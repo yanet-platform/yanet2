@@ -17,10 +17,21 @@ libdpdk = subproject('dpdk', default_options: [
     'enable_driver_sdk=true', 'disable_drivers=net/mlx4',
     'default_library=static', 'tests=false' ] )
 
+libdpdk_dep = libdpdk.get_variable('dpdk_dep')
+libdpdk_inc_dep = libdpdk_dep.partial_dependency(includes: true)
+
+subdir('common')
+
 subdir('filter')
 
-subdir('sock-send')
+subdir('lib')
+
+subdir('modules')
+
 
 subdir('dataplane')
+subdir('controlplane')
 
+
+subdir('sock-send')
 

@@ -1,0 +1,6 @@
+V1_i0_0 {
+  global:
+    "new_module_decap";
+  local:
+    *;
+};

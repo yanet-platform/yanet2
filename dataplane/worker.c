@@ -35,11 +35,12 @@
 
 #include "worker.h"
 
-#include "pipeline.h"
+#include "dataplane/pipeline/pipeline.h"
 
 #include "dataplane.h"
 
-#include "common/data_pipe.h"
+#include "data_pipe.h"
+
 #include <rte_ethdev.h>
 
 static void
@@ -175,13 +176,6 @@ worker_submit_burst(
 		worker->port_id, worker->queue_id, mbufs, count
 	);
 
-	if (written < count)
-		fprintf(stderr,
-			"brst fld %d:%d %d\n",
-			worker->port_id,
-			worker->queue_id,
-			count - written);
-
 	for (uint16_t idx = written; idx < count; ++idx) {
 		packet_list_add(failed, mbuf_to_packet(mbufs[idx]));
 	}
@@ -250,13 +244,13 @@ worker_loop_round(struct dataplane_worker *worker) {
 	// Determine pipelines
 	dataplane_route_pipeline(worker->dataplane, &input_packets);
 
-	// Now group packets by pipeline and build pipeline_front
+	// Now group packets by pipeline and build packet_front
 	while (packet_list_first(&input_packets)) {
 		struct pipeline *pipeline =
 			packet_list_first(&input_packets)->pipeline;
 
-		struct pipeline_front pipeline_front;
-		pipeline_front_init(&pipeline_front);
+		struct packet_front packet_front;
+		packet_front_init(&packet_front);
 
 		// List of packets with different pipeline assigned
 		struct packet_list ready_packets;
@@ -265,7 +259,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 		struct packet *packet;
 		while ((packet = packet_list_pop(&input_packets))) {
 			if (packet->pipeline == pipeline) {
-				pipeline_front_output(&pipeline_front, packet);
+				packet_front_output(&packet_front, packet);
 			} else {
 				packet_list_add(&ready_packets, packet);
 			}
@@ -273,11 +267,11 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 		// Process pipeline and push packets into drop and write lists
 
-		pipeline_process(pipeline, &pipeline_front);
+		pipeline_process(pipeline, &packet_front);
 
-		packet_list_concat(&drop_packets, &pipeline_front.drop);
-		packet_list_concat(&output_packets, &pipeline_front.output);
-		packet_list_concat(&output_packets, &pipeline_front.bypass);
+		packet_list_concat(&drop_packets, &packet_front.drop);
+		packet_list_concat(&output_packets, &packet_front.output);
+		packet_list_concat(&output_packets, &packet_front.bypass);
 
 		input_packets = ready_packets;
 	}

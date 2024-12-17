@@ -1,14 +1,19 @@
 dependencies = []
-dependencies += libdpdk.get_variable('dpdk_dep')
 
-sources = files('ipfw.c',
-                'classify.c')
+dependencies += lib_common_dep
 
-libfilter = static_library('filter',
-                           sources,
-                           include_directories: yanet_rootdir,
-                           dependencies: dependencies,
-                           install: false)
+sources = files(
+  'ipfw.c',
+)
 
-libfilter_dep = declare_dependency(link_with: libfilter)
+lib_filter = static_library(
+  'filter',
+ sources,
+ dependencies: dependencies,
+ install: false,
+)
 
+lib_filter_dep = declare_dependency(
+  link_with: lib_filter,
+  include_directories: include_directories('.'),
+)

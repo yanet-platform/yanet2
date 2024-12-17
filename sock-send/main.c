@@ -1,15 +1,15 @@
-#include <stdio.h>
-#include <pthread.h>
 #include <pcap.h>
+#include <pthread.h>
+#include <stdio.h>
 
 #include <arpa/inet.h>
 
 #include <stdint.h>
 
-#include <sys/uio.h>
 #include <errno.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 
 #include <unistd.h>
@@ -18,35 +18,32 @@ int sock_fd;
 
 int done = 0;
 
-struct __attribute__((__packed__)) packHeader
-{
+struct __attribute__((__packed__)) packHeader {
 	uint32_t data_length;
 };
 
 static int
-writeIovCount(int fd, struct iovec* iov, size_t count)
-{
-	while (count > 0)
-	{
+writeIovCount(int fd, struct iovec *iov, size_t count) {
+	while (count > 0) {
 		ssize_t written = writev(fd, iov, count);
-		if (written < 0)
-		{
+		if (written < 0) {
 			if (errno != EAGAIN && errno != EWOULDBLOCK)
 				return -1;
 			usleep(1000);
 			continue;
 		}
 		/// Adjust iov
-		while (written > 0)
-		{
-			if (iov->iov_len <= (size_t)written) /// Vec was consumed
+		while (written > 0) {
+			if (iov->iov_len <=
+			    (size_t)written) /// Vec was consumed
 			{
 				written -= iov->iov_len;
 				++iov;
 				--count;
 				continue;
 			}
-			iov->iov_base = (void*)((intptr_t)iov->iov_base + written);
+			iov->iov_base =
+				(void *)((intptr_t)iov->iov_base + written);
 			iov->iov_len -= written;
 			written = 0;
 		}
@@ -54,27 +51,23 @@ writeIovCount(int fd, struct iovec* iov, size_t count)
 	return 1;
 }
 
-
 static void *
-write_thread(void *arg)
-{
-	(void) arg;
+write_thread(void *arg) {
+	(void)arg;
 	char pcap_errbuf[PCAP_ERRBUF_SIZE];
 	struct pcap *pcap = pcap_fopen_offline(stdin, pcap_errbuf);
-	if (!pcap)
-	{
+	if (!pcap) {
 		fprintf(stderr, "pcap_fopen_offline(): %s\n", pcap_errbuf);
 		done = 1;
 		return NULL;
 	}
 
 	struct pcap_pkthdr *header;
-	const u_char* data;
+	const u_char *data;
 	static u_char zeros[8192];
 
 	uint64_t packetsCount = 0;
-	while (pcap_next_ex(pcap, &header, &data) >= 0 && !done)
-	{
+	while (pcap_next_ex(pcap, &header, &data) >= 0 && !done) {
 
 		struct packHeader hdr;
 		hdr.data_length = htonl(header->len);
@@ -85,18 +78,16 @@ write_thread(void *arg)
 		iov[0].iov_base = &hdr;
 		iov[0].iov_len = sizeof(hdr);
 
-		iov[1].iov_base = (void*)data;
+		iov[1].iov_base = (void *)data;
 		iov[1].iov_len = header->caplen;
 
-		if (header->caplen < header->len)
-		{
-			iov[2].iov_base = (void*)zeros;
+		if (header->caplen < header->len) {
+			iov[2].iov_base = (void *)zeros;
 			iov[2].iov_len = header->len - header->caplen;
 			iov_count = 3;
 		}
 
-		if (writeIovCount(sock_fd, iov, iov_count) < 0)
-		{
+		if (writeIovCount(sock_fd, iov, iov_count) < 0) {
 			break;
 		}
 
@@ -112,30 +103,24 @@ write_thread(void *arg)
 }
 
 int
-readData(int fd, u_char* buf, ssize_t len)
-{
+readData(int fd, u_char *buf, ssize_t len) {
 	ssize_t ret = 0;
-	while (len > 0 && !done)
-	{
+	while (len > 0 && !done) {
 		ret = read(fd, buf, len);
-		switch (ret)
-		{
-			case 0:
+		switch (ret) {
+		case 0:
+			return -1;
+		case -1:
+			if ((errno == EAGAIN) || (errno = EWOULDBLOCK)) {
+				usleep(1000);
+			} else {
 				return -1;
-			case -1:
-				if ((errno == EAGAIN) || (errno = EWOULDBLOCK))
-				{
-					usleep(1000);
-				}
-				else
-				{
-					return -1;
-				}
-				break;
-			default:
-				len -= ret;
-				buf += ret;
-				break;
+			}
+			break;
+		default:
+			len -= ret;
+			buf += ret;
+			break;
 		}
 	}
 
@@ -143,8 +128,7 @@ readData(int fd, u_char* buf, ssize_t len)
 }
 
 static int
-readPacket(int fd, struct pcap_pkthdr* header, u_char* data)
-{
+readPacket(int fd, struct pcap_pkthdr *header, u_char *data) {
 	struct packHeader hdr;
 	if (readData(fd, (u_char *)&hdr, sizeof(hdr))) {
 		return -1;
@@ -166,9 +150,8 @@ readPacket(int fd, struct pcap_pkthdr* header, u_char* data)
 }
 
 static void *
-read_thread(void *arg)
-{
-	(void) arg;
+read_thread(void *arg) {
+	(void)arg;
 
 	struct pcap *pcap = pcap_open_dead(DLT_EN10MB, 8192);
 	struct pcap_dumper *dmp = pcap_dump_fopen(pcap, stdout);
@@ -176,12 +159,10 @@ read_thread(void *arg)
 	u_char buffer[8192];
 	struct pcap_pkthdr tmp_pcap_packetHeader;
 
-	for (; !done ;)
-	{
+	for (; !done;) {
 		if (readPacket(sock_fd, &tmp_pcap_packetHeader, buffer)) {
 			break;
 		}
-
 
 		pcap_dump((unsigned char *)dmp, &tmp_pcap_packetHeader, buffer);
 	}
@@ -193,10 +174,8 @@ read_thread(void *arg)
 	return NULL;
 }
 
-
 int
-main(int argc, char **argv)
-{
+main(int argc, char **argv) {
 	if (argc != 2) {
 		fprintf(stderr, "usage: %s <socket_path>\n", argv[0]);
 		return -1;
@@ -204,14 +183,15 @@ main(int argc, char **argv)
 
 	sock_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
 	if (sock_fd < 0) {
-		fprintf(stderr, "could not create socket: %s\n", strerror(errno));
-			return -1;
+		fprintf(stderr, "could not create socket: %s\n", strerror(errno)
+		);
+		return -1;
 	}
 	struct sockaddr_un sockaddr;
 	sockaddr.sun_family = AF_UNIX;
 	strncpy(sockaddr.sun_path, argv[1], sizeof(sockaddr.sun_path) - 1);
-	if (connect(sock_fd, (struct sockaddr*)&sockaddr, sizeof(sockaddr)) < 0)
-	{
+	if (connect(sock_fd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) <
+	    0) {
 		fprintf(stderr, "could not connect: %s\n", strerror(errno));
 		return -1;
 	}
@@ -227,7 +207,6 @@ main(int argc, char **argv)
 	pthread_attr_init(&read_th_attr);
 	pthread_create(&read_th, &read_th_attr, read_thread, NULL);
 	pthread_attr_destroy(&read_th_attr);
-
 
 	pthread_join(write_th, NULL);
 	pthread_join(read_th, NULL);

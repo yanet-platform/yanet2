@@ -1,14 +1,10 @@
 #pragma once
 
-#include "pipeline.h"
+#include <stdint.h>
+
+#include "dataplane/pipeline/pipeline.h"
 
 struct dataplane;
-
-// Read callback provided by dataplane
-typedef void (*worker_read_func)(void *data, struct packet_list *packets);
-
-// write callback provided by dataplane
-typedef void (*worker_write_func)(void *data, struct packet_list *packets);
 
 struct worker_read_ctx {
 

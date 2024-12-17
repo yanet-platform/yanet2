@@ -130,11 +130,6 @@ lpm_insert(
 	int8_t max_hop = 0;
 
 	while (1) {
-		/*
-			for (int idx = 0; idx < hop + 1; ++idx)
-				fprintf(stdout, "%02x ", key[idx]);
-			fprintf(stdout, " === %d\n", hop);
-	*/
 		uint32_t *stored_value = (*pages[hop]) + key[hop];
 		if (*stored_value == LPM_VALUE_INVALID) {
 			if (hop < key_size - 1 &&

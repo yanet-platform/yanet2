@@ -2,9 +2,9 @@
 
 #include <stdint.h>
 
-#include "common/lpm.h"
-#include "common/network.h"
-#include "common/registry.h"
+#include "lpm.h"
+#include "network.h"
+#include "registry.h"
 
 #define ACTION_NON_TERMINATE 0x80000000
 
@@ -72,7 +72,8 @@ struct filter_compiler {
 	} v6_lookups;
 };
 
-int filter_compiler_init(
+int
+filter_compiler_init(
 	struct filter_compiler *compiler,
 	struct filter_action *actions,
 	uint32_t count

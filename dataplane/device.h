@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "rte_ether.h"
+
 #include "worker.h"
 
 struct rte_ether_addr;

@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include <dlfcn.h>
 #include <pthread.h>
 
 #include <rte_ether.h>
@@ -10,50 +11,9 @@
 
 #include "drivers/sock_dev.h"
 
-// FIXME remove this include
-#include "modules/acl.h"
-#include "modules/balancer.h"
-#include "modules/kernel.h"
-#include "modules/route.h"
+#include "data_pipe.h"
 
-#include "common/data_pipe.h"
-
-static int
-dataplane_init_kernel_pipeline(struct dataplane *dataplane) {
-	pipeline_init(&dataplane->kernel_pipeline);
-
-	struct pipeline_module_config_ref kernel_cfg_refs[1];
-	kernel_cfg_refs[0] =
-		(struct pipeline_module_config_ref){"kernel", "kernel0"};
-
-	return pipeline_configure(
-		&dataplane->kernel_pipeline,
-		kernel_cfg_refs,
-		1,
-		&dataplane->config.module_registry
-	);
-}
-
-static int
-dataplane_init_phy_pipeline(struct dataplane *dataplane) {
-	pipeline_init(&dataplane->phy_pipeline);
-
-	struct pipeline_module_config_ref phy_cfg_refs[4];
-	phy_cfg_refs[0] =
-		(struct pipeline_module_config_ref){"kernel", "kernel0"};
-	phy_cfg_refs[1] = (struct pipeline_module_config_ref){"acl", "acl0"};
-	phy_cfg_refs[2] =
-		(struct pipeline_module_config_ref){"balancer", "balancer0"};
-	phy_cfg_refs[3] =
-		(struct pipeline_module_config_ref){"route", "route0"};
-
-	return pipeline_configure(
-		&dataplane->phy_pipeline,
-		phy_cfg_refs + 0,
-		4,
-		&dataplane->config.module_registry
-	);
-}
+#include "dataplane/config/dataplane_registry.h"
 
 /*
  * static int
@@ -313,64 +273,62 @@ dataplane_init(
 	size_t device_count,
 	const char *const *devices
 ) {
-	dataplane->config.module_registry = (struct module_registry){NULL, 0};
+	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 
-	dataplane_register_module(dataplane, new_module_acl());
-	dataplane_register_module(dataplane, new_module_balancer());
-	dataplane_register_module(dataplane, new_module_route());
-	dataplane_register_module(dataplane, new_module_kernel());
+	dataplane->node_count = 2;
+	for (uint32_t node_idx = 0; node_idx < dataplane->node_count;
+	     ++node_idx) {
+		struct dataplane_numa_node *node = dataplane->nodes + node_idx;
 
-	/*
-	 * FIXME: rollback configurations bellow or make registry
-	 * configuration transactional
-	 */
+		dataplane_registry_init(&node->dataplane_registry);
+		dataplane_registry_load_module(
+			&node->dataplane_registry, bin_hndl, "route"
+		);
+		dataplane_registry_load_module(
+			&node->dataplane_registry, bin_hndl, "forward"
+		);
 
-	if (module_registry_configure(
-		    &dataplane->config.module_registry, "acl", "acl0", NULL, 0
-	    )) {
-		return -1;
+		uint16_t kernel_map[device_count * 2];
+		for (size_t dev_idx = 0; dev_idx < device_count; ++dev_idx)
+			kernel_map[dev_idx] = dev_idx + device_count;
+		for (size_t dev_idx = 0; dev_idx < device_count; ++dev_idx)
+			kernel_map[device_count + dev_idx] = dev_idx;
+
+		struct dataplane_module_config *dmc =
+			(struct dataplane_module_config[]
+			){{"route", "route0", NULL, 0},
+			  {"forward",
+			   "from_kernel",
+			   kernel_map,
+			   sizeof(kernel_map)},
+			  {"forward",
+			   "to_kernel",
+			   kernel_map,
+			   sizeof(kernel_map)}};
+
+		struct dataplane_pipeline_config *dpc =
+			(struct dataplane_pipeline_config[]
+			){{"phy",
+			   (struct dataplane_pipeline_module[]
+			   ){{"forward", "to_kernel"}, {"route", "route0"}},
+			   2},
+			  {"virt",
+			   (struct dataplane_pipeline_module[]){
+				   {"forward", "from_kernel"},
+			   },
+			   1}};
+
+		dataplane_registry_update(
+			&node->dataplane_registry, dmc, 1, dpc, 1
+		);
+
+		node->phy_pipeline = pipeline_registry_lookup(
+			&node->dataplane_registry.pipeline_registry, "phy"
+		);
+		node->kernel_pipeline = pipeline_registry_lookup(
+			&node->dataplane_registry.pipeline_registry, "virt"
+		);
 	}
-
-	if (module_registry_configure(
-		    &dataplane->config.module_registry,
-		    "balancer",
-		    "balancer0",
-		    NULL,
-		    0
-	    )) {
-		return -1;
-	}
-
-	if (module_registry_configure(
-		    &dataplane->config.module_registry,
-		    "route",
-		    "route0",
-		    NULL,
-		    0
-	    )) {
-		return -1;
-	}
-
-	uint16_t kernel_map[8];
-	for (size_t dev_idx = 0; dev_idx < device_count; ++dev_idx)
-		kernel_map[dev_idx] = dev_idx + device_count;
-
-	for (size_t dev_idx = 0; dev_idx < device_count; ++dev_idx)
-		kernel_map[device_count + dev_idx] = dev_idx;
-
-	if (module_registry_configure(
-		    &dataplane->config.module_registry,
-		    "kernel",
-		    "kernel0",
-		    kernel_map,
-		    sizeof(kernel_map)
-	    )) {
-		return -1;
-	}
-
-	// FIXME: handle errors
-	dataplane_init_kernel_pipeline(dataplane);
-	dataplane_init_phy_pipeline(dataplane);
 
 	(void)dpdk_init(binary, device_count, devices);
 
@@ -403,12 +361,14 @@ void
 dataplane_route_pipeline(
 	struct dataplane *dataplane, struct packet_list *packets
 ) {
+	// FIXME: select proper NUMA node
+
 	for (struct packet *packet = packet_list_first(packets); packet != NULL;
 	     packet = packet->next) {
 		if (packet->rx_device_id >= dataplane->device_count / 2) {
-			packet->pipeline = &dataplane->kernel_pipeline;
+			packet->pipeline = dataplane->nodes[0].kernel_pipeline;
 		} else {
-			packet->pipeline = &dataplane->phy_pipeline;
+			packet->pipeline = dataplane->nodes[0].phy_pipeline;
 		}
 	}
 }
@@ -427,50 +387,4 @@ dataplane_drop_packets(
 		struct rte_mbuf *mbuf = packet_to_mbuf(drop_packet);
 		rte_pktmbuf_free(mbuf);
 	}
-}
-
-int
-dataplane_register_module(struct dataplane *dataplane, struct module *module) {
-	struct module_registry *module_registry =
-		&dataplane->config.module_registry;
-
-	for (uint32_t idx = 0; idx < module_registry->module_count; ++idx) {
-		struct module_config_registry *module_config_registry =
-			module_registry->modules + idx;
-
-		if (module_config_registry->module == module) {
-			// TODO: error code
-			return -1;
-		}
-
-		if (!strncmp(
-			    module_config_registry->module->name,
-			    module->name,
-			    MODULE_NAME_LEN
-		    )) {
-			// TODO: error code
-			return -1;
-		}
-	}
-
-	// Module is not known by pointer nor name
-
-	// FIXME array extending as routine/library
-	if (module_registry->module_count % 8 == 0) {
-		struct module_config_registry *new_config_registry =
-			(struct module_config_registry *)realloc(
-				module_registry->modules,
-				sizeof(struct module_config_registry) *
-					(module_registry->module_count + 8)
-			);
-		if (new_config_registry == NULL) {
-			// TODO: error code
-			return -1;
-		}
-		module_registry->modules = new_config_registry;
-	}
-
-	module_registry->modules[module_registry->module_count++] =
-		(struct module_config_registry){module, NULL, 0};
-	return 0;
 }

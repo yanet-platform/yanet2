@@ -2,9 +2,9 @@
 
 #include <stdint.h>
 
-#include "common/key.h"
-#include "common/lpm.h"
-#include "common/radix.h"
+#include "key.h"
+#include "lpm.h"
+#include "radix.h"
 
 struct range_collector {
 	struct radix radix;

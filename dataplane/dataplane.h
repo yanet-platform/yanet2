@@ -4,25 +4,33 @@
 
 #include <pthread.h>
 
-#include "pipeline.h"
 #include "worker.h"
 
-#include "module.h"
+#include "dataplane/config/dataplane_registry.h"
+#include "dataplane/module/module.h"
+#include "dataplane/packet/packet.h"
+#include "dataplane/pipeline/pipeline.h"
 
 #include "device.h"
 
-struct dataplane_config {
-	struct module_registry module_registry;
+#include "memory.h"
 
-	struct pipeline *pipelines;
-	uint32_t pipeline_count;
+struct dataplane_numa_node {
+	struct block_allocator block_allocator;
+
+	struct dataplane_registry dataplane_registry;
+
+	struct pipeline *phy_pipeline;
+	struct pipeline *kernel_pipeline;
 };
+
+struct dataplane_config {};
 
 struct dataplane {
 	struct dataplane_config config;
 
-	struct pipeline phy_pipeline;
-	struct pipeline kernel_pipeline;
+	struct dataplane_numa_node nodes[8];
+	uint32_t node_count;
 
 	struct dataplane_device *devices;
 	uint32_t device_count;

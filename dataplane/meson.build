@@ -1,26 +1,49 @@
 dependencies = []
 dependencies += libdpdk.get_variable('dpdk_dep')
 
-dependencies += libfilter_dep
+dependencies += lib_common_dep
+dependencies += lib_pipeline_dp_dep
 
-sources = files('main.c',
-                'dataplane.c',
-                'dpdk.c',
-                'pipeline.c',
-                'module.c',
-                'device.c',
-                'worker.c',
-                'packet/packet.c',
-                'packet/encap.c',
-                'drivers/sock_dev.c',
-                'modules/kernel.c',
-                'modules/acl.c',
-                'modules/balancer.c',
-                'modules/route.c')
+lib_sources = files(
+  'device.c',
+  'worker.c',
+)
 
-executable('yanet-dataplane',
-           sources,
-           include_directories: yanet_rootdir,
-           dependencies: dependencies,
-           install: true)
+lib_dataplane = static_library(
+  'dataplane',
+  lib_sources,
+  dependencies: dependencies,
+  install: false,
+)
 
+lib_dataplane_dep = declare_dependency(
+  link_with: lib_dataplane,
+  include_directories: include_directories('.'),
+)
+
+dependencies += lib_dataplane_dep
+dependencies += lib_module_dp_dep
+dependencies += lib_pipeline_dp_dep
+dependencies += lib_config_dp_dep
+
+dependencies += lib_balancer_dp_dep
+dependencies += lib_decap_dp_dep
+dependencies += lib_acl_dp_dep
+dependencies += lib_forward_dp_dep
+dependencies += lib_route_dp_dep
+
+
+sources = files(
+  'main.c',
+  'dataplane.c',
+  'dpdk.c',
+  'drivers/sock_dev.c')
+
+executable(
+  'yanet-dataplane',
+  sources,
+  dependencies: dependencies,
+  install: true,
+)
+
+subdir('unittest')
