@@ -4,6 +4,7 @@
 
 #include <rte_dev.h>
 #include <rte_eal.h>
+#include <rte_ether.h>
 
 int
 dpdk_init(

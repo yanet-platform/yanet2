@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include <rte_ether.h>
+#include <rte_ip.h>
 
 /*
  * TODO: analyze if the valid packet parsing may
@@ -216,4 +217,9 @@ parse_packet(struct packet *packet) {
 	packet->transport_header.offset = offset;
 
 	return 0;
+}
+
+struct packet *
+mbuf_to_packet(struct rte_mbuf *mbuf) {
+	return (struct packet *)((void *)mbuf->buf_addr);
 }

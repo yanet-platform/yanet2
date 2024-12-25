@@ -5,7 +5,8 @@
 
 #include "common/lpm.h"
 
-#include "rte_ether.h"
+#include <rte_ether.h>
+#include <rte_ip.h>
 
 #define ROUTE_TYPE_IP4 4
 #define ROUTE_TYPE_IP6 6

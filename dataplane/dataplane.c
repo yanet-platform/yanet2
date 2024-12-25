@@ -4,6 +4,8 @@
 
 #include <pthread.h>
 
+#include <rte_ether.h>
+
 #include "dpdk.h"
 
 #include "drivers/sock_dev.h"

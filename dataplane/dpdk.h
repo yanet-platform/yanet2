@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <rte_ether.h>
+struct rte_ether_addr;
 
 int
 dpdk_init(const char *binary, size_t port_count, const char *const *port_names);

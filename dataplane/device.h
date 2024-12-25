@@ -5,6 +5,7 @@
 
 #include "worker.h"
 
+struct rte_ether_addr;
 struct dataplane;
 
 struct dataplane_device {

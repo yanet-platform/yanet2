@@ -4,6 +4,8 @@
 
 #include "dataplane/packet/encap.h"
 
+#include <rte_ether.h>
+
 int
 acl_handle_v4(
 	struct filter_compiler *compiler,

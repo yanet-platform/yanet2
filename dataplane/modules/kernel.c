@@ -6,6 +6,9 @@
 #include "packet/packet.h"
 #include "pipeline.h"
 
+#include <rte_ether.h>
+#include <rte_ip.h>
+
 struct kernel_module_config {
 	struct module_config config;
 

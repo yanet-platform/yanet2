@@ -4,11 +4,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "rte_ether.h"
-#include "rte_ip.h"
-#include "rte_mbuf.h"
-
 #define PACKET_HEADER_TYPE_UNKNOWN 0
+
+struct rte_mbuf;
 
 struct network_header {
 	uint16_t type;
@@ -102,21 +100,19 @@ packet_to_mbuf(const struct packet *packet) {
 	return packet->mbuf;
 }
 
-static inline struct packet *
-mbuf_to_packet(struct rte_mbuf *mbuf) {
-	return (struct packet *)((void *)mbuf->buf_addr);
-}
+struct packet *
+mbuf_to_packet(struct rte_mbuf *mbuf);
 
 struct ipv6_ext_2byte {
 	uint8_t next_type;
 	uint8_t size;
-} __rte_packed;
+} __attribute__((__packed__));
 
 struct ipv6_ext_fragment {
 	uint8_t next_type;
 	uint8_t reserved;
 	uint16_t offset_flag;
 	uint32_t identification;
-} __rte_packed;
+} __attribute__((__packed__));
 
 #endif

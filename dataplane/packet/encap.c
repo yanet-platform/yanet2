@@ -1,5 +1,8 @@
 #include "encap.h"
 
+#include <rte_ether.h>
+#include <rte_ip.h>
+
 static void
 packet_network_prepend(
 	struct packet *packet,
