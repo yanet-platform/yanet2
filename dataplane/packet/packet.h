@@ -1,5 +1,4 @@
-#ifndef PACKET_H
-#define PACKET_H
+#pragma once
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -114,5 +113,3 @@ struct ipv6_ext_fragment {
 	uint16_t offset_flag;
 	uint32_t identification;
 } __attribute__((__packed__));
-
-#endif

@@ -1,5 +1,4 @@
-#ifndef MODULE_H
-#define MODULE_H
+#pragma once
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -113,5 +112,3 @@ module_configure(
 		new_config
 	);
 }
-
-#endif

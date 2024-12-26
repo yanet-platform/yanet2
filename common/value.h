@@ -1,5 +1,4 @@
-#ifndef FILTER_VALUE_H
-#define FILTER_VALUE_H
+#pragma once
 
 /*
  * Rectangular value table allowing one to touch each key pair using
@@ -79,5 +78,3 @@ value_table_compact(struct value_table *value_table) {
 		);
 	}
 }
-
-#endif

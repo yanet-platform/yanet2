@@ -1,5 +1,4 @@
-#ifndef FILTER_NET6_PART_COLLECTOR
-#define FILTER_NET6_PART_COLLECTOR
+#pragma once
 
 #include <stdint.h>
 
@@ -300,5 +299,3 @@ static inline int
 range4_collector_collect(struct range_collector *collector, struct lpm *lpm) {
 	return range_collector_collect(collector, 4, lpm);
 }
-
-#endif

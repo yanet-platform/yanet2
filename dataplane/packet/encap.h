@@ -1,5 +1,4 @@
-#ifndef ENCAP_H
-#define ENCAP_H
+#pragma once
 
 #include "packet.h"
 
@@ -18,5 +17,3 @@ int
 packet_gre6_encap(
 	struct packet *packet, const uint8_t *dst, const uint8_t *src
 );
-
-#endif

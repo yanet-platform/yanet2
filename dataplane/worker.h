@@ -1,5 +1,4 @@
-#ifndef WORKER_H
-#define WORKER_H
+#pragma once
 
 #include "pipeline.h"
 
@@ -60,5 +59,3 @@ dataplane_worker_init(
 	struct dataplane_worker *worker,
 	int queue_id
 );
-
-#endif

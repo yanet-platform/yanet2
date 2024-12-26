@@ -1,5 +1,4 @@
-#ifndef RADIX_H
-#define RADIX_H
+#pragma once
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -211,5 +210,3 @@ radix32_walk(
 ) {
 	return radix_walk(radix32, 4, iterate_func, iterate_func_data);
 }
-
-#endif

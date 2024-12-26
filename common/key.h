@@ -1,5 +1,4 @@
-#ifndef FILTER_KEY_H
-#define FILTER_KEY_H
+#pragma once
 
 #include <stdint.h>
 
@@ -81,5 +80,3 @@ filter_key_cmp(uint8_t key_size, const uint8_t *l, const uint8_t *r) {
 
 	return 0;
 }
-
-#endif

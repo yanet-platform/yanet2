@@ -1,5 +1,4 @@
-#ifndef FILTER_REGISTRY_H
-#define FILTER_REGISTRY_H
+#pragma once
 
 /*
  * Value registry required to map a key into range of unique values.
@@ -246,5 +245,3 @@ error:
 	value_registry_free(dst_registry);
 	return -1;
 }
-
-#endif

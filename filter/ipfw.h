@@ -1,5 +1,4 @@
-#ifndef FILTER_IPFW_H
-#define FILTER_IPFW_H
+#pragma once
 
 #include <stdint.h>
 
@@ -78,5 +77,3 @@ int filter_compiler_init(
 	struct filter_action *actions,
 	uint32_t count
 );
-
-#endif

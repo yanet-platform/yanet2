@@ -1,5 +1,4 @@
-#ifndef BALANCER_H
-#define BALANCER_H
+#pragma once
 
 #include "module.h"
 
@@ -46,5 +45,3 @@ struct balancer_module {
 
 struct module *
 new_module_balancer();
-
-#endif

@@ -1,5 +1,4 @@
-#ifndef FILTER_CLASSIFY_H
-#define FILTER_CLASSIFY_H
+#pragma once
 
 #include <stdint.h>
 
@@ -29,5 +28,3 @@ uint32_t filter_classify_src_port(
 uint32_t filter_classify_dst_port(
 	const struct filter *filter, const struct packet *packet
 );
-
-#endif

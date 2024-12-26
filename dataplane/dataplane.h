@@ -1,5 +1,4 @@
-#ifndef DATAPLANE_H
-#define DATAPLANE_H
+#pragma once
 
 #include <stdint.h>
 
@@ -58,5 +57,3 @@ dataplane_register_module(struct dataplane *dataplane, struct module *module);
 
 int
 dataplane_configure_module(struct dataplane *dataplane);
-
-#endif

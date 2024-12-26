@@ -1,5 +1,4 @@
-#ifndef DECAP_H
-#define DECAP_H
+#pragma once
 
 #include "module.h"
 
@@ -13,5 +12,3 @@ struct decap_module {
 
 struct decap_module *
 new_decap();
-
-#endif

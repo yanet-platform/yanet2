@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef container_of
 
 #include <stddef.h>

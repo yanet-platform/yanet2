@@ -1,5 +1,4 @@
-#ifndef DEVICA_H
-#define DEVICE_H
+#pragma once
 
 #include <stdint.h>
 
@@ -39,5 +38,3 @@ int
 dataplane_dpdk_port_get_mac(
 	struct dataplane_device *device, struct rte_ether_addr *ether_addr
 );
-
-#endif

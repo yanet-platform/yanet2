@@ -1,5 +1,4 @@
-#ifndef ACL_H
-#define ACL_H
+#pragma once
 
 #include "module.h"
 
@@ -19,5 +18,3 @@ struct acl_module {
 
 struct module *
 new_module_acl();
-
-#endif

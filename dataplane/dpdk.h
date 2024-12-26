@@ -1,5 +1,4 @@
-#ifndef DATAPLANE_DPDK_H
-#define DATAPLANE_DPDK_H
+#pragma once
 
 #include <stddef.h>
 #include <stdint.h>
@@ -17,5 +16,3 @@ dpdk_add_vdev_port(
 	uint16_t queue_count,
 	uint16_t numa_id
 );
-
-#endif

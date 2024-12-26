@@ -1,5 +1,4 @@
-#ifndef NETWORK_H
-#define NETWORK_H
+#pragma once
 
 struct net6 {
 	uint64_t addr_hi;
@@ -12,5 +11,3 @@ struct net4 {
 	uint32_t addr;
 	uint32_t mask;
 };
-
-#endif

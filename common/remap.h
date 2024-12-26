@@ -1,5 +1,4 @@
-#ifndef FILTER_REMAP_H
-#define FILTER_REMAP_H
+#pragma once
 
 /*
  * Remap table allows to remap one unsinged into another and intended to spare
@@ -186,5 +185,3 @@ remap_table_compacted(struct remap_table *table, uint32_t key) {
 	struct remap_item *item = remap_table_item(table, key);
 	return item->value;
 }
-
-#endif

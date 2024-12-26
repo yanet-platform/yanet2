@@ -1,6 +1,4 @@
-#ifndef DATA_PIPE_H
-#define DATA_PIPE_H
-
+#pragma once
 #include <stdlib.h>
 
 struct data_pipe {
@@ -128,5 +126,3 @@ data_pipe_item_free(
 		free_func_data
 	);
 }
-
-#endif

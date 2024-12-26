@@ -1,5 +1,4 @@
-#ifndef LPM_H
-#define LPM_H
+#pragma once
 
 /*
  * Longest Prefix Match (LPM) tree used to map a range of n-byte values into
@@ -546,5 +545,3 @@ static inline void
 lpm4_compact(struct lpm *lpm4) {
 	return lpm_compact(lpm4, 4);
 }
-
-#endif

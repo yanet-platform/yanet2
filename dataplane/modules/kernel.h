@@ -1,5 +1,4 @@
-#ifndef MODULE_KERNEL_H
-#define MODULE_KERNEL_H
+#pragma once
 
 #include <stdint.h>
 
@@ -19,5 +18,3 @@ struct module_kernel_config_data {
 
 struct module *
 new_module_kernel();
-
-#endif

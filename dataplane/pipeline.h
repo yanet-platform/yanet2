@@ -1,5 +1,4 @@
-#ifndef PIPELINE_H
-#define PIPELINE_H
+#pragma once
 
 #include <stdint.h>
 
@@ -130,5 +129,3 @@ void
 pipeline_process(
 	struct pipeline *pipeline, struct pipeline_front *pipeline_front
 );
-
-#endif
