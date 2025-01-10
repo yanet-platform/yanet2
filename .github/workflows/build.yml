@@ -1,0 +1,16 @@
+name: Build YANET
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: yanetplatform/yanet2-base:latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: |
+          meson setup build -Dbuildtype=debug
+          meson compile -C build
