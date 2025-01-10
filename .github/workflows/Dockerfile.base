@@ -1,0 +1,7 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND noninteractive
+
+RUN apt update -y
+RUN apt install -y meson clang
+RUN apt install -y python3-pyelftools libnuma-dev libpcap-dev
