@@ -4,7 +4,7 @@ dependencies += lib_module_dp_dep
 dependencies += lib_pipeline_dp_dep
 
 sources = files(
-  'dataplane_registry.c',
+#  'dataplane_registry.c',
 )
 
 lib_config_dp = static_library(

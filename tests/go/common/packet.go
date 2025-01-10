@@ -5,10 +5,8 @@ package common
 //#cgo LDFLAGS: -L../../../build/lib/dataplane/module -ltesting_module
 //#include "dataplane/packet/packet.h"
 //#include "dataplane/module/testing.h"
-//#include "lpm.h"
 import "C"
 import (
-	"net/netip"
 	"runtime"
 	"unsafe"
 )
@@ -83,26 +81,3 @@ func PacketFrontToPayload(pf *C.struct_packet_front) PacketFrontResult {
 	}
 }
 
-func BuildLPMs(prefixes []netip.Prefix) (C.struct_lpm, C.struct_lpm) {
-	lpm4 := C.struct_lpm{}
-	lpm6 := C.struct_lpm{}
-	C.lpm_init(&lpm4)
-	C.lpm_init(&lpm6)
-
-	for _, prefix := range prefixes {
-		if prefix.Addr().Is4() {
-			ipv4 := prefix.Addr().As4()
-			mask := ToBroadCast(prefix).As4()
-			from := (*C.uint8_t)(unsafe.Pointer(&ipv4[0]))
-			to := (*C.uint8_t)(unsafe.Pointer(&mask[0]))
-			C.lpm_insert(&lpm4, 4, from, to, 1)
-		} else {
-			ipv6 := prefix.Addr().As16()
-			mask := ToBroadCast(prefix).As16()
-			from := (*C.uint8_t)(unsafe.Pointer(&ipv6[0]))
-			to := (*C.uint8_t)(unsafe.Pointer(&mask[0]))
-			C.lpm_insert(&lpm6, 16, from, to, 1)
-		}
-	}
-	return lpm4, lpm6
-}

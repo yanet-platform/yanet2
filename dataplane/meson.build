@@ -5,6 +5,7 @@ dependencies += lib_common_dep
 dependencies += lib_pipeline_dp_dep
 
 lib_sources = files(
+  'dataplane.c',
   'device.c',
   'worker.c',
 )
@@ -27,15 +28,14 @@ dependencies += lib_pipeline_dp_dep
 dependencies += lib_config_dp_dep
 
 dependencies += lib_balancer_dp_dep
-dependencies += lib_decap_dp_dep
-dependencies += lib_acl_dp_dep
+#dependencies += lib_decap_dp_dep
+#dependencies += lib_acl_dp_dep
 dependencies += lib_forward_dp_dep
 dependencies += lib_route_dp_dep
 
 
 sources = files(
   'main.c',
-  'dataplane.c',
   'dpdk.c',
   'drivers/sock_dev.c')
 

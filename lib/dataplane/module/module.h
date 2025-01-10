@@ -6,6 +6,8 @@
 
 #include "dataplane/packet/packet.h"
 
+#include "common/memory.h"
+
 #define MODULE_NAME_LEN 80
 #define MODULE_CONFIG_NAME_LEN 80
 
@@ -53,18 +55,18 @@ packet_front_bypass(struct packet_front *packet_front, struct packet *packet) {
 
 static inline void
 packet_front_switch(struct packet_front *packet_front) {
-	packet_front->input = packet_front->output;
+	packet_list_concat(&packet_front->input, &packet_front->output);
 	packet_list_init(&packet_front->output);
 }
 
 static inline void
 packet_front_pass(struct packet_front *packet_front) {
-	packet_front->output = packet_front->input;
+	packet_list_concat(&packet_front->output, &packet_front->input);
 	packet_list_init(&packet_front->input);
 }
 
-struct module;
-struct module_config;
+struct dp_config;
+struct module_data;
 
 /*
  * Module handler called for a pipeline front.
@@ -74,78 +76,14 @@ struct module_config;
  * Also module may create new packet and put the into output queue.
  */
 typedef void (*module_handler)(
-	struct module *module,
-	struct module_config *module_config,
+	struct dp_config *dp_config,
+	struct module_data *module_data,
 	struct packet_front *packet_front
-);
-
-/*
- * The module configuration handler called when module should be created,
- * reconfigured and freed. The handler accepts raw configuration data,
- * old instance configuration (or NULL) and sets new configuration pointer
- * via output parameter.
- *
- * The handler is responsible for:
- *  - checking if the configuration is same
- *  - preserving runtime parameters and variables
- */
-
-typedef int (*module_config_handler)(
-	struct module *module,
-	const void *config_data,
-	size_t config_data_size,
-	struct module_config **new_config
 );
 
 struct module {
 	char name[MODULE_NAME_LEN];
 	module_handler handler;
-	module_config_handler config_handler;
 };
-
-struct module_config {
-	struct module *module;
-	char name[MODULE_CONFIG_NAME_LEN];
-	uint32_t ref_count;
-};
-
-static inline void
-module_process(
-	struct module_config *config, struct packet_front *packet_front
-) {
-	return config->module->handler(config->module, config, packet_front);
-}
-
-static inline int
-module_configure(
-	struct module *module,
-	const char *config_name,
-	const void *config_data,
-	size_t config_data_size,
-	struct module_config *old_config,
-	struct module_config **new_config
-) {
-	(void)old_config;
-
-	int ret = module->config_handler(
-		module, config_data, config_data_size, new_config
-	);
-
-	if (ret)
-		return ret;
-
-	(*new_config)->module = module;
-
-	snprintf(
-		(*new_config)->name,
-		sizeof((*new_config)->name),
-		"%s",
-		config_name
-	);
-
-	(*new_config)->ref_count = 1;
-
-	return 0;
-}
 
 typedef struct module *(*module_load_handler)();

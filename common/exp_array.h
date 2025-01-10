@@ -1,0 +1,29 @@
+#pragma once
+
+#include "common/memory.h"
+
+static inline int
+mem_array_expand_exp(
+	struct memory_context *memory_context,
+	void **array,
+	size_t item_size,
+	uint64_t *count
+) {
+	if (!((*count - 1) & *count)) {
+		uint64_t old_size = *count * item_size;
+		uint64_t new_size = old_size * 2;
+		if (!new_size) {
+			// First one allocation: size is zero
+			new_size = item_size;
+		}
+		void *new_array = memory_brealloc(
+			memory_context, *array, old_size, new_size
+		);
+		if (!new_array)
+			return -1;
+		*array = new_array;
+	}
+
+	*count += 1;
+	return 0;
+}

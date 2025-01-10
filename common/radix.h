@@ -5,6 +5,8 @@
 
 #include <string.h>
 
+#include "common/memory.h"
+
 #define RADIX_VALUE_INVALID 0xffffffff
 #define RADIX_CHUNK_SIZE 16
 
@@ -19,64 +21,89 @@
 
 typedef uint32_t radix_page_t[256];
 
-// TODO: chunked storage
 struct radix {
+	struct memory_context *memory_context;
 	radix_page_t **pages;
-	size_t page_count;
+	uint64_t page_count;
 };
 
 static inline radix_page_t *
 radix_page(const struct radix *radix, uint32_t page_idx) {
-	return radix->pages[page_idx / RADIX_CHUNK_SIZE] +
-	       page_idx % RADIX_CHUNK_SIZE;
+	radix_page_t **pages = DECODE_ADDR(radix, radix->pages);
+	radix_page_t *chunk =
+		DECODE_ADDR(radix, pages[page_idx / RADIX_CHUNK_SIZE]);
+	return chunk + page_idx % RADIX_CHUNK_SIZE;
 }
 
 static inline int
-radix_init(struct radix *radix) {
-	radix->pages = (radix_page_t **)malloc(sizeof(radix_page_t *) * 1);
-	if (radix->pages == NULL)
-		return -1;
-	radix->pages[0] = (radix_page_t *)malloc(sizeof(radix_page_t) * 16);
-	if (radix->pages[0] == NULL)
-		return -1;
-	radix->page_count = 1;
-	memset(radix_page(radix, 0), 0xff, sizeof(radix_page_t));
+radix_new_page(struct radix *radix, uint32_t *page_idx) {
+
+	if (!(radix->page_count % RADIX_CHUNK_SIZE)) {
+		struct memory_context *memory_context =
+			DECODE_ADDR(radix, radix->memory_context);
+
+		radix_page_t *new_chunk = memory_balloc(
+			memory_context, sizeof(radix_page_t) * RADIX_CHUNK_SIZE
+		);
+
+		if (new_chunk == NULL)
+			return -1;
+
+		radix_page_t **old_pages = DECODE_ADDR(radix, radix->pages);
+		uint64_t old_chunk_count = radix->page_count / RADIX_CHUNK_SIZE;
+		uint64_t new_chunk_count = old_chunk_count + 1;
+		radix_page_t **new_pages = (radix_page_t **)memory_brealloc(
+			memory_context,
+			old_pages,
+			old_chunk_count * sizeof(*old_pages),
+			new_chunk_count * sizeof(*new_pages)
+		);
+		if (new_pages == NULL) {
+			memory_bfree(
+				memory_context,
+				new_chunk,
+				sizeof(radix_page_t) * RADIX_CHUNK_SIZE
+			);
+			return -1;
+		}
+
+		new_pages[new_chunk_count - 1] = ENCODE_ADDR(radix, new_chunk);
+		radix->pages = ENCODE_ADDR(radix, new_pages);
+	}
+	if (page_idx != NULL)
+		*page_idx = radix->page_count;
+	memset(radix_page(radix, radix->page_count), 0xff, sizeof(radix_page_t)
+	);
+	radix->page_count += 1;
 	return 0;
+}
+
+static inline int
+radix_init(struct radix *radix, struct memory_context *memory_context) {
+	radix->memory_context = ENCODE_ADDR(radix, memory_context);
+	radix->pages = ENCODE_ADDR(radix, NULL);
+	radix->page_count = 0;
+	return radix_new_page(radix, NULL);
 }
 
 static inline void
 radix_free(struct radix *radix) {
-	for (uint32_t chunk_idx = 0;
-	     chunk_idx < radix->page_count / RADIX_CHUNK_SIZE;
-	     ++chunk_idx) {
-		free(radix->pages[chunk_idx]);
-	}
-	free(radix->pages);
-}
-
-static inline uint32_t
-radix_new_page(struct radix *radix, uint32_t *page_idx) {
-	if (!(radix->page_count % RADIX_CHUNK_SIZE)) {
-		uint32_t new_chunk_count =
-			radix->page_count / RADIX_CHUNK_SIZE + 1;
-		radix_page_t **pages = (radix_page_t **)realloc(
-			radix->pages, sizeof(radix_page_t *) * new_chunk_count
-		);
-		if (pages == NULL) {
-			return -1;
-		}
-		radix->pages = pages;
-		radix->pages[new_chunk_count - 1] = (radix_page_t *)malloc(
+	struct memory_context *memory_context =
+		DECODE_ADDR(radix, radix->memory_context);
+	radix_page_t **pages = DECODE_ADDR(radix, radix->pages);
+	uint32_t chunk_count =
+		(radix->page_count + RADIX_CHUNK_SIZE - 1) / RADIX_CHUNK_SIZE;
+	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
+		radix_page_t *chunk = DECODE_ADDR(radix, pages[chunk_idx]);
+		memory_bfree(
+			memory_context,
+			chunk,
 			sizeof(radix_page_t) * RADIX_CHUNK_SIZE
 		);
-		if (radix->pages[new_chunk_count - 1] == NULL)
-			return -1;
 	}
-	*page_idx = radix->page_count;
-	memset(radix_page(radix, radix->page_count), 0xff, sizeof(radix_page_t)
+	memory_bfree(
+		memory_context, pages, sizeof(radix_page_t *) * chunk_count
 	);
-	++(radix->page_count);
-	return 0;
 }
 
 static inline int

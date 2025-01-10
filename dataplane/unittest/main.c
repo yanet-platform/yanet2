@@ -3,20 +3,30 @@
 #include <dlfcn.h>
 #include <string.h>
 
+#include <sys/mman.h>
+
 #include <pcap.h>
 
 #include <rte_mbuf.h>
 
-#include "dataplane/config/dataplane_registry.h"
+#include "dataplane/dpdk.h"
+
 #include "dataplane/module/module.h"
 #include "dataplane/pipeline/pipeline.h"
 
-#include "dataplane/dpdk.h"
+#include "dataplane/config/zone.h"
+
+#include "controlplane/agent/agent.h"
+
+#include "modules/route/config.h"
+#include "modules/route/controlplane.h"
 
 static int
 read_packets(struct rte_mempool *pool, struct packet_front *packet_front) {
 	char pcap_errbuf[512];
-	struct pcap *pcap = pcap_fopen_offline(stdin, pcap_errbuf);
+	//	struct pcap *pcap = pcap_fopen_offline(stdin, pcap_errbuf);
+	struct pcap *pcap =
+		pcap_fopen_offline(fopen("001-send.pcap", "r"), pcap_errbuf);
 	if (!pcap) {
 		fprintf(stderr, "pcap_fopen_offline(): %s\n", pcap_errbuf);
 		return -1;
@@ -84,18 +94,99 @@ write_packets(struct packet_front *packet_front) {
 }
 
 int
+dataplane_init_storage(
+	const char *storage_name,
+
+	size_t dp_memory,
+	size_t cp_memory,
+
+	struct dp_config **res_dp_config,
+	struct cp_config **res_cp_config
+);
+
+int
+dataplane_load_module(
+	struct dp_config *dp_config, void *bin_hndl, const char *name
+);
+
+int
 main(int argc, char **argv) {
 	(void)argc;
 	(void)argv;
 
-	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
-
 	dpdk_init(argv[0], 0, NULL);
 
-	struct dataplane_registry config;
-	dataplane_registry_init(&config);
+	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 
-	dataplane_registry_load_module(&config, bin_hndl, "route");
+	struct dp_config *dp_config;
+	struct cp_config *cp_config;
+
+	dataplane_init_storage(
+		"/tmp/unit", 1 << 24, 1 << 24, &dp_config, &cp_config
+	);
+
+	dataplane_load_module(dp_config, bin_hndl, "route");
+
+	struct agent *agent = agent_connect("/tmp/unit", "test", 1 << 20);
+	struct module_data *rmc = route_module_config_init(agent, "route0");
+	route_module_config_add_route(
+		rmc,
+		(struct ether_addr){
+			.addr = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06},
+		},
+		(struct ether_addr){
+			.addr = {0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c},
+		}
+	);
+
+	route_module_config_add_route_list(rmc, 1, (uint64_t[]){0});
+
+	route_module_config_add_prefix_v4(
+		rmc,
+		(uint8_t[4]){0, 0, 0, 0},
+		(uint8_t[4]){0xff, 0xff, 0xff, 0xff},
+		0
+	);
+
+	route_module_config_add_prefix_v6(
+		rmc,
+		(uint8_t[16]){0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		(uint8_t[16]){0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff,
+			      0xff},
+		0
+	);
+
+	agent_update_modules(agent, 1, &rmc);
+
+	agent_update_pipelines(agent, 1, NULL);
+	/*FIXME:
+	   (struct pipeline_config[]){
+				{
+					.length = 1,
+					.modules = (struct module_config[]){
+						{
+							.type = "route",
+							.name = "route0",
+						}
+					},
+				},
+			}
+		);
+	*/
 
 	struct rte_mempool *pool;
 	pool = rte_mempool_create(
@@ -112,26 +203,17 @@ main(int argc, char **argv) {
 		MEMPOOL_F_SP_PUT | MEMPOOL_F_SC_GET
 	);
 
-	struct dataplane_module_config *dmc = (struct dataplane_module_config[]
-	){{"route", "route0", NULL, 0}};
-	struct dataplane_pipeline_config *dpc =
-		(struct dataplane_pipeline_config[]
-		){{"default",
-		   (struct dataplane_pipeline_module[]){{"route", "route0"}},
-		   1}};
-
-	dataplane_registry_update(&config, dmc, 1, dpc, 1);
-
-	struct pipeline *pipeline;
-	pipeline =
-		pipeline_registry_lookup(&config.pipeline_registry, "default");
-
 	struct packet_front packet_front;
 	packet_front_init(&packet_front);
 
 	read_packets(pool, &packet_front),
 
-		pipeline_process(pipeline, &packet_front);
+		pipeline_process(
+			dp_config,
+			DECODE_ADDR(cp_config, cp_config->cp_config_gen),
+			0,
+			&packet_front
+		);
 
 	write_packets(&packet_front);
 

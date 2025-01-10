@@ -4,12 +4,15 @@ package decap_test
 //#cgo LDFLAGS: -L../../../../build/modules/decap -ldecap_dp
 //#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
 /*
-#include "modules/decap/dataplane.h"
+#include "common/memory.h"
+#include "lpm.h"
+#include "modules/decap/config.h"
+#include "dataplane/module/module.h"
 
 void
 decap_handle_packets(
-	struct module *module,
-	struct module_config *config,
+	struct dp_config *dp_config,
+	struct module_data *module_data,
 	struct packet_front *packet_front
 );
 */
@@ -23,13 +26,46 @@ import (
 	"github.com/gopacket/gopacket"
 )
 
-func decapModuleConfig(prefixes []netip.Prefix) C.struct_decap_module_config {
-	m := C.struct_decap_module_config{
-		config: C.struct_module_config{},
+func memCtxCreate() *C.struct_memory_context{
+	blockAlloc := C.struct_block_allocator{}
+	arena := C.malloc(1 << 20)
+	C.block_allocator_put_arena(&blockAlloc, arena, 1 << 20)
+	memCtx := C.struct_memory_context{}
+	C.memory_context_init(&memCtx, C.CString("test"), &blockAlloc)
+	return &memCtx
+}
+
+func buildLPMs(
+	prefixes []netip.Prefix,
+	memCtx *C.struct_memory_context,
+	lpm4 *C.struct_lpm,
+	lpm6 *C.struct_lpm,
+) {
+	C.lpm_init(lpm4, memCtx)
+	C.lpm_init(lpm6, memCtx)
+
+	for _, prefix := range prefixes {
+		if prefix.Addr().Is4() {
+			ipv4 := prefix.Addr().As4()
+			mask := common.ToBroadCast(prefix).As4()
+			from := (*C.uint8_t)(unsafe.Pointer(&ipv4[0]))
+			to := (*C.uint8_t)(unsafe.Pointer(&mask[0]))
+			C.lpm_insert(lpm4, 4, from, to, 1)
+		} else {
+			ipv6 := prefix.Addr().As16()
+			mask := common.ToBroadCast(prefix).As16()
+			from := (*C.uint8_t)(unsafe.Pointer(&ipv6[0]))
+			to := (*C.uint8_t)(unsafe.Pointer(&mask[0]))
+			C.lpm_insert(lpm6, 16, from, to, 1)
+		}
 	}
-	lpm4, lpm6 := common.BuildLPMs(prefixes)
-	m.prefixes4 = *(*C.struct_lpm)(unsafe.Pointer(&lpm4))
-	m.prefixes6 = *(*C.struct_lpm)(unsafe.Pointer(&lpm6))
+}
+
+func decapModuleConfig(prefixes []netip.Prefix, memCtx *C.struct_memory_context) *C.struct_decap_module_config {
+	m := &C.struct_decap_module_config{
+		module_data: C.struct_module_data{},
+	}
+	buildLPMs(prefixes, memCtx, &m.prefixes4, &m.prefixes6)
 
 	return m
 }
@@ -38,7 +74,7 @@ func decapHandlePackets(mc *C.struct_decap_module_config, packets ...gopacket.Pa
 	payload := common.PacketsToPaylod(packets)
 	pinner, pf := common.PacketFrontFromPayload(payload)
 	common.ParsePackets(pf)
-	C.decap_handle_packets(nil, &mc.config, (*C.struct_packet_front)(unsafe.Pointer(pf)))
+	C.decap_handle_packets(nil, &mc.module_data, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	result := common.PacketFrontToPayload(pf)
 	pinner.Unpin()
 	return result

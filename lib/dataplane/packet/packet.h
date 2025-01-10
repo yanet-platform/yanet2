@@ -31,7 +31,7 @@ struct packet {
 
 	struct rte_mbuf *mbuf;
 
-	struct pipeline *pipeline;
+	uint32_t pipeline_idx;
 
 	uint32_t hash;
 

@@ -15,7 +15,7 @@ static inline int
 data_pipe_init(struct data_pipe *pipe, size_t size) {
 	pipe->size = size;
 
-	pipe->data = (void **)malloc(sizeof(void *) * size);
+	pipe->data = (void **)malloc(sizeof(void *) * (1 << size));
 	if (pipe->data == NULL)
 		return -1;
 	pipe->w_pos = (size_t *)malloc(128);
@@ -56,13 +56,14 @@ data_pipe_ring_handle(
 	size_t to = *to_pos;
 
 	size_t available = to - from + space;
-	from %= size;
+	from &= (1 << size) - 1;
 	/*
 	 * Branch-less code: the first part is 1 if and only if we wrap
 	 * around the ring size whereas the second part is size of the ring
 	 * overflow.
 	 */
-	available -= (from + available) / size * (from + available - size);
+	available -=
+		((from + available) >> size) * (from + available - (1 << size));
 
 	if (!available)
 		return 0;
@@ -87,7 +88,7 @@ data_pipe_item_push(
 		data_pipe->f_pos,
 		data_pipe->data,
 		data_pipe->size,
-		data_pipe->size,
+		1 << data_pipe->size,
 		push_func,
 		push_func_data
 	);

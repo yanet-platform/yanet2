@@ -1,6 +1,5 @@
 #include "dataplane.h"
-
-#include <string.h>
+#include "config.h"
 
 #include <rte_ether.h>
 #include <rte_ip.h>
@@ -11,7 +10,9 @@
 
 #include "dataplane/module/module.h"
 
-#define BATCH_SIZE 32
+struct acl_module {
+	struct module module;
+};
 
 int
 acl_handle_v4(
@@ -170,13 +171,14 @@ acl_handle_v6(
 
 static void
 acl_handle_packets(
-	struct module *module,
-	struct module_config *config,
+	struct dp_config *dp_config,
+	struct module_data *module_data,
 	struct packet_front *packet_front
 ) {
-	(void)module;
-	struct acl_module_config *acl_config =
-		container_of(config, struct acl_module_config, config);
+	(void)dp_config;
+	struct acl_module_config *acl_config = container_of(
+		module_data, struct acl_module_config, module_data
+	);
 
 	struct filter_compiler *compiler = &acl_config->filter;
 
@@ -216,89 +218,6 @@ acl_handle_packets(
 	}
 }
 
-static int
-acl_handle_configure(
-	struct module *module,
-	const void *config_data,
-	size_t config_data_size,
-	struct module_config **new_config
-) {
-	(void)module;
-	(void)config_data;
-	(void)config_data_size;
-	(void)new_config;
-
-	struct acl_module_config *config = (struct acl_module_config *)malloc(
-		sizeof(struct acl_module_config)
-	);
-
-	struct filter_action actions[10];
-	actions[0].net6.src_count = 1;
-	actions[0].net6.srcs = (struct net6 *)malloc(sizeof(struct net6) * 1);
-	actions[0].net6.srcs[0] = (struct net6){0, 0, 0x00000000000000C0, 0};
-	actions[0].net6.dst_count = 1;
-	actions[0].net6.dsts = (struct net6 *)malloc(sizeof(struct net6) * 1);
-	actions[0].net6.dsts[0] =
-		(struct net6){0x0000000000000080, 0, 0x0000000000000080, 0};
-
-	actions[0].net4.src_count = 1;
-	actions[0].net4.srcs = (struct net4 *)malloc(sizeof(struct net4) * 1);
-	actions[0].net4.srcs[0] = (struct net4){0x00000080, 0x00000080};
-	actions[0].net4.dst_count = 1;
-	actions[0].net4.dsts = (struct net4 *)malloc(sizeof(struct net4) * 1);
-	actions[0].net4.dsts[0] = (struct net4){0x00000000, 0x00000080};
-
-	actions[0].transport.src_count = 1;
-	actions[0].transport.srcs = (struct filter_port_range *)malloc(
-		sizeof(struct filter_port_range) * 1
-	);
-	actions[0].transport.srcs[0] = (struct filter_port_range){0, 65535};
-
-	actions[0].transport.dst_count = 1;
-	actions[0].transport.dsts = (struct filter_port_range *)malloc(
-		sizeof(struct filter_port_range) * 1
-	);
-	actions[0].transport.dsts[0] =
-		(struct filter_port_range){htobe16(0), htobe16(65535)};
-	//		(struct filter_port_range){htobe16(80), htobe16(80)};
-
-	actions[0].action = 1;
-
-	actions[1].net6.src_count = 1;
-	actions[1].net6.srcs = (struct net6 *)malloc(sizeof(struct net6) * 1);
-	actions[1].net6.srcs[0] = (struct net6){0, 0, 0, 0};
-	actions[1].net6.dst_count = 1;
-	actions[1].net6.dsts = (struct net6 *)malloc(sizeof(struct net6) * 1);
-	actions[1].net6.dsts[0] = (struct net6){0, 0, 0, 0};
-
-	actions[1].transport.src_count = 1;
-	actions[1].transport.srcs = (struct filter_port_range *)malloc(
-		sizeof(struct filter_port_range) * 1
-	);
-	actions[1].transport.srcs[0] = (struct filter_port_range){0, 65535};
-
-	actions[1].transport.dst_count = 1;
-	actions[1].transport.dsts = (struct filter_port_range *)malloc(
-		sizeof(struct filter_port_range) * 1
-	);
-	actions[1].transport.dsts[0] = (struct filter_port_range){0, 65535};
-
-	actions[1].net4.src_count = 1;
-	actions[1].net4.srcs = (struct net4 *)malloc(sizeof(struct net4) * 1);
-	actions[1].net4.srcs[0] = (struct net4){0x00000000, 0x00000000};
-	actions[1].net4.dst_count = 1;
-	actions[1].net4.dsts = (struct net4 *)malloc(sizeof(struct net4) * 1);
-	actions[1].net4.dsts[0] = (struct net4){0x00000000, 0x00000000};
-
-	actions[1].action = 2;
-
-	filter_compiler_init(&config->filter, actions, 2);
-
-	*new_config = &config->config;
-
-	return 0;
-}
-
 struct module *
 new_module_acl() {
 	struct acl_module *module =
@@ -310,7 +229,6 @@ new_module_acl() {
 
 	snprintf(module->module.name, sizeof(module->module.name), "%s", "acl");
 	module->module.handler = acl_handle_packets;
-	module->module.config_handler = acl_handle_configure;
 
 	return &module->module;
 }

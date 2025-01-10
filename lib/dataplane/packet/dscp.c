@@ -1,6 +1,6 @@
 #include <rte_ip.h>
 
-#include "checksum.h"
+#include "common/checksum.h"
 #include "dscp.h"
 
 int

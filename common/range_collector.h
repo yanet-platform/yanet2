@@ -2,29 +2,43 @@
 
 #include <stdint.h>
 
+#include "common/exp_array.h"
+#include "common/memory.h"
+
 #include "key.h"
 #include "lpm.h"
 #include "radix.h"
 
 struct range_collector {
+	struct memory_context *memory_context;
+
 	struct radix radix;
 	uint8_t *masks;
-	uint32_t mask_count;
+	uint64_t mask_count;
 	uint32_t count;
 };
 
 static inline int
-range_collector_init(struct range_collector *collector) {
-	if (radix_init(&collector->radix))
+range_collector_init(
+	struct range_collector *collector, struct memory_context *memory_context
+) {
+	collector->memory_context = memory_context;
+
+	if (radix_init(&collector->radix, collector->memory_context))
 		return -1;
 	collector->masks = NULL;
 	collector->mask_count = 0;
+
 	return 0;
 }
 
 static inline void
-range_collector_free(struct range_collector *collector) {
-	free(collector->masks);
+range_collector_free(struct range_collector *collector, uint8_t key_size) {
+	memory_bfree(
+		collector->memory_context,
+		DECODE_ADDR(collector, collector->masks),
+		collector->mask_count * key_size
+	);
 	radix_free(&collector->radix);
 }
 
@@ -34,19 +48,22 @@ range_collector_add_mask(
 	uint8_t key_size,
 	uint32_t *mask_index
 ) {
-	if (!(collector->mask_count & (collector->mask_count + 1))) {
-		uint8_t *masks = (uint8_t *)realloc(
-			collector->masks,
-			key_size * (collector->mask_count + 1) * 2
-		);
-		if (masks == NULL)
-			return -1;
-		collector->masks = masks;
+	uint8_t *masks = DECODE_ADDR(collector, collector->masks);
+
+	if (mem_array_expand_exp(
+		    collector->memory_context,
+		    (void **)&masks,
+		    sizeof(*masks) * key_size,
+		    &collector->mask_count
+	    )) {
+		return -1;
 	}
 
-	memset(collector->masks + collector->mask_count * key_size, 0, key_size
-	);
-	*mask_index = collector->mask_count++;
+	memset(masks + (collector->mask_count - 1) * key_size, 0, key_size);
+
+	collector->masks = ENCODE_ADDR(collector, masks);
+
+	*mask_index = collector->mask_count - 1;
 	return 0;
 }
 
@@ -58,7 +75,7 @@ range_collector_set_mask(
 	uint8_t prefix
 ) {
 	uint32_t pos = mask_index * key_size + prefix / 8;
-	collector->masks[pos] |= 0x80 >> (prefix % 8);
+	DECODE_ADDR(collector, collector->masks)[pos] |= 0x80 >> (prefix % 8);
 }
 
 static int
@@ -206,7 +223,9 @@ range_collector_iterate(
 ) {
 	struct range_collector_ctx *ctx = (struct range_collector_ctx *)data;
 
-	const uint8_t *mask = ctx->collector->masks + value * key_size;
+	const uint8_t *mask =
+		DECODE_ADDR(ctx->collector, ctx->collector->masks) +
+		value * key_size;
 	uint8_t to[key_size];
 
 	for (uint8_t idx = 0; idx < key_size; ++idx) {
@@ -235,8 +254,6 @@ range_collector_collect(
 	ctx.max_value = 0;
 
 	ctx.lpm = lpm64;
-	if (lpm_init(ctx.lpm))
-		return -1;
 
 	uint32_t stack_size = key_size * 8 + 1;
 	uint32_t values[stack_size];
@@ -271,7 +288,6 @@ range_collector_collect(
 	return 0;
 
 error:
-	lpm_free(ctx.lpm);
 
 	return -1;
 }

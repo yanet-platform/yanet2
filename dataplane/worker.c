@@ -38,8 +38,9 @@
 #include "dataplane/pipeline/pipeline.h"
 
 #include "dataplane.h"
+#include "dataplane/config/zone.h"
 
-#include "data_pipe.h"
+#include "common/data_pipe.h"
 
 #include <rte_ethdev.h>
 
@@ -51,6 +52,7 @@ worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
 	uint16_t read = rte_eth_rx_burst(
 		worker->port_id, worker->queue_id, mbufs, ctx->read_size
 	);
+	__atomic_add_fetch(&worker->dataplane->read, read, __ATOMIC_ACQ_REL);
 	for (uint32_t idx = 0; idx < read; ++idx) {
 		struct packet *packet = mbuf_to_packet(mbufs[idx]);
 		memset(packet, 0, sizeof(struct packet));
@@ -92,12 +94,17 @@ worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
 		worker->port_id, worker->queue_id, mbufs, count
 	);
 
+	__atomic_add_fetch(
+		&worker->dataplane->write, written, __ATOMIC_ACQ_REL
+	);
+
 	for (size_t idx = 0; idx < written; ++idx) {
 		packets[idx]->tx_result = 0;
 	}
 
 	for (size_t idx = written; idx < count; ++idx) {
 		packets[idx]->tx_result = -1;
+		rte_pktmbuf_free(mbufs[idx]);
 	}
 
 	return count;
@@ -105,16 +112,11 @@ worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
 
 static size_t
 worker_connection_free_cb(void **item, size_t count, void *data) {
-	struct packet_list *failed = (struct packet_list *)data;
+	struct packet_list *sent = (struct packet_list *)data;
 
 	for (size_t idx = 0; idx < count; ++idx) {
 		struct packet *packet = ((struct packet **)item)[idx];
-		if (packet->tx_result) {
-			packet_list_add(failed, packet);
-		} else {
-			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-			rte_pktmbuf_free(mbuf);
-		}
+		packet_list_add(sent, packet);
 	}
 	return count;
 }
@@ -148,7 +150,7 @@ worker_send_to_port(struct worker_write_ctx *ctx, struct packet *packet) {
 
 static void
 worker_collect_from_port(
-	struct dataplane_worker *worker, struct packet_list *failed
+	struct dataplane_worker *worker, struct packet_list *sent
 ) {
 	for (uint32_t conn_idx = 0; conn_idx < worker->dataplane->device_count;
 	     ++conn_idx) {
@@ -159,7 +161,7 @@ worker_collect_from_port(
 			data_pipe_item_free(
 				tx_conn->pipes + pipe_idx,
 				worker_connection_free_cb,
-				failed
+				sent
 			);
 		}
 	}
@@ -175,6 +177,13 @@ worker_submit_burst(
 	uint16_t written = rte_eth_tx_burst(
 		worker->port_id, worker->queue_id, mbufs, count
 	);
+
+	__atomic_add_fetch(
+		&worker->dataplane->write, written, __ATOMIC_ACQ_REL
+	);
+
+	if (written < count)
+		fprintf(stderr, "pituh %d %d\n", written, count);
 
 	for (uint16_t idx = written; idx < count; ++idx) {
 		packet_list_add(failed, mbuf_to_packet(mbufs[idx]));
@@ -217,9 +226,29 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 		worker_submit_burst(worker, mbufs, to_write, &failed);
 	}
 
-	worker_collect_from_port(worker, &failed);
+	struct packet_list sent;
+	packet_list_init(&sent);
+	worker_collect_from_port(worker, &sent);
+	while ((packet = packet_list_pop(&sent)) != NULL) {
+		if (packet->tx_result) {
+			packet_list_add(&failed, packet);
+			continue;
+		}
 
-	*packets = failed;
+		// FIXME: per-pipe pending queue
+		packet_list_add(&worker->pending, packet);
+	}
+
+	while ((packet = packet_list_first(&worker->pending)) != NULL) {
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		if (rte_mbuf_refcnt_read(mbuf) != 1)
+			break;
+
+		(void)packet_list_pop(&worker->pending);
+		rte_pktmbuf_free(mbuf);
+	}
+
+	packet_list_concat(packets, &failed);
 
 	for (uint32_t pipe_idx = 0; pipe_idx < ctx->rx_pipe_count; ++pipe_idx) {
 		data_pipe_item_pop(
@@ -241,13 +270,19 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 	worker_read(worker, &input_packets);
 
+	struct dp_config *dp_config = worker->node->dp_config;
+	struct cp_config *cp_config = worker->node->cp_config;
+	struct cp_config_gen *cp_config_gen =
+		DECODE_ADDR(cp_config, cp_config->cp_config_gen);
+
 	// Determine pipelines
+	// FIXME: this should depend on cp_config
 	dataplane_route_pipeline(worker->dataplane, &input_packets);
 
 	// Now group packets by pipeline and build packet_front
 	while (packet_list_first(&input_packets)) {
-		struct pipeline *pipeline =
-			packet_list_first(&input_packets)->pipeline;
+		uint32_t pipeline_idx =
+			packet_list_first(&input_packets)->pipeline_idx;
 
 		struct packet_front packet_front;
 		packet_front_init(&packet_front);
@@ -258,7 +293,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 		struct packet *packet;
 		while ((packet = packet_list_pop(&input_packets))) {
-			if (packet->pipeline == pipeline) {
+			if (packet->pipeline_idx == pipeline_idx) {
 				packet_front_output(&packet_front, packet);
 			} else {
 				packet_list_add(&ready_packets, packet);
@@ -267,13 +302,15 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 		// Process pipeline and push packets into drop and write lists
 
-		pipeline_process(pipeline, &packet_front);
+		pipeline_process(
+			dp_config, cp_config_gen, pipeline_idx, &packet_front
+		);
 
 		packet_list_concat(&drop_packets, &packet_front.drop);
 		packet_list_concat(&output_packets, &packet_front.output);
 		packet_list_concat(&output_packets, &packet_front.bypass);
 
-		input_packets = ready_packets;
+		packet_list_concat(&input_packets, &ready_packets);
 	}
 
 	worker_write(worker, &output_packets);
@@ -298,9 +335,11 @@ dataplane_worker_init(
 	struct dataplane *dataplane,
 	struct dataplane_device *device,
 	struct dataplane_worker *worker,
-	int queue_id
+	int queue_id,
+	struct dataplane_device_worker_config *config
 ) {
 	worker->dataplane = dataplane;
+	worker->node = dataplane->nodes + config->numa_id;
 	worker->device = device;
 	worker->device_id = device->device_id;
 	worker->port_id = device->port_id;
@@ -310,8 +349,10 @@ dataplane_worker_init(
 	worker->write_ctx.write_size = 32;
 	worker->write_ctx.rx_pipes = NULL;
 
+	packet_list_init(&worker->pending);
+
 	// Initialize device rx and tx queue
-	if (rte_eth_tx_queue_setup(device->port_id, queue_id, 4096, 0, NULL)) {
+	if (rte_eth_tx_queue_setup(device->port_id, queue_id, 4096, 1, NULL)) {
 		return -1;
 	}
 
@@ -326,7 +367,7 @@ dataplane_worker_init(
 
 	worker->rx_mempool = rte_mempool_create(
 		mempool_name,
-		4096,
+		16384,
 		8192,
 		0,
 		sizeof(struct rte_pktmbuf_pool_private),
@@ -334,7 +375,7 @@ dataplane_worker_init(
 		NULL,
 		rte_pktmbuf_init,
 		NULL,
-		0,
+		1,
 		MEMPOOL_F_SP_PUT | MEMPOOL_F_SC_GET
 	);
 	if (worker->rx_mempool == NULL) {
@@ -342,7 +383,7 @@ dataplane_worker_init(
 	}
 
 	if (rte_eth_rx_queue_setup(
-		    device->port_id, queue_id, 4096, 0, NULL, worker->rx_mempool
+		    device->port_id, queue_id, 4096, 1, NULL, worker->rx_mempool
 	    )) {
 		goto error_mempool;
 	}

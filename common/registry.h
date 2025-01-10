@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "common/exp_array.h"
+#include "common/memory.h"
 #include "value.h"
 
 /*
@@ -19,15 +21,19 @@
  * if a value was used while the current generation.
  */
 struct value_collector {
+	struct memory_context *memory_context;
 	uint32_t **use_map;
 	uint32_t chunk_count;
 	uint32_t gen;
 };
 
 static inline int
-value_collector_init(struct value_collector *collector) {
+value_collector_init(
+	struct value_collector *collector, struct memory_context *memory_context
+) {
+	collector->memory_context = memory_context;
 	// zero-initialized array
-	collector->use_map = (uint32_t **)NULL;
+	collector->use_map = ENCODE_ADDR(collector, (uint32_t **)NULL);
 	collector->chunk_count = 0;
 	collector->gen = 0;
 
@@ -36,10 +42,23 @@ value_collector_init(struct value_collector *collector) {
 
 static inline void
 value_collector_free(struct value_collector *collector) {
+	uint32_t **use_map = DECODE_ADDR(collector, collector->use_map);
+
 	for (uint32_t chunk_idx = 0; chunk_idx < collector->chunk_count;
-	     ++chunk_idx)
-		free(collector->use_map[chunk_idx]);
-	free(collector->use_map);
+	     ++chunk_idx) {
+		uint32_t *chunk = DECODE_ADDR(collector, use_map[chunk_idx]);
+		if (chunk != NULL)
+			memory_bfree(
+				collector->memory_context,
+				chunk,
+				VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t)
+			);
+	}
+	memory_bfree(
+		collector->memory_context,
+		use_map,
+		collector->chunk_count * sizeof(uint32_t *)
+	);
 }
 
 static void
@@ -47,68 +66,106 @@ value_collector_reset(struct value_collector *collector) {
 	collector->gen++;
 }
 
-/*
- * The routine touches a value returnin if the value was seen before while
- * the current generation.
- */
 static inline int
-value_collector_collect(struct value_collector *collector, uint32_t value) {
+value_collector_check(struct value_collector *collector, uint32_t value) {
 	uint32_t chunk_idx = value / VALUE_COLLECTOR_CHUNK_SIZE;
+	uint32_t **use_map = DECODE_ADDR(collector, collector->use_map);
+
 	if (chunk_idx >= collector->chunk_count) {
-		uint32_t **use_map = (uint32_t **)realloc(
-			collector->use_map,
-			sizeof(uint32_t **) * (chunk_idx + 1)
+		uint32_t new_chunk_count = chunk_idx + 1;
+
+		uint32_t **new_use_map = (uint32_t **)memory_brealloc(
+			collector->memory_context,
+			use_map,
+			collector->chunk_count * sizeof(uint32_t *),
+			new_chunk_count * sizeof(uint32_t *)
 		);
-		if (use_map == NULL)
+
+		if (new_use_map == NULL)
 			return -1;
-		memset(use_map + collector->chunk_count,
-		       0,
-		       sizeof(uint32_t *) *
-			       (chunk_idx + 1 - collector->chunk_count));
-		collector->use_map = use_map;
-		collector->chunk_count = chunk_idx + 1;
+
+		for (uint32_t idx = collector->chunk_count;
+		     idx < new_chunk_count;
+		     ++idx)
+			new_use_map[idx] =
+				ENCODE_ADDR(collector, (uint32_t *)NULL);
+
+		use_map = new_use_map;
+		collector->use_map = ENCODE_ADDR(collector, use_map);
+		collector->chunk_count = new_chunk_count;
 	}
 
-	if (collector->use_map[chunk_idx] == NULL) {
-		collector->use_map[chunk_idx] = (uint32_t *)calloc(
-			VALUE_COLLECTOR_CHUNK_SIZE, sizeof(uint32_t)
+	uint32_t *chunk = DECODE_ADDR(collector, use_map[chunk_idx]);
+	if (chunk == NULL) {
+		chunk = (uint32_t *)memory_balloc(
+			collector->memory_context,
+			VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t)
 		);
-		if (collector->use_map[chunk_idx] == NULL)
+
+		if (chunk == NULL)
 			return -1;
+
+		use_map[chunk_idx] = ENCODE_ADDR(collector, chunk);
 	}
 
 	uint32_t value_idx = value % VALUE_COLLECTOR_CHUNK_SIZE;
+	if (chunk[value_idx] != collector->gen) {
+		return 1;
+	}
 
-	if (collector->use_map[chunk_idx][value_idx] == collector->gen)
-		return 0;
-	collector->use_map[chunk_idx][value_idx] = collector->gen;
+	return 0;
+}
+
+/*
+ * The routine touches a value returning 0 if the value was seen before while
+ * the current generation, 1 for new values and -1 in case of error
+ */
+static inline int
+value_collector_collect(struct value_collector *collector, uint32_t value) {
+	int check = value_collector_check(collector, value);
+	if (check != 1)
+		return check;
+
+	uint32_t **use_map = DECODE_ADDR(collector, collector->use_map);
+	uint32_t chunk_idx = value / VALUE_COLLECTOR_CHUNK_SIZE;
+
+	uint32_t *chunk = DECODE_ADDR(collector, use_map[chunk_idx]);
+	uint32_t value_idx = value % VALUE_COLLECTOR_CHUNK_SIZE;
+
+	chunk[value_idx] = collector->gen;
+
 	return 1;
 }
 
 struct value_range {
-	uint32_t from;
-	uint32_t count;
+	uint64_t from;
+	uint64_t count;
 };
 
 struct value_registry {
+	struct memory_context *memory_context;
 	struct value_collector collector;
 
 	uint32_t *values;
 	struct value_range *ranges;
-	uint32_t value_count;
-	uint32_t range_count;
+	uint64_t value_count;
+	uint64_t range_count;
 
 	uint32_t max_value;
 };
 
 static inline int
-value_registry_init(struct value_registry *registry) {
-	if (value_collector_init(&registry->collector))
+value_registry_init(
+	struct value_registry *registry, struct memory_context *memory_context
+) {
+	if (value_collector_init(&registry->collector, memory_context))
 		return -1;
 
-	registry->values = NULL;
+	registry->memory_context = memory_context;
+
+	registry->values = ENCODE_ADDR(registry, (uint32_t *)NULL);
 	registry->value_count = 0;
-	registry->ranges = NULL;
+	registry->ranges = ENCODE_ADDR(registry, (struct value_range *)NULL);
 	registry->range_count = 0;
 
 	registry->max_value = 0;
@@ -122,40 +179,52 @@ static inline int
 value_registry_start(struct value_registry *registry) {
 	value_collector_reset(&registry->collector);
 
-	if (!(registry->range_count & (registry->range_count + 1))) {
-		struct value_range *new_ranges = (struct value_range *)realloc(
-			registry->ranges,
-			sizeof(struct value_range) *
-				((registry->range_count + 1) * 2)
-		);
-		if (new_ranges == NULL)
-			return -1;
-		registry->ranges = new_ranges;
-	}
+	struct value_range *ranges = DECODE_ADDR(registry, registry->ranges);
 
-	registry->ranges[registry->range_count++] =
+	if (mem_array_expand_exp(
+		    registry->memory_context,
+		    (void **)&ranges,
+		    sizeof(*ranges),
+		    &registry->range_count
+	    )) {
+		return -1;
+	}
+	ranges[registry->range_count - 1] =
 		(struct value_range){registry->value_count, 0};
+
+	registry->ranges = ENCODE_ADDR(registry, ranges);
 
 	return 0;
 }
 
 static inline int
 value_registry_collect(struct value_registry *registry, uint32_t value) {
-	if (!(registry->value_count & (registry->value_count + 1))) {
-		uint32_t *new_values = (uint32_t *)realloc(
-			registry->values,
-			sizeof(uint32_t) * (registry->value_count + 1) * 2
-		);
-		if (new_values == NULL)
-			return -1;
-		registry->values = new_values;
-	}
+	int check = value_collector_check(&registry->collector, value);
+	if (check < 1)
+		return check;
 
 	if (value_collector_collect(&registry->collector, value)) {
-		registry->values[registry->value_count++] = value;
-		registry->ranges[registry->range_count - 1].count++;
+		uint32_t *values = DECODE_ADDR(registry, registry->values);
+
+		if (mem_array_expand_exp(
+			    registry->memory_context,
+			    (void **)&values,
+			    sizeof(*values),
+			    &registry->value_count
+		    )) {
+			return -1;
+		}
+
+		values[registry->value_count - 1] = value;
+
+		struct value_range *ranges =
+			DECODE_ADDR(registry, registry->ranges);
+		ranges[registry->range_count - 1].count++;
+
 		if (value >= registry->max_value)
 			registry->max_value = value;
+
+		registry->values = ENCODE_ADDR(registry, values);
 	}
 
 	return 0;
@@ -164,8 +233,17 @@ value_registry_collect(struct value_registry *registry, uint32_t value) {
 static inline void
 value_registry_free(struct value_registry *registry) {
 	value_collector_free(&registry->collector);
-	free(registry->ranges);
-	free(registry->values);
+	// FIXME: use mem_array_free_exp (not implemented yet
+	memory_bfree(
+		registry->memory_context,
+		DECODE_ADDR(registry, registry->values),
+		registry->value_count * sizeof(uint32_t)
+	);
+	memory_bfree(
+		registry->memory_context,
+		DECODE_ADDR(registry, registry->ranges),
+		registry->range_count * sizeof(struct value_range)
+	);
 }
 
 static inline uint32_t
@@ -193,16 +271,20 @@ value_registry_join_range(
 	value_registry_join_func join_func,
 	void *join_func_data
 ) {
-	struct value_range *range1 = registry1->ranges + range_idx;
-	struct value_range *range2 = registry2->ranges + range_idx;
+	struct value_range *range1 =
+		DECODE_ADDR(registry1, registry1->ranges) + range_idx;
+	struct value_range *range2 =
+		DECODE_ADDR(registry2, registry2->ranges) + range_idx;
 	for (uint32_t idx1 = range1->from; idx1 < range1->from + range1->count;
 	     ++idx1) {
 		for (uint32_t idx2 = range2->from;
 		     idx2 < range2->from + range2->count;
 		     ++idx2) {
 
-			uint32_t v1 = registry1->values[idx1];
-			uint32_t v2 = registry2->values[idx2];
+			uint32_t v1 =
+				DECODE_ADDR(registry1, registry1->values)[idx1];
+			uint32_t v2 =
+				DECODE_ADDR(registry2, registry2->values)[idx2];
 
 			join_func(v1, v2, range_idx, join_func_data);
 		}
@@ -212,14 +294,16 @@ value_registry_join_range(
 
 /*
  * FIXME: the function is tricky and should be refactored.
+ * FIXME: This function is not used!!!
  */
 static inline int
 value_registry_compact(
+	struct memory_context *memory_context,
 	struct value_registry *src_registry,
 	struct value_table *values,
 	struct value_registry *dst_registry
 ) {
-	if (value_registry_init(dst_registry)) {
+	if (value_registry_init(dst_registry, memory_context)) {
 		return -1;
 	}
 
@@ -233,12 +317,16 @@ value_registry_compact(
 		if (value_registry_start(dst_registry))
 			goto error;
 
-		struct value_range *range = src_registry->ranges + r_idx;
+		struct value_range *range =
+			DECODE_ADDR(src_registry, src_registry->ranges) + r_idx;
 		for (uint32_t v_idx = range->from;
 		     v_idx < range->from + range->count;
 		     ++v_idx) {
 			value_registry_collect(
-				dst_registry, src_registry->values[v_idx]
+				dst_registry,
+				DECODE_ADDR(
+					src_registry, src_registry->values
+				)[v_idx]
 			);
 		}
 	}

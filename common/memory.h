@@ -2,9 +2,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
+#include <string.h>
 
-#define BLOCK_COUNT 8
+#include "memory_address.h"
 
 #include "memory_block.h"
 
@@ -30,8 +30,29 @@ memory_context_init(
 	context->balloc_size = 0;
 	context->bfree_size = 0;
 
-	context->block_allocator = block_allocator;
-	snprintf(context->name, sizeof(context->name), "%s", name);
+	context->block_allocator = ENCODE_ADDR(context, block_allocator);
+	strncpy(context->name, name, sizeof(context->name) - 1);
+	context->name[sizeof(context->name) - 1] = 0;
+
+	return 0;
+}
+
+static inline int
+memory_context_init_from(
+	struct memory_context *context,
+	struct memory_context *parent,
+	const char *name
+) {
+	context->balloc_count = 0;
+	context->bfree_count = 0;
+	context->balloc_size = 0;
+	context->bfree_size = 0;
+
+	context->block_allocator = ENCODE_ADDR(
+		context, DECODE_ADDR(parent, parent->block_allocator)
+	);
+	strncpy(context->name, name, sizeof(context->name) - 1);
+	context->name[sizeof(context->name) - 1] = 0;
 
 	return 0;
 }
@@ -40,12 +61,44 @@ static inline void *
 memory_balloc(struct memory_context *context, size_t size) {
 	++context->balloc_count;
 	context->balloc_size += size;
-	return block_allocator_balloc(context->block_allocator, size);
+	return block_allocator_balloc(
+		DECODE_ADDR(context, context->block_allocator), size
+	);
 }
 
 static inline void
 memory_bfree(struct memory_context *context, void *block, size_t size) {
 	++context->bfree_count;
 	context->bfree_size += size;
-	return block_allocator_bfree(context->block_allocator, block, size);
+	return block_allocator_bfree(
+		DECODE_ADDR(context, context->block_allocator), block, size
+	);
+}
+
+static inline void *
+memory_brealloc(
+	struct memory_context *context,
+	void *data,
+	size_t old_size,
+	size_t new_size
+) {
+	if (!new_size && !old_size)
+		return NULL;
+
+	if (!new_size) {
+		memory_bfree(context, data, old_size);
+		return NULL;
+	}
+
+	void *new_data = memory_balloc(context, new_size);
+	if (new_data == NULL)
+		return NULL;
+	if (old_size < new_size)
+		memcpy(new_data, data, old_size);
+	else
+		memcpy(new_data, data, new_size);
+
+	if (old_size)
+		memory_bfree(context, data, old_size);
+	return new_data;
 }

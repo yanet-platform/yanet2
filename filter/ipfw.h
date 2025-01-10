@@ -2,9 +2,9 @@
 
 #include <stdint.h>
 
-#include "lpm.h"
-#include "network.h"
-#include "registry.h"
+#include "common/lpm.h"
+#include "common/network.h"
+#include "common/registry.h"
 
 #define ACTION_NON_TERMINATE 0x80000000
 
@@ -43,6 +43,7 @@ struct filter_action {
 };
 
 struct filter_compiler {
+	struct memory_context memory_context;
 	struct lpm src_net4;
 	struct lpm dst_net4;
 	struct value_table src_port4;
@@ -75,6 +76,7 @@ struct filter_compiler {
 int
 filter_compiler_init(
 	struct filter_compiler *compiler,
+	struct memory_context *memory_context,
 	struct filter_action *actions,
 	uint32_t count
 );

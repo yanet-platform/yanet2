@@ -5,7 +5,6 @@ dependencies += lib_module_dp_dep
 
 sources = files(
   'pipeline.c',
-  'pipeline_registry.c',
 )
 
 lib_pipeline_dp = static_library(

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "common/memory.h"
+
 /*
  * Remap table allows to remap one unsinged into another and intended to spare
  * unsigned value set size.
@@ -47,6 +49,7 @@ struct remap_item {
  *  - remaps items organized into chunks
  */
 struct remap_table {
+	struct memory_context *memory_context;
 	uint32_t gen;
 	uint32_t count;
 	uint32_t free_list;
@@ -54,31 +57,64 @@ struct remap_table {
 };
 
 static inline int
-remap_table_init(struct remap_table *table, uint32_t capacity) {
+remap_table_init(
+	struct remap_table *table,
+	struct memory_context *memory_context,
+	uint32_t capacity
+) {
+	table->memory_context = memory_context;
 	table->gen = 1;
 	table->count = 1;
-	table->keys = (struct remap_item **)malloc(sizeof(struct remap_item *));
-	if (table->keys == NULL)
+	struct remap_item **keys = (struct remap_item **)memory_balloc(
+		table->memory_context, sizeof(struct remap_item *)
+	);
+
+	if (keys == NULL)
 		return -1;
-	table->keys[0] = (struct remap_item *)malloc(
+
+	struct remap_item *chunk = (struct remap_item *)memory_balloc(
+		table->memory_context,
 		sizeof(struct remap_item) * REMAP_TABLE_CHUNK_SIZE
 	);
-	if (table->keys[0] == NULL) {
-		free(table->keys);
+	if (chunk == NULL) {
+		memory_bfree(
+			table->memory_context, keys, sizeof(struct remap_item *)
+		);
 		return -1;
 	}
-	table->keys[0][0] = (struct remap_item){capacity, 0, 0, 0};
+
+	chunk[0] = (struct remap_item){capacity, 0, 0, 0};
+
+	keys[0] = ENCODE_ADDR(table, chunk);
+	table->keys = ENCODE_ADDR(table, keys);
+
 	table->free_list = REMAP_TABLE_INVALID;
 	return 0;
 }
 
 static inline void
 remap_table_free(struct remap_table *table) {
-	for (uint32_t chunk_idx = 0;
-	     chunk_idx < table->count / REMAP_TABLE_CHUNK_SIZE;
-	     ++chunk_idx)
-		free(table->keys[chunk_idx]);
-	free(table->keys);
+	struct remap_item **keys = DECODE_ADDR(table, table->keys);
+
+	uint32_t chunk_count = (table->count + REMAP_TABLE_CHUNK_SIZE - 1) /
+			       REMAP_TABLE_CHUNK_SIZE;
+
+	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
+		struct remap_item *chunk = DECODE_ADDR(table, keys[chunk_idx]);
+		if (chunk != NULL) {
+			memory_bfree(
+				table->memory_context,
+				chunk,
+				sizeof(struct remap_item) *
+					REMAP_TABLE_CHUNK_SIZE
+			);
+		}
+	}
+	memory_bfree(
+		table->memory_context,
+		keys,
+		chunk_count * sizeof(struct remap_item *)
+	);
 }
 
 static inline void
@@ -88,8 +124,10 @@ remap_table_new_gen(struct remap_table *table) {
 
 static inline struct remap_item *
 remap_table_item(struct remap_table *table, uint32_t key) {
-	return table->keys[key / REMAP_TABLE_CHUNK_SIZE] +
-	       key % REMAP_TABLE_CHUNK_SIZE;
+	struct remap_item **keys = DECODE_ADDR(table, table->keys);
+	struct remap_item *chunk =
+		DECODE_ADDR(table, keys[key / REMAP_TABLE_CHUNK_SIZE]);
+	return chunk + key % REMAP_TABLE_CHUNK_SIZE;
 }
 
 /*
@@ -109,19 +147,41 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 	}
 
 	if (!(table->count % REMAP_TABLE_CHUNK_SIZE)) {
-		uint32_t new_chunk_count =
-			table->count / REMAP_TABLE_CHUNK_SIZE + 1;
-		struct remap_item **keys = (struct remap_item **)realloc(
-			table->keys,
-			sizeof(struct remap_item *) * new_chunk_count
-		);
-		if (keys == NULL)
+		struct remap_item *new_chunk =
+			(struct remap_item *)memory_balloc(
+				table->memory_context,
+				sizeof(struct remap_item) *
+					REMAP_TABLE_CHUNK_SIZE
+			);
+
+		if (new_chunk == NULL)
 			return -1;
-		table->keys[new_chunk_count - 1] = (struct remap_item *)malloc(
-			sizeof(struct remap_item) * REMAP_TABLE_CHUNK_SIZE
-		);
-		if (table->keys[new_chunk_count - 1] == NULL)
+
+		uint32_t old_chunk_count =
+			table->count / REMAP_TABLE_CHUNK_SIZE;
+		uint32_t new_chunk_count = old_chunk_count + 1;
+
+		struct remap_item **old_keys = DECODE_ADDR(table, table->keys);
+
+		struct remap_item **new_keys =
+			(struct remap_item **)memory_brealloc(
+				table->memory_context,
+				old_keys,
+				old_chunk_count * sizeof(struct remap_item *),
+				new_chunk_count * sizeof(struct remap_item *)
+			);
+		if (new_keys == NULL) {
+			memory_bfree(
+				table->memory_context,
+				new_chunk,
+				sizeof(struct remap_item) *
+					REMAP_TABLE_CHUNK_SIZE
+			);
 			return -1;
+		}
+
+		new_keys[new_chunk_count - 1] = ENCODE_ADDR(table, new_chunk);
+		table->keys = ENCODE_ADDR(table, new_keys);
 	}
 
 	struct remap_item *item = remap_table_item(table, table->count);

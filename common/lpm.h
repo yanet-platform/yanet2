@@ -14,7 +14,12 @@
 
 #include <string.h>
 
+#include "key.h"
 #include "value.h"
+
+#include "key.h"
+
+#include "memory.h"
 
 #define LPM_VALUE_INVALID 0xffffffff
 #define LPM_VALUE_MASK 0x7fffffff
@@ -26,63 +31,92 @@ typedef uint32_t lpm_page_t[256];
 
 // TODO chunked storage
 struct lpm {
+	struct memory_context *memory_context;
 	lpm_page_t **pages;
 	size_t page_count;
 };
 
 static inline lpm_page_t *
 lpm_page(const struct lpm *lpm, uint32_t page_idx) {
-	size_t chunk_idx = page_idx / LPM_CHUNK_SIZE;
-	size_t page_offset = page_idx % LPM_CHUNK_SIZE;
-	return lpm->pages[chunk_idx] + page_offset;
-}
-
-static inline int
-lpm_init(struct lpm *lpm) {
-	lpm->pages = (lpm_page_t **)malloc(sizeof(lpm_page_t *) * 1);
-	if (lpm->pages == NULL)
-		return -1;
-	lpm->pages[0] =
-		(lpm_page_t *)malloc(sizeof(lpm_page_t) * LPM_CHUNK_SIZE);
-	if (lpm->pages[0] == NULL)
-		return -1;
-	lpm->page_count = 1;
-	memset(lpm_page(lpm, 0), 0xff, sizeof(lpm_page_t));
-	return 0;
-}
-
-static inline void
-lpm_free(struct lpm *lpm) {
-	size_t chunks = lpm->page_count / LPM_CHUNK_SIZE;
-	for (size_t chunk_idx = 0; chunk_idx < chunks; ++chunk_idx)
-		free(lpm->pages[chunk_idx]);
-
-	free(lpm->pages);
+	lpm_page_t **pages = DECODE_ADDR(lpm, lpm->pages);
+	lpm_page_t *chunk = DECODE_ADDR(lpm, pages[page_idx / LPM_CHUNK_SIZE]);
+	return chunk + page_idx % LPM_CHUNK_SIZE;
 }
 
 static inline int
 lpm_new_page(struct lpm *lpm, uint32_t *page_idx) {
-	int first_page_in_chunk = (lpm->page_count % LPM_CHUNK_SIZE) == 0;
-	if (first_page_in_chunk) {
-		uint32_t new_chunk_count =
-			(lpm->page_count / LPM_CHUNK_SIZE) + 1;
-		lpm_page_t **pages = (lpm_page_t **)realloc(
-			lpm->pages, sizeof(lpm_page_t *) * new_chunk_count
+	if (!(lpm->page_count % LPM_CHUNK_SIZE)) {
+		uint32_t old_chunk_count = lpm->page_count / LPM_CHUNK_SIZE;
+		uint32_t new_chunk_count = old_chunk_count + 1;
+
+		struct memory_context *memory_context =
+			DECODE_ADDR(lpm, lpm->memory_context);
+
+		lpm_page_t **pages = (lpm_page_t **)memory_balloc(
+			memory_context, sizeof(lpm_page_t *) * new_chunk_count
 		);
 		if (pages == NULL) {
 			return -1;
 		}
-		lpm->pages = pages;
-		lpm->pages[new_chunk_count - 1] = (lpm_page_t *)malloc(
-			sizeof(lpm_page_t) * LPM_CHUNK_SIZE
+
+		lpm_page_t *page = (lpm_page_t *)memory_balloc(
+			memory_context, sizeof(lpm_page_t) * LPM_CHUNK_SIZE
 		);
-		if (lpm->pages[new_chunk_count - 1] == NULL)
+		if (page == NULL) {
+			memory_bfree(
+				memory_context,
+				pages,
+				sizeof(lpm_page_t) * LPM_CHUNK_SIZE
+			);
 			return -1;
+		}
+
+		memcpy(pages,
+		       DECODE_ADDR(lpm, lpm->pages),
+		       old_chunk_count * sizeof(lpm_page_t *));
+		pages[old_chunk_count] = ENCODE_ADDR(lpm, page);
+
+		memory_bfree(
+			memory_context,
+			DECODE_ADDR(lpm, lpm->pages),
+			old_chunk_count * sizeof(lpm_page_t *)
+		);
+		lpm->pages = ENCODE_ADDR(lpm, pages);
 	}
-	*page_idx = lpm->page_count;
 	memset(lpm_page(lpm, lpm->page_count), 0xff, sizeof(lpm_page_t));
 	lpm->page_count += 1;
+
+	if (page_idx != NULL)
+		*page_idx = lpm->page_count - 1;
+
 	return 0;
+}
+
+static inline int
+lpm_init(struct lpm *lpm, struct memory_context *memory_context) {
+	lpm->memory_context = ENCODE_ADDR(lpm, memory_context);
+	lpm->pages = ENCODE_ADDR(lpm, (lpm_page_t **)NULL);
+	lpm->page_count = 0;
+	return lpm_new_page(lpm, NULL);
+}
+
+static inline void
+lpm_free(struct lpm *lpm) {
+	struct memory_context *memory_context =
+		DECODE_ADDR(lpm, lpm->memory_context);
+	lpm_page_t **pages = DECODE_ADDR(lpm, lpm->pages);
+	uint32_t chunk_count =
+		(lpm->page_count + LPM_CHUNK_SIZE - 1) / LPM_CHUNK_SIZE;
+
+	for (size_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
+		memory_bfree(
+			DECODE_ADDR(lpm, lpm->memory_context),
+			DECODE_ADDR(lpm, pages[chunk_idx]),
+			sizeof(lpm_page_t) * LPM_CHUNK_SIZE
+		);
+	}
+
+	memory_bfree(memory_context, pages, sizeof(lpm_page_t *) * chunk_count);
 }
 
 static inline int
@@ -93,7 +127,7 @@ lpm_check_range_lo(
 	memcpy(check, key, hop + 1);
 
 	memset(check + hop + 1, 0x00, key_size - hop - 1);
-	if (memcmp(check, from, key_size) < 0)
+	if (filter_key_cmp(key_size, check, from) < 0)
 		return -1;
 
 	return 0;
@@ -107,7 +141,7 @@ lpm_check_range_hi(
 	memcpy(check, key, hop + 1);
 
 	memset(check + hop + 1, 0xff, key_size - hop - 1);
-	if (memcmp(check, to, key_size) > 0)
+	if (filter_key_cmp(key_size, check, to) > 0)
 		return -1;
 
 	return 0;

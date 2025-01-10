@@ -5,6 +5,12 @@
 #include "dataplane/pipeline/pipeline.h"
 
 struct dataplane;
+struct dataplane_numa_node;
+
+struct dataplane_device_worker_config {
+	uint16_t core_id;
+	uint16_t numa_id;
+};
 
 struct worker_read_ctx {
 
@@ -30,6 +36,7 @@ struct worker_write_ctx {
 
 struct dataplane_worker {
 	struct dataplane *dataplane;
+	struct dataplane_numa_node *node;
 	struct dataplane_device *device;
 
 	pthread_t thread_id;
@@ -43,6 +50,8 @@ struct dataplane_worker {
 
 	struct worker_read_ctx read_ctx;
 	struct worker_write_ctx write_ctx;
+
+	struct packet_list pending;
 };
 
 void
@@ -53,5 +62,6 @@ dataplane_worker_init(
 	struct dataplane *dataplane,
 	struct dataplane_device *device,
 	struct dataplane_worker *worker,
-	int queue_id
+	int queue_id,
+	struct dataplane_device_worker_config *config
 );

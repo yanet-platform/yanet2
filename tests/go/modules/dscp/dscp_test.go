@@ -128,8 +128,9 @@ func TestDSCP(t *testing.T) {
 				pkt := mark(t, p.pkt, c.from)
 				t.Log("Origin packet", pkt)
 
-				m := dscpModuleConfig(prefixes, c.flag, c.mark)
-				result := dscpHandlePackets(&m, pkt)
+				memCtx := memCtxCreate()
+				m := dscpModuleConfig(prefixes, c.flag, c.mark, memCtx)
+				result := dscpHandlePackets(m, pkt)
 				require.NotEmpty(t, result.Output, "result.Output")
 
 				resultPkt := common.ParseEtherPacket(result.Output[0])

@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "range_collector.h"
-#include "registry.h"
-#include "value.h"
+#include "common/range_collector.h"
+#include "common/registry.h"
+#include "common/value.h"
 
 typedef int (*action_check_collect)(struct filter_action *action);
 
@@ -188,12 +188,14 @@ value_table_touch_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 
 static int
 merge_registry_values(
+	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table
 ) {
 	if (value_table_init(
 		    table,
+		    memory_context,
 		    value_registry_capacity(registry1),
 		    value_registry_capacity(registry2)
 	    )) {
@@ -237,12 +239,13 @@ value_table_collect_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 
 static int
 collect_registry_values(
+	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,
 	struct value_registry *registry
 ) {
-	if (value_registry_init(registry)) {
+	if (value_registry_init(registry, memory_context)) {
 		return -1;
 	}
 
@@ -267,16 +270,21 @@ collect_registry_values(
 
 static int
 merge_and_collect_registry(
+	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,
 	struct value_registry *registry
 ) {
-	if (merge_registry_values(registry1, registry2, table)) {
+	if (merge_registry_values(
+		    memory_context, registry1, registry2, table
+	    )) {
 		return -1;
 	}
 
-	if (collect_registry_values(registry1, registry2, table, registry)) {
+	if (collect_registry_values(
+		    memory_context, registry1, registry2, table, registry
+	    )) {
 		value_table_free(table);
 		return -1;
 	}
@@ -292,11 +300,14 @@ struct value_set_ctx {
 
 static int
 action_list_is_term(struct value_registry *registry, uint32_t range_idx) {
-	struct value_range *range = registry->ranges + range_idx;
+	struct value_range *range =
+		DECODE_ADDR(registry, registry->ranges) + range_idx;
 	if (range->count == 0)
 		return 0;
 
-	uint32_t action_id = registry->values[range->from + range->count - 1];
+	uint32_t action_id = DECODE_ADDR(
+		registry, registry->values
+	)[range->from + range->count - 1];
 	return !(action_id & ACTION_NON_TERMINATE);
 }
 
@@ -319,14 +330,20 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 			return -1;
 
 		struct value_range *copy_range =
-			set_ctx->registry->ranges + prev_value;
+			DECODE_ADDR(
+				set_ctx->registry, set_ctx->registry->ranges
+			) +
+			prev_value;
 
 		for (uint32_t ridx = copy_range->from;
 		     ridx < copy_range->from + copy_range->count;
 		     ++ridx) {
 			value_registry_collect(
 				set_ctx->registry,
-				set_ctx->registry->values[ridx]
+				DECODE_ADDR(
+					set_ctx->registry,
+					set_ctx->registry->values
+				)[ridx]
 			);
 		}
 
@@ -340,6 +357,7 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 
 static int
 set_registry_values(
+	struct memory_context *memory_context,
 	struct filter_action *actions,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
@@ -348,13 +366,14 @@ set_registry_values(
 ) {
 	if (value_table_init(
 		    table,
+		    memory_context,
 		    value_registry_capacity(registry1),
 		    value_registry_capacity(registry2)
 	    )) {
 		return -1;
 	}
 
-	if (value_registry_init(registry)) {
+	if (value_registry_init(registry, memory_context)) {
 		goto error_registry;
 	}
 
@@ -392,6 +411,7 @@ error_registry:
 
 static inline int
 collect_net4_values(
+	struct filter_compiler *compiler,
 	struct filter_action *actions,
 	uint32_t count,
 	action_check_collect check_collect,
@@ -401,7 +421,7 @@ collect_net4_values(
 ) {
 
 	struct range_collector collector;
-	if (range_collector_init(&collector))
+	if (range_collector_init(&collector, &compiler->memory_context))
 		goto error;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -424,12 +444,17 @@ collect_net4_values(
 				goto error_collector;
 		}
 	}
+	if (lpm_init(lpm, &compiler->memory_context)) {
+		goto error_lpm;
+	}
 	if (range_collector_collect(&collector, 4, lpm)) {
 		goto error_collector;
 	}
 
 	struct value_table table;
-	if (value_table_init(&table, 1, collector.count))
+	if (value_table_init(
+		    &table, &compiler->memory_context, 1, collector.count
+	    ))
 		goto error_vtab;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -451,7 +476,7 @@ collect_net4_values(
 	lpm4_remap(lpm, &table);
 	lpm4_compact(lpm);
 
-	if (value_registry_init(registry))
+	if (value_registry_init(registry, &compiler->memory_context))
 		goto error_reg;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -474,7 +499,9 @@ collect_net4_values(
 error_reg:
 	value_table_free(&table);
 error_collector:
-	range_collector_free(&collector);
+	range_collector_free(&collector, 4);
+error_lpm:
+	lpm_free(lpm);
 
 error_vtab:
 
@@ -484,6 +511,7 @@ error:
 
 static int
 collect_net6_values(
+	struct filter_compiler *compiler,
 	struct filter_action *actions,
 	uint32_t count,
 	action_check_collect check_collect,
@@ -494,7 +522,7 @@ collect_net6_values(
 ) {
 
 	struct range_collector collector;
-	if (range_collector_init(&collector))
+	if (range_collector_init(&collector, &compiler->memory_context))
 		goto error;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -521,12 +549,17 @@ collect_net6_values(
 				goto error_collector;
 		}
 	}
+	if (lpm_init(lpm, &compiler->memory_context)) {
+		goto error_lpm;
+	}
 	if (range_collector_collect(&collector, 8, lpm)) {
 		goto error_collector;
 	}
 
 	struct value_table table;
-	if (value_table_init(&table, 1, collector.count))
+	if (value_table_init(
+		    &table, &compiler->memory_context, 1, collector.count
+	    ))
 		goto error_vtab;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -548,7 +581,7 @@ collect_net6_values(
 	lpm8_remap(lpm, &table);
 	lpm8_compact(lpm);
 
-	if (value_registry_init(registry))
+	if (value_registry_init(registry, &compiler->memory_context))
 		goto error_reg;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -571,7 +604,9 @@ collect_net6_values(
 error_reg:
 	value_table_free(&table);
 error_collector:
-	range_collector_free(&collector);
+	range_collector_free(&collector, 8);
+error_lpm:
+	lpm_free(lpm);
 
 error_vtab:
 
@@ -607,6 +642,7 @@ get_port_range_dst(
 
 static inline int
 collect_port_values(
+	struct memory_context *memory_context,
 	struct filter_action *actions,
 	uint32_t count,
 	action_check_collect check_collect,
@@ -614,7 +650,7 @@ collect_port_values(
 	struct value_table *table,
 	struct value_registry *registry
 ) {
-	if (value_table_init(table, 1, 65536))
+	if (value_table_init(table, memory_context, 1, 65536))
 		return -1;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -642,7 +678,7 @@ collect_port_values(
 
 	value_table_compact(table);
 
-	if (value_registry_init(registry))
+	if (value_registry_init(registry, memory_context))
 		goto error_reg;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -678,11 +714,17 @@ error_reg:
 int
 filter_compiler_init(
 	struct filter_compiler *filter,
+	struct memory_context *memory_context,
 	struct filter_action *actions,
 	uint32_t count
 ) {
+	memory_context_init_from(
+		&filter->memory_context, memory_context, "filter"
+	);
+
 	struct value_registry src_net4_registry;
 	collect_net4_values(
+		filter,
 		actions,
 		count,
 		action_check_has_v4,
@@ -693,6 +735,7 @@ filter_compiler_init(
 
 	struct value_registry dst_net4_registry;
 	collect_net4_values(
+		filter,
 		actions,
 		count,
 		action_check_has_v4,
@@ -703,6 +746,7 @@ filter_compiler_init(
 
 	struct value_registry src_port4_registry;
 	collect_port_values(
+		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v4,
@@ -713,6 +757,7 @@ filter_compiler_init(
 
 	struct value_registry dst_port4_registry;
 	collect_port_values(
+		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v4,
@@ -723,6 +768,7 @@ filter_compiler_init(
 
 	struct value_registry transport_port4_registry;
 	merge_and_collect_registry(
+		&filter->memory_context,
 		&src_port4_registry,
 		&dst_port4_registry,
 		&filter->v4_lookups.transport_port,
@@ -731,6 +777,7 @@ filter_compiler_init(
 
 	struct value_registry net4_registry;
 	merge_and_collect_registry(
+		&filter->memory_context,
 		&src_net4_registry,
 		&dst_net4_registry,
 		&filter->v4_lookups.network,
@@ -738,6 +785,7 @@ filter_compiler_init(
 	);
 
 	set_registry_values(
+		&filter->memory_context,
 		actions,
 		&net4_registry,
 		&transport_port4_registry,
@@ -747,6 +795,7 @@ filter_compiler_init(
 
 	struct value_registry src_net6_hi_registry;
 	collect_net6_values(
+		filter,
 		actions,
 		count,
 		action_check_has_v6,
@@ -758,6 +807,7 @@ filter_compiler_init(
 
 	struct value_registry src_net6_lo_registry;
 	collect_net6_values(
+		filter,
 		actions,
 		count,
 		action_check_has_v6,
@@ -769,6 +819,7 @@ filter_compiler_init(
 
 	struct value_registry dst_net6_hi_registry;
 	collect_net6_values(
+		filter,
 		actions,
 		count,
 		action_check_has_v6,
@@ -780,6 +831,7 @@ filter_compiler_init(
 
 	struct value_registry dst_net6_lo_registry;
 	collect_net6_values(
+		filter,
 		actions,
 		count,
 		action_check_has_v6,
@@ -791,6 +843,7 @@ filter_compiler_init(
 
 	struct value_registry src_port6_registry;
 	collect_port_values(
+		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v6,
@@ -801,6 +854,7 @@ filter_compiler_init(
 
 	struct value_registry dst_port6_registry;
 	collect_port_values(
+		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v6,
@@ -811,6 +865,7 @@ filter_compiler_init(
 
 	struct value_registry net6_hi_registry;
 	merge_and_collect_registry(
+		&filter->memory_context,
 		&src_net6_hi_registry,
 		&dst_net6_hi_registry,
 		&filter->v6_lookups.network_hi,
@@ -819,6 +874,7 @@ filter_compiler_init(
 
 	struct value_registry net6_lo_registry;
 	merge_and_collect_registry(
+		&filter->memory_context,
 		&src_net6_lo_registry,
 		&dst_net6_lo_registry,
 		&filter->v6_lookups.network_lo,
@@ -827,6 +883,7 @@ filter_compiler_init(
 
 	struct value_registry transport_port6_registry;
 	merge_and_collect_registry(
+		&filter->memory_context,
 		&src_port6_registry,
 		&dst_port6_registry,
 		&filter->v6_lookups.transport_port,
@@ -835,6 +892,7 @@ filter_compiler_init(
 
 	struct value_registry net6_registry;
 	merge_and_collect_registry(
+		&filter->memory_context,
 		&net6_hi_registry,
 		&net6_lo_registry,
 		&filter->v6_lookups.network,
@@ -842,6 +900,7 @@ filter_compiler_init(
 	);
 
 	set_registry_values(
+		&filter->memory_context,
 		actions,
 		&net6_registry,
 		&transport_port6_registry,

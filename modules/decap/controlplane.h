@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "network.h"
+#include "common/network.h"
 
 struct decap_module_config {
 	uint32_t v4_prefix_count;

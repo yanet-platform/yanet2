@@ -6,7 +6,6 @@
 
 #include "worker.h"
 
-#include "dataplane/config/dataplane_registry.h"
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
 #include "dataplane/pipeline/pipeline.h"
@@ -16,12 +15,8 @@
 #include "memory.h"
 
 struct dataplane_numa_node {
-	struct block_allocator block_allocator;
-
-	struct dataplane_registry dataplane_registry;
-
-	struct pipeline *phy_pipeline;
-	struct pipeline *kernel_pipeline;
+	struct dp_config *dp_config;
+	struct cp_config *cp_config;
 };
 
 struct dataplane_config {};
@@ -34,12 +29,23 @@ struct dataplane {
 
 	struct dataplane_device *devices;
 	uint32_t device_count;
+
+	uint64_t read;
+	uint64_t write;
+	uint64_t drop;
 };
 
 int
 dataplane_init(
 	struct dataplane *dataplane,
 	const char *binary,
+
+	const char *storage,
+
+	size_t numa_count,
+	size_t dp_memory,
+	size_t cp_memory,
+
 	size_t device_count,
 	const char *const *devices
 );
@@ -59,9 +65,3 @@ void
 dataplane_drop_packets(
 	struct dataplane *dataplane, struct packet_list *packets
 );
-
-int
-dataplane_register_module(struct dataplane *dataplane, struct module *module);
-
-int
-dataplane_configure_module(struct dataplane *dataplane);

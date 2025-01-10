@@ -29,15 +29,19 @@ dpdk_init(
 	insert_eal_arg("%s", binary);
 
 	// FIXME use huge pages if configured
-	insert_eal_arg("--no-huge");
-	insert_eal_arg("-m 4096");
-
-	insert_eal_arg("--proc-type=primary");
+	//	insert_eal_arg("--proc-type=primary");
 
 	for (size_t port_idx = 0; port_idx < port_count; ++port_idx) {
 		insert_eal_arg("-a");
 		insert_eal_arg("%s", port_names[port_idx]);
 	}
+
+	insert_eal_arg("--no-huge");
+	insert_eal_arg("-m");
+	insert_eal_arg("16384");
+
+	insert_eal_arg("-c");
+	insert_eal_arg("0x3e2");
 
 	eal_argv[eal_argc] = NULL;
 

@@ -27,3 +27,22 @@ lib_forward_dp_dep = declare_dependency(
     ],
 )
 
+# controlplane dependecies
+cp_dependencies = dependencies
+cp_dependencies += lib_config_dp_dep
+
+cp_sources = files(
+  'controlplane.c',
+)
+
+lib_forward_cp = static_library(
+  'forward_cp',
+  cp_sources,
+  dependencies: cp_dependencies,
+  install: false,
+)
+
+lib_forward_cp_dep = declare_dependency(
+  link_with: lib_forward_cp,
+)
+

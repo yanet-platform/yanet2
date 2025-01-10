@@ -1,4 +1,5 @@
 #include "device.h"
+#include "dataplane.h"
 
 #include <pthread.h>
 
@@ -49,14 +50,11 @@ int
 dataplane_dpdk_port_init(
 	struct dataplane *dataplane,
 	struct dataplane_device *device,
-	uint32_t device_id,
 	const char *name,
-	uint16_t worker_count,
-	uint16_t numa_id
+	struct dataplane_device_config *config
 ) {
-	(void)numa_id;
 
-	device->device_id = device_id;
+	device->device_id = config->device_id;
 	device->worker_count = 0;
 
 	// FIXME handle errors
@@ -66,35 +64,47 @@ dataplane_dpdk_port_init(
 
 	struct rte_eth_conf port_conf;
 	memset(&port_conf, 0, sizeof(struct rte_eth_conf));
-	// FIXME: do not use constant here
-	port_conf.rxmode.max_lro_pkt_size = 8000;
+	port_conf.rxmode.max_lro_pkt_size = config->max_lro_packet_size;
+
+	if (config->rss_hash != 0) {
+		port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
+		port_conf.rx_adv_conf.rss_conf.rss_hf = config->rss_hash;
+	}
 
 	//	port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
 
 	// FIXME: copy paste from sock-dev init routine
 	if (rte_eth_dev_configure(
-		    device->port_id, worker_count, worker_count, &port_conf
+		    device->port_id,
+		    config->worker_count,
+		    config->worker_count,
+		    &port_conf
 	    )) {
 		return -1;
 	}
 
-	if (rte_eth_dev_set_mtu(device->port_id, 7500)) {
+	if (rte_eth_dev_set_mtu(device->port_id, config->mtu)) {
 		return -1;
 	}
 
+	rte_eth_stats_reset(device->port_id);
+	rte_eth_xstats_reset(device->port_id);
+
 	// FIXME handle errors
 	device->workers = (struct dataplane_worker *)malloc(
-		sizeof(struct dataplane_worker) * worker_count
+		sizeof(struct dataplane_worker) * config->worker_count
 	);
 
-	for (device->worker_count = 0; device->worker_count < worker_count;
+	for (device->worker_count = 0;
+	     device->worker_count < config->worker_count;
 	     ++device->worker_count) {
 		// FIXME: handle errors
 		dataplane_worker_init(
 			dataplane,
 			device,
 			device->workers + device->worker_count,
-			device->worker_count
+			device->worker_count,
+			config->workers + device->worker_count
 		);
 	}
 

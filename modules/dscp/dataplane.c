@@ -1,7 +1,9 @@
-#include "dataplane.h"
+#include "config.h"
 
 #include <rte_ether.h>
 #include <rte_ip.h>
+
+#include "dataplane/config/zone.h"
 
 #include "dataplane/module/module.h"
 #include "dataplane/packet/dscp.h"
@@ -53,13 +55,14 @@ dscp_handle(struct dscp_module_config *config, struct packet *packet) {
 
 void
 dscp_handle_packets(
-	struct module *module,
-	struct module_config *config,
+	struct dp_config *dp_config,
+	struct module_data *module_data,
 	struct packet_front *packet_front
 ) {
-	(void)module;
-	struct dscp_module_config *dscp_config =
-		container_of(config, struct dscp_module_config, config);
+	(void)dp_config;
+	struct dscp_module_config *dscp_config = container_of(
+		module_data, struct dscp_module_config, module_data
+	);
 
 	if (dscp_config->dscp.flag != DSCP_MARK_NEVER) {
 		struct packet *packet;
@@ -74,38 +77,6 @@ dscp_handle_packets(
 
 	return;
 }
-
-static int
-dscp_handle_configure(
-	struct module *module,
-	const void *config_data,
-	size_t config_data_size,
-	struct module_config **new_config
-) {
-
-	(void)module;
-
-	struct dscp_module_config *config = (struct dscp_module_config *)malloc(
-		sizeof(struct dscp_module_config)
-	);
-
-	uint8_t ip6min[16] = {0};
-	uint8_t ip6max[16] = {0};
-	memset(ip6max, 0xff, 16);
-	lpm_init(&config->lpm_v4);
-	lpm_init(&config->lpm_v6);
-	lpm_insert(&config->lpm_v4, 4, ip6min, ip6max, 1);
-	lpm_insert(&config->lpm_v6, 16, ip6min, ip6max, 1);
-
-	if (config_data_size != sizeof(struct dscp_config)) {
-		return -1;
-	}
-	config->dscp = *(struct dscp_config *)config_data;
-
-	*new_config = &config->config;
-
-	return 0;
-};
 
 struct dscp_module {
 	struct module module;
@@ -124,7 +95,6 @@ new_module_dscp() {
 		module->module.name, sizeof(module->module.name), "%s", "dscp"
 	);
 	module->module.handler = dscp_handle_packets;
-	module->module.config_handler = dscp_handle_configure;
 
 	return &module->module;
 }

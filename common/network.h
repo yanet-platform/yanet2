@@ -2,6 +2,10 @@
 
 #include <stdint.h>
 
+struct ether_addr {
+	uint8_t addr[6];
+};
+
 struct net6 {
 	uint64_t addr_hi;
 	uint64_t addr_lo;

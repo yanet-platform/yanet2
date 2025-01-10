@@ -68,9 +68,10 @@ func TestDecap_IPIP6(t *testing.T) {
 	prefixes := []netip.Prefix{
 		common.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
 	}
-	m := decapModuleConfig(prefixes)
+	memCtx := memCtxCreate()
+	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(&m, pkt)
+	result := decapHandlePackets(m, pkt)
 	require.NotEmpty(t, result.Output)
 	resultPkt := common.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
@@ -98,9 +99,10 @@ func TestDecap_IPIP(t *testing.T) {
 	prefixes := []netip.Prefix{
 		common.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
 	}
-	m := decapModuleConfig(prefixes)
+	memCtx := memCtxCreate()
+	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(&m, pkt)
+	result := decapHandlePackets(m, pkt)
 	require.NotEmpty(t, result.Output)
 	resultPkt := common.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
@@ -122,9 +124,10 @@ func TestDecap_IP6IP(t *testing.T) {
 	prefixes := []netip.Prefix{
 		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
-	m := decapModuleConfig(prefixes)
+	memCtx := memCtxCreate()
+	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(&m, pkt)
+	result := decapHandlePackets(m, pkt)
 	require.NotEmpty(t, result.Output)
 	resultPkt := common.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
@@ -157,9 +160,10 @@ func TestDecap_IP6IP6(t *testing.T) {
 	prefixes := []netip.Prefix{
 		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
-	m := decapModuleConfig(prefixes)
+	memCtx := memCtxCreate()
+	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(&m, pkt)
+	result := decapHandlePackets(m, pkt)
 	require.NotEmpty(t, result.Output)
 	resultPkt := common.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
@@ -183,9 +187,10 @@ func TestDecap_IP6IP_noVlan(t *testing.T) {
 	prefixes := []netip.Prefix{
 		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
-	m := decapModuleConfig(prefixes)
+	memCtx := memCtxCreate()
+	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(&m, pkt)
+	result := decapHandlePackets(m, pkt)
 	require.NotEmpty(t, result.Output)
 	resultPkt := common.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
@@ -345,9 +350,10 @@ func TestDecap_GRE(t *testing.T) {
 		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 		common.Unwrap(netip.ParsePrefix("1.2.3.4/24")),
 	}
-	m := decapModuleConfig(prefixes)
+	memCtx := memCtxCreate()
+	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(&m, input...)
+	result := decapHandlePackets(m, input...)
 	require.Equal(t, len(expected)-len(drop), len(result.Output), "output")
 	require.Equal(t, len(drop), len(result.Drop), "drop")
 
@@ -415,9 +421,10 @@ func TestDecap_Fragment_ipv4(t *testing.T) {
 	prefixes := []netip.Prefix{
 		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
-	m := decapModuleConfig(prefixes)
+	memCtx := memCtxCreate()
+	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(&m, input...)
+	result := decapHandlePackets(m, input...)
 	require.NotEmpty(t, result.Output)
 	for idx, expectedPkt := range expected {
 		t.Logf("Origin packet idx=%d\n%s", idx, input[idx])
@@ -474,9 +481,10 @@ func TestDecap_Fragment_ipv6(t *testing.T) {
 	prefixes := []netip.Prefix{
 		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
-	m := decapModuleConfig(prefixes)
+	memCtx := memCtxCreate()
+	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(&m, input...)
+	result := decapHandlePackets(m, input...)
 	if len(result.Output) > 0 {
 		t.Log("Unexpected packet", common.ParseEtherPacket(result.Output[0]))
 	}
