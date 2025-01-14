@@ -18,12 +18,12 @@ int sock_fd;
 
 int done = 0;
 
-struct __attribute__((__packed__)) packHeader {
+struct __attribute__((__packed__)) pack_header {
 	uint32_t data_length;
 };
 
 static int
-writeIovCount(int fd, struct iovec *iov, size_t count) {
+write_iov_count(int fd, struct iovec *iov, size_t count) {
 	while (count > 0) {
 		ssize_t written = writev(fd, iov, count);
 		if (written < 0) {
@@ -66,10 +66,10 @@ write_thread(void *arg) {
 	const u_char *data;
 	static u_char zeros[8192];
 
-	uint64_t packetsCount = 0;
+	uint64_t packets_count = 0;
 	while (pcap_next_ex(pcap, &header, &data) >= 0 && !done) {
 
-		struct packHeader hdr;
+		struct pack_header hdr;
 		hdr.data_length = htonl(header->len);
 
 		struct iovec iov[3];
@@ -87,11 +87,11 @@ write_thread(void *arg) {
 			iov_count = 3;
 		}
 
-		if (writeIovCount(sock_fd, iov, iov_count) < 0) {
+		if (write_iov_count(sock_fd, iov, iov_count) < 0) {
 			break;
 		}
 
-		packetsCount++;
+		packets_count++;
 	}
 
 	pcap_close(pcap);
@@ -103,7 +103,7 @@ write_thread(void *arg) {
 }
 
 int
-readData(int fd, u_char *buf, ssize_t len) {
+read_data(int fd, u_char *buf, ssize_t len) {
 	ssize_t ret = 0;
 	while (len > 0 && !done) {
 		ret = read(fd, buf, len);
@@ -128,9 +128,9 @@ readData(int fd, u_char *buf, ssize_t len) {
 }
 
 static int
-readPacket(int fd, struct pcap_pkthdr *header, u_char *data) {
-	struct packHeader hdr;
-	if (readData(fd, (u_char *)&hdr, sizeof(hdr))) {
+read_packet(int fd, struct pcap_pkthdr *header, u_char *data) {
+	struct pack_header hdr;
+	if (read_data(fd, (u_char *)&hdr, sizeof(hdr))) {
 		return -1;
 	}
 
@@ -140,7 +140,7 @@ readPacket(int fd, struct pcap_pkthdr *header, u_char *data) {
 		return -1;
 	}
 
-	if (readData(fd, data, hdr.data_length)) {
+	if (read_data(fd, data, hdr.data_length)) {
 		return -1;
 	}
 
@@ -157,14 +157,16 @@ read_thread(void *arg) {
 	struct pcap_dumper *dmp = pcap_dump_fopen(pcap, stdout);
 
 	u_char buffer[8192];
-	struct pcap_pkthdr tmp_pcap_packetHeader;
+	struct pcap_pkthdr tmp_pcap_packet_header;
 
 	for (; !done;) {
-		if (readPacket(sock_fd, &tmp_pcap_packetHeader, buffer)) {
+		if (read_packet(sock_fd, &tmp_pcap_packet_header, buffer)) {
 			break;
 		}
 
-		pcap_dump((unsigned char *)dmp, &tmp_pcap_packetHeader, buffer);
+		pcap_dump(
+			(unsigned char *)dmp, &tmp_pcap_packet_header, buffer
+		);
 	}
 
 	done = 1;
