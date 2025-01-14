@@ -66,7 +66,6 @@ write_thread(void *arg) {
 	const u_char *data;
 	static u_char zeros[8192];
 
-	uint64_t packets_count = 0;
 	while (pcap_next_ex(pcap, &header, &data) >= 0 && !done) {
 
 		struct pack_header hdr;
@@ -90,8 +89,6 @@ write_thread(void *arg) {
 		if (write_iov_count(sock_fd, iov, iov_count) < 0) {
 			break;
 		}
-
-		packets_count++;
 	}
 
 	pcap_close(pcap);
