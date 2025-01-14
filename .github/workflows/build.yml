@@ -1,6 +1,12 @@
 name: Build YANET
 
-on: push
+on:
+  push:
+    branches: ["main"]
+    paths: ["**.h", "**.c", "**/meson.build"]
+  pull_request:
+    branches: ["main"]
+    paths: ["**.h", "**.c", "**/meson.build"]
 
 jobs:
   build:
@@ -20,3 +26,23 @@ jobs:
       - run: |
           meson setup build -Dbuildtype=debug
           meson compile -C build
+      - uses: cpp-linter/cpp-linter-action@main
+        id: linter
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          database: build
+          style: file
+          # Use .clang-tidy config file.
+          tidy-checks: ''
+          version: 19
+          thread-comments: false
+          step-summary: true
+          tidy-review: false
+          format-review: false
+          files-changed-only: true
+          ignore: '.github|build'
+      - name: Check code style violation
+        if: steps.linter.outputs.clang-tidy-checks-failed > 0
+        run: exit 1
