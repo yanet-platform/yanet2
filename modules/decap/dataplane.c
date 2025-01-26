@@ -1,7 +1,5 @@
 #include "dataplane.h"
 
-#include "dataplane/pipeline/pipeline.h"
-
 #include "dataplane/packet/decap.h"
 
 #include "rte_ether.h"
@@ -11,11 +9,11 @@ static int
 decap_handle_v4(const struct lpm *lpm, struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	struct rte_ipv4_hdr *ipv4Header = rte_pktmbuf_mtod_offset(
+	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-	if (lpm_lookup(lpm, 4, (uint8_t *)&ipv4Header->dst_addr) !=
+	if (lpm_lookup(lpm, 4, (uint8_t *)&ipv4_hdr->dst_addr) !=
 	    LPM_VALUE_INVALID) {
 		return packet_decap(packet);
 	}
@@ -27,12 +25,13 @@ static int
 decap_handle_v6(const struct lpm *lpm, struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	struct rte_ipv6_hdr *ipv4Header = rte_pktmbuf_mtod_offset(
+	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	if (lpm_lookup(lpm, 16, (uint8_t *)&ipv4Header->dst_addr) !=
+	if (lpm_lookup(lpm, 16, (uint8_t *)&ipv6_hdr->dst_addr) !=
 	    LPM_VALUE_INVALID) {
+		// FIXME: preserve flowlabel
 		return packet_decap(packet);
 	}
 
@@ -46,6 +45,7 @@ decap_handle_packets(
 	struct packet_front *packet_front
 ) {
 	(void)module;
+
 	struct decap_module_config *decap_config =
 		container_of(config, struct decap_module_config, config);
 
@@ -67,6 +67,9 @@ decap_handle_packets(
 		if (result) {
 			packet_front_drop(packet_front, packet);
 		} else {
+			// FIXME: if packet is ipv4 then mark ipv4 dscp
+			// FIXME: if packet is ipv6 restore flowlabel
+
 			packet_front_output(packet_front, packet);
 		}
 	}
@@ -80,9 +83,6 @@ decap_handle_configure(
 	struct module_config **new_config
 ) {
 	(void)module;
-	(void)config_data;
-	(void)config_data_size;
-	(void)new_config;
 
 	struct decap_module_config *config = (struct decap_module_config *)
 		malloc(sizeof(struct decap_module_config));

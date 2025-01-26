@@ -100,6 +100,12 @@ packet_list_pop(struct packet_list *packets) {
 }
 
 int
+parse_ipv4_header(struct packet *packet, uint16_t *type, uint16_t *offset);
+
+int
+parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset);
+
+int
 parse_packet(struct packet *packet);
 
 static inline struct rte_mbuf *

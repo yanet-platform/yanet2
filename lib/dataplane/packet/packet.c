@@ -20,9 +20,9 @@ parse_ether_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 		return -1;
 	}
 
-	const struct rte_ether_hdr *etherHeader =
+	const struct rte_ether_hdr *ether_hdr =
 		rte_pktmbuf_mtod_offset(mbuf, struct rte_ether_hdr *, *offset);
-	*type = etherHeader->ether_type;
+	*type = ether_hdr->ether_type;
 	*offset += sizeof(struct rte_ether_hdr);
 	return 0;
 }
@@ -37,17 +37,17 @@ parse_vlan_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 		return -1;
 	}
 
-	const struct rte_vlan_hdr *vlanHeader =
+	const struct rte_vlan_hdr *vlan_hdr =
 		rte_pktmbuf_mtod_offset(mbuf, struct rte_vlan_hdr *, *offset);
 
-	packet->vlan = rte_be_to_cpu_16(vlanHeader->vlan_tci);
+	packet->vlan = rte_be_to_cpu_16(vlan_hdr->vlan_tci);
 
-	*type = vlanHeader->eth_proto;
+	*type = vlan_hdr->eth_proto;
 	*offset += sizeof(struct rte_vlan_hdr);
 	return 0;
 }
 
-static inline int
+inline int
 parse_ipv4_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
@@ -57,22 +57,22 @@ parse_ipv4_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 		return -1;
 	}
 
-	const struct rte_ipv4_hdr *ipv4Header =
+	const struct rte_ipv4_hdr *ipv4_hdr =
 		rte_pktmbuf_mtod_offset(mbuf, struct rte_ipv4_hdr *, *offset);
 
 	if (rte_pktmbuf_pkt_len(mbuf) <
-	    (uint32_t)*offset + rte_be_to_cpu_16(ipv4Header->total_length)) {
+	    (uint32_t)*offset + rte_be_to_cpu_16(ipv4_hdr->total_length)) {
 		*type = PACKET_HEADER_TYPE_UNKNOWN;
 		return -1;
 	}
 
-	if ((ipv4Header->version_ihl & 0x0F) < 0x05) {
+	if ((ipv4_hdr->version_ihl & 0x0F) < 0x05) {
 		*type = PACKET_HEADER_TYPE_UNKNOWN;
 		return -1;
 	}
 
-	if (rte_be_to_cpu_16(ipv4Header->total_length) <
-	    4 * (ipv4Header->version_ihl & 0x0F)) {
+	if (rte_be_to_cpu_16(ipv4_hdr->total_length) <
+	    4 * (ipv4_hdr->version_ihl & 0x0F)) {
 		*type = PACKET_HEADER_TYPE_UNKNOWN;
 		return -1;
 	}
@@ -80,13 +80,13 @@ parse_ipv4_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 	// FIXME: check if fragmented
 	// FIXME: process extensions
 
-	*type = ipv4Header->next_proto_id;
-	*offset += 4 * (ipv4Header->version_ihl & 0x0F);
+	*type = ipv4_hdr->next_proto_id;
+	*offset += 4 * (ipv4_hdr->version_ihl & 0x0F);
 
 	return 0;
 }
 
-static inline int
+inline int
 parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
@@ -96,12 +96,12 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 		return -1;
 	}
 
-	const struct rte_ipv6_hdr *ipv6Header =
+	const struct rte_ipv6_hdr *ipv6_hdr =
 		rte_pktmbuf_mtod_offset(mbuf, struct rte_ipv6_hdr *, *offset);
 
 	if (rte_pktmbuf_pkt_len(mbuf) <
 	    *offset + sizeof(struct rte_ipv6_hdr) +
-		    rte_be_to_cpu_16(ipv6Header->payload_len)) {
+		    rte_be_to_cpu_16(ipv6_hdr->payload_len)) {
 		*type = PACKET_HEADER_TYPE_UNKNOWN;
 		return -1;
 	}
@@ -109,8 +109,8 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 	// walk through extensions
 	*offset += sizeof(struct rte_ipv6_hdr);
 	uint16_t max_offset =
-		*offset + rte_be_to_cpu_16(ipv6Header->payload_len);
-	uint8_t ext_type = ipv6Header->proto;
+		*offset + rte_be_to_cpu_16(ipv6_hdr->payload_len);
+	uint8_t ext_type = ipv6_hdr->proto;
 	while (*offset < max_offset) {
 		if (ext_type == IPPROTO_HOPOPTS ||
 		    ext_type == IPPROTO_ROUTING ||
