@@ -1,0 +1,55 @@
+package gateway
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/siderolabs/grpc-proxy/proxy"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+
+	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+)
+
+type GatewayService struct {
+	ynpb.UnimplementedGatewayServer
+	registry *BackendRegistry
+	log      *zap.SugaredLogger
+}
+
+func NewGatewayService(registry *BackendRegistry, log *zap.SugaredLogger) *GatewayService {
+	return &GatewayService{
+		registry: registry,
+		log:      log,
+	}
+}
+
+func (m *GatewayService) Register(
+	ctx context.Context,
+	request *ynpb.RegisterRequest,
+) (*ynpb.RegisterResponse, error) {
+	m.log.Infof("registering backend %q on %q", request.GetName(), request.GetEndpoint())
+
+	conn, err := grpc.NewClient(
+		request.GetEndpoint(),
+		grpc.WithDefaultCallOptions(grpc.ForceCodecV2(proxy.Codec())),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gRPC client to backend: %w", err)
+	}
+
+	backend := &proxy.SingleBackend{
+		GetConn: func(ctx context.Context) (context.Context, *grpc.ClientConn, error) {
+			md, _ := metadata.FromIncomingContext(ctx)
+			outCtx := metadata.NewOutgoingContext(ctx, md.Copy())
+
+			return outCtx, conn, nil
+		},
+	}
+	m.registry.RegisterBackend(request.GetName(), backend)
+
+	return &ynpb.RegisterResponse{}, nil
+}

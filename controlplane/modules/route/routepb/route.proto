@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package routepb;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/route/routepb;routepb";
+
+service Route {
+	rpc InsertRoute(InsertRouteRequest) returns (InsertRouteResponse) {
+	}
+}
+
+message InsertRouteRequest {
+}
+
+message InsertRouteResponse {
+}

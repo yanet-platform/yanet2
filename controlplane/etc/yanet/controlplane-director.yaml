@@ -1,0 +1,9 @@
+logging:
+  level: debug
+gateway:
+  server:
+    endpoint: &gateway_endpoint "[::1]:8080"
+modules:
+  route:
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint

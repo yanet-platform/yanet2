@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
+
+service Gateway {
+	rpc Register(RegisterRequest) returns (RegisterResponse) {
+	}
+}
+
+message RegisterRequest {
+	string name = 1;
+	string endpoint = 2;
+}
+
+message RegisterResponse {
+}
