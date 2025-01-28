@@ -44,7 +44,6 @@
 *.pdb
 
 # Kernel Module Compile Results
-*.mod*
 *.cmd
 .tmp_versions/
 modules.order
@@ -84,3 +83,6 @@ target/
 # clangd
 .cache
 compile_commands.json
+
+### Build directory ###
+build/
