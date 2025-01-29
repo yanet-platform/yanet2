@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/pkg/gateway"
@@ -31,7 +32,7 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 type LoggingConfig struct {
-	Level string `yaml:"level"`
+	Level zapcore.Level `yaml:"level"`
 }
 
 type ModulesConfig struct {

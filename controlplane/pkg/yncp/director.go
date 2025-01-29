@@ -16,7 +16,38 @@ type Director struct {
 	log     *zap.SugaredLogger
 }
 
-func NewDirector(cfg *Config, log *zap.SugaredLogger) (*Director, error) {
+type options struct {
+	Log      *zap.SugaredLogger
+	LogLevel *zap.AtomicLevel
+}
+
+func newOptions() *options {
+	return &options{
+		Log: zap.NewNop().Sugar(),
+	}
+}
+
+type DirectorOption func(*options)
+
+func WithLog(log *zap.SugaredLogger) DirectorOption {
+	return func(o *options) {
+		o.Log = log
+	}
+}
+
+func WithAtomicLogLevel(level *zap.AtomicLevel) DirectorOption {
+	return func(o *options) {
+		o.LogLevel = level
+	}
+}
+
+func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
+	opts := newOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	log := opts.Log
 	log.Infof("initializing YANET controlplane ...")
 	log.Debugw("parsed config", zap.Any("config", cfg))
 
@@ -26,6 +57,7 @@ func NewDirector(cfg *Config, log *zap.SugaredLogger) (*Director, error) {
 			route.NewRouteModule(cfg.Modules.Route, log),
 		),
 		gateway.WithLog(log),
+		gateway.WithAtomicLogLevel(opts.LogLevel),
 	)
 
 	return &Director{

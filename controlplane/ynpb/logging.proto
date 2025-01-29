@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
+
+service Logging {
+	// UpdateLevel updates the current logging level.
+	rpc UpdateLevel(UpdateLevelRequest) returns (UpdateLevelResponse) {
+	}
+}
+
+message UpdateLevelRequest {
+	// Level is the new log level.
+	//
+	// One of: "debug", "info", "warn", "error".
+	string level = 1;
+}
+
+message UpdateLevelResponse {
+}

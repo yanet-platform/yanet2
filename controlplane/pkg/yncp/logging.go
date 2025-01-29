@@ -4,24 +4,18 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 // InitLogging initializes the logging subsystem.
-func InitLogging(cfg *LoggingConfig) (*zap.SugaredLogger, error) {
-	logLevel, err := zapcore.ParseLevel(cfg.Level)
+func InitLogging(cfg *LoggingConfig) (*zap.SugaredLogger, zap.AtomicLevel, error) {
+	config := zap.NewDevelopmentConfig()
+	config.Development = false
+	config.Level.SetLevel(cfg.Level)
+
+	logger, err := config.Build()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse logging level: %w", err)
+		return nil, zap.AtomicLevel{}, fmt.Errorf("failed to initialize logger: %w", err)
 	}
 
-	logCfg := zap.NewDevelopmentConfig()
-	logCfg.Development = false
-	logCfg.Level.SetLevel(logLevel)
-
-	logger, err := logCfg.Build()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize logger: %w", err)
-	}
-
-	return logger.Sugar(), nil
+	return logger.Sugar(), config.Level, nil
 }

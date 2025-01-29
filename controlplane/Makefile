@@ -3,9 +3,9 @@
 GO=/Users/esafronov/.ya/tools/v4/6608868508/bin/go
 PROTOC := protoc
 
-ynpb: ynpb/gateway.proto
+ynpb: ynpb/gateway.proto ynpb/logging.proto
 	@echo "+ $@"
-	$(PROTOC) -I ./ynpb --go_out=./$@ --go_opt=paths=source_relative --go-grpc_out=./$@ --go-grpc_opt=paths=source_relative $<
+	$(PROTOC) -I ./ynpb --go_out=./$@ --go_opt=paths=source_relative --go-grpc_out=./$@ --go-grpc_opt=paths=source_relative $^
 
 modules/route/routepb: modules/route/routepb/route.proto
 	@echo "+ $@"

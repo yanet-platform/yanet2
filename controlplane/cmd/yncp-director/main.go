@@ -7,14 +7,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/yanet-platform/yanet2/controlplane/modules/route/routepb"
 	"github.com/yanet-platform/yanet2/controlplane/pkg/yncp"
 )
 
@@ -59,13 +55,13 @@ func run(cmd Cmd) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	log, err := yncp.InitLogging(&cfg.Logging)
+	log, atomicLevel, err := yncp.InitLogging(&cfg.Logging)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logging: %w", err)
 	}
 	defer log.Sync()
 
-	director, err := yncp.NewDirector(cfg, log)
+	director, err := yncp.NewDirector(cfg, yncp.WithLog(log), yncp.WithAtomicLogLevel(&atomicLevel))
 	if err != nil {
 		return fmt.Errorf("failed to create director: %w", err)
 	}
@@ -79,21 +75,6 @@ func run(cmd Cmd) error {
 		err := WaitInterrupted(ctx)
 		log.Infof("caught signal: %v", err)
 		return err
-	})
-	wg.Go(func() error {
-		time.Sleep(1 * time.Second)
-		conn, err := grpc.NewClient("[::1]:8080", grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			return err
-		}
-		defer conn.Close()
-
-		r := routepb.NewRouteClient(conn)
-		if _, err := r.InsertRoute(ctx, &routepb.InsertRouteRequest{}); err != nil {
-			return err
-		}
-
-		return nil
 	})
 
 	return wg.Wait()

@@ -23,6 +23,7 @@ type Module interface {
 type gatewayOptions struct {
 	BuiltInModules []Module
 	Log            *zap.SugaredLogger
+	LogLevel       *zap.AtomicLevel
 }
 
 func newGatewayOptions() *gatewayOptions {
@@ -42,6 +43,12 @@ func WithBuiltInModule(module Module) GatewayOption {
 func WithLog(log *zap.SugaredLogger) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.Log = log
+	}
+}
+
+func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
+	return func(o *gatewayOptions) {
+		o.LogLevel = level
 	}
 }
 
@@ -84,10 +91,14 @@ func NewGateway(cfg *Config, options ...GatewayOption) *Gateway {
 		),
 	)
 
-	service := NewGatewayService(registry, opts.Log)
+	gatewayService := NewGatewayService(registry, opts.Log)
+	loggingService := NewLoggingService(opts.LogLevel, opts.Log)
 
-	ynpb.RegisterGatewayServer(server, service)
-	log.Infof("registered gateway service")
+	ynpb.RegisterGatewayServer(server, gatewayService)
+	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", gatewayService)))
+
+	ynpb.RegisterLoggingServer(server, loggingService)
+	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", loggingService)))
 
 	return &Gateway{
 		cfg:            cfg,
