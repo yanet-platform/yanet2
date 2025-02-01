@@ -80,3 +80,7 @@ target/
 
 ### IDE ###
 .vscode
+
+# clangd
+.cache
+compile_commands.json
