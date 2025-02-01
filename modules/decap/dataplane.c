@@ -38,7 +38,7 @@ decap_handle_v6(const struct lpm *lpm, struct packet *packet) {
 	return 0;
 }
 
-static void
+void
 decap_handle_packets(
 	struct module *module,
 	struct module_config *config,

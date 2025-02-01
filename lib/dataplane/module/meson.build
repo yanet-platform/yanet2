@@ -6,6 +6,7 @@ sources = files(
   'module.c',
   'module_registry.c',
   'module_config_registry.c',
+  'testing.c',
 )
 
 lib_module_dp = static_library(

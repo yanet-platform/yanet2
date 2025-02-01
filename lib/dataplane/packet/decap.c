@@ -23,18 +23,12 @@
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// https://datatracker.ietf.org/doc/html/rfc2890#section-2
 static int
-packet_skip_gre(
-	struct packet *packet,
-	uint16_t *type,
-	uint16_t *offset,
-	uint16_t *next_proto
-) {
+packet_skip_gre(struct packet *packet, uint16_t *type, uint16_t *offset) {
 	struct rte_gre_hdr *gre_hdr = rte_pktmbuf_mtod_offset(
 		packet->mbuf,
 		struct rte_gre_hdr *,
 		packet->transport_header.offset
 	);
-	*next_proto = gre_hdr->proto;
 	if (gre_hdr->proto == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 		*type = IPPROTO_IPIP;
 	} else if (gre_hdr->proto == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
@@ -50,25 +44,22 @@ int
 packet_decap(struct packet *packet) {
 	uint16_t next_transport = packet->transport_header.type;
 	uint16_t next_offset = packet->transport_header.offset;
-	uint16_t next_ether_type;
+	uint16_t next_ether_type = packet->network_header.type;
 
 	if (next_transport == IPPROTO_GRE) {
-		if (packet_skip_gre(
-			    packet,
-			    &next_transport,
-			    &next_offset,
-			    &next_ether_type
-		    )) {
+		if (packet_skip_gre(packet, &next_transport, &next_offset)) {
 			return -1;
 		}
 	}
 	uint16_t tun_hdrs_size = next_offset - packet->network_header.offset;
 
 	if (next_transport == IPPROTO_IPIP) {
+		next_ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 		if (parse_ipv4_header(packet, &next_transport, &next_offset)) {
 			return -1;
 		}
 	} else if (next_transport == IPPROTO_IPV6) {
+		next_ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
 		if (parse_ipv6_header(packet, &next_transport, &next_offset)) {
 			return -1;
 		}

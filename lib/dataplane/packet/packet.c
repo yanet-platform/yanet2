@@ -108,8 +108,7 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 
 	// walk through extensions
 	*offset += sizeof(struct rte_ipv6_hdr);
-	uint16_t max_offset =
-		*offset + rte_be_to_cpu_16(ipv6_hdr->payload_len);
+	uint16_t max_offset = *offset + rte_be_to_cpu_16(ipv6_hdr->payload_len);
 	uint8_t ext_type = ipv6_hdr->proto;
 	while (*offset < max_offset) {
 		if (ext_type == IPPROTO_HOPOPTS ||
