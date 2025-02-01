@@ -19,6 +19,10 @@
  *  - generation may be increased at any time
  */
 
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+
 #define REMAP_TABLE_CHUNK_SIZE 65536
 #define REMAP_TABLE_INVALID 0xffffffff
 
@@ -68,7 +72,7 @@ remap_table_init(struct remap_table *table, uint32_t capacity) {
 	return 0;
 }
 
-static void
+static inline void
 remap_table_free(struct remap_table *table) {
 	for (uint32_t chunk_idx = 0;
 	     chunk_idx < table->count / REMAP_TABLE_CHUNK_SIZE;

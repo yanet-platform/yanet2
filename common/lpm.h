@@ -32,8 +32,9 @@ struct lpm {
 
 static inline lpm_page_t *
 lpm_page(const struct lpm *lpm, uint32_t page_idx) {
-	return lpm->pages[page_idx / LPM_CHUNK_SIZE] +
-	       page_idx % LPM_CHUNK_SIZE;
+	size_t chunk_idx = page_idx / LPM_CHUNK_SIZE;
+	size_t page_offset = page_idx % LPM_CHUNK_SIZE;
+	return lpm->pages[chunk_idx] + page_offset;
 }
 
 static inline int
@@ -41,7 +42,8 @@ lpm_init(struct lpm *lpm) {
 	lpm->pages = (lpm_page_t **)malloc(sizeof(lpm_page_t *) * 1);
 	if (lpm->pages == NULL)
 		return -1;
-	lpm->pages[0] = (lpm_page_t *)malloc(sizeof(lpm_page_t) * 16);
+	lpm->pages[0] =
+		(lpm_page_t *)malloc(sizeof(lpm_page_t) * LPM_CHUNK_SIZE);
 	if (lpm->pages[0] == NULL)
 		return -1;
 	lpm->page_count = 1;
@@ -51,8 +53,8 @@ lpm_init(struct lpm *lpm) {
 
 static inline void
 lpm_free(struct lpm *lpm) {
-	for (size_t chunk_idx = 0; chunk_idx < lpm->page_count / LPM_CHUNK_SIZE;
-	     ++chunk_idx)
+	size_t chunks = lpm->page_count / LPM_CHUNK_SIZE;
+	for (size_t chunk_idx = 0; chunk_idx < chunks; ++chunk_idx)
 		free(lpm->pages[chunk_idx]);
 
 	free(lpm->pages);
@@ -60,8 +62,10 @@ lpm_free(struct lpm *lpm) {
 
 static inline int
 lpm_new_page(struct lpm *lpm, uint32_t *page_idx) {
-	if (!(lpm->page_count % LPM_CHUNK_SIZE)) {
-		uint32_t new_chunk_count = lpm->page_count / LPM_CHUNK_SIZE + 1;
+	int first_page_in_chunk = (lpm->page_count % LPM_CHUNK_SIZE) == 0;
+	if (first_page_in_chunk) {
+		uint32_t new_chunk_count =
+			(lpm->page_count / LPM_CHUNK_SIZE) + 1;
 		lpm_page_t **pages = (lpm_page_t **)realloc(
 			lpm->pages, sizeof(lpm_page_t *) * new_chunk_count
 		);
@@ -72,12 +76,12 @@ lpm_new_page(struct lpm *lpm, uint32_t *page_idx) {
 		lpm->pages[new_chunk_count - 1] = (lpm_page_t *)malloc(
 			sizeof(lpm_page_t) * LPM_CHUNK_SIZE
 		);
-		if (lpm->pages[new_chunk_count - 1])
+		if (lpm->pages[new_chunk_count - 1] == NULL)
 			return -1;
 	}
 	*page_idx = lpm->page_count;
 	memset(lpm_page(lpm, lpm->page_count), 0xff, sizeof(lpm_page_t));
-	++(lpm->page_count);
+	lpm->page_count += 1;
 	return 0;
 }
 
