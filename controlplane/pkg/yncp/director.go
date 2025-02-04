@@ -10,12 +10,6 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/pkg/route"
 )
 
-type Director struct {
-	cfg     *Config
-	gateway *gateway.Gateway
-	log     *zap.SugaredLogger
-}
-
 type options struct {
 	Log      *zap.SugaredLogger
 	LogLevel *zap.AtomicLevel
@@ -27,20 +21,40 @@ func newOptions() *options {
 	}
 }
 
+// DirectorOption is a function that configures the YANET controlplane
+// director.
 type DirectorOption func(*options)
 
+// WithLog sets the logger for the YANET controlplane director.
 func WithLog(log *zap.SugaredLogger) DirectorOption {
 	return func(o *options) {
 		o.Log = log
 	}
 }
 
+// WithAtomicLogLevel sets the atomic logger level for the YANET controlplane
+// director.
+//
+// This level can be changed at runtime.
 func WithAtomicLogLevel(level *zap.AtomicLevel) DirectorOption {
 	return func(o *options) {
 		o.LogLevel = level
 	}
 }
 
+// Director is the YANET controlplane director.
+//
+// This is an entry point for the YANET controlplane. Its main purposes is to
+// initialize basic configuration, set up the Gateway API, sidecar gRPC
+// services and run them.
+type Director struct {
+	cfg     *Config
+	gateway *gateway.Gateway
+	log     *zap.SugaredLogger
+}
+
+// NewDirector creates a new YANET controlplane director using specified
+// config.
 func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	opts := newOptions()
 	for _, o := range options {

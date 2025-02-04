@@ -32,26 +32,43 @@ func newGatewayOptions() *gatewayOptions {
 	}
 }
 
+// GatewayOption is a function that configures the Gateway.
 type GatewayOption func(*gatewayOptions)
 
+// WithBuiltInModule adds a built-in module to the Gateway.
 func WithBuiltInModule(module Module) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.BuiltInModules = append(o.BuiltInModules, module)
 	}
 }
 
+// WithLog sets the logger for the Gateway.
 func WithLog(log *zap.SugaredLogger) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.Log = log
 	}
 }
 
+// WithAtomicLogLevel sets the atomic logger level for the Gateway.
+//
+// This level can be changed at runtime.
 func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.LogLevel = level
 	}
 }
 
+// Gateway is the Gateway API to YANET modules.
+//
+// It is a gRPC server that acts as a proxy for each YANET module's
+// configuration and monitoring.
+//
+// Such abstraction is required for the following reasons:
+// - Unify distinct modules under a single entry point.
+// - Serialize requests, because of possible conflicting configurations.
+// - Implement unified access control.
+//
+// Think of it as gRPC middleware if it were a single process.
 type Gateway struct {
 	cfg            *Config
 	server         *grpc.Server
@@ -60,6 +77,7 @@ type Gateway struct {
 	log            *zap.SugaredLogger
 }
 
+// NewGateway creates a new Gateway API.
 func NewGateway(cfg *Config, options ...GatewayOption) *Gateway {
 	opts := newGatewayOptions()
 	for _, o := range options {
@@ -79,7 +97,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) *Gateway {
 			return proxy.One2One, nil, status.Errorf(codes.NotFound, "unknown service")
 		}
 
-		log.Debugf("proxying request %q", fullMethodName)
+		log.Debugf("proxying request %q to %q", fullMethodName, service)
 
 		return proxy.One2One, []proxy.Backend{backend}, nil
 	}
@@ -109,6 +127,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) *Gateway {
 	}
 }
 
+// Run runs the gateway API until the specified context is canceled.
 func (m *Gateway) Run(ctx context.Context) error {
 	m.log.Infof("starting gRPC gateway")
 

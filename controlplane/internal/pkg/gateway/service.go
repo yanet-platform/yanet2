@@ -13,12 +13,14 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
+// GatewayService is the gRPC service for the Gateway API.
 type GatewayService struct {
 	ynpb.UnimplementedGatewayServer
 	registry *BackendRegistry
 	log      *zap.SugaredLogger
 }
 
+// NewGatewayService creates a new GatewayService.
 func NewGatewayService(registry *BackendRegistry, log *zap.SugaredLogger) *GatewayService {
 	return &GatewayService{
 		registry: registry,
@@ -26,6 +28,7 @@ func NewGatewayService(registry *BackendRegistry, log *zap.SugaredLogger) *Gatew
 	}
 }
 
+// Register registers a new module in the Gateway API.
 func (m *GatewayService) Register(
 	ctx context.Context,
 	request *ynpb.RegisterRequest,

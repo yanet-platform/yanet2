@@ -19,14 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Logging_UpdateLevel_FullMethodName = "/Logging/UpdateLevel"
+	Logging_UpdateLevel_FullMethodName = "/ynpb.Logging/UpdateLevel"
 )
 
 // LoggingClient is the client API for Logging service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LoggingClient interface {
-	// UpdateLevel updates the current logging level.
+	// UpdateLevel updates the minimum logging level.
 	UpdateLevel(ctx context.Context, in *UpdateLevelRequest, opts ...grpc.CallOption) (*UpdateLevelResponse, error)
 }
 
@@ -52,7 +52,7 @@ func (c *loggingClient) UpdateLevel(ctx context.Context, in *UpdateLevelRequest,
 // All implementations must embed UnimplementedLoggingServer
 // for forward compatibility.
 type LoggingServer interface {
-	// UpdateLevel updates the current logging level.
+	// UpdateLevel updates the minimum logging level.
 	UpdateLevel(context.Context, *UpdateLevelRequest) (*UpdateLevelResponse, error)
 	mustEmbedUnimplementedLoggingServer()
 }
@@ -110,7 +110,7 @@ func _Logging_UpdateLevel_Handler(srv interface{}, ctx context.Context, dec func
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Logging_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "Logging",
+	ServiceName: "ynpb.Logging",
 	HandlerType: (*LoggingServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

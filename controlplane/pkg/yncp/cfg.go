@@ -12,11 +12,15 @@ import (
 )
 
 type Config struct {
-	Logging LoggingConfig   `json:"logging" yaml:"logging"`
+	// Logging configuration.
+	Logging LoggingConfig `json:"logging" yaml:"logging"`
+	// Gateway configuration.
 	Gateway *gateway.Config `json:"gateway" yaml:"gateway"`
-	Modules ModulesConfig   `json:"modules" yaml:"modules"`
+	// Modules configuration.
+	Modules ModulesConfig `json:"modules" yaml:"modules"`
 }
 
+// LoadConfig loads the configuration from the given path.
 func LoadConfig(path string) (*Config, error) {
 	buf, err := os.ReadFile(path)
 	if err != nil {
@@ -31,10 +35,14 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// LoggingConfig is the configuration for the logging subsystem.
 type LoggingConfig struct {
+	// Level is the logging level.
 	Level zapcore.Level `yaml:"level"`
 }
 
+// ModulesConfig describes built-in modules.
 type ModulesConfig struct {
+	// Route is the configuration for the route module.
 	Route *route.Config `yaml:"route"`
 }

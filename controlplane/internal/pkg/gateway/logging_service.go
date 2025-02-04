@@ -12,6 +12,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
+// LoggingService is a service that exposes logging configuration at runtime.
 type LoggingService struct {
 	ynpb.UnimplementedLoggingServer
 
@@ -19,6 +20,7 @@ type LoggingService struct {
 	log  *zap.SugaredLogger
 }
 
+// NewLoggingService creates a new LoggingService.
 func NewLoggingService(atom *zap.AtomicLevel, log *zap.SugaredLogger) *LoggingService {
 	return &LoggingService{
 		atom: atom,
@@ -26,6 +28,7 @@ func NewLoggingService(atom *zap.AtomicLevel, log *zap.SugaredLogger) *LoggingSe
 	}
 }
 
+// UpdateLevel updates the minimum logging level.
 func (m *LoggingService) UpdateLevel(
 	ctx context.Context,
 	req *ynpb.UpdateLevelRequest,
@@ -40,7 +43,7 @@ func (m *LoggingService) UpdateLevel(
 	}
 
 	m.atom.SetLevel(level)
-	m.log.Infof("successfully updated log level to %q", level)
+	m.log.Infof("updated log level to %q", level)
 
 	return &ynpb.UpdateLevelResponse{}, nil
 }

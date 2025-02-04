@@ -19,13 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Gateway_Register_FullMethodName = "/Gateway/Register"
+	Gateway_Register_FullMethodName = "/ynpb.Gateway/Register"
 )
 
 // GatewayClient is the client API for Gateway service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Gateway API service.
 type GatewayClient interface {
+	// Register registers a new module.
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
 }
 
@@ -50,7 +53,10 @@ func (c *gatewayClient) Register(ctx context.Context, in *RegisterRequest, opts 
 // GatewayServer is the server API for Gateway service.
 // All implementations must embed UnimplementedGatewayServer
 // for forward compatibility.
+//
+// Gateway API service.
 type GatewayServer interface {
+	// Register registers a new module.
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
 	mustEmbedUnimplementedGatewayServer()
 }
@@ -108,7 +114,7 @@ func _Gateway_Register_Handler(srv interface{}, ctx context.Context, dec func(in
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Gateway_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "Gateway",
+	ServiceName: "ynpb.Gateway",
 	HandlerType: (*GatewayServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
