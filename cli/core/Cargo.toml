@@ -1,5 +1,5 @@
 [package]
-name = "ync"
+name = "yanet-cli"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -9,3 +9,4 @@ rust-version = "1.84"
 [dependencies]
 log = "0.4"
 simple_logger = { version = "5", features = ["timestamps"] }
+colored = "3"

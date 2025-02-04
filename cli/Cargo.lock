@@ -276,6 +276,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "colored"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
+dependencies = [
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "deranged"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -908,7 +917,7 @@ version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8c5dfa5e08767553704aa0ffd9d9794d527103c736aba9854773851fd7497eb"
 dependencies = [
- "colored",
+ "colored 2.2.0",
  "log",
  "time",
  "windows-sys 0.48.0",
@@ -1363,6 +1372,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
+name = "yanet-cli"
+version = "0.1.0"
+dependencies = [
+ "colored 3.0.0",
+ "log",
+ "simple_logger",
+]
+
+[[package]]
 name = "yanet-cli-route"
 version = "0.1.0"
 dependencies = [
@@ -1373,15 +1391,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tonic-build",
- "ync",
-]
-
-[[package]]
-name = "ync"
-version = "0.1.0"
-dependencies = [
- "log",
- "simple_logger",
+ "yanet-cli",
 ]
 
 [[package]]
