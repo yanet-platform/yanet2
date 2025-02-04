@@ -11,6 +11,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func Unwrap[T any](t T, e error) T {
+	if e != nil {
+		panic(e)
+	}
+	return t
+}
+
+func PacketsToPaylod(packets []gopacket.Packet) [][]byte {
+	payload := make([][]byte, 0, len(packets))
+	for _, p := range packets {
+		payload = append(payload, p.Data())
+	}
+	return payload
+}
+
 func LayersToPacket(t *testing.T, lyrs ...gopacket.SerializableLayer) gopacket.Packet {
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
@@ -20,11 +35,13 @@ func LayersToPacket(t *testing.T, lyrs ...gopacket.SerializableLayer) gopacket.P
 
 	require.NoError(t, gopacket.SerializeLayers(buf, opts, lyrs...))
 
-	return gopacket.NewPacket(
+	pkt := gopacket.NewPacket(
 		buf.Bytes(),
 		layers.LayerTypeEthernet,
 		gopacket.Default,
 	)
+	require.Empty(t, pkt.ErrorLayer(), "%#+v", lyrs)
+	return pkt
 
 }
 

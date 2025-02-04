@@ -80,15 +80,15 @@ func BuildLPMs(prefixes []netip.Prefix) (C.struct_lpm, C.struct_lpm) {
 		if prefix.Addr().Is4() {
 			ipv4 := prefix.Addr().As4()
 			mask := ToBroadCast(prefix).As4()
-			up4 := (*C.uint8_t)(unsafe.Pointer(&ipv4[0]))
-			upM := (*C.uint8_t)(unsafe.Pointer(&mask[0]))
-			C.lpm_insert(&lpm4, 4, up4, upM, 1)
+			from := (*C.uint8_t)(unsafe.Pointer(&ipv4[0]))
+			to := (*C.uint8_t)(unsafe.Pointer(&mask[0]))
+			C.lpm_insert(&lpm4, 4, from, to, 1)
 		} else {
 			ipv6 := prefix.Addr().As16()
 			mask := ToBroadCast(prefix).As16()
-			up6 := (*C.uint8_t)(unsafe.Pointer(&ipv6[0]))
-			upM := (*C.uint8_t)(unsafe.Pointer(&mask[0]))
-			C.lpm_insert(&lpm6, 16, up6, upM, 1)
+			from := (*C.uint8_t)(unsafe.Pointer(&ipv6[0]))
+			to := (*C.uint8_t)(unsafe.Pointer(&mask[0]))
+			C.lpm_insert(&lpm6, 16, from, to, 1)
 		}
 	}
 	return lpm4, lpm6

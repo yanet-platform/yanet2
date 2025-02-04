@@ -43,6 +43,8 @@ struct packet {
 	uint16_t flags;
 	uint16_t vlan;
 
+	uint32_t flow_label; // 12 unused bits + 20 bits of the label
+
 	struct network_header network_header;
 	struct transport_header transport_header;
 };

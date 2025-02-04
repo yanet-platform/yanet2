@@ -20,6 +20,8 @@ import (
 	"unsafe"
 
 	"tests/common"
+
+	"github.com/gopacket/gopacket"
 )
 
 func decapModuleConfig(prefixes []netip.Prefix) C.struct_decap_module_config {
@@ -33,7 +35,8 @@ func decapModuleConfig(prefixes []netip.Prefix) C.struct_decap_module_config {
 	return m
 }
 
-func decapHandlePackets(mc *C.struct_decap_module_config, payload [][]byte) common.PacketFrontResult {
+func decapHandlePackets(mc *C.struct_decap_module_config, packets ...gopacket.Packet) common.PacketFrontResult {
+	payload := common.PacketsToPaylod(packets)
 	pf := common.PacketFrontFromPayload(payload)
 	common.ParsePackets(pf)
 	C.decap_handle_packets(nil, &mc.config, (*C.struct_packet_front)(unsafe.Pointer(pf)))

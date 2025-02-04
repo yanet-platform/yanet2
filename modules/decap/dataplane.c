@@ -12,6 +12,9 @@ decap_handle_v4(const struct lpm *lpm, struct packet *packet) {
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
+	if (ipv4_hdr->fragment_offset != 0) {
+		return -1; // Fragmented packet
+	}
 
 	if (lpm_lookup(lpm, 4, (uint8_t *)&ipv4_hdr->dst_addr) !=
 	    LPM_VALUE_INVALID) {
@@ -28,10 +31,14 @@ decap_handle_v6(const struct lpm *lpm, struct packet *packet) {
 	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
+	if (ipv6_hdr->proto == IPPROTO_FRAGMENT) {
+		return -1; // Fragmented packet
+	}
 
 	if (lpm_lookup(lpm, 16, (uint8_t *)&ipv6_hdr->dst_addr) !=
 	    LPM_VALUE_INVALID) {
-		// FIXME: preserve flowlabel
+		packet->flow_label =
+			rte_be_to_cpu_32(ipv6_hdr->vtc_flow) & 0x000FFFFF;
 		return packet_decap(packet);
 	}
 
@@ -63,13 +70,9 @@ decap_handle_packets(
 				&decap_config->prefixes6, packet
 			);
 		}
-
 		if (result) {
 			packet_front_drop(packet_front, packet);
 		} else {
-			// FIXME: if packet is ipv4 then mark ipv4 dscp
-			// FIXME: if packet is ipv6 restore flowlabel
-
 			packet_front_output(packet_front, packet);
 		}
 	}

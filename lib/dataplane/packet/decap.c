@@ -10,7 +10,7 @@
 	(1 + __builtin_popcount((byte0) & 0xb0)) << 2
 
 /// GRE Header:
-///                      1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 3 3
+///                      1                   2                   3
 ///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 /// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 /// |C| |K|S| Reserved0       | Ver |         Protocol Type         |
@@ -29,6 +29,12 @@ packet_skip_gre(struct packet *packet, uint16_t *type, uint16_t *offset) {
 		struct rte_gre_hdr *,
 		packet->transport_header.offset
 	);
+
+	if (((*(uint32_t *)gre_hdr) & 0x0000FF4F) != 0x00000000) {
+		// If any reserved bits or a version is set
+		return -1;
+	}
+
 	if (gre_hdr->proto == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 		*type = IPPROTO_IPIP;
 	} else if (gre_hdr->proto == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
@@ -72,14 +78,12 @@ packet_decap(struct packet *packet) {
 
 	// Remove tunnel headers
 	uint8_t *prev_start = rte_pktmbuf_mtod(mbuf, uint8_t *);
-
-	// FIXME: separate strip header function
-	// FIXME: handle rte_pktmbuf_adj() == NULL
-	/* Copy ether header over rather than moving whole packet */
-	memmove(rte_pktmbuf_adj(mbuf, tun_hdrs_size),
-		prev_start,
-		// size of eth_hdr plus optional vlans
-		packet->network_header.offset);
+	uint8_t *new_start = (uint8_t *)rte_pktmbuf_adj(mbuf, tun_hdrs_size);
+	if (unlikely(new_start == NULL)) {
+		return -1;
+	}
+	/* Copy ether header (and vlans) over rather than moving whole packet */
+	memmove(new_start, prev_start, packet->network_header.offset);
 
 	// Update ether type
 	uint16_t *prev_eth_type = rte_pktmbuf_mtod_offset(
@@ -88,7 +92,7 @@ packet_decap(struct packet *packet) {
 		packet->network_header.offset - sizeof(uint16_t)
 	);
 	*prev_eth_type = next_ether_type;
-	// and transport_header meta
+	// And transport_header meta
 	packet->transport_header.type = next_transport;
 	packet->transport_header.offset = next_offset - tun_hdrs_size;
 
