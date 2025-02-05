@@ -9,7 +9,7 @@ use std::{
 
 use colored::{ColoredString, Colorize};
 
-const ERROR: LazyLock<ColoredString> = LazyLock::new(|| "error".bold().bright_red());
+static ERROR: LazyLock<ColoredString> = LazyLock::new(|| "error".bold().bright_red());
 
 fn main() {
     let mut args = std::env::args();

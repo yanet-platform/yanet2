@@ -2,7 +2,7 @@
 
 resolver = "2"
 
-members = ["core", "modules/route"]
+members = ["core", "modules/common", "modules/route"]
 
 [profile.release]
 panic = "abort"
