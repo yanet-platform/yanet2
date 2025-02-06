@@ -3,7 +3,6 @@ package decap_test
 //#cgo CFLAGS: -I../../../.. -I../../../../lib -I../../../../common
 //#cgo LDFLAGS: -L../../../../build/modules/decap -ldecap_dp
 //#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
-//#cgo LDFLAGS: -L../../../../build/lib/dataplane/module -lmodule
 /*
 #include "modules/decap/dataplane.h"
 

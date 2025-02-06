@@ -36,6 +36,7 @@ pipeline_configure(
 		return -1;
 
 	stpncpy(new_pipeline->name, name, PIPELINE_NAME_LEN);
+	new_pipeline->name[PIPELINE_NAME_LEN - 1] = '\0';
 
 	for (uint32_t idx = 0; idx < module_config_count; ++idx) {
 		new_pipeline->module_configs[idx] = module_configs[idx];

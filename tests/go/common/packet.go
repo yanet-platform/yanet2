@@ -2,7 +2,7 @@ package common
 
 //#cgo CFLAGS: -I../../.. -I../../../lib -I../../../common
 //#cgo LDFLAGS: -L../../../build/lib/dataplane/packet -lpacket
-//#cgo LDFLAGS: -L../../../build/lib/dataplane/module -lmodule
+//#cgo LDFLAGS: -L../../../build/lib/dataplane/module -ltesting_module
 //#include "dataplane/packet/packet.h"
 //#include "dataplane/module/testing.h"
 //#include "lpm.h"

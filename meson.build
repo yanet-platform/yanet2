@@ -35,3 +35,4 @@ subdir('controlplane')
 
 subdir('sock-send')
 
+subdir('tests')
