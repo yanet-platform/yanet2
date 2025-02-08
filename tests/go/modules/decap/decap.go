@@ -36,8 +36,10 @@ func decapModuleConfig(prefixes []netip.Prefix) C.struct_decap_module_config {
 
 func decapHandlePackets(mc *C.struct_decap_module_config, packets ...gopacket.Packet) common.PacketFrontResult {
 	payload := common.PacketsToPaylod(packets)
-	pf := common.PacketFrontFromPayload(payload)
+	pinner, pf := common.PacketFrontFromPayload(payload)
 	common.ParsePackets(pf)
 	C.decap_handle_packets(nil, &mc.config, (*C.struct_packet_front)(unsafe.Pointer(pf)))
-	return common.PacketFrontToPayload(pf)
+	result := common.PacketFrontToPayload(pf)
+	pinner.Unpin()
+	return result
 }

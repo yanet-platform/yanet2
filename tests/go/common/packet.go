@@ -9,8 +9,12 @@ package common
 import "C"
 import (
 	"net/netip"
+	"runtime"
 	"unsafe"
 )
+
+// FIXME: make configurable
+var mbufSize uint64 = 8096
 
 type PacketFrontResult struct {
 	Input  [][]byte
@@ -25,22 +29,30 @@ func ParsePackets(pf *C.struct_packet_front) {
 	}
 }
 
-func PacketFrontFromPayload(payload [][]byte) *C.struct_packet_front {
+func PacketFrontFromPayload(payload [][]byte) (runtime.Pinner, *C.struct_packet_front) {
 	testData := []C.struct_test_data{}
+	var payloadPinner runtime.Pinner
 	for _, data := range payload {
-		cBytes := C.CBytes(data)
+		payloadPinner.Pin(&data[0])
 		testData = append(testData, C.struct_test_data{
-			payload: (*C.char)(cBytes),
+			payload: (*C.char)(unsafe.Pointer(&data[0])),
 			size:    C.uint16_t(len(data)),
 		})
 	}
+	arenaSize := uint64(unsafe.Sizeof(C.struct_packet_front{})) + mbufSize*uint64(len(testData))
+	arena := make([]byte, arenaSize)
+	var pinner runtime.Pinner
+	pinner.Pin(&arena[0])
 	pf := C.testing_packet_front(
-		(*C.struct_test_data)(unsafe.Pointer(&testData[0])),
-		C.ulong(len(testData)),
-		// FIXME: make configurable
-		8096,
+		(*C.struct_test_data)(unsafe.Pointer(&testData[0])), // payload
+		(*C.uint8_t)(unsafe.Pointer(&arena[0])),             // arena
+		C.uint64_t(arenaSize),                               // arena_size
+		C.uint64_t(len(testData)),                           // mbuf_count
+		C.uint16_t(mbufSize),
 	)
-	return pf
+	payloadPinner.Unpin()
+
+	return pinner, pf
 }
 
 func PacketFrontToPayload(pf *C.struct_packet_front) PacketFrontResult {
@@ -57,8 +69,9 @@ func PacketFrontToPayload(pf *C.struct_packet_front) PacketFrontResult {
 		var resultList [][]byte
 		for p := list.first; p != nil; p = p.next {
 			var length C.uint16_t
-			data := unsafe.Pointer(C.testing_packet_data(p, &length))
-			resultList = append(resultList, C.GoBytes(data, (C.int)(length)))
+			dataPtr := unsafe.Pointer(C.testing_packet_data(p, &length))
+			data := unsafe.Slice((*byte)(dataPtr), length)
+			resultList = append(resultList, data)
 		}
 		result = append(result, resultList)
 	}
