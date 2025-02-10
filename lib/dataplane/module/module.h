@@ -57,6 +57,12 @@ packet_front_switch(struct packet_front *packet_front) {
 	packet_list_init(&packet_front->output);
 }
 
+static inline void
+packet_front_pass(struct packet_front *packet_front) {
+	packet_front->output = packet_front->input;
+	packet_list_init(&packet_front->input);
+}
+
 struct module;
 struct module_config;
 

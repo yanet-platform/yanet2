@@ -1,5 +1,7 @@
-#include "dscp.h"
+#include <rte_ip.h>
+
 #include "checksum.h"
+#include "dscp.h"
 
 int
 dscp_mark_v4(struct rte_ipv4_hdr *ip4_hdr, struct dscp_config config) {
@@ -11,9 +13,8 @@ dscp_mark_v4(struct rte_ipv4_hdr *ip4_hdr, struct dscp_config config) {
 
 	uint16_t checksum = ~rte_be_to_cpu_16(ip4_hdr->hdr_checksum);
 	checksum = csum_minus(checksum, mark);
-	uint8_t new_mark = config.tc & DSCP_MARK_MASK;
+	uint8_t new_mark = config.mark << DSCP_MARK_SHIFT;
 	checksum = csum_plus(checksum, new_mark);
-
 	ip4_hdr->hdr_checksum = ~rte_cpu_to_be_16(checksum);
 
 	uint8_t ecn = ip4_hdr->type_of_service & DSCP_ECN_MASK;
@@ -28,10 +29,10 @@ get_ipv6_tc(rte_be32_t vtc_flow) {
 }
 
 static inline rte_be32_t
-set_ipv6_tc(rte_be32_t vtc_flow, uint32_t dscp) {
-	uint32_t v = rte_cpu_to_be_32(dscp << RTE_IPV6_HDR_TC_SHIFT);
+set_ipv6_tc(rte_be32_t vtc_flow, uint32_t tc) {
+	// Shift by the length of the Flow Label - 20-bit.
+	uint32_t v = rte_cpu_to_be_32(tc << RTE_IPV6_HDR_TC_SHIFT);
 	vtc_flow &= ~rte_cpu_to_be_32(RTE_IPV6_HDR_TC_MASK);
-
 	return (v | vtc_flow);
 }
 
@@ -43,7 +44,7 @@ dscp_mark_v6(struct rte_ipv6_hdr *ip6_hdr, struct dscp_config config) {
 		// do not remark
 		return -1;
 	}
-	uint8_t new_mark = config.tc & DSCP_MARK_MASK;
+	uint8_t new_mark = config.mark << DSCP_MARK_SHIFT;
 	ip6_hdr->vtc_flow = set_ipv6_tc(ip6_hdr->vtc_flow, new_mark);
 	return 0;
 }

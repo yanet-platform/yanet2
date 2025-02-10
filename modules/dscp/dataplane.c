@@ -3,19 +3,9 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include "lpm.h"
-
 #include "dataplane/module/module.h"
 #include "dataplane/packet/dscp.h"
 #include "dataplane/packet/packet.h"
-
-struct dscp_module_config {
-	struct module_config config;
-
-	struct lpm lpm_v4;
-	struct lpm lpm_v6;
-	struct dscp_config dscp;
-};
 
 static int
 dscp_handle_v4(struct dscp_module_config *config, struct packet *packet) {
@@ -61,7 +51,7 @@ dscp_handle(struct dscp_module_config *config, struct packet *packet) {
 	return result;
 }
 
-static void
+void
 dscp_handle_packets(
 	struct module *module,
 	struct module_config *config,
@@ -76,10 +66,12 @@ dscp_handle_packets(
 		while ((packet = packet_list_pop(&packet_front->input)) != NULL
 		) {
 			dscp_handle(dscp_config, packet);
+			packet_list_add(&packet_front->output, packet);
 		}
+	} else {
+		packet_front_pass(packet_front);
 	}
 
-	packet_front_switch(packet_front);
 	return;
 }
 
