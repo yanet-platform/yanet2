@@ -41,8 +41,10 @@ func dscpModuleConfig(prefixes []netip.Prefix, flag, dscp uint8) C.struct_dscp_m
 	lpm4, lpm6 := common.BuildLPMs(prefixes)
 	m.lpm_v4 = *(*C.struct_lpm)(unsafe.Pointer(&lpm4))
 	m.lpm_v6 = *(*C.struct_lpm)(unsafe.Pointer(&lpm6))
-	m.flag = C.uint8_t(flag)
-	m.dscp = C.uint8_t(dscp)
+	m.dscp = C.struct_dscp_config{
+		flag: C.uint8_t(flag),
+		mark: C.uint8_t(dscp),
+	}
 
 	return m
 }
