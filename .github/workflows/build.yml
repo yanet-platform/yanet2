@@ -26,6 +26,7 @@ jobs:
       - run: |
           meson setup build -Dbuildtype=debug
           meson compile -C build
+          meson test -C build
       - uses: cpp-linter/cpp-linter-action@main
         id: linter
         continue-on-error: true
