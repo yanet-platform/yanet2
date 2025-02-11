@@ -11,6 +11,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04    
+    env:
+      cache_name: build-and-test
+
     steps:      
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
@@ -32,11 +35,23 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
+          cache: false
           check-latest: true
-          cache-dependency-path: |
-             tests/go/go.sum
-      - name: Display Go version
-        run: go version
+      # https://github.com/actions/setup-go/issues/358
+      - name: Get Go environment
+        run: |
+          echo "cache=$(go env GOCACHE)" >> $GITHUB_ENV
+          echo "modcache=$(go env GOMODCACHE)" >> $GITHUB_ENV
+      - name: Set up cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.cache }}
+            ${{ env.modcache }}
+          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
+          restore-keys: |
+            ${{ env.cache_name }}-${{ runner.os }}-go-
+
       - run:
           meson test -C build
       - name: Show meson test log
