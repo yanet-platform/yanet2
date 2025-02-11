@@ -37,6 +37,8 @@ jobs:
              tests/go/go.sum
       - run:
           meson test -C build
+      - run:
+          grep -v 'Inherited environment' build/meson-logs/testlog.txt
 
       - uses: cpp-linter/cpp-linter-action@main
         id: linter
