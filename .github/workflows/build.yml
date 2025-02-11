@@ -35,9 +35,12 @@ jobs:
           check-latest: true
           cache-dependency-path: |
              tests/go/go.sum
+      - name: Display Go version
+        run: go version
       - run:
           meson test -C build
-      - run:
+      - name: Show meson test log
+        run:
           grep -v 'Inherited environment' build/meson-logs/testlog.txt
 
       - uses: cpp-linter/cpp-linter-action@main
