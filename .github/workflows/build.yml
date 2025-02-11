@@ -16,9 +16,11 @@ jobs:
         with:
           packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git
           version: 1.1
+
       - uses: actions/checkout@v4
         with:
           submodules: true
+
       - uses: hendrikmuhs/ccache-action@v1.2.11
         name: ccache
         with:
@@ -26,7 +28,16 @@ jobs:
       - run: |
           meson setup build -Dbuildtype=debug
           meson compile -C build
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          check-latest: true
+          cache-dependency-path: |
+             tests/go/go.sum
+      - run:
           meson test -C build
+
       - uses: cpp-linter/cpp-linter-action@main
         id: linter
         continue-on-error: true
