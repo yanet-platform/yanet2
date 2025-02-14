@@ -56,7 +56,7 @@ write_packets(struct packet_front *packet_front) {
 	struct pcap *pcap = pcap_open_dead(DLT_EN10MB, 8192);
 	struct pcap_dumper *dmp = pcap_dump_fopen(pcap, stdout);
 
-	char writeBuf[8192];
+	char write_buf[8192];
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->output)) != NULL) {
@@ -69,7 +69,7 @@ write_packets(struct packet_front *packet_front) {
 		pcap_dump(
 			(unsigned char *)dmp,
 			&header,
-			(void *)rte_pktmbuf_read(mbuf, 0, header.len, writeBuf)
+			(void *)rte_pktmbuf_read(mbuf, 0, header.len, write_buf)
 		);
 
 		rte_pktmbuf_free(mbuf);

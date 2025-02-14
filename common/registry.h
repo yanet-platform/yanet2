@@ -1,5 +1,11 @@
 #pragma once
 
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "value.h"
+
 /*
  * Value registry required to map a key into range of unique values.
  * The registry consists of an array of values and key mapping denoting

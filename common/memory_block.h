@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define MEMORY_BLOCK_ALLOCATOR_MIN_BITS 3

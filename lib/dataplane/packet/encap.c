@@ -25,10 +25,10 @@ packet_network_prepend(
 	packet->transport_header.offset += size;
 
 	// FIXME previos heade type (ex: vlan)
-	uint16_t *nextHeaderType = rte_pktmbuf_mtod_offset(
+	uint16_t *next_hdr_type = rte_pktmbuf_mtod_offset(
 		mbuf, uint16_t *, packet->network_header.offset - 2
 	);
-	*nextHeaderType = type;
+	*next_hdr_type = type;
 }
 
 int
@@ -37,19 +37,19 @@ packet_ip4_encap(
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	struct rte_ipv4_hdr *ipv4HeaderInner = NULL;
-	struct rte_ipv6_hdr *ipv6HeaderInner = NULL;
+	struct rte_ipv4_hdr *ipv4_hdr_inner = NULL;
+	struct rte_ipv6_hdr *ipv6_hdr_inner = NULL;
 
 	if (packet->network_header.type ==
 	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		ipv4HeaderInner = rte_pktmbuf_mtod_offset(
+		ipv4_hdr_inner = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_ipv4_hdr *,
 			packet->network_header.offset
 		);
 	} else if (packet->network_header.type ==
 		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		ipv6HeaderInner = rte_pktmbuf_mtod_offset(
+		ipv6_hdr_inner = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_ipv6_hdr *,
 			packet->network_header.offset
@@ -63,30 +63,30 @@ packet_ip4_encap(
 	rte_memcpy(&header.dst_addr, dst, 4);
 	header.version_ihl = 0x45;
 
-	if (ipv4HeaderInner) {
-		header.type_of_service = ipv4HeaderInner->type_of_service;
+	if (ipv4_hdr_inner) {
+		header.type_of_service = ipv4_hdr_inner->type_of_service;
 		header.total_length = rte_cpu_to_be_16(
 			sizeof(struct rte_ipv4_hdr) +
-			rte_be_to_cpu_16(ipv4HeaderInner->total_length)
+			rte_be_to_cpu_16(ipv4_hdr_inner->total_length)
 		);
 
-		header.packet_id = ipv4HeaderInner->packet_id;
-		header.fragment_offset = ipv4HeaderInner->fragment_offset;
-		header.time_to_live = ipv4HeaderInner->time_to_live;
+		header.packet_id = ipv4_hdr_inner->packet_id;
+		header.fragment_offset = ipv4_hdr_inner->fragment_offset;
+		header.time_to_live = ipv4_hdr_inner->time_to_live;
 		header.next_proto_id = IPPROTO_IPIP;
 	} else {
 		header.type_of_service =
-			(rte_be_to_cpu_32(ipv6HeaderInner->vtc_flow) >> 20) &
+			(rte_be_to_cpu_32(ipv6_hdr_inner->vtc_flow) >> 20) &
 			0xFF;
 		header.total_length = rte_cpu_to_be_16(
 			sizeof(struct rte_ipv4_hdr) +
 			sizeof(struct rte_ipv6_hdr) +
-			rte_be_to_cpu_16(ipv6HeaderInner->payload_len)
+			rte_be_to_cpu_16(ipv6_hdr_inner->payload_len)
 		);
 
 		header.packet_id = rte_cpu_to_be_16(0x01);
 		header.fragment_offset = 0;
-		header.time_to_live = ipv6HeaderInner->hop_limits;
+		header.time_to_live = ipv6_hdr_inner->hop_limits;
 		header.next_proto_id = IPPROTO_IPV6;
 	}
 
@@ -109,19 +109,19 @@ packet_ip6_encap(
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	struct rte_ipv4_hdr *ipv4HeaderInner = NULL;
-	struct rte_ipv6_hdr *ipv6HeaderInner = NULL;
+	struct rte_ipv4_hdr *ipv4_hdr_inner = NULL;
+	struct rte_ipv6_hdr *ipv6_hdr_inner = NULL;
 
 	if (packet->network_header.type ==
 	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		ipv4HeaderInner = rte_pktmbuf_mtod_offset(
+		ipv4_hdr_inner = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_ipv4_hdr *,
 			packet->network_header.offset
 		);
 	} else if (packet->network_header.type ==
 		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		ipv6HeaderInner = rte_pktmbuf_mtod_offset(
+		ipv6_hdr_inner = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_ipv6_hdr *,
 			packet->network_header.offset
@@ -134,21 +134,21 @@ packet_ip6_encap(
 	rte_memcpy(&header.src_addr, src, 16);
 	rte_memcpy(&header.dst_addr, dst, 16);
 
-	if (ipv4HeaderInner != NULL) {
+	if (ipv4_hdr_inner != NULL) {
 		header.vtc_flow = rte_cpu_to_be_32(
-			(0x6 << 28) | (ipv4HeaderInner->type_of_service << 20)
+			(0x6 << 28) | (ipv4_hdr_inner->type_of_service << 20)
 		); ///< @todo: flow label
-		header.payload_len = ipv4HeaderInner->total_length;
+		header.payload_len = ipv4_hdr_inner->total_length;
 		header.proto = IPPROTO_IPIP;
-		header.hop_limits = ipv4HeaderInner->time_to_live;
-	} else if (ipv6HeaderInner != NULL) {
-		header.vtc_flow = ipv6HeaderInner->vtc_flow;
+		header.hop_limits = ipv4_hdr_inner->time_to_live;
+	} else if (ipv6_hdr_inner != NULL) {
+		header.vtc_flow = ipv6_hdr_inner->vtc_flow;
 		header.payload_len = rte_cpu_to_be_16(
 			sizeof(struct rte_ipv6_hdr) +
-			rte_be_to_cpu_16(ipv6HeaderInner->payload_len)
+			rte_be_to_cpu_16(ipv6_hdr_inner->payload_len)
 		);
 		header.proto = IPPROTO_IPV6;
-		header.hop_limits = ipv6HeaderInner->hop_limits;
+		header.hop_limits = ipv6_hdr_inner->hop_limits;
 	}
 
 	packet_network_prepend(

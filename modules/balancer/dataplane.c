@@ -6,7 +6,6 @@
 #include <rte_udp.h>
 
 #include "dataplane/packet/encap.h"
-#include "dataplane/pipeline/pipeline.h"
 
 int
 balancer_handle_v4(
@@ -17,48 +16,48 @@ balancer_handle_v4(
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	struct rte_ipv4_hdr *ipv4Header = rte_pktmbuf_mtod_offset(
+	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
 	uint32_t src_net = lpm4_lookup(
-		&compiler->src_net4, (uint8_t *)&ipv4Header->src_addr
+		&compiler->src_net4, (uint8_t *)&ipv4_hdr->src_addr
 	);
 	uint32_t dst_net = lpm4_lookup(
-		&compiler->dst_net4, (uint8_t *)&ipv4Header->dst_addr
+		&compiler->dst_net4, (uint8_t *)&ipv4_hdr->dst_addr
 	);
 
 	uint32_t src_port = 0;
 	uint32_t dst_port = 0;
 
 	if (packet->transport_header.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcpHeader = NULL;
-		tcpHeader = rte_pktmbuf_mtod_offset(
+		struct rte_tcp_hdr *tcp_hdr = NULL;
+		tcp_hdr = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_tcp_hdr *,
 			packet->transport_header.offset
 		);
 
 		src_port = value_table_get(
-			&compiler->src_port4, 0, tcpHeader->src_port
+			&compiler->src_port4, 0, tcp_hdr->src_port
 		);
 		dst_port = value_table_get(
-			&compiler->dst_port4, 0, tcpHeader->dst_port
+			&compiler->dst_port4, 0, tcp_hdr->dst_port
 		);
 
 	} else if (packet->transport_header.type == IPPROTO_UDP) {
-		struct rte_udp_hdr *udpHeader = NULL;
-		udpHeader = rte_pktmbuf_mtod_offset(
+		struct rte_udp_hdr *udp_hdr = NULL;
+		udp_hdr = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_udp_hdr *,
 			packet->transport_header.offset
 		);
 
 		src_port = value_table_get(
-			&compiler->src_port4, 0, udpHeader->src_port
+			&compiler->src_port4, 0, udp_hdr->src_port
 		);
 		dst_port = value_table_get(
-			&compiler->dst_port4, 0, udpHeader->dst_port
+			&compiler->dst_port4, 0, udp_hdr->dst_port
 		);
 
 	} else {
@@ -91,50 +90,50 @@ balancer_handle_v6(
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	struct rte_ipv6_hdr *ipv6Header = rte_pktmbuf_mtod_offset(
+	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
 	uint32_t src_net_hi =
-		lpm8_lookup(&compiler->src_net6_hi, ipv6Header->src_addr);
+		lpm8_lookup(&compiler->src_net6_hi, ipv6_hdr->src_addr);
 	uint32_t src_net_lo =
-		lpm8_lookup(&compiler->src_net6_lo, ipv6Header->src_addr + 8);
+		lpm8_lookup(&compiler->src_net6_lo, ipv6_hdr->src_addr + 8);
 	uint32_t dst_net_hi =
-		lpm8_lookup(&compiler->dst_net6_lo, ipv6Header->dst_addr);
+		lpm8_lookup(&compiler->dst_net6_lo, ipv6_hdr->dst_addr);
 	uint32_t dst_net_lo =
-		lpm8_lookup(&compiler->dst_net6_lo, ipv6Header->dst_addr + 8);
+		lpm8_lookup(&compiler->dst_net6_lo, ipv6_hdr->dst_addr + 8);
 
 	uint32_t src_port = 0;
 	uint32_t dst_port = 0;
 
 	if (packet->transport_header.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcpHeader = NULL;
-		tcpHeader = rte_pktmbuf_mtod_offset(
+		struct rte_tcp_hdr *tcp_hdr = NULL;
+		tcp_hdr = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_tcp_hdr *,
 			packet->transport_header.offset
 		);
 
 		src_port = value_table_get(
-			&compiler->src_port6, 0, tcpHeader->src_port
+			&compiler->src_port6, 0, tcp_hdr->src_port
 		);
 		dst_port = value_table_get(
-			&compiler->dst_port6, 0, tcpHeader->dst_port
+			&compiler->dst_port6, 0, tcp_hdr->dst_port
 		);
 
 	} else if (packet->transport_header.type == IPPROTO_UDP) {
-		struct rte_udp_hdr *udpHeader = NULL;
-		udpHeader = rte_pktmbuf_mtod_offset(
+		struct rte_udp_hdr *udp_hdr = NULL;
+		udp_hdr = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_udp_hdr *,
 			packet->transport_header.offset
 		);
 
 		src_port = value_table_get(
-			&compiler->src_port6, 0, udpHeader->src_port
+			&compiler->src_port6, 0, udp_hdr->src_port
 		);
 		dst_port = value_table_get(
-			&compiler->dst_port6, 0, udpHeader->dst_port
+			&compiler->dst_port6, 0, udp_hdr->dst_port
 		);
 
 	} else {

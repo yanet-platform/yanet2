@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 struct net6 {
 	uint64_t addr_hi;
 	uint64_t addr_lo;

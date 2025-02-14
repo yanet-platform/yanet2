@@ -27,7 +27,7 @@
 
 struct sock_internals;
 
-struct __attribute__((__packed__)) packHeader {
+struct __attribute__((__packed__)) pack_hdr {
 	uint32_t data_length;
 };
 
@@ -170,7 +170,7 @@ sock_dev_link_update(
 }
 
 ssize_t
-readCount(int fd, char *buf, size_t count) {
+read_count(int fd, char *buf, size_t count) {
 	ssize_t pos = read(fd, buf, count);
 	if (pos < 0) {
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -215,10 +215,11 @@ sock_dev_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs) {
 		return 0; /// No connection
 	}
 
-	struct packHeader hdr;
+	struct pack_hdr hdr;
 	char read_buf[MAX_PACK_SIZE];
 
-	ssize_t rc = readCount(sq->internals->conFd, (char *)&hdr, sizeof(hdr));
+	ssize_t rc =
+		read_count(sq->internals->conFd, (char *)&hdr, sizeof(hdr));
 	if (rc < 0) {
 		sq->internals->conFd = -1; /// Reset the connection
 		return 0;
@@ -232,7 +233,9 @@ sock_dev_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs) {
 	/// Packet header received, read the packet until reading is done or an
 	/// error happened
 	do {
-		rc = readCount(sq->internals->conFd, read_buf, hdr.data_length);
+		rc = read_count(
+			sq->internals->conFd, read_buf, hdr.data_length
+		);
 		if (rc < 0) {
 			sq->internals->eth_stats.ierrors++;
 			sq->internals->conFd = -1; /// Reset the connection
@@ -270,7 +273,7 @@ sock_dev_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs) {
 }
 
 static int
-writeIovCount(int fd, struct iovec *iov, size_t count) {
+write_iov_count(int fd, struct iovec *iov, size_t count) {
 	while (count > 0) {
 		ssize_t written = writev(fd, iov, count);
 		if (written < 0) {
@@ -310,13 +313,13 @@ sock_dev_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs) {
 		return 0;
 	}
 
-	char writeBuf[MAX_PACK_SIZE];
+	char write_buf[MAX_PACK_SIZE];
 
 	for (uint16_t i = 0; i < nb_bufs; ++i) {
 		struct rte_mbuf *mbuf = bufs[i];
 		size_t len = rte_pktmbuf_pkt_len(mbuf);
 
-		struct packHeader hdr;
+		struct pack_hdr hdr;
 		hdr.data_length = htonl(len);
 
 		struct iovec iov[2];
@@ -324,10 +327,10 @@ sock_dev_tx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs) {
 		iov[0].iov_len = sizeof(hdr);
 
 		iov[1].iov_base =
-			(void *)rte_pktmbuf_read(mbuf, 0, len, writeBuf);
+			(void *)rte_pktmbuf_read(mbuf, 0, len, write_buf);
 		iov[1].iov_len = len;
 
-		if (writeIovCount(si->conFd, iov, 2) < 0) {
+		if (write_iov_count(si->conFd, iov, 2) < 0) {
 			si->conFd = -1; /// Reset the connection
 			return i;
 		}

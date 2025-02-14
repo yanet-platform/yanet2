@@ -1,8 +1,8 @@
 #pragma once
 
-#include <stdint.h>
-
 #include <endian.h>
+#include <stdint.h>
+#include <string.h>
 
 static inline void
 filter_key_inc(uint8_t key_size, uint8_t *key) {
