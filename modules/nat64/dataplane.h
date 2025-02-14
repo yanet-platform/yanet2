@@ -7,7 +7,7 @@
 #include "uthash.h"
 
 struct ip4to6 {
-    uint8_t* ip4;             
+    uint32_t* ip4;             
 	uint8_t* ip6;
     UT_hash_handle hh;         /* makes this structure hashable */
 };

@@ -10,7 +10,7 @@ dependencies += lib_module_dp_dep
 sources = files(
   'main.c',
   '../dataplane.c',
-  'test.c',
+  'nat64_test.c',
   'commands.c'
 )
 
@@ -22,4 +22,4 @@ u = executable(
 )
 
 test('nat64 unittest', u,
-env: ['DPDK_TEST=nat64_autotest'])
+env: ['YANET_TEST=nat64_autotest'])

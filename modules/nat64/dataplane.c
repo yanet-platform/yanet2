@@ -2,54 +2,70 @@
 
 #include <string.h>
 
+#include <netinet/icmp6.h>
+#include <netinet/ip_icmp.h>
+
 #include <rte_ether.h>
 #include <rte_ip.h>
+#include <rte_log.h>
 #include <rte_mbuf.h>
-#include <rte_ether.h>
+#include <rte_memcpy.h>
 #include <rte_tcp.h>
 #include <rte_udp.h>
 
-#include <rte_mbuf.h>
 #include <rte_icmp.h>
 #include <rte_jhash.h>
+#include <rte_mbuf.h>
 
 #include "dataplane/module/module.h"
 
-void add_ip4to6(struct ip4to6 **hash, uint8_t* ip4, uint8_t* ip6) {
-    struct ip4to6 *s;
+#define RTE_LOGTYPE_NAT64 RTE_LOGTYPE_USER1
 
-    s = malloc(sizeof *s);
-    s->ip4 = ip4;
-    s->ip6 = ip6;
-	HASH_ADD_KEYPTR(hh, *hash, ip4, 4 * sizeof(uint8_t), s);
+void
+add_ip4to6(struct ip4to6 **hash, uint32_t *ip4, uint8_t *ip6) {
+	struct ip4to6 *s;
+
+	s = malloc(sizeof *s);
+	s->ip4 = ip4;
+	s->ip6 = ip6;
+	HASH_ADD_KEYPTR(hh, *hash, ip4, sizeof(uint32_t), s);
 }
 
-void add_ip6to4(struct ip4to6 **hash, uint8_t* ip6, uint8_t* ip4) {
-    struct ip4to6 *s;
+void
+add_ip6to4(struct ip4to6 **hash, uint8_t *ip6, uint32_t *ip4) {
+	struct ip4to6 *s;
 
-    s = malloc(sizeof *s);
-    s->ip4 = ip4;
-    s->ip6 = ip6;
+	s = malloc(sizeof *s);
+	s->ip4 = ip4;
+	s->ip6 = ip6;
 	HASH_ADD_KEYPTR(hh, *hash, ip6, 16 * sizeof(uint8_t), s);
+	char ip_str[2 * INET6_ADDRSTRLEN];
+	inet_ntop(AF_INET6, ip6, ip_str, INET6_ADDRSTRLEN);
+	inet_ntop(AF_INET, ip4, ip_str + INET6_ADDRSTRLEN + 1, INET_ADDRSTRLEN);
+	RTE_LOG(INFO,
+		NAT64,
+		"Adding mapping %s -> %s\n",
+		ip_str,
+		ip_str + INET6_ADDRSTRLEN + 1);
 }
 
-struct ip4to6*
-find_ip6to4(struct ip4to6 **hash, uint8_t* ip6) {
+struct ip4to6 *
+find_ip6to4(struct ip4to6 **hash, uint8_t *ip6) {
 	struct ip4to6 *s = NULL;
 
 	HASH_FIND(hh, *hash, ip6, 16 * sizeof(uint8_t), s);
 	return s;
 }
 
-struct ip4to6*
-find_ip4to6(struct ip4to6 **hash, uint8_t* ip4) {
+struct ip4to6 *
+find_ip4to6(struct ip4to6 **hash, uint32_t *ip4) {
 	struct ip4to6 *s = NULL;
 
-	HASH_FIND(hh, *hash, ip4, 4 * sizeof(uint8_t), s);
+	HASH_FIND(hh, *hash, ip4, sizeof(uint32_t), s);
 	return s;
 }
 
-static int 
+static int
 nat64_handle_configure(
 	struct module *module,
 	const void *config_data,
@@ -64,8 +80,8 @@ nat64_handle_configure(
 	struct nat64_module_config *config = (struct nat64_module_config *)
 		malloc(sizeof(struct nat64_module_config));
 
-		config->hash4to6 = NULL;
-		config->hash6to4 = NULL;
+	config->hash4to6 = NULL;
+	config->hash6to4 = NULL;
 
 	// FIXME: handle errors
 	// lpm_init(&config->map4to6);
@@ -79,8 +95,9 @@ nat64_handle_configure(
 
 	uint32_t mapping_count = *(uint32_t *)pos;
 	pos += sizeof(mapping_count);
+	RTE_LOG(INFO, NAT64, "mapping count %d\n", mapping_count);
 	while (mapping_count--) {
-		uint8_t *addr4 = (uint8_t *)pos;
+		uint32_t *addr4 = (uint32_t *)pos;
 		pos += 4;
 		uint8_t *addr6 = (uint8_t *)pos;
 		pos += 16;
@@ -90,147 +107,257 @@ nat64_handle_configure(
 	}
 
 	*new_config = &config->config;
+	RTE_LOG(INFO, NAT64, "NAT64 module configured\n");
+
+	return 0;
+}
+
+// TODO: Errors reporting
+static inline int
+icmp_v6_to_v4(
+	/* in */ struct icmp6_hdr *icmpHeader
+) {
+
+	uint8_t type = icmpHeader->icmp6_type;
+	uint8_t code = icmpHeader->icmp6_code;
+
+	RTE_LOG(INFO, NAT64, "ICMPv6 type: %d, code: %d \n", type, code);
+
+	switch (type) {
+	case ICMP6_DST_UNREACH:
+		type = ICMP_UNREACH;
+
+		switch (code) {
+		case ICMP6_DST_UNREACH_NOROUTE:
+		case ICMP6_DST_UNREACH_BEYONDSCOPE:
+		case ICMP6_DST_UNREACH_ADDR:
+			code = ICMP_HOST_UNREACH;
+			break;
+		case ICMP6_DST_UNREACH_ADMIN:
+			code = ICMP_HOST_ANO;
+			break;
+		case ICMP6_DST_UNREACH_NOPORT:
+			code = ICMP_PORT_UNREACH;
+			break;
+
+		default:
+			return -1;
+		}
+
+		break;
+
+	case ICMP6_PACKET_TOO_BIG:
+		type = ICMP_DEST_UNREACH;
+		code = ICMP_FRAG_NEEDED;
+
+		uint32_t mtu = rte_be_to_cpu_32(icmpHeader->icmp6_mtu) - 20;
+		icmpHeader->icmp6_mtu = 0;
+		icmpHeader->icmp6_data16[1] = rte_cpu_to_be_16(mtu);
+		break;
+
+	case ICMP6_TIME_EXCEEDED:
+		type = ICMP_TIME_EXCEEDED;
+		break;
+
+	case ICMP6_PARAM_PROB:
+
+		switch (code) {
+		case ICMP6_PARAMPROB_HEADER:
+			type = ICMP_PARAMPROB;
+			code = 0;
+			// TODO: calc
+			break;
+		case ICMP6_PARAMPROB_NEXTHEADER:
+			type = ICMP_DEST_UNREACH;
+			code = ICMP_PROT_UNREACH;
+			icmpHeader->icmp6_pptr = 0;
+			break;
+
+		default:
+			return -1;
+			break;
+		}
+
+		break;
+
+	default:
+		break;
+	}
+
+	RTE_LOG(INFO, NAT64, "translate ICMP type: %d, code: %d \n", type, code
+	);
+
+	icmpHeader->icmp6_type = type;
+	icmpHeader->icmp6_code = code;
 
 	return 0;
 }
 
 static int
 nat64_handle_v6(struct ip4to6 **hash, struct packet *packet) {
-    struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-    struct rte_ipv6_hdr *ipv6Header = rte_pktmbuf_mtod_offset(
-        mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
-    );
+	struct rte_ipv6_hdr *ipv6Header = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
+	);
 
 	if (ipv6Header->proto == IPPROTO_FRAGMENT) {
-		return -1; // Пропускаем фрагментированные пакеты
+		RTE_LOG(INFO, NAT64, "drop fragment\n");
+		return -1; // TODO: handle fragmented packets
 	}
 
-    struct ip4to6 *new_src_addr = find_ip6to4(hash, (uint8_t *)&ipv6Header->src_addr);
-    if (NULL == new_src_addr) {
-        // Если не найдено соответствующего IPv4-адреса, ничего не делаем
-        return 0;
-    }
+	// TODO: do we need to check ttl?
 
-    struct rte_ipv4_hdr *new_ipv4_header;
-    uint16_t new_packet_len = mbuf->pkt_len - sizeof(struct rte_ipv6_hdr) + sizeof(struct rte_ipv4_hdr);
+	char ip_str[2 * INET6_ADDRSTRLEN];
+	inet_ntop(AF_INET6, &ipv6Header->src_addr, ip_str, INET6_ADDRSTRLEN);
+	struct ip4to6 *new_src_addr =
+		find_ip6to4(hash, (uint8_t *)&ipv6Header->src_addr);
+	if (NULL == new_src_addr) {
+		RTE_LOG(INFO, NAT64, "not found mapping for %s. Drop\n", ip_str
+		);
+		// Если не найдено соответствующего IPv4-адреса, дропаем пакет
+		return -1;
+	}
 
-    // Выделяем память для нового IPv4-заголовка
-    if (rte_pktmbuf_prepend(mbuf, sizeof(struct rte_ipv4_hdr)) == NULL) {
-        return -1;
-    }
+	inet_ntop(
+		AF_INET,
+		new_src_addr->ip4,
+		ip_str + INET6_ADDRSTRLEN + 1,
+		INET_ADDRSTRLEN
+	);
+	RTE_LOG(INFO,
+		NAT64,
+		"Found mapping %s -> %s\n",
+		ip_str,
+		ip_str + INET6_ADDRSTRLEN + 1);
 
-    new_ipv4_header = rte_pktmbuf_mtod(mbuf, struct rte_ipv4_hdr *);
-    memset(new_ipv4_header, 0, sizeof(struct rte_ipv4_hdr));
+	// calculate delta for new packet length
+	uint16_t delta = packet->transport_header.offset -
+			 packet->network_header.offset -
+			 sizeof(struct rte_ipv4_hdr);
+	RTE_LOG(INFO,
+		NAT64,
+		"transport header offset: %d, network: %d, si: %lu, delta: "
+		"%d\n",
+		packet->transport_header.offset,
+		packet->network_header.offset,
+		sizeof(struct rte_ipv4_hdr),
+		delta);
 
-    // Заполняем IPv4-заголовок
-    new_ipv4_header->version_ihl = RTE_IPV4_VHL_DEF;
-    new_ipv4_header->type_of_service = ipv6Header->vtc_flow;
-    new_ipv4_header->total_length = rte_cpu_to_be_16(new_packet_len);
-    new_ipv4_header->packet_id = 0; // TODO: Реализовать генерацию уникального ID пакета
-    new_ipv4_header->fragment_offset = 0; // Флагы фрагментации
-    new_ipv4_header->time_to_live = ipv6Header->hop_limits;
-    new_ipv4_header->next_proto_id = ipv6Header->proto;
+	struct rte_ipv4_hdr *new_ipv4_header = rte_pktmbuf_mtod_offset(
+		mbuf,
+		struct rte_ipv4_hdr *,
+		packet->network_header.offset + delta
+	);
 
-    memcpy(&new_ipv4_header->src_addr, new_src_addr->ip4, sizeof(struct in_addr));
+	uint16_t payload_length = rte_be_to_cpu_16(ipv6Header->payload_len);
 
-    struct ip4to6 *new_dst_addr = find_ip6to4(hash, (uint8_t *)&ipv6Header->dst_addr);
-    if (NULL == new_dst_addr) {
-        // Если не найдено соответствующего IPv4-адреса, ничего не делаем
-        return 0;
-    }
+	new_ipv4_header->version_ihl = RTE_IPV4_VHL_DEF;
+	new_ipv4_header->type_of_service =
+		(rte_be_to_cpu_32(ipv6Header->vtc_flow) >> 20) & 0xFF;
+	new_ipv4_header->total_length =
+		rte_cpu_to_be_16(payload_length + sizeof(struct rte_ipv4_hdr));
 
-    memcpy(&new_ipv4_header->dst_addr, new_dst_addr->ip4, sizeof(struct in_addr));
+	new_ipv4_header->packet_id = 0;	      // TODO: generate id
+	new_ipv4_header->fragment_offset = 0; // TODO: handle fragmentation
+	new_ipv4_header->time_to_live =
+		ipv6Header->hop_limits; // TODO: decrement ttl?
+	new_ipv4_header->next_proto_id = ipv6Header->proto;
+	new_ipv4_header->hdr_checksum = 0;
 
-    // Обновляем CRC и другие заголовки (например, TCP/UDP)
-    uint16_t old_csum = ipv6Header->payload_len;
-    uint16_t new_csum = rte_ipv4_cksum(new_ipv4_header);
-    if (new_ipv4_header->next_proto_id == IPPROTO_TCP) {
-        struct rte_tcp_hdr *tcp_header = (struct rte_tcp_hdr *)(mbuf->pkt_data + sizeof(struct rte_ipv4_hdr));
-        tcp_header->cksum = 0;
-        tcp_header->cksum = rte_ipv4_udptcp_cksum(new_ipv4_header, tcp_header);
-    } else if (new_ipv4_header->next_proto_id == IPPROTO_UDP) {
-        struct rte_udp_hdr *udp_header = (struct rte_udp_hdr *)(mbuf->pkt_data + sizeof(struct rte_ipv4_hdr));
-        udp_header->dgram_cksum = 0;
-        udp_header->dgram_cksum = rte_ipv4_udptcp_cksum(new_ipv4_header, udp_header);
-    } else if (new_ipv4_header->next_proto_id == IPPROTO_ICMP) {
-        struct rte_icmp_hdr *icmp_header = (struct rte_icmp_hdr *)(mbuf->pkt_data + sizeof(struct rte_ipv4_hdr));
-        icmp_header->icmp_cksum = 0;
-        icmp_header->icmp_cksum = rte_ipv4_icmp_checksum(new_ipv4_header, icmp_header);
-    }
+	memcpy(&new_ipv4_header->src_addr, new_src_addr->ip4, sizeof(uint32_t));
+	// memcpy(&new_ipv4_header->dst_addr, new_dst_addr->ip4, sizeof(struct
+	// in_addr));
 
-    return 0;
+	// handle ICMP, TCP, UDP
+	if (ipv6Header->proto == IPPROTO_ICMPV6) {
+		new_ipv4_header->next_proto_id = IPPROTO_ICMP;
+
+		struct icmp6_hdr *icmpHeader = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct icmp6_hdr *,
+			packet->transport_header.offset
+		);
+		int result = icmp_v6_to_v4(icmpHeader);
+		if (result) {
+			RTE_LOG(ERR, NAT64, "icmp_v6_to_v4 failed\n");
+			return result;
+		}
+	}
+	// copy l2 header
+	rte_memcpy(
+		rte_pktmbuf_mtod_offset(mbuf, char *, delta),
+		rte_pktmbuf_mtod(mbuf, char *),
+		packet->network_header.offset
+	);
+
+	// reduce packet
+	if (rte_pktmbuf_adj(mbuf, delta) == NULL) {
+		RTE_LOG(ERR, NAT64, "adjust mbuf failed. Delta: %d\n", delta);
+		return -1;
+	}
+
+	// adjust new transport header offset
+	packet->transport_header.offset =
+		packet->network_header.offset + sizeof(struct rte_ipv4_hdr);
+
+	// set ipv4 header type
+	uint16_t *next_header_type = rte_pktmbuf_mtod_offset(
+		mbuf, uint16_t *, packet->network_header.offset - 2
+	);
+	*next_header_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+
+	// Обновляем длину пакета в структуре mbuf
+	mbuf->pkt_len -= 20;
+	mbuf->data_len -= 20;
+
+	return 0;
 }
 
 static int
-nat64_handle_v4(
-	struct hash_entry *hash,
-	struct packet *packet)
-{
-	if (packet->flags & PKT_FLAG_FRAG) {
-		packet_front_drop(packet);
-		return -1; // Неподдерживаемые фрагментированные пакеты
-	}
+nat64_handle_v4(struct ip4to6 **hash, struct packet *packet) {
 
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	struct rte_ipv4_hdr *ipv4Header = rte_pktmbuf_mtod(mbuf, struct rte_ipv4_hdr *);
-	if (!rte_is_valid_ipv4(ipv4Header)) {
-		packet_front_drop(packet);
-		return -1; // Неверный IPv4 заголовок
-	}
+	struct rte_ipv4_hdr *ipv4Header = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
+	);
 
-	uint32_t new_packet_len = mbuf->pkt_len + sizeof(struct in6_addr) - sizeof(uint32_t);
-	struct rte_mbuf *new_mbuf = rte_pktmbuf_alloc(packet_to_mempool(packet));
-	if (!new_mbuf) {
-		packet_front_drop(packet);
-		return -1; // Не удалось выделить память
-	}
+	uint32_t new_packet_len =
+		mbuf->pkt_len + sizeof(struct in6_addr) - sizeof(uint32_t);
 
-	rte_pktmbuf_prepend(new_mbuf, sizeof(struct rte_ipv6_hdr));
-	struct rte_ipv6_hdr *new_ipv6_header = rte_pktmbuf_mtod(mbuf, struct rte_ipv6_hdr *);
-	memset(new_ipv6_header, 0, sizeof(struct rte_ipv6_hdr));
+	uint16_t delta =
+		packet->transport_header.offset -
+		packet->network_header.offset +
+		(sizeof(struct rte_ipv6_hdr) - sizeof(struct rte_ipv4_hdr));
 
-	new_ipv6_header->version_ihl = RTE_IPV6_VHL_DEF;
+	rte_pktmbuf_prepend(
+		mbuf, sizeof(struct rte_ipv6_hdr) - sizeof(struct rte_ipv4_hdr)
+	);
+	struct rte_ipv6_hdr *new_ipv6_header = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
+	);
+
+	rte_memcpy(
+		rte_pktmbuf_mtod(mbuf, char *),
+		rte_pktmbuf_mtod_offset(mbuf, char *, delta),
+		packet->network_header.offset
+	);
+
 	new_ipv6_header->vtc_flow = ipv4Header->type_of_service;
 	new_ipv6_header->payload_len = rte_cpu_to_be_16(new_packet_len);
-	new_ipv6_header->hop_limits = ipv4Header->time_to_live;
+	new_ipv6_header->hop_limits =
+		ipv4Header->time_to_live; // TODO: decrement?
 	new_ipv6_header->proto = ipv4Header->next_proto_id;
 
-	struct hash_entry *entry = find_ip4to6(hash, &ipv4Header->src_addr);
+	uint32_t addr4 = rte_be_to_cpu_32(ipv4Header->dst_addr);
+	struct ip4to6 *entry = find_ip4to6(hash, &addr4);
 	if (!entry) {
-		packet_front_drop(packet);
-		return 0; // Не найдено соответствующего IPv6-адреса
+		return -1; // Не найдено соответствующего IPv6-адреса
 	}
 
-	memcpy(&new_ipv6_header->src_addr, entry->ipv6.s6_addr, sizeof(struct in6_addr));
+	memcpy(&new_ipv6_header->dst_addr, entry->ip6, 16 * sizeof(uint8_t));
 
-	entry = find_ip4to6(hash, &ipv4Header->dst_addr);
-	if (!entry) {
-		packet_front_drop(packet);
-		return 0; // Не найдено соответствующего IPv6-адреса
-	}
-
-	memcpy(&new_ipv6_header->dst_addr, entry->ipv6.s6_addr, sizeof(struct in6_addr));
-
-	uint16_t old_csum = ipv4Header->total_length;
-	uint16_t new_csum = rte_ipv6_cksum(new_ipv6_header);
-
-	if (ipv4Header->next_proto_id == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcp_header = (struct rte_tcp_hdr *)(mbuf->pkt_data + sizeof(struct rte_ipv4_hdr));
-		tcp_header->cksum = 0;
-		tcp_header->cksum = rte_ipv6_udptcp_cksum(new_ipv6_header, tcp_header);
-	} else if (ipv4Header->next_proto_id == IPPROTO_UDP) {
-		struct rte_udp_hdr *udp_header = (struct rte_udp_hdr *)(mbuf->pkt_data + sizeof(struct rte_ipv4_hdr));
-		udp_header->dgram_cksum = 0;
-		udp_header->dgram_cksum = rte_ipv6_udptcp_cksum(new_ipv6_header, udp_header);
-	} else if (ipv4Header->next_proto_id == IPPROTO_ICMP) {
-		struct rte_icmp_hdr *icmp_header = (struct rte_icmp_hdr *)(mbuf->pkt_data + sizeof(struct rte_ipv4_hdr));
-		icmp_header->icmp_cksum = 0;
-		icmp_header->icmp_cksum = rte_ipv6_icmp_checksum(new_ipv6_header, icmp_header);
-	}
-
-	rte_pktmbuf_free(mbuf);
 	return 0;
 }
 
@@ -279,8 +406,8 @@ new_module_nat64() {
 	snprintf(
 		module->module.name, sizeof(module->module.name), "%s", "nat64"
 	);
-	module->module.handler = balancer_handle_packets;
-	module->module.config_handler = balancer_handle_configure;
+	module->module.handler = nat64_handle_packets;
+	module->module.config_handler = nat64_handle_configure;
 
 	return &module->module;
 }
