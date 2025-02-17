@@ -314,6 +314,72 @@ nat64_handle_v6(struct ip4to6 **hash, struct packet *packet) {
 	return 0;
 }
 
+static inline int
+icmp_v4_to_v6(
+    /* in */ struct icmp *icmpHeader
+) {
+    uint8_t type = icmpHeader->icmp_type;
+    uint8_t code = icmpHeader->icmp_code;
+	
+    RTE_LOG(INFO, NAT64, "ICMPv4 type: %d, code: %d \n", type, code);
+
+    switch (type) {
+        case ICMP_UNREACH:
+            type = ICMP6_DST_UNREACH;
+
+            switch (code) {
+                case ICMP_HOST_UNREACH:
+                    code = ICMP6_DST_UNREACH_ADDR;
+                    break;
+                case ICMP_PORT_UNREACH:
+                    code = ICMP6_DST_UNREACH_NOPORT;
+                    break;
+                case ICMP_NET_UNREACH:
+                    code = ICMP6_DST_UNREACH_ADMIN; // Можно изменить на более подходящий код
+                    break;
+                case ICMP_FRAG_NEEDED:
+                    type = ICMP6_PACKET_TOO_BIG;
+                    code = 0;
+                    uint16_t mtu = rte_be_to_cpu_16(icmpHeader->icmp_nextmtu) + 20;
+                    icmpHeader->icmp_nextmtu = rte_cpu_to_be_32(mtu);
+                    break;
+
+                default:
+                    return -1;
+            }
+
+            break;
+
+        case ICMP_ECHO:
+        case ICMP_ECHOREPLY:
+            type = ICMP6_ECHO_REQUEST; // Для ICMP_ECHO
+            code = 0;
+            break;
+
+        case ICMP_TIME_EXCEEDED:
+            type = ICMP6_TIME_EXCEEDED;
+            break;
+
+        case ICMP_PARAMPROB:
+            type = ICMP6_PARAM_PROB;
+            code = ICMP6_PARAMPROB_HEADER; // Можно изменить на более подходящий код
+            break;
+
+        default:
+            RTE_LOG(WARNING, NAT64, "Unknown ICMPv4 type: %d, code: %d \n", type, code);
+            // Возможна обработка неизвестных типов или возврат ошибки
+            // return -1;
+            break;
+    }
+
+    RTE_LOG(INFO, NAT64, "Translated ICMP type: %d, code: %d \n", type, code);
+
+    icmpHeader->icmp_type = type;
+    icmpHeader->icmp_code = code;
+
+    return 0;
+}
+
 static int
 nat64_handle_v4(struct ip4to6 **hash, struct packet *packet) {
 
@@ -357,6 +423,10 @@ nat64_handle_v4(struct ip4to6 **hash, struct packet *packet) {
 	}
 
 	memcpy(&new_ipv6_header->dst_addr, entry->ip6, 16 * sizeof(uint8_t));
+
+	if (ipv4Header->next_proto_id == IPPROTO_ICMP) {
+		icmp_v4_to_v6(rte_pktmbuf_mtod_offset(mbuf, struct icmp *, packet->transport_header.offset));
+	}
 
 	return 0;
 }

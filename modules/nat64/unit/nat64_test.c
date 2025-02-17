@@ -3,9 +3,9 @@
 #include <dlfcn.h>
 #include <string.h>
 
+#include <pcap.h>
 #include <netinet/icmp6.h>
 #include <netinet/ip_icmp.h>
-#include <pcap.h>
 
 #include <rte_ether.h>
 #include <rte_ip.h>
@@ -53,9 +53,9 @@ static struct {
 	struct {
 		uint32_t ip4;
 		uint32_t ip6[4];
-	} mapping[4];
+	} mapping[8]; // Увеличиваем размер массива на 4 элемента
 } __rte_packed config_data =
-	{.count = 4,
+	{.count = 8,
 	 .mapping = {
 		 {
 			 .ip4 = RTE_BE32(RTE_IPV4(198, 51, 100, 1)),
@@ -72,6 +72,22 @@ static struct {
 		 {
 			 .ip4 = RTE_BE32(RTE_IPV4(198, 51, 100, 4)),
 			 .ip6 = {RTE_BE32(0x20010DB8), 0, 0, RTE_BE32(0x1)},
+		 },
+		 {
+			 .ip4 = RTE_BE32(RTE_IPV4(198, 51, 100, 5)),
+			 .ip6 = {RTE_BE32(0x20010DB8), 0, 0, RTE_BE32(0x8)},
+		 },
+		 {
+			 .ip4 = RTE_BE32(RTE_IPV4(198, 51, 100, 6)),
+			 .ip6 = {RTE_BE32(0x20010DB8), 0, 0, RTE_BE32(0x7)},
+		 },
+		 {
+			 .ip4 = RTE_BE32(RTE_IPV4(198, 51, 100, 7)),
+			 .ip6 = {RTE_BE32(0x20010DB8), 0, 0, RTE_BE32(0x6)},
+		 },
+		 {
+			 .ip4 = RTE_BE32(RTE_IPV4(198, 51, 100, 8)),
+			 .ip6 = {RTE_BE32(0x20010DB8), 0, 0, RTE_BE32(0x5)},
 		 },
 	 }};
 
@@ -164,7 +180,20 @@ test_new_module_nat64(void) {
 // 	memcpy(rte_pktmbuf_mtod(dm->mb, void *), &pkt, sizeof(pkt));
 // }
 
-// Create a sample IPv6 packet
+/**
+ * @brief Creates an IPv6 packet.
+ *
+ * This function creates a new IPv6 packet with the specified mapping number and protocol. The packet
+ * contains Ethernet, IPv6, and TCP headers, as well as data filled with random values.
+ *
+ * @param num Mapping number in the `config_data.mapping` array used to configure the source IPv6 addresses.
+ *            Must be within the range from 0 to `config_data.count - 1`.
+ *
+ * @param proto Protocol used in the IPv6 header. For example, IPPROTO_TCP for TCP packets.
+ *
+ * @return Pointer to a `struct packet` containing the created packet if the operation is successful.
+ *         In case of failure (e.g., when mbuf allocation fails), returns `NULL`.
+ */
 static struct packet *
 create_ipv6_packet(uint8_t num, uint8_t proto) {
 	struct rte_mbuf *mbuf = rte_pktmbuf_alloc(test_params.mbuf_pool);
@@ -410,12 +439,10 @@ static struct unit_test_suite nat64_test_suite =
 			 "test_nat64_config_handler", test_module_config_handler
 		 ),
 		 TEST_CASE_NAMED(
-			 "test_nat64_v6_to_v4_generic",
-			 test_nat64_v6_to_v4_generic
+			 "test_nat64_v6_to_v4_generic", test_nat64_v6_to_v4_generic
 		 ),
 		 TEST_CASE_NAMED(
-			 "test_nat64_v4_to_v6_generic",
-			 test_nat64_v4_to_v6_generic
+			 "test_nat64_v4_to_v6_generic", test_nat64_v4_to_v6_generic
 		 ),
 		 TEST_CASE_NAMED(
 			 "test_nat64_v6_to_v4_icmp", test_nat64_v6_to_v4_icmp
