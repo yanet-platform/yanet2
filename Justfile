@@ -24,7 +24,7 @@ dtest:
 				-v {{ ROOT_DIR }}:/yanet2 \
 				{{ TAG }} \
 				sh -c 'cd /yanet2 && just setup test'
-dbuild:
+dbuild *IGN:
 		@docker run -it --rm \
 				-v {{ ROOT_DIR }}:/yanet2 \
 				{{ TAG }} \

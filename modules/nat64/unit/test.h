@@ -27,6 +27,8 @@
 
 #include <rte_test.h>
 
+#define DEFAULT_TTL 64
+
 #define TEST_ASSERT RTE_TEST_ASSERT
 
 #define TEST_ASSERT_EQUAL RTE_TEST_ASSERT_EQUAL

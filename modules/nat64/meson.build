@@ -9,7 +9,7 @@ dp_dependencies += lib_packet_dp_dep
 dp_dependencies += lib_module_dp_dep
 
 dp_sources = files(
-  'dataplane.c',
+  'nat64dp.c',
 )
 
 lib_nat64_dp = static_library(

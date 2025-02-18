@@ -1,8 +1,3 @@
-/* SPDX-License-Identifier: BSD-3-Clause
- * Copyright(c) 2010-2014 Intel Corporation
- */
-
-
 #include <execinfo.h>
 #include <signal.h>
 #include <unistd.h>
@@ -32,9 +27,6 @@ extern cmdline_parse_ctx_t main_ctx[];
 #endif
 
 #include "test.h"
-#ifdef RTE_LIB_PDUMP
-#include "test_pdump.h"
-#endif
 
 #define RTE_LOGTYPE_APP RTE_LOGTYPE_USER7
 

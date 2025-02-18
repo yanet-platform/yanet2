@@ -9,16 +9,18 @@ dependencies += lib_module_dp_dep
 
 sources = files(
   'main.c',
-  '../dataplane.c',
+  '../nat64dp.c',
   'nat64_test.c',
   'commands.c'
 )
+
 
 u = executable(
   'unittest',
   sources,
   include_directories: [yanet_rootdir, '.', '..'],
-  dependencies: dependencies
+  dependencies: dependencies,
+  c_args : '-DDEBUG_NAT64'
 )
 
 test('nat64 unittest', u,
