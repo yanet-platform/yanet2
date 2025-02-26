@@ -65,6 +65,7 @@ func run(cmd Cmd) error {
 	if err != nil {
 		return fmt.Errorf("failed to create director: %w", err)
 	}
+	defer director.Close()
 
 	ctx := context.Background()
 	wg, ctx := errgroup.WithContext(ctx)

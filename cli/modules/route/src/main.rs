@@ -1,9 +1,11 @@
 //! CLI for YANET "route" module.
 
-use core::error::Error;
+use core::{error::Error, net::IpAddr};
 
 use clap::{ArgAction, Parser};
 use code::{route_client::RouteClient, InsertRouteRequest};
+use ipnet::IpNet;
+use tonic::transport::Channel;
 use ync::logging;
 
 #[allow(non_snake_case)]
@@ -28,8 +30,28 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
-    /// Insert a route.
-    Insert,
+    /// Inserts a unicast static route.
+    Insert(RouteInsertCmd),
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct RouteInsertCmd {
+    /// The destination prefix of the route.
+    ///
+    /// The prefix must be an IPv4 or IPv6 address followed by "/" and the
+    /// length of the prefix.
+    pub prefix: IpNet,
+    /// Route module name.
+    #[arg(long = "mod")]
+    pub module_name: String,
+    /// The IP address of the nexthop router.
+    #[arg(long = "via")]
+    pub nexthop_addr: IpAddr,
+    /// NUMA node index where changes should be applied, optionally repeated.
+    ///
+    /// If not specified, the route will be applied to all NUMA nodes.
+    #[arg(long)]
+    pub numa: Option<Vec<u32>>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -44,15 +66,36 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+    let mut service = RouteService::new(cmd.endpoint).await?;
+
     match cmd.mode {
-        ModeCmd::Insert => route_insert(cmd.endpoint).await,
+        ModeCmd::Insert(cmd) => service.insert_route(cmd).await,
     }
 }
 
-async fn route_insert(endpoint: String) -> Result<(), Box<dyn Error>> {
-    let mut client = RouteClient::connect(endpoint).await?;
-    let resp = client.insert_route(InsertRouteRequest {}).await?;
+pub struct RouteService {
+    client: RouteClient<Channel>,
+}
 
-    log::info!("LOL KEK: {:?}", resp);
-    Ok(())
+impl RouteService {
+    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
+        let client = RouteClient::connect(endpoint).await?;
+        let m = Self { client };
+
+        Ok(m)
+    }
+
+    pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Box<dyn Error>> {
+        let request = InsertRouteRequest {
+            module_name: cmd.module_name,
+            prefix: cmd.prefix.to_string(),
+            nexthop_addr: cmd.nexthop_addr.to_string(),
+            numa: cmd.numa.unwrap_or_default(),
+        };
+
+        let resp = self.client.insert_route(request).await?;
+
+        log::debug!("InsertRouteResponse: {:?}", resp);
+        Ok(())
+    }
 }

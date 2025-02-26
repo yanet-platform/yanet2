@@ -68,6 +68,22 @@ struct dp_config {
 	struct dp_topology dp_topology;
 };
 
+static inline size_t
+dp_config_modules_count(struct dp_config *dp_config) {
+	return dp_config->module_count;
+}
+
+static inline struct dp_module *
+dp_config_module_by_index(struct dp_config *dp_config, size_t index) {
+	if (index >= dp_config->module_count) {
+		return NULL;
+	}
+
+	struct dp_module *modules = ADDR_OF(dp_config, dp_config->dp_modules);
+
+	return modules + index;
+}
+
 static inline int
 dp_config_lookup_module(
 	struct dp_config *dp_config, const char *name, uint64_t *index

@@ -17,6 +17,7 @@ import (
 )
 
 type Module interface {
+	Close() error
 	Run(ctx context.Context) error
 }
 
@@ -125,6 +126,20 @@ func NewGateway(cfg *Config, options ...GatewayOption) *Gateway {
 		registry:       registry,
 		log:            log,
 	}
+}
+
+// Close closes the gateway API.
+func (m *Gateway) Close() error {
+	for _, builtInModule := range m.builtInModules {
+		if err := builtInModule.Close(); err != nil {
+			m.log.Warnw("failed to close built-in module",
+				zap.String("module", fmt.Sprintf("%T", builtInModule)),
+				zap.Error(err),
+			)
+		}
+	}
+
+	return nil
 }
 
 // Run runs the gateway API until the specified context is canceled.

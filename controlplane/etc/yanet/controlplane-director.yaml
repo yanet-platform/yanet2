@@ -11,95 +11,12 @@ gateway:
     endpoint: &gateway_endpoint "[::1]:8080"
 modules:
   route:
+    # MemoryPathPrefix is the path to the shared-memory file that is used to
+    # communicate with dataplane.
+    #
+    # NUMA index will be appended to the path.
+    memory_path_prefix: /dev/hugepages/data-
+    # Memory requirements for a single transaction.
+    memory_requirements: 16777216
     endpoint: "[::1]:0"
     gateway_endpoint: *gateway_endpoint
-
-# Shared memory structures description.
-structures:
-  # Longest Prefix Match structures group.
-  lpm:
-    # Unique structure key.
-    #
-    # This key is used to identify the structure in the shared memory, i.e. to
-    # locate its structure address.
-    route_lpm:
-      # Key size in bytes.
-      #
-      # In this case each key is an IPv6 address (16 bytes).
-      key_size: 16
-      # Value size in bytes.
-      value_size: 128
-      # The maximum number of bytes that can be allocated for this structure.
-      memory_limit: 1048576
-    acl6_sources_networks:
-      key_size: 16
-      value_size: 4
-      memory_limit: 1073741824
-    acl6_destination_networks:
-      key_size: 16
-      value_size: 4
-      memory_limit: 1073741824
-  hashmap:
-    # src+dst networks -> eqId0.
-    acl6_phase_network:
-      key_size: 8
-      value_size: 4
-      memory_limit: 1073741824
-    # sport+dport+proto+flags  -> eqId1.
-    acl6_phase_transport:
-      key_size: 16
-      value_size: 4
-      memory_limit: 1073741824
-    # eqId0+eqId1 -> eqId2.
-    acl6_phase1:
-      key_size: 8
-      value_size: 4
-      memory_limit: 1073741824
-    # eqId2 -> rule number + action.
-    acl6_phase2:
-      key_size: 4
-      value_size: 8
-      memory_limit: 1073741824
-  array:
-    acl6_sources_ports:
-      value_size: 2
-      max_entries: 65536
-    acl6_destination_ports:
-      value_size: 2
-      max_entries: 65536
-    acl6_protocols:
-      value_size: 1
-      max_entries: 256
-    acl6_flags:
-      value_size: 1
-      max_entries: 256
-  ring: {}
-  blob: {}
-
-# Modules configuration.
-modules_:
-  # Module name.
-  route:
-    # Describes links to structures.
-    structures:
-      # Structures identifyer in the module.
-      lpm: [route_lpm]
-  acl:
-    structures:
-      lpm:
-        - acl6_sources_networks
-        - acl6_destination_networks
-      hashmap:
-        - acl6_phase_network
-        - acl6_phase_transport
-        - acl6_phase1
-        - acl6_phase2
-
-pipeline:
-  # Pipeline name.
-  default:  
-    # Graph description.
-    edges:
-      - [route, acl]
-      - [acl, drop]
-      - [acl, logical_port_out]

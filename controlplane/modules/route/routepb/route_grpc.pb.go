@@ -25,7 +25,10 @@ const (
 // RouteClient is the client API for Route service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Route is a service for routing table management.
 type RouteClient interface {
+	// InsertRoute inserts a route into the routing table.
 	InsertRoute(ctx context.Context, in *InsertRouteRequest, opts ...grpc.CallOption) (*InsertRouteResponse, error)
 }
 
@@ -50,7 +53,10 @@ func (c *routeClient) InsertRoute(ctx context.Context, in *InsertRouteRequest, o
 // RouteServer is the server API for Route service.
 // All implementations must embed UnimplementedRouteServer
 // for forward compatibility.
+//
+// Route is a service for routing table management.
 type RouteServer interface {
+	// InsertRoute inserts a route into the routing table.
 	InsertRoute(context.Context, *InsertRouteRequest) (*InsertRouteResponse, error)
 	mustEmbedUnimplementedRouteServer()
 }

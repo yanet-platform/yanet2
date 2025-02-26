@@ -1,0 +1,161 @@
+package route
+
+//#cgo CFLAGS: -I../../../../../ -I../../../../../lib
+//#cgo LDFLAGS: -L../../../../../build/modules/route/ -lroute_cp
+//
+//#include <stdlib.h>
+//#include "api/agent.h"
+//#include "modules/route/controlplane.h"
+import "C"
+
+import (
+	"fmt"
+	"net"
+	"net/netip"
+	"unsafe"
+
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
+	"github.com/yanet-platform/yanet2/controlplane/internal/pkg/ffi"
+)
+
+type ModuleConfig struct {
+	ptr ffi.ModuleConfig
+}
+
+func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	ptr, err := C.route_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize module config: %w", err)
+	}
+	if ptr == nil {
+		return nil, fmt.Errorf("failed to initialize module config: module %q not found", name)
+	}
+
+	return &ModuleConfig{
+		ptr: ffi.NewModuleConfig(unsafe.Pointer(ptr)),
+	}, nil
+}
+
+func (m *ModuleConfig) asRawPtr() *C.struct_module_data {
+	return (*C.struct_module_data)(m.ptr.AsRawPtr())
+}
+
+func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
+	return m.ptr
+}
+
+func (m *ModuleConfig) RouteAdd(srcAddr net.HardwareAddr, dstAddr net.HardwareAddr) (int, error) {
+	if len(srcAddr) != 6 {
+		return -1, fmt.Errorf("unsupported source MAC address: must be EUI-48")
+	}
+	if len(dstAddr) != 6 {
+		return -1, fmt.Errorf("unsupported destination MAC address: must be EUI-48")
+	}
+
+	idx, err := C.route_module_config_add_route(
+		m.asRawPtr(),
+		*(*C.struct_ether_addr)(unsafe.Pointer(&srcAddr[0])),
+		*(*C.struct_ether_addr)(unsafe.Pointer(&dstAddr[0])),
+	)
+	if err != nil {
+		return -1, fmt.Errorf("failed to add route: %w", err)
+	}
+	if idx < 0 {
+		return -1, fmt.Errorf("failed to add route: unknown error")
+	}
+
+	return int(idx), nil
+}
+
+func (m *ModuleConfig) RouteListAdd(routeIndices []int) (int, error) {
+	cRouteIndices := make([]C.uint32_t, len(routeIndices))
+	for idx, v := range routeIndices {
+		cRouteIndices[idx] = C.uint32_t(v)
+	}
+
+	idx, err := C.route_module_config_add_route_list((*C.struct_module_data)(m.ptr.AsRawPtr()), C.size_t(len(routeIndices)), &cRouteIndices[0])
+	if err != nil {
+		return -1, fmt.Errorf("failed to add route list: %w", err)
+	}
+	if idx < 0 {
+		return -1, fmt.Errorf("failed to add route list: unknown error")
+	}
+
+	return int(idx), nil
+}
+
+func (m *ModuleConfig) PrefixAdd(prefix netip.Prefix, routeListIdx uint32) error {
+	if prefix.Addr().Is4() {
+		return m.prefixAdd4(prefix, routeListIdx)
+	}
+	if prefix.Addr().Is6() {
+		return m.prefixAdd6(prefix, routeListIdx)
+	}
+
+	return fmt.Errorf("unsupported prefix: must be either IPv4 or IPv6")
+}
+
+func (m *ModuleConfig) prefixAdd4(prefix netip.Prefix, routeListIdx uint32) error {
+	addrStart, err := netipAddr4ToFFI(prefix.Addr())
+	if err != nil {
+		return err
+	}
+	addrEnd, err := netipAddr4ToFFI(xnetip.LastAddr(prefix))
+	if err != nil {
+		return err
+	}
+
+	rc := C.route_module_config_add_prefix_v4(m.asRawPtr(), &addrStart[0], &addrEnd[0], C.uint32_t(routeListIdx))
+	if rc != 0 {
+		return fmt.Errorf("failed to add prefix: unknown error")
+	}
+
+	return nil
+}
+
+func (m *ModuleConfig) prefixAdd6(prefix netip.Prefix, routeListIdx uint32) error {
+	addrStart, err := netipAddr6ToFFI(prefix.Addr())
+	if err != nil {
+		return err
+	}
+	addrEnd, err := netipAddr6ToFFI(xnetip.LastAddr(prefix))
+	if err != nil {
+		return err
+	}
+
+	rc := C.route_module_config_add_prefix_v6(m.asRawPtr(), &addrStart[0], &addrEnd[0], C.uint32_t(routeListIdx))
+	if rc != 0 {
+		return fmt.Errorf("failed to add prefix: unknown error")
+	}
+
+	return nil
+}
+
+func netipAddr4ToFFI(ip netip.Addr) ([4]C.uint8_t, error) {
+	if !ip.Is4() {
+		return [4]C.uint8_t{}, fmt.Errorf("unsupported IP address: must be IPv4")
+	}
+
+	out := [4]C.uint8_t{}
+	for idx, v := range ip.As4() {
+		out[idx] = C.uint8_t(v)
+	}
+
+	return out, nil
+}
+
+func netipAddr6ToFFI(ip netip.Addr) ([16]C.uint8_t, error) {
+	if !ip.Is6() {
+		return [16]C.uint8_t{}, fmt.Errorf("unsupported IP address: must be IPv6")
+	}
+
+	out := [16]C.uint8_t{}
+	for idx, v := range ip.As16() {
+		out[idx] = C.uint8_t(v)
+	}
+
+	return out, nil
+}

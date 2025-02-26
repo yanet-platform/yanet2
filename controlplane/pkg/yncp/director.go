@@ -2,6 +2,7 @@ package yncp
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -65,10 +66,15 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	log.Infof("initializing YANET controlplane ...")
 	log.Debugw("parsed config", zap.Any("config", cfg))
 
+	routeModule, err := route.NewRouteModule(cfg.Modules.Route, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize route built-in module: %w", err)
+	}
+
 	gw := gateway.NewGateway(
 		cfg.Gateway,
 		gateway.WithBuiltInModule(
-			route.NewRouteModule(cfg.Modules.Route, log),
+			routeModule,
 		),
 		gateway.WithLog(log),
 		gateway.WithAtomicLogLevel(opts.LogLevel),
@@ -79,6 +85,11 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		gateway: gw,
 		log:     log,
 	}, nil
+}
+
+// Close closes the YANET controlplane director.
+func (m *Director) Close() error {
+	return m.gateway.Close()
 }
 
 // Run runs the YANET controlplane director.

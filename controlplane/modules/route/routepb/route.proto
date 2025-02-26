@@ -4,13 +4,35 @@ package routepb;
 
 option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/route/routepb;routepb";
 
+// Route is a service for routing table management.
 service Route {
+	// InsertRoute inserts a route into the routing table.
 	rpc InsertRoute(InsertRouteRequest) returns (InsertRouteResponse) {
 	}
 }
 
+// InsertRouteRequest is the request to insert a route.
 message InsertRouteRequest {
+	// ModuleName is the name of the module into which the route should be
+	// inserted.
+	string module_name = 1;
+	// The destination prefix of the route.
+	//
+	// The prefix must be an IPv4 or IPv6 address followed by "/" and the
+	// length of the prefix.
+	string prefix = 2;
+	// The IP address of the nexthop router.
+	//
+	// The address must be either an IPv4 or IPv6 address.
+	//
+	// Example: "fe80::1", "192.168.1.1"
+	string nexthop_addr = 3;
+	// Numa specifies NUMA nodes that should be affected.
+	//
+	// Empty means all NUMA nodes.
+	repeated uint32 numa = 4;
 }
 
+// InsertRouteResponse is the response of "InsertRoute" request.
 message InsertRouteResponse {
 }
