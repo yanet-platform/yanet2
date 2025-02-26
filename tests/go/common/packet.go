@@ -80,4 +80,3 @@ func PacketFrontToPayload(pf *C.struct_packet_front) PacketFrontResult {
 		Bypass: result[3],
 	}
 }
-

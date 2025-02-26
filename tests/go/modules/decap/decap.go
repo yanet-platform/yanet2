@@ -26,10 +26,10 @@ import (
 	"github.com/gopacket/gopacket"
 )
 
-func memCtxCreate() *C.struct_memory_context{
+func memCtxCreate() *C.struct_memory_context {
 	blockAlloc := C.struct_block_allocator{}
 	arena := C.malloc(1 << 20)
-	C.block_allocator_put_arena(&blockAlloc, arena, 1 << 20)
+	C.block_allocator_put_arena(&blockAlloc, arena, 1<<20)
 	memCtx := C.struct_memory_context{}
 	C.memory_context_init(&memCtx, C.CString("test"), &blockAlloc)
 	return &memCtx
