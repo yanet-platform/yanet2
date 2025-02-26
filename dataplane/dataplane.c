@@ -473,13 +473,16 @@ dataplane_init(
 			node_idx
 		);
 
-		dataplane_init_storage(
+		int rc = dataplane_init_storage(
 			storage_name,
 			dp_memory,
 			cp_memory,
 			&node->dp_config,
 			&node->cp_config
 		);
+		if (rc == -1) {
+			return -1;
+		}
 
 		uint16_t *forward_map = (uint16_t *)memory_balloc(
 			&node->dp_config->memory_context,

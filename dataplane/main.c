@@ -8,7 +8,7 @@ main(int argc, char **argv) {
 
 	// FIXME: dataplane configuration
 	// FIXME: dataplane error handling
-	dataplane_init(
+	int rc = dataplane_init(
 		&dataplane,
 		argv[0],
 		"/dev/hugepages/data",
@@ -18,6 +18,9 @@ main(int argc, char **argv) {
 		argc - 1,
 		(const char **)argv + 1
 	);
+	if (rc != 0) {
+		return -1;
+	}
 
 	dataplane_start(&dataplane);
 
