@@ -83,7 +83,7 @@ route_module_config_add_route(
 
 int
 route_module_config_add_route_list(
-	struct module_data *module_data, uint64_t count, const uint64_t *indexes
+	struct module_data *module_data, size_t count, const uint32_t *indexes
 ) {
 	struct route_module_config *config = container_of(
 		module_data, struct route_module_config, module_data
@@ -93,7 +93,7 @@ route_module_config_add_route_list(
 
 	uint64_t *route_indexes = DECODE_ADDR(config, config->route_indexes);
 
-	for (uint64_t idx = 0; idx < count; ++idx) {
+	for (size_t idx = 0; idx < count; ++idx) {
 		/*
 		 * FIXME: if there are huge loads of route indexes then
 		 * the loop may be inefficient. However, I do not expect

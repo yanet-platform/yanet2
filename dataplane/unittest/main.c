@@ -139,7 +139,7 @@ main(int argc, char **argv) {
 		}
 	);
 
-	route_module_config_add_route_list(rmc, 1, (uint64_t[]){0});
+	route_module_config_add_route_list(rmc, 1, (uint32_t[]){0});
 
 	route_module_config_add_prefix_v4(
 		rmc,

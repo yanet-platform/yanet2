@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "common/network.h"
@@ -19,7 +20,7 @@ route_module_config_add_route(
 
 int
 route_module_config_add_route_list(
-	struct module_data *module_data, uint64_t count, const uint64_t *indexes
+	struct module_data *module_data, size_t count, const uint32_t *indexes
 );
 
 int
