@@ -78,7 +78,7 @@ route_module_config_add_route(
 	};
 	config->routes = ENCODE_ADDR(config, routes);
 
-	return 0;
+	return config->route_count - 1;
 }
 
 int
@@ -135,7 +135,7 @@ route_module_config_add_route_list(
 
 	config->route_lists = ENCODE_ADDR(config, route_lists);
 
-	return 0;
+	return config->route_list_count - 1;
 }
 
 int
