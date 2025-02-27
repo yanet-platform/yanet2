@@ -17,6 +17,9 @@ agent_connect(
 ) {
 
 	int mem_fd = open(storage_name, O_RDWR, S_IRUSR | S_IWUSR);
+	if (mem_fd == -1) {
+		return NULL;
+	}
 	struct stat stat;
 	fstat(mem_fd, &stat);
 
@@ -28,6 +31,9 @@ agent_connect(
 		     mem_fd,
 		     0);
 	close(mem_fd);
+	if (storage == MAP_FAILED) {
+		return NULL;
+	}
 
 	struct dp_config *dp_config = (struct dp_config *)storage;
 	struct cp_config *cp_config =
