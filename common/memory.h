@@ -30,7 +30,7 @@ memory_context_init(
 	context->balloc_size = 0;
 	context->bfree_size = 0;
 
-	context->block_allocator = ENCODE_ADDR(context, block_allocator);
+	context->block_allocator = OFFSET_OF(context, block_allocator);
 	strncpy(context->name, name, sizeof(context->name) - 1);
 	context->name[sizeof(context->name) - 1] = 0;
 
@@ -48,9 +48,8 @@ memory_context_init_from(
 	context->balloc_size = 0;
 	context->bfree_size = 0;
 
-	context->block_allocator = ENCODE_ADDR(
-		context, DECODE_ADDR(parent, parent->block_allocator)
-	);
+	context->block_allocator =
+		OFFSET_OF(context, ADDR_OF(parent, parent->block_allocator));
 	strncpy(context->name, name, sizeof(context->name) - 1);
 	context->name[sizeof(context->name) - 1] = 0;
 
@@ -62,7 +61,7 @@ memory_balloc(struct memory_context *context, size_t size) {
 	++context->balloc_count;
 	context->balloc_size += size;
 	return block_allocator_balloc(
-		DECODE_ADDR(context, context->block_allocator), size
+		ADDR_OF(context, context->block_allocator), size
 	);
 }
 
@@ -71,7 +70,7 @@ memory_bfree(struct memory_context *context, void *block, size_t size) {
 	++context->bfree_count;
 	context->bfree_size += size;
 	return block_allocator_bfree(
-		DECODE_ADDR(context, context->block_allocator), block, size
+		ADDR_OF(context, context->block_allocator), block, size
 	);
 }
 

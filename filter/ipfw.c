@@ -301,13 +301,13 @@ struct value_set_ctx {
 static int
 action_list_is_term(struct value_registry *registry, uint32_t range_idx) {
 	struct value_range *range =
-		DECODE_ADDR(registry, registry->ranges) + range_idx;
+		ADDR_OF(registry, registry->ranges) + range_idx;
 	if (range->count == 0)
 		return 0;
 
-	uint32_t action_id = DECODE_ADDR(
-		registry, registry->values
-	)[range->from + range->count - 1];
+	uint32_t action_id =
+		ADDR_OF(registry,
+			registry->values)[range->from + range->count - 1];
 	return !(action_id & ACTION_NON_TERMINATE);
 }
 
@@ -330,9 +330,7 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 			return -1;
 
 		struct value_range *copy_range =
-			DECODE_ADDR(
-				set_ctx->registry, set_ctx->registry->ranges
-			) +
+			ADDR_OF(set_ctx->registry, set_ctx->registry->ranges) +
 			prev_value;
 
 		for (uint32_t ridx = copy_range->from;
@@ -340,10 +338,8 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 		     ++ridx) {
 			value_registry_collect(
 				set_ctx->registry,
-				DECODE_ADDR(
-					set_ctx->registry,
-					set_ctx->registry->values
-				)[ridx]
+				ADDR_OF(set_ctx->registry,
+					set_ctx->registry->values)[ridx]
 			);
 		}
 

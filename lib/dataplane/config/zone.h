@@ -72,8 +72,7 @@ static inline int
 dp_config_lookup_module(
 	struct dp_config *dp_config, const char *name, uint64_t *index
 ) {
-	struct dp_module *modules =
-		DECODE_ADDR(dp_config, dp_config->dp_modules);
+	struct dp_module *modules = ADDR_OF(dp_config, dp_config->dp_modules);
 	for (uint64_t idx = 0; idx < dp_config->module_count; ++idx) {
 		if (!strncmp(modules[idx].name, name, 80)) {
 			*index = idx;
@@ -109,12 +108,12 @@ cp_config_update_modules(
 ) {
 	// lock
 	struct cp_config_gen *old_config_gen =
-		DECODE_ADDR(cp_config, cp_config->cp_config_gen);
+		ADDR_OF(cp_config, cp_config->cp_config_gen);
 	// ref config
 	// unlock
 
 	struct cp_module_registry *old_module_registry =
-		DECODE_ADDR(old_config_gen, old_config_gen->module_registry);
+		ADDR_OF(old_config_gen, old_config_gen->module_registry);
 
 	uint64_t new_module_count = old_module_registry->count;
 	for (uint64_t new_idx = 0; new_idx < module_count; ++new_idx) {
@@ -126,12 +125,11 @@ cp_config_update_modules(
 				old_module_registry->modules + old_idx;
 
 			if (module_datas[new_idx]->index ==
-				    DECODE_ADDR(old_module, old_module->data)
+				    ADDR_OF(old_module, old_module->data)
 					    ->index &&
 			    !strncmp(
 				    module_datas[new_idx]->name,
-				    DECODE_ADDR(old_module, old_module->data)
-					    ->name,
+				    ADDR_OF(old_module, old_module->data)->name,
 				    64
 			    )) {
 				found = true;
@@ -163,9 +161,9 @@ cp_config_update_modules(
 			new_module_registry->modules + idx;
 
 		*new_module = (struct cp_module){
-			.data = ENCODE_ADDR(
+			.data = OFFSET_OF(
 				new_module,
-				DECODE_ADDR(old_module, old_module->data)
+				ADDR_OF(old_module, old_module->data)
 			),
 		};
 	}
@@ -181,15 +179,14 @@ cp_config_update_modules(
 				new_module_registry->modules + old_idx;
 
 			if (module_datas[new_idx]->index ==
-				    DECODE_ADDR(new_module, new_module->data)
+				    ADDR_OF(new_module, new_module->data)
 					    ->index &&
 			    !strncmp(
 				    module_datas[new_idx]->name,
-				    DECODE_ADDR(new_module, new_module->data)
-					    ->name,
+				    ADDR_OF(new_module, new_module->data)->name,
 				    64
 			    )) {
-				new_module->data = ENCODE_ADDR(
+				new_module->data = OFFSET_OF(
 					new_module, module_datas[new_idx]
 				);
 
@@ -203,7 +200,7 @@ cp_config_update_modules(
 				new_module_registry->count;
 
 			*new_module = (struct cp_module){
-				.data = ENCODE_ADDR(
+				.data = OFFSET_OF(
 					new_module, module_datas[new_idx]
 				),
 			};
@@ -213,20 +210,20 @@ cp_config_update_modules(
 	// FIXME: assert new_config_gen.module_count == new_module_count
 
 	new_config_gen->module_registry =
-		ENCODE_ADDR(new_config_gen, new_module_registry);
+		OFFSET_OF(new_config_gen, new_module_registry);
 
 	/*
 	 * Now we have to update pipelines
 	 * As we do not change original module order we may just to copy
 	 * pipeline registry to the new config generation.
 	 */
-	new_config_gen->pipeline_registry = ENCODE_ADDR(
+	new_config_gen->pipeline_registry = OFFSET_OF(
 		new_config_gen,
-		DECODE_ADDR(old_config_gen, old_config_gen->pipeline_registry)
+		ADDR_OF(old_config_gen, old_config_gen->pipeline_registry)
 	);
 
 	// lock
-	cp_config->cp_config_gen = ENCODE_ADDR(cp_config, new_config_gen);
+	cp_config->cp_config_gen = OFFSET_OF(cp_config, new_config_gen);
 
 	// unlock
 	return 0;
@@ -240,14 +237,12 @@ cp_config_gen_lookup_module(
 	uint64_t *res_index
 ) {
 	struct cp_module_registry *module_registry =
-		DECODE_ADDR(cp_config_gen, cp_config_gen->module_registry);
+		ADDR_OF(cp_config_gen, cp_config_gen->module_registry);
 	struct cp_module *modules = module_registry->modules;
 	for (uint64_t idx = 0; idx < module_registry->count; ++idx) {
 		struct cp_module *module = modules + idx;
-		if (index == DECODE_ADDR(module, module->data)->index &&
-		    !strncmp(
-			    name, DECODE_ADDR(module, module->data)->name, 64
-		    )) {
+		if (index == ADDR_OF(module, module->data)->index &&
+		    !strncmp(name, ADDR_OF(module, module->data)->name, 64)) {
 			*res_index = idx;
 			return 0;
 		}
@@ -267,7 +262,7 @@ cp_config_update_pipelines(
 ) {
 	// lock
 	struct cp_config_gen *old_config_gen =
-		DECODE_ADDR(cp_config, cp_config->cp_config_gen);
+		ADDR_OF(cp_config, cp_config->cp_config_gen);
 	// ref config
 	// unlock
 
@@ -276,9 +271,9 @@ cp_config_update_pipelines(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
 		);
 
-	new_config_gen->module_registry = ENCODE_ADDR(
+	new_config_gen->module_registry = OFFSET_OF(
 		new_config_gen,
-		DECODE_ADDR(old_config_gen, old_config_gen->module_registry)
+		ADDR_OF(old_config_gen, old_config_gen->module_registry)
 	);
 
 	struct cp_pipeline_registry *new_pipeline_registry =
@@ -326,16 +321,16 @@ cp_config_update_pipelines(
 		*cp_pipeline = (struct cp_pipeline){
 			.length = pipeline_config->length,
 			.module_indexes =
-				ENCODE_ADDR(cp_pipeline, new_module_indexes),
+				OFFSET_OF(cp_pipeline, new_module_indexes),
 		};
 	}
 
 	new_pipeline_registry->count = pipeline_count;
 	new_config_gen->pipeline_registry =
-		ENCODE_ADDR(new_config_gen, new_pipeline_registry);
+		OFFSET_OF(new_config_gen, new_pipeline_registry);
 
 	// lock
-	cp_config->cp_config_gen = ENCODE_ADDR(cp_config, new_config_gen);
+	cp_config->cp_config_gen = OFFSET_OF(cp_config, new_config_gen);
 
 	// unlock
 	return 0;

@@ -14,9 +14,9 @@ forward_select_device(struct dp_config *dp_config, uint16_t device_id) {
 	if (device_id >= dp_config->dp_topology.device_count)
 		return device_id;
 
-	uint16_t *forward_map = DECODE_ADDR(
-		&dp_config->dp_topology, dp_config->dp_topology.forward_map
-	);
+	uint16_t *forward_map =
+		ADDR_OF(&dp_config->dp_topology,
+			dp_config->dp_topology.forward_map);
 
 	return forward_map[device_id];
 }

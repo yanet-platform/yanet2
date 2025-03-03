@@ -34,7 +34,7 @@ block_allocator_init(struct block_allocator *allocator) {
 		allocator->pools[pool_idx].allocate = 0;
 		allocator->pools[pool_idx].free = 0;
 		allocator->pools[pool_idx].borrow = 0;
-		allocator->pools[pool_idx].free_list = ENCODE_ADDR(
+		allocator->pools[pool_idx].free_list = OFFSET_OF(
 			allocator, (void *)&allocator->pools[pool_idx].free_list
 		);
 	}
@@ -70,7 +70,7 @@ block_allocator_pool_get(
 ) {
 	(void)allocator;
 
-	void *result = DECODE_ADDR(allocator, pool->free_list);
+	void *result = ADDR_OF(allocator, pool->free_list);
 	pool->free_list = *(void **)result;
 	++pool->allocate;
 	--pool->free;
@@ -92,8 +92,8 @@ block_allocator_pool_borrow(
 	size_t size = block_allocator_pool_size(allocator, pool_index);
 	void *next_data = (void *)((uintptr_t)data + size);
 	*(void **)next_data = pool->free_list;
-	*(void **)data = ENCODE_ADDR(allocator, next_data);
-	pool->free_list = ENCODE_ADDR(allocator, data);
+	*(void **)data = OFFSET_OF(allocator, next_data);
+	pool->free_list = OFFSET_OF(allocator, data);
 
 	++parent_pool->borrow;
 	pool->free += 2;
@@ -114,7 +114,7 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 
 	struct block_allocator_pool *pool = allocator->pools + pool_index;
 
-	//	if (DECODE_ADDR(allocator, pool->free_list) == NULL) {
+	//	if (ADDR_OF(allocator, pool->free_list) == NULL) {
 	if (pool->free == 0) {
 		/*
 		 * Look for the first parent pool with free memory block
@@ -122,7 +122,7 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 		 */
 		size_t parent_pool_index = pool_index + 1;
 		while (parent_pool_index < MEMORY_BLOCK_ALLOCATOR_EXP &&
-		       /*		       DECODE_ADDR(
+		       /*		       ADDR_OF(
 						      allocator,
 						      allocator->pools[parent_pool_index].free_list
 					      ) == NULL) {
@@ -181,7 +181,7 @@ block_allocator_bfree(
 	struct block_allocator_pool *pool = allocator->pools + pool_index;
 
 	*(void **)block = pool->free_list;
-	pool->free_list = ENCODE_ADDR(allocator, block);
+	pool->free_list = OFFSET_OF(allocator, block);
 	++pool->free;
 }
 

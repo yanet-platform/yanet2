@@ -323,7 +323,7 @@ dataplane_load_module(
 	struct module *module = loader();
 
 	struct dp_module *dp_modules =
-		DECODE_ADDR(dp_config, dp_config->dp_modules);
+		ADDR_OF(dp_config, dp_config->dp_modules);
 	if (mem_array_expand_exp(
 		    &dp_config->memory_context,
 		    (void **)&dp_modules,
@@ -339,7 +339,7 @@ dataplane_load_module(
 	strncpy(dp_module->name, module->name, 80);
 	dp_module->handler = module->handler;
 
-	dp_config->dp_modules = ENCODE_ADDR(dp_config, dp_modules);
+	dp_config->dp_modules = OFFSET_OF(dp_config, dp_modules);
 
 	return 0;
 }
@@ -393,8 +393,7 @@ dataplane_init_storage(
 		&dp_config->memory_context, "dp", &dp_config->block_allocator
 	);
 
-	dp_config->dp_modules =
-		ENCODE_ADDR(dp_config, (struct dp_module *)NULL);
+	dp_config->dp_modules = OFFSET_OF(dp_config, (struct dp_module *)NULL);
 	dp_config->module_count = 0;
 
 	struct cp_config *cp_config =
@@ -430,12 +429,12 @@ dataplane_init_storage(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
 		);
 	cp_config_gen->module_registry =
-		ENCODE_ADDR(cp_config_gen, cp_module_registry);
+		OFFSET_OF(cp_config_gen, cp_module_registry);
 	cp_config_gen->pipeline_registry =
-		ENCODE_ADDR(cp_config_gen, cp_pipeline_registry);
-	cp_config->cp_config_gen = ENCODE_ADDR(cp_config, cp_config_gen);
+		OFFSET_OF(cp_config_gen, cp_pipeline_registry);
+	cp_config->cp_config_gen = OFFSET_OF(cp_config, cp_config_gen);
 
-	dp_config->cp_config = ENCODE_ADDR(dp_config, cp_config);
+	dp_config->cp_config = OFFSET_OF(dp_config, cp_config);
 
 	*res_dp_config = dp_config;
 	*res_cp_config = cp_config;
@@ -496,7 +495,7 @@ dataplane_init(
 
 		node->dp_config->dp_topology.device_count = device_count * 2;
 		node->dp_config->dp_topology.forward_map =
-			ENCODE_ADDR(&node->dp_config->dp_topology, forward_map);
+			OFFSET_OF(&node->dp_config->dp_topology, forward_map);
 
 		// FIXME: load modules into dp memory
 		dataplane_load_module(node->dp_config, bin_hndl, "forward");

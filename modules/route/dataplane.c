@@ -85,7 +85,7 @@ route_handle_packets(
 		}
 
 		struct route_list *route_list =
-			DECODE_ADDR(route_config, route_config->route_lists) +
+			ADDR_OF(route_config, route_config->route_lists) +
 			route_list_id;
 		if (route_list->count == 0) {
 			packet_front_drop(packet_front, packet);
@@ -93,12 +93,12 @@ route_handle_packets(
 		}
 
 		// TODO: Route selection should be based on hash/NUMA/etc
-		uint64_t route_index = DECODE_ADDR(
-			route_config, route_config->route_indexes
-		)[route_list->start + packet->hash % route_list->count];
+		uint64_t route_index =
+			ADDR_OF(route_config, route_config->route_indexes
+			)[route_list->start + packet->hash % route_list->count];
 
 		struct route *route =
-			DECODE_ADDR(route_config, route_config->routes) +
+			ADDR_OF(route_config, route_config->routes) +
 			route_index;
 		route_set_packet_destination(packet, route);
 		packet_front_output(packet_front, packet);

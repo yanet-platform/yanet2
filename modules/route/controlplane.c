@@ -41,13 +41,13 @@ route_module_config_init(struct agent *agent, const char *name) {
 	lpm_init(&config->lpm_v6, memory_context);
 
 	config->route_count = 0;
-	config->routes = ENCODE_ADDR(config, NULL);
+	config->routes = OFFSET_OF(config, NULL);
 
 	config->route_list_count = 0;
-	config->route_lists = ENCODE_ADDR(config, NULL);
+	config->route_lists = OFFSET_OF(config, NULL);
 
 	config->route_index_count = 0;
-	config->route_indexes = ENCODE_ADDR(config, NULL);
+	config->route_indexes = OFFSET_OF(config, NULL);
 
 	return &config->module_data;
 }
@@ -61,7 +61,7 @@ route_module_config_add_route(
 	struct route_module_config *config = container_of(
 		module_data, struct route_module_config, module_data
 	);
-	struct route *routes = DECODE_ADDR(config, config->routes);
+	struct route *routes = ADDR_OF(config, config->routes);
 
 	if (mem_array_expand_exp(
 		    &config->module_data.memory_context,
@@ -76,7 +76,7 @@ route_module_config_add_route(
 		.dst_addr = dst_addr,
 		.src_addr = src_addr,
 	};
-	config->routes = ENCODE_ADDR(config, routes);
+	config->routes = OFFSET_OF(config, routes);
 
 	return config->route_count - 1;
 }
@@ -91,7 +91,7 @@ route_module_config_add_route_list(
 
 	uint64_t start = config->route_index_count;
 
-	uint64_t *route_indexes = DECODE_ADDR(config, config->route_indexes);
+	uint64_t *route_indexes = ADDR_OF(config, config->route_indexes);
 
 	for (size_t idx = 0; idx < count; ++idx) {
 		/*
@@ -115,11 +115,10 @@ route_module_config_add_route_list(
 		 * as I do no want to have the config be completelly
 		 * broken.
 		 */
-		config->route_indexes = ENCODE_ADDR(config, route_indexes);
+		config->route_indexes = OFFSET_OF(config, route_indexes);
 	}
 
-	struct route_list *route_lists =
-		DECODE_ADDR(config, config->route_lists);
+	struct route_list *route_lists = ADDR_OF(config, config->route_lists);
 	if (mem_array_expand_exp(
 		    &config->module_data.memory_context,
 		    (void **)&route_lists,
@@ -133,7 +132,7 @@ route_module_config_add_route_list(
 		.count = count,
 	};
 
-	config->route_lists = ENCODE_ADDR(config, route_lists);
+	config->route_lists = OFFSET_OF(config, route_lists);
 
 	return config->route_list_count - 1;
 }

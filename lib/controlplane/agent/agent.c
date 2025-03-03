@@ -36,8 +36,7 @@ agent_connect(
 	}
 
 	struct dp_config *dp_config = (struct dp_config *)storage;
-	struct cp_config *cp_config =
-		DECODE_ADDR(dp_config, dp_config->cp_config);
+	struct cp_config *cp_config = ADDR_OF(dp_config, dp_config->cp_config);
 
 	/*
 	 * FIXME: the code bellow tries to allocate memory_limit bytes

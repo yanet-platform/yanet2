@@ -60,7 +60,7 @@ balancer_module_config_add_service(
 
 	uint64_t real_start = config->real_count;
 
-	struct balancer_rs *reals = DECODE_ADDR(config, config->reals);
+	struct balancer_rs *reals = ADDR_OF(config, config->reals);
 
 	for (uint64_t real_idx = 0; real_idx < service->real_count;
 	     ++real_idx) {
@@ -86,9 +86,9 @@ balancer_module_config_add_service(
 		       16);
 	}
 
-	config->reals = ENCODE_ADDR(config, reals);
+	config->reals = OFFSET_OF(config, reals);
 
-	struct balancer_vs *services = DECODE_ADDR(config, config->services);
+	struct balancer_vs *services = ADDR_OF(config, config->services);
 
 	if (mem_array_expand_exp(
 		    &config->module_data.memory_context,
@@ -122,7 +122,7 @@ balancer_module_config_add_service(
 		);
 	}
 
-	config->services = ENCODE_ADDR(config, services);
+	config->services = OFFSET_OF(config, services);
 	return 0;
 }
 
