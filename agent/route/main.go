@@ -28,7 +28,7 @@ func main() {
 	C.route_module_config_add_route_list(
 		rmc,
 		1,
-		&([]C.uint64_t{0})[0],
+		&([]C.uint32_t{0})[0],
 	)
 
 	C.route_module_config_add_prefix_v4(
