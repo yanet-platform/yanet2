@@ -6,6 +6,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func Test_TinyBitsetCount(t *testing.T) {
+	b := TinyBitset{}
+
+	assert.Equal(t, uint(0), b.Count())
+
+	b.Insert(0)
+	b.Insert(42)
+	assert.Equal(t, uint(2), b.Count())
+}
+
 func Test_TinyBitsetTraverse(t *testing.T) {
 	b := TinyBitset{}
 	b.Insert(0)

@@ -15,6 +15,16 @@ type TinyBitset struct {
 	words [MaxBitsetWords]uint64
 }
 
+// Count returns the number of bits set in the bitset.
+func (m *TinyBitset) Count() uint {
+	count := uint(0)
+	for _, word := range m.words {
+		count += uint(bits.OnesCount64(word))
+	}
+
+	return count
+}
+
 // Insert inserts the given index into the bitset.
 func (m *TinyBitset) Insert(idx uint32) {
 	if idx >= 64*MaxBitsetWords {
@@ -39,7 +49,7 @@ func (m *TinyBitset) Traverse(fn func(int)) {
 // AsSlice returns the bitset as a slice of indices, where each index is a
 // position of the bit set.
 func (m *TinyBitset) AsSlice() []int {
-	out := make([]int, 0)
+	out := make([]int, 0, m.Count())
 
 	m.Traverse(func(idx int) {
 		out = append(out, idx)
