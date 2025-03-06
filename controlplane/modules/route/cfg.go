@@ -1,5 +1,9 @@
 package route
 
+import (
+	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/bird"
+)
+
 type Config struct {
 	// MemoryPathPrefix is the path to the shared-memory file that is used to
 	// communicate with dataplane.
@@ -11,4 +15,17 @@ type Config struct {
 	MemoryRequirements uint   `yaml:"memory_requirements"`
 	Endpoint           string `yaml:"endpoint"`
 	GatewayEndpoint    string `yaml:"gateway_endpoint"`
+	// BirdExport configures the reader for the Bird Export Protocol feed.
+	BirdExport *bird.Config `yaml:"bird_export"`
+}
+
+func DefaultConfig() *Config {
+	return &Config{
+		// FIXME: a reasonable default value
+		MemoryPathPrefix:   "",
+		MemoryRequirements: 0,
+		Endpoint:           "",
+		GatewayEndpoint:    "",
+		BirdExport:         bird.DefaultConfig(),
+	}
 }

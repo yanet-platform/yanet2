@@ -20,6 +20,18 @@ type Config struct {
 	Modules ModulesConfig `json:"modules" yaml:"modules"`
 }
 
+func DefaultConfig() *Config {
+	return &Config{
+		Logging: LoggingConfig{
+			Level: zapcore.DebugLevel,
+		},
+		Gateway: gateway.DefaultConfig(),
+		Modules: ModulesConfig{
+			Route: route.DefaultConfig(),
+		},
+	}
+}
+
 // LoadConfig loads the configuration from the given path.
 func LoadConfig(path string) (*Config, error) {
 	buf, err := os.ReadFile(path)
@@ -27,7 +39,7 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	cfg := &Config{}
+	cfg := DefaultConfig()
 	if err := yaml.Unmarshal(buf, cfg); err != nil {
 		return nil, fmt.Errorf("failed to deserialize config: %w", err)
 	}

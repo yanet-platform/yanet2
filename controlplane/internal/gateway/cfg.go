@@ -11,3 +11,11 @@ type ServerConfig struct {
 	// Endpoint is the endpoint for the gateway server to be exposed on.
 	Endpoint string `yaml:"endpoint"`
 }
+
+func DefaultConfig() *Config {
+	return &Config{
+		Server: ServerConfig{
+			Endpoint: "[::]:0", // FIXME: a reasonable default
+		},
+	}
+}

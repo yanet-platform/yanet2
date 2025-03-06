@@ -162,6 +162,21 @@ func (m *MapTrie[K, Q, V]) Len() int {
 	return l
 }
 
+// UpdateOrDelete updates existing entry and deletes it from the MapTrie if update
+// indicates that updated entry becomes empty.
+func (m *MapTrie[K, Q, V]) UpdateOrDelete(prefix K, update func(V) (V, bool)) {
+	prefix = prefix.Masked()
+	bits := prefix.Bits()
+
+	if value, ok := m[bits][prefix]; ok {
+		if newValue, zero := update(value); zero {
+			delete(m[bits], prefix)
+		} else {
+			m[bits][prefix] = newValue
+		}
+	}
+}
+
 // Dump creates a flat map containing all prefixes and their values from the MapTrie.
 func (m MapTrie[K, Q, V]) Dump() map[K]V {
 	out := make(map[K]V, m.Len())
