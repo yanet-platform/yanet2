@@ -37,6 +37,39 @@ func TestMapTrieInsert(t *testing.T) {
 	}
 }
 
+func TestMapTrieMatches(t *testing.T) {
+	cases := []struct {
+		prefix  string
+		inMatch bool
+	}{
+		{"192.168.9.1/32", false},
+		{"192.168.9.1/27", false},
+		{"192.168.9.1/26", true},
+		{"192.168.10.1/24", false},
+		{"192.168.9.1/24", true},
+		{"192.168.9.1/16", true},
+		{"192.168.18.0/8", true},
+		{"193.168.9.1/8", false},
+		{"192.168.18.0/0", true},
+	}
+	mt := NewMapTrie(0)
+	query := netip.MustParseAddr("192.168.9.32") // in /26 mask
+
+	expected := []MapTrieKey{}
+	for _, c := range cases {
+		prefix := netip.MustParsePrefix(c.prefix)
+		route := Route{MapTrieKey: MapTrieKey{Prefix: prefix.Masked()}}
+		if c.inMatch {
+			expected = append(expected, route.MapTrieKey)
+		}
+		t.Logf("expect matches: %s", expected)
+		mt.InsertOrUpdate(route)
+		actual := mt.Matches(query)
+		require.Equal(t, expected, actual)
+	}
+
+}
+
 func heapInUse() uint64 {
 	runtime.GC()
 	ms := runtime.MemStats{}
