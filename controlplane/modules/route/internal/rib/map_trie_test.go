@@ -37,64 +37,75 @@ func TestMapTrieInsert(t *testing.T) {
 	}
 }
 
-func initTestData(v4count int, v6count int, random bool) []netip.Addr {
-	out := make([]netip.Addr, 0, v4count+v6count)
+func heapInUse() uint64 {
+	runtime.GC()
+	ms := runtime.MemStats{}
+	runtime.ReadMemStats(&ms)
+	return ms.HeapInuse
+}
+
+func initTestData(v4count int, v6count int, random bool) ([]netip.Addr, []Route) {
+	maskShift := 8
+	addrs := make([]netip.Addr, 0, v4count+v6count)
 	for idx := range v4count {
 		v4a := [4]byte{}
 		a := uint32(idx)
+		a <<= uint32(maskShift)
 		if random {
 			a = rand.Uint32()
 		}
 		binary.BigEndian.PutUint32(v4a[:], a)
-		out = append(out, netip.AddrFrom4(v4a))
+		addrs = append(addrs, netip.AddrFrom4(v4a))
 	}
 
 	for idx := range v6count {
 		v6a := [16]byte{}
 		a := uint64(0xfe80dada00b0feca)
 		b := uint64(idx)
+		b <<= uint64(maskShift)
 		if random {
 			b = rand.Uint64()
 
 		}
 		binary.BigEndian.PutUint64(v6a[:], a)
 		binary.BigEndian.PutUint64(v6a[8:], b)
-		out = append(out, netip.AddrFrom16(v6a))
+		addrs = append(addrs, netip.AddrFrom16(v6a))
 	}
 
-	return out
+	routes := make([]Route, len(addrs))
+	for idx, a := range addrs {
+		mask := a.BitLen() - maskShift
+		if random {
+			mask = rand.Intn(a.BitLen() + 1)
+		}
+		p, _ := a.Prefix(mask)
+		routes[idx] = Route{MapTrieKey: MapTrieKey{Prefix: p.Masked()}}
+	}
+	return addrs, routes
 }
 
 func TestMapTrieInsertMany(t *testing.T) {
-	out := initTestData(200000, 200000, true)
-	mt := NewMapTrie(1024)
-	for _, addr := range out {
-		p, err := addr.Prefix(rand.Intn(addr.BitLen() + 1))
-		require.NoError(t, err)
-		r := Route{MapTrieKey: MapTrieKey{Prefix: p.Masked()}}
-		mt.InsertOrUpdate(r)
+	addrs, routes := initTestData(200000, 200000, true)
+	mt := NewMapTrie(1024 * 4)
+	for _, route := range routes {
+		mt.InsertOrUpdate(route)
 	}
-	for _, addr := range out {
+	for _, addr := range addrs {
 		_, ok := mt.Lookup(addr)
 		require.True(t, ok, "lookup %s", addr)
 	}
 }
 
-var benchDataInsertuniq = initTestData(1_000_000, 400_000, false)
+var benchDataInsertuniqAddrs, benchDataInsertuniqRoutes = initTestData(1_000_000, 400_000, false)
 
 func Benchmark_mapTrie_insert_uniq(b *testing.B) {
-	addrs := benchDataInsertuniq
-	routes := make([]Route, len(addrs))
-	for idx, a := range addrs {
-		p, _ := a.Prefix(rand.Intn(a.BitLen() + 1))
-		routes[idx] = Route{MapTrieKey: MapTrieKey{Prefix: p.Masked()}}
-	}
-	ms0 := runtime.MemStats{}
-	runtime.ReadMemStats(&ms0)
+	addrs := benchDataInsertuniqAddrs
+	routes := benchDataInsertuniqRoutes
+
+	inuse0 := heapInUse()
 	mt := NewMapTrie(1024)
-	ms := runtime.MemStats{}
-	runtime.ReadMemStats(&ms)
-	b.Logf("The initial Memory usage of MapTrie: %s", datasize.ByteSize(ms.HeapInuse-ms0.HeapInuse))
+	inuse1 := heapInUse()
+	b.Logf("The initial Memory usage of MapTrie: %s", datasize.ByteSize(inuse1-inuse0))
 	b.ResetTimer()
 	for range b.N {
 		for idx := range routes {
@@ -102,12 +113,7 @@ func Benchmark_mapTrie_insert_uniq(b *testing.B) {
 		}
 	}
 	b.StopTimer()
-	ms2 := runtime.MemStats{}
-	runtime.ReadMemStats(&ms2)
-	uniq := 0
-	for _, m := range mt {
-		uniq += len(m)
-	}
+	inuse2 := heapInUse()
 	var found int
 	idx := max(rand.Intn(len(addrs))-1000, 0)
 	for idx := range addrs[idx : idx+1000] {
@@ -117,25 +123,18 @@ func Benchmark_mapTrie_insert_uniq(b *testing.B) {
 		}
 		found += len(v.Routes)
 	}
-	b.Logf("Total number of routes %d: uniq %d", len(routes), uniq)
-	b.Logf("Memory usage by mapTrie %s found=%d of 1k", datasize.ByteSize(ms2.HeapInuse-ms.HeapInuse), found)
+	b.Logf("Total number of routes %d: uniq %d", len(routes), mt.Len())
+	b.Logf("Memory usage by mapTrie %s found=%d of 1k", datasize.ByteSize(inuse2-inuse0), found)
 }
 
-var benchDataInsertmess = initTestData(1_000_000, 400_000, true)
+var benchDataInsertMessAddrs, benchDataInsertMessRoutes = initTestData(1_000_000, 400_000, true)
 
 func Benchmark_mapTrie_insert_mess(b *testing.B) {
-	addrs := benchDataInsertmess
-	routes := make([]Route, len(addrs))
-	for idx, a := range addrs {
-		p, _ := a.Prefix(rand.Intn(a.BitLen() + 1))
-		routes[idx] = Route{MapTrieKey: MapTrieKey{Prefix: p.Masked()}}
-	}
-	ms0 := runtime.MemStats{}
-	runtime.ReadMemStats(&ms0)
+	routes := benchDataInsertMessRoutes
+	inuse0 := heapInUse()
 	mt := NewMapTrie(1024)
-	ms := runtime.MemStats{}
-	runtime.ReadMemStats(&ms)
-	b.Logf("Initial Memory usage by mapTrie %s", datasize.ByteSize(ms.HeapInuse-ms0.HeapInuse))
+	inuse1 := heapInUse()
+	b.Logf("Initial Memory usage by mapTrie %s", datasize.ByteSize(inuse1-inuse0))
 	b.ResetTimer()
 	for range b.N {
 		for idx := range routes {
@@ -143,23 +142,16 @@ func Benchmark_mapTrie_insert_mess(b *testing.B) {
 		}
 	}
 	b.StopTimer()
-	ms2 := runtime.MemStats{}
-	runtime.ReadMemStats(&ms2)
-	uniq := 0
-	for _, m := range mt {
-		uniq += len(m)
-	}
-	b.Logf("Total number of prefixes %d: uniq %d", len(routes), uniq)
-	b.Logf("Memory usage by mapTrie %s", datasize.ByteSize(ms2.HeapInuse-ms.HeapInuse))
+	inuse2 := heapInUse()
+	b.Logf("Total number of prefixes %d: uniq %d", len(routes), mt.Len())
+	b.Logf("Memory usage by mapTrie %s", datasize.ByteSize(inuse2-inuse0))
 }
 
+var benchLookup1kAddrs, benchLookup1kRoutes = initTestData(1_000_000, 400_000, true)
+
 func Benchmark_mapTrie_lookup_mess_1k(b *testing.B) {
-	addrs := initTestData(1_000_000, 400_000, true)
-	routes := make([]Route, len(addrs))
-	for idx, a := range addrs {
-		p, _ := a.Prefix(rand.Intn(a.BitLen() + 1))
-		routes[idx] = Route{MapTrieKey: MapTrieKey{Prefix: p.Masked()}}
-	}
+	addrs := benchLookup1kAddrs
+	routes := benchLookup1kRoutes
 
 	mt := NewMapTrie(1024)
 	for _, route := range routes {
@@ -177,10 +169,5 @@ func Benchmark_mapTrie_lookup_mess_1k(b *testing.B) {
 	}
 	b.StopTimer()
 
-	uniq := 0
-	for _, m := range mt {
-		uniq += len(m)
-	}
-
-	b.Logf("Total number of prefixes %d: uniq: %d, found: %d", len(routes), uniq, found)
+	b.Logf("Total number of prefixes %d: uniq: %d, found: %d", len(routes), mt.Len(), found)
 }
