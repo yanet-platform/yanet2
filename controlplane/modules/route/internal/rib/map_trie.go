@@ -10,42 +10,37 @@ type MapTrieKey struct {
 
 type MapTrie [129]map[MapTrieKey]*RoutesList
 
-func NewMapTrie(preAllocSize int) MapTrie {
+func NewMapTrie(capacity int) MapTrie {
 	mt := MapTrie{}
 	for idx := range mt {
-		mt[idx] = make(map[MapTrieKey]*RoutesList, preAllocSize)
+		mt[idx] = make(map[MapTrieKey]*RoutesList, capacity)
 	}
 	return mt
 }
 
 func (m *MapTrie) Lookup(addr netip.Addr) (*RoutesList, bool) {
-	maxBits := 129
-	base := 128
-	if addr.Is4() {
-		base = 32
-		maxBits = 33
-	}
-	for n := range maxBits {
-		bits := base - n
-		p, err := addr.Prefix(bits)
-		if err != nil {
-			panic("Imposible err: " + err.Error())
-		}
+	bitLen := addr.BitLen()
+	for bits := bitLen; bits >= 0; bits-- {
+		p, _ := addr.Prefix(bits)
 		mtk := MapTrieKey{Prefix: p}
-		if _, ok := m[bits][mtk]; ok {
-			return nil, false
+		if v, ok := m[bits][mtk]; ok {
+			return v, true
 		}
 	}
 	return nil, false
 }
 
-func (m *MapTrie) Insert(key MapTrieKey, route Route) {
-	rl, ok := m[key.Prefix.Bits()][key]
+func (m *MapTrie) Entry(route Route) *RoutesList {
+	rl, ok := m[route.Prefix.Bits()][route.MapTrieKey]
 	if !ok {
 		rl = &RoutesList{}
-		m[key.Prefix.Bits()][key] = rl
+		m[route.Prefix.Bits()][route.MapTrieKey] = rl
 	}
-	rl.Insert(route)
+	return rl
+}
+
+func (m *MapTrie) InsertOrUpdate(route Route) {
+	m.Entry(route).Insert(route)
 }
 
 func (m *MapTrie) Len() int {

@@ -72,7 +72,7 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	copy(route.DestinationMAC[:], neigh.HardwareAddr)
 
 	m.mu.Lock()
-	m.routes.Insert(route.MapTrieKey, route)
+	m.routes.InsertOrUpdate(route)
 	m.mu.Unlock()
 
 	m.log.Infow("added unicast route",

@@ -5,6 +5,7 @@ go 1.22.5
 replace github.com/yanet-platform/yanet2/common/go => ../common/go
 
 require (
+	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/spf13/cobra v1.8.1
 	github.com/vishvananda/netlink v1.3.0
 	golang.org/x/sys v0.28.0
