@@ -70,6 +70,55 @@ func TestMapTrieMatches(t *testing.T) {
 
 }
 
+func FuzzMapTrieInsertAndLookup(f *testing.F) {
+	addr := netip.MustParseAddr("fd25:c819:6888:0:b282:ffff:1841:3832").As16()
+	allZero := netip.IPv6Unspecified().As16()
+	allFF := netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").As16()
+
+	f.Add(byte(120), allZero[:], addr[:])
+	f.Add(byte(30), addr[:], allFF[:])
+	f.Add(byte(0), addr[:], addr[:])
+	f.Add(byte(100), allZero[:], allFF[:])
+	f.Add(byte(128), allFF[:], allFF[:])
+
+	f.Fuzz(func(t *testing.T, m byte, pb []byte, qb []byte) {
+		mt := NewMapTrie(0)
+
+		prefixBytes := [16]byte{}
+		copy(prefixBytes[:], pb)
+		prefixAddr := netip.AddrFrom16(prefixBytes)
+
+		m = min(m, 128)
+		p := netip.PrefixFrom(prefixAddr, int(m)).Masked()
+
+		route := Route{MapTrieKey: MapTrieKey{Prefix: p}}
+		mt.InsertOrUpdate(route)
+
+		queryBytes := [16]byte{}
+		copy(queryBytes[:], qb)
+		queryAddr := netip.AddrFrom16(queryBytes)
+
+		_, ok := mt.Lookup(queryAddr)
+		qaPrefix := netip.PrefixFrom(queryAddr, int(m)).Masked()
+		equal := p == qaPrefix
+
+		switch [2]bool{ok, equal} {
+		case [2]bool{false, true}:
+			t.Errorf("query addr %s should match %s", queryAddr, p)
+		case [2]bool{true, false}:
+			t.Errorf("unexpected match of addr %s by prefix %s", qaPrefix, p)
+		}
+		matches := mt.Matches(queryAddr)
+		matched := len(matches) > 0
+		switch [2]bool{ok && equal, matched} {
+		case [2]bool{false, true}:
+			t.Errorf("unexpected return from Matches: %s, prefix=%s, queryAddr=%s", matches, p, queryAddr)
+		case [2]bool{true, false}:
+			t.Errorf("Matches should return a match: prefix=%s, queryAddr=%s", p, queryAddr)
+		}
+	})
+}
+
 func heapInUse() uint64 {
 	runtime.GC()
 	ms := runtime.MemStats{}
