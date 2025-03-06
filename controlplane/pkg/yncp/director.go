@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/pkg/gateway"
-	"github.com/yanet-platform/yanet2/controlplane/modules/route/pkg/route"
+	"github.com/yanet-platform/yanet2/controlplane/modules/route"
 )
 
 type options struct {
