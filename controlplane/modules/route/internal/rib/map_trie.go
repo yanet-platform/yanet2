@@ -52,11 +52,9 @@ func (m *MapTrie) Len() int {
 }
 
 func (m MapTrie) Dump() map[MapTrieKey]RoutesList {
-	base := len(m)
 	out := make(map[MapTrieKey]RoutesList, m.Len())
 	// Traverse from longest to shortest prefixes
-	for n := range len(m) {
-		idx := base - n
+	for idx := len(m) - 1; idx >= 0; idx-- {
 		for key, v := range m[idx] {
 			out[key] = *v
 		}
