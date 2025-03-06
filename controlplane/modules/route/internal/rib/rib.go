@@ -14,7 +14,7 @@ import (
 
 type RIB struct {
 	mu         sync.RWMutex
-	routes     map[netip.Prefix]RouteList
+	routes     MapTrie
 	neighbours *neigh.NexthopCache
 	links      *link.LinksCache
 	log        *zap.SugaredLogger
@@ -22,7 +22,7 @@ type RIB struct {
 
 func NewRIB(neighbours *neigh.NexthopCache, links *link.LinksCache, log *zap.SugaredLogger) *RIB {
 	return &RIB{
-		routes:     map[netip.Prefix]RouteList{},
+		routes:     NewMapTrie(1024),
 		neighbours: neighbours,
 		links:      links,
 		log:        log,
@@ -63,19 +63,16 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 		zap.Stringer("hardware_addr", link.HardwareAddr),
 	)
 
-	route := HardwareRoute{}
+	route := Route{
+		MapTrieKey: MapTrieKey{Prefix: prefix},
+	}
 
 	// Safe, because we've checked for MAC address format earlier.
 	copy(route.SourceMAC[:], link.HardwareAddr)
 	copy(route.DestinationMAC[:], neigh.HardwareAddr)
 
 	m.mu.Lock()
-	if _, ok := m.routes[prefix]; !ok {
-		m.routes[prefix] = RouteList{
-			Routes: map[HardwareRoute]struct{}{},
-		}
-	}
-	m.routes[prefix].Routes[route] = struct{}{}
+	m.routes.Insert(route.MapTrieKey, route)
 	m.mu.Unlock()
 
 	m.log.Infow("added unicast route",
@@ -88,24 +85,17 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	return nil
 }
 
-func (m *RIB) DumpRoutes() map[netip.Prefix]RouteList {
-	out := map[netip.Prefix]RouteList{}
-
+func (m *RIB) DumpRoutes() map[MapTrieKey]RoutesList {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.routes.Dump()
+}
 
-	for prefix, routeList := range m.routes {
-		routes := map[HardwareRoute]struct{}{}
-		for route := range routeList.Routes {
-			routes[route] = struct{}{}
-		}
-
-		out[prefix] = RouteList{
-			Routes: routes,
-		}
-	}
-
-	return out
+type Route struct {
+	MapTrieKey
+	NextHop netip.Addr
+	// Temporary placeholder
+	HardwareRoute
 }
 
 // HardwareRoute is a hashable pair of MAC addresses.
@@ -118,6 +108,11 @@ func (m HardwareRoute) String() string {
 	return fmt.Sprintf("%s -> %s", net.HardwareAddr(m.SourceMAC[:]), net.HardwareAddr(m.DestinationMAC[:]))
 }
 
-type RouteList struct {
-	Routes map[HardwareRoute]struct{}
+type RoutesList struct {
+	Routes []Route
+}
+
+func (m *RoutesList) Insert(route Route) {
+	// WIP(sakateka): FIXME: deduplicate routes
+	m.Routes = append(m.Routes, route)
 }

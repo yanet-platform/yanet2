@@ -90,20 +90,20 @@ func (m *RouteService) InsertRoute(
 
 		hardwareRoutes := map[rib.HardwareRoute]uint32{}
 		routesLists := map[bitset.TinyBitset]uint32{}
-		for prefix, routeList := range routes {
+		for key, routeList := range routes {
 			routesList := bitset.TinyBitset{}
 
-			for hardwareRoute := range routeList.Routes {
-				if idx, ok := hardwareRoutes[hardwareRoute]; ok {
+			for _, route := range routeList.Routes {
+				if idx, ok := hardwareRoutes[route.HardwareRoute]; ok {
 					routesList.Insert(idx)
 					continue
 				}
 
-				idx, err := config.RouteAdd(hardwareRoute.SourceMAC[:], hardwareRoute.DestinationMAC[:])
+				idx, err := config.RouteAdd(route.SourceMAC[:], route.DestinationMAC[:])
 				if err != nil {
-					return nil, fmt.Errorf("failed to add hardware route %q: %w", hardwareRoute, err)
+					return nil, fmt.Errorf("failed to add hardware route %q: %w", route.HardwareRoute, err)
 				}
-				hardwareRoutes[hardwareRoute] = uint32(idx)
+				hardwareRoutes[route.HardwareRoute] = uint32(idx)
 				routesList.Insert(uint32(idx))
 			}
 
@@ -116,7 +116,7 @@ func (m *RouteService) InsertRoute(
 				idx = uint32(routeListIdx)
 			}
 
-			if err := config.PrefixAdd(prefix, idx); err != nil {
+			if err := config.PrefixAdd(key.Prefix, idx); err != nil {
 				return nil, fmt.Errorf("failed to add prefix %q: %w", prefix, err)
 			}
 		}
