@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/pkg/xgrpc"
+	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 

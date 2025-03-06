@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/pkg/gateway"
+	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route"
 )
 

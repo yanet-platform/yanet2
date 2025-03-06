@@ -1,7 +1,7 @@
 package ffi
 
-//#cgo CFLAGS: -I../../../../ -I../../../../lib
-//#cgo LDFLAGS: -L../../../../build/lib/controlplane/agent -lagent
+//#cgo CFLAGS: -I../../../ -I../../../lib
+//#cgo LDFLAGS: -L../../../build/lib/controlplane/agent -lagent
 //
 //#include "api/agent.h"
 //#include "controlplane/agent/agent.h"

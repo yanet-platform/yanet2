@@ -15,7 +15,7 @@ import (
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
-	"github.com/yanet-platform/yanet2/controlplane/internal/pkg/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 )
 
 type ModuleConfig struct {

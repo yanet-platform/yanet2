@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/pkg/bitset"
-	"github.com/yanet-platform/yanet2/controlplane/internal/pkg/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/internal/bitset"
+	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/rib"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/routepb"
 )

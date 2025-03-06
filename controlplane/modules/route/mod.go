@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/pkg/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/link"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/neigh"
