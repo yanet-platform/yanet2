@@ -2,7 +2,8 @@
 
 use core::error::Error;
 
-use clap::{builder::PossibleValue, ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{builder::PossibleValue, ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::CompleteEnv;
 use ync::logging;
 use ynpb::{logging_client::LoggingClient, UpdateLevelRequest};
 
@@ -64,6 +65,8 @@ impl ValueEnum for ynpb::LogLevel {
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {
+    CompleteEnv::with_factory(Cmd::command).complete();
+
     let cmd = Cmd::parse();
     logging::init(cmd.verbose as usize).expect("no error expected");
 

@@ -2,7 +2,8 @@
 
 use core::{error::Error, net::IpAddr};
 
-use clap::{ArgAction, Parser};
+use clap::{ArgAction, CommandFactory, Parser};
+use clap_complete::CompleteEnv;
 use code::{route_client::RouteClient, InsertRouteRequest};
 use ipnet::IpNet;
 use tonic::transport::Channel;
@@ -56,6 +57,8 @@ pub struct RouteInsertCmd {
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {
+    CompleteEnv::with_factory(Cmd::command).complete();
+
     let cmd = Cmd::parse();
     logging::init(cmd.verbose as usize).expect("no error expected");
 
