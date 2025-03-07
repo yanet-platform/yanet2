@@ -37,6 +37,35 @@ func TestMapTrieInsert(t *testing.T) {
 	}
 }
 
+func TestMapTrieLookupv6(t *testing.T) {
+	addr := netip.MustParseAddr("fd25:cf19:6b13:cafe:babe:be57:f00d:0001")
+	cases := []struct {
+		prefix string
+		match  bool
+	}{
+		{"fd25:8888:6b13:cafe:babe:be57:f00d:04a5/16", true},
+		{"fd25:8888:6b13:cafe:babe:be57:f00d:04a5/64", false},
+		{"fd25:cf19:6b13:cafe:babe:be57:f00d:04a5/64", true},
+		{"fd25:cf19:6b13:cafe:babe:be57:f00d:04a5/112", true},
+		{"fd25:cf19:6b13:cafe:babe:be57:f00d:04a5/120", false},
+		{"fd25:cf19:6b13:cafe:babe:be57:f00d:04a5/128", false},
+	}
+	mt := NewMapTrie(0)
+	for _, c := range cases {
+		prefix := netip.MustParsePrefix(c.prefix).Masked()
+
+		route := Route{
+			MapTrieKey: MapTrieKey{Prefix: prefix},
+		}
+		mt.InsertOrUpdate(route)
+		list, ok := mt.Lookup(addr)
+		mp := list.Routes[0].Prefix
+		ok = ok && prefix == mp
+		require.Equal(t, c.match, ok, "lookup expected to match==%t but ok=%t addr=%s prefix=%s mp=%s",
+			c.match, ok, addr, prefix, mp)
+	}
+}
+
 func TestMapTrieMatches(t *testing.T) {
 	cases := []struct {
 		prefix  string
@@ -48,6 +77,10 @@ func TestMapTrieMatches(t *testing.T) {
 		{"192.168.10.1/24", false},
 		{"192.168.9.1/24", true},
 		{"192.168.9.1/16", true},
+		{"a8c0:109::/16", false},       // 192.168.9.1 in hex
+		{"a8c0:109::/112", false},      // 192.168.9.1 in hex
+		{"::ffff:a8c0:109/16", false},  // v6 mapped ::ffff:168.192.1.9
+		{"::ffff:a8c0:109/112", false}, // v6 mapped ::ffff:168.192.1.9
 		{"192.168.18.0/8", true},
 		{"193.168.9.1/8", false},
 		{"192.168.18.0/0", true},
