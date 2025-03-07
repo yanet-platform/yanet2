@@ -1,5 +1,7 @@
 #include "dataplane.h"
 
+#include "config.h"
+
 #include <stdint.h>
 
 #include <dlfcn.h>
@@ -10,71 +12,19 @@
 
 #include "dpdk.h"
 
-#include "drivers/sock_dev.h"
-
 #include "common/data_pipe.h"
+#include "common/exp_array.h"
 
 #include "dataplane/config/zone.h"
 
-// FIXME: move this to control plane
-#include "modules/balancer/config.h"
-#include "modules/forward/config.h"
-#include "modules/route/config.h"
+#include "dataplane/device.h"
+#include "dataplane/worker.h"
 
 #include <unistd.h>
 
 #include "linux/mman.h"
 #include "sys/mman.h"
 #include <fcntl.h>
-
-/*
- * static int
-dataplane_sock_port_init(
-	struct dataplane *dataplane,
-	struct dataplane_device *device,
-	const char *sock_name,
-	const char *name,
-	uint16_t queue_count,
-	uint16_t numa_id)
-{
-	device->queue_count = 0;
-
-	struct rte_eth_conf port_conf;
-	memset(&port_conf, 0, sizeof(struct rte_eth_conf));
-	// FIXME: do not use constant here
-	port_conf.rxmode.max_lro_pkt_size = 8000;
-
-	// FIXME handle errors
-	device->port_id = sock_dev_create(sock_name, name, numa_id);
-	if (rte_eth_dev_configure(
-		device->port_id,
-		queue_count,
-		queue_count,
-		&port_conf)) {
-		return -1;
-	}
-
-	// FIXME handle errors
-	device->workers = (struct dataplane_worker *)
-		malloc(sizeof(struct dataplane_worker) * queue_count);
-
-	for (device->queue_count = 0;
-	     device->queue_count < queue_count;
-	     ++device->queue_count) {
-		// FIXME: handle errors
-		dataplane_worker_init(
-			dataplane,
-			device,
-			device->workers + device->queue_count,
-			device->queue_count);
-	}
-
-	// FIXME handle errors
-	rte_eth_dev_start(device->port_id);
-
-	return 0;
-}
-*/
 
 static int
 dataplane_worker_connect(
@@ -165,53 +115,21 @@ dataplane_connect_device(
  * on default virtual devices creation policy.
  */
 static int
-dataplane_connect_devices(struct dataplane *dataplane)
+dataplane_connect_devices(
+	struct dataplane *dataplane,
+	uint64_t connection_count,
+	struct dataplane_connection_config *connections
+)
 
 {
-	/*
-	 * FIXME: the code bellow is about device interconnect topology so
-	 * there is full-mesh connection between dpdk `physical` devices and
-	 * each `physical` device is connected with its `virtual` counterpart.
-	 * In fact `data_pipe` is one directional connection (which allows
-	 * processing feedback (as producer should know if data are consumed)
-	 * so we create two connections for each device.
-	 * However, it is legal to create one directional flow between
-	 * devices (e.g. span port).
-	 */
-
-	size_t phy_device_count = dataplane->device_count / 2;
-
-	// Create physical devices full-mesh interconnection
-	for (size_t dev1_idx = 0; dev1_idx < phy_device_count; ++dev1_idx) {
-		for (size_t dev2_idx = dev1_idx + 1;
-		     dev2_idx < phy_device_count;
-		     ++dev2_idx) {
-			dataplane_connect_device(
-				dataplane,
-				dataplane->devices + dev1_idx,
-				dataplane->devices + dev2_idx
-			);
-
-			dataplane_connect_device(
-				dataplane,
-				dataplane->devices + dev2_idx,
-				dataplane->devices + dev1_idx
-			);
-		}
-	}
-
-	// Create interconnect between physical and virtual device pair
-	for (size_t dev1_idx = 0; dev1_idx < phy_device_count; ++dev1_idx) {
+	for (uint64_t conn_idx = 0; conn_idx < connection_count; ++conn_idx) {
+		struct dataplane_connection_config *connection =
+			connections + conn_idx;
+		// FIXME device id should be ferivied
 		dataplane_connect_device(
 			dataplane,
-			dataplane->devices + dev1_idx,
-			dataplane->devices + dev1_idx + phy_device_count
-		);
-
-		dataplane_connect_device(
-			dataplane,
-			dataplane->devices + dev1_idx + phy_device_count,
-			dataplane->devices + dev1_idx
+			dataplane->devices + connection->src_device_id,
+			dataplane->devices + connection->dst_device_id
 		);
 	}
 
@@ -221,91 +139,39 @@ dataplane_connect_devices(struct dataplane *dataplane)
 static int
 dataplane_create_devices(
 	struct dataplane *dataplane,
-	size_t device_count,
-	const char *const *devices
+	uint64_t device_count,
+	struct dataplane_device_config *device_configs
 ) {
 
-	dataplane->device_count = device_count * 2;
+	dataplane->device_count = device_count;
 	dataplane->devices = (struct dataplane_device *)malloc(
 		sizeof(struct dataplane_device) * dataplane->device_count
 	);
 
-	struct dataplane_device_config phy_config;
+	for (uint64_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
+		struct dataplane_device_config *device_config =
+			device_configs + dev_idx;
+		if (!strncmp(
+			    device_config->port_name,
+			    "virtio_user_",
+			    strlen("virtio_user_")
+		    )) {
+			// FIXME handle error
+			(void)dpdk_add_vdev_port(
+				device_config->port_name,
+				device_config->port_name +
+					strlen("virtio_user_"),
+				device_config->mac_addr,
+				device_config->worker_count
+			);
+		}
 
-	for (size_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
-		phy_config.device_id = dev_idx;
-		phy_config.rss_hash = RTE_ETH_RSS_IP;
-		phy_config.mtu = 8000;
-		phy_config.max_lro_packet_size = 8200;
-		phy_config.worker_count = 4;
-		phy_config.workers = (struct dataplane_device_worker_config[]){
-			{
-				.core_id = 26,
-				.numa_id = 0,
-			},
-			{
-				.core_id = 27,
-				.numa_id = 0,
-			},
-			{
-				.core_id = 28,
-				.numa_id = 0,
-			},
-			{
-				.core_id = 29,
-				.numa_id = 0,
-			},
-		};
 		// FIXME: handle port initializations bellow
-		(void)dataplane_dpdk_port_init(
+		(void)dataplane_device_init(
 			dataplane,
 			dataplane->devices + dev_idx,
-			devices[dev_idx],
-			&phy_config
-		);
-	}
-
-	struct dataplane_device_config virt_config;
-	for (size_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
-		char vdev_name[64];
-		snprintf(
-			vdev_name,
-			sizeof(vdev_name),
-			"virtio_user_kni%lu",
-			dev_idx
-		);
-
-		struct rte_ether_addr ether_addr;
-		// FIXME: handle port initializations bellow
-		(void)dataplane_dpdk_port_get_mac(
-			dataplane->devices + dev_idx, &ether_addr
-		);
-
-		(void)dpdk_add_vdev_port(
-			vdev_name,
-			vdev_name + strlen("virtio_user_"),
-			&ether_addr,
-			1,
-			0
-		);
-
-		virt_config.device_id = device_count + dev_idx;
-		virt_config.rss_hash = 0;
-		virt_config.mtu = 8000;
-		virt_config.max_lro_packet_size = 8200;
-		virt_config.worker_count = 1;
-		virt_config.workers = (struct dataplane_device_worker_config[]){
-			{
-				.core_id = 30,
-				.numa_id = 0,
-			},
-		};
-
-		(void)dataplane_dpdk_port_init(
-			dataplane,
-			dataplane->devices + device_count + dev_idx,
-			vdev_name,
-			&virt_config
+			dev_idx,
+			device_config
 		);
 	}
 
@@ -350,6 +216,8 @@ dataplane_init_storage(
 
 	size_t dp_memory,
 	size_t cp_memory,
+
+	uint64_t device_count,
 
 	struct dp_config **res_dp_config,
 	struct cp_config **res_cp_config
@@ -410,6 +278,14 @@ dataplane_init_storage(
 	);
 
 	// FIXME: cp_config bootstrap routine
+	struct cp_agent_registry *cp_agent_registry =
+		(struct cp_agent_registry *)memory_balloc(
+			&cp_config->memory_context,
+			sizeof(struct cp_agent_registry)
+		);
+	cp_agent_registry->count = 0;
+	cp_config->agent_registry = OFFSET_OF(cp_config, cp_agent_registry);
+
 	struct cp_module_registry *cp_module_registry =
 		(struct cp_module_registry *)memory_balloc(
 			&cp_config->memory_context,
@@ -424,6 +300,18 @@ dataplane_init_storage(
 		);
 	cp_pipeline_registry->count = 0;
 
+	struct cp_device_registry *device_registry =
+		(struct cp_device_registry *)memory_balloc(
+			&cp_config->memory_context,
+			sizeof(struct cp_device_registry) +
+				sizeof(uint64_t) * device_count
+		);
+	device_registry->count = device_count;
+	for (uint64_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
+		// FIXME invalid pipeline id
+		device_registry->pipelines[dev_idx] = -1;
+	}
+
 	struct cp_config_gen *cp_config_gen =
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
@@ -432,6 +320,8 @@ dataplane_init_storage(
 		OFFSET_OF(cp_config_gen, cp_module_registry);
 	cp_config_gen->pipeline_registry =
 		OFFSET_OF(cp_config_gen, cp_pipeline_registry);
+	cp_config_gen->device_registry =
+		OFFSET_OF(cp_config_gen, device_registry);
 	cp_config->cp_config_gen = OFFSET_OF(cp_config, cp_config_gen);
 
 	dp_config->cp_config = OFFSET_OF(dp_config, cp_config);
@@ -446,36 +336,29 @@ int
 dataplane_init(
 	struct dataplane *dataplane,
 	const char *binary,
-
-	const char *storage,
-
-	size_t numa_count,
-	size_t dp_memory,
-	size_t cp_memory,
-
-	size_t device_count,
-	const char *const *devices
+	struct dataplane_config *config
 ) {
 	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 
-	dataplane->node_count = numa_count;
+	dataplane->node_count = config->numa_count;
 	for (uint32_t node_idx = 0; node_idx < dataplane->node_count;
 	     ++node_idx) {
 		struct dataplane_numa_node *node = dataplane->nodes + node_idx;
 
-		char storage_name[64];
+		char storage_name[200];
 		snprintf(
 			storage_name,
 			sizeof(storage_name),
 			"%s-%u",
-			storage,
+			config->storage,
 			node_idx
 		);
 
 		int rc = dataplane_init_storage(
 			storage_name,
-			dp_memory,
-			cp_memory,
+			config->dp_memory,
+			config->cp_memory,
+			config->device_count,
 			&node->dp_config,
 			&node->cp_config
 		);
@@ -483,19 +366,8 @@ dataplane_init(
 			return -1;
 		}
 
-		uint16_t *forward_map = (uint16_t *)memory_balloc(
-			&node->dp_config->memory_context,
-			sizeof(uint16_t) * device_count * 2
-		);
-
-		for (uint16_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
-			forward_map[dev_idx] = dev_idx + device_count;
-			forward_map[device_count + dev_idx] = dev_idx;
-		}
-
-		node->dp_config->dp_topology.device_count = device_count * 2;
-		node->dp_config->dp_topology.forward_map =
-			OFFSET_OF(&node->dp_config->dp_topology, forward_map);
+		node->dp_config->dp_topology.device_count =
+			config->device_count;
 
 		// FIXME: load modules into dp memory
 		dataplane_load_module(node->dp_config, bin_hndl, "forward");
@@ -503,11 +375,29 @@ dataplane_init(
 		dataplane_load_module(node->dp_config, bin_hndl, "balancer");
 	}
 
-	(void)dpdk_init(binary, device_count, devices);
+	size_t pci_port_count = 0;
+	const char **pci_port_names =
+		(const char **)malloc(sizeof(char *) * config->device_count);
+	for (uint64_t dev_idx = 0; dev_idx < config->device_count; ++dev_idx) {
+		struct dataplane_device_config *device =
+			config->devices + dev_idx;
+		if (strncmp(device->port_name,
+			    "virtio_user_",
+			    strlen("virtio_user_"))) {
+			pci_port_names[pci_port_count++] = device->port_name;
+		}
+	}
 
-	dataplane_create_devices(dataplane, device_count, devices);
+	(void
+	)dpdk_init(binary, config->dpdk_memory, pci_port_count, pci_port_names);
 
-	dataplane_connect_devices(dataplane);
+	dataplane_create_devices(
+		dataplane, config->device_count, config->devices
+	);
+
+	dataplane_connect_devices(
+		dataplane, config->connection_count, config->connections
+	);
 
 	return 0;
 }
@@ -625,16 +515,26 @@ dataplane_stop(struct dataplane *dataplane) {
 
 void
 dataplane_route_pipeline(
-	struct dataplane *dataplane, struct packet_list *packets
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	struct packet_list *packets
 ) {
-	// FIXME: select proper NUMA node
+	(void)dp_config;
+
+	struct cp_config_gen *config_gen =
+		ADDR_OF(cp_config, cp_config->cp_config_gen);
+	struct cp_device_registry *device_registry =
+		ADDR_OF(config_gen, config_gen->device_registry);
 
 	for (struct packet *packet = packet_list_first(packets); packet != NULL;
 	     packet = packet->next) {
-		if (packet->rx_device_id >= dataplane->device_count / 2) {
-			packet->pipeline_idx = 1;
+		if (packet->rx_device_id >= device_registry->count) {
+			// FIXME invalid pipeline id
+			packet->pipeline_idx = -1;
 		} else {
-			packet->pipeline_idx = 0;
+			packet->pipeline_idx =
+				device_registry
+					->pipelines[packet->rx_device_id];
 		}
 	}
 }

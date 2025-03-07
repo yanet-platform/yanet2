@@ -1,0 +1,18 @@
+numa_count: 1
+storage: /dev/hugepages/yanet
+agent_name: bootstrap
+memory_limit: 4194304
+module_name: forward0
+devices:
+  - l2_forward_device_id: 1
+    v4_forwards:
+      - network: 192.168.122.129/32
+        device_id: 1
+    v6_forwards:
+  - l2_forward_device_id: 0
+    v4_forwards:
+      - network: 0.0.0.0/0
+        device_id: 0
+    v6_forwards:
+
+

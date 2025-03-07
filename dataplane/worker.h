@@ -1,16 +1,16 @@
 #pragma once
 
+#define _GNU_SOURCE
+#include <pthread.h>
+
 #include <stdint.h>
+
+#include "config.h"
 
 #include "dataplane/pipeline/pipeline.h"
 
 struct dataplane;
 struct dataplane_numa_node;
-
-struct dataplane_device_worker_config {
-	uint16_t core_id;
-	uint16_t numa_id;
-};
 
 struct worker_read_ctx {
 
@@ -52,10 +52,9 @@ struct dataplane_worker {
 	struct worker_write_ctx write_ctx;
 
 	struct packet_list pending;
-};
 
-void
-worker_exec(struct dataplane_worker *worker);
+	struct dataplane_device_worker_config config;
+};
 
 int
 dataplane_worker_init(
@@ -65,3 +64,9 @@ dataplane_worker_init(
 	int queue_id,
 	struct dataplane_device_worker_config *config
 );
+
+int
+dataplane_worker_start(struct dataplane_worker *worker);
+
+void
+dataplane_worker_stop(struct dataplane_worker *worker);

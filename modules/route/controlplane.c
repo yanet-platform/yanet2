@@ -11,8 +11,10 @@
 
 struct module_data *
 route_module_config_init(struct agent *agent, const char *name) {
+	struct dp_config *dp_config = ADDR_OF(agent, agent->dp_config);
+
 	uint64_t index;
-	if (dp_config_lookup_module(agent->dp_config, "route", &index)) {
+	if (dp_config_lookup_module(dp_config, "route", &index)) {
 		return NULL;
 	}
 

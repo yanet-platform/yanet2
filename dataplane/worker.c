@@ -35,9 +35,11 @@
 
 #include "worker.h"
 
+#include "dataplane/dataplane.h"
+#include "dataplane/device.h"
+
 #include "dataplane/pipeline/pipeline.h"
 
-#include "dataplane.h"
 #include "dataplane/config/zone.h"
 
 #include "common/data_pipe.h"
@@ -276,8 +278,9 @@ worker_loop_round(struct dataplane_worker *worker) {
 		ADDR_OF(cp_config, cp_config->cp_config_gen);
 
 	// Determine pipelines
-	// FIXME: this should depend on cp_config
-	dataplane_route_pipeline(worker->dataplane, &input_packets);
+	dataplane_route_pipeline(
+		worker->node->dp_config, worker->node->cp_config, &input_packets
+	);
 
 	// Now group packets by pipeline and build packet_front
 	while (packet_list_first(&input_packets)) {
@@ -323,11 +326,15 @@ worker_loop_round(struct dataplane_worker *worker) {
 	dataplane_drop_packets(worker->dataplane, &drop_packets);
 }
 
-void
-worker_exec(struct dataplane_worker *worker) {
+static void *
+worker_thread_start(void *arg) {
+	struct dataplane_worker *worker = (struct dataplane_worker *)arg;
+
 	while (1) {
 		worker_loop_round(worker);
 	}
+
+	return NULL;
 }
 
 int
@@ -344,6 +351,7 @@ dataplane_worker_init(
 	worker->device_id = device->device_id;
 	worker->port_id = device->port_id;
 	worker->queue_id = queue_id;
+	worker->config = *config;
 
 	worker->read_ctx.read_size = 32;
 	worker->write_ctx.write_size = 32;
@@ -352,7 +360,9 @@ dataplane_worker_init(
 	packet_list_init(&worker->pending);
 
 	// Initialize device rx and tx queue
-	if (rte_eth_tx_queue_setup(device->port_id, queue_id, 4096, 1, NULL)) {
+	if (rte_eth_tx_queue_setup(
+		    device->port_id, queue_id, 4096, config->numa_id, NULL
+	    )) {
 		return -1;
 	}
 
@@ -375,7 +385,7 @@ dataplane_worker_init(
 		NULL,
 		rte_pktmbuf_init,
 		NULL,
-		1,
+		config->numa_id,
 		MEMPOOL_F_SP_PUT | MEMPOOL_F_SC_GET
 	);
 	if (worker->rx_mempool == NULL) {
@@ -383,7 +393,12 @@ dataplane_worker_init(
 	}
 
 	if (rte_eth_rx_queue_setup(
-		    device->port_id, queue_id, 4096, 1, NULL, worker->rx_mempool
+		    device->port_id,
+		    queue_id,
+		    4096,
+		    config->numa_id,
+		    NULL,
+		    worker->rx_mempool
 	    )) {
 		goto error_mempool;
 	}
@@ -409,4 +424,29 @@ error_mempool:
 	rte_mempool_free(worker->rx_mempool);
 
 	return -1;
+}
+
+int
+dataplane_worker_start(struct dataplane_worker *worker) {
+	pthread_attr_t wrk_th_attr;
+	pthread_attr_init(&wrk_th_attr);
+
+	cpu_set_t mask;
+	CPU_ZERO(&mask);
+	CPU_SET(worker->config.core_id, &mask);
+
+	pthread_attr_setaffinity_np(&wrk_th_attr, sizeof(cpu_set_t), &mask);
+
+	pthread_create(
+		&worker->thread_id, &wrk_th_attr, worker_thread_start, worker
+	);
+
+	pthread_attr_destroy(&wrk_th_attr);
+
+	return 0;
+}
+
+void
+dataplane_worker_stop(struct dataplane_worker *worker) {
+	pthread_join(worker->thread_id, NULL);
 }

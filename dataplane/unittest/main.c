@@ -21,6 +21,9 @@
 #include "modules/route/config.h"
 #include "modules/route/controlplane.h"
 
+#include "common/malloc_heap.h"
+#include "rte_memory.h"
+
 static int
 read_packets(struct rte_mempool *pool, struct packet_front *packet_front) {
 	char pcap_errbuf[512];
@@ -114,7 +117,7 @@ main(int argc, char **argv) {
 	(void)argc;
 	(void)argv;
 
-	dpdk_init(argv[0], 0, NULL);
+	dpdk_init(argv[0], 32, 0, NULL);
 
 	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 
@@ -172,22 +175,19 @@ main(int argc, char **argv) {
 
 	agent_update_modules(agent, 1, &rmc);
 
-	agent_update_pipelines(agent, 1, NULL);
-	/*FIXME:
-	   (struct pipeline_config[]){
-				{
-					.length = 1,
-					.modules = (struct module_config[]){
-						{
-							.type = "route",
-							.name = "route0",
-						}
-					},
-				},
-			}
-		);
-	*/
+	struct pipeline_config *pc = pipeline_config_create(1);
+	pipeline_config_set_module(pc, 0, "route", "route0");
+	agent_update_pipelines(agent, 1, &pc);
 
+	/*struct malloc_heap heap;
+	malloc_heap_create(&heap, "pituh");
+	struct rte_memseg_list msl;
+	memset(&msl, 0, sizeof(msl));
+	msl.base_va = malloc(1 << 25);
+	msl.len = 1 << 25;
+	msl.page_sz = 4096;
+	malloc_heap_add_external_memory(&heap, &msl);
+	*/
 	struct rte_mempool *pool;
 	pool = rte_mempool_create(
 		"input",

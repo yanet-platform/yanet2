@@ -9,19 +9,7 @@
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
 
-static inline uint16_t
-forward_select_device(struct dp_config *dp_config, uint16_t device_id) {
-	if (device_id >= dp_config->dp_topology.device_count)
-		return device_id;
-
-	uint16_t *forward_map =
-		ADDR_OF(&dp_config->dp_topology,
-			dp_config->dp_topology.forward_map);
-
-	return forward_map[device_id];
-}
-
-static uint32_t
+static uint16_t
 forward_handle_v4(
 	struct dp_config *dp_config,
 	struct forward_module_config *config,
@@ -36,15 +24,23 @@ forward_handle_v4(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-	if (lpm_lookup(&config->lpm_v4, 4, (uint8_t *)&header->dst_addr) !=
-	    LPM_VALUE_INVALID) {
-		return forward_select_device(dp_config, packet->tx_device_id);
+	if (packet->tx_device_id >= config->device_count)
+		return packet->tx_device_id;
+
+	uint32_t forward_device_id = lpm_lookup(
+		&config->device_forwards[packet->tx_device_id].lpm_v4,
+		4,
+		(uint8_t *)&header->dst_addr
+	);
+
+	if (forward_device_id == LPM_VALUE_INVALID) {
+		forward_device_id = packet->tx_device_id;
 	}
 
-	return packet->tx_device_id;
+	return forward_device_id;
 }
 
-static uint32_t
+static uint16_t
 forward_handle_v6(
 	struct dp_config *dp_config,
 	struct forward_module_config *config,
@@ -58,12 +54,35 @@ forward_handle_v6(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	if (lpm_lookup(&config->lpm_v6, 16, header->dst_addr) !=
-	    LPM_VALUE_INVALID) {
-		return forward_select_device(dp_config, packet->tx_device_id);
+	if (packet->tx_device_id >= config->device_count)
+		return packet->tx_device_id;
+
+	uint32_t forward_device_id = lpm_lookup(
+		&config->device_forwards[packet->tx_device_id].lpm_v6,
+		16,
+		(uint8_t *)&header->dst_addr
+	);
+
+	if (forward_device_id == LPM_VALUE_INVALID) {
+		forward_device_id = packet->tx_device_id;
 	}
 
-	return packet->tx_device_id;
+	return forward_device_id;
+}
+
+static uint16_t
+forward_handle_l2(
+	struct dp_config *dp_config,
+	struct forward_module_config *config,
+	struct packet *packet
+) {
+	(void)dp_config;
+
+	if (packet->tx_device_id >= config->device_count)
+		return packet->tx_device_id;
+
+	return config->device_forwards[packet->tx_device_id]
+		.l2_forward_device_id;
 }
 
 static void
@@ -91,8 +110,8 @@ forward_handle_packets(
 				dp_config, forward_config, packet
 			);
 		} else {
-			device_id = forward_select_device(
-				dp_config, packet->tx_device_id
+			device_id = forward_handle_l2(
+				dp_config, forward_config, packet
 			);
 		}
 

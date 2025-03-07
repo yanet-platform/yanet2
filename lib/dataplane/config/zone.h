@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #include "common/memory.h"
 
@@ -11,8 +12,17 @@
 
 #include "controlplane/agent/agent.h"
 
+struct module_data;
+
 struct module_data {
 	uint64_t index;
+	uint64_t gen;
+	struct module_data *prev;
+	struct agent *agent;
+	/*
+	 * All module datas are accessible through registry so name
+	 * should live somewhere there.
+	 */
 	char name[80];
 	struct memory_context memory_context;
 };
@@ -23,7 +33,7 @@ struct cp_module {
 
 struct cp_module_registry {
 	uint64_t count;
-	struct cp_module modules[0];
+	struct cp_module modules[];
 };
 
 struct cp_pipeline {
@@ -33,23 +43,88 @@ struct cp_pipeline {
 
 struct cp_pipeline_registry {
 	uint64_t count;
-	struct cp_pipeline pipelines[0];
+	struct cp_pipeline pipelines[];
 };
+
+struct cp_device_registry {
+	uint64_t count;
+	uint64_t pipelines[];
+};
+
+struct cp_config_gen;
 
 struct cp_config_gen {
 	uint64_t gen;
 
 	struct cp_pipeline_registry *pipeline_registry;
 	struct cp_module_registry *module_registry;
+	struct cp_device_registry *device_registry;
+
+	struct cp_config_gen *prev;
+};
+
+struct cp_agent_registry;
+struct cp_agent_registry {
+	uint64_t count;
+	struct cp_agent_registry *prev;
+	struct agent *agents[];
 };
 
 // Controlplane config entry zone
 struct cp_config {
 	struct block_allocator block_allocator;
 	struct memory_context memory_context;
-	// Relative reference to active controlplane config
+
+	pid_t config_lock;
+
 	struct cp_config_gen *cp_config_gen;
+
+	struct cp_agent_registry *agent_registry;
 };
+
+static inline bool
+cp_config_try_lock(struct cp_config *cp_config) {
+	pid_t pid = getpid();
+	pid_t zero = 0;
+	return __atomic_compare_exchange_n(
+		&cp_config->config_lock,
+		&zero,
+		pid,
+		false,
+		__ATOMIC_RELAXED,
+		__ATOMIC_RELAXED
+	);
+}
+
+static inline void
+cp_config_lock(struct cp_config *cp_config) {
+	pid_t pid = getpid();
+	pid_t zero = 0;
+	while (!__atomic_compare_exchange_n(
+		&cp_config->config_lock,
+		&zero,
+		pid,
+		false,
+		__ATOMIC_RELAXED,
+		__ATOMIC_RELAXED
+	)) {
+		zero = 0;
+	};
+}
+
+static inline bool
+cp_config_unlock(struct cp_config *cp_config) {
+	pid_t pid = getpid();
+	pid_t zero = 0;
+	return __atomic_compare_exchange_n(
+		&cp_config->config_lock,
+		&pid,
+		zero,
+		false,
+		__ATOMIC_RELAXED,
+		__ATOMIC_RELAXED
+	);
+}
 
 struct dp_module {
 	char name[80];
@@ -59,14 +134,61 @@ struct dp_module {
 struct dp_config {
 	struct block_allocator block_allocator;
 	struct memory_context memory_context;
+	uint64_t storage_size;
 
 	struct cp_config *cp_config;
 
 	uint64_t module_count;
 	struct dp_module *dp_modules;
 
+	pid_t config_lock;
+
 	struct dp_topology dp_topology;
 };
+
+static inline bool
+dp_config_try_lock(struct dp_config *dp_config) {
+	pid_t pid = getpid();
+	pid_t zero = 0;
+	return __atomic_compare_exchange_n(
+		&dp_config->config_lock,
+		&zero,
+		pid,
+		false,
+		__ATOMIC_RELAXED,
+		__ATOMIC_RELAXED
+	);
+}
+
+static inline void
+dp_config_lock(struct dp_config *dp_config) {
+	pid_t pid = getpid();
+	pid_t zero = 0;
+	while (!__atomic_compare_exchange_n(
+		&dp_config->config_lock,
+		&zero,
+		pid,
+		false,
+		__ATOMIC_RELAXED,
+		__ATOMIC_RELAXED
+	)) {
+		zero = 0;
+	};
+}
+
+static inline bool
+dp_config_unlock(struct dp_config *dp_config) {
+	pid_t pid = getpid();
+	pid_t zero = 0;
+	return __atomic_compare_exchange_n(
+		&dp_config->config_lock,
+		&pid,
+		zero,
+		false,
+		__ATOMIC_RELAXED,
+		__ATOMIC_RELAXED
+	);
+}
 
 static inline size_t
 dp_config_modules_count(struct dp_config *dp_config) {
@@ -100,9 +222,9 @@ dp_config_lookup_module(
 
 /*
  * The routine updates one or more module confings linking them into
- * exisiting pipelines. Already exising modules are updated preserving its
+ * existing pipelines. Already existing modules are updated preserving its
  * index while new modules are to be appended to the tail of module list.
- * This means that pipilenes are not mutating here except adress recoding to
+ * This means that pipilenes are not mutating here except address recoding to
  * the new configuration generation container.
  */
 /*
@@ -122,11 +244,10 @@ cp_config_update_modules(
 	uint64_t module_count,
 	struct module_data **module_datas
 ) {
-	// lock
+	cp_config_lock(cp_config);
+
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(cp_config, cp_config->cp_config_gen);
-	// ref config
-	// unlock
 
 	struct cp_module_registry *old_module_registry =
 		ADDR_OF(old_config_gen, old_config_gen->module_registry);
@@ -148,11 +269,21 @@ cp_config_update_modules(
 				    ADDR_OF(old_module, old_module->data)->name,
 				    64
 			    )) {
+				module_datas[new_idx]->prev = OFFSET_OF(
+					module_datas[new_idx],
+					ADDR_OF(old_module, old_module->data)
+				);
 				found = true;
 				break;
 			}
 		}
 		if (!found) {
+			module_datas[new_idx]->prev = OFFSET_OF(
+				module_datas[new_idx],
+				// FIXME: NULL encoding hack
+				(struct module_data *)&module_datas[new_idx]
+					->prev
+			);
 			++new_module_count;
 		}
 	}
@@ -161,6 +292,20 @@ cp_config_update_modules(
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
 		);
+	new_config_gen->gen = old_config_gen->gen + 1;
+	/*
+	 * As we do not change original module order we may just to copy
+	 * pipeline registry to the new config generation.
+	 */
+	new_config_gen->pipeline_registry = OFFSET_OF(
+		new_config_gen,
+		ADDR_OF(old_config_gen, old_config_gen->pipeline_registry)
+	);
+	new_config_gen->device_registry = OFFSET_OF(
+		new_config_gen,
+		ADDR_OF(old_config_gen, old_config_gen->device_registry)
+	);
+
 	// FIXME: zero initialize in order to provide correct error handling
 
 	struct cp_module_registry *new_module_registry = memory_balloc(
@@ -205,7 +350,8 @@ cp_config_update_modules(
 				new_module->data = OFFSET_OF(
 					new_module, module_datas[new_idx]
 				);
-
+				module_datas[new_idx]->gen =
+					new_config_gen->gen;
 				found = true;
 				break;
 			}
@@ -215,6 +361,7 @@ cp_config_update_modules(
 				new_module_registry->modules +
 				new_module_registry->count;
 
+			module_datas[new_idx]->gen = new_config_gen->gen;
 			*new_module = (struct cp_module){
 				.data = OFFSET_OF(
 					new_module, module_datas[new_idx]
@@ -228,20 +375,11 @@ cp_config_update_modules(
 	new_config_gen->module_registry =
 		OFFSET_OF(new_config_gen, new_module_registry);
 
-	/*
-	 * Now we have to update pipelines
-	 * As we do not change original module order we may just to copy
-	 * pipeline registry to the new config generation.
-	 */
-	new_config_gen->pipeline_registry = OFFSET_OF(
-		new_config_gen,
-		ADDR_OF(old_config_gen, old_config_gen->pipeline_registry)
-	);
+	new_config_gen->prev = OFFSET_OF(new_config_gen, old_config_gen);
 
-	// lock
 	cp_config->cp_config_gen = OFFSET_OF(cp_config, new_config_gen);
 
-	// unlock
+	cp_config_unlock(cp_config);
 	return 0;
 }
 
@@ -276,20 +414,24 @@ cp_config_update_pipelines(
 	uint64_t pipeline_count,
 	struct pipeline_config *pipelines[]
 ) {
-	// lock
+	cp_config_lock(cp_config);
+
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(cp_config, cp_config->cp_config_gen);
-	// ref config
-	// unlock
 
 	struct cp_config_gen *new_config_gen =
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
 		);
 
+	new_config_gen->gen = old_config_gen->gen + 1;
 	new_config_gen->module_registry = OFFSET_OF(
 		new_config_gen,
 		ADDR_OF(old_config_gen, old_config_gen->module_registry)
+	);
+	new_config_gen->device_registry = OFFSET_OF(
+		new_config_gen,
+		ADDR_OF(old_config_gen, old_config_gen->device_registry)
 	);
 
 	struct cp_pipeline_registry *new_pipeline_registry =
@@ -318,7 +460,7 @@ cp_config_update_pipelines(
 				    &index
 			    )) {
 				// FIXME: free resources
-				return -1;
+				goto unlock;
 			}
 
 			if (cp_config_gen_lookup_module(
@@ -328,7 +470,7 @@ cp_config_update_pipelines(
 				    new_module_indexes + module_idx
 			    )) {
 				// FIXME: free resources
-				return -1;
+				goto unlock;
 			}
 		}
 
@@ -345,9 +487,61 @@ cp_config_update_pipelines(
 	new_config_gen->pipeline_registry =
 		OFFSET_OF(new_config_gen, new_pipeline_registry);
 
-	// lock
+	new_config_gen->prev = OFFSET_OF(new_config_gen, old_config_gen);
+
 	cp_config->cp_config_gen = OFFSET_OF(cp_config, new_config_gen);
 
-	// unlock
+unlock:
+	cp_config_unlock(cp_config);
+	return 0;
+}
+
+static inline int
+cp_config_update_devices(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	uint64_t device_count,
+	uint64_t *pipelines
+) {
+	(void)dp_config;
+
+	cp_config_lock(cp_config);
+
+	struct cp_config_gen *old_config_gen =
+		ADDR_OF(cp_config, cp_config->cp_config_gen);
+
+	struct cp_config_gen *new_config_gen =
+		(struct cp_config_gen *)memory_balloc(
+			&cp_config->memory_context, sizeof(struct cp_config_gen)
+		);
+	new_config_gen->gen = old_config_gen->gen + 1;
+	new_config_gen->module_registry = OFFSET_OF(
+		new_config_gen,
+		ADDR_OF(old_config_gen, old_config_gen->module_registry)
+	);
+	new_config_gen->pipeline_registry = OFFSET_OF(
+		new_config_gen,
+		ADDR_OF(old_config_gen, old_config_gen->pipeline_registry)
+	);
+
+	struct cp_device_registry *new_device_registry =
+		(struct cp_device_registry *)memory_balloc(
+			&cp_config->memory_context,
+			sizeof(struct cp_device_registry) +
+				sizeof(uint64_t) * device_count
+		);
+	new_device_registry->count = device_count;
+	for (uint64_t dev_idx = 0; dev_idx < device_count; ++dev_idx)
+		new_device_registry->pipelines[dev_idx] = pipelines[dev_idx];
+
+	new_config_gen->device_registry =
+		OFFSET_OF(new_config_gen, new_device_registry);
+
+	// FIXME: prev for the first one config_gen is invalid
+	new_config_gen->prev = OFFSET_OF(new_config_gen, old_config_gen);
+
+	cp_config->cp_config_gen = OFFSET_OF(cp_config, new_config_gen);
+
+	cp_config_unlock(cp_config);
 	return 0;
 }

@@ -31,7 +31,7 @@ subdir('modules')
 
 subdir('dataplane')
 
-#subdir('agent')
+subdir('agent')
 
 subdir('sock-send')
 

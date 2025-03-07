@@ -2,16 +2,23 @@
 
 #include <stddef.h>
 
+#include <sys/types.h>
+
 #include "common/memory.h"
 
 struct dp_config;
 struct cp_config;
+
+struct agent;
 
 struct agent {
 	struct block_allocator block_allocator;
 	struct memory_context memory_context;
 	struct dp_config *dp_config;
 	struct cp_config *cp_config;
+	pid_t pid;
+	struct agent *prev;
+	char name[80];
 };
 
 struct module_data;

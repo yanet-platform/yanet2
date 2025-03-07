@@ -1,10 +1,15 @@
 dependencies = []
+
+dependencies += dependency('threads')
+dependencies += dependency('yaml-0.1')
+
 dependencies += libdpdk.get_variable('dpdk_dep')
 
 dependencies += lib_common_dep
 dependencies += lib_pipeline_dp_dep
 
 lib_sources = files(
+  'config.c',
   'dataplane.c',
   'device.c',
   'worker.c',
