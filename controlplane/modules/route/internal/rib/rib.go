@@ -14,7 +14,7 @@ import (
 
 type RIB struct {
 	mu         sync.RWMutex
-	routes     MapTrie
+	routes     MapTrie[RoutesList]
 	neighbours *neigh.NexthopCache
 	links      *link.LinksCache
 	log        *zap.SugaredLogger
@@ -22,7 +22,7 @@ type RIB struct {
 
 func NewRIB(neighbours *neigh.NexthopCache, links *link.LinksCache, log *zap.SugaredLogger) *RIB {
 	return &RIB{
-		routes:     NewMapTrie(1024),
+		routes:     NewMapTrie[RoutesList](1024),
 		neighbours: neighbours,
 		links:      links,
 		log:        log,
@@ -64,7 +64,7 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	)
 
 	route := Route{
-		MapTrieKey: MapTrieKey{Prefix: prefix},
+		Prefix: prefix,
 	}
 
 	// Safe, because we've checked for MAC address format earlier.
@@ -72,7 +72,19 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	copy(route.DestinationMAC[:], neigh.HardwareAddr)
 
 	m.mu.Lock()
-	m.routes.InsertOrUpdate(route)
+	m.routes.InsertOrUpdate(
+		prefix,
+		func() RoutesList {
+			return RoutesList{
+				Routes: []Route{route},
+			}
+		},
+		func(m RoutesList) RoutesList {
+			// WIP(sakateka): FIXME: deduplicate routes
+			m.Routes = append(m.Routes, route)
+			return m
+		},
+	)
 	m.mu.Unlock()
 
 	m.log.Infow("added unicast route",
@@ -85,14 +97,14 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	return nil
 }
 
-func (m *RIB) DumpRoutes() map[MapTrieKey]RoutesList {
+func (m *RIB) DumpRoutes() map[netip.Prefix]RoutesList {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.routes.Dump()
 }
 
 type Route struct {
-	MapTrieKey
+	netip.Prefix
 	NextHop netip.Addr
 	// Temporary placeholder
 	HardwareRoute
@@ -110,9 +122,4 @@ func (m HardwareRoute) String() string {
 
 type RoutesList struct {
 	Routes []Route
-}
-
-func (m *RoutesList) Insert(route Route) {
-	// WIP(sakateka): FIXME: deduplicate routes
-	m.Routes = append(m.Routes, route)
 }

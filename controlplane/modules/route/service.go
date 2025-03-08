@@ -116,7 +116,7 @@ func (m *RouteService) InsertRoute(
 				idx = uint32(routeListIdx)
 			}
 
-			if err := config.PrefixAdd(key.Prefix, idx); err != nil {
+			if err := config.PrefixAdd(key, idx); err != nil {
 				return nil, fmt.Errorf("failed to add prefix %q: %w", prefix, err)
 			}
 		}
