@@ -14,7 +14,7 @@ import (
 
 type RIB struct {
 	mu         sync.RWMutex
-	routes     MapTrie[RoutesList]
+	routes     MapTrie[netip.Prefix, netip.Addr, RoutesList]
 	neighbours *neigh.NexthopCache
 	links      *link.LinksCache
 	log        *zap.SugaredLogger
@@ -22,7 +22,7 @@ type RIB struct {
 
 func NewRIB(neighbours *neigh.NexthopCache, links *link.LinksCache, log *zap.SugaredLogger) *RIB {
 	return &RIB{
-		routes:     NewMapTrie[RoutesList](1024),
+		routes:     NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
 		neighbours: neighbours,
 		links:      links,
 		log:        log,

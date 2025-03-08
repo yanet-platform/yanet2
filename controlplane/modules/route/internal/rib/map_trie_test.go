@@ -21,7 +21,7 @@ var onUpdate = func(v int) func(int) int {
 }
 
 func Test_MapTrie_LookupEmpty(t *testing.T) {
-	trie := NewMapTrie[int](0)
+	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
 
 	// Expect failed lookup in empty trie.
 	_, ok := trie.Lookup(netip.MustParseAddr("192.168.9.1"))
@@ -38,7 +38,7 @@ func Test_MapTrie_LookupAfterInsert(t *testing.T) {
 		{"127.0.0.1", false, 0},
 	}
 
-	trie := NewMapTrie[int](0)
+	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
 	trie.InsertOrUpdate(netip.MustParsePrefix("192.168.0.0/16"), onEmpty(0), onUpdate(0))
 
 	for _, c := range cases {
@@ -58,7 +58,7 @@ func Test_MapTrie_LookupAfterInsertUpdate(t *testing.T) {
 		{"127.0.0.1", false, 0},
 	}
 
-	trie := NewMapTrie[int](0)
+	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
 	trie.InsertOrUpdate(netip.MustParsePrefix("192.168.0.0/16"), onEmpty(0), onUpdate(0))
 	// This should update the value to 1.
 	trie.InsertOrUpdate(netip.MustParsePrefix("192.168.0.0/16"), onEmpty(1), onUpdate(1))
@@ -83,7 +83,7 @@ func Test_MapTrie_LookupAfterInsertNestedPrefixes(t *testing.T) {
 		{"127.0.0.1", true, 0},
 	}
 
-	trie := NewMapTrie[int](0)
+	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
 	trie.InsertOrUpdate(netip.MustParsePrefix("0.0.0.0/0"), onEmpty(0), onUpdate(0))
 	trie.InsertOrUpdate(netip.MustParsePrefix("192.0.0.0/8"), onEmpty(1), onUpdate(1))
 	trie.InsertOrUpdate(netip.MustParsePrefix("192.168.0.0/16"), onEmpty(2), onUpdate(2))
@@ -113,7 +113,7 @@ func Test_MapTrie_Lookup6(t *testing.T) {
 
 	addr := netip.MustParseAddr("fd25:cf19:6b13:cafe:babe:be57:f00d:0001")
 
-	trie := NewMapTrie[int](0)
+	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
 
 	for idx, c := range cases {
 		prefix := netip.MustParsePrefix(c.prefix).Masked()
@@ -145,7 +145,7 @@ func Test_MapTrie_Lookup6TopDownInsert(t *testing.T) {
 
 	addr := netip.MustParseAddr("fd25:cf19:6b13:cafe:babe:be57:f00d:0001")
 
-	trie := NewMapTrie[int](0)
+	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
 
 	for idx, c := range cases {
 		prefix := netip.MustParsePrefix(c.prefix).Masked()
@@ -161,7 +161,7 @@ func Test_MapTrie_Lookup6TopDownInsert(t *testing.T) {
 }
 
 func Test_MapTrie_LookupTraverse(t *testing.T) {
-	trie := NewMapTrie[int](0)
+	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
 
 	traverseLPM := func(addr netip.Addr) []netip.Prefix {
 		out := make([]netip.Prefix, 0)
@@ -305,7 +305,7 @@ func Fuzz_MapTrie_InsertAndLookup(f *testing.F) {
 	f.Add(byte(128), allFF[:], allFF[:])
 
 	f.Fuzz(func(t *testing.T, m byte, pb []byte, qb []byte) {
-		mt := NewMapTrie[RoutesList](0)
+		mt := NewMapTrie[netip.Prefix, netip.Addr, RoutesList](0)
 
 		prefixBytes := [16]byte{}
 		copy(prefixBytes[:], pb)
@@ -403,7 +403,7 @@ func initTestData(v4count int, v6count int, random bool) ([]netip.Addr, []Route)
 
 func Test_MapTrie_InsertMany(t *testing.T) {
 	addrs, routes := initTestData(200000, 200000, true)
-	mt := NewMapTrie[RoutesList](1024 * 4)
+	mt := NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024 * 4)
 	for _, route := range routes {
 		mt.InsertOrUpdate(
 			route.Prefix,
@@ -427,7 +427,7 @@ func Benchmark_MapTrie_InsertUniq(b *testing.B) {
 	routes := benchDataInsertuniqRoutes
 
 	inuse0 := heapInUse()
-	trie := NewMapTrie[RoutesList](1024)
+	trie := NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024)
 	inuse1 := heapInUse()
 	b.Logf("The initial Memory usage of MapTrie: %s", datasize.ByteSize(inuse1-inuse0))
 
@@ -466,7 +466,7 @@ var _, benchDataInsertMessRoutes = initTestData(1_000_000, 400_000, true)
 func Benchmark_MapTrie_InsertMess(b *testing.B) {
 	routes := benchDataInsertMessRoutes
 	inUse0 := heapInUse()
-	trie := NewMapTrie[RoutesList](1024)
+	trie := NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024)
 
 	inUse1 := heapInUse()
 	b.Logf("Initial Memory usage by mapTrie %s", datasize.ByteSize(inUse1-inUse0))
@@ -498,7 +498,7 @@ func Benchmark_mapTrie_lookup_mess_1k(b *testing.B) {
 	addrs := benchLookup1kAddrs
 	routes := benchLookup1kRoutes
 
-	mt := NewMapTrie[RoutesList](1024)
+	mt := NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024)
 	for _, route := range routes {
 		mt.InsertOrUpdate(
 			route.Prefix,
