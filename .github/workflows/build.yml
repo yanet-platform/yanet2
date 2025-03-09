@@ -3,10 +3,10 @@ name: Build YANET
 on:
   push:
     branches: ["main"]
-    paths: ["**.h", "**.c", "**/meson.build"]
+    paths: ["**.h", "**.c", "**/meson.build", "controlplane/**/*.go", "controlplane/go.mod", "controlplane/go.sum"]
   pull_request:
     branches: ["main"]
-    paths: ["**.h", "**.c", "**/meson.build"]
+    paths: ["**.h", "**.c", "**/meson.build", "controlplane/**/*.go", "controlplane/go.mod", "controlplane/go.sum"]
 
 jobs:
   build:
@@ -51,6 +51,19 @@ jobs:
           key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
           restore-keys: |
             ${{ env.cache_name }}-${{ runner.os }}-go-
+
+      - name: Install Go Protobuf Plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Build Go controlplane
+        run: |
+          cd controlplane
+          # Generate protobuf files
+          make ynpb modules/route/routepb
+          # Build the controlplane
+          make build
 
       - name: Build and run tests
         run: |
