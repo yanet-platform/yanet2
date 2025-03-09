@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	SizeOfUpdateStruct = unsafe.Sizeof(update{})
-	SizeOfNetAddrUnion = 40
-	SizeOfBaseType     = unsafe.Sizeof(baseType{})
-	SizeOfBaseTypeTail = SizeOfNetAddrUnion - SizeOfBaseType
+	sizeOfUpdateStruct = unsafe.Sizeof(update{})
+	attrAreaSizeOffset = unsafe.Offsetof(update{}.attrsAreaSize)
+	sizeOfNetAddrUnion = 40
+	sizeOfBaseType     = unsafe.Sizeof(baseType{})
+	sizeOfBaseTypeTail = sizeOfNetAddrUnion - sizeOfBaseType
 
 	NetIP4  = 1
 	NetIP6  = 2
@@ -62,12 +63,13 @@ const (
 )
 
 var (
-	ErrUnsupportedPrefix   = errors.New("unsupported prefix type")
-	ErrDataTooSmall        = errors.New("data buf is too small")
-	ErrUnknownAddrUnion    = errors.New("unknown addr union")
-	ErrAttributesTruncated = errors.New("attributes area truncated")
-	ErrAttrsUnexpectedEOD  = errors.New("unexpected End Of Data")
-	ErrBadPrefix           = errors.New("bad prefix")
+	ErrUpdateDecode        = errors.New("decode error")
+	ErrUnsupportedPrefix   = fmt.Errorf("unsupported prefix type: %w", ErrUpdateDecode)
+	ErrDataTooSmall        = fmt.Errorf("data buf is too small: %w", ErrUpdateDecode)
+	ErrUnknownAddrUnion    = fmt.Errorf("unknown addr union: %w", ErrUpdateDecode)
+	ErrAttributesTruncated = fmt.Errorf("attributes area truncated: %w", ErrUpdateDecode)
+	ErrAttrsUnexpectedEOD  = fmt.Errorf("unexpected End Of Data: %w", ErrUpdateDecode)
+	ErrBadPrefix           = fmt.Errorf("bad prefix: %w", ErrUpdateDecode)
 )
 
 type AttributeType uint8
@@ -167,24 +169,24 @@ type netAddrVPN6 struct {
 
 type update struct {
 	base          baseType
-	baseTail      [SizeOfBaseTypeTail]byte // NetAddrUnion data
+	baseTail      [sizeOfBaseTypeTail]byte // NetAddrUnion data
 	opType        Operation
 	peerAddr      IP6Addr
 	attrsAreaSize uint32
 }
 
 func newUpdate(data []byte) (*update, error) {
-	if len(data) < int(SizeOfUpdateStruct) {
+	if len(data) < int(sizeOfUpdateStruct) {
 		return nil, fmt.Errorf("data[:%d] is too small to hold an update(len=%d): %w",
-			len(data), SizeOfUpdateStruct, ErrDataTooSmall)
+			len(data), sizeOfUpdateStruct, ErrDataTooSmall)
 	}
 
 	u := (*update)(unsafe.Pointer(&data[0]))
 	if u.attrsAreaSize < uint32(sizeOfUint32) {
-		return nil, fmt.Errorf("unexpected attrsAreaSize=%d", u.attrsAreaSize)
+		return nil, fmt.Errorf("%w: unexpected attrsAreaSize=%d", ErrUpdateDecode, u.attrsAreaSize)
 	}
-	actualAttrsAreaSize := len(data[SizeOfUpdateStruct-4:])
-	if int(u.attrsAreaSize) < actualAttrsAreaSize {
+	actualAttrsAreaSize := len(data[attrAreaSizeOffset:]) // + size of u.attrsAreaSize
+	if int64(u.attrsAreaSize) > int64(actualAttrsAreaSize) {
 		return nil, fmt.Errorf("attributes area is too small want=%d, actual=%d: %w",
 			u.attrsAreaSize, actualAttrsAreaSize, ErrAttributesTruncated)
 	}
@@ -192,18 +194,18 @@ func newUpdate(data []byte) (*update, error) {
 }
 
 func (m *update) Decode(route *rib.Route) error {
-	if m.base.length > SizeOfNetAddrUnion {
+	if m.base.length > sizeOfNetAddrUnion {
 		return fmt.Errorf("update type(%s) is too big: %d > max known size %d: %w",
-			m.base.String(), m.base.length, SizeOfNetAddrUnion, ErrUnknownAddrUnion)
+			m.base.String(), m.base.length, sizeOfNetAddrUnion, ErrUnknownAddrUnion)
 	}
 	route.Peer = netipAddrFrom4U32(m.peerAddr)
 	route.ToRemove = m.opType.isRemove()
 
 	if err := m.decodePrefixAndRD(route); err != nil {
-		return fmt.Errorf("update.decodePrefixAndRD: %w", err)
+		return fmt.Errorf("%w: update.decodePrefixAndRD: %w", ErrUpdateDecode, err)
 	}
 	if err := m.decodeAttributes(route); err != nil {
-		return fmt.Errorf("update.Attributes: %w", err)
+		return fmt.Errorf("%w: update.Attributes: %w", ErrUpdateDecode, err)
 	}
 	return nil
 }
@@ -249,22 +251,23 @@ func (m *update) decodeAttributes(route *rib.Route) error {
 
 	// SAFETY: newUpdate checks for data boundaries.
 	data := unsafe.Slice((*byte)(
-		unsafe.Pointer(uintptr(unsafe.Pointer(&m.attrsAreaSize))+sizeOfUint32)),
-		m.attrsAreaSize-uint32(sizeOfUint32),
+		unsafe.Pointer(uintptr(unsafe.Pointer(&m.attrsAreaSize)))),
+		m.attrsAreaSize,
 	)
+	data = data[sizeOfUint32:] // skip m.attrsAreaSize
 
 	for len(data) > int(sizeOfUint32) {
 
 		typ := ExtendedAttributeID(binary.LittleEndian.Uint32(data))
 		data = data[sizeOfUint32:]
 
-		var attrSize uint32
+		if len(data) < int(sizeOfUint32) {
+			return fmt.Errorf("unexpected end of data during decoding attribute type %s: %w", typ.String(), ErrAttributesTruncated)
+		}
 
+		var attrSize uint32
 		if typ.isU32Attribute() {
 			attrSize = uint32(sizeOfUint32)
-			if len(data) < int(sizeOfUint32) {
-				return fmt.Errorf("unexpected end of data during decoding attribute type %s: %w", typ.String(), ErrAttributesTruncated)
-			}
 			val := binary.LittleEndian.Uint32(data)
 			switch typ {
 			case AttrOrigin, AttrOriginatorID:
@@ -342,7 +345,7 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 	case AttrMPLSLabelStack:
 	case AttrClusterList:
 	default:
-		return fmt.Errorf("unexpected attribute: %x", typ.String())
+		return fmt.Errorf("unexpected attribute: %s", typ.String())
 	}
 	return nil
 }

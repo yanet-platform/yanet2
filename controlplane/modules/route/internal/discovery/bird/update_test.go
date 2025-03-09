@@ -1,6 +1,7 @@
 package bird
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"testing"
@@ -242,7 +243,7 @@ func TestDecodeUpdate(t *testing.T) {
 				0: 0x4,     // NetAddr type NetVPN6
 				1: 0x8,     // prefix len
 				2: 0x40, 0, // ERROR: unknown NetAddrUinion struct size
-				SizeOfUpdateStruct - 4: 4, 0, 0, 0, // attrsAreaSize
+				attrAreaSizeOffset: 4, 0, 0, 0, // attrsAreaSize
 			},
 			errDecode: ErrUnknownAddrUnion,
 		},
@@ -268,19 +269,6 @@ func TestDecodeUpdate(t *testing.T) {
 				64: 0, 0, // truncated attrs data
 			},
 			errDecode: ErrAttrsUnexpectedEOD,
-		},
-		{
-			name: "ERR attributes truncated, update.attrsAreaSize != len(data[attrsArea:])",
-			data: []byte{
-				// NetAddrUnion 40 bytes
-				0: 0x3,     // NetVPN4
-				1: 0x8,     // prefix len
-				2: 0x14, 0, // NetAddr struct size
-				60: 4 + /* ERROR: too small attrsArea data, actual len==6*/ 4,
-				64: 0x1 /* < ORIGIN: PROTOCOL_BGP > */, 0x4, 0, 0,
-				68: 0, 0, // ... truncated
-			},
-			errNew: ErrAttributesTruncated,
 		},
 		{
 			name: "ERR U32 attribute truncated",
@@ -321,21 +309,24 @@ func TestDecodeUpdate(t *testing.T) {
 				68: 2, 0, 0, 0, // size of ASPath attribute
 				72: 2, 100, // ERROR: 100 segents but not enought data
 			},
-			errDecode: ErrAttrsUnexpectedEOD,
+			errNew: ErrAttributesTruncated,
 		},
 	}
 
 	for idx, c := range cases {
 		t.Run(fmt.Sprintf("case #%d %s", idx, c.name), func(t *testing.T) {
 			update, err := newUpdate(c.data)
-			require.ErrorIs(t, err, c.errNew, "err from newUpdate")
 			if c.errNew != nil {
+				require.Error(t, err)
+				require.ErrorIs(t, err, c.errNew, "err from newUpdate")
 				return
 			}
+			require.NoError(t, err)
 			actual := &rib.Route{}
 			err = update.Decode(actual)
-			require.ErrorIs(t, err, c.errDecode, "err from update.Decode")
 			if c.errDecode != nil {
+				require.Error(t, err)
+				require.ErrorIs(t, err, c.errDecode, "err from update.Decode")
 				return
 			}
 			require.Equal(t, &c.expected, actual, "%s != %s", c.expected.Prefix, actual.Prefix)
@@ -344,23 +335,23 @@ func TestDecodeUpdate(t *testing.T) {
 
 }
 
+var benchData []byte = []byte{
+	// NetAddrUnion
+	0: 0x2, 0x20, 0x14, 0, 0x51, 0x2, 0x1, 0x20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	20: 0, 0, 0, 0, 0x68, 0xd7, 0xa3, 0x35, 0x47, 0x59, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	// update type 4 bytes
+	40: 0x1, 0, 0, 0,
+	44: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x1, 0, 0, 0, 0x5e, 0, 0, 0, 0x1,
+	0x4, 0, 0, 0x2, 0, 0, 0, 0x2, 0x4, 0, 0, 0x12, 0, 0, 0, 0x2, 0x4, 0, 0,
+	0xc7, 0xf1, 0, 0, 0x1b, 0x1b, 0, 0, 0x5d, 0x67, 0, 0, 0x5d, 0x66,
+	0x3, 0x4, 0, 0, 0x10, 0, 0, 0, 0x91, 0x28, 0x2, 0x2a, 0, 0x2, 0x9, 0,
+	0, 0, 0, 0, 0x13, 0, 0, 0, 0x5, 0x4, 0, 0, 0x64, 0, 0, 0, 0x8, 0x4,
+	0, 0, 0x10, 0, 0, 0, 0x2, 0, 0xf1, 0xc7, 0xf9, 0x1, 0xf1, 0xc7, 0x9a,
+	0x2, 0xf1, 0xc7, 0x1a, 0x8, 0xf1, 0xc7}
+
 // cpu: 13th Gen Intel(R) Core(TM) i7-13700H
 // Benchmark_update_Decode-20      30660841                39.61 ns/op            0 B/op          0 allocs/op
 func Benchmark_update_Decode(b *testing.B) {
-	benchData := []byte{
-		// NetAddrUnion
-		0: 0x2, 0x20, 0x14, 0, 0x51, 0x2, 0x1, 0x20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		20: 0, 0, 0, 0, 0x68, 0xd7, 0xa3, 0x35, 0x47, 0x59, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		// update type 4 bytes
-		40: 0x1, 0, 0, 0,
-		44: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x1, 0, 0, 0, 0x5e, 0, 0, 0, 0x1,
-		0x4, 0, 0, 0x2, 0, 0, 0, 0x2, 0x4, 0, 0, 0x12, 0, 0, 0, 0x2, 0x4, 0, 0,
-		0xc7, 0xf1, 0, 0, 0x1b, 0x1b, 0, 0, 0x5d, 0x67, 0, 0, 0x5d, 0x66,
-		0x3, 0x4, 0, 0, 0x10, 0, 0, 0, 0x91, 0x28, 0x2, 0x2a, 0, 0x2, 0x9, 0,
-		0, 0, 0, 0, 0x13, 0, 0, 0, 0x5, 0x4, 0, 0, 0x64, 0, 0, 0, 0x8, 0x4,
-		0, 0, 0x10, 0, 0, 0, 0x2, 0, 0xf1, 0xc7, 0xf9, 0x1, 0xf1, 0xc7, 0x9a,
-		0x2, 0xf1, 0xc7, 0x1a, 0x8, 0xf1, 0xc7}
-
 	route := rib.MakeRoute()
 	result := 0
 
@@ -387,4 +378,32 @@ func Benchmark_update_Decode(b *testing.B) {
 		b.FailNow()
 	}
 	b.Logf("Pref sum %12d == %d", result, expectedResult)
+}
+
+// NOTE: In case of an error `fuzzing process hung or terminated unexpectedly: exit status 2`,
+// see: https://github.com/golang/go/issues/56238
+// And try to run again with: `go test -v -parallel=1 -fuzz ./...`
+func Fuzz_update_Decode(f *testing.F) {
+	f.Add([]byte{
+		// OK remove route event
+		1, 0x18, 8, 5: 7, 7: 1, 24: 0x10, 0x92, 0x53, 9, 0x1c, 0x5b, 32: 1,
+		0x11, 8, 0, 0, 0x80, 0, 1, 2, 56: 1, 60: 0x52, 0, 0, 0, 1, 4,
+		72: 2, 4, 0, 0, 0x12, 0, 0, 0, 2, 4, 0, 6, 0x14, 0x81, 0, 0, 5,
+		89: 0x13, 0, 0, 0x1d, 0x79, 0, 0, 0x97, 0x93, 3, 4, 0, 0, 0x10,
+		114: 0xff, 0xff, 0, 0, 0xb9, 0x68, 0x52, 0xce, 5, 4, 0, 0, 0x64,
+		0, 0, 0, 8, 4, 0, 0, 4, 0, 0, 0, 0xb8, 0x88, 0x13, 0x5,
+	})
+	f.Add(benchData)
+	f.Add(([]byte)(nil))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		u, err := newUpdate(data)
+		if u != nil {
+			route := &rib.Route{}
+			err = u.Decode(route)
+		}
+		if err != nil && !errors.Is(err, ErrUpdateDecode) {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
 }

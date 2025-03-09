@@ -126,7 +126,7 @@ func (m *Export) Run(ctx context.Context) error {
 			m.log.Debugw("Send RIB update", zap.Int("size", len(batch)),
 				zap.Bool("isTimeout", timeout))
 			if err := m.updater.BulkUpdate(batch); err != nil {
-				return fmt.Errorf("RIBUpdater.UpdateBulk: %w", err)
+				return fmt.Errorf("RIBUpdater.BulkUpdate: %w", err)
 			}
 			batch = batch[:0]
 		}
