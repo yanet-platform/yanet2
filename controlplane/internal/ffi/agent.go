@@ -35,7 +35,7 @@ type Agent struct {
 
 // TODO: docs for 'it's user responsibility to call "Close"'.
 func NewAgent(path string, name string, size uint) (*Agent, error) {
-	cPath := C.CString(path)
+	cPath := C.CString(pat)
 	defer C.free(unsafe.Pointer(cPath))
 
 	cName := C.CString(name)
