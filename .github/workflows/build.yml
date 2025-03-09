@@ -17,7 +17,7 @@ jobs:
     steps:      
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git
+          packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
           version: 1.1
 
       - uses: actions/checkout@v4
