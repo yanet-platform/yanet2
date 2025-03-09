@@ -1,6 +1,6 @@
 .PHONY: ynpb build modules/route/routepb
 
-GO=/Users/esafronov/.ya/tools/v4/6608868508/bin/go
+GO := go
 PROTOC := protoc
 
 ynpb: ynpb/gateway.proto ynpb/logging.proto
