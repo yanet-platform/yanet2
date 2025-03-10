@@ -1,8 +1,6 @@
 package rib
 
 import (
-	"fmt"
-	"net"
 	"net/netip"
 	"slices"
 	"sync"
@@ -23,18 +21,20 @@ func FreeRoute(r *Route) {
 	routeStructPool.Put(r)
 }
 
-func MakeRoute() *Route {
-	return routeStructPool.Get().(*Route)
+func makeRoute() *Route {
+	r := routeStructPool.Get().(*Route)
+	r.UpdatedAt = time.Now()
+	return r
 }
 
 func MakeStaticRoute() *Route {
-	r := MakeRoute()
+	r := makeRoute()
 	r.SourceID = RouteSourceStatic
 	return r
 }
 
 func MakeBirdRoute() *Route {
-	r := MakeRoute()
+	r := makeRoute()
 	r.SourceID = RouteSourceBird
 	return r
 }
@@ -77,16 +77,6 @@ func routeCompare(a *Route, b *Route) int {
 
 func routeCompareRev(a *Route, b *Route) int {
 	return -routeCompare(a, b)
-}
-
-// HardwareRoute is a hashable pair of MAC addresses.
-type HardwareRoute struct {
-	SourceMAC      [6]byte
-	DestinationMAC [6]byte
-}
-
-func (m HardwareRoute) String() string {
-	return fmt.Sprintf("%s -> %s", net.HardwareAddr(m.SourceMAC[:]), net.HardwareAddr(m.DestinationMAC[:]))
 }
 
 type RoutesList struct {

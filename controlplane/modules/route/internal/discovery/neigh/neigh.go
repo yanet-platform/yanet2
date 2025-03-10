@@ -212,17 +212,19 @@ func (m *NeighMonitor) updateNeighbours() error {
 
 		// Create the entry with resolved hardware addresses
 		entry := NeighbourEntry{
-			NextHop:      nexthopAddr,
-			LinkAddr:     neigh.HardwareAddr,
-			HardwareAddr: hardwareAddr,
-			UpdatedAt:    time.Now(),
-			State:        NeighbourState(neigh.State),
+			NextHop: nexthopAddr,
+			HardwareRoute: HardwareRoute{
+				SourceMAC:      [6]byte(hardwareAddr),
+				DestinationMAC: [6]byte(neigh.HardwareAddr),
+			},
+			UpdatedAt: time.Now(),
+			State:     NeighbourState(neigh.State),
 		}
 
 		m.log.Debugw("resolved neighbour entry",
 			zap.Stringer("nexthop_addr", entry.NextHop),
-			zap.Stringer("nexthop_hardware_addr", entry.LinkAddr),
-			zap.Stringer("hardware_addr", entry.HardwareAddr),
+			zap.Stringer("nexthop_hardware_addr", neigh.HardwareAddr),
+			zap.Stringer("inface_hardware_addr", hardwareAddr),
 			zap.Stringer("state", entry.State),
 		)
 

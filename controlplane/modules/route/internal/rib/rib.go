@@ -1,12 +1,12 @@
 package rib
 
 import (
-	"fmt"
 	"net/netip"
 	"sync"
 
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/neigh"
 )
 
@@ -25,23 +25,15 @@ func NewRIB(neighbours *neigh.NexthopCache, log *zap.SugaredLogger) *RIB {
 	}
 }
 
+func (m *RIB) NeighboursView() discovery.CacheView[netip.Addr, neigh.NeighbourEntry] {
+	return m.neighbours.View()
+
+}
+
 func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error {
 	m.log.Debugf("adding unicast route %q via %q", prefix, nexthopAddr)
 
-	// Obtain neighbor entry with resolved hardware addresses
-	neighbours := m.neighbours.View()
-	entry, ok := neighbours.Lookup(nexthopAddr)
-	if !ok {
-		return fmt.Errorf("neighbour with %q nexthop IP address not found", nexthopAddr)
-	}
-
-	m.log.Debugw("found neighbour with resolved hardware addresses",
-		zap.Stringer("nexthop_addr", nexthopAddr),
-		zap.Stringer("nexthop_hardware_addr", entry.LinkAddr),
-		zap.Stringer("hardware_addr", entry.HardwareAddr),
-	)
-
-	route := MakeRoute()
+	route := MakeStaticRoute()
 	route.Prefix = prefix
 	route.NextHop = nexthopAddr
 
@@ -63,8 +55,6 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	m.log.Infow("added unicast route",
 		zap.Stringer("prefix", prefix),
 		zap.Stringer("nexthop_addr", nexthopAddr),
-		zap.Stringer("hardware_addr", entry.HardwareAddr),
-		zap.Stringer("nexthop_hardware_addr", entry.LinkAddr),
 	)
 
 	return nil

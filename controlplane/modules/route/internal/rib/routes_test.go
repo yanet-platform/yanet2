@@ -10,7 +10,7 @@ import (
 )
 
 func TestRouteComparator(t *testing.T) {
-	a, b, c := MakeRoute(), MakeRoute(), MakeRoute()
+	a, b, c := MakeBirdRoute(), MakeBirdRoute(), MakeBirdRoute()
 	a.Prefix = netip.MustParsePrefix("::aaaa/128")
 	b.Prefix = netip.MustParsePrefix("::bbbb/128")
 	c.Prefix = netip.MustParsePrefix("::cccc/128")
@@ -52,9 +52,9 @@ func TestRouteComparator(t *testing.T) {
 }
 
 func TestRoutesList_Insert_keepsBest(t *testing.T) {
-	r1 := MakeRoute()
-	r2 := MakeRoute()
-	r3 := MakeRoute()
+	r1 := MakeBirdRoute()
+	r2 := MakeBirdRoute()
+	r3 := MakeBirdRoute()
 	for idx, r := range []*Route{r1, r2, r3} {
 		r.Peer = netip.MustParseAddr(fmt.Sprintf("0.0.0.%d", idx))
 		r.Pref = 100
@@ -92,9 +92,9 @@ func TestRoutesList_Insert_keepsBest(t *testing.T) {
 }
 
 func TestRouteList_Remove_keepsBest(t *testing.T) {
-	r1ref := MakeRoute()
-	r2ref := MakeRoute()
-	r3ref := MakeRoute()
+	r1ref := MakeBirdRoute()
+	r2ref := MakeBirdRoute()
+	r3ref := MakeBirdRoute()
 	list := RoutesList{}
 	for idx, r := range []*Route{r1ref, r2ref, r3ref} {
 		r.Peer = netip.MustParseAddr(fmt.Sprintf("0.0.0.%d", idx))

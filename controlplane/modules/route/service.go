@@ -14,6 +14,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/bitset"
 	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/bird"
+	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/rib"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/routepb"
 )
@@ -109,22 +110,37 @@ func (m *RouteService) updateModuleConfigs(
 			return fmt.Errorf("failed to create %q module config: %w", name, err)
 		}
 
-		hardwareRoutes := map[rib.HardwareRoute]uint32{}
+		// Obtain neighbor entry with resolved hardware addresses
+		neighbours := m.rib.NeighboursView()
+
+		hardwareRoutes := map[neigh.HardwareRoute]uint32{}
 		routesLists := map[bitset.TinyBitset]uint32{}
 		for prefix, routeList := range routes {
 			routesList := bitset.TinyBitset{}
 
+			// FIXME: insert only the best routes?
 			for _, route := range routeList.Routes {
-				if idx, ok := hardwareRoutes[route.Link]; ok {
+
+				// Lookup hwaddress for the route
+				entry, ok := neighbours.Lookup(route.NextHop)
+				if !ok {
+					return fmt.Errorf("neighbour with %q nexthop IP address not found", route.NextHop)
+				}
+
+				m.log.Debugw("found neighbour with resolved hardware addresses",
+					zap.Stringer("nexthop_addr", route.NextHop),
+				)
+
+				if idx, ok := hardwareRoutes[entry.HardwareRoute]; ok {
 					routesList.Insert(idx)
 					continue
 				}
 
-				idx, err := config.RouteAdd(route.Link.SourceMAC[:], route.Link.DestinationMAC[:])
+				idx, err := config.RouteAdd(entry.SourceMAC[:], entry.DestinationMAC[:])
 				if err != nil {
-					return fmt.Errorf("failed to add hardware route %q: %w", route.Link, err)
+					return fmt.Errorf("failed to add hardware route %q: %w", entry.HardwareRoute, err)
 				}
-				hardwareRoutes[route.Link] = uint32(idx)
+				hardwareRoutes[entry.HardwareRoute] = uint32(idx)
 				routesList.Insert(uint32(idx))
 			}
 

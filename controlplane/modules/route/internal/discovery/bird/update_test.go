@@ -352,7 +352,7 @@ var benchData []byte = []byte{
 // cpu: 13th Gen Intel(R) Core(TM) i7-13700H
 // Benchmark_update_Decode-20      30660841                39.61 ns/op            0 B/op          0 allocs/op
 func Benchmark_update_Decode(b *testing.B) {
-	route := rib.MakeRoute()
+	route := rib.MakeBirdRoute()
 	result := 0
 
 	b.ResetTimer()

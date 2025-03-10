@@ -1,6 +1,7 @@
 package neigh
 
 import (
+	"fmt"
 	"net"
 	"net/netip"
 	"time"
@@ -11,13 +12,22 @@ import (
 type NeighbourEntry struct {
 	// NextHop is the IP address of the next hop.
 	NextHop netip.Addr
-	// LinkAddr is the MAC address of the next hop.
-	LinkAddr net.HardwareAddr
-	// HardwareAddr is the MAC address of the local interface that observed
-	// the neighbour.
-	HardwareAddr net.HardwareAddr
+	HardwareRoute
 	// UpdatedAt is the timestamp when this entry was last updated.
 	UpdatedAt time.Time
 	// State is the state of the neighbor entry.
 	State NeighbourState
+}
+
+// HardwareRoute is a hashable pair of MAC addresses.
+type HardwareRoute struct {
+	// SourceMAC is the MAC address of the local interface that observed
+	// the neighbour.
+	SourceMAC [6]byte
+	// DestinationMAC is the MAC address of the next hop.
+	DestinationMAC [6]byte
+}
+
+func (m HardwareRoute) String() string {
+	return fmt.Sprintf("%s -> %s", net.HardwareAddr(m.SourceMAC[:]), net.HardwareAddr(m.DestinationMAC[:]))
 }
