@@ -1,6 +1,7 @@
 package route
 
 import (
+	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/bird"
 )
 
@@ -12,20 +13,19 @@ type Config struct {
 	MemoryPathPrefix string `yaml:"memory_path_prefix"`
 	// MemoryRequirements is the amount of memory that is required for a single
 	// transaction.
-	MemoryRequirements uint   `yaml:"memory_requirements"`
-	Endpoint           string `yaml:"endpoint"`
-	GatewayEndpoint    string `yaml:"gateway_endpoint"`
+	MemoryRequirements datasize.ByteSize `yaml:"memory_requirements"`
+	Endpoint           string            `yaml:"endpoint"`
+	GatewayEndpoint    string            `yaml:"gateway_endpoint"`
 	// BirdExport configures the reader for the Bird Export Protocol feed.
 	BirdExport *bird.Config `yaml:"bird_export"`
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		// FIXME: a reasonable default value
-		MemoryPathPrefix:   "",
-		MemoryRequirements: 0,
-		Endpoint:           "",
-		GatewayEndpoint:    "",
+		MemoryPathPrefix:   "/dev/hugepages/data-",
+		MemoryRequirements: 16777216,
+		Endpoint:           "[::1]:0",
+		GatewayEndpoint:    "[::1]:8080",
 		BirdExport:         bird.DefaultConfig(),
 	}
 }

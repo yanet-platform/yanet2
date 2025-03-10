@@ -15,7 +15,7 @@ type ServerConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Endpoint: "[::]:0", // FIXME: a reasonable default
+			Endpoint: "[::1]:8080",
 		},
 	}
 }
