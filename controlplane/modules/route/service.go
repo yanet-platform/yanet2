@@ -88,8 +88,7 @@ func (m *RouteService) syncRouteUpdates(name string, numaIndices []uint32) error
 
 	routes := m.rib.DumpRoutes()
 
-	// Huge mutex, but our shared memory must be protected from concurrent
-	// access.
+	// Huge mutex, but our shared memory must be protected from concurrent access.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.updateModuleConfigs(name, numaIndices, routes)
@@ -114,46 +113,49 @@ func (m *RouteService) updateModuleConfigs(
 		neighbours := m.rib.NeighboursView()
 
 		hardwareRoutes := map[neigh.HardwareRoute]uint32{}
-		routesLists := map[bitset.TinyBitset]uint32{}
-		for prefix, routeList := range routes {
-			routesList := bitset.TinyBitset{}
+		routesListsSet := map[bitset.TinyBitset]int{}
+		for prefix, routesList := range routes {
+			routesListSetKey := bitset.TinyBitset{}
 
-			// FIXME: insert only the best routes?
-			for _, route := range routeList.Routes {
-
-				// Lookup hwaddress for the route
-				entry, ok := neighbours.Lookup(route.NextHop)
-				if !ok {
-					return fmt.Errorf("neighbour with %q nexthop IP address not found", route.NextHop)
-				}
-
-				m.log.Debugw("found neighbour with resolved hardware addresses",
-					zap.Stringer("nexthop_addr", route.NextHop),
-				)
-
-				if idx, ok := hardwareRoutes[entry.HardwareRoute]; ok {
-					routesList.Insert(idx)
-					continue
-				}
-
-				idx, err := config.RouteAdd(entry.SourceMAC[:], entry.DestinationMAC[:])
-				if err != nil {
-					return fmt.Errorf("failed to add hardware route %q: %w", entry.HardwareRoute, err)
-				}
-				hardwareRoutes[entry.HardwareRoute] = uint32(idx)
-				routesList.Insert(uint32(idx))
+			route := routesList.Best()
+			if route == nil {
+				m.log.Debugw("skip prefix with no routes", zap.Stringer("prefix", prefix))
+				// FIXME add telemetry
+				continue
 			}
 
-			idx, ok := routesLists[routesList]
+			// Lookup hwaddress for the route
+			entry, ok := neighbours.Lookup(route.NextHop)
 			if !ok {
-				routeListIdx, err := config.RouteListAdd(routesList.AsSlice())
+				return fmt.Errorf("neighbour with %q nexthop IP address not found", route.NextHop)
+			}
+
+			m.log.Debugw("found neighbour with resolved hardware addresses",
+				zap.Stringer("nexthop_addr", route.NextHop),
+			)
+
+			if idx, ok := hardwareRoutes[entry.HardwareRoute]; ok {
+				routesListSetKey.Insert(idx)
+				continue
+			}
+
+			idx, err := config.RouteAdd(entry.SourceMAC[:], entry.DestinationMAC[:])
+			if err != nil {
+				return fmt.Errorf("failed to add hardware route %q: %w", entry.HardwareRoute, err)
+			}
+			hardwareRoutes[entry.HardwareRoute] = uint32(idx)
+			routesListSetKey.Insert(uint32(idx))
+
+			idx, ok = routesListsSet[routesListSetKey]
+			if !ok {
+				routeListIdx, err := config.RouteListAdd(routesListSetKey.AsSlice())
 				if err != nil {
 					return fmt.Errorf("failed to add routes list: %w", err)
 				}
-				idx = uint32(routeListIdx)
+				idx = routeListIdx
 			}
 
-			if err := config.PrefixAdd(prefix, idx); err != nil {
+			if err := config.PrefixAdd(prefix, uint32(idx)); err != nil {
 				return fmt.Errorf("failed to add prefix %q: %w", prefix, err)
 			}
 		}
