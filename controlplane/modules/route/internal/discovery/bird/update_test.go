@@ -17,6 +17,7 @@ func TestSizeAssert(t *testing.T) {
 	require.EqualValues(t, unsafe.Sizeof(netAddrIP6{}), 20)
 	require.EqualValues(t, unsafe.Sizeof(netAddrVPN4{}), 16)
 	require.EqualValues(t, unsafe.Sizeof(netAddrVPN6{}), 32)
+	require.EqualValues(t, unsafe.Sizeof(rib.LargeCommunity{}), 12)
 }
 
 func TestDecodeUpdate(t *testing.T) {

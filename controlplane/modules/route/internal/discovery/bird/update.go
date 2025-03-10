@@ -18,6 +18,8 @@ const (
 	sizeOfBaseType     = unsafe.Sizeof(baseType{})
 	sizeOfBaseTypeTail = sizeOfNetAddrUnion - sizeOfBaseType
 
+	sizeOfLargeCommunityStruct = int(unsafe.Sizeof(rib.LargeCommunity{}))
+
 	NetIP4  = 1
 	NetIP6  = 2
 	NetVPN4 = 3
@@ -351,6 +353,34 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 	case AttrCommunity:
 	case AttrExtCommunity:
 	case AttrLargeCommunity:
+		if len(data) < int(sizeOfUint32) {
+			return fmt.Errorf("%w: area of large communities is too small want=%d len=%d",
+				ErrUpdateDecode, sizeOfUint32, len(data))
+		}
+		areaSize := binary.LittleEndian.Uint32(data)
+		if len(data) != int(areaSize) { // areaSize includes decoded size field
+			return fmt.Errorf("%w: unexpected large communities area size expect=%d != len=%d",
+				ErrUpdateDecode, areaSize, len(data))
+		}
+		data = data[sizeOfUint32:]
+		areaSize -= uint32(sizeOfUint32)
+		if len(data) == 0 {
+			// skip empty area
+			return nil
+		}
+		tailSize := len(data) % sizeOfLargeCommunityStruct
+		if tailSize != 0 {
+			return fmt.Errorf("%w: area of large communities has unhandled data tail %d bytes: %#+v",
+				ErrUpdateDecode, tailSize, data[len(data)-tailSize])
+
+		}
+		largeCommunities := unsafe.Slice(
+			(*rib.LargeCommunity)(unsafe.Pointer(&data[0])),
+			areaSize/uint32(sizeOfLargeCommunityStruct),
+		)
+		for idx := range largeCommunities {
+			route.AddLargeCommunity(&largeCommunities[idx])
+		}
 	case AttrMPLSLabelStack:
 	case AttrClusterList:
 	default:

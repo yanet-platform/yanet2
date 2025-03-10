@@ -3,41 +3,8 @@ package rib
 import (
 	"net/netip"
 	"slices"
-	"sync"
 	"time"
 )
-
-// Pool for the Route structs
-var (
-	routeStructPool sync.Pool = sync.Pool{
-		New: func() any {
-			return &Route{}
-		},
-	}
-)
-
-func FreeRoute(r *Route) {
-	*r = Route{} // clear
-	routeStructPool.Put(r)
-}
-
-func makeRoute() *Route {
-	r := routeStructPool.Get().(*Route)
-	r.UpdatedAt = time.Now()
-	return r
-}
-
-func MakeStaticRoute() *Route {
-	r := makeRoute()
-	r.SourceID = RouteSourceStatic
-	return r
-}
-
-func MakeBirdRoute() *Route {
-	r := makeRoute()
-	r.SourceID = RouteSourceBird
-	return r
-}
 
 type RouteSourceID uint8
 
@@ -47,19 +14,31 @@ const (
 	RouteSourceBird
 )
 
+type LargeCommunity struct {
+	GA    uint32
+	Data1 uint32
+	Data2 uint32
+}
+
+type LargeCommunityList struct {
+	LargeCommunity
+	Next *LargeCommunityList
+}
+
 type Route struct {
-	Prefix    netip.Prefix
-	NextHop   netip.Addr
-	Peer      netip.Addr
-	RD        uint64
-	UpdatedAt time.Time
-	PeerAS    uint32
-	OriginAS  uint32
-	Med       uint32
-	Pref      uint32
-	ASPathLen uint8
-	SourceID  RouteSourceID
-	ToRemove  bool
+	Prefix           netip.Prefix
+	NextHop          netip.Addr
+	Peer             netip.Addr
+	RD               uint64
+	UpdatedAt        time.Time
+	PeerAS           uint32
+	OriginAS         uint32
+	Med              uint32
+	Pref             uint32
+	ASPathLen        uint8
+	LargeCommunities *LargeCommunityList
+	SourceID         RouteSourceID
+	ToRemove         bool
 }
 
 func routeCompare(a *Route, b *Route) int {
