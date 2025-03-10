@@ -137,6 +137,7 @@ func (m *RouteModule) registerServices(ctx context.Context, listenerAddr net.Add
 
 	wg, ctx := errgroup.WithContext(ctx)
 	for _, serviceName := range servicesNames {
+		serviceName := serviceName
 		req := &ynpb.RegisterRequest{
 			Name:     serviceName,
 			Endpoint: listenerAddr.String(),

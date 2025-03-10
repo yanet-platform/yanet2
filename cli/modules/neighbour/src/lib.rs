@@ -51,7 +51,7 @@ impl Display for Age {
 #[derive(Debug, Tabled)]
 pub struct NeighbourEntry {
     /// IP address of the next-hop router or directly connected host.
-    #[tabled(rename = "NEIGHBOUR")]
+    #[tabled(rename = "NEXTHOP")]
     pub next_hop: IpAddr,
     /// MAC address of the next-hop device.
     #[tabled(rename = "NEIGHBOUR MAC")]
