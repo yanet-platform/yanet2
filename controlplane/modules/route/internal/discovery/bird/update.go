@@ -371,7 +371,7 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 		tailSize := len(data) % sizeOfLargeCommunityStruct
 		if tailSize != 0 {
 			return fmt.Errorf("%w: area of large communities has unhandled data tail %d bytes: %#+v",
-				ErrUpdateDecode, tailSize, data[len(data)-tailSize])
+				ErrUpdateDecode, tailSize, data[len(data)-tailSize:])
 
 		}
 		largeCommunities := unsafe.Slice(
