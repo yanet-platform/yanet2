@@ -12,7 +12,7 @@ type Socket struct {
 }
 
 type Config struct {
-	Enabled       bool
+	Enable        bool              `yaml:"enable"`
 	Sockets       []Socket          `yaml:"sockets"`
 	ParserBufSize datasize.ByteSize `yaml:"parser_buf_size"`
 	// DumpTimeout configures the timeout after which routes are forcibly dumped.
@@ -23,7 +23,7 @@ type Config struct {
 
 func DefaultConfig() *Config {
 	return &Config{
-		Enabled:       false,
+		Enable:        false,
 		ParserBufSize: datasize.MB,
 		DumpTimeout:   time.Second,
 		DumpThreshold: 1000,

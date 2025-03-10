@@ -73,9 +73,7 @@ func (m *RouteService) InsertRoute(
 func (m *RouteService) BulkUpdate(routes []*rib.Route) error {
 	m.log.Debugw("Apply bulk update", zap.Int("size", len(routes)))
 	m.rib.BulkUpdate(routes)
-	// FIXME: trigger modules update somehow
-	// name := "TODO:"
-	// return m.syncRouteUpdates(name, nil) // update all numas
+	// TODO: notification about rib update
 	return nil
 }
 

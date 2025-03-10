@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"time"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/rib"
@@ -198,6 +199,7 @@ func (m *update) Decode(route *rib.Route) error {
 		return fmt.Errorf("update type(%s) is too big: %d > max known size %d: %w",
 			m.base.String(), m.base.length, sizeOfNetAddrUnion, ErrUnknownAddrUnion)
 	}
+	route.UpdatedAt = time.Now()
 	route.Peer = netipAddrFrom4U32(m.peerAddr)
 	route.ToRemove = m.opType.isRemove()
 

@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"slices"
 	"sync"
+	"time"
 )
 
 // Pool for the Route structs
@@ -26,18 +27,38 @@ func MakeRoute() *Route {
 	return routeStructPool.Get().(*Route)
 }
 
+func MakeStaticRoute() *Route {
+	r := MakeRoute()
+	r.SourceID = RouteSourceStatic
+	return r
+}
+
+func MakeBirdRoute() *Route {
+	r := MakeRoute()
+	r.SourceID = RouteSourceBird
+	return r
+}
+
+type RouteSourceID uint8
+
+const (
+	RouteSourceUnknown RouteSourceID = iota
+	RouteSourceStatic
+	RouteSourceBird
+)
+
 type Route struct {
-	Prefix  netip.Prefix
-	NextHop netip.Addr
-	Peer    netip.Addr
-	RD      uint64
-	// LinkID    int // FIXME: add LinkID - lookup on insert?
-	Link      HardwareRoute // FIXME: remove? do we want to save this information statically?
+	Prefix    netip.Prefix
+	NextHop   netip.Addr
+	Peer      netip.Addr
+	RD        uint64
+	UpdatedAt time.Time
 	PeerAS    uint32
 	OriginAS  uint32
 	Med       uint32
 	Pref      uint32
 	ASPathLen uint8
+	SourceID  RouteSourceID
 	ToRemove  bool
 }
 

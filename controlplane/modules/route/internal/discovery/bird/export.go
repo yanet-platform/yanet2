@@ -49,7 +49,7 @@ func NewExportReader(cfg *Config, ribUpdater RIBUpdater, log *zap.SugaredLogger)
 }
 
 func (m *Export) Run(ctx context.Context) error {
-	if !m.cfg.Enabled {
+	if !m.cfg.Enable {
 		m.log.Info("Bird export reader is disabled")
 		return nil
 	}
@@ -84,7 +84,7 @@ func (m *Export) Run(ctx context.Context) error {
 					cancel(err)
 					return fmt.Errorf("bird export parser.Next: %w", err)
 				}
-				route := rib.MakeRoute()
+				route := rib.MakeBirdRoute()
 				if err := update.Decode(route); err != nil {
 					cancel(err)
 					return fmt.Errorf("update.Decode(): %w", err)
