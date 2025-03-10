@@ -1,0 +1,15 @@
+.center,
+.center-h,
+.center-v {
+    display: flex;
+}
+
+.center,
+.center-h {
+    justify-content: center;
+}
+
+.center,
+.center-v {
+    height: 100%;
+}

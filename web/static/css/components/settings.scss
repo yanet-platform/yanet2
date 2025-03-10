@@ -1,0 +1,21 @@
+.settings {
+    &__section {
+        display: flex;
+        flex-direction: column;
+
+        &__head {}
+
+        &__item {
+            display: flex;
+            align-items: center;
+            margin-top: 24px;
+
+            &-head {
+                flex: 0 0 216px;
+                overflow: hidden;
+            }
+
+            &-content {}
+        }
+    }
+}

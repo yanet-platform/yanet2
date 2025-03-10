@@ -1,0 +1,12 @@
+header.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: var(--noc-header-height);
+    padding: 0 20px;
+    background-color: var(--noc-color-base-background);
+    border-bottom: 1px solid var(--noc-color-line-generic);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+}

@@ -1,0 +1,13 @@
+.noc-progressbar {
+    width: 100%;
+    height: 2px;
+
+    .progressbar__bar {
+        transition-timing-function: ease;
+        transition-duration: 0.3s;
+        transition-property: width;
+        height: 100%;
+        background-color: var(--noc-my-color-brand-normal);
+        border-radius: inherit;
+    }
+}

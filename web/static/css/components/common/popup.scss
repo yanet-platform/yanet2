@@ -1,0 +1,38 @@
+.noc-sp {
+    display: flex;
+    position: relative;
+
+    &__message {
+        position: absolute;
+        padding: 6px;
+        background-color: var(--noc-color-base-background);
+        border: 1px solid var(--noc-color-line-danger);
+        z-index: 1;
+        border-radius: 4px;
+        color: var(--noc-color-text-danger);
+        bottom: 125%;
+        visibility: hidden;
+        opacity: 0;
+    }
+
+    &__message::after {
+        position: absolute;
+        content: '';
+        left: 50%;
+        border-style: solid;
+        transform: rotate(225deg);
+        background-image: none;
+        z-index: 1;
+        width: .6666em;
+        height: .6666em;
+        border-width: 1px 0 0 1px;
+        bottom: -6px;
+        background-color: var(--noc-color-base-background);
+    }
+
+    &:hover &__message {
+        visibility: visible;
+        opacity: 1;
+        transition: visibility, opacity 0.1s ease;
+    }
+}

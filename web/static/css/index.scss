@@ -1,0 +1,67 @@
+@use "base.scss";
+@use "theme.scss";
+@use "components/common/button.scss";
+@use "components/common/center.scss";
+@use "components/common/checkbox.scss";
+@use "components/common/dropdown.scss";
+@use "components/common/header.scss";
+@use "components/common/input.scss";
+@use "components/common/popover.scss";
+@use "components/common/popup.scss";
+@use "components/common/progress.scss";
+@use "components/common/snackbar.scss";
+@use "components/common/spinner.scss";
+@use "components/nav.scss";
+@use "components/settings.scss";
+
+html {
+    height: 100%;
+    font-size: var(--noc-font-size);
+    font-family: var(--noc-font-family);
+    color: var(--noc-color-text-primary);
+    background-color: var(--noc-color-base-background);
+}
+
+body {
+    margin: 0;
+}
+
+main {
+    width: 100%;
+}
+
+h1 {
+    font-size: 18px;
+    font-weight: 400;
+}
+
+h3 {
+    margin: 0;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.app {
+    display: flex;
+    height: 100vh;
+}
+
+.viewport {
+    height: 100%;
+    overflow: scroll;
+}
+
+.viewport__content {
+    padding: 20px;
+    height: calc(100% - var(--noc-header-height) - 1px - 2 * 20px);    
+}
+
+.demo {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 300px;
+}
