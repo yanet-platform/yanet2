@@ -3,7 +3,15 @@ use std::{borrow::Cow, time::Duration};
 use leptos::prelude::*;
 
 use crate::components::common::{
-    button::Button, dropdown::Dropdown, header::Header, input::Input, popover::{Popover, PopoverTrigger}, popup::SpanPopup, progress::ProgressBar, snackbar::{SnackbarContext, SnackbarData}, viewport::{Viewport, ViewportContent}
+    button::Button,
+    dropdown::Dropdown,
+    header::Header,
+    input::Input,
+    popover::{Popover, PopoverTrigger},
+    popup::SpanPopup,
+    progress::ProgressBar,
+    snackbar::{SnackbarContext, SnackbarData},
+    viewport::{Viewport, ViewportContent},
 };
 
 #[component]
@@ -39,7 +47,7 @@ pub fn DemoView() -> impl IntoView {
             <ViewportContent>
                 <div class="demo">
                     // Simple controlled <Input>.
-                    <Input value=input1 on_input=move |s| set_input1.set(s) />                   
+                    <Input value=input1 on_input=move |s| set_input1.set(s) />
                     // With placeholder.
                     <Input
                         placeholder="Something..."
@@ -59,7 +67,7 @@ pub fn DemoView() -> impl IntoView {
                                 value=input4
                                 on_input=move |s| set_input4.set(s)
                                 is_disabled=Signal::derive(|| true)
-                            />                            
+                            />
                         </PopoverTrigger>
                         "This is popover"
                     </Popover>
