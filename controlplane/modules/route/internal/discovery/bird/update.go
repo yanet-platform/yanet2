@@ -70,6 +70,8 @@ var (
 	ErrAttributesTruncated = fmt.Errorf("attributes area truncated: %w", ErrUpdateDecode)
 	ErrAttrsUnexpectedEOD  = fmt.Errorf("unexpected End Of Data: %w", ErrUpdateDecode)
 	ErrBadPrefix           = fmt.Errorf("bad prefix: %w", ErrUpdateDecode)
+
+	ErrUnsupportedRDType = errors.New("ErrUnsupportedRDType")
 )
 
 type AttributeType uint8
@@ -210,6 +212,11 @@ func (m *update) Decode(route *rib.Route) error {
 	return nil
 }
 
+func isSupportedRDType(rd uint64) bool {
+	// https://datatracker.ietf.org/doc/html/rfc4364#section-4.2
+	return rd>>48 == 1
+}
+
 func (m *update) decodePrefixAndRD(route *rib.Route) error {
 	var addr netip.Addr
 	switch m.base.typ {
@@ -222,12 +229,16 @@ func (m *update) decodePrefixAndRD(route *rib.Route) error {
 	case NetVPN4:
 		m4 := (*netAddrVPN4)(unsafe.Pointer(m))
 		addr = netip.AddrFrom4([4]byte{m4.prefix[3], m4.prefix[2], m4.prefix[1], m4.prefix[0]})
-		// FIXME: check that the bit 48 is set?
+		if ok := isSupportedRDType(m4.rd); !ok {
+			return ErrUnsupportedRDType
+		}
 		route.RD = m4.rd
 	case NetVPN6:
 		m6 := (*netAddrVPN6)(unsafe.Pointer(m))
 		addr = netipAddrFrom4U32(m6.prefix)
-		// FIXME: check that the bit 48 is set?
+		if ok := isSupportedRDType(m6.rd); !ok {
+			return ErrUnsupportedRDType
+		}
 		route.RD = m6.rd
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupportedPrefix, m.base.String())
@@ -318,8 +329,6 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 				return fmt.Errorf("ASPath attribute truncated want=%d, actual=%d: %w",
 					asPathBytesSize, len(data), ErrAttrsUnexpectedEOD)
 			}
-			// FIXME skip local AS?
-			// LocalAS comes first, followed by PeerAS.
 			route.PeerAS = binary.BigEndian.Uint32(data)
 			route.OriginAS = binary.BigEndian.Uint32(data[lastUint32Start:])
 			data = data[asPathBytesSize:]

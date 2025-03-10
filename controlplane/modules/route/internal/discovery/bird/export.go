@@ -81,6 +81,10 @@ func (m *Export) Run(ctx context.Context) error {
 			for {
 				update, err := parser.Next()
 				if err != nil {
+					if err == ErrUnsupportedRDType {
+						// FIXME add telemetry
+						continue
+					}
 					cancel(err)
 					return fmt.Errorf("bird export parser.Next: %w", err)
 				}

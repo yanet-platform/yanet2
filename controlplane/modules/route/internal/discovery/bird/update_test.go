@@ -231,6 +231,8 @@ func TestDecodeUpdate(t *testing.T) {
 				1: 0xff,    // ERROR: prefix len overflow
 				2: 0x14, 0, // NetAddr struct size
 				4: 0xb8, 0xd, 0x7, 0x23, 0, 0, 0x4, 0, 0, 0, 0, 0, 0, 0, 0, 0, // prefix
+				// RD LE u64 (bytes in the reverse order as described in the RFC)
+				24: 0, 0, 0, 0, 0, 0, 0x1, 0,
 				40: 0x1, 0, 0, 0, // update type LE u32
 				44: 0,            // ... peer addr all zero
 				60: 0x4, 0, 0, 0, // no attrs
@@ -264,6 +266,7 @@ func TestDecodeUpdate(t *testing.T) {
 				0: 0x3,     // NetVPN4
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
+				8: 0, 0, 0, 0, 0, 0, 0x1, 0, // RD LE u64
 				// attrsAreaSize expected at idx == 60
 				60: 6,    // ERROR attrsAreaSize < 4+sizeoftype(4)  unexpected end of data
 				64: 0, 0, // truncated attrs data
@@ -277,6 +280,7 @@ func TestDecodeUpdate(t *testing.T) {
 				0: 0x3,     // NetVPN4
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
+				8: 0, 0, 0, 0, 0, 0, 0x1, 0, // RD LE u64
 				60: 4 + 4 + /* ERROR: not enought storage or U32 attribute */ 2,
 				64: 0x1 /* < ORIGIN: PROTOCOL_BGP > */, 0x4, 0, 0,
 				68: 0, 0, // ... truncated
@@ -290,6 +294,7 @@ func TestDecodeUpdate(t *testing.T) {
 				0: 0x3,     // NetVPN4
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
+				8: 0, 0, 0, 0, 0, 0, 0x1, 0, // RD LE u64
 				60: 4 + 4 + 4 + 4,
 				64: 0x2 /* < AS_PATH: PROTOCOL_BGP > */, 0x4, 0, 0,
 				68: 100, 5, 0, 0, // ERROR: size of complex attribute too big
