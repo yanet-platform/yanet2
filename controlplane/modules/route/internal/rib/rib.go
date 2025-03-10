@@ -8,7 +8,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/link"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/neigh"
 )
 
@@ -16,15 +15,13 @@ type RIB struct {
 	mu         sync.RWMutex
 	routes     MapTrie[netip.Prefix, netip.Addr, RoutesList]
 	neighbours *neigh.NexthopCache
-	links      *link.LinksCache
 	log        *zap.SugaredLogger
 }
 
-func NewRIB(neighbours *neigh.NexthopCache, links *link.LinksCache, log *zap.SugaredLogger) *RIB {
+func NewRIB(neighbours *neigh.NexthopCache, log *zap.SugaredLogger) *RIB {
 	return &RIB{
 		routes:     NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
 		neighbours: neighbours,
-		links:      links,
 		log:        log,
 	}
 }
@@ -32,44 +29,26 @@ func NewRIB(neighbours *neigh.NexthopCache, links *link.LinksCache, log *zap.Sug
 func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error {
 	m.log.Debugf("adding unicast route %q via %q", prefix, nexthopAddr)
 
-	// Obtain destination MAC address using neighbours table.
+	// Obtain neighbor entry with resolved hardware addresses
 	neighbours := m.neighbours.View()
-	neigh, ok := neighbours.Lookup(nexthopAddr)
+	entry, ok := neighbours.Lookup(nexthopAddr)
 	if !ok {
 		return fmt.Errorf("neighbour with %q nexthop IP address not found", nexthopAddr)
 	}
-	if len(neigh.HardwareAddr) != 6 {
-		return fmt.Errorf("unsupported MAC address %q: must be EUI-48", neigh.HardwareAddr)
-	}
 
-	m.log.Debugw("found neighbour",
-		zap.Int("link_index", neigh.LinkIndex),
+	m.log.Debugw("found neighbour with resolved hardware addresses",
 		zap.Stringer("nexthop_addr", nexthopAddr),
-		zap.Stringer("nexthop_hardware_addr", neigh.HardwareAddr),
-	)
-
-	// ... and source MAC using links cache.
-	links := m.links.View()
-	link, ok := links.Lookup(neigh.LinkIndex)
-	if !ok {
-		return fmt.Errorf("link with %q index not found", neigh.LinkIndex)
-	}
-	if len(link.HardwareAddr) != 6 {
-		return fmt.Errorf("unsupported MAC address %q: must be EUI-48", link.HardwareAddr)
-	}
-
-	m.log.Debugw("found local interface for neighbour",
-		zap.Int("link_index", link.Index),
-		zap.Stringer("hardware_addr", link.HardwareAddr),
+		zap.Stringer("nexthop_hardware_addr", entry.LinkAddr),
+		zap.Stringer("hardware_addr", entry.HardwareAddr),
 	)
 
 	route := Route{
 		Prefix: prefix,
 	}
 
-	// Safe, because we've checked for MAC address format earlier.
-	copy(route.SourceMAC[:], link.HardwareAddr)
-	copy(route.DestinationMAC[:], neigh.HardwareAddr)
+	// Now we can directly use the hardware addresses from the entry
+	copy(route.SourceMAC[:], entry.HardwareAddr)
+	copy(route.DestinationMAC[:], entry.LinkAddr)
 
 	m.mu.Lock()
 	m.routes.InsertOrUpdate(
@@ -90,8 +69,8 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	m.log.Infow("added unicast route",
 		zap.Stringer("prefix", prefix),
 		zap.Stringer("nexthop_addr", nexthopAddr),
-		zap.Stringer("hardware_addr", link.HardwareAddr),
-		zap.Stringer("nexthop_hardware_addr", neigh.HardwareAddr),
+		zap.Stringer("hardware_addr", entry.HardwareAddr),
+		zap.Stringer("nexthop_hardware_addr", entry.LinkAddr),
 	)
 
 	return nil

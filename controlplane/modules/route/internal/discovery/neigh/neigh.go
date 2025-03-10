@@ -3,6 +3,7 @@ package neigh
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 	"time"
 
@@ -16,10 +17,10 @@ import (
 
 // NexthopCache is a cache of nexthops that is populated via neighbour
 // discovery.
-type NexthopCache = discovery.Cache[netip.Addr, netlink.Neigh]
+type NexthopCache = discovery.Cache[netip.Addr, NeighbourEntry]
 
 // NexthopCacheView is a read-only view of the nexthop cache.
-type NexthopCacheView = discovery.CacheView[netip.Addr, netlink.Neigh]
+type NexthopCacheView = discovery.CacheView[netip.Addr, NeighbourEntry]
 
 // Option is a function that configures the neighbour monitor.
 type Option func(*options)
@@ -158,7 +159,28 @@ func (m *NeighMonitor) updateNeighbours() error {
 		return fmt.Errorf("failed to list neighbours: %w", err)
 	}
 
-	nexthopCache := map[netip.Addr]netlink.Neigh{}
+	links, err := netlink.LinkList()
+	if err != nil {
+		return fmt.Errorf("failed to list links: %w", err)
+	}
+
+	// Create a map of link indexes to hardware addresses for quick lookup
+	linkIndexToHardwareAddr := map[int]net.HardwareAddr{}
+	for _, link := range links {
+		attrs := link.Attrs()
+
+		// TODO: should be filter out loopback links?
+
+		hardwareAddr := attrs.HardwareAddr
+		if hardwareAddr == nil {
+			hardwareAddr = make(net.HardwareAddr, 6)
+		}
+
+		linkIndexToHardwareAddr[attrs.Index] = hardwareAddr
+	}
+
+	// Create the new cache map with resolved hardware addresses
+	nexthopCache := make(map[netip.Addr]NeighbourEntry)
 	for _, neigh := range neighs {
 		nexthopAddr, ok := netip.AddrFromSlice(neigh.IP)
 		if !ok {
@@ -166,13 +188,45 @@ func (m *NeighMonitor) updateNeighbours() error {
 			continue
 		}
 
-		nexthopCache[nexthopAddr] = neigh
+		// Skip entries with invalid MAC.
+		if len(neigh.HardwareAddr) != 6 {
+			m.log.Warnf("skipping entry with unsupported MAC address %q: must be EUI-48", neigh.HardwareAddr)
+			continue
+		}
+
+		// Get the hardware address of the interface.
+		hardwareAddr, ok := linkIndexToHardwareAddr[neigh.LinkIndex]
+		if !ok {
+			m.log.Warnf("no hardware address for link index: %d - %#+v", neigh.LinkIndex, neigh)
+			continue
+		}
+		if len(hardwareAddr) != 6 {
+			m.log.Warnf("skipping entry with unsupported interface MAC address %q: must be EUI-48", hardwareAddr)
+			continue
+		}
+
+		// Create the entry with resolved hardware addresses
+		entry := NeighbourEntry{
+			NextHop:      nexthopAddr,
+			LinkAddr:     neigh.HardwareAddr,
+			HardwareAddr: hardwareAddr,
+			UpdatedAt:    time.Now(),
+			State:        NeighbourState(neigh.State),
+		}
+
+		m.log.Debugw("resolved neighbour entry",
+			zap.Stringer("nexthop_addr", entry.NextHop),
+			zap.Stringer("nexthop_hardware_addr", entry.LinkAddr),
+			zap.Stringer("hardware_addr", entry.HardwareAddr),
+			zap.Stringer("state", entry.State),
+		)
+
+		nexthopCache[nexthopAddr] = entry
 	}
 
 	// Swap the entire table atomically.
 	m.nexthopCache.Swap(nexthopCache)
 
-	m.log.Infof("updated nexthop cache")
-
+	m.log.Infow("updated nexthop cache", zap.Int("size", len(nexthopCache)))
 	return nil
 }

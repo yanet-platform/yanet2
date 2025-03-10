@@ -7,7 +7,6 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/vishvananda/netlink"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery"
-	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/link"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/rib"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/routepb"
@@ -30,7 +28,6 @@ type RouteModule struct {
 	cfg                *Config
 	server             *grpc.Server
 	agents             []*ffi.Agent
-	linkDiscovery      *link.LinkMonitor
 	neighbourDiscovery *neigh.NeighMonitor
 	log                *zap.SugaredLogger
 }
@@ -39,13 +36,10 @@ type RouteModule struct {
 func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 	log = log.With(zap.String("module", moduleName))
 
-	linkCache := discovery.NewEmptyCache[int, netlink.LinkAttrs]()
-	linkDiscovery := link.NewLinkMonitor(linkCache, link.WithLog(log))
-
-	neighbourCache := discovery.NewEmptyCache[netip.Addr, netlink.Neigh]()
+	neighbourCache := discovery.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
 	neighbourDiscovery := neigh.NewNeighMonitor(neighbourCache, neigh.WithLog(log))
 
-	rib := rib.NewRIB(neighbourCache, linkCache, log)
+	rib := rib.NewRIB(neighbourCache, log)
 
 	// TODO: obtain NUMA topology.
 	numaIndices := []int{0}
@@ -75,7 +69,6 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		cfg:                cfg,
 		server:             server,
 		agents:             agents,
-		linkDiscovery:      linkDiscovery,
 		neighbourDiscovery: neighbourDiscovery,
 		log:                log,
 	}, nil
@@ -105,9 +98,6 @@ func (m *RouteModule) Run(ctx context.Context) error {
 	wg, ctx := errgroup.WithContext(ctx)
 	wg.Go(func() error {
 		return m.server.Serve(listener)
-	})
-	wg.Go(func() error {
-		return m.linkDiscovery.Run(ctx)
 	})
 	wg.Go(func() error {
 		return m.neighbourDiscovery.Run(ctx)
