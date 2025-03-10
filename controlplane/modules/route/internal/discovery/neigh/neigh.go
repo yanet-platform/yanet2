@@ -80,6 +80,11 @@ func NewNeighMonitor(neighbours *NexthopCache, options ...Option) *NeighMonitor 
 	return m
 }
 
+// Cache returns the nexthop cache.
+func (m *NeighMonitor) Cache() *NexthopCache {
+	return m.nexthopCache
+}
+
 // Run runs the neighbour monitor until the specified context is canceled.
 func (m *NeighMonitor) Run(ctx context.Context) error {
 	m.log.Debugf("starting neighbour monitor")

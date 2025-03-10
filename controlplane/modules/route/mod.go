@@ -20,8 +20,6 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
-const moduleName = "routepb.Route"
-
 // RouteModule is a controlplane part of a module that is responsible for
 // routing configuration.
 type RouteModule struct {
@@ -34,7 +32,7 @@ type RouteModule struct {
 
 // NewRouteModule creates a new RouteModule.
 func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
-	log = log.With(zap.String("module", moduleName))
+	log = log.With(zap.String("module", "routepb.Route"))
 
 	neighbourCache := discovery.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
 	neighbourDiscovery := neigh.NewNeighMonitor(neighbourCache, neigh.WithLog(log))
@@ -62,8 +60,12 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 	}
 
 	server := grpc.NewServer()
-	service := NewRouteService(agents, rib, log)
-	routepb.RegisterRouteServer(server, service)
+
+	routeService := NewRouteService(agents, rib, log)
+	routepb.RegisterRouteServer(server, routeService)
+
+	neighbourService := NewNeighbourService(neighbourCache, log)
+	routepb.RegisterNeighbourServer(server, neighbourService)
 
 	return &RouteModule{
 		cfg:                cfg,
@@ -103,6 +105,21 @@ func (m *RouteModule) Run(ctx context.Context) error {
 		return m.neighbourDiscovery.Run(ctx)
 	})
 
+	if err := m.registerServices(ctx, listenerAddr); err != nil {
+		return fmt.Errorf("failed to register services: %w", err)
+	}
+
+	<-ctx.Done()
+
+	m.log.Infow("stopping gRPC API", zap.Stringer("addr", listenerAddr))
+	defer m.log.Infow("stopped gRPC API", zap.Stringer("addr", listenerAddr))
+
+	m.server.GracefulStop()
+
+	return wg.Wait()
+}
+
+func (m *RouteModule) registerServices(ctx context.Context, listenerAddr net.Addr) error {
 	gatewayConn, err := grpc.NewClient(
 		m.cfg.GatewayEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -113,27 +130,31 @@ func (m *RouteModule) Run(ctx context.Context) error {
 
 	gateway := ynpb.NewGatewayClient(gatewayConn)
 
-	req := &ynpb.RegisterRequest{
-		Name:     moduleName,
-		Endpoint: listenerAddr.String(),
+	servicesNames := []string{
+		"routepb.Route",
+		"routepb.Neighbour",
 	}
 
-	for {
-		if _, err := gateway.Register(ctx, req); err == nil {
-			m.log.Infof("successfully registered in the Gateway API")
-			break
+	wg, ctx := errgroup.WithContext(ctx)
+	for _, serviceName := range servicesNames {
+		req := &ynpb.RegisterRequest{
+			Name:     serviceName,
+			Endpoint: listenerAddr.String(),
 		}
 
-		m.log.Warnf("failed to register in the Gateway API: %v", err)
-		time.Sleep(1 * time.Second)
+		wg.Go(func() error {
+			for {
+				if _, err := gateway.Register(ctx, req); err == nil {
+					m.log.Infof("successfully registered %q in the Gateway API", serviceName)
+					return nil
+				}
+
+				m.log.Warnf("failed to register %q in the Gateway API: %v", serviceName, err)
+				// TODO: exponential backoff should fit better here.
+				time.Sleep(1 * time.Second)
+			}
+		})
 	}
-
-	<-ctx.Done()
-
-	m.log.Infow("stopping gRPC API", zap.Stringer("addr", listenerAddr))
-	defer m.log.Infow("stopped gRPC API", zap.Stringer("addr", listenerAddr))
-
-	m.server.GracefulStop()
 
 	return wg.Wait()
 }

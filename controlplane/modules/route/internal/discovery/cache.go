@@ -53,3 +53,14 @@ func (m *CacheView[K, V]) Lookup(key K) (V, bool) {
 	link, ok := m.cache[key]
 	return link, ok
 }
+
+// Entries returns all entries in the cache as a map.
+func (m *CacheView[K, V]) Entries() map[K]V {
+	// Return a copy of the cache map to avoid modifying the original
+	entries := make(map[K]V, len(m.cache))
+	for k, v := range m.cache {
+		entries[k] = v
+	}
+
+	return entries
+}
