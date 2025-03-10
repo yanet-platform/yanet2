@@ -117,36 +117,37 @@ func (m *RouteService) updateModuleConfigs(
 		for prefix, routesList := range routes {
 			routesListSetKey := bitset.TinyBitset{}
 
-			route := routesList.Best()
-			if route == nil {
-				m.log.Debugw("skip prefix with no routes", zap.Stringer("prefix", prefix))
-				// FIXME add telemetry
-				continue
+			for _, route := range routesList.Routes {
+				if route == nil {
+					m.log.Debugw("skip prefix with no routes", zap.Stringer("prefix", prefix))
+					// FIXME add telemetry
+					continue
+				}
+
+				// Lookup hwaddress for the route
+				entry, ok := neighbours.Lookup(route.NextHop)
+				if !ok {
+					return fmt.Errorf("neighbour with %q nexthop IP address not found", route.NextHop)
+				}
+
+				m.log.Debugw("found neighbour with resolved hardware addresses",
+					zap.Stringer("nexthop_addr", route.NextHop),
+				)
+
+				if idx, ok := hardwareRoutes[entry.HardwareRoute]; ok {
+					routesListSetKey.Insert(idx)
+					continue
+				}
+
+				idx, err := config.RouteAdd(entry.SourceMAC[:], entry.DestinationMAC[:])
+				if err != nil {
+					return fmt.Errorf("failed to add hardware route %q: %w", entry.HardwareRoute, err)
+				}
+				hardwareRoutes[entry.HardwareRoute] = uint32(idx)
+				routesListSetKey.Insert(uint32(idx))
 			}
 
-			// Lookup hwaddress for the route
-			entry, ok := neighbours.Lookup(route.NextHop)
-			if !ok {
-				return fmt.Errorf("neighbour with %q nexthop IP address not found", route.NextHop)
-			}
-
-			m.log.Debugw("found neighbour with resolved hardware addresses",
-				zap.Stringer("nexthop_addr", route.NextHop),
-			)
-
-			if idx, ok := hardwareRoutes[entry.HardwareRoute]; ok {
-				routesListSetKey.Insert(idx)
-				continue
-			}
-
-			idx, err := config.RouteAdd(entry.SourceMAC[:], entry.DestinationMAC[:])
-			if err != nil {
-				return fmt.Errorf("failed to add hardware route %q: %w", entry.HardwareRoute, err)
-			}
-			hardwareRoutes[entry.HardwareRoute] = uint32(idx)
-			routesListSetKey.Insert(uint32(idx))
-
-			idx, ok = routesListsSet[routesListSetKey]
+			idx, ok := routesListsSet[routesListSetKey]
 			if !ok {
 				routeListIdx, err := config.RouteListAdd(routesListSetKey.AsSlice())
 				if err != nil {

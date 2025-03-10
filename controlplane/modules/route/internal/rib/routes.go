@@ -95,42 +95,26 @@ func (m *RoutesList) Insert(route *Route) bool {
 	}
 	if insertedIdx == -1 {
 		m.Routes = append(m.Routes, route)
-		insertedIdx = len(m.Routes) - 1
 	}
 	if len(m.Routes) > 1 {
-		// recalculate the best route
-		if insertedIdx == 0 {
-			// The best route is replaced, we need sorting to find a new best one.
-			slices.SortFunc(m.Routes, routeCompareRev) // for DESC order
-		} else if routeCompare(m.Routes[0], m.Routes[insertedIdx]) < 0 {
-			m.Routes[0], m.Routes[insertedIdx] = m.Routes[insertedIdx], m.Routes[0]
-		} // else if res > 0 // the best route is already at the index 0
+		// Sorting an almost-sorted slice should be relatively efficient
+		slices.SortFunc(m.Routes, routeCompareRev) // for DESC order
 	}
 	return true
 }
 
 func (m *RoutesList) Remove(route *Route) bool {
 	defer FreeRoute(route)
+	// Sorting is not need on removing
 	for idx, r := range m.Routes {
 		if r.Peer == route.Peer {
 			FreeRoute(m.Routes[idx]) // relese deleted route too
-			// Delete without preserving order
-			m.Routes[idx] = m.Routes[len(m.Routes)-1]
-			m.Routes = m.Routes[:len(m.Routes)-1]
+			// Delete with preserving order
+			m.Routes = slices.Delete(m.Routes, idx, idx+1)
 
-			if idx == 0 && len(m.Routes) > 1 {
-				// recalculate the best route if the best one has just been deleted.
-				slices.SortFunc(m.Routes, routeCompareRev)
-			}
 			return true
 		}
 	}
-	return false
-}
 
-func (m *RoutesList) Best() *Route {
-	if len(m.Routes) > 0 {
-		return m.Routes[0]
-	}
-	return nil
+	return false
 }

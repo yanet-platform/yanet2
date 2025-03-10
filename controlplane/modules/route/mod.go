@@ -49,11 +49,11 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		path := fmt.Sprintf("%s%d", cfg.MemoryPathPrefix, numaIdx)
 		log.Debugw("mapping shared memory",
 			zap.Int("numa", numaIdx),
-			zap.Uint("size", cfg.MemoryRequirements),
+			zap.Stringer("size", cfg.MemoryRequirements),
 			zap.String("path", path),
 		)
 
-		agent, err := ffi.NewAgent(path, "route", cfg.MemoryRequirements)
+		agent, err := ffi.NewAgent(path, "route", uint(cfg.MemoryRequirements))
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to shared memory on NUMA %d: %w", numaIdx, err)
 		}
