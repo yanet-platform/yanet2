@@ -73,7 +73,6 @@ func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
 
 	// Create context with metadata from HTTP headers.
 	ctx := r.Context()
@@ -96,9 +95,6 @@ func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		http.Error(w, fmt.Sprintf("Failed to connect to backend: %v", err), http.StatusInternalServerError)
 		return
 	}
-
-	// Create byte buffer for response.
-	var respData []byte
 
 	// We use a custom codec to directly send/receive binary protobuf data.
 	responseBuffer := proxy.NewFrame(nil)
@@ -143,7 +139,7 @@ func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Materialize the buffer slice.
-	respData = bufSlice.Materialize()
+	respData := bufSlice.Materialize()
 
 	// Set our special content type header.
 	w.Header().Set("Content-Type", "application/x-protobuf")
