@@ -69,7 +69,7 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 	neighbourService := NewNeighbourService(neighbourCache, log)
 	routepb.RegisterNeighbourServer(server, neighbourService)
 
-	export := bird.NewExportReader(cfg.BirdExport, service, log)
+	export := bird.NewExportReader(cfg.BirdExport, routeService, log)
 
 	return &RouteModule{
 		cfg:                cfg,

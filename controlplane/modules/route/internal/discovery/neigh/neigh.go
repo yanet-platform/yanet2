@@ -224,7 +224,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 		m.log.Debugw("resolved neighbour entry",
 			zap.Stringer("nexthop_addr", entry.NextHop),
 			zap.Stringer("nexthop_hardware_addr", neigh.HardwareAddr),
-			zap.Stringer("inface_hardware_addr", hardwareAddr),
+			zap.Stringer("iface_hardware_addr", hardwareAddr),
 			zap.Stringer("state", entry.State),
 		)
 
