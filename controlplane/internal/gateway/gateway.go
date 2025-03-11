@@ -166,9 +166,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 		})
 	}
 
-	// Run built-in modules.
 	for _, builtInModule := range m.builtInModules {
-		builtInModule := builtInModule // capture for closure.
 		wg.Go(func() error {
 			m.log.Infow("starting built-in module", zap.String("module", fmt.Sprintf("%T", builtInModule)))
 			return builtInModule.Run(ctx)
