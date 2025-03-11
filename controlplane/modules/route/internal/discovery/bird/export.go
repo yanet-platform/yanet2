@@ -75,7 +75,7 @@ func (m *Export) Run(ctx context.Context) error {
 
 			c, err := net.Dial("unix", socket.path)
 			if err != nil {
-				return fmt.Errorf("net.Dial(unix,  %s): %w", socket.path, err)
+				return fmt.Errorf("failed to dial bird export socket '%s': %w", socket.path, err)
 			}
 			go func() {
 				<-ctx.Done()
@@ -93,12 +93,12 @@ func (m *Export) Run(ctx context.Context) error {
 						continue
 					}
 					cancel(err)
-					return fmt.Errorf("bird export parser.Next: %w", err)
+					return fmt.Errorf("failed to parse next update chunk: %w", err)
 				}
 				route := rib.MakeBirdRoute()
 				if err := update.Decode(route); err != nil {
 					cancel(err)
-					return fmt.Errorf("update.Decode(): %w", err)
+					return fmt.Errorf("failed to decode next route update: %w", err)
 				}
 
 				select {
@@ -137,7 +137,7 @@ func (m *Export) Run(ctx context.Context) error {
 			m.log.Debugw("send RIB update", zap.Int("size", len(batch)),
 				zap.Bool("isTimeout", timeout))
 			if err := m.updater.BulkUpdate(batch); err != nil {
-				return fmt.Errorf("RIBUpdater.BulkUpdate: %w", err)
+				return fmt.Errorf("failed to call rib bulk update: %w", err)
 			}
 			batch = batch[:0]
 		}
