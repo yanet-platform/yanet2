@@ -16,10 +16,18 @@ instant = { version = "0.1", features = ["wasm-bindgen", "inaccurate"] }
 chrono = { version = "0.4", features = ["serde", "wasmbind"] }
 console_log = "1"
 
+# gRPC/Protobuf dependencies
+prost = "0.13"
+reqwest = { version = "0.12", features = ["json"] }
+bytes = "1.5"
+
 # TDB.
 log = "0.4"
 wasm-logger = "0.2"
 leptos-use = { version = "0.15.6", features = ["use_element_bounding"] }
+
+[build-dependencies]
+prost-build = "0.13"
 
 [profile.wasm-release]
 inherits = "release"

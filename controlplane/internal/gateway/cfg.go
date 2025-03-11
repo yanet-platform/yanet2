@@ -10,6 +10,9 @@ type Config struct {
 type ServerConfig struct {
 	// Endpoint is the endpoint for the gateway server to be exposed on.
 	Endpoint string `yaml:"endpoint"`
+	// HTTPEndpoint is the endpoint for the HTTP server that provides
+	// access to gRPC services for web clients.
+	HTTPEndpoint string `yaml:"http_endpoint"`
 }
 
 func DefaultConfig() *Config {

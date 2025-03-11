@@ -2,16 +2,19 @@ use std::{borrow::Cow, time::Duration};
 
 use leptos::prelude::*;
 
-use crate::components::common::{
-    button::Button,
-    dropdown::Dropdown,
-    header::Header,
-    input::Input,
-    popover::{Popover, PopoverTrigger},
-    popup::SpanPopup,
-    progress::ProgressBar,
-    snackbar::{SnackbarContext, SnackbarData},
-    viewport::{Viewport, ViewportContent},
+use crate::{
+    api,
+    components::common::{
+        button::Button,
+        dropdown::Dropdown,
+        header::Header,
+        input::Input,
+        popover::{Popover, PopoverTrigger},
+        popup::SpanPopup,
+        progress::ProgressBar,
+        snackbar::{SnackbarContext, SnackbarData},
+        viewport::{Viewport, ViewportContent},
+    },
 };
 
 #[component]
@@ -28,9 +31,37 @@ pub fn DemoView() -> impl IntoView {
     set_interval(move || set_progress.update(|p| *p += 0.01), Duration::from_millis(20));
 
     let snackbar = expect_context::<SnackbarContext>();
-    snackbar.push(SnackbarData::error("Test popup 1"));
-    snackbar.push(SnackbarData::error("Test popup 2"));
-    snackbar.push(SnackbarData::error("Test popup 3"));
+
+    // Create an action to fetch neighbours
+    let fetch_neighbours = Action::new_local(move |_| async move {
+        let client = api::neighbour::NeighbourClient::new(window().origin());
+
+        match client.list_neighbours().await {
+            Ok(neighbours) => {
+                log::info!("Retrieved {} neighbours", neighbours.len());
+
+                // Log each neighbour
+                for (i, neighbour) in neighbours.iter().enumerate() {
+                    log::info!(
+                        "Neighbour {}: IP={}, MAC={}, State={}",
+                        i + 1,
+                        neighbour.next_hop,
+                        neighbour.link_addr,
+                        neighbour.state
+                    );
+                }
+
+                snackbar.push(SnackbarData::error(format!(
+                    "Retrieved {} neighbours",
+                    neighbours.len()
+                )));
+            }
+            Err(err) => {
+                log::info!("Failed to retrieve neighbours: {}", err);
+                snackbar.push(SnackbarData::error(format!("Failed to retrieve neighbours: {}", err)));
+            }
+        }
+    });
 
     view! {
         <Viewport>
@@ -38,9 +69,18 @@ pub fn DemoView() -> impl IntoView {
                 <h1>"Demo"</h1>
                 <Button
                     primary=true
-                    on:click=move |_| snackbar.push(SnackbarData::error("Test popup 3"))
+                    on:click=move |_| snackbar.push(SnackbarData::error("Test popup"))
                 >
                     "Add popup"
+                </Button>
+
+                <Button
+                    primary=true
+                    on:click=move |_| {
+                        fetch_neighbours.dispatch(());
+                    }
+                >
+                    "Get Neighbours"
                 </Button>
             </Header>
 

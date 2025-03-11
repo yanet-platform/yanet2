@@ -5,7 +5,7 @@ use leptos_router::{
 };
 use settings::SideBarContext;
 
-// mod api;
+mod api;
 mod components;
 // mod i18n;
 mod settings;
