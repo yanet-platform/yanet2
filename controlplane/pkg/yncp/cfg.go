@@ -23,7 +23,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Logging: LoggingConfig{
-			Level: zapcore.DebugLevel,
+			Level: zapcore.InfoLevel,
 		},
 		Gateway: gateway.DefaultConfig(),
 		Modules: ModulesConfig{

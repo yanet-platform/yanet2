@@ -72,7 +72,7 @@ func (m *RouteService) InsertRoute(
 }
 
 func (m *RouteService) BulkUpdate(routes []*rib.Route) error {
-	m.log.Debugw("Apply bulk update", zap.Int("size", len(routes)))
+	m.log.Debugw("apply bulk update", zap.Int("size", len(routes)))
 	m.rib.BulkUpdate(routes)
 	// TODO: notification about rib update
 	return nil
@@ -139,7 +139,10 @@ func (m *RouteService) updateModuleConfigs(
 					continue
 				}
 
-				idx, err := config.RouteAdd(entry.SourceMAC[:], entry.DestinationMAC[:])
+				idx, err := config.RouteAdd(
+					entry.HardwareRoute.SourceMAC[:],
+					entry.HardwareRoute.DestinationMAC[:],
+				)
 				if err != nil {
 					return fmt.Errorf("failed to add hardware route %q: %w", entry.HardwareRoute, err)
 				}

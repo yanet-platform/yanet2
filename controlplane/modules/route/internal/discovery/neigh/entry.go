@@ -12,7 +12,8 @@ import (
 type NeighbourEntry struct {
 	// NextHop is the IP address of the next hop.
 	NextHop netip.Addr
-	HardwareRoute
+	// HardwareRoute represents a route in the Layer 2 (L2) networking stack.
+	HardwareRoute HardwareRoute
 	// UpdatedAt is the timestamp when this entry was last updated.
 	UpdatedAt time.Time
 	// State is the state of the neighbor entry.

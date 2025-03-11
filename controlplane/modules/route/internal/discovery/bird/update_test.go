@@ -380,10 +380,10 @@ func Benchmark_update_Decode(b *testing.B) {
 
 	expectedResult := (int(route.Pref) + 0x13) * b.N
 	if result != expectedResult {
-		b.Logf("Unexpected result: %d != %d", result, expectedResult)
+		b.Logf("unexpected result: %d != %d", result, expectedResult)
 		b.FailNow()
 	}
-	b.Logf("Pref sum %12d == %d", result, expectedResult)
+	b.Logf("pref sum %12d == %d", result, expectedResult)
 }
 
 // NOTE: In case of an error `fuzzing process hung or terminated unexpectedly: exit status 2`,

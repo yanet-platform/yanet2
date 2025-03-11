@@ -50,21 +50,26 @@ func NewExportReader(cfg *Config, ribUpdater RIBUpdater, log *zap.SugaredLogger)
 
 func (m *Export) Run(ctx context.Context) error {
 	if !m.cfg.Enable {
-		m.log.Info("Bird export reader is disabled")
+		m.log.Info("bird export reader is disabled")
 		return nil
 	}
 
-	updates := make(chan *rib.Route, 100)
+	// Any value greater then zero will be sufficient for the channel capacity.
+	// A buffered channel will reduce concurrency pressure, but it seems that
+	// the reading part can easily keep up with the parsing part.
+	// On the other hand, if RIBUpdater.BulkUpdate cannot catch up with the
+	// parser's speed, there is no reason to hold too many routes in memory.
+	updates := make(chan *rib.Route, 10)
 	defer close(updates)
 
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
-	m.log.Info("Starting socket readers for bird export")
+	m.log.Info("starting socket readers for bird export")
 	wg, ctx := errgroup.WithContext(ctx)
 	for _, socket := range m.sockets {
 		wg.Go(func() error {
-			m.log.Infow("Starting bird export reader",
+			m.log.Infow("starting bird export reader",
 				zap.String("name", socket.name),
 				zap.String("path", socket.path))
 
@@ -74,7 +79,9 @@ func (m *Export) Run(ctx context.Context) error {
 			}
 			go func() {
 				<-ctx.Done()
-				_ = c.Close()
+				if err := c.Close(); err != nil {
+					m.log.Warnw("bird socket closed with an error", zap.Error(err))
+				}
 			}()
 			reader := bufio.NewReader(c)
 			parser := NewParser(reader, socket.bufSize, m.log)
@@ -105,7 +112,7 @@ func (m *Export) Run(ctx context.Context) error {
 	}
 
 	wg.Go(func() error {
-		m.log.Info("Starting batch processor for bird route updates")
+		m.log.Info("starting batch processor for bird route updates")
 		batch := make([]*rib.Route, 0, m.cfg.DumpThreshold)
 		tick := time.NewTimer(m.cfg.DumpTimeout)
 		timeout := false
@@ -127,7 +134,7 @@ func (m *Export) Run(ctx context.Context) error {
 				continue
 			}
 
-			m.log.Debugw("Send RIB update", zap.Int("size", len(batch)),
+			m.log.Debugw("send RIB update", zap.Int("size", len(batch)),
 				zap.Bool("isTimeout", timeout))
 			if err := m.updater.BulkUpdate(batch); err != nil {
 				return fmt.Errorf("RIBUpdater.BulkUpdate: %w", err)
