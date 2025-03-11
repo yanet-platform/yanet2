@@ -30,7 +30,6 @@ subdir('modules')
 
 
 subdir('dataplane')
-subdir('controlplane')
 
 #subdir('agent')
 
