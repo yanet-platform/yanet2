@@ -86,6 +86,8 @@ compile_commands.json
 
 ### Build directory ###
 build/
+web/dist/
 
 # AI
 .cline*
+memory-bank
