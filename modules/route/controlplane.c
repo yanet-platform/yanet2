@@ -11,7 +11,7 @@
 
 struct module_data *
 route_module_config_init(struct agent *agent, const char *name) {
-	struct dp_config *dp_config = ADDR_OF(agent, agent->dp_config);
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 
 	uint64_t index;
 	if (dp_config_lookup_module(dp_config, "route", &index)) {
@@ -43,13 +43,13 @@ route_module_config_init(struct agent *agent, const char *name) {
 	lpm_init(&config->lpm_v6, memory_context);
 
 	config->route_count = 0;
-	config->routes = OFFSET_OF(config, NULL);
+	config->routes = NULL;
 
 	config->route_list_count = 0;
-	config->route_lists = OFFSET_OF(config, NULL);
+	config->route_lists = NULL;
 
 	config->route_index_count = 0;
-	config->route_indexes = OFFSET_OF(config, NULL);
+	config->route_indexes = NULL;
 
 	return &config->module_data;
 }
@@ -63,7 +63,7 @@ route_module_config_add_route(
 	struct route_module_config *config = container_of(
 		module_data, struct route_module_config, module_data
 	);
-	struct route *routes = ADDR_OF(config, config->routes);
+	struct route *routes = ADDR_OF(&config->routes);
 
 	if (mem_array_expand_exp(
 		    &config->module_data.memory_context,
@@ -78,7 +78,7 @@ route_module_config_add_route(
 		.dst_addr = dst_addr,
 		.src_addr = src_addr,
 	};
-	config->routes = OFFSET_OF(config, routes);
+	SET_OFFSET_OF(&config->routes, routes);
 
 	return config->route_count - 1;
 }
@@ -93,7 +93,7 @@ route_module_config_add_route_list(
 
 	uint64_t start = config->route_index_count;
 
-	uint64_t *route_indexes = ADDR_OF(config, config->route_indexes);
+	uint64_t *route_indexes = ADDR_OF(&config->route_indexes);
 
 	for (size_t idx = 0; idx < count; ++idx) {
 		/*
@@ -117,10 +117,10 @@ route_module_config_add_route_list(
 		 * as I do no want to have the config be completelly
 		 * broken.
 		 */
-		config->route_indexes = OFFSET_OF(config, route_indexes);
+		SET_OFFSET_OF(&config->route_indexes, route_indexes);
 	}
 
-	struct route_list *route_lists = ADDR_OF(config, config->route_lists);
+	struct route_list *route_lists = ADDR_OF(&config->route_lists);
 	if (mem_array_expand_exp(
 		    &config->module_data.memory_context,
 		    (void **)&route_lists,
@@ -134,7 +134,7 @@ route_module_config_add_route_list(
 		.count = count,
 	};
 
-	config->route_lists = OFFSET_OF(config, route_lists);
+	SET_OFFSET_OF(&config->route_lists, route_lists);
 
 	return config->route_list_count - 1;
 }

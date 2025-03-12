@@ -188,8 +188,7 @@ dataplane_load_module(
 		(module_load_handler)dlsym(bin_hndl, loader_name);
 	struct module *module = loader();
 
-	struct dp_module *dp_modules =
-		ADDR_OF(dp_config, dp_config->dp_modules);
+	struct dp_module *dp_modules = ADDR_OF(&dp_config->dp_modules);
 	if (mem_array_expand_exp(
 		    &dp_config->memory_context,
 		    (void **)&dp_modules,
@@ -205,7 +204,7 @@ dataplane_load_module(
 	strncpy(dp_module->name, module->name, 80);
 	dp_module->handler = module->handler;
 
-	dp_config->dp_modules = OFFSET_OF(dp_config, dp_modules);
+	SET_OFFSET_OF(&dp_config->dp_modules, dp_modules);
 
 	return 0;
 }
@@ -261,7 +260,7 @@ dataplane_init_storage(
 		&dp_config->memory_context, "dp", &dp_config->block_allocator
 	);
 
-	dp_config->dp_modules = OFFSET_OF(dp_config, (struct dp_module *)NULL);
+	dp_config->dp_modules = NULL;
 	dp_config->module_count = 0;
 
 	struct cp_config *cp_config =
@@ -284,7 +283,7 @@ dataplane_init_storage(
 			sizeof(struct cp_agent_registry)
 		);
 	cp_agent_registry->count = 0;
-	cp_config->agent_registry = OFFSET_OF(cp_config, cp_agent_registry);
+	SET_OFFSET_OF(&cp_config->agent_registry, cp_agent_registry);
 
 	struct cp_module_registry *cp_module_registry =
 		(struct cp_module_registry *)memory_balloc(
@@ -316,15 +315,12 @@ dataplane_init_storage(
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
 		);
-	cp_config_gen->module_registry =
-		OFFSET_OF(cp_config_gen, cp_module_registry);
-	cp_config_gen->pipeline_registry =
-		OFFSET_OF(cp_config_gen, cp_pipeline_registry);
-	cp_config_gen->device_registry =
-		OFFSET_OF(cp_config_gen, device_registry);
-	cp_config->cp_config_gen = OFFSET_OF(cp_config, cp_config_gen);
+	SET_OFFSET_OF(&cp_config_gen->module_registry, cp_module_registry);
+	SET_OFFSET_OF(&cp_config_gen->pipeline_registry, cp_pipeline_registry);
+	SET_OFFSET_OF(&cp_config_gen->device_registry, device_registry);
+	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
 
-	dp_config->cp_config = OFFSET_OF(dp_config, cp_config);
+	SET_OFFSET_OF(&dp_config->cp_config, cp_config);
 
 	*res_dp_config = dp_config;
 	*res_cp_config = cp_config;
@@ -521,10 +517,9 @@ dataplane_route_pipeline(
 ) {
 	(void)dp_config;
 
-	struct cp_config_gen *config_gen =
-		ADDR_OF(cp_config, cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_device_registry *device_registry =
-		ADDR_OF(config_gen, config_gen->device_registry);
+		ADDR_OF(&config_gen->device_registry);
 
 	for (struct packet *packet = packet_list_first(packets); packet != NULL;
 	     packet = packet->next) {

@@ -19,7 +19,7 @@ struct balancer_service_config {
 
 struct module_data *
 balancer_module_config_init(struct agent *agent, const char *name) {
-	struct dp_config *dp_config = ADDR_OF(agent, agent->dp_config);
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	uint64_t index;
 	if (dp_config_lookup_module(dp_config, "balancer", &index)) {
 		return NULL;
@@ -61,7 +61,7 @@ balancer_module_config_add_service(
 
 	uint64_t real_start = config->real_count;
 
-	struct balancer_rs *reals = ADDR_OF(config, config->reals);
+	struct balancer_rs *reals = ADDR_OF(&config->reals);
 
 	for (uint64_t real_idx = 0; real_idx < service->real_count;
 	     ++real_idx) {
@@ -87,9 +87,9 @@ balancer_module_config_add_service(
 		       16);
 	}
 
-	config->reals = OFFSET_OF(config, reals);
+	SET_OFFSET_OF(&config->reals, reals);
 
-	struct balancer_vs *services = ADDR_OF(config, config->services);
+	struct balancer_vs *services = ADDR_OF(&config->services);
 
 	if (mem_array_expand_exp(
 		    &config->module_data.memory_context,
@@ -123,7 +123,7 @@ balancer_module_config_add_service(
 		);
 	}
 
-	config->services = OFFSET_OF(config, services);
+	SET_OFFSET_OF(&config->services, services);
 	return 0;
 }
 

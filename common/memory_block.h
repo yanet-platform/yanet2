@@ -34,9 +34,7 @@ block_allocator_init(struct block_allocator *allocator) {
 		allocator->pools[pool_idx].allocate = 0;
 		allocator->pools[pool_idx].free = 0;
 		allocator->pools[pool_idx].borrow = 0;
-		allocator->pools[pool_idx].free_list = OFFSET_OF(
-			allocator, (void *)&allocator->pools[pool_idx].free_list
-		);
+		allocator->pools[pool_idx].free_list = NULL;
 	}
 
 	return 0;
@@ -70,8 +68,8 @@ block_allocator_pool_get(
 ) {
 	(void)allocator;
 
-	void *result = ADDR_OF(allocator, pool->free_list);
-	pool->free_list = *(void **)result;
+	void *result = ADDR_OF(&pool->free_list);
+	SET_OFFSET_OF(&pool->free_list, ADDR_OF((void **)result));
 	++pool->allocate;
 	--pool->free;
 	return result;
@@ -91,9 +89,9 @@ block_allocator_pool_borrow(
 	// Split the memory chunk into two piece and insert into free list
 	size_t size = block_allocator_pool_size(allocator, pool_index);
 	void *next_data = (void *)((uintptr_t)data + size);
-	*(void **)next_data = pool->free_list;
-	*(void **)data = OFFSET_OF(allocator, next_data);
-	pool->free_list = OFFSET_OF(allocator, data);
+	SET_OFFSET_OF((void **)next_data, ADDR_OF(&pool->free_list));
+	SET_OFFSET_OF((void **)data, next_data);
+	SET_OFFSET_OF(&pool->free_list, data);
 
 	++parent_pool->borrow;
 	pool->free += 2;
@@ -114,7 +112,6 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 
 	struct block_allocator_pool *pool = allocator->pools + pool_index;
 
-	//	if (ADDR_OF(allocator, pool->free_list) == NULL) {
 	if (pool->free == 0) {
 		/*
 		 * Look for the first parent pool with free memory block
@@ -180,8 +177,8 @@ block_allocator_bfree(
 	size_t pool_index = block_allocator_pool_index(allocator, size);
 	struct block_allocator_pool *pool = allocator->pools + pool_index;
 
-	*(void **)block = pool->free_list;
-	pool->free_list = OFFSET_OF(allocator, block);
+	SET_OFFSET_OF((void **)block, ADDR_OF(&pool->free_list));
+	SET_OFFSET_OF(&pool->free_list, block);
 	++pool->free;
 }
 

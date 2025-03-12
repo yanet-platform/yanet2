@@ -210,7 +210,7 @@ main(int argc, char **argv) {
 
 		pipeline_process(
 			dp_config,
-			ADDR_OF(cp_config, cp_config->cp_config_gen),
+			ADDR_OF(&cp_config->cp_config_gen),
 			0,
 			&packet_front
 		);

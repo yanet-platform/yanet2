@@ -92,7 +92,7 @@ balancer_rs_lookup(
 		mlt = udp_header->src_port;
 	}
 
-	return ADDR_OF(config, config->reals) + vs->real_start +
+	return ADDR_OF(&config->reals) + vs->real_start +
 	       (mlt % vs->real_count);
 }
 
@@ -175,8 +175,7 @@ balancer_handle_packets(
 		}
 
 		struct balancer_vs *vs =
-			ADDR_OF(balancer_config, balancer_config->services) +
-			service_id;
+			ADDR_OF(&balancer_config->services) + service_id;
 
 		struct balancer_rs *rs =
 			balancer_rs_lookup(balancer_config, vs, packet);

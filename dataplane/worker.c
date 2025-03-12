@@ -275,7 +275,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 	struct dp_config *dp_config = worker->node->dp_config;
 	struct cp_config *cp_config = worker->node->cp_config;
 	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(cp_config, cp_config->cp_config_gen);
+		ADDR_OF(&cp_config->cp_config_gen);
 
 	// Determine pipelines
 	dataplane_route_pipeline(

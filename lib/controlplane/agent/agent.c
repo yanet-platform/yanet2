@@ -58,7 +58,7 @@ agent_connect(
 	}
 
 	struct dp_config *dp_config = (struct dp_config *)storage;
-	struct cp_config *cp_config = ADDR_OF(dp_config, dp_config->cp_config);
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 
 	struct agent *new_agent = (struct agent *)memory_balloc(
 		&cp_config->memory_context, sizeof(struct agent)
@@ -90,27 +90,27 @@ agent_connect(
 		memory_limit -= alloc_size;
 	}
 
-	new_agent->dp_config = OFFSET_OF(new_agent, dp_config);
-	new_agent->cp_config = OFFSET_OF(new_agent, cp_config);
+	SET_OFFSET_OF(&new_agent->dp_config, dp_config);
+	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
 	new_agent->pid = getpid();
 
 	struct cp_agent_registry *old_registry =
-		ADDR_OF(cp_config, cp_config->agent_registry);
+		ADDR_OF(&cp_config->agent_registry);
 	bool found = false;
 	for (uint64_t agent_idx = 0; agent_idx < old_registry->count;
 	     ++agent_idx) {
 		struct agent *old_agent =
-			ADDR_OF(old_registry, old_registry->agents[agent_idx]);
+			ADDR_OF(&old_registry->agents[agent_idx]);
 		if (!strncmp(old_agent->name, agent_name, 80)) {
 			found = true;
-			old_registry->agents[agent_idx] =
-				OFFSET_OF(old_registry, new_agent);
-			new_agent->prev = OFFSET_OF(new_agent, old_agent);
+			SET_OFFSET_OF(
+				&old_registry->agents[agent_idx], new_agent
+			);
+			SET_OFFSET_OF(&new_agent->prev, old_agent);
 			break;
 		}
 	}
 	if (!found) {
-		// FIXME encode NULL here
 		new_agent->prev = NULL;
 		struct cp_agent_registry *new_registry =
 			(struct cp_agent_registry *)memory_balloc(
@@ -122,18 +122,19 @@ agent_connect(
 		new_registry->count = old_registry->count + 1;
 		for (uint64_t agent_idx = 0; agent_idx < old_registry->count;
 		     ++agent_idx) {
-			new_registry->agents[agent_idx] = OFFSET_OF(
-				new_registry,
-				ADDR_OF(old_registry,
-					old_registry->agents[agent_idx])
+			SET_OFFSET_OF(
+				&new_registry->agents[agent_idx],
+				ADDR_OF(&old_registry->agents[agent_idx])
 			);
 		}
-		new_registry->agents[new_registry->count - 1] =
-			OFFSET_OF(new_registry, new_agent);
+		SET_OFFSET_OF(
+			&new_registry->agents[new_registry->count - 1],
+			new_agent
+		);
 
-		new_registry->prev = OFFSET_OF(new_registry, old_registry);
+		SET_OFFSET_OF(&new_registry->prev, old_registry);
 
-		cp_config->agent_registry = OFFSET_OF(cp_config, new_registry);
+		SET_OFFSET_OF(&cp_config->agent_registry, new_registry);
 	}
 
 	return new_agent;
@@ -141,9 +142,9 @@ agent_connect(
 
 void
 agent_disconnect(struct agent *agent) {
-	void *storage = ADDR_OF(agent, agent->dp_config);
+	void *storage = ADDR_OF(&agent->dp_config);
 
-	munmap(storage, ADDR_OF(agent, agent->dp_config)->storage_size);
+	munmap(storage, ADDR_OF(&agent->dp_config)->storage_size);
 }
 
 int
@@ -153,7 +154,7 @@ agent_update_modules(
 	struct module_data **module_datas
 ) {
 	return cp_config_update_modules(
-		ADDR_OF(agent, agent->cp_config), module_count, module_datas
+		ADDR_OF(&agent->cp_config), module_count, module_datas
 	);
 }
 
@@ -164,8 +165,8 @@ agent_update_pipelines(
 	struct pipeline_config *pipelines[]
 ) {
 	return cp_config_update_pipelines(
-		ADDR_OF(agent, agent->dp_config),
-		ADDR_OF(agent, agent->cp_config),
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
 		pipeline_count,
 		pipelines
 	);
@@ -208,8 +209,8 @@ agent_update_devices(
 	struct agent *agent, uint64_t device_count, uint64_t *pipelines
 ) {
 	return cp_config_update_devices(
-		ADDR_OF(agent, agent->dp_config),
-		ADDR_OF(agent, agent->cp_config),
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
 		device_count,
 		pipelines
 	);
@@ -244,7 +245,7 @@ yanet_get_dp_module_list_info(struct dp_config *dp_config) {
 	if (module_list_info == NULL)
 		goto unlock;
 
-	struct dp_module *modules = ADDR_OF(dp_config, dp_config->dp_modules);
+	struct dp_module *modules = ADDR_OF(&dp_config->dp_modules);
 
 	module_list_info->module_count = dp_config->module_count;
 	for (uint64_t module_idx = 0; module_idx < dp_config->module_count;
@@ -267,13 +268,12 @@ cp_module_list_info_free(struct cp_module_list_info *module_list_info) {
 
 struct cp_module_list_info *
 yanet_get_cp_module_list_info(struct dp_config *dp_config) {
-	struct cp_config *cp_config = ADDR_OF(dp_config, dp_config->cp_config);
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *config_gen =
-		ADDR_OF(cp_config, cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_module_registry *module_registry =
-		ADDR_OF(config_gen, config_gen->module_registry);
+		ADDR_OF(&config_gen->module_registry);
 
 	struct cp_module_list_info *module_list_info =
 		(struct cp_module_list_info *)malloc(
@@ -288,8 +288,7 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	for (uint64_t module_idx = 0; module_idx < module_registry->count;
 	     ++module_idx) {
 		struct module_data *module_data =
-			ADDR_OF(module_registry->modules + module_idx,
-				(module_registry->modules + module_idx)->data);
+			ADDR_OF(&(module_registry->modules + module_idx)->data);
 		module_list_info->modules[module_idx].index =
 			module_data->index;
 		strncpy(module_list_info->modules[module_idx].config_name,
@@ -324,13 +323,12 @@ cp_pipeline_list_info_free(struct cp_pipeline_list_info *pipeline_list_info) {
 
 struct cp_pipeline_list_info *
 yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
-	struct cp_config *cp_config = ADDR_OF(dp_config, dp_config->cp_config);
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *config_gen =
-		ADDR_OF(cp_config, cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_pipeline_registry *pipeline_registry =
-		ADDR_OF(config_gen, config_gen->pipeline_registry);
+		ADDR_OF(&config_gen->pipeline_registry);
 
 	struct cp_pipeline_list_info *pipeline_list_info =
 		(struct cp_pipeline_list_info *)malloc(
@@ -362,7 +360,7 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 		}
 		pipeline_info->length = cp_pipeline->length;
 		memcpy(pipeline_info->modules,
-		       ADDR_OF(cp_pipeline, cp_pipeline->module_indexes),
+		       ADDR_OF(&cp_pipeline->module_indexes),
 		       sizeof(uint64_t) * cp_pipeline->length);
 
 		pipeline_list_info->pipelines[idx] = pipeline_info;

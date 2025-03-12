@@ -29,9 +29,8 @@ struct radix {
 
 static inline radix_page_t *
 radix_page(const struct radix *radix, uint32_t page_idx) {
-	radix_page_t **pages = ADDR_OF(radix, radix->pages);
-	radix_page_t *chunk =
-		ADDR_OF(radix, pages[page_idx / RADIX_CHUNK_SIZE]);
+	radix_page_t **pages = ADDR_OF(&radix->pages);
+	radix_page_t *chunk = ADDR_OF(&pages[page_idx / RADIX_CHUNK_SIZE]);
 	return chunk + page_idx % RADIX_CHUNK_SIZE;
 }
 
@@ -40,7 +39,7 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 
 	if (!(radix->page_count % RADIX_CHUNK_SIZE)) {
 		struct memory_context *memory_context =
-			ADDR_OF(radix, radix->memory_context);
+			ADDR_OF(&radix->memory_context);
 
 		radix_page_t *new_chunk = memory_balloc(
 			memory_context, sizeof(radix_page_t) * RADIX_CHUNK_SIZE
@@ -49,7 +48,7 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 		if (new_chunk == NULL)
 			return -1;
 
-		radix_page_t **old_pages = ADDR_OF(radix, radix->pages);
+		radix_page_t **old_pages = ADDR_OF(&radix->pages);
 		uint64_t old_chunk_count = radix->page_count / RADIX_CHUNK_SIZE;
 		uint64_t new_chunk_count = old_chunk_count + 1;
 		radix_page_t **new_pages = (radix_page_t **)memory_brealloc(
@@ -67,8 +66,8 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 			return -1;
 		}
 
-		new_pages[new_chunk_count - 1] = OFFSET_OF(radix, new_chunk);
-		radix->pages = OFFSET_OF(radix, new_pages);
+		SET_OFFSET_OF(&new_pages[new_chunk_count - 1], new_chunk);
+		SET_OFFSET_OF(&radix->pages, new_pages);
 	}
 	if (page_idx != NULL)
 		*page_idx = radix->page_count;
@@ -80,21 +79,20 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 
 static inline int
 radix_init(struct radix *radix, struct memory_context *memory_context) {
-	radix->memory_context = OFFSET_OF(radix, memory_context);
-	radix->pages = OFFSET_OF(radix, NULL);
+	SET_OFFSET_OF(&radix->memory_context, memory_context);
+	radix->pages = NULL;
 	radix->page_count = 0;
 	return radix_new_page(radix, NULL);
 }
 
 static inline void
 radix_free(struct radix *radix) {
-	struct memory_context *memory_context =
-		ADDR_OF(radix, radix->memory_context);
-	radix_page_t **pages = ADDR_OF(radix, radix->pages);
+	struct memory_context *memory_context = ADDR_OF(&radix->memory_context);
+	radix_page_t **pages = ADDR_OF(&radix->pages);
 	uint32_t chunk_count =
 		(radix->page_count + RADIX_CHUNK_SIZE - 1) / RADIX_CHUNK_SIZE;
 	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
-		radix_page_t *chunk = ADDR_OF(radix, pages[chunk_idx]);
+		radix_page_t *chunk = ADDR_OF(&pages[chunk_idx]);
 		memory_bfree(
 			memory_context,
 			chunk,

@@ -201,7 +201,7 @@ dp_config_module_by_index(struct dp_config *dp_config, size_t index) {
 		return NULL;
 	}
 
-	struct dp_module *modules = ADDR_OF(dp_config, dp_config->dp_modules);
+	struct dp_module *modules = ADDR_OF(&dp_config->dp_modules);
 
 	return modules + index;
 }
@@ -210,7 +210,7 @@ static inline int
 dp_config_lookup_module(
 	struct dp_config *dp_config, const char *name, uint64_t *index
 ) {
-	struct dp_module *modules = ADDR_OF(dp_config, dp_config->dp_modules);
+	struct dp_module *modules = ADDR_OF(&dp_config->dp_modules);
 	for (uint64_t idx = 0; idx < dp_config->module_count; ++idx) {
 		if (!strncmp(modules[idx].name, name, 80)) {
 			*index = idx;
@@ -247,10 +247,10 @@ cp_config_update_modules(
 	cp_config_lock(cp_config);
 
 	struct cp_config_gen *old_config_gen =
-		ADDR_OF(cp_config, cp_config->cp_config_gen);
+		ADDR_OF(&cp_config->cp_config_gen);
 
 	struct cp_module_registry *old_module_registry =
-		ADDR_OF(old_config_gen, old_config_gen->module_registry);
+		ADDR_OF(&old_config_gen->module_registry);
 
 	uint64_t new_module_count = old_module_registry->count;
 	for (uint64_t new_idx = 0; new_idx < module_count; ++new_idx) {
@@ -262,28 +262,22 @@ cp_config_update_modules(
 				old_module_registry->modules + old_idx;
 
 			if (module_datas[new_idx]->index ==
-				    ADDR_OF(old_module, old_module->data)
-					    ->index &&
+				    ADDR_OF(&old_module->data)->index &&
 			    !strncmp(
 				    module_datas[new_idx]->name,
-				    ADDR_OF(old_module, old_module->data)->name,
+				    ADDR_OF(&old_module->data)->name,
 				    64
 			    )) {
-				module_datas[new_idx]->prev = OFFSET_OF(
-					module_datas[new_idx],
-					ADDR_OF(old_module, old_module->data)
+				SET_OFFSET_OF(
+					&module_datas[new_idx]->prev,
+					ADDR_OF(&old_module->data)
 				);
 				found = true;
 				break;
 			}
 		}
 		if (!found) {
-			module_datas[new_idx]->prev = OFFSET_OF(
-				module_datas[new_idx],
-				// FIXME: NULL encoding hack
-				(struct module_data *)&module_datas[new_idx]
-					->prev
-			);
+			module_datas[new_idx]->prev = NULL;
 			++new_module_count;
 		}
 	}
@@ -297,13 +291,13 @@ cp_config_update_modules(
 	 * As we do not change original module order we may just to copy
 	 * pipeline registry to the new config generation.
 	 */
-	new_config_gen->pipeline_registry = OFFSET_OF(
-		new_config_gen,
-		ADDR_OF(old_config_gen, old_config_gen->pipeline_registry)
+	SET_OFFSET_OF(
+		&new_config_gen->pipeline_registry,
+		ADDR_OF(&old_config_gen->pipeline_registry)
 	);
-	new_config_gen->device_registry = OFFSET_OF(
-		new_config_gen,
-		ADDR_OF(old_config_gen, old_config_gen->device_registry)
+	SET_OFFSET_OF(
+		&new_config_gen->device_registry,
+		ADDR_OF(&old_config_gen->device_registry)
 	);
 
 	// FIXME: zero initialize in order to provide correct error handling
@@ -321,12 +315,7 @@ cp_config_update_modules(
 		struct cp_module *new_module =
 			new_module_registry->modules + idx;
 
-		*new_module = (struct cp_module){
-			.data = OFFSET_OF(
-				new_module,
-				ADDR_OF(old_module, old_module->data)
-			),
-		};
+		SET_OFFSET_OF(&new_module->data, ADDR_OF(&old_module->data));
 	}
 	new_module_registry->count = old_module_registry->count;
 
@@ -340,15 +329,14 @@ cp_config_update_modules(
 				new_module_registry->modules + old_idx;
 
 			if (module_datas[new_idx]->index ==
-				    ADDR_OF(new_module, new_module->data)
-					    ->index &&
+				    ADDR_OF(&new_module->data)->index &&
 			    !strncmp(
 				    module_datas[new_idx]->name,
-				    ADDR_OF(new_module, new_module->data)->name,
+				    ADDR_OF(&new_module->data)->name,
 				    64
 			    )) {
-				new_module->data = OFFSET_OF(
-					new_module, module_datas[new_idx]
+				SET_OFFSET_OF(
+					&new_module->data, module_datas[new_idx]
 				);
 				module_datas[new_idx]->gen =
 					new_config_gen->gen;
@@ -362,22 +350,17 @@ cp_config_update_modules(
 				new_module_registry->count;
 
 			module_datas[new_idx]->gen = new_config_gen->gen;
-			*new_module = (struct cp_module){
-				.data = OFFSET_OF(
-					new_module, module_datas[new_idx]
-				),
-			};
+			SET_OFFSET_OF(&new_module->data, module_datas[new_idx]);
 			new_module_registry->count += 1;
 		}
 	}
 	// FIXME: assert new_config_gen.module_count == new_module_count
 
-	new_config_gen->module_registry =
-		OFFSET_OF(new_config_gen, new_module_registry);
+	SET_OFFSET_OF(&new_config_gen->module_registry, new_module_registry);
 
-	new_config_gen->prev = OFFSET_OF(new_config_gen, old_config_gen);
+	SET_OFFSET_OF(&new_config_gen->prev, old_config_gen);
 
-	cp_config->cp_config_gen = OFFSET_OF(cp_config, new_config_gen);
+	SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
 
 	cp_config_unlock(cp_config);
 	return 0;
@@ -391,12 +374,12 @@ cp_config_gen_lookup_module(
 	uint64_t *res_index
 ) {
 	struct cp_module_registry *module_registry =
-		ADDR_OF(cp_config_gen, cp_config_gen->module_registry);
+		ADDR_OF(&cp_config_gen->module_registry);
 	struct cp_module *modules = module_registry->modules;
 	for (uint64_t idx = 0; idx < module_registry->count; ++idx) {
 		struct cp_module *module = modules + idx;
-		if (index == ADDR_OF(module, module->data)->index &&
-		    !strncmp(name, ADDR_OF(module, module->data)->name, 64)) {
+		if (index == ADDR_OF(&module->data)->index &&
+		    !strncmp(name, ADDR_OF(&module->data)->name, 64)) {
 			*res_index = idx;
 			return 0;
 		}
@@ -417,7 +400,7 @@ cp_config_update_pipelines(
 	cp_config_lock(cp_config);
 
 	struct cp_config_gen *old_config_gen =
-		ADDR_OF(cp_config, cp_config->cp_config_gen);
+		ADDR_OF(&cp_config->cp_config_gen);
 
 	struct cp_config_gen *new_config_gen =
 		(struct cp_config_gen *)memory_balloc(
@@ -425,13 +408,13 @@ cp_config_update_pipelines(
 		);
 
 	new_config_gen->gen = old_config_gen->gen + 1;
-	new_config_gen->module_registry = OFFSET_OF(
-		new_config_gen,
-		ADDR_OF(old_config_gen, old_config_gen->module_registry)
+	SET_OFFSET_OF(
+		&new_config_gen->module_registry,
+		ADDR_OF(&old_config_gen->module_registry)
 	);
-	new_config_gen->device_registry = OFFSET_OF(
-		new_config_gen,
-		ADDR_OF(old_config_gen, old_config_gen->device_registry)
+	SET_OFFSET_OF(
+		&new_config_gen->device_registry,
+		ADDR_OF(&old_config_gen->device_registry)
 	);
 
 	struct cp_pipeline_registry *new_pipeline_registry =
@@ -476,20 +459,18 @@ cp_config_update_pipelines(
 
 		struct cp_pipeline *cp_pipeline =
 			new_pipeline_registry->pipelines + pipeline_idx;
-		*cp_pipeline = (struct cp_pipeline){
-			.length = pipeline_config->length,
-			.module_indexes =
-				OFFSET_OF(cp_pipeline, new_module_indexes),
-		};
+		cp_pipeline->length = pipeline_config->length;
+		SET_OFFSET_OF(&cp_pipeline->module_indexes, new_module_indexes);
 	}
 
 	new_pipeline_registry->count = pipeline_count;
-	new_config_gen->pipeline_registry =
-		OFFSET_OF(new_config_gen, new_pipeline_registry);
+	SET_OFFSET_OF(
+		&new_config_gen->pipeline_registry, new_pipeline_registry
+	);
 
-	new_config_gen->prev = OFFSET_OF(new_config_gen, old_config_gen);
+	SET_OFFSET_OF(&new_config_gen->prev, old_config_gen);
 
-	cp_config->cp_config_gen = OFFSET_OF(cp_config, new_config_gen);
+	SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
 
 unlock:
 	cp_config_unlock(cp_config);
@@ -508,20 +489,20 @@ cp_config_update_devices(
 	cp_config_lock(cp_config);
 
 	struct cp_config_gen *old_config_gen =
-		ADDR_OF(cp_config, cp_config->cp_config_gen);
+		ADDR_OF(&cp_config->cp_config_gen);
 
 	struct cp_config_gen *new_config_gen =
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
 		);
 	new_config_gen->gen = old_config_gen->gen + 1;
-	new_config_gen->module_registry = OFFSET_OF(
-		new_config_gen,
-		ADDR_OF(old_config_gen, old_config_gen->module_registry)
+	SET_OFFSET_OF(
+		&new_config_gen->module_registry,
+		ADDR_OF(&old_config_gen->module_registry)
 	);
-	new_config_gen->pipeline_registry = OFFSET_OF(
-		new_config_gen,
-		ADDR_OF(old_config_gen, old_config_gen->pipeline_registry)
+	SET_OFFSET_OF(
+		&new_config_gen->pipeline_registry,
+		ADDR_OF(&old_config_gen->pipeline_registry)
 	);
 
 	struct cp_device_registry *new_device_registry =
@@ -534,13 +515,12 @@ cp_config_update_devices(
 	for (uint64_t dev_idx = 0; dev_idx < device_count; ++dev_idx)
 		new_device_registry->pipelines[dev_idx] = pipelines[dev_idx];
 
-	new_config_gen->device_registry =
-		OFFSET_OF(new_config_gen, new_device_registry);
+	SET_OFFSET_OF(&new_config_gen->device_registry, new_device_registry);
 
 	// FIXME: prev for the first one config_gen is invalid
-	new_config_gen->prev = OFFSET_OF(new_config_gen, old_config_gen);
+	SET_OFFSET_OF(&new_config_gen->prev, old_config_gen);
 
-	cp_config->cp_config_gen = OFFSET_OF(cp_config, new_config_gen);
+	SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
 
 	cp_config_unlock(cp_config);
 	return 0;

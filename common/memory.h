@@ -30,7 +30,7 @@ memory_context_init(
 	context->balloc_size = 0;
 	context->bfree_size = 0;
 
-	context->block_allocator = OFFSET_OF(context, block_allocator);
+	SET_OFFSET_OF(&context->block_allocator, block_allocator);
 	strncpy(context->name, name, sizeof(context->name) - 1);
 	context->name[sizeof(context->name) - 1] = 0;
 
@@ -48,8 +48,9 @@ memory_context_init_from(
 	context->balloc_size = 0;
 	context->bfree_size = 0;
 
-	context->block_allocator =
-		OFFSET_OF(context, ADDR_OF(parent, parent->block_allocator));
+	SET_OFFSET_OF(
+		&context->block_allocator, ADDR_OF(&parent->block_allocator)
+	);
 	strncpy(context->name, name, sizeof(context->name) - 1);
 	context->name[sizeof(context->name) - 1] = 0;
 
@@ -60,9 +61,7 @@ static inline void *
 memory_balloc(struct memory_context *context, size_t size) {
 	++context->balloc_count;
 	context->balloc_size += size;
-	return block_allocator_balloc(
-		ADDR_OF(context, context->block_allocator), size
-	);
+	return block_allocator_balloc(ADDR_OF(&context->block_allocator), size);
 }
 
 static inline void
@@ -70,7 +69,7 @@ memory_bfree(struct memory_context *context, void *block, size_t size) {
 	++context->bfree_count;
 	context->bfree_size += size;
 	return block_allocator_bfree(
-		ADDR_OF(context, context->block_allocator), block, size
+		ADDR_OF(&context->block_allocator), block, size
 	);
 }
 

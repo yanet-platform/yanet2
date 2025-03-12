@@ -85,8 +85,8 @@ remap_table_init(
 
 	chunk[0] = (struct remap_item){capacity, 0, 0, 0};
 
-	keys[0] = OFFSET_OF(table, chunk);
-	table->keys = OFFSET_OF(table, keys);
+	SET_OFFSET_OF(&keys[0], chunk);
+	SET_OFFSET_OF(&table->keys, keys);
 
 	table->free_list = REMAP_TABLE_INVALID;
 	return 0;
@@ -94,13 +94,13 @@ remap_table_init(
 
 static inline void
 remap_table_free(struct remap_table *table) {
-	struct remap_item **keys = ADDR_OF(table, table->keys);
+	struct remap_item **keys = ADDR_OF(&table->keys);
 
 	uint32_t chunk_count = (table->count + REMAP_TABLE_CHUNK_SIZE - 1) /
 			       REMAP_TABLE_CHUNK_SIZE;
 
 	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
-		struct remap_item *chunk = ADDR_OF(table, keys[chunk_idx]);
+		struct remap_item *chunk = ADDR_OF(&keys[chunk_idx]);
 		if (chunk != NULL) {
 			memory_bfree(
 				table->memory_context,
@@ -124,9 +124,8 @@ remap_table_new_gen(struct remap_table *table) {
 
 static inline struct remap_item *
 remap_table_item(struct remap_table *table, uint32_t key) {
-	struct remap_item **keys = ADDR_OF(table, table->keys);
-	struct remap_item *chunk =
-		ADDR_OF(table, keys[key / REMAP_TABLE_CHUNK_SIZE]);
+	struct remap_item **keys = ADDR_OF(&table->keys);
+	struct remap_item *chunk = ADDR_OF(&keys[key / REMAP_TABLE_CHUNK_SIZE]);
 	return chunk + key % REMAP_TABLE_CHUNK_SIZE;
 }
 
@@ -161,7 +160,7 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 			table->count / REMAP_TABLE_CHUNK_SIZE;
 		uint32_t new_chunk_count = old_chunk_count + 1;
 
-		struct remap_item **old_keys = ADDR_OF(table, table->keys);
+		struct remap_item **old_keys = ADDR_OF(&table->keys);
 
 		struct remap_item **new_keys =
 			(struct remap_item **)memory_brealloc(
@@ -180,8 +179,8 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 			return -1;
 		}
 
-		new_keys[new_chunk_count - 1] = OFFSET_OF(table, new_chunk);
-		table->keys = OFFSET_OF(table, new_keys);
+		SET_OFFSET_OF(&new_keys[new_chunk_count - 1], new_chunk);
+		SET_OFFSET_OF(&table->keys, new_keys);
 	}
 
 	struct remap_item *item = remap_table_item(table, table->count);

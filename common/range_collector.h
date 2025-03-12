@@ -36,7 +36,7 @@ static inline void
 range_collector_free(struct range_collector *collector, uint8_t key_size) {
 	memory_bfree(
 		collector->memory_context,
-		ADDR_OF(collector, collector->masks),
+		ADDR_OF(&collector->masks),
 		collector->mask_count * key_size
 	);
 	radix_free(&collector->radix);
@@ -48,7 +48,7 @@ range_collector_add_mask(
 	uint8_t key_size,
 	uint32_t *mask_index
 ) {
-	uint8_t *masks = ADDR_OF(collector, collector->masks);
+	uint8_t *masks = ADDR_OF(&collector->masks);
 
 	if (mem_array_expand_exp(
 		    collector->memory_context,
@@ -61,7 +61,7 @@ range_collector_add_mask(
 
 	memset(masks + (collector->mask_count - 1) * key_size, 0, key_size);
 
-	collector->masks = OFFSET_OF(collector, masks);
+	SET_OFFSET_OF(&collector->masks, masks);
 
 	*mask_index = collector->mask_count - 1;
 	return 0;
@@ -75,7 +75,7 @@ range_collector_set_mask(
 	uint8_t prefix
 ) {
 	uint32_t pos = mask_index * key_size + prefix / 8;
-	ADDR_OF(collector, collector->masks)[pos] |= 0x80 >> (prefix % 8);
+	ADDR_OF(&collector->masks)[pos] |= 0x80 >> (prefix % 8);
 }
 
 static int
@@ -223,8 +223,8 @@ range_collector_iterate(
 ) {
 	struct range_collector_ctx *ctx = (struct range_collector_ctx *)data;
 
-	const uint8_t *mask = ADDR_OF(ctx->collector, ctx->collector->masks) +
-			      value * key_size;
+	const uint8_t *mask =
+		ADDR_OF(&ctx->collector->masks) + value * key_size;
 	uint8_t to[key_size];
 
 	for (uint8_t idx = 0; idx < key_size; ++idx) {
