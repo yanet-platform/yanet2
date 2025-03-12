@@ -1,0 +1,50 @@
+.noc-table {
+    width: 100%;
+    border-spacing: 0;
+
+    thead {
+        user-select: none;
+
+        th::after {
+            content: var(--sort-icon);
+            padding-left: 8px;
+            color: var(--noc-color-text-secondary);
+            font-size: 10px;
+        }
+
+        th:hover {
+            cursor: pointer;
+            background-color: var(--noc-color-line-generic);
+        }
+    }
+
+    th,
+    td {
+        height: 32px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        box-sizing: content-box;
+        padding: 4px 10px;
+        padding-left: 10px;
+        border-bottom: 1px solid var(--noc-color-line-generic);
+        line-height: 18px;
+        text-align: left;
+        overflow-wrap: break-word;
+
+        &:first-child {
+            padding-left: 20px;
+        }
+    }
+
+    tbody {
+        tr {
+            &:hover {
+                background-color: var(--noc-color-line-generic);
+            }
+        }
+    }
+
+    td {
+        vertical-align: middle;
+    }
+}

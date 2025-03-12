@@ -25,6 +25,8 @@ bytes = "1.5"
 log = "0.4"
 wasm-logger = "0.2"
 leptos-use = { version = "0.15.6", features = ["use_element_bounding"] }
+leptos-struct-table = "0.14.0-beta2"
+wasmtimer = "0.4"
 
 [build-dependencies]
 prost-build = "0.13"

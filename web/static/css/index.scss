@@ -11,7 +11,9 @@
 @use "components/common/progress.scss";
 @use "components/common/snackbar.scss";
 @use "components/common/spinner.scss";
+@use "components/common/table.scss";
 @use "components/nav.scss";
+@use "components/neighbour.scss";
 @use "components/settings.scss";
 
 html {
@@ -56,7 +58,7 @@ a {
 
 .viewport__content {
     padding: 20px;
-    height: calc(100% - var(--noc-header-height) - 1px - 2 * 20px);    
+    height: calc(100% - var(--noc-header-height) - 1px - 2 * 20px);
 }
 
 .demo {

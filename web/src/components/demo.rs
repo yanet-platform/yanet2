@@ -3,7 +3,7 @@ use std::{borrow::Cow, time::Duration};
 use leptos::prelude::*;
 
 use crate::{
-    api,
+    api::neighbour::NeighbourClient,
     components::common::{
         button::Button,
         dropdown::Dropdown,
@@ -34,7 +34,7 @@ pub fn DemoView() -> impl IntoView {
 
     // Create an action to fetch neighbours
     let fetch_neighbours = Action::new_local(move |_| async move {
-        let client = api::neighbour::NeighbourClient::new(window().origin());
+        let client = NeighbourClient::new();
 
         match client.list_neighbours().await {
             Ok(neighbours) => {

@@ -29,6 +29,8 @@ pub fn Input<F>(
     /// By default color indication is applied.
     #[prop(optional, into)]
     is_error: Option<Signal<bool>>,
+    // TODO: docs.
+    #[prop(optional, into)] accesskey: Option<Cow<'static, str>>,
 ) -> impl IntoView
 where
     F: Fn(String) + 'static,
@@ -41,6 +43,7 @@ where
             <input
                 type=ty
                 placeholder=placeholder.to_string()
+                accesskey=accesskey.unwrap_or_default().to_string()
                 spellcheck=spellcheck.to_string()
                 disabled=is_disabled
                 prop:value=move || value.get()

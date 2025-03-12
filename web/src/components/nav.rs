@@ -29,6 +29,7 @@ pub fn Nav() -> impl IntoView {
             <NavMain>
                 <MenuLink name="Home" href="/" icon=IconKind::Home is_exact=true />
                 <MenuLink name="Demo" href="/demo" icon=IconKind::Tool is_exact=true />
+                <MenuLink name="Neighbours" href="/neighbour" icon=IconKind::Rack is_exact=true />
             </NavMain>
             <NavSecondary>
                 <MenuLink name="Settings" href="/settings" icon=IconKind::Settings />

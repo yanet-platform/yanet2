@@ -1,4 +1,5 @@
-use std::{borrow::Cow, collections::VecDeque, error::Error, time::Duration};
+use core::{error::Error, fmt::Display, time::Duration};
+use std::{borrow::Cow, collections::VecDeque};
 
 use instant::Instant;
 use leptos::{ev::MouseEvent, leptos_dom::helpers::TimeoutHandle, prelude::*};
@@ -87,6 +88,14 @@ impl SnackbarContext {
         T: Into<SnackbarData>,
     {
         self.snackbars.push(ev.into())
+    }
+
+    // TODO: docs.
+    pub fn error<E>(&self, err: E)
+    where
+        E: Display,
+    {
+        self.push(SnackbarData::error(format!("{err}")));
     }
 }
 

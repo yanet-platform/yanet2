@@ -1,10 +1,10 @@
-use core::fmt;
+use leptos::prelude::window;
 
 use self::code::{ListNeighboursRequest, ListNeighboursResponse, NeighbourEntry};
 use super::{GrpcHttpClient, GrpcHttpError};
 
 #[allow(non_snake_case)]
-mod code {
+pub mod code {
     include!(concat!(env!("OUT_DIR"), "/routepb.rs"));
 }
 
@@ -14,10 +14,9 @@ pub struct NeighbourClient {
 }
 
 impl NeighbourClient {
-    /// Constructs a new [`NeighbourClient`].
-    pub fn new(base_url: String) -> Self {
+    pub fn new() -> Self {
         Self {
-            client: GrpcHttpClient::new(base_url),
+            client: GrpcHttpClient::new(window().origin()),
         }
     }
 
