@@ -1,4 +1,5 @@
-#pragma once
+#ifndef NAT64DP_H
+#define NAT64DP_H
 
 #include "dataplane/module/module.h"
 #include "ipfw.h"
@@ -19,6 +20,9 @@
  * This macro extracts the four bytes from a 32-bit integer representing an IPv4 address.
  * It can be used in conjunction with printf and IPv4_BYTES_FMT to print the address.
  *
+ * The byte order is considered as big-endian, meaning that the first extracted byte is the most significant (MSB)
+ * and represents the first octet of the IP address.
+ *
  * @param addr 32-bit integer representing an IPv4 address.
  *
  * @example
@@ -32,6 +36,21 @@
 		(uint8_t) (((addr) >> 16) & 0xFF),\
 		(uint8_t) (((addr) >> 8) & 0xFF),\
 		(uint8_t) ((addr) & 0xFF)
+
+/**
+ * @brief Macro to extract IPv4 address bytes in reverse order for little-endian systems
+ *
+ * This macro is designed to work with systems that use little-endian byte order.
+ * It extracts the four bytes from a 32-bit integer representing an IPv4 address in reverse order.
+ * Use this if you need the least significant byte (LSB) as the first byte.
+ *
+ * @param addr 32-bit integer representing an IPv4 address.
+ */
+#define IPv4_BYTES_LE(addr) \
+		(uint8_t) ((addr) & 0xFF),\
+		(uint8_t) (((addr) >> 8) & 0xFF),\
+		(uint8_t) (((addr) >> 16) & 0xFF),\
+		(uint8_t) (((addr) >> 24) & 0xFF)
 #endif
 
 #ifndef IPv6_BYTES
@@ -78,7 +97,7 @@
  * This macro extracts the 8 16-bit words from an array representing an IPv6 address.
  * It can be used in conjunction with printf and IPv6_BYTES_FMT_U32 to print the address.
  *
- * @param addr Pointer to an array of 4 uint32_t values representing an IPv6 address.
+ * @param addr Pointer to an array of 4 uint32_t values representing the IPv6 address.
  *
  * @example
  * ```c
@@ -117,13 +136,14 @@
     rte_memcpy(ip6[12], ip4, 4); \
 } while (0)
 
-
 #ifdef DEBUG_NAT64
 
 /**
- * @brief Debug logging macro
+ * @brief Debug logging macro with optional code fragment
  *
  * This macro logs a debug message using the RTE_LOG function.
+ * It also allows for an optional code fragment `f` to be executed before the logging happens,
+ * which can be used to prepare data for logging.
  *
  * @param app The log type identifier. This is typically a predefined constant used to categorize log messages.
  * @param f An optional code fragment that will be executed before the logging happens. This can be used to prepare data for logging.
@@ -133,12 +153,31 @@
  * @example
  * ```c
  * int value = 42;
- * LOG_DBG(RTE_LOGTYPE_USER1, , "Debug value: %d\n", value);
- * LOG_DBG(RTE_LOGTYPE_USER1, printf("Before logging: value = %d\n", value);, "Debug value: %d\n", value);
+ * LOG_DBGX(NAT64, , "Debug value: %d\n", value);
+ * LOG_DBGX(NAT64, printf("Before logging: value = %d\n", value);, "Debug value: %d\n", value);
  * ```
  */
-#define LOG_DBG(app, f, fmt, ...) do {\
+#define LOG_DBGX(app, f, fmt, ...) do {\
 	f \
+	RTE_LOG(DEBUG, app, fmt, ##__VA_ARGS__); \
+} while (0)
+
+/**
+ * @brief Debug logging macro
+ *
+ * This macro logs a debug message using the RTE_LOG function.
+ *
+ * @param app The log type identifier. This is typically a predefined constant used to categorize log messages.
+ * @param fmt The format string for the log message.
+ * @param ... Additional arguments matching the format string.
+ *
+ * @example
+ * ```c
+ * int value = 42;
+ * LOG_DBG(NAT64, "Debug value: %d\n", value);
+ * ```
+ */
+#define LOG_DBG(app, fmt, ...) do {\
 	RTE_LOG(DEBUG, app, fmt, ##__VA_ARGS__); \
 } while (0)
 
@@ -153,11 +192,25 @@
  * All parameters are ignored.
  *
  * @param app The log type identifier. This parameter is ignored.
- * @param f An optional code fragment that will be executed. This parameter is ignored.
+ * @param f An optional code fragment that will be executed before the logging happens. This parameter is ignored.
  * @param fmt The format string for the log message. This parameter is ignored.
  * @param ... Additional arguments matching the format string. These parameters are ignored.
  */
-#define LOG_DBG(app, f, fmt, ...) (void)(0)
+#define LOG_DBGX(app, f, fmt, ...) (void)(0)
+
+/**
+ * @brief No-operation (noop) debug logging macro without optional code fragment
+ *
+ * This macro is a no-operation placeholder for debug logging.
+ * It does nothing and is used in-place of an actual logging macro.
+ *
+ * All parameters are ignored.
+ *
+ * @param app The log type identifier. This parameter is ignored.
+ * @param fmt The format string for the log message. This parameter is ignored.
+ * @param ... Additional arguments matching the format string. These parameters are ignored.
+ */
+#define LOG_DBG(app, fmt, ...) (void)(0)
 
 #endif
 
@@ -214,6 +267,17 @@ struct nat64_prefix {
 };
 
 
+
+/**
+ * @brief Structure for ICMP rate limiting
+ */
+struct nat64_icmp_rate_limit {
+    uint32_t tokens;       /**< Current token count */
+    uint32_t last_fill;    /**< Last token fill timestamp */
+    uint32_t max_tokens;   /**< Maximum number of tokens */
+    uint32_t fill_rate;    /**< Token fill rate (tokens per second) */
+};
+
 /**
  * @brief Configuration structure for the NAT64 module
  *
@@ -222,42 +286,22 @@ struct nat64_prefix {
 struct nat64_module_config {
     struct module_config config;
 
-    /**
-     * @brief Hash table for mapping IPv4 to IPv6 addresses
-     *
-     * This field contains the hash table used to store mappings from IPv4 addresses to IPv6 addresses.
-     */
-    struct ip4to6 *hash4to6;
-
-    /**
-     * @brief Hash table for mapping IPv6 to IPv4 addresses
-     *
-     * This field contains the hash table used to store mappings from IPv6 addresses to IPv4 addresses.
-     */
-    struct ip4to6 *hash6to4;
-
-    /**
-     * @brief Randomized source IPv6 address
-     *
-     * This field stores a randomized source IPv6 address used in NAT64 translations.
-     */
-    struct net6 rndsrc;
-
-    /**
-     * @brief Array of IPv6 prefixes for NAT64
-     *
-     * This field stores an array of IPv6 prefixes used for NAT64 translations.
-     */
-    struct nat64_prefix *ipv6_prefixes;
-
-    /**
-     * @brief Number of IPv6 prefixes
-     *
-     * This field stores the number of IPv6 prefixes stored in the ipv6_prefixes array.
-     */
-    size_t num_ipv6_prefixes;
-	
-    // TODO: ToS/QoS drop
+    /* Address mapping tables */
+    struct ip4to6 *hash4to6;          /**< IPv4 to IPv6 address mappings */
+    struct ip4to6 *hash6to4;          /**< IPv6 to IPv4 address mappings */
+    struct net6 rndsrc;               /**< Randomized source IPv6 address */
+    
+    /* NAT64 prefixes */
+    struct nat64_prefix *ipv6_prefixes; /**< Array of IPv6 prefixes */
+    size_t num_ipv6_prefixes;          /**< Number of IPv6 prefixes */
+    
+    /* MTU configuration and caching */
+    uint16_t mtu;                      /**< IPv4 MTU limit */
+    uint16_t mtu6;                     /**< IPv6 MTU limit */
+    
+    /* ICMP rate limiting */
+    struct nat64_icmp_rate_limit icmp_rate_limit; /**< ICMP rate limiter */
+    
 };
 
 /**
@@ -283,3 +327,5 @@ struct nat64_module {
  */
 struct module *
 new_module_nat64();
+
+#endif // NAT64DP_H

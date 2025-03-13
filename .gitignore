@@ -84,7 +84,6 @@ target/
 .cache
 compile_commands.json
 
-### Build directory ###
 build/
 web/dist/
 
@@ -97,3 +96,6 @@ memory-bank
 
 # Ignore Cargo.lock for libraries.
 common/**/Cargo.lock
+
+# local env
+.envrc

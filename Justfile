@@ -2,18 +2,23 @@
 
 TAG := "yanet2-dev"
 ROOT_DIR                := justfile_directory()
+OS := `uname -o`
 
 default:
   @just --list
 
 all:
-	@meson compile -C build
+	[ "{{ OS }}" = Darwin ] || meson compile -C build
 
-test: all
-	@meson test -C build --print-errorlogs
+test *IGN: all
+	[ "{{ OS }}" = Darwin ] || meson test -C build --print-errorlogs
+	[ "{{ OS }}" != Darwin ] || just dtest
+
+coverage:
+	find build -type f -iname '*.gcda' && ninja -C build coverage-html
 
 setup:
-	@meson setup build -Dbuildtype=debug
+	@meson setup build -Dbuildtype=debug -Db_coverage=true
 
 dbuild-cnt: ## Собрать докер-образ.
 		cd .github/workflows && BUILDKIT_PROGRESS=plain DOCKER_BUILDKIT=1 docker build --platform linux/amd64 \
