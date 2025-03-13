@@ -87,8 +87,7 @@ func (m *NeighMonitor) Cache() *NexthopCache {
 
 // Run runs the neighbour monitor until the specified context is canceled.
 func (m *NeighMonitor) Run(ctx context.Context) error {
-	m.log.Debugf("starting neighbour monitor")
-	defer m.log.Debugf("stopped neighbour monitor")
+	m.log.Debug("starting neighbour monitor")
 
 	wg, ctx := errgroup.WithContext(ctx)
 	wg.Go(func() error {
@@ -98,7 +97,9 @@ func (m *NeighMonitor) Run(ctx context.Context) error {
 		return m.runNeighPeriodicUpdate(ctx)
 	})
 
-	return wg.Wait()
+	err := wg.Wait()
+	m.log.Debugw("stopped neighbour monitor", zap.Error(err))
+	return err
 }
 
 func (m *NeighMonitor) runNeighSubscription(ctx context.Context) error {

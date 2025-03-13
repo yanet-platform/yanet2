@@ -3,6 +3,8 @@ package rib
 import (
 	"net/netip"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -14,13 +16,17 @@ type RIB struct {
 	mu         sync.RWMutex
 	routes     MapTrie[netip.Prefix, netip.Addr, RoutesList]
 	neighbours *neigh.NexthopCache
+	changedAt  *atomic.Int64
 	log        *zap.SugaredLogger
 }
 
 func NewRIB(neighbours *neigh.NexthopCache, log *zap.SugaredLogger) *RIB {
+	changedAt := atomic.Int64{}
+	changedAt.Store(time.Now().Unix())
 	return &RIB{
 		routes:     NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
 		neighbours: neighbours,
+		changedAt:  &changedAt,
 		log:        log,
 	}
 }
@@ -51,6 +57,7 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 		},
 	)
 	m.mu.Unlock()
+	m.changedAt.Store(time.Now().UnixNano())
 
 	m.log.Infow("added unicast route",
 		zap.Stringer("prefix", prefix),
@@ -68,8 +75,6 @@ func (m *RIB) DumpRoutes() map[netip.Prefix]RoutesList {
 
 func (m *RIB) BulkUpdate(routes []*Route) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	for _, route := range routes {
 		if route.ToRemove {
 			m.routes.UpdateOrDelete(
@@ -94,4 +99,10 @@ func (m *RIB) BulkUpdate(routes []*Route) {
 			)
 		}
 	}
+	m.mu.Unlock()
+	m.changedAt.Store(time.Now().UnixNano())
+}
+
+func (m *RIB) UpdatedAt() time.Time {
+	return time.Unix(0, m.changedAt.Load())
 }

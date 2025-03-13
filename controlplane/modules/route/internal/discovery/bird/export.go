@@ -80,7 +80,7 @@ func (m *Export) Run(ctx context.Context) error {
 			go func() {
 				<-ctx.Done()
 				if err := c.Close(); err != nil {
-					m.log.Warnw("bird socket closed with an error", zap.Error(err))
+					m.log.Warnw("bird socket closed with an error", zap.Error(err), zap.Any("ctx.Err", ctx.Err()))
 				}
 			}()
 			reader := bufio.NewReader(c)
@@ -114,7 +114,7 @@ func (m *Export) Run(ctx context.Context) error {
 	wg.Go(func() error {
 		m.log.Info("starting batch processor for bird route updates")
 		batch := make([]*rib.Route, 0, m.cfg.DumpThreshold)
-		tick := time.NewTimer(m.cfg.DumpTimeout)
+		tick := time.NewTicker(m.cfg.DumpTimeout)
 		timeout := false
 		for {
 			select {
@@ -123,25 +123,26 @@ func (m *Export) Run(ctx context.Context) error {
 			case route := <-updates:
 				batch = append(batch, route)
 			case <-tick.C:
-				timeout = true
-			}
-			if timeout {
-				tick.Reset(m.cfg.DumpTimeout)
 				if len(batch) == 0 {
 					continue
 				}
-			} else if len(batch)-1 < m.cfg.DumpThreshold {
-				continue
+				timeout = true
 			}
 
-			m.log.Debugw("send RIB update", zap.Int("size", len(batch)),
-				zap.Bool("isTimeout", timeout))
-			if err := m.updater.BulkUpdate(batch); err != nil {
-				return fmt.Errorf("failed to call rib bulk update: %w", err)
+			if timeout || len(batch) >= m.cfg.DumpThreshold {
+				m.log.Debugw("send RIB update", zap.Int("size", len(batch)),
+					zap.Bool("isTimeout", timeout))
+				if err := m.updater.BulkUpdate(batch); err != nil {
+					return fmt.Errorf("failed to call rib bulk update: %w", err)
+				}
+				batch = batch[:0]
 			}
-			batch = batch[:0]
+
+			timeout = false
 		}
 	})
-	m.log.Infow("Wait for export readers completion")
-	return wg.Wait()
+
+	err := wg.Wait()
+	m.log.Infow("export readers are stopped", zap.Error(err))
+	return err
 }

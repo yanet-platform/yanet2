@@ -56,6 +56,6 @@ func DefaultConfig() *Config {
 	return &Config{
 		ParserBufSize: datasize.MB,
 		DumpTimeout:   time.Second,
-		DumpThreshold: 1000,
+		DumpThreshold: 10_000,
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"slices"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -24,17 +25,26 @@ var _ bird.RIBUpdater = (*RouteService)(nil)
 type RouteService struct {
 	routepb.UnimplementedRouteServer
 
-	mu     sync.Mutex
-	agents []*ffi.Agent
-	rib    *rib.RIB
-	log    *zap.SugaredLogger
+	mu      sync.Mutex
+	agents  []*ffi.Agent
+	flushCh chan flushEvent
+	rib     *rib.RIB
+	log     *zap.SugaredLogger
+}
+
+type flushEvent struct {
+	moduleNames []string
+	numaIndices []uint32
 }
 
 func NewRouteService(agents []*ffi.Agent, rib *rib.RIB, log *zap.SugaredLogger) *RouteService {
 	return &RouteService{
 		agents: agents,
-		rib:    rib,
-		log:    log,
+		// Buffer size of 2 provides minimal queuing capacity while preventing
+		// blocking in most scenarios.
+		flushCh: make(chan flushEvent, 2),
+		rib:     rib,
+		log:     log,
 	}
 }
 
@@ -73,9 +83,68 @@ func (m *RouteService) InsertRoute(
 
 func (m *RouteService) BulkUpdate(routes []*rib.Route) error {
 	m.log.Debugw("apply bulk update", zap.Int("size", len(routes)))
+	start := time.Now()
 	m.rib.BulkUpdate(routes)
-	// TODO: notification about rib update
+	m.flushCh <- flushEvent{}
+	m.log.Debugw("bulk update completed", zap.Stringer("took", time.Since(start)))
 	return nil
+}
+
+// periodicRIBFlusher monitors and synchronizes route updates at regular intervals
+// or when triggered by flush events. It runs until the context is canceled.
+func (m *RouteService) periodicRIBFlusher(ctx context.Context, updatePeriod time.Duration) error {
+	m.log.Infow("starting periodic route updates synchronization", zap.Stringer("period", updatePeriod))
+
+	ticker := time.NewTicker(updatePeriod)
+	defer ticker.Stop()
+
+	lastUpdate := m.rib.UpdatedAt()
+	for {
+		var event flushEvent
+
+		// Wait for a trigger event or context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case <-ticker.C:
+			currentUpdate := m.rib.UpdatedAt()
+			if !currentUpdate.After(lastUpdate) {
+				// No changes since last update, skip this cycle
+				continue
+			}
+
+			m.log.Debug("flushing RIB changes due to timeout")
+			event = flushEvent{} // Empty event means process all modules
+			lastUpdate = currentUpdate
+
+		case evt, ok := <-m.flushCh:
+			if !ok {
+				return fmt.Errorf("flush events channel is closed")
+			}
+
+			m.log.Debugw("flushing RIB changes due to explicit event", zap.Any("event", evt))
+			event = evt
+		}
+
+		// If no specific modules were requested, use all modules
+		if len(event.moduleNames) == 0 {
+			// FIXME: This should iterate over all available route modules
+			event.moduleNames = append(event.moduleNames, "route0")
+		}
+
+		// Process updates for each requested module
+		for _, name := range event.moduleNames {
+			m.log.Debugw("synchronizing route updates", zap.String("module", name))
+
+			if err := m.syncRouteUpdates(name, event.numaIndices); err != nil {
+				m.log.Warnw("failed to synchronize route updates",
+					zap.String("module", name),
+					zap.Error(err))
+				// FIXME: continue with other modules even if one fails?
+			}
+		}
+	}
 }
 
 func (m *RouteService) syncRouteUpdates(name string, numaIndices []uint32) error {

@@ -21,3 +21,10 @@ modules:
     memory_requirements: 16777216
     endpoint: "[::1]:0"
     gateway_endpoint: *gateway_endpoint
+    bird_export:
+      enable: false
+      sockets:
+        - name: master4
+          path: /var/lib/bird-master4.sock
+        - name: master6
+          path: /var/lib/bird-master6.sock

@@ -315,9 +315,6 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 		// https://datatracker.ietf.org/doc/html/rfc4271#section-5.1.2
 		for len(data) >= 2 { // traverse all segments
 			segementType := data[0]
-			if segementType != ASPathSequence && segementType != ASPathConfedSequence {
-				return fmt.Errorf("unsupported ASPath segement type: %d", segementType)
-			}
 			route.ASPathLen = data[1]
 			if route.ASPathLen == 0 {
 				return nil
@@ -331,9 +328,25 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 				return fmt.Errorf("ASPath attribute truncated want=%d, actual=%d: %w",
 					asPathBytesSize, len(data), ErrAttrsUnexpectedEOD)
 			}
-			route.PeerAS = binary.BigEndian.Uint32(data)
-			route.OriginAS = binary.BigEndian.Uint32(data[lastUint32Start:])
+			peerAS := binary.BigEndian.Uint32(data)
+			originAS := binary.BigEndian.Uint32(data[lastUint32Start:])
 			data = data[asPathBytesSize:]
+
+			if segementType != ASPathSequence && segementType != ASPathConfedSequence {
+				// return fmt.Errorf("unsupported ASPath segement type: %d", segementType)
+				// Silently skip unsupported AS path segment types (e.g., AS_SET, AS_CONFED_SET).
+				// These segment types are valid per RFC 4271, but we only process sequence types
+				// for determining peer and origin AS values.
+				// Note: Routes with only AS_SET or AS_CONFED_SET segments (no sequence types)
+				// will have empty peer/origin AS values, which is acceptable as these routes
+				// typically represent aggregated paths where specific AS information is less relevant.
+				continue
+			}
+
+			route.PeerAS = peerAS
+			route.OriginAS = originAS
+			// stop decoding upon encountering the first successful match
+			return nil
 		}
 		if len(data) != 0 {
 			return fmt.Errorf("unhandled ASPath attribute data len=%d: %#v: %w", len(data), data, ErrAttrsUnexpectedEOD)
@@ -353,21 +366,11 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 	case AttrCommunity:
 	case AttrExtCommunity:
 	case AttrLargeCommunity:
-		if len(data) < int(sizeOfUint32) {
-			return fmt.Errorf("%w: area of large communities is too small want=%d len=%d",
-				ErrUpdateDecode, sizeOfUint32, len(data))
-		}
-		areaSize := binary.LittleEndian.Uint32(data)
-		if len(data) != int(areaSize) { // areaSize includes decoded size field
-			return fmt.Errorf("%w: unexpected large communities area size expect=%d != len=%d",
-				ErrUpdateDecode, areaSize, len(data))
-		}
-		data = data[sizeOfUint32:]
-		areaSize -= uint32(sizeOfUint32)
 		if len(data) == 0 {
 			// skip empty area
 			return nil
 		}
+		areaSize := len(data)
 		tailSize := len(data) % sizeOfLargeCommunityStruct
 		if tailSize != 0 {
 			return fmt.Errorf("%w: area of large communities has unhandled data tail %d bytes: %#+v",
@@ -376,7 +379,7 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 		}
 		largeCommunities := unsafe.Slice(
 			(*rib.LargeCommunity)(unsafe.Pointer(&data[0])),
-			areaSize/uint32(sizeOfLargeCommunityStruct),
+			areaSize/sizeOfLargeCommunityStruct,
 		)
 		for idx := range largeCommunities {
 			route.AddLargeCommunity(&largeCommunities[idx])

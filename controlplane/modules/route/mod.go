@@ -29,6 +29,7 @@ type RouteModule struct {
 	agents             []*ffi.Agent
 	neighbourDiscovery *neigh.NeighMonitor
 	birdExport         *bird.Export
+	routeService       *RouteService
 	log                *zap.SugaredLogger
 }
 
@@ -77,6 +78,7 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		agents:             agents,
 		neighbourDiscovery: neighbourDiscovery,
 		birdExport:         export,
+		routeService:       routeService,
 		log:                log,
 	}, nil
 }
@@ -111,6 +113,9 @@ func (m *RouteModule) Run(ctx context.Context) error {
 	})
 	wg.Go(func() error {
 		return m.birdExport.Run(ctx)
+	})
+	wg.Go(func() error {
+		return m.routeService.periodicRIBFlusher(ctx, m.cfg.RIBFlushPeriod)
 	})
 
 	if err := m.registerServices(ctx, listenerAddr); err != nil {
@@ -156,6 +161,11 @@ func (m *RouteModule) registerServices(ctx context.Context, listenerAddr net.Add
 				if _, err := gateway.Register(ctx, req); err == nil {
 					m.log.Infof("successfully registered %q in the Gateway API", serviceName)
 					return nil
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
 				}
 
 				m.log.Warnf("failed to register %q in the Gateway API: %v", serviceName, err)
