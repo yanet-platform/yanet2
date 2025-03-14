@@ -57,14 +57,14 @@ func buildLPMs(
 		if prefix.Addr().Is4() {
 			ipv4 := prefix.Addr().As4()
 			mask := xnetip.LastAddr(prefix).As4()
-			from := (*C.uint8_t)(unsafe.Pointer(&ipv4[0]))
-			to := (*C.uint8_t)(unsafe.Pointer(&mask[0]))
+			from := (*C.uint8_t)(&ipv4[0])
+			to := (*C.uint8_t)(&mask[0])
 			C.lpm_insert(lpm4, 4, from, to, 1)
 		} else {
 			ipv6 := prefix.Addr().As16()
 			mask := xnetip.LastAddr(prefix).As16()
-			from := (*C.uint8_t)(unsafe.Pointer(&ipv6[0]))
-			to := (*C.uint8_t)(unsafe.Pointer(&mask[0]))
+			from := (*C.uint8_t)(&ipv6[0])
+			to := (*C.uint8_t)(&mask[0])
 			C.lpm_insert(lpm6, 16, from, to, 1)
 		}
 	}

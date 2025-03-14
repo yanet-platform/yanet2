@@ -1,7 +1,7 @@
 #include "module.h"
 
 struct test_data {
-	const char *payload;
+	const uint8_t *payload;
 	uint16_t size;
 };
 

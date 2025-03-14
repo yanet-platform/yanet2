@@ -15,10 +15,10 @@ import (
 var mbufSize uint64 = 8096
 
 type PacketFrontResult struct {
-	Input  [][]byte
-	Output [][]byte
-	Drop   [][]byte
-	Bypass [][]byte
+	Input  [][]uint8
+	Output [][]uint8
+	Drop   [][]uint8
+	Bypass [][]uint8
 }
 
 func ParsePackets(pf *C.struct_packet_front) {
@@ -33,7 +33,7 @@ func PacketFrontFromPayload(payload [][]byte) (runtime.Pinner, *C.struct_packet_
 	for _, data := range payload {
 		payloadPinner.Pin(&data[0])
 		testData = append(testData, C.struct_test_data{
-			payload: (*C.char)(unsafe.Pointer(&data[0])),
+			payload: (*C.uint8_t)(&data[0]),
 			size:    C.uint16_t(len(data)),
 		})
 	}
@@ -43,7 +43,7 @@ func PacketFrontFromPayload(payload [][]byte) (runtime.Pinner, *C.struct_packet_
 	pinner.Pin(&arena[0])
 	pf := C.testing_packet_front(
 		(*C.struct_test_data)(unsafe.Pointer(&testData[0])), // payload
-		(*C.uint8_t)(unsafe.Pointer(&arena[0])),             // arena
+		(*C.uint8_t)(&arena[0]),                             // arena
 		C.uint64_t(arenaSize),                               // arena_size
 		C.uint64_t(len(testData)),                           // mbuf_count
 		C.uint16_t(mbufSize),
@@ -67,8 +67,7 @@ func PacketFrontToPayload(pf *C.struct_packet_front) PacketFrontResult {
 		var resultList [][]byte
 		for p := list.first; p != nil; p = p.next {
 			var length C.uint16_t
-			dataPtr := unsafe.Pointer(C.testing_packet_data(p, &length))
-			data := unsafe.Slice((*byte)(dataPtr), length)
+			data := unsafe.Slice((*uint8)(C.testing_packet_data(p, &length)), length)
 			resultList = append(resultList, data)
 		}
 		result = append(result, resultList)
