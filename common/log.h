@@ -15,12 +15,12 @@
 #define LOG_GRAY "\x1b[02;39m"
 #define LOG_RESET "\x1b[0m"
 
-static char *__log_color_reset = LOG_RESET;
+static char *__log_color_reset = LOG_RESET; // NOLINT
 
 /*
  * List of log-ids.
  */
-enum log_id { TRACE, DEBUG, INFO, WARN, ERROR, LOG_ID_MAX };
+enum log_id { TRACE, DEBUG, INFO, WARN, ERROR, LOG_ID_MAX }; // NOLINT
 
 struct logger {
 	uint8_t enable;
