@@ -194,7 +194,7 @@ func (m *RouteService) updateModuleConfigs(
 				}
 
 				// Lookup hwaddress for the route
-				entry, ok := neighbours.Lookup(route.NextHop)
+				entry, ok := neighbours.Lookup(route.NextHop.Unmap())
 				if !ok {
 					return fmt.Errorf("neighbour with %q nexthop IP address not found", route.NextHop)
 				}
