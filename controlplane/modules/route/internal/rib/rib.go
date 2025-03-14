@@ -22,7 +22,7 @@ type RIB struct {
 
 func NewRIB(neighbours *neigh.NexthopCache, log *zap.SugaredLogger) *RIB {
 	changedAt := atomic.Int64{}
-	changedAt.Store(time.Now().Unix())
+	changedAt.Store(time.Now().UnixNano())
 	return &RIB{
 		routes:     NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
 		neighbours: neighbours,

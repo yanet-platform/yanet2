@@ -80,7 +80,7 @@ func (m *Export) Run(ctx context.Context) error {
 			go func() {
 				<-ctx.Done()
 				if err := c.Close(); err != nil {
-					m.log.Warnw("bird socket closed with an error", zap.Error(err), zap.Any("ctx.Err", ctx.Err()))
+					m.log.Warnw("bird socket closed with an error", zap.Error(err), zap.Any("ctx_err", ctx.Err()))
 				}
 			}()
 			reader := bufio.NewReader(c)

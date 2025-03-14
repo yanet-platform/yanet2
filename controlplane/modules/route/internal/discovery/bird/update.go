@@ -314,7 +314,7 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 	case AttrASPath:
 		// https://datatracker.ietf.org/doc/html/rfc4271#section-5.1.2
 		for len(data) >= 2 { // traverse all segments
-			segementType := data[0]
+			segmentType := data[0]
 			route.ASPathLen = data[1]
 			if route.ASPathLen == 0 {
 				return nil
@@ -332,8 +332,8 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 			originAS := binary.BigEndian.Uint32(data[lastUint32Start:])
 			data = data[asPathBytesSize:]
 
-			if segementType != ASPathSequence && segementType != ASPathConfedSequence {
-				// return fmt.Errorf("unsupported ASPath segement type: %d", segementType)
+			if segmentType != ASPathSequence && segmentType != ASPathConfedSequence {
+				// return fmt.Errorf("unsupported ASPath segment type: %d", segmentType)
 				// Silently skip unsupported AS path segment types (e.g., AS_SET, AS_CONFED_SET).
 				// These segment types are valid per RFC 4271, but we only process sequence types
 				// for determining peer and origin AS values.
