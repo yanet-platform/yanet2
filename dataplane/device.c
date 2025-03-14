@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 
+#include "common/log.h"
 #include "dpdk.h"
 
 int
@@ -11,6 +12,10 @@ dataplane_device_start(
 ) {
 	(void)dataplane;
 
+	LOG(INFO,
+	    "start dataplane device id=%u with %d workers",
+	    device->device_id,
+	    device->worker_count);
 	dpdk_port_start(device->port_id);
 
 	for (uint32_t wrk_idx = 0; wrk_idx < device->worker_count; ++wrk_idx) {
@@ -48,6 +53,8 @@ dataplane_device_init(
 		    config->mtu,
 		    config->max_lro_packet_size
 	    )) {
+
+		LOG(ERROR, "failed to init dpdk port %s", config->port_name);
 		return -1;
 	}
 

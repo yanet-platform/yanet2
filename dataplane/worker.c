@@ -43,6 +43,7 @@
 #include "dataplane/config/zone.h"
 
 #include "common/data_pipe.h"
+#include "common/log.h"
 
 #include <rte_ethdev.h>
 
@@ -363,6 +364,10 @@ dataplane_worker_init(
 	if (rte_eth_tx_queue_setup(
 		    device->port_id, queue_id, 4096, config->numa_id, NULL
 	    )) {
+		LOG(ERROR,
+		    "failed to setup TX queue for port id=%u numa=%u",
+		    device->port_id,
+		    config->numa_id);
 		return -1;
 	}
 
@@ -389,6 +394,7 @@ dataplane_worker_init(
 		MEMPOOL_F_SP_PUT | MEMPOOL_F_SC_GET
 	);
 	if (worker->rx_mempool == NULL) {
+		LOG(ERROR, "failed to create worker rx pool %s", mempool_name);
 		return -1;
 	}
 
@@ -400,6 +406,10 @@ dataplane_worker_init(
 		    NULL,
 		    worker->rx_mempool
 	    )) {
+		LOG(ERROR,
+		    "failed to setup RX queue for port id=%u numa=%u",
+		    device->port_id,
+		    config->numa_id);
 		goto error_mempool;
 	}
 

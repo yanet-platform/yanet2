@@ -15,6 +15,8 @@
 #include "common/data_pipe.h"
 #include "common/exp_array.h"
 
+#include "common/log.h"
+
 #include "dataplane/config/zone.h"
 
 #include "dataplane/device.h"
@@ -182,6 +184,7 @@ int
 dataplane_load_module(
 	struct dp_config *dp_config, void *bin_hndl, const char *name
 ) {
+	LOG(INFO, "load module %s", name);
 	char loader_name[64];
 	snprintf(loader_name, sizeof(loader_name), "%s%s", "new_module_", name);
 	module_load_handler loader =
@@ -195,6 +198,7 @@ dataplane_load_module(
 		    sizeof(*dp_modules),
 		    &dp_config->module_count
 	    )) {
+		LOG(ERROR, "failed to allocate memory for module %s", name);
 		// FIXME: free module
 		return -1;
 	}
@@ -337,6 +341,8 @@ dataplane_init(
 	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 
 	dataplane->node_count = config->numa_count;
+	LOG(INFO, "initialize dataplane with %u numa", config->numa_count);
+
 	for (uint32_t node_idx = 0; node_idx < dataplane->node_count;
 	     ++node_idx) {
 		struct dataplane_numa_node *node = dataplane->nodes + node_idx;
@@ -350,6 +356,7 @@ dataplane_init(
 			node_idx
 		);
 
+		LOG(INFO, "initialize storage %s", storage_name);
 		int rc = dataplane_init_storage(
 			storage_name,
 			config->dp_memory,
@@ -359,6 +366,9 @@ dataplane_init(
 			&node->cp_config
 		);
 		if (rc == -1) {
+			LOG(ERROR,
+			    "failed to initialize storage %s",
+			    storage_name);
 			return -1;
 		}
 
@@ -374,6 +384,10 @@ dataplane_init(
 	size_t pci_port_count = 0;
 	const char **pci_port_names =
 		(const char **)malloc(sizeof(char *) * config->device_count);
+	if (pci_port_names == NULL) {
+		LOG(ERROR, "failed to allocate 'pci_port_names'");
+		return -1;
+	}
 	for (uint64_t dev_idx = 0; dev_idx < config->device_count; ++dev_idx) {
 		struct dataplane_device_config *device =
 			config->devices + dev_idx;
@@ -384,13 +398,16 @@ dataplane_init(
 		}
 	}
 
+	LOG(INFO, "initialize dpdk");
 	(void
 	)dpdk_init(binary, config->dpdk_memory, pci_port_count, pci_port_names);
 
+	LOG(INFO, "create devices");
 	dataplane_create_devices(
 		dataplane, config->device_count, config->devices
 	);
 
+	LOG(INFO, "connect devices");
 	dataplane_connect_devices(
 		dataplane, config->connection_count, config->connections
 	);
@@ -549,4 +566,9 @@ dataplane_drop_packets(
 		struct rte_mbuf *mbuf = packet_to_mbuf(drop_packet);
 		rte_pktmbuf_free(mbuf);
 	}
+}
+
+void
+dataplane_log_enable(char *name) {
+	log_enable_name(name);
 }
