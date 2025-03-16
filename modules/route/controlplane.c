@@ -39,8 +39,10 @@ route_module_config_init(struct agent *agent, const char *name) {
 	// From the point all allocations are made on local memory context
 	struct memory_context *memory_context =
 		&config->module_data.memory_context;
-	lpm_init(&config->lpm_v4, memory_context);
-	lpm_init(&config->lpm_v6, memory_context);
+	if (lpm_init(&config->lpm_v4, memory_context))
+		goto error_lpm_v4;
+	if (lpm_init(&config->lpm_v6, memory_context))
+		goto error_lpm_v6;
 
 	config->route_count = 0;
 	config->routes = NULL;
@@ -52,6 +54,17 @@ route_module_config_init(struct agent *agent, const char *name) {
 	config->route_indexes = NULL;
 
 	return &config->module_data;
+
+error_lpm_v6:
+	lpm_free(&config->lpm_v4);
+
+error_lpm_v4:
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct route_module_config)
+	);
+	return NULL;
 }
 
 int

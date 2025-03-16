@@ -66,14 +66,20 @@ lpm_new_page(struct lpm *lpm, uint32_t *page_idx) {
 			memory_bfree(
 				memory_context,
 				pages,
-				sizeof(lpm_page_t) * LPM_CHUNK_SIZE
+				sizeof(lpm_page_t *) * new_chunk_count
 			);
+
 			return -1;
 		}
 
-		memcpy(pages,
-		       ADDR_OF(&lpm->pages),
-		       old_chunk_count * sizeof(lpm_page_t *));
+		lpm_page_t **old_pages = ADDR_OF(&lpm->pages);
+		for (uint64_t chunk_idx = 0; chunk_idx < old_chunk_count;
+		     ++chunk_idx)
+			SET_OFFSET_OF(
+				&pages[chunk_idx],
+				ADDR_OF(&old_pages[chunk_idx])
+			);
+
 		SET_OFFSET_OF(&pages[old_chunk_count], page);
 
 		memory_bfree(
@@ -187,7 +193,11 @@ lpm_insert(
 				*stored_value = value | LPM_VALUE_FLAG;
 			}
 		} else if (*stored_value & LPM_VALUE_FLAG) {
-			// TODO
+			/*
+			 * FIXME: overwrite value with a deeper one.
+			 * Take care about propagating stored value if
+			 * required.
+			 */
 		} else {
 			++hop;
 			if (hop > max_hop) {

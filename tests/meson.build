@@ -1,1 +1,2 @@
 subdir('go')
+subdir('common')

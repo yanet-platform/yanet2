@@ -59,13 +59,20 @@ memory_context_init_from(
 
 static inline void *
 memory_balloc(struct memory_context *context, size_t size) {
+	void *result = block_allocator_balloc(
+		ADDR_OF(&context->block_allocator), size
+	);
+	if (result == NULL)
+		return NULL;
 	++context->balloc_count;
 	context->balloc_size += size;
-	return block_allocator_balloc(ADDR_OF(&context->block_allocator), size);
+	return result;
 }
 
 static inline void
 memory_bfree(struct memory_context *context, void *block, size_t size) {
+	if (!size)
+		return;
 	++context->bfree_count;
 	context->bfree_size += size;
 	return block_allocator_bfree(
