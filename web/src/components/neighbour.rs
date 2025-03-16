@@ -13,9 +13,9 @@ use crate::{
     api::neighbour::{code, NeighbourClient},
     components::common::{
         center::Center,
+        error::ErrorView,
         header::Header,
         input::Input,
-        snackbar::SnackbarContext,
         spinner::{Spinner, SpinnerSize},
         viewport::{Viewport, ViewportContent},
     },
@@ -24,41 +24,37 @@ use crate::{
 
 #[component]
 pub fn NeighbourView() -> impl IntoView {
-    // For now push errors in the snackbar.
-    // TODO (issue #??): render error page instead.
-    let snackbar = expect_context::<SnackbarContext>();
-
     // Use query parameters as a state.
     let (search, set_search) = query_signal::<String>("s");
 
     let neighbours = LocalResource::new(move || async move {
         let service = NeighbourClient::new();
 
-        match service.list_neighbours().await {
-            Ok(neighbours) => neighbours,
-            Err(err) => {
-                snackbar.error(err);
-                Default::default()
-            }
-        }
+        // TODO: docs.
+        service.list_neighbours().await.map_err(|err| err.into())
     });
 
     let neighbours = move || -> Option<_> {
-        let neighbours = neighbours
-            .get()?
-            .take()
-            .into_iter()
-            .map(NeighbourEntry::try_from)
-            .collect::<Result<Vec<_>, _>>();
+        let neighbours = neighbours.get()?.take().map(|n| {
+            n.into_iter()
+                .map(|n| NeighbourEntry::try_from(n).map_err(|err| Error::from(err)))
+                .collect::<Result<Vec<_>, _>>()
+        });
 
-        // In case of IP address parse error just render empty table.
-        // TODO (issue #??): render error page instead.
-        let neighbours = neighbours.unwrap_or_default();
+        // TODO: docs.
+        let neighbours = match neighbours {
+            Ok(neighbours) => match neighbours {
+                Ok(neighbours) => Ok(neighbours),
+                Err(err) => Err(err),
+            },
+            Err(err) => Err(err),
+        };
 
         Some(neighbours)
     };
 
-    let neighbours = move || -> Option<Vec<NeighbourEntry>> {
+    // TODO: docs.
+    let neighbours = move || -> Option<Result<Vec<NeighbourEntry>>> {
         let search = search.get().unwrap_or_default();
         let neighbours = neighbours();
 
@@ -66,11 +62,14 @@ pub fn NeighbourView() -> impl IntoView {
             return neighbours;
         }
 
+        // TODO: docs.
         neighbours.map(|neighbours| {
-            neighbours
-                .into_iter()
-                .filter(|neigh| fuzz_match(&search, &neigh.next_hop.to_string()))
-                .collect()
+            neighbours.map(|neighbours| {
+                neighbours
+                    .into_iter()
+                    .filter(|neigh| fuzz_match(&search, &neigh.next_hop.to_string()))
+                    .collect()
+            })
         })
     };
 
@@ -98,20 +97,39 @@ pub fn NeighbourView() -> impl IntoView {
                         </Center>
                     }
                 }>
-                    {move || {
-                        neighbours()
-                            .map(|neighbours| {
-                                view! {
-                                    <table class="noc-table">
-                                        <TableContent
-                                            rows=neighbours
-                                            scroll_container="html"
-                                            sorting_mode=SortingMode::SingleColumn
-                                        />
-                                    </table>
-                                }
+                    <ErrorBoundary fallback=move |errors| {
+                        // Join all errors into a single string.
+                        let error_details = errors.get()
+                            .into_iter()
+                            .map(|(.., err)| err.to_string())
+                            .collect::<Vec<_>>()
+                            .join("\n");
+
+                        view! {
+                            <ErrorView
+                                title="Error while fetching neighbours"
+                                details=error_details
+                            />
+                        }
+                    }>
+                        {move || {
+                            let n = neighbours();
+
+                            n.map(|neighbours| {
+                                neighbours.map(|neighbours| {
+                                    view! {
+                                        <table class="noc-table">
+                                            <TableContent
+                                                rows=neighbours
+                                                scroll_container="html"
+                                                sorting_mode=SortingMode::SingleColumn
+                                            />
+                                        </table>
+                                    }
+                                })
                             })
-                    }}
+                        }}
+                    </ErrorBoundary>
                 </Suspense>
             </ViewportContent>
         </Viewport>

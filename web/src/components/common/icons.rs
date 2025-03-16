@@ -1,15 +1,16 @@
 use leptos::prelude::*;
 
 use self::{
-    admin::IconAdmin, aim::IconAim, arrow_down::IconArrowDown, cross::IconCross, error_triangle::IconErrorTriangle,
-    help::IconHelp, home::IconHome, logo::IconLogo, rack::IconRack, settings::IconSettings, tool::IconTool,
-    triangle::IconTriangle,
+    admin::IconAdmin, aim::IconAim, arrow_down::IconArrowDown, cross::IconCross, error_bell::IconErrorBell,
+    error_triangle::IconErrorTriangle, help::IconHelp, home::IconHome, logo::IconLogo, rack::IconRack,
+    settings::IconSettings, tool::IconTool, triangle::IconTriangle,
 };
 
 mod admin;
 mod aim;
 mod arrow_down;
 mod cross;
+mod error_bell;
 mod error_triangle;
 mod help;
 mod home;
@@ -26,6 +27,7 @@ pub enum IconKind {
     Help,
     Cross,
     Settings,
+    ErrorBell,
     ErrorTriangle,
     ArrowDown,
     Admin,
@@ -46,6 +48,7 @@ pub fn Icon(
         IconKind::Help => view! { <IconHelp /> }.into_any(),
         IconKind::Cross => view! { <IconCross /> }.into_any(),
         IconKind::Settings => view! { <IconSettings /> }.into_any(),
+        IconKind::ErrorBell => view! { <IconErrorBell /> }.into_any(),
         IconKind::ErrorTriangle => view! { <IconErrorTriangle /> }.into_any(),
         IconKind::ArrowDown => view! { <IconArrowDown /> }.into_any(),
         IconKind::Admin => view! { <IconAdmin /> }.into_any(),

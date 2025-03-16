@@ -1,0 +1,24 @@
+.error-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 600px;
+    text-align: center;
+    padding: 2rem;
+    margin: 0 auto;
+    gap: 1rem;
+
+    .error-icon {
+        color: var(--noc-color-infographics-danger-medium);
+    }
+
+    .error-title {
+        font-size: 17px;
+    }
+
+    .error-details {
+        opacity: 0.9;
+        white-space: pre-line;
+        max-width: 500px;
+    }
+}

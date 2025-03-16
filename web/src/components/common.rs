@@ -4,6 +4,7 @@ pub mod button;
 pub mod center;
 pub mod checkbox;
 pub mod dropdown;
+pub mod error;
 pub mod header;
 pub mod icons;
 pub mod input;
