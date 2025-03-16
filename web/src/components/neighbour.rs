@@ -31,13 +31,13 @@ pub fn NeighbourView() -> impl IntoView {
         let service = NeighbourClient::new();
 
         // TODO: docs.
-        service.list_neighbours().await.map_err(|err| err.into())
+        service.list_neighbours().await.map_err(Error::from)
     });
 
     let neighbours = move || -> Option<_> {
         let neighbours = neighbours.get()?.take().map(|n| {
             n.into_iter()
-                .map(|n| NeighbourEntry::try_from(n).map_err(|err| Error::from(err)))
+                .map(|n| NeighbourEntry::try_from(n).map_err(Error::from))
                 .collect::<Result<Vec<_>, _>>()
         });
 
