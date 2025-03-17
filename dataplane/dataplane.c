@@ -15,6 +15,7 @@
 #include "common/data_pipe.h"
 #include "common/exp_array.h"
 
+#include "common/hugepages.h"
 #include "common/log.h"
 
 #include "dataplane/config/zone.h"
@@ -246,11 +247,29 @@ dataplane_init_storage(
 		     MAP_SHARED,
 		     mem_fd,
 		     0);
-	close(mem_fd);
 
-	if ((intptr_t)storage == -1) {
+	if (storage == MAP_FAILED) {
+		int err = errno;
+		LOG(ERROR,
+		    "failed to create memory-mapped storage %s: "
+		    "%s",
+		    storage_name,
+		    strerror(errno));
+
+		if (err == ENOMEM && is_file_on_hugepages_fs(mem_fd) == 1) {
+			LOG(ERROR,
+			    "the storage %s is meant to be allocated on "
+			    "HUGETLBFS, but there is no memory. Maybe because "
+			    "either there are no preallocated pages or another "
+			    "process have consumed the memory",
+			    storage_name);
+		}
+
+		close(mem_fd);
 		return -1;
 	}
+
+	close(mem_fd);
 
 	struct dp_config *dp_config = (struct dp_config *)storage;
 
