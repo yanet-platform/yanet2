@@ -6,7 +6,10 @@ package main
 //
 import "C"
 
-import "fmt"
+import (
+	"fmt"
+	"unsafe"
+)
 
 type ControlModule struct {
 	ModuleName string
@@ -14,16 +17,23 @@ type ControlModule struct {
 }
 
 func main() {
-	yanet := C.yanet_attach(
-		C.CString("/dev/hugepages/yanet"),
-	)
+	cPath := C.CString("/dev/hugepages/yanet")
+	defer C.free(unsafe.Pointer(cPath))
 
-	fmt.Printf("Numa %x\n", C.yanet_numa_map(yanet))
+	shm, err := C.yanet_shm_attach(cPath)
+	if err != nil {
+		panic(err)
+	}
+	defer C.yanet_shm_detach(shm)
 
-	dp_modules := C.yanet_get_dp_module_list_info(yanet)
+	fmt.Printf("Numa %x\n", C.yanet_shm_numa_map(shm))
+
+	dpConfig := C.yanet_shm_dp_config(shm, 0)
+
+	dp_modules := C.yanet_get_dp_module_list_info(dpConfig)
 	defer C.dp_module_list_info_free(dp_modules)
 
-	cp_modules := C.yanet_get_cp_module_list_info(yanet)
+	cp_modules := C.yanet_get_cp_module_list_info(dpConfig)
 	defer C.cp_module_list_info_free(cp_modules)
 
 	dataModules := make([]string, 0)
@@ -53,7 +63,7 @@ func main() {
 		fmt.Printf("  %s:%s\n", config.ModuleName, config.ConfigName)
 	}
 
-	cp_pipelines := C.yanet_get_cp_pipeline_list_info(yanet)
+	cp_pipelines := C.yanet_get_cp_pipeline_list_info(dpConfig)
 	defer C.cp_pipeline_list_info_free(cp_pipelines)
 
 	pipelines := make([][]ControlModule, 0)
@@ -76,6 +86,4 @@ func main() {
 		}
 		fmt.Printf("tx\n")
 	}
-
-	C.yanet_detach(yanet)
 }

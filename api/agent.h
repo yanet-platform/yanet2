@@ -5,19 +5,94 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Handle to YANET shared memory segment.
+struct yanet_shm;
+// Handle to dataplane configuration.
+struct dp_config;
+// TODO: docs.
 struct agent;
+// TODO: docs.
 struct module_data;
 
+// Attaches to YANET shared memory segment.
+//
+// This is the primary entry point for accessing YANET's shared memory. The
+// shared memory segment contains both dataplane configuration and
+// module-specific data.
+//
+// Once attached, the returned handle can be used to:
+// - Access dataplane configuration.
+// - Get module configurations.
+// - Allocate memory for new modules.
+//
+// @param path Path to the shared memory file (e.g. "/dev/hugepages/yanet").
+//
+// @return Handle to the shared memory segment on success.
+//         On failure, the function return NULL and set errno to indicate the
+//         error.
+//         The caller is responsible for detaching the handle using
+//         yanet_shm_detach().
+struct yanet_shm *
+yanet_shm_attach(const char *path);
+
+// Detaches from YANET shared memory segment.
+//
+// Releases all resources associated with the shared memory handle.
+// After this call, the handle becomes invalid and must not be used.
+//
+// @param shm Handle to shared memory segment obtained from yanet_shm_attach()
+int
+yanet_shm_detach(struct yanet_shm *shm);
+
+// Gets NUMA node mapping for dataplane.
+//
+// Returns a bitmap representing available NUMA nodes. Each bit in the returned
+// value corresponds to a NUMA node index. For example:
+// - 0x1 (bit 0 set) means NUMA node 0 is available
+// - 0x3 (bits 0,1 set) means NUMA nodes 0 and 1 are available
+//
+// @param shm Handle to shared memory segment
+//
+// @return Bitmap of available NUMA nodes
+uint32_t
+yanet_shm_numa_map(struct yanet_shm *shm);
+
+// Gets dataplane configuration from shared memory.
+//
+// Provides access to the dataplane configuration stored in shared memory.
+//
+// @param shm Handle to shared memory segment
+//
+// @return Handle to dataplane configuration.
+struct dp_config *
+yanet_shm_dp_config(struct yanet_shm *shm, uint32_t numa_idx);
+
+// Attaches a module agent to shared memory.
+//
+// Creates a new agent for a specific module in the given NUMA node.
+// The agent provides module-specific operations and memory management.
+//
+// @param shm Handle to shared memory segment
+// @param numa_idx NUMA node index where the agent should operate
+// @param agent_name Name of the module agent (e.g. "route", "balancer")
+// @param memory_limit Maximum memory limit for this agent
+//
+// @return Handle to the module agent, NULL on failure
 struct agent *
-agent_connect(
-	const char *storage_name,
+agent_attach(
+	struct yanet_shm *shm,
 	uint32_t numa_idx,
 	const char *agent_name,
 	size_t memory_limit
 );
 
-void
-agent_disconnect(struct agent *agent);
+// Detaches a module agent from shared memory, releasing associated  resources.
+//
+// @param agent Handle to the module agent to detach
+//
+// @return 0 on success, -1 on failure
+int
+agent_detach(struct agent *agent);
 
 int
 agent_update_modules(
@@ -53,18 +128,6 @@ int
 agent_update_devices(
 	struct agent *agent, size_t device_count, uint64_t *pipelines
 );
-
-// FIXME: proper name for shared memory handle
-struct dp_config;
-
-struct dp_config *
-yanet_attach(const char *storage_name);
-
-void
-yanet_detach(struct dp_config *yanet);
-
-uint32_t
-yanet_numa_map(struct dp_config *yanet);
 
 struct dp_module_info {
 	char name[80];

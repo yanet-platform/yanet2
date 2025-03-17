@@ -13,53 +13,71 @@
 
 #include "api/agent.h"
 
-struct dp_config *
-yanet_attach(const char *storage_name) {
+struct yanet_shm *
+yanet_shm_attach(const char *path) {
+	int fd = open(path, O_RDWR, S_IRUSR | S_IWUSR);
+	if (fd == -1) {
+		return NULL;
+	}
 
-	int mem_fd = open(storage_name, O_RDWR, S_IRUSR | S_IWUSR);
 	struct stat stat;
-	fstat(mem_fd, &stat);
+	int rc = fstat(fd, &stat);
+	if (rc == -1) {
+		close(fd);
+		return NULL;
+	}
 
-	void *storage =
-		mmap(NULL,
-		     stat.st_size,
-		     PROT_READ | PROT_WRITE,
-		     MAP_SHARED,
-		     mem_fd,
-		     0);
-	close(mem_fd);
+	void *ptr = mmap(
+		NULL, stat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0
+	);
+	close(fd);
+	if (ptr == MAP_FAILED) {
+		return NULL;
+	}
 
-	struct dp_config *dp_config = (struct dp_config *)storage;
-	return dp_config;
+	struct yanet_shm *shm = (struct yanet_shm *)ptr;
+	return shm;
 }
 
-void
-yanet_detach(struct dp_config *dp_config) {
-	uint32_t mask = (1 << dp_config->numa_idx) - 1;
-	uint32_t numa_pos = __builtin_popcount(dp_config->numa_map & mask);
-	dp_config = (struct dp_config *)((uintptr_t)dp_config -
-					 dp_config->storage_size * numa_pos);
-	munmap(dp_config,
-	       dp_config->storage_size * __builtin_popcount(dp_config->numa_map)
+int
+yanet_shm_detach(struct yanet_shm *shm) {
+	struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
+
+	return munmap(
+		dp_config,
+		dp_config->storage_size *
+			__builtin_popcount(dp_config->numa_map)
 	);
 }
 
 uint32_t
-yanet_numa_map(struct dp_config *yanet) {
-	return yanet->numa_map;
+yanet_shm_numa_map(struct yanet_shm *shm) {
+	struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
+	return dp_config->numa_map;
+}
+
+struct dp_config *
+yanet_shm_dp_config(struct yanet_shm *shm, uint32_t numa_idx) {
+	struct dp_config *dp_config = (struct dp_config *)shm;
+
+	uint32_t mask = (1 << numa_idx) - 1;
+	uint32_t numa_pos = __builtin_popcount(dp_config->numa_map & mask);
+	dp_config = (struct dp_config *)((uintptr_t)dp_config +
+					 dp_config->storage_size * numa_pos);
+
+	return dp_config;
 }
 
 struct agent *
-agent_connect(
-	const char *storage_name,
+agent_attach(
+	struct yanet_shm *shm,
 	uint32_t numa_idx,
 	const char *agent_name,
 	size_t memory_limit
 ) {
-	struct dp_config *dp_config = yanet_attach(storage_name);
+	struct dp_config *dp_config = yanet_shm_dp_config(shm, numa_idx);
 
 	if (!(dp_config->numa_map & (1 << numa_idx))) {
-		yanet_detach(dp_config);
 		return NULL;
 	}
 	uint32_t mask = (1 << numa_idx) - 1;
@@ -149,10 +167,11 @@ agent_connect(
 	return new_agent;
 }
 
-void
-agent_disconnect(struct agent *agent) {
-	void *storage = ADDR_OF(&agent->dp_config);
-	yanet_detach(storage);
+int
+agent_detach(struct agent *agent) {
+	(void)agent;
+	// NOTE: Currently a no-op.
+	return 0;
 }
 
 int

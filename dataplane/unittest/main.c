@@ -9,15 +9,12 @@
 
 #include <rte_mbuf.h>
 
+#include "api/agent.h"
+#include "controlplane/agent/agent.h"
+#include "dataplane/config/zone.h"
 #include "dataplane/dpdk.h"
-
 #include "dataplane/module/module.h"
 #include "dataplane/pipeline/pipeline.h"
-
-#include "dataplane/config/zone.h"
-
-#include "controlplane/agent/agent.h"
-
 #include "modules/route/config.h"
 #include "modules/route/controlplane.h"
 
@@ -130,7 +127,13 @@ main(int argc, char **argv) {
 
 	dataplane_load_module(dp_config, bin_hndl, "route");
 
-	struct agent *agent = agent_connect("/tmp/unit", "test", 1 << 20);
+	struct yanet_shm *shm = yanet_shm_attach("/tmp/unit");
+	if (shm == NULL) {
+		printf("failed to attach shm: %s\n", strerror(errno));
+		return -1;
+	}
+
+	struct agent *agent = agent_attach(shm, 0, "test", 1 << 20);
 	struct module_data *rmc = route_module_config_init(agent, "route0");
 	route_module_config_add_route(
 		rmc,
@@ -216,6 +219,8 @@ main(int argc, char **argv) {
 		);
 
 	write_packets(&packet_front);
+
+	yanet_shm_detach(shm);
 
 	return 0;
 }

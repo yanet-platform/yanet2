@@ -40,7 +40,7 @@ func (m *TinyBitset) Insert(idx uint32) {
 // significant one.
 func (m *TinyBitset) Traverse(fn func(int)) {
 	for idx, word := range m.words {
-		bitsTraverser(word).Traverse(func(r int) {
+		BitsTraverser(word).Traverse(func(r int) {
 			fn(64*idx + r)
 		})
 	}
@@ -58,15 +58,15 @@ func (m *TinyBitset) AsSlice() []int {
 	return out
 }
 
-// bitsTraverser is an iterator that allows to iterate over all bits set in the
+// BitsTraverser is an iterator that allows to iterate over all bits set in the
 // given 64-bit unsigned integer.
 //
 // Iteration is performed from the least significant bit to the most
 // significant one.
-type bitsTraverser uint64
+type BitsTraverser uint64
 
 // Traverse traverses the bitset and calls the given function for each bit set.
-func (m bitsTraverser) Traverse(fn func(int)) {
+func (m BitsTraverser) Traverse(fn func(int)) {
 	word := uint64(m)
 
 	for word > 0 {

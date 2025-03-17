@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/yanet-platform/yanet2/controlplane/internal/bitset"
 	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/bird"
@@ -26,6 +27,7 @@ import (
 type RouteModule struct {
 	cfg                *Config
 	server             *grpc.Server
+	shm                *ffi.SharedMemory
 	agents             []*ffi.Agent
 	neighbourDiscovery *neigh.NeighMonitor
 	birdExport         *bird.Export
@@ -42,19 +44,24 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 
 	rib := rib.NewRIB(neighbourCache, log)
 
-	// TODO: obtain NUMA topology.
-	numaIndices := []int{0}
+	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
+	}
+
+	numaIndices := make([]uint32, 0)
+	for numaIdx := range bitset.BitsTraverser(uint64(shm.NumaMap())) {
+		numaIndices = append(numaIndices, uint32(numaIdx))
+	}
 
 	agents := make([]*ffi.Agent, 0)
-	for numaIdx := range numaIndices {
-		path := fmt.Sprintf("%s%d", cfg.MemoryPathPrefix, numaIdx)
+	for _, numaIdx := range numaIndices {
 		log.Debugw("mapping shared memory",
-			zap.Int("numa", numaIdx),
+			zap.Uint32("numa", numaIdx),
 			zap.Stringer("size", cfg.MemoryRequirements),
-			zap.String("path", path),
 		)
 
-		agent, err := ffi.NewAgent(path, "route", uint(cfg.MemoryRequirements))
+		agent, err := shm.AgentAttach("route", numaIdx, uint(cfg.MemoryRequirements))
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to shared memory on NUMA %d: %w", numaIdx, err)
 		}
@@ -75,6 +82,7 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 	return &RouteModule{
 		cfg:                cfg,
 		server:             server,
+		shm:                shm,
 		agents:             agents,
 		neighbourDiscovery: neighbourDiscovery,
 		birdExport:         export,
@@ -87,8 +95,12 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 func (m *RouteModule) Close() error {
 	for numaIdx, agent := range m.agents {
 		if err := agent.Close(); err != nil {
-			m.log.Warnw("failed to close shared memory mapping", zap.Int("numa", numaIdx), zap.Error(err))
+			m.log.Warnw("failed to close shared memory agent", zap.Int("numa", numaIdx), zap.Error(err))
 		}
+	}
+
+	if err := m.shm.Detach(); err != nil {
+		m.log.Warnw("failed to detach from shared memory mapping", zap.Error(err))
 	}
 
 	return nil

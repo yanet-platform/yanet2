@@ -10,9 +10,11 @@ import "C"
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"net/netip"
 	"os"
+	"unsafe"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 )
@@ -56,13 +58,19 @@ func main() {
 		os.Exit(-1)
 	}
 
+	cPath := C.CString(config.Storage)
+	defer C.free(unsafe.Pointer(cPath))
+
+	shm, err := C.yanet_shm_attach(cPath)
+	if err != nil {
+		panic(err)
+	}
+	defer C.yanet_shm_detach(shm)
+
 	for numaIdx := 0; numaIdx < config.NumaCount; numaIdx++ {
-
-		storage := fmt.Sprintf("%s-%d", config.Storage, numaIdx)
-
-		agent := C.agent_connect(
-			C.CString(storage),
-			0,
+		agent := C.agent_attach(
+			shm,
+			C.uint32_t(numaIdx),
 			C.CString(config.AgentName),
 			C.uint64_t(config.MemoryLimit),
 		)
@@ -131,13 +139,14 @@ func main() {
 		defer C.pipeline_config_free(pipeline1)
 		C.pipeline_config_set_module(pipeline1, 0, C.CString("forward"), C.CString(config.ModuleName))
 
+		pipelines := [2]*C.struct_pipeline_config{
+			pipeline0,
+			pipeline1,
+		}
 		C.agent_update_pipelines(
 			agent,
 			2,
-			&([2]*C.struct_pipeline_config{
-				pipeline0,
-				pipeline1,
-			})[0],
+			&pipelines[0],
 		)
 	}
 }

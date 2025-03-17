@@ -16,7 +16,7 @@ modules:
     # communicate with dataplane.
     #
     # NUMA index will be appended to the path.
-    memory_path_prefix: /dev/hugepages/data-
+    memory_path: /dev/hugepages/yanet
     # Memory requirements for a single transaction.
     memory_requirements: 16777216
     endpoint: "[::1]:0"

@@ -7,7 +7,6 @@ package ffi
 //#include "controlplane/agent/agent.h"
 import "C"
 import (
-	"fmt"
 	"unsafe"
 )
 
@@ -25,35 +24,13 @@ func (m *ModuleConfig) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
 
-// TODO: consider renaming to something more specific, like:
-// - "MemoryContext"
-// - "SharedContext"
-// - etc.
 type Agent struct {
 	ptr *C.struct_agent
 }
 
-// TODO: docs for 'it's user responsibility to call "Close"'.
-func NewAgent(path string, name string, size uint) (*Agent, error) {
-	cPath := C.CString(path)
-	defer C.free(unsafe.Pointer(cPath))
-
-	cName := C.CString(name)
-	defer C.free(unsafe.Pointer(cName))
-
-	ptr, err := C.agent_connect(cPath, 0, cName, C.ulong(size))
-	if ptr == nil {
-		return nil, fmt.Errorf("failed to connect to shared memory %q: %w", path, err)
-	}
-
-	return &Agent{
-		ptr: ptr,
-	}, nil
-}
-
 func (m *Agent) Close() error {
-	// "TODO: currently there is no way to free an agent"
-	return fmt.Errorf("TODO: currently there is no way to free an agent")
+	_, err := C.agent_detach(m.ptr)
+	return err
 }
 
 func (m *Agent) AsRawPtr() unsafe.Pointer {

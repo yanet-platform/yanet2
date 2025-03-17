@@ -10,9 +10,11 @@ import "C"
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"net/netip"
 	"os"
+	"unsafe"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 )
@@ -188,10 +190,18 @@ func main() {
 		os.Exit(-1)
 	}
 
-	for numaIdx := 0; numaIdx < config.NumaCount; numaIdx++ {
+	cPath := C.CString(config.Storage)
+	defer C.free(unsafe.Pointer(cPath))
 
-		agent := C.agent_connect(
-			C.CString(config.Storage),
+	shm, err := C.yanet_shm_attach(cPath)
+	if err != nil {
+		panic(err)
+	}
+	defer C.yanet_shm_detach(shm)
+
+	for numaIdx := 0; numaIdx < config.NumaCount; numaIdx++ {
+		agent := C.agent_attach(
+			shm,
 			C.uint32_t(numaIdx),
 			C.CString(config.AgentName),
 			C.uint64_t(config.MemoryLimit),

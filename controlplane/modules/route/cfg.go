@@ -8,11 +8,9 @@ import (
 )
 
 type Config struct {
-	// MemoryPathPrefix is the path to the shared-memory file that is used to
+	// MemoryPath is the path to the shared-memory file that is used to
 	// communicate with dataplane.
-	//
-	// NUMA index will be appended to the path.
-	MemoryPathPrefix string `yaml:"memory_path_prefix"`
+	MemoryPath string `yaml:"memory_path"`
 	// MemoryRequirements is the amount of memory that is required for a single
 	// transaction.
 	MemoryRequirements datasize.ByteSize `yaml:"memory_requirements"`
@@ -26,7 +24,7 @@ type Config struct {
 
 func DefaultConfig() *Config {
 	return &Config{
-		MemoryPathPrefix:   "/dev/hugepages/data-",
+		MemoryPath:         "/dev/hugepages/yanet",
 		MemoryRequirements: 16777216,
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",

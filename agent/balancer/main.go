@@ -6,10 +6,20 @@ package main
 //#include "api/agent.h"
 //#include "modules/balancer/controlplane.h"
 import "C"
+import "unsafe"
 
 func main() {
-	agent := C.agent_connect(
-		C.CString("/dev/hugepages/data"),
+	cPath := C.CString("/dev/hugepages/yanet")
+	defer C.free(unsafe.Pointer(cPath))
+
+	shm, err := C.yanet_shm_attach(cPath)
+	if err != nil {
+		panic(err)
+	}
+	defer C.yanet_shm_detach(shm)
+
+	agent := C.agent_attach(
+		shm,
 		0,
 		C.CString("balancer"),
 		16*1024*1024,
