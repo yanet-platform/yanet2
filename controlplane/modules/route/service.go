@@ -189,14 +189,14 @@ func (m *RouteService) updateModuleConfigs(
 		for prefix, routesList := range routes {
 			routesListSetKey := bitset.TinyBitset{}
 
+			if routes == nil || len(routesList.Routes) == 0 {
+				m.log.Debugw("skip prefix with no routes", zap.Stringer("prefix", prefix))
+				// FIXME add telemetry
+				continue
+			}
+
 			totalRoutes += len(routesList.Routes)
 			for _, route := range routesList.Routes {
-				if route == nil {
-					m.log.Debugw("skip prefix with no routes", zap.Stringer("prefix", prefix))
-					// FIXME add telemetry
-					continue
-				}
-
 				// Lookup hwaddress for the route
 				entry, ok := neighbours.Lookup(route.NextHop.Unmap())
 				if !ok {
