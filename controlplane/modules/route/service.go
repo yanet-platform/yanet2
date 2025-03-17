@@ -199,10 +199,6 @@ func (m *RouteService) updateModuleConfigs(
 					return fmt.Errorf("neighbour with %q nexthop IP address not found", route.NextHop)
 				}
 
-				m.log.Debugw("found neighbour with resolved hardware addresses",
-					zap.Stringer("nexthop_addr", route.NextHop),
-				)
-
 				if idx, ok := hardwareRoutes[entry.HardwareRoute]; ok {
 					routesListSetKey.Insert(idx)
 					continue

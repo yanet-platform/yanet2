@@ -16,6 +16,7 @@
 // Hack around gcc versions < 12, which don't have `__FILE_NAME__` macro
 // defined.
 #ifndef __FILE_NAME__
+#include <string.h>
 static inline const char *
 __yanet_path_basename(const char *path) {
 	const char *base = strrchr(path, '/');
