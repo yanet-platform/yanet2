@@ -183,9 +183,13 @@ func (m *RouteService) updateModuleConfigs(
 
 		hardwareRoutes := map[neigh.HardwareRoute]uint32{}
 		routesListsSet := map[bitset.TinyBitset]int{}
+
+		routeInsertionStart := time.Now()
+		totalRoutes := 0
 		for prefix, routesList := range routes {
 			routesListSetKey := bitset.TinyBitset{}
 
+			totalRoutes += len(routesList.Routes)
 			for _, route := range routesList.Routes {
 				if route == nil {
 					m.log.Debugw("skip prefix with no routes", zap.Stringer("prefix", prefix))
@@ -228,6 +232,12 @@ func (m *RouteService) updateModuleConfigs(
 				return fmt.Errorf("failed to add prefix %q: %w", prefix, err)
 			}
 		}
+		m.log.Debugw("finished inserting routes",
+			zap.String("module", name),
+			zap.Int("count", totalRoutes),
+			zap.Uint32("numa", numaIdx),
+			zap.Stringer("took", time.Since(routeInsertionStart)),
+		)
 
 		configs = append(configs, config)
 	}
