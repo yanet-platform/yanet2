@@ -91,3 +91,6 @@ web/dist/
 # AI
 .cline*
 memory-bank
+
+# generated files
+*.pb.go

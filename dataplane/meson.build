@@ -6,6 +6,7 @@ dependencies += dependency('yaml-0.1')
 dependencies += libdpdk.get_variable('dpdk_dep')
 
 dependencies += lib_common_dep
+dependencies += lib_logging_dep
 dependencies += lib_pipeline_dp_dep
 
 lib_sources = files(
@@ -38,11 +39,11 @@ dependencies += lib_balancer_dp_dep
 dependencies += lib_forward_dp_dep
 dependencies += lib_route_dp_dep
 
-
 sources = files(
-  'main.c',
+  'drivers/sock_dev.c',
   'dpdk.c',
-  'drivers/sock_dev.c')
+  'main.c',
+)
 
 executable(
   'yanet-dataplane',

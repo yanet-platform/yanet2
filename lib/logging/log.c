@@ -1,5 +1,3 @@
-#pragma once
-
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -7,16 +5,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#define LOG_RED "\x1b[31m"
-#define LOG_GREEN "\x1b[32m"
-#define LOG_YELLOW "\x1b[33m"
-#define LOG_BLUE "\x1b[34m"
-#define LOG_MAGENTA "\x1b[35m"
-#define LOG_CYAN "\x1b[36m"
-#define LOG_GRAY "\x1b[02;39m"
-#define LOG_RESET "\x1b[0m"
+#include "log.h"
 
-static char *__log_color_reset = LOG_RESET; // NOLINT
+static const char *__log_color_reset = LOG_RESET; // NOLINT
 
 // Hack around gcc versions < 12, which don't have `__FILE_NAME__` macro
 // defined.
@@ -30,15 +21,10 @@ __yanet_path_basename(const char *path) {
 #define __FILE_NAME__ __yanet_path_basename(__FILE__)
 #endif
 
-/*
- * List of log-ids.
- */
-enum log_id { TRACE, DEBUG, INFO, WARN, ERROR, LOG_ID_MAX }; // NOLINT
-
 struct logger {
 	uint8_t enable;
-	char *name;
-	char *color;
+	const char *name;
+	const char *color;
 };
 
 static struct logger loggers[LOG_ID_MAX] = {
@@ -49,24 +35,9 @@ static struct logger loggers[LOG_ID_MAX] = {
 	[ERROR] = {.name = "ERROR", .color = LOG_RED},
 };
 
-#define LOG(log_level, fmt_, ...)                                              \
-	do {                                                                   \
-		if (log_enabled(log_level)) {                                  \
-			fprintf(stderr,                                        \
-				"%s [%s%-6s%s][%s:%d]: " fmt_ "\n",            \
-				log_fmt_timestamp(),                           \
-				log_color(log_level),                          \
-				log_name(log_level),                           \
-				log_color_reset(),                             \
-				__FILE_NAME__,                                 \
-				__LINE__,                                      \
-				##__VA_ARGS__);                                \
-		}                                                              \
-	} while (0)
-
-static inline const char *
+const char *
 log_fmt_timestamp(void) {
-	static char ts_str[sizeof("2025-03-14T17:57:21.777541")];
+	static char ts_str[sizeof("2025-03-14T17:57:21.777")];
 	struct timespec now;
 	struct tm tm;
 	int len;
@@ -76,49 +47,58 @@ log_fmt_timestamp(void) {
 
 	len = strftime(ts_str, sizeof(ts_str), "%FT%T", &tm);
 	snprintf(
-		ts_str + len, sizeof(ts_str) - len, ".%06lu", now.tv_nsec / 1000
+		ts_str + len,
+		sizeof(ts_str) - len,
+		".%03lu",
+		now.tv_nsec / 1000000
 	);
 
 	return ts_str;
 }
 
-static inline const char *
+inline const char *
 log_name(enum log_id lid) {
 	return loggers[lid].name;
 }
 
-static inline const char *
+inline const char *
 log_color(enum log_id lid) {
 	return loggers[lid].color;
 }
 
-static inline const char *
+inline const char *
 log_color_reset(void) {
 	return __log_color_reset;
 }
 
-static inline uint8_t
+inline uint8_t
 log_enabled(enum log_id lid) {
 	return loggers[lid].enable;
 }
 
-static inline void
+/**
+ * Enable logging for a specific logger ID (only).
+ * @param lid The logger ID for which logging should be enabled.
+ */
+inline void
 log_enable_id(enum log_id lid) {
 	loggers[lid].enable = 1;
 }
-static inline void
+
+inline void
 log_disable_id(enum log_id lid) {
 	loggers[lid].enable = 0;
 }
 
-static inline void
+inline void
 log_reset(void) {
 	for (uint64_t idx = 0; idx < sizeof(loggers) / sizeof(struct logger);
 	     idx++) {
 		loggers[idx].enable = 0;
 	}
 }
-static inline void
+
+inline void
 log_enable_name(char *log_name) {
 	enum log_id lid = LOG_ID_MAX;
 	for (uint64_t idx = 0; idx < sizeof(loggers) / sizeof(struct logger);

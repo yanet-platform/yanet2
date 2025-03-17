@@ -1,8 +1,8 @@
 #include <stdio.h>
 
-#include "common/log.h"
 #include "config.h"
 #include "dataplane.h"
+#include "logging/log.h"
 
 int
 main(int argc, char **argv) {
@@ -10,7 +10,8 @@ main(int argc, char **argv) {
 		fprintf(stderr, "%s", "usage: yanet-dataplane <config>");
 		return -1;
 	}
-	log_enable_name("info");
+	// This function initializes and enables logging
+	log_enable_name("debug");
 
 	struct dataplane_config *config;
 	FILE *config_file = fopen(argv[1], "r");
@@ -19,8 +20,8 @@ main(int argc, char **argv) {
 		LOG(ERROR, "invalid config file: %s", argv[1]);
 		return -1;
 	}
+
 	// FIXME: re-enable log level name from config
-	dataplane_log_enable("info");
 
 	struct dataplane dataplane;
 

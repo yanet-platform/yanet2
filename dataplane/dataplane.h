@@ -51,6 +51,3 @@ void
 dataplane_drop_packets(
 	struct dataplane *dataplane, struct packet_list *packets
 );
-
-void
-dataplane_log_enable(char *name);

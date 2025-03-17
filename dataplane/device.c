@@ -3,8 +3,8 @@
 
 #include <pthread.h>
 
-#include "common/log.h"
 #include "dpdk.h"
+#include "logging/log.h"
 
 int
 dataplane_device_start(

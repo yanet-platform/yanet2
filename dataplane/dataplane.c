@@ -16,7 +16,7 @@
 #include "common/exp_array.h"
 
 #include "common/hugepages.h"
-#include "common/log.h"
+#include "logging/log.h"
 
 #include "dataplane/config/zone.h"
 
@@ -585,9 +585,4 @@ dataplane_drop_packets(
 		struct rte_mbuf *mbuf = packet_to_mbuf(drop_packet);
 		rte_pktmbuf_free(mbuf);
 	}
-}
-
-void
-dataplane_log_enable(char *name) {
-	log_enable_name(name);
 }

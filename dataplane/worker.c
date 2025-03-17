@@ -43,7 +43,7 @@
 #include "dataplane/config/zone.h"
 
 #include "common/data_pipe.h"
-#include "common/log.h"
+#include "logging/log.h"
 
 #include <rte_ethdev.h>
 
@@ -346,6 +346,12 @@ dataplane_worker_init(
 	int queue_id,
 	struct dataplane_device_worker_config *config
 ) {
+
+	LOG(DEBUG,
+	    "initialize worker core=%u,numa=%u for port_id=%u",
+	    config->core_id,
+	    config->numa_id,
+	    device->port_id);
 	worker->dataplane = dataplane;
 	worker->node = dataplane->nodes + config->numa_id;
 	worker->device = device;
