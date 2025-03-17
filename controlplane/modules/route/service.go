@@ -85,7 +85,14 @@ func (m *RouteService) BulkUpdate(routes []*rib.Route) error {
 	m.log.Debugw("apply bulk update", zap.Int("size", len(routes)))
 	start := time.Now()
 	m.rib.BulkUpdate(routes)
-	m.flushCh <- flushEvent{}
+
+	// If flushCh already contains events, it will trigger a RIB flush.
+	// Therefore, we can safely skip adding a new event.
+	select {
+	case m.flushCh <- flushEvent{}:
+	default:
+	}
+
 	m.log.Debugw("bulk update completed", zap.Stringer("took", time.Since(start)))
 	return nil
 }
@@ -95,19 +102,22 @@ func (m *RouteService) BulkUpdate(routes []*rib.Route) error {
 func (m *RouteService) periodicRIBFlusher(ctx context.Context, updatePeriod time.Duration) error {
 	m.log.Infow("starting periodic route updates synchronization", zap.Stringer("period", updatePeriod))
 
-	ticker := time.NewTicker(updatePeriod)
-	defer ticker.Stop()
+	timer := time.NewTimer(updatePeriod)
+	defer timer.Stop()
 
 	lastUpdate := m.rib.UpdatedAt()
 	for {
 		var event flushEvent
+
+		// Reset timer explicitly on each iteration
+		timer.Reset(updatePeriod)
 
 		// Wait for a trigger event or context cancellation
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 
-		case <-ticker.C:
+		case <-timer.C:
 			currentUpdate := m.rib.UpdatedAt()
 			if !currentUpdate.After(lastUpdate) {
 				// No changes since last update, skip this cycle
