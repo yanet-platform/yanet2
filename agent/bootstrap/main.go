@@ -62,6 +62,7 @@ func main() {
 
 		agent := C.agent_connect(
 			C.CString(storage),
+			0,
 			C.CString(config.AgentName),
 			C.uint64_t(config.MemoryLimit),
 		)

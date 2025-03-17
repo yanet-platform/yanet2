@@ -33,31 +33,40 @@ yanet_attach(const char *storage_name) {
 	return dp_config;
 }
 
+void
+yanet_detach(struct dp_config *dp_config) {
+	uint32_t mask = (1 << dp_config->numa_idx) - 1;
+	uint32_t numa_pos = __builtin_popcount(dp_config->numa_map & mask);
+	dp_config = (struct dp_config *)((uintptr_t)dp_config -
+					 dp_config->storage_size * numa_pos);
+	munmap(dp_config,
+	       dp_config->storage_size * __builtin_popcount(dp_config->numa_map)
+	);
+}
+
+uint32_t
+yanet_numa_map(struct dp_config *yanet) {
+	return yanet->numa_map;
+}
+
 struct agent *
 agent_connect(
-	const char *storage_name, const char *agent_name, size_t memory_limit
+	const char *storage_name,
+	uint32_t numa_idx,
+	const char *agent_name,
+	size_t memory_limit
 ) {
+	struct dp_config *dp_config = yanet_attach(storage_name);
 
-	int mem_fd = open(storage_name, O_RDWR, S_IRUSR | S_IWUSR);
-	if (mem_fd == -1) {
+	if (!(dp_config->numa_map & (1 << numa_idx))) {
+		yanet_detach(dp_config);
 		return NULL;
 	}
-	struct stat stat;
-	fstat(mem_fd, &stat);
+	uint32_t mask = (1 << numa_idx) - 1;
+	uint32_t numa_pos = __builtin_popcount(dp_config->numa_map & mask);
+	dp_config = (struct dp_config *)((uintptr_t)dp_config +
+					 dp_config->storage_size * numa_pos);
 
-	void *storage =
-		mmap(NULL,
-		     stat.st_size,
-		     PROT_READ | PROT_WRITE,
-		     MAP_SHARED,
-		     mem_fd,
-		     0);
-	close(mem_fd);
-	if (storage == MAP_FAILED) {
-		return NULL;
-	}
-
-	struct dp_config *dp_config = (struct dp_config *)storage;
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 
 	struct agent *new_agent = (struct agent *)memory_balloc(
@@ -143,8 +152,7 @@ agent_connect(
 void
 agent_disconnect(struct agent *agent) {
 	void *storage = ADDR_OF(&agent->dp_config);
-
-	munmap(storage, ADDR_OF(&agent->dp_config)->storage_size);
+	yanet_detach(storage);
 }
 
 int

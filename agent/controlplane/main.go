@@ -190,10 +190,9 @@ func main() {
 
 	for numaIdx := 0; numaIdx < config.NumaCount; numaIdx++ {
 
-		storage := fmt.Sprintf("%s-%d", config.Storage, numaIdx)
-
 		agent := C.agent_connect(
-			C.CString(storage),
+			C.CString(config.Storage),
+			C.uint32_t(numaIdx),
 			C.CString(config.AgentName),
 			C.uint64_t(config.MemoryLimit),
 		)

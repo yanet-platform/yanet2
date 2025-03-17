@@ -1,6 +1,9 @@
 .PHONY: all dataplane controlplane test
 
-all: dataplane controlplane
+all: go-cache-clean dataplane controlplane
+
+go-cache-clean:
+	go clean -cache
 
 dataplane:
 	meson compile -C build

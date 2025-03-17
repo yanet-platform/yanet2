@@ -10,8 +10,14 @@ struct module_data;
 
 struct agent *
 agent_connect(
-	const char *storage_name, const char *agent_name, size_t memory_limit
+	const char *storage_name,
+	uint32_t numa_idx,
+	const char *agent_name,
+	size_t memory_limit
 );
+
+void
+agent_disconnect(struct agent *agent);
 
 int
 agent_update_modules(
@@ -53,6 +59,12 @@ struct dp_config;
 
 struct dp_config *
 yanet_attach(const char *storage_name);
+
+void
+yanet_detach(struct dp_config *yanet);
+
+uint32_t
+yanet_numa_map(struct dp_config *yanet);
 
 struct dp_module_info {
 	char name[80];

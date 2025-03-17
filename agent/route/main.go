@@ -9,7 +9,8 @@ import "C"
 
 func main() {
 	agent := C.agent_connect(
-		C.CString("/dev/hugepages/data-0"),
+		C.CString("/dev/hugepages/yanet"),
+		0,
 		C.CString("route"),
 		16*1024*1024,
 	)

@@ -132,18 +132,20 @@ struct dp_module {
 };
 
 struct dp_config {
-	struct block_allocator block_allocator;
-	struct memory_context memory_context;
+	uint32_t numa_map;
+	uint32_t numa_idx;
 	uint64_t storage_size;
 
-	struct cp_config *cp_config;
-
-	uint64_t module_count;
-	struct dp_module *dp_modules;
+	struct block_allocator block_allocator;
+	struct memory_context memory_context;
 
 	pid_t config_lock;
 
 	struct dp_topology dp_topology;
+	uint64_t module_count;
+	struct dp_module *dp_modules;
+
+	struct cp_config *cp_config;
 };
 
 static inline bool

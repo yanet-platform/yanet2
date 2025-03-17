@@ -25,8 +25,14 @@ struct module_data;
 
 struct agent *
 agent_connect(
-	const char *storage_name, const char *agent_name, size_t memory_limit
+	const char *storage_name,
+	uint32_t numa_idx,
+	const char *agent_name,
+	size_t memory_limit
 );
+
+void
+agent_disconnect(struct agent *agent);
 
 int
 agent_update_modules(

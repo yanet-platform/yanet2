@@ -41,7 +41,7 @@ func NewAgent(path string, name string, size uint) (*Agent, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.agent_connect(cPath, cName, C.ulong(size))
+	ptr, err := C.agent_connect(cPath, 0, cName, C.ulong(size))
 	if ptr == nil {
 		return nil, fmt.Errorf("failed to connect to shared memory %q: %w", path, err)
 	}

@@ -15,8 +15,10 @@ type ControlModule struct {
 
 func main() {
 	yanet := C.yanet_attach(
-		C.CString("/dev/hugepages/yanet-0"),
+		C.CString("/dev/hugepages/yanet"),
 	)
+
+	fmt.Printf("Numa %x\n", C.yanet_numa_map(yanet))
 
 	dp_modules := C.yanet_get_dp_module_list_info(yanet)
 	defer C.dp_module_list_info_free(dp_modules)
@@ -74,4 +76,6 @@ func main() {
 		}
 		fmt.Printf("tx\n")
 	}
+
+	C.yanet_detach(yanet)
 }

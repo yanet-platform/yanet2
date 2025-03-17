@@ -216,8 +216,9 @@ dataplane_load_module(
 
 int
 dataplane_init_storage(
-	const char *storage_name,
-
+	uint32_t numa_map,
+	uint32_t numa_idx,
+	void *storage,
 	size_t dp_memory,
 	size_t cp_memory,
 
@@ -226,52 +227,11 @@ dataplane_init_storage(
 	struct dp_config **res_dp_config,
 	struct cp_config **res_cp_config
 ) {
-	off_t storage_size = dp_memory + cp_memory;
-
-	// FIXME: handle errors
-	int mem_fd =
-		open(storage_name, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR
-		);
-	if (mem_fd < 0)
-		return -1;
-
-	if (ftruncate(mem_fd, storage_size)) {
-		close(mem_fd);
-		return -1;
-	}
-
-	void *storage =
-		mmap(NULL,
-		     storage_size,
-		     PROT_READ | PROT_WRITE,
-		     MAP_SHARED,
-		     mem_fd,
-		     0);
-
-	if (storage == MAP_FAILED) {
-		int err = errno;
-		LOG(ERROR,
-		    "failed to create memory-mapped storage %s: "
-		    "%s",
-		    storage_name,
-		    strerror(errno));
-
-		if (err == ENOMEM && is_file_on_hugepages_fs(mem_fd) == 1) {
-			LOG(ERROR,
-			    "the storage %s is meant to be allocated on "
-			    "HUGETLBFS, but there is no memory. Maybe because "
-			    "either there are no preallocated pages or another "
-			    "process have consumed the memory",
-			    storage_name);
-		}
-
-		close(mem_fd);
-		return -1;
-	}
-
-	close(mem_fd);
-
 	struct dp_config *dp_config = (struct dp_config *)storage;
+
+	dp_config->numa_map = numa_map;
+	dp_config->numa_idx = numa_idx;
+	dp_config->storage_size = dp_memory + cp_memory;
 
 	block_allocator_init(&dp_config->block_allocator);
 	block_allocator_put_arena(
@@ -282,6 +242,8 @@ dataplane_init_storage(
 	memory_context_init(
 		&dp_config->memory_context, "dp", &dp_config->block_allocator
 	);
+
+	dp_config->config_lock = 0;
 
 	dp_config->dp_modules = NULL;
 	dp_config->module_count = 0;
@@ -362,22 +324,64 @@ dataplane_init(
 	dataplane->node_count = config->numa_count;
 	LOG(INFO, "initialize dataplane with %u numa", config->numa_count);
 
+	off_t numa_size = config->dp_memory + config->cp_memory;
+	off_t storage_size = numa_size * config->numa_count;
+	// FIXME: handle errors
+	int mem_fd = open(
+		config->storage, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR
+	);
+	if (mem_fd < 0)
+		return -1;
+
+	if (ftruncate(mem_fd, storage_size)) {
+		close(mem_fd);
+		return -1;
+	}
+
+	void *storage =
+		mmap(NULL,
+		     storage_size,
+		     PROT_READ | PROT_WRITE,
+		     MAP_SHARED,
+		     mem_fd,
+		     0);
+	close(mem_fd);
+
+	if (storage == MAP_FAILED) {
+		int err = errno;
+		LOG(ERROR,
+		    "failed to create memory-mapped storage %s: "
+		    "%s",
+		    config->storage,
+		    strerror(errno));
+
+		if (err == ENOMEM && is_file_on_hugepages_fs(mem_fd) == 1) {
+			LOG(ERROR,
+			    "the storage %s is meant to be allocated on "
+			    "HUGETLBFS, but there is no memory. Maybe because "
+			    "either there are no preallocated pages or another "
+			    "process have consumed the memory",
+			    config->storage);
+		}
+
+		return -1;
+	}
+
+	uint32_t numa_map = 0;
+	for (uint32_t node_idx = 0; node_idx < dataplane->node_count;
+	     ++node_idx) {
+		numa_map |= 1 << node_idx;
+	}
+
 	for (uint32_t node_idx = 0; node_idx < dataplane->node_count;
 	     ++node_idx) {
 		struct dataplane_numa_node *node = dataplane->nodes + node_idx;
 
-		char storage_name[200];
-		snprintf(
-			storage_name,
-			sizeof(storage_name),
-			"%s-%u",
-			config->storage,
-			node_idx
-		);
-
-		LOG(INFO, "initialize storage %s", storage_name);
+		LOG(INFO, "initialize storage for NUMA %u", node_idx);
 		int rc = dataplane_init_storage(
-			storage_name,
+			numa_map,
+			node_idx,
+			storage + numa_size * node_idx,
 			config->dp_memory,
 			config->cp_memory,
 			config->device_count,
@@ -386,8 +390,8 @@ dataplane_init(
 		);
 		if (rc == -1) {
 			LOG(ERROR,
-			    "failed to initialize storage %s",
-			    storage_name);
+			    "failed to initialize storage for NUMA %u",
+			    node_idx);
 			return -1;
 		}
 
