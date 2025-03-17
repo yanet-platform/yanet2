@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
@@ -16,6 +17,18 @@
 #define LOG_RESET "\x1b[0m"
 
 static char *__log_color_reset = LOG_RESET; // NOLINT
+
+// Hack around gcc versions < 12, which don't have `__FILE_NAME__` macro
+// defined.
+#ifndef __FILE_NAME__
+static inline const char *
+__yanet_path_basename(const char *path) {
+	const char *base = strrchr(path, '/');
+	return base ? base + 1 : path;
+}
+
+#define __FILE_NAME__ __yanet_path_basename(__FILE__)
+#endif
 
 /*
  * List of log-ids.
