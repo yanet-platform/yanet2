@@ -345,7 +345,6 @@ dataplane_init(
 		     MAP_SHARED,
 		     mem_fd,
 		     0);
-	close(mem_fd);
 
 	if (storage == MAP_FAILED) {
 		int err = errno;
@@ -364,8 +363,10 @@ dataplane_init(
 			    config->storage);
 		}
 
+		close(mem_fd);
 		return -1;
 	}
+	close(mem_fd);
 
 	uint32_t numa_map = 0;
 	for (uint32_t node_idx = 0; node_idx < dataplane->node_count;
