@@ -33,6 +33,25 @@ func main() {
 	dp_modules := C.yanet_get_dp_module_list_info(dpConfig)
 	defer C.dp_module_list_info_free(dp_modules)
 
+	agents := C.yanet_get_cp_agent_list_info(dpConfig)
+	defer C.cp_agent_list_info_free(agents)
+
+	for agentIdx := C.uint64_t(0); agentIdx < agents.count; agentIdx++ {
+		agent := (*C.struct_cp_agent_info)(nil)
+		C.yanet_get_cp_agent_info(agents, agentIdx, &agent)
+		fmt.Printf("Agent %s\n", C.GoString(&agent.name[0]))
+		for instanceIdx := C.uint64_t(0); instanceIdx < agent.instance_count; instanceIdx++ {
+			instance := (*C.struct_cp_agent_instance_info)(nil)
+			C.yanet_get_cp_agent_instance_info(agent, instanceIdx, &instance)
+			fmt.Printf("  Pid %v Limit %d Allocated %d Freed %d\n",
+				instance.pid,
+				instance.memory_limit,
+				instance.allocated,
+				instance.freed,
+			)
+		}
+	}
+
 	cp_modules := C.yanet_get_cp_module_list_info(dpConfig)
 	defer C.cp_module_list_info_free(cp_modules)
 

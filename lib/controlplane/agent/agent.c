@@ -7,7 +7,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <errno.h>
+
 #include "common/memory.h"
+#include "common/strutils.h"
 
 #include "dataplane/config/zone.h"
 
@@ -90,7 +93,8 @@ agent_attach(
 	struct agent *new_agent = (struct agent *)memory_balloc(
 		&cp_config->memory_context, sizeof(struct agent)
 	);
-	strncpy(new_agent->name, agent_name, 80);
+	strtcpy(new_agent->name, agent_name, 80);
+	new_agent->memory_limit = memory_limit;
 	block_allocator_init(&new_agent->block_allocator);
 	memory_context_init(
 		&new_agent->memory_context,
@@ -121,6 +125,7 @@ agent_attach(
 	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
 	new_agent->pid = getpid();
 
+	cp_config_lock(cp_config);
 	struct cp_agent_registry *old_registry =
 		ADDR_OF(&cp_config->agent_registry);
 	bool found = false;
@@ -163,6 +168,8 @@ agent_attach(
 
 		SET_OFFSET_OF(&cp_config->agent_registry, new_registry);
 	}
+
+	cp_config_unlock(cp_config);
 
 	return new_agent;
 }
@@ -223,10 +230,10 @@ pipeline_config_set_module(
 	const char *type,
 	const char *name
 ) {
-	strncpy(config->modules[index].type,
+	strtcpy(config->modules[index].type,
 		type,
 		sizeof(config->modules[index].type));
-	strncpy(config->modules[index].name,
+	strtcpy(config->modules[index].name,
 		name,
 		sizeof(config->modules[index].name));
 }
@@ -277,7 +284,7 @@ yanet_get_dp_module_list_info(struct dp_config *dp_config) {
 	module_list_info->module_count = dp_config->module_count;
 	for (uint64_t module_idx = 0; module_idx < dp_config->module_count;
 	     ++module_idx) {
-		strncpy(module_list_info->modules[module_idx].name,
+		strtcpy(module_list_info->modules[module_idx].name,
 			modules[module_idx].name,
 			80);
 	}
@@ -318,7 +325,7 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 			ADDR_OF(&(module_registry->modules + module_idx)->data);
 		module_list_info->modules[module_idx].index =
 			module_data->index;
-		strncpy(module_list_info->modules[module_idx].config_name,
+		strtcpy(module_list_info->modules[module_idx].config_name,
 			module_data->name,
 			80);
 	}
@@ -426,22 +433,102 @@ yanet_get_cp_pipeline_module_info(
 	return 0;
 }
 
-struct cp_agent_list_info {};
+int
+yanet_get_cp_agent_instance_info(
+	struct cp_agent_info *agent_info,
+	uint64_t index,
+	struct cp_agent_instance_info **instance_info
+) {
+	if (index >= agent_info->instance_count) {
+		errno = ERANGE;
+		return -1;
+	}
 
-/*
-struct cp_agent_list_info
-yanet_get_agent_list {
-	struct dp_config *dp_config
-} {
+	*instance_info = agent_info->instances + index;
+
+	return 0;
+}
+
+int
+yanet_get_cp_agent_info(
+	struct cp_agent_list_info *agent_list_info,
+	uint64_t index,
+	struct cp_agent_info **agent_info
+) {
+	if (index >= agent_list_info->count) {
+		errno = ERANGE;
+		return -1;
+	}
+	*agent_info = agent_list_info->agents[index];
+	return 0;
+}
+
+void
+cp_agent_list_info_free(struct cp_agent_list_info *agent_list_info) {
+	for (uint64_t agent_idx = 0; agent_idx < agent_list_info->count;
+	     ++agent_idx) {
+		free(agent_list_info->agents[agent_idx]);
+	}
+
+	free(agent_list_info);
+}
+
+struct cp_agent_list_info *
+yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
 
-	struct cp_agent_list_info *agent_list_info = (struct cp_agent_list_info
-*) malloc(sizeof)
+	struct cp_agent_registry *agent_registry =
+		ADDR_OF(&cp_config->agent_registry);
 
+	struct cp_agent_list_info *agent_list_info =
+		(struct cp_agent_list_info *)malloc(
+			sizeof(struct cp_agent_list_info) +
+			sizeof(struct cp_agent_info *) * agent_registry->count
+		);
+	if (agent_list_info == NULL) {
+		goto unlock;
+	}
+	agent_list_info->count = 0;
+
+	for (uint64_t agent_idx = 0; agent_idx < agent_registry->count;
+	     ++agent_idx) {
+		struct agent *agent =
+			ADDR_OF(&agent_registry->agents[agent_idx]);
+		uint64_t instance_count = 1;
+		struct agent *prev_agent = ADDR_OF(&agent->prev);
+		while (prev_agent != NULL) {
+			prev_agent = ADDR_OF(&prev_agent->prev);
+			++instance_count;
+		}
+
+		struct cp_agent_info *agent_info = (struct cp_agent_info *)
+			malloc(sizeof(struct cp_agent_info) +
+			       sizeof(struct cp_agent_instance_info) *
+				       instance_count);
+		if (agent_info == NULL) {
+			cp_agent_list_info_free(agent_list_info);
+			agent_list_info = NULL;
+			goto unlock;
+		}
+
+		strtcpy(agent_info->name, agent->name, 80);
+		agent_info->instance_count = 0;
+		while (agent_info->instance_count < instance_count) {
+			struct cp_agent_instance_info *instance =
+				agent_info->instances +
+				agent_info->instance_count++;
+			instance->pid = agent->pid;
+			instance->memory_limit = agent->memory_limit;
+			instance->allocated = agent->memory_context.balloc_size;
+			instance->freed = agent->memory_context.bfree_size;
+			agent = ADDR_OF(&agent->prev);
+		}
+
+		agent_list_info->agents[agent_list_info->count++] = agent_info;
+	}
 
 unlock:
 	cp_config_unlock(cp_config);
 	return agent_list_info;
 }
-*/

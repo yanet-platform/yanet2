@@ -17,6 +17,7 @@ struct agent {
 	struct dp_config *dp_config;
 	struct cp_config *cp_config;
 	pid_t pid;
+	uint64_t memory_limit;
 	struct agent *prev;
 	char name[80];
 };

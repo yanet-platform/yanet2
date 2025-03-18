@@ -204,3 +204,41 @@ yanet_get_cp_pipeline_module_info(
 	uint64_t index,
 	uint64_t *config_index
 );
+
+struct cp_agent_instance_info {
+	pid_t pid;
+	uint64_t memory_limit;
+	uint64_t allocated;
+	uint64_t freed;
+};
+
+struct cp_agent_info {
+	char name[80];
+	uint64_t instance_count;
+	struct cp_agent_instance_info instances[];
+};
+
+struct cp_agent_list_info {
+	uint64_t count;
+	struct cp_agent_info *agents[];
+};
+
+int
+yanet_get_cp_agent_instance_info(
+	struct cp_agent_info *agent_info,
+	uint64_t index,
+	struct cp_agent_instance_info **instance_info
+);
+
+int
+yanet_get_cp_agent_info(
+	struct cp_agent_list_info *agent_list_info,
+	uint64_t index,
+	struct cp_agent_info **agent_info
+);
+
+void
+cp_agent_list_info_free(struct cp_agent_list_info *agent_list_info);
+
+struct cp_agent_list_info *
+yanet_get_cp_agent_list_info(struct dp_config *dp_config);
