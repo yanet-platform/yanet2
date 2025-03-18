@@ -37,7 +37,7 @@ type RouteModule struct {
 
 // NewRouteModule creates a new RouteModule.
 func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
-	log = log.With(zap.String("module", "routepb.Route"))
+	log = log.With(zap.String("module", "routepb.RouteService"))
 
 	neighbourCache := discovery.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
 	neighbourDiscovery := neigh.NewNeighMonitor(neighbourCache, neigh.WithLog(log))
@@ -72,7 +72,7 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 	server := grpc.NewServer()
 
 	routeService := NewRouteService(agents, rib, log)
-	routepb.RegisterRouteServer(server, routeService)
+	routepb.RegisterRouteServiceServer(server, routeService)
 
 	neighbourService := NewNeighbourService(neighbourCache, log)
 	routepb.RegisterNeighbourServer(server, neighbourService)
@@ -156,7 +156,7 @@ func (m *RouteModule) registerServices(ctx context.Context, listenerAddr net.Add
 	gateway := ynpb.NewGatewayClient(gatewayConn)
 
 	servicesNames := []string{
-		"routepb.Route",
+		"routepb.RouteService",
 		"routepb.Neighbour",
 	}
 

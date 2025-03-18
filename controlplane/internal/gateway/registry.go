@@ -21,7 +21,7 @@ func NewBackendRegistry() *BackendRegistry {
 
 // GetBackend returns a backend for the given service.
 //
-// Service parameter must be in gRPC format, such as "routepb.Route".
+// Service parameter must be in gRPC format, such as "routepb.RouteService".
 func (r *BackendRegistry) GetBackend(service string) (proxy.Backend, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

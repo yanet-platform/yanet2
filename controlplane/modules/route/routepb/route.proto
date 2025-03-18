@@ -4,11 +4,70 @@ package routepb;
 
 option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/route/routepb;routepb";
 
-// Route is a service for routing table management.
-service Route {
+// RouteService is a service for routing table management.
+service RouteService {
+	// ShowRoutes returns all routes in the routing table.
+	rpc ShowRoutes(ShowRoutesRequest) returns (ShowRoutesResponse) {
+	}
+
 	// InsertRoute inserts a route into the routing table.
 	rpc InsertRoute(InsertRouteRequest) returns (InsertRouteResponse) {
 	}
+}
+
+// ShowRoutesRequest contains filters for route listing.
+message ShowRoutesRequest {
+	// Filter to show only IPv4 routes.
+	bool ipv4_only = 1;
+	// Filter to show only IPv6 routes.
+	bool ipv6_only = 2;
+}
+
+// ShowRoutesResponse contains the list of routes.
+message ShowRoutesResponse {
+	// List of routes in the routing table.
+	repeated Route routes = 1;
+}
+
+// Route represents a routing table entry.
+message Route {
+	// Network prefix in CIDR notation.
+	string prefix = 1;
+	// Next hop IP address.
+	string next_hop = 2;
+	// Peer IP address.
+	string peer = 3;
+	// Peer's autonomous system number.
+	uint32 peer_as = 5;
+	// Origin autonomous system number.
+	uint32 origin_as = 6;
+	// Multi-Exit Discriminator value.
+	uint32 med = 7;
+	// Local preference value.
+	uint32 pref = 8;
+	// Route source (e.g., Static, BIRD).
+	RouteSourceID source = 10;
+	// BGP large communities attached to the route.
+	repeated LargeCommunity large_communities = 11;
+	// Indicates if this is the best path.
+	bool is_best = 12;
+}
+
+// LargeCommunity represents a BGP Large Community value.
+message LargeCommunity {
+	// Global administrator identifier.
+	uint32 global_administrator = 1;
+	// First part of local data.
+	uint32 local_data_part1 = 2;
+	// Second part of local data.
+	uint32 local_data_part2 = 3;
+}
+
+// NeighbourState represents the state of a neighbor entry.
+enum RouteSourceID {
+	ROUTE_SOURCE_ID_UNKNOWN = 0;
+	ROUTE_SOURCE_ID_STATIC = 1;
+	ROUTE_SOURCE_ID_BIRD = 2;
 }
 
 // InsertRouteRequest is the request to insert a route.

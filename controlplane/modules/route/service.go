@@ -20,10 +20,12 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/routepb"
 )
 
-var _ bird.RIBUpdater = (*RouteService)(nil)
+var (
+	_ bird.RIBUpdater = (*RouteService)(nil)
+)
 
 type RouteService struct {
-	routepb.UnimplementedRouteServer
+	routepb.UnimplementedRouteServiceServer
 
 	mu      sync.Mutex
 	agents  []*ffi.Agent
@@ -46,6 +48,61 @@ func NewRouteService(agents []*ffi.Agent, rib *rib.RIB, log *zap.SugaredLogger) 
 		rib:     rib,
 		log:     log,
 	}
+}
+
+func (m *RouteService) ShowRoutes(
+	ctx context.Context,
+	request *routepb.ShowRoutesRequest,
+) (*routepb.ShowRoutesResponse, error) {
+	routes := m.rib.DumpRoutes()
+	response := &routepb.ShowRoutesResponse{}
+
+	for prefix, routesList := range routes {
+		if len(routesList.Routes) == 0 {
+			continue
+		}
+
+		// Apply IPv4/IPv6 filters if specified.
+		if request.Ipv4Only && !prefix.Addr().Is4() {
+			continue
+		}
+		if request.Ipv6Only && !prefix.Addr().Is6() {
+			continue
+		}
+
+		for idx, r := range routesList.Routes {
+			isBest := idx == 0
+
+			communities := make([]*routepb.LargeCommunity, 0)
+			for c := r.LargeCommunities; c != nil; c = c.Next {
+				communities = append(communities, &routepb.LargeCommunity{
+					GlobalAdministrator: c.GA,
+					LocalDataPart1:      c.Data1,
+					LocalDataPart2:      c.Data2,
+				})
+			}
+
+			peer := ""
+			if r.Peer.IsValid() {
+				peer = r.Peer.String()
+			}
+
+			response.Routes = append(response.Routes, &routepb.Route{
+				Prefix:           prefix.String(),
+				NextHop:          r.NextHop.String(),
+				Peer:             peer,
+				PeerAs:           r.PeerAS,
+				OriginAs:         r.OriginAS,
+				Med:              r.Med,
+				Pref:             r.Pref,
+				Source:           routepb.RouteSourceID(r.SourceID),
+				LargeCommunities: communities,
+				IsBest:           isBest,
+			})
+		}
+	}
+
+	return response, nil
 }
 
 func (m *RouteService) InsertRoute(
