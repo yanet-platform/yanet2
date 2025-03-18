@@ -2,25 +2,25 @@
 #include <signal.h>
 #include <unistd.h>
 
-#include <string.h>
-#include <stdio.h>
-#include <stdint.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <errno.h>
 #include <ctype.h>
+#include <errno.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/queue.h>
 
-#include <cmdline_rdline.h>
-#include <cmdline_parse.h>
-#include <cmdline_socket.h>
 #include <cmdline.h>
+#include <cmdline_parse.h>
+#include <cmdline_rdline.h>
+#include <cmdline_socket.h>
 extern cmdline_parse_ctx_t main_ctx[];
 
-#include <rte_memory.h>
-#include <rte_eal.h>
 #include <rte_cycles.h>
+#include <rte_eal.h>
 #include <rte_log.h>
+#include <rte_memory.h>
 #include <rte_string_fns.h>
 #ifdef RTE_LIB_TIMER
 #include <rte_timer.h>
@@ -30,17 +30,18 @@ extern cmdline_parse_ctx_t main_ctx[];
 
 #define RTE_LOGTYPE_APP RTE_LOGTYPE_USER7
 
-#define FOR_EACH_SUITE_TESTCASE(iter, suite, case)			\
-	for (iter = 0, case = suite->unit_test_cases[0];		\
-		suite->unit_test_cases[iter].testcase ||		\
-		suite->unit_test_cases[iter].testcase_with_data;	\
-		iter++, case = suite->unit_test_cases[iter])
+#define FOR_EACH_SUITE_TESTCASE(iter, suite, case)                             \
+	for (iter = 0, case = suite->unit_test_cases[0];                       \
+	     suite->unit_test_cases[iter].testcase ||                          \
+	     suite->unit_test_cases[iter].testcase_with_data;                  \
+	     iter++, case = suite->unit_test_cases[iter])
 
-#define FOR_EACH_SUITE_TESTSUITE(iter, suite, sub_ts)			\
-	for (iter = 0, sub_ts = suite->unit_test_suites ?		\
-		suite->unit_test_suites[0]:NULL; sub_ts &&		\
-		suite->unit_test_suites[iter]->suite_name != NULL;	\
-		iter++, sub_ts = suite->unit_test_suites[iter])
+#define FOR_EACH_SUITE_TESTSUITE(iter, suite, sub_ts)                          \
+	for (iter = 0,                                                         \
+	    sub_ts = suite->unit_test_suites ? suite->unit_test_suites[0]      \
+					     : NULL;                           \
+	     sub_ts && suite->unit_test_suites[iter]->suite_name != NULL;      \
+	     iter++, sub_ts = suite->unit_test_suites[iter])
 
 const char *prgname; /* to be set to argv[0] */
 
@@ -49,21 +50,21 @@ int last_test_result;
 #define MAX_EXTRA_ARGS 32
 
 // ugly, standart non compatible hack for sigsev
-void handler(int sig) {
-  void *array[10];
-  size_t size;
+void
+handler(int sig) {
+	void *array[10];
+	size_t size;
 
-  size = backtrace(array, 10);
+	size = backtrace(array, 10);
 
-  fprintf(stderr, "Error: signal %d:\n", sig);
-  backtrace_symbols_fd(array, size, STDERR_FILENO);
-  exit(1);
+	fprintf(stderr, "Error: signal %d:\n", sig);
+	backtrace_symbols_fd(array, size, STDERR_FILENO);
+	exit(1);
 }
 
 int
-main(int argc, char **argv)
-{
-	signal(SIGSEGV, handler);   // install our handler
+main(int argc, char **argv) {
+	signal(SIGSEGV, handler); // install our handler
 	struct cmdline *cl;
 	char *tests[argc]; /* store an array of tests to run */
 	int test_count = 0;
@@ -79,10 +80,17 @@ main(int argc, char **argv)
 		int eargc;
 		int i;
 
-		RTE_LOG(INFO, APP, "Using additional DPDK_TEST_PARAMS: '%s'\n",
-				extra_args);
-		eargc = rte_strsplit(extra_args, strlen(extra_args),
-				eargv, MAX_EXTRA_ARGS, ' ');
+		RTE_LOG(INFO,
+			APP,
+			"Using additional DPDK_TEST_PARAMS: '%s'\n",
+			extra_args);
+		eargc = rte_strsplit(
+			extra_args,
+			strlen(extra_args),
+			eargv,
+			MAX_EXTRA_ARGS,
+			' '
+		);
 
 		/* merge argc/argv and the environment args */
 		all_argc = argc + eargc;
@@ -129,9 +137,9 @@ main(int argc, char **argv)
 #ifdef RTE_LIBEAL_USE_HPET
 	if (rte_eal_hpet_init(1) < 0)
 #endif
-		RTE_LOG(INFO, APP,
-				"HPET is not enabled, using TSC as default timer\n");
-
+		RTE_LOG(INFO,
+			APP,
+			"HPET is not enabled, using TSC as default timer\n");
 
 	char *dpdk_test = getenv("YANET_TEST");
 
@@ -154,8 +162,13 @@ main(int argc, char **argv)
 				goto out;
 			}
 			dpdk_test_skip = dpdk_test_skip_cp;
-			split_ret = rte_strsplit(dpdk_test_skip, strlen(dpdk_test_skip),
-					skip_tests, RTE_DIM(skip_tests), ',');
+			split_ret = rte_strsplit(
+				dpdk_test_skip,
+				strlen(dpdk_test_skip),
+				skip_tests,
+				RTE_DIM(skip_tests),
+				','
+			);
 			if (split_ret > 0)
 				n_skip_tests = split_ret;
 			else
@@ -172,7 +185,10 @@ main(int argc, char **argv)
 			/* check if test is to be skipped */
 			for (size_t j = 0; j < n_skip_tests; j++) {
 				if (strcmp(tests[i], skip_tests[j]) == 0) {
-					fprintf(stderr, "Skipping %s [YANET_TEST_SKIP]\n", tests[i]);
+					fprintf(stderr,
+						"Skipping %s "
+						"[YANET_TEST_SKIP]\n",
+						tests[i]);
 					ret = TEST_SKIPPED;
 					goto end_of_cmd;
 				}
@@ -180,7 +196,8 @@ main(int argc, char **argv)
 
 			snprintf(buf, sizeof(buf), "%s\n", tests[i]);
 			if (cmdline_parse_check(cl, buf) < 0) {
-				printf("Error: invalid test command: '%s'\n", tests[i]);
+				printf("Error: invalid test command: '%s'\n",
+				       tests[i]);
 				ret = -1;
 			} else if (cmdline_in(cl, buf, strlen(buf)) < 0) {
 				printf("error on cmdline input\n");
@@ -188,7 +205,7 @@ main(int argc, char **argv)
 			} else
 				ret = last_test_result;
 
-end_of_cmd:
+		end_of_cmd:
 			if (ret != 0 && ret != TEST_SKIPPED)
 				break;
 		}
@@ -219,18 +236,25 @@ out:
 }
 
 static void
-unit_test_suite_count_tcs_on_setup_fail(struct unit_test_suite *suite,
-		int test_success, unsigned int *sub_ts_failed,
-		unsigned int *sub_ts_skipped, unsigned int *sub_ts_total)
-{
+unit_test_suite_count_tcs_on_setup_fail(
+	struct unit_test_suite *suite,
+	int test_success,
+	unsigned int *sub_ts_failed,
+	unsigned int *sub_ts_skipped,
+	unsigned int *sub_ts_total
+) {
 	struct unit_test_case tc;
 	struct unit_test_suite *ts;
 	int i;
 
 	FOR_EACH_SUITE_TESTSUITE(i, suite, ts) {
 		unit_test_suite_count_tcs_on_setup_fail(
-			ts, test_success, sub_ts_failed,
-			sub_ts_skipped, sub_ts_total);
+			ts,
+			test_success,
+			sub_ts_failed,
+			sub_ts_skipped,
+			sub_ts_total
+		);
 		suite->total += ts->total;
 		suite->failed += ts->failed;
 		suite->skipped += ts->skipped;
@@ -250,13 +274,12 @@ unit_test_suite_count_tcs_on_setup_fail(struct unit_test_suite *suite,
 }
 
 static void
-unit_test_suite_reset_counts(struct unit_test_suite *suite)
-{
+unit_test_suite_reset_counts(struct unit_test_suite *suite) {
 	struct unit_test_suite *ts;
 	int i;
 
 	FOR_EACH_SUITE_TESTSUITE(i, suite, ts)
-		unit_test_suite_reset_counts(ts);
+	unit_test_suite_reset_counts(ts);
 	suite->total = 0;
 	suite->executed = 0;
 	suite->succeeded = 0;
@@ -266,8 +289,7 @@ unit_test_suite_reset_counts(struct unit_test_suite *suite)
 }
 
 int
-unit_test_suite_runner(struct unit_test_suite *suite)
-{
+unit_test_suite_runner(struct unit_test_suite *suite) {
 	int test_success, i, ret;
 	const char *status;
 	struct unit_test_case tc;
@@ -278,7 +300,9 @@ unit_test_suite_runner(struct unit_test_suite *suite)
 	unit_test_suite_reset_counts(suite);
 
 	if (suite->suite_name) {
-		printf(" + ------------------------------------------------------- +\n");
+		printf(" + "
+		       "-------------------------------------------------------"
+		       " +\n");
 		printf(" + Test Suite : %s\n", suite->suite_name);
 	}
 
@@ -289,14 +313,19 @@ unit_test_suite_runner(struct unit_test_suite *suite)
 			 * setup did not pass, so count all enabled tests and
 			 * mark them as failed/skipped
 			 */
-			unit_test_suite_count_tcs_on_setup_fail(suite,
-					test_success, &sub_ts_failed,
-					&sub_ts_skipped, &sub_ts_total);
+			unit_test_suite_count_tcs_on_setup_fail(
+				suite,
+				test_success,
+				&sub_ts_failed,
+				&sub_ts_skipped,
+				&sub_ts_total
+			);
 			goto suite_summary;
 		}
 	}
 
-	printf(" + ------------------------------------------------------- +\n");
+	printf(" + ------------------------------------------------------- +\n"
+	);
 
 	FOR_EACH_SUITE_TESTCASE(suite->total, suite, tc) {
 		if (!tc.enabled) {
@@ -352,8 +381,10 @@ unit_test_suite_runner(struct unit_test_suite *suite)
 		else
 			status = "failed";
 
-		printf(" + TestCase [%2d] : %s %s\n", suite->total,
-				tc.name, status);
+		printf(" + TestCase [%2d] : %s %s\n",
+		       suite->total,
+		       tc.name,
+		       status);
 	}
 	FOR_EACH_SUITE_TESTSUITE(i, suite, ts) {
 		ret = unit_test_suite_runner(ts);
@@ -380,23 +411,36 @@ unit_test_suite_runner(struct unit_test_suite *suite)
 	goto suite_summary;
 
 suite_summary:
-	printf(" + ------------------------------------------------------- +\n");
+	printf(" + ------------------------------------------------------- +\n"
+	);
 	printf(" + Test Suite Summary : %s\n", suite->suite_name);
-	printf(" + ------------------------------------------------------- +\n");
+	printf(" + ------------------------------------------------------- +\n"
+	);
 
 	FOR_EACH_SUITE_TESTSUITE(i, suite, ts)
-		printf(" + %s : %d/%d passed, %d/%d skipped, "
-			"%d/%d failed, %d/%d unsupported\n", ts->suite_name,
-			ts->succeeded, ts->total, ts->skipped, ts->total,
-			ts->failed, ts->total, ts->unsupported, ts->total);
+	printf(" + %s : %d/%d passed, %d/%d skipped, "
+	       "%d/%d failed, %d/%d unsupported\n",
+	       ts->suite_name,
+	       ts->succeeded,
+	       ts->total,
+	       ts->skipped,
+	       ts->total,
+	       ts->failed,
+	       ts->total,
+	       ts->unsupported,
+	       ts->total);
 
 	if (suite->unit_test_suites) {
-		printf(" + ------------------------------------------------------- +\n");
+		printf(" + "
+		       "-------------------------------------------------------"
+		       " +\n");
 		printf(" + Sub Testsuites Total :     %2d\n", sub_ts_total);
 		printf(" + Sub Testsuites Skipped :   %2d\n", sub_ts_skipped);
 		printf(" + Sub Testsuites Passed :    %2d\n", sub_ts_succeeded);
 		printf(" + Sub Testsuites Failed :    %2d\n", sub_ts_failed);
-		printf(" + ------------------------------------------------------- +\n");
+		printf(" + "
+		       "-------------------------------------------------------"
+		       " +\n");
 	}
 
 	printf(" + Tests Total :       %2d\n", suite->total);
@@ -405,7 +449,8 @@ suite_summary:
 	printf(" + Tests Unsupported:  %2d\n", suite->unsupported);
 	printf(" + Tests Passed :      %2d\n", suite->succeeded);
 	printf(" + Tests Failed :      %2d\n", suite->failed);
-	printf(" + ------------------------------------------------------- +\n");
+	printf(" + ------------------------------------------------------- +\n"
+	);
 
 	last_test_result = suite->failed;
 
