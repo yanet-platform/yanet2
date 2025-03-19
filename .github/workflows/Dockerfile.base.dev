@@ -8,3 +8,4 @@ RUN apt install -y python3-pyelftools libnuma-dev libpcap-dev git
 RUN apt install -y gdb lldb just
 RUN apt install -y golang-go
 RUN apt install -y lcov
+RUN apt install -y clang-format

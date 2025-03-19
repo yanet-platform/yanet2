@@ -38,31 +38,55 @@ RTE_LOG_REGISTER_DEFAULT(nat64test_logtype, INFO);
 #endif
 #define RTE_LOGTYPE_NAT64_TEST nat64test_logtype
 
+/**
+ * @brief Parameters for NAT64 unit testing
+ *
+ * Structure contains all necessary parameters for executing NAT64 tests,
+ * including packet buffer pool, configuration and NAT64 module.
+ */
 struct nat64_unittest_params {
-	struct packet_front packet_front;
-	struct module *module;
-	struct module_config *module_config;
+	struct packet_front packet_front; /**< Packet front for testing */
+	struct module *module; /**< Pointer to the module being tested */
+	struct module_config *module_config; /**< Module configuration */
 
-	struct rte_mempool *mbuf_pool;
-	uint8_t *config;
-	uint32_t config_size;
+	struct rte_mempool *mbuf_pool; /**< Packet buffer pool */
+	uint8_t *config;	       /**< Pointer to configuration data */
+	uint32_t config_size;	       /**< Size of configuration data */
 };
 
+/**
+ * @brief Global test parameters instance
+ *
+ * Static instance of test parameters used across all test cases.
+ * Initialized with NULL mbuf pool that gets created during test setup.
+ */
 static struct nat64_unittest_params test_params = {
-
 	.mbuf_pool = NULL,
 };
 
+/**
+ * @brief External IPv4 address used for testing
+ *
+ * IPv4 address from TEST-NET-1 range (192.0.2.0/24) per RFC 5737
+ * Used as source/destination address in test packets
+ */
 static uint32_t outer_ip4 = RTE_BE32(RTE_IPV4(192, 0, 2, 34));
 
-// 198.51.100.0/24 - TEST-NET-2, rfc5737
-// 2001:DB8::/32 - rfc3849
+/**
+ * @brief NAT64 address mapping configuration
+ *
+ * Contains IPv4-IPv6 address mappings for testing:
+ * - IPv4 addresses from TEST-NET-2 range (198.51.100.0/24) per RFC 5737
+ * - IPv6 addresses from Documentation prefix (2001:DB8::/32) per RFC 3849
+ *
+ * Used to configure NAT64 module with test address mappings
+ */
 static struct {
-	uint32_t count;
+	uint32_t count; /**< Number of address mappings */
 	struct {
-		uint32_t ip4;
-		uint32_t ip6[4];
-	} mapping[8]; // Увеличиваем размер массива на 4 элемента
+		uint32_t ip4;	 /**< IPv4 address in network byte order */
+		uint32_t ip6[4]; /**< IPv6 address as 4 32-bit segments */
+	} mapping[8];		 /**< Array of address mappings */
 } __rte_packed config_data =
 	{.count = 8,
 	 .mapping = {
@@ -100,6 +124,16 @@ static struct {
 		 },
 	 }};
 
+/**
+ * @brief Set up test environment before test execution
+ *
+ * Initializes test environment by:
+ * 1. Setting up logging level based on debug configuration
+ * 2. Creating DPDK mbuf pool for packet allocation
+ * 3. Initializing packet front for testing
+ *
+ * @return TEST_SUCCESS on successful setup, error code otherwise
+ */
 static int
 test_setup(void) {
 #ifdef DEBUG_NAT64
@@ -127,6 +161,16 @@ test_setup(void) {
 	return TEST_SUCCESS;
 }
 
+/**
+ * @brief Test NAT64 module configuration handling
+ *
+ * Tests that the module's config_handler correctly:
+ * 1. Processes configuration data
+ * 2. Creates module configuration structure
+ * 3. Returns non-NULL configuration
+ *
+ * @return TEST_SUCCESS on successful configuration, error code otherwise
+ */
 static int
 test_module_config_handler(void) {
 	test_params.module->config_handler(
@@ -141,6 +185,16 @@ test_module_config_handler(void) {
 	return TEST_SUCCESS;
 }
 
+/**
+ * @brief Test NAT64 module creation
+ *
+ * Tests that new_module_nat64() correctly:
+ * 1. Creates new NAT64 module instance
+ * 2. Returns non-NULL module pointer
+ * 3. Initializes module structure properly
+ *
+ * @return TEST_SUCCESS on successful module creation, error code otherwise
+ */
 static int
 test_new_module_nat64(void) {
 	test_params.module = new_module_nat64();
@@ -148,22 +202,48 @@ test_new_module_nat64(void) {
 	return TEST_SUCCESS;
 }
 
+/**
+ * @brief Universal packet structure for NAT64 testing
+ *
+ * Provides a unified representation of network packets for testing:
+ * - Supports both IPv4 and IPv6 packets
+ * - Handles multiple transport protocols (UDP, TCP, ICMP, ICMPv6)
+ * - Includes payload data handling
+ * - Used for both input packets and expected output verification
+ */
 struct upkt {
-	struct rte_ether_hdr eth;
+	struct rte_ether_hdr eth; /**< Ethernet header */
 	union {
-		struct rte_ipv4_hdr ipv4;
-		struct rte_ipv6_hdr ipv6;
-	} ip;
+		struct rte_ipv4_hdr
+			ipv4; /**< IPv4 header when eth.ether_type is IPv4 */
+		struct rte_ipv6_hdr
+			ipv6; /**< IPv6 header when eth.ether_type is IPv6 */
+	} ip;		      /**< IP header union for v4/v6 */
 	union {
-		struct rte_udp_hdr udp;
-		struct rte_tcp_hdr tcp;
-		struct icmphdr icmp;
-		struct icmp6_hdr icmp6;
-	} proto;
-	uint16_t data_len;
-	void *data;
+		struct rte_udp_hdr
+			udp; /**< UDP header when ip.proto is IPPROTO_UDP */
+		struct rte_tcp_hdr
+			tcp; /**< TCP header when ip.proto is IPPROTO_TCP */
+		struct icmphdr
+			icmp; /**< ICMP header when ip.proto is IPPROTO_ICMP */
+		struct icmp6_hdr icmp6; /**< ICMPv6 header when ip.proto is
+					   IPPROTO_ICMPV6 */
+	} proto;			/**< Protocol header union */
+	uint16_t data_len;		/**< Length of payload data */
+	void *data;			/**< Pointer to payload data */
 };
 
+/**
+ * @brief Print universal packet structure contents
+ *
+ * Prints detailed information about packet headers including:
+ * - Ethernet header
+ * - IP header (v4 or v6)
+ * - Protocol header (UDP, TCP, ICMP, ICMPv6)
+ * - Data length
+ *
+ * @param pkt Pointer to the universal packet structure to print
+ */
 void
 print_upkt(struct upkt *pkt) {
 	if (!pkt) {
@@ -457,6 +537,19 @@ print_upkt(struct upkt *pkt) {
 	RTE_LOG(INFO, NAT64_TEST, "Data Length: %d\n", pkt->data_len);
 }
 
+/**
+ * @brief Print contents of an rte_mbuf packet
+ *
+ * Prints detailed information about DPDK mbuf packet contents including:
+ * - Ethernet header fields
+ * - IP header fields (v4 or v6)
+ * - Protocol header fields (UDP, TCP, ICMP, ICMPv6)
+ * - Packet data length
+ *
+ * Used for debugging and verifying packet translations.
+ *
+ * @param mbuf Pointer to the DPDK mbuf structure to print
+ */
 void
 print_rte_mbuf(struct rte_mbuf *mbuf) {
 	if (!mbuf) {
@@ -769,6 +862,20 @@ print_rte_mbuf(struct rte_mbuf *mbuf) {
 	);
 }
 
+/**
+ * @brief Compare Ethernet headers between DPDK mbuf and universal packet
+ *
+ * Performs detailed comparison of Ethernet header fields:
+ * - Destination MAC address
+ * - Source MAC address
+ * - Ethernet type
+ *
+ * Logs any differences found between the headers for debugging purposes.
+ *
+ * @param eth_hdr Pointer to DPDK Ethernet header
+ * @param upkt Pointer to universal packet structure
+ * @return 0 if headers match, -1 if any differences found
+ */
 static inline int
 compare_ethernet_headers(struct rte_ether_hdr *eth_hdr, struct upkt *upkt) {
 	int result = 0;
@@ -817,6 +924,26 @@ compare_ethernet_headers(struct rte_ether_hdr *eth_hdr, struct upkt *upkt) {
 	return result;
 }
 
+/**
+ * @brief Compare IPv4 headers between DPDK mbuf and universal packet
+ *
+ * Performs detailed comparison of IPv4 header fields including:
+ * - Version and IHL
+ * - Type of Service
+ * - Total Length
+ * - Packet ID
+ * - Fragment Offset
+ * - Time to Live
+ * - Protocol
+ * - Header Checksum
+ * - Source and Destination Addresses
+ *
+ * Logs any differences found between the headers for debugging purposes.
+ *
+ * @param ipv4_hdr Pointer to DPDK IPv4 header
+ * @param upkt Pointer to universal packet structure
+ * @return 0 if headers match, -1 if any differences found
+ */
 static inline int
 compare_ipv4_headers(struct rte_ipv4_hdr *ipv4_hdr, struct upkt *upkt) {
 	int result = 0;
@@ -944,6 +1071,24 @@ compare_ipv4_headers(struct rte_ipv4_hdr *ipv4_hdr, struct upkt *upkt) {
 
 	return result;
 }
+/**
+ * @brief Compare IPv6 headers between DPDK mbuf and universal packet
+ *
+ * Performs detailed comparison of IPv6 header fields including:
+ * - Version
+ * - Traffic Class
+ * - Flow Label
+ * - Payload Length
+ * - Next Header
+ * - Hop Limit
+ * - Source and Destination Addresses
+ *
+ * Logs any differences found between the headers for debugging purposes.
+ *
+ * @param ipv6_hdr Pointer to DPDK IPv6 header
+ * @param upkt Pointer to universal packet structure
+ * @return 0 if headers match, -1 if any differences found
+ */
 static inline int
 compare_ipv6_headers(struct rte_ipv6_hdr *ipv6_hdr, struct upkt *upkt) {
 	int result = 0;
@@ -1025,6 +1170,21 @@ compare_ipv6_headers(struct rte_ipv6_hdr *ipv6_hdr, struct upkt *upkt) {
 	return result;
 }
 
+/**
+ * @brief Compare UDP headers between DPDK mbuf and universal packet
+ *
+ * Performs detailed comparison of UDP header fields including:
+ * - Source Port
+ * - Destination Port
+ * - Datagram Length
+ * - Checksum
+ *
+ * Logs any differences found between the headers for debugging purposes.
+ *
+ * @param udp_hdr Pointer to DPDK UDP header
+ * @param upkt Pointer to universal packet structure
+ * @return 0 if headers match, -1 if any differences found
+ */
 static inline int
 compare_udp_headers(struct rte_udp_hdr *udp_hdr, struct upkt *upkt) {
 	int result = 0;
@@ -1078,6 +1238,26 @@ compare_udp_headers(struct rte_udp_hdr *udp_hdr, struct upkt *upkt) {
 	return result;
 }
 
+/**
+ * @brief Compare TCP headers between DPDK mbuf and universal packet
+ *
+ * Performs detailed comparison of TCP header fields including:
+ * - Source Port
+ * - Destination Port
+ * - Sequence Number
+ * - Acknowledgment Number
+ * - Data Offset
+ * - TCP Flags
+ * - Window Size
+ * - Checksum
+ * - Urgent Pointer
+ *
+ * Logs any differences found between the headers for debugging purposes.
+ *
+ * @param tcp_hdr Pointer to DPDK TCP header
+ * @param upkt Pointer to universal packet structure
+ * @return 0 if headers match, -1 if any differences found
+ */
 static inline int
 compare_tcp_headers(struct rte_tcp_hdr *tcp_hdr, struct upkt *upkt) {
 	int result = 0;
@@ -1187,6 +1367,22 @@ compare_tcp_headers(struct rte_tcp_hdr *tcp_hdr, struct upkt *upkt) {
 	return result;
 }
 
+/**
+ * @brief Compare ICMP headers between DPDK mbuf and universal packet
+ *
+ * Performs detailed comparison of ICMP header fields including:
+ * - Type
+ * - Code
+ * - Gateway/Data field
+ * - Checksum
+ *
+ * Logs any differences found between the headers for debugging purposes.
+ * Used for verifying ICMP packet translations in NAT64 testing.
+ *
+ * @param icmp_hdr Pointer to ICMP header
+ * @param upkt Pointer to universal packet structure
+ * @return 0 if headers match, -1 if any differences found
+ */
 static inline int
 compare_icmp_headers(struct icmphdr *icmp_hdr, struct upkt *upkt) {
 	int result = 0;
@@ -1236,6 +1432,22 @@ compare_icmp_headers(struct icmphdr *icmp_hdr, struct upkt *upkt) {
 	return result;
 }
 
+/**
+ * @brief Compare ICMPv6 headers between DPDK mbuf and universal packet
+ *
+ * Performs detailed comparison of ICMPv6 header fields including:
+ * - Type
+ * - Code
+ * - Checksum
+ * - Parameter Pointer (for Parameter Problem messages)
+ *
+ * Logs any differences found between the headers for debugging purposes.
+ * Used for verifying ICMPv6 packet translations in NAT64 testing.
+ *
+ * @param icmp6_hdr Pointer to ICMPv6 header
+ * @param upkt Pointer to universal packet structure
+ * @return 0 if headers match, -1 if any differences found
+ */
 static inline int
 compare_icmp6_headers(struct icmp6_hdr *icmp6_hdr, struct upkt *upkt) {
 	int result = 0;
@@ -1291,6 +1503,24 @@ compare_icmp6_headers(struct icmp6_hdr *icmp6_hdr, struct upkt *upkt) {
 	return result;
 }
 
+/**
+ * @brief Compare and print differences between universal packet and DPDK mbuf
+ *
+ * Performs a comprehensive comparison between a universal packet structure and
+ * a DPDK mbuf, including:
+ * - Ethernet header fields
+ * - IPv4/IPv6 header fields
+ * - Protocol-specific headers (UDP, TCP, ICMP, ICMPv6)
+ * - Packet data content and length
+ *
+ * For each difference found, detailed logging is performed to help with
+ * debugging. This function is crucial for verifying packet translations in
+ * NAT64 testing.
+ *
+ * @param upkt Pointer to universal packet structure
+ * @param mbuf Pointer to DPDK mbuf structure
+ * @return 0 if packets match completely, -1 if any differences found
+ */
 static inline int
 print_diff_upkt_and_rte_mbuf(struct upkt *upkt, struct rte_mbuf *mbuf) {
 	if (!upkt || !mbuf) {
@@ -1393,28 +1623,41 @@ print_diff_upkt_and_rte_mbuf(struct upkt *upkt, struct rte_mbuf *mbuf) {
 	return result;
 }
 
-// ICMP test case structure
-struct icmp_test_case {
-	uint8_t from_type;	 // Source ICMP type
-	uint8_t from_code;	 // Source ICMP code
-	uint8_t to_type;	 // Expected translated type
-	uint8_t to_code;	 // Expected translated code
-	bool v6_to_v4;		 // Direction: true for v6->v4, false for v4->v6
-	const char *description; // Test case description
-	bool should_drop;	 // Whether packet should be dropped
-	uint32_t mtu;		 // For PTB tests, 0 if not applicable
-	bool has_embedded;	 // Whether to include embedded packet
-};
-
+/**
+ * @brief Test case structure for NAT64 packet translation tests
+ *
+ * Contains all information needed for a single NAT64 translation test:
+ * - Input packet to be translated
+ * - Expected output packet after translation
+ * - Test case name for identification
+ * - Drop flag for cases where packet should be dropped
+ *
+ * Used to build linked list of test cases for comprehensive testing
+ * of NAT64 translation scenarios.
+ */
 struct test_case {
-	struct test_case *next;
-	char *name;
-	struct upkt pkt;
-	struct upkt pkt_expected;
-	bool should_drop; // Whether packet should be dropped
+	struct test_case *next;	  /**< Pointer to next test case in list */
+	char *name;		  /**< Test case name/description */
+	struct upkt pkt;	  /**< Input packet for translation */
+	struct upkt pkt_expected; /**< Expected output after translation */
 };
 
-// Функция для добавления тестового случая
+/**
+ * @brief Add a new test case to the test suite
+ *
+ * Creates and initializes a new test case with:
+ * - Input packet to be translated
+ * - Expected output packet after translation
+ * - Test case name for identification
+ *
+ * Adds the test case to the linked list of test cases.
+ * Used to build up the test suite for NAT64 packet translation testing.
+ *
+ * @param head Pointer to head of test case linked list
+ * @param pkt Input packet for translation
+ * @param pkt_expected Expected output packet after translation
+ * @param name Test case name/description
+ */
 static inline void
 append_test_case(
 	struct test_case **head,
@@ -1442,6 +1685,24 @@ append_test_case(
 	}
 }
 
+/**
+ * @brief Calculate UDP/TCP checksum for IPv4 packets
+ *
+ * Calculates checksum according to RFC 768/793:
+ * 1. Computes checksum over L4 header
+ * 2. Adds checksum of payload data if present
+ * 3. Adds IPv4 pseudo-header checksum
+ * 4. Handles special case for UDP zero checksum
+ *
+ * Used to verify correct checksum calculation during NAT64 translation.
+ *
+ * @param ipv4_hdr Pointer to IPv4 header for pseudo-header
+ * @param l4_hdr Pointer to UDP/TCP header
+ * @param l4_len Length of UDP/TCP header
+ * @param payload Pointer to payload data
+ * @param payload_len Length of payload data
+ * @return Calculated checksum in network byte order
+ */
 static inline uint16_t
 upkt_ipv4_updtcp_checksum(
 	struct rte_ipv4_hdr *ipv4_hdr,
@@ -1472,6 +1733,24 @@ upkt_ipv4_updtcp_checksum(
 	return (uint16_t)cksum;
 }
 
+/**
+ * @brief Calculate UDP/TCP checksum for IPv6 packets
+ *
+ * Calculates checksum according to RFC 2460:
+ * 1. Computes checksum over L4 header
+ * 2. Adds checksum of payload data if present
+ * 3. Adds IPv6 pseudo-header checksum
+ * 4. Handles special case for UDP zero checksum
+ *
+ * Used to verify correct checksum calculation during NAT64 translation.
+ *
+ * @param ipv6_hdr Pointer to IPv6 header for pseudo-header
+ * @param l4_hdr Pointer to UDP/TCP header
+ * @param l4_len Length of UDP/TCP header
+ * @param payload Pointer to payload data
+ * @param payload_len Length of payload data
+ * @return Calculated checksum in network byte order
+ */
 static inline uint16_t
 upkt_ipv6_updtcp_checksum(
 	struct rte_ipv6_hdr *ipv6_hdr,
@@ -1505,6 +1784,22 @@ upkt_ipv6_updtcp_checksum(
 	return (uint16_t)cksum;
 }
 
+/**
+ * @brief Calculate and update checksums for packet headers
+ *
+ * For IPv4 packets:
+ * - Recalculates IPv4 header checksum
+ * - For UDP: Updates checksum including IPv4 pseudo-header (RFC 768)
+ * - For TCP: Updates checksum including IPv4 pseudo-header
+ * - For ICMP: Updates checksum for ICMP header and payload
+ *
+ * For IPv6 packets:
+ * - For UDP: Updates checksum including IPv6 pseudo-header (RFC 2460)
+ * - For TCP: Updates checksum including IPv6 pseudo-header
+ * - For ICMPv6: Updates checksum including IPv6 pseudo-header (RFC 4443)
+ *
+ * @param pkt Pointer to universal packet structure to update checksums for
+ */
 static inline void
 fix_checksums(struct upkt *pkt) {
 	if (pkt->eth.ether_type == RTE_BE16(RTE_ETHER_TYPE_IPV4)) {
@@ -1564,8 +1859,6 @@ fix_checksums(struct upkt *pkt) {
 				pkt->data,
 				pkt->data_len
 			);
-			// RTE_LOG(INFO, NAT64_TEST, "(fix6)UDP checksum: %X\n",
-			// rte_be_to_cpu_16(udp_hdr->dgram_cksum));
 			break;
 		case IPPROTO_TCP:
 			struct rte_tcp_hdr *tcp_hdr = &pkt->proto.tcp;
@@ -1594,6 +1887,30 @@ fix_checksums(struct upkt *pkt) {
 	}
 }
 
+/**
+ * @brief Create DPDK mbuf from universal packet and add to test packet list
+ *
+ * For IPv4 packets:
+ * - Allocates new mbuf from test pool
+ * - Copies Ethernet header
+ * - Copies IPv4 header
+ * - Copies protocol header (UDP, TCP, ICMP)
+ * - Copies payload data if present
+ * - Sets packet metadata (port, device IDs)
+ * - Parses packet headers
+ *
+ * For IPv6 packets:
+ * - Allocates new mbuf from test pool
+ * - Copies Ethernet header
+ * - Copies IPv6 header
+ * - Copies protocol header (UDP, TCP, ICMPv6)
+ * - Copies payload data if present
+ * - Sets packet metadata (port, device IDs)
+ * - Parses packet headers
+ *
+ * @param pkt Pointer to universal packet structure to convert to mbuf
+ * @return 0 on success, -1 on failure (allocation or parsing error)
+ */
 static inline int
 push_packet(struct upkt *pkt) {
 	struct rte_mbuf *mbuf = rte_pktmbuf_alloc(test_params.mbuf_pool);
@@ -1684,6 +2001,23 @@ push_packet(struct upkt *pkt) {
 	return 0;
 }
 
+/**
+ * @brief Create basic UDP test cases from NAT64 address mappings
+ *
+ * For each configured address mapping:
+ * 1. Creates IPv4->IPv6 test case with:
+ *    - UDP packet with source from TEST-NET-1 range
+ *    - Destination from mapping IPv4 address
+ *    - Expected translation to IPv6 with correct prefix
+ * 2. Creates IPv6->IPv4 test case with:
+ *    - Reversed source/destination addresses
+ *    - Appropriate checksum updates
+ *
+ * Used to verify basic NAT64 UDP translation functionality.
+ *
+ * @param test_case Pointer to test case list to append to
+ * @return 0 on success, -1 on failure
+ */
 static int
 append_test_cases_from_mappings(struct test_case **test_case) {
 	struct nat64_module_config *nat64_config = container_of(
@@ -1806,22 +2140,55 @@ append_test_cases_from_mappings(struct test_case **test_case) {
 	return 0;
 }
 
+/**
+ * @brief ICMP test case parameters
+ *
+ * Structure defining an ICMP translation test case including:
+ * - Source and destination ICMP types/codes
+ * - Translation direction (v4->v6 or v6->v4)
+ * - Expected behavior (translation or drop)
+ * - MTU values for Packet Too Big messages
+ * - Pointer values for Parameter Problem messages
+ *
+ * Used to define comprehensive ICMP translation test scenarios.
+ */
 struct icmp_type_info_t {
-	const char *name;    // Test case name
-	uint8_t type;	     // ICMPv4 type
-	uint8_t code;	     // ICMPv4 code
-	uint8_t type6;	     // ICMPv6 type
-	uint8_t code6;	     // ICMPv6 code
-	bool from_ipv4;	     // Whether packet is from IPv4 or IPv6
-	uint8_t embed_proto; // if > 0 include embedded packet with proto
-	uint32_t mtu;	     // For PTB tests, 0 if not applicable
-	uint32_t mtu6;
-	uint32_t pointer; // For Parameter Problem tests, 0 if not applicable
-	uint32_t pointer6;
-	bool should_drop; // Whether packet should be dropped
+	const char *name;    /**< Test case name */
+	uint8_t type;	     /**< ICMPv4 type */
+	uint8_t code;	     /**< ICMPv4 code */
+	uint8_t type6;	     /**< ICMPv6 type */
+	uint8_t code6;	     /**< ICMPv6 code */
+	bool from_ipv4;	     /**< Whether packet is from IPv4 or IPv6 */
+	uint8_t embed_proto; /**< if > 0 include embedded packet with proto */
+	uint32_t mtu;	     /**< For PTB tests, 0 if not applicable */
+	uint32_t mtu6;	     /**< IPv6 MTU value */
+	uint32_t pointer;  /**< For Parameter Problem tests, 0 if not applicable
+			    */
+	uint32_t pointer6; /**< IPv6 pointer value */
+	bool should_drop;  /**< Whether packet should be dropped */
 };
 
-// Add helper function to create ICMP packets
+/**
+ * @brief Create an ICMP packet for NAT64 testing
+ *
+ * Creates a complete ICMP packet with specified parameters including:
+ * - Ethernet header with appropriate MAC addresses
+ * - IPv4/IPv6 header based on is_v6 parameter
+ * - ICMP/ICMPv6 header with type, code and other fields from info
+ * - Optional embedded packet for error messages
+ * - Optional data payload for Echo Request/Reply
+ *
+ * The function handles both ICMPv4 and ICMPv6 packets, setting appropriate
+ * header fields, addresses, and checksums. For error messages, it can include
+ * an embedded packet with specified protocol (UDP, TCP, ICMP).
+ *
+ * @param info Pointer to ICMP type information structure
+ * @param is_v6 Boolean indicating if packet should be IPv6 (true) or IPv4
+ * (false)
+ * @param prefix IPv6 prefix for address translation
+ * @return Pointer to created universal packet structure, NULL if allocation
+ * fails
+ */
 static struct upkt *
 create_icmp_packet(
 	const struct icmp_type_info_t *info, bool is_v6, uint8_t *prefix
@@ -2219,7 +2586,27 @@ create_icmp_packet(
 	return pkt;
 }
 
-// Add test cases for all ICMP type codes
+/**
+ * @brief Create comprehensive ICMP test cases for NAT64 translation
+ *
+ * Creates test cases for all ICMP translation scenarios per RFC 7915:
+ * 1. Echo Request/Reply translations
+ * 2. Destination Unreachable variations
+ * 3. Packet Too Big with different MTU values
+ * 4. Time Exceeded messages
+ * 5. Parameter Problem with pointer translations
+ * 6. Drop cases for unsupported messages (MLD, ND)
+ * 7. Edge cases and invalid message handling
+ *
+ * Each test case verifies:
+ * - Correct type/code translation
+ * - Proper handling of embedded packets
+ * - MTU and pointer value adjustments
+ * - Expected packet drops
+ *
+ * @param test_case Pointer to test case list to append to
+ * @return 0 on success, -1 on failure
+ */
 static int
 append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
 	struct nat64_module_config *nat64_config = container_of(
@@ -3082,6 +3469,27 @@ append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
 	return 0;
 }
 
+/**
+ * @brief Create basic ICMP test cases from NAT64 address mappings
+ *
+ * For each configured address mapping:
+ * 1. Creates IPv4->IPv6 test case with:
+ *    - ICMP Echo Request packet with source from TEST-NET-1 range
+ *    - Destination from mapping IPv4 address
+ *    - Expected translation to ICMPv6 Echo Request
+ * 2. Creates IPv6->IPv4 test case with:
+ *    - Reversed source/destination addresses
+ *    - Echo Reply messages
+ *    - Appropriate checksum updates
+ *
+ * Used to verify basic ICMP translation functionality:
+ * - Echo Request/Reply translation
+ * - ID and sequence number preservation
+ * - Checksum recalculation
+ *
+ * @param test_case Pointer to test case list to append to
+ * @return 0 on success, -1 on failure
+ */
 static int
 append_test_cases_from_mappings_icmp(struct test_case **test_case) {
 	struct nat64_module_config *nat64_config = container_of(
@@ -3201,6 +3609,16 @@ append_test_cases_from_mappings_icmp(struct test_case **test_case) {
 	return 0;
 }
 
+/**
+ * @brief Count number of packets in a packet list
+ *
+ * Traverses the linked list of packets and counts total number.
+ * Used for test verification to check expected vs actual packet counts
+ * in input, output and drop lists.
+ *
+ * @param list Pointer to packet list structure to count
+ * @return Total number of packets in the list
+ */
 static inline int
 packet_list_counter(struct packet_list *list) {
 	int count = 0;
@@ -3209,6 +3627,15 @@ packet_list_counter(struct packet_list *list) {
 	}
 	return count;
 }
+/**
+ * @brief Clean up and free resources for a packet list
+ *
+ * Frees all DPDK mbufs in the packet list and reinitializes the list.
+ * Used during test cleanup and between test cases to ensure clean state.
+ * Handles input, output and drop packet lists.
+ *
+ * @param list Pointer to packet list structure to clean up
+ */
 static inline void
 packet_list_cleanup(struct packet_list *list) {
 	if (list == NULL) {
@@ -3224,6 +3651,23 @@ packet_list_cleanup(struct packet_list *list) {
 	packet_list_init(list);
 }
 
+/**
+ * @brief Test UDP checksum calculation during NAT64 translation
+ *
+ * Tests UDP checksum handling by:
+ * 1. Creating IPv4 UDP packet with payload
+ * 2. Creating expected IPv6 UDP packet after translation
+ * 3. Setting appropriate addresses and checksums
+ * 4. Running packet through NAT64 translation
+ * 5. Verifying:
+ *    - One output packet produced
+ *    - Output packet matches expected packet including checksums
+ *    - No packets dropped
+ *
+ * Ensures proper UDP checksum calculation during v4->v6 translation.
+ *
+ * @return 0 on success, error code on failure
+ */
 static inline int
 test_nat64_udp_checksum() {
 	struct nat64_module_config *nat64_config = container_of(
@@ -3358,6 +3802,24 @@ test_nat64_udp_checksum() {
 	return 0;
 }
 
+/**
+ * @brief Execute and verify a single NAT64 translation test case
+ *
+ * For each test case:
+ * 1. Cleans up packet lists from previous tests
+ * 2. Calculates checksums for input and expected packets
+ * 3. Pushes input packet to test front
+ * 4. Runs NAT64 translation
+ * 5. Verifies:
+ *    - For drop cases: packet appears in drop list
+ *    - For translation cases:
+ *      * One packet in output list
+ *      * No packets in drop list
+ *      * Output packet matches expected packet
+ *
+ * @param tc Pointer to test case structure to process
+ * @return TEST_SUCCESS on success, error code on failure
+ */
 static int
 process_test_case(struct test_case *tc) {
 	packet_list_cleanup(&test_params.packet_front.input);
@@ -3431,6 +3893,21 @@ process_test_case(struct test_case *tc) {
 	return TEST_SUCCESS;
 }
 
+/**
+ * @brief Run NAT64 tests using provided test case provider function
+ *
+ * Generic test runner that:
+ * 1. Gets test cases from provided test case provider function
+ * 2. Iterates through all test cases
+ * 3. Processes each test case through process_test_case()
+ * 4. Accumulates test results
+ *
+ * Used by specific test functions (UDP, TCP, ICMP) to run their test cases
+ * through a common execution path.
+ *
+ * @param tc_provider Function pointer to test case provider
+ * @return 0 on success, accumulated error count on failures
+ */
 static int
 test_nat64_generic(int (*tc_provider)(struct test_case **)) {
 	struct test_case *test_cases = NULL;
@@ -3449,6 +3926,19 @@ test_nat64_generic(int (*tc_provider)(struct test_case **)) {
 	return result;
 }
 
+/**
+ * @brief Create test case for packet drop scenario
+ *
+ * Creates a test case with:
+ * - UDP packet with unknown destination address
+ * - Expected empty packet to indicate drop
+ *
+ * Used to verify NAT64 drops packets with:
+ * - Unknown IPv4/IPv6 address mappings
+ *
+ * @param test_cases Pointer to test case list to append to
+ * @return TEST_SUCCESS on success, error code on failure
+ */
 static int
 drop_test_case(struct test_case **test_cases) {
 	append_test_case(
@@ -3491,21 +3981,87 @@ drop_test_case(struct test_case **test_cases) {
 	return TEST_SUCCESS;
 }
 
+/**
+ * @brief Test packet drop scenarios in NAT64 translation
+ *
+ * Tests cases where packets should be dropped:
+ * - Unknown IPv4/IPv6 address mappings
+ * - Invalid ICMP message types
+ * - Unsupported ICMPv6 messages (MLD, ND)
+ * - Malformed packets
+ * - Invalid protocol combinations
+ *
+ * Verifies packets are properly dropped and don't appear in output.
+ *
+ * @return 0 on success, error count on failures
+ */
 static inline int
 test_nat64_drop() {
 	return test_nat64_generic(drop_test_case);
 }
 
+/**
+ * @brief Test basic UDP packet translation through NAT64
+ *
+ * Tests UDP packet translation by:
+ * 1. Creating test cases with UDP packets in both directions (v4->v6 and
+ * v6->v4)
+ * 2. Setting appropriate ports and payload data
+ * 3. Running packets through NAT64 translation
+ * 4. Verifying header translations and checksum calculations
+ *
+ * Used to verify basic NAT64 UDP translation functionality:
+ * - Payload preservation
+ * - Checksum recalculation
+ *
+ * @return 0 on success, error count on failures
+ */
 static inline int
 test_nat64_udp() {
 	return test_nat64_generic(append_test_cases_from_mappings);
 }
 
+/**
+ * @brief Test basic ICMP packet translation through NAT64
+ *
+ * Tests basic ICMP translation scenarios including:
+ * - Echo Request/Reply translation between ICMPv4 and ICMPv6
+ * - ID and sequence number preservation
+ * - Checksum recalculation
+ * - Proper address mapping in ICMP headers
+ *
+ * Focuses on common ICMP types used for ping/echo functionality.
+ *
+ * @return 0 on success, error count on failures
+ */
 static inline int
 test_nat64_icmp() {
 	return test_nat64_generic(append_test_cases_from_mappings_icmp);
 }
 
+/**
+ * @brief Create TCP test cases from NAT64 address mappings
+ *
+ * For each configured address mapping:
+ * 1. Creates IPv4->IPv6 test case with:
+ *    - TCP SYN packet with source from TEST-NET-1 range
+ *    - Destination from mapping IPv4 address
+ *    - Expected translation to IPv6 with correct prefix
+ *    - Proper TCP flags, sequence numbers, window size
+ * 2. Creates IPv6->IPv4 test case with:
+ *    - Reversed source/destination addresses
+ *    - Preserved TCP header fields
+ *    - Appropriate checksum updates
+ *
+ * Used to verify TCP-specific aspects of NAT64 translation:
+ * - Sequence/ACK number preservation
+ * - TCP flags handling
+ * - Window size preservation
+ * - Checksum recalculation
+ *
+ * @param test_case Pointer to test case list to append to
+ * @return 0 on success, -1 on failure
+ */
 static inline int
 append_test_cases_from_mappings_tcp(struct test_case **test_case) {
 	struct nat64_module_config *nat64_config = container_of(
@@ -3632,16 +4188,59 @@ append_test_cases_from_mappings_tcp(struct test_case **test_case) {
 	return 0;
 }
 
+/**
+ * @brief Test TCP packet translation through NAT64
+ *
+ * Tests TCP packet translation by:
+ * 1. Creating test cases with TCP packets in both directions (v4->v6 and
+ * v6->v4)
+ * 2. Setting appropriate TCP flags, sequence numbers, ports
+ * 3. Running packets through NAT64 translation
+ * 4. Verifying header translations and checksum calculations
+ *
+ * Covers TCP-specific aspects like:
+ * - Port translation
+ * - Sequence/ACK number preservation
+ * - TCP flags handling
+ * - Checksum recalculation
+ *
+ * @return 0 on success, error count on failures
+ */
 static inline int
 test_nat64_tcp() {
 	return test_nat64_generic(append_test_cases_from_mappings_tcp);
 }
 
+/**
+ * @brief Test extended ICMP packet translation scenarios through NAT64
+ *
+ * Tests comprehensive ICMP translation cases including:
+ * - Error messages (Destination Unreachable, Time Exceeded)
+ * - Parameter Problem messages with pointer translation
+ * - Packet Too Big messages with MTU handling
+ * - MLD/ND messages that should be dropped
+ * - Invalid ICMP messages and edge cases
+ * - Embedded packet handling in ICMP error messages
+ *
+ * Implements test cases from RFC 7915 section 4.2 and 4.3.
+ *
+ * @return 0 on success, error count on failures
+ */
 static inline int
 test_nat64_icmp_more() {
 	return test_nat64_generic(append_test_cases_from_mappings_icmp_more);
 }
 
+/**
+ * @brief Clean up test suite resources
+ *
+ * Performs cleanup after test suite execution:
+ * - Frees all packets in input list
+ * - Frees all packets in output list
+ * - Frees all packets in drop list
+ *
+ * Ensures clean state between test runs and prevents memory leaks.
+ */
 static void
 testsuite_teardown(void) {
 	packet_list_cleanup(&test_params.packet_front.input);
@@ -3649,6 +4248,18 @@ testsuite_teardown(void) {
 	packet_list_cleanup(&test_params.packet_front.drop);
 }
 
+/**
+ * @brief Test suite definition for NAT64 functionality
+ *
+ * Defines complete test suite including:
+ * - Basic module creation and configuration tests
+ * - Protocol translation tests (UDP, TCP)
+ * - ICMP translation tests (basic and extended)
+ * - Error handling and packet drop tests
+ * - Checksum calculation verification
+ *
+ * Test cases verify compliance with RFC 7915 requirements.
+ */
 static struct unit_test_suite nat64_test_suite =
 	{.suite_name = "NAT64 Unit Test Suite",
 	 .setup = test_setup,
@@ -3665,14 +4276,27 @@ static struct unit_test_suite nat64_test_suite =
 		 TEST_CASE_NAMED("test_nat64_tcp", test_nat64_tcp),
 		 TEST_CASE_NAMED("test_nat64_icmp", test_nat64_icmp),
 		 TEST_CASE_NAMED("test_nat64_icmp_more", test_nat64_icmp_more),
-		 //  TEST_CASE_NAMED(
-		 // 	 "test_nat64_udp_checksum",
-		 // 	test_nat64_udp_checksum
-		 //  ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_udp_checksum", test_nat64_udp_checksum
+		 ),
 
 		 TEST_CASES_END() /**< NULL terminate unit test array */
 	 }};
 
+/**
+ * @brief Main entry point for NAT64 test suite execution
+ *
+ * Executes complete test suite for NAT64 functionality including:
+ * 1. Module creation and configuration tests
+ * 2. Basic protocol translation tests (UDP, TCP)
+ * 3. ICMP translation tests (basic and extended)
+ * 4. Error handling and packet drop tests
+ * 5. Checksum calculation verification
+ *
+ * Implements comprehensive testing of NAT64 module per RFC 7915.
+ *
+ * @return 0 on all tests passed, error count on failures
+ */
 static int
 nat64_testsuite(void) {
 	return unit_test_suite_runner(&nat64_test_suite);

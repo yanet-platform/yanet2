@@ -292,11 +292,12 @@ struct nat64_prefix {
 /**
  * @brief Structure for ICMP rate limiting
  */
-struct nat64_icmp_rate_limit {
-	uint32_t tokens;     /**< Current token count */
-	uint32_t last_fill;  /**< Last token fill timestamp */
-	uint32_t max_tokens; /**< Maximum number of tokens */
-	uint32_t fill_rate;  /**< Token fill rate (tokens per second) */
+struct rate_limiter {
+	uint32_t tokens;
+	uint64_t last_update;
+	uint32_t rate;
+	uint32_t burst;
+	rte_spinlock_t lock;
 };
 
 /**
@@ -322,7 +323,7 @@ struct nat64_module_config {
 	uint16_t mtu6; /**< IPv6 MTU limit */
 
 	/* ICMP rate limiting */
-	struct nat64_icmp_rate_limit icmp_rate_limit; /**< ICMP rate limiter */
+	struct rate_limiter icmp_error_limiter; /**< ICMP rate limiter */
 };
 
 /**
