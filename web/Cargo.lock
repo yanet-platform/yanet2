@@ -1460,6 +1460,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "netip"
+version = "0.1.0"
+
+[[package]]
 name = "next_tuple"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3072,6 +3076,7 @@ dependencies = [
  "leptos-use",
  "leptos_router",
  "log",
+ "netip",
  "prost",
  "prost-build",
  "reqwest",

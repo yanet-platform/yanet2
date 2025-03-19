@@ -4,6 +4,7 @@ use core::{
 };
 use std::time::SystemTime;
 
+use netip::MacAddr;
 use tabled::Tabled;
 
 // Newtype wrapper around NeighbourState for better display
@@ -55,11 +56,12 @@ pub struct NeighbourEntry {
     pub next_hop: IpAddr,
     /// MAC address of the next-hop device.
     #[tabled(rename = "NEIGHBOUR MAC")]
-    pub link_addr: String,
+    pub link_addr: MacAddr,
     /// MAC address of the local interface that connects to this neighbor.
     #[tabled(rename = "INTERFACE MAC")]
-    pub hardware_addr: String,
-    /// Current state of the neighbor relationship (e.g., REACHABLE, STALE, PROBE).
+    pub hardware_addr: MacAddr,
+    /// Current state of the neighbor relationship (e.g., REACHABLE, STALE,
+    /// PROBE).
     #[tabled(rename = "STATE")]
     pub state: State,
     /// Time elapsed since this neighbor entry was last updated.

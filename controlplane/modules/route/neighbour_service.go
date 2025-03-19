@@ -2,7 +2,6 @@ package route
 
 import (
 	"context"
-	"net"
 
 	"go.uber.org/zap"
 
@@ -38,8 +37,8 @@ func (m *NeighbourService) List(ctx context.Context, req *routepb.ListNeighbours
 	for _, entry := range entries {
 		protoEntry := &routepb.NeighbourEntry{
 			NextHop:      entry.NextHop.String(),
-			LinkAddr:     net.HardwareAddr(entry.HardwareRoute.DestinationMAC[:]).String(),
-			HardwareAddr: net.HardwareAddr(entry.HardwareRoute.SourceMAC[:]).String(),
+			LinkAddr:     routepb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
+			HardwareAddr: routepb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
 			State:        routepb.NeighbourState(entry.State),
 			UpdatedAt:    entry.UpdatedAt.Unix(),
 		}

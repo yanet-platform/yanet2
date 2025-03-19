@@ -94,3 +94,6 @@ memory-bank
 
 # generated files
 *.pb.go
+
+# Ignore Cargo.lock for libraries.
+common/**/Cargo.lock

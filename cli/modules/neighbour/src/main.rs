@@ -6,6 +6,7 @@ use std::time::UNIX_EPOCH;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{neighbour_client::NeighbourClient, ListNeighboursRequest};
+use netip::MacAddr;
 use tabled::{
     settings::{
         object::Columns,
@@ -97,10 +98,19 @@ impl NeighbourService {
                 let updated_at = UNIX_EPOCH + Duration::from_secs(entry.updated_at as u64);
                 let next_hop = entry.next_hop.parse().unwrap();
 
+                let link_addr = {
+                    let addr = entry.link_addr.map(|v| v.addr).unwrap_or_default();
+                    MacAddr::from(addr)
+                };
+                let hardware_addr = {
+                    let addr = entry.hardware_addr.map(|v| v.addr).unwrap_or_default();
+                    MacAddr::from(addr)
+                };
+
                 NeighbourEntry {
                     next_hop,
-                    link_addr: entry.link_addr,
-                    hardware_addr: entry.hardware_addr,
+                    link_addr,
+                    hardware_addr,
                     state: State(entry.state),
                     age: Age(updated_at),
                 }

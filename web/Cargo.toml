@@ -9,6 +9,7 @@ keywords = ["network", "traffic-generator"]
 publish = false
 
 [dependencies]
+netip = { version = "0.1", path = "../common/rust/netip" }
 leptos = { version = "0.7", features = ["csr"] }
 leptos_router = { version = "0.7" }
 web-sys = { version = "0.3.60", features = ["Storage"] }

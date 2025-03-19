@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package routepb;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/route/routepb;routepb";
+
+// MACAddress represents a hardware address.
+//
+// There are various MAC address formats, for example:
+// - EUI-48 (48-bit MAC addresses, most common).
+// - EUI-64 (64-bit extended unique identifier).
+message MACAddress {
+	reserved 1;
+	// Addr keeps MAC address bytes as a 64-bit unsigned integer in network
+	// byte order.
+	//
+	// For example, for the given MAC address "3a:ac:26:9b:5b:f9":
+	//  - As array: [0x3a, 0xac, 0x26, 0x9b, 0x5b, 0xf9, 0x00, 0x00].
+	//  - As uint64: 0x3aac269b5bf90000.
+	uint64 addr = 2;
+}

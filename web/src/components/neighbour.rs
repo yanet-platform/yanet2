@@ -141,8 +141,8 @@ pub fn NeighbourView() -> impl IntoView {
 #[table(impl_vec_data_provider, sortable)]
 struct NeighbourEntry {
     next_hop: IpAddr,
-    link_addr: String,
-    hardware_addr: String,
+    link_addr: MacAddr,
+    hardware_addr: MacAddr,
     state: State,
     age: Age,
 }
@@ -154,10 +154,13 @@ impl TryFrom<code::NeighbourEntry> for NeighbourEntry {
         let next_hop = entry.next_hop.parse()?;
         let age = Duration::from_secs(entry.updated_at as u64);
 
+        let link_addr = entry.link_addr.map(|v| v.addr).unwrap_or_default();
+        let hardware_addr = entry.hardware_addr.map(|v| v.addr).unwrap_or_default();
+
         let entry = Self {
             next_hop,
-            link_addr: entry.link_addr,
-            hardware_addr: entry.hardware_addr,
+            link_addr: link_addr.into(),
+            hardware_addr: hardware_addr.into(),
             state: State(entry.state),
             age: Age(age),
         };
@@ -216,6 +219,31 @@ impl Display for Age {
 }
 
 impl CellValue for Age {
+    type RenderOptions = ();
+
+    fn render_value(self, _options: Self::RenderOptions) -> impl IntoView {
+        view! { <>{self.to_string()}</> }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MacAddr(pub netip::MacAddr);
+
+impl From<u64> for MacAddr {
+    fn from(addr: u64) -> Self {
+        Self(netip::MacAddr::from(addr))
+    }
+}
+
+impl Display for MacAddr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self(addr) => write!(f, "{addr}"),
+        }
+    }
+}
+
+impl CellValue for MacAddr {
     type RenderOptions = ();
 
     fn render_value(self, _options: Self::RenderOptions) -> impl IntoView {
