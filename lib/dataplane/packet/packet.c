@@ -63,18 +63,18 @@ parse_ipv4_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 	if (rte_pktmbuf_pkt_len(mbuf) <
 	    (uint32_t)*offset + rte_be_to_cpu_16(ipv4_hdr->total_length)) {
 		*type = PACKET_HEADER_TYPE_UNKNOWN;
-		return -2;
+		return -1;
 	}
 
 	if ((ipv4_hdr->version_ihl & 0x0F) < 0x05) {
 		*type = PACKET_HEADER_TYPE_UNKNOWN;
-		return -3;
+		return -1;
 	}
 
 	if (rte_be_to_cpu_16(ipv4_hdr->total_length) <
 	    4 * (ipv4_hdr->version_ihl & 0x0F)) {
 		*type = PACKET_HEADER_TYPE_UNKNOWN;
-		return -4;
+		return -1;
 	}
 
 	// FIXME: check if fragmented
@@ -192,24 +192,23 @@ parse_packet(struct packet *packet) {
 
 	if ((type == rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN)) &&
 	    parse_vlan_header(packet, &type, &offset)) {
-		return -10;
+		return -1;
 	}
 
 	packet->network_header.type = type;
 	packet->network_header.offset = offset;
 
-	int result = 0;
 	if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		if ((result = parse_ipv4_header(packet, &type, &offset))) {
-			return result - 20 ;
+		if (parse_ipv4_header(packet, &type, &offset)) {
+			return -1;
 		}
 	} else if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		if ((result = parse_ipv6_header(packet, &type, &offset))) {
-			return result - 30;
+		if (parse_ipv6_header(packet, &type, &offset)) {
+			return -1;
 		}
 	} else {
 		// unknown header
-		return -40;
+		return -1;
 	}
 
 	// FIXME: separate routines for transport level parsing
