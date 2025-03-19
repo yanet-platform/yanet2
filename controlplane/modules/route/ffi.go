@@ -88,74 +88,38 @@ func (m *ModuleConfig) RouteListAdd(routeIndices []int) (int, error) {
 }
 
 func (m *ModuleConfig) PrefixAdd(prefix netip.Prefix, routeListIdx uint32) error {
-	if prefix.Addr().Is4() {
-		return m.prefixAdd4(prefix, routeListIdx)
-	}
-	if prefix.Addr().Is6() {
-		return m.prefixAdd6(prefix, routeListIdx)
-	}
+	addrStart := prefix.Addr()
+	addrEnd := xnetip.LastAddr(prefix)
 
+	if addrStart.Is4() {
+		return m.prefixAdd4(addrStart.As4(), addrEnd.As4(), routeListIdx)
+	}
+	if addrStart.Is6() {
+		return m.prefixAdd6(addrStart.As16(), addrEnd.As16(), routeListIdx)
+	}
 	return fmt.Errorf("unsupported prefix: must be either IPv4 or IPv6")
 }
 
-func (m *ModuleConfig) prefixAdd4(prefix netip.Prefix, routeListIdx uint32) error {
-	addrStart, err := netipAddr4ToFFI(prefix.Addr())
-	if err != nil {
-		return err
+func (m *ModuleConfig) prefixAdd4(addrStart [4]byte, addrEnd [4]byte, routeListIdx uint32) error {
+	if rc := C.route_module_config_add_prefix_v4(
+		m.asRawPtr(),
+		(*C.uint8_t)(&addrStart[0]),
+		(*C.uint8_t)(&addrEnd[0]),
+		C.uint32_t(routeListIdx),
+	); rc != 0 {
+		return fmt.Errorf("failed to add v4 prefix: unknown error code=%d", rc)
 	}
-	addrEnd, err := netipAddr4ToFFI(xnetip.LastAddr(prefix))
-	if err != nil {
-		return err
-	}
-
-	rc := C.route_module_config_add_prefix_v4(m.asRawPtr(), &addrStart[0], &addrEnd[0], C.uint32_t(routeListIdx))
-	if rc != 0 {
-		return fmt.Errorf("failed to add prefix: unknown error")
-	}
-
 	return nil
 }
 
-func (m *ModuleConfig) prefixAdd6(prefix netip.Prefix, routeListIdx uint32) error {
-	addrStart, err := netipAddr6ToFFI(prefix.Addr())
-	if err != nil {
-		return err
+func (m *ModuleConfig) prefixAdd6(addrStart [16]byte, addrEnd [16]byte, routeListIdx uint32) error {
+	if rc := C.route_module_config_add_prefix_v6(
+		m.asRawPtr(),
+		(*C.uint8_t)(&addrStart[0]),
+		(*C.uint8_t)(&addrEnd[0]),
+		C.uint32_t(routeListIdx),
+	); rc != 0 {
+		return fmt.Errorf("failed to add v6 prefix: unknown error code=%d", rc)
 	}
-	addrEnd, err := netipAddr6ToFFI(xnetip.LastAddr(prefix))
-	if err != nil {
-		return err
-	}
-
-	rc := C.route_module_config_add_prefix_v6(m.asRawPtr(), &addrStart[0], &addrEnd[0], C.uint32_t(routeListIdx))
-	if rc != 0 {
-		return fmt.Errorf("failed to add prefix: unknown error")
-	}
-
 	return nil
-}
-
-func netipAddr4ToFFI(ip netip.Addr) ([4]C.uint8_t, error) {
-	if !ip.Is4() {
-		return [4]C.uint8_t{}, fmt.Errorf("unsupported IP address: must be IPv4")
-	}
-
-	out := [4]C.uint8_t{}
-	for idx, v := range ip.As4() {
-		out[idx] = C.uint8_t(v)
-	}
-
-	return out, nil
-}
-
-func netipAddr6ToFFI(ip netip.Addr) ([16]C.uint8_t, error) {
-	if !ip.Is6() {
-		return [16]C.uint8_t{}, fmt.Errorf("unsupported IP address: must be IPv6")
-	}
-
-	out := [16]C.uint8_t{}
-	for idx, v := range ip.As16() {
-		out[idx] = C.uint8_t(v)
-	}
-
-	return out, nil
 }

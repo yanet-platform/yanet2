@@ -18,7 +18,7 @@ modules:
     # NUMA index will be appended to the path.
     memory_path: /dev/hugepages/yanet
     # Memory requirements for a single transaction.
-    memory_requirements: 16777216
+    memory_requirements: 16MB
     endpoint: "[::1]:0"
     gateway_endpoint: *gateway_endpoint
     bird_export:
