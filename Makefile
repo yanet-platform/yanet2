@@ -13,3 +13,5 @@ controlplane: dataplane
 
 test: dataplane
 	meson test -C build
+	echo "Controlplane tests"
+	go -C controlplane test ./...

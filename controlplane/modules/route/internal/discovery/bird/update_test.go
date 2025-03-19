@@ -113,6 +113,20 @@ func TestDecodeUpdate(t *testing.T) {
 				Med:       0,
 				Pref:      100,
 				ASPathLen: 3,
+				LargeCommunities: &rib.LargeCommunityList{
+					LargeCommunity: rib.LargeCommunity{
+						GA:    51706,
+						Data1: 1000,
+						Data2: 1,
+					},
+					Next: &rib.LargeCommunityList{
+						LargeCommunity: rib.LargeCommunity{
+							GA:    51706,
+							Data1: 1001,
+							Data2: 1,
+						},
+					},
+				},
 			},
 		},
 		{
@@ -196,6 +210,13 @@ func TestDecodeUpdate(t *testing.T) {
 				OriginAS:  0x00009793,
 				Pref:      0x64,
 				ASPathLen: 0x7,
+				LargeCommunities: &rib.LargeCommunityList{
+					LargeCommunity: rib.LargeCommunity{
+						GA:    48070,
+						Data1: 100,
+						Data2: 1299,
+					},
+				},
 			},
 		},
 		{
