@@ -3,8 +3,10 @@ sources = files(
   'dscp_test.go',
 )
 
-test('dscp',
+test(
+  'dscp',
   find_program('go'),
   args: ['test', './...'],
   workdir: meson.current_source_dir(),
+  timeout: 120,
 )

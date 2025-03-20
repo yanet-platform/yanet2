@@ -67,8 +67,6 @@ jobs:
 
       - name: Build and run tests
         run: |
-          echo "Pre-run go build to bypass Meson test timeouts"
-          go build -C tests/go ./...
           meson test -C build
       - name: Show meson test log
         run:
