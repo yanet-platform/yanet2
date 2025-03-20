@@ -72,7 +72,7 @@ func (m *RouteService) ShowRoutes(
 
 		for idx, r := range routesList.Routes {
 			isBest := idx == 0
-			response.Routes = append(response.Routes, convertRoute(prefix, isBest, r))
+			response.Routes = append(response.Routes, convertRoute(prefix, isBest, &r))
 		}
 	}
 
@@ -101,7 +101,7 @@ func (m *RouteService) LookupRoute(
 
 	for idx, r := range routes.Routes {
 		isBest := idx == 0
-		response.Routes = append(response.Routes, convertRoute(prefix, isBest, r))
+		response.Routes = append(response.Routes, convertRoute(prefix, isBest, &r))
 	}
 
 	return response, nil
@@ -140,7 +140,7 @@ func (m *RouteService) InsertRoute(
 	return &routepb.InsertRouteResponse{}, m.syncRouteUpdates(name, numaIndices)
 }
 
-func (m *RouteService) BulkUpdate(routes []*rib.Route) error {
+func (m *RouteService) BulkUpdate(routes []rib.Route) error {
 	m.log.Debugw("apply bulk update", zap.Int("size", len(routes)))
 	start := time.Now()
 	m.rib.BulkUpdate(routes)
@@ -227,14 +227,8 @@ func (m *RouteService) syncRouteUpdates(name string, numaIndices []uint32) error
 
 	// Huge mutex, but our shared memory must be protected from concurrent access.
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	err := m.updateModuleConfigs(name, numaIndices, routes)
-	m.mu.Unlock()
-
-	for _, list := range routes {
-		for _, route := range list.Routes {
-			rib.FreeRoute(route)
-		}
-	}
 	return err
 }
 
@@ -334,9 +328,9 @@ func (m *RouteService) updateModuleConfigs(
 }
 
 func convertRoute(prefix netip.Prefix, isBest bool, route *rib.Route) *routepb.Route {
-	communities := make([]*routepb.LargeCommunity, 0)
-	for c := route.LargeCommunities; c != nil; c = c.Next {
-		communities = append(communities, convertLargeCommunity(c.LargeCommunity))
+	communities := make([]*routepb.LargeCommunity, len(route.LargeCommunities))
+	for _, c := range route.LargeCommunities {
+		communities = append(communities, convertLargeCommunity(c))
 	}
 
 	peer := ""
@@ -360,8 +354,8 @@ func convertRoute(prefix netip.Prefix, isBest bool, route *rib.Route) *routepb.R
 
 func convertLargeCommunity(community rib.LargeCommunity) *routepb.LargeCommunity {
 	return &routepb.LargeCommunity{
-		GlobalAdministrator: community.GA,
-		LocalDataPart1:      community.Data1,
-		LocalDataPart2:      community.Data2,
+		GlobalAdministrator: community.GlobalAdministrator,
+		LocalDataPart1:      community.LocalDataPart1,
+		LocalDataPart2:      community.LocalDataPart2,
 	}
 }

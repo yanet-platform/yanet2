@@ -14,7 +14,7 @@ import (
 )
 
 type RIBUpdater interface {
-	BulkUpdate([]*rib.Route) error
+	BulkUpdate([]rib.Route) error
 }
 
 type exportSocket struct {
@@ -95,7 +95,7 @@ func (m *Export) Run(ctx context.Context) error {
 					cancel(err)
 					return fmt.Errorf("failed to parse next update chunk: %w", err)
 				}
-				route := rib.MakeBirdRoute()
+				route := &rib.Route{}
 				if err := update.Decode(route); err != nil {
 					cancel(err)
 					return fmt.Errorf("failed to decode next route update: %w", err)
@@ -113,7 +113,7 @@ func (m *Export) Run(ctx context.Context) error {
 
 	wg.Go(func() error {
 		m.log.Info("starting batch processor for bird route updates")
-		batch := make([]*rib.Route, 0, m.cfg.DumpThreshold)
+		batch := make([]rib.Route, 0, m.cfg.DumpThreshold)
 		tick := time.NewTicker(m.cfg.DumpTimeout)
 		timeout := false
 		for {
@@ -121,7 +121,7 @@ func (m *Export) Run(ctx context.Context) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			case route := <-updates:
-				batch = append(batch, route)
+				batch = append(batch, *route)
 			case <-tick.C:
 				if len(batch) == 0 {
 					continue

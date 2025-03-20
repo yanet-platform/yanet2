@@ -15,14 +15,9 @@ const (
 )
 
 type LargeCommunity struct {
-	GA    uint32
-	Data1 uint32
-	Data2 uint32
-}
-
-type LargeCommunityList struct {
-	LargeCommunity
-	Next *LargeCommunityList
+	GlobalAdministrator uint32
+	LocalDataPart1      uint32
+	LocalDataPart2      uint32
 }
 
 // Route stores information about network routes and associated BGP attributes.
@@ -63,7 +58,7 @@ type Route struct {
 	// This field participates in route cost calculation.
 	ASPathLen uint8
 	// LargeCommunities is used for link bandwidth information.
-	LargeCommunities *LargeCommunityList
+	LargeCommunities []LargeCommunity
 	// SourceID identifies the origin of this route's information,
 	// such as static or Bird.
 	SourceID RouteSourceID
@@ -71,7 +66,7 @@ type Route struct {
 	ToRemove bool
 }
 
-func routeCompare(a *Route, b *Route) int {
+func routeCompare(a Route, b Route) int {
 	// higher priority is better
 	if prefDiff := int(a.Pref) - int(b.Pref); prefDiff != 0 {
 		return prefDiff
@@ -84,19 +79,18 @@ func routeCompare(a *Route, b *Route) int {
 	return int(a.Med) - int(b.Med)
 }
 
-func routeCompareRev(a *Route, b *Route) int {
+func routeCompareRev(a Route, b Route) int {
 	return -routeCompare(a, b)
 }
 
 type RoutesList struct {
-	Routes []*Route
+	Routes []Route
 }
 
-func (m *RoutesList) Insert(route *Route) bool {
+func (m *RoutesList) Insert(route Route) bool {
 	insertedIdx := -1
 	for idx, r := range m.Routes {
 		if r.Peer == route.Peer {
-			FreeRoute(m.Routes[idx]) // release updated route
 			m.Routes[idx] = route
 			insertedIdx = idx
 			break
@@ -112,12 +106,10 @@ func (m *RoutesList) Insert(route *Route) bool {
 	return true
 }
 
-func (m *RoutesList) Remove(route *Route) bool {
-	defer FreeRoute(route)
+func (m *RoutesList) Remove(route Route) bool {
 	// Sorting is not need on removing
 	for idx, r := range m.Routes {
 		if r.Peer == route.Peer {
-			FreeRoute(m.Routes[idx]) // relese deleted route too
 			// Delete with preserving order
 			m.Routes = slices.Delete(m.Routes, idx, idx+1)
 

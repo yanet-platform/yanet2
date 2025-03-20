@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/rib"
@@ -381,9 +382,7 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 			(*rib.LargeCommunity)(unsafe.Pointer(&data[0])),
 			areaSize/sizeOfLargeCommunityStruct,
 		)
-		for idx := range largeCommunities {
-			route.AddLargeCommunity(&largeCommunities[idx])
-		}
+		route.LargeCommunities = slices.Clone(largeCommunities)
 	case AttrMPLSLabelStack:
 	case AttrClusterList:
 	default:

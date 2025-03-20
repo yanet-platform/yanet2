@@ -324,12 +324,12 @@ func Fuzz_MapTrie_InsertAndLookup(f *testing.F) {
 		m = min(m, 128)
 		p := netip.PrefixFrom(prefixAddr, int(m)).Masked()
 
-		route := &Route{Prefix: p}
+		route := Route{Prefix: p}
 		mt.InsertOrUpdate(
 			p,
 			func() RoutesList {
 				return RoutesList{
-					Routes: []*Route{route},
+					Routes: []Route{route},
 				}
 			},
 			func(m RoutesList) RoutesList {
@@ -371,7 +371,7 @@ func heapInUse() uint64 {
 	return ms.HeapInuse
 }
 
-func initTestData(v4count int, v6count int, random bool) ([]netip.Addr, []*Route) {
+func initTestData(v4count int, v6count int, random bool) ([]netip.Addr, []Route) {
 	maskShift := 8
 	addrs := make([]netip.Addr, 0, v4count+v6count)
 	for idx := range v4count {
@@ -399,14 +399,14 @@ func initTestData(v4count int, v6count int, random bool) ([]netip.Addr, []*Route
 		addrs = append(addrs, netip.AddrFrom16(v6a))
 	}
 
-	routes := make([]*Route, len(addrs))
+	routes := make([]Route, len(addrs))
 	for idx, a := range addrs {
 		mask := a.BitLen() - maskShift
 		if random {
 			mask = rand.Intn(a.BitLen() + 1)
 		}
 		p, _ := a.Prefix(mask)
-		routes[idx] = &Route{Prefix: p.Masked()}
+		routes[idx] = Route{Prefix: p.Masked()}
 	}
 	return addrs, routes
 }
@@ -417,7 +417,7 @@ func Test_MapTrie_InsertMany(t *testing.T) {
 	for _, route := range routes {
 		mt.InsertOrUpdate(
 			route.Prefix,
-			func() RoutesList { return RoutesList{Routes: []*Route{route}} },
+			func() RoutesList { return RoutesList{Routes: []Route{route}} },
 			func(m RoutesList) RoutesList {
 				m.Routes = append(m.Routes, route)
 				return m
@@ -442,12 +442,12 @@ func Benchmark_MapTrie_InsertUniq(b *testing.B) {
 	b.Logf("The initial Memory usage of MapTrie: %s", datasize.ByteSize(inuse1-inuse0))
 
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		for idx, route := range routes {
 			trie.InsertOrUpdate(
 				routes[idx].Prefix,
 				func() RoutesList {
-					return RoutesList{Routes: []*Route{route}}
+					return RoutesList{Routes: []Route{route}}
 				},
 				func(m RoutesList) RoutesList {
 					m.Routes = append(m.Routes, route)
@@ -481,12 +481,12 @@ func Benchmark_MapTrie_InsertMess(b *testing.B) {
 	inUse1 := heapInUse()
 	b.Logf("Initial Memory usage by mapTrie %s", datasize.ByteSize(inUse1-inUse0))
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		for idx, route := range routes {
 			trie.InsertOrUpdate(
 				routes[idx].Prefix,
 				func() RoutesList {
-					return RoutesList{Routes: []*Route{route}}
+					return RoutesList{Routes: []Route{route}}
 				},
 				func(m RoutesList) RoutesList {
 					m.Routes = append(m.Routes, route)
@@ -513,7 +513,7 @@ func Benchmark_mapTrie_lookup_mess_1k(b *testing.B) {
 		mt.InsertOrUpdate(
 			route.Prefix,
 			func() RoutesList {
-				return RoutesList{Routes: []*Route{route}}
+				return RoutesList{Routes: []Route{route}}
 			},
 			func(m RoutesList) RoutesList {
 				return m
