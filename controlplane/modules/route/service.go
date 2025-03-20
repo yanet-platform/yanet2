@@ -223,13 +223,19 @@ func (m *RouteService) syncRouteUpdates(name string, numaIndices []uint32) error
 			numaIndices = append(numaIndices, uint32(idx))
 		}
 	}
-
 	routes := m.rib.DumpRoutes()
 
 	// Huge mutex, but our shared memory must be protected from concurrent access.
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.updateModuleConfigs(name, numaIndices, routes)
+	err := m.updateModuleConfigs(name, numaIndices, routes)
+	m.mu.Unlock()
+
+	for _, list := range routes {
+		for _, route := range list.Routes {
+			rib.FreeRoute(route)
+		}
+	}
+	return err
 }
 
 func (m *RouteService) updateModuleConfigs(
@@ -258,7 +264,7 @@ func (m *RouteService) updateModuleConfigs(
 		for prefix, routesList := range routes {
 			routesListSetKey := bitset.TinyBitset{}
 
-			if routes == nil || len(routesList.Routes) == 0 {
+			if len(routesList.Routes) == 0 {
 				m.log.Debugw("skip prefix with no routes", zap.Stringer("prefix", prefix))
 				// FIXME add telemetry
 				continue

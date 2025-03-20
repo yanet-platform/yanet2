@@ -2,6 +2,7 @@ package rib
 
 import (
 	"net/netip"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -70,14 +71,43 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 func (m *RIB) DumpRoutes() map[netip.Prefix]RoutesList {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.routes.Dump()
+	// As routes are passed by reference, when they are deleted from the tree,
+	// they will be zeroed and returned to the pool. To prevent routes from
+	// becoming invalid once freed, we must copy each route from the route lists.
+	// Since `RoutesList` is passed by value, there's no need to create a
+	// separate copy of it. However, since the `Routes` member within
+	// the struct is a reference type, we need to replace it as well.
+	dump := m.routes.Dump()
+	for key, list := range dump {
+		routes := make([]*Route, len(list.Routes))
+		for idx := range list.Routes {
+			routes[idx] = copyRoute(list.Routes[idx])
+		}
+		// replace with a copy of the routes slice to avoid sharing data
+		list.Routes = routes
+		dump[key] = list
+	}
+	return dump
 }
 
 func (m *RIB) LongestMatch(addr netip.Addr) (netip.Prefix, RoutesList, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	prefix, list, ok := m.routes.Lookup(addr)
+	routes := make([]*Route, len(list.Routes))
+	for idx := range list.Routes {
+		routes[idx] = copyRoute(list.Routes[idx])
+	}
+	// replace with a copy of the routes slice to avoid sharing data
+	list.Routes = routes
 
-	return m.routes.Lookup(addr)
+	runtime.AddCleanup(&list, func(routes []*Route) {
+		for _, r := range routes {
+			FreeRoute(r)
+		}
+	}, list.Routes)
+
+	return prefix, list, ok
 }
 
 func (m *RIB) BulkUpdate(routes []*Route) {

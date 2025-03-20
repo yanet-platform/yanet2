@@ -36,6 +36,21 @@ func makeRoute() *Route {
 	return r
 }
 
+func copyRoute(r *Route) *Route {
+	cpy := makeRoute()
+	*cpy = *r
+
+	// Copy LargeCommunities
+	cpy.LargeCommunities = nil
+	copyListRef := &cpy.LargeCommunities
+	for c := r.LargeCommunities; c != nil; c = c.Next {
+		*copyListRef = largeCommunityListStructPool.Get().(*LargeCommunityList)
+		(*copyListRef).LargeCommunity = c.LargeCommunity
+		copyListRef = &(*copyListRef).Next
+	}
+	return cpy
+}
+
 func MakeStaticRoute() *Route {
 	r := makeRoute()
 	r.SourceID = RouteSourceStatic

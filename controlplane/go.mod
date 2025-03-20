@@ -1,6 +1,6 @@
 module github.com/yanet-platform/yanet2/controlplane
 
-go 1.22.5
+go 1.24.0
 
 replace github.com/yanet-platform/yanet2/common/go => ../common/go
 
