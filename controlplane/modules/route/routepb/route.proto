@@ -10,6 +10,10 @@ service RouteService {
 	rpc ShowRoutes(ShowRoutesRequest) returns (ShowRoutesResponse) {
 	}
 
+	// LookupRoute looks up possible routes for the given IP address.
+	rpc LookupRoute(LookupRouteRequest) returns (LookupRouteResponse) {
+	}
+
 	// InsertRoute inserts a route into the routing table.
 	rpc InsertRoute(InsertRouteRequest) returns (InsertRouteResponse) {
 	}
@@ -27,6 +31,20 @@ message ShowRoutesRequest {
 message ShowRoutesResponse {
 	// List of routes in the routing table.
 	repeated Route routes = 1;
+}
+
+// LookupRouteRequest contains the IP address to lookup.
+message LookupRouteRequest {
+	// IP address to lookup.
+	string ip_addr = 1;
+}
+
+// LookupRouteResponse contains the matching routes for the IP address.
+message LookupRouteResponse {
+	// Prefix is the prefix that matched with the IP address.
+	string prefix = 1;
+	// Matching routes for the IP address, sorted with best path first.
+	repeated Route routes = 2;
 }
 
 // Route represents a routing table entry.

@@ -62,19 +62,20 @@ func NewMapTrie[K MapTrieKey[K], Q MapTrieQuery[K], V any](cap int) MapTrie[K, Q
 // possible prefix for the given query.
 //
 // If no match is found, the function returns the zero value and false.
-func (m *MapTrie[K, Q, V]) Lookup(query Q) (V, bool) {
+func (m *MapTrie[K, Q, V]) Lookup(query Q) (K, V, bool) {
 	bitLen := query.BitLen()
 
 	for bits := bitLen; bits >= 0; bits-- {
 		prefix, _ := query.Prefix(bits)
 
 		if value, ok := m[bits][prefix]; ok {
-			return value, true
+			return prefix, value, true
 		}
 	}
 
-	var zero V
-	return zero, false
+	var zeroPrefix K
+	var zeroValue V
+	return zeroPrefix, zeroValue, false
 }
 
 // LookupTraverse finds all prefixes in the MapTrie that contain the given query,

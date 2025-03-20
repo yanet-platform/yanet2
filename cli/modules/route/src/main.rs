@@ -1,10 +1,9 @@
 //! CLI for YANET "route" module.
 
-use core::{error::Error, net::IpAddr, str::FromStr};
+use core::{error::Error, net::IpAddr};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use code::{route_service_client::RouteServiceClient, InsertRouteRequest, RouteSourceId, ShowRoutesRequest};
 use ipnet::IpNet;
 use tabled::{
     settings::{
@@ -12,16 +11,14 @@ use tabled::{
         style::{BorderColor, HorizontalLine},
         Color, Style,
     },
-    Table,
+    Table, Tabled,
 };
 use tonic::transport::Channel;
-use yanet_cli_route::{Communities, LargeCommunity, Prefix, RouteEntry};
+use yanet_cli_route::{
+    code::{route_service_client::RouteServiceClient, InsertRouteRequest, LookupRouteRequest, ShowRoutesRequest},
+    RouteEntry,
+};
 use ync::logging;
-
-#[allow(non_snake_case)]
-pub mod code {
-    tonic::include_proto!("routepb");
-}
 
 /// Route module.
 #[derive(Debug, Clone, Parser)]
@@ -42,6 +39,8 @@ pub struct Cmd {
 pub enum ModeCmd {
     /// Show routes currently stored in RIB (route information base).
     Show(RouteShowCmd),
+    /// Perform RIB route lookup.
+    Lookup(RouteLookupCmd),
     /// Inserts a unicast static route.
     Insert(RouteInsertCmd),
 }
@@ -54,6 +53,12 @@ pub struct RouteShowCmd {
     /// Show only IPv6 routes.
     #[arg(long)]
     pub ipv6: bool,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct RouteLookupCmd {
+    /// The IP address to lookup in the routing table.
+    pub addr: IpAddr,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -94,6 +99,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
     match cmd.mode {
         ModeCmd::Show(cmd) => service.show_routes(cmd).await,
+        ModeCmd::Lookup(cmd) => service.lookup_route(cmd).await,
         ModeCmd::Insert(cmd) => service.insert_route(cmd).await,
     }
 }
@@ -121,52 +127,29 @@ impl RouteService {
         let mut entries = response
             .routes
             .into_iter()
-            .map(|route| {
-                let communities = route
-                    .large_communities
-                    .into_iter()
-                    .map(|c| LargeCommunity {
-                        global_administrator: c.global_administrator,
-                        local_data_part1: c.local_data_part1,
-                        local_data_part2: c.local_data_part2,
-                    })
-                    .collect();
-
-                let prefix = IpNet::from_str(&route.prefix).expect("must be valid prefix");
-
-                let source = RouteSourceId::try_from(route.source)
-                    .unwrap_or_default()
-                    .as_str_name()
-                    .strip_prefix("ROUTE_SOURCE_ID_")
-                    .unwrap_or_default()
-                    .to_lowercase();
-
-                RouteEntry {
-                    prefix: Prefix(prefix, route.is_best),
-                    next_hop: route.next_hop,
-                    peer: route.peer,
-                    source,
-                    peer_as: route.peer_as,
-                    origin_as: route.origin_as,
-                    pref: route.pref,
-                    med: route.med,
-                    communities: Communities(communities),
-                }
-            })
+            .map(|route| RouteEntry::from(route))
             .collect::<Vec<_>>();
 
         entries.sort_by(|a, b| a.prefix.0.cmp(&b.prefix.0));
 
-        let mut table = Table::new(entries);
-        table.with(
-            Style::modern()
-                .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
-                .remove_horizontal(),
-        );
-        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-        table.modify(Rows::first(), Color::BOLD);
+        print_table(entries);
 
-        println!("{}", table);
+        Ok(())
+    }
+
+    pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Box<dyn Error>> {
+        let request = LookupRouteRequest { ip_addr: cmd.addr.to_string() };
+
+        let response = self.client.lookup_route(request).await?.into_inner();
+
+        if response.routes.is_empty() {
+            println!("No routes found for {}", cmd.addr);
+            return Ok(());
+        }
+
+        // NOTE: no sorting here, since routes are already sorted by their best.
+
+        print_table(response.routes.into_iter().map(|route| RouteEntry::from(route)));
 
         Ok(())
     }
@@ -184,4 +167,21 @@ impl RouteService {
         log::debug!("InsertRouteResponse: {:?}", resp);
         Ok(())
     }
+}
+
+fn print_table<I, T>(entries: I)
+where
+    I: IntoIterator<Item = T>,
+    T: Tabled,
+{
+    let mut table = Table::new(entries);
+    table.with(
+        Style::modern()
+            .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
+            .remove_horizontal(),
+    );
+    table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
+    table.modify(Rows::first(), Color::BOLD);
+
+    println!("{}", table);
 }

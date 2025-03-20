@@ -72,34 +72,36 @@ func (m *RouteService) ShowRoutes(
 
 		for idx, r := range routesList.Routes {
 			isBest := idx == 0
-
-			communities := make([]*routepb.LargeCommunity, 0)
-			for c := r.LargeCommunities; c != nil; c = c.Next {
-				communities = append(communities, &routepb.LargeCommunity{
-					GlobalAdministrator: c.GA,
-					LocalDataPart1:      c.Data1,
-					LocalDataPart2:      c.Data2,
-				})
-			}
-
-			peer := ""
-			if r.Peer.IsValid() {
-				peer = r.Peer.String()
-			}
-
-			response.Routes = append(response.Routes, &routepb.Route{
-				Prefix:           prefix.String(),
-				NextHop:          r.NextHop.String(),
-				Peer:             peer,
-				PeerAs:           r.PeerAS,
-				OriginAs:         r.OriginAS,
-				Med:              r.Med,
-				Pref:             r.Pref,
-				Source:           routepb.RouteSourceID(r.SourceID),
-				LargeCommunities: communities,
-				IsBest:           isBest,
-			})
+			response.Routes = append(response.Routes, convertRoute(prefix, isBest, r))
 		}
+	}
+
+	return response, nil
+}
+
+func (m *RouteService) LookupRoute(
+	ctx context.Context,
+	request *routepb.LookupRouteRequest,
+) (*routepb.LookupRouteResponse, error) {
+	addr, err := netip.ParseAddr(request.GetIpAddr())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to parse IP address: %v", err)
+	}
+
+	prefix, routes, ok := m.rib.LongestMatch(addr)
+	if !ok {
+		return &routepb.LookupRouteResponse{}, nil
+	}
+
+	response := &routepb.LookupRouteResponse{
+		// TODO: Replace with IPNetwork protobuf message.
+		Prefix: prefix.String(),
+		Routes: make([]*routepb.Route, 0, len(routes.Routes)),
+	}
+
+	for idx, r := range routes.Routes {
+		isBest := idx == 0
+		response.Routes = append(response.Routes, convertRoute(prefix, isBest, r))
 	}
 
 	return response, nil
@@ -323,4 +325,37 @@ func (m *RouteService) updateModuleConfigs(
 		)
 	}
 	return nil
+}
+
+func convertRoute(prefix netip.Prefix, isBest bool, route *rib.Route) *routepb.Route {
+	communities := make([]*routepb.LargeCommunity, 0)
+	for c := route.LargeCommunities; c != nil; c = c.Next {
+		communities = append(communities, convertLargeCommunity(c.LargeCommunity))
+	}
+
+	peer := ""
+	if route.Peer.IsValid() {
+		peer = route.Peer.String()
+	}
+
+	return &routepb.Route{
+		Prefix:           prefix.String(),
+		NextHop:          route.NextHop.String(),
+		Peer:             peer,
+		PeerAs:           route.PeerAS,
+		OriginAs:         route.OriginAS,
+		Med:              route.Med,
+		Pref:             route.Pref,
+		Source:           routepb.RouteSourceID(route.SourceID),
+		LargeCommunities: communities,
+		IsBest:           isBest,
+	}
+}
+
+func convertLargeCommunity(community rib.LargeCommunity) *routepb.LargeCommunity {
+	return &routepb.LargeCommunity{
+		GlobalAdministrator: community.GA,
+		LocalDataPart1:      community.Data1,
+		LocalDataPart2:      community.Data2,
+	}
 }

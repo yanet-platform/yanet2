@@ -73,6 +73,13 @@ func (m *RIB) DumpRoutes() map[netip.Prefix]RoutesList {
 	return m.routes.Dump()
 }
 
+func (m *RIB) LongestMatch(addr netip.Addr) (netip.Prefix, RoutesList, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return m.routes.Lookup(addr)
+}
+
 func (m *RIB) BulkUpdate(routes []*Route) {
 	m.mu.Lock()
 	for _, route := range routes {

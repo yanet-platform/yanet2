@@ -24,38 +24,41 @@ func Test_MapTrie_LookupEmpty(t *testing.T) {
 	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
 
 	// Expect failed lookup in empty trie.
-	_, ok := trie.Lookup(netip.MustParseAddr("192.168.9.1"))
+	_, _, ok := trie.Lookup(netip.MustParseAddr("192.168.9.1"))
 	assert.False(t, ok)
 }
 
 func Test_MapTrie_LookupAfterInsert(t *testing.T) {
 	cases := []struct {
-		addr        string
-		expectedOk  bool
-		expectedIdx int
+		addr           string
+		expectedOk     bool
+		expectedPrefix netip.Prefix
+		expectedIdx    int
 	}{
-		{"192.168.9.1", true, 0},
-		{"127.0.0.1", false, 0},
+		{"192.168.9.1", true, netip.MustParsePrefix("192.168.0.0/16"), 0},
+		{"127.0.0.1", false, netip.Prefix{}, 0},
 	}
 
 	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
 	trie.InsertOrUpdate(netip.MustParsePrefix("192.168.0.0/16"), onEmpty(0), onUpdate(0))
 
 	for _, c := range cases {
-		v, ok := trie.Lookup(netip.MustParseAddr(c.addr))
+		prefix, v, ok := trie.Lookup(netip.MustParseAddr(c.addr))
 		require.Equal(t, c.expectedOk, ok)
 		assert.Equal(t, c.expectedIdx, v)
+		assert.Equal(t, c.expectedPrefix, prefix)
 	}
 }
 
 func Test_MapTrie_LookupAfterInsertUpdate(t *testing.T) {
 	cases := []struct {
-		addr        string
-		expectedOk  bool
-		expectedIdx int
+		addr           string
+		expectedOk     bool
+		expectedPrefix netip.Prefix
+		expectedIdx    int
 	}{
-		{"192.168.9.1", true, 1},
-		{"127.0.0.1", false, 0},
+		{"192.168.9.1", true, netip.MustParsePrefix("192.168.0.0/16"), 1},
+		{"127.0.0.1", false, netip.Prefix{}, 0},
 	}
 
 	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
@@ -64,23 +67,25 @@ func Test_MapTrie_LookupAfterInsertUpdate(t *testing.T) {
 	trie.InsertOrUpdate(netip.MustParsePrefix("192.168.0.0/16"), onEmpty(1), onUpdate(1))
 
 	for _, c := range cases {
-		v, ok := trie.Lookup(netip.MustParseAddr(c.addr))
+		prefix, v, ok := trie.Lookup(netip.MustParseAddr(c.addr))
 		require.Equal(t, c.expectedOk, ok)
 		assert.Equal(t, c.expectedIdx, v)
+		assert.Equal(t, c.expectedPrefix, prefix)
 	}
 }
 
 func Test_MapTrie_LookupAfterInsertNestedPrefixes(t *testing.T) {
 	cases := []struct {
-		addr        string
-		expectedOk  bool
-		expectedIdx int
+		addr           string
+		expectedOk     bool
+		expectedPrefix netip.Prefix
+		expectedIdx    int
 	}{
-		{"192.168.1.1", true, 4},
-		{"192.168.1.2", true, 3},
-		{"192.168.2.2", true, 2},
-		{"192.200.1.1", true, 1},
-		{"127.0.0.1", true, 0},
+		{"192.168.1.1", true, netip.MustParsePrefix("192.168.1.1/32"), 4},
+		{"192.168.1.2", true, netip.MustParsePrefix("192.168.1.0/24"), 3},
+		{"192.168.2.2", true, netip.MustParsePrefix("192.168.0.0/16"), 2},
+		{"192.200.1.1", true, netip.MustParsePrefix("192.0.0.0/8"), 1},
+		{"127.0.0.1", true, netip.MustParsePrefix("0.0.0.0/0"), 0},
 	}
 
 	trie := NewMapTrie[netip.Prefix, netip.Addr, int](0)
@@ -91,24 +96,26 @@ func Test_MapTrie_LookupAfterInsertNestedPrefixes(t *testing.T) {
 	trie.InsertOrUpdate(netip.MustParsePrefix("192.168.1.1/32"), onEmpty(4), onUpdate(4))
 
 	for _, c := range cases {
-		v, ok := trie.Lookup(netip.MustParseAddr(c.addr))
+		prefix, v, ok := trie.Lookup(netip.MustParseAddr(c.addr))
 		require.Equal(t, c.expectedOk, ok)
 		assert.Equal(t, c.expectedIdx, v)
+		assert.Equal(t, c.expectedPrefix, prefix)
 	}
 }
 
 func Test_MapTrie_Lookup6(t *testing.T) {
 	cases := []struct {
-		prefix      string
-		expectedOk  bool
-		expectedIdx int
+		prefix         string
+		expectedOk     bool
+		expectedPrefix netip.Prefix
+		expectedIdx    int
 	}{
-		{"fd25:cf19:6b13:cafe:babe:be57:f00d:04a5/128", false, 0},
-		{"fd25:cf19:6b13:cafe:babe:be57:f00d:400/120", false, 0},
-		{"fd25:cf19:6b13:cafe:babe:be57:f00d::/112", true, 2},
-		{"fd25:cf19:6b13:cafe::/64", true, 2},
-		{"fd25:8888:6b13:cafe::/64", true, 2},
-		{"fd25::/16", true, 2},
+		{"fd25:cf19:6b13:cafe:babe:be57:f00d:04a5/128", false, netip.Prefix{}, 0},
+		{"fd25:cf19:6b13:cafe:babe:be57:f00d:400/120", false, netip.Prefix{}, 0},
+		{"fd25:cf19:6b13:cafe:babe:be57:f00d::/112", true, netip.MustParsePrefix("fd25:cf19:6b13:cafe:babe:be57:f00d::/112"), 2},
+		{"fd25:cf19:6b13:cafe::/64", true, netip.MustParsePrefix("fd25:cf19:6b13:cafe:babe:be57:f00d::/112"), 2},
+		{"fd25:8888:6b13:cafe::/64", true, netip.MustParsePrefix("fd25:cf19:6b13:cafe:babe:be57:f00d::/112"), 2},
+		{"fd25::/16", true, netip.MustParsePrefix("fd25:cf19:6b13:cafe:babe:be57:f00d::/112"), 2},
 	}
 
 	addr := netip.MustParseAddr("fd25:cf19:6b13:cafe:babe:be57:f00d:0001")
@@ -120,27 +127,29 @@ func Test_MapTrie_Lookup6(t *testing.T) {
 
 		trie.InsertOrUpdate(prefix, onEmpty(idx), onUpdate(idx))
 
-		value, ok := trie.Lookup(addr)
+		matchedPrefix, value, ok := trie.Lookup(addr)
 		require.Equal(t, c.expectedOk, ok,
 			"lookup expected match==%t, but ok=%t, prefix=%s", c.expectedOk, ok, prefix)
 		require.Equal(t, c.expectedIdx, value,
 			"lookup expected value==%d, but value=%d, prefix=%s", c.expectedIdx, value, prefix)
+		require.Equal(t, c.expectedPrefix, matchedPrefix)
 	}
 }
 
 func Test_MapTrie_Lookup6TopDownInsert(t *testing.T) {
 	cases := []struct {
-		prefix      string
-		expectedOk  bool
-		expectedIdx int
+		prefix         string
+		expectedOk     bool
+		expectedPrefix netip.Prefix
+		expectedIdx    int
 	}{
-		{"fd25::/16", true, 0},
-		{"fd25:8888:6b13:cafe::/64", true, 0},
-		{"fd25:cf19:6b13:cafe::/64", true, 2},
-		{"fd25:cf19:6b13:cafe:babe:be57:f00d::/112", true, 3},
-		{"fd25:cf19:6b13:cafe:babe:be57:f00d:400/120", true, 3},
-		{"fd25:cf19:6b13:cafe:babe:be57:f00d:04a5/128", true, 3},
-		{"fd25:cf19:6b13:cafe:babe:be57:f00d:0001/128", true, 6},
+		{"fd25::/16", true, netip.MustParsePrefix("fd25::/16"), 0},
+		{"fd25:8888:6b13:cafe::/64", true, netip.MustParsePrefix("fd25::/16"), 0},
+		{"fd25:cf19:6b13:cafe::/64", true, netip.MustParsePrefix("fd25:cf19:6b13:cafe::/64"), 2},
+		{"fd25:cf19:6b13:cafe:babe:be57:f00d::/112", true, netip.MustParsePrefix("fd25:cf19:6b13:cafe:babe:be57:f00d::/112"), 3},
+		{"fd25:cf19:6b13:cafe:babe:be57:f00d:400/120", true, netip.MustParsePrefix("fd25:cf19:6b13:cafe:babe:be57:f00d::/112"), 3},
+		{"fd25:cf19:6b13:cafe:babe:be57:f00d:04a5/128", true, netip.MustParsePrefix("fd25:cf19:6b13:cafe:babe:be57:f00d::/112"), 3},
+		{"fd25:cf19:6b13:cafe:babe:be57:f00d:0001/128", true, netip.MustParsePrefix("fd25:cf19:6b13:cafe:babe:be57:f00d:0001/128"), 6},
 	}
 
 	addr := netip.MustParseAddr("fd25:cf19:6b13:cafe:babe:be57:f00d:0001")
@@ -152,11 +161,12 @@ func Test_MapTrie_Lookup6TopDownInsert(t *testing.T) {
 
 		trie.InsertOrUpdate(prefix, onEmpty(idx), onUpdate(idx))
 
-		value, ok := trie.Lookup(addr)
+		matchedPrefix, value, ok := trie.Lookup(addr)
 		require.Equal(t, c.expectedOk, ok,
 			"lookup expected match==%t, but ok=%t, prefix=%s", c.expectedOk, ok, prefix)
 		require.Equal(t, c.expectedIdx, value,
 			"lookup expected value==%d, but value=%d, prefix=%s", c.expectedIdx, value, prefix)
+		require.Equal(t, c.expectedPrefix, matchedPrefix)
 	}
 }
 
@@ -332,7 +342,7 @@ func Fuzz_MapTrie_InsertAndLookup(f *testing.F) {
 		copy(queryBytes[:], qb)
 		queryAddr := netip.AddrFrom16(queryBytes)
 
-		_, ok := mt.Lookup(queryAddr)
+		_, _, ok := mt.Lookup(queryAddr)
 		qaPrefix := netip.PrefixFrom(queryAddr, int(m)).Masked()
 		equal := p == qaPrefix
 
@@ -415,7 +425,7 @@ func Test_MapTrie_InsertMany(t *testing.T) {
 		)
 	}
 	for _, addr := range addrs {
-		_, ok := mt.Lookup(addr)
+		_, _, ok := mt.Lookup(addr)
 		require.True(t, ok, "lookup %s", addr)
 	}
 }
@@ -451,7 +461,7 @@ func Benchmark_MapTrie_InsertUniq(b *testing.B) {
 	var found int
 	idx := max(rand.Intn(len(addrs))-1000, 0)
 	for idx := range addrs[idx : idx+1000] {
-		v, ok := trie.Lookup(addrs[idx])
+		_, v, ok := trie.Lookup(addrs[idx])
 		if !ok {
 			panic("not found")
 		}
@@ -514,7 +524,7 @@ func Benchmark_mapTrie_lookup_mess_1k(b *testing.B) {
 	var found int
 	b.ResetTimer()
 	for idx := range b.N {
-		v, ok := mt.Lookup(addrs[idx%len(addrs)])
+		_, v, ok := mt.Lookup(addrs[idx%len(addrs)])
 		if !ok {
 			panic("not found")
 		}
