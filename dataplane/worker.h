@@ -1,6 +1,5 @@
 #pragma once
 
-#define _GNU_SOURCE
 #include <pthread.h>
 
 #include <stdint.h>

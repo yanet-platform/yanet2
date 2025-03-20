@@ -4,7 +4,7 @@ project('yanet', 'c',
                           'warning_level=2',
                           'werror=true'])
 
-add_global_arguments(['-march=corei7', '-g', '-O0'], language: 'c')
+add_global_arguments(['-march=corei7', '-g', '-O0', '-D_GNU_SOURCE'], language: 'c')
 
 yanet_rootdir = include_directories('.')
 
