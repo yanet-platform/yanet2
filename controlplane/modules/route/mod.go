@@ -50,9 +50,9 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 	}
 
 	numaIndices := make([]uint32, 0)
-	for numaIdx := range bitset.BitsTraverser(uint64(shm.NumaMap())) {
+	bitset.NewBitsTraverser(uint64(shm.NumaMap())).Traverse(func(numaIdx int) {
 		numaIndices = append(numaIndices, uint32(numaIdx))
-	}
+	})
 
 	agents := make([]*ffi.Agent, 0)
 	for _, numaIdx := range numaIndices {
