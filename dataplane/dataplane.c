@@ -300,12 +300,16 @@ dataplane_init_storage(
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
 		);
+
+	cp_config_gen->gen = 0;
+
 	SET_OFFSET_OF(&cp_config_gen->module_registry, cp_module_registry);
 	SET_OFFSET_OF(&cp_config_gen->pipeline_registry, cp_pipeline_registry);
 	SET_OFFSET_OF(&cp_config_gen->device_registry, device_registry);
 	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
 
 	SET_OFFSET_OF(&dp_config->cp_config, cp_config);
+	SET_OFFSET_OF(&cp_config->dp_config, dp_config);
 
 	*res_dp_config = dp_config;
 	*res_cp_config = cp_config;

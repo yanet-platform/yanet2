@@ -12,13 +12,23 @@
 
 #include "controlplane/agent/agent.h"
 
+struct dp_config;
+
 struct module_data;
+
+typedef void (*module_data_free_handler)(struct module_data *module_data);
 
 struct module_data {
 	uint64_t index;
 	uint64_t gen;
 	struct module_data *prev;
 	struct agent *agent;
+	/*
+	 * The fuunction valid only in execution context of owning agent.
+	 * If owning agent is `dead` the the data should be freed
+	 * during agent destroy.
+	 */
+	module_data_free_handler free_handler;
 	/*
 	 * All module datas are accessible through registry so name
 	 * should live somewhere there.
@@ -74,6 +84,7 @@ struct cp_agent_registry {
 struct cp_config {
 	struct block_allocator block_allocator;
 	struct memory_context memory_context;
+	struct dp_config *dp_config;
 
 	pid_t config_lock;
 
@@ -131,6 +142,12 @@ struct dp_module {
 	module_handler handler;
 };
 
+struct dp_worker {
+	uint64_t gen;
+	// TODO: place worker stat here
+	uint64_t pad[15];
+};
+
 struct dp_config {
 	uint32_t numa_map;
 	uint32_t numa_idx;
@@ -146,6 +163,9 @@ struct dp_config {
 	struct dp_module *dp_modules;
 
 	struct cp_config *cp_config;
+
+	uint64_t worker_count;
+	struct dp_worker **workers;
 };
 
 static inline bool
@@ -222,6 +242,47 @@ dp_config_lookup_module(
 	return -1;
 }
 
+static inline void
+dp_config_wait_for_gen(struct dp_config *dp_config, uint64_t gen) {
+	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
+	uint64_t idx = 0;
+	do {
+		struct dp_worker *worker = ADDR_OF(workers + idx);
+		if (worker->gen < gen) {
+			// TODO cpu yield
+			continue;
+		}
+
+		++idx;
+	} while (idx < dp_config->worker_count);
+}
+
+static inline void
+cp_config_collect_modules(struct cp_config *cp_config) {
+	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_module_registry *module_registry =
+		ADDR_OF(&config_gen->module_registry);
+
+	for (uint64_t idx = 0; idx < module_registry->count; ++idx) {
+		struct module_data *module_data =
+			ADDR_OF(&module_registry->modules[idx].data);
+		if (module_data->prev == NULL)
+			continue;
+
+		struct module_data *prev_module_data =
+			ADDR_OF(&module_data->prev);
+		struct agent *prev_agent = ADDR_OF(&prev_module_data->agent);
+		SET_OFFSET_OF(
+			&module_data->prev, ADDR_OF(&prev_module_data->prev)
+		);
+		// Put the data in the owning context free space
+		SET_OFFSET_OF(
+			&prev_module_data->prev, prev_agent->unused_module
+		);
+		SET_OFFSET_OF(&prev_agent->unused_module, prev_module_data);
+	}
+}
+
 /*
  * The routine updates one or more module confings linking them into
  * existing pipelines. Already existing modules are updated preserving its
@@ -242,10 +303,12 @@ dp_config_lookup_module(
  */
 static inline int
 cp_config_update_modules(
-	struct cp_config *cp_config,
+	struct agent *agent,
 	uint64_t module_count,
 	struct module_data **module_datas
 ) {
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
 
 	struct cp_config_gen *old_config_gen =
@@ -325,23 +388,30 @@ cp_config_update_modules(
 	for (uint64_t new_idx = 0; new_idx < module_count; ++new_idx) {
 		bool found = false;
 
+		struct module_data *new_module_data = module_datas[new_idx];
+
 		for (uint64_t old_idx = 0; old_idx < old_module_registry->count;
 		     ++old_idx) {
 			struct cp_module *new_module =
 				new_module_registry->modules + old_idx;
 
-			if (module_datas[new_idx]->index ==
-				    ADDR_OF(&new_module->data)->index &&
+			struct module_data *old_module_data =
+				ADDR_OF(&new_module->data);
+
+			if (new_module_data->index == old_module_data->index &&
 			    !strncmp(
-				    module_datas[new_idx]->name,
-				    ADDR_OF(&new_module->data)->name,
+				    new_module_data->name,
+				    old_module_data->name,
 				    64
 			    )) {
+				struct agent *old_agent =
+					ADDR_OF(&old_module_data->agent);
+				old_agent->loaded_module_count -= 1;
+
 				SET_OFFSET_OF(
-					&new_module->data, module_datas[new_idx]
+					&new_module->data, new_module_data
 				);
-				module_datas[new_idx]->gen =
-					new_config_gen->gen;
+				new_module_data->gen = new_config_gen->gen;
 				found = true;
 				break;
 			}
@@ -351,10 +421,13 @@ cp_config_update_modules(
 				new_module_registry->modules +
 				new_module_registry->count;
 
-			module_datas[new_idx]->gen = new_config_gen->gen;
-			SET_OFFSET_OF(&new_module->data, module_datas[new_idx]);
+			new_module_data->gen = new_config_gen->gen;
+			SET_OFFSET_OF(&new_module->data, new_module_data);
 			new_module_registry->count += 1;
 		}
+
+		struct agent *new_agent = ADDR_OF(&new_module_data->agent);
+		new_agent->loaded_module_count += 1;
 	}
 	// FIXME: assert new_config_gen.module_count == new_module_count
 
@@ -364,7 +437,27 @@ cp_config_update_modules(
 
 	SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
 
+	dp_config_wait_for_gen(dp_config, new_config_gen->gen);
+
+	cp_config_collect_modules(cp_config);
+
+	SET_OFFSET_OF(&new_config_gen->prev, ADDR_OF(&old_config_gen->prev));
+
+	memory_bfree(
+		&cp_config->memory_context,
+		old_module_registry,
+		sizeof(struct cp_module_registry) +
+			sizeof(struct cp_module) * old_module_registry->count
+	);
+
+	memory_bfree(
+		&cp_config->memory_context,
+		old_config_gen,
+		sizeof(struct cp_config_gen)
+	);
+
 	cp_config_unlock(cp_config);
+
 	return 0;
 }
 
@@ -418,6 +511,9 @@ cp_config_update_pipelines(
 		&new_config_gen->device_registry,
 		ADDR_OF(&old_config_gen->device_registry)
 	);
+
+	struct cp_pipeline_registry *old_pipeline_registry =
+		ADDR_OF(&old_config_gen->pipeline_registry);
 
 	struct cp_pipeline_registry *new_pipeline_registry =
 		(struct cp_pipeline_registry *)memory_balloc(
@@ -474,6 +570,35 @@ cp_config_update_pipelines(
 
 	SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
 
+	dp_config_wait_for_gen(dp_config, new_config_gen->gen);
+
+	SET_OFFSET_OF(&new_config_gen->prev, ADDR_OF(&old_config_gen->prev));
+
+	for (uint64_t idx = 0; idx < old_pipeline_registry->count; ++idx) {
+		struct cp_pipeline *pipeline =
+			old_pipeline_registry->pipelines + idx;
+		uint64_t *module_indexes = ADDR_OF(&pipeline->module_indexes);
+
+		memory_bfree(
+			&cp_config->memory_context,
+			module_indexes,
+			sizeof(uint64_t) * pipeline->length
+		);
+	}
+
+	memory_bfree(
+		&cp_config->memory_context,
+		old_pipeline_registry,
+		sizeof(struct cp_pipeline_registry
+		) + sizeof(struct cp_pipeline) * old_pipeline_registry->count
+	);
+
+	memory_bfree(
+		&cp_config->memory_context,
+		old_config_gen,
+		sizeof(struct cp_config_gen)
+	);
+
 unlock:
 	cp_config_unlock(cp_config);
 	return 0;
@@ -523,6 +648,26 @@ cp_config_update_devices(
 	SET_OFFSET_OF(&new_config_gen->prev, old_config_gen);
 
 	SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
+
+	dp_config_wait_for_gen(dp_config, new_config_gen->gen);
+
+	SET_OFFSET_OF(&new_config_gen->prev, ADDR_OF(&old_config_gen->prev));
+
+	struct cp_device_registry *old_device_registry =
+		ADDR_OF(&old_config_gen->device_registry);
+
+	memory_bfree(
+		&cp_config->memory_context,
+		old_device_registry,
+		sizeof(struct cp_device_registry) +
+			sizeof(uint64_t) * old_device_registry->count
+	);
+
+	memory_bfree(
+		&cp_config->memory_context,
+		old_config_gen,
+		sizeof(struct cp_config_gen)
+	);
 
 	cp_config_unlock(cp_config);
 	return 0;

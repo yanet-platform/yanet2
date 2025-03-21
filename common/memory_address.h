@@ -5,6 +5,6 @@
 			   (uintptr_t)((*OFFSET) ? (OFFSET) : NULL)))
 #define SET_OFFSET_OF(PTR, ADDR)                                               \
 	do {                                                                   \
-		*PTR = ((typeof(ADDR))((uintptr_t)(ADDR) -                     \
-				       (uintptr_t)(ADDR ? PTR : NULL)));       \
+		*(PTR) = ((typeof(ADDR))((uintptr_t)(ADDR) -                   \
+					 (uintptr_t)(ADDR ? (PTR) : NULL)));   \
 	} while (0)

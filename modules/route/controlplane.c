@@ -35,6 +35,8 @@ route_module_config_init(struct agent *agent, const char *name) {
 		&agent->memory_context,
 		name
 	);
+	SET_OFFSET_OF(&config->module_data.agent, agent);
+	config->module_data.free_handler = route_module_config_free;
 
 	// From the point all allocations are made on local memory context
 	struct memory_context *memory_context =
@@ -66,6 +68,44 @@ error_lpm_v4:
 	);
 	return NULL;
 }
+
+void
+route_module_config_free(struct module_data *module_data) {
+	struct route_module_config *config = container_of(
+		module_data, struct route_module_config, module_data
+	);
+
+	struct route *routes = ADDR_OF(&config->routes);
+	memory_bfree(
+		&config->module_data.memory_context,
+		routes,
+		sizeof(struct route) * config->route_count
+	);
+
+	struct route_list *route_lists = ADDR_OF(&config->route_lists);
+	memory_bfree(
+		&config->module_data.memory_context,
+		route_lists,
+		sizeof(struct route_list) * config->route_list_count
+	);
+
+	uint64_t *route_indexes = ADDR_OF(&config->route_indexes);
+	memory_bfree(
+		&config->module_data.memory_context,
+		route_indexes,
+		sizeof(uint64_t) * config->route_index_count
+	);
+
+	lpm_free(&config->lpm_v6);
+	lpm_free(&config->lpm_v4);
+
+	struct agent *agent = ADDR_OF(&module_data->agent);
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct route_module_config)
+	);
+};
 
 int
 route_module_config_add_route(

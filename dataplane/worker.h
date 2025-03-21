@@ -11,6 +11,8 @@
 struct dataplane;
 struct dataplane_numa_node;
 
+struct dp_worker;
+
 struct worker_read_ctx {
 
 	uint16_t read_size;
@@ -37,6 +39,7 @@ struct dataplane_worker {
 	struct dataplane *dataplane;
 	struct dataplane_numa_node *node;
 	struct dataplane_device *device;
+	struct dp_worker *dp_worker;
 
 	pthread_t thread_id;
 

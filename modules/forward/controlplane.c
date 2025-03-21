@@ -38,6 +38,8 @@ forward_module_config_init(
 		&agent->memory_context,
 		name
 	);
+	SET_OFFSET_OF(&config->module_data.agent, agent);
+	config->module_data.free_handler = forward_module_config_free;
 
 	struct memory_context *memory_context =
 		&config->module_data.memory_context;
@@ -53,6 +55,29 @@ forward_module_config_init(
 	}
 
 	return &config->module_data;
+}
+
+void
+forward_module_config_free(struct module_data *module_data) {
+	struct forward_module_config *config = container_of(
+		module_data, struct forward_module_config, module_data
+	);
+
+	for (uint64_t device_idx = 0; device_idx < config->device_count;
+	     ++device_idx) {
+		struct forward_device_config *device_config =
+			config->device_forwards + device_idx;
+		lpm_free(&device_config->lpm_v4);
+		lpm_free(&device_config->lpm_v6);
+	}
+
+	struct agent *agent = ADDR_OF(&module_data->agent);
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct forward_module_config
+		) + sizeof(struct forward_device_config) * config->device_count
+	);
 }
 
 int

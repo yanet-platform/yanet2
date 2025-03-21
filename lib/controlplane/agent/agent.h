@@ -9,6 +9,8 @@
 struct dp_config;
 struct cp_config;
 
+struct module_data;
+
 struct agent;
 
 struct agent {
@@ -18,9 +20,20 @@ struct agent {
 	struct cp_config *cp_config;
 	pid_t pid;
 	uint64_t memory_limit;
+	uint64_t gen;
+	uint64_t loaded_module_count;
+	uint64_t active_module_count;
 	struct agent *prev;
 	char name[80];
+
+	uint64_t arena_count;
+	void **arenas;
+
+	struct module_data *unused_module;
 };
+
+void
+agent_cleanup(struct agent *agent);
 
 struct module_data;
 

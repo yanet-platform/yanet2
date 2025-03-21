@@ -43,11 +43,12 @@ func main() {
 		for instanceIdx := C.uint64_t(0); instanceIdx < agent.instance_count; instanceIdx++ {
 			instance := (*C.struct_cp_agent_instance_info)(nil)
 			C.yanet_get_cp_agent_instance_info(agent, instanceIdx, &instance)
-			fmt.Printf("  Pid %v Limit %d Allocated %d Freed %d\n",
+			fmt.Printf("  Pid %v Limit %d Allocated %d Freed %d Gen %d\n",
 				instance.pid,
 				instance.memory_limit,
 				instance.allocated,
 				instance.freed,
+				instance.gen,
 			)
 		}
 	}

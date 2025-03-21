@@ -278,6 +278,8 @@ worker_loop_round(struct dataplane_worker *worker) {
 	struct cp_config_gen *cp_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 
+	worker->dp_worker->gen = cp_config_gen->gen;
+
 	// Determine pipelines
 	dataplane_route_pipeline(
 		worker->node->dp_config, worker->node->cp_config, &input_packets
@@ -346,7 +348,7 @@ dataplane_worker_init(
 	int queue_id,
 	struct dataplane_device_worker_config *config
 ) {
-
+	// FIXME: free resources on error
 	LOG(DEBUG,
 	    "initialize worker core=%u,numa=%u for port_id=%u",
 	    config->core_id,
@@ -359,6 +361,42 @@ dataplane_worker_init(
 	worker->port_id = device->port_id;
 	worker->queue_id = queue_id;
 	worker->config = *config;
+
+	struct dp_config *dp_config = worker->node->dp_config;
+	struct dp_worker *dp_worker = (struct dp_worker *)memory_balloc(
+		&dp_config->memory_context, sizeof(struct dp_worker)
+	);
+	if (dp_worker == NULL) {
+		return -1;
+	}
+	memset(dp_worker, 0, sizeof(struct dp_worker));
+	worker->dp_worker = dp_worker;
+	struct dp_worker **new_workers = (struct dp_worker **)memory_balloc(
+		&dp_config->memory_context,
+		sizeof(struct dp_worker **) * (dp_config->worker_count + 1)
+	);
+	if (new_workers == NULL) {
+		memory_bfree(
+			&dp_config->memory_context,
+			dp_worker,
+			sizeof(struct dp_worker)
+		);
+		return -1;
+	}
+	struct dp_worker **old_workers = ADDR_OF(&dp_config->workers);
+	for (uint64_t idx = 0; idx < dp_config->worker_count; ++idx) {
+		SET_OFFSET_OF(new_workers + idx, ADDR_OF(old_workers + idx));
+	}
+
+	SET_OFFSET_OF(new_workers + dp_config->worker_count, dp_worker);
+	// FIXME workers should be set up after device initialization
+	SET_OFFSET_OF(&dp_config->workers, new_workers);
+	memory_bfree(
+		&dp_config->memory_context,
+		old_workers,
+		sizeof(struct dp_worker **) * dp_config->worker_count
+	);
+	dp_config->worker_count += 1;
 
 	worker->read_ctx.read_size = 32;
 	worker->write_ctx.write_size = 32;

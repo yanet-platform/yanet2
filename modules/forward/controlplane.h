@@ -10,6 +10,9 @@ forward_module_config_init(
 	struct agent *agent, const char *name, uint16_t device_count
 );
 
+void
+forward_module_config_free(struct module_data *module_data);
+
 int
 forward_module_config_enable_v4(
 	struct module_data *module_data,

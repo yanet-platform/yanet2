@@ -11,6 +11,9 @@ struct module_data;
 struct module_data *
 route_module_config_init(struct agent *agent, const char *name);
 
+void
+route_module_config_free(struct module_data *module_data);
+
 int
 route_module_config_add_route(
 	struct module_data *module_data,

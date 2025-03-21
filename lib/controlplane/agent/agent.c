@@ -16,6 +16,10 @@
 
 #include "api/agent.h"
 
+#include <stdio.h>
+
+#define AGENT_ARENA_SIZE (1 << 22)
+
 struct yanet_shm *
 yanet_shm_attach(const char *path) {
 	int fd = open(path, O_RDWR, S_IRUSR | S_IWUSR);
@@ -90,11 +94,25 @@ agent_attach(
 
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 
+	cp_config_lock(cp_config);
+
 	struct agent *new_agent = (struct agent *)memory_balloc(
 		&cp_config->memory_context, sizeof(struct agent)
 	);
+	if (new_agent == NULL) {
+		goto unlock;
+	}
+	memset(new_agent, 0, sizeof(struct agent));
+
 	strtcpy(new_agent->name, agent_name, 80);
 	new_agent->memory_limit = memory_limit;
+	SET_OFFSET_OF(&new_agent->dp_config, dp_config);
+	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
+	new_agent->pid = getpid();
+
+	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	new_agent->gen = config_gen->gen;
+
 	block_allocator_init(&new_agent->block_allocator);
 	memory_context_init(
 		&new_agent->memory_context,
@@ -107,25 +125,34 @@ agent_attach(
 	 * using max possible chunk size what breaks allocator encapsulation.
 	 * Alternative multi-alloc api should be implemented.
 	 */
-	while (memory_limit > 0) {
-		size_t alloc_size = memory_limit;
-		if (alloc_size > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE) {
-			alloc_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
-		}
-		void *alloc =
-			memory_balloc(&cp_config->memory_context, alloc_size);
-		block_allocator_put_arena(
-			&new_agent->block_allocator, alloc, alloc_size
-		);
-
-		memory_limit -= alloc_size;
+	uint64_t arena_count =
+		(memory_limit + AGENT_ARENA_SIZE - 1) / AGENT_ARENA_SIZE;
+	void **arenas = (void **)memory_balloc(
+		&cp_config->memory_context, sizeof(void *) * arena_count
+	);
+	if (arenas == NULL) {
+		agent_cleanup(new_agent);
+		new_agent = NULL;
+		goto unlock;
 	}
 
-	SET_OFFSET_OF(&new_agent->dp_config, dp_config);
-	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
-	new_agent->pid = getpid();
+	while (new_agent->arena_count < arena_count) {
+		void *arena = memory_balloc(
+			&cp_config->memory_context, AGENT_ARENA_SIZE
+		);
+		if (arena == NULL) {
+			agent_cleanup(new_agent);
+			new_agent = NULL;
+			goto unlock;
+		}
+		block_allocator_put_arena(
+			&new_agent->block_allocator, arena, AGENT_ARENA_SIZE
+		);
+		SET_OFFSET_OF(arenas + new_agent->arena_count, arena);
+		new_agent->arena_count++;
+	}
+	SET_OFFSET_OF(&new_agent->arenas, arenas);
 
-	cp_config_lock(cp_config);
 	struct cp_agent_registry *old_registry =
 		ADDR_OF(&cp_config->agent_registry);
 	bool found = false;
@@ -142,6 +169,7 @@ agent_attach(
 			break;
 		}
 	}
+
 	if (!found) {
 		new_agent->prev = NULL;
 		struct cp_agent_registry *new_registry =
@@ -151,6 +179,12 @@ agent_attach(
 					(old_registry->count + 1) *
 						sizeof(struct agent *)
 			);
+		if (new_registry == NULL) {
+			agent_cleanup(new_agent);
+			new_agent = NULL;
+			goto unlock;
+		}
+
 		new_registry->count = old_registry->count + 1;
 		for (uint64_t agent_idx = 0; agent_idx < old_registry->count;
 		     ++agent_idx) {
@@ -169,9 +203,44 @@ agent_attach(
 		SET_OFFSET_OF(&cp_config->agent_registry, new_registry);
 	}
 
+	struct agent *agent = new_agent;
+	while (ADDR_OF(&agent->prev) != NULL) {
+		struct agent *prev_agent = ADDR_OF(&agent->prev);
+
+		if (prev_agent->loaded_module_count == 0) {
+			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
+			agent_cleanup(prev_agent);
+			continue;
+		}
+
+		agent = ADDR_OF(&agent->prev);
+	}
+
+unlock:
 	cp_config_unlock(cp_config);
 
 	return new_agent;
+}
+
+void
+agent_cleanup(struct agent *agent) {
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+
+	void **arenas = ADDR_OF(&agent->arenas);
+	for (uint64_t arena_idx = 0; arena_idx < agent->arena_count;
+	     ++arena_idx) {
+		memory_bfree(
+			&cp_config->memory_context,
+			ADDR_OF(arenas + arena_idx),
+			AGENT_ARENA_SIZE
+		);
+	}
+	memory_bfree(
+		&cp_config->memory_context,
+		arenas,
+		sizeof(void *) * agent->arena_count
+	);
+	memory_bfree(&cp_config->memory_context, agent, sizeof(struct agent));
 }
 
 int
@@ -187,9 +256,30 @@ agent_update_modules(
 	size_t module_count,
 	struct module_data **module_datas
 ) {
-	return cp_config_update_modules(
-		ADDR_OF(&agent->cp_config), module_count, module_datas
-	);
+	int res = cp_config_update_modules(agent, module_count, module_datas);
+
+	while (agent->unused_module != NULL) {
+		struct module_data *module_data =
+			ADDR_OF(&agent->unused_module);
+		SET_OFFSET_OF(
+			&agent->unused_module, ADDR_OF(&module_data->prev)
+		);
+		module_data->free_handler(module_data);
+	}
+
+	while (ADDR_OF(&agent->prev) != NULL) {
+		struct agent *prev_agent = ADDR_OF(&agent->prev);
+
+		if (prev_agent->loaded_module_count == 0) {
+			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
+			agent_cleanup(prev_agent);
+			continue;
+		}
+
+		agent = ADDR_OF(&agent->prev);
+	}
+
+	return res;
 }
 
 int
@@ -328,6 +418,7 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 		strtcpy(module_list_info->modules[module_idx].config_name,
 			module_data->name,
 			80);
+		module_list_info->modules[module_idx].gen = module_data->gen;
 	}
 
 unlock:
@@ -522,6 +613,7 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 			instance->memory_limit = agent->memory_limit;
 			instance->allocated = agent->memory_context.balloc_size;
 			instance->freed = agent->memory_context.bfree_size;
+			instance->gen = agent->gen;
 			agent = ADDR_OF(&agent->prev);
 		}
 

@@ -154,6 +154,7 @@ yanet_get_dp_module_info(
 struct cp_module_info {
 	uint64_t index;
 	char config_name[80];
+	uint64_t gen;
 };
 
 struct cp_module_list_info {
@@ -210,6 +211,7 @@ struct cp_agent_instance_info {
 	uint64_t memory_limit;
 	uint64_t allocated;
 	uint64_t freed;
+	uint64_t gen;
 };
 
 struct cp_agent_info {
