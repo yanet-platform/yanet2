@@ -44,22 +44,7 @@ agent_update_modules(
 	struct module_data **module_datas
 );
 
-struct module_config {
-	char type[80];
-	char name[80];
-};
-
-struct pipeline_config {
-	uint64_t length;
-	struct module_config modules[0];
-};
-
-int
-agent_update_pipelines(
-	struct agent *agent,
-	size_t pipeline_count,
-	struct pipeline_config *pipelines[]
-);
+struct pipeline_config;
 
 struct pipeline_config *
 pipeline_config_create(uint64_t length);
@@ -73,4 +58,11 @@ pipeline_config_set_module(
 	uint64_t index,
 	const char *type,
 	const char *name
+);
+
+int
+agent_update_pipelines(
+	struct agent *agent,
+	size_t pipeline_count,
+	struct pipeline_config *pipelines[]
 );

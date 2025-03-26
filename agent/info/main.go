@@ -2,6 +2,8 @@ package main
 
 //#cgo CFLAGS: -I../../ -I../../lib
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
+//#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
+//#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
 //#include "api/agent.h"
 //
 import "C"

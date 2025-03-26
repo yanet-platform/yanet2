@@ -2,6 +2,7 @@ dependencies = []
 
 dependencies += lib_common_dep
 dependencies += lib_config_dp_dep
+dependencies += lib_config_cp_dep
 
 sources = files(
   'agent.c',

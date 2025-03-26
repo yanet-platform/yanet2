@@ -12,6 +12,7 @@
 #include "common/memory.h"
 #include "common/strutils.h"
 
+#include "controlplane/config/zone.h"
 #include "dataplane/config/zone.h"
 
 #include "api/agent.h"
@@ -198,7 +199,15 @@ agent_attach(
 			new_agent
 		);
 
-		SET_OFFSET_OF(&new_registry->prev, old_registry);
+		SET_OFFSET_OF(
+			&new_registry->prev, ADDR_OF(&old_registry->prev)
+		);
+		memory_bfree(
+			&cp_config->memory_context,
+			old_registry,
+			sizeof(struct cp_agent_registry) +
+				sizeof(struct agent *) * old_registry->count
+		);
 
 		SET_OFFSET_OF(&cp_config->agent_registry, new_registry);
 	}

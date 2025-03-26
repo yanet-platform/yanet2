@@ -55,7 +55,8 @@ worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
 	uint16_t read = rte_eth_rx_burst(
 		worker->port_id, worker->queue_id, mbufs, ctx->read_size
 	);
-	__atomic_add_fetch(&worker->dataplane->read, read, __ATOMIC_ACQ_REL);
+	worker->dp_worker->rx_count += read;
+
 	for (uint32_t idx = 0; idx < read; ++idx) {
 		struct packet *packet = mbuf_to_packet(mbufs[idx]);
 		memset(packet, 0, sizeof(struct packet));
@@ -88,6 +89,8 @@ worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
 	struct dataplane_worker *worker = (struct dataplane_worker *)data;
 	struct packet **packets = (struct packet **)item;
 
+	worker->dp_worker->remote_rx_count += count;
+
 	struct rte_mbuf *mbufs[count];
 	for (size_t idx = 0; idx < count; ++idx) {
 		mbufs[idx] = packet_to_mbuf(packets[idx]);
@@ -95,10 +98,6 @@ worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
 
 	size_t written = rte_eth_tx_burst(
 		worker->port_id, worker->queue_id, mbufs, count
-	);
-
-	__atomic_add_fetch(
-		&worker->dataplane->write, written, __ATOMIC_ACQ_REL
 	);
 
 	for (size_t idx = 0; idx < written; ++idx) {
@@ -215,12 +214,9 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 			++to_write;
 		} else {
 			if (worker_send_to_port(ctx, packet)) {
-				fprintf(stderr,
-					"send fld %d %d to %d\n",
-					worker->device_id,
-					worker->queue_id,
-					packet->tx_device_id);
 				packet_list_add(&failed, packet);
+			} else {
+				worker->dp_worker->remote_tx_count += 1;
 			}
 		}
 	}
@@ -279,6 +275,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 		ADDR_OF(&cp_config->cp_config_gen);
 
 	worker->dp_worker->gen = cp_config_gen->gen;
+	worker->dp_worker->iterations += 1;
 
 	// Determine pipelines
 	dataplane_route_pipeline(
