@@ -99,9 +99,133 @@ func (m *DPConfig) Modules() []DPModule {
 	return out
 }
 
+func (m *DPConfig) CPConfigs() []CPConfig {
+	cpModulesListInfo := C.yanet_get_cp_module_list_info(m.ptr)
+	defer C.cp_module_list_info_free(cpModulesListInfo)
+
+	out := make([]CPConfig, 0, cpModulesListInfo.module_count)
+
+	for idx := C.uint64_t(0); idx < cpModulesListInfo.module_count; idx++ {
+		cpModuleInfo := C.struct_cp_module_info{}
+
+		// SAFETY: safe, because we query using index within valid range.
+		rc := C.yanet_get_cp_module_info(cpModulesListInfo, idx, &cpModuleInfo)
+		if rc != 0 {
+			panic("FFI corruption: module index became invalid")
+		}
+
+		configName := C.GoString(&cpModuleInfo.config_name[0])
+
+		out = append(out, CPConfig{
+			ModuleIndex: uint32(cpModuleInfo.index),
+			ConfigName:  configName,
+			Gen:         uint64(cpModuleInfo.gen),
+		})
+	}
+
+	return out
+}
+
+// Pipelines returns all pipeline configurations from the dataplane.
+func (m *DPConfig) Pipelines() []Pipeline {
+	pipelineListInfo := C.yanet_get_cp_pipeline_list_info(m.ptr)
+	defer C.cp_pipeline_list_info_free(pipelineListInfo)
+
+	out := make([]Pipeline, pipelineListInfo.count)
+	for idx := C.uint64_t(0); idx < pipelineListInfo.count; idx++ {
+		var pipelineInfo *C.struct_cp_pipeline_info
+		rc := C.yanet_get_cp_pipeline_info(pipelineListInfo, idx, &pipelineInfo)
+		if rc != 0 {
+			panic("FFI corruption: pipeline index became invalid")
+		}
+
+		pipeline := make([]uint64, pipelineInfo.length)
+		for moduleIdx := C.uint64_t(0); moduleIdx < pipelineInfo.length; moduleIdx++ {
+			var configIndex C.uint64_t
+			rc := C.yanet_get_cp_pipeline_module_info(pipelineInfo, moduleIdx, &configIndex)
+			if rc != 0 {
+				panic("FFI corruption: pipeline module index became invalid")
+			}
+			pipeline[moduleIdx] = uint64(configIndex)
+		}
+
+		out[idx] = Pipeline{
+			ModuleConfigs: pipeline,
+		}
+	}
+
+	return out
+}
+
+// Agents returns all agent information from the dataplane.
+func (m *DPConfig) Agents() []AgentInfo {
+	agentListInfo := C.yanet_get_cp_agent_list_info(m.ptr)
+	defer C.cp_agent_list_info_free(agentListInfo)
+
+	out := make([]AgentInfo, agentListInfo.count)
+	for idx := C.uint64_t(0); idx < agentListInfo.count; idx++ {
+		var agentInfo *C.struct_cp_agent_info
+		rc := C.yanet_get_cp_agent_info(agentListInfo, idx, &agentInfo)
+		if rc != 0 {
+			panic("FFI corruption: agent index became invalid")
+		}
+
+		instances := make([]AgentInstanceInfo, agentInfo.instance_count)
+		for instIdx := C.uint64_t(0); instIdx < agentInfo.instance_count; instIdx++ {
+			var instanceInfo *C.struct_cp_agent_instance_info
+			rc := C.yanet_get_cp_agent_instance_info(agentInfo, instIdx, &instanceInfo)
+			if rc != 0 {
+				panic("FFI corruption: agent instance index became invalid")
+			}
+
+			instances[instIdx] = AgentInstanceInfo{
+				PID:         uint32(instanceInfo.pid),
+				MemoryLimit: uint64(instanceInfo.memory_limit),
+				Allocated:   uint64(instanceInfo.allocated),
+				Freed:       uint64(instanceInfo.freed),
+				Gen:         uint64(instanceInfo.gen),
+			}
+		}
+
+		out[idx] = AgentInfo{
+			Name:      C.GoString(&agentInfo.name[0]),
+			Instances: instances,
+		}
+	}
+
+	return out
+}
+
 // DPModule represents a dataplane module in the YANET configuration.
 type DPModule struct {
 	name string
+}
+
+// CPConfig represents a control plane configuration associated with a module.
+type CPConfig struct {
+	ModuleIndex uint32
+	ConfigName  string
+	Gen         uint64
+}
+
+// Pipeline represents a dataplane packet processing pipeline configuration.
+type Pipeline struct {
+	ModuleConfigs []uint64
+}
+
+// AgentInfo represents information about a control plane agent.
+type AgentInfo struct {
+	Name      string
+	Instances []AgentInstanceInfo
+}
+
+// AgentInstanceInfo contains details about a specific agent instance.
+type AgentInstanceInfo struct {
+	PID         uint32
+	MemoryLimit uint64
+	Allocated   uint64
+	Freed       uint64
+	Gen         uint64
 }
 
 // Name returns the name of the dataplane module.

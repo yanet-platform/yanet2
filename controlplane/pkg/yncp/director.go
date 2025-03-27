@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route"
 )
@@ -50,6 +51,7 @@ func WithAtomicLogLevel(level *zap.AtomicLevel) DirectorOption {
 // services and run them.
 type Director struct {
 	cfg     *Config
+	shm     *ffi.SharedMemory
 	gateway *gateway.Gateway
 	log     *zap.SugaredLogger
 }
@@ -66,6 +68,12 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	log.Infof("initializing YANET controlplane ...")
 	log.Debugw("parsed config", zap.Any("config", cfg))
 
+	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
+	}
+	log.Debugw("attached to shared memory", zap.String("path", cfg.MemoryPath))
+
 	routeModule, err := route.NewRouteModule(cfg.Modules.Route, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize route built-in module: %w", err)
@@ -73,6 +81,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 
 	gw := gateway.NewGateway(
 		cfg.Gateway,
+		shm,
 		gateway.WithBuiltInModule(
 			routeModule,
 		),
@@ -82,6 +91,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 
 	return &Director{
 		cfg:     cfg,
+		shm:     shm,
 		gateway: gw,
 		log:     log,
 	}, nil
@@ -89,6 +99,8 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 
 // Close closes the YANET controlplane director.
 func (m *Director) Close() error {
+	defer m.shm.Detach()
+
 	return m.gateway.Close()
 }
 

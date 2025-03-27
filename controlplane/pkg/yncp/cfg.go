@@ -14,6 +14,9 @@ import (
 type Config struct {
 	// Logging configuration.
 	Logging LoggingConfig `json:"logging" yaml:"logging"`
+	// MemoryPath is the path to the shared-memory file that is used to
+	// communicate with dataplane.
+	MemoryPath string `yaml:"memory_path"`
 	// Gateway configuration.
 	Gateway *gateway.Config `json:"gateway" yaml:"gateway"`
 	// Modules configuration.
@@ -25,7 +28,8 @@ func DefaultConfig() *Config {
 		Logging: LoggingConfig{
 			Level: zapcore.InfoLevel,
 		},
-		Gateway: gateway.DefaultConfig(),
+		MemoryPath: "/dev/hugepages/yanet",
+		Gateway:    gateway.DefaultConfig(),
 		Modules: ModulesConfig{
 			Route: route.DefaultConfig(),
 		},

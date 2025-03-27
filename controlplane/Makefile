@@ -14,7 +14,10 @@ OUTPUT_BIN := $(BUILD_DIR)/yanet-controlplane
 MAIN_GO := cmd/yncp-director/main.go
 
 # Proto file dependencies
-YNPB_PROTO_FILES := $(YNPB_DIR)/gateway.proto $(YNPB_DIR)/logging.proto
+YNPB_PROTO_FILES := \
+	$(YNPB_DIR)/gateway.proto \
+	$(YNPB_DIR)/logging.proto \
+	$(YNPB_DIR)/inspect.proto
 ROUTE_PROTO_FILES := $(ROUTE_PB_DIR)/route.proto $(ROUTE_PB_DIR)/neighbour.proto $(ROUTE_PB_DIR)/macaddr.proto
 
 # Protoc options

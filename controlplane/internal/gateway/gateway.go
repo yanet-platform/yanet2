@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
@@ -81,7 +82,7 @@ type Gateway struct {
 }
 
 // NewGateway creates a new Gateway API.
-func NewGateway(cfg *Config, options ...GatewayOption) *Gateway {
+func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *Gateway {
 	opts := newGatewayOptions()
 	for _, o := range options {
 		o(opts)
@@ -114,12 +115,16 @@ func NewGateway(cfg *Config, options ...GatewayOption) *Gateway {
 
 	gatewayService := NewGatewayService(registry, opts.Log)
 	loggingService := NewLoggingService(opts.LogLevel, opts.Log)
+	inspectService := NewInspectService(shm)
 
 	ynpb.RegisterGatewayServer(server, gatewayService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", gatewayService)))
 
 	ynpb.RegisterLoggingServer(server, loggingService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", loggingService)))
+
+	ynpb.RegisterInspectServiceServer(server, inspectService)
+	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", inspectService)))
 
 	return &Gateway{
 		cfg:            cfg,

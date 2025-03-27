@@ -1,6 +1,5 @@
 use core::{
     fmt::{self, Display, Formatter},
-    net::IpAddr,
     str::FromStr,
 };
 

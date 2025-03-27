@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package ynpb;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
+
+// InspectService provides methods to inspect the YANET2 configuration.
+service InspectService {
+	// Inspect retrieves the current configuration state.
+	rpc Inspect(InspectRequest) returns (InspectResponse) {
+	}
+}
+
+// InspectRequest is sent to retrieve current configuration.
+message InspectRequest {
+}
+
+// InspectResponse contains the complete configuration state.
+message InspectResponse {
+	// NUMABitmap is a bitmap of NUMA nodes used in dataplane.
+	uint32 numa_bitmap = 1;
+	// NUMAInfo contains detailed information about each NUMA node.
+	repeated NUMAInfo numa_info = 2;
+}
+
+// NUMAInfo contains information about a NUMA node configuration.
+message NUMAInfo {
+	// NUMA node index.
+	uint32 numa = 1;
+	// Dataplane modules available in this NUMA node.
+	repeated DPModuleInfo dp_modules = 2;
+	// Control plane configurations in this NUMA node.
+	repeated CPConfigInfo cp_configs = 3;
+	// Pipelines configured in this NUMA node.
+	repeated PipelineInfo pipelines = 4;
+	// Agents running in this NUMA node.
+	repeated AgentInfo agents = 5;
+}
+
+// DPModuleInfo contains information about a dataplane module.
+message DPModuleInfo {
+	// Name is the name of the dataplane module.
+	//
+	// The module name uniquely identifies the module in the dataplane.
+	string name = 1;
+}
+
+// CPConfigInfo contains information about a control plane configuration.
+message CPConfigInfo {
+	// ModuleIdx is the index of the dataplane module this configuration
+	// belongs to.
+	uint32 module_idx = 1;
+	// Name is the unique identifier for this configuration.
+	string name = 2;
+	// Gen is the generation number of the control plane module.
+	uint64 gen = 3;
+}
+
+// PipelineInfo contains information about a packet processing pipeline.
+message PipelineInfo {
+	// PipelineId is the unique identifier for this pipeline.
+	uint32 pipeline_id = 1;
+	// Modules is a list of module configurations in the pipeline's
+	// processing order.
+	repeated PipelineModuleInfo modules = 2;
+}
+
+// PipelineModuleInfo contains information about a module in a pipeline.
+message PipelineModuleInfo {
+	// ConfigIndex is the index in the control plane configurations list.
+	uint32 config_index = 1;
+}
+
+// AgentInfo contains information about a control plane agent.
+message AgentInfo {
+	// Name is the identifier for this agent.
+	string name = 1;
+	// Instances is a list of running instances of this agent.
+	repeated AgentInstanceInfo instances = 2;
+}
+
+// AgentInstanceInfo contains information about a specific agent instance.
+message AgentInstanceInfo {
+	// Pid is the process ID of the agent instance.
+	uint32 pid = 1;
+	// MemoryLimit is the maximum memory allocation allowed for this agent
+	// instance.
+	uint64 memory_limit = 2;
+	// Allocated is the current amount of memory allocated by this agent
+	// instance.
+	uint64 allocated = 3;
+	// Freed is the amount of memory freed by this agent instance.
+	uint64 freed = 4;
+	// Gen is the generation number of the agent instance.
+	uint64 gen = 5;
+}
