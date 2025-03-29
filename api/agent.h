@@ -111,7 +111,7 @@ agent_update_pipelines(
 );
 
 struct pipeline_config *
-pipeline_config_create(uint64_t length);
+pipeline_config_create(const char *name, uint64_t length);
 
 void
 pipeline_config_free(struct pipeline_config *config);
@@ -124,9 +124,24 @@ pipeline_config_set_module(
 	const char *name
 );
 
+struct device_pipeline_map;
+
 int
 agent_update_devices(
-	struct agent *agent, size_t device_count, uint64_t *pipelines
+	struct agent *agent,
+	uint64_t device_count,
+	struct device_pipeline_map *pipelines[]
+);
+
+struct device_pipeline_map *
+device_pipeline_map_create(uint64_t device_id, uint64_t pipeline_count);
+
+void
+device_pipeline_map_free(struct device_pipeline_map *devices);
+
+int
+device_pipeline_map_add(
+	struct device_pipeline_map *devices, const char *name, uint64_t weight
 );
 
 struct dp_module_info {
@@ -177,6 +192,7 @@ yanet_get_cp_module_info(
 );
 
 struct cp_pipeline_info {
+	char name[64];
 	uint64_t length;
 	uint64_t modules[];
 };

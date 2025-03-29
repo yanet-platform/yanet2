@@ -21,8 +21,8 @@ pipeline_process(
 	}
 
 	struct cp_pipeline *cp_pipeline =
-		cp_pipeline_registry->pipelines + pipeline_idx;
-	uint64_t *module_indexes = ADDR_OF(&cp_pipeline->module_indexes);
+		ADDR_OF(cp_pipeline_registry->pipelines + pipeline_idx);
+	uint64_t *module_indexes = cp_pipeline->module_indexes;
 
 	struct cp_module_registry *cp_module_registry =
 		ADDR_OF(&cp_config_gen->module_registry);

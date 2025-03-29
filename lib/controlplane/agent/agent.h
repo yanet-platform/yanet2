@@ -47,7 +47,7 @@ agent_update_modules(
 struct pipeline_config;
 
 struct pipeline_config *
-pipeline_config_create(uint64_t length);
+pipeline_config_create(const char *name, uint64_t length);
 
 void
 pipeline_config_free(struct pipeline_config *config);
@@ -65,4 +65,17 @@ agent_update_pipelines(
 	struct agent *agent,
 	size_t pipeline_count,
 	struct pipeline_config *pipelines[]
+);
+
+struct device_pipeline_map;
+
+struct device_pipeline_map *
+device_pipeline_map_create(uint64_t device_id, uint64_t pipeline_count);
+
+void
+device_pipeline_map_free(struct device_pipeline_map *devices);
+
+int
+device_pipeline_map_add(
+	struct device_pipeline_map *device, const char *name, uint64_t weight
 );

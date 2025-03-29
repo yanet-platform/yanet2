@@ -292,12 +292,13 @@ dataplane_init_storage(
 		(struct cp_device_registry *)memory_balloc(
 			&cp_config->memory_context,
 			sizeof(struct cp_device_registry) +
-				sizeof(uint64_t) * device_count
+				sizeof(struct cp_device_pipeline_map *) *
+					device_count
 		);
 	device_registry->count = device_count;
 	for (uint64_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
 		// FIXME invalid pipeline id
-		device_registry->pipelines[dev_idx] = -1;
+		device_registry->device_map[dev_idx] = NULL;
 	}
 
 	struct cp_config_gen *cp_config_gen =
@@ -596,11 +597,20 @@ dataplane_route_pipeline(
 		if (packet->rx_device_id >= device_registry->count) {
 			// FIXME invalid pipeline id
 			packet->pipeline_idx = -1;
-		} else {
-			packet->pipeline_idx =
-				device_registry
-					->pipelines[packet->rx_device_id];
+			continue;
 		}
+
+		struct cp_device_pipeline_map *pipeline_map =
+			ADDR_OF(device_registry->device_map +
+				packet->rx_device_id);
+		if (pipeline_map == NULL) {
+			packet->pipeline_idx = -1;
+			continue;
+		}
+
+		packet->pipeline_idx =
+			pipeline_map
+				->pipelines[packet->hash % pipeline_map->size];
 	}
 }
 

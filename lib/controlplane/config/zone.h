@@ -68,8 +68,10 @@ struct cp_module_registry {
  * and indexes of modules to be processed inside module registry.
  */
 struct cp_pipeline {
+	char name[80];
 	uint64_t length;
-	uint64_t *module_indexes;
+	uint64_t refcnt;
+	uint64_t module_indexes[];
 };
 
 /*
@@ -80,7 +82,12 @@ struct cp_pipeline {
  */
 struct cp_pipeline_registry {
 	uint64_t count;
-	struct cp_pipeline pipelines[];
+	struct cp_pipeline *pipelines[];
+};
+
+struct cp_device_pipeline_map {
+	uint64_t size;
+	uint64_t pipelines[];
 };
 
 /*
@@ -90,7 +97,7 @@ struct cp_pipeline_registry {
  */
 struct cp_device_registry {
 	uint64_t count;
-	uint64_t pipelines[];
+	struct cp_device_pipeline_map *device_map[];
 };
 
 struct cp_config_gen;
@@ -162,7 +169,7 @@ struct cp_config {
 	struct cp_config_gen *cp_config_gen;
 
 	/*
-	 * Registry og agent attached to the controplane configuration
+	 * Registry of agent attached to the controplane configuration
 	 * memory zone.
 	 */
 	struct cp_agent_registry *agent_registry;
@@ -210,6 +217,7 @@ struct module_config {
 };
 
 struct pipeline_config {
+	char name[80];
 	uint64_t length;
 	struct module_config modules[0];
 };
@@ -219,13 +227,24 @@ cp_config_update_pipelines(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t pipeline_count,
-	struct pipeline_config *pipelines[]
+	struct pipeline_config **pipelines
 );
+
+struct pipeline_weight {
+	char name[80];
+	uint64_t weight;
+};
+
+struct device_pipeline_map {
+	uint64_t device_id;
+	uint64_t count;
+	struct pipeline_weight pipelines[];
+};
 
 int
 cp_config_update_devices(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t device_count,
-	uint64_t *pipelines
+	struct device_pipeline_map *pipelines[]
 );

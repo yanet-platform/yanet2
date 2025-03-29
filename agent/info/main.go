@@ -18,6 +18,11 @@ type ControlModule struct {
 	ConfigName string
 }
 
+type Pipeline struct {
+	Name string
+	Modules []ControlModule
+}
+
 func main() {
 	cPath := C.CString("/dev/hugepages/yanet")
 	defer C.free(unsafe.Pointer(cPath))
@@ -88,22 +93,26 @@ func main() {
 	cp_pipelines := C.yanet_get_cp_pipeline_list_info(dpConfig)
 	defer C.cp_pipeline_list_info_free(cp_pipelines)
 
-	pipelines := make([][]ControlModule, 0)
+	pipelines := make([]Pipeline, 0)
 	for idx := C.uint64_t(0); idx < cp_pipelines.count; idx++ {
-		pipeline := make([]ControlModule, 0)
 		var pipeline_info *C.struct_cp_pipeline_info
 		C.yanet_get_cp_pipeline_info(cp_pipelines, idx, &pipeline_info)
+		pipeline := Pipeline{
+			Name: C.GoString(&pipeline_info.name[0]),
+			Modules: make([]ControlModule, 0),
+		}
 		for idx := C.uint64_t(0); idx < pipeline_info.length; idx++ {
 			var config_index C.uint64_t
 			C.yanet_get_cp_pipeline_module_info(pipeline_info, idx, &config_index)
-			pipeline = append(pipeline, controlModules[config_index])
+			pipeline.Modules = append(pipeline.Modules, controlModules[config_index])
 		}
 		pipelines = append(pipelines, pipeline)
 	}
 	fmt.Printf("%s\n", "Pipelines")
 	for _, pipeline := range pipelines {
+		fmt.Printf("%s: ", pipeline.Name)
 		fmt.Printf("rx -> ")
-		for _, config := range pipeline {
+		for _, config := range pipeline.Modules {
 			fmt.Printf("%s:%s -> ", config.ModuleName, config.ConfigName)
 		}
 		fmt.Printf("tx\n")

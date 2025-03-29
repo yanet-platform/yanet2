@@ -48,7 +48,13 @@ type PipelineModuleConfig struct {
 }
 
 type PipelineConfig struct {
+	Name string `yaml:"name"`
 	Chain []PipelineModuleConfig `yaml:"chain"`
+}
+
+type DevicePipeline struct {
+	Name string `yaml:"name"`
+	Weight uint `yaml:"weight"`
 }
 
 type ControlplaneConfig struct {
@@ -58,24 +64,42 @@ type ControlplaneConfig struct {
 	MemoryLimit uint64 `yaml:"memory_limit"`
 
 	Pipelines []PipelineConfig `yaml:"pipelines"`
-	Devices   []uint64         `yaml:"devices"`
+	DevicePipelines   map[int][]DevicePipeline         `yaml:"device_pipelines"`
 
 	Forward ForwardConfig `yaml:"forward"`
 }
 
 func configureDevices(
 	agent *C.struct_agent,
-	pipelines []uint64,
+	devices map[int][]DevicePipeline,
 ) {
-	if pipelines == nil {
+	if devices == nil {
 		return
+	}
+
+	deviceMap := make([]*C.struct_device_pipeline_map, 0)
+
+	for id, pipelines := range devices {
+		pipelineMap := C.device_pipeline_map_create(C.uint64_t(id), C.uint64_t(len(pipelines)))
+		for _, pipeline := range pipelines {
+			C.device_pipeline_map_add(
+				pipelineMap,
+				C.CString(pipeline.Name),
+				C.uint64_t(pipeline.Weight),
+			)
+		}
+		deviceMap = append(deviceMap, pipelineMap)
 	}
 
 	C.agent_update_devices(
 		agent,
-		C.uint64_t(len(pipelines)),
-		(*C.uint64_t)(&pipelines[0]),
+		C.uint64_t(len(deviceMap)),
+		&deviceMap[0],
 	)
+
+	for _, pipelineMap := range deviceMap {
+		C.device_pipeline_map_free(pipelineMap)
+	}
 }
 
 func configureForward(
@@ -156,7 +180,10 @@ func configurePipelines(
 
 	for _, pipelineConfig := range pipelineConfigs {
 
-		pipeline := C.pipeline_config_create(C.uint64_t(len(pipelineConfig.Chain)))
+		pipeline := C.pipeline_config_create(
+			C.CString(pipelineConfig.Name),
+			C.uint64_t(len(pipelineConfig.Chain)),
+		)
 		defer C.pipeline_config_free(pipeline)
 
 		for idx, item := range pipelineConfig.Chain {
@@ -213,7 +240,7 @@ func main() {
 
 		configurePipelines(agent, config.Pipelines)
 
-		configureDevices(agent, config.Devices)
+		configureDevices(agent, config.DevicePipelines)
 
 	}
 

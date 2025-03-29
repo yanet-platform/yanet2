@@ -133,11 +133,11 @@ func main() {
 			&forward,
 		)
 
-		pipeline0 := C.pipeline_config_create(1)
+		pipeline0 := C.pipeline_config_create(C.CString("phy"), 1)
 		defer C.pipeline_config_free(pipeline0)
 		C.pipeline_config_set_module(pipeline0, 0, C.CString("forward"), C.CString(config.ModuleName))
 
-		pipeline1 := C.pipeline_config_create(1)
+		pipeline1 := C.pipeline_config_create(C.CString("virt"), 1)
 		defer C.pipeline_config_free(pipeline1)
 		C.pipeline_config_set_module(pipeline1, 0, C.CString("forward"), C.CString(config.ModuleName))
 

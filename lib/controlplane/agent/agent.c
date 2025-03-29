@@ -306,12 +306,12 @@ agent_update_pipelines(
 }
 
 struct pipeline_config *
-pipeline_config_create(uint64_t length) {
+pipeline_config_create(const char *name, uint64_t length) {
 	struct pipeline_config *config = (struct pipeline_config *)malloc(
 		sizeof(struct pipeline_config) +
 		sizeof(struct module_config) * length
 	);
-
+	strtcpy(config->name, name, 80);
 	config->length = length;
 
 	return config;
@@ -339,7 +339,9 @@ pipeline_config_set_module(
 
 int
 agent_update_devices(
-	struct agent *agent, uint64_t device_count, uint64_t *pipelines
+	struct agent *agent,
+	uint64_t device_count,
+	struct device_pipeline_map *pipelines[]
 ) {
 	return cp_config_update_devices(
 		ADDR_OF(&agent->dp_config),
@@ -482,7 +484,7 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 	pipeline_list_info->count = pipeline_registry->count;
 	for (uint64_t idx = 0; idx < pipeline_registry->count; ++idx) {
 		struct cp_pipeline *cp_pipeline =
-			pipeline_registry->pipelines + idx;
+			ADDR_OF(pipeline_registry->pipelines + idx);
 		struct cp_pipeline_info *pipeline_info =
 			(struct cp_pipeline_info *)malloc(
 				sizeof(struct cp_pipeline_info) +
@@ -493,9 +495,10 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 			pipeline_list_info = NULL;
 			goto unlock;
 		}
+		strtcpy(pipeline_info->name, cp_pipeline->name, 64);
 		pipeline_info->length = cp_pipeline->length;
 		memcpy(pipeline_info->modules,
-		       ADDR_OF(&cp_pipeline->module_indexes),
+		       cp_pipeline->module_indexes,
 		       sizeof(uint64_t) * cp_pipeline->length);
 
 		pipeline_list_info->pipelines[idx] = pipeline_info;
@@ -634,4 +637,39 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 unlock:
 	cp_config_unlock(cp_config);
 	return agent_list_info;
+}
+
+struct device_pipeline_map *
+device_pipeline_map_create(uint64_t device_id, uint64_t pipeline_count) {
+	struct device_pipeline_map *map = (struct device_pipeline_map *)malloc(
+		sizeof(struct device_pipeline_map) +
+		sizeof(struct pipeline_weight) * pipeline_count
+	);
+
+	if (map == NULL)
+		return NULL;
+
+	memset(map,
+	       0,
+	       sizeof(struct device_pipeline_map) +
+		       sizeof(struct pipeline_weight) * pipeline_count);
+	map->device_id = device_id;
+
+	return map;
+}
+
+void
+device_pipeline_map_free(struct device_pipeline_map *devices) {
+	free(devices);
+}
+
+int
+device_pipeline_map_add(
+	struct device_pipeline_map *device, const char *name, uint64_t weight
+) {
+	strtcpy(device->pipelines[device->count].name, name, 80);
+	device->pipelines[device->count].weight = weight;
+	device->count += 1;
+
+	return 0;
 }
