@@ -192,7 +192,7 @@ yanet_get_cp_module_info(
 );
 
 struct cp_pipeline_info {
-	char name[64];
+	char name[80];
 	uint64_t length;
 	uint64_t modules[];
 };

@@ -5,9 +5,14 @@
 
 #include <sys/types.h>
 
+#include "common/container_of.h"
 #include "common/memory.h"
 
+#define CP_MODULE_DATA_NAME_LEN 80
+#define CP_PIPELINE_NAME_LEN 80
+
 struct dp_config;
+struct cp_config;
 
 /*
  * Structure module_data reflects module configuration
@@ -25,6 +30,8 @@ struct module_data;
 typedef void (*module_data_free_handler)(struct module_data *module_data);
 
 struct module_data {
+	uint64_t refcnt;
+
 	// Reference to dataplane module
 	uint64_t index;
 	// Controlplane generation when this object was created
@@ -43,13 +50,9 @@ struct module_data {
 	 * All module datas are accessible through registry so name
 	 * should live somewhere there.
 	 */
-	char name[80];
+	char name[CP_MODULE_DATA_NAME_LEN];
 	// Memory context for additional resources inside the configuration
 	struct memory_context memory_context;
-};
-
-struct cp_module {
-	struct module_data *data;
 };
 
 /*
@@ -59,8 +62,11 @@ struct cp_module {
  * corresponding module_data in the module registry.
  */
 struct cp_module_registry {
+	uint64_t refcnt;
+
 	uint64_t count;
-	struct cp_module modules[];
+	uint64_t capacity;
+	struct module_data *modules[];
 };
 
 /*
@@ -68,9 +74,10 @@ struct cp_module_registry {
  * and indexes of modules to be processed inside module registry.
  */
 struct cp_pipeline {
-	char name[80];
-	uint64_t length;
 	uint64_t refcnt;
+
+	char name[CP_PIPELINE_NAME_LEN];
+	uint64_t length;
 	uint64_t module_indexes[];
 };
 
@@ -82,11 +89,14 @@ struct cp_pipeline {
  */
 struct cp_pipeline_registry {
 	uint64_t count;
+	uint64_t refcnt;
+	uint64_t capacity;
 	struct cp_pipeline *pipelines[];
 };
 
-struct cp_device_pipeline_map {
+struct cp_device {
 	uint64_t size;
+	uint64_t refcnt;
 	uint64_t pipelines[];
 };
 
@@ -97,7 +107,9 @@ struct cp_device_pipeline_map {
  */
 struct cp_device_registry {
 	uint64_t count;
-	struct cp_device_pipeline_map *device_map[];
+	uint64_t refcnt;
+	uint64_t capacity;
+	struct cp_device *devices[];
 };
 
 struct cp_config_gen;
@@ -206,7 +218,8 @@ cp_config_unlock(struct cp_config *cp_config);
  */
 int
 cp_config_update_modules(
-	struct agent *agent,
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
 	uint64_t module_count,
 	struct module_data **module_datas
 );
@@ -248,3 +261,36 @@ cp_config_update_devices(
 	uint64_t device_count,
 	struct device_pipeline_map *pipelines[]
 );
+
+struct cp_config_gen *
+cp_config_gen_create(struct cp_config *cp_config);
+
+static inline struct module_data *
+cp_config_gen_get_module(struct cp_config_gen *config_gen, uint64_t index) {
+	struct cp_module_registry *module_registry =
+		ADDR_OF(&config_gen->module_registry);
+	if (index >= module_registry->count)
+		return NULL;
+
+	return ADDR_OF(module_registry->modules + index);
+}
+
+static inline struct cp_pipeline *
+cp_config_gen_get_pipeline(struct cp_config_gen *config_gen, uint64_t index) {
+	struct cp_pipeline_registry *pipeline_registry =
+		ADDR_OF(&config_gen->pipeline_registry);
+	if (index >= pipeline_registry->count)
+		return NULL;
+
+	return ADDR_OF(pipeline_registry->pipelines + index);
+}
+
+static inline struct cp_device *
+cp_config_gen_get_device(struct cp_config_gen *config_gen, uint64_t index) {
+	struct cp_device_registry *device_registry =
+		ADDR_OF(&config_gen->device_registry);
+	if (index >= device_registry->count)
+		return NULL;
+
+	return ADDR_OF(device_registry->devices + index);
+}

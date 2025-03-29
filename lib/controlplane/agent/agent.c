@@ -265,7 +265,12 @@ agent_update_modules(
 	size_t module_count,
 	struct module_data **module_datas
 ) {
-	int res = cp_config_update_modules(agent, module_count, module_datas);
+	int res = cp_config_update_modules(
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
+		module_count,
+		module_datas
+	);
 
 	while (agent->unused_module != NULL) {
 		struct module_data *module_data =
@@ -311,7 +316,7 @@ pipeline_config_create(const char *name, uint64_t length) {
 		sizeof(struct pipeline_config) +
 		sizeof(struct module_config) * length
 	);
-	strtcpy(config->name, name, 80);
+	strtcpy(config->name, name, CP_PIPELINE_NAME_LEN);
 	config->length = length;
 
 	return config;
@@ -423,7 +428,7 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	for (uint64_t module_idx = 0; module_idx < module_registry->count;
 	     ++module_idx) {
 		struct module_data *module_data =
-			ADDR_OF(&(module_registry->modules + module_idx)->data);
+			ADDR_OF(module_registry->modules + module_idx);
 		module_list_info->modules[module_idx].index =
 			module_data->index;
 		strtcpy(module_list_info->modules[module_idx].config_name,
@@ -495,7 +500,10 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 			pipeline_list_info = NULL;
 			goto unlock;
 		}
-		strtcpy(pipeline_info->name, cp_pipeline->name, 64);
+
+		strtcpy(pipeline_info->name,
+			cp_pipeline->name,
+			CP_PIPELINE_NAME_LEN);
 		pipeline_info->length = cp_pipeline->length;
 		memcpy(pipeline_info->modules,
 		       cp_pipeline->module_indexes,
@@ -667,7 +675,9 @@ int
 device_pipeline_map_add(
 	struct device_pipeline_map *device, const char *name, uint64_t weight
 ) {
-	strtcpy(device->pipelines[device->count].name, name, 80);
+	strtcpy(device->pipelines[device->count].name,
+		name,
+		CP_PIPELINE_NAME_LEN);
 	device->pipelines[device->count].weight = weight;
 	device->count += 1;
 

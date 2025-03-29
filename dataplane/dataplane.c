@@ -226,8 +226,6 @@ dataplane_init_storage(
 	size_t dp_memory,
 	size_t cp_memory,
 
-	uint64_t device_count,
-
 	struct dp_config **res_dp_config,
 	struct cp_config **res_cp_config
 ) {
@@ -274,43 +272,7 @@ dataplane_init_storage(
 	cp_agent_registry->count = 0;
 	SET_OFFSET_OF(&cp_config->agent_registry, cp_agent_registry);
 
-	struct cp_module_registry *cp_module_registry =
-		(struct cp_module_registry *)memory_balloc(
-			&cp_config->memory_context,
-			sizeof(struct cp_module_registry)
-		);
-	cp_module_registry->count = 0;
-
-	struct cp_pipeline_registry *cp_pipeline_registry =
-		(struct cp_pipeline_registry *)memory_balloc(
-			&cp_config->memory_context,
-			sizeof(struct cp_pipeline_registry)
-		);
-	cp_pipeline_registry->count = 0;
-
-	struct cp_device_registry *device_registry =
-		(struct cp_device_registry *)memory_balloc(
-			&cp_config->memory_context,
-			sizeof(struct cp_device_registry) +
-				sizeof(struct cp_device_pipeline_map *) *
-					device_count
-		);
-	device_registry->count = device_count;
-	for (uint64_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
-		// FIXME invalid pipeline id
-		device_registry->device_map[dev_idx] = NULL;
-	}
-
-	struct cp_config_gen *cp_config_gen =
-		(struct cp_config_gen *)memory_balloc(
-			&cp_config->memory_context, sizeof(struct cp_config_gen)
-		);
-
-	cp_config_gen->gen = 0;
-
-	SET_OFFSET_OF(&cp_config_gen->module_registry, cp_module_registry);
-	SET_OFFSET_OF(&cp_config_gen->pipeline_registry, cp_pipeline_registry);
-	SET_OFFSET_OF(&cp_config_gen->device_registry, device_registry);
+	struct cp_config_gen *cp_config_gen = cp_config_gen_create(cp_config);
 	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
 
 	SET_OFFSET_OF(&dp_config->cp_config, cp_config);
@@ -394,7 +356,6 @@ dataplane_init(
 			storage + numa_size * node_idx,
 			config->dp_memory,
 			config->cp_memory,
-			config->device_count,
 			&node->dp_config,
 			&node->cp_config
 		);
@@ -594,15 +555,17 @@ dataplane_route_pipeline(
 
 	for (struct packet *packet = packet_list_first(packets); packet != NULL;
 	     packet = packet->next) {
-		if (packet->rx_device_id >= device_registry->count) {
-			// FIXME invalid pipeline id
+		struct cp_device *cp_device = cp_config_gen_get_device(
+			config_gen, packet->rx_device_id
+		);
+		if (cp_device == NULL) {
 			packet->pipeline_idx = -1;
 			continue;
 		}
 
-		struct cp_device_pipeline_map *pipeline_map =
-			ADDR_OF(device_registry->device_map +
-				packet->rx_device_id);
+		struct cp_device *pipeline_map =
+			ADDR_OF(device_registry->devices + packet->rx_device_id
+			);
 		if (pipeline_map == NULL) {
 			packet->pipeline_idx = -1;
 			continue;
