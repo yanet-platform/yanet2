@@ -13,12 +13,9 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/modules/route"
 )
 
-type ConfigReloader func() (*Config, error)
-
 type options struct {
-	Log            *zap.SugaredLogger
-	LogLevel       *zap.AtomicLevel
-	ConfigReloader ConfigReloader
+	Log      *zap.SugaredLogger
+	LogLevel *zap.AtomicLevel
 }
 
 func newOptions() *options {
@@ -45,15 +42,6 @@ func WithLog(log *zap.SugaredLogger) DirectorOption {
 func WithAtomicLogLevel(level *zap.AtomicLevel) DirectorOption {
 	return func(o *options) {
 		o.LogLevel = level
-	}
-}
-
-// WithConfigReloader sets the function to reload the entire Director's configuration
-//
-// Config reloading does not recreate, load, or unload modules.
-func WithConfigReloader(reloader ConfigReloader) DirectorOption {
-	return func(o *options) {
-		o.ConfigReloader = reloader
 	}
 }
 
