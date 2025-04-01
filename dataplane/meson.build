@@ -34,7 +34,8 @@ dependencies += lib_pipeline_dp_dep
 dependencies += lib_config_dp_dep
 
 dependencies += lib_balancer_dp_dep
-#dependencies += lib_decap_dp_dep
+dependencies += lib_decap_dp_dep
+dependencies += lib_dscp_dp_dep
 #dependencies += lib_acl_dp_dep
 dependencies += lib_forward_dp_dep
 dependencies += lib_route_dp_dep

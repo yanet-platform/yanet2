@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package decappb;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/decap/decappb;decappb";
+
+// DecapService is a service for decapsulation module.
+service DecapService {
+	// ShowConfig returns the current configuration for the decap module.
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {
+	}
+
+	// AddPrefixes adds prefixes to the decap module configuration.
+	rpc AddPrefixes(AddPrefixesRequest) returns (AddPrefixesResponse) {
+	}
+	// RemovePrefixes removes prefixes from the decap module configuration.
+	rpc RemovePrefixes(RemovePrefixesRequest)
+		returns (RemovePrefixesResponse) {
+	}
+}
+
+// TargetModule request for operating on a specific target module.
+message TargetModule {
+	// ModuleName is the name of the module for which to reload the
+	// configuration.
+	string module_name = 1;
+	// Numa specifies NUMA nodes that should be affected.
+	//
+	// Empty means all NUMA nodes.
+	repeated uint32 numa = 2;
+}
+
+// ShowConfigResponse retrieves the runtime configuration for the decap module.
+message ShowConfigRequest {
+	TargetModule target = 1;
+}
+
+message InstanceConfig {
+	uint32 numa = 2;
+	repeated string prefixes = 3;
+}
+// ShowConfigResponse contains the configuration details of the decap module.
+message ShowConfigResponse {
+	repeated InstanceConfig configs = 1;
+}
+
+// AddPrefixesRequest adds prefixes to the input filter of the decap module.
+message AddPrefixesRequest {
+	TargetModule target = 1;
+	repeated string prefixes = 2;
+}
+message AddPrefixesResponse {
+}
+
+// RemovePrefixesRequest removes prefixes from the input filter of the decap
+// module.
+message RemovePrefixesRequest {
+	TargetModule target = 1;
+	repeated string prefixes = 2;
+}
+message RemovePrefixesResponse {
+}

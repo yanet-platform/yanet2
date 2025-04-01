@@ -190,6 +190,10 @@ dataplane_load_module(
 	snprintf(loader_name, sizeof(loader_name), "%s%s", "new_module_", name);
 	module_load_handler loader =
 		(module_load_handler)dlsym(bin_hndl, loader_name);
+	if (loader == NULL) {
+		LOG(ERROR, "failed to load dyn symbol %s", loader_name);
+		return -1;
+	}
 	struct module *module = loader();
 
 	struct dp_module *dp_modules = ADDR_OF(&dp_config->dp_modules);
@@ -404,9 +408,30 @@ dataplane_init(
 			config->device_count;
 
 		// FIXME: load modules into dp memory
-		dataplane_load_module(node->dp_config, bin_hndl, "forward");
-		dataplane_load_module(node->dp_config, bin_hndl, "route");
-		dataplane_load_module(node->dp_config, bin_hndl, "balancer");
+		rc = dataplane_load_module(
+			node->dp_config, bin_hndl, "forward"
+		);
+		if (rc == -1) {
+			return -1;
+		}
+		rc = dataplane_load_module(node->dp_config, bin_hndl, "route");
+		if (rc == -1) {
+			return -1;
+		}
+		rc = dataplane_load_module(node->dp_config, bin_hndl, "decap");
+		if (rc == -1) {
+			return -1;
+		}
+		rc = dataplane_load_module(node->dp_config, bin_hndl, "dscp");
+		if (rc == -1) {
+			return -1;
+		}
+		rc = dataplane_load_module(
+			node->dp_config, bin_hndl, "balancer"
+		);
+		if (rc == -1) {
+			return -1;
+		}
 	}
 
 	size_t pci_port_count = 0;

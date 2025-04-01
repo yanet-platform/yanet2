@@ -9,12 +9,16 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
+	"github.com/yanet-platform/yanet2/controlplane/modules/decap"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route"
 )
 
+type ConfigReloader func() (*Config, error)
+
 type options struct {
-	Log      *zap.SugaredLogger
-	LogLevel *zap.AtomicLevel
+	Log            *zap.SugaredLogger
+	LogLevel       *zap.AtomicLevel
+	ConfigReloader ConfigReloader
 }
 
 func newOptions() *options {
@@ -41,6 +45,15 @@ func WithLog(log *zap.SugaredLogger) DirectorOption {
 func WithAtomicLogLevel(level *zap.AtomicLevel) DirectorOption {
 	return func(o *options) {
 		o.LogLevel = level
+	}
+}
+
+// WithConfigReloader sets the function to reload the entire Director's configuration
+//
+// Config reloading does not recreate, load, or unload modules.
+func WithConfigReloader(reloader ConfigReloader) DirectorOption {
+	return func(o *options) {
+		o.ConfigReloader = reloader
 	}
 }
 
@@ -79,11 +92,19 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize route built-in module: %w", err)
 	}
 
+	decapModule, err := decap.NewDecapModule(cfg.Modules.Decap, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize decap built-in module: %w", err)
+	}
+
 	gw := gateway.NewGateway(
 		cfg.Gateway,
 		shm,
 		gateway.WithBuiltInModule(
 			routeModule,
+		),
+		gateway.WithBuiltInModule(
+			decapModule,
 		),
 		gateway.WithLog(log),
 		gateway.WithAtomicLogLevel(opts.LogLevel),

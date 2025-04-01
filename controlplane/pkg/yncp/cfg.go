@@ -8,10 +8,12 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
+	"github.com/yanet-platform/yanet2/controlplane/modules/decap"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route"
 )
 
-type Config struct {
+type Config config
+type config struct {
 	// Logging configuration.
 	Logging LoggingConfig `json:"logging" yaml:"logging"`
 	// MemoryPath is the path to the shared-memory file that is used to
@@ -32,6 +34,7 @@ func DefaultConfig() *Config {
 		Gateway:    gateway.DefaultConfig(),
 		Modules: ModulesConfig{
 			Route: route.DefaultConfig(),
+			Decap: decap.DefaultConfig(),
 		},
 	}
 }
@@ -61,4 +64,35 @@ type LoggingConfig struct {
 type ModulesConfig struct {
 	// Route is the configuration for the route module.
 	Route *route.Config `yaml:"route"`
+
+	// Decap is the configuration for the decap module.
+	Decap *decap.Config `yaml:"decap"`
+}
+
+// UnmarshalYAML serves as a proxy for validation.
+//
+// To avoid infinite recursion, the validating wrapper casts itself to the
+// private config struct. This allows the decoder to operate on it using the
+// default behavior for handling Go structs without an unmarshal method.
+func (m *Config) UnmarshalYAML(value *yaml.Node) error {
+	err := value.Decode((*config)(m))
+	if err != nil {
+		return err
+	}
+	return m.Validate()
+}
+
+// Validate validates the control plane configuration.
+func (m *Config) Validate() error {
+	return m.Modules.Validate()
+}
+
+func (m *ModulesConfig) Validate() error {
+	if m.Route == nil {
+		return fmt.Errorf("route module is not configured")
+	}
+	if m.Decap == nil {
+		return fmt.Errorf("decap module is not configured")
+	}
+	return nil
 }

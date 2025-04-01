@@ -1,6 +1,5 @@
 # common dependecies
 dependencies += lib_common_dep
-dependencies += lib_filter_dep
 
 # dataplane dependecies
 dp_dependencies = dependencies
@@ -22,13 +21,15 @@ lib_decap_dp = static_library(
 lib_decap_dp_dep = declare_dependency(
   link_with: lib_decap_dp,
   link_args: [
-    '-Wl,--defsym=new_module_decap=new_module_decap',
+    '-Wl,--defsym',
+    '-Wl,new_module_decap=new_module_decap',
     '-Wl,--export-dynamic-symbol=new_module_decap',
   ],
 )
 
 # controlplane dependecies
 cp_dependencies = dependencies
+cp_dependencies += lib_config_dp_dep
 
 cp_sources = files(
   'controlplane.c',
