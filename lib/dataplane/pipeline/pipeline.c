@@ -1,8 +1,5 @@
 #include "pipeline.h"
 
-#include <stdlib.h>
-#include <string.h>
-
 #include "dataplane/module/module.h"
 
 #include "dataplane/config/zone.h"

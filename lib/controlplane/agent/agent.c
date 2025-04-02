@@ -105,7 +105,7 @@ agent_attach(
 	}
 	memset(new_agent, 0, sizeof(struct agent));
 
-	strtcpy(new_agent->name, agent_name, 80);
+	strtcpy(new_agent->name, agent_name, sizeof(new_agent->name));
 	new_agent->memory_limit = memory_limit;
 	SET_OFFSET_OF(&new_agent->dp_config, dp_config);
 	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
@@ -385,7 +385,7 @@ yanet_get_dp_module_list_info(struct dp_config *dp_config) {
 	     ++module_idx) {
 		strtcpy(module_list_info->modules[module_idx].name,
 			modules[module_idx].name,
-			80);
+			sizeof(module_list_info->modules[module_idx].name));
 	}
 
 unlock:
@@ -426,7 +426,8 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 			module_data->index;
 		strtcpy(module_list_info->modules[module_idx].config_name,
 			module_data->name,
-			80);
+			sizeof(module_list_info->modules[module_idx].config_name
+			));
 		module_list_info->modules[module_idx].gen = module_data->gen;
 	}
 
@@ -612,7 +613,8 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 			goto unlock;
 		}
 
-		strtcpy(agent_info->name, agent->name, 80);
+		strtcpy(agent_info->name, agent->name, sizeof(agent_info->name)
+		);
 		agent_info->instance_count = 0;
 		while (agent_info->instance_count < instance_count) {
 			struct cp_agent_instance_info *instance =

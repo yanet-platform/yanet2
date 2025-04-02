@@ -1,8 +1,9 @@
 #include "config.h"
 
+#include <stdlib.h>
 #include <yaml.h>
 
-#include <stdlib.h>
+#include "common/strutils.h"
 
 enum state {
 	state_empty,
@@ -84,7 +85,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 			switch (state) {
 			case state_dataplane_storage:
-				strncpy(dataplane->storage, start, 80);
+				strtcpy(dataplane->storage,
+					start,
+					sizeof(dataplane->storage));
 				state = state_dataplane;
 				break;
 			case state_dataplane_numa_count:
@@ -114,11 +117,15 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 
 			case state_device_port_name:
-				strncpy(device->port_name, start, 80);
+				strtcpy(device->port_name,
+					start,
+					sizeof(device->port_name));
 				state = state_device;
 				break;
 			case state_device_mac_addr:
-				strncpy(device->mac_addr, start, 20);
+				strtcpy(device->mac_addr,
+					start,
+					sizeof(device->mac_addr));
 				state = state_device;
 				break;
 			case state_device_mtu:

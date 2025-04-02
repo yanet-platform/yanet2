@@ -2,6 +2,7 @@
 #include "config.h"
 
 #include "common/container_of.h"
+#include "common/strutils.h"
 
 struct balancer_real_config {
 	uint64_t type;
@@ -34,9 +35,8 @@ balancer_module_config_init(struct agent *agent, const char *name) {
 		return NULL;
 
 	config->module_data.index = index;
-	strncpy(config->module_data.name,
-		name,
-		sizeof(config->module_data.name) - 1);
+	strtcpy(config->module_data.name, name, sizeof(config->module_data.name)
+	);
 	memory_context_init_from(
 		&config->module_data.memory_context,
 		&agent->memory_context,

@@ -5,8 +5,8 @@
 #include <string.h>
 
 #include "memory_address.h"
-
 #include "memory_block.h"
+#include "strutils.h"
 
 // TODO: link parent and child context
 struct memory_context {
@@ -31,7 +31,7 @@ memory_context_init(
 	context->bfree_size = 0;
 
 	SET_OFFSET_OF(&context->block_allocator, block_allocator);
-	strncpy(context->name, name, sizeof(context->name) - 1);
+	strtcpy(context->name, name, sizeof(context->name));
 	context->name[sizeof(context->name) - 1] = 0;
 
 	return 0;
@@ -51,7 +51,7 @@ memory_context_init_from(
 	SET_OFFSET_OF(
 		&context->block_allocator, ADDR_OF(&parent->block_allocator)
 	);
-	strncpy(context->name, name, sizeof(context->name) - 1);
+	strtcpy(context->name, name, sizeof(context->name));
 	context->name[sizeof(context->name) - 1] = 0;
 
 	return 0;

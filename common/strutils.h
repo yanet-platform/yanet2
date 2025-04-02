@@ -7,7 +7,7 @@
 
 #include <errno.h>
 
-ssize_t
+inline static ssize_t
 strtcpy(char *restrict dst, const char *restrict src, size_t dsize) {
 	bool trunc;
 	size_t dlen, slen;

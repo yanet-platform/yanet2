@@ -20,6 +20,8 @@
 #include <rte_bus_pci.h>
 #include <rte_pci.h>
 
+#include "common/strutils.h"
+
 #define MAX_RX_QUEUES 128
 #define MAX_TX_QUEUES 128
 
@@ -390,9 +392,9 @@ sock_dev_create(const char *path, const char *name, int numa_node) {
 	unlink(path);
 	internals->fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
 	internals->sockaddr.sun_family = AF_UNIX;
-	strncpy(internals->sockaddr.sun_path,
+	strtcpy(internals->sockaddr.sun_path,
 		path,
-		sizeof(internals->sockaddr.sun_path) - 1);
+		sizeof(internals->sockaddr.sun_path));
 	bind(internals->fd,
 	     (struct sockaddr *)&internals->sockaddr,
 	     sizeof(internals->sockaddr));

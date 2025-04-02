@@ -3,6 +3,7 @@
 #include "config.h"
 
 #include "common/container_of.h"
+#include "common/strutils.h"
 
 #include "controlplane/agent/agent.h"
 
@@ -30,9 +31,8 @@ forward_module_config_init(
 		return NULL;
 
 	config->module_data.index = index;
-	strncpy(config->module_data.name,
-		name,
-		sizeof(config->module_data.name) - 1);
+	strtcpy(config->module_data.name, name, sizeof(config->module_data.name)
+	);
 	memory_context_init_from(
 		&config->module_data.memory_context,
 		&agent->memory_context,

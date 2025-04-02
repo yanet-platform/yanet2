@@ -6,6 +6,7 @@
 
 #include "common/container_of.h"
 #include "common/memory_address.h"
+#include "common/strutils.h"
 
 #include "controlplane/agent/agent.h"
 #include "dataplane/config/zone.h"
@@ -31,9 +32,8 @@ decap_module_config_init(struct agent *agent, const char *name) {
 	}
 
 	config->module_data.index = index;
-	strncpy(config->module_data.name,
-		name,
-		sizeof(config->module_data.name) - 1);
+	strtcpy(config->module_data.name, name, sizeof(config->module_data.name)
+	);
 	memory_context_init_from(
 		&config->module_data.memory_context,
 		&agent->memory_context,

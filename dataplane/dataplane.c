@@ -14,6 +14,7 @@
 
 #include "common/data_pipe.h"
 #include "common/exp_array.h"
+#include "common/strutils.h"
 
 #include "common/hugepages.h"
 #include "logging/log.h"
@@ -25,7 +26,6 @@
 
 #include <unistd.h>
 
-#include "linux/mman.h"
 #include "sys/mman.h"
 #include <fcntl.h>
 
@@ -210,7 +210,7 @@ dataplane_load_module(
 
 	struct dp_module *dp_module = dp_modules + dp_config->module_count - 1;
 
-	strncpy(dp_module->name, module->name, 80);
+	strtcpy(dp_module->name, module->name, sizeof(dp_module->name));
 	dp_module->handler = module->handler;
 
 	SET_OFFSET_OF(&dp_config->dp_modules, dp_modules);
