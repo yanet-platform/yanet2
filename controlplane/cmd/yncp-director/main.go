@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/yanet-platform/yanet2/controlplane/pkg/yncp"
+	"github.com/yanet-platform/yanet2/controlplane/yncp"
 )
 
 var cmd Cmd
