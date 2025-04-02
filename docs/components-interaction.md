@@ -181,6 +181,11 @@ sequenceDiagram
         
         Note over Bird: Traffic flow restored
     end
+%%{init:
+  {
+    'themeCSS':'g:nth-of-type(1n) .actor-line {stroke: red !important;};g:nth-of-type(2n) .actor-line {stroke: purple !important;};g:nth-of-type(3n) .actor-line {stroke: orange !important;};g:nth-of-type(4n) .actor-line {stroke: green !important;};g:nth-of-type(5n) .actor-line {stroke: grey !important;};g:nth-of-type(6n) .actor-line {stroke: blue !important;};g:nth-of-type(7n) .actor-line {stroke: brown !important;};g:nth-of-type(8n) .actor-line {stroke: magenta !important;};g:nth-of-type(9n) .actor-line {stroke: lime !important;};g:nth-of-type(10n) .actor-line {stroke: indigo !important;};'
+  }
+}%%
 ```
 
 ## Initialization Stages
