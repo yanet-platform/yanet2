@@ -36,8 +36,8 @@ message ShowConfigRequest {
 }
 
 message InstanceConfig {
-	uint32 numa = 2;
-	repeated string prefixes = 3;
+	uint32 numa = 1;
+	repeated string prefixes = 2;
 }
 // ShowConfigResponse contains the configuration details of the decap module.
 message ShowConfigResponse {
