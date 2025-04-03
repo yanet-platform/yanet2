@@ -10,6 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/modules/decap"
+	"github.com/yanet-platform/yanet2/controlplane/modules/forward"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route"
 )
 
@@ -85,6 +86,11 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize decap built-in module: %w", err)
 	}
 
+	forwardModule, err := forward.NewForwardModule(cfg.Modules.Forward, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize forward built-in module: %w", err)
+	}
+
 	gw := gateway.NewGateway(
 		cfg.Gateway,
 		shm,
@@ -93,6 +99,9 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		),
 		gateway.WithBuiltInModule(
 			decapModule,
+		),
+		gateway.WithBuiltInModule(
+			forwardModule,
 		),
 		gateway.WithLog(log),
 		gateway.WithAtomicLogLevel(opts.LogLevel),

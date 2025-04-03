@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package forwardpb;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/forward/forwardpb;forwardpb";
+
+// ForwardService is a controlplane service for forwarding module.
+service ForwardService {
+	// ShowConfig returns the current configuration for the forward module.
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {
+	}
+
+	// AddDevice adds a L2 device to the forward module configuration.
+	rpc AddDevice(AddDeviceRequest) returns (AddDeviceResponse) {
+	}
+	// RemoveDevice removes a device from the forward module configuration.
+	// It also removes all configured forwards to this device.
+	rpc RemoveDevice(RemoveDeviceRequest) returns (RemoveDeviceResponse) {
+	}
+
+	// AddForward adds a forwarding rule to the forward module
+	// configuration.
+	rpc AddForward(AddForwardRequest) returns (AddForwardResponse) {
+	}
+	// RemoveForward removes a forwarding rule from the forward module
+	// configuration.
+	rpc RemoveForward(RemoveForwardRequest)
+		returns (RemoveForwardResponse) {
+	}
+}
+
+// TargetModule request for operating on a specific target module.
+message TargetModule {
+	// ModuleName is the name of the module for which to reload the
+	// configuration.
+	string module_name = 1;
+	// Numa specifies NUMA nodes that should be affected.
+	//
+	// Empty means all NUMA nodes.
+	repeated uint32 numa = 2;
+}
+
+// ShowConfigResponse retrieves the runtime configuration for the forward
+// module.
+message ShowConfigRequest {
+	TargetModule target = 1;
+}
+
+message ForwardEntry {
+	string network = 1;
+	uint32 device_id = 2;
+}
+
+message ForwardDeviceConfig {
+	uint32 device_id = 1;
+	repeated ForwardEntry forwards = 2;
+}
+
+message ForwardConfig {
+	repeated ForwardDeviceConfig devices = 1;
+}
+
+message InstanceConfig {
+	uint32 numa = 1;
+	ForwardConfig config = 2;
+}
+
+// ShowConfigResponse contains the configuration details of the forward module.
+message ShowConfigResponse {
+	repeated InstanceConfig configs = 1;
+}
+
+// AddDeviceRequest specifies the target module to which a new device
+// should be added in the forwarding module configuration.
+message AddDeviceRequest {
+	TargetModule target = 1;
+	uint32 device_id = 2;
+}
+
+message AddDeviceResponse {
+}
+
+// RemoveDeviceRequest specifies the request to remove a device from
+// a target module. All associated forwards pointing to the removed device
+// will also be deleted.
+message RemoveDeviceRequest {
+	TargetModule target = 1;
+	uint32 device_id = 2;
+}
+
+message RemoveDeviceResponse {
+}
+
+// AddForwardRequest specifies the target module to which a forward rule should
+// be added for the specified existing device identified by the device ID.
+// If an existing forward rule is present, it will be replaced.
+message AddForwardRequest {
+	TargetModule target = 1;
+	uint32 device_id = 2;
+	ForwardEntry forward = 3;
+}
+
+message AddForwardResponse {
+}
+
+// RemoveForwardRequest specifies the device ID within the target module
+// from which to remove the forward entry for the specified network.
+message RemoveForwardRequest {
+	TargetModule target = 1;
+	uint32 device_id = 2;
+	string network = 3;
+}
+
+message RemoveForwardResponse {
+}

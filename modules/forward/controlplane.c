@@ -13,7 +13,6 @@ struct module_data *
 forward_module_config_init(
 	struct agent *agent, const char *name, uint16_t device_count
 ) {
-	// FIXME dataplane lock
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	uint64_t index;
 	if (dp_config_lookup_module(dp_config, "forward", &index)) {

@@ -1,4 +1,4 @@
-package decap
+package forward
 
 import (
 	"context"
@@ -11,22 +11,22 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
-	"github.com/yanet-platform/yanet2/controlplane/modules/decap/decappb"
+	"github.com/yanet-platform/yanet2/controlplane/modules/forward/forwardpb"
 )
 
-// DecapModule is a control-plane component of a module that is responsible for
-// decapsulating various kinds of tunnels.
-type DecapModule struct {
-	cfg          *Config
-	server       *grpc.Server
-	shm          *ffi.SharedMemory
-	agents       []*ffi.Agent
-	decapService *DecapService
-	log          *zap.SugaredLogger
+// ForwardModule is a control-plane component of a module that is responsible for
+// forwarding traffic between devices.
+type ForwardModule struct {
+	cfg            *Config
+	server         *grpc.Server
+	shm            *ffi.SharedMemory
+	agents         []*ffi.Agent
+	forwardService *ForwardService
+	log            *zap.SugaredLogger
 }
 
-func NewDecapModule(cfg *Config, log *zap.SugaredLogger) (*DecapModule, error) {
-	log = log.With(zap.String("module", "decappb.DecapService"))
+func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, error) {
+	log = log.With(zap.String("module", "forwardpb.ForwardService"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
 	if err != nil {
@@ -39,28 +39,28 @@ func NewDecapModule(cfg *Config, log *zap.SugaredLogger) (*DecapModule, error) {
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("decap", numaIndices, uint(cfg.MemoryRequirements))
+	agents, err := shm.AgentsAttach("forward", numaIndices, uint(cfg.MemoryRequirements))
 	if err != nil {
 		return nil, err
 	}
 
 	server := grpc.NewServer()
 
-	decapService := NewDecapService(agents, log)
-	decappb.RegisterDecapServiceServer(server, decapService)
+	forwardService := NewForwardService(agents, log)
+	forwardpb.RegisterForwardServiceServer(server, forwardService)
 
-	return &DecapModule{
-		cfg:          cfg,
-		server:       server,
-		shm:          shm,
-		agents:       agents,
-		decapService: decapService,
-		log:          log,
+	return &ForwardModule{
+		cfg:            cfg,
+		server:         server,
+		shm:            shm,
+		agents:         agents,
+		forwardService: forwardService,
+		log:            log,
 	}, nil
 }
 
 // Close closes the module.
-func (m *DecapModule) Close() error {
+func (m *ForwardModule) Close() error {
 	for numaIdx, agent := range m.agents {
 		if err := agent.Close(); err != nil {
 			m.log.Warnw("failed to close shared memory agent", zap.Int("numa", numaIdx), zap.Error(err))
@@ -75,7 +75,7 @@ func (m *DecapModule) Close() error {
 }
 
 // Run runs the module until the specified context is canceled.
-func (m *DecapModule) Run(ctx context.Context) error {
+func (m *ForwardModule) Run(ctx context.Context) error {
 	listener, err := net.Listen("tcp", m.cfg.Endpoint)
 	if err != nil {
 		return fmt.Errorf("failed to initialize gRPC listener: %w", err)
@@ -87,7 +87,7 @@ func (m *DecapModule) Run(ctx context.Context) error {
 		return m.server.Serve(listener)
 	})
 
-	serviceNames := []string{"decappb.DecapService"}
+	serviceNames := []string{"forwardpb.ForwardService"}
 
 	if err = gateway.RegisterModule(
 		ctx,

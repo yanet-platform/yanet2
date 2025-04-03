@@ -9,6 +9,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/modules/decap"
+	"github.com/yanet-platform/yanet2/controlplane/modules/forward"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route"
 )
 
@@ -33,8 +34,9 @@ func DefaultConfig() *Config {
 		MemoryPath: "/dev/hugepages/yanet",
 		Gateway:    gateway.DefaultConfig(),
 		Modules: ModulesConfig{
-			Route: route.DefaultConfig(),
-			Decap: decap.DefaultConfig(),
+			Route:   route.DefaultConfig(),
+			Decap:   decap.DefaultConfig(),
+			Forward: forward.DefaultConfig(),
 		},
 	}
 }
@@ -67,6 +69,9 @@ type ModulesConfig struct {
 
 	// Decap is the configuration for the decap module.
 	Decap *decap.Config `yaml:"decap"`
+
+	// Forward is the configuration for the forward module.
+	Forward *forward.Config `yaml:"forward"`
 }
 
 // UnmarshalYAML serves as a proxy for validation.
@@ -93,6 +98,9 @@ func (m *ModulesConfig) Validate() error {
 	}
 	if m.Decap == nil {
 		return fmt.Errorf("decap module is not configured")
+	}
+	if m.Forward == nil {
+		return fmt.Errorf("forward module is not configured")
 	}
 	return nil
 }
