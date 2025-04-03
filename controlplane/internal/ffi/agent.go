@@ -5,6 +5,7 @@ package ffi
 //#cgo LDFLAGS: -L../../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../../build/lib/dataplane/config -lconfig_dp
 //
+//#define _GNU_SOURCE
 //#include "api/agent.h"
 //#include "controlplane/agent/agent.h"
 import "C"
