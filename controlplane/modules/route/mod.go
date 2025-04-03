@@ -3,6 +3,7 @@ package route
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 
 	"go.uber.org/zap"
@@ -106,27 +107,30 @@ func (m *RouteModule) Run(ctx context.Context) error {
 		return m.routeService.periodicRIBFlusher(ctx, m.cfg.RIBFlushPeriod)
 	})
 
+	listener, err := net.Listen("tcp", m.cfg.Endpoint)
+	if err != nil {
+		return fmt.Errorf("failed to initialize gRPC listener: %w", err)
+	}
+
+	wg.Go(func() error {
+		m.log.Infow("exposing gRPC API", zap.Stringer("addr", listener.Addr()))
+		return m.server.Serve(listener)
+	})
+
 	serviceNames := []string{
 		"routepb.RouteService",
 		"routepb.Neighbour",
 	}
 
-	listener, err := gateway.RegisterModule(
+	if err := gateway.RegisterModule(
 		ctx,
 		m.cfg.GatewayEndpoint,
-		m.cfg.Endpoint,
+		listener,
 		serviceNames,
-		m.log.With("name", "registry"),
-	)
-	if err != nil {
+		m.log,
+	); err != nil {
 		return fmt.Errorf("failed to register services: %w", err)
 	}
-
-	m.log.Infow("exposing gRPC API", zap.Stringer("addr", listener.Addr()))
-
-	wg.Go(func() error {
-		return m.server.Serve(listener)
-	})
 
 	<-ctx.Done()
 

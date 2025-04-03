@@ -52,24 +52,21 @@ func (r *BackendRegistry) RegisterBackend(service string, backend proxy.Backend)
 func RegisterModule(
 	ctx context.Context,
 	gatewayEndpoint string,
-	moduleEndpoint string,
+	listener net.Listener,
 	serviceNames []string,
 	log *zap.SugaredLogger,
-) (net.Listener, error) {
+) error {
+	log = log.With("name", "gateway")
 
 	gatewayConn, err := grpc.NewClient(
 		gatewayEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize gateway gRPC client: %w", err)
+		return fmt.Errorf("failed to initialize gateway gRPC client: %w", err)
 	}
 
 	client := ynpb.NewGatewayClient(gatewayConn)
-	listener, err := net.Listen("tcp", moduleEndpoint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize gRPC listener: %w", err)
-	}
 
 	wg, ctx := errgroup.WithContext(ctx)
 	for _, serviceName := range serviceNames {
@@ -98,8 +95,5 @@ func RegisterModule(
 		})
 	}
 
-	if err := wg.Wait(); err != nil {
-		return nil, err
-	}
-	return listener, nil
+	return wg.Wait()
 }
