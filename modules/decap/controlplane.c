@@ -17,7 +17,7 @@ decap_module_config_init(struct agent *agent, const char *name) {
 
 	uint64_t index;
 	if (dp_config_lookup_module(dp_config, "decap", &index)) {
-		errno = ENOENT;
+		errno = ENXIO;
 		return NULL;
 	}
 

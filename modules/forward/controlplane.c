@@ -1,3 +1,5 @@
+#include <errno.h>
+
 #include "controlplane.h"
 
 #include "config.h"
@@ -15,11 +17,14 @@ forward_module_config_init(
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	uint64_t index;
 	if (dp_config_lookup_module(dp_config, "forward", &index)) {
+		errno = ENXIO;
 		return NULL;
 	}
 
-	if (device_count != dp_config->dp_topology.device_count)
+	if (device_count != dp_config->dp_topology.device_count) {
+		errno = EINVAL;
 		return NULL;
+	}
 
 	struct forward_module_config *config =
 		(struct forward_module_config *)memory_balloc(
@@ -27,8 +32,10 @@ forward_module_config_init(
 			sizeof(struct forward_module_config
 			) + sizeof(struct forward_device_config) * device_count
 		);
-	if (config == NULL)
+	if (config == NULL) {
+		errno = ENOMEM;
 		return NULL;
+	}
 
 	config->module_data.index = index;
 	strtcpy(config->module_data.name, name, sizeof(config->module_data.name)
@@ -50,11 +57,22 @@ forward_module_config_init(
 		struct forward_device_config *device_forward =
 			config->device_forwards + dev_idx;
 		device_forward->l2_forward_device_id = dev_idx;
-		lpm_init(&device_forward->lpm_v4, memory_context);
-		lpm_init(&device_forward->lpm_v6, memory_context);
+		if (lpm_init(&device_forward->lpm_v4, memory_context)) {
+			goto fail;
+		}
+		if (lpm_init(&device_forward->lpm_v6, memory_context)) {
+			goto fail;
+		}
 	}
 
 	return &config->module_data;
+
+fail: {
+	int prev_errno = errno;
+	forward_module_config_free(&config->module_data);
+	errno = prev_errno;
+	return NULL;
+}
 }
 
 void
@@ -92,10 +110,14 @@ forward_module_config_enable_v4(
 		module_data, struct forward_module_config, module_data
 	);
 
-	if (src_device_id >= config->device_count)
+	if (src_device_id >= config->device_count) {
+		errno = ENODEV;
 		return -1;
-	if (dst_device_id >= config->device_count)
+	}
+	if (dst_device_id >= config->device_count) {
+		errno = ENODEV;
 		return -1;
+	}
 
 	return lpm_insert(
 		&config->device_forwards[src_device_id].lpm_v4,
@@ -118,10 +140,14 @@ forward_module_config_enable_v6(
 		module_data, struct forward_module_config, module_data
 	);
 
-	if (src_device_id >= config->device_count)
+	if (src_device_id >= config->device_count) {
+		errno = ENODEV;
 		return -1;
-	if (dst_device_id >= config->device_count)
+	}
+	if (dst_device_id >= config->device_count) {
+		errno = ENODEV;
 		return -1;
+	}
 
 	return lpm_insert(
 		&config->device_forwards[src_device_id].lpm_v6,
@@ -142,10 +168,14 @@ forward_module_config_enable_l2(
 		module_data, struct forward_module_config, module_data
 	);
 
-	if (src_device_id >= config->device_count)
+	if (src_device_id >= config->device_count) {
+		errno = ENODEV;
 		return -1;
-	if (dst_device_id >= config->device_count)
+	}
+	if (dst_device_id >= config->device_count) {
+		errno = ENODEV;
 		return -1;
+	}
 
 	config->device_forwards[src_device_id].l2_forward_device_id =
 		dst_device_id;

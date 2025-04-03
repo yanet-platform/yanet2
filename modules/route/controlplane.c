@@ -15,6 +15,7 @@ route_module_config_init(struct agent *agent, const char *name) {
 
 	uint64_t index;
 	if (dp_config_lookup_module(dp_config, "route", &index)) {
+		errno = ENXIO;
 		return NULL;
 	}
 
@@ -23,8 +24,10 @@ route_module_config_init(struct agent *agent, const char *name) {
 			&agent->memory_context,
 			sizeof(struct route_module_config)
 		);
-	if (config == NULL)
+	if (config == NULL) {
+		errno = ENOMEM;
 		return NULL;
+	}
 
 	config->module_data.index = index;
 	strtcpy(config->module_data.name, name, sizeof(config->module_data.name)

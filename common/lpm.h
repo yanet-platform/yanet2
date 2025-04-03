@@ -8,6 +8,7 @@
  * The tree does not allow to rewrite key-ranges or delete them.
  */
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -56,6 +57,7 @@ lpm_new_page(struct lpm *lpm, uint32_t *page_idx) {
 			memory_context, sizeof(lpm_page_t *) * new_chunk_count
 		);
 		if (pages == NULL) {
+			errno = ENOMEM;
 			return -1;
 		}
 
@@ -69,6 +71,7 @@ lpm_new_page(struct lpm *lpm, uint32_t *page_idx) {
 				sizeof(lpm_page_t *) * new_chunk_count
 			);
 
+			errno = ENOMEM;
 			return -1;
 		}
 
@@ -110,6 +113,10 @@ static inline void
 lpm_free(struct lpm *lpm) {
 	struct memory_context *memory_context = ADDR_OF(&lpm->memory_context);
 	lpm_page_t **pages = ADDR_OF(&lpm->pages);
+	if (pages == NULL) {
+		return;
+	}
+
 	uint32_t chunk_count =
 		(lpm->page_count + LPM_CHUNK_SIZE - 1) / LPM_CHUNK_SIZE;
 
@@ -152,9 +159,16 @@ lpm_check_range_hi(
 	return 0;
 }
 
-/*
- * The routine maps range [from..to] to value value.
- * Keys are big-endian encoded.
+/**
+ * Maps the range [from..to] to a given value.
+ *
+ * @param from   The starting point of the range (inclusive).
+ * @param to     The ending point of the range (inclusive).
+ * @param value  The value to which the range is mapped.
+ *
+ * @note Keys are big-endian encoded.
+ *
+ * @return On success, returns 0. If an error occurs, sets errno and returns -1.
  */
 static inline int
 lpm_insert(
