@@ -9,6 +9,8 @@ import "C"
 import (
 	"fmt"
 	"unsafe"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/bitset"
 )
 
 // SharedMemory represents a handle to YANET shared memory segment.
@@ -49,7 +51,7 @@ func (m *SharedMemory) DPConfig(numaIdx uint32) *DPConfig {
 	return &DPConfig{ptr: ptr}
 }
 
-// AgentAttach attaches to a module agent to shared memory.
+// AgentAttach attaches a module agent to shared memory on the specified NUMA node.
 func (m *SharedMemory) AgentAttach(name string, numaIdx uint32, size uint) (*Agent, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
@@ -62,6 +64,20 @@ func (m *SharedMemory) AgentAttach(name string, numaIdx uint32, size uint) (*Age
 	return &Agent{ptr: ptr}, nil
 }
 
+// AgentsAttach attaches agents to shared memory on the specified list of NUMA nodes.
+func (m *SharedMemory) AgentsAttach(name string, numaIndices []uint32, size uint) ([]*Agent, error) {
+	agents := make([]*Agent, 0, len(numaIndices))
+	for _, numaIdx := range numaIndices {
+		agent, err := m.AgentAttach(name, numaIdx, uint(size))
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to shared memory on NUMA %d: %w", numaIdx, err)
+		}
+
+		agents = append(agents, agent)
+	}
+	return agents, nil
+}
+
 // NumaMap returns the NUMA node mapping as a bitmap.
 //
 // The returned value is a bitmap where each bit represents a NUMA node that
@@ -72,6 +88,15 @@ func (m *SharedMemory) AgentAttach(name string, numaIdx uint32, size uint) (*Age
 // use by YANET.
 func (m *SharedMemory) NumaMap() uint32 {
 	return uint32(C.yanet_shm_numa_map(m.ptr))
+}
+
+// NumaIndices returns a list of indices available NUMA nodes.
+func (m *SharedMemory) NumaIndices() []uint32 {
+	numaIndices := make([]uint32, 0)
+	bitset.NewBitsTraverser(uint64(m.NumaMap())).Traverse(func(numaIdx int) {
+		numaIndices = append(numaIndices, uint32(numaIdx))
+	})
+	return numaIndices
 }
 
 // DPConfig represents a handle to dataplane configuration.

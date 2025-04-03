@@ -3,23 +3,19 @@ package route
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/netip"
-	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/bitset"
 	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/bird"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/internal/rib"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route/routepb"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
 // RouteModule is a controlplane part of a module that is responsible for
@@ -49,24 +45,15 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
 	}
 
-	numaIndices := make([]uint32, 0)
-	bitset.NewBitsTraverser(uint64(shm.NumaMap())).Traverse(func(numaIdx int) {
-		numaIndices = append(numaIndices, uint32(numaIdx))
-	})
+	numaIndices := shm.NumaIndices()
+	log.Debugw("mapping shared memory",
+		zap.Uint32s("numa", numaIndices),
+		zap.Stringer("size", cfg.MemoryRequirements),
+	)
 
-	agents := make([]*ffi.Agent, 0)
-	for _, numaIdx := range numaIndices {
-		log.Debugw("mapping shared memory",
-			zap.Uint32("numa", numaIdx),
-			zap.Stringer("size", cfg.MemoryRequirements),
-		)
-
-		agent, err := shm.AgentAttach("route", numaIdx, uint(cfg.MemoryRequirements))
-		if err != nil {
-			return nil, fmt.Errorf("failed to connect to shared memory on NUMA %d: %w", numaIdx, err)
-		}
-
-		agents = append(agents, agent)
+	agents, err := shm.AgentsAttach("route", numaIndices, uint(cfg.MemoryRequirements))
+	if err != nil {
+		return nil, err
 	}
 
 	server := grpc.NewServer()
@@ -108,18 +95,7 @@ func (m *RouteModule) Close() error {
 
 // Run runs the module until the specified context is canceled.
 func (m *RouteModule) Run(ctx context.Context) error {
-	listener, err := net.Listen("tcp", m.cfg.Endpoint)
-	if err != nil {
-		return fmt.Errorf("failed to initialize gRPC listener: %w", err)
-	}
-
-	listenerAddr := listener.Addr()
-	m.log.Infow("exposing gRPC API", zap.Stringer("addr", listenerAddr))
-
 	wg, ctx := errgroup.WithContext(ctx)
-	wg.Go(func() error {
-		return m.server.Serve(listener)
-	})
 	wg.Go(func() error {
 		return m.neighbourDiscovery.Run(ctx)
 	})
@@ -130,62 +106,34 @@ func (m *RouteModule) Run(ctx context.Context) error {
 		return m.routeService.periodicRIBFlusher(ctx, m.cfg.RIBFlushPeriod)
 	})
 
-	if err := m.registerServices(ctx, listenerAddr); err != nil {
-		return fmt.Errorf("failed to register services: %w", err)
-	}
-
-	<-ctx.Done()
-
-	m.log.Infow("stopping gRPC API", zap.Stringer("addr", listenerAddr))
-	defer m.log.Infow("stopped gRPC API", zap.Stringer("addr", listenerAddr))
-
-	m.server.GracefulStop()
-
-	return wg.Wait()
-}
-
-func (m *RouteModule) registerServices(ctx context.Context, listenerAddr net.Addr) error {
-	gatewayConn, err := grpc.NewClient(
-		m.cfg.GatewayEndpoint,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to initialize gateway gRPC client: %w", err)
-	}
-
-	gateway := ynpb.NewGatewayClient(gatewayConn)
-
-	servicesNames := []string{
+	serviceNames := []string{
 		"routepb.RouteService",
 		"routepb.Neighbour",
 	}
 
-	wg, ctx := errgroup.WithContext(ctx)
-	for _, serviceName := range servicesNames {
-		serviceName := serviceName
-		req := &ynpb.RegisterRequest{
-			Name:     serviceName,
-			Endpoint: listenerAddr.String(),
-		}
-
-		wg.Go(func() error {
-			for {
-				if _, err := gateway.Register(ctx, req); err == nil {
-					m.log.Infof("successfully registered %q in the Gateway API", serviceName)
-					return nil
-				}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
-
-				m.log.Warnf("failed to register %q in the Gateway API: %v", serviceName, err)
-				// TODO: exponential backoff should fit better here.
-				time.Sleep(1 * time.Second)
-			}
-		})
+	listener, err := gateway.RegisterModule(
+		ctx,
+		m.cfg.GatewayEndpoint,
+		m.cfg.Endpoint,
+		serviceNames,
+		m.log.With("name", "registry"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to register services: %w", err)
 	}
+
+	m.log.Infow("exposing gRPC API", zap.Stringer("addr", listener.Addr()))
+
+	wg.Go(func() error {
+		return m.server.Serve(listener)
+	})
+
+	<-ctx.Done()
+
+	m.log.Infow("stopping gRPC API", zap.Stringer("addr", listener.Addr()))
+	defer m.log.Infow("stopped gRPC API", zap.Stringer("addr", listener.Addr()))
+
+	m.server.GracefulStop()
 
 	return wg.Wait()
 }
