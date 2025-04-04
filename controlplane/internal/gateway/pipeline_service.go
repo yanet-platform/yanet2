@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
-	"go.uber.org/zap"
 )
 
 const agentName = "pipeline"
@@ -62,21 +63,7 @@ func (m *PipelineService) Update(
 				ModuleName: moduleName,
 				ConfigName: configName,
 			})
-
-			m.log.Infow("added module to pipeline",
-				zap.Uint32("numa", numaIdx),
-				zap.String("agent_name", agentName),
-				zap.String("pipeline_name", pipelineConfig.GetName()),
-				zap.String("module_name", moduleName),
-				zap.String("config_name", configName),
-			)
 		}
-
-		m.log.Infow("configured pipeline",
-			zap.Uint32("numa", numaIdx),
-			zap.String("agent_name", agentName),
-			zap.String("pipeline_name", pipelineConfig.GetName()),
-		)
 
 		configs = append(configs, cfg)
 	}
@@ -85,7 +72,10 @@ func (m *PipelineService) Update(
 		return nil, fmt.Errorf("failed to update pipelines: %w", err)
 	}
 
-	m.log.Infow("updated pipelines", zap.Uint32("numa", numaIdx))
+	m.log.Infow("updated pipelines",
+		zap.Uint32("numa", numaIdx),
+		zap.Any("configs", configs),
+	)
 
 	return &ynpb.UpdatePipelinesResponse{}, nil
 }
@@ -104,7 +94,6 @@ func (m *PipelineService) Assign(
 	}
 	defer agent.Close()
 
-	// Convert the protobuf device map to the FFI device map
 	devicePipelines := make(map[int][]ffi.DevicePipeline)
 	for deviceID, pipelines := range devices {
 		devicePipelinesList := make([]ffi.DevicePipeline, 0, len(pipelines.GetPipelines()))
@@ -114,14 +103,6 @@ func (m *PipelineService) Assign(
 				Name:   pipeline.GetPipelineName(),
 				Weight: uint(pipeline.GetPipelineWeight()),
 			})
-
-			m.log.Infow("assigning pipeline to device",
-				zap.Uint32("numa", numaIdx),
-				zap.String("agent_name", agentName),
-				zap.Uint32("device_id", uint32(deviceID)),
-				zap.String("pipeline_name", pipeline.GetPipelineName()),
-				zap.Uint32("pipeline_weight", pipeline.GetPipelineWeight()),
-			)
 		}
 
 		devicePipelines[int(deviceID)] = devicePipelinesList
@@ -131,7 +112,10 @@ func (m *PipelineService) Assign(
 		return nil, fmt.Errorf("failed to assign pipelines to devices: %w", err)
 	}
 
-	m.log.Infow("assigned pipelines to devices", zap.Uint32("numa", numaIdx))
+	m.log.Infow("assigned pipelines to devices",
+		zap.Uint32("numa", numaIdx),
+		zap.Any("devices", devices),
+	)
 
 	return &ynpb.AssignPipelinesResponse{}, nil
 }
