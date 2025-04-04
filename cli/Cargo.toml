@@ -11,6 +11,7 @@ members = [
     "modules/neighbour",
     "modules/forward",
     "modules/pipeline",
+    "modules/nat64",
 ]
 
 [profile.release]

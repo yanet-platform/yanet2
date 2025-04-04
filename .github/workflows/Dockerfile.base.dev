@@ -1,11 +1,81 @@
 FROM ubuntu:24.04
 
-ENV DEBIAN_FRONTEND noninteractive
+# Image metadata
+LABEL maintainer="YANET Team" \
+      description="Development environment for YANET2" \
+      version="1.0"
 
-RUN apt update -y
-RUN apt install -y meson clang
-RUN apt install -y python3-pyelftools libnuma-dev libpcap-dev git
-RUN apt install -y gdb lldb just
-RUN apt install -y golang-go
-RUN apt install -y lcov
-RUN apt install -y clang-format
+# Environment variables
+ENV DEBIAN_FRONTEND=noninteractive \
+    GOCACHE=/tmp/gocache \
+    GOMODCACHE=/tmp/gomodcache \
+    PATH="/usr/local/go/bin:${PATH}"
+
+# Tool versions
+ARG GO_VERSION=latest
+ARG PROTOC_GEN_GO_VERSION=latest
+ARG PROTOC_GEN_GO_GRPC_VERSION=latest
+
+RUN <<EOF
+#!/bin/bash
+set -euo pipefail
+
+# Function to install packages with error checking
+install_packages() {
+    if ! apt-get install -y "$@"; then
+        echo "Error installing packages: $*" >&2
+        exit 1
+    fi
+}
+
+# Update package lists
+apt-get update -y
+
+echo "Installing build tools..."
+install_packages \
+    meson \
+    clang \
+    clang-format \
+    git \
+    just \
+    make
+
+echo "Installing development dependencies..."
+install_packages \
+    python3-pyelftools \
+    libnuma-dev \
+    libpcap-dev \
+    libyaml-dev \
+    protobuf-compiler \
+    rustup
+
+echo "Installing debugging tools..."
+install_packages \
+    gdb \
+    lldb \
+    lcov
+
+echo "Installing Go and tools..."
+install_packages golang-go
+
+echo "Installing Go modules..."
+GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}
+GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
+
+echo "Install rust..."
+# fix "rustup is not installed at '/root/.cargo'" error
+rustup set auto-self-update disable
+rustup install stable
+
+# Clean up caches
+echo "Cleaning up caches..."
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+
+# Create cache directories
+mkdir -p /tmp/gocache /tmp/gomodcache
+chmod 777 /tmp/gocache /tmp/gomodcache
+EOF
+
+# Default working directory
+WORKDIR /yanet2

@@ -1,6 +1,6 @@
-.PHONY: all dataplane controlplane test
+.PHONY: all dataplane controlplane test cli
 
-all: go-cache-clean dataplane controlplane
+all: go-cache-clean dataplane controlplane cli
 
 go-cache-clean:
 	go clean -cache
@@ -10,6 +10,9 @@ dataplane:
 
 controlplane: dataplane
 	$(MAKE) -C controlplane
+
+cli:
+	$(MAKE) -C cli
 
 test: dataplane
 	meson test -C build

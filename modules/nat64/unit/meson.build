@@ -5,11 +5,13 @@ dependencies += lib_filter_dep
 
 dependencies += lib_common_dep
 dependencies += lib_module_dp_dep
+dependencies += lib_config_dp_dep
 
 
 sources = files(
   'main.c',
   '../nat64dp.c',
+  '../nat64cp.c',
   'nat64_test.c',
   'commands.c'
 )

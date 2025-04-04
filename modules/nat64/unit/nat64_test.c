@@ -1,5 +1,6 @@
 /* System headers */
 #include <dlfcn.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -30,6 +31,8 @@
 #include "dataplane/module/module.h"
 #include "nat64dp.h"
 #include "test.h"
+#include "nat64cp.h"
+#include "common.h"
 
 #ifdef DEBUG_NAT64
 RTE_LOG_REGISTER_DEFAULT(nat64test_logtype, DEBUG);
@@ -38,16 +41,40 @@ RTE_LOG_REGISTER_DEFAULT(nat64test_logtype, INFO);
 #endif
 #define RTE_LOGTYPE_NAT64_TEST nat64test_logtype
 
+#define ARENA_SIZE (1 << 20)
+
 /**
- * @brief Parameters for NAT64 unit testing
+ * @brief Test environment parameters for NAT64 unit testing
  *
- * Structure contains all necessary parameters for executing NAT64 tests,
- * including packet buffer pool, configuration and NAT64 module.
+ * This structure contains all necessary parameters and resources for executing NAT64 tests:
+ * - Packet front for managing test packet flows
+ * - Module instance being tested
+ * - Module configuration data
+ * - Memory management resources (arena, allocator, context)
+ * - DPDK mbuf pool for packet allocation
+ * - Configuration data and size
+ *
+ * The structure provides a centralized way to manage test state and resources,
+ * ensuring proper initialization and cleanup between test cases.
+ *
+ * @note The mbuf_pool is initialized during test setup and used for all packet
+ *       allocations during testing
+ * @note Memory resources (arena, allocator) are used for dynamic allocations
+ *       during testing
+ * @note Configuration data is used to set up NAT64 mappings and prefixes
+ *
+ * @see test_setup() For initialization of these parameters
+ * @see packet_front For packet management
+ * @see module_data For NAT64 module configuration
  */
 struct nat64_unittest_params {
 	struct packet_front packet_front; /**< Packet front for testing */
 	struct module *module; /**< Pointer to the module being tested */
-	struct module_config *module_config; /**< Module configuration */
+	struct module_data *module_data; /**< Module configuration */
+	
+	void* arena0;
+	struct block_allocator ba;
+	struct memory_context mctx;
 
 	struct rte_mempool *mbuf_pool; /**< Packet buffer pool */
 	uint8_t *config;	       /**< Pointer to configuration data */
@@ -62,6 +89,7 @@ struct nat64_unittest_params {
  */
 static struct nat64_unittest_params test_params = {
 	.mbuf_pool = NULL,
+	.module_data = NULL,
 };
 
 /**
@@ -125,14 +153,43 @@ static struct {
 	 }};
 
 /**
- * @brief Set up test environment before test execution
+ * @brief Initialize test environment and resources for NAT64 testing
  *
- * Initializes test environment by:
- * 1. Setting up logging level based on debug configuration
- * 2. Creating DPDK mbuf pool for packet allocation
- * 3. Initializing packet front for testing
+ * This function performs comprehensive test environment setup:
+ * 1. Configures logging:
+ *    - Sets debug level if DEBUG_NAT64 is defined
+ *    - Enables detailed logging of test execution
  *
- * @return TEST_SUCCESS on successful setup, error code otherwise
+ * 2. Creates DPDK resources:
+ *    - Allocates mbuf pool with 4096 elements
+ *    - Sets buffer size to RTE_MBUF_DEFAULT_BUF_SIZE
+ *    - Configures cache size of 250 mbufs
+ *    - Uses current CPU socket for optimal performance
+ *
+ * 3. Initializes memory management:
+ *    - Allocates arena of ARENA_SIZE bytes
+ *    - Sets up block allocator for dynamic memory
+ *    - Creates memory context for NAT64 module
+ *
+ * 4. Sets up packet processing:
+ *    - Initializes packet front for managing test packets
+ *    - Prepares input/output packet queues
+ *
+ * The setup ensures all resources needed for NAT64 testing are properly
+ * allocated and initialized.
+ *
+ * @return TEST_SUCCESS on successful setup,
+ *         Negative error code on failure:
+ *         - ENOMEM: Memory allocation failed
+ *         - EINVAL: Invalid parameter/configuration
+ *
+ * @note Calls rte_pktmbuf_pool_create() which may fail if system lacks huge pages
+ * @note Memory arena size is defined by ARENA_SIZE macro
+ * @note Resources must be freed by corresponding cleanup function
+ *
+ * @see test_params Global test parameters structure
+ * @see packet_front_init() For packet management initialization
+ * @see memory_context_init() For memory management setup
  */
 static int
 test_setup(void) {
@@ -158,8 +215,136 @@ test_setup(void) {
 	packet_front_init(&test_params.packet_front);
 	RTE_LOG(DEBUG, NAT64_TEST, "Init packet front done.\n");
 
+	// arena initialization
+	test_params.arena0 = malloc(ARENA_SIZE);
+	if (test_params.arena0 == NULL) {
+		RTE_LOG(ERR, NAT64_TEST, "could not allocate arena0\n");
+		return -1;
+	}
+
+	block_allocator_init(&test_params.ba);
+	block_allocator_put_arena(&test_params.ba, test_params.arena0, ARENA_SIZE);
+
+	memory_context_init(&test_params.mctx, "nat64 tests", &test_params.ba);
+
 	return TEST_SUCCESS;
 }
+
+/**
+ * @brief Configure NAT64 module for testing
+ *
+ * Sets up:
+ * - Memory and basic parameters
+ * - LPM tables for address lookup
+ * - NAT64 prefix (2001:db8::/96)
+ * - Address mappings from config_data
+ *
+ * @param module_data Pointer to store module configuration
+ * @return 0 on success, negative error code on failure
+ *
+ * @see config_data Address mapping definitions
+ * @see nat64_module_config Configuration structure
+ */
+static int
+nat64_test_config(
+	struct module_data **module_data
+) {
+	if (!module_data) {
+		RTE_LOG(ERR, NAT64_TEST, "module_data pointer is NULL\n");
+		return -EINVAL;
+	}
+
+	struct nat64_module_config *config = (struct nat64_module_config *)
+		memory_balloc(&test_params.mctx, sizeof(struct nat64_module_config));
+	if (!config) {
+		RTE_LOG(ERR, NAT64_TEST, "Failed to allocate memory for config\n");
+		return -ENOMEM;
+	}
+
+	// Initialize module_data fields
+	strtcpy(config->module_data.name, "nat64_test", sizeof(config->module_data.name));
+	memory_context_init_from(
+		&config->module_data.memory_context,
+		&test_params.mctx,
+		"nat64_test"
+	);
+
+	// config->module_data.free_handler = nat64_module_config_free;
+	config->module_data.index = 0;
+// Initialize fields
+config->mappings.count = 0;
+config->mappings.list = NULL;
+config->prefixes.prefixes = NULL;
+config->prefixes.count = 0;
+config->mtu.ipv4 = 1450;
+config->mtu.ipv6 = 1280;
+
+struct memory_context *memory_context = &config->module_data.memory_context;
+if (lpm_init(&config->mappings.v4_to_v6, memory_context)) {
+	RTE_LOG(ERR, NAT64_TEST, "Failed to initialize v4_to_v6 LPM\n");
+	goto error_config;
+}
+if (lpm_init(&config->mappings.v6_to_v4, memory_context)) {
+	RTE_LOG(ERR, NAT64_TEST, "Failed to initialize v6_to_v4 LPM\n");
+	goto error_lpm_v4;
+}
+
+
+// Add prefix
+uint8_t pfx[12] = {
+	0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00
+};
+if (nat64_module_config_add_prefix((struct module_data *)config, pfx) < 0) {
+	goto error_lpm_v6;
+}
+
+	// Add mappings
+	uint32_t mapping_count = config_data.count;
+	for (uint32_t i = 0; i < mapping_count; i++) {
+		if (nat64_module_config_add_mapping(
+			(struct module_data *)config,
+			config_data.mapping[i].ip4,
+			(uint8_t *)config_data.mapping[i].ip6,
+			0) < 0) {
+			goto error_mappings;
+		}
+	}
+
+	LOG_DBG(NAT64_TEST, "NAT64 module configured successfully\n"
+	        "  Mappings: %lu\n"
+	        "  Prefixes: %lu\n"
+	        "  MTU IPv4: %u\n"
+	        "  MTU IPv6: %u\n",
+	        config->mappings.count,
+	        config->prefixes.count,
+	        config->mtu.ipv4,
+	        config->mtu.ipv6);
+
+	*module_data = (struct module_data *)config;
+	return 0;
+
+error_mappings:
+	if (config->mappings.list)
+		memory_bfree(&config->module_data.memory_context, config->mappings.list,
+			sizeof(struct ip4to6) * config->mappings.count);
+	if (config->prefixes.prefixes)
+		memory_bfree(&config->module_data.memory_context, config->prefixes.prefixes,
+			sizeof(struct nat64_prefix) * config->prefixes.count);
+
+error_lpm_v6:
+	lpm_free(&config->mappings.v6_to_v4);
+
+error_lpm_v4:
+	lpm_free(&config->mappings.v4_to_v6);
+
+error_config:
+	if (config) {
+		memory_bfree(&test_params.mctx, config, sizeof(struct nat64_module_config));
+	}
+	return -EINVAL;
+}
+
 
 /**
  * @brief Test NAT64 module configuration handling
@@ -171,16 +356,11 @@ test_setup(void) {
  *
  * @return TEST_SUCCESS on successful configuration, error code otherwise
  */
-static int
+static inline int
 test_module_config_handler(void) {
-	test_params.module->config_handler(
-		test_params.module,
-		&config_data,
-		sizeof(config_data),
-		&test_params.module_config
-	);
+	TEST_ASSERT_SUCCESS(nat64_test_config(&test_params.module_data), "nat64_test_config failed\n");
 	TEST_ASSERT_NOT_NULL(
-		test_params.module_config, "module_config_handler failed\n"
+		test_params.module_data, "module_config_handler failed\n"
 	);
 	return TEST_SUCCESS;
 }
@@ -203,13 +383,13 @@ test_new_module_nat64(void) {
 }
 
 /**
- * @brief Universal packet structure for NAT64 testing
+ * @brief Test packet structure
  *
- * Provides a unified representation of network packets for testing:
- * - Supports both IPv4 and IPv6 packets
- * - Handles multiple transport protocols (UDP, TCP, ICMP, ICMPv6)
- * - Includes payload data handling
- * - Used for both input packets and expected output verification
+ * Contains:
+ * - Protocol headers (IPv4/v6, UDP/TCP/ICMP)
+ * - Payload data
+ *
+ * Used for test input and verification
  */
 struct upkt {
 	struct rte_ether_hdr eth; /**< Ethernet header */
@@ -1504,22 +1684,16 @@ compare_icmp6_headers(struct icmp6_hdr *icmp6_hdr, struct upkt *upkt) {
 }
 
 /**
- * @brief Compare and print differences between universal packet and DPDK mbuf
+ * @brief Compare packet structures
  *
- * Performs a comprehensive comparison between a universal packet structure and
- * a DPDK mbuf, including:
- * - Ethernet header fields
- * - IPv4/IPv6 header fields
- * - Protocol-specific headers (UDP, TCP, ICMP, ICMPv6)
- * - Packet data content and length
+ * Compares:
+ * - Headers (Ethernet, IP, Protocol)
+ * - Packet data
+ * - Checksums
  *
- * For each difference found, detailed logging is performed to help with
- * debugging. This function is crucial for verifying packet translations in
- * NAT64 testing.
- *
- * @param upkt Pointer to universal packet structure
- * @param mbuf Pointer to DPDK mbuf structure
- * @return 0 if packets match completely, -1 if any differences found
+ * @param upkt Universal packet structure
+ * @param mbuf DPDK mbuf structure
+ * @return 0 if match, -1 if different
  */
 static inline int
 print_diff_upkt_and_rte_mbuf(struct upkt *upkt, struct rte_mbuf *mbuf) {
@@ -1686,22 +1860,20 @@ append_test_case(
 }
 
 /**
- * @brief Calculate UDP/TCP checksum for IPv4 packets
+ * @brief Calculate IPv4 UDP/TCP checksum
  *
- * Calculates checksum according to RFC 768/793:
- * 1. Computes checksum over L4 header
- * 2. Adds checksum of payload data if present
- * 3. Adds IPv4 pseudo-header checksum
- * 4. Handles special case for UDP zero checksum
+ * Per RFC 768/793:
+ * - L4 header checksum
+ * - Payload checksum
+ * - IPv4 pseudo-header
+ * - UDP zero checksum handling
  *
- * Used to verify correct checksum calculation during NAT64 translation.
- *
- * @param ipv4_hdr Pointer to IPv4 header for pseudo-header
- * @param l4_hdr Pointer to UDP/TCP header
- * @param l4_len Length of UDP/TCP header
- * @param payload Pointer to payload data
- * @param payload_len Length of payload data
- * @return Calculated checksum in network byte order
+ * @param ipv4_hdr IPv4 header
+ * @param l4_hdr Protocol header
+ * @param l4_len Protocol header length
+ * @param payload Payload data
+ * @param payload_len Payload length
+ * @return Checksum in network byte order
  */
 static inline uint16_t
 upkt_ipv4_updtcp_checksum(
@@ -2020,9 +2192,7 @@ push_packet(struct upkt *pkt) {
  */
 static int
 append_test_cases_from_mappings(struct test_case **test_case) {
-	struct nat64_module_config *nat64_config = container_of(
-		test_params.module_config, struct nat64_module_config, config
-	);
+	struct nat64_module_config *nat64_config = (struct nat64_module_config *)test_params.module_data;
 	for (uint32_t i = 0; i < config_data.count; i++) {
 		struct upkt pkt = {
 			.eth =
@@ -2101,7 +2271,7 @@ append_test_cases_from_mappings(struct test_case **test_case) {
 
 		SET_IPV4_MAPPED_IPV6(
 			&pkt_expected.ip.ipv6.src_addr,
-			nat64_config->ipv6_prefixes[0].prefix,
+			ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix,
 			&outer_ip4
 		);
 		char buf[1024];
@@ -2141,16 +2311,14 @@ append_test_cases_from_mappings(struct test_case **test_case) {
 }
 
 /**
- * @brief ICMP test case parameters
+ * @brief ICMP test parameters
  *
- * Structure defining an ICMP translation test case including:
- * - Source and destination ICMP types/codes
- * - Translation direction (v4->v6 or v6->v4)
- * - Expected behavior (translation or drop)
- * - MTU values for Packet Too Big messages
- * - Pointer values for Parameter Problem messages
+ * Contains:
+ * - ICMP types/codes
+ * - Translation flags
+ * - MTU/pointer values
  *
- * Used to define comprehensive ICMP translation test scenarios.
+ * Used for ICMP translation tests
  */
 struct icmp_type_info_t {
 	const char *name;    /**< Test case name */
@@ -2169,25 +2337,17 @@ struct icmp_type_info_t {
 };
 
 /**
- * @brief Create an ICMP packet for NAT64 testing
+ * @brief Create ICMP test packet
  *
- * Creates a complete ICMP packet with specified parameters including:
- * - Ethernet header with appropriate MAC addresses
- * - IPv4/IPv6 header based on is_v6 parameter
- * - ICMP/ICMPv6 header with type, code and other fields from info
- * - Optional embedded packet for error messages
- * - Optional data payload for Echo Request/Reply
+ * Creates packet with:
+ * - Headers (Ethernet, IP, ICMP)
+ * - Optional embedded packet
+ * - Optional payload
  *
- * The function handles both ICMPv4 and ICMPv6 packets, setting appropriate
- * header fields, addresses, and checksums. For error messages, it can include
- * an embedded packet with specified protocol (UDP, TCP, ICMP).
- *
- * @param info Pointer to ICMP type information structure
- * @param is_v6 Boolean indicating if packet should be IPv6 (true) or IPv4
- * (false)
- * @param prefix IPv6 prefix for address translation
- * @return Pointer to created universal packet structure, NULL if allocation
- * fails
+ * @param info ICMP parameters
+ * @param is_v6 Create IPv6 packet if true
+ * @param prefix NAT64 prefix
+ * @return New packet or NULL on failure
  */
 static struct upkt *
 create_icmp_packet(
@@ -2609,9 +2769,7 @@ create_icmp_packet(
  */
 static int
 append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
-	struct nat64_module_config *nat64_config = container_of(
-		test_params.module_config, struct nat64_module_config, config
-	);
+	struct nat64_module_config *nat64_config = (struct nat64_module_config *)test_params.module_data;
 
 	const struct icmp_type_info_t icmp_types[] = {
 		{"Echo Request v4->v6",
@@ -3403,7 +3561,7 @@ append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
 			struct upkt *pkt = create_icmp_packet(
 				info,
 				!info->from_ipv4,
-				nat64_config->ipv6_prefixes[0].prefix
+				ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix
 			);
 			if (!pkt) {
 				return -1;
@@ -3424,10 +3582,12 @@ append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
 
 		// For regular translation cases
 		struct upkt *pkt_v4 = create_icmp_packet(
-			info, false, nat64_config->ipv6_prefixes[0].prefix
+			info, false,
+				ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix
 		);
 		struct upkt *pkt_v6 = create_icmp_packet(
-			info, true, nat64_config->ipv6_prefixes[0].prefix
+			info, true,
+				ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix
 		);
 
 		if (!pkt_v4 || !pkt_v6) {
@@ -3492,9 +3652,7 @@ append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
  */
 static int
 append_test_cases_from_mappings_icmp(struct test_case **test_case) {
-	struct nat64_module_config *nat64_config = container_of(
-		test_params.module_config, struct nat64_module_config, config
-	);
+	struct nat64_module_config *nat64_config = (struct nat64_module_config *)test_params.module_data;
 	for (uint32_t i = 0; i < config_data.count; i++) {
 		struct upkt pkt = {
 			.eth =
@@ -3564,7 +3722,7 @@ append_test_cases_from_mappings_icmp(struct test_case **test_case) {
 		);
 		SET_IPV4_MAPPED_IPV6(
 			&pkt_expected.ip.ipv6.src_addr,
-			nat64_config->ipv6_prefixes[0].prefix,
+			ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix,
 			&outer_ip4
 		);
 		char buf[1024];
@@ -3670,9 +3828,7 @@ packet_list_cleanup(struct packet_list *list) {
  */
 static inline int
 test_nat64_udp_checksum() {
-	struct nat64_module_config *nat64_config = container_of(
-		test_params.module_config, struct nat64_module_config, config
-	);
+	struct nat64_module_config *nat64_config = (struct nat64_module_config *)test_params.module_data;
 
 	// Create IPv4 UDP packet
 	struct upkt pkt = {
@@ -3744,7 +3900,7 @@ test_nat64_udp_checksum() {
 	);
 	SET_IPV4_MAPPED_IPV6(
 		&pkt_expected.ip.ipv6.src_addr,
-		nat64_config->ipv6_prefixes[0].prefix,
+		ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix,
 		&outer_ip4
 	);
 
@@ -3760,8 +3916,8 @@ test_nat64_udp_checksum() {
 	TEST_ASSERT_EQUAL(push_packet(&pkt), 0, "Failed to push packet\n");
 
 	test_params.module->handler(
-		test_params.module,
-		test_params.module_config,
+		NULL,
+		test_params.module_data,
 		&test_params.packet_front
 	);
 
@@ -3837,8 +3993,8 @@ process_test_case(struct test_case *tc) {
 	);
 
 	test_params.module->handler(
-		test_params.module,
-		test_params.module_config,
+		NULL,
+		test_params.module_data,
 		&test_params.packet_front
 	);
 
@@ -4001,20 +4157,15 @@ test_nat64_drop() {
 }
 
 /**
- * @brief Test basic UDP packet translation through NAT64
+ * @brief Test UDP packet translation
  *
- * Tests UDP packet translation by:
- * 1. Creating test cases with UDP packets in both directions (v4->v6 and
- * v6->v4)
- * 2. Setting appropriate ports and payload data
- * 3. Running packets through NAT64 translation
- * 4. Verifying header translations and checksum calculations
+ * Verifies:
+ * - IPv4->IPv6 and IPv6->IPv4 translation
+ * - Port mapping
+ * - Payload handling
+ * - Checksum calculation
  *
- * Used to verify basic NAT64 UDP translation functionality:
- * - Payload preservation
- * - Checksum recalculation
- *
- * @return 0 on success, error count on failures
+ * @return 0 on success, error count on failure
  */
 static inline int
 test_nat64_udp() {
@@ -4064,9 +4215,7 @@ test_nat64_icmp() {
  */
 static inline int
 append_test_cases_from_mappings_tcp(struct test_case **test_case) {
-	struct nat64_module_config *nat64_config = container_of(
-		test_params.module_config, struct nat64_module_config, config
-	);
+	struct nat64_module_config *nat64_config = (struct nat64_module_config *)test_params.module_data;
 	for (uint32_t i = 0; i < config_data.count; i++) {
 		struct upkt pkt = {
 			.eth =
@@ -4146,7 +4295,7 @@ append_test_cases_from_mappings_tcp(struct test_case **test_case) {
 		);
 		SET_IPV4_MAPPED_IPV6(
 			&pkt_expected.ip.ipv6.src_addr,
-			nat64_config->ipv6_prefixes[0].prefix,
+			ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix,
 			&outer_ip4
 		);
 
@@ -4212,19 +4361,16 @@ test_nat64_tcp() {
 }
 
 /**
- * @brief Test extended ICMP packet translation scenarios through NAT64
+ * @brief Test ICMP packet translation
  *
- * Tests comprehensive ICMP translation cases including:
- * - Error messages (Destination Unreachable, Time Exceeded)
- * - Parameter Problem messages with pointer translation
- * - Packet Too Big messages with MTU handling
- * - MLD/ND messages that should be dropped
- * - Invalid ICMP messages and edge cases
- * - Embedded packet handling in ICMP error messages
+ * Verifies:
+ * - Error message translation
+ * - MTU and pointer handling
+ * - Message filtering
+ * - Embedded packet handling
  *
- * Implements test cases from RFC 7915 section 4.2 and 4.3.
- *
- * @return 0 on success, error count on failures
+ * @see RFC 7915 sections 4.2, 4.3
+ * @return 0 on success, error count on failure
  */
 static inline int
 test_nat64_icmp_more() {
@@ -4249,16 +4395,15 @@ testsuite_teardown(void) {
 }
 
 /**
- * @brief Test suite definition for NAT64 functionality
+ * @brief NAT64 test suite definition
  *
- * Defines complete test suite including:
- * - Basic module creation and configuration tests
- * - Protocol translation tests (UDP, TCP)
- * - ICMP translation tests (basic and extended)
- * - Error handling and packet drop tests
- * - Checksum calculation verification
+ * Tests:
+ * - Module setup and configuration
+ * - Protocol translation (UDP, TCP, ICMP)
+ * - Error handling and packet drops
+ * - Checksum calculations
  *
- * Test cases verify compliance with RFC 7915 requirements.
+ * @see RFC 7915 for translation requirements
  */
 static struct unit_test_suite nat64_test_suite =
 	{.suite_name = "NAT64 Unit Test Suite",
@@ -4284,18 +4429,14 @@ static struct unit_test_suite nat64_test_suite =
 	 }};
 
 /**
- * @brief Main entry point for NAT64 test suite execution
+ * @brief Execute NAT64 test suite
  *
- * Executes complete test suite for NAT64 functionality including:
- * 1. Module creation and configuration tests
- * 2. Basic protocol translation tests (UDP, TCP)
- * 3. ICMP translation tests (basic and extended)
- * 4. Error handling and packet drop tests
- * 5. Checksum calculation verification
+ * Runs all tests to verify:
+ * - Basic module functionality
+ * - Protocol translation
+ * - Error handling
  *
- * Implements comprehensive testing of NAT64 module per RFC 7915.
- *
- * @return 0 on all tests passed, error count on failures
+ * @return 0 on success, error count on failures
  */
 static int
 nat64_testsuite(void) {

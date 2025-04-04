@@ -45,6 +45,7 @@
 /* Project headers */
 #include "dataplane/module/module.h"
 #include "nat64dp.h"
+#include "common.h"
 
 /**
  * @def RTE_LOGTYPE_NAT64
@@ -65,151 +66,158 @@ RTE_LOG_REGISTER_DEFAULT(nat64_logtype, INFO);
 #define RTE_LOGTYPE_NAT64 nat64_logtype
 
 /**
- * @brief Adds a mapping from IPv4 to IPv6.
- *
- * @param hash Pointer to the hash table where mappings are stored.
- * @param ip4 Source IPv4 address.
- * @param ip6 Destination IPv6 address.
- * @param prefix_index Index of the prefix used for this mapping.
- * @return 0 on success, -1 on failure.
+ * @brief Structure for ICMP rate limiting
  */
-static inline int
-add_ip4to6(
-	struct ip4to6 **hash, uint32_t *ip4, uint8_t *ip6, size_t prefix_index
-) {
-	if (!hash || !ip4 || !ip6) {
-		RTE_LOG(ERR,
-			NAT64,
-			"Invalid NULL arguments, hash: %p, ip4: %p, ip6: %p\n",
-			hash,
-			ip4,
-			ip6);
-		return -1;
-	}
-	struct ip4to6 *s = NULL;
-
-	HASH_FIND(hh, *hash, ip4, sizeof(uint32_t), s);
-	if (s) {
-		RTE_LOG(WARNING,
-			NAT64,
-			"Mapping already exists for " IPv4_BYTES_FMT "\n",
-			IPv4_BYTES_LE(*ip4));
-		return -1;
-	}
-
-	s = (struct ip4to6 *)rte_malloc(NULL, sizeof *s, 0);
-	if (!s) {
-		RTE_LOG(ERR,
-			NAT64,
-			"Failed to allocate memory for ip4to6 entry\n");
-		return -1;
-	}
-	s->ip4 = ip4;
-	s->ip6 = ip6;
-	s->prefix_index = prefix_index;
-	HASH_ADD_KEYPTR(hh, *hash, ip4, sizeof(uint32_t), s);
-	LOG_DBG(NAT64,
-		"Adding mapping " IPv4_BYTES_FMT " -> " IPv6_BYTES_FMT
-		", prefix#%zu\n",
-		IPv4_BYTES_LE(*ip4),
-		IPv6_BYTES(ip6),
-		prefix_index);
-	return 0;
-}
+struct rate_limiter {
+	uint32_t tokens;
+	uint64_t last_update;
+	uint32_t rate;
+	uint32_t burst;
+	rte_spinlock_t lock;
+};
 
 /**
- * @brief Adds a mapping from IPv6 to IPv4.
+ * @brief Finds a mapping from IPv6 to IPv4 address
  *
- * This function creates and stores a new mapping from an IPv6 address to an
- * IPv4 address in the specified hash table.
+ * This function searches the LPM (Longest Prefix Match) table for a mapping from
+ * an IPv6 address to an IPv4 address. The search is performed using
+ * the IPv6 address as the lookup key.
  *
- * @param hash Pointer to the hash table where mappings are stored.
- * @param ip6 Source IPv6 address.
- * @param ip4 Destination IPv4 address.
- * @param prefix_index Index of the prefix used for this mapping.
- * @return 0 on success, -1 on failure.
- */
-static inline int
-add_ip6to4(
-	struct ip4to6 **hash, uint8_t *ip6, uint32_t *ip4, size_t prefix_index
-) {
-	if (!hash || !ip4 || !ip6) {
-		RTE_LOG(ERR,
-			NAT64,
-			"Invalid NULL arguments, hash: %p, ip4: %p, ip6: %p\n",
-			hash,
-			ip4,
-			ip6);
-		return -1;
-	}
-
-	struct ip4to6 *s = NULL;
-
-	HASH_FIND(hh, *hash, ip6, 16 * sizeof(uint8_t), s);
-	if (s) {
-		RTE_LOG(WARNING,
-			NAT64,
-			"Mapping already exists for " IPv6_BYTES_FMT "\n",
-			IPv6_BYTES(ip6));
-		return -1;
-	}
-
-	s = (struct ip4to6 *)rte_malloc(NULL, sizeof *s, 0);
-	if (!s) {
-		RTE_LOG(ERR,
-			NAT64,
-			"Failed to allocate memory for ip6to4 entry\n");
-		return -1;
-	}
-	s->ip4 = ip4;
-	s->ip6 = ip6;
-	s->prefix_index = prefix_index;
-	HASH_ADD_KEYPTR(hh, *hash, ip6, 16 * sizeof(uint8_t), s);
-	LOG_DBG(NAT64,
-		"Adding mapping " IPv6_BYTES_FMT " -> " IPv4_BYTES_FMT
-		", prefix#%zu\n",
-		IPv6_BYTES(ip6),
-		IPv4_BYTES(RTE_BE32(*ip4)),
-		prefix_index);
-	return 0;
-}
-
-/**
- * @brief Finds a mapping from IPv6 to IPv4.
+ * The function implements part of the stateless NAT64 translation algorithm
+ * described in RFC7915 section 4.1 (Address Translation).
  *
- * This function searches the hash table for a mapping from an IPv6 address to
- * an IPv4 address.
+ * @param config Pointer to the NAT64 module configuration containing mapping tables.
+ *               Must not be NULL.
+ * @param ip6 Pointer to the source IPv6 address to look up (16 bytes).
+ *            Must not be NULL and must point to a valid IPv6 address.
  *
- * @param hash Pointer to the hash table where mappings are stored.
- * @param ip6 Source IPv6 address to look up.
- * @return Pointer to the found mapping or NULL if not found.
+ * @return Pointer to the found mapping structure on success,
+ *         NULL on failure with the following possible reasons:
+ *         - Invalid parameters (NULL config or ip6)
+ *         - No matching prefix found in the LPM table
+ *         - Invalid mapping index
+ *
+ * @see ip4to6
+ * @see nat64_module_config
+ *
+ * @note The function assumes the IPv6 address is in network byte order
+ *
+ * @example
+ * ```c
+ * uint8_t ipv6_addr[16] = {
+ *     0x20, 0x01, 0x0d, 0xb8, // 2001:db8::/32 prefix
+ *     0x00, 0x00, 0x00, 0x00,
+ *     0x00, 0x00, 0x00, 0x00,
+ *     0x00, 0x00, 0x00, 0x01
+ * };
+ * struct ip4to6 *mapping = find_ip6to4(config, ipv6_addr);
+ * if (mapping) {
+ *     // Use mapping->ip4 as the translated IPv4 address
+ * }
+ * ```
  */
 struct ip4to6 *
-find_ip6to4(struct ip4to6 **hash, uint8_t *ip6) {
-	struct ip4to6 *s = NULL;
+find_ip6to4(struct nat64_module_config *config, uint8_t *ip6) {
+    if (!config || !ip6) {
+        return NULL;
+    }
 
-	HASH_FIND(hh, *hash, ip6, 16 * sizeof(uint8_t), s);
-	return s;
+    // Поиск соответствия в LPM таблице
+    uint32_t index = lpm_lookup(&config->mappings.v6_to_v4, 16, ip6);
+    if (index == LPM_VALUE_INVALID) {
+        return NULL;
+    }
+
+    // Получаем указатель на соответствующую запись в списке маппингов
+    if (index >= config->mappings.count) {
+        return NULL;
+    }
+    
+    return &ADDR_OF(&config->mappings.list)[index];
 }
 
 /**
- * @brief Finds a mapping from IPv4 to IPv6.
+ * @brief Finds a mapping from IPv4 to IPv6 address
  *
- * This function searches the hash table for a mapping from an IPv4 address to
- * an IPv6 address.
+ * This function searches the LPM (Longest Prefix Match) table for a mapping from
+ * an IPv4 address to an IPv6 address. The search is performed using the IPv4
+ * address as the lookup key.
  *
- * @param hash Pointer to the hash table where mappings are stored.
- * @param ip4 Source IPv4 address to look up.
- * @return Pointer to the found mapping or NULL if not found.
+ * @param config Pointer to the NAT64 module configuration containing mapping tables.
+ *               Must not be NULL.
+ * @param ip4 Pointer to the source IPv4 address to look up (4 bytes).
+ *            Must not be NULL and must point to a valid IPv4 address.
+ *
+ * @return Pointer to the found mapping structure on success,
+ *         NULL on failure with the following possible reasons:
+ *         - Invalid parameters (NULL config or ip4)
+ *         - No matching prefix found in the LPM table
+ *         - Invalid mapping index
+ *
+ * @see ip4to6
+ * @see nat64_module_config
+ *
+ * @note The function assumes the IPv4 address is in network byte order
+ *
+ * @example
+ * ```c
+ * uint32_t ipv4_addr = RTE_BE32(RTE_IPV4(192, 0, 2, 1));
+ * struct ip4to6 *mapping = find_ip4to6(config, &ipv4_addr);
+ * if (mapping) {
+ *     // Use mapping->ip6 as the translated IPv6 address
+ * }
+ * ```
  */
 struct ip4to6 *
-find_ip4to6(struct ip4to6 **hash, uint32_t *ip4) {
-	struct ip4to6 *s = NULL;
+find_ip4to6(struct nat64_module_config *config, uint32_t *ip4) {
+    if (!config || !ip4) {
+        return NULL;
+    }
 
-	HASH_FIND(hh, *hash, ip4, sizeof(uint32_t), s);
-	return s;
+    // Поиск соответствия в LPM таблице
+    uint32_t index = lpm_lookup(&config->mappings.v4_to_v6, 4, (uint8_t*)ip4);
+    if (index == LPM_VALUE_INVALID) {
+        return NULL;
+    }
+
+    // Получаем указатель на соответствующую запись в списке маппингов
+    if (index >= config->mappings.count) {
+        return NULL;
+    }
+    
+    return &ADDR_OF(&config->mappings.list)[index];
 }
 
+/**
+ * @brief Implements token bucket rate limiting algorithm
+ *
+ * This function implements a thread-safe token bucket rate limiter that controls
+ * packet processing rates. It uses DPDK's TSC (Time Stamp Counter) for timing
+ * and spinlocks for thread safety.
+ *
+ * The algorithm works as follows:
+ * 1. Calculates elapsed time since last update using TSC
+ * 2. Adds new tokens based on elapsed time and configured rate
+ * 3. Caps total tokens at configured burst size
+ * 4. Attempts to consume one token if available
+ *
+ * @param limiter Pointer to rate limiter structure containing:
+ *               - tokens: Current number of available tokens
+ *               - last_update: Last update timestamp (TSC cycles)
+ *               - rate: Token replenishment rate (tokens/second)
+ *               - burst: Maximum number of tokens (burst size)
+ *               - lock: Spinlock for thread safety
+ *
+ * @return 0 if a token was consumed (rate limit allows packet),
+ *         -1 if no tokens available (rate limit exceeded) or invalid parameters
+ *
+ * @note This function is thread-safe due to spinlock usage
+ * @note Uses DPDK's TSC for high-precision timing
+ *
+ * @see rate_limiter Structure containing rate limiting parameters
+ * @see rte_get_tsc_cycles() DPDK function for getting current TSC value
+ * @see rte_get_tsc_hz() DPDK function for getting TSC frequency
+ */
 static inline int
 check_rate_limit(struct rate_limiter *limiter) {
 	if (!limiter) {
@@ -235,104 +243,42 @@ check_rate_limit(struct rate_limiter *limiter) {
 	return result;
 }
 
-/**
- * @brief Configures the NAT64 module with initial settings.
- *
- * This function initializes the NAT64 module configuration including hash
- * tables, MTU settings, and IPv6 prefixes. It also processes any provided
- * configuration data to set up address mappings.
- *
- * @param module Pointer to the module structure
- * @param config_data Pointer to configuration data
- * @param config_data_size Size of configuration data
- * @param new_config Pointer to store the new configuration
- * @return 0 on success, negative value on failure
- */
-static int
-nat64_handle_configure(
-	struct module *module,
-	const void *config_data,
-	size_t config_data_size,
-	struct module_config **new_config
-) {
-	(void)module;
-	(void)config_data;
-	(void)config_data_size;
-	(void)new_config;
-
-	struct nat64_module_config *config = (struct nat64_module_config *)
-		rte_malloc(NULL, sizeof(struct nat64_module_config), 0);
-
-	if (!config) {
-		RTE_LOG(ERR, NAT64, "Failed to allocate memory for config\n");
-		return -1;
-	}
-
-	config->hash4to6 = NULL;
-	config->hash6to4 = NULL;
-
-	config->mtu6 = 1280;
-	config->mtu = 1450;
-
-	struct nat64_prefix prfxs[] = {
-		{.prefix =
-			 {0x2a,
-			  0x02,
-			  0x06,
-			  0xbc,
-			  0x00,
-			  0x00,
-			  0x00,
-			  0x00,
-			  0x00,
-			  0x00,
-			  0x00,
-			  0x00}}
-	};
-	size_t prfxs_size = sizeof(prfxs);
-	config->ipv6_prefixes = rte_malloc(NULL, prfxs_size, 0);
-	if (config->ipv6_prefixes == NULL) {
-		RTE_LOG(ERR,
-			NAT64,
-			"Failed to allocate memory for ipv6 prefixes\n");
-		return -ENOMEM;
-	}
-
-	rte_memcpy(config->ipv6_prefixes, prfxs, prfxs_size);
-
-	// FIXME: deserialization
-	uintptr_t pos = (uintptr_t)config_data;
-	uintptr_t end = pos + config_data_size;
-	// FIXME: check data boundaries
-	(void)end;
-
-	uint32_t mapping_count = *(uint32_t *)pos;
-	pos += sizeof(mapping_count);
-	LOG_DBG(NAT64, "mapping count %d\n", mapping_count);
-	while (mapping_count--) {
-		uint32_t *addr4 = (uint32_t *)pos;
-		pos += 4;
-		uint8_t *addr6 = (uint8_t *)pos;
-		pos += 16;
-		add_ip4to6(&config->hash4to6, addr4, addr6, 0);
-		add_ip6to4(&config->hash6to4, addr6, addr4, 0);
-	}
-
-	LOG_DBG(NAT64, "NAT64 module configured\n");
-	*new_config = &config->config;
-
-	return 0;
-}
 
 /**
- * Validates IPv4/IPv6 fragment parameters according to RFC7915
+ * @brief Validates IPv4/IPv6 fragment parameters according to RFC7915
  *
- * @param frag_offset Fragment offset in bytes
- * @param frag_size Fragment size in bytes
- * @param total_len Total packet length
- * @param more_fragments More fragments flag
- * @param is_icmp Whether the packet is ICMP
- * @return 0 if valid, -1 if invalid
+ * This function validates fragment parameters to ensure they comply with
+ * RFC7915 requirements for NAT64 translation. It performs the following checks:
+ * - Rejects fragmented ICMP/ICMPv6 packets (RFC7915 section 1.2)
+ * - Verifies fragment offset is a multiple of 8 bytes
+ * - Ensures non-last fragments are multiples of 8 bytes
+ * - Validates minimum fragment size (8 bytes)
+ * - Checks for fragment overlap
+ *
+ * @param frag_offset Fragment offset in bytes from start of original packet.
+ *                    Must be a multiple of 8 bytes.
+ * @param frag_size Size of current fragment's payload in bytes.
+ *                  Must be at least 8 bytes.
+ *                  For non-last fragments, must be a multiple of 8 bytes.
+ * @param total_len Total length of the original unfragmented packet.
+ *                  Used to detect fragment overlap.
+ * @param more_fragments Flag indicating if more fragments follow (MF bit).
+ *                      True if this is not the last fragment.
+ * @param is_icmp Flag indicating if packet is ICMP/ICMPv6.
+ *                Fragmented ICMP packets are not allowed.
+ *
+ * @return 0 if all fragment parameters are valid,
+ *         -1 if any validation fails with the following possible reasons:
+ *         - Fragmented ICMP packet (not allowed)
+ *         - Fragment offset not multiple of 8
+ *         - Non-last fragment size not multiple of 8
+ *         - Fragment too small (< 8 bytes)
+ *         - Fragment extends beyond packet end
+ *
+ * @note Fragment offset and size must be multiples of 8 bytes per
+ *       IPv4 (RFC791) and IPv6 (RFC8200) specifications
+ *
+ * @see RFC7915 Section 1.2 - Fragmentation and Reassembly
  */
 static int
 validate_fragment_params(
@@ -497,7 +443,7 @@ icmp_v6_to_v4(
 		// (MTU_of_IPv6_nexthop)-20).
 		if (mtu == 0) {
 			// Router doesn't implement RFC1191, use cfg
-			mtu = nat64_config->mtu;
+			mtu = nat64_config->mtu.ipv4;
 		}
 
 		// Calculate header size difference
@@ -507,15 +453,15 @@ icmp_v6_to_v4(
 		// RFC7915: Adjust MTU for header size difference
 		uint16_t adjusted_mtu = mtu - delta;
 
-		if (nat64_config->mtu6 > 0) {
+		if (nat64_config->mtu.ipv6 > 0) {
 			adjusted_mtu =
 				RTE_MIN(adjusted_mtu,
-					nat64_config->mtu6 - delta);
+					nat64_config->mtu.ipv6 - delta);
 		}
 
-		if (nat64_config->mtu > 0) {
+		if (nat64_config->mtu.ipv4 > 0) {
 			// Account for IPv4->IPv6 translation overhead
-			adjusted_mtu = RTE_MIN(adjusted_mtu, nat64_config->mtu);
+			adjusted_mtu = RTE_MIN(adjusted_mtu, nat64_config->mtu.ipv4);
 		}
 
 		LOG_DBG(NAT64,
@@ -525,8 +471,8 @@ icmp_v6_to_v4(
 			"  - Config IPv4 MTU: %u\n"
 			"  - Adjusted MTU: %u\n",
 			mtu,
-			nat64_config->mtu6,
-			nat64_config->mtu,
+			nat64_config->mtu.ipv6,
+			nat64_config->mtu.ipv4,
 			adjusted_mtu);
 
 		mtu = adjusted_mtu;
@@ -1160,22 +1106,56 @@ icmp_v6_to_v4(
 }
 
 /**
- * @brief Process IPv6 extension headers
+ * @brief Processes IPv6 extension headers according to RFC7915
  *
- * This function processes all IPv6 extension headers in a packet, including
- * fragment headers, and updates the packet structure accordingly.
- * It follows RFC7915 requirements for handling extension headers.
+ * This function processes IPv6 extension headers in order as specified by RFC7915
+ * section 5.1 and RFC8200 section 4.1. It handles:
+ * - Hop-by-Hop Options Header (must be first if present)
+ * - Routing Header (dropping deprecated Type 0)
+ * - Fragment Header (extracting fragmentation info)
+ * - Destination Options Header
+ * - Authentication Header (dropping)
+ * - Encapsulating Security Payload Header (dropping)
  *
- * @param nat64_config Pointer to the NAT64 module configuration
- * @param packet Pointer to the packet structure
- * @param next_header Pointer to store the next header type after all extensions
- * @param is_fragmented Pointer to store whether the packet is fragmented
- * @param frag_offset Pointer to store the fragment offset if fragmented
- * @param frag_flags Pointer to store the fragment flags if fragmented
- * @param frag_id Pointer to store the fragment ID if fragmented
- * @param ext_hdrs_len Pointer to store the total length of all extension
- * headers
- * @return 0 on success, -1 on failure
+ * The function updates packet offsets and extracts fragmentation information
+ * needed for NAT64 translation.
+ *
+ * @param nat64_config Pointer to NAT64 module configuration.
+ *                     Currently unused but kept for future extensions.
+ * @param packet Pointer to packet structure containing header offsets.
+ *               Will be updated with new transport header offset.
+ * @param next_header [out] Pointer to store final next header type after
+ *                    processing all extension headers.
+ * @param is_fragmented [out] Pointer to store fragmentation status.
+ *                     Set to 1 if packet has Fragment Header.
+ * @param frag_offset [out] Pointer to store fragment offset in bytes.
+ *                   Valid only if is_fragmented is 1.
+ * @param frag_flags [out] Pointer to store fragment flags (M bit).
+ *                  Valid only if is_fragmented is 1.
+ * @param frag_id [out] Pointer to store fragment ID.
+ *               Valid only if is_fragmented is 1.
+ * @param ext_hdrs_len [out] Pointer to store total length of all extension
+ *                    headers in bytes.
+ *
+ * @return 0 on successful processing,
+ *         -1 on failure with the following possible reasons:
+ *         - Failed to get mbuf or headers
+ *         - Invalid extension header length
+ *         - Type 0 Routing Header (deprecated)
+ *         - IPsec headers (not translated)
+ *         - Malformed extension headers
+ *
+ * @note Extension headers must be processed in order specified by RFC8200:
+ *       1. Hop-by-Hop Options
+ *       2. Destination Options (before Routing)
+ *       3. Routing
+ *       4. Fragment
+ *       5. Authentication
+ *       6. Encapsulating Security Payload
+ *       7. Destination Options (before upper layer)
+ *
+ * @see RFC7915 Section 5.1 - Extension Header Processing
+ * @see RFC8200 Section 4.1 - Extension Header Order
  */
 static int
 process_ipv6_extension_headers(
@@ -1409,14 +1389,50 @@ process_ipv6_extension_headers(
 }
 
 /**
- * @brief Handles IPv6 packets for NAT64 translation.
+ * @brief Handles IPv6 to IPv4 packet translation according to RFC7915
  *
- * This function processes IPv6 packets according to RFC7915, handling extension
- * headers, fragmentation, and protocol-specific translations (ICMP, TCP, UDP).
+ * This function implements the core IPv6-to-IPv4 translation logic as specified
+ * in RFC7915. It performs the following steps:
+ * 1. Extracts and validates IPv6 header
+ * 2. Looks up IPv4 address mapping for source IPv6 address
+ * 3. Processes IPv6 extension headers (if any)
+ * 4. Validates fragmentation parameters
+ * 5. Translates IP headers and adjusts packet size
+ * 6. Performs protocol-specific translations:
+ *    - ICMPv6 to ICMPv4 (including embedded packet translation)
+ *    - TCP/UDP checksum recalculation
  *
- * @param nat64_config Pointer to NAT64 module configuration
- * @param packet Pointer to the packet structure containing the IPv6 header
- * @return 0 on success, -1 on failure
+ * The function handles:
+ * - Header translation and address mapping
+ * - Extension header processing
+ * - Fragmentation handling
+ * - Protocol-specific translations (ICMP, TCP, UDP)
+ * - Checksum recalculation
+ *
+ * @param nat64_config Pointer to NAT64 module configuration containing:
+ *                     - Address mappings
+ *                     - MTU settings
+ *                     - NAT64 prefixes
+ * @param packet Pointer to the packet structure containing:
+ *               - Network header offset
+ *               - Transport header offset
+ *               - IPv6 header and payload
+ *
+ * @return 0 on successful translation,
+ *         -1 on failure with the following possible reasons:
+ *         - Failed to get packet headers
+ *         - No matching IPv4 address mapping found
+ *         - Invalid extension headers
+ *         - Invalid fragmentation parameters
+ *         - Unsupported protocol or message type
+ *         - Memory allocation/buffer size issues
+ *
+ * @note The function modifies the packet in-place, adjusting offsets and
+ *       recalculating checksums as needed.
+ *
+ * @see RFC7915 - IP/ICMP Translation Algorithm
+ * @see process_ipv6_extension_headers() For extension header handling
+ * @see icmp_v6_to_v4() For ICMPv6 translation
  */
 static int
 nat64_handle_v6(
@@ -1438,7 +1454,7 @@ nat64_handle_v6(
 	}
 
 	struct ip4to6 *new_src_addr = find_ip6to4(
-		&nat64_config->hash6to4, (uint8_t *)&ipv6Header->src_addr
+		nat64_config, (uint8_t *)&ipv6Header->src_addr
 	);
 	if (NULL == new_src_addr) {
 		LOG_DBG(NAT64,
@@ -1450,7 +1466,7 @@ nat64_handle_v6(
 	LOG_DBG(NAT64,
 		"found mapping " IPv6_BYTES_FMT " -> " IPv4_BYTES_FMT "\n",
 		IPv6_BYTES(ipv6Header->src_addr),
-		IPv4_BYTES(RTE_BE32(*new_src_addr->ip4)));
+		IPv4_BYTES(RTE_BE32(new_src_addr->ip4)));
 
 	// Process IPv6 extension headers and check for fragmentation
 	uint8_t is_fragmented = 0;
@@ -1519,7 +1535,7 @@ nat64_handle_v6(
 		packet->transport_header.offset,
 		packet->network_header.offset,
 		delta,
-		nat64_config->mtu);
+		(unsigned int)nat64_config->mtu.ipv4);
 
 	struct rte_ipv4_hdr *new_ipv4_header = rte_pktmbuf_mtod_offset(
 		mbuf,
@@ -1556,7 +1572,7 @@ nat64_handle_v6(
 	new_ipv4_header->next_proto_id = ipv6Header->proto;
 	new_ipv4_header->hdr_checksum = 0;
 
-	new_ipv4_header->src_addr = *new_src_addr->ip4;
+	new_ipv4_header->src_addr = new_src_addr->ip4;
 
 	if (ipv6Header->proto == IPPROTO_FRAGMENT) {
 		rte_memcpy(
@@ -1956,16 +1972,16 @@ icmp_v4_to_v6(
 			if (mtu == 0) {
 				// TODO: RFC1191 values
 				// Use configured MTU
-				mtu = nat64_config->mtu;
+				mtu = nat64_config->mtu.ipv4;
 			}
 			mtu += 20;
 
 			// Apply configured MTU limits if set
-			if (nat64_config->mtu6 > 0) {
-				mtu = RTE_MIN(mtu, nat64_config->mtu6);
+			if (nat64_config->mtu.ipv6 > 0) {
+				mtu = RTE_MIN(mtu, nat64_config->mtu.ipv6);
 			}
-			if (nat64_config->mtu > 0) {
-				mtu = RTE_MIN(mtu, nat64_config->mtu + 20);
+			if (nat64_config->mtu.ipv4 > 0) {
+				mtu = RTE_MIN(mtu, nat64_config->mtu.ipv4 + 20);
 			}
 			// RFC7915: MTU must not be less than IPv6 minimum
 			// (1280)
@@ -1978,7 +1994,7 @@ icmp_v4_to_v6(
 				"  - Config IPv6 MTU: %u\n",
 				rte_be_to_cpu_16(icmpHeader->icmp_nextmtu),
 				mtu,
-				nat64_config->mtu6);
+				nat64_config->mtu.ipv6);
 
 			icmpHeader->icmp_nextmtu = rte_cpu_to_be_32(mtu);
 			break;
@@ -2163,7 +2179,7 @@ icmp_v4_to_v6(
 			rte_be_to_cpu_16(new_ipv6_header->payload_len);
 		uint16_t new_payload_len = payload_len + delta;
 		int16_t mtu_overflow =
-			nat64_config->mtu6 -
+			nat64_config->mtu.ipv6 -
 			(packet->transport_header.offset + new_payload_len -
 			 (new_ipv6_header->proto == IPPROTO_FRAGMENT
 				  ? RTE_IPV6_FRAG_HDR_SIZE
@@ -2378,7 +2394,6 @@ nat64_handle_v4(
 	struct nat64_module_config *nat64_config, struct packet *packet
 ) {
 
-	LOG_DBG(NAT64, "Processing IPv4 packet\n");
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	if (!mbuf) {
@@ -2398,7 +2413,7 @@ nat64_handle_v4(
 	LOG_DBG(NAT64, "Processing IPv4 packet\n");
 
 	uint32_t addr4 = ipv4Header->dst_addr;
-	struct ip4to6 *entry = find_ip4to6(&nat64_config->hash4to6, &addr4);
+	struct ip4to6 *entry = find_ip4to6(nat64_config, &addr4);
 	if (!entry) {
 		RTE_LOG(ERR,
 			NAT64,
@@ -2407,6 +2422,10 @@ nat64_handle_v4(
 			IPv4_BYTES_LE(addr4));
 		return -1; //
 	}
+
+	LOG_DBG(NAT64,
+		"Found IPv6 mapping for IPv4 address " IPv4_BYTES_FMT ": " IPv6_BYTES_FMT "\n",
+		IPv4_BYTES_LE(addr4), IPv6_BYTES(entry->ip6));
 
 	// Check for IPv4 options and handle them according to RFC7915
 	uint8_t ihl = (ipv4Header->version_ihl & RTE_IPV4_HDR_IHL_MASK);
@@ -2570,7 +2589,7 @@ nat64_handle_v4(
 		    ipv4Header,
 		    new_ipv6_header,
 		    packet->network_header.offset,
-		    nat64_config->ipv6_prefixes[entry->prefix_index].prefix,
+		    ADDR_OF(&nat64_config->prefixes.prefixes)[entry->prefix_index].prefix,
 		    entry->ip6,
 		    is_fragmented,
 		    delta,
@@ -2589,7 +2608,7 @@ nat64_handle_v4(
 			nat64_config,
 			packet,
 			new_ipv6_header,
-			nat64_config->ipv6_prefixes[entry->prefix_index].prefix,
+		    ADDR_OF(&nat64_config->prefixes.prefixes)[entry->prefix_index].prefix,
 			entry->ip6
 		);
 		if (result) {
@@ -2660,27 +2679,48 @@ nat64_handle_v4(
 }
 
 /**
- * @brief Handles packets for translation between IPv4 and IPv6.
+ * @brief Main packet processing function for NAT64 translation
  *
- * This function processes packets from the input list, translating them between
- * IPv4 and IPv6 according to NAT64 rules, and either outputs them or drops them
- * based on translation success.
+ * This function is the main entry point for NAT64 packet processing. It handles
+ * both IPv4-to-IPv6 and IPv6-to-IPv4 translations according to RFC7915.
+ * For each packet in the input list, it:
+ * 1. Determines packet IP version
+ * 2. Routes to appropriate handler (nat64_handle_v4 or nat64_handle_v6)
+ * 3. Either outputs translated packet or drops on failure
  *
- * @param module Pointer to the NAT64 module structure
- * @param config Pointer to the NAT64 configuration structure
- * @param packet_front Pointer to the packet front structure containing
- *                     input and output packet lists
+ * The function implements stateless NAT64 translation, meaning:
+ * - No connection tracking
+ * - No dynamic address mapping
+ * - Fixed prefix and address mapping configuration
+ *
+ * @param dp_config Pointer to dataplane configuration (unused but required by API)
+ * @param module_data Pointer to NAT64 module data containing:
+ *                    - Address mappings
+ *                    - NAT64 prefixes
+ *                    - MTU settings
+ * @param packet_front Pointer to packet front structure containing:
+ *                     - Input packet list to process
+ *                     - Output list for translated packets
+ *                     - Drop list for failed translations
+ *
+ * @note Packets are processed one at a time to maintain ordering
+ * @note Translation failures result in packet being moved to drop list
+ * @note The function assumes packets have valid Ethernet and IP headers
+ *
+ * @see nat64_handle_v4() For IPv4-to-IPv6 translation
+ * @see nat64_handle_v6() For IPv6-to-IPv4 translation
+ * @see RFC7915 - IP/ICMP Translation Algorithm
  */
-static void
+void
 nat64_handle_packets(
-	struct module *module,
-	struct module_config *config,
+	struct dp_config *dp_config,
+	struct module_data *module_data,
 	struct packet_front *packet_front
 ) {
-	(void)module; // Unused parameter
+	(void)dp_config; // Unused parameter
 
 	struct nat64_module_config *nat64_config =
-		container_of(config, struct nat64_module_config, config);
+		container_of(module_data, struct nat64_module_config, module_data);
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
@@ -2709,12 +2749,38 @@ nat64_handle_packets(
 }
 
 /**
- * @brief Creates a new NAT64 module.
+ * @brief Creates and initializes a new NAT64 module instance
  *
- * This function allocates and initializes a new NAT64 module structure,
- * setting up the module name, packet handler, and configuration handler.
+ * This function allocates and initializes a new NAT64 module that implements
+ * stateless NAT64 translation according to RFC7915. The module integrates with
+ * the dataplane framework through the base module interface.
  *
- * @return Pointer to the newly created module or NULL on failure
+ * The initialization process includes:
+ * 1. Setting up debug logging if NAT64_DEBUG is defined
+ * 2. Allocating memory for the module structure
+ * 3. Setting up the module name and packet handler
+ * 4. Initializing internal state
+ *
+ * The module provides:
+ * - Stateless NAT64 translation (RFC7915)
+ * - IPv4/IPv6 header translation
+ * - Protocol-specific handling (TCP, UDP, ICMP)
+ * - Fragmentation support
+ * - Checksum recalculation
+ *
+ * @return Pointer to the newly created module on success,
+ *         NULL on failure with errno set to indicate the error:
+ *         - ENOMEM: Memory allocation failed
+ *         - EINVAL: Module initialization failed
+ *
+ * @note The returned pointer should be cast to struct nat64_module* to access
+ *       NAT64-specific fields.
+ * @note The module must be configured with address mappings and prefixes
+ *       before use.
+ *
+ * @see nat64_module Structure containing the implementation
+ * @see nat64_module_config Configuration structure for the module
+ * @see RFC7915 - IP/ICMP Translation Algorithm
  */
 struct module *
 new_module_nat64() {
@@ -2733,7 +2799,6 @@ new_module_nat64() {
 		module->module.name, sizeof(module->module.name), "%s", "nat64"
 	);
 	module->module.handler = nat64_handle_packets;
-	module->module.config_handler = nat64_handle_configure;
 
 	return &module->module;
 }
