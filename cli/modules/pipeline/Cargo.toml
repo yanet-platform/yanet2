@@ -1,0 +1,19 @@
+[package]
+name = "yanet-cli-pipeline"
+version = "0.1.0"
+edition = "2021"
+authors = ["YANET Team"]
+description = "CLI for YANET pipeline module"
+
+[dependencies]
+ync = { path = "../../core", version = "0.1", package = "yanet-cli"}
+log = "0.4"
+clap = { version = "4.5", features = ["derive"] }
+clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
+tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
+prost = "0.13"
+prost-types = "0.13"
+tonic = { version = "0.12" }
+
+[build-dependencies]
+tonic-build = "0.12"

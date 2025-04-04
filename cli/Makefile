@@ -2,7 +2,7 @@ CARGO ?= $(shell which cargo)
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 
-MODULES := common inspect neighbour route decap forward
+MODULES := common inspect neighbour route decap forward pipeline
 BINARIES := yanet-cli $(addprefix yanet-cli-,$(MODULES))
 TARGETS := $(addprefix build/,$(BINARIES))
 

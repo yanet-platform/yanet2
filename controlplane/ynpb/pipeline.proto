@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package ynpb;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
+
+// TODO: docs.
+service PipelineService {
+	// TODO: docs.
+	rpc Update(UpdatePipelinesRequest) returns (UpdatePipelinesResponse) {
+	}
+
+	// TODO: Assign (assign pipeline to device id).
+	rpc Assign(AssignPipelinesRequest) returns (AssignPipelinesResponse) {
+	}
+}
+
+// TODO: docs.
+message UpdatePipelinesRequest {
+	// TODO: docs.
+	uint32 numa = 1;
+	// TODO: docs.
+	repeated PipelineChain chains = 2;
+}
+
+// A pipeline chain.
+message PipelineChain {
+	// Name of the pipeline.
+	//
+	// This name is used to identify the pipeline in the controlplane.
+	string name = 1;
+	// Nodes in the pipeline chain.
+	//
+	// The nodes are executed in order.
+	repeated PipelineChainNode nodes = 2;
+}
+
+// A node in a pipeline chain.
+message PipelineChainNode {
+	// Name of the module to execute.
+	//
+	// This name must match a module name in the controlplane.
+	string module_name = 1;
+	// Name of the configuration to use for the module.
+	//
+	// This name must match a configuration name in the controlplane.
+	string config_name = 2;
+}
+
+// TODO: docs.
+message UpdatePipelinesResponse {
+}
+
+message AssignPipelinesRequest {
+	// NUMA node to assign the pipelines to.
+	uint32 numa = 1;
+	// Devices to assign the pipelines to.
+	//
+	// Each device can have several pipelines assigned to it, which is
+	// described in the DevicePipelines message, since protobuf map values
+	// are not allowed to be repeated.
+	map<uint32, DevicePipelines> devices = 2;
+}
+
+message DevicePipelines {
+	// Pipelines to assign to the device.
+	repeated DevicePipeline pipelines = 1;
+}
+
+message DevicePipeline {
+	// Name of the pipeline to assign to the device.
+	string pipeline_name = 1;
+	// Weight of the pipeline to assign to the device.
+	//
+	// More weight means more traffic will be sent to the pipeline. Zero
+	// weight means the pipeline will not be used at all.
+	uint32 pipeline_weight = 2;
+}
+
+message AssignPipelinesResponse {
+}

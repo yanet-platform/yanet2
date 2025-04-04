@@ -17,7 +17,8 @@ MAIN_GO := cmd/yncp-director/main.go
 YNPB_PROTO_FILES := \
 	$(YNPB_DIR)/gateway.proto \
 	$(YNPB_DIR)/logging.proto \
-	$(YNPB_DIR)/inspect.proto
+	$(YNPB_DIR)/inspect.proto \
+	$(YNPB_DIR)/pipeline.proto
 ROUTE_PROTO_FILES := $(ROUTE_PB_DIR)/route.proto $(ROUTE_PB_DIR)/neighbour.proto $(ROUTE_PB_DIR)/macaddr.proto
 DECAP_PROTO_FILES := $(DECAP_PB_DIR)/decap.proto
 FORWARD_PROTO_FILES := $(FORWARD_PB_DIR)/forward.proto

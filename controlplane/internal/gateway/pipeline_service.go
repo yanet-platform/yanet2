@@ -1,0 +1,137 @@
+package gateway
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+	"go.uber.org/zap"
+)
+
+const agentName = "pipeline"
+
+// TODO: docs.
+type PipelineService struct {
+	ynpb.UnimplementedPipelineServiceServer
+
+	shm *ffi.SharedMemory
+	log *zap.SugaredLogger
+}
+
+// TODO: docs.
+func NewPipelineService(shm *ffi.SharedMemory, log *zap.SugaredLogger) *PipelineService {
+	return &PipelineService{
+		shm: shm,
+		log: log,
+	}
+}
+
+// TODO: docs.
+func (m *PipelineService) Update(
+	ctx context.Context,
+	request *ynpb.UpdatePipelinesRequest,
+) (*ynpb.UpdatePipelinesResponse, error) {
+	numaIdx := request.GetNuma()
+	chains := request.GetChains()
+
+	availableModuleNames := map[string]struct{}{}
+	for _, mod := range m.shm.DPConfig(numaIdx).Modules() {
+		availableModuleNames[mod.Name()] = struct{}{}
+	}
+
+	// TODO: ensure requested module is in available.
+
+	agent, err := m.shm.AgentAttach(agentName, numaIdx, uint(1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
+	}
+	defer agent.Close()
+
+	configs := make([]ffi.PipelineConfig, 0, len(chains))
+
+	for _, pipelineConfig := range chains {
+		cfg := ffi.PipelineConfig{
+			Name: pipelineConfig.GetName(),
+		}
+		for _, node := range pipelineConfig.GetNodes() {
+			moduleName := node.GetModuleName()
+			configName := node.GetConfigName()
+
+			cfg.Chain = append(cfg.Chain, ffi.PipelineModuleConfig{
+				ModuleName: moduleName,
+				ConfigName: configName,
+			})
+
+			m.log.Infow("added module to pipeline",
+				zap.Uint32("numa", numaIdx),
+				zap.String("agent_name", agentName),
+				zap.String("pipeline_name", pipelineConfig.GetName()),
+				zap.String("module_name", moduleName),
+				zap.String("config_name", configName),
+			)
+		}
+
+		m.log.Infow("configured pipeline",
+			zap.Uint32("numa", numaIdx),
+			zap.String("agent_name", agentName),
+			zap.String("pipeline_name", pipelineConfig.GetName()),
+		)
+
+		configs = append(configs, cfg)
+	}
+
+	if err := agent.UpdatePipelines(configs); err != nil {
+		return nil, fmt.Errorf("failed to update pipelines: %w", err)
+	}
+
+	m.log.Infow("updated pipelines", zap.Uint32("numa", numaIdx))
+
+	return &ynpb.UpdatePipelinesResponse{}, nil
+}
+
+// Assign assigns pipelines to devices.
+func (m *PipelineService) Assign(
+	ctx context.Context,
+	request *ynpb.AssignPipelinesRequest,
+) (*ynpb.AssignPipelinesResponse, error) {
+	numaIdx := request.GetNuma()
+	devices := request.GetDevices()
+
+	agent, err := m.shm.AgentAttach(agentName, numaIdx, uint(1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
+	}
+	defer agent.Close()
+
+	// Convert the protobuf device map to the FFI device map
+	devicePipelines := make(map[int][]ffi.DevicePipeline)
+	for deviceID, pipelines := range devices {
+		devicePipelinesList := make([]ffi.DevicePipeline, 0, len(pipelines.GetPipelines()))
+
+		for _, pipeline := range pipelines.GetPipelines() {
+			devicePipelinesList = append(devicePipelinesList, ffi.DevicePipeline{
+				Name:   pipeline.GetPipelineName(),
+				Weight: uint(pipeline.GetPipelineWeight()),
+			})
+
+			m.log.Infow("assigning pipeline to device",
+				zap.Uint32("numa", numaIdx),
+				zap.String("agent_name", agentName),
+				zap.Uint32("device_id", uint32(deviceID)),
+				zap.String("pipeline_name", pipeline.GetPipelineName()),
+				zap.Uint32("pipeline_weight", pipeline.GetPipelineWeight()),
+			)
+		}
+
+		devicePipelines[int(deviceID)] = devicePipelinesList
+	}
+
+	if err := agent.UpdateDevices(devicePipelines); err != nil {
+		return nil, fmt.Errorf("failed to assign pipelines to devices: %w", err)
+	}
+
+	m.log.Infow("assigned pipelines to devices", zap.Uint32("numa", numaIdx))
+
+	return &ynpb.AssignPipelinesResponse{}, nil
+}

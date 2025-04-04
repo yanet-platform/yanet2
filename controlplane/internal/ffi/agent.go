@@ -10,6 +10,7 @@ package ffi
 //#include "controlplane/agent/agent.h"
 import "C"
 import (
+	"fmt"
 	"unsafe"
 )
 
@@ -61,4 +62,89 @@ func (m *Agent) DPConfig() *DPConfig {
 	return &DPConfig{
 		ptr: m.ptr.dp_config,
 	}
+}
+
+func (m *Agent) UpdatePipelines(pipelinesConfigs []PipelineConfig) error {
+	pipelines := make([]*C.struct_pipeline_config, 0, len(pipelinesConfigs))
+
+	for _, cfg := range pipelinesConfigs {
+		pipeline, err := newPipelineConfig(cfg.Name, len(cfg.Chain))
+		if err != nil {
+			return fmt.Errorf("failed to create pipeline config: %w", err)
+		}
+		defer pipeline.Free()
+
+		for idx, node := range cfg.Chain {
+			pipeline.SetNode(idx, node.ModuleName, node.ConfigName)
+		}
+
+		pipelines = append(pipelines, pipeline.AsRawPtr())
+	}
+
+	rc, err := C.agent_update_pipelines(
+		m.ptr,
+		C.uint64_t(len(pipelinesConfigs)),
+		&pipelines[0],
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update pipelines: %w", err)
+	}
+	if rc != 0 {
+		return fmt.Errorf("failed to update pipelines: %d code", rc)
+	}
+
+	return nil
+}
+
+// UpdateDevices attaches the given pipelines to the given device IDs.
+func (m *Agent) UpdateDevices(devices map[int][]DevicePipeline) error {
+	// If there are no devices, do nothing.
+	if len(devices) == 0 {
+		return nil
+	}
+
+	deviceMap := make([]*C.struct_device_pipeline_map, 0)
+
+	// Create a device pipeline map for each device.
+	for idx, pipelines := range devices {
+		pipelineMap := C.device_pipeline_map_create(C.uint64_t(idx), C.uint64_t(len(pipelines)))
+		if pipelineMap == nil {
+			return fmt.Errorf("failed to create device pipeline map")
+		}
+		defer C.device_pipeline_map_free(pipelineMap)
+
+		// Add each pipeline to the device pipeline map.
+		for _, pipeline := range pipelines {
+			rc := C.device_pipeline_map_add(
+				pipelineMap,
+				C.CString(pipeline.Name),
+				C.uint64_t(pipeline.Weight),
+			)
+			if rc != 0 {
+				return fmt.Errorf("failed to add pipeline to device pipeline map")
+			}
+		}
+
+		deviceMap = append(deviceMap, pipelineMap)
+	}
+
+	// Update the devices.
+	rc, err := C.agent_update_devices(
+		m.ptr,
+		C.uint64_t(len(deviceMap)),
+		&deviceMap[0],
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update devices: %w", err)
+	}
+	if rc != 0 {
+		return fmt.Errorf("failed to update devices: %d code", rc)
+	}
+
+	return nil
+}
+
+type DevicePipeline struct {
+	Name   string
+	Weight uint
 }

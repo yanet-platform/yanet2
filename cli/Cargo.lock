@@ -2292,6 +2292,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-pipeline"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "log",
+ "prost",
+ "prost-types",
+ "tokio",
+ "tonic 0.12.3",
+ "tonic-build 0.12.3",
+ "yanet-cli",
+]
+
+[[package]]
 name = "yanet-cli-route"
 version = "0.1.0"
 dependencies = [
