@@ -166,18 +166,19 @@ func (m *DPConfig) Pipelines() []Pipeline {
 			panic("FFI corruption: pipeline index became invalid")
 		}
 
-		pipeline := make([]uint64, pipelineInfo.length)
+		moduleConfigs := make([]uint64, pipelineInfo.length)
 		for moduleIdx := C.uint64_t(0); moduleIdx < pipelineInfo.length; moduleIdx++ {
 			var configIndex C.uint64_t
 			rc := C.yanet_get_cp_pipeline_module_info(pipelineInfo, moduleIdx, &configIndex)
 			if rc != 0 {
 				panic("FFI corruption: pipeline module index became invalid")
 			}
-			pipeline[moduleIdx] = uint64(configIndex)
+			moduleConfigs[moduleIdx] = uint64(configIndex)
 		}
 
 		out[idx] = Pipeline{
-			ModuleConfigs: pipeline,
+			Name:          C.GoString(&pipelineInfo.name[0]),
+			ModuleConfigs: moduleConfigs,
 		}
 	}
 
@@ -237,6 +238,12 @@ type CPConfig struct {
 
 // Pipeline represents a dataplane packet processing pipeline configuration.
 type Pipeline struct {
+	// Name is the name of the pipeline.
+	Name string
+	// ModuleConfigs is a list of module configurations indices.
+	//
+	// The index is the index of the module configuration in the dataplane
+	// configuration.
 	ModuleConfigs []uint64
 }
 

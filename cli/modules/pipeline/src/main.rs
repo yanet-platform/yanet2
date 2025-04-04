@@ -135,7 +135,7 @@ impl PipelineService {
                     if parts.len() != 2 {
                         panic!("Invalid pipeline format. Expected 'pipeline_name:weight'");
                     }
-                    let weight = parts[1].parse::<u32>().expect("Invalid weight value");
+                    let weight = parts[1].parse::<u64>().expect("Invalid weight value");
                     DevicePipeline {
                         pipeline_name: parts[0].to_string(),
                         pipeline_weight: weight,

@@ -133,7 +133,7 @@ impl InspectService {
 
             tree.begin_child("Pipelines".to_string());
             for pipeline in &info.pipelines {
-                tree.begin_child(format!("Pipeline {}", pipeline.pipeline_id));
+                tree.begin_child(format!("Pipeline {}", pipeline.name));
                 tree.add_empty_child("rx".to_string());
                 for stage in &pipeline.modules {
                     let cp_cfg = &info.cp_configs[stage.config_index as usize];

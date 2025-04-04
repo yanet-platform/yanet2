@@ -101,7 +101,7 @@ func (m *PipelineService) Assign(
 		for _, pipeline := range pipelines.GetPipelines() {
 			devicePipelinesList = append(devicePipelinesList, ffi.DevicePipeline{
 				Name:   pipeline.GetPipelineName(),
-				Weight: uint(pipeline.GetPipelineWeight()),
+				Weight: pipeline.GetPipelineWeight(),
 			})
 		}
 

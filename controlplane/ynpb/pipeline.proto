@@ -74,7 +74,7 @@ message DevicePipeline {
 	//
 	// More weight means more traffic will be sent to the pipeline. Zero
 	// weight means the pipeline will not be used at all.
-	uint32 pipeline_weight = 2;
+	uint64 pipeline_weight = 2;
 }
 
 message AssignPipelinesResponse {

@@ -58,8 +58,8 @@ message CPConfigInfo {
 
 // PipelineInfo contains information about a packet processing pipeline.
 message PipelineInfo {
-	// PipelineId is the unique identifier for this pipeline.
-	uint32 pipeline_id = 1;
+	// Name is the name of the pipeline.
+	string name = 1;
 	// Modules is a list of module configurations in the pipeline's
 	// processing order.
 	repeated PipelineModuleInfo modules = 2;

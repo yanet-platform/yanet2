@@ -103,7 +103,7 @@ func (m *Agent) UpdateDevices(devices map[int][]DevicePipeline) error {
 		return nil
 	}
 
-	deviceMap := make([]*C.struct_device_pipeline_map, 0)
+	deviceMap := make([]*C.struct_device_pipeline_map, 0, len(devices))
 
 	// Create a device pipeline map for each device.
 	for idx, pipelines := range devices {
@@ -115,9 +115,12 @@ func (m *Agent) UpdateDevices(devices map[int][]DevicePipeline) error {
 
 		// Add each pipeline to the device pipeline map.
 		for _, pipeline := range pipelines {
+			cPipelineName := C.CString(pipeline.Name)
+			defer C.free(unsafe.Pointer(cPipelineName))
+
 			rc := C.device_pipeline_map_add(
 				pipelineMap,
-				C.CString(pipeline.Name),
+				cPipelineName,
 				C.uint64_t(pipeline.Weight),
 			)
 			if rc != 0 {
@@ -146,5 +149,5 @@ func (m *Agent) UpdateDevices(devices map[int][]DevicePipeline) error {
 
 type DevicePipeline struct {
 	Name   string
-	Weight uint
+	Weight uint64
 }

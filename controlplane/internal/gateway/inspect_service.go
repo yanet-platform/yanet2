@@ -82,8 +82,8 @@ func (m *InspectService) pipelines(dpConfig *ffi.DPConfig) []*ynpb.PipelineInfo 
 	out := make([]*ynpb.PipelineInfo, len(pipelines))
 	for idx, pipeline := range pipelines {
 		pipelineInfo := &ynpb.PipelineInfo{
-			PipelineId: uint32(idx),
-			Modules:    make([]*ynpb.PipelineModuleInfo, len(pipeline.ModuleConfigs)),
+			Name:    pipeline.Name,
+			Modules: make([]*ynpb.PipelineModuleInfo, len(pipeline.ModuleConfigs)),
 		}
 
 		for modIdx, configIdx := range pipeline.ModuleConfigs {
