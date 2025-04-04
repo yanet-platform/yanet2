@@ -16,6 +16,8 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/modules/forward/forwardpb"
 )
 
+type ffiConfigUpdater func(m *ForwardService, name string, numaIndices []uint32) error
+
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
 
@@ -23,6 +25,7 @@ type ForwardService struct {
 	agents  []*ffi.Agent
 	log     *zap.SugaredLogger
 	configs map[instanceKey]*ForwardConfig // instance key -> config
+	updater ffiConfigUpdater
 }
 
 func NewForwardService(agents []*ffi.Agent, log *zap.SugaredLogger) *ForwardService {
@@ -30,11 +33,12 @@ func NewForwardService(agents []*ffi.Agent, log *zap.SugaredLogger) *ForwardServ
 		agents:  agents,
 		log:     log,
 		configs: make(map[instanceKey]*ForwardConfig),
+		updater: updateModuleConfigs,
 	}
 }
 
 func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConfigRequest) (*forwardpb.ShowConfigResponse, error) {
-	numaIndices, err := m.getNUMAIndices(req.Target.Numa)
+	name, numaIndices, err := validateTarget(req.Target, len(m.agents))
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +48,7 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 
 	configs := make([]*forwardpb.InstanceConfig, 0, len(numaIndices))
 	for _, numaIdx := range numaIndices {
-		key := instanceKey{name: req.Target.ModuleName, numaIdx: numaIdx}
+		key := instanceKey{name: name, numaIdx: numaIdx}
 		config := m.configs[key]
 		if config == nil {
 			config = &ForwardConfig{}
@@ -88,12 +92,7 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 }
 
 func (m *ForwardService) AddDevice(ctx context.Context, req *forwardpb.AddDeviceRequest) (*forwardpb.AddDeviceResponse, error) {
-	name := req.Target.ModuleName
-	if name == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "module name is required")
-	}
-
-	numa, err := m.getNUMAIndices(req.Target.Numa)
+	name, numa, err := validateTarget(req.Target, len(m.agents))
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +136,7 @@ func (m *ForwardService) AddDevice(ctx context.Context, req *forwardpb.AddDevice
 	}
 
 	// Then update shm configs
-	if err := m.updateModuleConfigs(name, numa); err != nil {
+	if err := m.updater(m, name, numa); err != nil {
 		return nil, fmt.Errorf("failed to update module configs: %w", err)
 	}
 
@@ -151,12 +150,7 @@ func (m *ForwardService) AddDevice(ctx context.Context, req *forwardpb.AddDevice
 }
 
 func (m *ForwardService) RemoveDevice(ctx context.Context, req *forwardpb.RemoveDeviceRequest) (*forwardpb.RemoveDeviceResponse, error) {
-	name := req.Target.ModuleName
-	if name == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "module name is required")
-	}
-
-	numa, err := m.getNUMAIndices(req.Target.Numa)
+	name, numa, err := validateTarget(req.Target, len(m.agents))
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +222,7 @@ func (m *ForwardService) RemoveDevice(ctx context.Context, req *forwardpb.Remove
 	}
 
 	// Then update shm configs
-	if err := m.updateModuleConfigs(name, numa); err != nil {
+	if err := m.updater(m, name, numa); err != nil {
 		return nil, fmt.Errorf("failed to update module configs: %w", err)
 	}
 
@@ -244,28 +238,16 @@ func (m *ForwardService) RemoveDevice(ctx context.Context, req *forwardpb.Remove
 }
 
 func (m *ForwardService) AddForward(ctx context.Context, req *forwardpb.AddForwardRequest) (*forwardpb.AddForwardResponse, error) {
-	name := req.Target.ModuleName
-	if name == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "module name is required")
-	}
-
-	numa, err := m.getNUMAIndices(req.Target.Numa)
+	name, numa, err := validateTarget(req.Target, len(m.agents))
 	if err != nil {
 		return nil, err
 	}
-
-	network, err := netip.ParsePrefix(req.Forward.Network)
+	if req.Forward == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "forward entry cannot be nil")
+	}
+	sourceDeviceId, network, targetDeviceId, err := validateForwardParams(req.DeviceId, req.Forward.Network, req.Forward.DeviceId)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid network prefix: %v", err)
-	}
-
-	sourceDeviceId := ForwardDeviceID(req.DeviceId)
-	if uint32(sourceDeviceId) != req.DeviceId {
-		return nil, status.Errorf(codes.InvalidArgument, "source device ID is too large for uint16")
-	}
-	targetDeviceId := ForwardDeviceID(req.Forward.DeviceId)
-	if uint32(targetDeviceId) != req.Forward.DeviceId {
-		return nil, status.Errorf(codes.InvalidArgument, "destination device ID is too large for uint16")
+		return nil, err
 	}
 
 	m.mu.Lock()
@@ -273,7 +255,6 @@ func (m *ForwardService) AddForward(ctx context.Context, req *forwardpb.AddForwa
 
 	// First update in-memory configs
 	for _, numaIdx := range numa {
-		deviceFound := false
 		key := instanceKey{name: name, numaIdx: numaIdx}
 		config := m.configs[key]
 		if config == nil {
@@ -281,7 +262,21 @@ func (m *ForwardService) AddForward(ctx context.Context, req *forwardpb.AddForwa
 			m.configs[key] = config
 		}
 
-		// Find device
+		// Check if the target device exists
+		targetDeviceFound := false
+		for i := range config.DeviceForwards {
+			if config.DeviceForwards[i].L2ForwardDeviceID == targetDeviceId {
+				targetDeviceFound = true
+				break
+			}
+		}
+
+		if !targetDeviceFound {
+			return nil, status.Errorf(codes.NotFound, "target device with ID %d not found in NUMA node %d", targetDeviceId, numaIdx)
+		}
+
+		// Find the source device.
+		sourceDeviceFound := false
 		for i := range config.DeviceForwards {
 			if config.DeviceForwards[i].L2ForwardDeviceID == sourceDeviceId {
 				device := &config.DeviceForwards[i]
@@ -290,17 +285,17 @@ func (m *ForwardService) AddForward(ctx context.Context, req *forwardpb.AddForwa
 				}
 				// Add or update forward entry
 				device.Forwards[network] = targetDeviceId
-				deviceFound = true
+				sourceDeviceFound = true
 				break
 			}
 		}
-		if !deviceFound {
-			return nil, status.Errorf(codes.NotFound, "device with ID %d not found in NUMA node %d", sourceDeviceId, numaIdx)
+		if !sourceDeviceFound {
+			return nil, status.Errorf(codes.NotFound, "source device with ID %d not found in NUMA node %d", sourceDeviceId, numaIdx)
 		}
 	}
 
 	// Then update shm configs
-	if err := m.updateModuleConfigs(name, numa); err != nil {
+	if err := m.updater(m, name, numa); err != nil {
 		return nil, fmt.Errorf("failed to update module configs: %w", err)
 	}
 
@@ -315,24 +310,14 @@ func (m *ForwardService) AddForward(ctx context.Context, req *forwardpb.AddForwa
 }
 
 func (m *ForwardService) RemoveForward(ctx context.Context, req *forwardpb.RemoveForwardRequest) (*forwardpb.RemoveForwardResponse, error) {
-	name := req.Target.ModuleName
-	if name == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "module name is required")
-	}
-
-	numa, err := m.getNUMAIndices(req.Target.Numa)
+	name, numa, err := validateTarget(req.Target, len(m.agents))
 	if err != nil {
 		return nil, err
 	}
 
-	network, err := netip.ParsePrefix(req.Network)
+	deviceId, network, _, err := validateForwardParams(req.DeviceId, req.Network, 0)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid network prefix: %v", err)
-	}
-
-	deviceId := ForwardDeviceID(req.DeviceId)
-	if uint32(deviceId) != req.DeviceId {
-		return nil, status.Errorf(codes.InvalidArgument, "source device ID is too large for uint16")
+		return nil, err
 	}
 
 	m.mu.Lock()
@@ -367,7 +352,7 @@ func (m *ForwardService) RemoveForward(ctx context.Context, req *forwardpb.Remov
 	}
 
 	// Then update shm configs
-	if err := m.updateModuleConfigs(name, numa); err != nil {
+	if err := m.updater(m, name, numa); err != nil {
 		return nil, fmt.Errorf("failed to update module configs: %w", err)
 	}
 
@@ -380,7 +365,8 @@ func (m *ForwardService) RemoveForward(ctx context.Context, req *forwardpb.Remov
 	return &forwardpb.RemoveForwardResponse{}, nil
 }
 
-func (m *ForwardService) updateModuleConfigs(
+func updateModuleConfigs(
+	m *ForwardService,
 	name string,
 	numaIndices []uint32,
 ) error {
@@ -462,20 +448,53 @@ func (m *ForwardService) updateModuleConfigs(
 	return nil
 }
 
-func (m *ForwardService) getNUMAIndices(requestedNuma []uint32) ([]uint32, error) {
+func getNUMAIndices(requestedNuma []uint32, numAgents int) ([]uint32, error) {
 	numaIndices := slices.Compact(slices.Sorted(slices.Values(requestedNuma)))
 
 	slices.Sort(requestedNuma)
 	if !slices.Equal(numaIndices, requestedNuma) {
 		return nil, status.Error(codes.InvalidArgument, "duplicate NUMA indices in the request")
 	}
-	if len(numaIndices) > 0 && int(numaIndices[len(numaIndices)-1]) >= len(m.agents) {
+	if len(numaIndices) > 0 && int(numaIndices[len(numaIndices)-1]) >= numAgents {
 		return nil, status.Error(codes.InvalidArgument, "NUMA indices are out of range")
 	}
 	if len(numaIndices) == 0 {
-		for idx := range m.agents {
+		for idx := range numAgents {
 			numaIndices = append(numaIndices, uint32(idx))
 		}
 	}
 	return numaIndices, nil
+}
+
+func validateTarget(target *forwardpb.TargetModule, numAgents int) (string, []uint32, error) {
+	if target == nil {
+		return "", nil, status.Errorf(codes.InvalidArgument, "target cannot be nil")
+	}
+
+	name := target.ModuleName
+	if name == "" {
+		return "", nil, status.Errorf(codes.InvalidArgument, "module name is required")
+	}
+	numa, err := getNUMAIndices(target.Numa, numAgents)
+	if err != nil {
+		return "", nil, err
+	}
+	return name, numa, nil
+}
+
+func validateForwardParams(srcDeviceId uint32, network string, dstDeviceId uint32) (ForwardDeviceID, netip.Prefix, ForwardDeviceID, error) {
+	prefix, err := netip.ParsePrefix(network)
+	if err != nil {
+		return 0, netip.Prefix{}, 0, status.Errorf(codes.InvalidArgument, "failed to parse network: %v", err)
+	}
+
+	sourceDeviceId := ForwardDeviceID(srcDeviceId)
+	if uint32(sourceDeviceId) != srcDeviceId {
+		return 0, netip.Prefix{}, 0, status.Errorf(codes.InvalidArgument, "source device ID is too large for uint16")
+	}
+	targetDeviceId := ForwardDeviceID(dstDeviceId)
+	if uint32(targetDeviceId) != dstDeviceId {
+		return 0, netip.Prefix{}, 0, status.Errorf(codes.InvalidArgument, "destination device ID is too large for uint16")
+	}
+	return sourceDeviceId, prefix, targetDeviceId, nil
 }
