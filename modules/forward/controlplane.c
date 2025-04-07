@@ -20,7 +20,7 @@ forward_module_config_init(
 		return NULL;
 	}
 
-	if (device_count != dp_config->dp_topology.device_count) {
+	if (device_count > dp_config->dp_topology.device_count) {
 		errno = EINVAL;
 		return NULL;
 	}
