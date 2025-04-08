@@ -945,6 +945,10 @@ cp_config_update_devices(
 			cp_config, old_config_gen, pipeline_maps[idx]
 		);
 
+		if (device == NULL) {
+			goto error_free;
+		}
+
 		if (cp_device_registry_update(
 			    cp_config,
 			    new_device_registry,
