@@ -2788,10 +2788,12 @@ new_module_nat64() {
 #ifdef NAT64_DEBUG
 	rte_log_set_level(RTE_LOGTYPE_NAT64, RTE_LOG_DEBUG);
 #endif
+	// Use malloc because module load before init dpdk
 	struct nat64_module *module =
-		(struct nat64_module *)rte_malloc(NULL, sizeof(*module), 0);
+		(struct nat64_module *)malloc(sizeof(*module));
 
 	if (module == NULL) {
+		RTE_LOG(ERR, NAT64, "Failed to allocate memory for module\n");
 		return NULL;
 	}
 

@@ -60,16 +60,17 @@ func (s *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	configs := make([]*nat64pb.InstanceConfig, 0, len(numaIndices))
-	for _, numaIdx := range numaIndices {
-		key := instanceKey{name: req.Target.ModuleName, numaIdx: numaIdx}
-		config := s.configs[key]
-		if config == nil {
-			config = &NAT64Config{}
+	configs := make([]*nat64pb.InstanceConfig, 0)
+	for key, config := range s.configs {
+		// Пропускаем если:
+		// - NUMA не в запрошенном списке
+		// - ModuleName задан и не совпадает с текущим конфигом
+		if !contains(numaIndices, key.numaIdx) || (req.Target.ModuleName != "" && key.name != req.Target.ModuleName) {
+			continue
 		}
 
 		instanceConfig := &nat64pb.InstanceConfig{
-			Numa:     numaIdx,
+			Numa:     key.numaIdx,
 			Prefixes: make([]*nat64pb.Prefix, 0, len(config.Prefixes)),
 			Mappings: make([]*nat64pb.Mapping, 0, len(config.Mappings)),
 			Mtu: &nat64pb.MTUConfig{
@@ -100,6 +101,16 @@ func (s *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 	}, nil
 }
 
+// Вспомогательная функция для проверки наличия элемента в слайсе
+func contains(slice []uint32, item uint32) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequest) (*nat64pb.AddPrefixResponse, error) {
 	if len(req.Prefix) != 12 {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid prefix length: got %d, want 12", len(req.Prefix))
@@ -125,6 +136,11 @@ func (s *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 		config.Prefixes = append(config.Prefixes, req.Prefix)
 	}
 
+	s.log.Infow("added prefix",
+		zap.String("name", req.Target.ModuleName),
+		zap.Binary("prefix", req.Prefix),
+		zap.Uint32s("numa", numaIndices),
+	)
 	// Update module configs
 	if err := s.updateModuleConfigs(req.Target.ModuleName, numaIndices); err != nil {
 		return nil, fmt.Errorf("failed to update module configs: %w", err)

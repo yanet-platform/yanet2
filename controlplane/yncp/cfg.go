@@ -10,6 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/modules/decap"
 	"github.com/yanet-platform/yanet2/controlplane/modules/forward"
+	"github.com/yanet-platform/yanet2/controlplane/modules/nat64"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route"
 )
 
@@ -37,6 +38,7 @@ func DefaultConfig() *Config {
 			Route:   route.DefaultConfig(),
 			Decap:   decap.DefaultConfig(),
 			Forward: forward.DefaultConfig(),
+			NAT64:   nat64.DefaultConfig(),
 		},
 	}
 }
@@ -72,6 +74,9 @@ type ModulesConfig struct {
 
 	// Forward is the configuration for the forward module.
 	Forward *forward.Config `yaml:"forward"`
+
+	// NAT64 is the configuration for the NAT64 module.
+	NAT64 *nat64.Config `yaml:"nat64"`
 }
 
 // UnmarshalYAML serves as a proxy for validation.

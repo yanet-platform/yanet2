@@ -11,6 +11,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/modules/decap"
 	"github.com/yanet-platform/yanet2/controlplane/modules/forward"
+	"github.com/yanet-platform/yanet2/controlplane/modules/nat64"
 	"github.com/yanet-platform/yanet2/controlplane/modules/route"
 )
 
@@ -91,6 +92,11 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize forward built-in module: %w", err)
 	}
 
+	nat64Module, err := nat64.NewNAT64Module(cfg.Modules.NAT64, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize nat64 built-in module: %w", err)
+	}
+
 	gw := gateway.NewGateway(
 		cfg.Gateway,
 		shm,
@@ -102,6 +108,9 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		),
 		gateway.WithBuiltInModule(
 			forwardModule,
+		),
+		gateway.WithBuiltInModule(
+			nat64Module,
 		),
 		gateway.WithLog(log),
 		gateway.WithAtomicLogLevel(opts.LogLevel),

@@ -5,6 +5,9 @@ project('yanet', 'c',
                           'werror=true'])
 
 add_global_arguments(['-march=corei7', '-g', '-O0', '-D_GNU_SOURCE'], language: 'c')
+if get_option('buildtype') == 'debug'
+  add_global_arguments('-DDEBUG_NAT64', language : 'c')
+endif
 
 yanet_rootdir = include_directories('.')
 

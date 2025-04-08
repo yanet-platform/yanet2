@@ -388,6 +388,10 @@ dataplane_init(
 		if (rc == -1) {
 			return -1;
 		}
+		rc = dataplane_load_module(node->dp_config, bin_hndl, "nat64");
+		if (rc == -1) {
+			return -1;
+		}
 		rc = dataplane_load_module(
 			node->dp_config, bin_hndl, "balancer"
 		);

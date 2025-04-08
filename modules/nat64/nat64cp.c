@@ -27,7 +27,7 @@
  *
  * This macro defines a specific log type for the NAT64CP module.
  * The log type is registered using RTE_LOG_REGISTER_DEFAULT with the log level
- * set to DEBUG if DEBUG_NAT64CP is defined, otherwise INFO.
+ * set to DEBUG if DEBUG_NAT64 is defined, otherwise INFO.
  *
  * @note For more details on RTE_LOG and log types, refer to the DPDK
  * documentation: https://doc.dpdk.org/guides/prog_guide/log_lib.html

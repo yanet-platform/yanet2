@@ -39,6 +39,7 @@ dependencies += lib_dscp_dp_dep
 #dependencies += lib_acl_dp_dep
 dependencies += lib_forward_dp_dep
 dependencies += lib_route_dp_dep
+dependencies += lib_nat64_dp_dep
 
 sources = files(
   'drivers/sock_dev.c',

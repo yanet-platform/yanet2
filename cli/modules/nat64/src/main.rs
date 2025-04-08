@@ -1,11 +1,13 @@
 use core::error::Error;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
+use ipnet::Ipv6Net;
 
 use code::{
-    nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, RemoveMappingRequest,
-    RemovePrefixRequest, SetMtuRequest, ShowConfigRequest, ShowConfigResponse, TargetModule,
+    nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest,
+    SetMtuRequest, ShowConfigRequest, ShowConfigResponse, TargetModule,
 };
 use ptree::TreeBuilder;
 use tonic::transport::Channel;
@@ -57,23 +59,19 @@ pub enum ModeCmd {
 pub enum PrefixCmd {
     /// Add a new NAT64 prefix
     Add(AddPrefixCmd),
-    /// Remove a NAT64 prefix
-    Remove(RemovePrefixCmd),
 }
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum MappingCmd {
     /// Add a new IPv4-IPv6 mapping
     Add(AddMappingCmd),
-    /// Remove an IPv4-IPv6 mapping
-    Remove(RemoveMappingCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// NAT64 module name to operate on.
     #[arg(long = "mod")]
-    pub module_name: String,
+    pub module_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -86,20 +84,7 @@ pub struct AddPrefixCmd {
     pub numa: Option<Vec<u32>>,
     /// IPv6 prefix (12 bytes) to be added.
     #[arg(long)]
-    pub prefix: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct RemovePrefixCmd {
-    /// NAT64 module name to operate on.
-    #[arg(long = "mod")]
-    pub module_name: String,
-    /// NUMA node index where the changes should be applied.
-    #[arg(long)]
-    pub numa: Option<Vec<u32>>,
-    /// IPv6 prefix (12 bytes) to be removed.
-    #[arg(long)]
-    pub prefix: Vec<u8>,
+    pub prefix: Ipv6Net,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -112,26 +97,13 @@ pub struct AddMappingCmd {
     pub numa: Option<Vec<u32>>,
     /// IPv4 address (4 bytes).
     #[arg(long)]
-    pub ipv4: Vec<u8>,
+    pub ipv4: Ipv4Addr,
     /// IPv6 address (16 bytes).
     #[arg(long)]
-    pub ipv6: Vec<u8>,
+    pub ipv6: Ipv6Addr,
     /// Index of the prefix to use.
     #[arg(long)]
     pub prefix_index: u32,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct RemoveMappingCmd {
-    /// NAT64 module name to operate on.
-    #[arg(long = "mod")]
-    pub module_name: String,
-    /// NUMA node index where the changes should be applied.
-    #[arg(long)]
-    pub numa: Option<Vec<u32>>,
-    /// IPv4 address (4 bytes) to remove mapping for.
-    #[arg(long)]
-    pub ipv4: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -179,11 +151,9 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Show(cmd) => service.show_config(cmd, format).await,
         ModeCmd::Prefix { cmd } => match cmd {
             PrefixCmd::Add(cmd) => service.add_prefix(cmd).await,
-            PrefixCmd::Remove(cmd) => service.remove_prefix(cmd).await,
         },
         ModeCmd::Mapping { cmd } => match cmd {
             MappingCmd::Add(cmd) => service.add_mapping(cmd).await,
-            MappingCmd::Remove(cmd) => service.remove_mapping(cmd).await,
         },
         ModeCmd::Mtu(cmd) => service.set_mtu(cmd).await,
     }
@@ -202,7 +172,7 @@ impl NAT64Service {
     pub async fn show_config(&mut self, cmd: ShowConfigCmd, format: OutputFormat) -> Result<(), Box<dyn Error>> {
         let request = ShowConfigRequest {
             target: Some(TargetModule {
-                module_name: cmd.module_name.to_owned(),
+                module_name: cmd.module_name.unwrap_or_default(),
                 numa: Vec::new(),
             }),
         };
@@ -220,25 +190,11 @@ impl NAT64Service {
                 module_name: cmd.module_name,
                 numa: cmd.numa.unwrap_or_default(),
             }),
-            prefix: cmd.prefix,
+            prefix: cmd.prefix.addr().octets()[..12].to_vec(),
         };
         log::debug!("AddPrefixRequest: {:?}", request);
         let response = self.client.add_prefix(request).await?.into_inner();
         log::debug!("AddPrefixResponse: {:?}", response);
-        Ok(())
-    }
-
-    pub async fn remove_prefix(&mut self, cmd: RemovePrefixCmd) -> Result<(), Box<dyn Error>> {
-        let request = RemovePrefixRequest {
-            target: Some(TargetModule {
-                module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
-            }),
-            prefix: cmd.prefix,
-        };
-        log::debug!("RemovePrefixRequest: {:?}", request);
-        let response = self.client.remove_prefix(request).await?.into_inner();
-        log::debug!("RemovePrefixResponse: {:?}", response);
         Ok(())
     }
 
@@ -248,27 +204,13 @@ impl NAT64Service {
                 module_name: cmd.module_name,
                 numa: cmd.numa.unwrap_or_default(),
             }),
-            ipv4: cmd.ipv4,
-            ipv6: cmd.ipv6,
+            ipv4: cmd.ipv4.octets().to_vec(),
+            ipv6: cmd.ipv6.octets().to_vec(),
             prefix_index: cmd.prefix_index,
         };
         log::debug!("AddMappingRequest: {:?}", request);
         let response = self.client.add_mapping(request).await?.into_inner();
         log::debug!("AddMappingResponse: {:?}", response);
-        Ok(())
-    }
-
-    pub async fn remove_mapping(&mut self, cmd: RemoveMappingCmd) -> Result<(), Box<dyn Error>> {
-        let request = RemoveMappingRequest {
-            target: Some(TargetModule {
-                module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
-            }),
-            ipv4: cmd.ipv4,
-        };
-        log::debug!("RemoveMappingRequest: {:?}", request);
-        let response = self.client.remove_mapping(request).await?.into_inner();
-        log::debug!("RemoveMappingResponse: {:?}", response);
         Ok(())
     }
 
