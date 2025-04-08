@@ -1,0 +1,19 @@
+.tab-nav {
+    display: flex;
+    gap: 4px;
+    border-bottom: 2px solid var(--noc-color-line-generic);
+    margin-bottom: 12px;
+    height: fit-content;
+
+    .tab-nav-link {
+        padding: 12px;
+
+        &.active {
+            margin: 0 0 -2px;
+            font-weight: 800;
+            border-bottom-width: 2px;
+            border-bottom-style: solid;
+            border-color: var(--noc-color-line-generic-active);
+        }
+    }
+}

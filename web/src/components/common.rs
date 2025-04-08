@@ -14,4 +14,5 @@ pub mod popup;
 pub mod progress;
 pub mod snackbar;
 pub mod spinner;
+pub mod tabs;
 pub mod viewport;

@@ -78,7 +78,7 @@ pub fn NeighbourView() -> impl IntoView {
 
     view! {
         <Viewport>
-            <Header class:neighbour-ph=true>
+            <Header class="neighbour-ph">
                 <h1>"Neighbours"</h1>
 
                 <Input
@@ -89,7 +89,7 @@ pub fn NeighbourView() -> impl IntoView {
                 />
             </Header>
 
-            <ViewportContent class:neighbour-pc=true>
+            <ViewportContent class="neighbour-pc">
                 <Suspense fallback=move || {
                     view! {
                         <Center>

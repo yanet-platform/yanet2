@@ -15,7 +15,7 @@ mod xxx;
 use crate::{
     components::{
         common::snackbar::Snackbar, demo::DemoView, home::Home, nav::Nav, neighbour::NeighbourView,
-        settings::SettingsView,
+        route::lookup::RouteLookupView, settings::SettingsView,
     },
     theme::ThemeContext,
 };
@@ -34,6 +34,7 @@ pub fn App() -> impl IntoView {
                         <Routes fallback=|| "Not found.">
                             <Route path=path!("/") view=Home />
                             <Route path=path!("/neighbour") view=NeighbourView />
+                            <Route path=path!("/route/lookup") view=RouteLookupView />
                             <Route path=path!("/demo") view=DemoView />
                             <Route path=path!("/settings") view=|| view! { <SettingsView /> } />
                         </Routes>

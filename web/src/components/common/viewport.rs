@@ -16,9 +16,18 @@ pub fn Viewport(
 /// Viewport's main content component.
 #[component]
 pub fn ViewportContent(
+    /// Optional class.
+    #[prop(optional, into)]
+    class: Option<&'static str>,
     /// Nested children.
     #[prop(optional)]
     children: Option<Children>,
 ) -> impl IntoView {
-    view! { <div class="viewport__content">{children.map(|c| c())}</div> }
+    let mut cls = "viewport__content".to_string();
+    if let Some(c) = class {
+        cls.push(' ');
+        cls.push_str(c);
+    }
+
+    view! { <div class=cls>{children.map(|c| c())}</div> }
 }

@@ -3,7 +3,7 @@ use leptos::prelude::*;
 use self::{
     admin::IconAdmin, aim::IconAim, arrow_down::IconArrowDown, cross::IconCross, error_bell::IconErrorBell,
     error_triangle::IconErrorTriangle, help::IconHelp, home::IconHome, logo::IconLogo, rack::IconRack,
-    settings::IconSettings, tool::IconTool, triangle::IconTriangle,
+    route::IconRoute, settings::IconSettings, tool::IconTool, triangle::IconTriangle,
 };
 
 mod admin;
@@ -16,6 +16,7 @@ mod help;
 mod home;
 mod logo;
 mod rack;
+mod route;
 mod settings;
 mod tool;
 mod triangle;
@@ -35,6 +36,7 @@ pub enum IconKind {
     Rack,
     Tool,
     Triangle,
+    Route,
 }
 
 #[component]
@@ -56,5 +58,6 @@ pub fn Icon(
         IconKind::Rack => view! { <IconRack /> }.into_any(),
         IconKind::Tool => view! { <IconTool /> }.into_any(),
         IconKind::Triangle => view! { <IconTriangle /> }.into_any(),
+        IconKind::Route => view! { <IconRoute /> }.into_any(),
     }
 }
