@@ -101,3 +101,11 @@ common/**/Cargo.lock
 
 # local env
 .envrc
+
+# fuzzing
+timeout-*
+crash-*
+corpus/
+fuzz-*.log
+default.profdata
+default.profraw

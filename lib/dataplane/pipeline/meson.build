@@ -10,6 +10,8 @@ sources = files(
 lib_pipeline_dp = static_library(
   'pipeline',
   sources,
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )

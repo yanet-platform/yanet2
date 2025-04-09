@@ -71,12 +71,18 @@ func decapModuleConfig(prefixes []netip.Prefix, memCtx *C.struct_memory_context)
 	return m
 }
 
-func decapHandlePackets(mc *C.struct_decap_module_config, packets ...gopacket.Packet) common.PacketFrontResult {
+func decapHandlePackets(mc *C.struct_decap_module_config, packets ...gopacket.Packet) (common.PacketFrontResult, error) {
 	payload := common.PacketsToPaylod(packets)
-	pinner, pf := common.PacketFrontFromPayload(payload)
-	common.ParsePackets(pf)
+	pf := common.PacketFrontFromPayload(payload)
+	err := common.ParsePackets(pf)
+	if err != nil {
+		return common.PacketFrontResult{}, err
+	}
+
+	return cDecapHandlePackets(mc, pf), nil
+}
+
+func cDecapHandlePackets(mc *C.struct_decap_module_config, pf *common.CPacketFront) common.PacketFrontResult {
 	C.decap_handle_packets(nil, &mc.module_data, (*C.struct_packet_front)(unsafe.Pointer(pf)))
-	result := common.PacketFrontToPayload(pf)
-	pinner.Unpin()
-	return result
+	return common.PacketFrontToPayload(pf)
 }

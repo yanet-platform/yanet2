@@ -1,0 +1,6 @@
+option(
+  'fuzzing',
+  type: 'feature',
+  value: 'disabled',
+  description: 'Enable libFuzzer integration',
+)

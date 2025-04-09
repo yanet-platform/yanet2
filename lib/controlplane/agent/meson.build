@@ -11,6 +11,8 @@ sources = files(
 lib_agent_cp = static_library(
   'agent',
   sources,
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )

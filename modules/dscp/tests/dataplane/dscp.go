@@ -86,10 +86,9 @@ func dscpModuleConfig(prefixes []netip.Prefix, flag, dscp uint8, memCtx *C.struc
 
 func dscpHandlePackets(mc *C.struct_dscp_module_config, packets ...gopacket.Packet) common.PacketFrontResult {
 	payload := common.PacketsToPaylod(packets)
-	pinner, pf := common.PacketFrontFromPayload(payload)
+	pf := common.PacketFrontFromPayload(payload)
 	common.ParsePackets(pf)
 	C.dscp_handle_packets(nil, &mc.module_data, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	result := common.PacketFrontToPayload(pf)
-	pinner.Unpin()
 	return result
 }

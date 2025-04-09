@@ -71,7 +71,8 @@ func TestDecap_IPIP6(t *testing.T) {
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(m, pkt)
+	result, err := decapHandlePackets(m, pkt)
+	require.NoError(t, err)
 	require.NotEmpty(t, result.Output)
 	resultPkt := common.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
@@ -102,7 +103,8 @@ func TestDecap_IPIP(t *testing.T) {
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(m, pkt)
+	result, err := decapHandlePackets(m, pkt)
+	require.NoError(t, err)
 	require.NotEmpty(t, result.Output)
 	resultPkt := common.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
@@ -127,7 +129,8 @@ func TestDecap_IP6IP(t *testing.T) {
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(m, pkt)
+	result, err := decapHandlePackets(m, pkt)
+	require.NoError(t, err)
 	require.NotEmpty(t, result.Output)
 	resultPkt := common.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
@@ -163,7 +166,8 @@ func TestDecap_IP6IP6(t *testing.T) {
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(m, pkt)
+	result, err := decapHandlePackets(m, pkt)
+	require.NoError(t, err)
 	require.NotEmpty(t, result.Output)
 	resultPkt := common.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
@@ -190,7 +194,8 @@ func TestDecap_IP6IP_noVlan(t *testing.T) {
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(m, pkt)
+	result, err := decapHandlePackets(m, pkt)
+	require.NoError(t, err)
 	require.NotEmpty(t, result.Output)
 	resultPkt := common.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
@@ -286,14 +291,14 @@ func TestDecap_GRE(t *testing.T) {
 			ip4.DstIP = net.ParseIP("1.2.3.10")
 			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
-		// 11. drop - RecursionControl
+		// 11. drop - StrictSourceRoute
 		func() gopacket.Packet {
 			gre := gre
 			gre.StrictSourceRoute = true
 			ip4.DstIP = net.ParseIP("1.2.3.11")
 			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
-		// 12. drop - RecursionControl
+		// 12. drop - RoutingPresent
 		func() gopacket.Packet {
 			gre := gre
 			gre.RoutingPresent = true
@@ -353,7 +358,8 @@ func TestDecap_GRE(t *testing.T) {
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(m, input...)
+	result, err := decapHandlePackets(m, input...)
+	require.NoError(t, err)
 	require.Equal(t, len(expected)-len(drop), len(result.Output), "output")
 	require.Equal(t, len(drop), len(result.Drop), "drop")
 
@@ -424,7 +430,8 @@ func TestDecap_Fragment_ipv4(t *testing.T) {
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(m, input...)
+	result, err := decapHandlePackets(m, input...)
+	require.NoError(t, err)
 	require.NotEmpty(t, result.Output)
 	for idx, expectedPkt := range expected {
 		t.Logf("Origin packet idx=%d\n%s", idx, input[idx])
@@ -484,7 +491,8 @@ func TestDecap_Fragment_ipv6(t *testing.T) {
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
 
-	result := decapHandlePackets(m, input...)
+	result, err := decapHandlePackets(m, input...)
+	require.NoError(t, err)
 	if len(result.Output) > 0 {
 		t.Log("Unexpected packet", common.ParseEtherPacket(result.Output[0]))
 	}

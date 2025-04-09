@@ -8,9 +8,11 @@ sources = files(
 
 lib_filter = static_library(
   'filter',
- sources,
- dependencies: dependencies,
- install: false,
+  sources,
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+  install: false,
 )
 
 lib_filter_dep = declare_dependency(

@@ -5,6 +5,8 @@ sources = files(
 lib_logging = static_library(
   'logging',
   sources,
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
   install: false,
 )
 

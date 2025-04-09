@@ -7,12 +7,15 @@ package common
 //#include "dataplane/module/testing.h"
 import "C"
 import (
+	"fmt"
 	"runtime"
 	"unsafe"
 )
 
 // FIXME: make configurable
 var mbufSize uint64 = 8096
+
+type CPacketFront C.struct_packet_front
 
 type PacketFrontResult struct {
 	Input  [][]uint8
@@ -21,13 +24,17 @@ type PacketFrontResult struct {
 	Bypass [][]uint8
 }
 
-func ParsePackets(pf *C.struct_packet_front) {
+func ParsePackets(pf *CPacketFront) error {
 	for p := pf.input.first; p != nil; p = p.next {
-		C.parse_packet(p)
+		rc := C.parse_packet(p)
+		if rc != 0 {
+			return fmt.Errorf("failed to call C.parse_packet rc=%d", rc)
+		}
 	}
+	return nil
 }
 
-func PacketFrontFromPayload(payload [][]byte) (runtime.Pinner, *C.struct_packet_front) {
+func PacketFrontFromPayload(payload [][]byte) *CPacketFront {
 	testData := []C.struct_test_data{}
 	var payloadPinner runtime.Pinner
 	for _, data := range payload {
@@ -39,8 +46,6 @@ func PacketFrontFromPayload(payload [][]byte) (runtime.Pinner, *C.struct_packet_
 	}
 	arenaSize := uint64(unsafe.Sizeof(C.struct_packet_front{})) + mbufSize*uint64(len(testData))
 	arena := make([]byte, arenaSize)
-	var pinner runtime.Pinner
-	pinner.Pin(&arena[0])
 	pf := C.testing_packet_front(
 		(*C.struct_test_data)(unsafe.Pointer(&testData[0])), // payload
 		(*C.uint8_t)(&arena[0]),                             // arena
@@ -50,10 +55,10 @@ func PacketFrontFromPayload(payload [][]byte) (runtime.Pinner, *C.struct_packet_
 	)
 	payloadPinner.Unpin()
 
-	return pinner, pf
+	return (*CPacketFront)(pf)
 }
 
-func PacketFrontToPayload(pf *C.struct_packet_front) PacketFrontResult {
+func PacketFrontToPayload(pf *CPacketFront) PacketFrontResult {
 
 	lists := []C.struct_packet_list{
 		pf.input,

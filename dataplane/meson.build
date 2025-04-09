@@ -19,6 +19,8 @@ lib_sources = files(
 lib_dataplane = static_library(
   'dataplane',
   lib_sources,
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )
@@ -47,11 +49,13 @@ sources = files(
   'main.c',
 )
 
-executable(
-  'yanet-dataplane',
-  sources,
-  dependencies: dependencies,
-  install: true,
-)
+if not get_option('fuzzing').enabled()
+  executable(
+    'yanet-dataplane',
+    sources,
+    dependencies: dependencies,
+    install: true,
+  )
+endif
 
 #subdir('unittest')
