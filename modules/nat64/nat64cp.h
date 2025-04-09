@@ -29,7 +29,8 @@ nat64_module_config_init(struct agent *agent, const char *name);
  *
  * @param module_data Pointer to the module data structure
  */
-void nat64_module_config_free(struct module_data *module_data);
+void
+nat64_module_config_free(struct module_data *module_data);
 
 /**
  * @brief Adds an IPv4-IPv6 address mapping
@@ -45,11 +46,12 @@ void nat64_module_config_free(struct module_data *module_data);
  *         - ENOMEM: Memory allocation failed
  *         - EINVAL: Invalid prefix index
  */
-int nat64_module_config_add_mapping(
-    struct module_data *module_data,
-    uint32_t ip4,
-    uint8_t ip6[16],
-    size_t prefix_num
+int
+nat64_module_config_add_mapping(
+	struct module_data *module_data,
+	uint32_t ip4,
+	uint8_t ip6[16],
+	size_t prefix_num
 );
 
 /**
@@ -64,7 +66,7 @@ int nat64_module_config_add_mapping(
  * @return Index of the new prefix on success, -1 on failure with errno set:
  *         - ENOMEM: Memory allocation failed
  */
-int nat64_module_config_add_prefix(
-    struct module_data *module_data,
-    uint8_t prefix[12]
+int
+nat64_module_config_add_prefix(
+	struct module_data *module_data, uint8_t prefix[12]
 );

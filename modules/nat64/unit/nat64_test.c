@@ -27,12 +27,12 @@
 #include <rte_udp.h>
 
 /* Project headers */
+#include "common.h"
 #include "dataplane/dpdk.h"
 #include "dataplane/module/module.h"
+#include "nat64cp.h"
 #include "nat64dp.h"
 #include "test.h"
-#include "nat64cp.h"
-#include "common.h"
 
 #ifdef DEBUG_NAT64
 RTE_LOG_REGISTER_DEFAULT(nat64test_logtype, DEBUG);
@@ -46,7 +46,8 @@ RTE_LOG_REGISTER_DEFAULT(nat64test_logtype, INFO);
 /**
  * @brief Test environment parameters for NAT64 unit testing
  *
- * This structure contains all necessary parameters and resources for executing NAT64 tests:
+ * This structure contains all necessary parameters and resources for executing
+ * NAT64 tests:
  * - Packet front for managing test packet flows
  * - Module instance being tested
  * - Module configuration data
@@ -71,8 +72,8 @@ struct nat64_unittest_params {
 	struct packet_front packet_front; /**< Packet front for testing */
 	struct module *module; /**< Pointer to the module being tested */
 	struct module_data *module_data; /**< Module configuration */
-	
-	void* arena0;
+
+	void *arena0;
 	struct block_allocator ba;
 	struct memory_context mctx;
 
@@ -183,7 +184,8 @@ static struct {
  *         - ENOMEM: Memory allocation failed
  *         - EINVAL: Invalid parameter/configuration
  *
- * @note Calls rte_pktmbuf_pool_create() which may fail if system lacks huge pages
+ * @note Calls rte_pktmbuf_pool_create() which may fail if system lacks huge
+ * pages
  * @note Memory arena size is defined by ARENA_SIZE macro
  * @note Resources must be freed by corresponding cleanup function
  *
@@ -223,7 +225,9 @@ test_setup(void) {
 	}
 
 	block_allocator_init(&test_params.ba);
-	block_allocator_put_arena(&test_params.ba, test_params.arena0, ARENA_SIZE);
+	block_allocator_put_arena(
+		&test_params.ba, test_params.arena0, ARENA_SIZE
+	);
 
 	memory_context_init(&test_params.mctx, "nat64 tests", &test_params.ba);
 
@@ -246,23 +250,27 @@ test_setup(void) {
  * @see nat64_module_config Configuration structure
  */
 static int
-nat64_test_config(
-	struct module_data **module_data
-) {
+nat64_test_config(struct module_data **module_data) {
 	if (!module_data) {
 		RTE_LOG(ERR, NAT64_TEST, "module_data pointer is NULL\n");
 		return -EINVAL;
 	}
 
-	struct nat64_module_config *config = (struct nat64_module_config *)
-		memory_balloc(&test_params.mctx, sizeof(struct nat64_module_config));
+	struct nat64_module_config *config =
+		(struct nat64_module_config *)memory_balloc(
+			&test_params.mctx, sizeof(struct nat64_module_config)
+		);
 	if (!config) {
-		RTE_LOG(ERR, NAT64_TEST, "Failed to allocate memory for config\n");
+		RTE_LOG(ERR,
+			NAT64_TEST,
+			"Failed to allocate memory for config\n");
 		return -ENOMEM;
 	}
 
 	// Initialize module_data fields
-	strtcpy(config->module_data.name, "nat64_test", sizeof(config->module_data.name));
+	strtcpy(config->module_data.name,
+		"nat64_test",
+		sizeof(config->module_data.name));
 	memory_context_init_from(
 		&config->module_data.memory_context,
 		&test_params.mctx,
@@ -271,66 +279,85 @@ nat64_test_config(
 
 	// config->module_data.free_handler = nat64_module_config_free;
 	config->module_data.index = 0;
-// Initialize fields
-config->mappings.count = 0;
-config->mappings.list = NULL;
-config->prefixes.prefixes = NULL;
-config->prefixes.count = 0;
-config->mtu.ipv4 = 1450;
-config->mtu.ipv6 = 1280;
+	// Initialize fields
+	config->mappings.count = 0;
+	config->mappings.list = NULL;
+	config->prefixes.prefixes = NULL;
+	config->prefixes.count = 0;
+	config->mtu.ipv4 = 1450;
+	config->mtu.ipv6 = 1280;
 
-struct memory_context *memory_context = &config->module_data.memory_context;
-if (lpm_init(&config->mappings.v4_to_v6, memory_context)) {
-	RTE_LOG(ERR, NAT64_TEST, "Failed to initialize v4_to_v6 LPM\n");
-	goto error_config;
-}
-if (lpm_init(&config->mappings.v6_to_v4, memory_context)) {
-	RTE_LOG(ERR, NAT64_TEST, "Failed to initialize v6_to_v4 LPM\n");
-	goto error_lpm_v4;
-}
+	struct memory_context *memory_context =
+		&config->module_data.memory_context;
+	if (lpm_init(&config->mappings.v4_to_v6, memory_context)) {
+		RTE_LOG(ERR, NAT64_TEST, "Failed to initialize v4_to_v6 LPM\n");
+		goto error_config;
+	}
+	if (lpm_init(&config->mappings.v6_to_v4, memory_context)) {
+		RTE_LOG(ERR, NAT64_TEST, "Failed to initialize v6_to_v4 LPM\n");
+		goto error_lpm_v4;
+	}
 
-
-// Add prefix
-uint8_t pfx[12] = {
-	0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00
-};
-if (nat64_module_config_add_prefix((struct module_data *)config, pfx) < 0) {
-	goto error_lpm_v6;
-}
+	// Add prefix
+	uint8_t pfx[12] = {
+		0x20,
+		0x01,
+		0x0d,
+		0xb8,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00
+	};
+	if (nat64_module_config_add_prefix((struct module_data *)config, pfx) <
+	    0) {
+		goto error_lpm_v6;
+	}
 
 	// Add mappings
 	uint32_t mapping_count = config_data.count;
 	for (uint32_t i = 0; i < mapping_count; i++) {
 		if (nat64_module_config_add_mapping(
-			(struct module_data *)config,
-			config_data.mapping[i].ip4,
-			(uint8_t *)config_data.mapping[i].ip6,
-			0) < 0) {
+			    (struct module_data *)config,
+			    config_data.mapping[i].ip4,
+			    (uint8_t *)config_data.mapping[i].ip6,
+			    0
+		    ) < 0) {
 			goto error_mappings;
 		}
 	}
 
-	LOG_DBG(NAT64_TEST, "NAT64 module configured successfully\n"
-	        "  Mappings: %lu\n"
-	        "  Prefixes: %lu\n"
-	        "  MTU IPv4: %u\n"
-	        "  MTU IPv6: %u\n",
-	        config->mappings.count,
-	        config->prefixes.count,
-	        config->mtu.ipv4,
-	        config->mtu.ipv6);
+	LOG_DBG(NAT64_TEST,
+		"NAT64 module configured successfully\n"
+		"  Mappings: %lu\n"
+		"  Prefixes: %lu\n"
+		"  MTU IPv4: %u\n"
+		"  MTU IPv6: %u\n",
+		config->mappings.count,
+		config->prefixes.count,
+		config->mtu.ipv4,
+		config->mtu.ipv6);
 
 	*module_data = (struct module_data *)config;
 	return 0;
 
 error_mappings:
 	if (config->mappings.list)
-		memory_bfree(&config->module_data.memory_context, config->mappings.list,
-			sizeof(struct ip4to6) * config->mappings.count);
+		memory_bfree(
+			&config->module_data.memory_context,
+			config->mappings.list,
+			sizeof(struct ip4to6) * config->mappings.count
+		);
 	if (config->prefixes.prefixes)
-		memory_bfree(&config->module_data.memory_context, config->prefixes.prefixes,
-			sizeof(struct nat64_prefix) * config->prefixes.count);
+		memory_bfree(
+			&config->module_data.memory_context,
+			config->prefixes.prefixes,
+			sizeof(struct nat64_prefix) * config->prefixes.count
+		);
 
 error_lpm_v6:
 	lpm_free(&config->mappings.v6_to_v4);
@@ -340,11 +367,14 @@ error_lpm_v4:
 
 error_config:
 	if (config) {
-		memory_bfree(&test_params.mctx, config, sizeof(struct nat64_module_config));
+		memory_bfree(
+			&test_params.mctx,
+			config,
+			sizeof(struct nat64_module_config)
+		);
 	}
 	return -EINVAL;
 }
-
 
 /**
  * @brief Test NAT64 module configuration handling
@@ -358,7 +388,10 @@ error_config:
  */
 static inline int
 test_module_config_handler(void) {
-	TEST_ASSERT_SUCCESS(nat64_test_config(&test_params.module_data), "nat64_test_config failed\n");
+	TEST_ASSERT_SUCCESS(
+		nat64_test_config(&test_params.module_data),
+		"nat64_test_config failed\n"
+	);
 	TEST_ASSERT_NOT_NULL(
 		test_params.module_data, "module_config_handler failed\n"
 	);
@@ -2192,7 +2225,8 @@ push_packet(struct upkt *pkt) {
  */
 static int
 append_test_cases_from_mappings(struct test_case **test_case) {
-	struct nat64_module_config *nat64_config = (struct nat64_module_config *)test_params.module_data;
+	struct nat64_module_config *nat64_config =
+		(struct nat64_module_config *)test_params.module_data;
 	for (uint32_t i = 0; i < config_data.count; i++) {
 		struct upkt pkt = {
 			.eth =
@@ -2769,7 +2803,8 @@ create_icmp_packet(
  */
 static int
 append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
-	struct nat64_module_config *nat64_config = (struct nat64_module_config *)test_params.module_data;
+	struct nat64_module_config *nat64_config =
+		(struct nat64_module_config *)test_params.module_data;
 
 	const struct icmp_type_info_t icmp_types[] = {
 		{"Echo Request v4->v6",
@@ -3561,7 +3596,8 @@ append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
 			struct upkt *pkt = create_icmp_packet(
 				info,
 				!info->from_ipv4,
-				ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix
+				ADDR_OF(&nat64_config->prefixes.prefixes)[0]
+					.prefix
 			);
 			if (!pkt) {
 				return -1;
@@ -3582,12 +3618,14 @@ append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
 
 		// For regular translation cases
 		struct upkt *pkt_v4 = create_icmp_packet(
-			info, false,
-				ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix
+			info,
+			false,
+			ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix
 		);
 		struct upkt *pkt_v6 = create_icmp_packet(
-			info, true,
-				ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix
+			info,
+			true,
+			ADDR_OF(&nat64_config->prefixes.prefixes)[0].prefix
 		);
 
 		if (!pkt_v4 || !pkt_v6) {
@@ -3652,7 +3690,8 @@ append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
  */
 static int
 append_test_cases_from_mappings_icmp(struct test_case **test_case) {
-	struct nat64_module_config *nat64_config = (struct nat64_module_config *)test_params.module_data;
+	struct nat64_module_config *nat64_config =
+		(struct nat64_module_config *)test_params.module_data;
 	for (uint32_t i = 0; i < config_data.count; i++) {
 		struct upkt pkt = {
 			.eth =
@@ -3828,7 +3867,8 @@ packet_list_cleanup(struct packet_list *list) {
  */
 static inline int
 test_nat64_udp_checksum() {
-	struct nat64_module_config *nat64_config = (struct nat64_module_config *)test_params.module_data;
+	struct nat64_module_config *nat64_config =
+		(struct nat64_module_config *)test_params.module_data;
 
 	// Create IPv4 UDP packet
 	struct upkt pkt = {
@@ -3916,9 +3956,7 @@ test_nat64_udp_checksum() {
 	TEST_ASSERT_EQUAL(push_packet(&pkt), 0, "Failed to push packet\n");
 
 	test_params.module->handler(
-		NULL,
-		test_params.module_data,
-		&test_params.packet_front
+		NULL, test_params.module_data, &test_params.packet_front
 	);
 
 	// Verify output
@@ -3993,9 +4031,7 @@ process_test_case(struct test_case *tc) {
 	);
 
 	test_params.module->handler(
-		NULL,
-		test_params.module_data,
-		&test_params.packet_front
+		NULL, test_params.module_data, &test_params.packet_front
 	);
 
 	if (tc->pkt_expected.eth.dst_addr.addr_bytes[0] == 0) {
@@ -4215,7 +4251,8 @@ test_nat64_icmp() {
  */
 static inline int
 append_test_cases_from_mappings_tcp(struct test_case **test_case) {
-	struct nat64_module_config *nat64_config = (struct nat64_module_config *)test_params.module_data;
+	struct nat64_module_config *nat64_config =
+		(struct nat64_module_config *)test_params.module_data;
 	for (uint32_t i = 0; i < config_data.count; i++) {
 		struct upkt pkt = {
 			.eth =

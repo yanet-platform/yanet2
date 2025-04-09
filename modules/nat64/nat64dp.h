@@ -21,8 +21,11 @@
  *       NAT64 functionality, refer to RFC6146.
  */
 struct nat64_module {
-    struct module module;                  /**< Base module structure for common functionality */
-    struct nat64_module_config *config;    /**< NAT64-specific configuration including mappings and prefixes */
+	struct module
+		module; /**< Base module structure for common functionality */
+	struct nat64_module_config
+		*config; /**< NAT64-specific configuration including mappings
+			    and prefixes */
 };
 
 /**

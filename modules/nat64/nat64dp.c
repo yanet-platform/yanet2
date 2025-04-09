@@ -43,9 +43,9 @@
 #include <rte_udp.h>
 
 /* Project headers */
+#include "common.h"
 #include "dataplane/module/module.h"
 #include "nat64dp.h"
-#include "common.h"
 
 /**
  * @def RTE_LOGTYPE_NAT64
@@ -79,15 +79,15 @@ struct rate_limiter {
 /**
  * @brief Finds a mapping from IPv6 to IPv4 address
  *
- * This function searches the LPM (Longest Prefix Match) table for a mapping from
- * an IPv6 address to an IPv4 address. The search is performed using
- * the IPv6 address as the lookup key.
+ * This function searches the LPM (Longest Prefix Match) table for a mapping
+ * from an IPv6 address to an IPv4 address. The search is performed using the
+ * IPv6 address as the lookup key.
  *
  * The function implements part of the stateless NAT64 translation algorithm
  * described in RFC7915 section 4.1 (Address Translation).
  *
- * @param config Pointer to the NAT64 module configuration containing mapping tables.
- *               Must not be NULL.
+ * @param config Pointer to the NAT64 module configuration containing mapping
+ * tables. Must not be NULL.
  * @param ip6 Pointer to the source IPv6 address to look up (16 bytes).
  *            Must not be NULL and must point to a valid IPv6 address.
  *
@@ -118,33 +118,33 @@ struct rate_limiter {
  */
 struct ip4to6 *
 find_ip6to4(struct nat64_module_config *config, uint8_t *ip6) {
-    if (!config || !ip6) {
-        return NULL;
-    }
+	if (!config || !ip6) {
+		return NULL;
+	}
 
-    // Поиск соответствия в LPM таблице
-    uint32_t index = lpm_lookup(&config->mappings.v6_to_v4, 16, ip6);
-    if (index == LPM_VALUE_INVALID) {
-        return NULL;
-    }
+	// Поиск соответствия в LPM таблице
+	uint32_t index = lpm_lookup(&config->mappings.v6_to_v4, 16, ip6);
+	if (index == LPM_VALUE_INVALID) {
+		return NULL;
+	}
 
-    // Получаем указатель на соответствующую запись в списке маппингов
-    if (index >= config->mappings.count) {
-        return NULL;
-    }
-    
-    return &ADDR_OF(&config->mappings.list)[index];
+	// Получаем указатель на соответствующую запись в списке маппингов
+	if (index >= config->mappings.count) {
+		return NULL;
+	}
+
+	return &ADDR_OF(&config->mappings.list)[index];
 }
 
 /**
  * @brief Finds a mapping from IPv4 to IPv6 address
  *
- * This function searches the LPM (Longest Prefix Match) table for a mapping from
- * an IPv4 address to an IPv6 address. The search is performed using the IPv4
- * address as the lookup key.
+ * This function searches the LPM (Longest Prefix Match) table for a mapping
+ * from an IPv4 address to an IPv6 address. The search is performed using the
+ * IPv4 address as the lookup key.
  *
- * @param config Pointer to the NAT64 module configuration containing mapping tables.
- *               Must not be NULL.
+ * @param config Pointer to the NAT64 module configuration containing mapping
+ * tables. Must not be NULL.
  * @param ip4 Pointer to the source IPv4 address to look up (4 bytes).
  *            Must not be NULL and must point to a valid IPv4 address.
  *
@@ -170,30 +170,31 @@ find_ip6to4(struct nat64_module_config *config, uint8_t *ip6) {
  */
 struct ip4to6 *
 find_ip4to6(struct nat64_module_config *config, uint32_t *ip4) {
-    if (!config || !ip4) {
-        return NULL;
-    }
+	if (!config || !ip4) {
+		return NULL;
+	}
 
-    // Поиск соответствия в LPM таблице
-    uint32_t index = lpm_lookup(&config->mappings.v4_to_v6, 4, (uint8_t*)ip4);
-    if (index == LPM_VALUE_INVALID) {
-        return NULL;
-    }
+	// Поиск соответствия в LPM таблице
+	uint32_t index =
+		lpm_lookup(&config->mappings.v4_to_v6, 4, (uint8_t *)ip4);
+	if (index == LPM_VALUE_INVALID) {
+		return NULL;
+	}
 
-    // Получаем указатель на соответствующую запись в списке маппингов
-    if (index >= config->mappings.count) {
-        return NULL;
-    }
-    
-    return &ADDR_OF(&config->mappings.list)[index];
+	// Получаем указатель на соответствующую запись в списке маппингов
+	if (index >= config->mappings.count) {
+		return NULL;
+	}
+
+	return &ADDR_OF(&config->mappings.list)[index];
 }
 
 /**
  * @brief Implements token bucket rate limiting algorithm
  *
- * This function implements a thread-safe token bucket rate limiter that controls
- * packet processing rates. It uses DPDK's TSC (Time Stamp Counter) for timing
- * and spinlocks for thread safety.
+ * This function implements a thread-safe token bucket rate limiter that
+ * controls packet processing rates. It uses DPDK's TSC (Time Stamp Counter) for
+ * timing and spinlocks for thread safety.
  *
  * The algorithm works as follows:
  * 1. Calculates elapsed time since last update using TSC
@@ -242,7 +243,6 @@ check_rate_limit(struct rate_limiter *limiter) {
 	rte_spinlock_unlock(&limiter->lock);
 	return result;
 }
-
 
 /**
  * @brief Validates IPv4/IPv6 fragment parameters according to RFC7915
@@ -461,7 +461,8 @@ icmp_v6_to_v4(
 
 		if (nat64_config->mtu.ipv4 > 0) {
 			// Account for IPv4->IPv6 translation overhead
-			adjusted_mtu = RTE_MIN(adjusted_mtu, nat64_config->mtu.ipv4);
+			adjusted_mtu =
+				RTE_MIN(adjusted_mtu, nat64_config->mtu.ipv4);
 		}
 
 		LOG_DBG(NAT64,
@@ -1108,8 +1109,8 @@ icmp_v6_to_v4(
 /**
  * @brief Processes IPv6 extension headers according to RFC7915
  *
- * This function processes IPv6 extension headers in order as specified by RFC7915
- * section 5.1 and RFC8200 section 4.1. It handles:
+ * This function processes IPv6 extension headers in order as specified by
+ * RFC7915 section 5.1 and RFC8200 section 4.1. It handles:
  * - Hop-by-Hop Options Header (must be first if present)
  * - Routing Header (dropping deprecated Type 0)
  * - Fragment Header (extracting fragmentation info)
@@ -1453,9 +1454,8 @@ nat64_handle_v6(
 		return -1;
 	}
 
-	struct ip4to6 *new_src_addr = find_ip6to4(
-		nat64_config, (uint8_t *)&ipv6Header->src_addr
-	);
+	struct ip4to6 *new_src_addr =
+		find_ip6to4(nat64_config, (uint8_t *)&ipv6Header->src_addr);
 	if (NULL == new_src_addr) {
 		LOG_DBG(NAT64,
 			"not found mapping for " IPv6_BYTES_FMT ". Drop\n",
@@ -1518,8 +1518,6 @@ nat64_handle_v6(
 		next_header,
 		is_fragmented,
 		ext_hdrs_len);
-
-
 
 	// Calculate size difference between headers
 	uint16_t delta = packet->transport_header.offset -
@@ -2424,8 +2422,10 @@ nat64_handle_v4(
 	}
 
 	LOG_DBG(NAT64,
-		"Found IPv6 mapping for IPv4 address " IPv4_BYTES_FMT ": " IPv6_BYTES_FMT "\n",
-		IPv4_BYTES_LE(addr4), IPv6_BYTES(entry->ip6));
+		"Found IPv6 mapping for IPv4 address " IPv4_BYTES_FMT
+		": " IPv6_BYTES_FMT "\n",
+		IPv4_BYTES_LE(addr4),
+		IPv6_BYTES(entry->ip6));
 
 	// Check for IPv4 options and handle them according to RFC7915
 	uint8_t ihl = (ipv4Header->version_ihl & RTE_IPV4_HDR_IHL_MASK);
@@ -2589,7 +2589,9 @@ nat64_handle_v4(
 		    ipv4Header,
 		    new_ipv6_header,
 		    packet->network_header.offset,
-		    ADDR_OF(&nat64_config->prefixes.prefixes)[entry->prefix_index].prefix,
+		    ADDR_OF(&nat64_config->prefixes.prefixes
+		    )[entry->prefix_index]
+			    .prefix,
 		    entry->ip6,
 		    is_fragmented,
 		    delta,
@@ -2608,7 +2610,9 @@ nat64_handle_v4(
 			nat64_config,
 			packet,
 			new_ipv6_header,
-		    ADDR_OF(&nat64_config->prefixes.prefixes)[entry->prefix_index].prefix,
+			ADDR_OF(&nat64_config->prefixes.prefixes
+			)[entry->prefix_index]
+				.prefix,
 			entry->ip6
 		);
 		if (result) {
@@ -2693,7 +2697,8 @@ nat64_handle_v4(
  * - No dynamic address mapping
  * - Fixed prefix and address mapping configuration
  *
- * @param dp_config Pointer to dataplane configuration (unused but required by API)
+ * @param dp_config Pointer to dataplane configuration (unused but required by
+ * API)
  * @param module_data Pointer to NAT64 module data containing:
  *                    - Address mappings
  *                    - NAT64 prefixes
@@ -2719,8 +2724,9 @@ nat64_handle_packets(
 ) {
 	(void)dp_config; // Unused parameter
 
-	struct nat64_module_config *nat64_config =
-		container_of(module_data, struct nat64_module_config, module_data);
+	struct nat64_module_config *nat64_config = container_of(
+		module_data, struct nat64_module_config, module_data
+	);
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {

@@ -6,108 +6,120 @@ option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/nat64
 
 // NAT64Service is a control-plane service for managing NAT64 module
 service NAT64Service {
-    // ShowConfig returns the current configuration of the NAT64 module
-    rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {}
-    
-    // AddPrefix adds a new NAT64 prefix to the configuration
-    rpc AddPrefix(AddPrefixRequest) returns (AddPrefixResponse) {}
-    
-    // RemovePrefix removes a NAT64 prefix from the configuration
-    rpc RemovePrefix(RemovePrefixRequest) returns (RemovePrefixResponse) {}
-    
-    // AddMapping adds a new IPv4-IPv6 address mapping
-    rpc AddMapping(AddMappingRequest) returns (AddMappingResponse) {}
-    
-    // RemoveMapping removes an IPv4-IPv6 address mapping
-    rpc RemoveMapping(RemoveMappingRequest) returns (RemoveMappingResponse) {}
-    
-    // SetMTU sets MTU values for IPv4/IPv6
-    rpc SetMTU(SetMTURequest) returns (SetMTUResponse) {}
+	// ShowConfig returns the current configuration of the NAT64 module
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {
+	}
+
+	// AddPrefix adds a new NAT64 prefix to the configuration
+	rpc AddPrefix(AddPrefixRequest) returns (AddPrefixResponse) {
+	}
+
+	// RemovePrefix removes a NAT64 prefix from the configuration
+	rpc RemovePrefix(RemovePrefixRequest) returns (RemovePrefixResponse) {
+	}
+
+	// AddMapping adds a new IPv4-IPv6 address mapping
+	rpc AddMapping(AddMappingRequest) returns (AddMappingResponse) {
+	}
+
+	// RemoveMapping removes an IPv4-IPv6 address mapping
+	rpc RemoveMapping(RemoveMappingRequest)
+		returns (RemoveMappingResponse) {
+	}
+
+	// SetMTU sets MTU values for IPv4/IPv6
+	rpc SetMTU(SetMTURequest) returns (SetMTUResponse) {
+	}
 }
 
 // TargetModule specifies the target module for configuration operations
 message TargetModule {
-    // ModuleName is the name of the module to configure
-    string module_name = 1;
-    // Numa specifies NUMA nodes that should be affected
-    // Empty means all NUMA nodes
-    repeated uint32 numa = 2;
+	// ModuleName is the name of the module to configure
+	string module_name = 1;
+	// Numa specifies NUMA nodes that should be affected
+	// Empty means all NUMA nodes
+	repeated uint32 numa = 2;
 }
 
 // ShowConfigRequest requests the current configuration
 message ShowConfigRequest {
-    TargetModule target = 1;
+	TargetModule target = 1;
 }
 
 // MTUConfig contains MTU configuration values
 message MTUConfig {
-    uint32 ipv4_mtu = 1;  // MTU value for IPv4
-    uint32 ipv6_mtu = 2;  // MTU value for IPv6
+	uint32 ipv4_mtu = 1; // MTU value for IPv4
+	uint32 ipv6_mtu = 2; // MTU value for IPv6
 }
 
 // Prefix represents a NAT64 prefix
 message Prefix {
-    bytes prefix = 1;  // 12-byte IPv6 prefix
+	bytes prefix = 1; // 12-byte IPv6 prefix
 }
 
 // Mapping represents an IPv4-IPv6 address mapping
 message Mapping {
-    bytes ipv4 = 1;    // IPv4 address in network byte order
-    bytes ipv6 = 2;    // IPv6 address (16 bytes)
-    uint32 prefix_index = 3;  // Index of the used prefix
+	bytes ipv4 = 1;		 // IPv4 address in network byte order
+	bytes ipv6 = 2;		 // IPv6 address (16 bytes)
+	uint32 prefix_index = 3; // Index of the used prefix
 }
 
 // InstanceConfig represents configuration for a single NUMA node
 message InstanceConfig {
-    uint32 numa = 1;
-    repeated Prefix prefixes = 2;
-    repeated Mapping mappings = 3;
-    MTUConfig mtu = 4;
+	uint32 numa = 1;
+	repeated Prefix prefixes = 2;
+	repeated Mapping mappings = 3;
+	MTUConfig mtu = 4;
 }
 
 // ShowConfigResponse contains the current configuration
 message ShowConfigResponse {
-    repeated InstanceConfig configs = 1;
+	repeated InstanceConfig configs = 1;
 }
 
 // AddPrefixRequest specifies a prefix to add
 message AddPrefixRequest {
-    TargetModule target = 1;
-    bytes prefix = 2;  // 12-byte IPv6 prefix
+	TargetModule target = 1;
+	bytes prefix = 2; // 12-byte IPv6 prefix
 }
 
-message AddPrefixResponse {}
+message AddPrefixResponse {
+}
 
 // RemovePrefixRequest specifies a prefix to remove
 message RemovePrefixRequest {
-    TargetModule target = 1;
-    bytes prefix = 2;  // 12-byte IPv6 prefix
+	TargetModule target = 1;
+	bytes prefix = 2; // 12-byte IPv6 prefix
 }
 
-message RemovePrefixResponse {}
+message RemovePrefixResponse {
+}
 
 // AddMappingRequest specifies an IPv4-IPv6 mapping to add
 message AddMappingRequest {
-    TargetModule target = 1;
-    bytes ipv4 = 2;    // IPv4 address in network byte order
-    bytes ipv6 = 3;    // IPv6 address (16 bytes)
-    uint32 prefix_index = 4;  // Index of the used prefix
+	TargetModule target = 1;
+	bytes ipv4 = 2;		 // IPv4 address in network byte order
+	bytes ipv6 = 3;		 // IPv6 address (16 bytes)
+	uint32 prefix_index = 4; // Index of the used prefix
 }
 
-message AddMappingResponse {}
+message AddMappingResponse {
+}
 
 // RemoveMappingRequest specifies an IPv4-IPv6 mapping to remove
 message RemoveMappingRequest {
-    TargetModule target = 1;
-    bytes ipv4 = 2;    // IPv4 address to remove mapping for
+	TargetModule target = 1;
+	bytes ipv4 = 2; // IPv4 address to remove mapping for
 }
 
-message RemoveMappingResponse {}
+message RemoveMappingResponse {
+}
 
 // SetMTURequest specifies MTU values to set
 message SetMTURequest {
-    TargetModule target = 1;
-    MTUConfig mtu = 2;
+	TargetModule target = 1;
+	MTUConfig mtu = 2;
 }
 
-message SetMTUResponse {}
+message SetMTUResponse {
+}
