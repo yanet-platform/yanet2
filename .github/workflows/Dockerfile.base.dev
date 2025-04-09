@@ -35,7 +35,8 @@ echo "Installing build tools..."
 install_packages \
     meson \
     clang \
-    clang-format \
+    clang-format-19 \
+    clang-tidy-19 \
     git \
     just \
     make

@@ -3,14 +3,26 @@
 # Project configuration
 TAG := "yanet2-dev"
 ROOT_DIR := justfile_directory()
+DOCKER_CACHE_DIR := "/tmp"
+
+# Required tools - used for validation
+required_tools := "docker clang-tidy-19 clang-format-19 meson ninja"
 
 # Show available commands
 default:
     @just --list
 
+# === Build Targets ===
+
 # Build all targets
 all:
     @meson compile -C build
+
+# Setup build environment with optional coverage
+setup:
+    @meson setup build -Dbuildtype=debug -Db_coverage=false
+
+# === Test Targets ===
 
 # Run tests with optional arguments
 test *IGN: all
@@ -21,15 +33,33 @@ covclean:
     @find build -type f -iname '*.gcda' -delete
 
 # Generate coverage report
-coverage:
+coverage: covclean test
     @ninja -C build coverage-html
 
-# Setup build environment
-setup:
-    @meson setup build -Dbuildtype=debug -Db_coverage=false
+# === Code Quality Targets ===
+
+# Run clang-tidy on specified files
+tidy *FILES:
+    #!/usr/bin/env bash
+    if [ -z "{{ FILES }}" ]; then
+        echo "Error: No files specified"
+        exit 1
+    fi
+    clang-tidy-19 -p build --format-style=file {{ FILES }}
+
+# Format code with clang-format
+bloody *FILES:
+    #!/usr/bin/env bash
+    if [ -z "{{ FILES }}" ]; then
+        echo "Error: No files specified"
+        exit 1
+    fi
+    clang-format-19 --style=file -i {{ FILES }}
+
+# === Docker Targets ===
 
 # Build development Docker image
-dbuild-cnt: ## Собрать докер-образ
+dbuild-cnt:
     #!/usr/bin/env bash
     set -euo pipefail
     cd .github/workflows && \
@@ -37,41 +67,42 @@ dbuild-cnt: ## Собрать докер-образ
     docker build \
         --platform linux/amd64 \
         -f Dockerfile.base.dev \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        --cache-from {{ TAG }} \
         -t {{ TAG }} .
+
+# Common Docker run configuration
+_docker_run *COMMAND:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker run -it --rm \
+        -v {{ ROOT_DIR }}:/yanet2 \
+        -v {{ DOCKER_CACHE_DIR }}/gomodcache:/tmp/gomodcache:rw \
+        -v {{ DOCKER_CACHE_DIR }}/gocache:/tmp/gocache:rw \
+        {{ TAG }} \
+        sh -c 'cd /yanet2 && {{ COMMAND }}'
 
 # Run tests in Docker
 dtest:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    docker run -it --rm --privileged \
-        -v {{ ROOT_DIR }}:/yanet2 \
-        -v /tmp/gomodcache:/tmp/gomodcache:rw \
-        -v /tmp/gocache:/tmp/gocache:rw \
-        {{ TAG }} \
-        sh -c 'cd /yanet2 && just setup test'
+    @just _docker_run "just setup test"
+
+# Run clang-tidy in Docker
+dtidy *FILES:
+    @just _docker_run "just tidy {{ FILES }}"
+
+# Run clang-format in Docker
+dbloody *FILES:
+    @just _docker_run "just bloody {{ FILES }}"
 
 # Build in Docker
 dbuild *IGN:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    docker run -it --rm \
-        -v {{ ROOT_DIR }}:/yanet2 \
-        -v /tmp/gomodcache:/tmp/gomodcache:rw \
-        -v /tmp/gocache:/tmp/gocache:rw \
-        {{ TAG }} \
-        sh -c 'cd /yanet2 && just setup all'
+    @just _docker_run "just setup all"
 
 # Start shell in Docker
 dshell:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    docker run -it --rm \
-        -v {{ ROOT_DIR }}:/yanet2 \
-        -v /tmp/gomodcache:/tmp/gomodcache:rw \
-        -v /tmp/gocache:/tmp/gocache:rw \
-        {{ TAG }} bash
+    @just _docker_run "bash"
 
-# Run commands in Docker
+# Run arbitrary commands in Docker
 drun *CMDS:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -79,31 +110,12 @@ drun *CMDS:
         echo "Error: No commands specified"
         exit 1
     fi
-    docker run -it --rm \
-        -v {{ ROOT_DIR }}:/yanet2 \
-        -v /tmp/gomodcache:/tmp/gomodcache:rw \
-        -v /tmp/gocache:/tmp/gocache:rw \
-        {{ TAG }} \
-        sh -c 'cd /yanet2 && {{ CMDS }}'
+    just _docker_run "{{ CMDS }}"
 
 # Generate coverage report in Docker
 dcoverage:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    docker run -it --rm --privileged \
-        -v {{ ROOT_DIR }}:/yanet2 \
-        -v /tmp/gomodcache:/tmp/gomodcache:rw \
-        -v /tmp/gocache:/tmp/gocache:rw \
-        {{ TAG }} \
-        sh -c 'cd /yanet2 && just covclean test; just coverage'
+    @just _docker_run "just setup coverage=true && just coverage"
 
 # Build controlplane in Docker
 dcontrolplane:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    docker run -it --rm \
-        -v {{ ROOT_DIR }}:/yanet2 \
-        -v /tmp/gomodcache:/tmp/gomodcache:rw \
-        -v /tmp/gocache:/tmp/gocache:rw \
-        {{ TAG }} \
-        sh -c 'cd /yanet2/controlplane && make build'
+    @just _docker_run "cd controlplane && make build"

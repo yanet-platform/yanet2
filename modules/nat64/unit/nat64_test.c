@@ -862,7 +862,7 @@ print_rte_mbuf(struct rte_mbuf *mbuf) {
 		uint8_t *proto_data = (uint8_t *)(ipv4_hdr + 1);
 
 		switch (ipv4_hdr->next_proto_id) {
-		case IPPROTO_UDP:
+		case IPPROTO_UDP: {
 			data_off += sizeof(struct rte_udp_hdr);
 			struct rte_udp_hdr *udp_hdr =
 				(struct rte_udp_hdr *)proto_data;
@@ -884,7 +884,8 @@ print_rte_mbuf(struct rte_mbuf *mbuf) {
 				"  Checksum: 0x%04X\n",
 				ntohs(udp_hdr->dgram_cksum));
 			break;
-		case IPPROTO_TCP:
+		}
+		case IPPROTO_TCP: {
 			data_off += sizeof(struct rte_tcp_hdr);
 			struct rte_tcp_hdr *tcp_hdr =
 				(struct rte_tcp_hdr *)proto_data;
@@ -922,7 +923,8 @@ print_rte_mbuf(struct rte_mbuf *mbuf) {
 				"  Checksum: 0x%04X\n",
 				ntohs(tcp_hdr->cksum));
 			break;
-		case IPPROTO_ICMP:
+		}
+		case IPPROTO_ICMP: {
 			data_off += sizeof(struct icmphdr);
 			struct icmphdr *icmp_hdr = (struct icmphdr *)proto_data;
 			RTE_LOG(INFO, NAT64_TEST, "ICMP Header:\n");
@@ -939,6 +941,7 @@ print_rte_mbuf(struct rte_mbuf *mbuf) {
 				"  Checksum: 0x%04X\n",
 				ntohs(icmp_hdr->checksum));
 			break;
+		}
 		}
 	} else if (eth_hdr->ether_type == RTE_BE16(RTE_ETHER_TYPE_IPV6)) {
 		struct rte_ipv6_hdr *ipv6_hdr =
@@ -1753,23 +1756,26 @@ print_diff_upkt_and_rte_mbuf(struct upkt *upkt, struct rte_mbuf *mbuf) {
 		uint8_t *proto_data = (uint8_t *)(ipv4_hdr + 1);
 
 		switch (ipv4_hdr->next_proto_id) {
-		case IPPROTO_UDP:
+		case IPPROTO_UDP: {
 			data_off += sizeof(struct rte_udp_hdr);
 			struct rte_udp_hdr *udp_hdr =
 				(struct rte_udp_hdr *)proto_data;
 			result |= compare_udp_headers(udp_hdr, upkt);
 			break;
-		case IPPROTO_TCP:
+		}
+		case IPPROTO_TCP: {
 			data_off += sizeof(struct rte_tcp_hdr);
 			struct rte_tcp_hdr *tcp_hdr =
 				(struct rte_tcp_hdr *)proto_data;
 			result |= compare_tcp_headers(tcp_hdr, upkt);
 			break;
-		case IPPROTO_ICMP:
+		}
+		case IPPROTO_ICMP: {
 			data_off += sizeof(struct icmphdr);
 			struct icmphdr *icmp_hdr = (struct icmphdr *)proto_data;
 			result |= compare_icmp_headers(icmp_hdr, upkt);
 			break;
+		}
 		}
 	} else if (eth_hdr->ether_type == RTE_BE16(RTE_ETHER_TYPE_IPV6)) {
 		struct rte_ipv6_hdr *ipv6_hdr =
@@ -1779,24 +1785,27 @@ print_diff_upkt_and_rte_mbuf(struct upkt *upkt, struct rte_mbuf *mbuf) {
 		uint8_t *proto_data = (uint8_t *)(ipv6_hdr + 1);
 
 		switch (ipv6_hdr->proto) {
-		case IPPROTO_UDP:
+		case IPPROTO_UDP: {
 			data_off += sizeof(struct rte_udp_hdr);
 			struct rte_udp_hdr *udp_hdr =
 				(struct rte_udp_hdr *)proto_data;
 			result |= compare_udp_headers(udp_hdr, upkt);
 			break;
-		case IPPROTO_TCP:
+		}
+		case IPPROTO_TCP: {
 			data_off += sizeof(struct rte_tcp_hdr);
 			struct rte_tcp_hdr *tcp_hdr =
 				(struct rte_tcp_hdr *)proto_data;
 			result |= compare_tcp_headers(tcp_hdr, upkt);
 			break;
-		case IPPROTO_ICMPV6:
+		}
+		case IPPROTO_ICMPV6: {
 			data_off += sizeof(struct icmp6_hdr);
 			struct icmp6_hdr *icmp6_hdr =
 				(struct icmp6_hdr *)proto_data;
 			result |= compare_icmp6_headers(icmp6_hdr, upkt);
 			break;
+		}
 		}
 	}
 
@@ -2015,7 +2024,7 @@ fix_checksums(struct upkt *pkt) {
 		ipv4_hdr->hdr_checksum = rte_ipv4_cksum(ipv4_hdr);
 
 		switch (ipv4_hdr->next_proto_id) {
-		case IPPROTO_UDP:
+		case IPPROTO_UDP: {
 			struct rte_udp_hdr *udp_hdr = &pkt->proto.udp;
 			udp_hdr->dgram_cksum = 0;
 			udp_hdr->dgram_cksum = upkt_ipv4_updtcp_checksum(
@@ -2026,7 +2035,8 @@ fix_checksums(struct upkt *pkt) {
 				pkt->data_len
 			);
 			break;
-		case IPPROTO_TCP:
+		}
+		case IPPROTO_TCP: {
 			struct rte_tcp_hdr *tcp_hdr = &pkt->proto.tcp;
 			tcp_hdr->cksum = 0;
 			tcp_hdr->cksum = upkt_ipv4_updtcp_checksum(
@@ -2037,7 +2047,8 @@ fix_checksums(struct upkt *pkt) {
 				pkt->data_len
 			);
 			break;
-		case IPPROTO_ICMP:
+		}
+		case IPPROTO_ICMP: {
 			struct icmphdr *icmp_hdr = &pkt->proto.icmp;
 			icmp_hdr->checksum = 0;
 			uint32_t cksum = __rte_raw_cksum(
@@ -2051,10 +2062,11 @@ fix_checksums(struct upkt *pkt) {
 			icmp_hdr->checksum = ~__rte_raw_cksum_reduce(cksum);
 			break;
 		}
+		}
 	} else if (pkt->eth.ether_type == RTE_BE16(RTE_ETHER_TYPE_IPV6)) {
 		struct rte_ipv6_hdr *ipv6_hdr = &pkt->ip.ipv6;
 		switch (ipv6_hdr->proto) {
-		case IPPROTO_UDP:
+		case IPPROTO_UDP: {
 			struct rte_udp_hdr *udp_hdr = &pkt->proto.udp;
 			udp_hdr->dgram_cksum = 0;
 			udp_hdr->dgram_cksum = upkt_ipv6_updtcp_checksum(
@@ -2065,7 +2077,8 @@ fix_checksums(struct upkt *pkt) {
 				pkt->data_len
 			);
 			break;
-		case IPPROTO_TCP:
+		}
+		case IPPROTO_TCP: {
 			struct rte_tcp_hdr *tcp_hdr = &pkt->proto.tcp;
 			tcp_hdr->cksum = 0;
 			tcp_hdr->cksum = upkt_ipv6_updtcp_checksum(
@@ -2076,10 +2089,11 @@ fix_checksums(struct upkt *pkt) {
 				pkt->data_len
 			);
 			break;
-		case IPPROTO_ICMPV6:
+		}
+		case IPPROTO_ICMPV6: {
 			struct icmp6_hdr *icmp6_hdr = &pkt->proto.icmp6;
 			icmp6_hdr->icmp6_cksum = 0;
-
+			
 			uint32_t sum = rte_ipv6_phdr_cksum(ipv6_hdr, 0);
 			sum = __rte_raw_cksum(
 				icmp6_hdr, sizeof(struct icmp6_hdr), sum
@@ -2088,6 +2102,7 @@ fix_checksums(struct upkt *pkt) {
 
 			icmp6_hdr->icmp6_cksum = ~__rte_raw_cksum_reduce(sum);
 			break;
+		}
 		}
 	}
 }
@@ -2565,7 +2580,7 @@ create_icmp_packet(
 
 			// Initialize protocol-specific header
 			switch (proto) {
-			case IPPROTO_UDP:
+			case IPPROTO_UDP: {
 				struct rte_udp_hdr *udp =
 					(struct rte_udp_hdr *)proto_hdr;
 				udp->src_port = rte_cpu_to_be_16(12345);
@@ -2575,8 +2590,9 @@ create_icmp_packet(
 				);
 				udp->dgram_cksum = 0;
 				break;
+			}
 
-			case IPPROTO_TCP:
+			case IPPROTO_TCP: {
 				struct rte_tcp_hdr *tcp =
 					(struct rte_tcp_hdr *)proto_hdr;
 				tcp->src_port = rte_cpu_to_be_16(12345);
@@ -2589,8 +2605,9 @@ create_icmp_packet(
 				tcp->cksum = 0;
 				tcp->tcp_urp = 0;
 				break;
+			}
 
-			case IPPROTO_ICMPV6:
+			case IPPROTO_ICMPV6: {
 				struct icmp6_hdr *icmp6 =
 					(struct icmp6_hdr *)proto_hdr;
 				icmp6->icmp6_type = ICMP6_ECHO_REQUEST;
@@ -2599,6 +2616,7 @@ create_icmp_packet(
 				icmp6->icmp6_id = rte_cpu_to_be_16(0x1234);
 				icmp6->icmp6_seq = rte_cpu_to_be_16(1);
 				break;
+			}
 			}
 
 			uint8_t *data = (uint8_t *)proto_hdr + proto_hdr_len;
@@ -2636,7 +2654,7 @@ create_icmp_packet(
 
 			// Initialize protocol-specific header
 			switch (proto) {
-			case IPPROTO_UDP:
+			case IPPROTO_UDP: {
 				struct rte_udp_hdr *udp =
 					(struct rte_udp_hdr *)proto_hdr;
 				udp->src_port = rte_cpu_to_be_16(12345);
@@ -2646,8 +2664,9 @@ create_icmp_packet(
 				);
 				udp->dgram_cksum = 0;
 				break;
+			}
 
-			case IPPROTO_TCP:
+			case IPPROTO_TCP: {
 				struct rte_tcp_hdr *tcp =
 					(struct rte_tcp_hdr *)proto_hdr;
 				tcp->src_port = rte_cpu_to_be_16(12345);
@@ -2660,8 +2679,9 @@ create_icmp_packet(
 				tcp->cksum = 0;
 				tcp->tcp_urp = 0;
 				break;
+			}
 
-			case IPPROTO_ICMP:
+			case IPPROTO_ICMP: {
 				struct icmphdr *icmp =
 					(struct icmphdr *)proto_hdr;
 				icmp->type = ICMP_ECHO;
@@ -2670,6 +2690,7 @@ create_icmp_packet(
 				icmp->un.echo.id = rte_cpu_to_be_16(0x1234);
 				icmp->un.echo.sequence = rte_cpu_to_be_16(1);
 				break;
+			}
 			}
 
 			uint8_t *data = (uint8_t *)proto_hdr + proto_hdr_len;

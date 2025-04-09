@@ -66,17 +66,6 @@ RTE_LOG_REGISTER_DEFAULT(nat64_logtype, INFO);
 #define RTE_LOGTYPE_NAT64 nat64_logtype
 
 /**
- * @brief Structure for ICMP rate limiting
- */
-struct rate_limiter {
-	uint32_t tokens;
-	uint64_t last_update;
-	uint32_t rate;
-	uint32_t burst;
-	rte_spinlock_t lock;
-};
-
-/**
  * @brief Finds a mapping from IPv6 to IPv4 address
  *
  * This function searches the LPM (Longest Prefix Match) table for a mapping
@@ -187,61 +176,6 @@ find_ip4to6(struct nat64_module_config *config, uint32_t *ip4) {
 	}
 
 	return &ADDR_OF(&config->mappings.list)[index];
-}
-
-/**
- * @brief Implements token bucket rate limiting algorithm
- *
- * This function implements a thread-safe token bucket rate limiter that
- * controls packet processing rates. It uses DPDK's TSC (Time Stamp Counter) for
- * timing and spinlocks for thread safety.
- *
- * The algorithm works as follows:
- * 1. Calculates elapsed time since last update using TSC
- * 2. Adds new tokens based on elapsed time and configured rate
- * 3. Caps total tokens at configured burst size
- * 4. Attempts to consume one token if available
- *
- * @param limiter Pointer to rate limiter structure containing:
- *               - tokens: Current number of available tokens
- *               - last_update: Last update timestamp (TSC cycles)
- *               - rate: Token replenishment rate (tokens/second)
- *               - burst: Maximum number of tokens (burst size)
- *               - lock: Spinlock for thread safety
- *
- * @return 0 if a token was consumed (rate limit allows packet),
- *         -1 if no tokens available (rate limit exceeded) or invalid parameters
- *
- * @note This function is thread-safe due to spinlock usage
- * @note Uses DPDK's TSC for high-precision timing
- *
- * @see rate_limiter Structure containing rate limiting parameters
- * @see rte_get_tsc_cycles() DPDK function for getting current TSC value
- * @see rte_get_tsc_hz() DPDK function for getting TSC frequency
- */
-static inline int
-check_rate_limit(struct rate_limiter *limiter) {
-	if (!limiter) {
-		return -1;
-	}
-
-	rte_spinlock_lock(&limiter->lock);
-
-	uint64_t now = rte_get_tsc_cycles();
-	uint64_t elapsed = now - limiter->last_update;
-
-	uint32_t new_tokens = (elapsed * limiter->rate) / rte_get_tsc_hz();
-	limiter->tokens = RTE_MIN(limiter->tokens + new_tokens, limiter->burst);
-	limiter->last_update = now;
-
-	int result = -1;
-	if (limiter->tokens > 0) {
-		limiter->tokens--;
-		result = 0;
-	}
-
-	rte_spinlock_unlock(&limiter->lock);
-	return result;
 }
 
 /**
@@ -373,17 +307,17 @@ icmp_v6_to_v4(
 		return -1;
 	}
 
-	struct icmp6_hdr *icmpHeader = rte_pktmbuf_mtod_offset(
+	struct icmp6_hdr *icmp_header = rte_pktmbuf_mtod_offset(
 		mbuf, struct icmp6_hdr *, packet->transport_header.offset
 	);
 
-	if (!icmpHeader) {
+	if (!icmp_header) {
 		RTE_LOG(ERR, NAT64, "Failed to get ICMPv6 header from mbuf\n");
 		return -1;
 	}
 
-	uint8_t type = icmpHeader->icmp6_type;
-	uint8_t code = icmpHeader->icmp6_code;
+	uint8_t type = icmp_header->icmp6_type;
+	uint8_t code = icmp_header->icmp6_code;
 
 	LOG_DBG(NAT64,
 		"start translate ICMPv6 type: %d, code: %d \n",
@@ -428,7 +362,7 @@ icmp_v6_to_v4(
 		code = ICMP_FRAG_NEEDED;
 
 		// MTU adjustment according to RFC7915 section 5.2
-		uint32_t mtu = rte_be_to_cpu_32(icmpHeader->icmp6_mtu);
+		uint32_t mtu = rte_be_to_cpu_32(icmp_header->icmp6_mtu);
 		LOG_DBG(NAT64, "Original ICMPv6 MTU: %u\n", mtu);
 
 		// RFC7915 Section 5.2: Handle MTU adjustment for Packet Too Big
@@ -481,7 +415,7 @@ icmp_v6_to_v4(
 		LOG_DBG(NAT64, "Adjusted ICMPv4 MTU: %u\n", mtu);
 
 		// Store the adjusted MTU in the ICMPv4 header
-		struct icmp *icmp_hdr = (struct icmp *)icmpHeader;
+		struct icmp *icmp_hdr = (struct icmp *)icmp_header;
 		icmp_hdr->icmp_nextmtu = rte_cpu_to_be_16(mtu);
 		break;
 
@@ -499,7 +433,8 @@ icmp_v6_to_v4(
 
 			// RFC7915 Figure 6: Pointer translation from IPv6 to
 			// IPv4
-			uint32_t ptr = rte_be_to_cpu_32(icmpHeader->icmp6_pptr);
+			uint32_t ptr =
+				rte_be_to_cpu_32(icmp_header->icmp6_pptr);
 
 			LOG_DBG(NAT64,
 				"Translating ICMPv6 Parameter Problem pointer: "
@@ -598,7 +533,7 @@ icmp_v6_to_v4(
 				"Translated Parameter Problem pointer to IPv4 "
 				"offset: %u\n",
 				ptr);
-			icmpHeader->icmp6_pptr = rte_cpu_to_be_32(
+			icmp_header->icmp6_pptr = rte_cpu_to_be_32(
 				ptr << 24
 			); // set first byte to ptr and zeroed other bytes
 			   // (reserved 6-8). TODO: support RFC4884.
@@ -669,8 +604,8 @@ icmp_v6_to_v4(
 	LOG_DBG(NAT64, "translate ICMP type: %d, code: %d \n", type, code);
 
 	// Update the ICMP header with the translated type and code
-	icmpHeader->icmp6_type = type;
-	icmpHeader->icmp6_code = code;
+	icmp_header->icmp6_type = type;
+	icmp_header->icmp6_code = code;
 
 	// RFC7915 Section 4.3: Handle ICMP error message translation
 	bool is_error =
@@ -916,7 +851,7 @@ icmp_v6_to_v4(
 				sizeof(struct rte_ipv4_hdr) + delta;
 
 			switch (new_ipv4_payload_header->next_proto_id) {
-			case IPPROTO_ICMPV6:
+			case IPPROTO_ICMPV6: {
 				// Embedded ICMPv6 header needs to be translated
 				// to ICMPv4
 				struct icmp6_hdr *embedded_icmp6 =
@@ -966,14 +901,6 @@ icmp_v6_to_v4(
 					(struct icmp *)embedded_icmp6;
 				embedded_icmp4->icmp_cksum = 0;
 
-				// Calculate the ICMP checksum - use the correct
-				// length uint16_t icmp_len = payload_length; if
-				// (icmp_len > sizeof(struct icmp)) {
-				//     icmp_len -= sizeof(struct rte_ipv4_hdr);
-				// } else {
-				//     icmp_len = sizeof(struct icmp);
-				// }
-
 				embedded_icmp4->icmp_cksum = ~rte_raw_cksum(
 					embedded_icmp4, payload_length
 				);
@@ -981,8 +908,8 @@ icmp_v6_to_v4(
 					embedded_icmp4->icmp_cksum = 0xffff;
 				}
 				break;
-
-			case IPPROTO_UDP:
+			}
+			case IPPROTO_UDP: {
 				// Recalculate UDP checksum
 				struct rte_udp_hdr *udp_hdr =
 					rte_pktmbuf_mtod_offset(
@@ -1004,8 +931,8 @@ icmp_v6_to_v4(
 					new_ipv4_payload_header, udp_hdr
 				);
 				break;
-
-			case IPPROTO_TCP:
+			}
+			case IPPROTO_TCP: {
 				// Recalculate TCP checksum
 				struct rte_tcp_hdr *tcp_hdr =
 					rte_pktmbuf_mtod_offset(
@@ -1027,6 +954,7 @@ icmp_v6_to_v4(
 					new_ipv4_payload_header, tcp_hdr
 				);
 				break;
+			}
 			}
 		}
 		new_ipv4_payload_header->hdr_checksum =
@@ -1063,7 +991,7 @@ icmp_v6_to_v4(
 		);
 	}
 	// RFC7915: Calculate ICMPv4 checksum
-	struct icmp *icmp_hdr = (struct icmp *)icmpHeader;
+	struct icmp *icmp_hdr = (struct icmp *)icmp_header;
 	icmp_hdr->icmp_cksum = 0;
 
 	// Get the ICMP message length from IPv4 header
@@ -1445,32 +1373,32 @@ nat64_handle_v6(
 		return -1;
 	}
 
-	struct rte_ipv6_hdr *ipv6Header = rte_pktmbuf_mtod_offset(
+	struct rte_ipv6_hdr *ipv6_header = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	if (!ipv6Header) {
+	if (!ipv6_header) {
 		RTE_LOG(ERR, NAT64, "Failed to get IPv6 header from mbuf\n");
 		return -1;
 	}
 
 	struct ip4to6 *new_src_addr =
-		find_ip6to4(nat64_config, (uint8_t *)&ipv6Header->src_addr);
+		find_ip6to4(nat64_config, (uint8_t *)&ipv6_header->src_addr);
 	if (NULL == new_src_addr) {
 		LOG_DBG(NAT64,
 			"not found mapping for " IPv6_BYTES_FMT ". Drop\n",
-			IPv6_BYTES(ipv6Header->src_addr));
+			IPv6_BYTES(ipv6_header->src_addr));
 		return -1;
 	}
 
 	LOG_DBG(NAT64,
 		"found mapping " IPv6_BYTES_FMT " -> " IPv4_BYTES_FMT "\n",
-		IPv6_BYTES(ipv6Header->src_addr),
+		IPv6_BYTES(ipv6_header->src_addr),
 		IPv4_BYTES(RTE_BE32(new_src_addr->ip4)));
 
 	// Process IPv6 extension headers and check for fragmentation
 	uint8_t is_fragmented = 0;
-	uint8_t next_header = ipv6Header->proto;
+	uint8_t next_header = ipv6_header->proto;
 	uint16_t frag_offset = 0;
 	uint16_t frag_flags = 0;
 	uint32_t frag_id = 0;
@@ -1493,7 +1421,7 @@ nat64_handle_v6(
 
 	// If packet is fragmented, validate fragment parameters
 	if (is_fragmented) {
-		uint16_t total_len = rte_be_to_cpu_16(ipv6Header->payload_len);
+		uint16_t total_len = rte_be_to_cpu_16(ipv6_header->payload_len);
 		uint16_t frag_size = total_len - ext_hdrs_len;
 
 		if (validate_fragment_params(
@@ -1547,11 +1475,11 @@ nat64_handle_v6(
 		return -1;
 	}
 
-	uint16_t payload_length = rte_be_to_cpu_16(ipv6Header->payload_len);
+	uint16_t payload_length = rte_be_to_cpu_16(ipv6_header->payload_len);
 
 	new_ipv4_header->version_ihl = RTE_IPV4_VHL_DEF;
 	new_ipv4_header->type_of_service =
-		(rte_be_to_cpu_32(ipv6Header->vtc_flow) >> 20) & 0xFF;
+		(rte_be_to_cpu_32(ipv6_header->vtc_flow) >> 20) & 0xFF;
 	new_ipv4_header->total_length =
 		rte_cpu_to_be_16(payload_length + sizeof(struct rte_ipv4_hdr));
 
@@ -1566,31 +1494,31 @@ nat64_handle_v6(
 		new_ipv4_header->packet_id = 0;
 		new_ipv4_header->fragment_offset = 0;
 	}
-	new_ipv4_header->time_to_live = ipv6Header->hop_limits;
-	new_ipv4_header->next_proto_id = ipv6Header->proto;
+	new_ipv4_header->time_to_live = ipv6_header->hop_limits;
+	new_ipv4_header->next_proto_id = ipv6_header->proto;
 	new_ipv4_header->hdr_checksum = 0;
 
 	new_ipv4_header->src_addr = new_src_addr->ip4;
 
-	if (ipv6Header->proto == IPPROTO_FRAGMENT) {
+	if (ipv6_header->proto == IPPROTO_FRAGMENT) {
 		rte_memcpy(
 			&new_ipv4_header->dst_addr,
-			&ipv6Header->dst_addr[12],
+			&ipv6_header->dst_addr[12],
 			sizeof(uint32_t)
 		);
 	}
 
 	// handle ICMP, TCP, UDP
-	if (ipv6Header->proto == IPPROTO_ICMPV6) {
+	if (ipv6_header->proto == IPPROTO_ICMPV6) {
 		new_ipv4_header->next_proto_id = IPPROTO_ICMP;
 
-		struct icmp6_hdr *icmpHeader = rte_pktmbuf_mtod_offset(
+		struct icmp6_hdr *icmp_header = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct icmp6_hdr *,
 			packet->transport_header.offset
 		);
 
-		if (!icmpHeader) {
+		if (!icmp_header) {
 			RTE_LOG(ERR,
 				NAT64,
 				"Failed to get ICMPv6 header from mbuf\n");
@@ -1608,7 +1536,7 @@ nat64_handle_v6(
 				"ICMP translation failed, dropping packet\n");
 			return -1;
 		}
-	} else if (ipv6Header->proto == IPPROTO_UDP) {
+	} else if (ipv6_header->proto == IPPROTO_UDP) {
 		// Recalculate UDP checksum for IPv4
 		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
 			mbuf,
@@ -1631,7 +1559,7 @@ nat64_handle_v6(
 			"UDP checksum calculated: 0x%04X\n",
 			rte_be_to_cpu_16(udp_hdr->dgram_cksum));
 
-	} else if (ipv6Header->proto == IPPROTO_TCP) {
+	} else if (ipv6_header->proto == IPPROTO_TCP) {
 		// Recalculate TCP checksum for IPv4
 		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
 			mbuf,
@@ -1845,12 +1773,12 @@ icmp_v4_to_v6(
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	struct icmp *icmpHeader = rte_pktmbuf_mtod_offset(
+	struct icmp *icmp_header = rte_pktmbuf_mtod_offset(
 		mbuf, struct icmp *, packet->transport_header.offset
 	);
 
-	uint8_t type = icmpHeader->icmp_type;
-	uint8_t code = icmpHeader->icmp_code;
+	uint8_t type = icmp_header->icmp_type;
+	uint8_t code = icmp_header->icmp_code;
 
 	LOG_DBG(NAT64,
 		"start translation ICMPv4 type: %d, "
@@ -1949,7 +1877,7 @@ icmp_v4_to_v6(
 		case ICMP_PROT_UNREACH:
 			type = ICMP6_PARAM_PROB;
 			code = ICMP6_PARAMPROB_NEXTHEADER;
-			((struct icmp6_hdr *)icmpHeader)->icmp6_pptr =
+			((struct icmp6_hdr *)icmp_header)->icmp6_pptr =
 				rte_be_to_cpu_32(6);
 			break;
 
@@ -1963,7 +1891,7 @@ icmp_v4_to_v6(
 
 			// Get MTU from ICMP header
 			uint16_t mtu =
-				rte_be_to_cpu_16(icmpHeader->icmp_nextmtu);
+				rte_be_to_cpu_16(icmp_header->icmp_nextmtu);
 
 			// RFC7915: If MTU is 0, router doesn't implement
 			// RFC1191
@@ -1990,11 +1918,11 @@ icmp_v4_to_v6(
 				"  - Original MTU: %u\n"
 				"  - Adjusted MTU: %u\n"
 				"  - Config IPv6 MTU: %u\n",
-				rte_be_to_cpu_16(icmpHeader->icmp_nextmtu),
+				rte_be_to_cpu_16(icmp_header->icmp_nextmtu),
 				mtu,
 				nat64_config->mtu.ipv6);
 
-			icmpHeader->icmp_nextmtu = rte_cpu_to_be_32(mtu);
+			icmp_header->icmp_nextmtu = rte_cpu_to_be_32(mtu);
 			break;
 
 		default:
@@ -2070,7 +1998,7 @@ icmp_v4_to_v6(
 		 * Figure 3: Pointer Value for Translating from IPv4 to IPv6
 		 */
 
-		uint8_t ptr = icmpHeader->icmp_pptr;
+		uint8_t ptr = icmp_header->icmp_pptr;
 		switch (ptr) {
 		case 0:
 		case 1:
@@ -2124,7 +2052,7 @@ icmp_v4_to_v6(
 			break;
 		}
 
-		((struct icmp6_hdr *)icmpHeader)->icmp6_pptr =
+		((struct icmp6_hdr *)icmp_header)->icmp6_pptr =
 			rte_be_to_cpu_32(ptr);
 		break;
 
@@ -2139,8 +2067,8 @@ icmp_v4_to_v6(
 
 	LOG_DBG(NAT64, "translated ICMP type: %d, code: %d \n", type, code);
 
-	icmpHeader->icmp_type = type;
-	icmpHeader->icmp_code = code;
+	icmp_header->icmp_type = type;
+	icmp_header->icmp_code = code;
 
 	// translate rest if error type
 	if (type < 128) {
@@ -2267,53 +2195,54 @@ icmp_v4_to_v6(
 			case IPPROTO_ICMP:
 				new_ipv6_payload_header->proto = IPPROTO_ICMPV6;
 
-				struct rte_icmp_hdr *icmpHeaderPayload =
+				struct rte_icmp_hdr *icmp_header_payload =
 					rte_pktmbuf_mtod_offset(
 						mbuf,
 						struct rte_icmp_hdr *,
 						payload_offset
 					);
-				if (icmpHeaderPayload->icmp_type == ICMP_ECHO) {
-					icmpHeaderPayload->icmp_type =
+				if (icmp_header_payload->icmp_type ==
+				    ICMP_ECHO) {
+					icmp_header_payload->icmp_type =
 						ICMP6_ECHO_REQUEST;
-				} else if (icmpHeaderPayload->icmp_type ==
+				} else if (icmp_header_payload->icmp_type ==
 					   ICMP_ECHOREPLY) {
-					icmpHeaderPayload->icmp_type =
+					icmp_header_payload->icmp_type =
 						ICMP6_ECHO_REPLY;
 				} else {
 					RTE_LOG(ERR,
 						NAT64,
 						"Unknown icmp type %d in icmp "
 						"payload\n",
-						icmpHeaderPayload->icmp_type);
+						icmp_header_payload->icmp_type);
 					return -1;
 				}
 
 				// Recalculate ICMP checksum for IPv6 embeded
-				icmpHeaderPayload->icmp_cksum = 0;
+				icmp_header_payload->icmp_cksum = 0;
 				uint32_t sum = rte_ipv6_phdr_cksum(
 					new_ipv6_payload_header, 0
 				);
 				sum = __rte_raw_cksum(
-					icmpHeaderPayload,
+					icmp_header_payload,
 					rte_be_to_cpu_16(new_ipv6_payload_header
 								 ->payload_len),
 					sum
 				);
 
-				icmpHeaderPayload->icmp_cksum =
+				icmp_header_payload->icmp_cksum =
 					~__rte_raw_cksum_reduce(sum);
 				break;
 
-			case IPPROTO_UDP:
-				struct rte_udp_hdr *udpHeader =
+			case IPPROTO_UDP: {
+				struct rte_udp_hdr *udp_header =
 					rte_pktmbuf_mtod_offset(
 						mbuf,
 						struct rte_udp_hdr *,
 						payload_offset
 					);
 
-				if (!udpHeader) {
+				if (!udp_header) {
 					RTE_LOG(ERR,
 						NAT64,
 						"Failed to get UDP header from "
@@ -2322,24 +2251,24 @@ icmp_v4_to_v6(
 				}
 
 				// Recalculate UDP checksum for IPv6
-				udpHeader->dgram_cksum = 0;
-				udpHeader->dgram_cksum =
+				udp_header->dgram_cksum = 0;
+				udp_header->dgram_cksum =
 					rte_ipv6_udptcp_cksum_mbuf(
 						mbuf,
 						new_ipv6_payload_header,
 						payload_offset
 					);
 				break;
-
-			case IPPROTO_TCP:
-				struct rte_tcp_hdr *tcpHeader =
+			}
+			case IPPROTO_TCP: {
+				struct rte_tcp_hdr *tcp_header =
 					rte_pktmbuf_mtod_offset(
 						mbuf,
 						struct rte_tcp_hdr *,
 						payload_offset
 					);
 
-				if (!tcpHeader) {
+				if (!tcp_header) {
 					RTE_LOG(ERR,
 						NAT64,
 						"Failed to get TCP header from "
@@ -2348,13 +2277,14 @@ icmp_v4_to_v6(
 				}
 
 				// Recalculate TCP checksum for IPv6
-				tcpHeader->cksum = 0;
-				tcpHeader->cksum = rte_ipv6_udptcp_cksum_mbuf(
+				tcp_header->cksum = 0;
+				tcp_header->cksum = rte_ipv6_udptcp_cksum_mbuf(
 					mbuf,
 					new_ipv6_payload_header,
 					payload_offset
 				);
 				break;
+			}
 
 			default:
 				RTE_LOG(ERR,
@@ -2366,13 +2296,13 @@ icmp_v4_to_v6(
 		}
 	}
 
-	icmpHeader->icmp_cksum = 0;
+	icmp_header->icmp_cksum = 0;
 	uint32_t sum = rte_ipv6_phdr_cksum(new_ipv6_header, 0);
 	sum = __rte_raw_cksum(
-		icmpHeader, rte_be_to_cpu_16(new_ipv6_header->payload_len), sum
+		icmp_header, rte_be_to_cpu_16(new_ipv6_header->payload_len), sum
 	);
 
-	icmpHeader->icmp_cksum = ~__rte_raw_cksum_reduce(sum);
+	icmp_header->icmp_cksum = ~__rte_raw_cksum_reduce(sum);
 
 	return 0;
 }
@@ -2399,18 +2329,18 @@ nat64_handle_v4(
 		return -1;
 	}
 
-	struct rte_ipv4_hdr *ipv4Header = rte_pktmbuf_mtod_offset(
+	struct rte_ipv4_hdr *ipv4_header = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-	if (!ipv4Header) {
+	if (!ipv4_header) {
 		RTE_LOG(ERR, NAT64, "Failed to get IPv4 header from mbuf\n");
 		return -1;
 	}
 
 	LOG_DBG(NAT64, "Processing IPv4 packet\n");
 
-	uint32_t addr4 = ipv4Header->dst_addr;
+	uint32_t addr4 = ipv4_header->dst_addr;
 	struct ip4to6 *entry = find_ip4to6(nat64_config, &addr4);
 	if (!entry) {
 		RTE_LOG(ERR,
@@ -2428,9 +2358,9 @@ nat64_handle_v4(
 		IPv6_BYTES(entry->ip6));
 
 	// Check for IPv4 options and handle them according to RFC7915
-	uint8_t ihl = (ipv4Header->version_ihl & RTE_IPV4_HDR_IHL_MASK);
+	uint8_t ihl = (ipv4_header->version_ihl & RTE_IPV4_HDR_IHL_MASK);
 	if (ihl > RTE_IPV4_MIN_IHL) {
-		uint8_t *options = (uint8_t *)(ipv4Header + 1);
+		uint8_t *options = (uint8_t *)(ipv4_header + 1);
 		uint8_t options_len =
 			(ihl - RTE_IPV4_MIN_IHL) * RTE_IPV4_IHL_MULTIPLIER;
 		uint8_t *options_end = options + options_len;
@@ -2462,7 +2392,7 @@ nat64_handle_v4(
 				// options
 				struct rte_icmp_hdr *icmp_hdr =
 					(struct rte_icmp_hdr
-						 *)((char *)ipv4Header +
+						 *)((char *)ipv4_header +
 						    sizeof(struct rte_ipv4_hdr)
 					);
 
@@ -2519,7 +2449,7 @@ nat64_handle_v4(
 					       packet->network_header.offset);
 
 	// Extract fragment information
-	uint16_t frag_data = rte_be_to_cpu_16(ipv4Header->fragment_offset);
+	uint16_t frag_data = rte_be_to_cpu_16(ipv4_header->fragment_offset);
 	uint16_t frag_offset = (frag_data & RTE_IPV4_HDR_OFFSET_MASK) << 3;
 	bool more_fragments = !!(frag_data & RTE_IPV4_HDR_MF_FLAG);
 	uint8_t is_fragmented =
@@ -2527,9 +2457,10 @@ nat64_handle_v4(
 
 	if (is_fragmented) {
 		// Calculate fragment size
-		uint16_t total_len = rte_be_to_cpu_16(ipv4Header->total_length);
+		uint16_t total_len =
+			rte_be_to_cpu_16(ipv4_header->total_length);
 		uint16_t header_len =
-			(ipv4Header->version_ihl & RTE_IPV4_HDR_IHL_MASK) * 4;
+			(ipv4_header->version_ihl & RTE_IPV4_HDR_IHL_MASK) * 4;
 		uint16_t frag_size = total_len - header_len;
 
 		// Validate fragment parameters
@@ -2538,7 +2469,7 @@ nat64_handle_v4(
 			    frag_size,
 			    total_len,
 			    more_fragments,
-			    ipv4Header->next_proto_id == IPPROTO_ICMP
+			    ipv4_header->next_proto_id == IPPROTO_ICMP
 		    ) != 0) {
 			return -1;
 		}
@@ -2555,7 +2486,7 @@ nat64_handle_v4(
 		LOG_DBG(NAT64,
 			"ip4 header bigger than ip6 header(s) " IPv4_BYTES_FMT
 			" -> " IPv4_BYTES_FMT "\n",
-			IPv4_BYTES_LE(ipv4Header->src_addr),
+			IPv4_BYTES_LE(ipv4_header->src_addr),
 			IPv4_BYTES_LE(addr4));
 		RTE_LOG(ERR,
 			NAT64,
@@ -2586,7 +2517,7 @@ nat64_handle_v4(
 
 	if (copy_ipv4_to_ipv6_hdr(
 		    mbuf,
-		    ipv4Header,
+		    ipv4_header,
 		    new_ipv6_header,
 		    packet->network_header.offset,
 		    ADDR_OF(&nat64_config->prefixes.prefixes
@@ -2621,14 +2552,13 @@ nat64_handle_v4(
 			return -1;
 		}
 	} else if (new_ipv6_header->proto == IPPROTO_UDP) {
-
-		struct rte_udp_hdr *udpHeader = rte_pktmbuf_mtod_offset(
+		struct rte_udp_hdr *udp_header = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_udp_hdr *,
 			packet->transport_header.offset
 		);
 
-		if (!udpHeader) {
+		if (!udp_header) {
 			RTE_LOG(ERR,
 				NAT64,
 				"Failed to get UDP header from mbuf\n");
@@ -2636,10 +2566,10 @@ nat64_handle_v4(
 		}
 
 		// Recalculate UDP checksum for IPv6
-		udpHeader->dgram_cksum = 0;
+		udp_header->dgram_cksum = 0;
 		// Use rte_ipv6_udptcp_cksum_mbuf for more accurate checksum
 		// calculation
-		udpHeader->dgram_cksum = rte_ipv6_udptcp_cksum_mbuf(
+		udp_header->dgram_cksum = rte_ipv6_udptcp_cksum_mbuf(
 			mbuf, new_ipv6_header, packet->transport_header.offset
 		);
 		LOG_DBG(NAT64,
@@ -2647,16 +2577,15 @@ nat64_handle_v4(
 			rte_ipv6_phdr_cksum(new_ipv6_header, 0));
 		LOG_DBG(NAT64,
 			"UDP checksum calculated: 0x%04X\n",
-			rte_be_to_cpu_16(udpHeader->dgram_cksum));
+			rte_be_to_cpu_16(udp_header->dgram_cksum));
 	} else if (new_ipv6_header->proto == IPPROTO_TCP) {
-
-		struct rte_tcp_hdr *tcpHeader = rte_pktmbuf_mtod_offset(
+		struct rte_tcp_hdr *tcp_header = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_tcp_hdr *,
 			packet->transport_header.offset
 		);
 
-		if (!tcpHeader) {
+		if (!tcp_header) {
 			RTE_LOG(ERR,
 				NAT64,
 				"Failed to get TCP header from mbuf\n");
@@ -2664,20 +2593,20 @@ nat64_handle_v4(
 		}
 
 		// Recalculate TCP checksum for IPv6
-		tcpHeader->cksum = 0;
-		tcpHeader->cksum = rte_ipv6_udptcp_cksum_mbuf(
+		tcp_header->cksum = 0;
+		tcp_header->cksum = rte_ipv6_udptcp_cksum_mbuf(
 			mbuf, new_ipv6_header, packet->transport_header.offset
 		);
 	}
 
-	struct rte_ether_hdr *ethHeader =
+	struct rte_ether_hdr *eth_header =
 		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-	if (!ethHeader) {
+	if (!eth_header) {
 		RTE_LOG(ERR, NAT64, "Failed to get Ethernet header from mbuf\n"
 		);
 		return -1;
 	}
-	ethHeader->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+	eth_header->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
 
 	return 0;
 }
@@ -2794,7 +2723,6 @@ new_module_nat64() {
 #ifdef NAT64_DEBUG
 	rte_log_set_level(RTE_LOGTYPE_NAT64, RTE_LOG_DEBUG);
 #endif
-	// Use malloc because module load before init dpdk
 	struct nat64_module *module =
 		(struct nat64_module *)malloc(sizeof(*module));
 
