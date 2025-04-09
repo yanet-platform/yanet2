@@ -2093,7 +2093,7 @@ fix_checksums(struct upkt *pkt) {
 		case IPPROTO_ICMPV6: {
 			struct icmp6_hdr *icmp6_hdr = &pkt->proto.icmp6;
 			icmp6_hdr->icmp6_cksum = 0;
-			
+
 			uint32_t sum = rte_ipv6_phdr_cksum(ipv6_hdr, 0);
 			sum = __rte_raw_cksum(
 				icmp6_hdr, sizeof(struct icmp6_hdr), sum
@@ -2721,20 +2721,22 @@ create_icmp_packet(
 			void *proto_hdr = (void *)(ip6 + 1);
 
 			switch (proto) {
-			case IPPROTO_UDP:
+			case IPPROTO_UDP: {
 				struct rte_udp_hdr *udp =
 					(struct rte_udp_hdr *)proto_hdr;
 				udp->dgram_cksum =
 					rte_ipv6_udptcp_cksum(ip6, udp);
 				break;
+			}
 
-			case IPPROTO_TCP:
+			case IPPROTO_TCP: {
 				struct rte_tcp_hdr *tcp =
 					(struct rte_tcp_hdr *)proto_hdr;
 				tcp->cksum = rte_ipv6_udptcp_cksum(ip6, tcp);
 				break;
+			}
 
-			case IPPROTO_ICMPV6:
+			case IPPROTO_ICMPV6: {
 				struct icmp6_hdr *icmp6 =
 					(struct icmp6_hdr *)proto_hdr;
 				uint32_t cksum = rte_ipv6_phdr_cksum(ip6, 0);
@@ -2750,6 +2752,7 @@ create_icmp_packet(
 				icmp6->icmp6_cksum =
 					~__rte_raw_cksum_reduce(cksum);
 				break;
+			}
 			}
 		} else {
 			struct rte_ipv4_hdr *ip4 =
