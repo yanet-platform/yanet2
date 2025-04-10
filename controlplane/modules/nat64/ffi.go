@@ -1,7 +1,8 @@
 package nat64
 
-//#cgo CFLAGS: -I../../../
-//#cgo LDFLAGS: -L../../../build/modules/nat64/ -lnat64_cp
+//#cgo CFLAGS: -I../../../ -I../../../lib
+//#cgo LDFLAGS: -L../../../build/modules/nat64/ -lnat64_cp -llogging
+//#cgo LDFLAGS: -L../../../build/lib/logging/ -llogging
 //
 //#include "api/agent.h"
 //#include "modules/nat64/nat64cp.h"

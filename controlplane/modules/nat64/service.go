@@ -255,6 +255,9 @@ func (s *NAT64Service) updateModuleConfigs(name string, numaIndices []uint32) er
 	// Create module configs for each NUMA node
 	configs := make([]*ModuleConfig, len(numaIndices))
 	for i, numaIdx := range numaIndices {
+		if int(numaIdx) >= len(s.agents) {
+			return fmt.Errorf("NUMA index %d is out of range (agents length: %d)", numaIdx, len(s.agents))
+		}
 		agent := s.agents[numaIdx]
 		if agent == nil {
 			return fmt.Errorf("agent for NUMA %d is nil", numaIdx)

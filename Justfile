@@ -114,7 +114,7 @@ drun *CMDS:
 
 # Generate coverage report in Docker
 dcoverage:
-    @just _docker_run "just setup coverage=true && just coverage"
+    @just _docker_run "just setup && just coverage"
 
 # Build controlplane in Docker
 dcontrolplane:

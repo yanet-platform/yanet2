@@ -3,9 +3,6 @@
 #include <inttypes.h>
 #include <string.h>
 
-/* DPDK headers */
-#include <rte_log.h>
-
 /* Project headers */
 #include "common.h"
 #include "config.h"
@@ -17,27 +14,10 @@
 #include "common/lpm.h"
 #include "common/memory_address.h"
 #include "common/strutils.h"
+#include "logging/log.h"
 
 #include "controlplane/agent/agent.h"
 #include "dataplane/config/zone.h"
-
-/**
- * @def RTE_LOGTYPE_NAT64CP
- * @brief Define log type for NAT64CP module.
- *
- * This macro defines a specific log type for the NAT64CP module.
- * The log type is registered using RTE_LOG_REGISTER_DEFAULT with the log level
- * set to DEBUG if DEBUG_NAT64 is defined, otherwise INFO.
- *
- * @note For more details on RTE_LOG and log types, refer to the DPDK
- * documentation: https://doc.dpdk.org/guides/prog_guide/log_lib.html
- */
-#ifdef DEBUG_NAT64
-RTE_LOG_REGISTER_DEFAULT(nat64cp_logtype, DEBUG);
-#else
-RTE_LOG_REGISTER_DEFAULT(nat64cp_logtype, INFO);
-#endif
-#define RTE_LOGTYPE_NAT64CP nat64cp_logtype
 
 struct module_data *
 nat64_module_config_init(struct agent *agent, const char *name) {
@@ -75,10 +55,14 @@ nat64_module_config_init(struct agent *agent, const char *name) {
 		&config->module_data.memory_context;
 
 	// Initialize LPM structures
-	if (lpm_init(&config->mappings.v4_to_v6, memory_context))
+	if (lpm_init(&config->mappings.v4_to_v6, memory_context)) {
+		LOG(ERROR, "Failed to initialize v4_to_v6 LPM");
 		goto error_cleanup;
-	if (lpm_init(&config->mappings.v6_to_v4, memory_context))
+	}
+	if (lpm_init(&config->mappings.v6_to_v4, memory_context)) {
+		LOG(ERROR, "Failed to initialize v6_to_v4 LPM");
 		goto error_lpm_v6;
+	}
 
 	// Initialize other fields
 	config->mappings.count = 0;
@@ -88,7 +72,7 @@ nat64_module_config_init(struct agent *agent, const char *name) {
 	config->mtu.ipv6 = 1280; // Minimum IPv6 MTU
 	config->mtu.ipv4 = 1450; // Default IPv4 MTU
 
-	RTE_LOG(DEBUG, NAT64CP, "Initialized NAT64 module '%s'\n", name);
+	LOG(DEBUG, "Initialized NAT64 module '%s'", name);
 	return &config->module_data;
 
 error_lpm_v6:
@@ -107,39 +91,81 @@ error_cleanup:
 
 void
 nat64_module_config_free(struct module_data *module_data) {
+	LOG(DEBUG, "Starting cleanup of NAT64 module '%s'", module_data->name);
+
 	struct nat64_module_config *config = container_of(
 		module_data, struct nat64_module_config, module_data
 	);
 
-	// Free LPM structures
+	LOG(DEBUG, "Freeing LPM structures for module '%s'", module_data->name);
+
+	LOG(DEBUG,
+	    "Freeing v4_to_v6 LPM table at %p",
+	    (void *)&config->mappings.v4_to_v6);
 	lpm_free(&config->mappings.v4_to_v6);
+
+	LOG(DEBUG,
+	    "Freeing v6_to_v4 LPM table at %p",
+	    (void *)&config->mappings.v6_to_v4);
 	lpm_free(&config->mappings.v6_to_v4);
 
-	// Free arrays
 	if (config->mappings.list) {
+		struct ip4to6 *mapping_list = ADDR_OF(&config->mappings.list);
+		size_t mappings_size =
+			sizeof(struct ip4to6) * config->mappings.count;
+		LOG(DEBUG,
+		    "Freeing mappings list: count=%zu, size=%zu bytes, "
+		    "address=%p",
+		    config->mappings.count,
+		    mappings_size,
+		    (void *)mapping_list);
+
 		memory_bfree(
 			&module_data->memory_context,
-			config->mappings.list,
-			sizeof(struct ip4to6) * config->mappings.count
+			mapping_list,
+			mappings_size
 		);
-	}
-	if (config->prefixes.prefixes) {
-		memory_bfree(
-			&module_data->memory_context,
-			config->prefixes.prefixes,
-			sizeof(struct nat64_prefix) * config->prefixes.count
-		);
+	} else {
+		LOG(DEBUG, "No mappings list to free");
 	}
 
-	RTE_LOG(DEBUG, NAT64CP, "Freed NAT64 module '%s'\n", module_data->name);
+	if (config->prefixes.prefixes) {
+		size_t prefixes_size =
+			sizeof(struct nat64_prefix) * config->prefixes.count;
+		struct nat64_prefix *prefixes = ADDR_OF(&config->prefixes.prefixes);
+		LOG(DEBUG,
+		    "Freeing prefixes array: count=%zu, size=%zu bytes, "
+		    "address=%p",
+		    config->prefixes.count,
+		    prefixes_size,
+		    (void *)prefixes);
+
+		memory_bfree(
+			&module_data->memory_context,
+			prefixes,
+			prefixes_size
+		);
+	} else {
+		LOG(DEBUG, "No prefixes array to free");
+	}
+
+	LOG(DEBUG, "Freed NAT64 module '%s' resources", module_data->name);
 
 	// Free main config structure
 	struct agent *agent = ADDR_OF(&module_data->agent);
-	memory_bfree(
-		&agent->memory_context,
-		config,
-		sizeof(struct nat64_module_config)
-	);
+	if (module_data->agent) {
+		LOG(DEBUG,
+		    "Freeing main config structure: size=%zu bytes, address=%p",
+		    sizeof(struct nat64_module_config),
+		    (void *)config);
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct nat64_module_config)
+		);
+	}
+
+	LOG(DEBUG, "Completed cleanup of NAT64 module '%s'", module_data->name);
 }
 
 int
@@ -155,6 +181,10 @@ nat64_module_config_add_mapping(
 
 	// Validate prefix index
 	if (prefix_num >= config->prefixes.count) {
+		LOG(ERROR,
+		    "Invalid prefix index %zu (max %zu)",
+		    prefix_num,
+		    config->prefixes.count);
 		errno = EINVAL;
 		return -1;
 	}
@@ -167,6 +197,7 @@ nat64_module_config_add_mapping(
 		    sizeof(*mappings),
 		    &config->mappings.count
 	    )) {
+		LOG(ERROR, "Failed to expand mapping array");
 		errno = ENOMEM;
 		return -1;
 	}
@@ -186,6 +217,7 @@ nat64_module_config_add_mapping(
 		    ip6,
 		    config->mappings.count - 1
 	    )) {
+		LOG(ERROR, "Failed to insert mapping into v6_to_v4 LPM");
 		errno = ENOMEM;
 		return -1;
 	}
@@ -198,16 +230,15 @@ nat64_module_config_add_mapping(
 		    (uint8_t *)&ip4,
 		    config->mappings.count - 1
 	    )) {
+		LOG(ERROR, "Failed to insert mapping into v4_to_v6 LPM");
 		errno = ENOMEM;
 		return -1;
 	}
 
-	RTE_LOG(DEBUG,
-		NAT64CP,
-		"Added mapping IPv4 -> IPv6: " IPv4_BYTES_FMT
-		" -> " IPv6_BYTES_FMT "\n",
-		IPv4_BYTES_LE(ip4),
-		IPv6_BYTES(ip6));
+	LOG(DEBUG,
+	    "Added mapping IPv4 -> IPv6: " IPv4_BYTES_FMT " -> " IPv6_BYTES_FMT,
+	    IPv4_BYTES_LE(ip4),
+	    IPv6_BYTES(ip6));
 
 	return config->mappings.count - 1;
 }
@@ -228,6 +259,7 @@ nat64_module_config_add_prefix(
 		    sizeof(*prefixes),
 		    &config->prefixes.count
 	    )) {
+		LOG(ERROR, "Failed to expand prefix array");
 		errno = ENOMEM;
 		return -1;
 	}
@@ -237,21 +269,21 @@ nat64_module_config_add_prefix(
 	memcpy(prefixes[config->prefixes.count - 1].prefix, prefix, 12);
 	SET_OFFSET_OF(&config->prefixes.prefixes, prefixes);
 
-	LOG_DBG(NAT64CP,
-		"Added prefix "
-		"%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x\n",
-		prefix[0],
-		prefix[1],
-		prefix[2],
-		prefix[3],
-		prefix[4],
-		prefix[5],
-		prefix[6],
-		prefix[7],
-		prefix[8],
-		prefix[9],
-		prefix[10],
-		prefix[11]);
+	LOG(DEBUG,
+	    "Added prefix "
+	    "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x\n",
+	    prefix[0],
+	    prefix[1],
+	    prefix[2],
+	    prefix[3],
+	    prefix[4],
+	    prefix[5],
+	    prefix[6],
+	    prefix[7],
+	    prefix[8],
+	    prefix[9],
+	    prefix[10],
+	    prefix[11]);
 
 	return config->prefixes.count - 1;
 }

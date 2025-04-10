@@ -30,6 +30,7 @@
 #include "common.h"
 #include "dataplane/dpdk.h"
 #include "dataplane/module/module.h"
+#include "logging/log.h"
 #include "nat64cp.h"
 #include "nat64dp.h"
 #include "test.h"
@@ -197,6 +198,7 @@ static int
 test_setup(void) {
 #ifdef DEBUG_NAT64
 	rte_log_set_level(RTE_LOGTYPE_NAT64_TEST, RTE_LOG_DEBUG);
+	log_enable_name("debug");
 #endif
 	const uint8_t socket_id = rte_socket_id();
 	if (test_params.mbuf_pool == NULL) {
@@ -343,6 +345,7 @@ nat64_test_config(struct module_data **module_data) {
 		config->mtu.ipv6);
 
 	*module_data = (struct module_data *)config;
+	(*module_data)->agent = NULL;
 	return 0;
 
 error_mappings:
@@ -4450,6 +4453,7 @@ test_nat64_icmp_more() {
  */
 static void
 testsuite_teardown(void) {
+	nat64_module_config_free(test_params.module_data);
 	packet_list_cleanup(&test_params.packet_front.input);
 	packet_list_cleanup(&test_params.packet_front.output);
 	packet_list_cleanup(&test_params.packet_front.drop);

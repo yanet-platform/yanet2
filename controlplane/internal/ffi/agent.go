@@ -42,18 +42,33 @@ func (m *Agent) AsRawPtr() unsafe.Pointer {
 }
 
 func (m *Agent) UpdateModules(modules []ModuleConfig) error {
+	if len(modules) == 0 {
+		return fmt.Errorf("no modules provided")
+	}
+
 	configs := make([]*C.struct_module_data, len(modules))
 	for i, module := range modules {
+		if module.ptr == nil {
+			return fmt.Errorf("module config at index %d is nil", i)
+		}
 		configs[i] = (*C.struct_module_data)(module.AsRawPtr())
 	}
 
-	len := C.size_t(len(modules))
+	if len(configs) == 0 {
+		return fmt.Errorf("no module configs to update")
+	}
 
-	C.agent_update_modules(
+	rc, err := C.agent_update_modules(
 		(*C.struct_agent)(m.AsRawPtr()),
-		len,
+		C.size_t(len(modules)),
 		&configs[0],
 	)
+	if err != nil {
+		return fmt.Errorf("failed to update modules: %w", err)
+	}
+	if rc != 0 {
+		return fmt.Errorf("failed to update modules: %d code", rc)
+	}
 
 	return nil
 }

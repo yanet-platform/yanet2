@@ -29,7 +29,7 @@ lib_nat64_dp_dep = declare_dependency(
 # controlplane dependencies
 cp_dependencies = dependencies
 cp_dependencies += lib_config_dp_dep
-cp_dependencies += libdpdk_dep
+cp_dependencies += lib_logging_dep
 
 cp_sources = files(
   'nat64cp.c',
