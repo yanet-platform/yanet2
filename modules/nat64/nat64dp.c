@@ -2391,8 +2391,8 @@ nat64_handle_v4(
 				// RFC7915: Send ICMP error for source route
 				// options
 				struct rte_icmp_hdr *icmp_hdr =
-					(struct rte_icmp_hdr
-						 *)(options_end + 1);
+					(struct rte_icmp_hdr *)(options_end + 1
+					);
 
 				icmp_hdr->icmp_type = ICMP_DEST_UNREACH;
 				icmp_hdr->icmp_code = ICMP_SR_FAILED;
