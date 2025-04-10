@@ -2391,9 +2391,7 @@ nat64_handle_v4(
 				// RFC7915: Send ICMP error for source route
 				// options
 				struct rte_icmp_hdr *icmp_hdr =
-					(struct rte_icmp_hdr
-						 *)((char *)ipv4_header +
-						    sizeof(struct rte_ipv4_hdr)
+					(struct rte_icmp_hdr *)(options_end + 1
 					);
 
 				icmp_hdr->icmp_type = ICMP_DEST_UNREACH;
@@ -2406,6 +2404,7 @@ nat64_handle_v4(
 					icmp_hdr->icmp_cksum = 0xffff;
 				}
 
+				// FIXME: send icmp error packet instead drop
 				LOG_DBG(NAT64,
 					"Dropping packet with source route "
 					"option\n");
@@ -2683,40 +2682,6 @@ nat64_handle_packets(
 	}
 }
 
-/**
- * @brief Creates and initializes a new NAT64 module instance
- *
- * This function allocates and initializes a new NAT64 module that implements
- * stateless NAT64 translation according to RFC7915. The module integrates with
- * the dataplane framework through the base module interface.
- *
- * The initialization process includes:
- * 1. Setting up debug logging if NAT64_DEBUG is defined
- * 2. Allocating memory for the module structure
- * 3. Setting up the module name and packet handler
- * 4. Initializing internal state
- *
- * The module provides:
- * - Stateless NAT64 translation (RFC7915)
- * - IPv4/IPv6 header translation
- * - Protocol-specific handling (TCP, UDP, ICMP)
- * - Fragmentation support
- * - Checksum recalculation
- *
- * @return Pointer to the newly created module on success,
- *         NULL on failure with errno set to indicate the error:
- *         - ENOMEM: Memory allocation failed
- *         - EINVAL: Module initialization failed
- *
- * @note The returned pointer should be cast to struct nat64_module* to access
- *       NAT64-specific fields.
- * @note The module must be configured with address mappings and prefixes
- *       before use.
- *
- * @see nat64_module Structure containing the implementation
- * @see nat64_module_config Configuration structure for the module
- * @see RFC7915 - IP/ICMP Translation Algorithm
- */
 struct module *
 new_module_nat64() {
 

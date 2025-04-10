@@ -132,7 +132,8 @@ nat64_module_config_free(struct module_data *module_data) {
 	if (config->prefixes.prefixes) {
 		size_t prefixes_size =
 			sizeof(struct nat64_prefix) * config->prefixes.count;
-		struct nat64_prefix *prefixes = ADDR_OF(&config->prefixes.prefixes);
+		struct nat64_prefix *prefixes =
+			ADDR_OF(&config->prefixes.prefixes);
 		LOG(DEBUG,
 		    "Freeing prefixes array: count=%zu, size=%zu bytes, "
 		    "address=%p",
@@ -141,9 +142,7 @@ nat64_module_config_free(struct module_data *module_data) {
 		    (void *)prefixes);
 
 		memory_bfree(
-			&module_data->memory_context,
-			prefixes,
-			prefixes_size
+			&module_data->memory_context, prefixes, prefixes_size
 		);
 	} else {
 		LOG(DEBUG, "No prefixes array to free");

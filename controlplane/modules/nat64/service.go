@@ -3,6 +3,7 @@ package nat64
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 
 	"go.uber.org/zap"
@@ -62,10 +63,10 @@ func (s *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 
 	configs := make([]*nat64pb.InstanceConfig, 0)
 	for key, config := range s.configs {
-		// Пропускаем если:
-		// - NUMA не в запрошенном списке
-		// - ModuleName задан и не совпадает с текущим конфигом
-		if !contains(numaIndices, key.numaIdx) || (req.Target.ModuleName != "" && key.name != req.Target.ModuleName) {
+		// Skip if:
+		// - NUMA is not in the requested list
+		// - ModuleName is set and doesn't match current config
+		if !slices.Contains(numaIndices, key.numaIdx) || (req.Target.ModuleName != "" && key.name != req.Target.ModuleName) {
 			continue
 		}
 
@@ -100,17 +101,6 @@ func (s *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 		Configs: configs,
 	}, nil
 }
-
-// Вспомогательная функция для проверки наличия элемента в слайсе
-func contains(slice []uint32, item uint32) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequest) (*nat64pb.AddPrefixResponse, error) {
 	if len(req.Prefix) != 12 {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid prefix length: got %d, want 12", len(req.Prefix))
