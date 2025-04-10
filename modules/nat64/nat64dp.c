@@ -781,7 +781,7 @@ icmp_v6_to_v4(
 		}
 		uint32_t src_addr;
 		// TODO: check prefix?
-		memcpy(&src_addr, &ipv6_payload_header->src_addr[12], 4);
+		rte_memcpy(&src_addr, &ipv6_payload_header->src_addr[12], 4);
 
 		// Translate the embedded IPv6 header to IPv4
 		new_ipv4_payload_header->version_ihl = RTE_IPV4_VHL_DEF;
@@ -2391,8 +2391,8 @@ nat64_handle_v4(
 				// RFC7915: Send ICMP error for source route
 				// options
 				struct rte_icmp_hdr *icmp_hdr =
-					(struct rte_icmp_hdr *)(options_end + 1
-					);
+					(struct rte_icmp_hdr
+						 *)(options_end + 1);
 
 				icmp_hdr->icmp_type = ICMP_DEST_UNREACH;
 				icmp_hdr->icmp_code = ICMP_SR_FAILED;

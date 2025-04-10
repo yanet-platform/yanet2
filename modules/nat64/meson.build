@@ -1,6 +1,5 @@
 # common dependencies
 dependencies += lib_common_dep
-dependencies += lib_filter_dep
 
 # dataplane dependencies
 dp_dependencies = dependencies
