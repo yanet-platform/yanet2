@@ -2289,8 +2289,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tonic",
- "tonic-build",
+ "tonic 0.12.3",
+ "tonic-build 0.12.3",
  "yanet-cli",
 ]
 

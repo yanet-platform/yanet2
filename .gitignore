@@ -88,6 +88,8 @@ build/
 web/dist/
 
 # AI
+.ai
+.cursor*
 .cline*
 memory-bank
 
