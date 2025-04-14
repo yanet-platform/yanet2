@@ -21,11 +21,10 @@ import (
 	"net/netip"
 	"unsafe"
 
-	"tests/common"
-
-	"common/xnetip"
-
 	"github.com/gopacket/gopacket"
+
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
+	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
 func memCtxCreate() *C.struct_memory_context {

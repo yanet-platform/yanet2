@@ -23,10 +23,10 @@ import (
 	"net/netip"
 	"unsafe"
 
-	"common/xnetip"
-	"tests/common"
-
 	"github.com/gopacket/gopacket"
+
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
+	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
 var (

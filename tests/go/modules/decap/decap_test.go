@@ -6,13 +6,13 @@ import (
 	"slices"
 	"testing"
 
-	"tests/common"
-
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
 // A set of predefined layers for these tests
