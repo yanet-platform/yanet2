@@ -3,8 +3,8 @@ package gateway
 import (
 	"context"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/bitset"
-	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
+	"github.com/yanet-platform/yanet2/common/go/bitset"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 

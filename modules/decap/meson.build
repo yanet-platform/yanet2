@@ -31,13 +31,13 @@ lib_decap_dp_dep = declare_dependency(
 cp_dependencies = dependencies
 cp_dependencies += lib_config_dp_dep
 
-cp_sources = files(
+sources = files(
   'controlplane.c',
 )
 
 lib_decap_cp = static_library(
   'decap_cp',
-  cp_sources,
+  sources,
   dependencies: cp_dependencies,
   install: false,
 )

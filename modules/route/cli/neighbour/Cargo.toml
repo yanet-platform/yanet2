@@ -1,0 +1,22 @@
+[package]
+name = "yanet-cli-neighbour"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+rust-version = "1.84"
+
+[dependencies]
+ync = { path = "../../../../cli/core", version = "0.1", package = "yanet-cli"}
+log = "0.4"
+clap = { version = "4.5", features = ["derive"] }
+clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
+tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
+prost = "0.13"
+prost-types = "0.13"
+tonic = { version = "0.12" }
+tabled = { version = "0.18" }
+netip = { version = "0.1", path = "../../../../common/rust/netip" }
+
+[build-dependencies]
+tonic-build = "0.12"

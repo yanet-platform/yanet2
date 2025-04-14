@@ -30,13 +30,13 @@ lib_balancer_dp_dep = declare_dependency(
 # controlplane dependecies
 cp_dependencies = dependencies
 
-cp_sources = files(
+sources = files(
   'controlplane.c',
 )
 
 lib_balancer_cp = static_library(
   'balancer_cp',
-  cp_sources,
+  sources,
   dependencies: cp_dependencies,
   install: false,
 )

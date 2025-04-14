@@ -9,9 +9,9 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/modules/nat64/nat64pb"
+	"github.com/yanet-platform/yanet2/controlplane/yncp/gateway"
 )
 
 // NAT64Module is a control-plane component responsible for NAT64 translation

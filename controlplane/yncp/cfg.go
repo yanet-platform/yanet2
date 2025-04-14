@@ -11,7 +11,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/modules/decap"
 	"github.com/yanet-platform/yanet2/controlplane/modules/forward"
 	"github.com/yanet-platform/yanet2/controlplane/modules/nat64"
-	"github.com/yanet-platform/yanet2/controlplane/modules/route"
+	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 )
 
 type Config config

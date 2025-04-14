@@ -30,13 +30,13 @@ cp_dependencies = dependencies
 cp_dependencies += lib_config_dp_dep
 cp_dependencies += lib_logging_dep
 
-cp_sources = files(
+sources = files(
   'nat64cp.c',
 )
 
 lib_nat64_cp = static_library(
   'nat64_cp',
-  cp_sources,
+  sources,
   dependencies: cp_dependencies,
   install: false,
 )

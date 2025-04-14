@@ -1,0 +1,27 @@
+[workspace]
+
+resolver = "2"
+
+members = [
+    "cli/core",
+    "cli/modules/common",
+    "cli/modules/inspect",
+    "cli/modules/decap",
+    "cli/modules/forward",
+    "cli/modules/pipeline",
+    "cli/modules/nat64",
+    "modules/route/cli/route",
+    "modules/route/cli/neighbour",
+    "web",
+]
+
+[profile.release]
+panic = "abort"
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = 'z'
+lto = true
+codegen-units = 1
+debug = true
+

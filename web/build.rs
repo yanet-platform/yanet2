@@ -1,10 +1,10 @@
 use std::{io, path::PathBuf};
 
 fn main() -> io::Result<()> {
-    println!("cargo:rerun-if-changed=../controlplane/modules/route/routepb");
+    println!("cargo:rerun-if-changed=../modules/route/controlplane/routepb");
 
     // Path to the directory containing proto files.
-    let route_proto_dir = PathBuf::from("../controlplane/modules/route/routepb");
+    let route_proto_dir = PathBuf::from("../modules/route/controlplane/routepb");
 
     // Collect all .proto files.
     let mut proto_files = Vec::new();
@@ -18,10 +18,10 @@ fn main() -> io::Result<()> {
 
     prost_build::Config::new().compile_protos(
         &[
-            "../controlplane/modules/route/routepb/route.proto",
-            "../controlplane/modules/route/routepb/neighbour.proto",
+            "../modules/route/controlplane/routepb/route.proto",
+            "../modules/route/controlplane/routepb/neighbour.proto",
         ],
-        &["../controlplane/modules/route/routepb"],
+        &["../modules/route/controlplane/routepb"],
     )?;
 
     Ok(())

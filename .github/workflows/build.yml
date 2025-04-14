@@ -59,11 +59,11 @@ jobs:
 
       - name: Build Go controlplane
         run: |
-          cd controlplane
           # Generate protobuf files
-          make ynpb modules/route/routepb
+          make -C modules/route proto
+          make -C controlplane ynpb
           # Build the controlplane
-          make build
+          make -C controlplane build
 
       - name: Build and run tests
         run: |

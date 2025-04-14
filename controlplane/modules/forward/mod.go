@@ -9,9 +9,9 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/modules/forward/forwardpb"
+	"github.com/yanet-platform/yanet2/controlplane/yncp/gateway"
 )
 
 // ForwardModule is a control-plane component of a module that is responsible for

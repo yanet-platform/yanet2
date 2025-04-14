@@ -1,14 +1,20 @@
 module github.com/yanet-platform/yanet2/controlplane
 
-go 1.24.0
+go 1.24.1
 
 replace github.com/yanet-platform/yanet2/common/go => ../common/go
+
+replace github.com/yanet-platform/yanet2/modules/route => ../modules/route
 
 require (
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/spf13/cobra v1.8.1
-	github.com/vishvananda/netlink v1.3.0
-	golang.org/x/sys v0.30.0
+	github.com/yanet-platform/yanet2/modules/route v0.0.0-00010101000000-000000000000
+)
+
+require (
+	github.com/vishvananda/netlink v1.3.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
 )
 
 require (
@@ -29,7 +35,7 @@ require (
 	github.com/siderolabs/grpc-proxy v0.5.1
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/testify v1.10.0
-	github.com/yanet-platform/yanet2/common/go v0.0.0-00010101000000-000000000000
+	github.com/yanet-platform/yanet2/common/go v0.0.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/sync v0.11.0
 	google.golang.org/grpc v1.70.0
