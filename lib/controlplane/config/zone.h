@@ -143,7 +143,6 @@ struct agent;
 struct cp_agent_registry;
 struct cp_agent_registry {
 	uint64_t count;
-	struct cp_agent_registry *prev;
 	struct agent *agents[];
 };
 

@@ -179,8 +179,7 @@ cp_module_registry_free(
 	memory_bfree(
 		&cp_config->memory_context,
 		module_registry,
-		sizeof(struct cp_module_registry) +
-			sizeof(struct module_data) * module_registry->capacity
+		cp_module_registry_size(module_registry->capacity)
 	);
 }
 
@@ -395,8 +394,7 @@ cp_pipeline_registry_free(
 	memory_bfree(
 		&cp_config->memory_context,
 		pipeline_registry,
-		sizeof(struct cp_pipeline_registry
-		) + sizeof(struct cp_pipeline *) * pipeline_registry->capacity
+		cp_pipeline_registry_size(pipeline_registry->capacity)
 	);
 }
 
@@ -518,9 +516,7 @@ cp_device_registry_free(
 	memory_bfree(
 		&cp_config->memory_context,
 		device_registry,
-		sizeof(struct cp_device_registry) +
-			sizeof(struct cp_device_pipeline_map *) *
-				device_registry->capacity
+		cp_device_registry_size(device_registry->capacity)
 	);
 }
 

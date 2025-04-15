@@ -199,9 +199,6 @@ agent_attach(
 			new_agent
 		);
 
-		SET_OFFSET_OF(
-			&new_registry->prev, ADDR_OF(&old_registry->prev)
-		);
 		memory_bfree(
 			&cp_config->memory_context,
 			old_registry,
