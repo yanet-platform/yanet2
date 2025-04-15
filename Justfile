@@ -5,8 +5,6 @@ TAG := "yanet2-dev"
 ROOT_DIR := justfile_directory()
 DOCKER_CACHE_DIR := "/tmp"
 
-# Required tools - used for validation
-required_tools := "docker clang-tidy-19 clang-format-19 meson ninja"
 
 # Show available commands
 default:
@@ -15,20 +13,21 @@ default:
 # === Build Targets ===
 
 # Build all targets
-all:
+build:
     @meson compile -C build
 
 # Setup build environment with optional coverage
-setup:
-    @meson setup build -Dbuildtype=debug -Db_coverage=false
+setup COVERAGE_MODE="false":
+    @meson setup build -Dbuildtype=debug -Db_coverage={{ COVERAGE_MODE }}
 
 # === Test Targets ===
 
 # Run tests with optional arguments
-test *IGN: all
+test: build
     @meson test -C build --print-errorlogs
 
 # Clean coverage data
+# clean *.gcno file manually after remove c file
 covclean:
     @find build -type f -iname '*.gcda' -delete
 
@@ -82,6 +81,9 @@ _docker_run *COMMAND:
         {{ TAG }} \
         sh -c 'cd /yanet2 && {{ COMMAND }}'
 
+dsetup COVERAGE_MODE="false":
+    @just _docker_run "just setup {{ COVERAGE_MODE }}"
+
 # Run tests in Docker
 dtest:
     @just _docker_run "just setup test"
@@ -95,8 +97,8 @@ dbloody *FILES:
     @just _docker_run "just bloody {{ FILES }}"
 
 # Build in Docker
-dbuild *IGN:
-    @just _docker_run "just setup all"
+dbuild:
+    @just _docker_run "just build"
 
 # Start shell in Docker
 dshell:
@@ -114,7 +116,7 @@ drun *CMDS:
 
 # Generate coverage report in Docker
 dcoverage:
-    @just _docker_run "just setup && just coverage"
+    @just _docker_run "just setup true && just coverage"
 
 # Build controlplane in Docker
 dcontrolplane:

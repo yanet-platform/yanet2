@@ -6,4 +6,8 @@ custom_target('balancer-agent',
     output : 'balancer-agent',
     input : agent_balancer_sources,
     command : ['go', 'build', '-o', '@OUTPUT@', '@INPUT@'],
-    build_by_default: true)
+    build_by_default: true,
+      env: get_option('b_coverage') ? {
+    'CGO_LDFLAGS': '-lgcov',
+  } : {},
+    )

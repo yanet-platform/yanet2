@@ -21,6 +21,9 @@ struct module_data;
 struct module_data *
 nat64_module_config_init(struct agent *agent, const char *name);
 
+struct module_data *
+nat64_module_config_init_config(struct memory_context *rmemory_context, const char *name, uint64_t index);
+
 /**
  * @brief Frees NAT64 module configuration resources
  *
