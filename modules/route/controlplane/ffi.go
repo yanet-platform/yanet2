@@ -25,7 +25,7 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.route_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName)
+	ptr, err := C.route_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize module config: %w", err)
 	}
@@ -38,8 +38,8 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	}, nil
 }
 
-func (m *ModuleConfig) asRawPtr() *C.struct_module_data {
-	return (*C.struct_module_data)(m.ptr.AsRawPtr())
+func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
+	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
 func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
@@ -75,7 +75,7 @@ func (m *ModuleConfig) RouteListAdd(routeIndices []uint32) (int, error) {
 		cRouteIndices[idx] = C.uint32_t(v)
 	}
 
-	idx, err := C.route_module_config_add_route_list((*C.struct_module_data)(m.ptr.AsRawPtr()), C.size_t(len(routeIndices)), &cRouteIndices[0])
+	idx, err := C.route_module_config_add_route_list((*C.struct_cp_module)(m.ptr.AsRawPtr()), C.size_t(len(routeIndices)), &cRouteIndices[0])
 	if err != nil {
 		return -1, fmt.Errorf("failed to add route list: %w", err)
 	}

@@ -1,12 +1,12 @@
 #pragma once
 
 #include "common/lpm.h"
-#include "dataplane/config/zone.h"
-#include "dataplane/module/module.h"
 #include "dataplane/packet/dscp.h"
 
+#include "controlplane/config/zone.h"
+
 struct dscp_module_config {
-	struct module_data module_data;
+	struct cp_module cp_module;
 
 	struct lpm lpm_v4;
 	struct lpm lpm_v6;

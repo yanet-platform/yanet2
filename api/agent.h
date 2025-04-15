@@ -12,7 +12,7 @@ struct dp_config;
 // TODO: docs.
 struct agent;
 // TODO: docs.
-struct module_data;
+struct cp_module;
 
 // Attaches to YANET shared memory segment.
 //
@@ -96,9 +96,7 @@ agent_detach(struct agent *agent);
 
 int
 agent_update_modules(
-	struct agent *agent,
-	size_t module_count,
-	struct module_data **module_datas
+	struct agent *agent, size_t module_count, struct cp_module **cp_modules
 );
 
 struct pipeline_config;
@@ -124,24 +122,24 @@ pipeline_config_set_module(
 	const char *name
 );
 
-struct device_pipeline_map;
+struct cp_device_config;
 
 int
 agent_update_devices(
 	struct agent *agent,
 	uint64_t device_count,
-	struct device_pipeline_map *pipelines[]
+	struct cp_device_config *devices[]
 );
 
-struct device_pipeline_map *
-device_pipeline_map_create(uint64_t device_id, uint64_t pipeline_count);
+struct cp_device_config *
+cp_device_config_create(const char *name, uint64_t pipeline_count);
 
 void
-device_pipeline_map_free(struct device_pipeline_map *devices);
+cp_device_config_free(struct cp_device_config *config);
 
 int
-device_pipeline_map_add(
-	struct device_pipeline_map *devices, const char *name, uint64_t weight
+cp_device_config_add_pipeline(
+	struct cp_device_config *config, const char *name, uint64_t weight
 );
 
 struct dp_module_info {
@@ -292,3 +290,38 @@ cp_agent_list_info_free(struct cp_agent_list_info *agent_list_info);
 
 struct cp_agent_list_info *
 yanet_get_cp_agent_list_info(struct dp_config *dp_config);
+
+struct counter_value_handle;
+
+struct counter_handle {
+	char name[60];
+	uint64_t size;
+	uint64_t gen;
+	struct counter_value_handle *value_handle;
+};
+
+struct counter_handle_list {
+	uint64_t count;
+	struct counter_handle counters[];
+};
+
+struct counter_handle_list *
+yanet_get_pm_counters(
+	struct dp_config *dp_config,
+	const char *module_type,
+	const char *module_name,
+	const char *pipeline_name
+);
+
+struct counter_handle_list *
+yanet_get_worker_counters(struct dp_config *dp_config);
+
+struct counter_handle *
+yanet_get_counter(struct counter_handle_list *counters, uint64_t idx);
+
+uint64_t
+yanet_get_counter_value(
+	struct counter_value_handle *value_handle,
+	uint64_t value_idx,
+	uint64_t worker_idx
+);

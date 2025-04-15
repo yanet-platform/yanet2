@@ -41,8 +41,8 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	}, nil
 }
 
-func (m *ModuleConfig) asRawPtr() *C.struct_module_data {
-	return (*C.struct_module_data)(m.ptr.AsRawPtr())
+func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
+	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
 func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
@@ -51,10 +51,13 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 
 // L2ForwardEnable configures a device for L2 forwarding
 func (m *ModuleConfig) L2ForwardEnable(srcDeviceID DeviceID, dstDeviceID DeviceID) error {
+	cname := C.CString("l2")
+	defer C.free(unsafe.Pointer(cname))
 	rc, err := C.forward_module_config_enable_l2(
 		m.asRawPtr(),
 		C.uint16_t(srcDeviceID),
 		C.uint16_t(dstDeviceID),
+		cname,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to enable device %d: %w", dstDeviceID, err)
@@ -87,12 +90,15 @@ func (m *ModuleConfig) L3ForwardEnable(prefix netip.Prefix, srcDeviceID DeviceID
 }
 
 func (m *ModuleConfig) forwardEnableV4(addrStart [4]byte, addrEnd [4]byte, srcDeviceID DeviceID, dstDeviceID DeviceID) error {
+	cname := C.CString("v4")
+	defer C.free(unsafe.Pointer(cname))
 	rc, err := C.forward_module_config_enable_v4(
 		m.asRawPtr(),
 		(*C.uint8_t)(&addrStart[0]),
 		(*C.uint8_t)(&addrEnd[0]),
 		C.uint16_t(srcDeviceID),
 		C.uint16_t(dstDeviceID),
+		cname,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to enable v4 forward from device %d to %d: %w", srcDeviceID, dstDeviceID, err)
@@ -104,12 +110,15 @@ func (m *ModuleConfig) forwardEnableV4(addrStart [4]byte, addrEnd [4]byte, srcDe
 }
 
 func (m *ModuleConfig) forwardEnableV6(addrStart [16]byte, addrEnd [16]byte, srcDeviceID DeviceID, dstDeviceID DeviceID) error {
+	cname := C.CString("v6")
+	defer C.free(unsafe.Pointer(cname))
 	rc, err := C.forward_module_config_enable_v6(
 		m.asRawPtr(),
 		(*C.uint8_t)(&addrStart[0]),
 		(*C.uint8_t)(&addrEnd[0]),
 		C.uint16_t(srcDeviceID),
 		C.uint16_t(dstDeviceID),
+		cname,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to enable v6 forward from device %d to %d: %w", srcDeviceID, dstDeviceID, err)

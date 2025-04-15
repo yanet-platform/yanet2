@@ -19,53 +19,83 @@
 #include "controlplane/agent/agent.h"
 #include "dataplane/config/zone.h"
 
-struct module_data *
-nat64_module_config_init(struct agent *agent, const char *name) {
-	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
-
-	uint64_t index;
-	if (dp_config_lookup_module(dp_config, "nat64", &index)) {
-		errno = ENXIO;
-		return NULL;
-	}
-	struct module_data *module_data = nat64_module_config_init_config(
-		&agent->memory_context, name, index
-	);
-	SET_OFFSET_OF(&module_data->agent, agent);
-	return module_data;
-}
-
-struct module_data *
-nat64_module_config_init_config(
-	struct memory_context *rmemory_context, const char *name, uint64_t index
-) {
+struct cp_module *
+nat64_module_config_create(struct agent *agent, const char *name) {
 	struct nat64_module_config *config =
 		(struct nat64_module_config *)memory_balloc(
-			rmemory_context, sizeof(struct nat64_module_config)
+			&agent->memory_context,
+			sizeof(struct nat64_module_config)
 		);
 	if (config == NULL) {
 		errno = ENOMEM;
 		return NULL;
 	}
 
-	config->module_data.agent = NULL;
+	if (cp_module_init(
+		    &config->cp_module,
+		    agent,
+		    "nat64",
+		    name,
+		    nat64_module_config_free
+	    )) {
+		goto error_init;
+	}
 
-	config->module_data.index = index;
-	strtcpy(config->module_data.name, name, sizeof(config->module_data.name)
+	if (nat64_module_config_data_init(
+		    config, &config->cp_module.memory_context
+	    )) {
+		goto error_init;
+	}
+
+	return &config->cp_module;
+
+error_init:
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct nat64_module_config)
 	);
-	memory_context_init_from(
-		&config->module_data.memory_context, rmemory_context, name
+	errno = ENOMEM;
+	return NULL;
+}
+
+void
+nat64_module_config_free(struct cp_module *cp_module) {
+	LOG(DEBUG, "Starting cleanup of NAT64 module '%s'", cp_module->name);
+
+	struct nat64_module_config *config =
+		container_of(cp_module, struct nat64_module_config, cp_module);
+
+	nat64_module_config_data_destroy(
+		config, &config->cp_module.memory_context
 	);
-	config->module_data.free_handler = nat64_module_config_free;
 
-	// From this point all allocations are made on local memory context
-	struct memory_context *memory_context =
-		&config->module_data.memory_context;
+	// Free main config structure
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+	if (cp_module->agent) {
+		LOG(DEBUG,
+		    "Freeing main config structure: size=%zu bytes, address=%p",
+		    sizeof(struct nat64_module_config),
+		    (void *)config);
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct nat64_module_config)
+		);
+	}
 
+	LOG(DEBUG, "Completed cleanup of NAT64 module '%s'", cp_module->name);
+}
+
+int
+nat64_module_config_data_init(
+	struct nat64_module_config *config,
+	struct memory_context *memory_context
+) {
 	// Initialize LPM structures
 	if (lpm_init(&config->mappings.v4_to_v6, memory_context)) {
 		LOG(ERROR, "Failed to initialize v4_to_v6 LPM");
-		goto error_cleanup;
+		goto error_lpm_v4;
 	}
 	if (lpm_init(&config->mappings.v6_to_v4, memory_context)) {
 		LOG(ERROR, "Failed to initialize v6_to_v4 LPM");
@@ -75,7 +105,7 @@ nat64_module_config_init_config(
 	// Initialize v6 prefixes LPM
 	if (lpm_init(&config->prefixes.v6_prefixes, memory_context)) {
 		LOG(ERROR, "Failed to initialize v6_prefixes LPM");
-		goto error_lpm_v6_to_v4;
+		goto error_lpm_prefixes;
 	}
 
 	// Initialize other fields
@@ -89,35 +119,22 @@ nat64_module_config_init_config(
 	config->mappings.drop_unknown_mapping = false;
 	config->prefixes.drop_unknown_prefix = false;
 
-	LOG(DEBUG, "Initialized NAT64 module '%s'", name);
-	return &config->module_data;
+	return 0;
 
-error_lpm_v6_to_v4:
+error_lpm_prefixes:
 	lpm_free(&config->mappings.v6_to_v4);
-	goto error_lpm_v6;
-
 error_lpm_v6:
 	lpm_free(&config->mappings.v4_to_v6);
-	goto error_cleanup;
+error_lpm_v4:
 
-error_cleanup:
-	memory_bfree(
-		rmemory_context, config, sizeof(struct nat64_module_config)
-	);
-	errno = ENOMEM;
-	return NULL;
+	return -1;
 }
 
 void
-nat64_module_config_free(struct module_data *module_data) {
-	LOG(DEBUG, "Starting cleanup of NAT64 module '%s'", module_data->name);
-
-	struct nat64_module_config *config = container_of(
-		module_data, struct nat64_module_config, module_data
-	);
-
-	LOG(DEBUG, "Freeing LPM structures for module '%s'", module_data->name);
-
+nat64_module_config_data_destroy(
+	struct nat64_module_config *config,
+	struct memory_context *memory_context
+) {
 	LOG(DEBUG,
 	    "Freeing v4_to_v6 LPM table at %p",
 	    (void *)&config->mappings.v4_to_v6);
@@ -144,11 +161,7 @@ nat64_module_config_free(struct module_data *module_data) {
 		    mappings_size,
 		    (void *)mapping_list);
 
-		memory_bfree(
-			&module_data->memory_context,
-			mapping_list,
-			mappings_size
-		);
+		memory_bfree(memory_context, mapping_list, mappings_size);
 	} else {
 		LOG(DEBUG, "No mappings list to free");
 	}
@@ -165,40 +178,21 @@ nat64_module_config_free(struct module_data *module_data) {
 		    prefixes_size,
 		    (void *)prefixes);
 
-		memory_bfree(
-			&module_data->memory_context, prefixes, prefixes_size
-		);
+		memory_bfree(memory_context, prefixes, prefixes_size);
 	} else {
 		LOG(DEBUG, "No prefixes array to free");
-	}
-
-	LOG(DEBUG, "Freed NAT64 module '%s' resources", module_data->name);
-
-	// Free main config structure
-	struct agent *agent = ADDR_OF(&module_data->agent);
-	if (module_data->agent) {
-		LOG(DEBUG,
-		    "Freeing main config structure: size=%zu bytes, address=%p",
-		    sizeof(struct nat64_module_config),
-		    (void *)config);
-		memory_bfree(
-			&agent->memory_context,
-			config,
-			sizeof(struct nat64_module_config)
-		);
 	}
 }
 
 int
 nat64_module_config_add_mapping(
-	struct module_data *module_data,
+	struct cp_module *cp_module,
 	uint32_t ip4,
 	uint8_t ip6[16],
 	size_t prefix_num
 ) {
-	struct nat64_module_config *config = container_of(
-		module_data, struct nat64_module_config, module_data
-	);
+	struct nat64_module_config *config =
+		container_of(cp_module, struct nat64_module_config, cp_module);
 
 	// Validate prefix index
 	if (prefix_num >= config->prefixes.count) {
@@ -213,7 +207,7 @@ nat64_module_config_add_mapping(
 	// Expand mapping array
 	struct ip4to6 *mappings = ADDR_OF(&config->mappings.list);
 	if (mem_array_expand_exp(
-		    &config->module_data.memory_context,
+		    &config->cp_module.memory_context,
 		    (void **)&mappings,
 		    sizeof(*mappings),
 		    &config->mappings.count
@@ -266,16 +260,15 @@ nat64_module_config_add_mapping(
 
 int
 nat64_module_config_add_prefix(
-	struct module_data *module_data, uint8_t prefix[12]
+	struct cp_module *cp_module, uint8_t prefix[12]
 ) {
-	struct nat64_module_config *config = container_of(
-		module_data, struct nat64_module_config, module_data
-	);
+	struct nat64_module_config *config =
+		container_of(cp_module, struct nat64_module_config, cp_module);
 
 	// Expand prefix array
 	struct nat64_prefix *prefixes = ADDR_OF(&config->prefixes.prefixes);
 	if (mem_array_expand_exp(
-		    &config->module_data.memory_context,
+		    &config->cp_module.memory_context,
 		    (void **)&prefixes,
 		    sizeof(*prefixes),
 		    &config->prefixes.count
@@ -324,18 +317,17 @@ nat64_module_config_add_prefix(
 
 int
 nat64_module_config_set_drop_unknown(
-	struct module_data *module_data,
+	struct cp_module *cp_module,
 	bool drop_unknown_prefix,
 	bool drop_unknown_mapping
 ) {
-	if (!module_data) {
+	if (!cp_module) {
 		errno = EINVAL;
 		return -1;
 	}
 
-	struct nat64_module_config *config = container_of(
-		module_data, struct nat64_module_config, module_data
-	);
+	struct nat64_module_config *config =
+		container_of(cp_module, struct nat64_module_config, cp_module);
 
 	config->prefixes.drop_unknown_prefix = drop_unknown_prefix;
 	config->mappings.drop_unknown_mapping = drop_unknown_mapping;

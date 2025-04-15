@@ -3,7 +3,7 @@
 #include "common/lpm.h"
 #include "common/network.h"
 
-#include "dataplane/config/zone.h"
+#include "controlplane/config/zone.h"
 
 /**
  * @brief Structure representing a mapping from IPv4 to IPv6
@@ -53,7 +53,7 @@ struct nat64_prefix {
  * including LPM tables and arrays for address mappings.
  */
 struct nat64_module_config {
-	struct module_data module_data;
+	struct cp_module cp_module;
 	/* Address mapping configuration */
 	struct {
 		uint64_t count;		   /**< Number of mappings */

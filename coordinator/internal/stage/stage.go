@@ -198,7 +198,7 @@ func (m *Stage) assignPipelines(ctx context.Context, numaIdx NUMAIdx, devices []
 
 	req := &ynpb.AssignPipelinesRequest{
 		Numa:    uint32(numaIdx),
-		Devices: map[uint32]*ynpb.DevicePipelines{},
+		Devices: map[string]*ynpb.DevicePipelines{},
 	}
 
 	for _, device := range devices {
@@ -210,7 +210,7 @@ func (m *Stage) assignPipelines(ctx context.Context, numaIdx NUMAIdx, devices []
 			})
 		}
 
-		req.Devices[uint32(device.ID)] = &ynpb.DevicePipelines{
+		req.Devices[string(device.ID)] = &ynpb.DevicePipelines{
 			Pipelines: devicePipelines,
 		}
 	}

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "common/numutils.h"
+
 #include "common/memory.h"
 
 static inline int
@@ -26,4 +28,18 @@ mem_array_expand_exp(
 
 	*count += 1;
 	return 0;
+}
+
+static inline void
+mem_array_free_exp(
+	struct memory_context *memory_context,
+	void *array,
+	size_t item_size,
+	uint64_t count
+) {
+	if (!count)
+		return;
+
+	uint64_t capacity = 1 << uint64_log(count);
+	memory_bfree(memory_context, array, capacity * item_size);
 }

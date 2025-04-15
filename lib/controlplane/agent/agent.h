@@ -9,7 +9,7 @@
 struct dp_config;
 struct cp_config;
 
-struct module_data;
+struct cp_module;
 
 struct agent;
 
@@ -29,19 +29,17 @@ struct agent {
 	uint64_t arena_count;
 	void **arenas;
 
-	struct module_data *unused_module;
+	struct cp_module *unused_module;
 };
 
 void
 agent_cleanup(struct agent *agent);
 
-struct module_data;
+struct cp_module;
 
 int
 agent_update_modules(
-	struct agent *agent,
-	size_t module_count,
-	struct module_data **module_datas
+	struct agent *agent, size_t module_count, struct cp_module **cp_modules
 );
 
 struct pipeline_config;
@@ -67,15 +65,15 @@ agent_update_pipelines(
 	struct pipeline_config *pipelines[]
 );
 
-struct device_pipeline_map;
+struct cp_device_config;
 
-struct device_pipeline_map *
-device_pipeline_map_create(uint64_t device_id, uint64_t pipeline_count);
+struct cp_device_config *
+cp_device_config_create(const char *name, uint64_t pipeline_count);
 
 void
-device_pipeline_map_free(struct device_pipeline_map *devices);
+cp_device_config_free(struct cp_device_config *config);
 
 int
-device_pipeline_map_add(
-	struct device_pipeline_map *device, const char *name, uint64_t weight
+cp_device_config_add_pipeline(
+	struct cp_device_config *config, const char *name, uint64_t weight
 );

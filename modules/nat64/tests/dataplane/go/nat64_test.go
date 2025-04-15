@@ -76,8 +76,7 @@ func TestNat64_ICMP_v6_to_v4_Echo(t *testing.T) {
 			common.Unwrap(netip.ParseAddr("2001:db8::1")),
 		},
 	}
-	memCtx := memCtxCreate()
-	m := nat64ModuleConfig(mappings, memCtx)
+	m := nat64ModuleConfig(mappings)
 	require.NotNil(t, m, "Failed to create NAT64 config")
 
 	// Process packet

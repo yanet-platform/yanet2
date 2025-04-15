@@ -6,7 +6,9 @@ package nat64_test
 //#cgo LDFLAGS: -L../../../../../build/modules/nat64/dataplane -lnat64_dp
 //#cgo LDFLAGS: -L../../../../../build/modules/nat64/api -lnat64_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/dataplane/packet -lpacket
+//#cgo LDFLAGS: -L../../../../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/dataplane/config -lconfig_dp
+//#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //#cgo LDFLAGS: -L../../../../../build/lib/logging -llogging
 //#cgo LDFLAGS: -L../../../../../build/subprojects/dpdk/lib -l:librte_log.a
 /*
@@ -25,7 +27,9 @@ package nat64_test
 void
 nat64_handle_packets(
     struct dp_config *dp_config,
-    struct module_data *module_data,
+    uint64_t worker_id,
+    struct cp_module *cp_module,
+    struct counter_storage *counter_storage,
     struct packet_front *packet_front
 );
 */
@@ -46,18 +50,8 @@ type mapping struct {
 	ip6 netip.Addr
 }
 
-// memCtxCreate creates and initializes memory context for tests
-func memCtxCreate() *C.struct_memory_context {
-	blockAlloc := C.struct_block_allocator{}
-	arena := C.malloc(1 << 20)
-	C.block_allocator_put_arena(&blockAlloc, arena, 1<<20)
-	memCtx := C.struct_memory_context{}
-	C.memory_context_init(&memCtx, C.CString("test"), &blockAlloc)
-	return &memCtx
-}
-
 // nat64ModuleConfig creates and configures NAT64 module configuration
-func nat64ModuleConfig(mappings []mapping, memCtx *C.struct_memory_context) *C.struct_nat64_module_config {
+func nat64ModuleConfig(mappings []mapping) *C.struct_nat64_module_config {
 	cDebug := C.CString("debug")
 	defer C.free(unsafe.Pointer(cDebug))
 	_, err := C.log_enable_name(cDebug)
@@ -66,9 +60,15 @@ func nat64ModuleConfig(mappings []mapping, memCtx *C.struct_memory_context) *C.s
 		return nil
 	}
 
-	config, err := C.nat64_module_config_init_config(memCtx, C.CString("nat64"), 0)
-	if err != nil {
-		log.Printf("nat64 module config init fail: %v", err.Error())
+	config := new(C.struct_nat64_module_config)
+
+	blockAlloc := C.struct_block_allocator{}
+	arena := C.malloc(1 << 20)
+	C.block_allocator_put_arena(&blockAlloc, arena, 1<<20)
+	C.memory_context_init(&config.cp_module.memory_context, C.CString("test"), &blockAlloc)
+
+	if C.nat64_module_config_data_init(config, &config.cp_module.memory_context) != 0 {
+		log.Printf("nat64 module config init fail")
 		return nil
 	}
 
@@ -76,7 +76,7 @@ func nat64ModuleConfig(mappings []mapping, memCtx *C.struct_memory_context) *C.s
 	pfx := [12]byte{0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00}
 
-	if rc, err := C.nat64_module_config_add_prefix((*C.struct_module_data)(unsafe.Pointer(config)), (*C.uint8_t)(&pfx[0])); err != nil || rc < 0 {
+	if rc, err := C.nat64_module_config_add_prefix(&config.cp_module, (*C.uint8_t)(&pfx[0])); err != nil || rc < 0 {
 		log.Printf("prefix add fail: %v, %v", rc, err.Error())
 		return nil
 	}
@@ -86,7 +86,7 @@ func nat64ModuleConfig(mappings []mapping, memCtx *C.struct_memory_context) *C.s
 		ip4 := m.ip4.As4()
 		ip6 := m.ip6.As16()
 		if C.nat64_module_config_add_mapping(
-			(*C.struct_module_data)(unsafe.Pointer(config)),
+			&config.cp_module,
 			*(*C.uint32_t)(unsafe.Pointer(&ip4[0])),
 			(*C.uint8_t)(&ip6[0]),
 			0,
@@ -95,7 +95,7 @@ func nat64ModuleConfig(mappings []mapping, memCtx *C.struct_memory_context) *C.s
 		}
 	}
 
-	return (*C.struct_nat64_module_config)(unsafe.Pointer(config))
+	return config
 }
 
 // nat64HandlePackets processes packets through NAT64 module
@@ -103,7 +103,7 @@ func nat64HandlePackets(mc *C.struct_nat64_module_config, packets ...gopacket.Pa
 	payload := common.PacketsToPaylod(packets)
 	pf := common.PacketFrontFromPayload(payload)
 	common.ParsePackets(pf)
-	C.nat64_handle_packets(nil, &mc.module_data, (*C.struct_packet_front)(unsafe.Pointer(pf)))
+	C.nat64_handle_packets(nil, 0, &mc.cp_module, nil, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	result := common.PacketFrontToPayload(pf)
 	return result
 }

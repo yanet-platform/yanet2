@@ -15,7 +15,9 @@ uint8_t dscp_mark_always = DSCP_MARK_ALWAYS;
 void
 dscp_handle_packets(
 	struct dp_config *dp_config,
-	struct module_data *module_data,
+	uint64_t worker_idx,
+	struct cp_module *cp_module,
+	struct counter_storage *counter_storage,
 	struct packet_front *packet_front
 );
 */
@@ -73,7 +75,7 @@ func buildLPMs(
 
 func dscpModuleConfig(prefixes []netip.Prefix, flag, dscp uint8, memCtx *C.struct_memory_context) *C.struct_dscp_module_config {
 	m := &C.struct_dscp_module_config{
-		module_data: C.struct_module_data{},
+		cp_module: C.struct_cp_module{},
 	}
 	buildLPMs(prefixes, memCtx, &m.lpm_v4, &m.lpm_v6)
 
@@ -89,7 +91,7 @@ func dscpHandlePackets(mc *C.struct_dscp_module_config, packets ...gopacket.Pack
 	payload := common.PacketsToPaylod(packets)
 	pf := common.PacketFrontFromPayload(payload)
 	common.ParsePackets(pf)
-	C.dscp_handle_packets(nil, &mc.module_data, (*C.struct_packet_front)(unsafe.Pointer(pf)))
+	C.dscp_handle_packets(nil, 0, &mc.cp_module, nil, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	result := common.PacketFrontToPayload(pf)
 	return result
 }

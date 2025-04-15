@@ -2,7 +2,12 @@
 #include "config.h"
 
 #include "common/container_of.h"
+#include "common/exp_array.h"
 #include "common/strutils.h"
+
+#include "dataplane/config/zone.h"
+
+#include "controlplane/agent/agent.h"
 
 struct balancer_real_config {
 	uint64_t type;
@@ -18,14 +23,8 @@ struct balancer_service_config {
 	struct balancer_real_config reals[];
 };
 
-struct module_data *
+struct cp_module *
 balancer_module_config_init(struct agent *agent, const char *name) {
-	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
-	uint64_t index;
-	if (dp_config_lookup_module(dp_config, "balancer", &index)) {
-		return NULL;
-	}
-
 	struct balancer_module_config *config =
 		(struct balancer_module_config *)memory_balloc(
 			&agent->memory_context,
@@ -34,29 +33,68 @@ balancer_module_config_init(struct agent *agent, const char *name) {
 	if (config == NULL)
 		return NULL;
 
-	config->module_data.index = index;
-	strtcpy(config->module_data.name, name, sizeof(config->module_data.name)
-	);
-	memory_context_init_from(
-		&config->module_data.memory_context,
-		&agent->memory_context,
-		name
-	);
+	if (cp_module_init(
+		    &config->cp_module,
+		    agent,
+		    "balancer",
+		    name,
+		    balancer_module_config_free
+	    )) {
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct balancer_module_config)
+		);
+
+		return NULL;
+	}
 
 	struct memory_context *memory_context =
-		&config->module_data.memory_context;
+		&config->cp_module.memory_context;
 	lpm_init(&config->v4_service_lookup, memory_context);
 	lpm_init(&config->v6_service_lookup, memory_context);
 
-	return &config->module_data;
+	return &config->cp_module;
+}
+
+void
+balancer_module_config_free(struct cp_module *cp_module) {
+	struct balancer_module_config *config = container_of(
+		cp_module, struct balancer_module_config, cp_module
+	);
+
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	mem_array_free_exp(
+		&agent->memory_context,
+		ADDR_OF(&config->reals),
+		sizeof(struct balancer_rs),
+		config->real_count
+	);
+
+	mem_array_free_exp(
+		&agent->memory_context,
+		ADDR_OF(&config->services),
+		sizeof(struct balancer_vs),
+		config->service_count
+	);
+
+	lpm_free(&config->v4_service_lookup);
+	lpm_free(&config->v6_service_lookup);
+
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct balancer_module_config)
+	);
 }
 
 int
 balancer_module_config_add_service(
-	struct module_data *module_data, struct balancer_service_config *service
+	struct cp_module *cp_module, struct balancer_service_config *service
 ) {
 	struct balancer_module_config *config = container_of(
-		module_data, struct balancer_module_config, module_data
+		cp_module, struct balancer_module_config, cp_module
 	);
 
 	uint64_t real_start = config->real_count;
@@ -66,7 +104,7 @@ balancer_module_config_add_service(
 	for (uint64_t real_idx = 0; real_idx < service->real_count;
 	     ++real_idx) {
 		if (mem_array_expand_exp(
-			    &config->module_data.memory_context,
+			    &config->cp_module.memory_context,
 			    (void **)&reals,
 			    sizeof(*reals),
 			    &config->real_count
@@ -92,7 +130,7 @@ balancer_module_config_add_service(
 	struct balancer_vs *services = ADDR_OF(&config->services);
 
 	if (mem_array_expand_exp(
-		    &config->module_data.memory_context,
+		    &config->cp_module.memory_context,
 		    (void **)&services,
 		    sizeof(*services),
 		    &config->service_count

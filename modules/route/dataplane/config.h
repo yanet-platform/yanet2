@@ -3,7 +3,7 @@
 #include "common/lpm.h"
 #include "common/network.h"
 
-#include "dataplane/config/zone.h"
+#include "controlplane/config/zone.h"
 
 struct route {
 	/*
@@ -26,7 +26,7 @@ struct route_list {
  * index and fetches one route to be applied to a packet.
  */
 struct route_module_config {
-	struct module_data module_data;
+	struct cp_module cp_module;
 
 	struct lpm lpm_v6;
 	struct lpm lpm_v4;

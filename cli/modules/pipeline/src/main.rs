@@ -59,7 +59,7 @@ pub struct AssignCmd {
     pub numa: u32,
     /// Device ID to assign pipelines to.
     #[arg(short, long)]
-    pub device: u32,
+    pub device: String,
     /// Pipeline assignments in format "pipeline_name:weight"
     #[arg(short, long)]
     pub pipelines: Vec<String>,

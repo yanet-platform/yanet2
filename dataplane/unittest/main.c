@@ -11,12 +11,12 @@
 
 #include "api/agent.h"
 #include "controlplane/agent/agent.h"
+#include "controlplane/config/zone.h"
 #include "dataplane/config/zone.h"
 #include "dataplane/dpdk.h"
 #include "dataplane/module/module.h"
 #include "dataplane/pipeline/pipeline.h"
-#include "modules/route/config.h"
-#include "modules/route/controlplane.h"
+#include "modules/route/api/controlplane.h"
 
 #include "common/malloc_heap.h"
 #include "rte_memory.h"
@@ -134,7 +134,7 @@ main(int argc, char **argv) {
 	}
 
 	struct agent *agent = agent_attach(shm, 0, "test", 1 << 20);
-	struct module_data *rmc = route_module_config_init(agent, "route0");
+	struct cp_module *rmc = route_module_config_create(agent, "route0");
 	route_module_config_add_route(
 		rmc,
 		(struct ether_addr){
@@ -178,7 +178,7 @@ main(int argc, char **argv) {
 
 	agent_update_modules(agent, 1, &rmc);
 
-	struct pipeline_config *pc = pipeline_config_create(1);
+	struct pipeline_config *pc = pipeline_config_create("test", 1);
 	pipeline_config_set_module(pc, 0, "route", "route0");
 	agent_update_pipelines(agent, 1, &pc);
 
@@ -214,6 +214,7 @@ main(int argc, char **argv) {
 		pipeline_process(
 			dp_config,
 			ADDR_OF(&cp_config->cp_config_gen),
+			0,
 			0,
 			&packet_front
 		);

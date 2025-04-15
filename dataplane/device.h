@@ -15,6 +15,8 @@ struct dataplane_device {
 	uint32_t worker_count;
 	struct dataplane_worker *workers;
 
+	char port_name[80];
+
 	uint16_t port_id;
 };
 

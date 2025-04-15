@@ -68,16 +68,16 @@ RTE_LOG_REGISTER_DEFAULT(nat64test_logtype, INFO);
  *
  * @see test_setup() For initialization of these parameters
  * @see packet_front For packet management
- * @see module_data For NAT64 module configuration
+ * @see cp_module For NAT64 module configuration
  */
 struct nat64_unittest_params {
 	struct packet_front packet_front; /**< Packet front for testing */
 	struct module *module; /**< Pointer to the module being tested */
-	struct module_data *module_data; /**< Module configuration */
+	struct nat64_module_config module_config; /**< Module configuration */
 
 	void *arena0;
 	struct block_allocator ba;
-	struct memory_context mctx;
+	struct memory_context *memory_context;
 
 	struct rte_mempool *mbuf_pool; /**< Packet buffer pool */
 	uint8_t *config;	       /**< Pointer to configuration data */
@@ -92,7 +92,6 @@ struct nat64_unittest_params {
  */
 static struct nat64_unittest_params test_params = {
 	.mbuf_pool = NULL,
-	.module_data = NULL,
 };
 
 /**
@@ -232,7 +231,11 @@ test_setup(void) {
 		&test_params.ba, test_params.arena0, ARENA_SIZE
 	);
 
-	memory_context_init(&test_params.mctx, "nat64 tests", &test_params.ba);
+	test_params.memory_context =
+		&test_params.module_config.cp_module.memory_context;
+	memory_context_init(
+		test_params.memory_context, "nat64 tests", &test_params.ba
+	);
 
 	return TEST_SUCCESS;
 }
@@ -246,32 +249,23 @@ test_setup(void) {
  * - NAT64 prefix (2001:db8::/96)
  * - Address mappings from config_data
  *
- * @param module_data Pointer to store module configuration
+ * @param cp_module Pointer to store module configuration
  * @return 0 on success, negative error code on failure
  *
  * @see config_data Address mapping definitions
  * @see nat64_module_config Configuration structure
  */
 static int
-nat64_test_config(struct module_data **module_data) {
-	if (!module_data) {
-		RTE_LOG(ERR, NAT64_TEST, "module_data pointer is NULL\n");
-		return -EINVAL;
-	}
-
+nat64_test_config(struct nat64_module_config *module_config) {
 	// Initialize module configuration using nat64_module_config_init_config
-	*module_data = nat64_module_config_init_config(
-		&test_params.mctx, "nat64_test", 0
-	);
-	if (!*module_data) {
+	if (nat64_module_config_data_init(
+		    module_config, test_params.memory_context
+	    )) {
 		RTE_LOG(ERR, NAT64_TEST, "Failed to initialize module config\n"
 		);
 		return -ENOMEM;
 	}
 
-	struct nat64_module_config *config = container_of(
-		*module_data, struct nat64_module_config, module_data
-	);
 	// Add prefix
 	uint8_t pfx[12] = {
 		0x20,
@@ -287,7 +281,7 @@ nat64_test_config(struct module_data **module_data) {
 		0x00,
 		0x00
 	};
-	if (nat64_module_config_add_prefix((struct module_data *)config, pfx) <
+	if (nat64_module_config_add_prefix(&module_config->cp_module, pfx) <
 	    0) {
 		goto error_add;
 	}
@@ -296,7 +290,7 @@ nat64_test_config(struct module_data **module_data) {
 	uint32_t mapping_count = config_data.count;
 	for (uint32_t i = 0; i < mapping_count; i++) {
 		if (nat64_module_config_add_mapping(
-			    (struct module_data *)config,
+			    &module_config->cp_module,
 			    config_data.mapping[i].ip4,
 			    (uint8_t *)config_data.mapping[i].ip6,
 			    0
@@ -316,13 +310,11 @@ nat64_test_config(struct module_data **module_data) {
 		config->mtu.ipv4,
 		config->mtu.ipv6);
 
-	*module_data = (struct module_data *)config;
-	(*module_data)->agent = NULL;
 	return 0;
 
 error_add:
-	memory_bfree(
-		&test_params.mctx, config, sizeof(struct nat64_module_config)
+	nat64_module_config_data_destroy(
+		module_config, test_params.memory_context
 	);
 	return -EINVAL;
 }
@@ -340,11 +332,8 @@ error_add:
 static inline int
 test_module_config_handler(void) {
 	TEST_ASSERT_SUCCESS(
-		nat64_test_config(&test_params.module_data),
+		nat64_test_config(&test_params.module_config),
 		"nat64_test_config failed\n"
-	);
-	TEST_ASSERT_NOT_NULL(
-		test_params.module_data, "module_config_handler failed\n"
 	);
 	return TEST_SUCCESS;
 }
@@ -2192,7 +2181,7 @@ push_packet(struct upkt *pkt) {
 static int
 append_test_cases_from_mappings(struct test_case **test_case) {
 	struct nat64_module_config *nat64_config =
-		(struct nat64_module_config *)test_params.module_data;
+		(struct nat64_module_config *)&test_params.module_config;
 	for (uint32_t i = 0; i < config_data.count; i++) {
 		struct upkt pkt = {
 			.eth =
@@ -2779,7 +2768,7 @@ create_icmp_packet(
 static int
 append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
 	struct nat64_module_config *nat64_config =
-		(struct nat64_module_config *)test_params.module_data;
+		(struct nat64_module_config *)&test_params.module_config;
 
 	const struct icmp_type_info_t icmp_types[] = {
 		{"Echo Request v4->v6",
@@ -3666,7 +3655,7 @@ append_test_cases_from_mappings_icmp_more(struct test_case **test_case) {
 static int
 append_test_cases_from_mappings_icmp(struct test_case **test_case) {
 	struct nat64_module_config *nat64_config =
-		(struct nat64_module_config *)test_params.module_data;
+		(struct nat64_module_config *)&test_params.module_config;
 	for (uint32_t i = 0; i < config_data.count; i++) {
 		struct upkt pkt = {
 			.eth =
@@ -3843,7 +3832,7 @@ packet_list_cleanup(struct packet_list *list) {
 static inline int
 test_nat64_udp_checksum() {
 	struct nat64_module_config *nat64_config =
-		(struct nat64_module_config *)test_params.module_data;
+		(struct nat64_module_config *)&test_params.module_config;
 
 	// Create IPv4 UDP packet
 	struct upkt pkt = {
@@ -3931,7 +3920,11 @@ test_nat64_udp_checksum() {
 	TEST_ASSERT_EQUAL(push_packet(&pkt), 0, "Failed to push packet\n");
 
 	test_params.module->handler(
-		NULL, test_params.module_data, &test_params.packet_front
+		NULL,
+		0,
+		&test_params.module_config.cp_module,
+		NULL,
+		&test_params.packet_front
 	);
 
 	// Verify output
@@ -4006,7 +3999,11 @@ process_test_case(struct test_case *tc) {
 	);
 
 	test_params.module->handler(
-		NULL, test_params.module_data, &test_params.packet_front
+		NULL,
+		0,
+		&test_params.module_config.cp_module,
+		NULL,
+		&test_params.packet_front
 	);
 
 	if (tc->pkt_expected.eth.dst_addr.addr_bytes[0] == 0) {
@@ -4201,8 +4198,7 @@ append_test_cases_unknown_handling(struct test_case **test_case) {
 		.data = "0123456789"
 	};
 
-	struct nat64_module_config *cfg =
-		(struct nat64_module_config *)test_params.module_data;
+	struct nat64_module_config *cfg = &test_params.module_config;
 	struct upkt pkt_expected_v6, pkt_expected_v4;
 	const char *msg_v6, *msg_v4;
 	if (cfg && (cfg->prefixes.drop_unknown_prefix ||
@@ -4247,15 +4243,13 @@ static int
 test_nat64_unknown_handling_prefix_mapping(void) {
 	// Save original configuration
 	bool original_drop_unknown_prefix =
-		((struct nat64_module_config *)test_params.module_data)
-			->prefixes.drop_unknown_prefix;
+		test_params.module_config.prefixes.drop_unknown_prefix;
 	bool original_drop_unknown_mapping =
-		((struct nat64_module_config *)test_params.module_data)
-			->mappings.drop_unknown_mapping;
+		test_params.module_config.mappings.drop_unknown_mapping;
 
 	// Set flags for this test
 	nat64_module_config_set_drop_unknown(
-		test_params.module_data, true, true
+		&test_params.module_config.cp_module, true, true
 	);
 
 	// Run the test
@@ -4263,7 +4257,7 @@ test_nat64_unknown_handling_prefix_mapping(void) {
 
 	// Restore original configuration
 	nat64_module_config_set_drop_unknown(
-		test_params.module_data,
+		&test_params.module_config.cp_module,
 		original_drop_unknown_prefix,
 		original_drop_unknown_mapping
 	);
@@ -4287,15 +4281,13 @@ static int
 test_nat64_unknown_handling_prefix_only(void) {
 	// Save original configuration
 	bool original_drop_unknown_prefix =
-		((struct nat64_module_config *)test_params.module_data)
-			->prefixes.drop_unknown_prefix;
+		test_params.module_config.prefixes.drop_unknown_prefix;
 	bool original_drop_unknown_mapping =
-		((struct nat64_module_config *)test_params.module_data)
-			->mappings.drop_unknown_mapping;
+		test_params.module_config.mappings.drop_unknown_mapping;
 
 	// Set flags for this test
 	nat64_module_config_set_drop_unknown(
-		test_params.module_data, true, false
+		&test_params.module_config.cp_module, true, false
 	);
 
 	// Run the test
@@ -4303,7 +4295,7 @@ test_nat64_unknown_handling_prefix_only(void) {
 
 	// Restore original configuration
 	nat64_module_config_set_drop_unknown(
-		test_params.module_data,
+		&test_params.module_config.cp_module,
 		original_drop_unknown_prefix,
 		original_drop_unknown_mapping
 	);
@@ -4327,15 +4319,13 @@ static int
 test_nat64_unknown_handling_mapping_only(void) {
 	// Save original configuration
 	bool original_drop_unknown_prefix =
-		((struct nat64_module_config *)test_params.module_data)
-			->prefixes.drop_unknown_prefix;
+		test_params.module_config.prefixes.drop_unknown_prefix;
 	bool original_drop_unknown_mapping =
-		((struct nat64_module_config *)test_params.module_data)
-			->mappings.drop_unknown_mapping;
+		test_params.module_config.mappings.drop_unknown_mapping;
 
 	// Set flags for this test
 	nat64_module_config_set_drop_unknown(
-		test_params.module_data, false, true
+		&test_params.module_config.cp_module, false, true
 	);
 
 	// Run the test
@@ -4343,7 +4333,7 @@ test_nat64_unknown_handling_mapping_only(void) {
 
 	// Restore original configuration
 	nat64_module_config_set_drop_unknown(
-		test_params.module_data,
+		&test_params.module_config.cp_module,
 		original_drop_unknown_prefix,
 		original_drop_unknown_mapping
 	);
@@ -4366,15 +4356,13 @@ static int
 test_nat64_unknown_handling_none(void) {
 	// Save original configuration
 	bool original_drop_unknown_prefix =
-		((struct nat64_module_config *)test_params.module_data)
-			->prefixes.drop_unknown_prefix;
+		test_params.module_config.prefixes.drop_unknown_prefix;
 	bool original_drop_unknown_mapping =
-		((struct nat64_module_config *)test_params.module_data)
-			->mappings.drop_unknown_mapping;
+		test_params.module_config.mappings.drop_unknown_mapping;
 
 	// Set flags for this test
 	nat64_module_config_set_drop_unknown(
-		test_params.module_data, false, false
+		&test_params.module_config.cp_module, false, false
 	);
 
 	// Run the test
@@ -4382,7 +4370,7 @@ test_nat64_unknown_handling_none(void) {
 
 	// Restore original configuration
 	nat64_module_config_set_drop_unknown(
-		test_params.module_data,
+		&test_params.module_config.cp_module,
 		original_drop_unknown_prefix,
 		original_drop_unknown_mapping
 	);
@@ -4449,8 +4437,7 @@ test_nat64_icmp() {
  */
 static inline int
 append_test_cases_from_mappings_tcp(struct test_case **test_case) {
-	struct nat64_module_config *nat64_config =
-		(struct nat64_module_config *)test_params.module_data;
+	struct nat64_module_config *nat64_config = &test_params.module_config;
 	for (uint32_t i = 0; i < config_data.count; i++) {
 		struct upkt pkt = {
 			.eth =
@@ -4640,22 +4627,17 @@ test_nat64_icmp_more() {
  */
 static inline int
 test_default_values(void) {
-	struct module_data *module_data;
+	struct nat64_module_config module_config;
 	// Initialize module configuration using nat64_module_config_init_config
-	module_data = nat64_module_config_init_config(
-		&test_params.mctx, "nat64_test", 0
-	);
-	if (!module_data) {
+	if (nat64_module_config_data_init(
+		    &module_config, test_params.memory_context
+	    )) {
 		RTE_LOG(ERR, NAT64_TEST, "Failed to initialize module config\n"
 		);
 		return -ENOMEM;
 	}
 
-	struct nat64_module_config *config = container_of(
-		module_data, struct nat64_module_config, module_data
-	);
-
-	TEST_ASSERT_NOT_NULL(config, "Module config is NULL\n");
+	struct nat64_module_config *config = &module_config;
 
 	// Verify MTU defaults
 	TEST_ASSERT_EQUAL(
@@ -4693,7 +4675,7 @@ test_default_values(void) {
 		"drop_unknown_prefix default should be false\n"
 	);
 
-	nat64_module_config_free(module_data);
+	nat64_module_config_data_destroy(config, test_params.memory_context);
 
 	return TEST_SUCCESS;
 }
@@ -4710,7 +4692,9 @@ test_default_values(void) {
  */
 static void
 testsuite_teardown(void) {
-	nat64_module_config_free(test_params.module_data);
+	nat64_module_config_data_destroy(
+		&test_params.module_config, test_params.memory_context
+	);
 	packet_list_cleanup(&test_params.packet_front.input);
 	packet_list_cleanup(&test_params.packet_front.output);
 	packet_list_cleanup(&test_params.packet_front.drop);

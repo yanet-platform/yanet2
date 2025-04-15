@@ -59,7 +59,7 @@ message AssignPipelinesRequest {
 	// Each device can have several pipelines assigned to it, which is
 	// described in the DevicePipelines message, since protobuf map values
 	// are not allowed to be repeated.
-	map<uint32, DevicePipelines> devices = 2;
+	map<string, DevicePipelines> devices = 2;
 }
 
 message DevicePipelines {

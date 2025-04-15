@@ -15,8 +15,8 @@
 #define ARENA_SIZE (1 << 20)
 
 struct forward_fuzzing_params {
-	struct module *module; /**< Pointer to the module being tested */
-	struct module_data *module_data; /**< Module configuration */
+	struct module *module;	     /**< Pointer to the module being tested */
+	struct cp_module *cp_module; /**< Module configuration */
 
 	void *arena;
 	void *payload_arena;
@@ -25,11 +25,11 @@ struct forward_fuzzing_params {
 };
 
 static struct forward_fuzzing_params fuzz_params = {
-	.module_data = NULL,
+	.cp_module = NULL,
 };
 
 static int
-forward_test_config(struct module_data **module_data) {
+forward_test_config(struct cp_module **cp_module) {
 	uint16_t device_count = 2;
 
 	struct forward_module_config *config =
@@ -43,23 +43,23 @@ forward_test_config(struct module_data **module_data) {
 		return -ENOMEM;
 	}
 
-	// Initialize module_data fields
-	strtcpy(config->module_data.name,
+	// Initialize cp_module fields
+	strtcpy(config->cp_module.name,
 		"forward_test",
-		sizeof(config->module_data.name));
+		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->module_data.memory_context,
+		&config->cp_module.memory_context,
 		&fuzz_params.mctx,
 		"forward_test"
 	);
 
-	config->module_data.index = 0;
-	config->module_data.agent = NULL;
+	config->cp_module.type = 0;
+	config->cp_module.agent = NULL;
 	config->device_count = device_count;
-	config->module_data.free_handler = forward_module_config_free;
+	config->cp_module.free_handler = forward_module_config_free;
 
 	struct memory_context *memory_context =
-		&config->module_data.memory_context;
+		&config->cp_module.memory_context;
 
 	for (uint16_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
 		struct forward_device_config *device_forward =
@@ -76,7 +76,7 @@ forward_test_config(struct module_data **module_data) {
 		uint16_t from_dev = idx;
 		uint16_t to_dev = device_count - idx - 1;
 		int rc = forward_module_config_enable_l2(
-			&config->module_data, from_dev, to_dev
+			&config->cp_module, from_dev, to_dev, 0
 		);
 		if (rc != 0) {
 			goto fail;
@@ -84,18 +84,19 @@ forward_test_config(struct module_data **module_data) {
 
 		// 127.0.0.0/24
 		rc = forward_module_config_enable_v4(
-			&config->module_data,
+			&config->cp_module,
 			(uint8_t[4]){127, 0, 0, 0},
 			(uint8_t[4]){127, 0, 0, 0xff},
 			from_dev,
-			to_dev
+			to_dev,
+			0
 		);
 		if (rc != 0) {
 			goto fail;
 		}
 		// fe80::0/96
 		rc = forward_module_config_enable_v6(
-			&config->module_data,
+			&config->cp_module,
 			(uint8_t[16]){0xfe, 0x80, [15] = 0},
 			(uint8_t[16]){0xfe,
 				      0x80,
@@ -104,18 +105,19 @@ forward_test_config(struct module_data **module_data) {
 				      [14] = 0xff,
 				      [15] = 0xff},
 			from_dev,
-			to_dev
+			to_dev,
+			0
 		);
 		if (rc != 0) {
 			goto fail;
 		}
 	}
 
-	*module_data = (struct module_data *)config;
+	*cp_module = (struct cp_module *)config;
 	return 0;
 
 fail:
-	forward_module_config_free(&config->module_data);
+	forward_module_config_free(&config->cp_module);
 	return -EINVAL;
 }
 
@@ -144,7 +146,7 @@ fuzz_setup() {
 		return -ENOMEM;
 	}
 
-	return forward_test_config(&fuzz_params.module_data);
+	return forward_test_config(&fuzz_params.cp_module);
 }
 
 int
@@ -170,7 +172,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 
 	parse_packet(pf->input.first);
 	// Process packet through forward module
-	fuzz_params.module->handler(NULL, fuzz_params.module_data, pf);
+	fuzz_params.module->handler(NULL, 0, fuzz_params.cp_module, NULL, pf);
 
 	return 0;
 }

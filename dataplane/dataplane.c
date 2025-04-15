@@ -20,6 +20,7 @@
 #include "common/hugepages.h"
 #include "logging/log.h"
 
+#include "controlplane/config/zone.h"
 #include "dataplane/config/zone.h"
 
 #include "dataplane/device.h"
@@ -432,6 +433,34 @@ dataplane_init(
 		dataplane, config->connection_count, config->connections
 	);
 
+	for (uint32_t node_idx = 0; node_idx < dataplane->node_count;
+	     ++node_idx) {
+		struct dataplane_numa_node *node = dataplane->nodes + node_idx;
+		struct dp_config *dp_config = node->dp_config;
+		counter_storage_allocator_init(
+			&dp_config->counter_storage_allocator,
+			&dp_config->memory_context,
+			dp_config->worker_count
+		);
+
+		struct cp_config *cp_config = node->cp_config;
+		counter_storage_allocator_init(
+			&cp_config->counter_storage_allocator,
+			&cp_config->memory_context,
+			dp_config->worker_count
+		);
+
+		SET_OFFSET_OF(
+			&dp_config->worker_counter_storage,
+			counter_storage_spawn(
+				&dp_config->memory_context,
+				&dp_config->counter_storage_allocator,
+				NULL,
+				&dp_config->worker_counters
+			)
+		);
+	}
+
 	return 0;
 }
 
@@ -442,10 +471,6 @@ stat_thread(void *arg) {
 	FILE *log = fopen("stat.log", "w");
 
 	(void)dataplane;
-
-	uint64_t read = dataplane->read;
-	uint64_t write = dataplane->write;
-	uint64_t drop = dataplane->drop;
 
 	struct rte_eth_xstat_name names[4096];
 	struct rte_eth_xstat xstats0[dataplane->device_count][4096];
@@ -462,19 +487,6 @@ stat_thread(void *arg) {
 
 	while (1) {
 		sleep(1);
-
-		uint64_t nr = dataplane->read;
-		uint64_t nw = dataplane->write;
-		uint64_t nd = dataplane->drop;
-
-		fprintf(log,
-			"dp %lu %lu %lu\n",
-			nr - read,
-			nw - write,
-			nd - drop);
-		read = nr;
-		write = nw;
-		drop = nd;
 
 		for (uint16_t idx = 0; idx < dataplane->device_count; ++idx) {
 			struct rte_eth_stats stats1;
@@ -531,6 +543,31 @@ dataplane_start(struct dataplane *dataplane) {
 		dataplane_device_start(dataplane, dataplane->devices + dev_idx);
 	}
 
+	for (size_t dev_idx = 0; dev_idx < dataplane->device_count; ++dev_idx) {
+		struct dataplane_device *device = dataplane->devices + dev_idx;
+
+		struct cp_device_config cp_device_config;
+		strtcpy(cp_device_config.name,
+			device->port_name,
+			CP_DEVICE_NAME_LEN);
+		cp_device_config.pipeline_weight_count = 0;
+		for (uint64_t node_idx = 0; node_idx < dataplane->node_count;
+		     ++node_idx) {
+			struct dataplane_numa_node *node =
+				dataplane->nodes + node_idx;
+
+			struct cp_device_config *cp_device_configs =
+				&cp_device_config;
+
+			cp_config_update_devices(
+				node->dp_config,
+				node->cp_config,
+				1,
+				&cp_device_configs
+			);
+		}
+	}
+
 	pthread_t thread_id;
 	pthread_create(&thread_id, NULL, stat_thread, dataplane);
 
@@ -549,34 +586,22 @@ dataplane_stop(struct dataplane *dataplane) {
 void
 dataplane_route_pipeline(
 	struct dp_config *dp_config,
-	struct cp_config *cp_config,
+	struct cp_config_gen *cp_config_gen,
 	struct packet_list *packets
 ) {
 	(void)dp_config;
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
-	struct cp_device_registry *device_registry =
-		ADDR_OF(&config_gen->device_registry);
-
 	for (struct packet *packet = packet_list_first(packets); packet != NULL;
 	     packet = packet->next) {
 		struct cp_device *cp_device = cp_config_gen_get_device(
-			config_gen, packet->rx_device_id
+			cp_config_gen, packet->rx_device_id
 		);
 		if (cp_device == NULL) {
 			packet->pipeline_idx = -1;
 			continue;
 		}
 
-		struct cp_device *pipeline_map =
-			ADDR_OF(device_registry->devices + packet->rx_device_id
-			);
-		if (pipeline_map == NULL) {
-			packet->pipeline_idx = -1;
-			continue;
-		}
-
-		if (pipeline_map->size == 0) {
+		if (cp_device->pipeline_map_size == 0) {
 			LOG(ERROR,
 			    "pipeline_map size is 0 for device %d",
 			    packet->rx_device_id);
@@ -584,8 +609,8 @@ dataplane_route_pipeline(
 			continue;
 		}
 		packet->pipeline_idx =
-			pipeline_map
-				->pipelines[packet->hash % pipeline_map->size];
+			cp_device->pipeline_map
+				[packet->hash % cp_device->pipeline_map_size];
 	}
 }
 
@@ -596,7 +621,6 @@ dataplane_drop_packets(
 	(void)dataplane;
 	struct packet *packet = packet_list_first(packets);
 	while (packet != NULL) {
-		__atomic_add_fetch(&dataplane->drop, 1, __ATOMIC_ACQ_REL);
 		// Freeing packet will destroy the `next` field to
 		struct packet *drop_packet = packet;
 		packet = packet->next;

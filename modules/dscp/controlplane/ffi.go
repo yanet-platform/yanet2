@@ -25,7 +25,7 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	defer C.free(unsafe.Pointer(cName))
 
 	// Create a new module config using the C API
-	ptr, err := C.dscp_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName)
+	ptr, err := C.dscp_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize module config: %w", err)
 	}
@@ -38,8 +38,8 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	}, nil
 }
 
-func (m *ModuleConfig) asRawPtr() *C.struct_module_data {
-	return (*C.struct_module_data)(m.ptr.AsRawPtr())
+func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
+	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
 func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {

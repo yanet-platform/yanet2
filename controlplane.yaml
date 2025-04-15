@@ -25,9 +25,9 @@ pipelines:
     - module_name: forward
       config_name: forward0
 device_pipelines:
-  0:
+  07:00.0:
     - name: phy
       weight: 10
-  1:
+  virtio_user_kni0:
     - name: virt
       weight: 20

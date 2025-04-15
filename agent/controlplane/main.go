@@ -5,6 +5,7 @@ package main
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
+//#cgo LDFLAGS: -L../../build/lib/counters -lcounters
 //
 //#include "api/agent.h"
 //#include "modules/forward/api/controlplane.h"
@@ -65,41 +66,41 @@ type ControlplaneConfig struct {
 	MemoryLimit uint64 `yaml:"memory_limit"`
 
 	Pipelines       []PipelineConfig         `yaml:"pipelines"`
-	DevicePipelines map[int][]DevicePipeline `yaml:"device_pipelines"`
+	DevicePipelines map[string][]DevicePipeline `yaml:"device_pipelines"`
 
 	Forward ForwardConfig `yaml:"forward"`
 }
 
 func configureDevices(
 	agent *C.struct_agent,
-	devices map[int][]DevicePipeline,
+	devices map[string][]DevicePipeline,
 ) {
 	if devices == nil {
 		return
 	}
 
-	deviceMap := make([]*C.struct_device_pipeline_map, 0)
+	configs := make([]*C.struct_cp_device_config, 0)
 
 	for id, pipelines := range devices {
-		pipelineMap := C.device_pipeline_map_create(C.uint64_t(id), C.uint64_t(len(pipelines)))
+		deviceConfig := C.cp_device_config_create(C.CString(id), C.uint64_t(len(pipelines)))
 		for _, pipeline := range pipelines {
-			C.device_pipeline_map_add(
-				pipelineMap,
+			C.cp_device_config_add_pipeline(
+				deviceConfig,
 				C.CString(pipeline.Name),
 				C.uint64_t(pipeline.Weight),
 			)
 		}
-		deviceMap = append(deviceMap, pipelineMap)
+		configs = append(configs, deviceConfig)
 	}
 
 	C.agent_update_devices(
 		agent,
-		C.uint64_t(len(deviceMap)),
-		&deviceMap[0],
+		C.uint64_t(len(configs)),
+		&configs[0],
 	)
 
-	for _, pipelineMap := range deviceMap {
-		C.device_pipeline_map_free(pipelineMap)
+	for _, config := range configs {
+		C.cp_device_config_free(config)
 	}
 }
 
@@ -117,6 +118,7 @@ func configureForward(
 			forward,
 			C.uint16_t(devIdx),
 			C.uint16_t(device.L2ForwardDeviceID),
+			C.CString(fmt.Sprintf("l2-%v->%v", devIdx, device.L2ForwardDeviceID)),
 		)
 
 		for _, forwardConfig := range device.V4Forwards {
@@ -134,6 +136,7 @@ func configureForward(
 				(*C.uint8_t)(&to[0]),
 				C.uint16_t(devIdx),
 				C.uint16_t(forwardConfig.DeviceID),
+			C.CString(fmt.Sprintf("v4-%v-%v", devIdx, forwardConfig.DeviceID)),
 			)
 		}
 
@@ -152,6 +155,7 @@ func configureForward(
 				(*C.uint8_t)(&to[0]),
 				C.uint16_t(devIdx),
 				C.uint16_t(forwardConfig.DeviceID),
+				C.CString(fmt.Sprintf("v6-%v-%v", devIdx, forwardConfig.DeviceID)),
 			)
 		}
 	}
@@ -242,6 +246,34 @@ func main() {
 
 		configureDevices(agent, config.DevicePipelines)
 
+		for pIdx := range config.Pipelines {
+			counters := C.yanet_get_pm_counters(C.yanet_shm_dp_config(shm, C.uint32_t(numaIdx)), C.CString("forward"), C.CString("forward0"), C.CString(config.Pipelines[pIdx].Name))
+			for idx := C.uint64_t(0); idx < counters.count; idx++ {
+				counter := C.yanet_get_counter(counters, idx)
+				fmt.Printf("Counter forward forward0 %s %s", config.Pipelines[pIdx].Name, C.GoString(&counter.name[0]))
+
+				for idx := 0; idx < 2; idx++ {
+					fmt.Printf("%20d", C.yanet_get_counter_value(counter.value_handle, 0, C.uint64_t(idx)))
+				}
+				fmt.Printf("\n")
+			}
+		}
+
+		counters := C.yanet_get_worker_counters(
+			C.yanet_shm_dp_config(shm, C.uint32_t(numaIdx)),
+		)
+		{
+			for idx := C.uint64_t(0); idx < counters.count; idx++ {
+				counter := C.yanet_get_counter(counters, idx)
+				fmt.Printf("Counter %v %s", idx, C.GoString(&counter.name[0]))
+
+				for idx := 0; idx < 2; idx++ {
+					fmt.Printf("%20d", C.yanet_get_counter_value(counter.value_handle, 0, C.uint64_t(idx)))
+				}
+				fmt.Printf("\n")
+			}
+
+		}
 	}
 
 }

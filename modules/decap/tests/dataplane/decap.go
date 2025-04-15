@@ -13,7 +13,9 @@ package decap_test
 void
 decap_handle_packets(
 	struct dp_config *dp_config,
-	struct module_data *module_data,
+	uint64_t worker_idx,
+	struct cp_module *cp_module,
+	struct counter_storage *counter_storage,
 	struct packet_front *packet_front
 );
 */
@@ -65,7 +67,7 @@ func buildLPMs(
 
 func decapModuleConfig(prefixes []netip.Prefix, memCtx *C.struct_memory_context) *C.struct_decap_module_config {
 	m := &C.struct_decap_module_config{
-		module_data: C.struct_module_data{},
+		cp_module: C.struct_cp_module{},
 	}
 	buildLPMs(prefixes, memCtx, &m.prefixes4, &m.prefixes6)
 
@@ -84,6 +86,6 @@ func decapHandlePackets(mc *C.struct_decap_module_config, packets ...gopacket.Pa
 }
 
 func cDecapHandlePackets(mc *C.struct_decap_module_config, pf *common.CPacketFront) common.PacketFrontResult {
-	C.decap_handle_packets(nil, &mc.module_data, (*C.struct_packet_front)(unsafe.Pointer(pf)))
+	C.decap_handle_packets(nil, 0, &mc.cp_module, nil, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	return common.PacketFrontToPayload(pf)
 }

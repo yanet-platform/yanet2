@@ -13,6 +13,7 @@ void
 pipeline_process(
 	struct dp_config *dp_config,
 	struct cp_config_gen *cp_config_gen,
+	uint64_t worker_idx,
 	uint64_t pipeline_idx,
 	struct packet_front *packet_front
 );

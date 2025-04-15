@@ -10,11 +10,12 @@
 
 #include "dataplane/config/topology.h"
 
+#include "counters/counters.h"
+
 #include "controlplane/agent/agent.h"
 
-#include "controlplane/config/zone.h"
-
 struct dp_config;
+struct cp_config;
 
 struct dp_module {
 	char name[80];
@@ -22,13 +23,21 @@ struct dp_module {
 };
 
 struct dp_worker {
+	uint64_t idx;
+
 	uint64_t gen;
-	uint64_t iterations;
-	uint64_t rx_count;
-	uint64_t tx_count;
-	uint64_t remote_rx_count;
-	uint64_t remote_tx_count;
-	uint64_t pad[10];
+
+	uint64_t *iterations;
+
+	uint64_t *rx_count;
+	uint64_t *rx_size;
+
+	uint64_t *tx_count;
+	uint64_t *tx_size;
+
+	uint64_t *remote_rx_count;
+	uint64_t *remote_tx_count;
+	uint64_t pad[7];
 };
 
 struct dp_config {
@@ -49,6 +58,10 @@ struct dp_config {
 
 	uint64_t worker_count;
 	struct dp_worker **workers;
+
+	struct counter_storage_allocator counter_storage_allocator;
+	struct counter_registry worker_counters;
+	struct counter_storage *worker_counter_storage;
 };
 
 bool

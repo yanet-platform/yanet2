@@ -17,8 +17,8 @@
 #define ARENA_SIZE (1 << 20)
 
 struct nat64_fuzzing_params {
-	struct module *module; /**< Pointer to the module being tested */
-	struct module_data *module_data; /**< Module configuration */
+	struct module *module;	     /**< Pointer to the module being tested */
+	struct cp_module *cp_module; /**< Module configuration */
 
 	void *arena;
 	void *payload_arena;
@@ -27,11 +27,11 @@ struct nat64_fuzzing_params {
 };
 
 static struct nat64_fuzzing_params fuzz_params = {
-	.module_data = NULL,
+	.cp_module = NULL,
 };
 
 static int
-nat64_test_config(struct module_data **module_data) {
+nat64_test_config(struct cp_module **cp_module) {
 	struct nat64_module_config *config =
 		(struct nat64_module_config *)memory_balloc(
 			&fuzz_params.mctx, sizeof(struct nat64_module_config)
@@ -41,18 +41,18 @@ nat64_test_config(struct module_data **module_data) {
 		return -ENOMEM;
 	}
 
-	// Initialize module_data fields
-	strtcpy(config->module_data.name,
+	// Initialize cp_module fields
+	strtcpy(config->cp_module.name,
 		"nat64_test",
-		sizeof(config->module_data.name));
+		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->module_data.memory_context,
+		&config->cp_module.memory_context,
 		&fuzz_params.mctx,
 		"nat64_test"
 	);
 
-	config->module_data.index = 0;
-	config->module_data.agent = NULL;
+	config->cp_module.type = 0;
+	config->cp_module.agent = NULL;
 	config->mappings.count = 0;
 	config->mappings.list = NULL;
 	config->prefixes.prefixes = NULL;
@@ -61,7 +61,7 @@ nat64_test_config(struct module_data **module_data) {
 	config->mtu.ipv6 = 1280;
 
 	struct memory_context *memory_context =
-		&config->module_data.memory_context;
+		&config->cp_module.memory_context;
 	if (lpm_init(&config->mappings.v4_to_v6, memory_context)) {
 		goto error_config;
 	}
@@ -71,7 +71,7 @@ nat64_test_config(struct module_data **module_data) {
 
 	// Add prefix
 	uint8_t pfx[12] = {0x20, 0x01, 0x0d, 0xb8, [11] = 0x00};
-	if (nat64_module_config_add_prefix((struct module_data *)config, pfx) <
+	if (nat64_module_config_add_prefix((struct cp_module *)config, pfx) <
 	    0) {
 		goto error_lpm_v6;
 	}
@@ -101,7 +101,7 @@ nat64_test_config(struct module_data **module_data) {
 	// Add mappings
 	for (uint32_t i = 0; i < 4; i++) {
 		if (nat64_module_config_add_mapping(
-			    (struct module_data *)config,
+			    (struct cp_module *)config,
 			    mappings[i].ip4,
 			    (uint8_t *)mappings[i].ip6,
 			    0
@@ -110,19 +110,19 @@ nat64_test_config(struct module_data **module_data) {
 		}
 	}
 
-	*module_data = (struct module_data *)config;
+	*cp_module = (struct cp_module *)config;
 	return 0;
 
 error_mappings:
 	if (config->mappings.list)
 		memory_bfree(
-			&config->module_data.memory_context,
+			&config->cp_module.memory_context,
 			config->mappings.list,
 			sizeof(struct ip4to6) * config->mappings.count
 		);
 	if (config->prefixes.prefixes)
 		memory_bfree(
-			&config->module_data.memory_context,
+			&config->cp_module.memory_context,
 			config->prefixes.prefixes,
 			sizeof(struct nat64_prefix) * config->prefixes.count
 		);
@@ -169,8 +169,9 @@ fuzz_setup() {
 		return -ENOMEM;
 	}
 
-	return nat64_test_config(&fuzz_params.module_data);
+	return nat64_test_config(&fuzz_params.cp_module);
 }
+
 RTE_LOG_REGISTER_DEFAULT(nat64test_logtype, EMERG);
 #define RTE_LOGTYPE_NAT64_TEST nat64test_logtype
 
@@ -198,7 +199,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 
 	parse_packet(pf->input.first);
 	// Process packet through NAT64 module
-	fuzz_params.module->handler(NULL, fuzz_params.module_data, pf);
+	fuzz_params.module->handler(NULL, 0, fuzz_params.cp_module, NULL, pf);
 
 	return 0;
 }

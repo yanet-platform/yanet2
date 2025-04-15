@@ -66,7 +66,8 @@ packet_front_pass(struct packet_front *packet_front) {
 }
 
 struct dp_config;
-struct module_data;
+struct cp_module;
+struct counter_storage;
 
 /*
  * Module handler called for a pipeline front.
@@ -77,7 +78,9 @@ struct module_data;
  */
 typedef void (*module_handler)(
 	struct dp_config *dp_config,
-	struct module_data *module_data,
+	uint64_t worker_idx,
+	struct cp_module *cp_module,
+	struct counter_storage *counter_storage,
 	struct packet_front *packet_front
 );
 

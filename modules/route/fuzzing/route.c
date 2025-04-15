@@ -15,8 +15,8 @@
 #define ARENA_SIZE (1 << 20)
 
 struct route_fuzzing_params {
-	struct module *module; /**< Pointer to the module being tested */
-	struct module_data *module_data; /**< Module configuration */
+	struct module *module;	     /**< Pointer to the module being tested */
+	struct cp_module *cp_module; /**< Module configuration */
 
 	void *arena;
 	void *payload_arena;
@@ -25,11 +25,11 @@ struct route_fuzzing_params {
 };
 
 static struct route_fuzzing_params fuzz_params = {
-	.module_data = NULL,
+	.cp_module = NULL,
 };
 
 static int
-route_test_config(struct module_data **module_data) {
+route_test_config(struct cp_module **cp_module) {
 	struct route_module_config *config =
 		(struct route_module_config *)memory_balloc(
 			&fuzz_params.mctx, sizeof(struct route_module_config)
@@ -39,22 +39,22 @@ route_test_config(struct module_data **module_data) {
 		return -ENOMEM;
 	}
 
-	// Initialize module_data fields
-	strtcpy(config->module_data.name,
+	// Initialize cp_module fields
+	strtcpy(config->cp_module.name,
 		"route_test",
-		sizeof(config->module_data.name));
+		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->module_data.memory_context,
+		&config->cp_module.memory_context,
 		&fuzz_params.mctx,
 		"route_test"
 	);
 
-	config->module_data.index = 0;
-	config->module_data.agent = NULL;
-	config->module_data.free_handler = route_module_config_free;
+	config->cp_module.type = 0;
+	config->cp_module.agent = NULL;
+	config->cp_module.free_handler = route_module_config_free;
 
 	struct memory_context *memory_context =
-		&config->module_data.memory_context;
+		&config->cp_module.memory_context;
 	if (lpm_init(&config->lpm_v4, memory_context)) {
 		goto error_lpm_v4;
 	}
@@ -70,7 +70,7 @@ route_test_config(struct module_data **module_data) {
 	config->route_index_count = 0;
 	config->route_indexes = NULL;
 
-	struct module_data *rmc = &config->module_data;
+	struct cp_module *rmc = &config->cp_module;
 
 	int route_idx = route_module_config_add_route(
 		rmc,
@@ -115,7 +115,7 @@ route_test_config(struct module_data **module_data) {
 		goto error_lpm_v6;
 	}
 
-	*module_data = (struct module_data *)config;
+	*cp_module = (struct cp_module *)config;
 	return 0;
 
 error_lpm_v6:
@@ -153,7 +153,7 @@ fuzz_setup() {
 		return -ENOMEM;
 	}
 
-	return route_test_config(&fuzz_params.module_data);
+	return route_test_config(&fuzz_params.cp_module);
 }
 
 int
@@ -179,7 +179,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 
 	parse_packet(pf->input.first);
 	// Process packet through route module
-	fuzz_params.module->handler(NULL, fuzz_params.module_data, pf);
+	fuzz_params.module->handler(NULL, 0, fuzz_params.cp_module, NULL, pf);
 
 	return 0;
 }

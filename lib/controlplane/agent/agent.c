@@ -258,24 +258,19 @@ agent_detach(struct agent *agent) {
 
 int
 agent_update_modules(
-	struct agent *agent,
-	size_t module_count,
-	struct module_data **module_datas
+	struct agent *agent, size_t module_count, struct cp_module **modules
 ) {
 	int res = cp_config_update_modules(
 		ADDR_OF(&agent->dp_config),
 		ADDR_OF(&agent->cp_config),
 		module_count,
-		module_datas
+		modules
 	);
 
 	while (agent->unused_module != NULL) {
-		struct module_data *module_data =
-			ADDR_OF(&agent->unused_module);
-		SET_OFFSET_OF(
-			&agent->unused_module, ADDR_OF(&module_data->prev)
-		);
-		module_data->free_handler(module_data);
+		struct cp_module *cp_module = ADDR_OF(&agent->unused_module);
+		SET_OFFSET_OF(&agent->unused_module, ADDR_OF(&cp_module->prev));
+		cp_module->free_handler(cp_module);
 	}
 
 	while (ADDR_OF(&agent->prev) != NULL) {
@@ -343,13 +338,13 @@ int
 agent_update_devices(
 	struct agent *agent,
 	uint64_t device_count,
-	struct device_pipeline_map *pipelines[]
+	struct cp_device_config *devices[]
 ) {
 	return cp_config_update_devices(
 		ADDR_OF(&agent->dp_config),
 		ADDR_OF(&agent->cp_config),
 		device_count,
-		pipelines
+		devices
 	);
 }
 
@@ -410,29 +405,37 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 
 	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_module_registry *module_registry =
-		ADDR_OF(&config_gen->module_registry);
+		&config_gen->module_registry;
 
 	struct cp_module_list_info *module_list_info =
 		(struct cp_module_list_info *)malloc(
 			sizeof(struct cp_module_list_info) +
-			sizeof(struct cp_module_info) * module_registry->count
+			sizeof(struct cp_module_info) *
+				module_registry->registry.capacity
 		);
 	if (module_list_info == NULL)
 		goto unlock;
 
 	module_list_info->gen = config_gen->gen;
-	module_list_info->module_count = module_registry->count;
-	for (uint64_t module_idx = 0; module_idx < module_registry->count;
+	module_list_info->module_count = 0;
+	for (uint64_t module_idx = 0;
+	     module_idx < module_registry->registry.capacity;
 	     ++module_idx) {
-		struct module_data *module_data =
-			ADDR_OF(module_registry->modules + module_idx);
-		module_list_info->modules[module_idx].index =
-			module_data->index;
-		strtcpy(module_list_info->modules[module_idx].config_name,
-			module_data->name,
-			sizeof(module_list_info->modules[module_idx].config_name
-			));
-		module_list_info->modules[module_idx].gen = module_data->gen;
+		struct cp_module *cp_module =
+			cp_config_gen_get_module(config_gen, module_idx);
+		module_list_info->modules[module_list_info->module_count]
+			.index = cp_module->type;
+		strtcpy(module_list_info
+				->modules[module_list_info->module_count]
+				.config_name,
+			cp_module->name,
+			sizeof(module_list_info
+				       ->modules[module_list_info->module_count]
+				       .config_name));
+		module_list_info->modules[module_list_info->module_count].gen =
+			cp_module->gen;
+
+		module_list_info->module_count += 1;
 	}
 
 unlock:
@@ -466,27 +469,30 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 	cp_config_lock(cp_config);
 
 	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
-	struct cp_pipeline_registry *pipeline_registry =
-		ADDR_OF(&config_gen->pipeline_registry);
+	struct registry *pipeline_registry =
+		&config_gen->pipeline_registry.registry;
 
 	struct cp_pipeline_list_info *pipeline_list_info =
 		(struct cp_pipeline_list_info *)malloc(
 			sizeof(struct cp_pipeline_list_info) +
 			sizeof(struct cp_pipeline_info *) *
-				pipeline_registry->count
+				pipeline_registry->capacity
 		);
 	if (pipeline_list_info == NULL)
 		goto unlock;
 
 	memset(pipeline_list_info,
 	       0,
-	       sizeof(struct cp_pipeline_list_info
-	       ) + sizeof(struct cp_pipeline_info *) * pipeline_registry->count
-	);
-	pipeline_list_info->count = pipeline_registry->count;
-	for (uint64_t idx = 0; idx < pipeline_registry->count; ++idx) {
+	       sizeof(struct cp_pipeline_list_info) +
+		       sizeof(struct cp_pipeline_info *) *
+			       pipeline_registry->capacity);
+	for (uint64_t idx = 0; idx < pipeline_registry->capacity; ++idx) {
 		struct cp_pipeline *cp_pipeline =
-			ADDR_OF(pipeline_registry->pipelines + idx);
+			cp_config_gen_get_pipeline(config_gen, idx);
+		if (cp_pipeline == NULL) {
+			continue;
+		}
+
 		struct cp_pipeline_info *pipeline_info =
 			(struct cp_pipeline_info *)malloc(
 				sizeof(struct cp_pipeline_info) +
@@ -502,11 +508,12 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 			cp_pipeline->name,
 			CP_PIPELINE_NAME_LEN);
 		pipeline_info->length = cp_pipeline->length;
-		memcpy(pipeline_info->modules,
-		       cp_pipeline->module_indexes,
-		       sizeof(uint64_t) * cp_pipeline->length);
-
-		pipeline_list_info->pipelines[idx] = pipeline_info;
+		for (uint64_t idx = 0; idx < cp_pipeline->length; ++idx) {
+			pipeline_info->modules[idx] =
+				cp_pipeline->modules[idx].index;
+		}
+		pipeline_list_info->pipelines[pipeline_list_info->count++] =
+			pipeline_info;
 	}
 
 unlock:
@@ -554,10 +561,11 @@ static struct cp_device_info *
 yanet_build_device_info(struct cp_device *device) {
 	uint64_t prev_pipeline_id = -1;
 	uint64_t pipeline_count = 0;
-	for (uint64_t link_idx = 0; link_idx < device->size; ++link_idx) {
-		if (prev_pipeline_id != device->pipelines[link_idx]) {
+	for (uint64_t link_idx = 0; link_idx < device->pipeline_map_size;
+	     ++link_idx) {
+		if (prev_pipeline_id != device->pipeline_map[link_idx]) {
 			pipeline_count++;
-			prev_pipeline_id = device->pipelines[link_idx];
+			prev_pipeline_id = device->pipeline_map[link_idx];
 		}
 	}
 
@@ -574,13 +582,14 @@ yanet_build_device_info(struct cp_device *device) {
 	device_info->pipeline_count = pipeline_count;
 	prev_pipeline_id = -1;
 	pipeline_count = 0;
-	for (uint64_t link_idx = 0; link_idx < device->size; ++link_idx) {
-		if (prev_pipeline_id != device->pipelines[link_idx]) {
+	for (uint64_t link_idx = 0; link_idx < device->pipeline_map_size;
+	     ++link_idx) {
+		if (prev_pipeline_id != device->pipeline_map[link_idx]) {
 			pipeline_count++;
-			prev_pipeline_id = device->pipelines[link_idx];
+			prev_pipeline_id = device->pipeline_map[link_idx];
 		}
 		device_info->pipelines[pipeline_count - 1].pipeline_idx =
-			device->pipelines[link_idx];
+			device->pipeline_map[link_idx];
 		device_info->pipelines[pipeline_count - 1].weight++;
 	}
 
@@ -595,11 +604,12 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 		ADDR_OF(&cp_config->cp_config_gen);
 
 	struct cp_device_registry *device_registry =
-		ADDR_OF(&cp_config_gen->device_registry);
+		&cp_config_gen->device_registry;
 
 	size_t device_list_info_size =
 		sizeof(struct cp_device_list_info) +
-		sizeof(struct cp_device_info *) * device_registry->count;
+		sizeof(struct cp_device_info *) *
+			device_registry->registry.capacity;
 	struct cp_device_list_info *device_list_info =
 		(struct cp_device_list_info *)malloc(device_list_info_size);
 	if (device_list_info == NULL)
@@ -607,8 +617,9 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 
 	memset(device_list_info, 0, device_list_info_size);
 	device_list_info->gen = cp_config_gen->gen;
-	device_list_info->device_count = device_registry->count;
-	for (uint64_t idx = 0; idx < device_registry->count; ++idx) {
+	device_list_info->device_count = 0;
+	for (uint64_t idx = 0; idx < device_registry->registry.capacity;
+	     ++idx) {
 		struct cp_device *device =
 			cp_config_gen_get_device(cp_config_gen, idx);
 		struct cp_device_info *device_info =
@@ -748,39 +759,150 @@ unlock:
 	return agent_list_info;
 }
 
-struct device_pipeline_map *
-device_pipeline_map_create(uint64_t device_id, uint64_t pipeline_count) {
-	struct device_pipeline_map *map = (struct device_pipeline_map *)malloc(
-		sizeof(struct device_pipeline_map) +
-		sizeof(struct pipeline_weight) * pipeline_count
+struct cp_device_config *
+cp_device_config_create(const char *name, uint64_t pipeline_count) {
+	struct cp_device_config *config = (struct cp_device_config *)malloc(
+		sizeof(struct cp_device_config) +
+		sizeof(struct cp_pipeline_weight) * pipeline_count
 	);
 
-	if (map == NULL)
+	if (config == NULL)
 		return NULL;
 
-	memset(map,
+	memset(config,
 	       0,
-	       sizeof(struct device_pipeline_map) +
-		       sizeof(struct pipeline_weight) * pipeline_count);
-	map->device_id = device_id;
+	       sizeof(struct cp_device_config) +
+		       sizeof(struct cp_pipeline_weight) * pipeline_count);
+	strtcpy(config->name, name, CP_DEVICE_NAME_LEN);
 
-	return map;
+	return config;
 }
 
 void
-device_pipeline_map_free(struct device_pipeline_map *devices) {
-	free(devices);
+cp_device_config_free(struct cp_device_config *config) {
+	free(config);
 }
 
 int
-device_pipeline_map_add(
-	struct device_pipeline_map *device, const char *name, uint64_t weight
+cp_device_config_add_pipeline(
+	struct cp_device_config *device, const char *name, uint64_t weight
 ) {
-	strtcpy(device->pipelines[device->count].name,
+	strtcpy(device->pipeline_weights[device->pipeline_weight_count].name,
 		name,
 		CP_PIPELINE_NAME_LEN);
-	device->pipelines[device->count].weight = weight;
-	device->count += 1;
+	device->pipeline_weights[device->pipeline_weight_count].weight = weight;
+	device->pipeline_weight_count += 1;
 
 	return 0;
+}
+
+struct counter_handle_list *
+yanet_get_pm_counters(
+	struct dp_config *dp_config,
+	const char *module_type,
+	const char *module_name,
+	const char *pipeline_name
+) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *cp_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
+
+	struct counter_registry *counter_registry;
+	struct counter_storage *counter_storage;
+
+	uint64_t module_type_index;
+	if (dp_config_lookup_module(
+		    dp_config, module_type, &module_type_index
+	    )) {
+		return NULL;
+	}
+
+	struct counter_storage *cs =
+		cp_config_gen_get_pipeline_module_counter_storage(
+			cp_config_gen,
+			pipeline_name,
+			module_type_index,
+			module_name
+		);
+
+	if (cs == NULL) {
+		cp_config_unlock(cp_config);
+		return NULL;
+	}
+	counter_storage = cs;
+	counter_registry = ADDR_OF(&counter_storage->registry);
+
+	uint64_t count = counter_registry->count;
+	struct counter_name *names = ADDR_OF(&counter_registry->names);
+	struct counter_link *links = ADDR_OF(&counter_registry->links);
+
+	cp_config_unlock(cp_config);
+
+	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
+		sizeof(struct counter_handle_list) +
+		sizeof(struct counter_handle) * count
+	);
+
+	if (list == NULL)
+		return NULL;
+	list->count = count;
+	struct counter_handle *handlers = list->counters;
+
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		strtcpy(handlers[idx].name, names[idx].name, 60);
+		handlers[idx].size = names[idx].size;
+		handlers[idx].gen = names[idx].gen;
+		handlers[idx].value_handle =
+			counter_get_value_handle(links + idx, counter_storage);
+	}
+
+	return list;
+}
+
+struct counter_handle *
+yanet_get_counter(struct counter_handle_list *counters, uint64_t idx) {
+	if (idx >= counters->count)
+		return NULL;
+	return counters->counters + idx;
+}
+
+uint64_t
+yanet_get_counter_value(
+	struct counter_value_handle *value_handle,
+	uint64_t value_idx,
+	uint64_t worker_idx
+) {
+	return counter_handle_get_value(value_handle, worker_idx)[value_idx];
+}
+
+struct counter_handle_list *
+yanet_get_worker_counters(struct dp_config *dp_config) {
+	struct counter_registry *counter_registry = &dp_config->worker_counters;
+	struct counter_storage *storage =
+		ADDR_OF(&dp_config->worker_counter_storage);
+
+	uint64_t count = counter_registry->count;
+	struct counter_name *names = ADDR_OF(&counter_registry->names);
+	struct counter_link *links = ADDR_OF(&counter_registry->links);
+
+	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
+		sizeof(struct counter_handle_list) +
+		sizeof(struct counter_handle) * count
+	);
+
+	if (list == NULL)
+		return NULL;
+	list->count = count;
+	struct counter_handle *handlers = list->counters;
+
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		strtcpy(handlers[idx].name, names[idx].name, 60);
+		handlers[idx].size = names[idx].size;
+		handlers[idx].gen = names[idx].gen;
+		handlers[idx].value_handle =
+			counter_get_value_handle(links + idx, storage);
+	}
+
+	return list;
 }

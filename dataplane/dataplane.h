@@ -17,10 +17,6 @@ struct dataplane {
 
 	struct dataplane_device *devices;
 	uint32_t device_count;
-
-	uint64_t read;
-	uint64_t write;
-	uint64_t drop;
 };
 
 int
@@ -37,13 +33,13 @@ int
 dataplane_stop(struct dataplane *dataplane);
 
 struct dp_config;
-struct cp_config;
+struct cp_config_gen;
 struct packet_list;
 
 void
 dataplane_route_pipeline(
 	struct dp_config *dp_config,
-	struct cp_config *cp_config,
+	struct cp_config_gen *cp_config_gen,
 	struct packet_list *packets
 );
 

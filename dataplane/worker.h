@@ -14,7 +14,6 @@ struct dataplane_numa_node;
 struct dp_worker;
 
 struct worker_read_ctx {
-
 	uint16_t read_size;
 };
 

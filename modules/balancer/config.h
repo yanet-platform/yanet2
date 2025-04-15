@@ -2,10 +2,9 @@
 
 #include "defines.h"
 
-#include "common/exp_array.h"
 #include "common/lpm.h"
 
-#include "dataplane/config/zone.h"
+#include "controlplane/config/zone.h"
 
 struct balancer_vs {
 	uint64_t type;
@@ -22,7 +21,7 @@ struct balancer_rs {
 };
 
 struct balancer_module_config {
-	struct module_data module_data;
+	struct cp_module cp_module;
 
 	struct lpm v4_service_lookup;
 	struct lpm v6_service_lookup;

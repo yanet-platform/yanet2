@@ -4,6 +4,7 @@ fuzz_targets = {
     lib_packet_dp_dep,
     lib_balancer_dp_dep,
     lib_balancer_cp_dep,
+    lib_config_dp_dep,
   ],
 }
 

@@ -29,7 +29,7 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.nat64_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName)
+	ptr, err := C.nat64_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize NAT64 module config: %w", err)
 	}
@@ -42,8 +42,8 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	}, nil
 }
 
-func (m *ModuleConfig) asRawPtr() *C.struct_module_data {
-	return (*C.struct_module_data)(m.ptr.AsRawPtr())
+func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
+	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
 // AsFFIModule returns the module configuration as an FFI module

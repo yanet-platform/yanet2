@@ -29,7 +29,7 @@ lib_balancer_dp_dep = declare_dependency(
   ],
 )
 
-cp_dependencies = dependencies + [lib_config_dp_dep]
+cp_dependencies = dependencies + [lib_config_cp_dep]
 
 sources = files(
   'controlplane.c',

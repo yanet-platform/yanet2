@@ -3,6 +3,7 @@ package ffi
 //#cgo CFLAGS: -I../../ -I../../lib
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
+//#cgo LDFLAGS: -L../../build/lib/counters/ -lcounters
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
 //
 //#define _GNU_SOURCE
@@ -15,12 +16,12 @@ import (
 )
 
 type ModuleConfig struct {
-	ptr *C.struct_module_data
+	ptr *C.struct_cp_module
 }
 
 func NewModuleConfig(ptr unsafe.Pointer) ModuleConfig {
 	return ModuleConfig{
-		ptr: (*C.struct_module_data)(ptr),
+		ptr: (*C.struct_cp_module)(ptr),
 	}
 }
 
@@ -46,12 +47,12 @@ func (m *Agent) UpdateModules(modules []ModuleConfig) error {
 		return fmt.Errorf("no modules provided")
 	}
 
-	configs := make([]*C.struct_module_data, len(modules))
+	configs := make([]*C.struct_cp_module, len(modules))
 	for i, module := range modules {
 		if module.ptr == nil {
 			return fmt.Errorf("module config at index %d is nil", i)
 		}
-		configs[i] = (*C.struct_module_data)(module.AsRawPtr())
+		configs[i] = (*C.struct_cp_module)(module.AsRawPtr())
 	}
 
 	if len(configs) == 0 {
@@ -112,29 +113,32 @@ func (m *Agent) UpdatePipelines(pipelinesConfigs []PipelineConfig) error {
 }
 
 // UpdateDevices attaches the given pipelines to the given device IDs.
-func (m *Agent) UpdateDevices(devices map[int][]DevicePipeline) error {
+func (m *Agent) UpdateDevices(devices map[string][]DevicePipeline) error {
 	// If there are no devices, do nothing.
 	if len(devices) == 0 {
 		return nil
 	}
 
-	deviceMap := make([]*C.struct_device_pipeline_map, 0, len(devices))
+	configs := make([]*C.struct_cp_device_config, 0, len(devices))
 
 	// Create a device pipeline map for each device.
 	for idx, pipelines := range devices {
-		pipelineMap := C.device_pipeline_map_create(C.uint64_t(idx), C.uint64_t(len(pipelines)))
-		if pipelineMap == nil {
+		deviceName := C.CString(idx)
+		defer C.free(unsafe.Pointer(deviceName))
+
+		config := C.cp_device_config_create(deviceName, C.uint64_t(len(pipelines)))
+		if config == nil {
 			return fmt.Errorf("failed to create device pipeline map")
 		}
-		defer C.device_pipeline_map_free(pipelineMap)
+		defer C.cp_device_config_free(config)
 
 		// Add each pipeline to the device pipeline map.
 		for _, pipeline := range pipelines {
 			cPipelineName := C.CString(pipeline.Name)
 			defer C.free(unsafe.Pointer(cPipelineName))
 
-			rc := C.device_pipeline_map_add(
-				pipelineMap,
+			rc := C.cp_device_config_add_pipeline(
+				config,
 				cPipelineName,
 				C.uint64_t(pipeline.Weight),
 			)
@@ -143,14 +147,14 @@ func (m *Agent) UpdateDevices(devices map[int][]DevicePipeline) error {
 			}
 		}
 
-		deviceMap = append(deviceMap, pipelineMap)
+		configs = append(configs, config)
 	}
 
 	// Update the devices.
 	rc, err := C.agent_update_devices(
 		m.ptr,
-		C.uint64_t(len(deviceMap)),
-		&deviceMap[0],
+		C.uint64_t(len(configs)),
+		&configs[0],
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update devices: %w", err)

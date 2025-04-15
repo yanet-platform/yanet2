@@ -3,10 +3,13 @@
 #include <stdint.h>
 
 struct agent;
-struct module_data;
+struct cp_module;
 
-struct module_data *
+struct cp_module *
 balancer_module_config_init(struct agent *agent, const char *name);
+
+void
+balancer_module_config_free(struct cp_module *cp_module);
 
 struct blanacer_service_config;
 
@@ -30,5 +33,5 @@ balancer_service_config_set_real(
 
 int
 balancer_module_config_add_service(
-	struct module_data *module_data, struct balancer_service_config *service
+	struct cp_module *cp_module, struct balancer_service_config *service
 );

@@ -58,6 +58,8 @@ dataplane_device_init(
 		return -1;
 	}
 
+	strtcpy(device->port_name, config->port_name, 80);
+
 	// FIXME handle errors
 	device->workers = (struct dataplane_worker *)malloc(
 		sizeof(struct dataplane_worker) * config->worker_count

@@ -2820,7 +2820,7 @@ nat64_handle_v4(
  *
  * @param dp_config Pointer to dataplane configuration (unused but required by
  * API)
- * @param module_data Pointer to NAT64 module data containing:
+ * @param cp_module Pointer to NAT64 module data containing:
  *                    - Address mappings
  *                    - NAT64 prefixes
  *                    - MTU settings
@@ -2840,14 +2840,17 @@ nat64_handle_v4(
 void
 nat64_handle_packets(
 	struct dp_config *dp_config,
-	struct module_data *module_data,
+	uint64_t worker_idx,
+	struct cp_module *cp_module,
+	struct counter_storage *counter_storage,
 	struct packet_front *packet_front
 ) {
 	(void)dp_config; // Unused parameter
+	(void)worker_idx;
+	(void)counter_storage;
 
-	struct nat64_module_config *nat64_config = container_of(
-		module_data, struct nat64_module_config, module_data
-	);
+	struct nat64_module_config *nat64_config =
+		container_of(cp_module, struct nat64_module_config, cp_module);
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {

@@ -13,6 +13,8 @@ static uint16_t
 forward_handle_v4(
 	struct dp_config *dp_config,
 	struct forward_module_config *config,
+	uint64_t worker_id,
+	struct counter_storage *counter_storage,
 	struct packet *packet
 ) {
 
@@ -34,16 +36,31 @@ forward_handle_v4(
 	);
 
 	if (forward_device_id == LPM_VALUE_INVALID) {
-		forward_device_id = packet->tx_device_id;
+		return packet->tx_device_id;
 	}
 
-	return forward_device_id;
+	uint64_t counter_id =
+		ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
+		)[forward_device_id]
+			.counter_id;
+	uint64_t *counters = counter_get_address(
+		ADDR_OF(&config->cp_module.counters.links) + counter_id,
+		counter_storage,
+		worker_id
+	);
+	counters[0] += 1;
+
+	return ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
+	)[forward_device_id]
+		.device_id;
 }
 
 static uint16_t
 forward_handle_v6(
 	struct dp_config *dp_config,
 	struct forward_module_config *config,
+	uint64_t worker_id,
+	struct counter_storage *counter_storage,
 	struct packet *packet
 ) {
 	(void)dp_config;
@@ -64,16 +81,31 @@ forward_handle_v6(
 	);
 
 	if (forward_device_id == LPM_VALUE_INVALID) {
-		forward_device_id = packet->tx_device_id;
+		return packet->tx_device_id;
 	}
 
-	return forward_device_id;
+	uint64_t counter_id =
+		ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
+		)[forward_device_id]
+			.counter_id;
+	uint64_t *counters = counter_get_address(
+		ADDR_OF(&config->cp_module.counters.links) + counter_id,
+		counter_storage,
+		worker_id
+	);
+	counters[0] += 1;
+
+	return ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
+	)[forward_device_id]
+		.device_id;
 }
 
 static uint16_t
 forward_handle_l2(
 	struct dp_config *dp_config,
 	struct forward_module_config *config,
+	uint64_t worker_id,
+	struct counter_storage *counter_storage,
 	struct packet *packet
 ) {
 	(void)dp_config;
@@ -81,17 +113,30 @@ forward_handle_l2(
 	if (packet->tx_device_id >= config->device_count)
 		return packet->tx_device_id;
 
+	uint64_t *counters = counter_get_address(
+		ADDR_OF(&config->cp_module.counters.links
+		) + config->device_forwards[packet->tx_device_id].l2_counter_id,
+		counter_storage,
+		worker_id
+	);
+	counters[0] += 1;
+
 	return config->device_forwards[packet->tx_device_id].l2_dst_device_id;
 }
 
 static void
 forward_handle_packets(
 	struct dp_config *dp_config,
-	struct module_data *module_data,
+	uint64_t worker_idx,
+	struct cp_module *cp_module,
+	struct counter_storage *counter_storage,
 	struct packet_front *packet_front
 ) {
+	(void)worker_idx;
+	(void)counter_storage;
+
 	struct forward_module_config *forward_config = container_of(
-		module_data, struct forward_module_config, module_data
+		cp_module, struct forward_module_config, cp_module
 	);
 
 	struct packet *packet;
@@ -101,16 +146,28 @@ forward_handle_packets(
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 			device_id = forward_handle_v4(
-				dp_config, forward_config, packet
+				dp_config,
+				forward_config,
+				worker_idx,
+				counter_storage,
+				packet
 			);
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 			device_id = forward_handle_v6(
-				dp_config, forward_config, packet
+				dp_config,
+				forward_config,
+				worker_idx,
+				counter_storage,
+				packet
 			);
 		} else {
 			device_id = forward_handle_l2(
-				dp_config, forward_config, packet
+				dp_config,
+				forward_config,
+				worker_idx,
+				counter_storage,
+				packet
 			);
 		}
 

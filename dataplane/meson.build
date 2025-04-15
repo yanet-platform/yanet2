@@ -48,7 +48,6 @@ dependencies = lib_dependencies + [
   # lib_pdump_dp_dep,
 ]
 
-
 sources = files(
   'drivers/sock_dev.c',
   'dpdk.c',

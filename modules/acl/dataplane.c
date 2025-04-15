@@ -172,13 +172,16 @@ acl_handle_v6(
 static void
 acl_handle_packets(
 	struct dp_config *dp_config,
-	struct module_data *module_data,
+	uint64_t worker_idx,
+	struct cp_module *cp_module,
+	struct counter_storage *counter_storage,
 	struct packet_front *packet_front
 ) {
 	(void)dp_config;
-	struct acl_module_config *acl_config = container_of(
-		module_data, struct acl_module_config, module_data
-	);
+	(void)worker_idx;
+	(void)counter_storage;
+	struct acl_module_config *acl_config =
+		container_of(cp_module, struct acl_module_config, cp_module);
 
 	struct filter_compiler *compiler = &acl_config->filter;
 

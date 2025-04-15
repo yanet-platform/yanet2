@@ -42,6 +42,7 @@
 
 #include "dataplane/pipeline/pipeline.h"
 
+#include "controlplane/config/zone.h"
 #include "dataplane/config/zone.h"
 
 #include "common/data_pipe.h"
@@ -57,7 +58,7 @@ worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
 	uint16_t read = rte_eth_rx_burst(
 		worker->port_id, worker->queue_id, mbufs, ctx->read_size
 	);
-	worker->dp_worker->rx_count += read;
+	*(worker->dp_worker->rx_count) += read;
 
 	for (uint32_t idx = 0; idx < read; ++idx) {
 		struct packet *packet = mbuf_to_packet(mbufs[idx]);
@@ -91,7 +92,7 @@ worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
 	struct dataplane_worker *worker = (struct dataplane_worker *)data;
 	struct packet **packets = (struct packet **)item;
 
-	worker->dp_worker->remote_rx_count += count;
+	(*worker->dp_worker->remote_rx_count) += count;
 
 	struct rte_mbuf *mbufs[count];
 	for (size_t idx = 0; idx < count; ++idx) {
@@ -101,6 +102,7 @@ worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
 	size_t written = rte_eth_tx_burst(
 		worker->port_id, worker->queue_id, mbufs, count
 	);
+	*(worker->dp_worker->tx_count) += written;
 
 	for (size_t idx = 0; idx < written; ++idx) {
 		packets[idx]->tx_result = 0;
@@ -182,12 +184,7 @@ worker_submit_burst(
 		worker->port_id, worker->queue_id, mbufs, count
 	);
 
-	__atomic_add_fetch(
-		&worker->dataplane->write, written, __ATOMIC_ACQ_REL
-	);
-
-	if (written < count)
-		fprintf(stderr, "pituh %d %d\n", written, count);
+	*(worker->dp_worker->tx_count) += written;
 
 	for (uint16_t idx = written; idx < count; ++idx) {
 		packet_list_add(failed, mbuf_to_packet(mbufs[idx]));
@@ -218,7 +215,7 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 			if (worker_send_to_port(ctx, packet)) {
 				packet_list_add(&failed, packet);
 			} else {
-				worker->dp_worker->remote_tx_count += 1;
+				*(worker->dp_worker->remote_tx_count) += 1;
 			}
 		}
 	}
@@ -277,11 +274,11 @@ worker_loop_round(struct dataplane_worker *worker) {
 		ADDR_OF(&cp_config->cp_config_gen);
 
 	worker->dp_worker->gen = cp_config_gen->gen;
-	worker->dp_worker->iterations += 1;
+	*worker->dp_worker->iterations += 1;
 
 	// Determine pipelines
 	dataplane_route_pipeline(
-		worker->node->dp_config, worker->node->cp_config, &input_packets
+		worker->node->dp_config, cp_config_gen, &input_packets
 	);
 
 	// Now group packets by pipeline and build packet_front
@@ -305,11 +302,20 @@ worker_loop_round(struct dataplane_worker *worker) {
 			}
 		}
 
-		// Process pipeline and push packets into drop and write lists
-
-		pipeline_process(
-			dp_config, cp_config_gen, pipeline_idx, &packet_front
-		);
+		if (pipeline_idx == (uint32_t)-1) {
+			packet_list_concat(&drop_packets, &packet_front.output);
+			packet_list_init(&packet_front.output);
+		} else {
+			// Process pipeline and push packets into drop and write
+			// lists
+			pipeline_process(
+				dp_config,
+				cp_config_gen,
+				worker->dp_worker->idx,
+				pipeline_idx,
+				&packet_front
+			);
+		}
 
 		packet_list_concat(&drop_packets, &packet_front.drop);
 		packet_list_concat(&output_packets, &packet_front.output);
@@ -369,6 +375,8 @@ dataplane_worker_init(
 		return -1;
 	}
 	memset(dp_worker, 0, sizeof(struct dp_worker));
+	dp_worker->idx = dp_config->worker_count;
+
 	worker->dp_worker = dp_worker;
 	struct dp_worker **new_workers = (struct dp_worker **)memory_balloc(
 		&dp_config->memory_context,
@@ -471,6 +479,19 @@ dataplane_worker_init(
 	// Initialize zero rx connections
 	worker->write_ctx.rx_pipe_count = 0;
 
+	// Prepare counter registry
+	counter_registry_init(
+		&dp_config->worker_counters, &dp_config->memory_context, 0
+	);
+
+	counter_registry_register(&dp_config->worker_counters, "iterations", 1);
+
+	counter_registry_register(&dp_config->worker_counters, "rx", 2);
+	counter_registry_register(&dp_config->worker_counters, "tx", 2);
+	counter_registry_register(&dp_config->worker_counters, "remote_rx", 2);
+
+	counter_registry_register(&dp_config->worker_counters, "remote_tx", 2);
+
 	return 0;
 
 error_mempool:
@@ -481,6 +502,62 @@ error_mempool:
 
 int
 dataplane_worker_start(struct dataplane_worker *worker) {
+
+	struct dp_worker *dp_worker = worker->dp_worker;
+	struct dp_config *dp_config = worker->node->dp_config;
+	// FIXME: do not use hard-coded counter identifiers
+	dp_worker->iterations = counter_get_address(
+		ADDR_OF(&dp_config->worker_counters.links) + 0,
+		ADDR_OF(&dp_config->worker_counter_storage),
+		dp_worker->idx
+	);
+
+	dp_worker->rx_count =
+		counter_get_address(
+			ADDR_OF(&dp_config->worker_counters.links) + 1,
+			ADDR_OF(&dp_config->worker_counter_storage),
+			dp_worker->idx
+		) +
+		0;
+	dp_worker->rx_size =
+		counter_get_address(
+			ADDR_OF(&dp_config->worker_counters.links) + 1,
+			ADDR_OF(&dp_config->worker_counter_storage),
+			dp_worker->idx
+		) +
+		1;
+
+	dp_worker->tx_count =
+		counter_get_address(
+			ADDR_OF(&dp_config->worker_counters.links) + 2,
+			ADDR_OF(&dp_config->worker_counter_storage),
+			dp_worker->idx
+		) +
+		0;
+	dp_worker->tx_size =
+		counter_get_address(
+			ADDR_OF(&dp_config->worker_counters.links) + 2,
+			ADDR_OF(&dp_config->worker_counter_storage),
+			dp_worker->idx
+		) +
+		1;
+
+	dp_worker->remote_rx_count =
+		counter_get_address(
+			ADDR_OF(&dp_config->worker_counters.links) + 3,
+			ADDR_OF(&dp_config->worker_counter_storage),
+			dp_worker->idx
+		) +
+		0;
+
+	dp_worker->remote_tx_count =
+		counter_get_address(
+			ADDR_OF(&dp_config->worker_counters.links) + 4,
+			ADDR_OF(&dp_config->worker_counter_storage),
+			dp_worker->idx
+		) +
+		0;
+
 	pthread_attr_t wrk_th_attr;
 	pthread_attr_init(&wrk_th_attr);
 

@@ -143,7 +143,7 @@ func main() {
 		srv,
 	)
 
-	configs := [1]*C.struct_module_data{bmc}
+	configs := [1]*C.struct_cp_module{bmc}
 
 	C.agent_update_modules(
 		agent,

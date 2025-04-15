@@ -6,8 +6,8 @@
 
 #define container_of(ptr, type, member)                                        \
 	({                                                                     \
-		void *__mptr = (void *)(ptr);                                  \
-		((type *)(__mptr - offsetof(type, member)));                   \
+		void *mptr = (void *)(ptr);                                    \
+		((type *)(mptr - offsetof(type, member)));                     \
 	})
 
 #endif

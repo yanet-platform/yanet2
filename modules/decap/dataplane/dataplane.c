@@ -56,13 +56,16 @@ decap_handle_v6(const struct lpm *lpm, struct packet *packet) {
 void
 decap_handle_packets(
 	struct dp_config *dp_config,
-	struct module_data *module_data,
+	uint64_t worker_idx,
+	struct cp_module *cp_module,
+	struct counter_storage *counter_storage,
 	struct packet_front *packet_front
 ) {
 	(void)dp_config;
-	struct decap_module_config *decap_config = container_of(
-		module_data, struct decap_module_config, module_data
-	);
+	(void)worker_idx;
+	(void)counter_storage;
+	struct decap_module_config *decap_config =
+		container_of(cp_module, struct decap_module_config, cp_module);
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {

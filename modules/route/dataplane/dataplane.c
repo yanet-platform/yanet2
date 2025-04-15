@@ -88,14 +88,17 @@ route_set_packet_destination(struct packet *packet, struct route *route) {
 static void
 route_handle_packets(
 	struct dp_config *dp_config,
-	struct module_data *module_data,
+	uint64_t worker_idx,
+	struct cp_module *cp_module,
+	struct counter_storage *counter_storage,
 	struct packet_front *packet_front
 ) {
 	(void)dp_config;
+	(void)worker_idx;
+	(void)counter_storage;
 
-	struct route_module_config *route_config = container_of(
-		module_data, struct route_module_config, module_data
-	);
+	struct route_module_config *route_config =
+		container_of(cp_module, struct route_module_config, cp_module);
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {

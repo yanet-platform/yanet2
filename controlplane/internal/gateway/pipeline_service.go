@@ -99,7 +99,7 @@ func (m *PipelineService) Assign(
 	}
 	defer agent.Close()
 
-	devicePipelines := make(map[int][]ffi.DevicePipeline)
+	devicePipelines := make(map[string][]ffi.DevicePipeline)
 	for deviceID, pipelines := range devices {
 		devicePipelinesList := make([]ffi.DevicePipeline, 0, len(pipelines.GetPipelines()))
 
@@ -110,7 +110,7 @@ func (m *PipelineService) Assign(
 			})
 		}
 
-		devicePipelines[int(deviceID)] = devicePipelinesList
+		devicePipelines[deviceID] = devicePipelinesList
 	}
 
 	if err := agent.UpdateDevices(devicePipelines); err != nil {

@@ -16,8 +16,8 @@
 #define ARENA_SIZE (1 << 20)
 
 struct balancer_fuzzing_params {
-	struct module *module; /**< Pointer to the module being tested */
-	struct module_data *module_data; /**< Module configuration */
+	struct module *module;	     /**< Pointer to the module being tested */
+	struct cp_module *cp_module; /**< Module configuration */
 
 	void *arena;
 	void *payload_arena;
@@ -26,7 +26,7 @@ struct balancer_fuzzing_params {
 };
 
 static struct balancer_fuzzing_params fuzz_params = {
-	.module_data = NULL,
+	.cp_module = NULL,
 };
 
 void
@@ -84,7 +84,7 @@ add_real_servers(
 }
 
 static int
-balancer_test_config(struct module_data **module_data) {
+balancer_test_config(struct cp_module **cp_module) {
 	struct balancer_module_config *config =
 		(struct balancer_module_config *)memory_balloc(
 			&fuzz_params.mctx, sizeof(struct balancer_module_config)
@@ -94,23 +94,23 @@ balancer_test_config(struct module_data **module_data) {
 		return -ENOMEM;
 	}
 
-	// Initialize module_data fields
-	strtcpy(config->module_data.name,
+	// Initialize cp_module fields
+	strtcpy(config->cp_module.name,
 		"balancer_test",
-		sizeof(config->module_data.name));
+		sizeof(config->cp_module.name));
 	memory_context_init_from(
-		&config->module_data.memory_context,
+		&config->cp_module.memory_context,
 		&fuzz_params.mctx,
 		"balancer_test"
 	);
 
-	config->module_data.index = 0;
-	config->module_data.agent = NULL;
+	config->cp_module.type = 0;
+	config->cp_module.agent = NULL;
 	// FIXME:
-	// config->module_data.free_handler = balancer_module_config_free;
+	// config->cp_module.free_handler = balancer_module_config_free;
 
 	struct memory_context *memory_context =
-		&config->module_data.memory_context;
+		&config->cp_module.memory_context;
 	if (lpm_init(&config->v4_service_lookup, memory_context)) {
 		goto error_lpm_v4;
 	}
@@ -157,7 +157,7 @@ balancer_test_config(struct module_data **module_data) {
 	);
 
 	int rc = balancer_module_config_add_service(
-		&config->module_data, svc_cfg_ipv6
+		&config->cp_module, svc_cfg_ipv6
 	);
 	balancer_service_config_free(svc_cfg_ipv6); // free in anyway
 	if (rc != 0) {
@@ -184,7 +184,7 @@ balancer_test_config(struct module_data **module_data) {
 	);
 
 	rc = balancer_module_config_add_service(
-		&config->module_data, svc_cfg_ipv4
+		&config->cp_module, svc_cfg_ipv4
 	);
 	balancer_service_config_free(svc_cfg_ipv4); // free in anyway
 	if (rc != 0) {
@@ -192,7 +192,7 @@ balancer_test_config(struct module_data **module_data) {
 	}
 
 	if (rc == 0) { // ok
-		*module_data = (struct module_data *)config;
+		*cp_module = (struct cp_module *)config;
 		return 0;
 	}
 
@@ -231,7 +231,7 @@ fuzz_setup() {
 		return -ENOMEM;
 	}
 
-	return balancer_test_config(&fuzz_params.module_data);
+	return balancer_test_config(&fuzz_params.cp_module);
 }
 
 int
@@ -257,7 +257,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 
 	parse_packet(pf->input.first);
 	// Process packet through balancer module
-	fuzz_params.module->handler(NULL, fuzz_params.module_data, pf);
+	fuzz_params.module->handler(NULL, 0, fuzz_params.cp_module, NULL, pf);
 
 	return 0;
 }
