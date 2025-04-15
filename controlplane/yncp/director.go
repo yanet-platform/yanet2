@@ -9,9 +9,9 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
-	"github.com/yanet-platform/yanet2/controlplane/modules/forward"
-	"github.com/yanet-platform/yanet2/controlplane/modules/nat64"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
+	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
+	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 )
 

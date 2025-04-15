@@ -7,23 +7,20 @@ dependencies += lib_module_dp_dep
 dependencies += lib_config_dp_dep
 dependencies += lib_logging_dep
 
-
 sources = files(
   'main.c',
-  '../nat64dp.c',
-  '../nat64cp.c',
+  '../../dataplane/nat64dp.c',
+  '../../api/nat64cp.c',
   'nat64_test.c',
   'commands.c'
 )
 
-
 u = executable(
   'unittest',
   sources,
-  include_directories: [yanet_rootdir, '.', '..'],
+  include_directories: [yanet_rootdir, '.', '../..', '../../..', '../../dataplane'],
   dependencies: dependencies,
-  c_args : '-DDEBUG_NAT64'
+  c_args: '-DDEBUG_NAT64',
 )
 
-test('nat64 unittest', u,
-env: ['YANET_TEST=nat64_autotest'])
+test('nat64 unittest', u, env: ['YANET_TEST=nat64_autotest'])

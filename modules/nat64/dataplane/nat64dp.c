@@ -45,7 +45,7 @@
 /* Project headers */
 #include "common.h"
 #include "dataplane/module/module.h"
-#include "nat64dp.h"
+#include "modules/nat64/dataplane/nat64dp.h"
 
 /**
  * @def RTE_LOGTYPE_NAT64

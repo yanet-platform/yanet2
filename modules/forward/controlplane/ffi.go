@@ -1,10 +1,10 @@
 package forward
 
 //#cgo CFLAGS: -I../../../
-//#cgo LDFLAGS: -L../../../build/modules/forward/ -lforward_cp
+//#cgo LDFLAGS: -L../../../build/modules/forward/api -lforward_cp
 //
 //#include "api/agent.h"
-//#include "modules/forward/controlplane.h"
+//#include "modules/forward/api/controlplane.h"
 import "C"
 
 import (

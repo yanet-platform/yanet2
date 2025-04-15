@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/modules/forward/forwardpb"
+	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
 
 // Override ForwardSerivce updater to avoid FFI calls in tests

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package forwardpb;
 
-option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/forward/forwardpb;forwardpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb;forwardpb";
 
 // ForwardService is a controlplane service for forwarding module.
 service ForwardService {

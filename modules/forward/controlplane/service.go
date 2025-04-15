@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/modules/forward/forwardpb"
+	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
 
 type ffiConfigUpdater func(m *ForwardService, name string, numaIndices []uint32) error

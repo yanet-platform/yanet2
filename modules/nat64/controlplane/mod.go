@@ -1,4 +1,4 @@
-package forward
+package nat64
 
 import (
 	"context"
@@ -10,23 +10,23 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/modules/forward/forwardpb"
 	"github.com/yanet-platform/yanet2/controlplane/yncp/gateway"
+	"github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb"
 )
 
-// ForwardModule is a control-plane component of a module that is responsible for
-// forwarding traffic between devices.
-type ForwardModule struct {
-	cfg            *Config
-	server         *grpc.Server
-	shm            *ffi.SharedMemory
-	agents         []*ffi.Agent
-	forwardService *ForwardService
-	log            *zap.SugaredLogger
+// NAT64Module is a control-plane component responsible for NAT64 translation
+type NAT64Module struct {
+	cfg          *Config
+	server       *grpc.Server
+	shm          *ffi.SharedMemory
+	agents       []*ffi.Agent
+	nat64Service *NAT64Service
+	log          *zap.SugaredLogger
 }
 
-func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, error) {
-	log = log.With(zap.String("module", "forwardpb.ForwardService"))
+// NewNAT64Module creates a new NAT64 module instance
+func NewNAT64Module(cfg *Config, log *zap.SugaredLogger) (*NAT64Module, error) {
+	log = log.With(zap.String("module", "nat64pb.NAT64Service"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
 	if err != nil {
@@ -39,28 +39,28 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("forward", numaIndices, uint(cfg.MemoryRequirements))
+	agents, err := shm.AgentsAttach("nat64", numaIndices, uint(cfg.MemoryRequirements))
 	if err != nil {
 		return nil, err
 	}
 
 	server := grpc.NewServer()
 
-	forwardService := NewForwardService(agents, log)
-	forwardpb.RegisterForwardServiceServer(server, forwardService)
+	nat64Service := NewNAT64Service(agents, log)
+	nat64pb.RegisterNAT64ServiceServer(server, nat64Service)
 
-	return &ForwardModule{
-		cfg:            cfg,
-		server:         server,
-		shm:            shm,
-		agents:         agents,
-		forwardService: forwardService,
-		log:            log,
+	return &NAT64Module{
+		cfg:          cfg,
+		server:       server,
+		shm:          shm,
+		agents:       agents,
+		nat64Service: nat64Service,
+		log:          log,
 	}, nil
 }
 
-// Close closes the module.
-func (m *ForwardModule) Close() error {
+// Close closes the module and releases all resources
+func (m *NAT64Module) Close() error {
 	for numaIdx, agent := range m.agents {
 		if err := agent.Close(); err != nil {
 			m.log.Warnw("failed to close shared memory agent", zap.Int("numa", numaIdx), zap.Error(err))
@@ -74,8 +74,8 @@ func (m *ForwardModule) Close() error {
 	return nil
 }
 
-// Run runs the module until the specified context is canceled.
-func (m *ForwardModule) Run(ctx context.Context) error {
+// Run runs the module until the specified context is canceled
+func (m *NAT64Module) Run(ctx context.Context) error {
 	listener, err := net.Listen("tcp", m.cfg.Endpoint)
 	if err != nil {
 		return fmt.Errorf("failed to initialize gRPC listener: %w", err)
@@ -87,7 +87,7 @@ func (m *ForwardModule) Run(ctx context.Context) error {
 		return m.server.Serve(listener)
 	})
 
-	serviceNames := []string{"forwardpb.ForwardService"}
+	serviceNames := []string{"nat64pb.NAT64Service"}
 
 	if err = gateway.RegisterModule(
 		ctx,

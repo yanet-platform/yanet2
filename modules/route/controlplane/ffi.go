@@ -1,7 +1,7 @@
 package route
 
 //#cgo CFLAGS: -I../../../ -I../../../lib
-//#cgo LDFLAGS: -L../../../build/modules/route/api/ -lroute_cp
+//#cgo LDFLAGS: -L../../../build/modules/route/api -lroute_cp
 //
 //#include "api/agent.h"
 //#include "modules/route/api/controlplane.h"

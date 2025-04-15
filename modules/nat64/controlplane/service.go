@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/modules/nat64/nat64pb"
+	"github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb"
 )
 
 // NAT64Service implements the NAT64 gRPC service

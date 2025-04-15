@@ -62,6 +62,8 @@ jobs:
           # Generate protobuf files
           make -C modules/route proto
           make -C modules/decap proto
+          make -C modules/nat64 proto
+          make -C modules/forward proto
           make -C controlplane ynpb
           # Build the controlplane
           make -C controlplane build

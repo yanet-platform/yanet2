@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package nat64pb;
 
-option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/nat64/nat64pb;nat64pb";
+option go_package = "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb;nat64pb";
 
 // NAT64Service is a control-plane service for managing NAT64 module
 service NAT64Service {

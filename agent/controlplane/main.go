@@ -1,12 +1,13 @@
 package main
 
 //#cgo CFLAGS: -I../../ -I../../lib
-//#cgo LDFLAGS: -L../../build/modules/forward/ -lforward_cp
+//#cgo LDFLAGS: -L../../build/modules/forward/api -lforward_cp
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
+//
 //#include "api/agent.h"
-//#include "modules/forward/controlplane.h"
+//#include "modules/forward/api/controlplane.h"
 //
 import "C"
 
@@ -48,13 +49,13 @@ type PipelineModuleConfig struct {
 }
 
 type PipelineConfig struct {
-	Name string `yaml:"name"`
+	Name  string                 `yaml:"name"`
 	Chain []PipelineModuleConfig `yaml:"chain"`
 }
 
 type DevicePipeline struct {
-	Name string `yaml:"name"`
-	Weight uint `yaml:"weight"`
+	Name   string `yaml:"name"`
+	Weight uint   `yaml:"weight"`
 }
 
 type ControlplaneConfig struct {
@@ -63,8 +64,8 @@ type ControlplaneConfig struct {
 	AgentName   string `yaml:"agent_name"`
 	MemoryLimit uint64 `yaml:"memory_limit"`
 
-	Pipelines []PipelineConfig `yaml:"pipelines"`
-	DevicePipelines   map[int][]DevicePipeline         `yaml:"device_pipelines"`
+	Pipelines       []PipelineConfig         `yaml:"pipelines"`
+	DevicePipelines map[int][]DevicePipeline `yaml:"device_pipelines"`
 
 	Forward ForwardConfig `yaml:"forward"`
 }
