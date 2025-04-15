@@ -1,2 +1,1 @@
-subdir('go')
 subdir('common')

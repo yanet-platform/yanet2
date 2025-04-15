@@ -1,11 +1,11 @@
 package dscp_test
 
 //#cgo CFLAGS: -I../../../.. -I../../../../lib -I../../../../common
-//#cgo LDFLAGS: -L../../../../build/modules/dscp -ldscp_dp
+//#cgo LDFLAGS: -L../../../../build/modules/dscp/dataplane -ldscp_dp
 //#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
 /*
 #include "lib/dataplane/packet/dscp.h"
-#include "modules/dscp/config.h"
+#include "modules/dscp/dataplane/config.h"
 
 uint8_t dscp_mark_never = DSCP_MARK_NEVER;
 uint8_t dscp_mark_default = DSCP_MARK_DEFAULT;

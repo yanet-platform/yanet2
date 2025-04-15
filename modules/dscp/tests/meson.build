@@ -1,2 +1,1 @@
 subdir('dataplane')
-subdir('tests')
