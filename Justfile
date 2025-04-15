@@ -86,7 +86,7 @@ dsetup COVERAGE_MODE="false":
 
 # Run tests in Docker
 dtest:
-    @just _docker_run "just setup test"
+    @just _docker_run "just setup false test"
 
 # Run clang-tidy in Docker
 dtidy *FILES:

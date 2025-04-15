@@ -25,3 +25,5 @@ u = executable(
 )
 
 test('nat64 unittest', u, env: ['YANET_TEST=nat64_autotest'])
+
+subdir('go')

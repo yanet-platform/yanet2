@@ -1,11 +1,13 @@
 package nat64_test
 
-//#cgo CFLAGS: -I../../../.. -I../../../../lib -I../../../../common -I../../../../modules/nat64
-//#cgo LDFLAGS: -L../../../../build/modules/nat64 -lnat64_dp -lnat64_cp
-//#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
-//#cgo LDFLAGS: -L../../../../build/lib/dataplane/config -lconfig_dp
-//#cgo LDFLAGS: -L../../../../build/lib/logging/ -llogging
-//#cgo LDFLAGS: -L../../../../build/subprojects/dpdk/lib/ -lrte_log -static
+//#cgo CFLAGS: -I../../../../.. -I../../../../../lib -I../../../../../common
+//#cgo CFLAGS: -I../../../dataplane -I../../../api
+//#cgo LDFLAGS: -L../../../../../build/modules/nat64/dataplane -lnat64_dp
+//#cgo LDFLAGS: -L../../../../../build/modules/nat64/api -lnat64_cp
+//#cgo LDFLAGS: -L../../../../../build/lib/dataplane/packet -lpacket
+//#cgo LDFLAGS: -L../../../../../build/lib/dataplane/config -lconfig_dp
+//#cgo LDFLAGS: -L../../../../../build/lib/logging -llogging
+//#cgo LDFLAGS: -L../../../../../build/subprojects/dpdk/lib -lrte_log -static
 /*
 #include <stdlib.h>
 #include <string.h>
@@ -13,8 +15,8 @@ package nat64_test
 
 #include "common/memory.h"
 #include "common/lpm.h"
-#include "modules/nat64/nat64cp.h"
-#include "modules/nat64/config.h"
+#include "nat64cp.h"
+#include "config.h"
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
 #include "logging/log.h"
@@ -31,7 +33,7 @@ import (
 	"net/netip"
 	"unsafe"
 
-	"tests/common"
+	"github.com/yanet-platform/yanet2/tests/go/common"
 
 	"log"
 

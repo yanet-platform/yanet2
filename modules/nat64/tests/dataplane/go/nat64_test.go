@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"tests/common"
+	"github.com/yanet-platform/yanet2/tests/go/common"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"

@@ -27,6 +27,7 @@
 #include <rte_udp.h>
 
 /* Project headers */
+#include "common/memory.h"
 #include "api/nat64cp.h"
 #include "common.h"
 #include "dataplane/dpdk.h"
