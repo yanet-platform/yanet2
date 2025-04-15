@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/modules/decap/decappb"
+	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb"
 )
 
 type DecapService struct {

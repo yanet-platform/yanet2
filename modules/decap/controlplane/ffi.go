@@ -1,10 +1,10 @@
 package decap
 
-//#cgo CFLAGS: -I../../../ -I../../../lib
-//#cgo LDFLAGS: -L../../../build/modules/decap/ -ldecap_cp
+//#cgo CFLAGS: -I../../../
+//#cgo LDFLAGS: -L../../../build/modules/decap/api -ldecap_cp
 //
 //#include "api/agent.h"
-//#include "modules/decap/controlplane.h"
+//#include "modules/decap/api/controlplane.h"
 import "C"
 
 import (

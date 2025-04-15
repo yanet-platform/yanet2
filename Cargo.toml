@@ -6,12 +6,12 @@ members = [
     "cli/core",
     "cli/modules/common",
     "cli/modules/inspect",
-    "cli/modules/decap",
     "cli/modules/forward",
     "cli/modules/pipeline",
     "cli/modules/nat64",
-    "modules/route/cli/route",
+    "modules/decap/cli",
     "modules/route/cli/neighbour",
+    "modules/route/cli/route",
     "web",
 ]
 
@@ -24,4 +24,3 @@ opt-level = 'z'
 lto = true
 codegen-units = 1
 debug = true
-

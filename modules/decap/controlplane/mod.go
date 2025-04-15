@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/modules/decap/decappb"
 	"github.com/yanet-platform/yanet2/controlplane/yncp/gateway"
+	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb"
 )
 
 // DecapModule is a control-plane component of a module that is responsible for

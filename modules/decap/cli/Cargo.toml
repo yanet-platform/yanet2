@@ -7,7 +7,7 @@ publish = false
 rust-version = "1.85"
 
 [dependencies]
-ync = { path = "../../core", version = "0.1", package = "yanet-cli"}
+ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
 log = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }

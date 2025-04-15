@@ -1,2 +1,1 @@
-subdir('decap')
 subdir('dscp')
