@@ -9,6 +9,10 @@ if get_option('buildtype') == 'debug'
   add_global_arguments('-DDEBUG_NAT64', language : 'c')
 endif
 
+# Define common programs once to avoid duplication
+go = find_program('go', required: true)
+protoc = find_program('protoc', required: true)
+
 yanet_rootdir = include_directories('.')
 
 libdpdk = subproject('dpdk', default_options: [
@@ -24,17 +28,11 @@ libdpdk_dep = libdpdk.get_variable('dpdk_dep')
 libdpdk_inc_dep = libdpdk_dep.partial_dependency(includes: true)
 
 subdir('common')
-
 subdir('filter')
-
 subdir('lib')
-
 subdir('modules')
-
+subdir('controlplane')
 subdir('dataplane')
-
 subdir('agent')
-
 subdir('sock-send')
-
 subdir('tests')

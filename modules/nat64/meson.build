@@ -3,6 +3,7 @@ dependencies += lib_common_dep
 dependencies += lib_logging_dep
 
 subdir('api')
+subdir('controlplane')
 subdir('dataplane')
 
 # Make dependencies available to parent scope

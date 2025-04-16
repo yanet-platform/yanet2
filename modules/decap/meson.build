@@ -1,6 +1,7 @@
 # common dependencies
 dependencies += lib_common_dep
 
+subdir('controlplane')
 subdir('api')
 subdir('dataplane')
 subdir('tests')

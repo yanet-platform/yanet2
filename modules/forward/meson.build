@@ -3,6 +3,7 @@ dependencies += lib_common_dep
 dependencies += lib_filter_dep
 
 subdir('api')
+subdir('controlplane')
 subdir('dataplane')
 subdir('tests')
 

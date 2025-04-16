@@ -28,9 +28,6 @@ jobs:
         name: ccache
         with:
           key: ${{ runner.os }}-build-cache
-      - run: |
-          meson setup build -Dbuildtype=debug
-          meson compile -C build
 
       - uses: actions/setup-go@v5
         with:
@@ -57,16 +54,10 @@ jobs:
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
-      - name: Build Go controlplane
+      - name: Build YANET (dataplane -> modules -> controlplane)
         run: |
-          # Generate protobuf files
-          make -C modules/route proto
-          make -C modules/decap proto
-          make -C modules/nat64 proto
-          make -C modules/forward proto
-          make -C controlplane ynpb
-          # Build the controlplane
-          make -C controlplane build
+          meson setup build -Dbuildtype=debug
+          meson compile -C build
 
       - name: Build and run tests
         run: |
