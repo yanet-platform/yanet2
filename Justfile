@@ -120,4 +120,8 @@ dcoverage:
 
 # Build controlplane in Docker
 dcontrolplane:
-    @just _docker_run "cd controlplane && make build"
+    @just _docker_run "make controlplane"
+
+# Build controlplane in Docker
+dcli:
+    @just _docker_run "make cli"
