@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testingLayers возвращает предопределенные слои для тестов
+// testingLayers returns predefined layers for tests
 func testingLayers() (layers.Ethernet, layers.IPv6, layers.IPv4) {
 	eth := layers.Ethernet{
 		SrcMAC:       common.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
@@ -42,12 +42,12 @@ func testingLayers() (layers.Ethernet, layers.IPv6, layers.IPv4) {
 	return eth, ip6, ip4
 }
 
-// TestNat64_ICMP_v6_to_v4_Echo тестирует трансляцию ICMPv6 Echo Request в ICMPv4
+// TestNat64_ICMP_v6_to_v4_Echo tests translation of ICMPv6 Echo Request to ICMPv4
 func TestNat64_ICMP_v6_to_v4_Echo(t *testing.T) {
 
 	eth, ip6, ip4 := testingLayers()
 
-	// Создаем ICMPv6 Echo Request
+	// Create ICMPv6 Echo Request
 	icmp6 := layers.ICMPv6{
 		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
 	}
@@ -58,7 +58,7 @@ func TestNat64_ICMP_v6_to_v4_Echo(t *testing.T) {
 		SeqNumber:  37,
 	}
 
-	// Создаем тестовый пакет с payload
+	// Create test packet with payload
 	payload := []byte("PING TEST PAYLOAD 1234567890")
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
@@ -67,7 +67,6 @@ func TestNat64_ICMP_v6_to_v4_Echo(t *testing.T) {
 	}
 	require.NoError(t, gopacket.SerializeLayers(buf, opts, &icmp6, &icmp6Echo, gopacket.Payload(payload)))
 
-	// Создаем тестовый пакет
 	pkt := common.LayersToPacket(t, &eth, &ip6, &icmp6, &icmp6Echo, gopacket.Payload(payload))
 	t.Log("Origin packet", pkt)
 
@@ -81,25 +80,24 @@ func TestNat64_ICMP_v6_to_v4_Echo(t *testing.T) {
 	m := nat64ModuleConfig(mappings, memCtx)
 	require.NotNil(t, m, "Failed to create NAT64 config")
 
-	// Обрабатываем пакет
+	// Process packet
 	result := nat64HandlePackets(m, pkt)
 	require.NotEmpty(t, result.Output, "No output packets")
 	resultPkt := common.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
 
-	// Создаем ожидаемый ICMPv4 пакет
+	// Create expected ICMPv4 packet
 	icmp4 := layers.ICMPv4{
 		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
 	}
 	icmp4.Id = 17
 	icmp4.Seq = 37
 
-	// Создаем ожидаемый пакет
 	eth.EthernetType = layers.EthernetTypeIPv4
 	expectedPkt := common.LayersToPacket(t, &eth, &ip4, &icmp4, gopacket.Payload(payload))
 	t.Log("Expected packet", expectedPkt)
 
-	// Сравниваем результат с ожидаемым пакетом
+	// Compare result with expected packet
 	diff := cmp.Diff(expectedPkt.Layers(), resultPkt.Layers(),
 		cmpopts.IgnoreUnexported(
 			layers.Ethernet{},
@@ -109,6 +107,6 @@ func TestNat64_ICMP_v6_to_v4_Echo(t *testing.T) {
 	)
 	require.Empty(t, diff, "Packets don't match")
 
-	// Проверяем payload
+	// Check payload
 	require.Equal(t, payload, resultPkt.ApplicationLayer().Payload(), "Payload doesn't match")
 }

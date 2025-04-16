@@ -111,13 +111,13 @@ find_ip6to4(struct nat64_module_config *config, uint8_t *ip6) {
 		return NULL;
 	}
 
-	// Поиск соответствия в LPM таблице
+	// Search for a match in the LPM table
 	uint32_t index = lpm_lookup(&config->mappings.v6_to_v4, 16, ip6);
 	if (index == LPM_VALUE_INVALID) {
 		return NULL;
 	}
 
-	// Получаем указатель на соответствующую запись в списке маппингов
+	// Get a pointer to the corresponding entry in the mappings list
 	if (index >= config->mappings.count) {
 		return NULL;
 	}
@@ -163,14 +163,14 @@ find_ip4to6(struct nat64_module_config *config, uint32_t *ip4) {
 		return NULL;
 	}
 
-	// Поиск соответствия в LPM таблице
+	// Search for a match in the LPM table
 	uint32_t index =
 		lpm_lookup(&config->mappings.v4_to_v6, 4, (uint8_t *)ip4);
 	if (index == LPM_VALUE_INVALID) {
 		return NULL;
 	}
 
-	// Получаем указатель на соответствующую запись в списке маппингов
+	// Get a pointer to the corresponding entry in the mappings list
 	if (index >= config->mappings.count) {
 		return NULL;
 	}

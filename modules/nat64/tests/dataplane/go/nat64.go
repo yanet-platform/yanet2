@@ -45,7 +45,7 @@ type mapping struct {
 	ip6 netip.Addr
 }
 
-// memCtxCreate создает и инициализирует контекст памяти для тестов
+// memCtxCreate creates and initializes memory context for tests
 func memCtxCreate() *C.struct_memory_context {
 	blockAlloc := C.struct_block_allocator{}
 	arena := C.malloc(1 << 20)
@@ -55,7 +55,7 @@ func memCtxCreate() *C.struct_memory_context {
 	return &memCtx
 }
 
-// nat64ModuleConfig создает и настраивает конфигурацию NAT64 модуля
+// nat64ModuleConfig creates and configures NAT64 module configuration
 func nat64ModuleConfig(mappings []mapping, memCtx *C.struct_memory_context) *C.struct_nat64_module_config {
 	cDebug := C.CString("debug")
 	defer C.free(unsafe.Pointer(cDebug))
@@ -71,7 +71,7 @@ func nat64ModuleConfig(mappings []mapping, memCtx *C.struct_memory_context) *C.s
 		return nil
 	}
 
-	// Добавляем NAT64 префикс
+	// Add NAT64 prefix
 	pfx := [12]byte{0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00}
 
@@ -80,7 +80,7 @@ func nat64ModuleConfig(mappings []mapping, memCtx *C.struct_memory_context) *C.s
 		return nil
 	}
 
-	// Добавляем маппинги
+	// Add mappings
 	for _, m := range mappings {
 		ip4 := m.ip4.As4()
 		ip6 := m.ip6.As16()
@@ -97,7 +97,7 @@ func nat64ModuleConfig(mappings []mapping, memCtx *C.struct_memory_context) *C.s
 	return (*C.struct_nat64_module_config)(unsafe.Pointer(config))
 }
 
-// nat64HandlePackets обрабатывает пакеты через NAT64 модуль
+// nat64HandlePackets processes packets through NAT64 module
 func nat64HandlePackets(mc *C.struct_nat64_module_config, packets ...gopacket.Packet) common.PacketFrontResult {
 	payload := common.PacketsToPaylod(packets)
 	pinner, pf := common.PacketFrontFromPayload(payload)
