@@ -34,8 +34,11 @@ static struct nat64_fuzzing_params fuzz_params = {
 
 static int
 nat64_test_config(struct module_data **module_data) {
-	struct nat64_module_config *config = (struct nat64_module_config *
-	)memory_balloc(&fuzz_params.mctx, sizeof(struct nat64_module_config));
+	struct nat64_module_config *config =
+		(struct nat64_module_config *)memory_balloc(
+			&fuzz_params.mctx, sizeof(struct nat64_module_config)
+		);
+
 	if (!config) {
 		return -ENOMEM;
 	}
