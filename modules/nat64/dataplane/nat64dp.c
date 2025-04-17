@@ -975,10 +975,18 @@ icmp_v6_to_v4(
 				sizeof(struct icmp6_hdr)
 		);
 
-		size_t len = rte_pktmbuf_data_len(mbuf) -
-			     (packet->transport_header.offset +
-			      sizeof(struct icmp6_hdr) + delta);
+		ssize_t len = rte_pktmbuf_data_len(mbuf) -
+			      (packet->transport_header.offset +
+			       sizeof(struct icmp6_hdr) + delta);
 
+		if (len < 0) {
+			RTE_LOG(ERR,
+				NAT64,
+				"Failed to calculate payload len (negative "
+				"value %ld)\n",
+				len);
+			return -1;
+		}
 		memmove(dst, src, len);
 
 		// Adjust the packet length
@@ -1088,7 +1096,7 @@ icmp_v6_to_v4(
  */
 static int
 process_ipv6_extension_headers(
-	struct nat64_module_config *nat64_config __rte_unused,
+	struct nat64_module_config *nat64_config,
 	struct packet *packet,
 	uint8_t *next_header,
 	uint8_t *is_fragmented,
@@ -1124,8 +1132,10 @@ process_ipv6_extension_headers(
 	uint16_t current_offset =
 		packet->network_header.offset + sizeof(struct rte_ipv6_hdr);
 
+	uint32_t processed = 0;
 	// RFC7915 Section 5.1: Process extension headers in order
-	while (1) {
+	while (processed < nat64_config->options_limit) {
+		processed += 1;
 		// Check if we've reached a non-extension header
 		if (*next_header != IPPROTO_HOPOPTS &&
 		    *next_header != IPPROTO_ROUTING &&

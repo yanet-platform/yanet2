@@ -71,6 +71,9 @@ nat64_module_config_init(struct agent *agent, const char *name) {
 	config->prefixes.count = 0;
 	config->mtu.ipv6 = 1280; // Minimum IPv6 MTU
 	config->mtu.ipv4 = 1450; // Default IPv4 MTU
+	// As per Section 5.3: Protecting a Node from Excessive Extension
+	// Headers Options: https://www.rfc-editor.org/rfc/rfc8504.html
+	config->options_limit = 8;
 
 	LOG(DEBUG, "Initialized NAT64 module '%s'", name);
 	return &config->module_data;

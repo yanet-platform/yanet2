@@ -4,6 +4,7 @@ fuzz_targets = {
     lib_packet_dp_dep,
     lib_nat64_dp_dep,
     lib_nat64_cp_dep,
+    libdpdk_inc_dep,
   ],
 }
 

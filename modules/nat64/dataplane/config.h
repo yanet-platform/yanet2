@@ -73,4 +73,12 @@ struct nat64_module_config {
 		uint16_t ipv4; /**< IPv4 MTU limit */
 		uint16_t ipv6; /**< IPv6 MTU limit */
 	} mtu;
+	/**
+	 * @brief Limit on the number of IPv6 header options to process.
+	 *
+	 * This defines the maximum number of IPv6 options that can be
+	 * processed, following the guidance provided in the draft:
+	 * https://datatracker.ietf.org/doc/draft-ietf-6man-eh-limits/
+	 */
+	uint32_t options_limit;
 };
