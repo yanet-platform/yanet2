@@ -59,7 +59,3 @@ subdir('dataplane')
 subdir('agent')
 subdir('sock-send')
 subdir('tests')
-
-if get_option('fuzzing').enabled()
-  subdir('fuzzing')
-endif
