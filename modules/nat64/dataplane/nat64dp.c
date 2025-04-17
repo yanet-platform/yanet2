@@ -2695,7 +2695,7 @@ nat64_handle_packets(
 struct module *
 new_module_nat64() {
 
-#ifdef NAT64_DEBUG
+#ifdef DEBUG_NAT64
 	rte_log_set_level(RTE_LOGTYPE_NAT64, RTE_LOG_DEBUG);
 #endif
 	struct nat64_module *module =

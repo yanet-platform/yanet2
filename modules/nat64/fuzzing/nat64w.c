@@ -186,12 +186,15 @@ fuzz_setup() {
 
 	return nat64_test_config(&fuzz_params.module_data);
 }
+RTE_LOG_REGISTER_DEFAULT(nat64test_logtype, EMERG);
+#define RTE_LOGTYPE_NAT64_TEST nat64test_logtype
 
 int
-LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 	if (fuzz_params.module == NULL) {
+		rte_log_set_level(RTE_LOGTYPE_NAT64_TEST, RTE_LOG_EMERG);
 		if (fuzz_setup() != 0) {
-			return -1;
+			exit(1); // Proper setup is essential for continuing
 		}
 	}
 
