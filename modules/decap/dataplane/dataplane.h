@@ -1,4 +1,4 @@
 #pragma once
 
-// struct module *
-// new_module_decap();
+struct module *
+new_module_decap();
