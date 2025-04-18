@@ -17,15 +17,11 @@
 struct nat64_fuzzing_params {
 	struct module *module; /**< Pointer to the module being tested */
 	struct module_data *module_data; /**< Module configuration */
-	struct rte_mbuf *mbuf;
 
 	void *arena;
 	void *payload_arena;
 	struct block_allocator ba;
 	struct memory_context mctx;
-
-	uint8_t *config;      /**< Pointer to configuration data */
-	uint32_t config_size; /**< Size of configuration data */
 };
 
 static struct nat64_fuzzing_params fuzz_params = {
@@ -72,20 +68,7 @@ nat64_test_config(struct module_data **module_data) {
 	}
 
 	// Add prefix
-	uint8_t pfx[12] = {
-		0x20,
-		0x01,
-		0x0d,
-		0xb8,
-		0x00,
-		0x00,
-		0x00,
-		0x00,
-		0x00,
-		0x00,
-		0x00,
-		0x00
-	};
+	uint8_t pfx[12] = {0x20, 0x01, 0x0d, 0xb8, [11] = 0x00};
 	if (nat64_module_config_add_prefix((struct module_data *)config, pfx) <
 	    0) {
 		goto error_lpm_v6;

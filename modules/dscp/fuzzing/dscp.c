@@ -16,15 +16,11 @@
 struct dscp_fuzzing_params {
 	struct module *module; /**< Pointer to the module being tested */
 	struct module_data *module_data; /**< Module configuration */
-	struct rte_mbuf *mbuf;
 
 	void *arena;
 	void *payload_arena;
 	struct block_allocator ba;
 	struct memory_context mctx;
-
-	uint8_t *config;      /**< Pointer to configuration data */
-	uint32_t config_size; /**< Size of configuration data */
 };
 
 static struct dscp_fuzzing_params fuzz_params = {
