@@ -42,9 +42,11 @@ custom_target(
         join_paths(meson.current_source_dir(), 'cmd', 'yncp-director', 'main.go'),
     ],
     build_by_default: true,
+    build_always_stale: true,
     depends: [
         ynpb_gen,
         decap_protoc_gen,
+        dscp_protoc_gen,
         forward_protoc_gen,
         nat64_protoc_gen,
         route_protoc_gen,

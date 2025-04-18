@@ -7,8 +7,7 @@ use ipnet::Ipv6Net;
 
 use code::{
     nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, SetMtuRequest,
-    SetOptionsLimitRequest, SetOptionsLimitResponse, ShowConfigRequest, ShowConfigResponse,
-    TargetModule,
+    SetOptionsLimitRequest, ShowConfigRequest, ShowConfigResponse, TargetModule,
 };
 use ptree::TreeBuilder;
 use tonic::transport::Channel;

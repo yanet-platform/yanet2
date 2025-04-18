@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package dscppb;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/dscp/dscppb;dscppb";
+
+// DscpService is a service for Differentiated Services Code Point module.
+service DscpService {
+	// ShowConfig returns the current configuration for the dscp module.
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {
+	}
+
+	// AddPrefixes adds prefixes to the dscp module configuration.
+	rpc AddPrefixes(AddPrefixesRequest) returns (AddPrefixesResponse) {
+	}
+	// RemovePrefixes removes prefixes from the dscp module configuration.
+	rpc RemovePrefixes(RemovePrefixesRequest)
+		returns (RemovePrefixesResponse) {
+	}
+	// SetDscpMarking sets the DSCP marking configuration.
+	rpc SetDscpMarking(SetDscpMarkingRequest)
+		returns (SetDscpMarkingResponse) {
+	}
+}
+
+// TargetModule request for operating on a specific target module.
+message TargetModule {
+	// ModuleName is the name of the module for which to reload the
+	// configuration.
+	string module_name = 1;
+	// Numa specifies NUMA nodes that should be affected.
+	//
+	// Empty means all NUMA nodes.
+	repeated uint32 numa = 2;
+}
+
+// ShowConfigResponse retrieves the runtime configuration for the dscp module.
+message ShowConfigRequest {
+	TargetModule target = 1;
+}
+
+message InstanceConfig {
+	uint32 numa = 1;
+	repeated string prefixes = 2;
+	DscpConfig dscp_config = 3;
+}
+
+// DscpConfig contains the DSCP marking configuration.
+message DscpConfig {
+	// Flag indicates when to apply DSCP marking.
+	// 0 - Never, 1 - Default (mark only if original DSCP is 0), 2 - Always
+	uint32 flag = 1;
+	// DSCP value to set
+	uint32 mark = 2;
+}
+
+// ShowConfigResponse contains the configuration details of the dscp module.
+message ShowConfigResponse {
+	repeated InstanceConfig configs = 1;
+}
+
+// AddPrefixesRequest adds prefixes to the input filter of the dscp module.
+message AddPrefixesRequest {
+	TargetModule target = 1;
+	repeated string prefixes = 2;
+}
+message AddPrefixesResponse {
+}
+
+// RemovePrefixesRequest removes prefixes from the input filter of the dscp
+// module.
+message RemovePrefixesRequest {
+	TargetModule target = 1;
+	repeated string prefixes = 2;
+}
+message RemovePrefixesResponse {
+}
+
+// SetDscpMarkingRequest sets the DSCP marking configuration.
+message SetDscpMarkingRequest {
+	TargetModule target = 1;
+	DscpConfig dscp_config = 2;
+}
+message SetDscpMarkingResponse {
+}

@@ -4100,6 +4100,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-dscp"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored 3.0.0",
+ "ipnet",
+ "log",
+ "prost",
+ "ptree",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
+]
+
+[[package]]
 name = "yanet-cli-forward"
 version = "0.1.0"
 dependencies = [

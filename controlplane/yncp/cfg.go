@@ -9,6 +9,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
+	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
@@ -37,6 +38,7 @@ func DefaultConfig() *Config {
 		Modules: ModulesConfig{
 			Route:   route.DefaultConfig(),
 			Decap:   decap.DefaultConfig(),
+			DSCP:    dscp.DefaultConfig(),
 			Forward: forward.DefaultConfig(),
 			NAT64:   nat64.DefaultConfig(),
 		},
@@ -72,6 +74,9 @@ type ModulesConfig struct {
 	// Decap is the configuration for the decap module.
 	Decap *decap.Config `yaml:"decap"`
 
+	// DSCP is the configuration for the dscp module.
+	DSCP *dscp.Config `yaml:"dscp"`
+
 	// Forward is the configuration for the forward module.
 	Forward *forward.Config `yaml:"forward"`
 
@@ -104,8 +109,14 @@ func (m *ModulesConfig) Validate() error {
 	if m.Decap == nil {
 		return fmt.Errorf("decap module is not configured")
 	}
+	if m.DSCP == nil {
+		return fmt.Errorf("dscp module is not configured")
+	}
 	if m.Forward == nil {
 		return fmt.Errorf("forward module is not configured")
+	}
+	if m.NAT64 == nil {
+		return fmt.Errorf("nat64 module is not configured")
 	}
 	return nil
 }

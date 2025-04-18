@@ -10,6 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
+	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
@@ -87,6 +88,11 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize decap built-in module: %w", err)
 	}
 
+	dscpModule, err := dscp.NewDSCPModule(cfg.Modules.DSCP, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize dscp built-in module: %w", err)
+	}
+
 	forwardModule, err := forward.NewForwardModule(cfg.Modules.Forward, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize forward built-in module: %w", err)
@@ -105,6 +111,9 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		),
 		gateway.WithBuiltInModule(
 			decapModule,
+		),
+		gateway.WithBuiltInModule(
+			dscpModule,
 		),
 		gateway.WithBuiltInModule(
 			forwardModule,
