@@ -3,4 +3,4 @@
 #include "dataplane/module/module.h"
 
 struct module *
-new_module_kernel();
+new_module_forward();

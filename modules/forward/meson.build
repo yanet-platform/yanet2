@@ -5,6 +5,7 @@ dependencies += lib_filter_dep
 subdir('api')
 subdir('controlplane')
 subdir('dataplane')
+subdir('fuzzing')
 subdir('tests')
 
 # Make dependencies available to parent scope

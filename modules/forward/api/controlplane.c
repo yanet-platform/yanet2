@@ -89,12 +89,15 @@ forward_module_config_free(struct module_data *module_data) {
 	}
 
 	struct agent *agent = ADDR_OF(&module_data->agent);
-	memory_bfree(
-		&agent->memory_context,
-		config,
-		sizeof(struct forward_module_config
-		) + sizeof(struct forward_device_config) * config->device_count
-	);
+	if (agent != NULL) {
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct forward_module_config) +
+				sizeof(struct forward_device_config) *
+					config->device_count
+		);
+	}
 }
 
 int
