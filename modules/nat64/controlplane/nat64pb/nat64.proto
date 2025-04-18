@@ -30,7 +30,6 @@ service NAT64Service {
 	// SetMTU sets MTU values for IPv4/IPv6
 	rpc SetMTU(SetMTURequest) returns (SetMTUResponse) {
 	}
-
 }
 
 // TargetModule specifies the target module for configuration operations
@@ -124,4 +123,3 @@ message SetMTURequest {
 
 message SetMTUResponse {
 }
-
