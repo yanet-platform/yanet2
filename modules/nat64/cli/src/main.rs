@@ -7,7 +7,7 @@ use ipnet::Ipv6Net;
 
 use code::{
     nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, SetMtuRequest,
-    SetOptionsLimitRequest, ShowConfigRequest, ShowConfigResponse, TargetModule,
+    ShowConfigRequest, ShowConfigResponse, TargetModule,
 };
 use ptree::TreeBuilder;
 use tonic::transport::Channel;
@@ -50,8 +50,6 @@ pub enum ModeCmd {
     },
     /// Set MTU values
     Mtu(MtuCmd),
-    /// Set OptionsLimit value
-    OptionsLimit(OptionsLimitCmd),
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -124,19 +122,6 @@ pub struct MtuCmd {
     pub ipv6_mtu: u32,
 }
 
-#[derive(Debug, Clone, Parser)]
-pub struct OptionsLimitCmd {
-    /// NAT64 module name to operate on.
-    #[arg(long = "mod")]
-    pub module_name: String,
-    /// NUMA node index where the changes should be applied.
-    #[arg(long)]
-    pub numa: Option<Vec<u32>>,
-    /// OptionsLimit value for IPv6.
-    #[arg(long)]
-    pub options_limit: u32,
-}
-
 /// Output format options.
 #[derive(Debug, Clone, ValueEnum)]
 pub enum OutputFormat {
@@ -170,7 +155,6 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
             MappingCmd::Add(cmd) => service.add_mapping(cmd).await,
         },
         ModeCmd::Mtu(cmd) => service.set_mtu(cmd).await,
-        ModeCmd::OptionsLimit(cmd) => service.set_options_limit(cmd).await,
     }
 }
 
@@ -245,20 +229,6 @@ impl NAT64Service {
         log::debug!("SetMtuResponse: {:?}", response);
         Ok(())
     }
-
-    pub async fn set_options_limit(&mut self, cmd: OptionsLimitCmd) -> Result<(), Box<dyn Error>> {
-        let request = SetOptionsLimitRequest {
-            target: Some(TargetModule {
-                module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
-            }),
-            options_limit: cmd.options_limit,
-        };
-        log::debug!("SetOptionsLimitRequest: {:?}", request);
-        let response = self.client.set_options_limit(request).await?.into_inner();
-        log::debug!("SetOptionsLimitResponse: {:?}", response);
-        Ok(())
-    }
 }
 
 pub fn print_json(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
@@ -293,8 +263,6 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
             tree.add_empty_child(format!("IPv6: {}", mtu.ipv6_mtu));
             tree.end_child();
         }
-
-        tree.add_empty_child(format!("OptionsLimit: {}", config.options_limit));
 
         tree.end_child();
     }

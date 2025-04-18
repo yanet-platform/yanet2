@@ -26,10 +26,9 @@ type NAT64Service struct {
 
 // NAT64Config represents the configuration for a NAT64 instance
 type NAT64Config struct {
-	Prefixes     [][]byte
-	Mappings     []Mapping
-	MTU          MTUConfig
-	OptionsLimit uint32
+	Prefixes [][]byte
+	Mappings []Mapping
+	MTU      MTUConfig
 }
 
 // Mapping represents an IPv4-IPv6 address mapping
@@ -235,45 +234,6 @@ func (s *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 	)
 
 	return &nat64pb.SetMTUResponse{}, nil
-}
-
-func (s *NAT64Service) SetOptionsLimit(ctx context.Context, req *nat64pb.SetOptionsLimitRequest) (*nat64pb.SetOptionsLimitResponse, error) {
-	if req.OptionsLimit == 0 {
-		return nil, status.Error(codes.InvalidArgument, "options limit should be greater then zero")
-	}
-
-	numaIndices, err := s.getNUMAIndices(req.Target.Numa)
-	if err != nil {
-		return nil, err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Update in-memory configs
-	for _, numaIdx := range numaIndices {
-		key := instanceKey{name: req.Target.ModuleName, numaIdx: numaIdx}
-		config := s.configs[key]
-		if config == nil {
-			config = &NAT64Config{}
-			s.configs[key] = config
-		}
-
-		config.OptionsLimit = req.OptionsLimit
-	}
-
-	// Update module configs
-	if err := s.updateModuleConfigs(req.Target.ModuleName, numaIndices); err != nil {
-		return nil, fmt.Errorf("failed to update module configs: %w", err)
-	}
-
-	s.log.Infow("successfully set OptionsLimit",
-		zap.String("name", req.Target.ModuleName),
-		zap.Uint32("options_limit", req.OptionsLimit),
-		zap.Uint32s("numa", numaIndices),
-	)
-
-	return &nat64pb.SetOptionsLimitResponse{}, nil
 }
 
 func (s *NAT64Service) updateModuleConfigs(name string, numaIndices []uint32) error {

@@ -31,10 +31,6 @@ service NAT64Service {
 	rpc SetMTU(SetMTURequest) returns (SetMTUResponse) {
 	}
 
-	// SetOptionsLimit sets options limit value for IPv6
-	rpc SetOptionsLimit(SetOptionsLimitRequest)
-		returns (SetOptionsLimitResponse) {
-	}
 }
 
 // TargetModule specifies the target module for configuration operations
@@ -75,7 +71,6 @@ message InstanceConfig {
 	repeated Prefix prefixes = 2;
 	repeated Mapping mappings = 3;
 	MTUConfig mtu = 4;
-	uint32 options_limit = 5;
 }
 
 // ShowConfigResponse contains the current configuration
@@ -130,10 +125,3 @@ message SetMTURequest {
 message SetMTUResponse {
 }
 
-// SetOptionsLimitRequest specifies OptionsLimit values to set
-message SetOptionsLimitRequest {
-	TargetModule target = 1;
-	uint32 options_limit = 2;
-}
-message SetOptionsLimitResponse {
-}

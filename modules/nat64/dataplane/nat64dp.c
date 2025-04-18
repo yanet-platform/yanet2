@@ -701,12 +701,49 @@ icmp_v6_to_v4(
 		// Check if the embedded packet is fragmented
 		uint8_t is_fragmented = 0;
 		uint8_t next_header = ipv6_payload_header->proto;
+		uint8_t count_header = 0;
 		uint16_t offset = sizeof(struct rte_ipv6_hdr);
 
 		// Skip extension headers
 		while (next_header == IPPROTO_HOPOPTS ||
 		       next_header == IPPROTO_ROUTING ||
 		       next_header == IPPROTO_DSTOPTS) {
+			if (offset >= remaining_len) {
+				RTE_LOG(ERR,
+					NAT64,
+					"Reached end of packet while "
+					"validating embedded packet\n");
+				return -1;
+			}
+			count_header++;
+			/* RFC8200 Section 4.1: Hop-by-Hop Options header must
+			 * appear immediately after the IPv6 header if present
+			 */
+			if (count_header > 1 &&
+			    next_header == IPPROTO_HOPOPTS) {
+				RTE_LOG(ERR,
+					NAT64,
+					"Malformed packet: Hop-by-Hop Options "
+					"header must be first (found at "
+					"position %d)\n",
+					count_header);
+				return -1;
+			}
+
+			/* RFC8200 Section 4.4: Each extension header should
+			 * occur at most once, except for Destination Options
+			 * which may occur twice:
+			 * - Once before Routing header
+			 * - Once before upper-layer header */
+			if (count_header > 4) {
+				RTE_LOG(ERR,
+					NAT64,
+					"Malformed packet: Too many extension "
+					"headers (%d > %d)\n",
+					count_header,
+					4);
+				return -1;
+			}
 			// Skip this extension header
 			struct ipv6_ext_2byte *ext_hdr =
 				rte_pktmbuf_mtod_offset(
@@ -726,7 +763,15 @@ icmp_v6_to_v4(
 			}
 
 			next_header = ext_hdr->next_type;
-			offset += (ext_hdr->size + 1) * 8;
+			uint16_t new_offset = offset + (ext_hdr->size + 1) * 8;
+			if (new_offset >= remaining_len) {
+				RTE_LOG(ERR,
+					NAT64,
+					"Reached end of packet while "
+					"validating embedded packet\n");
+				return -1;
+			}
+			offset = new_offset;
 		}
 
 		if (next_header == IPPROTO_FRAGMENT) {
@@ -1042,6 +1087,19 @@ icmp_v6_to_v4(
 	return 0;
 }
 
+/* Maximum number of IPv6 extension headers allowed (RFC 8200) */
+#define MAX_IPV6_EXT_HEADERS 8
+/* Maximum number of Destination Options headers allowed */
+#define MAX_DSTOPTS_HEADERS 2
+
+/* Bit flags to track seen extension headers */
+#define SEEN_HOPOPTS 0x01
+#define SEEN_ROUTING 0x02
+#define SEEN_FRAGMENT 0x04
+#define SEEN_DSTOPTS 0x08
+#define SEEN_AH 0x10
+#define SEEN_ESP 0x20
+
 /**
  * @brief Processes IPv6 extension headers according to RFC7915
  *
@@ -1105,6 +1163,7 @@ process_ipv6_extension_headers(
 	uint32_t *frag_id,
 	uint16_t *ext_hdrs_len
 ) {
+	(void)nat64_config;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	if (!mbuf) {
 		RTE_LOG(ERR, NAT64, "Failed to get mbuf from packet\n");
@@ -1132,10 +1191,12 @@ process_ipv6_extension_headers(
 	uint16_t current_offset =
 		packet->network_header.offset + sizeof(struct rte_ipv6_hdr);
 
-	uint32_t processed = 0;
+	uint8_t seen_headers = 0;  // Bitmap of seen header types
+	uint8_t dstopts_count = 0; // Count of Destination Options headers
+	uint8_t count_header = 0;
+
 	// RFC7915 Section 5.1: Process extension headers in order
-	while (processed < nat64_config->options_limit) {
-		processed += 1;
+	while (current_offset < rte_pktmbuf_data_len(mbuf)) {
 		// Check if we've reached a non-extension header
 		if (*next_header != IPPROTO_HOPOPTS &&
 		    *next_header != IPPROTO_ROUTING &&
@@ -1144,6 +1205,97 @@ process_ipv6_extension_headers(
 		    *next_header != IPPROTO_AH && // Authentication Header
 		    *next_header !=
 			    IPPROTO_ESP) { // Encapsulating Security Payload
+			break;
+		}
+		count_header++;
+		// Check if we've reached maximum headers
+		if (count_header >= MAX_IPV6_EXT_HEADERS) {
+			RTE_LOG(ERR,
+				NAT64,
+				"Malformed packet: Too many extension headers "
+				"(%d > %d)\n",
+				count_header,
+				MAX_IPV6_EXT_HEADERS);
+			return -1;
+		}
+
+		// RFC8200 Section 4.1: Hop-by-Hop must be first if present
+		if (count_header > 1 && *next_header == IPPROTO_HOPOPTS) {
+			RTE_LOG(ERR,
+				NAT64,
+				"Malformed packet: Hop-by-Hop Options header "
+				"must be first (found at position %d)\n",
+				count_header);
+			return -1;
+		}
+
+		// Check for duplicate headers (except Destination Options)
+		if (*next_header == IPPROTO_HOPOPTS &&
+		    (seen_headers & SEEN_HOPOPTS)) {
+			RTE_LOG(ERR,
+				NAT64,
+				"Malformed packet: Duplicate Hop-by-Hop "
+				"Options header\n");
+			return -1;
+		} else if (*next_header == IPPROTO_ROUTING &&
+			   (seen_headers & SEEN_ROUTING)) {
+			RTE_LOG(ERR,
+				NAT64,
+				"Malformed packet: Duplicate Routing header\n");
+			return -1;
+		} else if (*next_header == IPPROTO_FRAGMENT &&
+			   (seen_headers & SEEN_FRAGMENT)) {
+			RTE_LOG(ERR,
+				NAT64,
+				"Malformed packet: Duplicate Fragment header\n"
+			);
+			return -1;
+		} else if (*next_header == IPPROTO_DSTOPTS) {
+			if (dstopts_count >= MAX_DSTOPTS_HEADERS) {
+				RTE_LOG(ERR,
+					NAT64,
+					"Malformed packet: Too many "
+					"Destination Options headers (%d)\n",
+					dstopts_count + 1);
+				return -1;
+			}
+			dstopts_count++;
+		} else if (*next_header == IPPROTO_AH &&
+			   (seen_headers & SEEN_AH)) {
+			RTE_LOG(ERR,
+				NAT64,
+				"Malformed packet: Duplicate Authentication "
+				"header\n");
+			return -1;
+		} else if (*next_header == IPPROTO_ESP &&
+			   (seen_headers & SEEN_ESP)) {
+			RTE_LOG(ERR,
+				NAT64,
+				"Malformed packet: Duplicate ESP header\n");
+			return -1;
+		}
+
+		// Update seen headers bitmap
+		switch (*next_header) {
+		case IPPROTO_HOPOPTS:
+			seen_headers |= SEEN_HOPOPTS;
+			break;
+		case IPPROTO_ROUTING:
+			seen_headers |= SEEN_ROUTING;
+			break;
+		case IPPROTO_FRAGMENT:
+			seen_headers |= SEEN_FRAGMENT;
+			break;
+		case IPPROTO_DSTOPTS:
+			seen_headers |= SEEN_DSTOPTS;
+			break;
+		case IPPROTO_AH:
+			seen_headers |= SEEN_AH;
+			break;
+		case IPPROTO_ESP:
+			seen_headers |= SEEN_ESP;
+			break;
+		default:
 			break;
 		}
 
@@ -1310,6 +1462,11 @@ process_ipv6_extension_headers(
 				*next_header);
 			return -1;
 		}
+	}
+
+	if (current_offset >= rte_pktmbuf_data_len(mbuf)) {
+		RTE_LOG(ERR, NAT64, "Extension header exceeds packet bounds\n");
+		return -1;
 	}
 
 	// Update transport header offset to account for all extension headers
