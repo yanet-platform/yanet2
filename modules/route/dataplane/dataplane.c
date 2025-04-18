@@ -80,6 +80,10 @@ route_handle_packets(
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 			route_list_id = route_handle_v6(route_config, packet);
 		} else {
+			route_list_id = LPM_VALUE_INVALID;
+		}
+
+		if (route_list_id == LPM_VALUE_INVALID) {
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
