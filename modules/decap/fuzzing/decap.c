@@ -138,10 +138,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 		MBUF_MAX_SIZE
 	);
 
-	if (parse_packet(pf->input.first)) {
-		return 0;
-	}
-
+	parse_packet(pf->input.first);
 	// Process packet through decap module
 	fuzz_params.module->handler(NULL, fuzz_params.module_data, pf);
 
