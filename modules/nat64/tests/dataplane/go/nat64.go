@@ -100,10 +100,9 @@ func nat64ModuleConfig(mappings []mapping, memCtx *C.struct_memory_context) *C.s
 // nat64HandlePackets processes packets through NAT64 module
 func nat64HandlePackets(mc *C.struct_nat64_module_config, packets ...gopacket.Packet) common.PacketFrontResult {
 	payload := common.PacketsToPaylod(packets)
-	pinner, pf := common.PacketFrontFromPayload(payload)
+	pf := common.PacketFrontFromPayload(payload)
 	common.ParsePackets(pf)
 	C.nat64_handle_packets(nil, &mc.module_data, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	result := common.PacketFrontToPayload(pf)
-	pinner.Unpin()
 	return result
 }
