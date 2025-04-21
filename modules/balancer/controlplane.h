@@ -2,8 +2,6 @@
 
 #include <stdint.h>
 
-#include "defines.h"
-
 struct agent;
 struct module_data;
 

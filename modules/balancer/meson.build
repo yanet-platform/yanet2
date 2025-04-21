@@ -44,3 +44,5 @@ lib_balancer_cp = static_library(
 lib_balancer_cp_dep = declare_dependency(
   link_with: lib_balancer_cp,
 )
+
+subdir('fuzzing')
