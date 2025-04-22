@@ -8,6 +8,8 @@
 
 #include <rte_ethdev.h>
 
+#include "logging/log.h"
+
 int
 dpdk_init(
 	const char *binary,
@@ -77,7 +79,9 @@ dpdk_port_init(
 	uint16_t mtu,
 	uint16_t max_lro_packet_size
 ) {
-	if (rte_eth_dev_get_port_by_name(name, port_id)) {
+	int rc;
+	if ((rc = rte_eth_dev_get_port_by_name(name, port_id))) {
+		LOG(ERROR, "failed to get port id for %s: %d", name, rc);
 		return -1;
 	}
 
@@ -90,13 +94,23 @@ dpdk_port_init(
 		port_conf.rx_adv_conf.rss_conf.rss_hf = rss_hash;
 	}
 
-	if (rte_eth_dev_configure(
-		    *port_id, rx_queue_count, tx_queue_count, &port_conf
-	    )) {
+	if ((rc = rte_eth_dev_configure(
+		     *port_id, rx_queue_count, tx_queue_count, &port_conf
+	     ))) {
+		LOG(ERROR,
+		    "failed to configure port id %d (%s): %d",
+		    *port_id,
+		    name,
+		    rc);
 		return -1;
 	}
 
-	if (rte_eth_dev_set_mtu(*port_id, mtu)) {
+	if ((rc = rte_eth_dev_set_mtu(*port_id, mtu))) {
+		LOG(ERROR,
+		    "failed to set mtu for port id %d (%s): %d",
+		    *port_id,
+		    name,
+		    rc);
 		return -1;
 	}
 
