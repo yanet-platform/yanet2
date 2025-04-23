@@ -1,0 +1,20 @@
+[Unit]
+Description=yanet2 controlplane
+After=yanet2-dataplane.service
+Requires=yanet2-dataplane.service
+BindsTo=yanet2-dataplane.service
+StartLimitBurst=3600000
+StartLimitIntervalSec=0
+
+[Service]
+User=root
+Group=yanet
+
+ExecStart=/usr/local/bin/yanet-controlplane -c /etc/yanet2/controlplane.yaml
+TimeoutSec=1200
+Restart=always
+RestartSec=1
+LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target
