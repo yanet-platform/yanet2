@@ -7,6 +7,7 @@
 
 #include <rte_common.h>
 #include <rte_ether.h>
+#include <rte_arp.h>
 #include <rte_icmp.h>
 #include <rte_ip.h>
 #include <rte_tcp.h>
@@ -177,6 +178,33 @@ print_rte_mbuf(struct rte_mbuf *mbuf) {
             break;
         }
         }
+    } else if (eth_hdr->ether_type == RTE_BE16(RTE_ETHER_TYPE_ARP)) {
+        struct rte_arp_hdr *arp_hdr = (struct rte_arp_hdr *)(eth_hdr + 1);
+        data_off += sizeof(struct rte_arp_hdr);
+        LOG(ERROR, "ARP Header:");
+        LOG(ERROR, "  Hardware Type: 0x%04X", ntohs(arp_hdr->arp_hardware));
+        LOG(ERROR, "  Protocol Type: 0x%04X", ntohs(arp_hdr->arp_protocol));
+        LOG(ERROR, "  Hardware Length: %d", arp_hdr->arp_hlen);
+        LOG(ERROR, "  Protocol Length: %d", arp_hdr->arp_plen);
+        LOG(ERROR, "  Opcode: %d", ntohs(arp_hdr->arp_opcode));
+        
+        LOG(ERROR, "  Sender MAC: " RTE_ETHER_ADDR_PRT_FMT,
+            RTE_ETHER_ADDR_BYTES(&arp_hdr->arp_data.arp_sha));
+        
+        struct in_addr sender_ip;
+        sender_ip.s_addr = arp_hdr->arp_data.arp_sip;
+        char sender_ip_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &sender_ip, sender_ip_str, INET_ADDRSTRLEN);
+        LOG(ERROR, "  Sender IP: %s", sender_ip_str);
+
+        LOG(ERROR, "  Target MAC: " RTE_ETHER_ADDR_PRT_FMT,
+            RTE_ETHER_ADDR_BYTES(&arp_hdr->arp_data.arp_tha));
+            
+        struct in_addr target_ip;
+        target_ip.s_addr = arp_hdr->arp_data.arp_tip;
+        char target_ip_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &target_ip, target_ip_str, INET_ADDRSTRLEN);
+        LOG(ERROR, "  Target IP: %s", target_ip_str);
     } else if (eth_hdr->ether_type == RTE_BE16(RTE_ETHER_TYPE_IPV6)) {
         struct rte_ipv6_hdr *ipv6_hdr =
             (struct rte_ipv6_hdr *)(eth_hdr + 1);
