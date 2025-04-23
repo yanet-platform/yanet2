@@ -68,6 +68,11 @@ func (m *PipelineService) Update(
 		configs = append(configs, cfg)
 	}
 
+	m.log.Infow("updating pipelines",
+		zap.Uint32("numa", numaIdx),
+		zap.Any("configs", configs),
+	)
+
 	if err := agent.UpdatePipelines(configs); err != nil {
 		return nil, fmt.Errorf("failed to update pipelines: %w", err)
 	}

@@ -1,0 +1,20 @@
+l2_forwards:
+  - source_device_id: 0
+    destination_device_id: 1
+  - source_device_id: 1
+    destination_device_id: 0
+l3_forwards:
+  - source_device_id: 0
+    rules:
+      - network: 141.8.128.237/32
+        destination_device_id: 1
+      - network: 2a02:6b8:0:320::b3aa/128
+        destination_device_id: 1
+      - network: ff02::/16
+        destination_device_id: 1
+  - source_device_id: 1
+    rules:
+      - network: 0.0.0.0/0
+        destination_device_id: 0
+      - network: ::/0
+        destination_device_id: 0

@@ -1,0 +1,27 @@
+# Coordinator configuration.
+coordinator:
+  # Coordinator gRPC endpoint for external module registration.
+  endpoint: "[::1]:50052"
+
+# Gateway configuration.
+gateway:
+  # Gateway API endpoint.
+  endpoint: "[::1]:8080"
+
+# Multi-stage configuration.
+stages:
+  # Stage 1: Bootstrap.
+  - name: bootstrap
+    # Per-NUMA configuration within this stage
+    numa:
+      # NUMA node 0
+      0:
+        modules:
+          forward:
+            config_name: "forward-bootstrap0"
+            config_path: "modules/forward/etc/yanet/forward-bootstrap.yaml"
+        pipeline:
+          name: bootstrap
+          chain:
+            - module_name: "forward"
+              config_name: "forward-bootstrap0"

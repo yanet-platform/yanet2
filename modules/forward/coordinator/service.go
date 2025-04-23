@@ -1,0 +1,155 @@
+package coordinator
+
+import (
+	"context"
+	"fmt"
+
+	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/yanet-platform/yanet2/coordinator/coordinatorpb"
+	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
+)
+
+// ModuleService implements the Module gRPC service for the forward module.
+type ModuleService struct {
+	coordinatorpb.UnimplementedModuleServiceServer
+
+	gatewayEndpoint string
+	log             *zap.SugaredLogger
+}
+
+// NewModuleService creates a new ModuleService instance.
+func NewModuleService(gatewayEndpoint string, log *zap.SugaredLogger) *ModuleService {
+	return &ModuleService{
+		gatewayEndpoint: gatewayEndpoint,
+		log:             log,
+	}
+}
+
+// SetupConfig applies a configuration to the module for a specific NUMA node.
+func (m *ModuleService) SetupConfig(
+	ctx context.Context,
+	req *coordinatorpb.SetupConfigRequest,
+) (*coordinatorpb.SetupConfigResponse, error) {
+	numaNode := req.GetNumaNode()
+	configName := req.GetConfigName()
+
+	m.log.Infow("setting up configuration",
+		zap.Uint32("numa", numaNode),
+	)
+
+	config := &Config{}
+	if err := yaml.Unmarshal(req.GetConfig(), config); err != nil {
+		m.log.Errorw("failed to unmarshal configuration",
+			zap.Uint32("numa", numaNode),
+			zap.Error(err),
+		)
+		return &coordinatorpb.SetupConfigResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to unmarshal configuration: %v", err),
+		}, nil
+	}
+
+	// Setup configuration to the module
+	if err := m.setupConfig(ctx, numaNode, configName, config); err != nil {
+		m.log.Errorw("failed to setup configuration",
+			zap.Uint32("numa", numaNode),
+			zap.Error(err),
+		)
+		return &coordinatorpb.SetupConfigResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to setup configuration: %v", err),
+		}, nil
+	}
+
+	return &coordinatorpb.SetupConfigResponse{
+		Success: true,
+		Message: "configuration setup successfully",
+	}, nil
+}
+
+// setupConfig setups the provided configuration to the forward module for the
+// specified NUMA node.
+func (m *ModuleService) setupConfig(
+	ctx context.Context,
+	numaNode uint32,
+	configName string,
+	config *Config,
+) error {
+	m.log.Infow("setting up forward configuration",
+		zap.Uint32("numa", numaNode),
+		zap.String("config_name", configName),
+		zap.Any("config", config),
+	)
+
+	// Connect to the controlplane ForwardService
+	conn, err := grpc.NewClient(
+		m.gatewayEndpoint,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to connect to controlplane service: %w", err)
+	}
+	defer conn.Close()
+
+	client := forwardpb.NewForwardServiceClient(conn)
+
+	// Create a target configuration for the ForwardService
+	target := &forwardpb.TargetModule{
+		ModuleName: configName,
+		Numa:       []uint32{numaNode},
+	}
+
+	for _, forward := range config.L2Forwards {
+		req := &forwardpb.L2ForwardEnableRequest{
+			Target:   target,
+			SrcDevId: uint32(forward.SourceDeviceID),
+			DstDevId: uint32(forward.DestinationDeviceID),
+		}
+
+		if _, err = client.EnableL2Forward(ctx, req); err != nil {
+			return fmt.Errorf(
+				"failed to enable L2 forward from %d to %d: %w",
+				forward.SourceDeviceID,
+				forward.DestinationDeviceID,
+				err,
+			)
+		}
+	}
+
+	for _, forward := range config.L3Forwards {
+		sourceDeviceID := forward.SourceDeviceID
+
+		for _, rule := range forward.Rules {
+			req := &forwardpb.AddL3ForwardRequest{
+				Target:   target,
+				SrcDevId: uint32(sourceDeviceID),
+				Forward: &forwardpb.L3ForwardEntry{
+					Network:  rule.Network.String(),
+					DstDevId: uint32(rule.DestinationDeviceID),
+				},
+			}
+
+			if _, err = client.AddL3Forward(ctx, req); err != nil {
+				return fmt.Errorf(
+					"failed to add forward from %d to %d for network %s: %w",
+					sourceDeviceID,
+					rule.DestinationDeviceID,
+					rule.Network.String(),
+					err,
+				)
+			}
+		}
+	}
+
+	m.log.Infow("finished setting up forward configuration",
+		zap.Uint32("numa", numaNode),
+		zap.String("config_name", configName),
+	)
+
+	return nil
+}
