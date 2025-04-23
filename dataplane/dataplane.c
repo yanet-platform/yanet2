@@ -1,6 +1,7 @@
 #include "dataplane.h"
 
 #include "config.h"
+#include "logging/log.h"
 
 #include <stdint.h>
 
@@ -575,9 +576,12 @@ dataplane_route_pipeline(
 			continue;
 		}
 
-		packet->pipeline_idx =
-			pipeline_map
-				->pipelines[packet->hash % pipeline_map->size];
+		if (pipeline_map->size == 0) {
+			LOG(ERROR, "pipeline_map size is 0 for device %d", packet->rx_device_id);
+			packet->pipeline_idx = -1;
+			continue;
+		}
+		packet->pipeline_idx = pipeline_map->pipelines[packet->hash % pipeline_map->size];
 	}
 }
 
