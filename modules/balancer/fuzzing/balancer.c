@@ -29,15 +29,56 @@ static struct balancer_fuzzing_params fuzz_params = {
 };
 
 void
-parse_address(char *address, struct in6_addr *ret) {
-	int rc = inet_pton(AF_INET6, address, ret);
+parse_address(int af, char *address, void *ret) {
+	int rc = inet_pton(af, address, ret);
 	if (rc <= 0) {
 		if (rc == 0) {
-			fprintf(stderr, "Not in presentation format");
+			fprintf(stderr, "ERR: Not in presentation format\n");
 		} else {
 			perror("inet_pton");
 		}
 		exit(EXIT_FAILURE);
+	}
+}
+
+static void
+add_real_servers(
+	struct balancer_service_config *svc_cfg,
+	char *real_addresses[],
+	uint64_t real_count,
+	struct in_addr src_addr_v4,
+	struct in6_addr src_addr_v6,
+	struct in_addr src_mask_v4,
+	struct in6_addr src_mask_v6
+) {
+	for (uint64_t real_idx = 0; real_idx < real_count; real_idx++) {
+		struct in6_addr dst6_addr;
+		struct in_addr dst4_addr;
+		char *ip = real_addresses[real_idx];
+		uint8_t *addr;
+		int is_v6 = strchr(ip, ':') != NULL;
+
+		if (is_v6) {
+			parse_address(
+				AF_INET6, real_addresses[real_idx], &dst6_addr
+			);
+			addr = dst6_addr.s6_addr;
+		} else {
+			parse_address(
+				AF_INET, real_addresses[real_idx], &dst4_addr
+			);
+			addr = (uint8_t *)&dst4_addr.s_addr;
+		}
+		balancer_service_config_set_real(
+			svc_cfg,
+			real_idx,
+			is_v6 ? RS_TYPE_V6 : RS_TYPE_V4,
+			addr,
+			is_v6 ? src_addr_v6.s6_addr
+			      : (uint8_t *)&src_addr_v4.s_addr,
+			is_v6 ? src_mask_v6.s6_addr
+			      : (uint8_t *)&src_mask_v4.s_addr
+		);
 	}
 }
 
@@ -76,90 +117,80 @@ balancer_test_config(struct module_data **module_data) {
 		goto error_lpm_v6;
 	}
 
+	struct in_addr src_addr_v4;
+	parse_address(AF_INET, "10.6.0.0", &src_addr_v4);
+	struct in_addr src_mask_v4;
+	parse_address(AF_INET, "255.255.255.0", &src_mask_v4);
+	struct in6_addr src_addr_v6;
+	parse_address(AF_INET6, "2a01:db8:6666::", &src_addr_v6);
+	struct in6_addr src_mask_v6;
+	parse_address(
+		AF_INET6, "ffff:ffff:ffff:ffff:ffff:ffff::", &src_mask_v6
+	);
+
+	char *real_addresses[6] = {
+		"2a01:db8::675:a15a:3314",
+		"2a01:db8::675:a15a:3ca0",
+		"2a01:db8::675:a15a:4174",
+		"192.168.1.1",
+		"192.168.1.2",
+		"192.168.1.3"
+	};
 	uint64_t real_count = 6;
+
+	// IPv6 service configuration
 	struct in6_addr address;
-	parse_address("2a01:db8::853a:0:3", &address);
-	struct balancer_service_config *svc_cfg =
+	parse_address(AF_INET6, "2a01:db8::853a:0:3", &address);
+	struct balancer_service_config *svc_cfg_ipv6 =
 		balancer_service_config_create(
-			0x010002, address.s6_addr, real_count
+			VS_OPT_ENCAP | VS_TYPE_V6, address.s6_addr, real_count
 		);
-
-	struct in6_addr src_addr;
-	parse_address("2a01:db8:6666::", &src_addr);
-	struct in6_addr src_mask;
-	parse_address("ffff:ffff:ffff:ffff:ffff:ffff::", &src_mask);
-	// 1
-	struct in6_addr dst_addr;
-	parse_address("2a01:db8::675:a15a:3314", &dst_addr);
-	balancer_service_config_set_real(
-		svc_cfg,
-		0,
-		0x02,
-		dst_addr.s6_addr,
-		src_addr.s6_addr,
-		src_mask.s6_addr
-	);
-
-	// 2
-	parse_address("2a01:db8::675:a15a:3ca0", &dst_addr);
-	balancer_service_config_set_real(
-		svc_cfg,
-		0,
-		0x02,
-		dst_addr.s6_addr,
-		src_addr.s6_addr,
-		src_mask.s6_addr
-	);
-
-	// 3
-	parse_address("2a01:db8::675:a15a:4174", &dst_addr);
-	balancer_service_config_set_real(
-		svc_cfg,
-		0,
-		0x02,
-		dst_addr.s6_addr,
-		src_addr.s6_addr,
-		src_mask.s6_addr
-	);
-
-	// 4
-	parse_address("2a01:db8::675:a15a:4bb8", &dst_addr);
-	balancer_service_config_set_real(
-		svc_cfg,
-		0,
-		0x02,
-		dst_addr.s6_addr,
-		src_addr.s6_addr,
-		src_mask.s6_addr
-	);
-
-	// 5
-	parse_address("2a01:db8::675:a15a:4d6c", &dst_addr);
-	balancer_service_config_set_real(
-		svc_cfg,
-		0,
-		0x02,
-		dst_addr.s6_addr,
-		src_addr.s6_addr,
-		src_mask.s6_addr
-	);
-
-	// 6
-	parse_address("2a01:db8::675:a15a:0e98", &dst_addr);
-	balancer_service_config_set_real(
-		svc_cfg,
-		0,
-		0x02,
-		dst_addr.s6_addr,
-		src_addr.s6_addr,
-		src_mask.s6_addr
+	add_real_servers(
+		svc_cfg_ipv6,
+		real_addresses,
+		real_count,
+		src_addr_v4,
+		src_addr_v6,
+		src_mask_v4,
+		src_mask_v6
 	);
 
 	int rc = balancer_module_config_add_service(
-		&config->module_data, svc_cfg
+		&config->module_data, svc_cfg_ipv6
 	);
-	balancer_service_config_free(svc_cfg); // free in anyway
-	if (rc == 0) {			       // ok
+	balancer_service_config_free(svc_cfg_ipv6); // free in anyway
+	if (rc != 0) {
+		goto error_lpm_v6;
+	}
+
+	// IPv4 service configuration
+	struct in_addr address_v4;
+	parse_address(AF_INET, "10.10.10.10", &address_v4);
+	struct balancer_service_config *svc_cfg_ipv4 =
+		balancer_service_config_create(
+			VS_OPT_ENCAP | VS_TYPE_V4,
+			(uint8_t *)&address_v4.s_addr,
+			real_count
+		);
+	add_real_servers(
+		svc_cfg_ipv4,
+		real_addresses,
+		real_count,
+		src_addr_v4,
+		src_addr_v6,
+		src_mask_v4,
+		src_mask_v6
+	);
+
+	rc = balancer_module_config_add_service(
+		&config->module_data, svc_cfg_ipv4
+	);
+	balancer_service_config_free(svc_cfg_ipv4); // free in anyway
+	if (rc != 0) {
+		goto error_lpm_v6;
+	}
+
+	if (rc == 0) { // ok
 		*module_data = (struct module_data *)config;
 		return 0;
 	}

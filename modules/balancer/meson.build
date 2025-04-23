@@ -15,6 +15,8 @@ dp_sources = files(
 lib_balancer_dp = static_library(
   'balancer_dp',
   dp_sources,
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
   dependencies: dp_dependencies,
   install: false,
 )
@@ -37,6 +39,8 @@ sources = files(
 lib_balancer_cp = static_library(
   'balancer_cp',
   sources,
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
   dependencies: cp_dependencies,
   install: false,
 )

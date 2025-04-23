@@ -24,7 +24,7 @@ balancer_handle_v4(
 	);
 
 	uint32_t service_id =
-		lpm_lookup(vs_lookup, 4, (uint8_t *)&ipv4_hdr->src_addr);
+		lpm_lookup(vs_lookup, 4, (uint8_t *)&ipv4_hdr->dst_addr);
 
 	if (service_id == LPM_VALUE_INVALID)
 		return -1;
@@ -48,7 +48,7 @@ balancer_handle_v6(
 	);
 
 	uint32_t service_id =
-		lpm_lookup(vs_lookup, 16, (uint8_t *)&ipv6_hdr->src_addr);
+		lpm_lookup(vs_lookup, 16, (uint8_t *)&ipv6_hdr->dst_addr);
 
 	if (service_id == LPM_VALUE_INVALID)
 		return -1;
@@ -169,7 +169,13 @@ balancer_handle_packets(
 			);
 		}
 
-		if (!lookup) {
+		if (lookup != 0) {
+			packet_front_drop(packet_front, packet);
+			continue;
+		}
+		if (balancer_config->service_count <= service_id) {
+			// If the service_id is out of range of available
+			// services
 			packet_front_drop(packet_front, packet);
 			continue;
 		}

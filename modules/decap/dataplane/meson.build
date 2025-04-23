@@ -14,6 +14,8 @@ dp_sources = files(
 lib_decap_dp = static_library(
     'decap_dp',
     dp_sources,
+    c_args: yanet_c_args,
+    link_args: yanet_link_args,
     dependencies: dp_dependencies,
     install: false,
 )
