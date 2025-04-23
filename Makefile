@@ -28,3 +28,6 @@ test: dataplane
 fuzz:
 	env CC=clang CXX=clang++ meson setup -Dfuzzing=enabled  buildfuzz
 	env CC=clang CXX=clang++ meson compile -C buildfuzz
+
+install: all cli-install
+	meson install -C build
