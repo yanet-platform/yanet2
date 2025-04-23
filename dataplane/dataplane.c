@@ -577,11 +577,15 @@ dataplane_route_pipeline(
 		}
 
 		if (pipeline_map->size == 0) {
-			LOG(ERROR, "pipeline_map size is 0 for device %d", packet->rx_device_id);
+			LOG(ERROR,
+			    "pipeline_map size is 0 for device %d",
+			    packet->rx_device_id);
 			packet->pipeline_idx = -1;
 			continue;
 		}
-		packet->pipeline_idx = pipeline_map->pipelines[packet->hash % pipeline_map->size];
+		packet->pipeline_idx =
+			pipeline_map
+				->pipelines[packet->hash % pipeline_map->size];
 	}
 }
 
