@@ -542,6 +542,110 @@ yanet_get_cp_pipeline_module_info(
 	return 0;
 }
 
+void
+cp_device_list_info_free(struct cp_device_list_info *device_list_info) {
+	for (uint64_t idx = 0; idx < device_list_info->device_count; ++idx)
+		free(device_list_info->devices[idx]);
+
+	free(device_list_info);
+}
+
+static struct cp_device_info *
+yanet_build_device_info(struct cp_device *device) {
+	uint64_t prev_pipeline_id = -1;
+	uint64_t pipeline_count = 0;
+	for (uint64_t link_idx = 0; link_idx < device->size; ++link_idx) {
+		if (prev_pipeline_id != device->pipelines[link_idx]) {
+			pipeline_count++;
+			prev_pipeline_id = device->pipelines[link_idx];
+		}
+	}
+
+	size_t device_info_size =
+		sizeof(struct cp_device_info) +
+		sizeof(struct cp_device_pipeline_info) * pipeline_count;
+	struct cp_device_info *device_info =
+		(struct cp_device_info *)malloc(device_info_size);
+	if (device_info == NULL) {
+		return NULL;
+	}
+	memset(device_info, 0, device_info_size);
+
+	device_info->pipeline_count = pipeline_count;
+	prev_pipeline_id = -1;
+	pipeline_count = 0;
+	for (uint64_t link_idx = 0; link_idx < device->size; ++link_idx) {
+		if (prev_pipeline_id != device->pipelines[link_idx]) {
+			pipeline_count++;
+			prev_pipeline_id = device->pipelines[link_idx];
+		}
+		device_info->pipelines[pipeline_count - 1].pipeline_idx =
+			device->pipelines[link_idx];
+		device_info->pipelines[pipeline_count - 1].weight++;
+	}
+
+	return device_info;
+}
+
+struct cp_device_list_info *
+yanet_get_cp_device_list_info(struct dp_config *dp_config) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *cp_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
+
+	struct cp_device_registry *device_registry =
+		ADDR_OF(&cp_config_gen->device_registry);
+
+	size_t device_list_info_size =
+		sizeof(struct cp_device_list_info) +
+		sizeof(struct cp_device_info *) * device_registry->count;
+	struct cp_device_list_info *device_list_info =
+		(struct cp_device_list_info *)malloc(device_list_info_size);
+	if (device_list_info == NULL)
+		goto unlock;
+
+	memset(device_list_info, 0, device_list_info_size);
+	device_list_info->gen = cp_config_gen->gen;
+	device_list_info->device_count = device_registry->count;
+	for (uint64_t idx = 0; idx < device_registry->count; ++idx) {
+		struct cp_device *device =
+			cp_config_gen_get_device(cp_config_gen, idx);
+		struct cp_device_info *device_info =
+			yanet_build_device_info(device);
+		if (device_info == NULL) {
+			cp_device_list_info_free(device_list_info);
+			device_list_info = NULL;
+			goto unlock;
+		}
+
+		device_list_info->devices[idx] = device_info;
+	}
+
+unlock:
+	cp_config_unlock(cp_config);
+
+	return device_list_info;
+}
+
+struct cp_device_info *
+yanet_get_cp_device_info(
+	struct cp_device_list_info *device_list_info, uint64_t idx
+) {
+	if (idx >= device_list_info->device_count)
+		return NULL;
+	return device_list_info->devices[idx];
+}
+
+struct cp_device_pipeline_info *
+yanet_get_cp_device_pipeline_info(
+	struct cp_device_info *device_info, uint64_t idx
+) {
+	if (idx >= device_info->pipeline_count)
+		return NULL;
+	return device_info->pipelines + idx;
+}
+
 int
 yanet_get_cp_agent_instance_info(
 	struct cp_agent_info *agent_info,

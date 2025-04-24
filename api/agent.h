@@ -222,6 +222,38 @@ yanet_get_cp_pipeline_module_info(
 	uint64_t *config_index
 );
 
+struct cp_device_pipeline_info {
+	uint64_t pipeline_idx;
+	uint64_t weight;
+};
+
+struct cp_device_info {
+	uint64_t pipeline_count;
+	struct cp_device_pipeline_info pipelines[];
+};
+
+struct cp_device_list_info {
+	uint64_t gen;
+	uint64_t device_count;
+	struct cp_device_info *devices[];
+};
+
+void
+cp_device_list_info_free(struct cp_device_list_info *device_list_info);
+
+struct cp_device_list_info *
+yanet_get_cp_device_list_info(struct dp_config *dp_config);
+
+struct cp_device_info *
+yanet_get_cp_device_info(
+	struct cp_device_list_info *device_list_info, uint64_t idx
+);
+
+struct cp_device_pipeline_info *
+yanet_get_cp_device_pipeline_info(
+	struct cp_device_info *device_info, uint64_t idx
+);
+
 struct cp_agent_instance_info {
 	pid_t pid;
 	uint64_t memory_limit;
