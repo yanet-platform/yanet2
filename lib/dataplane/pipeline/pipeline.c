@@ -351,28 +351,45 @@ pipeline_process(
 			ADDR_OF(&dp_config->dp_modules) + module_index;
 
 		packet_front_switch(packet_front);
-		LOG_TRACE(
-			"processing packet with module [pre] %s, in %d, out "
-			"%d, drop %d",
-			dp_module->name,
-			packet_list_counter(&packet_front->input),
-			packet_list_counter(&packet_front->output),
-			packet_list_counter(&packet_front->drop)
-		);
+		LOG_TRACEX(int in = packet_list_counter(&packet_front->input);
+			   int out = packet_list_counter(&packet_front->output);
+			   int bypass =
+				   packet_list_counter(&packet_front->bypass);
+			   int drop = packet_list_counter(&packet_front->drop);
+			   ,
+			   "processing packet with module [pre] %s, in %d, out "
+			   "%d, bypass %d, drop %d",
+			   dp_module->name,
+			   in,
+			   out,
+			   bypass,
+			   drop);
 
-		packet_list_print(&packet_front->input);
+		LOG_TRACEX(packet_list_print(&packet_front->input);
+			   ,
+			   "Start processing packet with module %s",
+			   dp_module->name);
 
 		dp_module->handler(dp_config, module_data, packet_front);
 
-		LOG_TRACE(
+		LOG_TRACEX(
+			int in = packet_list_counter(&packet_front->input);
+			int out = packet_list_counter(&packet_front->output);
+			int bypass = packet_list_counter(&packet_front->bypass);
+			int drop = packet_list_counter(&packet_front->drop);
+			,
 			"processing packet with module [post] %s, in %d, out "
-			"%d, drop %d",
+			"%d, bypass %d, drop %d",
 			dp_module->name,
-			packet_list_counter(&packet_front->input),
-			packet_list_counter(&packet_front->output),
-			packet_list_counter(&packet_front->drop)
+			in,
+			out,
+			bypass,
+			drop
 		);
 
-		packet_list_print(&packet_front->output);
+		LOG_TRACEX(packet_list_print(&packet_front->output);
+			   ,
+			   "End processing packet with module %s",
+			   dp_module->name);
 	}
 }
