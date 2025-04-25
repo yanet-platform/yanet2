@@ -115,8 +115,33 @@ packet_to_mbuf(const struct packet *packet) {
 	return packet->mbuf;
 }
 
+#ifdef ENABLE_TRACE_LOG
 struct packet *
 mbuf_to_packet(struct rte_mbuf *mbuf);
+
+#else
+struct packet *
+mbuf_to_packet(struct rte_mbuf *mbuf) {};
+#endif
+
+void
+packet_list_print(struct packet_list *list);
+
+/**
+ * @brief Count number of packets in a packet list
+ *
+ * Traverses the linked list of packets and counts total number.
+ * Used for test verification to check expected vs actual packet counts
+ * in input, output and drop lists.
+ *
+ * @param list Pointer to packet list structure to count
+ * @return Total number of packets in the list
+ */
+int
+packet_list_counter(struct packet_list *list);
+
+void
+logtrace_rte_mbuf(struct rte_mbuf *mbuf);
 
 struct ipv6_ext_2byte {
 	uint8_t next_type;

@@ -220,6 +220,7 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 			}
 		}
 	}
+	LOG_TRACEX(packet_list_print(&failed);, "Failed packets");
 
 	if (to_write > 0) {
 		worker_submit_burst(worker, mbufs, to_write, &failed);

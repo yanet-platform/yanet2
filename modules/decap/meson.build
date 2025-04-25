@@ -1,5 +1,6 @@
 # common dependencies
 dependencies += lib_common_dep
+dependencies += lib_logging_dep
 
 subdir('api')
 subdir('controlplane')

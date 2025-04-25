@@ -3844,14 +3844,14 @@ append_test_cases_from_mappings_icmp(struct test_case **test_case) {
  * @param list Pointer to packet list structure to count
  * @return Total number of packets in the list
  */
-static inline int
-packet_list_counter(struct packet_list *list) {
-	int count = 0;
-	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
-		count++;
-	}
-	return count;
-}
+// static inline int
+// packet_list_counter(struct packet_list *list) {
+// 	int count = 0;
+// 	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
+// 		count++;
+// 	}
+// 	return count;
+// }
 /**
  * @brief Clean up and free resources for a packet list
  *
