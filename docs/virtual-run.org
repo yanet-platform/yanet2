@@ -125,7 +125,7 @@ yanet-cli decap prefix-add -p <prefix> --mod decap0
 yanet-cli route insert --mod route0 --via <gw> ::/0
 
 yanet-cli pipeline update --name=bootstrap --modules forward:forward0 --numa=0
-yanet-cli pipeline update --name=decap --modules decap:decap0 --modules forward:forward0 --modules route:route0 --numa=0
+yanet-cli pipeline update --name=decap --modules forward:forward0 --modules decap:decap0 --modules route:route0 --numa=0
 
 yanet-cli pipeline assign --numa=0 --device=1 --pipelines bootstrap:1
 yanet-cli pipeline assign --numa=0 --device=0 --pipelines decap:1
