@@ -14,7 +14,10 @@ dataplane:
 cli:
 	cargo build --release --workspace --exclude=yanetweb
 
-cli-install: $(foreach module,$(MODULES),cli-install/$(module))
+cli-install: cli-core-install $(foreach module,$(MODULES),cli-install/$(module))
+
+cli-core-install:
+	$(MAKE) -C cli install
 
 cli-install/%:
 	$(MAKE) -C modules/$*/cli install

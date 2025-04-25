@@ -13,7 +13,7 @@ build/%:
 
 install:
 	install -d $(DESTDIR)$(BINDIR)
-	install -m 755 $(addprefix target/release/,$(BINARIES)) $(DESTDIR)$(BINDIR)/
+	install -m 755 $(addprefix ../target/release/,$(BINARIES)) $(DESTDIR)$(BINDIR)/
 
 clean:
 	$(CARGO) clean
