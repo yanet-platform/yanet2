@@ -232,28 +232,9 @@ mbuf_to_packet(struct rte_mbuf *mbuf) {
 	return (struct packet *)((void *)mbuf->buf_addr);
 }
 
-/**
- * @brief Print contents of an rte_mbuf packet in a detailed format
- *
- * Prints detailed information about DPDK mbuf packet contents using LOG_TRACE
- * including:
- * - Ethernet header fields (MAC addresses, ether type)
- * - ARP header fields (if packet is ARP)
- * - IP header fields (v4 or v6, including addresses, protocol, TTL/hop limit)
- * - Protocol header fields:
- *   - UDP (ports, length, checksum)
- *   - TCP (ports, sequence numbers, flags, window)
- *   - ICMP (type, code, checksum)
- *   - ICMPv6 (type, code, checksum)
- * - Final packet data length
- *
- * Used for detailed packet inspection during debugging, development and
- * verification of packet processing.
- *
- * @param mbuf Pointer to the DPDK mbuf structure containing packet to print
- */
 void
 logtrace_rte_mbuf(struct rte_mbuf *mbuf) {
+#ifdef ENABLE_TRACE_LOG
 	if (!mbuf) {
 		LOG(ERROR, "Mbuf is NULL");
 		return;
@@ -525,6 +506,9 @@ logtrace_rte_mbuf(struct rte_mbuf *mbuf) {
 		}
 	}
 	LOG_TRACE("Data Length: %d", mbuf->pkt_len - data_off);
+#else
+	(void)mbuf;
+#endif // ENABLE_TRACE_LOG
 }
 
 int
