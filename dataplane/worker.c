@@ -47,6 +47,37 @@
 
 #include <rte_ethdev.h>
 
+static bool
+is_target_source_addr(struct rte_mbuf *mbuf) {
+	struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+	if (eth_hdr->ether_type != rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+		return false;
+	}
+		
+	struct rte_ipv6_hdr *ip6_hdr = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, sizeof(struct rte_ether_hdr)
+	);
+	uint8_t target_addr[16] = {
+		0x2a,
+		0x02,
+		0x06,
+		0xb8,
+		0x00,
+		0x00,
+		0x03,
+		0x2b,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0xb1,
+		0xaa,
+		0x00,
+		0x00
+	};
+	return memcmp(ip6_hdr->src_addr, target_addr, 16) == 0;
+}
+
 static void
 worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
 	struct worker_read_ctx *ctx = &worker->read_ctx;
@@ -204,31 +235,67 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(packets)) != NULL) {
+		bool trace_pkt = is_target_source_addr(packet_to_mbuf(packet));
 		if (to_write == ctx->write_size) {
-			LOG_TRACE("Submitting burst of %d packets to same device", to_write);
+			if (trace_pkt) {
+				LOG_TRACE(
+					"Submitting burst of %d packets to "
+					"same device",
+					to_write
+				);
+			}
 			worker_submit_burst(worker, mbufs, to_write, &failed);
 			to_write = 0;
 		}
 
 		if (packet->tx_device_id == worker->device_id) {
 			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-			LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Processing packet for same device");
+			if (trace_pkt) {
+				LOG_TRACEX(
+					logtrace_rte_mbuf(mbuf),
+					"Processing packet for same device"
+				);
+			}
 			mbufs[to_write] = mbuf;
 			++to_write;
 		} else {
 			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-			LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Sending packet to different device %d", packet->tx_device_id);
+			if (trace_pkt) {
+				LOG_TRACEX(
+					logtrace_rte_mbuf(mbuf),
+					"Sending packet to different device %d",
+					packet->tx_device_id
+				);
+			}
 			if (worker_send_to_port(ctx, packet)) {
-				LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Failed to send packet to device %d", packet->tx_device_id);
+				if (trace_pkt) {
+					LOG_TRACEX(
+						logtrace_rte_mbuf(mbuf),
+						"Failed to send packet to "
+						"device %d",
+						packet->tx_device_id
+					);
+				}
 				packet_list_add(&failed, packet);
 			} else {
-				LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Successfully sent packet to device %d", packet->tx_device_id);
+				if (trace_pkt) {
+					LOG_TRACEX(
+						logtrace_rte_mbuf(mbuf),
+						"Successfully sent packet to "
+						"device %d",
+						packet->tx_device_id
+					);
+				}
 				worker->dp_worker->remote_tx_count += 1;
 			}
 		}
 	}
+
 	if (packet_list_counter(&failed)) {
-		LOG_TRACEX(packet_list_print(&failed), "Failed packets in first pass");
+		LOG_TRACEX(
+			packet_list_print(&failed),
+			"Failed packets in first pass"
+		);
 	}
 
 	if (to_write > 0) {
@@ -236,45 +303,64 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 		worker_submit_burst(worker, mbufs, to_write, &failed);
 	}
 	if (packet_list_counter(&failed)) {
-		LOG_TRACEX(packet_list_print(&failed), "Failed packets after final burst");
+		LOG_TRACEX(
+			packet_list_print(&failed),
+			"Failed packets in final burst"
+		);
 	}
 
 	struct packet_list sent;
 	packet_list_init(&sent);
-	LOG_TRACE("Collecting packets from other ports");
 	worker_collect_from_port(worker, &sent);
 	while ((packet = packet_list_pop(&sent)) != NULL) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		bool trace_pkt = is_target_source_addr(mbuf);
 		if (packet->tx_result) {
-			LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Remote transmission failed");
+			if (trace_pkt) {
+				LOG_TRACEX(
+					logtrace_rte_mbuf(mbuf),
+					"Remote transmission failed"
+				);
+			}
 			packet_list_add(&failed, packet);
 			continue;
 		}
 
-		LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Remote transmission succeeded");
+		if (trace_pkt) {
+			LOG_TRACEX(
+				logtrace_rte_mbuf(mbuf),
+				"Remote transmission succeeded"
+			);
+		}
 		// FIXME: per-pipe pending queue
 		packet_list_add(&worker->pending, packet);
 	}
-	if (packet_list_counter(&failed)) {
-		LOG_TRACEX(packet_list_print(&failed), "Failed packets after remote transmission");
-	}
-
-	LOG_TRACE("Processing pending packets");
+	//
 	while ((packet = packet_list_first(&worker->pending)) != NULL) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+		bool trace_pkt = is_target_source_addr(mbuf);
 		if (rte_mbuf_refcnt_read(mbuf) != 1) {
-			LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Packet still in use (refcount != 1)");
+			if (trace_pkt) {
+				LOG_TRACEX(
+					logtrace_rte_mbuf(mbuf),
+					"Packet still in use (refcount != 1)"
+				);
+			}
 			break;
 		}
 
-		LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Freeing completed packet");
+		if (trace_pkt) {
+			LOG_TRACEX(
+				logtrace_rte_mbuf(mbuf),
+				"Freeing completed packet"
+			);
+		}
 		(void)packet_list_pop(&worker->pending);
 		rte_pktmbuf_free(mbuf);
 	}
 
 	packet_list_concat(packets, &failed);
 
-	LOG_TRACE("Processing %d rx pipes", ctx->rx_pipe_count);
 	for (uint32_t pipe_idx = 0; pipe_idx < ctx->rx_pipe_count; ++pipe_idx) {
 		data_pipe_item_pop(
 			ctx->rx_pipes + pipe_idx, worker_rx_pipe_pop_cb, worker
