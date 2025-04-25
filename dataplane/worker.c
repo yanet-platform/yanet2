@@ -70,10 +70,10 @@ is_target_source_addr(struct rte_mbuf *mbuf) {
 		0x00,
 		0x00,
 		0x00,
-		0xb1,
-		0xaa,
 		0x00,
-		0x00
+		0x00,
+		0xb1,
+		0xaa
 	};
 	return memcmp(ip6_hdr->src_addr, target_addr, 16) == 0;
 }
@@ -299,7 +299,6 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 	}
 
 	if (to_write > 0) {
-		LOG_TRACE("Submitting final burst of %d packets", to_write);
 		worker_submit_burst(worker, mbufs, to_write, &failed);
 	}
 	if (packet_list_counter(&failed)) {
