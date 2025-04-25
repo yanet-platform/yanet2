@@ -56,8 +56,8 @@ func (m *ModuleConfig) RouteAdd(srcAddr net.HardwareAddr, dstAddr net.HardwareAd
 
 	idx, err := C.route_module_config_add_route(
 		m.asRawPtr(),
-		*(*C.struct_ether_addr)(unsafe.Pointer(&srcAddr[0])),
 		*(*C.struct_ether_addr)(unsafe.Pointer(&dstAddr[0])),
+		*(*C.struct_ether_addr)(unsafe.Pointer(&srcAddr[0])),
 	)
 	if err != nil {
 		return -1, fmt.Errorf("failed to add route: %w", err)
