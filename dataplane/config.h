@@ -38,6 +38,7 @@ struct dataplane_config {
 	struct dataplane_device_config *devices;
 	uint64_t connection_count;
 	struct dataplane_connection_config *connections;
+	char loglevel[32];
 };
 
 int

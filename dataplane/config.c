@@ -33,6 +33,8 @@ enum state {
 	state_connection,
 	state_connection_src,
 	state_connection_dst,
+
+	state_loglevel,
 };
 
 int
@@ -113,6 +115,12 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					strtol(start, &end, 10);
 				if (*end != '\0')
 					goto error;
+				state = state_dataplane;
+				break;
+			case state_loglevel:
+				strtcpy(dataplane->loglevel,
+					start,
+					sizeof(dataplane->loglevel));
 				state = state_dataplane;
 				break;
 
@@ -216,6 +224,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					state = state_devices;
 				} else if (!strcmp("connections", start)) {
 					state = state_connections;
+				} else if (!strcmp("loglevel", start)) {
+					state = state_loglevel;
 				} else {
 					goto error;
 				}

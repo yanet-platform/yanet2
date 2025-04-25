@@ -46,6 +46,20 @@ enum log_id { TRACE, DEBUG, INFO, WARN, ERROR, LOG_ID_MAX }; // NOLINT
 		}                                                              \
 	} while (0)
 
+#ifdef ENABLE_TRACE_LOG
+#define LOG_TRACE(fmt, ...)                                                    \
+	do {                                                                   \
+		LOG(TRACE, fmt, ##__VA_ARGS__);                                \
+	} while (0)
+#define LOG_TRACEX(f, fmt, ...)                                                \
+	do {                                                                   \
+		f LOG(TRACE, fmt, ##__VA_ARGS__);                              \
+	} while (0)
+#else
+#define LOG_TRACE(...) (void)(0)
+#define LOG_TRACEX(...) (void)(0)
+#endif // ENABLE_TRACE_LOG
+
 const char *
 log_fmt_timestamp(void);
 /**

@@ -11,6 +11,7 @@ add_global_arguments(
 )
 if get_option('buildtype') == 'debug'
   add_global_arguments('-DDEBUG_NAT64', language: 'c')
+  add_global_arguments('-DENABLE_TRACE_LOG', language: 'c')
 endif
 
 # Define common programs once to avoid duplication

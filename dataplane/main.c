@@ -21,7 +21,7 @@ main(int argc, char **argv) {
 		return -1;
 	}
 
-	// FIXME: re-enable log level name from config
+	log_enable_name(config->loglevel);
 
 	struct dataplane dataplane;
 
