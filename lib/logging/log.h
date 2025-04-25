@@ -53,7 +53,8 @@ enum log_id { TRACE, DEBUG, INFO, WARN, ERROR, LOG_ID_MAX }; // NOLINT
 	} while (0)
 #define LOG_TRACEX(f, fmt, ...)                                                \
 	do {                                                                   \
-		f; LOG(TRACE, fmt, ##__VA_ARGS__);                              \
+		f;                                                             \
+		LOG(TRACE, fmt, ##__VA_ARGS__);                                \
 	} while (0)
 #else
 #define LOG_TRACE(...) (void)(0)
