@@ -115,14 +115,8 @@ packet_to_mbuf(const struct packet *packet) {
 	return packet->mbuf;
 }
 
-#ifdef ENABLE_TRACE_LOG
 struct packet *
 mbuf_to_packet(struct rte_mbuf *mbuf);
-
-#else
-struct packet *
-mbuf_to_packet(struct rte_mbuf *mbuf) {};
-#endif
 
 void
 packet_list_print(struct packet_list *list);
@@ -140,8 +134,13 @@ packet_list_print(struct packet_list *list);
 int
 packet_list_counter(struct packet_list *list);
 
+#ifdef ENABLE_TRACE_LOG
 void
 logtrace_rte_mbuf(struct rte_mbuf *mbuf);
+#else 
+void
+logtrace_rte_mbuf(struct rte_mbuf *mbuf) {};
+#endif // ENABLE_TRACE_LOG
 
 struct ipv6_ext_2byte {
 	uint8_t next_type;
