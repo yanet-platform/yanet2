@@ -1,34 +1,36 @@
 #include "pipeline.h"
 
-#include <arpa/inet.h>
-#include <inttypes.h>
 #include <netinet/icmp6.h>
 #include <netinet/ip_icmp.h>
 
 #include <rte_arp.h>
-#include <rte_common.h>
 #include <rte_ether.h>
-#include <rte_icmp.h>
 #include <rte_ip.h>
 #include <rte_tcp.h>
 #include <rte_udp.h>
 
 #include "dataplane/config/zone.h"
-#include "dataplane/module/module.h"
 #include "lib/logging/log.h"
 
 /**
- * @brief Print contents of an rte_mbuf packet
+ * @brief Print contents of an rte_mbuf packet in a detailed format
  *
- * Prints detailed information about DPDK mbuf packet contents including:
- * - Ethernet header fields
- * - IP header fields (v4 or v6)
- * - Protocol header fields (UDP, TCP, ICMP, ICMPv6)
- * - Packet data length
+ * Prints detailed information about DPDK mbuf packet contents using LOG_TRACE
+ * including:
+ * - Ethernet header fields (MAC addresses, ether type)
+ * - ARP header fields (if packet is ARP)
+ * - IP header fields (v4 or v6, including addresses, protocol, TTL/hop limit)
+ * - Protocol header fields:
+ *   - UDP (ports, length, checksum)
+ *   - TCP (ports, sequence numbers, flags, window)
+ *   - ICMP (type, code, checksum)
+ *   - ICMPv6 (type, code, checksum)
+ * - Final packet data length
  *
- * Used for debugging and verifying packet translations.
+ * Used for detailed packet inspection during debugging, development and
+ * verification of packet processing.
  *
- * @param mbuf Pointer to the DPDK mbuf structure to print
+ * @param mbuf Pointer to the DPDK mbuf structure containing packet to print
  */
 void
 print_rte_mbuf(struct rte_mbuf *mbuf) {

@@ -1,0 +1,132 @@
+#+title: Virtual Run
+
+* Preparation
+#+begin_src shell
+git clone git@github.com:yanet-platform/yanet2.git
+#+end_src
+#+begin_src shell
+apt-get update -y
+
+# Install build tools
+apt-get install -y \
+    meson \
+    clang \
+    git \
+    make
+
+# Install development dependencies
+apt-get install -y \
+    software-properties-common \
+    python3-pyelftools \
+    libnuma-dev \
+    libpcap-dev \
+    libyaml-dev \
+    libibverbs-dev \
+    protobuf-compiler
+
+# Install debugging tools
+apt-get install -y \
+    gdb \
+    lldb \
+    lcov
+# Install tools for 24.04
+apt-get install -y \
+    clang-format-19 \
+    clang-tidy-19 \
+    just \
+    rustup
+
+# Install Go and tools
+apt-get install -y golang-go
+# 22.04
+add-apt-repository 'deb http://mirror.yandex.ru/mirrors/launchpad/longsleep/golang-backports jammy main' -n
+cat <<EOT | sudo apt-key add -
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mI0ET551kQEEAME7Iyb7+c79CVWVwe+QaNlAVgauke1Q9Ycw8Rdxj55lKBJ5Ilpp
+LwiKreAVin4CCaGEtT9btePbYYKg8I+/dsiDbE9+o8e8FIMEBwy+FS+9bwLZ5WZP
+6nEtKPrrk3E+RUUpNbmO6udA62E0q2w7NcoA1jRS2YucsIL39aFXJcmvABEBAAG0
+IUxhdW5jaHBhZCBQUEEgZm9yIFNpbW9uIEVpc2VubWFuboi4BBMBAgAiBQJPnnWR
+AhsDBgsJCAcDAgYVCAIJCgsEFgIDAQIeAQIXgAAKCRD2vIFzVqPUXle6BAC3FUrE
+7j4ltlgGAT2vRNlqWe8W6v0v20e1M8GsFHNB24zL/iRitUMosaWX94ufExwm+83y
+ka4Cq0J4oUCSJtgWDLb6K2hYMKLnofj889+4ZN0akNyMOg0O5usD0oJJuRXL0+e3
+sZo8b2aj7MwrHe+rTLLnlyKlRTUpt1gGF5GuiA==
+=S8ek
+-----END PGP PUBLIC KEY BLOCK-----
+EOT
+sudo apt update
+sudo apt install golang-go
+
+# Install Go modules
+GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+# Install Rust (self update disable need only for rustup installed from apt)
+rustup set auto-self-update disable
+rustup install stable
+
+#+end_src
+There is no rustup on 22.04, and we have no internet access
+#+begin_src shell
+ssh -D 8080 <bastion host>
+#+end_src
+Download rustup-init on a machine with internet access and just
+#+begin_src shell
+wget https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+wget https://github.com/casey/just/releases/download/1.40.0/just-1.40.0-x86_64-unknown-linux-musl.tar.gz
+#+end_src
+Install
+#+begin_src shell
+https_proxy=socks5://127.0.0.1:8080 /home/moonug/rustup-init
+#+end_src
+
+#+begin_src shell
+https_proxy=socks5://127.0.0.1:8080 GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+https_proxy=socks5://127.0.0.1:8080 GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+#+end_src
+#+begin_src shell
+tar xf just-1.40.0-x86_64-unknown-linux-musl.tar.gz -C /usr/local/bin/
+#+end_src
+#+begin_src shell
+git config --global http.proxy 'socks5://127.0.0.1:8080'
+#+end_src
+#+begin_src shell
+just setup
+#+end_src
+
+Configure cargo to use proxy =~/.cargo/config.toml=
+#+begin_src toml
+[http]
+proxy = "socks5://127.0.0.1:8080"
+#+end_src
+
+* Install
+#+begin_src shell
+make
+sudo make cli-install
+sudo install -m 755 target/release/yanet-cli /usr/local/bin
+#+end_src
+
+* Configuration
+#+begin_src shell
+# l2 0 -> 1
+yanet-cli forward device-add --mod=forward0 --dev-id=1
+# l2 1 -> 0
+yanet-cli forward device-add --mod=forward0 --dev-id=0
+yanet-cli forward forward-add --mod=forward0 1 <ip4>/32 1
+yanet-cli forward forward-add --mod=forward0 1 <ip6>/128 1
+yanet-cli forward forward-add --mod=forward0 1 ff02::/16 1
+
+yanet-cli forward forward-add --mod=forward0 0 0.0.0.0/0 0
+yanet-cli forward forward-add --mod=forward0 0 ::/0 0
+
+yanet-cli decap prefix-add -p <prefix> --mod decap0
+
+yanet-cli route insert --mod route0 --via <gw> ::/0
+
+yanet-cli pipeline update --name=bootstrap --modules forward:forward0 --numa=0
+yanet-cli pipeline update --name=decap --modules decap:decap0 --modules forward:forward0 --modules route:route0 --numa=0
+
+yanet-cli pipeline assign --numa=0 --device=1 --pipelines bootstrap:1
+yanet-cli pipeline assign --numa=0 --device=0 --pipelines decap:1
+#+end_src
