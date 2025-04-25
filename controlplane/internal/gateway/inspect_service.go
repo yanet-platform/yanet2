@@ -40,6 +40,7 @@ func (m *InspectService) Inspect(
 			CpConfigs: m.cpConfigs(dpConfig),
 			Pipelines: m.pipelines(dpConfig),
 			Agents:    m.agents(dpConfig),
+			Devices:   m.devices(dpConfig),
 		}
 
 		response.NumaInfo = append(response.NumaInfo, numaInfo)
@@ -119,6 +120,32 @@ func (m *InspectService) agents(dpConfig *ffi.DPConfig) []*ynpb.AgentInfo {
 		}
 
 		out[idx] = agentInfo
+	}
+
+	return out
+}
+
+func (m *InspectService) devices(dpConfig *ffi.DPConfig) []*ynpb.DeviceInfo {
+	devices := dpConfig.Devices()
+	if len(devices) == 0 {
+		return nil
+	}
+
+	out := make([]*ynpb.DeviceInfo, len(devices))
+	for idx, device := range devices {
+		deviceInfo := &ynpb.DeviceInfo{
+			DeviceId:  uint32(device.DeviceID),
+			Pipelines: make([]*ynpb.DevicePipelineInfo, len(device.Pipelines)),
+		}
+
+		for pipelineIdx, pipeline := range device.Pipelines {
+			deviceInfo.Pipelines[pipelineIdx] = &ynpb.DevicePipelineInfo{
+				PipelineIdx: pipeline.PipelineIndex,
+				Weight:      pipeline.Weight,
+			}
+		}
+
+		out[idx] = deviceInfo
 	}
 
 	return out

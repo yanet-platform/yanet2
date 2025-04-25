@@ -35,6 +35,8 @@ message NUMAInfo {
 	repeated PipelineInfo pipelines = 4;
 	// Agents running in this NUMA node.
 	repeated AgentInfo agents = 5;
+	// Devices configured in this NUMA node.
+	repeated DeviceInfo devices = 6;
 }
 
 // DPModuleInfo contains information about a dataplane module.
@@ -93,4 +95,20 @@ message AgentInstanceInfo {
 	uint64 freed = 4;
 	// Gen is the generation number of the agent instance.
 	uint64 gen = 5;
+}
+
+// DeviceInfo contains information about a device.
+message DeviceInfo {
+	// DeviceId is the unique identifier for this device.
+	uint32 device_id = 1;
+	// Pipelines is a list of pipelines configured for this device.
+	repeated DevicePipelineInfo pipelines = 2;
+}
+
+// DevicePipelineInfo contains information about a pipeline in a device.
+message DevicePipelineInfo {
+	// PipelineIdx is the index of the pipeline in the pipeline list.
+	uint32 pipeline_idx = 1;
+	// Weight is the weight of this pipeline in the device.
+	uint64 weight = 2;
 }

@@ -145,6 +145,17 @@ impl InspectService {
             }
             tree.end_child();
 
+            tree.begin_child("Pipelines bindings".to_string());
+            for device in &info.devices {
+                tree.begin_child(format!("Device {}", device.device_id));
+                for pipeline in &device.pipelines {
+                    let pipeline_info = &info.pipelines[pipeline.pipeline_idx as usize];
+                    tree.add_empty_child(format!("Pipeline {} (weight: {})", pipeline_info.name, pipeline.weight));
+                }
+                tree.end_child();
+            }
+            tree.end_child();
+
             tree.end_child();
         }
 

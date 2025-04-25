@@ -275,3 +275,52 @@ func (m *DPModule) Name() string {
 func (m DPModule) String() string {
 	return m.Name()
 }
+
+// DevicePipelineInfo represents information about a pipeline in a device.
+type DevicePipelineInfo struct {
+	PipelineIndex uint32
+	Weight        uint64
+}
+
+// DeviceInfo represents information about a device.
+type DeviceInfo struct {
+	DeviceID  uint16
+	Pipelines []DevicePipelineInfo
+}
+
+// Devices returns all device information from the dataplane.
+func (m *DPConfig) Devices() []DeviceInfo {
+	deviceListInfo := C.yanet_get_cp_device_list_info(m.ptr)
+	if deviceListInfo == nil {
+		return nil
+	}
+	defer C.cp_device_list_info_free(deviceListInfo)
+
+	out := make([]DeviceInfo, deviceListInfo.device_count)
+	for idx := C.uint64_t(0); idx < deviceListInfo.device_count; idx++ {
+		deviceInfo := C.yanet_get_cp_device_info(deviceListInfo, idx)
+		if deviceInfo == nil {
+			continue
+		}
+
+		pipelines := make([]DevicePipelineInfo, deviceInfo.pipeline_count)
+		for pipelineIdx := C.uint64_t(0); pipelineIdx < deviceInfo.pipeline_count; pipelineIdx++ {
+			pipelineInfo := C.yanet_get_cp_device_pipeline_info(deviceInfo, pipelineIdx)
+			if pipelineInfo == nil {
+				continue
+			}
+
+			pipelines[pipelineIdx] = DevicePipelineInfo{
+				PipelineIndex: uint32(pipelineInfo.pipeline_idx),
+				Weight:        uint64(pipelineInfo.weight),
+			}
+		}
+
+		out[idx] = DeviceInfo{
+			DeviceID:  uint16(idx),
+			Pipelines: pipelines,
+		}
+	}
+
+	return out
+}
