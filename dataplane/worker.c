@@ -49,11 +49,12 @@
 
 static bool
 is_target_source_addr(struct rte_mbuf *mbuf) {
-	struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+	struct rte_ether_hdr *eth_hdr =
+		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
 	if (eth_hdr->ether_type != rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 		return false;
 	}
-		
+
 	struct rte_ipv6_hdr *ip6_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, sizeof(struct rte_ether_hdr)
 	);
@@ -207,6 +208,18 @@ worker_submit_burst(
 	uint16_t count,
 	struct packet_list *failed
 ) {
+	for (uint16_t idx = 0; idx < count; ++idx) {
+		if (is_target_source_addr(mbufs[idx])) {
+			LOG_TRACEX(
+				logtrace_rte_mbuf(mbufs[idx]),
+				"Real sending packet to "
+				"port %u, queue %u, %d packets",
+				worker->port_id,
+				worker->queue_id,
+				count
+			);
+		}
+	}
 	uint16_t written = rte_eth_tx_burst(
 		worker->port_id, worker->queue_id, mbufs, count
 	);
@@ -216,7 +229,10 @@ worker_submit_burst(
 	);
 
 	if (written < count)
-		fprintf(stderr, "pituh %d %d\n", written, count);
+		LOG(ERROR,
+		    "Some packets not written: %d written out of %d",
+		    written,
+		    count);
 
 	for (uint16_t idx = written; idx < count; ++idx) {
 		packet_list_add(failed, mbuf_to_packet(mbufs[idx]));
@@ -299,6 +315,7 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 	}
 
 	if (to_write > 0) {
+
 		worker_submit_burst(worker, mbufs, to_write, &failed);
 	}
 	if (packet_list_counter(&failed)) {

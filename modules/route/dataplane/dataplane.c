@@ -5,6 +5,7 @@
 #include <rte_mbuf.h>
 
 #include "common/memory.h"
+#include "lib/logging/log.h"
 
 #include "dataplane/config/zone.h"
 
@@ -48,6 +49,24 @@ route_set_packet_destination(struct packet *packet, struct route *route) {
 	struct rte_ether_hdr *ether_hdr =
 		rte_pktmbuf_mtod_offset(mbuf, struct rte_ether_hdr *, 0);
 
+	LOG_TRACEX(
+		,
+		"route_set_packet_destination [pre] "
+		"src_mac: " RTE_ETHER_ADDR_PRT_FMT
+		", dst_mac: " RTE_ETHER_ADDR_PRT_FMT,
+		RTE_ETHER_ADDR_BYTES(&ether_hdr->src_addr),
+		RTE_ETHER_ADDR_BYTES(&ether_hdr->dst_addr)
+	);
+
+	LOG_TRACEX(
+		,
+		"route_set_packet_destination [route] "
+		"src_mac: " RTE_ETHER_ADDR_PRT_FMT
+		", dst_mac: " RTE_ETHER_ADDR_PRT_FMT,
+		RTE_ETHER_ADDR_BYTES((struct rte_ether_addr *)&route->src_addr),
+		RTE_ETHER_ADDR_BYTES((struct rte_ether_addr *)&route->dst_addr)
+	);
+
 	memcpy(ether_hdr->dst_addr.addr_bytes,
 	       route->dst_addr.addr,
 	       sizeof(route->dst_addr));
@@ -55,6 +74,15 @@ route_set_packet_destination(struct packet *packet, struct route *route) {
 	memcpy(ether_hdr->src_addr.addr_bytes,
 	       route->src_addr.addr,
 	       sizeof(route->src_addr));
+
+	LOG_TRACEX(
+		,
+		"route_set_packet_destination [post] "
+		"src_mac: " RTE_ETHER_ADDR_PRT_FMT
+		", dst_mac: " RTE_ETHER_ADDR_PRT_FMT,
+		RTE_ETHER_ADDR_BYTES(&ether_hdr->src_addr),
+		RTE_ETHER_ADDR_BYTES(&ether_hdr->dst_addr)
+	);
 }
 
 static void
