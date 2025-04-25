@@ -205,51 +205,76 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 	struct packet *packet;
 	while ((packet = packet_list_pop(packets)) != NULL) {
 		if (to_write == ctx->write_size) {
+			LOG_TRACE("Submitting burst of %d packets to same device", to_write);
 			worker_submit_burst(worker, mbufs, to_write, &failed);
 			to_write = 0;
 		}
 
 		if (packet->tx_device_id == worker->device_id) {
-			mbufs[to_write] = packet_to_mbuf(packet);
+			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+			LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Processing packet for same device");
+			mbufs[to_write] = mbuf;
 			++to_write;
 		} else {
+			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+			LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Sending packet to different device %d", packet->tx_device_id);
 			if (worker_send_to_port(ctx, packet)) {
+				LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Failed to send packet to device %d", packet->tx_device_id);
 				packet_list_add(&failed, packet);
 			} else {
+				LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Successfully sent packet to device %d", packet->tx_device_id);
 				worker->dp_worker->remote_tx_count += 1;
 			}
 		}
 	}
-	LOG_TRACEX(packet_list_print(&failed);, "Failed packets");
+	if (packet_list_counter(&failed)) {
+		LOG_TRACEX(packet_list_print(&failed), "Failed packets in first pass");
+	}
 
 	if (to_write > 0) {
+		LOG_TRACE("Submitting final burst of %d packets", to_write);
 		worker_submit_burst(worker, mbufs, to_write, &failed);
+	}
+	if (packet_list_counter(&failed)) {
+		LOG_TRACEX(packet_list_print(&failed), "Failed packets after final burst");
 	}
 
 	struct packet_list sent;
 	packet_list_init(&sent);
+	LOG_TRACE("Collecting packets from other ports");
 	worker_collect_from_port(worker, &sent);
 	while ((packet = packet_list_pop(&sent)) != NULL) {
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 		if (packet->tx_result) {
+			LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Remote transmission failed");
 			packet_list_add(&failed, packet);
 			continue;
 		}
 
+		LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Remote transmission succeeded");
 		// FIXME: per-pipe pending queue
 		packet_list_add(&worker->pending, packet);
 	}
+	if (packet_list_counter(&failed)) {
+		LOG_TRACEX(packet_list_print(&failed), "Failed packets after remote transmission");
+	}
 
+	LOG_TRACE("Processing pending packets");
 	while ((packet = packet_list_first(&worker->pending)) != NULL) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-		if (rte_mbuf_refcnt_read(mbuf) != 1)
+		if (rte_mbuf_refcnt_read(mbuf) != 1) {
+			LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Packet still in use (refcount != 1)");
 			break;
+		}
 
+		LOG_TRACEX(logtrace_rte_mbuf(mbuf), "Freeing completed packet");
 		(void)packet_list_pop(&worker->pending);
 		rte_pktmbuf_free(mbuf);
 	}
 
 	packet_list_concat(packets, &failed);
 
+	LOG_TRACE("Processing %d rx pipes", ctx->rx_pipe_count);
 	for (uint32_t pipe_idx = 0; pipe_idx < ctx->rx_pipe_count; ++pipe_idx) {
 		data_pipe_item_pop(
 			ctx->rx_pipes + pipe_idx, worker_rx_pipe_pop_cb, worker
