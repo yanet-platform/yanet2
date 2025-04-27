@@ -20,7 +20,7 @@ type ModuleConfig struct {
 	ptr ffi.ModuleConfig
 }
 
-func NewModuleConfig(agent *ffi.Agent, name string, deviceCount uint16) (*ModuleConfig, error) {
+func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("agent cannot be nil")
 	}
@@ -28,7 +28,7 @@ func NewModuleConfig(agent *ffi.Agent, name string, deviceCount uint16) (*Module
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.forward_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName, C.uint16_t(deviceCount))
+	ptr, err := C.forward_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize module config: %w", err)
 	}
@@ -49,8 +49,8 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
-// DeviceEnable configures a device for L2 forwarding
-func (m *ModuleConfig) DeviceEnable(srcDeviceID ForwardDeviceID, dstDeviceID ForwardDeviceID) error {
+// L2ForwardEnable configures a device for L2 forwarding
+func (m *ModuleConfig) L2ForwardEnable(srcDeviceID DeviceID, dstDeviceID DeviceID) error {
 	rc, err := C.forward_module_config_enable_l2(
 		m.asRawPtr(),
 		C.uint16_t(srcDeviceID),
@@ -67,7 +67,7 @@ func (m *ModuleConfig) DeviceEnable(srcDeviceID ForwardDeviceID, dstDeviceID For
 
 // ForwardEnable configures forwarding for a specified IP prefix from a source device to a target device.
 // The prefix can be either IPv4 or IPv6.
-func (m *ModuleConfig) ForwardEnable(prefix netip.Prefix, srcDeviceID ForwardDeviceID, dstDeviceID ForwardDeviceID) error {
+func (m *ModuleConfig) L3ForwardEnable(prefix netip.Prefix, srcDeviceID DeviceID, dstDeviceID DeviceID) error {
 	addrStart := prefix.Addr()
 	addrEnd := xnetip.LastAddr(prefix)
 
@@ -86,7 +86,7 @@ func (m *ModuleConfig) ForwardEnable(prefix netip.Prefix, srcDeviceID ForwardDev
 	return fmt.Errorf("unsupported prefix: %s must be either IPv4 or IPv6", prefix)
 }
 
-func (m *ModuleConfig) forwardEnableV4(addrStart [4]byte, addrEnd [4]byte, srcDeviceID ForwardDeviceID, dstDeviceID ForwardDeviceID) error {
+func (m *ModuleConfig) forwardEnableV4(addrStart [4]byte, addrEnd [4]byte, srcDeviceID DeviceID, dstDeviceID DeviceID) error {
 	rc, err := C.forward_module_config_enable_v4(
 		m.asRawPtr(),
 		(*C.uint8_t)(&addrStart[0]),
@@ -103,7 +103,7 @@ func (m *ModuleConfig) forwardEnableV4(addrStart [4]byte, addrEnd [4]byte, srcDe
 	return nil
 }
 
-func (m *ModuleConfig) forwardEnableV6(addrStart [16]byte, addrEnd [16]byte, srcDeviceID ForwardDeviceID, dstDeviceID ForwardDeviceID) error {
+func (m *ModuleConfig) forwardEnableV6(addrStart [16]byte, addrEnd [16]byte, srcDeviceID DeviceID, dstDeviceID DeviceID) error {
 	rc, err := C.forward_module_config_enable_v6(
 		m.asRawPtr(),
 		(*C.uint8_t)(&addrStart[0]),
@@ -118,4 +118,8 @@ func (m *ModuleConfig) forwardEnableV6(addrStart [16]byte, addrEnd [16]byte, src
 		return fmt.Errorf("failed to enable v6 forward from device %d to %d: return code=%d", srcDeviceID, dstDeviceID, rc)
 	}
 	return nil
+}
+
+func topologyDeviceCount(agent *ffi.Agent) uint64 {
+	return uint64(C.forward_module_topology_device_count((*C.struct_agent)(agent.AsRawPtr())))
 }

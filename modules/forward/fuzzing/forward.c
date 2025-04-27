@@ -63,7 +63,7 @@ forward_test_config(struct module_data **module_data) {
 	for (uint16_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
 		struct forward_device_config *device_forward =
 			config->device_forwards + dev_idx;
-		device_forward->l2_forward_device_id = dev_idx;
+		device_forward->l2_dst_device_id = dev_idx;
 		if (lpm_init(&device_forward->lpm_v4, memory_context)) {
 			goto fail;
 		}

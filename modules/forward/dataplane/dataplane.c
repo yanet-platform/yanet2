@@ -81,8 +81,7 @@ forward_handle_l2(
 	if (packet->tx_device_id >= config->device_count)
 		return packet->tx_device_id;
 
-	return config->device_forwards[packet->tx_device_id]
-		.l2_forward_device_id;
+	return config->device_forwards[packet->tx_device_id].l2_dst_device_id;
 }
 
 static void

@@ -5,7 +5,7 @@
 #include "dataplane/config/zone.h"
 
 struct forward_device_config {
-	uint16_t l2_forward_device_id;
+	uint16_t l2_dst_device_id;
 	struct lpm lpm_v4;
 	struct lpm lpm_v6;
 };

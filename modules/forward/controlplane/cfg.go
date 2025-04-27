@@ -18,15 +18,11 @@ type Config struct {
 	GatewayEndpoint string `yaml:"gateway_endpoint"`
 }
 
-type ForwardConfig struct {
-	DeviceForwards []ForwardDeviceConfig `yaml:"devices"`
-}
-
-type ForwardDeviceID uint16
+type DeviceID uint16
 
 type ForwardDeviceConfig struct {
-	L2ForwardDeviceID ForwardDeviceID                  `yaml:"l2_forward_device_id"`
-	Forwards          map[netip.Prefix]ForwardDeviceID `yaml:"forwards"`
+	DstDevId DeviceID                  `yaml:"dst_dev_id"`
+	Forwards map[netip.Prefix]DeviceID `yaml:"forwards"`
 }
 
 type instanceKey struct {

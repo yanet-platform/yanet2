@@ -10,9 +10,7 @@
 #include "controlplane/agent/agent.h"
 
 struct module_data *
-forward_module_config_init(
-	struct agent *agent, const char *name, uint16_t device_count
-) {
+forward_module_config_init(struct agent *agent, const char *name) {
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	uint64_t index;
 	if (dp_config_lookup_module(dp_config, "forward", &index)) {
@@ -20,11 +18,7 @@ forward_module_config_init(
 		return NULL;
 	}
 
-	if (device_count > dp_config->dp_topology.device_count) {
-		errno = EINVAL;
-		return NULL;
-	}
-
+	uint64_t device_count = dp_config->dp_topology.device_count;
 	struct forward_module_config *config =
 		(struct forward_module_config *)memory_balloc(
 			&agent->memory_context,
@@ -36,6 +30,7 @@ forward_module_config_init(
 		return NULL;
 	}
 
+	config->device_count = device_count;
 	config->module_data.index = index;
 	strtcpy(config->module_data.name, name, sizeof(config->module_data.name)
 	);
@@ -50,12 +45,14 @@ forward_module_config_init(
 	struct memory_context *memory_context =
 		&config->module_data.memory_context;
 
-	config->device_count = device_count;
-
-	for (uint16_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
+	// FIXME: Ensure that there are no more than UINT16_MAX devices.
+	for (uint16_t dev_idx = 0; dev_idx < config->device_count; ++dev_idx) {
 		struct forward_device_config *device_forward =
 			config->device_forwards + dev_idx;
-		device_forward->l2_forward_device_id = dev_idx;
+		// dev_idx is the source device ID. By default, there is no
+		// forwarding between devices, and all incoming traffic to the
+		// device goes back through the same device.
+		device_forward->l2_dst_device_id = dev_idx;
 		if (lpm_init(&device_forward->lpm_v4, memory_context)) {
 			goto fail;
 		}
@@ -179,7 +176,12 @@ forward_module_config_enable_l2(
 		return -1;
 	}
 
-	config->device_forwards[src_device_id].l2_forward_device_id =
-		dst_device_id;
+	config->device_forwards[src_device_id].l2_dst_device_id = dst_device_id;
 	return 0;
+}
+
+uint64_t
+forward_module_topology_device_count(struct agent *agent) {
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+	return dp_config->dp_topology.device_count;
 }

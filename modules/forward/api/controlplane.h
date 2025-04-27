@@ -1,14 +1,12 @@
 #pragma once
 
-#include "common/network.h"
+#include <stdint.h>
 
 struct agent;
 struct module_data;
 
 struct module_data *
-forward_module_config_init(
-	struct agent *agent, const char *name, uint16_t device_count
-);
+forward_module_config_init(struct agent *agent, const char *name);
 
 void
 forward_module_config_free(struct module_data *module_data);
@@ -37,3 +35,6 @@ forward_module_config_enable_l2(
 	uint16_t src_device_id,
 	uint16_t dst_device_id
 );
+
+uint64_t
+forward_module_topology_device_count(struct agent *agent);

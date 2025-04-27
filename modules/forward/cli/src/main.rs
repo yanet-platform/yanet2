@@ -3,8 +3,9 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use code::{
-    AddDeviceRequest, AddForwardRequest, ForwardEntry, RemoveDeviceRequest, RemoveForwardRequest, ShowConfigRequest,
-    ShowConfigResponse, TargetModule, forward_service_client::ForwardServiceClient,
+    AddL3ForwardRequest, L2ForwardEnableRequest, L3ForwardEntry, RemoveL3ForwardRequest,
+    ShowConfigRequest, ShowConfigResponse, TargetModule,
+    forward_service_client::ForwardServiceClient,
 };
 use ipnet::IpNet;
 use ptree::TreeBuilder;
@@ -46,10 +47,9 @@ pub enum OutputFormat {
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
     Show(ShowConfigCmd),
-    DeviceAdd(AddDeviceCmd),
-    DeviceRemove(RemoveDeviceCmd),
-    ForwardAdd(AddForwardCmd),
-    ForwardRemove(RemoveForwardCmd),
+    L2Enable(L2ForwardCmd),
+    L3Add(AddL3ForwardCmd),
+    L3Remove(RemoveL3ForwardCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -63,7 +63,7 @@ pub struct ShowConfigCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct AddDeviceCmd {
+pub struct L2ForwardCmd {
     /// The name of the module to operate on.
     #[arg(long = "mod", short)]
     pub module_name: String,
@@ -72,14 +72,16 @@ pub struct AddDeviceCmd {
     /// If no numa specified, the route will be applied to all NUMA nodes.
     #[arg(long)]
     pub numa: Option<Vec<u32>>,
-
-    /// The DeviceID to be added to the forward module configuration.
-    #[arg(required = true, long = "dev-id", short)]
-    pub device: u16,
+    /// Source device ID.
+    #[arg(required = true, long = "src", value_name = "src-dev-id")]
+    pub src: u16,
+    /// Destination device ID.
+    #[arg(required = true, long = "dst", value_name = "dst-dev-id")]
+    pub dst: u16,
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct RemoveDeviceCmd {
+pub struct AddL3ForwardCmd {
     /// The name of the module to operate on.
     #[arg(long = "mod", short)]
     pub module_name: String,
@@ -88,39 +90,19 @@ pub struct RemoveDeviceCmd {
     /// If no numa specified, the route will be applied to all NUMA nodes.
     #[arg(long)]
     pub numa: Option<Vec<u32>>,
-
-    /// The DeviceID to be removed from the forward module configuration.
-    ///
-    /// Removing a device results in removing all forwarding rules
-    /// that point to the removed device.
-    #[arg(required = true, long = "dev-id", short)]
-    pub device: u16,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct AddForwardCmd {
-    /// The name of the module to operate on.
-    #[arg(long = "mod", short)]
-    pub module_name: String,
-    /// NUMA node index where the changes should be applied, optional.
-    ///
-    /// If no numa specified, the route will be applied to all NUMA nodes.
-    #[arg(long)]
-    pub numa: Option<Vec<u32>>,
-
-    /// The deviceId where the forwarding rule will be added.
-    #[arg(required = true, num_args(1), value_name = "dev-id")]
-    pub device: u16,
-    /// The network to which the forwarding rule will be created.
-    #[arg(required = true, num_args(1), value_name = "network")]
+    /// Source device ID.
+    #[arg(required = true, long = "src", value_name = "src-dev-id")]
+    pub src: u16,
+    /// Network prefix.
+    #[arg(required = true, long = "net", value_name = "network")]
     pub network: IpNet,
-    /// The target device ID where the forwarding rule points.
-    #[arg(required = true, num_args(1), value_name = "via-id")]
-    pub target: u16,
+    /// Destination device ID.
+    #[arg(required = true, long = "dst", value_name = "dst-dev-id")]
+    pub dst: u16,
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct RemoveForwardCmd {
+pub struct RemoveL3ForwardCmd {
     /// The name of the module to operate on.
     #[arg(long = "mod", short)]
     pub module_name: String,
@@ -129,12 +111,11 @@ pub struct RemoveForwardCmd {
     /// If no numa specified, the route will be applied to all NUMA nodes.
     #[arg(long)]
     pub numa: Option<Vec<u32>>,
-
-    /// The device ID from which the forwarding rule will be removed.
-    #[arg(required = true, num_args(1), value_name = "dev-id")]
-    pub device: u16,
-    /// The network from which the forwarding rule will be removed.
-    #[arg(required = true, num_args(1), value_name = "network")]
+    /// Source device ID.
+    #[arg(required = true, long = "src", value_name = "src-dev-id")]
+    pub src: u16,
+    /// Network prefix.
+    #[arg(required = true, long = "net", value_name = "network")]
     pub network: IpNet,
 }
 
@@ -164,64 +145,54 @@ impl ForwardService {
         Ok(())
     }
 
-    pub async fn add_device(&mut self, cmd: AddDeviceCmd) -> Result<(), Box<dyn Error>> {
-        let request = AddDeviceRequest {
+    pub async fn enable_l2_forward(&mut self, cmd: L2ForwardCmd) -> Result<(), Box<dyn Error>> {
+        let request = L2ForwardEnableRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
                 numa: cmd.numa.unwrap_or_default(),
             }),
-            device_id: cmd.device as u32,
+            src_dev_id: cmd.src as u32,
+            dst_dev_id: cmd.dst as u32,
         };
-        log::trace!("AddDeviceRequest: {:?}", request);
-        let response = self.client.add_device(request).await?.into_inner();
-        log::debug!("AddDeviceResponse: {:?}", response);
+        log::trace!("L2ForwardEnableRequest: {:?}", request);
+        let response = self.client.enable_l2_forward(request).await?.into_inner();
+        log::debug!("L2ForwardEnableResponse: {:?}", response);
         Ok(())
     }
 
-    pub async fn remove_device(&mut self, cmd: RemoveDeviceCmd) -> Result<(), Box<dyn Error>> {
-        let request = RemoveDeviceRequest {
+    pub async fn add_l3_forward(&mut self, cmd: AddL3ForwardCmd) -> Result<(), Box<dyn Error>> {
+        let request = AddL3ForwardRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
                 numa: cmd.numa.unwrap_or_default(),
             }),
-            device_id: cmd.device as u32,
-        };
-        log::trace!("RemoveDeviceRequest: {:?}", request);
-        let response = self.client.remove_device(request).await?.into_inner();
-        log::debug!("RemoveDeviceResponse: {:?}", response);
-        Ok(())
-    }
-
-    pub async fn add_forward(&mut self, cmd: AddForwardCmd) -> Result<(), Box<dyn Error>> {
-        let request = AddForwardRequest {
-            target: Some(TargetModule {
-                module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
-            }),
-            device_id: cmd.device as u32,
-            forward: Some(ForwardEntry {
+            src_dev_id: cmd.src as u32,
+            forward: Some(L3ForwardEntry {
                 network: cmd.network.to_string(),
-                device_id: cmd.target as u32,
+                dst_dev_id: cmd.dst as u32,
             }),
         };
-        log::trace!("AddForwardRequest: {:?}", request);
-        let response = self.client.add_forward(request).await?.into_inner();
-        log::debug!("AddForwardResponse: {:?}", response);
+        log::trace!("AddL3ForwardRequest: {:?}", request);
+        let response = self.client.add_l3_forward(request).await?.into_inner();
+        log::debug!("AddL3ForwardResponse: {:?}", response);
         Ok(())
     }
 
-    pub async fn remove_forward(&mut self, cmd: RemoveForwardCmd) -> Result<(), Box<dyn Error>> {
-        let request = RemoveForwardRequest {
+    pub async fn remove_l3_forward(
+        &mut self,
+        cmd: RemoveL3ForwardCmd,
+    ) -> Result<(), Box<dyn Error>> {
+        let request = RemoveL3ForwardRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
                 numa: cmd.numa.unwrap_or_default(),
             }),
-            device_id: cmd.device as u32,
+            src_dev_id: cmd.src as u32,
             network: cmd.network.to_string(),
         };
-        log::trace!("RemoveForwardRequest: {:?}", request);
-        let response = self.client.remove_forward(request).await?.into_inner();
-        log::debug!("RemoveForwardResponse: {:?}", response);
+        log::trace!("RemoveL3ForwardRequest: {:?}", request);
+        let response = self.client.remove_l3_forward(request).await?.into_inner();
+        log::debug!("RemoveL3ForwardResponse: {:?}", response);
         Ok(())
     }
 }
@@ -231,10 +202,9 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
     match cmd.mode {
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::DeviceAdd(cmd) => service.add_device(cmd).await,
-        ModeCmd::DeviceRemove(cmd) => service.remove_device(cmd).await,
-        ModeCmd::ForwardAdd(cmd) => service.add_forward(cmd).await,
-        ModeCmd::ForwardRemove(cmd) => service.remove_forward(cmd).await,
+        ModeCmd::L2Enable(cmd) => service.enable_l2_forward(cmd).await,
+        ModeCmd::L3Add(cmd) => service.add_l3_forward(cmd).await,
+        ModeCmd::L3Remove(cmd) => service.remove_l3_forward(cmd).await,
     }
 }
 
@@ -247,18 +217,20 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("Forward Configs".to_string());
 
     for instance in &resp.configs {
-        tree.begin_child(format!("NUMA {}", instance.numa));
+        tree.begin_child(format!("'{}' on NUMA {}", resp.name, instance.numa));
 
-        tree.begin_child("Forwards".to_string());
         for dev in instance.devices.iter() {
-            tree.begin_child(format!("DeviceId: {}", dev.device_id));
-            for fwd in &dev.forwards {
-                tree.add_empty_child(format!("{} via dev-id {}", fwd.network, fwd.device_id));
+            tree.begin_child(format!("dev-id {}", dev.src_dev_id));
+            tree.add_empty_child(format!("L2 via dev-id {}", dev.dst_dev_id));
+            if !dev.forwards.is_empty() {
+                tree.begin_child(format!("L3 forwards (num={})", dev.forwards.len()));
+                for fwd in &dev.forwards {
+                    tree.add_empty_child(format!("{} via dev-id {}", fwd.network, fwd.dst_dev_id));
+                }
+                tree.end_child();
             }
             tree.end_child();
         }
-
-        tree.end_child();
 
         tree.end_child();
     }

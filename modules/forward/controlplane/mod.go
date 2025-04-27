@@ -3,6 +3,7 @@ package forward
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 
 	"go.uber.org/zap"
@@ -46,7 +47,13 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 
 	server := grpc.NewServer()
 
-	forwardService := NewForwardService(agents, log)
+	// STATEMENT: All agents have the same topology.
+	deviceCount := topologyDeviceCount(agents[0])
+	if deviceCount >= math.MaxUint16 {
+		return nil, fmt.Errorf("too many devices: %d (max %d)", deviceCount, math.MaxUint16)
+	}
+
+	forwardService := NewForwardService(agents, log, uint16(deviceCount))
 	forwardpb.RegisterForwardServiceServer(server, forwardService)
 
 	return &ForwardModule{
