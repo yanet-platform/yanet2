@@ -110,7 +110,6 @@ func configureForward(
 	forward := C.forward_module_config_init(
 		agent,
 		C.CString(config.ConfigName),
-		C.uint16_t(len(config.DeviceForwards)),
 	)
 
 	for devIdx, device := range config.DeviceForwards {

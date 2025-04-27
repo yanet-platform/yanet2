@@ -70,7 +70,7 @@ func main() {
 	}
 	defer C.yanet_shm_detach(shm)
 
-	for numaIdx := 0; numaIdx < config.NumaCount; numaIdx++ {
+	for numaIdx := range config.NumaCount {
 		agent := C.agent_attach(
 			shm,
 			C.uint32_t(numaIdx),
@@ -81,7 +81,6 @@ func main() {
 		forward := C.forward_module_config_init(
 			agent,
 			C.CString(config.ModuleName),
-			C.uint16_t(len(config.DeviceForwards)),
 		)
 
 		for devIdx, device := range config.DeviceForwards {
