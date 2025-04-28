@@ -109,16 +109,14 @@ sudo install -m 755 target/release/yanet-cli /usr/local/bin
 
 * Configuration
 #+begin_src shell
-# l2 0 -> 1
-yanet-cli forward device-add --mod=forward0 --dev-id=1
-# l2 1 -> 0
-yanet-cli forward device-add --mod=forward0 --dev-id=0
-yanet-cli forward forward-add --mod=forward0 1 <ip4>/32 1
-yanet-cli forward forward-add --mod=forward0 1 <ip6>/128 1
-yanet-cli forward forward-add --mod=forward0 1 ff02::/16 1
+yanet-cli forward l2-enable --mod=forward0 --src 0 --dst 1
+yanet-cli forward l2-enable --mod=forward0 --src 1 --dst 0
+yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net <ip4>/32
+yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net <ip6>/128
+yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net ff02::/16
 
-yanet-cli forward forward-add --mod=forward0 0 0.0.0.0/0 0
-yanet-cli forward forward-add --mod=forward0 0 ::/0 0
+yanet-cli forward l3-add --mod=forward0 --src 1 --dst 0 --net 0.0.0.0/0
+yanet-cli forward l3-add --mod=forward0 --src 1 --dst 0 --net ::/0
 
 yanet-cli decap prefix-add -p <prefix> --mod decap0
 
