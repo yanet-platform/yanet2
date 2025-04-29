@@ -1,7 +1,7 @@
 #pragma once
 
 #define ADDR_OF(OFFSET)                                                        \
-	((typeof(*OFFSET))(*(uintptr_t *)(OFFSET) +                            \
+	((typeof(*OFFSET))((uintptr_t)*(OFFSET) +                              \
 			   (uintptr_t)((*(OFFSET)) ? (OFFSET) : NULL)))
 #define SET_OFFSET_OF(PTR, ADDR)                                               \
 	do {                                                                   \

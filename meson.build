@@ -9,9 +9,6 @@ add_global_arguments(
   ['-march=corei7', '-g', '-D_GNU_SOURCE'],
   language: 'c',
 )
-if meson.get_compiler('c').get_id() == 'gcc'
-  add_global_arguments('-fno-strict-aliasing', language: 'c')
-endif
 
 if get_option('buildtype') == 'debug'
   add_global_arguments('-DDEBUG_NAT64', language: 'c')
