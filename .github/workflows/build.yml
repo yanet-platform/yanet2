@@ -3,10 +3,10 @@ name: Build YANET
 on:
   push:
     branches: ["main"]
-    paths: ["**.h", "**.c", "**/meson.build", "controlplane/**/*.go", "controlplane/go.mod", "controlplane/go.sum"]
+    paths: ["**.h", "**.c", "**/meson.build", "**.go", "go.mod", "go.sum"]
   pull_request:
     branches: ["main"]
-    paths: ["**.h", "**.c", "**/meson.build", "controlplane/**/*.go", "controlplane/go.mod", "controlplane/go.sum"]
+    paths: ["**.h", "**.c", "**/meson.build", "**.go", "go.mod", "go.sum"]
 
 jobs:
   build:
