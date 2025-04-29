@@ -74,8 +74,11 @@ func (m *Stage) Setup(ctx context.Context) error {
 	}
 
 	for numaIdx, numaConfig := range m.cfg.NUMA {
-		if err := m.setupPipeline(ctx, numaIdx, numaConfig.Pipeline); err != nil {
+		if err := m.setupPipelines(ctx, numaIdx, numaConfig.Pipelines); err != nil {
 			return fmt.Errorf("failed to setup pipeline: %w", err)
+		}
+		if err := m.assignPipelines(ctx, numaIdx, numaConfig.Devices); err != nil {
+			return fmt.Errorf("failed to assign pipeline to devices: %w", err)
 		}
 	}
 
@@ -147,37 +150,73 @@ func (m *Stage) setupModuleConfig(ctx context.Context, numaIdx NUMAIdx, name str
 	return nil
 }
 
-func (m *Stage) setupPipeline(ctx context.Context, numaIdx NUMAIdx, pipeline *PipelineConfig) error {
-	m.log.Infow("setting up pipeline",
+func (m *Stage) setupPipelines(ctx context.Context, numaIdx NUMAIdx, pipelines []PipelineConfig) error {
+	m.log.Infow("setting up pipelines",
 		zap.Uint32("numa", uint32(numaIdx)),
-		zap.String("pipeline", pipeline.Name),
-		zap.Any("chain", pipeline.Chain),
+		zap.Any("pipelines", pipelines),
 	)
-	defer m.log.Infow("finished setting up pipeline",
+	defer m.log.Infow("finished setting up pipelines",
 		zap.Uint32("numa", uint32(numaIdx)),
-		zap.String("pipeline", pipeline.Name),
-		zap.Any("chain", pipeline.Chain),
+		zap.Any("pipelines", pipelines),
 	)
-
-	nodes := make([]*ynpb.PipelineChainNode, 0, len(pipeline.Chain))
-	for _, node := range pipeline.Chain {
-		nodes = append(nodes, &ynpb.PipelineChainNode{
-			ModuleName: node.ModuleName,
-			ConfigName: node.ConfigName,
-		})
-	}
 
 	req := &ynpb.UpdatePipelinesRequest{
 		Numa: uint32(numaIdx),
-		Chains: []*ynpb.PipelineChain{
-			{
-				Name:  pipeline.Name,
-				Nodes: nodes,
-			},
-		},
 	}
+
+	for _, pipeline := range pipelines {
+		nodes := make([]*ynpb.PipelineChainNode, 0, len(pipeline.Chain))
+		for _, node := range pipeline.Chain {
+			nodes = append(nodes, &ynpb.PipelineChainNode{
+				ModuleName: node.ModuleName,
+				ConfigName: node.ConfigName,
+			})
+		}
+
+		req.Chains = append(req.Chains, &ynpb.PipelineChain{
+			Name:  pipeline.Name,
+			Nodes: nodes,
+		})
+	}
+
 	if _, err := m.pipeline.Update(ctx, req); err != nil {
 		return fmt.Errorf("failed to update pipeline: %w", err)
+	}
+
+	return nil
+}
+
+func (m *Stage) assignPipelines(ctx context.Context, numaIdx NUMAIdx, devices []DeviceConfig) error {
+	m.log.Infow("assigning pipelines to devices",
+		zap.Uint32("numa", uint32(numaIdx)),
+		zap.Any("devices", devices),
+	)
+	defer m.log.Infow("finished assigning pipelines to devices",
+		zap.Uint32("numa", uint32(numaIdx)),
+		zap.Any("devices", devices),
+	)
+
+	req := &ynpb.AssignPipelinesRequest{
+		Numa:    uint32(numaIdx),
+		Devices: map[uint32]*ynpb.DevicePipelines{},
+	}
+
+	for _, device := range devices {
+		devicePipelines := make([]*ynpb.DevicePipeline, 0, len(device.Pipelines))
+		for _, pipeline := range device.Pipelines {
+			devicePipelines = append(devicePipelines, &ynpb.DevicePipeline{
+				PipelineName:   pipeline.Name,
+				PipelineWeight: pipeline.Weight,
+			})
+		}
+
+		req.Devices[uint32(device.ID)] = &ynpb.DevicePipelines{
+			Pipelines: devicePipelines,
+		}
+	}
+
+	if _, err := m.pipeline.Assign(ctx, req); err != nil {
+		return fmt.Errorf("failed to assign pipelines to devices: %w", err)
 	}
 
 	return nil
