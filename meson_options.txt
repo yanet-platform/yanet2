@@ -4,3 +4,9 @@ option(
   value: 'disabled',
   description: 'Enable libFuzzer integration',
 )
+option(
+  'trace',
+  type: 'feature',
+  value: 'disabled',
+  description: 'Enable LOG_TRACE[X] macro',
+)

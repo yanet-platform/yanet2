@@ -1313,18 +1313,18 @@ static inline int
 compare_ipv6_headers(struct rte_ipv6_hdr *ipv6_hdr, struct upkt *upkt) {
 	int result = 0;
 
-	if ((htons(ipv6_hdr->vtc_flow & 0xF0000000)) >> 28 !=
-	    (htons(upkt->ip.ipv6.vtc_flow) & 0xF0000000) >> 28) {
+	if ((htonl(ipv6_hdr->vtc_flow) & 0xF0000000) >> 28 !=
+	    (htonl(upkt->ip.ipv6.vtc_flow) & 0xF0000000) >> 28) {
 		result = -1;
 		RTE_LOG(ERR, NAT64_TEST, "Difference in IPv6 version\n");
 		RTE_LOG(ERR,
 			NAT64_TEST,
 			"UPKT: %d\n",
-			(htons(upkt->ip.ipv6.vtc_flow) & 0xF0000000) >> 28);
+			(htonl(upkt->ip.ipv6.vtc_flow) & 0xF0000000) >> 28);
 		RTE_LOG(ERR,
 			NAT64_TEST,
 			"MBUF: %d\n",
-			(htons(ipv6_hdr->vtc_flow) & 0xF0000000) >> 28);
+			(htonl(ipv6_hdr->vtc_flow) & 0xF0000000) >> 28);
 	}
 
 	if (memcmp(&ipv6_hdr->src_addr,

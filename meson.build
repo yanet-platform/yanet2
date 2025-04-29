@@ -2,17 +2,23 @@ project(
   'yanet',
   'c',
   meson_version: '>= 0.61',
-  default_options: ['buildtype=release', 'warning_level=2', 'werror=true'],
+  default_options: ['buildtype=release', 'warning_level=2', 'werror=true', 'optimization=2'],
 )
 
 add_global_arguments(
-  ['-march=corei7', '-g', '-O0', '-D_GNU_SOURCE'],
+  ['-march=corei7', '-g', '-D_GNU_SOURCE'],
   language: 'c',
 )
+if meson.get_compiler('c').get_id() == 'gcc'
+  add_global_arguments('-fno-strict-aliasing', language: 'c')
+endif
+
 if get_option('buildtype') == 'debug'
   add_global_arguments('-DDEBUG_NAT64', language: 'c')
-# uncomment it for debug
-#  add_global_arguments('-DENABLE_TRACE_LOG', language: 'c')
+endif
+
+if get_option('trace').enabled()
+  add_global_arguments('-DENABLE_TRACE_LOG', language: 'c')
 endif
 
 # Define common programs once to avoid duplication
