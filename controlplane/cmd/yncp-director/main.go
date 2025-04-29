@@ -5,12 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/yanet-platform/yanet2/common/go/xcmd"
 	"github.com/yanet-platform/yanet2/controlplane/yncp"
 )
 
@@ -27,7 +26,7 @@ var rootCmd = &cobra.Command{
 	Short: "YANET API Gateway and director",
 	Run: func(rawCmd *cobra.Command, args []string) {
 		if err := run(cmd); err != nil {
-			if errors.Is(err, Interrupted{}) {
+			if errors.Is(err, xcmd.Interrupted{}) {
 				return
 			}
 
@@ -73,32 +72,10 @@ func run(cmd Cmd) error {
 		return director.Run(ctx)
 	})
 	wg.Go(func() error {
-		err := WaitInterrupted(ctx)
+		err := xcmd.WaitInterrupted(ctx)
 		log.Infof("caught signal: %v", err)
 		return err
 	})
 
 	return wg.Wait()
-}
-
-type Interrupted struct {
-	os.Signal
-}
-
-func (m Interrupted) Error() string {
-	return m.String()
-}
-
-// WaitInterrupted blocks until either SIGINT or SIGTERM signal is received or
-// the provided context is canceled.
-func WaitInterrupted(ctx context.Context) error {
-	ch := make(chan os.Signal, 1)
-
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	select {
-	case v := <-ch:
-		return Interrupted{Signal: v}
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
