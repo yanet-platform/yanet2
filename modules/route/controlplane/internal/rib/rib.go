@@ -41,8 +41,10 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	m.log.Debugf("adding unicast route %q via %q", prefix, nexthopAddr)
 
 	route := Route{
-		Prefix:  prefix,
-		NextHop: nexthopAddr,
+		Prefix:    prefix,
+		NextHop:   nexthopAddr,
+		SourceID:  RouteSourceStatic,
+		UpdatedAt: time.Now(),
 	}
 
 	m.mu.Lock()
