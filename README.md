@@ -86,9 +86,9 @@ YANET employs a multi-language approach to leverage the strengths of different p
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yandex/yanet2.git
-   git submodule update --init
+   git clone https://github.com/yanet-platform/yanet2.git
    cd yanet2
+   git submodule update --init   
    ```
 
 2. Configure and build with Meson:
