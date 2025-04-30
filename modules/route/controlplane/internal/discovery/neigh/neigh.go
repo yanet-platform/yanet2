@@ -185,8 +185,10 @@ func (m *NeighMonitor) updateNeighbours() error {
 		linkIndexToHardwareAddr[attrs.Index] = hardwareAddr
 	}
 
+	view := m.nexthopCache.View()
+
 	// Create the new cache map with resolved hardware addresses
-	nexthopCache := make(map[netip.Addr]NeighbourEntry)
+	nexthopCache := map[netip.Addr]NeighbourEntry{}
 	for _, neigh := range neighs {
 		nexthopAddr, ok := netip.AddrFromSlice(neigh.IP)
 		if !ok {
@@ -220,6 +222,12 @@ func (m *NeighMonitor) updateNeighbours() error {
 			},
 			UpdatedAt: time.Now(),
 			State:     NeighbourState(neigh.State),
+		}
+
+		if e, ok := view.Lookup(nexthopAddr); ok {
+			if e.HardwareRoute == entry.HardwareRoute && e.State == entry.State {
+				entry.UpdatedAt = e.UpdatedAt
+			}
 		}
 
 		m.log.Debugw("resolved neighbour entry",

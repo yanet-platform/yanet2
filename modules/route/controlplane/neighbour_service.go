@@ -29,12 +29,12 @@ func NewNeighbourService(neighCache *neigh.NexthopCache, log *zap.SugaredLogger)
 func (m *NeighbourService) List(ctx context.Context, req *routepb.ListNeighboursRequest) (*routepb.ListNeighboursResponse, error) {
 	// Get a view of the current neighbor cache
 	view := m.neighCache.View()
-	entries := view.Entries()
+	entries, size := view.Entries()
 
 	// Convert all entries to proto format
-	protoEntries := make([]*routepb.NeighbourEntry, 0, len(entries))
+	protoEntries := make([]*routepb.NeighbourEntry, 0, size)
 
-	for _, entry := range entries {
+	for entry := range entries {
 		protoEntry := &routepb.NeighbourEntry{
 			NextHop:      entry.NextHop.String(),
 			LinkAddr:     routepb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
