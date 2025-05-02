@@ -71,10 +71,10 @@ dbuild-cnt:
         -t {{ TAG }} .
 
 # Common Docker run configuration
-_docker_run *COMMAND:
+_docker_run IT *COMMAND:
     #!/usr/bin/env bash
     set -euo pipefail
-    docker run -it --rm \
+    docker run {{ IT }} --rm \
         -v {{ ROOT_DIR }}:/yanet2 \
         -v {{ DOCKER_CACHE_DIR }}/gomodcache:/tmp/gomodcache:rw \
         -v {{ DOCKER_CACHE_DIR }}/gocache:/tmp/gocache:rw \
@@ -82,27 +82,27 @@ _docker_run *COMMAND:
         sh -c 'cd /yanet2 && {{ COMMAND }}'
 
 dsetup COVERAGE_MODE="false":
-    @just _docker_run "just setup {{ COVERAGE_MODE }}"
+    @just _docker_run -it "just setup {{ COVERAGE_MODE }}"
 
 # Run tests in Docker
 dtest:
-    @just _docker_run "just setup false test"
+    @just _docker_run -it "just setup false test"
 
 # Run clang-tidy in Docker
 dtidy *FILES:
-    @just _docker_run "just tidy {{ FILES }}"
+    @just _docker_run -q "just tidy {{ FILES }}"
 
 # Run clang-format in Docker
 dbloody *FILES:
-    @just _docker_run "just bloody {{ FILES }}"
+    @just _docker_run -q "just bloody {{ FILES }}"
 
 # Build in Docker
 dbuild:
-    @just _docker_run "just build"
+    @just _docker_run -it "just build"
 
 # Start shell in Docker
 dshell:
-    @just _docker_run "bash"
+    @just _docker_run -it "bash"
 
 # Run arbitrary commands in Docker
 drun *CMDS:
@@ -112,16 +112,16 @@ drun *CMDS:
         echo "Error: No commands specified"
         exit 1
     fi
-    just _docker_run "{{ CMDS }}"
+    just _docker_run -it "{{ CMDS }}"
 
 # Generate coverage report in Docker
 dcoverage:
-    @just _docker_run "just setup true && just coverage"
+    @just _docker_run -q "just setup true && just coverage"
 
 # Build controlplane in Docker
 dcontrolplane:
-    @just _docker_run "make controlplane"
+    @just _docker_run -q "make controlplane"
 
 # Build controlplane in Docker
 dcli:
-    @just _docker_run "make cli"
+    @just _docker_run -q "make cli"

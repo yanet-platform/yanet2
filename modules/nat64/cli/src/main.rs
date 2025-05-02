@@ -6,8 +6,8 @@ use clap_complete::CompleteEnv;
 use ipnet::Ipv6Net;
 
 use code::{
-    nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, SetMtuRequest,
-    ShowConfigRequest, ShowConfigResponse, TargetModule,
+    nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, SetDropUnknownRequest,
+    SetMtuRequest, ShowConfigRequest, ShowConfigResponse, TargetModule,
 };
 use ptree::TreeBuilder;
 use tonic::transport::Channel;
@@ -50,6 +50,8 @@ pub enum ModeCmd {
     },
     /// Set MTU values
     Mtu(MtuCmd),
+    /// Set drop_unknown flags
+    Drop(DropCmd),
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -155,6 +157,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
             MappingCmd::Add(cmd) => service.add_mapping(cmd).await,
         },
         ModeCmd::Mtu(cmd) => service.set_mtu(cmd).await,
+        ModeCmd::Drop(cmd) => service.set_drop_unknown(cmd).await,
     }
 }
 
@@ -228,7 +231,37 @@ impl NAT64Service {
         let response = self.client.set_mtu(request).await?.into_inner();
         log::debug!("SetMtuResponse: {:?}", response);
         Ok(())
+        pub async fn set_drop_unknown(&mut self, cmd: DropCmd) -> Result<(), Box<dyn Error>> {
+            let request = SetDropUnknownRequest {
+                target: Some(TargetModule {
+                    module_name: cmd.module_name,
+                    numa: cmd.numa.unwrap_or_default(),
+                }),
+                drop_unknown_prefix: cmd.drop_unknown_prefix,
+                drop_unknown_mapping: cmd.drop_unknown_mapping,
+            };
+            log::debug!("SetDropUnknownRequest: {:?}", request);
+            let response = self.client.set_drop_unknown(request).await?.into_inner();
+            log::debug!("SetDropUnknownResponse: {:?}", response);
+            Ok(())
+        }
     }
+    
+    /// Command for setting drop_unknown flags
+    #[derive(Debug, Clone, Parser)]
+    pub struct DropCmd {
+        /// NAT64 module name to operate on.
+        #[arg(long = "mod")]
+        pub module_name: String,
+        /// NUMA node index where the changes should be applied.
+        #[arg(long)]
+        pub numa: Option<Vec<u32>>,
+        /// Drop packets with unknown prefix
+        #[arg(long)]
+        pub drop_unknown_prefix: bool,
+        /// Drop packets with unknown mapping
+        #[arg(long)]
+        pub drop_unknown_mapping: bool,
 }
 
 pub fn print_json(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {

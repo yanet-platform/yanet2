@@ -95,3 +95,20 @@ func (m *ModuleConfig) AddPrefix(prefix []byte) error {
 
 	return nil
 }
+
+// SetDropUnknown sets drop_unknown_prefix and drop_unknown_mapping flags
+func (m *ModuleConfig) SetDropUnknown(dropUnknownPrefix bool, dropUnknownMapping bool) error {
+	rc, err := C.nat64_module_config_set_drop_unknown(
+		m.asRawPtr(),
+		C.bool(dropUnknownPrefix),
+		C.bool(dropUnknownMapping),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set drop unknown flags: %w", err)
+	}
+	if rc < 0 {
+		return fmt.Errorf("failed to set drop unknown flags: return code %d", rc)
+	}
+
+	return nil
+}

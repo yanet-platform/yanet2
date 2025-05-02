@@ -30,6 +30,10 @@ service NAT64Service {
 	// SetMTU sets MTU values for IPv4/IPv6
 	rpc SetMTU(SetMTURequest) returns (SetMTUResponse) {
 	}
+
+	// SetDropUnknown sets drop_unknown_prefix and drop_unknown_mapping flags
+	rpc SetDropUnknown(SetDropUnknownRequest) returns (SetDropUnknownResponse) {
+	}
 }
 
 // TargetModule specifies the target module for configuration operations
@@ -122,4 +126,14 @@ message SetMTURequest {
 }
 
 message SetMTUResponse {
+}
+
+// SetDropUnknownRequest specifies drop_unknown flags to set
+message SetDropUnknownRequest {
+	TargetModule target = 1;
+	bool drop_unknown_prefix = 2;  // Drop packets with unknown prefix
+	bool drop_unknown_mapping = 3; // Drop packets with unknown mapping
+}
+
+message SetDropUnknownResponse {
 }

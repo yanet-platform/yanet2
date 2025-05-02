@@ -26,9 +26,11 @@ type NAT64Service struct {
 
 // NAT64Config represents the configuration for a NAT64 instance
 type NAT64Config struct {
-	Prefixes [][]byte
-	Mappings []Mapping
-	MTU      MTUConfig
+	Prefixes           [][]byte
+	Mappings           []Mapping
+	MTU                MTUConfig
+	DropUnknownPrefix  bool
+	DropUnknownMapping bool
 }
 
 // Mapping represents an IPv4-IPv6 address mapping
@@ -236,6 +238,43 @@ func (s *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 	return &nat64pb.SetMTUResponse{}, nil
 }
 
+func (s *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropUnknownRequest) (*nat64pb.SetDropUnknownResponse, error) {
+	numaIndices, err := s.getNUMAIndices(req.Target.Numa)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Update in-memory configs
+	for _, numaIdx := range numaIndices {
+		key := instanceKey{name: req.Target.ModuleName, numaIdx: numaIdx}
+		config := s.configs[key]
+		if config == nil {
+			config = &NAT64Config{}
+			s.configs[key] = config
+		}
+
+		config.DropUnknownPrefix = req.DropUnknownPrefix
+		config.DropUnknownMapping = req.DropUnknownMapping
+	}
+
+	// Update module configs
+	if err := s.updateModuleConfigs(req.Target.ModuleName, numaIndices); err != nil {
+		return nil, fmt.Errorf("failed to update module configs: %w", err)
+	}
+
+	s.log.Infow("successfully set drop unknown flags",
+		zap.String("name", req.Target.ModuleName),
+		zap.Bool("drop_unknown_prefix", req.DropUnknownPrefix),
+		zap.Bool("drop_unknown_mapping", req.DropUnknownMapping),
+		zap.Uint32s("numa", numaIndices),
+	)
+
+	return &nat64pb.SetDropUnknownResponse{}, nil
+}
+
 func (s *NAT64Service) updateModuleConfigs(name string, numaIndices []uint32) error {
 	s.log.Debugw("updating configuration",
 		zap.String("module", name),
@@ -277,6 +316,11 @@ func (s *NAT64Service) updateModuleConfigs(name string, numaIndices []uint32) er
 			if err := moduleConfig.AddMapping(mapping.IPv4, mapping.IPv6, mapping.PrefixIndex); err != nil {
 				return fmt.Errorf("failed to add mapping on NUMA %d: %w", numaIdx, err)
 			}
+		}
+
+		// Set drop unknown flags
+		if err := moduleConfig.SetDropUnknown(config.DropUnknownPrefix, config.DropUnknownMapping); err != nil {
+			return fmt.Errorf("failed to set drop unknown flags on NUMA %d: %w", numaIdx, err)
 		}
 
 		configs[i] = moduleConfig

@@ -48,6 +48,8 @@ nat64_module_config_init_config(
 		return NULL;
 	}
 
+	config->module_data.agent = NULL;
+
 	config->module_data.index = index;
 	strtcpy(config->module_data.name, name, sizeof(config->module_data.name)
 	);
@@ -70,6 +72,12 @@ nat64_module_config_init_config(
 		goto error_lpm_v6;
 	}
 
+	// Initialize v6 prefixes LPM
+	if (lpm_init(&config->prefixes.v6_prefixes, memory_context)) {
+		LOG(ERROR, "Failed to initialize v6_prefixes LPM");
+		goto error_lpm_v6_to_v4;
+	}
+
 	// Initialize other fields
 	config->mappings.count = 0;
 	config->mappings.list = NULL;
@@ -78,8 +86,15 @@ nat64_module_config_init_config(
 	config->mtu.ipv6 = 1280; // Minimum IPv6 MTU
 	config->mtu.ipv4 = 1450; // Default IPv4 MTU
 
+	config->mappings.drop_unknown_mapping = false;
+	config->prefixes.drop_unknown_prefix = false;
+
 	LOG(DEBUG, "Initialized NAT64 module '%s'", name);
 	return &config->module_data;
+
+error_lpm_v6_to_v4:
+	lpm_free(&config->mappings.v6_to_v4);
+	goto error_lpm_v6;
 
 error_lpm_v6:
 	lpm_free(&config->mappings.v4_to_v6);
@@ -112,6 +127,11 @@ nat64_module_config_free(struct module_data *module_data) {
 	    "Freeing v6_to_v4 LPM table at %p",
 	    (void *)&config->mappings.v6_to_v4);
 	lpm_free(&config->mappings.v6_to_v4);
+
+	LOG(DEBUG,
+	    "Freeing v6_prefixes LPM table at %p",
+	    (void *)&config->prefixes.v6_prefixes);
+	lpm_free(&config->prefixes.v6_prefixes);
 
 	if (config->mappings.list) {
 		struct ip4to6 *mapping_list = ADDR_OF(&config->mappings.list);
@@ -167,8 +187,6 @@ nat64_module_config_free(struct module_data *module_data) {
 			sizeof(struct nat64_module_config)
 		);
 	}
-
-	LOG(DEBUG, "Completed cleanup of NAT64 module '%s'", module_data->name);
 }
 
 int
@@ -272,6 +290,19 @@ nat64_module_config_add_prefix(
 	memcpy(prefixes[config->prefixes.count - 1].prefix, prefix, 12);
 	SET_OFFSET_OF(&config->prefixes.prefixes, prefixes);
 
+	// Add to LPM structure
+	if (lpm_insert(
+		    &config->prefixes.v6_prefixes,
+		    12,
+		    prefix,
+		    prefix,
+		    config->prefixes.count - 1
+	    )) {
+		LOG(ERROR, "Failed to insert prefix into v6_prefixes LPM");
+		errno = ENOMEM;
+		return -1;
+	}
+
 	LOG(DEBUG,
 	    "Added prefix "
 	    "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x\n",
@@ -289,4 +320,30 @@ nat64_module_config_add_prefix(
 	    prefix[11]);
 
 	return config->prefixes.count - 1;
+}
+
+int
+nat64_module_config_set_drop_unknown(
+	struct module_data *module_data,
+	bool drop_unknown_prefix,
+	bool drop_unknown_mapping
+) {
+	if (!module_data) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	struct nat64_module_config *config = container_of(
+		module_data, struct nat64_module_config, module_data
+	);
+
+	config->prefixes.drop_unknown_prefix = drop_unknown_prefix;
+	config->mappings.drop_unknown_mapping = drop_unknown_mapping;
+
+	LOG(DEBUG,
+	    "Set drop unknown flags: prefix=%d, mapping=%d",
+	    drop_unknown_prefix,
+	    drop_unknown_mapping);
+
+	return 0;
 }

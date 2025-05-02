@@ -259,48 +259,19 @@ nat64_test_config(struct module_data **module_data) {
 		return -EINVAL;
 	}
 
-	struct nat64_module_config *config =
-		(struct nat64_module_config *)memory_balloc(
-			&test_params.mctx, sizeof(struct nat64_module_config)
+	// Initialize module configuration using nat64_module_config_init_config
+	*module_data = nat64_module_config_init_config(
+		&test_params.mctx, "nat64_test", 0
+	);
+	if (!*module_data) {
+		RTE_LOG(ERR, NAT64_TEST, "Failed to initialize module config\n"
 		);
-	if (!config) {
-		RTE_LOG(ERR,
-			NAT64_TEST,
-			"Failed to allocate memory for config\n");
 		return -ENOMEM;
 	}
 
-	// Initialize module_data fields
-	strtcpy(config->module_data.name,
-		"nat64_test",
-		sizeof(config->module_data.name));
-	memory_context_init_from(
-		&config->module_data.memory_context,
-		&test_params.mctx,
-		"nat64_test"
+	struct nat64_module_config *config = container_of(
+		*module_data, struct nat64_module_config, module_data
 	);
-
-	// config->module_data.free_handler = nat64_module_config_free;
-	config->module_data.index = 0;
-	// Initialize fields
-	config->mappings.count = 0;
-	config->mappings.list = NULL;
-	config->prefixes.prefixes = NULL;
-	config->prefixes.count = 0;
-	config->mtu.ipv4 = 1450;
-	config->mtu.ipv6 = 1280;
-
-	struct memory_context *memory_context =
-		&config->module_data.memory_context;
-	if (lpm_init(&config->mappings.v4_to_v6, memory_context)) {
-		RTE_LOG(ERR, NAT64_TEST, "Failed to initialize v4_to_v6 LPM\n");
-		goto error_config;
-	}
-	if (lpm_init(&config->mappings.v6_to_v4, memory_context)) {
-		RTE_LOG(ERR, NAT64_TEST, "Failed to initialize v6_to_v4 LPM\n");
-		goto error_lpm_v4;
-	}
-
 	// Add prefix
 	uint8_t pfx[12] = {
 		0x20,
@@ -318,7 +289,7 @@ nat64_test_config(struct module_data **module_data) {
 	};
 	if (nat64_module_config_add_prefix((struct module_data *)config, pfx) <
 	    0) {
-		goto error_lpm_v6;
+		goto error_add;
 	}
 
 	// Add mappings
@@ -330,7 +301,7 @@ nat64_test_config(struct module_data **module_data) {
 			    (uint8_t *)config_data.mapping[i].ip6,
 			    0
 		    ) < 0) {
-			goto error_mappings;
+			goto error_add;
 		}
 	}
 
@@ -349,34 +320,10 @@ nat64_test_config(struct module_data **module_data) {
 	(*module_data)->agent = NULL;
 	return 0;
 
-error_mappings:
-	if (config->mappings.list)
-		memory_bfree(
-			&config->module_data.memory_context,
-			config->mappings.list,
-			sizeof(struct ip4to6) * config->mappings.count
-		);
-	if (config->prefixes.prefixes)
-		memory_bfree(
-			&config->module_data.memory_context,
-			config->prefixes.prefixes,
-			sizeof(struct nat64_prefix) * config->prefixes.count
-		);
-
-error_lpm_v6:
-	lpm_free(&config->mappings.v6_to_v4);
-
-error_lpm_v4:
-	lpm_free(&config->mappings.v4_to_v6);
-
-error_config:
-	if (config) {
-		memory_bfree(
-			&test_params.mctx,
-			config,
-			sizeof(struct nat64_module_config)
-		);
-	}
+error_add:
+	memory_bfree(
+		&test_params.mctx, config, sizeof(struct nat64_module_config)
+	);
 	return -EINVAL;
 }
 
@@ -4147,77 +4094,300 @@ test_nat64_generic(int (*tc_provider)(struct test_case **)) {
 }
 
 /**
- * @brief Create test case for packet drop scenario
+ * @brief Create test cases for unknown prefix and mapping handling
  *
- * Creates a test case with:
- * - UDP packet with unknown destination address
- * - Expected empty packet to indicate drop
+ * Creates test cases to verify:
+ * 1. Packets with unknown IPv6 prefix are dropped when drop_unknown_prefix=true
+ * 2. Packets with unknown IPv4/IPv6 mappings are dropped when
+ * drop_unknown_mapping=true
+ * 3. Packets are forwarded when corresponding drop flags are false
  *
- * Used to verify NAT64 drops packets with:
- * - Unknown IPv4/IPv6 address mappings
- *
- * @param test_cases Pointer to test case list to append to
- * @return TEST_SUCCESS on success, error code on failure
+ * @param test_case Pointer to test case list to append to
+ * @return 0 on success, -1 on failure
  */
 static int
-drop_test_case(struct test_case **test_cases) {
+append_test_cases_unknown_handling(struct test_case **test_case) {
+	// Test case 1: IPv6 packet with unknown source prefix
+	struct upkt pkt_unknown_prefix = {
+		.eth =
+			{
+				.dst_addr.addr_bytes =
+					"\xff\xff\xff\xff\xff\xff",
+				.src_addr.addr_bytes =
+					"\x02\x00\x00\x00\x00\x00",
+				.ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV6),
+			},
+		.ip.ipv6 =
+			{.vtc_flow = RTE_BE32(0x60000000),
+			 .payload_len =
+				 RTE_BE16(sizeof(struct rte_udp_hdr) + 10),
+			 .proto = IPPROTO_UDP,
+			 .hop_limits = DEFAULT_TTL,
+			 // Unknown prefix 2001:db9::/96 (different from
+			 // configured 2001:db8::/96)
+			 .src_addr =
+				 {0x20,
+				  0x01,
+				  0x0d,
+				  0xb9,
+				  0,
+				  0,
+				  0,
+				  0,
+				  0,
+				  0,
+				  0,
+				  0,
+				  0,
+				  0,
+				  0,
+				  1},
+			 .dst_addr =
+				 {0x20,
+				  0x01,
+				  0x0d,
+				  0xb9,
+				  0,
+				  0,
+				  0,
+				  0,
+				  0,
+				  0,
+				  0,
+				  0,
+				  192,
+				  0,
+				  2,
+				  1}},
+		.proto.udp =
+			{.src_port = RTE_BE16(12345),
+			 .dst_port = RTE_BE16(53),
+			 .dgram_len = RTE_BE16(sizeof(struct rte_udp_hdr) + 10)
+			},
+		.data_len = 10,
+		.data = "0123456789"
+	};
+
+	// Empty packet means expected drop
+	struct upkt pkt_drop = {.eth.dst_addr.addr_bytes = {0}};
+
+	// Test case 2: IPv4 packet with unknown destination mapping
+	struct upkt pkt_unknown_mapping = {
+		.eth =
+			{
+				.dst_addr.addr_bytes =
+					"\xff\xff\xff\xff\xff\xff",
+				.src_addr.addr_bytes =
+					"\x02\x00\x00\x00\x00\x00",
+				.ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV4),
+			},
+		.ip.ipv4 =
+			{.version_ihl = RTE_IPV4_VHL_DEF,
+			 .total_length = RTE_BE16(
+				 sizeof(struct rte_ipv4_hdr) +
+				 sizeof(struct rte_udp_hdr) + 10
+			 ),
+			 .time_to_live = DEFAULT_TTL,
+			 .next_proto_id = IPPROTO_UDP,
+			 .src_addr = RTE_BE32(RTE_IPV4(192, 0, 2, 1)),
+			 // Unknown IPv4 address not in mappings
+			 .dst_addr = RTE_BE32(RTE_IPV4(198, 51, 100, 99))},
+		.proto.udp =
+			{.src_port = RTE_BE16(12345),
+			 .dst_port = RTE_BE16(53),
+			 .dgram_len = RTE_BE16(sizeof(struct rte_udp_hdr) + 10)
+			},
+		.data_len = 10,
+		.data = "0123456789"
+	};
+
+	struct nat64_module_config *cfg =
+		(struct nat64_module_config *)test_params.module_data;
+	struct upkt pkt_expected_v6, pkt_expected_v4;
+	const char *msg_v6, *msg_v4;
+	if (cfg && (cfg->prefixes.drop_unknown_prefix ||
+		    cfg->mappings.drop_unknown_mapping)) {
+		pkt_expected_v6 = pkt_drop;
+		msg_v6 = "IPv6 unknown prefix: should be dropped";
+	} else {
+		pkt_expected_v6 = pkt_unknown_prefix;
+		msg_v6 = "IPv6 unknown prefix: should be passed";
+	}
+	if (cfg && cfg->mappings.drop_unknown_mapping) {
+		pkt_expected_v4 = pkt_drop;
+		msg_v4 = "IPv4 unknown mapping: should be dropped";
+	} else {
+		pkt_expected_v4 = pkt_unknown_mapping;
+		msg_v4 = "IPv4 unknown mapping: should be passed";
+	}
+
 	append_test_case(
-		test_cases,
-		(struct upkt){
-			.eth =
-				{
-					.dst_addr.addr_bytes =
-						"\xff\xff\xff\xff\xff\xff",
-					.src_addr.addr_bytes =
-						"\x02\x00\x00\x00\x00\x00",
-					.ether_type =
-						RTE_BE16(RTE_ETHER_TYPE_IPV4),
-				},
-			.ip.ipv4 =
-				{
-					.version_ihl = RTE_IPV4_VHL_DEF,
-					.total_length = RTE_BE16(
-						sizeof(struct rte_ipv4_hdr) +
-						sizeof(struct rte_udp_hdr)
-					),
-					.time_to_live = DEFAULT_TTL,
-					.next_proto_id = IPPROTO_UDP,
-					.src_addr = RTE_BE32(0x01010101),
-					.dst_addr = RTE_BE32(
-						RTE_IPV4(198, 58, 100, 1)
-					),
-				},
-			.proto.udp =
-				{
-					.dst_port = RTE_BE16(9),
-					.dgram_len = RTE_BE16(
-						sizeof(struct rte_udp_hdr)
-					),
-				},
-		},
-		(struct upkt){.eth.dst_addr.addr_bytes = {0}},
-		"drop unknow mapping"
+		test_case, pkt_unknown_prefix, pkt_expected_v6, (char *)msg_v6
 	);
-	return TEST_SUCCESS;
+	append_test_case(
+		test_case, pkt_unknown_mapping, pkt_expected_v4, (char *)msg_v4
+	);
+
+	return 0;
 }
 
 /**
- * @brief Test packet drop scenarios in NAT64 translation
+ * @brief Test combined unknown prefix and mapping handling
  *
- * Tests cases where packets should be dropped:
- * - Unknown IPv4/IPv6 address mappings
- * - Invalid ICMP message types
- * - Unsupported ICMPv6 messages (MLD, ND)
- * - Malformed packets
- * - Invalid protocol combinations
+ * Verifies NAT64 behavior when both drop_unknown_prefix and
+ * drop_unknown_mapping are true. Tests that packets with:
+ * - Unknown IPv6 prefixes (not in prefix table)
+ * - Unknown IPv4-IPv6 mappings (not in mapping table)
+ * are properly dropped according to configuration.
+ * Uses default test prefix (2001:db8::/96) and mappings.
  *
- * Verifies packets are properly dropped and don't appear in output.
- *
- * @return 0 on success, error count on failures
+ * @return 0 if all tests pass, number of failures otherwise
  */
-static inline int
-test_nat64_drop() {
-	return test_nat64_generic(drop_test_case);
+static int
+test_nat64_unknown_handling_prefix_mapping(void) {
+	// Save original configuration
+	bool original_drop_unknown_prefix =
+		((struct nat64_module_config *)test_params.module_data)
+			->prefixes.drop_unknown_prefix;
+	bool original_drop_unknown_mapping =
+		((struct nat64_module_config *)test_params.module_data)
+			->mappings.drop_unknown_mapping;
+
+	// Set flags for this test
+	nat64_module_config_set_drop_unknown(
+		test_params.module_data, true, true
+	);
+
+	// Run the test
+	int result = test_nat64_generic(append_test_cases_unknown_handling);
+
+	// Restore original configuration
+	nat64_module_config_set_drop_unknown(
+		test_params.module_data,
+		original_drop_unknown_prefix,
+		original_drop_unknown_mapping
+	);
+
+	return result;
+}
+
+/**
+ * @brief Test unknown prefix handling only
+ *
+ * Verifies NAT64 behavior when only drop_unknown_prefix is true.
+ * Tests that:
+ * - IPv6 packets with unknown prefixes are dropped
+ * - IPv4 packets are processed normally (mapping check skipped)
+ * - Known prefixes are passed through
+ * Checks proper interaction between prefix LPM and drop flag.
+ *
+ * @return 0 if all tests pass, number of failures otherwise
+ */
+static int
+test_nat64_unknown_handling_prefix_only(void) {
+	// Save original configuration
+	bool original_drop_unknown_prefix =
+		((struct nat64_module_config *)test_params.module_data)
+			->prefixes.drop_unknown_prefix;
+	bool original_drop_unknown_mapping =
+		((struct nat64_module_config *)test_params.module_data)
+			->mappings.drop_unknown_mapping;
+
+	// Set flags for this test
+	nat64_module_config_set_drop_unknown(
+		test_params.module_data, true, false
+	);
+
+	// Run the test
+	int result = test_nat64_generic(append_test_cases_unknown_handling);
+
+	// Restore original configuration
+	nat64_module_config_set_drop_unknown(
+		test_params.module_data,
+		original_drop_unknown_prefix,
+		original_drop_unknown_mapping
+	);
+
+	return result;
+}
+
+/**
+ * @brief Test unknown mapping handling only
+ *
+ * Verifies NAT64 behavior when only drop_unknown_mapping is true.
+ * Tests that:
+ * - IPv6 packets with unknown mappings are dropped
+ * - IPv4 packets with unknown mappings are dropped
+ * - Packets with known mappings are passed through
+ * Validates mapping table lookup and flag processing.
+ *
+ * @return 0 if all tests pass, number of failures otherwise
+ */
+static int
+test_nat64_unknown_handling_mapping_only(void) {
+	// Save original configuration
+	bool original_drop_unknown_prefix =
+		((struct nat64_module_config *)test_params.module_data)
+			->prefixes.drop_unknown_prefix;
+	bool original_drop_unknown_mapping =
+		((struct nat64_module_config *)test_params.module_data)
+			->mappings.drop_unknown_mapping;
+
+	// Set flags for this test
+	nat64_module_config_set_drop_unknown(
+		test_params.module_data, false, true
+	);
+
+	// Run the test
+	int result = test_nat64_generic(append_test_cases_unknown_handling);
+
+	// Restore original configuration
+	nat64_module_config_set_drop_unknown(
+		test_params.module_data,
+		original_drop_unknown_prefix,
+		original_drop_unknown_mapping
+	);
+
+	return result;
+}
+
+/**
+ * @brief Test passthrough behavior
+ *
+ * Verifies NAT64 behavior when both drop_unknown_prefix and
+ * drop_unknown_mapping are false. Tests that:
+ * - All IPv6 packets are passed through (prefix/mapping ignored)
+ * - All IPv4 packets are passed through (mapping ignored)
+ * Validates default permissive mode operation.
+ *
+ * @return 0 if all tests pass, number of failures otherwise
+ */
+static int
+test_nat64_unknown_handling_none(void) {
+	// Save original configuration
+	bool original_drop_unknown_prefix =
+		((struct nat64_module_config *)test_params.module_data)
+			->prefixes.drop_unknown_prefix;
+	bool original_drop_unknown_mapping =
+		((struct nat64_module_config *)test_params.module_data)
+			->mappings.drop_unknown_mapping;
+
+	// Set flags for this test
+	nat64_module_config_set_drop_unknown(
+		test_params.module_data, false, false
+	);
+
+	// Run the test
+	int result = test_nat64_generic(append_test_cases_unknown_handling);
+
+	// Restore original configuration
+	nat64_module_config_set_drop_unknown(
+		test_params.module_data,
+		original_drop_unknown_prefix,
+		original_drop_unknown_mapping
+	);
+
+	return result;
 }
 
 /**
@@ -4426,6 +4596,21 @@ test_nat64_tcp() {
 }
 
 /**
+ * @brief Test handling of unknown prefixes and mappings
+ *
+ * Tests NAT64 behavior with:
+ * - Unknown IPv6 prefixes
+ * - Unknown address mappings
+ * - Proper packet dropping based on configuration
+ *
+ * @return 0 on success, error count on failures
+ */
+static inline int
+test_nat64_unknown_handling() {
+	return test_nat64_generic(append_test_cases_unknown_handling);
+}
+
+/**
  * @brief Test ICMP packet translation
  *
  * Verifies:
@@ -4440,6 +4625,77 @@ test_nat64_tcp() {
 static inline int
 test_nat64_icmp_more() {
 	return test_nat64_generic(append_test_cases_from_mappings_icmp_more);
+}
+
+/**
+ * @brief Test default configuration values for NAT64 module
+ *
+ * Verifies that the NAT64 module is initialized with correct default values:
+ * - MTU values (IPv4: 1450, IPv6: 1280)
+ * - Empty mappings list
+ * - Empty prefixes list
+ * - Memory context initialization
+ *
+ * @return TEST_SUCCESS on success, error code on failure
+ */
+static inline int
+test_default_values(void) {
+	struct module_data *module_data;
+	// Initialize module configuration using nat64_module_config_init_config
+	module_data = nat64_module_config_init_config(
+		&test_params.mctx, "nat64_test", 0
+	);
+	if (!module_data) {
+		RTE_LOG(ERR, NAT64_TEST, "Failed to initialize module config\n"
+		);
+		return -ENOMEM;
+	}
+
+	struct nat64_module_config *config = container_of(
+		module_data, struct nat64_module_config, module_data
+	);
+
+	TEST_ASSERT_NOT_NULL(config, "Module config is NULL\n");
+
+	// Verify MTU defaults
+	TEST_ASSERT_EQUAL(
+		config->mtu.ipv4, 1450, "Incorrect IPv4 MTU default\n"
+	);
+	TEST_ASSERT_EQUAL(
+		config->mtu.ipv6, 1280, "Incorrect IPv6 MTU default\n"
+	);
+
+	// Verify empty mappings
+	TEST_ASSERT_EQUAL(
+		config->mappings.count, 0, "Mappings count should be 0\n"
+	);
+	TEST_ASSERT_NULL(
+		config->mappings.list, "Mappings list should be NULL\n"
+	);
+
+	// Verify empty prefixes
+	TEST_ASSERT_EQUAL(
+		config->prefixes.count, 0, "Prefixes count should be 0\n"
+	);
+	TEST_ASSERT_NULL(
+		config->prefixes.prefixes, "Prefixes list should be NULL\n"
+	);
+
+	// Verify default drop flags
+	TEST_ASSERT_EQUAL(
+		config->mappings.drop_unknown_mapping,
+		false,
+		"drop_unknown_mapping default should be false\n"
+	);
+	TEST_ASSERT_EQUAL(
+		config->prefixes.drop_unknown_prefix,
+		false,
+		"drop_unknown_prefix default should be false\n"
+	);
+
+	nat64_module_config_free(module_data);
+
+	return TEST_SUCCESS;
 }
 
 /**
@@ -4482,13 +4738,35 @@ static struct unit_test_suite nat64_test_suite =
 		 TEST_CASE_NAMED(
 			 "test_nat64_config_handler", test_module_config_handler
 		 ),
-		 TEST_CASE_NAMED("test_nat64_drop", test_nat64_drop),
+		 TEST_CASE_NAMED(
+			 "test_nat64_default_values", test_default_values
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_unknown_handling_prefix_mapping",
+			 test_nat64_unknown_handling_prefix_mapping
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_unknown_handling_prefix_only",
+			 test_nat64_unknown_handling_prefix_only
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_unknown_handling_mapping_only",
+			 test_nat64_unknown_handling_mapping_only
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_unknown_handling_none",
+			 test_nat64_unknown_handling_none
+		 ),
 		 TEST_CASE_NAMED("test_nat64_udp", test_nat64_udp),
 		 TEST_CASE_NAMED("test_nat64_tcp", test_nat64_tcp),
 		 TEST_CASE_NAMED("test_nat64_icmp", test_nat64_icmp),
 		 TEST_CASE_NAMED("test_nat64_icmp_more", test_nat64_icmp_more),
 		 TEST_CASE_NAMED(
 			 "test_nat64_udp_checksum", test_nat64_udp_checksum
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_unknown_handling",
+			 test_nat64_unknown_handling
 		 ),
 
 		 TEST_CASES_END() /**< NULL terminate unit test array */

@@ -56,16 +56,21 @@ struct nat64_module_config {
 	struct module_data module_data;
 	/* Address mapping configuration */
 	struct {
-		uint64_t count;	     /**< Number of mappings */
-		struct ip4to6 *list; /**< List of IPv4 to IPv6 mappings */
-		struct lpm v4_to_v6; /**< IPv4 to IPv6 LPM table */
-		struct lpm v6_to_v4; /**< IPv6 to IPv4 LPM table */
+		uint64_t count;		   /**< Number of mappings */
+		struct ip4to6 *list;	   /**< List of IPv4 to IPv6 mappings */
+		struct lpm v4_to_v6;	   /**< IPv4 to IPv6 LPM table */
+		struct lpm v6_to_v4;	   /**< IPv6 to IPv4 LPM table */
+		bool drop_unknown_mapping; /**< Drop packets with unknown
+					      mapping */
 	} mappings;
 
 	/* NAT64 prefix configuration */
 	struct {
 		struct nat64_prefix *prefixes; /**< Array of IPv6 prefixes */
 		uint64_t count;		       /**< Number of prefixes */
+		bool drop_unknown_prefix; /**< Drop packets with unknown prefix
+					   */
+		struct lpm v6_prefixes;	  /**< LPM table for IPv6 prefixes */
 	} prefixes;
 
 	/* MTU configuration */

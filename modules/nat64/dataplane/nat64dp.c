@@ -1553,9 +1553,28 @@ nat64_handle_v6(
 		find_ip6to4(nat64_config, (uint8_t *)&ipv6_header->src_addr);
 	if (NULL == new_src_addr) {
 		LOG_DBG(NAT64,
-			"not found mapping for " IPv6_BYTES_FMT ". Drop\n",
+			"not found mapping for " IPv6_BYTES_FMT "\n",
 			IPv6_BYTES(ipv6_header->src_addr));
-		return -1;
+		if (nat64_config->prefixes.drop_unknown_prefix) {
+			uint32_t prefix_index = lpm_lookup(
+				&nat64_config->prefixes.v6_prefixes,
+				12,
+				(uint8_t *)&ipv6_header->src_addr
+			);
+			if (prefix_index == LPM_VALUE_INVALID) {
+				LOG_DBG(NAT64,
+					"Dropping packet due to unknown IPv6 "
+					"prefix\n");
+				return -1;
+			}
+		}
+		if (nat64_config->mappings.drop_unknown_mapping) {
+			LOG_DBG(NAT64,
+				"Dropping packet due to no IPv6->IPv4 mapping\n"
+			);
+			return -1;
+		}
+		return 0;
 	}
 
 	LOG_DBG(NAT64,
@@ -2510,12 +2529,17 @@ nat64_handle_v4(
 	uint32_t addr4 = ipv4_header->dst_addr;
 	struct ip4to6 *entry = find_ip4to6(nat64_config, &addr4);
 	if (!entry) {
-		RTE_LOG(ERR,
-			NAT64,
+		LOG_DBG(NAT64,
 			"Failed to find IPv6 mapping for IPv4 "
 			"address " IPv4_BYTES_FMT "\n",
 			IPv4_BYTES_LE(addr4));
-		return -1; //
+		if (nat64_config->mappings.drop_unknown_mapping) {
+			LOG_DBG(NAT64,
+				"Dropping packet due to no IPv4->IPv6 mapping\n"
+			);
+			return -1;
+		}
+		return 0;
 	}
 
 	LOG_DBG(NAT64,
@@ -2843,7 +2867,9 @@ nat64_handle_packets(
 				"Dropping packet due to translation failure\n");
 			packet_front_drop(packet_front, packet);
 		} else {
-			LOG_DBG(NAT64, "Successfully translated packet\n");
+			LOG_DBG(NAT64,
+				"Packet successfully translated or passed "
+				"through\n");
 			packet_front_output(packet_front, packet);
 		}
 	}

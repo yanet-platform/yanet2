@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -75,4 +76,23 @@ nat64_module_config_add_mapping(
 int
 nat64_module_config_add_prefix(
 	struct module_data *module_data, uint8_t prefix[12]
+);
+
+/**
+ * @brief Sets drop_unknown_prefix and drop_unknown_mapping flags
+ *
+ * Configures whether packets with unknown prefixes or mappings should be
+ * dropped.
+ *
+ * @param module_data Pointer to the module data structure
+ * @param drop_unknown_prefix Whether to drop packets with unknown prefix
+ * @param drop_unknown_mapping Whether to drop packets with unknown mapping
+ * @return 0 on success, -1 on failure with errno set:
+ *         - EINVAL: Invalid module data pointer
+ */
+int
+nat64_module_config_set_drop_unknown(
+	struct module_data *module_data,
+	bool drop_unknown_prefix,
+	bool drop_unknown_mapping
 );
