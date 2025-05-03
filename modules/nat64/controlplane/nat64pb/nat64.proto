@@ -31,8 +31,10 @@ service NAT64Service {
 	rpc SetMTU(SetMTURequest) returns (SetMTUResponse) {
 	}
 
-	// SetDropUnknown sets drop_unknown_prefix and drop_unknown_mapping flags
-	rpc SetDropUnknown(SetDropUnknownRequest) returns (SetDropUnknownResponse) {
+	// SetDropUnknown sets drop_unknown_prefix and drop_unknown_mapping
+	// flags
+	rpc SetDropUnknown(SetDropUnknownRequest)
+		returns (SetDropUnknownResponse) {
 	}
 }
 
