@@ -22,8 +22,9 @@ type Cmd struct {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "yanet-controlplane-director",
-	Short: "YANET API Gateway and director",
+	Use:     "yanet-controlplane-director",
+	Short:   "YANET API Gateway and director",
+	Version: yncp.Version(),
 	Run: func(rawCmd *cobra.Command, args []string) {
 		if err := run(cmd); err != nil {
 			if errors.Is(err, xcmd.Interrupted{}) {

@@ -32,12 +32,15 @@ ynpb_gen = custom_target(
     build_by_default: true,
 )
 
+ld_flags = '-X github.com/yanet-platform/yanet2/controlplane/internal/version.version=' + meson.project_version()
+
 custom_target(
     'yanet-controlplane',
     output: 'yanet-controlplane',
     command: [
         go,
         'build',
+        '-ldflags=' + ld_flags,
         '-o', '@OUTPUT@',
         join_paths(meson.current_source_dir(), 'cmd', 'yncp-director', 'main.go'),
     ],
