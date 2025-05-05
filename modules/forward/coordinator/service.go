@@ -8,7 +8,9 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/coordinator/coordinatorpb"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
@@ -38,37 +40,17 @@ func (m *ModuleService) SetupConfig(
 	numaNode := req.GetNumaNode()
 	configName := req.GetConfigName()
 
-	m.log.Infow("setting up configuration",
-		zap.Uint32("numa", numaNode),
-	)
-
 	config := &Config{}
 	if err := yaml.Unmarshal(req.GetConfig(), config); err != nil {
-		m.log.Errorw("failed to unmarshal configuration",
-			zap.Uint32("numa", numaNode),
-			zap.Error(err),
-		)
-		return &coordinatorpb.SetupConfigResponse{
-			Success: false,
-			Message: fmt.Sprintf("failed to unmarshal configuration: %v", err),
-		}, nil
+		return nil, status.Errorf(codes.InvalidArgument, "failed to unmarshal configuration: %v", err)
 	}
 
-	// Setup configuration to the module
 	if err := m.setupConfig(ctx, numaNode, configName, config); err != nil {
-		m.log.Errorw("failed to setup configuration",
-			zap.Uint32("numa", numaNode),
-			zap.Error(err),
-		)
-		return &coordinatorpb.SetupConfigResponse{
-			Success: false,
-			Message: fmt.Sprintf("failed to setup configuration: %v", err),
-		}, nil
+		return nil, status.Errorf(codes.Internal, "failed to setup configuration: %v", err)
 	}
 
 	return &coordinatorpb.SetupConfigResponse{
 		Success: true,
-		Message: "configuration setup successfully",
 	}, nil
 }
 

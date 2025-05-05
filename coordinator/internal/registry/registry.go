@@ -2,6 +2,8 @@ package registry
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"sync"
 )
 
@@ -56,10 +58,5 @@ func (m *Registry) ListModules() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	names := make([]string, 0, len(m.modules))
-	for name := range m.modules {
-		names = append(names, name)
-	}
-
-	return names
+	return slices.Collect(maps.Keys(m.modules))
 }

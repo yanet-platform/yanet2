@@ -20,15 +20,22 @@ stages:
           forward:
             config_name: "forward-bootstrap0"
             config_path: "modules/forward/etc/yanet/forward-bootstrap.yaml"
+          route:
+            config_name: "route-bootstrap0"
+            config_path: "modules/route/etc/yanet/route-bootstrap.yaml"
         pipelines:
           - name: bootstrap
             chain:
               - module_name: "forward"
                 config_name: "forward-bootstrap0"
+              - module_name: "route"
+                config_name: "route-bootstrap0"
           - name: decap
             chain:
               - module_name: "forward"
                 config_name: "forward-bootstrap0"
+              - module_name: "route"
+                config_name: "route-bootstrap0"
         devices:
           - id: 0
             pipelines:
