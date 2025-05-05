@@ -14,6 +14,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 	"github.com/yanet-platform/yanet2/coordinator/coordinatorpb"
+	"github.com/yanet-platform/yanet2/coordinator/internal/builtin"
 	"github.com/yanet-platform/yanet2/coordinator/internal/registry"
 	"github.com/yanet-platform/yanet2/coordinator/internal/stage"
 	forwardcoord "github.com/yanet-platform/yanet2/modules/forward/coordinator"
@@ -47,7 +48,7 @@ type Coordinator struct {
 	registry       *registry.Registry
 	registryRx     <-chan registry.RegisterEvent
 	server         *grpc.Server
-	builtInModules []builtInModule
+	builtInModules []*builtin.BuiltInModuleRunner
 	log            *zap.SugaredLogger
 }
 
@@ -69,16 +70,16 @@ func NewCoordinator(cfg *Config, options ...CoordinatorOption) (*Coordinator, er
 
 	const builtInModuleEndpoint = "[::1]:0"
 
-	builtInModules := []builtInModule{
-		forwardcoord.NewForwardModule(
+	builtInModules := []*builtin.BuiltInModuleRunner{
+		builtin.NewBuiltInModuleRunner(
+			forwardcoord.NewModule(cfg.Gateway.Endpoint, log),
 			builtInModuleEndpoint,
-			cfg.Gateway.Endpoint,
 			cfg.Coordinator.Endpoint,
 			log,
 		),
-		routecoord.NewModule(
+		builtin.NewBuiltInModuleRunner(
+			routecoord.NewModule(cfg.Gateway.Endpoint, log),
 			builtInModuleEndpoint,
-			cfg.Gateway.Endpoint,
 			cfg.Coordinator.Endpoint,
 			log,
 		),
@@ -143,9 +144,9 @@ func (m *Coordinator) runBuiltInModules(ctx context.Context) error {
 	defer m.log.Info("stopped built-in modules")
 
 	wg, ctx := errgroup.WithContext(ctx)
-	for _, module := range m.builtInModules {
+	for _, runner := range m.builtInModules {
 		wg.Go(func() error {
-			return module.Run(ctx)
+			return runner.Run(ctx)
 		})
 	}
 
@@ -219,8 +220,4 @@ func (m *Coordinator) Close() error {
 	}
 
 	return nil
-}
-
-type builtInModule interface {
-	Run(ctx context.Context) error
 }

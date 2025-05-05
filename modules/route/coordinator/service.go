@@ -53,9 +53,7 @@ func (m *ModuleService) SetupConfig(
 		return nil, status.Errorf(codes.Internal, "failed to setup configuration: %v", err)
 	}
 
-	return &coordinatorpb.SetupConfigResponse{
-		Success: true,
-	}, nil
+	return &coordinatorpb.SetupConfigResponse{}, nil
 }
 
 func (m *ModuleService) setupConfig(

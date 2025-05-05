@@ -24,10 +24,4 @@ message SetupConfigRequest {
 
 // SetupConfigResponse is the response to a setup configuration request.
 message SetupConfigResponse {
-	// Success indicates whether configuration was successfully applied.
-	bool success = 1;
-
-	// Message provides additional information about the configuration
-	// application.
-	string message = 2;
 }

@@ -7,7 +7,9 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/coordinator/coordinatorpb"
 )
@@ -49,15 +51,7 @@ func (m *RegistryService) RegisterModule(
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		m.log.Errorw("failed to connect to module endpoint",
-			zap.String("name", name),
-			zap.String("endpoint", endpoint),
-			zap.Error(err),
-		)
-		return &coordinatorpb.RegisterModuleResponse{
-			Success: false,
-			Message: fmt.Sprintf("failed to connect to endpoint: %v", err),
-		}, nil
+		return nil, status.Errorf(codes.Unavailable, "failed to connect to module endpoint: %v", err)
 	}
 
 	// Create a module struct that implements Module interface
@@ -73,9 +67,7 @@ func (m *RegistryService) RegisterModule(
 
 	m.registry.RegisterModule(name, mod)
 
-	return &coordinatorpb.RegisterModuleResponse{
-		Success: true,
-	}, nil
+	return &coordinatorpb.RegisterModuleResponse{}, nil
 }
 
 // ListModules lists all registered modules.
@@ -120,16 +112,13 @@ type module struct {
 }
 
 func (m *module) SetupConfig(ctx context.Context, numaIdx uint32, configName string, config []byte) error {
-	resp, err := m.conn.SetupConfig(ctx, &coordinatorpb.SetupConfigRequest{
+	_, err := m.conn.SetupConfig(ctx, &coordinatorpb.SetupConfigRequest{
 		NumaNode:   numaIdx,
 		ConfigName: configName,
 		Config:     config,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to setup config: %w", err)
-	}
-	if !resp.Success {
-		return fmt.Errorf("failed to setup config: %s", resp.Message)
 	}
 
 	return nil

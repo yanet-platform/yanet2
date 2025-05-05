@@ -31,11 +31,6 @@ message RegisterModuleRequest {
 
 // RegisterModuleResponse is the response to a register module request.
 message RegisterModuleResponse {
-	// Success indicates whether registration was successful.
-	bool success = 1;
-
-	// Message provides additional information about the registration.
-	string message = 2;
 }
 
 // ListModulesRequest is a request to list all registered modules.
@@ -57,7 +52,6 @@ message GetModuleRequest {
 
 // GetModuleResponse is the response to a get module request.
 message GetModuleResponse {
-	// Exists indicates whether the module exists.
 	bool exists = 1;
 
 	// Name is the name of the module.

@@ -49,9 +49,7 @@ func (m *ModuleService) SetupConfig(
 		return nil, status.Errorf(codes.Internal, "failed to setup configuration: %v", err)
 	}
 
-	return &coordinatorpb.SetupConfigResponse{
-		Success: true,
-	}, nil
+	return &coordinatorpb.SetupConfigResponse{}, nil
 }
 
 // setupConfig setups the provided configuration to the forward module for the
