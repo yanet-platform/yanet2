@@ -273,7 +273,7 @@ func validateTarget(target *forwardpb.TargetModule, numAgents int) (string, numa
 		return "", numa.NUMAMap(0), status.Errorf(codes.InvalidArgument, "module name is required")
 	}
 
-	numaMap, err := tranformNUMAMap(numa.NUMAMap(target.Numa), numAgents)
+	numaMap, err := transformNUMAMap(numa.NUMAMap(target.Numa), numAgents)
 	if err != nil {
 		return "", numa.NUMAMap(0), err
 	}
@@ -361,7 +361,7 @@ func updateModuleConfigs(
 	return nil
 }
 
-func tranformNUMAMap(requestedNuma numa.NUMAMap, numAgents int) (numa.NUMAMap, error) {
+func transformNUMAMap(requestedNuma numa.NUMAMap, numAgents int) (numa.NUMAMap, error) {
 	numaMap := requestedNuma.Intersect(numa.NewWithTrailingOnes(numAgents))
 
 	if numaMap.IsEmpty() {
