@@ -12,11 +12,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/common/go/numa"
+	"github.com/yanet-platform/yanet2/common/go/xiter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
 
-type ffiConfigUpdater func(m *ForwardService, name string, numaIndices []uint32) error
+type ffiConfigUpdater func(m *ForwardService, name string, numaMap numa.NUMAMap) error
 
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
@@ -40,7 +42,7 @@ func NewForwardService(agents []*ffi.Agent, log *zap.SugaredLogger, deviceCount 
 }
 
 func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConfigRequest) (*forwardpb.ShowConfigResponse, error) {
-	name, numaIndices, err := validateTarget(req.Target, len(m.agents))
+	name, numaMap, err := validateTarget(req.Target, len(m.agents))
 	if err != nil {
 		return nil, err
 	}
@@ -48,8 +50,8 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	configs := make([]*forwardpb.InstanceConfig, 0, len(numaIndices))
-	for _, numaIdx := range numaIndices {
+	configs := make([]*forwardpb.InstanceConfig, 0, numaMap.Len())
+	for numaIdx := range numaMap.Iter() {
 		key := instanceKey{name: name, numaIdx: numaIdx}
 		config := m.configs[key]
 		if config == nil {
@@ -99,7 +101,7 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 }
 
 func (m *ForwardService) EnableL2Forward(ctx context.Context, req *forwardpb.L2ForwardEnableRequest) (*forwardpb.L2ForwardEnableResponse, error) {
-	name, numa, err := validateTarget(req.Target, len(m.agents))
+	name, numaMap, err := validateTarget(req.Target, len(m.agents))
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +115,7 @@ func (m *ForwardService) EnableL2Forward(ctx context.Context, req *forwardpb.L2F
 	defer m.mu.Unlock()
 
 	// Enable (or override) forwarding between devices
-	for _, numaIdx := range numa {
+	for numaIdx := range numaMap.Iter() {
 		key := instanceKey{name: name, numaIdx: numaIdx}
 		config, exists := m.configs[key]
 		if !exists {
@@ -128,7 +130,7 @@ func (m *ForwardService) EnableL2Forward(ctx context.Context, req *forwardpb.L2F
 	// FIXME: Commit in-memory config only if SHM updates are successful?
 
 	// Then update shm configs
-	if err := m.updater(m, name, numa); err != nil {
+	if err := m.updater(m, name, numaMap); err != nil {
 		return nil, fmt.Errorf("failed to update module configs: %w", err)
 	}
 
@@ -136,7 +138,7 @@ func (m *ForwardService) EnableL2Forward(ctx context.Context, req *forwardpb.L2F
 		zap.String("name", name),
 		zap.Uint16("src_dev_id", uint16(srcDevId)),
 		zap.Uint16("dst_dev_id", uint16(dstDevId)),
-		zap.Uint32s("numa", numa),
+		zap.Uint32s("numa", slices.Collect(numaMap.Iter())),
 	)
 
 	return &forwardpb.L2ForwardEnableResponse{}, nil
@@ -159,7 +161,7 @@ func (m *ForwardService) AddL3Forward(ctx context.Context, req *forwardpb.AddL3F
 	defer m.mu.Unlock()
 
 	// First update in-memory configs
-	for _, numaIdx := range numa {
+	for numaIdx := range numa.Iter() {
 		key := instanceKey{name: name, numaIdx: numaIdx}
 		config := m.configs[key]
 		if config == nil {
@@ -205,7 +207,7 @@ func (m *ForwardService) RemoveL3Forward(ctx context.Context, req *forwardpb.Rem
 	defer m.mu.Unlock()
 
 	// First update in-memory configs
-	for _, numaIdx := range numa {
+	for numaIdx := range numa.Iter() {
 		key := instanceKey{name: name, numaIdx: numaIdx}
 		config, exists := m.configs[key]
 		if !exists {
@@ -261,36 +263,37 @@ func (m *ForwardService) validateForwardParams(srcDeviceId uint32, network strin
 	return sourceDeviceId, prefix, targetDeviceId, nil
 }
 
-func validateTarget(target *forwardpb.TargetModule, numAgents int) (string, []uint32, error) {
+func validateTarget(target *forwardpb.TargetModule, numAgents int) (string, numa.NUMAMap, error) {
 	if target == nil {
-		return "", nil, status.Errorf(codes.InvalidArgument, "target cannot be nil")
+		return "", numa.NUMAMap(0), status.Errorf(codes.InvalidArgument, "target cannot be nil")
 	}
 
-	name := target.ModuleName
+	name := target.GetModuleName()
 	if name == "" {
-		return "", nil, status.Errorf(codes.InvalidArgument, "module name is required")
+		return "", numa.NUMAMap(0), status.Errorf(codes.InvalidArgument, "module name is required")
 	}
-	numa, err := getNUMAIndices(target.Numa, numAgents)
+
+	numaMap, err := tranformNUMAMap(numa.NUMAMap(target.Numa), numAgents)
 	if err != nil {
-		return "", nil, err
+		return "", numa.NUMAMap(0), err
 	}
-	return name, numa, nil
+
+	return name, numaMap, nil
 }
 
 func updateModuleConfigs(
 	m *ForwardService,
 	name string,
-	numaIndices []uint32,
+	numaMap numa.NUMAMap,
 ) error {
 	m.log.Debugw("updating configuration",
 		zap.String("module", name),
-		zap.Uint32s("numa", numaIndices),
+		zap.Uint32s("numa", slices.Collect(numaMap.Iter())),
 	)
 
 	// Create module configs for each NUMA node
-	configs := make([]*ModuleConfig, len(numaIndices))
-	for i, numaIdx := range numaIndices {
-
+	configs := make([]*ModuleConfig, numaMap.Len())
+	for i, numaIdx := range xiter.Enumerate(numaMap.Iter()) {
 		agent := m.agents[numaIdx]
 		if agent == nil {
 			return fmt.Errorf("agent for NUMA %d is nil", numaIdx)
@@ -336,7 +339,7 @@ func updateModuleConfigs(
 	}
 
 	// Apply all configurations
-	for i, numaIdx := range numaIndices {
+	for i, numaIdx := range xiter.Enumerate(numaMap.Iter()) {
 		agent := m.agents[numaIdx]
 		config := configs[i]
 
@@ -352,28 +355,20 @@ func updateModuleConfigs(
 
 	m.log.Infow("successfully updated all module configurations",
 		zap.String("name", name),
-		zap.Uint32s("numa", numaIndices),
+		zap.Uint32s("numa", slices.Collect(numaMap.Iter())),
 	)
 
 	return nil
 }
 
-func getNUMAIndices(requestedNuma []uint32, numAgents int) ([]uint32, error) {
-	numaIndices := slices.Compact(slices.Sorted(slices.Values(requestedNuma)))
+func tranformNUMAMap(requestedNuma numa.NUMAMap, numAgents int) (numa.NUMAMap, error) {
+	numaMap := requestedNuma.Intersect(numa.NewWithTrailingOnes(numAgents))
 
-	slices.Sort(requestedNuma)
-	if !slices.Equal(numaIndices, requestedNuma) {
-		return nil, status.Error(codes.InvalidArgument, "duplicate NUMA indices in the request")
+	if numaMap.IsEmpty() {
+		return numa.NUMAMap(0), status.Error(codes.InvalidArgument, "NUMA indices are empty")
 	}
-	if len(numaIndices) > 0 && int(numaIndices[len(numaIndices)-1]) >= numAgents {
-		return nil, status.Error(codes.InvalidArgument, "NUMA indices are out of range")
-	}
-	if len(numaIndices) == 0 {
-		for idx := range numAgents {
-			numaIndices = append(numaIndices, uint32(idx))
-		}
-	}
-	return numaIndices, nil
+
+	return numaMap, nil
 }
 
 func defaultForwardConfig(deviceCount uint16) []ForwardDeviceConfig {

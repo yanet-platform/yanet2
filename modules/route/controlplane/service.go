@@ -13,6 +13,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
 	"github.com/yanet-platform/yanet2/common/go/numa"
+	"github.com/yanet-platform/yanet2/common/go/xiter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery/bird"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery/neigh"
@@ -301,9 +302,9 @@ func (m *RouteService) updateModuleConfigs(
 		configs = append(configs, config)
 	}
 
-	for numaIdx := range numaMap.Iter() {
+	for idx, numaIdx := range xiter.Enumerate(numaMap.Iter()) {
 		agent := m.agents[numaIdx]
-		config := configs[numaIdx]
+		config := configs[idx]
 
 		if err := agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
 			return fmt.Errorf("failed to update module: %w", err)

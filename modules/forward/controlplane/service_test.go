@@ -9,13 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/common/go/numa"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
 
 // Override ForwardSerivce updater to avoid FFI calls in tests
-func testUpdateModuleConfigs(m *ForwardService, name string, numaIndices []uint32) error {
-	m.log.Debugw("Skip FFI calls in tests", zap.String("module", name), zap.Uint32s("numa", numaIndices))
+func testUpdateModuleConfigs(m *ForwardService, name string, numaMap numa.NUMAMap) error {
+	m.log.Debugw("Skip FFI calls in tests", zap.String("module", name), zap.Uint32s("numa", slices.Collect(numaMap.Iter())))
 	return nil
 }
 
@@ -171,7 +172,7 @@ func TestShowConfig(t *testing.T) {
 	// Setup: Add devices and forward rules
 	// Set up default config for NUMA 0
 	_, err := svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
-		Target:   &forwardpb.TargetModule{ModuleName: "test-module", Numa: []uint32{0}},
+		Target:   &forwardpb.TargetModule{ModuleName: "test-module", Numa: 0b1},
 		SrcDevId: 1,
 		DstDevId: 7,
 	})
@@ -264,7 +265,7 @@ func TestShowConfig(t *testing.T) {
 		resp, err := svc.ShowConfig(context.Background(), &forwardpb.ShowConfigRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       []uint32{1}, // Specifically request NUMA 1
+				Numa:       0b10, // Specifically request NUMA 1
 			},
 		})
 

@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/common/go/numa"
 	"github.com/yanet-platform/yanet2/coordinator/coordinatorpb"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
@@ -81,7 +82,7 @@ func (m *ModuleService) setupConfig(
 	// Create a target configuration for the ForwardService
 	target := &forwardpb.TargetModule{
 		ModuleName: configName,
-		Numa:       []uint32{numaNode},
+		Numa:       uint32(numa.NewWithOneBitSet(numaNode)),
 	}
 
 	for _, forward := range config.L2Forwards {

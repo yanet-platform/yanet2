@@ -3,15 +3,13 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use code::{
-    AddL3ForwardRequest, L2ForwardEnableRequest, L3ForwardEntry, RemoveL3ForwardRequest,
-    ShowConfigRequest, ShowConfigResponse, TargetModule,
-    forward_service_client::ForwardServiceClient,
+    AddL3ForwardRequest, L2ForwardEnableRequest, L3ForwardEntry, RemoveL3ForwardRequest, ShowConfigRequest,
+    ShowConfigResponse, TargetModule, forward_service_client::ForwardServiceClient,
 };
 use ipnet::IpNet;
 use ptree::TreeBuilder;
 use tonic::transport::Channel;
-
-use ync::logging;
+use ync::{logging, numa::NumaMap};
 
 #[allow(non_snake_case)]
 pub mod code {
@@ -133,7 +131,7 @@ impl ForwardService {
         let request = ShowConfigRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name.to_owned(),
-                numa: Vec::new(),
+                numa: NumaMap::MAX.as_u32(),
             }),
         };
         let response = self.client.show_config(request).await?.into_inner();
@@ -149,7 +147,7 @@ impl ForwardService {
         let request = L2ForwardEnableRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
+                numa: cmd.numa.map(NumaMap::from).unwrap_or(NumaMap::MAX).as_u32(),
             }),
             src_dev_id: cmd.src as u32,
             dst_dev_id: cmd.dst as u32,
@@ -164,7 +162,7 @@ impl ForwardService {
         let request = AddL3ForwardRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
+                numa: cmd.numa.map(NumaMap::from).unwrap_or(NumaMap::MAX).as_u32(),
             }),
             src_dev_id: cmd.src as u32,
             forward: Some(L3ForwardEntry {
@@ -178,14 +176,11 @@ impl ForwardService {
         Ok(())
     }
 
-    pub async fn remove_l3_forward(
-        &mut self,
-        cmd: RemoveL3ForwardCmd,
-    ) -> Result<(), Box<dyn Error>> {
+    pub async fn remove_l3_forward(&mut self, cmd: RemoveL3ForwardCmd) -> Result<(), Box<dyn Error>> {
         let request = RemoveL3ForwardRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
+                numa: cmd.numa.map(NumaMap::from).unwrap_or(NumaMap::MAX).as_u32(),
             }),
             src_dev_id: cmd.src as u32,
             network: cmd.network.to_string(),
