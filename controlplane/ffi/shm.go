@@ -93,8 +93,9 @@ func (m *SharedMemory) NumaMap() uint32 {
 // NumaIndices returns a list of indices available NUMA nodes.
 func (m *SharedMemory) NumaIndices() []uint32 {
 	numaIndices := make([]uint32, 0)
-	bitset.NewBitsTraverser(uint64(m.NumaMap())).Traverse(func(numaIdx int) {
-		numaIndices = append(numaIndices, uint32(numaIdx))
+	bitset.NewBitsTraverser(uint64(m.NumaMap())).Traverse(func(numaIdx uint32) bool {
+		numaIndices = append(numaIndices, numaIdx)
+		return true
 	})
 	return numaIndices
 }

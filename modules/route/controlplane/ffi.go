@@ -69,7 +69,7 @@ func (m *ModuleConfig) RouteAdd(srcAddr net.HardwareAddr, dstAddr net.HardwareAd
 	return int(idx), nil
 }
 
-func (m *ModuleConfig) RouteListAdd(routeIndices []int) (int, error) {
+func (m *ModuleConfig) RouteListAdd(routeIndices []uint32) (int, error) {
 	cRouteIndices := make([]C.uint32_t, len(routeIndices))
 	for idx, v := range routeIndices {
 		cRouteIndices[idx] = C.uint32_t(v)

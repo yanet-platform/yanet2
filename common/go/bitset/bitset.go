@@ -2,6 +2,7 @@ package bitset
 
 import (
 	"fmt"
+	"iter"
 	"math/bits"
 )
 
@@ -38,21 +39,32 @@ func (m *TinyBitset) Insert(idx uint32) {
 //
 // Iteration is performed from the least significant bit to the most
 // significant one.
-func (m *TinyBitset) Traverse(fn func(int)) {
+func (m *TinyBitset) Traverse(fn func(uint32) bool) {
 	for idx, word := range m.words {
-		NewBitsTraverser(word).Traverse(func(r int) {
-			fn(64*idx + r)
+		isContinue := NewBitsTraverser(word).Traverse(func(r uint32) bool {
+			return fn(64*uint32(idx) + r)
 		})
+
+		if !isContinue {
+			break
+		}
+	}
+}
+
+func (m *TinyBitset) Iter() iter.Seq[uint32] {
+	return func(yield func(uint32) bool) {
+		m.Traverse(yield)
 	}
 }
 
 // AsSlice returns the bitset as a slice of indices, where each index is a
 // position of the bit set.
-func (m *TinyBitset) AsSlice() []int {
-	out := make([]int, 0, m.Count())
+func (m *TinyBitset) AsSlice() []uint32 {
+	out := make([]uint32, 0, m.Count())
 
-	m.Traverse(func(idx int) {
+	m.Traverse(func(idx uint32) bool {
 		out = append(out, idx)
+		return true
 	})
 
 	return out
@@ -73,7 +85,7 @@ func NewBitsTraverser(word uint64) BitsTraverser {
 }
 
 // Traverse traverses the bitset and calls the given function for each bit set.
-func (m BitsTraverser) Traverse(fn func(int)) {
+func (m BitsTraverser) Traverse(fn func(uint32) bool) bool {
 	word := m.word
 
 	for word > 0 {
@@ -89,6 +101,10 @@ func (m BitsTraverser) Traverse(fn func(int)) {
 		t := word & -word
 		word ^= t
 
-		fn(r)
+		if !fn(uint32(r)) {
+			return false
+		}
 	}
+
+	return true
 }

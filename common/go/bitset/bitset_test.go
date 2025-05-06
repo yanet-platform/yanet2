@@ -1,6 +1,7 @@
 package bitset
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,24 +21,67 @@ func Test_TinyBitsetTraverse(t *testing.T) {
 	b := TinyBitset{}
 	b.Insert(0)
 	b.Insert(42)
+	b.Insert(512)
 
-	bits := make([]int, 0)
-	b.Traverse(func(idx int) {
+	bits := make([]uint32, 0)
+	b.Traverse(func(idx uint32) bool {
 		bits = append(bits, idx)
+		return true
 	})
 
-	assert.Equal(t, []int{0, 42}, bits)
+	assert.Equal(t, []uint32{0, 42, 512}, bits)
+}
+
+func Test_TinyBitsetPartialTraverse(t *testing.T) {
+	b := TinyBitset{}
+	b.Insert(42)
+	b.Insert(84)
+	b.Insert(512)
+
+	bits := make([]uint32, 0)
+	b.Traverse(func(idx uint32) bool {
+		bits = append(bits, idx)
+		return false
+	})
+
+	assert.Equal(t, []uint32{42}, bits)
 }
 
 func Test_TinyBitsetTraverseEmpty(t *testing.T) {
 	b := TinyBitset{}
 
-	bits := make([]int, 0)
-	b.Traverse(func(idx int) {
+	bits := make([]uint32, 0)
+	b.Traverse(func(idx uint32) bool {
 		bits = append(bits, idx)
+		return true
 	})
 
-	assert.Equal(t, []int{}, bits)
+	assert.Equal(t, []uint32{}, bits)
+}
+
+func Test_TinyBitsetIter(t *testing.T) {
+	b := TinyBitset{}
+	b.Insert(0)
+	b.Insert(42)
+	b.Insert(512)
+
+	bits := slices.Collect(b.Iter())
+
+	assert.Equal(t, []uint32{0, 42, 512}, bits)
+}
+
+func Test_TinyBitsetPartialIter(t *testing.T) {
+	b := TinyBitset{}
+	b.Insert(42)
+	b.Insert(512)
+
+	bits := make([]uint32, 0)
+	for bit := range b.Iter() {
+		bits = append(bits, bit)
+		break
+	}
+
+	assert.Equal(t, []uint32{42}, bits)
 }
 
 func Test_TinyBitsetAsSlice(t *testing.T) {
@@ -45,7 +89,7 @@ func Test_TinyBitsetAsSlice(t *testing.T) {
 	b.Insert(0)
 	b.Insert(42)
 
-	assert.Equal(t, []int{0, 42}, b.AsSlice())
+	assert.Equal(t, []uint32{0, 42}, b.AsSlice())
 }
 
 func Test_TinyBitsetPanicsOnLargeIndex(t *testing.T) {

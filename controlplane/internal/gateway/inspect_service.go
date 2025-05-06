@@ -30,8 +30,7 @@ func (m *InspectService) Inspect(
 		NumaBitmap: numaBitmap,
 	}
 
-	bitset.NewBitsTraverser(uint64(numaBitmap)).Traverse(func(idx int) {
-		numaIdx := uint32(idx)
+	bitset.NewBitsTraverser(uint64(numaBitmap)).Traverse(func(numaIdx uint32) bool {
 		dpConfig := m.shm.DPConfig(numaIdx)
 
 		numaInfo := &ynpb.NUMAInfo{
@@ -44,6 +43,7 @@ func (m *InspectService) Inspect(
 		}
 
 		response.NumaInfo = append(response.NumaInfo, numaInfo)
+		return true
 	})
 
 	return response, nil
