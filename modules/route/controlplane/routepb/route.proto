@@ -104,10 +104,8 @@ message InsertRouteRequest {
 	//
 	// Example: "fe80::1", "192.168.1.1"
 	string nexthop_addr = 3;
-	// Numa specifies NUMA nodes that should be affected.
-	//
-	// Empty means all NUMA nodes.
-	repeated uint32 numa = 4;
+	// Numa specifies a bitmap of NUMA nodes that should be affected.
+	uint32 numa = 4;
 }
 
 // InsertRouteResponse is the response of "InsertRoute" request.

@@ -18,7 +18,7 @@ use yanet_cli_route::{
     code::{route_service_client::RouteServiceClient, InsertRouteRequest, LookupRouteRequest, ShowRoutesRequest},
     RouteEntry,
 };
-use ync::logging;
+use ync::{logging, numa::NumaMap};
 
 /// Route module.
 #[derive(Debug, Clone, Parser)]
@@ -155,11 +155,13 @@ impl RouteService {
     }
 
     pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Box<dyn Error>> {
+        let numa = cmd.numa.map(NumaMap::from).unwrap_or(NumaMap::MAX).as_u32();
+
         let request = InsertRouteRequest {
             module_name: cmd.module_name,
             prefix: cmd.prefix.to_string(),
             nexthop_addr: cmd.nexthop_addr.to_string(),
-            numa: cmd.numa.unwrap_or_default(),
+            numa,
         };
 
         let resp = self.client.insert_route(request).await?;

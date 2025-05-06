@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/common/go/numa"
 	"github.com/yanet-platform/yanet2/coordinator/coordinatorpb"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 )
@@ -75,7 +76,7 @@ func (m *ModuleService) setupConfig(
 
 	for _, route := range config.Routes {
 		request := &routepb.InsertRouteRequest{
-			Numa:        []uint32{numaNode},
+			Numa:        uint32(numa.NewWithOneBitSet(numaNode)),
 			ModuleName:  configName,
 			Prefix:      route.Prefix.String(),
 			NexthopAddr: route.Nexthop.String(),

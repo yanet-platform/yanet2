@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
-	"slices"
 	"sync"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
+	"github.com/yanet-platform/yanet2/common/go/numa"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery/bird"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery/neigh"
@@ -36,7 +36,7 @@ type RouteService struct {
 
 type flushEvent struct {
 	moduleNames []string
-	numaIndices []uint32
+	numaMap     numa.NUMAMap
 }
 
 func NewRouteService(agents []*ffi.Agent, rib *rib.RIB, log *zap.SugaredLogger) *RouteService {
@@ -123,21 +123,17 @@ func (m *RouteService) InsertRoute(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop address: %v", err)
 	}
 
-	numaIndices := request.GetNuma()
-	slices.Sort(numaIndices)
-	numaIndices = slices.Compact(numaIndices)
-	if !slices.Equal(numaIndices, request.GetNuma()) {
-		return nil, status.Error(codes.InvalidArgument, "repeated NUMA indices are duplicated")
-	}
-	if len(numaIndices) > 0 && int(numaIndices[len(numaIndices)-1]) >= len(m.agents) {
-		return nil, status.Error(codes.InvalidArgument, "NUMA indices are out of range")
+	// After the intersection, the numaMap contains ONLY reachable NUMA nodes.
+	numaMap := numa.NUMAMap(request.GetNuma()).Intersect(numa.NewWithTrailingOnes(len(m.agents)))
+	if numaMap.IsEmpty() {
+		return nil, status.Error(codes.InvalidArgument, "NUMA map is empty")
 	}
 
 	if err := m.rib.AddUnicastRoute(prefix, nexthopAddr); err != nil {
 		return nil, fmt.Errorf("failed to add unicast route: %w", err)
 	}
 
-	return &routepb.InsertRouteResponse{}, m.syncRouteUpdates(name, numaIndices)
+	return &routepb.InsertRouteResponse{}, m.syncRouteUpdates(name, numaMap)
 }
 
 func (m *RouteService) BulkUpdate(routes []rib.Route) error {
@@ -206,7 +202,7 @@ func (m *RouteService) periodicRIBFlusher(ctx context.Context, updatePeriod time
 		for _, name := range event.moduleNames {
 			m.log.Debugw("synchronizing route updates", zap.String("module", name))
 
-			if err := m.syncRouteUpdates(name, event.numaIndices); err != nil {
+			if err := m.syncRouteUpdates(name, event.numaMap); err != nil {
 				m.log.Warnw("failed to synchronize route updates",
 					zap.String("module", name),
 					zap.Error(err))
@@ -216,30 +212,24 @@ func (m *RouteService) periodicRIBFlusher(ctx context.Context, updatePeriod time
 	}
 }
 
-func (m *RouteService) syncRouteUpdates(name string, numaIndices []uint32) error {
-	// Empty means all NUMA nodes.
-	if len(numaIndices) == 0 {
-		for idx := range m.agents {
-			numaIndices = append(numaIndices, uint32(idx))
-		}
-	}
+func (m *RouteService) syncRouteUpdates(name string, numaMap numa.NUMAMap) error {
 	routes := m.rib.DumpRoutes()
 
 	// Huge mutex, but our shared memory must be protected from concurrent access.
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	err := m.updateModuleConfigs(name, numaIndices, routes)
+	err := m.updateModuleConfigs(name, numaMap, routes)
 	return err
 }
 
 func (m *RouteService) updateModuleConfigs(
 	name string,
-	numaIndices []uint32,
+	numaMap numa.NUMAMap,
 	routes map[netip.Prefix]rib.RoutesList,
 ) error {
-	configs := make([]*ModuleConfig, 0, len(numaIndices))
+	configs := make([]*ModuleConfig, 0, numaMap.Len())
 
-	for _, numaIdx := range numaIndices {
+	for numaIdx := range numaMap.Iter() {
 		agent := m.agents[numaIdx]
 
 		config, err := NewModuleConfig(agent, name)
@@ -311,7 +301,7 @@ func (m *RouteService) updateModuleConfigs(
 		configs = append(configs, config)
 	}
 
-	for _, numaIdx := range numaIndices {
+	for numaIdx := range numaMap.Iter() {
 		agent := m.agents[numaIdx]
 		config := configs[numaIdx]
 

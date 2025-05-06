@@ -108,3 +108,10 @@ func (m BitsTraverser) Traverse(fn func(uint32) bool) bool {
 
 	return true
 }
+
+// Iter returns an iterator over the bits set in this word.
+func (m BitsTraverser) Iter() iter.Seq[uint32] {
+	return func(yield func(uint32) bool) {
+		m.Traverse(yield)
+	}
+}
