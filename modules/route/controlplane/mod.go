@@ -3,7 +3,6 @@ package route
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/netip"
 
 	"go.uber.org/zap"
@@ -11,7 +10,6 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/yncp/gateway"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery/bird"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery/neigh"
@@ -23,12 +21,12 @@ import (
 // routing configuration.
 type RouteModule struct {
 	cfg                *Config
-	server             *grpc.Server
 	shm                *ffi.SharedMemory
 	agents             []*ffi.Agent
 	neighbourDiscovery *neigh.NeighMonitor
 	birdExport         *bird.Export
 	routeService       *RouteService
+	neighbourService   *NeighbourService
 	log                *zap.SugaredLogger
 }
 
@@ -57,26 +55,41 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		return nil, err
 	}
 
-	server := grpc.NewServer()
-
 	routeService := NewRouteService(agents, rib, log)
-	routepb.RegisterRouteServiceServer(server, routeService)
-
 	neighbourService := NewNeighbourService(neighbourCache, log)
-	routepb.RegisterNeighbourServer(server, neighbourService)
 
 	export := bird.NewExportReader(cfg.BirdExport, routeService, log)
 
 	return &RouteModule{
 		cfg:                cfg,
-		server:             server,
 		shm:                shm,
 		agents:             agents,
 		neighbourDiscovery: neighbourDiscovery,
 		birdExport:         export,
 		routeService:       routeService,
+		neighbourService:   neighbourService,
 		log:                log,
 	}, nil
+}
+
+func (m *RouteModule) Name() string {
+	return "route"
+}
+
+func (m *RouteModule) Endpoint() string {
+	return m.cfg.Endpoint
+}
+
+func (m *RouteModule) ServicesNames() []string {
+	return []string{
+		"routepb.RouteService",
+		"routepb.Neighbour",
+	}
+}
+
+func (m *RouteModule) RegisterService(server *grpc.Server) {
+	routepb.RegisterRouteServiceServer(server, m.routeService)
+	routepb.RegisterNeighbourServer(server, m.neighbourService)
 }
 
 // Close closes the module.
@@ -106,38 +119,6 @@ func (m *RouteModule) Run(ctx context.Context) error {
 	wg.Go(func() error {
 		return m.routeService.periodicRIBFlusher(ctx, m.cfg.RIBFlushPeriod)
 	})
-
-	listener, err := net.Listen("tcp", m.cfg.Endpoint)
-	if err != nil {
-		return fmt.Errorf("failed to initialize gRPC listener: %w", err)
-	}
-
-	wg.Go(func() error {
-		m.log.Infow("exposing gRPC API", zap.Stringer("addr", listener.Addr()))
-		return m.server.Serve(listener)
-	})
-
-	serviceNames := []string{
-		"routepb.RouteService",
-		"routepb.Neighbour",
-	}
-
-	if err := gateway.RegisterModule(
-		ctx,
-		m.cfg.GatewayEndpoint,
-		listener,
-		serviceNames,
-		m.log,
-	); err != nil {
-		return fmt.Errorf("failed to register services: %w", err)
-	}
-
-	<-ctx.Done()
-
-	m.log.Infow("stopping gRPC API", zap.Stringer("addr", listener.Addr()))
-	defer m.log.Infow("stopped gRPC API", zap.Stringer("addr", listener.Addr()))
-
-	m.server.GracefulStop()
 
 	return wg.Wait()
 }

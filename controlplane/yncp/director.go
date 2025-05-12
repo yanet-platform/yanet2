@@ -103,7 +103,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize nat64 built-in module: %w", err)
 	}
 
-	gw := gateway.NewGateway(
+	gateway := gateway.NewGateway(
 		cfg.Gateway,
 		shm,
 		gateway.WithBuiltInModule(
@@ -128,7 +128,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	return &Director{
 		cfg:     cfg,
 		shm:     shm,
-		gateway: gw,
+		gateway: gateway,
 		log:     log,
 	}, nil
 }

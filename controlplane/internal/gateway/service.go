@@ -3,6 +3,8 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"net"
+	"strings"
 
 	"github.com/siderolabs/grpc-proxy/proxy"
 	"go.uber.org/zap"
@@ -36,7 +38,16 @@ func (m *GatewayService) Register(
 	m.log.Infof("registering backend %q on %q", request.GetName(), request.GetEndpoint())
 
 	conn, err := grpc.NewClient(
-		request.GetEndpoint(),
+		"passthrough:target",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			dialer := net.Dialer{}
+			endpoint := request.GetEndpoint()
+			if strings.HasPrefix(endpoint, "/") {
+				return dialer.DialContext(ctx, "unix", endpoint)
+			}
+
+			return dialer.DialContext(ctx, "tcp", endpoint)
+		}),
 		grpc.WithDefaultCallOptions(grpc.ForceCodecV2(proxy.Codec())),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)

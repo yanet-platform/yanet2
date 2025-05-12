@@ -19,13 +19,8 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
-type Module interface {
-	Close() error
-	Run(ctx context.Context) error
-}
-
 type gatewayOptions struct {
-	BuiltInModules []Module
+	BuiltInModules []BuiltInModule
 	Log            *zap.SugaredLogger
 	LogLevel       *zap.AtomicLevel
 }
@@ -40,7 +35,7 @@ func newGatewayOptions() *gatewayOptions {
 type GatewayOption func(*gatewayOptions)
 
 // WithBuiltInModule adds a built-in module to the Gateway.
-func WithBuiltInModule(module Module) GatewayOption {
+func WithBuiltInModule(module BuiltInModule) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.BuiltInModules = append(o.BuiltInModules, module)
 	}
@@ -76,7 +71,7 @@ func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
 type Gateway struct {
 	cfg            *Config
 	server         *grpc.Server
-	builtInModules []Module
+	builtInModules []*BuiltInModuleRunner
 	registry       *BackendRegistry
 	log            *zap.SugaredLogger
 }
@@ -130,10 +125,19 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *G
 	ynpb.RegisterPipelineServiceServer(server, pipelineService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", pipelineService)))
 
+	builtInModules := make([]*BuiltInModuleRunner, 0)
+	for _, mod := range opts.BuiltInModules {
+		builtInModules = append(builtInModules, NewBuiltInModuleRunner(
+			mod,
+			cfg.Server.Endpoint,
+			log,
+		))
+	}
+
 	return &Gateway{
 		cfg:            cfg,
 		server:         server,
-		builtInModules: opts.BuiltInModules,
+		builtInModules: builtInModules,
 		registry:       registry,
 		log:            log,
 	}

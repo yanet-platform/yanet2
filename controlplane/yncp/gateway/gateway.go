@@ -23,8 +23,6 @@ func RegisterModule(
 	serviceNames []string,
 	log *zap.SugaredLogger,
 ) error {
-	log = log.With("name", "gateway")
-
 	gatewayConn, err := grpc.NewClient(
 		gatewayEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),

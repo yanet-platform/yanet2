@@ -1,17 +1,13 @@
 package forward
 
 import (
-	"context"
 	"fmt"
 	"math"
-	"net"
 
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/yncp/gateway"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
 
@@ -19,7 +15,6 @@ import (
 // forwarding traffic between devices.
 type ForwardModule struct {
 	cfg            *Config
-	server         *grpc.Server
 	shm            *ffi.SharedMemory
 	agents         []*ffi.Agent
 	forwardService *ForwardService
@@ -45,8 +40,6 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 		return nil, err
 	}
 
-	server := grpc.NewServer()
-
 	// STATEMENT: All agents have the same topology.
 	deviceCount := topologyDeviceCount(agents[0])
 	if deviceCount >= math.MaxUint16 {
@@ -54,16 +47,30 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 	}
 
 	forwardService := NewForwardService(agents, log, uint16(deviceCount))
-	forwardpb.RegisterForwardServiceServer(server, forwardService)
 
 	return &ForwardModule{
 		cfg:            cfg,
-		server:         server,
 		shm:            shm,
 		agents:         agents,
 		forwardService: forwardService,
 		log:            log,
 	}, nil
+}
+
+func (m *ForwardModule) Name() string {
+	return "forward"
+}
+
+func (m *ForwardModule) Endpoint() string {
+	return m.cfg.Endpoint
+}
+
+func (m *ForwardModule) ServicesNames() []string {
+	return []string{"forwardpb.ForwardService"}
+}
+
+func (m *ForwardModule) RegisterService(server *grpc.Server) {
+	forwardpb.RegisterForwardServiceServer(server, m.forwardService)
 }
 
 // Close closes the module.
@@ -79,39 +86,4 @@ func (m *ForwardModule) Close() error {
 	}
 
 	return nil
-}
-
-// Run runs the module until the specified context is canceled.
-func (m *ForwardModule) Run(ctx context.Context) error {
-	listener, err := net.Listen("tcp", m.cfg.Endpoint)
-	if err != nil {
-		return fmt.Errorf("failed to initialize gRPC listener: %w", err)
-	}
-
-	wg, ctx := errgroup.WithContext(ctx)
-	wg.Go(func() error {
-		m.log.Infow("exposing gRPC API", zap.Stringer("addr", listener.Addr()))
-		return m.server.Serve(listener)
-	})
-
-	serviceNames := []string{"forwardpb.ForwardService"}
-
-	if err = gateway.RegisterModule(
-		ctx,
-		m.cfg.GatewayEndpoint,
-		listener,
-		serviceNames,
-		m.log,
-	); err != nil {
-		return fmt.Errorf("failed to register services: %w", err)
-	}
-
-	<-ctx.Done()
-
-	m.log.Infow("stopping gRPC API", zap.Stringer("addr", listener.Addr()))
-	defer m.log.Infow("stopped gRPC API", zap.Stringer("addr", listener.Addr()))
-
-	m.server.GracefulStop()
-
-	return wg.Wait()
 }

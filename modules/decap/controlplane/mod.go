@@ -1,16 +1,10 @@
 package decap
 
 import (
-	"context"
-	"fmt"
-	"net"
-
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/yncp/gateway"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb"
 )
 
@@ -18,7 +12,6 @@ import (
 // decapsulating various kinds of tunnels.
 type DecapModule struct {
 	cfg          *Config
-	server       *grpc.Server
 	shm          *ffi.SharedMemory
 	agents       []*ffi.Agent
 	decapService *DecapService
@@ -44,19 +37,31 @@ func NewDecapModule(cfg *Config, log *zap.SugaredLogger) (*DecapModule, error) {
 		return nil, err
 	}
 
-	server := grpc.NewServer()
-
 	decapService := NewDecapService(agents, log)
-	decappb.RegisterDecapServiceServer(server, decapService)
 
 	return &DecapModule{
 		cfg:          cfg,
-		server:       server,
 		shm:          shm,
 		agents:       agents,
 		decapService: decapService,
 		log:          log,
 	}, nil
+}
+
+func (m *DecapModule) Name() string {
+	return "decap"
+}
+
+func (m *DecapModule) Endpoint() string {
+	return m.cfg.Endpoint
+}
+
+func (m *DecapModule) ServicesNames() []string {
+	return []string{"decappb.DecapService"}
+}
+
+func (m *DecapModule) RegisterService(server *grpc.Server) {
+	decappb.RegisterDecapServiceServer(server, m.decapService)
 }
 
 // Close closes the module.
@@ -72,39 +77,4 @@ func (m *DecapModule) Close() error {
 	}
 
 	return nil
-}
-
-// Run runs the module until the specified context is canceled.
-func (m *DecapModule) Run(ctx context.Context) error {
-	listener, err := net.Listen("tcp", m.cfg.Endpoint)
-	if err != nil {
-		return fmt.Errorf("failed to initialize gRPC listener: %w", err)
-	}
-
-	wg, ctx := errgroup.WithContext(ctx)
-	wg.Go(func() error {
-		m.log.Infow("exposing gRPC API", zap.Stringer("addr", listener.Addr()))
-		return m.server.Serve(listener)
-	})
-
-	serviceNames := []string{"decappb.DecapService"}
-
-	if err = gateway.RegisterModule(
-		ctx,
-		m.cfg.GatewayEndpoint,
-		listener,
-		serviceNames,
-		m.log,
-	); err != nil {
-		return fmt.Errorf("failed to register services: %w", err)
-	}
-
-	<-ctx.Done()
-
-	m.log.Infow("stopping gRPC API", zap.Stringer("addr", listener.Addr()))
-	defer m.log.Infow("stopped gRPC API", zap.Stringer("addr", listener.Addr()))
-
-	m.server.GracefulStop()
-
-	return wg.Wait()
 }
