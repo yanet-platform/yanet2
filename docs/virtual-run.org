@@ -108,23 +108,77 @@ sudo install -m 755 target/release/yanet-cli /usr/local/bin
 #+end_src
 
 * Configuration
+** Prepare
 #+begin_src shell
+export DEFGW6=<gw6>
+export DEFGW4=<gw4>
+export IP6=<ip6>
+export IP4=<ip4>
+#+end_src
+** decap
+*** env
+#+begin_src shell
+export DECAP_PREFIX=<prefix>
+#+end_src
+*** configure. Save to file like =decap_cfg.sh=
+#+begin_src shell
+#!/bin/sh
 yanet-cli forward l2-enable --mod=forward0 --src 0 --dst 1
 yanet-cli forward l2-enable --mod=forward0 --src 1 --dst 0
-yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net <ip4>/32
-yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net <ip6>/128
+yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net $IP4/32
+yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net $IP6/128
 yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net ff02::/16
 
 yanet-cli forward l3-add --mod=forward0 --src 1 --dst 0 --net 0.0.0.0/0
 yanet-cli forward l3-add --mod=forward0 --src 1 --dst 0 --net ::/0
 
-yanet-cli decap prefix-add -p <prefix> --mod decap0
+yanet-cli decap prefix-add -p $DECAP_PREFIX --mod decap0
 
-yanet-cli route insert --mod route0 --via <gw> ::/0
+yanet-cli route insert --mod route0 --via $DEFGW6 ::/0
 
 yanet-cli pipeline update --name=bootstrap --modules forward:forward0 --numa=0
 yanet-cli pipeline update --name=decap --modules forward:forward0 --modules decap:decap0 --modules route:route0 --numa=0
 
 yanet-cli pipeline assign --numa=0 --device=1 --pipelines bootstrap:1
 yanet-cli pipeline assign --numa=0 --device=0 --pipelines decap:1
+# tmp hack for resolve neighbors
+sleep 3
+yanet-cli route insert --mod route0 --via $DEFGW6 ::/0
+yanet-cli route insert --mod route0 --via $DEFGW4 0.0.0.0/0
+#+end_src
+** NAT64
+*** env
+#+begin_src shell
+export NAT64_PREFIX=<prefix>
+#+end_src
+*** configure. Save to file like =nat64_cfg.sh=. Don't forget to run =chmod +x= on it.
+#+begin_src shell
+#!/bin/sh
+yanet-cli forward l2-enable --mod=forward0 --src 0 --dst 1
+yanet-cli forward l2-enable --mod=forward0 --src 1 --dst 0
+
+yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net $IP4/32
+yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net $IP6/128
+yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net ff02::/16
+
+yanet-cli forward l3-add --mod=forward0 --src 1 --dst 0 --net 0.0.0.0/0
+yanet-cli forward l3-add --mod=forward0 --src 1 --dst 0 --net ::/0
+
+yanet-cli route insert --mod route0 --via $DEFGW6 ::/0
+
+yanet-cli nat64 prefix add --prefix $NAT64_PREFIX --mod nat0
+yanet-cli nat64 mapping add --mod nat0 --ipv4 <ipv4> --ipv6 <ipv6> --prefix-index 0
+yanet-cli nat64 mtu --mod nat0 --ipv4-mtu 1450 --ipv6-mtu 6950
+
+yanet-cli pipeline update --name=bootstrap --modules forward:forward0 --numa=0
+yanet-cli pipeline update --name=nat64 --modules forward:forward0 --modules nat64:nat0 --modules route:route0 --numa=0
+
+yanet-cli pipeline assign --numa=0 --device=1 --pipelines bootstrap:1
+yanet-cli pipeline assign --numa=0 --device=0 --pipelines nat64:1
+
+# tmp hack for resolve neighbors
+sleep 3
+yanet-cli route insert --mod route0 --via $DEFGW6 ::/0
+yanet-cli route insert --mod route0 --via $DEFGW4 0.0.0.0/0
+
 #+end_src
