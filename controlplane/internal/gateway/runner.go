@@ -7,8 +7,8 @@ import (
 	"os"
 	"path"
 	"strings"
-	"time"
 
+	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -121,28 +121,24 @@ func (m *BuiltInModuleRunner) register(ctx context.Context, addr net.Addr) error
 
 	wg, ctx := errgroup.WithContext(ctx)
 	for _, serviceName := range m.module.ServicesNames() {
-		serviceName := serviceName
 		req := &ynpb.RegisterRequest{
 			Name:     serviceName,
 			Endpoint: addr.String(),
 		}
 
 		wg.Go(func() error {
-			for {
-				if _, err := client.Register(ctx, req); err == nil {
-					m.log.Infof("successfully registered %q in the Gateway API", serviceName)
-					return nil
-				}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
+			_, err := backoff.Retry(ctx, func() (*ynpb.RegisterResponse, error) {
+				resp, err := client.Register(ctx, req)
+				if err != nil {
+					m.log.Warnf("failed to register %q in the Gateway API: %v", serviceName, err)
+					return nil, err
 				}
 
-				m.log.Warnf("failed to register %q in the Gateway API: %v", serviceName, err)
-				// TODO: exponential backoff should fit better here.
-				time.Sleep(1 * time.Second)
-			}
+				m.log.Infof("successfully registered %q in the Gateway API", serviceName)
+				return resp, nil
+			}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
+
+			return err
 		})
 	}
 

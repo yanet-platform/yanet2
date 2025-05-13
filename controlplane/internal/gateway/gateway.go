@@ -181,7 +181,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 
 	for _, builtInModule := range m.builtInModules {
 		wg.Go(func() error {
-			m.log.Infow("starting built-in module", zap.String("module", fmt.Sprintf("%T", builtInModule)))
+			m.log.Infow("starting built-in module", zap.String("module", fmt.Sprintf("%T", builtInModule.module)))
 			return builtInModule.Run(ctx)
 		})
 	}
