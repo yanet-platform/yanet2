@@ -50,11 +50,6 @@ func NewBuiltInModuleRunner(
 }
 
 func (m *BuiltInModuleRunner) Close() error {
-	endpoint := m.module.Endpoint()
-	if strings.HasPrefix(endpoint, "/") {
-		os.Remove(endpoint)
-	}
-
 	return m.module.Close()
 }
 
