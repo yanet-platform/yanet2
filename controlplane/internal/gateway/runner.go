@@ -110,7 +110,7 @@ func (m *BuiltInModuleRunner) listen() (net.Listener, error) {
 
 func (m *BuiltInModuleRunner) register(ctx context.Context, addr net.Addr) error {
 	gatewayConn, err := grpc.NewClient(
-		addr.String(),
+		m.gatewayEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
