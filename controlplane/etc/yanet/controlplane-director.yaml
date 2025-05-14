@@ -22,13 +22,6 @@ modules:
     memory_requirements: 16MB
     endpoint: "[::1]:0"
     gateway_endpoint: *gateway_endpoint
-    bird_export:
-      enable: false
-      sockets:
-        - name: master4
-          path: /var/lib/bird-master4.sock
-        - name: master6
-          path: /var/lib/bird-master6.sock
   decap:
     memory_path_prefix: /dev/hugepages/yanet
     memory_requirements: 16MB

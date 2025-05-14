@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sys/unix"
 
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery"
+	"github.com/yanet-platform/yanet2/modules/route/internal/discovery"
 )
 
 // NexthopCache is a cache of nexthops that is populated via neighbour

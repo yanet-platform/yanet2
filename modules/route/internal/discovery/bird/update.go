@@ -9,7 +9,7 @@ import (
 	"slices"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/rib"
+	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
 
 const (

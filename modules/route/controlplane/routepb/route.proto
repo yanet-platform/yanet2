@@ -7,24 +7,37 @@ option go_package = "github.com/yanet-platform/yanet2/modules/route/controlplane
 // RouteService is a service for routing table management.
 service RouteService {
 	// ShowRoutes returns all routes in the routing table.
-	rpc ShowRoutes(ShowRoutesRequest) returns (ShowRoutesResponse) {
-	}
+	rpc ShowRoutes(ShowRoutesRequest) returns (ShowRoutesResponse);
 
 	// LookupRoute looks up possible routes for the given IP address.
-	rpc LookupRoute(LookupRouteRequest) returns (LookupRouteResponse) {
-	}
+	rpc LookupRoute(LookupRouteRequest) returns (LookupRouteResponse);
 
 	// InsertRoute inserts a route into the routing table.
-	rpc InsertRoute(InsertRouteRequest) returns (InsertRouteResponse) {
-	}
+	rpc InsertRoute(InsertRouteRequest) returns (InsertRouteResponse);
+
+	// FlushRoutes triggers the operation of flushing routes from
+	// the Routing Information Base (RIB) to the Forwarding Information Base
+	// (FIB).
+	rpc FlushRoutes(FlushRoutesRequest) returns (FlushRoutesResponse);
+
+	rpc FeedRIB(stream Update) returns (UpdateSummary);
+}
+
+// TargetModule specifies which module the request should be performed on.
+message TargetModule {
+	// ModuleName is the name of the module that should be affected.
+	string module_name = 1;
+	// Numa specifies the index of the NUMA node to be affected.
+	uint32 numa = 2;
 }
 
 // ShowRoutesRequest contains filters for route listing.
 message ShowRoutesRequest {
+	TargetModule target = 1;
 	// Filter to show only IPv4 routes.
-	bool ipv4_only = 1;
+	bool ipv4_only = 2;
 	// Filter to show only IPv6 routes.
-	bool ipv6_only = 2;
+	bool ipv6_only = 3;
 }
 
 // ShowRoutesResponse contains the list of routes.
@@ -35,8 +48,9 @@ message ShowRoutesResponse {
 
 // LookupRouteRequest contains the IP address to lookup.
 message LookupRouteRequest {
+	TargetModule target = 1;
 	// IP address to lookup.
-	string ip_addr = 1;
+	string ip_addr = 2;
 }
 
 // LookupRouteResponse contains the matching routes for the IP address.
@@ -47,6 +61,53 @@ message LookupRouteResponse {
 	repeated Route routes = 2;
 }
 
+// InsertRouteRequest is the request to insert a route.
+message InsertRouteRequest {
+	TargetModule target = 1;
+	// The destination prefix of the route.
+	//
+	// The prefix must be an IPv4 or IPv6 address followed by "/" and the
+	// length of the prefix.
+	string prefix = 2;
+	// The IP address of the nexthop router.
+	//
+	// The address must be either an IPv4 or IPv6 address.
+	//
+	// Example: "fe80::1", "192.168.1.1"
+	string nexthop_addr = 3;
+
+	// Indicates whether the RIB should be flushed to the FIB after this
+	// request.
+	bool do_flush = 4;
+}
+
+// InsertRouteResponse is the response of "InsertRoute" request.
+message InsertRouteResponse {
+}
+
+// FlushRoutesRequest specifies which module should perform the RIB to FIB
+// flush.
+message FlushRoutesRequest {
+	TargetModule target = 1;
+}
+
+message FlushRoutesResponse {
+}
+
+// Update represents a message in the stream for inserting one route
+// into the target's module RIB.
+message Update {
+	// The target module where the RIB should be updated.
+	TargetModule target = 1;
+	// Indicates whether this is a route deletion event.
+	bool is_delete = 2;
+	// The route to add to the RIB.
+	Route route = 3;
+}
+
+message UpdateSummary {
+}
+
 // Route represents a routing table entry.
 message Route {
 	// Network prefix in CIDR notation.
@@ -55,6 +116,8 @@ message Route {
 	string next_hop = 2;
 	// Peer IP address.
 	string peer = 3;
+	// https://datatracker.ietf.org/doc/html/rfc4364#section-4.2
+	uint64 route_distinguisher = 4;
 	// Peer's autonomous system number.
 	uint32 peer_as = 5;
 	// Origin autonomous system number.
@@ -63,6 +126,8 @@ message Route {
 	uint32 med = 7;
 	// Local preference value.
 	uint32 pref = 8;
+	// ASPathLen measures the number of AS hops to reach our system.
+	uint32 as_path_len = 9;
 	// Route source (e.g., Static, BIRD).
 	RouteSourceID source = 10;
 	// BGP large communities attached to the route.
@@ -86,28 +151,4 @@ enum RouteSourceID {
 	ROUTE_SOURCE_ID_UNKNOWN = 0;
 	ROUTE_SOURCE_ID_STATIC = 1;
 	ROUTE_SOURCE_ID_BIRD = 2;
-}
-
-// InsertRouteRequest is the request to insert a route.
-message InsertRouteRequest {
-	// ModuleName is the name of the module into which the route should be
-	// inserted.
-	string module_name = 1;
-	// The destination prefix of the route.
-	//
-	// The prefix must be an IPv4 or IPv6 address followed by "/" and the
-	// length of the prefix.
-	string prefix = 2;
-	// The IP address of the nexthop router.
-	//
-	// The address must be either an IPv4 or IPv6 address.
-	//
-	// Example: "fe80::1", "192.168.1.1"
-	string nexthop_addr = 3;
-	// Numa specifies a bitmap of NUMA nodes that should be affected.
-	uint32 numa = 4;
-}
-
-// InsertRouteResponse is the response of "InsertRoute" request.
-message InsertRouteResponse {
 }

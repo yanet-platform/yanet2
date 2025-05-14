@@ -15,10 +15,13 @@ use tabled::{
 };
 use tonic::transport::Channel;
 use yanet_cli_route::{
-    code::{route_service_client::RouteServiceClient, InsertRouteRequest, LookupRouteRequest, ShowRoutesRequest},
+    code::{
+        route_service_client::RouteServiceClient, InsertRouteRequest, LookupRouteRequest, ShowRoutesRequest,
+        TargetModule,
+    },
     RouteEntry,
 };
-use ync::{logging, numa::NumaMap};
+use ync::logging;
 
 /// Route module.
 #[derive(Debug, Clone, Parser)]
@@ -53,12 +56,24 @@ pub struct RouteShowCmd {
     /// Show only IPv6 routes.
     #[arg(long)]
     pub ipv6: bool,
+    /// Route module name.
+    #[arg(long = "mod")]
+    pub module_name: String,
+    /// NUMA node index where changes should be applied, optionally repeated.
+    #[arg(long)]
+    pub numa: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct RouteLookupCmd {
     /// The IP address to lookup in the routing table.
     pub addr: IpAddr,
+    /// Route module name.
+    #[arg(long = "mod")]
+    pub module_name: String,
+    /// NUMA node index where changes should be applied, optionally repeated.
+    #[arg(long)]
+    pub numa: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -75,10 +90,8 @@ pub struct RouteInsertCmd {
     #[arg(long = "via")]
     pub nexthop_addr: IpAddr,
     /// NUMA node index where changes should be applied, optionally repeated.
-    ///
-    /// If not specified, the route will be applied to all NUMA nodes.
     #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    pub numa: Vec<u32>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -117,56 +130,71 @@ impl RouteService {
     }
 
     pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowRoutesRequest {
-            ipv4_only: cmd.ipv4,
-            ipv6_only: cmd.ipv6,
-        };
+        for numa in cmd.numa {
+            let request = ShowRoutesRequest {
+                target: Some(TargetModule {
+                    module_name: cmd.module_name.clone(),
+                    numa,
+                }),
+                ipv4_only: cmd.ipv4,
+                ipv6_only: cmd.ipv6,
+            };
 
-        let response = self.client.show_routes(request).await?.into_inner();
+            let response = self.client.show_routes(request).await?.into_inner();
 
-        let mut entries = response
-            .routes
-            .into_iter()
-            .map(|route| RouteEntry::from(route))
-            .collect::<Vec<_>>();
+            let mut entries = response.routes.into_iter().map(RouteEntry::from).collect::<Vec<_>>();
 
-        entries.sort_by(|a, b| a.prefix.0.cmp(&b.prefix.0));
+            entries.sort_by(|a, b| a.prefix.0.cmp(&b.prefix.0));
 
-        print_table(entries);
+            println!("NUMA {numa}");
+            print_table(entries);
+        }
 
         Ok(())
     }
 
     pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Box<dyn Error>> {
-        let request = LookupRouteRequest { ip_addr: cmd.addr.to_string() };
+        for numa in cmd.numa {
+            let request = LookupRouteRequest {
+                target: Some(TargetModule {
+                    module_name: cmd.module_name.clone(),
+                    numa,
+                }),
+                ip_addr: cmd.addr.to_string(),
+            };
 
-        let response = self.client.lookup_route(request).await?.into_inner();
+            let response = self.client.lookup_route(request).await?.into_inner();
 
-        if response.routes.is_empty() {
-            println!("No routes found for {}", cmd.addr);
-            return Ok(());
+            if response.routes.is_empty() {
+                println!("No routes found for {} on NUMA {numa}", cmd.addr);
+                continue;
+            }
+
+            println!("NUMA {numa}");
+            // NOTE: no sorting here, since routes are already sorted by their best.
+            print_table(response.routes.into_iter().map(RouteEntry::from));
         }
-
-        // NOTE: no sorting here, since routes are already sorted by their best.
-
-        print_table(response.routes.into_iter().map(|route| RouteEntry::from(route)));
 
         Ok(())
     }
 
     pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Box<dyn Error>> {
-        let numa = cmd.numa.map(NumaMap::from).unwrap_or(NumaMap::MAX).as_u32();
+        for numa in cmd.numa {
+            let request = InsertRouteRequest {
+                target: Some(TargetModule {
+                    module_name: cmd.module_name.clone(),
+                    numa,
+                }),
+                prefix: cmd.prefix.to_string(),
+                nexthop_addr: cmd.nexthop_addr.to_string(),
+                do_flush: true,
+            };
 
-        let request = InsertRouteRequest {
-            module_name: cmd.module_name,
-            prefix: cmd.prefix.to_string(),
-            nexthop_addr: cmd.nexthop_addr.to_string(),
-            numa,
-        };
+            let resp = self.client.insert_route(request).await?;
 
-        let resp = self.client.insert_route(request).await?;
+            log::debug!("InsertRouteResponse on NUMA {numa}: {:?}", resp);
+        }
 
-        log::debug!("InsertRouteResponse: {:?}", resp);
         Ok(())
     }
 }

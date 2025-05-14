@@ -5,8 +5,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
+	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
 )
 
 // NeighbourService implements the Neighbour service for retrieving neighbor information.

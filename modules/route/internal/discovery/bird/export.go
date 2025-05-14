@@ -10,47 +10,46 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/rib"
+	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
 
-type RIBUpdater interface {
-	BulkUpdate([]rib.Route) error
-}
+type Updater func([]rib.Route) error
+type Notifier func() error
 
 type exportSocket struct {
-	name    string
 	path    string
 	bufSize int
 }
 
 type Export struct {
-	sockets []exportSocket
-	ch      chan []rib.Route
-	cfg     *Config
-	updater RIBUpdater
-	log     *zap.SugaredLogger
+	sockets  []exportSocket
+	ch       chan []rib.Route
+	cfg      *Config
+	updater  Updater
+	notifier Notifier
+	log      *zap.SugaredLogger
 }
 
-func NewExportReader(cfg *Config, ribUpdater RIBUpdater, log *zap.SugaredLogger) *Export {
+func NewExportReader(cfg *Config, onUpdate Updater, onFlush Notifier, log *zap.SugaredLogger) *Export {
 	sockets := make([]exportSocket, 0, len(cfg.Sockets))
 	for _, s := range cfg.Sockets {
 		sockets = append(sockets, exportSocket{
-			name:    s.Name,
-			path:    s.Path,
+			path:    s,
 			bufSize: int(cfg.ParserBufSize.Bytes()),
 		})
 	}
 	return &Export{
-		sockets: sockets,
-		cfg:     cfg,
-		updater: ribUpdater,
-		log:     log,
+		sockets:  sockets,
+		cfg:      cfg,
+		updater:  onUpdate,
+		notifier: onFlush,
+		log:      log,
 	}
 }
 
 func (m *Export) Run(ctx context.Context) error {
-	if !m.cfg.Enable {
-		m.log.Info("bird export reader is disabled")
+	if len(m.cfg.Sockets) == 0 {
+		m.log.Info("bird export reader is disabled, no sockets provided")
 		return nil
 	}
 
@@ -70,7 +69,6 @@ func (m *Export) Run(ctx context.Context) error {
 	for _, socket := range m.sockets {
 		wg.Go(func() error {
 			m.log.Infow("starting bird export reader",
-				zap.String("name", socket.name),
 				zap.String("path", socket.path))
 
 			c, err := net.Dial("unix", socket.path)
@@ -122,6 +120,7 @@ func (m *Export) Run(ctx context.Context) error {
 				return ctx.Err()
 			case route := <-updates:
 				batch = append(batch, *route)
+				tick.Reset(m.cfg.DumpTimeout)
 			case <-tick.C:
 				if len(batch) == 0 {
 					continue
@@ -132,10 +131,14 @@ func (m *Export) Run(ctx context.Context) error {
 			if timeout || len(batch) >= m.cfg.DumpThreshold {
 				m.log.Debugw("send RIB update", zap.Int("size", len(batch)),
 					zap.Bool("isTimeout", timeout))
-				if err := m.updater.BulkUpdate(batch); err != nil {
-					return fmt.Errorf("failed to call rib bulk update: %w", err)
+				if err := m.updater(batch); err != nil {
+					return fmt.Errorf("failed to call updater: %w", err)
 				}
 				batch = batch[:0]
+
+				if err := m.notifier(); err != nil {
+					return fmt.Errorf("failed to call notifier: %w", err)
+				}
 			}
 
 			timeout = false

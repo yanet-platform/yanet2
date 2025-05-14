@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/rib"
+	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
 
 // bird/lib/net.c#L60

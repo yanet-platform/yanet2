@@ -8,33 +8,23 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery"
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery/neigh"
 )
 
 type RIB struct {
-	mu         sync.RWMutex
-	routes     MapTrie[netip.Prefix, netip.Addr, RoutesList]
-	neighbours *neigh.NexthopCache
-	changedAt  *atomic.Int64
-	log        *zap.SugaredLogger
+	mu        sync.RWMutex
+	routes    MapTrie[netip.Prefix, netip.Addr, RoutesList]
+	changedAt *atomic.Int64
+	log       *zap.SugaredLogger
 }
 
-func NewRIB(neighbours *neigh.NexthopCache, log *zap.SugaredLogger) *RIB {
+func NewRIB(log *zap.SugaredLogger) *RIB {
 	changedAt := atomic.Int64{}
 	changedAt.Store(time.Now().UnixNano())
 	return &RIB{
-		routes:     NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
-		neighbours: neighbours,
-		changedAt:  &changedAt,
-		log:        log,
+		routes:    NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
+		changedAt: &changedAt,
+		log:       log,
 	}
-}
-
-func (m *RIB) NeighboursView() discovery.CacheView[netip.Addr, neigh.NeighbourEntry] {
-	return m.neighbours.View()
-
 }
 
 func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error {
@@ -96,7 +86,7 @@ func (m *RIB) LongestMatch(addr netip.Addr) (netip.Prefix, RoutesList, bool) {
 	return prefix, list, ok
 }
 
-func (m *RIB) BulkUpdate(routes []Route) {
+func (m *RIB) Update(routes ...Route) {
 	m.mu.Lock()
 	for _, route := range routes {
 		if route.ToRemove {

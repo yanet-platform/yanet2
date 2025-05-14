@@ -9,7 +9,6 @@ import (
 
 // Module represents a route module in the coordinator.
 type Module struct {
-	configs map[uint32]*Config
 	service *ModuleService
 	log     *zap.SugaredLogger
 }
@@ -21,7 +20,6 @@ func NewModule(gatewayEndpoint string, log *zap.SugaredLogger) *Module {
 	service := NewModuleService(gatewayEndpoint, log)
 
 	return &Module{
-		configs: map[uint32]*Config{},
 		service: service,
 		log:     log,
 	}

@@ -10,11 +10,9 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery"
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery/bird"
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/discovery/neigh"
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/internal/rib"
 	routepb "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
+	"github.com/yanet-platform/yanet2/modules/route/internal/discovery"
+	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
 )
 
 // RouteModule is a controlplane part of a module that is responsible for
@@ -24,7 +22,6 @@ type RouteModule struct {
 	shm                *ffi.SharedMemory
 	agents             []*ffi.Agent
 	neighbourDiscovery *neigh.NeighMonitor
-	birdExport         *bird.Export
 	routeService       *RouteService
 	neighbourService   *NeighbourService
 	log                *zap.SugaredLogger
@@ -36,8 +33,6 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 
 	neighbourCache := discovery.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
 	neighbourDiscovery := neigh.NewNeighMonitor(neighbourCache, neigh.WithLog(log))
-
-	rib := rib.NewRIB(neighbourCache, log)
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
 	if err != nil {
@@ -55,17 +50,14 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		return nil, err
 	}
 
-	routeService := NewRouteService(agents, rib, log)
+	routeService := NewRouteService(agents, neighbourCache, log)
 	neighbourService := NewNeighbourService(neighbourCache, log)
-
-	export := bird.NewExportReader(cfg.BirdExport, routeService, log)
 
 	return &RouteModule{
 		cfg:                cfg,
 		shm:                shm,
 		agents:             agents,
 		neighbourDiscovery: neighbourDiscovery,
-		birdExport:         export,
 		routeService:       routeService,
 		neighbourService:   neighbourService,
 		log:                log,
@@ -112,12 +104,6 @@ func (m *RouteModule) Run(ctx context.Context) error {
 	wg, ctx := errgroup.WithContext(ctx)
 	wg.Go(func() error {
 		return m.neighbourDiscovery.Run(ctx)
-	})
-	wg.Go(func() error {
-		return m.birdExport.Run(ctx)
-	})
-	wg.Go(func() error {
-		return m.routeService.periodicRIBFlusher(ctx, m.cfg.RIBFlushPeriod)
 	})
 
 	return wg.Wait()
