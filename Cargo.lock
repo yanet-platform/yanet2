@@ -4220,6 +4220,7 @@ dependencies = [
  "log",
  "prost",
  "prost-types",
+ "ptree",
  "tabled",
  "tokio",
  "tonic",

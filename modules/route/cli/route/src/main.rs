@@ -5,6 +5,7 @@ use core::{error::Error, net::IpAddr};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use ipnet::IpNet;
+use ptree::TreeBuilder;
 use tabled::{
     settings::{
         object::{Columns, Rows},
@@ -16,8 +17,8 @@ use tabled::{
 use tonic::transport::Channel;
 use yanet_cli_route::{
     code::{
-        route_service_client::RouteServiceClient, InsertRouteRequest, LookupRouteRequest, ShowRoutesRequest,
-        TargetModule,
+        route_service_client::RouteServiceClient, InsertRouteRequest, ListConfigsRequest, LookupRouteRequest,
+        ShowRoutesRequest, TargetModule,
     },
     RouteEntry,
 };
@@ -58,9 +59,9 @@ pub struct RouteShowCmd {
     pub ipv6: bool,
     /// Route module name.
     #[arg(long = "mod")]
-    pub module_name: String,
+    pub module_name: Option<String>,
     /// NUMA node index where changes should be applied, optionally repeated.
-    #[arg(long)]
+    #[arg(long, required = false)]
     pub numa: Vec<u32>,
 }
 
@@ -72,7 +73,7 @@ pub struct RouteLookupCmd {
     #[arg(long = "mod")]
     pub module_name: String,
     /// NUMA node index where changes should be applied, optionally repeated.
-    #[arg(long)]
+    #[arg(long, required = true)]
     pub numa: Vec<u32>,
 }
 
@@ -90,7 +91,7 @@ pub struct RouteInsertCmd {
     #[arg(long = "via")]
     pub nexthop_addr: IpAddr,
     /// NUMA node index where changes should be applied, optionally repeated.
-    #[arg(long)]
+    #[arg(long, required = true)]
     pub numa: Vec<u32>,
 }
 
@@ -129,13 +130,41 @@ impl RouteService {
         Ok(m)
     }
 
+    pub async fn print_config_list(&mut self) -> Result<(), Box<dyn Error>> {
+        let request = ListConfigsRequest {};
+        let response = self.client.list_configs(request).await?.into_inner();
+        let mut tree = TreeBuilder::new("Route Configs".to_string());
+        for numa in response.numa_configs {
+            tree.begin_child(format!("NUMA {}", numa.numa));
+            for config in numa.configs {
+                tree.add_empty_child(config);
+            }
+        }
+        let tree = tree.build();
+        ptree::print_tree(&tree)?;
+        Ok(())
+    }
+
+    pub async fn get_numa_indices(&mut self) -> Result<Vec<u32>, Box<dyn Error>> {
+        let request = ListConfigsRequest {};
+        let response = self.client.list_configs(request).await?.into_inner();
+        Ok(response.numa_configs.iter().map(|c| c.numa).collect())
+    }
+
     pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Box<dyn Error>> {
-        for numa in cmd.numa {
+        let Some(name) = cmd.module_name else {
+            self.print_config_list().await?;
+            return Ok(());
+        };
+
+        let mut numa_indices = cmd.numa;
+        if numa_indices.is_empty() {
+            numa_indices = self.get_numa_indices().await?;
+        }
+
+        for numa in numa_indices {
             let request = ShowRoutesRequest {
-                target: Some(TargetModule {
-                    module_name: cmd.module_name.clone(),
-                    numa,
-                }),
+                target: Some(TargetModule { module_name: name.clone(), numa }),
                 ipv4_only: cmd.ipv4,
                 ipv6_only: cmd.ipv6,
             };

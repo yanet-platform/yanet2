@@ -98,6 +98,7 @@ func (m *Export) Run(ctx context.Context) error {
 					cancel(err)
 					return fmt.Errorf("failed to decode next route update: %w", err)
 				}
+				route.SourceID = rib.RouteSourceBird
 
 				select {
 				case <-ctx.Done():

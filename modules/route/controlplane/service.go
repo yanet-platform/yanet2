@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/netip"
 	"sync"
 	"time"
@@ -14,7 +15,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
-	"github.com/yanet-platform/yanet2/common/go/numa"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	routepb "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
@@ -26,7 +26,7 @@ type RouteService struct {
 
 	mu         sync.Mutex
 	agents     []*ffi.Agent
-	ribs       map[instanceKey]*ribHolder
+	ribs       map[instanceKey]*rib.RIB
 	neighCache *neigh.NexthopCache
 	log        *zap.SugaredLogger
 }
@@ -38,10 +38,31 @@ func NewRouteService(
 ) *RouteService {
 	return &RouteService{
 		agents:     agents,
-		ribs:       map[instanceKey]*ribHolder{},
+		ribs:       map[instanceKey]*rib.RIB{},
 		neighCache: neighCache,
 		log:        log,
 	}
+}
+
+func (m *RouteService) ListConfigs(
+	ctx context.Context,
+	request *routepb.ListConfigsRequest,
+) (*routepb.ListConfigsResponse, error) {
+
+	response := &routepb.ListConfigsResponse{
+		NumaConfigs: make([]*routepb.NumaConfigs, len(m.agents)),
+	}
+	for idx := range m.agents {
+		response.NumaConfigs[idx] = &routepb.NumaConfigs{
+			Numa: uint32(idx),
+		}
+	}
+	for key := range maps.Keys(m.ribs) {
+		numaConfigs := response.NumaConfigs[key.numaIdx]
+		numaConfigs.Configs = append(numaConfigs.Configs, key.name)
+	}
+
+	return response, nil
 }
 
 func (m *RouteService) ShowRoutes(
@@ -58,7 +79,7 @@ func (m *RouteService) ShowRoutes(
 	if !ok {
 		return &routepb.ShowRoutesResponse{}, nil
 	}
-	routes := holder.rib.DumpRoutes()
+	routes := holder.DumpRoutes()
 
 	response := &routepb.ShowRoutesResponse{}
 
@@ -104,7 +125,7 @@ func (m *RouteService) LookupRoute(
 		return &routepb.LookupRouteResponse{}, nil
 	}
 
-	prefix, routes, ok := holder.rib.LongestMatch(addr)
+	prefix, routes, ok := holder.LongestMatch(addr)
 	if !ok {
 		return &routepb.LookupRouteResponse{}, nil
 	}
@@ -154,10 +175,10 @@ func (m *RouteService) InsertRoute(
 
 	holder, ok := m.ribs[instanceKey{name: name, numaIdx: numa}]
 	if !ok {
-		holder = newRIBHolder(m.log)
+		holder = rib.NewRIB(m.log)
 		m.ribs[instanceKey{name: name, numaIdx: numa}] = holder
 	}
-	if err := holder.rib.AddUnicastRoute(prefix, nexthopAddr); err != nil {
+	if err := holder.AddUnicastRoute(prefix, nexthopAddr); err != nil {
 		return nil, fmt.Errorf("failed to add unicast route: %w", err)
 	}
 
@@ -173,7 +194,7 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 		name   string
 		numa   uint32
 		err    error
-		holder *ribHolder
+		holder *rib.RIB
 	)
 
 	for {
@@ -192,12 +213,16 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 			var ok bool
 			holder, ok = m.ribs[instanceKey{name: name, numaIdx: numa}]
 			if !ok {
-				holder = newRIBHolder(m.log)
+				holder = rib.NewRIB(m.log)
 				m.ribs[instanceKey{name: name, numaIdx: numa}] = holder
 			}
 
 		}
-		holder.updateRIB(update)
+		route, err := routepb.ToRIBRoute(update.GetRoute(), update.GetIsDelete())
+		if err != nil {
+			return fmt.Errorf("failed to convert proto route to RIB route: %w", err)
+		}
+		holder.Update(*route)
 	}
 }
 
@@ -208,7 +233,7 @@ func (m *RouteService) syncRouteUpdates(name string, numa uint32) error {
 		return nil
 	}
 
-	routes := holder.rib.DumpRoutes()
+	routes := holder.DumpRoutes()
 
 	// Huge mutex, but our shared memory must be protected from concurrent access.
 	m.mu.Lock()
@@ -313,10 +338,10 @@ func (m *RouteService) validateTarget(target *routepb.TargetModule) (string, uin
 		return "", 0, fmt.Errorf("target module name is required")
 	}
 	// After the intersection, the numaMap contains ONE reachable NUMA node.
-	numaMap := numa.NewWithOneBitSet(target.GetNuma()).Intersect(numa.NewWithTrailingOnes(len(m.agents)))
-	if numaMap.IsEmpty() {
-		return "", 0, fmt.Errorf("NUMA map is empty for target %s:%v", name, target.GetNuma())
+	numa := target.GetNuma()
+	if numa >= uint32(len(m.agents)) {
+		return "", 0, fmt.Errorf("NUMA index %d for config %s is out of range [0..%d) ", name, numa)
 	}
 
-	return name, target.GetNuma(), nil
+	return name, numa, nil
 }

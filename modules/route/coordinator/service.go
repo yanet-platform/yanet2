@@ -94,6 +94,24 @@ func (m *ModuleService) setupConfig(
 	}
 	flushRequest := &routepb.FlushRoutesRequest{Target: target}
 
+	// Insert and flush static routes first.
+	for _, route := range config.Routes {
+		request := &routepb.InsertRouteRequest{
+			Target:      target,
+			Prefix:      route.Prefix.String(),
+			NexthopAddr: route.Nexthop.String(),
+		}
+
+		if _, err := client.InsertRoute(ctx, request); err != nil {
+			return fmt.Errorf("failed to insert static route: %w", err)
+		}
+	}
+
+	if _, err := client.FlushRoutes(ctx, flushRequest); err != nil {
+		return fmt.Errorf("failed to flush static routes for %s: %w", configName, err)
+	}
+
+	// And then add dynamic routes, if any.
 	if len(config.BirdImport.Sockets) > 0 {
 		streamCtx, cancel := context.WithCancel(context.Background())
 
@@ -105,11 +123,11 @@ func (m *ModuleService) setupConfig(
 
 		log := m.log.With("config", configName, "numa", numaNode)
 		onUpdate := func(routes []rib.Route) error {
-			log.Debugf("Received update batch with %d routes", len(routes))
+			log.Debugf("received update batch with %d routes", len(routes))
 			for idx := range routes {
 				select {
 				case <-streamCtx.Done():
-					log.Warnf("Terminate update stream due to: %w", streamCtx.Err())
+					log.Warnf("terminate update stream due to: %w", streamCtx.Err())
 					_, err = stream.CloseAndRecv()
 					return errors.Join(streamCtx.Err(), err)
 				default:
@@ -146,31 +164,17 @@ func (m *ModuleService) setupConfig(
 
 		go func() {
 			if err := export.Run(streamCtx); err != nil {
-				log.Errorf("Failed to run bird export reader: %v", err)
+				log.Errorf("failed to run bird export reader: %v", err)
 				cancel()
 				conn.Close()
+				// FIXME: Determine the appropriate action for this scenario.
+				panic(err)
 			}
 		}()
 
 	} else {
 		// We do not need this connection if there is no background stream for import
-		defer conn.Close()
-	}
-
-	for _, route := range config.Routes {
-		request := &routepb.InsertRouteRequest{
-			Target:      target,
-			Prefix:      route.Prefix.String(),
-			NexthopAddr: route.Nexthop.String(),
-		}
-
-		if _, err := client.InsertRoute(ctx, request); err != nil {
-			return fmt.Errorf("failed to insert static route: %w", err)
-		}
-	}
-
-	if _, err := client.FlushRoutes(ctx, flushRequest); err != nil {
-		return fmt.Errorf("failed to flush static routes for %s: %w", configName, err)
+		conn.Close()
 	}
 
 	return nil

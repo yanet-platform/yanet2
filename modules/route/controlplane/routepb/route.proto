@@ -6,6 +6,10 @@ option go_package = "github.com/yanet-platform/yanet2/modules/route/controlplane
 
 // RouteService is a service for routing table management.
 service RouteService {
+	// ListConfigs returns all route module configurations of all NUMA
+	// nodes.
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
 	// ShowRoutes returns all routes in the routing table.
 	rpc ShowRoutes(ShowRoutesRequest) returns (ShowRoutesResponse);
 
@@ -29,6 +33,19 @@ message TargetModule {
 	string module_name = 1;
 	// Numa specifies the index of the NUMA node to be affected.
 	uint32 numa = 2;
+}
+
+message ListConfigsRequest {
+}
+
+// ListConfigsResponse contains existing configurations per NUMA node.
+message ListConfigsResponse {
+	repeated NumaConfigs numa_configs = 1;
+}
+
+message NumaConfigs {
+	uint32 numa = 1;
+	repeated string configs = 2;
 }
 
 // ShowRoutesRequest contains filters for route listing.
