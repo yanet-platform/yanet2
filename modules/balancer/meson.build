@@ -1,13 +1,12 @@
-# common dependecies
-dependencies += lib_common_dep
-dependencies += lib_filter_dep
-dependencies += lib_logging_dep
+dependencies = [
+  lib_common_dep,
+  lib_logging_dep,
+]
 
-# dataplane dependecies
-dp_dependencies = dependencies
-dp_dependencies += lib_packet_dp_dep
-
-dp_dependencies += lib_module_dp_dep
+dp_dependencies = dependencies + [
+  lib_packet_dp_dep,
+  lib_module_dp_dep,
+]
 
 dp_sources = files(
   'dataplane.c',
@@ -30,8 +29,7 @@ lib_balancer_dp_dep = declare_dependency(
   ],
 )
 
-# controlplane dependecies
-cp_dependencies = dependencies
+cp_dependencies = dependencies + [lib_config_dp_dep]
 
 sources = files(
   'controlplane.c',

@@ -1,13 +1,5 @@
-# common dependencies
-dependencies += lib_common_dep
-dependencies += lib_logging_dep
-
-subdir('controlplane')
 subdir('api')
+subdir('controlplane')
 subdir('dataplane')
 subdir('fuzzing')
 subdir('tests')
-
-# Make dependencies available to parent scope
-dscp_dp_dep = lib_dscp_dp_dep
-dscp_cp_dep = lib_dscp_cp_dep

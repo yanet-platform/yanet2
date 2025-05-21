@@ -1,13 +1,16 @@
-dependencies = []
+lib_dependencies = [
+  dependency('threads'),
+  dependency('yaml-0.1'),
+  libdpdk.get_variable('dpdk_dep'),
 
-dependencies += dependency('threads')
-dependencies += dependency('yaml-0.1')
+  lib_common_dep,
+  lib_logging_dep,
+  lib_pipeline_dp_dep,
+  lib_config_dp_dep,
+  lib_config_cp_dep,
+]
 
-dependencies += libdpdk.get_variable('dpdk_dep')
 
-dependencies += lib_common_dep
-dependencies += lib_logging_dep
-dependencies += lib_pipeline_dp_dep
 
 lib_sources = files(
   'config.c',
@@ -21,7 +24,7 @@ lib_dataplane = static_library(
   lib_sources,
   c_args: yanet_c_args,
   link_args: yanet_link_args,
-  dependencies: dependencies,
+  dependencies: lib_dependencies,
   install: false,
 )
 
@@ -30,18 +33,21 @@ lib_dataplane_dep = declare_dependency(
   include_directories: include_directories('.'),
 )
 
-dependencies += lib_dataplane_dep
-dependencies += lib_module_dp_dep
-dependencies += lib_pipeline_dp_dep
-dependencies += lib_config_dp_dep
+dependencies = lib_dependencies + [
+  lib_dataplane_dep,
+  lib_module_dp_dep,
 
-dependencies += lib_balancer_dp_dep
-dependencies += lib_decap_dp_dep
-dependencies += lib_dscp_dp_dep
-#dependencies += lib_acl_dp_dep
-dependencies += lib_forward_dp_dep
-dependencies += lib_route_dp_dep
-dependencies += lib_nat64_dp_dep
+  # modules
+  lib_balancer_dp_dep,
+  lib_decap_dp_dep,
+  lib_dscp_dp_dep,
+  # lib_acl_dp_dep,
+  lib_forward_dp_dep,
+  lib_route_dp_dep,
+  lib_nat64_dp_dep,
+  # lib_pdump_dp_dep,
+]
+
 
 sources = files(
   'drivers/sock_dev.c',

@@ -1,7 +1,9 @@
-dependencies = []
+dependencies = [
+  lib_common_dep,
+  lib_logging_dep,
+  libdpdk_inc_dep,
+]
 
-dependencies += lib_common_dep
-dependencies += libdpdk_inc_dep
 
 sources = files(
   'decap.c',

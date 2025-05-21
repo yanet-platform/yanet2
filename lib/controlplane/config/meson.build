@@ -1,7 +1,7 @@
-dependencies = []
-
-dependencies += lib_module_dp_dep
-dependencies += lib_pipeline_dp_dep
+dependencies = [
+  lib_module_dp_dep,
+  lib_pipeline_dp_dep,
+]
 
 sources = files(
   'zone.c',

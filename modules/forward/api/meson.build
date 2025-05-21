@@ -1,6 +1,7 @@
-# controlplane dependencies
-cp_dependencies = dependencies
-cp_dependencies += lib_config_dp_dep
+cp_dependencies = [
+  lib_common_dep,
+  lib_config_dp_dep,
+]
 
 includes = include_directories('../dataplane')
 
