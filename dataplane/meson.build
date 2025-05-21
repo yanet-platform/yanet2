@@ -10,8 +10,6 @@ lib_dependencies = [
   lib_config_cp_dep,
 ]
 
-
-
 lib_sources = files(
   'config.c',
   'dataplane.c',
@@ -45,7 +43,7 @@ dependencies = lib_dependencies + [
   lib_forward_dp_dep,
   lib_route_dp_dep,
   lib_nat64_dp_dep,
-  # lib_pdump_dp_dep,
+  lib_pdump_dp_dep,
 ]
 
 sources = files(

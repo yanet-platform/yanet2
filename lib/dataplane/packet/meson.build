@@ -4,7 +4,6 @@ dependencies = [
   libdpdk_inc_dep,
 ]
 
-
 sources = files(
   'decap.c',
   'dscp.c',

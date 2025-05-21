@@ -12,6 +12,7 @@ import (
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
+	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 )
 
@@ -41,6 +42,7 @@ func DefaultConfig() *Config {
 			DSCP:    dscp.DefaultConfig(),
 			Forward: forward.DefaultConfig(),
 			NAT64:   nat64.DefaultConfig(),
+			Pdump:   pdump.DefaultConfig(),
 		},
 	}
 }
@@ -82,6 +84,9 @@ type ModulesConfig struct {
 
 	// NAT64 is the configuration for the NAT64 module.
 	NAT64 *nat64.Config `yaml:"nat64"`
+
+	// Pdump is the configuration for the packet dump module.
+	Pdump *pdump.Config `yaml:"pdump"`
 }
 
 // UnmarshalYAML serves as a proxy for validation.

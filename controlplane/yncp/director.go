@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
@@ -13,6 +12,7 @@ import (
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
+	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 )
 
@@ -103,6 +103,11 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize nat64 built-in module: %w", err)
 	}
 
+	pdumpModule, err := pdump.NewPdumpModule(cfg.Modules.Pdump, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize pdump built-in module: %w", err)
+	}
+
 	gateway := gateway.NewGateway(
 		cfg.Gateway,
 		shm,
@@ -120,6 +125,9 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		),
 		gateway.WithBuiltInModule(
 			nat64Module,
+		),
+		gateway.WithBuiltInModule(
+			pdumpModule,
 		),
 		gateway.WithLog(log),
 		gateway.WithAtomicLogLevel(opts.LogLevel),
@@ -142,11 +150,5 @@ func (m *Director) Close() error {
 
 // Run runs the YANET controlplane director.
 func (m *Director) Run(ctx context.Context) error {
-	// Serve.
-	wg, ctx := errgroup.WithContext(ctx)
-	wg.Go(func() error {
-		return m.gateway.Run(ctx)
-	})
-
-	return wg.Wait()
+	return m.gateway.Run(ctx)
 }

@@ -14,7 +14,6 @@
 
 #include "controlplane/agent/agent.h"
 
-struct dp_config;
 struct cp_config;
 
 struct dp_module {

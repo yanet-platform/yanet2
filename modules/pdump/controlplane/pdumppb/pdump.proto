@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+package pdumppb;
+
+import "common/proto/target.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/pdump/pdumppb;pdumppb";
+
+// PdumpService is a service for Differentiated Services Code Point module.
+service PdumpService {
+	// ListConfigs returns all pdump module configurations of all NUMA
+	// nodes.
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
+	// ShowConfig returns the current configuration for the pdump module.
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+
+	// SetFilter sets the packet filter.
+	rpc SetFilter(SetFilterRequest) returns (SetFilterResponse);
+
+	// SetDumpMode switches the pdump module to read packets from the
+	// drop packet list instead of the input packet list or from both lists.
+	rpc SetDumpMode(SetDumpModeRequest) returns (SetDumpModeResponse);
+
+	// SetSnapLen sets the maximum packet length to capture.
+	rpc SetSnapLen(SetSnapLenRequest) returns (SetSnapLenResponse);
+
+	// SetWorkerRingSize sets the size of the per-worker ring buffer where
+	// matched packets are written.
+	rpc SetWorkerRingSize(SetWorkerRingSizeRequest)
+		returns (SetWorkerRingSizeResponse);
+
+	// ReadDump activates reading packet dumps from shared memory. Each
+	// packet is returned as an individual Record message containing
+	// metadata and packet content.
+	rpc ReadDump(ReadDumpRequest) returns (stream Record);
+}
+
+// ReadDumpRequest contains the target config for initializing pdump record
+// streaming.
+message ReadDumpRequest {
+	commonpb.TargetModule target = 1;
+}
+
+message RecordMeta {
+	// Timestamp of receiving package on dataplane side.
+	uint64 Timestamp = 1;
+	// Size of the payload data
+	uint32 DataSize = 2;
+	// PacketLen indicates the length of the original packet.
+	uint32 PacketLen = 3;
+	// Worker that processes this message; this index is used to select the
+	// appropriate ring buffer.
+	uint32 WorkerIdx = 4;
+	// Index of the pipeline where the pdump module is located.
+	uint32 PipelineIdx = 5;
+	// ID of the device from which the packet was received.
+	uint32 RxDeviceId = 6;
+	// ID of the device to which the packet may be sent.
+	uint32 TxDeviceId = 7;
+	// Indicates whether the packet was processed from the drop queue or
+	// from the input queue.
+	bool IsDrops = 8;
+}
+
+message Record {
+	RecordMeta meta = 1;
+	bytes data = 2;
+}
+
+message ListConfigsRequest {
+}
+
+// ListConfigsResponse contains existing configurations per NUMA node.
+message ListConfigsResponse {
+	repeated NumaConfigs numa_configs = 1;
+}
+
+message NumaConfigs {
+	uint32 numa = 1;
+	repeated string configs = 2;
+}
+
+// ShowConfigResponse retrieves the runtime configuration for the pdump module.
+message ShowConfigRequest {
+	commonpb.TargetModule target = 1;
+}
+
+// Config contains the pdump module configuration.
+message Config {
+	// If set, the pdump module reads from the list of dropped packets
+	// instead of the list of input packets
+	bool collect_drops = 1;
+	string filter = 2;
+}
+
+// ShowConfigResponse contains the configuration details of the pdump module.
+message ShowConfigResponse {
+	uint32 numa = 1;
+	Config config = 3;
+}
+
+// SetFilterRequest contains information about the target module and
+// the filter for the pdump module's configuration.
+message SetFilterRequest {
+	commonpb.TargetModule target = 1;
+	string filter = 2;
+}
+message SetFilterResponse {
+}
+
+message SetDumpModeRequest {
+	commonpb.TargetModule target = 1;
+	DumpMode mode = 2;
+}
+
+message SetDumpModeResponse {
+}
+
+message SetSnapLenRequest {
+	commonpb.TargetModule target = 1;
+	uint32 snaplen = 2;
+}
+
+message SetSnapLenResponse {
+}
+
+message SetWorkerRingSizeRequest {
+	commonpb.TargetModule target = 1;
+	uint32 ring_size = 2;
+}
+
+message SetWorkerRingSizeResponse {
+}
+
+// DumpMode specifies the packet list to operate on.
+enum DumpMode {
+	PDUMP_DUMP_INPUT = 0;
+	PDUMP_DUMP_DROPS = 1;
+	PDUMP_DUMP_BOTH = 2;
+}

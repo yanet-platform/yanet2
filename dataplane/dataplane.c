@@ -314,6 +314,8 @@ dataplane_init(
 	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 
 	dataplane->node_count = config->numa_count;
+	// FIXME: check that node_count < N where N is the size of
+	// dataplane->nodes[N]
 	LOG(INFO, "initialize dataplane with %u numa", config->numa_count);
 
 	off_t numa_size = config->dp_memory + config->cp_memory;
@@ -368,6 +370,7 @@ dataplane_init(
 
 	for (uint32_t node_idx = 0; node_idx < dataplane->node_count;
 	     ++node_idx) {
+
 		struct dataplane_numa_node *node = dataplane->nodes + node_idx;
 
 		LOG(INFO, "initialize storage for NUMA %u", node_idx);
@@ -416,6 +419,10 @@ dataplane_init(
 		rc = dataplane_load_module(
 			node->dp_config, bin_hndl, "balancer"
 		);
+		if (rc == -1) {
+			return -1;
+		}
+		rc = dataplane_load_module(node->dp_config, bin_hndl, "pdump");
 		if (rc == -1) {
 			return -1;
 		}

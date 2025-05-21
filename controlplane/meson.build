@@ -21,6 +21,7 @@ custom_target(
         forward_protoc_gen,
         nat64_protoc_gen,
         route_protoc_gen,
+        pdump_protoc_gen,
     ],
     install: true,
     install_dir: get_option('bindir'),
