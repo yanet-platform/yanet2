@@ -279,7 +279,9 @@ func (m *RouteService) updateModuleConfig(
 			// Lookup hwaddress for the route
 			entry, ok := neighbours.Lookup(route.NextHop.Unmap())
 			if !ok {
-				return fmt.Errorf("neighbour with %q nexthop IP address not found", route.NextHop)
+				// FIXME: add telemetry?
+				m.log.Warnf("neighbour with %q nexthop IP address not found, skip", route.NextHop)
+				continue
 			}
 
 			if idx, ok := hardwareRoutes[entry.HardwareRoute]; ok {
@@ -340,7 +342,7 @@ func (m *RouteService) validateTarget(target *routepb.TargetModule) (string, uin
 	// After the intersection, the numaMap contains ONE reachable NUMA node.
 	numa := target.GetNuma()
 	if numa >= uint32(len(m.agents)) {
-		return "", 0, fmt.Errorf("NUMA index %d for config %s is out of range [0..%d) ", name, numa)
+		return "", 0, fmt.Errorf("NUMA index %d for config %s is out of range [0..%d) ", numa, name, len(m.agents))
 	}
 
 	return name, numa, nil
