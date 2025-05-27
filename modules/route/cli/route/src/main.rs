@@ -57,9 +57,9 @@ pub struct RouteShowCmd {
     /// Show only IPv6 routes.
     #[arg(long)]
     pub ipv6: bool,
-    /// Route module name.
-    #[arg(long = "mod")]
-    pub module_name: Option<String>,
+    /// Route config name.
+    #[arg(long = "cfg")]
+    pub config_name: Option<String>,
     /// NUMA node index where changes should be applied, optionally repeated.
     #[arg(long, required = false)]
     pub numa: Vec<u32>,
@@ -69,9 +69,9 @@ pub struct RouteShowCmd {
 pub struct RouteLookupCmd {
     /// The IP address to lookup in the routing table.
     pub addr: IpAddr,
-    /// Route module name.
-    #[arg(long = "mod")]
-    pub module_name: String,
+    /// Route config name.
+    #[arg(long = "cfg")]
+    pub config_name: String,
     /// NUMA node index where changes should be applied, optionally repeated.
     #[arg(long, required = true)]
     pub numa: Vec<u32>,
@@ -84,9 +84,9 @@ pub struct RouteInsertCmd {
     /// The prefix must be an IPv4 or IPv6 address followed by "/" and the
     /// length of the prefix.
     pub prefix: IpNet,
-    /// Route module name.
-    #[arg(long = "mod")]
-    pub module_name: String,
+    /// Route config name.
+    #[arg(long = "cfg")]
+    pub config_name: String,
     /// The IP address of the nexthop router.
     #[arg(long = "via")]
     pub nexthop_addr: IpAddr,
@@ -152,7 +152,7 @@ impl RouteService {
     }
 
     pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Box<dyn Error>> {
-        let Some(name) = cmd.module_name else {
+        let Some(name) = cmd.config_name else {
             self.print_config_list().await?;
             return Ok(());
         };
@@ -164,7 +164,7 @@ impl RouteService {
 
         for numa in numa_indices {
             let request = ShowRoutesRequest {
-                target: Some(TargetModule { module_name: name.clone(), numa }),
+                target: Some(TargetModule { config_name: name.clone(), numa }),
                 ipv4_only: cmd.ipv4,
                 ipv6_only: cmd.ipv6,
             };
@@ -186,7 +186,7 @@ impl RouteService {
         for numa in cmd.numa {
             let request = LookupRouteRequest {
                 target: Some(TargetModule {
-                    module_name: cmd.module_name.clone(),
+                    config_name: cmd.config_name.clone(),
                     numa,
                 }),
                 ip_addr: cmd.addr.to_string(),
@@ -211,7 +211,7 @@ impl RouteService {
         for numa in cmd.numa {
             let request = InsertRouteRequest {
                 target: Some(TargetModule {
-                    module_name: cmd.module_name.clone(),
+                    config_name: cmd.config_name.clone(),
                     numa,
                 }),
                 prefix: cmd.prefix.to_string(),

@@ -89,7 +89,7 @@ func (m *ModuleService) setupConfig(
 	}
 	client := routepb.NewRouteServiceClient(conn)
 	target := &routepb.TargetModule{
-		ModuleName: configName,
+		ConfigName: configName,
 		Numa:       numaNode,
 	}
 	flushRequest := &routepb.FlushRoutesRequest{Target: target}

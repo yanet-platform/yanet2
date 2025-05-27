@@ -335,11 +335,10 @@ func (m *RouteService) validateTarget(target *routepb.TargetModule) (string, uin
 	if target == nil {
 		return "", 0, fmt.Errorf("target module cannot be nil")
 	}
-	name := target.GetModuleName()
+	name := target.GetConfigName()
 	if name == "" {
 		return "", 0, fmt.Errorf("target module name is required")
 	}
-	// After the intersection, the numaMap contains ONE reachable NUMA node.
 	numa := target.GetNuma()
 	if numa >= uint32(len(m.agents)) {
 		return "", 0, fmt.Errorf("NUMA index %d for config %s is out of range [0..%d) ", numa, name, len(m.agents))
