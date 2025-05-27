@@ -1,6 +1,6 @@
 //! CLI for YANET "inspect" module.
 
-use core::{error::Error, ops::ControlFlow};
+use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
@@ -90,12 +90,6 @@ impl InspectService {
     }
 
     fn format_tree_output(&self, response: &code::InspectResponse) -> Result<(), Box<dyn Error>> {
-        let mut numa_nodes = Vec::new();
-        traverse_bits(response.numa_bitmap as u64, |idx| -> ControlFlow<()> {
-            numa_nodes.push(idx);
-            ControlFlow::Continue(())
-        });
-
         let mut tree = TreeBuilder::new("YANET System".to_string());
 
         for info in &response.numa_info {
@@ -110,7 +104,7 @@ impl InspectService {
             tree.begin_child("Controlplane Configurations".to_string());
             for cfg in &info.cp_configs {
                 let module = &info.dp_modules[cfg.module_idx as usize];
-                tree.add_empty_child(format!("{}:{} (gen: {})", module.name, cfg.name, cfg.gen));
+                tree.add_empty_child(format!("{}:{} (gen: {})", module.name, cfg.name, cfg.generation));
             }
             tree.end_child();
 
@@ -123,7 +117,7 @@ impl InspectService {
                     tree.add_empty_child(format!("Memory limit: {}", instance.memory_limit));
                     tree.add_empty_child(format!("Allocated: {}", instance.allocated));
                     tree.add_empty_child(format!("Freed: {}", instance.freed));
-                    tree.add_empty_child(format!("Generation: {}", instance.gen));
+                    tree.add_empty_child(format!("Generation: {}", instance.generation));
                     tree.end_child();
                 }
 
@@ -164,20 +158,4 @@ impl InspectService {
 
         Ok(())
     }
-}
-
-#[inline]
-pub fn traverse_bits<F, B>(mut word: u64, mut f: F) -> ControlFlow<B>
-where
-    F: FnMut(usize) -> ControlFlow<B>,
-{
-    while word > 0 {
-        let r = word.trailing_zeros() as usize;
-        let t = word & word.wrapping_neg();
-        word ^= t;
-
-        f(r)?;
-    }
-
-    ControlFlow::Continue(())
 }

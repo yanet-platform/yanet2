@@ -1,22 +1,30 @@
 use core::error::Error;
 
+use bitmap::BitsIterator;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
-use ipnet::IpNet;
-use ptree::TreeBuilder;
-use tonic::transport::Channel;
-
-use code::{
+use decappb::{
     AddPrefixesRequest, RemovePrefixesRequest, ShowConfigRequest, ShowConfigResponse, TargetModule,
     decap_service_client::DecapServiceClient,
 };
+use ipnet::IpNet;
+use ptree::TreeBuilder;
+use tonic::transport::Channel;
 use ync::logging;
+use ynpb::{InspectRequest, inspect_service_client::InspectServiceClient};
 
 #[allow(non_snake_case)]
-pub mod code {
+pub mod decappb {
     use serde::Serialize;
 
     tonic::include_proto!("decappb");
+}
+
+#[allow(non_snake_case)]
+pub mod ynpb {
+    use serde::Serialize;
+
+    tonic::include_proto!("ynpb");
 }
 
 /// Decap module.
@@ -44,8 +52,12 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// Decap module name to operate on.
-    #[arg(long = "mod", short)]
-    pub module_name: String,
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
+    /// NUMA node index where the changes should be applied, optionally
+    /// repeated.
+    #[arg(long, required = false)]
+    pub numa: Vec<u32>,
     /// Output format.
     #[clap(long, value_enum, default_value_t = OutputFormat::Tree)]
     pub format: OutputFormat,
@@ -54,13 +66,12 @@ pub struct ShowConfigCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct AddPrefixesCmd {
     /// Decap module name to operate on.
-    #[arg(long = "mod", short)]
-    pub module_name: String,
-    /// NUMA node index where the changes should be applied, optional.
-    ///
-    /// If no numa specified, the route will be applied to all NUMA nodes.
-    #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
+    /// NUMA node index where the changes should be applied, optionally
+    /// repeated.
+    #[arg(long, required = true)]
+    pub numa: Vec<u32>,
 
     /// Prefix to be added to the input filter of the decapsulation module.
     #[arg(long, short)]
@@ -70,14 +81,13 @@ pub struct AddPrefixesCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RemovePrefixesCmd {
     /// Decap module name to operate on.
-    #[arg(long = "mod", short)]
-    pub module_name: String,
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
 
-    /// NUMA node index where the changes should be applied, optional.
-    ///
-    /// If no numa specified, the route will be applied to all NUMA nodes.
-    #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    /// NUMA node index where the changes should be applied, optionally
+    /// repeated.
+    #[arg(long, required = true)]
+    pub numa: Vec<u32>,
 
     /// Prefix to be removed from the input filter of the decapsulation module.
     #[arg(long, short)]
@@ -116,56 +126,81 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct DecapService {
+    inspect: InspectServiceClient<Channel>,
     client: DecapServiceClient<Channel>,
 }
 
 impl DecapService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
+        let inspect = InspectServiceClient::connect(endpoint.clone()).await?;
         let client = DecapServiceClient::connect(endpoint).await?;
-        Ok(Self { client })
+        Ok(Self { inspect, client })
+    }
+
+    pub async fn get_numa_indices(&mut self) -> Result<Vec<u32>, Box<dyn Error>> {
+        let request = InspectRequest {};
+        let response = self.inspect.inspect(request).await?.into_inner();
+
+        let numa = BitsIterator::new(response.numa_bitmap as u64)
+            .map(|idx| idx as u32)
+            .collect();
+
+        Ok(numa)
     }
 
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowConfigRequest {
-            target: Some(TargetModule {
-                module_name: cmd.module_name.to_owned(),
-                numa: Vec::new(),
-            }),
-        };
-        let response = self.client.show_config(request).await?.into_inner();
-        match cmd.format {
-            OutputFormat::Json => print_json(&response)?,
-            OutputFormat::Tree => print_tree(&response)?,
+        let mut numa_indices = cmd.numa;
+        if numa_indices.is_empty() {
+            numa_indices = self.get_numa_indices().await?;
+        }
+
+        for numa in numa_indices {
+            let request = ShowConfigRequest {
+                target: Some(TargetModule {
+                    config_name: cmd.config_name.to_owned(),
+                    numa,
+                }),
+            };
+            let response = self.client.show_config(request).await?.into_inner();
+
+            match cmd.format {
+                OutputFormat::Json => print_json(&response)?,
+                OutputFormat::Tree => print_tree(&response)?,
+            }
         }
 
         Ok(())
     }
 
     pub async fn add_prefixes(&mut self, cmd: AddPrefixesCmd) -> Result<(), Box<dyn Error>> {
-        let request = AddPrefixesRequest {
-            target: Some(TargetModule {
-                module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
-            }),
-            prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
-        };
-        log::trace!("AddPrefixesRequest: {:?}", request);
-        let response = self.client.add_prefixes(request).await?.into_inner();
-        log::debug!("AddPrefixesResponse: {:?}", response);
+        for numa in cmd.numa {
+            let request = AddPrefixesRequest {
+                target: Some(TargetModule {
+                    config_name: cmd.config_name.clone(),
+                    numa,
+                }),
+                prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
+            };
+            log::trace!("AddPrefixesRequest: {:?}", request);
+            let response = self.client.add_prefixes(request).await?.into_inner();
+            log::debug!("AddPrefixesResponse: {:?}", response);
+        }
         Ok(())
     }
 
     pub async fn remove_prefixes(&mut self, cmd: RemovePrefixesCmd) -> Result<(), Box<dyn Error>> {
-        let request = RemovePrefixesRequest {
-            target: Some(TargetModule {
-                module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
-            }),
-            prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
-        };
-        log::trace!("RemovePrefixesRequest: {:?}", request);
-        let response = self.client.remove_prefixes(request).await?.into_inner();
-        log::debug!("RemovePrefixesResponse: {:?}", response);
+        for numa in cmd.numa {
+            let request = RemovePrefixesRequest {
+                target: Some(TargetModule {
+                    config_name: cmd.config_name.clone(),
+                    numa,
+                }),
+                prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
+            };
+            log::trace!("RemovePrefixesRequest: {:?}", request);
+            let response = self.client.remove_prefixes(request).await?.into_inner();
+            log::debug!("RemovePrefixesResponse: {:?}", response);
+        }
         Ok(())
     }
 }
@@ -178,7 +213,7 @@ pub fn print_json(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
 pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("Decap Configs".to_string());
 
-    for config in &resp.configs {
+    if let Some(config) = &resp.config {
         tree.begin_child(format!("NUMA {}", config.numa));
 
         tree.begin_child("Prefixes".to_string());
@@ -188,10 +223,10 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
         tree.end_child();
 
         tree.end_child();
-    }
 
-    let tree = tree.build();
-    ptree::print_tree(&tree)?;
+        let tree = tree.build();
+        ptree::print_tree(&tree)?;
+    }
 
     Ok(())
 }

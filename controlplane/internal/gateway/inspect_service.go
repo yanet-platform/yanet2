@@ -68,9 +68,9 @@ func (m *InspectService) cpConfigs(dpConfig *ffi.DPConfig) []*ynpb.CPConfigInfo 
 	out := make([]*ynpb.CPConfigInfo, len(configs))
 	for idx, config := range configs {
 		out[idx] = &ynpb.CPConfigInfo{
-			ModuleIdx: config.ModuleIndex,
-			Name:      config.ConfigName,
-			Gen:       config.Gen,
+			ModuleIdx:  config.ModuleIndex,
+			Name:       config.ConfigName,
+			Generation: config.Gen,
 		}
 	}
 
@@ -115,7 +115,7 @@ func (m *InspectService) agents(dpConfig *ffi.DPConfig) []*ynpb.AgentInfo {
 				MemoryLimit: instance.MemoryLimit,
 				Allocated:   instance.Allocated,
 				Freed:       instance.Freed,
-				Gen:         instance.Gen,
+				Generation:  instance.Gen,
 			}
 		}
 

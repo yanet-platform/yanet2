@@ -37,31 +37,30 @@ func (m *DecapService) ShowConfig(
 	ctx context.Context,
 	request *decappb.ShowConfigRequest,
 ) (*decappb.ShowConfigResponse, error) {
-	name := request.GetTarget().GetModuleName()
-	numa, err := m.getNUMAIndices(request.GetTarget().GetNuma())
+	name, numa, err := m.validateTarget(request.GetTarget())
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	configs := make([]*decappb.InstanceConfig, 0, len(numa))
-	for _, numaIdx := range numa {
-		key := instanceKey{name: name, numaIdx: numaIdx}
-		if prefixes, ok := m.configs[key]; ok {
-			instanceConfig := &decappb.InstanceConfig{
-				Numa:     numaIdx,
-				Prefixes: make([]string, 0, len(prefixes)),
-			}
 
-			for _, p := range prefixes {
-				instanceConfig.Prefixes = append(instanceConfig.Prefixes, p.String())
-			}
-			configs = append(configs, instanceConfig)
-		}
+	key := instanceKey{name: name, numaIdx: numa}
+	prefixes, ok := m.configs[key]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "no config found")
 	}
 
-	return &decappb.ShowConfigResponse{Configs: configs}, nil
+	instanceConfig := &decappb.InstanceConfig{
+		Numa:     numa,
+		Prefixes: make([]string, 0, len(prefixes)),
+	}
+
+	for _, p := range prefixes {
+		instanceConfig.Prefixes = append(instanceConfig.Prefixes, p.String())
+	}
+
+	return &decappb.ShowConfigResponse{Config: instanceConfig}, nil
 }
 
 func (m *DecapService) AddPrefixes(
@@ -69,10 +68,9 @@ func (m *DecapService) AddPrefixes(
 	request *decappb.AddPrefixesRequest,
 ) (*decappb.AddPrefixesResponse, error) {
 
-	name := request.GetTarget().GetModuleName()
-	numa, err := m.getNUMAIndices(request.GetTarget().GetNuma())
+	name, numa, err := m.validateTarget(request.GetTarget())
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	toAdd := make([]netip.Prefix, 0, len(request.GetPrefixes()))
@@ -86,33 +84,31 @@ func (m *DecapService) AddPrefixes(
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, numaIdx := range numa {
-		key := instanceKey{name: name, numaIdx: numaIdx}
-		prefixes, ok := m.configs[key]
-		if !ok {
-			m.configs[key] = toAdd
-		} else {
-			m.configs[key] = slices.Compact(
-				slices.SortedFunc(
-					slices.Values(slices.Concat(prefixes, toAdd)),
-					func(a netip.Prefix, b netip.Prefix) int {
-						return cmp.Compare(a.String(), b.String())
-					}),
-			)
-		}
+
+	key := instanceKey{name: name, numaIdx: numa}
+	prefixes, ok := m.configs[key]
+	if !ok {
+		m.configs[key] = toAdd
+	} else {
+		m.configs[key] = slices.Compact(
+			slices.SortedFunc(
+				slices.Values(slices.Concat(prefixes, toAdd)),
+				func(a netip.Prefix, b netip.Prefix) int {
+					return cmp.Compare(a.String(), b.String())
+				}),
+		)
 	}
 
-	return &decappb.AddPrefixesResponse{}, m.updateModuleConfigs(name, numa)
+	return &decappb.AddPrefixesResponse{}, m.updateModuleConfig(name, numa)
 }
 
 func (m *DecapService) RemovePrefixes(
 	ctx context.Context,
 	request *decappb.RemovePrefixesRequest,
 ) (*decappb.RemovePrefixesResponse, error) {
-	name := request.GetTarget().GetModuleName()
-	numa, err := m.getNUMAIndices(request.GetTarget().GetNuma())
+	name, numa, err := m.validateTarget(request.GetTarget())
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	toRemove := make([]netip.Prefix, 0, len(request.GetPrefixes()))
@@ -127,75 +123,63 @@ func (m *DecapService) RemovePrefixes(
 	// Lock instances store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, numaIdx := range numa {
-		key := instanceKey{name: name, numaIdx: numaIdx}
-		prefixes, ok := m.configs[key]
-		if !ok {
-			continue
-		}
 
-		m.configs[key] = slices.DeleteFunc(prefixes, func(prefix netip.Prefix) bool {
-			return slices.Contains(toRemove, prefix)
-		})
-
+	key := instanceKey{name: name, numaIdx: numa}
+	prefixes, ok := m.configs[key]
+	if !ok {
+		return &decappb.RemovePrefixesResponse{}, nil
 	}
 
-	return &decappb.RemovePrefixesResponse{}, m.updateModuleConfigs(name, numa)
+	m.configs[key] = slices.DeleteFunc(prefixes, func(prefix netip.Prefix) bool {
+		return slices.Contains(toRemove, prefix)
+	})
+
+	return &decappb.RemovePrefixesResponse{}, m.updateModuleConfig(name, numa)
 }
 
-func (m *DecapService) updateModuleConfigs(
+func (m *DecapService) updateModuleConfig(
 	name string,
-	numaIndices []uint32,
+	numaIdx uint32,
 ) error {
-	m.log.Debugw("update config", zap.String("module", name), zap.Uint32s("numa", numaIndices))
+	m.log.Debugw("update config", zap.String("module", name), zap.Uint32("numa", numaIdx))
 
-	configs := make([]*ModuleConfig, 0, len(numaIndices))
-	for _, numaIdx := range numaIndices {
-		agent := m.agents[numaIdx]
+	agent := m.agents[numaIdx]
 
-		config, err := NewModuleConfig(agent, name)
-		if err != nil {
-			return fmt.Errorf("failed to create %q module config: %w", name, err)
+	config, err := NewModuleConfig(agent, name)
+	if err != nil {
+		return fmt.Errorf("failed to create %q module config: %w", name, err)
+	}
+	for _, prefix := range m.configs[instanceKey{name: name, numaIdx: numaIdx}] {
+		if err := config.PrefixAdd(prefix); err != nil {
+			return fmt.Errorf("failed to add prefix for %s: %w", name, err)
 		}
-		for _, prefix := range m.configs[instanceKey{name: name, numaIdx: numaIdx}] {
-			if err := config.PrefixAdd(prefix); err != nil {
-				return fmt.Errorf("failed to add prefix for %s: %w", name, err)
-			}
-		}
-
-		configs = append(configs, config)
 	}
 
-	for _, numaIdx := range numaIndices {
-		agent := m.agents[numaIdx]
-		config := configs[numaIdx]
-
-		if err := agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
-			return fmt.Errorf("failed to update module: %w", err)
-		}
-
-		m.log.Infow("successfully updated module",
-			zap.String("name", name),
-			zap.Uint32("numa", numaIdx),
-		)
+	if err := agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
+		return fmt.Errorf("failed to update module: %w", err)
 	}
+
+	m.log.Infow("successfully updated module",
+		zap.String("name", name),
+		zap.Uint32("numa", numaIdx),
+	)
+
 	return nil
 }
 
-func (m *DecapService) getNUMAIndices(requestedNuma []uint32) ([]uint32, error) {
-	numaIndices := slices.Compact(slices.Sorted(slices.Values(requestedNuma)))
+// TODO: decompose into TargetModule.Validate(). Make it common.
+func (m *DecapService) validateTarget(target *decappb.TargetModule) (string, uint32, error) {
+	if target == nil {
+		return "", 0, fmt.Errorf("target module cannot be nil")
+	}
+	name := target.GetConfigName()
+	if name == "" {
+		return "", 0, fmt.Errorf("target module name is required")
+	}
+	numa := target.GetNuma()
+	if numa >= uint32(len(m.agents)) {
+		return "", 0, fmt.Errorf("NUMA index %d for config %s is out of range [0..%d) ", numa, name, len(m.agents))
+	}
 
-	slices.Sort(requestedNuma)
-	if !slices.Equal(numaIndices, requestedNuma) {
-		return nil, status.Error(codes.InvalidArgument, "duplicate NUMA indices in the request")
-	}
-	if len(numaIndices) > 0 && int(numaIndices[len(numaIndices)-1]) >= len(m.agents) {
-		return nil, status.Error(codes.InvalidArgument, "NUMA indices are out of range")
-	}
-	if len(numaIndices) == 0 {
-		for idx := range m.agents {
-			numaIndices = append(numaIndices, uint32(idx))
-		}
-	}
-	return numaIndices, nil
+	return name, numa, nil
 }
