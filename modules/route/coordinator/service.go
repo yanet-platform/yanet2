@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	commonpb "github.com/yanet-platform/yanet2/common/proto"
 	"github.com/yanet-platform/yanet2/coordinator/coordinatorpb"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/bird"
@@ -88,7 +89,7 @@ func (m *ModuleService) setupConfig(
 		return fmt.Errorf("failed to connect to the gateway: %w", err)
 	}
 	client := routepb.NewRouteServiceClient(conn)
-	target := &routepb.TargetModule{
+	target := &commonpb.TargetModule{
 		ConfigName: configName,
 		Numa:       numaNode,
 	}

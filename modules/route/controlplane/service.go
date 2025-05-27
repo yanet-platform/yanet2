@@ -70,7 +70,7 @@ func (m *RouteService) ShowRoutes(
 	request *routepb.ShowRoutesRequest,
 ) (*routepb.ShowRoutesResponse, error) {
 
-	name, numa, err := m.validateTarget(request.GetTarget())
+	name, numa, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -110,7 +110,7 @@ func (m *RouteService) LookupRoute(
 	request *routepb.LookupRouteRequest,
 ) (*routepb.LookupRouteResponse, error) {
 
-	name, numa, err := m.validateTarget(request.GetTarget())
+	name, numa, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -148,7 +148,7 @@ func (m *RouteService) FlushRoutes(
 	ctx context.Context,
 	request *routepb.FlushRoutesRequest,
 ) (*routepb.FlushRoutesResponse, error) {
-	name, numa, err := m.validateTarget(request.GetTarget())
+	name, numa, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -159,7 +159,7 @@ func (m *RouteService) InsertRoute(
 	ctx context.Context,
 	request *routepb.InsertRouteRequest,
 ) (*routepb.InsertRouteResponse, error) {
-	name, numa, err := m.validateTarget(request.GetTarget())
+	name, numa, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -206,7 +206,7 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 			return err
 		}
 		if holder == nil {
-			name, numa, err = m.validateTarget(update.Target)
+			name, numa, err = update.GetTarget().Validate(uint32(len(m.agents)))
 			if err != nil {
 				return status.Error(codes.InvalidArgument, err.Error())
 			}
@@ -329,20 +329,4 @@ func (m *RouteService) updateModuleConfig(
 		zap.Uint32("numa", numaIdx),
 	)
 	return nil
-}
-
-func (m *RouteService) validateTarget(target *routepb.TargetModule) (string, uint32, error) {
-	if target == nil {
-		return "", 0, fmt.Errorf("target module cannot be nil")
-	}
-	name := target.GetConfigName()
-	if name == "" {
-		return "", 0, fmt.Errorf("target module name is required")
-	}
-	numa := target.GetNuma()
-	if numa >= uint32(len(m.agents)) {
-		return "", 0, fmt.Errorf("NUMA index %d for config %s is out of range [0..%d) ", numa, name, len(m.agents))
-	}
-
-	return name, numa, nil
 }

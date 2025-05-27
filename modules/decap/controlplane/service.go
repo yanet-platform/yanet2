@@ -37,7 +37,7 @@ func (m *DecapService) ShowConfig(
 	ctx context.Context,
 	request *decappb.ShowConfigRequest,
 ) (*decappb.ShowConfigResponse, error) {
-	name, numa, err := m.validateTarget(request.GetTarget())
+	name, numa, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -68,7 +68,7 @@ func (m *DecapService) AddPrefixes(
 	request *decappb.AddPrefixesRequest,
 ) (*decappb.AddPrefixesResponse, error) {
 
-	name, numa, err := m.validateTarget(request.GetTarget())
+	name, numa, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -106,7 +106,7 @@ func (m *DecapService) RemovePrefixes(
 	ctx context.Context,
 	request *decappb.RemovePrefixesRequest,
 ) (*decappb.RemovePrefixesResponse, error) {
-	name, numa, err := m.validateTarget(request.GetTarget())
+	name, numa, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -165,21 +165,4 @@ func (m *DecapService) updateModuleConfig(
 	)
 
 	return nil
-}
-
-// TODO: decompose into TargetModule.Validate(). Make it common.
-func (m *DecapService) validateTarget(target *decappb.TargetModule) (string, uint32, error) {
-	if target == nil {
-		return "", 0, fmt.Errorf("target module cannot be nil")
-	}
-	name := target.GetConfigName()
-	if name == "" {
-		return "", 0, fmt.Errorf("target module name is required")
-	}
-	numa := target.GetNuma()
-	if numa >= uint32(len(m.agents)) {
-		return "", 0, fmt.Errorf("NUMA index %d for config %s is out of range [0..%d) ", numa, name, len(m.agents))
-	}
-
-	return name, numa, nil
 }

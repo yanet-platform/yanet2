@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package routepb;
 
+import "common/proto/target.proto";
+
 option go_package = "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb;routepb";
 
 // RouteService is a service for routing table management.
@@ -27,14 +29,6 @@ service RouteService {
 	rpc FeedRIB(stream Update) returns (UpdateSummary);
 }
 
-// TargetModule specifies which module the request should be performed on.
-message TargetModule {
-	// ConfigName is the name of the module config that should be affected.
-	string config_name = 1;
-	// Numa specifies the index of the NUMA node to be affected.
-	uint32 numa = 2;
-}
-
 message ListConfigsRequest {
 }
 
@@ -50,7 +44,7 @@ message NumaConfigs {
 
 // ShowRoutesRequest contains filters for route listing.
 message ShowRoutesRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	// Filter to show only IPv4 routes.
 	bool ipv4_only = 2;
 	// Filter to show only IPv6 routes.
@@ -65,7 +59,7 @@ message ShowRoutesResponse {
 
 // LookupRouteRequest contains the IP address to lookup.
 message LookupRouteRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	// IP address to lookup.
 	string ip_addr = 2;
 }
@@ -80,7 +74,7 @@ message LookupRouteResponse {
 
 // InsertRouteRequest is the request to insert a route.
 message InsertRouteRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	// The destination prefix of the route.
 	//
 	// The prefix must be an IPv4 or IPv6 address followed by "/" and the
@@ -105,7 +99,7 @@ message InsertRouteResponse {
 // FlushRoutesRequest specifies which module should perform the RIB to FIB
 // flush.
 message FlushRoutesRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 }
 
 message FlushRoutesResponse {
@@ -115,7 +109,7 @@ message FlushRoutesResponse {
 // into the target's module RIB.
 message Update {
 	// The target module where the RIB should be updated.
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	// Indicates whether this is a route deletion event.
 	bool is_delete = 2;
 	// The route to add to the RIB.

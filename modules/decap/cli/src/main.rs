@@ -3,8 +3,9 @@ use core::error::Error;
 use bitmap::BitsIterator;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
+use commonpb::TargetModule;
 use decappb::{
-    AddPrefixesRequest, RemovePrefixesRequest, ShowConfigRequest, ShowConfigResponse, TargetModule,
+    AddPrefixesRequest, RemovePrefixesRequest, ShowConfigRequest, ShowConfigResponse,
     decap_service_client::DecapServiceClient,
 };
 use ipnet::IpNet;
@@ -18,6 +19,13 @@ pub mod decappb {
     use serde::Serialize;
 
     tonic::include_proto!("decappb");
+}
+
+#[allow(non_snake_case)]
+pub mod commonpb {
+    use serde::Serialize;
+
+    tonic::include_proto!("commonpb");
 }
 
 #[allow(non_snake_case)]

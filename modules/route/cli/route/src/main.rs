@@ -16,9 +16,10 @@ use tabled::{
 };
 use tonic::transport::Channel;
 use yanet_cli_route::{
-    code::{
+    commonpb::TargetModule,
+    routepb::{
         route_service_client::RouteServiceClient, InsertRouteRequest, ListConfigsRequest, LookupRouteRequest,
-        ShowRoutesRequest, TargetModule,
+        ShowRoutesRequest,
     },
     RouteEntry,
 };

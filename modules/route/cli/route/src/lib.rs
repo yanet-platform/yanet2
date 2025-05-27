@@ -3,13 +3,17 @@ use core::{
     str::FromStr,
 };
 
-use code::RouteSourceId;
 use colored::Colorize;
 use ipnet::IpNet;
 use tabled::Tabled;
 
 #[allow(non_snake_case)]
-pub mod code {
+pub mod commonpb {
+    tonic::include_proto!("commonpb");
+}
+
+#[allow(non_snake_case)]
+pub mod routepb {
     tonic::include_proto!("routepb");
 }
 
@@ -21,8 +25,8 @@ pub struct LargeCommunity {
     pub local_data_part2: u32,
 }
 
-impl From<code::LargeCommunity> for LargeCommunity {
-    fn from(community: code::LargeCommunity) -> Self {
+impl From<routepb::LargeCommunity> for LargeCommunity {
+    fn from(community: routepb::LargeCommunity) -> Self {
         Self {
             global_administrator: community.global_administrator,
             local_data_part1: community.local_data_part1,
@@ -75,14 +79,14 @@ pub struct RouteEntry {
     pub communities: Communities,
 }
 
-impl From<code::Route> for RouteEntry {
-    fn from(route: code::Route) -> Self {
+impl From<routepb::Route> for RouteEntry {
+    fn from(route: routepb::Route) -> Self {
         let communities = route.large_communities.into_iter().map(|c| c.into()).collect();
 
         // TODO: migrate to strongly-typed protobuf messages for IPNetwork.
         let prefix = IpNet::from_str(&route.prefix).expect("must be valid prefix");
 
-        let source = RouteSourceId::try_from(route.source)
+        let source = routepb::RouteSourceId::try_from(route.source)
             .unwrap_or_default()
             .as_str_name()
             .strip_prefix("ROUTE_SOURCE_ID_")

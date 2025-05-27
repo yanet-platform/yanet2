@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package commonpb;
+
+option go_package = "github.com/yanet-platform/yanet2/common/proto;commonpb";
+
+// TargetModule specifies which module the request should be performed on.
+message TargetModule {
+	// ConfigName is the name of the module config that should be affected.
+	string config_name = 1;
+	// Numa specifies the index of the NUMA node to be affected.
+	uint32 numa = 2;
+}
