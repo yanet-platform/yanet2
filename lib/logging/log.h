@@ -4,7 +4,7 @@
 #include <strings.h>
 #include <unistd.h>
 
-#include <yanet_build_config.h>
+#include "yanet_build_config.h"
 
 #define LOG_RED "\x1b[31m"
 #define LOG_GREEN "\x1b[32m"

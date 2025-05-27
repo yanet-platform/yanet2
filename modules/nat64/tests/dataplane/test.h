@@ -14,6 +14,8 @@
 #include <rte_hexdump.h>
 #include <rte_os_shim.h>
 
+#include "yanet_build_config.h"
+
 #define TEST_SUCCESS EXIT_SUCCESS
 #define TEST_FAILED -1
 #define TEST_SKIPPED 77
@@ -26,11 +28,6 @@
 #endif
 
 #include <rte_test.h>
-
-// In tests, we always want DEBUG_NAT64.
-#ifndef DEBUG_NAT64
-#define DEBUG_NAT64
-#endif
 
 #define DEFAULT_TTL 64
 

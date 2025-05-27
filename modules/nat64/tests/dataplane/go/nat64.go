@@ -1,5 +1,6 @@
 package nat64_test
 
+//#cgo CFLAGS: -I../../../../../build
 //#cgo CFLAGS: -I../../../../.. -I../../../../../lib -I../../../../../common
 //#cgo CFLAGS: -I../../../dataplane -I../../../api
 //#cgo LDFLAGS: -L../../../../../build/modules/nat64/dataplane -lnat64_dp
@@ -7,7 +8,7 @@ package nat64_test
 //#cgo LDFLAGS: -L../../../../../build/lib/dataplane/packet -lpacket
 //#cgo LDFLAGS: -L../../../../../build/lib/dataplane/config -lconfig_dp
 //#cgo LDFLAGS: -L../../../../../build/lib/logging -llogging
-//#cgo LDFLAGS: -L../../../../../build/subprojects/dpdk/lib -lrte_log -static
+//#cgo LDFLAGS: -L../../../../../build/subprojects/dpdk/lib -l:librte_log.a
 /*
 #include <stdlib.h>
 #include <string.h>

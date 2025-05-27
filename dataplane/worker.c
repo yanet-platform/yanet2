@@ -33,7 +33,7 @@
  *  - anything else
  */
 
-#include <yanet_build_config.h>
+#include "yanet_build_config.h"
 
 #include "worker.h"
 

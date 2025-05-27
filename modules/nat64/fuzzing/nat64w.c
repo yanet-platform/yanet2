@@ -5,8 +5,8 @@
 #include <rte_ip.h>
 #include <rte_mbuf.h>
 
+#include "yanet_build_config.h" // MBUF_MAX_SIZE
 #include <rte_build_config.h>	// RTE_PKTMBUF_HEADROOM
-#include <yanet_build_config.h> // MBUF_MAX_SIZE
 
 #include "dataplane/module/module.h"
 #include "dataplane/module/testing.h"

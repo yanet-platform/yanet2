@@ -3,6 +3,7 @@ package dscp_test
 //#cgo CFLAGS: -I../../../.. -I../../../../lib -I../../../../common
 //#cgo LDFLAGS: -L../../../../build/modules/dscp/dataplane -ldscp_dp
 //#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
+//#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
 /*
 #include "lib/dataplane/packet/dscp.h"
 #include "modules/dscp/dataplane/config.h"

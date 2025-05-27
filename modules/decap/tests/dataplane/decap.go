@@ -1,8 +1,9 @@
 package decap_test
 
-//#cgo CFLAGS: -I../../../../../ -I../../../../../lib
-//#cgo LDFLAGS: -L../../../../../build/modules/decap/dataplane -ldecap_dp
-//#cgo LDFLAGS: -L../../../../../build/lib/dataplane/packet -lpacket
+//#cgo CFLAGS: -I../../../../ -I../../../../lib
+//#cgo LDFLAGS: -L../../../../build/modules/decap/dataplane -ldecap_dp
+//#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
+//#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
 /*
 #include "common/memory.h"
 #include "common/lpm.h"
