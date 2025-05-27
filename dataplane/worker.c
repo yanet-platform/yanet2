@@ -33,6 +33,8 @@
  *  - anything else
  */
 
+#include <yanet_build_config.h>
+
 #include "worker.h"
 
 #include "dataplane/dataplane.h"
@@ -424,7 +426,7 @@ dataplane_worker_init(
 	worker->rx_mempool = rte_mempool_create(
 		mempool_name,
 		16384,
-		8192,
+		MBUF_MAX_SIZE,
 		0,
 		sizeof(struct rte_pktmbuf_pool_private),
 		rte_pktmbuf_pool_init,

@@ -2,11 +2,26 @@ option(
   'fuzzing',
   type: 'feature',
   value: 'disabled',
-  description: 'Enable libFuzzer integration',
+  description: 'Enable libFuzzer integration.',
 )
 option(
   'trace',
   type: 'feature',
   value: 'disabled',
-  description: 'Enable LOG_TRACE[X] macro',
+  description: 'Enable LOG_TRACE[X] macro.',
+)
+
+option(
+  'mbuf_max_size',
+  type: 'integer',
+  value: 8192,
+  description: 'Default mempool element (mBuf) size for workers.',
+)
+
+option(
+  'pkt_mbuf_headroom',
+  type: 'integer',
+  value: 256,
+  description: 'Default data offset (in bytes) in a packet buffer'
+                + 'to leave room for additional headers.'
 )

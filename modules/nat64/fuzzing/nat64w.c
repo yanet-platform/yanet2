@@ -5,6 +5,9 @@
 #include <rte_ip.h>
 #include <rte_mbuf.h>
 
+#include <rte_build_config.h>	// RTE_PKTMBUF_HEADROOM
+#include <yanet_build_config.h> // MBUF_MAX_SIZE
+
 #include "dataplane/module/module.h"
 #include "dataplane/module/testing.h"
 #include "dataplane/packet/packet.h"
@@ -12,7 +15,6 @@
 #include "modules/nat64/dataplane/nat64dp.h"
 
 #define ARENA_SIZE (1 << 20)
-#define MBUF_MAX_SIZE 8196
 
 struct nat64_fuzzing_params {
 	struct module *module; /**< Pointer to the module being tested */

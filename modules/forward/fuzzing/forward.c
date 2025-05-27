@@ -2,6 +2,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <rte_build_config.h>	// RTE_PKTMBUF_HEADROOM
+#include <yanet_build_config.h> // MBUF_MAX_SIZE
+
 #include "dataplane/module/module.h"
 #include "dataplane/module/testing.h"
 #include "dataplane/packet/packet.h"
@@ -10,8 +13,6 @@
 #include "modules/forward/dataplane/dataplane.h"
 
 #define ARENA_SIZE (1 << 20)
-#define MBUF_MAX_SIZE 8196
-#define RTE_PKTMBUF_HEADROOM 256
 
 struct forward_fuzzing_params {
 	struct module *module; /**< Pointer to the module being tested */

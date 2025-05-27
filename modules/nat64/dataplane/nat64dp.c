@@ -42,6 +42,8 @@
 #include <rte_tcp.h>
 #include <rte_udp.h>
 
+#include <yanet_build_config.h>
+
 /* Project headers */
 #include "common.h"
 #include "dataplane/module/module.h"

@@ -11,13 +11,13 @@ add_global_arguments(
   language: 'c',
 )
 
-if get_option('buildtype') == 'debug'
-  add_global_arguments('-DDEBUG_NAT64', language: 'c')
-endif
+yanet_conf = configuration_data()
+yanet_conf.set('DEBUG_NAT64', get_option('buildtype') == 'debug')
+yanet_conf.set('ENABLE_TRACE_LOG', get_option('trace').enabled())
+yanet_conf.set('MBUF_MAX_SIZE', get_option('mbuf_max_size'))
 
-if get_option('trace').enabled()
-  add_global_arguments('-DENABLE_TRACE_LOG', language: 'c')
-endif
+build_cfg = 'yanet_build_config.h'
+configure_file(output: build_cfg, configuration: yanet_conf)
 
 # Define common programs once to avoid duplication
 go = find_program('go', required: true)
@@ -31,7 +31,6 @@ if get_option('fuzzing').enabled()
     '-fsanitize-coverage=edge,indirect-calls,trace-cmp',
     '-fprofile-instr-generate',
     '-fcoverage-mapping',
-
   ]
   yanet_c_args += fuzz_args
   yanet_link_args += fuzz_args
@@ -43,7 +42,7 @@ libdpdk = subproject(
   default_options: [
     'platform=generic',
     'cpu_instruction_set=corei7',
-    'pkt_mbuf_headroom=256',
+    'pkt_mbuf_headroom=@0@'.format(get_option('pkt_mbuf_headroom')),
     'disable_apps=dumpcap,graph,pdump,proc-info,test-acl,test-bbdev,test-cmdline,test-compress-perf,test-crypto-perf,test-dma-perf,test-eventdev,test-fib,test-flow-perf,test-gpudev,test-mldev,test-pipeline,test-regex,test-sad,test-security-perf',
     'disable_libs=bitratestats,cfgfile,flow_classify,gpudev,gro,gso,kni,jobstats,latencystats,metrics,node,pdump,pipeline,port,power,table,vhost',
     'enable_driver_sdk=true',

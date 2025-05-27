@@ -12,6 +12,8 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
+#include <yanet_build_config.h>
+
 #include "lib/logging/log.h"
 
 /*

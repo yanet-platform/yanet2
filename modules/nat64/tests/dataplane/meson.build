@@ -20,7 +20,6 @@ u = executable(
   sources,
   include_directories: [yanet_rootdir, '.', '../..', '../../..', '../../dataplane'],
   dependencies: dependencies,
-  c_args: ['-DDEBUG_NAT64'],
 )
 
 test('nat64 unittest', u, env: ['YANET_TEST=nat64_autotest'])

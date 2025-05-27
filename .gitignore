@@ -109,3 +109,7 @@ corpus/
 fuzz-*.log
 default.profdata
 default.profraw
+
+# Application launch artifacts
+stat.log
+.gdb_history

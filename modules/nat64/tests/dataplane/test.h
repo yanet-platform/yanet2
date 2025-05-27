@@ -27,6 +27,11 @@
 
 #include <rte_test.h>
 
+// In tests, we always want DEBUG_NAT64.
+#ifndef DEBUG_NAT64
+#define DEBUG_NAT64
+#endif
+
 #define DEFAULT_TTL 64
 
 #define TEST_ASSERT RTE_TEST_ASSERT
