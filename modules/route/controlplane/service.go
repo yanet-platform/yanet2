@@ -300,6 +300,9 @@ func (m *RouteService) updateModuleConfig(
 			routesListSetKey.Insert(uint32(idx))
 		}
 
+		if routesListSetKey.Count() == 0 {
+			continue
+		}
 		idx, ok := routesListsSet[routesListSetKey]
 		if !ok {
 			routeListIdx, err := config.RouteListAdd(routesListSetKey.AsSlice())
