@@ -19,8 +19,6 @@
 
 #include <stdio.h>
 
-#define AGENT_ARENA_SIZE (1 << 22)
-
 struct yanet_shm *
 yanet_shm_attach(const char *path) {
 	int fd = open(path, O_RDWR, S_IRUSR | S_IWUSR);
@@ -127,7 +125,8 @@ agent_attach(
 	 * Alternative multi-alloc api should be implemented.
 	 */
 	uint64_t arena_count =
-		(memory_limit + AGENT_ARENA_SIZE - 1) / AGENT_ARENA_SIZE;
+		(memory_limit + MEMORY_BLOCK_ALLOCATOR_MAX_SIZE - 1) /
+		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
 	void **arenas = (void **)memory_balloc(
 		&cp_config->memory_context, sizeof(void *) * arena_count
 	);
@@ -139,7 +138,8 @@ agent_attach(
 
 	while (new_agent->arena_count < arena_count) {
 		void *arena = memory_balloc(
-			&cp_config->memory_context, AGENT_ARENA_SIZE
+			&cp_config->memory_context,
+			MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
 		);
 		if (arena == NULL) {
 			agent_cleanup(new_agent);
@@ -147,7 +147,9 @@ agent_attach(
 			goto unlock;
 		}
 		block_allocator_put_arena(
-			&new_agent->block_allocator, arena, AGENT_ARENA_SIZE
+			&new_agent->block_allocator,
+			arena,
+			MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
 		);
 		SET_OFFSET_OF(arenas + new_agent->arena_count, arena);
 		new_agent->arena_count++;
@@ -238,7 +240,7 @@ agent_cleanup(struct agent *agent) {
 		memory_bfree(
 			&cp_config->memory_context,
 			ADDR_OF(arenas + arena_idx),
-			AGENT_ARENA_SIZE
+			MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
 		);
 	}
 	memory_bfree(

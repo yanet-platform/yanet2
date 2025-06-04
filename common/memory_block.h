@@ -5,12 +5,12 @@
 
 #include "memory_address.h"
 
-#define MEMORY_BLOCK_ALLOCATOR_MIN_BITS 3
 #define MEMORY_BLOCK_ALLOCATOR_EXP 24
+#define MEMORY_BLOCK_ALLOCATOR_MIN_BITS 3
+#define MEMORY_BLOCK_ALLOCATOR_MAX_BITS                                        \
+	(MEMORY_BLOCK_ALLOCATOR_MIN_BITS + MEMORY_BLOCK_ALLOCATOR_EXP - 1)
 #define MEMORY_BLOCK_ALLOCATOR_MIN_SIZE (1 << MEMORY_BLOCK_ALLOCATOR_MIN_BITS)
-#define MEMORY_BLOCK_ALLOCATOR_MAX_SIZE                                        \
-	(1 << (MEMORY_BLOCK_ALLOCATOR_MIN_BITS + MEMORY_BLOCK_ALLOCATOR_EXP -  \
-	       1))
+#define MEMORY_BLOCK_ALLOCATOR_MAX_SIZE (1 << MEMORY_BLOCK_ALLOCATOR_MAX_BITS)
 
 struct block_allocator_pool {
 	uint64_t allocate;
@@ -53,12 +53,17 @@ static inline size_t
 block_allocator_pool_index(struct block_allocator *allocator, size_t size) {
 	(void)allocator;
 
-	if (size < (1 << MEMORY_BLOCK_ALLOCATOR_MIN_BITS))
+	if (size < MEMORY_BLOCK_ALLOCATOR_MIN_SIZE)
 		return 0;
 
+	// Make 'size' the upper end of its power-of-2 range
 	size = (size << 1) - 1;
+	// Normalize by the minimum block size.
+	// This converts the transformed size into units relative to
+	// MEMORY_BLOCK_ALLOCATOR_MIN_SIZE.
 	size >>= MEMORY_BLOCK_ALLOCATOR_MIN_BITS;
 
+	// Calculate floor(log2(n)), where n represents the relative uints.
 	return sizeof(long long) * 8 - 1 - __builtin_clzll(size);
 }
 
