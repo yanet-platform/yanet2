@@ -4,10 +4,8 @@
 
 #include "common/container_of.h"
 #include "common/exp_array.h"
-#include "common/strutils.h"
 
 #include "controlplane/agent/agent.h"
-#include "dataplane/config/zone.h"
 
 struct cp_module *
 route_module_config_create(struct agent *agent, const char *name) {

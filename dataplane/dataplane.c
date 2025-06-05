@@ -602,7 +602,7 @@ dataplane_route_pipeline(
 		}
 
 		if (cp_device->pipeline_map_size == 0) {
-			LOG(ERROR,
+			LOG(TRACE,
 			    "pipeline_map size is 0 for device %d",
 			    packet->rx_device_id);
 			packet->pipeline_idx = -1;
