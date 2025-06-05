@@ -70,7 +70,7 @@ jobs:
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
       - name: Build packages  
-        run: sudo ./scripts/build-deb.sh
+        run: sudo -E ./scripts/build-deb.sh
         
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
