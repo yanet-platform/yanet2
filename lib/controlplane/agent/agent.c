@@ -425,6 +425,9 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	     ++module_idx) {
 		struct cp_module *cp_module =
 			cp_config_gen_get_module(config_gen, module_idx);
+		if (cp_module == NULL) {
+			break;
+		}
 		module_list_info->modules[module_list_info->module_count]
 			.index = cp_module->type;
 		strtcpy(module_list_info
@@ -624,6 +627,9 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	     ++idx) {
 		struct cp_device *device =
 			cp_config_gen_get_device(cp_config_gen, idx);
+		if (device == NULL) {
+			break;
+		}
 		struct cp_device_info *device_info =
 			yanet_build_device_info(device);
 		if (device_info == NULL) {

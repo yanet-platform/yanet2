@@ -87,7 +87,7 @@ forward_module_config_free(struct cp_module *cp_module) {
 
 		memory_bfree(
 			&agent->memory_context,
-			device_config->targets,
+			ADDR_OF(&device_config->targets),
 			sizeof(struct forward_target) *
 				device_config->target_count
 		);
@@ -147,7 +147,7 @@ forward_module_config_enable_v4(
 		);
 	memory_bfree(
 		&agent->memory_context,
-		device_config->targets,
+		ADDR_OF(&device_config->targets),
 		sizeof(struct forward_target) * device_config->target_count
 	);
 	SET_OFFSET_OF(&device_config->targets, targets);
@@ -206,7 +206,7 @@ forward_module_config_enable_v6(
 		);
 	memory_bfree(
 		&agent->memory_context,
-		device_config->targets,
+		ADDR_OF(&device_config->targets),
 		sizeof(struct forward_target) * device_config->target_count
 	);
 	SET_OFFSET_OF(&device_config->targets, targets);
