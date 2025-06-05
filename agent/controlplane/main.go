@@ -60,12 +60,12 @@ type DevicePipeline struct {
 }
 
 type ControlplaneConfig struct {
-	NumaCount   int    `yaml:"numa_count"`
-	Storage     string `yaml:"storage"`
-	AgentName   string `yaml:"agent_name"`
-	MemoryLimit uint64 `yaml:"memory_limit"`
+	InstanceCount int    `yaml:"instance_count"`
+	Storage       string `yaml:"storage"`
+	AgentName     string `yaml:"agent_name"`
+	MemoryLimit   uint64 `yaml:"memory_limit"`
 
-	Pipelines       []PipelineConfig         `yaml:"pipelines"`
+	Pipelines       []PipelineConfig            `yaml:"pipelines"`
 	DevicePipelines map[string][]DevicePipeline `yaml:"device_pipelines"`
 
 	Forward ForwardConfig `yaml:"forward"`
@@ -136,7 +136,7 @@ func configureForward(
 				(*C.uint8_t)(&to[0]),
 				C.uint16_t(devIdx),
 				C.uint16_t(forwardConfig.DeviceID),
-			C.CString(fmt.Sprintf("v4-%v-%v", devIdx, forwardConfig.DeviceID)),
+				C.CString(fmt.Sprintf("v4-%v-%v", devIdx, forwardConfig.DeviceID)),
 			)
 		}
 
@@ -232,10 +232,10 @@ func main() {
 	}
 	defer C.yanet_shm_detach(shm)
 
-	for numaIdx := 0; numaIdx < config.NumaCount; numaIdx++ {
+	for instance := 0; instance < config.InstanceCount; instance++ {
 		agent := C.agent_attach(
 			shm,
-			C.uint32_t(numaIdx),
+			C.uint32_t(instance),
 			C.CString(config.AgentName),
 			C.uint64_t(config.MemoryLimit),
 		)
@@ -247,7 +247,7 @@ func main() {
 		configureDevices(agent, config.DevicePipelines)
 
 		for pIdx := range config.Pipelines {
-			counters := C.yanet_get_pm_counters(C.yanet_shm_dp_config(shm, C.uint32_t(numaIdx)), C.CString("forward"), C.CString("forward0"), C.CString(config.Pipelines[pIdx].Name))
+			counters := C.yanet_get_pm_counters(C.yanet_shm_dp_config(shm, C.uint32_t(instance)), C.CString("forward"), C.CString("forward0"), C.CString(config.Pipelines[pIdx].Name))
 			for idx := C.uint64_t(0); idx < counters.count; idx++ {
 				counter := C.yanet_get_counter(counters, idx)
 				fmt.Printf("Counter forward forward0 %s %s", config.Pipelines[pIdx].Name, C.GoString(&counter.name[0]))
@@ -260,7 +260,7 @@ func main() {
 		}
 
 		counters := C.yanet_get_worker_counters(
-			C.yanet_shm_dp_config(shm, C.uint32_t(numaIdx)),
+			C.yanet_shm_dp_config(shm, C.uint32_t(instance)),
 		)
 		{
 			for idx := C.uint64_t(0); idx < counters.count; idx++ {

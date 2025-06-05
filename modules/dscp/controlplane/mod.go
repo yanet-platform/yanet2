@@ -26,13 +26,13 @@ func NewDSCPModule(cfg *Config, log *zap.SugaredLogger) (*DscpModule, error) {
 		return nil, err
 	}
 
-	numaIndices := shm.NumaIndices()
+	instanceIndices := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
-		zap.Uint32s("numa", numaIndices),
+		zap.Uint32s("instances", instanceIndices),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("dscp", numaIndices, uint(cfg.MemoryRequirements))
+	agents, err := shm.AgentsAttach("dscp", instanceIndices, uint(cfg.MemoryRequirements))
 	if err != nil {
 		return nil, err
 	}
@@ -66,9 +66,9 @@ func (m *DscpModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *DscpModule) Close() error {
-	for numaIdx, agent := range m.agents {
+	for inst, agent := range m.agents {
 		if err := agent.Close(); err != nil {
-			m.log.Warnw("failed to close shared memory agent", zap.Int("numa", numaIdx), zap.Error(err))
+			m.log.Warnw("failed to close shared memory agent", zap.Int("inst", inst), zap.Error(err))
 		}
 	}
 

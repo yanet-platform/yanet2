@@ -9,14 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/yanet-platform/yanet2/common/go/numa"
+	dp "github.com/yanet-platform/yanet2/common/go/dataplane"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
 
 // Override ForwardSerivce updater to avoid FFI calls in tests
-func testUpdateModuleConfigs(m *ForwardService, name string, numaMap numa.NUMAMap) error {
-	m.log.Debugw("Skip FFI calls in tests", zap.String("module", name), zap.Uint32s("numa", slices.Collect(numaMap.Iter())))
+func testUpdateModuleConfigs(m *ForwardService, name string, instMap dp.DpInstanceMap) error {
+	m.log.Debugw("Skip FFI calls in tests", zap.String("module", name), zap.Uint32s("instances", slices.Collect(instMap.Iter())))
 	return nil
 }
 
@@ -36,7 +36,7 @@ func TestEnableL2Forward(t *testing.T) {
 	req := &forwardpb.L2ForwardEnableRequest{
 		Target: &forwardpb.TargetModule{
 			ModuleName: "test-module",
-			Numa:       0b1, // Target NUMA node 0
+			Instances:  0b1, // Target instance 0
 		},
 		SrcDevId: uint32(srcId),
 		DstDevId: uint32(dstId),
@@ -46,7 +46,7 @@ func TestEnableL2Forward(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that dstDevId is set
-	key := instanceKey{name: "test-module", numaIdx: 0}
+	key := instanceKey{name: "test-module", dataplaneInstance: 0}
 	config := svc.configs[key]
 	require.NotNil(t, config)
 	require.Equal(t, dstId, uint16(config[srcId].DstDevId))
@@ -72,7 +72,7 @@ func TestAddL3Forward(t *testing.T) {
 	addForwardReq := &forwardpb.AddL3ForwardRequest{
 		Target: &forwardpb.TargetModule{
 			ModuleName: "test-module",
-			Numa:       0b1, // Target NUMA node 0
+			Instances:  0b1, // Target instance 0
 		},
 		SrcDevId: 1,
 		Forward: &forwardpb.L3ForwardEntry{
@@ -84,7 +84,7 @@ func TestAddL3Forward(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that the rule was added
-	key := instanceKey{name: "test-module", numaIdx: 0}
+	key := instanceKey{name: "test-module", dataplaneInstance: 0}
 	config := svc.configs[key]
 	device := &config[1]
 	prefix := netip.MustParsePrefix("192.168.1.0/24")
@@ -96,7 +96,7 @@ func TestAddL3Forward(t *testing.T) {
 	invalidTargetReq := &forwardpb.AddL3ForwardRequest{
 		Target: &forwardpb.TargetModule{
 			ModuleName: "test-module",
-			Numa:       0b1, // Target NUMA node 0
+			Instances:  0b1, // Target instance 0
 		},
 		SrcDevId: 1,
 		Forward: &forwardpb.L3ForwardEntry{
@@ -112,7 +112,7 @@ func TestAddL3Forward(t *testing.T) {
 	invalidReq := &forwardpb.AddL3ForwardRequest{
 		Target: &forwardpb.TargetModule{
 			ModuleName: "test-module",
-			Numa:       0b1, // Target NUMA node 0
+			Instances:  0b1, // Target instance 0
 		},
 		SrcDevId: 1,
 		Forward: &forwardpb.L3ForwardEntry{
@@ -132,7 +132,7 @@ func TestRemoveL3Forward(t *testing.T) {
 	_, err := svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
 		Target: &forwardpb.TargetModule{
 			ModuleName: "test-module",
-			Numa:       0b1, // Target NUMA node 0
+			Instances:  0b1, // Target instance 0
 		},
 		SrcDevId: 1,
 		Forward: &forwardpb.L3ForwardEntry{
@@ -146,7 +146,7 @@ func TestRemoveL3Forward(t *testing.T) {
 	removeReq := &forwardpb.RemoveL3ForwardRequest{
 		Target: &forwardpb.TargetModule{
 			ModuleName: "test-module",
-			Numa:       0b1, // Target NUMA node 0
+			Instances:  0b1, // Target instance 0
 		},
 		SrcDevId: 1,
 		Network:  "192.168.1.0/24",
@@ -155,7 +155,7 @@ func TestRemoveL3Forward(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that the rule was removed
-	key := instanceKey{name: "test-module", numaIdx: 0}
+	key := instanceKey{name: "test-module", dataplaneInstance: 0}
 	config := svc.configs[key]
 	device := &config[1]
 	prefix := netip.MustParsePrefix("192.168.1.0/24")
@@ -173,26 +173,34 @@ func getDevice(t *testing.T, SrcDevId uint32, cfg *forwardpb.InstanceConfig) *fo
 }
 
 func TestShowConfig(t *testing.T) {
-	svc := newTestService(make([]*ffi.Agent, 2), 8) // Create service with 2 agents for testing multiple NUMA nodes
+	svc := newTestService(make([]*ffi.Agent, 2), 8) // Create service with 2 agents for testing multiple dataplane instances
 
 	// Setup: Add devices and forward rules
-	// Set up default config for NUMA 0
+	// Set up default config for instance 0
 	_, err := svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
-		Target:   &forwardpb.TargetModule{ModuleName: "test-module", Numa: 0b1},
+		Target:   &forwardpb.TargetModule{ModuleName: "test-module", Instances: 0b1},
 		SrcDevId: 1,
 		DstDevId: 7,
 	})
 	require.NoError(t, err)
 
-	// Set up minimal config for NUMA 1 to ensure it's returned by ShowConfig
+	// Set up minimal config for instance 1 to ensure it's returned by ShowConfig
 	_, err = svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
-		Target:   &forwardpb.TargetModule{ModuleName: "test-module", Numa: 0b10},
+		Target:   &forwardpb.TargetModule{ModuleName: "test-module", Instances: 0b10},
 		SrcDevId: 1,
 		DstDevId: 1,
 	})
 	require.NoError(t, err)
 
-	key := instanceKey{name: "test-module", numaIdx: 0}
+	// Set up minimal config for instance 1 to ensure it's returned by ShowConfig
+	_, err = svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
+		Target:   &forwardpb.TargetModule{ModuleName: "test-module", Instances: 0b10},
+		SrcDevId: 1,
+		DstDevId: 1,
+	})
+	require.NoError(t, err)
+
+	key := instanceKey{name: "test-module", dataplaneInstance: 0}
 
 	// Add forward rules directly to the config
 	forward1 := netip.MustParsePrefix("192.168.1.0/24")
@@ -210,31 +218,31 @@ func TestShowConfig(t *testing.T) {
 
 	// Set up configs for non-existent module test
 	_, err = svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
-		Target:   &forwardpb.TargetModule{ModuleName: "non-existent-module", Numa: 0b11},
+		Target:   &forwardpb.TargetModule{ModuleName: "non-existent-module", Instances: 0b11},
 		SrcDevId: 1,
 		DstDevId: 1,
 	})
 	require.NoError(t, err)
 
-	// Test scenario 1: Show configuration for all NUMA nodes
-	t.Run("ShowAllNUMA", func(t *testing.T) {
+	// Test scenario 1: Show configuration for instances nodes
+	t.Run("ShowAllInstances", func(t *testing.T) {
 		resp, err := svc.ShowConfig(context.Background(), &forwardpb.ShowConfigRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       0b11, // Target both NUMA nodes (0b01 | 0b10)
+				Instances:  0b11, // Target both instances (0b01 | 0b10)
 			},
 		})
 
 		require.NoError(t, err, "ShowConfig should not return an error")
 		require.NotNil(t, resp, "Response should not be nil")
-		require.Len(t, resp.Configs, 2, "Should return configs for both NUMA nodes")
+		require.Len(t, resp.Configs, 2, "Should return configs for both instances")
 
-		// Verify NUMA index 0 configuration
-		numa0Found := false
+		// Verify instance index 0 configuration
+		inst0Found := false
 		for _, cfg := range resp.Configs {
-			if cfg.Numa == 0 {
-				numa0Found = true
-				require.Len(t, cfg.Devices, int(svc.deviceCount), "Should have %d devices in NUMA 0", svc.deviceCount)
+			if cfg.Instance == 0 {
+				inst0Found = true
+				require.Len(t, cfg.Devices, int(svc.deviceCount), "Should have %d devices in instance 0", svc.deviceCount)
 
 				// Check device 1 has 2 forward rules
 				var srcDevId uint32 = 1
@@ -261,14 +269,14 @@ func TestShowConfig(t *testing.T) {
 				require.Equal(t, 2, networksFound, "Device 3 should have networks %s and %s", forward3, forward4)
 			}
 		}
-		require.True(t, numa0Found, "NUMA 0 should be in the response")
+		require.True(t, inst0Found, "instance 0 should be in the response")
 
-		// Verify NUMA index 1 configuration
-		numa1Found := false
+		// Verify instance 1 configuration
+		inst1Found := false
 		for _, cfg := range resp.Configs {
-			if cfg.Numa == 1 {
-				numa1Found = true
-				require.Len(t, cfg.Devices, int(svc.deviceCount), "Should have %d devices in NUMA 1", svc.deviceCount)
+			if cfg.Instance == 1 {
+				inst1Found = true
+				require.Len(t, cfg.Devices, int(svc.deviceCount), "Should have %d devices in instance 1", svc.deviceCount)
 
 				// All devices should forward L2 to itself
 				for _, dev := range cfg.Devices {
@@ -277,22 +285,22 @@ func TestShowConfig(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, numa1Found, "NUMA 1 should be in the response")
+		require.True(t, inst1Found, "instance 1 should be in the response")
 	})
 
-	// Test scenario 2: Show configuration for specific NUMA node
-	t.Run("ShowSpecificNUMA", func(t *testing.T) {
+	// Test scenario 2: Show configuration for specific instance
+	t.Run("ShowSpecificInstance", func(t *testing.T) {
 		resp, err := svc.ShowConfig(context.Background(), &forwardpb.ShowConfigRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       0b10, // Specifically request NUMA 1
+				Instances:  0b10, // Specifically request instance 1
 			},
 		})
 
 		require.NoError(t, err, "ShowConfig should not return an error")
 		require.NotNil(t, resp, "Response should not be nil")
-		require.Len(t, resp.Configs, 1, "Should return config for only NUMA 1")
-		require.Equal(t, uint32(1), resp.Configs[0].Numa, "Response should be for NUMA 1")
+		require.Len(t, resp.Configs, 1, "Should return config for only instance 1")
+		require.Equal(t, uint32(1), resp.Configs[0].Instance, "Response should be for instance 1")
 		require.Len(t, resp.Configs[0].Devices, int(svc.deviceCount), "Should return %d devices", svc.deviceCount)
 	})
 
@@ -301,15 +309,15 @@ func TestShowConfig(t *testing.T) {
 		resp, err := svc.ShowConfig(context.Background(), &forwardpb.ShowConfigRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "non-existent-module",
-				Numa:       0b11, // Target both NUMA nodes (0b01 | 0b10)
+				Instances:  0b11, // Target both instances (0b01 | 0b10)
 			},
 		})
 
 		require.NoError(t, err, "ShowConfig should not return an error for non-existent module")
 		require.NotNil(t, resp, "Response should not be nil")
-		require.Len(t, resp.Configs, 2, "Should return configs for both NUMA nodes")
+		require.Len(t, resp.Configs, 2, "Should return configs for both instances")
 		for _, cfg := range resp.Configs {
-			require.Len(t, cfg.Devices, int(svc.deviceCount), "Should return %d devices for NUMA %d", svc.deviceCount, cfg.Numa)
+			require.Len(t, cfg.Devices, int(svc.deviceCount), "Should return %d devices for instance %d", svc.deviceCount, cfg.Instance)
 		}
 	})
 }
@@ -361,7 +369,7 @@ func TestInputValidation(t *testing.T) {
 	t.Run("missing module name", func(t *testing.T) {
 		// Test empty module name in AddDevice
 		_, err := svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
-			Target:   &forwardpb.TargetModule{Numa: 0b1},
+			Target:   &forwardpb.TargetModule{Instances: 0b1},
 			SrcDevId: 1,
 			DstDevId: 2,
 		})
@@ -370,7 +378,7 @@ func TestInputValidation(t *testing.T) {
 
 		// Test empty module name in RemoveDevice
 		_, err = svc.RemoveL3Forward(context.Background(), &forwardpb.RemoveL3ForwardRequest{
-			Target:   &forwardpb.TargetModule{Numa: 0b1},
+			Target:   &forwardpb.TargetModule{Instances: 0b1},
 			SrcDevId: 1,
 			Network:  "192.168.1.0/24",
 		})
@@ -379,7 +387,7 @@ func TestInputValidation(t *testing.T) {
 
 		// Test empty module name in AddForward
 		_, err = svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
-			Target:   &forwardpb.TargetModule{Numa: 0b1},
+			Target:   &forwardpb.TargetModule{Instances: 0b1},
 			SrcDevId: 1,
 			Forward: &forwardpb.L3ForwardEntry{
 				Network:  "192.168.1.0/24",
@@ -391,7 +399,7 @@ func TestInputValidation(t *testing.T) {
 
 		// Test empty module name in RemoveForward
 		_, err = svc.RemoveL3Forward(context.Background(), &forwardpb.RemoveL3ForwardRequest{
-			Target:   &forwardpb.TargetModule{Numa: 0b1},
+			Target:   &forwardpb.TargetModule{Instances: 0b1},
 			SrcDevId: 1,
 			Network:  "192.168.1.0/24",
 		})
@@ -400,7 +408,7 @@ func TestInputValidation(t *testing.T) {
 
 		// Test empty module name in ShowConfig
 		_, err = svc.ShowConfig(context.Background(), &forwardpb.ShowConfigRequest{
-			Target: &forwardpb.TargetModule{Numa: 0b1},
+			Target: &forwardpb.TargetModule{Instances: 0b1},
 		})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "module name is required")
@@ -411,7 +419,7 @@ func TestInputValidation(t *testing.T) {
 		_, err := svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       0b1, // Target NUMA node 0
+				Instances:  0b1, // Target instance 0
 			},
 			SrcDevId: 1,
 			DstDevId: 2,
@@ -422,7 +430,7 @@ func TestInputValidation(t *testing.T) {
 		_, err = svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       0b1, // Target NUMA node 0
+				Instances:  0b1, // Target instance 0
 			},
 			SrcDevId: 2,
 			DstDevId: 2,
@@ -433,7 +441,7 @@ func TestInputValidation(t *testing.T) {
 		_, err = svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       0b1, // Target NUMA node 0
+				Instances:  0b1, // Target instance node 0
 			},
 			SrcDevId: 1,
 			Forward: &forwardpb.L3ForwardEntry{
@@ -448,7 +456,7 @@ func TestInputValidation(t *testing.T) {
 		_, err = svc.RemoveL3Forward(context.Background(), &forwardpb.RemoveL3ForwardRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       0b1, // Target NUMA node 0
+				Instances:  0b1, // Target instance node 0
 			},
 			SrcDevId: 1,
 			Network:  "invalid-network",
@@ -462,7 +470,7 @@ func TestInputValidation(t *testing.T) {
 		_, err := svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       0b1, // Target NUMA node 0
+				Instances:  0b1, // Target instance node 0
 			},
 			SrcDevId: 1,
 			Forward:  nil,
@@ -479,7 +487,7 @@ func TestInputValidation(t *testing.T) {
 		_, err := svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       0b1, // Target NUMA node 0
+				Instances:  0b1,
 			},
 			SrcDevId: 2,
 			DstDevId: 2,
@@ -490,7 +498,7 @@ func TestInputValidation(t *testing.T) {
 		_, err = svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       0b1, // Target NUMA node 0
+				Instances:  0b1, // Target instance 0
 			},
 			SrcDevId: 999, // Non-existent source device
 			Forward: &forwardpb.L3ForwardEntry{
@@ -510,7 +518,7 @@ func TestInputValidation(t *testing.T) {
 		_, err := svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       0b1, // Target NUMA node 0
+				Instances:  0b1, // Target instance 0
 			},
 			SrcDevId: 1,
 			DstDevId: 1,
@@ -521,7 +529,7 @@ func TestInputValidation(t *testing.T) {
 		_, err = svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
 			Target: &forwardpb.TargetModule{
 				ModuleName: "test-module",
-				Numa:       0b1, // Target NUMA node 0
+				Instances:  0b1, // Target instance 0
 			},
 			SrcDevId: 1, // Existing source device
 			Forward: &forwardpb.L3ForwardEntry{

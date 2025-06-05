@@ -70,15 +70,15 @@ func (m *Stage) Setup(ctx context.Context) error {
 	m.log.Infow("setting up stage")
 	defer m.log.Infow("finished setting up stage")
 
-	if err := m.setupNUMAConfigs(ctx); err != nil {
-		return fmt.Errorf("failed to setup NUMA configs: %w", err)
+	if err := m.setupInstanceConfigs(ctx); err != nil {
+		return fmt.Errorf("failed to setup instance configs: %w", err)
 	}
 
-	for numaIdx, numaConfig := range m.cfg.NUMA {
-		if err := m.setupPipelines(ctx, numaIdx, numaConfig.Pipelines); err != nil {
+	for instance, instanceConfig := range m.cfg.Instances {
+		if err := m.setupPipelines(ctx, instance, instanceConfig.Pipelines); err != nil {
 			return fmt.Errorf("failed to setup pipeline: %w", err)
 		}
-		if err := m.assignPipelines(ctx, numaIdx, numaConfig.Devices); err != nil {
+		if err := m.assignPipelines(ctx, instance, instanceConfig.Devices); err != nil {
 			return fmt.Errorf("failed to assign pipeline to devices: %w", err)
 		}
 	}
@@ -86,47 +86,47 @@ func (m *Stage) Setup(ctx context.Context) error {
 	return nil
 }
 
-func (m *Stage) setupNUMAConfigs(ctx context.Context) error {
+func (m *Stage) setupInstanceConfigs(ctx context.Context) error {
 	wg, ctx := errgroup.WithContext(ctx)
-	for numaIdx, numaConfig := range m.cfg.NUMA {
+	for instance, instanceConfig := range m.cfg.Instances {
 		wg.Go(func() error {
-			return m.setupNUMAConfig(ctx, numaIdx, numaConfig)
+			return m.setupInstanceConfig(ctx, instance, instanceConfig)
 		})
 	}
 
 	return wg.Wait()
 }
 
-// setupNUMAConfig applies a NUMA config to the modules.
-func (m *Stage) setupNUMAConfig(ctx context.Context, numaIdx NUMAIdx, cfg NUMAConfig) error {
-	m.log.Infow("setting up NUMA config",
-		zap.Uint32("numa", uint32(numaIdx)),
+// setupInstanceConfig applies an instance config to the modules.
+func (m *Stage) setupInstanceConfig(ctx context.Context, instance DataplaneInstanceIdx, cfg DpInstanceConfig) error {
+	m.log.Infow("setting up instance config",
+		zap.Uint32("instance", uint32(instance)),
 		zap.Any("config", cfg),
 	)
-	defer m.log.Infow("finished setting up NUMA config",
-		zap.Uint32("numa", uint32(numaIdx)),
+	defer m.log.Infow("finished setting up dataplane instance config",
+		zap.Uint32("instance", uint32(instance)),
 		zap.Any("config", cfg),
 	)
 
-	if err := m.setupModulesConfigs(ctx, numaIdx, cfg.Modules); err != nil {
+	if err := m.setupModulesConfigs(ctx, instance, cfg.Modules); err != nil {
 		return fmt.Errorf("failed to setup modules configs: %w", err)
 	}
 
 	return nil
 }
 
-func (m *Stage) setupModulesConfigs(ctx context.Context, numaIdx NUMAIdx, modules map[string]ModuleConfig) error {
+func (m *Stage) setupModulesConfigs(ctx context.Context, instance DataplaneInstanceIdx, modules map[string]ModuleConfig) error {
 	wg, ctx := errgroup.WithContext(ctx)
 	for name, cfg := range modules {
 		wg.Go(func() error {
-			return m.setupModuleConfig(ctx, numaIdx, name, cfg)
+			return m.setupModuleConfig(ctx, instance, name, cfg)
 		})
 	}
 
 	return wg.Wait()
 }
 
-func (m *Stage) setupModuleConfig(ctx context.Context, numaIdx NUMAIdx, name string, cfg ModuleConfig) error {
+func (m *Stage) setupModuleConfig(ctx context.Context, instance DataplaneInstanceIdx, name string, cfg ModuleConfig) error {
 	m.log.Infow("setting up module config",
 		zap.String("module", name),
 	)
@@ -144,25 +144,25 @@ func (m *Stage) setupModuleConfig(ctx context.Context, numaIdx NUMAIdx, name str
 		return fmt.Errorf("failed to read config: %w", err)
 	}
 
-	if err := mod.SetupConfig(ctx, uint32(numaIdx), cfg.ConfigName, data); err != nil {
+	if err := mod.SetupConfig(ctx, uint32(instance), cfg.ConfigName, data); err != nil {
 		return fmt.Errorf("failed to setup config: %w", err)
 	}
 
 	return nil
 }
 
-func (m *Stage) setupPipelines(ctx context.Context, numaIdx NUMAIdx, pipelines []PipelineConfig) error {
+func (m *Stage) setupPipelines(ctx context.Context, instance DataplaneInstanceIdx, pipelines []PipelineConfig) error {
 	m.log.Infow("setting up pipelines",
-		zap.Uint32("numa", uint32(numaIdx)),
+		zap.Uint32("instance", uint32(instance)),
 		zap.Any("pipelines", pipelines),
 	)
 	defer m.log.Infow("finished setting up pipelines",
-		zap.Uint32("numa", uint32(numaIdx)),
+		zap.Uint32("instance", uint32(instance)),
 		zap.Any("pipelines", pipelines),
 	)
 
 	req := &ynpb.UpdatePipelinesRequest{
-		Numa: uint32(numaIdx),
+		Instance: uint32(instance),
 	}
 
 	for _, pipeline := range pipelines {
@@ -187,19 +187,19 @@ func (m *Stage) setupPipelines(ctx context.Context, numaIdx NUMAIdx, pipelines [
 	return nil
 }
 
-func (m *Stage) assignPipelines(ctx context.Context, numaIdx NUMAIdx, devices []DeviceConfig) error {
+func (m *Stage) assignPipelines(ctx context.Context, instance DataplaneInstanceIdx, devices []DeviceConfig) error {
 	m.log.Infow("assigning pipelines to devices",
-		zap.Uint32("numa", uint32(numaIdx)),
+		zap.Uint32("instance", uint32(instance)),
 		zap.Any("devices", devices),
 	)
 	defer m.log.Infow("finished assigning pipelines to devices",
-		zap.Uint32("numa", uint32(numaIdx)),
+		zap.Uint32("instance", uint32(instance)),
 		zap.Any("devices", devices),
 	)
 
 	req := &ynpb.AssignPipelinesRequest{
-		Numa:    uint32(numaIdx),
-		Devices: map[string]*ynpb.DevicePipelines{},
+		Instance: uint32(instance),
+		Devices:  map[string]*ynpb.DevicePipelines{},
 	}
 
 	for _, device := range devices {

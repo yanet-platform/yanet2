@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-func (x *TargetModule) Validate(numaMax uint32) (string, uint32, error) {
+func (x *TargetModule) Validate(instanceMax uint32) (string, uint32, error) {
 	if x == nil {
 		return "", 0, fmt.Errorf("target module cannot be nil")
 	}
@@ -12,10 +12,10 @@ func (x *TargetModule) Validate(numaMax uint32) (string, uint32, error) {
 	if name == "" {
 		return "", 0, fmt.Errorf("target module name is required")
 	}
-	numa := x.GetNuma()
-	if numa >= numaMax {
-		return "", 0, fmt.Errorf("NUMA index %d for config %s is out of range [0..%d) ", numa, name, numaMax)
+	inst := x.GetDataplaneInstance()
+	if inst >= instanceMax {
+		return "", 0, fmt.Errorf("instance index %d for config %s is out of range [0..%d) ", inst, name, instanceMax)
 	}
 
-	return name, numa, nil
+	return name, inst, nil
 }

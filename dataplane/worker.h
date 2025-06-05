@@ -9,7 +9,7 @@
 #include "dataplane/pipeline/pipeline.h"
 
 struct dataplane;
-struct dataplane_numa_node;
+struct dataplane_instance;
 
 struct dp_worker;
 
@@ -36,7 +36,8 @@ struct worker_write_ctx {
 
 struct dataplane_worker {
 	struct dataplane *dataplane;
-	struct dataplane_numa_node *node;
+	// TODO: use it to attach worker to the local NUMA
+	struct dataplane_instance *instance;
 	struct dataplane_device *device;
 	struct dp_worker *dp_worker;
 

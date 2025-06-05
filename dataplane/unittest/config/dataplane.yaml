@@ -2,29 +2,35 @@ dataplane:
   storage: /dev/hugepages/yanet
   dpdk_memory: 1024
   instances:
-    - dp_memory: 1073741824
-      cp_memory: 1073741824
+    - numa_id: 0
+      cp_memory: 2048
+      dp_memory: 1024
+    - dp_memory: 512
+      cp_memory: 128
+      numa_id: 1
+    - cp_memory: 124
       numa_id: 0
+      dp_memory: 123
   devices:
     - port_name: 07:00.0
-      mtu: 7000
-      max_lro_packet_size: 7200
+      mtu: 5000
+      max_lro_packet_size: 3600
       rss_hash: 0
       workers:
         - core_id: 4
           instance_id: 0
           rx_queue_len: 1024
-          tx_queue_len: 1024
+          tx_queue_len: 512
     - port_name: virtio_user_kni0
       mac_addr: 52:54:00:6b:ff:a5
       mtu: 7000
       max_lro_packet_size: 7200
-      rss_hash: 0
+      rss_hash: 1
       workers:
         - core_id: 5
-          instance_id: 0
-          rx_queue_len: 1024
-          tx_queue_len: 1024
+          instance_id: 1
+          rx_queue_len: 128
+          tx_queue_len: 4096
   connections:
     - src_device_id: 0
       dst_device_id: 1

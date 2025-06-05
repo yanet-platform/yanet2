@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/common/go/numa"
+	dp "github.com/yanet-platform/yanet2/common/go/dataplane"
 	"github.com/yanet-platform/yanet2/coordinator/coordinatorpb"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
@@ -33,12 +33,12 @@ func NewModuleService(gatewayEndpoint string, log *zap.SugaredLogger) *ModuleSer
 	}
 }
 
-// SetupConfig applies a configuration to the module for a specific NUMA node.
+// SetupConfig applies a configuration to the module for a specific instance.
 func (m *ModuleService) SetupConfig(
 	ctx context.Context,
 	req *coordinatorpb.SetupConfigRequest,
 ) (*coordinatorpb.SetupConfigResponse, error) {
-	numaNode := req.GetNumaNode()
+	instance := req.GetInstance()
 	configName := req.GetConfigName()
 
 	config := &Config{}
@@ -46,7 +46,7 @@ func (m *ModuleService) SetupConfig(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to unmarshal configuration: %v", err)
 	}
 
-	if err := m.setupConfig(ctx, numaNode, configName, config); err != nil {
+	if err := m.setupConfig(ctx, instance, configName, config); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to setup configuration: %v", err)
 	}
 
@@ -54,15 +54,15 @@ func (m *ModuleService) SetupConfig(
 }
 
 // setupConfig setups the provided configuration to the forward module for the
-// specified NUMA node.
+// specified instance.
 func (m *ModuleService) setupConfig(
 	ctx context.Context,
-	numaNode uint32,
+	instance uint32,
 	configName string,
 	config *Config,
 ) error {
 	m.log.Infow("setting up forward configuration",
-		zap.Uint32("numa", numaNode),
+		zap.Uint32("instance", instance),
 		zap.String("config_name", configName),
 		zap.Any("config", config),
 	)
@@ -82,7 +82,7 @@ func (m *ModuleService) setupConfig(
 	// Create a target configuration for the ForwardService
 	target := &forwardpb.TargetModule{
 		ModuleName: configName,
-		Numa:       uint32(numa.NewWithOneBitSet(numaNode)),
+		Instances:  uint32(dp.NewWithOneBitSet(instance)),
 	}
 
 	for _, forward := range config.L2Forwards {
@@ -128,7 +128,7 @@ func (m *ModuleService) setupConfig(
 	}
 
 	m.log.Infow("finished setting up forward configuration",
-		zap.Uint32("numa", numaNode),
+		zap.Uint32("instance", instance),
 		zap.String("config_name", configName),
 	)
 

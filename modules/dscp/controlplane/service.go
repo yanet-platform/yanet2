@@ -48,19 +48,19 @@ func (m *DscpService) ShowConfig(
 	request *dscppb.ShowConfigRequest,
 ) (*dscppb.ShowConfigResponse, error) {
 	name := request.GetTarget().GetModuleName()
-	numa, err := m.getNUMAIndices(request.GetTarget().GetNuma())
+	instances, err := m.getInstances(request.GetTarget().GetInstances())
 	if err != nil {
 		return nil, err
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	configs := make([]*dscppb.InstanceConfig, 0, len(numa))
-	for _, numaIdx := range numa {
-		key := instanceKey{name: name, numaIdx: numaIdx}
+	configs := make([]*dscppb.InstanceConfig, 0, len(instances))
+	for _, inst := range instances {
+		key := instanceKey{name: name, dataplaneInstance: inst}
 		if config, ok := m.configs[key]; ok {
 			instanceConfig := &dscppb.InstanceConfig{
-				Numa:     numaIdx,
+				Instance: inst,
 				Prefixes: make([]string, 0, len(config.prefixes)),
 				DscpConfig: &dscppb.DscpConfig{
 					Flag: uint32(config.dscpCfg.flag),
@@ -84,7 +84,7 @@ func (m *DscpService) AddPrefixes(
 ) (*dscppb.AddPrefixesResponse, error) {
 
 	name := request.GetTarget().GetModuleName()
-	numa, err := m.getNUMAIndices(request.GetTarget().GetNuma())
+	inst, err := m.getInstances(request.GetTarget().GetInstances())
 	if err != nil {
 		return nil, err
 	}
@@ -100,8 +100,8 @@ func (m *DscpService) AddPrefixes(
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, numaIdx := range numa {
-		key := instanceKey{name: name, numaIdx: numaIdx}
+	for _, inst := range inst {
+		key := instanceKey{name: name, dataplaneInstance: inst}
 		config, ok := m.configs[key]
 		if !ok {
 			m.configs[key] = &moduleConfig{
@@ -119,7 +119,7 @@ func (m *DscpService) AddPrefixes(
 		}
 	}
 
-	return &dscppb.AddPrefixesResponse{}, m.updateModuleConfigs(name, numa)
+	return &dscppb.AddPrefixesResponse{}, m.updateModuleConfigs(name, inst)
 }
 
 func (m *DscpService) RemovePrefixes(
@@ -127,7 +127,7 @@ func (m *DscpService) RemovePrefixes(
 	request *dscppb.RemovePrefixesRequest,
 ) (*dscppb.RemovePrefixesResponse, error) {
 	name := request.GetTarget().GetModuleName()
-	numa, err := m.getNUMAIndices(request.GetTarget().GetNuma())
+	inst, err := m.getInstances(request.GetTarget().GetInstances())
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +144,8 @@ func (m *DscpService) RemovePrefixes(
 	// Lock instances store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, numaIdx := range numa {
-		key := instanceKey{name: name, numaIdx: numaIdx}
+	for _, inst := range inst {
+		key := instanceKey{name: name, dataplaneInstance: inst}
 		config, ok := m.configs[key]
 		if !ok {
 			continue
@@ -156,7 +156,7 @@ func (m *DscpService) RemovePrefixes(
 		})
 	}
 
-	return &dscppb.RemovePrefixesResponse{}, m.updateModuleConfigs(name, numa)
+	return &dscppb.RemovePrefixesResponse{}, m.updateModuleConfigs(name, inst)
 }
 
 func (m *DscpService) SetDscpMarking(
@@ -164,7 +164,7 @@ func (m *DscpService) SetDscpMarking(
 	request *dscppb.SetDscpMarkingRequest,
 ) (*dscppb.SetDscpMarkingResponse, error) {
 	name := request.GetTarget().GetModuleName()
-	numa, err := m.getNUMAIndices(request.GetTarget().GetNuma())
+	inst, err := m.getInstances(request.GetTarget().GetInstances())
 	if err != nil {
 		return nil, err
 	}
@@ -189,8 +189,8 @@ func (m *DscpService) SetDscpMarking(
 	// Lock instances store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, numaIdx := range numa {
-		key := instanceKey{name: name, numaIdx: numaIdx}
+	for _, inst := range inst {
+		key := instanceKey{name: name, dataplaneInstance: inst}
 		config, ok := m.configs[key]
 		if !ok {
 			m.configs[key] = &moduleConfig{
@@ -206,25 +206,25 @@ func (m *DscpService) SetDscpMarking(
 		}
 	}
 
-	return &dscppb.SetDscpMarkingResponse{}, m.updateModuleConfigs(name, numa)
+	return &dscppb.SetDscpMarkingResponse{}, m.updateModuleConfigs(name, inst)
 }
 
 func (m *DscpService) updateModuleConfigs(
 	name string,
-	numaIndices []uint32,
+	instances []uint32,
 ) error {
-	m.log.Debugw("update config", zap.String("module", name), zap.Uint32s("numa", numaIndices))
+	m.log.Debugw("update config", zap.String("module", name), zap.Uint32s("instances", instances))
 
-	configs := make([]*ModuleConfig, 0, len(numaIndices))
-	for _, numaIdx := range numaIndices {
-		agent := m.agents[numaIdx]
+	configs := make([]*ModuleConfig, 0, len(instances))
+	for _, inst := range instances {
+		agent := m.agents[inst]
 
 		config, err := NewModuleConfig(agent, name)
 		if err != nil {
 			return fmt.Errorf("failed to create %q module config: %w", name, err)
 		}
 
-		moduleConfig := m.configs[instanceKey{name: name, numaIdx: numaIdx}]
+		moduleConfig := m.configs[instanceKey{name: name, dataplaneInstance: inst}]
 		if moduleConfig != nil {
 			// Add prefixes
 			for _, prefix := range moduleConfig.prefixes {
@@ -242,9 +242,9 @@ func (m *DscpService) updateModuleConfigs(
 		configs = append(configs, config)
 	}
 
-	for _, numaIdx := range numaIndices {
-		agent := m.agents[numaIdx]
-		config := configs[numaIdx]
+	for _, inst := range instances {
+		agent := m.agents[inst]
+		config := configs[inst]
 
 		if err := agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
 			return fmt.Errorf("failed to update module: %w", err)
@@ -252,26 +252,26 @@ func (m *DscpService) updateModuleConfigs(
 
 		m.log.Infow("successfully updated module",
 			zap.String("name", name),
-			zap.Uint32("numa", numaIdx),
+			zap.Uint32("instance", inst),
 		)
 	}
 	return nil
 }
 
-func (m *DscpService) getNUMAIndices(requestedNuma []uint32) ([]uint32, error) {
-	numaIndices := slices.Compact(slices.Sorted(slices.Values(requestedNuma)))
+func (m *DscpService) getInstances(requestedInstances []uint32) ([]uint32, error) {
+	instances := slices.Compact(slices.Sorted(slices.Values(requestedInstances)))
 
-	slices.Sort(requestedNuma)
-	if !slices.Equal(numaIndices, requestedNuma) {
-		return nil, status.Error(codes.InvalidArgument, "duplicate NUMA indices in the request")
+	slices.Sort(requestedInstances)
+	if !slices.Equal(instances, requestedInstances) {
+		return nil, status.Error(codes.InvalidArgument, "duplicate instance in the request")
 	}
-	if len(numaIndices) > 0 && int(numaIndices[len(numaIndices)-1]) >= len(m.agents) {
-		return nil, status.Error(codes.InvalidArgument, "NUMA indices are out of range")
+	if len(instances) > 0 && int(instances[len(instances)-1]) >= len(m.agents) {
+		return nil, status.Error(codes.InvalidArgument, "instance indices are out of range")
 	}
-	if len(numaIndices) == 0 {
+	if len(instances) == 0 {
 		for idx := range m.agents {
-			numaIndices = append(numaIndices, uint32(idx))
+			instances = append(instances, uint32(idx))
 		}
 	}
-	return numaIndices, nil
+	return instances, nil
 }

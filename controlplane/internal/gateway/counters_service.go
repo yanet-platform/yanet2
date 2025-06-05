@@ -48,10 +48,10 @@ func (m *CountersService) Pipeline(
 	ctx context.Context,
 	request *ynpb.PipelineCountersRequest,
 ) (*ynpb.CountersResponse, error) {
-	numaIdx := request.GetNuma()
+	instance := request.GetDpInstance()
 	pipeline := request.GetPipeline()
 
-	dpConfig := m.shm.DPConfig(numaIdx)
+	dpConfig := m.shm.DPConfig(instance)
 	counterValues := dpConfig.PipelineCounters(pipeline)
 
 	response := &ynpb.CountersResponse{
@@ -65,12 +65,12 @@ func (m *CountersService) PipelineModule(
 	ctx context.Context,
 	request *ynpb.PipelineModuleCountersRequest,
 ) (*ynpb.CountersResponse, error) {
-	numaIdx := request.GetNuma()
+	instance := request.GetDpInstance()
 	pipeline := request.GetPipeline()
 	module_type := request.GetModuleType()
 	module_name := request.GetModuleName()
 
-	dpConfig := m.shm.DPConfig(numaIdx)
+	dpConfig := m.shm.DPConfig(instance)
 	counterValues := dpConfig.PipelineModuleCounters(pipeline, module_type, module_name)
 
 	response := &ynpb.CountersResponse{

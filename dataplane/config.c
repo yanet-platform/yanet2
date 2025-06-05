@@ -9,10 +9,13 @@ enum state {
 	state_empty,
 	state_dataplane,
 	state_dataplane_storage,
-	state_dataplane_numa_count,
-	state_dataplane_dp_memory,
-	state_dataplane_cp_memory,
 	state_dataplane_dpdk_memory,
+
+	state_instances,
+	state_instance,
+	state_instance_numa_id,
+	state_instance_dp_memory,
+	state_instance_cp_memory,
 
 	state_devices,
 	state_device,
@@ -25,7 +28,7 @@ enum state {
 	state_workers,
 	state_worker,
 	state_worker_core_id,
-	state_worker_numa_id,
+	state_worker_instance_id,
 	state_worker_rx_queue_len,
 	state_worker_tx_queue_len,
 
@@ -56,6 +59,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 	memset(dataplane, 0, sizeof(*dataplane));
 
+	struct dataplane_instance_config *instance = NULL;
 	struct dataplane_device_config *device = NULL;
 	struct dataplane_device_worker_config *worker = NULL;
 	struct dataplane_connection_config *connection = NULL;
@@ -92,24 +96,6 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					sizeof(dataplane->storage));
 				state = state_dataplane;
 				break;
-			case state_dataplane_numa_count:
-				dataplane->numa_count = strtol(start, &end, 10);
-				if (*end != '\0')
-					goto error;
-				state = state_dataplane;
-				break;
-			case state_dataplane_dp_memory:
-				dataplane->dp_memory = strtol(start, &end, 10);
-				if (*end != '\0')
-					goto error;
-				state = state_dataplane;
-				break;
-			case state_dataplane_cp_memory:
-				dataplane->cp_memory = strtol(start, &end, 10);
-				if (*end != '\0')
-					goto error;
-				state = state_dataplane;
-				break;
 			case state_dataplane_dpdk_memory:
 				dataplane->dpdk_memory =
 					strtol(start, &end, 10);
@@ -122,6 +108,26 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					start,
 					sizeof(dataplane->loglevel));
 				state = state_dataplane;
+				break;
+
+			// handle new instance
+			case state_instance_numa_id:
+				instance->numa_idx = strtol(start, &end, 10);
+				if (*end != '\0')
+					goto error;
+				state = state_instance;
+				break;
+			case state_instance_dp_memory:
+				instance->dp_memory = strtol(start, &end, 10);
+				if (*end != '\0')
+					goto error;
+				state = state_instance;
+				break;
+			case state_instance_cp_memory:
+				instance->cp_memory = strtol(start, &end, 10);
+				if (*end != '\0')
+					goto error;
+				state = state_instance;
 				break;
 
 			case state_device_port_name:
@@ -165,8 +171,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 				state = state_worker;
 				break;
-			case state_worker_numa_id:
-				worker->numa_id = strtol(start, &end, 10);
+			case state_worker_instance_id:
+				worker->instance_id = strtol(start, &end, 10);
 				if (*end != '\0')
 					goto error;
 
@@ -212,20 +218,28 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			case state_dataplane:
 				if (!strcmp("storage", start)) {
 					state = state_dataplane_storage;
-				} else if (!strcmp("numa_count", start)) {
-					state = state_dataplane_numa_count;
-				} else if (!strcmp("dp_memory", start)) {
-					state = state_dataplane_dp_memory;
-				} else if (!strcmp("cp_memory", start)) {
-					state = state_dataplane_cp_memory;
 				} else if (!strcmp("dpdk_memory", start)) {
 					state = state_dataplane_dpdk_memory;
+				} else if (!strcmp("instances", start)) {
+					state = state_instances;
 				} else if (!strcmp("devices", start)) {
 					state = state_devices;
 				} else if (!strcmp("connections", start)) {
 					state = state_connections;
 				} else if (!strcmp("loglevel", start)) {
 					state = state_loglevel;
+				} else {
+					goto error;
+				}
+
+				break;
+			case state_instance:
+				if (!strcmp("numa_id", start)) {
+					state = state_instance_numa_id;
+				} else if (!strcmp("dp_memory", start)) {
+					state = state_instance_dp_memory;
+				} else if (!strcmp("cp_memory", start)) {
+					state = state_instance_cp_memory;
 				} else {
 					goto error;
 				}
@@ -253,8 +267,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			case state_worker:
 				if (!strcmp("core_id", start)) {
 					state = state_worker_core_id;
-				} else if (!strcmp("numa_id", start)) {
-					state = state_worker_numa_id;
+				} else if (!strcmp("instance_id", start)) {
+					state = state_worker_instance_id;
 				} else if (!strcmp("rx_queue_len", start)) {
 					state = state_worker_rx_queue_len;
 				} else if (!strcmp("tx_queue_len", start)) {
@@ -282,6 +296,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 		case YAML_SEQUENCE_START_EVENT:
 			switch (state) {
+			case state_instances:
+				break;
 			case state_devices:
 				break;
 			case state_workers:
@@ -294,6 +310,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			break;
 		case YAML_SEQUENCE_END_EVENT:
 			switch (state) {
+			case state_instances:
+				state = state_dataplane;
+				break;
 			case state_devices:
 				state = state_dataplane;
 				break;
@@ -314,6 +333,23 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 			case state_dataplane:
 				break;
+			case state_instances: {
+				++dataplane->instance_count;
+				// FIXME: realloc may fail
+				dataplane
+					->instances = (struct
+						       dataplane_instance_config
+							       *)
+					realloc(dataplane->instances,
+						sizeof(struct
+						       dataplane_instance_config
+						) * dataplane->instance_count);
+				instance = dataplane->instances +
+					   dataplane->instance_count - 1;
+				memset(instance, 0, sizeof(*instance));
+				state = state_instance;
+				break;
+			}
 			case state_devices: {
 				dataplane->device_count++;
 				// FIXME: realloc may fail
@@ -376,6 +412,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			case state_dataplane:
 				state = state_empty;
 				break;
+			case state_instance:
+				state = state_instances;
+				break;
 			case state_device:
 				state = state_devices;
 				break;
@@ -414,6 +453,8 @@ err_alloc_config:
 
 void
 dataplane_config_free(struct dataplane_config *config) {
+	free(config->instances);
+
 	for (uint64_t dev_idx = 0; dev_idx < config->device_count; ++dev_idx) {
 		struct dataplane_device_config *device =
 			config->devices + dev_idx;

@@ -50,16 +50,16 @@ func (m *RouteService) ListConfigs(
 ) (*routepb.ListConfigsResponse, error) {
 
 	response := &routepb.ListConfigsResponse{
-		NumaConfigs: make([]*routepb.NumaConfigs, len(m.agents)),
+		InstanceConfigs: make([]*routepb.InstanceConfigs, len(m.agents)),
 	}
 	for idx := range m.agents {
-		response.NumaConfigs[idx] = &routepb.NumaConfigs{
-			Numa: uint32(idx),
+		response.InstanceConfigs[idx] = &routepb.InstanceConfigs{
+			Instance: uint32(idx),
 		}
 	}
 	for key := range maps.Keys(m.ribs) {
-		numaConfigs := response.NumaConfigs[key.numaIdx]
-		numaConfigs.Configs = append(numaConfigs.Configs, key.name)
+		instanceConfigs := response.InstanceConfigs[key.dataplaneInstance]
+		instanceConfigs.Configs = append(instanceConfigs.Configs, key.name)
 	}
 
 	return response, nil
@@ -70,12 +70,12 @@ func (m *RouteService) ShowRoutes(
 	request *routepb.ShowRoutesRequest,
 ) (*routepb.ShowRoutesResponse, error) {
 
-	name, numa, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, instances, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	holder, ok := m.ribs[instanceKey{name: name, numaIdx: numa}]
+	holder, ok := m.ribs[instanceKey{name: name, dataplaneInstance: instances}]
 	if !ok {
 		return &routepb.ShowRoutesResponse{}, nil
 	}
@@ -110,7 +110,7 @@ func (m *RouteService) LookupRoute(
 	request *routepb.LookupRouteRequest,
 ) (*routepb.LookupRouteResponse, error) {
 
-	name, numa, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, instances, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -120,7 +120,7 @@ func (m *RouteService) LookupRoute(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse IP address: %v", err)
 	}
 
-	holder, ok := m.ribs[instanceKey{name: name, numaIdx: numa}]
+	holder, ok := m.ribs[instanceKey{name: name, dataplaneInstance: instances}]
 	if !ok {
 		return &routepb.LookupRouteResponse{}, nil
 	}
@@ -148,18 +148,18 @@ func (m *RouteService) FlushRoutes(
 	ctx context.Context,
 	request *routepb.FlushRoutesRequest,
 ) (*routepb.FlushRoutesResponse, error) {
-	name, numa, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, instances, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	return &routepb.FlushRoutesResponse{}, m.syncRouteUpdates(name, numa)
+	return &routepb.FlushRoutesResponse{}, m.syncRouteUpdates(name, instances)
 }
 
 func (m *RouteService) InsertRoute(
 	ctx context.Context,
 	request *routepb.InsertRouteRequest,
 ) (*routepb.InsertRouteResponse, error) {
-	name, numa, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, instances, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -173,28 +173,28 @@ func (m *RouteService) InsertRoute(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop address: %v", err)
 	}
 
-	holder, ok := m.ribs[instanceKey{name: name, numaIdx: numa}]
+	holder, ok := m.ribs[instanceKey{name: name, dataplaneInstance: instances}]
 	if !ok {
 		holder = rib.NewRIB(m.log)
-		m.ribs[instanceKey{name: name, numaIdx: numa}] = holder
+		m.ribs[instanceKey{name: name, dataplaneInstance: instances}] = holder
 	}
 	if err := holder.AddUnicastRoute(prefix, nexthopAddr); err != nil {
 		return nil, fmt.Errorf("failed to add unicast route: %w", err)
 	}
 
 	if request.GetDoFlush() {
-		return &routepb.InsertRouteResponse{}, m.syncRouteUpdates(name, numa)
+		return &routepb.InsertRouteResponse{}, m.syncRouteUpdates(name, instances)
 	}
-	return &routepb.InsertRouteResponse{}, m.syncRouteUpdates(name, numa)
+	return &routepb.InsertRouteResponse{}, m.syncRouteUpdates(name, instances)
 }
 
 func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update, routepb.UpdateSummary]) error {
 	var (
-		update *routepb.Update
-		name   string
-		numa   uint32
-		err    error
-		holder *rib.RIB
+		update    *routepb.Update
+		name      string
+		instances uint32
+		err       error
+		holder    *rib.RIB
 	)
 
 	for {
@@ -206,15 +206,15 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 			return err
 		}
 		if holder == nil {
-			name, numa, err = update.GetTarget().Validate(uint32(len(m.agents)))
+			name, instances, err = update.GetTarget().Validate(uint32(len(m.agents)))
 			if err != nil {
 				return status.Error(codes.InvalidArgument, err.Error())
 			}
 			var ok bool
-			holder, ok = m.ribs[instanceKey{name: name, numaIdx: numa}]
+			holder, ok = m.ribs[instanceKey{name: name, dataplaneInstance: instances}]
 			if !ok {
 				holder = rib.NewRIB(m.log)
-				m.ribs[instanceKey{name: name, numaIdx: numa}] = holder
+				m.ribs[instanceKey{name: name, dataplaneInstance: instances}] = holder
 			}
 
 		}
@@ -226,10 +226,10 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 	}
 }
 
-func (m *RouteService) syncRouteUpdates(name string, numa uint32) error {
-	holder, ok := m.ribs[instanceKey{name: name, numaIdx: numa}]
+func (m *RouteService) syncRouteUpdates(name string, dpInstance uint32) error {
+	holder, ok := m.ribs[instanceKey{name: name, dataplaneInstance: dpInstance}]
 	if !ok {
-		m.log.Warnf("no RIB found for module '%s' on NUMA %d", name, numa)
+		m.log.Warnf("no RIB found for module '%s' on dataplane instance %d", name, dpInstance)
 		return nil
 	}
 
@@ -238,7 +238,7 @@ func (m *RouteService) syncRouteUpdates(name string, numa uint32) error {
 	// Huge mutex, but our shared memory must be protected from concurrent access.
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	err := m.updateModuleConfig(name, numa, routes)
+	err := m.updateModuleConfig(name, dpInstance, routes)
 	if err != nil {
 		return err
 	}
@@ -247,10 +247,10 @@ func (m *RouteService) syncRouteUpdates(name string, numa uint32) error {
 
 func (m *RouteService) updateModuleConfig(
 	name string,
-	numaIdx uint32,
+	inst uint32,
 	routes map[netip.Prefix]rib.RoutesList,
 ) error {
-	agent := m.agents[numaIdx]
+	agent := m.agents[inst]
 
 	config, err := NewModuleConfig(agent, name)
 	if err != nil {
@@ -319,7 +319,7 @@ func (m *RouteService) updateModuleConfig(
 	m.log.Debugw("finished inserting routes",
 		zap.String("module", name),
 		zap.Int("count", totalRoutes),
-		zap.Uint32("numa", numaIdx),
+		zap.Uint32("inst", inst),
 		zap.Stringer("took", time.Since(routeInsertionStart)),
 	)
 
@@ -329,7 +329,7 @@ func (m *RouteService) updateModuleConfig(
 
 	m.log.Infow("successfully updated module",
 		zap.String("name", name),
-		zap.Uint32("numa", numaIdx),
+		zap.Uint32("inst", inst),
 	)
 	return nil
 }

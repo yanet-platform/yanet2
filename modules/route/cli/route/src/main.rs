@@ -61,9 +61,9 @@ pub struct RouteShowCmd {
     /// Route config name.
     #[arg(long = "cfg")]
     pub config_name: Option<String>,
-    /// NUMA node index where changes should be applied, optionally repeated.
+    /// Dataplane instances where changes should be applied, optionally repeated.
     #[arg(long, required = false)]
-    pub numa: Vec<u32>,
+    pub instances: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -73,9 +73,9 @@ pub struct RouteLookupCmd {
     /// Route config name.
     #[arg(long = "cfg")]
     pub config_name: String,
-    /// NUMA node index where changes should be applied, optionally repeated.
+    /// Dataplane instances where changes should be applied, optionally repeated.
     #[arg(long, required = true)]
-    pub numa: Vec<u32>,
+    pub instances: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -91,9 +91,9 @@ pub struct RouteInsertCmd {
     /// The IP address of the nexthop router.
     #[arg(long = "via")]
     pub nexthop_addr: IpAddr,
-    /// NUMA node index where changes should be applied, optionally repeated.
+    /// Dataplane instances where changes should be applied, optionally repeated.
     #[arg(long, required = true)]
-    pub numa: Vec<u32>,
+    pub instances: Vec<u32>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -135,9 +135,9 @@ impl RouteService {
         let request = ListConfigsRequest {};
         let response = self.client.list_configs(request).await?.into_inner();
         let mut tree = TreeBuilder::new("Route Configs".to_string());
-        for numa in response.numa_configs {
-            tree.begin_child(format!("NUMA {}", numa.numa));
-            for config in numa.configs {
+        for inst in response.instance_configs {
+            tree.begin_child(format!("Instance {}", inst.instance));
+            for config in inst.configs {
                 tree.add_empty_child(config);
             }
         }
@@ -146,10 +146,10 @@ impl RouteService {
         Ok(())
     }
 
-    pub async fn get_numa_indices(&mut self) -> Result<Vec<u32>, Box<dyn Error>> {
+    pub async fn get_instances(&mut self) -> Result<Vec<u32>, Box<dyn Error>> {
         let request = ListConfigsRequest {};
         let response = self.client.list_configs(request).await?.into_inner();
-        Ok(response.numa_configs.iter().map(|c| c.numa).collect())
+        Ok(response.instance_configs.iter().map(|c| c.instance).collect())
     }
 
     pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Box<dyn Error>> {
@@ -158,14 +158,14 @@ impl RouteService {
             return Ok(());
         };
 
-        let mut numa_indices = cmd.numa;
-        if numa_indices.is_empty() {
-            numa_indices = self.get_numa_indices().await?;
+        let mut instances = cmd.instances;
+        if instances.is_empty() {
+            instances = self.get_instances().await?;
         }
 
-        for numa in numa_indices {
+        for inst in instances {
             let request = ShowRoutesRequest {
-                target: Some(TargetModule { config_name: name.clone(), numa }),
+                target: Some(TargetModule { config_name: name.clone(), dataplane_instance: inst }),
                 ipv4_only: cmd.ipv4,
                 ipv6_only: cmd.ipv6,
             };
@@ -176,7 +176,7 @@ impl RouteService {
 
             entries.sort_by(|a, b| a.prefix.0.cmp(&b.prefix.0));
 
-            println!("NUMA {numa}");
+            println!("Instance {inst}");
             print_table(entries);
         }
 
@@ -184,11 +184,11 @@ impl RouteService {
     }
 
     pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Box<dyn Error>> {
-        for numa in cmd.numa {
+        for inst in cmd.instances {
             let request = LookupRouteRequest {
                 target: Some(TargetModule {
                     config_name: cmd.config_name.clone(),
-                    numa,
+                    dataplane_instance: inst,
                 }),
                 ip_addr: cmd.addr.to_string(),
             };
@@ -196,11 +196,11 @@ impl RouteService {
             let response = self.client.lookup_route(request).await?.into_inner();
 
             if response.routes.is_empty() {
-                println!("No routes found for {} on NUMA {numa}", cmd.addr);
+                println!("No routes found for {} on instance {inst}", cmd.addr);
                 continue;
             }
 
-            println!("NUMA {numa}");
+            println!("Instance {inst}");
             // NOTE: no sorting here, since routes are already sorted by their best.
             print_table(response.routes.into_iter().map(RouteEntry::from));
         }
@@ -209,11 +209,11 @@ impl RouteService {
     }
 
     pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Box<dyn Error>> {
-        for numa in cmd.numa {
+        for inst in cmd.instances {
             let request = InsertRouteRequest {
                 target: Some(TargetModule {
                     config_name: cmd.config_name.clone(),
-                    numa,
+                    dataplane_instance: inst,
                 }),
                 prefix: cmd.prefix.to_string(),
                 nexthop_addr: cmd.nexthop_addr.to_string(),
@@ -222,7 +222,7 @@ impl RouteService {
 
             let resp = self.client.insert_route(request).await?;
 
-            log::debug!("InsertRouteResponse on NUMA {numa}: {:?}", resp);
+            log::debug!("InsertRouteResponse on instance {inst}: {:?}", resp);
         }
 
         Ok(())

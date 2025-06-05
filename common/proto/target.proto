@@ -8,6 +8,7 @@ option go_package = "github.com/yanet-platform/yanet2/common/proto;commonpb";
 message TargetModule {
 	// ConfigName is the name of the module config that should be affected.
 	string config_name = 1;
-	// Numa specifies the index of the NUMA node to be affected.
-	uint32 numa = 2;
+	// dataplane_instance specifies the index of the dataplane instance to
+	// be affected.
+	uint32 dataplane_instance = 2;
 }

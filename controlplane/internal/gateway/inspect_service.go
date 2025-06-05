@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 
-	"github.com/yanet-platform/yanet2/common/go/bitset"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
@@ -24,17 +23,17 @@ func (m *InspectService) Inspect(
 	ctx context.Context,
 	request *ynpb.InspectRequest,
 ) (*ynpb.InspectResponse, error) {
-	numaBitmap := m.shm.NumaMap()
+	instanceIndices := m.shm.InstanceIndices()
 
 	response := &ynpb.InspectResponse{
-		NumaBitmap: numaBitmap,
+		InstanceIndices: instanceIndices,
 	}
 
-	bitset.NewBitsTraverser(uint64(numaBitmap)).Traverse(func(numaIdx uint32) bool {
-		dpConfig := m.shm.DPConfig(numaIdx)
+	for _, instanceIdx := range instanceIndices {
+		dpConfig := m.shm.DPConfig(instanceIdx)
 
-		numaInfo := &ynpb.NUMAInfo{
-			Numa:      numaIdx,
+		instanceInfo := &ynpb.InstanceInfo{
+			NumaIdx:   m.numaIdx(dpConfig),
 			DpModules: m.dpModules(dpConfig),
 			CpConfigs: m.cpConfigs(dpConfig),
 			Pipelines: m.pipelines(dpConfig),
@@ -42,9 +41,8 @@ func (m *InspectService) Inspect(
 			Devices:   m.devices(dpConfig),
 		}
 
-		response.NumaInfo = append(response.NumaInfo, numaInfo)
-		return true
-	})
+		response.InstanceInfo = append(response.InstanceInfo, instanceInfo)
+	}
 
 	return response, nil
 }
@@ -149,4 +147,8 @@ func (m *InspectService) devices(dpConfig *ffi.DPConfig) []*ynpb.DeviceInfo {
 	}
 
 	return out
+}
+
+func (m *InspectService) numaIdx(dpConfig *ffi.DPConfig) uint32 {
+	return dpConfig.NumaIdx()
 }

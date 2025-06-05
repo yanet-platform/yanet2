@@ -44,36 +44,26 @@ yanet_shm_attach(const char *path);
 int
 yanet_shm_detach(struct yanet_shm *shm);
 
-// Gets NUMA node mapping for dataplane.
+// Gets configuration of dataplane instance from shared memory.
 //
-// Returns a bitmap representing available NUMA nodes. Each bit in the returned
-// value corresponds to a NUMA node index. For example:
-// - 0x1 (bit 0 set) means NUMA node 0 is available
-// - 0x3 (bits 0,1 set) means NUMA nodes 0 and 1 are available
+// Provides access to the dataplane instance configuration stored in shared
+// memory.
 //
 // @param shm Handle to shared memory segment
-//
-// @return Bitmap of available NUMA nodes
-uint32_t
-yanet_shm_numa_map(struct yanet_shm *shm);
-
-// Gets dataplane configuration from shared memory.
-//
-// Provides access to the dataplane configuration stored in shared memory.
-//
-// @param shm Handle to shared memory segment
+// @param instance_idx Index of the dataplane instance
 //
 // @return Handle to dataplane configuration.
 struct dp_config *
-yanet_shm_dp_config(struct yanet_shm *shm, uint32_t numa_idx);
+yanet_shm_dp_config(struct yanet_shm *shm, uint32_t instance_idx);
 
 // Attaches a module agent to shared memory.
 //
-// Creates a new agent for a specific module in the given NUMA node.
+// Creates a new agent for a specific module in the given dataplane instance.
 // The agent provides module-specific operations and memory management.
 //
 // @param shm Handle to shared memory segment
-// @param numa_idx NUMA node index where the agent should operate
+// @param instance_idx Index of the dataplane instance where the agent should
+// operate
 // @param agent_name Name of the module agent (e.g. "route", "balancer")
 // @param memory_limit Maximum memory limit for this agent
 //
@@ -81,10 +71,26 @@ yanet_shm_dp_config(struct yanet_shm *shm, uint32_t numa_idx);
 struct agent *
 agent_attach(
 	struct yanet_shm *shm,
-	uint32_t numa_idx,
+	uint32_t instance_idx,
 	const char *agent_name,
 	size_t memory_limit
 );
+
+// Returns number of dataplane instances in the specified shared memory segment.
+//
+// @param shm Handle to the shared memory segment.
+//
+// @return Number of dataplane instances in the specified shared memory segment.
+uint32_t
+yanet_shm_instance_count(struct yanet_shm *shm);
+
+// Returns index of numa node dataplane instance attached to
+//
+// @param dp_config Handle to the dataplane instance.
+//
+// @return Index of numa node dataplane instance attached to.
+uint32_t
+dataplane_instance_numa_idx(struct dp_config *dp_config);
 
 // Detaches a module agent from shared memory, releasing associated  resources.
 //

@@ -33,17 +33,17 @@ func (m *PipelineService) Update(
 	ctx context.Context,
 	request *ynpb.UpdatePipelinesRequest,
 ) (*ynpb.UpdatePipelinesResponse, error) {
-	numaIdx := request.GetNuma()
+	instance := request.GetInstance()
 	chains := request.GetChains()
 
 	availableModuleNames := map[string]struct{}{}
-	for _, mod := range m.shm.DPConfig(numaIdx).Modules() {
+	for _, mod := range m.shm.DPConfig(instance).Modules() {
 		availableModuleNames[mod.Name()] = struct{}{}
 	}
 
 	// TODO: ensure requested module is in available.
 
-	agent, err := m.shm.AgentAttach(agentName, numaIdx, uint(1<<20))
+	agent, err := m.shm.AgentAttach(agentName, instance, uint(1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
 	}
@@ -69,7 +69,7 @@ func (m *PipelineService) Update(
 	}
 
 	m.log.Infow("updating pipelines",
-		zap.Uint32("numa", numaIdx),
+		zap.Uint32("instance", instance),
 		zap.Any("configs", configs),
 	)
 
@@ -78,7 +78,7 @@ func (m *PipelineService) Update(
 	}
 
 	m.log.Infow("updated pipelines",
-		zap.Uint32("numa", numaIdx),
+		zap.Uint32("instance", instance),
 		zap.Any("configs", configs),
 	)
 
@@ -90,10 +90,10 @@ func (m *PipelineService) Assign(
 	ctx context.Context,
 	request *ynpb.AssignPipelinesRequest,
 ) (*ynpb.AssignPipelinesResponse, error) {
-	numaIdx := request.GetNuma()
+	instance := request.GetInstance()
 	devices := request.GetDevices()
 
-	agent, err := m.shm.AgentAttach(agentName, numaIdx, uint(1<<20))
+	agent, err := m.shm.AgentAttach(agentName, instance, uint(1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
 	}
@@ -118,7 +118,7 @@ func (m *PipelineService) Assign(
 	}
 
 	m.log.Infow("assigned pipelines to devices",
-		zap.Uint32("numa", numaIdx),
+		zap.Uint32("instance", instance),
 		zap.Any("devices", devices),
 	)
 

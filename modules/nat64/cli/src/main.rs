@@ -80,9 +80,9 @@ pub struct AddPrefixCmd {
     /// NAT64 module name to operate on.
     #[arg(long = "mod")]
     pub module_name: String,
-    /// NUMA node index where the changes should be applied.
+    /// Dataplane instances where changes should be applied.
     #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    pub instances: Option<Vec<u32>>,
     /// IPv6 prefix (12 bytes) to be added.
     #[arg(long)]
     pub prefix: Ipv6Net,
@@ -93,9 +93,9 @@ pub struct AddMappingCmd {
     /// NAT64 module name to operate on.
     #[arg(long = "mod")]
     pub module_name: String,
-    /// NUMA node index where the changes should be applied.
+    /// Dataplane instances where changes should be applied.
     #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    pub instances: Option<Vec<u32>>,
     /// IPv4 address (4 bytes).
     #[arg(long)]
     pub ipv4: Ipv4Addr,
@@ -112,9 +112,9 @@ pub struct MtuCmd {
     /// NAT64 module name to operate on.
     #[arg(long = "mod")]
     pub module_name: String,
-    /// NUMA node index where the changes should be applied.
+    /// Dataplane instances where changes should be applied.
     #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    pub instances: Option<Vec<u32>>,
     /// MTU value for IPv4.
     #[arg(long)]
     pub ipv4_mtu: u32,
@@ -174,7 +174,7 @@ impl NAT64Service {
         let request = ShowConfigRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name.unwrap_or_default(),
-                numa: Vec::new(),
+                instances: Vec::new(),
             }),
         };
         let response = self.client.show_config(request).await?.into_inner();
@@ -189,7 +189,7 @@ impl NAT64Service {
         let request = AddPrefixRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
+                instances: cmd.instances.unwrap_or_default(),
             }),
             prefix: cmd.prefix.addr().octets()[..12].to_vec(),
         };
@@ -203,7 +203,7 @@ impl NAT64Service {
         let request = AddMappingRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
+                instances: cmd.instances.unwrap_or_default(),
             }),
             ipv4: cmd.ipv4.octets().to_vec(),
             ipv6: cmd.ipv6.octets().to_vec(),
@@ -219,7 +219,7 @@ impl NAT64Service {
         let request = SetMtuRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
+                instances: cmd.instances.unwrap_or_default(),
             }),
             mtu: Some(code::MtuConfig {
                 ipv4_mtu: cmd.ipv4_mtu,
@@ -236,7 +236,7 @@ impl NAT64Service {
         let request = SetDropUnknownRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
+                instances: cmd.instances.unwrap_or_default(),
             }),
             drop_unknown_prefix: cmd.drop_unknown_prefix,
             drop_unknown_mapping: cmd.drop_unknown_mapping,
@@ -254,9 +254,9 @@ pub struct DropCmd {
     /// NAT64 module name to operate on.
     #[arg(long = "mod")]
     pub module_name: String,
-    /// NUMA node index where the changes should be applied.
+    /// Dataplane instances where changes should be applied.
     #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    pub instances: Option<Vec<u32>>,
     /// Drop packets with unknown prefix
     #[arg(long)]
     pub drop_unknown_prefix: bool,
@@ -274,7 +274,7 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("NAT64 Configs".to_string());
 
     for config in &resp.configs {
-        tree.begin_child(format!("NUMA {}", config.numa));
+        tree.begin_child(format!("Instance {}", config.instance));
 
         tree.begin_child("Prefixes".to_string());
         for (idx, prefix) in config.prefixes.iter().enumerate() {

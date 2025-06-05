@@ -17,8 +17,8 @@ service PipelineService {
 
 // TODO: docs.
 message UpdatePipelinesRequest {
-	// TODO: docs.
-	uint32 numa = 1;
+	// Dataplane instance
+	uint32 instance = 1;
 	// TODO: docs.
 	repeated PipelineChain chains = 2;
 }
@@ -52,8 +52,8 @@ message UpdatePipelinesResponse {
 }
 
 message AssignPipelinesRequest {
-	// NUMA node to assign the pipelines to.
-	uint32 numa = 1;
+	// Dataplane instance to assign the pipelines to.
+	uint32 instance = 1;
 	// Devices to assign the pipelines to.
 	//
 	// Each device can have several pipelines assigned to it, which is

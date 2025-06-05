@@ -1,6 +1,5 @@
 use core::error::Error;
 
-use bitmap::BitsIterator;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use commonpb::TargetModule;
@@ -62,10 +61,10 @@ pub struct ShowConfigCmd {
     /// Decap module name to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
-    /// NUMA node index where the changes should be applied, optionally
+    /// Instance where the changes should be applied, optionally
     /// repeated.
     #[arg(long, required = false)]
-    pub numa: Vec<u32>,
+    pub instances: Vec<u32>,
     /// Output format.
     #[clap(long, value_enum, default_value_t = OutputFormat::Tree)]
     pub format: OutputFormat,
@@ -76,10 +75,10 @@ pub struct AddPrefixesCmd {
     /// Decap module name to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
-    /// NUMA node index where the changes should be applied, optionally
+    /// Instance where the changes should be applied, optionally
     /// repeated.
     #[arg(long, required = true)]
-    pub numa: Vec<u32>,
+    pub instances: Vec<u32>,
 
     /// Prefix to be added to the input filter of the decapsulation module.
     #[arg(long, short)]
@@ -92,10 +91,10 @@ pub struct RemovePrefixesCmd {
     #[arg(long = "cfg", short)]
     pub config_name: String,
 
-    /// NUMA node index where the changes should be applied, optionally
+    /// Instance where the changes should be applied, optionally
     /// repeated.
     #[arg(long, required = true)]
-    pub numa: Vec<u32>,
+    pub instances: Vec<u32>,
 
     /// Prefix to be removed from the input filter of the decapsulation module.
     #[arg(long, short)]
@@ -145,28 +144,25 @@ impl DecapService {
         Ok(Self { inspect, client })
     }
 
-    pub async fn get_numa_indices(&mut self) -> Result<Vec<u32>, Box<dyn Error>> {
+    pub async fn get_instances(&mut self) -> Result<Vec<u32>, Box<dyn Error>> {
         let request = InspectRequest {};
         let response = self.inspect.inspect(request).await?.into_inner();
 
-        let numa = BitsIterator::new(response.numa_bitmap as u64)
-            .map(|idx| idx as u32)
-            .collect();
-
-        Ok(numa)
+        let instances = response.instance_indices;
+        Ok(instances)
     }
 
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
-        let mut numa_indices = cmd.numa;
-        if numa_indices.is_empty() {
-            numa_indices = self.get_numa_indices().await?;
+        let mut instances = cmd.instances;
+        if instances.is_empty() {
+            instances = self.get_instances().await?;
         }
 
-        for numa in numa_indices {
+        for inst in instances {
             let request = ShowConfigRequest {
                 target: Some(TargetModule {
                     config_name: cmd.config_name.to_owned(),
-                    numa,
+                    dataplane_instance: inst,
                 }),
             };
             let response = self.client.show_config(request).await?.into_inner();
@@ -181,11 +177,11 @@ impl DecapService {
     }
 
     pub async fn add_prefixes(&mut self, cmd: AddPrefixesCmd) -> Result<(), Box<dyn Error>> {
-        for numa in cmd.numa {
+        for inst in cmd.instances {
             let request = AddPrefixesRequest {
                 target: Some(TargetModule {
                     config_name: cmd.config_name.clone(),
-                    numa,
+                    dataplane_instance: inst,
                 }),
                 prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
             };
@@ -197,11 +193,11 @@ impl DecapService {
     }
 
     pub async fn remove_prefixes(&mut self, cmd: RemovePrefixesCmd) -> Result<(), Box<dyn Error>> {
-        for numa in cmd.numa {
+        for inst in cmd.instances {
             let request = RemovePrefixesRequest {
                 target: Some(TargetModule {
                     config_name: cmd.config_name.clone(),
-                    numa,
+                    dataplane_instance: inst,
                 }),
                 prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
             };
@@ -222,7 +218,7 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("Decap Configs".to_string());
 
     if let Some(config) = &resp.config {
-        tree.begin_child(format!("NUMA {}", config.numa));
+        tree.begin_child(format!("Instance {}", config.instance));
 
         tree.begin_child("Prefixes".to_string());
         for (idx, prefix) in config.prefixes.iter().enumerate() {

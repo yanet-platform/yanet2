@@ -1,12 +1,12 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NumaMap(u32);
+pub struct InstanceMap(u32);
 
-impl NumaMap {
+impl InstanceMap {
     pub const MAX: Self = Self(u32::MAX);
 
     #[inline]
-    pub const fn new(numa: u32) -> Self {
-        Self(numa)
+    pub const fn new(instance_map: u32) -> Self {
+        Self(instance_map)
     }
 
     #[inline]
@@ -17,13 +17,13 @@ impl NumaMap {
     }
 }
 
-impl From<Vec<u32>> for NumaMap {
+impl From<Vec<u32>> for InstanceMap {
     fn from(indices: Vec<u32>) -> Self {
-        let mut numa = 0;
+        let mut map = 0;
         for idx in indices {
-            numa |= 1 << idx;
+            map |= 1 << idx;
         }
 
-        Self(numa)
+        Self(map)
     }
 }

@@ -13,9 +13,9 @@ service ModuleService {
 
 // SetupConfigRequest is a request to setup configuration for a module.
 message SetupConfigRequest {
-	// NUMANode specifies the NUMA node ID for which the configuration is
-	// intended.
-	uint32 numa_node = 1;
+	// Instance specifies the dataplane instance id for which the
+	// configuration is intended.
+	uint32 instance = 1;
 	// ConfigName is the name of the configuration to apply.
 	string config_name = 2;
 	// Config is the serialized configuration for the module.

@@ -111,9 +111,9 @@ type module struct {
 	conn     coordinatorpb.ModuleServiceClient
 }
 
-func (m *module) SetupConfig(ctx context.Context, numaIdx uint32, configName string, config []byte) error {
+func (m *module) SetupConfig(ctx context.Context, instance uint32, configName string, config []byte) error {
 	_, err := m.conn.SetupConfig(ctx, &coordinatorpb.SetupConfigRequest{
-		NumaNode:   numaIdx,
+		Instance:   instance,
 		ConfigName: configName,
 		Config:     config,
 	})

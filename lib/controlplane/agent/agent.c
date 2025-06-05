@@ -47,49 +47,43 @@ yanet_shm_attach(const char *path) {
 
 int
 yanet_shm_detach(struct yanet_shm *shm) {
-	struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
+	// calculate total size of shared memory
+	size_t size = 0;
+	struct dp_config *dp_config = (struct dp_config *)shm;
+	uint32_t instance_count = dp_config->instance_count;
+	for (uint32_t instance_idx = 0; instance_idx < instance_count;
+	     ++instance_idx) {
+		size += dp_config->storage_size;
+		dp_config = dp_config_nextk(dp_config, 1);
+	}
 
-	return munmap(
-		dp_config,
-		dp_config->storage_size *
-			__builtin_popcount(dp_config->numa_map)
-	);
-}
-
-uint32_t
-yanet_shm_numa_map(struct yanet_shm *shm) {
-	struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
-	return dp_config->numa_map;
+	return munmap(shm, size);
 }
 
 struct dp_config *
-yanet_shm_dp_config(struct yanet_shm *shm, uint32_t numa_idx) {
-	struct dp_config *dp_config = (struct dp_config *)shm;
+yanet_shm_dp_config(struct yanet_shm *shm, uint32_t instance_idx) {
+	return dp_config_nextk((struct dp_config *)shm, instance_idx);
+}
 
-	uint32_t mask = (1 << numa_idx) - 1;
-	uint32_t numa_pos = __builtin_popcount(dp_config->numa_map & mask);
-	dp_config = (struct dp_config *)((uintptr_t)dp_config +
-					 dp_config->storage_size * numa_pos);
+uint32_t
+yanet_shm_instance_count(struct yanet_shm *shm) {
+	struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
+	return dp_config->instance_count;
+}
 
-	return dp_config;
+uint32_t
+dataplane_instance_numa_idx(struct dp_config *dp_config) {
+	return dp_config->numa_idx;
 }
 
 struct agent *
 agent_attach(
 	struct yanet_shm *shm,
-	uint32_t numa_idx,
+	uint32_t instance_idx,
 	const char *agent_name,
 	size_t memory_limit
 ) {
-	struct dp_config *dp_config = yanet_shm_dp_config(shm, numa_idx);
-
-	if (!(dp_config->numa_map & (1 << numa_idx))) {
-		return NULL;
-	}
-	uint32_t mask = (1 << numa_idx) - 1;
-	uint32_t numa_pos = __builtin_popcount(dp_config->numa_map & mask);
-	dp_config = (struct dp_config *)((uintptr_t)dp_config +
-					 dp_config->storage_size * numa_pos);
+	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
 
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 

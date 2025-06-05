@@ -41,9 +41,9 @@ pub enum ModeCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
-    /// NUMA node index where the changes should be applied.
+    /// Dataplane instance where the changes should be applied.
     #[arg(long)]
-    pub numa: u32,
+    pub instance: u32,
     /// Pipeline name.
     #[arg(long)]
     pub name: String,
@@ -54,9 +54,9 @@ pub struct UpdateCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct AssignCmd {
-    /// NUMA node index where the changes should be applied.
+    /// Dataplane instance where the changes should be applied.
     #[arg(short, long)]
-    pub numa: u32,
+    pub instance: u32,
     /// Device ID to assign pipelines to.
     #[arg(short, long)]
     pub device: String,
@@ -100,7 +100,7 @@ impl PipelineService {
 
     pub async fn update_pipelines(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         let request = UpdatePipelinesRequest {
-            numa: cmd.numa,
+            instance: cmd.instance,
             chains: vec![PipelineChain {
                 name: cmd.name,
                 nodes: cmd
@@ -147,7 +147,7 @@ impl PipelineService {
         let mut devices = std::collections::HashMap::new();
         devices.insert(cmd.device, device_pipelines);
 
-        let request = AssignPipelinesRequest { numa: cmd.numa, devices };
+        let request = AssignPipelinesRequest { instance: cmd.instance, devices };
 
         self.client.assign(request).await?;
         log::info!("Successfully assigned pipeline to device");

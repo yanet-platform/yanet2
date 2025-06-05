@@ -39,7 +39,7 @@ type ForwardDeviceConfig struct {
 }
 
 type ForwardConfig struct {
-	NumaCount      int                   `yaml:"numa_count"`
+	InstanceCount  int                   `yaml:"instance_count"`
 	Storage        string                `yaml:"storage"`
 	AgentName      string                `yaml:"agent_name"`
 	MemoryLimit    uint64                `yaml:"memory_limit"`
@@ -70,10 +70,10 @@ func main() {
 	}
 	defer C.yanet_shm_detach(shm)
 
-	for numaIdx := range config.NumaCount {
+	for instance := range config.InstanceCount {
 		agent := C.agent_attach(
 			shm,
-			C.uint32_t(numaIdx),
+			C.uint32_t(instance),
 			C.CString(config.AgentName),
 			C.uint64_t(config.MemoryLimit),
 		)

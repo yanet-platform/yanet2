@@ -40,8 +40,14 @@ struct dp_worker {
 };
 
 struct dp_config {
-	uint32_t numa_map;
+	uint32_t instance_count;
+	uint32_t instance_idx;
+
+	/*
+	 * Use it to attach workers
+	 */
 	uint32_t numa_idx;
+
 	uint64_t storage_size;
 
 	struct block_allocator block_allocator;
@@ -62,6 +68,12 @@ struct dp_config {
 	struct counter_registry worker_counters;
 	struct counter_storage *worker_counter_storage;
 };
+
+/*
+ * Returns dp_config of k-th instance from current.
+ */
+struct dp_config *
+dp_config_nextk(struct dp_config *current, uint32_t k);
 
 bool
 dp_config_try_lock(struct dp_config *dp_config);

@@ -20,12 +20,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-
 type ControlplaneConfig struct {
-	NumaCount   int    `yaml:"numa_count"`
-	Storage     string `yaml:"storage"`
-	AgentName   string `yaml:"agent_name"`
-	MemoryLimit uint64 `yaml:"memory_limit"`
+	InstanceCount int    `yaml:"instance_count"`
+	Storage       string `yaml:"storage"`
+	AgentName     string `yaml:"agent_name"`
+	MemoryLimit   uint64 `yaml:"memory_limit"`
 }
 
 func main() {
@@ -51,9 +50,9 @@ func main() {
 	}
 	defer C.yanet_shm_detach(shm)
 
-	for numaIdx := 0; numaIdx < config.NumaCount; numaIdx++ {
+	for instance := 0; instance < config.InstanceCount; instance++ {
 		counters := C.yanet_get_worker_counters(
-			C.yanet_shm_dp_config(shm, C.uint32_t(numaIdx)),
+			C.yanet_shm_dp_config(shm, C.uint32_t(instance)),
 		)
 		{
 			for idx := C.uint64_t(0); idx < counters.count; idx++ {
@@ -67,38 +66,38 @@ func main() {
 			}
 
 		}
-	
-	for _, pName := range []string{"phy", "virt"} {
-		counters := C.yanet_get_pm_counters(C.yanet_shm_dp_config(shm, C.uint32_t(numaIdx)), C.CString("forward"), C.CString("forward0"), C.CString(pName))
-		for idx := C.uint64_t(0); idx < counters.count; idx++ {
-			counter := C.yanet_get_counter(counters, idx)
-			fmt.Printf("Counter forward forward0 %s %s\n", pName, C.GoString(&counter.name[0]))
 
-			for wrk_idx := 0; wrk_idx < 2; wrk_idx++ {
-				fmt.Printf("wrk %d: \n", wrk_idx) 
-				for idx := 0; idx < int(counter.size); idx++ {
-					fmt.Printf("%16d", C.yanet_get_counter_value(counter.value_handle, C.uint64_t(idx), C.uint64_t(wrk_idx)))
+		for _, pName := range []string{"phy", "virt"} {
+			counters := C.yanet_get_pm_counters(C.yanet_shm_dp_config(shm, C.uint32_t(instance)), C.CString("forward"), C.CString("forward0"), C.CString(pName))
+			for idx := C.uint64_t(0); idx < counters.count; idx++ {
+				counter := C.yanet_get_counter(counters, idx)
+				fmt.Printf("Counter forward forward0 %s %s\n", pName, C.GoString(&counter.name[0]))
+
+				for wrk_idx := 0; wrk_idx < 2; wrk_idx++ {
+					fmt.Printf("wrk %d: \n", wrk_idx)
+					for idx := 0; idx < int(counter.size); idx++ {
+						fmt.Printf("%16d", C.yanet_get_counter_value(counter.value_handle, C.uint64_t(idx), C.uint64_t(wrk_idx)))
+					}
+					fmt.Printf("\n")
 				}
-			fmt.Printf("\n")
+			}
+		}
+		for _, pName := range []string{"phy", "virt"} {
+			counters := C.yanet_get_pipeline_counters(C.yanet_shm_dp_config(shm, C.uint32_t(instance)), C.CString(pName))
+			for idx := C.uint64_t(0); idx < counters.count; idx++ {
+				counter := C.yanet_get_counter(counters, idx)
+				fmt.Printf("Counter %s %s\n", pName, C.GoString(&counter.name[0]))
+
+				for wrk_idx := 0; wrk_idx < 2; wrk_idx++ {
+					fmt.Printf("wrk %d: \n", wrk_idx)
+
+					for idx := 0; idx < int(counter.size); idx++ {
+						fmt.Printf("%16d", C.yanet_get_counter_value(counter.value_handle, C.uint64_t(idx), C.uint64_t(wrk_idx)))
+					}
+					fmt.Printf("\n")
+				}
 			}
 		}
 	}
-	for _, pName := range []string{"phy", "virt"} {
-		counters := C.yanet_get_pipeline_counters(C.yanet_shm_dp_config(shm, C.uint32_t(numaIdx)), C.CString(pName))
-		for idx := C.uint64_t(0); idx < counters.count; idx++ {
-			counter := C.yanet_get_counter(counters, idx)
-			fmt.Printf("Counter %s %s\n", pName, C.GoString(&counter.name[0]))
-
-for wrk_idx := 0; wrk_idx < 2; wrk_idx++ {
-				fmt.Printf("wrk %d: \n", wrk_idx) 
-
-			for idx := 0; idx < int(counter.size); idx++ {
-				fmt.Printf("%16d", C.yanet_get_counter_value(counter.value_handle, C.uint64_t(idx), C.uint64_t(wrk_idx)))
-			}
-			fmt.Printf("\n")
-			}
-		}
-	}
-}
 
 }

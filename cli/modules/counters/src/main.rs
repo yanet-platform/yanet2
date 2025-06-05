@@ -42,7 +42,7 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct PipelineCmd {
     #[arg(long)]
-    pub numa: u32,
+    pub instance: u32,
     #[arg(long)]
     pub pipeline_name: String,
 }
@@ -50,7 +50,7 @@ pub struct PipelineCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct PipelineModuleCmd {
     #[arg(long)]
-    pub numa: u32,
+    pub instance: u32,
     #[arg(long)]
     pub pipeline_name: String,
     #[arg(long)]
@@ -77,8 +77,8 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = CountersService::new(cmd.endpoint).await?;
 
     match cmd.mode {
-        ModeCmd::Pipeline(cmd) => service.show_pipeline(cmd.numa, cmd.pipeline_name).await?,
-        ModeCmd::PipelineModule(cmd) => service.show_pipeline_module(cmd.numa, cmd.pipeline_name, cmd.module_type, cmd.module_name).await?,
+        ModeCmd::Pipeline(cmd) => service.show_pipeline(cmd.instance, cmd.pipeline_name).await?,
+        ModeCmd::PipelineModule(cmd) => service.show_pipeline_module(cmd.instance, cmd.pipeline_name, cmd.module_type, cmd.module_name).await?,
     }
 
     Ok(())
@@ -94,9 +94,9 @@ impl CountersService {
         Ok(Self { client })
     }
 
-    pub async fn show_pipeline(&mut self, numa: u32, pipeline_name: String) -> Result<(), Box<dyn Error>> {
+    pub async fn show_pipeline(&mut self, instance: u32, pipeline_name: String) -> Result<(), Box<dyn Error>> {
         let request = PipelineCountersRequest {
-            numa: numa,
+            dp_instance: instance,
             pipeline: pipeline_name,
         };
         let response = self.client.pipeline(request).await?;
@@ -104,9 +104,9 @@ impl CountersService {
         Ok(())
     }
 
-    pub async fn show_pipeline_module(&mut self, numa: u32, pipeline_name: String, module_type: String, module_name: String) -> Result<(), Box<dyn Error>> {
+    pub async fn show_pipeline_module(&mut self, instance: u32, pipeline_name: String, module_type: String, module_name: String) -> Result<(), Box<dyn Error>> {
         let request = PipelineModuleCountersRequest {
-                numa: numa,
+                dp_instance: instance,
                 pipeline: pipeline_name,
                 module_type: module_type,
                 module_name: module_name,

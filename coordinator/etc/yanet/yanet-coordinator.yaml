@@ -12,9 +12,9 @@ gateway:
 stages:
   # Stage 1: Bootstrap.
   - name: bootstrap
-    # Per-NUMA configuration within this stage
-    numa:
-      # NUMA node 0
+    # Per-instance configuration within this stage
+    instance:
+      # Instance 0
       0:
         modules:
           forward:

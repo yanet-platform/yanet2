@@ -21,8 +21,8 @@ import (
 )
 
 type instanceKey struct {
-	name string
-	numa uint32
+	name              string
+	dataplaneInstance uint32
 }
 
 type importHodler struct {
@@ -55,12 +55,12 @@ func (m *ModuleService) SetupConfig(
 	ctx context.Context,
 	req *coordinatorpb.SetupConfigRequest,
 ) (*coordinatorpb.SetupConfigResponse, error) {
-	numaNode := req.GetNumaNode()
+	instance := req.GetInstance()
 	configName := req.GetConfigName()
 
 	m.log.Infow("setting up configuration",
 		zap.String("name", configName),
-		zap.Uint32("numa", numaNode),
+		zap.Uint32("instance", instance),
 	)
 
 	cfg := DefaultConfig()
@@ -68,7 +68,7 @@ func (m *ModuleService) SetupConfig(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to unmarshal configuration: %v", err)
 	}
 
-	if err := m.setupConfig(ctx, numaNode, configName, cfg); err != nil {
+	if err := m.setupConfig(ctx, instance, configName, cfg); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to setup configuration: %v", err)
 	}
 
@@ -77,7 +77,7 @@ func (m *ModuleService) SetupConfig(
 
 func (m *ModuleService) setupConfig(
 	ctx context.Context,
-	numaNode uint32,
+	instance uint32,
 	configName string,
 	config *Config,
 ) error {
@@ -90,8 +90,8 @@ func (m *ModuleService) setupConfig(
 	}
 	client := routepb.NewRouteServiceClient(conn)
 	target := &commonpb.TargetModule{
-		ConfigName: configName,
-		Numa:       numaNode,
+		ConfigName:        configName,
+		DataplaneInstance: instance,
 	}
 	flushRequest := &routepb.FlushRoutesRequest{Target: target}
 
@@ -122,7 +122,7 @@ func (m *ModuleService) setupConfig(
 			return fmt.Errorf("failed to setup route update push stream: %w", err)
 		}
 
-		log := m.log.With("config", configName, "numa", numaNode)
+		log := m.log.With("config", configName, "instance", instance)
 		onUpdate := func(routes []rib.Route) error {
 			log.Debugf("received update batch with %d routes", len(routes))
 			for idx := range routes {
@@ -151,13 +151,13 @@ func (m *ModuleService) setupConfig(
 		}
 
 		export := bird.NewExportReader(config.BirdImport, onUpdate, onFlush, m.log)
-		holder, ok := m.imports[instanceKey{name: configName, numa: numaNode}]
+		holder, ok := m.imports[instanceKey{name: configName, dataplaneInstance: instance}]
 		if ok {
 			holder.cancel()
 			holder.conn.Close()
 		}
 
-		m.imports[instanceKey{name: configName, numa: numaNode}] = &importHodler{
+		m.imports[instanceKey{name: configName, dataplaneInstance: instance}] = &importHodler{
 			export: export,
 			cancel: cancel,
 			conn:   conn,

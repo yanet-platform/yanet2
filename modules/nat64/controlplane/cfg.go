@@ -61,8 +61,8 @@ func DefaultConfig() *Config {
 	}
 }
 
-// instanceKey uniquely identifies a module instance on a NUMA node
+// instanceKey uniquely identifies a module instance on a dataplane instance
 type instanceKey struct {
-	name    string
-	numaIdx uint32
+	name              string
+	dataplaneInstance uint32
 }

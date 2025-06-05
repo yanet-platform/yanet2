@@ -126,7 +126,8 @@ route_handle_packets(
 			continue;
 		}
 
-		// TODO: Route selection should be based on hash/NUMA/etc
+		// TODO: Route selection should be based on hash/NUMA/dp
+		// instance/etc
 		uint64_t route_index = ADDR_OF(&route_config->route_indexes
 		)[route_list->start + packet->hash % route_list->count];
 

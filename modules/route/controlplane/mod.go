@@ -39,13 +39,13 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
 	}
 
-	numaIndices := shm.NumaIndices()
+	instanceIndices := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
-		zap.Uint32s("numa", numaIndices),
+		zap.Uint32s("instances", instanceIndices),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("route", numaIndices, uint(cfg.MemoryRequirements))
+	agents, err := shm.AgentsAttach("route", instanceIndices, uint(cfg.MemoryRequirements))
 	if err != nil {
 		return nil, err
 	}
@@ -86,9 +86,9 @@ func (m *RouteModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *RouteModule) Close() error {
-	for numaIdx, agent := range m.agents {
+	for inst, agent := range m.agents {
 		if err := agent.Close(); err != nil {
-			m.log.Warnw("failed to close shared memory agent", zap.Int("numa", numaIdx), zap.Error(err))
+			m.log.Warnw("failed to close shared memory agent", zap.Int("inst", inst), zap.Error(err))
 		}
 	}
 

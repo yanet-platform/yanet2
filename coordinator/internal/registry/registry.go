@@ -14,7 +14,7 @@ type RegisterEvent struct {
 
 // Module represents a registered module.
 type Module interface {
-	SetupConfig(ctx context.Context, numaIdx uint32, configName string, config []byte) error
+	SetupConfig(ctx context.Context, instance uint32, configName string, config []byte) error
 }
 
 // Registry keeps track of all registered modules.

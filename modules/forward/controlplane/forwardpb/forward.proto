@@ -27,8 +27,9 @@ message TargetModule {
 	// ModuleName is the name of the module for which to reload the
 	// configuration.
 	string module_name = 1;
-	// Numa specifies a bitmap of NUMA nodes that should be affected.
-	uint32 numa = 2;
+	// Instances specifies a bitmap of dataplane instances that should be
+	// affected.
+	uint32 instances = 2;
 }
 
 // ShowConfigResponse retrieves the runtime configuration for the forward
@@ -49,7 +50,7 @@ message ForwardDeviceConfig {
 }
 
 message InstanceConfig {
-	uint32 numa = 1;
+	uint32 instance = 1;
 	repeated ForwardDeviceConfig devices = 2;
 }
 

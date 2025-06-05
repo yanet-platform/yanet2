@@ -26,6 +26,6 @@ func DefaultConfig() *Config {
 }
 
 type instanceKey struct {
-	name    string
-	numaIdx uint32
+	name              string
+	dataplaneInstance uint32
 }

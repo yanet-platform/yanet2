@@ -14,12 +14,14 @@ service CountersService {
 }
 
 message PipelineCountersRequest {
-	uint32 numa = 1;
+	// Dataplane instance
+	uint32 dp_instance = 1;
 	string pipeline = 2;
 }
 
 message PipelineModuleCountersRequest {
-	uint32 numa = 1;
+	// Dataplane instance
+	uint32 dp_instance = 1;
 	string pipeline = 2;
 	string module_type = 3;
 	string module_name = 4;

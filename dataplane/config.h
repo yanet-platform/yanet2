@@ -3,9 +3,15 @@
 #include <stdint.h>
 #include <stdio.h>
 
+struct dataplane_instance_config {
+	uint16_t numa_idx;
+	uint64_t dp_memory;
+	uint64_t cp_memory;
+};
+
 struct dataplane_device_worker_config {
 	uint16_t core_id;
-	uint16_t numa_id;
+	uint16_t instance_id;
 	uint16_t rx_queue_len;
 	uint16_t tx_queue_len;
 };
@@ -29,10 +35,12 @@ struct dataplane_connection_config {
 
 struct dataplane_config {
 	char storage[80];
-	uint16_t numa_count;
-	uint64_t dp_memory;
-	uint64_t cp_memory;
 	uint64_t dpdk_memory;
+
+	uint16_t numa_count;
+
+	uint16_t instance_count;
+	struct dataplane_instance_config *instances;
 
 	uint64_t device_count;
 	struct dataplane_device_config *devices;

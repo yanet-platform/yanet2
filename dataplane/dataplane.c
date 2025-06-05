@@ -241,8 +241,8 @@ dataplane_load_module(
 
 int
 dataplane_init_storage(
-	uint32_t numa_map,
 	uint32_t numa_idx,
+	uint32_t instance_idx,
 	void *storage,
 	size_t dp_memory,
 	size_t cp_memory,
@@ -250,10 +250,12 @@ dataplane_init_storage(
 	struct dp_config **res_dp_config,
 	struct cp_config **res_cp_config
 ) {
+	// TODO: move pages to requested numa node
+
 	struct dp_config *dp_config = (struct dp_config *)storage;
 
-	dp_config->numa_map = numa_map;
 	dp_config->numa_idx = numa_idx;
+	dp_config->instance_idx = instance_idx;
 	dp_config->storage_size = dp_memory + cp_memory;
 
 	block_allocator_init(&dp_config->block_allocator);
@@ -313,13 +315,22 @@ dataplane_init(
 ) {
 	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 
-	dataplane->node_count = config->numa_count;
-	// FIXME: check that node_count < N where N is the size of
-	// dataplane->nodes[N]
-	LOG(INFO, "initialize dataplane with %u numa", config->numa_count);
+	dataplane->instance_count = config->instance_count;
 
-	off_t numa_size = config->dp_memory + config->cp_memory;
-	off_t storage_size = numa_size * config->numa_count;
+	LOG(INFO,
+	    "initialize dataplane with %u instances",
+	    config->instance_count);
+
+	// calc storage size
+	off_t storage_size = 0;
+	for (uint16_t instance_id = 0; instance_id < config->instance_count;
+	     ++instance_id) {
+		struct dataplane_instance_config *instance_config =
+			&config->instances[instance_id];
+		storage_size +=
+			instance_config->cp_memory + instance_config->dp_memory;
+	}
+
 	// FIXME: handle errors
 	int mem_fd = open(
 		config->storage, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR
@@ -362,70 +373,81 @@ dataplane_init(
 	}
 	close(mem_fd);
 
-	uint32_t numa_map = 0;
-	for (uint32_t node_idx = 0; node_idx < dataplane->node_count;
-	     ++node_idx) {
-		numa_map |= 1 << node_idx;
-	}
+	off_t instance_offset = 0;
+	for (uint32_t instance_idx = 0;
+	     instance_idx < dataplane->instance_count;
+	     ++instance_idx) {
+		struct dataplane_instance *instance =
+			dataplane->instances + instance_idx;
+		struct dataplane_instance_config *instance_config =
+			config->instances + instance_idx;
 
-	for (uint32_t node_idx = 0; node_idx < dataplane->node_count;
-	     ++node_idx) {
-
-		struct dataplane_numa_node *node = dataplane->nodes + node_idx;
-
-		LOG(INFO, "initialize storage for NUMA %u", node_idx);
+		LOG(INFO, "initialize storage for instance %u", instance_idx);
 		int rc = dataplane_init_storage(
-			numa_map,
-			node_idx,
-			storage + numa_size * node_idx,
-			config->dp_memory,
-			config->cp_memory,
-			&node->dp_config,
-			&node->cp_config
+			instance_config->numa_idx,
+			instance_idx,
+			storage + instance_offset,
+			instance_config->dp_memory,
+			instance_config->cp_memory,
+			&instance->dp_config,
+			&instance->cp_config
 		);
 		if (rc == -1) {
 			LOG(ERROR,
-			    "failed to initialize storage for NUMA %u",
-			    node_idx);
+			    "failed to initialize storage for instance %u",
+			    instance_idx);
 			return -1;
 		}
 
-		node->dp_config->dp_topology.device_count =
+		instance->dp_config->dp_topology.device_count =
 			config->device_count;
 
 		// FIXME: load modules into dp memory
 		rc = dataplane_load_module(
-			node->dp_config, bin_hndl, "forward"
+			instance->dp_config, bin_hndl, "forward"
 		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(node->dp_config, bin_hndl, "route");
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(node->dp_config, bin_hndl, "decap");
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(node->dp_config, bin_hndl, "dscp");
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(node->dp_config, bin_hndl, "nat64");
 		if (rc == -1) {
 			return -1;
 		}
 		rc = dataplane_load_module(
-			node->dp_config, bin_hndl, "balancer"
+			instance->dp_config, bin_hndl, "route"
 		);
 		if (rc == -1) {
 			return -1;
 		}
-		rc = dataplane_load_module(node->dp_config, bin_hndl, "pdump");
+		rc = dataplane_load_module(
+			instance->dp_config, bin_hndl, "decap"
+		);
 		if (rc == -1) {
 			return -1;
 		}
+		rc = dataplane_load_module(
+			instance->dp_config, bin_hndl, "dscp"
+		);
+		if (rc == -1) {
+			return -1;
+		}
+		rc = dataplane_load_module(
+			instance->dp_config, bin_hndl, "nat64"
+		);
+		if (rc == -1) {
+			return -1;
+		}
+		rc = dataplane_load_module(
+			instance->dp_config, bin_hndl, "balancer"
+		);
+		if (rc == -1) {
+			return -1;
+		}
+		rc = dataplane_load_module(
+			instance->dp_config, bin_hndl, "pdump"
+		);
+		if (rc == -1) {
+			return -1;
+		}
+
+		instance_offset +=
+			instance_config->dp_memory + instance_config->cp_memory;
 	}
 
 	size_t pci_port_count = 0;
@@ -467,17 +489,24 @@ dataplane_init(
 		dataplane, config->connection_count, config->connections
 	);
 
-	for (uint32_t node_idx = 0; node_idx < dataplane->node_count;
-	     ++node_idx) {
-		struct dataplane_numa_node *node = dataplane->nodes + node_idx;
-		struct dp_config *dp_config = node->dp_config;
+	// init dataplane instances
+	for (uint32_t instance_idx = 0;
+	     instance_idx < dataplane->instance_count;
+	     ++instance_idx) {
+		struct dataplane_instance *instance =
+			dataplane->instances + instance_idx;
+		struct dp_config *dp_config = instance->dp_config;
+
+		dp_config->instance_idx = instance_idx;
+		dp_config->instance_count = dataplane->instance_count;
+
 		counter_storage_allocator_init(
 			&dp_config->counter_storage_allocator,
 			&dp_config->memory_context,
 			dp_config->worker_count
 		);
 
-		struct cp_config *cp_config = node->cp_config;
+		struct cp_config *cp_config = instance->cp_config;
 		counter_storage_allocator_init(
 			&cp_config->counter_storage_allocator,
 			&cp_config->memory_context,
@@ -587,10 +616,11 @@ dataplane_start(struct dataplane *dataplane) {
 			device->port_name,
 			CP_DEVICE_NAME_LEN);
 		cp_device_config.pipeline_weight_count = 0;
-		for (uint64_t node_idx = 0; node_idx < dataplane->node_count;
+		for (uint64_t node_idx = 0;
+		     node_idx < dataplane->instance_count;
 		     ++node_idx) {
-			struct dataplane_numa_node *node =
-				dataplane->nodes + node_idx;
+			struct dataplane_instance *node =
+				dataplane->instances + node_idx;
 
 			struct cp_device_config *cp_device_configs =
 				&cp_device_config;

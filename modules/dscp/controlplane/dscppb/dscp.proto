@@ -28,10 +28,10 @@ message TargetModule {
 	// ModuleName is the name of the module for which to reload the
 	// configuration.
 	string module_name = 1;
-	// Numa specifies NUMA nodes that should be affected.
+	// Instance specifies dataplane instances that should be affected.
 	//
-	// Empty means all NUMA nodes.
-	repeated uint32 numa = 2;
+	// Empty means all instances.
+	repeated uint32 instances = 2;
 }
 
 // ShowConfigResponse retrieves the runtime configuration for the dscp module.
@@ -40,7 +40,8 @@ message ShowConfigRequest {
 }
 
 message InstanceConfig {
-	uint32 numa = 1;
+	// Dataplane instance
+	uint32 instance = 1;
 	repeated string prefixes = 2;
 	DscpConfig dscp_config = 3;
 }

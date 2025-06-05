@@ -17,26 +17,29 @@ message InspectRequest {
 
 // InspectResponse contains the complete configuration state.
 message InspectResponse {
-	// NUMABitmap is a bitmap of NUMA nodes used in dataplane.
-	uint32 numa_bitmap = 1;
-	// NUMAInfo contains detailed information about each NUMA node.
-	repeated NUMAInfo numa_info = 2;
+	// Indices of the dataplane instances.
+	repeated uint32 instance_indices = 1;
+	// InstanceInfo contains detailed information about each dataplane
+	// instance.
+	repeated InstanceInfo instance_info = 2;
 }
 
-// NUMAInfo contains information about a NUMA node configuration.
-message NUMAInfo {
-	// NUMA node index.
-	uint32 numa = 1;
-	// Dataplane modules available in this NUMA node.
-	repeated DPModuleInfo dp_modules = 2;
-	// Control plane configurations in this NUMA node.
-	repeated CPConfigInfo cp_configs = 3;
-	// Pipelines configured in this NUMA node.
-	repeated PipelineInfo pipelines = 4;
-	// Agents running in this NUMA node.
-	repeated AgentInfo agents = 5;
-	// Devices configured in this NUMA node.
-	repeated DeviceInfo devices = 6;
+// InstanceInfo contains information about a dataplane instance configuration.
+message InstanceInfo {
+	// Instance index.
+	uint32 instance_idx = 1;
+	// Index of NUMA node instance attached to.
+	uint32 numa_idx = 2;
+	// Dataplane modules available in this dataplane instance.
+	repeated DPModuleInfo dp_modules = 3;
+	// Control plane configurations in this dataplane instance.
+	repeated CPConfigInfo cp_configs = 4;
+	// Pipelines configured in this dataplane instance.
+	repeated PipelineInfo pipelines = 5;
+	// Agents running in this dataplane instance.
+	repeated AgentInfo agents = 6;
+	// Devices configured in this dataplane instance.
+	repeated DeviceInfo devices = 7;
 }
 
 // DPModuleInfo contains information about a dataplane module.

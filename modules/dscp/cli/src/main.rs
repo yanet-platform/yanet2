@@ -57,11 +57,11 @@ pub struct AddPrefixesCmd {
     /// DSCP module name to operate on.
     #[arg(long = "mod", short)]
     pub module_name: String,
-    /// NUMA node index where the changes should be applied, optional.
+    /// Dataplane instances where the changes should be applied, optional.
     ///
-    /// If no numa specified, the route will be applied to all NUMA nodes.
+    /// If no instances specified, the route will be applied to all instances.
     #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    pub instances: Option<Vec<u32>>,
 
     /// Prefix to be added to the input filter of the DSCP module.
     #[arg(long, short)]
@@ -74,11 +74,11 @@ pub struct RemovePrefixesCmd {
     #[arg(long = "mod", short)]
     pub module_name: String,
 
-    /// NUMA node index where the changes should be applied, optional.
+    /// Dataplane instances where the changes should be applied, optional.
     ///
-    /// If no numa specified, the route will be applied to all NUMA nodes.
+    /// If no instances specified, the route will be applied to all instances.
     #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    pub instances: Option<Vec<u32>>,
 
     /// Prefix to be removed from the input filter of the DSCP module.
     #[arg(long, short)]
@@ -91,11 +91,11 @@ pub struct SetDscpMarkingCmd {
     #[arg(long = "mod", short)]
     pub module_name: String,
 
-    /// NUMA node index where the changes should be applied, optional.
+    /// Dataplane instances where the changes should be applied, optional.
     ///
-    /// If no numa specified, the route will be applied to all NUMA nodes.
+    /// If no instances specified, the route will be applied to all instances.
     #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    pub instances: Option<Vec<u32>>,
 
     /// DSCP marking flag: 0 - Never, 1 - Default (only if original DSCP is 0), 2 - Always
     #[arg(long)]
@@ -152,7 +152,7 @@ impl DscpService {
         let request = ShowConfigRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name.to_owned(),
-                numa: Vec::new(),
+                instances: Vec::new(),
             }),
         };
         let response = self.client.show_config(request).await?.into_inner();
@@ -168,7 +168,7 @@ impl DscpService {
         let request = AddPrefixesRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
+                instances: cmd.instances.unwrap_or_default(),
             }),
             prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
         };
@@ -182,7 +182,7 @@ impl DscpService {
         let request = RemovePrefixesRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
+                instances: cmd.instances.unwrap_or_default(),
             }),
             prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
         };
@@ -206,7 +206,7 @@ impl DscpService {
         let request = SetDscpMarkingRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.unwrap_or_default(),
+                instances: cmd.instances.unwrap_or_default(),
             }),
             dscp_config: Some(DscpConfig {
                 flag: cmd.flag,
@@ -229,7 +229,7 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("DSCP Configs".to_string());
 
     for config in &resp.configs {
-        tree.begin_child(format!("NUMA {}", config.numa));
+        tree.begin_child(format!("Instance {}", config.instance));
 
         if let Some(dscp_config) = &config.dscp_config {
             tree.begin_child("DSCP Marking".to_string());

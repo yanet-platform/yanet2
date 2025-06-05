@@ -1,10 +1,9 @@
 dataplane:
   storage: /dev/hugepages/yanet
+  numa_count: 1
+  dp_memory: 1073741824
+  cp_memory: 1073741824
   dpdk_memory: 1024
-  instances:
-    - dp_memory: 1073741824
-      cp_memory: 1073741824
-      numa_id: 0
   devices:
     - port_name: 07:00.0
       mtu: 7000
@@ -12,7 +11,7 @@ dataplane:
       rss_hash: 0
       workers:
         - core_id: 4
-          instance_id: 0
+          numa_id: 0
           rx_queue_len: 1024
           tx_queue_len: 1024
     - port_name: virtio_user_kni0
@@ -22,7 +21,7 @@ dataplane:
       rss_hash: 0
       workers:
         - core_id: 5
-          instance_id: 0
+          numa_id: 0
           rx_queue_len: 1024
           tx_queue_len: 1024
   connections:

@@ -43,8 +43,8 @@ func (m *Config) RequiredModules() map[string]struct{} {
 	modules := map[string]struct{}{}
 
 	for _, stage := range m.Stages {
-		for _, numaConfig := range stage.NUMA {
-			for name := range numaConfig.Modules {
+		for _, instanceConfig := range stage.Instances {
+			for name := range instanceConfig.Modules {
 				modules[name] = struct{}{}
 			}
 		}

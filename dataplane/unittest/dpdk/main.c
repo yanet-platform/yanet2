@@ -125,6 +125,9 @@ main(int argc, char **argv) {
 		"/tmp/unit", 1 << 24, 1 << 24, &dp_config, &cp_config
 	);
 
+	struct dp_worker dp_worker;
+	dp_worker.idx = 0;
+
 	dataplane_load_module(dp_config, bin_hndl, "route");
 
 	struct yanet_shm *shm = yanet_shm_attach("/tmp/unit");
@@ -213,8 +216,8 @@ main(int argc, char **argv) {
 
 		pipeline_process(
 			dp_config,
+			&dp_worker,
 			ADDR_OF(&cp_config->cp_config_gen),
-			0,
 			0,
 			&packet_front
 		);

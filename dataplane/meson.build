@@ -61,4 +61,4 @@ if not get_option('fuzzing').enabled()
   )
 endif
 
-#subdir('unittest')
+subdir('unittest')

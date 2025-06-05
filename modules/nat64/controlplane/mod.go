@@ -26,13 +26,13 @@ func NewNAT64Module(cfg *Config, log *zap.SugaredLogger) (*NAT64Module, error) {
 		return nil, err
 	}
 
-	numaIndices := shm.NumaIndices()
+	instanceIndices := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
-		zap.Uint32s("numa", numaIndices),
+		zap.Uint32s("instances", instanceIndices),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("nat64", numaIndices, uint(cfg.MemoryRequirements))
+	agents, err := shm.AgentsAttach("nat64", instanceIndices, uint(cfg.MemoryRequirements))
 	if err != nil {
 		return nil, err
 	}
@@ -66,9 +66,9 @@ func (m *NAT64Module) RegisterService(server *grpc.Server) {
 
 // Close closes the module and releases all resources
 func (m *NAT64Module) Close() error {
-	for numaIdx, agent := range m.agents {
+	for instance, agent := range m.agents {
 		if err := agent.Close(); err != nil {
-			m.log.Warnw("failed to close shared memory agent", zap.Int("numa", numaIdx), zap.Error(err))
+			m.log.Warnw("failed to close shared memory agent", zap.Int("instance", instance), zap.Error(err))
 		}
 	}
 

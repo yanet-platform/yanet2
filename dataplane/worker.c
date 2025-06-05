@@ -267,8 +267,8 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 	worker_read(worker, &input_packets);
 
-	struct dp_config *dp_config = worker->node->dp_config;
-	struct cp_config *cp_config = worker->node->cp_config;
+	struct dp_config *dp_config = worker->instance->dp_config;
+	struct cp_config *cp_config = worker->instance->cp_config;
 	struct cp_config_gen *cp_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 
@@ -277,7 +277,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 	// Determine pipelines
 	dataplane_route_pipeline(
-		worker->node->dp_config, cp_config_gen, &input_packets
+		worker->instance->dp_config, cp_config_gen, &input_packets
 	);
 
 	// Now group packets by pipeline and build packet_front
@@ -354,19 +354,19 @@ dataplane_worker_init(
 ) {
 	// FIXME: free resources on error
 	LOG(DEBUG,
-	    "initialize worker core=%u,numa=%u for port_id=%u",
+	    "initialize worker core=%u, instance=%u for port_id=%u",
 	    config->core_id,
-	    config->numa_id,
+	    config->instance_id,
 	    device->port_id);
 	worker->dataplane = dataplane;
-	worker->node = dataplane->nodes + config->numa_id;
+	worker->instance = dataplane->instances + config->instance_id;
 	worker->device = device;
 	worker->device_id = device->device_id;
 	worker->port_id = device->port_id;
 	worker->queue_id = queue_id;
 	worker->config = *config;
 
-	struct dp_config *dp_config = worker->node->dp_config;
+	struct dp_config *dp_config = worker->instance->dp_config;
 	struct dp_worker *dp_worker = (struct dp_worker *)memory_balloc(
 		&dp_config->memory_context, sizeof(struct dp_worker)
 	);
@@ -412,12 +412,12 @@ dataplane_worker_init(
 
 	// Initialize device rx and tx queue
 	if (rte_eth_tx_queue_setup(
-		    device->port_id, queue_id, 4096, config->numa_id, NULL
+		    device->port_id, queue_id, 4096, config->instance_id, NULL
 	    )) {
 		LOG(ERROR,
 		    "failed to setup TX queue for port id=%u numa=%u",
 		    device->port_id,
-		    config->numa_id);
+		    config->instance_id);
 		return -1;
 	}
 
@@ -440,7 +440,7 @@ dataplane_worker_init(
 		NULL,
 		rte_pktmbuf_init,
 		NULL,
-		config->numa_id,
+		config->instance_id,
 		MEMPOOL_F_SP_PUT | MEMPOOL_F_SC_GET
 	);
 	if (worker->rx_mempool == NULL) {
@@ -452,14 +452,14 @@ dataplane_worker_init(
 		    device->port_id,
 		    queue_id,
 		    4096,
-		    config->numa_id,
+		    config->instance_id,
 		    NULL,
 		    worker->rx_mempool
 	    )) {
 		LOG(ERROR,
 		    "failed to setup RX queue for port id=%u numa=%u",
 		    device->port_id,
-		    config->numa_id);
+		    config->instance_id);
 		goto error_mempool;
 	}
 
@@ -503,7 +503,7 @@ int
 dataplane_worker_start(struct dataplane_worker *worker) {
 
 	struct dp_worker *dp_worker = worker->dp_worker;
-	struct dp_config *dp_config = worker->node->dp_config;
+	struct dp_config *dp_config = worker->instance->dp_config;
 	// FIXME: do not use hard-coded counter identifiers
 	dp_worker->iterations = counter_get_address(
 		0, dp_worker->idx, ADDR_OF(&dp_config->worker_counter_storage)

@@ -6,14 +6,14 @@
 struct dataplane_config;
 struct dataplane_device;
 
-struct dataplane_numa_node {
+struct dataplane_instance {
 	struct dp_config *dp_config;
 	struct cp_config *cp_config;
 };
 
 struct dataplane {
-	struct dataplane_numa_node nodes[8];
-	uint32_t node_count;
+	struct dataplane_instance instances[8];
+	uint32_t instance_count;
 
 	struct dataplane_device *devices;
 	uint32_t device_count;

@@ -80,16 +80,16 @@ impl PdumpService {
     async fn get_configs(
         &mut self,
         name: &str,
-        numa_indices: Vec<u32>,
+        instances: Vec<u32>,
     ) -> Result<Vec<ShowConfigResponse>, Box<dyn Error>> {
         let mut responses = Vec::new();
-        for numa in numa_indices {
+        for instance in instances {
             let request = ShowConfigRequest {
-                target: Some(TargetModule { config_name: name.to_owned(), numa }),
+                target: Some(TargetModule { config_name: name.to_owned(), dataplane_instance: instance }),
             };
-            log::trace!("show config request on NUMA {numa}: {request:?}");
+            log::trace!("show config request on dataplane instance {instance}: {request:?}");
             let response = self.client.show_config(request).await?.into_inner();
-            log::debug!("show config response on NUMA {numa}: {response:?}");
+            log::debug!("show config response on dataplane instance {instance}: {response:?}");
             responses.push(response);
         }
         Ok(responses)
@@ -101,11 +101,11 @@ impl PdumpService {
             return Ok(());
         };
 
-        let mut numa_indices = cmd.numa;
-        if numa_indices.is_empty() {
-            numa_indices = self.get_numa_indices().await?;
+        let mut instances = cmd.instances;
+        if instances.is_empty() {
+            instances = self.get_dataplane_instances().await?;
         }
-        let configs = self.get_configs(&name, numa_indices).await?;
+        let configs = self.get_configs(&name, instances).await?;
 
         match cmd.format {
             ConfigOutputFormat::Json => print_json(configs)?,
@@ -116,65 +116,65 @@ impl PdumpService {
     }
 
     pub async fn set_filter(&mut self, cmd: SetFilterCmd) -> Result<(), Box<dyn Error>> {
-        for numa in cmd.numa {
+        for instance in cmd.instances {
             let request = SetFilterRequest {
                 target: Some(TargetModule {
                     config_name: cmd.config_name.clone(),
-                    numa,
+                    dataplane_instance: instance,
                 }),
                 filter: cmd.filter.to_string(),
             };
-            log::trace!("set filter request on NUMA {numa}: {request:?}");
+            log::trace!("set filter request on instance {instance}: {request:?}");
             let response = self.client.set_filter(request).await?.into_inner();
-            log::debug!("set filter response on NUMA {numa}: {response:?}");
+            log::debug!("set filter response on instance {instance}: {response:?}");
         }
         Ok(())
     }
 
     pub async fn set_dump_mode(&mut self, cmd: SetDumpModeCmd) -> Result<(), Box<dyn Error>> {
-        for numa in cmd.numa {
+        for instance in cmd.instances {
             let request = SetDumpModeRequest {
                 target: Some(TargetModule {
                     config_name: cmd.config_name.clone(),
-                    numa,
+                    dataplane_instance: instance,
                 }),
                 mode: cmd.mode.into(),
             };
-            log::trace!("set dump mode request on NUMA {numa}: {request:?}");
+            log::trace!("set dump mode request on instance {instance}: {request:?}");
             let response = self.client.set_dump_mode(request).await?.into_inner();
-            log::debug!("set dump mode response on NUMA {numa}: {response:?}");
+            log::debug!("set dump mode response on instance {instance}: {response:?}");
         }
         Ok(())
     }
 
     pub async fn set_snap_len(&mut self, cmd: SetSnapLenCmd) -> Result<(), Box<dyn Error>> {
-        for numa in cmd.numa {
+        for instance in cmd.instances {
             let request = SetSnapLenRequest {
                 target: Some(TargetModule {
                     config_name: cmd.config_name.clone(),
-                    numa,
+                    dataplane_instance: instance,
                 }),
                 snaplen: cmd.snaplen,
             };
-            log::trace!("set snap len request on NUMA {numa}: {request:?}");
+            log::trace!("set snap len request on instance {instance}: {request:?}");
             let response = self.client.set_snap_len(request).await?.into_inner();
-            log::debug!("set snap len response on NUMA {numa}: {response:?}");
+            log::debug!("set snap len response on instance {instance}: {response:?}");
         }
         Ok(())
     }
 
     pub async fn set_ring_size(&mut self, cmd: SetRingSizeCmd) -> Result<(), Box<dyn Error>> {
-        for numa in cmd.numa {
+        for instance in cmd.instances {
             let request = SetWorkerRingSizeRequest {
                 target: Some(TargetModule {
                     config_name: cmd.config_name.clone(),
-                    numa,
+                    dataplane_instance: instance,
                 }),
                 ring_size: cmd.ring_size,
             };
-            log::trace!("set per worker ring size request on NUMA {numa}: {request:?}");
+            log::trace!("set per worker ring size request on instance {instance}: {request:?}");
             let response = self.client.set_worker_ring_size(request).await?.into_inner();
-            log::debug!("set per worker ring size response on NUMA {numa}: {response:?}");
+            log::debug!("set per worker ring size response on instance {instance}: {response:?}");
         }
         Ok(())
     }
@@ -186,9 +186,9 @@ impl PdumpService {
         let mut reader_set = JoinSet::new();
         let (tx, rx) = tokio::sync::mpsc::channel::<pdumppb::Record>(16);
 
-        log::debug!("request current pdump configuration for numa: {:?}", cmd.numa);
+        log::debug!("request current pdump configuration for instances: {:?}", cmd.instances);
         let configs: Vec<_> = self
-            .get_configs(&cmd.config_name, cmd.numa.clone())
+            .get_configs(&cmd.config_name, cmd.instances.clone())
             .await?
             .into_iter()
             .filter_map(|c| c.config)
@@ -197,21 +197,21 @@ impl PdumpService {
         if configs.is_empty() {
             return Err(Box::new(std::io::Error::new(
                 ErrorKind::NotFound,
-                format!("Configuration {} not found on NUMA {:?}", cmd.config_name, cmd.numa),
+                format!("Configuration {} not found on instances {:?}", cmd.config_name, cmd.instances),
             )));
         }
 
-        for numa in cmd.numa {
+        for instance in cmd.instances {
             let request = ReadDumpRequest {
                 target: Some(TargetModule {
                     config_name: cmd.config_name.clone(),
-                    numa,
+                    dataplane_instance: instance,
                 }),
             };
-            log::trace!("read_data request on NUMA {numa}: {request:?}");
+            log::trace!("read_data request on instance {instance}: {request:?}");
             let stream = self.client.read_dump(request).await?.into_inner();
             log::debug!(
-                "read_data successfully acquired data stream on NUMA {numa} for {}",
+                "read_data successfully acquired data stream on instance {instance} for {}",
                 cmd.config_name,
             );
 
@@ -256,19 +256,19 @@ impl PdumpService {
         Ok(())
     }
 
-    async fn get_numa_indices(&mut self) -> Result<Vec<u32>, Box<dyn Error>> {
+    async fn get_dataplane_instances(&mut self) -> Result<Vec<u32>, Box<dyn Error>> {
         let request = ListConfigsRequest {};
         let response = self.client.list_configs(request).await?.into_inner();
-        Ok(response.numa_configs.iter().map(|c| c.numa).collect())
+        Ok(response.instance_configs.iter().map(|c| c.instance).collect())
     }
 
     async fn print_config_list(&mut self) -> Result<(), Box<dyn Error>> {
         let request = ListConfigsRequest {};
         let response = self.client.list_configs(request).await?.into_inner();
         let mut tree = TreeBuilder::new("Pdump Configs".to_string());
-        for numa in response.numa_configs {
-            tree.begin_child(format!("NUMA {}", numa.numa));
-            for config in numa.configs {
+        for instance_config in response.instance_configs {
+            tree.begin_child(format!("Instance {}", instance_config.instance));
+            for config in instance_config.configs {
                 tree.add_empty_child(config);
             }
         }
@@ -287,7 +287,7 @@ pub fn print_tree(configs: Vec<ShowConfigResponse>) -> Result<(), Box<dyn Error>
     let mut tree = TreeBuilder::new("Pdump Configs".to_string());
 
     for config in &configs {
-        tree.begin_child(format!("NUMA {}", config.numa));
+        tree.begin_child(format!("Instance {}", config.instance));
 
         if let Some(config) = &config.config {
             tree.add_empty_child(format!("Filter: {}", config.filter));

@@ -1,7 +1,7 @@
 package stage
 
-// NUMAIdx is the index of a NUMA node.
-type NUMAIdx uint32
+// DataplaneInstanceIdx is the index of a dataplane instance.
+type DataplaneInstanceIdx uint32
 
 // Config represents a stage config in the configuration process.
 //
@@ -11,17 +11,17 @@ type NUMAIdx uint32
 type Config struct {
 	// Name is the unique identifier for this stage.
 	Name string `yaml:"name"`
-	// NUMA configuration for each node.
-	NUMA map[NUMAIdx]NUMAConfig `yaml:"numa"`
+	// Configuration for each dataplane instance.
+	Instances map[DataplaneInstanceIdx]DpInstanceConfig `yaml:"instance"`
 }
 
-// NUMAConfig contains the configuration for a specific NUMA node.
-type NUMAConfig struct {
-	// Modules configuration for this NUMA node.
+// DpInstanceConfig contains the configuration for a specific dataplane instance.
+type DpInstanceConfig struct {
+	// Modules configuration for this dataplane instance.
 	Modules map[string]ModuleConfig `yaml:"modules,omitempty"`
-	// Pipelines configuration for this NUMA node.
+	// Pipelines configuration for this dataplane instance.
 	Pipelines []PipelineConfig `yaml:"pipelines,omitempty"`
-	// Devices configuration for this NUMA node.
+	// Devices configuration for this dataplane instance.
 	Devices []DeviceConfig `yaml:"devices,omitempty"`
 }
 

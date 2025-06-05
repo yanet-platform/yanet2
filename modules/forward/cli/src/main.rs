@@ -9,7 +9,7 @@ use code::{
 use ipnet::IpNet;
 use ptree::TreeBuilder;
 use tonic::transport::Channel;
-use ync::{logging, numa::NumaMap};
+use ync::{logging, instance::InstanceMap};
 
 #[allow(non_snake_case)]
 pub mod code {
@@ -65,11 +65,11 @@ pub struct L2ForwardCmd {
     /// The name of the module to operate on.
     #[arg(long = "mod", short)]
     pub module_name: String,
-    /// NUMA node index where the changes should be applied, optional.
-    ///
-    /// If no numa specified, the route will be applied to all NUMA nodes.
+    /// Dataplane instances where the changes should be applied, optional.
+    /// 
+    /// If no instances specified, the route will be applied to all instances nodes.
     #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    pub instances: Option<Vec<u32>>,
     /// Source device ID.
     #[arg(required = true, long = "src", value_name = "src-dev-id")]
     pub src: u16,
@@ -83,11 +83,11 @@ pub struct AddL3ForwardCmd {
     /// The name of the module to operate on.
     #[arg(long = "mod", short)]
     pub module_name: String,
-    /// NUMA node index where the changes should be applied, optional.
-    ///
-    /// If no numa specified, the route will be applied to all NUMA nodes.
+    /// Dataplane instances where the changes should be applied, optional.
+    /// 
+    /// If no instances specified, the route will be applied to all instances nodes.
     #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    pub instances: Option<Vec<u32>>,
     /// Source device ID.
     #[arg(required = true, long = "src", value_name = "src-dev-id")]
     pub src: u16,
@@ -104,11 +104,11 @@ pub struct RemoveL3ForwardCmd {
     /// The name of the module to operate on.
     #[arg(long = "mod", short)]
     pub module_name: String,
-    /// NUMA node index where the changes should be applied, optional.
-    ///
-    /// If no numa specified, the route will be applied to all NUMA nodes.
+    /// Dataplane instances where the changes should be applied, optional.
+    /// 
+    /// If no instances specified, the route will be applied to all instances nodes.
     #[arg(long)]
-    pub numa: Option<Vec<u32>>,
+    pub instances: Option<Vec<u32>>,
     /// Source device ID.
     #[arg(required = true, long = "src", value_name = "src-dev-id")]
     pub src: u16,
@@ -131,7 +131,7 @@ impl ForwardService {
         let request = ShowConfigRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name.to_owned(),
-                numa: NumaMap::MAX.as_u32(),
+                instances: InstanceMap::MAX.as_u32(),
             }),
         };
         let response = self.client.show_config(request).await?.into_inner();
@@ -147,7 +147,7 @@ impl ForwardService {
         let request = L2ForwardEnableRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.map(NumaMap::from).unwrap_or(NumaMap::MAX).as_u32(),
+                instances: cmd.instances.map(InstanceMap::from).unwrap_or(InstanceMap::MAX).as_u32(),
             }),
             src_dev_id: cmd.src as u32,
             dst_dev_id: cmd.dst as u32,
@@ -162,7 +162,7 @@ impl ForwardService {
         let request = AddL3ForwardRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.map(NumaMap::from).unwrap_or(NumaMap::MAX).as_u32(),
+                instances: cmd.instances.map(InstanceMap::from).unwrap_or(InstanceMap::MAX).as_u32(),
             }),
             src_dev_id: cmd.src as u32,
             forward: Some(L3ForwardEntry {
@@ -180,7 +180,7 @@ impl ForwardService {
         let request = RemoveL3ForwardRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
-                numa: cmd.numa.map(NumaMap::from).unwrap_or(NumaMap::MAX).as_u32(),
+                instances: cmd.instances.map(InstanceMap::from).unwrap_or(InstanceMap::MAX).as_u32(),
             }),
             src_dev_id: cmd.src as u32,
             network: cmd.network.to_string(),
@@ -212,7 +212,7 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("Forward Configs".to_string());
 
     for instance in &resp.configs {
-        tree.begin_child(format!("'{}' on NUMA {}", resp.name, instance.numa));
+        tree.begin_child(format!("'{}' on instance {}", resp.name, instance.instance));
 
         for dev in instance.devices.iter() {
             tree.begin_child(format!("dev-id {}", dev.src_dev_id));

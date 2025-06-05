@@ -12,13 +12,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/common/go/numa"
+	dataplane "github.com/yanet-platform/yanet2/common/go/dataplane"
 	"github.com/yanet-platform/yanet2/common/go/xiter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
 
-type ffiConfigUpdater func(m *ForwardService, name string, numaMap numa.NUMAMap) error
+type ffiConfigUpdater func(m *ForwardService, name string, instanceMap dataplane.DpInstanceMap) error
 
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
@@ -42,7 +42,7 @@ func NewForwardService(agents []*ffi.Agent, log *zap.SugaredLogger, deviceCount 
 }
 
 func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConfigRequest) (*forwardpb.ShowConfigResponse, error) {
-	name, numaMap, err := validateTarget(req.Target, len(m.agents))
+	name, instanceMap, err := validateTarget(req.Target, len(m.agents))
 	if err != nil {
 		return nil, err
 	}
@@ -50,9 +50,9 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	configs := make([]*forwardpb.InstanceConfig, 0, numaMap.Len())
-	for numaIdx := range numaMap.Iter() {
-		key := instanceKey{name: name, numaIdx: numaIdx}
+	configs := make([]*forwardpb.InstanceConfig, 0, instanceMap.Len())
+	for instance := range instanceMap.Iter() {
+		key := instanceKey{name: name, dataplaneInstance: instance}
 		config := m.configs[key]
 		if config == nil {
 			continue
@@ -89,8 +89,8 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 		})
 
 		configs = append(configs, &forwardpb.InstanceConfig{
-			Numa:    numaIdx,
-			Devices: devices,
+			Instance: instance,
+			Devices:  devices,
 		})
 	}
 
@@ -101,7 +101,7 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 }
 
 func (m *ForwardService) EnableL2Forward(ctx context.Context, req *forwardpb.L2ForwardEnableRequest) (*forwardpb.L2ForwardEnableResponse, error) {
-	name, numaMap, err := validateTarget(req.Target, len(m.agents))
+	name, instances, err := validateTarget(req.Target, len(m.agents))
 	if err != nil {
 		return nil, err
 	}
@@ -115,8 +115,8 @@ func (m *ForwardService) EnableL2Forward(ctx context.Context, req *forwardpb.L2F
 	defer m.mu.Unlock()
 
 	// Enable (or override) forwarding between devices
-	for numaIdx := range numaMap.Iter() {
-		key := instanceKey{name: name, numaIdx: numaIdx}
+	for instance := range instances.Iter() {
+		key := instanceKey{name: name, dataplaneInstance: instance}
 		config, exists := m.configs[key]
 		if !exists {
 			config = defaultForwardConfig(m.deviceCount)
@@ -130,7 +130,7 @@ func (m *ForwardService) EnableL2Forward(ctx context.Context, req *forwardpb.L2F
 	// FIXME: Commit in-memory config only if SHM updates are successful?
 
 	// Then update shm configs
-	if err := m.updater(m, name, numaMap); err != nil {
+	if err := m.updater(m, name, instances); err != nil {
 		return nil, fmt.Errorf("failed to update module configs: %w", err)
 	}
 
@@ -138,14 +138,14 @@ func (m *ForwardService) EnableL2Forward(ctx context.Context, req *forwardpb.L2F
 		zap.String("name", name),
 		zap.Uint16("src_dev_id", uint16(srcDevId)),
 		zap.Uint16("dst_dev_id", uint16(dstDevId)),
-		zap.Uint32s("numa", slices.Collect(numaMap.Iter())),
+		zap.Uint32s("instances", slices.Collect(instances.Iter())),
 	)
 
 	return &forwardpb.L2ForwardEnableResponse{}, nil
 }
 
 func (m *ForwardService) AddL3Forward(ctx context.Context, req *forwardpb.AddL3ForwardRequest) (*forwardpb.AddL3ForwardResponse, error) {
-	name, numa, err := validateTarget(req.Target, len(m.agents))
+	name, instances, err := validateTarget(req.Target, len(m.agents))
 	if err != nil {
 		return nil, err
 	}
@@ -161,8 +161,8 @@ func (m *ForwardService) AddL3Forward(ctx context.Context, req *forwardpb.AddL3F
 	defer m.mu.Unlock()
 
 	// First update in-memory configs
-	for numaIdx := range numa.Iter() {
-		key := instanceKey{name: name, numaIdx: numaIdx}
+	for instance := range instances.Iter() {
+		key := instanceKey{name: name, dataplaneInstance: instance}
 		config := m.configs[key]
 		if config == nil {
 			config = defaultForwardConfig(m.deviceCount)
@@ -179,7 +179,7 @@ func (m *ForwardService) AddL3Forward(ctx context.Context, req *forwardpb.AddL3F
 	// FIXME: Commit in-memory config only if SHM updates are successful?
 
 	// Then update shm configs
-	if err := m.updater(m, name, numa); err != nil {
+	if err := m.updater(m, name, instances); err != nil {
 		return nil, fmt.Errorf("failed to update module configs: %w", err)
 	}
 
@@ -194,7 +194,7 @@ func (m *ForwardService) AddL3Forward(ctx context.Context, req *forwardpb.AddL3F
 }
 
 func (m *ForwardService) RemoveL3Forward(ctx context.Context, req *forwardpb.RemoveL3ForwardRequest) (*forwardpb.RemoveL3ForwardResponse, error) {
-	name, numa, err := validateTarget(req.Target, len(m.agents))
+	name, instances, err := validateTarget(req.Target, len(m.agents))
 	if err != nil {
 		return nil, err
 	}
@@ -207,8 +207,8 @@ func (m *ForwardService) RemoveL3Forward(ctx context.Context, req *forwardpb.Rem
 	defer m.mu.Unlock()
 
 	// First update in-memory configs
-	for numaIdx := range numa.Iter() {
-		key := instanceKey{name: name, numaIdx: numaIdx}
+	for inst := range instances.Iter() {
+		key := instanceKey{name: name, dataplaneInstance: inst}
 		config, exists := m.configs[key]
 		if !exists {
 			continue
@@ -224,7 +224,7 @@ func (m *ForwardService) RemoveL3Forward(ctx context.Context, req *forwardpb.Rem
 	// FIXME: Commit in-memory config only if SHM updates are successful?
 
 	// Then update shm configs
-	if err := m.updater(m, name, numa); err != nil {
+	if err := m.updater(m, name, instances); err != nil {
 		return nil, fmt.Errorf("failed to update module configs: %w", err)
 	}
 
@@ -263,43 +263,43 @@ func (m *ForwardService) validateForwardParams(srcDeviceId uint32, network strin
 	return sourceDeviceId, prefix, targetDeviceId, nil
 }
 
-func validateTarget(target *forwardpb.TargetModule, numAgents int) (string, numa.NUMAMap, error) {
+func validateTarget(target *forwardpb.TargetModule, numAgents int) (string, dataplane.DpInstanceMap, error) {
 	if target == nil {
-		return "", numa.NUMAMap(0), status.Errorf(codes.InvalidArgument, "target cannot be nil")
+		return "", dataplane.DpInstanceMap(0), status.Errorf(codes.InvalidArgument, "target cannot be nil")
 	}
 
 	name := target.GetModuleName()
 	if name == "" {
-		return "", numa.NUMAMap(0), status.Errorf(codes.InvalidArgument, "module name is required")
+		return "", dataplane.DpInstanceMap(0), status.Errorf(codes.InvalidArgument, "module name is required")
 	}
 
-	numaMap, err := transformNUMAMap(numa.NUMAMap(target.Numa), numAgents)
+	instanceMap, err := transformInstanceMap(dataplane.DpInstanceMap(target.Instances), numAgents)
 	if err != nil {
-		return "", numa.NUMAMap(0), err
+		return "", dataplane.DpInstanceMap(0), err
 	}
 
-	return name, numaMap, nil
+	return name, instanceMap, nil
 }
 
 func updateModuleConfigs(
 	m *ForwardService,
 	name string,
-	numaMap numa.NUMAMap,
+	instances dataplane.DpInstanceMap,
 ) error {
 	m.log.Debugw("updating configuration",
 		zap.String("module", name),
-		zap.Uint32s("numa", slices.Collect(numaMap.Iter())),
+		zap.Uint32s("instances", slices.Collect(instances.Iter())),
 	)
 
-	// Create module configs for each NUMA node
-	configs := make([]*ModuleConfig, numaMap.Len())
-	for i, numaIdx := range xiter.Enumerate(numaMap.Iter()) {
-		agent := m.agents[numaIdx]
+	// Create module configs for each instance
+	configs := make([]*ModuleConfig, instances.Len())
+	for i, inst := range xiter.Enumerate(instances.Iter()) {
+		agent := m.agents[inst]
 		if agent == nil {
-			return fmt.Errorf("agent for NUMA %d is nil", numaIdx)
+			return fmt.Errorf("agent for instance %d is nil", inst)
 		}
 
-		key := instanceKey{name: name, numaIdx: numaIdx}
+		key := instanceKey{name: name, dataplaneInstance: inst}
 		config := m.configs[key]
 		if config == nil {
 			config = defaultForwardConfig(m.deviceCount)
@@ -314,7 +314,7 @@ func updateModuleConfigs(
 
 		moduleConfig, err := NewModuleConfig(agent, name)
 		if err != nil {
-			return fmt.Errorf("failed to create module config for NUMA %d: %w", numaIdx, err)
+			return fmt.Errorf("failed to create module config for instance %d: %w", inst, err)
 		}
 
 		// Configure all forwards
@@ -323,14 +323,14 @@ func updateModuleConfigs(
 			dstDeviceID := device.DstDevId
 
 			if err := moduleConfig.L2ForwardEnable(srcDeviceID, dstDeviceID); err != nil {
-				return fmt.Errorf("failed to enable forward from dev(%d) to dev(%d) on NUMA %d: %w", srcDeviceID, dstDeviceID, numaIdx, err)
+				return fmt.Errorf("failed to enable forward from dev(%d) to dev(%d) on instance %d: %w", srcDeviceID, dstDeviceID, inst, err)
 			}
 
 			// Then configure all forwards for this device
 			for network, targetDevice := range device.Forwards {
 				if err := moduleConfig.L3ForwardEnable(network, srcDeviceID, targetDevice); err != nil {
-					return fmt.Errorf("failed to enable forward from dev(%d) to dev(%d) for network %s on NUMA %d: %w",
-						srcDeviceID, targetDevice, network, numaIdx, err)
+					return fmt.Errorf("failed to enable forward from dev(%d) to dev(%d) for network %s on instance %d: %w",
+						srcDeviceID, targetDevice, network, inst, err)
 				}
 			}
 		}
@@ -339,36 +339,36 @@ func updateModuleConfigs(
 	}
 
 	// Apply all configurations
-	for i, numaIdx := range xiter.Enumerate(numaMap.Iter()) {
-		agent := m.agents[numaIdx]
+	for i, inst := range xiter.Enumerate(instances.Iter()) {
+		agent := m.agents[inst]
 		config := configs[i]
 
 		if err := agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
-			return fmt.Errorf("failed to update module on NUMA %d: %w", numaIdx, err)
+			return fmt.Errorf("failed to update module on instance %d: %w", inst, err)
 		}
 
 		m.log.Debugw("successfully updated module config",
 			zap.String("name", name),
-			zap.Uint32("numa", numaIdx),
+			zap.Uint32("instance", inst),
 		)
 	}
 
 	m.log.Infow("successfully updated all module configurations",
 		zap.String("name", name),
-		zap.Uint32s("numa", slices.Collect(numaMap.Iter())),
+		zap.Uint32s("instances", slices.Collect(instances.Iter())),
 	)
 
 	return nil
 }
 
-func transformNUMAMap(requestedNuma numa.NUMAMap, numAgents int) (numa.NUMAMap, error) {
-	numaMap := requestedNuma.Intersect(numa.NewWithTrailingOnes(numAgents))
+func transformInstanceMap(requestedInstanceMap dataplane.DpInstanceMap, numAgents int) (dataplane.DpInstanceMap, error) {
+	instanceMap := requestedInstanceMap.Intersect(dataplane.NewWithTrailingOnes(numAgents))
 
-	if numaMap.IsEmpty() {
-		return numa.NUMAMap(0), status.Error(codes.InvalidArgument, "NUMA indices are empty")
+	if instanceMap.IsEmpty() {
+		return dataplane.DpInstanceMap(0), status.Error(codes.InvalidArgument, "instance list are empty")
 	}
 
-	return numaMap, nil
+	return instanceMap, nil
 }
 
 func defaultForwardConfig(deviceCount uint16) []ForwardDeviceConfig {

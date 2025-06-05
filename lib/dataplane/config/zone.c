@@ -1,4 +1,14 @@
 #include "zone.h"
+#include <stdint.h>
+
+struct dp_config *
+dp_config_nextk(struct dp_config *current, uint32_t k) {
+	for (uint32_t i = 0; i < k; ++i) {
+		current = (struct dp_config *)((uintptr_t)current +
+					       current->storage_size);
+	}
+	return current;
+}
 
 void
 dp_config_wait_for_gen(struct dp_config *dp_config, uint64_t gen) {
