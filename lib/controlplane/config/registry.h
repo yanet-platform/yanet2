@@ -198,7 +198,7 @@ registry_get_unused_index(struct registry *registry, uint64_t *index) {
 		if (registry_get(registry, *index) == NULL) {
 			return 0;
 		}
-		*index = +1;
+		*index += 1;
 	}
 
 	return registry_extend(registry);
