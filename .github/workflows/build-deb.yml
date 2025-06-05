@@ -66,8 +66,8 @@ jobs:
             ${{ env.cache_name }}-${{ runner.os }}-go-${{ matrix.unbtver }}
       - name: Install Go Protobuf Plugins
         run: |
-          GOBIN=/usr/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          GOBIN=/usr/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
       - name: Check that code can compile
         run: cargo --version &&  which cargo && rustup --version
