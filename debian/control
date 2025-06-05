@@ -1,7 +1,7 @@
 Source: yanet2
 Section: net
 Priority: optional
-Maintainer: Yanet Team <maintainer@example.com>
+Maintainer: Konstantin Sazonov <moonug@yandex-team.ru>
 Standards-Version: 4.6.2
 Build-Depends: debhelper (>= 12)
  , meson (>= 0.53)
