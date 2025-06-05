@@ -101,6 +101,7 @@ common/**/Cargo.lock
 
 # local env
 .envrc
+.env
 
 # fuzzing
 timeout-*

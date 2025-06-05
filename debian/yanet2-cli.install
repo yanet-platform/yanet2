@@ -1,0 +1,10 @@
+usr/bin/yanet-cli
+usr/bin/yanet-cli-common
+usr/bin/yanet-cli-inspect
+usr/bin/yanet-cli-pipeline
+usr/bin/yanet-cli-decap
+usr/bin/yanet-cli-dscp
+usr/bin/yanet-cli-forward
+usr/bin/yanet-cli-nat64
+usr/bin/yanet-cli-route
+usr/bin/yanet-cli-neighbour

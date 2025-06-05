@@ -14,7 +14,7 @@ CapabilityBoundingSet=cap_net_admin cap_net_raw cap_ipc_lock cap_sys_admin cap_s
 RuntimeDirectory=yanet
 RuntimeDirectoryMode=0775
 
-ExecStart=/usr/local/bin/yanet-dataplane /etc/yanet2/dataplane.yaml
+ExecStart=/usr/bin/yanet-dataplane /etc/yanet2/dataplane.yaml
 TimeoutSec=300
 
 # wait interfaces up

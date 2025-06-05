@@ -1,0 +1,24 @@
+#+title: Act
+
+* Overview
+Use [[https://github.com/nektos/act][act]] to run GitHub Actions workflows locally.
+
+* Configuration
+Create or update your =~/.actrc= file:
+
+#+begin_src shell
+cat ~/.actrc
+#-P ubuntu-latest=ghcr.io/catthehacker/ubuntu:full-latest
+-P ubuntu-24.04=ghcr.io/catthehacker/ubuntu:act-24.04
+#+end_src
+
+The =full-latest= image is handy for rare cases but uses about 80 GB of disk space.
+
+* Usage
+From the repository root, run:
+
+#+begin_src shell
+act --container-architecture linux/amd64 --artifact-server-path ./artifacts
+#+end_src
+
+Note: --container-architecture linux/amd64 is usually only needed on macOS.

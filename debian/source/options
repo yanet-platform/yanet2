@@ -1,0 +1,9 @@
+tar-ignore=".venv"
+tar-ignore=".github" 
+tar-ignore="tests"
+tar-ignore="debian"
+tar-ignore=".git"
+tar-ignore="outdeb"
+tar-ignore="build"
+tar-ignore="target"
+

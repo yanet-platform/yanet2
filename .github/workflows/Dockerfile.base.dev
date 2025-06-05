@@ -44,11 +44,25 @@ install_packages \
 echo "Installing development dependencies..."
 install_packages \
     python3-pyelftools \
+    python3-dev \
     libnuma-dev \
     libpcap-dev \
     libyaml-dev \
     protobuf-compiler \
     rustup
+
+echo "Installing Debian packaging tools..."
+install_packages \
+    dpkg-dev \
+    debhelper \
+    lintian \
+    devscripts \
+    fakeroot \
+    build-essential \
+    dh-make \
+    equivs \
+    pbuilder \
+    quilt
 
 echo "Installing debugging tools..."
 install_packages \
@@ -60,8 +74,8 @@ echo "Installing Go and tools..."
 install_packages golang-go
 
 echo "Installing Go modules..."
-GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}
-GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
+GOBIN=/usr/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}
+GOBIN=/usr/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
 
 echo "Install rust..."
 # fix "rustup is not installed at '/root/.cargo'" error

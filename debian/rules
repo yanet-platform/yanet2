@@ -1,0 +1,36 @@
+#!/usr/bin/make -f
+
+# Enable verbose output for debugging
+export DH_VERBOSE = 1
+export DH_OPTIONS=-v
+export DEB_CFLAGS_MAINT_APPEND = -fno-lto
+export DEB_LDFLAGS_MAINT_APPEND = -fno-lto
+
+# Enable all hardening options
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+# Set parallel build options
+export DEB_BUILD_OPTIONS = parallel=$(shell nproc)
+
+# Meson build directory
+BUILDDIR = build
+
+%:
+	dh $@ --parallel
+
+override_dh_auto_configure:
+	meson setup $(BUILDDIR) \
+			--default-library=static \
+			-Dfuzzing=disabled \
+			-Dtrace=disabled; \
+
+# Handle missing files more gracefully
+override_dh_missing:
+	dh_missing --fail-missing
+
+override_dh_dwz:
+	: # Skip dwz compression to avoid errors with compressed debug sections
+
+override_dh_strip:
+	dh_strip --dbgsym-migration='yanet2-dbgsym (<< 0.0.1-1~)'
+

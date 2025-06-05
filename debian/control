@@ -1,0 +1,81 @@
+Source: yanet2
+Section: net
+Priority: optional
+Maintainer: Yanet Team <maintainer@example.com>
+Standards-Version: 4.6.2
+Build-Depends: debhelper (>= 12)
+ , meson (>= 0.53)
+ , ninja-build
+ , pkg-config
+ , libnuma-dev
+ , libpcap-dev
+ , libyaml-dev
+ , libibverbs-dev
+ , protobuf-compiler
+ , libprotobuf-dev
+ , golang-go (>= 1.19)
+ , python3-dev
+ , python3-setuptools
+ , python3-pyelftools
+
+Package: yanet2-dataplane
+Architecture: any
+Depends: ${shlibs:Depends}
+ , ${misc:Depends}
+ , libnuma1
+ , libpcap0.8
+ , libyaml-0-2
+ , libibverbs1
+Description: Yanet2 dataplane component
+ High-performance network dataplane for Yanet2.
+ .
+ This package provides the dataplane binary and module libraries for
+ packet processing, routing, NAT64, and other network functions.
+
+Package: yanet2-controlplane
+Architecture: any
+Depends: ${shlibs:Depends}
+ , ${misc:Depends}
+ , yanet2-dataplane
+ , libyaml-0-2
+Description: Yanet2 controlplane component
+ Control plane for Yanet2 network stack.
+ .
+ This package contains the control plane services that manage the
+ dataplane configuration, routing tables, and network policies.
+
+Package: yanet2-cli
+Architecture: any
+Depends: ${shlibs:Depends}
+ , ${misc:Depends}
+ , yanet2-controlplane
+Description: Yanet2 CLI utilities
+ Command-line tools for Yanet2: yanet-cli-nat64, yanet-cli-route,
+ yanet-cli-decap, yanet-cli-dscp, yanet-cli-forward.
+ .
+ This package provides command-line utilities for configuring and
+ managing Yanet2 network functions.
+
+Package: yanet2-coordinator
+Architecture: any
+Depends: ${shlibs:Depends}
+ , ${misc:Depends}
+ , libyaml-0-2
+Description: Yanet2 coordinator component
+ Coordinator service for Yanet2 network stack.
+ .
+ This package contains the coordinator service that manages module
+ lifecycle, configuration distribution, and service orchestration
+ across the Yanet2 infrastructure.
+
+Package: yanet2
+Architecture: all
+Depends: yanet2-dataplane (= ${binary:Version}),
+ yanet2-controlplane (= ${binary:Version}),
+ yanet2-cli (= ${binary:Version}),
+ yanet2-coordinator (= ${binary:Version})
+Description: Yanet2 meta-package
+ Installs all main Yanet2 components.
+ .
+ This meta-package installs the complete Yanet2 network stack,
+ including dataplane, controlplane, coordinator and CLI utilities.

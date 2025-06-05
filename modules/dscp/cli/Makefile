@@ -21,6 +21,6 @@ install:
 	install -m 755 $(addprefix $(RELEASE_DIR)/,$(BINARIES)) $(DESTDIR)$(BINDIR)/
 
 clean:
-	$(CARGO) clean
+	$(CARGO) clean || true
 
 .PHONY: build install clean

@@ -1,0 +1,87 @@
+name: Build DEB Packages
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+jobs:
+  build-deb:
+    strategy:
+      matrix:
+        unbtver:
+          - 24.04
+          - 22.04
+    runs-on: ubuntu-${{ matrix.unbtver }}
+    env:
+      cache_name: deb-build-${{ matrix.unbtver }}
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: update apt (act hack)
+        if: ${{ env.ACT }}
+        run: |
+          apt-get update
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Cache rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ matrix.unbtver }}
+          
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: devscripts equivs
+          version: 1.1
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+          check-latest: true
+      # https://github.com/actions/setup-go/issues/358
+      - name: Get Go environment
+        run: |
+          echo "cache=$(go env GOCACHE)" >> $GITHUB_ENV
+          echo "modcache=$(go env GOMODCACHE)" >> $GITHUB_ENV
+      - name: Set up go cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.cache }}
+            ${{ env.modcache }}
+          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}-${{ matrix.unbtver }}
+          restore-keys: |
+            ${{ env.cache_name }}-${{ runner.os }}-go-${{ matrix.unbtver }}
+      - name: Install Go Protobuf Plugins
+        run: |
+          GOBIN=/usr/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          GOBIN=/usr/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Check that code can compile
+        run: cargo --version &&  which cargo && rustup --version
+      - name: Build packages  
+        run: ./scripts/build-deb.sh
+        
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yanet2-debs-${{ matrix.unbtver }}
+          path: outdeb/*.deb
+          
+      - name: Create Release for ${{ matrix.unbtver }}
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: outdeb/*.deb

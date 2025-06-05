@@ -75,6 +75,7 @@ _docker_run IT *COMMAND:
     #!/usr/bin/env bash
     set -euo pipefail
     docker run {{ IT }} --rm \
+        --platform linux/amd64 \
         -v {{ ROOT_DIR }}:/yanet2 \
         -v {{ DOCKER_CACHE_DIR }}/gomodcache:/tmp/gomodcache:rw \
         -v {{ DOCKER_CACHE_DIR }}/gocache:/tmp/gocache:rw \
@@ -125,3 +126,7 @@ dcontrolplane:
 # Build controlplane in Docker
 dcli:
     @just _docker_run -q "make cli"
+
+# Build deb packages for all main components inside Docker container (unified with CI)
+ddeb:
+    @just _docker_run -q "./scripts/build-deb.sh"

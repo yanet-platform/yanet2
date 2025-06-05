@@ -10,7 +10,7 @@ StartLimitIntervalSec=0
 User=root
 Group=yanet
 
-ExecStart=/usr/local/bin/yanet-controlplane -c /etc/yanet2/controlplane.yaml
+ExecStart=/usr/bin/yanet-controlplane -c /etc/yanet2/controlplane.yaml
 TimeoutSec=1200
 Restart=always
 RestartSec=1

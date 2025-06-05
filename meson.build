@@ -3,11 +3,23 @@ project(
   'c',
   meson_version: '>= 0.61',
   version: '0.0.1',
-  default_options: ['buildtype=release', 'warning_level=2', 'werror=true', 'optimization=2'],
+  default_options: [
+    'buildtype=release',
+    'warning_level=2',
+    'werror=true',
+    'optimization=2',
+    'prefix=/usr',
+    'libdir=lib',
+    'bindir=bin',
+  ],
 )
 
 add_global_arguments(
-  ['-march=corei7', '-g', '-D_GNU_SOURCE'],
+  ['-march=corei7', '-g', '-D_GNU_SOURCE',
+   '-Wno-stringop-overflow',
+   '-Wno-array-bounds',
+   '-Wno-stringop-overread',
+   '-Wno-vla-larger-than'],
   language: 'c',
 )
 
@@ -44,11 +56,15 @@ libdpdk = subproject(
     'cpu_instruction_set=corei7',
     'pkt_mbuf_headroom=@0@'.format(get_option('pkt_mbuf_headroom')),
     'disable_apps=dumpcap,graph,pdump,proc-info,test-acl,test-bbdev,test-cmdline,test-compress-perf,test-crypto-perf,test-dma-perf,test-eventdev,test-fib,test-flow-perf,test-gpudev,test-mldev,test-pipeline,test-regex,test-sad,test-security-perf',
+    'enable_apps=',
     'disable_libs=bitratestats,cfgfile,flow_classify,gpudev,gro,gso,kni,jobstats,latencystats,metrics,node,pdump,pipeline,port,power,table,vhost',
     'enable_driver_sdk=true',
     'enable_drivers=net/mlx5,common/mlx5,bus/auxiliary,net/virtio',
     'default_library=static',
     'tests=false',
+    'examples=',
+    'werror=false',
+    'c_args=-Wno-stringop-overflow -Wno-array-bounds -Wno-stringop-overread -Wno-vla-larger-than',
   ],
 )
 
