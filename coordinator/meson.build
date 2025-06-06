@@ -13,6 +13,7 @@ custom_target(
     build_always_stale: true,
     depends: [
         coordinator_protoc_gen,
+        ynpb_gen, # Add dependency to ensure ynpb files are generated
     ],
     install: true,
     install_dir: get_option('bindir'),
