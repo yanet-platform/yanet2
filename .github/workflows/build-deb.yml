@@ -76,10 +76,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: yanet2-debs-${{ matrix.unbtver }}
-          path: outdeb/*.deb
+          path: outdeb/*
           
       - name: Create Release for ${{ matrix.unbtver }}
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: outdeb/*.deb
+          files: outdeb/*
