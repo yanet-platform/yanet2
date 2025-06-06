@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euxo pipefail
+env
 
 # Install build deps with verbose output
 apt-get update
