@@ -93,16 +93,36 @@ dpdk_port_init(
 		port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
 		port_conf.rx_adv_conf.rss_conf.rss_hf = rss_hash;
 	}
+	port_conf.rxmode.offloads |= RTE_ETH_RX_OFFLOAD_TIMESTAMP;
 
 	if ((rc = rte_eth_dev_configure(
 		     *port_id, rx_queue_count, tx_queue_count, &port_conf
 	     ))) {
-		LOG(ERROR,
+		LOG(WARN,
 		    "failed to configure port id %d (%s): %d",
 		    *port_id,
 		    name,
 		    rc);
-		return -1;
+		LOG(INFO,
+		    "try to configure port without RX timestamp offload %d "
+		    "(%s)",
+		    *port_id,
+		    name);
+		port_conf.rxmode.offloads &= ~RTE_ETH_RX_OFFLOAD_TIMESTAMP;
+
+		if ((rc = rte_eth_dev_configure(
+			     *port_id,
+			     rx_queue_count,
+			     tx_queue_count,
+			     &port_conf
+		     ))) {
+			LOG(ERROR,
+			    "failed to configure port id %d (%s): %d",
+			    *port_id,
+			    name,
+			    rc);
+			return -1;
+		}
 	}
 
 	if ((rc = rte_eth_dev_set_mtu(*port_id, mtu))) {

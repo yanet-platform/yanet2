@@ -106,10 +106,21 @@ dataplane_connect_device(
 			from_worker->write_ctx.tx_connections +
 			to_device->device_id;
 
-		// FIXME: handle errors
-		dataplane_worker_connect(
-			dataplane, from_device, from_worker, tx_conn, to_worker
-		);
+		if (dataplane_worker_connect(
+			    dataplane,
+			    from_device,
+			    from_worker,
+			    tx_conn,
+			    to_worker
+		    )) {
+			LOG(ERROR,
+			    "failed to connect workers from device %s to "
+			    "device %s",
+			    from_device->port_name,
+			    to_device->port_name);
+
+			return -1;
+		};
 	}
 
 	return 0;
@@ -161,23 +172,31 @@ dataplane_create_devices(
 			    "virtio_user_",
 			    strlen("virtio_user_")
 		    )) {
-			// FIXME handle error
-			(void)dpdk_add_vdev_port(
-				device_config->port_name,
-				device_config->port_name +
-					strlen("virtio_user_"),
-				device_config->mac_addr,
-				device_config->worker_count
-			);
+			if (dpdk_add_vdev_port(
+				    device_config->port_name,
+				    device_config->port_name +
+					    strlen("virtio_user_"),
+				    device_config->mac_addr,
+				    device_config->worker_count
+			    )) {
+				LOG(ERROR,
+				    "failed to add vdev port %s",
+				    device_config->port_name);
+				return -1;
+			}
 		}
 
-		// FIXME: handle port initializations bellow
-		(void)dataplane_device_init(
-			dataplane,
-			dataplane->devices + dev_idx,
-			dev_idx,
-			device_config
-		);
+		if (dataplane_device_init(
+			    dataplane,
+			    dataplane->devices + dev_idx,
+			    dev_idx,
+			    device_config
+		    )) {
+			LOG(ERROR,
+			    "failed to init device %s",
+			    device_config->port_name);
+			return -1;
+		}
 	}
 
 	return 0;
@@ -420,13 +439,21 @@ dataplane_init(
 	}
 
 	LOG(INFO, "initialize dpdk");
-	(void
-	)dpdk_init(binary, config->dpdk_memory, pci_port_count, pci_port_names);
+	if (dpdk_init(
+		    binary, config->dpdk_memory, pci_port_count, pci_port_names
+	    ) == -1) {
+		LOG(INFO, "failed to initialize dpdk");
+		errno = rte_errno;
+		return -1;
+	}
 
 	LOG(INFO, "create devices");
-	dataplane_create_devices(
-		dataplane, config->device_count, config->devices
-	);
+	if (dataplane_create_devices(
+		    dataplane, config->device_count, config->devices
+	    )) {
+		LOG(ERROR, "failed to create devices");
+		return -1;
+	};
 
 	LOG(INFO, "connect devices");
 	dataplane_connect_devices(

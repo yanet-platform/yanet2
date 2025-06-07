@@ -60,22 +60,27 @@ dataplane_device_init(
 
 	strtcpy(device->port_name, config->port_name, 80);
 
-	// FIXME handle errors
 	device->workers = (struct dataplane_worker *)malloc(
 		sizeof(struct dataplane_worker) * config->worker_count
 	);
+	if (device->workers == NULL) {
+		LOG(ERROR, "failed to allocate memory for device workers");
+		errno = ENOMEM;
+		return -1;
+	}
 
 	for (device->worker_count = 0;
 	     device->worker_count < config->worker_count;
 	     ++device->worker_count) {
-		// FIXME: handle errors
-		dataplane_worker_init(
-			dataplane,
-			device,
-			device->workers + device->worker_count,
-			device->worker_count,
-			config->workers + device->worker_count
-		);
+		if (dataplane_worker_init(
+			    dataplane,
+			    device,
+			    device->workers + device->worker_count,
+			    device->worker_count,
+			    config->workers + device->worker_count
+		    )) {
+			return -1;
+		}
 	}
 
 	return 0;
