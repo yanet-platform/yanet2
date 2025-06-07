@@ -16,7 +16,10 @@ __thread int per_lcore__rte_errno = 0;
 // So the controlplane function pointer is meaningless.
 const void *
 __rte_pktmbuf_read( // NOLINT(readability-identifier-naming)
-	const struct rte_mbuf *m, uint32_t off, uint32_t len, void *buf
+	const struct rte_mbuf *m,
+	uint32_t off,
+	uint32_t len,
+	void *buf
 ) {
 	(void)m, (void)off, (void)len, (void)buf;
 	return NULL;
@@ -24,7 +27,9 @@ __rte_pktmbuf_read( // NOLINT(readability-identifier-naming)
 
 void
 __rte_panic( // NOLINT(readability-identifier-naming)
-	const char *funcname, const char *format, ...
+	const char *funcname,
+	const char *format,
+	...
 ) {
 	(void)funcname, (void)format;
 	abort();

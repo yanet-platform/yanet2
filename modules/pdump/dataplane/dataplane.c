@@ -2,13 +2,64 @@
 
 #include <bpf_impl.h>
 #include <rte_bpf.h>
+#include <rte_mbuf_dyn.h>
 
 #include "dataplane/config/zone.h"
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
-#include "logging/log.h"
 
 #include "ring.h"
+
+static inline bool
+mbuf_is_timestamp_enabled(const struct rte_mbuf *mbuf) {
+	static uint64_t timestamp_rx_dynflag;
+
+	if (timestamp_rx_dynflag == 0) {
+		int timestamp_rx_dynflag_offset = rte_mbuf_dynflag_lookup(
+			RTE_MBUF_DYNFLAG_RX_TIMESTAMP_NAME, NULL
+		);
+		if (timestamp_rx_dynflag_offset < 0)
+			return false;
+		timestamp_rx_dynflag = RTE_BIT64(timestamp_rx_dynflag_offset);
+	}
+
+	return (mbuf->ol_flags & timestamp_rx_dynflag) != 0;
+}
+
+static inline rte_mbuf_timestamp_t
+mbuf_get_timestamp(const struct rte_mbuf *mbuf) {
+	static int timestamp_dynfield_offset = -1;
+
+	if (timestamp_dynfield_offset < 0) {
+		timestamp_dynfield_offset = rte_mbuf_dynfield_lookup(
+			RTE_MBUF_DYNFIELD_TIMESTAMP_NAME, NULL
+		);
+		if (timestamp_dynfield_offset < 0)
+			return 0;
+	}
+
+	return *RTE_MBUF_DYNFIELD(mbuf, timestamp_dynfield_offset, rte_mbuf_timestamp_t *);
+}
+
+static inline uint64_t
+get_tsc_timestamp() {
+	// FIXME: shoud we use static __thread here???
+	static uint64_t tsc_hz = 0;
+	if (tsc_hz == 0) {
+		tsc_hz = rte_get_tsc_hz();
+		if (tsc_hz == 0) {
+			return 0;
+		}
+	}
+	uint64_t current_tsc = rte_rdtsc();
+	// TODO: Benchmark performance in a production-like environment.
+	// // NOTE: __int128 are supported by gcc and clang
+	// uint64_t timestamp_ns = (uint64_t)((__int128)current_tsc *
+	// 1000000000ULL / tsc_hz);
+	double ts = (double)current_tsc * 1000000000ULL / (double)tsc_hz;
+	uint64_t timestamp_ns = (uint64_t)ts;
+	return timestamp_ns;
+}
 
 static inline void
 pdump_write_msg(
@@ -33,29 +84,55 @@ pdump_write_msg(
 }
 
 static inline void
-pdump_msg_header(
-	struct ring_msg_hdr *hdr,
-	struct packet *pkt,
+process_queue(
+	struct packet *first_pkt,
+	struct rte_bpf *bpf,
+	struct ring_buffer *ring,
 	uint32_t worker_idx,
 	uint32_t snaplen,
 	bool is_drops
 ) {
-	memset(hdr, 0, sizeof(*hdr));
+	uint64_t tsc_timestamp = ~0ULL;
 
-	struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
+	uint8_t *ring_data = ADDR_OF(&ring->data);
 
-	// FIXME: add timestamp
-	// NOTE: We do not support multi-segment mbuf;
-	// therefore, data_len must equal pkt_len.
-	uint16_t packet_len = rte_pktmbuf_data_len(mbuf);
-	uint32_t capture_len = packet_len > snaplen ? snaplen : packet_len;
-	hdr->packet_len = packet_len;
-	hdr->total_len = sizeof(*hdr) + capture_len;
-	hdr->worker_idx = worker_idx;
-	hdr->pipeline_idx = pkt->pipeline_idx;
-	hdr->rx_device_id = pkt->rx_device_id;
-	hdr->tx_device_id = pkt->tx_device_id;
-	hdr->is_drops = is_drops;
+	for (struct packet *pkt = first_pkt; pkt != NULL; pkt = pkt->next) {
+		struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
+
+		int rc = rte_bpf_exec(bpf, (void *)mbuf);
+		if (rc) {
+			uint64_t timestamp;
+			if (mbuf_is_timestamp_enabled(mbuf)) {
+				timestamp = mbuf_get_timestamp(mbuf);
+			} else {
+				// Fallback to the TSC timestamp for the entire
+				// packet list.
+				if (tsc_timestamp == ~0ULL) {
+					tsc_timestamp = get_tsc_timestamp();
+				}
+				timestamp = tsc_timestamp;
+			}
+
+			// NOTE: We do not support multi-segment mbuf;
+			// therefore, data_len must equal pkt_len.
+			uint16_t packet_len = rte_pktmbuf_data_len(mbuf);
+			uint32_t capture_len =
+				packet_len > snaplen ? snaplen : packet_len;
+			struct ring_msg_hdr hdr = {
+				.packet_len = packet_len,
+				.total_len = sizeof(hdr) + capture_len,
+				.timestamp = timestamp,
+				.worker_idx = worker_idx,
+				.pipeline_idx = pkt->pipeline_idx,
+				.rx_device_id = pkt->rx_device_id,
+				.tx_device_id = pkt->tx_device_id,
+				.is_drops = is_drops,
+			};
+
+			uint8_t *payload = rte_pktmbuf_mtod(mbuf, uint8_t *);
+			pdump_write_msg(ring, ring_data, &hdr, payload);
+		}
+	}
 }
 
 void
@@ -73,7 +150,6 @@ pdump_handle_packets(
 		container_of(cp_module, struct pdump_module_config, cp_module);
 
 	struct ring_buffer *ring = ADDR_OF(&config->rings) + worker_idx;
-	uint8_t *ring_data = ADDR_OF(&ring->data);
 
 	struct rte_bpf *bpf_shm = ADDR_OF(&config->ebpf_program);
 	struct rte_bpf bpf = *bpf_shm;
@@ -82,66 +158,28 @@ pdump_handle_packets(
 	bpf.prm.xsym = NULL;
 	bpf.prm.nb_xsym = 0;
 
-	struct packet *pkt;
-	struct ring_msg_hdr hdr;
-
 	// First, process dropped packets.
-	if (config->mode & PDUMP_DROPS) {
-		for (pkt = packet_front->drop.first; pkt != NULL;
-		     pkt = pkt->next) {
-			struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
-
-			int rc = rte_bpf_exec(&bpf, (void *)mbuf);
-			if (rc) {
-				LOG_TRACE(
-					"capturing packet from the drop queue"
-				);
-
-				pdump_msg_header(
-					&hdr,
-					pkt,
-					// Assume a maximum of 4 million
-					// workers.
-					(uint32_t)worker_idx,
-					config->snaplen,
-					true
-				);
-				uint8_t *payload =
-					rte_pktmbuf_mtod(mbuf, uint8_t *);
-				pdump_write_msg(ring, ring_data, &hdr, payload);
-
-			} else {
-				LOG_TRACE("skip packet from the drop queue");
-			}
-		}
+	if (config->mode & PDUMP_DROPS && packet_front->drop.first != NULL) {
+		process_queue(
+			packet_front->drop.first,
+			&bpf,
+			ring,
+			(uint32_t)worker_idx,
+			config->snaplen,
+			true
+		);
 	}
 
 	// Then process the input packets.
-	if (config->mode & PDUMP_INPUT) {
-		for (pkt = packet_front->input.first; pkt != NULL;
-		     pkt = pkt->next) {
-			struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
-
-			int rc = rte_bpf_exec(&bpf, (void *)mbuf);
-			if (rc) {
-				LOG_TRACE(
-					"capturing packet from the input queue"
-				);
-
-				pdump_msg_header(
-					&hdr,
-					pkt,
-					worker_idx,
-					config->snaplen,
-					false
-				);
-				uint8_t *payload =
-					rte_pktmbuf_mtod(mbuf, uint8_t *);
-				pdump_write_msg(ring, ring_data, &hdr, payload);
-			} else {
-				LOG_TRACE("skip packet from the input queue");
-			}
-		}
+	if (config->mode & PDUMP_INPUT && packet_front->input.first != NULL) {
+		process_queue(
+			packet_front->input.first,
+			&bpf,
+			ring,
+			(uint32_t)worker_idx,
+			config->snaplen,
+			false
+		);
 	}
 
 	// We should always pass the packets in the input queue
