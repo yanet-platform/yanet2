@@ -145,8 +145,39 @@ pdump_module_config_free(struct cp_module *module) {
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
 
-	// FIXME: proper memory deallocation.
 	struct agent *agent = ADDR_OF(&module->agent);
+	char *filter = ADDR_OF(&config->filter);
+	if (filter != NULL) {
+		memory_bfree(
+			&agent->memory_context, filter, strlen(filter) + 1
+		);
+	}
+
+	struct rte_bpf *ebpf = ADDR_OF(&config->ebpf_program);
+	if (ebpf != NULL) {
+		memory_bfree(&agent->memory_context, ebpf, ebpf->sz);
+	}
+
+	struct ring_buffer *rings = ADDR_OF(&config->rings);
+	if (rings != NULL) {
+		struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+		uint32_t wc = dp_config->worker_count;
+
+		for (uint32_t idx = 0; idx < wc; idx++) {
+			struct ring_buffer *ring = rings + idx;
+			uint8_t *data = ADDR_OF(&ring->data);
+			if (data != NULL) {
+				memory_bfree(
+					&agent->memory_context, data, ring->size
+				);
+			}
+		}
+		memory_bfree(
+			&agent->memory_context,
+			rings,
+			sizeof(struct ring_buffer) * wc
+		);
+	}
 	memory_bfree(
 		&agent->memory_context,
 		config,
