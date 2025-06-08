@@ -1,4 +1,9 @@
 use pcap_file::pcap::PcapPacket;
+use pcap_file::pcapng::blocks::Block;
+use pcap_file::pcapng::blocks::enhanced_packet::EnhancedPacketBlock;
+use pcap_file::pcapng::blocks::interface_description::{
+    InterfaceDescriptionBlock, InterfaceDescriptionOption, TsResolution,
+};
 use pcap_file::{pcap::PcapWriter, pcapng::PcapNgWriter};
 use std::error::Error;
 use std::time::Duration;
@@ -53,6 +58,7 @@ struct Pcap {
 
 struct PcapNg {
     inner: PcapNgWriter<PdumpOutput>,
+    interface_id: u32,
 }
 
 enum PdumpWriter {
@@ -74,8 +80,22 @@ impl PdumpWriter {
                 PdumpWriter::Pcap(Pcap { inner: pcap_writer })
             }
             DumpOutputFormat::PcapNg => {
-                let pcapng_writer = PcapNgWriter::new(output)?;
-                PdumpWriter::PcapNg(PcapNg { inner: pcapng_writer })
+                let mut pcapng_writer = PcapNgWriter::new(output)?;
+
+                // Create and write an Interface Description Block
+                let interface_block = InterfaceDescriptionBlock {
+                    linktype: pcap_file::DataLink::ETHERNET,
+                    snaplen: 65535, // FIXME: Maximum snapshot length
+                    options: vec![InterfaceDescriptionOption::IfTsResol(TsResolution::NANO.to_raw())],
+                };
+
+                // Write the interface description block
+                pcapng_writer.write_block(&Block::InterfaceDescription(interface_block))?;
+
+                // Interface ID is 0 for the first (and only) interface
+                let interface_id = 0u32;
+
+                PdumpWriter::PcapNg(PcapNg { inner: pcapng_writer, interface_id })
             }
         };
         Ok(writer)
@@ -110,8 +130,18 @@ impl PdumpWriter {
         Ok(writer.inner.write_packet(&packet)?)
     }
 
-    fn write_pcapng(_writer: &mut PcapNg, _rec: pdumppb::Record) -> Result<usize, Box<dyn Error>> {
-        todo!()
+    fn write_pcapng(writer: &mut PcapNg, rec: pdumppb::Record) -> Result<usize, Box<dyn Error>> {
+        let meta = rec.meta.unwrap();
+        let ts = Duration::from_nanos(meta.timestamp);
+
+        let mut packet_block = EnhancedPacketBlock::default();
+        packet_block.interface_id = writer.interface_id;
+        packet_block.timestamp = ts;
+        packet_block.original_len = meta.packet_len;
+        packet_block.data = rec.data.into();
+        packet_block.set_write_ts_resolution(TsResolution::NANO);
+
+        Ok(writer.inner.write_block(&Block::EnhancedPacket(packet_block))?)
     }
 }
 

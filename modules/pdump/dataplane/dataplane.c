@@ -43,7 +43,7 @@ mbuf_get_timestamp(const struct rte_mbuf *mbuf) {
 
 static inline uint64_t
 get_tsc_timestamp() {
-	// FIXME: shoud we use static __thread here???
+	// FIXME: should we use `static __thread` here?
 	static uint64_t tsc_hz = 0;
 	if (tsc_hz == 0) {
 		tsc_hz = rte_get_tsc_hz();
