@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime/cgo"
+	"strings"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -22,9 +23,11 @@ import (
 )
 
 var (
-	logger *zap.SugaredLogger
+	logger    *zap.SugaredLogger
+	debugEBPF bool
 
 	defaultSnaplen = uint32(C.default_snaplen)
+	replacer       = strings.NewReplacer("\n", "\\n")
 )
 
 //export pdumpGoControlplaneLog
@@ -35,16 +38,19 @@ func pdumpGoControlplaneLog(level C.uint32_t, msg *C.char) {
 	goMsg := C.GoString(msg)
 	switch level {
 	case C.log_emerg, C.log_alert, C.log_crit:
-		logger.Errorf("CRIT: %s", goMsg)
+		logger.Errorf("CRIT: %s", replacer.Replace(goMsg))
 	case C.log_error:
 		logger.Errorf("%s", goMsg) // format for suppressing trace
 
 	case C.log_warn:
-		logger.Warn(goMsg)
+		logger.Warn(replacer.Replace(goMsg))
 	case C.log_notice, C.log_info:
-		logger.Info(goMsg)
+		logger.Info(replacer.Replace(goMsg))
 	case C.log_debug:
-		logger.Debug(goMsg)
+		if strings.HasPrefix(goMsg, "BPF: ") && !debugEBPF {
+			return
+		}
+		logger.Debug(replacer.Replace(goMsg))
 	}
 }
 

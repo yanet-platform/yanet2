@@ -28,6 +28,7 @@ func NewPdumpModule(cfg *Config, log *zap.SugaredLogger) (*PdumpModule, error) {
 		zap.WithCaller(false),
 		zap.AddStacktrace(zapcore.FatalLevel),
 	)
+	debugEBPF = cfg.DebugEBPF
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
 	if err != nil {

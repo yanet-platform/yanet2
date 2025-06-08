@@ -14,6 +14,7 @@ type Config struct {
 
 	Endpoint        string `yaml:"endpoint"`
 	GatewayEndpoint string `yaml:"gateway_endpoint"`
+	DebugEBPF       bool   `yaml:"debug_ebpf"`
 }
 
 func DefaultConfig() *Config {
@@ -22,6 +23,7 @@ func DefaultConfig() *Config {
 		MemoryRequirements: 16 * datasize.MB,
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",
+		DebugEBPF:          false,
 	}
 }
 
