@@ -173,6 +173,7 @@ func (m *ModuleConfig) SetupRing(ring *ringBuffer) error {
 	if addr == nil {
 		return errors.Join(fmt.Errorf("failed to allocate ring buffer"), err)
 	}
+	ring.workers = nil // forget about old rings...
 	rings := unsafe.Slice(addr, workerCount)
 	for idx := range rings {
 		dataPtr := C.pdump_module_config_addr_of(&rings[idx].data)
