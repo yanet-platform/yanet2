@@ -1,9 +1,10 @@
-use pcap_file::pcap::PcapPacket;
+use pcap_file::pcap::{PcapHeader, PcapPacket};
 use pcap_file::pcapng::blocks::Block;
 use pcap_file::pcapng::blocks::enhanced_packet::EnhancedPacketBlock;
 use pcap_file::pcapng::blocks::interface_description::{
     InterfaceDescriptionBlock, InterfaceDescriptionOption, TsResolution,
 };
+use pcap_file::{DataLink, Endianness};
 use pcap_file::{pcap::PcapWriter, pcapng::PcapNgWriter};
 use std::error::Error;
 use std::time::Duration;
@@ -68,24 +69,28 @@ enum PdumpWriter {
 }
 
 impl PdumpWriter {
-    fn new(fmt: DumpOutputFormat, dst: &str) -> Result<Self, Box<dyn Error>> {
+    fn new(fmt: DumpOutputFormat, dst: &str, snaplen: u32) -> Result<Self, Box<dyn Error>> {
         let output = PdumpOutput::new(dst)?;
 
         let writer = match fmt {
             DumpOutputFormat::Text => PdumpWriter::Text(Text { inner: output }),
             DumpOutputFormat::Pcap => {
-                // FIXME: Construct the pcap header.
-                // Issue a get config request before the read request.
-                let pcap_writer = PcapWriter::new(output)?;
+                let header = PcapHeader {
+                    snaplen,
+                    ts_resolution: pcap_file::TsResolution::NanoSecond,
+                    endianness: Endianness::Little,
+                    ..Default::default()
+                };
+                let pcap_writer = PcapWriter::with_header(output, header)?;
                 PdumpWriter::Pcap(Pcap { inner: pcap_writer })
             }
             DumpOutputFormat::PcapNg => {
-                let mut pcapng_writer = PcapNgWriter::new(output)?;
+                let mut pcapng_writer = PcapNgWriter::with_endianness(output, Endianness::Little)?;
 
                 // Create and write an Interface Description Block
                 let interface_block = InterfaceDescriptionBlock {
-                    linktype: pcap_file::DataLink::ETHERNET,
-                    snaplen: 65535, // FIXME: Maximum snapshot length
+                    linktype: DataLink::ETHERNET,
+                    snaplen,
                     options: vec![InterfaceDescriptionOption::IfTsResol(TsResolution::NANO.to_raw())],
                 };
 
@@ -145,8 +150,14 @@ impl PdumpWriter {
     }
 }
 
-pub fn pdump_write(fmt: DumpOutputFormat, mut rx: mpsc::UnboundedReceiver<pdumppb::Record>, dst: &str) {
-    let mut writer = match PdumpWriter::new(fmt, dst) {
+pub fn pdump_write(
+    config: Vec<pdumppb::Config>,
+    mut rx: mpsc::UnboundedReceiver<pdumppb::Record>,
+    fmt: DumpOutputFormat,
+    dst: &str,
+) {
+    let max_snaplen = config.iter().fold(0, |sl, e| sl.max(e.snaplen));
+    let mut writer = match PdumpWriter::new(fmt, dst, max_snaplen) {
         Ok(w) => w,
         Err(e) => {
             log::error!("failed to create pdump writer at '{}': {}", dst, e);

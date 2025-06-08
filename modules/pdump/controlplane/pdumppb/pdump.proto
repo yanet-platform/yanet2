@@ -88,10 +88,10 @@ message ShowConfigRequest {
 
 // Config contains the pdump module configuration.
 message Config {
-	// If set, the pdump module reads from the list of dropped packets
-	// instead of the list of input packets
-	bool collect_drops = 1;
-	string filter = 2;
+	string filter = 1;
+	DumpMode mode = 2;
+	uint32 snaplen = 3;
+	uint32 ring_size = 4;
 }
 
 // ShowConfigResponse contains the configuration details of the pdump module.

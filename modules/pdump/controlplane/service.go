@@ -78,7 +78,10 @@ func (m *PdumpService) ShowConfig(
 
 	if config, ok := m.configs[key]; ok {
 		response.Config = &pdumppb.Config{
-			Filter: config.filter,
+			Filter:   config.filter,
+			Mode:     config.dumpMode,
+			Snaplen:  config.snaplen,
+			RingSize: config.ring.perWorkerSize,
 		}
 
 	}

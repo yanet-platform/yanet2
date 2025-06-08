@@ -74,6 +74,24 @@ impl PdumpService {
         Ok(Self { client })
     }
 
+    async fn get_configs(
+        &mut self,
+        name: &str,
+        numa_indices: Vec<u32>,
+    ) -> Result<Vec<ShowConfigResponse>, Box<dyn Error>> {
+        let mut responses = Vec::new();
+        for numa in numa_indices {
+            let request = ShowConfigRequest {
+                target: Some(TargetModule { config_name: name.to_owned(), numa }),
+            };
+            log::trace!("show config request on NUMA {numa}: {request:?}");
+            let response = self.client.show_config(request).await?.into_inner();
+            log::debug!("show config response on NUMA {numa}: {response:?}");
+            responses.push(response);
+        }
+        Ok(responses)
+    }
+
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
         let Some(name) = cmd.config_name else {
             self.print_config_list().await?;
@@ -84,18 +102,11 @@ impl PdumpService {
         if numa_indices.is_empty() {
             numa_indices = self.get_numa_indices().await?;
         }
+        let configs = self.get_configs(&name, numa_indices).await?;
 
-        let mut responses = Vec::new();
-        for numa in numa_indices {
-            let request = ShowConfigRequest {
-                target: Some(TargetModule { config_name: name.clone(), numa }),
-            };
-            let response = self.client.show_config(request).await?.into_inner();
-            responses.push(response);
-        }
         match cmd.format {
-            ConfigOutputFormat::Json => print_json(responses)?,
-            ConfigOutputFormat::Tree => print_tree(responses)?,
+            ConfigOutputFormat::Json => print_json(configs)?,
+            ConfigOutputFormat::Tree => print_tree(configs)?,
         }
 
         Ok(())
@@ -171,6 +182,15 @@ impl PdumpService {
 
         let mut reader_set = JoinSet::new();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<pdumppb::Record>();
+
+        log::debug!("request current pdump configuration for numa: {:?}", cmd.numa);
+        let configs = self
+            .get_configs(&cmd.config_name, cmd.numa.clone())
+            .await?
+            .into_iter()
+            .map(|c| c.config.expect("some pdump config"))
+            .collect();
+
         for numa in cmd.numa {
             let request = ReadDumpRequest {
                 target: Some(TargetModule {
@@ -179,20 +199,20 @@ impl PdumpService {
                 }),
             };
             log::trace!("read_data request on NUMA {numa}: {request:?}");
-            let response = self.client.read_dump(request).await?.into_inner();
+            let stream = self.client.read_dump(request).await?.into_inner();
             log::debug!(
                 "read_data successfully acquired data stream on NUMA {numa} for {}",
-                cmd.config_name
+                cmd.config_name,
             );
 
-            reader_set.spawn(writer::pdump_stream_reader(response, tx.clone(), done.clone()));
+            reader_set.spawn(writer::pdump_stream_reader(stream, tx.clone(), done.clone()));
         }
         drop(tx);
 
         // Spawn outside the reader_set to get unpinable join handler.
         let mut write_jh = tokio::task::spawn_blocking(move || {
             let output = cmd.output.unwrap_or("-".to_string());
-            writer::pdump_write(cmd.format, rx, &output)
+            writer::pdump_write(configs, rx, cmd.format, &output)
         });
 
         let mut sig_pipe = unix::signal(SignalKind::pipe())?;
@@ -260,8 +280,13 @@ pub fn print_tree(configs: Vec<ShowConfigResponse>) -> Result<(), Box<dyn Error>
         tree.begin_child(format!("NUMA {}", config.numa));
 
         if let Some(config) = &config.config {
-            let input = if config.collect_drops { "drops" } else { "input" };
-            tree.add_empty_child(format!("Filter on {}: {}", input, config.filter));
+            tree.add_empty_child(format!("Filter: {}", config.filter));
+            tree.add_empty_child(format!(
+                "Mode: {}",
+                config.mode().as_str_name().replace("PDUMP_DUMP_", "")
+            ));
+            tree.add_empty_child(format!("Snaplen: {}", config.snaplen));
+            tree.add_empty_child(format!("PerWorkerRingSize: {}", config.ring_size));
         }
 
         tree.end_child();
