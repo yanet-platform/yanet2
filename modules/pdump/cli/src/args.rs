@@ -118,8 +118,10 @@ pub struct SetRingSizeCmd {
 /// Dump Output format options.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum DumpOutputFormat {
-    /// Simple human-readable output of the packet metadata and content
+    /// Simple one-line human-readable output of the packet metadata and content
     Text,
+    /// Pretty multi-line human-readable output of the packet metadata and content
+    Pretty,
     /// PCAP Capture File Format
     Pcap,
     /// PCAP Next Generation (pcapng) Capture File Format

@@ -18,6 +18,7 @@ ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
 bytesize = "2.0.1"
 pcap-file = "3.0.0-rc1"
 tokio-util = "0.7.15"
+pnet_packet = "0.35"
 
 [build-dependencies]
 tonic-build = "0.13" 

@@ -20,6 +20,7 @@ use args::{
 };
 
 mod args;
+mod printer;
 mod writer;
 
 #[allow(non_snake_case)]

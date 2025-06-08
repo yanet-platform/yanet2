@@ -18,6 +18,7 @@ use tonic::codec::Streaming;
 
 use crate::args::DumpOutputFormat;
 use crate::pdumppb;
+use crate::printer;
 
 enum PdumpOutput {
     Stdout(io::Stdout),
@@ -51,6 +52,7 @@ impl io::Write for PdumpOutput {
 
 struct Text {
     inner: PdumpOutput,
+    pretty: bool,
 }
 
 struct Pcap {
@@ -73,7 +75,8 @@ impl PdumpWriter {
         let output = PdumpOutput::new(dst)?;
 
         let writer = match fmt {
-            DumpOutputFormat::Text => PdumpWriter::Text(Text { inner: output }),
+            DumpOutputFormat::Text => PdumpWriter::Text(Text { inner: output, pretty: false }),
+            DumpOutputFormat::Pretty => PdumpWriter::Text(Text { inner: output, pretty: true }),
             DumpOutputFormat::Pcap => {
                 let header = PcapHeader {
                     snaplen,
@@ -123,9 +126,14 @@ impl PdumpWriter {
     }
 
     fn write_text(writer: &mut Text, rec: pdumppb::Record) -> Result<usize, Box<dyn Error>> {
-        Ok(writer
-            .inner
-            .write(format!("FIXME Pretty print: {:?}\n", rec.meta).as_bytes())?)
+        if writer.pretty {
+            printer::pretty_print_metadata(&mut writer.inner, &rec.meta.unwrap())?;
+            printer::pretty_print_ethernet_frame(&mut writer.inner, &rec.data)?;
+        } else {
+            printer::pretty_print_metadata_concise(&mut writer.inner, &rec.meta.unwrap())?;
+            printer::pretty_print_ethernet_frame_concise(&mut writer.inner, &rec.data)?;
+        }
+        Ok(0)
     }
 
     fn write_pcap(writer: &mut Pcap, rec: pdumppb::Record) -> Result<usize, Box<dyn Error>> {
