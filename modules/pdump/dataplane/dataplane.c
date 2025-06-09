@@ -10,6 +10,8 @@
 
 #include "ring.h"
 
+#define TSC_SHIFT 32
+
 static inline bool
 mbuf_is_timestamp_enabled(const struct rte_mbuf *mbuf) {
 	static uint64_t timestamp_rx_dynflag;
@@ -43,21 +45,35 @@ mbuf_get_timestamp(const struct rte_mbuf *mbuf) {
 
 static inline uint64_t
 get_tsc_timestamp() {
-	// FIXME: should we use `static __thread` here?
-	static uint64_t tsc_hz = 0;
-	if (tsc_hz == 0) {
-		tsc_hz = rte_get_tsc_hz();
-		if (tsc_hz == 0) {
+	static uint64_t tsc_mult = ~0ULL;
+
+	// One-time initialization
+	if (unlikely(tsc_mult == ~0ULL)) {
+		uint64_t hz = rte_get_tsc_hz();
+		if (unlikely(hz == 0)) {
 			return 0;
 		}
+
+		// Verify we won't overflow during multiplication
+		// Max safe TSC value: ~18 years at 5GHz, which should be fine
+		tsc_mult = ((1ULL << TSC_SHIFT) * 1000000000ULL) / hz;
+		// NOTE: Ignoring potential timestamp loss due to a zero TSC
+		// multiplier, a possibility at extremely high frequencies. This
+		// is acceptable for the pdump application.
 	}
+
 	uint64_t current_tsc = rte_rdtsc();
-	// TODO: Benchmark performance in a production-like environment.
-	// // NOTE: __int128 are supported by gcc and clang
-	// uint64_t timestamp_ns = (uint64_t)((__int128)current_tsc *
-	// 1000000000ULL / tsc_hz);
-	double ts = (double)current_tsc * 1000000000ULL / (double)tsc_hz;
-	uint64_t timestamp_ns = (uint64_t)ts;
+
+// Check if your compiler/platform supports __uint128_t
+#ifdef __SIZEOF_INT128__
+	uint64_t timestamp_ns =
+		((__uint128_t)current_tsc * tsc_mult) >> TSC_SHIFT;
+#else
+	// Fallback for platforms without 128-bit support
+	uint64_t high = (current_tsc >> 32) * tsc_mult;
+	uint64_t low = (current_tsc & 0xFFFFFFFF) * tsc_mult;
+	uint64_t timestamp_ns = (high >> (TSC_SHIFT - 32)) + (low >> TSC_SHIFT);
+#endif
 	return timestamp_ns;
 }
 
