@@ -18,6 +18,7 @@
 
 const uint32_t default_snaplen = MBUF_MAX_SIZE;
 const uint32_t max_ring_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
+const uint32_t ring_msg_magic = RING_MSG_MAGIC;
 
 #define pdump_log(level, fmt_, ...) rte_log(level, 0, fmt_, ##__VA_ARGS__)
 

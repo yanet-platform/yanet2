@@ -224,7 +224,7 @@ func (m *PdumpService) updateModuleConfig(
 			return fmt.Errorf("failed to set pdump filter for %s: %w", name, err)
 		}
 		m.log.Debugw("setup ring", zap.String("module", name), zap.Uint32("numa", numa))
-		if err := ffiConfig.SetupRing(instanceConfig.ring); err != nil {
+		if err := ffiConfig.SetupRing(instanceConfig.ring, m.log); err != nil {
 			return fmt.Errorf("failed to setup ring buffers for %s: %w", name, err)
 		}
 	}

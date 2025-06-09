@@ -40,7 +40,9 @@ mbuf_get_timestamp(const struct rte_mbuf *mbuf) {
 			return 0;
 	}
 
-	return *RTE_MBUF_DYNFIELD(mbuf, timestamp_dynfield_offset, rte_mbuf_timestamp_t *);
+	return *RTE_MBUF_DYNFIELD(
+		mbuf, timestamp_dynfield_offset, rte_mbuf_timestamp_t *
+	);
 }
 
 static inline uint64_t
@@ -135,8 +137,9 @@ process_queue(
 			uint32_t capture_len =
 				packet_len > snaplen ? snaplen : packet_len;
 			struct ring_msg_hdr hdr = {
-				.packet_len = packet_len,
 				.total_len = sizeof(hdr) + capture_len,
+				.magic = RING_MSG_MAGIC,
+				.packet_len = packet_len,
 				.timestamp = timestamp,
 				.worker_idx = worker_idx,
 				.pipeline_idx = pkt->pipeline_idx,

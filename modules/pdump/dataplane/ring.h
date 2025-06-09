@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 
+// Align value to 4-byte boundary for consistent ring buffer alignment
 #define __ALIGN4RING(val) (((val) + 3) & ~3)
 
 // Header of the ring buffer, located at the beginning of the buffer.
@@ -13,22 +14,30 @@ struct ring_buffer {
 	// write_idx indicates the next logical index for a worker to write to.
 	_Atomic uint64_t write_idx;
 	// readable_idx is the logical index of the next valid ring_msg_hdr.
+	// This is advanced by the writer when space is needed (overwriting old
+	// data).
 	_Atomic uint64_t readable_idx;
 
 	// Size represents the total size of the ring buffer;
-	// The data portion's size is hdr->size minus sizeof(hdr).
+	// The data portion's size is size minus sizeof(struct ring_buffer).
 	uint32_t size;
+	// Mask for efficient modulo operation (size must be power of 2)
 	uint32_t mask;
-	// Offset within shared memory to the ring buffer data.
+	// Pointer to the ring buffer data area
 	uint8_t *data;
 };
+
+// Magic number to validate ring message headers
+#define RING_MSG_MAGIC 0xDEADBEEF
 
 // This header precedes each message in the ring buffer and contains the total
 // message length and packet metadata.
 struct ring_msg_hdr {
 	// Total size of the message, including the header and following
-	// payload.
+	// payload. NOTE: total_len must be the first member.
 	uint32_t total_len;
+	// Magic number for header validation
+	uint32_t magic;
 	// packet_len indicates the length of the original packet.
 	uint32_t packet_len;
 	// Timestamp indicating when the packet was captured.
@@ -53,21 +62,29 @@ static inline void
 pdump_ring_prepare(
 	struct ring_buffer *ring, uint8_t *ring_data, uint32_t payload_size
 ) {
-	// While the occupied space exceeds the maximum occupied space,
-	// indicating available free space for payload writing to the ring
-	// buffer.
+	uint32_t aligned_payload_size = __ALIGN4RING(payload_size);
+	assert(ring->size > aligned_payload_size);
+	assert(ring->write_idx >= ring->readable_idx);
+
+	// While the occupied space (write_idx - readable_idx) exceeds the
+	// available space needed for the new payload, advance readable_idx
+	// to free up space by discarding old messages.
 	while ((ring->write_idx - ring->readable_idx) >
-	       (ring->size - payload_size)) {
-		// STATEMENT: We can skip the boundary crossing check when
-		// reading the slot size due to ring buffer alignment.
+	       (ring->size - aligned_payload_size)) {
+		// Read the size of the message at readable_idx to know how much
+		// space to free. We can safely read uint32_t directly because
+		// all writes are aligned to 4-byte boundaries by
+		// pdump_ring_checkpoint, ensuring the total_len field is always
+		// properly aligned.
 		uint8_t *pos = ring_data + (ring->readable_idx & ring->mask);
 		uint32_t readable_slot_size = *(uint32_t *)pos;
 		readable_slot_size = __ALIGN4RING(readable_slot_size);
 
+		// Advance readable_idx past this message to free its space
 		atomic_fetch_add_explicit(
 			&ring->readable_idx,
 			readable_slot_size,
-			memory_order_relaxed
+			memory_order_release
 		);
 	}
 }
@@ -83,10 +100,8 @@ pdump_ring_write(
 	assert(ring->size > offset + size);
 
 	size_t n = 0;
-	// This loop handles the case where the write extends beyond the ring
-	// buffer's boundary. If the tail is less than the size of the data
-	// being written, the next iteration will return a tail equal to the
-	// entire ring buffer.
+	// Handle writes that may wrap around the ring buffer boundary.
+	// Split the write into chunks that don't cross the boundary.
 	while (n < size) {
 		uint64_t write_idx =
 			(ring->write_idx + offset + n) & ring->mask;
@@ -102,8 +117,11 @@ pdump_ring_write(
 
 static inline void
 pdump_ring_checkpoint(struct ring_buffer *ring, uint32_t size) {
-	// Alignment is critical for the pdump_ring_prepare function to work
-	// properly.
+	// Align size to 4-byte boundary - this alignment is critical for
+	// pdump_ring_prepare to safely read message sizes without boundary
+	// checks.
 	size = __ALIGN4RING(size);
-	atomic_fetch_add_explicit(&ring->write_idx, size, memory_order_relaxed);
+	// Use release ordering to ensure all data writes are visible to readers
+	// before the write_idx update makes the data available for consumption.
+	atomic_fetch_add_explicit(&ring->write_idx, size, memory_order_release);
 }

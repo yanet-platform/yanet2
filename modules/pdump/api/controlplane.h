@@ -11,6 +11,7 @@ struct ring_buffer;
 
 extern const uint32_t default_snaplen;
 extern const uint32_t max_ring_size;
+extern const uint32_t ring_msg_magic;
 
 // From rte_log.h
 /* Can't use 0, as it gives compiler warnings */

@@ -162,7 +162,7 @@ func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
 	return nil
 }
 
-func (m *ModuleConfig) SetupRing(ring *ringBuffer) error {
+func (m *ModuleConfig) SetupRing(ring *ringBuffer, log *zap.SugaredLogger) error {
 	var workerCount C.uint64_t
 
 	addr, err := C.pdump_module_config_set_per_worker_ring(
@@ -183,6 +183,7 @@ func (m *ModuleConfig) SetupRing(ring *ringBuffer) error {
 			readIdx:     0,
 			data:        unsafe.Slice((*byte)(dataPtr), rings[idx].size),
 			mask:        uint64(rings[idx].mask),
+			log:         log.With("ringIdx", idx).Desugar(),
 		}
 		ring.workers = append(ring.workers, worker)
 	}

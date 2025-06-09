@@ -5,11 +5,13 @@ import "C"
 
 import (
 	"context"
+	"strconv"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb"
@@ -23,29 +25,38 @@ const (
 
 var (
 	maxRingSize          = uint32(C.max_ring_size)
+	ringMsgMagic         = C.ring_msg_magic
 	defaultReadChunkSize = datasize.ByteSize(defaultSnaplen * 32)
 )
 
-func alignToHdrSizeSize(off int) int {
-	return (off + (hdrSizeSize - 1)) & -hdrSizeSize
+// alignToU32 aligns offset to 4-byte boundary, matching dataplane alignment.
+// Uses the same alignment as dataplane: __ALIGN4RING(val) (((val) + 3) & ~3)
+// This ensures consistent alignment between writer and reader.
+func alignToU32(off int) int {
+	return (off + 3) & ^3
 }
 
+// ringBuffer manages multiple worker ring buffers for packet capture data.
 type ringBuffer struct {
-	workers       []*workerArea
-	perWorkerSize uint32
+	workers       []*workerArea // Per-worker ring buffer areas
+	perWorkerSize uint32        // Size of each worker's ring buffer
 	// TODO: Implement configurable read chunk size.
-	readChunkSize uint32
+	readChunkSize uint32 // Maximum bytes to read in one operation
 }
 
+// workerArea represents a single worker's ring buffer state and data.
 type workerArea struct {
-	writeIdx    *uint64
-	readableIdx *uint64
-	readIdx     uint64
-	buf         []byte
-	data        []byte
-	mask        uint64
+	writeIdx    *uint64     // Pointer to writer's current write position
+	readableIdx *uint64     // Pointer to oldest readable data position
+	readIdx     uint64      // Reader's current read position
+	buf         []byte      // Temporary buffer for partial reads
+	data        []byte      // Ring buffer data area
+	mask        uint64      // Mask for efficient modulo operation
+	log         *zap.Logger // Logger for this worker area
 }
 
+// spawnWakers creates notification channels for each worker and starts a background
+// goroutine that periodically checks for new data and notifies waiting readers.
 func (m *ringBuffer) spawnWakers(ctx context.Context) []chan bool {
 	wakers := make([]chan bool, 0, len(m.workers))
 	for range m.workers {
@@ -56,11 +67,12 @@ func (m *ringBuffer) spawnWakers(ctx context.Context) []chan bool {
 
 	go func() {
 		for {
+			// Check each worker for new data and notify if available
 			for idx, worker := range m.workers {
 				if worker.hasMore() {
 					select {
-					case wakers[idx] <- true:
-					default:
+					case wakers[idx] <- true: // Non-blocking notification
+					default: // Skip if channel is full (reader is busy)
 					}
 				}
 			}
@@ -70,22 +82,24 @@ func (m *ringBuffer) spawnWakers(ctx context.Context) []chan bool {
 			case <-ticker.C:
 			}
 		}
-
 	}()
 
 	return wakers
 }
 
+// runReaders starts reader goroutines for all workers and processes ring buffer data
+// into protobuf records, sending them to the provided channel.
 func (m *ringBuffer) runReaders(ctx context.Context, recordCh chan<- *pdumppb.Record) error {
 	wakers := m.spawnWakers(ctx)
 	wg, _ := errgroup.WithContext(ctx)
 	for idx, worker := range m.workers {
 		wg.Go(func() error {
-			// Allocate an internal buffer to store intermediate partial read results.
+			// Allocate buffer for accumulating partial reads across ring boundary
 			worker.buf = make([]byte, 0, m.readChunkSize)
 
 			waker := wakers[idx]
 			for {
+				// Read available data and convert to protobuf records
 				records := worker.read(m.readChunkSize)
 				for _, rec := range records {
 					select {
@@ -94,9 +108,11 @@ func (m *ringBuffer) runReaders(ctx context.Context, recordCh chan<- *pdumppb.Re
 					case recordCh <- rec:
 					}
 				}
+				// Continue immediately if more data is available
 				if worker.hasMore() {
 					continue
 				}
+				// Wait for notification of new data
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
@@ -108,100 +124,114 @@ func (m *ringBuffer) runReaders(ctx context.Context, recordCh chan<- *pdumppb.Re
 	return wg.Wait()
 }
 
+// hasMore checks if there's unread data available in the worker's ring buffer.
 func (w *workerArea) hasMore() bool {
 	writeVal := atomic.LoadUint64(w.writeIdx)
 	readVal := atomic.LoadUint64(&w.readIdx)
 	return writeVal > readVal
 }
 
+// read extracts packet data from the ring buffer and converts it to protobuf records.
+// It handles ring buffer wraparound, data overwrites, and message boundary alignment.
 func (w *workerArea) read(n uint32) []*pdumppb.Record {
-	// Get the read counter value
+	// Load current ring buffer positions with acquire ordering to ensure
+	// we see all writes that happened before the position updates
 	readableVal := atomic.LoadUint64(w.readableIdx)
-	// Get the write counter value
 	writeVal := atomic.LoadUint64(w.writeIdx)
 
+	// Handle case where writer has overwritten data we were reading
 	if readableVal > w.readIdx {
-		// If the writer has overwritten some of the readable data,
-		// continue from the new readable index.
+		// Writer advanced readable_idx, meaning our previous read position
+		// is now invalid. Jump to the new readable position.
 		atomic.StoreUint64(&w.readIdx, readableVal)
 	} else {
-		// If we're still reading the readable portion and the writer hasn't
-		// overwritten it, continue reading from readIdx.
+		// We're still within the readable range, continue from our position
 		readableVal = w.readIdx
 	}
 
+	// Check if there's any new data to read
 	if writeVal <= readableVal {
-		// If no writes have occurred since the last read, return.
 		return nil
 	}
 
-	// Calculate the readable part size.
-	// Limit reading to a chunk size (the free space in the buffer with a length of readChunkSize).
+	// Calculate how much data to read, limited by chunk size to avoid
+	// reading too much at once and blocking other operations
 	size := min(writeVal-readableVal, uint64(n))
 
-	// Calculate indices within the worker's ring data.
+	// Convert logical positions to physical ring buffer indices
 	readableIdx := readableVal & w.mask
 	readableIdxEnd := (readableIdx + size) & w.mask
 
+	// Remember buffer size before appending new data for overwrite detection
 	beforeReadBufSize := len(w.buf)
+
+	// Copy data from ring buffer, handling potential wraparound
 	if readableIdxEnd > readableIdx {
-		// If the write index is past the read index, there's a contiguous chunk of data.
+		// Data is contiguous - simple case
 		w.buf = append(w.buf, w.data[readableIdx:readableIdxEnd]...)
 	} else {
-		// If the write index is before the read index, the readable data spans
-		// across the end and beginning of the buffer.
-		w.buf = append(w.buf, w.data[readableIdx:]...)
-		w.buf = append(w.buf, w.data[:readableIdxEnd]...)
+		// Data wraps around ring buffer boundary - copy in two parts
+		w.buf = append(w.buf, w.data[readableIdx:]...)    // From readableIdx to end
+		w.buf = append(w.buf, w.data[:readableIdxEnd]...) // From start to readableIdxEnd
 	}
+
+	// Update our read position
 	atomic.AddUint64(&w.readIdx, size)
 
-	// Check if the ring worker has overwritten data during the read process;
-	// if so, discard the overwritten data.
+	// Check if writer overwrote data while we were copying it
 	newReadableVal := atomic.LoadUint64(w.readableIdx)
-	diff := int(newReadableVal - readableVal)
-	if diff > 0 {
-		// If the ring worker has overwritten data, any previously partially
-		// read data is now invalid and should be discarded.
-		diff += beforeReadBufSize
-		// If a worker has overwritten past the end of the last reading,
-		// all read data is invalid; return nothing to try again on the next iteration.
-		if diff > len(w.buf) {
+	if newReadableVal > readableVal {
+		// Calculate how much data was overwritten
+		diff := newReadableVal - readableVal
+		// Include any previously buffered data that's now invalid
+		diff += uint64(beforeReadBufSize)
+
+		if diff > uint64(len(w.buf)) {
+			// All our data was overwritten - discard everything and retry
 			w.buf = w.buf[:0]
 			return nil
 		}
-		// Forget overwritten data by shifting the beginning of the slice to
-		// the data after the overwritten part.
-		// We intentionally always allocate from the right and discard data
-		// from the left. This is because, during conversion to the proto
-		// Records, the data passed to those records should not be modified by
-		// us. GRPC will copy the data for network transmission asynchronously,
-		// and any modifications we make could potentially corrupt the GRPC
-		// message.
-		w.buf = w.buf[diff:]
 
+		// Discard the overwritten portion by advancing buffer start.
+		// We always append new data to the right and discard from the left
+		// to ensure protobuf record data slices remain valid during async
+		// GRPC transmission (GRPC copies data asynchronously).
+		w.buf = w.buf[diff:]
 	}
+
 	response := make([]*pdumppb.Record, 0)
 
-	// While there is sufficient data for the size of the message size,
-	// we'll attempt to convert the data to a proto Record.
+	// Parse complete messages from the buffer and convert to protobuf records
 	for len(w.buf) > int(cRingMsgHdrSize) {
-		// Now the beginning of the buffer should point to the header of the ring
-		// buffer message.
-		// An important detail is that this size doesn't include data alignment
-		// to a u32 boundary; therefore, we must skip this alignment if it exists
-		// to reach the next message header.
+		// Cast buffer start to message header - buffer should be aligned
+		// to message boundaries from previous processing
 		msgHeader := (*C.struct_ring_msg_hdr)(unsafe.Pointer(&w.buf[0]))
-		// We must always read data with alignment padding. Failure to do so
-		// can prevent proper handling of subsequent alignment padding,
-		// effectively losing information about the next message header's location.
-		skipSize := alignToHdrSizeSize(int(msgHeader.total_len))
-		if skipSize > len(w.buf) {
-			// If there isn't enough data for the entire message (including
-			// alignment), we'll try to read more on the next attempt.
+
+		totalLen := uint32(msgHeader.total_len)
+
+		// Validate message header integrity
+		if msgHeader.magic != ringMsgMagic || totalLen < uint32(cRingMsgHdrSize) {
+			// Corrupted header detected - this should be rare with proper
+			// overwrite handling, but can still occur under extreme load
+			w.log.Debug("discard buffer due to magic or msg.total_len validation",
+				zap.String("magic", strconv.FormatUint(uint64(msgHeader.magic), 16)),
+				zap.Uint32("total_len", totalLen))
+			w.buf = w.buf[:0]
 			return response
 		}
+
+		// Calculate aligned skip size to find next message boundary.
+		// Must match dataplane alignment to maintain message boundaries.
+		skipSize := alignToU32(int(totalLen))
+		if skipSize > len(w.buf) {
+			// Incomplete message - wait for more data in next read
+			return response
+		}
+
+		// Extract packet data (excluding header)
 		data := w.buf[cRingMsgHdrSize:msgHeader.total_len]
 
+		// Convert to protobuf record
 		rec := &pdumppb.Record{
 			Meta: &pdumppb.RecordMeta{
 				Timestamp:   uint64(msgHeader.timestamp),
@@ -217,6 +247,7 @@ func (w *workerArea) read(n uint32) []*pdumppb.Record {
 		}
 		response = append(response, rec)
 
+		// Advance buffer past this message (including alignment padding)
 		w.buf = w.buf[skipSize:]
 	}
 
