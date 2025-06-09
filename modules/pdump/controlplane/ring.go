@@ -140,14 +140,26 @@ func (w *workerArea) read(n uint32) []*pdumppb.Record {
 	writeVal := atomic.LoadUint64(w.writeIdx)
 
 	// Handle case where writer has overwritten data we were reading
+	// 'readableVal' currently holds the latest shared readable_idx.
+	// 'w.readIdx' is our private record of how far we've successfully processed.
 	if readableVal > w.readIdx {
-		// Writer advanced readable_idx, meaning our previous read position
-		// is now invalid. Jump to the new readable position.
+		// Writer advanced shared readable_idx past our private w.readIdx.
+		// This means any partial data in w.buf from a previous read() call is now stale
+		// as it belongs to an overwritten region of the shared ring buffer.
+		if len(w.buf) > 0 {
+			w.buf = w.buf[:0] // Clear stale partial data
+		}
+		// Catch up our private read index to the new truth from shared memory.
 		atomic.StoreUint64(&w.readIdx, readableVal)
 	} else {
-		// We're still within the readable range, continue from our position
+		// Shared readable_idx has not advanced past our private w.readIdx.
+		// This means w.readIdx is still valid (or even ahead, though ideally not).
+		// The effective starting point for this read operation will be our current w.readIdx.
+		// 'readableVal' will carry this effective starting point for the rest of this function.
 		readableVal = w.readIdx
 	}
+	// At this point, 'readableVal' is the definitive logical offset from which this read operation will attempt to fetch data.
+	// And 'w.readIdx' is also at least 'readableVal' (it might be advanced further by this function if data is read).
 
 	// Check if there's any new data to read
 	if writeVal <= readableVal {
@@ -178,17 +190,24 @@ func (w *workerArea) read(n uint32) []*pdumppb.Record {
 	// Update our read position
 	atomic.AddUint64(&w.readIdx, size)
 
-	// Check if writer overwrote data while we were copying it
-	newReadableVal := atomic.LoadUint64(w.readableIdx)
-	if newReadableVal > readableVal {
+	// Check if writer overwrote data while we were copying it.
+	// 'readableVal' here is the 'effectiveReadStart' determined at the beginning of this function.
+	latestSharedReadableIdx := atomic.LoadUint64(w.readableIdx)
+	if latestSharedReadableIdx > readableVal {
+		// Overwrite detected. The writer has advanced readable_idx past the point
+		// from which we started reading this batch (readableVal).
+		// This means any data accumulated in w.buf (both old data from
+		// beforeReadBufSize and part of newly copied data) is now suspect.
+
 		// Calculate how much data was overwritten
-		diff := newReadableVal - readableVal
+		diff := latestSharedReadableIdx - readableVal
 		// Include any previously buffered data that's now invalid
 		diff += uint64(beforeReadBufSize)
 
 		if diff > uint64(len(w.buf)) {
 			// All our data was overwritten - discard everything and retry
 			w.buf = w.buf[:0]
+			atomic.StoreUint64(&w.readIdx, latestSharedReadableIdx) // Reset reader position to the new valid start
 			return nil
 		}
 

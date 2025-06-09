@@ -40,9 +40,7 @@ mbuf_get_timestamp(const struct rte_mbuf *mbuf) {
 			return 0;
 	}
 
-	return *RTE_MBUF_DYNFIELD(
-		mbuf, timestamp_dynfield_offset, rte_mbuf_timestamp_t *
-	);
+	return *RTE_MBUF_DYNFIELD(mbuf, timestamp_dynfield_offset, rte_mbuf_timestamp_t *);
 }
 
 static inline uint64_t
