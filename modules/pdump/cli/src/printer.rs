@@ -58,7 +58,11 @@ pub fn pretty_print_metadata<W: Write>(mut writer: W, meta: &pdumppb::RecordMeta
 ///
 /// * `writer` - A writer to output the formatted text to.
 /// * `ethernet_packet` - A byte slice representing the complete Ethernet frame.
-pub fn pretty_print_ethernet_frame_concise<W: Write>(mut writer: W, ethernet_packet: &[u8]) -> io::Result<()> {
+pub fn pretty_print_ethernet_frame_concise<W: Write>(
+    mut writer: W,
+    ethernet_packet: &[u8],
+    packet_len: u32,
+) -> io::Result<()> {
     let frame = match EthernetPacket::new(ethernet_packet) {
         Some(frame) => frame,
         None => {
@@ -146,15 +150,21 @@ pub fn pretty_print_ethernet_frame_concise<W: Write>(mut writer: W, ethernet_pac
     if !vlan_part.is_empty() {
         vlan_part = format!(" VLANS[{}]", vlan_part);
     }
+    let origin_len = if ethernet_packet.len() < packet_len as usize {
+        format!("{}>", packet_len)
+    } else {
+        "".to_string()
+    };
     // Print concise one-line summary
     writeln!(
         writer,
-        "{}->{}{} {} ({}B)",
+        "{}->{}{} {} ({}{}B)",
         frame.get_source(),
         frame.get_destination(),
         vlan_part,
         protocol_info,
-        ethernet_packet.len()
+        origin_len,
+        ethernet_packet.len(),
     )?;
 
     Ok(())
@@ -166,7 +176,7 @@ pub fn pretty_print_ethernet_frame_concise<W: Write>(mut writer: W, ethernet_pac
 ///
 /// * `writer` - A writer to output the formatted text to.
 /// * `ethernet_packet` - A byte slice representing the complete Ethernet frame.
-pub fn pretty_print_ethernet_frame<W: Write>(mut writer: W, ethernet_packet: &[u8]) -> io::Result<()> {
+pub fn pretty_print_ethernet_frame<W: Write>(mut writer: W, ethernet_packet: &[u8], packet_len: u32) -> io::Result<()> {
     // Create an EthernetPacket from the byte slice.
     let frame = match EthernetPacket::new(ethernet_packet) {
         Some(frame) => frame,
@@ -176,7 +186,12 @@ pub fn pretty_print_ethernet_frame<W: Write>(mut writer: W, ethernet_packet: &[u
         }
     };
 
-    writeln!(writer, "--- Ethernet Frame ---")?;
+    let truncated = if ethernet_packet.len() < packet_len as usize {
+        format!(" (Truncated to {})", ethernet_packet.len())
+    } else {
+        "".to_string()
+    };
+    writeln!(writer, "--- Ethernet Frame {} Bytes{} ---", packet_len, truncated)?;
     writeln!(writer, "  Source MAC:      {}", frame.get_source())?;
     writeln!(writer, "  Destination MAC: {}", frame.get_destination())?;
 
@@ -1022,7 +1037,7 @@ mod tests {
         let frame = create_ipv4_tcp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame_concise(&mut output, &frame, 0).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
@@ -1039,7 +1054,8 @@ mod tests {
         let frame = create_ipv4_udp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        let packet_len = frame.len() * 2;
+        pretty_print_ethernet_frame_concise(&mut output, &frame, packet_len as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
@@ -1047,7 +1063,7 @@ mod tests {
         assert!(output_str.contains("aa:bb:cc:dd:ee:ff->00:11:22:33:44:55"));
         assert!(output_str.contains("IPv4:10.0.0.1->10.0.0.2"));
         assert!(output_str.contains("UDP:53->53"));
-        assert!(output_str.contains(&format!("({}B)", frame.len())));
+        assert!(output_str.contains(&format!("({}>{}B)", packet_len, frame.len())));
     }
 
     #[test]
@@ -1055,7 +1071,7 @@ mod tests {
         let frame = create_ipv6_tcp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame_concise(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
@@ -1072,7 +1088,7 @@ mod tests {
         let frame = create_vlan_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame_concise(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
@@ -1088,7 +1104,7 @@ mod tests {
         let frame = create_arp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame_concise(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
@@ -1103,7 +1119,7 @@ mod tests {
         let frame = create_malformed_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame_concise(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
@@ -1116,12 +1132,17 @@ mod tests {
         let frame = create_ipv4_tcp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        let packet_len = frame.len() as u32 * 3;
+        pretty_print_ethernet_frame(&mut output, &frame, packet_len).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
         // Check that output contains expected sections and data
-        assert!(output_str.contains("--- Ethernet Frame ---"));
+        assert!(
+            output_str.contains("--- Ethernet Frame 186 Bytes (Truncated to 62) ---"),
+            "{}",
+            output_str
+        );
         assert!(output_str.contains("Source MAC:      aa:bb:cc:dd:ee:ff"));
         assert!(output_str.contains("Destination MAC: 00:11:22:33:44:55"));
         assert!(output_str.contains("EtherType:       IPv4 (0x0800)"));
@@ -1142,12 +1163,12 @@ mod tests {
         let frame = create_ipv4_udp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
         // Check that output contains expected sections and data
-        assert!(output_str.contains("--- Ethernet Frame ---"));
+        assert!(output_str.contains("--- Ethernet Frame 50 Bytes ---"), "{}", output_str);
         assert!(output_str.contains("Source MAC:      aa:bb:cc:dd:ee:ff"));
         assert!(output_str.contains("Destination MAC: 00:11:22:33:44:55"));
         assert!(output_str.contains("EtherType:       IPv4 (0x0800)"));
@@ -1166,12 +1187,12 @@ mod tests {
         let frame = create_ipv6_tcp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
         // Check that output contains expected sections and data
-        assert!(output_str.contains("--- Ethernet Frame ---"));
+        assert!(output_str.contains("--- Ethernet Frame 84 Bytes ---"), "{}", output_str);
         assert!(output_str.contains("Source MAC:      aa:bb:cc:dd:ee:ff"));
         assert!(output_str.contains("Destination MAC: 00:11:22:33:44:55"));
         assert!(output_str.contains("EtherType:       IPv6 (0x86dd)"));
@@ -1192,12 +1213,12 @@ mod tests {
         let frame = create_vlan_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
         // Check that output contains expected sections and data
-        assert!(output_str.contains("--- Ethernet Frame ---"));
+        assert!(output_str.contains("--- Ethernet Frame 46 Bytes ---"), "{}", output_str);
         assert!(output_str.contains("Source MAC:      aa:bb:cc:dd:ee:ff"));
         assert!(output_str.contains("Destination MAC: 00:11:22:33:44:55"));
         assert!(output_str.contains("VLAN Tag:"));
@@ -1213,12 +1234,12 @@ mod tests {
         let frame = create_arp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
         // Check that output contains expected sections and data
-        assert!(output_str.contains("--- Ethernet Frame ---"));
+        assert!(output_str.contains("--- Ethernet Frame 42 Bytes ---"), "{}", output_str);
         assert!(output_str.contains("Source MAC:      aa:bb:cc:dd:ee:ff"));
         assert!(output_str.contains("Destination MAC: 00:11:22:33:44:55"));
         assert!(output_str.contains("EtherType:       ARP (0x0806)"));
@@ -1231,7 +1252,7 @@ mod tests {
         let frame = create_malformed_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
@@ -1249,12 +1270,12 @@ mod tests {
         frame.extend_from_slice(&[0xFF, 0xFF]); // Unknown EtherType
 
         let mut output = Vec::new();
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
         // Check that unknown EtherType is handled
-        assert!(output_str.contains("--- Ethernet Frame ---"));
+        assert!(output_str.contains("--- Ethernet Frame 14 Bytes ---"), "{}", output_str);
         assert!(output_str.contains("EtherType:       Unknown (0xffff)"));
         assert!(output_str.contains("L3 Protocol:     (Unhandled EtherType)"));
         assert!(output_str.contains("----------------------"));
@@ -1270,14 +1291,15 @@ mod tests {
         frame.extend_from_slice(&[0x12, 0x34]); // Unknown EtherType
 
         let mut output = Vec::new();
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        let packet_len = frame.len() as u32 * 3;
+        pretty_print_ethernet_frame_concise(&mut output, &frame, packet_len).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
 
         // Check that unknown EtherType is handled in concise format
         assert!(output_str.contains("aa:bb:cc:dd:ee:ff->00:11:22:33:44:55"));
         assert!(output_str.contains("EtherType:0x1234"));
-        assert!(output_str.contains(&format!("({}B)", frame.len())));
+        assert!(output_str.contains("(42>14B)"), "{}", output_str);
     }
 
     #[test]
@@ -1285,7 +1307,7 @@ mod tests {
         let frame = create_ipv4_tcp_frame();
         let mut cursor = Cursor::new(Vec::new());
 
-        pretty_print_ethernet_frame_concise(&mut cursor, &frame).unwrap();
+        pretty_print_ethernet_frame_concise(&mut cursor, &frame, frame.len() as u32).unwrap();
 
         let output = cursor.into_inner();
         let output_str = String::from_utf8(output).unwrap();
@@ -1301,13 +1323,13 @@ mod tests {
         let frame = create_ipv4_udp_frame();
         let mut cursor = Cursor::new(Vec::new());
 
-        pretty_print_ethernet_frame(&mut cursor, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut cursor, &frame, frame.len() as u32).unwrap();
 
         let output = cursor.into_inner();
         let output_str = String::from_utf8(output).unwrap();
 
         // Verify the function works with Cursor as well
-        assert!(output_str.contains("--- Ethernet Frame ---"));
+        assert!(output_str.contains("--- Ethernet Frame 50 Bytes ---"), "{}", output_str);
         assert!(output_str.contains("Source MAC:      aa:bb:cc:dd:ee:ff"));
         assert!(output_str.contains("--- UDP Datagram ---"));
         assert!(output_str.contains("----------------------"));
@@ -1318,7 +1340,7 @@ mod tests {
         let frame = create_ipv4_tcp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame_concise(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
         let expected = format!(
@@ -1334,7 +1356,7 @@ mod tests {
         let frame = create_ipv4_udp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame_concise(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
         let expected = format!(
@@ -1350,7 +1372,7 @@ mod tests {
         let frame = create_vlan_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame_concise(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
         let expected = format!(
@@ -1366,7 +1388,7 @@ mod tests {
         let frame = create_arp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame_concise(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
         let expected = format!("aa:bb:cc:dd:ee:ff->00:11:22:33:44:55 ARP ({}B)\n", frame.len());
@@ -1379,10 +1401,10 @@ mod tests {
         let frame = create_ipv4_tcp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
-        let expected = r#"--- Ethernet Frame ---
+        let expected = r#"--- Ethernet Frame 62 Bytes ---
   Source MAC:      aa:bb:cc:dd:ee:ff
   Destination MAC: 00:11:22:33:44:55
   EtherType:       IPv4 (0x0800)
@@ -1407,7 +1429,7 @@ mod tests {
 ----------------------
 "#;
 
-        assert_eq!(output_str, expected);
+        assert_eq!(output_str, expected, "{} != {}", output_str, expected);
     }
 
     #[test]
@@ -1415,10 +1437,10 @@ mod tests {
         let frame = create_ipv4_udp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
-        let expected = r#"--- Ethernet Frame ---
+        let expected = r#"--- Ethernet Frame 50 Bytes ---
   Source MAC:      aa:bb:cc:dd:ee:ff
   Destination MAC: 00:11:22:33:44:55
   EtherType:       IPv4 (0x0800)
@@ -1447,10 +1469,10 @@ mod tests {
         let frame = create_vlan_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
-        let expected = r#"--- Ethernet Frame ---
+        let expected = r#"--- Ethernet Frame 46 Bytes ---
   Source MAC:      aa:bb:cc:dd:ee:ff
   Destination MAC: 00:11:22:33:44:55
   VLAN Tag:
@@ -1461,7 +1483,7 @@ mod tests {
 ----------------------
 "#;
 
-        assert_eq!(output_str, expected);
+        assert_eq!(output_str, expected, "{} != {}", output_str, expected);
     }
 
     #[test]
@@ -1469,10 +1491,10 @@ mod tests {
         let frame = create_ipv6_tcp_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
-        let expected = r#"--- Ethernet Frame ---
+        let expected = r#"--- Ethernet Frame 84 Bytes ---
   Source MAC:      aa:bb:cc:dd:ee:ff
   Destination MAC: 00:11:22:33:44:55
   EtherType:       IPv6 (0x86dd)
@@ -1504,7 +1526,7 @@ mod tests {
         let frame = create_malformed_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
         let expected = "Error: Malformed Ethernet frame.\n";
@@ -1517,7 +1539,7 @@ mod tests {
         let frame = create_malformed_frame();
         let mut output = Vec::new();
 
-        pretty_print_ethernet_frame_concise(&mut output, &frame).unwrap();
+        pretty_print_ethernet_frame_concise(&mut output, &frame, frame.len() as u32).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
         let expected = "Error: Malformed Ethernet frame.\n";

@@ -126,12 +126,13 @@ impl PdumpWriter {
     }
 
     fn write_text(writer: &mut Text, rec: pdumppb::Record) -> Result<usize, Box<dyn Error>> {
+        let meta = &rec.meta.unwrap();
         if writer.pretty {
-            printer::pretty_print_metadata(&mut writer.inner, &rec.meta.unwrap())?;
-            printer::pretty_print_ethernet_frame(&mut writer.inner, &rec.data)?;
+            printer::pretty_print_metadata(&mut writer.inner, meta)?;
+            printer::pretty_print_ethernet_frame(&mut writer.inner, &rec.data, meta.packet_len)?;
         } else {
             printer::pretty_print_metadata_concise(&mut writer.inner, &rec.meta.unwrap())?;
-            printer::pretty_print_ethernet_frame_concise(&mut writer.inner, &rec.data)?;
+            printer::pretty_print_ethernet_frame_concise(&mut writer.inner, &rec.data, meta.packet_len)?;
         }
         Ok(0)
     }
