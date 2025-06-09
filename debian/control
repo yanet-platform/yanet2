@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Konstantin Sazonov <moonug@yandex-team.ru>
 Standards-Version: 4.6.2
 Build-Depends: debhelper (>= 12)
- , meson (>= 0.63)
+ , meson (>= 0.61)
  , ninja-build
  , pkg-config
  , libnuma-dev
