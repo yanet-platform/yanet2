@@ -137,8 +137,7 @@ worker_send_to_port(struct worker_write_ctx *ctx, struct packet *packet) {
 		ctx->tx_connections + packet->tx_device_id;
 
 	if (!tx_conn->count) {
-		fprintf(stderr, "no conn\n");
-		// No available data pipe to the port
+		LOG(ERROR, "no available data pipe for the port");
 		return -1;
 	}
 
