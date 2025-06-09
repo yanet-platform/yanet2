@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Konstantin Sazonov <moonug@yandex-team.ru>
 Standards-Version: 4.6.2
 Build-Depends: debhelper (>= 12)
- , meson (>= 0.53)
+ , meson (>= 0.63)
  , ninja-build
  , pkg-config
  , libnuma-dev
@@ -13,7 +13,7 @@ Build-Depends: debhelper (>= 12)
  , libibverbs-dev
  , protobuf-compiler
  , libprotobuf-dev
- , golang-go (>= 1.19)
+ , golang-go (>= 1.24)
  , python3-dev
  , python3-setuptools
  , python3-pyelftools
