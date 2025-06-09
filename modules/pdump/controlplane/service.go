@@ -254,7 +254,7 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 		return fmt.Errorf("config for %s on NUMA node %d is not initialized properly", name, numa)
 	}
 
-	recordCh := make(chan *pdumppb.Record, 100)
+	recordCh := make(chan *pdumppb.Record, 16)
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 	go m.runRingReaders(ctx, config, recordCh)

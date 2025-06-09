@@ -182,7 +182,8 @@ impl PdumpWriter {
 
 pub fn pdump_write(
     config: Vec<pdumppb::Config>,
-    mut rx: mpsc::UnboundedReceiver<pdumppb::Record>,
+    mut rx: mpsc::Receiver<pdumppb::Record>,
+    packet_limit: Option<u64>,
     fmt: DumpOutputFormat,
     dst: &str,
 ) {
@@ -194,11 +195,23 @@ pub fn pdump_write(
             return;
         }
     };
+    let mut count = 0;
     while let Some(rec) = rx.blocking_recv() {
         if let Err(e) = writer.write(rec) {
             log::error!("failed to write record: {}", e);
             break;
         };
+        if let Some(limit) = packet_limit {
+            if count >= limit {
+                log::debug!(
+                    "stopping writer because the packet capture limit has been reached: {}",
+                    limit
+                );
+
+                break;
+            }
+        }
+        count += 1;
     }
     _ = writer.flush().map_err(|e| {
         log::error!("failed to flush writer: {}", e);
@@ -207,7 +220,7 @@ pub fn pdump_write(
 
 pub async fn pdump_stream_reader(
     mut stream: Streaming<pdumppb::Record>,
-    tx: mpsc::UnboundedSender<pdumppb::Record>,
+    tx: mpsc::Sender<pdumppb::Record>,
     done: CancellationToken,
 ) {
     loop {
@@ -224,8 +237,8 @@ pub async fn pdump_stream_reader(
                     }
                     Ok(None) => return,
                     Ok(Some(rec)) => {
-                        if let Err(e) = tx.send(rec) {
-                            log::error!("failed to send record to pdump writer via mpsc channel: {}", e);
+                        if let Err(e) = tx.send(rec).await {
+                            log::warn!("failed to send Record to pdump writer via mpsc channel: {}", e);
                             return;
                         };
                     }

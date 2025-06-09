@@ -2,6 +2,7 @@ use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use core::error::Error;
 use ptree::TreeBuilder;
+use std::io::ErrorKind;
 
 use tokio::signal::{unix, unix::SignalKind};
 use tokio::task::JoinSet;
@@ -182,15 +183,22 @@ impl PdumpService {
         let done = cancellation_token.clone();
 
         let mut reader_set = JoinSet::new();
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<pdumppb::Record>();
+        let (tx, rx) = tokio::sync::mpsc::channel::<pdumppb::Record>(16);
 
         log::debug!("request current pdump configuration for numa: {:?}", cmd.numa);
-        let configs = self
+        let configs: Vec<_> = self
             .get_configs(&cmd.config_name, cmd.numa.clone())
             .await?
             .into_iter()
-            .map(|c| c.config.expect("some pdump config"))
+            .filter_map(|c| c.config)
             .collect();
+
+        if configs.is_empty() {
+            return Err(Box::new(std::io::Error::new(
+                ErrorKind::NotFound,
+                format!("Configuration {} not found on NUMA {:?}", cmd.config_name, cmd.numa),
+            )));
+        }
 
         for numa in cmd.numa {
             let request = ReadDumpRequest {
@@ -213,7 +221,7 @@ impl PdumpService {
         // Spawn outside the reader_set to get unpinable join handler.
         let mut write_jh = tokio::task::spawn_blocking(move || {
             let output = cmd.output.unwrap_or("-".to_string());
-            writer::pdump_write(configs, rx, cmd.format, &output)
+            writer::pdump_write(configs, rx, cmd.num, cmd.format, &output)
         });
 
         let mut sig_pipe = unix::signal(SignalKind::pipe())?;
@@ -306,7 +314,7 @@ pub async fn main() {
     logging::init(cmd.verbose as usize).expect("initialize logging");
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
+        log::error!("run failed: {err}");
         std::process::exit(1);
     }
 }

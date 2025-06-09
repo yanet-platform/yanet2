@@ -82,6 +82,10 @@ pub struct ReadCmd {
     /// Dump output destination.
     #[clap(long, short = 'o')]
     pub output: Option<String>,
+
+    /// The number of packets to capture before exiting.
+    #[arg(long, short)]
+    pub num: Option<u64>,
 }
 
 fn ring_buffer_size_range(s: &str) -> Result<u64, String> {
