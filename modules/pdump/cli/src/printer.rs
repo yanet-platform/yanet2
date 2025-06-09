@@ -22,7 +22,8 @@ pub fn pretty_print_metadata_concise<W: Write>(mut writer: W, meta: &pdumppb::Re
     // Format: W:worker_idx P:pipeline_idx RX:rx_device_id TX:tx_device_id
     write!(
         writer,
-        "Q:{} W:{} P:{} RX:{} TX:{} ",
+        "{} Q:{} W:{} P:{} RX:{} TX:{} ",
+        format_duration_ns(meta.timestamp),
         if meta.is_drops { "D" } else { "I" },
         meta.worker_idx,
         meta.pipeline_idx,
@@ -39,8 +40,9 @@ pub fn pretty_print_metadata_concise<W: Write>(mut writer: W, meta: &pdumppb::Re
 /// * `meta` - The metadata field from a pdumppb::Record.
 pub fn pretty_print_metadata<W: Write>(mut writer: W, meta: &pdumppb::RecordMeta) -> io::Result<()> {
     let queue = if meta.is_drops { "DROPS" } else { "INPUT" };
+    let ts = format_duration_ns(meta.timestamp);
     writeln!(writer, "--- Packet Metadata ---")?;
-    writeln!(writer, "  Timestamp:      {}", meta.timestamp)?;
+    writeln!(writer, "  Timestamp:      {}", ts)?;
     writeln!(writer, "  Packet Length:  {}", meta.packet_len)?;
     writeln!(writer, "  Worker Index:   {}", meta.worker_idx)?;
     writeln!(writer, "  Pipeline Index: {}", meta.pipeline_idx)?;
@@ -860,6 +862,19 @@ fn get_tcp_flags_string(flags: u8) -> String {
     }
 }
 
+fn format_duration_ns(ts: u64) -> String {
+    let micro = ts / 1000 % 1000;
+    let total_millis = ts / 1000000;
+    let millis = total_millis % 1000;
+    let total_seconds = total_millis / 1000;
+    let seconds = total_seconds % 60;
+    let total_minutes = total_seconds / 60;
+    let minutes = total_minutes % 60;
+    let hours = total_minutes / 60;
+
+    format!("{:02}:{:02}:{:02}.{:03}.{:03}", hours, minutes, seconds, millis, micro)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1564,7 +1579,7 @@ mod tests {
         pretty_print_metadata_concise(&mut output, &meta).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
-        assert_eq!(output_str, "Q:I W:1 P:2 RX:3 TX:4 ");
+        assert_eq!(output_str, "00:00:01.234.567 Q:I W:1 P:2 RX:3 TX:4 ");
     }
 
     #[test]
@@ -1586,7 +1601,7 @@ mod tests {
         let output_str = String::from_utf8(output).unwrap();
         let expected = "\
 --- Packet Metadata ---
-  Timestamp:      1234567890
+  Timestamp:      00:00:01.234.567
   Packet Length:  1500
   Worker Index:   1
   Pipeline Index: 2

@@ -53,6 +53,7 @@ impl io::Write for PdumpOutput {
 struct Text {
     inner: PdumpOutput,
     pretty: bool,
+    base_ts: Option<u64>,
 }
 
 struct Pcap {
@@ -75,8 +76,16 @@ impl PdumpWriter {
         let output = PdumpOutput::new(dst)?;
 
         let writer = match fmt {
-            DumpOutputFormat::Text => PdumpWriter::Text(Text { inner: output, pretty: false }),
-            DumpOutputFormat::Pretty => PdumpWriter::Text(Text { inner: output, pretty: true }),
+            DumpOutputFormat::Text => PdumpWriter::Text(Text {
+                inner: output,
+                pretty: false,
+                base_ts: None,
+            }),
+            DumpOutputFormat::Pretty => PdumpWriter::Text(Text {
+                inner: output,
+                pretty: true,
+                base_ts: None,
+            }),
             DumpOutputFormat::Pcap => {
                 let header = PcapHeader {
                     snaplen,
@@ -126,12 +135,24 @@ impl PdumpWriter {
     }
 
     fn write_text(writer: &mut Text, rec: pdumppb::Record) -> Result<usize, Box<dyn Error>> {
-        let meta = &rec.meta.unwrap();
+        let mut meta = rec.meta.unwrap();
+
+        let ts = match &writer.base_ts {
+            None => {
+                // Store the timestamp of the first packet in the writer to establish a baseline.
+                writer.base_ts = Some(meta.timestamp);
+                0
+            }
+            // Align timestamps relative to the first packet.
+            Some(v) => meta.timestamp - *v,
+        };
+        meta.timestamp = ts;
+
         if writer.pretty {
-            printer::pretty_print_metadata(&mut writer.inner, meta)?;
+            printer::pretty_print_metadata(&mut writer.inner, &meta)?;
             printer::pretty_print_ethernet_frame(&mut writer.inner, &rec.data, meta.packet_len)?;
         } else {
-            printer::pretty_print_metadata_concise(&mut writer.inner, &rec.meta.unwrap())?;
+            printer::pretty_print_metadata_concise(&mut writer.inner, &meta)?;
             printer::pretty_print_ethernet_frame_concise(&mut writer.inner, &rec.data, meta.packet_len)?;
         }
         Ok(0)
