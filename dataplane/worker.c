@@ -147,7 +147,7 @@ worker_send_to_port(struct worker_write_ctx *ctx, struct packet *packet) {
 		    worker_connection_push_cb,
 		    packet
 	    ) != 1) {
-		fprintf(stderr, "no space\n");
+		LOG(ERROR, "data pipe is full");
 		return -1;
 	}
 
