@@ -52,12 +52,14 @@ struct packet {
 struct packet_list {
 	struct packet *first;
 	struct packet **last;
+	uint64_t count;
 };
 
 static inline void
 packet_list_init(struct packet_list *list) {
 	list->first = NULL;
 	list->last = &list->first;
+	list->count = 0;
 }
 
 static inline void
@@ -65,6 +67,7 @@ packet_list_add(struct packet_list *list, struct packet *packet) {
 	*list->last = packet;
 	packet->next = NULL;
 	list->last = &packet->next;
+	list->count += 1;
 }
 
 static inline struct packet *
@@ -86,6 +89,7 @@ packet_list_concat(struct packet_list *dst, struct packet_list *src) {
 
 	*dst->last = packet_list_first(src);
 	dst->last = src->last;
+	dst->count += src->count;
 }
 
 static inline struct packet *
@@ -97,8 +101,14 @@ packet_list_pop(struct packet_list *packets) {
 	packets->first = res->next;
 	if (packets->first == NULL)
 		packets->last = &packets->first;
+	packets->count -= 1;
 
 	return res;
+}
+
+static inline uint64_t
+packet_list_count(struct packet_list *packets) {
+	return packets->count;
 }
 
 int

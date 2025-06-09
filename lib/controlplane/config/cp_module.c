@@ -32,50 +32,10 @@ cp_module_init(
 
 	cp_module->free_handler = free_handler;
 
-	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	cp_config_lock(cp_config);
-
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
-	uint64_t module_data_index = (uint64_t)-1;
-	if (!cp_config_gen_lookup_module_index(
-		    cp_config_gen,
-		    cp_module->type,
-		    cp_module->name,
-		    &module_data_index
+	if (counter_registry_init(
+		    &cp_module->counters, &cp_module->memory_context, 1
 	    )) {
-		struct cp_module *prev_module_data = cp_config_gen_get_module(
-			cp_config_gen, module_data_index
-		);
-
-		cp_module->gen = prev_module_data->gen + 1;
-		if (counter_registry_init(
-			    &cp_module->counters,
-			    &cp_module->memory_context,
-			    cp_module->gen
-		    )) {
-			cp_config_unlock(cp_config);
-			return -1;
-		}
-
-		if (counter_registry_copy(
-			    &cp_module->counters, &prev_module_data->counters
-		    )) {
-			cp_config_unlock(cp_config);
-			return -1;
-		}
-
-		cp_config_unlock(cp_config);
-
-	} else {
-		cp_config_unlock(cp_config);
-		if (counter_registry_init(
-			    &cp_module->counters, &cp_module->memory_context, 1
-		    )) {
-			return -1;
-		}
-
-		cp_module->gen = 1;
+		return -1;
 	}
 
 	return 0;
@@ -214,18 +174,26 @@ cp_module_registry_upsert(
 	struct cp_module_registry *module_registry,
 	uint64_t type,
 	const char *name,
-	struct cp_module *module
+	struct cp_module *new_module
 ) {
 	struct cp_module_cmp_data cmp_data = {
 		.type = type,
 		.name = name,
 	};
 
+	struct cp_module *old_module =
+		cp_module_registry_lookup(module_registry, type, name);
+
+	counter_registry_link(
+		&new_module->counters,
+		(old_module != NULL) ? &old_module->counters : NULL
+	);
+
 	return registry_replace(
 		&module_registry->registry,
 		cp_module_registry_item_cmp,
 		&cmp_data,
-		&module->config_item,
+		&new_module->config_item,
 		cp_module_registry_item_free_cb,
 		ADDR_OF(&module_registry->memory_context)
 	);

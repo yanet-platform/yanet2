@@ -43,11 +43,8 @@ forward_handle_v4(
 		ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
 		)[forward_device_id]
 			.counter_id;
-	uint64_t *counters = counter_get_address(
-		ADDR_OF(&config->cp_module.counters.links) + counter_id,
-		counter_storage,
-		worker_id
-	);
+	uint64_t *counters =
+		counter_get_address(counter_id, worker_id, counter_storage);
 	counters[0] += 1;
 
 	return ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
@@ -88,11 +85,8 @@ forward_handle_v6(
 		ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
 		)[forward_device_id]
 			.counter_id;
-	uint64_t *counters = counter_get_address(
-		ADDR_OF(&config->cp_module.counters.links) + counter_id,
-		counter_storage,
-		worker_id
-	);
+	uint64_t *counters =
+		counter_get_address(counter_id, worker_id, counter_storage);
 	counters[0] += 1;
 
 	return ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
@@ -114,10 +108,9 @@ forward_handle_l2(
 		return packet->tx_device_id;
 
 	uint64_t *counters = counter_get_address(
-		ADDR_OF(&config->cp_module.counters.links
-		) + config->device_forwards[packet->tx_device_id].l2_counter_id,
-		counter_storage,
-		worker_id
+		config->device_forwards[packet->tx_device_id].l2_counter_id,
+		worker_id,
+		counter_storage
 	);
 	counters[0] += 1;
 

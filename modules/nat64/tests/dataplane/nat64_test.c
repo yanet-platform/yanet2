@@ -2187,9 +2187,19 @@ append_test_cases_from_mappings(struct test_case **test_case) {
 			.eth =
 				{
 					.dst_addr.addr_bytes =
-						"\xff\xff\xff\xff\xff\xff",
+						{0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff},
 					.src_addr.addr_bytes =
-						"\x02\x00\x00\x00\x00\x00",
+						{0x02,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00},
 					.ether_type = rte_cpu_to_be_16(
 						RTE_ETHER_TYPE_IPV4
 					),
@@ -2223,9 +2233,19 @@ append_test_cases_from_mappings(struct test_case **test_case) {
 			.eth =
 				{
 					.dst_addr.addr_bytes =
-						"\xff\xff\xff\xff\xff\xff",
+						{0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff},
 					.src_addr.addr_bytes =
-						"\x02\x00\x00\x00\x00\x00",
+						{0x02,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00},
 					.ether_type = rte_cpu_to_be_16(
 						RTE_ETHER_TYPE_IPV6
 					),
@@ -2350,10 +2370,14 @@ create_icmp_packet(
 
 	// Common fields
 	rte_memcpy(
-		&pkt->eth.dst_addr.addr_bytes, "\xff\xff\xff\xff\xff\xff", 6
+		&pkt->eth.dst_addr.addr_bytes,
+		(uint8_t[6]){0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		6
 	);
 	rte_memcpy(
-		&pkt->eth.src_addr.addr_bytes, "\x02\x00\x00\x00\x00\x00", 6
+		&pkt->eth.src_addr.addr_bytes,
+		(uint8_t[6]){0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
+		6
 	);
 
 	// Create embedded packet for ICMP error messages if needed
@@ -3661,9 +3685,19 @@ append_test_cases_from_mappings_icmp(struct test_case **test_case) {
 			.eth =
 				{
 					.dst_addr.addr_bytes =
-						"\xff\xff\xfa\xff\xff\xff",
+						{0xff,
+						 0xff,
+						 0xfa,
+						 0xff,
+						 0xff,
+						 0xff},
 					.src_addr.addr_bytes =
-						"\x02\x00\x00\x00\x00\x00",
+						{0x02,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00},
 					.ether_type = rte_cpu_to_be_16(
 						RTE_ETHER_TYPE_IPV4
 					),
@@ -3693,9 +3727,19 @@ append_test_cases_from_mappings_icmp(struct test_case **test_case) {
 			.eth =
 				{
 					.dst_addr.addr_bytes =
-						"\xff\xff\xfa\xff\xff\xff",
+						{0xff,
+						 0xff,
+						 0xfa,
+						 0xff,
+						 0xff,
+						 0xff},
 					.src_addr.addr_bytes =
-						"\x02\x00\x00\x00\x00\x00",
+						{0x02,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00},
 					.ether_type = rte_cpu_to_be_16(
 						RTE_ETHER_TYPE_IPV6
 					),
@@ -3839,9 +3883,9 @@ test_nat64_udp_checksum() {
 		.eth =
 			{
 				.dst_addr.addr_bytes =
-					"\xff\xff\xff\xff\xff\xff",
+					{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 				.src_addr.addr_bytes =
-					"\x02\x00\x00\x00\x00\x00",
+					{0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
 				.ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV4),
 			},
 		.ip.ipv4 =
@@ -3872,9 +3916,9 @@ test_nat64_udp_checksum() {
 		.eth =
 			{
 				.dst_addr.addr_bytes =
-					"\xff\xff\xff\xff\xff\xff",
+					{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 				.src_addr.addr_bytes =
-					"\x02\x00\x00\x00\x00\x00",
+					{0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
 				.ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV6),
 			},
 		.ip.ipv6 =
@@ -4109,9 +4153,9 @@ append_test_cases_unknown_handling(struct test_case **test_case) {
 		.eth =
 			{
 				.dst_addr.addr_bytes =
-					"\xff\xff\xff\xff\xff\xff",
+					{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 				.src_addr.addr_bytes =
-					"\x02\x00\x00\x00\x00\x00",
+					{0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
 				.ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV6),
 			},
 		.ip.ipv6 =
@@ -4173,9 +4217,9 @@ append_test_cases_unknown_handling(struct test_case **test_case) {
 		.eth =
 			{
 				.dst_addr.addr_bytes =
-					"\xff\xff\xff\xff\xff\xff",
+					{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 				.src_addr.addr_bytes =
-					"\x02\x00\x00\x00\x00\x00",
+					{0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
 				.ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV4),
 			},
 		.ip.ipv4 =
@@ -4443,9 +4487,19 @@ append_test_cases_from_mappings_tcp(struct test_case **test_case) {
 			.eth =
 				{
 					.dst_addr.addr_bytes =
-						"\xff\xff\xff\xff\xff\xff",
+						{0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff},
 					.src_addr.addr_bytes =
-						"\x02\x00\x00\x00\x00\x00",
+						{0x02,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00},
 					.ether_type = rte_cpu_to_be_16(
 						RTE_ETHER_TYPE_IPV4
 					),
@@ -4481,9 +4535,19 @@ append_test_cases_from_mappings_tcp(struct test_case **test_case) {
 			.eth =
 				{
 					.dst_addr.addr_bytes =
-						"\xff\xff\xff\xff\xff\xff",
+						{0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff},
 					.src_addr.addr_bytes =
-						"\x02\x00\x00\x00\x00\x00",
+						{0x02,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00},
 					.ether_type = rte_cpu_to_be_16(
 						RTE_ETHER_TYPE_IPV6
 					),

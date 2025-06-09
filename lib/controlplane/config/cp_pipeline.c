@@ -35,6 +35,22 @@ cp_pipeline_create(
 		&new_pipeline->counter_registry, memory_context, 0
 	);
 
+	new_pipeline->counter_packet_in_count = counter_registry_register(
+		&new_pipeline->counter_registry, "input", 1
+	);
+	new_pipeline->counter_packet_out_count = counter_registry_register(
+		&new_pipeline->counter_registry, "output", 1
+	);
+	new_pipeline->counter_packet_drop_count = counter_registry_register(
+		&new_pipeline->counter_registry, "drop", 1
+	);
+	new_pipeline->counter_packet_bypass_count = counter_registry_register(
+		&new_pipeline->counter_registry, "bypass", 1
+	);
+	new_pipeline->counter_packet_in_hist = counter_registry_register(
+		&new_pipeline->counter_registry, "input histogram", 8
+	);
+
 	for (uint64_t module_idx = 0; module_idx < pipeline_config->length;
 	     ++module_idx) {
 		uint64_t index;
@@ -57,12 +73,15 @@ cp_pipeline_create(
 
 		char counter_name[COUNTER_NAME_LEN];
 		snprintf(
-			counter_name, COUNTER_NAME_LEN, "stage-%lu", module_idx
+			counter_name,
+			COUNTER_NAME_LEN,
+			"stage %lu tsc histogram",
+			module_idx
 		);
 
-		new_pipeline->modules[module_idx].counter_id =
+		new_pipeline->modules[module_idx].tsc_counter_id =
 			counter_registry_register(
-				&new_pipeline->counter_registry, counter_name, 4
+				&new_pipeline->counter_registry, counter_name, 8
 			);
 	}
 
@@ -77,6 +96,8 @@ void
 cp_pipeline_free(
 	struct memory_context *memory_context, struct cp_pipeline *pipeline
 ) {
+	//	counter_registry_destroy(&pipeline->counter_registry);
+
 	memory_bfree(
 		memory_context,
 		pipeline,
@@ -197,13 +218,21 @@ int
 cp_pipeline_registry_upsert(
 	struct cp_pipeline_registry *pipeline_registry,
 	const char *name,
-	struct cp_pipeline *pipeline
+	struct cp_pipeline *new_pipeline
 ) {
+	struct cp_pipeline *old_pipeline =
+		cp_pipeline_registry_lookup(pipeline_registry, name);
+
+	counter_registry_link(
+		&new_pipeline->counter_registry,
+		(old_pipeline != NULL) ? &old_pipeline->counter_registry : NULL
+	);
+
 	return registry_replace(
 		&pipeline_registry->registry,
 		cp_pipeline_registry_item_cmp,
 		name,
-		&pipeline->config_item,
+		&new_pipeline->config_item,
 		cp_pipeline_registry_item_free_cb,
 		ADDR_OF(&pipeline_registry->memory_context)
 	);

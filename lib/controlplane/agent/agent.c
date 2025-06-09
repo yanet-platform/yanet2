@@ -843,7 +843,6 @@ yanet_get_pm_counters(
 
 	uint64_t count = counter_registry->count;
 	struct counter_name *names = ADDR_OF(&counter_registry->names);
-	struct counter_link *links = ADDR_OF(&counter_registry->links);
 
 	cp_config_unlock(cp_config);
 
@@ -862,7 +861,56 @@ yanet_get_pm_counters(
 		handlers[idx].size = names[idx].size;
 		handlers[idx].gen = names[idx].gen;
 		handlers[idx].value_handle =
-			counter_get_value_handle(links + idx, counter_storage);
+			counter_get_value_handle(idx, counter_storage);
+	}
+
+	return list;
+}
+
+struct counter_handle_list *
+yanet_get_pipeline_counters(
+	struct dp_config *dp_config, const char *pipeline_name
+) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *cp_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
+
+	struct counter_registry *counter_registry;
+	struct counter_storage *counter_storage;
+
+	struct counter_storage *cs = cp_config_gen_get_pipeline_counter_storage(
+		cp_config_gen, pipeline_name
+	);
+
+	if (cs == NULL) {
+		cp_config_unlock(cp_config);
+		return NULL;
+	}
+	counter_storage = cs;
+	counter_registry = ADDR_OF(&counter_storage->registry);
+
+	uint64_t count = counter_registry->count;
+	struct counter_name *names = ADDR_OF(&counter_registry->names);
+
+	cp_config_unlock(cp_config);
+
+	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
+		sizeof(struct counter_handle_list) +
+		sizeof(struct counter_handle) * count
+	);
+
+	if (list == NULL)
+		return NULL;
+	list->count = count;
+	struct counter_handle *handlers = list->counters;
+
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		strtcpy(handlers[idx].name, names[idx].name, 60);
+		handlers[idx].size = names[idx].size;
+		handlers[idx].gen = names[idx].gen;
+		handlers[idx].value_handle =
+			counter_get_value_handle(idx, counter_storage);
 	}
 
 	return list;
@@ -892,7 +940,6 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 
 	uint64_t count = counter_registry->count;
 	struct counter_name *names = ADDR_OF(&counter_registry->names);
-	struct counter_link *links = ADDR_OF(&counter_registry->links);
 
 	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
 		sizeof(struct counter_handle_list) +
@@ -909,7 +956,7 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 		handlers[idx].size = names[idx].size;
 		handlers[idx].gen = names[idx].gen;
 		handlers[idx].value_handle =
-			counter_get_value_handle(links + idx, storage);
+			counter_get_value_handle(idx, storage);
 	}
 
 	return list;

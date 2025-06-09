@@ -153,6 +153,7 @@ cp_config_gen_install(
 			counter_storage_free(new_counter_storage);
 			goto error;
 		}
+		SET_OFFSET_OF(&pipeline->counters, new_counter_storage);
 	}
 
 	for (uint64_t pipeline_idx = 0;
@@ -252,6 +253,8 @@ cp_config_delete_module(
 	if (new_config_gen == NULL) {
 		goto error_unlock;
 	}
+
+	// FIXME check the module is not referenced by any pipeline
 
 	if (cp_module_registry_delete(
 		    &new_config_gen->module_registry, module_type, module_name

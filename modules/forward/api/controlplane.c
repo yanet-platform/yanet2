@@ -104,6 +104,30 @@ forward_module_config_free(struct cp_module *cp_module) {
 	}
 }
 
+static inline struct forward_target *
+forward_module_new_target(
+	struct memory_context *memory_context,
+	struct forward_device_config *device_config
+) {
+	struct forward_target *old_targets = ADDR_OF(&device_config->targets);
+
+	struct forward_target *new_targets =
+		(struct forward_target *)memory_brealloc(
+			memory_context,
+			old_targets,
+			sizeof(struct forward_target) *
+				(device_config->target_count),
+			sizeof(struct forward_target) *
+				(device_config->target_count + 1)
+		);
+
+	if (new_targets == NULL)
+		return NULL;
+
+	SET_OFFSET_OF(&device_config->targets, new_targets);
+	return new_targets + device_config->target_count++;
+}
+
 int
 forward_module_config_enable_v4(
 	struct cp_module *cp_module,
@@ -131,28 +155,17 @@ forward_module_config_enable_v4(
 	struct forward_device_config *device_config =
 		config->device_forwards + src_device_id;
 
-	struct forward_target *targets = (struct forward_target *)memory_balloc(
-		&agent->memory_context,
-		sizeof(struct forward_target) *
-			(device_config->target_count + 1)
+	struct forward_target *new_target = forward_module_new_target(
+		&agent->memory_context, device_config
 	);
-	if (targets == NULL) {
-		// FIXME
-	}
 
-	targets[device_config->target_count].device_id = dst_device_id;
-	targets[device_config->target_count].counter_id =
-		counter_registry_register(
-			&cp_module->counters, counter_name, 2
-		);
-	memory_bfree(
-		&agent->memory_context,
-		ADDR_OF(&device_config->targets),
-		sizeof(struct forward_target) * device_config->target_count
+	if (new_target == NULL)
+		return -1;
+
+	new_target->device_id = dst_device_id;
+	new_target->counter_id = counter_registry_register(
+		&cp_module->counters, counter_name, 2
 	);
-	SET_OFFSET_OF(&device_config->targets, targets);
-
-	device_config->target_count += 1;
 
 	return lpm_insert(
 		&config->device_forwards[src_device_id].lpm_v4,
@@ -190,28 +203,17 @@ forward_module_config_enable_v6(
 	struct forward_device_config *device_config =
 		config->device_forwards + src_device_id;
 
-	struct forward_target *targets = (struct forward_target *)memory_balloc(
-		&agent->memory_context,
-		sizeof(struct forward_target) *
-			(device_config->target_count + 1)
+	struct forward_target *new_target = forward_module_new_target(
+		&agent->memory_context, device_config
 	);
-	if (targets == NULL) {
-		// FIXME
-	}
 
-	targets[device_config->target_count].device_id = dst_device_id;
-	targets[device_config->target_count].counter_id =
-		counter_registry_register(
-			&cp_module->counters, counter_name, 2
-		);
-	memory_bfree(
-		&agent->memory_context,
-		ADDR_OF(&device_config->targets),
-		sizeof(struct forward_target) * device_config->target_count
+	if (new_target == NULL)
+		return -1;
+
+	new_target->device_id = dst_device_id;
+	new_target->counter_id = counter_registry_register(
+		&cp_module->counters, counter_name, 2
 	);
-	SET_OFFSET_OF(&device_config->targets, targets);
-
-	device_config->target_count += 1;
 
 	return lpm_insert(
 		&config->device_forwards[src_device_id].lpm_v6,

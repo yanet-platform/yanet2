@@ -309,8 +309,8 @@ worker_loop_round(struct dataplane_worker *worker) {
 			// lists
 			pipeline_process(
 				dp_config,
+				worker->dp_worker,
 				cp_config_gen,
-				worker->dp_worker->idx,
 				pipeline_idx,
 				&packet_front
 			);
@@ -506,54 +506,50 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 	struct dp_config *dp_config = worker->node->dp_config;
 	// FIXME: do not use hard-coded counter identifiers
 	dp_worker->iterations = counter_get_address(
-		ADDR_OF(&dp_config->worker_counters.links) + 0,
-		ADDR_OF(&dp_config->worker_counter_storage),
-		dp_worker->idx
+		0, dp_worker->idx, ADDR_OF(&dp_config->worker_counter_storage)
 	);
 
 	dp_worker->rx_count =
 		counter_get_address(
-			ADDR_OF(&dp_config->worker_counters.links) + 1,
-			ADDR_OF(&dp_config->worker_counter_storage),
-			dp_worker->idx
+			1,
+			dp_worker->idx,
+			ADDR_OF(&dp_config->worker_counter_storage)
 		) +
 		0;
-	dp_worker->rx_size =
-		counter_get_address(
-			ADDR_OF(&dp_config->worker_counters.links) + 1,
-			ADDR_OF(&dp_config->worker_counter_storage),
-			dp_worker->idx
-		) +
-		1;
+	dp_worker->rx_size = counter_get_address(
+				     1,
+				     dp_worker->idx,
+				     ADDR_OF(&dp_config->worker_counter_storage)
+			     ) +
+			     1;
 
 	dp_worker->tx_count =
 		counter_get_address(
-			ADDR_OF(&dp_config->worker_counters.links) + 2,
-			ADDR_OF(&dp_config->worker_counter_storage),
-			dp_worker->idx
+			2,
+			dp_worker->idx,
+			ADDR_OF(&dp_config->worker_counter_storage)
 		) +
 		0;
-	dp_worker->tx_size =
-		counter_get_address(
-			ADDR_OF(&dp_config->worker_counters.links) + 2,
-			ADDR_OF(&dp_config->worker_counter_storage),
-			dp_worker->idx
-		) +
-		1;
+	dp_worker->tx_size = counter_get_address(
+				     2,
+				     dp_worker->idx,
+				     ADDR_OF(&dp_config->worker_counter_storage)
+			     ) +
+			     1;
 
 	dp_worker->remote_rx_count =
 		counter_get_address(
-			ADDR_OF(&dp_config->worker_counters.links) + 3,
-			ADDR_OF(&dp_config->worker_counter_storage),
-			dp_worker->idx
+			3,
+			dp_worker->idx,
+			ADDR_OF(&dp_config->worker_counter_storage)
 		) +
 		0;
 
 	dp_worker->remote_tx_count =
 		counter_get_address(
-			ADDR_OF(&dp_config->worker_counters.links) + 4,
-			ADDR_OF(&dp_config->worker_counter_storage),
-			dp_worker->idx
+			4,
+			dp_worker->idx,
+			ADDR_OF(&dp_config->worker_counter_storage)
 		) +
 		0;
 

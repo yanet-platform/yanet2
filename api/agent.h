@@ -314,6 +314,11 @@ yanet_get_pm_counters(
 );
 
 struct counter_handle_list *
+yanet_get_pipeline_counters(
+	struct dp_config *dp_config, const char *pipeline_name
+);
+
+struct counter_handle_list *
 yanet_get_worker_counters(struct dp_config *dp_config);
 
 struct counter_handle *

@@ -104,7 +104,10 @@ counter_registry_expand(
 
 static uint64_t
 counter_registry_insert(
-	struct counter_registry *registry, const char *name, uint64_t size
+	struct counter_registry *registry,
+	const char *name,
+	uint64_t size,
+	uint64_t gen
 ) {
 	if (!size)
 		return -1;
@@ -126,12 +129,13 @@ counter_registry_insert(
 
 	strtcpy(new_name->name, name, COUNTER_NAME_LEN);
 	new_name->size = size;
-	new_name->gen = registry->gen;
+	new_name->gen = gen;
 
 	uint64_t pool_idx = uint64_log(size);
-	uint64_t link_size = 8 << pool_idx;
+	// uint64_t link_size = 8 << pool_idx;
 
-	new_link->offset = registry->counts[pool_idx]++ * link_size;
+	new_link->offset =
+		(uint64_t)-1; // registry->counts[pool_idx]++ * link_size;
 	new_link->pool_idx = pool_idx;
 
 	return registry->count++;
@@ -155,7 +159,62 @@ counter_registry_register(
 		return idx;
 	}
 
-	return counter_registry_insert(registry, name, size);
+	return counter_registry_insert(registry, name, size, registry->gen);
+}
+
+int
+counter_registry_link(
+	struct counter_registry *dst, struct counter_registry *src
+) {
+	if (src != NULL) {
+		for (uint64_t pool_idx = 0; pool_idx < COUNTER_POOL_SIZE;
+		     ++pool_idx) {
+			dst->counts[pool_idx] = src->counts[pool_idx];
+		}
+
+		for (uint64_t src_idx = 0; src_idx < src->count; ++src_idx) {
+			struct counter_name *src_name =
+				ADDR_OF(&src->names) + src_idx;
+
+			// Skip outdated counters
+			if (src_name->gen != src->gen)
+				continue;
+
+			uint64_t dst_idx = counter_registry_lookup_index(
+				dst, src_name->name, src_name->size
+			);
+			if (dst_idx == (uint64_t)-1) {
+				dst_idx = counter_registry_insert(
+					dst,
+					src_name->name,
+					src_name->size,
+					src_name->gen
+				);
+			}
+			if (dst_idx == (uint64_t)-1) {
+				return -1;
+			}
+
+			struct counter_link *src_link =
+				ADDR_OF(&src->links) + src_idx;
+			struct counter_link *dst_link =
+				ADDR_OF(&dst->links) + dst_idx;
+			dst_link->offset = src_link->offset;
+		}
+	}
+	for (uint64_t dst_idx = 0; dst_idx < dst->count; ++dst_idx) {
+		struct counter_link *dst_link = ADDR_OF(&dst->links) + dst_idx;
+
+		if (dst_link->offset != (uint64_t)-1) {
+			continue;
+		}
+
+		// FIXME reuse old links (with clearance)
+		dst_link->offset = dst->counts[dst_link->pool_idx]++ *
+				   (8 << dst_link->pool_idx);
+	}
+
+	return 0;
 }
 
 int

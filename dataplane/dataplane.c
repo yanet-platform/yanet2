@@ -484,6 +484,8 @@ dataplane_init(
 			dp_config->worker_count
 		);
 
+		counter_registry_link(&dp_config->worker_counters, NULL);
+
 		SET_OFFSET_OF(
 			&dp_config->worker_counter_storage,
 			counter_storage_spawn(

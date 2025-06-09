@@ -13,7 +13,7 @@ struct counter_storage;
 struct cp_pipeline_module {
 	uint64_t index;
 	struct counter_storage *counter_storage;
-	uint64_t counter_id;
+	uint64_t tsc_counter_id;
 };
 
 /*
@@ -22,8 +22,18 @@ struct cp_pipeline_module {
  */
 struct cp_pipeline {
 	struct registry_item config_item;
+
 	struct counter_registry counter_registry;
+	struct counter_storage *counters;
+
+	uint64_t counter_packet_in_count;
+	uint64_t counter_packet_out_count;
+	uint64_t counter_packet_drop_count;
+	uint64_t counter_packet_bypass_count;
+	uint64_t counter_packet_in_hist;
+
 	char name[CP_PIPELINE_NAME_LEN];
+
 	uint64_t length;
 	struct cp_pipeline_module modules[];
 };

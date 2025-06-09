@@ -55,6 +55,11 @@ counter_registry_register(
 	struct counter_registry *registry, const char *name, uint64_t size
 );
 
+int
+counter_registry_link(
+	struct counter_registry *dst, struct counter_registry *src
+);
+
 struct counter_storage_page {
 	uint64_t values[COUNTER_STORAGE_PAGE_SIZE / sizeof(uint64_t)];
 };
@@ -102,15 +107,21 @@ counter_storage_free(struct counter_storage *storage);
 struct counter_value_handle;
 static inline struct counter_value_handle *
 counter_get_value_handle(
-	struct counter_link *link, struct counter_storage *storage
+	uint64_t counter_id, struct counter_storage *counter_storage
 ) {
+	struct counter_registry *counter_regsitry =
+		ADDR_OF(&counter_storage->registry);
+
+	struct counter_link *link =
+		ADDR_OF(&counter_regsitry->links) + counter_id;
 
 #ifdef COUNTERS_CHECK
 	if (link->pool_idx >= COUNTER_POOL_SIZE)
 		return NULL;
 #endif
 
-	struct counter_storage_pool *pool = storage->pools + link->pool_idx;
+	struct counter_storage_pool *pool =
+		counter_storage->pools + link->pool_idx;
 	uint64_t block_idx = link->offset / COUNTER_STORAGE_PAGE_SIZE;
 	uint64_t offset = link->offset % COUNTER_STORAGE_PAGE_SIZE;
 
@@ -135,13 +146,13 @@ counter_handle_get_value(
 
 static inline uint64_t *
 counter_get_address(
-	struct counter_link *link,
-	struct counter_storage *storage,
-	uint64_t instance_id
+	uint64_t counter_id,
+	uint64_t instance_id,
+	struct counter_storage *storage
 ) {
 
 	struct counter_value_handle *value_handle =
-		counter_get_value_handle(link, storage);
+		counter_get_value_handle(counter_id, storage);
 
 #ifdef COUNTERS_CHECK
 	if (value_handle == NULL)
