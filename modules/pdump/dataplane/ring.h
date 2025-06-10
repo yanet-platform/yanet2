@@ -63,7 +63,7 @@ pdump_ring_prepare(
 	struct ring_buffer *ring, uint8_t *ring_data, uint32_t payload_size
 ) {
 	uint32_t aligned_payload_size = __ALIGN4RING(payload_size);
-	assert(ring->size > aligned_payload_size);
+	assert(ring->size >= aligned_payload_size);
 	assert(ring->write_idx >= ring->readable_idx);
 
 	// While the occupied space (write_idx - readable_idx) exceeds the
@@ -79,6 +79,19 @@ pdump_ring_prepare(
 		uint8_t *pos = ring_data + (ring->readable_idx & ring->mask);
 		uint32_t readable_slot_size = *(uint32_t *)pos;
 		readable_slot_size = __ALIGN4RING(readable_slot_size);
+
+		if (ring->readable_idx + readable_slot_size > ring->write_idx) {
+			// If invalid data was read from pos and advancing
+			// readable_idx would exceed write_idx, reset
+			// readable_idx to write_idx to indicate no more
+			// readable data is available.
+			atomic_store_explicit(
+				&ring->readable_idx,
+				ring->write_idx,
+				memory_order_release
+			);
+			return;
+		}
 
 		// Advance readable_idx past this message to free its space
 		atomic_fetch_add_explicit(
@@ -97,7 +110,7 @@ pdump_ring_write(
 	uint8_t *payload,
 	uint64_t size
 ) {
-	assert(ring->size > offset + size);
+	assert(ring->size >= offset + size);
 
 	size_t n = 0;
 	// Handle writes that may wrap around the ring buffer boundary.
