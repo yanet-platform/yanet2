@@ -5,6 +5,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifndef unlikely
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#endif
+
 // Align value to 4-byte boundary for consistent ring buffer alignment
 #define __ALIGN4RING(val) (((val) + 3) & ~3)
 
@@ -80,11 +84,16 @@ pdump_ring_prepare(
 		uint32_t readable_slot_size = *(uint32_t *)pos;
 		readable_slot_size = __ALIGN4RING(readable_slot_size);
 
-		if (ring->readable_idx + readable_slot_size > ring->write_idx) {
-			// If invalid data was read from pos and advancing
-			// readable_idx would exceed write_idx, reset
-			// readable_idx to write_idx to indicate no more
-			// readable data is available.
+		if (unlikely(
+			    !readable_slot_size ||
+			    ring->readable_idx + readable_slot_size >
+				    ring->write_idx
+		    )) {
+			// When invalid data is detected at the current position
+			// and advancing readable_idx would either exceed
+			// write_idx or cause an infinite loop, reset
+			// readable_idx to write_idx to indicate that no
+			// readable data remains in the buffer.
 			atomic_store_explicit(
 				&ring->readable_idx,
 				ring->write_idx,
@@ -137,4 +146,26 @@ pdump_ring_checkpoint(struct ring_buffer *ring, uint32_t size) {
 	// Use release ordering to ensure all data writes are visible to readers
 	// before the write_idx update makes the data available for consumption.
 	atomic_fetch_add_explicit(&ring->write_idx, size, memory_order_release);
+}
+
+static inline void
+pdump_ring_write_msg(
+	struct ring_buffer *ring,
+	uint8_t *ring_data,
+	struct ring_msg_hdr *hdr,
+	uint8_t *payload
+) {
+	// Step 1. Move readable_idx to make space for new data
+	pdump_ring_prepare(ring, ring_data, hdr->total_len);
+
+	// Step 2. Write ring_msg_hdr struct
+	uint64_t hdr_size = sizeof(*hdr);
+	pdump_ring_write(ring, ring_data, 0, (uint8_t *)hdr, hdr_size);
+
+	// Step 3. Write mbuf data to an offset equal to hdr_size.
+	uint64_t payload_size = hdr->total_len - hdr_size;
+	pdump_ring_write(ring, ring_data, hdr_size, payload, payload_size);
+
+	// Step 4. Store write_idx atomically, considering alignment.
+	pdump_ring_checkpoint(ring, hdr->total_len);
 }

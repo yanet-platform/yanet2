@@ -17,10 +17,13 @@ import (
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb"
 )
 
+type ringMsgHdr C.struct_ring_msg_hdr
+type cRingBuffer C.struct_ring_buffer
+
 const (
 	minRingSize     = datasize.MB
-	hdrSizeSize     = int(unsafe.Sizeof(C.struct_ring_msg_hdr{}.total_len))
-	cRingMsgHdrSize = unsafe.Sizeof(C.struct_ring_msg_hdr{})
+	hdrSizeSize     = int(unsafe.Sizeof(ringMsgHdr{}.total_len))
+	cRingMsgHdrSize = unsafe.Sizeof(ringMsgHdr{})
 )
 
 var (
@@ -28,6 +31,15 @@ var (
 	ringMsgMagic         = C.ring_msg_magic
 	defaultReadChunkSize = datasize.ByteSize(defaultSnaplen * 32)
 )
+
+func forTestsPdumpRingWriteMsg(ring *cRingBuffer, ringData *uint8, hdr *ringMsgHdr, payload *uint8) {
+	C.pdump_ring_write_msg(
+		(*C.struct_ring_buffer)(ring),
+		(*C.uint8_t)(ringData),
+		(*C.struct_ring_msg_hdr)(hdr),
+		(*C.uint8_t)(payload),
+	)
+}
 
 // alignToU32 aligns offset to 4-byte boundary, matching dataplane alignment.
 // Uses the same alignment as dataplane: __ALIGN4RING(val) (((val) + 3) & ~3)
@@ -238,10 +250,10 @@ func (w *workerArea) read(n uint32) []*pdumppb.Record {
 	response := make([]*pdumppb.Record, 0)
 
 	// Parse complete messages from the buffer and convert to protobuf records
-	for len(w.buf) > int(cRingMsgHdrSize) {
+	for len(w.buf) >= int(cRingMsgHdrSize) {
 		// Cast buffer start to message header - buffer should be aligned
 		// to message boundaries from previous processing
-		msgHeader := (*C.struct_ring_msg_hdr)(unsafe.Pointer(&w.buf[0]))
+		msgHeader := (*ringMsgHdr)(unsafe.Pointer(&w.buf[0]))
 
 		totalLen := uint32(msgHeader.total_len)
 

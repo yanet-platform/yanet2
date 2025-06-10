@@ -393,23 +393,12 @@ test_complete_message_cycle() {
 	hdr.packet_len = payload_len;
 	hdr.timestamp = 1234567890ULL;
 
-	/* Step 1: Prepare space */
-	pdump_ring_prepare(&ring, ring.data, total_len);
-
-	/* Step 2: Write header */
-	pdump_ring_write(&ring, ring.data, 0, (uint8_t *)&hdr, sizeof(hdr));
-
-	/* Step 3: Write payload */
-	pdump_ring_write(
-		&ring, ring.data, sizeof(hdr), (uint8_t *)payload, payload_len
-	);
-
-	/* Step 4: Checkpoint */
 	uint64_t write_idx_before = atomic_load(&ring.write_idx);
-	pdump_ring_checkpoint(&ring, total_len);
-	uint64_t write_idx_after = atomic_load(&ring.write_idx);
+	/* Write message using pdump_ring_write_msg */
+	pdump_ring_write_msg(&ring, ring.data, &hdr, (uint8_t *)payload);
 
-	/* Verify checkpoint advanced write index */
+	/* Verify write advanced write index */
+	uint64_t write_idx_after = atomic_load(&ring.write_idx);
 	uint32_t aligned_total_len = __ALIGN4RING(total_len);
 	TEST_ASSERT_EQUAL(
 		write_idx_after,
@@ -487,19 +476,10 @@ test_multiple_messages() {
 		hdr.packet_len = payload_len;
 		hdr.timestamp = 1000000ULL + i;
 
-		/* Write message */
-		pdump_ring_prepare(&ring, ring.data, total_len);
-		pdump_ring_write(
-			&ring, ring.data, 0, (uint8_t *)&hdr, sizeof(hdr)
+		/* Write message using pdump_ring_write_msg */
+		pdump_ring_write_msg(
+			&ring, ring.data, &hdr, (uint8_t *)payloads[i]
 		);
-		pdump_ring_write(
-			&ring,
-			ring.data,
-			sizeof(hdr),
-			(uint8_t *)payloads[i],
-			payload_len
-		);
-		pdump_ring_checkpoint(&ring, total_len);
 	}
 
 	/* Verify all messages */
@@ -565,18 +545,10 @@ test_ring_overflow() {
 		hdr.magic = RING_MSG_MAGIC;
 		hdr.packet_len = strlen(payload);
 
-		pdump_ring_prepare(&ring, ring.data, hdr.total_len);
-		pdump_ring_write(
-			&ring, ring.data, 0, (uint8_t *)&hdr, sizeof(hdr)
+		/* Write message using pdump_ring_write_msg */
+		pdump_ring_write_msg(
+			&ring, ring.data, &hdr, (uint8_t *)payload
 		);
-		pdump_ring_write(
-			&ring,
-			ring.data,
-			sizeof(hdr),
-			(uint8_t *)payload,
-			strlen(payload)
-		);
-		pdump_ring_checkpoint(&ring, hdr.total_len);
 	}
 
 	/* readable_idx should have advanced due to space reclamation */
@@ -678,12 +650,8 @@ test_stress_large_data() {
 	hdr.magic = RING_MSG_MAGIC;
 	hdr.packet_len = large_payload_size;
 
-	pdump_ring_prepare(&ring, ring.data, total_len);
-	pdump_ring_write(&ring, ring.data, 0, (uint8_t *)&hdr, sizeof(hdr));
-	pdump_ring_write(
-		&ring, ring.data, sizeof(hdr), large_payload, large_payload_size
-	);
-	pdump_ring_checkpoint(&ring, total_len);
+	/* Write message using pdump_ring_write_msg */
+	pdump_ring_write_msg(&ring, ring.data, &hdr, large_payload);
 
 	/* Verify large message */
 	struct ring_msg_hdr *written_hdr = (struct ring_msg_hdr *)ring.data;
@@ -746,12 +714,8 @@ test_boundary_conditions() {
 	TEST_ASSERT_NOT_NULL(max_payload, "Failed to allocate max payload");
 	memset(max_payload, 0xCC, max_msg_size);
 
-	pdump_ring_prepare(&ring, ring.data, max_total_len);
-	pdump_ring_write(&ring, ring.data, 0, (uint8_t *)&hdr, sizeof(hdr));
-	pdump_ring_write(
-		&ring, ring.data, sizeof(hdr), max_payload, max_msg_size
-	);
-	pdump_ring_checkpoint(&ring, max_total_len);
+	/* Write message using pdump_ring_write_msg */
+	pdump_ring_write_msg(&ring, ring.data, &hdr, max_payload);
 
 	/* Verify max size message */
 	struct ring_msg_hdr *written_hdr = (struct ring_msg_hdr *)ring.data;

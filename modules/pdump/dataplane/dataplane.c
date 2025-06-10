@@ -78,28 +78,6 @@ get_tsc_timestamp() {
 }
 
 static inline void
-pdump_write_msg(
-	struct ring_buffer *ring,
-	uint8_t *ring_data,
-	struct ring_msg_hdr *hdr,
-	uint8_t *payload
-) {
-	// Step 1. Move readable_idx to make space for new data
-	pdump_ring_prepare(ring, ring_data, hdr->total_len);
-
-	// Step 2. Write ring_msg_hdr struct
-	uint64_t hdr_size = sizeof(*hdr);
-	pdump_ring_write(ring, ring_data, 0, (uint8_t *)hdr, hdr_size);
-
-	// Step 3. Write mbuf data to an offset equal to hdr_size.
-	uint64_t payload_size = hdr->total_len - hdr_size;
-	pdump_ring_write(ring, ring_data, hdr_size, payload, payload_size);
-
-	// Step 4. Store write_idx atomically, considering alignment.
-	pdump_ring_checkpoint(ring, hdr->total_len);
-}
-
-static inline void
 process_queue(
 	struct packet *first_pkt,
 	struct rte_bpf *bpf,
@@ -147,7 +125,7 @@ process_queue(
 			};
 
 			uint8_t *payload = rte_pktmbuf_mtod(mbuf, uint8_t *);
-			pdump_write_msg(ring, ring_data, &hdr, payload);
+			pdump_ring_write_msg(ring, ring_data, &hdr, payload);
 		}
 	}
 }
