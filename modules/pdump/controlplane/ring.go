@@ -44,6 +44,23 @@ type ringBuffer struct {
 	readChunkSize uint32 // Maximum bytes to read in one operation
 }
 
+// Clone creates a copy of the ring buffer. This is useful when multiple readers
+// need their own independent ring buffer instances to avoid concurrent modification issues
+// and ensure each reader has its own workerArea.readIdx.  The cloned ring buffer will
+// have its own copy of the worker areas, preventing readers from interfering with each other's read positions.
+// Note: The underlying ringbuffer shared memory is still shared. This copy is a shallow copy
+// in terms of the shared memory ring buffer itself.  Only the worker areas are copied.
+func (m *ringBuffer) Clone() *ringBuffer {
+	bufferClone := *m
+	workersClone := make([]*workerArea, 0, len(m.workers))
+	for _, w := range m.workers {
+		wCopy := *w
+		workersClone = append(workersClone, &wCopy)
+	}
+	bufferClone.workers = workersClone
+	return &bufferClone
+}
+
 // workerArea represents a single worker's ring buffer state and data.
 type workerArea struct {
 	writeIdx    *uint64     // Pointer to writer's current write position
