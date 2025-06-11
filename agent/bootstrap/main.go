@@ -88,6 +88,7 @@ func main() {
 				forward,
 				C.uint16_t(devIdx),
 				C.uint16_t(device.L2ForwardDeviceID),
+				C.CString("l2"),
 			)
 
 			for _, forwardConfig := range device.V4Forwards {
@@ -105,6 +106,7 @@ func main() {
 					(*C.uint8_t)(&to[0]),
 					C.uint16_t(devIdx),
 					C.uint16_t(forwardConfig.DeviceID),
+					C.CString("l3v4"),
 				)
 			}
 
@@ -123,6 +125,7 @@ func main() {
 					(*C.uint8_t)(&to[0]),
 					C.uint16_t(devIdx),
 					C.uint16_t(forwardConfig.DeviceID),
+					C.CString("l3v6"),
 				)
 			}
 		}
