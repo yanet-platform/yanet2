@@ -29,6 +29,7 @@ cli-clean/%:
 	$(MAKE) -C modules/$*/cli clean
 
 test: dataplane
+	go test ./...
 	meson test -C build
 
 fuzz:
