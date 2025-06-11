@@ -132,6 +132,16 @@ func TestLastAddr(t *testing.T) {
 			expected: "2001:db8:1234:5678:ffff:ffff:ffff:ffff",
 		},
 		{
+			name:     "IPv6 /63 (just before 64-bit boundary - zeros)",
+			prefix:   "2001:db8:1234:0::/63",
+			expected: "2001:db8:1234:1:ffff:ffff:ffff:ffff",
+		},
+		{
+			name:     "IPv6 0/65 (just after 64-bit boundary - zeros)",
+			prefix:   "2001:db8:1234:5678:0::/65",
+			expected: "2001:db8:1234:5678:7fff:ffff:ffff:ffff",
+		},
+		{
 			name:     "IPv6 /80",
 			prefix:   "2001:db8:1234:5678:9abc::/80",
 			expected: "2001:db8:1234:5678:9abc:ffff:ffff:ffff",
@@ -256,4 +266,3 @@ func BenchmarkLastAddr(b *testing.B) {
 		}
 	}
 }
-
