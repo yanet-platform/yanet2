@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -210,7 +211,7 @@ func (m *Stage) assignPipelines(ctx context.Context, numaIdx NUMAIdx, devices []
 			})
 		}
 
-		req.Devices[string(device.ID)] = &ynpb.DevicePipelines{
+		req.Devices[strconv.Itoa(int(device.ID))] = &ynpb.DevicePipelines{
 			Pipelines: devicePipelines,
 		}
 	}
