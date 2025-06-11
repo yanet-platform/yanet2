@@ -26,6 +26,9 @@ func LastAddr(prefix netip.Prefix) netip.Addr {
 			bits -= 64
 			startByte = 8
 			addrBits = binary.BigEndian.Uint64(v6b[8:])
+		} else {
+			// Put uint64_max into last part of the addr
+			binary.BigEndian.PutUint64(v6b[8:], ^uint64(0))
 		}
 		wildcardBits := uint64(1<<(64-bits) - 1)
 		broadCastBits := addrBits | wildcardBits
