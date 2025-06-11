@@ -70,7 +70,7 @@ jobs:
 
       - name: Build and run tests
         run: |
-          meson test -C build
+          make test
       - name: Show meson test log
         run:
           grep -v 'Inherited environment' build/meson-logs/testlog.txt
