@@ -326,3 +326,82 @@ func (m *DPConfig) Devices() []DeviceInfo {
 
 	return out
 }
+
+type CounterInfo struct {
+	Name   string
+	Values [][]uint64
+}
+
+func (M *DPConfig) encodeCounters(counters *C.struct_counter_handle_list) []CounterInfo {
+	res := make([]CounterInfo, 0)
+
+	for cidx := C.uint64_t(0); cidx < counters.count; cidx++ {
+		handle := C.yanet_get_counter(counters, cidx)
+		counterInfo := CounterInfo{
+			Name:   C.GoString(&handle.name[0]),
+			Values: make([][]uint64, 0, counters.instance_count),
+		}
+
+		for iidx := C.uint64_t(0); iidx < counters.instance_count; iidx++ {
+			counterInfo.Values = append(
+				counterInfo.Values,
+				make([]uint64, 0, int(handle.size)),
+			)
+			for vidx := C.uint64_t(0); vidx < handle.size; vidx++ {
+				counterInfo.Values[iidx] = append(
+					counterInfo.Values[iidx],
+					uint64(C.yanet_get_counter_value(
+						handle.value_handle,
+						vidx,
+						iidx,
+					)),
+				)
+			}
+		}
+
+		res = append(res, counterInfo)
+	}
+
+	return res
+}
+
+// PipelineCounters returns pipeline counters
+func (m *DPConfig) PipelineCounters(pipeline_name string) []CounterInfo {
+	c_pipeline_name := C.CString(pipeline_name)
+	defer C.free(unsafe.Pointer(c_pipeline_name))
+	counters := C.yanet_get_pipeline_counters(m.ptr, c_pipeline_name)
+	defer C.yanet_counter_handle_list_free(counters)
+
+	if counters == nil {
+		return nil
+	}
+
+	return m.encodeCounters(counters)
+}
+
+// PipelineModuleCounters returns pipeline module counters
+func (m *DPConfig) PipelineModuleCounters(
+	pipeline_name string,
+	module_type string,
+	module_name string,
+) []CounterInfo {
+	c_pipeline_name := C.CString(pipeline_name)
+	defer C.free(unsafe.Pointer(c_pipeline_name))
+	c_module_type := C.CString(module_type)
+	defer C.free(unsafe.Pointer(c_module_type))
+	c_module_name := C.CString(module_name)
+	defer C.free(unsafe.Pointer(c_module_name))
+	counters := C.yanet_get_pm_counters(
+		m.ptr,
+		c_pipeline_name,
+		c_module_type,
+		c_module_name,
+	)
+	defer C.yanet_counter_handle_list_free(counters)
+
+	if counters == nil {
+		return nil
+	}
+
+	return m.encodeCounters(counters)
+}

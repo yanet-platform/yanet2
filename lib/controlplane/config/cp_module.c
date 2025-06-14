@@ -32,6 +32,8 @@ cp_module_init(
 
 	cp_module->free_handler = free_handler;
 
+	registry_item_init(&cp_module->config_item);
+
 	if (counter_registry_init(
 		    &cp_module->counters, &cp_module->memory_context, 1
 	    )) {

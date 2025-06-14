@@ -807,9 +807,9 @@ cp_device_config_add_pipeline(
 struct counter_handle_list *
 yanet_get_pm_counters(
 	struct dp_config *dp_config,
+	const char *pipeline_name,
 	const char *module_type,
-	const char *module_name,
-	const char *pipeline_name
+	const char *module_name
 ) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
@@ -823,6 +823,7 @@ yanet_get_pm_counters(
 	if (dp_config_lookup_module(
 		    dp_config, module_type, &module_type_index
 	    )) {
+		cp_config_unlock(cp_config);
 		return NULL;
 	}
 
@@ -853,6 +854,8 @@ yanet_get_pm_counters(
 
 	if (list == NULL)
 		return NULL;
+	list->instance_count =
+		ADDR_OF(&counter_storage->allocator)->instance_count;
 	list->count = count;
 	struct counter_handle *handlers = list->counters;
 
@@ -902,6 +905,8 @@ yanet_get_pipeline_counters(
 
 	if (list == NULL)
 		return NULL;
+	list->instance_count =
+		ADDR_OF(&counter_storage->allocator)->instance_count;
 	list->count = count;
 	struct counter_handle *handlers = list->counters;
 
@@ -948,6 +953,7 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 
 	if (list == NULL)
 		return NULL;
+	list->instance_count = ADDR_OF(&storage->allocator)->instance_count;
 	list->count = count;
 	struct counter_handle *handlers = list->counters;
 
@@ -960,4 +966,9 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 	}
 
 	return list;
+}
+
+void
+yanet_counter_handle_list_free(struct counter_handle_list *counters) {
+	free(counters);
 }

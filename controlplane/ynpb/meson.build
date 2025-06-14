@@ -6,6 +6,7 @@ ynpb_proto_files = [
     join_paths(ynpb_dir, 'logging.proto'),
     join_paths(ynpb_dir, 'inspect.proto'),
     join_paths(ynpb_dir, 'pipeline.proto'),
+    join_paths(ynpb_dir, 'counters.proto'),
 ]
 
 # Generate protobuf files
@@ -20,6 +21,8 @@ ynpb_gen = custom_target(
         'inspect_grpc.pb.go',
         'pipeline.pb.go',
         'pipeline_grpc.pb.go',
+        'counters.pb.go',
+        'counters_grpc.pb.go',
     ],
     input: ynpb_proto_files,
     command: [
