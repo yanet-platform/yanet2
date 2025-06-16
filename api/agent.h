@@ -301,6 +301,7 @@ struct counter_handle {
 };
 
 struct counter_handle_list {
+	uint64_t instance_count;
 	uint64_t count;
 	struct counter_handle counters[];
 };
@@ -330,3 +331,6 @@ yanet_get_counter_value(
 	uint64_t value_idx,
 	uint64_t worker_idx
 );
+
+void
+yanet_counter_handle_list_free(struct counter_handle_list *counters);

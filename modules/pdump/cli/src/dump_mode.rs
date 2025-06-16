@@ -13,20 +13,21 @@ mod mode {
     // Auto-generated bindings from C header file
     include!(concat!(env!("OUT_DIR"), "/pdump_mode.rs"));
 }
-use mode::*;
+
+pub use mode::pdump_mode;
 
 #[allow(dead_code)]
 /// Capture input packets mode flag
-pub const INPUT: pdump_mode = pdump_mode_PDUMP_INPUT;
+pub const INPUT: pdump_mode = mode::pdump_mode_PDUMP_INPUT;
 #[allow(dead_code)]
 /// Capture dropped packets mode flag
-pub const DROPS: pdump_mode = pdump_mode_PDUMP_DROPS;
+pub const DROPS: pdump_mode = mode::pdump_mode_PDUMP_DROPS;
 #[allow(dead_code)]
 /// Capture bypassed packets mode flag
-pub const BYPASS: pdump_mode = pdump_mode_PDUMP_BYPASS;
+pub const BYPASS: pdump_mode = mode::pdump_mode_PDUMP_BYPASS;
 #[allow(dead_code)]
 /// Capture all packets (input, drops, and bypass) mode flag
-pub const ALL: pdump_mode = pdump_mode_PDUMP_ALL;
+pub const ALL: pdump_mode = mode::pdump_mode_PDUMP_ALL;
 
 #[derive(Args, Debug, Clone, Copy)]
 #[group(required = false, multiple = true)]
@@ -49,9 +50,9 @@ pub struct Mode {
 }
 
 pub fn to_str(mode: pdump_mode) -> &'static str {
-    let input = mode & pdump_mode_PDUMP_INPUT != 0;
-    let drops = mode & pdump_mode_PDUMP_DROPS != 0;
-    let bypass = mode & pdump_mode_PDUMP_BYPASS != 0;
+    let input = mode & mode::pdump_mode_PDUMP_INPUT != 0;
+    let drops = mode & mode::pdump_mode_PDUMP_DROPS != 0;
+    let bypass = mode & mode::pdump_mode_PDUMP_BYPASS != 0;
 
     // This match covers all combinations to avoid allocations
     match (input, drops, bypass) {
@@ -67,9 +68,9 @@ pub fn to_str(mode: pdump_mode) -> &'static str {
 }
 
 pub fn to_char(mode: pdump_mode) -> char {
-    let input = mode & pdump_mode_PDUMP_INPUT != 0;
-    let drops = mode & pdump_mode_PDUMP_DROPS != 0;
-    let bypass = mode & pdump_mode_PDUMP_BYPASS != 0;
+    let input = mode & mode::pdump_mode_PDUMP_INPUT != 0;
+    let drops = mode & mode::pdump_mode_PDUMP_DROPS != 0;
+    let bypass = mode & mode::pdump_mode_PDUMP_BYPASS != 0;
     match (input, drops, bypass) {
         (true, false, false) => 'I',
         (false, true, false) => 'D',

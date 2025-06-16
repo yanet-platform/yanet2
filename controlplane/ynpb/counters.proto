@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package ynpb;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
+
+service CountersService {
+	// Inspect retrieves the current configuration state.
+	rpc Pipeline(PipelineCountersRequest) returns (CountersResponse) {
+	}
+	rpc PipelineModule(PipelineModuleCountersRequest)
+		returns (CountersResponse) {
+	}
+}
+
+message PipelineCountersRequest {
+	uint32 numa = 1;
+	string pipeline = 2;
+}
+
+message PipelineModuleCountersRequest {
+	uint32 numa = 1;
+	string pipeline = 2;
+	string module_type = 3;
+	string module_name = 4;
+}
+
+message CounterInstanceInfo {
+	repeated uint64 values = 1;
+}
+
+message CounterInfo {
+	string name = 1;
+	repeated CounterInstanceInfo instances = 2;
+}
+
+message CountersResponse {
+	repeated CounterInfo counters = 1;
+}
