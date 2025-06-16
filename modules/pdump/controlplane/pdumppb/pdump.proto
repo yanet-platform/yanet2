@@ -44,23 +44,22 @@ message ReadDumpRequest {
 
 message RecordMeta {
 	// Timestamp of receiving package on dataplane side.
-	uint64 Timestamp = 1;
+	uint64 timestamp = 1;
 	// Size of the payload data
-	uint32 DataSize = 2;
+	uint32 data_size = 2;
 	// PacketLen indicates the length of the original packet.
-	uint32 PacketLen = 3;
+	uint32 packet_len = 3;
 	// Worker that processes this message; this index is used to select the
 	// appropriate ring buffer.
-	uint32 WorkerIdx = 4;
+	uint32 worker_idx = 4;
 	// Index of the pipeline where the pdump module is located.
-	uint32 PipelineIdx = 5;
+	uint32 pipeline_idx = 5;
 	// ID of the device from which the packet was received.
-	uint32 RxDeviceId = 6;
+	uint32 rx_device_id = 6;
 	// ID of the device to which the packet may be sent.
-	uint32 TxDeviceId = 7;
-	// Indicates whether the packet was processed from the drop queue or
-	// from the input queue.
-	bool IsDrops = 8;
+	uint32 tx_device_id = 7;
+	// Indicates from which packet_list the packet is collected.
+	uint32 queue = 8;
 }
 
 message Record {
@@ -88,9 +87,13 @@ message ShowConfigRequest {
 
 // Config contains the pdump module configuration.
 message Config {
+	// pcap style filter
 	string filter = 1;
-	DumpMode mode = 2;
+	// Mode specifies a bitmap of queues that should be dumped.
+	uint32 mode = 2;
+	// snaplen specifies maximum packet length to capture
 	uint32 snaplen = 3;
+	// ring_size specifies per worker ring buffer size
 	uint32 ring_size = 4;
 }
 
@@ -111,7 +114,7 @@ message SetFilterResponse {
 
 message SetDumpModeRequest {
 	commonpb.TargetModule target = 1;
-	DumpMode mode = 2;
+	uint32 mode = 2;
 }
 
 message SetDumpModeResponse {
@@ -131,11 +134,4 @@ message SetWorkerRingSizeRequest {
 }
 
 message SetWorkerRingSizeResponse {
-}
-
-// DumpMode specifies the packet list to operate on.
-enum DumpMode {
-	PDUMP_DUMP_INPUT = 0;
-	PDUMP_DUMP_DROPS = 1;
-	PDUMP_DUMP_BOTH = 2;
 }

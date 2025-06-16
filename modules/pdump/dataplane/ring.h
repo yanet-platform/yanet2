@@ -44,21 +44,20 @@ struct ring_msg_hdr {
 	uint32_t magic;
 	// packet_len indicates the length of the original packet.
 	uint32_t packet_len;
-	// Timestamp indicating when the packet was captured.
+	// timestamp indicating when the packet was captured.
 	uint64_t timestamp;
-	// Worker that processes this message; this index is used to select the
-	// appropriate ring buffer.
+	// worker_idx is index of the worker that processes this message; this
+	// index is used to select the appropriate ring buffer.
 	uint32_t worker_idx;
-	// Index of the pipeline where the pdump module is located.
+	// pipeline_idx is index of the pipeline where the pdump module is
+	// located.
 	uint32_t pipeline_idx;
-	// ID of the device from which the packet was received.
+	// rx_device_id is ID of the device from which the packet was received.
 	uint16_t rx_device_id;
-	// ID of the device to which the packet may be sent.
+	// tx_device_id ID of the device to which the packet may be sent.
 	uint16_t tx_device_id;
-	// Indicates whether the packet was processed from the drop queue or
-	// from the input queue.
-	// uint8_t for now, potentially refactorable as a bitfield.
-	uint8_t is_drops;
+	// Indicates from which packet_list the packet was processed.
+	uint8_t queue; // enum pdump_mode bitmap
 	uint8_t reserved[3];
 };
 

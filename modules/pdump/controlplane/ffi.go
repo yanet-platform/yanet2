@@ -19,7 +19,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb"
 )
 
 var (
@@ -28,6 +27,9 @@ var (
 
 	defaultSnaplen = uint32(C.default_snaplen)
 	replacer       = strings.NewReplacer("\n", "\\n")
+
+	defaultMode uint32 = C.PDUMP_INPUT
+	maxMode     uint32 = C.PDUMP_ALL
 )
 
 //export pdumpGoControlplaneLog
@@ -116,24 +118,29 @@ func (m *ModuleConfig) SetFilter(filter string) error {
 	return nil
 }
 
-func (m *ModuleConfig) SetDumpMode(pbMode pdumppb.DumpMode) error {
+func (m *ModuleConfig) SetDumpMode(pbMode uint32) error {
 	var mode C.enum_pdump_mode
-	switch pbMode {
-	case pdumppb.DumpMode_PDUMP_DUMP_INPUT:
-		mode = C.PDUMP_INPUT
-	case pdumppb.DumpMode_PDUMP_DUMP_DROPS:
-		mode = C.PDUMP_DROPS
-	case pdumppb.DumpMode_PDUMP_DUMP_BOTH:
-		mode = C.PDUMP_BOTH
-	default:
-		return fmt.Errorf("unknown case for C.enum_pdump_mode: %v", pbMode)
+	if pbMode&C.PDUMP_INPUT != 0 {
+		mode |= C.PDUMP_INPUT
+	}
+	if pbMode&C.PDUMP_DROPS != 0 {
+		mode |= C.PDUMP_DROPS
+	}
+	if pbMode&C.PDUMP_BYPASS != 0 {
+		mode |= C.PDUMP_BYPASS
+	}
+	if pbMode&C.PDUMP_ALL != 0 {
+		mode = C.PDUMP_ALL
+	}
+	if pbMode > C.PDUMP_ALL {
+		return fmt.Errorf("unknown pdump mode %x (max known %x)", pbMode, C.PDUMP_ALL)
 	}
 
 	rc, err := C.pdump_module_config_set_mode(
 		m.asRawPtr(),
 		mode,
 	)
-	if rc != 0 {
+	if rc != 0 || err != nil {
 		return errors.Join(fmt.Errorf("error code=%d", rc), err)
 	}
 	return nil

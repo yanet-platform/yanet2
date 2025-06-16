@@ -22,3 +22,4 @@ pnet_packet = "0.35"
 
 [build-dependencies]
 tonic-build = "0.13" 
+bindgen = "0.72.0"

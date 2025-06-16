@@ -84,7 +84,7 @@ process_queue(
 	struct ring_buffer *ring,
 	uint32_t worker_idx,
 	uint32_t snaplen,
-	bool is_drops
+	enum pdump_mode queue
 ) {
 	uint64_t tsc_timestamp = ~0ULL;
 
@@ -121,7 +121,7 @@ process_queue(
 				.pipeline_idx = pkt->pipeline_idx,
 				.rx_device_id = pkt->rx_device_id,
 				.tx_device_id = pkt->tx_device_id,
-				.is_drops = is_drops,
+				.queue = (uint8_t)queue
 			};
 
 			uint8_t *payload = rte_pktmbuf_mtod(mbuf, uint8_t *);
@@ -161,7 +161,7 @@ pdump_handle_packets(
 			ring,
 			(uint32_t)worker_idx,
 			config->snaplen,
-			true
+			PDUMP_DROPS
 		);
 	}
 
@@ -173,7 +173,19 @@ pdump_handle_packets(
 			ring,
 			(uint32_t)worker_idx,
 			config->snaplen,
-			false
+			PDUMP_INPUT
+		);
+	}
+
+	// And then process the input packets.
+	if (config->mode & PDUMP_BYPASS && packet_front->bypass.first != NULL) {
+		process_queue(
+			packet_front->bypass.first,
+			&bpf,
+			ring,
+			(uint32_t)worker_idx,
+			config->snaplen,
+			PDUMP_BYPASS
 		);
 	}
 

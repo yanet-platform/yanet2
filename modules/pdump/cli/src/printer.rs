@@ -1,4 +1,4 @@
-use crate::pdumppb;
+use crate::{dump_mode, pdumppb};
 use pnet_packet::Packet;
 use pnet_packet::ethernet::{EtherTypes, EthernetPacket};
 use pnet_packet::icmp::{IcmpCode, IcmpPacket, IcmpTypes};
@@ -24,7 +24,7 @@ pub fn pretty_print_metadata_concise<W: Write>(mut writer: W, meta: &pdumppb::Re
         writer,
         "{} Q:{} W:{} P:{} RX:{} TX:{} ",
         format_duration_ns(meta.timestamp),
-        if meta.is_drops { "D" } else { "I" },
+        dump_mode::to_char(meta.queue),
         meta.worker_idx,
         meta.pipeline_idx,
         meta.rx_device_id,
@@ -39,7 +39,6 @@ pub fn pretty_print_metadata_concise<W: Write>(mut writer: W, meta: &pdumppb::Re
 /// * `writer` - A writer to output the formatted text to.
 /// * `meta` - The metadata field from a pdumppb::Record.
 pub fn pretty_print_metadata<W: Write>(mut writer: W, meta: &pdumppb::RecordMeta) -> io::Result<()> {
-    let queue = if meta.is_drops { "DROPS" } else { "INPUT" };
     let ts = format_duration_ns(meta.timestamp);
     writeln!(writer, "--- Packet Metadata ---")?;
     writeln!(writer, "  Timestamp:      {}", ts)?;
@@ -49,7 +48,7 @@ pub fn pretty_print_metadata<W: Write>(mut writer: W, meta: &pdumppb::RecordMeta
     writeln!(writer, "  Data Size:      {}", meta.data_size)?;
     writeln!(writer, "  RX Device ID:   {}", meta.rx_device_id)?;
     writeln!(writer, "  TX Device ID:   {}", meta.tx_device_id)?;
-    writeln!(writer, "  Packet Queue:   {}", queue)?;
+    writeln!(writer, "  Packet Queue:   {}", dump_mode::to_str(meta.queue))?;
     writeln!(writer, "----------------------")?;
     Ok(())
 }
@@ -1564,7 +1563,7 @@ mod tests {
 
     #[test]
     fn test_print_metadata_concise() {
-        let meta = pdumppb::RecordMeta {
+        let mut meta = pdumppb::RecordMeta {
             timestamp: 1234567890,
             packet_len: 1500,
             worker_idx: 1,
@@ -1572,14 +1571,21 @@ mod tests {
             data_size: 1000,
             rx_device_id: 3,
             tx_device_id: 4,
-            is_drops: false,
+            queue: dump_mode::INPUT,
         };
 
         let mut output = Vec::new();
         pretty_print_metadata_concise(&mut output, &meta).unwrap();
 
-        let output_str = String::from_utf8(output).unwrap();
+        let output_str = String::from_utf8(output.clone()).unwrap();
         assert_eq!(output_str, "00:00:01.234.567 Q:I W:1 P:2 RX:3 TX:4 ");
+
+        meta.queue = dump_mode::BYPASS;
+        output.clear();
+        pretty_print_metadata_concise(&mut output, &meta).unwrap();
+
+        let output_str = String::from_utf8(output).unwrap();
+        assert_eq!(output_str, "00:00:01.234.567 Q:B W:1 P:2 RX:3 TX:4 ");
     }
 
     #[test]
@@ -1592,7 +1598,7 @@ mod tests {
             data_size: 1000,
             rx_device_id: 3,
             tx_device_id: 4,
-            is_drops: false,
+            queue: dump_mode::BYPASS,
         };
 
         let mut output = Vec::new();
@@ -1608,7 +1614,7 @@ mod tests {
   Data Size:      1000
   RX Device ID:   3
   TX Device ID:   4
-  Packet Queue:   INPUT
+  Packet Queue:   BYPASS
 ----------------------
 ";
         assert_eq!(output_str, expected);
@@ -1624,7 +1630,7 @@ mod tests {
             data_size: 1000,
             rx_device_id: 3,
             tx_device_id: 4,
-            is_drops: true,
+            queue: dump_mode::DROPS,
         };
 
         let mut output = Vec::new();

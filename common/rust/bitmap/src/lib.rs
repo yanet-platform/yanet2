@@ -114,7 +114,7 @@ mod test {
     #[test]
     fn traverse_bits_check_each_bit() {
         let word = 0b1000001110111000;
-        let expected = vec![3, 4, 5, 7, 8, 9, 15];
+        let expected = [3, 4, 5, 7, 8, 9, 15];
 
         let mut idx = 0;
         let c: ControlFlow<()> = traverse_bits(word, |bit| {
@@ -130,7 +130,7 @@ mod test {
     #[test]
     fn traverse_bits_rev_check_each_bit() {
         let word = 0b1000001110111000;
-        let expected = vec![15, 9, 8, 7, 5, 4, 3];
+        let expected = [15, 9, 8, 7, 5, 4, 3];
 
         let mut idx = 0;
         let c: ControlFlow<()> = traverse_bits_rev(word, |bit| {

@@ -110,7 +110,7 @@ impl InspectService {
 
             tree.begin_child("Agents".to_string());
             for agent in &info.agents {
-                tree.begin_child(format!("{}", agent.name));
+                tree.begin_child(agent.name.to_string());
 
                 for instance in &agent.instances {
                     tree.begin_child(format!("Instance (PID: {})", instance.pid));

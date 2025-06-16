@@ -38,10 +38,10 @@ type PdumpService struct {
 // instanceConfig stores the configuration for a packet capture instance,
 // including packet filtering rules, capture mode, snapshot length, and ring buffer parameters.
 type instanceConfig struct {
-	filter   string           // libpcap expression string used to select packets for capture.
-	dumpMode pdumppb.DumpMode // Specifies the queue of packets to capture (e.g., input, drops, or both).
-	snaplen  uint32           // Snapshot length, the maximum number of bytes to capture from each packet.
-	ring     *ringBuffer      // Configuration for the shared ring buffer used by this instance, including per-worker size.
+	filter   string      // libpcap expression string used to select packets for capture.
+	dumpMode uint32      // Bitmap that specifies the types of packets to capture (e.g., input, drops, ...).
+	snaplen  uint32      // Snapshot length, the maximum number of bytes to capture from each packet.
+	ring     *ringBuffer // Configuration for the shared ring buffer used by this instance, including per-worker size.
 }
 
 type ringReader struct {
@@ -155,6 +155,13 @@ func (m *PdumpService) SetDumpMode(
 		return nil, err
 	}
 	mode := request.GetMode()
+	if mode > maxMode {
+		return nil, fmt.Errorf("unknown pdump mode %b (max known %b)", mode, maxMode)
+	}
+
+	if mode == 0 {
+		mode = defaultMode
+	}
 
 	// Lock instances store and module updates
 	m.mu.Lock()
@@ -428,7 +435,7 @@ func (m *PdumpService) spawnRingReaders(ctx context.Context, key instanceKey, ri
 func defaultModuleConfig() *instanceConfig {
 	return &instanceConfig{
 		filter:   "",
-		dumpMode: pdumppb.DumpMode_PDUMP_DUMP_INPUT,
+		dumpMode: defaultMode,
 		snaplen:  defaultSnaplen,
 		ring: &ringBuffer{
 			perWorkerSize: uint32(minRingSize.Bytes()),

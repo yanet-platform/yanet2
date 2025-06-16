@@ -116,7 +116,7 @@ func writeTestMessage(t *testing.T, wrapper *testWorkerWrapper, payload []byte) 
 		pipeline_idx: 2,
 		rx_device_id: 3,
 		tx_device_id: 4,
-		is_drops:     0,
+		queue:        _Ctype_uint8_t(defaultMode),
 	}
 
 	var payloadPtr *uint8
@@ -279,7 +279,8 @@ func TestWorkerAreaRead(t *testing.T) {
 		assert.Equal(t, uint32(2), record.Meta.PipelineIdx)
 		assert.Equal(t, uint32(3), record.Meta.RxDeviceId)
 		assert.Equal(t, uint32(4), record.Meta.TxDeviceId)
-		assert.False(t, record.Meta.IsDrops)
+		assert.False(t, record.Meta.Queue&_Ciconst_PDUMP_DROPS != 0, "meta.queue %b", record.Meta.Queue)
+		assert.True(t, record.Meta.Queue&_Ciconst_PDUMP_INPUT != 0)
 		assert.Equal(t, payload, record.Data)
 	})
 
@@ -404,12 +405,12 @@ func TestWorkerAreaReadAdditional(t *testing.T) {
 
 		// Then modify the is_drops flag in the ring buffer data
 		msgHeader := (*ringMsgHdr)(unsafe.Pointer(&worker.wa.data[0]))
-		msgHeader.is_drops = 1 // Set drops flag
+		msgHeader.queue = _Ciconst_PDUMP_DROPS // Set drops flag
 
 		records := worker.wa.read(testReadChunkSize)
 		require.Len(t, records, 1)
 
-		assert.True(t, records[0].Meta.IsDrops, "Should correctly handle drops flag")
+		assert.True(t, records[0].Meta.Queue&_Ciconst_PDUMP_DROPS != 0, "Should correctly handle drops flag")
 	})
 }
 

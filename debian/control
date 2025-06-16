@@ -51,7 +51,8 @@ Depends: ${shlibs:Depends}
  , yanet2-controlplane
 Description: Yanet2 CLI utilities
  Command-line tools for Yanet2: yanet-cli-nat64, yanet-cli-route,
- yanet-cli-decap, yanet-cli-dscp, yanet-cli-forward.
+ yanet-cli-decap, yanet-cli-dscp, yanet-cli-forward,
+ yanet-cli-pdump.
  .
  This package provides command-line utilities for configuring and
  managing Yanet2 network functions.

@@ -289,7 +289,7 @@ func (w *workerArea) read(n uint32) []*pdumppb.Record {
 				PipelineIdx: uint32(msgHeader.pipeline_idx),
 				RxDeviceId:  uint32(msgHeader.rx_device_id),
 				TxDeviceId:  uint32(msgHeader.tx_device_id),
-				IsDrops:     msgHeader.is_drops == 1,
+				Queue:       uint32(msgHeader.queue),
 			},
 			Data: data,
 		}

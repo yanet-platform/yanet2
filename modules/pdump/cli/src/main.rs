@@ -21,6 +21,7 @@ use args::{
 };
 
 mod args;
+mod dump_mode;
 mod printer;
 mod writer;
 
@@ -290,10 +291,7 @@ pub fn print_tree(configs: Vec<ShowConfigResponse>) -> Result<(), Box<dyn Error>
 
         if let Some(config) = &config.config {
             tree.add_empty_child(format!("Filter: {}", config.filter));
-            tree.add_empty_child(format!(
-                "Mode: {}",
-                config.mode().as_str_name().replace("PDUMP_DUMP_", "")
-            ));
+            tree.add_empty_child(format!("Mode: {}", dump_mode::to_str(config.mode)));
             tree.add_empty_child(format!("Snaplen: {}", config.snaplen));
             tree.add_empty_child(format!("PerWorkerRingSize: {}", config.ring_size));
         }

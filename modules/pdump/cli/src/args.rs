@@ -1,6 +1,4 @@
-use clap::{Args, Parser, ValueEnum};
-
-use crate::pdumppb::DumpMode;
+use clap::{Parser, ValueEnum};
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
@@ -49,7 +47,7 @@ pub struct SetDumpModeCmd {
 
     /// Determine the packet list to capture packets from.
     #[command(flatten)]
-    pub mode: Mode,
+    pub mode: crate::dump_mode::Mode,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -139,33 +137,4 @@ pub enum ConfigOutputFormat {
     Tree,
     /// JSON format.
     Json,
-}
-
-#[derive(Args, Debug, Clone, Copy)]
-#[group(required = false, multiple = false)]
-pub struct Mode {
-    /// Capture input packets
-    #[arg(long)]
-    pub input: bool,
-
-    /// Capture dropped packets
-    #[arg(long)]
-    pub drops: bool,
-
-    /// Capture both input and dropped packets.
-    #[arg(long)]
-    pub both: bool,
-}
-
-impl From<Mode> for i32 {
-    fn from(val: Mode) -> Self {
-        let (input, drops, both) = (val.input, val.drops, val.both);
-        match (input, drops, both) {
-            // default case - dump the input packet list
-            (false, false, false) => DumpMode::PdumpDumpInput.into(),
-            (true, false, false) => DumpMode::PdumpDumpInput.into(),
-            (false, true, false) => DumpMode::PdumpDumpDrops.into(),
-            _ => DumpMode::PdumpDumpBoth.into(),
-        }
-    }
 }

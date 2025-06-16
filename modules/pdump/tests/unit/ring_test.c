@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 /* Project headers */
+#include "dataplane/mode.h"
 #include "modules/pdump/dataplane/ring.h"
 #include <lib/logging/log.h>
 
@@ -115,16 +116,20 @@ test_align4ring_macro() {
  *
  * Tests:
  * - Header size and alignment
- * - Magic number validation
- * - Field ordering and sizes
+ * - Maximum queue id (enum pdump_mode)
  */
 static int
-test_ring_msg_hdr_alignment() {
+test_ring_msg_hdr() {
 	/* Test header size - should be properly aligned */
 	TEST_ASSERT_EQUAL(
 		sizeof(struct ring_msg_hdr) % 4,
 		0,
 		"Ring message header size not 4-byte aligned"
+	);
+
+	TEST_ASSERT(
+		PDUMP_ALL <= UINT8_MAX,
+		"enum pdump_mode is out of range (max u8)"
 	);
 
 	return TEST_SUCCESS;
@@ -849,7 +854,7 @@ struct test_case {
 static struct test_case test_cases[] = {
 	{"Ring Initialization", test_ring_init},
 	{"ALIGN4RING Macro", test_align4ring_macro},
-	{"Ring Message Header Alignment", test_ring_msg_hdr_alignment},
+	{"Ring Message Header constraints", test_ring_msg_hdr},
 	{"Basic Ring Write", test_ring_write_basic},
 	{"Ring Write Wraparound", test_ring_write_wraparound},
 	{"Ring Checkpoint", test_ring_checkpoint},
