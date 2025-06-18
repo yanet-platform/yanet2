@@ -92,7 +92,7 @@ yanet_shm_instance_count(struct yanet_shm *shm);
 uint32_t
 dataplane_instance_numa_idx(struct dp_config *dp_config);
 
-// Detaches a module agent from shared memory, releasing associated  resources.
+// Detaches a module agent from shared memory, releasing associated resources.
 //
 // @param agent Handle to the module agent to detach
 //
@@ -103,6 +103,16 @@ agent_detach(struct agent *agent);
 int
 agent_update_modules(
 	struct agent *agent, size_t module_count, struct cp_module **cp_modules
+);
+
+// Delete module with specified type and name.
+// 
+// @return -1 if module is still referenced by some pipeline or module does not exist, 0 on success.
+int
+agent_delete_module(
+	struct agent *agent, 
+	const char *module_type, 
+	const char *module_name
 );
 
 struct pipeline_config;

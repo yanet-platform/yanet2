@@ -263,23 +263,34 @@ agent_update_modules(
 		modules
 	);
 
-	while (agent->unused_module != NULL) {
-		struct cp_module *cp_module = ADDR_OF(&agent->unused_module);
-		SET_OFFSET_OF(&agent->unused_module, ADDR_OF(&cp_module->prev));
-		cp_module->free_handler(cp_module);
+	agent_free_unused_modules(agent);
+	agent_free_unused_agents(agent);
+
+	return res;
+}
+
+int
+agent_delete_module(
+	struct agent *agent, 
+	const char *module_type, 
+	const char *module_name
+) {
+	struct dp_config *dp_config = agent->dp_config;
+	struct cp_config *cp_config = agent->cp_config;
+	
+	uint64_t index;
+	if (dp_config_lookup_module(
+			dp_config,
+			module_type,
+			&index
+		)) {
+		return -1;
 	}
 
-	while (ADDR_OF(&agent->prev) != NULL) {
-		struct agent *prev_agent = ADDR_OF(&agent->prev);
+	int res = cp_config_delete_module(dp_config, cp_config, index, module_name);
 
-		if (prev_agent->loaded_module_count == 0) {
-			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
-			agent_cleanup(prev_agent);
-			continue;
-		}
-
-		agent = ADDR_OF(&agent->prev);
-	}
+	agent_free_unused_modules(agent);
+	agent_free_unused_agents(agent);
 
 	return res;
 }
@@ -965,4 +976,28 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 void
 yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 	free(counters);
+}
+
+void
+agent_free_unused_modules(struct agent *agent) {
+	while (agent->unused_module != NULL) {
+		struct cp_module *cp_module = ADDR_OF(&agent->unused_module);
+		SET_OFFSET_OF(&agent->unused_module, ADDR_OF(&cp_module->prev));
+		cp_module->free_handler(cp_module);
+	}
+}
+
+void
+agent_free_unused_agents(struct agent *agent) {
+	while (ADDR_OF(&agent->prev) != NULL) {
+		struct agent *prev_agent = ADDR_OF(&agent->prev);
+
+		if (prev_agent->loaded_module_count == 0) {
+			SET_OFFSET_OF(&agent->prev, ADDR_OF(&prev_agent->prev));
+			agent_cleanup(prev_agent);
+			continue;
+		}
+
+		agent = ADDR_OF(&agent->prev);
+	}
 }

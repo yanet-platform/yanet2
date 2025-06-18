@@ -126,3 +126,14 @@ static inline uint64_t
 cp_pipeline_registry_capacity(struct cp_pipeline_registry *pipeline_registry) {
 	return pipeline_registry->registry.capacity;
 }
+
+/*
+* Find index of the pipeline stage associated with provided module.
+* Returns -1 in case module is not referenced.
+*/
+ssize_t cp_pipeline_find_module(
+	struct cp_config_gen *cp_config_gen,
+	struct cp_pipeline *pipeline,
+	uint64_t module_type,
+	const char *module_name
+);

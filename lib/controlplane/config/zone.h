@@ -209,3 +209,16 @@ int
 cp_config_gen_lookup_pipeline_index(
 	struct cp_config_gen *config_gen, const char *name, uint64_t *index
 );
+
+/*
+* Delete module with specified type and name.
+* Method does not free memory of the module.
+* Returns error if module is beeing used by some pipeline.
+*/
+int
+cp_config_delete_module(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	uint64_t module_type,
+	const char *module_name
+);

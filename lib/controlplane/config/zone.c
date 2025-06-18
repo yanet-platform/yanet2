@@ -5,6 +5,9 @@
 #include "common/container_of.h"
 #include "common/strutils.h"
 
+#include "cp_module.h"
+#include "cp_pipeline.h"
+#include "dataplane/packet/packet.h"
 #include "lib/dataplane/config/zone.h"
 
 #include "lib/controlplane/agent/agent.h"
@@ -248,13 +251,28 @@ cp_config_delete_module(
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
+
+	// check if module if referenced by some pipeline
+	for (uint64_t pipeline_idx = 0;
+	     pipeline_idx <
+	     cp_pipeline_registry_capacity(&old_config_gen->pipeline_registry);
+	     ++pipeline_idx) {
+		struct cp_pipeline *pipeline = cp_config_gen_get_pipeline(
+			old_config_gen, pipeline_idx
+		);
+
+		// if module is referenced by some pipeline
+		// return error
+		if (cp_pipeline_find_module(old_config_gen, pipeline, module_type, module_name) != -1) {
+			goto error_unlock;
+		}
+	}
+
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
 		goto error_unlock;
 	}
-
-	// FIXME check the module is not referenced by any pipeline
 
 	if (cp_module_registry_delete(
 		    &new_config_gen->module_registry, module_type, module_name

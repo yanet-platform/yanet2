@@ -118,3 +118,4 @@ cp_module_registry_delete(
 	uint64_t type,
 	const char *name
 );
+
