@@ -26,30 +26,41 @@ forward_handle_v4(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-	if (packet->tx_device_id >= config->device_count)
+	// Validate that the RX device ID exists in the configuration.
+	// If not found, return the original TX device ID unchanged.
+	if (packet->rx_device_id >= config->device_count) {
 		return packet->tx_device_id;
+	}
 
-	uint32_t forward_device_id = lpm_lookup(
-		&config->device_forwards[packet->tx_device_id].lpm_v4,
-		4,
-		(uint8_t *)&header->dst_addr
-	);
+	struct forward_device_config *fdc =
+		&config->device_forwards[packet->rx_device_id];
 
+	// Perform LPM lookup on the destination IPv4 address using the
+	// LPM table associated with the RX device to determine the
+	// target forwarding device ID.
+	uint32_t forward_device_id =
+		lpm_lookup(&fdc->lpm_v4, 4, (uint8_t *)&header->dst_addr);
+
+	// If the LPM lookup fails, it indicates no forwarding rule
+	// is configured for this destination. Return the original
+	// TX device ID to maintain current packet flow.
 	if (forward_device_id == LPM_VALUE_INVALID) {
 		return packet->tx_device_id;
 	}
 
-	uint64_t counter_id =
-		ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
-		)[forward_device_id]
-			.counter_id;
+	struct forward_target *target =
+		&ADDR_OF(&fdc->targets)[forward_device_id];
+
+	// Update the forwarding counter for the RX device to target device
+	// mapping to track packet statistics.
+	uint64_t counter_id = target->counter_id;
 	uint64_t *counters =
 		counter_get_address(counter_id, worker_id, counter_storage);
 	counters[0] += 1;
 
-	return ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
-	)[forward_device_id]
-		.device_id;
+	// Return the target device ID for packet forwarding based on
+	// the LPM lookup result.
+	return target->device_id;
 }
 
 static uint16_t
@@ -68,30 +79,40 @@ forward_handle_v6(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	if (packet->tx_device_id >= config->device_count)
+	// Validate that the RX device ID exists in the configuration.
+	// If not found, return the original TX device ID unchanged.
+	if (packet->rx_device_id >= config->device_count)
 		return packet->tx_device_id;
 
-	uint32_t forward_device_id = lpm_lookup(
-		&config->device_forwards[packet->tx_device_id].lpm_v6,
-		16,
-		(uint8_t *)&header->dst_addr
-	);
+	struct forward_device_config *fdc =
+		&config->device_forwards[packet->rx_device_id];
 
+	// Perform LPM lookup on the destination IPv6 address using the
+	// LPM table associated with the RX device to determine the
+	// target forwarding device ID.
+	uint32_t forward_device_id =
+		lpm_lookup(&fdc->lpm_v6, 16, (uint8_t *)&header->dst_addr);
+
+	// If the LPM lookup fails, it indicates no forwarding rules
+	// are configured for this destination. Return the original
+	// TX device ID to maintain current packet flow.
 	if (forward_device_id == LPM_VALUE_INVALID) {
 		return packet->tx_device_id;
 	}
 
-	uint64_t counter_id =
-		ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
-		)[forward_device_id]
-			.counter_id;
+	struct forward_target *target =
+		&ADDR_OF(&fdc->targets)[forward_device_id];
+
+	// Update the forwarding counter for the RX device to target device
+	// mapping to track packet statistics.
+	uint64_t counter_id = target->counter_id;
 	uint64_t *counters =
 		counter_get_address(counter_id, worker_id, counter_storage);
 	counters[0] += 1;
 
-	return ADDR_OF(&config->device_forwards[packet->tx_device_id].targets
-	)[forward_device_id]
-		.device_id;
+	// Return the target device ID for packet forwarding based on
+	// the LPM lookup result.
+	return target->device_id;
 }
 
 static uint16_t
@@ -104,17 +125,18 @@ forward_handle_l2(
 ) {
 	(void)dp_config;
 
-	if (packet->tx_device_id >= config->device_count)
+	if (packet->rx_device_id >= config->device_count)
 		return packet->tx_device_id;
 
+	struct forward_device_config *fdc =
+		&config->device_forwards[packet->rx_device_id];
+
 	uint64_t *counters = counter_get_address(
-		config->device_forwards[packet->tx_device_id].l2_counter_id,
-		worker_id,
-		counter_storage
+		fdc->l2_counter_id, worker_id, counter_storage
 	);
 	counters[0] += 1;
 
-	return config->device_forwards[packet->tx_device_id].l2_dst_device_id;
+	return fdc->l2_dst_device_id;
 }
 
 static void
@@ -165,9 +187,19 @@ forward_handle_packets(
 		}
 
 		if (device_id != packet->tx_device_id) {
+			// If the forwarding module modifies the target
+			// device_id, the packet should be placed in the bypass
+			// queue, effectively skipping subsequent pipeline
+			// modules. A worker thread will later process the
+			// bypass queue and transmit the packet to its intended
+			// destination.
 			packet->tx_device_id = device_id;
 			packet_front_bypass(packet_front, packet);
 		} else {
+			// If the forwarding module doesn't modify the target
+			// device_id, the packet should be placed in the output
+			// queue, which will be the input queue for the next
+			// module.
 			packet_front_output(packet_front, packet);
 		}
 	}

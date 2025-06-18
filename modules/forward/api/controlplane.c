@@ -5,7 +5,6 @@
 #include "config.h"
 
 #include "common/container_of.h"
-#include "common/strutils.h"
 
 #include "controlplane/agent/agent.h"
 
