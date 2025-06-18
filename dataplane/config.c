@@ -336,17 +336,16 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			case state_instances: {
 				++dataplane->instance_count;
 
-				void *mem = realloc(dataplane->instances,
-						sizeof(struct
-						       dataplane_instance_config
-						) * dataplane->instance_count);
+				void *mem = realloc(
+					dataplane->instances,
+					sizeof(struct dataplane_instance_config
+					) * dataplane->instance_count
+				);
 				if (mem == NULL) {
 					goto error;
 				}
-				dataplane
-					->instances = (struct
-						       dataplane_instance_config
-							       *)mem;
+				dataplane->instances =
+					(struct dataplane_instance_config *)mem;
 
 				instance = dataplane->instances +
 					   dataplane->instance_count - 1;
@@ -356,16 +355,16 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			}
 			case state_devices: {
 				dataplane->device_count++;
-				void *mem = realloc(dataplane->devices,
-						sizeof(struct
-						       dataplane_device_config
-						) * dataplane->device_count);
+				void *mem = realloc(
+					dataplane->devices,
+					sizeof(struct dataplane_device_config) *
+						dataplane->device_count
+				);
 				if (mem == NULL) {
 					goto error;
 				}
-				dataplane->devices = (struct
-						      dataplane_device_config *)
-					mem;
+				dataplane->devices =
+					(struct dataplane_device_config *)mem;
 				device = dataplane->devices +
 					 dataplane->device_count - 1;
 				memset(device, 0, sizeof(*device));
@@ -374,16 +373,18 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			}
 			case state_workers: {
 				device->worker_count++;
-				void *mem = realloc(device->workers,
-						sizeof(struct
-						       dataplane_device_worker_config
-						) * device->worker_count);
+				void *mem = realloc(
+					device->workers,
+					sizeof(struct
+					       dataplane_device_worker_config
+					) * device->worker_count
+				);
 				if (mem == NULL) {
 					goto error;
 				}
-				device->workers = (struct
-						   dataplane_device_worker_config
-							   *)mem;
+				device->workers =
+					(struct dataplane_device_worker_config
+						 *)mem;
 				worker = device->workers +
 					 device->worker_count - 1;
 				memset(worker, 0, sizeof(*worker));
@@ -393,15 +394,15 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			}
 			case state_connections: {
 				dataplane->connection_count++;
-				void *mem = realloc(dataplane->connections,
-						sizeof(struct
-						       dataplane_connection_config
-						) * dataplane->connection_count
-					);
-				dataplane
-					->connections = (struct
-							 dataplane_connection_config
-								 *)mem;
+				void *mem = realloc(
+					dataplane->connections,
+					sizeof(struct
+					       dataplane_connection_config
+					) * dataplane->connection_count
+				);
+				dataplane->connections =
+					(struct dataplane_connection_config *)
+						mem;
 				connection = dataplane->connections +
 					     dataplane->connection_count - 1;
 				memset(connection, 0, sizeof(*connection));
@@ -454,7 +455,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 error:
 	dataplane_config_free(dataplane);
-	
+
 err_alloc_config:
 	yaml_parser_delete(&parser);
 	return -1;
