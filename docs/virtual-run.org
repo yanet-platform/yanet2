@@ -136,11 +136,11 @@ yanet-cli decap prefix-add -p $DECAP_PREFIX --mod decap0
 
 yanet-cli route insert --mod route0 --via $DEFGW6 ::/0
 
-yanet-cli pipeline update --name=bootstrap --modules forward:forward0 --numa=0
-yanet-cli pipeline update --name=decap --modules forward:forward0 --modules decap:decap0 --modules route:route0 --numa=0
+yanet-cli pipeline update --name=bootstrap --modules forward:forward0 --instance=0
+yanet-cli pipeline update --name=decap --modules forward:forward0 --modules decap:decap0 --modules route:route0 --instance=0
 
-yanet-cli pipeline assign --numa=0 --device=1 --pipelines bootstrap:1
-yanet-cli pipeline assign --numa=0 --device=0 --pipelines decap:1
+yanet-cli pipeline assign --instance=0 --device=1 --pipelines bootstrap:1
+yanet-cli pipeline assign --instance=0 --device=0 --pipelines decap:1
 # tmp hack for resolve neighbors
 sleep 3
 yanet-cli route insert --mod route0 --via $DEFGW6 ::/0
@@ -170,11 +170,11 @@ yanet-cli nat64 prefix add --prefix $NAT64_PREFIX --mod nat0
 yanet-cli nat64 mapping add --mod nat0 --ipv4 <ipv4> --ipv6 <ipv6> --prefix-index 0
 yanet-cli nat64 mtu --mod nat0 --ipv4-mtu 1450 --ipv6-mtu 6950
 
-yanet-cli pipeline update --name=bootstrap --modules forward:forward0 --numa=0
-yanet-cli pipeline update --name=nat64 --modules forward:forward0 --modules nat64:nat0 --modules route:route0 --numa=0
+yanet-cli pipeline update --name=bootstrap --modules forward:forward0 --instance=0
+yanet-cli pipeline update --name=nat64 --modules forward:forward0 --modules nat64:nat0 --modules route:route0 --instance=0
 
-yanet-cli pipeline assign --numa=0 --device=1 --pipelines bootstrap:1
-yanet-cli pipeline assign --numa=0 --device=0 --pipelines nat64:1
+yanet-cli pipeline assign --instance=0 --device=1 --pipelines bootstrap:1
+yanet-cli pipeline assign --instance=0 --device=0 --pipelines nat64:1
 
 # tmp hack for resolve neighbors
 sleep 3
