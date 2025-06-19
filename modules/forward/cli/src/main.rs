@@ -5,6 +5,7 @@ use clap_complete::CompleteEnv;
 use code::{
     AddL3ForwardRequest, L2ForwardEnableRequest, L3ForwardEntry, RemoveL3ForwardRequest, ShowConfigRequest,
     ShowConfigResponse, TargetModule, forward_service_client::ForwardServiceClient,
+    DeleteModuleRequest,
 };
 use ipnet::IpNet;
 use ptree::TreeBuilder;
@@ -45,6 +46,7 @@ pub enum OutputFormat {
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
     Show(ShowConfigCmd),
+    DeleteModule(DeleteModuleCmd),
     L2Enable(L2ForwardCmd),
     L3Add(AddL3ForwardCmd),
     L3Remove(RemoveL3ForwardCmd),
@@ -58,6 +60,13 @@ pub struct ShowConfigCmd {
     /// Output format.
     #[clap(long, value_enum, default_value_t = OutputFormat::Tree)]
     pub format: OutputFormat,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct DeleteModuleCmd {
+    /// The name of the module to delete
+    #[arg(long = "mod", short)]
+    pub module_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -143,6 +152,17 @@ impl ForwardService {
         Ok(())
     }
 
+    pub async fn delete_module(&mut self, cmd: DeleteModuleCmd) -> Result<(), Box<dyn Error>> {
+        let request = DeleteModuleRequest {
+            target: Some(TargetModule {
+                module_name: cmd.module_name,
+                instances: InstanceMap::MAX.as_u32(),
+            })
+        };
+        self.client.delete_module(request).await?;
+        Ok(())
+    }
+
     pub async fn enable_l2_forward(&mut self, cmd: L2ForwardCmd) -> Result<(), Box<dyn Error>> {
         let request = L2ForwardEnableRequest {
             target: Some(TargetModule {
@@ -197,6 +217,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
     match cmd.mode {
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
+        ModeCmd::DeleteModule(cmd) => service.delete_module(cmd).await,
         ModeCmd::L2Enable(cmd) => service.enable_l2_forward(cmd).await,
         ModeCmd::L3Add(cmd) => service.add_l3_forward(cmd).await,
         ModeCmd::L3Remove(cmd) => service.remove_l3_forward(cmd).await,

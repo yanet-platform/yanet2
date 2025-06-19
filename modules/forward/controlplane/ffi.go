@@ -143,6 +143,9 @@ func DeleteModule(m *ForwardService, instanceMap dataplane.DpInstanceMap, module
 
 	deleted := dataplane.DpInstanceMap(0)
 	for inst := range instanceMap.Iter() {
+		if inst >= uint32(len(m.agents)) {
+			break
+		}
 		agent := m.agents[inst]
 		result := C.agent_delete_module((*C.struct_agent)(agent.AsRawPtr()), cTypeName, cModuleName)
 		if result == 0 {
