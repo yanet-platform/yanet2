@@ -243,6 +243,9 @@ func (m *ForwardService) DeleteModule(ctx context.Context, req *forwardpb.Delete
 		return nil, err
 	}
 	deleted := DeleteModule(m, instances, moduleName)
+
+	m.log.Infow("deleted module for instances", zap.Uint32("deleted", uint32(deleted)))
+
 	response := &forwardpb.DeleteModuleResponse{
 		Deleted: uint32(deleted),
 	}
