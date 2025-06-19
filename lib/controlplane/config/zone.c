@@ -260,6 +260,9 @@ cp_config_delete_module(
 		struct cp_pipeline *pipeline = cp_config_gen_get_pipeline(
 			old_config_gen, pipeline_idx
 		);
+		if (pipeline == NULL) {
+			continue;
+		}
 
 		// if module is referenced by some pipeline
 		// return error
