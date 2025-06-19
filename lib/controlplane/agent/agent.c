@@ -275,8 +275,8 @@ agent_delete_module(
 	const char *module_type, 
 	const char *module_name
 ) {
-	struct dp_config *dp_config = agent->dp_config;
-	struct cp_config *cp_config = agent->cp_config;
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	
 	uint64_t index;
 	if (dp_config_lookup_module(
