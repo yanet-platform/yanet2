@@ -259,3 +259,8 @@ forward_module_topology_device_count(struct agent *agent) {
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	return dp_config->dp_topology.device_count;
 }
+
+int
+forward_module_delete(struct cp_module *cp_module) {
+	return agent_delete_module(cp_module->agent, "forward", cp_module->name);
+}

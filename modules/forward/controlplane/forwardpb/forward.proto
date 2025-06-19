@@ -20,6 +20,11 @@ service ForwardService {
 	// configuration.
 	rpc RemoveL3Forward(RemoveL3ForwardRequest)
 		returns (RemoveL3ForwardResponse);
+
+	// Allows to delete forward module if it is not referenced
+	// by any pipeline. 
+	rpc DeleteModule(DeleteModuleRequest)
+		returns (DeleteModuleResponse);
 }
 
 // TargetModule request for operating on a specific target module.
@@ -91,4 +96,17 @@ message RemoveL3ForwardRequest {
 }
 
 message RemoveL3ForwardResponse {
+}
+
+// Delete module with specified name.
+message DeleteModuleRequest {
+	// Specifies module name and 
+	// instances of forward agent to delete.
+	TargetModule target = 1;
+}
+
+message DeleteModuleResponse {
+	// Specifies bitmap of dataplane instances,
+	// for which modules were successfully deleted.
+	uint32 deleted = 1;
 }

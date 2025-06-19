@@ -52,3 +52,7 @@ func (m DpInstanceMap) Intersect(other DpInstanceMap) DpInstanceMap {
 func (m DpInstanceMap) Iter() iter.Seq[uint32] {
 	return bitset.NewBitsTraverser(uint64(m)).Iter()
 }
+
+func (m *DpInstanceMap) Enable(i uint32) {
+	*m |= 1 << i
+}

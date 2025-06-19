@@ -41,3 +41,8 @@ forward_module_config_enable_l2(
 
 uint64_t
 forward_module_topology_device_count(struct agent *agent);
+
+// Allows to delete some module of forward.
+// @return Returns -1 on error and 0 on success.
+int
+forward_module_delete(struct cp_module *cp_module);

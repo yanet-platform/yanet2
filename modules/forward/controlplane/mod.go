@@ -11,6 +11,8 @@ import (
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
 
+const agentName = "forward"
+
 // ForwardModule is a control-plane component of a module that is responsible for
 // forwarding traffic between devices.
 type ForwardModule struct {
@@ -35,7 +37,7 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("forward", instances, uint(cfg.MemoryRequirements))
+	agents, err := shm.AgentsAttach(agentName, instances, uint(cfg.MemoryRequirements))
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +60,7 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 }
 
 func (m *ForwardModule) Name() string {
-	return "forward"
+	return agentName
 }
 
 func (m *ForwardModule) Endpoint() string {

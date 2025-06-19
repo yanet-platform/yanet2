@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"unsafe"
 
+	dataplane "github.com/yanet-platform/yanet2/common/go/dataplane"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
@@ -131,4 +132,23 @@ func (m *ModuleConfig) forwardEnableV6(addrStart [16]byte, addrEnd [16]byte, src
 
 func topologyDeviceCount(agent *ffi.Agent) uint64 {
 	return uint64(C.forward_module_topology_device_count((*C.struct_agent)(agent.AsRawPtr())))
+}
+
+func DeleteModule(m *ForwardService, instanceMap dataplane.DpInstanceMap, moduleName string) dataplane.DpInstanceMap {
+	cTypeName := C.CString(agentName)
+	defer C.free(unsafe.Pointer(cTypeName))
+
+	cModuleName := C.CString(moduleName)
+	defer C.free(unsafe.Pointer(cModuleName))
+
+	deleted := dataplane.DpInstanceMap(0)
+	for inst := range instanceMap.Iter() {
+		agent := m.agents[inst]
+		result := C.agent_delete_module((*C.struct_agent)(agent.AsRawPtr()), cTypeName, cModuleName)
+		if result == 0 {
+			deleted.Enable(inst)
+		}
+	}
+
+	return deleted
 }

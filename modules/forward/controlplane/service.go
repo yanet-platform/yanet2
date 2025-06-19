@@ -237,6 +237,18 @@ func (m *ForwardService) RemoveL3Forward(ctx context.Context, req *forwardpb.Rem
 	return &forwardpb.RemoveL3ForwardResponse{}, nil
 }
 
+func (m *ForwardService) DeleteModule(ctx context.Context, req *forwardpb.DeleteModuleRequest) (*forwardpb.DeleteModuleResponse, error) {
+	moduleName, instances, err := validateTarget(req.GetTarget(), len(m.agents))
+	if err != nil {
+		return nil, err
+	}
+	deleted := DeleteModule(m, instances, moduleName)
+	response := &forwardpb.DeleteModuleResponse{
+		Deleted: uint32(deleted),
+	}
+	return response, nil
+}
+
 func (m *ForwardService) validateForwardParams(srcDeviceId uint32, network string, dstDeviceId uint32) (DeviceID, netip.Prefix, DeviceID, error) {
 	prefix, err := netip.ParsePrefix(network)
 	if err != nil {
