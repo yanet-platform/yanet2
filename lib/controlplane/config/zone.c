@@ -381,7 +381,7 @@ cp_config_delete_pipeline(
 		ADDR_OF(&cp_config->cp_config_gen);
 
 	uint64_t index;
-	if (!cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
+	if (cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
 		goto error_unlock;
 	}
 
