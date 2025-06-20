@@ -170,3 +170,18 @@ type DevicePipeline struct {
 	Name   string
 	Weight uint64
 }
+
+func (m *Agent) DeletePipeline(name string) error {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	rc, err := C.agent_delete_pipeline(m.ptr, cName)
+	if err != nil {
+		return fmt.Errorf("failed to delete pipeline: %w", err)
+	}
+	if rc != 0 {
+		return fmt.Errorf("failed to delete pipeline: %d code", rc)
+	}
+
+	return nil
+}
