@@ -88,3 +88,8 @@ int
 cp_device_registry_delete(
 	struct cp_device_registry *device_registry, const char *name
 );
+
+static inline uint64_t
+cp_device_registry_capacity(struct cp_device_registry *device_registry) {
+	return device_registry->registry.capacity;
+}

@@ -298,6 +298,18 @@ agent_update_pipelines(
 	);
 }
 
+int
+agent_delete_pipeline(
+	struct agent *agent,
+	const char *pipeline_name
+) {
+	return cp_config_delete_pipeline(
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
+		pipeline_name
+	);
+}
+
 struct pipeline_config *
 pipeline_config_create(const char *name, uint64_t length) {
 	struct pipeline_config *config = (struct pipeline_config *)malloc(
