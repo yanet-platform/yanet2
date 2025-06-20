@@ -170,7 +170,7 @@ impl PipelineService {
     pub async fn delete_pipeline(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
         let request = DeletePipelineRequest {
             instance: cmd.instance,
-            pipeline_name: cmd.pipeline,
+            pipeline_name: cmd.name,
         };
         self.client.delete(request).await?;
         log::info!("Successfully deleted pipeline");
