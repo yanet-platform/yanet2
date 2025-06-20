@@ -374,9 +374,11 @@ cp_config_delete_pipeline(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	const char *name) {
+
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
 
 	uint64_t index;
 	if (!cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
