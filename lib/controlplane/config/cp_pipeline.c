@@ -5,6 +5,8 @@
 #include "controlplane/config/zone.h"
 #include "dataplane/config/zone.h"
 
+#include <string.h>
+
 static inline uint64_t
 cp_pipeline_alloc_size(uint64_t length) {
 	return sizeof(struct cp_pipeline) +
