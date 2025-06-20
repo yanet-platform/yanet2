@@ -376,11 +376,11 @@ cp_config_delete_pipeline(
 	const char *name) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen = cp_config->cp_config_gen;
+	struct cp_config_gen *old_config_gen = ADDR_OF(&cp_config->cp_config_gen);
 
 	uint64_t index;
 	if (!cp_config_gen_lookup_pipeline_index(cp_config->cp_config_gen, name, &index)) {
-		goto error_unlock;
+		goto error_unlock; 
 	}
 
 	// check if pipeline is assigned to some device
