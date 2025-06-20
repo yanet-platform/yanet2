@@ -72,9 +72,9 @@ pub struct DeleteCmd {
     /// Dataplane instance where the changes should be applied.
     #[arg(short, long)]
     pub instance: u32,
-    /// Pipeline name
+    /// Pipeline name.
     #[arg(short, long)]
-    pub pipeline: String,
+    pub name: String,
 }
 
 #[tokio::main(flavor = "current_thread")]
