@@ -299,10 +299,7 @@ agent_update_pipelines(
 }
 
 int
-agent_delete_pipeline(
-	struct agent *agent,
-	const char *pipeline_name
-) {
+agent_delete_pipeline(struct agent *agent, const char *pipeline_name) {
 	return cp_config_delete_pipeline(
 		ADDR_OF(&agent->dp_config),
 		ADDR_OF(&agent->cp_config),

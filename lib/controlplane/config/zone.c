@@ -373,7 +373,8 @@ int
 cp_config_delete_pipeline(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
-	const char *name) {
+	const char *name
+) {
 
 	cp_config_lock(cp_config);
 
@@ -390,14 +391,16 @@ cp_config_delete_pipeline(
 	     device_idx <
 	     cp_device_registry_capacity(&old_config_gen->device_registry);
 	     ++device_idx) {
-		struct cp_device *device = cp_config_gen_get_device(
-			old_config_gen, device_idx
-		);
+		struct cp_device *device =
+			cp_config_gen_get_device(old_config_gen, device_idx);
 		if (device == NULL)
 			continue;
 
-		for (uint64_t assigned_pipeline_idx = 0; assigned_pipeline_idx < device->pipeline_map_size; ++assigned_pipeline_idx) {
-			uint64_t pipeline_idx = device->pipeline_map[assigned_pipeline_idx];
+		for (uint64_t assigned_pipeline_idx = 0;
+		     assigned_pipeline_idx < device->pipeline_map_size;
+		     ++assigned_pipeline_idx) {
+			uint64_t pipeline_idx =
+				device->pipeline_map[assigned_pipeline_idx];
 			if (pipeline_idx == index) {
 				// if pipeline assigned to device
 				// throw error
