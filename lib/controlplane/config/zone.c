@@ -379,8 +379,8 @@ cp_config_delete_pipeline(
 	struct cp_config_gen *old_config_gen = ADDR_OF(&cp_config->cp_config_gen);
 
 	uint64_t index;
-	if (!cp_config_gen_lookup_pipeline_index(cp_config->cp_config_gen, name, &index)) {
-		goto error_unlock; 
+	if (!cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
+		goto error_unlock;
 	}
 
 	// check if pipeline is assigned to some device
