@@ -157,10 +157,10 @@ func (m *Agent) UpdateDevices(devices map[string][]DevicePipeline) error {
 		&configs[0],
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update devices: %w", err)
+		return err
 	}
 	if rc != 0 {
-		return fmt.Errorf("failed to update devices: %d code", rc)
+		return fmt.Errorf("error code: %d", rc)
 	}
 
 	return nil
@@ -177,10 +177,10 @@ func (m *Agent) DeletePipeline(name string) error {
 
 	rc, err := C.agent_delete_pipeline(m.ptr, cName)
 	if err != nil {
-		return fmt.Errorf("failed to delete pipeline: %w", err)
+		return err
 	}
 	if rc != 0 {
-		return fmt.Errorf("failed to delete pipeline: %d code", rc)
+		return fmt.Errorf("error code: %d", rc)
 	}
 
 	return nil
