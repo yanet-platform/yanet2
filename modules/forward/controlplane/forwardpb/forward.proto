@@ -22,9 +22,8 @@ service ForwardService {
 		returns (RemoveL3ForwardResponse);
 
 	// Allows to delete forward module if it is not referenced
-	// by any pipeline. 
-	rpc DeleteModule(DeleteModuleRequest)
-		returns (DeleteModuleResponse);
+	// by any pipeline.
+	rpc DeleteModule(DeleteModuleRequest) returns (DeleteModuleResponse);
 }
 
 // TargetModule request for operating on a specific target module.
@@ -100,7 +99,7 @@ message RemoveL3ForwardResponse {
 
 // Delete module with specified name.
 message DeleteModuleRequest {
-	// Specifies module name and 
+	// Specifies module name and
 	// instances of forward agent to delete.
 	TargetModule target = 1;
 }
