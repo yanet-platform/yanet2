@@ -46,7 +46,7 @@ pub enum OutputFormat {
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
     Show(ShowConfigCmd),
-    DeleteModule(DeleteModuleCmd),
+    Delete(DeleteCmd),
     L2Enable(L2ForwardCmd),
     L3Add(AddL3ForwardCmd),
     L3Remove(RemoveL3ForwardCmd),
@@ -63,7 +63,7 @@ pub struct ShowConfigCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct DeleteModuleCmd {
+pub struct DeleteCmd {
     /// The name of the module to delete
     #[arg(long = "mod", short)]
     pub module_name: String,
@@ -152,7 +152,7 @@ impl ForwardService {
         Ok(())
     }
 
-    pub async fn delete_module(&mut self, cmd: DeleteModuleCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn delete_module(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
         let request = DeleteModuleRequest {
             target: Some(TargetModule {
                 module_name: cmd.module_name,
@@ -217,7 +217,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
     match cmd.mode {
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::DeleteModule(cmd) => service.delete_module(cmd).await,
+        ModeCmd::Delete(cmd) => service.delete_module(cmd).await,
         ModeCmd::L2Enable(cmd) => service.enable_l2_forward(cmd).await,
         ModeCmd::L3Add(cmd) => service.add_l3_forward(cmd).await,
         ModeCmd::L3Remove(cmd) => service.remove_l3_forward(cmd).await,

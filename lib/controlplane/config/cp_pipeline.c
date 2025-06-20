@@ -266,8 +266,7 @@ ssize_t cp_pipeline_find_module(
 			cp_config_gen,
 			pipeline->modules[stage_idx].index
 		);
-		int cmp_result = strcmp(module->name, module_name);
-		if ((cmp_result == 0) && (module->type == module_type)) {
+		if (!strcmp(module->name, module_name) && (module->type == module_type)) {
 			return stage_idx;
 		}
 	}
