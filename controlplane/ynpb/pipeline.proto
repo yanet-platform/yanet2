@@ -14,7 +14,7 @@ service PipelineService {
 	rpc Assign(AssignPipelinesRequest) returns (AssignPipelinesResponse) {
 	}
 
-	// Allows to delete pipeline with specified name 
+	// Allows to delete pipeline with specified name
 	// if it is not assigned to device.
 	rpc Delete(DeletePipelineRequest) returns (DeletePipelineResponse);
 }
