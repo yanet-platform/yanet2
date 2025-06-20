@@ -271,23 +271,19 @@ agent_update_modules(
 
 int
 agent_delete_module(
-	struct agent *agent, 
-	const char *module_type, 
-	const char *module_name
+	struct agent *agent, const char *module_type, const char *module_name
 ) {
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	
+
 	uint64_t index;
-	if (dp_config_lookup_module(
-			dp_config,
-			module_type,
-			&index
-		)) {
+	if (dp_config_lookup_module(dp_config, module_type, &index)) {
 		return -1;
 	}
 
-	int res = cp_config_delete_module(dp_config, cp_config, index, module_name);
+	int res = cp_config_delete_module(
+		dp_config, cp_config, index, module_name
+	);
 
 	agent_free_unused_modules(agent);
 	agent_free_unused_agents(agent);

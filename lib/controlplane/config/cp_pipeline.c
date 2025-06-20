@@ -254,19 +254,20 @@ cp_pipeline_registry_delete(
 	);
 }
 
-ssize_t cp_pipeline_find_module(
+ssize_t
+cp_pipeline_find_module(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_pipeline *pipeline,
 	uint64_t module_type,
 	const char *module_name
 ) {
 	for (uint64_t stage_idx = 0; stage_idx < pipeline->length;
-			++stage_idx) {
+	     ++stage_idx) {
 		struct cp_module *module = cp_config_gen_get_module(
-			cp_config_gen,
-			pipeline->modules[stage_idx].index
+			cp_config_gen, pipeline->modules[stage_idx].index
 		);
-		if (!strcmp(module->name, module_name) && (module->type == module_type)) {
+		if (!strcmp(module->name, module_name) &&
+		    (module->type == module_type)) {
 			return stage_idx;
 		}
 	}

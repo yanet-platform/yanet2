@@ -43,15 +43,13 @@ agent_update_modules(
 );
 
 /*
-* Delete module with specified type and name.
-* Returns error if module is still referenced by some pipeline
-* or module does not exist.
-*/
+ * Delete module with specified type and name.
+ * Returns error if module is still referenced by some pipeline
+ * or module does not exist.
+ */
 int
 agent_delete_module(
-	struct agent *agent, 
-	const char *module_type, 
-	const char *module_name
+	struct agent *agent, const char *module_type, const char *module_name
 );
 
 struct pipeline_config;

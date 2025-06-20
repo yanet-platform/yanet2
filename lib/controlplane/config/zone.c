@@ -266,7 +266,9 @@ cp_config_delete_module(
 
 		// if module is referenced by some pipeline
 		// return error
-		if (cp_pipeline_find_module(old_config_gen, pipeline, module_type, module_name) != -1) {
+		if (cp_pipeline_find_module(
+			    old_config_gen, pipeline, module_type, module_name
+		    ) != -1) {
 			goto error_unlock;
 		}
 	}
