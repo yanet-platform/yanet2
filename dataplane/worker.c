@@ -415,7 +415,7 @@ dataplane_worker_init(
 		    device->port_id, queue_id, 4096, config->instance_id, NULL
 	    )) {
 		LOG(ERROR,
-		    "failed to setup TX queue for port id=%u numa=%u",
+		    "failed to setup TX queue for port id=%u instance=%u",
 		    device->port_id,
 		    config->instance_id);
 		return -1;
