@@ -2,14 +2,10 @@
 
 #include <unistd.h>
 
-#include "common/container_of.h"
-#include "common/strutils.h"
-
+#include "cp_device.h"
 #include "cp_module.h"
 #include "cp_pipeline.h"
-#include "cp_device.h"
 
-#include "dataplane/packet/packet.h"
 #include "lib/dataplane/config/zone.h"
 
 #include "lib/controlplane/agent/agent.h"
