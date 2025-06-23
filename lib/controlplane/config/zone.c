@@ -252,7 +252,7 @@ cp_config_delete_module(
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 
-	// check if module if referenced by some pipeline
+	// check if module is referenced by some pipeline
 	for (uint64_t pipeline_idx = 0;
 	     pipeline_idx <
 	     cp_pipeline_registry_capacity(&old_config_gen->pipeline_registry);
