@@ -457,7 +457,7 @@ dataplane_worker_init(
 		    worker->rx_mempool
 	    )) {
 		LOG(ERROR,
-		    "failed to setup RX queue for port id=%u numa=%u",
+		    "failed to setup RX queue for port id=%u instance=%u",
 		    device->port_id,
 		    config->instance_id);
 		goto error_mempool;
