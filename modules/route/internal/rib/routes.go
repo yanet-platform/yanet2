@@ -24,6 +24,9 @@ type LargeCommunity struct {
 // This information helps compute route costs, enabling the data plane to select
 // the optimal route for traffic forwarding
 type Route struct {
+	// SessionID identifies the session that added this route to the rib, used
+	// for cleanup of stale routes.
+	SessionID uint64
 	// Prefix is used as a key in routing databases (RIB and FIB), represented as
 	// an IPv6 network prefix. IPv4 addresses are stored as IPv6-mapped addresses.
 	Prefix netip.Prefix
@@ -38,6 +41,8 @@ type Route struct {
 	//
 	// This field is used to distinguish similar routes to different systems.
 	RD uint64
+	// LargeCommunities is used for link bandwidth information.
+	LargeCommunities []LargeCommunity
 	// UpdatedAt notes the last time the route was added or modified in the RIB.
 	UpdatedAt time.Time
 	// PeerAS denotes the Autonomous System of the BGP peer, per RFC 4271 Section 5.1.2.
@@ -57,8 +62,6 @@ type Route struct {
 	//
 	// This field participates in route cost calculation.
 	ASPathLen uint8
-	// LargeCommunities is used for link bandwidth information.
-	LargeCommunities []LargeCommunity
 	// SourceID identifies the origin of this route's information,
 	// such as static or Bird.
 	SourceID RouteSourceID

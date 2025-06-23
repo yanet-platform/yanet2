@@ -13,6 +13,10 @@ service PipelineService {
 	// TODO: Assign (assign pipeline to device id).
 	rpc Assign(AssignPipelinesRequest) returns (AssignPipelinesResponse) {
 	}
+
+	// Allows to delete pipeline with specified name
+	// if it is not assigned to device.
+	rpc Delete(DeletePipelineRequest) returns (DeletePipelineResponse);
 }
 
 // TODO: docs.
@@ -78,4 +82,15 @@ message DevicePipeline {
 }
 
 message AssignPipelinesResponse {
+}
+
+message DeletePipelineRequest {
+	// Dataplane instance
+	uint32 instance = 1;
+
+	// Name of the pipeline
+	string pipeline_name = 2;
+}
+
+message DeletePipelineResponse {
 }

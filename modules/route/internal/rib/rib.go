@@ -11,19 +11,27 @@ import (
 )
 
 type RIB struct {
-	mu        sync.RWMutex
-	routes    MapTrie[netip.Prefix, netip.Addr, RoutesList]
-	changedAt *atomic.Int64
-	log       *zap.SugaredLogger
+	mu               sync.RWMutex
+	routes           MapTrie[netip.Prefix, netip.Addr, RoutesList]
+	changedAt        *atomic.Int64
+	currentSessionId *atomic.Uint64 // Monotonically increasing ID for BIRD import sessions
+	// sessionTerminator points to a flag signaling the active FeedRIB stream to terminate;
+	// swapped on NewSession to invalidate the previous stream.
+	sessionTerminator *atomic.Pointer[atomic.Bool]
+	log               *zap.SugaredLogger
 }
 
 func NewRIB(log *zap.SugaredLogger) *RIB {
 	changedAt := atomic.Int64{}
 	changedAt.Store(time.Now().UnixNano())
+	sessionTerminator := &atomic.Pointer[atomic.Bool]{}
+	sessionTerminator.Store(&atomic.Bool{})
 	return &RIB{
-		routes:    NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
-		changedAt: &changedAt,
-		log:       log,
+		routes:            NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
+		changedAt:         &changedAt,
+		currentSessionId:  &atomic.Uint64{},
+		sessionTerminator: sessionTerminator,
+		log:               log,
 	}
 }
 
@@ -88,11 +96,17 @@ func (m *RIB) LongestMatch(addr netip.Addr) (netip.Prefix, RoutesList, bool) {
 
 func (m *RIB) Update(routes ...Route) {
 	m.mu.Lock()
+	m.update(routes...)
+	m.mu.Unlock()
+	m.changedAt.Store(time.Now().UnixNano())
+}
+func (m *RIB) update(routes ...Route) {
 	for _, route := range routes {
 		if route.ToRemove {
 			m.routes.UpdateOrDelete(
 				route.Prefix,
 				func(m RoutesList) (RoutesList, bool) {
+					m.Remove(route)
 					return m, len(m.Routes) == 0
 				},
 			)
@@ -111,10 +125,58 @@ func (m *RIB) Update(routes ...Route) {
 			)
 		}
 	}
-	m.mu.Unlock()
-	m.changedAt.Store(time.Now().UnixNano())
 }
 
 func (m *RIB) UpdatedAt() time.Time {
 	return time.Unix(0, m.changedAt.Load())
+}
+
+// NewSession generates a unique ID for a new BIRD import stream and provides its termination flag.
+// Crucially, it also signals the *previous* stream (if any) to terminate by setting its flag.
+// This ensures only one import stream actively updates a RIB for a given source.
+func (m *RIB) NewSession() (uint64, *atomic.Bool) {
+	id := m.currentSessionId.Add(1)
+	newSessionTerminator := &atomic.Bool{}
+	// Atomically replace the RIB's sessionTerminator with the new one, getting the old.
+	oldSessionTerminator := m.sessionTerminator.Swap(newSessionTerminator)
+	// Signal the previous stream, identified by oldSessionTerminator, to stop.
+	oldSessionTerminator.Store(true)
+	return id, newSessionTerminator
+}
+
+// CleanupTask removes stale BIRD routes (those with sessionID <= provided sessionID) after a TTL.
+// It's launched when a BIRD import stream ends, targeting routes from that now-defunct session.
+// The 'quit' channel allows for early termination, e.g., on service shutdown.
+func (m *RIB) CleanupTask(sessionID uint64, quit chan bool, ttl time.Duration) {
+	timeout := time.After(ttl)
+	select {
+	case <-quit:
+		return
+	case <-timeout:
+	}
+
+	changed := false
+	m.mu.Lock()
+	defer func() {
+		m.mu.Unlock()
+		if changed {
+			m.changedAt.Store(time.Now().UnixNano())
+		}
+	}()
+
+	for _, routeList := range m.routes.Dump() {
+		select {
+		case <-quit:
+			return
+		default:
+		}
+
+		for _, route := range routeList.Routes {
+			if route.SourceID == RouteSourceBird && route.SessionID <= sessionID {
+				changed = true
+				route.ToRemove = true
+			}
+		}
+		m.update(routeList.Routes...)
+	}
 }

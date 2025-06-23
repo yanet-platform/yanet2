@@ -123,6 +123,12 @@ agent_update_pipelines(
 	struct pipeline_config *pipelines[]
 );
 
+// Delete pipeline with specified name.
+// @return -1 if pipeline not exists or is assigned to some device, 0 on
+// success.
+int
+agent_delete_pipeline(struct agent *agent, const char *pipeline_name);
+
 struct pipeline_config *
 pipeline_config_create(const char *name, uint64_t length);
 

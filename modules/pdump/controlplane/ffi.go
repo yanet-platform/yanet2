@@ -119,6 +119,10 @@ func (m *ModuleConfig) SetFilter(filter string) error {
 }
 
 func (m *ModuleConfig) SetDumpMode(pbMode uint32) error {
+	if pbMode > C.PDUMP_ALL {
+		return fmt.Errorf("unknown pdump mode %x (max known %x)", pbMode, C.PDUMP_ALL)
+	}
+
 	var mode C.enum_pdump_mode
 	if pbMode&C.PDUMP_INPUT != 0 {
 		mode |= C.PDUMP_INPUT
@@ -129,11 +133,12 @@ func (m *ModuleConfig) SetDumpMode(pbMode uint32) error {
 	if pbMode&C.PDUMP_BYPASS != 0 {
 		mode |= C.PDUMP_BYPASS
 	}
-	if pbMode&C.PDUMP_ALL != 0 {
-		mode = C.PDUMP_ALL
-	}
-	if pbMode > C.PDUMP_ALL {
-		return fmt.Errorf("unknown pdump mode %x (max known %x)", pbMode, C.PDUMP_ALL)
+
+	if pbMode != uint32(mode) {
+		// This check validates the exhaustiveness of the preceding if
+		// statements against the pdump_mode enum.
+		// This check will fail if new modes are added.
+		return fmt.Errorf("unknown pdump mode %x", pbMode^mode)
 	}
 
 	rc, err := C.pdump_module_config_set_mode(

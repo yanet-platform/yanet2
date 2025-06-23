@@ -34,3 +34,7 @@ func (m *Module) Name() string {
 func (m *Module) RegisterService(server *grpc.Server) {
 	coordinatorpb.RegisterModuleServiceServer(server, m.service)
 }
+
+func (m *Module) StopService() {
+	// No-op currently
+}

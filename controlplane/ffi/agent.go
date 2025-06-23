@@ -157,10 +157,10 @@ func (m *Agent) UpdateDevices(devices map[string][]DevicePipeline) error {
 		&configs[0],
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update devices: %w", err)
+		return err
 	}
 	if rc != 0 {
-		return fmt.Errorf("failed to update devices: %d code", rc)
+		return fmt.Errorf("error code: %d", rc)
 	}
 
 	return nil
@@ -169,4 +169,19 @@ func (m *Agent) UpdateDevices(devices map[string][]DevicePipeline) error {
 type DevicePipeline struct {
 	Name   string
 	Weight uint64
+}
+
+func (m *Agent) DeletePipeline(name string) error {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	rc, err := C.agent_delete_pipeline(m.ptr, cName)
+	if err != nil {
+		return err
+	}
+	if rc != 0 {
+		return fmt.Errorf("error code: %d", rc)
+	}
+
+	return nil
 }

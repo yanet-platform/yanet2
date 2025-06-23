@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -26,20 +27,28 @@ type RouteService struct {
 
 	mu         sync.Mutex
 	agents     []*ffi.Agent
+	ribsLock   sync.RWMutex
 	ribs       map[instanceKey]*rib.RIB
 	neighCache *neigh.NexthopCache
-	log        *zap.SugaredLogger
+
+	ribTTL time.Duration
+	quitCh chan bool
+
+	log *zap.SugaredLogger
 }
 
 func NewRouteService(
 	agents []*ffi.Agent,
 	neighCache *neigh.NexthopCache,
+	ribTTL time.Duration,
 	log *zap.SugaredLogger,
 ) *RouteService {
 	return &RouteService{
 		agents:     agents,
 		ribs:       map[instanceKey]*rib.RIB{},
 		neighCache: neighCache,
+		ribTTL:     ribTTL,
+		quitCh:     make(chan bool),
 		log:        log,
 	}
 }
@@ -57,10 +66,12 @@ func (m *RouteService) ListConfigs(
 			Instance: uint32(idx),
 		}
 	}
+	m.ribsLock.RLock()
 	for key := range maps.Keys(m.ribs) {
 		instanceConfigs := response.InstanceConfigs[key.dataplaneInstance]
 		instanceConfigs.Configs = append(instanceConfigs.Configs, key.name)
 	}
+	m.ribsLock.RUnlock()
 
 	return response, nil
 }
@@ -70,12 +81,12 @@ func (m *RouteService) ShowRoutes(
 	request *routepb.ShowRoutesRequest,
 ) (*routepb.ShowRoutesResponse, error) {
 
-	name, instances, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, instance, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	holder, ok := m.ribs[instanceKey{name: name, dataplaneInstance: instances}]
+	holder, ok := m.getRib(name, instance)
 	if !ok {
 		return &routepb.ShowRoutesResponse{}, nil
 	}
@@ -110,7 +121,7 @@ func (m *RouteService) LookupRoute(
 	request *routepb.LookupRouteRequest,
 ) (*routepb.LookupRouteResponse, error) {
 
-	name, instances, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, instance, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -120,7 +131,7 @@ func (m *RouteService) LookupRoute(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse IP address: %v", err)
 	}
 
-	holder, ok := m.ribs[instanceKey{name: name, dataplaneInstance: instances}]
+	holder, ok := m.getRib(name, instance)
 	if !ok {
 		return &routepb.LookupRouteResponse{}, nil
 	}
@@ -148,18 +159,24 @@ func (m *RouteService) FlushRoutes(
 	ctx context.Context,
 	request *routepb.FlushRoutesRequest,
 ) (*routepb.FlushRoutesResponse, error) {
-	name, instances, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, instance, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	return &routepb.FlushRoutesResponse{}, m.syncRouteUpdates(name, instances)
+	ribRef, ok := m.getRib(name, instance)
+	if !ok {
+		m.log.Warnf("no RIB found for module '%s' on dataplane instance %d", name, instance)
+		return &routepb.FlushRoutesResponse{}, nil
+	}
+
+	return &routepb.FlushRoutesResponse{}, m.syncRouteUpdates(ribRef, name, instance)
 }
 
 func (m *RouteService) InsertRoute(
 	ctx context.Context,
 	request *routepb.InsertRouteRequest,
 ) (*routepb.InsertRouteResponse, error) {
-	name, instances, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, instance, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -173,67 +190,109 @@ func (m *RouteService) InsertRoute(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop address: %v", err)
 	}
 
-	holder, ok := m.ribs[instanceKey{name: name, dataplaneInstance: instances}]
-	if !ok {
-		holder = rib.NewRIB(m.log)
-		m.ribs[instanceKey{name: name, dataplaneInstance: instances}] = holder
-	}
+	holder := m.getOrCreateRib(name, instance)
+
 	if err := holder.AddUnicastRoute(prefix, nexthopAddr); err != nil {
 		return nil, fmt.Errorf("failed to add unicast route: %w", err)
 	}
 
 	if request.GetDoFlush() {
-		return &routepb.InsertRouteResponse{}, m.syncRouteUpdates(name, instances)
+		return &routepb.InsertRouteResponse{}, m.syncRouteUpdates(holder, name, instance)
 	}
-	return &routepb.InsertRouteResponse{}, m.syncRouteUpdates(name, instances)
+	return &routepb.InsertRouteResponse{}, nil
 }
 
+// FeedRIB receives a stream of route updates (typically from BIRD) and applies them to the
+// appropriate RIB instance. It implements session management to handle stale routes:
+//  1. On first update, a new session is started in the RIB. This invalidates any prior session
+//     for the same RIB, signaling its stream (if active) to terminate.
+//  2. Routes received are tagged with the current session ID.
+//  3. If this stream is superseded by another FeedRIB call for the same RIB,
+//     its `terminated` flag will be set, causing this stream to close.
+//  4. When the stream ends (EOF or error), a CleanupTask is launched for the RIB
+//     to remove routes from this session (and older BIRD sessions) after a TTL.
 func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update, routepb.UpdateSummary]) error {
 	var (
-		update    *routepb.Update
-		name      string
-		instances uint32
-		err       error
-		holder    *rib.RIB
+		update     *routepb.Update
+		name       string
+		instance   uint32
+		err        error
+		ribRef     *rib.RIB     // Reference to the target RIB for this stream.
+		sessionId  uint64       // ID for the current route import session.
+		terminated *atomic.Bool // Flag to signal termination of this specific stream.
 	)
-
 	for {
 		update, err = stream.Recv()
-		if err == io.EOF {
-			return stream.SendAndClose(&routepb.UpdateSummary{})
+		if err == io.EOF { // Stream closed by client.
+			err = stream.SendAndClose(&routepb.UpdateSummary{})
+			break
 		}
-		if err != nil {
-			return err
+		if err != nil { // Other stream error.
+			break
 		}
-		if holder == nil {
-			name, instances, err = update.GetTarget().Validate(uint32(len(m.agents)))
-			if err != nil {
-				return status.Error(codes.InvalidArgument, err.Error())
-			}
-			var ok bool
-			holder, ok = m.ribs[instanceKey{name: name, dataplaneInstance: instances}]
-			if !ok {
-				holder = rib.NewRIB(m.log)
-				m.ribs[instanceKey{name: name, dataplaneInstance: instances}] = holder
-			}
 
+		// On the first update, identify the target RIB and start a new session.
+		if ribRef == nil {
+			name, instance, err = update.GetTarget().Validate(uint32(len(m.agents)))
+			if err != nil {
+				err = status.Error(codes.InvalidArgument, err.Error())
+				break // Invalid target, cannot proceed.
+			}
+			ribRef = m.getOrCreateRib(name, instance)
+			// NewSession() increments RIB's session counter and returns the new ID.
+			// It also sets the termination flag for the *previous* session's stream.
+			sessionId, terminated = ribRef.NewSession()
+			m.log.Infof("new FeedRIB session %d started for %s on instance %d", sessionId, name, instance)
 		}
-		route, err := routepb.ToRIBRoute(update.GetRoute(), update.GetIsDelete())
-		if err != nil {
-			return fmt.Errorf("failed to convert proto route to RIB route: %w", err)
+
+		// Check if this session has been superseded by a newer one.
+		if terminated.Load() {
+			m.log.Warnf("FeedRIB session %d for %s on instance %d terminated by a newer session", sessionId, name, instance)
+			err = stream.SendAndClose(&routepb.UpdateSummary{}) // Gracefully close our side.
+			break
 		}
-		holder.Update(*route)
+
+		route, convertErr := routepb.ToRIBRoute(update.GetRoute(), update.GetIsDelete())
+		if convertErr != nil {
+			m.log.Errorf("failed to convert proto route to RIB route for session %d: %v. Update: %+v", sessionId, convertErr, update)
+			continue // Skip this invalid route update.
+		}
+		route.SessionID = sessionId // Tag route with current session ID.
+		ribRef.Update(*route)
 	}
+
+	// If a RIB was established for this stream, schedule cleanup for its session.
+	// This runs regardless of whether the stream ended cleanly or with an error.
+	if ribRef != nil {
+		m.log.Infof("FeedRIB session %d for %s on instance %d ended. Scheduling cleanup.", sessionId, name, instance)
+		// CleanupTask will remove routes from this sessionID (and older BIRD ones) after ribTTL.
+		go ribRef.CleanupTask(sessionId, m.quitCh, m.ribTTL)
+	}
+
+	// err will be nil on clean EOF, or the stream error otherwise.
+	return err
 }
 
-func (m *RouteService) syncRouteUpdates(name string, dpInstance uint32) error {
-	holder, ok := m.ribs[instanceKey{name: name, dataplaneInstance: dpInstance}]
-	if !ok {
-		m.log.Warnf("no RIB found for module '%s' on dataplane instance %d", name, dpInstance)
-		return nil
-	}
+func (m *RouteService) getRib(name string, instance uint32) (*rib.RIB, bool) {
+	m.ribsLock.RLock()
+	defer m.ribsLock.RUnlock()
+	rib, ok := m.ribs[instanceKey{name: name, dataplaneInstance: instance}]
+	return rib, ok
+}
 
-	routes := holder.DumpRoutes()
+func (m *RouteService) getOrCreateRib(name string, instance uint32) *rib.RIB {
+	m.ribsLock.Lock()
+	defer m.ribsLock.Unlock()
+	ribRef, ok := m.ribs[instanceKey{name: name, dataplaneInstance: instance}]
+	if !ok {
+		ribRef = rib.NewRIB(m.log)
+		m.ribs[instanceKey{name: name, dataplaneInstance: instance}] = ribRef
+	}
+	return ribRef
+}
+
+func (m *RouteService) syncRouteUpdates(ribRef *rib.RIB, name string, dpInstance uint32) error {
+	routes := ribRef.DumpRoutes()
 
 	// Huge mutex, but our shared memory must be protected from concurrent access.
 	m.mu.Lock()

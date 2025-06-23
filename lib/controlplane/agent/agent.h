@@ -75,6 +75,9 @@ agent_update_pipelines(
 	struct pipeline_config *pipelines[]
 );
 
+int
+agent_delete_pipeline(struct agent *agent, const char *pipeline_name);
+
 struct cp_device_config;
 
 struct cp_device_config *

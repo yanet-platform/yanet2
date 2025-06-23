@@ -148,6 +148,13 @@ cp_config_update_pipelines(
 );
 
 int
+cp_config_delete_pipeline(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	const char *name
+);
+
+int
 cp_config_update_devices(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,

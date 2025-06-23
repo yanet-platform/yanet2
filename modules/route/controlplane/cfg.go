@@ -1,6 +1,8 @@
 package route
 
 import (
+	"time"
+
 	"github.com/c2h5oh/datasize"
 )
 
@@ -13,6 +15,7 @@ type Config struct {
 	MemoryRequirements datasize.ByteSize `yaml:"memory_requirements"`
 	Endpoint           string            `yaml:"endpoint"`
 	GatewayEndpoint    string            `yaml:"gateway_endpoint"`
+	RibTTL             time.Duration     `yaml:"rib_ttl"`
 }
 
 func DefaultConfig() *Config {
@@ -21,6 +24,7 @@ func DefaultConfig() *Config {
 		MemoryRequirements: 16777216,
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",
+		RibTTL:             time.Minute,
 	}
 }
 

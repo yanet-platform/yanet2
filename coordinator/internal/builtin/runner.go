@@ -16,6 +16,7 @@ import (
 type BuiltInModule interface {
 	Name() string
 	RegisterService(server *grpc.Server)
+	StopService()
 }
 
 type BuiltInModuleRunner struct {
@@ -67,6 +68,7 @@ func (m *BuiltInModuleRunner) Run(ctx context.Context) error {
 		go func() {
 			<-ctx.Done()
 			server.GracefulStop()
+			m.module.StopService()
 		}()
 		return server.Serve(listener)
 	})

@@ -7,6 +7,8 @@
 
 #include "cp_module.h"
 #include "cp_pipeline.h"
+#include "cp_device.h"
+
 #include "dataplane/packet/packet.h"
 #include "lib/dataplane/config/zone.h"
 
@@ -377,6 +379,70 @@ cp_config_update_pipelines(
 		    )) {
 			goto error_free;
 		}
+	}
+
+	cp_config_gen_install(dp_config, cp_config, new_config_gen);
+	cp_config_unlock(cp_config);
+
+	return 0;
+
+error_free:
+	cp_config_gen_free(cp_config, new_config_gen);
+error_unlock:
+	cp_config_unlock(cp_config);
+	return -1;
+}
+
+int
+cp_config_delete_pipeline(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	const char *name
+) {
+
+	cp_config_lock(cp_config);
+
+	struct cp_config_gen *old_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
+
+	uint64_t index;
+	if (cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
+		goto error_unlock;
+	}
+
+	// check if pipeline is assigned to some device
+	for (uint64_t device_idx = 0;
+	     device_idx <
+	     cp_device_registry_capacity(&old_config_gen->device_registry);
+	     ++device_idx) {
+		struct cp_device *device =
+			cp_config_gen_get_device(old_config_gen, device_idx);
+		if (device == NULL)
+			continue;
+
+		for (uint64_t assigned_pipeline_idx = 0;
+		     assigned_pipeline_idx < device->pipeline_map_size;
+		     ++assigned_pipeline_idx) {
+			uint64_t pipeline_idx =
+				device->pipeline_map[assigned_pipeline_idx];
+			if (pipeline_idx == index) {
+				// if pipeline is assigned to device
+				// throw error
+				goto error_unlock;
+			}
+		}
+	}
+
+	struct cp_config_gen *new_config_gen =
+		cp_config_gen_create_from(cp_config, old_config_gen);
+	if (new_config_gen == NULL) {
+		goto error_unlock;
+	}
+
+	if (cp_pipeline_registry_delete(
+		    &new_config_gen->pipeline_registry, name
+	    )) {
+		goto error_free;
 	}
 
 	cp_config_gen_install(dp_config, cp_config, new_config_gen);

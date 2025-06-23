@@ -50,7 +50,7 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		return nil, err
 	}
 
-	routeService := NewRouteService(agents, neighbourCache, log)
+	routeService := NewRouteService(agents, neighbourCache, cfg.RibTTL, log)
 	neighbourService := NewNeighbourService(neighbourCache, log)
 
 	return &RouteModule{
@@ -100,10 +100,17 @@ func (m *RouteModule) Close() error {
 }
 
 // Run runs the module until the specified context is canceled.
+// Implements the BackgroundBuiltInModule interface from
+// controlplane/internal/gateway/runner.go
 func (m *RouteModule) Run(ctx context.Context) error {
 	wg, ctx := errgroup.WithContext(ctx)
 	wg.Go(func() error {
 		return m.neighbourDiscovery.Run(ctx)
+	})
+	wg.Go(func() error {
+		<-ctx.Done()
+		close(m.routeService.quitCh)
+		return ctx.Err()
 	})
 
 	return wg.Wait()

@@ -13,7 +13,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
 
-type Updater func([]rib.Route) error
+type Updater func(context.Context, []rib.Route) error
 type Notifier func() error
 
 type exportSocket struct {
@@ -132,7 +132,7 @@ func (m *Export) Run(ctx context.Context) error {
 			if timeout || len(batch) >= m.cfg.DumpThreshold {
 				m.log.Debugw("send RIB update", zap.Int("size", len(batch)),
 					zap.Bool("isTimeout", timeout))
-				if err := m.updater(batch); err != nil {
+				if err := m.updater(ctx, batch); err != nil {
 					return fmt.Errorf("failed to call updater: %w", err)
 				}
 				batch = batch[:0]

@@ -12,6 +12,14 @@ import (
 
 const agentName = "pipeline"
 
+// Pipeline agent is not persistent: it is created
+// on every call of update/assign/delete
+// Memory, allocated for pipeline agent, will be free after
+// corresponding call is done. So, on every call we need to allocate
+// memory for temporary operations only. For now, 1MB is
+// sufficient.
+const defaultAgentMemory = uint(1 << 20)
+
 // TODO: docs.
 type PipelineService struct {
 	ynpb.UnimplementedPipelineServiceServer
@@ -43,7 +51,7 @@ func (m *PipelineService) Update(
 
 	// TODO: ensure requested module is in available.
 
-	agent, err := m.shm.AgentAttach(agentName, instance, uint(1<<20))
+	agent, err := m.shm.AgentAttach(agentName, instance, defaultAgentMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
 	}
@@ -93,7 +101,7 @@ func (m *PipelineService) Assign(
 	instance := request.GetInstance()
 	devices := request.GetDevices()
 
-	agent, err := m.shm.AgentAttach(agentName, instance, uint(1<<20))
+	agent, err := m.shm.AgentAttach(agentName, instance, defaultAgentMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
 	}
@@ -123,4 +131,24 @@ func (m *PipelineService) Assign(
 	)
 
 	return &ynpb.AssignPipelinesResponse{}, nil
+}
+
+func (m *PipelineService) Delete(
+	ctx context.Context,
+	request *ynpb.DeletePipelineRequest,
+) (*ynpb.DeletePipelineResponse, error) {
+	instance := request.GetInstance()
+	pipeline_name := request.GetPipelineName()
+
+	agent, err := m.shm.AgentAttach(agentName, instance, defaultAgentMemory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
+	}
+	defer agent.Close()
+
+	if err := agent.DeletePipeline(pipeline_name); err != nil {
+		return nil, fmt.Errorf("failed to delete pipeline: %w", err)
+	}
+
+	return &ynpb.DeletePipelineResponse{}, nil
 }

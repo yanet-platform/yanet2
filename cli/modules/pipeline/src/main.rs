@@ -6,7 +6,7 @@ use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{
     pipeline_service_client::PipelineServiceClient, AssignPipelinesRequest, DevicePipeline, DevicePipelines,
-    PipelineChain, PipelineChainNode, UpdatePipelinesRequest,
+    PipelineChain, PipelineChainNode, UpdatePipelinesRequest, DeletePipelineRequest,
 };
 use tonic::transport::Channel;
 use ync::logging;
@@ -37,6 +37,8 @@ pub enum ModeCmd {
     Update(UpdateCmd),
     /// Assign pipelines to devices.
     Assign(AssignCmd),
+    /// Delete pipeline.
+    Delete(DeleteCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -65,6 +67,16 @@ pub struct AssignCmd {
     pub pipelines: Vec<String>,
 }
 
+#[derive(Debug, Clone, Parser)]
+pub struct DeleteCmd {
+    /// Dataplane instance where the changes should be applied.
+    #[arg(short, long)]
+    pub instance: u32,
+    /// Pipeline name.
+    #[arg(short, long)]
+    pub name: String,
+}
+
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
@@ -84,6 +96,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     match cmd.mode {
         ModeCmd::Update(cmd) => service.update_pipelines(cmd).await,
         ModeCmd::Assign(cmd) => service.assign_pipeline(cmd).await,
+        ModeCmd::Delete(cmd) => service.delete_pipeline(cmd).await,
     }
 }
 
@@ -151,6 +164,16 @@ impl PipelineService {
 
         self.client.assign(request).await?;
         log::info!("Successfully assigned pipeline to device");
+        Ok(())
+    }
+
+    pub async fn delete_pipeline(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
+        let request = DeletePipelineRequest {
+            instance: cmd.instance,
+            pipeline_name: cmd.name,
+        };
+        self.client.delete(request).await?;
+        log::info!("Successfully deleted pipeline");
         Ok(())
     }
 }
