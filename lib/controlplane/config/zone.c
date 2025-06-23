@@ -402,7 +402,7 @@ cp_config_delete_pipeline(
 			uint64_t pipeline_idx =
 				device->pipeline_map[assigned_pipeline_idx];
 			if (pipeline_idx == index) {
-				// if pipeline assigned to device
+				// if pipeline is assigned to device
 				// throw error
 				goto error_unlock;
 			}
