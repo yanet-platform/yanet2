@@ -94,5 +94,6 @@ cp_device_config_add_pipeline(
 void
 agent_free_unused_modules(struct agent *agent);
 
+// Allows to clean up previous agents which have no loaded modules.
 void
 agent_free_unused_agents(struct agent *agent);

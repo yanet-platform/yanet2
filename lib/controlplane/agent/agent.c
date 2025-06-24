@@ -994,6 +994,10 @@ agent_free_unused_modules(struct agent *agent) {
 
 void
 agent_free_unused_agents(struct agent *agent) {
+	if (agent == NULL) {
+		return;
+	}
+	agent = ADDR_OF(&agent->prev);
 	while (agent != NULL) {
 		struct agent *prev_agent = ADDR_OF(&agent->prev);
 		if (agent->loaded_module_count == 0) {
