@@ -350,8 +350,7 @@ filter_query(
 	for (size_t i = 0; i < filter->attributes_count; ++i) {
 		size_t vertex = tree_vertex_attr(i, filter->attributes_count);
 
-		size_t parent =
-			tree_vertex_parent(vertex);
+		size_t parent = tree_vertex_parent(vertex);
 		size_t parent_idx = tree_vertex_idx(parent);
 
 		struct filter_leaf *leaf = &filter->leaves[i];
@@ -364,8 +363,7 @@ filter_query(
 		size_t vertex_idx = tree_vertex_idx(vertex);
 		struct filter_vertex *filter_vertex =
 			&filter->vertices[vertex_idx];
-		size_t parent =
-			tree_vertex_parent(vertex);
+		size_t parent = tree_vertex_parent(vertex);
 		size_t parent_idx = tree_vertex_idx(parent);
 		filter->vertices[parent_idx].slots[vertex & 1] =
 			value_table_get(

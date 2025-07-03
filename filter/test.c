@@ -18,8 +18,7 @@ main() {
 	assert(res == 0);
 
 	struct filter_attribute attributes[2] = {
-		src_port_attribute,
-		dst_port_attribute
+		src_port_attribute, dst_port_attribute
 	};
 
 	struct filter_net6 dummy_net6 = {0, 0, NULL, NULL};
@@ -27,11 +26,15 @@ main() {
 
 	struct filter_port_range src_port_range_1 = {5, 7};
 	struct filter_port_range dst_port_range_1 = {1, 5};
-	struct filter_transport f1 = {0, 1, 1, &src_port_range_1, &dst_port_range_1};
+	struct filter_transport f1 = {
+		0, 1, 1, &src_port_range_1, &dst_port_range_1
+	};
 
 	struct filter_port_range src_port_range_2 = {6, 8};
 	struct filter_port_range dst_port_range_2 = {3, 4};
-	struct filter_transport f2 = {0, 1, 1, &src_port_range_2, &dst_port_range_2};
+	struct filter_transport f2 = {
+		0, 1, 1, &src_port_range_2, &dst_port_range_2
+	};
 
 	struct filter_action actions[2] = {
 		{dummy_net6, dummy_net4, f1, 1},

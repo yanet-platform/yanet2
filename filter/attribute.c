@@ -154,10 +154,6 @@ init_dst_port(
 	);
 }
 
-struct filter_attribute src_port_attribute = {
-    init_src_port, lookup_src_port
-};
+struct filter_attribute src_port_attribute = {init_src_port, lookup_src_port};
 
-struct filter_attribute dst_port_attribute = {
-    init_dst_port, lookup_dst_port
-};
+struct filter_attribute dst_port_attribute = {init_dst_port, lookup_dst_port};
