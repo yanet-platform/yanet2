@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "common/memory.h"
 #include "common/range_collector.h"
 #include "common/registry.h"
 #include "common/value.h"
@@ -124,7 +125,7 @@ net6_collect_values(
 	}
 }
 
-struct net_collect_cxt {
+struct net_collect_ctx {
 	struct value_table *table;
 	struct value_registry *registry;
 };
@@ -403,7 +404,7 @@ error_registry:
 
 static inline int
 collect_net4_values(
-	struct filter_compiler *compiler,
+	struct memory_context *memory_context,
 	struct filter_action *actions,
 	uint32_t count,
 	action_check_collect check_collect,
@@ -413,7 +414,7 @@ collect_net4_values(
 ) {
 
 	struct range_collector collector;
-	if (range_collector_init(&collector, &compiler->memory_context))
+	if (range_collector_init(&collector, memory_context))
 		goto error;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -436,7 +437,7 @@ collect_net4_values(
 				goto error_collector;
 		}
 	}
-	if (lpm_init(lpm, &compiler->memory_context)) {
+	if (lpm_init(lpm, memory_context)) {
 		goto error_lpm;
 	}
 	if (range_collector_collect(&collector, 4, lpm)) {
@@ -445,7 +446,7 @@ collect_net4_values(
 
 	struct value_table table;
 	if (value_table_init(
-		    &table, &compiler->memory_context, 1, collector.count
+		    &table, memory_context, 1, collector.count
 	    ))
 		goto error_vtab;
 
@@ -468,7 +469,7 @@ collect_net4_values(
 	lpm4_remap(lpm, &table);
 	lpm4_compact(lpm);
 
-	if (value_registry_init(registry, &compiler->memory_context))
+	if (value_registry_init(registry, memory_context))
 		goto error_reg;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -503,7 +504,7 @@ error:
 
 static int
 collect_net6_values(
-	struct filter_compiler *compiler,
+	struct memory_context *memory_context,
 	struct filter_action *actions,
 	uint32_t count,
 	action_check_collect check_collect,
@@ -514,7 +515,7 @@ collect_net6_values(
 ) {
 
 	struct range_collector collector;
-	if (range_collector_init(&collector, &compiler->memory_context))
+	if (range_collector_init(&collector, memory_context))
 		goto error;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -541,7 +542,7 @@ collect_net6_values(
 				goto error_collector;
 		}
 	}
-	if (lpm_init(lpm, &compiler->memory_context)) {
+	if (lpm_init(lpm, memory_context)) {
 		goto error_lpm;
 	}
 	if (range_collector_collect(&collector, 8, lpm)) {
@@ -550,7 +551,7 @@ collect_net6_values(
 
 	struct value_table table;
 	if (value_table_init(
-		    &table, &compiler->memory_context, 1, collector.count
+		    &table, memory_context, 1, collector.count
 	    ))
 		goto error_vtab;
 
@@ -573,7 +574,7 @@ collect_net6_values(
 	lpm8_remap(lpm, &table);
 	lpm8_compact(lpm);
 
-	if (value_registry_init(registry, &compiler->memory_context))
+	if (value_registry_init(registry, memory_context))
 		goto error_reg;
 
 	for (struct filter_action *action = actions; action < actions + count;
@@ -716,7 +717,7 @@ filter_compiler_init(
 
 	struct value_registry src_net4_registry;
 	collect_net4_values(
-		filter,
+		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v4,
@@ -727,7 +728,7 @@ filter_compiler_init(
 
 	struct value_registry dst_net4_registry;
 	collect_net4_values(
-		filter,
+		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v4,
@@ -787,7 +788,7 @@ filter_compiler_init(
 
 	struct value_registry src_net6_hi_registry;
 	collect_net6_values(
-		filter,
+		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v6,
@@ -799,7 +800,7 @@ filter_compiler_init(
 
 	struct value_registry src_net6_lo_registry;
 	collect_net6_values(
-		filter,
+		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v6,
@@ -811,7 +812,7 @@ filter_compiler_init(
 
 	struct value_registry dst_net6_hi_registry;
 	collect_net6_values(
-		filter,
+		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v6,
@@ -823,7 +824,7 @@ filter_compiler_init(
 
 	struct value_registry dst_net6_lo_registry;
 	collect_net6_values(
-		filter,
+		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v6,
