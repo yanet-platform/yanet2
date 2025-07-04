@@ -1,10 +1,10 @@
+#include "attribute.h"
 #include "common/memory.h"
 #include "common/registry.h"
 #include "common/value.h"
 
 #include "filter.h"
 #include "ipfw.h"
-#include "tree.h"
 
 struct value_set_ctx {
 	const struct filter_action *actions;
@@ -232,51 +232,29 @@ merge_and_collect_registry(
 
 static struct value_registry *
 vertex_get_registry(struct filter *filter, size_t vertex) {
-	if (tree_is_vertex_leaf(vertex, filter->attributes_count)) { // leaf
-		size_t idx = tree_leaf_idx(vertex, filter->attributes_count);
-		return &(filter->leaves + idx)->registry;
-	} else { // vertex
-		size_t idx = tree_vertex_idx(vertex);
-		return &(filter->vertices + idx)->registry;
-	}
+	return &filter->v[vertex].registry;
 }
 
 static int
-filter_build_vertex(struct filter *filter, size_t vertex) {
-	size_t idx = tree_vertex_idx(vertex);
-	struct filter_vertex *filter_vertex = &filter->vertices[idx];
-
-	size_t left = tree_vertex_left(vertex);
-	struct value_registry *left_registry =
-		vertex_get_registry(filter, left);
-
-	size_t right = tree_vertex_right(vertex);
-	struct value_registry *right_registry =
-		vertex_get_registry(filter, right);
-
+filter_build_vertex(struct filter *filter, size_t idx) {
 	return merge_and_collect_registry(
 		&filter->memory_context,
-		left_registry,
-		right_registry,
-		&filter_vertex->table,
-		&filter_vertex->registry
+		vertex_get_registry(filter, 2 * idx),
+		vertex_get_registry(filter, 2 * idx + 1),
+		&filter->v[idx].table,
+		&filter->v[idx].registry
 	);
 }
 
 static int
 filter_build_root(struct filter *filter, const struct filter_action *actions) {
-	struct filter_vertex *root = &filter->vertices[1];
-	struct value_registry *left =
-		vertex_get_registry(filter, tree_vertex_left(1));
-	struct value_registry *right =
-		vertex_get_registry(filter, tree_vertex_right(1));
 	return set_registry_values(
 		&filter->memory_context,
 		actions,
-		left,
-		right,
-		&root->table,
-		&root->registry
+		vertex_get_registry(filter, 2 * 1),
+		vertex_get_registry(filter, 2 * 1 + 1),
+		&filter->v[1].table,
+		&filter->v[1].registry
 	);
 }
 
@@ -286,11 +264,14 @@ filter_build(
 	const struct filter_action *actions,
 	uint32_t actions_count
 ) {
-	for (size_t i = 0; i < filter->attributes_count; ++i) {
-		struct filter_leaf *leaf = &filter->leaves[i];
-		int res = leaf->init_func(
-			&leaf->registry,
-			&leaf->data,
+	// build leaves
+	for (size_t i = 0; i < filter->n; ++i) {
+		struct filter_attribute *attr = &filter->attr[i];
+		struct filter_vertex *v = &filter->v[filter->n + i];
+
+		int res = attr->init_func(
+			&v->registry,
+			&v->data,
 			actions,
 			actions_count,
 			&filter->memory_context
@@ -299,13 +280,16 @@ filter_build(
 			return res;
 		}
 	}
-	for (size_t vertex = filter->attributes_count - 1; vertex >= 2;
-	     --vertex) {
-		int res = filter_build_vertex(filter, vertex);
+
+	// build the rest vertices except root
+	for (size_t idx = filter->n - 1; idx >= 2; --idx) {
+		int res = filter_build_vertex(filter, idx);
 		if (res < 0) {
 			return res;
 		}
 	}
+
+	// build root
 	return filter_build_root(filter, actions);
 }
 
@@ -327,54 +311,44 @@ filter_init(
 	if (res < 0) {
 		return res;
 	}
-	filter->attributes_count = attributes_count;
-	for (size_t i = 0; i < filter->attributes_count; ++i) {
-		struct filter_leaf *leaf = &filter->leaves[i];
-		leaf->init_func = attributes[i].init_func;
-		leaf->lookup_func = attributes[i].lookup_func;
-	}
-	for (size_t i = 1; i < filter->attributes_count; ++i) {
-		struct filter_vertex *vertex = &filter->vertices[i];
-		vertex->slots[0] = vertex->slots[1] = -1;
-	}
+	filter->n = attributes_count;
+	memcpy(filter->attr,
+	       attributes,
+	       attributes_count * sizeof(struct filter_attribute));
 	return filter_build(filter, actions, actions_count);
 }
 
 int
 filter_query(
 	struct filter *filter,
-	struct packet_info packet_view,
+	struct packet_info packet,
 	uint32_t **actions,
 	uint32_t *count
 ) {
-	for (size_t i = 0; i < filter->attributes_count; ++i) {
-		size_t vertex = tree_vertex_attr(i, filter->attributes_count);
+	// calculate classifiers for attributes
+	for (size_t attr_idx = 0; attr_idx < filter->n; ++attr_idx) {
+		size_t vertex = filter->n + attr_idx;
 
-		size_t parent = tree_vertex_parent(vertex);
-		size_t parent_idx = tree_vertex_idx(parent);
+		struct filter_attribute *attr = &filter->attr[attr_idx];
+		struct filter_vertex *v = &filter->v[vertex];
 
-		struct filter_leaf *leaf = &filter->leaves[i];
-		filter->vertices[parent_idx].slots[vertex & 1] =
-			leaf->lookup_func(packet_view, leaf->data);
+		// store calculated classifier in the parent vertex
+		filter->v[vertex / 2].slots[vertex & 1] =
+			attr->lookup_func(packet, v->data);
 	}
-	for (size_t vertex = filter->attributes_count - 1; vertex >= 2;
-	     --vertex) {
+
+	// calculate classifiers for the rest vertices except root
+	for (size_t vertex = filter->n - 1; vertex >= 2; --vertex) {
 		// here both slots must be calculated already
-		size_t vertex_idx = tree_vertex_idx(vertex);
-		struct filter_vertex *filter_vertex =
-			&filter->vertices[vertex_idx];
-		size_t parent = tree_vertex_parent(vertex);
-		size_t parent_idx = tree_vertex_idx(parent);
-		filter->vertices[parent_idx].slots[vertex & 1] =
-			value_table_get(
-				&filter_vertex->table,
-				filter_vertex->slots[0],
-				filter_vertex->slots[1]
-			);
+		struct filter_vertex *v = &filter->v[vertex];
+
+		// store calculated classifier in the parent vertex
+		filter->v[vertex / 2].slots[vertex & 1] =
+			value_table_get(&v->table, v->slots[0], v->slots[1]);
 	}
 
-	// get result
-	struct filter_vertex *root = &filter->vertices[1];
+	// get result from root
+	struct filter_vertex *root = &filter->v[1];
 	uint32_t result =
 		value_table_get(&root->table, root->slots[0], root->slots[1]);
 	struct value_range *range = ADDR_OF(&root->registry.ranges) + result;
