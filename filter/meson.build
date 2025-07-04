@@ -5,7 +5,8 @@ dependencies += lib_common_dep
 sources = files(
   'ipfw.c',
   'filter.c',
-  'attribute.c'
+  'attribute.c',
+  'helper.c'
 )
 
 lib_filter = static_library(
@@ -22,11 +23,7 @@ lib_filter_dep = declare_dependency(
   include_directories: include_directories('.'),
 )
 
-test_filter_sources = files(
-  'filter.c',
-  'test.c',
-  'attribute.c'
-)
+test_filter_sources = sources + ['test.c']
 
 test_args = [
   '-O0',

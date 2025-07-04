@@ -1,7 +1,7 @@
 #include "attribute.h"
 #include "common/memory_block.h"
 #include "filter.h"
-#include "ipfw.h"
+
 #include <assert.h>
 #include <stdio.h>
 

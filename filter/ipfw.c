@@ -1,8 +1,6 @@
 #include "ipfw.h"
 
 #include <stdbool.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "common/memory.h"
 #include "common/range_collector.h"
