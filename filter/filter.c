@@ -230,11 +230,6 @@ merge_and_collect_registry(
 	return 0;
 }
 
-static struct value_registry *
-vertex_get_registry(struct filter *filter, size_t vertex) {
-	return &filter->v[vertex].registry;
-}
-
 static int
 filter_build(
 	struct filter *filter,
@@ -258,12 +253,17 @@ filter_build(
 		}
 	}
 
+	// n=1 is corner case because root is leaf
+	if (filter->n == 1) {
+		return 0;
+	}
+
 	// build the rest vertices except root
 	for (size_t idx = filter->n - 1; idx >= 2; --idx) {
 		int res = merge_and_collect_registry(
 			&filter->memory_context,
-			vertex_get_registry(filter, 2 * idx),
-			vertex_get_registry(filter, 2 * idx + 1),
+			&filter->v[2 * idx].registry,
+			&filter->v[2 * idx + 1].registry,
 			&filter->v[idx].table,
 			&filter->v[idx].registry
 		);
@@ -276,8 +276,8 @@ filter_build(
 	return set_registry_values(
 		&filter->memory_context,
 		actions,
-		vertex_get_registry(filter, 2 * 1),
-		vertex_get_registry(filter, 2 * 1 + 1),
+		&filter->v[2 * 1].registry,
+		&filter->v[2 * 1 + 1].registry,
 		&filter->v[1].table,
 		&filter->v[1].registry
 	);
@@ -339,7 +339,15 @@ filter_query(
 
 	// get result from root
 	struct filter_vertex *r = &filter->v[1];
-	uint32_t result = value_table_get(&r->table, r->slots[0], r->slots[1]);
+	
+	uint32_t result;
+	if (filter->n == 1) { // n=1 is corner case
+		// calculated in the first cycle
+		result = filter->v[0].slots[1];
+	} else {
+		result = value_table_get(&r->table, r->slots[0], r->slots[1]);
+	}
+	
 	struct value_range *range = ADDR_OF(&r->registry.ranges) + result;
 	*actions = ADDR_OF(&r->registry.values) + range->from;
 	*count = range->count;
