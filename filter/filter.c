@@ -339,7 +339,7 @@ filter_query(
 
 	// get result from root
 	struct filter_vertex *r = &filter->v[1];
-	
+
 	uint32_t result;
 	if (filter->n == 1) { // n=1 is corner case
 		// calculated in the first cycle
@@ -347,7 +347,7 @@ filter_query(
 	} else {
 		result = value_table_get(&r->table, r->slots[0], r->slots[1]);
 	}
-	
+
 	struct value_range *range = ADDR_OF(&r->registry.ranges) + result;
 	*actions = ADDR_OF(&r->registry.values) + range->from;
 	*count = range->count;
