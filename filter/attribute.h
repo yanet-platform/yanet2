@@ -1,6 +1,8 @@
 #pragma once
 
-#include "ipfw.h"
+#include "common/registry.h"
+
+#include "action.h"
 #include "packet.h"
 
 #define MAX_ATTRIBUTES 10
