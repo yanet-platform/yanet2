@@ -236,29 +236,6 @@ vertex_get_registry(struct filter *filter, size_t vertex) {
 }
 
 static int
-filter_build_vertex(struct filter *filter, size_t idx) {
-	return merge_and_collect_registry(
-		&filter->memory_context,
-		vertex_get_registry(filter, 2 * idx),
-		vertex_get_registry(filter, 2 * idx + 1),
-		&filter->v[idx].table,
-		&filter->v[idx].registry
-	);
-}
-
-static int
-filter_build_root(struct filter *filter, const struct filter_action *actions) {
-	return set_registry_values(
-		&filter->memory_context,
-		actions,
-		vertex_get_registry(filter, 2 * 1),
-		vertex_get_registry(filter, 2 * 1 + 1),
-		&filter->v[1].table,
-		&filter->v[1].registry
-	);
-}
-
-static int
 filter_build(
 	struct filter *filter,
 	const struct filter_action *actions,
@@ -283,14 +260,27 @@ filter_build(
 
 	// build the rest vertices except root
 	for (size_t idx = filter->n - 1; idx >= 2; --idx) {
-		int res = filter_build_vertex(filter, idx);
+		int res = merge_and_collect_registry(
+			&filter->memory_context,
+			vertex_get_registry(filter, 2 * idx),
+			vertex_get_registry(filter, 2 * idx + 1),
+			&filter->v[idx].table,
+			&filter->v[idx].registry
+		);
 		if (res < 0) {
 			return res;
 		}
 	}
 
 	// build root
-	return filter_build_root(filter, actions);
+	return set_registry_values(
+		&filter->memory_context,
+		actions,
+		vertex_get_registry(filter, 2 * 1),
+		vertex_get_registry(filter, 2 * 1 + 1),
+		&filter->v[1].table,
+		&filter->v[1].registry
+	);
 }
 
 int
@@ -348,11 +338,10 @@ filter_query(
 	}
 
 	// get result from root
-	struct filter_vertex *root = &filter->v[1];
-	uint32_t result =
-		value_table_get(&root->table, root->slots[0], root->slots[1]);
-	struct value_range *range = ADDR_OF(&root->registry.ranges) + result;
-	*actions = ADDR_OF(&root->registry.values) + range->from;
+	struct filter_vertex *r = &filter->v[1];
+	uint32_t result = value_table_get(&r->table, r->slots[0], r->slots[1]);
+	struct value_range *range = ADDR_OF(&r->registry.ranges) + result;
+	*actions = ADDR_OF(&r->registry.values) + range->from;
 	*count = range->count;
 
 	return 0;
