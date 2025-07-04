@@ -3,7 +3,8 @@
 
 #include "action.h"
 
-int merge_and_collect_registry(
+int
+merge_and_collect_registry(
 	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
