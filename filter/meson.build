@@ -1,6 +1,7 @@
 dependencies = []
 
 dependencies += lib_common_dep
+dependencies += lib_packet_dp_dep
 
 sources = files(
   'ipfw.c',
@@ -35,6 +36,6 @@ executable(
   test_filter_sources, 
   c_args: test_args, 
   link_args: yanet_link_args, 
-  dependencies: dependencies,
+  dependencies: dependencies + libdpdk_inc_dep + libdpdk_dep,
   link_language: 'c'
 )

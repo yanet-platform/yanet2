@@ -11,6 +11,7 @@
 
 #include <rte_ether.h>
 #include <rte_ip.h>
+#include <stdio.h>
 
 #include "lib/logging/log.h"
 #include "yanet_build_config.h"
@@ -537,14 +538,14 @@ packet_src_port(const struct packet *packet) {
 			struct rte_tcp_hdr *,
 			packet->transport_header.offset
 		);
-		return tcp_hdr->src_port;
+		return rte_be_to_cpu_16(tcp_hdr->src_port);
 	} else if (packet->transport_header.type == IPPROTO_UDP) {
 		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_udp_hdr *,
 			packet->transport_header.offset
 		);
-		return udp_hdr->src_port;
+		return rte_be_to_cpu_16(udp_hdr->src_port);
 	} else {
 		// TODO
 		return 0;
@@ -560,14 +561,14 @@ packet_dst_port(const struct packet *packet) {
 			struct rte_tcp_hdr *,
 			packet->transport_header.offset
 		);
-		return tcp_hdr->dst_port;
+		return rte_be_to_cpu_16(tcp_hdr->dst_port);
 	} else if (packet->transport_header.type == IPPROTO_UDP) {
 		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_udp_hdr *,
 			packet->transport_header.offset
 		);
-		return udp_hdr->dst_port;
+		return rte_be_to_cpu_16(udp_hdr->dst_port);
 	} else {
 		// TODO
 		return 0;
