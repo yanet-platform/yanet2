@@ -1,9 +1,9 @@
 #pragma once
 
 #include "common/registry.h"
+#include "lib/dataplane/packet/packet.h"
 
 #include "action.h"
-#include "packet.h"
 
 #define MAX_ATTRIBUTES 10
 
@@ -15,7 +15,7 @@ typedef int (*attr_init_func)(
 	struct memory_context *memory_context
 );
 
-typedef uint32_t (*attr_lookup_func)(struct packet_info packet, void *data);
+typedef uint32_t (*attr_lookup_func)(struct packet *packet, void *data);
 
 struct filter_attribute {
 	attr_init_func init_func;

@@ -87,7 +87,7 @@ filter_init(
 int
 filter_query(
 	struct filter *filter,
-	struct packet_info packet,
+	struct packet *packet,
 	uint32_t **actions,
 	uint32_t *count
 ) {

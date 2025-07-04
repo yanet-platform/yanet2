@@ -1,4 +1,5 @@
 #include "attribute.h"
+#include "lib/dataplane/packet/packet.h"
 
 typedef int (*action_check_collect)(struct filter_action *action);
 
@@ -8,7 +9,7 @@ typedef void (*action_get_port_range_func)(
 	uint32_t *count
 );
 
-int
+static inline int
 collect_port_values(
 	struct memory_context *memory_context,
 	const struct filter_action *actions,
@@ -34,9 +35,10 @@ collect_port_values(
 		     ++ports) {
 			if (ports->to - ports->from == 65535)
 				continue;
-			for (uint32_t port = ports->from; port <= ports->to;
+			for (uint32_t port = be16toh(ports->from);
+			     port <= be16toh(ports->to);
 			     ++port) {
-				value_table_touch(table, 0, port);
+				value_table_touch(table, 0, htobe16(port));
 			}
 		}
 	}
@@ -119,15 +121,15 @@ init_src_port(
 }
 
 uint32_t
-lookup_src_port(struct packet_info packet, void *data) {
+lookup_src_port(struct packet *packet, void *data) {
 	struct value_table *table = data;
-	return value_table_get(table, 0, packet.src_port);
+	return value_table_get(table, 0, packet_src_port(packet));
 }
 
 uint32_t
-lookup_dst_port(struct packet_info packet, void *data) {
+lookup_dst_port(struct packet *packet, void *data) {
 	struct value_table *table = data;
-	return value_table_get(table, 0, packet.dst_port);
+	return value_table_get(table, 0, packet_dst_port(packet));
 }
 
 int
