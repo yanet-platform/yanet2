@@ -31,7 +31,6 @@ lpm_collect_value_iterator(uint32_t value, void *data) {
 	return value_table_touch(table, 0, value);
 }
 
-
 static inline int
 lpm_collect_registry_iterator(uint32_t value, void *data) {
 	struct value_registry *registry = (struct value_registry *)data;
@@ -90,7 +89,8 @@ collect_net4_values(
 	if (range_collector_init(&collector, memory_context))
 		goto error;
 
-	for (const struct filter_action *action = actions; action < actions + count;
+	for (const struct filter_action *action = actions;
+	     action < actions + count;
 	     ++action) {
 
 		struct net4 *nets;
@@ -118,7 +118,8 @@ collect_net4_values(
 	if (value_table_init(&table, memory_context, 1, collector.count))
 		goto error_vtab;
 
-	for (const struct filter_action *action = actions; action < actions + count;
+	for (const struct filter_action *action = actions;
+	     action < actions + count;
 	     ++action) {
 
 		value_table_new_gen(&table);
@@ -137,7 +138,8 @@ collect_net4_values(
 	if (value_registry_init(registry, memory_context))
 		goto error_reg;
 
-	for (const struct filter_action *action = actions; action < actions + count;
+	for (const struct filter_action *action = actions;
+	     action < actions + count;
 	     ++action) {
 		value_registry_start(registry);
 
@@ -165,61 +167,71 @@ error:
 }
 
 int
-init_src_net4(struct value_registry *registry,
+init_src_net4(
+	struct value_registry *registry,
 	void **data,
 	const struct filter_action *actions,
 	size_t actions_count,
-	struct memory_context *memory_context) {
-    struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
-    *data = lpm;
-    return collect_net4_values(memory_context, actions, actions_count, action_get_net4_src, lpm, registry);
+	struct memory_context *memory_context
+) {
+	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
+	*data = lpm;
+	return collect_net4_values(
+		memory_context,
+		actions,
+		actions_count,
+		action_get_net4_src,
+		lpm,
+		registry
+	);
 }
 
 uint32_t
 lookup_src_net4(struct packet *packet, void *data) {
-    struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-    struct lpm *lpm = (struct lpm *)data;
+	struct lpm *lpm = (struct lpm *)data;
 
-	return lpm4_lookup(
-		lpm, (uint8_t *)&ipv4_hdr->src_addr
-	);
+	return lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->src_addr);
 }
 
 int
-init_dst_net4(struct value_registry *registry,
+init_dst_net4(
+	struct value_registry *registry,
 	void **data,
 	const struct filter_action *actions,
 	size_t actions_count,
-	struct memory_context *memory_context) {
-    struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
-    *data = lpm;
-    return collect_net4_values(memory_context, actions, actions_count, action_get_net4_dst, lpm, registry);
+	struct memory_context *memory_context
+) {
+	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
+	*data = lpm;
+	return collect_net4_values(
+		memory_context,
+		actions,
+		actions_count,
+		action_get_net4_dst,
+		lpm,
+		registry
+	);
 }
 
 uint32_t
 lookup_dst_net4(struct packet *packet, void *data) {
-    struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-    struct lpm *lpm = (struct lpm *)data;
+	struct lpm *lpm = (struct lpm *)data;
 
-	return lpm4_lookup(
-		lpm, (uint8_t *)&ipv4_hdr->dst_addr
-	);
+	return lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->dst_addr);
 }
 
-struct filter_attribute attribute_net4_src = {
-    init_src_net4,  lookup_src_net4
-};
+struct filter_attribute attribute_net4_src = {init_src_net4, lookup_src_net4};
 
-struct filter_attribute attribute_net4_dst = {
-    init_dst_net4,  lookup_dst_net4
-};
+struct filter_attribute attribute_net4_dst = {init_dst_net4, lookup_dst_net4};
