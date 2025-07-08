@@ -7,6 +7,13 @@
 
 #define MAX_ATTRIBUTES 10
 
+// This function is provided by user.
+// It should initialize user-defined data-structure for
+// classifying packet and initialize registry according to
+// the following rules:
+// 	1. i-th registry range corresponds to the i-th action
+// 	2. values for the i-th range corresponds to the classifiers from i-th
+// action
 typedef int (*attr_init_func)(
 	struct value_registry *registry,
 	void **data,

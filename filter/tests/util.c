@@ -73,78 +73,96 @@ make_packet(
 	return packet;
 }
 
-void query_filter_and_expect_action(struct filter *filter, struct packet *packet, uint32_t expected_action) {
-    uint32_t *actions;
-    uint32_t count;
-    int res = filter_query(filter, packet, &actions, &count);
-    assert(res == 0);
-    assert(count == 1);
-    assert(expected_action == actions[0]);
+void
+query_filter_and_expect_action(
+	struct filter *filter, struct packet *packet, uint32_t expected_action
+) {
+	uint32_t *actions;
+	uint32_t count;
+	int res = filter_query(filter, packet, &actions, &count);
+	assert(res == 0);
+	assert(count == 1);
+	assert(expected_action == actions[0]);
+}
+
+void
+query_filter_and_expect_no_actions(
+	struct filter *filter, struct packet *packet
+) {
+	uint32_t *actions;
+	uint32_t count;
+	int res = filter_query(filter, packet, &actions, &count);
+	assert(res == 0);
+	assert(count == 0);
 }
 
 void
 builder_add_net6_dst(struct filter_action_builder *builder, struct net6 dst) {
-    builder->net6_dst[builder->net6_dst_count++] = dst;
+	builder->net6_dst[builder->net6_dst_count++] = dst;
 }
 
 void
 builder_add_net6_src(struct filter_action_builder *builder, struct net6 src) {
-    builder->net6_src[builder->net6_src_count++] = src;
+	builder->net6_src[builder->net6_src_count++] = src;
 }
 
 void
 builder_add_net4_dst(struct filter_action_builder *builder, struct net4 dst) {
-    builder->net4_dst[builder->net4_dst_count++] = dst;
+	builder->net4_dst[builder->net4_dst_count++] = dst;
 }
 
 void
 builder_add_net4_src(struct filter_action_builder *builder, struct net4 src) {
-    builder->net4_src[builder->net4_src_count++] = src;
+	builder->net4_src[builder->net4_src_count++] = src;
 }
 
 void
-builder_add_dst_port_range(struct filter_action_builder *builder, uint16_t from, uint16_t to) {
-    struct filter_port_range port_range = {
-        from, to
-    };
-    builder->dst_port_ranges[builder->dst_port_ranges_count++] = port_range;
+builder_add_dst_port_range(
+	struct filter_action_builder *builder, uint16_t from, uint16_t to
+) {
+	struct filter_port_range port_range = {from, to};
+	builder->dst_port_ranges[builder->dst_port_ranges_count++] = port_range;
 }
 
 void
-builder_add_src_port_range(struct filter_action_builder *builder, uint16_t from, uint16_t to) {
-    struct filter_port_range port_range = {
-        from, to
-    };
-    builder->src_port_ranges[builder->src_port_ranges_count++] = port_range;
+builder_add_src_port_range(
+	struct filter_action_builder *builder, uint16_t from, uint16_t to
+) {
+	struct filter_port_range port_range = {from, to};
+	builder->src_port_ranges[builder->src_port_ranges_count++] = port_range;
 }
 
-void builder_init(struct filter_action_builder *builder) {
-    memset(builder, 0, sizeof(struct filter_action_builder));
+void
+builder_init(struct filter_action_builder *builder) {
+	memset(builder, 0, sizeof(struct filter_action_builder));
 }
 
 struct filter_action
 build_action(struct filter_action_builder *builder, uint32_t action) {
-    struct filter_action result_action = {
-        .action = action,
-        .net4 = {
-            .dst_count = builder->net4_dst_count,
-            .dsts = builder->net4_dst,
-            .src_count = builder->net4_src_count,
-            .srcs = builder->net4_src,
-        },
-        .net6 = {
-            .dst_count = builder->net6_dst_count,
-            .dsts = builder->net6_dst,
-            .src_count = builder->net6_src_count,
-            .srcs = builder->net6_src,
-        },
-        .transport = {
-            .proto_flags = 0,
-            .dst_count = builder->dst_port_ranges_count,
-            .dsts = builder->dst_port_ranges,
-            .src_count = builder->src_port_ranges_count,
-            .srcs = builder->src_port_ranges,
-        },
-    };
-    return result_action;
+	struct filter_action result_action = {
+		.action = action,
+		.net4 =
+			{
+				.dst_count = builder->net4_dst_count,
+				.dsts = builder->net4_dst,
+				.src_count = builder->net4_src_count,
+				.srcs = builder->net4_src,
+			},
+		.net6 =
+			{
+				.dst_count = builder->net6_dst_count,
+				.dsts = builder->net6_dst,
+				.src_count = builder->net6_src_count,
+				.srcs = builder->net6_src,
+			},
+		.transport =
+			{
+				.proto_flags = 0,
+				.dst_count = builder->dst_port_ranges_count,
+				.dsts = builder->dst_port_ranges,
+				.src_count = builder->src_port_ranges_count,
+				.srcs = builder->src_port_ranges,
+			},
+	};
+	return result_action;
 }
