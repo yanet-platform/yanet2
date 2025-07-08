@@ -5,8 +5,9 @@ dependencies = [
 sources = files(
   'ipfw.c',
   'filter.c',
-  'attribute.c',
-  'helper.c'
+  'helper.c',
+  'attribute/net4.c',
+  'attribute/port.c',
 )
 
 lib_filter = static_library(

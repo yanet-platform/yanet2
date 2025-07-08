@@ -1,7 +1,4 @@
-#include "attribute.h"
-#include "lib/dataplane/packet/packet.h"
-
-typedef int (*action_check_collect)(struct filter_action *action);
+#include "../attribute.h"
 
 typedef void (*action_get_port_range_func)(
 	const struct filter_action *action,
@@ -156,6 +153,6 @@ init_dst_port(
 	);
 }
 
-struct filter_attribute src_port_attribute = {init_src_port, lookup_src_port};
+struct filter_attribute attribute_port_src = {init_src_port, lookup_src_port};
 
-struct filter_attribute dst_port_attribute = {init_dst_port, lookup_dst_port};
+struct filter_attribute attribute_port_dst = {init_dst_port, lookup_dst_port};

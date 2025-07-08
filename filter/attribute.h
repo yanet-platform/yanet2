@@ -29,5 +29,8 @@ struct filter_attribute {
 	attr_lookup_func lookup_func;
 };
 
-extern struct filter_attribute src_port_attribute;
-extern struct filter_attribute dst_port_attribute;
+extern struct filter_attribute attribute_port_src;
+extern struct filter_attribute attribute_port_dst;
+
+extern struct filter_attribute attribute_net4_src;
+extern struct filter_attribute attribute_net4_dst;

@@ -23,7 +23,7 @@ main() {
 
 	// filter attributes
 	struct filter_attribute attributes[2] = {
-		src_port_attribute, dst_port_attribute
+		port_src_attribute, attribute_port_dst
 	};
 
 	// action 1:

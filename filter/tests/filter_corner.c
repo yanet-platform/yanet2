@@ -23,7 +23,7 @@ check_single_attribute() {
 	assert(memory_context_init_result == 0);
 
 	// setup single attribute
-	struct filter_attribute attribute = src_port_attribute;
+	struct filter_attribute attribute = port_src_attribute;
 
 	// first action
 	// src port: [5-7] + [6-10] + [15-20]
