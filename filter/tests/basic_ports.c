@@ -9,13 +9,22 @@
 #include <assert.h>
 #include <stdio.h>
 
-void query_and_expect_action(struct filter *filter, uint16_t src_port, uint16_t dst_port, uint32_t expected) {
+void
+query_and_expect_action(
+	struct filter *filter,
+	uint16_t src_port,
+	uint16_t dst_port,
+	uint32_t expected
+) {
 	struct packet packet = make_packet(0, 0, src_port, dst_port);
 	query_filter_and_expect_action(filter, &packet, expected);
 	free_packet(&packet);
 }
 
-void query_and_expect_no_action(struct filter* filter, uint16_t src_port, uint16_t dst_port) {
+void
+query_and_expect_no_action(
+	struct filter *filter, uint16_t src_port, uint16_t dst_port
+) {
 	struct packet packet = make_packet(0, 0, src_port, dst_port);
 	query_filter_and_expect_no_actions(filter, &packet);
 	free_packet(&packet);
