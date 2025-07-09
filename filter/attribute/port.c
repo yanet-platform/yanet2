@@ -32,10 +32,10 @@ collect_port_values(
 		     ++ports) {
 			if (ports->to - ports->from == 65535)
 				continue;
-			for (uint32_t port = be16toh(ports->from);
-			     port <= be16toh(ports->to);
+			for (uint32_t port = ports->from;
+			     port <= ports->to;
 			     ++port) {
-				value_table_touch(table, 0, htobe16(port));
+				value_table_touch(table, 0, port);
 			}
 		}
 	}
