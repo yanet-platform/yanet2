@@ -110,7 +110,7 @@ void
 builder_add_net4_dst(
 	struct filter_action_builder *builder, uint32_t addr, uint32_t mask
 ) {
-	struct net4 dst = {addr, mask};
+	struct net4 dst = {htobe32(addr), htobe32(mask)};
 	builder->net4_dst[builder->net4_dst_count++] = dst;
 }
 
@@ -118,7 +118,7 @@ void
 builder_add_net4_src(
 	struct filter_action_builder *builder, uint32_t addr, uint32_t mask
 ) {
-	struct net4 src = {addr, mask};
+	struct net4 src = {htobe32(addr), htobe32(mask)};
 	builder->net4_src[builder->net4_src_count++] = src;
 }
 
