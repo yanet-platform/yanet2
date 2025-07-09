@@ -9,8 +9,8 @@
 #include <assert.h>
 #include <stdio.h>
 
-int
-main() {
+void
+test_ports_1() {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
@@ -68,6 +68,38 @@ main() {
 	}
 
 	free(memory);
+}
+
+void
+test_ports_2() {
+	// init memory
+	struct block_allocator allocator;
+	block_allocator_init(&allocator);
+	void *memory = malloc(1 << 24); // 16MB
+	block_allocator_put_arena(&allocator, memory, 1 << 24);
+
+	struct memory_context memory_context;
+	int res = memory_context_init(&memory_context, "test", &allocator);
+	assert(res == 0);
+
+	struct filter_attribute attributes[2] = {
+		attribute_port_src, attribute_port_dst
+	};
+	(void)attributes;
+
+	// action 1
+	struct filter_action_builder builder1;
+	builder_init(&builder1);
+	builder_add_src_port_range(&builder1, 5, 7);
+	builder_add_dst_port_range(&builder1, 1, 5);
+	struct filter_action action1 = build_action(&builder1, 1);
+	(void)action1;
+}
+
+int
+main() {
+	test_ports_1();
+	test_ports_2();
 
 	puts("OK!");
 	return 0;

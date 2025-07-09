@@ -45,10 +45,12 @@ net4_collect_values(
 	struct value_table *table
 ) {
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		uint32_t to = net4->addr | ~net4->mask;
+		uint32_t addr = htobe32(net4->addr);
+		uint32_t mask = htobe32(net4->mask);
+		uint32_t to = addr | ~mask;
 		lpm4_collect_values(
 			lpm,
-			(uint8_t *)&net4->addr,
+			(uint8_t *)&addr,
 			(uint8_t *)&to,
 			lpm_collect_value_iterator,
 			table
@@ -64,10 +66,12 @@ net4_collect_registry(
 	struct value_registry *registry
 ) {
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		uint32_t to = net4->addr | ~net4->mask;
+		uint32_t addr = htobe32(net4->addr);
+		uint32_t mask = htobe32(net4->mask);
+		uint32_t to = addr | ~mask;
 		lpm4_collect_values(
 			lpm,
-			(uint8_t *)&net4->addr,
+			(uint8_t *)&addr,
 			(uint8_t *)&to,
 			lpm_collect_registry_iterator,
 			registry
@@ -99,9 +103,10 @@ collect_net4_values(
 
 		for (struct net4 *net4 = nets; net4 < nets + net_count;
 		     ++net4) {
+			uint32_t addr = htobe32(net4->addr);
 			if (range4_collector_add(
 				    &collector,
-				    (uint8_t *)&net4->addr,
+				    (uint8_t *)&addr,
 				    __builtin_popcountll(net4->mask)
 			    ))
 				goto error_collector;
