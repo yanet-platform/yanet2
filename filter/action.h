@@ -9,6 +9,8 @@
 struct filter_net6 {
 	uint32_t src_count;
 	uint32_t dst_count;
+
+	// IPv6 + mask in little-endian
 	struct net6 *srcs;
 	struct net6 *dsts;
 };
@@ -16,12 +18,17 @@ struct filter_net6 {
 struct filter_net4 {
 	uint32_t src_count;
 	uint32_t dst_count;
+
+	// IPv4 + mask in little-endian
 	struct net4 *srcs;
 	struct net4 *dsts;
 };
 
 struct filter_port_range {
+	// Range start in little-endian, inclusive
 	uint16_t from;
+
+	// Range end in little-endian, inclusive
 	uint16_t to;
 };
 
