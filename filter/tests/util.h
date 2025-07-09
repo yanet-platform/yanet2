@@ -53,10 +53,14 @@ void
 builder_add_net6_src(struct filter_action_builder *builder, struct net6 src);
 
 void
-builder_add_net4_dst(struct filter_action_builder *builder, uint32_t addr, uint32_t mask);
+builder_add_net4_dst(
+	struct filter_action_builder *builder, uint32_t addr, uint32_t mask
+);
 
 void
-builder_add_net4_src(struct filter_action_builder *builder, uint32_t addr, uint32_t mask);
+builder_add_net4_src(
+	struct filter_action_builder *builder, uint32_t addr, uint32_t mask
+);
 
 void
 builder_add_dst_port_range(

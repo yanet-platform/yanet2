@@ -9,8 +9,9 @@
 #include <assert.h>
 #include <stdio.h>
 
-inline static uint32_t ip(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
-    return (a << 24) | (b << 16) | (c << 8) | d;
+inline static uint32_t
+ip(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
+	return (a << 24) | (b << 16) | (c << 8) | d;
 }
 
 int
@@ -33,8 +34,12 @@ main() {
 	// action 1:
 	struct filter_action_builder builder1;
 	builder_init(&builder1);
-    builder_add_net4_src(&builder1, ip(192, 255, 168, 0), ip(255, 255, 255, 0));
-    builder_add_net4_dst(&builder1, ip(192, 255, 168, 0), ip(255, 255, 255, 0));
+	builder_add_net4_src(
+		&builder1, ip(192, 255, 168, 0), ip(255, 255, 255, 0)
+	);
+	builder_add_net4_dst(
+		&builder1, ip(192, 255, 168, 0), ip(255, 255, 255, 0)
+	);
 	struct filter_action action1 = build_action(&builder1, 1);
 
 	// init filter
@@ -43,24 +48,30 @@ main() {
 	assert(res == 0);
 
 	{
-		struct packet packet = make_packet(ip(192, 255, 168, 1), ip(192, 255, 168, 10), 0, 0);
+		struct packet packet = make_packet(
+			ip(192, 255, 168, 1), ip(192, 255, 168, 10), 0, 0
+		);
 		query_filter_and_expect_action(&filter, &packet, 1);
 		free_packet(&packet);
 	}
 
-    {
-        // no action because src ip mismatch
-        struct packet packet = make_packet(ip(195, 255, 168, 1), ip(192, 255, 168, 10), 0, 0);
-        query_filter_and_expect_no_actions(&filter, &packet);
+	{
+		// no action because src ip mismatch
+		struct packet packet = make_packet(
+			ip(195, 255, 168, 1), ip(192, 255, 168, 10), 0, 0
+		);
+		query_filter_and_expect_no_actions(&filter, &packet);
 		free_packet(&packet);
-    }
-    
-    {
-        // no action because dst ip mismatch
-        struct packet packet = make_packet(ip(192, 255, 168, 10), ip(195, 255, 168, 1), 0, 0);
-        query_filter_and_expect_no_actions(&filter, &packet);
+	}
+
+	{
+		// no action because dst ip mismatch
+		struct packet packet = make_packet(
+			ip(192, 255, 168, 10), ip(195, 255, 168, 1), 0, 0
+		);
+		query_filter_and_expect_no_actions(&filter, &packet);
 		free_packet(&packet);
-    }
+	}
 
 	free(memory);
 
