@@ -107,12 +107,18 @@ builder_add_net6_src(struct filter_action_builder *builder, struct net6 src) {
 }
 
 void
-builder_add_net4_dst(struct filter_action_builder *builder, struct net4 dst) {
+builder_add_net4_dst(struct filter_action_builder *builder, uint32_t addr, uint32_t mask) {
+	struct net4 dst = {
+		addr, mask
+	};
 	builder->net4_dst[builder->net4_dst_count++] = dst;
 }
 
 void
-builder_add_net4_src(struct filter_action_builder *builder, struct net4 src) {
+builder_add_net4_src(struct filter_action_builder *builder, uint32_t addr, uint32_t mask) {
+	struct net4 src = {
+		addr, mask
+	};
 	builder->net4_src[builder->net4_src_count++] = src;
 }
 

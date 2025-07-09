@@ -29,8 +29,16 @@ struct filter_attribute {
 	attr_lookup_func lookup_func;
 };
 
+// Transport
 extern struct filter_attribute attribute_port_src;
 extern struct filter_attribute attribute_port_dst;
 
+// IPv4
 extern struct filter_attribute attribute_net4_src;
 extern struct filter_attribute attribute_net4_dst;
+
+// IPv6
+// TODO
+
+// vlan
+// TODO

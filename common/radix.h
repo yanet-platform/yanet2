@@ -149,6 +149,38 @@ typedef int (*radix_iterate_func)(
 	uint8_t key_size, const uint8_t *key, uint32_t value, void *data
 );
 
+static inline void
+radix_walk_rec(
+	const struct radix *radix,
+	uint8_t key_size,
+	uint8_t *key,
+	radix_page_t *page,
+	uint8_t depth,
+	radix_iterate_func cb,
+	void *cb_data
+) {
+	for (uint16_t next = 0; next < 256; ++next) {
+		uint32_t value = (*page)[next];
+		if (value == RADIX_VALUE_INVALID) {
+			continue;
+		}
+		key[depth] = next;
+		if (depth + 1 < key_size) {
+			radix_walk_rec(
+				radix,
+				key_size,
+				key,
+				radix_page(radix, value),
+				depth + 1,
+				cb,
+				cb_data
+			);
+		} else {
+			cb(key_size, key, value, cb_data);
+		}
+	}
+}
+
 /*
  * The routine iterates through whole RADIX and invokes a callback for
  * each valid key/value pair.
@@ -161,40 +193,15 @@ radix_walk(
 	void *iterate_func_data
 ) {
 	uint8_t key[key_size];
-	radix_page_t *pages[key_size];
-
-	uint8_t depth = 0;
-	key[depth] = 0;
-	pages[depth] = radix_page(radix, 0);
-
-	while (1) {
-		uint32_t value = (*pages[depth])[key[depth]];
-
-		if (value != RADIX_VALUE_INVALID) {
-			if (depth == key_size - 1) {
-				if (iterate_func(
-					    key_size,
-					    key,
-					    value,
-					    iterate_func_data
-				    ))
-					return -1;
-			} else {
-				pages[depth + 1] = radix_page(radix, value);
-				key[depth + 1] = 0;
-				++depth;
-				continue;
-			}
-		}
-
-		key[depth]++;
-		if (key[depth] == 0) {
-			if (depth == 0)
-				break;
-			--depth;
-			key[depth]++;
-		}
-	}
+	radix_walk_rec(
+		radix,
+		key_size,
+		key,
+		radix_page(radix, 0),
+		0,
+		iterate_func,
+		iterate_func_data
+	);
 	return 0;
 }
 
