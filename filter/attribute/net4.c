@@ -232,12 +232,17 @@ lookup_dst_net4(struct packet *packet, void *data) {
 	return lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->dst_addr);
 }
 
-void free_net4(void *data, struct memory_context *memory_context) {
+void
+free_net4(void *data, struct memory_context *memory_context) {
 	(void)memory_context;
 	struct lpm *lpm = (struct lpm *)data;
 	lpm_free(lpm);
 }
 
-struct filter_attribute attribute_net4_src = {init_src_net4, lookup_src_net4, free_net4};
+struct filter_attribute attribute_net4_src = {
+	init_src_net4, lookup_src_net4, free_net4
+};
 
-struct filter_attribute attribute_net4_dst = {init_dst_net4, lookup_dst_net4, free_net4};
+struct filter_attribute attribute_net4_dst = {
+	init_dst_net4, lookup_dst_net4, free_net4
+};

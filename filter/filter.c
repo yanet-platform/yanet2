@@ -120,7 +120,7 @@ filter_init(
 	memcpy(filter->attr,
 	       attributes,
 	       attributes_count * sizeof(struct filter_attribute));
-	
+
 	return filter_build(filter, actions, actions_count);
 }
 

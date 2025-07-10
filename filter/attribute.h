@@ -25,8 +25,7 @@ typedef int (*attr_init_func)(
 typedef uint32_t (*attr_lookup_func)(struct packet *packet, void *data);
 
 typedef void (*attr_free_func)(
-	void *data,
-	struct memory_context *memory_context
+	void *data, struct memory_context *memory_context
 );
 
 struct filter_attribute {

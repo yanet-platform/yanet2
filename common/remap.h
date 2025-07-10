@@ -136,15 +136,15 @@ remap_table_item(struct remap_table *table, uint32_t key) {
  */
 static inline int
 remap_table_new_key(struct remap_table *table, uint32_t *key) {
-/*	if (table->free_list != REMAP_TABLE_INVALID) {
-		*key = table->free_list;
-		struct remap_item *free_item = remap_table_item(table, *key);
-		table->free_list = free_item->value;
+	/*	if (table->free_list != REMAP_TABLE_INVALID) {
+			*key = table->free_list;
+			struct remap_item *free_item = remap_table_item(table,
+	   *key); table->free_list = free_item->value;
 
-		*free_item = (struct remap_item){0, 0, 0, 0};
-		return 0;
-	}
-*/
+			*free_item = (struct remap_item){0, 0, 0, 0};
+			return 0;
+		}
+	*/
 	if (!(table->count % REMAP_TABLE_CHUNK_SIZE)) {
 		struct remap_item *new_chunk =
 			(struct remap_item *)memory_balloc(
@@ -177,7 +177,8 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 			return -1;
 		}
 
-		for (uint64_t chunk_idx = 0; chunk_idx < old_chunk_count; ++chunk_idx) {
+		for (uint64_t chunk_idx = 0; chunk_idx < old_chunk_count;
+		     ++chunk_idx) {
 			SET_OFFSET_OF(
 				new_keys + chunk_idx,
 				ADDR_OF(old_keys + chunk_idx)
@@ -187,7 +188,11 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 		SET_OFFSET_OF(&new_keys[new_chunk_count - 1], new_chunk);
 		SET_OFFSET_OF(&table->keys, new_keys);
 
-		memory_bfree(table->memory_context, old_keys, old_chunk_count * sizeof(struct remap_item *));
+		memory_bfree(
+			table->memory_context,
+			old_keys,
+			old_chunk_count * sizeof(struct remap_item *)
+		);
 	}
 
 	struct remap_item *item = remap_table_item(table, table->count);
