@@ -74,3 +74,10 @@ builder_add_src_port_range(
 
 struct filter_action
 build_action(struct filter_action_builder *builder, uint32_t action);
+
+////////////////////////////////////////////////////////////////////////////////
+
+inline static uint32_t
+ip(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
+	return (a << 24) | (b << 16) | (c << 8) | d;
+}

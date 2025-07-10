@@ -45,3 +45,14 @@ test_filter_corner = executable(
 
 test('corner', test_filter_corner, suite: ['filter'])
 
+# test net4 + ports filter
+test_filter_net4_ports = executable(
+    'test_filter_net4_ports', 
+  test_sources + ['net4_ports.c'],
+  c_args: test_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+
+test('net4_ports', test_filter_net4_ports, suite: ['filter'])

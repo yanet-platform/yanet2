@@ -9,11 +9,6 @@
 #include <assert.h>
 #include <stdio.h>
 
-inline static uint32_t
-ip(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
-	return (a << 24) | (b << 16) | (c << 8) | d;
-}
-
 int
 main() {
 	// init memory
