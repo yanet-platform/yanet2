@@ -143,7 +143,10 @@ filter_query(
 	}
 
 	// get result from root
-	struct filter_vertex *r = &filter->v[filter->n > 1];
+
+	// root is 1 when n>1 and 0 else.
+	size_t root = filter->n > 1;
+	struct filter_vertex *r = &filter->v[root];
 
 	uint32_t result = value_table_get(&r->table, r->slots[0], r->slots[1]);
 
