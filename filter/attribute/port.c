@@ -1,4 +1,5 @@
 #include "../attribute.h"
+#include "common/memory.h"
 
 typedef void (*action_get_port_range_func)(
 	const struct filter_action *action,
@@ -145,6 +146,14 @@ init_dst_port(
 	);
 }
 
-struct filter_attribute attribute_port_src = {init_src_port, lookup_src_port};
+void
+free_port(void *data, struct memory_context *memory_context) {
+	(void)memory_context;
+	
+	struct value_table *table = (struct value_table *)data;
+	value_table_free(table);
+}
 
-struct filter_attribute attribute_port_dst = {init_dst_port, lookup_dst_port};
+struct filter_attribute attribute_port_src = {init_src_port, lookup_src_port, free_port};
+
+struct filter_attribute attribute_port_dst = {init_dst_port, lookup_dst_port, free_port};

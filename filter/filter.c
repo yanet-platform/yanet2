@@ -62,6 +62,7 @@ filter_build(
 		);
 		if (res < 0) {
 			value_registry_free(&dummy);
+			return res;
 		}
 
 		// dummy classifier is always 0
@@ -104,19 +105,22 @@ filter_init(
 	uint32_t actions_count,
 	struct memory_context *memory_context
 ) {
+	filter->n = attributes_count;
 	if (attributes_count == 0) {
 		return -1;
 	}
+
 	int res = memory_context_init_from(
 		&filter->memory_context, memory_context, "filter"
 	);
 	if (res < 0) {
 		return res;
 	}
-	filter->n = attributes_count;
+
 	memcpy(filter->attr,
 	       attributes,
 	       attributes_count * sizeof(struct filter_attribute));
+	
 	return filter_build(filter, actions, actions_count);
 }
 
@@ -162,4 +166,32 @@ filter_query(
 	*count = range->count;
 
 	return 0;
+}
+
+void
+filter_free(struct filter *filter) {
+	if (filter->n == 0) {
+		// do nothing
+		return;
+	}
+
+	for (size_t i = 0; i < filter->n; ++i) {
+		struct filter_attribute *attr = &filter->attr[i];
+		struct filter_vertex *v = &filter->v[filter->n + i];
+		attr->free_func(v->data, &filter->memory_context);
+	}
+	for (size_t i = 1; i < 2 * filter->n; ++i) {
+		struct filter_vertex *v = &filter->v[i];
+		value_registry_free(&v->registry);
+	}
+	for (size_t i = 1; i < filter->n; ++i) {
+		struct filter_vertex *v = &filter->v[i];
+		value_table_free(&v->table);
+	}
+
+	if (filter->n == 1) {
+		struct filter_vertex *v = &filter->v[0];
+		value_registry_free(&v->registry);
+		value_table_free(&v->table);
+	}
 }

@@ -22,7 +22,7 @@ struct filter_vertex {
 
 	// Data structure which allows to
 	// lookup packet classifier corresponds to
-	// leaf.
+	// leaf.x
 	void *data;
 };
 
@@ -62,3 +62,6 @@ filter_query(
 	uint32_t **actions,
 	uint32_t *count
 );
+
+void
+filter_free(struct filter *filter);

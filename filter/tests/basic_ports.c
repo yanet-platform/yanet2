@@ -79,6 +79,8 @@ test_ports_1() {
 
 	query_and_expect_action(&filter, 6, 3, 1);
 	query_and_expect_action(&filter, 8, 3, 2);
+
+	filter_free(&filter);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -151,6 +153,8 @@ test_ports_2() {
 
 	query_and_expect_no_action(&filter, 5017, 3000);
 	query_and_expect_no_action(&filter, 20, 3000);
+
+	filter_free(&filter);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

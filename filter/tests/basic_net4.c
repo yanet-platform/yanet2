@@ -68,6 +68,8 @@ main() {
 		free_packet(&packet);
 	}
 
+	filter_free(&filter);
+
 	free(memory);
 
 	puts("OK!");

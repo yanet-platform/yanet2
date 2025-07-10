@@ -24,9 +24,15 @@ typedef int (*attr_init_func)(
 
 typedef uint32_t (*attr_lookup_func)(struct packet *packet, void *data);
 
+typedef void (*attr_free_func)(
+	void *data,
+	struct memory_context *memory_context
+);
+
 struct filter_attribute {
 	attr_init_func init_func;
 	attr_lookup_func lookup_func;
+	attr_free_func free_func;
 };
 
 // Transport

@@ -114,6 +114,8 @@ check_single_attribute() {
 #undef queries
 	}
 
+	filter_free(&filter);
+
 	free(memory);
 }
 
@@ -146,6 +148,8 @@ check_no_attributes() {
 		filter_init(&filter, NULL, 0, &action, 1, &memory_context);
 
 	assert(init_result < 0);
+
+	filter_free(&filter);
 
 	free(memory);
 }

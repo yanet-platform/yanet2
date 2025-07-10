@@ -71,6 +71,8 @@ test(void *memory, struct filter_attribute attrs[4]) {
 		query_filter_and_expect_action(&filter, &p, 2);
 		free_packet(&p);
 	}
+
+	filter_free(&filter);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
