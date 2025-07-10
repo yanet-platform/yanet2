@@ -29,8 +29,37 @@ filter_build(
 		}
 	}
 
-	// n=1 is corner case because root is leaf
+	// n=1 is corner case becase
+	// leaf for attribute 0 is vertex 1,
+	// but vertex 1 is root for cases n>1.
 	if (filter->n == 1) {
+		// in this case,
+		// root is vertex 0, 1 is leaf, and also there is
+		// dummy registry used for build root.
+		// dummy registry contains classifier 0 for every action.
+		struct value_registry dummy;
+		int res = init_dummy_registry(
+			&filter->memory_context, actions_count, &dummy
+		);
+		if (res < 0) {
+			value_registry_free(&dummy);
+			return res;
+		}
+		res = merge_and_set_registry_values(
+			&filter->memory_context,
+			actions,
+			&dummy,
+			&filter->v[1].registry,
+			&filter->v[0].table,
+			&filter->v[0].registry
+		);
+		if (res < 0) {
+			value_registry_free(&dummy);
+		}
+
+		// dummy classifier is always 0
+		filter->v[0].slots[0] = 0;
+
 		return 0;
 	}
 
@@ -49,7 +78,7 @@ filter_build(
 	}
 
 	// build root
-	return set_registry_values(
+	return merge_and_set_registry_values(
 		&filter->memory_context,
 		actions,
 		&filter->v[2 * 1].registry,
@@ -114,15 +143,9 @@ filter_query(
 	}
 
 	// get result from root
-	struct filter_vertex *r = &filter->v[1];
+	struct filter_vertex *r = &filter->v[filter->n > 1];
 
-	uint32_t result;
-	if (filter->n == 1) { // n=1 is corner case
-		// calculated in the first cycle
-		result = filter->v[0].slots[1];
-	} else {
-		result = value_table_get(&r->table, r->slots[0], r->slots[1]);
-	}
+	uint32_t result = value_table_get(&r->table, r->slots[0], r->slots[1]);
 
 	struct value_range *range = ADDR_OF(&r->registry.ranges) + result;
 	*actions = ADDR_OF(&r->registry.values) + range->from;

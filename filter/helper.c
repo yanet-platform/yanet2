@@ -1,4 +1,30 @@
 #include "helper.h"
+#include "common/registry.h"
+
+int
+init_dummy_registry(
+	struct memory_context *memory_context,
+	uint32_t actions,
+	struct value_registry *registry
+) {
+	int res = value_registry_init(registry, memory_context);
+	if (res < 0) {
+		return res;
+	}
+	for (uint32_t i = 0; i < actions; ++i) {
+		res = value_registry_start(registry);
+		if (res < 0) {
+			return res;
+		}
+		res = value_registry_collect(registry, 0);
+		if (res < 0) {
+			return res;
+		}
+	}
+	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 struct value_set_ctx {
 	const struct filter_action *actions;
@@ -56,7 +82,7 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 }
 
 int
-set_registry_values(
+merge_and_set_registry_values(
 	struct memory_context *memory_context,
 	const struct filter_action *actions,
 	struct value_registry *registry1,
