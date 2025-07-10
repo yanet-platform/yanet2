@@ -38,8 +38,8 @@ main() {
 
 	value_table_compact(&table);
 
-	for (size_t i = 0; i < 5; ++i) {
-		for (size_t j = i + 1; j < 5; ++j) {
+	for (size_t i = 0; i < 10; ++i) {
+		for (size_t j = i + 1; j < 10; ++j) {
 			int res = (mask[i] == mask[j]) ^
 				  (value_table_get(&table, 0, i) ==
 				   value_table_get(&table, 0, j));
