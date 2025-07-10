@@ -6,11 +6,13 @@
 #include <stdio.h>
 
 void
-test(struct filter_attribute attrs[4]) {
+test(void *memory, struct filter_attribute attrs[4]) {
 	// init memory
+	memset(memory, 0, 1 << 26);
+
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
-	void *memory = malloc(1 << 26); // 64MB
+
 	block_allocator_put_arena(&allocator, memory, 1 << 26);
 
 	struct memory_context memory_context;
@@ -69,8 +71,6 @@ test(struct filter_attribute attrs[4]) {
 		query_filter_and_expect_action(&filter, &p, 2);
 		free_packet(&p);
 	}
-
-	free(memory);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -110,6 +110,8 @@ next_permutation(uint32_t *a, size_t n) {
 
 int
 main() {
+	void *memory = malloc(1 << 26); // 64MB
+
 	uint32_t perm[4] = {0, 1, 2, 3};
 
 	struct filter_attribute attrs[4] = {
@@ -125,7 +127,7 @@ main() {
 		for (size_t i = 0; i < 4; ++i) {
 			a[i] = attrs[perm[i]];
 		}
-		test(a);
+		test(memory, a);
 		++check_counter;
 	} while (next_permutation(perm, 4));
 
@@ -133,6 +135,8 @@ main() {
 
 	puts("OK");
 	printf("checked %u attribute permutations\n", check_counter);
+
+	free(memory);
 
 	return 0;
 }

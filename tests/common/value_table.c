@@ -20,7 +20,8 @@ main() {
 	}
 
 	struct value_table table;
-	value_table_init(&table, &mem_ctx, 1, 10);
+	int res = value_table_init(&table, &mem_ctx, 1, 10);
+	assert(res == 0);
 
 	uint32_t l[5] = {2, 3, 0, 8, 6};
 	uint32_t r[5] = {5, 7, 4, 9, 10};

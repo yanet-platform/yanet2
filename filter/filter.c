@@ -17,7 +17,14 @@ filter_build(
 		struct filter_attribute *attr = &filter->attr[i];
 		struct filter_vertex *v = &filter->v[filter->n + i];
 
-		int res = attr->init_func(
+		int res = value_registry_init(
+			&v->registry, &filter->memory_context
+		);
+		if (res < 0) {
+			return res;
+		}
+
+		res = attr->init_func(
 			&v->registry,
 			&v->data,
 			actions,

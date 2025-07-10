@@ -41,9 +41,6 @@ collect_port_values(
 
 	value_table_compact(table);
 
-	if (value_registry_init(registry, memory_context))
-		goto error_reg;
-
 	for (const struct filter_action *action = actions;
 	     action < actions + count;
 	     ++action) {
@@ -66,10 +63,6 @@ collect_port_values(
 	}
 
 	return 0;
-
-error_reg:
-	value_table_free(table);
-	return -1;
 }
 
 void

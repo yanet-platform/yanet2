@@ -56,3 +56,14 @@ test_filter_net4_ports = executable(
 )
 
 test('net4_ports', test_filter_net4_ports, suite: ['filter'])
+
+# test memory reuse
+
+test_filter_memory = executable('test_filter_memory',
+  test_sources + ['memory.c'],
+  c_args: test_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('memory', test_filter_memory, suite: ['filter'])

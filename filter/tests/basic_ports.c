@@ -37,9 +37,10 @@ query_and_expect_no_action(
 void
 test_ports_1() {
 	// init memory
+	void *memory = malloc(1 << 24); // 16MB
+
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
-	void *memory = malloc(1 << 24); // 16MB
 	block_allocator_put_arena(&allocator, memory, 1 << 24);
 
 	struct memory_context memory_context;
@@ -78,8 +79,6 @@ test_ports_1() {
 
 	query_and_expect_action(&filter, 6, 3, 1);
 	query_and_expect_action(&filter, 8, 3, 2);
-
-	free(memory);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -160,6 +159,8 @@ int
 main() {
 	test_ports_1();
 	test_ports_2();
+
 	puts("OK!");
+
 	return 0;
 }

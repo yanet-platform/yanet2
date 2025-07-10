@@ -140,9 +140,6 @@ collect_net4_values(
 	lpm4_remap(lpm, &table);
 	lpm4_compact(lpm);
 
-	if (value_registry_init(registry, memory_context))
-		goto error_reg;
-
 	for (const struct filter_action *action = actions;
 	     action < actions + count;
 	     ++action) {
@@ -158,8 +155,6 @@ collect_net4_values(
 	value_table_free(&table);
 	return 0;
 
-error_reg:
-	value_table_free(&table);
 error_collector:
 	range_collector_free(&collector, 4);
 error_lpm:
