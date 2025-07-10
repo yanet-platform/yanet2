@@ -116,7 +116,7 @@ test_ports_2() {
 	builder_init(&builder2);
 	builder_add_src_port_range(&builder2, 30, 500);
 	builder_add_dst_port_range(&builder2, 400, 12040);
-	struct filter_action action2 = build_action(&builder1, 2);
+	struct filter_action action2 = build_action(&builder2, 2);
 
 	// rule 3
 	//	src: 100-2014
