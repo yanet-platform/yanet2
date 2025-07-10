@@ -17,3 +17,11 @@ radix_test = executable(
   dependencies: dependencies,
 )
 test('radix', radix_test, suite: ['common'])
+
+table_test = executable(
+  'table_test',
+  ['value_table.c'],
+  c_args: yanet_c_args,
+  dependencies: dependencies
+)
+test('value_table', table_test, suite: ['common'])
