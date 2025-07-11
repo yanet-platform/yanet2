@@ -123,19 +123,19 @@ builder_add_net4_src(
 }
 
 void
-builder_add_dst_port_range(
+builder_add_port_dst_range(
 	struct filter_action_builder *builder, uint16_t from, uint16_t to
 ) {
 	struct filter_port_range port_range = {from, to};
-	builder->dst_port_ranges[builder->dst_port_ranges_count++] = port_range;
+	builder->dst_port_ranges[builder->port_dst_ranges_count++] = port_range;
 }
 
 void
-builder_add_src_port_range(
+builder_add_port_src_range(
 	struct filter_action_builder *builder, uint16_t from, uint16_t to
 ) {
 	struct filter_port_range port_range = {from, to};
-	builder->src_port_ranges[builder->src_port_ranges_count++] = port_range;
+	builder->src_port_ranges[builder->port_src_ranges_count++] = port_range;
 }
 
 void
@@ -164,9 +164,9 @@ build_action(struct filter_action_builder *builder, uint32_t action) {
 		.transport =
 			{
 				.proto_flags = 0,
-				.dst_count = builder->dst_port_ranges_count,
+				.dst_count = builder->port_dst_ranges_count,
 				.dsts = builder->dst_port_ranges,
-				.src_count = builder->src_port_ranges_count,
+				.src_count = builder->port_src_ranges_count,
 				.srcs = builder->src_port_ranges,
 			},
 	};

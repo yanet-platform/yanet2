@@ -26,8 +26,8 @@ test(void *memory, struct filter_attribute attrs[4]) {
 	//  net4_dst: 192.0.0.0/8
 	struct filter_action_builder b1;
 	builder_init(&b1);
-	builder_add_src_port_range(&b1, 100, 500);
-	builder_add_dst_port_range(&b1, 200, 250);
+	builder_add_port_src_range(&b1, 100, 500);
+	builder_add_port_dst_range(&b1, 200, 250);
 	builder_add_net4_src(&b1, ip(198, 233, 0, 0), ip(255, 255, 0, 0));
 	builder_add_net4_dst(&b1, ip(192, 0, 0, 0), ip(255, 0, 0, 0));
 	struct filter_action a1 = build_action(&b1, 1);
@@ -39,8 +39,8 @@ test(void *memory, struct filter_attribute attrs[4]) {
 	//  net4_dst: 192.0.0.0/8
 	struct filter_action_builder b2;
 	builder_init(&b2);
-	builder_add_src_port_range(&b2, 200, 300);
-	builder_add_dst_port_range(&b2, 100, 300);
+	builder_add_port_src_range(&b2, 200, 300);
+	builder_add_port_dst_range(&b2, 100, 300);
 	builder_add_net4_src(&b2, ip(198, 233, 10, 0), ip(255, 255, 255, 0));
 	builder_add_net4_dst(&b2, ip(192, 0, 0, 0), ip(255, 0, 0, 0));
 	struct filter_action a2 = build_action(&b2, 2);

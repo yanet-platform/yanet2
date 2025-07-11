@@ -167,7 +167,7 @@ error:
 }
 
 int
-init_src_net4(
+init_net4_src(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_action *actions,
@@ -187,7 +187,7 @@ init_src_net4(
 }
 
 uint32_t
-lookup_src_net4(struct packet *packet, void *data) {
+lookup_net4_src(struct packet *packet, void *data) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
@@ -200,7 +200,7 @@ lookup_src_net4(struct packet *packet, void *data) {
 }
 
 int
-init_dst_net4(
+init_net4_dst(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_action *actions,
@@ -220,7 +220,7 @@ init_dst_net4(
 }
 
 uint32_t
-lookup_dst_net4(struct packet *packet, void *data) {
+lookup_net4_dst(struct packet *packet, void *data) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
@@ -240,9 +240,9 @@ free_net4(void *data, struct memory_context *memory_context) {
 }
 
 struct filter_attribute attribute_net4_src = {
-	init_src_net4, lookup_src_net4, free_net4
+	init_net4_src, lookup_net4_src, free_net4
 };
 
 struct filter_attribute attribute_net4_dst = {
-	init_dst_net4, lookup_dst_net4, free_net4
+	init_net4_dst, lookup_net4_dst, free_net4
 };

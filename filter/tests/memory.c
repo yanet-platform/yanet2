@@ -54,8 +54,8 @@ test_src_dst_ports(void *memory) {
 	//	dst_port: [1..5]
 	struct filter_action_builder builder1;
 	builder_init(&builder1);
-	builder_add_src_port_range(&builder1, 5, 7);
-	builder_add_dst_port_range(&builder1, 1, 5);
+	builder_add_port_src_range(&builder1, 5, 7);
+	builder_add_port_dst_range(&builder1, 1, 5);
 	struct filter_action action1 = build_action(&builder1, 1);
 
 	// action 2:
@@ -63,8 +63,8 @@ test_src_dst_ports(void *memory) {
 	//	dst_port: [3..4]
 	struct filter_action_builder builder2;
 	builder_init(&builder2);
-	builder_add_src_port_range(&builder2, 6, 8);
-	builder_add_dst_port_range(&builder2, 3, 4);
+	builder_add_port_src_range(&builder2, 6, 8);
+	builder_add_port_dst_range(&builder2, 3, 4);
 	struct filter_action action2 = build_action(&builder2, 2);
 
 	struct filter_action actions[2] = {action1, action2};
@@ -94,14 +94,14 @@ test_src_port_only(void *memory) {
 	//	src_port: [500..700]
 	struct filter_action_builder builder1;
 	builder_init(&builder1);
-	builder_add_src_port_range(&builder1, 500, 700);
+	builder_add_port_src_range(&builder1, 500, 700);
 	struct filter_action action1 = build_action(&builder1, 1);
 
 	// action 2:
 	//	src_port: [600..800]
 	struct filter_action_builder builder2;
 	builder_init(&builder2);
-	builder_add_src_port_range(&builder2, 600, 800);
+	builder_add_port_src_range(&builder2, 600, 800);
 	struct filter_action action2 = build_action(&builder2, 2);
 
 	struct filter_action actions[2] = {action1, action2};

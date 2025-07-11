@@ -28,23 +28,23 @@ check_single_attribute(void *memory) {
 	// src port: [5-7] + [6-10] + [15-20]
 	struct filter_action_builder builder1;
 	builder_init(&builder1);
-	builder_add_src_port_range(&builder1, 5, 7);
-	builder_add_src_port_range(&builder1, 6, 10);
-	builder_add_src_port_range(&builder1, 15, 20);
+	builder_add_port_src_range(&builder1, 5, 7);
+	builder_add_port_src_range(&builder1, 6, 10);
+	builder_add_port_src_range(&builder1, 15, 20);
 	struct filter_action action1 = build_action(&builder1, 1);
 
 	// second action
 	// src port: [11-21]
 	struct filter_action_builder builder2;
 	builder_init(&builder2);
-	builder_add_src_port_range(&builder2, 11, 21);
+	builder_add_port_src_range(&builder2, 11, 21);
 	struct filter_action action2 = build_action(&builder2, 2);
 
 	// third action
 	// src port: [30-40]
 	struct filter_action_builder builder3;
 	builder_init(&builder3);
-	builder_add_src_port_range(&builder3, 30, 40);
+	builder_add_port_src_range(&builder3, 30, 40);
 	struct filter_action action3 = build_action(&builder3, 3);
 
 	// setup actions
@@ -132,7 +132,7 @@ check_no_attributes(void *memory) {
 	// src port: [5-7]
 	struct filter_action_builder builder;
 	builder_init(&builder);
-	builder_add_src_port_range(&builder, 5, 7);
+	builder_add_port_src_range(&builder, 5, 7);
 	struct filter_action action = build_action(&builder, 1);
 
 	// init filter

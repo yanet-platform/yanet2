@@ -37,10 +37,10 @@ struct filter_action_builder {
 	size_t net4_src_count;
 
 	struct filter_port_range dst_port_ranges[10];
-	size_t dst_port_ranges_count;
+	size_t port_dst_ranges_count;
 
 	struct filter_port_range src_port_ranges[10];
-	size_t src_port_ranges_count;
+	size_t port_src_ranges_count;
 };
 
 void
@@ -63,12 +63,12 @@ builder_add_net4_src(
 );
 
 void
-builder_add_dst_port_range(
+builder_add_port_dst_range(
 	struct filter_action_builder *builder, uint16_t from, uint16_t to
 );
 
 void
-builder_add_src_port_range(
+builder_add_port_src_range(
 	struct filter_action_builder *builder, uint16_t from, uint16_t to
 );
 
