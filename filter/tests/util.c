@@ -2,6 +2,8 @@
 #include "filter.h"
 #include "rule.h"
 
+#include <assert.h>
+
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
@@ -15,32 +17,43 @@ make_mbuf(
 	uint16_t src_port,
 	uint16_t dst_port,
 	uint8_t proto,
-	uint16_t flags
+	uint16_t flags,
+	uint16_t vlan
 ) {
 	size_t total_size =
-		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + 2048;
+		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + 2048 + 128;
 	struct rte_mbuf *mbuf = malloc(total_size);
 
 	if (!mbuf)
 		return NULL;
 
-	uint16_t total_len = sizeof(struct rte_ether_hdr) +
+	uint16_t total_len = sizeof(struct rte_ether_hdr) + 128 +
 			     sizeof(struct rte_ipv4_hdr) +
 			     sizeof(struct rte_udp_hdr);
 
-	mbuf->buf_addr = ((char *)mbuf) + sizeof(struct rte_mbuf);
-	mbuf->data_off = RTE_PKTMBUF_HEADROOM;
-	mbuf->buf_len = 2048 + RTE_PKTMBUF_HEADROOM;
+	mbuf->buf_addr = ((char *)mbuf) + sizeof(struct rte_mbuf) + 128;
+	mbuf->data_off = RTE_PKTMBUF_HEADROOM + 128;
+	mbuf->buf_len = 2048 + RTE_PKTMBUF_HEADROOM + 128;
 
 	mbuf->pkt_len = total_len;
 	mbuf->l2_len = sizeof(struct rte_ether_hdr);
 	mbuf->l3_len = sizeof(struct rte_ipv4_hdr);
 
+	if (vlan != 0) {
+		int res = rte_vlan_insert(&mbuf);
+		assert(res == 0);
+		mbuf->vlan_tci = rte_cpu_to_be_16(vlan);
+	}
+
 	struct rte_ether_hdr *eth =
 		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-	struct rte_ipv4_hdr *ip = (struct rte_ipv4_hdr *)(eth + 1);
+	if (vlan != 0) {
+		eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
+	} else {
+		eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	}
 
-	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	struct rte_ipv4_hdr *ip = (struct rte_ipv4_hdr *)(eth + 1);
 
 	ip->version_ihl = 0x45;
 	ip->type_of_service = 0;
@@ -81,11 +94,12 @@ make_packet(
 	uint16_t src_port,
 	uint16_t dst_port,
 	uint8_t proto,
-	uint16_t flags
+	uint16_t flags,
+	uint16_t vlan
 ) {
 	struct packet packet;
 	packet.mbuf =
-		make_mbuf(src_ip, dst_ip, src_port, dst_port, proto, flags);
+		make_mbuf(src_ip, dst_ip, src_port, dst_port, proto, flags, vlan);
 	assert(packet.mbuf != NULL);
 	int parse_result = parse_packet(&packet);
 	assert(parse_result == 0);
@@ -169,9 +183,15 @@ builer_set_proto(
 }
 
 void
+builder_set_vlan(struct filter_rule_builder *builder, uint16_t vlan) {
+	builder->vlan = vlan;
+}
+
+void
 builder_init(struct filter_rule_builder *builder) {
 	memset(builder, 0, sizeof(struct filter_rule_builder));
 	builder->proto.proto = PROTO_UNSPEC;
+	builder->vlan = VLAN_UNSPEC;
 }
 
 struct filter_rule
@@ -200,6 +220,7 @@ build_rule(struct filter_rule_builder *builder, uint32_t action) {
 				.src_count = builder->port_src_ranges_count,
 				.srcs = builder->src_port_ranges,
 			},
+		.vlan = builder->vlan
 	};
 	return result_action;
 }

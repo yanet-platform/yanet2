@@ -50,7 +50,7 @@ main() {
 			0,
 			0,
 			IPPROTO_UDP,
-			0
+			0, 0
 		);
 		query_filter_and_expect_action(&filter, &packet, 1);
 		free_packet(&packet);
@@ -64,7 +64,7 @@ main() {
 			0,
 			0,
 			IPPROTO_UDP,
-			0
+			0, 0
 		);
 		query_filter_and_expect_no_actions(&filter, &packet);
 		free_packet(&packet);
@@ -78,7 +78,7 @@ main() {
 			0,
 			0,
 			IPPROTO_UDP,
-			0
+			0, 0
 		);
 		query_filter_and_expect_no_actions(&filter, &packet);
 		free_packet(&packet);

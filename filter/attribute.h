@@ -47,4 +47,4 @@ extern struct filter_attribute attribute_net4_dst;
 // TODO
 
 // vlan
-// TODO
+extern struct filter_attribute attribute_vlan;

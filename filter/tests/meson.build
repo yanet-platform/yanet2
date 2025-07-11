@@ -77,3 +77,13 @@ test_filter_proto = executable('test_filter_proto',
   link_language: 'c'
 )
 test('proto', test_filter_proto, suite: ['filter'])
+
+# test vlan
+test_filter_vlan = executable('test_filter_vlan',
+  test_sources + ['basic_vlan.c'],
+  c_args: test_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('vlan', test_filter_vlan, suite: ['filter'])

@@ -14,18 +14,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
-	struct packet packet = make_packet(0, 0, 0, 0, IPPROTO_TCP, flags, 0);
-	uint32_t *actions;
-	uint32_t actions_count;
-	filter_query(filter, &packet, &actions, &actions_count);
-	assert(actions_count == 1);
-	assert(actions[0] == expected);
-}
-
-void
-query_udp_packet(struct filter *filter, uint32_t expected) {
-	struct packet packet = make_packet(0, 0, 0, 0, IPPROTO_UDP, 0, 0);
+query_packet(struct filter *filter, uint16_t vlan, uint32_t expected) {
+	struct packet packet = make_packet(0, 0, 0, 0, IPPROTO_UDP, 0, vlan);
 	uint32_t *actions;
 	uint32_t actions_count;
 	filter_query(filter, &packet, &actions, &actions_count);
@@ -47,34 +37,28 @@ test_vlan_1(void *memory) {
 	assert(res == 0);
 
 	struct filter_rule_builder b1;
-	builer_set_proto(&b1, IPPROTO_TCP, 0b101, 0b010);
+	builder_set_vlan(&b1, 10);
 	struct filter_rule r1 = build_rule(&b1, 1);
 
 	struct filter_rule_builder b2;
-	builer_set_proto(&b2, IPPROTO_UDP, 0, 0);
+	builder_set_vlan(&b2, 20);
 	struct filter_rule r2 = build_rule(&b2, 2);
 
 	struct filter_rule_builder b3;
-	builer_set_proto(&b3, PROTO_UNSPEC, 0, 0);
+	builder_set_vlan(&b3, 10);
 	struct filter_rule r3 = build_rule(&b3, 3);
 
 	struct filter_rule rules[3] = {r1, r2, r3};
 
 	struct filter filter;
 	res = filter_init(
-		&filter, &attribute_proto, 1, rules, 3, &memory_context
+		&filter, &attribute_vlan, 1, rules, 3, &memory_context
 	);
 	assert(res == 0);
 
-	query_tcp_packet(&filter, 0b101, 1);
-	query_tcp_packet(&filter, 0b10101, 1);
-	query_tcp_packet(&filter, 0b1101, 1);
-	query_tcp_packet(&filter, (1 << 9) - 1 - 2, 1);
-	query_tcp_packet(&filter, 0b010, 3);
-	query_tcp_packet(&filter, 0b011, 3);
-	query_tcp_packet(&filter, 0b1110, 3);
-
-	query_udp_packet(&filter, 2);
+	query_packet(&filter, 10, 1);
+    query_packet(&filter, 20, 2);
+    query_packet(&filter, 30, 3);
 
 	filter_free(&filter);
 }

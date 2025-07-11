@@ -48,9 +48,12 @@ struct filter_transport {
 	struct filter_port_range *dsts;
 };
 
+#define VLAN_UNSPEC ((uint16_t)-1)
+
 struct filter_rule {
 	struct filter_net6 net6;
 	struct filter_net4 net4;
 	struct filter_transport transport;
+	uint16_t vlan;
 	uint32_t action;
 };

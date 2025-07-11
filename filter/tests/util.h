@@ -15,7 +15,8 @@ make_packet(
 	uint16_t src_port,
 	uint16_t dst_port,
 	uint8_t proto,
-	uint16_t flags
+	uint16_t flags,
+	uint16_t vlan
 );
 
 void
@@ -48,6 +49,8 @@ struct filter_rule_builder {
 
 	struct filter_port_range src_port_ranges[10];
 	size_t port_src_ranges_count;
+
+	uint16_t vlan;
 };
 
 void
@@ -86,6 +89,9 @@ builer_set_proto(
 	uint16_t enable_bits,
 	uint16_t disable_bits
 );
+
+void
+builder_set_vlan(struct filter_rule_builder *builder, uint16_t vlan);
 
 struct filter_rule
 build_rule(struct filter_rule_builder *builder, uint32_t action);
