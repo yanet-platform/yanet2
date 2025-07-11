@@ -98,8 +98,9 @@ make_packet(
 	uint16_t vlan
 ) {
 	struct packet packet;
-	packet.mbuf =
-		make_mbuf(src_ip, dst_ip, src_port, dst_port, proto, flags, vlan);
+	packet.mbuf = make_mbuf(
+		src_ip, dst_ip, src_port, dst_port, proto, flags, vlan
+	);
 	assert(packet.mbuf != NULL);
 	int parse_result = parse_packet(&packet);
 	assert(parse_result == 0);

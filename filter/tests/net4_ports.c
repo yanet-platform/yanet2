@@ -62,7 +62,8 @@ test(void *memory, struct filter_attribute attrs[4]) {
 			200,
 			230,
 			IPPROTO_UDP,
-			0, 0
+			0,
+			0
 		);
 		query_filter_and_expect_action(&filter, &p, 1);
 		free_packet(&p);
@@ -75,7 +76,8 @@ test(void *memory, struct filter_attribute attrs[4]) {
 			200,
 			150,
 			IPPROTO_UDP,
-			0, 0
+			0,
+			0
 		);
 		query_filter_and_expect_action(&filter, &p, 2);
 		free_packet(&p);

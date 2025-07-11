@@ -57,8 +57,8 @@ test_vlan_1(void *memory) {
 	assert(res == 0);
 
 	query_packet(&filter, 10, 1);
-    query_packet(&filter, 20, 2);
-    query_packet(&filter, 30, 3);
+	query_packet(&filter, 20, 2);
+	query_packet(&filter, 30, 3);
 
 	filter_free(&filter);
 }

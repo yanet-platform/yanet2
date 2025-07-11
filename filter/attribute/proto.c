@@ -42,7 +42,9 @@ proto_classifier_init(
 		int16_t mask = proto->disable_bits ^ ((1 << 9) - 1) ^
 			       proto->enable_bits;
 		for (int16_t m = mask; m > 0; m = (m - 1) & mask) {
-			value_table_touch(&c->tcp_flags, 0, m | proto->enable_bits);
+			value_table_touch(
+				&c->tcp_flags, 0, m | proto->enable_bits
+			);
 		}
 		value_table_touch(&c->tcp_flags, 0, proto->enable_bits);
 	}
@@ -70,8 +72,9 @@ proto_classifier_init(
 			int16_t mask = proto->disable_bits ^ ((1 << 9) - 1) ^
 				       proto->enable_bits;
 			for (int16_t m = mask; m > 0; m = (m - 1) & mask) {
-				uint32_t value =
-					value_table_get(&c->tcp_flags, 0, m | proto->enable_bits);
+				uint32_t value = value_table_get(
+					&c->tcp_flags, 0, m | proto->enable_bits
+				);
 				value_registry_collect(registry, value);
 			}
 			uint32_t value = value_table_get(
@@ -79,13 +82,14 @@ proto_classifier_init(
 			);
 			value_registry_collect(registry, value);
 		} else if (proto->proto == PROTO_UNSPEC) {
-            // all classifiers are suitable
-			for (uint32_t class = 0; class <= c->max_tcp_class + 2; ++class) {
-                value_registry_collect(registry, class);
-            }
+			// all classifiers are suitable
+			for (uint32_t class = 0; class <= c->max_tcp_class + 2;
+			     ++class) {
+				value_registry_collect(registry, class);
+			}
 		} else {
-            // TODO
-        }
+			// TODO
+		}
 	}
 
 	return 0;
