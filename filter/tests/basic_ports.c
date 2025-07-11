@@ -35,10 +35,8 @@ query_and_expect_no_action(
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-test_ports_1() {
+test_src_dst_ports(void *memory) {
 	// init memory
-	void *memory = malloc(1 << 24); // 16MB
-
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
 	block_allocator_put_arena(&allocator, memory, 1 << 24);
@@ -86,11 +84,10 @@ test_ports_1() {
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-test_ports_2() {
+test_ports_2(void *memory) {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
-	void *memory = malloc(1 << 24); // 16MB
 	block_allocator_put_arena(&allocator, memory, 1 << 24);
 
 	struct memory_context memory_context;
@@ -161,10 +158,13 @@ test_ports_2() {
 
 int
 main() {
-	test_ports_1();
-	test_ports_2();
+	void *memory = malloc(1 << 24);
+
+	test_src_dst_ports(memory);
+	test_ports_2(memory);
 
 	puts("OK!");
 
+	free(memory);
 	return 0;
 }

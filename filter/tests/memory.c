@@ -35,7 +35,7 @@ query_and_expect_no_action(
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-test_ports_1(void *memory) {
+test_src_dst_ports(void *memory) {
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
 	block_allocator_put_arena(&allocator, memory, 1 << 24);
@@ -76,6 +76,51 @@ test_ports_1(void *memory) {
 
 	query_and_expect_action(&filter, 6, 3, 1);
 	query_and_expect_action(&filter, 8, 3, 2);
+
+	filter_free(&filter);
+}
+
+void
+test_src_port_only(void *memory) {
+	struct block_allocator allocator;
+	block_allocator_init(&allocator);
+	block_allocator_put_arena(&allocator, memory, 1 << 24);
+
+	struct memory_context memory_context;
+	int res = memory_context_init(&memory_context, "test", &allocator);
+	assert(res == 0);
+
+	// action 1:
+	//	src_port: [500..700]
+	struct filter_action_builder builder1;
+	builder_init(&builder1);
+	builder_add_src_port_range(&builder1, 500, 700);
+	struct filter_action action1 = build_action(&builder1, 1);
+
+	// action 2:
+	//	src_port: [600..800]
+	struct filter_action_builder builder2;
+	builder_init(&builder2);
+	builder_add_src_port_range(&builder2, 600, 800);
+	struct filter_action action2 = build_action(&builder2, 2);
+
+	struct filter_action actions[2] = {action1, action2};
+
+	// init filter
+	struct filter filter;
+	res = filter_init(&filter, &attribute_port_src, 1, actions, 2, &memory_context);
+	assert(res == 0);
+
+	query_and_expect_action(&filter, 500, 0, 1);
+	query_and_expect_action(&filter, 600, 0, 1);
+	query_and_expect_action(&filter, 700, 0, 1);
+	query_and_expect_action(&filter, 701, 0, 2);
+	query_and_expect_action(&filter, 800, 0, 2);
+
+	query_and_expect_no_action(&filter, 499, 0);
+	query_and_expect_no_action(&filter, 801, 0);
+
+	filter_free(&filter);
 }
 
 int
@@ -83,7 +128,17 @@ main() {
 	void *memory = malloc(1 << 24);
 
 	for (size_t i = 0; i < 10; ++i) {
-		test_ports_1(memory);
+		test_src_port_only(memory);
+		if (i >= 5) {
+			memset(memory, (int)i, 1 << 24);
+		}
+	}
+
+	for (size_t i = 0; i < 10; ++i) {
+		test_src_dst_ports(memory);
+		if (i >= 5) {
+			memset(memory, (int)i, 1 << 24);
+		}
 	}
 
 	free(memory);

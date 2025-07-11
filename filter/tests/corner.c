@@ -10,11 +10,10 @@
 #include <stdio.h>
 
 void
-check_single_attribute() {
+check_single_attribute(void *memory) {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
-	void *memory = malloc(1 << 24); // 16MB
 	block_allocator_put_arena(&allocator, memory, 1 << 24);
 
 	struct memory_context memory_context;
@@ -115,15 +114,12 @@ check_single_attribute() {
 	}
 
 	filter_free(&filter);
-
-	free(memory);
 }
 
 void
-check_no_attributes() {
+check_no_attributes(void *memory) {
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
-	void *memory = malloc(1 << 24); // 16MB
 	block_allocator_put_arena(&allocator, memory, 1 << 24);
 
 	// init memory
@@ -150,21 +146,23 @@ check_no_attributes() {
 	assert(init_result < 0);
 
 	filter_free(&filter);
-
-	free(memory);
 }
 
 int
 main() {
+	void *memory = malloc(1 << 24); // 16 MB
+
 	// Single attribute is corner case because
 	// attribute leaf is root in the same time.
-	check_single_attribute();
+	check_single_attribute(memory);
 
 	// Filter initialization must fail
 	// in case there are no attributes.
-	check_no_attributes();
+	check_no_attributes(memory);
 
 	puts("OK!");
+
+	free(memory);
 
 	return 0;
 }

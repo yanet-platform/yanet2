@@ -15,6 +15,7 @@
  */
 
 #define VALUE_COLLECTOR_CHUNK_SIZE 4096
+#define VALUE_COLLECTOR_UNTOUCHED ((uint32_t)-1)
 
 /*
  * Value collector is a simple array where each item contains inforamation
@@ -66,6 +67,10 @@ value_collector_reset(struct value_collector *collector) {
 	collector->gen++;
 }
 
+/*
+* Routine returns 1 if value was not seen during current generation,
+* 0 if it was seen, and -1 in case of error.
+*/
 static inline int
 value_collector_check(struct value_collector *collector, uint32_t value) {
 	uint32_t chunk_idx = value / VALUE_COLLECTOR_CHUNK_SIZE;
@@ -104,15 +109,13 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 		if (chunk == NULL)
 			return -1;
 
+		memset(chunk, VALUE_COLLECTOR_UNTOUCHED, VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t));
+
 		SET_OFFSET_OF(&use_map[chunk_idx], chunk);
-	}
+	} 
 
 	uint32_t value_idx = value % VALUE_COLLECTOR_CHUNK_SIZE;
-	if (chunk[value_idx] != collector->gen) {
-		return 1;
-	}
-
-	return 0;
+	return chunk[value_idx] != collector->gen;
 }
 
 /*
@@ -198,11 +201,7 @@ value_registry_start(struct value_registry *registry) {
 
 static inline int
 value_registry_collect(struct value_registry *registry, uint32_t value) {
-	int check = value_collector_check(&registry->collector, value);
-	if (check < 1)
-		return check;
-
-	if (value_collector_collect(&registry->collector, value)) {
+	if (value_collector_collect(&registry->collector, value) == 1) {
 		uint32_t *values = ADDR_OF(&registry->values);
 
 		if (mem_array_expand_exp(

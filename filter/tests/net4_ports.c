@@ -8,8 +8,6 @@
 void
 test(void *memory, struct filter_attribute attrs[4]) {
 	// init memory
-	memset(memory, 0, 1 << 26);
-
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
 

@@ -1,5 +1,6 @@
 #include "../attribute.h"
 #include "common/memory.h"
+#include "common/registry.h"
 
 typedef void (*action_get_port_range_func)(
 	const struct filter_action *action,
