@@ -6,12 +6,12 @@
 #include <rte_mbuf.h>
 
 typedef void (*action_get_net4_func)(
-	const struct filter_action *action, struct net4 **net, uint32_t *count
+	const struct filter_rule *action, struct net4 **net, uint32_t *count
 );
 
 static void
 action_get_net4_src(
-	const struct filter_action *action, struct net4 **net, uint32_t *count
+	const struct filter_rule *action, struct net4 **net, uint32_t *count
 ) {
 	*net = action->net4.srcs;
 	*count = action->net4.src_count;
@@ -19,7 +19,7 @@ action_get_net4_src(
 
 static void
 action_get_net4_dst(
-	const struct filter_action *action, struct net4 **net, uint32_t *count
+	const struct filter_rule *action, struct net4 **net, uint32_t *count
 ) {
 	*net = action->net4.dsts;
 	*count = action->net4.dst_count;
@@ -82,7 +82,7 @@ net4_collect_registry(
 static inline int
 collect_net4_values(
 	struct memory_context *memory_context,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	uint32_t count,
 	action_get_net4_func get_net4,
 	struct lpm *lpm,
@@ -93,7 +93,7 @@ collect_net4_values(
 	if (range_collector_init(&collector, memory_context))
 		goto error;
 
-	for (const struct filter_action *action = actions;
+	for (const struct filter_rule *action = actions;
 	     action < actions + count;
 	     ++action) {
 
@@ -123,7 +123,7 @@ collect_net4_values(
 	if (value_table_init(&table, memory_context, 1, collector.count))
 		goto error_vtab;
 
-	for (const struct filter_action *action = actions;
+	for (const struct filter_rule *action = actions;
 	     action < actions + count;
 	     ++action) {
 
@@ -140,7 +140,7 @@ collect_net4_values(
 	lpm4_remap(lpm, &table);
 	lpm4_compact(lpm);
 
-	for (const struct filter_action *action = actions;
+	for (const struct filter_rule *action = actions;
 	     action < actions + count;
 	     ++action) {
 		value_registry_start(registry);
@@ -170,7 +170,7 @@ int
 init_net4_src(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
@@ -203,7 +203,7 @@ int
 init_net4_dst(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {

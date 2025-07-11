@@ -3,7 +3,7 @@
 #include "common/registry.h"
 
 typedef void (*action_get_port_range_func)(
-	const struct filter_action *action,
+	const struct filter_rule *action,
 	struct filter_port_range **ranges,
 	uint32_t *count
 );
@@ -11,7 +11,7 @@ typedef void (*action_get_port_range_func)(
 static inline int
 collect_port_values(
 	struct memory_context *memory_context,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	uint32_t count,
 	action_get_port_range_func get_port_range,
 	struct value_table *table,
@@ -20,7 +20,7 @@ collect_port_values(
 	if (value_table_init(table, memory_context, 1, 65536))
 		return -1;
 
-	for (const struct filter_action *action = actions;
+	for (const struct filter_rule *action = actions;
 	     action < actions + count;
 	     ++action) {
 
@@ -43,7 +43,7 @@ collect_port_values(
 
 	value_table_compact(table);
 
-	for (const struct filter_action *action = actions;
+	for (const struct filter_rule *action = actions;
 	     action < actions + count;
 	     ++action) {
 		value_registry_start(registry);
@@ -69,7 +69,7 @@ collect_port_values(
 
 void
 get_port_range_src(
-	const struct filter_action *action,
+	const struct filter_rule *action,
 	struct filter_port_range **ranges,
 	uint32_t *count
 ) {
@@ -79,7 +79,7 @@ get_port_range_src(
 
 void
 get_port_range_dst(
-	const struct filter_action *action,
+	const struct filter_rule *action,
 	struct filter_port_range **ranges,
 	uint32_t *count
 ) {
@@ -103,7 +103,7 @@ int
 init_port_dst(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
@@ -127,7 +127,7 @@ int
 init_port_src(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {

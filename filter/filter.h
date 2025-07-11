@@ -49,7 +49,7 @@ filter_init(
 	struct filter *filter,
 	const struct filter_attribute *attributes,
 	uint32_t attributes_count,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	uint32_t actions_count,
 	struct memory_context *memory_context
 );

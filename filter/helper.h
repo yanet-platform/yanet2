@@ -1,7 +1,7 @@
 #include "common/memory.h"
 #include "common/registry.h"
 
-#include "action.h"
+#include "rule.h"
 
 int
 merge_and_collect_registry(
@@ -15,7 +15,7 @@ merge_and_collect_registry(
 int
 merge_and_set_registry_values(
 	struct memory_context *memory_context,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,

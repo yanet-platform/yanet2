@@ -67,3 +67,13 @@ test_filter_memory = executable('test_filter_memory',
   link_language: 'c'
 )
 test('memory', test_filter_memory, suite: ['filter'])
+
+# test proto
+test_filter_proto = executable('test_filter_proto',
+  test_sources + ['basic_proto.c'],
+  c_args: test_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('proto', test_filter_proto, suite: ['filter'])

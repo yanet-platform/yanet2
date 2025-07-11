@@ -1,15 +1,21 @@
 #include "util.h"
-#include "action.h"
 #include "filter.h"
+#include "rule.h"
 
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
+#include <rte_tcp.h>
 #include <rte_udp.h>
 
 static struct rte_mbuf *
 make_mbuf(
-	uint32_t src_ip, uint32_t dst_ip, uint16_t src_port, uint16_t dst_port
+	uint32_t src_ip,
+	uint32_t dst_ip,
+	uint16_t src_port,
+	uint16_t dst_port,
+	uint8_t proto,
+	uint16_t flags
 ) {
 	size_t total_size =
 		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + 2048;
@@ -33,7 +39,6 @@ make_mbuf(
 	struct rte_ether_hdr *eth =
 		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
 	struct rte_ipv4_hdr *ip = (struct rte_ipv4_hdr *)(eth + 1);
-	struct rte_udp_hdr *udp = (struct rte_udp_hdr *)(ip + 1);
 
 	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
@@ -43,15 +48,23 @@ make_mbuf(
 	ip->packet_id = 0;
 	ip->fragment_offset = 0;
 	ip->time_to_live = 64;
-	ip->next_proto_id = IPPROTO_UDP;
+	ip->next_proto_id = proto;
 	ip->src_addr = rte_cpu_to_be_32(src_ip);
 	ip->dst_addr = rte_cpu_to_be_32(dst_ip);
 	ip->hdr_checksum = 0;
 
-	udp->src_port = rte_cpu_to_be_16(src_port);
-	udp->dst_port = rte_cpu_to_be_16(dst_port);
-	udp->dgram_len = rte_cpu_to_be_16(sizeof(*udp));
-	udp->dgram_cksum = 0;
+	if (proto == IPPROTO_UDP) {
+		struct rte_udp_hdr *udp = (struct rte_udp_hdr *)(ip + 1);
+		udp->src_port = rte_cpu_to_be_16(src_port);
+		udp->dst_port = rte_cpu_to_be_16(dst_port);
+		udp->dgram_len = rte_cpu_to_be_16(sizeof(*udp));
+		udp->dgram_cksum = 0;
+	} else { // tcp
+		struct rte_tcp_hdr *tcp = (struct rte_tcp_hdr *)(ip + 1);
+		tcp->src_port = rte_cpu_to_be_16(src_port);
+		tcp->dst_port = rte_cpu_to_be_16(dst_port);
+		tcp->tcp_flags = flags;
+	}
 
 	return mbuf;
 }
@@ -63,10 +76,16 @@ free_packet(struct packet *packet) {
 
 struct packet
 make_packet(
-	uint32_t src_ip, uint32_t dst_ip, uint16_t src_port, uint16_t dst_port
+	uint32_t src_ip,
+	uint32_t dst_ip,
+	uint16_t src_port,
+	uint16_t dst_port,
+	uint8_t proto,
+	uint16_t flags
 ) {
 	struct packet packet;
-	packet.mbuf = make_mbuf(src_ip, dst_ip, src_port, dst_port);
+	packet.mbuf =
+		make_mbuf(src_ip, dst_ip, src_port, dst_port, proto, flags);
 	assert(packet.mbuf != NULL);
 	int parse_result = parse_packet(&packet);
 	assert(parse_result == 0);
@@ -97,18 +116,18 @@ query_filter_and_expect_no_actions(
 }
 
 void
-builder_add_net6_dst(struct filter_action_builder *builder, struct net6 dst) {
+builder_add_net6_dst(struct filter_rule_builder *builder, struct net6 dst) {
 	builder->net6_dst[builder->net6_dst_count++] = dst;
 }
 
 void
-builder_add_net6_src(struct filter_action_builder *builder, struct net6 src) {
+builder_add_net6_src(struct filter_rule_builder *builder, struct net6 src) {
 	builder->net6_src[builder->net6_src_count++] = src;
 }
 
 void
 builder_add_net4_dst(
-	struct filter_action_builder *builder, uint32_t addr, uint32_t mask
+	struct filter_rule_builder *builder, uint32_t addr, uint32_t mask
 ) {
 	struct net4 dst = {addr, mask};
 	builder->net4_dst[builder->net4_dst_count++] = dst;
@@ -116,7 +135,7 @@ builder_add_net4_dst(
 
 void
 builder_add_net4_src(
-	struct filter_action_builder *builder, uint32_t addr, uint32_t mask
+	struct filter_rule_builder *builder, uint32_t addr, uint32_t mask
 ) {
 	struct net4 src = {addr, mask};
 	builder->net4_src[builder->net4_src_count++] = src;
@@ -124,7 +143,7 @@ builder_add_net4_src(
 
 void
 builder_add_port_dst_range(
-	struct filter_action_builder *builder, uint16_t from, uint16_t to
+	struct filter_rule_builder *builder, uint16_t from, uint16_t to
 ) {
 	struct filter_port_range port_range = {from, to};
 	builder->dst_port_ranges[builder->port_dst_ranges_count++] = port_range;
@@ -132,20 +151,32 @@ builder_add_port_dst_range(
 
 void
 builder_add_port_src_range(
-	struct filter_action_builder *builder, uint16_t from, uint16_t to
+	struct filter_rule_builder *builder, uint16_t from, uint16_t to
 ) {
 	struct filter_port_range port_range = {from, to};
 	builder->src_port_ranges[builder->port_src_ranges_count++] = port_range;
 }
 
 void
-builder_init(struct filter_action_builder *builder) {
-	memset(builder, 0, sizeof(struct filter_action_builder));
+builer_set_proto(
+	struct filter_rule_builder *builder,
+	uint8_t proto,
+	uint16_t enable_bits,
+	uint16_t disable_bits
+) {
+	builder->proto =
+		(struct filter_proto){proto, enable_bits, disable_bits};
 }
 
-struct filter_action
-build_action(struct filter_action_builder *builder, uint32_t action) {
-	struct filter_action result_action = {
+void
+builder_init(struct filter_rule_builder *builder) {
+	memset(builder, 0, sizeof(struct filter_rule_builder));
+	builder->proto.proto = PROTO_UNSPEC;
+}
+
+struct filter_rule
+build_rule(struct filter_rule_builder *builder, uint32_t action) {
+	struct filter_rule result_action = {
 		.action = action,
 		.net4 =
 			{
@@ -163,7 +194,7 @@ build_action(struct filter_action_builder *builder, uint32_t action) {
 			},
 		.transport =
 			{
-				.proto_flags = 0,
+				.proto = builder->proto,
 				.dst_count = builder->port_dst_ranges_count,
 				.dsts = builder->dst_port_ranges,
 				.src_count = builder->port_src_ranges_count,

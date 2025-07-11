@@ -3,7 +3,7 @@
 #include "common/registry.h"
 #include "lib/dataplane/packet/packet.h"
 
-#include "action.h"
+#include "rule.h"
 
 #define MAX_ATTRIBUTES 10
 
@@ -17,7 +17,7 @@
 typedef int (*attr_init_func)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	size_t actions_count,
 	struct memory_context *memory_context
 );
@@ -37,6 +37,7 @@ struct filter_attribute {
 // Transport
 extern struct filter_attribute attribute_port_src;
 extern struct filter_attribute attribute_port_dst;
+extern struct filter_attribute attribute_proto;
 
 // IPv4
 extern struct filter_attribute attribute_net4_src;

@@ -8,6 +8,7 @@ sources = files(
   'helper.c',
   'attribute/net4.c',
   'attribute/port.c',
+  'attribute/proto.c'
 )
 
 lib_filter = static_library(

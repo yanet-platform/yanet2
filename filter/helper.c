@@ -27,7 +27,7 @@ init_dummy_registry(
 ////////////////////////////////////////////////////////////////////////////////
 
 struct value_set_ctx {
-	const struct filter_action *actions;
+	const struct filter_rule *actions;
 	struct value_table *table;
 	struct value_registry *registry;
 };
@@ -84,7 +84,7 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 int
 merge_and_set_registry_values(
 	struct memory_context *memory_context,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,

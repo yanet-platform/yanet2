@@ -3,6 +3,7 @@
 #include "util.h"
 
 #include <assert.h>
+#include <netinet/in.h>
 #include <stdio.h>
 
 void
@@ -24,28 +25,28 @@ test(void *memory, struct filter_attribute attrs[4]) {
 	//  dst_port: 200-250
 	//  net4_src: 198.233.0.0/16
 	//  net4_dst: 192.0.0.0/8
-	struct filter_action_builder b1;
+	struct filter_rule_builder b1;
 	builder_init(&b1);
 	builder_add_port_src_range(&b1, 100, 500);
 	builder_add_port_dst_range(&b1, 200, 250);
 	builder_add_net4_src(&b1, ip(198, 233, 0, 0), ip(255, 255, 0, 0));
 	builder_add_net4_dst(&b1, ip(192, 0, 0, 0), ip(255, 0, 0, 0));
-	struct filter_action a1 = build_action(&b1, 1);
+	struct filter_rule a1 = build_rule(&b1, 1);
 
 	// a2:
 	//  src_port: 200-300
 	//  dst_port: 100-300
 	//  net4_src: 198.233.10.0/24
 	//  net4_dst: 192.0.0.0/8
-	struct filter_action_builder b2;
+	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_add_port_src_range(&b2, 200, 300);
 	builder_add_port_dst_range(&b2, 100, 300);
 	builder_add_net4_src(&b2, ip(198, 233, 10, 0), ip(255, 255, 255, 0));
 	builder_add_net4_dst(&b2, ip(192, 0, 0, 0), ip(255, 0, 0, 0));
-	struct filter_action a2 = build_action(&b2, 2);
+	struct filter_rule a2 = build_rule(&b2, 2);
 
-	struct filter_action actions[2] = {a1, a2};
+	struct filter_rule actions[2] = {a1, a2};
 
 	// build filter
 	struct filter filter;
@@ -56,7 +57,12 @@ test(void *memory, struct filter_attribute attrs[4]) {
 
 	{
 		struct packet p = make_packet(
-			ip(198, 233, 10, 15), ip(192, 1, 1, 1), 200, 230
+			ip(198, 233, 10, 15),
+			ip(192, 1, 1, 1),
+			200,
+			230,
+			IPPROTO_UDP,
+			0
 		);
 		query_filter_and_expect_action(&filter, &p, 1);
 		free_packet(&p);
@@ -64,7 +70,12 @@ test(void *memory, struct filter_attribute attrs[4]) {
 
 	{
 		struct packet p = make_packet(
-			ip(198, 233, 10, 15), ip(192, 1, 1, 1), 200, 150
+			ip(198, 233, 10, 15),
+			ip(192, 1, 1, 1),
+			200,
+			150,
+			IPPROTO_UDP,
+			0
 		);
 		query_filter_and_expect_action(&filter, &p, 2);
 		free_packet(&p);

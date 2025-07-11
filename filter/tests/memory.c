@@ -18,7 +18,8 @@ query_and_expect_action(
 	uint16_t dst_port,
 	uint32_t expected
 ) {
-	struct packet packet = make_packet(0, 0, src_port, dst_port);
+	struct packet packet =
+		make_packet(0, 0, src_port, dst_port, IPPROTO_UDP, 0);
 	query_filter_and_expect_action(filter, &packet, expected);
 	free_packet(&packet);
 }
@@ -27,7 +28,8 @@ void
 query_and_expect_no_action(
 	struct filter *filter, uint16_t src_port, uint16_t dst_port
 ) {
-	struct packet packet = make_packet(0, 0, src_port, dst_port);
+	struct packet packet =
+		make_packet(0, 0, src_port, dst_port, IPPROTO_UDP, 0);
 	query_filter_and_expect_no_actions(filter, &packet);
 	free_packet(&packet);
 }
@@ -52,22 +54,22 @@ test_src_dst_ports(void *memory) {
 	// action 1:
 	//	src_port: [5..7]
 	//	dst_port: [1..5]
-	struct filter_action_builder builder1;
+	struct filter_rule_builder builder1;
 	builder_init(&builder1);
 	builder_add_port_src_range(&builder1, 5, 7);
 	builder_add_port_dst_range(&builder1, 1, 5);
-	struct filter_action action1 = build_action(&builder1, 1);
+	struct filter_rule action1 = build_rule(&builder1, 1);
 
 	// action 2:
 	//	src_port: [6..8]
 	//	dst_port: [3..4]
-	struct filter_action_builder builder2;
+	struct filter_rule_builder builder2;
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 6, 8);
 	builder_add_port_dst_range(&builder2, 3, 4);
-	struct filter_action action2 = build_action(&builder2, 2);
+	struct filter_rule action2 = build_rule(&builder2, 2);
 
-	struct filter_action actions[2] = {action1, action2};
+	struct filter_rule actions[2] = {action1, action2};
 
 	// init filter
 	struct filter filter;
@@ -92,19 +94,19 @@ test_src_port_only(void *memory) {
 
 	// action 1:
 	//	src_port: [500..700]
-	struct filter_action_builder builder1;
+	struct filter_rule_builder builder1;
 	builder_init(&builder1);
 	builder_add_port_src_range(&builder1, 500, 700);
-	struct filter_action action1 = build_action(&builder1, 1);
+	struct filter_rule action1 = build_rule(&builder1, 1);
 
 	// action 2:
 	//	src_port: [600..800]
-	struct filter_action_builder builder2;
+	struct filter_rule_builder builder2;
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 600, 800);
-	struct filter_action action2 = build_action(&builder2, 2);
+	struct filter_rule action2 = build_rule(&builder2, 2);
 
-	struct filter_action actions[2] = {action1, action2};
+	struct filter_rule actions[2] = {action1, action2};
 
 	// init filter
 	struct filter filter;

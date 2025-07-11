@@ -32,15 +32,23 @@ struct filter_port_range {
 	uint16_t to;
 };
 
+#define PROTO_UNSPEC ((uint8_t)-1)
+
+struct filter_proto {
+	uint8_t proto;	       // 1 ICMP, 16 TCP, 6 UDP
+	uint16_t enable_bits;  // only for TCP
+	uint16_t disable_bits; // only for TCP
+};
+
 struct filter_transport {
-	uint16_t proto_flags;
+	struct filter_proto proto;
 	uint16_t src_count;
 	uint16_t dst_count;
 	struct filter_port_range *srcs;
 	struct filter_port_range *dsts;
 };
 
-struct filter_action {
+struct filter_rule {
 	struct filter_net6 net6;
 	struct filter_net4 net4;
 	struct filter_transport transport;

@@ -4,6 +4,7 @@
 #include "common/memory_block.h"
 #include "filter.h"
 
+#include <netinet/in.h>
 #include <rte_ip.h>
 
 #include <assert.h>
@@ -27,7 +28,7 @@ main() {
 	};
 
 	// action 1:
-	struct filter_action_builder builder1;
+	struct filter_rule_builder builder1;
 	builder_init(&builder1);
 	builder_add_net4_src(
 		&builder1, ip(192, 255, 168, 0), ip(255, 255, 255, 0)
@@ -35,7 +36,7 @@ main() {
 	builder_add_net4_dst(
 		&builder1, ip(192, 255, 168, 0), ip(255, 255, 255, 0)
 	);
-	struct filter_action action1 = build_action(&builder1, 1);
+	struct filter_rule action1 = build_rule(&builder1, 1);
 
 	// init filter
 	struct filter filter;
@@ -44,7 +45,12 @@ main() {
 
 	{
 		struct packet packet = make_packet(
-			ip(192, 255, 168, 1), ip(192, 255, 168, 10), 0, 0
+			ip(192, 255, 168, 1),
+			ip(192, 255, 168, 10),
+			0,
+			0,
+			IPPROTO_UDP,
+			0
 		);
 		query_filter_and_expect_action(&filter, &packet, 1);
 		free_packet(&packet);
@@ -53,7 +59,12 @@ main() {
 	{
 		// no action because src ip mismatch
 		struct packet packet = make_packet(
-			ip(195, 255, 168, 1), ip(192, 255, 168, 10), 0, 0
+			ip(195, 255, 168, 1),
+			ip(192, 255, 168, 10),
+			0,
+			0,
+			IPPROTO_UDP,
+			0
 		);
 		query_filter_and_expect_no_actions(&filter, &packet);
 		free_packet(&packet);
@@ -62,7 +73,12 @@ main() {
 	{
 		// no action because dst ip mismatch
 		struct packet packet = make_packet(
-			ip(192, 255, 168, 10), ip(195, 255, 168, 1), 0, 0
+			ip(192, 255, 168, 10),
+			ip(195, 255, 168, 1),
+			0,
+			0,
+			IPPROTO_UDP,
+			0
 		);
 		query_filter_and_expect_no_actions(&filter, &packet);
 		free_packet(&packet);

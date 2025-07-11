@@ -1,4 +1,3 @@
-#include "attribute.h"
 #include "common/memory.h"
 #include "common/registry.h"
 #include "common/value.h"
@@ -9,7 +8,7 @@
 static int
 filter_build(
 	struct filter *filter,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	uint32_t actions_count
 ) {
 	// build leaves
@@ -101,7 +100,7 @@ filter_init(
 	struct filter *filter,
 	const struct filter_attribute *attributes,
 	uint32_t attributes_count,
-	const struct filter_action *actions,
+	const struct filter_rule *actions,
 	uint32_t actions_count,
 	struct memory_context *memory_context
 ) {
@@ -181,12 +180,10 @@ filter_free(struct filter *filter) {
 		attr->free_func(v->data, &filter->memory_context);
 	}
 	for (size_t i = 1; i < 2 * filter->n; ++i) {
-		struct filter_vertex *v = &filter->v[i];
-		value_registry_free(&v->registry);
+		value_registry_free(&filter->v[i].registry);
 	}
 	for (size_t i = 1; i < filter->n; ++i) {
-		struct filter_vertex *v = &filter->v[i];
-		value_table_free(&v->table);
+		value_table_free(&filter->v[i].table);
 	}
 
 	if (filter->n == 1) {

@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "action.h"
+#include "rule.h"
 
 #include "common/lpm.h"
 #include "common/registry.h"
@@ -42,6 +42,6 @@ int
 filter_compiler_init(
 	struct filter_compiler *compiler,
 	struct memory_context *memory_context,
-	struct filter_action *actions,
+	struct filter_rule *actions,
 	uint32_t count
 );

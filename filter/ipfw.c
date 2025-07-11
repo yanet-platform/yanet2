@@ -7,25 +7,25 @@
 #include "common/registry.h"
 #include "common/value.h"
 
-typedef int (*action_check_collect)(struct filter_action *action);
+typedef int (*action_check_collect)(struct filter_rule *action);
 
 static inline int
-action_check_has_v4(struct filter_action *action) {
+action_check_has_v4(struct filter_rule *action) {
 	return action->net4.src_count && action->net4.dst_count;
 }
 
 static inline int
-action_check_has_v6(struct filter_action *action) {
+action_check_has_v6(struct filter_rule *action) {
 	return action->net6.src_count && action->net6.dst_count;
 }
 
 typedef void (*action_get_net4_func)(
-	struct filter_action *action, struct net4 **net, uint32_t *count
+	struct filter_rule *action, struct net4 **net, uint32_t *count
 );
 
 static void
 action_get_net4_src(
-	struct filter_action *action, struct net4 **net, uint32_t *count
+	struct filter_rule *action, struct net4 **net, uint32_t *count
 ) {
 	*net = action->net4.srcs;
 	*count = action->net4.src_count;
@@ -33,19 +33,19 @@ action_get_net4_src(
 
 static void
 action_get_net4_dst(
-	struct filter_action *action, struct net4 **net, uint32_t *count
+	struct filter_rule *action, struct net4 **net, uint32_t *count
 ) {
 	*net = action->net4.dsts;
 	*count = action->net4.dst_count;
 }
 
 typedef void (*action_get_net6_func)(
-	struct filter_action *action, struct net6 **net, uint32_t *count
+	struct filter_rule *action, struct net6 **net, uint32_t *count
 );
 
 static void
 action_get_net6_src(
-	struct filter_action *action, struct net6 **net, uint32_t *count
+	struct filter_rule *action, struct net6 **net, uint32_t *count
 ) {
 	*net = action->net6.srcs;
 	*count = action->net6.src_count;
@@ -53,7 +53,7 @@ action_get_net6_src(
 
 static void
 action_get_net6_dst(
-	struct filter_action *action, struct net6 **net, uint32_t *count
+	struct filter_rule *action, struct net6 **net, uint32_t *count
 ) {
 	*net = action->net6.dsts;
 	*count = action->net6.dst_count;
@@ -292,7 +292,7 @@ merge_and_collect_registry(
 }
 
 struct value_set_ctx {
-	struct filter_action *actions;
+	struct filter_rule *actions;
 	struct value_table *table;
 	struct value_registry *registry;
 };
@@ -349,7 +349,7 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 static int
 set_registry_values(
 	struct memory_context *memory_context,
-	struct filter_action *actions,
+	struct filter_rule *actions,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,
@@ -403,7 +403,7 @@ error_registry:
 static inline int
 collect_net4_values(
 	struct memory_context *memory_context,
-	struct filter_action *actions,
+	struct filter_rule *actions,
 	uint32_t count,
 	action_check_collect check_collect,
 	action_get_net4_func get_net4,
@@ -415,7 +415,7 @@ collect_net4_values(
 	if (range_collector_init(&collector, memory_context))
 		goto error;
 
-	for (struct filter_action *action = actions; action < actions + count;
+	for (struct filter_rule *action = actions; action < actions + count;
 	     ++action) {
 
 		if (!check_collect(action))
@@ -446,7 +446,7 @@ collect_net4_values(
 	if (value_table_init(&table, memory_context, 1, collector.count))
 		goto error_vtab;
 
-	for (struct filter_action *action = actions; action < actions + count;
+	for (struct filter_rule *action = actions; action < actions + count;
 	     ++action) {
 
 		if (!check_collect(action))
@@ -468,7 +468,7 @@ collect_net4_values(
 	if (value_registry_init(registry, memory_context))
 		goto error_reg;
 
-	for (struct filter_action *action = actions; action < actions + count;
+	for (struct filter_rule *action = actions; action < actions + count;
 	     ++action) {
 		value_registry_start(registry);
 
@@ -501,7 +501,7 @@ error:
 static int
 collect_net6_values(
 	struct memory_context *memory_context,
-	struct filter_action *actions,
+	struct filter_rule *actions,
 	uint32_t count,
 	action_check_collect check_collect,
 	action_get_net6_func get_net6,
@@ -514,7 +514,7 @@ collect_net6_values(
 	if (range_collector_init(&collector, memory_context))
 		goto error;
 
-	for (struct filter_action *action = actions; action < actions + count;
+	for (struct filter_rule *action = actions; action < actions + count;
 	     ++action) {
 
 		if (!check_collect(action))
@@ -549,7 +549,7 @@ collect_net6_values(
 	if (value_table_init(&table, memory_context, 1, collector.count))
 		goto error_vtab;
 
-	for (struct filter_action *action = actions; action < actions + count;
+	for (struct filter_rule *action = actions; action < actions + count;
 	     ++action) {
 
 		if (!check_collect(action))
@@ -571,7 +571,7 @@ collect_net6_values(
 	if (value_registry_init(registry, memory_context))
 		goto error_reg;
 
-	for (struct filter_action *action = actions; action < actions + count;
+	for (struct filter_rule *action = actions; action < actions + count;
 	     ++action) {
 		value_registry_start(registry);
 
@@ -602,14 +602,14 @@ error:
 }
 
 typedef void (*action_get_port_range_func)(
-	struct filter_action *action,
+	struct filter_rule *action,
 	struct filter_port_range **ranges,
 	uint32_t *count
 );
 
 static inline void
 get_port_range_src(
-	struct filter_action *action,
+	struct filter_rule *action,
 	struct filter_port_range **ranges,
 	uint32_t *count
 ) {
@@ -619,7 +619,7 @@ get_port_range_src(
 
 static inline void
 get_port_range_dst(
-	struct filter_action *action,
+	struct filter_rule *action,
 	struct filter_port_range **ranges,
 	uint32_t *count
 ) {
@@ -630,7 +630,7 @@ get_port_range_dst(
 static inline int
 collect_port_values(
 	struct memory_context *memory_context,
-	struct filter_action *actions,
+	struct filter_rule *actions,
 	uint32_t count,
 	action_check_collect check_collect,
 	action_get_port_range_func get_port_range,
@@ -640,7 +640,7 @@ collect_port_values(
 	if (value_table_init(table, memory_context, 1, 65536))
 		return -1;
 
-	for (struct filter_action *action = actions; action < actions + count;
+	for (struct filter_rule *action = actions; action < actions + count;
 	     ++action) {
 		if (!check_collect(action))
 			continue;
@@ -668,7 +668,7 @@ collect_port_values(
 	if (value_registry_init(registry, memory_context))
 		goto error_reg;
 
-	for (struct filter_action *action = actions; action < actions + count;
+	for (struct filter_rule *action = actions; action < actions + count;
 	     ++action) {
 		value_registry_start(registry);
 
@@ -702,7 +702,7 @@ int
 filter_compiler_init(
 	struct filter_compiler *filter,
 	struct memory_context *memory_context,
-	struct filter_action *actions,
+	struct filter_rule *actions,
 	uint32_t count
 ) {
 	memory_context_init_from(

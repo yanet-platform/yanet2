@@ -1,7 +1,7 @@
 #pragma once
 
-#include "action.h"
 #include "dataplane/packet/packet.h"
+#include "rule.h"
 
 #include "filter.h"
 
@@ -10,7 +10,12 @@ free_packet(struct packet *packet);
 
 struct packet
 make_packet(
-	uint32_t src_ip, uint32_t dst_ip, uint16_t src_port, uint16_t dst_port
+	uint32_t src_ip,
+	uint32_t dst_ip,
+	uint16_t src_port,
+	uint16_t dst_port,
+	uint8_t proto,
+	uint16_t flags
 );
 
 void
@@ -23,7 +28,7 @@ query_filter_and_expect_no_actions(
 	struct filter *filter, struct packet *packet
 );
 
-struct filter_action_builder {
+struct filter_rule_builder {
 	struct net6 net6_dst[10];
 	size_t net6_dst_count;
 
@@ -36,6 +41,8 @@ struct filter_action_builder {
 	struct net4 net4_src[10];
 	size_t net4_src_count;
 
+	struct filter_proto proto;
+
 	struct filter_port_range dst_port_ranges[10];
 	size_t port_dst_ranges_count;
 
@@ -44,36 +51,44 @@ struct filter_action_builder {
 };
 
 void
-builder_init(struct filter_action_builder *builder);
+builder_init(struct filter_rule_builder *builder);
 
 void
-builder_add_net6_dst(struct filter_action_builder *builder, struct net6 dst);
+builder_add_net6_dst(struct filter_rule_builder *builder, struct net6 dst);
 
 void
-builder_add_net6_src(struct filter_action_builder *builder, struct net6 src);
+builder_add_net6_src(struct filter_rule_builder *builder, struct net6 src);
 
 void
 builder_add_net4_dst(
-	struct filter_action_builder *builder, uint32_t addr, uint32_t mask
+	struct filter_rule_builder *builder, uint32_t addr, uint32_t mask
 );
 
 void
 builder_add_net4_src(
-	struct filter_action_builder *builder, uint32_t addr, uint32_t mask
+	struct filter_rule_builder *builder, uint32_t addr, uint32_t mask
 );
 
 void
 builder_add_port_dst_range(
-	struct filter_action_builder *builder, uint16_t from, uint16_t to
+	struct filter_rule_builder *builder, uint16_t from, uint16_t to
 );
 
 void
 builder_add_port_src_range(
-	struct filter_action_builder *builder, uint16_t from, uint16_t to
+	struct filter_rule_builder *builder, uint16_t from, uint16_t to
 );
 
-struct filter_action
-build_action(struct filter_action_builder *builder, uint32_t action);
+void
+builer_set_proto(
+	struct filter_rule_builder *builder,
+	uint8_t proto,
+	uint16_t enable_bits,
+	uint16_t disable_bits
+);
+
+struct filter_rule
+build_rule(struct filter_rule_builder *builder, uint32_t action);
 
 ////////////////////////////////////////////////////////////////////////////////
 
