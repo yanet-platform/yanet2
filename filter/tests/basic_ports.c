@@ -156,12 +156,72 @@ test_ports_2(void *memory) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+void
+test_any_port(void *memory) {
+	// init memory
+	struct block_allocator allocator;
+	block_allocator_init(&allocator);
+	block_allocator_put_arena(&allocator, memory, 1 << 24);
+
+	struct memory_context memory_context;
+	int res = memory_context_init(&memory_context, "test", &allocator);
+	assert(res == 0);
+
+	struct filter_attribute attributes[2] = {
+		attribute_port_src, attribute_port_dst
+	};
+
+	// rule 1
+	//	src: 1024-5016
+	//	dst: any
+	struct filter_action_builder builder1;
+	builder_init(&builder1);
+	builder_add_port_src_range(&builder1, 1024, 5016);
+	builder_add_port_dst_range(&builder1, 0, 65535);
+	struct filter_action action1 = build_action(&builder1, 1);
+
+	// rule 2
+	//	src: any
+	//	dst: 400-12040
+	struct filter_action_builder builder2;
+	builder_init(&builder2);
+	builder_add_port_src_range(&builder2, 0, 65535);
+	builder_add_port_dst_range(&builder2, 400, 12040);
+	struct filter_action action2 = build_action(&builder2, 2);
+
+	// rule 3
+	//	src: 100-2014
+	//	dst: 5000-15000
+	struct filter_action_builder builder3;
+	builder_init(&builder3);
+	builder_add_port_src_range(&builder3, 100, 2014);
+	builder_add_port_dst_range(&builder3, 5000, 15000);
+	struct filter_action action3 = build_action(&builder3, 3);
+
+	struct filter_action actions[3] = {action1, action2, action3};
+
+	struct filter filter;
+	res = filter_init(&filter, attributes, 2, actions, 3, &memory_context);
+	assert(res == 0);
+
+	query_and_expect_action(&filter, 1025, 11111, 1);
+	query_and_expect_action(&filter, 11111, 404, 2);
+	query_and_expect_action(&filter, 500, 15000, 3);
+
+	query_and_expect_no_action(&filter, 1000, 200);
+
+	filter_free(&filter);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 int
 main() {
 	void *memory = malloc(1 << 24);
 
 	test_src_dst_ports(memory);
 	test_ports_2(memory);
+	test_any_port(memory);
 
 	puts("OK!");
 
