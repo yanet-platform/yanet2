@@ -108,7 +108,9 @@ test_src_port_only(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = filter_init(&filter, &attribute_port_src, 1, actions, 2, &memory_context);
+	res = filter_init(
+		&filter, &attribute_port_src, 1, actions, 2, &memory_context
+	);
 	assert(res == 0);
 
 	query_and_expect_action(&filter, 500, 0, 1);

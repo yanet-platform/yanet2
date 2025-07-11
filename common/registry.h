@@ -68,9 +68,9 @@ value_collector_reset(struct value_collector *collector) {
 }
 
 /*
-* Routine returns 1 if value was not seen during current generation,
-* 0 if it was seen, and -1 in case of error.
-*/
+ * Routine returns 1 if value was not seen during current generation,
+ * 0 if it was seen, and -1 in case of error.
+ */
 static inline int
 value_collector_check(struct value_collector *collector, uint32_t value) {
 	uint32_t chunk_idx = value / VALUE_COLLECTOR_CHUNK_SIZE;
@@ -109,10 +109,12 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 		if (chunk == NULL)
 			return -1;
 
-		memset(chunk, VALUE_COLLECTOR_UNTOUCHED, VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t));
+		memset(chunk,
+		       VALUE_COLLECTOR_UNTOUCHED,
+		       VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t));
 
 		SET_OFFSET_OF(&use_map[chunk_idx], chunk);
-	} 
+	}
 
 	uint32_t value_idx = value % VALUE_COLLECTOR_CHUNK_SIZE;
 	return chunk[value_idx] != collector->gen;
