@@ -43,13 +43,9 @@ make_mbuf(
 	mbuf->l3_len = sizeof(struct rte_ipv4_hdr);
 
 	if (vlan != 0) {
-		printf("make mbuf: vlan=%u\n", vlan);
 		mbuf->l2_len += sizeof(struct rte_ether_hdr);
 		mbuf->vlan_tci = rte_cpu_to_be_16(vlan);
 		int res = rte_vlan_insert(&mbuf);
-		if (res != 0) {
-			printf("res=%d\n", res);
-		}
 		assert(res == 0);
 	}
 
