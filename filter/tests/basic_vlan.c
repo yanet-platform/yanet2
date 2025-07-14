@@ -45,7 +45,7 @@ test_vlan_1(void *memory) {
 	struct filter_rule r2 = build_rule(&b2, 2);
 
 	struct filter_rule_builder b3;
-	builder_set_vlan(&b3, 10);
+	builder_set_vlan(&b3, 30);
 	struct filter_rule r3 = build_rule(&b3, 3);
 
 	struct filter_rule rules[3] = {r1, r2, r3};

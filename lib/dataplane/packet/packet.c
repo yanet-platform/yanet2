@@ -201,9 +201,12 @@ parse_packet(struct packet *packet) {
 		return -1;
 	}
 
-	if ((type == rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN)) &&
-	    parse_vlan_header(packet, &type, &offset)) {
-		return -1;
+	if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN)) {
+		if (parse_vlan_header(packet, &type, &offset)) {
+			return -1;
+		} else {
+			return 0;
+		}
 	}
 
 	packet->network_header.type = type;

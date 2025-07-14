@@ -100,8 +100,8 @@ filter_init(
 	struct filter *filter,
 	const struct filter_attribute *attributes,
 	uint32_t attributes_count,
-	const struct filter_rule *actions,
-	uint32_t actions_count,
+	const struct filter_rule *rules,
+	uint32_t rule_count,
 	struct memory_context *memory_context
 ) {
 	filter->n = attributes_count;
@@ -120,7 +120,7 @@ filter_init(
 	       attributes,
 	       attributes_count * sizeof(struct filter_attribute));
 
-	return filter_build(filter, actions, actions_count);
+	return filter_build(filter, rules, rule_count);
 }
 
 int

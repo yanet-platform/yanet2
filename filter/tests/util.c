@@ -21,35 +21,41 @@ make_mbuf(
 	uint16_t vlan
 ) {
 	size_t total_size =
-		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + 2048 + 128;
+		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + 2048;
 	struct rte_mbuf *mbuf = malloc(total_size);
+	memset(mbuf, 0, sizeof(struct rte_mbuf));
+	mbuf->refcnt = 1;
 
 	if (!mbuf)
 		return NULL;
 
-	uint16_t total_len = sizeof(struct rte_ether_hdr) + 128 +
+	uint16_t total_len = sizeof(struct rte_ether_hdr) +
 			     sizeof(struct rte_ipv4_hdr) +
 			     sizeof(struct rte_udp_hdr);
 
-	mbuf->buf_addr = ((char *)mbuf) + sizeof(struct rte_mbuf) + 128;
-	mbuf->data_off = RTE_PKTMBUF_HEADROOM + 128;
-	mbuf->buf_len = 2048 + RTE_PKTMBUF_HEADROOM + 128;
+	mbuf->buf_addr = ((char *)mbuf) + sizeof(struct rte_mbuf);
+	mbuf->data_len = 2048;
+	mbuf->data_off = RTE_PKTMBUF_HEADROOM;
+	mbuf->buf_len = 2048 + RTE_PKTMBUF_HEADROOM;
 
 	mbuf->pkt_len = total_len;
 	mbuf->l2_len = sizeof(struct rte_ether_hdr);
 	mbuf->l3_len = sizeof(struct rte_ipv4_hdr);
 
 	if (vlan != 0) {
-		int res = rte_vlan_insert(&mbuf);
-		assert(res == 0);
+		printf("make mbuf: vlan=%u\n", vlan);
+		mbuf->l2_len += sizeof(struct rte_ether_hdr);
 		mbuf->vlan_tci = rte_cpu_to_be_16(vlan);
+		int res = rte_vlan_insert(&mbuf);
+		if (res != 0) {
+			printf("res=%d\n", res);
+		}
+		assert(res == 0);
 	}
 
 	struct rte_ether_hdr *eth =
 		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-	if (vlan != 0) {
-		eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
-	} else {
+	if (vlan == 0) {
 		eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 	}
 

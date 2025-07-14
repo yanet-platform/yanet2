@@ -35,6 +35,7 @@ init_vlan(
 		if (r->vlan == VLAN_UNSPEC) {
 			continue;
 		}
+		value_table_new_gen(t);
 		value_table_touch(t, 0, r->vlan);
 	}
 	value_table_compact(t);
