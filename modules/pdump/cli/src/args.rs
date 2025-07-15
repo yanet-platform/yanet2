@@ -3,10 +3,7 @@ use clap::{Parser, ValueEnum};
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
     Show(ShowConfigCmd),
-    SetFilter(SetFilterCmd),
-    SetDumpMode(SetDumpModeCmd),
-    SetSnapLen(SetSnapLenCmd),
-    SetRingSize(SetRingSizeCmd),
+    Set(SetConfigCmd),
     Read(ReadCmd),
 }
 
@@ -16,7 +13,7 @@ pub struct ShowConfigCmd {
     #[arg(long = "cfg", short)]
     pub config_name: Option<String>,
     /// Indices of dataplane instances where changes should be applied, optionally repeated.
-    #[arg(long, required = false)]
+    #[arg(long, short, required = false)]
     pub instances: Vec<u32>,
     /// Output format.
     #[clap(long, value_enum, default_value_t = ConfigOutputFormat::Tree)]
@@ -24,44 +21,29 @@ pub struct ShowConfigCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct SetFilterCmd {
+pub struct SetConfigCmd {
     /// Pdump config name to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
     /// Indices of dataplane instances where changes should be applied, optionally repeated.
-    #[arg(long, required = true)]
+    #[arg(long, short, required = true)]
     pub instances: Vec<u32>,
 
-    #[arg(long = "filter", short)]
-    pub filter: String,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct SetDumpModeCmd {
-    /// Pdump config name to operate on.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
-    /// Indices of dataplane instances where changes should be applied, optionally repeated.
-    #[arg(long, required = true)]
-    pub instances: Vec<u32>,
+    /// Filter represents a pcap-style filter expression
+    #[arg(long, short)]
+    pub filter: Option<String>,
 
     /// Determine the packet list to capture packets from.
     #[command(flatten)]
-    pub mode: crate::dump_mode::Mode,
-}
+    pub mode: Option<crate::dump_mode::Mode>,
 
-#[derive(Debug, Clone, Parser)]
-pub struct SetSnapLenCmd {
-    /// Pdump config name to operate on.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
-    /// Indices of dataplane instances where changes should be applied, optionally repeated.
-    #[arg(long, required = true)]
-    pub instances: Vec<u32>,
-
-    // SnapLen is the maximum packet length to capture.
+    /// Snaplen is the maximum packet length to capture.
     #[arg(long = "snaplen", short = 's')]
-    pub snaplen: u32,
+    pub snaplen: Option<u32>,
+
+    /// Per-worker ring buffer size
+    #[arg(long = "ring-size", value_parser=ring_buffer_size_range)]
+    pub ring_size: Option<u32>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -70,7 +52,7 @@ pub struct ReadCmd {
     #[arg(long = "cfg", short)]
     pub config_name: String,
     /// Indices of dataplane instances where the data should be read.
-    #[arg(long, required = true)]
+    #[arg(long, short, required = true)]
     pub instances: Vec<u32>,
 
     /// Dump output format.
@@ -101,20 +83,6 @@ fn ring_buffer_size_range(s: &str) -> Result<u64, String> {
         }
         Ok(val)
     }
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct SetRingSizeCmd {
-    /// Pdump config name to operate on.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
-    /// Indices of dataplane instances where changes should be applied, optionally repeated.
-    #[arg(long, required = true)]
-    pub instances: Vec<u32>,
-
-    /// Per-worker ring buffer size
-    #[arg(long = "size", short = 's', value_parser=ring_buffer_size_range)]
-    pub ring_size: u32,
 }
 
 /// Dump Output format options.

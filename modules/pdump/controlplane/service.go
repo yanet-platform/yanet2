@@ -9,7 +9,6 @@ package pdump
 import (
 	"context"
 	"fmt"
-	"maps"
 	"sync"
 
 	"go.uber.org/zap"
@@ -80,7 +79,7 @@ func (m *PdumpService) ListConfigs(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for key := range maps.Keys(m.configs) {
+	for key := range m.configs {
 		instConfig := response.InstanceConfigs[key.dataplaneInstance]
 		instConfig.Configs = append(instConfig.Configs, key.name)
 	}
@@ -118,49 +117,18 @@ func (m *PdumpService) ShowConfig(
 	return response, nil
 }
 
-// SetFilter configures the packet filter for a specific instance using libpcap syntax.
-func (m *PdumpService) SetFilter(
+// SetConfig TODO...
+func (m *PdumpService) SetConfig(
 	ctx context.Context,
-	request *pdumppb.SetFilterRequest,
-) (*pdumppb.SetFilterResponse, error) {
+	request *pdumppb.SetConfigRequest,
+) (*pdumppb.SetConfigResponse, error) {
 	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, err
 	}
-	filter := request.GetFilter()
 
-	// Lock instances store and module updates
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	config, ok := m.configs[key]
-	if !ok {
-		config = defaultModuleConfig()
-		m.configs[key] = config
-	}
-	config.filter = filter
-
-	return &pdumppb.SetFilterResponse{}, m.updateModuleConfig(name, inst)
-}
-
-// SetDumpMode sets the packet capture mode for a specific instance,
-// determining whether to capture incoming, dropped, or both types of packets.
-func (m *PdumpService) SetDumpMode(
-	ctx context.Context,
-	request *pdumppb.SetDumpModeRequest,
-) (*pdumppb.SetDumpModeResponse, error) {
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
-	if err != nil {
-		return nil, err
-	}
-	mode := request.GetMode()
-	if mode > maxMode {
-		return nil, fmt.Errorf("unknown pdump mode %b (max known %b)", mode, maxMode)
-	}
-
-	if mode == 0 {
-		mode = defaultMode
+	if request.Config == nil {
+		return nil, fmt.Errorf("config is required")
 	}
 
 	// Lock instances store and module updates
@@ -168,79 +136,67 @@ func (m *PdumpService) SetDumpMode(
 	defer m.mu.Unlock()
 
 	key := instanceKey{name: name, dataplaneInstance: inst}
+	newConfig := *defaultModuleConfig()
 	config, ok := m.configs[key]
-	if !ok {
-		config = defaultModuleConfig()
-		m.configs[key] = config
-	}
-	config.dumpMode = mode
-
-	return &pdumppb.SetDumpModeResponse{}, m.updateModuleConfig(name, inst)
-}
-
-// SetSnapLen sets the maximum number of bytes to capture per packet.
-// If the provided snaplen is zero, it defaults to the system's default value.
-func (m *PdumpService) SetSnapLen(
-	ctx context.Context,
-	request *pdumppb.SetSnapLenRequest,
-) (*pdumppb.SetSnapLenResponse, error) {
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
-	if err != nil {
-		return nil, err
+	if ok {
+		// Create a copy of the config to ensure atomic updates.
+		newRing := newConfig.ring // Preserve the new ring.
+		newConfig = *config
+		newRing.perWorkerSize = newConfig.ring.perWorkerSize
+		newRing.readChunkSize = newConfig.ring.readChunkSize
+		newConfig.ring = newRing // Restore the new ring.
 	}
 
-	snaplen := request.GetSnaplen()
-	if snaplen == 0 {
-		m.log.Infof("snaplen is zero, resetting to default value %d", defaultSnaplen)
-		snaplen = defaultSnaplen
+	if request.UpdateMask != nil && len(request.UpdateMask.Paths) > 0 {
+		for _, path := range request.UpdateMask.Paths {
+			switch path {
+			case "filter":
+				newConfig.filter = request.Config.GetFilter()
+			case "mode":
+				// Sets the packet capture mode for a specific instance,
+				// determining whether to capture incoming, dropped,
+				// or both types of packets.
+
+				mode := request.Config.GetMode()
+				if mode > maxMode {
+					return nil, fmt.Errorf("unknown pdump mode %b (max known %b)", mode, maxMode)
+				}
+				if mode == 0 {
+					mode = defaultMode
+				}
+
+				newConfig.dumpMode = mode
+			case "snaplen":
+				// Sets the maximum number of bytes to capture per packet.
+				// If the provided snaplen is zero, it defaults to the system's default value.
+
+				snaplen := request.Config.GetSnaplen()
+				if snaplen == 0 {
+					m.log.Infof("snaplen is zero, resetting to default value %d", defaultSnaplen)
+					snaplen = defaultSnaplen
+				}
+
+				newConfig.snaplen = snaplen
+			case "ring_size":
+				// Configures the ring buffer size for each worker.
+				// The size must fall within the range [minRingSize, maxRingSize].
+				size := request.Config.GetRingSize()
+				if size < uint32(minRingSize.Bytes()) || size > maxRingSize {
+					return nil, fmt.Errorf("ring size %s not in range [%s, %s]",
+						datasize.ByteSize(size), minRingSize, datasize.ByteSize(maxRingSize))
+				}
+
+				newConfig.ring.perWorkerSize = size
+			default:
+				return nil, fmt.Errorf("unknown path '%s'", path)
+			}
+		}
 	}
+	// If the updateMask is empty and no configuration exists for the key,
+	// a default configuration will be created.
+	m.configs[key] = &newConfig
 
-	// Lock instances store and module updates
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	config, ok := m.configs[key]
-	if !ok {
-		config = defaultModuleConfig()
-		m.configs[key] = config
-	}
-	config.snaplen = snaplen
-
-	return &pdumppb.SetSnapLenResponse{}, m.updateModuleConfig(name, inst)
-}
-
-// SetWorkerRingSize configures the ring buffer size for each worker.
-// The size must fall within the range [minRingSize, maxRingSize].
-func (m *PdumpService) SetWorkerRingSize(
-	ctx context.Context,
-	request *pdumppb.SetWorkerRingSizeRequest,
-) (*pdumppb.SetWorkerRingSizeResponse, error) {
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
-	if err != nil {
-		return nil, err
-	}
-
-	size := request.GetRingSize()
-	if size < uint32(minRingSize.Bytes()) || size > maxRingSize {
-		return nil, fmt.Errorf("ring size %s not in range [%s, %s]",
-			datasize.ByteSize(size), minRingSize, datasize.ByteSize(maxRingSize))
-	}
-
-	// Lock instances store and module updates
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	config, ok := m.configs[key]
-	if !ok {
-		config = defaultModuleConfig()
-		m.configs[key] = config
-	}
-	config.ring.perWorkerSize = size
-	config.ring.workers = nil
-
-	return &pdumppb.SetWorkerRingSizeResponse{}, m.updateModuleConfig(name, inst)
+	return &pdumppb.SetConfigResponse{}, m.updateModuleConfig(name, inst)
 }
 
 // updateModuleConfig applies the current configuration to the specified module instance.

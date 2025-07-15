@@ -15,20 +15,8 @@ service PdumpService {
 	// ShowConfig returns the current configuration for the pdump module.
 	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-	// SetFilter sets the packet filter.
-	rpc SetFilter(SetFilterRequest) returns (SetFilterResponse);
-
-	// SetDumpMode switches the pdump module to read packets from the
-	// drop packet list instead of the input packet list or from both lists.
-	rpc SetDumpMode(SetDumpModeRequest) returns (SetDumpModeResponse);
-
-	// SetSnapLen sets the maximum packet length to capture.
-	rpc SetSnapLen(SetSnapLenRequest) returns (SetSnapLenResponse);
-
-	// SetWorkerRingSize sets the size of the per-worker ring buffer where
-	// matched packets are written.
-	rpc SetWorkerRingSize(SetWorkerRingSizeRequest)
-		returns (SetWorkerRingSizeResponse);
+	// SetConfig sets a new config for the pdump module
+	rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
 
 	// ReadDump activates reading packet dumps from shared memory. Each
 	// packet is returned as an individual Record message containing
@@ -89,13 +77,14 @@ message ShowConfigRequest {
 
 // Config contains the pdump module configuration.
 message Config {
-	// pcap style filter
+	// Pcap style filter.
 	string filter = 1;
 	// Mode specifies a bitmap of queues that should be dumped.
+	// For now available queues are INPUT, OUTPUT, DROP, BYPASS.
 	uint32 mode = 2;
-	// snaplen specifies maximum packet length to capture
+	// Snaplen specifies maximum packet length to capture.
 	uint32 snaplen = 3;
-	// ring_size specifies per worker ring buffer size
+	// Ring_size specifies per worker ring buffer size.
 	uint32 ring_size = 4;
 }
 
@@ -106,35 +95,19 @@ message ShowConfigResponse {
 	Config config = 3;
 }
 
-// SetFilterRequest contains information about the target module and
-// the filter for the pdump module's configuration.
-message SetFilterRequest {
+// SetConfigRequest contains new configuration for the pdump module instance
+message SetConfigRequest {
 	commonpb.TargetModule target = 1;
-	string filter = 2;
-}
-message SetFilterResponse {
-}
-
-message SetDumpModeRequest {
-	commonpb.TargetModule target = 1;
-	uint32 mode = 2;
+	Config config = 2;
+	FieldMask update_mask = 3;
 }
 
-message SetDumpModeResponse {
+message SetConfigResponse {
 }
 
-message SetSnapLenRequest {
-	commonpb.TargetModule target = 1;
-	uint32 snaplen = 2;
-}
-
-message SetSnapLenResponse {
-}
-
-message SetWorkerRingSizeRequest {
-	commonpb.TargetModule target = 1;
-	uint32 ring_size = 2;
-}
-
-message SetWorkerRingSizeResponse {
+// Copy pasted from import "google/protobuf/field_mask.proto";
+// for integrity purposes.
+message FieldMask {
+	// The set of field mask paths.
+	repeated string paths = 1;
 }

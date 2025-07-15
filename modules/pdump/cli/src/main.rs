@@ -11,14 +11,14 @@ use tonic::transport::Channel;
 
 use commonpb::TargetModule;
 use pdumppb::{
-    ListConfigsRequest, ReadDumpRequest, SetDumpModeRequest, SetFilterRequest, SetSnapLenRequest,
-    SetWorkerRingSizeRequest, ShowConfigRequest, ShowConfigResponse, pdump_service_client::PdumpServiceClient,
+    ListConfigsRequest, ReadDumpRequest, ShowConfigRequest, ShowConfigResponse,
+    pdump_service_client::PdumpServiceClient,
 };
 use ync::logging;
 
-use args::{
-    ConfigOutputFormat, ModeCmd, ReadCmd, SetDumpModeCmd, SetFilterCmd, SetRingSizeCmd, SetSnapLenCmd, ShowConfigCmd,
-};
+use args::{ConfigOutputFormat, ModeCmd, ReadCmd, SetConfigCmd, ShowConfigCmd};
+
+use crate::pdumppb::SetConfigRequest;
 
 mod args;
 mod dump_mode;
@@ -59,10 +59,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
     match cmd.mode {
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::SetFilter(cmd) => service.set_filter(cmd).await,
-        ModeCmd::SetDumpMode(cmd) => service.set_dump_mode(cmd).await,
-        ModeCmd::SetSnapLen(cmd) => service.set_snap_len(cmd).await,
-        ModeCmd::SetRingSize(cmd) => service.set_ring_size(cmd).await,
+        ModeCmd::Set(cmd) => service.set_config(cmd).await,
         ModeCmd::Read(cmd) => service.read_dump(cmd).await,
     }
 }
@@ -85,7 +82,10 @@ impl PdumpService {
         let mut responses = Vec::new();
         for instance in instances {
             let request = ShowConfigRequest {
-                target: Some(TargetModule { config_name: name.to_owned(), dataplane_instance: instance }),
+                target: Some(TargetModule {
+                    config_name: name.to_owned(),
+                    dataplane_instance: instance,
+                }),
             };
             log::trace!("show config request on dataplane instance {instance}: {request:?}");
             let response = self.client.show_config(request).await?.into_inner();
@@ -115,66 +115,43 @@ impl PdumpService {
         Ok(())
     }
 
-    pub async fn set_filter(&mut self, cmd: SetFilterCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn set_config(&mut self, cmd: SetConfigCmd) -> Result<(), Box<dyn Error>> {
         for instance in cmd.instances {
-            let request = SetFilterRequest {
+            let mut request = SetConfigRequest {
                 target: Some(TargetModule {
                     config_name: cmd.config_name.clone(),
                     dataplane_instance: instance,
                 }),
-                filter: cmd.filter.to_string(),
+                ..Default::default()
             };
-            log::trace!("set filter request on instance {instance}: {request:?}");
-            let response = self.client.set_filter(request).await?.into_inner();
-            log::debug!("set filter response on instance {instance}: {response:?}");
-        }
-        Ok(())
-    }
+            let mut cfg = request.config.unwrap_or_default();
+            let mut mask = request.update_mask.unwrap_or_default();
 
-    pub async fn set_dump_mode(&mut self, cmd: SetDumpModeCmd) -> Result<(), Box<dyn Error>> {
-        for instance in cmd.instances {
-            let request = SetDumpModeRequest {
-                target: Some(TargetModule {
-                    config_name: cmd.config_name.clone(),
-                    dataplane_instance: instance,
-                }),
-                mode: cmd.mode.into(),
-            };
-            log::trace!("set dump mode request on instance {instance}: {request:?}");
-            let response = self.client.set_dump_mode(request).await?.into_inner();
-            log::debug!("set dump mode response on instance {instance}: {response:?}");
-        }
-        Ok(())
-    }
+            if let Some(filter) = &cmd.filter {
+                cfg.filter = filter.to_string();
+                mask.paths.push("filter".to_string());
+            }
 
-    pub async fn set_snap_len(&mut self, cmd: SetSnapLenCmd) -> Result<(), Box<dyn Error>> {
-        for instance in cmd.instances {
-            let request = SetSnapLenRequest {
-                target: Some(TargetModule {
-                    config_name: cmd.config_name.clone(),
-                    dataplane_instance: instance,
-                }),
-                snaplen: cmd.snaplen,
-            };
-            log::trace!("set snap len request on instance {instance}: {request:?}");
-            let response = self.client.set_snap_len(request).await?.into_inner();
-            log::debug!("set snap len response on instance {instance}: {response:?}");
-        }
-        Ok(())
-    }
+            if let Some(mode) = cmd.mode {
+                cfg.mode = mode.into();
+                mask.paths.push("mode".to_string());
+            }
 
-    pub async fn set_ring_size(&mut self, cmd: SetRingSizeCmd) -> Result<(), Box<dyn Error>> {
-        for instance in cmd.instances {
-            let request = SetWorkerRingSizeRequest {
-                target: Some(TargetModule {
-                    config_name: cmd.config_name.clone(),
-                    dataplane_instance: instance,
-                }),
-                ring_size: cmd.ring_size,
-            };
-            log::trace!("set per worker ring size request on instance {instance}: {request:?}");
-            let response = self.client.set_worker_ring_size(request).await?.into_inner();
-            log::debug!("set per worker ring size response on instance {instance}: {response:?}");
+            if let Some(snaplen) = cmd.snaplen {
+                cfg.snaplen = snaplen;
+                mask.paths.push("snaplen".to_string());
+            }
+
+            if let Some(ring_size) = cmd.ring_size {
+                cfg.ring_size = ring_size;
+                mask.paths.push("ring_size".to_string());
+            }
+
+            request.config = Some(cfg);
+            request.update_mask = Some(mask);
+            log::trace!("set config request on instance {instance}: {request:?}");
+            let response = self.client.set_config(request).await?.into_inner();
+            log::debug!("set config response on instance {instance}: {response:?}");
         }
         Ok(())
     }
@@ -197,7 +174,10 @@ impl PdumpService {
         if configs.is_empty() {
             return Err(Box::new(std::io::Error::new(
                 ErrorKind::NotFound,
-                format!("Configuration {} not found on instances {:?}", cmd.config_name, cmd.instances),
+                format!(
+                    "Configuration {} not found on instances {:?}",
+                    cmd.config_name, cmd.instances
+                ),
             )));
         }
 
