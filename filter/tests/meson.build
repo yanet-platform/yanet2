@@ -76,7 +76,7 @@ test_filter_proto = executable('test_filter_proto',
   dependencies: test_deps,
   link_language: 'c'
 )
-test('proto', test_filter_proto, suite: ['filter'])
+test('basic_proto', test_filter_proto, suite: ['filter'])
 
 # test vlan
 test_filter_vlan = executable('test_filter_vlan',
@@ -86,4 +86,14 @@ test_filter_vlan = executable('test_filter_vlan',
   dependencies: test_deps,
   link_language: 'c'
 )
-test('vlan', test_filter_vlan, suite: ['filter'])
+test('basic_vlan', test_filter_vlan, suite: ['filter'])
+
+# bench and compare vs previous filter
+test_vs_prev = executable('filter_bench',
+ test_sources + ['bench.c'],
+  c_args: yanet_c_args + ['-O3'],
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('bench', test_vs_prev, suite: ['filter'])

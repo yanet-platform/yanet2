@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <assert.h>
+
 #include <string.h>
 
 #include "common/memory.h"
@@ -36,7 +38,6 @@ radix_page(const struct radix *radix, uint32_t page_idx) {
 
 static inline int
 radix_new_page(struct radix *radix, uint32_t *page_idx) {
-
 	if (!(radix->page_count % RADIX_CHUNK_SIZE)) {
 		struct memory_context *memory_context =
 			ADDR_OF(&radix->memory_context);
@@ -45,17 +46,17 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 			memory_context, sizeof(radix_page_t) * RADIX_CHUNK_SIZE
 		);
 
+		// 0x7ffff7b64000
+		// 0x7fffe7b64040
+
 		if (new_chunk == NULL)
 			return -1;
 
 		radix_page_t **old_pages = ADDR_OF(&radix->pages);
 		uint64_t old_chunk_count = radix->page_count / RADIX_CHUNK_SIZE;
 		uint64_t new_chunk_count = old_chunk_count + 1;
-		radix_page_t **new_pages = (radix_page_t **)memory_brealloc(
-			memory_context,
-			old_pages,
-			old_chunk_count * sizeof(*old_pages),
-			new_chunk_count * sizeof(*new_pages)
+		radix_page_t **new_pages = (radix_page_t **)memory_balloc(
+			memory_context, new_chunk_count * sizeof(*new_pages)
 		);
 		if (new_pages == NULL) {
 			memory_bfree(
@@ -66,13 +67,26 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 			return -1;
 		}
 
+		for (size_t i = 0; i < old_chunk_count; ++i) {
+			radix_page_t *page = ADDR_OF(&old_pages[i]);
+			SET_OFFSET_OF(&new_pages[i], page);
+		}
+
 		SET_OFFSET_OF(&new_pages[new_chunk_count - 1], new_chunk);
 		SET_OFFSET_OF(&radix->pages, new_pages);
+
+		memory_bfree(
+			memory_context,
+			old_pages,
+			old_chunk_count * sizeof(*new_pages)
+		);
 	}
 	if (page_idx != NULL)
 		*page_idx = radix->page_count;
-	memset(radix_page(radix, radix->page_count), 0xff, sizeof(radix_page_t)
-	);
+	radix_page_t *page = radix_page(radix, radix->page_count);
+	for (size_t i = 0; i < 256; ++i) {
+		(*page)[i] = RADIX_VALUE_INVALID;
+	}
 	radix->page_count += 1;
 	return 0;
 }
@@ -115,7 +129,7 @@ radix_insert(
 
 	for (uint8_t iter = 0; iter < key_size - 1; ++iter) {
 		uint32_t *stored_value = (*page) + key[iter];
-		if (*stored_value == RADIX_VALUE_INVALID &&
+		if ((*stored_value == RADIX_VALUE_INVALID) &&
 		    radix_new_page(radix, stored_value))
 			return -1;
 		page = radix_page(radix, *stored_value);

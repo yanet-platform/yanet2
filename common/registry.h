@@ -1,5 +1,6 @@
 #pragma once
 
+#include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -79,20 +80,34 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 	if (chunk_idx >= collector->chunk_count) {
 		uint32_t new_chunk_count = chunk_idx + 1;
 
-		uint32_t **new_use_map = (uint32_t **)memory_brealloc(
+		uint32_t **new_use_map = (uint32_t **)memory_balloc(
 			collector->memory_context,
-			use_map,
-			collector->chunk_count * sizeof(uint32_t *),
 			new_chunk_count * sizeof(uint32_t *)
 		);
 
 		if (new_use_map == NULL)
 			return -1;
 
+		for (uint32_t idx = 0; idx < collector->chunk_count; ++idx) {
+			uint32_t *chunk = ADDR_OF(&use_map[idx]);
+			SET_OFFSET_OF(&new_use_map[idx], chunk);
+		}
+
+		for (uint32_t idx = 0; idx < collector->chunk_count; ++idx) {
+			assert(ADDR_OF(&use_map[idx]) ==
+			       ADDR_OF(&new_use_map[idx]));
+		}
+
 		for (uint32_t idx = collector->chunk_count;
 		     idx < new_chunk_count;
 		     ++idx)
 			new_use_map[idx] = NULL;
+
+		memory_bfree(
+			collector->memory_context,
+			use_map,
+			collector->chunk_count * sizeof(uint32_t *)
+		);
 
 		use_map = new_use_map;
 		SET_OFFSET_OF(&collector->use_map, use_map);
@@ -110,7 +125,7 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 			return -1;
 
 		memset(chunk,
-		       VALUE_COLLECTOR_UNTOUCHED,
+		       0xff,
 		       VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t));
 
 		SET_OFFSET_OF(&use_map[chunk_idx], chunk);

@@ -14,6 +14,7 @@ action_check_has_v4(struct filter_rule *action) {
 	return action->net4.src_count && action->net4.dst_count;
 }
 
+[[maybe_unused]]
 static inline int
 action_check_has_v6(struct filter_rule *action) {
 	return action->net6.src_count && action->net6.dst_count;
@@ -43,6 +44,7 @@ typedef void (*action_get_net6_func)(
 	struct filter_rule *action, struct net6 **net, uint32_t *count
 );
 
+[[maybe_unused]]
 static void
 action_get_net6_src(
 	struct filter_rule *action, struct net6 **net, uint32_t *count
@@ -51,6 +53,7 @@ action_get_net6_src(
 	*count = action->net6.src_count;
 }
 
+[[maybe_unused]]
 static void
 action_get_net6_dst(
 	struct filter_rule *action, struct net6 **net, uint32_t *count
@@ -63,12 +66,14 @@ typedef void (*net6_get_part_func)(
 	struct net6 *net, uint64_t *addr, uint64_t *mask
 );
 
+[[maybe_unused]]
 static void
 net6_get_hi_part(struct net6 *net, uint64_t *addr, uint64_t *mask) {
 	*addr = net->addr_hi;
 	*mask = net->mask_hi;
 }
 
+[[maybe_unused]]
 static void
 net6_get_lo_part(struct net6 *net, uint64_t *addr, uint64_t *mask) {
 	*addr = net->addr_lo;
@@ -89,10 +94,12 @@ net4_collect_values(
 	struct value_table *table
 ) {
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		uint32_t to = net4->addr | ~net4->mask;
+		uint32_t addr = htobe32(net4->addr);
+		uint32_t mask = htobe32(net4->mask);
+		uint32_t to = addr | ~mask;
 		lpm4_collect_values(
 			lpm,
-			(uint8_t *)&net4->addr,
+			(uint8_t *)&addr,
 			(uint8_t *)&to,
 			lpm_collect_value_iterator,
 			table
@@ -142,10 +149,12 @@ net4_collect_registry(
 	struct value_registry *registry
 ) {
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		uint32_t to = net4->addr | ~net4->mask;
+		uint32_t addr = htobe32(net4->addr);
+		uint32_t mask = htobe32(net4->mask);
+		uint32_t to = addr | ~mask;
 		lpm4_collect_values(
 			lpm,
-			(uint8_t *)&net4->addr,
+			(uint8_t *)&addr,
 			(uint8_t *)&to,
 			lpm_collect_registry_iterator,
 			registry
@@ -427,9 +436,10 @@ collect_net4_values(
 
 		for (struct net4 *net4 = nets; net4 < nets + net_count;
 		     ++net4) {
+			uint32_t addr = htobe32(net4->addr);
 			if (range4_collector_add(
 				    &collector,
-				    (uint8_t *)&net4->addr,
+				    (uint8_t *)&addr,
 				    __builtin_popcountll(net4->mask)
 			    ))
 				goto error_collector;
@@ -498,6 +508,7 @@ error:
 	return -1;
 }
 
+[[maybe_unused]]
 static int
 collect_net6_values(
 	struct memory_context *memory_context,
@@ -655,10 +666,9 @@ collect_port_values(
 		     ++ports) {
 			if (ports->to - ports->from == 65535)
 				continue;
-			for (uint32_t port = be16toh(ports->from);
-			     port <= be16toh(ports->to);
+			for (uint32_t port = ports->from; port <= ports->to;
 			     ++port) {
-				value_table_touch(table, 0, htobe16(port));
+				value_table_touch(table, 0, port);
 			}
 		}
 	}
@@ -705,12 +715,15 @@ filter_compiler_init(
 	struct filter_rule *actions,
 	uint32_t count
 ) {
-	memory_context_init_from(
+	int res = memory_context_init_from(
 		&filter->memory_context, memory_context, "filter"
 	);
+	if (res < 0) {
+		return res;
+	}
 
 	struct value_registry src_net4_registry;
-	collect_net4_values(
+	res = collect_net4_values(
 		&filter->memory_context,
 		actions,
 		count,
@@ -719,9 +732,12 @@ filter_compiler_init(
 		&filter->src_net4,
 		&src_net4_registry
 	);
+	if (res < 0) {
+		return res;
+	}
 
 	struct value_registry dst_net4_registry;
-	collect_net4_values(
+	res = collect_net4_values(
 		&filter->memory_context,
 		actions,
 		count,
@@ -730,9 +746,12 @@ filter_compiler_init(
 		&filter->dst_net4,
 		&dst_net4_registry
 	);
+	if (res < 0) {
+		return res;
+	}
 
 	struct value_registry src_port4_registry;
-	collect_port_values(
+	res = collect_port_values(
 		&filter->memory_context,
 		actions,
 		count,
@@ -741,9 +760,12 @@ filter_compiler_init(
 		&filter->src_port4,
 		&src_port4_registry
 	);
+	if (res < 0) {
+		return res;
+	}
 
 	struct value_registry dst_port4_registry;
-	collect_port_values(
+	res = collect_port_values(
 		&filter->memory_context,
 		actions,
 		count,
@@ -752,26 +774,35 @@ filter_compiler_init(
 		&filter->dst_port4,
 		&dst_port4_registry
 	);
+	if (res < 0) {
+		return res;
+	}
 
 	struct value_registry transport_port4_registry;
-	merge_and_collect_registry(
+	res = merge_and_collect_registry(
 		&filter->memory_context,
 		&src_port4_registry,
 		&dst_port4_registry,
 		&filter->v4_lookups.transport_port,
 		&transport_port4_registry
 	);
+	if (res < 0) {
+		return res;
+	}
 
 	struct value_registry net4_registry;
-	merge_and_collect_registry(
+	res = merge_and_collect_registry(
 		&filter->memory_context,
 		&src_net4_registry,
 		&dst_net4_registry,
 		&filter->v4_lookups.network,
 		&net4_registry
 	);
+	if (res < 0) {
+		return res;
+	}
 
-	set_registry_values(
+	return set_registry_values(
 		&filter->memory_context,
 		actions,
 		&net4_registry,
@@ -780,120 +811,124 @@ filter_compiler_init(
 		&filter->v4_lookups.result_registry
 	);
 
-	struct value_registry src_net6_hi_registry;
-	collect_net6_values(
-		&filter->memory_context,
-		actions,
-		count,
-		action_check_has_v6,
-		action_get_net6_src,
-		net6_get_hi_part,
-		&filter->src_net6_hi,
-		&src_net6_hi_registry
-	);
+	// #ifndef IPFW_SKIP_NET6
 
-	struct value_registry src_net6_lo_registry;
-	collect_net6_values(
-		&filter->memory_context,
-		actions,
-		count,
-		action_check_has_v6,
-		action_get_net6_src,
-		net6_get_lo_part,
-		&filter->src_net6_lo,
-		&src_net6_lo_registry
-	);
+	// 	struct value_registry src_net6_hi_registry;
+	// 	collect_net6_values(
+	// 		&filter->memory_context,
+	// 		actions,
+	// 		count,
+	// 		action_check_has_v6,
+	// 		action_get_net6_src,
+	// 		net6_get_hi_part,
+	// 		&filter->src_net6_hi,
+	// 		&src_net6_hi_registry
+	// 	);
 
-	struct value_registry dst_net6_hi_registry;
-	collect_net6_values(
-		&filter->memory_context,
-		actions,
-		count,
-		action_check_has_v6,
-		action_get_net6_dst,
-		net6_get_hi_part,
-		&filter->dst_net6_hi,
-		&dst_net6_hi_registry
-	);
+	// 	struct value_registry src_net6_lo_registry;
+	// 	collect_net6_values(
+	// 		&filter->memory_context,
+	// 		actions,
+	// 		count,
+	// 		action_check_has_v6,
+	// 		action_get_net6_src,
+	// 		net6_get_lo_part,
+	// 		&filter->src_net6_lo,
+	// 		&src_net6_lo_registry
+	// 	);
 
-	struct value_registry dst_net6_lo_registry;
-	collect_net6_values(
-		&filter->memory_context,
-		actions,
-		count,
-		action_check_has_v6,
-		action_get_net6_dst,
-		net6_get_lo_part,
-		&filter->dst_net6_lo,
-		&dst_net6_lo_registry
-	);
+	// 	struct value_registry dst_net6_hi_registry;
+	// 	collect_net6_values(
+	// 		&filter->memory_context,
+	// 		actions,
+	// 		count,
+	// 		action_check_has_v6,
+	// 		action_get_net6_dst,
+	// 		net6_get_hi_part,
+	// 		&filter->dst_net6_hi,
+	// 		&dst_net6_hi_registry
+	// 	);
 
-	struct value_registry src_port6_registry;
-	collect_port_values(
-		&filter->memory_context,
-		actions,
-		count,
-		action_check_has_v6,
-		get_port_range_src,
-		&filter->src_port6,
-		&src_port6_registry
-	);
+	// 	struct value_registry dst_net6_lo_registry;
+	// 	collect_net6_values(
+	// 		&filter->memory_context,
+	// 		actions,
+	// 		count,
+	// 		action_check_has_v6,
+	// 		action_get_net6_dst,
+	// 		net6_get_lo_part,
+	// 		&filter->dst_net6_lo,
+	// 		&dst_net6_lo_registry
+	// 	);
 
-	struct value_registry dst_port6_registry;
-	collect_port_values(
-		&filter->memory_context,
-		actions,
-		count,
-		action_check_has_v6,
-		get_port_range_dst,
-		&filter->dst_port6,
-		&dst_port6_registry
-	);
+	// 	struct value_registry src_port6_registry;
+	// 	collect_port_values(
+	// 		&filter->memory_context,
+	// 		actions,
+	// 		count,
+	// 		action_check_has_v6,
+	// 		get_port_range_src,
+	// 		&filter->src_port6,
+	// 		&src_port6_registry
+	// 	);
 
-	struct value_registry net6_hi_registry;
-	merge_and_collect_registry(
-		&filter->memory_context,
-		&src_net6_hi_registry,
-		&dst_net6_hi_registry,
-		&filter->v6_lookups.network_hi,
-		&net6_hi_registry
-	);
+	// 	struct value_registry dst_port6_registry;
+	// 	collect_port_values(
+	// 		&filter->memory_context,
+	// 		actions,
+	// 		count,
+	// 		action_check_has_v6,
+	// 		get_port_range_dst,
+	// 		&filter->dst_port6,
+	// 		&dst_port6_registry
+	// 	);
 
-	struct value_registry net6_lo_registry;
-	merge_and_collect_registry(
-		&filter->memory_context,
-		&src_net6_lo_registry,
-		&dst_net6_lo_registry,
-		&filter->v6_lookups.network_lo,
-		&net6_lo_registry
-	);
+	// 	struct value_registry net6_hi_registry;
+	// 	merge_and_collect_registry(
+	// 		&filter->memory_context,
+	// 		&src_net6_hi_registry,
+	// 		&dst_net6_hi_registry,
+	// 		&filter->v6_lookups.network_hi,
+	// 		&net6_hi_registry
+	// 	);
 
-	struct value_registry transport_port6_registry;
-	merge_and_collect_registry(
-		&filter->memory_context,
-		&src_port6_registry,
-		&dst_port6_registry,
-		&filter->v6_lookups.transport_port,
-		&transport_port6_registry
-	);
+	// 	struct value_registry net6_lo_registry;
+	// 	merge_and_collect_registry(
+	// 		&filter->memory_context,
+	// 		&src_net6_lo_registry,
+	// 		&dst_net6_lo_registry,
+	// 		&filter->v6_lookups.network_lo,
+	// 		&net6_lo_registry
+	// 	);
 
-	struct value_registry net6_registry;
-	merge_and_collect_registry(
-		&filter->memory_context,
-		&net6_hi_registry,
-		&net6_lo_registry,
-		&filter->v6_lookups.network,
-		&net6_registry
-	);
+	// 	struct value_registry transport_port6_registry;
+	// 	merge_and_collect_registry(
+	// 		&filter->memory_context,
+	// 		&src_port6_registry,
+	// 		&dst_port6_registry,
+	// 		&filter->v6_lookups.transport_port,
+	// 		&transport_port6_registry
+	// 	);
 
-	set_registry_values(
-		&filter->memory_context,
-		actions,
-		&net6_registry,
-		&transport_port6_registry,
-		&filter->v6_lookups.result,
-		&filter->v6_lookups.result_registry
-	);
+	// 	struct value_registry net6_registry;
+	// 	merge_and_collect_registry(
+	// 		&filter->memory_context,
+	// 		&net6_hi_registry,
+	// 		&net6_lo_registry,
+	// 		&filter->v6_lookups.network,
+	// 		&net6_registry
+	// 	);
+
+	// 	set_registry_values(
+	// 		&filter->memory_context,
+	// 		actions,
+	// 		&net6_registry,
+	// 		&transport_port6_registry,
+	// 		&filter->v6_lookups.result,
+	// 		&filter->v6_lookups.result_registry
+	// 	);
+
+	// #endif
 
 	return 0;
 }
