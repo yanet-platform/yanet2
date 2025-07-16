@@ -92,7 +92,7 @@ message Config {
 message ShowConfigResponse {
 	// Dataplane instance
 	uint32 instance = 1;
-	Config config = 3;
+	Config config = 2;
 }
 
 // SetConfigRequest contains new configuration for the pdump module instance
