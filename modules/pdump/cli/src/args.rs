@@ -12,7 +12,7 @@ pub struct ShowConfigCmd {
     /// Pdump config name to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: Option<String>,
-    /// Indices of dataplane instances where changes should be applied, optionally repeated.
+    /// Indices of dataplane instances from which configurations should be retrieved.
     #[arg(long, short, required = false)]
     pub instances: Vec<u32>,
     /// Output format.

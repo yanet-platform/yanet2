@@ -57,7 +57,7 @@ pub struct ShowConfigCmd {
     /// DSCP module name to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: Option<String>,
-    /// Indices of dataplane instances where changes should be applied, optionally repeated.
+    /// Indices of dataplane instances from which configurations should be retrieved.
     #[arg(long, short, required = false)]
     pub instances: Vec<u32>,
     /// Output format.
@@ -70,10 +70,8 @@ pub struct AddPrefixesCmd {
     /// DSCP module name to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
-    /// Dataplane instances where the changes should be applied, optional.
-    ///
-    /// If no instances specified, the route will be applied to all instances.
-    #[arg(long)]
+    /// Dataplane instances where the changes should be applied.
+    #[arg(long, short, required = true)]
     pub instances: Vec<u32>,
 
     /// Prefix to be added to the input filter of the DSCP module.
@@ -87,10 +85,8 @@ pub struct RemovePrefixesCmd {
     #[arg(long = "cfg", short)]
     pub config_name: String,
 
-    /// Dataplane instances where the changes should be applied, optional.
-    ///
-    /// If no instances specified, the route will be applied to all instances.
-    #[arg(long)]
+    /// Dataplane instances where the changes should be applied.
+    #[arg(long, short, required = true)]
     pub instances: Vec<u32>,
 
     /// Prefix to be removed from the input filter of the DSCP module.
@@ -104,10 +100,8 @@ pub struct SetDscpMarkingCmd {
     #[arg(long = "cfg", short)]
     pub config_name: String,
 
-    /// Dataplane instances where the changes should be applied, optional.
-    ///
-    /// If no instances specified, the route will be applied to all instances.
-    #[arg(long)]
+    /// Dataplane instances where the changes should be applied.
+    #[arg(long, short, required = true)]
     pub instances: Vec<u32>,
 
     /// DSCP marking flag: 0 - Never, 1 - Default (only if original DSCP is 0), 2 - Always
