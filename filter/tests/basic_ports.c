@@ -48,8 +48,8 @@ test_src_dst_ports(void *memory) {
 	assert(res == 0);
 
 	// filter attributes
-	struct filter_attribute attributes[2] = {
-		attribute_port_src, attribute_port_dst
+	const struct filter_attribute *attributes[2] = {
+		&attribute_port_src, &attribute_port_dst
 	};
 
 	// action 1:
@@ -86,7 +86,7 @@ test_src_dst_ports(void *memory) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-test_ports_2(void *memory) {
+src_dst_ports(void *memory) {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
@@ -96,8 +96,8 @@ test_ports_2(void *memory) {
 	int res = memory_context_init(&memory_context, "test", &allocator);
 	assert(res == 0);
 
-	struct filter_attribute attributes[2] = {
-		attribute_port_src, attribute_port_dst
+	const struct filter_attribute *attributes[2] = {
+		&attribute_port_src, &attribute_port_dst
 	};
 
 	// rule 1
@@ -169,8 +169,8 @@ test_any_port(void *memory) {
 	int res = memory_context_init(&memory_context, "test", &allocator);
 	assert(res == 0);
 
-	struct filter_attribute attributes[2] = {
-		attribute_port_src, attribute_port_dst
+	const struct filter_attribute *attributes[2] = {
+		&attribute_port_src, &attribute_port_dst
 	};
 
 	// rule 1
@@ -222,7 +222,7 @@ main() {
 	void *memory = malloc(1 << 24);
 
 	test_src_dst_ports(memory);
-	test_ports_2(memory);
+	src_dst_ports(memory);
 	test_any_port(memory);
 
 	puts("OK!");

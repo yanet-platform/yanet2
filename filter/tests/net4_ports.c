@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 void
-test(void *memory, struct filter_attribute attrs[4]) {
+test(void *memory, const struct filter_attribute *attrs[4]) {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
@@ -127,16 +127,16 @@ main() {
 
 	uint32_t perm[4] = {0, 1, 2, 3};
 
-	struct filter_attribute attrs[4] = {
-		attribute_port_src,
-		attribute_port_dst,
-		attribute_net4_src,
-		attribute_net4_dst,
+	const struct filter_attribute *attrs[4] = {
+		&attribute_port_src,
+		&attribute_port_dst,
+		&attribute_net4_src,
+		&attribute_net4_dst,
 	};
 
 	uint32_t check_counter = 0;
 	do {
-		struct filter_attribute a[4];
+		const struct filter_attribute *a[4];
 		for (size_t i = 0; i < 4; ++i) {
 			a[i] = attrs[perm[i]];
 		}

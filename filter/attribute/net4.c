@@ -236,10 +236,10 @@ free_net4(void *data, struct memory_context *memory_context) {
 	lpm_free(lpm);
 }
 
-struct filter_attribute attribute_net4_src = {
+const struct filter_attribute attribute_net4_src = {
 	init_net4_src, lookup_net4_src, free_net4
 };
 
-struct filter_attribute attribute_net4_dst = {
+const struct filter_attribute attribute_net4_dst = {
 	init_net4_dst, lookup_net4_dst, free_net4
 };

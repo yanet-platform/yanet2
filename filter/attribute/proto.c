@@ -137,6 +137,6 @@ free_proto(void *data, struct memory_context *memory_context) {
 	value_table_free(&c->tcp_flags);
 }
 
-struct filter_attribute attribute_proto = {
+const struct filter_attribute attribute_proto = {
 	init_proto, lookup_proto, free_proto
 };

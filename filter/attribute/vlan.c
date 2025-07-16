@@ -75,4 +75,6 @@ free_vlan(void *data, struct memory_context *m) {
 	value_table_free(t);
 }
 
-struct filter_attribute attribute_vlan = {init_vlan, lookup_vlan, free_vlan};
+const struct filter_attribute attribute_vlan = {
+	init_vlan, lookup_vlan, free_vlan
+};

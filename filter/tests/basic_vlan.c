@@ -50,10 +50,10 @@ test_vlan_1(void *memory) {
 
 	struct filter_rule rules[3] = {r1, r2, r3};
 
+	const struct filter_attribute *attributes[] = {&attribute_vlan};
+
 	struct filter filter;
-	res = filter_init(
-		&filter, &attribute_vlan, 1, rules, 3, &memory_context
-	);
+	res = filter_init(&filter, attributes, 1, rules, 3, &memory_context);
 	assert(res == 0);
 
 	query_packet(&filter, 10, 1);

@@ -60,10 +60,10 @@ test_vlan_1(void *memory) {
 
 	struct filter_rule rules[3] = {r1, r2, r3};
 
+	const struct filter_attribute *attrs[1] = {&attribute_proto};
+
 	struct filter filter;
-	res = filter_init(
-		&filter, &attribute_proto, 1, rules, 3, &memory_context
-	);
+	res = filter_init(&filter, attrs, 1, rules, 3, &memory_context);
 	assert(res == 0);
 
 	query_tcp_packet(&filter, 0b101, 1);

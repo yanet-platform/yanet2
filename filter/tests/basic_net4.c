@@ -23,8 +23,8 @@ main() {
 	assert(res == 0);
 
 	// filter attributes
-	struct filter_attribute attributes[2] = {
-		attribute_net4_src, attribute_net4_dst
+	const struct filter_attribute *attributes[2] = {
+		&attribute_net4_src, &attribute_net4_dst
 	};
 
 	// action 1:

@@ -13,7 +13,7 @@ filter_build(
 ) {
 	// build leaves
 	for (size_t i = 0; i < filter->n; ++i) {
-		struct filter_attribute *attr = &filter->attr[i];
+		struct filter_attribute *attr = filter->attr[i];
 		struct filter_vertex *v = &filter->v[filter->n + i];
 
 		int res = value_registry_init(
@@ -98,7 +98,7 @@ filter_build(
 int
 filter_init(
 	struct filter *filter,
-	const struct filter_attribute *attributes,
+	const struct filter_attribute **attributes,
 	uint32_t attributes_count,
 	const struct filter_rule *rules,
 	uint32_t rule_count,
@@ -118,7 +118,7 @@ filter_init(
 
 	memcpy(filter->attr,
 	       attributes,
-	       attributes_count * sizeof(struct filter_attribute));
+	       attributes_count * sizeof(struct filter_attribute *));
 
 	return filter_build(filter, rules, rule_count);
 }
@@ -134,7 +134,7 @@ filter_query(
 	for (size_t attr_idx = 0; attr_idx < filter->n; ++attr_idx) {
 		size_t vertex = filter->n + attr_idx;
 
-		struct filter_attribute *attr = &filter->attr[attr_idx];
+		struct filter_attribute *attr = filter->attr[attr_idx];
 		struct filter_vertex *v = &filter->v[vertex];
 
 		// store calculated classifier in the parent vertex
@@ -175,7 +175,7 @@ filter_free(struct filter *filter) {
 	}
 
 	for (size_t i = 0; i < filter->n; ++i) {
-		struct filter_attribute *attr = &filter->attr[i];
+		struct filter_attribute *attr = filter->attr[i];
 		struct filter_vertex *v = &filter->v[filter->n + i];
 		attr->free_func(v->data, &filter->memory_context);
 	}

@@ -47,8 +47,8 @@ test_src_dst_ports(void *memory) {
 	assert(res == 0);
 
 	// filter attributes
-	struct filter_attribute attributes[2] = {
-		attribute_port_src, attribute_port_dst
+	const struct filter_attribute *attributes[2] = {
+		&attribute_port_src, &attribute_port_dst
 	};
 
 	// action 1:
@@ -108,11 +108,11 @@ test_src_port_only(void *memory) {
 
 	struct filter_rule actions[2] = {action1, action2};
 
+	const struct filter_attribute *attrs[1] = {&attribute_port_src};
+
 	// init filter
 	struct filter filter;
-	res = filter_init(
-		&filter, &attribute_port_src, 1, actions, 2, &memory_context
-	);
+	res = filter_init(&filter, attrs, 1, actions, 2, &memory_context);
 	assert(res == 0);
 
 	query_and_expect_action(&filter, 500, 0, 1);
