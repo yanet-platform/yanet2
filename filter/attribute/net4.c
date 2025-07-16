@@ -9,7 +9,7 @@ typedef void (*action_get_net4_func)(
 	const struct filter_rule *action, struct net4 **net, uint32_t *count
 );
 
-static void
+static inline void
 action_get_net4_src(
 	const struct filter_rule *action, struct net4 **net, uint32_t *count
 ) {
@@ -17,7 +17,7 @@ action_get_net4_src(
 	*count = action->net4.src_count;
 }
 
-static void
+static inline void
 action_get_net4_dst(
 	const struct filter_rule *action, struct net4 **net, uint32_t *count
 ) {
@@ -166,7 +166,7 @@ error:
 	return -1;
 }
 
-int
+static inline int
 init_net4_src(
 	struct value_registry *registry,
 	void **data,
@@ -186,7 +186,7 @@ init_net4_src(
 	);
 }
 
-uint32_t
+static inline uint32_t
 lookup_net4_src(struct packet *packet, void *data) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
@@ -196,7 +196,7 @@ lookup_net4_src(struct packet *packet, void *data) {
 	return lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->src_addr);
 }
 
-int
+static inline int
 init_net4_dst(
 	struct value_registry *registry,
 	void **data,
@@ -216,7 +216,7 @@ init_net4_dst(
 	);
 }
 
-uint32_t
+static inline uint32_t
 lookup_net4_dst(struct packet *packet, void *data) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
@@ -229,7 +229,7 @@ lookup_net4_dst(struct packet *packet, void *data) {
 	return lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->dst_addr);
 }
 
-void
+static inline void
 free_net4(void *data, struct memory_context *memory_context) {
 	(void)memory_context;
 	struct lpm *lpm = (struct lpm *)data;

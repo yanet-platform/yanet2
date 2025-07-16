@@ -67,7 +67,7 @@ collect_port_values(
 	return 0;
 }
 
-void
+static inline void
 get_port_range_src(
 	const struct filter_rule *action,
 	struct filter_port_range **ranges,
@@ -77,7 +77,7 @@ get_port_range_src(
 	*count = action->transport.src_count;
 }
 
-void
+static inline void
 get_port_range_dst(
 	const struct filter_rule *action,
 	struct filter_port_range **ranges,
@@ -87,19 +87,19 @@ get_port_range_dst(
 	*count = action->transport.dst_count;
 }
 
-uint32_t
+static inline uint32_t
 lookup_port_src(struct packet *packet, void *data) {
 	struct value_table *table = data;
 	return value_table_get(table, 0, packet_src_port(packet));
 }
 
-uint32_t
+static inline uint32_t
 lookup_port_dst(struct packet *packet, void *data) {
 	struct value_table *table = data;
 	return value_table_get(table, 0, packet_dst_port(packet));
 }
 
-int
+static inline int
 init_port_dst(
 	struct value_registry *registry,
 	void **data,
@@ -123,7 +123,7 @@ init_port_dst(
 	);
 }
 
-int
+static inline int
 init_port_src(
 	struct value_registry *registry,
 	void **data,
