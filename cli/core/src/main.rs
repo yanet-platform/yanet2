@@ -35,7 +35,7 @@ fn main() {
 
     let args = matches.get_many::<OsString>("").expect("expected downcast to OsString");
 
-    let subcommand = format!("yanet-cli-{}", cmd);
+    let subcommand = format!("yanet-cli-{cmd}");
     let err = process::Command::new(&subcommand).args(args).exec();
 
     match err.kind() {

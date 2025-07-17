@@ -129,7 +129,7 @@ impl NeighbourService {
         );
         table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
 
-        println!("{}", table);
+        println!("{table}");
 
         Ok(())
     }

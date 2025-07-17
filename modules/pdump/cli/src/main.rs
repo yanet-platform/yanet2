@@ -220,7 +220,7 @@ impl PdumpService {
                 log::warn!("writer task finished, initiating shutdown...");
                 match res {
                     Ok(()) => log::debug!("writer task completed successfully."),
-                    Err(e) => log::warn!("writer task failed: {}", e),
+                    Err(e) => log::warn!("writer task failed: {e}"),
                 }
                 cancellation_token.cancel();
             }
@@ -229,7 +229,7 @@ impl PdumpService {
         // Wait for all reader tasks to gracefully finish.
         while let Some(res) = reader_set.join_next().await {
             if let Err(e) = res {
-                log::warn!("reader task failed during shutdown: {}", e);
+                log::warn!("reader task failed during shutdown: {e}");
             }
         }
 

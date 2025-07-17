@@ -222,7 +222,7 @@ impl RouteService {
 
             let resp = self.client.insert_route(request).await?;
 
-            log::debug!("InsertRouteResponse on instance {inst}: {:?}", resp);
+            log::debug!("InsertRouteResponse on instance {inst}: {resp:?}");
         }
 
         Ok(())
@@ -243,5 +243,5 @@ where
     table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
     table.modify(Rows::first(), Color::BOLD);
 
-    println!("{}", table);
+    println!("{table}");
 }

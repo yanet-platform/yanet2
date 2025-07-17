@@ -108,8 +108,8 @@ impl CountersService {
         let request = PipelineModuleCountersRequest {
                 dp_instance: instance,
                 pipeline: pipeline_name,
-                module_type: module_type,
-                module_name: module_name,
+                module_type,
+                module_name,
             };
         let response = self.client.pipeline_module(request).await?;
         println!("{}", serde_json::to_string(response.get_ref())?);

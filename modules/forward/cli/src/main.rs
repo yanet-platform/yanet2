@@ -172,9 +172,9 @@ impl ForwardService {
             src_dev_id: cmd.src as u32,
             dst_dev_id: cmd.dst as u32,
         };
-        log::trace!("L2ForwardEnableRequest: {:?}", request);
+        log::trace!("L2ForwardEnableRequest: {request:?}");
         let response = self.client.enable_l2_forward(request).await?.into_inner();
-        log::debug!("L2ForwardEnableResponse: {:?}", response);
+        log::debug!("L2ForwardEnableResponse: {response:?}");
         Ok(())
     }
 
@@ -190,9 +190,9 @@ impl ForwardService {
                 dst_dev_id: cmd.dst as u32,
             }),
         };
-        log::trace!("AddL3ForwardRequest: {:?}", request);
+        log::trace!("AddL3ForwardRequest: {request:?}");
         let response = self.client.add_l3_forward(request).await?.into_inner();
-        log::debug!("AddL3ForwardResponse: {:?}", response);
+        log::debug!("AddL3ForwardResponse: {response:?}");
         Ok(())
     }
 
@@ -205,9 +205,9 @@ impl ForwardService {
             src_dev_id: cmd.src as u32,
             network: cmd.network.to_string(),
         };
-        log::trace!("RemoveL3ForwardRequest: {:?}", request);
+        log::trace!("RemoveL3ForwardRequest: {request:?}");
         let response = self.client.remove_l3_forward(request).await?.into_inner();
-        log::debug!("RemoveL3ForwardResponse: {:?}", response);
+        log::debug!("RemoveL3ForwardResponse: {response:?}");
         Ok(())
     }
 }
