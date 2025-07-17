@@ -165,7 +165,10 @@ impl RouteService {
 
         for inst in instances {
             let request = ShowRoutesRequest {
-                target: Some(TargetModule { config_name: name.clone(), dataplane_instance: inst }),
+                target: Some(TargetModule {
+                    config_name: name.clone(),
+                    dataplane_instance: inst,
+                }),
                 ipv4_only: cmd.ipv4,
                 ipv6_only: cmd.ipv6,
             };
@@ -222,7 +225,7 @@ impl RouteService {
 
             let resp = self.client.insert_route(request).await?;
 
-            log::debug!("InsertRouteResponse on instance {inst}: {:?}", resp);
+            log::debug!("InsertRouteResponse on instance {inst}: {resp:?}");
         }
 
         Ok(())
@@ -243,5 +246,5 @@ where
     table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
     table.modify(Rows::first(), Color::BOLD);
 
-    println!("{}", table);
+    println!("{table}");
 }

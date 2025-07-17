@@ -185,9 +185,9 @@ impl DecapService {
                 }),
                 prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
             };
-            log::trace!("AddPrefixesRequest: {:?}", request);
+            log::trace!("AddPrefixesRequest: {request:?}");
             let response = self.client.add_prefixes(request).await?.into_inner();
-            log::debug!("AddPrefixesResponse: {:?}", response);
+            log::debug!("AddPrefixesResponse: {response:?}");
         }
         Ok(())
     }
@@ -201,9 +201,9 @@ impl DecapService {
                 }),
                 prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
             };
-            log::trace!("RemovePrefixesRequest: {:?}", request);
+            log::trace!("RemovePrefixesRequest: {request:?}");
             let response = self.client.remove_prefixes(request).await?.into_inner();
-            log::debug!("RemovePrefixesResponse: {:?}", response);
+            log::debug!("RemovePrefixesResponse: {response:?}");
         }
         Ok(())
     }
@@ -222,7 +222,7 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
 
         tree.begin_child("Prefixes".to_string());
         for (idx, prefix) in config.prefixes.iter().enumerate() {
-            tree.add_empty_child(format!("{}: {}", idx, prefix));
+            tree.add_empty_child(format!("{idx}: {prefix}"));
         }
         tree.end_child();
 

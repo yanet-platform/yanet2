@@ -1,6 +1,10 @@
 use leptos::prelude::*;
 
-use crate::components::common::{header::Header, tabs::{TabNav, TabNavLink}, viewport::{Viewport, ViewportContent}};
+use crate::components::common::{
+    header::Header,
+    tabs::{TabNav, TabNavLink},
+    viewport::{Viewport, ViewportContent},
+};
 
 #[component]
 pub fn RouteLookupView() -> impl IntoView {

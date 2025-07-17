@@ -41,7 +41,7 @@ pub fn pretty_print_metadata_concise<W: Write>(mut writer: W, meta: &pdumppb::Re
 pub fn pretty_print_metadata<W: Write>(mut writer: W, meta: &pdumppb::RecordMeta) -> io::Result<()> {
     let ts = format_duration_ns(meta.timestamp);
     writeln!(writer, "--- Packet Metadata ---")?;
-    writeln!(writer, "  Timestamp:      {}", ts)?;
+    writeln!(writer, "  Timestamp:      {ts}")?;
     writeln!(writer, "  Packet Length:  {}", meta.packet_len)?;
     writeln!(writer, "  Worker Index:   {}", meta.worker_idx)?;
     writeln!(writer, "  Pipeline Index: {}", meta.pipeline_idx)?;
@@ -149,10 +149,10 @@ pub fn pretty_print_ethernet_frame_concise<W: Write>(
 
     let mut vlan_part = vlans.iter().map(u16::to_string).collect::<Vec<String>>().join(",");
     if !vlan_part.is_empty() {
-        vlan_part = format!(" VLANS[{}]", vlan_part);
+        vlan_part = format!(" VLANS[{vlan_part}]");
     }
     let origin_len = if ethernet_packet.len() < packet_len as usize {
-        format!("{}>", packet_len)
+        format!("{packet_len}>")
     } else {
         "".to_string()
     };
@@ -192,7 +192,7 @@ pub fn pretty_print_ethernet_frame<W: Write>(mut writer: W, ethernet_packet: &[u
     } else {
         "".to_string()
     };
-    writeln!(writer, "--- Ethernet Frame {} Bytes{} ---", packet_len, truncated)?;
+    writeln!(writer, "--- Ethernet Frame {packet_len} Bytes{truncated} ---")?;
     writeln!(writer, "  Source MAC:      {}", frame.get_source())?;
     writeln!(writer, "  Destination MAC: {}", frame.get_destination())?;
 
@@ -440,8 +440,8 @@ fn pretty_print_icmp_packet<W: Write>(mut writer: W, icmp_packet: &[u8]) -> io::
             if packet.payload().len() >= 4 {
                 let identifier = u16::from_be_bytes([packet.payload()[0], packet.payload()[1]]);
                 let sequence = u16::from_be_bytes([packet.payload()[2], packet.payload()[3]]);
-                writeln!(writer, "      Identifier:       {}", identifier)?;
-                writeln!(writer, "      Sequence Number:  {}", sequence)?;
+                writeln!(writer, "      Identifier:       {identifier}")?;
+                writeln!(writer, "      Sequence Number:  {sequence}")?;
                 writeln!(
                     writer,
                     "      Data Length:      {} bytes",
@@ -481,7 +481,7 @@ fn pretty_print_icmp_packet<W: Write>(mut writer: W, icmp_packet: &[u8]) -> io::
                     packet.payload()[2],
                     packet.payload()[3],
                 );
-                writeln!(writer, "      Gateway Address:  {}", gateway)?;
+                writeln!(writer, "      Gateway Address:  {gateway}")?;
             }
         }
         _ => {
@@ -557,8 +557,8 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
             if packet.payload().len() >= 4 {
                 let identifier = u16::from_be_bytes([packet.payload()[0], packet.payload()[1]]);
                 let sequence = u16::from_be_bytes([packet.payload()[2], packet.payload()[3]]);
-                writeln!(writer, "      Identifier:       {}", identifier)?;
-                writeln!(writer, "      Sequence Number:  {}", sequence)?;
+                writeln!(writer, "      Identifier:       {identifier}")?;
+                writeln!(writer, "      Sequence Number:  {sequence}")?;
                 writeln!(
                     writer,
                     "      Data Length:      {} bytes",
@@ -595,7 +595,7 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
                     packet.payload()[2],
                     packet.payload()[3],
                 ]);
-                writeln!(writer, "      MTU:              {}", mtu)?;
+                writeln!(writer, "      MTU:              {mtu}")?;
             }
         }
         Icmpv6Types::TimeExceeded => {
@@ -613,7 +613,7 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
                     packet.payload()[2],
                     packet.payload()[3],
                 ]);
-                writeln!(writer, "      Pointer:          {}", pointer)?;
+                writeln!(writer, "      Pointer:          {pointer}")?;
             }
         }
         Icmpv6Types::RouterSolicit => {
@@ -635,7 +635,7 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
                 let router_lifetime = u16::from_be_bytes([packet.payload()[2], packet.payload()[3]]);
                 writeln!(writer, "      Managed Flag:     {}", (flags & 0x80) != 0)?;
                 writeln!(writer, "      Other Flag:       {}", (flags & 0x40) != 0)?;
-                writeln!(writer, "      Router Lifetime:  {} seconds", router_lifetime)?;
+                writeln!(writer, "      Router Lifetime:  {router_lifetime} seconds")?;
             }
             if packet.payload().len() >= 12 {
                 let reachable_time = u32::from_be_bytes([
@@ -650,8 +650,8 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
                     packet.payload()[10],
                     packet.payload()[11],
                 ]);
-                writeln!(writer, "      Reachable Time:   {} ms", reachable_time)?;
-                writeln!(writer, "      Retrans Timer:    {} ms", retrans_timer)?;
+                writeln!(writer, "      Reachable Time:   {reachable_time} ms")?;
+                writeln!(writer, "      Retrans Timer:    {retrans_timer} ms")?;
             }
         }
         Icmpv6Types::NeighborSolicit => {
@@ -659,7 +659,7 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
                 let mut addr: [u8; 16] = [0; 16];
                 addr.copy_from_slice(&packet.payload()[4..19]);
                 let target_addr = Ipv6Addr::from(addr);
-                writeln!(writer, "      Target Address:   {}", target_addr)?;
+                writeln!(writer, "      Target Address:   {target_addr}")?;
             }
         }
         Icmpv6Types::NeighborAdvert => {
@@ -673,7 +673,7 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
                 let mut addr: [u8; 16] = [0; 16];
                 addr.copy_from_slice(&packet.payload()[4..19]);
                 let target_addr = Ipv6Addr::from(addr);
-                writeln!(writer, "      Target Address:   {}", target_addr)?;
+                writeln!(writer, "      Target Address:   {target_addr}")?;
             }
         }
         _ => {
@@ -871,7 +871,7 @@ fn format_duration_ns(ts: u64) -> String {
     let minutes = total_minutes % 60;
     let hours = total_minutes / 60;
 
-    format!("{:02}:{:02}:{:02}.{:03}.{:03}", hours, minutes, seconds, millis, micro)
+    format!("{hours:02}:{minutes:02}:{seconds:02}.{millis:03}.{micro:03}")
 }
 
 #[cfg(test)]
@@ -1443,7 +1443,7 @@ mod tests {
 ----------------------
 "#;
 
-        assert_eq!(output_str, expected, "{} != {}", output_str, expected);
+        assert_eq!(output_str, expected, "{output_str} != {expected}");
     }
 
     #[test]
@@ -1497,7 +1497,7 @@ mod tests {
 ----------------------
 "#;
 
-        assert_eq!(output_str, expected, "{} != {}", output_str, expected);
+        assert_eq!(output_str, expected, "{output_str} != {expected}");
     }
 
     #[test]

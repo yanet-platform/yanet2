@@ -191,22 +191,19 @@ pub fn pdump_write(
     let mut writer = match PdumpWriter::new(fmt, dst, max_snaplen) {
         Ok(w) => w,
         Err(e) => {
-            log::error!("failed to create pdump writer at '{}': {}", dst, e);
+            log::error!("failed to create pdump writer at '{dst}': {e}");
             return;
         }
     };
     let mut count = 0;
     while let Some(rec) = rx.blocking_recv() {
         if let Err(e) = writer.write(rec) {
-            log::error!("failed to write record: {}", e);
+            log::error!("failed to write record: {e}");
             break;
         };
         if let Some(limit) = packet_limit {
             if count >= limit {
-                log::debug!(
-                    "stopping writer because the packet capture limit has been reached: {}",
-                    limit
-                );
+                log::debug!("stopping writer because the packet capture limit has been reached: {limit}");
 
                 break;
             }
@@ -214,7 +211,7 @@ pub fn pdump_write(
         count += 1;
     }
     _ = writer.flush().map_err(|e| {
-        log::error!("failed to flush writer: {}", e);
+        log::error!("failed to flush writer: {e}");
     });
 }
 
@@ -232,13 +229,13 @@ pub async fn pdump_stream_reader(
             message = stream.message() => {
                 match message {
                     Err(e) => {
-                        log::warn!("error on gRPC stream: {}", e);
+                        log::warn!("error on gRPC stream: {e}");
                         return;
                     }
                     Ok(None) => return,
                     Ok(Some(rec)) => {
                         if let Err(e) = tx.send(rec).await {
-                            log::warn!("failed to send Record to pdump writer via mpsc channel: {}", e);
+                            log::warn!("failed to send Record to pdump writer via mpsc channel: {e}");
                             return;
                         };
                     }

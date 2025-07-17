@@ -193,9 +193,9 @@ impl NAT64Service {
             }),
             prefix: cmd.prefix.addr().octets()[..12].to_vec(),
         };
-        log::debug!("AddPrefixRequest: {:?}", request);
+        log::debug!("AddPrefixRequest: {request:?}");
         let response = self.client.add_prefix(request).await?.into_inner();
-        log::debug!("AddPrefixResponse: {:?}", response);
+        log::debug!("AddPrefixResponse: {response:?}");
         Ok(())
     }
 
@@ -209,9 +209,9 @@ impl NAT64Service {
             ipv6: cmd.ipv6.octets().to_vec(),
             prefix_index: cmd.prefix_index,
         };
-        log::debug!("AddMappingRequest: {:?}", request);
+        log::debug!("AddMappingRequest: {request:?}");
         let response = self.client.add_mapping(request).await?.into_inner();
-        log::debug!("AddMappingResponse: {:?}", response);
+        log::debug!("AddMappingResponse: {response:?}");
         Ok(())
     }
 
@@ -226,9 +226,9 @@ impl NAT64Service {
                 ipv6_mtu: cmd.ipv6_mtu,
             }),
         };
-        log::debug!("SetMtuRequest: {:?}", request);
+        log::debug!("SetMtuRequest: {request:?}");
         let response = self.client.set_mtu(request).await?.into_inner();
-        log::debug!("SetMtuResponse: {:?}", response);
+        log::debug!("SetMtuResponse: {response:?}");
         Ok(())
     }
 
@@ -241,9 +241,9 @@ impl NAT64Service {
             drop_unknown_prefix: cmd.drop_unknown_prefix,
             drop_unknown_mapping: cmd.drop_unknown_mapping,
         };
-        log::debug!("SetDropUnknownRequest: {:?}", request);
+        log::debug!("SetDropUnknownRequest: {request:?}");
         let response = self.client.set_drop_unknown(request).await?.into_inner();
-        log::debug!("SetDropUnknownResponse: {:?}", response);
+        log::debug!("SetDropUnknownResponse: {response:?}");
         Ok(())
     }
 }

@@ -123,18 +123,18 @@ export DECAP_PREFIX=<prefix>
 *** configure. Save to file like =decap_cfg.sh=
 #+begin_src shell
 #!/bin/sh
-yanet-cli forward l2-enable --mod=forward0 --src 0 --dst 1
-yanet-cli forward l2-enable --mod=forward0 --src 1 --dst 0
-yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net $IP4/32
-yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net $IP6/128
-yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net ff02::/16
+yanet-cli forward l2-enable --cfg=forward0 --instance 0 --src 0 --dst 1
+yanet-cli forward l2-enable --cfg=forward0 --instance 0 --src 1 --dst 0
+yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 0 --dst 1 --net $IP4/32
+yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 0 --dst 1 --net $IP6/128
+yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 0 --dst 1 --net ff02::/16
 
-yanet-cli forward l3-add --mod=forward0 --src 1 --dst 0 --net 0.0.0.0/0
-yanet-cli forward l3-add --mod=forward0 --src 1 --dst 0 --net ::/0
+yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 1 --dst 0 --net 0.0.0.0/0
+yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 1 --dst 0 --net ::/0
 
-yanet-cli decap prefix-add -p $DECAP_PREFIX --mod decap0
+yanet-cli decap prefix-add --cfg decap0 --instance 0 -p $DECAP_PREFIX
 
-yanet-cli route insert --mod route0 --via $DEFGW6 ::/0
+yanet-cli route insert --cfg route0 --instance 0 --via $DEFGW6 ::/0
 
 yanet-cli pipeline update --name=bootstrap --modules forward:forward0 --instance=0
 yanet-cli pipeline update --name=decap --modules forward:forward0 --modules decap:decap0 --modules route:route0 --instance=0
@@ -143,8 +143,8 @@ yanet-cli pipeline assign --instance=0 --device=1 --pipelines bootstrap:1
 yanet-cli pipeline assign --instance=0 --device=0 --pipelines decap:1
 # tmp hack for resolve neighbors
 sleep 3
-yanet-cli route insert --mod route0 --via $DEFGW6 ::/0
-yanet-cli route insert --mod route0 --via $DEFGW4 0.0.0.0/0
+yanet-cli route insert --cfg route0 --instance 0 --via $DEFGW6 ::/0
+yanet-cli route insert --cfg route0 --instance 0 --via $DEFGW4 0.0.0.0/0
 #+end_src
 ** NAT64
 *** env
@@ -154,19 +154,19 @@ export NAT64_PREFIX=<prefix>
 *** configure. Save to file like =nat64_cfg.sh=. Don't forget to run =chmod +x= on it.
 #+begin_src shell
 #!/bin/sh
-yanet-cli forward l2-enable --mod=forward0 --src 0 --dst 1
-yanet-cli forward l2-enable --mod=forward0 --src 1 --dst 0
+yanet-cli forward l2-enable --cfg=forward0 --instance 0 --src 0 --dst 1
+yanet-cli forward l2-enable --cfg=forward0 --instance 0 --src 1 --dst 0
 
-yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net $IP4/32
-yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net $IP6/128
-yanet-cli forward l3-add --mod=forward0 --src 0 --dst 1 --net ff02::/16
+yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 0 --dst 1 --net $IP4/32
+yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 0 --dst 1 --net $IP6/128
+yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 0 --dst 1 --net ff02::/16
 
-yanet-cli forward l3-add --mod=forward0 --src 1 --dst 0 --net 0.0.0.0/0
-yanet-cli forward l3-add --mod=forward0 --src 1 --dst 0 --net ::/0
+yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 1 --dst 0 --net 0.0.0.0/0
+yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 1 --dst 0 --net ::/0
 
-yanet-cli route insert --mod route0 --via $DEFGW6 ::/0
+yanet-cli route insert --cfg route0 --via $DEFGW6 ::/0
 
-yanet-cli nat64 prefix add --prefix $NAT64_PREFIX --mod nat0
+yanet-cli nat64 prefix add --mod nat0 --prefix $NAT64_PREFIX
 yanet-cli nat64 mapping add --mod nat0 --ipv4 <ipv4> --ipv6 <ipv6> --prefix-index 0
 yanet-cli nat64 mtu --mod nat0 --ipv4-mtu 1450 --ipv6-mtu 6950
 
@@ -178,7 +178,7 @@ yanet-cli pipeline assign --instance=0 --device=0 --pipelines nat64:1
 
 # tmp hack for resolve neighbors
 sleep 3
-yanet-cli route insert --mod route0 --via $DEFGW6 ::/0
-yanet-cli route insert --mod route0 --via $DEFGW4 0.0.0.0/0
+yanet-cli route insert --cfg route0 --instance 0 --via $DEFGW6 ::/0
+yanet-cli route insert --cfg route0 --instance 0 --via $DEFGW4 0.0.0.0/0
 
 #+end_src

@@ -7,16 +7,26 @@ use ptree::TreeBuilder;
 use tonic::transport::Channel;
 
 use code::{
-    AddPrefixesRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest,
-    ShowConfigRequest, ShowConfigResponse, TargetModule, dscp_service_client::DscpServiceClient,
+    AddPrefixesRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest, ShowConfigRequest,
+    ShowConfigResponse, dscp_service_client::DscpServiceClient,
 };
+use commonpb::TargetModule;
 use ync::logging;
+
+use crate::code::ListConfigsRequest;
 
 #[allow(non_snake_case)]
 pub mod code {
     use serde::Serialize;
 
     tonic::include_proto!("dscppb");
+}
+
+#[allow(non_snake_case)]
+pub mod commonpb {
+    use serde::Serialize;
+
+    tonic::include_proto!("commonpb");
 }
 
 /// DSCP module for packet marking.
@@ -45,8 +55,11 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "mod", short)]
-    pub module_name: String,
+    #[arg(long = "cfg", short)]
+    pub config_name: Option<String>,
+    /// Indices of dataplane instances from which configurations should be retrieved.
+    #[arg(long, short, required = false)]
+    pub instances: Vec<u32>,
     /// Output format.
     #[clap(long, value_enum, default_value_t = OutputFormat::Tree)]
     pub format: OutputFormat,
@@ -55,47 +68,41 @@ pub struct ShowConfigCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct AddPrefixesCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "mod", short)]
-    pub module_name: String,
-    /// Dataplane instances where the changes should be applied, optional.
-    ///
-    /// If no instances specified, the route will be applied to all instances.
-    #[arg(long)]
-    pub instances: Option<Vec<u32>>,
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
+    /// Dataplane instances where the changes should be applied.
+    #[arg(long, short, required = true)]
+    pub instances: Vec<u32>,
 
     /// Prefix to be added to the input filter of the DSCP module.
-    #[arg(long, short)]
+    #[arg(long, short, required = true)]
     pub prefix: Vec<IpNet>,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct RemovePrefixesCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "mod", short)]
-    pub module_name: String,
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
 
-    /// Dataplane instances where the changes should be applied, optional.
-    ///
-    /// If no instances specified, the route will be applied to all instances.
-    #[arg(long)]
-    pub instances: Option<Vec<u32>>,
+    /// Dataplane instances where the changes should be applied.
+    #[arg(long, short, required = true)]
+    pub instances: Vec<u32>,
 
     /// Prefix to be removed from the input filter of the DSCP module.
-    #[arg(long, short)]
+    #[arg(long, short, required = true)]
     pub prefix: Vec<IpNet>,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct SetDscpMarkingCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "mod", short)]
-    pub module_name: String,
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
 
-    /// Dataplane instances where the changes should be applied, optional.
-    ///
-    /// If no instances specified, the route will be applied to all instances.
-    #[arg(long)]
-    pub instances: Option<Vec<u32>>,
+    /// Dataplane instances where the changes should be applied.
+    #[arg(long, short, required = true)]
+    pub instances: Vec<u32>,
 
     /// DSCP marking flag: 0 - Never, 1 - Default (only if original DSCP is 0), 2 - Always
     #[arg(long)]
@@ -149,46 +156,66 @@ impl DscpService {
     }
 
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowConfigRequest {
-            target: Some(TargetModule {
-                module_name: cmd.module_name.to_owned(),
-                instances: Vec::new(),
-            }),
+        let Some(name) = cmd.config_name else {
+            self.print_config_list().await?;
+            return Ok(());
         };
-        let response = self.client.show_config(request).await?.into_inner();
+
+        let mut instances = cmd.instances;
+        if instances.is_empty() {
+            instances = self.get_dataplane_instances().await?;
+        }
+        let mut configs = Vec::new();
+        for instance in instances {
+            let request = ShowConfigRequest {
+                target: Some(TargetModule {
+                    config_name: name.to_owned(),
+                    dataplane_instance: instance,
+                }),
+            };
+            log::trace!("show config request on dataplane instance {instance}: {request:?}");
+            let response = self.client.show_config(request).await?.into_inner();
+            log::debug!("show config response on dataplane instance {instance}: {response:?}");
+            configs.push(response);
+        }
+
         match cmd.format {
-            OutputFormat::Json => print_json(&response)?,
-            OutputFormat::Tree => print_tree(&response)?,
+            OutputFormat::Json => print_json(configs)?,
+            OutputFormat::Tree => print_tree(configs)?,
         }
 
         Ok(())
     }
 
     pub async fn add_prefixes(&mut self, cmd: AddPrefixesCmd) -> Result<(), Box<dyn Error>> {
-        let request = AddPrefixesRequest {
-            target: Some(TargetModule {
-                module_name: cmd.module_name,
-                instances: cmd.instances.unwrap_or_default(),
-            }),
-            prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
-        };
-        log::trace!("AddPrefixesRequest: {:?}", request);
-        let response = self.client.add_prefixes(request).await?.into_inner();
-        log::debug!("AddPrefixesResponse: {:?}", response);
+        for instance in cmd.instances {
+            let request = AddPrefixesRequest {
+                target: Some(TargetModule {
+                    config_name: cmd.config_name.clone(),
+                    dataplane_instance: instance,
+                }),
+                prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
+            };
+            log::trace!("AddPrefixesRequest: {request:?}");
+            let response = self.client.add_prefixes(request).await?.into_inner();
+            log::debug!("AddPrefixesResponse: {response:?}");
+        }
         Ok(())
     }
 
     pub async fn remove_prefixes(&mut self, cmd: RemovePrefixesCmd) -> Result<(), Box<dyn Error>> {
-        let request = RemovePrefixesRequest {
-            target: Some(TargetModule {
-                module_name: cmd.module_name,
-                instances: cmd.instances.unwrap_or_default(),
-            }),
-            prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
-        };
-        log::trace!("RemovePrefixesRequest: {:?}", request);
-        let response = self.client.remove_prefixes(request).await?.into_inner();
-        log::debug!("RemovePrefixesResponse: {:?}", response);
+        for instance in cmd.instances {
+            let request = RemovePrefixesRequest {
+                target: Some(TargetModule {
+                    config_name: cmd.config_name.clone(),
+                    dataplane_instance: instance,
+                }),
+                prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
+            };
+            log::trace!("RemovePrefixesRequest: {request:?}");
+            let response = self.client.remove_prefixes(request).await?.into_inner();
+            log::debug!("RemovePrefixesResponse: {response:?}");
+        }
         Ok(())
     }
 
@@ -203,49 +230,68 @@ impl DscpService {
             return Err("Invalid mark value (must be 0-63)".into());
         }
 
-        let request = SetDscpMarkingRequest {
-            target: Some(TargetModule {
-                module_name: cmd.module_name,
-                instances: cmd.instances.unwrap_or_default(),
-            }),
-            dscp_config: Some(DscpConfig {
-                flag: cmd.flag,
-                mark: cmd.mark,
-            }),
-        };
-        log::trace!("SetDscpMarkingRequest: {:?}", request);
-        let response = self.client.set_dscp_marking(request).await?.into_inner();
-        log::debug!("SetDscpMarkingResponse: {:?}", response);
+        for instance in cmd.instances {
+            let request = SetDscpMarkingRequest {
+                target: Some(TargetModule {
+                    config_name: cmd.config_name.clone(),
+                    dataplane_instance: instance,
+                }),
+                dscp_config: Some(DscpConfig { flag: cmd.flag, mark: cmd.mark }),
+            };
+            log::trace!("SetDscpMarkingRequest: {request:?}");
+            let response = self.client.set_dscp_marking(request).await?.into_inner();
+            log::debug!("SetDscpMarkingResponse: {response:?}");
+        }
+        Ok(())
+    }
+
+    async fn get_dataplane_instances(&mut self) -> Result<Vec<u32>, Box<dyn Error>> {
+        let request = ListConfigsRequest {};
+        let response = self.client.list_configs(request).await?.into_inner();
+        Ok(response.instance_configs.iter().map(|c| c.instance).collect())
+    }
+
+    async fn print_config_list(&mut self) -> Result<(), Box<dyn Error>> {
+        let request = ListConfigsRequest {};
+        let response = self.client.list_configs(request).await?.into_inner();
+        let mut tree = TreeBuilder::new("List DSCP Configs".to_string());
+        for instance_config in response.instance_configs {
+            tree.begin_child(format!("Instance {}", instance_config.instance));
+            for config in instance_config.configs {
+                tree.add_empty_child(config);
+            }
+        }
+        let tree = tree.build();
+        ptree::print_tree(&tree)?;
         Ok(())
     }
 }
 
-pub fn print_json(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
-    println!("{}", serde_json::to_string(resp)?);
+pub fn print_json(configs: Vec<ShowConfigResponse>) -> Result<(), Box<dyn Error>> {
+    println!("{}", serde_json::to_string(&configs)?);
     Ok(())
 }
 
-pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
-    let mut tree = TreeBuilder::new("DSCP Configs".to_string());
+pub fn print_tree(configs: Vec<ShowConfigResponse>) -> Result<(), Box<dyn Error>> {
+    let mut tree = TreeBuilder::new("View DSCP Configs".to_string());
 
-    for config in &resp.configs {
+    for config in &configs {
         tree.begin_child(format!("Instance {}", config.instance));
 
-        if let Some(dscp_config) = &config.dscp_config {
-            tree.begin_child("DSCP Marking".to_string());
-            tree.add_empty_child(format!("Flag: {}", flag_to_string(dscp_config.flag)));
-            tree.add_empty_child(format!(
-                "Mark: {} (0x{:02x})",
-                dscp_config.mark, dscp_config.mark
-            ));
+        if let Some(config) = &config.config {
+            if let Some(dscp_config) = config.dscp_config {
+                tree.begin_child("DSCP Marking".to_string());
+                tree.add_empty_child(format!("Flag: {}", flag_to_string(dscp_config.flag)));
+                tree.add_empty_child(format!("Mark: {} (0x{:02x})", dscp_config.mark, dscp_config.mark));
+                tree.end_child();
+            }
+
+            tree.begin_child("Prefixes".to_string());
+            for (idx, prefix) in config.prefixes.iter().enumerate() {
+                tree.add_empty_child(format!("{idx}: {prefix}"));
+            }
             tree.end_child();
         }
-
-        tree.begin_child("Prefixes".to_string());
-        for (idx, prefix) in config.prefixes.iter().enumerate() {
-            tree.add_empty_child(format!("{}: {}", idx, prefix));
-        }
-        tree.end_child();
 
         tree.end_child();
     }
@@ -261,6 +307,6 @@ fn flag_to_string(flag: u32) -> String {
         0 => "Never".to_string(),
         1 => "Default (only if original DSCP is 0)".to_string(),
         2 => "Always".to_string(),
-        _ => format!("Unknown ({})", flag),
+        _ => format!("Unknown ({flag})"),
     }
 }

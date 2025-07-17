@@ -44,7 +44,7 @@ impl Display for Age {
             Self(timestamp) => now.duration_since(*timestamp).unwrap_or_default(),
         };
 
-        write!(f, "{:.2?}", duration)
+        write!(f, "{duration:.2?}")
     }
 }
 

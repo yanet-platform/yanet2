@@ -59,7 +59,6 @@ pub struct PipelineModuleCmd {
     pub module_name: String,
 }
 
-
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
@@ -78,14 +77,18 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
     match cmd.mode {
         ModeCmd::Pipeline(cmd) => service.show_pipeline(cmd.instance, cmd.pipeline_name).await?,
-        ModeCmd::PipelineModule(cmd) => service.show_pipeline_module(cmd.instance, cmd.pipeline_name, cmd.module_type, cmd.module_name).await?,
+        ModeCmd::PipelineModule(cmd) => {
+            service
+                .show_pipeline_module(cmd.instance, cmd.pipeline_name, cmd.module_type, cmd.module_name)
+                .await?
+        }
     }
 
     Ok(())
 }
 
 pub struct CountersService {
-    client:CountersServiceClient<Channel>,
+    client: CountersServiceClient<Channel>,
 }
 
 impl CountersService {
@@ -104,13 +107,19 @@ impl CountersService {
         Ok(())
     }
 
-    pub async fn show_pipeline_module(&mut self, instance: u32, pipeline_name: String, module_type: String, module_name: String) -> Result<(), Box<dyn Error>> {
+    pub async fn show_pipeline_module(
+        &mut self,
+        instance: u32,
+        pipeline_name: String,
+        module_type: String,
+        module_name: String,
+    ) -> Result<(), Box<dyn Error>> {
         let request = PipelineModuleCountersRequest {
-                dp_instance: instance,
-                pipeline: pipeline_name,
-                module_type: module_type,
-                module_name: module_name,
-            };
+            dp_instance: instance,
+            pipeline: pipeline_name,
+            module_type,
+            module_name,
+        };
         let response = self.client.pipeline_module(request).await?;
         println!("{}", serde_json::to_string(response.get_ref())?);
         Ok(())

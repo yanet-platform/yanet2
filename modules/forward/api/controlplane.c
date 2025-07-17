@@ -260,7 +260,7 @@ forward_module_topology_device_count(struct agent *agent) {
 }
 
 int
-forward_module_delete(struct cp_module *cp_module) {
+forward_module_config_delete(struct cp_module *cp_module) {
 	return agent_delete_module(
 		cp_module->agent, "forward", cp_module->name
 	);

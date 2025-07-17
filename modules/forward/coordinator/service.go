@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	dp "github.com/yanet-platform/yanet2/common/go/dataplane"
+	commonpb "github.com/yanet-platform/yanet2/common/proto"
 	"github.com/yanet-platform/yanet2/coordinator/coordinatorpb"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
@@ -80,9 +80,9 @@ func (m *ModuleService) setupConfig(
 	client := forwardpb.NewForwardServiceClient(conn)
 
 	// Create a target configuration for the ForwardService
-	target := &forwardpb.TargetModule{
-		ModuleName: configName,
-		Instances:  uint32(dp.NewWithOneBitSet(instance)),
+	target := &commonpb.TargetModule{
+		ConfigName:        configName,
+		DataplaneInstance: instance,
 	}
 
 	for _, forward := range config.L2Forwards {
