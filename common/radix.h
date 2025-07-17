@@ -46,9 +46,6 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 			memory_context, sizeof(radix_page_t) * RADIX_CHUNK_SIZE
 		);
 
-		// 0x7ffff7b64000
-		// 0x7fffe7b64040
-
 		if (new_chunk == NULL)
 			return -1;
 
@@ -67,6 +64,7 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 			return -1;
 		}
 
+		// Set correct relative addresses
 		for (size_t i = 0; i < old_chunk_count; ++i) {
 			radix_page_t *page = ADDR_OF(&old_pages[i]);
 			SET_OFFSET_OF(&new_pages[i], page);
@@ -78,15 +76,13 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 		memory_bfree(
 			memory_context,
 			old_pages,
-			old_chunk_count * sizeof(*new_pages)
+			old_chunk_count * sizeof(radix_page_t *)
 		);
 	}
 	if (page_idx != NULL)
 		*page_idx = radix->page_count;
 	radix_page_t *page = radix_page(radix, radix->page_count);
-	for (size_t i = 0; i < 256; ++i) {
-		(*page)[i] = RADIX_VALUE_INVALID;
-	}
+	memset(page, 0xff, sizeof(radix_page_t));
 	radix->page_count += 1;
 	return 0;
 }
