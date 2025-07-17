@@ -4,6 +4,8 @@
 #include "common/registry.h"
 #include "helper.h"
 
+////////////////////////////////////////////////////////////////////////////////
+
 // Represents vertex in the classfication tree
 struct filter_vertex {
 	struct value_registry registry;
@@ -22,8 +24,8 @@ struct filter_vertex {
 	uint32_t slots[2];
 
 	// Data structure which allows to
-	// lookup packet classifier corresponds to
-	// leaf.x
+	// lookup classifier of packet attribute
+	// corresponds to leaf.
 	void *data;
 };
 
@@ -43,6 +45,8 @@ struct filter {
 
 	struct memory_context memory_context;
 };
+
+////////////////////////////////////////////////////////////////////////////////
 
 // Allows to initialize filter with provided attributes and actions.
 int
@@ -64,14 +68,14 @@ filter_query(
 	uint32_t *count
 );
 
+// Allows to free filter memory.
 void
 filter_free(struct filter *filter);
 
 ////////////////////////////////////////////////////////////////////////////////
 
 #define FILTER_INIT(filter, rules, rule_count, ctx, res, ...)                  \
-	static const struct filter_attribute *__filter_attrs[] = {__VA_ARGS__  \
-	};                                                                     \
+	const struct filter_attribute *__filter_attrs[] = {__VA_ARGS__};       \
 	do {                                                                   \
 		if (sizeof(__filter_attrs) == 0) {                             \
 			*(res) = -1;                                           \

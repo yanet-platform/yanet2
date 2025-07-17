@@ -7,6 +7,8 @@
 #include <rte_ip.h>
 #include <rte_mbuf.h>
 
+////////////////////////////////////////////////////////////////////////////////
+
 typedef void (*action_get_net4_func)(
 	const struct filter_rule *action, struct net4 **net, uint32_t *count
 );
@@ -168,6 +170,9 @@ error:
 	return -1;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+// Allows to initialize attribute for IPv4 source address.
 static inline int
 init_net4_src(
 	struct value_registry *registry,
@@ -188,6 +193,7 @@ init_net4_src(
 	);
 }
 
+// Allows to lookup classifier for packet IPv4 source address.
 static inline uint32_t
 lookup_net4_src(struct packet *packet, void *data) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -198,6 +204,7 @@ lookup_net4_src(struct packet *packet, void *data) {
 	return lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->src_addr);
 }
 
+// Allows to initialize attribute for IPv4 destination address.
 static inline int
 init_net4_dst(
 	struct value_registry *registry,
@@ -218,6 +225,7 @@ init_net4_dst(
 	);
 }
 
+// Allows to lookup classifier for packet IPv4 destination address.
 static inline uint32_t
 lookup_net4_dst(struct packet *packet, void *data) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -231,6 +239,7 @@ lookup_net4_dst(struct packet *packet, void *data) {
 	return lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->dst_addr);
 }
 
+// Allows to free data to classification.
 static inline void
 free_net4(void *data, struct memory_context *memory_context) {
 	(void)memory_context;
