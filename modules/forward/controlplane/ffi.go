@@ -133,7 +133,7 @@ func topologyDeviceCount(agent *ffi.Agent) uint64 {
 	return uint64(C.forward_module_topology_device_count((*C.struct_agent)(agent.AsRawPtr())))
 }
 
-func DeleteModule(m *ForwardService, configName string, instance uint32) bool {
+func DeleteConfig(m *ForwardService, configName string, instance uint32) bool {
 	cTypeName := C.CString(agentName)
 	defer C.free(unsafe.Pointer(cTypeName))
 

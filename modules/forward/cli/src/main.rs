@@ -79,6 +79,9 @@ pub struct DeleteCmd {
     /// The name of the module to delete
     #[arg(long = "cfg", short)]
     pub config_name: String,
+    /// Dataplane instances from which to delete config
+    #[arg(long, short, required = true)]
+    pub instances: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -174,14 +177,16 @@ impl ForwardService {
         Ok(())
     }
 
-    pub async fn delete_module(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
-        let request = DeleteConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name,
-                dataplane_instance: 0,
-            }),
-        };
-        self.client.delete_config(request).await?;
+    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
+        for instance in cmd.instances {
+            let request = DeleteConfigRequest {
+                target: Some(TargetModule {
+                    config_name: cmd.config_name.clone(),
+                    dataplane_instance: instance,
+                }),
+            };
+            self.client.delete_config(request).await?;
+        }
         Ok(())
     }
 
@@ -266,7 +271,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
     match cmd.mode {
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::Delete(cmd) => service.delete_module(cmd).await,
+        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::L2Enable(cmd) => service.enable_l2_forward(cmd).await,
         ModeCmd::L3Add(cmd) => service.add_l3_forward(cmd).await,
         ModeCmd::L3Remove(cmd) => service.remove_l3_forward(cmd).await,

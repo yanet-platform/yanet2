@@ -245,12 +245,12 @@ func (m *ForwardService) RemoveL3Forward(ctx context.Context, req *forwardpb.Rem
 	return &forwardpb.RemoveL3ForwardResponse{}, nil
 }
 
-func (m *ForwardService) DeleteModule(ctx context.Context, req *forwardpb.DeleteConfigRequest) (*forwardpb.DeleteConfigResponse, error) {
+func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.DeleteConfigRequest) (*forwardpb.DeleteConfigResponse, error) {
 	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, err
 	}
-	deleted := DeleteModule(m, name, inst)
+	deleted := DeleteConfig(m, name, inst)
 
 	m.log.Infow("deleted module config",
 		zap.String("name", name),
