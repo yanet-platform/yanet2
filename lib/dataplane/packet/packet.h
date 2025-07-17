@@ -125,12 +125,6 @@ packet_to_mbuf(const struct packet *packet) {
 	return packet->mbuf;
 }
 
-uint16_t
-packet_src_port(const struct packet *packet);
-
-uint16_t
-packet_dst_port(const struct packet *packet);
-
 struct packet *
 mbuf_to_packet(struct rte_mbuf *mbuf);
 

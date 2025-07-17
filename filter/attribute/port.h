@@ -4,6 +4,56 @@
 #include "common/registry.h"
 #include "dataplane/packet/packet.h"
 
+#include <rte_ip.h>
+#include <rte_udp.h>
+#include <rte_tcp.h>
+
+static inline uint16_t
+packet_src_port(const struct packet *packet) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	if (packet->transport_header.type == IPPROTO_TCP) {
+		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_tcp_hdr *,
+			packet->transport_header.offset
+		);
+		return rte_be_to_cpu_16(tcp_hdr->src_port);
+	} else if (packet->transport_header.type == IPPROTO_UDP) {
+		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_udp_hdr *,
+			packet->transport_header.offset
+		);
+		return rte_be_to_cpu_16(udp_hdr->src_port);
+	} else {
+		// TODO
+		return 0;
+	}
+}
+
+static inline uint16_t
+packet_dst_port(const struct packet *packet) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	if (packet->transport_header.type == IPPROTO_TCP) {
+		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_tcp_hdr *,
+			packet->transport_header.offset
+		);
+		return rte_be_to_cpu_16(tcp_hdr->dst_port);
+	} else if (packet->transport_header.type == IPPROTO_UDP) {
+		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_udp_hdr *,
+			packet->transport_header.offset
+		);
+		return rte_be_to_cpu_16(udp_hdr->dst_port);
+	} else {
+		// TODO
+		return 0;
+	}
+}
+
 // src port
 static inline uint32_t
 lookup_port_src(struct packet *packet, void *data) {
