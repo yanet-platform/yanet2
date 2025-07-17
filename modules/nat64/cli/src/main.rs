@@ -74,7 +74,7 @@ pub enum MappingCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
-    /// The name of the module to operate on.
+    /// The name of the config to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: Option<String>,
     /// Indices of dataplane instances from which configurations should be retrieved.
@@ -87,7 +87,7 @@ pub struct ShowConfigCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct AddPrefixCmd {
-    /// The name of the module to operate on.
+    /// The name of the config to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
     /// Dataplane instances where changes should be applied.
@@ -100,7 +100,7 @@ pub struct AddPrefixCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct AddMappingCmd {
-    /// The name of the module to operate on.
+    /// The name of the config to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
     /// Dataplane instances where changes should be applied.
@@ -119,7 +119,7 @@ pub struct AddMappingCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct MtuCmd {
-    /// The name of the module to operate on.
+    /// The name of the config to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
     /// Dataplane instances where changes should be applied.
@@ -307,7 +307,7 @@ impl NAT64Service {
 /// Command for setting drop_unknown flags
 #[derive(Debug, Clone, Parser)]
 pub struct DropCmd {
-    /// The name of the module to operate on.
+    /// The name of the config to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
     /// Dataplane instances where changes should be applied.
