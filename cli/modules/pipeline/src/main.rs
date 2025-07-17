@@ -5,8 +5,8 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{
-    pipeline_service_client::PipelineServiceClient, AssignPipelinesRequest, DevicePipeline, DevicePipelines,
-    PipelineChain, PipelineChainNode, UpdatePipelinesRequest, DeletePipelineRequest,
+    pipeline_service_client::PipelineServiceClient, AssignPipelinesRequest, DeletePipelineRequest, DevicePipeline,
+    DevicePipelines, PipelineChain, PipelineChainNode, UpdatePipelinesRequest,
 };
 use tonic::transport::Channel;
 use ync::logging;

@@ -165,7 +165,10 @@ impl RouteService {
 
         for inst in instances {
             let request = ShowRoutesRequest {
-                target: Some(TargetModule { config_name: name.clone(), dataplane_instance: inst }),
+                target: Some(TargetModule {
+                    config_name: name.clone(),
+                    dataplane_instance: inst,
+                }),
                 ipv4_only: cmd.ipv4,
                 ipv6_only: cmd.ipv6,
             };

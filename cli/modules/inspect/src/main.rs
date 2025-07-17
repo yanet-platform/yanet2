@@ -94,7 +94,7 @@ impl InspectService {
 
         for info in &response.instance_info {
             tree.begin_child(format!("Instance {}", info.instance_idx));
-            
+
             tree.begin_child(format!("Attached to NUMA {}", info.numa_idx));
             tree.end_child();
 

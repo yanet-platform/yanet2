@@ -203,9 +203,7 @@ pub fn pdump_write(
         };
         if let Some(limit) = packet_limit {
             if count >= limit {
-                log::debug!(
-                    "stopping writer because the packet capture limit has been reached: {limit}"
-                );
+                log::debug!("stopping writer because the packet capture limit has been reached: {limit}");
 
                 break;
             }
