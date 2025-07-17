@@ -75,7 +75,7 @@ pub struct AddPrefixesCmd {
     pub instances: Vec<u32>,
 
     /// Prefix to be added to the input filter of the DSCP module.
-    #[arg(long, short)]
+    #[arg(long, short, required = true)]
     pub prefix: Vec<IpNet>,
 }
 
@@ -90,7 +90,7 @@ pub struct RemovePrefixesCmd {
     pub instances: Vec<u32>,
 
     /// Prefix to be removed from the input filter of the DSCP module.
-    #[arg(long, short)]
+    #[arg(long, short, required = true)]
     pub prefix: Vec<IpNet>,
 }
 
@@ -196,9 +196,9 @@ impl DscpService {
                 }),
                 prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
             };
-            log::trace!("AddPrefixesRequest: {:?}", request);
+            log::trace!("AddPrefixesRequest: {request:?}");
             let response = self.client.add_prefixes(request).await?.into_inner();
-            log::debug!("AddPrefixesResponse: {:?}", response);
+            log::debug!("AddPrefixesResponse: {response:?}");
         }
         Ok(())
     }
@@ -212,9 +212,9 @@ impl DscpService {
                 }),
                 prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
             };
-            log::trace!("RemovePrefixesRequest: {:?}", request);
+            log::trace!("RemovePrefixesRequest: {request:?}");
             let response = self.client.remove_prefixes(request).await?.into_inner();
-            log::debug!("RemovePrefixesResponse: {:?}", response);
+            log::debug!("RemovePrefixesResponse: {response:?}");
         }
         Ok(())
     }
@@ -238,9 +238,9 @@ impl DscpService {
                 }),
                 dscp_config: Some(DscpConfig { flag: cmd.flag, mark: cmd.mark }),
             };
-            log::trace!("SetDscpMarkingRequest: {:?}", request);
+            log::trace!("SetDscpMarkingRequest: {request:?}");
             let response = self.client.set_dscp_marking(request).await?.into_inner();
-            log::debug!("SetDscpMarkingResponse: {:?}", response);
+            log::debug!("SetDscpMarkingResponse: {response:?}");
         }
         Ok(())
     }
@@ -254,7 +254,7 @@ impl DscpService {
     async fn print_config_list(&mut self) -> Result<(), Box<dyn Error>> {
         let request = ListConfigsRequest {};
         let response = self.client.list_configs(request).await?.into_inner();
-        let mut tree = TreeBuilder::new("DSCP Configs".to_string());
+        let mut tree = TreeBuilder::new("List DSCP Configs".to_string());
         for instance_config in response.instance_configs {
             tree.begin_child(format!("Instance {}", instance_config.instance));
             for config in instance_config.configs {
@@ -273,7 +273,7 @@ pub fn print_json(configs: Vec<ShowConfigResponse>) -> Result<(), Box<dyn Error>
 }
 
 pub fn print_tree(configs: Vec<ShowConfigResponse>) -> Result<(), Box<dyn Error>> {
-    let mut tree = TreeBuilder::new("DSCP Configs".to_string());
+    let mut tree = TreeBuilder::new("View DSCP Configs".to_string());
 
     for config in &configs {
         tree.begin_child(format!("Instance {}", config.instance));
@@ -288,7 +288,7 @@ pub fn print_tree(configs: Vec<ShowConfigResponse>) -> Result<(), Box<dyn Error>
 
             tree.begin_child("Prefixes".to_string());
             for (idx, prefix) in config.prefixes.iter().enumerate() {
-                tree.add_empty_child(format!("{}: {}", idx, prefix));
+                tree.add_empty_child(format!("{idx}: {prefix}"));
             }
             tree.end_child();
         }
@@ -307,6 +307,6 @@ fn flag_to_string(flag: u32) -> String {
         0 => "Never".to_string(),
         1 => "Default (only if original DSCP is 0)".to_string(),
         2 => "Always".to_string(),
-        _ => format!("Unknown ({})", flag),
+        _ => format!("Unknown ({flag})"),
     }
 }
