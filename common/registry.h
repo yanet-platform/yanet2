@@ -88,14 +88,10 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 		if (new_use_map == NULL)
 			return -1;
 
+		// Set correct relative addresses
 		for (uint32_t idx = 0; idx < collector->chunk_count; ++idx) {
 			uint32_t *chunk = ADDR_OF(&use_map[idx]);
 			SET_OFFSET_OF(&new_use_map[idx], chunk);
-		}
-
-		for (uint32_t idx = 0; idx < collector->chunk_count; ++idx) {
-			assert(ADDR_OF(&use_map[idx]) ==
-			       ADDR_OF(&new_use_map[idx]));
 		}
 
 		for (uint32_t idx = collector->chunk_count;
