@@ -2,10 +2,16 @@ syntax = "proto3";
 
 package forwardpb;
 
+import "common/proto/target.proto";
+
 option go_package = "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb;forwardpb";
 
 // ForwardService is a controlplane service for forwarding module.
 service ForwardService {
+	// ListConfigs returns all forward module configurations of all
+	// dataplane instances.
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
 	// ShowConfig returns the current configuration for the forward module.
 	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
@@ -21,25 +27,9 @@ service ForwardService {
 	rpc RemoveL3Forward(RemoveL3ForwardRequest)
 		returns (RemoveL3ForwardResponse);
 
-	// Allows to delete forward module if it is not referenced
+	// Allows to delete forward config if it is not referenced
 	// by any pipeline.
-	rpc DeleteModule(DeleteModuleRequest) returns (DeleteModuleResponse);
-}
-
-// TargetModule request for operating on a specific target module.
-message TargetModule {
-	// ModuleName is the name of the module for which to reload the
-	// configuration.
-	string module_name = 1;
-	// Instances specifies a bitmap of dataplane instances that should be
-	// affected.
-	uint32 instances = 2;
-}
-
-// ShowConfigResponse retrieves the runtime configuration for the forward
-// module.
-message ShowConfigRequest {
-	TargetModule target = 1;
+	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
 }
 
 message L3ForwardEntry {
@@ -53,20 +43,40 @@ message ForwardDeviceConfig {
 	repeated L3ForwardEntry forwards = 3;
 }
 
-message InstanceConfig {
+message Config {
+	repeated ForwardDeviceConfig devices = 1;
+}
+
+// Represents config names of dataplane instances
+message InstanceConfigs {
+	// Dataplane instance
 	uint32 instance = 1;
-	repeated ForwardDeviceConfig devices = 2;
+	repeated string configs = 2;
+}
+
+message ListConfigsRequest {
+}
+
+// ListConfigsResponse contains existing configurations per dataplane instance.
+message ListConfigsResponse {
+	repeated InstanceConfigs instance_configs = 1;
+}
+
+// ShowConfigResponse retrieves the runtime configuration for the forward
+// module.
+message ShowConfigRequest {
+	commonpb.TargetModule target = 1;
 }
 
 // ShowConfigResponse contains the configuration details of the forward module.
 message ShowConfigResponse {
-	string name = 1;
-	repeated InstanceConfig configs = 2;
+	uint32 instance = 1;
+	Config config = 2;
 }
 
 // L2ForwardEnableRequest enables Layer 2 forwarding between specified devices.
 message L2ForwardEnableRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	uint32 src_dev_id = 2;
 	uint32 dst_dev_id = 3;
 }
@@ -78,7 +88,7 @@ message L2ForwardEnableResponse {
 // should be added for the device identified by the device ID. If an existing
 // forward rule is present, it will be replaced.
 message AddL3ForwardRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	uint32 src_dev_id = 2;
 	L3ForwardEntry forward = 3;
 }
@@ -89,7 +99,7 @@ message AddL3ForwardResponse {
 // RemoveL3ForwardRequest specifies the device ID within the target module
 // from which to remove the forward entry for the specified network.
 message RemoveL3ForwardRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	uint32 src_dev_id = 2;
 	string network = 3;
 }
@@ -97,15 +107,13 @@ message RemoveL3ForwardRequest {
 message RemoveL3ForwardResponse {
 }
 
-// Delete module with specified name.
-message DeleteModuleRequest {
+// Delete config with specified name.
+message DeleteConfigRequest {
 	// Specifies module name and
-	// instances of forward agent to delete.
-	TargetModule target = 1;
+	// dataplane instance of forward agent to delete.
+	commonpb.TargetModule target = 1;
 }
 
-message DeleteModuleResponse {
-	// Specifies bitmap of dataplane instances,
-	// for which modules were successfully deleted.
-	uint32 deleted = 1;
+message DeleteConfigResponse {
+	bool deleted = 1;
 }
