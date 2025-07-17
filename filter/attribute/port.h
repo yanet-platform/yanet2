@@ -5,8 +5,8 @@
 #include "dataplane/packet/packet.h"
 
 #include <rte_ip.h>
-#include <rte_udp.h>
 #include <rte_tcp.h>
+#include <rte_udp.h>
 
 static inline uint16_t
 packet_src_port(const struct packet *packet) {
