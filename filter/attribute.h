@@ -38,26 +38,26 @@ struct filter_attribute {
 	attr_free_func free_func;
 };
 
-const static struct filter_attribute attribute_port_src = {
+static const struct filter_attribute attribute_port_src = {
 	init_port_src, lookup_port_src, free_port
 };
 
 // dst port
-const static struct filter_attribute attribute_port_dst = {
+static const struct filter_attribute attribute_port_dst = {
 	init_port_dst, lookup_port_dst, free_port
 };
 
 // proto
-const static struct filter_attribute attribute_proto = {
+static const struct filter_attribute attribute_proto = {
 	init_proto, lookup_proto, free_proto
 };
 
 // IPv4
-const static struct filter_attribute attribute_net4_src = {
+static const struct filter_attribute attribute_net4_src = {
 	init_net4_src, lookup_net4_src, free_net4
 };
 
-const static struct filter_attribute attribute_net4_dst = {
+static const struct filter_attribute attribute_net4_dst = {
 	init_net4_dst, lookup_net4_dst, free_net4
 };
 
@@ -65,6 +65,6 @@ const static struct filter_attribute attribute_net4_dst = {
 // TODO
 
 // vlan
-const static struct filter_attribute attribute_vlan = {
+static const struct filter_attribute attribute_vlan = {
 	init_vlan, lookup_vlan, free_vlan
 };

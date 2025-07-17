@@ -28,12 +28,12 @@ struct attr {
 	free_cb free;
 };
 
-const static struct attr a1 = {my_cb, my_free_cb};
-const static struct attr a2 = {my_cb1, my_free_cb1};
+static const struct attr a1 = {my_cb, my_free_cb};
+static const struct attr a2 = {my_cb1, my_free_cb1};
 
-// const static struct attr *attrs[] = {&a1, &a2};
+// static const struct attr *attrs[] = {&a1, &a2};
 
-#define INIT(...) const static struct attr *__attrs[] = {__VA_ARGS__};
+#define INIT(...) static const struct attr *__attrs[] = {__VA_ARGS__};
 
 #define QUERY(x, y)                                                            \
 	do {                                                                   \
