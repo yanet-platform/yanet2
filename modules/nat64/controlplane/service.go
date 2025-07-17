@@ -3,7 +3,6 @@ package nat64
 import (
 	"context"
 	"fmt"
-	"slices"
 	"sync"
 
 	"go.uber.org/zap"
@@ -54,26 +53,43 @@ func NewNAT64Service(agents []*ffi.Agent, log *zap.SugaredLogger) *NAT64Service 
 	}
 }
 
+func (s *NAT64Service) ListConfigs(ctx context.Context, req *nat64pb.ListConfigsRequest) (*nat64pb.ListConfigsResponse, error) {
+	response := &nat64pb.ListConfigsResponse{
+		InstanceConfigs: make([]*nat64pb.InstanceConfigs, len(s.agents)),
+	}
+	for inst := range s.agents {
+		response.InstanceConfigs[inst] = &nat64pb.InstanceConfigs{
+			Instance: uint32(inst),
+		}
+	}
+
+	// Lock instances store and module updates
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for key := range s.configs {
+		instConfig := response.InstanceConfigs[key.dataplaneInstance]
+		instConfig.Configs = append(instConfig.Configs, key.name)
+	}
+
+	return response, nil
+}
+
 func (s *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRequest) (*nat64pb.ShowConfigResponse, error) {
-	instances, err := s.getInstances(req.Target.Instances)
+	name, inst, err := req.GetTarget().Validate(uint32(len(s.agents)))
 	if err != nil {
 		return nil, err
 	}
 
+	key := instanceKey{name: name, dataplaneInstance: inst}
+	response := &nat64pb.ShowConfigResponse{Instance: inst}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	configs := make([]*nat64pb.InstanceConfig, 0)
-	for key, config := range s.configs {
-		// Skip if:
-		// - Dataplane instance id is not in the requested list
-		// - ModuleName is set and doesn't match current config
-		if !slices.Contains(instances, key.dataplaneInstance) || (req.Target.ModuleName != "" && key.name != req.Target.ModuleName) {
-			continue
-		}
-
-		instanceConfig := &nat64pb.InstanceConfig{
-			Instance: key.dataplaneInstance,
+	config := s.configs[key]
+	if config != nil {
+		response.Config = &nat64pb.Config{
 			Prefixes: make([]*nat64pb.Prefix, 0, len(config.Prefixes)),
 			Mappings: make([]*nat64pb.Mapping, 0, len(config.Mappings)),
 			Mtu: &nat64pb.MTUConfig{
@@ -83,32 +99,28 @@ func (s *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 		}
 
 		for _, prefix := range config.Prefixes {
-			instanceConfig.Prefixes = append(instanceConfig.Prefixes, &nat64pb.Prefix{
+			response.Config.Prefixes = append(response.Config.Prefixes, &nat64pb.Prefix{
 				Prefix: prefix,
 			})
 		}
 
 		for _, mapping := range config.Mappings {
-			instanceConfig.Mappings = append(instanceConfig.Mappings, &nat64pb.Mapping{
+			response.Config.Mappings = append(response.Config.Mappings, &nat64pb.Mapping{
 				Ipv4:        mapping.IPv4,
 				Ipv6:        mapping.IPv6,
 				PrefixIndex: mapping.PrefixIndex,
 			})
 		}
-
-		configs = append(configs, instanceConfig)
 	}
 
-	return &nat64pb.ShowConfigResponse{
-		Configs: configs,
-	}, nil
+	return response, nil
 }
 func (s *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequest) (*nat64pb.AddPrefixResponse, error) {
 	if len(req.Prefix) != 12 {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid prefix length: got %d, want 12", len(req.Prefix))
 	}
 
-	instances, err := s.getInstances(req.Target.Instances)
+	name, inst, err := req.GetTarget().Validate(uint32(len(s.agents)))
 	if err != nil {
 		return nil, err
 	}
@@ -116,32 +128,25 @@ func (s *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Update in-memory configs
-	for _, inst := range instances {
-		key := instanceKey{name: req.Target.ModuleName, dataplaneInstance: inst}
-		config := s.configs[key]
-		if config == nil {
-			config = &NAT64Config{}
-			s.configs[key] = config
-		}
-
-		config.Prefixes = append(config.Prefixes, req.Prefix)
+	// Update in-memory config
+	key := instanceKey{name: name, dataplaneInstance: inst}
+	config := s.configs[key]
+	if config == nil {
+		config = &NAT64Config{}
+		s.configs[key] = config
 	}
 
-	s.log.Infow("added prefix",
-		zap.String("name", req.Target.ModuleName),
-		zap.Binary("prefix", req.Prefix),
-		zap.Uint32s("instances", instances),
-	)
-	// Update module configs
-	if err := s.updateModuleConfigs(req.Target.ModuleName, instances); err != nil {
-		return nil, fmt.Errorf("failed to update module configs: %w", err)
+	config.Prefixes = append(config.Prefixes, req.Prefix)
+
+	// Update module config
+	if err := s.updateModuleConfig(name, inst); err != nil {
+		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
 	s.log.Infow("successfully added prefix",
-		zap.String("name", req.Target.ModuleName),
+		zap.String("name", name),
 		zap.Binary("prefix", req.Prefix),
-		zap.Uint32s("instances", instances),
+		zap.Uint32("instance", inst),
 	)
 
 	return &nat64pb.AddPrefixResponse{}, nil
@@ -155,7 +160,7 @@ func (s *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 		return nil, status.Errorf(codes.InvalidArgument, "invalid IPv6 address length: got %d, want 16", len(req.Ipv6))
 	}
 
-	instances, err := s.getInstances(req.Target.Instances)
+	name, inst, err := req.GetTarget().Validate(uint32(len(s.agents)))
 	if err != nil {
 		return nil, err
 	}
@@ -163,33 +168,31 @@ func (s *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Update in-memory configs
-	for _, instance := range instances {
-		key := instanceKey{name: req.Target.ModuleName, dataplaneInstance: instance}
-		config := s.configs[key]
-		if config == nil {
-			config = &NAT64Config{}
-			s.configs[key] = config
-		}
-
-		config.Mappings = append(config.Mappings, Mapping{
-			IPv4:        req.Ipv4,
-			IPv6:        req.Ipv6,
-			PrefixIndex: req.PrefixIndex,
-		})
+	// Update in-memory config
+	key := instanceKey{name: name, dataplaneInstance: inst}
+	config := s.configs[key]
+	if config == nil {
+		config = &NAT64Config{}
+		s.configs[key] = config
 	}
 
-	// Update module configs
-	if err := s.updateModuleConfigs(req.Target.ModuleName, instances); err != nil {
-		return nil, fmt.Errorf("failed to update module configs: %w", err)
+	config.Mappings = append(config.Mappings, Mapping{
+		IPv4:        req.Ipv4,
+		IPv6:        req.Ipv6,
+		PrefixIndex: req.PrefixIndex,
+	})
+
+	// Update module config
+	if err := s.updateModuleConfig(name, inst); err != nil {
+		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
 	s.log.Infow("successfully added mapping",
-		zap.String("name", req.Target.ModuleName),
+		zap.String("name", name),
 		zap.Binary("ipv4", req.Ipv4),
 		zap.Binary("ipv6", req.Ipv6),
 		zap.Uint32("prefix_index", req.PrefixIndex),
-		zap.Uint32s("instances", instances),
+		zap.Uint32("instance", inst),
 	)
 
 	return &nat64pb.AddMappingResponse{}, nil
@@ -200,7 +203,7 @@ func (s *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 		return nil, status.Error(codes.InvalidArgument, "mtu config is required")
 	}
 
-	instances, err := s.getInstances(req.Target.Instances)
+	name, inst, err := req.GetTarget().Validate(uint32(len(s.agents)))
 	if err != nil {
 		return nil, err
 	}
@@ -208,38 +211,36 @@ func (s *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Update in-memory configs
-	for _, inst := range instances {
-		key := instanceKey{name: req.Target.ModuleName, dataplaneInstance: inst}
-		config := s.configs[key]
-		if config == nil {
-			config = &NAT64Config{}
-			s.configs[key] = config
-		}
-
-		config.MTU = MTUConfig{
-			IPv4MTU: req.Mtu.Ipv4Mtu,
-			IPv6MTU: req.Mtu.Ipv6Mtu,
-		}
+	// Update in-memory config
+	key := instanceKey{name: name, dataplaneInstance: inst}
+	config := s.configs[key]
+	if config == nil {
+		config = &NAT64Config{}
+		s.configs[key] = config
 	}
 
-	// Update module configs
-	if err := s.updateModuleConfigs(req.Target.ModuleName, instances); err != nil {
-		return nil, fmt.Errorf("failed to update module configs: %w", err)
+	config.MTU = MTUConfig{
+		IPv4MTU: req.Mtu.Ipv4Mtu,
+		IPv6MTU: req.Mtu.Ipv6Mtu,
+	}
+
+	// Update module config
+	if err := s.updateModuleConfig(name, inst); err != nil {
+		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
 	s.log.Infow("successfully set MTU",
-		zap.String("name", req.Target.ModuleName),
+		zap.String("name", name),
 		zap.Uint32("ipv4_mtu", req.Mtu.Ipv4Mtu),
 		zap.Uint32("ipv6_mtu", req.Mtu.Ipv6Mtu),
-		zap.Uint32s("instances", instances),
+		zap.Uint32("instance", inst),
 	)
 
 	return &nat64pb.SetMTUResponse{}, nil
 }
 
 func (s *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropUnknownRequest) (*nat64pb.SetDropUnknownResponse, error) {
-	instances, err := s.getInstances(req.Target.Instances)
+	name, inst, err := req.GetTarget().Validate(uint32(len(s.agents)))
 	if err != nil {
 		return nil, err
 	}
@@ -247,125 +248,85 @@ func (s *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropU
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Update in-memory configs
-	for _, inst := range instances {
-		key := instanceKey{name: req.Target.ModuleName, dataplaneInstance: inst}
-		config := s.configs[key]
-		if config == nil {
-			config = &NAT64Config{}
-			s.configs[key] = config
-		}
-
-		config.DropUnknownPrefix = req.DropUnknownPrefix
-		config.DropUnknownMapping = req.DropUnknownMapping
+	// Update in-memory config
+	key := instanceKey{name: name, dataplaneInstance: inst}
+	config := s.configs[key]
+	if config == nil {
+		config = &NAT64Config{}
+		s.configs[key] = config
 	}
 
-	// Update module configs
-	if err := s.updateModuleConfigs(req.Target.ModuleName, instances); err != nil {
-		return nil, fmt.Errorf("failed to update module configs: %w", err)
+	config.DropUnknownPrefix = req.DropUnknownPrefix
+	config.DropUnknownMapping = req.DropUnknownMapping
+
+	// Update module config
+	if err := s.updateModuleConfig(name, inst); err != nil {
+		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
 	s.log.Infow("successfully set drop unknown flags",
-		zap.String("name", req.Target.ModuleName),
+		zap.String("name", name),
 		zap.Bool("drop_unknown_prefix", req.DropUnknownPrefix),
 		zap.Bool("drop_unknown_mapping", req.DropUnknownMapping),
-		zap.Uint32s("instances", instances),
+		zap.Uint32("instance", inst),
 	)
 
 	return &nat64pb.SetDropUnknownResponse{}, nil
 }
 
-func (s *NAT64Service) updateModuleConfigs(name string, instances []uint32) error {
+func (s *NAT64Service) updateModuleConfig(name string, instance uint32) error {
 	s.log.Debugw("updating configuration",
 		zap.String("module", name),
-		zap.Uint32s("instances", instances),
+		zap.Uint32("instance", instance),
 	)
 
-	// Create module configs for each dataplane instance
-	configs := make([]*ModuleConfig, len(instances))
-	for i, inst := range instances {
-		if int(inst) >= len(s.agents) {
-			return fmt.Errorf("instance index %d is out of range (agents length: %d)", inst, len(s.agents))
-		}
-		agent := s.agents[inst]
-		if agent == nil {
-			return fmt.Errorf("agent for instance %d is nil", inst)
-		}
-
-		moduleConfig, err := NewModuleConfig(agent, name)
-		if err != nil {
-			return fmt.Errorf("failed to create module config for instance %d: %w", inst, err)
-		}
-
-		key := instanceKey{name: name, dataplaneInstance: inst}
-		config := s.configs[key]
-		if config == nil {
-			config = &NAT64Config{}
-			s.configs[key] = config
-		}
-
-		// Configure all prefixes
-		for _, prefix := range config.Prefixes {
-			if err := moduleConfig.AddPrefix(prefix); err != nil {
-				return fmt.Errorf("failed to add prefix on instance %d: %w", inst, err)
-			}
-		}
-
-		// Configure all mappings
-		for _, mapping := range config.Mappings {
-			if err := moduleConfig.AddMapping(mapping.IPv4, mapping.IPv6, mapping.PrefixIndex); err != nil {
-				return fmt.Errorf("failed to add mapping on instance %d: %w", inst, err)
-			}
-		}
-
-		// Set drop unknown flags
-		if err := moduleConfig.SetDropUnknown(config.DropUnknownPrefix, config.DropUnknownMapping); err != nil {
-			return fmt.Errorf("failed to set drop unknown flags on instance %d: %w", inst, err)
-		}
-
-		configs[i] = moduleConfig
+	if int(instance) >= len(s.agents) {
+		return fmt.Errorf("instance index %d is out of range (agents length: %d)", instance, len(s.agents))
+	}
+	agent := s.agents[instance]
+	if agent == nil {
+		return fmt.Errorf("agent for instance %d is nil", instance)
 	}
 
-	// Apply all configurations
-	for i, inst := range instances {
-		agent := s.agents[inst]
-		config := configs[i]
-
-		if err := agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
-			return fmt.Errorf("failed to update module on instance %d: %w", inst, err)
-		}
-
-		s.log.Debugw("successfully updated module config",
-			zap.String("name", name),
-			zap.Uint32("instance", inst),
-			zap.Int("prefix_count", len(s.configs[instanceKey{name: name, dataplaneInstance: inst}].Prefixes)),
-			zap.Int("mapping_count", len(s.configs[instanceKey{name: name, dataplaneInstance: inst}].Mappings)),
-		)
+	moduleConfig, err := NewModuleConfig(agent, name)
+	if err != nil {
+		return fmt.Errorf("failed to create module config for instance %d: %w", instance, err)
 	}
 
-	s.log.Infow("successfully updated all module configurations",
+	key := instanceKey{name: name, dataplaneInstance: instance}
+	config := s.configs[key]
+	if config == nil {
+		config = &NAT64Config{}
+		s.configs[key] = config
+	}
+
+	// Configure all prefixes
+	for _, prefix := range config.Prefixes {
+		if err := moduleConfig.AddPrefix(prefix); err != nil {
+			return fmt.Errorf("failed to add prefix on instance %d: %w", instance, err)
+		}
+	}
+
+	// Configure all mappings
+	for _, mapping := range config.Mappings {
+		if err := moduleConfig.AddMapping(mapping.IPv4, mapping.IPv6, mapping.PrefixIndex); err != nil {
+			return fmt.Errorf("failed to add mapping on instance %d: %w", instance, err)
+		}
+	}
+
+	// Set drop unknown flags
+	if err := moduleConfig.SetDropUnknown(config.DropUnknownPrefix, config.DropUnknownMapping); err != nil {
+		return fmt.Errorf("failed to set drop unknown flags on instance %d: %w", instance, err)
+	}
+
+	if err := agent.UpdateModules([]ffi.ModuleConfig{moduleConfig.AsFFIModule()}); err != nil {
+		return fmt.Errorf("failed to update module on instance %d: %w", instance, err)
+	}
+
+	s.log.Debugw("successfully updated module config",
 		zap.String("name", name),
-		zap.Uint32s("instances", instances),
+		zap.Uint32("instance", instance),
 	)
 
 	return nil
-}
-
-func (s *NAT64Service) getInstances(requestedInstances []uint32) ([]uint32, error) {
-	if len(requestedInstances) == 0 {
-		indices := make([]uint32, len(s.agents))
-		for i := range s.agents {
-			indices[i] = uint32(i)
-		}
-		return indices, nil
-	}
-
-	// Validate requested instance indices
-	for _, inst := range requestedInstances {
-		if int(inst) >= len(s.agents) {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid instance index: %d", inst)
-		}
-	}
-
-	return requestedInstances, nil
 }
