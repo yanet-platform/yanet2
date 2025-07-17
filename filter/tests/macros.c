@@ -38,7 +38,7 @@ src_port(void *memory) {
 	assert(actions[0] == 1);
 
 	free_packet(&packet);
-	// FILTER_FREE(&filter);
+	FILTER_FREE(&filter);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -1,9 +1,9 @@
-#include "../attribute.h"
+#include "../helper.h"
+#include "../rule.h"
 #include "common/memory.h"
 #include "common/registry.h"
 #include "common/value.h"
 #include "dataplane/packet/packet.h"
-#include "rule.h"
 
 #include <stdint.h>
 
@@ -13,7 +13,7 @@
 #include <rte_mbuf.h>
 #include <rte_tcp.h>
 
-int
+static inline int
 init_vlan(
 	struct value_registry *registry,
 	void **data,
@@ -61,20 +61,16 @@ init_vlan(
 	return 0;
 }
 
-uint32_t
+static inline uint32_t
 lookup_vlan(struct packet *packet, void *data) {
 	struct value_table *t = (struct value_table *)data;
 	uint16_t vlan = rte_be_to_cpu_16(packet->mbuf->vlan_tci);
 	return value_table_get(t, 0, vlan);
 }
 
-void
+static inline void
 free_vlan(void *data, struct memory_context *m) {
 	(void)m;
 	struct value_table *t = (struct value_table *)data;
 	value_table_free(t);
 }
-
-const struct filter_attribute attribute_vlan = {
-	init_vlan, lookup_vlan, free_vlan
-};

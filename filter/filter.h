@@ -189,8 +189,11 @@ filter_free(struct filter *filter);
 
 #define FILTER_FREE(filter)                                                    \
 	do {                                                                   \
-		const size_t n = sizeof(__filter_attrs                         \
-		) sizeof(struct filter_attribute *);                           \
+		const size_t n = sizeof(__filter_attrs) /                      \
+				 sizeof(struct filter_attribute *);            \
+		if (n == 0) {                                                  \
+			goto free_finish;                                      \
+		}                                                              \
 		for (size_t i = 0; i < n; ++i) {                               \
 			const struct filter_attribute *attr =                  \
 				__filter_attrs[i];                             \
@@ -209,4 +212,4 @@ filter_free(struct filter *filter);
 			value_table_free(&v->table);                           \
 		}                                                              \
 	} while (0);                                                           \
-	\
+	free_finish:

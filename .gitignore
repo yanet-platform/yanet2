@@ -84,6 +84,7 @@ target/
 .cache
 compile_commands.json
 
+buildclang/
 build/
 web/dist/
 

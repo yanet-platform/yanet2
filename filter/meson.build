@@ -6,10 +6,6 @@ sources = files(
   'ipfw.c',
   'filter.c',
   'helper.c',
-  'attribute/net4.c',
-  'attribute/port.c',
-  'attribute/proto.c',
-  'attribute/vlan.c'
 )
 
 lib_filter = static_library(

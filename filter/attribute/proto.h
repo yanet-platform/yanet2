@@ -1,7 +1,9 @@
-#include "../attribute.h"
+#include "../helper.h"
 #include "../rule.h"
 #include "common/registry.h"
 #include "common/value.h"
+
+#include "dataplane/packet/packet.h"
 
 #include <netinet/in.h>
 #include <rte_ether.h>
@@ -95,7 +97,7 @@ proto_classifier_init(
 	return 0;
 }
 
-int
+static inline int
 init_proto(
 	struct value_registry *registry,
 	void **data,
@@ -111,7 +113,7 @@ init_proto(
 	);
 }
 
-uint32_t
+static inline uint32_t
 lookup_proto(struct packet *packet, void *data) {
 	struct proto_classifier *c = (struct proto_classifier *)data;
 
@@ -130,13 +132,9 @@ lookup_proto(struct packet *packet, void *data) {
 	}
 }
 
-void
+static inline void
 free_proto(void *data, struct memory_context *memory_context) {
 	(void)memory_context;
 	struct proto_classifier *c = (struct proto_classifier *)data;
 	value_table_free(&c->tcp_flags);
 }
-
-const struct filter_attribute attribute_proto = {
-	init_proto, lookup_proto, free_proto
-};

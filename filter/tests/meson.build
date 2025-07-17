@@ -88,7 +88,7 @@ test_filter_vlan = executable('test_filter_vlan',
 )
 test('basic_vlan', test_filter_vlan, suite: ['filter'])
 
-# bench and compare vs previous filter
+# bench and compare with previous filter
 test_vs_prev = executable('filter_bench',
  test_sources + ['bench.c'],
   c_args: yanet_c_args + ['-O3', '-DIPFW_SKIP_NET6'],
@@ -98,6 +98,17 @@ test_vs_prev = executable('filter_bench',
 )
 test('bench', test_vs_prev, suite: ['filter'])
 
+# bench macros and compare with previous filter
+test_macros_vs_prev = executable('filter_bench_macros',
+ test_sources + ['bench_macros.c'],
+  c_args: yanet_c_args + ['-O3', '-DIPFW_SKIP_NET6'],
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('bench_macros', test_macros_vs_prev, suite: ['filter'])
+
+# test filter macros
 filter_macros = executable('filter_macros',
  test_sources + ['macros.c'],
   c_args: yanet_c_args + ['-O3'],

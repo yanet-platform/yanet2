@@ -1,6 +1,8 @@
-#include "../attribute.h"
+#include "../helper.h"
+#include "../rule.h"
 #include "common/lpm.h"
 #include "common/range_collector.h"
+#include "dataplane/packet/packet.h"
 
 #include <rte_ip.h>
 #include <rte_mbuf.h>
@@ -235,11 +237,3 @@ free_net4(void *data, struct memory_context *memory_context) {
 	struct lpm *lpm = (struct lpm *)data;
 	lpm_free(lpm);
 }
-
-const struct filter_attribute attribute_net4_src = {
-	init_net4_src, lookup_net4_src, free_net4
-};
-
-const struct filter_attribute attribute_net4_dst = {
-	init_net4_dst, lookup_net4_dst, free_net4
-};
