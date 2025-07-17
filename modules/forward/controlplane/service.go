@@ -250,12 +250,14 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 	if err != nil {
 		return nil, err
 	}
-	deleted := DeleteConfig(m, name, inst)
+	// Remove module configuration from the control plane.
+	delete(m.configs, instanceKey{name, inst})
 
+	deleted := DeleteConfig(m, name, inst)
 	m.log.Infow("deleted module config",
 		zap.String("name", name),
 		zap.Uint32("instance", inst),
-		zap.Bool("deleted", deleted),
+		zap.Bool("dataplane_hit", deleted),
 	)
 
 	response := &forwardpb.DeleteConfigResponse{
