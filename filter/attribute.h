@@ -28,8 +28,8 @@
 typedef int (*attr_init_func)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *actions,
-	size_t actions_count,
+	const struct filter_rule *rules,
+	size_t rule_count,
 	struct memory_context *memory_context
 );
 
