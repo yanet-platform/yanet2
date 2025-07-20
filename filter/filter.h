@@ -74,10 +74,16 @@ filter_free(struct filter *filter);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define FILTER_INIT(filter, rules, rule_count, ctx, res, ...)                  \
-	const struct filter_attribute *__filter_attrs[] = {__VA_ARGS__};       \
+#define FILTER_DECLARE(tag, ...)                                               \
+	static const struct filter_attribute *__filter_attrs_##tag[] = {       \
+		__VA_ARGS__                                                    \
+	};                                                                     \
+	struct filter __filter_##tag;
+
+#define FILTER_INIT(tag, rules, rule_count, ctx, res)                          \
 	do {                                                                   \
-		if (sizeof(__filter_attrs) == 0) {                             \
+		struct filter *filter = &(__filter_##tag);                     \
+		if (sizeof(__filter_attrs_##tag) == 0) {                       \
 			*(res) = -1;                                           \
 			goto init_failed;                                      \
 		}                                                              \
@@ -87,11 +93,11 @@ filter_free(struct filter *filter);
 		if (*(res) < 0) {                                              \
 			goto init_failed;                                      \
 		}                                                              \
-		const size_t n = sizeof(__filter_attrs) /                      \
+		const size_t n = sizeof(__filter_attrs_##tag) /                \
 				 sizeof(struct filter_attribute *);            \
 		for (size_t i = 0; i < n; ++i) {                               \
 			const struct filter_attribute *attr =                  \
-				__filter_attrs[i];                             \
+				__filter_attrs_##tag[i];                       \
 			struct filter_vertex *v = &(filter)->v[n + i];         \
 			*(res) = value_registry_init(                          \
 				&v->registry, &(filter)->memory_context        \
@@ -160,14 +166,15 @@ filter_free(struct filter *filter);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define FILTER_QUERY(filter, packet, actions, actions_count)                   \
+#define FILTER_QUERY(tag, packet, actions, actions_count)                      \
 	do {                                                                   \
-		const size_t n = sizeof(__filter_attrs) /                      \
+		struct filter *filter = &(__filter_##tag);                     \
+		const size_t n = sizeof(__filter_attrs_##tag) /                \
 				 sizeof(struct filter_attribute *);            \
 		for (size_t attr_idx = 0; attr_idx < n; ++attr_idx) {          \
 			size_t vertex = n + attr_idx;                          \
 			const struct filter_attribute *attr =                  \
-				__filter_attrs[attr_idx];                      \
+				__filter_attrs_##tag[attr_idx];                \
 			struct filter_vertex *v = &((filter)->v)[vertex];      \
 			(filter)->v[vertex / 2].slots[vertex & 1] =            \
 				attr->lookup_func(packet, v->data);            \
@@ -191,16 +198,17 @@ filter_free(struct filter *filter);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define FILTER_FREE(filter)                                                    \
+#define FILTER_FREE(tag)                                                       \
 	do {                                                                   \
-		const size_t n = sizeof(__filter_attrs) /                      \
+		struct filter *filter = &(__filter_##tag);                     \
+		const size_t n = sizeof(__filter_attrs_##tag) /                \
 				 sizeof(struct filter_attribute *);            \
 		if (n == 0) {                                                  \
 			goto free_finish;                                      \
 		}                                                              \
 		for (size_t i = 0; i < n; ++i) {                               \
 			const struct filter_attribute *attr =                  \
-				__filter_attrs[i];                             \
+				__filter_attrs_##tag[i];                       \
 			struct filter_vertex *v = &(filter)->v[n + i];         \
 			attr->free_func(v->data, &(filter)->memory_context);   \
 		}                                                              \

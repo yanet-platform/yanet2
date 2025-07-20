@@ -165,19 +165,18 @@ main() {
 		}
 	}
 
-	clock_t new_filter_init_start_time = clock();
-	struct filter filter;
-	FILTER_INIT(
-		&filter,
-		rules,
-		MAX_IP * MAX_IP,
-		&memory_context,
-		&res,
+	// declare filter
+	FILTER_DECLARE(
+		f,
 		&attribute_net4_src,
 		&attribute_net4_dst,
 		&attribute_port_src,
 		&attribute_port_dst
 	);
+
+	clock_t new_filter_init_start_time = clock();
+
+	FILTER_INIT(f, rules, MAX_IP * MAX_IP, &memory_context, &res);
 	assert(res == 0);
 	double filter_init_time =
 		(double)((clock() - new_filter_init_start_time)) /
@@ -213,7 +212,7 @@ main() {
 	for (size_t i = 0; i < PACKETS; ++i) {
 		uint32_t *actions;
 		uint32_t actions_count;
-		FILTER_QUERY(&filter, &packets[i], &actions, &actions_count);
+		FILTER_QUERY(f, &packets[i], &actions, &actions_count);
 		new_filter_checksum ^= actions_count;
 		for (size_t j = 0; j < actions_count; ++j) {
 			new_filter_checksum ^= actions[j];
@@ -251,7 +250,7 @@ main() {
 
 	puts("OK");
 
-	FILTER_FREE(&filter);
+	FILTER_FREE(f);
 
 	free(memory);
 	free(memory1);
