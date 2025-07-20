@@ -2,10 +2,15 @@ syntax = "proto3";
 
 package nat64pb;
 
+import "common/proto/target.proto";
+
 option go_package = "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb;nat64pb";
 
 // NAT64Service is a control-plane service for managing NAT64 module
 service NAT64Service {
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse) {
+	}
+
 	// ShowConfig returns the current configuration of the NAT64 module
 	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {
 	}
@@ -38,18 +43,24 @@ service NAT64Service {
 	}
 }
 
-// TargetModule specifies the target module for configuration operations
-message TargetModule {
-	// ModuleName is the name of the module to configure
-	string module_name = 1;
-	// Instances specifies dataplane instances that should be affected
-	// Empty means all instances
-	repeated uint32 instances = 2;
+// Represents config names of dataplane instances
+message InstanceConfigs {
+	// Dataplane instance
+	uint32 instance = 1;
+	repeated string configs = 2;
+}
+
+message ListConfigsRequest {
+}
+
+// ListConfigsResponse contains existing configurations per dataplane instance.
+message ListConfigsResponse {
+	repeated InstanceConfigs instance_configs = 1;
 }
 
 // ShowConfigRequest requests the current configuration
 message ShowConfigRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 }
 
 // MTUConfig contains MTU configuration values
@@ -70,23 +81,22 @@ message Mapping {
 	uint32 prefix_index = 3; // Index of the used prefix
 }
 
-// InstanceConfig represents configuration for a single dataplane instance
-message InstanceConfig {
-	// Dataplane instance
-	uint32 instance = 1;
-	repeated Prefix prefixes = 2;
-	repeated Mapping mappings = 3;
-	MTUConfig mtu = 4;
+// Config represents configuration for a single dataplane instance
+message Config {
+	repeated Prefix prefixes = 1;
+	repeated Mapping mappings = 2;
+	MTUConfig mtu = 3;
 }
 
 // ShowConfigResponse contains the current configuration
 message ShowConfigResponse {
-	repeated InstanceConfig configs = 1;
+	uint32 instance = 1;
+	Config config = 2;
 }
 
 // AddPrefixRequest specifies a prefix to add
 message AddPrefixRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	bytes prefix = 2; // 12-byte IPv6 prefix
 }
 
@@ -95,7 +105,7 @@ message AddPrefixResponse {
 
 // RemovePrefixRequest specifies a prefix to remove
 message RemovePrefixRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	bytes prefix = 2; // 12-byte IPv6 prefix
 }
 
@@ -104,7 +114,7 @@ message RemovePrefixResponse {
 
 // AddMappingRequest specifies an IPv4-IPv6 mapping to add
 message AddMappingRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	bytes ipv4 = 2;		 // IPv4 address in network byte order
 	bytes ipv6 = 3;		 // IPv6 address (16 bytes)
 	uint32 prefix_index = 4; // Index of the used prefix
@@ -115,7 +125,7 @@ message AddMappingResponse {
 
 // RemoveMappingRequest specifies an IPv4-IPv6 mapping to remove
 message RemoveMappingRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	bytes ipv4 = 2; // IPv4 address to remove mapping for
 }
 
@@ -124,7 +134,7 @@ message RemoveMappingResponse {
 
 // SetMTURequest specifies MTU values to set
 message SetMTURequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	MTUConfig mtu = 2;
 }
 
@@ -133,7 +143,7 @@ message SetMTUResponse {
 
 // SetDropUnknownRequest specifies drop_unknown flags to set
 message SetDropUnknownRequest {
-	TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 	bool drop_unknown_prefix = 2;  // Drop packets with unknown prefix
 	bool drop_unknown_mapping = 3; // Drop packets with unknown mapping
 }

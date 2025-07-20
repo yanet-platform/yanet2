@@ -166,9 +166,9 @@ yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 1 --dst 0 --net ::/0
 
 yanet-cli route insert --cfg route0 --via $DEFGW6 ::/0
 
-yanet-cli nat64 prefix add --mod nat0 --prefix $NAT64_PREFIX
-yanet-cli nat64 mapping add --mod nat0 --ipv4 <ipv4> --ipv6 <ipv6> --prefix-index 0
-yanet-cli nat64 mtu --mod nat0 --ipv4-mtu 1450 --ipv6-mtu 6950
+yanet-cli nat64 prefix add --cfg nat0 --instance 0 --prefix $NAT64_PREFIX
+yanet-cli nat64 mapping add --cfg nat0 --instance 0 --ipv4 <ipv4> --ipv6 <ipv6> --prefix-index 0
+yanet-cli nat64 mtu --cfg nat0 --instance 0 --ipv4-mtu 1450 --ipv6-mtu 6950
 
 yanet-cli pipeline update --name=bootstrap --modules forward:forward0 --instance=0
 yanet-cli pipeline update --name=nat64 --modules forward:forward0 --modules nat64:nat0 --modules route:route0 --instance=0
