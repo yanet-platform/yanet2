@@ -36,7 +36,7 @@ typedef int (*attr_init_func)(
 // This function is provided by user and should classify packet attribute.
 // It takes packet and user data initialized in `attr_init_func`.
 // Returns classifier of the packet attribute.
-typedef uint32_t (*attr_lookup_func)(struct packet *packet, void *data);
+typedef uint32_t (*attr_query_func)(struct packet *packet, void *data);
 
 // This function allows to free user data, initialzed in `attr_init_func`.
 typedef void (*attr_free_func)(
@@ -47,7 +47,7 @@ typedef void (*attr_free_func)(
 // (transport protocol, IPv4 source address, etc).
 struct filter_attribute {
 	attr_init_func init_func;
-	attr_lookup_func lookup_func;
+	attr_query_func lookup_func;
 	attr_free_func free_func;
 };
 
