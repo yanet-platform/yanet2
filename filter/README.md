@@ -133,6 +133,10 @@ FILTER_FREE(&filter, sign);
 ### Functional
 
 ```C
+// main.c
+
+#include "filter.h"
+
 int
 main() {
    // Set rules to filter packets
@@ -164,7 +168,7 @@ main() {
 ### Macros
 
 ```C
-// main.cpp
+// main.c
 
 #include "filter.h"
 
