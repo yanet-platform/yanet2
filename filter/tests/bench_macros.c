@@ -177,7 +177,9 @@ main() {
 	clock_t new_filter_init_start_time = clock();
 
 	struct filter filter;
-	FILTER_INIT(&filter, sign, rules, MAX_IP * MAX_IP, &memory_context, &res);
+	FILTER_INIT(
+		&filter, sign, rules, MAX_IP * MAX_IP, &memory_context, &res
+	);
 	assert(res == 0);
 	double filter_init_time =
 		(double)((clock() - new_filter_init_start_time)) /
@@ -213,7 +215,9 @@ main() {
 	for (size_t i = 0; i < PACKETS; ++i) {
 		uint32_t *actions;
 		uint32_t actions_count;
-		FILTER_QUERY(&filter, sign, &packets[i], &actions, &actions_count);
+		FILTER_QUERY(
+			&filter, sign, &packets[i], &actions, &actions_count
+		);
 		new_filter_checksum ^= actions_count;
 		for (size_t j = 0; j < actions_count; ++j) {
 			new_filter_checksum ^= actions[j];

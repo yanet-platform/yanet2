@@ -25,7 +25,7 @@ src_port(void *memory) {
 	struct filter_rule rule1 = build_rule(&builder1, 1);
 
 	FILTER_DECLARE(sign, &attribute_port_src);
-	
+
 	struct filter filter;
 	FILTER_INIT(&filter, sign, &rule1, 1, &memory_context, &res);
 	assert(res == 0);

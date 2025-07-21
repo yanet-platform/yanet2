@@ -53,9 +53,8 @@ check_single_attribute(void *memory) {
 
 	// setup filter
 	struct filter filter;
-	int init_result = filter_init(
-		&filter, &attribute, 1, rules, 3, &memory_context
-	);
+	int init_result =
+		filter_init(&filter, &attribute, 1, rules, 3, &memory_context);
 	assert(init_result == 0);
 
 	// make few queries and expect hit

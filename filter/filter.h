@@ -74,12 +74,12 @@ filter_free(struct filter *filter);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define FILTER_DECLARE(tag, ...)										\
-static const struct filter_attribute *__filter_attrs_##tag[] = {       \
+#define FILTER_DECLARE(tag, ...)                                               \
+	static const struct filter_attribute *__filter_attrs_##tag[] = {       \
 		__VA_ARGS__                                                    \
 	};
 
-#define FILTER_INIT(filter, tag, rules, rule_count, ctx, res)              \
+#define FILTER_INIT(filter, tag, rules, rule_count, ctx, res)                  \
 	do {                                                                   \
 		if (sizeof(__filter_attrs_##tag) == 0) {                       \
 			*(res) = -1;                                           \
@@ -164,7 +164,7 @@ static const struct filter_attribute *__filter_attrs_##tag[] = {       \
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define FILTER_QUERY(filter, tag, packet, actions, actions_count)                      \
+#define FILTER_QUERY(filter, tag, packet, actions, actions_count)              \
 	do {                                                                   \
 		const size_t n = sizeof(__filter_attrs_##tag) /                \
 				 sizeof(struct filter_attribute *);            \
@@ -195,10 +195,10 @@ static const struct filter_attribute *__filter_attrs_##tag[] = {       \
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define FILTER_FREE(filter, tag)                                           \
+#define FILTER_FREE(filter, tag)                                               \
 	do {                                                                   \
-		const size_t n = sizeof(__filter_attrs_##tag)                 		\
-				 / sizeof(struct filter_attribute *);            				\
+		const size_t n = sizeof(__filter_attrs_##tag) /                \
+				 sizeof(struct filter_attribute *);            \
 		if (n == 0) {                                                  \
 			goto free_finish;                                      \
 		}                                                              \
