@@ -25,11 +25,11 @@ An attribute is composed of three user-defined functions.
 Initialization function allows to initialize attribute data:
 ```C
 typedef int (*attr_init_func)(
-	struct value_registry *registry,
-	void **data,
-	const struct filter_rule *rules,
-	size_t rule_count,
-	struct memory_context *memory_context
+   struct value_registry *registry,
+   void **data,
+   const struct filter_rule *rules,
+   size_t rule_count,
+   struct memory_context *memory_context
 );
 ```
 
@@ -68,7 +68,7 @@ struct filter_rule rules[3] = {rule1, rule2, rule3};
 
 struct filter filter;
 int res = filter_init(
-	&filter, attributes, 2, rules, 3, &memory_context
+   &filter, attributes, 2, rules, 3, &memory_context
 );
 assert(res == 0);
 ```
@@ -99,8 +99,8 @@ FILTER_DECLARE(signature_tag, &attr1, &attr2, ...)
 
 allows to declare filter signature and link it with provided tag. It opens up into
 ```C
-static const struct filter_attribute *__filter_attrs_signature_tag[] = {  
-	&attr1, &attr2, ...                                                    
+static const struct filter_attribute *__filter_attrs_signature_tag[] = {
+   &attr1, &attr2, ...                                                    
 };
 ```
 
