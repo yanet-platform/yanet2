@@ -23,3 +23,4 @@ lib_filter_dep = declare_dependency(
 )
 
 subdir('tests')
+subdir('bench')

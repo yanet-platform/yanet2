@@ -51,9 +51,7 @@ make_mbuf(
 
 	struct rte_ether_hdr *eth =
 		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-	if (vlan == 0) {
-		eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
-	}
+	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
 	struct rte_ipv4_hdr *ip = (struct rte_ipv4_hdr *)(eth + 1);
 
