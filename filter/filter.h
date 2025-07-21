@@ -74,15 +74,13 @@ filter_free(struct filter *filter);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define FILTER_DECLARE(tag, ...)                                               \
-	static const struct filter_attribute *__filter_attrs_##tag[] = {       \
+#define FILTER_DECLARE(tag, ...)										\
+static const struct filter_attribute *__filter_attrs_##tag[] = {       \
 		__VA_ARGS__                                                    \
-	};                                                                     \
-	struct filter __filter_##tag;
+	};
 
-#define FILTER_INIT(tag, rules, rule_count, ctx, res)                          \
+#define FILTER_INIT(filter, tag, rules, rule_count, ctx, res)              \
 	do {                                                                   \
-		struct filter *filter = &(__filter_##tag);                     \
 		if (sizeof(__filter_attrs_##tag) == 0) {                       \
 			*(res) = -1;                                           \
 			goto init_failed;                                      \
@@ -166,9 +164,8 @@ filter_free(struct filter *filter);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define FILTER_QUERY(tag, packet, actions, actions_count)                      \
+#define FILTER_QUERY(filter, tag, packet, actions, actions_count)                      \
 	do {                                                                   \
-		struct filter *filter = &(__filter_##tag);                     \
 		const size_t n = sizeof(__filter_attrs_##tag) /                \
 				 sizeof(struct filter_attribute *);            \
 		for (size_t attr_idx = 0; attr_idx < n; ++attr_idx) {          \
@@ -198,11 +195,10 @@ filter_free(struct filter *filter);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define FILTER_FREE(tag)                                                       \
+#define FILTER_FREE(filter, tag)                                           \
 	do {                                                                   \
-		struct filter *filter = &(__filter_##tag);                     \
-		const size_t n = sizeof(__filter_attrs_##tag) /                \
-				 sizeof(struct filter_attribute *);            \
+		const size_t n = sizeof(__filter_attrs_##tag)                 		\
+				 / sizeof(struct filter_attribute *);            				\
 		if (n == 0) {                                                  \
 			goto free_finish;                                      \
 		}                                                              \

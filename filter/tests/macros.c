@@ -24,20 +24,21 @@ src_port(void *memory) {
 	builder_add_port_src_range(&builder1, 1024, 5016);
 	struct filter_rule rule1 = build_rule(&builder1, 1);
 
-	FILTER_DECLARE(filter, &attribute_port_src);
-
-	FILTER_INIT(filter, &rule1, 1, &memory_context, &res);
+	FILTER_DECLARE(sign, &attribute_port_src);
+	
+	struct filter filter;
+	FILTER_INIT(&filter, sign, &rule1, 1, &memory_context, &res);
 	assert(res == 0);
 
 	struct packet packet = make_packet(0, 0, 4000, 0, IPPROTO_UDP, 0, 0);
 	uint32_t *actions;
 	uint32_t actions_count;
-	FILTER_QUERY(filter, &packet, &actions, &actions_count);
+	FILTER_QUERY(&filter, sign, &packet, &actions, &actions_count);
 	assert(actions_count == 1);
 	assert(actions[0] == 1);
 
 	free_packet(&packet);
-	FILTER_FREE(filter);
+	FILTER_FREE(&filter, sign);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
