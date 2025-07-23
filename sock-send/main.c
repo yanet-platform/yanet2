@@ -108,7 +108,7 @@ read_data(int fd, u_char *buf, ssize_t len) {
 		case 0:
 			return -1;
 		case -1:
-			if ((errno == EAGAIN) || (errno = EWOULDBLOCK)) {
+			if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
 				usleep(1000);
 			} else {
 				return -1;
