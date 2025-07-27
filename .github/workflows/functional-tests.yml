@@ -1,0 +1,86 @@
+name: Functional Tests
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'tests/functional/**'
+      - 'modules/**'
+      - 'dataplane/**'
+      - 'controlplane/**'
+      - '.github/workflows/functional-tests.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'tests/functional/**'
+      - 'modules/**'
+      - 'dataplane/**'
+      - 'controlplane/**'
+      - '.github/workflows/functional-tests.yml'
+
+jobs:
+  functional-tests:
+    name: Run Functional Tests
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86 \
+          qemu-utils \
+          genisoimage \
+          cloud-image-utils
+
+    - name: Cache QEMU image
+      uses: actions/cache@v4
+      with:
+        path: tests/functional/yanet-test.qcow2
+        key: ${{ runner.os }}-qemu-image-${{ hashFiles('tests/functional/Makefile') }}
+
+    - name: Build YANET
+      run: |
+        just dbuild
+
+    - name: Prepare test environment
+      working-directory: tests/functional
+      run: |
+        make prepare-vm
+
+    - name: Run functional tests
+      working-directory: tests/functional
+      run: |
+        make test
+
+    - name: Upload test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs
+        path: |
+          tests/functional/*.log
+          tests/functional/yanet-test-vm.log
+        retention-days: 7
+
+    - name: Upload QEMU image on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: qemu-image
+        path: tests/functional/yanet-test.qcow2
+        retention-days: 1
+
+    - name: Cleanup
+      if: always()
+      working-directory: tests/functional
+      run: |
+        make clean

@@ -1,4 +1,4 @@
-.PHONY: all dataplane test cli cli-install fuzz clean $(foreach module,$(MODULES),cli/$(module) cli-install/$(module))
+.PHONY: all dataplane test test-functional cli cli-install fuzz clean $(foreach module,$(MODULES),cli/$(module) cli-install/$(module))
 
 # Define the list of modules to avoid repetition
 MODULES := decap dscp route forward nat64
@@ -31,6 +31,10 @@ cli-clean/%:
 test: dataplane
 	go test ./...
 	meson test -C build
+
+test-functional: dataplane
+	@echo "Running functional tests..."
+	cd tests/functional && $(MAKE) test
 
 fuzz:
 	env CC=clang CXX=clang++ meson setup -Dfuzzing=enabled  buildfuzz

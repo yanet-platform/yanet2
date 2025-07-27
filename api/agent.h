@@ -1,5 +1,8 @@
 #pragma once
 
+// FIXME: double declare
+#define CP_DEVICE_NAME_LEN 80
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -248,12 +251,14 @@ struct cp_device_pipeline_info {
 
 struct cp_device_info {
 	uint64_t pipeline_count;
+	char name[CP_DEVICE_NAME_LEN];
 	struct cp_device_pipeline_info pipelines[];
 };
 
 struct cp_device_list_info {
 	uint64_t gen;
 	uint64_t device_count;
+
 	struct cp_device_info *devices[];
 };
 

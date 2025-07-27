@@ -1,0 +1,5 @@
+# Test artifacts
+*.qcow2
+*.iso
+*.log
+ubuntu-*.img

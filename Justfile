@@ -26,6 +26,14 @@ setup COVERAGE_MODE="false":
 test: build
     @meson test -C build --print-errorlogs
 
+# Run functional tests
+test-functional: build
+    @echo "Running functional tests..."
+    @cd tests/functional && make test
+
+# Run all tests (unit + functional)
+test-all: test test-functional
+
 # Clean coverage data
 # clean *.gcno file manually after remove c file
 covclean:
@@ -123,7 +131,7 @@ dcoverage:
 dcontrolplane:
     @just _docker_run -q "make controlplane"
 
-# Build controlplane in Docker
+# Build CLI in Docker
 dcli:
     @just _docker_run -q "make cli"
 

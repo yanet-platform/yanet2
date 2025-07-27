@@ -277,6 +277,7 @@ type DevicePipelineInfo struct {
 // DeviceInfo represents information about a device.
 type DeviceInfo struct {
 	DeviceID  uint16
+	Name      string
 	Pipelines []DevicePipelineInfo
 }
 
@@ -310,6 +311,7 @@ func (m *DPConfig) Devices() []DeviceInfo {
 
 		out[idx] = DeviceInfo{
 			DeviceID:  uint16(idx),
+			Name:      C.GoString(&deviceInfo.name[0]),
 			Pipelines: pipelines,
 		}
 	}

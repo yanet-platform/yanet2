@@ -595,6 +595,7 @@ yanet_build_device_info(struct cp_device *device) {
 	memset(device_info, 0, device_info_size);
 
 	device_info->pipeline_count = pipeline_count;
+	strtcpy(device_info->name, device->name, CP_DEVICE_NAME_LEN);
 	prev_pipeline_id = -1;
 	pipeline_count = 0;
 	for (uint64_t link_idx = 0; link_idx < device->pipeline_map_size;
@@ -648,7 +649,8 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 			goto unlock;
 		}
 
-		device_list_info->devices[idx] = device_info;
+		device_list_info->devices[device_list_info->device_count] = device_info;
+		device_list_info->device_count++;
 	}
 
 unlock:

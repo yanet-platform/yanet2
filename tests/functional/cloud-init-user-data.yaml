@@ -1,0 +1,174 @@
+#cloud-config
+
+# Disable default ubuntu user password
+users:
+  - name: ubuntu
+    lock_passwd: false
+    passwd: ""
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+
+# Enable root login without password
+disable_root: false
+ssh_pwauth: true
+
+# Network configuration
+network:
+  version: 2
+  ethernets:
+    # Main interface for internet connectivity
+    enp0s4:
+      dhcp4: true
+      dhcp6: false
+      optional: false
+    # Test interfaces - don't wait for these
+    enp1s0:
+      dhcp4: false
+      dhcp6: false
+      optional: true
+    enp2s0:
+      dhcp4: false
+      dhcp6: false
+      optional: true
+    # KNI interface for YANET testing
+    kni0:
+      dhcp4: false
+      dhcp6: false
+      optional: true
+      addresses:
+        - 203.0.113.14/24
+
+packages:
+  - qemu-guest-agent
+  - meson
+  - clang
+  - clang-format-19
+  - clang-tidy-19
+  - git
+  - just
+  - make
+  - python3-pyelftools
+  - libnuma-dev
+  - libpcap-dev
+  - libyaml-dev
+  - protobuf-compiler
+  - rustup
+  - gdb
+  - lldb
+  - lcov
+  - golang-go
+  - linux-headers-generic
+  - linux-image-extra-virtual
+  - kmod
+  - procps
+  - util-linux
+  - tcpdump
+  - tshark
+  - vim-tiny
+  - iputils-ping
+  - net-tools
+runcmd:
+  - exec &> /var/log/cloud-init-output.log
+  - apt-get update -y
+  - apt-get install -y linux-modules-extra-$(uname -r)-generic --no-install-recommends
+  - |
+    # Remove password for ubuntu user
+    passwd -d ubuntu
+    # Remove password for root user
+    passwd -d root
+    # Allow empty passwords in PAM
+    sed -i 's/nullok_secure/nullok/' /etc/pam.d/common-auth
+  - |
+    # Configure systemd-networkd-wait-online to not wait for optional interfaces
+    mkdir -p /etc/systemd/system/systemd-networkd-wait-online.service.d
+    cat <<EOF > /etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf
+    [Service]
+    ExecStart=
+    ExecStart=/lib/systemd/systemd-networkd-wait-online --interface=enp0s4 --timeout=30
+    EOF
+  - |
+    # Fix serial console ordering cycle - completely break the cycle
+    mkdir -p /etc/systemd/system/serial-getty@ttyS0.service.d
+    cat <<EOF > /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
+    [Unit]
+    Description=Serial Getty on ttyS0 with autologin
+    Documentation=man:agetty(8)
+    After=systemd-user-sessions.service
+    After=plymouth-quit-wait.service
+    Conflicts=rescue.service
+    ConditionPathExists=/dev/ttyS0
+
+    [Service]
+    ExecStart=
+    ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud 115200,38400,9600 ttyS0 vt220
+    Type=idle
+    Restart=always
+    RestartSec=0
+    UtmpIdentifier=ttyS0
+    TTYPath=/dev/ttyS0
+    TTYReset=yes
+    TTYVHangup=yes
+    TTYVTDisallocate=yes
+    KillMode=process
+    IgnoreSIGPIPE=no
+    SendSIGHUP=yes
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+    # Also create a getty.target drop-in to prevent cycles
+    mkdir -p /etc/systemd/system/getty.target.d
+    cat <<EOF > /etc/systemd/system/getty.target.d/10-no-cycle.conf
+    [Unit]
+    Description=Login Prompts
+    Wants=
+    After=
+    DefaultDependencies=no
+    EOF
+  - |
+    # Disable conflicting services to break ordering cycle
+    systemctl mask getty@tty1.service
+    systemctl mask console-getty.service
+    systemctl mask container-getty@1.service
+    # Create custom target to replace getty.target
+    systemctl daemon-reload
+    systemctl disable getty.target
+    systemctl enable serial-getty@ttyS0.service
+  # Configure Go environment
+  - mkdir -p /root/go
+  - export GOPATH=/root/go
+  - export PATH=$PATH:$GOPATH/bin
+  - GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+  - GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+  # Configure Rust
+  - rustup set auto-self-update disable
+  - rustup install stable
+  # Configure hugepages
+  - echo 'vm.nr_hugepages = 2048' >> /etc/sysctl.conf
+  - sysctl -p
+  - mkdir -p /dev/hugepages
+  - mount -t hugetlbfs nodev /dev/hugepages
+  - echo 'nodev /dev/hugepages hugetlbfs defaults 0 0' >> /etc/fstab
+  # Configure kernel modules
+  - modprobe vfio-pci
+  - echo 'vfio-pci' >> /etc/modules
+  # Configure 9P mounts
+  - mkdir -p /mnt/binaries
+  - mkdir -p /mnt/config
+  - mkdir -p /mnt/build
+  - mkdir -p /mnt/target
+  - mkdir -p /mnt/yanet2
+  - echo "binaries /mnt/binaries 9p trans=virtio,version=9p2000.L,rw,_netdev 0 0" >> /etc/fstab
+  - echo "config /mnt/config 9p trans=virtio,version=9p2000.L,rw,_netdev 0 0" >> /etc/fstab
+  - echo "build /mnt/build 9p trans=virtio,version=9p2000.L,rw,_netdev 0 0" >> /etc/fstab
+  - echo "target /mnt/target 9p trans=virtio,version=9p2000.L,rw,_netdev 0 0" >> /etc/fstab
+  - echo "yanet2 /mnt/yanet2 9p trans=virtio,version=9p2000.L,rw,_netdev 0 0" >> /etc/fstab
+  # Configure automatic sudo for ubuntu user
+  - echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+  # Add ubuntu user to necessary groups
+  - usermod -aG sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev ubuntu
+  # Signal VM is fully ready
+  - echo "YANET VM FULLY READY - $(date)" > /dev/ttyS0
+  - echo "Autologin configured for ubuntu user" > /dev/ttyS0
+  # Power off VM after cloud-init configuration is complete
+  - poweroff
