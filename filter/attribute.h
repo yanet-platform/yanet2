@@ -47,7 +47,7 @@ typedef void (*attr_free_func)(
 // (transport protocol, IPv4 source address, etc).
 struct filter_attribute {
 	attr_init_func init_func;
-	attr_query_func lookup_func;
+	attr_query_func query_func;
 	attr_free_func free_func;
 };
 

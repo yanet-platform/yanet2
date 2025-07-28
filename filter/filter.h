@@ -174,7 +174,7 @@ filter_free(struct filter *filter);
 				__filter_attrs_##tag[attr_idx];                \
 			struct filter_vertex *v = &((filter)->v)[vertex];      \
 			(filter)->v[vertex / 2].slots[vertex & 1] =            \
-				attr->lookup_func(packet, v->data);            \
+				attr->query_func(packet, v->data);             \
 		}                                                              \
 		for (size_t vertex = n - 1; vertex >= 2; --vertex) {           \
 			struct filter_vertex *v = &((filter)->v)[vertex];      \

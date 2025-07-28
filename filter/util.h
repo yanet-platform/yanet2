@@ -5,6 +5,10 @@
 
 #include "filter.h"
 
+////////////////////////////////////////////////////////////////////////////////
+
+#define MAX_RULES 10
+
 void
 free_packet(struct packet *packet);
 
@@ -30,24 +34,24 @@ query_filter_and_expect_no_actions(
 );
 
 struct filter_rule_builder {
-	struct net6 net6_dst[10];
+	struct net6 net6_dst[MAX_RULES];
 	size_t net6_dst_count;
 
-	struct net6 net6_src[10];
+	struct net6 net6_src[MAX_RULES];
 	size_t net6_src_count;
 
-	struct net4 net4_dst[10];
+	struct net4 net4_dst[MAX_RULES];
 	size_t net4_dst_count;
 
-	struct net4 net4_src[10];
+	struct net4 net4_src[MAX_RULES];
 	size_t net4_src_count;
 
 	struct filter_proto proto;
 
-	struct filter_port_range dst_port_ranges[10];
+	struct filter_port_range dst_port_ranges[MAX_RULES];
 	size_t port_dst_ranges_count;
 
-	struct filter_port_range src_port_ranges[10];
+	struct filter_port_range src_port_ranges[MAX_RULES];
 	size_t port_src_ranges_count;
 
 	uint16_t vlan;

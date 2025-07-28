@@ -14,10 +14,18 @@
 #include <assert.h>
 #include <stdint.h>
 
+////////////////////////////////////////////////////////////////////////////////
+
+#define TCP_FLAGS 9
+
+////////////////////////////////////////////////////////////////////////////////
+
 struct proto_classifier {
 	struct value_table tcp_flags;
 	uint32_t max_tcp_class;
 };
+
+////////////////////////////////////////////////////////////////////////////////
 
 static int
 proto_classifier_init(
@@ -27,7 +35,7 @@ proto_classifier_init(
 	uint32_t rule_count,
 	struct memory_context *mem
 ) {
-	int res = value_table_init(&c->tcp_flags, mem, 1, 1 << 9);
+	int res = value_table_init(&c->tcp_flags, mem, 1, 1 << TCP_FLAGS);
 	if (res < 0) {
 		return res;
 	}
@@ -41,7 +49,7 @@ proto_classifier_init(
 			continue;
 		}
 		value_table_new_gen(&c->tcp_flags);
-		int16_t mask = proto->disable_bits ^ ((1 << 9) - 1) ^
+		int16_t mask = proto->disable_bits ^ ((1 << TCP_FLAGS) - 1) ^
 			       proto->enable_bits;
 		for (int16_t m = mask; m > 0; m = (m - 1) & mask) {
 			value_table_touch(
@@ -53,7 +61,7 @@ proto_classifier_init(
 
 	value_table_compact(&c->tcp_flags);
 	c->max_tcp_class = 0;
-	for (uint16_t i = 0; i < (1 << 9); ++i) {
+	for (uint16_t i = 0; i < (1 << TCP_FLAGS); ++i) {
 		uint32_t value = value_table_get(&c->tcp_flags, 0, i);
 		if (value > c->max_tcp_class) {
 			c->max_tcp_class = value;
@@ -63,15 +71,19 @@ proto_classifier_init(
 	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
 		const struct filter_proto *proto = &r->transport.proto;
 		value_registry_start(registry);
-		if (proto->proto == IPPROTO_UDP) { // UDP
+		switch (proto->proto) {
+		case IPPROTO_UDP:
 			value_registry_collect(registry, c->max_tcp_class + 1);
-		} else if (proto->proto == IPPROTO_ICMP) { // ICPM
+			break;
+		case IPPROTO_ICMP:
 			value_registry_collect(registry, c->max_tcp_class + 2);
-		} else if (proto->proto == IPPROTO_TCP) { // TCP
+			break;
+		case IPPROTO_TCP:
 			if (proto->enable_bits & proto->disable_bits) {
 				continue;
 			}
-			int16_t mask = proto->disable_bits ^ ((1 << 9) - 1) ^
+			int16_t mask = proto->disable_bits ^
+				       ((1 << TCP_FLAGS) - 1) ^
 				       proto->enable_bits;
 			for (int16_t m = mask; m > 0; m = (m - 1) & mask) {
 				uint32_t value = value_table_get(
@@ -83,19 +95,24 @@ proto_classifier_init(
 				&c->tcp_flags, 0, proto->enable_bits
 			);
 			value_registry_collect(registry, value);
-		} else if (proto->proto == PROTO_UNSPEC) {
+			break;
+		case PROTO_UNSPEC:
 			// all classifiers are suitable
 			for (uint32_t class = 0; class <= c->max_tcp_class + 2;
 			     ++class) {
 				value_registry_collect(registry, class);
 			}
-		} else {
+			break;
+		default:
 			// TODO
+			assert(0);
 		}
 	}
 
 	return 0;
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 static inline int
 init_proto(
@@ -112,6 +129,8 @@ init_proto(
 		registry, c, rules, rule_count, memory_context
 	);
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 static inline uint32_t
 lookup_proto(struct packet *packet, void *data) {

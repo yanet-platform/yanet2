@@ -139,7 +139,7 @@ filter_query(
 
 		// store calculated classifier in the parent vertex
 		filter->v[vertex / 2].slots[vertex & 1] =
-			attr->lookup_func(packet, v->data);
+			attr->query_func(packet, v->data);
 	}
 
 	// calculate classifiers for the rest vertices except root

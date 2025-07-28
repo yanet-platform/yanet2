@@ -15,6 +15,7 @@
 
 #include <string.h>
 
+#include "common/memory_address.h"
 #include "key.h"
 #include "value.h"
 
@@ -75,13 +76,12 @@ lpm_new_page(struct lpm *lpm, uint32_t *page_idx) {
 			return -1;
 		}
 
+		// Set correct relative addresses
 		lpm_page_t **old_pages = ADDR_OF(&lpm->pages);
 		for (uint64_t chunk_idx = 0; chunk_idx < old_chunk_count;
-		     ++chunk_idx)
-			SET_OFFSET_OF(
-				&pages[chunk_idx],
-				ADDR_OF(&old_pages[chunk_idx])
-			);
+		     ++chunk_idx) {
+			EQUATE_OFFSET(&pages[chunk_idx], &old_pages[chunk_idx]);
+		}
 
 		SET_OFFSET_OF(&pages[old_chunk_count], page);
 

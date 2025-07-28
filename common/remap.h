@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/memory.h"
+#include "common/memory_address.h"
 
 /*
  * Remap table allows to remap one unsinged into another and intended to spare
@@ -179,9 +180,8 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 
 		for (uint64_t chunk_idx = 0; chunk_idx < old_chunk_count;
 		     ++chunk_idx) {
-			SET_OFFSET_OF(
-				new_keys + chunk_idx,
-				ADDR_OF(old_keys + chunk_idx)
+			EQUATE_OFFSET(
+				new_keys + chunk_idx, old_keys + chunk_idx
 			);
 		}
 

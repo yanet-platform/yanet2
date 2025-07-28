@@ -36,7 +36,7 @@ query_udp_packet(struct filter *filter, uint32_t expected) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-test_vlan_1(void *memory) {
+test_proto_1(void *memory) {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
@@ -83,7 +83,7 @@ int
 main() {
 	void *memory = malloc(1 << 24);
 
-	test_vlan_1(memory);
+	test_proto_1(memory);
 
 	free(memory);
 

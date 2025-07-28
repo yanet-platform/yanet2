@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "common/memory.h"
+#include "common/memory_address.h"
 
 #define RADIX_VALUE_INVALID 0xffffffff
 #define RADIX_CHUNK_SIZE 16
@@ -66,8 +67,7 @@ radix_new_page(struct radix *radix, uint32_t *page_idx) {
 
 		// Set correct relative addresses
 		for (size_t i = 0; i < old_chunk_count; ++i) {
-			radix_page_t *page = ADDR_OF(&old_pages[i]);
-			SET_OFFSET_OF(&new_pages[i], page);
+			EQUATE_OFFSET(&new_pages[i], &old_pages[i]);
 		}
 
 		SET_OFFSET_OF(&new_pages[new_chunk_count - 1], new_chunk);

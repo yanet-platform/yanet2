@@ -53,6 +53,53 @@ gen_packets(size_t count) {
 ////////////////////////////////////////////////////////////////////////////////
 
 int
+query_filter_compiler(
+	struct filter_compiler *filter_compiler,
+	struct packet *packet,
+	uint32_t *rule_count,
+	uint32_t **rules
+) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
+	);
+
+	uint32_t src_net = lpm4_lookup(
+		&filter_compiler->src_net4, (uint8_t *)&ipv4_hdr->src_addr
+	);
+	uint32_t dst_net = lpm4_lookup(
+		&filter_compiler->dst_net4, (uint8_t *)&ipv4_hdr->dst_addr
+	);
+
+	uint32_t src_port = value_table_get(
+		&filter_compiler->src_port4, 0, packet_src_port(packet)
+	);
+	uint32_t dst_port = value_table_get(
+		&filter_compiler->dst_port4, 0, packet_dst_port(packet)
+	);
+
+	uint32_t net = value_table_get(
+		&filter_compiler->v4_lookups.network, src_net, dst_net
+	);
+	uint32_t transport = value_table_get(
+		&filter_compiler->v4_lookups.transport_port, src_port, dst_port
+	);
+	uint32_t result = value_table_get(
+		&filter_compiler->v4_lookups.result, net, transport
+	);
+
+	struct value_range *range =
+		ADDR_OF(&filter_compiler->v4_lookups.result_registry.ranges) +
+		result;
+	*rules = ADDR_OF(&filter_compiler->v4_lookups.result_registry.values) +
+		 range->from;
+	*rule_count = range->count;
+	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+int
 main() {
 	// init memory
 	struct block_allocator allocator;
@@ -127,7 +174,7 @@ main() {
 		&attribute_port_dst
 	);
 
-	clock_t init_time = clock();
+	clock_t new_filter_init_start_time = clock();
 
 	struct filter filter;
 	FILTER_INIT(
@@ -135,31 +182,83 @@ main() {
 	);
 	assert(res == 0);
 	double filter_init_time =
-		(double)((clock() - init_time)) / CLOCKS_PER_SEC;
-	printf("Filter init time: %.4f seconds\n", filter_init_time);
+		(double)((clock() - new_filter_init_start_time)) /
+		CLOCKS_PER_SEC;
+	printf("[MACROS] New filter init time: %.4f seconds\n",
+	       filter_init_time);
+
+	// init memory for old filter
+	struct block_allocator allocator1;
+	block_allocator_init(&allocator1);
+	void *memory1 = malloc(MEMORY);
+	block_allocator_put_arena(&allocator1, memory1, MEMORY);
+
+	struct memory_context memory_context1;
+	res = memory_context_init(&memory_context1, "test_prev", &allocator1);
+	assert(res == 0);
+
+	clock_t old_filter_init_start_time = clock();
+	struct filter_compiler filter_compiler;
+	res = filter_compiler_init(
+		&filter_compiler, &memory_context1, rules, MAX_IP * MAX_IP
+	);
+	assert(res == 0);
+	double old_filter_init_time =
+		(double)((clock() - old_filter_init_start_time)) /
+		CLOCKS_PER_SEC;
+	printf("Old filter init time: %.4f seconds\n", old_filter_init_time);
 
 	struct packet *packets = gen_packets(PACKETS);
 
 	clock_t filter_query_start_time = clock();
+	uint32_t new_filter_checksum = 0;
 	for (size_t i = 0; i < PACKETS; ++i) {
 		uint32_t *actions;
 		uint32_t actions_count;
 		FILTER_QUERY(
 			&filter, sign, &packets[i], &actions, &actions_count
 		);
+		new_filter_checksum ^= actions_count;
+		for (size_t j = 0; j < actions_count; ++j) {
+			new_filter_checksum ^= actions[j];
+		}
 	}
-	double query_time =
+	double new_filter_query_time =
 		(double)((clock() - filter_query_start_time)) / CLOCKS_PER_SEC;
-	printf("Filter summary query time: %.4f seconds (%.2f "
+	printf("[MACROS] New filter summary query time: %.4f seconds (%.2f "
 	       "mp/s)\n",
-	       query_time,
-	       (double)PACKETS / query_time / 1e6);
+	       new_filter_query_time,
+	       (double)PACKETS / new_filter_query_time / 1e6);
+
+	clock_t old_filter_query_start_time = clock();
+	uint32_t old_filter_checksum = 0;
+
+	for (size_t i = 0; i < PACKETS; ++i) {
+		uint32_t *actions;
+		uint32_t actions_count;
+		query_filter_compiler(
+			&filter_compiler, &packets[i], &actions_count, &actions
+		);
+		old_filter_checksum ^= actions_count;
+		for (size_t j = 0; j < actions_count; ++j) {
+			old_filter_checksum ^= actions[j];
+		}
+	}
+	double old_filter_query_time =
+		(double)((clock() - old_filter_query_start_time)) /
+		CLOCKS_PER_SEC;
+	printf("Old filter summary query time: %.4f seconds (%.2f mp/s)\n",
+	       old_filter_query_time,
+	       (double)PACKETS / old_filter_query_time / 1e6);
+
+	assert(old_filter_checksum == new_filter_checksum);
 
 	puts("OK");
 
 	FILTER_FREE(&filter, sign);
 
 	free(memory);
+	free(memory1);
 
 	for (size_t i = 0; i < PACKETS; ++i) {
 		free_packet(&packets[i]);
