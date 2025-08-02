@@ -31,8 +31,8 @@ configure_file(output: build_cfg, configuration: yanet_conf)
 go = find_program('go', required: true)
 protoc = find_program('protoc', required: true)
 
+yanet_test_c_args = ['-O0']
 yanet_c_args = []
-# yanet_c_args = ['-g', '-O0']
 yanet_link_args = []
 if get_option('fuzzing').enabled()
   fuzz_args = [
@@ -41,6 +41,8 @@ if get_option('fuzzing').enabled()
     '-fprofile-instr-generate',
     '-fcoverage-mapping',
   ]
+
+  # For fuzzing builds, all libraries should be instrumented with coverage counters.
   yanet_c_args += fuzz_args
   yanet_link_args += fuzz_args
 endif
