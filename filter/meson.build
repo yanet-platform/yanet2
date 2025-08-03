@@ -22,5 +22,6 @@ lib_filter_dep = declare_dependency(
   include_directories: include_directories('.'),
 )
 
+subdir('utils')
 subdir('tests')
 subdir('bench')

@@ -35,7 +35,7 @@
 // for rule 3. Then user function can introduce 5 classifiers:
 //	0: classifier 0 corresponds to segment [0, 999] and maps to rule 3.
 //	1: classifier 1 corresponds to segment [1000, 1499] and maps to rules 1
-//and 3.
+// and 3.
 // 	2: [1500, 2000] -> rules {1, 2, 3}
 // 	3: [2001, 3000] -> rules {2, 3}
 // 	4: [3001, 65536] -> rule 2.

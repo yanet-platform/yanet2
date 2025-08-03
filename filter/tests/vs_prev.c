@@ -1,7 +1,7 @@
 #include "../filter.h"
 #include "../ipfw.h"
 #include "attribute.h"
-#include "util.h"
+#include "utils.h"
 
 #include <assert.h>
 #include <netinet/in.h>
