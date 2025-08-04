@@ -12,7 +12,7 @@ fuzz_args = []
 if get_option('fuzzing').enabled()
   fuzz_args = ['-fsanitize=fuzzer,address']
 else
-  nofuzz_sources += 'reproducer.c'
+  nofuzz_sources += '../../../tests/common/fuzzing/reproducer.c'
 endif
 
 foreach target_name, deps : fuzz_targets

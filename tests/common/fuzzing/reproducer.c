@@ -9,7 +9,7 @@ LLVMFuzzerTestOneInput(const unsigned char *data, size_t size); // NOLINT
 int
 main(int argc, char **argv) {
 	if (argc < 2) {
-		fprintf(stderr, "Usage: %s input-file", argv[0]);
+		fprintf(stderr, "Usage: %s input-file\n", argv[0]);
 		return 1;
 	}
 

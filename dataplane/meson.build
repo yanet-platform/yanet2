@@ -52,13 +52,11 @@ sources = files(
   'main.c',
 )
 
-if not get_option('fuzzing').enabled()
-  executable(
-    'yanet-dataplane',
-    sources,
-    dependencies: dependencies,
-    install: true,
-  )
-endif
+executable(
+  'yanet-dataplane',
+  sources,
+  dependencies: dependencies,
+  install: true,
+)
 
 subdir('unittest')
