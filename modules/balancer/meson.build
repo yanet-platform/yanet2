@@ -49,3 +49,4 @@ lib_balancer_cp_dep = declare_dependency(
 )
 
 subdir('fuzzing')
+subdir('tests')

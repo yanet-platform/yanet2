@@ -91,7 +91,7 @@ packet_ip4_encap(
 	}
 
 	header.hdr_checksum = 0;
-	rte_ipv4_cksum(&header);
+	header.hdr_checksum = rte_ipv4_cksum(&header);
 
 	packet_network_prepend(
 		packet,

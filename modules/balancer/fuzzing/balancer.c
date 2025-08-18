@@ -144,7 +144,10 @@ balancer_test_config(struct cp_module **cp_module) {
 	parse_address(AF_INET6, "2a01:db8::853a:0:3", &address);
 	struct balancer_service_config *svc_cfg_ipv6 =
 		balancer_service_config_create(
-			VS_OPT_ENCAP | VS_TYPE_V6, address.s6_addr, real_count
+			VS_OPT_ENCAP | VS_TYPE_V6,
+			address.s6_addr,
+			real_count,
+			1
 		);
 	add_real_servers(
 		svc_cfg_ipv6,
@@ -154,6 +157,16 @@ balancer_test_config(struct cp_module **cp_module) {
 		src_addr_v6,
 		src_mask_v4,
 		src_mask_v6
+	);
+
+	// 2a01::0/96
+	balancer_service_config_set_src_prefix(
+		svc_cfg_ipv6,
+		0,
+		(uint8_t[16]){0x2a, 0x01, [15] = 0},
+		(uint8_t[16]
+		){0x2a, 0x01, [12] = 0xff, [13] = 0xff, [14] = 0xff, [15] = 0xff
+		}
 	);
 
 	int rc = balancer_module_config_add_service(
@@ -171,7 +184,8 @@ balancer_test_config(struct cp_module **cp_module) {
 		balancer_service_config_create(
 			VS_OPT_ENCAP | VS_TYPE_V4,
 			(uint8_t *)&address_v4.s_addr,
-			real_count
+			real_count,
+			1
 		);
 	add_real_servers(
 		svc_cfg_ipv4,
@@ -181,6 +195,14 @@ balancer_test_config(struct cp_module **cp_module) {
 		src_addr_v6,
 		src_mask_v4,
 		src_mask_v6
+	);
+
+	// 10.6.0.0/16
+	balancer_service_config_set_src_prefix(
+		svc_cfg_ipv6,
+		0,
+		(uint8_t[16]){10, 6},
+		(uint8_t[16]){10, 6, 0xff, 0xff}
 	);
 
 	rc = balancer_module_config_add_service(

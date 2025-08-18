@@ -15,7 +15,9 @@ struct balancer_module {
 
 int
 balancer_handle_v4(
-	struct lpm *vs_lookup, struct packet *packet, uint64_t *res_service_id
+	struct balancer_module_config *balancer_config,
+	struct packet *packet,
+	struct balancer_vs **res_vs
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
@@ -23,23 +25,40 @@ balancer_handle_v4(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-	uint32_t service_id =
-		lpm_lookup(vs_lookup, 4, (uint8_t *)&ipv4_hdr->dst_addr);
+	uint32_t service_id = lpm_lookup(
+		&balancer_config->v4_service_lookup,
+		4,
+		(uint8_t *)&ipv4_hdr->dst_addr
+	);
 
 	if (service_id == LPM_VALUE_INVALID)
 		return -1;
 
+	if (balancer_config->service_count <= service_id)
+		// If the service_id is out of range of available
+		// services
+		return -1;
+
+	struct balancer_vs **vs_ptr =
+		ADDR_OF(&balancer_config->services) + service_id;
+	struct balancer_vs *vs = ADDR_OF(vs_ptr);
+
+	if (lpm_lookup(&vs->src, 4, (uint8_t *)&ipv4_hdr->src_addr) ==
+	    LPM_VALUE_INVALID)
+		return -1;
 	/*
 	 * FIXME: lpm value is 4 byte long where service_id is 8 bytes but
 	 * it is less possible to have more thant UINT32_MAX services.
 	 */
-	*res_service_id = service_id;
+	*res_vs = vs;
 	return 0;
 }
 
 int
 balancer_handle_v6(
-	struct lpm *vs_lookup, struct packet *packet, uint64_t *res_service_id
+	struct balancer_module_config *balancer_config,
+	struct packet *packet,
+	struct balancer_vs **res_vs
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
@@ -47,17 +66,33 @@ balancer_handle_v6(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	uint32_t service_id =
-		lpm_lookup(vs_lookup, 16, (uint8_t *)&ipv6_hdr->dst_addr);
+	uint32_t service_id = lpm_lookup(
+		&balancer_config->v6_service_lookup,
+		16,
+		(uint8_t *)&ipv6_hdr->dst_addr
+	);
 
 	if (service_id == LPM_VALUE_INVALID)
+		return -1;
+
+	if (balancer_config->service_count <= service_id)
+		// If the service_id is out of range of available
+		// services
+		return -1;
+
+	struct balancer_vs **vs_ptr =
+		ADDR_OF(&balancer_config->services) + service_id;
+	struct balancer_vs *vs = ADDR_OF(vs_ptr);
+
+	if (lpm_lookup(&vs->src, 16, (uint8_t *)&ipv6_hdr->src_addr) ==
+	    LPM_VALUE_INVALID)
 		return -1;
 
 	/*
 	 * FIXME: lpm value is 4 byte long where service_id is 8 bytes but
 	 * it is less possible to have more thant UINT32_MAX services.
 	 */
-	*res_service_id = service_id;
+	*res_vs = vs;
 	return 0;
 }
 
@@ -137,7 +172,7 @@ balancer_route(
 	return -1;
 }
 
-static void
+void
 balancer_handle_packets(
 	struct dp_config *dp_config,
 	uint64_t worker_idx,
@@ -155,37 +190,20 @@ balancer_handle_packets(
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
-		int lookup = -1;
-		uint64_t service_id;
+		int res = -1;
+		struct balancer_vs *vs;
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			lookup = balancer_handle_v4(
-				&balancer_config->v4_service_lookup,
-				packet,
-				&service_id
-			);
+			res = balancer_handle_v4(balancer_config, packet, &vs);
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			lookup = balancer_handle_v6(
-				&balancer_config->v6_service_lookup,
-				packet,
-				&service_id
-			);
+			res = balancer_handle_v6(balancer_config, packet, &vs);
 		}
 
-		if (lookup != 0) {
+		if (res != 0) {
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
-		if (balancer_config->service_count <= service_id) {
-			// If the service_id is out of range of available
-			// services
-			packet_front_drop(packet_front, packet);
-			continue;
-		}
-
-		struct balancer_vs *vs =
-			ADDR_OF(&balancer_config->services) + service_id;
 
 		struct balancer_rs *rs =
 			balancer_rs_lookup(balancer_config, vs, packet);

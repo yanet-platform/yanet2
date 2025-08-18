@@ -38,6 +38,7 @@ func main() {
 			0x00, 0x00, 0x00, 0x03,
 		})[0],
 		6,
+		1,
 	)
 	defer C.balancer_service_config_free(srv)
 
@@ -136,6 +137,18 @@ func main() {
 		})[0],
 		src_addr,
 		src_mask,
+	)
+
+	C.balancer_service_config_set_src_prefix(
+		srv,
+		0,
+		&([]C.uint8_t{})[0],
+		&([]C.uint8_t{
+			0xff, 0xff, 0xff, 0xff,
+			0xff, 0xff, 0xff, 0xff,
+			0xff, 0xff, 0xff, 0xff,
+			0xff, 0xff, 0xff, 0xff,
+		})[0],
 	)
 
 	C.balancer_module_config_add_service(

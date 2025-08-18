@@ -11,6 +11,7 @@ struct balancer_vs {
 	uint8_t address[16];
 	uint64_t real_start;
 	uint64_t real_count;
+	struct lpm src;
 };
 
 struct balancer_rs {
@@ -27,7 +28,7 @@ struct balancer_module_config {
 	struct lpm v6_service_lookup;
 
 	uint64_t service_count;
-	struct balancer_vs *services;
+	struct balancer_vs **services;
 
 	uint64_t real_count;
 	struct balancer_rs *reals;
