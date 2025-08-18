@@ -11,6 +11,7 @@ struct balancer_vs {
 	uint8_t address[16];
 	uint64_t real_start;
 	uint64_t real_count;
+	struct lpm src;
 };
 
 struct balancer_rs {
