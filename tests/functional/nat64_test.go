@@ -13,7 +13,7 @@ import (
 )
 
 // TestNAT64_BasicFunctionality tests basic NAT64 module functionality
-func TestNAT64_BasicFunctionality(t *testing.T) {
+func TestNAT64(t *testing.T) {
 	// Use global framework instance like in TestYANETStartup
 	fw := globalFramework
 	require.NotNil(t, fw, "Global framework should be initialized")
@@ -24,6 +24,7 @@ func TestNAT64_BasicFunctionality(t *testing.T) {
 			"ip link set kni0 up",
 			"ip nei add fe80::1 lladdr " + framework.SrcMAC + " dev kni0",
 			"ip nei add 203.0.113.1 lladdr " + framework.SrcMAC + " dev kni0",
+			"ip addr add 203.0.113.14/24 dev kni0",
 			"sleep 3",
 			// Enable L2 forwarding between devices
 			"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 0 --dst 1",
@@ -31,7 +32,8 @@ func TestNAT64_BasicFunctionality(t *testing.T) {
 			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net 203.0.113.14/32",
 			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net fe80::5054:ff:fe6b:ffa5/64",
 			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net ff02::/16",
-			"/mnt/target/release/yanet-cli-forward show --cfg=forward0 --instances 0",
+			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net 0.0.0.0/0",
+			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net ::/0",
 
 			// Route
 			"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via fe80::1 ::/0",
@@ -50,14 +52,6 @@ func TestNAT64_BasicFunctionality(t *testing.T) {
 			// Assign pipelines to devices
 			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=01:00.0 --pipelines nat64:1",
 			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
-
-			// Inspect configuration
-			"/mnt/target/release/yanet-cli-inspect",
-			"/mnt/target/release/yanet-cli-route show --cfg route0 --instances 0",
-
-			// Copy logs for debugging
-			"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",
-			"cp /var/log/yanet-dataplane.log /mnt/build/ 2>/dev/null || echo 'No dataplane log found'",
 		}
 
 		for _, cmd := range commands {
@@ -164,14 +158,17 @@ func createNAT64IPv4Packet(srcIP, dstIP net.IP, payload []byte) []byte {
 		PSH:     true,
 		ACK:     true,
 	}
-	tcp.SetNetworkLayerForChecksum(&ip4)
+	err := tcp.SetNetworkLayerForChecksum(&ip4)
+	if err != nil {
+		panic(err)
+	}
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
 		FixLengths:       true,
 		ComputeChecksums: true,
 	}
-	err := gopacket.SerializeLayers(buf, opts, &eth, &ip4, &tcp, gopacket.Payload(payload))
+	err = gopacket.SerializeLayers(buf, opts, &eth, &ip4, &tcp, gopacket.Payload(payload))
 	if err != nil {
 		panic(err)
 	}
@@ -203,14 +200,17 @@ func createNAT64IPv6Packet(srcIP, dstIP net.IP, payload []byte) []byte {
 		PSH:     true,
 		ACK:     true,
 	}
-	tcp.SetNetworkLayerForChecksum(&ip6)
+	err := tcp.SetNetworkLayerForChecksum(&ip6)
+	if err != nil {
+		panic(err)
+	}
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
 		FixLengths:       true,
 		ComputeChecksums: true,
 	}
-	err := gopacket.SerializeLayers(buf, opts, &eth, &ip6, &tcp, gopacket.Payload(payload))
+	err = gopacket.SerializeLayers(buf, opts, &eth, &ip6, &tcp, gopacket.Payload(payload))
 	if err != nil {
 		panic(err)
 	}

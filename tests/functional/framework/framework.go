@@ -62,7 +62,6 @@ func New(config *Config, opts ...FrameworkOption) (*TestFramework, error) {
 		return nil, fmt.Errorf("config is required")
 	}
 
-	// Create work directory if not exists
 	if config.WorkDir == "" {
 		config.WorkDir = filepath.Join(os.TempDir(), "yanet-test")
 	}
@@ -77,13 +76,6 @@ func New(config *Config, opts ...FrameworkOption) (*TestFramework, error) {
 		socketClients: make(map[int]*SocketClient),
 	}
 
-	// Apply functional options
-	for _, opt := range opts {
-		if err := opt(fw); err != nil {
-			return nil, fmt.Errorf("failed to apply option: %w", err)
-		}
-	}
-
 	// Initialize QEMU manager
 	qemu, err := NewQEMUManager(config.QEMUImage, fw.log)
 	if err != nil {
@@ -96,12 +88,15 @@ func New(config *Config, opts ...FrameworkOption) (*TestFramework, error) {
 		return nil, fmt.Errorf("failed to create CLI manager: %w", err)
 	}
 
-	// Initialize PacketParser
-	packetParser := NewPacketParser()
-
 	fw.QEMU = qemu
 	fw.CLI = cli
-	fw.PacketParser = packetParser
+	fw.PacketParser = NewPacketParser()
+
+	for _, opt := range opts {
+		if err := opt(fw); err != nil {
+			return nil, fmt.Errorf("failed to apply option: %w", err)
+		}
+	}
 
 	return fw, nil
 }
@@ -502,16 +497,6 @@ func (f *TestFramework) SendPacketAndParse(inputIfaceIndex int, outputIfaceIndex
 	return inputPacketInfo, outputPacketInfo, nil
 }
 
-// VerifyDecapsulation verifies that decapsulation was performed correctly
-func (f *TestFramework) VerifyDecapsulation(originalPacket, processedPacket *PacketInfo) error {
-	return f.PacketParser.VerifyDecapsulation(originalPacket, processedPacket)
-}
-
-// VerifyNAT64Translation verifies that NAT64 translation was performed correctly
-func (f *TestFramework) VerifyNAT64Translation(originalPacket, translatedPacket *PacketInfo, nat64Prefix string) error {
-	return f.PacketParser.VerifyNAT64Translation(originalPacket, translatedPacket, nat64Prefix)
-}
-
 // GetSocketClient returns a socket client for the specified interface
 func (f *TestFramework) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
 	// For QEMU networking: Unix stream socket interfaces only
@@ -540,11 +525,6 @@ func (f *TestFramework) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
 	return client, nil
 }
 
-// GetSockDev returns a socket device for the specified interface (alias for GetSocketClient)
-func (f *TestFramework) GetSockDev(ifaceIndex int) (*SocketClient, error) {
-	return f.GetSocketClient(ifaceIndex)
-}
-
 // StartYANET starts and configures YANET services in the VM using provided dataplane and controlplane configuration files
 func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig string) error {
 	f.log.Info("Starting YANET in VM...")
@@ -559,13 +539,13 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	}
 
 	// Create configuration files in the mounted config directory on the host
-	f.log.Info("Creating configuration files in mounted config directory...")
+	f.log.Debug("Creating configuration files in mounted config directory...")
 	if err := f.createConfigFiles(dataplaneConfig, controlplaneConfig); err != nil {
 		return fmt.Errorf("failed to create config files: %w", err)
 	}
 
 	// Check if YANET binaries are available
-	f.log.Info("Checking YANET binary availability...")
+	f.log.Debug("Checking YANET binary availability...")
 	commands := []string{
 		"ls -la /mnt/build/",
 		"ls -la /mnt/build/dataplane/",
@@ -584,7 +564,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	}
 
 	// Load required kernel modules
-	f.log.Info("Loading required kernel modules...")
+	f.log.Debug("Loading required kernel modules...")
 	moduleCommands := []string{
 		"sudo modprobe vfio-pci",
 	}
@@ -597,45 +577,34 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 		f.log.Debugf("Module command: %s\nOutput: %s", cmd, output)
 	}
 
-	f.log.Info("Configuring network interfaces for DPDK...")
+	f.log.Debug("Configuring network interfaces for DPDK...")
 
 	// Check PCI devices status
-	statusCmd := "/mnt/build/dpdk-devbind.py --status"
+	statusCmd := "/mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py --status"
 	output, err := f.CLI.ExecuteCommand(statusCmd)
 	if err != nil {
 		return fmt.Errorf("DPDK devbind status check failed: %v", err)
-	} else {
-		f.log.Debugf("DPDK devices status: %s", output)
 	}
+	f.log.Debugf("DPDK devices status: %s", output)
 
 	// Bind network interfaces to DPDK driver
 	// Based on the QEMU configuration, we need to bind the virtio interfaces
 	bindCommands := []string{
-		"/mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py --bind=vfio-pci 01:00.0 || echo 'Failed to bind 01:00.0, continuing...'",
-		"/mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py --bind=vfio-pci 02:00.0 || echo 'Failed to bind 02:00.0, continuing...'",
+		"/mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py --bind=vfio-pci 01:00.0",
+		"/mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py --bind=vfio-pci 02:00.0",
 	}
 
 	for _, cmd := range bindCommands {
 		output, err = f.CLI.ExecuteCommand(cmd)
 		if err != nil {
-			f.log.Warnf("DPDK bind command failed (may not be critical): %s, error: %v", cmd, err)
-		} else {
-			f.log.Debugf("DPDK bind command: %s\nOutput: %s", cmd, output)
+			return fmt.Errorf("interface bind failed: %s, %w", cmd, err)
 		}
-	}
-
-	// Check status again after binding
-	output, err = f.CLI.ExecuteCommand(statusCmd)
-	if err != nil {
-		f.log.Warnf("DPDK devbind status check after binding failed: %v", err)
-	} else {
-		f.log.Debugf("DPDK devices status after binding: %s", output)
+		f.log.Debugf("DPDK bind command: %s\nOutput: %s", cmd, output)
 	}
 
 	// Verify that config files are accessible in VM
 	f.log.Info("Verifying config files are accessible in VM...")
 	verifyCommands := []string{
-		"ls -la /mnt/config/",
 		"ls -la /mnt/config/dataplane.yaml",
 		"ls -la /mnt/config/controlplane.yaml",
 	}
@@ -649,7 +618,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	}
 
 	// Start dataplane in background using config from mounted directory
-	f.log.Info("Starting YANET dataplane...")
+	f.log.Debug("Starting YANET dataplane...")
 	dataplaneCmd := "bash -c 'nohup /mnt/build/dataplane/yanet-dataplane /mnt/config/dataplane.yaml > /var/log/yanet-dataplane.log 2>&1 &'"
 	output, err = f.CLI.ExecuteCommand(dataplaneCmd)
 	if err != nil {
@@ -658,11 +627,10 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	f.log.Infof("Dataplane started: %s", output)
 
 	// Wait for dataplane to initialize
-	f.log.Info("Waiting for dataplane to initialize...")
-	time.Sleep(5 * time.Second)
+	f.log.Debug("Waiting for dataplane to initialize...")
 
 	// Start controlplane in background using config from mounted directory
-	f.log.Info("Starting YANET controlplane...")
+	f.log.Debug("Starting YANET controlplane...")
 	controlplaneCmd := "bash -c 'nohup /mnt/build/controlplane/yanet-controlplane -c /mnt/config/controlplane.yaml > /var/log/yanet-controlplane.log 2>&1 &'"
 	output, err = f.CLI.ExecuteCommand(controlplaneCmd)
 	if err != nil {
@@ -671,7 +639,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	f.log.Infof("Controlplane started: %s", output)
 
 	// Verify services are running
-	f.log.Info("Verifying YANET services are running...")
+	f.log.Debug("Verifying YANET services are running...")
 	time.Sleep(5 * time.Second)
 
 	checkCmds := []string{

@@ -39,26 +39,45 @@ func createForwardPacket(srcIP, dstIP net.IP, payload []byte) []byte {
 		PSH:     true,
 		ACK:     true,
 	}
-	tcp.SetNetworkLayerForChecksum(&ip4)
+	err := tcp.SetNetworkLayerForChecksum(&ip4)
+	if err != nil {
+		panic(err)
+	}
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
 		FixLengths:       true,
 		ComputeChecksums: true,
 	}
-	err := gopacket.SerializeLayers(buf, opts, &eth, &ip4, &tcp, gopacket.Payload(payload))
+	err = gopacket.SerializeLayers(buf, opts, &eth, &ip4, &tcp, gopacket.Payload(payload))
 	if err != nil {
 		panic(err)
 	}
 	return buf.Bytes()
 }
 
-// createL2ForwardPacket creates a simple Ethernet frame for L2 forwarding testing
-func createL2ForwardPacket(payload []byte) []byte {
+// createICMPPacket creates a simple ICMP echo request packet for testing
+func createICMPPacket(srcIP, dstIP net.IP, payload []byte) []byte {
 	eth := layers.Ethernet{
 		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
 		DstMAC:       framework.MustParseMAC(framework.DstMAC),
 		EthernetType: layers.EthernetTypeIPv4,
+	}
+
+	ip4 := layers.IPv4{
+		Version:  4,
+		IHL:      5,
+		Id:       1,
+		TTL:      64,
+		Protocol: layers.IPProtocolICMPv4,
+		SrcIP:    srcIP,
+		DstIP:    dstIP,
+	}
+
+	icmp := layers.ICMPv4{
+		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+		Id:       1,
+		Seq:      1,
 	}
 
 	buf := gopacket.NewSerializeBuffer()
@@ -66,7 +85,40 @@ func createL2ForwardPacket(payload []byte) []byte {
 		FixLengths:       true,
 		ComputeChecksums: true,
 	}
-	err := gopacket.SerializeLayers(buf, opts, &eth, gopacket.Payload(payload))
+	err := gopacket.SerializeLayers(buf, opts, &eth, &ip4, &icmp, gopacket.Payload(payload))
+	if err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+// createICMPv6Packet creates a simple ICMPv6 echo request packet for testing
+func createICMPv6Packet(srcIP, dstIP net.IP, payload []byte) []byte {
+	eth := layers.Ethernet{
+		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
+		DstMAC:       framework.MustParseMAC(framework.DstMAC),
+		EthernetType: layers.EthernetTypeIPv6,
+	}
+
+	ip6 := layers.IPv6{
+		Version:    6,
+		NextHeader: layers.IPProtocolICMPv6,
+		HopLimit:   64,
+		SrcIP:      srcIP,
+		DstIP:      dstIP,
+	}
+
+	icmp := layers.ICMPv6{
+		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
+	}
+	icmp.SetNetworkLayerForChecksum(&ip6)
+
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
+	err := gopacket.SerializeLayers(buf, opts, &eth, &ip6, &icmp, gopacket.Payload(payload))
 	if err != nil {
 		panic(err)
 	}
@@ -74,8 +126,7 @@ func createL2ForwardPacket(payload []byte) []byte {
 }
 
 // TestForward_BasicFunctionality tests basic forward module functionality
-func TestForward_BasicFunctionality(t *testing.T) {
-	// Use global framework instance like in TestYANETStartup
+func TestForward(t *testing.T) {
 	fw := globalFramework
 	require.NotNil(t, fw, "Global framework should be initialized")
 
@@ -83,15 +134,18 @@ func TestForward_BasicFunctionality(t *testing.T) {
 		// Configure forward module (L2 and L3 forwarding)
 		commands := []string{
 			"ip link set kni0 up",
-			"ip nei add fe80::1 lladdr 52:54:00:6b:ff:a1 dev kni0",
-			"ip nei add 203.0.113.1 lladdr 52:54:00:6b:ff:a1 dev kni0",
-			"sleep 3",
+			"ip nei add fe80::1 lladdr " + framework.SrcMAC + " dev kni0",
+			"ip nei add 203.0.113.1 lladdr " + framework.SrcMAC + " dev kni0",
+			"ip addr add 203.0.113.14/24 dev kni0",
+
 			// Enable L2 forwarding between devices
 			"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 0 --dst 1",
 			"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 1 --dst 0",
-			// Add L3 forwarding rules
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net 192.0.2.0/24",
+			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net 203.0.113.14/32",
+			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net fe80::5054:ff:fe6b:ffa5/64",
+			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net ff02::/16",
 			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net 0.0.0.0/0",
+			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net ::/0",
 			"/mnt/target/release/yanet-cli-forward show --cfg=forward0 --instances 0",
 
 			// Route
@@ -105,32 +159,24 @@ func TestForward_BasicFunctionality(t *testing.T) {
 			// Assign pipelines to devices
 			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=01:00.0 --pipelines forward:1",
 			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
-
-			// Inspect configuration
-			"/mnt/target/release/yanet-cli-inspect",
-			"/mnt/target/release/yanet-cli-route show --cfg route0 --instances 0",
-
-			// Copy logs for debugging
-			"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",
-			"cp /var/log/yanet-dataplane.log /mnt/build/ 2>/dev/null || echo 'No dataplane log found'",
 		}
 
 		for _, cmd := range commands {
 			output, err := fw.CLI.ExecuteCommand(cmd)
 			require.NoError(t, err, "Failed to execute command: %s", cmd)
-			t.Logf("Output: %s", output)
+			if output != "" {
+				t.Logf("Output: %s", output)
+			}
 		}
 	})
 
-	t.Run("Test_L3_Forwarding", func(t *testing.T) {
-		// Test L3 forwarding within configured network
+	t.Run("Test_Forwarding", func(t *testing.T) {
 		packet := createForwardPacket(
 			net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
 			net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
 			[]byte("forward test"),
 		)
 
-		// Send packet and wait for response
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
 		require.NoError(t, err, "Failed to send packet")
 
@@ -142,41 +188,43 @@ func TestForward_BasicFunctionality(t *testing.T) {
 		assert.Equal(t, "192.0.2.2", outputPacket.DstIP.String(), "Destination IP should be preserved")
 	})
 
-	t.Run("Test_L2_Forwarding", func(t *testing.T) {
-		// Test L2 forwarding (MAC-based)
-		packet := createL2ForwardPacket(
-			[]byte("l2 forward test"),
+	t.Run("Test_ICMP4_Echo", func(t *testing.T) {
+		packet := createICMPPacket(
+			net.ParseIP("203.0.113.1"),
+			net.ParseIP("203.0.113.14"),
+			[]byte("icmp test"),
 		)
 
 		// Send packet and wait for response
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
-		require.NoError(t, err, "Failed to send L2 packet")
+		require.NoError(t, err, "Failed to send ICMP packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 
-		// For L2 forwarding, we mainly verify the packet was processed
-		// MAC addresses might be modified by the forwarding process
+		assert.Equal(t, "203.0.113.14", outputPacket.SrcIP.String(), "Source IP should be the destination of the request")
+		assert.Equal(t, "203.0.113.1", outputPacket.DstIP.String(), "Destination IP should be the source of the request")
 	})
 
-	t.Run("Test_Non_Matching_Network", func(t *testing.T) {
-		// Test packet to network not in forwarding table
-		packet := createForwardPacket(
-			net.ParseIP("10.0.0.1"), // src IP (not in forwarding rules)
-			net.ParseIP("10.0.0.2"), // dst IP (not in forwarding rules)
-			[]byte("no route"),
+	t.Run("Test_ICMP6_Echo", func(t *testing.T) {
+		// Test ICMPv6 echo request to fe80::5054:ff:fe6b:ffa5
+		packet := createICMPv6Packet(
+			net.ParseIP("fe80::1"),                 // src IP
+			net.ParseIP("fe80::5054:ff:fe6b:ffa5"), // dst IP (in L3 forwarding table)
+			[]byte("icmpv6 test"),
 		)
 
 		// Send packet and wait for response
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
-		require.NoError(t, err, "Failed to send non-matching packet")
+		require.NoError(t, err, "Failed to send ICMPv6 packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		require.NotNil(t, outputPacket, "Output packet should be parsed")
 
-		if outputPacket != nil {
-			// Packet might be forwarded via default route
-			assert.Equal(t, "10.0.0.1", outputPacket.SrcIP.String(), "Source IP should be preserved")
-			assert.Equal(t, "10.0.0.2", outputPacket.DstIP.String(), "Destination IP should be preserved")
-		}
+		// Verify that we received an ICMPv6 echo reply
+		// For ICMPv6 echo reply, the type should be 129 (EchoReply)
+		// and the addresses should be swapped
+		assert.Equal(t, "fe80::5054:ff:fe6b:ffa5", outputPacket.SrcIP.String(), "Source IP should be the destination of the request")
+		assert.Equal(t, "fe80::1", outputPacket.DstIP.String(), "Destination IP should be the source of the request")
 	})
 }

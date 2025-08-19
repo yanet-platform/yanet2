@@ -24,7 +24,7 @@ func TestDecap_BasicFunctionality(t *testing.T) {
 			"ip link set kni0 up",
 			"ip nei add fe80::1 lladdr " + framework.SrcMAC + " dev kni0",
 			"ip nei add 203.0.113.1 lladdr " + framework.SrcMAC + " dev kni0",
-			"sleep 3",
+			"ip addr add 203.0.113.14/24 dev kni0",
 
 			// Enable L2 forwarding between devices
 			"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 0 --dst 1",
@@ -32,8 +32,6 @@ func TestDecap_BasicFunctionality(t *testing.T) {
 			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net 203.0.113.14/32",
 			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net fe80::5054:ff:fe6b:ffa5/64",
 			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net ff02::/16",
-
-			// Add L3 forwarding rules
 			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net 0.0.0.0/0",
 			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net ::/0",
 
@@ -41,21 +39,17 @@ func TestDecap_BasicFunctionality(t *testing.T) {
 			"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via fe80::1 ::/0",
 			"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 0.0.0.0/0",
 
-			// Add decap prefixes (outer tunnel destination addresses)
-			// IPv4 prefix for IPIP6 (IPv6-in-IPv4) tunnels
 			"/mnt/target/release/yanet-cli-decap prefix-add --cfg decap0 --instances 0 -p 4.5.6.7/32",
-			// IPv6 prefix for IP6IP (IPv4-in-IPv6) tunnels
 			"/mnt/target/release/yanet-cli-decap prefix-add --cfg decap0 --instances 0 -p 1:2:3:4::abcd/128",
 
-			// Configure pipelines (following docs/virtual-run.org)
 			"/mnt/target/release/yanet-cli-pipeline update --name=bootstrap --modules forward:forward0 --instance=0",
 			"/mnt/target/release/yanet-cli-pipeline update --name=decap --modules forward:forward0 --modules decap:decap0 --modules route:route0 --instance=0",
 
-			// Assign pipelines to devices
 			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=01:00.0 --pipelines decap:1",
 			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
 
-			// Copy logs to mounted directory for debugging
+			// for debugging
+			//"sh -c 'tcpdump -nvei kni0 > /mnt/build/tcpdump.log 2>/dev/null &'",
 			//"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",
 			//"cp /var/log/yanet-dataplane.log /mnt/build/ 2>/dev/null || echo 'No dataplane log found'",
 		}
@@ -409,14 +403,17 @@ func createIPIP6Packet(outerDstIP, innerSrcIP, innerDstIP net.IP) []byte {
 	icmp := layers.ICMPv6{
 		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
 	}
-	icmp.SetNetworkLayerForChecksum(&ip6)
+	err := icmp.SetNetworkLayerForChecksum(&ip6)
+	if err != nil {
+		panic(err)
+	}
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
 		FixLengths:       true,
 		ComputeChecksums: true,
 	}
-	err := gopacket.SerializeLayers(buf, opts, &eth, &ip4tunnel, &ip6, &icmp)
+	err = gopacket.SerializeLayers(buf, opts, &eth, &ip4tunnel, &ip6, &icmp)
 	if err != nil {
 		panic(err)
 	}
