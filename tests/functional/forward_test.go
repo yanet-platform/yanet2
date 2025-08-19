@@ -111,14 +111,17 @@ func createICMPv6Packet(srcIP, dstIP net.IP, payload []byte) []byte {
 	icmp := layers.ICMPv6{
 		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
 	}
-	icmp.SetNetworkLayerForChecksum(&ip6)
+	err := icmp.SetNetworkLayerForChecksum(&ip6)
+	if err != nil {
+		panic(err)
+	}
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
 		FixLengths:       true,
 		ComputeChecksums: true,
 	}
-	err := gopacket.SerializeLayers(buf, opts, &eth, &ip6, &icmp, gopacket.Payload(payload))
+	err = gopacket.SerializeLayers(buf, opts, &eth, &ip6, &icmp, gopacket.Payload(payload))
 	if err != nil {
 		panic(err)
 	}

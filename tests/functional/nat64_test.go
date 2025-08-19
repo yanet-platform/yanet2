@@ -57,7 +57,9 @@ func TestNAT64(t *testing.T) {
 		for _, cmd := range commands {
 			output, err := fw.CLI.ExecuteCommand(cmd)
 			require.NoError(t, err, "Failed to execute command: %s", cmd)
-			t.Logf("Output: %s", output)
+			if output != "" {
+				t.Logf("Output: %s", output)
+			}
 		}
 	})
 

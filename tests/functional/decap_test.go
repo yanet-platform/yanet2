@@ -545,14 +545,17 @@ func createIP6IP6Packet(outerDstIP, innerSrcIP, innerDstIP net.IP) []byte {
 	icmp := layers.ICMPv6{
 		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
 	}
-	icmp.SetNetworkLayerForChecksum(&ip6)
+	err := icmp.SetNetworkLayerForChecksum(&ip6)
+	if err != nil {
+		panic(err)
+	}
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
 		FixLengths:       true,
 		ComputeChecksums: true,
 	}
-	err := gopacket.SerializeLayers(buf, opts, &eth, &ip6tunnel, &ip6, &icmp)
+	err = gopacket.SerializeLayers(buf, opts, &eth, &ip6tunnel, &ip6, &icmp)
 	if err != nil {
 		panic(err)
 	}
@@ -811,14 +814,17 @@ func createFragmentedIPIP6Packet(outerDstIP, innerSrcIP, innerDstIP net.IP, frag
 	icmp := layers.ICMPv6{
 		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
 	}
-	icmp.SetNetworkLayerForChecksum(&ip6)
+	err := icmp.SetNetworkLayerForChecksum(&ip6)
+	if err != nil {
+		panic(err)
+	}
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
 		FixLengths:       true,
 		ComputeChecksums: true,
 	}
-	err := gopacket.SerializeLayers(buf, opts, &eth, &ip4tunnel, &ip6, &icmp)
+	err = gopacket.SerializeLayers(buf, opts, &eth, &ip4tunnel, &ip6, &icmp)
 	if err != nil {
 		panic(err)
 	}
