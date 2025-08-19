@@ -697,14 +697,14 @@ func (f *TestFramework) createConfigFiles(dataplaneConfig string, controlplaneCo
 	if err := os.WriteFile(dataplaneConfigPath, []byte(dataplaneConfig), 0644); err != nil {
 		return fmt.Errorf("failed to write dataplane config to %s: %w", dataplaneConfigPath, err)
 	}
-	f.log.Infof("Created dataplane config: %s", dataplaneConfigPath)
+	f.log.Debugf("Created dataplane config: %s", dataplaneConfigPath)
 
 	// Create controlplane config file
 	controlplaneConfigPath := filepath.Join(configDir, "controlplane.yaml")
 	if err := os.WriteFile(controlplaneConfigPath, []byte(controlplaneConfig), 0644); err != nil {
 		return fmt.Errorf("failed to write controlplane config to %s: %w", controlplaneConfigPath, err)
 	}
-	f.log.Infof("Created controlplane config: %s", controlplaneConfigPath)
+	f.log.Debugf("Created controlplane config: %s", controlplaneConfigPath)
 
 	// Verify files were created successfully
 	if _, err := os.Stat(dataplaneConfigPath); err != nil {
@@ -714,6 +714,6 @@ func (f *TestFramework) createConfigFiles(dataplaneConfig string, controlplaneCo
 		return fmt.Errorf("controlplane config file not found after creation: %w", err)
 	}
 
-	f.log.Info("Configuration files created successfully on host")
+	f.log.Debug("Configuration files created successfully on host")
 	return nil
 }

@@ -476,17 +476,11 @@ func TestNAT64(t *testing.T) {
 		// For now, just log the output to see what it returns
 		t.Logf("Command output: %s", output)
 
-		// TODO: Fix this test when we figure out how to get the configuration information
-		// Check that output contains default values
-		// Default IPv4 MTU should be 1450
-		// assert.Contains(t, output, "IPv4: 1450", "Default IPv4 MTU should be 1450")
-		// Default IPv6 MTU should be 1280
-		// assert.Contains(t, output, "IPv6: 1280", "Default IPv6 MTU should be 1280")
+		assert.Contains(t, output, "IPv4: 1450", "Default IPv4 MTU should be 1450")
+		assert.Contains(t, output, "IPv6: 1280", "Default IPv6 MTU should be 1280")
 
-		// Check that drop_unknown flags are false by default
-		// The output should contain "drop_unknown_prefix: false" and "drop_unknown_mapping: false"
-		// assert.Contains(t, output, "drop_unknown_prefix: false", "drop_unknown_prefix should be false by default")
-		// assert.Contains(t, output, "drop_unknown_mapping: false", "drop_unknown_mapping should be false by default")
+		assert.Contains(t, output, "drop_unknown_prefix: false", "drop_unknown_prefix should be false by default")
+		assert.Contains(t, output, "drop_unknown_mapping: false", "drop_unknown_mapping should be false by default")
 	})
 	time.Sleep(time.Second)
 }
