@@ -401,6 +401,8 @@ dataplane_init(
 
 		instance->dp_config->dp_topology.device_count =
 			config->device_count;
+		instance->dp_config->instance_idx = instance_idx;
+		instance->dp_config->instance_count = dataplane->instance_count;
 
 		// FIXME: load modules into dp memory
 		rc = dataplane_load_module(
