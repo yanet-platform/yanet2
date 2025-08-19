@@ -82,6 +82,61 @@ make_mbuf(
 	return mbuf;
 }
 
+// IPv6 in host byte order
+static struct rte_mbuf *
+make_mbuf_v6(
+	const uint8_t src_ip[16],
+	const uint8_t dst_ip[16],
+	uint16_t src_port,
+	uint16_t dst_port
+) {
+	size_t total_size =
+		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + 2048;
+	struct rte_mbuf *mbuf = malloc(total_size);
+	memset(mbuf, 0, sizeof(struct rte_mbuf));
+	mbuf->refcnt = 1;
+
+	if (!mbuf) {
+		return NULL;
+	}
+
+	uint16_t total_len = sizeof(struct rte_ether_hdr) +
+			     sizeof(struct rte_ipv6_hdr) +
+			     sizeof(struct rte_udp_hdr);
+
+	mbuf->buf_addr = ((char *)mbuf) + sizeof(struct rte_mbuf);
+	mbuf->data_len = 2048;
+	mbuf->data_off = RTE_PKTMBUF_HEADROOM;
+	mbuf->buf_len = 2048 + RTE_PKTMBUF_HEADROOM;
+
+	mbuf->pkt_len = total_len;
+	mbuf->l2_len = sizeof(struct rte_ether_hdr);
+	mbuf->l3_len = sizeof(struct rte_ipv6_hdr);
+	mbuf->l4_len = sizeof(struct rte_udp_hdr);
+	mbuf->packet_type =
+		RTE_PTYPE_L2_ETHER | RTE_PTYPE_L3_IPV6 | RTE_PTYPE_L4_UDP;
+
+	struct rte_ether_hdr *eth =
+		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+
+	struct rte_ipv6_hdr *ip = (struct rte_ipv6_hdr *)(eth + 1);
+	ip->proto = IPPROTO_UDP;
+	ip->payload_len = rte_cpu_to_be_16(sizeof(struct rte_udp_hdr));
+	for (size_t i = 0; i < 16; ++i) {
+		ip->src_addr[i] = src_ip[16 - i - 1];
+		ip->dst_addr[i] = dst_ip[16 - i - 1];
+	}
+
+	struct rte_udp_hdr *udp = (struct rte_udp_hdr *)(ip + 1);
+	udp->src_port = rte_cpu_to_be_16(src_port);
+	udp->dst_port = rte_cpu_to_be_16(dst_port);
+	udp->dgram_len = rte_cpu_to_be_16(sizeof(*udp));
+	udp->dgram_cksum = 0;
+
+	return mbuf;
+}
+
 void
 free_packet(struct packet *packet) {
 	free(packet->mbuf);
@@ -107,6 +162,24 @@ make_packet(
 	return packet;
 }
 
+// IPv6 in host byte order
+struct packet
+make_packet_net6(
+	const uint8_t src_ip[16],
+	const uint8_t dst_ip[16],
+	uint16_t src_port,
+	uint16_t dst_port
+) {
+	struct packet packet;
+	packet.mbuf = make_mbuf_v6(src_ip, dst_ip, src_port, dst_port);
+	assert(packet.mbuf != NULL);
+	int parse_result = parse_packet(&packet);
+	assert(parse_result == 0);
+	return packet;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 void
 query_filter_and_expect_action(
 	struct filter *filter, struct packet *packet, uint32_t expected_action
@@ -129,6 +202,8 @@ query_filter_and_expect_no_actions(
 	assert(res == 0);
 	assert(count == 0);
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 void
 builder_add_net6_dst(struct filter_rule_builder *builder, struct net6 dst) {

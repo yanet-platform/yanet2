@@ -13,7 +13,6 @@ test('basic_ports', test_filter_basic_ports, suite: ['filter'])
 
 # test basic net4
 test_filter_basic_net4 = executable('basic_net4',
-  
 ['basic_net4.c'],
   c_args: yanet_test_c_args,
   link_args: yanet_link_args,
@@ -21,6 +20,16 @@ test_filter_basic_net4 = executable('basic_net4',
   link_language: 'c'
 )
 test('basic_net4', test_filter_basic_net4, suite: ['filter'])
+
+# test basic net6
+test_filter_basic_net6 = executable('basic_net6',
+['basic_net6.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('basic_net6', test_filter_basic_net6, suite: ['filter'])
 
 # test corner cases
 test_filter_corner = executable(

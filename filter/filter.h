@@ -79,6 +79,8 @@
 // Also, user specifies function to free data allocated by user in the
 // initialization function.
 
+////////////////////////////////////////////////////////////////////////////////
+
 #pragma once
 
 #include "attribute.h"

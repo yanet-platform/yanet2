@@ -65,14 +65,24 @@ typedef void (*net6_get_part_func)(
 
 static void
 net6_get_hi_part(struct net6 *net, uint64_t *addr, uint64_t *mask) {
-	*addr = net->addr_hi;
-	*mask = net->mask_hi;
+	*addr = 0;
+	for (size_t i = 0, shift = 0; i < 8; ++i, shift += 8) {
+		*addr |= ((uint64_t)net->ip[8 + i]) << shift;
+	}
+	*mask = -1ull << (64 - net->pref_hi);
+	*mask = be64toh(*mask);
+	*addr &= *mask;
 }
 
 static void
 net6_get_lo_part(struct net6 *net, uint64_t *addr, uint64_t *mask) {
-	*addr = net->addr_lo;
-	*mask = net->mask_lo;
+	*addr = 0;
+	for (size_t i = 0, shift = 0; i < 8; ++i, shift += 8) {
+		*addr |= ((uint64_t)net->ip[8 + i]) << shift;
+	}
+	*mask = -1ull << (64 - net->pref_lo);
+	*mask = be64toh(*mask);
+	*addr &= *mask;
 }
 
 static inline int

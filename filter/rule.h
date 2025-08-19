@@ -11,6 +11,8 @@ struct filter_net6 {
 	uint32_t dst_count;
 
 	// IPv6 + mask in little-endian
+	// both masks must be prefix-consecutive
+	// (like 11..100..0)
 	struct net6 *srcs;
 	struct net6 *dsts;
 };
@@ -20,6 +22,8 @@ struct filter_net4 {
 	uint32_t dst_count;
 
 	// IPv4 + mask in little-endian
+	// mask must be prefix-consecutive
+	// (like 11..100..0)
 	struct net4 *srcs;
 	struct net4 *dsts;
 };

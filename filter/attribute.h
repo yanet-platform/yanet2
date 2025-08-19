@@ -4,6 +4,7 @@
 #include "lib/dataplane/packet/packet.h"
 
 #include "attribute/net4.h"
+#include "attribute/net6.h"
 #include "attribute/port.h"
 #include "attribute/proto.h"
 #include "attribute/vlan.h"
@@ -88,7 +89,15 @@ static const struct filter_attribute attribute_net4_dst = {
 // IPv6
 ////////////////////////////////////////////////////////////////////////////////
 
-// TODO
+// IPv6 source address
+static const struct filter_attribute attribute_net6_src = {
+	init_net6_src, lookup_net6_src, free_net6
+};
+
+// IPv6 destination address
+static const struct filter_attribute attribute_net6_dst = {
+	init_net6_dst, lookup_net6_dst, free_net6
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // VLAN

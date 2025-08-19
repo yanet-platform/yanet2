@@ -23,6 +23,14 @@ make_packet(
 	uint16_t vlan
 );
 
+struct packet
+make_packet_net6(
+	const uint8_t src_ip[16],
+	const uint8_t dst_ip[16],
+	uint16_t src_port,
+	uint16_t dst_port
+);
+
 void
 query_filter_and_expect_action(
 	struct filter *filter, struct packet *packet, uint32_t expected_action

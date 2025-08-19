@@ -4,21 +4,23 @@
 #include "common/range_collector.h"
 #include "dataplane/packet/packet.h"
 
+#include "util.h"
+
 #include <rte_ip.h>
 #include <rte_mbuf.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
-typedef void (*action_get_net4_func)(
-	const struct filter_rule *action, struct net4 **net, uint32_t *count
+typedef void (*rule_get_net4_func)(
+	const struct filter_rule *rule, struct net4 **net, uint32_t *count
 );
 
 static inline void
 action_get_net4_src(
-	const struct filter_rule *action, struct net4 **net, uint32_t *count
+	const struct filter_rule *rule, struct net4 **net, uint32_t *count
 ) {
-	*net = action->net4.srcs;
-	*count = action->net4.src_count;
+	*net = rule->net4.srcs;
+	*count = rule->net4.src_count;
 }
 
 static inline void
@@ -27,18 +29,6 @@ action_get_net4_dst(
 ) {
 	*net = action->net4.dsts;
 	*count = action->net4.dst_count;
-}
-
-static inline int
-lpm_collect_value_iterator(uint32_t value, void *data) {
-	struct value_table *table = (struct value_table *)data;
-	return value_table_touch(table, 0, value);
-}
-
-static inline int
-lpm_collect_registry_iterator(uint32_t value, void *data) {
-	struct value_registry *registry = (struct value_registry *)data;
-	return value_registry_collect(registry, value);
 }
 
 static inline void
@@ -88,7 +78,7 @@ collect_net4_values(
 	struct memory_context *memory_context,
 	const struct filter_rule *actions,
 	uint32_t count,
-	action_get_net4_func get_net4,
+	rule_get_net4_func get_net4,
 	struct lpm *lpm,
 	struct value_registry *registry
 ) {
@@ -100,6 +90,10 @@ collect_net4_values(
 	for (const struct filter_rule *action = actions;
 	     action < actions + count;
 	     ++action) {
+		if (action->net4.src_count == 0 &&
+		    action->net4.dst_count == 0) {
+			continue;
+		}
 
 		struct net4 *nets;
 		uint32_t net_count;
@@ -239,7 +233,7 @@ lookup_net4_dst(struct packet *packet, void *data) {
 	return lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->dst_addr);
 }
 
-// Allows to free data to classification.
+// Allows to free data for IPv4 classification.
 static inline void
 free_net4(void *data, struct memory_context *memory_context) {
 	(void)memory_context;
