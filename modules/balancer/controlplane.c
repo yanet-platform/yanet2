@@ -56,7 +56,9 @@ balancer_module_config_init(struct agent *agent, const char *name) {
 		return NULL;
 	}
 
-	balancer_module_config_data_init(config, &config->cp_module.memory_context);
+	balancer_module_config_data_init(
+		config, &config->cp_module.memory_context
+	);
 
 	return &config->cp_module;
 }
@@ -86,15 +88,13 @@ balancer_module_config_free(struct cp_module *cp_module) {
 	);
 
 	for (uint64_t service_idx = 0; service_idx < config->service_count;
-			service_idx++) {
+	     service_idx++) {
 		struct balancer_vs **vs_ptr =
 			ADDR_OF(&config->services) + service_idx;
 		struct balancer_vs *vs = ADDR_OF(vs_ptr);
 		lpm_free(&vs->src);
 		memory_bfree(
-			&agent->memory_context,
-			vs,
-			sizeof(struct balancer_vs)
+			&agent->memory_context, vs, sizeof(struct balancer_vs)
 		);
 	}
 
@@ -156,7 +156,7 @@ balancer_module_config_add_service(
 	struct balancer_vs **services = ADDR_OF(&config->services);
 
 	for (uint64_t service_idx = 0; service_idx < config->service_count;
-			service_idx++) {
+	     service_idx++) {
 		services[service_idx] = ADDR_OF(&services[service_idx]);
 	}
 
@@ -169,10 +169,11 @@ balancer_module_config_add_service(
 		return -1;
 	}
 
-	struct balancer_vs *balancer_service = (struct balancer_vs *)memory_balloc(
-		&config->cp_module.memory_context,
-		sizeof(struct balancer_vs)
-	);
+	struct balancer_vs *balancer_service =
+		(struct balancer_vs *)memory_balloc(
+			&config->cp_module.memory_context,
+			sizeof(struct balancer_vs)
+		);
 
 	if (balancer_service == NULL)
 		return -1;
@@ -180,7 +181,7 @@ balancer_module_config_add_service(
 	services[config->service_count - 1] = balancer_service;
 
 	for (uint64_t service_idx = 0; service_idx < config->service_count;
-			service_idx++) {
+	     service_idx++) {
 		SET_OFFSET_OF(&services[service_idx], services[service_idx]);
 	}
 
@@ -209,13 +210,24 @@ balancer_module_config_add_service(
 
 	for (uint64_t prefix_idx = 0; prefix_idx < service->prefixes_count;
 	     ++prefix_idx) {
-		struct balancer_src_prefix prefix = service->prefixes[prefix_idx];
+		struct balancer_src_prefix prefix =
+			service->prefixes[prefix_idx];
 		if (service->type & VS_TYPE_V4) {
 			lpm_insert(
-				&balancer_service->src, 4, prefix.start_addr, prefix.end_addr, 1);
+				&balancer_service->src,
+				4,
+				prefix.start_addr,
+				prefix.end_addr,
+				1
+			);
 		} else if (service->type & VS_TYPE_V6) {
 			lpm_insert(
-				&balancer_service->src, 16, prefix.start_addr, prefix.end_addr, 1);
+				&balancer_service->src,
+				16,
+				prefix.start_addr,
+				prefix.end_addr,
+				1
+			);
 		}
 	}
 
@@ -247,8 +259,9 @@ balancer_service_config_create(
 	);
 	if (config->prefixes == NULL)
 		return NULL;
-	memset(config->prefixes, 0,
-			sizeof(struct balancer_src_prefix) * prefixes_count);
+	memset(config->prefixes,
+	       0,
+	       sizeof(struct balancer_src_prefix) * prefixes_count);
 	config->prefixes_count = prefixes_count;
 
 	config->type = type;
@@ -298,7 +311,8 @@ balancer_service_config_set_src_prefix(
 	uint8_t *start_addr,
 	uint8_t *end_addr
 ) {
-	struct balancer_src_prefix *src_prefix = service_config->prefixes + index;
+	struct balancer_src_prefix *src_prefix =
+		service_config->prefixes + index;
 	if (service_config->type & VS_TYPE_V6) {
 		memcpy(src_prefix->start_addr, start_addr, 16);
 		memcpy(src_prefix->end_addr, end_addr, 16);
