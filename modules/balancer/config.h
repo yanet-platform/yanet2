@@ -28,7 +28,7 @@ struct balancer_module_config {
 	struct lpm v6_service_lookup;
 
 	uint64_t service_count;
-	struct balancer_vs *services;
+	struct balancer_vs **services;
 
 	uint64_t real_count;
 	struct balancer_rs *reals;

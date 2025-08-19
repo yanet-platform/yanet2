@@ -37,8 +37,9 @@ balancer_handle_v4(
 			// services
 		return -1;
 
-	struct balancer_vs *vs =
+	struct balancer_vs **vs_ptr =
 		ADDR_OF(&balancer_config->services) + service_id;
+	struct balancer_vs *vs = ADDR_OF(vs_ptr);
 
 	if (lpm_lookup(&vs->src, 4, (uint8_t *)&ipv4_hdr->src_addr)
 			== LPM_VALUE_INVALID)
@@ -75,8 +76,9 @@ balancer_handle_v6(
 			// services
 		return -1;
 
-	struct balancer_vs *vs =
+	struct balancer_vs **vs_ptr =
 		ADDR_OF(&balancer_config->services) + service_id;
+	struct balancer_vs *vs = ADDR_OF(vs_ptr);
 
 	if (lpm_lookup(&vs->src, 16, (uint8_t *)&ipv6_hdr->src_addr)
 			== LPM_VALUE_INVALID)

@@ -87,9 +87,15 @@ balancer_module_config_free(struct cp_module *cp_module) {
 
 	for (uint64_t service_idx = 0; service_idx < config->service_count;
 			service_idx++) {
-		struct balancer_vs *vs =
+		struct balancer_vs **vs_ptr =
 			ADDR_OF(&config->services) + service_idx;
+		struct balancer_vs *vs = ADDR_OF(vs_ptr);
 		lpm_free(&vs->src);
+		memory_bfree(
+			&agent->memory_context,
+			vs,
+			sizeof(struct balancer_vs)
+		);
 	}
 
 	mem_array_free_exp(
@@ -147,17 +153,36 @@ balancer_module_config_add_service(
 
 	SET_OFFSET_OF(&config->reals, reals);
 
-	struct balancer_vs *services = ADDR_OF(&config->services);
+	struct balancer_vs **services = ADDR_OF(&config->services);
+
+	for (uint64_t service_idx = 0; service_idx < config->service_count;
+			service_idx++) {
+		services[service_idx] = ADDR_OF(&services[service_idx]);
+	}
 
 	if (mem_array_expand_exp(
 		    &config->cp_module.memory_context,
 		    (void **)&services,
-		    sizeof(*services),
+		    sizeof(struct balancer_vs *),
 		    &config->service_count
 	    )) {
 		return -1;
 	}
-	struct balancer_vs *balancer_service = &services[config->service_count - 1];
+
+	struct balancer_vs *balancer_service = (struct balancer_vs *)memory_balloc(
+		&config->cp_module.memory_context,
+		sizeof(struct balancer_vs)
+	);
+
+	if (balancer_service == NULL)
+		return -1;
+
+	services[config->service_count - 1] = balancer_service;
+
+	for (uint64_t service_idx = 0; service_idx < config->service_count;
+			service_idx++) {
+		SET_OFFSET_OF(&services[service_idx], services[service_idx]);
+	}
 
 	balancer_service->type = service->type;
 	memcpy(balancer_service->address, service->address, 16);
