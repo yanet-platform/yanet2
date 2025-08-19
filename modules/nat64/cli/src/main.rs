@@ -354,6 +354,9 @@ pub fn print_tree(configs: Vec<ShowConfigResponse>) -> Result<(), Box<dyn Error>
                 tree.add_empty_child(format!("IPv6: {}", mtu.ipv6_mtu));
                 tree.end_child();
             }
+            
+            tree.add_empty_child(format!("DropUnknownPrefix: {}", config.drop_unknown_prefix));
+            tree.add_empty_child(format!("DropUnknownMapping: {}", config.drop_unknown_mapping));
         }
 
         tree.end_child();

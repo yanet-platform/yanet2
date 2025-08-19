@@ -86,6 +86,8 @@ message Config {
 	repeated Prefix prefixes = 1;
 	repeated Mapping mappings = 2;
 	MTUConfig mtu = 3;
+	bool drop_unknown_prefix = 4;  // Drop packets with unknown prefix
+	bool drop_unknown_mapping = 5; // Drop packets with unknown mapping
 }
 
 // ShowConfigResponse contains the current configuration

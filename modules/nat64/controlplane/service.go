@@ -96,6 +96,8 @@ func (s *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 				Ipv4Mtu: config.MTU.IPv4MTU,
 				Ipv6Mtu: config.MTU.IPv6MTU,
 			},
+			DropUnknownPrefix:  config.DropUnknownPrefix,
+			DropUnknownMapping: config.DropUnknownMapping,
 		}
 
 		for _, prefix := range config.Prefixes {

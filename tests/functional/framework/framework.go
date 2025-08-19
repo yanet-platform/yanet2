@@ -684,7 +684,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 
 // createConfigFiles creates configuration files in the mounted config directory on the host
 func (f *TestFramework) createConfigFiles(dataplaneConfig string, controlplaneConfig string) error {
-	f.log.Info("Creating configuration files on host in mounted directory...")
+	f.log.Debug("Creating configuration files on host in mounted directory...")
 
 	// Get the config directory path from QEMU manager
 	configDir := f.QEMU.ConfigDir
