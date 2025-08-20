@@ -191,6 +191,20 @@ query_filter_and_expect_action(
 }
 
 void
+query_filter_and_expect_actions(
+	struct filter *filter, struct packet *packet, uint32_t action_count, uint32_t *ref_actions
+) {
+	uint32_t *actions;
+	uint32_t count;
+	int res = filter_query(filter, packet, &actions, &count);
+	assert(res == 0);
+	assert(count == action_count);
+	for (uint32_t i = 0; i < count; ++i) {
+		assert(actions[i] == ref_actions[i]);
+	}
+}
+
+void
 query_filter_and_expect_no_actions(
 	struct filter *filter, struct packet *packet
 ) {

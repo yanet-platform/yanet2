@@ -38,6 +38,11 @@ query_filter_and_expect_action(
 );
 
 void
+query_filter_and_expect_actions(
+	struct filter *filter, struct packet *packet, uint32_t action_count, uint32_t *actions
+);
+
+void
 query_filter_and_expect_no_actions(
 	struct filter *filter, struct packet *packet
 );

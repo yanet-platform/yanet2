@@ -102,3 +102,13 @@ filter_macros = executable('macros',
   link_language: 'c'
 )
 test('macros', filter_macros, suite: ['filter'])
+
+# test non-terminative actions
+non_term_actions = executable('non_term_actions',
+  ['non_term.c'], 
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('non_term_actions', non_term_actions, suite: ['filter'])
