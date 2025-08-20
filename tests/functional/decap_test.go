@@ -18,22 +18,15 @@ func TestDecap(t *testing.T) {
 	require.NotNil(t, fw, "Global framework should be initialized")
 
 	t.Run("Configure_Decap_Module", func(t *testing.T) {
-		_, err := fw.CLI.ExecuteCommands(framework.CommonConfigCommands...)
-		require.NoError(t, err, "Failed to setup common configuration")
-
 		// Decap-specific configuration
 		commands := []string{
 			"/mnt/target/release/yanet-cli-decap prefix-add --cfg decap0 --instances 0 -p 4.5.6.7/32",
 			"/mnt/target/release/yanet-cli-decap prefix-add --cfg decap0 --instances 0 -p 1:2:3:4::abcd/128",
 
-			"/mnt/target/release/yanet-cli-pipeline update --name=bootstrap --modules forward:forward0 --instance=0",
-			"/mnt/target/release/yanet-cli-pipeline update --name=decap --modules forward:forward0 --modules decap:decap0 --modules route:route0 --instance=0",
-
-			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=01:00.0 --pipelines decap:1",
-			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
+			"/mnt/target/release/yanet-cli-pipeline update --name=test --modules forward:forward0 --modules decap:decap0 --modules route:route0 --instance=0",
 		}
 
-		_, err = fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.CLI.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure decap module")
 	})
 
@@ -276,17 +269,9 @@ func TestDecap(t *testing.T) {
 	})
 
 	t.Run("Check_Yanet_State", func(t *testing.T) {
-		// Configure forward module first (L2 and L3 forwarding)
-		commands := []string{
-			// Check counters and stats
-			"/mnt/target/release/yanet-cli-counters pipeline --instance 0 --pipeline-name decap",
-		}
-
-		for _, cmd := range commands {
-			output, err := fw.CLI.ExecuteCommand(cmd)
-			require.NoError(t, err, "Failed to execute command: %s", cmd)
-			t.Logf("Output: %s", output)
-		}
+		cmd := "/mnt/target/release/yanet-cli-counters pipeline --instance 0 --pipeline-name test"
+		output, err := fw.CLI.ExecuteCommand(cmd)
+		require.NoError(t, err, "Failed to execute command %s with output %s", cmd, output)
 	})
 }
 

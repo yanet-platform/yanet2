@@ -79,8 +79,7 @@ go test -v ./...
 go test -v -timeout 10m ./...
 
 # Run from project root directory
-just dtest-functional  # Docker (recommended)
-just test-functional   # Local
+just test-functional   # qemu
 ```
 
 ### Debugging and Diagnostics
@@ -93,12 +92,33 @@ make help
 make debug-vm
 # Use Ctrl+A, X to exit QEMU
 
+# Enable debug logging for tests
+export YANET_TEST_DEBUG=1
+go test -v ./...
+
 # Clean test artifacts
 make clean
 
 # Full cleanup (including downloaded images)
 make clean-all
 ```
+
+#### Debug Logging
+
+By default, tests use minimal logging level (ErrorLevel). To enable verbose debug output, set the environment variable:
+
+```bash
+# Enable verbose logging
+export YANET_TEST_DEBUG=1
+
+# Run tests with debug output
+go test -v ./...
+
+# Or in a single command
+YANET_TEST_DEBUG=1 go test -v ./...
+```
+
+When `YANET_TEST_DEBUG` is set, the framework will use zap's Development configuration with detailed output of all framework operations.
 
 ### Writing Tests
 

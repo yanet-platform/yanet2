@@ -134,22 +134,13 @@ func TestForward(t *testing.T) {
 	require.NotNil(t, fw, "Global framework should be initialized")
 
 	t.Run("Configure_Forward_Module", func(t *testing.T) {
-		_, err := fw.CLI.ExecuteCommands(framework.CommonConfigCommands...)
-		require.NoError(t, err, "Failed to setup common configuration")
-
 		// Forward-specific configuration
 		commands := []string{
-
 			// Configure pipelines
-			"/mnt/target/release/yanet-cli-pipeline update --name=bootstrap --modules forward:forward0 --instance=0",
-			"/mnt/target/release/yanet-cli-pipeline update --name=forward --modules forward:forward0 --modules route:route0 --instance=0",
-
-			// Assign pipelines to devices
-			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=01:00.0 --pipelines forward:1",
-			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
+			"/mnt/target/release/yanet-cli-pipeline update --name=test --modules forward:forward0 --modules route:route0 --instance=0",
 		}
 
-		_, err = fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.CLI.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure forward module")
 	})
 

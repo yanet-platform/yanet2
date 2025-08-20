@@ -32,7 +32,7 @@ test: dataplane
 	go test ./...
 	meson test -C build
 
-test-functional: dataplane
+test-functional:
 	@echo "Running functional tests..."
 	cd tests/functional && $(MAKE) test
 

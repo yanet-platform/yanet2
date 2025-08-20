@@ -19,7 +19,11 @@ func TestMain(m *testing.M) {
 	var code int
 
 	// Create logger for detailed logging
-	logger, err := zap.NewDevelopment()
+	lg := zap.NewDevelopmentConfig()
+	if _, ok := os.LookupEnv("YANET_TEST_DEBUG"); !ok {
+		lg.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
+	}
+	logger, err := lg.Build()
 	if err != nil {
 		panic(err)
 	}
@@ -100,6 +104,10 @@ logging:
 `
 
 	if err := fw.StartYANET(dataplaneConfig, controlplaneConfig); err != nil {
+		panic(err)
+	}
+
+	if _, err := fw.CLI.ExecuteCommands(framework.CommonConfigCommands...); err != nil {
 		panic(err)
 	}
 
@@ -239,7 +247,6 @@ func TestFramework(t *testing.T) {
 			for i := range 2 {
 				// Check if socket path exists
 				socketPath := fw.QEMU.SocketPaths[i]
-				t.Logf("🔍 Checking socket file existence: %s", socketPath)
 
 				// Check if socket file exists
 				_, err := os.Stat(socketPath)

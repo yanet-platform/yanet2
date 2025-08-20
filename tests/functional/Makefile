@@ -23,7 +23,6 @@ all: test
 
 # Prepare test environment with autologin
 prepare-vm: check-deps $(QEMU_IMAGE)
-	@echo "Preparing test environment with autologin support..."
 	@echo "Test environment ready"
 
 # Install dependencies

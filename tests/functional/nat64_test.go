@@ -73,8 +73,6 @@ func TestNAT64(t *testing.T) {
 	require.NotNil(t, fw, "Global framework should be initialized")
 
 	t.Run("Configure_NAT64_Module", func(t *testing.T) {
-		_, err := fw.CLI.ExecuteCommands(framework.CommonConfigCommands...)
-		require.NoError(t, err, "Failed to setup common configuration")
 
 		// NAT64-specific configuration
 		commands := []string{
@@ -83,16 +81,11 @@ func TestNAT64(t *testing.T) {
 			"/mnt/target/release/yanet-cli-nat64 mapping add --cfg nat64_0 --instances 0 --ipv4 198.51.100.1 --ipv6 2001:db8::4 --prefix-index 0",
 			"/mnt/target/release/yanet-cli-nat64 mapping add --cfg nat64_0 --instances 0 --ipv4 198.51.100.2 --ipv6 2001:db8::3 --prefix-index 0",
 
-			// Configure pipelines
-			"/mnt/target/release/yanet-cli-pipeline update --name=bootstrap --modules forward:forward0 --instance=0",
-			"/mnt/target/release/yanet-cli-pipeline update --name=nat64 --modules forward:forward0 --modules nat64:nat64_0 --modules route:route0 --instance=0",
-
-			// Assign pipelines to devices
-			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=01:00.0 --pipelines nat64:1",
-			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
+			// Configure pipeline
+			"/mnt/target/release/yanet-cli-pipeline update --name=test --modules forward:forward0 --modules nat64:nat64_0 --modules route:route0 --instance=0",
 		}
 
-		_, err = fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.CLI.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure forward module")
 	})
 
@@ -563,48 +556,6 @@ func createNAT64Packet(srcIP, dstIP net.IP, l4 gopacket.SerializableLayer, paylo
 		ComputeChecksums: true,
 	}
 	err := gopacket.SerializeLayers(buf, opts, &eth, ipLayer, l4, gopacket.Payload(payload))
-	if err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
-}
-
-// Helper function to create NAT64 IPv6 test packets
-func createNAT64IPv6Packet(srcIP, dstIP net.IP, payload []byte) []byte {
-	eth := layers.Ethernet{
-		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
-		DstMAC:       framework.MustParseMAC(framework.DstMAC),
-		EthernetType: layers.EthernetTypeIPv6,
-	}
-
-	ip6 := layers.IPv6{
-		Version:    6,
-		NextHeader: layers.IPProtocolTCP,
-		HopLimit:   64,
-		SrcIP:      srcIP,
-		DstIP:      dstIP,
-	}
-
-	tcp := layers.TCP{
-		SrcPort: 12345,
-		DstPort: 80,
-		Seq:     1,
-		Ack:     1,
-		Window:  1024,
-		PSH:     true,
-		ACK:     true,
-	}
-	err := tcp.SetNetworkLayerForChecksum(&ip6)
-	if err != nil {
-		panic(err)
-	}
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
-	err = gopacket.SerializeLayers(buf, opts, &eth, &ip6, &tcp, gopacket.Payload(payload))
 	if err != nil {
 		panic(err)
 	}
