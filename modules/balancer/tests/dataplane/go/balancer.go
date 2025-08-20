@@ -37,7 +37,6 @@ balancer_handle_packets(
 import "C"
 import (
 	"net/netip"
-	"testing"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
@@ -91,7 +90,7 @@ func toCPtr(netAddr netip.Addr) *C.uint8_t {
 	return (*C.uint8_t)(&buf[0])
 }
 
-func balancerModuleConfigAddService(t *testing.T, mc *C.struct_balancer_module_config, sc balancerServiceConfig) {
+func balancerModuleConfigAddService(mc *C.struct_balancer_module_config, sc balancerServiceConfig) {
 	var csc *C.struct_balancer_service_config
 	typ := C.uint64_t(C.VS_OPT_ENCAP)
 	if sc.addr.Is4() {
