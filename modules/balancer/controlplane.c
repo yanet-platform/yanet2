@@ -149,6 +149,10 @@ balancer_module_config_add_service(
 		memcpy(reals[config->real_count - 1].src_mask,
 		       service->reals[real_idx].src_mask,
 		       16);
+		for (uint8_t i = 0; i < 16; i++) {
+			service->reals[real_idx].src_addr[i] &=
+				service->reals[real_idx].src_mask[i];
+		}
 	}
 
 	SET_OFFSET_OF(&config->reals, reals);

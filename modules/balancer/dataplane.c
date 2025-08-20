@@ -142,8 +142,22 @@ balancer_route(
 
 	if (rs->type == RS_TYPE_V4) {
 		if (vs->type & VS_OPT_ENCAP) {
+			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+
+			struct rte_ipv4_hdr *ipv4_header =
+				rte_pktmbuf_mtod_offset(
+					mbuf,
+					struct rte_ipv4_hdr *,
+					packet->network_header.offset
+				);
+			uint32_t src_mask = *(uint32_t *)(&rs->src_mask[0]);
+			uint32_t src_addr = *(uint32_t *)(&rs->src_addr[0]);
+			// rs->src_addr is already masked.
+			uint32_t src =
+				(ipv4_header->src_addr & ~src_mask) | src_addr;
+
 			return packet_ip4_encap(
-				packet, rs->dst_addr, rs->src_addr
+				packet, rs->dst_addr, (uint8_t *)(&src)
 			);
 		}
 	}
@@ -160,10 +174,12 @@ balancer_route(
 				);
 
 			uint8_t src[16];
-			memcpy(src, rs->src_addr, 16);
-			// FIXME randomize src
-			src[14] ^= ipv6_header->src_addr[14];
-			src[15] ^= ipv6_header->src_addr[15];
+			for (uint8_t i = 0; i < 16; i++) {
+				// rs->src_addr is already masked.
+				src[i] = (ipv6_header->src_addr[i] &
+					  (~rs->src_mask[i])) |
+					 rs->src_addr[i];
+			}
 
 			return packet_ip6_encap(packet, rs->dst_addr, src);
 		}

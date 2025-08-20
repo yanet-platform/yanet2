@@ -58,16 +58,30 @@ func createUDPPacket(srcIP string, dstIP string) []gopacket.SerializableLayer {
 }
 
 func encapsulate(t *testing.T, origLayers []gopacket.SerializableLayer, srcIP string, dstIP string) gopacket.Packet {
-	ipv4 := &layers.IPv4{
-		Version:  4,
-		IHL:      5,
-		TTL:      64,
-		Protocol: layers.IPProtocolIPv4,
-		SrcIP:    net.ParseIP(srcIP),
-		DstIP:    net.ParseIP(dstIP),
+	src := net.ParseIP(srcIP)
+	dst := net.ParseIP(dstIP)
+	var ip gopacket.SerializableLayer
+	if src.To4() != nil {
+		ip = &layers.IPv4{
+			Version:  4,
+			IHL:      5,
+			TTL:      64,
+			Protocol: layers.IPProtocolIPv4,
+			SrcIP:    src,
+			DstIP:    dst,
+		}
+	} else {
+		ip = &layers.IPv6{
+			Version:    6,
+			NextHeader: layers.IPProtocolIPv6,
+			HopLimit:   64,
+			SrcIP:      src,
+			DstIP:      dst,
+		}
 	}
+
 	newLayers := make([]gopacket.SerializableLayer, 0, len(origLayers)+1)
-	newLayers = append(newLayers, origLayers[0], ipv4)
+	newLayers = append(newLayers, origLayers[0], ip)
 	newLayers = append(newLayers, origLayers[1:]...)
 	return common.LayersToPacket(t, newLayers...)
 }
@@ -80,8 +94,9 @@ func TestBalancer_HappyPath_IPV4(t *testing.T) {
 		addr: common.Unwrap(netip.ParseAddr("192.0.0.2")),
 		reals: []balancerRealConfig{
 			{
-				dst: common.Unwrap(netip.ParseAddr("192.0.0.3")),
-				src: common.Unwrap(netip.ParseAddr("192.1.0.3")),
+				dst:     common.Unwrap(netip.ParseAddr("192.0.0.3")),
+				src:     common.Unwrap(netip.ParseAddr("196.0.0.0")),
+				srcMask: common.Unwrap(netip.ParseAddr("255.0.0.0")),
 			},
 		},
 		prefixes: []netip.Prefix{common.Unwrap(netip.ParsePrefix("192.0.0.0/24"))},
@@ -91,7 +106,7 @@ func TestBalancer_HappyPath_IPV4(t *testing.T) {
 	pkt := common.LayersToPacket(t, inLayers...)
 	t.Log("Origin packet", pkt)
 
-	expectedPkt := encapsulate(t, inLayers, "192.1.0.3", "192.0.0.3")
+	expectedPkt := encapsulate(t, inLayers, "196.0.0.1", "192.0.0.3")
 	t.Log("Expected packet", expectedPkt)
 
 	// Process packet
@@ -105,6 +120,50 @@ func TestBalancer_HappyPath_IPV4(t *testing.T) {
 		cmpopts.IgnoreUnexported(
 			layers.Ethernet{},
 			layers.IPv4{},
+			layers.UDP{},
+		),
+	)
+	require.Empty(t, diff, "Packets don't match")
+
+	// Check payload
+	require.Equal(t, expectedPkt.ApplicationLayer().Payload(),
+		resultPkt.ApplicationLayer().Payload(), "Payload doesn't match")
+}
+
+func TestBalancer_HappyPath_IPV6(t *testing.T) {
+	m := balancerModuleConfig()
+	require.NotNil(t, m, "Failed to create balancer config")
+
+	balancerModuleConfigAddService(m, balancerServiceConfig{
+		addr: common.Unwrap(netip.ParseAddr("2001:db8:2::")),
+		reals: []balancerRealConfig{
+			{
+				dst:     common.Unwrap(netip.ParseAddr("2001:db8:3::")),
+				src:     common.Unwrap(netip.ParseAddr("2000::")),
+				srcMask: common.Unwrap(netip.ParseAddr("ff::")),
+			},
+		},
+		prefixes: []netip.Prefix{common.Unwrap(netip.ParsePrefix("2001:db8::/32"))},
+	})
+
+	inLayers := createUDPPacket("2001:db8:1::", "2001:db8:2::")
+	pkt := common.LayersToPacket(t, inLayers...)
+	t.Log("Origin packet", pkt)
+
+	expectedPkt := encapsulate(t, inLayers, "2000:db8:1::", "2001:db8:3::")
+	t.Log("Expected packet", expectedPkt)
+
+	// Process packet
+	result := balancerHandlePackets(m, pkt)
+	require.NotEmpty(t, result.Output, "No output packets")
+	resultPkt := common.ParseEtherPacket(result.Output[0])
+	t.Log("Result packet", resultPkt)
+
+	// Compare result with expected packet
+	diff := cmp.Diff(expectedPkt.Layers(), resultPkt.Layers(),
+		cmpopts.IgnoreUnexported(
+			layers.Ethernet{},
+			layers.IPv6{},
 			layers.UDP{},
 		),
 	)
