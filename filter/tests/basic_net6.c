@@ -395,5 +395,7 @@ main() {
 
 	puts("OK");
 
+	free(memory);
+
 	return 0;
 }
