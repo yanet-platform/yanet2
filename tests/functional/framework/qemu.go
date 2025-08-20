@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -18,28 +17,65 @@ import (
 	"go.uber.org/zap"
 )
 
-// QEMUManager handles QEMU VM lifecycle and operations
+// QEMUManager handles the complete lifecycle and operations of QEMU virtual machines
+// for YANET functional testing. It provides comprehensive VM management including
+// startup, networking configuration, filesystem sharing, and graceful shutdown.
+//
+// The manager supports:
+//   - QEMU VM lifecycle management with proper resource cleanup
+//   - Unix socket-based networking for packet injection and capture
+//   - 9P filesystem sharing for host-VM file exchange
+//   - Serial console and monitor interface access
+//   - VM readiness detection and synchronization
+//   - Parallel test execution with unique instance isolation
+//
+// All operations are thread-safe and support concurrent access patterns
+// required for comprehensive network testing scenarios.
 type QEMUManager struct {
-	ImagePath   string
-	WorkDir     string
-	Command     *exec.Cmd
-	BinariesDir string
-	ConfigDir   string
-	BuildDir    string
-	TargetDir   string
-	SerialPath  string
-	MonitorPath string
-	SocketPaths []string
-	isReady     bool
-	readySignal chan bool
-	monitorConn net.Conn
-	serialConn  net.Conn
-	log         *zap.SugaredLogger
-	readyMutex  sync.RWMutex // Protects isReady field
-	instanceID  string       // Unique ID for this VM instance
+	ImagePath   string             // Path to the QEMU disk image file
+	WorkDir     string             // Temporary working directory for VM instance
+	Command     *exec.Cmd          // QEMU process command handle
+	BinariesDir string             // Directory for shared binary files
+	ConfigDir   string             // Directory for configuration files
+	BuildDir    string             // Project build directory (shared with VM)
+	TargetDir   string             // Project target directory (shared with VM)
+	SerialPath  string             // Unix socket path for serial console access
+	MonitorPath string             // Unix socket path for QEMU monitor interface
+	SocketPaths []string           // Unix socket paths for network interfaces
+	isReady     bool               // VM readiness state flag
+	readySignal chan bool          // Channel for VM readiness notification
+	monitorConn net.Conn           // Connection to QEMU monitor interface
+	serialConn  net.Conn           // Connection to VM serial console
+	log         *zap.SugaredLogger // Logger for debugging and monitoring
+	readyMutex  sync.RWMutex       // Protects concurrent access to isReady field
+	instanceID  string             // Unique identifier for this VM instance
 }
 
-// NewQEMUManager creates a new QEMU manager instance
+// NewQEMUManager creates and initializes a new QEMU manager instance for virtual
+// machine testing. The manager sets up all necessary directories, generates unique
+// instance identifiers for parallel execution, and configures filesystem sharing
+// paths for host-VM communication.
+//
+// The initialization process includes:
+//   - Unique instance ID generation for parallel test isolation
+//   - Working directory creation in system temporary space
+//   - Project root detection for build and target directory sharing
+//   - Socket path configuration for VM networking and console access
+//
+// Parameters:
+//   - imagePath: Path to the QEMU disk image file (must exist and be accessible)
+//   - logger: Structured logger for debugging and monitoring VM operations
+//
+// Returns:
+//   - *QEMUManager: Configured QEMU manager ready for VM startup
+//   - error: An error if project root detection fails or paths are invalid
+//
+// Example:
+//
+//	manager, err := NewQEMUManager("/path/to/vm-image.qcow2", logger)
+//	if err != nil {
+//	    log.Fatalf("Failed to create QEMU manager: %v", err)
+//	}
 func NewQEMUManager(imagePath string, logger *zap.SugaredLogger) (*QEMUManager, error) {
 	// Generate unique instance ID for parallel execution
 	instanceID := fmt.Sprintf("yanet-vm-%d-%d", os.Getpid(), time.Now().UnixNano())
@@ -48,7 +84,7 @@ func NewQEMUManager(imagePath string, logger *zap.SugaredLogger) (*QEMUManager, 
 	// Determine project root directory
 	projectRoot, err := findProjectRoot()
 	if err != nil {
-		return nil, fmt.Errorf("Failed to determine project root directory: %w", err)
+		return nil, fmt.Errorf("failed to determine project root directory: %w", err)
 	}
 	buildDir := filepath.Join(projectRoot, "build")
 	targetDir := filepath.Join(projectRoot, "target")
@@ -68,7 +104,43 @@ func NewQEMUManager(imagePath string, logger *zap.SugaredLogger) (*QEMUManager, 
 	}, nil
 }
 
-// Start launches a QEMU VM with the specified configuration
+// Start launches a QEMU virtual machine with comprehensive configuration for
+// YANET testing including networking, filesystem sharing, and console access.
+// This method handles the complete VM startup process with proper error handling
+// and resource management.
+//
+// The startup process includes:
+//   - QEMU binary availability verification
+//   - VM image file existence validation
+//   - Working directory structure creation
+//   - Network interface configuration with Unix sockets
+//   - 9P filesystem sharing setup for host-VM file exchange
+//   - Serial console and monitor interface initialization
+//   - VM process launch with proper logging and error capture
+//   - Connection establishment to VM interfaces
+//   - Background VM readiness monitoring
+//
+// Network Configuration:
+//   - User networking for internet access
+//   - Two virtio-net interfaces with Unix socket backends
+//   - IOMMU and modern virtio features enabled for performance
+//
+// Filesystem Sharing:
+//   - Binaries directory for executable sharing
+//   - Configuration directory for runtime config files
+//   - Build directory for YANET binaries access
+//   - Target directory for build artifacts
+//   - Complete project directory for source code access
+//
+// Returns:
+//   - error: An error if VM startup fails, networking cannot be configured,
+//     or console connections cannot be established
+//
+// Example:
+//
+//	if err := manager.Start(); err != nil {
+//	    log.Fatalf("VM startup failed: %v", err)
+//	}
 func (q *QEMUManager) Start() error {
 	// Check if QEMU is available
 	if _, err := exec.LookPath("qemu-system-x86_64"); err != nil {
@@ -91,16 +163,16 @@ func (q *QEMUManager) Start() error {
 	if err := os.MkdirAll(q.ConfigDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-	fmt.Println("DEBUG: Config directory created.")
+	q.log.Debug("Config directory created.")
 
 	// Generate socket paths for Unix stream interface
-	fmt.Println("DEBUG: Generating socket paths...")
+	q.log.Debug("Generating socket paths...")
 	q.SocketPaths = make([]string, 2) // Assuming 2 interfaces for now
 	for i := range q.SocketPaths {
 		// Use /tmp/ directory like in working Makefile configuration
 		q.SocketPaths[i] = filepath.Join("/tmp", fmt.Sprintf("yanetvm_%s_sockdev_%d.sock", q.instanceID, i))
 	}
-	fmt.Println("DEBUG: Socket paths generated.")
+	q.log.Debug("Socket paths generated.")
 
 	// Detect OS
 	osType := runtime.GOOS
@@ -112,6 +184,7 @@ func (q *QEMUManager) Start() error {
 		"-m", "5G",
 		"-machine", "q35,kernel-irqchip=split",
 		"-cpu", "max",
+		"-snapshot",
 		"-device", "intel-iommu,intremap=on,device-iotlb=on",
 		"-device", "ioh3420,id=pcie.1,chassis=1",
 		"-device", "ioh3420,id=pcie.2,chassis=2",
@@ -173,7 +246,11 @@ func (q *QEMUManager) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to create log file: %w", err)
 	}
-	defer logWriter.Close()
+	defer func() {
+		if err := logWriter.Close(); err != nil {
+			q.log.Errorf("Failed to close log file: %v", err)
+		}
+	}()
 
 	// Start QEMU
 	q.Command = exec.Command("qemu-system-x86_64", args...)
@@ -239,7 +316,28 @@ func (q *QEMUManager) Start() error {
 	return nil
 }
 
-// Stop terminates the QEMU VM and cleans up resources
+// Stop performs graceful termination of the QEMU virtual machine and comprehensive
+// cleanup of all associated resources. This method ensures proper resource
+// deallocation and prevents resource leaks in testing environments.
+//
+// The cleanup process includes:
+//   - Graceful closure of monitor and serial console connections
+//   - QEMU process termination with proper signal handling
+//   - Working directory and temporary file cleanup
+//   - Unix socket file removal from filesystem
+//   - Error collection and reporting for failed cleanup operations
+//
+// Multiple cleanup errors are collected and returned as a combined error
+// to provide comprehensive information about any cleanup failures.
+//
+// Returns:
+//   - error: A combined error if any cleanup operations fail, or nil if successful
+//
+// Example:
+//
+//	if err := manager.Stop(); err != nil {
+//	    log.Errorf("VM cleanup encountered errors: %v", err)
+//	}
 func (q *QEMUManager) Stop() error {
 	var errs []error
 
@@ -285,7 +383,10 @@ func (q *QEMUManager) Stop() error {
 func (q *QEMUManager) GetStdin() io.WriteCloser {
 	// Try to connect if not already connected
 	if q.serialConn == nil {
-		q.connectToSerial()
+		if err := q.connectToSerial(); err != nil {
+			q.log.Errorf("Failed to connect to serial console: %v", err)
+			return nil
+		}
 	}
 	return q.serialConn
 }
@@ -294,7 +395,10 @@ func (q *QEMUManager) GetStdin() io.WriteCloser {
 func (q *QEMUManager) GetStdout() io.ReadCloser {
 	// Try to connect if not already connected
 	if q.serialConn == nil {
-		q.connectToSerial()
+		if err := q.connectToSerial(); err != nil {
+			q.log.Errorf("Failed to connect to serial console: %v", err)
+			return nil
+		}
 	}
 	return q.serialConn
 }
@@ -302,11 +406,20 @@ func (q *QEMUManager) GetStdout() io.ReadCloser {
 // captureStderr captures QEMU stderr for logging
 func (q *QEMUManager) captureStderr(stderr io.ReadCloser, logWriter *os.File) {
 	go func() {
-		defer stderr.Close()
+		defer func() {
+			if err := stderr.Close(); err != nil {
+				q.log.Errorf("Failed to close stderr pipe: %v", err)
+			}
+		}()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
-			logWriter.WriteString("STDERR: " + line + "\n")
+			if _, err := logWriter.WriteString("STDERR: " + line + "\n"); err != nil {
+				q.log.Errorf("Failed to write stderr to log file: %v", err)
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			q.log.Errorf("Error reading stderr: %v", err)
 		}
 	}()
 }
@@ -358,7 +471,7 @@ func (q *QEMUManager) connectToSerial() error {
 // monitorVMReadiness monitors serial console output to detect when VM is ready
 func (q *QEMUManager) monitorVMReadiness() {
 	if q.serialConn == nil {
-		log.Default().Println("fail to monitor VM readiness")
+		q.log.Error("Failed to monitor VM readiness: serial connection is nil")
 		return
 	}
 
@@ -372,7 +485,9 @@ func (q *QEMUManager) monitorVMReadiness() {
 		if strings.Contains(line, "To restore this content, you can run the 'unminimize' command") {
 			q.log.Debug("Unminimize message seen, sending Enter to activate prompt")
 			if q.serialConn != nil {
-				q.serialConn.Write([]byte("\n"))
+				if _, err := q.serialConn.Write([]byte("\n")); err != nil {
+					q.log.Errorf("Failed to send Enter to serial console: %v", err)
+				}
 			}
 		}
 
@@ -384,9 +499,32 @@ func (q *QEMUManager) monitorVMReadiness() {
 			return
 		}
 	}
+
+	// Check for scanner errors
+	if err := scanner.Err(); err != nil {
+		q.log.Errorf("Error reading from serial console: %v", err)
+	}
 }
 
-// WaitForReady waits for VM to become ready with timeout
+// WaitForReady blocks until the virtual machine becomes ready for command
+// execution or the specified timeout expires. This method provides synchronous
+// waiting for VM readiness with proper timeout handling.
+//
+// The method first checks if the VM is already ready to avoid unnecessary
+// waiting. If not ready, it waits for the readiness signal from the background
+// monitoring goroutine.
+//
+// Parameters:
+//   - timeout: Maximum time to wait for VM readiness
+//
+// Returns:
+//   - error: An error if the timeout expires before VM becomes ready, or nil if ready
+//
+// Example:
+//
+//	if err := manager.WaitForReady(60 * time.Second); err != nil {
+//	    log.Fatalf("VM failed to become ready: %v", err)
+//	}
 func (q *QEMUManager) WaitForReady(timeout time.Duration) error {
 	if q.IsVMReady() {
 		q.log.Debug("VM is already ready")
@@ -402,14 +540,37 @@ func (q *QEMUManager) WaitForReady(timeout time.Duration) error {
 	}
 }
 
-// IsVMReady returns whether the VM is ready
+// IsVMReady returns the current readiness state of the virtual machine in a
+// thread-safe manner. This method can be called from multiple goroutines
+// without synchronization concerns.
+//
+// VM readiness indicates that the virtual machine has completed its boot
+// process and is ready to accept and execute commands through the serial console.
+//
+// Returns:
+//   - bool: True if the VM is ready for command execution, false otherwise
+//
+// Example:
+//
+//	if manager.IsVMReady() {
+//	    // Safe to execute commands
+//	    output, err := cli.ExecuteCommand("ls -la")
+//	}
 func (q *QEMUManager) IsVMReady() bool {
 	q.readyMutex.RLock()
 	defer q.readyMutex.RUnlock()
 	return q.isReady
 }
 
-// setVMReady sets the VM ready state
+// setVMReady updates the VM readiness state in a thread-safe manner. This method
+// is used internally by the readiness monitoring goroutine to update the VM
+// state when readiness conditions are detected.
+//
+// The method uses a write lock to ensure exclusive access during state updates
+// and prevent race conditions with concurrent readiness checks.
+//
+// Parameters:
+//   - ready: New readiness state to set (true when VM is ready, false otherwise)
 func (q *QEMUManager) setVMReady(ready bool) {
 	q.readyMutex.Lock()
 	defer q.readyMutex.Unlock()

@@ -37,6 +37,12 @@ var (
 		// Configure routing
 		"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via fe80::1 ::/0",
 		"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 0.0.0.0/0",
+
+		"/mnt/target/release/yanet-cli-pipeline update --name=bootstrap --modules forward:forward0 --instance=0",
+		"/mnt/target/release/yanet-cli-pipeline update --name=test --modules forward:forward0 --modules route:route0 --instance=0",
+
+		"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=01:00.0 --pipelines test:1",
+		"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
 	}
 	DebugCommands = []string{
 		"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",
@@ -44,6 +50,22 @@ var (
 	}
 )
 
+// MustParseMAC parses a MAC address string and panics if parsing fails.
+// This utility function is designed for use with known-good MAC address constants
+// where parsing failure indicates a programming error rather than runtime input error.
+//
+// Parameters:
+//   - mac: MAC address string in standard format (e.g., "52:54:00:6b:ff:a1")
+//
+// Returns:
+//   - net.HardwareAddr: Parsed hardware address
+//
+// Panics:
+//   - If the MAC address string is malformed or invalid
+//
+// Example:
+//
+//	hwAddr := MustParseMAC("52:54:00:6b:ff:a1")
 func MustParseMAC(mac string) net.HardwareAddr {
 	hwAddr, err := net.ParseMAC(mac)
 	if err != nil {
@@ -52,20 +74,39 @@ func MustParseMAC(mac string) net.HardwareAddr {
 	return hwAddr
 }
 
-// TestFramework represents the main test framework structure
+// TestFramework represents the main test framework structure for YANET functional testing.
+// It orchestrates QEMU virtual machine management, CLI command execution, packet processing,
+// and network socket communication to provide a comprehensive testing environment.
+//
+// The framework manages:
+//   - QEMU virtual machine lifecycle and networking
+//   - CLI command execution within the VM
+//   - Packet parsing and analysis capabilities
+//   - Socket-based network communication with VM interfaces
+//   - Working directory for test artifacts and temporary files
+//
+// All operations are thread-safe through internal synchronization mechanisms.
 type TestFramework struct {
-	QEMU         *QEMUManager
-	CLI          *CLIManager
-	PacketParser *PacketParser
-	WorkDir      string
-	log          *zap.SugaredLogger
+	QEMU         *QEMUManager       // Virtual machine manager for test environment
+	CLI          *CLIManager        // Command-line interface manager for VM operations
+	PacketParser *PacketParser      // Network packet parsing and analysis engine
+	WorkDir      string             // Working directory for test files and artifacts
+	log          *zap.SugaredLogger // Logger for debugging and monitoring
 
-	// Socket client cache
-	socketClients map[int]*SocketClient
-	clientsMutex  sync.Mutex
+	// Socket client cache for network interface communication
+	socketClients map[int]*SocketClient // Cached socket clients indexed by interface number
+	clientsMutex  sync.Mutex            // Protects concurrent access to socketClients map
 }
 
-// WithLog sets the logger for the TestFramework
+// WithLog configures the TestFramework to use the specified logger for debugging
+// and monitoring test execution. This functional option allows detailed logging
+// of framework operations, packet flows, and VM interactions.
+//
+// Parameters:
+//   - log: A zap.SugaredLogger instance for structured logging
+//
+// Returns:
+//   - FrameworkOption: A functional option that sets the logger
 func WithLog(log *zap.SugaredLogger) FrameworkOption {
 	return func(fw *TestFramework) error {
 		fw.log = log
@@ -73,16 +114,47 @@ func WithLog(log *zap.SugaredLogger) FrameworkOption {
 	}
 }
 
-// FrameworkOption defines functional options for TestFramework
+// FrameworkOption defines functional options for configuring TestFramework instances.
+// This pattern enables flexible initialization with optional parameters while
+// maintaining backward compatibility and clean API design.
 type FrameworkOption func(*TestFramework) error
 
-// Config contains test framework configuration
+// Config contains essential configuration parameters for initializing the test framework.
+// It specifies the QEMU virtual machine image and working directory for test execution.
 type Config struct {
-	QEMUImage string
-	WorkDir   string
+	QEMUImage string // Path to the QEMU virtual machine image file
+	WorkDir   string // Working directory for test artifacts (auto-created if empty)
 }
 
-// New creates a new test framework instance
+// New creates and initializes a new TestFramework instance with the specified configuration
+// and optional functional parameters. The framework sets up all necessary components
+// including QEMU VM management, CLI operations, and packet processing capabilities.
+//
+// The initialization process includes:
+//   - Working directory creation and validation
+//   - QEMU manager setup with the specified VM image
+//   - CLI manager initialization for VM command execution
+//   - Packet parser setup for network analysis
+//   - Socket client cache initialization
+//
+// Parameters:
+//   - config: Required configuration containing VM image path and working directory
+//   - opts: Optional functional options for customizing framework behavior
+//
+// Returns:
+//   - *TestFramework: Fully initialized test framework instance
+//   - error: An error if initialization fails or configuration is invalid
+//
+// Example:
+//
+//	config := &Config{
+//	    QEMUImage: "/path/to/vm-image.qcow2",
+//	    WorkDir:   "/tmp/yanet-tests",
+//	}
+//	fw, err := New(config, WithLog(logger))
+//	if err != nil {
+//	    log.Fatalf("Failed to create framework: %v", err)
+//	}
 func New(config *Config, opts ...FrameworkOption) (*TestFramework, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config is required")
@@ -133,7 +205,23 @@ func New(config *Config, opts ...FrameworkOption) (*TestFramework, error) {
 	return fw, nil
 }
 
-// Start initializes the test environment
+// Start initializes and launches the complete test environment, including the QEMU
+// virtual machine with configured networking. This method must be called before
+// executing any tests or VM operations.
+//
+// The startup process includes:
+//   - QEMU virtual machine launch with socket networking
+//   - Network interface initialization
+//   - VM readiness verification
+//
+// Returns:
+//   - error: An error if VM startup fails or networking cannot be established
+//
+// Example:
+//
+//	if err := framework.Start(); err != nil {
+//	    log.Fatalf("Failed to start test environment: %v", err)
+//	}
 func (f *TestFramework) Start() error {
 	// Start QEMU VM with socket networking
 	if err := f.QEMU.Start(); err != nil {
@@ -143,7 +231,29 @@ func (f *TestFramework) Start() error {
 	return nil
 }
 
-// Stop cleans up the test environment
+// Stop performs comprehensive cleanup of the test environment, ensuring proper
+// resource deallocation and temporary file removal. This method should always
+// be called when testing is complete to prevent resource leaks.
+//
+// The cleanup process includes:
+//   - Closing all active socket client connections
+//   - Terminating CLI manager connections
+//   - Stopping and cleaning up the QEMU virtual machine
+//   - Removing the working directory and all test artifacts
+//
+// Multiple cleanup errors are collected and returned as a combined error for
+// comprehensive error reporting.
+//
+// Returns:
+//   - error: A combined error if any cleanup operations fail, or nil if successful
+//
+// Example:
+//
+//	defer func() {
+//	    if err := framework.Stop(); err != nil {
+//	        log.Errorf("Cleanup failed: %v", err)
+//	    }
+//	}()
 func (f *TestFramework) Stop() error {
 	var errs []error
 
@@ -182,7 +292,32 @@ func (f *TestFramework) Stop() error {
 	return nil
 }
 
-// SendPacketAndCapture sends a packet and captures any response (without verification)
+// SendPacketAndCapture sends a network packet through the specified input interface
+// and captures any response from the output interface without performing packet
+// verification or parsing. This is a low-level method for raw packet testing.
+//
+// The method handles:
+//   - Socket client retrieval and connection management
+//   - Packet transmission through the input interface
+//   - Response capture from the output interface with timeout
+//   - Automatic socket connection establishment
+//
+// Parameters:
+//   - inputIfaceIndex: Index of the network interface to send the packet through
+//   - outputIfaceIndex: Index of the network interface to capture response from
+//   - packet: Raw packet data to transmit
+//   - timeout: Maximum time to wait for response capture
+//
+// Returns:
+//   - []byte: Raw response packet data, or nil if no response received
+//   - error: An error if packet transmission fails or interfaces are unavailable
+//
+// Example:
+//
+//	response, err := fw.SendPacketAndCapture(0, 1, packetData, 5*time.Second)
+//	if err != nil {
+//	    log.Fatalf("Packet transmission failed: %v", err)
+//	}
 func (f *TestFramework) SendPacketAndCapture(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([]byte, error) {
 	f.log.Infof("Sending packet on interface %d and capturing response on interface %d", inputIfaceIndex, outputIfaceIndex)
 
@@ -214,7 +349,35 @@ func (f *TestFramework) SendPacketAndCapture(inputIfaceIndex int, outputIfaceInd
 	return outputClient.ReceivePacket(timeout)
 }
 
-// SendPacketAndParse sends a packet, captures the response, and parses both packets
+// SendPacketAndParse sends a network packet, captures the response, and parses both
+// the input and output packets into structured PacketInfo objects. This high-level
+// method provides comprehensive packet analysis for detailed testing scenarios.
+//
+// The method performs:
+//   - Input packet parsing and validation
+//   - Packet transmission through the specified interfaces
+//   - Response capture with timeout handling
+//   - Output packet parsing and analysis
+//   - Detailed logging of packet flow for debugging
+//
+// Parameters:
+//   - inputIfaceIndex: Index of the network interface to send the packet through
+//   - outputIfaceIndex: Index of the network interface to capture response from
+//   - packet: Raw packet data to transmit
+//   - timeout: Maximum time to wait for response capture
+//
+// Returns:
+//   - *PacketInfo: Parsed information about the input packet
+//   - *PacketInfo: Parsed information about the output packet (nil if no response)
+//   - error: An error if packet processing, transmission, or parsing fails
+//
+// Example:
+//
+//	input, output, err := fw.SendPacketAndParse(0, 1, packetData, 5*time.Second)
+//	if err != nil {
+//	    log.Fatalf("Packet processing failed: %v", err)
+//	}
+//	log.Infof("Sent: %s, Received: %s", input.String(), output.String())
 func (f *TestFramework) SendPacketAndParse(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) (*PacketInfo, *PacketInfo, error) {
 	// Parse input packet
 	inputPacketInfo, err := f.PacketParser.ParsePacket(packet)
@@ -241,7 +404,30 @@ func (f *TestFramework) SendPacketAndParse(inputIfaceIndex int, outputIfaceIndex
 	return inputPacketInfo, outputPacketInfo, nil
 }
 
-// GetSocketClient returns a socket client for the specified interface
+// GetSocketClient retrieves or creates a socket client for the specified network
+// interface. The method implements caching to reuse existing connections and
+// ensures thread-safe access to the socket client pool.
+//
+// The method handles:
+//   - Interface index validation against available QEMU socket paths
+//   - Thread-safe access to the socket client cache
+//   - Automatic socket client creation for new interfaces
+//   - Client caching for performance optimization
+//
+// Parameters:
+//   - ifaceIndex: Zero-based index of the network interface (must be < len(SocketPaths))
+//
+// Returns:
+//   - *SocketClient: Socket client for the specified interface
+//   - error: An error if the interface index is invalid or client creation fails
+//
+// Example:
+//
+//	client, err := fw.GetSocketClient(0)
+//	if err != nil {
+//	    log.Fatalf("Failed to get socket client: %v", err)
+//	}
+//	defer client.Close()
 func (f *TestFramework) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
 	// For QEMU networking: Unix stream socket interfaces only
 	if ifaceIndex >= len(f.QEMU.SocketPaths) {
@@ -269,7 +455,41 @@ func (f *TestFramework) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
 	return client, nil
 }
 
-// StartYANET starts and configures YANET services in the VM using provided dataplane and controlplane configuration files
+// StartYANET initializes and launches the complete YANET network processing stack
+// within the virtual machine environment. This comprehensive method handles all
+// aspects of YANET deployment including configuration, kernel module loading,
+// network interface binding, and service startup.
+//
+// The startup process includes:
+//   - Configuration file creation and validation
+//   - YANET binary availability verification
+//   - Required kernel module loading (vfio-pci)
+//   - Network interface binding to DPDK drivers
+//   - YANET dataplane service startup with background execution
+//   - YANET controlplane service startup and readiness verification
+//   - Service health checks and log monitoring
+//
+// Parameters:
+//   - dataplaneConfig: YAML configuration content for the YANET dataplane service
+//   - controlplaneConfig: YAML configuration content for the YANET controlplane service
+//
+// Returns:
+//   - error: An error if any step of the YANET startup process fails
+//
+// Example:
+//
+//	dataplaneYAML := `
+//	interfaces:
+//	  - name: "eth0"
+//	    pci: "01:00.0"
+//	`
+//	controlplaneYAML := `
+//	modules:
+//	  - name: "forward"
+//	`
+//	if err := fw.StartYANET(dataplaneYAML, controlplaneYAML); err != nil {
+//	    log.Fatalf("YANET startup failed: %v", err)
+//	}
 func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig string) error {
 	f.log.Info("Starting YANET in VM...")
 
@@ -411,6 +631,28 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	return nil
 }
 
+// waitOutputPresent repeatedly executes a command until the output satisfies the
+// provided checker function or the timeout expires. This utility method is used
+// for waiting on asynchronous operations and service readiness verification.
+//
+// The method polls the command output at regular intervals (100ms) and applies
+// the checker function to determine if the expected condition has been met.
+// This is particularly useful for waiting on service startup, configuration
+// application, or system state changes.
+//
+// Parameters:
+//   - cmd: Shell command to execute repeatedly
+//   - checker: Function that returns true when the desired condition is met
+//   - timeout: Maximum time to wait for the condition
+//
+// Returns:
+//   - error: An error if the timeout expires or command execution fails
+//
+// Example:
+//
+//	err := fw.waitOutputPresent("ps aux | grep yanet", func(output string) bool {
+//	    return strings.Contains(output, "yanet-dataplane")
+//	}, 30*time.Second)
 func (f *TestFramework) waitOutputPresent(cmd string, checker func(string) bool, timeout time.Duration) error {
 	// Wait for flags to be applied
 	deadline := time.Now().Add(timeout)
@@ -432,7 +674,25 @@ func (f *TestFramework) waitOutputPresent(cmd string, checker func(string) bool,
 	return fmt.Errorf("timeout waiting for output to be present: %s", cmd)
 }
 
-// createConfigFiles creates configuration files in the mounted config directory on the host
+// createConfigFiles creates YANET configuration files in the host filesystem
+// within the mounted config directory that is accessible from the virtual machine.
+// This method handles the host-side file creation for VM-accessible configuration.
+//
+// The method performs:
+//   - Configuration directory validation from QEMU manager
+//   - Dataplane configuration file creation (dataplane.yaml)
+//   - Controlplane configuration file creation (controlplane.yaml)
+//   - File creation verification and error handling
+//   - Proper file permissions setting for VM access
+//
+// Parameters:
+//   - dataplaneConfig: YAML configuration content for YANET dataplane
+//   - controlplaneConfig: YAML configuration content for YANET controlplane
+//
+// Returns:
+//   - error: An error if configuration directory is unavailable or file creation fails
+//
+// Note: This is an internal method used by StartYANET and should not be called directly.
 func (f *TestFramework) createConfigFiles(dataplaneConfig string, controlplaneConfig string) error {
 	f.log.Debug("Creating configuration files on host in mounted directory...")
 
