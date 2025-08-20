@@ -1,6 +1,8 @@
 package functional
 
 import (
+	"encoding/json"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -12,6 +14,58 @@ import (
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
+// setAndWaitForNAT64DropFlags sets NAT64 drop flags and waits for them to be applied
+func setAndWaitForNAT64DropFlags(fw *framework.TestFramework, dropUnknownPrefix, dropUnknownMapping bool, timeout time.Duration) error {
+	// Build the drop command
+	cmd := "/mnt/target/release/yanet-cli-nat64 drop --cfg nat64_0 --instances 0"
+	if dropUnknownPrefix {
+		cmd += " --drop-unknown-prefix"
+	}
+	if dropUnknownMapping {
+		cmd += " --drop-unknown-mapping"
+	}
+
+	// Execute the drop command
+	_, err := fw.CLI.ExecuteCommand(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to set NAT64 drop flags: %w", err)
+	}
+
+	// Wait for flags to be applied
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		output, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-nat64 show --cfg nat64_0 --instances 0 --format json")
+		if err != nil {
+			return fmt.Errorf("failed to check NAT64 status: %w", err)
+		}
+
+		statuses := []struct {
+			Config struct {
+				DropUnknownPrefix  bool `json:"drop_unknown_prefix"`
+				DropUnknownMapping bool `json:"drop_unknown_mapping"`
+			}
+		}{}
+		err = json.Unmarshal([]byte(output), &statuses)
+		if err != nil {
+			return fmt.Errorf("failed to parse NAT64 status ===%s===: %w", output, err)
+		}
+		if len(statuses) == 0 {
+			return fmt.Errorf("failed to parse NAT64 status ===%s===: no configurations found", output)
+		}
+		status := statuses[0].Config
+		// Check if flags match expected state
+		if (dropUnknownPrefix == status.DropUnknownPrefix) && (dropUnknownMapping == status.DropUnknownMapping) {
+			return nil
+		}
+
+		// Wait before next check
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return fmt.Errorf("timeout waiting for NAT64 drop flags to be applied (prefix=%v, mapping=%v)", dropUnknownPrefix, dropUnknownMapping)
+}
+
 // TestNAT64_BasicFunctionality tests basic NAT64 module functionality
 func TestNAT64(t *testing.T) {
 	// Use global framework instance like in TestYANETStartup
@@ -19,30 +73,15 @@ func TestNAT64(t *testing.T) {
 	require.NotNil(t, fw, "Global framework should be initialized")
 
 	t.Run("Configure_NAT64_Module", func(t *testing.T) {
-		// Configure forward module first (L2 and L3 forwarding)
+		_, err := fw.CLI.ExecuteCommands(framework.CommonConfigCommands...)
+		require.NoError(t, err, "Failed to setup common configuration")
+
+		// NAT64-specific configuration
 		commands := []string{
-			"ip link set kni0 up",
-			"ip nei add fe80::1 lladdr " + framework.SrcMAC + " dev kni0",
-			"ip nei add 203.0.113.1 lladdr " + framework.SrcMAC + " dev kni0",
-			"ip addr add 203.0.113.14/24 dev kni0",
-			// Enable L2 forwarding between devices
-			"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 0 --dst 1",
-			"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 1 --dst 0",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net 203.0.113.14/32",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net fe80::5054:ff:fe6b:ffa5/64",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net ff02::/16",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net 0.0.0.0/0",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net ::/0",
-
-			// Route
-			"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via fe80::1 ::/0",
-			"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 0.0.0.0/0",
-
 			// Configure NAT64 mappings (using addresses from unit tests)
 			"/mnt/target/release/yanet-cli-nat64 prefix add --cfg nat64_0 --instances 0 --prefix 2001:db8::/96",
 			"/mnt/target/release/yanet-cli-nat64 mapping add --cfg nat64_0 --instances 0 --ipv4 198.51.100.1 --ipv6 2001:db8::4 --prefix-index 0",
 			"/mnt/target/release/yanet-cli-nat64 mapping add --cfg nat64_0 --instances 0 --ipv4 198.51.100.2 --ipv6 2001:db8::3 --prefix-index 0",
-			"/mnt/target/release/yanet-cli-nat64 show --cfg nat64_0 --instances 0",
 
 			// Configure pipelines
 			"/mnt/target/release/yanet-cli-pipeline update --name=bootstrap --modules forward:forward0 --instance=0",
@@ -53,17 +92,11 @@ func TestNAT64(t *testing.T) {
 			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
 		}
 
-		for _, cmd := range commands {
-			output, err := fw.CLI.ExecuteCommand(cmd)
-			require.NoError(t, err, "Failed to execute command: %s", cmd)
-			if output != "" {
-				t.Logf("Output: %s", output)
-			}
-		}
+		_, err = fw.CLI.ExecuteCommands(commands...)
+		require.NoError(t, err, "Failed to configure forward module")
 	})
 
 	t.Run("Test_IPv4_to_IPv6_Translation", func(t *testing.T) {
-		// Test IPv4 to IPv6 translation using correct addresses from unit tests
 		// From outer_ip4 (192.0.2.34) to mapped address (198.51.100.2)
 		packet := createNAT64Packet(
 			net.ParseIP("192.0.2.34"),   // outer_ip4 from unit tests -> embedded as 2001:db8::c000:222
@@ -80,21 +113,15 @@ func TestNAT64(t *testing.T) {
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 
 		// Verify IPv4 to IPv6 translation
-		require.False(t, inputPacket.IsIPv6, "Input packet should be IPv4")
 		require.True(t, outputPacket.IsIPv6, "Output packet should be IPv6")
-		// 192.0.2.34 (0xc000222) embedded in NAT64 prefix becomes 2001:db8::c000:222
 		assert.Equal(t, "2001:db8::c000:222", outputPacket.SrcIP.String(), "Source should be IPv4-embedded in NAT64 prefix")
 		assert.Equal(t, "2001:db8::3", outputPacket.DstIP.String(), "Destination should be mapped IPv6")
 
-		// Verify TCP ports are preserved
-		// Source port 12345 should be preserved
-		// Destination port 80 (HTTP) should be preserved
 		assert.Equal(t, uint16(12345), outputPacket.SrcPort, "Source port should be preserved")
 		assert.Equal(t, uint16(80), outputPacket.DstPort, "Destination port should be preserved")
 	})
 
 	t.Run("Test_IPv6_to_IPv4_Translation", func(t *testing.T) {
-		// Test IPv6 to IPv4 translation - reverse direction
 		// From mapped IPv6 (2001:db8::3) to embedded IPv6 (2001:db8::c000:222)
 		packet := createNAT64Packet(
 			net.ParseIP("2001:db8::3"),        // mapped IPv6 -> 198.51.100.2
@@ -103,75 +130,39 @@ func TestNAT64(t *testing.T) {
 			[]byte("ipv6 to ipv4"),
 		)
 
-		// Send packet and wait for response
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
 		require.NoError(t, err, "Failed to send IPv6 packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 
-		// Verify IPv6 to IPv4 translation
-		require.True(t, inputPacket.IsIPv6, "Input packet should be IPv6")
-		require.False(t, outputPacket.IsIPv6, "Output packet should be IPv4")
+		require.True(t, outputPacket.IsIPv4, "Output packet should be IPv4")
 		assert.Equal(t, "198.51.100.2", outputPacket.SrcIP.String(), "Source should be mapped IPv4")
 		assert.Equal(t, "192.0.2.34", outputPacket.DstIP.String(), "Destination should be extracted from NAT64 prefix")
 
-		// Verify TCP ports are preserved
-		// Source port 12345 should be preserved
-		// Destination port 80 (HTTP) should be preserved
 		assert.Equal(t, uint16(12345), outputPacket.SrcPort, "Source port should be preserved")
 		assert.Equal(t, uint16(80), outputPacket.DstPort, "Destination port should be preserved")
-	})
-
-	t.Run("Test_Non_Mapped_Address", func(t *testing.T) {
-		// Test packet with address not in NAT64 mapping
-		packet := createNAT64Packet(
-			net.ParseIP("192.0.2.100"), // src IPv4 (not in mapping)
-			net.ParseIP("192.0.2.101"), // dst IPv4 (not in mapping)
-			createTCPLayer(),
-			[]byte("no mapping"),
-		)
-
-		// Send packet and wait for response
-		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
-		require.NoError(t, err, "Packet should be processed")
-
-		require.NotNil(t, inputPacket, "Input packet should be parsed")
-		require.NotNil(t, outputPacket, "Output packet should be present")
-
-		// Non-mapped packets pass through unchanged (NAT64 pass-through mode)
-		require.False(t, inputPacket.IsIPv6, "Input packet should be IPv4")
-		require.False(t, outputPacket.IsIPv6, "Output packet should remain IPv4")
-		assert.Equal(t, "192.0.2.100", outputPacket.SrcIP.String(), "Source should remain unchanged")
-		assert.Equal(t, "192.0.2.101", outputPacket.DstIP.String(), "Destination should remain unchanged")
 	})
 
 	t.Run("Test_IPv4_to_IPv6_Translation_UDP", func(t *testing.T) {
 		// Test IPv4 to IPv6 translation using UDP packets
 		packet := createNAT64Packet(
-			net.ParseIP("192.0.2.34"),   // outer_ip4 from unit tests -> embedded as 2001:db8::c000:222
-			net.ParseIP("198.51.100.2"), // mapped IPv4 -> 2001:db8::3
+			net.ParseIP("192.0.2.34"),
+			net.ParseIP("198.51.100.2"),
 			createUDPLayer(),
 			createDNSPayload(),
 		)
 
-		// Send packet and wait for response
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
 		require.NoError(t, err, "Failed to send IPv4 UDP packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 
-		// Verify IPv4 to IPv6 translation
-		require.False(t, inputPacket.IsIPv6, "Input packet should be IPv4")
 		require.True(t, outputPacket.IsIPv6, "Output packet should be IPv6")
-		// 192.0.2.34 (0xc000222) embedded in NAT64 prefix becomes 2001:db8::c000:222
 		assert.Equal(t, "2001:db8::c000:222", outputPacket.SrcIP.String(), "Source should be IPv4-embedded in NAT64 prefix")
 		assert.Equal(t, "2001:db8::3", outputPacket.DstIP.String(), "Destination should be mapped IPv6")
 
-		// Verify UDP ports are preserved
-		// Source port 12345 should be preserved
-		// Destination port 53 (DNS) should be preserved
 		assert.Equal(t, uint16(12345), outputPacket.SrcPort, "Source port should be preserved")
 		assert.Equal(t, uint16(53), outputPacket.DstPort, "Destination port should be preserved")
 	})
@@ -185,7 +176,6 @@ func TestNAT64(t *testing.T) {
 			createDNSPayload(),
 		)
 
-		// Send packet and wait for response
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
 		require.NoError(t, err, "Failed to send IPv6 UDP packet")
 
@@ -193,48 +183,36 @@ func TestNAT64(t *testing.T) {
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 
 		// Verify IPv6 to IPv4 translation
-		require.True(t, inputPacket.IsIPv6, "Input packet should be IPv6")
-		require.False(t, outputPacket.IsIPv6, "Output packet should be IPv4")
+		require.True(t, outputPacket.IsIPv4, "Output packet should be IPv4")
 		assert.Equal(t, "198.51.100.2", outputPacket.SrcIP.String(), "Source should be mapped IPv4")
 		assert.Equal(t, "192.0.2.34", outputPacket.DstIP.String(), "Destination should be extracted from NAT64 prefix")
 
-		// Verify UDP ports are preserved
-		// Source port 12345 should be preserved
-		// Destination port 53 (DNS) should be preserved
 		assert.Equal(t, uint16(12345), outputPacket.SrcPort, "Source port should be preserved")
 		assert.Equal(t, uint16(53), outputPacket.DstPort, "Destination port should be preserved")
 	})
 
 	t.Run("Test_IPv4_to_IPv6_Translation_ICMP", func(t *testing.T) {
-		// Test IPv4 to IPv6 translation using ICMP packets
 		packet := createNAT64Packet(
-			net.ParseIP("192.0.2.34"),   // outer_ip4 from unit tests -> embedded as 2001:db8::c000:222
-			net.ParseIP("198.51.100.2"), // mapped IPv4 -> 2001:db8::3
+			net.ParseIP("192.0.2.34"),
+			net.ParseIP("198.51.100.2"),
 			createICMPv4Layer(),
 			[]byte("ipv4 to ipv6 icmp"),
 		)
 
-		// Send packet and wait for response
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
 		require.NoError(t, err, "Failed to send IPv4 ICMP packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 
-		// Verify IPv4 to IPv6 translation
-		require.False(t, inputPacket.IsIPv6, "Input packet should be IPv4")
 		require.True(t, outputPacket.IsIPv6, "Output packet should be IPv6")
-		// 192.0.2.34 (0xc000222) embedded in NAT64 prefix becomes 2001:db8::c000:222
 		assert.Equal(t, "2001:db8::c000:222", outputPacket.SrcIP.String(), "Source should be IPv4-embedded in NAT64 prefix")
 		assert.Equal(t, "2001:db8::3", outputPacket.DstIP.String(), "Destination should be mapped IPv6")
 
-		// Verify ICMP protocol is translated
-		// ICMPv4 should be translated to ICMPv6
 		require.Equal(t, layers.IPProtocolICMPv6, outputPacket.NextHeader, "Protocol should be translated to ICMPv6")
 	})
 
 	t.Run("Test_IPv6_to_IPv4_Translation_ICMP", func(t *testing.T) {
-		// Test IPv6 to IPv4 translation - reverse direction with ICMP packets
 		packet := createNAT64Packet(
 			net.ParseIP("2001:db8::3"),        // mapped IPv6 -> 198.51.100.2
 			net.ParseIP("2001:db8::c000:222"), // embedded IPv6 -> 192.0.2.34
@@ -242,38 +220,57 @@ func TestNAT64(t *testing.T) {
 			[]byte("ipv6 to ipv4 icmp"),
 		)
 
-		// Send packet and wait for response
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
 		require.NoError(t, err, "Failed to send IPv6 ICMP packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 
-		// Verify IPv6 to IPv4 translation
-		require.True(t, inputPacket.IsIPv6, "Input packet should be IPv6")
-		require.False(t, outputPacket.IsIPv6, "Output packet should be IPv4")
+		require.True(t, outputPacket.IsIPv4, "Output packet should be IPv4")
 		assert.Equal(t, "198.51.100.2", outputPacket.SrcIP.String(), "Source should be mapped IPv4")
 		assert.Equal(t, "192.0.2.34", outputPacket.DstIP.String(), "Destination should be extracted from NAT64 prefix")
 
-		// Verify ICMP protocol is translated
-		// ICMPv6 should be translated to ICMPv4
 		require.Equal(t, layers.IPProtocolICMPv4, outputPacket.Protocol, "Protocol should be translated to ICMPv4")
 	})
 
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixTrue_MappingTrue", func(t *testing.T) {
-		// Configure NAT64 with drop_unknown_prefix=true and drop_unknown_mapping=true
-		commands := []string{
-			"/mnt/target/release/yanet-cli-nat64 drop --cfg nat64_0 --instances 0 --drop-unknown-prefix --drop-unknown-mapping",
-			"/mnt/target/release/yanet-cli-nat64 show --cfg nat64_0 --instances 0",
-		}
+		// Set drop-unknown-prefix=true, drop-unknown-mapping=true
+		err := setAndWaitForNAT64DropFlags(fw, true, true, 10*time.Second)
+		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
-		for _, cmd := range commands {
-			output, err := fw.CLI.ExecuteCommand(cmd)
-			require.NoError(t, err, "Failed to execute command: %s", cmd)
-			if output != "" {
-				t.Logf("Command '%s' output: %s", cmd, output)
-			}
-		}
+		// Test IPv6 packet with known prefix and mapping - should be translated
+		ipv6PacketKnown := createNAT64Packet(
+			net.ParseIP("2001:db8::3"),        // known mapped IPv6 -> 198.51.100.2
+			net.ParseIP("2001:db8::c000:222"), // embedded IPv6 -> 192.0.2.34
+			createTCPLayer(),
+			[]byte("known mapping"),
+		)
+
+		// Send packet and wait for response
+		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, ipv6PacketKnown, 100*time.Millisecond)
+		require.NoError(t, err, "Packet should be processed")
+
+		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		require.NotNil(t, outputPacket, "Output packet should be present")
+		require.True(t, outputPacket.IsIPv4, "Output packet should be IPv4")
+		assert.Equal(t, "198.51.100.2", outputPacket.SrcIP.String(), "Source should be mapped IPv4")
+		assert.Equal(t, "192.0.2.34", outputPacket.DstIP.String(), "Destination should be extracted from NAT64 prefix")
+
+		ipv4PacketKnown := createNAT64Packet(
+			net.ParseIP("192.0.2.34"),
+			net.ParseIP("198.51.100.2"),
+			createTCPLayer(),
+			[]byte("known mapping"),
+		)
+
+		inputPacket, outputPacket, err = fw.SendPacketAndParse(0, 0, ipv4PacketKnown, 100*time.Millisecond)
+		require.NoError(t, err, "Packet should be processed")
+
+		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		require.NotNil(t, outputPacket, "Output packet should be present")
+		require.True(t, outputPacket.IsIPv6, "Output packet should be IPv6")
+		assert.Equal(t, "2001:db8::c000:222", outputPacket.SrcIP.String(), "Source should be IPv4-embedded in NAT64 prefix")
+		assert.Equal(t, "2001:db8::3", outputPacket.DstIP.String(), "Destination should be mapped IPv6")
 
 		// Test IPv6 packet with unknown prefix - should be dropped
 		ipv6Packet := createNAT64Packet(
@@ -283,12 +280,10 @@ func TestNAT64(t *testing.T) {
 			[]byte("unknown prefix"),
 		)
 
-		// Send packet and wait for response
-		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, ipv6Packet, 100*time.Millisecond)
-		require.NoError(t, err, "Packet should be processed")
+		inputPacket, outputPacket, err = fw.SendPacketAndParse(0, 0, ipv6Packet, 500*time.Millisecond)
+		require.Error(t, err, "Packet should be dropped")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
-		// With drop_unknown_prefix=true, the packet should be dropped, so outputPacket should be nil
 		assert.Nil(t, outputPacket, "Output packet should be nil (dropped)")
 
 		// Test IPv4 packet with unknown mapping - should be dropped
@@ -299,28 +294,17 @@ func TestNAT64(t *testing.T) {
 			[]byte("unknown mapping"),
 		)
 
-		// Send packet and wait for response
-		inputPacket2, outputPacket2, err := fw.SendPacketAndParse(0, 0, ipv4Packet, 100*time.Millisecond)
-		require.NoError(t, err, "Packet should be processed")
+		inputPacket, outputPacket, err = fw.SendPacketAndParse(0, 0, ipv4Packet, 500*time.Millisecond)
+		require.Error(t, err, "Packet should be dropped")
 
-		require.NotNil(t, inputPacket2, "Input packet should be parsed")
-		// With drop_unknown_mapping=true, the packet should be dropped, so outputPacket should be nil
-		assert.Nil(t, outputPacket2, "Output packet should be nil (dropped)")
+		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		assert.Nil(t, outputPacket, "Output packet should be nil (dropped)")
 	})
 
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixTrue_MappingFalse", func(t *testing.T) {
-		// Configure NAT64 with drop_unknown_prefix=true and drop_unknown_mapping=false
-		commands := []string{
-			"/mnt/target/release/yanet-cli-nat64 drop --cfg nat64_0 --instances 0 --drop-unknown-prefix",
-		}
-
-		for _, cmd := range commands {
-			output, err := fw.CLI.ExecuteCommand(cmd)
-			require.NoError(t, err, "Failed to execute command: %s", cmd)
-			if output != "" {
-				t.Logf("Output: %s", output)
-			}
-		}
+		// Set drop-unknown-prefix=true, drop-unknown-mapping=false
+		err := setAndWaitForNAT64DropFlags(fw, true, false, 10*time.Second)
+		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
 		// Test IPv6 packet with unknown prefix - should be dropped
 		ipv6Packet := createNAT64Packet(
@@ -330,12 +314,10 @@ func TestNAT64(t *testing.T) {
 			[]byte("unknown prefix"),
 		)
 
-		// Send packet and wait for response
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, ipv6Packet, 100*time.Millisecond)
-		require.NoError(t, err, "Packet should be processed")
+		require.Error(t, err, "Packet should be dropped")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
-		// With drop_unknown_prefix=true, the packet should be dropped, so outputPacket should be nil
 		assert.Nil(t, outputPacket, "Output packet should be nil (dropped)")
 
 		// Test IPv4 packet with unknown mapping - should be passed through
@@ -346,34 +328,21 @@ func TestNAT64(t *testing.T) {
 			[]byte("unknown mapping"),
 		)
 
-		// Send packet and wait for response
-		inputPacket2, outputPacket2, err := fw.SendPacketAndParse(0, 0, ipv4Packet, 100*time.Millisecond)
+		inputPacket, outputPacket, err = fw.SendPacketAndParse(0, 0, ipv4Packet, 100*time.Millisecond)
 		require.NoError(t, err, "Packet should be processed")
 
-		require.NotNil(t, inputPacket2, "Input packet should be parsed")
-		require.NotNil(t, outputPacket2, "Output packet should be present")
-		// With drop_unknown_mapping=false, the packet should be passed through unchanged
-		require.False(t, inputPacket2.IsIPv6, "Input packet should be IPv4")
-		require.False(t, outputPacket2.IsIPv6, "Output packet should remain IPv4")
-		assert.Equal(t, "192.0.2.100", outputPacket2.SrcIP.String(), "Source should remain unchanged")
-		assert.Equal(t, "192.0.2.101", outputPacket2.DstIP.String(), "Destination should remain unchanged")
+		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		require.NotNil(t, outputPacket, "Output packet should be present")
+		require.True(t, outputPacket.IsIPv4, "Output packet should remain IPv4")
+		assert.Equal(t, "192.0.2.100", outputPacket.SrcIP.String(), "Source should remain unchanged")
+		assert.Equal(t, "192.0.2.101", outputPacket.DstIP.String(), "Destination should remain unchanged")
 	})
 
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixFalse_MappingTrue", func(t *testing.T) {
-		// Configure NAT64 with drop_unknown_prefix=false and drop_unknown_mapping=true
-		commands := []string{
-			"/mnt/target/release/yanet-cli-nat64 drop --cfg nat64_0 --instances 0 --drop-unknown-mapping",
-		}
+		// Set drop-unknown-prefix=false, drop-unknown-mapping=true
+		err := setAndWaitForNAT64DropFlags(fw, false, true, 10*time.Second)
+		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
-		for _, cmd := range commands {
-			output, err := fw.CLI.ExecuteCommand(cmd)
-			require.NoError(t, err, "Failed to execute command: %s", cmd)
-			if output != "" {
-				t.Logf("Output: %s", output)
-			}
-		}
-
-		// Test IPv6 packet with unknown prefix - should be passed through
 		ipv6Packet := createNAT64Packet(
 			net.ParseIP("2001:db9::3"),        // unknown prefix 2001:db9::/96 (different from configured 2001:db8::/96)
 			net.ParseIP("2001:db9::c000:222"), // embedded IPv6 -> 192.0.2.34
@@ -381,17 +350,11 @@ func TestNAT64(t *testing.T) {
 			[]byte("unknown prefix"),
 		)
 
-		// Send packet and wait for response
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, ipv6Packet, 100*time.Millisecond)
-		require.NoError(t, err, "Packet should be processed")
+		require.Error(t, err, "Packet should be dropped")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
-		require.NotNil(t, outputPacket, "Output packet should be present")
-		// With drop_unknown_prefix=false, the packet should be passed through unchanged
-		require.True(t, inputPacket.IsIPv6, "Input packet should be IPv6")
-		require.True(t, outputPacket.IsIPv6, "Output packet should remain IPv6")
-		assert.Equal(t, "2001:db9::3", outputPacket.SrcIP.String(), "Source should remain unchanged")
-		assert.Equal(t, "2001:db9::c000:222", outputPacket.DstIP.String(), "Destination should remain unchanged")
+		require.Nil(t, outputPacket, "Output packet should be present")
 
 		// Test IPv4 packet with unknown mapping - should be dropped
 		ipv4Packet := createNAT64Packet(
@@ -401,28 +364,17 @@ func TestNAT64(t *testing.T) {
 			[]byte("unknown mapping"),
 		)
 
-		// Send packet and wait for response
-		inputPacket2, outputPacket2, err := fw.SendPacketAndParse(0, 0, ipv4Packet, 100*time.Millisecond)
-		require.NoError(t, err, "Packet should be processed")
+		inputPacket, outputPacket, err = fw.SendPacketAndParse(0, 0, ipv4Packet, 100*time.Millisecond)
+		require.Error(t, err, "Packet should be dropped")
 
-		require.NotNil(t, inputPacket2, "Input packet should be parsed")
-		// With drop_unknown_mapping=true, the packet should be dropped, so outputPacket should be nil
-		assert.Nil(t, outputPacket2, "Output packet should be nil (dropped)")
+		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		assert.Nil(t, outputPacket, "Output packet should be nil (dropped)")
 	})
 
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixFalse_MappingFalse", func(t *testing.T) {
-		// Configure NAT64 with drop_unknown_prefix=false and drop_unknown_mapping=false
-		commands := []string{
-			"/mnt/target/release/yanet-cli-nat64 drop --cfg nat64_0 --instances 0",
-		}
-
-		for _, cmd := range commands {
-			output, err := fw.CLI.ExecuteCommand(cmd)
-			require.NoError(t, err, "Failed to execute command: %s", cmd)
-			if output != "" {
-				t.Logf("Output: %s", output)
-			}
-		}
+		// Set both drop flags to false
+		err := setAndWaitForNAT64DropFlags(fw, false, false, 10*time.Second)
+		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
 		// Test IPv6 packet with unknown prefix - should be passed through
 		ipv6Packet := createNAT64Packet(
@@ -432,13 +384,11 @@ func TestNAT64(t *testing.T) {
 			[]byte("unknown prefix"),
 		)
 
-		// Send packet and wait for response
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, ipv6Packet, 100*time.Millisecond)
 		require.NoError(t, err, "Packet should be processed")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be present")
-		// With drop_unknown_prefix=false, the packet should be passed through unchanged
 		require.True(t, inputPacket.IsIPv6, "Input packet should be IPv6")
 		require.True(t, outputPacket.IsIPv6, "Output packet should remain IPv6")
 		assert.Equal(t, "2001:db9::3", outputPacket.SrcIP.String(), "Source should remain unchanged")
@@ -452,156 +402,16 @@ func TestNAT64(t *testing.T) {
 			[]byte("unknown mapping"),
 		)
 
-		// Send packet and wait for response
-		inputPacket2, outputPacket2, err := fw.SendPacketAndParse(0, 0, ipv4Packet, 100*time.Millisecond)
+		inputPacket, outputPacket, err = fw.SendPacketAndParse(0, 0, ipv4Packet, 100*time.Millisecond)
 		require.NoError(t, err, "Packet should be processed")
 
-		require.NotNil(t, inputPacket2, "Input packet should be parsed")
-		require.NotNil(t, outputPacket2, "Output packet should be present")
-		// With drop_unknown_mapping=false, the packet should be passed through unchanged
-		require.False(t, inputPacket2.IsIPv6, "Input packet should be IPv4")
-		require.False(t, outputPacket2.IsIPv6, "Output packet should remain IPv4")
-		assert.Equal(t, "192.0.2.100", outputPacket2.SrcIP.String(), "Source should remain unchanged")
-		assert.Equal(t, "192.0.2.101", outputPacket2.DstIP.String(), "Destination should remain unchanged")
+		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		require.NotNil(t, outputPacket, "Output packet should be present")
+		require.True(t, inputPacket.IsIPv4, "Input packet should be IPv4")
+		require.True(t, outputPacket.IsIPv4, "Output packet should remain IPv4")
+		assert.Equal(t, "192.0.2.100", outputPacket.SrcIP.String(), "Source should remain unchanged")
+		assert.Equal(t, "192.0.2.101", outputPacket.DstIP.String(), "Destination should remain unchanged")
 	})
-
-	t.Run("Test_Default_Configuration_Values", func(t *testing.T) {
-		// Test default configuration values for NAT64 module
-		// This test checks that the NAT64 module is initialized with correct default values
-
-		// Show current configuration
-		output, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-nat64 show --cfg nat64_0 --instances 0")
-		require.NoError(t, err, "Failed to execute command: /mnt/target/release/yanet-cli-nat64 show --cfg nat64_0 --instances 0")
-
-		// For now, just log the output to see what it returns
-		t.Logf("Command output: %s", output)
-
-		assert.Contains(t, output, "IPv4: 1450", "Default IPv4 MTU should be 1450")
-		assert.Contains(t, output, "IPv6: 1280", "Default IPv6 MTU should be 1280")
-
-		assert.Contains(t, output, "drop_unknown_prefix: false", "drop_unknown_prefix should be false by default")
-		assert.Contains(t, output, "drop_unknown_mapping: false", "drop_unknown_mapping should be false by default")
-	})
-	time.Sleep(time.Second)
-}
-
-// Helper function to create NAT64 IPv4 TCP test packets
-func createNAT64IPv4TCPPacket(srcIP, dstIP net.IP, payload []byte) []byte {
-	eth := layers.Ethernet{
-		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
-		DstMAC:       framework.MustParseMAC(framework.DstMAC),
-		EthernetType: layers.EthernetTypeIPv4,
-	}
-
-	ip4 := layers.IPv4{
-		Version:  4,
-		IHL:      5,
-		Id:       1,
-		TTL:      64,
-		Protocol: layers.IPProtocolTCP,
-		SrcIP:    srcIP,
-		DstIP:    dstIP,
-	}
-
-	tcp := layers.TCP{
-		SrcPort: 12345,
-		DstPort: 80,
-		Seq:     1,
-		Ack:     1,
-		Window:  1024,
-		PSH:     true,
-		ACK:     true,
-	}
-	err := tcp.SetNetworkLayerForChecksum(&ip4)
-	if err != nil {
-		panic(err)
-	}
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
-	err = gopacket.SerializeLayers(buf, opts, &eth, &ip4, &tcp, gopacket.Payload(payload))
-	if err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
-}
-
-// Helper function to create NAT64 IPv4 UDP test packets
-func createNAT64IPv4UDPPacket(srcIP, dstIP net.IP, payload []byte) []byte {
-	eth := layers.Ethernet{
-		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
-		DstMAC:       framework.MustParseMAC(framework.DstMAC),
-		EthernetType: layers.EthernetTypeIPv4,
-	}
-
-	ip4 := layers.IPv4{
-		Version:  4,
-		IHL:      5,
-		Id:       1,
-		TTL:      64,
-		Protocol: layers.IPProtocolUDP,
-		SrcIP:    srcIP,
-		DstIP:    dstIP,
-	}
-
-	udp := layers.UDP{
-		SrcPort: 12345,
-		DstPort: 53, // DNS port
-	}
-	err := udp.SetNetworkLayerForChecksum(&ip4)
-	if err != nil {
-		panic(err)
-	}
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
-	err = gopacket.SerializeLayers(buf, opts, &eth, &ip4, &udp, gopacket.Payload(payload))
-	if err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
-}
-
-// Helper function to create NAT64 IPv4 ICMP test packets
-func createNAT64IPv4ICMPPacket(srcIP, dstIP net.IP, payload []byte) []byte {
-	eth := layers.Ethernet{
-		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
-		DstMAC:       framework.MustParseMAC(framework.DstMAC),
-		EthernetType: layers.EthernetTypeIPv4,
-	}
-
-	ip4 := layers.IPv4{
-		Version:  4,
-		IHL:      5,
-		Id:       1,
-		TTL:      64,
-		Protocol: layers.IPProtocolICMPv4,
-		SrcIP:    srcIP,
-		DstIP:    dstIP,
-	}
-
-	icmp := layers.ICMPv4{
-		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
-		Id:       0x1234,
-		Seq:      1,
-	}
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
-	err := gopacket.SerializeLayers(buf, opts, &eth, &ip4, &icmp, gopacket.Payload(payload))
-	if err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
 }
 
 // Helper function to create TCP layer

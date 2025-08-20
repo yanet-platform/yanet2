@@ -134,26 +134,11 @@ func TestForward(t *testing.T) {
 	require.NotNil(t, fw, "Global framework should be initialized")
 
 	t.Run("Configure_Forward_Module", func(t *testing.T) {
-		// Configure forward module (L2 and L3 forwarding)
+		_, err := fw.CLI.ExecuteCommands(framework.CommonConfigCommands...)
+		require.NoError(t, err, "Failed to setup common configuration")
+
+		// Forward-specific configuration
 		commands := []string{
-			"ip link set kni0 up",
-			"ip nei add fe80::1 lladdr " + framework.SrcMAC + " dev kni0",
-			"ip nei add 203.0.113.1 lladdr " + framework.SrcMAC + " dev kni0",
-			"ip addr add 203.0.113.14/24 dev kni0",
-
-			// Enable L2 forwarding between devices
-			"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 0 --dst 1",
-			"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 1 --dst 0",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net 203.0.113.14/32",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net fe80::5054:ff:fe6b:ffa5/64",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net ff02::/16",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net 0.0.0.0/0",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net ::/0",
-			"/mnt/target/release/yanet-cli-forward show --cfg=forward0 --instances 0",
-
-			// Route
-			"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via fe80::1 ::/0",
-			"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 0.0.0.0/0",
 
 			// Configure pipelines
 			"/mnt/target/release/yanet-cli-pipeline update --name=bootstrap --modules forward:forward0 --instance=0",
@@ -164,13 +149,8 @@ func TestForward(t *testing.T) {
 			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
 		}
 
-		for _, cmd := range commands {
-			output, err := fw.CLI.ExecuteCommand(cmd)
-			require.NoError(t, err, "Failed to execute command: %s", cmd)
-			if output != "" {
-				t.Logf("Output: %s", output)
-			}
-		}
+		_, err = fw.CLI.ExecuteCommands(commands...)
+		require.NoError(t, err, "Failed to configure forward module")
 	})
 
 	t.Run("Test_Forwarding", func(t *testing.T) {

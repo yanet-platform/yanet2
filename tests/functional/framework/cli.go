@@ -23,8 +23,8 @@ type CLIManager struct {
 	outputBuffer strings.Builder
 	mutex        sync.Mutex
 	reader       *bufio.Scanner
-	isReading    bool
 	log          *zap.SugaredLogger
+	cmdMutex     sync.Mutex
 }
 
 // CLIOption defines functional options for CLIManager
@@ -57,6 +57,8 @@ func NewCLIManager(qemu *QEMUManager, opts ...CLIOption) (*CLIManager, error) {
 
 // ExecuteCommand executes a CLI command in the QEMU VM via serial console
 func (c *CLIManager) ExecuteCommand(command string) (string, error) {
+	c.cmdMutex.Lock()
+	defer c.cmdMutex.Unlock()
 	if c.qemu == nil || c.qemu.Command == nil || c.qemu.Command.Process == nil {
 		return "", fmt.Errorf("QEMU VM is not running")
 	}
@@ -89,8 +91,9 @@ func (c *CLIManager) ExecuteCommand(command string) (string, error) {
 	c.mutex.Unlock()
 
 	// Send command to VM with a unique marker for better parsing
-	commandMarker := fmt.Sprintf("CMD_START_%d", time.Now().UnixNano())
-	endMarker := fmt.Sprintf("CMD_END_%d", time.Now().UnixNano())
+	tm := time.Now().UnixNano()
+	commandMarker := fmt.Sprintf("CMD_START_%d", tm)
+	endMarker := fmt.Sprintf("CMD_END_%d", tm)
 
 	fullCommand := fmt.Sprintf("echo '%s'; %s; echo \"=$?=%s\"\n", commandMarker, command, endMarker)
 	_, err := stdin.Write([]byte(fullCommand))
@@ -102,12 +105,20 @@ func (c *CLIManager) ExecuteCommand(command string) (string, error) {
 	return c.waitForCommandCompletionWithMarkers(command, fullCommand, commandMarker, endMarker, 30*time.Second)
 }
 
+func (c *CLIManager) ExecuteCommands(commands ...string) ([]string, error) {
+	outputs := make([]string, 0, len(commands))
+	for _, cmd := range commands {
+		output, err := c.ExecuteCommand(cmd)
+		outputs = append(outputs, output)
+		if err != nil {
+			return outputs, fmt.Errorf("failed to execute common config command '%s': %w", cmd, err)
+		}
+	}
+	return outputs, nil
+}
+
 // readOutput continuously reads output from QEMU stdout
 func (c *CLIManager) readOutput() {
-	c.mutex.Lock()
-	c.isReading = true
-	c.mutex.Unlock()
-
 	for c.reader.Scan() {
 		line := c.reader.Text()
 
@@ -117,10 +128,6 @@ func (c *CLIManager) readOutput() {
 
 		c.log.Debugf("DEBUG: VM output: %s", line)
 	}
-
-	c.mutex.Lock()
-	c.isReading = false
-	c.mutex.Unlock()
 
 	if err := c.reader.Err(); err != nil {
 		c.log.Debugf("DEBUG: Error reading VM output: %v", err)
@@ -136,7 +143,7 @@ func (c *CLIManager) waitForCommandCompletionWithMarkers(command, fullCommand, s
 		c.mutex.Lock()
 		output := c.outputBuffer.String()
 		c.mutex.Unlock()
-		output = strings.Replace(output, fullCommand, "", 1)
+		output = strings.ReplaceAll(output, fullCommand, "")
 
 		// Look for start marker
 		if !foundStart && strings.Contains(output, startMarker) {
@@ -169,7 +176,10 @@ func (c *CLIManager) extractCommandOutputWithMarkers(output, startMarker, endMar
 	retCode := 0
 
 	for _, line := range lines {
-		line = strings.TrimSpace(line)
+		line = c.cleanControlCharacters(line)
+		if line == "" {
+			continue
+		}
 
 		// Look for start marker
 		if !foundStart && strings.Contains(line, startMarker) {
@@ -189,14 +199,10 @@ func (c *CLIManager) extractCommandOutputWithMarkers(output, startMarker, endMar
 		}
 
 		// Collect lines between markers
-		if foundStart && line != "" {
+		if foundStart {
 			// Skip shell prompts and command echoes
 			if !c.isShellPrompt(line) {
-				// Clean ANSI escape sequences and control characters
-				cleanLine := c.cleanControlCharacters(line)
-				if cleanLine != "" {
-					resultLines = append(resultLines, cleanLine)
-				}
+				resultLines = append(resultLines, line)
 			}
 		}
 	}
@@ -211,7 +217,7 @@ func (c *CLIManager) extractCommandOutputWithMarkers(output, startMarker, endMar
 
 // isShellPrompt checks if a line is a shell prompt
 func (c *CLIManager) isShellPrompt(line string) bool {
-	return (strings.Contains(line, "root@") || strings.Contains(line, "ubuntu@")) &&
+	return (strings.HasPrefix(line, "root@yanet-vm") || strings.HasPrefix(line, "ubuntu@yanet-vm")) &&
 		(strings.Contains(line, "# ") || strings.Contains(line, "$ "))
 }
 
@@ -239,8 +245,7 @@ func (c *CLIManager) cleanControlCharacters(line string) string {
 func (c *CLIManager) Close() error {
 	// Stop the background reader
 	c.mutex.Lock()
-	c.isReading = false
-	c.mutex.Unlock()
+	defer c.mutex.Unlock()
 
 	return nil
 }

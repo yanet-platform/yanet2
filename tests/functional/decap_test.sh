@@ -18,7 +18,7 @@ cleanup() {
 trap cleanup ERR
 
 # Bind devices to DPDK
-/mnt/build/dpdk-devbind.py --bind=vfio-pci 01:00.0 || echo "Device binding failed or already bound"
+/mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py --bind=vfio-pci 01:00.0 || echo "Device binding failed or already bound"
 
 # Start dataplane with logging
 /mnt/build/dataplane/yanet-dataplane /mnt/build/dataplane.yaml > /mnt/build/yanet-dataplane.log 2>&1 &

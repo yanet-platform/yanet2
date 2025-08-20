@@ -34,17 +34,17 @@ tests/functional/
 │   ├── qemu.go         # QEMU VM management
 │   ├── cli.go          # CLI interaction
 │   ├── socket_client.go # TCP socket client for QEMU communication
-│   ├── packet_simulator.go # Packet simulator for testing
-│   ├── sock_dev.go     # Network device utilities
-│   ├── tap_macos.go    # TAP interface for macOS (legacy)
+│   ├── packet_parser.go # Packet parser for network analysis
+│   ├── utils.go        # Utility functions
 │   └── framework.go    # Main framework code
-├── acl_test.go         # ACL module tests
+├── framework_test.go   # Main comprehensive framework test
 ├── nat64_test.go       # NAT64 module tests
 ├── forward_test.go     # Forward module tests
 ├── decap_test.go       # Decap module tests
-├── simple_test.go      # Simple basic tests
+├── decap_test.sh       # Shell script for decap testing
 ├── Makefile            # Build and run commands
-├── cloud-init/            # Cloud-init configuration with autologin
+├── cloud-init-user-data.yaml # Cloud-init configuration with autologin
+├── meta-data           # Cloud-init metadata
 └── README.md           # Documentation
 ```
 
@@ -69,24 +69,18 @@ make test
 # Run all functional tests
 make test
 
-# Run enhanced decap tests
-make test-enhanced
-
-# Run basic framework tests
-make test-basic
-
 # Run specific test
-make test-run TEST=TestDecapEnhancedWithYANET
+make test-run TEST=TestFramework
 
-# Run from project root directory
-make test-functional
-just test-functional
-
-# Run in Docker (recommended)
-just dtest-functional
+# Run with Go directly
+go test -v ./...
 
 # Run with increased timeout
 go test -v -timeout 10m ./...
+
+# Run from project root directory
+just dtest-functional  # Docker (recommended)
+just test-functional   # Local
 ```
 
 ### Debugging and Diagnostics
@@ -95,12 +89,12 @@ go test -v -timeout 10m ./...
 # Show help for all commands
 make help
 
-# Show QEMU command without running
-make debug-dry-run
-
 # Run VM in debug mode with serial console
 make debug-vm
 # Use Ctrl+A, X to exit QEMU
+
+# Clean test artifacts
+make clean
 
 # Full cleanup (including downloaded images)
 make clean-all
@@ -121,7 +115,7 @@ import (
 3. Create test function:
 ```go
 func TestExample(t *testing.T) {
-    // Framework initialization (without SSH parameters)
+    // Framework initialization
     fw, err := framework.New(&framework.Config{
         QEMUImage: "yanet-test.qcow2",
     })
@@ -131,28 +125,14 @@ func TestExample(t *testing.T) {
     // Start test environment
     require.NoError(t, fw.Start())
 
-    // Start and configure YANET
-    require.NoError(t, fw.StartYANET())
+    // Wait for VM to be ready
+    require.NoError(t, fw.WaitForReady())
 
-    // Configure decap module
-    prefixes := []string{"2001:db8::2/128", "10.0.0.2/32"}
-    require.NoError(t, fw.ConfigureDecapModule(prefixes))
-
-    // Create test packet
-    packet := createDecapPacket("ip6ip4")
-
-    // Send packet and capture response
-    response, err := fw.SendPacketAndCapture(0, 1, packet, 5*time.Second)
-    if err != nil {
-        t.Logf("Packet capture failed (expected without YANET): %v", err)
-    } else {
-        t.Logf("Captured response: %d bytes", len(response))
-    }
-
-    // Get statistics
-    stats, err := fw.GetYANETStats()
+    // Execute basic commands
+    output, err := fw.ExecuteCommand("whoami")
     require.NoError(t, err)
-    t.Logf("Collected %d categories of statistics", len(stats))
+    t.Logf("Current user: %s", strings.TrimSpace(output))
+
 }
 ```
 
@@ -171,21 +151,21 @@ VM uses autologin through serial console - SSH is not required:
 make debug-vm
 
 # Logs are available in files:
-# - qemu_debug.log - QEMU startup and configuration
-# - test_output*.log - test execution
+# - qemu.log - QEMU startup and configuration
+# - test_output*.log - test execution logs
 # - /tmp/yanet-test-vm/ - VM working directory
 ```
 
 ### Network Traffic Monitoring
 
-To view packets passing through socket connections, you can use standard network monitoring tools:
+To view packets passing through Unix domain sockets, you can monitor socket files:
 
 ```bash
-# Monitor TCP connections
-netstat -an | grep :9001
+# Check socket files
+ls -la /tmp/yanetvm_sockdev_*.sock
 
-# View traffic through tcpdump (if available)
-tcpdump -i lo port 9001
+# Monitor socket activity
+lsof /tmp/yanetvm_sockdev_*.sock
 ```
 
 ## Limitations
@@ -196,18 +176,18 @@ tcpdump -i lo port 9001
 
 ## Network Architecture
 
-The framework uses **real TCP socket connections** for communication with QEMU VM:
+The framework uses **Unix domain sockets** for communication with QEMU VM:
 
-- **QEMU starts** with parameter `-netdev socket,listen=:9001`
-- **Tests connect** to this port through TCP socket client
+- **QEMU starts** with `-netdev stream` using Unix domain sockets
+- **Socket devices** at `/tmp/yanetvm_sockdev_*.sock` for network interfaces
 - **Packets are transmitted** as raw bytes through socket connections
 - **Packet processing** happens in the real YANET network stack
 
 This provides:
 - ✅ **Real network environment** without emulation
-- ✅ **Cross-platform compatibility** (works on Linux, macOS, Windows)
+- ✅ **High performance** through Unix domain sockets
 - ✅ **Easy debugging** through standard network tools
-- ✅ **Reliability** thanks to proven TCP protocols
+- ✅ **Reliability** and low latency communication
 
 ## Build Dependencies
 
@@ -215,12 +195,16 @@ This provides:
 
 ```bash
 # Build necessary components before testing
+just dbuild                    # Docker build (recommended)
+just build                     # Local build
+
+# Or using meson directly
 meson compile -C build          # Builds dataplane and modules
-make controlplane              # Builds controlplane agents
 ```
 
 Tests use **QEMU 9P filesystem** for access to built binary files:
 - `build/` directory is mounted in VM as shared filesystem
+- `target/` directory for CLI binaries
 - VM runs real YANET processes from built binaries
 - This ensures full end-to-end testing
 

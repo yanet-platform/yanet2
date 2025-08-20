@@ -70,7 +70,7 @@ func NewSocketClient(socketPath string, opts ...SocketClientOption) (*SocketClie
 
 	sc := &SocketClient{
 		socketPath: socketPath,
-		timeout:    5 * time.Second,      // default 5s timeout for Unix sockets
+		timeout:    100 * time.Millisecond,
 		log:        zap.NewNop().Sugar(), // default noop logger
 	}
 
@@ -151,7 +151,7 @@ func (sc *SocketClient) SendPacket(packet []byte) error {
 
 // ReceivePacket receives a packet from the QEMU socket connection
 // The packet is expected to be prefixed with its length in network byte order
-func (sc *SocketClient) ReceivePacket() ([]byte, error) {
+func (sc *SocketClient) ReceivePacket(timeout time.Duration) ([]byte, error) {
 	if sc.conn == nil {
 		return nil, fmt.Errorf("not connected to socket")
 	}
@@ -162,7 +162,7 @@ func (sc *SocketClient) ReceivePacket() ([]byte, error) {
 
 	// Keep reading packets until we find one with the correct SrcMAC
 	for {
-		err := sc.conn.SetReadDeadline(time.Now().Add(sc.timeout))
+		err := sc.conn.SetReadDeadline(time.Now().Add(timeout))
 		if err != nil {
 			return nil, fmt.Errorf("failed to set read deadline: %w", err)
 		}

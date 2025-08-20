@@ -13,32 +13,16 @@ import (
 )
 
 // TestDecap_BasicFunctionality tests basic decap module functionality
-func TestDecap_BasicFunctionality(t *testing.T) {
-	// Use global framework instance like in TestYANETStartup
+func TestDecap(t *testing.T) {
 	fw := globalFramework
 	require.NotNil(t, fw, "Global framework should be initialized")
 
 	t.Run("Configure_Decap_Module", func(t *testing.T) {
-		// Configure forward module first (L2 and L3 forwarding)
+		_, err := fw.CLI.ExecuteCommands(framework.CommonConfigCommands...)
+		require.NoError(t, err, "Failed to setup common configuration")
+
+		// Decap-specific configuration
 		commands := []string{
-			"ip link set kni0 up",
-			"ip nei add fe80::1 lladdr " + framework.SrcMAC + " dev kni0",
-			"ip nei add 203.0.113.1 lladdr " + framework.SrcMAC + " dev kni0",
-			"ip addr add 203.0.113.14/24 dev kni0",
-
-			// Enable L2 forwarding between devices
-			"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 0 --dst 1",
-			"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 1 --dst 0",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net 203.0.113.14/32",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net fe80::5054:ff:fe6b:ffa5/64",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net ff02::/16",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net 0.0.0.0/0",
-			"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net ::/0",
-
-			// Route
-			"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via fe80::1 ::/0",
-			"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 0.0.0.0/0",
-
 			"/mnt/target/release/yanet-cli-decap prefix-add --cfg decap0 --instances 0 -p 4.5.6.7/32",
 			"/mnt/target/release/yanet-cli-decap prefix-add --cfg decap0 --instances 0 -p 1:2:3:4::abcd/128",
 
@@ -47,22 +31,10 @@ func TestDecap_BasicFunctionality(t *testing.T) {
 
 			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=01:00.0 --pipelines decap:1",
 			"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
-
-			// for debugging
-			//"sh -c 'tcpdump -nvei kni0 > /mnt/build/tcpdump.log 2>/dev/null &'",
-			//"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",
-			//"cp /var/log/yanet-dataplane.log /mnt/build/ 2>/dev/null || echo 'No dataplane log found'",
 		}
 
-		for _, cmd := range commands {
-			output, err := fw.CLI.ExecuteCommand(cmd)
-			require.NoError(t, err, "Failed to execute command: %s", cmd)
-			if len(output) > 0 {
-				t.Logf("Output: %s", output)
-			}
-		}
-		// wait for dataplane
-		time.Sleep(10 * time.Second)
+		_, err = fw.CLI.ExecuteCommands(commands...)
+		require.NoError(t, err, "Failed to configure decap module")
 	})
 
 	t.Run("Test_IPIP6_Decapsulation", func(t *testing.T) {

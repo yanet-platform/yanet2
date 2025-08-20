@@ -108,8 +108,8 @@ func (q *QEMUManager) Start() error {
 	// Base arguments
 	args := []string{
 		"-name", "yanet-test-vm",
-		"-smp", "4",
-		"-m", "8G",
+		"-smp", "2",
+		"-m", "5G",
 		"-machine", "q35,kernel-irqchip=split",
 		"-cpu", "max",
 		"-device", "intel-iommu,intremap=on,device-iotlb=on",

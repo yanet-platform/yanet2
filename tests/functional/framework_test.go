@@ -2,7 +2,6 @@ package functional
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -74,7 +73,7 @@ dataplane:
       max_lro_packet_size: 7200
       rss_hash: 0
       workers:
-        - core_id: 1
+        - core_id: 0
           instance_id: 0
           rx_queue_len: 1024
           tx_queue_len: 1024
@@ -84,7 +83,7 @@ dataplane:
       max_lro_packet_size: 7200
       rss_hash: 0
       workers:
-        - core_id: 2
+        - core_id: 0
           instance_id: 0
           rx_queue_len: 1024
           tx_queue_len: 1024
@@ -278,7 +277,7 @@ func TestFramework(t *testing.T) {
 			testPacket = append(testPacket, padding...)
 		}
 
-		packetInfo, err := fw.ParsePacket(testPacket)
+		packetInfo, err := fw.PacketParser.ParsePacket(testPacket)
 		require.NoError(t, err, "Failed to parse test packet")
 		require.NotNil(t, packetInfo, "PacketInfo should not be nil")
 		require.True(t, packetInfo.IsIPv4, "Packet should be IPv4")
@@ -307,167 +306,5 @@ func TestFramework(t *testing.T) {
 			output, err := fw.CLI.ExecuteCommand("cat /proc/meminfo | grep -i huge")
 			require.NoErrorf(t, err, "Failed to get hugepages info: %s", output)
 		})
-	})
-}
-
-// TestYANETStartup tests basic YANET startup and configuration
-func TestYANETStartup(t *testing.T) {
-	// Use global framework instance
-	fw := globalFramework
-	require.NotNil(t, fw, "Global framework should be initialized")
-
-	// Updated dataplane config matching our single interface setup
-	dataplaneConfig := `
-dataplane:
-  storage: /dev/hugepages/yanet
-  dpdk_memory: 1024
-  loglevel: trace
-  instances:
-    - dp_memory: 1073741824
-      cp_memory: 1073741824
-      numa_id: 0
-  devices:
-    - port_name: 01:00.0
-      mtu: 7000
-      max_lro_packet_size: 7200
-      rss_hash: 0
-      workers:
-        - core_id: 1
-          instance_id: 0
-          rx_queue_len: 1024
-          tx_queue_len: 1024
-    - port_name: virtio_user_kni0
-      mac_addr: 52:54:00:6b:ff:a5
-      mtu: 7000
-      max_lro_packet_size: 7200
-      rss_hash: 0
-      workers:
-        - core_id: 1
-          instance_id: 0
-          rx_queue_len: 1024
-          tx_queue_len: 1024
-  connections:
-    - src_device_id: 0
-      dst_device_id: 1
-    - src_device_id: 1
-      dst_device_id: 0
-`
-
-	// Updated controlplane config
-	controlplaneConfig := `
-logging:
-  level: trace
-`
-
-	t.Run("Build_Verification", func(t *testing.T) {
-		// Verify build files are mounted
-		output, err := fw.CLI.ExecuteCommand("ls -la /mnt/build/")
-		require.NoError(t, err, "Build directory not accessible")
-		require.Contains(t, output, "dataplane", "Build directory missing dataplane subdirectory")
-
-		// Verify binaries exist
-		_, err = fw.CLI.ExecuteCommand("ls -la /mnt/build/dataplane/yanet-dataplane")
-		require.NoError(t, err, "Dataplane binary not found")
-
-		_, err = fw.CLI.ExecuteCommand("ls -la /mnt/build/controlplane/yanet-controlplane")
-		require.NoError(t, err, "Controlplane binary not found")
-	})
-
-	t.Run("System_Setup", func(t *testing.T) {
-		// Setup directories
-		setupCommands := []string{
-			"mkdir -p /var/log/yanet",
-		}
-
-		for _, cmd := range setupCommands {
-			_, err := fw.CLI.ExecuteCommand(cmd)
-			require.NoError(t, err, "Failed to execute setup command: %s", cmd)
-		}
-
-		// Verify that mounted config directory is accessible
-		output, err := fw.CLI.ExecuteCommand("ls -la /mnt/config/")
-		require.NoError(t, err, "Failed to access mounted config directory")
-		require.Contains(t, output, "dataplane.yaml", "Config directory not found")
-	})
-
-	t.Run("Binary_Tests", func(t *testing.T) {
-		// Test binary execution (help commands should work)
-		output, err := fw.CLI.ExecuteCommand("cd /mnt/build/controlplane && timeout 10s ./yanet-controlplane --help 2>&1")
-		require.NoError(t, err, "Controlplane binary failed to show help")
-		t.Logf("Controlplane help output: %q", output)
-
-		// Check for common help indicators instead of just "Usage"
-		helpIndicators := []string{"Usage", "usage", "help", "Help", "Options", "options", "Commands", "commands"}
-		foundHelp := false
-		for _, indicator := range helpIndicators {
-			if strings.Contains(output, indicator) {
-				foundHelp = true
-				break
-			}
-		}
-		require.True(t, foundHelp, "Controlplane help output missing help information. Output: %q", output)
-	})
-
-	t.Run("System_Resources", func(t *testing.T) {
-		// Verify system has adequate resources
-		output, err := fw.CLI.ExecuteCommand("grep MemTotal /proc/meminfo")
-		require.NoError(t, err, "Failed to check memory")
-		require.Contains(t, output, "MemTotal", "Memory information not available")
-
-		output, err = fw.CLI.ExecuteCommand("nproc")
-		require.NoError(t, err, "Failed to check CPU count")
-		require.NotEmpty(t, output, "CPU count not available")
-
-		// Test basic network interface presence
-		output, err = fw.CLI.ExecuteCommand("ip link show")
-		require.NoError(t, err, "Failed to list network interfaces")
-		require.Contains(t, output, "lo", "Loopback interface not found")
-	})
-
-	t.Run("YANET_Startup", func(t *testing.T) {
-		require.NoError(t, fw.StartYANET(dataplaneConfig, controlplaneConfig))
-	})
-
-	t.Run("Config_File_Verification", func(t *testing.T) {
-		// Verify files exist on host in the mounted config directory
-		configDir := fw.QEMU.ConfigDir
-		dataplaneConfigPath := filepath.Join(configDir, "dataplane.yaml")
-		controlplaneConfigPath := filepath.Join(configDir, "controlplane.yaml")
-
-		require.FileExists(t, dataplaneConfigPath, "Dataplane config file not found on host")
-		require.FileExists(t, controlplaneConfigPath, "Controlplane config file not found on host")
-
-		// Verify file contents on host
-		dataplaneContent, err := os.ReadFile(dataplaneConfigPath)
-		require.NoError(t, err, "Failed to read dataplane config")
-		require.Contains(t, string(dataplaneContent), "dataplane:", "Dataplane config content incorrect")
-
-		controlplaneContent, err := os.ReadFile(controlplaneConfigPath)
-		require.NoError(t, err, "Failed to read controlplane config")
-		require.Contains(t, string(controlplaneContent), "logging:", "Controlplane config content incorrect")
-	})
-
-	// Final statistics check - only makes sense after YANET is running
-	t.Run("Final_Statistics", func(t *testing.T) {
-		stats, err := fw.GetYANETStats()
-		require.NoError(t, err)
-		require.NotEmpty(t, stats, "Statistics should not be empty")
-
-		// Check main statistics categories
-		expectedCategories := []string{"interfaces", "memory", "processes", "network_stats"}
-		for _, category := range expectedCategories {
-			require.Contains(t, stats, category, "Statistics should contain %s", category)
-		}
-
-		// Log brief summary
-		if interfaces, ok := stats["interfaces"].(string); ok {
-			interfaceCount := strings.Count(interfaces, "mtu")
-			require.Greater(t, interfaceCount, 0, "No network interfaces found")
-		}
-
-		if processes, ok := stats["processes"].(string); ok {
-			processLines := strings.Count(processes, "\n")
-			require.Greater(t, processLines, 0, "No processes found")
-		}
 	})
 }
