@@ -3,6 +3,7 @@
 #include <stdbool.h>
 
 #include "common/memory.h"
+#include "common/network.h"
 #include "common/range_collector.h"
 #include "common/registry.h"
 #include "common/value.h"
@@ -66,8 +67,8 @@ typedef void (*net6_get_part_func)(
 static void
 net6_get_hi_part(struct net6 *net, uint64_t *addr, uint64_t *mask) {
 	*addr = 0;
-	for (size_t i = 0, shift = 0; i < 8; ++i, shift += 8) {
-		*addr |= ((uint64_t)net->ip[8 + i]) << shift;
+	for (size_t i = 0, shift = 0; i < NET6_LEN / 2; ++i, shift += 8) {
+		*addr |= ((uint64_t)net->ip[NET6_LEN / 2 + i]) << shift;
 	}
 	*mask = -1ull << (64 - net->pref_hi);
 	*mask = be64toh(*mask);
@@ -77,8 +78,8 @@ net6_get_hi_part(struct net6 *net, uint64_t *addr, uint64_t *mask) {
 static void
 net6_get_lo_part(struct net6 *net, uint64_t *addr, uint64_t *mask) {
 	*addr = 0;
-	for (size_t i = 0, shift = 0; i < 8; ++i, shift += 8) {
-		*addr |= ((uint64_t)net->ip[8 + i]) << shift;
+	for (size_t i = 0, shift = 0; i < NET6_LEN / 2; ++i, shift += 8) {
+		*addr |= ((uint64_t)net->ip[NET6_LEN / 2 + i]) << shift;
 	}
 	*mask = -1ull << (64 - net->pref_lo);
 	*mask = be64toh(*mask);

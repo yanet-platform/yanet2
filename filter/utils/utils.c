@@ -85,8 +85,8 @@ make_mbuf(
 // IPv6 in host byte order
 static struct rte_mbuf *
 make_mbuf_net6(
-	const uint8_t src_ip[16],
-	const uint8_t dst_ip[16],
+	const uint8_t src_ip[NET6_LEN],
+	const uint8_t dst_ip[NET6_LEN],
 	uint16_t src_port,
 	uint16_t dst_port
 ) {
@@ -123,9 +123,9 @@ make_mbuf_net6(
 	struct rte_ipv6_hdr *ip = (struct rte_ipv6_hdr *)(eth + 1);
 	ip->proto = IPPROTO_UDP;
 	ip->payload_len = rte_cpu_to_be_16(sizeof(struct rte_udp_hdr));
-	for (size_t i = 0; i < 16; ++i) {
-		ip->src_addr[i] = src_ip[16 - i - 1];
-		ip->dst_addr[i] = dst_ip[16 - i - 1];
+	for (size_t i = 0; i < NET6_LEN; ++i) {
+		ip->src_addr[i] = src_ip[NET6_LEN - i - 1];
+		ip->dst_addr[i] = dst_ip[NET6_LEN - i - 1];
 	}
 
 	struct rte_udp_hdr *udp = (struct rte_udp_hdr *)(ip + 1);
@@ -165,8 +165,8 @@ make_packet(
 // IPv6 in host byte order
 struct packet
 make_packet_net6(
-	const uint8_t src_ip[16],
-	const uint8_t dst_ip[16],
+	const uint8_t src_ip[NET6_LEN],
+	const uint8_t dst_ip[NET6_LEN],
 	uint16_t src_port,
 	uint16_t dst_port
 ) {

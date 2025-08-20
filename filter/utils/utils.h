@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/network.h"
 #include "dataplane/packet/packet.h"
 #include "rule.h"
 
@@ -25,8 +26,8 @@ make_packet(
 
 struct packet
 make_packet_net6(
-	const uint8_t src_ip[16],
-	const uint8_t dst_ip[16],
+	const uint8_t src_ip[NET6_LEN],
+	const uint8_t dst_ip[NET6_LEN],
 	uint16_t src_port,
 	uint16_t dst_port
 );
