@@ -84,7 +84,7 @@ make_mbuf(
 
 // IPv6 in host byte order
 static struct rte_mbuf *
-make_mbuf_v6(
+make_mbuf_net6(
 	const uint8_t src_ip[16],
 	const uint8_t dst_ip[16],
 	uint16_t src_port,
@@ -171,7 +171,7 @@ make_packet_net6(
 	uint16_t dst_port
 ) {
 	struct packet packet;
-	packet.mbuf = make_mbuf_v6(src_ip, dst_ip, src_port, dst_port);
+	packet.mbuf = make_mbuf_net6(src_ip, dst_ip, src_port, dst_port);
 	assert(packet.mbuf != NULL);
 	int parse_result = parse_packet(&packet);
 	assert(parse_result == 0);

@@ -6,6 +6,8 @@ struct ether_addr {
 	uint8_t addr[6];
 };
 
+#define NET6_LEN 16
+
 struct net6 {
 	// IPv6 address in the host byte order.
 	uint8_t ip[16];
