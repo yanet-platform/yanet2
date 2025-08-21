@@ -649,7 +649,8 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 			goto unlock;
 		}
 
-		device_list_info->devices[device_list_info->device_count] = device_info;
+		device_list_info->devices[device_list_info->device_count] =
+			device_info;
 		device_list_info->device_count++;
 	}
 
