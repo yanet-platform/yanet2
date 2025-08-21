@@ -127,7 +127,7 @@ int
 filter_query(
 	struct filter *filter,
 	struct packet *packet,
-	uint32_t **actions,
+	const uint32_t **actions,
 	uint32_t *count
 ) {
 	// calculate classifiers for attributes

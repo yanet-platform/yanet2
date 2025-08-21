@@ -112,3 +112,12 @@ non_term_actions = executable('non_term_actions',
   link_language: 'c'
 )
 test('non_term_actions', non_term_actions, suite: ['filter'])
+
+category = executable('category',
+  ['category.c'], 
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('category', category, suite: ['filter'])

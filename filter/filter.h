@@ -165,7 +165,7 @@ int
 filter_query(
 	struct filter *filter,
 	struct packet *packet,
-	uint32_t **actions,
+	const uint32_t **actions,
 	uint32_t *count
 );
 
@@ -322,3 +322,11 @@ filter_free(struct filter *filter);
 		}                                                              \
 	} while (0);                                                           \
 	free_finish:
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Allows to find actions with fixed category.
+uint32_t
+find_actions_with_category(
+	uint32_t *actions, uint32_t count, uint32_t category
+);

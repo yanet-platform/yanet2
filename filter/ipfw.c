@@ -293,7 +293,7 @@ merge_and_collect_registry(
 }
 
 struct value_set_ctx {
-	struct filter_rule *actions;
+	struct filter_rule *rules;
 	struct value_table *table;
 	struct value_registry *registry;
 };
@@ -337,7 +337,7 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 		}
 
 		value_registry_collect(
-			set_ctx->registry, set_ctx->actions[idx].action
+			set_ctx->registry, set_ctx->rules[idx].action
 		);
 	}
 
@@ -370,7 +370,7 @@ set_registry_values(
 		return -1;
 
 	struct value_set_ctx set_ctx;
-	set_ctx.actions = actions;
+	set_ctx.rules = actions;
 	set_ctx.table = table;
 	set_ctx.registry = registry;
 

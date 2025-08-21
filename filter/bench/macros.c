@@ -1,5 +1,4 @@
 #include "../filter.h"
-#include "../ipfw.h"
 #include "attribute.h"
 #include "utils.h"
 

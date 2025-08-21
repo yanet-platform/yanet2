@@ -1,5 +1,6 @@
 #include "helper.h"
 #include "common/registry.h"
+#include "rule.h"
 
 int
 init_dummy_registry(
@@ -27,10 +28,13 @@ init_dummy_registry(
 ////////////////////////////////////////////////////////////////////////////////
 
 struct value_set_ctx {
-	const struct filter_rule *actions;
+	const struct filter_rule *rules;
 	struct value_table *table;
 	struct value_registry *registry;
 };
+
+#define CAN_TERMINATE(action) (((action) >> 15) == 0)
+#define CATEGORY(action) ((action) >> 16)
 
 static int
 action_list_is_term(struct value_registry *registry, uint32_t range_idx) {
@@ -38,8 +42,39 @@ action_list_is_term(struct value_registry *registry, uint32_t range_idx) {
 	if (range->count == 0)
 		return 0;
 
-	uint32_t action_id = ADDR_OF(&range->values)[range->count - 1];
-	return !(action_id & ACTION_NON_TERMINATE);
+	uint32_t action = range->values[range->count - 1];
+	return CAN_TERMINATE(action);
+}
+
+uint32_t
+find_actions_with_category(
+	uint32_t *actions, uint32_t count, uint16_t category
+) {
+	uint32_t count_category = 0;
+
+	for (uint32_t i = 0; i < count; ++i) {
+		uint32_t action = actions[i];
+		uint16_t cat = CATEGORY(action);
+
+		// check if action corresponds to category
+		if (cat == 0 || (cat & (1 << category))) {
+			actions[count_category++] = action;
+		} else {
+			// if no, we skip this action
+			// even if it is terminal, it does not matter
+			continue;
+		}
+
+		// here, action corresponds to category
+
+		// if non-terminate flag is off,
+		// we need terminate.
+		if (!(action & ACTION_NON_TERMINATE)) {
+			break;
+		}
+	}
+
+	return count_category;
 }
 
 static int
@@ -71,7 +106,7 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 		}
 
 		value_registry_collect(
-			set_ctx->registry, set_ctx->actions[idx].action
+			set_ctx->registry, set_ctx->rules[idx].action
 		);
 	}
 
@@ -81,7 +116,7 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 int
 merge_and_set_registry_values(
 	struct memory_context *memory_context,
-	const struct filter_rule *actions,
+	const struct filter_rule *rules,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,
@@ -104,7 +139,7 @@ merge_and_set_registry_values(
 		return -1;
 
 	struct value_set_ctx set_ctx;
-	set_ctx.actions = actions;
+	set_ctx.rules = rules;
 	set_ctx.table = table;
 	set_ctx.registry = registry;
 

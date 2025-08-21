@@ -4,7 +4,11 @@
 
 #include "common/network.h"
 
-#define ACTION_NON_TERMINATE 0x80000000
+#define ACTION_MASK ((uint32_t)0xffff)
+#define ACTION_NON_TERMINATE ((uint32_t)0x8000)
+#define CATEGORY_SHIFT ((uint32_t)16)
+#define MAKE_ACTION_CATEGORY_MASK(category_mask)                               \
+	((uint32_t)(category_mask) << CATEGORY_SHIFT)
 
 struct filter_net6 {
 	uint32_t src_count;
@@ -59,5 +63,10 @@ struct filter_rule {
 	struct filter_net4 net4;
 	struct filter_transport transport;
 	uint16_t vlan;
+
+	// first 15 bits are for user action
+	// 16th bit is for terminate flag
+	// the oldest 16 bits are for category mask,
+	// which is 0 if rule is for all categories.
 	uint32_t action;
 };

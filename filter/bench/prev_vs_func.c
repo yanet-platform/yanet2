@@ -208,7 +208,7 @@ main() {
 	clock_t filter_query_start_time = clock();
 	uint32_t new_filter_checksum = 0;
 	for (size_t i = 0; i < PACKETS; ++i) {
-		uint32_t *actions;
+		const uint32_t *actions;
 		uint32_t actions_count;
 		filter_query(&filter, &packets[i], &actions, &actions_count);
 		new_filter_checksum ^= actions_count;
