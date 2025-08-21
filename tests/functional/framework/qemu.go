@@ -192,7 +192,9 @@ func (q *QEMUManager) Start() error {
 
 	// OS-specific configuration
 	if osType == "linux" {
-		args = append(args, "-enable-kvm")
+		if isKVMEnabled() {
+			args = append(args, "-enable-kvm")
+		}
 	}
 
 	// Drive configuration
@@ -575,4 +577,12 @@ func (q *QEMUManager) setVMReady(ready bool) {
 	q.readyMutex.Lock()
 	defer q.readyMutex.Unlock()
 	q.isReady = ready
+}
+
+// isKVMEnabled checks if KVM is available on the system.
+func isKVMEnabled() bool {
+	if _, err := os.Stat("/dev/kvm"); err == nil {
+		return true
+	}
+	return false
 }

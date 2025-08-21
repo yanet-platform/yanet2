@@ -24,7 +24,7 @@ jobs:
   functional-tests:
     name: Run Functional Tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 150
 
     steps:
     - uses: actions/checkout@v4
@@ -73,7 +73,9 @@ jobs:
     - name: Cache QEMU image
       uses: actions/cache@v4
       with:
-        path: tests/functional/yanet-test.qcow2
+        path: |
+          tests/functional/yanet-test.qcow2
+          tests/functional/*.iso
         key: ${{ runner.os }}-qemu-image-${{ hashFiles('tests/functional/Makefile') }}-${{ hashFiles('tests/functional/cloud-init-user-data.yaml') }}
         restore-keys: |
           ${{ runner.os }}-qemu-image-
@@ -111,37 +113,23 @@ jobs:
         # Make binaries executable
         chmod +x build/dataplane/yanet-dataplane || true
         chmod +x build/controlplane/yanet-controlplane || true
-        chmod +x target/release/yanet-cli-* || true
+        chmod +x target/release/yanet-cli* || true
         
-        echo "=== Final structure ==="
-        echo "=== Build directory ==="
-        ls -la build/
-        echo "=== Dataplane binaries ==="
-        ls -la build/dataplane/
-        echo "=== Controlplane binaries ==="
-        ls -la build/controlplane/
-        echo "=== Target release binaries ==="
-        ls -la target/release/
-
     - name: Prepare test environment
       working-directory: tests/functional
       run: |
-        echo "=== Starting test environment preparation ==="
-        echo "=== Current directory: $(pwd) ==="
-        echo "=== Available disk space ==="
         df -h
-        echo "=== Checking dependencies ==="
         make check-deps
         
         echo "=== Starting QEMU VM preparation ==="
         
         # Run with timeout and monitoring
-        timeout 2700 make prepare-vm &
+        timeout 7200 make prepare-vm &
         QEMU_PID=$!
         
         # Monitor QEMU progress
-        for i in {1..45}; do
-          echo "=== QEMU status check $i/45 ==="
+        for i in {1..120}; do
+          echo "=== QEMU status check $i/120 ==="
           ps aux | grep qemu | grep -v grep || echo "QEMU process not found"
           
           if [ -f qemu_debug.log ]; then
@@ -179,93 +167,13 @@ jobs:
           exit $QEMU_EXIT_CODE
         fi
         
-        echo "=== Test environment preparation completed ==="
-      timeout-minutes: 50
-      env:
-        YANET_TEST_DEBUG: 1
+      timeout-minutes: 130
 
     - name: Run functional tests
       working-directory: tests/functional
       run: |
-        echo "=== Starting functional tests ==="
-        echo "=== Current directory: $(pwd) ==="
-        echo "=== Available disk space ==="
         df -h
-        echo "=== QEMU image status ==="
         ls -la yanet-test.qcow2
         export YANET_TEST_DEBUG=1
         make test
-        echo "=== Functional tests completed ==="
       timeout-minutes: 35
-
-    - name: Upload test logs
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-logs-${{ github.run_number }}
-        path: |
-          tests/functional/*.log
-          tests/functional/yanet-test-vm.log
-          tests/functional/qemu*.log
-          tests/functional/test_*.log
-          /tmp/yanet-test-vm/
-        retention-days: 7
-
-    - name: Upload QEMU image on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: qemu-image-${{ github.run_number }}
-        path: |
-          tests/functional/yanet-test.qcow2
-          tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
-          tests/functional/*.iso
-        retention-days: 3
-
-    - name: Upload build artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-artifacts-${{ github.run_number }}
-        path: |
-          build/
-          target/
-        retention-days: 3
-
-    - name: Print system information for debugging
-      if: always()
-      run: |
-        echo "=== System Information ==="
-        uname -a
-        echo "=== QEMU Version ==="
-        qemu-system-x86_64 --version
-        echo "=== KVM Status ==="
-        if [ -e /dev/kvm ]; then
-          echo "KVM is available:"
-          ls -la /dev/kvm
-        else
-          echo "KVM is not available, will use TCG emulation"
-        fi
-        echo "=== Memory Information ==="
-        free -h
-        echo "=== Disk Space ==="
-        df -h
-        echo "=== Running Processes ==="
-        ps aux | grep -E "(qemu|yanet)" || echo "No QEMU/YANET processes found"
-
-    - name: Cleanup
-      if: always()
-      working-directory: tests/functional
-      run: |
-        echo "=== Cleaning up test artifacts ==="
-        make clean || true
-        
-        echo "=== Cleaning temporary files ==="
-        sudo rm -rf /tmp/yanet-test-vm || true
-        sudo rm -f /tmp/yanetvm_sockdev_*.sock || true
-        sudo rm -f *.log || true
-        
-        echo "=== Cleaning Go cache ==="
-        go clean -testcache || true
-        
-        echo "=== Cleanup completed ==="
