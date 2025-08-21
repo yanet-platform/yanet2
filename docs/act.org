@@ -21,4 +21,12 @@ From the repository root, run:
 act --container-architecture linux/amd64 --artifact-server-path ./artifacts
 #+end_src
 
+or
+
+#+begin_src shell
+act --container-architecture linux/amd64 --artifact-server-path ./artifacts -j build-deb
+#+end_src
+
+for run only =build-deb= job.
+
 Note: --container-architecture linux/amd64 is usually only needed on macOS.

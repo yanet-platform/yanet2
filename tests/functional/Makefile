@@ -8,10 +8,16 @@ QEMU_AUTOINIT := -drive file=$(CLOUD_INIT_AUTOLOGIN_ISO),if=virtio,format=raw
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 	MKISOFS := hdiutil makehybrid -iso -joliet -default-volume-name cidata -o
-	QEMU_ACCEL := 
+	QEMU_ACCEL :=
 else
 	MKISOFS := genisoimage -output
-	QEMU_ACCEL := -enable-kvm
+	# Check if KVM is available
+	KVM_AVAILABLE := $(shell [ -r /dev/kvm ] && echo "yes" || echo "no")
+	ifeq ($(KVM_AVAILABLE),yes)
+		QEMU_ACCEL := -enable-kvm
+	else
+		QEMU_ACCEL :=
+	endif
 endif
 
 .PHONY: all test clean prepare-vm check-deps test-enhanced test-basic debug-vm debug-dry-run test-login

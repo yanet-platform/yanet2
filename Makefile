@@ -29,7 +29,7 @@ cli-clean/%:
 	$(MAKE) -C modules/$*/cli clean
 
 test: dataplane
-	go test ./...
+	go test $$(go list ./... | grep -v 'tests/functional')
 	meson test -C build
 
 test-functional:
