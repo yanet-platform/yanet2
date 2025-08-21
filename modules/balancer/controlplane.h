@@ -38,6 +38,7 @@ balancer_service_config_set_real(
 	struct balancer_service_config *config,
 	uint64_t index,
 	uint64_t type,
+	uint16_t weight,
 	uint8_t *dst_addr,
 	uint8_t *src_addr,
 	uint8_t *src_mask

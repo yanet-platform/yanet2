@@ -3,6 +3,7 @@
 
 #include "common/container_of.h"
 #include "common/exp_array.h"
+#include "common/memory.h"
 #include "common/strutils.h"
 
 #include "dataplane/config/zone.h"
@@ -11,6 +12,7 @@
 
 struct balancer_real_config {
 	uint64_t type;
+	uint16_t weight;
 	uint8_t dst_addr[16];
 	uint8_t src_addr[16];
 	uint8_t src_mask[16];
@@ -182,6 +184,24 @@ balancer_module_config_add_service(
 	if (balancer_service == NULL)
 		return -1;
 
+	if (ring_init(
+		    &balancer_service->real_ring,
+		    &config->cp_module.memory_context,
+		    service->real_count
+	    )) {
+		return -1;
+	}
+
+	for (uint64_t real_idx = 0; real_idx < service->real_count;
+	     ++real_idx) {
+		if (ring_change_weight(
+			    &balancer_service->real_ring,
+			    real_idx,
+			    service->reals[real_idx].weight
+		    )) {
+			return -1;
+		}
+	}
 	services[config->service_count - 1] = balancer_service;
 
 	for (uint64_t service_idx = 0; service_idx < config->service_count;
@@ -290,6 +310,7 @@ balancer_service_config_set_real(
 	struct balancer_service_config *service_config,
 	uint64_t index,
 	uint64_t type,
+	uint16_t weight,
 	uint8_t *dst_addr,
 	uint8_t *src_addr,
 	uint8_t *src_mask
@@ -297,6 +318,7 @@ balancer_service_config_set_real(
 	struct balancer_real_config *real_config =
 		service_config->reals + index;
 	real_config->type = type;
+	real_config->weight = weight;
 	if (type & RS_TYPE_V4) {
 		memcpy(real_config->dst_addr, dst_addr, 4);
 		memcpy(real_config->src_addr, src_addr, 4);

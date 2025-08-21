@@ -97,6 +97,7 @@ func TestBalancer_HappyPath_IPV4(t *testing.T) {
 				dst:     common.Unwrap(netip.ParseAddr("192.0.0.3")),
 				src:     common.Unwrap(netip.ParseAddr("196.0.0.0")),
 				srcMask: common.Unwrap(netip.ParseAddr("255.0.0.0")),
+				weight:  1,
 			},
 		},
 		prefixes: []netip.Prefix{common.Unwrap(netip.ParsePrefix("192.0.0.0/24"))},
@@ -141,6 +142,7 @@ func TestBalancer_HappyPath_IPV6(t *testing.T) {
 				dst:     common.Unwrap(netip.ParseAddr("2001:db8:3::")),
 				src:     common.Unwrap(netip.ParseAddr("2000::")),
 				srcMask: common.Unwrap(netip.ParseAddr("ff::")),
+				weight:  1,
 			},
 		},
 		prefixes: []netip.Prefix{common.Unwrap(netip.ParsePrefix("2001:db8::/32"))},
@@ -182,8 +184,9 @@ func TestBalancer_SrcCheck(t *testing.T) {
 		addr: common.Unwrap(netip.ParseAddr("192.0.0.2")),
 		reals: []balancerRealConfig{
 			{
-				dst: common.Unwrap(netip.ParseAddr("192.0.0.3")),
-				src: common.Unwrap(netip.ParseAddr("192.1.0.3")),
+				dst:    common.Unwrap(netip.ParseAddr("192.0.0.3")),
+				src:    common.Unwrap(netip.ParseAddr("192.1.0.3")),
+				weight: 1,
 			},
 		},
 		prefixes: []netip.Prefix{
@@ -195,8 +198,9 @@ func TestBalancer_SrcCheck(t *testing.T) {
 		addr: common.Unwrap(netip.ParseAddr("1:2:3:4::")),
 		reals: []balancerRealConfig{
 			{
-				dst: common.Unwrap(netip.ParseAddr("192.0.0.3")),
-				src: common.Unwrap(netip.ParseAddr("192.1.0.3")),
+				dst:    common.Unwrap(netip.ParseAddr("192.0.0.3")),
+				src:    common.Unwrap(netip.ParseAddr("192.1.0.3")),
+				weight: 1,
 			},
 		},
 		prefixes: []netip.Prefix{

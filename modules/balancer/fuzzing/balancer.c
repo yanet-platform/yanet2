@@ -74,6 +74,7 @@ add_real_servers(
 			svc_cfg,
 			real_idx,
 			is_v6 ? RS_TYPE_V6 : RS_TYPE_V4,
+			1,
 			addr,
 			is_v6 ? src_addr_v6.s6_addr
 			      : (uint8_t *)&src_addr_v4.s_addr,

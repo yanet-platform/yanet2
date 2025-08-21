@@ -43,3 +43,23 @@ mem_array_free_exp(
 	uint64_t capacity = 1 << uint64_log(count);
 	memory_bfree(memory_context, array, capacity * item_size);
 }
+
+static inline void *
+mem_array_alloc_exp(
+	struct memory_context *memory_context,
+	size_t item_size,
+	uint64_t count,
+	uint64_t *res_capacity
+) {
+	if (!count) {
+		if (res_capacity) {
+			*res_capacity = 0;
+		}
+		return NULL;
+	}
+	uint64_t capacity = 1 << uint64_log(count);
+	if (res_capacity) {
+		*res_capacity = capacity;
+	}
+	return memory_balloc(memory_context, capacity * item_size);
+}

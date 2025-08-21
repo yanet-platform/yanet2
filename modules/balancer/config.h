@@ -1,6 +1,7 @@
 #pragma once
 
 #include "defines.h"
+#include "ring.h"
 
 #include "common/lpm.h"
 
@@ -12,6 +13,7 @@ struct balancer_vs {
 	uint64_t real_start;
 	uint64_t real_count;
 	struct lpm src;
+	struct ring real_ring;
 };
 
 struct balancer_rs {

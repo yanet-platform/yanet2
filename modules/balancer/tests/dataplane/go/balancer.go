@@ -77,6 +77,7 @@ type balancerServiceConfig struct {
 
 type balancerRealConfig struct {
 	dst, src, srcMask netip.Addr
+	weight            uint16
 }
 
 func toCPtr(netAddr netip.Addr) *C.uint8_t {
@@ -110,6 +111,7 @@ func balancerModuleConfigAddService(mc *C.struct_balancer_module_config, sc bala
 			csc,
 			C.uint64_t(i),
 			typ,
+			C.uint16_t(r.weight),
 			toCPtr(r.dst),
 			toCPtr(r.src),
 			toCPtr(r.srcMask),

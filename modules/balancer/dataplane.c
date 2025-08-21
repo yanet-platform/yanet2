@@ -102,33 +102,11 @@ balancer_rs_lookup(
 	struct balancer_vs *vs,
 	struct packet *packet
 ) {
-	if (vs->real_count == 0)
+	uint32_t real_id = ring_get(&vs->real_ring, packet->hash);
+	if (real_id == RING_VALUE_INVALID)
 		return NULL;
 
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	uint16_t mlt = 0;
-	if (packet->transport_header.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcp_header = NULL;
-		tcp_header = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_tcp_hdr *,
-			packet->transport_header.offset
-		);
-
-		mlt = tcp_header->src_port;
-	} else if (packet->transport_header.type == IPPROTO_UDP) {
-		struct rte_udp_hdr *udp_header = NULL;
-		udp_header = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_udp_hdr *,
-			packet->transport_header.offset
-		);
-
-		mlt = udp_header->src_port;
-	}
-
-	return ADDR_OF(&config->reals) + vs->real_start +
-	       (mlt % vs->real_count);
+	return ADDR_OF(&config->reals) + vs->real_start + real_id;
 }
 
 static int
