@@ -86,6 +86,7 @@ jobs:
         workflow: build.yml
         name: yanet2-binaries
         path: ./
+        commit: ${{ github.sha }}
 
     - name: Display structure of downloaded files
       run: |
