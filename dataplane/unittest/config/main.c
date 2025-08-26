@@ -18,10 +18,7 @@ check_instance(
 }
 
 int
-main(int argc, char **argv) {
-	(void)argc;
-	(void)argv;
-
+main() {
 	FILE *dataplane_config_file = fopen(CONFIG_PATH, "r");
 
 	struct dataplane_config *config = NULL;
@@ -33,4 +30,10 @@ main(int argc, char **argv) {
 	check_instance(config->instances, 0, 1024, 2048);
 	check_instance(config->instances + 1, 1, 512, 128);
 	check_instance(config->instances + 2, 0, 123, 124);
+
+	dataplane_config_free(config);
+
+	puts("OK");
+
+	return 0;
 }

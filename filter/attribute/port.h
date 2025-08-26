@@ -59,7 +59,8 @@ static inline uint32_t
 lookup_port_src(struct packet *packet, void *data) {
 	(void)packet;
 	struct value_table *table = data;
-	return value_table_get(table, 0, packet_src_port(packet));
+	uint32_t res = value_table_get(table, 0, packet_src_port(packet));
+	return res;
 }
 
 typedef void (*action_get_port_range_func)(
@@ -71,7 +72,7 @@ typedef void (*action_get_port_range_func)(
 static inline int
 collect_port_values(
 	struct memory_context *memory_context,
-	const struct filter_rule *actions,
+	const struct filter_rule *rules,
 	uint32_t count,
 	action_get_port_range_func get_port_range,
 	struct value_table *table,
@@ -80,8 +81,7 @@ collect_port_values(
 	if (value_table_init(table, memory_context, 1, 65536))
 		return -1;
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
+	for (const struct filter_rule *action = rules; action < rules + count;
 	     ++action) {
 
 		value_table_new_gen(table);
@@ -103,14 +103,13 @@ collect_port_values(
 
 	value_table_compact(table);
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
+	for (const struct filter_rule *rule = rules; rule < rules + count;
+	     ++rule) {
 		value_registry_start(registry);
 
 		struct filter_port_range *port_ranges;
 		uint32_t port_range_count;
-		get_port_range(action, &port_ranges, &port_range_count);
+		get_port_range(rule, &port_ranges, &port_range_count);
 		for (struct filter_port_range *ports = port_ranges;
 		     ports < port_ranges + port_range_count;
 		     ++ports) {
@@ -150,7 +149,8 @@ get_port_range_dst(
 static inline uint32_t
 lookup_port_dst(struct packet *packet, void *data) {
 	struct value_table *table = data;
-	return value_table_get(table, 0, packet_dst_port(packet));
+	uint32_t res = value_table_get(table, 0, packet_dst_port(packet));
+	return res;
 }
 
 static inline int

@@ -248,7 +248,7 @@ builder_add_port_src_range(
 }
 
 void
-builer_set_proto(
+builder_set_proto(
 	struct filter_rule_builder *builder,
 	uint8_t proto,
 	uint16_t enable_bits,

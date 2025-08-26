@@ -37,12 +37,13 @@ value_table_init(
 	uint32_t *values = (uint32_t *)memory_balloc(
 		memory_context, h_dim * v_dim * sizeof(uint32_t)
 	);
-	memset(values, 0, h_dim * v_dim * sizeof(uint32_t));
 
 	if (values == NULL) {
 		remap_table_free(&value_table->remap_table);
 		return -1;
 	}
+
+	memset(values, 0, h_dim * v_dim * sizeof(uint32_t));
 
 	SET_OFFSET_OF(&value_table->values, values);
 

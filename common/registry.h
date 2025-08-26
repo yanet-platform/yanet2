@@ -2,7 +2,6 @@
 
 #include <assert.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "common/exp_array.h"
@@ -292,7 +291,10 @@ value_registry_join_range(
 			uint32_t v1 = ADDR_OF(&registry1->values)[idx1];
 			uint32_t v2 = ADDR_OF(&registry2->values)[idx2];
 
-			join_func(v1, v2, range_idx, join_func_data);
+			int ret = join_func(v1, v2, range_idx, join_func_data);
+			if (ret < 0) {
+				return ret;
+			}
 		}
 	}
 	return 0;

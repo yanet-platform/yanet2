@@ -6,6 +6,7 @@ sources = files(
   'ipfw.c',
   'filter.c',
   'helper.c',
+  'trie.c'
 )
 
 lib_filter = static_library(

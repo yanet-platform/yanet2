@@ -96,7 +96,7 @@ builder_add_port_src_range(
 );
 
 void
-builer_set_proto(
+builder_set_proto(
 	struct filter_rule_builder *builder,
 	uint8_t proto,
 	uint16_t enable_bits,
@@ -112,6 +112,6 @@ build_rule(struct filter_rule_builder *builder, uint32_t action);
 ////////////////////////////////////////////////////////////////////////////////
 
 inline static uint32_t
-ip(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
+ip(uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
 	return (a << 24) | (b << 16) | (c << 8) | d;
 }

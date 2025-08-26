@@ -78,6 +78,9 @@ main() {
 
 	radix_free(&radix);
 
+	free(arena0);
+
 	puts("OK!");
+
 	return 0;
 }

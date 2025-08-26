@@ -140,15 +140,17 @@ lookup_proto(struct packet *packet, void *data) {
 		rte_pktmbuf_mtod(packet->mbuf, struct rte_ether_hdr *);
 	struct rte_ipv4_hdr *ip_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
 
+	uint32_t class;
 	if (ip_hdr->next_proto_id == IPPROTO_UDP) {
-		return c->max_tcp_class + 1;
+		class = c->max_tcp_class + 1;
 	} else if (ip_hdr->next_proto_id == IPPROTO_ICMP) {
-		return c->max_tcp_class + 2;
+		class = c->max_tcp_class + 2;
 	} else { // TCP
 		struct rte_tcp_hdr *tcp_hdr =
 			(struct rte_tcp_hdr *)(ip_hdr + 1);
-		return value_table_get(&c->tcp_flags, 0, tcp_hdr->tcp_flags);
+		class = value_table_get(&c->tcp_flags, 0, tcp_hdr->tcp_flags);
 	}
+	return class;
 }
 
 static inline void

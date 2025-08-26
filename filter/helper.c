@@ -1,5 +1,9 @@
 #include "helper.h"
+#include "common/exp_array.h"
+#include "common/memory.h"
 #include "common/registry.h"
+#include <stdlib.h>
+#include <string.h>
 
 int
 init_dummy_registry(
@@ -151,25 +155,29 @@ merge_registry_values(
 	struct value_registry *registry2,
 	struct value_table *table
 ) {
-	if (value_table_init(
-		    table,
-		    memory_context,
-		    value_registry_capacity(registry1),
-		    value_registry_capacity(registry2)
-	    )) {
+	int ret = value_table_init(
+		table,
+		memory_context,
+		value_registry_capacity(registry1),
+		value_registry_capacity(registry2)
+	);
+	if (ret < 0) {
 		return -1;
 	}
 
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
 		value_table_new_gen(table);
-		value_registry_join_range(
+		ret = value_registry_join_range(
 			registry1,
 			registry2,
 			range_idx,
 			value_table_touch_action,
 			table
 		);
+		if (ret < 0) {
+			return -1;
+		}
 	}
 
 	value_table_compact(table);
@@ -191,8 +199,6 @@ value_table_collect_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 		collect_ctx->registry,
 		value_table_get(collect_ctx->table, v1, v2)
 	);
-
-	return 0;
 }
 
 static int
@@ -203,9 +209,7 @@ collect_registry_values(
 	struct value_table *table,
 	struct value_registry *registry
 ) {
-	if (value_registry_init(registry, memory_context)) {
-		return -1;
-	}
+	int ret = value_registry_init(registry, memory_context);
 
 	struct value_collect_ctx collect_ctx;
 	collect_ctx.table = table;
@@ -213,14 +217,20 @@ collect_registry_values(
 
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
-		value_registry_start(registry);
-		value_registry_join_range(
+		ret = value_registry_start(registry);
+		if (ret < 0) {
+			return -1;
+		}
+		ret = value_registry_join_range(
 			registry1,
 			registry2,
 			range_idx,
 			value_table_collect_action,
 			&collect_ctx
 		);
+		if (ret < 0) {
+			return -1;
+		}
 	}
 
 	return 0;
@@ -248,4 +258,101 @@ merge_and_collect_registry(
 	}
 
 	return 0;
+}
+
+int
+on_found_rule_classifier(const struct trie_vertex *v, void *data) {
+	struct rule_classifiers *cls = data;
+	for (uint64_t i = 0; i < v->rule_count; ++i) {
+		uint32_t rule = v->rules[i];
+		if (cls->classifiers[rule] != NULL &&
+		    cls->classifiers[rule][cls->count[rule] - 1] ==
+			    v->classifier) {
+			continue;
+		}
+		void *classifiers = cls->classifiers[rule];
+		int ret = mem_array_expand_exp(
+			cls->mctx,
+			&classifiers,
+			sizeof(uint32_t),
+			&cls->count[rule]
+		);
+		if (ret < 0) {
+			return ret;
+		}
+		cls->classifiers[rule] = classifiers;
+		cls->classifiers[rule][cls->count[rule] - 1] = v->classifier;
+	}
+	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+static inline int
+compare_ints(const void *a, const void *b) {
+	uint32_t arg1 = *(const uint32_t *)a;
+	uint32_t arg2 = *(const uint32_t *)b;
+	return (int)(arg1 > arg2) - (int)(arg1 < arg2);
+}
+
+int
+fill_rule_registry_by_trie(
+	const struct trie *trie,
+	uint32_t rule_count,
+	struct value_registry *registry,
+	struct memory_context *mctx
+) {
+	uint32_t **classifiers =
+		memory_balloc(mctx, rule_count * sizeof(uint32_t *));
+	if (classifiers == NULL) {
+		return -1;
+	}
+	uint64_t *count = memory_balloc(mctx, rule_count * sizeof(uint64_t));
+	if (count == NULL) {
+		memory_bfree(
+			mctx, classifiers, rule_count * sizeof(uint32_t *)
+		);
+		return -1;
+	}
+
+	for (uint32_t i = 0; i < rule_count; ++i) {
+		classifiers[i] = NULL;
+	}
+	memset(count, 0, sizeof(uint64_t) * rule_count);
+
+	struct rule_classifiers cls = {
+		.classifiers = classifiers, .count = count, .mctx = mctx
+	};
+
+	int ret = trie_collect_rule_classifiers(trie, &cls);
+	if (ret < 0) {
+		goto free;
+	}
+
+	for (uint32_t rule = 0; rule < rule_count; ++rule) {
+		ret = value_registry_start(registry);
+		if (ret < 0) {
+			goto free;
+		}
+		qsort(cls.classifiers[rule],
+		      cls.count[rule],
+		      sizeof(uint32_t),
+		      compare_ints);
+		for (uint32_t i = 0; i < cls.count[rule]; ++i) {
+			uint32_t c = cls.classifiers[rule][i];
+			if (i > 0 && c == cls.classifiers[rule][i - 1]) {
+				continue;
+			}
+			ret = value_registry_collect(registry, c);
+			if (ret < 0) {
+				goto free;
+			}
+		}
+	}
+
+free:
+	memory_bfree(mctx, classifiers, rule_count * sizeof(uint32_t *));
+	memory_bfree(mctx, count, rule_count * sizeof(uint64_t));
+
+	return ret;
 }

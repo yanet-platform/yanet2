@@ -258,5 +258,8 @@ main() {
 	}
 	free(packets);
 
+	free(rules);
+	free(builders);
+
 	return 0;
 }

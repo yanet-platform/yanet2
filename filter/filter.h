@@ -322,3 +322,6 @@ filter_free(struct filter *filter);
 		}                                                              \
 	} while (0);                                                           \
 	free_finish:
+
+void
+value_registry_print(struct value_registry *r, uint32_t value);

@@ -26,3 +26,12 @@ executable('macros',
   dependencies: deps,
   link_language: 'c'
 )
+
+# bench vs dpdk
+executable('dpdk',
+ ['dpdk/gen.c', 'dpdk/util.c', 'dpdk/main.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: deps,
+  link_language: 'c'
+)

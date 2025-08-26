@@ -102,3 +102,23 @@ filter_macros = executable('macros',
   link_language: 'c'
 )
 test('macros', filter_macros, suite: ['filter'])
+
+
+# test ipv4 5-tuple
+ipv4_tuple = executable('ipv4_tuple', ['ipv4_tuple.c'], 
+c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('ipv4_tuple', ipv4_tuple, suite: ['filter'])
+
+
+# test trie
+trie = executable('trie', ['trie.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('trie', trie, suite: ['filter'])
