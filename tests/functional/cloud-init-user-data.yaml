@@ -70,7 +70,7 @@ packages:
 runcmd:
   - exec &> /var/log/cloud-init-output.log
   - apt-get update -y
-  - apt-get install -y linux-modules-extra-$(uname -r)-generic --no-install-recommends
+  - apt-get install -y linux-modules-extra-$(uname -r) --no-install-recommends
   - |
     # Remove password for ubuntu user
     passwd -d ubuntu

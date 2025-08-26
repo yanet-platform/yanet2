@@ -144,6 +144,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: true
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -234,7 +236,6 @@ jobs:
     - name: Prepare test environment
       working-directory: tests/functional
       run: |
-        df -h
         make check-deps
         
         echo "=== Starting QEMU VM preparation ==="
@@ -253,10 +254,6 @@ jobs:
             echo "=== Last 10 lines of QEMU log ==="
             tail -10 qemu_debug.log
           fi
-          
-          # Check disk space
-          echo "=== Disk space usage ==="
-          df -h .
           
           sleep 60
           
@@ -288,8 +285,6 @@ jobs:
     - name: Run functional tests
       working-directory: tests/functional
       run: |
-        df -h
-        ls -la yanet-test.qcow2
         export YANET_TEST_DEBUG=1
         make test
       timeout-minutes: 35
