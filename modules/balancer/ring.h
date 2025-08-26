@@ -64,7 +64,7 @@ ring_init(
  * Reallocates ids array if new total weight exceeds capacity.
  */
 static inline int
-ring_change_weight(struct ring *ring, uint32_t real_idx, uint32_t new_weight) {
+ring_change_weight(struct ring *ring, uint32_t real_idx, uint16_t new_weight) {
 	assert(real_idx < ring->weight_count);
 
 	uint16_t *weight_ptr = ADDR_OF(&ring->weights) + real_idx;

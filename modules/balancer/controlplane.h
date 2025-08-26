@@ -17,6 +17,14 @@ balancer_module_config_data_init(
 	struct memory_context *memory_context
 );
 
+int
+balancer_module_config_update_real_weight(
+	struct balancer_module_config *config,
+	uint64_t service_idx,
+	uint64_t real_idx,
+	uint16_t weight
+);
+
 void
 balancer_module_config_free(struct cp_module *cp_module);
 

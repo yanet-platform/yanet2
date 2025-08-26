@@ -65,13 +65,49 @@ balancer_module_config_init(struct agent *agent, const char *name) {
 	return &config->cp_module;
 }
 
+static void
+set_default_timeout_if_empty(uint32_t *value) {
+	if (*value == 0) {
+		*value = STATE_TIMEOUT_DEFAULT;
+	}
+}
+
 void
 balancer_module_config_data_init(
 	struct balancer_module_config *config,
 	struct memory_context *memory_context
 ) {
+
+	set_default_timeout_if_empty(&config->state_config.tcp_syn_ack_timeout);
+	set_default_timeout_if_empty(&config->state_config.tcp_syn_timeout);
+	set_default_timeout_if_empty(&config->state_config.tcp_fin_timeout);
+	set_default_timeout_if_empty(&config->state_config.tcp_timeout);
+	set_default_timeout_if_empty(&config->state_config.udp_timeout);
+	set_default_timeout_if_empty(&config->state_config.default_timeout);
+
 	lpm_init(&config->v4_service_lookup, memory_context);
 	lpm_init(&config->v6_service_lookup, memory_context);
+	balancer_state_init(&config->state, memory_context);
+}
+
+int
+balancer_module_config_update_real_weight(
+	struct balancer_module_config *config,
+	uint64_t service_idx,
+	uint64_t real_idx,
+	uint16_t weight
+) {
+	if (service_idx >= config->service_count) {
+		return -1;
+	}
+	struct balancer_vs *service =
+		ADDR_OF(&ADDR_OF(&config->services)[service_idx]);
+
+	if (ring_change_weight(&service->real_ring, real_idx, weight)) {
+		return -1;
+	}
+	ADDR_OF(&config->reals)[service->real_start + real_idx].weight = weight;
+	return 0;
 }
 
 void
@@ -109,6 +145,7 @@ balancer_module_config_free(struct cp_module *cp_module) {
 
 	lpm_free(&config->v4_service_lookup);
 	lpm_free(&config->v6_service_lookup);
+	balancer_state_free(&config->state);
 
 	memory_bfree(
 		&agent->memory_context,
@@ -142,6 +179,8 @@ balancer_module_config_add_service(
 
 		reals[config->real_count - 1].type =
 			service->reals[real_idx].type;
+		reals[config->real_count - 1].weight =
+			service->reals[real_idx].weight;
 		memcpy(reals[config->real_count - 1].dst_addr,
 		       service->reals[real_idx].dst_addr,
 		       16);

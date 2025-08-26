@@ -1,6 +1,7 @@
 package balancer_test
 
 import (
+	"fmt"
 	"net"
 	"net/netip"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
@@ -55,6 +57,47 @@ func createUDPPacket(srcIP string, dstIP string) []gopacket.SerializableLayer {
 
 	payload := []byte("PING TEST PAYLOAD 1234567890")
 	return []gopacket.SerializableLayer{eth, ip.(gopacket.SerializableLayer), udp, gopacket.Payload(payload)}
+}
+
+func createTCPPacket(srcIP string, dstIP string, tcp *layers.TCP) []gopacket.SerializableLayer {
+
+	src := net.ParseIP(srcIP)
+	dst := net.ParseIP(dstIP)
+
+	var ip gopacket.NetworkLayer
+	ethernetType := layers.EthernetTypeIPv6
+	if src.To4() != nil {
+		ethernetType = layers.EthernetTypeIPv4
+		ip = &layers.IPv4{
+			Version:  4,
+			IHL:      5,
+			TTL:      64,
+			Protocol: layers.IPProtocolTCP,
+			SrcIP:    src,
+			DstIP:    dst,
+		}
+	} else {
+		ip = &layers.IPv6{
+			Version:    6,
+			NextHeader: layers.IPProtocolTCP,
+			HopLimit:   64,
+			SrcIP:      src,
+			DstIP:      dst,
+		}
+	}
+
+	eth := &layers.Ethernet{
+		SrcMAC:       common.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
+		DstMAC:       common.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
+		EthernetType: ethernetType,
+	}
+
+	tcp.SrcPort = 1234
+	tcp.DstPort = 5678
+	tcp.SetNetworkLayerForChecksum(ip)
+
+	payload := []byte("PING TEST PAYLOAD 1234567890")
+	return []gopacket.SerializableLayer{eth, ip.(gopacket.SerializableLayer), tcp, gopacket.Payload(payload)}
 }
 
 func encapsulate(t *testing.T, origLayers []gopacket.SerializableLayer, srcIP string, dstIP string) gopacket.Packet {
@@ -234,5 +277,132 @@ func TestBalancer_SrcCheck(t *testing.T) {
 			}
 		})
 	}
+}
 
+func TestBalancer_SameReal(t *testing.T) {
+	m := balancerModuleConfig()
+	require.NotNil(t, m, "Failed to create balancer config")
+
+	balancerModuleConfigAddService(m, balancerServiceConfig{
+		addr: common.Unwrap(netip.ParseAddr("1:2:3:4::")),
+		reals: []balancerRealConfig{
+			{
+				dst:    common.Unwrap(netip.ParseAddr("1:2:3:4:1::")),
+				weight: 1,
+			},
+			{
+				dst:    common.Unwrap(netip.ParseAddr("1:2:3:4:2::")),
+				weight: 1,
+			},
+		},
+		prefixes: []netip.Prefix{
+			common.Unwrap(netip.ParsePrefix("1:2:3:4::/64")),
+		},
+	})
+
+	var firstDst net.IP
+	for i := range 100 {
+		inLayers := createUDPPacket(fmt.Sprintf("1:2:3:4:%x%x::", i/16, i%16), "1:2:3:4::")
+		pkt := common.LayersToPacket(t, inLayers...)
+		result := balancerHandlePackets(m, pkt)
+		require.NotEmpty(t, result.Output, "No output packets")
+		resultPkt := common.ParseEtherPacket(result.Output[0])
+		dst := resultPkt.NetworkLayer().(*layers.IPv6).DstIP
+		if firstDst == nil {
+			firstDst = dst
+		} else {
+			require.True(t, firstDst.Equal(dst), "%v != %v", firstDst, dst)
+		}
+	}
+}
+
+func TestBalancer_Reschedule(t *testing.T) {
+	realIP1 := common.Unwrap(netip.ParseAddr("1:2:3:4:1::"))
+	realIP2 := common.Unwrap(netip.ParseAddr("1:2:3:4:2::"))
+
+	type testcase struct {
+		name       string
+		reschedule bool
+		packet     func(srcIP string, dstIP string) gopacket.Packet
+	}
+
+	for _, tc := range []testcase{
+		{
+			name:       "udp",
+			reschedule: true,
+			packet: func(srcIP, dstIP string) gopacket.Packet {
+				inLayers := createUDPPacket(srcIP, dstIP)
+				return common.LayersToPacket(t, inLayers...)
+			},
+		},
+		{
+			name:       "tcp ack",
+			reschedule: false,
+			packet: func(srcIP, dstIP string) gopacket.Packet {
+				inLayers := createTCPPacket(srcIP, dstIP, &layers.TCP{ACK: true})
+				return common.LayersToPacket(t, inLayers...)
+			},
+		},
+		{
+			name:       "tcp syn",
+			reschedule: true,
+			packet: func(srcIP, dstIP string) gopacket.Packet {
+				inLayers := createTCPPacket(srcIP, dstIP, &layers.TCP{SYN: true})
+				return common.LayersToPacket(t, inLayers...)
+			},
+		},
+		{
+			name:       "tcp syn rst",
+			reschedule: false,
+			packet: func(srcIP, dstIP string) gopacket.Packet {
+				inLayers := createTCPPacket(srcIP, dstIP, &layers.TCP{SYN: true, RST: true})
+				return common.LayersToPacket(t, inLayers...)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := balancerModuleConfig()
+			require.NotNil(t, m, "Failed to create balancer config")
+
+			balancerModuleConfigAddService(m, balancerServiceConfig{
+				addr: common.Unwrap(netip.ParseAddr("1:2:3:4::")),
+				reals: []balancerRealConfig{
+					{
+						dst:    realIP1,
+						weight: 1,
+					},
+					{
+						dst:    realIP2,
+						weight: 0,
+					},
+				},
+				prefixes: []netip.Prefix{
+					common.Unwrap(netip.ParsePrefix("1:2:3:4::/64")),
+				},
+			})
+
+			pkt := tc.packet("1:2:3:4:1::", "1:2:3:4::")
+
+			result := balancerHandlePackets(m, pkt)
+			require.NotEmpty(t, result.Output, "No output packets")
+			resultPkt := common.ParseEtherPacket(result.Output[0])
+			dst := resultPkt.NetworkLayer().(*layers.IPv6).DstIP
+
+			require.Equal(t, realIP1.String(), dst.String())
+
+			balancerModuleConfigUpdateRealWeight(m, 0, 0, 0) // disable first real
+			balancerModuleConfigUpdateRealWeight(m, 0, 1, 1) // enable second
+
+			result = balancerHandlePackets(m, pkt)
+			if tc.reschedule {
+				require.NotEmpty(t, result.Output, "No output packets")
+				resultPkt = common.ParseEtherPacket(result.Output[0])
+				dst = resultPkt.NetworkLayer().(*layers.IPv6).DstIP
+
+				require.Equal(t, realIP2.String(), dst.String())
+			} else {
+				require.Empty(t, result.Output)
+			}
+		})
+	}
 }

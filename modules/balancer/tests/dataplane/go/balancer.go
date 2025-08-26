@@ -91,15 +91,28 @@ func toCPtr(netAddr netip.Addr) *C.uint8_t {
 	return (*C.uint8_t)(&buf[0])
 }
 
+func balancerModuleConfigUpdateRealWeight(
+	mc *C.struct_balancer_module_config,
+	serviceIdx uint64,
+	realIdx uint64,
+	weight uint16,
+) {
+	C.balancer_module_config_update_real_weight(
+		mc,
+		C.uint64_t(serviceIdx),
+		C.uint64_t(realIdx),
+		C.uint16_t(weight),
+	)
+}
+
 func balancerModuleConfigAddService(mc *C.struct_balancer_module_config, sc balancerServiceConfig) {
-	var csc *C.struct_balancer_service_config
 	typ := C.uint64_t(C.VS_OPT_ENCAP)
 	if sc.addr.Is4() {
 		typ = typ | C.VS_TYPE_V4
 	} else {
 		typ = typ | C.VS_TYPE_V6
 	}
-	csc = C.balancer_service_config_create(typ, toCPtr(sc.addr), C.uint64_t(len(sc.reals)), C.uint64_t(len(sc.prefixes)))
+	csc := C.balancer_service_config_create(typ, toCPtr(sc.addr), C.uint64_t(len(sc.reals)), C.uint64_t(len(sc.prefixes)))
 	defer C.balancer_service_config_free(csc)
 
 	for i, r := range sc.reals {

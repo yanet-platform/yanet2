@@ -8,13 +8,14 @@
 #include "dataplane/packet/encap.h"
 
 #include "dataplane/config/zone.h"
+#include "state.h"
 
 struct balancer_module {
 	struct module module;
 };
 
 int
-balancer_handle_v4(
+balancer_vs_lookup_v4(
 	struct balancer_module_config *balancer_config,
 	struct packet *packet,
 	struct balancer_vs **res_vs
@@ -55,7 +56,7 @@ balancer_handle_v4(
 }
 
 int
-balancer_handle_v6(
+balancer_vs_lookup_v6(
 	struct balancer_module_config *balancer_config,
 	struct packet *packet,
 	struct balancer_vs **res_vs
@@ -96,17 +97,160 @@ balancer_handle_v6(
 	return 0;
 }
 
+struct packet_metadata {
+	uint8_t network_proto;
+	uint8_t transport_proto;
+
+	uint8_t src_addr[16];
+	uint8_t dst_addr[16];
+	uint16_t src_port;
+	uint16_t dst_port;
+
+	uint8_t tcp_flags;
+};
+
+int
+balancer_fill_packet_metadata(
+	struct packet *packet, struct packet_metadata *metadata
+) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+
+	if (packet->network_header.type ==
+	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+		metadata->network_proto = METADATA_NETWORK_PROTO_V4;
+		struct rte_ipv4_hdr *ipv4_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv4_hdr *,
+			packet->network_header.offset
+		);
+
+		memcpy(metadata->dst_addr, (uint8_t *)&ipv4_header->dst_addr, 4
+		);
+		memcpy(metadata->src_addr, (uint8_t *)&ipv4_header->src_addr, 4
+		);
+	} else if (packet->network_header.type ==
+		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+		metadata->network_proto = METADATA_NETWORK_PROTO_V6;
+		struct rte_ipv6_hdr *ipv6_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
+		);
+
+		memcpy(metadata->dst_addr, ipv6_header->dst_addr, 16);
+		memcpy(metadata->src_addr, ipv6_header->src_addr, 16);
+	} else {
+		return -1;
+	}
+	if (packet->transport_header.type == IPPROTO_TCP) {
+		metadata->transport_proto = METADATA_TRANSPORT_PROTO_TCP;
+		struct rte_tcp_hdr *tcp_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_tcp_hdr *,
+			packet->transport_header.offset
+		);
+
+		metadata->dst_port = tcp_header->dst_port;
+		metadata->src_port = tcp_header->src_port;
+		metadata->tcp_flags = tcp_header->tcp_flags;
+	} else if (packet->transport_header.type == IPPROTO_UDP) {
+		metadata->transport_proto = METADATA_TRANSPORT_PROTO_UDP;
+		struct rte_udp_hdr *udp_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_udp_hdr *,
+			packet->transport_header.offset
+		);
+
+		metadata->dst_port = udp_header->dst_port;
+		metadata->src_port = udp_header->src_port;
+	} else {
+		return -1;
+	}
+	return 0;
+}
+
+static inline bool
+metadata_reschedule_real(struct packet_metadata *metadata) {
+	if (metadata->transport_proto == METADATA_TRANSPORT_PROTO_UDP) {
+		return true;
+	}
+	return metadata->transport_proto == METADATA_TRANSPORT_PROTO_TCP &&
+	       ((metadata->tcp_flags & (RTE_TCP_SYN_FLAG | RTE_TCP_RST_FLAG)) ==
+		RTE_TCP_SYN_FLAG);
+}
+
+static inline uint32_t
+metadata_storage_timeout(
+	struct balancer_state_config *state_config,
+	struct packet_metadata *metadata
+) {
+	if (metadata->transport_proto == METADATA_TRANSPORT_PROTO_UDP) {
+		return state_config->udp_timeout;
+	}
+	if (metadata->transport_proto != METADATA_TRANSPORT_PROTO_TCP) {
+		return state_config->default_timeout;
+	}
+
+	if ((metadata->tcp_flags & RTE_TCP_SYN_FLAG) == RTE_TCP_SYN_FLAG) {
+		if ((metadata->tcp_flags & RTE_TCP_ACK_FLAG) ==
+		    RTE_TCP_ACK_FLAG) {
+			return state_config->tcp_syn_ack_timeout;
+		}
+		return state_config->tcp_syn_timeout;
+	}
+	if (metadata->tcp_flags & RTE_TCP_FIN_FLAG) {
+		return state_config->tcp_fin_timeout;
+	}
+	return state_config->tcp_timeout;
+}
+
 static inline struct balancer_rs *
 balancer_rs_lookup(
 	struct balancer_module_config *config,
 	struct balancer_vs *vs,
 	struct packet *packet
 ) {
-	uint32_t real_id = ring_get(&vs->real_ring, packet->hash);
-	if (real_id == RING_VALUE_INVALID)
+	struct packet_metadata metadata;
+	int res = balancer_fill_packet_metadata(packet, &metadata);
+	if (res != 0) {
+		return NULL;
+	}
+
+	uint32_t timeout =
+		metadata_storage_timeout(&config->state_config, &metadata);
+
+	struct balancer_rs *reals = ADDR_OF(&config->reals);
+
+	uint32_t real_id = balancer_state_lookup(&config->state, &metadata);
+
+	if (real_id != SESSION_VALUE_INVALID) {
+		struct balancer_rs *balancer_rs = reals + real_id;
+		if (balancer_rs->weight > 0) {
+			res = balancer_state_touch(
+				&config->state, &metadata, timeout
+			);
+			if (res != 0) {
+				return NULL;
+			}
+			return balancer_rs;
+		}
+		if (!metadata_reschedule_real(&metadata)) {
+			return NULL;
+		}
+	}
+
+	uint32_t real_idx = ring_get(&vs->real_ring, packet->hash);
+	if (real_idx == RING_VALUE_INVALID)
 		return NULL;
 
-	return ADDR_OF(&config->reals) + vs->real_start + real_id;
+	real_id = real_idx + vs->real_start;
+
+	res = balancer_state_set(&config->state, &metadata, timeout, real_id);
+	if (res != 0) {
+		return NULL;
+	}
+
+	return reals + real_id;
 }
 
 static int
@@ -188,10 +332,14 @@ balancer_handle_packets(
 		struct balancer_vs *vs;
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			res = balancer_handle_v4(balancer_config, packet, &vs);
+			res = balancer_vs_lookup_v4(
+				balancer_config, packet, &vs
+			);
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			res = balancer_handle_v6(balancer_config, packet, &vs);
+			res = balancer_vs_lookup_v6(
+				balancer_config, packet, &vs
+			);
 		}
 
 		if (res != 0) {
