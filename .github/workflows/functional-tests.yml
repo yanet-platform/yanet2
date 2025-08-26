@@ -81,8 +81,9 @@ jobs:
           ${{ runner.os }}-qemu-image-
 
     - name: Download YANET binaries from build workflow
-      uses: actions/download-artifact@v4
+      uses: dawidd6/action-download-artifact@v3
       with:
+        workflow: build.yml
         name: yanet2-binaries
         path: ./
 
