@@ -184,21 +184,6 @@ trie_build_classifiers(struct trie *trie) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-uint32_t
-trie_classify(const struct trie *trie, const uint8_t *value, uint32_t n) {
-	const struct trie_vertex *v = &trie->vertices[0];
-	for (uint32_t b = 0; b < n; ++b) {
-		uint32_t next = v->next[value[b]];
-		if (next == TRIE_VERTEX_UNDEF) {
-			break;
-		}
-		v = &trie->vertices[next];
-	}
-	return v->classifier;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 static int
 collect_rule_classifiers_rec(
 	const struct trie *trie,
