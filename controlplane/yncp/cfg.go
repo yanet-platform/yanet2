@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -37,12 +38,13 @@ func DefaultConfig() *Config {
 		MemoryPath: "/dev/hugepages/yanet",
 		Gateway:    gateway.DefaultConfig(),
 		Modules: ModulesConfig{
-			Route:   route.DefaultConfig(),
-			Decap:   decap.DefaultConfig(),
-			DSCP:    dscp.DefaultConfig(),
-			Forward: forward.DefaultConfig(),
-			NAT64:   nat64.DefaultConfig(),
-			Pdump:   pdump.DefaultConfig(),
+			Route:    route.DefaultConfig(),
+			Decap:    decap.DefaultConfig(),
+			DSCP:     dscp.DefaultConfig(),
+			Forward:  forward.DefaultConfig(),
+			NAT64:    nat64.DefaultConfig(),
+			Pdump:    pdump.DefaultConfig(),
+			Balancer: balancer.DefaultConfig(),
 		},
 	}
 }
@@ -87,6 +89,9 @@ type ModulesConfig struct {
 
 	// Pdump is the configuration for the packet dump module.
 	Pdump *pdump.Config `yaml:"pdump"`
+
+	// Balancer is the configuration for the balancer module.
+	Balancer *balancer.Config `yaml:"balancer"`
 }
 
 // UnmarshalYAML serves as a proxy for validation.
@@ -122,6 +127,9 @@ func (m *ModulesConfig) Validate() error {
 	}
 	if m.NAT64 == nil {
 		return fmt.Errorf("nat64 module is not configured")
+	}
+	if m.Balancer == nil {
+		return fmt.Errorf("balancer module is not configured")
 	}
 	return nil
 }

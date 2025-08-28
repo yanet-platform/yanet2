@@ -48,5 +48,6 @@ lib_balancer_cp_dep = declare_dependency(
   link_with: lib_balancer_cp,
 )
 
+subdir('controlplane')
 subdir('fuzzing')
 subdir('tests')

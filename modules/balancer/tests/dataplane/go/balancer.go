@@ -98,7 +98,7 @@ func balancerModuleConfigUpdateRealWeight(
 	weight uint16,
 ) {
 	C.balancer_module_config_update_real_weight(
-		mc,
+		&mc.cp_module,
 		C.uint64_t(serviceIdx),
 		C.uint64_t(realIdx),
 		C.uint16_t(weight),

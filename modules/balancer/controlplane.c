@@ -92,16 +92,24 @@ balancer_module_config_data_init(
 
 int
 balancer_module_config_update_real_weight(
-	struct balancer_module_config *config,
+	struct cp_module *cp_module,
 	uint64_t service_idx,
 	uint64_t real_idx,
 	uint16_t weight
 ) {
+	struct balancer_module_config *config = container_of(
+		cp_module, struct balancer_module_config, cp_module
+	);
+
 	if (service_idx >= config->service_count) {
 		return -1;
 	}
 	struct balancer_vs *service =
 		ADDR_OF(&ADDR_OF(&config->services)[service_idx]);
+
+	if (real_idx >= service->real_count) {
+		return -1;
+	}
 
 	if (ring_change_weight(&service->real_ring, real_idx, weight)) {
 		return -1;
@@ -152,6 +160,28 @@ balancer_module_config_free(struct cp_module *cp_module) {
 		config,
 		sizeof(struct balancer_module_config)
 	);
+}
+
+void
+balancer_module_config_set_state_config(
+	struct cp_module *cp_module,
+	uint32_t tcp_syn_ack_timeout,
+	uint32_t tcp_syn_timeout,
+	uint32_t tcp_fin_timeout,
+	uint32_t tcp_timeout,
+	uint32_t udp_timeout,
+	uint32_t default_timeout
+) {
+	struct balancer_module_config *config = container_of(
+		cp_module, struct balancer_module_config, cp_module
+	);
+
+	config->state_config.tcp_syn_ack_timeout = tcp_syn_ack_timeout;
+	config->state_config.tcp_syn_timeout = tcp_syn_timeout;
+	config->state_config.tcp_fin_timeout = tcp_fin_timeout;
+	config->state_config.tcp_timeout = tcp_timeout;
+	config->state_config.udp_timeout = udp_timeout;
+	config->state_config.default_timeout = default_timeout;
 }
 
 int

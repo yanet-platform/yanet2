@@ -8,6 +8,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -108,6 +109,11 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize pdump built-in module: %w", err)
 	}
 
+	balancerModule, err := balancer.NewBalancerModule(cfg.Modules.Balancer, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize balancer built-in module: %w", err)
+	}
+
 	gateway := gateway.NewGateway(
 		cfg.Gateway,
 		shm,
@@ -128,6 +134,9 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		),
 		gateway.WithBuiltInModule(
 			pdumpModule,
+		),
+		gateway.WithBuiltInModule(
+			balancerModule,
 		),
 		gateway.WithLog(log),
 		gateway.WithAtomicLogLevel(opts.LogLevel),

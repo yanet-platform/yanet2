@@ -1,0 +1,144 @@
+syntax = "proto3";
+
+package balancerpb;
+
+import "common/proto/target.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb;balancerpb";
+
+// BalancerService is a control-plane service for managing balancer module.
+service BalancerService {
+	// Lists existing configurations per dataplane instance.
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse) {
+	}
+
+	// ShowConfig returns the current configuration of the balancer module.
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {
+	}
+
+	// AddService a new virtual service to the configuration.
+	rpc AddService(AddServiceRequest) returns (AddServiceResponse) {
+	}
+
+	// RemoveService removes a virtual service from the configuration.
+	rpc RemoveService(RemoveServiceRequest)
+		returns (RemoveServiceResponse) {
+	}
+
+	// SetRealWeight sets weight a real server.
+	rpc SetRealWeight(SetRealWeightRequest)
+		returns (SetRealWeightResponse) {
+	}
+
+	// SetStateConfig sets state TTLs config to the configuration.
+	rpc SetStateConfig(SetStateConfigRequest)
+		returns (SetStateConfigResponse) {
+	}
+}
+
+// Represents config names of dataplane instances.
+message InstanceConfigs {
+	// Dataplane instance
+	uint32 instance = 1;
+	repeated string configs = 2;
+}
+
+message ListConfigsRequest {
+}
+
+// ListConfigsResponse contains existing configurations per dataplane instance.
+message ListConfigsResponse {
+	repeated InstanceConfigs instance_configs = 1;
+}
+
+// ShowConfigRequest requests the current configuration.
+message ShowConfigRequest {
+	commonpb.TargetModule target = 1;
+}
+
+// Represents a subnet in CIDR notation.
+message Prefix {
+	bytes addr = 1;
+	uint32 size = 2;
+}
+
+// Message representing a real server in the configuration.
+message Real {
+	// Weight assigned to the real server.
+	uint32 weight = 1;
+
+	// Destination address of the real server.
+	bytes dst_addr = 2;
+
+	// When encapsulation is enabled, the source address is calculated as:
+	// src = (src_addr & src_mask) | (original_src & (~ src_mask)).
+	bytes src_addr = 3;
+	bytes src_mask = 4;
+}
+
+message Service {
+	// Virtual IP address.
+	bytes addr = 1;
+	// List of CIDR subnets from which incoming requests are allowed.
+	repeated Prefix prefixes = 2;
+	repeated Real reals = 3;
+	// Indicates whether encapsulation is enabled.
+	bool encap = 4;
+}
+
+// StateConfig contains session TTL for different types of packets.
+// The system uses the most specific TTL value applicable to a packet.
+message StateConfig {
+	uint32 tcp_syn_ack_ttl = 1;
+	uint32 tcp_syn_ttl = 2;
+	uint32 tcp_fin_ttl = 3;
+	uint32 tcp_ttl = 4;
+	uint32 udp_ttl = 5;
+	uint32 default_ttl = 6;
+}
+
+// Config represents configuration for a single dataplane instance.
+message Config {
+	repeated Service services = 1;
+	StateConfig state_config = 2;
+}
+
+// ShowConfigResponse contains the current configuration
+message ShowConfigResponse {
+	uint32 instance = 1;
+	Config config = 2;
+}
+
+message AddServiceRequest {
+	commonpb.TargetModule target = 1;
+	Service service = 2;
+}
+
+message AddServiceResponse {
+}
+
+message RemoveServiceRequest {
+	commonpb.TargetModule target = 1;
+	bytes service_addr = 2;
+}
+
+message RemoveServiceResponse {
+}
+
+message SetRealWeightRequest {
+	commonpb.TargetModule target = 1;
+	bytes service_addr = 2;
+	bytes real_addr = 3;
+	uint32 weight = 4;
+}
+
+message SetRealWeightResponse {
+}
+
+message SetStateConfigRequest {
+	commonpb.TargetModule target = 1;
+	StateConfig state_config = 2;
+}
+
+message SetStateConfigResponse {
+}

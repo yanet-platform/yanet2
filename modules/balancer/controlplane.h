@@ -19,10 +19,21 @@ balancer_module_config_data_init(
 
 int
 balancer_module_config_update_real_weight(
-	struct balancer_module_config *config,
+	struct cp_module *cp_module,
 	uint64_t service_idx,
 	uint64_t real_idx,
 	uint16_t weight
+);
+
+void
+balancer_module_config_set_state_config(
+	struct cp_module *cp_module,
+	uint32_t tcp_syn_ack_timeout,
+	uint32_t tcp_syn_timeout,
+	uint32_t tcp_fin_timeout,
+	uint32_t tcp_timeout,
+	uint32_t udp_timeout,
+	uint32_t default_timeout
 );
 
 void
