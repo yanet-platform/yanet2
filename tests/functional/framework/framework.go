@@ -567,7 +567,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	}
 
 	// Verify that config files are accessible in VM
-	f.log.Info("Verifying config files are accessible in VM...")
+	f.log.Debug("Verifying config files are accessible in VM...")
 	verifyCommands := []string{
 		"ls -la /mnt/config/dataplane.yaml",
 		"ls -la /mnt/config/controlplane.yaml",

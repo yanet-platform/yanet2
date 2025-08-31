@@ -21,7 +21,12 @@ func TestMain(m *testing.M) {
 	// Create logger for detailed logging
 	lg := zap.NewDevelopmentConfig()
 	if _, ok := os.LookupEnv("YANET_TEST_DEBUG"); !ok {
+		// no env - set error level
 		lg.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
+	} else {
+		// save debug log to test.log
+		lg.OutputPaths = []string{"test.log"}
+		lg.ErrorOutputPaths = []string{"test.log"}
 	}
 	logger, err := lg.Build()
 	if err != nil {
