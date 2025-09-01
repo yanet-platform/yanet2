@@ -11,6 +11,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	github.com/vishvananda/netlink v1.3.1
+	github.com/yanet-platform/monalive v0.0.0-20250829145829-777d1e9a97f3
 	go.uber.org/zap v1.27.0
 	golang.org/x/sync v0.15.0
 	golang.org/x/sys v0.33.0

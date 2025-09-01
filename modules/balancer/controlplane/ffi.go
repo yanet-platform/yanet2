@@ -59,8 +59,11 @@ func sliceToPtr(s []byte) *C.uint8_t {
 
 func (m *ModuleConfig) AddService(service Service) error {
 	typ := C.uint64_t(0)
-	if service.Encap {
+	switch service.ForwardingMethod {
+	case TUN:
 		typ = typ | C.VS_OPT_ENCAP
+	case GRE:
+		typ = typ | C.VS_OPT_GRE
 	}
 	if service.Addr.Is4() {
 		typ = typ | C.VS_TYPE_V4

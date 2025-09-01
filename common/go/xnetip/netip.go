@@ -2,6 +2,7 @@ package xnetip
 
 import (
 	"encoding/binary"
+	"net"
 	"net/netip"
 )
 
@@ -35,4 +36,12 @@ func LastAddr(prefix netip.Prefix) netip.Addr {
 		binary.BigEndian.PutUint64(v6b[startByte:], broadCastBits)
 		return netip.AddrFrom16(v6b)
 	}
+}
+
+func Mask(prefix netip.Prefix) net.IPMask {
+	size := net.IPv4len
+	if !prefix.Addr().Is4() {
+		size = net.IPv6len
+	}
+	return net.CIDRMask(prefix.Bits(), 8*size)
 }

@@ -32,11 +32,22 @@ type Real struct {
 	SrcMask netip.Addr
 }
 
+type ForwardingMethod string
+
+func (fm ForwardingMethod) String() string {
+	return string(fm)
+}
+
+const (
+	TUN ForwardingMethod = "TUN"
+	GRE ForwardingMethod = "GRE"
+)
+
 type Service struct {
-	Addr     netip.Addr
-	Prefixes []netip.Prefix
-	Reals    []Real
-	Encap    bool
+	Addr             netip.Addr
+	Prefixes         []netip.Prefix
+	Reals            []Real
+	ForwardingMethod ForwardingMethod
 }
 
 // BalancerConfig represents the configuration for a Balancer instance
@@ -56,10 +67,10 @@ func (cfg *BalancerConfig) DeepCopy() *BalancerConfig {
 	}
 	for _, s := range cfg.Services {
 		newService := Service{
-			Addr:     s.Addr,
-			Prefixes: make([]netip.Prefix, len(s.Prefixes)),
-			Reals:    make([]Real, len(s.Reals)),
-			Encap:    s.Encap,
+			Addr:             s.Addr,
+			Prefixes:         make([]netip.Prefix, len(s.Prefixes)),
+			Reals:            make([]Real, len(s.Reals)),
+			ForwardingMethod: s.ForwardingMethod,
 		}
 		copy(newService.Prefixes, s.Prefixes)
 		copy(newService.Reals, s.Reals)
@@ -136,6 +147,26 @@ func (s *BalancerService) ListConfigs(
 
 }
 
+func forwardingMethodToProto(forwardingMethod ForwardingMethod) balancerpb.ForwardingMethod {
+	switch forwardingMethod {
+	case TUN:
+		return balancerpb.ForwardingMethod_FORWARDING_METHOD_TUN
+	case GRE:
+		return balancerpb.ForwardingMethod_FORWARDING_METHOD_GRE
+	}
+	return balancerpb.ForwardingMethod_FORWARDING_METHOD_UNSPECIFIED
+}
+
+func forwardingMethodFromProto(forwardingMethod balancerpb.ForwardingMethod) (ForwardingMethod, error) {
+	switch forwardingMethod {
+	case balancerpb.ForwardingMethod_FORWARDING_METHOD_TUN:
+		return TUN, nil
+	case balancerpb.ForwardingMethod_FORWARDING_METHOD_GRE:
+		return GRE, nil
+	}
+	return "", fmt.Errorf("Unknown forwarding method: %v", forwardingMethod)
+}
+
 // ShowConfig returns the current configuration of the balancer module.
 func (s *BalancerService) ShowConfig(
 	_ context.Context,
@@ -169,10 +200,10 @@ func (s *BalancerService) ShowConfig(
 	}
 	for _, s := range config.Services {
 		service := balancerpb.Service{
-			Addr:     s.Addr.AsSlice(),
-			Prefixes: make([]*balancerpb.Prefix, 0, len(s.Prefixes)),
-			Reals:    make([]*balancerpb.Real, 0, len(s.Reals)),
-			Encap:    s.Encap,
+			Addr:             s.Addr.AsSlice(),
+			Prefixes:         make([]*balancerpb.Prefix, 0, len(s.Prefixes)),
+			Reals:            make([]*balancerpb.Real, 0, len(s.Reals)),
+			ForwardingMethod: forwardingMethodToProto(s.ForwardingMethod),
 		}
 		for _, p := range s.Prefixes {
 			service.Prefixes = append(service.Prefixes, &balancerpb.Prefix{
@@ -203,10 +234,11 @@ func (s *BalancerService) AddService(
 		return nil, err
 	}
 
+	forwardingMethod, err := forwardingMethodFromProto(req.GetService().GetForwardingMethod())
 	newService := Service{
-		Prefixes: make([]netip.Prefix, 0, len(req.GetService().GetPrefixes())),
-		Reals:    make([]Real, 0, len(req.GetService().GetReals())),
-		Encap:    req.GetService().GetEncap(),
+		Prefixes:         make([]netip.Prefix, 0, len(req.GetService().GetPrefixes())),
+		Reals:            make([]Real, 0, len(req.GetService().GetReals())),
+		ForwardingMethod: forwardingMethod,
 	}
 	var ok bool
 	newService.Addr, ok = netip.AddrFromSlice(req.GetService().GetAddr())
@@ -260,7 +292,7 @@ func (s *BalancerService) AddService(
 		zap.String("name", name),
 		zap.Uint32("instance", inst),
 		zap.Stringer("address", newService.Addr),
-		zap.Bool("encap", newService.Encap),
+		zap.Stringer("forwarding_method", newService.ForwardingMethod),
 		zap.Int("reals_count", len(newService.Reals)),
 		zap.Int("prefixes_count", len(newService.Prefixes)),
 	)
