@@ -4,15 +4,12 @@
 
 #include "counters/counters.h"
 
+#include "controlplane/config/defines.h"
+
 #include "controlplane/config/registry.h"
 
-#define CP_PIPELINE_NAME_LEN 80
-
-struct counter_storage;
-
-struct cp_pipeline_module {
-	uint64_t index;
-	struct counter_storage *counter_storage;
+struct cp_pipeline_function {
+	char name[CP_FUNCTION_NAME_LEN];
 	uint64_t tsc_counter_id;
 };
 
@@ -24,7 +21,6 @@ struct cp_pipeline {
 	struct registry_item config_item;
 
 	struct counter_registry counter_registry;
-	struct counter_storage *counters;
 
 	uint64_t counter_packet_in_count;
 	uint64_t counter_packet_out_count;
@@ -35,18 +31,13 @@ struct cp_pipeline {
 	char name[CP_PIPELINE_NAME_LEN];
 
 	uint64_t length;
-	struct cp_pipeline_module modules[];
+	struct cp_pipeline_function functions[];
 };
 
-struct module_config {
-	char type[80];
-	char name[80];
-};
-
-struct pipeline_config {
-	char name[80];
+struct cp_pipeline_config {
+	char name[CP_PIPELINE_NAME_LEN];
 	uint64_t length;
-	struct module_config modules[0];
+	char functions[][CP_FUNCTION_NAME_LEN];
 };
 
 struct dp_config;
@@ -55,9 +46,8 @@ struct cp_config_gen;
 struct cp_pipeline *
 cp_pipeline_create(
 	struct memory_context *memory_context,
-	struct dp_config *dp_config,
 	struct cp_config_gen *cp_config_gen,
-	struct pipeline_config *pipeline_config
+	struct cp_pipeline_config *cp_pipeline_config
 );
 
 void

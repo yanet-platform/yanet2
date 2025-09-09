@@ -23,7 +23,8 @@ func TestDecap(t *testing.T) {
 			"/mnt/target/release/yanet-cli-decap prefix-add --cfg decap0 --instances 0 -p 4.5.6.7/32",
 			"/mnt/target/release/yanet-cli-decap prefix-add --cfg decap0 --instances 0 -p 1:2:3:4::abcd/128",
 
-			"/mnt/target/release/yanet-cli-pipeline update --name=test --modules forward:forward0 --modules decap:decap0 --modules route:route0 --instance=0",
+			"/mnt/target/release/yanet-cli-function update --name=test --chains c0:3=forward:forward0,decap:decap0,route:route0 --instance=0",
+			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
 		}
 
 		_, err := fw.CLI.ExecuteCommands(commands...)
@@ -269,7 +270,7 @@ func TestDecap(t *testing.T) {
 	})
 
 	t.Run("Check_Yanet_State", func(t *testing.T) {
-		cmd := "/mnt/target/release/yanet-cli-counters pipeline --instance 0 --pipeline-name test"
+		cmd := "/mnt/target/release/yanet-cli-counters pipeline --instance 0 --device-name kni0 --pipeline-name test"
 		output, err := fw.CLI.ExecuteCommand(cmd)
 		require.NoError(t, err, "Failed to execute command %s with output %s", cmd, output)
 	})

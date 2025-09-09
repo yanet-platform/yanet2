@@ -18,11 +18,14 @@ cp_module_init(
 ) {
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 
-	if (dp_config_lookup_module(dp_config, module_type, &cp_module->type)) {
+	if (dp_config_lookup_module(
+		    dp_config, module_type, &cp_module->dp_module_idx
+	    )) {
 		errno = ENXIO;
 		return -1;
 	}
 
+	strtcpy(cp_module->type, module_type, sizeof(cp_module->type));
 	strtcpy(cp_module->name, module_name, sizeof(cp_module->name));
 	memory_context_init_from(
 		&cp_module->memory_context, &agent->memory_context, module_name
@@ -35,7 +38,7 @@ cp_module_init(
 	registry_item_init(&cp_module->config_item);
 
 	if (counter_registry_init(
-		    &cp_module->counters, &cp_module->memory_context, 1
+		    &cp_module->counter_registry, &cp_module->memory_context, 1
 	    )) {
 		return -1;
 	}
@@ -109,7 +112,7 @@ cp_module_registry_get(
 }
 
 struct cp_module_cmp_data {
-	uint64_t type;
+	const char *type;
 	const char *name;
 };
 
@@ -123,17 +126,18 @@ cp_module_registry_item_cmp(
 	const struct cp_module_cmp_data *cmp_data =
 		(const struct cp_module_cmp_data *)data;
 
-	if (cmp_data->type == module->type)
-		return strncmp(
-			module->name, cmp_data->name, CP_MODULE_NAME_LEN
-		);
-	return module->type - cmp_data->type;
+	int cmp = strncmp(module->name, cmp_data->name, sizeof(module->name));
+
+	if (cmp)
+		return cmp;
+
+	return strncmp(module->type, cmp_data->type, sizeof(module->type));
 }
 
 int
 cp_module_registry_lookup_index(
 	struct cp_module_registry *module_registry,
-	uint64_t type,
+	const char *type,
 	const char *name,
 	uint64_t *index
 ) {
@@ -153,7 +157,7 @@ cp_module_registry_lookup_index(
 struct cp_module *
 cp_module_registry_lookup(
 	struct cp_module_registry *module_registry,
-	uint64_t type,
+	const char *type,
 	const char *name
 ) {
 	uint64_t index;
@@ -174,7 +178,7 @@ cp_module_registry_lookup(
 int
 cp_module_registry_upsert(
 	struct cp_module_registry *module_registry,
-	uint64_t type,
+	const char *type,
 	const char *name,
 	struct cp_module *new_module
 ) {
@@ -187,8 +191,8 @@ cp_module_registry_upsert(
 		cp_module_registry_lookup(module_registry, type, name);
 
 	counter_registry_link(
-		&new_module->counters,
-		(old_module != NULL) ? &old_module->counters : NULL
+		&new_module->counter_registry,
+		(old_module != NULL) ? &old_module->counter_registry : NULL
 	);
 
 	return registry_replace(
@@ -204,7 +208,7 @@ cp_module_registry_upsert(
 int
 cp_module_registry_delete(
 	struct cp_module_registry *module_registry,
-	uint64_t type,
+	const char *type,
 	const char *name
 ) {
 	struct cp_module_cmp_data cmp_data = {

@@ -15,7 +15,7 @@ dp_config_wait_for_gen(struct dp_config *dp_config, uint64_t gen) {
 	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
 	uint64_t idx = 0;
 	do {
-		struct dp_worker *worker = ADDR_OF(workers + idx);
+		volatile struct dp_worker *worker = ADDR_OF(workers + idx);
 		if (worker->gen < gen) {
 			// TODO cpu yield
 			continue;

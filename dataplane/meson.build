@@ -39,7 +39,7 @@ dependencies = lib_dependencies + [
   lib_balancer_dp_dep,
   lib_decap_dp_dep,
   lib_dscp_dp_dep,
-  # lib_acl_dp_dep,
+  lib_acl_dp_dep,
   lib_forward_dp_dep,
   lib_route_dp_dep,
   lib_nat64_dp_dep,

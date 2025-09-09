@@ -6,7 +6,7 @@ use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{
     pipeline_service_client::PipelineServiceClient, AssignPipelinesRequest, DeletePipelineRequest, DevicePipeline,
-    DevicePipelines, PipelineChain, PipelineChainNode, UpdatePipelinesRequest,
+    DevicePipelines, Pipeline, UpdatePipelinesRequest,
 };
 use tonic::transport::Channel;
 use ync::logging;
@@ -49,9 +49,9 @@ pub struct UpdateCmd {
     /// Pipeline name.
     #[arg(long)]
     pub name: String,
-    /// Module names and their configs in format "module_name:config_name".
+    /// Pipeline functions.
     #[arg(long)]
-    pub modules: Vec<String>,
+    pub functions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -114,22 +114,9 @@ impl PipelineService {
     pub async fn update_pipelines(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         let request = UpdatePipelinesRequest {
             instance: cmd.instance,
-            chains: vec![PipelineChain {
+            pipelines: vec![Pipeline {
                 name: cmd.name,
-                nodes: cmd
-                    .modules
-                    .into_iter()
-                    .map(|m| {
-                        let parts: Vec<&str> = m.split(':').collect();
-                        if parts.len() != 2 {
-                            panic!("Invalid module format. Expected 'module_name:config_name'");
-                        }
-                        PipelineChainNode {
-                            module_name: parts[0].to_string(),
-                            config_name: parts[1].to_string(),
-                        }
-                    })
-                    .collect(),
+                functions: cmd.functions,
             }],
         };
 

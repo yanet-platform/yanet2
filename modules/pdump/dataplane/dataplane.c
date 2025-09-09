@@ -118,7 +118,8 @@ process_queue(
 				.packet_len = packet_len,
 				.timestamp = timestamp,
 				.worker_idx = worker_idx,
-				.pipeline_idx = pkt->pipeline_idx,
+				// FIXME
+				// .pipeline_idx = pkt->pipeline_idx,
 				.rx_device_id = pkt->rx_device_id,
 				.tx_device_id = pkt->tx_device_id,
 				.queue = (uint8_t)queue

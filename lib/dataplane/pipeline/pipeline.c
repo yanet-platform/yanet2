@@ -9,109 +9,121 @@
 #include <rte_cycles.h>
 
 void
-pipeline_process(
+module_ectx_process(
 	struct dp_config *dp_config,
 	struct dp_worker *dp_worker,
 	struct cp_config_gen *cp_config_gen,
-	uint64_t pipeline_idx,
+	struct module_ectx *module_ectx,
+	struct packet_front *packet_front
+
+) {
+	(void)cp_config_gen;
+
+	struct cp_module *cp_module = ADDR_OF(&module_ectx->module);
+	struct dp_module *dp_module =
+		ADDR_OF(&dp_config->dp_modules) + cp_module->dp_module_idx;
+
+	dp_module->handler(
+		dp_config,
+		dp_worker->idx,
+		cp_module,
+		ADDR_OF(&module_ectx->counter_storage),
+		packet_front
+	);
+
+	LOG_TRACEX(int in = packet_list_counter(&packet_front->input);
+		   int out = packet_list_counter(&packet_front->output);
+		   int bypass = packet_list_counter(&packet_front->bypass);
+		   int drop = packet_list_counter(&packet_front->drop);
+		   packet_list_print(&packet_front->output);
+		   ,
+		   "processed packets with module %s, in %d, out "
+		   "%d, bypass %d, drop %d. Output list printed above.",
+		   dp_module->name,
+		   in,
+		   out,
+		   bypass,
+		   drop);
+}
+
+void
+chain_ectx_process(
+	struct dp_config *dp_config,
+	struct dp_worker *dp_worker,
+	struct cp_config_gen *cp_config_gen,
+	struct chain_ectx *chain_ectx,
 	struct packet_front *packet_front
 ) {
-	struct cp_pipeline *cp_pipeline =
-		cp_config_gen_get_pipeline(cp_config_gen, pipeline_idx);
-	if (cp_pipeline == NULL) {
-		packet_list_concat(&packet_front->drop, &packet_front->output);
-		packet_list_init(&packet_front->output);
-		return;
-	}
-
-	struct cp_pipeline_module *pipeline_modules = cp_pipeline->modules;
-
-	*counter_get_address(
-		cp_pipeline->counter_packet_in_count,
-		dp_worker->idx,
-		ADDR_OF(&cp_pipeline->counters)
-	) += packet_list_count(&packet_front->output);
-
-	counter_hist_exp2_inc(
-		cp_pipeline->counter_packet_in_hist,
-		dp_worker->idx,
-		ADDR_OF(&cp_pipeline->counters),
-		0,
-		7,
-		packet_list_count(&packet_front->output),
-		1
-	);
+	uint64_t input_size = packet_list_count(&packet_front->input);
 
 	uint64_t tsc_start = rte_rdtsc();
 
-	for (uint64_t stage_idx = 0; stage_idx < cp_pipeline->length;
-	     ++stage_idx) {
-		struct cp_module *cp_module = cp_config_gen_get_module(
-			cp_config_gen, pipeline_modules[stage_idx].index
-		);
-
-		uint64_t module_index = cp_module->type;
-		struct dp_module *dp_module =
-			ADDR_OF(&dp_config->dp_modules) + module_index;
-
+	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
 		packet_front_switch(packet_front);
 
-		uint64_t input_size = packet_list_count(&packet_front->input);
+		struct module_ectx *module_ectx =
+			ADDR_OF(chain_ectx->modules + idx);
 
-		struct counter_storage *counter_storage =
-			ADDR_OF(&pipeline_modules[stage_idx].counter_storage);
-
-		dp_module->handler(
+		module_ectx_process(
 			dp_config,
-			dp_worker->idx,
-			cp_module,
-			counter_storage,
+			dp_worker,
+			cp_config_gen,
+			module_ectx,
 			packet_front
 		);
 
-		LOG_TRACEX(int in = packet_list_counter(&packet_front->input);
-			   int out = packet_list_counter(&packet_front->output);
-			   int bypass =
-				   packet_list_counter(&packet_front->bypass);
-			   int drop = packet_list_counter(&packet_front->drop);
-			   packet_list_print(&packet_front->output);
-			   ,
-			   "processed packets with module %s, in %d, out "
-			   "%d, bypass %d, drop %d. Output list printed above.",
-			   dp_module->name,
-			   in,
-			   out,
-			   bypass,
-			   drop);
+		if (0) {
+			uint64_t tsc_stop = rte_rdtsc();
+			counter_hist_exp2_inc(
+				0, // module_ectx->tsc_counter_id,
+				dp_worker->idx,
+				ADDR_OF(&chain_ectx->counter_storage),
+				0,
+				7,
+				input_size,
+				tsc_stop - tsc_start
+			);
 
-		uint64_t tsc_stop = rte_rdtsc();
-		counter_hist_exp2_inc(
-			pipeline_modules[stage_idx].tsc_counter_id,
-			dp_worker->idx,
-			ADDR_OF(&cp_pipeline->counters),
-			0,
-			7,
-			input_size,
-			tsc_stop - tsc_start
-		);
-		tsc_start = tsc_stop;
+			tsc_start = tsc_stop;
+		}
 	}
+}
 
-	*counter_get_address(
-		cp_pipeline->counter_packet_out_count,
-		dp_worker->idx,
-		ADDR_OF(&cp_pipeline->counters)
-	) += packet_list_count(&packet_front->output);
+void
+function_ectx_process(
+	struct dp_config *dp_config,
+	struct dp_worker *dp_worker,
+	struct cp_config_gen *cp_config_gen,
+	struct function_ectx *function_ectx,
+	struct packet_front *packet_front
+) {
+	// FIXME route through chains
+	uint64_t chain_idx = 0;
+	struct chain_ectx *chain_ectx =
+		ADDR_OF(function_ectx->chain_map + chain_idx);
+	chain_ectx_process(
+		dp_config, dp_worker, cp_config_gen, chain_ectx, packet_front
+	);
+}
 
-	*counter_get_address(
-		cp_pipeline->counter_packet_drop_count,
-		dp_worker->idx,
-		ADDR_OF(&cp_pipeline->counters)
-	) += packet_list_count(&packet_front->drop);
+void
+pipeline_ectx_process(
+	struct dp_config *dp_config,
+	struct dp_worker *dp_worker,
+	struct cp_config_gen *cp_config_gen,
+	struct pipeline_ectx *pipeline_ectx,
+	struct packet_front *packet_front
+) {
+	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
+		struct function_ectx *function_ectx =
+			ADDR_OF(pipeline_ectx->functions + idx);
 
-	*counter_get_address(
-		cp_pipeline->counter_packet_bypass_count,
-		dp_worker->idx,
-		ADDR_OF(&cp_pipeline->counters)
-	) += packet_list_count(&packet_front->bypass);
+		function_ectx_process(
+			dp_config,
+			dp_worker,
+			cp_config_gen,
+			function_ectx,
+			packet_front
+		);
+	}
 }

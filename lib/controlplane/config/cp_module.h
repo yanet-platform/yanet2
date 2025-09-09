@@ -27,7 +27,9 @@ struct cp_module {
 	struct registry_item config_item;
 
 	// Reference to dataplane module
-	uint64_t type;
+	uint64_t dp_module_idx;
+
+	char type[80];
 	/*
 	 * All module datas are accessible through registry so name
 	 * should live somewhere there.
@@ -38,7 +40,7 @@ struct cp_module {
 	uint64_t gen;
 
 	// Counters declared inside module data
-	struct counter_registry counters;
+	struct counter_registry counter_registry;
 
 	// Link to the previous instance of the module configuration
 	struct cp_module *prev;
@@ -86,28 +88,20 @@ cp_module_registry_destroy(struct cp_module_registry *module_registry);
 
 struct cp_module *
 cp_module_registry_get(
-	struct cp_module_registry *module_registry, uint64_t idx
-);
-
-int
-cp_module_registry_lookup_index(
-	struct cp_module_registry *module_registry,
-	uint64_t type,
-	const char *name,
-	uint64_t *index
+	struct cp_module_registry *module_registry, uint64_t index
 );
 
 struct cp_module *
 cp_module_registry_lookup(
 	struct cp_module_registry *module_registry,
-	uint64_t type,
+	const char *type,
 	const char *name
 );
 
 int
 cp_module_registry_upsert(
 	struct cp_module_registry *module_registry,
-	uint64_t type,
+	const char *type,
 	const char *name,
 	struct cp_module *module
 );
@@ -115,6 +109,6 @@ cp_module_registry_upsert(
 int
 cp_module_registry_delete(
 	struct cp_module_registry *module_registry,
-	uint64_t type,
+	const char *type,
 	const char *name
 );

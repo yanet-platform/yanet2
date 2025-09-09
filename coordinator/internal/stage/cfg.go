@@ -17,20 +17,10 @@ type Config struct {
 
 // DpInstanceConfig contains the configuration for a specific dataplane instance.
 type DpInstanceConfig struct {
-	// Modules configuration for this dataplane instance.
-	Modules map[string]ModuleConfig `yaml:"modules,omitempty"`
 	// Pipelines configuration for this dataplane instance.
 	Pipelines []PipelineConfig `yaml:"pipelines,omitempty"`
 	// Devices configuration for this dataplane instance.
 	Devices []DeviceConfig `yaml:"devices,omitempty"`
-}
-
-// ModuleConfig contains configuration for a specific module.
-type ModuleConfig struct {
-	// ConfigName is the name of the configuration for this module.
-	ConfigName string `yaml:"config_name"`
-	// ConfigPath is the path to the module configuration file.
-	ConfigPath string `yaml:"config_path"`
 }
 
 // PipelineConfig represents a pipeline configuration.
@@ -38,15 +28,7 @@ type PipelineConfig struct {
 	// Name is the unique identifier for this pipeline.
 	Name string `yaml:"name"`
 	// Chain define the processing chain in this pipeline.
-	Chain []NodeConfig `yaml:"chain"`
-}
-
-// NodeConfig represents a module node in a processing chain.
-type NodeConfig struct {
-	// ModuleName is the name of the module.
-	ModuleName string `yaml:"module_name"`
-	// ConfigName is the configuration name for this module.
-	ConfigName string `yaml:"config_name"`
+	Functions []string `yaml:"chain"`
 }
 
 // DeviceConfig represents a device configuration.

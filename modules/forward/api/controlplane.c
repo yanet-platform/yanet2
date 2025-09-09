@@ -163,7 +163,7 @@ forward_module_config_enable_v4(
 
 	new_target->device_id = dst_device_id;
 	new_target->counter_id = counter_registry_register(
-		&cp_module->counters, counter_name, 2
+		&cp_module->counter_registry, counter_name, 2
 	);
 
 	return lpm_insert(
@@ -211,7 +211,7 @@ forward_module_config_enable_v6(
 
 	new_target->device_id = dst_device_id;
 	new_target->counter_id = counter_registry_register(
-		&cp_module->counters, counter_name, 2
+		&cp_module->counter_registry, counter_name, 2
 	);
 
 	return lpm_insert(
@@ -245,7 +245,7 @@ forward_module_config_enable_l2(
 
 	config->device_forwards[src_device_id].l2_counter_id =
 		counter_registry_register(
-			&cp_module->counters, counter_name, 2
+			&cp_module->counter_registry, counter_name, 2
 		);
 
 	config->device_forwards[src_device_id].l2_dst_device_id = dst_device_id;

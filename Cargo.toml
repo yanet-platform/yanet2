@@ -7,6 +7,7 @@ members = [
     "cli/modules/common",
     "cli/modules/inspect",
     "cli/modules/pipeline",
+    "cli/modules/function",
     "cli/modules/counters",
     "modules/decap/cli",
     "modules/dscp/cli",

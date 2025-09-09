@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package ynpb;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
+
+// TODO: docs.
+service FunctionService {
+	// TODO: docs.
+	rpc Update(UpdateFunctionsRequest) returns (UpdateFunctionsResponse) {
+	}
+
+	// Allows to delete pipeline with specified name
+	// if it is not assigned to device.
+	rpc Delete(DeleteFunctionRequest) returns (DeleteFunctionResponse);
+}
+
+// TODO: docs.
+message UpdateFunctionsRequest {
+	// Dataplane instance
+	uint32 instance = 1;
+
+	repeated Function functions = 2;
+}
+
+message Function {
+	// TODO: docs.
+	string Name = 1;
+	repeated FunctionChain chains = 2;
+};
+
+message FunctionChain {
+	Chain chain = 1;
+	uint64 Weight = 2;
+}
+
+message Chain {
+	string Name = 1;
+	repeated ChainModule modules = 2;
+}
+
+message ChainModule {
+	string Type = 1;
+	string Name = 2;
+}
+
+// TODO: docs.
+message UpdateFunctionsResponse {
+}
+
+message DeleteFunctionRequest {
+	// Dataplane instance
+	uint32 instance = 1;
+
+	// Name of the pipeline
+	string function_name = 2;
+}
+
+message DeleteFunctionResponse {
+}

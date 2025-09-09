@@ -38,8 +38,11 @@ var (
 		"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via fe80::1 ::/0",
 		"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 0.0.0.0/0",
 
-		"/mnt/target/release/yanet-cli-pipeline update --name=bootstrap --modules forward:forward0 --instance=0",
-		"/mnt/target/release/yanet-cli-pipeline update --name=test --modules forward:forward0 --modules route:route0 --instance=0",
+		"/mnt/target/release/yanet-cli-function update --name=virt --chains chain0:10=forward:forward0 --instance=0",
+		"/mnt/target/release/yanet-cli-function update --name=test --chains chain2:1=forward:forward0,route:route0 --instance=0",
+
+		"/mnt/target/release/yanet-cli-pipeline update --name=bootstrap --functions virt --instance=0",
+		"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
 
 		"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=01:00.0 --pipelines test:1",
 		"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",

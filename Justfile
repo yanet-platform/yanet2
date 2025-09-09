@@ -14,6 +14,7 @@ default:
 
 # Build all targets
 build:
+    @meson setup build
     @meson compile -C build
 
 # Setup build environment with optional coverage

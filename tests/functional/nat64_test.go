@@ -81,8 +81,9 @@ func TestNAT64(t *testing.T) {
 			"/mnt/target/release/yanet-cli-nat64 mapping add --cfg nat64_0 --instances 0 --ipv4 198.51.100.1 --ipv6 2001:db8::4 --prefix-index 0",
 			"/mnt/target/release/yanet-cli-nat64 mapping add --cfg nat64_0 --instances 0 --ipv4 198.51.100.2 --ipv6 2001:db8::3 --prefix-index 0",
 
+			"/mnt/target/release/yanet-cli-function update --name=test --chains chain0:1=forward:forward0,nat64:nat64_0,route:route0 --instance=0",
 			// Configure pipeline
-			"/mnt/target/release/yanet-cli-pipeline update --name=test --modules forward:forward0 --modules nat64:nat64_0 --modules route:route0 --instance=0",
+			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
 		}
 
 		_, err := fw.CLI.ExecuteCommands(commands...)

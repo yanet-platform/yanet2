@@ -38,21 +38,6 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// RequiredModules returns a set of module names from the configuration.
-func (m *Config) RequiredModules() map[string]struct{} {
-	modules := map[string]struct{}{}
-
-	for _, stage := range m.Stages {
-		for _, instanceConfig := range stage.Instances {
-			for name := range instanceConfig.Modules {
-				modules[name] = struct{}{}
-			}
-		}
-	}
-
-	return modules
-}
-
 // CoordinatorConfig contains settings for the coordinator itself.
 type CoordinatorConfig struct {
 	// Endpoint is the coordinator gRPC endpoint for external module

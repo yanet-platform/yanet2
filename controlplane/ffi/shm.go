@@ -358,10 +358,15 @@ func (M *DPConfig) encodeCounters(counters *C.struct_counter_handle_list) []Coun
 }
 
 // PipelineCounters returns pipeline counters
-func (m *DPConfig) PipelineCounters(pipeline_name string) []CounterInfo {
+func (m *DPConfig) PipelineCounters(
+	device_name string,
+	pipeline_name string,
+) []CounterInfo {
+	c_device_name := C.CString(device_name)
+	defer C.free(unsafe.Pointer(c_device_name))
 	c_pipeline_name := C.CString(pipeline_name)
 	defer C.free(unsafe.Pointer(c_pipeline_name))
-	counters := C.yanet_get_pipeline_counters(m.ptr, c_pipeline_name)
+	counters := C.yanet_get_pipeline_counters(m.ptr, c_device_name, c_pipeline_name)
 	defer C.yanet_counter_handle_list_free(counters)
 
 	if counters == nil {
@@ -372,20 +377,32 @@ func (m *DPConfig) PipelineCounters(pipeline_name string) []CounterInfo {
 }
 
 // PipelineModuleCounters returns pipeline module counters
-func (m *DPConfig) PipelineModuleCounters(
+func (m *DPConfig) ModuleCounters(
+	device_name string,
 	pipeline_name string,
+	function_name string,
+	chain_name string,
 	module_type string,
 	module_name string,
 ) []CounterInfo {
+	c_device_name := C.CString(device_name)
+	defer C.free(unsafe.Pointer(c_device_name))
 	c_pipeline_name := C.CString(pipeline_name)
 	defer C.free(unsafe.Pointer(c_pipeline_name))
+	c_function_name := C.CString(function_name)
+	defer C.free(unsafe.Pointer(c_function_name))
+	c_chain_name := C.CString(chain_name)
+	defer C.free(unsafe.Pointer(c_chain_name))
 	c_module_type := C.CString(module_type)
 	defer C.free(unsafe.Pointer(c_module_type))
 	c_module_name := C.CString(module_name)
 	defer C.free(unsafe.Pointer(c_module_name))
-	counters := C.yanet_get_pm_counters(
+	counters := C.yanet_get_module_counters(
 		m.ptr,
+		c_device_name,
 		c_pipeline_name,
+		c_function_name,
+		c_chain_name,
 		c_module_type,
 		c_module_name,
 	)

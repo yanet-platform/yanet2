@@ -1,13 +1,16 @@
-numa_count: 1
+instance_count: 1
 storage: /dev/hugepages/yanet
 agent_name: bootstrap
 memory_limit: 4194304
+acl:
+  config_name: acl0
+  ruleset_path: any.fw
 forward:
   config_name: forward0
   devices:
     - l2_forward_device_id: 1
       v4_forwards:
-        - network: 192.168.122.129/32
+        - network: 192.168.144.129/32
           device_id: 1
       v6_forwards:
     - l2_forward_device_id: 0
@@ -15,19 +18,52 @@ forward:
         - network: 0.0.0.0/0
           device_id: 0
       v6_forwards:
+functions:
+  func0:
+    chains:
+      chain0:
+        weight: 5
+        modules:
+        - module_name: forward
+          config_name: forward0
+      chain1:
+        weight: 5
+        modules:
+        - module_name: forward
+          config_name: forward0
+  func1:
+    chains:
+      chain0:
+        weight: 5
+        modules:
+        - module_name: forward
+          config_name: forward0
+      chain1:
+        weight: 5
+        modules:
+        - module_name: forward
+          config_name: forward0
 pipelines:
-  - name: phy
-    chain:
-    - module_name: forward
-      config_name: forward0
-  - name: virt
-    chain:
-    - module_name: forward
-      config_name: forward0
+  phy0:
+    functions:
+    - func0
+  phy1:
+    functions:
+    - func1
+  virt0:
+    functions:
+    - func0
+  virt1:
+    functions:
+    - func1
 device_pipelines:
   07:00.0:
-    - name: phy
+    phy0:
+      weight: 10
+    phy1:
       weight: 10
   virtio_user_kni0:
-    - name: virt
-      weight: 20
+    virt0:
+      weight: 5
+    virt1:
+      weight: 5

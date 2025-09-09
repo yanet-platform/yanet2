@@ -3,7 +3,6 @@ package coordinator
 import (
 	"context"
 	"fmt"
-	"maps"
 	"net"
 	"sync"
 
@@ -155,30 +154,34 @@ func (m *Coordinator) runBuiltInModules(ctx context.Context) error {
 
 // waitRegistrationComplete waits until all required modules are registered.
 func (m *Coordinator) waitRegistrationComplete(ctx context.Context) error {
-	// Collect all required module names from the configuration.
-	requiredModules := m.cfg.RequiredModules()
-	requiredModulesLeft := maps.Clone(requiredModules)
+	// TODO: Wait until all network functions are loaded
+	/*
+		// Collect all required module names from the configuration.
+		requiredModules := m.cfg.RequiredModules()
+		requiredModulesLeft := maps.Clone(requiredModules)
 
-	m.log.Infow("waiting for modules to be registered",
-		zap.Any("modules", requiredModules),
-	)
+		m.log.Infow("waiting for modules to be registered",
+			zap.Any("modules", requiredModules),
+		)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case ev := <-m.registryRx:
-			m.log.Infow("received registry event", zap.String("module", ev.Name))
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case ev := <-m.registryRx:
+				m.log.Infow("received registry event", zap.String("module", ev.Name))
 
-			delete(requiredModulesLeft, ev.Name)
-			if len(requiredModulesLeft) == 0 {
-				m.log.Infow("successfully registered required modules",
-					zap.Any("modules", requiredModules),
-				)
-				return nil
+				delete(requiredModulesLeft, ev.Name)
+				if len(requiredModulesLeft) == 0 {
+					m.log.Infow("successfully registered required modules",
+						zap.Any("modules", requiredModules),
+					)
+					return nil
+				}
 			}
 		}
-	}
+	*/
+	return nil
 }
 
 // setupStages applies the stages described in the config.

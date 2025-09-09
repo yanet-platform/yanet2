@@ -49,7 +49,7 @@ route_test_config(struct cp_module **cp_module) {
 		"route_test"
 	);
 
-	config->cp_module.type = 0;
+	config->cp_module.dp_module_idx = 0;
 	config->cp_module.agent = NULL;
 	config->cp_module.free_handler = route_module_config_free;
 

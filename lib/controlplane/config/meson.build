@@ -6,9 +6,12 @@ lib_counters_dep,
 
 sources = files(
   'cp_module.c',
+  'cp_chain.c',
+  'cp_function.c',
   'cp_pipeline.c',
   'cp_device.c',
   'cp_counter.c',
+  'econtext.c',
   'zone.c',
 )
 

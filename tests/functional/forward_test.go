@@ -136,8 +136,9 @@ func TestForward(t *testing.T) {
 	t.Run("Configure_Forward_Module", func(t *testing.T) {
 		// Forward-specific configuration
 		commands := []string{
+			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:4=forward:forward0,route:route0 --instance=0",
 			// Configure pipelines
-			"/mnt/target/release/yanet-cli-pipeline update --name=test --modules forward:forward0 --modules route:route0 --instance=0",
+			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
 		}
 
 		_, err := fw.CLI.ExecuteCommands(commands...)

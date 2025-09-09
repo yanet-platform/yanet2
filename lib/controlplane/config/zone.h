@@ -11,15 +11,20 @@
 
 #include "dataplane/config/zone.h"
 
+#include "controlplane/config/cp_chain.h"
 #include "controlplane/config/cp_device.h"
+#include "controlplane/config/cp_function.h"
 #include "controlplane/config/cp_module.h"
 #include "controlplane/config/cp_pipeline.h"
 
 #include "controlplane/config/cp_counter.h"
 
+#include "controlplane/config/econtext.h"
+
 struct dp_config;
 struct cp_config;
 struct cp_config_gen;
+struct config_ectx;
 
 /*
  * Configuration generation denotes a snapshot of controlplane
@@ -37,15 +42,14 @@ struct cp_config_gen {
 
 	struct cp_config *cp_config;
 	struct dp_config *dp_config;
+	struct config_ectx *config_ectx;
 
 	struct cp_module_registry module_registry;
+	struct cp_function_registry function_registry;
 	struct cp_pipeline_registry pipeline_registry;
 	struct cp_device_registry device_registry;
 
-	struct cp_pipeline_module_counter_storage_registry
-		pipeline_module_counter_storage_registry;
-	struct cp_pipeline_counter_storage_registry
-		pipeline_counter_storage_registry;
+	struct cp_config_counter_storage_registry counter_storage_registry;
 };
 
 struct agent;
@@ -140,11 +144,26 @@ cp_config_update_modules(
 );
 
 int
+cp_config_update_functions(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	uint64_t function_count,
+	struct cp_function_config **functions
+);
+
+int
+cp_config_delete_function(
+	struct dp_config *dp_config,
+	struct cp_config *cp_config,
+	const char *name
+);
+
+int
 cp_config_update_pipelines(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t pipeline_count,
-	struct pipeline_config **pipelines
+	struct cp_pipeline_config **pipelines
 );
 
 int
@@ -165,9 +184,16 @@ cp_config_update_devices(
 struct cp_config_gen *
 cp_config_gen_create(struct cp_config *cp_config);
 
+/*
 static inline struct cp_module *
 cp_config_gen_get_module(struct cp_config_gen *config_gen, uint64_t index) {
 	return cp_module_registry_get(&config_gen->module_registry, index);
+}
+*/
+
+static inline struct cp_function *
+cp_config_gen_get_function(struct cp_config_gen *config_gen, uint64_t index) {
+	return cp_function_registry_get(&config_gen->function_registry, index);
 }
 
 static inline struct cp_pipeline *
@@ -181,35 +207,93 @@ cp_config_gen_get_device(struct cp_config_gen *config_gen, uint64_t index) {
 }
 
 static inline struct counter_storage *
-cp_config_gen_get_pipeline_module_counter_storage(
+cp_config_gen_get_module_counter_storage(
 	struct cp_config_gen *config_gen,
+	const char *device_name,
 	const char *pipeline_name,
-	uint64_t module_type,
+	const char *function_name,
+	const char *chain_name,
+	const char *module_type,
 	const char *module_name
 ) {
-	return cp_pipeline_module_counter_storage_registry_lookup(
-		&config_gen->pipeline_module_counter_storage_registry,
+	return cp_config_counter_storage_registry_lookup_module(
+		&config_gen->counter_storage_registry,
+		device_name,
 		pipeline_name,
+		function_name,
+		chain_name,
 		module_type,
 		module_name
 	);
 }
 
 static inline struct counter_storage *
-cp_config_gen_get_pipeline_counter_storage(
-	struct cp_config_gen *config_gen, const char *pipeline_name
+cp_config_gen_get_chain_counter_storage(
+	struct cp_config_gen *config_gen,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name
 ) {
-	return cp_pipeline_counter_storage_registry_lookup(
-		&config_gen->pipeline_counter_storage_registry, pipeline_name
+	return cp_config_counter_storage_registry_lookup_chain(
+		&config_gen->counter_storage_registry,
+		device_name,
+		pipeline_name,
+		function_name,
+		chain_name
 	);
 }
 
-int
-cp_config_gen_lookup_module_index(
-	struct cp_config_gen *cp_config_gen,
-	uint64_t type,
-	const char *name,
-	uint64_t *index
+static inline struct counter_storage *
+cp_config_gen_get_function_counter_storage(
+	struct cp_config_gen *config_gen,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name
+) {
+	return cp_config_counter_storage_registry_lookup_function(
+		&config_gen->counter_storage_registry,
+		device_name,
+		pipeline_name,
+		function_name
+	);
+}
+
+static inline struct counter_storage *
+cp_config_gen_get_pipeline_counter_storage(
+	struct cp_config_gen *config_gen,
+	const char *device_name,
+	const char *pipeline_name
+) {
+	return cp_config_counter_storage_registry_lookup_pipeline(
+		&config_gen->counter_storage_registry,
+		device_name,
+		pipeline_name
+	);
+}
+
+static inline struct counter_storage *
+cp_config_gen_get_device_counter_storage(
+	struct cp_config_gen *config_gen, const char *device_name
+) {
+	return cp_config_counter_storage_registry_lookup_device(
+		&config_gen->counter_storage_registry, device_name
+	);
+}
+
+struct cp_module *
+cp_config_gen_lookup_module(
+	struct cp_config_gen *config_gen, const char *type, const char *name
+);
+
+struct cp_function *
+cp_config_gen_lookup_function(
+	struct cp_config_gen *config_gen, const char *name
+);
+
+struct cp_pipeline *
+cp_config_gen_lookup_pipeline(
+	struct cp_config_gen *config_gen, const char *name
 );
 
 int
@@ -226,6 +310,6 @@ int
 cp_config_delete_module(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
-	uint64_t module_type,
+	const char *module_type,
 	const char *module_name
 );

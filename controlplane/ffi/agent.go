@@ -80,19 +80,43 @@ func (m *Agent) DPConfig() *DPConfig {
 	}
 }
 
+func (m *Agent) UpdateFunctions(functionConfigs []FunctionConfig) error {
+	functions := make([]*C.struct_cp_function_config, 0, len(functionConfigs))
+
+	for _, cfg := range functionConfigs {
+		function, err := newFunctionConfig(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to create pipeline config: %w", err)
+		}
+		defer function.Free()
+
+		functions = append(functions, function.AsRawPtr())
+	}
+
+	rc, err := C.agent_update_functions(
+		m.ptr,
+		C.uint64_t(len(functionConfigs)),
+		&functions[0],
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update pipelines: %w", err)
+	}
+	if rc != 0 {
+		return fmt.Errorf("failed to update pipelines: %d code", rc)
+	}
+
+	return nil
+}
+
 func (m *Agent) UpdatePipelines(pipelinesConfigs []PipelineConfig) error {
-	pipelines := make([]*C.struct_pipeline_config, 0, len(pipelinesConfigs))
+	pipelines := make([]*C.struct_cp_pipeline_config, 0, len(pipelinesConfigs))
 
 	for _, cfg := range pipelinesConfigs {
-		pipeline, err := newPipelineConfig(cfg.Name, len(cfg.Chain))
+		pipeline, err := newPipelineConfig(cfg)
 		if err != nil {
 			return fmt.Errorf("failed to create pipeline config: %w", err)
 		}
 		defer pipeline.Free()
-
-		for idx, node := range cfg.Chain {
-			pipeline.SetNode(idx, node.ModuleName, node.ConfigName)
-		}
 
 		pipelines = append(pipelines, pipeline.AsRawPtr())
 	}
@@ -132,16 +156,19 @@ func (m *Agent) UpdateDevices(devices map[string][]DevicePipeline) error {
 		}
 		defer C.cp_device_config_free(config)
 
+		idx := uint64(0)
 		// Add each pipeline to the device pipeline map.
 		for _, pipeline := range pipelines {
 			cPipelineName := C.CString(pipeline.Name)
 			defer C.free(unsafe.Pointer(cPipelineName))
 
-			rc := C.cp_device_config_add_pipeline(
+			rc := C.cp_device_config_set_pipeline(
 				config,
+				C.uint64_t(idx),
 				cPipelineName,
 				C.uint64_t(pipeline.Weight),
 			)
+			idx++
 			if rc != 0 {
 				return fmt.Errorf("failed to add pipeline to device pipeline map")
 			}
@@ -169,6 +196,21 @@ func (m *Agent) UpdateDevices(devices map[string][]DevicePipeline) error {
 type DevicePipeline struct {
 	Name   string
 	Weight uint64
+}
+
+func (m *Agent) DeleteFunction(name string) error {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	rc, err := C.agent_delete_function(m.ptr, cName)
+	if err != nil {
+		return err
+	}
+	if rc != 0 {
+		return fmt.Errorf("error code: %d", rc)
+	}
+
+	return nil
 }
 
 func (m *Agent) DeletePipeline(name string) error {

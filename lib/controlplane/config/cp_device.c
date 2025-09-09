@@ -7,8 +7,9 @@
 #include "controlplane/config/zone.h"
 
 static inline uint64_t
-cp_device_alloc_size(uint64_t pipeline_map_size) {
-	return sizeof(struct cp_device) + sizeof(uint64_t) * pipeline_map_size;
+cp_device_alloc_size(uint64_t pipeline_count) {
+	return sizeof(struct cp_device) +
+	       sizeof(struct cp_pipeline_weight) * pipeline_count;
 }
 
 struct cp_device *
@@ -18,55 +19,38 @@ cp_device_create(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_device_config *device_config
 ) {
+	// FIXME
 	(void)dp_config;
-
-	uint64_t pipeline_map_size = 0;
-	for (uint64_t pipeline_weight_idx = 0;
-	     pipeline_weight_idx < device_config->pipeline_weight_count;
-	     ++pipeline_weight_idx) {
-		struct cp_pipeline_weight *pipeline_weight =
-			device_config->pipeline_weights + pipeline_weight_idx;
-		pipeline_map_size += pipeline_weight->weight;
-	}
+	(void)cp_config_gen;
 
 	struct cp_device *new_device = (struct cp_device *)memory_balloc(
-		memory_context, cp_device_alloc_size(pipeline_map_size)
+		memory_context,
+		cp_device_alloc_size(device_config->pipeline_weight_count)
 	);
 	if (new_device == NULL) {
 		return NULL;
 	}
+	memset(new_device,
+	       0,
+	       cp_device_alloc_size(device_config->pipeline_weight_count));
 
 	registry_item_init(&new_device->config_item);
 
-	new_device->pipeline_map_size = pipeline_map_size;
+	new_device->pipeline_count = device_config->pipeline_weight_count;
 	strtcpy(new_device->name, device_config->name, CP_DEVICE_NAME_LEN);
 
-	uint64_t weight_pos = 0;
-
-	for (uint64_t pipeline_weight_idx = 0;
-	     pipeline_weight_idx < device_config->pipeline_weight_count;
-	     ++pipeline_weight_idx) {
-		struct cp_pipeline_weight *pipeline_weight =
-			device_config->pipeline_weights + pipeline_weight_idx;
-		uint64_t pipeline_index;
-		if (cp_config_gen_lookup_pipeline_index(
-			    cp_config_gen,
-			    pipeline_weight->name,
-			    &pipeline_index
-		    )) {
-			goto error;
-		}
-		uint64_t weight = pipeline_weight->weight;
-		while (weight--) {
-			new_device->pipeline_map[weight_pos++] = pipeline_index;
-		}
+	for (uint64_t idx = 0; idx < device_config->pipeline_weight_count;
+	     ++idx) {
+		struct cp_pipeline_weight_config *pipeline_weight =
+			device_config->pipeline_weights + idx;
+		strtcpy(new_device->pipeline_weights[idx].name,
+			pipeline_weight->name,
+			CP_PIPELINE_NAME_LEN);
+		new_device->pipeline_weights[idx].weight =
+			pipeline_weight->weight;
 	}
 
 	return new_device;
-
-error:
-	cp_device_free(memory_context, new_device);
-	return NULL;
 }
 
 void
@@ -76,11 +60,9 @@ cp_device_free(
 	memory_bfree(
 		memory_context,
 		device,
-		cp_device_alloc_size(device->pipeline_map_size)
+		cp_device_alloc_size(device->pipeline_count)
 	);
 }
-
-// Pipeline registry
 
 int
 cp_device_registry_init(
@@ -178,13 +160,21 @@ int
 cp_device_registry_upsert(
 	struct cp_device_registry *device_registry,
 	const char *name,
-	struct cp_device *device
+	struct cp_device *new_device
 ) {
+	struct cp_device *old_device =
+		cp_device_registry_lookup(device_registry, name);
+
+	counter_registry_link(
+		&new_device->counter_registry,
+		(old_device != NULL) ? &old_device->counter_registry : NULL
+	);
+
 	return registry_replace(
 		&device_registry->registry,
 		cp_device_registry_item_cmp,
 		name,
-		&device->config_item,
+		&new_device->config_item,
 		cp_device_registry_item_free_cb,
 		ADDR_OF(&device_registry->memory_context)
 	);

@@ -271,19 +271,43 @@ worker_loop_round(struct dataplane_worker *worker) {
 	struct cp_config *cp_config = worker->instance->cp_config;
 	struct cp_config_gen *cp_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
+	struct config_ectx *config_ectx = ADDR_OF(&cp_config_gen->config_ectx);
 
 	worker->dp_worker->gen = cp_config_gen->gen;
 	*worker->dp_worker->iterations += 1;
 
-	// Determine pipelines
-	dataplane_route_pipeline(
-		worker->instance->dp_config, cp_config_gen, &input_packets
-	);
+	for (struct packet *packet = packet_list_first(&input_packets);
+	     packet != NULL;
+	     packet = packet->next) {
+		if (config_ectx == NULL ||
+		    packet->rx_device_id > config_ectx->device_count) {
+			packet->pipeline_ectx = NULL;
+			continue;
+		}
+		struct device_ectx *device_ectx =
+			ADDR_OF(config_ectx->devices + packet->rx_device_id);
+		if (device_ectx == NULL) {
+			packet->pipeline_ectx = NULL;
+			continue;
+		}
+
+		if (device_ectx->pipeline_map_size == 0) {
+			LOG(TRACE,
+			    "pipeline_map size is 0 for device %d",
+			    packet->rx_device_id);
+			packet->pipeline_ectx = NULL;
+			continue;
+		}
+		packet->pipeline_ectx =
+			ADDR_OF(device_ectx->pipeline_map +
+				(packet->hash % device_ectx->pipeline_map_size)
+			);
+	}
 
 	// Now group packets by pipeline and build packet_front
 	while (packet_list_first(&input_packets)) {
-		uint32_t pipeline_idx =
-			packet_list_first(&input_packets)->pipeline_idx;
+		struct pipeline_ectx *pipeline_ectx =
+			packet_list_first(&input_packets)->pipeline_ectx;
 
 		struct packet_front packet_front;
 		packet_front_init(&packet_front);
@@ -294,24 +318,24 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 		struct packet *packet;
 		while ((packet = packet_list_pop(&input_packets))) {
-			if (packet->pipeline_idx == pipeline_idx) {
+			if (packet->pipeline_ectx == pipeline_ectx) {
 				packet_front_output(&packet_front, packet);
 			} else {
 				packet_list_add(&ready_packets, packet);
 			}
 		}
 
-		if (pipeline_idx == (uint32_t)-1) {
+		if (pipeline_ectx == NULL) {
 			packet_list_concat(&drop_packets, &packet_front.output);
 			packet_list_init(&packet_front.output);
 		} else {
 			// Process pipeline and push packets into drop and write
 			// lists
-			pipeline_process(
+			pipeline_ectx_process(
 				dp_config,
 				worker->dp_worker,
 				cp_config_gen,
-				pipeline_idx,
+				pipeline_ectx,
 				&packet_front
 			);
 		}

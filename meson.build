@@ -15,7 +15,7 @@ project(
 )
 
 add_global_arguments(
-  ['-march=corei7', '-g', '-D_GNU_SOURCE'],
+  ['-march=corei7', '-g', '-D_GNU_SOURCE',],
   language: 'c',
 )
 

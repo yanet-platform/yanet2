@@ -2,6 +2,7 @@ package main
 
 //#cgo CFLAGS: -I../../ -I../../lib
 //#cgo LDFLAGS: -L../../build/modules/forward/api -lforward_cp
+//#cgo LDFLAGS: -L../../build/filter -lfilter
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
@@ -49,14 +50,26 @@ type PipelineModuleConfig struct {
 	ConfigName string `yaml:"config_name"`
 }
 
+type ChainConfig struct {
+	Weight  uint                   `yaml:"weight"`
+	Modules []PipelineModuleConfig `yaml:"modules"`
+}
+
+type FunctionConfig struct {
+	Chains map[string]ChainConfig `yaml:"chains"`
+}
+
 type PipelineConfig struct {
-	Name  string                 `yaml:"name"`
-	Chain []PipelineModuleConfig `yaml:"chain"`
+	Functions []string `yaml:"functions"`
 }
 
 type DevicePipeline struct {
-	Name   string `yaml:"name"`
-	Weight uint   `yaml:"weight"`
+	Weight uint `yaml:"weight"`
+}
+
+type ACLConfig struct {
+	ConfigName  string `yaml:"config_name"`
+	RulesetPath string `yaml:"ruleset_path"`
 }
 
 type ControlplaneConfig struct {
@@ -65,15 +78,60 @@ type ControlplaneConfig struct {
 	AgentName     string `yaml:"agent_name"`
 	MemoryLimit   uint64 `yaml:"memory_limit"`
 
-	Pipelines       []PipelineConfig            `yaml:"pipelines"`
-	DevicePipelines map[string][]DevicePipeline `yaml:"device_pipelines"`
+	Functions       map[string]FunctionConfig            `yaml:functions`
+	Pipelines       map[string]PipelineConfig            `yaml:"pipelines"`
+	DevicePipelines map[string]map[string]DevicePipeline `yaml:"device_pipelines"`
 
 	Forward ForwardConfig `yaml:"forward"`
+
+	ACL ACLConfig `yaml:"acl"`
+}
+
+func configureFunctions(
+	agent *C.struct_agent,
+	functions map[string]FunctionConfig,
+) {
+	if functions == nil {
+		return
+	}
+
+	configs := make([]*C.struct_cp_function_config, 0)
+
+	for name, cfg := range functions {
+		func_cfg := C.cp_function_config_create(C.CString(name), C.uint64_t(len(cfg.Chains)))
+
+		chain_idx := C.uint64_t(0)
+		for name, chain := range cfg.Chains {
+			types := make([]*C.char, 0)
+			names := make([]*C.char, 0)
+
+			for _, mod := range chain.Modules {
+				types = append(types, C.CString(mod.ModuleName))
+				names = append(names, C.CString(mod.ConfigName))
+			}
+
+			chain_cfg := C.cp_chain_config_create(C.CString(name), C.uint64_t(len(chain.Modules)), &types[0], &names[0])
+			C.cp_function_config_set_chain(func_cfg, chain_idx, chain_cfg, C.uint64_t(chain.Weight))
+			chain_idx++
+		}
+
+		configs = append(configs, func_cfg)
+	}
+
+	C.agent_update_functions(
+		agent,
+		C.uint64_t(len(configs)),
+		&configs[0],
+	)
+
+	for _, config := range configs {
+		C.cp_function_config_free(config)
+	}
 }
 
 func configureDevices(
 	agent *C.struct_agent,
-	devices map[string][]DevicePipeline,
+	devices map[string]map[string]DevicePipeline,
 ) {
 	if devices == nil {
 		return
@@ -83,12 +141,16 @@ func configureDevices(
 
 	for id, pipelines := range devices {
 		deviceConfig := C.cp_device_config_create(C.CString(id), C.uint64_t(len(pipelines)))
-		for _, pipeline := range pipelines {
-			C.cp_device_config_add_pipeline(
+		idx := uint64(0)
+		for name, pipeline := range pipelines {
+			C.cp_device_config_set_pipeline(
 				deviceConfig,
-				C.CString(pipeline.Name),
+				C.uint64_t(idx),
+				C.CString(name),
 				C.uint64_t(pipeline.Weight),
 			)
+
+			idx++
 		}
 		configs = append(configs, deviceConfig)
 	}
@@ -170,43 +232,44 @@ func configureForward(
 
 func configurePipelines(
 	agent *C.struct_agent,
-	pipelineConfigs []PipelineConfig,
+	pipelineConfigs map[string]PipelineConfig,
 ) {
 	if pipelineConfigs == nil {
 		return
 	}
 
 	pipelines := make(
-		[]*C.struct_pipeline_config,
+		[]*C.struct_cp_pipeline_config,
 		0,
 		len(pipelineConfigs),
 	)
 
-	for _, pipelineConfig := range pipelineConfigs {
+	for name, pipelineConfig := range pipelineConfigs {
 
-		pipeline := C.pipeline_config_create(
-			C.CString(pipelineConfig.Name),
-			C.uint64_t(len(pipelineConfig.Chain)),
+		pipeline := C.cp_pipeline_config_create(
+			C.CString(name),
+			C.uint64_t(len(pipelineConfig.Functions)),
 		)
-		defer C.pipeline_config_free(pipeline)
+		defer C.cp_pipeline_config_free(pipeline)
 
-		for idx, item := range pipelineConfig.Chain {
-			C.pipeline_config_set_module(
+		for idx, name := range pipelineConfig.Functions {
+			C.cp_pipeline_config_set_function(
 				pipeline,
 				C.uint64_t(idx),
-				C.CString(item.ModuleName),
-				C.CString(item.ConfigName),
+				C.CString(name),
 			)
 		}
 
 		pipelines = append(pipelines, pipeline)
 	}
 
-	C.agent_update_pipelines(
+	pth := C.agent_update_pipelines(
 		agent,
 		C.uint64_t(len(pipelineConfigs)),
 		&pipelines[0],
 	)
+
+	fmt.Printf("pipes %v\n", pth)
 }
 
 func main() {
@@ -222,6 +285,8 @@ func main() {
 		fmt.Printf("could not read config: %v", err)
 		os.Exit(-1)
 	}
+
+	fmt.Printf("cfg: %+v\n", config)
 
 	cPath := C.CString(config.Storage)
 	defer C.free(unsafe.Pointer(cPath))
@@ -242,38 +307,14 @@ func main() {
 
 		configureForward(agent, config.Forward)
 
+		//		configureACL(agent, config.ACL)
+
+		configureFunctions(agent, config.Functions)
+
 		configurePipelines(agent, config.Pipelines)
 
 		configureDevices(agent, config.DevicePipelines)
 
-		for pIdx := range config.Pipelines {
-			counters := C.yanet_get_pm_counters(C.yanet_shm_dp_config(shm, C.uint32_t(instance)), C.CString("forward"), C.CString("forward0"), C.CString(config.Pipelines[pIdx].Name))
-			for idx := C.uint64_t(0); idx < counters.count; idx++ {
-				counter := C.yanet_get_counter(counters, idx)
-				fmt.Printf("Counter forward forward0 %s %s", config.Pipelines[pIdx].Name, C.GoString(&counter.name[0]))
-
-				for idx := 0; idx < 2; idx++ {
-					fmt.Printf("%20d", C.yanet_get_counter_value(counter.value_handle, 0, C.uint64_t(idx)))
-				}
-				fmt.Printf("\n")
-			}
-		}
-
-		counters := C.yanet_get_worker_counters(
-			C.yanet_shm_dp_config(shm, C.uint32_t(instance)),
-		)
-		{
-			for idx := C.uint64_t(0); idx < counters.count; idx++ {
-				counter := C.yanet_get_counter(counters, idx)
-				fmt.Printf("Counter %v %s", idx, C.GoString(&counter.name[0]))
-
-				for idx := 0; idx < 2; idx++ {
-					fmt.Printf("%20d", C.yanet_get_counter_value(counter.value_handle, 0, C.uint64_t(idx)))
-				}
-				fmt.Printf("\n")
-			}
-
-		}
 	}
 
 }

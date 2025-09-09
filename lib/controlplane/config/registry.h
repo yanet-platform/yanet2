@@ -205,6 +205,18 @@ registry_get_unused_index(struct registry *registry, uint64_t *index) {
 }
 
 static inline int
+registry_insert(struct registry *registry, struct registry_item *new_item) {
+	uint64_t index;
+	if (registry_get_unused_index(registry, &index)) {
+		return -1;
+	}
+
+	registry_set(registry, index, new_item);
+
+	return 0;
+}
+
+static inline int
 registry_replace(
 	struct registry *registry,
 	registry_item_cmp_func cmp_func,

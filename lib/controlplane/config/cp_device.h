@@ -2,22 +2,31 @@
 
 #include "common/memory.h"
 
+#include "counters/counters.h"
+
 #include "controlplane/config/defines.h"
 
 #include "controlplane/config/registry.h"
+
+struct cp_pipeline_weight {
+	char name[CP_PIPELINE_NAME_LEN];
+	uint64_t weight;
+};
 
 struct cp_device {
 	struct registry_item config_item;
 	char name[CP_DEVICE_NAME_LEN];
 
-	uint64_t pipeline_map_size;
-	uint64_t pipeline_map[];
+	struct counter_registry counter_registry;
+
+	uint64_t pipeline_count;
+	struct cp_pipeline_weight pipeline_weights[];
 };
 
 struct dp_config;
 struct cp_config_gen;
 
-struct cp_pipeline_weight {
+struct cp_pipeline_weight_config {
 	char name[CP_PIPELINE_NAME_LEN];
 	uint64_t weight;
 };
@@ -25,7 +34,7 @@ struct cp_pipeline_weight {
 struct cp_device_config {
 	char name[CP_DEVICE_NAME_LEN];
 	uint64_t pipeline_weight_count;
-	struct cp_pipeline_weight pipeline_weights[];
+	struct cp_pipeline_weight_config pipeline_weights[];
 };
 
 struct cp_device *

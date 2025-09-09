@@ -4,7 +4,7 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use code::{counters_service_client::CountersServiceClient, PipelineCountersRequest, PipelineModuleCountersRequest};
+use code::{counters_service_client::CountersServiceClient, PipelineCountersRequest, ModuleCountersRequest};
 use tonic::transport::Channel;
 use ync::logging;
 
@@ -36,7 +36,7 @@ pub enum ModeCmd {
     /// Show pipeline counters.
     Pipeline(PipelineCmd),
     /// Show counters of module assigned to a pipeline.
-    PipelineModule(PipelineModuleCmd),
+    Module(ModuleCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -44,15 +44,23 @@ pub struct PipelineCmd {
     #[arg(long)]
     pub instance: u32,
     #[arg(long)]
+    pub device_name: String,
+    #[arg(long)]
     pub pipeline_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct PipelineModuleCmd {
+pub struct ModuleCmd {
     #[arg(long)]
     pub instance: u32,
     #[arg(long)]
+    pub device_name: String,
+    #[arg(long)]
     pub pipeline_name: String,
+    #[arg(long)]
+    pub function_name: String,
+    #[arg(long)]
+    pub chain_name: String,
     #[arg(long)]
     pub module_type: String,
     #[arg(long)]
@@ -76,10 +84,10 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = CountersService::new(cmd.endpoint).await?;
 
     match cmd.mode {
-        ModeCmd::Pipeline(cmd) => service.show_pipeline(cmd.instance, cmd.pipeline_name).await?,
-        ModeCmd::PipelineModule(cmd) => {
+        ModeCmd::Pipeline(cmd) => service.show_pipeline(cmd.instance, cmd.device_name, cmd.pipeline_name).await?,
+        ModeCmd::Module(cmd) => {
             service
-                .show_pipeline_module(cmd.instance, cmd.pipeline_name, cmd.module_type, cmd.module_name)
+                .show_module(cmd.instance, cmd.device_name, cmd.pipeline_name, cmd.function_name, cmd.chain_name, cmd.module_type, cmd.module_name)
                 .await?
         }
     }
@@ -97,9 +105,10 @@ impl CountersService {
         Ok(Self { client })
     }
 
-    pub async fn show_pipeline(&mut self, instance: u32, pipeline_name: String) -> Result<(), Box<dyn Error>> {
+    pub async fn show_pipeline(&mut self, instance: u32, device_name: String, pipeline_name: String) -> Result<(), Box<dyn Error>> {
         let request = PipelineCountersRequest {
             dp_instance: instance,
+            device: device_name,
             pipeline: pipeline_name,
         };
         let response = self.client.pipeline(request).await?;
@@ -107,20 +116,26 @@ impl CountersService {
         Ok(())
     }
 
-    pub async fn show_pipeline_module(
+    pub async fn show_module(
         &mut self,
         instance: u32,
+        device_name: String,
         pipeline_name: String,
+        function_name: String,
+        chain_name: String,
         module_type: String,
         module_name: String,
     ) -> Result<(), Box<dyn Error>> {
-        let request = PipelineModuleCountersRequest {
+        let request = ModuleCountersRequest {
             dp_instance: instance,
+            device: device_name,
             pipeline: pipeline_name,
+            function: function_name,
+            chain: chain_name,
             module_type,
             module_name,
         };
-        let response = self.client.pipeline_module(request).await?;
+        let response = self.client.module(request).await?;
         println!("{}", serde_json::to_string(response.get_ref())?);
         Ok(())
     }

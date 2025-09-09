@@ -53,7 +53,7 @@ forward_test_config(struct cp_module **cp_module) {
 		"forward_test"
 	);
 
-	config->cp_module.type = 0;
+	config->cp_module.dp_module_idx = 0;
 	config->cp_module.agent = NULL;
 	config->device_count = device_count;
 	config->cp_module.free_handler = forward_module_config_free;

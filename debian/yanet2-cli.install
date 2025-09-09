@@ -1,6 +1,7 @@
 usr/bin/yanet-cli
 usr/bin/yanet-cli-common
 usr/bin/yanet-cli-inspect
+usr/bin/yanet-cli-function
 usr/bin/yanet-cli-pipeline
 usr/bin/yanet-cli-decap
 usr/bin/yanet-cli-dscp

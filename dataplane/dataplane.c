@@ -447,6 +447,12 @@ dataplane_init(
 		if (rc == -1) {
 			return -1;
 		}
+		rc = dataplane_load_module(
+			instance->dp_config, bin_hndl, "acl"
+		);
+		if (rc == -1) {
+			return -1;
+		}
 
 		instance_offset +=
 			instance_config->dp_memory + instance_config->cp_memory;
@@ -649,37 +655,6 @@ dataplane_stop(struct dataplane *dataplane) {
 	}
 
 	return 0;
-}
-
-void
-dataplane_route_pipeline(
-	struct dp_config *dp_config,
-	struct cp_config_gen *cp_config_gen,
-	struct packet_list *packets
-) {
-	(void)dp_config;
-
-	for (struct packet *packet = packet_list_first(packets); packet != NULL;
-	     packet = packet->next) {
-		struct cp_device *cp_device = cp_config_gen_get_device(
-			cp_config_gen, packet->rx_device_id
-		);
-		if (cp_device == NULL) {
-			packet->pipeline_idx = -1;
-			continue;
-		}
-
-		if (cp_device->pipeline_map_size == 0) {
-			LOG(TRACE,
-			    "pipeline_map size is 0 for device %d",
-			    packet->rx_device_id);
-			packet->pipeline_idx = -1;
-			continue;
-		}
-		packet->pipeline_idx =
-			cp_device->pipeline_map
-				[packet->hash % cp_device->pipeline_map_size];
-	}
 }
 
 void

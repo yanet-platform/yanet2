@@ -24,11 +24,11 @@ message UpdatePipelinesRequest {
 	// Dataplane instance
 	uint32 instance = 1;
 	// TODO: docs.
-	repeated PipelineChain chains = 2;
+	repeated Pipeline pipelines = 2;
 }
 
 // A pipeline chain.
-message PipelineChain {
+message Pipeline {
 	// Name of the pipeline.
 	//
 	// This name is used to identify the pipeline in the controlplane.
@@ -36,19 +36,7 @@ message PipelineChain {
 	// Nodes in the pipeline chain.
 	//
 	// The nodes are executed in order.
-	repeated PipelineChainNode nodes = 2;
-}
-
-// A node in a pipeline chain.
-message PipelineChainNode {
-	// Name of the module to execute.
-	//
-	// This name must match a module name in the controlplane.
-	string module_name = 1;
-	// Name of the configuration to use for the module.
-	//
-	// This name must match a configuration name in the controlplane.
-	string config_name = 2;
+	repeated string functions = 2;
 }
 
 // TODO: docs.

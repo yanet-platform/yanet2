@@ -10,33 +10,43 @@
 static inline uint64_t
 cp_pipeline_alloc_size(uint64_t length) {
 	return sizeof(struct cp_pipeline) +
-	       sizeof(struct cp_pipeline_module) * length;
+	       sizeof(struct cp_pipeline_function) * length;
 }
 
 struct cp_pipeline *
 cp_pipeline_create(
 	struct memory_context *memory_context,
-	struct dp_config *dp_config,
 	struct cp_config_gen *cp_config_gen,
-	struct pipeline_config *pipeline_config
+	struct cp_pipeline_config *cp_pipeline_config
 ) {
+	// FIXME
+	(void)cp_config_gen;
+
 	struct cp_pipeline *new_pipeline = (struct cp_pipeline *)memory_balloc(
-		memory_context, cp_pipeline_alloc_size(pipeline_config->length)
+		memory_context,
+		cp_pipeline_alloc_size(cp_pipeline_config->length)
 	);
 	if (new_pipeline == NULL) {
 		return NULL;
 	}
 
+	memset(new_pipeline,
+	       0,
+	       cp_pipeline_alloc_size(cp_pipeline_config->length));
 	registry_item_init(&new_pipeline->config_item);
 
-	new_pipeline->length = pipeline_config->length;
-	strtcpy(new_pipeline->name, pipeline_config->name, CP_PIPELINE_NAME_LEN
-	);
+	new_pipeline->length = cp_pipeline_config->length;
+	strtcpy(new_pipeline->name,
+		cp_pipeline_config->name,
+		CP_PIPELINE_NAME_LEN);
 
-	counter_registry_init(
-		&new_pipeline->counter_registry, memory_context, 0
-	);
+	if (counter_registry_init(
+		    &new_pipeline->counter_registry, memory_context, 0
+	    )) {
+		goto error;
+	}
 
+	// FIXME return error on counter failure
 	new_pipeline->counter_packet_in_count = counter_registry_register(
 		&new_pipeline->counter_registry, "input", 1
 	);
@@ -53,35 +63,19 @@ cp_pipeline_create(
 		&new_pipeline->counter_registry, "input histogram", 8
 	);
 
-	for (uint64_t module_idx = 0; module_idx < pipeline_config->length;
-	     ++module_idx) {
-		uint64_t index;
-		if (dp_config_lookup_module(
-			    dp_config,
-			    pipeline_config->modules[module_idx].type,
-			    &index
-		    )) {
-			goto error;
-		}
-
-		if (cp_config_gen_lookup_module_index(
-			    cp_config_gen,
-			    index,
-			    pipeline_config->modules[module_idx].name,
-			    &new_pipeline->modules[module_idx].index
-		    )) {
-			goto error;
-		}
-
+	for (uint64_t idx = 0; idx < cp_pipeline_config->length; ++idx) {
+		strtcpy(new_pipeline->functions[idx].name,
+			cp_pipeline_config->functions[idx],
+			sizeof(new_pipeline->functions[idx].name));
 		char counter_name[COUNTER_NAME_LEN];
 		snprintf(
 			counter_name,
-			COUNTER_NAME_LEN,
+			sizeof(counter_name),
 			"stage %lu tsc histogram",
-			module_idx
+			idx
 		);
 
-		new_pipeline->modules[module_idx].tsc_counter_id =
+		new_pipeline->functions[idx].tsc_counter_id =
 			counter_registry_register(
 				&new_pipeline->counter_registry, counter_name, 8
 			);
@@ -99,6 +93,8 @@ cp_pipeline_free(
 	struct memory_context *memory_context, struct cp_pipeline *pipeline
 ) {
 	//	counter_registry_destroy(&pipeline->counter_registry);
+
+	// FIXME free functions
 
 	memory_bfree(
 		memory_context,
@@ -252,24 +248,4 @@ cp_pipeline_registry_delete(
 		cp_pipeline_registry_item_free_cb,
 		ADDR_OF(&pipeline_registry->memory_context)
 	);
-}
-
-ssize_t
-cp_pipeline_find_module(
-	struct cp_config_gen *cp_config_gen,
-	struct cp_pipeline *pipeline,
-	uint64_t module_type,
-	const char *module_name
-) {
-	for (uint64_t stage_idx = 0; stage_idx < pipeline->length;
-	     ++stage_idx) {
-		struct cp_module *module = cp_config_gen_get_module(
-			cp_config_gen, pipeline->modules[stage_idx].index
-		);
-		if (!strcmp(module->name, module_name) &&
-		    (module->type == module_type)) {
-			return stage_idx;
-		}
-	}
-	return -1;
 }

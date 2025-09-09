@@ -1,12 +1,13 @@
 #pragma once
 
-// FIXME: double declare
-#define CP_DEVICE_NAME_LEN 80
-
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "config.h"
+#include "counter.h"
+#include "info.h"
 
 // Handle to YANET shared memory segment.
 struct yanet_shm;
@@ -117,13 +118,21 @@ agent_delete_module(
 	struct agent *agent, const char *module_type, const char *module_name
 );
 
-struct pipeline_config;
+int
+agent_update_functions(
+	struct agent *agent,
+	uint64_t function_count,
+	struct cp_function_config *functions[]
+);
+
+int
+agent_delete_function(struct agent *agent, const char *function_name);
 
 int
 agent_update_pipelines(
 	struct agent *agent,
 	size_t pipeline_count,
-	struct pipeline_config *pipelines[]
+	struct cp_pipeline_config *pipelines[]
 );
 
 // Delete pipeline with specified name.
@@ -132,231 +141,9 @@ agent_update_pipelines(
 int
 agent_delete_pipeline(struct agent *agent, const char *pipeline_name);
 
-struct pipeline_config *
-pipeline_config_create(const char *name, uint64_t length);
-
-void
-pipeline_config_free(struct pipeline_config *config);
-
-void
-pipeline_config_set_module(
-	struct pipeline_config *config,
-	uint64_t index,
-	const char *type,
-	const char *name
-);
-
-struct cp_device_config;
-
 int
 agent_update_devices(
 	struct agent *agent,
 	uint64_t device_count,
 	struct cp_device_config *devices[]
 );
-
-struct cp_device_config *
-cp_device_config_create(const char *name, uint64_t pipeline_count);
-
-void
-cp_device_config_free(struct cp_device_config *config);
-
-int
-cp_device_config_add_pipeline(
-	struct cp_device_config *config, const char *name, uint64_t weight
-);
-
-struct dp_module_info {
-	char name[80];
-};
-
-struct dp_module_list_info {
-	uint64_t module_count;
-	struct dp_module_info modules[];
-};
-
-void
-dp_module_list_info_free(struct dp_module_list_info *module_list_info);
-
-struct dp_module_list_info *
-yanet_get_dp_module_list_info(struct dp_config *dp_config);
-
-int
-yanet_get_dp_module_info(
-	struct dp_module_list_info *module_list,
-	uint64_t index,
-	struct dp_module_info *module_info
-);
-
-struct cp_module_info {
-	uint64_t index;
-	char config_name[80];
-	uint64_t gen;
-};
-
-struct cp_module_list_info {
-	uint64_t gen;
-	uint64_t module_count;
-	struct cp_module_info modules[];
-};
-
-void
-cp_module_list_info_free(struct cp_module_list_info *module_list_info);
-
-struct cp_module_list_info *
-yanet_get_cp_module_list_info(struct dp_config *dp_config);
-
-int
-yanet_get_cp_module_info(
-	struct cp_module_list_info *module_list,
-	uint64_t index,
-	struct cp_module_info *module_info
-);
-
-struct cp_pipeline_info {
-	char name[80];
-	uint64_t length;
-	uint64_t modules[];
-};
-
-struct cp_pipeline_list_info {
-	uint64_t count;
-	struct cp_pipeline_info *pipelines[];
-};
-
-void
-cp_pipeline_list_info_free(struct cp_pipeline_list_info *pipeline_list_info);
-
-struct cp_pipeline_list_info *
-yanet_get_cp_pipeline_list_info(struct dp_config *dp_config);
-
-int
-yanet_get_cp_pipeline_info(
-	struct cp_pipeline_list_info *pipeline_list_info,
-	uint64_t index,
-	struct cp_pipeline_info **pipeline_info
-);
-
-int
-yanet_get_cp_pipeline_module_info(
-	struct cp_pipeline_info *pipeline_info,
-	uint64_t index,
-	uint64_t *config_index
-);
-
-struct cp_device_pipeline_info {
-	uint64_t pipeline_idx;
-	uint64_t weight;
-};
-
-struct cp_device_info {
-	uint64_t pipeline_count;
-	char name[CP_DEVICE_NAME_LEN];
-	struct cp_device_pipeline_info pipelines[];
-};
-
-struct cp_device_list_info {
-	uint64_t gen;
-	uint64_t device_count;
-
-	struct cp_device_info *devices[];
-};
-
-void
-cp_device_list_info_free(struct cp_device_list_info *device_list_info);
-
-struct cp_device_list_info *
-yanet_get_cp_device_list_info(struct dp_config *dp_config);
-
-struct cp_device_info *
-yanet_get_cp_device_info(
-	struct cp_device_list_info *device_list_info, uint64_t idx
-);
-
-struct cp_device_pipeline_info *
-yanet_get_cp_device_pipeline_info(
-	struct cp_device_info *device_info, uint64_t idx
-);
-
-struct cp_agent_instance_info {
-	pid_t pid;
-	uint64_t memory_limit;
-	uint64_t allocated;
-	uint64_t freed;
-	uint64_t gen;
-};
-
-struct cp_agent_info {
-	char name[80];
-	uint64_t instance_count;
-	struct cp_agent_instance_info instances[];
-};
-
-struct cp_agent_list_info {
-	uint64_t count;
-	struct cp_agent_info *agents[];
-};
-
-int
-yanet_get_cp_agent_instance_info(
-	struct cp_agent_info *agent_info,
-	uint64_t index,
-	struct cp_agent_instance_info **instance_info
-);
-
-int
-yanet_get_cp_agent_info(
-	struct cp_agent_list_info *agent_list_info,
-	uint64_t index,
-	struct cp_agent_info **agent_info
-);
-
-void
-cp_agent_list_info_free(struct cp_agent_list_info *agent_list_info);
-
-struct cp_agent_list_info *
-yanet_get_cp_agent_list_info(struct dp_config *dp_config);
-
-struct counter_value_handle;
-
-struct counter_handle {
-	char name[60];
-	uint64_t size;
-	uint64_t gen;
-	struct counter_value_handle *value_handle;
-};
-
-struct counter_handle_list {
-	uint64_t instance_count;
-	uint64_t count;
-	struct counter_handle counters[];
-};
-
-struct counter_handle_list *
-yanet_get_pm_counters(
-	struct dp_config *dp_config,
-	const char *module_type,
-	const char *module_name,
-	const char *pipeline_name
-);
-
-struct counter_handle_list *
-yanet_get_pipeline_counters(
-	struct dp_config *dp_config, const char *pipeline_name
-);
-
-struct counter_handle_list *
-yanet_get_worker_counters(struct dp_config *dp_config);
-
-struct counter_handle *
-yanet_get_counter(struct counter_handle_list *counters, uint64_t idx);
-
-uint64_t
-yanet_get_counter_value(
-	struct counter_value_handle *value_handle,
-	uint64_t value_idx,
-	uint64_t worker_idx
-);
-
-void
-yanet_counter_handle_list_free(struct counter_handle_list *counters);

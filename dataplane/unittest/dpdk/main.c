@@ -181,8 +181,18 @@ main(int argc, char **argv) {
 
 	agent_update_modules(agent, 1, &rmc);
 
-	struct pipeline_config *pc = pipeline_config_create("test", 1);
-	pipeline_config_set_module(pc, 0, "route", "route0");
+	const char *type = "route";
+	const char *name = "route0";
+
+	struct cp_chain_config *cc =
+		cp_chain_config_create("chain0", 1, &type, &name);
+
+	struct cp_function_config *fc = cp_function_config_create("route", 1);
+	cp_function_config_set_chain(fc, 0, cc, 1);
+	agent_update_functions(agent, 1, &fc);
+
+	struct cp_pipeline_config *pc = cp_pipeline_config_create("test", 1);
+	cp_pipeline_config_set_function(pc, 0, "route");
 	agent_update_pipelines(agent, 1, &pc);
 
 	/*struct malloc_heap heap;

@@ -1,5 +1,5 @@
 agent_controlplane_sources = [
-    'main.go'
+    'main.go',
 ]
 
 

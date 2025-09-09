@@ -276,13 +276,8 @@ agent_delete_module(
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
-	uint64_t index;
-	if (dp_config_lookup_module(dp_config, module_type, &index)) {
-		return -1;
-	}
-
 	int res = cp_config_delete_module(
-		dp_config, cp_config, index, module_name
+		dp_config, cp_config, module_type, module_name
 	);
 
 	agent_free_unused_modules(agent);
@@ -291,11 +286,116 @@ agent_delete_module(
 	return res;
 }
 
+struct cp_chain_config *
+cp_chain_config_create(
+	const char *name,
+	uint64_t length,
+	const char *const *types,
+	const char *const *names
+) {
+	struct cp_chain_config *cp_chain_config = (struct cp_chain_config *)
+		calloc(1,
+		       sizeof(struct cp_chain_config) +
+			       sizeof(struct cp_chain_module_config) * length);
+	if (cp_chain_config == NULL)
+		return NULL;
+
+	// FIXME memset
+
+	strtcpy(cp_chain_config->name, name, CP_CHAIN_NAME_LEN);
+	cp_chain_config->length = length;
+
+	for (uint64_t idx = 0; idx < length; ++idx) {
+		// FIXME 80
+		strtcpy(cp_chain_config->modules[idx].type, types[idx], 80);
+		strtcpy(cp_chain_config->modules[idx].name, names[idx], 80);
+	}
+	return cp_chain_config;
+}
+
+void
+cp_chain_config_free(struct cp_chain_config *cp_chain_config) {
+	free(cp_chain_config);
+}
+
+struct cp_function_config *
+cp_function_config_create(const char *name, uint64_t chain_count) {
+	struct cp_function_config *config = (struct cp_function_config *)malloc(
+		sizeof(struct cp_function_config) +
+		sizeof(struct cp_function_chain_config) * chain_count
+	);
+	if (config == NULL)
+		return NULL;
+	memset(config,
+	       0,
+	       sizeof(struct cp_function_config) +
+		       sizeof(struct cp_function_chain_config) * chain_count);
+	strtcpy(config->name, name, CP_FUNCTION_NAME_LEN);
+	config->chain_count = chain_count;
+
+	return config;
+}
+
+void
+cp_function_config_free(struct cp_function_config *config) {
+	for (uint64_t idx = 0; idx < config->chain_count; ++idx) {
+		if (config->chains[idx].chain != NULL)
+			cp_chain_config_free(config->chains[idx].chain);
+	}
+	free(config);
+}
+
+int
+cp_function_config_set_chain(
+	struct cp_function_config *cp_function_config,
+	uint64_t index,
+	struct cp_chain_config *cp_chain_config,
+	uint64_t weight
+) {
+	if (index >= cp_function_config->chain_count)
+		return -1;
+
+	if (cp_function_config->chains[index].chain != NULL)
+		return -1;
+
+	cp_function_config->chains[index] = (struct cp_function_chain_config){
+		.chain = cp_chain_config,
+		.weight = weight,
+	};
+
+	return 0;
+}
+
+int
+agent_update_functions(
+	struct agent *agent,
+	uint64_t function_count,
+	struct cp_function_config *functions[]
+) {
+	return cp_config_update_functions(
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
+		function_count,
+		functions
+	);
+
+	return 0;
+}
+
+int
+agent_delete_function(struct agent *agent, const char *function_name) {
+	return cp_config_delete_function(
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
+		function_name
+	);
+}
+
 int
 agent_update_pipelines(
 	struct agent *agent,
 	size_t pipeline_count,
-	struct pipeline_config *pipelines[]
+	struct cp_pipeline_config *pipelines[]
 ) {
 	return cp_config_update_pipelines(
 		ADDR_OF(&agent->dp_config),
@@ -314,11 +414,10 @@ agent_delete_pipeline(struct agent *agent, const char *pipeline_name) {
 	);
 }
 
-struct pipeline_config *
-pipeline_config_create(const char *name, uint64_t length) {
-	struct pipeline_config *config = (struct pipeline_config *)malloc(
-		sizeof(struct pipeline_config) +
-		sizeof(struct module_config) * length
+struct cp_pipeline_config *
+cp_pipeline_config_create(const char *name, uint64_t length) {
+	struct cp_pipeline_config *config = (struct cp_pipeline_config *)malloc(
+		sizeof(struct cp_pipeline_config) + sizeof(char[80]) * length
 	);
 	strtcpy(config->name, name, CP_PIPELINE_NAME_LEN);
 	config->length = length;
@@ -327,23 +426,19 @@ pipeline_config_create(const char *name, uint64_t length) {
 }
 
 void
-pipeline_config_free(struct pipeline_config *config) {
+cp_pipeline_config_free(struct cp_pipeline_config *config) {
 	free(config);
 }
 
-void
-pipeline_config_set_module(
-	struct pipeline_config *config,
-	uint64_t index,
-	const char *type,
-	const char *name
+int
+cp_pipeline_config_set_function(
+	struct cp_pipeline_config *config, uint64_t index, const char *name
 ) {
-	strtcpy(config->modules[index].type,
-		type,
-		sizeof(config->modules[index].type));
-	strtcpy(config->modules[index].name,
-		name,
-		sizeof(config->modules[index].name));
+	if (index >= config->length)
+		return -1;
+	strtcpy(config->functions[index], name, sizeof(config->functions[index])
+	);
+	return 0;
 }
 
 int
@@ -430,6 +525,7 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 
 	module_list_info->gen = config_gen->gen;
 	module_list_info->module_count = 0;
+	/*
 	for (uint64_t module_idx = 0;
 	     module_idx < module_registry->registry.capacity;
 	     ++module_idx) {
@@ -452,6 +548,7 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 
 		module_list_info->module_count += 1;
 	}
+	*/
 
 unlock:
 	cp_config_unlock(cp_config);
@@ -523,10 +620,12 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 			cp_pipeline->name,
 			CP_PIPELINE_NAME_LEN);
 		pipeline_info->length = cp_pipeline->length;
+		/*
 		for (uint64_t idx = 0; idx < cp_pipeline->length; ++idx) {
 			pipeline_info->modules[idx] =
 				cp_pipeline->modules[idx].index;
 		}
+		*/
 		pipeline_list_info->pipelines[pipeline_list_info->count++] =
 			pipeline_info;
 	}
@@ -574,19 +673,9 @@ cp_device_list_info_free(struct cp_device_list_info *device_list_info) {
 
 static struct cp_device_info *
 yanet_build_device_info(struct cp_device *device) {
-	uint64_t prev_pipeline_id = -1;
-	uint64_t pipeline_count = 0;
-	for (uint64_t link_idx = 0; link_idx < device->pipeline_map_size;
-	     ++link_idx) {
-		if (prev_pipeline_id != device->pipeline_map[link_idx]) {
-			pipeline_count++;
-			prev_pipeline_id = device->pipeline_map[link_idx];
-		}
-	}
-
 	size_t device_info_size =
 		sizeof(struct cp_device_info) +
-		sizeof(struct cp_device_pipeline_info) * pipeline_count;
+		sizeof(struct cp_device_pipeline_info) * device->pipeline_count;
 	struct cp_device_info *device_info =
 		(struct cp_device_info *)malloc(device_info_size);
 	if (device_info == NULL) {
@@ -594,19 +683,14 @@ yanet_build_device_info(struct cp_device *device) {
 	}
 	memset(device_info, 0, device_info_size);
 
-	device_info->pipeline_count = pipeline_count;
+	device_info->pipeline_count = device->pipeline_count;
 	strtcpy(device_info->name, device->name, CP_DEVICE_NAME_LEN);
-	prev_pipeline_id = -1;
-	pipeline_count = 0;
-	for (uint64_t link_idx = 0; link_idx < device->pipeline_map_size;
-	     ++link_idx) {
-		if (prev_pipeline_id != device->pipeline_map[link_idx]) {
-			pipeline_count++;
-			prev_pipeline_id = device->pipeline_map[link_idx];
-		}
-		device_info->pipelines[pipeline_count - 1].pipeline_idx =
-			device->pipeline_map[link_idx];
-		device_info->pipelines[pipeline_count - 1].weight++;
+	for (uint64_t idx = 0; idx < device->pipeline_count; ++idx) {
+		// FIXME
+		device_info->pipelines[idx].pipeline_idx =
+			-1; // device->pipeline_map[link_idx];
+		device_info->pipelines[idx].weight =
+			device->pipeline_weights[idx].weight;
 	}
 
 	return device_info;
@@ -784,7 +868,7 @@ struct cp_device_config *
 cp_device_config_create(const char *name, uint64_t pipeline_count) {
 	struct cp_device_config *config = (struct cp_device_config *)malloc(
 		sizeof(struct cp_device_config) +
-		sizeof(struct cp_pipeline_weight) * pipeline_count
+		sizeof(struct cp_pipeline_weight_config) * pipeline_count
 	);
 
 	if (config == NULL)
@@ -792,9 +876,10 @@ cp_device_config_create(const char *name, uint64_t pipeline_count) {
 
 	memset(config,
 	       0,
-	       sizeof(struct cp_device_config) +
-		       sizeof(struct cp_pipeline_weight) * pipeline_count);
+	       sizeof(struct cp_device_config
+	       ) + sizeof(struct cp_pipeline_weight_config) * pipeline_count);
 	strtcpy(config->name, name, CP_DEVICE_NAME_LEN);
+	config->pipeline_weight_count = pipeline_count;
 
 	return config;
 }
@@ -805,22 +890,28 @@ cp_device_config_free(struct cp_device_config *config) {
 }
 
 int
-cp_device_config_add_pipeline(
-	struct cp_device_config *device, const char *name, uint64_t weight
+cp_device_config_set_pipeline(
+	struct cp_device_config *device,
+	uint64_t index,
+	const char *name,
+	uint64_t weight
 ) {
-	strtcpy(device->pipeline_weights[device->pipeline_weight_count].name,
-		name,
-		CP_PIPELINE_NAME_LEN);
-	device->pipeline_weights[device->pipeline_weight_count].weight = weight;
-	device->pipeline_weight_count += 1;
+	if (index >= device->pipeline_weight_count)
+		return -1;
+	strtcpy(device->pipeline_weights[index].name, name, CP_PIPELINE_NAME_LEN
+	);
+	device->pipeline_weights[index].weight = weight;
 
 	return 0;
 }
 
 struct counter_handle_list *
-yanet_get_pm_counters(
+yanet_get_module_counters(
 	struct dp_config *dp_config,
+	const char *device_name,
 	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name,
 	const char *module_type,
 	const char *module_name
 ) {
@@ -832,21 +923,15 @@ yanet_get_pm_counters(
 	struct counter_registry *counter_registry;
 	struct counter_storage *counter_storage;
 
-	uint64_t module_type_index;
-	if (dp_config_lookup_module(
-		    dp_config, module_type, &module_type_index
-	    )) {
-		cp_config_unlock(cp_config);
-		return NULL;
-	}
-
-	struct counter_storage *cs =
-		cp_config_gen_get_pipeline_module_counter_storage(
-			cp_config_gen,
-			pipeline_name,
-			module_type_index,
-			module_name
-		);
+	struct counter_storage *cs = cp_config_gen_get_module_counter_storage(
+		cp_config_gen,
+		device_name,
+		pipeline_name,
+		function_name,
+		chain_name,
+		module_type,
+		module_name
+	);
 
 	if (cs == NULL) {
 		cp_config_unlock(cp_config);
@@ -858,6 +943,7 @@ yanet_get_pm_counters(
 	uint64_t count = counter_registry->count;
 	struct counter_name *names = ADDR_OF(&counter_registry->names);
 
+	// FIXME: unlock is correct
 	cp_config_unlock(cp_config);
 
 	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
@@ -885,7 +971,9 @@ yanet_get_pm_counters(
 
 struct counter_handle_list *
 yanet_get_pipeline_counters(
-	struct dp_config *dp_config, const char *pipeline_name
+	struct dp_config *dp_config,
+	const char *device_name,
+	const char *pipeline_name
 ) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
@@ -896,7 +984,7 @@ yanet_get_pipeline_counters(
 	struct counter_storage *counter_storage;
 
 	struct counter_storage *cs = cp_config_gen_get_pipeline_counter_storage(
-		cp_config_gen, pipeline_name
+		cp_config_gen, device_name, pipeline_name
 	);
 
 	if (cs == NULL) {
@@ -909,6 +997,7 @@ yanet_get_pipeline_counters(
 	uint64_t count = counter_registry->count;
 	struct counter_name *names = ADDR_OF(&counter_registry->names);
 
+	// FIXME: unlock is correct
 	cp_config_unlock(cp_config);
 
 	struct counter_handle_list *list = (struct counter_handle_list *)malloc(

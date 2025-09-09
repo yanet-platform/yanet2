@@ -24,14 +24,14 @@ struct transport_header {
 	uint16_t offset;
 };
 
-struct pipeline;
+struct pipeline_ectx;
 
 struct packet {
 	struct packet *next;
 
 	struct rte_mbuf *mbuf;
 
-	uint32_t pipeline_idx;
+	struct pipeline_ectx *pipeline_ectx;
 
 	uint32_t hash;
 

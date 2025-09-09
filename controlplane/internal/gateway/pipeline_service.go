@@ -42,14 +42,7 @@ func (m *PipelineService) Update(
 	request *ynpb.UpdatePipelinesRequest,
 ) (*ynpb.UpdatePipelinesResponse, error) {
 	instance := request.GetInstance()
-	chains := request.GetChains()
-
-	availableModuleNames := map[string]struct{}{}
-	for _, mod := range m.shm.DPConfig(instance).Modules() {
-		availableModuleNames[mod.Name()] = struct{}{}
-	}
-
-	// TODO: ensure requested module is in available.
+	pipelines := request.GetPipelines()
 
 	agent, err := m.shm.AgentAttach(agentName, instance, defaultAgentMemory)
 	if err != nil {
@@ -57,20 +50,14 @@ func (m *PipelineService) Update(
 	}
 	defer agent.Close()
 
-	configs := make([]ffi.PipelineConfig, 0, len(chains))
+	configs := make([]ffi.PipelineConfig, 0, len(pipelines))
 
-	for _, pipelineConfig := range chains {
+	for _, pipelineConfig := range pipelines {
 		cfg := ffi.PipelineConfig{
 			Name: pipelineConfig.GetName(),
 		}
-		for _, node := range pipelineConfig.GetNodes() {
-			moduleName := node.GetModuleName()
-			configName := node.GetConfigName()
-
-			cfg.Chain = append(cfg.Chain, ffi.PipelineModuleConfig{
-				ModuleName: moduleName,
-				ConfigName: configName,
-			})
+		for _, functionName := range pipelineConfig.GetFunctions() {
+			cfg.Functions = append(cfg.Functions, functionName)
 		}
 
 		configs = append(configs, cfg)
