@@ -25,7 +25,8 @@ filter_key_apply_prefix(
 	uint8_t key_size, const uint8_t *from, uint8_t *to, uint8_t prefix
 ) {
 	memcpy(to, from, key_size);
-	to[prefix / 8] |= ((uint16_t)1 << (8 - prefix % 8)) - 1;
+	if (prefix % 8)
+		to[prefix / 8] |= ((uint16_t)1 << (8 - prefix % 8)) - 1;
 	for (uint8_t idx = (prefix + 7) / 8; idx < key_size; ++idx)
 		to[idx] |= 0xff;
 }
