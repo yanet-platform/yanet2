@@ -84,13 +84,13 @@ lpm_new_page(struct lpm *lpm, uint32_t *page_idx) {
 		}
 
 		SET_OFFSET_OF(&pages[old_chunk_count], page);
+		SET_OFFSET_OF(&lpm->pages, pages);
 
 		memory_bfree(
 			memory_context,
-			ADDR_OF(&lpm->pages),
+			old_pages,
 			old_chunk_count * sizeof(lpm_page_t *)
 		);
-		SET_OFFSET_OF(&lpm->pages, pages);
 	}
 	memset(lpm_page(lpm, lpm->page_count), 0xff, sizeof(lpm_page_t));
 	lpm->page_count += 1;
@@ -150,7 +150,7 @@ lpm_check_range_hi(
 	uint8_t key_size, const uint8_t *key, const uint8_t *to, uint8_t hop
 ) {
 	uint8_t check[key_size];
-	memcpy(check, key, hop + 1);
+	memcpy(check, key, key_size);
 
 	memset(check + hop + 1, 0xff, key_size - hop - 1);
 	if (filter_key_cmp(key_size, check, to) > 0)
@@ -279,6 +279,8 @@ lpm_walk(
 	lpm_page_t *pages[key_size];
 
 	int8_t hop = 0;
+	int8_t hi_limit = 0;
+
 	key[hop] = from[hop];
 	pages[hop] = lpm_page(lpm, 0);
 	int8_t max_hop = 0;
@@ -315,6 +317,9 @@ lpm_walk(
 			memcpy(prev_to, key, key_size);
 			memset(prev_to + hop + 1, 0xff, key_size - hop - 1);
 		} else {
+			if (key[hop] == to[hop] && hop == hi_limit)
+				++hi_limit;
+
 			++hop;
 			if (hop > max_hop) {
 				key[hop] = from[hop];
@@ -329,11 +334,12 @@ lpm_walk(
 		do {
 			key[hop]++;
 			uint8_t upper_bound = 0xff;
-			if (lpm_check_range_hi(key_size, key, to, hop))
+			if (hop == hi_limit)
 				upper_bound = to[hop];
 			if (key[hop] == (uint8_t)(upper_bound + 1)) {
-				if (hop == 0)
+				if (hop == hi_limit) {
 					goto out;
+				}
 				--hop;
 			} else
 				break;
@@ -378,37 +384,57 @@ lpm_collect_values(
 	lpm_page_t *pages[key_size];
 
 	int8_t hop = 0;
+	int8_t hi_limit = 0;
+
 	key[hop] = from[hop];
 	pages[hop] = lpm_page(lpm, 0);
+	int8_t max_hop = 0;
+
+	uint32_t prev_value = LPM_VALUE_INVALID;
 
 	while (1) {
 		uint32_t value = (*pages[hop])[key[hop]];
 		if (value == LPM_VALUE_INVALID) {
 			// TODO: handle unintialized value: should we call cb?
 		} else if (value & LPM_VALUE_FLAG) {
-			if (collect_func(
-				    value & LPM_VALUE_MASK, collect_func_data
-			    )) {
-				return -1;
+			if (value != prev_value) {
+				prev_value = value;
+				if (collect_func(
+					    value & LPM_VALUE_MASK,
+					    collect_func_data
+				    )) {
+					return -1;
+				}
 			}
 		} else {
+			if (key[hop] == to[hop] && hop == hi_limit)
+				++hi_limit;
+
 			++hop;
-			key[hop] = from[hop];
+			if (hop > max_hop) {
+				key[hop] = from[hop];
+				max_hop = hop;
+			} else {
+				key[hop] = 0;
+			}
 			pages[hop] = lpm_page(lpm, value);
 			continue;
 		}
 
 		do {
 			key[hop]++;
+
 			uint8_t upper_bound = 0xff;
-			if (lpm_check_range_hi(key_size, key, to, hop))
+			if (hop == hi_limit)
 				upper_bound = to[hop];
 			if (key[hop] == (uint8_t)(upper_bound + 1)) {
-				if (hop == 0)
+				if (hop == hi_limit) {
 					goto out;
+				}
 				--hop;
 			} else
 				break;
+
 		} while (1);
 	}
 
