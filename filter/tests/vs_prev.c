@@ -91,8 +91,7 @@ query_filter_compiler(
 	struct value_range *range =
 		ADDR_OF(&filter_compiler->v4_lookups.result_registry.ranges) +
 		result;
-	*rules = ADDR_OF(&filter_compiler->v4_lookups.result_registry.values) +
-		 range->from;
+	*rules = ADDR_OF(&range->values);
 	*rule_count = range->count;
 	return 0;
 }

@@ -82,7 +82,7 @@ acl_handle_v4(
 
 	struct value_range *range =
 		compiler->v4_lookups.result_registry.ranges + result;
-	*actions = compiler->v4_lookups.result_registry.values + range->from;
+	*actions = ADDR_OF(&range->values);
 	*count = range->count;
 
 	return 0;
@@ -163,7 +163,7 @@ acl_handle_v6(
 
 	struct value_range *range =
 		compiler->v6_lookups.result_registry.ranges + result;
-	*actions = compiler->v6_lookups.result_registry.values + range->from;
+	*actions = ADDR_OF(&range->values);
 	*count = range->count;
 
 	return 0;

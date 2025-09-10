@@ -161,7 +161,7 @@ filter_query(
 	uint32_t result = value_table_get(&r->table, r->slots[0], r->slots[1]);
 
 	struct value_range *range = ADDR_OF(&r->registry.ranges) + result;
-	*actions = ADDR_OF(&r->registry.values) + range->from;
+	*actions = ADDR_OF(&range->values);
 	*count = range->count;
 
 	return 0;

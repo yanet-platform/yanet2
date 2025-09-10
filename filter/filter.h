@@ -290,7 +290,7 @@ filter_free(struct filter *filter);
 			value_table_get(&r->table, r->slots[0], r->slots[1]);  \
 		struct value_range *range =                                    \
 			ADDR_OF(&r->registry.ranges) + result;                 \
-		*(actions) = ADDR_OF(&r->registry.values) + range->from;       \
+		*(actions) = ADDR_OF(&range->values);                          \
 		*(actions_count) = range->count;                               \
 	} while (0)
 

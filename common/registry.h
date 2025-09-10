@@ -124,6 +124,8 @@ value_collector_check(struct value_collector *collector, uint32_t value) {
 		       0xff,
 		       VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t));
 
+		memset(chunk, 0, VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t));
+
 		SET_OFFSET_OF(&use_map[chunk_idx], chunk);
 	}
 
@@ -153,7 +155,7 @@ value_collector_collect(struct value_collector *collector, uint32_t value) {
 }
 
 struct value_range {
-	uint64_t from;
+	uint32_t *values;
 	uint64_t count;
 };
 
@@ -161,9 +163,7 @@ struct value_registry {
 	struct memory_context *memory_context;
 	struct value_collector collector;
 
-	uint32_t *values;
 	struct value_range *ranges;
-	uint64_t value_count;
 	uint64_t range_count;
 
 	uint32_t max_value;
@@ -178,8 +178,6 @@ value_registry_init(
 
 	registry->memory_context = memory_context;
 
-	registry->values = NULL;
-	registry->value_count = 0;
 	registry->ranges = NULL;
 	registry->range_count = 0;
 
@@ -196,16 +194,39 @@ value_registry_start(struct value_registry *registry) {
 
 	struct value_range *ranges = ADDR_OF(&registry->ranges);
 
-	if (mem_array_expand_exp(
-		    registry->memory_context,
-		    (void **)&ranges,
-		    sizeof(*ranges),
-		    &registry->range_count
-	    )) {
-		return -1;
+	if (!((registry->range_count - 1) & registry->range_count)) {
+		uint64_t old_capacity = registry->range_count;
+		uint64_t new_capacity = old_capacity * 2 + !old_capacity;
+
+		struct value_range *new_ranges =
+			(struct value_range *)memory_balloc(
+				registry->memory_context,
+				new_capacity * sizeof(struct value_range)
+			);
+
+		if (new_ranges == NULL)
+			return -1;
+
+		for (uint64_t idx = 0; idx < old_capacity; ++idx) {
+			SET_OFFSET_OF(
+				&new_ranges[idx].values,
+				ADDR_OF(&ranges[idx].values)
+			);
+			new_ranges[idx].count = ranges[idx].count;
+		}
+
+		SET_OFFSET_OF(&registry->ranges, new_ranges);
+
+		memory_bfree(
+			registry->memory_context,
+			ranges,
+			sizeof(struct value_range) * old_capacity
+		);
+
+		ranges = new_ranges;
 	}
-	ranges[registry->range_count - 1] =
-		(struct value_range){registry->value_count, 0};
+
+	ranges[registry->range_count++] = (struct value_range){NULL, 0};
 
 	SET_OFFSET_OF(&registry->ranges, ranges);
 
@@ -215,26 +236,25 @@ value_registry_start(struct value_registry *registry) {
 static inline int
 value_registry_collect(struct value_registry *registry, uint32_t value) {
 	if (value_collector_collect(&registry->collector, value) == 1) {
-		uint32_t *values = ADDR_OF(&registry->values);
+		struct value_range *range =
+			ADDR_OF(&registry->ranges) + registry->range_count - 1;
+		uint32_t *values = ADDR_OF(&range->values);
 
 		if (mem_array_expand_exp(
 			    registry->memory_context,
 			    (void **)&values,
 			    sizeof(*values),
-			    &registry->value_count
+			    &range->count
 		    )) {
 			return -1;
 		}
 
-		values[registry->value_count - 1] = value;
+		values[range->count - 1] = value;
 
-		struct value_range *ranges = ADDR_OF(&registry->ranges);
-		ranges[registry->range_count - 1].count++;
-
-		if (value >= registry->max_value)
+		if (value > registry->max_value)
 			registry->max_value = value;
 
-		SET_OFFSET_OF(&registry->values, values);
+		SET_OFFSET_OF(&range->values, values);
 	}
 
 	return 0;
@@ -243,12 +263,18 @@ value_registry_collect(struct value_registry *registry, uint32_t value) {
 static inline void
 value_registry_free(struct value_registry *registry) {
 	value_collector_free(&registry->collector);
-	// FIXME: use mem_array_free_exp (not implemented yet
-	memory_bfree(
-		registry->memory_context,
-		ADDR_OF(&registry->values),
-		registry->value_count * sizeof(uint32_t)
-	);
+
+	for (uint64_t idx = 0; idx < registry->range_count; ++idx) {
+		struct value_range *range = ADDR_OF(&registry->ranges) + idx;
+
+		mem_array_free_exp(
+			registry->memory_context,
+			ADDR_OF(&range->values),
+			sizeof(uint32_t),
+			range->count
+		);
+	}
+
 	memory_bfree(
 		registry->memory_context,
 		ADDR_OF(&registry->ranges),
@@ -282,64 +308,18 @@ value_registry_join_range(
 	void *join_func_data
 ) {
 	struct value_range *range1 = ADDR_OF(&registry1->ranges) + range_idx;
+	uint32_t *values1 = ADDR_OF(&range1->values);
 	struct value_range *range2 = ADDR_OF(&registry2->ranges) + range_idx;
-	for (uint32_t idx1 = range1->from; idx1 < range1->from + range1->count;
-	     ++idx1) {
-		for (uint32_t idx2 = range2->from;
-		     idx2 < range2->from + range2->count;
-		     ++idx2) {
+	uint32_t *values2 = ADDR_OF(&range2->values);
 
-			uint32_t v1 = ADDR_OF(&registry1->values)[idx1];
-			uint32_t v2 = ADDR_OF(&registry2->values)[idx2];
+	for (uint32_t idx1 = 0; idx1 < range1->count; ++idx1) {
+		for (uint32_t idx2 = 0; idx2 < range2->count; ++idx2) {
+
+			uint32_t v1 = values1[idx1];
+			uint32_t v2 = values2[idx2];
 
 			join_func(v1, v2, range_idx, join_func_data);
 		}
 	}
 	return 0;
-}
-
-/*
- * FIXME: the function is tricky and should be refactored.
- * FIXME: This function is not used!!!
- */
-static inline int
-value_registry_compact(
-	struct memory_context *memory_context,
-	struct value_registry *src_registry,
-	struct value_table *values,
-	struct value_registry *dst_registry
-) {
-	if (value_registry_init(dst_registry, memory_context)) {
-		return -1;
-	}
-
-	for (uint32_t r_idx = 0; r_idx < values->remap_table.count; ++r_idx) {
-		struct remap_item *item =
-			remap_table_item(&values->remap_table, r_idx);
-		if (!item->count) {
-			continue;
-		}
-
-		if (value_registry_start(dst_registry))
-			goto error;
-
-		struct value_range *range =
-			ADDR_OF(&src_registry->ranges) + r_idx;
-		for (uint32_t v_idx = range->from;
-		     v_idx < range->from + range->count;
-		     ++v_idx) {
-			value_registry_collect(
-				dst_registry,
-				ADDR_OF(&src_registry->values)[v_idx]
-			);
-		}
-	}
-
-	value_table_compact(values);
-
-	return 0;
-
-error:
-	value_registry_free(dst_registry);
-	return -1;
 }

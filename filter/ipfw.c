@@ -318,8 +318,7 @@ action_list_is_term(struct value_registry *registry, uint32_t range_idx) {
 	if (range->count == 0)
 		return 0;
 
-	uint32_t action_id =
-		ADDR_OF(&registry->values)[range->from + range->count - 1];
+	uint32_t action_id = ADDR_OF(&range->values)[range->count - 1];
 	return !(action_id & ACTION_NON_TERMINATE);
 }
 
@@ -344,12 +343,10 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 		struct value_range *copy_range =
 			ADDR_OF(&set_ctx->registry->ranges) + prev_value;
 
-		for (uint32_t ridx = copy_range->from;
-		     ridx < copy_range->from + copy_range->count;
-		     ++ridx) {
+		for (uint32_t ridx = 0; ridx < copy_range->count; ++ridx) {
 			value_registry_collect(
 				set_ctx->registry,
-				ADDR_OF(&set_ctx->registry->values)[ridx]
+				ADDR_OF(&copy_range->values)[ridx]
 			);
 		}
 
