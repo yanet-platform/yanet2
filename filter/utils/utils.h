@@ -15,8 +15,8 @@ free_packet(struct packet *packet);
 
 struct packet
 make_packet(
-	uint32_t src_ip,
-	uint32_t dst_ip,
+	uint8_t *src_ip,
+	uint8_t *dst_ip,
 	uint16_t src_port,
 	uint16_t dst_port,
 	uint8_t proto,
@@ -77,12 +77,12 @@ builder_add_net6_src(struct filter_rule_builder *builder, struct net6 src);
 
 void
 builder_add_net4_dst(
-	struct filter_rule_builder *builder, uint32_t addr, uint32_t mask
+	struct filter_rule_builder *builder, uint8_t *addr, uint8_t *mask
 );
 
 void
 builder_add_net4_src(
-	struct filter_rule_builder *builder, uint32_t addr, uint32_t mask
+	struct filter_rule_builder *builder, uint8_t *addr, uint8_t *mask
 );
 
 void
@@ -111,7 +111,7 @@ build_rule(struct filter_rule_builder *builder, uint32_t action);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-inline static uint32_t
-ip(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
-	return (a << 24) | (b << 16) | (c << 8) | d;
-}
+#define ip(a, b, c, d)                                                         \
+	(uint8_t[4]) {                                                         \
+		a, b, c, d                                                     \
+	}

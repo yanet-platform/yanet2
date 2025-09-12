@@ -15,7 +15,9 @@
 
 void
 query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
-	struct packet packet = make_packet(0, 0, 0, 0, IPPROTO_TCP, flags, 0);
+	struct packet packet = make_packet(
+		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 0, 0, IPPROTO_TCP, flags, 0
+	);
 	uint32_t *actions;
 	uint32_t actions_count;
 	filter_query(filter, &packet, &actions, &actions_count);
@@ -25,7 +27,9 @@ query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
 
 void
 query_udp_packet(struct filter *filter, uint32_t expected) {
-	struct packet packet = make_packet(0, 0, 0, 0, IPPROTO_UDP, 0, 0);
+	struct packet packet = make_packet(
+		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 0, 0, IPPROTO_UDP, 0, 0
+	);
 	uint32_t *actions;
 	uint32_t actions_count;
 	filter_query(filter, &packet, &actions, &actions_count);

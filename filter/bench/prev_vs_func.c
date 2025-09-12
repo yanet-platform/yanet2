@@ -153,8 +153,8 @@ main() {
 				dst_port1 = t;
 			}
 
-			uint32_t src_ip = ip(i + 1, 0, 0, 0);
-			uint32_t dst_ip = ip(j + 1, 0, 0, 0);
+			uint8_t *src_ip = ip(i + 1, 0, 0, 0);
+			uint8_t *dst_ip = ip(j + 1, 0, 0, 0);
 
 			struct filter_rule_builder *builder =
 				&builders[i * MAX_IP + j];

@@ -66,24 +66,14 @@ typedef void (*net6_get_part_func)(
 
 static void
 net6_get_hi_part(struct net6 *net, uint64_t *addr, uint64_t *mask) {
-	*addr = 0;
-	for (size_t i = 0, shift = 0; i < NET6_LEN / 2; ++i, shift += 8) {
-		*addr |= ((uint64_t)net->ip[NET6_LEN / 2 + i]) << shift;
-	}
-	*mask = -1ull << (64 - net->pref_hi);
-	*mask = be64toh(*mask);
-	*addr &= *mask;
+	*addr = *(uint64_t *)net->addr;
+	*mask = *(uint64_t *)net->mask;
 }
 
 static void
 net6_get_lo_part(struct net6 *net, uint64_t *addr, uint64_t *mask) {
-	*addr = 0;
-	for (size_t i = 0, shift = 0; i < NET6_LEN / 2; ++i, shift += 8) {
-		*addr |= ((uint64_t)net->ip[NET6_LEN / 2 + i]) << shift;
-	}
-	*mask = -1ull << (64 - net->pref_lo);
-	*mask = be64toh(*mask);
-	*addr &= *mask;
+	*addr = *(uint64_t *)(net->addr + 8);
+	*mask = *(uint64_t *)(net->mask + 8);
 }
 
 static inline int
@@ -100,15 +90,11 @@ net4_collect_values(
 	struct value_table *table
 ) {
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		uint32_t addr = htobe32(net4->addr);
-		uint32_t mask = htobe32(net4->mask);
-		uint32_t to = addr | ~mask;
+		uint8_t to[4];
+		for (uint8_t idx = 0; idx < sizeof(to); ++idx)
+			to[idx] = net4->addr[idx] | ~net4->mask[idx];
 		lpm4_collect_values(
-			lpm,
-			(uint8_t *)&addr,
-			(uint8_t *)&to,
-			lpm_collect_value_iterator,
-			table
+			lpm, net4->addr, to, lpm_collect_value_iterator, table
 		);
 	}
 }
@@ -155,8 +141,8 @@ net4_collect_registry(
 	struct value_registry *registry
 ) {
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		uint32_t addr = htobe32(net4->addr);
-		uint32_t mask = htobe32(net4->mask);
+		uint32_t addr = *(uint32_t *)net4->addr;
+		uint32_t mask = *(uint32_t *)net4->mask;
 		uint32_t to = addr | ~mask;
 		lpm4_collect_values(
 			lpm,
@@ -439,11 +425,11 @@ collect_net4_values(
 
 		for (struct net4 *net4 = nets; net4 < nets + net_count;
 		     ++net4) {
-			uint32_t addr = htobe32(net4->addr);
 			if (range4_collector_add(
 				    &collector,
-				    (uint8_t *)&addr,
-				    __builtin_popcountll(net4->mask)
+				    net4->addr,
+				    __builtin_popcountll(*(uint32_t *)net4->mask
+				    )
 			    ))
 				goto error_collector;
 		}

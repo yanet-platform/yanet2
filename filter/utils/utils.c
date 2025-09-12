@@ -12,8 +12,8 @@
 
 static struct rte_mbuf *
 make_mbuf(
-	uint32_t src_ip,
-	uint32_t dst_ip,
+	uint8_t *src_ip,
+	uint8_t *dst_ip,
 	uint16_t src_port,
 	uint16_t dst_port,
 	uint8_t proto,
@@ -62,8 +62,8 @@ make_mbuf(
 	ip->fragment_offset = 0;
 	ip->time_to_live = 64;
 	ip->next_proto_id = proto;
-	ip->src_addr = rte_cpu_to_be_32(src_ip);
-	ip->dst_addr = rte_cpu_to_be_32(dst_ip);
+	memcpy(&ip->src_addr, src_ip, 4);
+	memcpy(&ip->dst_addr, dst_ip, 4);
 	ip->hdr_checksum = 0;
 
 	if (proto == IPPROTO_UDP) {
@@ -123,10 +123,8 @@ make_mbuf_net6(
 	struct rte_ipv6_hdr *ip = (struct rte_ipv6_hdr *)(eth + 1);
 	ip->proto = IPPROTO_UDP;
 	ip->payload_len = rte_cpu_to_be_16(sizeof(struct rte_udp_hdr));
-	for (size_t i = 0; i < NET6_LEN; ++i) {
-		ip->src_addr[i] = src_ip[NET6_LEN - i - 1];
-		ip->dst_addr[i] = dst_ip[NET6_LEN - i - 1];
-	}
+	memcpy(ip->src_addr, src_ip, 16);
+	memcpy(ip->dst_addr, dst_ip, 16);
 
 	struct rte_udp_hdr *udp = (struct rte_udp_hdr *)(ip + 1);
 	udp->src_port = rte_cpu_to_be_16(src_port);
@@ -144,8 +142,8 @@ free_packet(struct packet *packet) {
 
 struct packet
 make_packet(
-	uint32_t src_ip,
-	uint32_t dst_ip,
+	uint8_t *src_ip,
+	uint8_t *dst_ip,
 	uint16_t src_port,
 	uint16_t dst_port,
 	uint8_t proto,
@@ -217,17 +215,47 @@ builder_add_net6_src(struct filter_rule_builder *builder, struct net6 src) {
 
 void
 builder_add_net4_dst(
-	struct filter_rule_builder *builder, uint32_t addr, uint32_t mask
+	struct filter_rule_builder *builder, uint8_t *addr, uint8_t *mask
 ) {
-	struct net4 dst = {addr, mask};
+	struct net4 dst = {
+		.addr =
+			{
+				addr[0],
+				addr[1],
+				addr[2],
+				addr[3],
+			},
+		.mask =
+			{
+				mask[0],
+				mask[1],
+				mask[2],
+				mask[3],
+			},
+	};
 	builder->net4_dst[builder->net4_dst_count++] = dst;
 }
 
 void
 builder_add_net4_src(
-	struct filter_rule_builder *builder, uint32_t addr, uint32_t mask
+	struct filter_rule_builder *builder, uint8_t *addr, uint8_t *mask
 ) {
-	struct net4 src = {addr, mask};
+	struct net4 src = {
+		.addr =
+			{
+				addr[0],
+				addr[1],
+				addr[2],
+				addr[3],
+			},
+		.mask =
+			{
+				mask[0],
+				mask[1],
+				mask[2],
+				mask[3],
+			},
+	};
 	builder->net4_src[builder->net4_src_count++] = src;
 }
 

@@ -39,10 +39,7 @@ action_get_net6_dst(
 ////////////////////////////////////////////////////////////////////////////////
 
 struct net6_part {
-	// Bytes in host byte order
 	uint64_t bytes;
-
-	// Bytes in host byte order
 	uint64_t mask;
 };
 
@@ -51,26 +48,16 @@ typedef struct net6_part (*net6_get_part_func)(struct net6 *net);
 static struct net6_part
 net6_get_hi_part(struct net6 *net) {
 	struct net6_part part;
-	part.bytes = 0;
-	for (size_t i = 0, shift = 0; i < NET6_LEN / 2; ++i, shift += 8) {
-		part.bytes |= ((uint64_t)net->ip[NET6_LEN / 2 + i]) << shift;
-	}
-	part.mask = -1ull << (64 - net->pref_hi);
-	part.mask = be64toh(part.mask);
-	part.bytes &= part.mask;
+	part.mask = *(uint64_t *)net->mask;
+	part.bytes = *(uint64_t *)net->addr & part.mask;
 	return part;
 }
 
 static struct net6_part
 net6_get_lo_part(struct net6 *net) {
 	struct net6_part part;
-	part.bytes = 0;
-	for (size_t i = 0, shift = 0; i < NET6_LEN / 2; ++i, shift += 8) {
-		part.bytes |= ((uint64_t)net->ip[i]) << shift;
-	}
-	part.mask = -1ull << (64 - net->pref_lo);
-	part.mask = be64toh(part.mask);
-	part.bytes &= part.mask;
+	part.mask = *(uint64_t *)(net->mask + 8);
+	part.bytes = *(uint64_t *)(net->addr + 8) & part.mask;
 	return part;
 }
 ////////////////////////////////////////////////////////////////////////////////

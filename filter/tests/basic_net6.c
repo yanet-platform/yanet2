@@ -40,18 +40,18 @@ make_addr(
 	uint8_t ip[NET6_LEN], uint8_t big, uint8_t c1, uint8_t low, uint8_t c2
 ) {
 	memset(ip, 0, NET6_LEN);
-	for (uint8_t i = 0; i < c2; ++i) {
-		if (i % 2 == 0) {
-			ip[NET6_LEN / 2 - i / 2 - 1] = low << 4;
-		} else {
-			ip[NET6_LEN / 2 - i / 2 - 1] |= low;
-		}
-	}
 	for (uint8_t i = 0; i < c1; ++i) {
 		if (i % 2 == 0) {
-			ip[NET6_LEN - i / 2 - 1] = big << 4;
+			ip[i / 2] = big << 4;
 		} else {
-			ip[NET6_LEN - i / 2 - 1] |= big;
+			ip[i / 2] |= big;
+		}
+	}
+	for (uint8_t i = 0; i < c2; ++i) {
+		if (i % 2 == 0) {
+			ip[8 + i / 2] = low << 4;
+		} else {
+			ip[8 + i / 2] |= low;
 		}
 	}
 }
@@ -73,11 +73,28 @@ test1(void *memory) {
 	struct filter_rule_builder builder;
 	builder_init(&builder);
 	struct net6 net = {
-		.ip = {},
-		.pref_hi = 40,
-		.pref_lo = 24,
+		.addr = {},
+		.mask =
+			{
+				0xff,
+				0xff,
+				0xff,
+				0xff,
+				0xff,
+				0x00,
+				0x00,
+				0x00,
+				0xff,
+				0xff,
+				0xff,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+			},
 	};
-	make_addr(net.ip, 0xB, 16, 0xA, 16);
+	make_addr(net.addr, 0xB, 16, 0xA, 16);
 	builder_add_net6_dst(&builder, net);
 	struct filter_rule rule = build_rule(&builder, 1);
 	const struct filter_rule rules[1] = {rule};
@@ -112,9 +129,8 @@ test1(void *memory) {
 		uint8_t src[NET6_LEN] = {};
 		uint8_t dst[NET6_LEN];
 		memset(dst, 0, NET6_LEN);
-		dst[15] = dst[14] = dst[13] = dst[12] = dst[11] = 0xBB;
-		dst[5] = 0xAA;
-		dst[6] = dst[7] = 0xAA;
+		dst[0] = dst[1] = dst[2] = dst[3] = dst[4] = 0xBB;
+		dst[8] = dst[9] = dst[10] = 0xAA;
 		query_packet_and_expect_action(&filter, src, dst, 1);
 	}
 
@@ -123,7 +139,7 @@ test1(void *memory) {
 		uint8_t src[NET6_LEN] = {};
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
-		dst[11] = 0xB0;
+		dst[4] = 0xB0;
 		query_packet_and_expect_no_actions(&filter, src, dst);
 	}
 
@@ -132,7 +148,7 @@ test1(void *memory) {
 		uint8_t src[NET6_LEN] = {};
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
-		dst[10] = 0xB0;
+		dst[5] = 0xB0;
 		query_packet_and_expect_action(&filter, src, dst, 1);
 	}
 
@@ -141,7 +157,7 @@ test1(void *memory) {
 		uint8_t src[NET6_LEN] = {};
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
-		dst[5] = 0xA0;
+		dst[10] = 0xA0;
 		query_packet_and_expect_no_actions(&filter, src, dst);
 	}
 
@@ -150,7 +166,7 @@ test1(void *memory) {
 		uint8_t src[NET6_LEN] = {};
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
-		dst[6] = 0xA0;
+		dst[9] = 0xA0;
 		query_packet_and_expect_no_actions(&filter, src, dst);
 	}
 
@@ -159,19 +175,31 @@ test1(void *memory) {
 		uint8_t src[NET6_LEN] = {};
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
-		dst[4] = 0xA0;
+		dst[11] = 0xA0;
 		query_packet_and_expect_action(&filter, src, dst, 1);
 	}
 
 	// query packet 9
 	{
 		uint8_t src[16] = {};
-		uint8_t dst[16];
-		// make_addr(dst, 0xBB, 16, 0xAA, 16);
-		memset(dst, 0xAa, 8);
-		memset(dst + 8, 0xBb, 8);
-		memset(dst, 0, 5);
-		memset(dst + 8, 0, 3);
+		uint8_t dst[16] = {
+			0xbb,
+			0xbb,
+			0xbb,
+			0xbb,
+			0xbb,
+			0x00,
+			0x00,
+			0x00,
+			0xaa,
+			0xaa,
+			0xaa,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+		};
 		query_packet_and_expect_action(&filter, src, dst, 1);
 	}
 
@@ -195,12 +223,29 @@ test2(void *memory) {
 	struct filter_rule_builder builder;
 	builder_init(&builder);
 	struct net6 net = {
-		.ip = {},
-		.pref_hi = 36,
-		.pref_lo = 20,
+		.addr = {},
+		.mask =
+			{
+				0xff,
+				0xff,
+				0xff,
+				0xff,
+				0xf0,
+				0x00,
+				0x00,
+				0x00,
+				0xff,
+				0xff,
+				0xf0,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+				0x00,
+			},
 	};
-	memset(net.ip, 0xAa, 8);
-	memset(net.ip + 8, 0xBb, 8);
+	memset(net.addr, 0xBb, 8);
+	memset(net.addr + 8, 0xAa, 8);
 	builder_add_net6_dst(&builder, net);
 	struct filter_rule rule = build_rule(&builder, 1);
 	const struct filter_rule rules[1] = {rule};
@@ -214,39 +259,72 @@ test2(void *memory) {
 	// query packet 1
 	{
 		uint8_t src[16] = {};
-		uint8_t dst[16];
-		memset(dst, 0, 5);
-		dst[5] = 0xA0;
-		memset(dst + 6, 0xAa, 2);
-		memset(dst + 8, 0, 3);
-		dst[11] = 0xB0;
-		memset(dst + 12, 0xBb, 4);
+		uint8_t dst[16] = {
+			0xbb,
+			0xbb,
+			0xbb,
+			0xbb,
+			0xb0,
+			0x00,
+			0x00,
+			0x00,
+			0xaa,
+			0xaa,
+			0xa0,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+		};
 		query_packet_and_expect_action(&filter, src, dst, 1);
 	}
 
 	// query packet 2
 	{
 		uint8_t src[16] = {};
-		uint8_t dst[16];
-		memset(dst, 0, 5);
-		dst[5] = 0x90;
-		memset(dst + 6, 0xAa, 2);
-		memset(dst + 8, 0, 3);
-		dst[11] = 0xB0;
-		memset(dst + 12, 0xBb, 4);
+		uint8_t dst[16] = {
+			0xbb,
+			0xbb,
+			0xbb,
+			0xbb,
+			0xb0,
+			0x00,
+			0x00,
+			0x00,
+			0xaa,
+			0xaa,
+			0x90,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+		};
 		query_packet_and_expect_no_actions(&filter, src, dst);
 	}
 
 	// query packet 3
 	{
 		uint8_t src[16] = {};
-		uint8_t dst[16];
-		memset(dst, 0, 5);
-		dst[5] = 0xA0;
-		memset(dst + 6, 0xAA, 2);
-		memset(dst + 8, 0, 3);
-		dst[11] = 0xF0;
-		memset(dst + 12, 0xBB, 4);
+		uint8_t dst[16] = {
+			0xbb,
+			0xbb,
+			0xbb,
+			0xbb,
+			0xf0,
+			0x00,
+			0x00,
+			0x00,
+			0xaa,
+			0xaa,
+			0xa0,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+			0x00,
+		};
 		query_packet_and_expect_no_actions(&filter, src, dst);
 	}
 
@@ -276,20 +354,54 @@ test3(void *memory) {
 
 		// add IPv6 source address rule
 		struct net6 src_net = {
-			.ip = {},
-			.pref_hi = 36,
-			.pref_lo = 20,
+			.addr = {},
+			.mask =
+				{
+					0xff,
+					0xff,
+					0xff,
+					0xff,
+					0xf0,
+					0x00,
+					0x00,
+					0x00,
+					0xff,
+					0xff,
+					0xf0,
+					0x00,
+					0x00,
+					0x00,
+					0x00,
+					0x00,
+				},
 		};
-		make_addr(src_net.ip, 0xB, 16, 0xA, 16);
+		make_addr(src_net.addr, 0xB, 16, 0xA, 16);
 		builder_add_net6_src(&builder1, src_net);
 
 		// add IPv6 destination address rule
 		struct net6 dst_net = {
-			.ip = {},
-			.pref_hi = 40,
-			.pref_lo = 24,
+			.addr = {},
+			.mask =
+				{
+					0xff,
+					0xff,
+					0xff,
+					0xff,
+					0xff,
+					0x00,
+					0x00,
+					0x00,
+					0xff,
+					0xff,
+					0xff,
+					0x00,
+					0x00,
+					0x00,
+					0x00,
+					0x00,
+				},
 		};
-		make_addr(dst_net.ip, 0xB, 16, 0xA, 16);
+		make_addr(dst_net.addr, 0xB, 16, 0xA, 16);
 		builder_add_net6_dst(&builder1, dst_net);
 
 		rule1 = build_rule(&builder1, 1);
@@ -302,20 +414,54 @@ test3(void *memory) {
 
 		// add IPv6 source address rule
 		struct net6 src_net = {
-			.ip = {},
-			.pref_hi = 40,
-			.pref_lo = 24,
+			.addr = {},
+			.mask =
+				{
+					0xff,
+					0xff,
+					0xff,
+					0xff,
+					0xff,
+					0x00,
+					0x00,
+					0x00,
+					0xff,
+					0xff,
+					0xff,
+					0x00,
+					0x00,
+					0x00,
+					0x00,
+					0x00,
+				},
 		};
-		make_addr(src_net.ip, 0xB, 16, 0xA, 16);
+		make_addr(src_net.addr, 0xB, 16, 0xA, 16);
 		builder_add_net6_src(&builder2, src_net);
 
 		// add IPv6 destination address rule
 		struct net6 dst_net = {
-			.ip = {},
-			.pref_hi = 36,
-			.pref_lo = 20,
+			.addr = {},
+			.mask =
+				{
+					0xff,
+					0xff,
+					0xff,
+					0xff,
+					0xf0,
+					0x00,
+					0x00,
+					0x00,
+					0xff,
+					0xff,
+					0xf0,
+					0x00,
+					0x00,
+					0x00,
+					0x00,
+					0x00,
+				},
 		};
-		make_addr(dst_net.ip, 0xB, 16, 0xA, 16);
+		make_addr(dst_net.addr, 0xB, 16, 0xA, 16);
 		builder_add_net6_dst(&builder2, dst_net);
 
 		rule2 = build_rule(&builder2, 2);

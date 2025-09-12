@@ -88,7 +88,13 @@ check_single_attribute(void *memory) {
 
 		for (size_t i = 0; i < queries; ++i) {
 			struct packet packet = make_packet(
-				0, 0, query_ports[i], 0, IPPROTO_UDP, 0, 0
+				ip(0, 0, 0, 0),
+				ip(0, 0, 0, 0),
+				query_ports[i],
+				0,
+				IPPROTO_UDP,
+				0,
+				0
 			);
 			query_filter_and_expect_action(
 				&filter, &packet, expected_actions[i]
@@ -106,7 +112,13 @@ check_single_attribute(void *memory) {
 		uint16_t query_ports[queries] = {45, 1, 2, 3, 4, 25};
 		for (size_t i = 0; i < queries; ++i) {
 			struct packet packet = make_packet(
-				0, 0, query_ports[i], 0, IPPROTO_UDP, 0, 0
+				ip(0, 0, 0, 0),
+				ip(0, 0, 0, 0),
+				query_ports[i],
+				0,
+				IPPROTO_UDP,
+				0,
+				0
 			);
 			query_filter_and_expect_no_actions(&filter, &packet);
 			free_packet(&packet);

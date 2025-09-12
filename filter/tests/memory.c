@@ -18,8 +18,15 @@ query_and_expect_action(
 	uint16_t dst_port,
 	uint32_t expected
 ) {
-	struct packet packet =
-		make_packet(0, 0, src_port, dst_port, IPPROTO_UDP, 0, 0);
+	struct packet packet = make_packet(
+		ip(0, 0, 0, 0),
+		ip(0, 0, 0, 0),
+		src_port,
+		dst_port,
+		IPPROTO_UDP,
+		0,
+		0
+	);
 	query_filter_and_expect_action(filter, &packet, expected);
 	free_packet(&packet);
 }
@@ -28,8 +35,15 @@ void
 query_and_expect_no_action(
 	struct filter *filter, uint16_t src_port, uint16_t dst_port
 ) {
-	struct packet packet =
-		make_packet(0, 0, src_port, dst_port, IPPROTO_UDP, 0, 0);
+	struct packet packet = make_packet(
+		ip(0, 0, 0, 0),
+		ip(0, 0, 0, 0),
+		src_port,
+		dst_port,
+		IPPROTO_UDP,
+		0,
+		0
+	);
 	query_filter_and_expect_no_actions(filter, &packet);
 	free_packet(&packet);
 }
