@@ -286,7 +286,7 @@ jobs:
       working-directory: tests/functional
       run: |
         export YANET_TEST_DEBUG=1
-        make test
+        make test || tail -n 100 test.log
       timeout-minutes: 35
 
     - name: Upload functional test logs

@@ -185,7 +185,7 @@ func (c *CLIManager) ExecuteCommands(commands ...string) ([]string, error) {
 		output, err := c.ExecuteCommand(cmd)
 		outputs = append(outputs, output)
 		if err != nil {
-			return outputs, fmt.Errorf("failed to execute common config command '%s': %w", cmd, err)
+			return outputs, fmt.Errorf("failed to execute command '%s': %w", cmd, err)
 		}
 	}
 	return outputs, nil

@@ -14,10 +14,32 @@ import (
 // Global framework instance shared across all tests
 var globalFramework *framework.TestFramework
 
-// TestMain sets up and tears down the test framework
+// TestMain is the entry point for running tests in this package.
+// It wraps the standard testing.M.Run() with additional setup/teardown logic
+// via testMainWrapper. The exit code from testMainWrapper is passed to os.Exit.
 func TestMain(m *testing.M) {
-	var code int
+	os.Exit(testMainWrapper(m))
+}
 
+// testMainWrapper is a test framework wrapper function that:
+// 1. Initializes logging based on YANET_TEST_DEBUG environment variable
+// 2. Creates and configures test framework with QEMU image
+// 3. Starts YANET with predefined dataplane and controlplane configurations
+// 4. Executes common configuration commands
+// 5. Runs all tests via testing.M.Run()
+//
+// The function handles framework lifecycle:
+// - Starts framework and QEMU VM
+// - Waits for VM readiness
+// - Ensures proper cleanup on exit
+// - Returns test execution status code
+//
+// Parameters:
+//   - m: testing.M instance for running tests
+//
+// Returns:
+//   - int: Test execution result code
+func testMainWrapper(m *testing.M) (code int) {
 	// Create logger for detailed logging
 	lg := zap.NewDevelopmentConfig()
 	if _, ok := os.LookupEnv("YANET_TEST_DEBUG"); !ok {
@@ -26,7 +48,7 @@ func TestMain(m *testing.M) {
 	} else {
 		// save debug log to test.log
 		lg.OutputPaths = []string{"test.log"}
-		lg.ErrorOutputPaths = []string{"test.log"}
+		lg.ErrorOutputPaths = []string{"stderr", "test.log"}
 	}
 	logger, err := lg.Build()
 	if err != nil {
@@ -40,29 +62,31 @@ func TestMain(m *testing.M) {
 		QEMUImage: "yanet-test.qcow2",
 	}, framework.WithLog(sugar))
 	if err != nil {
-		panic(err)
+		sugar.Errorf("Failed to create framework: %v", err)
+		return 1
 	}
 
 	globalFramework = fw
 
 	// Start test environment
 	if err := fw.Start(); err != nil {
-		panic(err)
+		sugar.Errorf("Failed to start framework: %v", err)
+		return 1
 	}
 
-	// Ensure cleanup happens before os.Exit
 	defer func() {
 		if fw != nil {
 			if err := fw.Stop(); err != nil {
 				sugar.Errorf("Failed to stop framework: %v", err)
+				code = 12
 			}
 		}
-		os.Exit(code)
 	}()
 
 	// Wait for VM to be ready
 	if err := fw.QEMU.WaitForReady(60 * time.Second); err != nil {
-		panic(err)
+		sugar.Errorf("Failed to wait for VM readiness: %v", err)
+		return 1
 	}
 
 	// Start YANET with decap module configuration
@@ -109,15 +133,17 @@ logging:
 `
 
 	if err := fw.StartYANET(dataplaneConfig, controlplaneConfig); err != nil {
-		panic(err)
+		sugar.Errorf("Failed to start YANET: %v", err)
+		return 1
 	}
 
 	if _, err := fw.CLI.ExecuteCommands(framework.CommonConfigCommands...); err != nil {
-		panic(err)
+		sugar.Errorf("Failed to execute common configuration commands: %v", err)
+		return 1
 	}
 
 	// Run tests
-	code = m.Run()
+	return m.Run()
 }
 
 // TestFramework - comprehensive test for checking all yanet functionality
