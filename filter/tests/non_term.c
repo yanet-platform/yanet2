@@ -15,8 +15,10 @@ query_and_expect_actions(
 	uint32_t action_count,
 	uint32_t *actions
 ) {
+	uint8_t src_ip[4] = {0, 0, 0, 123};
+	uint8_t dst_ip[4] = {0, 0, 1, 65};
 	struct packet packet =
-		make_packet(123, 321, src_port, dst_port, IPPROTO_UDP, 0, 0);
+		make_packet(src_ip, dst_ip, src_port, dst_port, IPPROTO_UDP, 0, 0);
 	query_filter_and_expect_actions(filter, &packet, action_count, actions);
 	free_packet(&packet);
 }
