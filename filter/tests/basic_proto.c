@@ -15,14 +15,18 @@
 
 void
 query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
-	struct packet packet = make_packet(0, 0, 0, 0, IPPROTO_TCP, flags, 0);
+	struct packet packet = make_packet(
+		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 0, 0, IPPROTO_TCP, flags, 0
+	);
 	query_filter_and_expect_action(filter, &packet, expected);
 	free_packet(&packet);
 }
 
 void
 query_udp_packet(struct filter *filter, uint32_t expected) {
-	struct packet packet = make_packet(0, 0, 0, 0, IPPROTO_UDP, 0, 0);
+	struct packet packet = make_packet(
+		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 0, 0, IPPROTO_UDP, 0, 0
+	);
 	query_filter_and_expect_action(filter, &packet, expected);
 	free_packet(&packet);
 }

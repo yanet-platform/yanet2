@@ -16,10 +16,15 @@ query_and_check_actions(
 	uint32_t ref_actions_count,
 	const uint32_t *ref_actions
 ) {
-	uint8_t src_ip[4] = {0, 0, 0, 123};
-	uint8_t dst_ip[4] = {0, 0, 1, 65};
-	struct packet packet =
-		make_packet(src_ip, dst_ip, src_port, 222, IPPROTO_UDP, 0, 0);
+	struct packet packet = make_packet(
+		ip(0, 0, 0, 123),
+		ip(0, 0, 1, 65),
+		src_port,
+		222,
+		IPPROTO_UDP,
+		0,
+		0
+	);
 	const uint32_t *actions;
 	uint32_t actions_count;
 	int res = filter_query(filter, &packet, &actions, &actions_count);
