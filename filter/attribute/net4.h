@@ -31,25 +31,38 @@ action_get_net4_dst(
 	*count = action->net4.dst_count;
 }
 
-static inline void
+static inline int
 net4_collect_values(
 	struct net4 *start,
 	uint32_t count,
-	struct lpm *lpm,
+	struct range_index *range_index,
 	struct value_table *table
 ) {
+	uint32_t *values = ADDR_OF(&range_index->values);
+
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		uint32_t addr = *(uint32_t *)net4->addr;
-		uint32_t mask = *(uint32_t *)net4->mask;
-		uint32_t to = addr | ~mask;
-		lpm4_collect_values(
-			lpm,
-			(uint8_t *)&addr,
-			(uint8_t *)&to,
-			lpm_collect_value_iterator,
-			table
-		);
+		if (*(uint32_t *)net4->mask == 0x00000000)
+			continue;
+		uint32_t to =
+			*(uint32_t *)net4->addr | ~*(uint32_t *)net4->mask;
+		filter_key_inc(4, (uint8_t *)&to);
+
+		uint32_t start =
+			radix_lookup(&range_index->radix, 4, net4->addr);
+		uint32_t stop = range_index->count;
+		if (to != 0)
+			stop = radix_lookup(
+				&range_index->radix, 4, (uint8_t *)&to
+			);
+
+		for (uint32_t idx = start; idx < stop; ++idx) {
+			if (value_table_touch(table, 0, values[idx])) {
+				return -1;
+			}
+		}
 	}
+
+	return 0;
 }
 
 static inline void
@@ -113,7 +126,13 @@ collect_net4_values(
 	if (lpm_init(lpm, memory_context)) {
 		goto error_lpm;
 	}
-	if (range_collector_collect(&collector, 4, lpm)) {
+	struct range_index range_index;
+	if (range_index_init(&range_index, memory_context)) {
+		// FIXME error
+		goto error_collector;
+	}
+
+	if (range_collector_collect(&collector, 4, lpm, &range_index)) {
 		goto error_collector;
 	}
 
@@ -131,7 +150,11 @@ collect_net4_values(
 		uint32_t net_count;
 		get_net4(action, &nets, &net_count);
 
-		net4_collect_values(nets, net_count, lpm, &table);
+		if (net4_collect_values(
+			    nets, net_count, &range_index, &table
+		    )) {
+			// FIXME: error
+		}
 	}
 
 	value_table_compact(&table);

@@ -61,19 +61,19 @@ action_get_net6_dst(
 }
 
 typedef void (*net6_get_part_func)(
-	struct net6 *net, uint64_t *addr, uint64_t *mask
+	struct net6 *net, uint8_t **addr, uint8_t **mask
 );
 
 static void
-net6_get_hi_part(struct net6 *net, uint64_t *addr, uint64_t *mask) {
-	*addr = *(uint64_t *)net->addr;
-	*mask = *(uint64_t *)net->mask;
+net6_get_hi_part(struct net6 *net, uint8_t **addr, uint8_t **mask) {
+	*addr = net->addr;
+	*mask = net->mask;
 }
 
 static void
-net6_get_lo_part(struct net6 *net, uint64_t *addr, uint64_t *mask) {
-	*addr = *(uint64_t *)(net->addr + 8);
-	*mask = *(uint64_t *)(net->mask + 8);
+net6_get_lo_part(struct net6 *net, uint8_t **addr, uint8_t **mask) {
+	*addr = net->addr + 8;
+	*mask = net->mask + 8;
 }
 
 static inline int
@@ -82,50 +82,41 @@ lpm_collect_value_iterator(uint32_t value, void *data) {
 	return value_table_touch(table, 0, value);
 }
 
-static inline void
+static inline int
 net4_collect_values(
 	struct net4 *start,
 	uint32_t count,
 	struct lpm *lpm,
+	struct range_index *range_index,
 	struct value_table *table
 ) {
+	(void)lpm;
+	uint32_t *values = ADDR_OF(&range_index->values);
+
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		uint8_t to[4];
-		for (uint8_t idx = 0; idx < sizeof(to); ++idx)
-			to[idx] = net4->addr[idx] | ~net4->mask[idx];
-		lpm4_collect_values(
-			lpm, net4->addr, to, lpm_collect_value_iterator, table
-		);
-	}
-}
+		if (*(uint32_t *)net4->mask == 0x00000000)
+			continue;
+		uint32_t to =
+			*(uint32_t *)net4->addr | ~*(uint32_t *)net4->mask;
+		filter_key_inc(4, (uint8_t *)&to);
 
-static inline void
-net6_collect_values(
-	struct net6 *start,
-	uint32_t count,
-	net6_get_part_func get_part,
-	struct lpm *lpm,
-	struct value_table *table
-) {
-	for (struct net6 *net6 = start; net6 < start + count; ++net6) {
-		uint64_t addr;
-		uint64_t mask;
-		get_part(net6, &addr, &mask);
-		uint64_t to = addr | ~mask;
-		lpm8_collect_values(
-			lpm,
-			(uint8_t *)&addr,
-			(uint8_t *)&to,
-			lpm_collect_value_iterator,
-			table
-		);
-	}
-}
+		uint32_t start =
+			radix_lookup(&range_index->radix, 4, net4->addr);
+		uint32_t stop = range_index->count;
+		if (to != 0)
+			stop = radix_lookup(
+				&range_index->radix, 4, (uint8_t *)&to
+			);
 
-struct net_collect_ctx {
-	struct value_table *table;
-	struct value_registry *registry;
-};
+		for (uint32_t idx = start; idx < stop; ++idx) {
+			if (lpm_collect_value_iterator(values[idx], table)) {
+				return -1;
+			}
+		}
+	}
+
+	return 0;
+}
 
 static inline int
 lpm_collect_registry_iterator(uint32_t value, void *data) {
@@ -145,29 +136,6 @@ net4_collect_registry(
 		uint32_t mask = *(uint32_t *)net4->mask;
 		uint32_t to = addr | ~mask;
 		lpm4_collect_values(
-			lpm,
-			(uint8_t *)&addr,
-			(uint8_t *)&to,
-			lpm_collect_registry_iterator,
-			registry
-		);
-	}
-}
-
-static inline void
-net6_collect_registry(
-	struct net6 *start,
-	uint32_t count,
-	net6_get_part_func get_part,
-	struct lpm *lpm,
-	struct value_registry *registry
-) {
-	for (struct net6 *net6 = start; net6 < start + count; ++net6) {
-		uint64_t addr;
-		uint64_t mask;
-		get_part(net6, &addr, &mask);
-		uint64_t to = addr | ~mask;
-		lpm8_collect_values(
 			lpm,
 			(uint8_t *)&addr,
 			(uint8_t *)&to,
@@ -437,7 +405,14 @@ collect_net4_values(
 	if (lpm_init(lpm, memory_context)) {
 		goto error_lpm;
 	}
-	if (range_collector_collect(&collector, 4, lpm)) {
+
+	struct range_index range_index;
+	if (range_index_init(&range_index, memory_context)) {
+		// FIXME error
+		goto error_collector;
+	}
+
+	if (range_collector_collect(&collector, 4, lpm, &range_index)) {
 		goto error_collector;
 	}
 
@@ -457,7 +432,7 @@ collect_net4_values(
 		uint32_t net_count;
 		get_net4(action, &nets, &net_count);
 
-		net4_collect_values(nets, net_count, lpm, &table);
+		net4_collect_values(nets, net_count, lpm, &range_index, &table);
 	}
 
 	value_table_compact(&table);
@@ -498,7 +473,7 @@ error:
 }
 
 static int
-collect_net6_values(
+collect_net6_range(
 	struct memory_context *memory_context,
 	struct filter_rule *actions,
 	uint32_t count,
@@ -506,9 +481,8 @@ collect_net6_values(
 	action_get_net6_func get_net6,
 	net6_get_part_func get_part,
 	struct lpm *lpm,
-	struct value_registry *registry
+	struct range_index *ri
 ) {
-
 	struct range_collector collector;
 	if (range_collector_init(&collector, memory_context))
 		goto error;
@@ -525,14 +499,15 @@ collect_net6_values(
 
 		for (struct net6 *net6 = nets; net6 < nets + net_count;
 		     ++net6) {
-			uint64_t addr;
-			uint64_t mask;
+
+			uint8_t *addr;
+			uint8_t *mask;
 			get_part(net6, &addr, &mask);
 
 			if (range8_collector_add(
 				    &collector,
-				    (uint8_t *)&addr,
-				    __builtin_popcountll(mask)
+				    addr,
+				    __builtin_popcountll(*(uint64_t *)mask)
 			    ))
 				goto error_collector;
 		}
@@ -540,64 +515,273 @@ collect_net6_values(
 	if (lpm_init(lpm, memory_context)) {
 		goto error_lpm;
 	}
-	if (range_collector_collect(&collector, 8, lpm)) {
+
+	if (range_index_init(ri, memory_context)) {
+		// FIXME error
 		goto error_collector;
 	}
 
-	struct value_table table;
-	if (value_table_init(&table, memory_context, 1, collector.count))
-		goto error_vtab;
-
-	for (struct filter_rule *action = actions; action < actions + count;
-	     ++action) {
-
-		if (!check_collect(action))
-			continue;
-
-		value_table_new_gen(&table);
-
-		struct net6 *nets;
-		uint32_t net_count;
-		get_net6(action, &nets, &net_count);
-
-		net6_collect_values(nets, net_count, get_part, lpm, &table);
+	if (range_collector_collect(&collector, 8, lpm, ri)) {
+		goto error_collector;
 	}
 
-	value_table_compact(&table);
-	lpm8_remap(lpm, &table);
-	lpm8_compact(lpm);
-
-	if (value_registry_init(registry, memory_context))
-		goto error_reg;
-
-	for (struct filter_rule *action = actions; action < actions + count;
-	     ++action) {
-		value_registry_start(registry);
-
-		if (!check_collect(action))
-			continue;
-
-		struct net6 *nets;
-		uint32_t net_count;
-		get_net6(action, &nets, &net_count);
-
-		net6_collect_registry(nets, net_count, get_part, lpm, registry);
-	}
-
-	value_table_free(&table);
 	return 0;
 
-error_reg:
-	value_table_free(&table);
-error_collector:
-	range_collector_free(&collector, 8);
 error_lpm:
-	lpm_free(lpm);
 
-error_vtab:
+error_collector:
 
 error:
 	return -1;
+}
+
+static int
+merge_net6_range(
+	struct memory_context *memory_context,
+	struct filter_rule *actions,
+	uint32_t count,
+	action_check_collect check_collect,
+	action_get_net6_func get_net6,
+	struct range_index *ri_hi,
+	struct range_index *ri_lo,
+	struct value_table *table,
+	struct value_registry *registry
+) {
+	value_table_init(
+		table,
+		memory_context,
+		ri_hi->max_value + 1,
+		ri_lo->max_value + 1
+	);
+
+	uint32_t net_cnt = 0;
+
+	struct radix rdx;
+	radix_init(&rdx, memory_context);
+
+	for (struct filter_rule *action = actions; action < actions + count;
+	     ++action) {
+
+		if (!check_collect(action))
+			continue;
+
+		value_table_new_gen(table);
+
+		uint32_t *values_hi = ADDR_OF(&ri_hi->values);
+		uint32_t *values_lo = ADDR_OF(&ri_lo->values);
+
+		struct net6 *nets;
+		uint32_t net_count;
+		get_net6(action, &nets, &net_count);
+
+		for (struct net6 *net6 = nets; net6 < nets + net_count;
+		     ++net6) {
+
+			if (radix_lookup(&rdx, 32, net6->addr) !=
+			    RADIX_VALUE_INVALID)
+				continue;
+
+			radix_insert(&rdx, 32, net6->addr, net_cnt++);
+
+			uint8_t *from_hi;
+			uint8_t *mask_hi;
+			net6_get_hi_part(net6, &from_hi, &mask_hi);
+			uint8_t to_hi[8];
+			*(uint64_t *)to_hi =
+				*(uint64_t *)from_hi | ~*(uint64_t *)mask_hi;
+			filter_key_inc(8, to_hi);
+			uint32_t start_hi =
+				radix_lookup(&ri_hi->radix, 8, from_hi);
+			uint32_t stop_hi = ri_hi->count;
+			if (*(uint64_t *)to_hi != 0)
+				stop_hi = radix_lookup(&ri_hi->radix, 8, to_hi);
+
+			uint8_t *from_lo;
+			uint8_t *mask_lo;
+			net6_get_lo_part(net6, &from_lo, &mask_lo);
+			uint8_t to_lo[8];
+			*(uint64_t *)to_lo =
+				*(uint64_t *)from_lo | ~*(uint64_t *)mask_lo;
+			filter_key_inc(8, to_lo);
+			uint32_t start_lo =
+				radix_lookup(&ri_lo->radix, 8, from_lo);
+			uint32_t stop_lo = ri_lo->count;
+			if (*(uint64_t *)to_lo != 0)
+				stop_lo = radix_lookup(&ri_lo->radix, 8, to_lo);
+
+			if (!(*(uint64_t *)from_hi == 0 &&
+			      *(uint64_t *)to_hi == 0 &&
+			      *(uint64_t *)from_lo == 0 &&
+			      *(uint64_t *)to_lo == 0)) {
+
+				for (uint32_t idx_hi = start_hi;
+				     idx_hi < stop_hi;
+				     ++idx_hi) {
+					for (uint32_t idx_lo = start_lo;
+					     idx_lo < stop_lo;
+					     ++idx_lo) {
+						value_table_touch(
+							table,
+							values_hi[idx_hi],
+							values_lo[idx_lo]
+						);
+					}
+				}
+			}
+		}
+	}
+
+	uint32_t *values_hi = ADDR_OF(&ri_hi->values);
+	uint32_t *values_lo = ADDR_OF(&ri_lo->values);
+
+	struct value_registry net_registry;
+	value_registry_init(&net_registry, memory_context);
+
+	for (struct filter_rule *action = actions; action < actions + count;
+	     ++action) {
+		if (!check_collect(action))
+			continue;
+
+		struct net6 *nets;
+		uint32_t net_count;
+		get_net6(action, &nets, &net_count);
+
+		for (struct net6 *net6 = nets; net6 < nets + net_count;
+		     ++net6) {
+
+			uint32_t net_idx = radix_lookup(&rdx, 32, net6->addr);
+			if (net_idx < net_registry.range_count)
+				continue;
+
+			value_registry_start(&net_registry);
+
+			uint8_t *from_hi;
+			uint8_t *mask_hi;
+			net6_get_hi_part(net6, &from_hi, &mask_hi);
+			uint8_t to_hi[8];
+			*(uint64_t *)to_hi =
+				*(uint64_t *)from_hi | ~*(uint64_t *)mask_hi;
+			filter_key_inc(8, to_hi);
+			uint32_t start_hi =
+				radix_lookup(&ri_hi->radix, 8, from_hi);
+			uint32_t stop_hi = ri_hi->count;
+			if (*(uint64_t *)to_hi != 0)
+				stop_hi = radix_lookup(&ri_hi->radix, 8, to_hi);
+
+			uint8_t *from_lo;
+			uint8_t *mask_lo;
+			net6_get_lo_part(net6, &from_lo, &mask_lo);
+			uint8_t to_lo[8];
+			*(uint64_t *)to_lo =
+				*(uint64_t *)from_lo | ~*(uint64_t *)mask_lo;
+			filter_key_inc(8, to_lo);
+			uint32_t start_lo =
+				radix_lookup(&ri_lo->radix, 8, from_lo);
+			uint32_t stop_lo = ri_lo->count;
+			if (*(uint64_t *)to_lo != 0)
+				stop_lo = radix_lookup(&ri_lo->radix, 8, to_lo);
+
+			for (uint32_t idx_hi = start_hi; idx_hi < stop_hi;
+			     ++idx_hi) {
+				for (uint32_t idx_lo = start_lo;
+				     idx_lo < stop_lo;
+				     ++idx_lo) {
+					value_registry_collect(
+						&net_registry,
+						value_table_get(
+							table,
+							values_hi[idx_hi],
+							values_lo[idx_lo]
+						)
+					);
+				}
+			}
+		}
+	}
+
+	value_registry_init(registry, memory_context);
+
+	for (struct filter_rule *action = actions; action < actions + count;
+	     ++action) {
+
+		if (value_registry_start(registry))
+			return -1;
+
+		if (!check_collect(action))
+			continue;
+
+		struct net6 *nets;
+		uint32_t net_count;
+		get_net6(action, &nets, &net_count);
+
+		for (struct net6 *net6 = nets; net6 < nets + net_count;
+		     ++net6) {
+
+			uint32_t net_idx = radix_lookup(&rdx, 32, net6->addr);
+
+			struct value_range *rng =
+				ADDR_OF(&net_registry.ranges) + net_idx;
+			uint32_t *vls = ADDR_OF(&rng->values);
+			for (uint32_t idx = 0; idx < rng->count; ++idx)
+				value_registry_collect(registry, vls[idx]);
+		}
+	}
+
+	// FIXME: free temporary resources
+
+	return 0;
+}
+
+static int
+collect_net6_values(
+	struct memory_context *memory_context,
+	struct filter_rule *actions,
+	uint32_t count,
+	action_check_collect check_collect,
+	action_get_net6_func get_net6,
+
+	struct lpm *lpm_hi,
+	struct lpm *lpm_lo,
+	struct value_table *table,
+	struct value_registry *registry
+) {
+	struct range_index ri_hi;
+	collect_net6_range(
+		memory_context,
+		actions,
+		count,
+		check_collect,
+		get_net6,
+		net6_get_hi_part,
+		lpm_hi,
+		&ri_hi
+	);
+
+	struct range_index ri_lo;
+	collect_net6_range(
+		memory_context,
+		actions,
+		count,
+		check_collect,
+		get_net6,
+		net6_get_lo_part,
+		lpm_lo,
+		&ri_lo
+	);
+
+	merge_net6_range(
+		memory_context,
+		actions,
+		count,
+		check_collect,
+		get_net6,
+		&ri_hi,
+		&ri_lo,
+		table,
+		registry
+	);
+
+	return 0;
 }
 
 typedef void (*action_get_port_range_func)(
@@ -681,15 +865,90 @@ collect_port_values(
 		     ++ports) {
 			for (uint32_t port = ports->from; port <= ports->to;
 			     ++port) {
-				value_registry_collect(
-					registry,
-					value_table_get(table, 0, port)
-				);
+				if (value_registry_collect(
+					    registry,
+					    value_table_get(table, 0, port)
+				    )) {
+					goto error_collect;
+				}
 			}
 		}
 	}
 
 	return 0;
+
+error_collect:
+
+error_reg:
+	value_table_free(table);
+	return -1;
+}
+
+static inline int
+collect_proto_values(
+	struct memory_context *memory_context,
+	struct filter_rule *actions,
+	uint32_t count,
+	action_check_collect check_collect,
+	struct value_table *table,
+	struct value_registry *registry
+) {
+	if (value_table_init(table, memory_context, 1, 65536))
+		return -1;
+
+	for (struct filter_rule *action = actions; action < actions + count;
+	     ++action) {
+		if (!check_collect(action))
+			continue;
+
+		value_table_new_gen(table);
+
+		for (struct filter_proto_range *protos =
+			     action->transport.protos;
+		     protos <
+		     action->transport.protos + action->transport.proto_count;
+		     ++protos) {
+			if (protos->to - protos->from == 65535)
+				continue;
+			for (uint32_t proto = protos->from; proto <= protos->to;
+			     ++proto) {
+				value_table_touch(table, 0, proto);
+			}
+		}
+	}
+
+	value_table_compact(table);
+
+	if (value_registry_init(registry, memory_context))
+		goto error_reg;
+
+	for (struct filter_rule *action = actions; action < actions + count;
+	     ++action) {
+		value_registry_start(registry);
+
+		if (!check_collect(action))
+			continue;
+
+		for (struct filter_proto_range *protos =
+			     action->transport.protos;
+		     protos <
+		     action->transport.protos + action->transport.proto_count;
+		     ++protos) {
+			for (uint32_t proto = protos->from; proto <= protos->to;
+			     ++proto) {
+				if (value_registry_collect(
+					    registry,
+					    value_table_get(table, 0, proto)
+				    )) {
+					goto error_collect;
+				}
+			}
+		}
+	}
+
+	return 0;
+
+error_collect:
 
 error_reg:
 	value_table_free(table);
@@ -709,6 +968,16 @@ filter_compiler_init(
 	if (res < 0) {
 		return res;
 	}
+
+	struct value_registry proto4_registry;
+	collect_proto_values(
+		&filter->memory_context,
+		actions,
+		count,
+		action_check_has_v4,
+		&filter->proto4,
+		&proto4_registry
+	);
 
 	struct value_registry src_net4_registry;
 	res = collect_net4_values(
@@ -766,14 +1035,24 @@ filter_compiler_init(
 		return res;
 	}
 
-	struct value_registry transport_port4_registry;
-	res = merge_and_collect_registry(
+	struct value_registry port4_registry;
+	merge_and_collect_registry(
 		&filter->memory_context,
 		&src_port4_registry,
 		&dst_port4_registry,
+		&filter->v4_lookups.port,
+		&port4_registry
+	);
+
+	struct value_registry transport_port4_registry;
+	res = merge_and_collect_registry(
+		&filter->memory_context,
+		&port4_registry,
+		&proto4_registry,
 		&filter->v4_lookups.transport_port,
 		&transport_port4_registry
 	);
+
 	if (res < 0) {
 		return res;
 	}
@@ -801,52 +1080,40 @@ filter_compiler_init(
 
 #ifndef IPFW_SKIP_NET6
 
-	struct value_registry src_net6_hi_registry;
+	struct value_registry proto6_registry;
+	collect_proto_values(
+		&filter->memory_context,
+		actions,
+		count,
+		action_check_has_v6,
+		&filter->proto6,
+		&proto6_registry
+	);
+
+	struct value_registry src_net6_registry;
 	collect_net6_values(
 		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v6,
 		action_get_net6_src,
-		net6_get_hi_part,
 		&filter->src_net6_hi,
-		&src_net6_hi_registry
-	);
-
-	struct value_registry src_net6_lo_registry;
-	collect_net6_values(
-		&filter->memory_context,
-		actions,
-		count,
-		action_check_has_v6,
-		action_get_net6_src,
-		net6_get_lo_part,
 		&filter->src_net6_lo,
-		&src_net6_lo_registry
+		&filter->v6_lookups.network_src,
+		&src_net6_registry
 	);
 
-	struct value_registry dst_net6_hi_registry;
+	struct value_registry dst_net6_registry;
 	collect_net6_values(
 		&filter->memory_context,
 		actions,
 		count,
 		action_check_has_v6,
 		action_get_net6_dst,
-		net6_get_hi_part,
 		&filter->dst_net6_hi,
-		&dst_net6_hi_registry
-	);
-
-	struct value_registry dst_net6_lo_registry;
-	collect_net6_values(
-		&filter->memory_context,
-		actions,
-		count,
-		action_check_has_v6,
-		action_get_net6_dst,
-		net6_get_lo_part,
 		&filter->dst_net6_lo,
-		&dst_net6_lo_registry
+		&filter->v6_lookups.network_dst,
+		&dst_net6_registry
 	);
 
 	struct value_registry src_port6_registry;
@@ -871,29 +1138,20 @@ filter_compiler_init(
 		&dst_port6_registry
 	);
 
-	struct value_registry net6_hi_registry;
+	struct value_registry port6_registry;
 	merge_and_collect_registry(
 		&filter->memory_context,
-		&src_net6_hi_registry,
-		&dst_net6_hi_registry,
-		&filter->v6_lookups.network_hi,
-		&net6_hi_registry
-	);
-
-	struct value_registry net6_lo_registry;
-	merge_and_collect_registry(
-		&filter->memory_context,
-		&src_net6_lo_registry,
-		&dst_net6_lo_registry,
-		&filter->v6_lookups.network_lo,
-		&net6_lo_registry
+		&src_port6_registry,
+		&dst_port6_registry,
+		&filter->v6_lookups.port,
+		&port6_registry
 	);
 
 	struct value_registry transport_port6_registry;
 	merge_and_collect_registry(
 		&filter->memory_context,
-		&src_port6_registry,
-		&dst_port6_registry,
+		&port6_registry,
+		&proto6_registry,
 		&filter->v6_lookups.transport_port,
 		&transport_port6_registry
 	);
@@ -901,8 +1159,8 @@ filter_compiler_init(
 	struct value_registry net6_registry;
 	merge_and_collect_registry(
 		&filter->memory_context,
-		&net6_hi_registry,
-		&net6_lo_registry,
+		&src_net6_registry,
+		&dst_net6_registry,
 		&filter->v6_lookups.network,
 		&net6_registry
 	);

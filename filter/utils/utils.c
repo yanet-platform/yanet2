@@ -323,8 +323,10 @@ build_rule(struct filter_rule_builder *builder, uint32_t action) {
 				.dsts = builder->dst_port_ranges,
 				.src_count = builder->port_src_ranges_count,
 				.srcs = builder->src_port_ranges,
+				.protos = &builder->proto_range,
+				.proto_count = 1,
 			},
-		.vlan = builder->vlan
+		.vlan = builder->vlan,
 	};
 	return result_action;
 }

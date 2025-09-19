@@ -8,6 +8,7 @@
 #include "key.h"
 #include "lpm.h"
 #include "radix.h"
+#include "range_index.h"
 
 struct range_collector {
 	struct memory_context *memory_context;
@@ -116,6 +117,7 @@ range_collector_add(
 struct range_collector_ctx {
 	struct range_collector *collector;
 	struct lpm *lpm;
+	struct range_index *range_index;
 
 	uint32_t max_value;
 	uint32_t stack_depth;
@@ -171,6 +173,11 @@ range_collector_stack_emit(
 	if (lpm_insert(ctx->lpm, key_size, ctx->pos, to, *item.value))
 		return -1;
 
+	if (range_index_insert(
+		    ctx->range_index, key_size, ctx->pos, *item.value
+	    ))
+		return -1;
+
 	memcpy(ctx->pos, to, key_size);
 	filter_key_inc(key_size, ctx->pos);
 
@@ -203,7 +210,7 @@ range_collector_stack_emit_until(
 	return 0;
 }
 
-static int
+static inline int
 range_collector_add_network(
 	uint8_t key_size,
 	const uint8_t *from,
@@ -217,7 +224,7 @@ range_collector_add_network(
 	return 0;
 }
 
-static int
+static inline int
 range_collector_iterate(
 	uint8_t key_size, const uint8_t *from, uint32_t value, void *data
 ) {
@@ -244,15 +251,19 @@ range_collector_iterate(
 	return 0;
 }
 
-static int
+static inline int
 range_collector_collect(
-	struct range_collector *collector, uint8_t key_size, struct lpm *lpm64
+	struct range_collector *collector,
+	uint8_t key_size,
+	struct lpm *lpm64,
+	struct range_index *range_index
 ) {
 	struct range_collector_ctx ctx;
 	ctx.collector = collector;
 	ctx.max_value = 0;
 
 	ctx.lpm = lpm64;
+	ctx.range_index = range_index;
 
 	uint32_t stack_size = key_size * 8 + 1;
 	uint32_t values[stack_size];
@@ -299,18 +310,8 @@ range8_collector_add(
 }
 
 static inline int
-range8_collector_collect(struct range_collector *collector, struct lpm *lpm) {
-	return range_collector_collect(collector, 8, lpm);
-}
-
-static inline int
 range4_collector_add(
 	struct range_collector *collector, const uint8_t *from, uint8_t prefix
 ) {
 	return range_collector_add(collector, 4, from, prefix);
-}
-
-static inline int
-range4_collector_collect(struct range_collector *collector, struct lpm *lpm) {
-	return range_collector_collect(collector, 4, lpm);
 }

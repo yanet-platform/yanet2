@@ -81,8 +81,13 @@ query_filter_compiler(
 	uint32_t net = value_table_get(
 		&filter_compiler->v4_lookups.network, src_net, dst_net
 	);
+
+	uint32_t port = value_table_get(
+		&filter_compiler->v4_lookups.port, src_port, dst_port
+	);
+	uint32_t proto = value_table_get(&filter_compiler->proto4, 0, 0);
 	uint32_t transport = value_table_get(
-		&filter_compiler->v4_lookups.transport_port, src_port, dst_port
+		&filter_compiler->v4_lookups.transport_port, port, proto
 	);
 	uint32_t result = value_table_get(
 		&filter_compiler->v4_lookups.result, net, transport
@@ -159,6 +164,8 @@ main() {
 			struct filter_rule_builder *builder =
 				&builders[i * MAX_IP + j];
 			builder_init(builder);
+			builder->proto_range =
+				(struct filter_proto_range){0, 65535};
 			builder_add_port_src_range(
 				builder, src_port1, src_port2
 			);

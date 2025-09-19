@@ -2,7 +2,7 @@
 
 #include "controlplane/config/zone.h"
 
-#include "ipfw.h"
+#include "filter/ipfw.h"
 
 // FIXME: make the structure private?
 struct acl_module_config {

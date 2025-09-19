@@ -63,6 +63,8 @@ struct filter_rule_builder {
 	struct filter_port_range src_port_ranges[MAX_RULES];
 	size_t port_src_ranges_count;
 
+	struct filter_proto_range proto_range;
+
 	uint16_t vlan;
 };
 
