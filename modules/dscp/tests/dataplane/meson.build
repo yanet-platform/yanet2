@@ -21,4 +21,8 @@ test(
   workdir: meson.current_source_dir(),
   timeout: 120,
   env: test_env,
+  depends: [
+    lib_dscp_cp,
+    lib_testing_module_dp,
+  ],
 )

@@ -21,4 +21,7 @@ test(
   workdir: meson.current_source_dir(),
   timeout: 120,
   env: test_env,
+  depends: [
+    lib_testing_module_dp,
+  ],
 )
