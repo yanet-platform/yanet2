@@ -11,6 +11,7 @@ project(
     'prefix=/usr',
     'libdir=lib',
     'bindir=bin',
+    'c_std=c2x',
   ],
 )
 
