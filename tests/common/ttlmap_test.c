@@ -29,7 +29,7 @@ void bucket_basic() {
         res = __TTLMAP_BUCKET_LOOKUP(bucket_ptr, &i, &value, &lock, 0);
         assert(res == 0);
         assert(*value == i);
-        ttlmap_unlock(lock);
+        __ttlmap_unlock(lock);
     }
 
     // insert one more key, expect error
@@ -57,7 +57,7 @@ void bucket_basic() {
         res = __TTLMAP_BUCKET_LOOKUP(bucket_ptr, &key, &value, &lock, 9);
         assert(res == 0);
         assert(*value == key);
-        ttlmap_unlock(lock);
+        __ttlmap_unlock(lock);
     }
 
     // try insert with rewrite
@@ -76,7 +76,7 @@ void bucket_basic() {
         res = __TTLMAP_BUCKET_LOOKUP(bucket_ptr, &key, &value, &lock, 9);
         assert(res == 0);
         assert(*value == 100);
-        ttlmap_unlock(lock);                
+        __ttlmap_unlock(lock);                
     }
 
     // again
@@ -95,13 +95,13 @@ void bucket_basic() {
         res = __TTLMAP_BUCKET_LOOKUP(bucket_ptr, &key, &value, &lock, 15);
         assert(res == 0);
         assert(*value == 500);
-        ttlmap_unlock(lock);      
+        __ttlmap_unlock(lock);      
         
         key = 0;
         res = __TTLMAP_BUCKET_LOOKUP(bucket_ptr, &key, &value, &lock, 15);
         assert(res == 0);
         assert(*value == 100);
-        ttlmap_unlock(lock);
+        __ttlmap_unlock(lock);
     }
 
     // check buckets again
@@ -118,7 +118,7 @@ void bucket_basic() {
             // i == __TTLMAP_BUCKET_ENTRIES / 2
             assert(*value == 500);
         }
-        ttlmap_unlock(lock);
+        __ttlmap_unlock(lock);
     }
 }
 
@@ -134,7 +134,7 @@ static void *thread_func(void *bucket) {
             return (void *)1;
         }
         *value = *value + 1;
-        ttlmap_unlock(lock);
+        __ttlmap_unlock(lock);
     }
     return (void *)0;
 }
@@ -190,13 +190,13 @@ void bucket_big_alignment() {
     assert(res == 0);
     assert(lookup_value->x == 0);
     lookup_value->x += 10;
-    ttlmap_unlock(lock);
+    __ttlmap_unlock(lock);
 
     res = __TTLMAP_BUCKET_LOOKUP(bucket_ptr, &key, &lookup_value, &lock, 0);
     assert(res == 0);
     lookup_value->x += 10;
     assert(lookup_value->x == 20);
-    ttlmap_unlock(lock);
+    __ttlmap_unlock(lock);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -223,7 +223,7 @@ typedef struct test_value {
     size_t counter2;
 } test_value_t;
 
-static size_t ttlmap_init(void *memory, size_t memory_size, size_t kv_entries) {
+void ttlmap_init(void *memory, size_t memory_size, size_t kv_entries) {
     int res;
 
     struct block_allocator alloc;
@@ -239,12 +239,235 @@ static size_t ttlmap_init(void *memory, size_t memory_size, size_t kv_entries) {
     res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, kv_entries);
     assert(res == 0);
 
-    return mctx.balloc_size;
+    TTLMAP_FREE(&map);
+}
+
+void ttlmap_init_and_get_buckets(void *memory, size_t memory_size, size_t kv_entries) {
+    int res;
+
+    struct block_allocator alloc;
+    res = block_allocator_init(&alloc);
+    assert(res == 0);
+    block_allocator_put_arena(&alloc, memory, memory_size);
+    
+    struct memory_context mctx;
+    res = memory_context_init(&mctx, "test", &alloc);
+    assert(res == 0);
+
+    ttlmap_t map;
+    res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, kv_entries);
+    assert(res == 0);
+
+    for (size_t i = 0; i < (1 << map.buckets_exp); ++i) {
+        void *bucket = __TTLMAP_BUCKET_GET_WITH_ID(&map, i, test_key_t, test_value_t);
+        assert((uintptr_t)bucket % 64 == 0);
+        
+        test_key_t key = {
+            .ip_dst = i + 0x01010,
+            .ip_src = i + 0x10101,
+            .port_dst = 10,
+            .port_src = 20,
+            .proto = 55,
+            .tcp_flags = i
+        };
+        test_value_t value = {
+            .counter1 = i,
+            .counter2 = i + 1,
+            .session_id = 0
+        };
+        res = __TTLMAP_BUCKET_INSERT(bucket, &key, &value, 0, 10);
+        assert(res == 0);
+    }
+
+    for (size_t i = 0; i < (1 << map.buckets_exp); ++i) {
+        void *bucket = __TTLMAP_BUCKET_GET_WITH_ID(&map, i, test_key_t, test_value_t);
+        assert((uintptr_t)bucket % 64 == 0);
+
+        test_key_t key = {
+            .ip_dst = i + 0x01010,
+            .ip_src = i + 0x10101,
+            .port_dst = 10,
+            .port_src = 20,
+            .proto = 55,
+            .tcp_flags = i
+        };
+        test_value_t value = {
+            .counter1 = i,
+            .counter2 = i + 1,
+            .session_id = 0
+        };
+        test_value_t *lookup_value;
+        ttlmap_lock_t *lock;
+        res = __TTLMAP_BUCKET_LOOKUP(bucket, &key, &lookup_value, &lock, 5);
+        assert(res == 0);
+        assert(memcmp(lookup_value, &value, sizeof(value)) == 0);
+        __ttlmap_unlock(lock);
+    }
+
+    int fd = 0;
+    TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, fd);
+    fprintf(fdopen(fd, "w"), "\tPer-entry memory overhead: %.2lf%%\n", 100.0 * (double)(map.mctx.balloc_size) / (kv_entries * (sizeof(test_key_t) + sizeof(test_value_t))));
+
+    TTLMAP_FREE(&map);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
+    int res;
+
+    struct block_allocator alloc;
+    res = block_allocator_init(&alloc);
+    assert(res == 0);
+    block_allocator_put_arena(&alloc, memory, memory_size);
+    
+    struct memory_context mctx;
+    res = memory_context_init(&mctx, "test", &alloc);
+    assert(res == 0);
+
+    ttlmap_t map;
+    res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, kv_entries);
+    assert(res == 0);
+    
+    size_t inserted = 0;
+    for (size_t i = 0; i < kv_entries; ++i) {
+        test_key_t key = {
+            .ip_dst = i + 0x01010,
+            .ip_src = i + 0x10101,
+            .port_dst = 10,
+            .port_src = 20,
+            .proto = 55,
+            .tcp_flags = i
+        };
+        test_value_t value = {
+            .counter1 = i,
+            .counter2 = i + 1,
+            .session_id = 0
+        };
+        int res = TTLMAP_INSERT(&map, &key, &value, 0, 10);
+        if (res == 0) {
+            ++inserted;
+        }
+    }
+
+    size_t lookup = 0;
+    for (size_t i = 0; i < kv_entries; ++i) {
+        test_key_t key = {
+            .ip_dst = i + 0x01010,
+            .ip_src = i + 0x10101,
+            .port_dst = 10,
+            .port_src = 20,
+            .proto = 55,
+            .tcp_flags = i
+        };
+        test_value_t ref_value = {
+            .counter1 = i,
+            .counter2 = i + 1,
+            .session_id = 0
+        };
+        test_value_t *value;
+        ttlmap_lock_t *lock;
+
+        int res = TTLMAP_LOOKUP(&map, &key, &value, &lock, 5);
+        if (res == 0) {
+            ++lookup;
+            assert(memcmp(&ref_value, value, sizeof(ref_value)) == 0);
+            ttlmap_release(lock);
+        }
+    }
+    assert(inserted == lookup);
+
+    printf("- Inserted: %lu/%lu entries (%.2lf%%)\n", inserted, kv_entries, 100.0 * (double)inserted / kv_entries);
+    TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, 0);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void ttlmap_free_works(void *memory, size_t memory_size) {
+    const size_t kv_entries = 100000;
+    int res;
+
+    struct block_allocator alloc;
+    res = block_allocator_init(&alloc);
+    assert(res == 0);
+    block_allocator_put_arena(&alloc, memory, memory_size);
+    
+    struct memory_context mctx;
+    res = memory_context_init(&mctx, "test", &alloc);
+    assert(res == 0);
+
+    ttlmap_t map;
+    res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, kv_entries);
+    assert(res == 0);
+
+    size_t inserted = 0;
+    for (size_t i = 0; i < kv_entries; ++i) {
+        test_key_t key = {
+            .ip_dst = i + 0x01010,
+            .ip_src = i + 0x10101,
+            .port_dst = 10,
+            .port_src = 20,
+            .proto = 55,
+            .tcp_flags = i
+        };
+        test_value_t value = {
+            .counter1 = i,
+            .counter2 = i + 1,
+            .session_id = 0
+        };
+        int res = TTLMAP_INSERT(&map, &key, &value, 0, 10);
+        if (res == 0) {
+            ++inserted;
+        }
+    }
+
+    size_t lookup = 0;
+    for (size_t i = 0; i < kv_entries; ++i) {
+        test_key_t key = {
+            .ip_dst = i + 0x01010,
+            .ip_src = i + 0x10101,
+            .port_dst = 10,
+            .port_src = 20,
+            .proto = 55,
+            .tcp_flags = i
+        };
+        test_value_t ref_value = {
+            .counter1 = i,
+            .counter2 = i + 1,
+            .session_id = 0
+        };
+        test_value_t *value;
+        ttlmap_lock_t *lock;
+
+        int res = TTLMAP_LOOKUP(&map, &key, &value, &lock, 5);
+        if (res == 0) {
+            ++lookup;
+            assert(memcmp(&ref_value, value, sizeof(ref_value)) == 0);
+            ttlmap_release(lock);
+        }
+    }
+    assert(inserted == lookup);
+
+    TTLMAP_FREE(&map);
+    assert(map.mctx.balloc_size == map.mctx.bfree_size);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void ttlmap_init_and_get_buckets_many_entries(void *memory, size_t memory_size) {
+    ttlmap_init_and_get_buckets(memory, memory_size, 1000000);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void ttlmap_strike_many_entries(void *memory, size_t memory_size) {
+    ttlmap_strike_entries(memory, memory_size, 1000000);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 int main() {
+    // buckets
     puts("Test bucket_basic...");
     bucket_basic();
 
@@ -258,10 +481,31 @@ int main() {
     bucket_alignment();
 
     // ttlmap
-    void *memory = malloc(1 << 20);
+    size_t memory_size = 1 << 30;
+    void *memory = malloc(memory_size);
     puts("Test ttlmap_init...");
-    size_t memory_used = ttlmap_init(memory, 1 << 20, 100);
-    printf("Used %lu bytes for 100 key-value entries (key size is %lu, value size is %lu)\n", memory_used, sizeof(test_key_t), sizeof(test_value_t));
+    ttlmap_init(memory, memory_size, 100);
+
+    for (size_t entries = 1; entries <= 10000; entries = (size_t)((double)(entries + 1) * 1.6)) {
+        printf("\nTest ttlmap_init_and_get_buckets [entries=%zu]...\n", entries);
+        ttlmap_init_and_get_buckets(memory, memory_size, entries);
+    }
+
+    for (size_t entries = 1; entries <= 10000; entries = (size_t)((double)(entries + 1) * 1.6)) {
+        printf("\nTest ttlmap_strike_entries [entries=%zu]...\n", entries);
+        ttlmap_strike_entries(memory, memory_size, entries);
+    }
+
+    puts("Test ttlmap_free_works...");
+    ttlmap_free_works(memory, memory_size);
+
+    puts("Test ttlmap_init_and_get_buckets_many_entries...");
+    ttlmap_init_and_get_buckets_many_entries(memory, memory_size);
+
+    puts("Test ttlmap_strike_many_entries...");
+    ttlmap_strike_many_entries(memory, memory_size);
+
+    free(memory);
 
     puts("OK!");
     return 0;
