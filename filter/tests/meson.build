@@ -83,16 +83,6 @@ test_filter_vlan = executable('basic_vlan',
 )
 test('basic_vlan', test_filter_vlan, suite: ['filter'])
 
-# bench and compare with previous filter
-test_vs_prev = executable('new_vs_old',
- ['vs_prev.c'],
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: test_deps,
-  link_language: 'c'
-)
-test('vs_prev', test_vs_prev, suite: ['filter'])
-
 # test filter macros
 filter_macros = executable('macros',
  ['macros.c'],

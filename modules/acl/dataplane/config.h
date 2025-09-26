@@ -2,11 +2,11 @@
 
 #include "controlplane/config/zone.h"
 
-#include "filter/ipfw.h"
+#include "filter/filter.h"
 
 // FIXME: make the structure private?
 struct acl_module_config {
 	struct cp_module cp_module;
 
-	struct filter_compiler filter;
+	struct filter filter;
 };

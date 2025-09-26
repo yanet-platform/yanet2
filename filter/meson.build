@@ -3,7 +3,6 @@ dependencies = [
 ]
 
 sources = files(
-  'ipfw.c',
   'filter.c',
   'helper.c',
 )

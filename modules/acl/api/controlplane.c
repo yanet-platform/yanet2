@@ -64,10 +64,19 @@ acl_module_compile(
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
-	return filter_compiler_init(
+	const struct filter_attribute *attributes[4] = {
+		&attribute_net4_src,
+		&attribute_net4_dst,
+		&attribute_port_src,
+		&attribute_port_dst
+	};
+
+	return filter_init(
 		&config->filter,
-		&cp_module->memory_context,
+		attributes,
+		4,
 		actions,
-		action_count
+		action_count,
+		&cp_module->memory_context
 	);
 }
