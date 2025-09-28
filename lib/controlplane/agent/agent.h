@@ -112,7 +112,12 @@ agent_delete_pipeline(struct agent *agent, const char *pipeline_name);
 struct cp_device_config;
 
 struct cp_device_config *
-cp_device_config_create(const char *name, uint64_t pipeline_count);
+cp_device_config_create(
+	const char *name,
+	uint16_t device_id,
+	uint16_t vlan,
+	uint64_t pipeline_count
+);
 
 void
 cp_device_config_free(struct cp_device_config *config);

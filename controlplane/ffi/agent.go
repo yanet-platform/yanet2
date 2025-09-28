@@ -137,20 +137,20 @@ func (m *Agent) UpdatePipelines(pipelinesConfigs []PipelineConfig) error {
 }
 
 // UpdateDevices attaches the given pipelines to the given device IDs.
-func (m *Agent) UpdateDevices(devices map[string][]DevicePipeline) error {
+func (m *Agent) UpdateDevices(deviceConfigs []DeviceConfig) error {
 	// If there are no devices, do nothing.
-	if len(devices) == 0 {
+	if len(deviceConfigs) == 0 {
 		return nil
 	}
 
-	configs := make([]*C.struct_cp_device_config, 0, len(devices))
+	configs := make([]*C.struct_cp_device_config, 0, len(deviceConfigs))
 
 	// Create a device pipeline map for each device.
-	for idx, pipelines := range devices {
-		deviceName := C.CString(idx)
+	for _, cfg := range deviceConfigs {
+		deviceName := C.CString(cfg.Name)
 		defer C.free(unsafe.Pointer(deviceName))
 
-		config := C.cp_device_config_create(deviceName, C.uint64_t(len(pipelines)))
+		config := C.cp_device_config_create(deviceName, C.uint16_t(cfg.DeviceId), C.uint16_t(cfg.Vlan), C.uint64_t(len(cfg.Pipelines)))
 		if config == nil {
 			return fmt.Errorf("failed to create device pipeline map")
 		}
@@ -158,7 +158,7 @@ func (m *Agent) UpdateDevices(devices map[string][]DevicePipeline) error {
 
 		idx := uint64(0)
 		// Add each pipeline to the device pipeline map.
-		for _, pipeline := range pipelines {
+		for _, pipeline := range cfg.Pipelines {
 			cPipelineName := C.CString(pipeline.Name)
 			defer C.free(unsafe.Pointer(cPipelineName))
 

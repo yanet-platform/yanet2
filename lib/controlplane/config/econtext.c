@@ -592,7 +592,18 @@ config_ectx_free(
 	struct cp_config_gen *cp_config_gen, struct config_ectx *config_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
+	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
+
+	struct phy_device_map *phy_device_maps =
+		ADDR_OF(&config_ectx->phy_device_maps);
+	if (phy_device_maps != NULL)
+		memory_bfree(
+			memory_context,
+			phy_device_maps,
+			sizeof(struct phy_device_map) *
+				dp_config->dp_topology.device_count
+		);
 
 	for (uint64_t device_idx = 0; device_idx < config_ectx->device_count;
 	     ++device_idx) {
@@ -618,6 +629,7 @@ config_ectx_create(
 	struct cp_config_gen *old_config_gen
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
+	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
 
 	size_t ectx_size = sizeof(struct config_ectx) +
@@ -631,6 +643,20 @@ config_ectx_create(
 	if (config_ectx == NULL)
 		return config_ectx;
 	memset(config_ectx, 0, ectx_size);
+	struct phy_device_map *phy_device_maps =
+		(struct phy_device_map *)memory_balloc(
+			memory_context,
+			sizeof(struct phy_device_map) *
+				dp_config->dp_topology.device_count
+		);
+	if (phy_device_maps == NULL)
+		goto error;
+	memset(phy_device_maps,
+	       0,
+	       sizeof(struct phy_device_map) *
+		       dp_config->dp_topology.device_count);
+	SET_OFFSET_OF(&config_ectx->phy_device_maps, phy_device_maps);
+
 	config_ectx->device_count =
 		cp_device_registry_capacity(&cp_config_gen->device_registry);
 
@@ -653,6 +679,11 @@ config_ectx_create(
 		if (device_ectx == NULL)
 			goto error;
 		SET_OFFSET_OF(config_ectx->devices + device_idx, device_ectx);
+		struct phy_device_map *phy_device_map =
+			phy_device_maps + cp_device->device_id;
+		SET_OFFSET_OF(
+			phy_device_map->vlan + cp_device->vlan, device_ectx
+		);
 	}
 
 	return config_ectx;

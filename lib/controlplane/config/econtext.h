@@ -49,9 +49,13 @@ struct device_ectx {
 	struct pipeline_ectx *pipeline_map[];
 };
 
-// TODO: worker ectx??
+struct phy_device_map {
+	struct device_ectx *vlan[4096];
+};
 
 struct config_ectx {
+	struct phy_device_map *phy_device_maps;
+
 	uint64_t device_count;
 	struct device_ectx *devices[];
 };

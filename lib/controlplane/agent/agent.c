@@ -865,7 +865,12 @@ unlock:
 }
 
 struct cp_device_config *
-cp_device_config_create(const char *name, uint64_t pipeline_count) {
+cp_device_config_create(
+	const char *name,
+	uint16_t device_id,
+	uint16_t vlan,
+	uint64_t pipeline_count
+) {
 	struct cp_device_config *config = (struct cp_device_config *)malloc(
 		sizeof(struct cp_device_config) +
 		sizeof(struct cp_pipeline_weight_config) * pipeline_count
@@ -879,6 +884,8 @@ cp_device_config_create(const char *name, uint64_t pipeline_count) {
 	       sizeof(struct cp_device_config
 	       ) + sizeof(struct cp_pipeline_weight_config) * pipeline_count);
 	strtcpy(config->name, name, CP_DEVICE_NAME_LEN);
+	config->device_id = device_id;
+	config->vlan = vlan;
 	config->pipeline_weight_count = pipeline_count;
 
 	return config;

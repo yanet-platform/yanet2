@@ -64,12 +64,19 @@ type PipelineConfig struct {
 }
 
 type DevicePipeline struct {
-	Weight uint `yaml:"weight"`
+	Name   string `yaml:"name"`
+	Weight uint   `yaml:"weight"`
 }
 
 type ACLConfig struct {
 	ConfigName  string `yaml:"config_name"`
 	RulesetPath string `yaml:"ruleset_path"`
+}
+
+type DeviceConfig struct {
+	Id        uint16           `yaml:"id"`
+	Vlan      uint16           `yaml:"vlan"`
+	Pipelines []DevicePipeline `yaml:"pipelines"`
 }
 
 type ControlplaneConfig struct {
@@ -78,9 +85,9 @@ type ControlplaneConfig struct {
 	AgentName     string `yaml:"agent_name"`
 	MemoryLimit   uint64 `yaml:"memory_limit"`
 
-	Functions       map[string]FunctionConfig            `yaml:functions`
-	Pipelines       map[string]PipelineConfig            `yaml:"pipelines"`
-	DevicePipelines map[string]map[string]DevicePipeline `yaml:"device_pipelines"`
+	Functions map[string]FunctionConfig `yaml:functions`
+	Pipelines map[string]PipelineConfig `yaml:"pipelines"`
+	Devices   map[string]DeviceConfig   `yaml:"devices"`
 
 	Forward ForwardConfig `yaml:"forward"`
 
@@ -131,7 +138,7 @@ func configureFunctions(
 
 func configureDevices(
 	agent *C.struct_agent,
-	devices map[string]map[string]DevicePipeline,
+	devices map[string]DeviceConfig,
 ) {
 	if devices == nil {
 		return
@@ -139,14 +146,14 @@ func configureDevices(
 
 	configs := make([]*C.struct_cp_device_config, 0)
 
-	for id, pipelines := range devices {
-		deviceConfig := C.cp_device_config_create(C.CString(id), C.uint64_t(len(pipelines)))
+	for id, device := range devices {
+		deviceConfig := C.cp_device_config_create(C.CString(id), C.uint16_t(device.Id), C.uint16_t(device.Vlan), C.uint64_t(len(device.Pipelines)))
 		idx := uint64(0)
-		for name, pipeline := range pipelines {
+		for _, pipeline := range device.Pipelines {
 			C.cp_device_config_set_pipeline(
 				deviceConfig,
 				C.uint64_t(idx),
-				C.CString(name),
+				C.CString(pipeline.Name),
 				C.uint64_t(pipeline.Weight),
 			)
 
@@ -313,7 +320,7 @@ func main() {
 
 		configurePipelines(agent, config.Pipelines)
 
-		configureDevices(agent, config.DevicePipelines)
+		configureDevices(agent, config.Devices)
 
 	}
 

@@ -44,8 +44,8 @@ var (
 		"/mnt/target/release/yanet-cli-pipeline update --name=bootstrap --functions virt --instance=0",
 		"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
 
-		"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=01:00.0 --pipelines test:1",
-		"/mnt/target/release/yanet-cli-pipeline assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
+		"/mnt/target/release/yanet-cli-device update --instance=0 --name=01:00.0 --device-id=0 --vlan=0 --pipelines test:1",
+		"/mnt/target/release/yanet-cli-device update --instance=0 --name=virtio_user_kni0 --device-id=1 --vlan=0 --pipelines bootstrap:1",
 	}
 	DebugCommands = []string{
 		"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",

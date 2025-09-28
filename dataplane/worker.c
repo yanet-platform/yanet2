@@ -279,15 +279,20 @@ worker_loop_round(struct dataplane_worker *worker) {
 	for (struct packet *packet = packet_list_first(&input_packets);
 	     packet != NULL;
 	     packet = packet->next) {
-		if (config_ectx == NULL ||
-		    packet->rx_device_id > config_ectx->device_count) {
-			packet->pipeline_ectx = NULL;
+		packet->pipeline_ectx = NULL;
+
+		if (config_ectx == NULL) {
 			continue;
 		}
+		struct phy_device_map *phy_device_map =
+			ADDR_OF(&config_ectx->phy_device_maps) +
+			packet->rx_device_id;
 		struct device_ectx *device_ectx =
-			ADDR_OF(config_ectx->devices + packet->rx_device_id);
+			ADDR_OF(phy_device_map->vlan + packet->vlan);
+		if (device_ectx == NULL)
+			device_ectx = ADDR_OF(phy_device_map->vlan);
+
 		if (device_ectx == NULL) {
-			packet->pipeline_ectx = NULL;
 			continue;
 		}
 
@@ -295,7 +300,6 @@ worker_loop_round(struct dataplane_worker *worker) {
 			LOG(TRACE,
 			    "pipeline_map size is 0 for device %d",
 			    packet->rx_device_id);
-			packet->pipeline_ectx = NULL;
 			continue;
 		}
 		packet->pipeline_ectx =

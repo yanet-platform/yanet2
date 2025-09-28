@@ -3,7 +3,6 @@ package stage
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"go.uber.org/zap"
 
@@ -38,6 +37,7 @@ type Stage struct {
 	cfg      Config
 	registry *registry.Registry
 	pipeline ynpb.PipelineServiceClient
+	device ynpb.DeviceServiceClient
 	log      *zap.SugaredLogger
 }
 
@@ -72,7 +72,7 @@ func (m *Stage) Setup(ctx context.Context) error {
 		if err := m.setupPipelines(ctx, instance, instanceConfig.Pipelines); err != nil {
 			return fmt.Errorf("failed to setup pipeline: %w", err)
 		}
-		if err := m.assignPipelines(ctx, instance, instanceConfig.Devices); err != nil {
+		if err := m.setupDevices(ctx, instance, instanceConfig.Devices); err != nil {
 			return fmt.Errorf("failed to assign pipeline to devices: %w", err)
 		}
 	}
@@ -108,37 +108,38 @@ func (m *Stage) setupPipelines(ctx context.Context, instance DataplaneInstanceId
 	return nil
 }
 
-func (m *Stage) assignPipelines(ctx context.Context, instance DataplaneInstanceIdx, devices []DeviceConfig) error {
-	m.log.Infow("assigning pipelines to devices",
+func (m *Stage) setupDevices(ctx context.Context, instance DataplaneInstanceIdx, devices []DeviceConfig) error {
+	m.log.Infow("setting up devices",
 		zap.Uint32("instance", uint32(instance)),
 		zap.Any("devices", devices),
 	)
-	defer m.log.Infow("finished assigning pipelines to devices",
+	defer m.log.Infow("finished setting up devices",
 		zap.Uint32("instance", uint32(instance)),
 		zap.Any("devices", devices),
 	)
 
-	req := &ynpb.AssignPipelinesRequest{
+	req := &ynpb.UpdateDevicesRequest{
 		Instance: uint32(instance),
-		Devices:  map[string]*ynpb.DevicePipelines{},
 	}
 
 	for _, device := range devices {
-		devicePipelines := make([]*ynpb.DevicePipeline, 0, len(device.Pipelines))
+		reqDevice := &ynpb.Device{
+			Name: device.Name,
+			DeviceId: device.DeviceId,
+			Vlan: device.Vlan,
+		}
 		for _, pipeline := range device.Pipelines {
-			devicePipelines = append(devicePipelines, &ynpb.DevicePipeline{
-				PipelineName:   pipeline.Name,
-				PipelineWeight: pipeline.Weight,
+			reqDevice.Pipelines = append(reqDevice.Pipelines, &ynpb.DevicePipeline{
+				Name:   pipeline.Name,
+				Weight: pipeline.Weight,
 			})
 		}
 
-		req.Devices[strconv.Itoa(int(device.ID))] = &ynpb.DevicePipelines{
-			Pipelines: devicePipelines,
-		}
+		req.Devices = append(req.Devices, reqDevice)
 	}
 
-	if _, err := m.pipeline.Assign(ctx, req); err != nil {
-		return fmt.Errorf("failed to assign pipelines to devices: %w", err)
+	if _, err := m.device.Update(ctx, req); err != nil {
+		return fmt.Errorf("failed to set up devices: %w", err)
 	}
 
 	return nil

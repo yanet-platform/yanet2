@@ -80,46 +80,6 @@ func (m *PipelineService) Update(
 	return &ynpb.UpdatePipelinesResponse{}, nil
 }
 
-// Assign assigns pipelines to devices.
-func (m *PipelineService) Assign(
-	ctx context.Context,
-	request *ynpb.AssignPipelinesRequest,
-) (*ynpb.AssignPipelinesResponse, error) {
-	instance := request.GetInstance()
-	devices := request.GetDevices()
-
-	agent, err := m.shm.AgentAttach(agentName, instance, defaultAgentMemory)
-	if err != nil {
-		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
-	}
-	defer agent.Close()
-
-	devicePipelines := make(map[string][]ffi.DevicePipeline)
-	for deviceID, pipelines := range devices {
-		devicePipelinesList := make([]ffi.DevicePipeline, 0, len(pipelines.GetPipelines()))
-
-		for _, pipeline := range pipelines.GetPipelines() {
-			devicePipelinesList = append(devicePipelinesList, ffi.DevicePipeline{
-				Name:   pipeline.GetPipelineName(),
-				Weight: pipeline.GetPipelineWeight(),
-			})
-		}
-
-		devicePipelines[deviceID] = devicePipelinesList
-	}
-
-	if err := agent.UpdateDevices(devicePipelines); err != nil {
-		return nil, fmt.Errorf("failed to assign pipelines to devices: %w", err)
-	}
-
-	m.log.Infow("assigned pipelines to devices",
-		zap.Uint32("instance", instance),
-		zap.Any("devices", devices),
-	)
-
-	return &ynpb.AssignPipelinesResponse{}, nil
-}
-
 func (m *PipelineService) Delete(
 	ctx context.Context,
 	request *ynpb.DeletePipelineRequest,
@@ -138,4 +98,65 @@ func (m *PipelineService) Delete(
 	}
 
 	return &ynpb.DeletePipelineResponse{}, nil
+}
+
+// TODO: docs.
+func NewDeviceService(shm *ffi.SharedMemory, log *zap.SugaredLogger) *DeviceService {
+	return &DeviceService{
+		shm: shm,
+		log: log,
+	}
+}
+
+// TODO: docs
+type DeviceService struct {
+	ynpb.UnimplementedDeviceServiceServer
+
+	shm *ffi.SharedMemory
+	log *zap.SugaredLogger
+}
+
+func (m *DeviceService) Update(
+	ctx context.Context,
+	request *ynpb.UpdateDevicesRequest,
+) (*ynpb.UpdateDevicesResponse, error) {
+	instance := request.GetInstance()
+	devices := request.GetDevices()
+
+	agent, err := m.shm.AgentAttach(agentName, instance, defaultAgentMemory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
+	}
+	defer agent.Close()
+
+	configs := make([]ffi.DeviceConfig, 0, len(devices))
+	for _, deviceConfig := range devices {
+		cfg := ffi.DeviceConfig{
+			Name:      deviceConfig.GetName(),
+			DeviceId:  uint16(deviceConfig.GetDeviceId()),
+			Vlan:      uint16(deviceConfig.GetVlan()),
+			Pipelines: make([]ffi.DevicePipelineConfig, 0, len(deviceConfig.GetPipelines())),
+		}
+
+		for _, pipeline := range deviceConfig.GetPipelines() {
+			cfg.Pipelines = append(cfg.Pipelines, ffi.DevicePipelineConfig{
+				Name:   pipeline.GetName(),
+				Weight: pipeline.GetWeight(),
+			})
+		}
+
+		configs = append(configs, cfg)
+	}
+
+	if err := agent.UpdateDevices(configs); err != nil {
+		return nil, fmt.Errorf("failed to assign pipelines to devices: %w", err)
+	}
+
+	m.log.Infow("assigned pipelines to devices",
+
+		zap.Uint32("instance", instance),
+		zap.Any("devices", devices),
+	)
+
+	return &ynpb.UpdateDevicesResponse{}, nil
 }

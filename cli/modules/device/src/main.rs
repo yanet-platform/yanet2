@@ -5,8 +5,7 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{
-    pipeline_service_client::PipelineServiceClient, DeletePipelineRequest,
-    Pipeline, UpdatePipelinesRequest,
+    device_service_client::DeviceServiceClient, Device, DevicePipeline, UpdateDevicesRequest,
 };
 use tonic::transport::Channel;
 use ync::logging;
@@ -16,7 +15,7 @@ pub mod code {
     tonic::include_proto!("ynpb");
 }
 
-/// Pipeline module.
+/// Device module.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
 #[command(flatten_help = true)]
@@ -33,10 +32,8 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
-    /// Update pipeline configurations.
+    /// Update device configurations.
     Update(UpdateCmd),
-    /// Delete pipeline.
-    Delete(DeleteCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -44,22 +41,18 @@ pub struct UpdateCmd {
     /// Dataplane instance where the changes should be applied.
     #[arg(long)]
     pub instance: u32,
-    /// Pipeline name.
+    /// Device name.
     #[arg(long)]
     pub name: String,
-    /// Pipeline functions.
+    /// Device Id
     #[arg(long)]
-    pub functions: Vec<String>,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct DeleteCmd {
-    /// Dataplane instance where the changes should be applied.
+    pub device_id: u32,
+    /// Vlan
+    #[arg(long)]
+    pub vlan: u32,
+    /// Pipeline assignments in format "pipeline_name:weight"
     #[arg(short, long)]
-    pub instance: u32,
-    /// Pipeline name.
-    #[arg(short, long)]
-    pub name: String,
+    pub pipelines: Vec<String>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -76,46 +69,51 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = PipelineService::new(cmd.endpoint).await?;
+    let mut service = DeviceService::new(cmd.endpoint).await?;
 
     match cmd.mode {
-        ModeCmd::Update(cmd) => service.update_pipelines(cmd).await,
-        ModeCmd::Delete(cmd) => service.delete_pipeline(cmd).await,
+        ModeCmd::Update(cmd) => service.update_devices(cmd).await,
     }
 }
 
-pub struct PipelineService {
-    client: PipelineServiceClient<Channel>,
+pub struct DeviceService {
+    client: DeviceServiceClient<Channel>,
 }
 
-impl PipelineService {
+impl DeviceService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let channel = Channel::from_shared(endpoint)?.connect().await?;
-        let client = PipelineServiceClient::new(channel);
+        let client = DeviceServiceClient::new(channel);
         Ok(Self { client })
     }
 
-    pub async fn update_pipelines(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        let request = UpdatePipelinesRequest {
+    pub async fn update_devices(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
+        let request = UpdateDevicesRequest {
             instance: cmd.instance,
-            pipelines: vec![Pipeline {
+            devices: vec![Device {
                 name: cmd.name,
-                functions: cmd.functions,
+                device_id: cmd.device_id,
+                vlan: cmd.vlan,
+                pipelines: cmd
+                    .pipelines
+                    .into_iter()
+                    .map(|p| {
+                        let parts: Vec<&str> = p.split(':').collect();
+                        if parts.len() != 2 {
+                            panic!("Invalid pipeline format. Expected 'pipeline_name:weight'");
+                        }
+                        let weight = parts[1].parse::<u64>().expect("Invalid weight value");
+                        DevicePipeline {
+                            name: parts[0].to_string(),
+                            weight: weight,
+                        }
+                    })
+                    .collect(),
             }],
         };
 
         self.client.update(request).await?;
-        log::info!("Successfully updated pipelines");
-        Ok(())
-    }
-
-    pub async fn delete_pipeline(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
-        let request = DeletePipelineRequest {
-            instance: cmd.instance,
-            pipeline_name: cmd.name,
-        };
-        self.client.delete(request).await?;
-        log::info!("Successfully deleted pipeline");
+        log::info!("Successfully updated devices");
         Ok(())
     }
 }

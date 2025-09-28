@@ -39,6 +39,9 @@ cp_device_create(
 	new_device->pipeline_count = device_config->pipeline_weight_count;
 	strtcpy(new_device->name, device_config->name, CP_DEVICE_NAME_LEN);
 
+	new_device->device_id = device_config->device_id;
+	new_device->vlan = device_config->vlan;
+
 	for (uint64_t idx = 0; idx < device_config->pipeline_weight_count;
 	     ++idx) {
 		struct cp_pipeline_weight_config *pipeline_weight =

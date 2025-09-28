@@ -42,6 +42,8 @@ type DevicePipelineConfig struct {
 
 type DeviceConfig struct {
 	Name      string
+	DeviceId  uint16
+	Vlan      uint16
 	Pipelines []DevicePipelineConfig
 }
 
@@ -159,7 +161,7 @@ func newDeviceConfig(config DeviceConfig) (*deviceConfig, error) {
 	cName := C.CString(config.Name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.cp_device_config_create(cName, C.uint64_t(len(config.Pipelines)))
+	ptr, err := C.cp_device_config_create(cName, C.uint16_t(config.DeviceId), C.uint16_t(config.Vlan), C.uint64_t(len(config.Pipelines)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ffi pipeline config: %w", err)
 	}
