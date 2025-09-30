@@ -49,7 +49,7 @@ balancer_vs_lookup_v4(
 		return -1;
 	/*
 	 * FIXME: lpm value is 4 byte long where service_id is 8 bytes but
-	 * it is less possible to have more thant UINT32_MAX services.
+	 * it is less possible to have more than UINT32_MAX services.
 	 */
 	*res_vs = vs;
 	return 0;
@@ -352,6 +352,8 @@ balancer_handle_packets(
 		if (rs == NULL) {
 			// real lookup failed
 			packet_front_drop(packet_front, packet);
+
+			// FIXME: Do we need to return, or should we continue here?
 			return;
 		}
 
