@@ -17,7 +17,32 @@ typedef struct ttlmap {
     size_t chunk_sizes[__TTLMAP_MAX_CHUNKS];
     size_t buckets_per_chunk_exp; // buckets_per_chunk = 2**buckets_per_chunk_exp
     size_t buckets_exp; // buckets = 2**buckets_exp
+    uint32_t max_ttl_ever; // max ttl which map ever seen
 } ttlmap_t;
+
+////////////////////////////////////////////////////////////////////////////////
+
+#define __TTLMAP_GET_INTERNAL(map_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now /* uint32_t */, timeout /* uint32_t */) \
+__extension__({ \
+    if ((map_ptr)->max_ttl_ever < now + timeout) { \
+        (map_ptr)->max_ttl_ever = now + timeout; \
+    } \
+    uint32_t __hash = __TTLMAP_KEY_HASH((key_ptr)); \
+    uint32_t __buckets = 1 << ((map_ptr)->buckets_exp); \
+    uint32_t __bucket_id = __hash & (__buckets - 1); \
+    uint32_t __chunk = __bucket_id >> ((map_ptr)->buckets_per_chunk_exp); \
+    uint32_t __buckets_per_chunk = 1 << ((map_ptr)->buckets_per_chunk_exp); \
+    uint32_t __bucket_in_chunk = __bucket_id & (__buckets_per_chunk - 1); \
+    void *__b = __extension__({ \
+        typedef typeof(*(key_ptr)) __key_type; \
+        typedef typeof(**(value_ptr_ptr)) __value_type; \
+        __TTLMAP_BUCKET_DECLARE(__key_type, __value_type); \
+        __bucket_t *__buckets_array = ADDR_OF(&((map_ptr)->chunks[__chunk])); \
+        &__buckets_array[__bucket_in_chunk]; \
+    });\
+    uint32_t __idx = (__hash >> ((map_ptr)->buckets_exp) & (__TTLMAP_BUCKET_ENTRIES - 1)); \
+    __TTLMAP_BUCKET_GET(__b, (key_ptr), (value_ptr_ptr), (lock_ptr_ptr), (now), (timeout), __idx); \
+})
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -88,6 +113,7 @@ __ttlmap_init_internal(ttlmap_t *map, struct memory_context *mctx, size_t bucket
 __extension__({ \
     __label__ __done; \
     int __res = 0; \
+    (map_ptr)->max_ttl_ever = 0; \
     __TTLMAP_BUCKET_DECLARE(key_type, value_type); \
     size_t __bucket_count = __ttlmap_bucket_count(entries); \
     assert(__bucket_count > 0); \
@@ -96,7 +122,7 @@ __extension__({ \
         goto __done; \
     } \
     for (size_t __i = 0; __i < __bucket_count; ++__i) { \
-       __bucket_t *__b = (__bucket_t *)__TTLMAP_BUCKET_GET_WITH_ID(map_ptr, __i, key_type, value_type); \
+       __bucket_t *__b = (__bucket_t *)__TTLMAP_BUCKET_FIND_WITH_ID(map_ptr, __i, key_type, value_type); \
        __TTLMAP_BUCKET_INIT(__b, key_type, value_type); \
     } \
 __done: \
