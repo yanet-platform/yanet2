@@ -14,6 +14,8 @@ struct balancer_real_config {
 	uint64_t type;
 	uint16_t weight;
 	uint8_t dst_addr[16];
+
+	// FIXME: why we need these two?
 	uint8_t src_addr[16];
 	uint8_t src_mask[16];
 };
@@ -28,7 +30,7 @@ struct balancer_service_config {
 	uint8_t address[16];
 	uint64_t prefixes_count;
 	struct balancer_src_prefix *prefixes;
-	uint64_t real_count;
+	uint64_t real_count; 
 	struct balancer_real_config reals[];
 };
 

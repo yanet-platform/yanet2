@@ -352,9 +352,7 @@ balancer_handle_packets(
 		if (rs == NULL) {
 			// real lookup failed
 			packet_front_drop(packet_front, packet);
-
-			// FIXME: Do we need to return, or should we continue here?
-			return;
+			continue;
 		}
 
 		if (balancer_route(balancer_config, vs, rs, packet) != 0) {
