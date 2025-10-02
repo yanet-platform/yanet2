@@ -312,7 +312,7 @@ void ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) 
                 .counter2 = i + 1,
                 .session_id = 0
             };
-            ttlmap_release(lock);
+            ttlmap_release_lock(lock);
         } else {
             assert(res == TTLMAP_FAILED);
         }
@@ -340,7 +340,7 @@ void ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) 
         if (res == TTLMAP_FOUND) {
             ++found;
             assert(memcmp(&ref_value, value, sizeof(ref_value)) == 0);
-            ttlmap_release(lock);
+            ttlmap_release_lock(lock);
         } else {
             assert(res == TTLMAP_FAILED);
         }

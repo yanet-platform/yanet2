@@ -27,7 +27,32 @@ __extension__({ \
 
 #define TTLMAP_FOUND 1
 #define TTLMAP_INSERTED 0
+#define TTLMAP_REPLACED 2
 #define TTLMAP_FAILED -1
+
+////////////////////////////////////////////////////////////////////////////////
+
+#define __TTLMAP_BUCKET_LOOKUP(bucket_ptr, key_ptr, value_ptr, now, idx); \
+__extension__({ \
+    __label__ __done; \
+    int __ret = TTLMAP_FAILED; \
+    typedef typeof(*(key_ptr)) __key_type; \
+    typedef typeof(**(value_ptr)) __value_type; \
+    __TTLMAP_BUCKET_DECLARE(__key_type, __value_type); \
+    __bucket_t *__bucket = (__bucket_t *)(bucket_ptr); \
+    __ttlmap_lock(&__bucket->lock); \
+    for (size_t __i = 0; __i < __TTLMAP_BUCKET_ENTRIES; ++__i) { \
+        size_t __pos = (__i + (idx)) & (__TTLMAP_BUCKET_ENTRIES - 1); \
+        if (__bucket->deadline[__pos] > (now) && __TTLMAP_KEYS_EQUAL((key_ptr), &__bucket->keys[__pos])) { \
+            memset((value_ptr), &__bucket->values[__pos], sizeof(__value_type)); \
+            __ret = TTLMAP_FOUND; \
+            goto __done; \
+        } \
+    } \
+__done: \
+    __ttlmap_unlock(&__bucket->lock); \
+    __ret; \
+})
 
 // If value is found, returns 1.
 // If value is not found, returns 0 and tries to insert. On insert success, sets `value_ptr_ptr`
@@ -56,10 +81,10 @@ __extension__({ \
         size_t __pos = (__i + (idx)) & (__TTLMAP_BUCKET_ENTRIES - 1); \
         if (__bucket->deadline[__pos] <= (now)) { \
             /* printf("ttlmap insert: bucket_ptr=%lx, idx=%zu, i=%zu, pos=%zu\n", (uintptr_t)bucket_ptr, (size_t)idx, __i, __pos); */\
+            __ret = (__bucket->deadline[__pos] > 0) ? TTLMAP_REPLACED : TTLMAP_INSERTED; \
             __bucket->deadline[__pos] = (now) + (timeout); \
             __TTLMAP_MEMORY_SET(&__bucket->keys[__pos], (key_ptr)); \
             *(value_ptr_ptr) = &__bucket->values[__pos]; \
-            __ret = TTLMAP_INSERTED; \
             goto __done; \
         } \
     } \

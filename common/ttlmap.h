@@ -21,13 +21,16 @@ typedef struct ttlmap_lock ttlmap_lock_t;
 #define TTLMAP_GET(map_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now /* uint32_t */, timeout /* uint32_t */) \
     __TTLMAP_GET_INTERNAL(map_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now, timeout)
 
+#define TTLMAP_LOOKUP(map_ptr, key_ptr, value_ptr, now) \
+    __TTLMAP_LOOKUP_INTERNAL(map_ptr, key_ptr, value_ptr, now)
+
 #define TTLMAP_PRINT_STAT(map_ptr, key_type, value_type, fd) \
     __TTLMAP_PRINT_STAT_INTERNAL(map_ptr, key_type, value_type, fd)
 
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline void
-ttlmap_release(ttlmap_lock_t *lock) {
+ttlmap_release_lock(ttlmap_lock_t *lock) {
     __ttlmap_unlock(lock);
 }
 
