@@ -1,12 +1,10 @@
 #pragma once
 
-#include "defines.h"
 #include "ring.h"
 #include "state.h"
 
-#include "common/lpm.h"
-
-#include "controlplane/config/zone.h"
+#include <common/lpm.h>
+#include <controlplane/config/cp_module.h>
 
 struct balancer_vs {
 	uint64_t type;
