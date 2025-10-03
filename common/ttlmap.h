@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 #include "detail/ttlmap/ttlmap.h"
+#include "detail/ttlmap/bucket.h"
 #include "detail/ttlmap/lock.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -23,6 +24,9 @@ typedef struct ttlmap_lock ttlmap_lock_t;
 
 #define TTLMAP_LOOKUP(map_ptr, key_ptr, value_ptr, now) \
     __TTLMAP_LOOKUP_INTERNAL(map_ptr, key_ptr, value_ptr, now)
+
+#define TTLMAP_REMOVE(key_type, value_ptr) \
+    __TTLMAP_INVALIDATE_INTERNAL(key_type, value_ptr)
 
 #define TTLMAP_PRINT_STAT(map_ptr, key_type, value_type, fd) \
     __TTLMAP_PRINT_STAT_INTERNAL(map_ptr, key_type, value_type, fd)

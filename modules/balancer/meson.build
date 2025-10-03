@@ -1,6 +1,7 @@
 dependencies = [
   lib_common_dep,
   lib_logging_dep,
+  libdpdk_dep,
 ]
 
 dp_dependencies = dependencies + [
@@ -32,7 +33,7 @@ lib_balancer_dp_dep = declare_dependency(
 cp_dependencies = dependencies + [lib_config_cp_dep]
 
 sources = files(
-  'controlplane.c',
+  'controlplane.c', 'state.c'
 )
 
 lib_balancer_cp = static_library(

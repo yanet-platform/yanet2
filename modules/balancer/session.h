@@ -7,9 +7,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_session_id {
-    uint8_t protocol;
-	uint8_t l3_balancing;
-	uint8_t addr_type; // 4=ip4, 6=ip6.
+    uint8_t transport_proto;
+	uint8_t network_proto;
 
 	uint8_t ip_source[16];
 	uint8_t ip_destination[16];
@@ -26,9 +25,3 @@ struct balancer_session_state {
 };
 
 typedef ttlmap_lock_t balancer_session_lock_t;
-
-struct balancer_sessions_storage_gen {
-    __rte_cache_aligned struct ttlmap session_table;
-    __rte_cache_aligned struct balancer_state_worker_local worker_local[MAX_WORKERS_NUM];
-    size_t table_capacity;
-};

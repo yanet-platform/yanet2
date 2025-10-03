@@ -8,6 +8,7 @@
 #include "dataplane/packet/encap.h"
 
 #include "dataplane/config/zone.h"
+#include "session.h"
 #include "state.h"
 
 struct balancer_module {
@@ -169,6 +170,16 @@ balancer_fill_packet_metadata(
 	return 0;
 }
 
+static inline void
+balancer_fill_session_id(struct balancer_session_id *id, struct packet_metadata *data) {
+	id->transport_proto = data->transport_proto;
+	id->network_proto = data->network_proto;
+	memcpy(id->ip_source, data->src_addr, 16);
+	memcpy(id->ip_destination, data->dst_addr, 16);
+	id->port_source = data->src_port;
+	id->port_destination = data->dst_port;
+}
+
 static inline bool
 metadata_reschedule_real(struct packet_metadata *metadata) {
 	if (metadata->transport_proto == METADATA_TRANSPORT_PROTO_UDP) {
@@ -207,6 +218,7 @@ metadata_storage_timeout(
 static inline struct balancer_rs *
 balancer_rs_lookup(
 	struct balancer_module_config *config,
+	uint32_t worker_idx,
 	uint32_t now,
 	struct balancer_vs *vs,
 	struct packet *packet
@@ -221,37 +233,41 @@ balancer_rs_lookup(
 		metadata_storage_timeout(&config->state_config, &metadata);
 
 	struct balancer_rs *reals = ADDR_OF(&config->reals);
+	struct balancer_session_id session_id;
+	balancer_fill_session_id(&session_id, &metadata);
 
-	uint32_t real_id = balancer_state_lookup(&config->state, &metadata);
-
-	if (real_id != SESSION_VALUE_INVALID) {
-		struct balancer_rs *balancer_rs = reals + real_id;
-		if (balancer_rs->weight > 0) {
-			res = balancer_state_touch(
-				&config->state, &metadata, timeout
-			);
-			if (res != 0) {
-				return NULL;
-			}
-			return balancer_rs;
-		}
-		if (!metadata_reschedule_real(&metadata)) {
-			return NULL;
-		}
-	}
-
-	uint32_t real_idx = ring_get(&vs->real_ring, packet->hash);
-	if (real_idx == RING_VALUE_INVALID)
-		return NULL;
-
-	real_id = real_idx + vs->real_start;
-
-	res = balancer_state_set(&config->state, &metadata, timeout, real_id);
-	if (res != 0) {
+	struct balancer_session_state *session_state;
+	balancer_session_lock_t *session_lock;
+	int get_session_result = balancer_get_session(&config->state, worker_idx, now, timeout, &session_id, &session_state, &session_lock);
+	if (get_session_result == BALANCER_GET_SESSION_FAILED) {
 		return NULL;
 	}
 
-	return reals + real_id;
+	if (get_session_result == BALANCER_SESSION_FOUND) {
+		struct balancer_rs *rs = &reals[session_state->real_id];
+		if (rs->weight > 0) {
+			session_state->timeout = timeout;
+			session_state->last_packet_timestamp = now;
+			balancer_unlock_session(session_lock);
+			return rs;
+		}
+	} 
+	if (!metadata_reschedule_real(&metadata)) {
+		balancer_invalidate_session(session_state);
+		balancer_unlock_session(session_lock);
+		return NULL;
+	}
+	uint32_t real_id = ring_get(&vs->real_ring, packet->hash);
+	if (real_id == RING_VALUE_INVALID) {
+		return NULL;
+	}
+	real_id += vs->real_start;
+	session_state->create_timestamp = now;
+	session_state->last_packet_timestamp = now;
+	session_state->real_id = real_id;
+	session_state->timeout = timeout;
+	balancer_unlock_session(session_lock);
+	return &reals[real_id];
 }
 
 static int
@@ -352,7 +368,7 @@ balancer_handle_packets(
 		/// @todo: Fix expensive syscall
 		uint32_t now = time(NULL);
 		struct balancer_rs *rs =
-			balancer_rs_lookup(balancer_config, now, vs, packet);
+			balancer_rs_lookup(balancer_config, worker_idx, now, vs, packet);
 		if (rs == NULL) {
 			// real lookup failed
 			packet_front_drop(packet_front, packet);

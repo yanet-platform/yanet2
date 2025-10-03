@@ -16,11 +16,17 @@
 #define __TTLMAP_BUCKET_ENTRIES_EXP 4
 #define __TTLMAP_BUCKET_ENTRIES (1 << __TTLMAP_BUCKET_ENTRIES_EXP)
 
+#define __TTLMAP_BUCKET_ENTRY_DECLARE(key_type, value_type) \
+typedef struct { \
+    key_type key; \
+    value_type value; \
+    uint32_t deadline; \
+} __bucket_entry_t
+
 #define __TTLMAP_BUCKET_DECLARE(key_type, value_type) \
+__TTLMAP_BUCKET_ENTRY_DECLARE(key_type, value_type); \
 typedef struct __bucket { \
-    key_type keys[__TTLMAP_BUCKET_ENTRIES]; \
-    value_type values[__TTLMAP_BUCKET_ENTRIES]; \
-    uint32_t deadline[__TTLMAP_BUCKET_ENTRIES]; \
+    __bucket_entry_t entries[__TTLMAP_BUCKET_ENTRIES]; \
     ttlmap_lock_t lock; \
 } __rte_cache_aligned __bucket_t
 
@@ -28,7 +34,9 @@ typedef struct __bucket { \
 __extension__({ \
     __TTLMAP_BUCKET_DECLARE(key_type, value_type); \
     __bucket_t *__bucket = (__bucket_t *)bucket_ptr; \
-    memset(__bucket->deadline, 0, sizeof(__bucket->deadline)); \
+    for (size_t i = 0; i < __TTLMAP_BUCKET_ENTRIES; ++i) { \
+        __bucket->entries[i].deadline = 0; \
+    } \
     __ttlmap_lock_init(&__bucket->lock); \
 })
 
@@ -39,14 +47,15 @@ __extension__({ \
     __label__ __done; \
     int __ret = TTLMAP_FAILED; \
     typedef typeof(*(key_ptr)) __key_type; \
-    typedef typeof(**(value_ptr)) __value_type; \
+    typedef typeof(*(value_ptr)) __value_type; \
     __TTLMAP_BUCKET_DECLARE(__key_type, __value_type); \
     __bucket_t *__bucket = (__bucket_t *)(bucket_ptr); \
     __ttlmap_lock(&__bucket->lock); \
     for (size_t __i = 0; __i < __TTLMAP_BUCKET_ENTRIES; ++__i) { \
         size_t __pos = (__i + (idx)) & (__TTLMAP_BUCKET_ENTRIES - 1); \
-        if (__bucket->deadline[__pos] > (now) && __TTLMAP_KEYS_EQUAL((key_ptr), &__bucket->keys[__pos])) { \
-            memset((value_ptr), &__bucket->values[__pos], sizeof(__value_type)); \
+        __bucket_entry_t *entry = &__bucket->entries[__pos]; \
+        if (entry->deadline > (now) && __TTLMAP_KEYS_EQUAL((key_ptr), &entry->key)) { \
+            memcpy((value_ptr), &entry->value, sizeof(__value_type)); \
             __ret = TTLMAP_FOUND; \
             goto __done; \
         } \
@@ -71,22 +80,24 @@ __extension__({ \
     __ttlmap_lock(&__bucket->lock); \
     for (size_t __i = 0; __i < __TTLMAP_BUCKET_ENTRIES; ++__i) { \
         size_t __pos = (__i + (idx)) & (__TTLMAP_BUCKET_ENTRIES - 1); \
-        if (__bucket->deadline[__pos] > (now) && __TTLMAP_KEYS_EQUAL((key_ptr), &__bucket->keys[__pos])) { \
+        __bucket_entry_t *entry = &__bucket->entries[__pos]; \
+        if (entry->deadline > (now) && __TTLMAP_KEYS_EQUAL((key_ptr), &entry->key)) { \
             /* printf("ttlmap found: bucket_ptr=%lx, idx=%zu, i=%zu, pos=%zu\n", (uintptr_t)bucket_ptr, (size_t)idx, __i, __pos); */ \
-            __bucket->deadline[__pos] = (now) + (timeout); \
-            *(value_ptr_ptr) = &__bucket->values[__pos]; \
+            entry->deadline = (now) + (timeout); \
+            *(value_ptr_ptr) = &entry->value; \
             __ret = TTLMAP_FOUND; \
             goto __done; \
         } \
     } \
     for (size_t __i = 0; __i < __TTLMAP_BUCKET_ENTRIES; ++__i) { \
         size_t __pos = (__i + (idx)) & (__TTLMAP_BUCKET_ENTRIES - 1); \
-        if (__bucket->deadline[__pos] <= (now)) { \
+        __bucket_entry_t *entry = &__bucket->entries[__pos]; \
+        if (entry->deadline <= (now)) { \
             /* printf("ttlmap insert: bucket_ptr=%lx, idx=%zu, i=%zu, pos=%zu\n", (uintptr_t)bucket_ptr, (size_t)idx, __i, __pos); */\
-            __ret = (__bucket->deadline[__pos] > 0) ? TTLMAP_REPLACED : TTLMAP_INSERTED; \
-            __bucket->deadline[__pos] = (now) + (timeout); \
-            __TTLMAP_MEMORY_SET(&__bucket->keys[__pos], (key_ptr)); \
-            *(value_ptr_ptr) = &__bucket->values[__pos]; \
+            __ret = (entry->deadline > 0) ? TTLMAP_REPLACED : TTLMAP_INSERTED; \
+            entry->deadline = (now) + (timeout); \
+            __TTLMAP_MEMORY_SET(&entry->key, (key_ptr)); \
+            *(value_ptr_ptr) = &entry->value; \
             goto __done; \
         } \
     } \
@@ -95,6 +106,16 @@ __extension__({ \
 __done: \
     __ret; \
 })
+
+////////////////////////////////////////////////////////////////////////////////
+
+#define __TTLMAP_INVALIDATE_INTERNAL(key_type, value_ptr) \
+__extension__({ \
+    typedef typeof(*value_ptr) __value_type; \
+    __TTLMAP_BUCKET_ENTRY_DECLARE(key_type, __value_type); \
+    __bucket_entry_t *entry = container_of((value_ptr), __bucket_entry_t, value); \
+    entry->deadline = 0; \
+}); \
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -136,7 +157,7 @@ __extension__({ \
     const __bucket_t *__bucket = (const __bucket_t *)__addr; \
     size_t count = 0; \
     for (size_t i = 0; i < __TTLMAP_BUCKET_ENTRIES; ++i) { \
-        if (__bucket->deadline[i] > 0) { \
+        if (__bucket->entries[i].deadline > 0) { \
             ++count; \
         } \
     } \

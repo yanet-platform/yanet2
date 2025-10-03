@@ -31,7 +31,7 @@ __extension__({ \
     uint32_t __bucket_in_chunk = __bucket_id & (__buckets_per_chunk - 1); \
     void *__b = __extension__({ \
         typedef typeof(*(key_ptr)) __key_type; \
-        typedef typeof(**(value_ptr_ptr)) __value_type; \
+        typedef typeof(*(value_ptr)) __value_type; \
         __TTLMAP_BUCKET_DECLARE(__key_type, __value_type); \
         __bucket_t *__buckets_array = ADDR_OF(&((map_ptr)->chunks[__chunk])); \
         &__buckets_array[__bucket_in_chunk]; \

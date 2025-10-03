@@ -39,7 +39,7 @@ struct balancer_module_config {
 
 	struct lpm v4_service_lookup;
 	struct lpm v6_service_lookup;
-	struct state state;
+	struct balancer_state state;
 
 	struct balancer_state_config state_config;
 
