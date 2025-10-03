@@ -28,7 +28,7 @@ struct balancer_service_config {
 	uint8_t address[16];
 	uint64_t prefixes_count;
 	struct balancer_src_prefix *prefixes;
-	uint64_t real_count; 
+	uint64_t real_count;
 	struct balancer_real_config reals[];
 };
 
@@ -84,7 +84,9 @@ balancer_module_config_init(struct agent *agent, const char *name) {
 	}
 
 	config_data_init(
-		config, &config->cp_module.memory_context, ADDR_OF(&agent->dp_config)->worker_count
+		config,
+		&config->cp_module.memory_context,
+		ADDR_OF(&agent->dp_config)->worker_count
 	);
 
 	return &config->cp_module;

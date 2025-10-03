@@ -171,7 +171,9 @@ balancer_fill_packet_metadata(
 }
 
 static inline void
-balancer_fill_session_id(struct balancer_session_id *id, struct packet_metadata *data) {
+balancer_fill_session_id(
+	struct balancer_session_id *id, struct packet_metadata *data
+) {
 	id->transport_proto = data->transport_proto;
 	id->network_proto = data->network_proto;
 	memcpy(id->ip_source, data->src_addr, 16);
@@ -238,7 +240,15 @@ balancer_rs_lookup(
 
 	struct balancer_session_state *session_state;
 	balancer_session_lock_t *session_lock;
-	int get_session_result = balancer_get_session(&config->state, worker_idx, now, timeout, &session_id, &session_state, &session_lock);
+	int get_session_result = balancer_get_session(
+		&config->state,
+		worker_idx,
+		now,
+		timeout,
+		&session_id,
+		&session_state,
+		&session_lock
+	);
 	if (get_session_result == BALANCER_GET_SESSION_FAILED) {
 		return NULL;
 	}
@@ -251,7 +261,7 @@ balancer_rs_lookup(
 			balancer_unlock_session(session_lock);
 			return rs;
 		}
-	} 
+	}
 	if (!metadata_reschedule_real(&metadata)) {
 		balancer_invalidate_session(session_state);
 		balancer_unlock_session(session_lock);
@@ -364,11 +374,11 @@ balancer_handle_packets(
 			continue;
 		}
 
-
 		/// @todo: Fix expensive syscall
 		uint32_t now = time(NULL);
-		struct balancer_rs *rs =
-			balancer_rs_lookup(balancer_config, worker_idx, now, vs, packet);
+		struct balancer_rs *rs = balancer_rs_lookup(
+			balancer_config, worker_idx, now, vs, packet
+		);
 		if (rs == NULL) {
 			// real lookup failed
 			packet_front_drop(packet_front, packet);
