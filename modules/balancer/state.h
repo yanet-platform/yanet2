@@ -7,8 +7,8 @@
 #include <dirent.h>
 #include <rte_build_config.h>
 #include <rte_common.h>
+#include <stdatomic.h>
 
-#include "defines.h"
 #include "session.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -23,27 +23,37 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct worker_local {
-	uint8_t use_prev_gen;	// atomic
+struct worker_info {
+	_Atomic uint32_t use_prev_gen;	// atomic
 	uint8_t __padding[63];	// NOLINT
-	size_t active_sessions; // space occupied by worker
-	uint32_t max_deadline_current_gen;
-	uint32_t max_deadline_prev_gen;
-};
+	_Atomic uint32_t max_deadline_current_gen;
+	_Atomic uint32_t max_deadline_prev_gen;
+	_Atomic uint32_t active_sessions; // sessions created by worker
+} __rte_cache_aligned;
+
+#define WORKER_SET_ATOMIC(worker_info_ptr, field, value) \
+    __c11_atomic_store(&(worker_info_ptr)->field, value, __ATOMIC_SEQ_CST)
+
+#define WORKER_GET_ATOMIC(worker_info_ptr, field) \
+    __c11_atomic_load(&(worker_info_ptr)->field, __ATOMIC_SEQ_CST)
+
+#define WORKER_INC_ATOMIC(worker_info_ptr, field) \
+    __c11_atomic_fetch_add(&(worker_info_ptr)->field, 1, __ATOMIC_SEQ_CST)
+
+////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_sessions_storage_gen {
-	__rte_cache_aligned struct ttlmap session_table;
-	size_t table_capacity;
-	__rte_cache_aligned struct worker_local
-		worker_local[BALANCER_MAX_WORKERS_NUM];
+	struct ttlmap session_table;
+	size_t session_table_capacity;
+	struct worker_info worker_info[BALANCER_MAX_WORKERS_NUM];
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_state {
 	struct balancer_sessions_storage_gen generations[2];
-	size_t current_gen;
-	size_t workers_cnt;
+	_Atomic uint32_t current_gen; // workers read, cp modify
+	uint32_t workers_cnt;
 	struct memory_context *mctx;
 };
 
@@ -60,18 +70,20 @@ balancer_state_free(struct balancer_state *state);
 
 static inline struct balancer_sessions_storage_gen *
 balancer_get_cur_storage_gen(struct balancer_state *state) {
-	return &state->generations[state->current_gen & 1];
+    uint32_t current_gen = __c11_atomic_load(&state->current_gen, __ATOMIC_SEQ_CST);
+	return &state->generations[current_gen & 1];
 }
 
 static inline struct balancer_sessions_storage_gen *
 balancer_get_prev_storage_gen(struct balancer_state *state) {
-	return &state->generations[(state->current_gen & 1) ^ 1];
+    uint32_t current_gen = __c11_atomic_load(&state->current_gen, __ATOMIC_SEQ_CST);
+	return &state->generations[(current_gen & 1) ^ 1];
 }
 
 static inline int
 balancer_get_session(
 	struct balancer_state *state,
-	size_t worker_idx,
+	uint32_t worker_idx,
 	uint32_t now,
 	uint32_t timeout,
 	struct balancer_session_id *session_id,
@@ -88,20 +100,20 @@ balancer_get_session(
 		now,
 		timeout
 	);
-	struct worker_local *worker_local =
-		&sessions_cur->worker_local[worker_idx];
+	struct worker_info *worker_info =
+		&sessions_cur->worker_info[worker_idx];
 	if (ret == TTLMAP_FOUND) {
-		worker_local->max_deadline_current_gen =
-			RTE_MAX(worker_local->max_deadline_current_gen,
+		worker_info->max_deadline_current_gen =
+			RTE_MAX(worker_info->max_deadline_current_gen,
 				now + timeout);
 		return ret;
 	} else if (ret == TTLMAP_INSERTED || ret == TTLMAP_REPLACED) {
-		worker_local->active_sessions += (ret == TTLMAP_INSERTED);
-		if (worker_local->use_prev_gen == 1) {
-			if (worker_local->max_deadline_prev_gen +
-				    STATE_TIMEOUT_DEFAULT <
-			    now) {
-				worker_local->use_prev_gen = 1;
+        if (ret == TTLMAP_INSERTED) {
+            WORKER_INC_ATOMIC(worker_info, active_sessions);
+        }
+		if (worker_info->use_prev_gen == 1) { // if (worker_info->use_prev_gen == 1)
+			if (worker_info->max_deadline_prev_gen < now) {
+                WORKER_SET_ATOMIC(worker_info, use_prev_gen, 0);
 				return BALANCER_SESSION_CREATED;
 			}
 			struct balancer_sessions_storage_gen *sessions_prev =

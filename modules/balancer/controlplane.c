@@ -1,5 +1,6 @@
 #include "controlplane.h"
 #include "config.h"
+#include "defines.h"
 
 #include "common/exp_array.h"
 #include "common/memory.h"

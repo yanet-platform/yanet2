@@ -18,7 +18,7 @@ typedef struct ttlmap {
 	size_t buckets_per_chunk_exp; // buckets_per_chunk =
 				      // 2**buckets_per_chunk_exp
 	size_t buckets_exp;	      // buckets = 2**buckets_exp
-} ttlmap_t;
+} __rte_cache_aligned ttlmap_t;
 
 ////////////////////////////////////////////////////////////////////////////////
 

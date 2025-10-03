@@ -8,6 +8,7 @@
 #include "dataplane/packet/encap.h"
 
 #include "dataplane/config/zone.h"
+#include "defines.h"
 #include "session.h"
 #include "state.h"
 

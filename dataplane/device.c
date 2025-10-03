@@ -1,4 +1,5 @@
 #include "device.h"
+#include "common/strutils.h"
 #include "dataplane.h"
 
 #include <pthread.h>

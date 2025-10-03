@@ -13,6 +13,8 @@
 #include "modules/balancer/controlplane.h"
 #include "modules/balancer/dataplane.h"
 
+#include "defines.h"
+
 #define ARENA_SIZE (1 << 20)
 
 struct balancer_fuzzing_params {

@@ -3,9 +3,9 @@
 #include "common/container_of.h"
 
 #include "controlplane/config/zone.h"
-#include "dataplane/config/zone.h"
 
 #include <string.h>
+#include <stdio.h>
 
 static inline uint64_t
 cp_pipeline_alloc_size(uint64_t length) {
