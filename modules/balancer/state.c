@@ -62,10 +62,9 @@ balancer_extend_state_on_demand(struct balancer_state *state) {
 	size_t active_sessions = 0;
 	for (size_t i = 0; i < state->workers_cnt; ++i) {
 		struct worker_info *worker_info = &sessions_cur->worker_info[i];
-		if (worker_info->use_prev_gen == 1) {
+		if (WORKER_GET_ATOMIC(worker_info, use_prev_gen) == 1) {
 			return 0;
 		}
-		// active_sessions += worker_info->active_sessions
 		active_sessions +=
 			WORKER_GET_ATOMIC(worker_info, active_sessions);
 	}
