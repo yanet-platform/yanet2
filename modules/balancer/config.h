@@ -7,7 +7,7 @@
 #include <controlplane/config/cp_module.h>
 
 struct balancer_vs {
-	uint64_t type;
+	uint64_t flags;
 	uint8_t address[16];
 	uint64_t real_start;
 	uint64_t real_count;
@@ -16,7 +16,7 @@ struct balancer_vs {
 };
 
 struct balancer_rs {
-	uint64_t type;
+	uint64_t flags;
 	uint16_t weight;
 	uint8_t dst_addr[16];
 	uint8_t src_addr[16];

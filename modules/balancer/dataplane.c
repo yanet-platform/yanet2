@@ -173,14 +173,21 @@ balancer_fill_packet_metadata(
 
 static inline void
 balancer_fill_session_id(
-	struct balancer_session_id *id, struct packet_metadata *data
+	struct balancer_session_id *id,
+	struct packet_metadata *data,
+	struct balancer_vs *vs
 ) {
 	id->transport_proto = data->transport_proto;
 	id->network_proto = data->network_proto;
 	memcpy(id->ip_source, data->src_addr, 16);
 	memcpy(id->ip_destination, data->dst_addr, 16);
-	id->port_source = data->src_port;
-	id->port_destination = data->dst_port;
+	if (vs->flags & VS_PURE_L3) {
+		id->port_source = 0;
+		id->port_destination = 0;
+	} else {
+		id->port_source = data->src_port;
+		id->port_destination = data->dst_port;
+	}
 }
 
 static inline bool
@@ -237,7 +244,7 @@ balancer_rs_lookup(
 
 	struct balancer_rs *reals = ADDR_OF(&config->reals);
 	struct balancer_session_id session_id;
-	balancer_fill_session_id(&session_id, &metadata);
+	balancer_fill_session_id(&session_id, &metadata, vs);
 
 	struct balancer_session_state *session_state;
 	balancer_session_lock_t *session_lock;
@@ -290,8 +297,8 @@ balancer_route(
 ) {
 	(void)config;
 
-	if (rs->type == RS_TYPE_V4) {
-		if (vs->type & VS_OPT_ENCAP) {
+	if (rs->flags == RS_TYPE_V4) {
+		if (vs->flags & VS_OPT_ENCAP) {
 			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 			struct rte_ipv4_hdr *ipv4_header =
@@ -312,8 +319,8 @@ balancer_route(
 		}
 	}
 
-	if (rs->type == RS_TYPE_V6) {
-		if (vs->type & VS_OPT_ENCAP) {
+	if (rs->flags == RS_TYPE_V6) {
+		if (vs->flags & VS_OPT_ENCAP) {
 			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 			struct rte_ipv6_hdr *ipv6_header =
@@ -384,6 +391,10 @@ balancer_handle_packets(
 			// real lookup failed
 			packet_front_drop(packet_front, packet);
 			continue;
+		}
+
+		if (vs->flags & VS_FIX_MSS) {
+			/// @todo: fix MSS here
 		}
 
 		if (balancer_route(balancer_config, vs, rs, packet) != 0) {

@@ -210,7 +210,7 @@ balancer_module_config_add_service(
 			return -1;
 		}
 
-		reals[config->real_count - 1].type =
+		reals[config->real_count - 1].flags =
 			service->reals[real_idx].type;
 		reals[config->real_count - 1].weight =
 			service->reals[real_idx].weight;
@@ -281,7 +281,7 @@ balancer_module_config_add_service(
 		SET_OFFSET_OF(&services[service_idx], services[service_idx]);
 	}
 
-	balancer_service->type = service->type;
+	balancer_service->flags = service->type;
 	memcpy(balancer_service->address, service->address, 16);
 	balancer_service->real_start = real_start;
 	balancer_service->real_count = service->real_count;
