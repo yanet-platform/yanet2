@@ -11,12 +11,6 @@ balancer_module_config_init(struct agent *agent, const char *name);
 struct balancer_module_config;
 struct memory_context;
 
-void
-balancer_module_config_data_init(
-	struct balancer_module_config *config,
-	struct memory_context *memory_context
-);
-
 int
 balancer_module_config_update_real_weight(
 	struct cp_module *cp_module,

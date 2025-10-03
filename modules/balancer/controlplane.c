@@ -1,10 +1,8 @@
 #include "controlplane.h"
 #include "config.h"
 
-#include "common/container_of.h"
 #include "common/exp_array.h"
 #include "common/memory.h"
-#include "common/strutils.h"
 
 #include "dataplane/config/zone.h"
 
@@ -34,6 +32,31 @@ struct balancer_service_config {
 	struct balancer_real_config reals[];
 };
 
+static void
+set_default_timeout_if_empty(uint32_t *value) {
+	if (*value == 0) {
+		*value = STATE_TIMEOUT_DEFAULT;
+	}
+}
+
+static void
+config_data_init(
+	struct balancer_module_config *config,
+	struct memory_context *mctx,
+	size_t workers_cnt
+) {
+	set_default_timeout_if_empty(&config->state_config.tcp_syn_ack_timeout);
+	set_default_timeout_if_empty(&config->state_config.tcp_syn_timeout);
+	set_default_timeout_if_empty(&config->state_config.tcp_fin_timeout);
+	set_default_timeout_if_empty(&config->state_config.tcp_timeout);
+	set_default_timeout_if_empty(&config->state_config.udp_timeout);
+	set_default_timeout_if_empty(&config->state_config.default_timeout);
+
+	lpm_init(&config->v4_service_lookup, mctx);
+	lpm_init(&config->v6_service_lookup, mctx);
+	balancer_state_init(&config->state, workers_cnt, 1 << 20, mctx);
+}
+
 struct cp_module *
 balancer_module_config_init(struct agent *agent, const char *name) {
 	struct balancer_module_config *config =
@@ -60,36 +83,11 @@ balancer_module_config_init(struct agent *agent, const char *name) {
 		return NULL;
 	}
 
-	balancer_module_config_data_init(
-		config, &config->cp_module.memory_context
+	config_data_init(
+		config, &config->cp_module.memory_context, ADDR_OF(&agent->dp_config)->worker_count
 	);
 
 	return &config->cp_module;
-}
-
-static void
-set_default_timeout_if_empty(uint32_t *value) {
-	if (*value == 0) {
-		*value = STATE_TIMEOUT_DEFAULT;
-	}
-}
-
-void
-balancer_module_config_data_init(
-	struct balancer_module_config *config,
-	struct memory_context *memory_context
-) {
-
-	set_default_timeout_if_empty(&config->state_config.tcp_syn_ack_timeout);
-	set_default_timeout_if_empty(&config->state_config.tcp_syn_timeout);
-	set_default_timeout_if_empty(&config->state_config.tcp_fin_timeout);
-	set_default_timeout_if_empty(&config->state_config.tcp_timeout);
-	set_default_timeout_if_empty(&config->state_config.udp_timeout);
-	set_default_timeout_if_empty(&config->state_config.default_timeout);
-
-	lpm_init(&config->v4_service_lookup, memory_context);
-	lpm_init(&config->v6_service_lookup, memory_context);
-	balancer_state_init(&config->state, memory_context);
 }
 
 int
