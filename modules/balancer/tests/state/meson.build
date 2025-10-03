@@ -1,4 +1,5 @@
 state_test_sources = files(
+    'worker.c',
   'main.c',
 )
 
