@@ -42,7 +42,7 @@ __extension__({ \
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define __TTLMAP_GET_INTERNAL(map_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now /* uint32_t */, timeout /* uint32_t */) \
+#define __TTLMAP_GET_INTERNAL(map_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now, timeout) \
 __extension__({ \
     uint32_t __hash = __TTLMAP_KEY_HASH((key_ptr)); \
     uint32_t __buckets = 1 << ((map_ptr)->buckets_exp); \
