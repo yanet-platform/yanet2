@@ -24,21 +24,21 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 struct worker_info {
-	_Atomic uint32_t use_prev_gen;	// atomic
-	uint8_t __padding[63];	// NOLINT
+	_Atomic uint32_t use_prev_gen; // atomic
+	uint8_t __padding[63];	       // NOLINT
 	_Atomic uint32_t max_deadline_current_gen;
 	_Atomic uint32_t max_deadline_prev_gen;
 	_Atomic uint32_t active_sessions; // sessions created by worker
 } __rte_cache_aligned;
 
-#define WORKER_SET_ATOMIC(worker_info_ptr, field, value) \
-    __c11_atomic_store(&(worker_info_ptr)->field, value, __ATOMIC_SEQ_CST)
+#define WORKER_SET_ATOMIC(worker_info_ptr, field, value)                       \
+	__c11_atomic_store(&(worker_info_ptr)->field, value, __ATOMIC_SEQ_CST)
 
-#define WORKER_GET_ATOMIC(worker_info_ptr, field) \
-    __c11_atomic_load(&(worker_info_ptr)->field, __ATOMIC_SEQ_CST)
+#define WORKER_GET_ATOMIC(worker_info_ptr, field)                              \
+	__c11_atomic_load(&(worker_info_ptr)->field, __ATOMIC_SEQ_CST)
 
-#define WORKER_INC_ATOMIC(worker_info_ptr, field) \
-    __c11_atomic_fetch_add(&(worker_info_ptr)->field, 1, __ATOMIC_SEQ_CST)
+#define WORKER_INC_ATOMIC(worker_info_ptr, field)                              \
+	__c11_atomic_fetch_add(&(worker_info_ptr)->field, 1, __ATOMIC_SEQ_CST)
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -70,13 +70,15 @@ balancer_state_free(struct balancer_state *state);
 
 static inline struct balancer_sessions_storage_gen *
 balancer_get_cur_storage_gen(struct balancer_state *state) {
-    uint32_t current_gen = __c11_atomic_load(&state->current_gen, __ATOMIC_SEQ_CST);
+	uint32_t current_gen =
+		__c11_atomic_load(&state->current_gen, __ATOMIC_SEQ_CST);
 	return &state->generations[current_gen & 1];
 }
 
 static inline struct balancer_sessions_storage_gen *
 balancer_get_prev_storage_gen(struct balancer_state *state) {
-    uint32_t current_gen = __c11_atomic_load(&state->current_gen, __ATOMIC_SEQ_CST);
+	uint32_t current_gen =
+		__c11_atomic_load(&state->current_gen, __ATOMIC_SEQ_CST);
 	return &state->generations[(current_gen & 1) ^ 1];
 }
 
@@ -108,12 +110,13 @@ balancer_get_session(
 				now + timeout);
 		return ret;
 	} else if (ret == TTLMAP_INSERTED || ret == TTLMAP_REPLACED) {
-        if (ret == TTLMAP_INSERTED) {
-            WORKER_INC_ATOMIC(worker_info, active_sessions);
-        }
-		if (worker_info->use_prev_gen == 1) { // if (worker_info->use_prev_gen == 1)
+		if (ret == TTLMAP_INSERTED) {
+			WORKER_INC_ATOMIC(worker_info, active_sessions);
+		}
+		if (worker_info->use_prev_gen ==
+		    1) { // if (worker_info->use_prev_gen == 1)
 			if (worker_info->max_deadline_prev_gen < now) {
-                WORKER_SET_ATOMIC(worker_info, use_prev_gen, 0);
+				WORKER_SET_ATOMIC(worker_info, use_prev_gen, 0);
 				return BALANCER_SESSION_CREATED;
 			}
 			struct balancer_sessions_storage_gen *sessions_prev =
