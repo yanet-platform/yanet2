@@ -1,12 +1,8 @@
 #pragma once
 
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "dataplane/packet/packet.h"
-
-#include "common/memory.h"
 
 #define MODULE_NAME_LEN 80
 #define MODULE_CONFIG_NAME_LEN 80
