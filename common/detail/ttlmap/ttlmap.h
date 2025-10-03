@@ -42,7 +42,7 @@ __extension__({ \
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define __TTLMAP_GET_INTERNAL(map_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now /* uint32_t */, timeout /* uint32_t */) \
+#define __TTLMAP_GET_INTERNAL(map_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now, timeout) \
 __extension__({ \
     uint32_t __hash = __TTLMAP_KEY_HASH((key_ptr)); \
     uint32_t __buckets = 1 << ((map_ptr)->buckets_exp); \
@@ -85,9 +85,9 @@ __ttlmap_init_internal(ttlmap_t *map, struct memory_context *mctx, size_t bucket
 
     map->buckets_exp = 63 - __builtin_clzll(bucket_count);
 
-    size_t buckets_per_chunk = (MEMORY_BLOCK_ALLOCATOR_MAX_SIZE - bucket_align) / bucket_size;
     // coarse to the closest power of two
-    map->buckets_per_chunk_exp = 63 - __builtin_clzll(buckets_per_chunk);
+    map->buckets_per_chunk_exp = 63 - __builtin_clzll((MEMORY_BLOCK_ALLOCATOR_MAX_SIZE - bucket_align) / bucket_size);
+    size_t buckets_per_chunk = 1ull << map->buckets_per_chunk_exp;
     
     memset(&map->chunks, 0, sizeof(map->chunks));
     memset(&map->chunk_sizes, 0, sizeof(map->chunk_sizes));
@@ -99,7 +99,7 @@ __ttlmap_init_internal(ttlmap_t *map, struct memory_context *mctx, size_t bucket
         if (need_size > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE) {
             need_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
         }
-        void *chunk = memory_balloc(&map->mctx, need_size);\
+        void *chunk = memory_balloc(&map->mctx, need_size); \
         if (chunk == NULL) {
             break;
         }
@@ -123,6 +123,58 @@ __ttlmap_init_internal(ttlmap_t *map, struct memory_context *mctx, size_t bucket
 
     return 0;
 }
+
+// static inline int
+// __ttlmap_init_internal(ttlmap_t *map, struct memory_context *mctx, size_t bucket_align, size_t bucket_size, size_t bucket_count) { // NOLINT
+//     if ((bucket_count & (bucket_count - 1)) != 0) { // bucket count must be power of 2
+//         return -1;
+//     }
+
+//     int res = memory_context_init_from(&map->mctx, mctx, "ttlmap");
+//     if (res < 0) {
+//         return -1;
+//     }
+
+//     map->buckets_exp = 63 - __builtin_clzll(bucket_count);
+
+//     size_t buckets_per_chunk = (MEMORY_BLOCK_ALLOCATOR_MAX_SIZE - bucket_align) / bucket_size;
+//     // coarse to the closest power of two
+//     map->buckets_per_chunk_exp = 63 - __builtin_clzll(buckets_per_chunk);
+    
+//     memset(&map->chunks, 0, sizeof(map->chunks));
+//     memset(&map->chunk_sizes, 0, sizeof(map->chunk_sizes));
+//     for (size_t i = 0; i < __TTLMAP_MAX_CHUNKS; ++i) {
+//         if (bucket_count == 0) {
+//             break;
+//         }
+//         size_t need_size = bucket_count * bucket_size + bucket_align;
+//         if (need_size > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE) {
+//             need_size = MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
+//         }
+//         void *chunk = memory_balloc(&map->mctx, need_size);\
+//         if (chunk == NULL) {
+//             break;
+//         }
+//         uintptr_t chunk_ptr = (uintptr_t)chunk;
+//         size_t need_add_offset = (bucket_align - chunk_ptr % bucket_align) % bucket_align;
+//         map->chunk_shifts[i] = need_add_offset;
+//         map->chunk_sizes[i] = need_size;
+//         chunk_ptr += need_add_offset;
+//         SET_OFFSET_OF(&map->chunks[i], (void *)chunk_ptr);
+//         if (buckets_per_chunk >= bucket_count) {
+//             bucket_count = 0;
+//         } else {
+//             bucket_count -= buckets_per_chunk;
+//         }
+//     }
+    
+//     if (bucket_count != 0) {
+//         __TTLMAP_FREE_INTERNAL(map);
+//         return -1;
+//     }
+
+//     return 0;
+// }
 
 ////////////////////////////////////////////////////////////////////////////////
 

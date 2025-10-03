@@ -136,6 +136,7 @@ __extension__({ \
     uint32_t __chunk = __bucket >> ((map_ptr)->buckets_per_chunk_exp); \
     uint32_t __buckets_per_chunk = 1 << ((map_ptr)->buckets_per_chunk_exp); \
     uint32_t __bucket_in_chunk = __bucket & (__buckets_per_chunk - 1); \
+    /* printf("bucket=%u, chunk=%u, buckets_per_chunk=%u, bucket_in_chunk=%u\n", __bucket, __chunk, __buckets_per_chunk, __bucket_in_chunk); */ \
     __bucket_t *__buckets_array = ADDR_OF(&((map_ptr)->chunks[__chunk])); \
     (void *)&__buckets_array[__bucket_in_chunk]; \
 })
