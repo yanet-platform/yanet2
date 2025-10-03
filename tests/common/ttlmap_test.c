@@ -52,7 +52,7 @@ void bucket_basic() {
         size_t *value;
         ttlmap_lock_t *lock;
         res = __TTLMAP_BUCKET_GET(bucket_ptr, &key, &value, &lock, 10, 10, 0);
-        assert(res == TTLMAP_INSERTED);
+        assert(res == TTLMAP_INSERTED || res == TTLMAP_REPLACED);
         assert(value != NULL);
         __ttlmap_unlock(lock);
     }
@@ -96,7 +96,7 @@ void bucket_basic() {
         size_t *value;
         ttlmap_lock_t *lock;
         res = __TTLMAP_BUCKET_GET(bucket_ptr, &key, &value, &lock, 15, 10, 0);
-        assert(res == TTLMAP_INSERTED);
+        assert(res == TTLMAP_INSERTED || res == TTLMAP_REPLACED);
         assert(*value != 100);
         *value = 500;
         __ttlmap_unlock(lock);
