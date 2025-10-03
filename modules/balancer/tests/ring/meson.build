@@ -17,7 +17,8 @@ ring_test_exe = executable(
 )
 
 test(
-  'balancer_ring',
+  'ring',
   ring_test_exe,
   timeout: 30,
+  suite: 'balancer',
 )

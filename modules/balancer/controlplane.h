@@ -27,7 +27,8 @@ balancer_module_config_set_state_config(
 	uint32_t tcp_fin_timeout,
 	uint32_t tcp_timeout,
 	uint32_t udp_timeout,
-	uint32_t default_timeout
+	uint32_t default_timeout,
+	uint32_t sessions_to_reserve
 );
 
 void

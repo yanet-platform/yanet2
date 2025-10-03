@@ -55,7 +55,12 @@ config_data_init(
 
 	lpm_init(&config->v4_service_lookup, mctx);
 	lpm_init(&config->v6_service_lookup, mctx);
-	balancer_state_init(&config->state, workers_cnt, 1 << 20, mctx);
+	balancer_state_init(
+		&config->state,
+		workers_cnt,
+		config->state_config.sessions_to_reserve,
+		mctx
+	);
 }
 
 struct cp_module *
@@ -173,7 +178,8 @@ balancer_module_config_set_state_config(
 	uint32_t tcp_fin_timeout,
 	uint32_t tcp_timeout,
 	uint32_t udp_timeout,
-	uint32_t default_timeout
+	uint32_t default_timeout,
+	uint32_t sessions_to_reserve
 ) {
 	struct balancer_module_config *config = container_of(
 		cp_module, struct balancer_module_config, cp_module
@@ -185,6 +191,7 @@ balancer_module_config_set_state_config(
 	config->state_config.tcp_timeout = tcp_timeout;
 	config->state_config.udp_timeout = udp_timeout;
 	config->state_config.default_timeout = default_timeout;
+	config->state_config.sessions_to_reserve = sessions_to_reserve;
 }
 
 int

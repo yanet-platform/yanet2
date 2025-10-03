@@ -15,7 +15,7 @@ test_env = environment(
 )
 
 test(
-  'balancer',
+  'dataplane',
   find_program('go'),
   args: ['test', './...'] + (get_option('b_coverage') ? ['-cover', '-args', '-test.gocoverdir=' + meson.current_build_dir()]: []),
   workdir: meson.current_source_dir(),
@@ -24,4 +24,5 @@ test(
   depends: [
     lib_testing_module_dp,
   ],
+  suite: 'balancer',
 )

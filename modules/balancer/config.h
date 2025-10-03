@@ -30,6 +30,7 @@ struct balancer_state_config {
 	uint32_t tcp_timeout;
 	uint32_t udp_timeout;
 	uint32_t default_timeout;
+	uint32_t sessions_to_reserve;
 };
 
 struct balancer_module_config {
