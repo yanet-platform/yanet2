@@ -17,3 +17,51 @@ int balancer_state_init(struct balancer_state *state, size_t workers_cnt, size_t
     }
     return ret;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+int
+balancer_extend_state_on_demand(struct balancer_state *state) {
+    struct balancer_sessions_storage_gen *sessions_cur = balancer_get_cur_storage_gen(state);
+    size_t active_sessions = 0;
+    for (size_t i = 0; i < state->workers_cnt; ++i) {
+        struct worker_local *worker_local = &sessions_cur->worker_local[i];
+        if (worker_local->use_prev_gen == 1) {
+            return 0;
+        }
+        active_sessions += worker_local->active_sessions;
+    }
+    if (active_sessions * 10 > sessions_cur->table_capacity * 8) {
+        struct balancer_sessions_storage_gen *sessions_next = balancer_get_prev_storage_gen(state);
+        int ret = TTLMAP_INIT(&sessions_next->session_table, ADDR_OF(&state->mctx), struct balancer_session_id, struct balancer_session_state, sessions_cur->table_capacity * 2);
+        if (ret != 0) {
+            return -1;
+        }
+        for (size_t i = 0; i < state->workers_cnt; ++i) {
+            struct worker_local *worker_local = &sessions_next->worker_local[i];
+            worker_local->active_sessions = 0;
+            worker_local->max_deadline_current_gen = 0;
+            worker_local->max_deadline_prev_gen = sessions_cur->worker_local[i].max_deadline_current_gen;
+            worker_local->use_prev_gen = 1;
+        }
+        state->current_gen ^= 1;
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+static inline int
+balancer_try_free_unused(struct balancer_state *state) {
+    struct balancer_sessions_storage_gen *sessions_cur = balancer_get_cur_storage_gen(state);
+    for (size_t i = 0; i < state->workers_cnt; ++i) {
+        if (sessions_cur->worker_local[i].use_prev_gen == 1) {
+            return 0;
+        }
+    }
+    struct balancer_sessions_storage_gen *sessions_prev = balancer_get_prev_storage_gen(state);
+    TTLMAP_FREE(&sessions_prev->session_table);
+    return 1;
+}

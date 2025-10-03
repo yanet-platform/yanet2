@@ -207,6 +207,7 @@ metadata_storage_timeout(
 static inline struct balancer_rs *
 balancer_rs_lookup(
 	struct balancer_module_config *config,
+	uint32_t now,
 	struct balancer_vs *vs,
 	struct packet *packet
 ) {
@@ -347,12 +348,15 @@ balancer_handle_packets(
 			continue;
 		}
 
+
+		/// @todo: Fix expensive syscall
+		uint32_t now = time(NULL);
 		struct balancer_rs *rs =
-			balancer_rs_lookup(balancer_config, vs, packet);
+			balancer_rs_lookup(balancer_config, now, vs, packet);
 		if (rs == NULL) {
 			// real lookup failed
 			packet_front_drop(packet_front, packet);
-			return;
+			continue;
 		}
 
 		if (balancer_route(balancer_config, vs, rs, packet) != 0) {

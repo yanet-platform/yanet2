@@ -6,6 +6,13 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
+#define TTLMAP_FOUND    (0b01)
+#define TTLMAP_INSERTED (0b10)
+#define TTLMAP_REPLACED (0b11)
+#define TTLMAP_FAILED   (-1)
+
+////////////////////////////////////////////////////////////////////////////////
+
 #define __TTLMAP_BUCKET_ENTRIES_EXP 4
 #define __TTLMAP_BUCKET_ENTRIES (1 << __TTLMAP_BUCKET_ENTRIES_EXP)
 
@@ -24,11 +31,6 @@ __extension__({ \
     memset(__bucket->deadline, 0, sizeof(__bucket->deadline)); \
     __ttlmap_lock_init(&__bucket->lock); \
 })
-
-#define TTLMAP_FOUND 1
-#define TTLMAP_INSERTED 0
-#define TTLMAP_REPLACED 2
-#define TTLMAP_FAILED -1
 
 ////////////////////////////////////////////////////////////////////////////////
 
