@@ -24,7 +24,7 @@ lib_balancer_dp = static_library(
 
 lib_balancer_dp_dep = declare_dependency(
   link_with: lib_balancer_dp,
-  dependencies: [libdpdk_inc_dep]
+  dependencies: [libdpdk_dep]
 )
 
 cp_dependencies = dependencies + [lib_config_cp_dep]

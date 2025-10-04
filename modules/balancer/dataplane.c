@@ -266,13 +266,13 @@ balancer_rs_lookup(
 		if (rs->weight > 0) {
 			session_state->timeout = timeout;
 			session_state->last_packet_timestamp = now;
-			balancer_unlock_session(session_lock);
+			balancer_session_unlock(session_lock);
 			return rs;
 		}
 	}
 	if (!metadata_reschedule_real(&metadata)) {
-		balancer_invalidate_session(session_state);
-		balancer_unlock_session(session_lock);
+		balancer_session_invalidate(session_state);
+		balancer_session_unlock(session_lock);
 		return NULL;
 	}
 	uint32_t real_id = ring_get(&vs->real_ring, packet->hash);
@@ -284,7 +284,7 @@ balancer_rs_lookup(
 	session_state->last_packet_timestamp = now;
 	session_state->real_id = real_id;
 	session_state->timeout = timeout;
-	balancer_unlock_session(session_lock);
+	balancer_session_unlock(session_lock);
 	return &reals[real_id];
 }
 

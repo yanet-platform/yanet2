@@ -1,5 +1,7 @@
 state_test_sources = files(
-    'worker.c',
+  'worker.c',
+  'helpers.c',
+  'controlplane.c',
   'main.c',
 )
 
@@ -9,7 +11,7 @@ state_test_includes = [
 ]
 
 state_test_exe = executable(
-  'ring_test',
+  'state',
   c_args: yanet_test_c_args,
   link_args: yanet_link_args,
   sources: state_test_sources,

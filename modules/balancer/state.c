@@ -104,7 +104,7 @@ balancer_extend_state_on_demand(struct balancer_state *state) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline int
+int
 balancer_try_free_unused(struct balancer_state *state) {
 	struct balancer_sessions_storage_gen *sessions_cur =
 		balancer_get_cur_storage_gen(state);

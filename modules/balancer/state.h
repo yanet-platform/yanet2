@@ -146,12 +146,12 @@ balancer_get_session(
 }
 
 static inline void
-balancer_invalidate_session(struct balancer_session_state *state) {
+balancer_session_invalidate(struct balancer_session_state *state) {
 	TTLMAP_REMOVE(struct balancer_session_id, state);
 }
 
 static inline void
-balancer_unlock_session(balancer_session_lock_t *lock) {
+balancer_session_unlock(balancer_session_lock_t *lock) {
 	ttlmap_release_lock(lock);
 }
 
@@ -160,7 +160,7 @@ balancer_unlock_session(balancer_session_lock_t *lock) {
 int
 balancer_extend_state_on_demand(struct balancer_state *state);
 
-static inline int
+int
 balancer_try_free_unused(struct balancer_state *state);
 
 ////////////////////////////////////////////////////////////////////////////////
