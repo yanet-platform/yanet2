@@ -8,6 +8,8 @@
 #include "memory_block.h"
 #include "strutils.h"
 
+#include <lib/logging/log.h>
+
 // TODO: link parent and child context
 struct memory_context {
 	struct block_allocator *block_allocator;

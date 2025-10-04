@@ -36,3 +36,12 @@ ttlmap_test = executable(
   dependencies: dependencies + [libdpdk_dep]
 )
 test('ttlmap', ttlmap_test, suite: ['common'])
+
+memory_context_test = executable(
+  'memory_context_test',
+  ['memory_context_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies
+)
+test('memory_context_test', memory_context_test, suite: ['common'])

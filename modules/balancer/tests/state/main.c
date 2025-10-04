@@ -3,6 +3,7 @@
 
 #include "controlplane.h"
 #include "helpers.h"
+#include "state.h"
 #include "worker.h"
 
 #include <lib/logging/log.h>
@@ -76,6 +77,7 @@ main(int argc, char **argv) {
 	LOG(INFO, "Allocated memory arena");
 
 	struct block_allocator alloc;
+	block_allocator_init(&alloc);
 	block_allocator_put_arena(&alloc, arena, ARENA_SIZE);
 	struct memory_context mctx;
 
@@ -187,6 +189,8 @@ main(int argc, char **argv) {
 		LOG(ERROR, "Controlplane failed");
 		return 1;
 	}
+
+	balancer_state_free(&balancer);
 
 	free(arena);
 
