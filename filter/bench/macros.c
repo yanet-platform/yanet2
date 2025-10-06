@@ -129,8 +129,8 @@ main() {
 	clock_t init_time = clock();
 
 	struct filter filter;
-	FILTER_INIT(
-		&filter, sign, rules, MAX_IP * MAX_IP, &memory_context, &res
+	res = FILTER_INIT(
+		&filter, sign, rules, MAX_IP * MAX_IP, &memory_context
 	);
 	assert(res == 0);
 	double filter_init_time =

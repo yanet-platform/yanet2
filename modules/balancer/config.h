@@ -15,7 +15,7 @@ struct balancer_vs_port_range {
 
 struct balancer_vs {
 	uint64_t flags;
-	
+
 	uint8_t address[16];
 
 	struct balancer_vs_port_range *port_ranges;

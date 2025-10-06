@@ -75,8 +75,8 @@ test_macro_filter(struct filter_rule *rules, struct packet *packets) {
 	clock_t new_filter_init_start_time = clock();
 
 	struct filter filter;
-	FILTER_INIT(
-		&filter, sign, rules, MAX_IP * MAX_IP, &memory_context, &res
+	res = FILTER_INIT(
+		&filter, sign, rules, MAX_IP * MAX_IP, &memory_context
 	);
 	assert(res == 0);
 	double filter_init_time =

@@ -12,14 +12,7 @@
 #include "session.h"
 #include "state.h"
 
-#include <filter/filter.h>
-
-
-#define BALANCER_V4_VS_LOKUP_FILRER_TAG BALANCER_V4_LOKUP
-#define BALANCER_V6_VS_LOOKUP_FILTER_TAG BALANCER_V6_LOKUP
-
-FILTER_DECLARE(BALANCER_V4_VS_LOKUP_FILRER_TAG, &attribute_net4_dst, &attribute_port_dst);
-FILTER_DECLARE(BALANCER_V6_VS_LOKUP_FILRER_TAG, &attribute_net6_dst, &attribute_port_dst);
+#include "vs.h"
 
 struct balancer_module {
 	struct module module;
@@ -37,26 +30,25 @@ balancer_vs_lookup_v4(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-	uint32_t *actions;
-	uint32_t actions_count;
-	FILTER_QUERY(&balancer_config->v4_service_lookup, BALANCER_V4_VS_LOKUP_FILRER_TAG, packet, &actions, &actions_count);
-	if (actions_count == 0) {
+	uint32_t service_id = v4_vs_lookup_get(balancer_config, packet);
+	if (service_id == VS_ID_INVALID) {
 		return -1;
 	}
-	uint32_t service_id = actions[0];
 
-	if (balancer_config->service_count <= service_id)
+	if (balancer_config->service_count <= service_id) {
 		// If the service_id is out of range of available
 		// services
 		return -1;
+	}
 
 	struct balancer_vs **vs_ptr =
 		ADDR_OF(&balancer_config->services) + service_id;
 	struct balancer_vs *vs = ADDR_OF(vs_ptr);
 
 	if (lpm_lookup(&vs->src_filter, 4, (uint8_t *)&ipv4_hdr->src_addr) ==
-	    LPM_VALUE_INVALID)
+	    LPM_VALUE_INVALID) {
 		return -1;
+	}
 	/*
 	 * FIXME: lpm value is 4 byte long where service_id is 8 bytes but
 	 * it is less possible to have more than UINT32_MAX services.
@@ -77,16 +69,10 @@ balancer_vs_lookup_v6(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	uint32_t *actions;
-	uint32_t actions_count;
-	FILTER_QUERY(&balancer_config->v6_service_lookup, BALANCER_V6_VS_LOKUP_FILRER_TAG, packet, &actions, &actions_count);
-	if (actions_count == 0) {
+	uint32_t service_id = v6_vs_lookup_get(balancer_config, packet);
+	if (service_id == VS_ID_INVALID) {
 		return -1;
 	}
-	uint32_t service_id = actions[0];
-
-	if (service_id == LPM_VALUE_INVALID)
-		return -1;
 
 	if (balancer_config->service_count <= service_id)
 		// If the service_id is out of range of available

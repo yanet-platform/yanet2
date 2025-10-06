@@ -75,7 +75,6 @@ balancer_service_config_set_port_range(
 	uint16_t to
 );
 
-
 int
 balancer_module_config_add_service(
 	struct cp_module *cp_module, struct balancer_service_config *service

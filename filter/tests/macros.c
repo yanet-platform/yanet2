@@ -27,7 +27,7 @@ src_port(void *memory) {
 	FILTER_DECLARE(sign, &attribute_port_src);
 
 	struct filter filter;
-	FILTER_INIT(&filter, sign, &rule1, 1, &memory_context, &res);
+	res = FILTER_INIT(&filter, sign, &rule1, 1, &memory_context);
 	assert(res == 0);
 
 	struct packet packet = make_packet(

@@ -9,18 +9,7 @@
 #include "dataplane/config/zone.h"
 
 #include "controlplane/agent/agent.h"
-
-#include "filter/attribute.h"
-#include "filter/filter.h"
-#include "filter/rule.h"
-
-////////////////////////////////////////////////////////////////////////////////
-
-#define BALANCER_V4_VS_LOKUP_FILRER_TAG BALANCER_V4_LOKUP
-#define BALANCER_V6_VS_LOOKUP_FILTER_TAG BALANCER_V6_LOKUP
-
-FILTER_DECLARE(BALANCER_V4_VS_LOKUP_FILRER_TAG, &attribute_net4_dst, &attribute_port_dst);
-FILTER_DECLARE(BALANCER_V6_VS_LOKUP_FILRER_TAG, &attribute_net6_dst, &attribute_port_dst);
+#include "vs.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -70,11 +59,11 @@ config_data_init(
 	set_default_timeout_if_empty(&config->state_config.udp_timeout);
 	set_default_timeout_if_empty(&config->state_config.default_timeout);
 
-	int ret = FILTER_INIT(&config->v4_service_lookup, BALANCER_V4_VS_LOKUP_FILRER_TAG, NULL, 0, mctx);
+	int ret = v4_vs_lookup_init(config, mctx, NULL, 0);
 	if (ret < 0) {
 		return -1;
 	}
-	ret = FILTER_INIT(&config->v6_service_lookup, BALANCER_V6_VS_LOKUP_FILRER_TAG, NULL, 0, mctx);
+	ret = v6_vs_lookup_init(config, mctx, NULL, 0);
 	if (ret < 0) {
 		return -1;
 	}
@@ -182,8 +171,8 @@ balancer_module_config_free(struct cp_module *cp_module) {
 		config->service_count
 	);
 
-	FILTER_FREE(&config->v4_service_lookup, BALANCER_V4_VS_LOKUP_FILRER_TAG);
-	FILTER_FREE(&config->v6_service_lookup, BALANCER_V6_VS_LOKUP_FILRER_TAG);
+	v4_vs_lookup_free(config);
+	v6_vs_lookup_free(config);
 
 	balancer_state_free(&config->state);
 
@@ -219,7 +208,9 @@ balancer_module_config_set_state_config(
 }
 
 static int
-build_v4_service_lookup(struct balancer_module_config *config, struct memory_context *mctx) {
+build_v4_service_lookup(
+	struct balancer_module_config *config, struct memory_context *mctx
+) {
 	struct balancer_vs **services = ADDR_OF(&config->services);
 	size_t v4_service_count = 0;
 	for (size_t i = 0; i < config->service_count; ++i) {
@@ -228,7 +219,9 @@ build_v4_service_lookup(struct balancer_module_config *config, struct memory_con
 			++v4_service_count;
 		}
 	}
-	struct filter_rule *rules = memory_balloc(mctx, sizeof(struct filter_rule) * v4_service_count);
+	struct filter_rule *rules = memory_balloc(
+		mctx, sizeof(struct filter_rule) * v4_service_count
+	);
 	if (rules == NULL) {
 		goto free_on_error;
 	}
@@ -239,38 +232,49 @@ build_v4_service_lookup(struct balancer_module_config *config, struct memory_con
 		if (service->flags & VS_TYPE_V4) {
 			struct filter_rule *rule = &rules[v4_service_index];
 			rule->net4.dst_count = 1;
-			rule->net4.dsts = memory_balloc(mctx, sizeof(struct net4));
+			rule->net4.dsts =
+				memory_balloc(mctx, sizeof(struct net4));
 			if (rule->net4.dsts == NULL) {
 				goto free_on_error;
 			}
 			memcpy(rule->net4.dsts[0].addr, service->address, 4);
 			memset(rule->net4.dsts[0].mask, 0xFF, 4);
 			rule->transport.dst_count = 1;
-			rule->transport.dsts = memory_balloc(mctx, sizeof(struct filter_port_range) * service->port_range_count);
+			rule->transport.dsts = memory_balloc(
+				mctx,
+				sizeof(struct filter_port_range) *
+					service->port_range_count
+			);
 			if (rule->transport.dsts == NULL) {
 				goto free_on_error;
 			}
 			for (size_t k = 0; k < service->port_range_count; ++k) {
-				rule->transport.dsts[k].from = service->port_ranges[k].from;
-				rule->transport.dsts[k].to = service->port_ranges[k].to;
+				rule->transport.dsts[k].from =
+					service->port_ranges[k].from;
+				rule->transport.dsts[k].to =
+					service->port_ranges[k].to;
 			}
 			rule->action = v4_service_index;
 			++v4_service_index;
 		}
 	}
-	FILTER_FREE(&config->v4_service_lookup, BALANCER_V4_VS_LOKUP_FILRER_TAG);
-	int ret = FILTER_INIT(&config->v4_service_lookup, BALANCER_V4_VS_LOKUP_FILRER_TAG, rules, v4_service_count, mctx);
+
+	v4_vs_lookup_free(config);
+	int ret = v4_vs_lookup_init(config, mctx, rules, v4_service_count);
 	if (ret < 0) {
 		goto free_on_error;
 	}
+	/// @todo: free
 	return 0;
 free_on_error:
 	/// @todo: free
 	return -1;
 }
 
-static int 
-build_v6_service_lookup(struct balancer_module_config *config, struct memory_context *mctx) {
+static int
+build_v6_service_lookup(
+	struct balancer_module_config *config, struct memory_context *mctx
+) {
 	struct balancer_vs **services = ADDR_OF(&config->services);
 	size_t v6_service_count = 0;
 	for (size_t i = 0; i < config->service_count; ++i) {
@@ -279,7 +283,9 @@ build_v6_service_lookup(struct balancer_module_config *config, struct memory_con
 			++v6_service_count;
 		}
 	}
-	struct filter_rule *rules = memory_balloc(mctx, sizeof(struct filter_rule) * v6_service_count);
+	struct filter_rule *rules = memory_balloc(
+		mctx, sizeof(struct filter_rule) * v6_service_count
+	);
 	if (rules == NULL) {
 		goto free_on_error;
 	}
@@ -290,27 +296,34 @@ build_v6_service_lookup(struct balancer_module_config *config, struct memory_con
 		if (service->flags & VS_TYPE_V6) {
 			struct filter_rule *rule = &rules[v6_service_index];
 			rule->net6.dst_count = 1;
-			rule->net6.dsts = memory_balloc(mctx, sizeof(struct net6));
+			rule->net6.dsts =
+				memory_balloc(mctx, sizeof(struct net6));
 			if (rule->net6.dsts == NULL) {
 				goto free_on_error;
 			}
 			memcpy(rule->net6.dsts[0].addr, service->address, 16);
 			memset(rule->net6.dsts[0].mask, 0xFF, 16);
 			rule->transport.dst_count = 1;
-			rule->transport.dsts = memory_balloc(mctx, sizeof(struct filter_port_range) * service->port_range_count);
+			rule->transport.dsts = memory_balloc(
+				mctx,
+				sizeof(struct filter_port_range) *
+					service->port_range_count
+			);
 			if (rule->transport.dsts == NULL) {
 				goto free_on_error;
 			}
 			for (size_t k = 0; k < service->port_range_count; ++k) {
-				rule->transport.dsts[k].from = service->port_ranges[k].from;
-				rule->transport.dsts[k].to = service->port_ranges[k].to;
+				rule->transport.dsts[k].from =
+					service->port_ranges[k].from;
+				rule->transport.dsts[k].to =
+					service->port_ranges[k].to;
 			}
 			rule->action = v6_service_index;
 			++v6_service_index;
 		}
 	}
-	FILTER_FREE(&config->v6_service_lookup, BALANCER_V6_VS_LOKUP_FILRER_TAG);
-	int ret = FILTER_INIT(&config->v6_service_lookup, BALANCER_V6_VS_LOKUP_FILRER_TAG, rules, v6_service_count, mctx);
+	v6_vs_lookup_free(config);
+	int ret = v6_vs_lookup_init(config, mctx, rules, v6_service_count);
 	if (ret < 0) {
 		goto free_on_error;
 	}
@@ -419,11 +432,17 @@ balancer_module_config_add_service(
 	balancer_service->real_start = real_start;
 	balancer_service->real_count = service->real_count;
 	if (service->type & VS_TYPE_V4) {
-		build_v4_service_lookup(config, &config->cp_module.memory_context);
+		build_v4_service_lookup(
+			config, &config->cp_module.memory_context
+		);
 	} else if (service->type & VS_TYPE_V6) {
-		build_v6_service_lookup(config, &config->cp_module.memory_context);
+		build_v6_service_lookup(
+			config, &config->cp_module.memory_context
+		);
 	}
-	lpm_init(&balancer_service->src_filter, &config->cp_module.memory_context);
+	lpm_init(
+		&balancer_service->src_filter, &config->cp_module.memory_context
+	);
 
 	for (uint64_t prefix_idx = 0; prefix_idx < service->prefixes_count;
 	     ++prefix_idx) {
@@ -477,7 +496,9 @@ balancer_service_config_create(
 	       sizeof(struct balancer_service_config) +
 		       sizeof(struct balancer_real_config) * real_count);
 
-	config->port_ranges = (struct balancer_vs_port_range *)malloc(sizeof(struct balancer_vs_port_range) * port_range_count);
+	config->port_ranges = (struct balancer_vs_port_range *)malloc(
+		sizeof(struct balancer_vs_port_range) * port_range_count
+	);
 	if (config->port_ranges == NULL) {
 		return NULL;
 	}
