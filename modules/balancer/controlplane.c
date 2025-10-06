@@ -1,4 +1,5 @@
 #include "controlplane.h"
+#include "common/memory_address.h"
 #include "config.h"
 #include "defines.h"
 
@@ -8,6 +9,20 @@
 #include "dataplane/config/zone.h"
 
 #include "controlplane/agent/agent.h"
+
+#include "filter/attribute.h"
+#include "filter/filter.h"
+#include "filter/rule.h"
+
+////////////////////////////////////////////////////////////////////////////////
+
+#define BALANCER_V4_VS_LOKUP_FILRER_TAG BALANCER_V4_LOKUP
+#define BALANCER_V6_VS_LOOKUP_FILTER_TAG BALANCER_V6_LOKUP
+
+FILTER_DECLARE(BALANCER_V4_VS_LOKUP_FILRER_TAG, &attribute_net4_dst, &attribute_port_dst);
+FILTER_DECLARE(BALANCER_V6_VS_LOKUP_FILRER_TAG, &attribute_net6_dst, &attribute_port_dst);
+
+////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_real_config {
 	uint64_t type;
@@ -27,6 +42,8 @@ struct balancer_src_prefix {
 struct balancer_service_config {
 	uint64_t type;
 	uint8_t address[16];
+	struct balancer_vs_port_range *port_ranges;
+	uint64_t port_range_count;
 	uint64_t prefixes_count;
 	struct balancer_src_prefix *prefixes;
 	uint64_t real_count;
@@ -40,7 +57,7 @@ set_default_timeout_if_empty(uint32_t *value) {
 	}
 }
 
-static void
+static int
 config_data_init(
 	struct balancer_module_config *config,
 	struct memory_context *mctx,
@@ -53,9 +70,15 @@ config_data_init(
 	set_default_timeout_if_empty(&config->state_config.udp_timeout);
 	set_default_timeout_if_empty(&config->state_config.default_timeout);
 
-	lpm_init(&config->v4_service_lookup, mctx);
-	lpm_init(&config->v6_service_lookup, mctx);
-	balancer_state_init(
+	int ret = FILTER_INIT(&config->v4_service_lookup, BALANCER_V4_VS_LOKUP_FILRER_TAG, NULL, 0, mctx);
+	if (ret < 0) {
+		return -1;
+	}
+	ret = FILTER_INIT(&config->v6_service_lookup, BALANCER_V6_VS_LOKUP_FILRER_TAG, NULL, 0, mctx);
+	if (ret < 0) {
+		return -1;
+	}
+	return balancer_state_init(
 		&config->state,
 		workers_cnt,
 		config->state_config.sessions_to_reserve,
@@ -146,7 +169,7 @@ balancer_module_config_free(struct cp_module *cp_module) {
 		struct balancer_vs **vs_ptr =
 			ADDR_OF(&config->services) + service_idx;
 		struct balancer_vs *vs = ADDR_OF(vs_ptr);
-		lpm_free(&vs->src);
+		lpm_free(&vs->src_filter);
 		memory_bfree(
 			&agent->memory_context, vs, sizeof(struct balancer_vs)
 		);
@@ -159,8 +182,9 @@ balancer_module_config_free(struct cp_module *cp_module) {
 		config->service_count
 	);
 
-	lpm_free(&config->v4_service_lookup);
-	lpm_free(&config->v6_service_lookup);
+	FILTER_FREE(&config->v4_service_lookup, BALANCER_V4_VS_LOKUP_FILRER_TAG);
+	FILTER_FREE(&config->v6_service_lookup, BALANCER_V6_VS_LOKUP_FILRER_TAG);
+
 	balancer_state_free(&config->state);
 
 	memory_bfree(
@@ -192,6 +216,108 @@ balancer_module_config_set_state_config(
 	config->state_config.udp_timeout = udp_timeout;
 	config->state_config.default_timeout = default_timeout;
 	config->state_config.sessions_to_reserve = sessions_to_reserve;
+}
+
+static int
+build_v4_service_lookup(struct balancer_module_config *config, struct memory_context *mctx) {
+	struct balancer_vs **services = ADDR_OF(&config->services);
+	size_t v4_service_count = 0;
+	for (size_t i = 0; i < config->service_count; ++i) {
+		struct balancer_vs *service = ADDR_OF(&services[i]);
+		if (service->flags & VS_TYPE_V4) {
+			++v4_service_count;
+		}
+	}
+	struct filter_rule *rules = memory_balloc(mctx, sizeof(struct filter_rule) * v4_service_count);
+	if (rules == NULL) {
+		goto free_on_error;
+	}
+
+	size_t v4_service_index = 0;
+	for (size_t i = 0; i < config->service_count; ++i) {
+		struct balancer_vs *service = ADDR_OF(&services[i]);
+		if (service->flags & VS_TYPE_V4) {
+			struct filter_rule *rule = &rules[v4_service_index];
+			rule->net4.dst_count = 1;
+			rule->net4.dsts = memory_balloc(mctx, sizeof(struct net4));
+			if (rule->net4.dsts == NULL) {
+				goto free_on_error;
+			}
+			memcpy(rule->net4.dsts[0].addr, service->address, 4);
+			memset(rule->net4.dsts[0].mask, 0xFF, 4);
+			rule->transport.dst_count = 1;
+			rule->transport.dsts = memory_balloc(mctx, sizeof(struct filter_port_range) * service->port_range_count);
+			if (rule->transport.dsts == NULL) {
+				goto free_on_error;
+			}
+			for (size_t k = 0; k < service->port_range_count; ++k) {
+				rule->transport.dsts[k].from = service->port_ranges[k].from;
+				rule->transport.dsts[k].to = service->port_ranges[k].to;
+			}
+			rule->action = v4_service_index;
+			++v4_service_index;
+		}
+	}
+	FILTER_FREE(&config->v4_service_lookup, BALANCER_V4_VS_LOKUP_FILRER_TAG);
+	int ret = FILTER_INIT(&config->v4_service_lookup, BALANCER_V4_VS_LOKUP_FILRER_TAG, rules, v4_service_count, mctx);
+	if (ret < 0) {
+		goto free_on_error;
+	}
+	return 0;
+free_on_error:
+	/// @todo: free
+	return -1;
+}
+
+static int 
+build_v6_service_lookup(struct balancer_module_config *config, struct memory_context *mctx) {
+	struct balancer_vs **services = ADDR_OF(&config->services);
+	size_t v6_service_count = 0;
+	for (size_t i = 0; i < config->service_count; ++i) {
+		struct balancer_vs *service = ADDR_OF(&services[i]);
+		if (service->flags & VS_TYPE_V6) {
+			++v6_service_count;
+		}
+	}
+	struct filter_rule *rules = memory_balloc(mctx, sizeof(struct filter_rule) * v6_service_count);
+	if (rules == NULL) {
+		goto free_on_error;
+	}
+
+	size_t v6_service_index = 0;
+	for (size_t i = 0; i < config->service_count; ++i) {
+		struct balancer_vs *service = ADDR_OF(&services[i]);
+		if (service->flags & VS_TYPE_V6) {
+			struct filter_rule *rule = &rules[v6_service_index];
+			rule->net6.dst_count = 1;
+			rule->net6.dsts = memory_balloc(mctx, sizeof(struct net6));
+			if (rule->net6.dsts == NULL) {
+				goto free_on_error;
+			}
+			memcpy(rule->net6.dsts[0].addr, service->address, 16);
+			memset(rule->net6.dsts[0].mask, 0xFF, 16);
+			rule->transport.dst_count = 1;
+			rule->transport.dsts = memory_balloc(mctx, sizeof(struct filter_port_range) * service->port_range_count);
+			if (rule->transport.dsts == NULL) {
+				goto free_on_error;
+			}
+			for (size_t k = 0; k < service->port_range_count; ++k) {
+				rule->transport.dsts[k].from = service->port_ranges[k].from;
+				rule->transport.dsts[k].to = service->port_ranges[k].to;
+			}
+			rule->action = v6_service_index;
+			++v6_service_index;
+		}
+	}
+	FILTER_FREE(&config->v6_service_lookup, BALANCER_V6_VS_LOKUP_FILRER_TAG);
+	int ret = FILTER_INIT(&config->v6_service_lookup, BALANCER_V6_VS_LOKUP_FILRER_TAG, rules, v6_service_count, mctx);
+	if (ret < 0) {
+		goto free_on_error;
+	}
+	return 0;
+free_on_error:
+	/// @todo: free
+	return -1;
 }
 
 int
@@ -293,23 +419,11 @@ balancer_module_config_add_service(
 	balancer_service->real_start = real_start;
 	balancer_service->real_count = service->real_count;
 	if (service->type & VS_TYPE_V4) {
-		lpm_insert(
-			&config->v4_service_lookup,
-			4,
-			service->address,
-			service->address,
-			config->service_count - 1
-		);
+		build_v4_service_lookup(config, &config->cp_module.memory_context);
 	} else if (service->type & VS_TYPE_V6) {
-		lpm_insert(
-			&config->v6_service_lookup,
-			16,
-			service->address,
-			service->address,
-			config->service_count - 1
-		);
+		build_v6_service_lookup(config, &config->cp_module.memory_context);
 	}
-	lpm_init(&balancer_service->src, &config->cp_module.memory_context);
+	lpm_init(&balancer_service->src_filter, &config->cp_module.memory_context);
 
 	for (uint64_t prefix_idx = 0; prefix_idx < service->prefixes_count;
 	     ++prefix_idx) {
@@ -317,7 +431,7 @@ balancer_module_config_add_service(
 			service->prefixes[prefix_idx];
 		if (service->type & VS_TYPE_V4) {
 			lpm_insert(
-				&balancer_service->src,
+				&balancer_service->src_filter,
 				4,
 				prefix.start_addr,
 				prefix.end_addr,
@@ -325,7 +439,7 @@ balancer_module_config_add_service(
 			);
 		} else if (service->type & VS_TYPE_V6) {
 			lpm_insert(
-				&balancer_service->src,
+				&balancer_service->src_filter,
 				16,
 				prefix.start_addr,
 				prefix.end_addr,
@@ -342,26 +456,42 @@ struct balancer_service_config *
 balancer_service_config_create(
 	uint64_t type,
 	uint8_t *address,
+	uint64_t port_range_count,
 	uint64_t real_count,
 	uint64_t prefixes_count
 ) {
+	if (port_range_count == 0 || prefixes_count == 0) {
+		return NULL;
+	}
+
 	struct balancer_service_config *config =
 		(struct balancer_service_config *)malloc(
 			sizeof(struct balancer_service_config) +
 			sizeof(struct balancer_real_config) * real_count
 		);
-	if (config == NULL)
+	if (config == NULL) {
 		return NULL;
+	}
 	memset(config,
 	       0,
 	       sizeof(struct balancer_service_config) +
 		       sizeof(struct balancer_real_config) * real_count);
 
+	config->port_ranges = (struct balancer_vs_port_range *)malloc(sizeof(struct balancer_vs_port_range) * port_range_count);
+	if (config->port_ranges == NULL) {
+		return NULL;
+	}
+	for (size_t i = 0; i < port_range_count; ++i) {
+		config->port_ranges[i].from = config->port_ranges[i].to = 0;
+	}
+	config->port_range_count = port_range_count;
+
 	config->prefixes = (struct balancer_src_prefix *)malloc(
 		sizeof(struct balancer_src_prefix) * prefixes_count
 	);
-	if (config->prefixes == NULL)
+	if (config->prefixes == NULL) {
 		return NULL;
+	}
 	memset(config->prefixes,
 	       0,
 	       sizeof(struct balancer_src_prefix) * prefixes_count);
@@ -376,6 +506,17 @@ balancer_service_config_create(
 	config->real_count = real_count;
 
 	return config;
+}
+
+void
+balancer_service_config_set_port_range(
+	struct balancer_service_config *service_config,
+	uint64_t index,
+	uint16_t from,
+	uint16_t to
+) {
+	service_config->port_ranges[index].from = from;
+	service_config->port_ranges[index].to = to;
 }
 
 void

@@ -6,12 +6,26 @@
 #include <common/lpm.h>
 #include <controlplane/config/cp_module.h>
 
+#include <filter/filter.h>
+
+struct balancer_vs_port_range {
+	uint16_t from;
+	uint16_t to;
+};
+
 struct balancer_vs {
 	uint64_t flags;
+	
 	uint8_t address[16];
+
+	struct balancer_vs_port_range *port_ranges;
+	size_t port_range_count;
+
 	uint64_t real_start;
 	uint64_t real_count;
-	struct lpm src;
+
+	struct lpm src_filter;
+
 	struct ring real_ring;
 };
 
@@ -36,8 +50,14 @@ struct balancer_state_config {
 struct balancer_module_config {
 	struct cp_module cp_module;
 
-	struct lpm v4_service_lookup;
-	struct lpm v6_service_lookup;
+	// src_ip v4 + port
+	// struct lpm v4_service_lookup;
+	struct filter v4_service_lookup;
+
+	// src ip v6 + port
+	// struct lpm v6_service_lookup;
+	struct filter v6_service_lookup;
+
 	struct balancer_state state;
 
 	struct balancer_state_config state_config;
