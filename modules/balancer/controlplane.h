@@ -79,3 +79,6 @@ int
 balancer_module_config_add_service(
 	struct cp_module *cp_module, struct balancer_service_config *service
 );
+
+void
+balancer_module_config_update_current_time(struct cp_module *cp_module);

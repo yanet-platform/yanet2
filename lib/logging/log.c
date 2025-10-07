@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <strings.h>
+#include <threads.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -25,7 +26,7 @@ static struct logger loggers[LOG_ID_MAX] = {
 
 const char *
 log_fmt_timestamp(void) {
-	static char ts_str[sizeof("2025-03-14T17:57:21.777")];
+	static _Thread_local char ts_str[sizeof("2025-03-14T17:57:21.777")];
 	struct timespec now;
 	struct tm tm;
 	int len;

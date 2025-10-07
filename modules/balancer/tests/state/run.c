@@ -102,6 +102,8 @@ run(void *arena,
 
 	uint64_t start_ns = get_time_ns();
 
+	workers_prepare_globals();
+
 	for (uint32_t i = 0; i < workers_cnt; ++i) {
 		struct worker_config *cfg = &workers[i].cfg;
 		cfg->run_result = &workers[i].run_result;

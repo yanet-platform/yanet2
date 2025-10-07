@@ -1,4 +1,5 @@
 #include "controlplane.h"
+#include "clock.h"
 #include "common/memory_address.h"
 #include "config.h"
 #include "defines.h"
@@ -58,6 +59,8 @@ config_data_init(
 	set_default_timeout_if_empty(&config->state_config.tcp_timeout);
 	set_default_timeout_if_empty(&config->state_config.udp_timeout);
 	set_default_timeout_if_empty(&config->state_config.default_timeout);
+
+	clock_init(&config->clock);
 
 	int ret = v4_vs_lookup_init(config, mctx, NULL, 0);
 	if (ret < 0) {
@@ -587,4 +590,14 @@ balancer_service_config_set_src_prefix(
 		memcpy(src_prefix->start_addr, start_addr, 4);
 		memcpy(src_prefix->end_addr, end_addr, 4);
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+balancer_module_config_update_current_time(struct cp_module *cp_module) {
+	struct balancer_module_config *config = container_of(
+		cp_module, struct balancer_module_config, cp_module
+	);
+	clock_update_time(&config->clock);
 }

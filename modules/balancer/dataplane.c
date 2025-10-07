@@ -1,3 +1,4 @@
+#include "clock.h"
 #include "config.h"
 
 #include <rte_ether.h>
@@ -225,7 +226,6 @@ static inline struct balancer_rs *
 balancer_rs_lookup(
 	struct balancer_module_config *config,
 	uint32_t worker_idx,
-	uint32_t now,
 	struct balancer_vs *vs,
 	struct packet *packet
 ) {
@@ -235,6 +235,7 @@ balancer_rs_lookup(
 		return NULL;
 	}
 
+	uint32_t now = clock_get_time(&config->clock);
 	uint32_t timeout =
 		metadata_storage_timeout(&config->state_config, &metadata);
 
@@ -378,10 +379,8 @@ balancer_handle_packets(
 			continue;
 		}
 
-		/// @todo: Fix expensive syscall
-		uint32_t now = time(NULL);
 		struct balancer_rs *rs = balancer_rs_lookup(
-			balancer_config, worker_idx, now, vs, packet
+			balancer_config, worker_idx, vs, packet
 		);
 		if (rs == NULL) {
 			// real lookup failed

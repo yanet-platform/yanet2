@@ -8,6 +8,8 @@
 
 #include <filter/filter.h>
 
+#include "clock.h"
+
 struct balancer_vs_port_range {
 	uint16_t from;
 	uint16_t to;
@@ -60,9 +62,12 @@ struct balancer_module_config {
 
 	struct balancer_state state;
 
+	struct clock clock;
+
 	struct balancer_state_config state_config;
 
-	// FIXME: Should we store array of `balancer_vs` instead of `balancer_vs
+	/// @todo: Should we store array of `balancer_vs` instead of
+	/// `balancer_vs
 	// *`?
 	uint64_t service_count;
 	struct balancer_vs **services;

@@ -32,7 +32,6 @@ configure_file(output: build_cfg, configuration: yanet_conf)
 go = find_program('go', required: true)
 protoc = find_program('protoc', required: true)
 
-yanet_test_c_args = ['-O0']
 yanet_c_args = []
 yanet_link_args = []
 if get_option('fuzzing').enabled()
@@ -49,6 +48,16 @@ if get_option('fuzzing').enabled()
 endif
 yanet_rootdir = include_directories('.')
 
+if get_option('b_sanitize') == 'thread'
+  tsan_args = [
+    '-fsanitize=thread'
+  ]
+  yanet_c_args += tsan_args
+  yanet_link_args += tsan_args
+endif
+
+yanet_test_c_args = yanet_c_args + ['-O0']
+
 libdpdk = subproject(
   'dpdk',
   default_options: [
@@ -64,7 +73,8 @@ libdpdk = subproject(
     'tests=false',
     'examples=',
     'werror=false',
-    'c_args=-Wno-stringop-overflow -Wno-array-bounds -Wno-stringop-overread -Wno-vla-larger-than',
+    'c_args=-Wno-stringop-overflow -Wno-array-bounds -Wno-stringop-overread -Wno-vla-larger-than -fsanitize=thread',
+    'c_link_args=-fsanitize=thread,address,undefined',
   ],
 )
 
