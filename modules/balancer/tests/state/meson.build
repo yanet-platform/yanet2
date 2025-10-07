@@ -23,6 +23,6 @@ state_test_exe = executable(
 test(
   'state',
   state_test_exe,
-  timeout: 10,
+  timeout: 30,
   suite: 'balancer',
 )

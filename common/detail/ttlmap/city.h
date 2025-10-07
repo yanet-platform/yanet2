@@ -300,7 +300,7 @@ hash32_len5to12(const char *s, size_t len) {
 }
 
 static inline uint32
-city_hash_32(const char *s, size_t len) {
+city_hash32(const char *s, size_t len) {
 	if (len <= 24) {
 		return len <= 12 ? (len <= 4 ? hash32_len0to4(s, len)
 					     : hash32_len5to12(s, len))
