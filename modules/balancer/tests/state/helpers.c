@@ -46,3 +46,13 @@ gen_sessions(
 	}
 	return sessions;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+uint64_t
+get_time_ns() {
+	struct timespec ts;
+	int res = clock_gettime(CLOCK_REALTIME, &ts);
+	assert(res == 0);
+	return ts.tv_nsec + ts.tv_sec * 1e9;
+}

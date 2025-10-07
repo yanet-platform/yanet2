@@ -99,16 +99,17 @@ typedef struct ttlmap {
 				);                                             \
 			}                                                      \
 		}                                                              \
+		(map_ptr)->buckets_exp = (size_t)-1;                           \
 	})
 
 static inline int
-__ttlmap_init_internal(
+__ttlmap_init_internal( // NOLINT
 	ttlmap_t *map,
 	struct memory_context *mctx,
 	size_t bucket_align,
 	size_t bucket_size,
 	size_t bucket_count
-) { // NOLINT
+) {
 	if ((bucket_count & (bucket_count - 1)) !=
 	    0) { // bucket count must be power of 2
 		return -1;

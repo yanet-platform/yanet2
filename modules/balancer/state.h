@@ -29,7 +29,11 @@ struct worker_info {
 	_Atomic uint32_t max_deadline_current_gen;
 	_Atomic uint32_t max_deadline_prev_gen;
 	_Atomic uint32_t active_sessions; // sessions created by worker
+	_Atomic uint32_t density_factor;
 } __rte_cache_aligned;
+
+void
+worker_info_init(struct worker_info *info);
 
 #define WORKER_SET_ATOMIC(worker_info_ptr, field, value)                       \
 	__c11_atomic_store(&(worker_info_ptr)->field, value, __ATOMIC_SEQ_CST)
@@ -44,7 +48,6 @@ struct worker_info {
 
 struct balancer_sessions_storage_gen {
 	struct ttlmap session_table;
-	size_t session_table_capacity;
 	struct worker_info worker_info[BALANCER_MAX_WORKERS_NUM];
 };
 
@@ -68,6 +71,8 @@ balancer_state_init(
 void
 balancer_state_free(struct balancer_state *state);
 
+////////////////////////////////////////////////////////////////////////////////
+
 static inline struct balancer_sessions_storage_gen *
 balancer_get_cur_storage_gen(struct balancer_state *state) {
 	uint32_t current_gen =
@@ -82,6 +87,8 @@ balancer_get_prev_storage_gen(struct balancer_state *state) {
 	return &state->generations[(current_gen & 1) ^ 1];
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 static inline int
 balancer_get_session(
 	struct balancer_state *state,
@@ -94,7 +101,8 @@ balancer_get_session(
 ) {
 	struct balancer_sessions_storage_gen *sessions_cur =
 		balancer_get_cur_storage_gen(state);
-	int ret = TTLMAP_GET(
+
+	int res = TTLMAP_GET(
 		&sessions_cur->session_table,
 		session_id,
 		session_state,
@@ -102,22 +110,28 @@ balancer_get_session(
 		now,
 		timeout
 	);
+	int status = TTLMAP_STATUS(res);
+	uint32_t meta = TTLMAP_META(res);
+
 	struct worker_info *worker_info =
 		&sessions_cur->worker_info[worker_idx];
-	if (ret == TTLMAP_FOUND) {
+	uint32_t new_density_factor =
+		RTE_MAX(meta, worker_info->density_factor);
+	WORKER_SET_ATOMIC(worker_info, density_factor, new_density_factor);
+
+	if (status == TTLMAP_FOUND) {
 		uint32_t new_max_deadline =
 			RTE_MAX(worker_info->max_deadline_current_gen,
 				now + timeout);
 		WORKER_SET_ATOMIC(
 			worker_info, max_deadline_current_gen, new_max_deadline
 		);
-		return ret;
-	} else if (ret == TTLMAP_INSERTED || ret == TTLMAP_REPLACED) {
-		if (ret == TTLMAP_INSERTED) {
+		return BALANCER_SESSION_FOUND;
+	} else if (status == TTLMAP_INSERTED || status == TTLMAP_REPLACED) {
+		if (status == TTLMAP_INSERTED) {
 			WORKER_INC_ATOMIC(worker_info, active_sessions);
 		}
-		if (WORKER_GET_ATOMIC(worker_info, use_prev_gen) ==
-		    1) { // if (worker_info->use_prev_gen == 1)
+		if (WORKER_GET_ATOMIC(worker_info, use_prev_gen) == 1) {
 			if (WORKER_GET_ATOMIC(
 				    worker_info, max_deadline_prev_gen
 			    ) < now) {
@@ -126,13 +140,13 @@ balancer_get_session(
 			}
 			struct balancer_sessions_storage_gen *sessions_prev =
 				balancer_get_prev_storage_gen(state);
-			ret = TTLMAP_LOOKUP(
+			status = TTLMAP_LOOKUP(
 				&sessions_prev->session_table,
 				session_id,
 				*session_state,
 				now
 			);
-			if (ret == TTLMAP_FOUND) {
+			if (status == TTLMAP_FOUND) {
 				return BALANCER_SESSION_FOUND;
 			} else {
 				return BALANCER_SESSION_CREATED;
@@ -140,7 +154,7 @@ balancer_get_session(
 		} else {
 			return BALANCER_SESSION_CREATED;
 		}
-	} else { // ret == TTLMAP_FAILED
+	} else { // status == TTLMAP_FAILED
 		return BALANCER_GET_SESSION_FAILED;
 	}
 }
@@ -153,6 +167,13 @@ balancer_session_invalidate(struct balancer_session_state *state) {
 static inline void
 balancer_session_unlock(balancer_session_lock_t *lock) {
 	ttlmap_release_lock(lock);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+static inline size_t
+balancer_session_table_capacity(struct balancer_sessions_storage_gen *storage) {
+	return ttlmap_capacity(&storage->session_table);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

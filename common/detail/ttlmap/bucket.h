@@ -9,7 +9,14 @@
 #define TTLMAP_FOUND (0b01)
 #define TTLMAP_INSERTED (0b10)
 #define TTLMAP_REPLACED (0b11)
-#define TTLMAP_FAILED (-1)
+#define TTLMAP_FAILED (0b00)
+#define TTLMAP_STATUS_MASK (0b11)
+#define TTLMAP_STATUS_BITS (2)
+
+////////////////////////////////////////////////////////////////////////////////
+
+#define TTLMAP_STATUS(op_result) ((op_result) & TTLMAP_STATUS_MASK)
+#define TTLMAP_META(op_result) ((uint32_t)((op_result) >> TTLMAP_STATUS_BITS))
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -61,7 +68,8 @@
 				memcpy((value_ptr),                            \
 				       &entry->value,                          \
 				       sizeof(__value_type));                  \
-				__ret = TTLMAP_FOUND;                          \
+				__ret = (__i << (TTLMAP_STATUS_BITS)) |        \
+					TTLMAP_FOUND;                          \
 				goto __done;                                   \
 			}                                                      \
 		}                                                              \
@@ -70,9 +78,6 @@
 		__ret;                                                         \
 	})
 
-// If value is found, returns 1.
-// If value is not found, returns 0 and tries to insert. On insert success, sets
-// `value_ptr_ptr` to the value pointer.
 #define __TTLMAP_BUCKET_GET(                                                   \
 	bucket_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now, timeout, idx    \
 )                                                                              \
@@ -91,13 +96,10 @@
 			__bucket_entry_t *entry = &__bucket->entries[__pos];   \
 			if (entry->deadline > (now) &&                         \
 			    __TTLMAP_KEYS_EQUAL((key_ptr), &entry->key)) {     \
-				/* printf("ttlmap found: bucket_ptr=%lx,       \
-				 * idx=%zu, i=%zu, pos=%zu\n",                 \
-				 * (uintptr_t)bucket_ptr, (size_t)idx, __i,    \
-				 * __pos); */                                  \
 				entry->deadline = (now) + (timeout);           \
 				*(value_ptr_ptr) = &entry->value;              \
-				__ret = TTLMAP_FOUND;                          \
+				__ret = (__i << TTLMAP_STATUS_BITS) |          \
+					TTLMAP_FOUND;                          \
 				goto __done;                                   \
 			}                                                      \
 		}                                                              \
@@ -106,13 +108,10 @@
 				(__i + (idx)) & (__TTLMAP_BUCKET_ENTRIES - 1); \
 			__bucket_entry_t *entry = &__bucket->entries[__pos];   \
 			if (entry->deadline <= (now)) {                        \
-				/* printf("ttlmap insert: bucket_ptr=%lx,      \
-				 * idx=%zu, i=%zu, pos=%zu\n",                 \
-				 * (uintptr_t)bucket_ptr, (size_t)idx, __i,    \
-				 * __pos); */                                  \
-				__ret = (entry->deadline > 0)                  \
-						? TTLMAP_REPLACED              \
-						: TTLMAP_INSERTED;             \
+				__ret = (__i << TTLMAP_STATUS_BITS) |          \
+					((entry->deadline > 0)                 \
+						 ? TTLMAP_REPLACED             \
+						 : TTLMAP_INSERTED);           \
 				entry->deadline = (now) + (timeout);           \
 				__TTLMAP_MEMORY_SET(&entry->key, (key_ptr));   \
 				*(value_ptr_ptr) = &entry->value;              \
@@ -159,9 +158,6 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 			1 << ((map_ptr)->buckets_per_chunk_exp);               \
 		uint32_t __bucket_in_chunk =                                   \
 			__bucket & (__buckets_per_chunk - 1);                  \
-		/* printf("bucket=%u, chunk=%u, buckets_per_chunk=%u,          \
-		 * bucket_in_chunk=%u\n", __bucket, __chunk,                   \
-		 * __buckets_per_chunk, __bucket_in_chunk); */                 \
 		__bucket_t *__buckets_array =                                  \
 			ADDR_OF(&((map_ptr)->chunks[__chunk]));                \
 		(void *)&__buckets_array[__bucket_in_chunk];                   \

@@ -3,6 +3,8 @@
 #include "session.h"
 #include "state.h"
 
+#include <assert.h>
+#include <sys/time.h>
 #include <time.h>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -18,7 +20,8 @@ workers_prepare_globals() {
 
 void
 run_worker(struct worker_config *config) {
-	uint64_t worker_start = clock();
+	uint64_t worker_start_ns = get_time_ns();
+
 	config->run_result->failed = 0;
 	uint64_t rng = config->worker_idx;
 	for (size_t i = 0; i < config->iterations; ++i) {
@@ -47,6 +50,10 @@ run_worker(struct worker_config *config) {
 			&session_lock
 		);
 		if (res == BALANCER_GET_SESSION_FAILED) {
+			LOG(WARN,
+			    "worker #%u failed to insert on %zu iteration",
+			    config->worker_idx,
+			    i + 1);
 			++config->run_result->failed;
 			continue;
 		}
@@ -58,7 +65,8 @@ run_worker(struct worker_config *config) {
 		session_state->timeout = timeout;
 		balancer_session_unlock(session_lock);
 	}
-	uint32_t elapsed_ms =
-		(double)(clock() - worker_start) / CLOCKS_PER_SEC / 1000.0;
+
+	uint64_t worker_end_ns = get_time_ns();
+	uint32_t elapsed_ms = (double)(worker_end_ns - worker_start_ns) / 1e6;
 	config->run_result->elapsed_ms = elapsed_ms;
 }

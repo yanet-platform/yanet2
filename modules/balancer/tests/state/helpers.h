@@ -28,3 +28,8 @@ struct balancer_session_id *
 gen_sessions(
 	size_t sessions_cnt, struct memory_context *mctx, uint32_t worker_idx
 );
+
+////////////////////////////////////////////////////////////////////////////////
+
+uint64_t
+get_time_ns();

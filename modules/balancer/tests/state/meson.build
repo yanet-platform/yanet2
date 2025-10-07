@@ -3,6 +3,7 @@ state_test_sources = files(
   'helpers.c',
   'controlplane.c',
   'main.c',
+  'run.c'
 )
 
 state_test_includes = [
@@ -22,6 +23,6 @@ state_test_exe = executable(
 test(
   'state',
   state_test_exe,
-  timeout: 30,
+  timeout: 10,
   suite: 'balancer',
 )

@@ -23,7 +23,7 @@ bucket_basic() {
 		res = __TTLMAP_BUCKET_GET(
 			bucket_ptr, &i, &value, &lock, 0, 10, 0
 		);
-		assert(res == TTLMAP_INSERTED);
+		assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED);
 		assert(value != NULL);
 		*value = i;
 		__ttlmap_unlock(lock);
@@ -36,7 +36,7 @@ bucket_basic() {
 		res = __TTLMAP_BUCKET_GET(
 			bucket_ptr, &i, &value, &lock, 0, 10, 0
 		);
-		assert(res == TTLMAP_FOUND);
+		assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
 		assert(*value == i);
 		__ttlmap_unlock(lock);
 	}
@@ -49,7 +49,7 @@ bucket_basic() {
 		res = __TTLMAP_BUCKET_GET(
 			bucket_ptr, &key, &value, &lock, 0, 10, 0
 		);
-		assert(res == TTLMAP_FAILED);
+		assert(TTLMAP_STATUS(res) == TTLMAP_FAILED);
 		assert(value == NULL);
 	}
 
@@ -61,7 +61,8 @@ bucket_basic() {
 		res = __TTLMAP_BUCKET_GET(
 			bucket_ptr, &key, &value, &lock, 10, 10, 0
 		);
-		assert(res == TTLMAP_INSERTED || res == TTLMAP_REPLACED);
+		assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED ||
+		       TTLMAP_STATUS(res) == TTLMAP_REPLACED);
 		assert(value != NULL);
 		__ttlmap_unlock(lock);
 	}
@@ -74,7 +75,7 @@ bucket_basic() {
 		res = __TTLMAP_BUCKET_GET(
 			bucket_ptr, &key, &value, &lock, 9, 10, 0
 		);
-		assert(res == TTLMAP_FOUND);
+		assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
 		assert(*value == key);
 		__ttlmap_unlock(lock);
 	}
@@ -87,7 +88,7 @@ bucket_basic() {
 		res = __TTLMAP_BUCKET_GET(
 			bucket_ptr, &key, &value, &lock, 11, 10, 0
 		);
-		assert(res == TTLMAP_FOUND);
+		assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
 		*value = 100;
 		__ttlmap_unlock(lock);
 	}
@@ -100,7 +101,7 @@ bucket_basic() {
 		res = __TTLMAP_BUCKET_GET(
 			bucket_ptr, &key, &value, &lock, 11, 10, 0
 		);
-		assert(res == TTLMAP_FOUND);
+		assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
 		assert(*value == 100);
 		__ttlmap_unlock(lock);
 	}
@@ -113,7 +114,8 @@ bucket_basic() {
 		res = __TTLMAP_BUCKET_GET(
 			bucket_ptr, &key, &value, &lock, 15, 10, 0
 		);
-		assert(res == TTLMAP_INSERTED || res == TTLMAP_REPLACED);
+		assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED ||
+		       TTLMAP_STATUS(res) == TTLMAP_REPLACED);
 		assert(*value != 100);
 		*value = 500;
 		__ttlmap_unlock(lock);
@@ -131,7 +133,7 @@ thread_func(void *bucket) {
 		int res = __TTLMAP_BUCKET_GET(
 			bucket, &key, &value, &lock, 0, 10, 0
 		);
-		if (res != TTLMAP_FOUND) {
+		if (TTLMAP_STATUS(res) != TTLMAP_FOUND) {
 			return (void *)1;
 		}
 		*value = *value + 1;
@@ -150,7 +152,7 @@ bucket_multithread() {
 	ttlmap_lock_t *lock;
 	int res =
 		__TTLMAP_BUCKET_GET(bucket_ptr, &key, &value, &lock, 0, 10, 0);
-	assert(res == TTLMAP_INSERTED);
+	assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED);
 	*value = 0;
 	__ttlmap_unlock(lock);
 	pthread_t threads[10];
@@ -170,7 +172,7 @@ bucket_multithread() {
 	res = __TTLMAP_BUCKET_GET(
 		bucket_ptr, &key, &lookup_value, &lock, 0, 10, 0
 	);
-	assert(res == TTLMAP_FOUND);
+	assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
 	assert(*lookup_value == 1000000);
 }
 
@@ -195,18 +197,18 @@ bucket_big_alignment() {
 	ttlmap_lock_t *lock;
 	int res =
 		__TTLMAP_BUCKET_GET(bucket_ptr, &key, &value, &lock, 0, 10, 0);
-	assert(res == TTLMAP_INSERTED);
+	assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED);
 	*value = (value_t){.x = 0};
 	__ttlmap_unlock(lock);
 
 	res = __TTLMAP_BUCKET_GET(bucket_ptr, &key, &value, &lock, 0, 10, 0);
-	assert(res == TTLMAP_FOUND);
+	assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
 	assert(value->x == 0);
 	value->x += 10;
 	__ttlmap_unlock(lock);
 
 	res = __TTLMAP_BUCKET_GET(bucket_ptr, &key, &value, &lock, 0, 10, 0);
-	assert(res == TTLMAP_FOUND);
+	assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
 	value->x += 10;
 	assert(value->x == 20);
 	__ttlmap_unlock(lock);
@@ -295,7 +297,7 @@ ttlmap_init_and_get_buckets(
 		res = __TTLMAP_BUCKET_GET(
 			bucket, &key, &value, &lock, 0, 10, 0
 		);
-		assert(res == TTLMAP_INSERTED);
+		assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED);
 		*value = (test_value_t
 		){.counter1 = i, .counter2 = i + 1, .session_id = 0};
 		__ttlmap_unlock(lock);
@@ -344,13 +346,13 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 		test_value_t *value;
 		ttlmap_lock_t *lock;
 		int res = TTLMAP_GET(&map, &key, &value, &lock, 0, 10);
-		if (res == TTLMAP_INSERTED) {
+		if (TTLMAP_STATUS(res) == TTLMAP_INSERTED) {
 			++inserted;
 			*value = (test_value_t
 			){.counter1 = i, .counter2 = i + 1, .session_id = 0};
 			ttlmap_release_lock(lock);
 		} else {
-			assert(res == TTLMAP_FAILED);
+			assert(TTLMAP_STATUS(res) == TTLMAP_FAILED);
 		}
 	}
 
@@ -371,13 +373,13 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 		ttlmap_lock_t *lock;
 
 		int res = TTLMAP_GET(&map, &key, &value, &lock, 5, 10);
-		if (res == TTLMAP_FOUND) {
+		if (TTLMAP_STATUS(res) == TTLMAP_FOUND) {
 			++found;
 			assert(memcmp(&ref_value, value, sizeof(ref_value)) == 0
 			);
 			ttlmap_release_lock(lock);
 		} else {
-			assert(res == TTLMAP_FAILED);
+			assert(TTLMAP_STATUS(res) == TTLMAP_FAILED);
 		}
 	}
 	assert(inserted == found);

@@ -21,12 +21,7 @@ typedef struct ttlmap_lock ttlmap_lock_t;
 #define TTLMAP_FREE(map_ptr) __TTLMAP_FREE_INTERNAL(map_ptr)
 
 #define TTLMAP_GET(                                                            \
-	map_ptr,                                                               \
-	key_ptr,                                                               \
-	value_ptr_ptr,                                                         \
-	lock_ptr_ptr,                                                          \
-	now /* uint32_t */,                                                    \
-	timeout /* uint32_t */                                                 \
+	map_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now, timeout            \
 )                                                                              \
 	__TTLMAP_GET_INTERNAL(                                                 \
 		map_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now, timeout    \
@@ -46,6 +41,14 @@ typedef struct ttlmap_lock ttlmap_lock_t;
 static inline void
 ttlmap_release_lock(ttlmap_lock_t *lock) {
 	__ttlmap_unlock(lock);
+}
+
+static inline uint64_t
+ttlmap_capacity(ttlmap_t *map) {
+	if (map->buckets_exp == (size_t)-1) {
+		return 0;
+	}
+	return (1ull << map->buckets_exp) * __TTLMAP_BUCKET_ENTRIES;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
