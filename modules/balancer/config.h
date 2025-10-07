@@ -62,7 +62,7 @@ struct balancer_module_config {
 
 	struct balancer_state state;
 
-	struct clock clock;
+	struct balancer_clock clock;
 
 	struct balancer_state_config state_config;
 
