@@ -60,11 +60,10 @@ struct balancer_module_config {
 	// struct lpm v6_service_lookup;
 	struct filter v6_service_lookup;
 
+	struct balancer_state_config state_config;
 	struct balancer_state state;
 
 	struct balancer_clock clock;
-
-	struct balancer_state_config state_config;
 
 	/// @todo: Should we store array of `balancer_vs` instead of
 	/// `balancer_vs
