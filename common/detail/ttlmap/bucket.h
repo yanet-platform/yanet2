@@ -130,9 +130,9 @@
 	__extension__({                                                        \
 		typedef typeof(*value_ptr) __value_type;                       \
 		__TTLMAP_BUCKET_ENTRY_DECLARE(key_type, __value_type);         \
-		__bucket_entry_t *entry =                                      \
+		__bucket_entry_t *__entry =                                    \
 			container_of((value_ptr), __bucket_entry_t, value);    \
-		entry->deadline = 0;                                           \
+		__entry->deadline = 0;                                         \
 	});
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -184,11 +184,11 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 		);                                                             \
 		__TTLMAP_BUCKET_DECLARE(key_type, value_type);                 \
 		const __bucket_t *__bucket = (const __bucket_t *)__addr;       \
-		size_t count = 0;                                              \
-		for (size_t i = 0; i < __TTLMAP_BUCKET_ENTRIES; ++i) {         \
-			if (__bucket->entries[i].deadline > 0) {               \
-				++count;                                       \
+		size_t __count = 0;                                            \
+		for (size_t __i = 0; __i < __TTLMAP_BUCKET_ENTRIES; ++__i) {   \
+			if (__bucket->entries[__i].deadline > 0) {             \
+				++__count;                                     \
 			}                                                      \
 		}                                                              \
-		count;                                                         \
+		__count;                                                       \
 	})
