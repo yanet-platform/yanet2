@@ -1,5 +1,6 @@
 #pragma once
 
+#include "attribute.h"
 #include "config.h"
 #include <assert.h>
 #include <filter/filter.h>
@@ -13,18 +14,11 @@
 #define VS_PURE_L3 ((uint8_t)(1u << 0))
 #define VS_FIX_MSS ((uint8_t)(1u << 1))
 
+/// @todo: what is this?
 #define YANET_BALANCER_OPS_FLAG ((uint8_t)(1u << 2))
 
 #define VS_TYPE_V4 ((uint8_t)(1u << 3))
 #define VS_TYPE_V6 ((uint8_t)(1u << 4))
-
-////////////////////////////////////////////////////////////////////////////////
-
-/// @todo: add support for gre
-enum balancer_vs_forwarding_method {
-	ipip = 0,
-	gre = 1
-};
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -38,7 +32,12 @@ enum balancer_vs_forwarding_method {
 
 #define __V4_LOOKUP_TAG __BALANCER_V4_LOOKUP_TAG
 
-FILTER_DECLARE(__V4_LOOKUP_TAG, &attribute_net4_dst, &attribute_port_dst);
+FILTER_DECLARE(
+	__V4_LOOKUP_TAG,
+	&attribute_net4_dst,
+	&attribute_port_dst,
+	&attribute_proto
+);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -92,7 +91,12 @@ v4_vs_lookup_free(struct balancer_module_config *balancer_config) {
 
 #define __V6_LOOKUP_TAG __BALANCER_V6_LOOKUP_TAG
 
-FILTER_DECLARE(__V6_LOOKUP_TAG, &attribute_net6_dst, &attribute_port_dst);
+FILTER_DECLARE(
+	__V6_LOOKUP_TAG,
+	&attribute_net6_dst,
+	&attribute_port_dst,
+	&attribute_proto
+);
 
 ////////////////////////////////////////////////////////////////////////////////
 

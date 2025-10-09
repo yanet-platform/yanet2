@@ -10,18 +10,18 @@
 
 #include "clock.h"
 
-struct balancer_vs_port_range {
-	uint16_t from;
-	uint16_t to;
-};
+/// @todo: add support for GRE
+enum balancer_vs_forwarding_method { ipip = 0, gre = 1 };
 
 struct balancer_vs {
 	uint64_t flags;
 
+	enum balancer_vs_forwarding_method forwarding_method;
+
 	uint8_t address[16];
 
-	struct balancer_vs_port_range *port_ranges;
-	size_t port_range_count;
+	uint16_t port;
+	uint8_t proto;
 
 	uint64_t real_start;
 	uint64_t real_count;

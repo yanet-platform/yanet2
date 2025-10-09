@@ -10,12 +10,13 @@
 #include "dataplane/config/zone.h"
 
 #include "controlplane/agent/agent.h"
+#include "rs.h"
 #include "vs.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_real_config {
-	uint64_t type;
+	uint64_t flags;
 	uint16_t weight;
 	uint8_t dst_addr[16];
 
@@ -30,10 +31,10 @@ struct balancer_src_prefix {
 };
 
 struct balancer_service_config {
-	uint64_t type;
+	uint64_t flags;
 	uint8_t address[16];
-	struct balancer_vs_port_range *port_ranges;
-	uint64_t port_range_count;
+	uint16_t port;
+	uint8_t proto;
 	uint64_t prefixes_count;
 	struct balancer_src_prefix *prefixes;
 	uint64_t real_count;
@@ -244,19 +245,24 @@ build_v4_service_lookup(
 			memset(rule->net4.dsts[0].mask, 0xFF, 4);
 			rule->transport.dst_count = 1;
 			rule->transport.dsts = memory_balloc(
-				mctx,
-				sizeof(struct filter_port_range) *
-					service->port_range_count
+				mctx, sizeof(struct filter_port_range)
 			);
 			if (rule->transport.dsts == NULL) {
 				goto free_on_error;
 			}
-			for (size_t k = 0; k < service->port_range_count; ++k) {
-				rule->transport.dsts[k].from =
-					service->port_ranges[k].from;
-				rule->transport.dsts[k].to =
-					service->port_ranges[k].to;
+			rule->transport.dsts[0] = (struct filter_port_range
+			){service->port, service->port};
+
+			rule->transport.proto_count = 1;
+			rule->transport.protos = memory_balloc(
+				mctx, sizeof(struct filter_proto_range)
+			);
+			if (rule->transport.protos == NULL) {
+				goto free_on_error;
 			}
+			rule->transport.protos[0] = (struct filter_proto_range
+			){service->proto, service->proto};
+
 			rule->action = v4_service_index;
 			++v4_service_index;
 		}
@@ -308,19 +314,24 @@ build_v6_service_lookup(
 			memset(rule->net6.dsts[0].mask, 0xFF, 16);
 			rule->transport.dst_count = 1;
 			rule->transport.dsts = memory_balloc(
-				mctx,
-				sizeof(struct filter_port_range) *
-					service->port_range_count
+				mctx, sizeof(struct filter_port_range)
 			);
+			rule->transport.dsts[0] = (struct filter_port_range
+			){service->port, service->port};
 			if (rule->transport.dsts == NULL) {
 				goto free_on_error;
 			}
-			for (size_t k = 0; k < service->port_range_count; ++k) {
-				rule->transport.dsts[k].from =
-					service->port_ranges[k].from;
-				rule->transport.dsts[k].to =
-					service->port_ranges[k].to;
+
+			rule->transport.proto_count = 1;
+			rule->transport.protos = memory_balloc(
+				mctx, sizeof(struct filter_proto_range)
+			);
+			if (rule->transport.protos == NULL) {
+				goto free_on_error;
 			}
+			rule->transport.protos[0] = (struct filter_proto_range
+			){service->proto, service->proto};
+
 			rule->action = v6_service_index;
 			++v6_service_index;
 		}
@@ -338,7 +349,8 @@ free_on_error:
 
 int
 balancer_module_config_add_service(
-	struct cp_module *cp_module, struct balancer_service_config *service
+	struct cp_module *cp_module,
+	struct balancer_service_config *service_config
 ) {
 	struct balancer_module_config *config = container_of(
 		cp_module, struct balancer_module_config, cp_module
@@ -348,7 +360,7 @@ balancer_module_config_add_service(
 
 	struct balancer_rs *reals = ADDR_OF(&config->reals);
 
-	for (uint64_t real_idx = 0; real_idx < service->real_count;
+	for (uint64_t real_idx = 0; real_idx < service_config->real_count;
 	     ++real_idx) {
 		if (mem_array_expand_exp(
 			    &config->cp_module.memory_context,
@@ -360,21 +372,21 @@ balancer_module_config_add_service(
 		}
 
 		reals[config->real_count - 1].flags =
-			service->reals[real_idx].type;
+			service_config->reals[real_idx].flags;
 		reals[config->real_count - 1].weight =
-			service->reals[real_idx].weight;
+			service_config->reals[real_idx].weight;
 		memcpy(reals[config->real_count - 1].dst_addr,
-		       service->reals[real_idx].dst_addr,
+		       service_config->reals[real_idx].dst_addr,
 		       16);
 		memcpy(reals[config->real_count - 1].src_addr,
-		       service->reals[real_idx].src_addr,
+		       service_config->reals[real_idx].src_addr,
 		       16);
 		memcpy(reals[config->real_count - 1].src_mask,
-		       service->reals[real_idx].src_mask,
+		       service_config->reals[real_idx].src_mask,
 		       16);
 		for (uint8_t i = 0; i < 16; i++) {
-			service->reals[real_idx].src_addr[i] &=
-				service->reals[real_idx].src_mask[i];
+			service_config->reals[real_idx].src_addr[i] &=
+				service_config->reals[real_idx].src_mask[i];
 		}
 	}
 
@@ -396,72 +408,71 @@ balancer_module_config_add_service(
 		return -1;
 	}
 
-	struct balancer_vs *balancer_service =
-		(struct balancer_vs *)memory_balloc(
-			&config->cp_module.memory_context,
-			sizeof(struct balancer_vs)
-		);
+	struct balancer_vs *service = (struct balancer_vs *)memory_balloc(
+		&config->cp_module.memory_context, sizeof(struct balancer_vs)
+	);
 
-	if (balancer_service == NULL)
+	if (service == NULL)
 		return -1;
 
 	if (ring_init(
-		    &balancer_service->real_ring,
+		    &service->real_ring,
 		    &config->cp_module.memory_context,
-		    service->real_count
+		    service_config->real_count
 	    )) {
 		return -1;
 	}
 
-	for (uint64_t real_idx = 0; real_idx < service->real_count;
+	service->proto = service_config->proto;
+
+	for (uint64_t real_idx = 0; real_idx < service_config->real_count;
 	     ++real_idx) {
 		if (ring_change_weight(
-			    &balancer_service->real_ring,
+			    &service->real_ring,
 			    real_idx,
-			    service->reals[real_idx].weight
+			    service_config->reals[real_idx].weight
 		    )) {
 			return -1;
 		}
 	}
-	services[config->service_count - 1] = balancer_service;
+	services[config->service_count - 1] = service;
 
 	for (uint64_t service_idx = 0; service_idx < config->service_count;
 	     service_idx++) {
 		SET_OFFSET_OF(&services[service_idx], services[service_idx]);
 	}
 
-	balancer_service->flags = service->type;
-	memcpy(balancer_service->address, service->address, 16);
-	balancer_service->real_start = real_start;
-	balancer_service->real_count = service->real_count;
-	if (service->type & VS_TYPE_V4) {
+	service->flags = service_config->flags;
+	memcpy(service->address, service_config->address, 16);
+	service->real_start = real_start;
+	service->real_count = service_config->real_count;
+	if (service_config->flags & VS_TYPE_V4) {
 		build_v4_service_lookup(
 			config, &config->cp_module.memory_context
 		);
-	} else if (service->type & VS_TYPE_V6) {
+	} else if (service_config->flags & VS_TYPE_V6) {
 		build_v6_service_lookup(
 			config, &config->cp_module.memory_context
 		);
 	}
-	lpm_init(
-		&balancer_service->src_filter, &config->cp_module.memory_context
-	);
+	lpm_init(&service->src_filter, &config->cp_module.memory_context);
 
-	for (uint64_t prefix_idx = 0; prefix_idx < service->prefixes_count;
+	for (uint64_t prefix_idx = 0;
+	     prefix_idx < service_config->prefixes_count;
 	     ++prefix_idx) {
 		struct balancer_src_prefix prefix =
-			service->prefixes[prefix_idx];
-		if (service->type & VS_TYPE_V4) {
+			service_config->prefixes[prefix_idx];
+		if (service_config->flags & VS_TYPE_V4) {
 			lpm_insert(
-				&balancer_service->src_filter,
+				&service->src_filter,
 				4,
 				prefix.start_addr,
 				prefix.end_addr,
 				1
 			);
-		} else if (service->type & VS_TYPE_V6) {
+		} else if (service_config->flags & VS_TYPE_V6) {
 			lpm_insert(
-				&balancer_service->src_filter,
+				&service->src_filter,
 				16,
 				prefix.start_addr,
 				prefix.end_addr,
@@ -478,11 +489,12 @@ struct balancer_service_config *
 balancer_service_config_create(
 	uint64_t type,
 	uint8_t *address,
-	uint64_t port_range_count,
+	uint16_t port,
+	uint8_t proto,
 	uint64_t real_count,
 	uint64_t prefixes_count
 ) {
-	if (port_range_count == 0 || prefixes_count == 0) {
+	if (prefixes_count == 0) {
 		return NULL;
 	}
 
@@ -498,17 +510,8 @@ balancer_service_config_create(
 	       0,
 	       sizeof(struct balancer_service_config) +
 		       sizeof(struct balancer_real_config) * real_count);
-
-	config->port_ranges = (struct balancer_vs_port_range *)malloc(
-		sizeof(struct balancer_vs_port_range) * port_range_count
-	);
-	if (config->port_ranges == NULL) {
-		return NULL;
-	}
-	for (size_t i = 0; i < port_range_count; ++i) {
-		config->port_ranges[i].from = config->port_ranges[i].to = 0;
-	}
-	config->port_range_count = port_range_count;
+	config->port = port;
+	config->proto = proto;
 
 	config->prefixes = (struct balancer_src_prefix *)malloc(
 		sizeof(struct balancer_src_prefix) * prefixes_count
@@ -521,7 +524,7 @@ balancer_service_config_create(
 	       sizeof(struct balancer_src_prefix) * prefixes_count);
 	config->prefixes_count = prefixes_count;
 
-	config->type = type;
+	config->flags = type;
 	if (type & VS_TYPE_V4) {
 		memcpy(config->address, address, 4);
 	} else if (type & VS_TYPE_V6) {
@@ -530,17 +533,6 @@ balancer_service_config_create(
 	config->real_count = real_count;
 
 	return config;
-}
-
-void
-balancer_service_config_set_port_range(
-	struct balancer_service_config *service_config,
-	uint64_t index,
-	uint16_t from,
-	uint16_t to
-) {
-	service_config->port_ranges[index].from = from;
-	service_config->port_ranges[index].to = to;
 }
 
 void
@@ -553,7 +545,7 @@ void
 balancer_service_config_set_real(
 	struct balancer_service_config *service_config,
 	uint64_t index,
-	uint64_t type,
+	uint64_t flags,
 	uint16_t weight,
 	uint8_t *dst_addr,
 	uint8_t *src_addr,
@@ -561,16 +553,16 @@ balancer_service_config_set_real(
 ) {
 	struct balancer_real_config *real_config =
 		service_config->reals + index;
-	real_config->type = type;
+	real_config->flags = flags;
 	real_config->weight = weight;
-	if (type & RS_TYPE_V4) {
-		memcpy(real_config->dst_addr, dst_addr, 4);
-		memcpy(real_config->src_addr, src_addr, 4);
-		memcpy(real_config->src_mask, src_mask, 4);
-	} else if (type & RS_TYPE_V6) {
+	if (flags & YANET_BALANCER_FLAG_DST_IPV6) {
 		memcpy(real_config->dst_addr, dst_addr, 16);
 		memcpy(real_config->src_addr, src_addr, 16);
 		memcpy(real_config->src_mask, src_mask, 16);
+	} else {
+		memcpy(real_config->dst_addr, dst_addr, 4);
+		memcpy(real_config->src_addr, src_addr, 4);
+		memcpy(real_config->src_mask, src_mask, 4);
 	}
 }
 
@@ -583,10 +575,10 @@ balancer_service_config_set_src_prefix(
 ) {
 	struct balancer_src_prefix *src_prefix =
 		service_config->prefixes + index;
-	if (service_config->type & VS_TYPE_V6) {
+	if (service_config->flags & VS_TYPE_V6) {
 		memcpy(src_prefix->start_addr, start_addr, 16);
 		memcpy(src_prefix->end_addr, end_addr, 16);
-	} else if (service_config->type & VS_TYPE_V4) {
+	} else if (service_config->flags & VS_TYPE_V4) {
 		memcpy(src_prefix->start_addr, start_addr, 4);
 		memcpy(src_prefix->end_addr, end_addr, 4);
 	}

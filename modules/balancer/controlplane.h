@@ -40,7 +40,8 @@ struct balancer_service_config *
 balancer_service_config_create(
 	uint64_t type,
 	uint8_t *address,
-	uint64_t port_range_count,
+	uint16_t ports,
+	uint8_t proto,
 	uint64_t real_count,
 	uint64_t prefixes_count
 );
@@ -52,7 +53,7 @@ void
 balancer_service_config_set_real(
 	struct balancer_service_config *config,
 	uint64_t index,
-	uint64_t type,
+	uint64_t flags,
 	uint16_t weight,
 	uint8_t *dst_addr,
 	uint8_t *src_addr,
@@ -65,14 +66,6 @@ balancer_service_config_set_src_prefix(
 	uint64_t index,
 	uint8_t *start_addr,
 	uint8_t *end_addr
-);
-
-void
-balancer_service_config_set_port_range(
-	struct balancer_service_config *service_config,
-	uint64_t index,
-	uint16_t from,
-	uint16_t to
 );
 
 int

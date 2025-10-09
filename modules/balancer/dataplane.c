@@ -10,6 +10,7 @@
 
 #include "dataplane/config/zone.h"
 #include "defines.h"
+#include "rs.h"
 #include "session.h"
 #include "state.h"
 
@@ -169,7 +170,7 @@ balancer_fill_packet_metadata(
 }
 
 static inline void
-balancer_fill_session_id(
+fill_session_id(
 	struct balancer_session_id *id,
 	struct packet_metadata *data,
 	struct balancer_vs *vs
@@ -198,7 +199,7 @@ metadata_reschedule_real(struct packet_metadata *metadata) {
 }
 
 static inline uint32_t
-metadata_storage_timeout(
+session_timeout(
 	struct balancer_state_config *state_config,
 	struct packet_metadata *metadata
 ) {
@@ -236,12 +237,11 @@ balancer_rs_lookup(
 	}
 
 	uint32_t now = clock_get_time(&config->clock);
-	uint32_t timeout =
-		metadata_storage_timeout(&config->state_config, &metadata);
+	uint32_t timeout = session_timeout(&config->state_config, &metadata);
 
 	struct balancer_rs *reals = ADDR_OF(&config->reals);
 	struct balancer_session_id session_id;
-	balancer_fill_session_id(&session_id, &metadata, vs);
+	fill_session_id(&session_id, &metadata, vs);
 
 	struct balancer_session_state *session_state;
 	balancer_session_lock_t *session_lock;
@@ -274,6 +274,7 @@ balancer_rs_lookup(
 	}
 	uint32_t real_id = ring_get(&vs->real_ring, packet->hash);
 	if (real_id == RING_VALUE_INVALID) {
+		balancer_session_unlock(session_lock);
 		return NULL;
 	}
 	real_id += vs->real_start;
@@ -286,7 +287,7 @@ balancer_rs_lookup(
 }
 
 static int
-balancer_route(
+balancer_tunnel(
 	struct balancer_module_config *config,
 	struct balancer_vs *vs,
 	struct balancer_rs *rs,
@@ -294,52 +295,49 @@ balancer_route(
 ) {
 	(void)config;
 
-	if (rs->flags == RS_TYPE_V4) {
-		if (vs->flags & VS_OPT_ENCAP) {
-			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	if (rs->flags & YANET_BALANCER_FLAG_DST_IPV6) { // IPv6
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-			struct rte_ipv4_hdr *ipv4_header =
-				rte_pktmbuf_mtod_offset(
-					mbuf,
-					struct rte_ipv4_hdr *,
-					packet->network_header.offset
-				);
-			uint32_t src_mask = *(uint32_t *)(&rs->src_mask[0]);
-			uint32_t src_addr = *(uint32_t *)(&rs->src_addr[0]);
+		struct rte_ipv6_hdr *ipv6_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
+		);
+
+		uint8_t src[16];
+		for (uint8_t i = 0; i < 16; i++) {
 			// rs->src_addr is already masked.
-			uint32_t src =
-				(ipv4_header->src_addr & ~src_mask) | src_addr;
-
-			return packet_ip4_encap(
-				packet, rs->dst_addr, (uint8_t *)(&src)
-			);
+			src[i] = (ipv6_header->src_addr[i] & (~rs->src_mask[i])
+				 ) |
+				 rs->src_addr[i];
 		}
-	}
 
-	if (rs->flags == RS_TYPE_V6) {
-		if (vs->flags & VS_OPT_ENCAP) {
-			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
-			struct rte_ipv6_hdr *ipv6_header =
-				rte_pktmbuf_mtod_offset(
-					mbuf,
-					struct rte_ipv6_hdr *,
-					packet->network_header.offset
-				);
-
-			uint8_t src[16];
-			for (uint8_t i = 0; i < 16; i++) {
-				// rs->src_addr is already masked.
-				src[i] = (ipv6_header->src_addr[i] &
-					  (~rs->src_mask[i])) |
-					 rs->src_addr[i];
-			}
-
-			return packet_ip6_encap(packet, rs->dst_addr, src);
+		if (vs->forwarding_method == gre) {
+			/// @todo: support GRE
 		}
-	}
 
-	return -1;
+		return packet_ip6_encap(packet, rs->dst_addr, src);
+	} else {
+		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+
+		struct rte_ipv4_hdr *ipv4_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv4_hdr *,
+			packet->network_header.offset
+		);
+		uint32_t src_mask = *(uint32_t *)(&rs->src_mask[0]);
+		uint32_t src_addr = *(uint32_t *)(&rs->src_addr[0]);
+		// rs->src_addr is already masked.
+		uint32_t src = (ipv4_header->src_addr & ~src_mask) | src_addr;
+
+		if (vs->forwarding_method == gre) {
+			/// @todo: support GRE
+		}
+
+		return packet_ip4_encap(
+			packet, rs->dst_addr, (uint8_t *)(&src)
+		);
+	}
 }
 
 void
@@ -392,7 +390,7 @@ balancer_handle_packets(
 			/// @todo: fix MSS here
 		}
 
-		if (balancer_route(balancer_config, vs, rs, packet) != 0) {
+		if (balancer_tunnel(balancer_config, vs, rs, packet) != 0) {
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
