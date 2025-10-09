@@ -4,12 +4,15 @@
 #include "dataplane/packet/encap.h"
 #include "ring.h"
 #include "rs_def.h"
+#include "rte_tcp.h"
 #include "session.h"
 #include "vs_def.h"
 #include <assert.h>
 #include <filter/filter.h>
 #include <netinet/in.h>
 #include <stdint.h>
+
+#include "mss.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -105,7 +108,7 @@ balancer_tunnel_packet(
 	struct packet *packet
 ) {
 	if (vs_flags & VS_FIX_MSS) {
-		/// @todo: fix MSS here
+        balancer_fix_mss(packet);
 	}
 
 	if (rs->flags & YANET_BALANCER_FLAG_DST_IPV6) { // IPv6
