@@ -19,7 +19,7 @@
 
 #define BALANCER_SESSION_FOUND TTLMAP_FOUND
 #define BALANCER_SESSION_CREATED (TTLMAP_INSERTED | TTLMAP_REPLACED)
-#define BALANCER_GET_SESSION_FAILED TTLMAP_FAILED
+#define BALANCER_SESSION_TABLE_OVERFLOW TTLMAP_FAILED
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -90,7 +90,7 @@ balancer_get_prev_storage_gen(struct balancer_state *state) {
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline int
-balancer_get_session(
+balancer_get_or_create_session(
 	struct balancer_state *state,
 	uint32_t worker_idx,
 	uint32_t now,
@@ -155,7 +155,7 @@ balancer_get_session(
 			return BALANCER_SESSION_CREATED;
 		}
 	} else { // status == TTLMAP_FAILED
-		return BALANCER_GET_SESSION_FAILED;
+		return BALANCER_SESSION_TABLE_OVERFLOW;
 	}
 }
 

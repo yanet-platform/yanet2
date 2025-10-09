@@ -1,0 +1,27 @@
+#pragma once
+
+#include <stdint.h>
+
+////////////////////////////////////////////////////////////////////////////////
+// Real Service Flags
+////////////////////////////////////////////////////////////////////////////////
+
+typedef uint8_t balancer_rs_flags_t;
+
+////////////////////////////////////////////////////////////////////////////////
+
+#define YANET_BALANCER_FLAG_ENABLED ((uint8_t)(1u << 0))
+#define YANET_BALANCER_FLAG_DST_IPV6 ((uint8_t)(1u << 1))
+
+#define IPv4_OUTER_SOURCE_NETWORK_FLAG ((uint8_t)(1u << 2))
+#define IPv6_OUTER_SOURCE_NETWORK_FLAG ((uint8_t)(1u << 3))
+
+////////////////////////////////////////////////////////////////////////////////
+
+struct balancer_rs {
+	balancer_rs_flags_t flags;
+	uint16_t weight;
+	uint8_t dst_addr[16];
+	uint8_t src_addr[16];
+	uint8_t src_mask[16];
+};

@@ -40,7 +40,7 @@ run_worker(struct worker_config *config) {
 		);
 		struct balancer_session_state *session_state;
 		balancer_session_lock_t *session_lock;
-		int res = balancer_get_session(
+		int res = balancer_get_or_create_session(
 			config->balancer,
 			config->worker_idx,
 			now,
@@ -49,7 +49,7 @@ run_worker(struct worker_config *config) {
 			&session_state,
 			&session_lock
 		);
-		if (res == BALANCER_GET_SESSION_FAILED) {
+		if (res == BALANCER_SESSION_TABLE_OVERFLOW) {
 			LOG(WARN,
 			    "worker #%u failed to insert on %zu iteration",
 			    config->worker_idx,

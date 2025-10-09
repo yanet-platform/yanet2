@@ -10,7 +10,8 @@
 #include "dataplane/config/zone.h"
 
 #include "controlplane/agent/agent.h"
-#include "rs.h"
+#include "rs_def.h"
+#include "session.h"
 #include "vs.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -54,12 +55,14 @@ config_data_init(
 	struct memory_context *mctx,
 	size_t workers_cnt
 ) {
-	set_default_timeout_if_empty(&config->state_config.tcp_syn_ack_timeout);
-	set_default_timeout_if_empty(&config->state_config.tcp_syn_timeout);
-	set_default_timeout_if_empty(&config->state_config.tcp_fin_timeout);
-	set_default_timeout_if_empty(&config->state_config.tcp_timeout);
-	set_default_timeout_if_empty(&config->state_config.udp_timeout);
-	set_default_timeout_if_empty(&config->state_config.default_timeout);
+	struct balancer_session_timeouts *timeouts =
+		&config->state_config.timeouts;
+	set_default_timeout_if_empty(&timeouts->tcp_syn_ack_timeout);
+	set_default_timeout_if_empty(&timeouts->tcp_syn_timeout);
+	set_default_timeout_if_empty(&timeouts->tcp_fin_timeout);
+	set_default_timeout_if_empty(&timeouts->tcp_timeout);
+	set_default_timeout_if_empty(&timeouts->udp_timeout);
+	set_default_timeout_if_empty(&timeouts->default_timeout);
 
 	clock_init(&config->clock);
 
@@ -202,12 +205,14 @@ balancer_module_config_set_state_config(
 		cp_module, struct balancer_module_config, cp_module
 	);
 
-	config->state_config.tcp_syn_ack_timeout = tcp_syn_ack_timeout;
-	config->state_config.tcp_syn_timeout = tcp_syn_timeout;
-	config->state_config.tcp_fin_timeout = tcp_fin_timeout;
-	config->state_config.tcp_timeout = tcp_timeout;
-	config->state_config.udp_timeout = udp_timeout;
-	config->state_config.default_timeout = default_timeout;
+	struct balancer_session_timeouts *timeouts =
+		&config->state_config.timeouts;
+	timeouts->tcp_syn_ack_timeout = tcp_syn_ack_timeout;
+	timeouts->tcp_syn_timeout = tcp_syn_timeout;
+	timeouts->tcp_fin_timeout = tcp_fin_timeout;
+	timeouts->tcp_timeout = tcp_timeout;
+	timeouts->udp_timeout = udp_timeout;
+	timeouts->default_timeout = default_timeout;
 	config->state_config.sessions_to_reserve = sessions_to_reserve;
 }
 

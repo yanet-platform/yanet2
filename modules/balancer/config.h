@@ -1,51 +1,17 @@
 #pragma once
 
-#include "ring.h"
-#include "state.h"
-
 #include <common/lpm.h>
 #include <controlplane/config/cp_module.h>
 
 #include <filter/filter.h>
 
 #include "clock.h"
+#include "state.h"
 
-/// @todo: add support for GRE
-enum balancer_vs_forwarding_method { ipip = 0, gre = 1 };
-
-struct balancer_vs {
-	uint64_t flags;
-
-	enum balancer_vs_forwarding_method forwarding_method;
-
-	uint8_t address[16];
-
-	uint16_t port;
-	uint8_t proto;
-
-	uint64_t real_start;
-	uint64_t real_count;
-
-	struct lpm src_filter;
-
-	struct ring real_ring;
-};
-
-struct balancer_rs {
-	uint64_t flags;
-	uint16_t weight;
-	uint8_t dst_addr[16];
-	uint8_t src_addr[16];
-	uint8_t src_mask[16];
-};
+////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_state_config {
-	uint32_t tcp_syn_ack_timeout;
-	uint32_t tcp_syn_timeout;
-	uint32_t tcp_fin_timeout;
-	uint32_t tcp_timeout;
-	uint32_t udp_timeout;
-	uint32_t default_timeout;
+	struct balancer_session_timeouts timeouts;
 	uint32_t sessions_to_reserve;
 };
 

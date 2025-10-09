@@ -2,6 +2,7 @@
 #include "common/memory.h"
 #include "defines.h"
 #include "session.h"
+#include <netinet/in.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -38,9 +39,7 @@ gen_sessions(
 			}
 		}
 		session->transport_proto =
-			(rng_next(&rng) % 2 == 0)
-				? METADATA_TRANSPORT_PROTO_TCP
-				: METADATA_TRANSPORT_PROTO_UDP;
+			(rng_next(&rng) % 2 == 0) ? IPPROTO_TCP : IPPROTO_UDP;
 		session->port_source = rng_next(&rng) & 0xFFFF;
 		session->port_destination = rng_next(&rng) & 0xFFFF;
 	}
