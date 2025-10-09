@@ -165,7 +165,9 @@ balancer_fix_mss(struct packet *packet) {
 		cksum = __csum_plus(cksum, 0x1 << 4);
 		cksum = __csum_plus(cksum, *(uint16_t *)option);
 		cksum = __csum_plus(cksum, *(uint16_t *)option->data);
-		cksum = __csum_plus(cksum, rte_cpu_to_be_16(TCP_OPTION_MSS_LEN));
+		cksum = __csum_plus(
+			cksum, rte_cpu_to_be_16(TCP_OPTION_MSS_LEN)
+		);
 		tcp_header->cksum = (cksum == 0xffff) ? cksum : ~cksum;
 
 		if (packet->network_header.type ==
