@@ -2,7 +2,6 @@
 #include "clock.h"
 #include "common/memory_address.h"
 #include "config.h"
-#include "defines.h"
 
 #include "common/exp_array.h"
 #include "common/memory.h"
@@ -42,14 +41,7 @@ struct balancer_service_config {
 	struct balancer_real_config reals[];
 };
 
-static void
-set_default_timeout_if_empty(uint32_t *value) {
-	if (*value == 0) {
-		*value = STATE_TIMEOUT_DEFAULT;
-	}
-}
-
-static int
+int
 config_data_init(
 	struct balancer_module_config *config,
 	struct memory_context *mctx,
@@ -57,20 +49,16 @@ config_data_init(
 ) {
 	struct balancer_session_timeouts *timeouts =
 		&config->state_config.timeouts;
-	set_default_timeout_if_empty(&timeouts->tcp_syn_ack_timeout);
-	set_default_timeout_if_empty(&timeouts->tcp_syn_timeout);
-	set_default_timeout_if_empty(&timeouts->tcp_fin_timeout);
-	set_default_timeout_if_empty(&timeouts->tcp_timeout);
-	set_default_timeout_if_empty(&timeouts->udp_timeout);
-	set_default_timeout_if_empty(&timeouts->default_timeout);
+	memset(timeouts, 0, sizeof(struct balancer_session_timeouts));
+	config->state_config.sessions_to_reserve = 1;
 
 	clock_init(&config->clock);
 
-	int ret = v4_vs_lookup_init(config, mctx, NULL, 0);
+	int ret = balancer_vsv4_table_init(config, mctx, NULL, 0);
 	if (ret < 0) {
 		return -1;
 	}
-	ret = v6_vs_lookup_init(config, mctx, NULL, 0);
+	ret = balancer_vsv6_table_init(config, mctx, NULL, 0);
 	if (ret < 0) {
 		return -1;
 	}
@@ -83,7 +71,7 @@ config_data_init(
 }
 
 struct cp_module *
-balancer_module_config_init(struct agent *agent, const char *name) {
+zbalancer_module_config_init(struct agent *agent, const char *name) {
 	struct balancer_module_config *config =
 		(struct balancer_module_config *)memory_balloc(
 			&agent->memory_context,
@@ -178,7 +166,7 @@ balancer_module_config_free(struct cp_module *cp_module) {
 		config->service_count
 	);
 
-	v4_vs_lookup_free(config);
+	balancer_vsv4_table_free(config);
 	v6_vs_lookup_free(config);
 
 	balancer_state_free(&config->state);
@@ -191,15 +179,14 @@ balancer_module_config_free(struct cp_module *cp_module) {
 }
 
 void
-balancer_module_config_set_state_config(
+balancer_module_config_set_timeouts(
 	struct cp_module *cp_module,
 	uint32_t tcp_syn_ack_timeout,
 	uint32_t tcp_syn_timeout,
 	uint32_t tcp_fin_timeout,
 	uint32_t tcp_timeout,
 	uint32_t udp_timeout,
-	uint32_t default_timeout,
-	uint32_t sessions_to_reserve
+	uint32_t default_timeout
 ) {
 	struct balancer_module_config *config = container_of(
 		cp_module, struct balancer_module_config, cp_module
@@ -213,7 +200,6 @@ balancer_module_config_set_state_config(
 	timeouts->tcp_timeout = tcp_timeout;
 	timeouts->udp_timeout = udp_timeout;
 	timeouts->default_timeout = default_timeout;
-	config->state_config.sessions_to_reserve = sessions_to_reserve;
 }
 
 static int
@@ -273,8 +259,8 @@ build_v4_service_lookup(
 		}
 	}
 
-	v4_vs_lookup_free(config);
-	int ret = v4_vs_lookup_init(config, mctx, rules, v4_service_count);
+	balancer_vsv4_table_free(config);
+	int ret = balancer_vsv4_table_init(config, mctx, rules, v4_service_count);
 	if (ret < 0) {
 		goto free_on_error;
 	}
@@ -342,7 +328,7 @@ build_v6_service_lookup(
 		}
 	}
 	v6_vs_lookup_free(config);
-	int ret = v6_vs_lookup_init(config, mctx, rules, v6_service_count);
+	int ret = balancer_vsv6_table_init(config, mctx, rules, v6_service_count);
 	if (ret < 0) {
 		goto free_on_error;
 	}

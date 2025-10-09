@@ -25,7 +25,7 @@ lib_balancer_dp = static_library(
 
 lib_balancer_dp_dep = declare_dependency(
   link_with: lib_balancer_dp,
-  dependencies: [libdpdk_dep]
+  dependencies: [dp_dependencies, libdpdk_dep]
 )
 
 cp_dependencies = dependencies + [lib_config_cp_dep]
@@ -45,6 +45,7 @@ lib_balancer_cp = static_library(
 
 lib_balancer_cp_dep = declare_dependency(
   link_with: lib_balancer_cp,
+  dependencies: dependencies
 )
 
 subdir('controlplane')

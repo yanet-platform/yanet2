@@ -10,7 +10,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define VS_ID_INVALID (uint32_t)-1
+#define VS_ID_INVALID (uint32_t)(-1)
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -30,7 +30,7 @@ FILTER_DECLARE(
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline uint32_t
-v4_vs_lookup_get(
+balancer_vsv4_table_get(
 	struct balancer_module_config *balancer_config, struct packet *packet
 ) {
 	uint32_t *actions;
@@ -51,7 +51,7 @@ v4_vs_lookup_get(
 }
 
 static inline int
-v4_vs_lookup_init(
+balancer_vsv4_table_init(
 	struct balancer_module_config *balancer_config,
 	struct memory_context *mctx,
 	struct filter_rule *rules,
@@ -67,7 +67,7 @@ v4_vs_lookup_init(
 }
 
 static inline void
-v4_vs_lookup_free(struct balancer_module_config *balancer_config) {
+balancer_vsv4_table_free(struct balancer_module_config *balancer_config) {
 	FILTER_FREE(&balancer_config->v4_service_lookup, __V4_LOOKUP_TAG);
 }
 
@@ -89,7 +89,7 @@ FILTER_DECLARE(
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline uint32_t
-v6_vs_lookup_get(
+balancer_vsv6_table_get(
 	struct balancer_module_config *balancer_config, struct packet *packet
 ) {
 	uint32_t *actions;
@@ -110,7 +110,7 @@ v6_vs_lookup_get(
 }
 
 static inline int
-v6_vs_lookup_init(
+balancer_vsv6_table_init(
 	struct balancer_module_config *balancer_config,
 	struct memory_context *mctx,
 	struct filter_rule *rules,
@@ -133,7 +133,7 @@ v6_vs_lookup_free(struct balancer_module_config *balancer_config) {
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline struct balancer_vs *
-balancer_vs_v4_lookup(
+balancer_lookup_vsv4(
 	struct balancer_module_config *balancer_config, struct packet *packet
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -142,7 +142,7 @@ balancer_vs_v4_lookup(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-	uint32_t service_id = v4_vs_lookup_get(balancer_config, packet);
+	uint32_t service_id = balancer_vsv4_table_get(balancer_config, packet);
 	if (service_id == VS_ID_INVALID) {
 		return NULL;
 	}
@@ -166,7 +166,7 @@ balancer_vs_v4_lookup(
 }
 
 static inline struct balancer_vs *
-balancer_vs_v6_lookup(
+balancer_lookup_vsv6(
 	struct balancer_module_config *balancer_config, struct packet *packet
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -175,7 +175,7 @@ balancer_vs_v6_lookup(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	uint32_t service_id = v6_vs_lookup_get(balancer_config, packet);
+	uint32_t service_id = balancer_vsv6_table_get(balancer_config, packet);
 	if (service_id == VS_ID_INVALID) {
 		return NULL;
 	}
@@ -208,10 +208,10 @@ balancer_lookup_vs(
 ) {
 	if (packet->network_header.type ==
 	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		return balancer_vs_v4_lookup(balancer_config, packet);
+		return balancer_lookup_vsv4(balancer_config, packet);
 	} else if (packet->network_header.type ==
 		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		return balancer_vs_v6_lookup(balancer_config, packet);
+		return balancer_lookup_vsv6(balancer_config, packet);
 	} else {
 		return NULL;
 	}

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 struct agent;
@@ -20,15 +21,14 @@ balancer_module_config_update_real_weight(
 );
 
 void
-balancer_module_config_set_state_config(
+balancer_module_config_set_timeouts(
 	struct cp_module *cp_module,
 	uint32_t tcp_syn_ack_timeout,
 	uint32_t tcp_syn_timeout,
 	uint32_t tcp_fin_timeout,
 	uint32_t tcp_timeout,
 	uint32_t udp_timeout,
-	uint32_t default_timeout,
-	uint32_t sessions_to_reserve
+	uint32_t default_timeout
 );
 
 void
@@ -38,9 +38,9 @@ struct balancer_service_config;
 
 struct balancer_service_config *
 balancer_service_config_create(
-	uint64_t type,
+	uint64_t flags,
 	uint8_t *address,
-	uint16_t ports,
+	uint16_t port,
 	uint8_t proto,
 	uint64_t real_count,
 	uint64_t prefixes_count

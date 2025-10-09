@@ -107,8 +107,8 @@ balancer_tunnel_packet(
 	struct balancer_rs *rs,
 	struct packet *packet
 ) {
-	if (vs_flags & VS_FIX_MSS) {
-		balancer_fix_mss(packet);
+	if ((vs_flags & VS_FIX_MSS) && (vs_flags & VS_TYPE_V6)) {
+		balancer_fix_mss_ipv6(packet);
 	}
 
 	if (rs->flags & YANET_BALANCER_FLAG_DST_IPV6) { // IPv6

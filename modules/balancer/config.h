@@ -1,6 +1,5 @@
 #pragma once
 
-#include <common/lpm.h>
 #include <controlplane/config/cp_module.h>
 
 #include <filter/filter.h>

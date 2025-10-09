@@ -3,6 +3,7 @@ package balancer_test
 //#cgo CFLAGS: -I../../../../../build
 //#cgo CFLAGS: -I../../../../.. -I../../../../../lib -I../../../../../common
 //#cgo CFLAGS: -I../../../
+//#cgo LDFLAGS: -L../../../../../build/filter -lfilter
 //#cgo LDFLAGS: -L../../../../../build/modules/balancer -lbalancer_dp
 //#cgo LDFLAGS: -L../../../../../build/modules/balancer -lbalancer_cp
 //#cgo LDFLAGS: -L../../../../../build/lib/dataplane/packet -lpacket

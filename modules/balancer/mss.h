@@ -57,7 +57,7 @@ __csum_minus(uint16_t val0, uint16_t val1) { // NOLINT
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline void
-balancer_fix_mss(struct packet *packet) {
+balancer_fix_mss_ipv6(struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	if (packet->transport_header.type == IPPROTO_TCP) {
 		struct rte_tcp_hdr *tcp_header = rte_pktmbuf_mtod_offset(
@@ -170,37 +170,15 @@ balancer_fix_mss(struct packet *packet) {
 		);
 		tcp_header->cksum = (cksum == 0xffff) ? cksum : ~cksum;
 
-		if (packet->network_header.type ==
-		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			struct rte_ipv4_hdr *ipv4_header =
-				rte_pktmbuf_mtod_offset(
-					mbuf,
-					struct rte_ipv4_hdr *,
-					packet->network_header.offset
-				);
-			ipv4_header->total_length = rte_cpu_to_be_16(
-				rte_be_to_cpu_16(ipv4_header->total_length) +
-				TCP_OPTION_MSS_LEN
-			);
-
-			cksum = ~ipv4_header->hdr_checksum;
-			cksum = __csum_plus(
-				cksum, rte_cpu_to_be_16(TCP_OPTION_MSS_LEN)
-			);
-			ipv4_header->hdr_checksum =
-				(cksum == 0xffff) ? cksum : ~cksum;
-		} else if (packet->network_header.type ==
-			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			struct rte_ipv6_hdr *ipv6_header =
-				rte_pktmbuf_mtod_offset(
-					mbuf,
-					struct rte_ipv6_hdr *,
-					packet->network_header.offset
-				);
-			ipv6_header->payload_len = rte_cpu_to_be_16(
-				rte_be_to_cpu_16(ipv6_header->payload_len) +
-				TCP_OPTION_MSS_LEN
-			);
-		}
+        struct rte_ipv6_hdr *ipv6_header =
+            rte_pktmbuf_mtod_offset(
+                mbuf,
+                struct rte_ipv6_hdr *,
+                packet->network_header.offset
+            );
+        ipv6_header->payload_len = rte_cpu_to_be_16(
+            rte_be_to_cpu_16(ipv6_header->payload_len) +
+            TCP_OPTION_MSS_LEN
+        );
 	}
 }
