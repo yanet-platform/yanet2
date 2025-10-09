@@ -11,10 +11,10 @@
  */
 #define ADDR_OF(OFFSET)                                                        \
 	__extension__({                                                        \
-		typeof(*(OFFSET)) _offset_val = *(OFFSET);                     \
-		(typeof(_offset_val))((uintptr_t)_offset_val +                 \
-				      (uintptr_t)((_offset_val) ? (OFFSET)     \
-								: NULL));      \
+		typeof(*(OFFSET)) offset_val = *(OFFSET);                      \
+		(typeof(offset_val))((uintptr_t)offset_val +                   \
+				     (uintptr_t)((offset_val) ? (OFFSET)       \
+							      : NULL));        \
 	})
 
 /**

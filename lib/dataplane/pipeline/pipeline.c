@@ -17,19 +17,10 @@ module_ectx_process(
 	struct packet_front *packet_front
 
 ) {
+	(void)dp_config;
 	(void)cp_config_gen;
 
-	struct cp_module *cp_module = ADDR_OF(&module_ectx->module);
-	struct dp_module *dp_module =
-		ADDR_OF(&dp_config->dp_modules) + cp_module->dp_module_idx;
-
-	dp_module->handler(
-		dp_config,
-		dp_worker->idx,
-		cp_module,
-		ADDR_OF(&module_ectx->counter_storage),
-		packet_front
-	);
+	module_ectx->handler(dp_worker, module_ectx, packet_front);
 
 	LOG_TRACEX(int in = packet_list_counter(&packet_front->input);
 		   int out = packet_list_counter(&packet_front->output);
@@ -126,4 +117,61 @@ pipeline_ectx_process(
 			packet_front
 		);
 	}
+}
+
+static void
+device_entry_ectx_process(
+	struct dp_worker *dp_worker,
+	struct device_ectx *device_ectx,
+	struct device_entry_ectx *entry_ectx,
+	struct packet_front *packet_front,
+	struct packet *packet
+) {
+	entry_ectx->handler(dp_worker, device_ectx, packet);
+	packet->tx_device_id =
+		ADDR_OF(&device_ectx->cp_device)->config_item.index;
+
+	if (!entry_ectx->pipeline_map_size) {
+		packet->pipeline_ectx = NULL;
+		packet_list_add(&packet_front->drop, packet);
+		return;
+	}
+	struct pipeline_ectx *pipeline_ectx =
+		ADDR_OF(entry_ectx->pipeline_map +
+			packet->hash % entry_ectx->pipeline_map_size);
+	if (!pipeline_ectx) {
+		packet->pipeline_ectx = NULL;
+		packet_list_add(&packet_front->drop, packet);
+		return;
+	}
+	packet->pipeline_ectx = pipeline_ectx;
+	packet_list_add(&packet_front->pending, packet);
+}
+
+void
+device_ectx_process_input(
+	struct dp_worker *dp_worker,
+	struct device_ectx *device_ectx,
+	struct packet_front *packet_front,
+	struct packet *packet
+) {
+	struct device_entry_ectx *entry_ectx =
+		ADDR_OF(&device_ectx->input_pipelines);
+	device_entry_ectx_process(
+		dp_worker, device_ectx, entry_ectx, packet_front, packet
+	);
+}
+
+void
+device_ectx_process_output(
+	struct dp_worker *dp_worker,
+	struct device_ectx *device_ectx,
+	struct packet_front *packet_front,
+	struct packet *packet
+) {
+	struct device_entry_ectx *entry_ectx =
+		ADDR_OF(&device_ectx->output_pipelines);
+	device_entry_ectx_process(
+		dp_worker, device_ectx, entry_ectx, packet_front, packet
+	);
 }

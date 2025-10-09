@@ -26,7 +26,7 @@ cp_chain_create(
 	}
 
 	if (counter_registry_init(
-		    &new_chain->counter_registry, memory_context, 1
+		    &new_chain->counter_registry, memory_context, 0
 	    )) {
 		goto error;
 	}

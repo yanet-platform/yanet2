@@ -3963,12 +3963,12 @@ test_nat64_udp_checksum() {
 
 	TEST_ASSERT_EQUAL(push_packet(&pkt), 0, "Failed to push packet\n");
 
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
 	test_params.module->handler(
-		NULL,
-		0,
-		&test_params.module_config.cp_module,
-		NULL,
-		&test_params.packet_front
+		NULL, &module_ectx, &test_params.packet_front
 	);
 
 	// Verify output
@@ -4042,12 +4042,12 @@ process_test_case(struct test_case *tc) {
 		tc->name
 	);
 
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
 	test_params.module->handler(
-		NULL,
-		0,
-		&test_params.module_config.cp_module,
-		NULL,
-		&test_params.packet_front
+		NULL, &module_ectx, &test_params.packet_front
 	);
 
 	if (tc->pkt_expected.eth.dst_addr.addr_bytes[0] == 0) {

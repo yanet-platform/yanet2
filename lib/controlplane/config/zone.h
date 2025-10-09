@@ -24,7 +24,7 @@
 struct dp_config;
 struct cp_config;
 struct cp_config_gen;
-struct config_ectx;
+struct config_gen_ectx;
 
 /*
  * Configuration generation denotes a snapshot of controlplane
@@ -42,7 +42,7 @@ struct cp_config_gen {
 
 	struct cp_config *cp_config;
 	struct dp_config *dp_config;
-	struct config_ectx *config_ectx;
+	struct config_gen_ectx *config_gen_ectx;
 
 	struct cp_module_registry module_registry;
 	struct cp_function_registry function_registry;

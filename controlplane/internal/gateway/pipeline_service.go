@@ -132,19 +132,24 @@ func (m *DeviceService) Update(
 	configs := make([]ffi.DeviceConfig, 0, len(devices))
 	for _, deviceConfig := range devices {
 		cfg := ffi.DeviceConfig{
-			Name:      deviceConfig.GetName(),
-			DeviceId:  uint16(deviceConfig.GetDeviceId()),
-			Vlan:      uint16(deviceConfig.GetVlan()),
-			Pipelines: make([]ffi.DevicePipelineConfig, 0, len(deviceConfig.GetPipelines())),
+			Name:   deviceConfig.GetName(),
+			Input:  make([]ffi.DevicePipelineConfig, 0, len(deviceConfig.GetInput())),
+			Output: make([]ffi.DevicePipelineConfig, 0, len(deviceConfig.GetOutput())),
 		}
 
-		for _, pipeline := range deviceConfig.GetPipelines() {
-			cfg.Pipelines = append(cfg.Pipelines, ffi.DevicePipelineConfig{
+		for _, pipeline := range deviceConfig.GetInput() {
+			cfg.Input = append(cfg.Input, ffi.DevicePipelineConfig{
 				Name:   pipeline.GetName(),
 				Weight: pipeline.GetWeight(),
 			})
 		}
 
+		for _, pipeline := range deviceConfig.GetOutput() {
+			cfg.Output = append(cfg.Output, ffi.DevicePipelineConfig{
+				Name:   pipeline.GetName(),
+				Weight: pipeline.GetWeight(),
+			})
+		}
 		configs = append(configs, cfg)
 	}
 

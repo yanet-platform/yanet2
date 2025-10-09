@@ -21,6 +21,11 @@ struct dp_module {
 	module_handler handler;
 };
 
+struct dp_device_handler {
+	device_handler input;
+	device_handler output;
+};
+
 struct dp_worker {
 	uint64_t idx;
 
@@ -56,8 +61,12 @@ struct dp_config {
 	pid_t config_lock;
 
 	struct dp_topology dp_topology;
+
 	uint64_t module_count;
 	struct dp_module *dp_modules;
+
+	uint64_t device_handler_count;
+	struct dp_device_handler *dp_device_handlers;
 
 	struct cp_config *cp_config;
 

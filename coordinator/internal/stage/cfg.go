@@ -35,10 +35,9 @@ type PipelineConfig struct {
 type DeviceConfig struct {
 	// ID is the ID of the device.
 	Name string `yaml:"name"`
-	DeviceId uint32 `yaml:"id"`
-	Vlan uint32 `yaml:"vlan"`
 	// Pipelines is the list of pipelines to assign to the device.
-	Pipelines []DevicePipelineConfig `yaml:"pipelines"`
+	Input  []DevicePipelineConfig `yaml:"input"`
+	Output []DevicePipelineConfig `yaml:"output"`
 }
 
 // DevicePipelineConfig represents a pipeline configuration for a device.

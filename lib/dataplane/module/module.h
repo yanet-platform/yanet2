@@ -24,18 +24,18 @@
  * before and after pipeline processing.
  */
 struct packet_front {
+	struct packet_list pending;
 	struct packet_list input;
 	struct packet_list output;
 	struct packet_list drop;
-	struct packet_list bypass;
 };
 
 static inline void
 packet_front_init(struct packet_front *packet_front) {
+	packet_list_init(&packet_front->pending);
 	packet_list_init(&packet_front->input);
 	packet_list_init(&packet_front->output);
 	packet_list_init(&packet_front->drop);
-	packet_list_init(&packet_front->bypass);
 }
 
 static inline void
@@ -46,11 +46,6 @@ packet_front_output(struct packet_front *packet_front, struct packet *packet) {
 static inline void
 packet_front_drop(struct packet_front *packet_front, struct packet *packet) {
 	packet_list_add(&packet_front->drop, packet);
-}
-
-static inline void
-packet_front_bypass(struct packet_front *packet_front, struct packet *packet) {
-	packet_list_add(&packet_front->bypass, packet);
 }
 
 static inline void
@@ -66,7 +61,8 @@ packet_front_pass(struct packet_front *packet_front) {
 }
 
 struct dp_config;
-struct cp_module;
+struct module_ectx;
+struct dp_worker;
 struct counter_storage;
 
 /*
@@ -77,10 +73,8 @@ struct counter_storage;
  * Also module may create new packet and put the into output queue.
  */
 typedef void (*module_handler)(
-	struct dp_config *dp_config,
-	uint64_t worker_idx,
-	struct cp_module *cp_module,
-	struct counter_storage *counter_storage,
+	struct dp_worker *dp_worker,
+	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 );
 
@@ -90,3 +84,11 @@ struct module {
 };
 
 typedef struct module *(*module_load_handler)();
+
+struct device_ectx;
+
+typedef void (*device_handler)(
+	struct dp_worker *dp_worker,
+	struct device_ectx *device_ectx,
+	struct packet *packet
+);

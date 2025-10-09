@@ -7,9 +7,36 @@
 #include "controlplane/config/zone.h"
 
 static inline uint64_t
-cp_device_alloc_size(uint64_t pipeline_count) {
-	return sizeof(struct cp_device) +
-	       sizeof(struct cp_pipeline_weight) * pipeline_count;
+cp_device_entry_alloc_size(uint64_t pipeline_count) {
+	return sizeof(struct cp_device_entry) +
+	       sizeof(struct cp_device_pipeline) * pipeline_count;
+}
+
+static struct cp_device_entry *
+cp_device_entry_create(
+	struct memory_context *memory_context,
+	struct cp_device_entry_config *cp_device_entry_config
+) {
+	uint64_t alloc_size =
+		cp_device_entry_alloc_size(cp_device_entry_config->count);
+	struct cp_device_entry *cp_device_entry = (struct cp_device_entry *)
+		memory_balloc(memory_context, alloc_size);
+	if (cp_device_entry == NULL)
+		return NULL;
+	memset(cp_device_entry, 0, alloc_size);
+	cp_device_entry->pipeline_count = cp_device_entry_config->count;
+	for (uint64_t idx = 0; idx < cp_device_entry_config->count; ++idx) {
+		struct cp_device_pipeline *cp_device_pipeline =
+			cp_device_entry->pipelines + idx;
+		struct cp_pipeline_weight_config *cp_device_pipeline_config =
+			cp_device_entry_config->pipelines + idx;
+		strtcpy(cp_device_pipeline->name,
+			cp_device_pipeline_config->name,
+			CP_PIPELINE_NAME_LEN);
+		cp_device_pipeline->weight = cp_device_pipeline_config->weight;
+	}
+
+	return cp_device_entry;
 }
 
 struct cp_device *
@@ -24,47 +51,69 @@ cp_device_create(
 	(void)cp_config_gen;
 
 	struct cp_device *new_device = (struct cp_device *)memory_balloc(
-		memory_context,
-		cp_device_alloc_size(device_config->pipeline_weight_count)
+		memory_context, sizeof(struct cp_device)
 	);
 	if (new_device == NULL) {
 		return NULL;
 	}
-	memset(new_device,
-	       0,
-	       cp_device_alloc_size(device_config->pipeline_weight_count));
-
-	registry_item_init(&new_device->config_item);
-
-	new_device->pipeline_count = device_config->pipeline_weight_count;
+	memset(new_device, 0, sizeof(struct cp_device_config));
 	strtcpy(new_device->name, device_config->name, CP_DEVICE_NAME_LEN);
 
-	new_device->device_id = device_config->device_id;
-	new_device->vlan = device_config->vlan;
-
-	for (uint64_t idx = 0; idx < device_config->pipeline_weight_count;
-	     ++idx) {
-		struct cp_pipeline_weight_config *pipeline_weight =
-			device_config->pipeline_weights + idx;
-		strtcpy(new_device->pipeline_weights[idx].name,
-			pipeline_weight->name,
-			CP_PIPELINE_NAME_LEN);
-		new_device->pipeline_weights[idx].weight =
-			pipeline_weight->weight;
+	SET_OFFSET_OF(
+		&new_device->input_pipelines,
+		cp_device_entry_create(
+			memory_context, device_config->input_pipelines
+		)
+	);
+	if (new_device->input_pipelines == NULL) {
+		cp_device_free(memory_context, new_device);
+		return NULL;
 	}
+
+	SET_OFFSET_OF(
+		&new_device->output_pipelines,
+		cp_device_entry_create(
+			memory_context, device_config->output_pipelines
+		)
+	);
+	if (new_device->output_pipelines == NULL) {
+		cp_device_free(memory_context, new_device);
+		return NULL;
+	}
+
+	registry_item_init(&new_device->config_item);
+	counter_registry_init(&new_device->counter_registry, memory_context, 0);
 
 	return new_device;
 }
 
-void
-cp_device_free(
-	struct memory_context *memory_context, struct cp_device *device
+static void
+cp_device_entry_free(
+	struct memory_context *memory_context,
+	struct cp_device_entry *cp_device_entry
 ) {
+	if (cp_device_entry == NULL)
+		return;
 	memory_bfree(
 		memory_context,
-		device,
-		cp_device_alloc_size(device->pipeline_count)
+		cp_device_entry,
+		cp_device_entry_alloc_size(cp_device_entry->pipeline_count)
 	);
+}
+
+void
+cp_device_free(
+	struct memory_context *memory_context, struct cp_device *cp_device
+) {
+	cp_device_entry_free(
+		memory_context, ADDR_OF(&cp_device->output_pipelines)
+	);
+
+	cp_device_entry_free(
+		memory_context, ADDR_OF(&cp_device->input_pipelines)
+	);
+
+	memory_bfree(memory_context, cp_device, sizeof(struct cp_device));
 }
 
 int

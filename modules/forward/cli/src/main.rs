@@ -94,10 +94,10 @@ pub struct L2ForwardCmd {
     pub instances: Vec<u32>,
     /// Source device ID.
     #[arg(required = true, long = "src", value_name = "src-dev-id")]
-    pub src: u16,
+    pub src: String,
     /// Destination device ID.
     #[arg(required = true, long = "dst", value_name = "dst-dev-id")]
-    pub dst: u16,
+    pub dst: String,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -110,13 +110,13 @@ pub struct AddL3ForwardCmd {
     pub instances: Vec<u32>,
     /// Source device ID.
     #[arg(required = true, long = "src", value_name = "src-dev-id")]
-    pub src: u16,
+    pub src: String,
     /// Network prefix.
     #[arg(required = true, long = "net", value_name = "network")]
     pub network: IpNet,
     /// Destination device ID.
     #[arg(required = true, long = "dst", value_name = "dst-dev-id")]
-    pub dst: u16,
+    pub dst: String,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -129,7 +129,7 @@ pub struct RemoveL3ForwardCmd {
     pub instances: Vec<u32>,
     /// Source device ID.
     #[arg(required = true, long = "src", value_name = "src-dev-id")]
-    pub src: u16,
+    pub src: String,
     /// Network prefix.
     #[arg(required = true, long = "net", value_name = "network")]
     pub network: IpNet,
@@ -197,8 +197,8 @@ impl ForwardService {
                     config_name: cmd.config_name.clone(),
                     dataplane_instance: instance,
                 }),
-                src_dev_id: cmd.src as u32,
-                dst_dev_id: cmd.dst as u32,
+                src_dev_id: cmd.src.to_string(),
+                dst_dev_id: cmd.dst.to_string(),
             };
             log::trace!("L2ForwardEnableRequest: {request:?}");
             let response = self.client.enable_l2_forward(request).await?.into_inner();
@@ -214,10 +214,10 @@ impl ForwardService {
                     config_name: cmd.config_name.clone(),
                     dataplane_instance: instance,
                 }),
-                src_dev_id: cmd.src as u32,
+                src_dev_id: cmd.src.to_string(),
                 forward: Some(L3ForwardEntry {
                     network: cmd.network.to_string(),
-                    dst_dev_id: cmd.dst as u32,
+                    dst_dev_id: cmd.dst.to_string(),
                 }),
             };
             log::trace!("AddL3ForwardRequest: {request:?}");
@@ -234,7 +234,7 @@ impl ForwardService {
                     config_name: cmd.config_name.clone(),
                     dataplane_instance: instance,
                 }),
-                src_dev_id: cmd.src as u32,
+                src_dev_id: cmd.src.to_string(),
                 network: cmd.network.to_string(),
             };
             log::trace!("RemoveL3ForwardRequest: {request:?}");

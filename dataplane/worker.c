@@ -192,6 +192,8 @@ worker_submit_burst(
 
 static void
 worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
+	struct dp_config *dp_config = worker->instance->dp_config;
+
 	struct packet_list failed;
 	packet_list_init(&failed);
 
@@ -205,6 +207,12 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 		if (to_write == ctx->write_size) {
 			worker_submit_burst(worker, mbufs, to_write, &failed);
 			to_write = 0;
+		}
+
+		if (packet->tx_device_id >=
+		    dp_config->dp_topology.device_count) {
+			packet_list_add(&failed, packet);
+			continue;
 		}
 
 		if (packet->tx_device_id == worker->device_id) {
@@ -256,99 +264,86 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 
 static void
 worker_loop_round(struct dataplane_worker *worker) {
+	struct dp_config *dp_config = worker->instance->dp_config;
+	struct cp_config *cp_config = worker->instance->cp_config;
+	struct cp_config_gen *cp_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
+	struct config_gen_ectx *config_gen_ectx =
+		ADDR_OF(&cp_config_gen->config_gen_ectx);
+
+	worker->dp_worker->gen = cp_config_gen->gen;
+	*worker->dp_worker->iterations += 1;
+
 	struct packet_list input_packets;
 	packet_list_init(&input_packets);
-
 	struct packet_list output_packets;
 	packet_list_init(&output_packets);
-
 	struct packet_list drop_packets;
 	packet_list_init(&drop_packets);
 
 	worker_read(worker, &input_packets);
 
-	struct dp_config *dp_config = worker->instance->dp_config;
-	struct cp_config *cp_config = worker->instance->cp_config;
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
-	struct config_ectx *config_ectx = ADDR_OF(&cp_config_gen->config_ectx);
+	if (config_gen_ectx == NULL) {
+		packet_list_concat(&drop_packets, &input_packets);
+		packet_list_init(&input_packets);
+	}
 
-	worker->dp_worker->gen = cp_config_gen->gen;
-	*worker->dp_worker->iterations += 1;
+	struct packet_front packet_front;
+	packet_front_init(&packet_front);
 
-	for (struct packet *packet = packet_list_first(&input_packets);
-	     packet != NULL;
-	     packet = packet->next) {
+	while (packet_list_first(&input_packets)) {
+		struct packet *packet = packet_list_pop(&input_packets);
 		packet->pipeline_ectx = NULL;
 
-		if (config_ectx == NULL) {
-			continue;
-		}
-		struct phy_device_map *phy_device_map =
-			ADDR_OF(&config_ectx->phy_device_maps) +
-			packet->rx_device_id;
 		struct device_ectx *device_ectx =
-			ADDR_OF(phy_device_map->vlan + packet->vlan);
-		if (device_ectx == NULL)
-			device_ectx = ADDR_OF(phy_device_map->vlan);
-
-		if (device_ectx == NULL) {
-			continue;
-		}
-
-		if (device_ectx->pipeline_map_size == 0) {
-			LOG(TRACE,
-			    "pipeline_map size is 0 for device %d",
-			    packet->rx_device_id);
-			continue;
-		}
-		packet->pipeline_ectx =
-			ADDR_OF(device_ectx->pipeline_map +
-				(packet->hash % device_ectx->pipeline_map_size)
+			ADDR_OF(config_gen_ectx->devices + packet->rx_device_id
 			);
+		if (device_ectx == NULL) {
+			packet_front_drop(&packet_front, packet);
+			continue;
+		}
+
+		device_ectx_process_input(
+			worker->dp_worker, device_ectx, &packet_front, packet
+		);
 	}
 
 	// Now group packets by pipeline and build packet_front
-	while (packet_list_first(&input_packets)) {
-		struct pipeline_ectx *pipeline_ectx =
-			packet_list_first(&input_packets)->pipeline_ectx;
+	while (packet_list_first(&packet_front.pending)) {
+		struct packet *packet =
+			packet_list_first(&packet_front.pending);
+		struct pipeline_ectx *pipeline_ectx = packet->pipeline_ectx;
 
-		struct packet_front packet_front;
-		packet_front_init(&packet_front);
+		struct packet_list pending_packets;
+		packet_list_init(&pending_packets);
 
-		// List of packets with different pipeline assigned
-		struct packet_list ready_packets;
-		packet_list_init(&ready_packets);
-
-		struct packet *packet;
-		while ((packet = packet_list_pop(&input_packets))) {
+		while ((packet = packet_list_pop(&packet_front.pending))) {
 			if (packet->pipeline_ectx == pipeline_ectx) {
 				packet_front_output(&packet_front, packet);
 			} else {
-				packet_list_add(&ready_packets, packet);
+				packet_list_add(&pending_packets, packet);
 			}
 		}
 
-		if (pipeline_ectx == NULL) {
-			packet_list_concat(&drop_packets, &packet_front.output);
-			packet_list_init(&packet_front.output);
-		} else {
-			// Process pipeline and push packets into drop and write
-			// lists
-			pipeline_ectx_process(
-				dp_config,
-				worker->dp_worker,
-				cp_config_gen,
-				pipeline_ectx,
-				&packet_front
-			);
-		}
+		/*
+		 * All the packets with the same pipeline_ectx are ready to
+		 * process, so return postponned packet into pending
+		 * queue.
+		 */
+		packet_list_concat(&packet_front.pending, &pending_packets);
+
+		pipeline_ectx_process(
+			dp_config,
+			worker->dp_worker,
+			cp_config_gen,
+			pipeline_ectx,
+			&packet_front
+		);
 
 		packet_list_concat(&drop_packets, &packet_front.drop);
+		packet_list_init(&packet_front.drop);
 		packet_list_concat(&output_packets, &packet_front.output);
-		packet_list_concat(&output_packets, &packet_front.bypass);
-
-		packet_list_concat(&input_packets, &ready_packets);
+		packet_list_init(&packet_front.output);
 	}
 
 	worker_write(worker, &output_packets);

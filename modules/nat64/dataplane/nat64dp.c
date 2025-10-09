@@ -2839,18 +2839,17 @@ nat64_handle_v4(
  */
 void
 nat64_handle_packets(
-	struct dp_config *dp_config,
-	uint64_t worker_idx,
-	struct cp_module *cp_module,
-	struct counter_storage *counter_storage,
+	struct dp_worker *dp_worker,
+	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 ) {
-	(void)dp_config; // Unused parameter
-	(void)worker_idx;
-	(void)counter_storage;
+	(void)dp_worker;
 
-	struct nat64_module_config *nat64_config =
-		container_of(cp_module, struct nat64_module_config, cp_module);
+	struct nat64_module_config *nat64_config = container_of(
+		ADDR_OF(&module_ectx->cp_module),
+		struct nat64_module_config,
+		cp_module
+	);
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {

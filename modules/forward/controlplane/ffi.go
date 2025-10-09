@@ -53,17 +53,21 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 func (m *ModuleConfig) L2ForwardEnable(srcDeviceID DeviceID, dstDeviceID DeviceID) error {
 	cname := C.CString("l2")
 	defer C.free(unsafe.Pointer(cname))
+	sName := C.CString(string(srcDeviceID))
+	defer C.free(unsafe.Pointer(sName))
+	dName := C.CString(string(dstDeviceID))
+	defer C.free(unsafe.Pointer(dName))
 	rc, err := C.forward_module_config_enable_l2(
 		m.asRawPtr(),
-		C.uint16_t(srcDeviceID),
-		C.uint16_t(dstDeviceID),
+		sName,
+		dName,
 		cname,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to enable device %d: %w", dstDeviceID, err)
+		return fmt.Errorf("failed to enable device %s: %w", dstDeviceID, err)
 	}
 	if rc != 0 {
-		return fmt.Errorf("failed to enable device %d: return code=%d", dstDeviceID, rc)
+		return fmt.Errorf("failed to enable device %s: return code=%d", dstDeviceID, rc)
 	}
 	return nil
 }
@@ -92,19 +96,24 @@ func (m *ModuleConfig) L3ForwardEnable(prefix netip.Prefix, srcDeviceID DeviceID
 func (m *ModuleConfig) forwardEnableV4(addrStart [4]byte, addrEnd [4]byte, srcDeviceID DeviceID, dstDeviceID DeviceID) error {
 	cname := C.CString("v4")
 	defer C.free(unsafe.Pointer(cname))
+	sName := C.CString(string(srcDeviceID))
+	defer C.free(unsafe.Pointer(sName))
+	dName := C.CString(string(dstDeviceID))
+	defer C.free(unsafe.Pointer(dName))
+
 	rc, err := C.forward_module_config_enable_v4(
 		m.asRawPtr(),
 		(*C.uint8_t)(&addrStart[0]),
 		(*C.uint8_t)(&addrEnd[0]),
-		C.uint16_t(srcDeviceID),
-		C.uint16_t(dstDeviceID),
+		sName,
+		dName,
 		cname,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to enable v4 forward from device %d to %d: %w", srcDeviceID, dstDeviceID, err)
+		return fmt.Errorf("failed to enable v4 forward from device %s to %s: %w", srcDeviceID, dstDeviceID, err)
 	}
 	if rc != 0 {
-		return fmt.Errorf("failed to enable v4 forward from device %d to %d: return code=%d", srcDeviceID, dstDeviceID, rc)
+		return fmt.Errorf("failed to enable v4 forward from device %s to %s: return code=%d", srcDeviceID, dstDeviceID, rc)
 	}
 	return nil
 }
@@ -112,19 +121,24 @@ func (m *ModuleConfig) forwardEnableV4(addrStart [4]byte, addrEnd [4]byte, srcDe
 func (m *ModuleConfig) forwardEnableV6(addrStart [16]byte, addrEnd [16]byte, srcDeviceID DeviceID, dstDeviceID DeviceID) error {
 	cname := C.CString("v6")
 	defer C.free(unsafe.Pointer(cname))
+	sName := C.CString(string(srcDeviceID))
+	defer C.free(unsafe.Pointer(sName))
+	dName := C.CString(string(dstDeviceID))
+	defer C.free(unsafe.Pointer(dName))
+
 	rc, err := C.forward_module_config_enable_v6(
 		m.asRawPtr(),
 		(*C.uint8_t)(&addrStart[0]),
 		(*C.uint8_t)(&addrEnd[0]),
-		C.uint16_t(srcDeviceID),
-		C.uint16_t(dstDeviceID),
+		sName,
+		dName,
 		cname,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to enable v6 forward from device %d to %d: %w", srcDeviceID, dstDeviceID, err)
+		return fmt.Errorf("failed to enable v6 forward from device %s to %s: %w", srcDeviceID, dstDeviceID, err)
 	}
 	if rc != 0 {
-		return fmt.Errorf("failed to enable v6 forward from device %d to %d: return code=%d", srcDeviceID, dstDeviceID, rc)
+		return fmt.Errorf("failed to enable v6 forward from device %s to %s: return code=%d", srcDeviceID, dstDeviceID, rc)
 	}
 	return nil
 }

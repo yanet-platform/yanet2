@@ -115,9 +115,10 @@ cp_config_gen_free(
 	cp_pipeline_registry_destroy(&config_gen->pipeline_registry);
 	cp_device_registry_destroy(&config_gen->device_registry);
 
-	struct config_ectx *config_ectx = ADDR_OF(&config_gen->config_ectx);
-	if (config_ectx != NULL)
-		config_ectx_free(config_gen, config_ectx);
+	struct config_gen_ectx *config_gen_ectx =
+		ADDR_OF(&config_gen->config_gen_ectx);
+	if (config_gen_ectx != NULL)
+		config_gen_ectx_free(config_gen, config_gen_ectx);
 
 	cp_config_counter_storage_registry_destroy(
 		&config_gen->counter_storage_registry
@@ -133,13 +134,13 @@ cp_config_gen_install(
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 
-	struct config_ectx *new_config_ectx =
-		config_ectx_create(new_config_gen, old_config_gen);
-	if (new_config_ectx == NULL) {
+	struct config_gen_ectx *new_config_gen_ectx =
+		config_gen_ectx_create(new_config_gen, old_config_gen);
+	if (new_config_gen_ectx == NULL) {
 		return -1;
 	}
 
-	SET_OFFSET_OF(&new_config_gen->config_ectx, new_config_ectx);
+	SET_OFFSET_OF(&new_config_gen->config_gen_ectx, new_config_gen_ectx);
 
 	SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
 	dp_config_wait_for_gen(dp_config, new_config_gen->gen);
@@ -526,6 +527,7 @@ error_unlock:
 
 struct cp_config_gen *
 cp_config_gen_create(struct cp_config *cp_config) {
+	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
 	struct cp_config_gen *cp_config_gen =
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
@@ -550,11 +552,38 @@ cp_config_gen_create(struct cp_config *cp_config) {
 	cp_device_registry_init(
 		&cp_config->memory_context, &cp_config_gen->device_registry
 	);
-
 	cp_config_counter_storage_registry_init(
 		&cp_config->memory_context,
 		&cp_config_gen->counter_storage_registry
 	);
+
+	// Create phy devices
+	for (uint64_t idx = 0; idx < dp_config->dp_topology.device_count;
+	     ++idx) {
+
+		struct cp_device_config device_config;
+		memset(&device_config, 0, sizeof(struct cp_device_config));
+		strtcpy(device_config.name,
+			ADDR_OF(&dp_config->dp_topology.devices)[idx].port_name,
+			CP_DEVICE_NAME_LEN);
+		device_config.type = 0;
+		struct cp_device_entry_config pipe_cfg;
+		pipe_cfg.count = 0;
+		device_config.input_pipelines = &pipe_cfg;
+		device_config.output_pipelines = &pipe_cfg;
+		struct cp_device *cp_device = cp_device_create(
+			&cp_config->memory_context,
+			dp_config,
+			cp_config_gen,
+			&device_config
+		);
+		// FIXME check cp_device and upsert
+		cp_device_registry_upsert(
+			&cp_config_gen->device_registry,
+			device_config.name,
+			cp_device
+		);
+	}
 
 	return cp_config_gen;
 }

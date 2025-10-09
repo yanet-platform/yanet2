@@ -12,12 +12,22 @@ package decap_test
 
 void
 decap_handle_packets(
-	struct dp_config *dp_config,
-	uint64_t worker_idx,
-	struct cp_module *cp_module,
-	struct counter_storage *counter_storage,
+	struct dp_worker *dp_worker,
+	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 );
+
+void
+test_decap_handle_packets(
+	struct dp_worker *dp_worker,
+	struct cp_module *cp_module,
+	struct packet_front *packet_front
+) {
+	struct module_ectx module_ectx = {};
+	SET_OFFSET_OF(&module_ectx.cp_module, cp_module);
+	decap_handle_packets(dp_worker, &module_ectx, packet_front);
+}
+
 */
 import "C"
 import (
@@ -86,6 +96,6 @@ func decapHandlePackets(mc *C.struct_decap_module_config, packets ...gopacket.Pa
 }
 
 func cDecapHandlePackets(mc *C.struct_decap_module_config, pf *common.CPacketFront) common.PacketFrontResult {
-	C.decap_handle_packets(nil, 0, &mc.cp_module, nil, (*C.struct_packet_front)(unsafe.Pointer(pf)))
+	C.test_decap_handle_packets(nil, &mc.cp_module, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	return common.PacketFrontToPayload(pf)
 }

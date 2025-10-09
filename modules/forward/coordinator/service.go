@@ -88,13 +88,13 @@ func (m *ModuleService) setupConfig(
 	for _, forward := range config.L2Forwards {
 		req := &forwardpb.L2ForwardEnableRequest{
 			Target:   target,
-			SrcDevId: uint32(forward.SourceDeviceID),
-			DstDevId: uint32(forward.DestinationDeviceID),
+			SrcDevId: forward.SourceDeviceID,
+			DstDevId: forward.DestinationDeviceID,
 		}
 
 		if _, err = client.EnableL2Forward(ctx, req); err != nil {
 			return fmt.Errorf(
-				"failed to enable L2 forward from %d to %d: %w",
+				"failed to enable L2 forward from %s to %s: %w",
 				forward.SourceDeviceID,
 				forward.DestinationDeviceID,
 				err,
@@ -108,16 +108,16 @@ func (m *ModuleService) setupConfig(
 		for _, rule := range forward.Rules {
 			req := &forwardpb.AddL3ForwardRequest{
 				Target:   target,
-				SrcDevId: uint32(sourceDeviceID),
+				SrcDevId: sourceDeviceID,
 				Forward: &forwardpb.L3ForwardEntry{
 					Network:  rule.Network.String(),
-					DstDevId: uint32(rule.DestinationDeviceID),
+					DstDevId: rule.DestinationDeviceID,
 				},
 			}
 
 			if _, err = client.AddL3Forward(ctx, req); err != nil {
 				return fmt.Errorf(
-					"failed to add forward from %d to %d for network %s: %w",
+					"failed to add forward from %s to %s for network %s: %w",
 					sourceDeviceID,
 					rule.DestinationDeviceID,
 					rule.Network.String(),

@@ -18,7 +18,7 @@ type Config struct {
 	GatewayEndpoint string `yaml:"gateway_endpoint"`
 }
 
-type DeviceID uint16
+type DeviceID string
 
 type ForwardDeviceConfig struct {
 	DstDevId DeviceID                  `yaml:"dst_dev_id"`

@@ -17,6 +17,24 @@ module_ectx_free(
 	if (counter_storage != NULL)
 		counter_storage_free(counter_storage);
 
+	uint64_t *cm_index = ADDR_OF(&module_ectx->cm_index);
+	if (cm_index != NULL) {
+		memory_bfree(
+			memory_context,
+			cm_index,
+			sizeof(uint64_t) * module_ectx->cm_index_size
+		);
+	}
+
+	uint64_t *mc_index = ADDR_OF(&module_ectx->mc_index);
+	if (mc_index != NULL) {
+		memory_bfree(
+			memory_context,
+			mc_index,
+			sizeof(uint64_t) * module_ectx->mc_index_size
+		);
+	}
+
 	memory_bfree(memory_context, module_ectx, sizeof(struct module_ectx));
 }
 
@@ -25,12 +43,14 @@ module_ectx_create(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_module *cp_module,
 	struct cp_config_gen *old_config_gen,
+	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
 	struct pipeline_ectx *pipeline_ectx,
 	struct function_ectx *function_ectx,
 	struct chain_ectx *chain_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
+	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
 
 	size_t ectx_size = sizeof(struct module_ectx);
@@ -40,12 +60,18 @@ module_ectx_create(
 		return NULL;
 
 	memset(module_ectx, 0, ectx_size);
-	SET_OFFSET_OF(&module_ectx->module, cp_module);
+	SET_OFFSET_OF(&module_ectx->cp_module, cp_module);
 
-	struct cp_device *cp_device = ADDR_OF(&device_ectx->device);
-	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->pipeline);
-	struct cp_function *cp_function = ADDR_OF(&function_ectx->function);
-	struct cp_chain *cp_chain = ADDR_OF(&chain_ectx->chain);
+	SET_OFFSET_OF(&module_ectx->config_gen_ectx, config_gen_ectx);
+
+	struct dp_module *dp_module =
+		ADDR_OF(&dp_config->dp_modules) + cp_module->dp_module_idx;
+	module_ectx->handler = dp_module->handler;
+
+	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
+	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);
+	struct cp_function *cp_function = ADDR_OF(&function_ectx->cp_function);
+	struct cp_chain *cp_chain = ADDR_OF(&chain_ectx->cp_chain);
 
 	struct counter_storage *old_counter_storage =
 		cp_config_counter_storage_registry_lookup_module(
@@ -85,7 +111,6 @@ module_ectx_create(
 	return module_ectx;
 
 error:
-
 	memory_bfree(memory_context, module_ectx, ectx_size);
 
 	return NULL;
@@ -125,6 +150,7 @@ chain_ectx_create(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_chain *cp_chain,
 	struct cp_config_gen *old_config_gen,
+	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
 	struct pipeline_ectx *pipeline_ectx,
 	struct function_ectx *function_ectx
@@ -140,12 +166,12 @@ chain_ectx_create(
 		return NULL;
 
 	memset(chain_ectx, 0, ectx_size);
-	SET_OFFSET_OF(&chain_ectx->chain, cp_chain);
+	SET_OFFSET_OF(&chain_ectx->cp_chain, cp_chain);
 	chain_ectx->length = cp_chain->length;
 
-	struct cp_device *cp_device = ADDR_OF(&device_ectx->device);
-	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->pipeline);
-	struct cp_function *cp_function = ADDR_OF(&function_ectx->function);
+	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
+	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);
+	struct cp_function *cp_function = ADDR_OF(&function_ectx->cp_function);
 
 	struct counter_storage *old_counter_storage =
 		cp_config_counter_storage_registry_lookup_chain(
@@ -193,6 +219,7 @@ chain_ectx_create(
 			cp_config_gen,
 			cp_module,
 			old_config_gen,
+			config_gen_ectx,
 			device_ectx,
 			pipeline_ectx,
 			function_ectx,
@@ -207,7 +234,6 @@ chain_ectx_create(
 	return chain_ectx;
 
 error:
-
 	chain_ectx_free(cp_config_gen, chain_ectx);
 	return NULL;
 }
@@ -252,6 +278,7 @@ function_ectx_create(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_function *cp_function,
 	struct cp_config_gen *old_config_gen,
+	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
 	struct pipeline_ectx *pipeline_ectx
 ) {
@@ -272,22 +299,22 @@ function_ectx_create(
 		return NULL;
 
 	memset(function_ectx, 0, ectx_size);
-	SET_OFFSET_OF(&function_ectx->function, cp_function);
-	function_ectx->chain_count = cp_function->chain_count;
+	SET_OFFSET_OF(&function_ectx->cp_function, cp_function);
 
 	struct chain_ectx **chains = (struct chain_ectx **)memory_balloc(
 		memory_context,
-		sizeof(struct chain_ectx **) * function_ectx->chain_count
+		sizeof(struct chain_ectx *) * cp_function->chain_count
 	);
 	if (chains == NULL)
 		goto error;
 	memset(chains,
 	       0,
-	       sizeof(struct chain_ectx **) * function_ectx->chain_count);
+	       sizeof(struct chain_ectx *) * function_ectx->chain_count);
 	SET_OFFSET_OF(&function_ectx->chains, chains);
+	function_ectx->chain_count = cp_function->chain_count;
 
-	struct cp_device *cp_device = ADDR_OF(&device_ectx->device);
-	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->pipeline);
+	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
+	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);
 
 	struct counter_storage *old_counter_storage =
 		cp_config_counter_storage_registry_lookup_function(
@@ -326,6 +353,7 @@ function_ectx_create(
 			cp_config_gen,
 			cp_chain,
 			old_config_gen,
+			config_gen_ectx,
 			device_ectx,
 			pipeline_ectx,
 			function_ectx
@@ -384,6 +412,7 @@ pipeline_ectx_create(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_pipeline *cp_pipeline,
 	struct cp_config_gen *old_config_gen,
+	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
@@ -397,10 +426,10 @@ pipeline_ectx_create(
 	if (pipeline_ectx == NULL)
 		return NULL;
 	memset(pipeline_ectx, 0, ectx_size);
-	SET_OFFSET_OF(&pipeline_ectx->pipeline, cp_pipeline);
+	SET_OFFSET_OF(&pipeline_ectx->cp_pipeline, cp_pipeline);
 	pipeline_ectx->length = cp_pipeline->length;
 
-	struct cp_device *cp_device = ADDR_OF(&device_ectx->device);
+	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
 
 	struct counter_storage *old_counter_storage =
 		cp_config_counter_storage_registry_lookup_pipeline(
@@ -438,6 +467,7 @@ pipeline_ectx_create(
 			cp_config_gen,
 			cp_function,
 			old_config_gen,
+			config_gen_ectx,
 			device_ectx,
 			pipeline_ectx
 		);
@@ -450,9 +480,128 @@ pipeline_ectx_create(
 	return pipeline_ectx;
 
 error:
-
 	pipeline_ectx_free(cp_config_gen, pipeline_ectx);
 
+	return NULL;
+}
+
+static void
+device_entry_ectx_free(
+	struct cp_config_gen *cp_config_gen,
+	struct device_entry_ectx *device_entry_ectx
+) {
+	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
+	struct memory_context *memory_context = &cp_config->memory_context;
+
+	struct pipeline_ectx **pipelines =
+		ADDR_OF(&device_entry_ectx->pipelines);
+	if (pipelines != NULL) {
+		for (uint64_t idx = 0; idx < device_entry_ectx->pipeline_count;
+		     ++idx) {
+			struct pipeline_ectx *pipeline_ectx =
+				ADDR_OF(pipelines + idx);
+			if (pipeline_ectx == NULL)
+				continue;
+			pipeline_ectx_free(cp_config_gen, pipeline_ectx);
+		}
+	}
+
+	memory_bfree(
+		memory_context,
+		pipelines,
+		sizeof(struct pipeline_ectx *) *
+			device_entry_ectx->pipeline_count
+	);
+
+	size_t ectx_size = sizeof(struct device_entry_ectx) +
+			   sizeof(struct pipeline_ectx *) *
+				   device_entry_ectx->pipeline_map_size;
+
+	memory_bfree(memory_context, device_entry_ectx, ectx_size);
+}
+
+static struct device_entry_ectx *
+device_entry_ectx_create(
+	struct cp_config_gen *new_config_gen,
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_ectx *device_ectx,
+	device_handler handler,
+	struct cp_device_entry *cp_device_entry,
+	struct cp_config_gen *old_config_gen
+) {
+	struct cp_config *cp_config = ADDR_OF(&new_config_gen->cp_config);
+	struct memory_context *memory_context = &cp_config->memory_context;
+
+	uint64_t weight_sum = 0;
+	for (uint64_t idx = 0; idx < cp_device_entry->pipeline_count; ++idx) {
+		weight_sum += cp_device_entry->pipelines[idx].weight;
+	}
+
+	size_t ectx_size = sizeof(struct device_entry_ectx) +
+			   sizeof(struct pipeline_ectx *) * weight_sum;
+
+	struct device_entry_ectx *device_entry_ectx =
+		(struct device_entry_ectx *)memory_balloc(
+			memory_context, ectx_size
+		);
+	if (device_entry_ectx == NULL)
+		return NULL;
+
+	memset(device_entry_ectx, 0, ectx_size);
+	device_entry_ectx->handler = handler;
+
+	device_entry_ectx->pipeline_count = cp_device_entry->pipeline_count;
+	if (!device_entry_ectx->pipeline_count)
+		return device_entry_ectx;
+	struct pipeline_ectx **pipelines =
+		(struct pipeline_ectx **)memory_balloc(
+			memory_context,
+			sizeof(struct pipeline_ectx *) *
+				device_entry_ectx->pipeline_count
+		);
+	if (pipelines == NULL)
+		goto error;
+	memset(pipelines,
+	       0,
+	       sizeof(struct pipeline_ectx *) *
+		       device_entry_ectx->pipeline_count);
+	SET_OFFSET_OF(&device_entry_ectx->pipelines, pipelines);
+
+	device_entry_ectx->pipeline_map_size = weight_sum;
+	uint64_t pos = 0;
+	for (uint64_t idx = 0; idx < cp_device_entry->pipeline_count; ++idx) {
+		struct cp_pipeline *cp_pipeline = cp_config_gen_lookup_pipeline(
+			new_config_gen, cp_device_entry->pipelines[idx].name
+		);
+		if (cp_pipeline == NULL) {
+			goto error;
+		}
+		struct pipeline_ectx *pipeline_ectx = pipeline_ectx_create(
+			new_config_gen,
+			cp_pipeline,
+			old_config_gen,
+			config_gen_ectx,
+			device_ectx
+		);
+		if (pipeline_ectx == NULL)
+			goto error;
+
+		SET_OFFSET_OF(pipelines + idx, pipeline_ectx);
+
+		for (uint64_t weight_idx = 0;
+		     weight_idx < cp_device_entry->pipelines[idx].weight;
+		     ++weight_idx) {
+			SET_OFFSET_OF(
+				device_entry_ectx->pipeline_map + pos,
+				pipeline_ectx
+			);
+			++pos;
+		}
+	}
+
+	return device_entry_ectx;
+
+error:
 	return NULL;
 }
 
@@ -463,29 +612,21 @@ device_ectx_free(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
 
-	struct pipeline_ectx **pipelines = ADDR_OF(&device_ectx->pipelines);
-	for (uint64_t idx = 0; idx < device_ectx->pipeline_count; ++idx) {
-		struct pipeline_ectx *pipeline_ectx = ADDR_OF(pipelines + idx);
-		if (pipeline_ectx == NULL)
-			continue;
-		pipeline_ectx_free(cp_config_gen, pipeline_ectx);
-	}
+	struct device_entry_ectx *input =
+		ADDR_OF(&device_ectx->input_pipelines);
+	if (input)
+		device_entry_ectx_free(cp_config_gen, input);
+	struct device_entry_ectx *output =
+		ADDR_OF(&device_ectx->output_pipelines);
+	if (output)
+		device_entry_ectx_free(cp_config_gen, output);
 
 	struct counter_storage *counter_storage =
 		ADDR_OF(&device_ectx->counter_storage);
 	if (counter_storage != NULL)
 		counter_storage_free(counter_storage);
 
-	memory_bfree(
-		memory_context,
-		pipelines,
-		sizeof(struct pipeline_ectx *) * device_ectx->pipeline_count
-	);
-
-	size_t ectx_size =
-		sizeof(struct device_ectx) +
-		sizeof(struct pipeline_ectx *) * device_ectx->pipeline_map_size;
-
+	size_t ectx_size = sizeof(struct device_ectx);
 	memory_bfree(memory_context, device_ectx, ectx_size);
 }
 
@@ -493,18 +634,14 @@ static struct device_ectx *
 device_ectx_create(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_device *cp_device,
+	struct config_gen_ectx *config_gen_ectx,
 	struct cp_config_gen *old_config_gen
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
+	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
 
-	uint64_t weight_sum = 0;
-	for (uint64_t idx = 0; idx < cp_device->pipeline_count; ++idx) {
-		weight_sum += cp_device->pipeline_weights[idx].weight;
-	}
-
-	size_t ectx_size = sizeof(struct device_ectx) +
-			   sizeof(struct pipeline_ectx *) * weight_sum;
+	size_t ectx_size = sizeof(struct device_ectx);
 
 	struct device_ectx *device_ectx =
 		(struct device_ectx *)memory_balloc(memory_context, ectx_size);
@@ -512,20 +649,7 @@ device_ectx_create(
 		return NULL;
 
 	memset(device_ectx, 0, ectx_size);
-	SET_OFFSET_OF(&device_ectx->device, cp_device);
-	device_ectx->pipeline_count = cp_device->pipeline_count;
-	struct pipeline_ectx **pipelines =
-		(struct pipeline_ectx **)memory_balloc(
-			memory_context,
-			sizeof(struct pipeline_ectx *) *
-				device_ectx->pipeline_count
-		);
-	if (pipelines == NULL)
-		goto error;
-	memset(pipelines,
-	       0,
-	       sizeof(struct pipeline_ectx *) * device_ectx->pipeline_count);
-	SET_OFFSET_OF(&device_ectx->pipelines, pipelines);
+	SET_OFFSET_OF(&device_ectx->cp_device, cp_device);
 
 	struct counter_storage *old_counter_storage =
 		cp_config_counter_storage_registry_lookup_device(
@@ -552,32 +676,32 @@ device_ectx_create(
 
 	SET_OFFSET_OF(&device_ectx->counter_storage, counter_storage);
 
-	device_ectx->pipeline_map_size = weight_sum;
-	uint64_t pos = 0;
-	for (uint64_t idx = 0; idx < cp_device->pipeline_count; ++idx) {
-		struct cp_pipeline *cp_pipeline = cp_config_gen_lookup_pipeline(
-			cp_config_gen, cp_device->pipeline_weights[idx].name
-		);
-		if (cp_pipeline == NULL) {
-			goto error;
-		}
-		struct pipeline_ectx *pipeline_ectx = pipeline_ectx_create(
-			cp_config_gen, cp_pipeline, old_config_gen, device_ectx
-		);
-		if (pipeline_ectx == NULL)
-			goto error;
+	struct dp_device_handler *handlers =
+		ADDR_OF(&dp_config->dp_device_handlers) + cp_device->type;
 
-		SET_OFFSET_OF(pipelines + idx, pipeline_ectx);
+	struct device_entry_ectx *input = device_entry_ectx_create(
+		cp_config_gen,
+		config_gen_ectx,
+		device_ectx,
+		handlers->input,
+		ADDR_OF(&cp_device->input_pipelines),
+		old_config_gen
+	);
+	if (input == NULL)
+		goto error;
+	SET_OFFSET_OF(&device_ectx->input_pipelines, input);
 
-		for (uint64_t weight_idx = 0;
-		     weight_idx < cp_device->pipeline_weights[idx].weight;
-		     ++weight_idx) {
-			SET_OFFSET_OF(
-				device_ectx->pipeline_map + pos, pipeline_ectx
-			);
-			++pos;
-		}
-	}
+	struct device_entry_ectx *output = device_entry_ectx_create(
+		cp_config_gen,
+		config_gen_ectx,
+		device_ectx,
+		handlers->output,
+		ADDR_OF(&cp_device->output_pipelines),
+		old_config_gen
+	);
+	if (output == NULL)
+		goto error;
+	SET_OFFSET_OF(&device_ectx->output_pipelines, output);
 
 	return device_ectx;
 
@@ -588,28 +712,19 @@ error:
 }
 
 void
-config_ectx_free(
-	struct cp_config_gen *cp_config_gen, struct config_ectx *config_ectx
+config_gen_ectx_free(
+	struct cp_config_gen *cp_config_gen,
+	struct config_gen_ectx *config_gen_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
 
-	struct phy_device_map *phy_device_maps =
-		ADDR_OF(&config_ectx->phy_device_maps);
-	if (phy_device_maps != NULL)
-		memory_bfree(
-			memory_context,
-			phy_device_maps,
-			sizeof(struct phy_device_map) *
-				dp_config->dp_topology.device_count
-		);
-
-	for (uint64_t device_idx = 0; device_idx < config_ectx->device_count;
+	for (uint64_t device_idx = 0;
+	     device_idx < config_gen_ectx->device_count;
 	     ++device_idx) {
 
 		struct device_ectx *device_ectx =
-			ADDR_OF(config_ectx->devices + device_idx);
+			ADDR_OF(config_gen_ectx->devices + device_idx);
 
 		if (device_ectx != NULL) {
 			device_ectx_free(cp_config_gen, device_ectx);
@@ -617,47 +732,270 @@ config_ectx_free(
 	}
 
 	size_t ectx_size =
-		sizeof(struct config_ectx) +
-		sizeof(struct device_ectx *) * config_ectx->device_count;
+		sizeof(struct config_gen_ectx) +
+		sizeof(struct device_ectx *) * config_gen_ectx->device_count;
 
-	memory_bfree(memory_context, config_ectx, ectx_size);
+	memory_bfree(memory_context, config_gen_ectx, ectx_size);
 }
 
-struct config_ectx *
-config_ectx_create(
+static int
+link_module_ectx(
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_ectx *device_ectx,
+	struct device_entry_ectx *device_entry_ectx,
+	struct pipeline_ectx *pipeline_ectx,
+	struct function_ectx *function_ectx,
+	struct chain_ectx *chain_ectx,
+	struct module_ectx *module_ectx
+) {
+	(void)device_ectx;
+	(void)device_entry_ectx;
+	(void)pipeline_ectx;
+	(void)function_ectx;
+	(void)chain_ectx;
+
+	struct cp_config_gen *cp_config_gen =
+		ADDR_OF(&config_gen_ectx->cp_config_gen);
+	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
+	struct memory_context *memory_context = &cp_config->memory_context;
+
+	struct cp_module *cp_module = ADDR_OF(&module_ectx->cp_module);
+
+	uint64_t *cm_index = (uint64_t *)memory_balloc(
+		memory_context, sizeof(uint64_t) * config_gen_ectx->device_count
+	);
+	if (config_gen_ectx->device_count && cm_index == NULL)
+		goto error;
+	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx)
+		cm_index[idx] = -1;
+	SET_OFFSET_OF(&module_ectx->cm_index, cm_index);
+	module_ectx->cm_index_size = config_gen_ectx->device_count;
+
+	uint64_t *mc_index = (uint64_t *)memory_balloc(
+		memory_context, sizeof(uint64_t) * cp_module->device_count
+	);
+	if (cp_module->device_count && mc_index == NULL)
+		goto error;
+	for (uint64_t idx = 0; idx < cp_module->device_count; ++idx)
+		mc_index[idx] = -1;
+	SET_OFFSET_OF(&module_ectx->mc_index, mc_index);
+	module_ectx->mc_index_size = cp_module->device_count;
+
+	struct cp_module_device *m_devices = ADDR_OF(&cp_module->devices);
+
+	for (uint64_t m_idx = 0; m_idx < cp_module->device_count; ++m_idx) {
+		for (uint64_t c_idx = 0; c_idx < config_gen_ectx->device_count;
+		     ++c_idx) {
+			struct device_ectx *device_ectx =
+				ADDR_OF(config_gen_ectx->devices + c_idx);
+			if (device_ectx == NULL)
+				continue;
+			struct cp_device *cp_device =
+				ADDR_OF(&device_ectx->cp_device);
+			if (!strncmp(
+				    m_devices[m_idx].name,
+				    cp_device->name,
+				    CP_DEVICE_NAME_LEN
+			    )) {
+				mc_index[m_idx] = c_idx;
+				cm_index[c_idx] = m_idx;
+			}
+		}
+	}
+
+	return 0;
+
+error:
+	return -1;
+}
+
+static int
+link_chain_ectx(
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_ectx *device_ectx,
+	struct device_entry_ectx *device_entry_ectx,
+	struct pipeline_ectx *pipeline_ectx,
+	struct function_ectx *function_ectx,
+	struct chain_ectx *chain_ectx
+) {
+	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
+		struct module_ectx *module_ectx =
+			ADDR_OF(chain_ectx->modules + idx);
+		if (module_ectx == NULL)
+			continue;
+		if (link_module_ectx(
+			    config_gen_ectx,
+			    device_ectx,
+			    device_entry_ectx,
+			    pipeline_ectx,
+			    function_ectx,
+			    chain_ectx,
+			    module_ectx
+		    )) {
+			goto error;
+		}
+	}
+
+	return 0;
+
+error:
+	return -1;
+}
+
+static int
+link_function_ectx(
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_ectx *device_ectx,
+	struct device_entry_ectx *device_entry_ectx,
+	struct pipeline_ectx *pipeline_ectx,
+	struct function_ectx *function_ectx
+) {
+	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
+	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
+		struct chain_ectx *chain_ectx = ADDR_OF(chains + idx);
+		if (chain_ectx == NULL)
+			continue;
+		if (link_chain_ectx(
+			    config_gen_ectx,
+			    device_ectx,
+			    device_entry_ectx,
+			    pipeline_ectx,
+			    function_ectx,
+			    chain_ectx
+		    )) {
+			goto error;
+		}
+	}
+
+	return 0;
+
+error:
+	return -1;
+}
+
+static int
+link_pipeline_ectx(
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_ectx *device_ectx,
+	struct device_entry_ectx *device_entry_ectx,
+	struct pipeline_ectx *pipeline_ectx
+) {
+	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
+		struct function_ectx *function_ectx =
+			ADDR_OF(pipeline_ectx->functions + idx);
+		if (function_ectx == NULL)
+			continue;
+		if (link_function_ectx(
+			    config_gen_ectx,
+			    device_ectx,
+			    device_entry_ectx,
+			    pipeline_ectx,
+			    function_ectx
+		    )) {
+			goto error;
+		}
+	}
+
+	return 0;
+
+error:
+	return -1;
+}
+
+static int
+link_device_entry_ectx(
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_ectx *device_ectx,
+	struct device_entry_ectx *device_entry_ectx
+) {
+	struct pipeline_ectx **pipelines =
+		ADDR_OF(&device_entry_ectx->pipelines);
+	for (uint64_t idx = 0; idx < device_entry_ectx->pipeline_count; ++idx) {
+		struct pipeline_ectx *pipeline_ectx = ADDR_OF(pipelines + idx);
+		if (pipeline_ectx == NULL)
+			continue;
+		if (link_pipeline_ectx(
+			    config_gen_ectx,
+			    device_ectx,
+			    device_entry_ectx,
+			    pipeline_ectx
+		    )) {
+			goto error;
+		}
+	}
+
+	return 0;
+
+error:
+	return -1;
+}
+
+static int
+link_device_ectx(
+	struct config_gen_ectx *config_gen_ectx, struct device_ectx *device_ectx
+) {
+	if (link_device_entry_ectx(
+		    config_gen_ectx,
+		    device_ectx,
+		    ADDR_OF(&device_ectx->input_pipelines)
+	    )) {
+		goto error;
+	}
+	if (link_device_entry_ectx(
+		    config_gen_ectx,
+		    device_ectx,
+		    ADDR_OF(&device_ectx->output_pipelines)
+	    )) {
+		goto error;
+	}
+
+	return 0;
+
+error:
+	return -1;
+}
+
+static int
+link_config_gen_ectx(struct config_gen_ectx *config_gen_ectx) {
+	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
+		struct device_ectx *device_ectx =
+			ADDR_OF(config_gen_ectx->devices + idx);
+		if (device_ectx == NULL)
+			continue;
+		if (link_device_ectx(config_gen_ectx, device_ectx)) {
+			goto error;
+		}
+	}
+
+	return 0;
+
+error:
+	return -1;
+}
+
+struct config_gen_ectx *
+config_gen_ectx_create(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_config_gen *old_config_gen
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
 
-	size_t ectx_size = sizeof(struct config_ectx) +
+	size_t ectx_size = sizeof(struct config_gen_ectx) +
 			   sizeof(struct device_ectx *) *
 				   cp_device_registry_capacity(
 					   &cp_config_gen->device_registry
 				   );
 
-	struct config_ectx *config_ectx =
-		(struct config_ectx *)memory_balloc(memory_context, ectx_size);
-	if (config_ectx == NULL)
-		return config_ectx;
-	memset(config_ectx, 0, ectx_size);
-	struct phy_device_map *phy_device_maps =
-		(struct phy_device_map *)memory_balloc(
-			memory_context,
-			sizeof(struct phy_device_map) *
-				dp_config->dp_topology.device_count
-		);
-	if (phy_device_maps == NULL)
-		goto error;
-	memset(phy_device_maps,
-	       0,
-	       sizeof(struct phy_device_map) *
-		       dp_config->dp_topology.device_count);
-	SET_OFFSET_OF(&config_ectx->phy_device_maps, phy_device_maps);
+	struct config_gen_ectx *config_gen_ectx = (struct config_gen_ectx *)
+		memory_balloc(memory_context, ectx_size);
+	if (config_gen_ectx == NULL)
+		return config_gen_ectx;
+	memset(config_gen_ectx, 0, ectx_size);
 
-	config_ectx->device_count =
+	SET_OFFSET_OF(&config_gen_ectx->cp_config_gen, cp_config_gen);
+
+	config_gen_ectx->device_count =
 		cp_device_registry_capacity(&cp_config_gen->device_registry);
 
 	for (uint64_t device_idx = 0;
@@ -669,27 +1007,31 @@ config_ectx_create(
 		struct cp_device *cp_device =
 			cp_config_gen_get_device(cp_config_gen, device_idx);
 		if (cp_device == NULL) {
-			config_ectx->devices[device_idx] = NULL;
+			config_gen_ectx->devices[device_idx] = NULL;
 			continue;
 		}
 
 		struct device_ectx *device_ectx = device_ectx_create(
-			cp_config_gen, cp_device, old_config_gen
+			cp_config_gen,
+			cp_device,
+			config_gen_ectx,
+			old_config_gen
 		);
 		if (device_ectx == NULL)
 			goto error;
-		SET_OFFSET_OF(config_ectx->devices + device_idx, device_ectx);
-		struct phy_device_map *phy_device_map =
-			phy_device_maps + cp_device->device_id;
 		SET_OFFSET_OF(
-			phy_device_map->vlan + cp_device->vlan, device_ectx
+			config_gen_ectx->devices + device_idx, device_ectx
 		);
 	}
 
-	return config_ectx;
+	if (link_config_gen_ectx(config_gen_ectx)) {
+		goto error;
+	}
+
+	return config_gen_ectx;
 
 error:
-	config_ectx_free(cp_config_gen, config_ectx);
+	config_gen_ectx_free(cp_config_gen, config_gen_ectx);
 
 	return NULL;
 }

@@ -21,7 +21,6 @@ type PacketFrontResult struct {
 	Input  [][]uint8
 	Output [][]uint8
 	Drop   [][]uint8
-	Bypass [][]uint8
 }
 
 func ParsePackets(pf *CPacketFront) error {
@@ -64,7 +63,6 @@ func PacketFrontToPayload(pf *CPacketFront) PacketFrontResult {
 		pf.input,
 		pf.output,
 		pf.drop,
-		pf.bypass,
 	}
 
 	result := [][][]byte{}
@@ -81,6 +79,5 @@ func PacketFrontToPayload(pf *CPacketFront) PacketFrontResult {
 		Input:  result[0],
 		Output: result[1],
 		Drop:   result[2],
-		Bypass: result[3],
 	}
 }

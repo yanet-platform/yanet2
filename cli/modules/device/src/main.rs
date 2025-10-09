@@ -44,15 +44,12 @@ pub struct UpdateCmd {
     /// Device name.
     #[arg(long)]
     pub name: String,
-    /// Device Id
-    #[arg(long)]
-    pub device_id: u32,
-    /// Vlan
-    #[arg(long)]
-    pub vlan: u32,
     /// Pipeline assignments in format "pipeline_name:weight"
     #[arg(short, long)]
-    pub pipelines: Vec<String>,
+    pub input: Vec<String>,
+    /// Pipeline assignments in format "pipeline_name:weight"
+    #[arg(short, long)]
+    pub output: Vec<String>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -92,10 +89,23 @@ impl DeviceService {
             instance: cmd.instance,
             devices: vec![Device {
                 name: cmd.name,
-                device_id: cmd.device_id,
-                vlan: cmd.vlan,
-                pipelines: cmd
-                    .pipelines
+                input: cmd
+                    .input
+                    .into_iter()
+                    .map(|p| {
+                        let parts: Vec<&str> = p.split(':').collect();
+                        if parts.len() != 2 {
+                            panic!("Invalid pipeline format. Expected 'pipeline_name:weight'");
+                        }
+                        let weight = parts[1].parse::<u64>().expect("Invalid weight value");
+                        DevicePipeline {
+                            name: parts[0].to_string(),
+                            weight: weight,
+                        }
+                    })
+                    .collect(),
+                output: cmd
+                    .output
                     .into_iter()
                     .map(|p| {
                         let parts: Vec<&str> = p.split(':').collect();

@@ -26,12 +26,22 @@ package nat64_test
 
 void
 nat64_handle_packets(
-    struct dp_config *dp_config,
-    uint64_t worker_id,
-    struct cp_module *cp_module,
-    struct counter_storage *counter_storage,
-    struct packet_front *packet_front
+	struct dp_worker *dp_worker,
+	struct module_ectx *module_ectx,
+	struct packet_front *packet_front
 );
+
+void
+test_nat64_handle_packets(
+	struct dp_worker *dp_worker,
+	struct cp_module *cp_module,
+	struct packet_front *packet_front
+) {
+	struct module_ectx module_ectx = {};
+	SET_OFFSET_OF(&module_ectx.cp_module, cp_module);
+	nat64_handle_packets(dp_worker, &module_ectx, packet_front);
+}
+
 */
 import "C"
 import (
@@ -103,7 +113,7 @@ func nat64HandlePackets(mc *C.struct_nat64_module_config, packets ...gopacket.Pa
 	payload := common.PacketsToPaylod(packets)
 	pf := common.PacketFrontFromPayload(payload)
 	common.ParsePackets(pf)
-	C.nat64_handle_packets(nil, 0, &mc.cp_module, nil, (*C.struct_packet_front)(unsafe.Pointer(pf)))
+	C.test_nat64_handle_packets(nil, &mc.cp_module, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	result := common.PacketFrontToPayload(pf)
 	return result
 }

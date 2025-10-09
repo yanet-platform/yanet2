@@ -26,13 +26,13 @@ var (
 		"ip addr add 203.0.113.14/24 dev kni0",
 
 		// Configure L2 and L3 forwarding
-		"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 0 --dst 1",
-		"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 1 --dst 0",
-		"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net 203.0.113.14/32",
-		"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net fe80::5054:ff:fe6b:ffa5/64",
-		"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net ff02::/16",
-		"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net 0.0.0.0/0",
-		"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net ::/0",
+		"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0",
+		"/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --instances 0 --src virtio_user_kni0 --dst 01:00.0",
+		"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0 --net 203.0.113.14/32",
+		"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0 --net fe80::5054:ff:fe6b:ffa5/64",
+		"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0 --net ff02::/16",
+		"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src virtio_user_kni0 --dst 01:00.0 --net 0.0.0.0/0",
+		"/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --instances 0 --src virtio_user_kni0 --dst 01:00.0 --net ::/0",
 
 		// Configure routing
 		"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via fe80::1 ::/0",
@@ -43,9 +43,10 @@ var (
 
 		"/mnt/target/release/yanet-cli-pipeline update --name=bootstrap --functions virt --instance=0",
 		"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
+		"/mnt/target/release/yanet-cli-pipeline update --name=dummy --instance=0",
 
-		"/mnt/target/release/yanet-cli-device update --instance=0 --name=01:00.0 --device-id=0 --vlan=0 --pipelines test:1",
-		"/mnt/target/release/yanet-cli-device update --instance=0 --name=virtio_user_kni0 --device-id=1 --vlan=0 --pipelines bootstrap:1",
+		"/mnt/target/release/yanet-cli-device update --instance=0 --name=01:00.0 --input test:1 --output dummy:1",
+		"/mnt/target/release/yanet-cli-device update --instance=0 --name=virtio_user_kni0 --input bootstrap:1 --output dummy:1",
 	}
 	DebugCommands = []string{
 		"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",

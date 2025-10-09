@@ -16,8 +16,8 @@ forward_module_config_enable_v4(
 	struct cp_module *cp_module,
 	const uint8_t *from,
 	const uint8_t *to,
-	uint16_t src_device_id,
-	uint16_t dst_device_id,
+	const char *src_name,
+	const char *dst_name,
 	const char *counter_name
 );
 
@@ -26,16 +26,16 @@ forward_module_config_enable_v6(
 	struct cp_module *cp_module,
 	const uint8_t *from,
 	const uint8_t *to,
-	uint16_t src_device_id,
-	uint16_t dst_device_id,
+	const char *src_name,
+	const char *dst_name,
 	const char *counter_name
 );
 
 int
 forward_module_config_enable_l2(
 	struct cp_module *cp_module,
-	uint16_t src_device_id,
-	uint16_t dst_device_id,
+	const char *src_name,
+	const char *dst_name,
 	const char *counter_name
 );
 

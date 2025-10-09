@@ -38,10 +38,40 @@ cp_module_init(
 	registry_item_init(&cp_module->config_item);
 
 	if (counter_registry_init(
-		    &cp_module->counter_registry, &cp_module->memory_context, 1
+		    &cp_module->counter_registry, &cp_module->memory_context, 0
 	    )) {
 		return -1;
 	}
+
+	return 0;
+}
+
+int
+cp_module_link_device(
+	struct cp_module *cp_module, const char *name, uint64_t *index
+) {
+	struct cp_module_device *devices = ADDR_OF(&cp_module->devices);
+	for (uint64_t idx = 0; idx < cp_module->device_count; ++idx) {
+		if (!strncmp(devices[idx].name, name, CP_DEVICE_NAME_LEN)) {
+			*index = idx;
+			return 0;
+		}
+	}
+
+	devices = (struct cp_module_device *)memory_brealloc(
+		&cp_module->memory_context,
+		devices,
+		sizeof(struct cp_module_device) * cp_module->device_count,
+		sizeof(struct cp_module_device) * (cp_module->device_count + 1)
+	);
+	if (devices == NULL)
+		return -1;
+
+	strtcpy(devices[cp_module->device_count].name, name, CP_DEVICE_NAME_LEN
+	);
+	SET_OFFSET_OF(&cp_module->devices, devices);
+	*index = cp_module->device_count;
+	++cp_module->device_count;
 
 	return 0;
 }

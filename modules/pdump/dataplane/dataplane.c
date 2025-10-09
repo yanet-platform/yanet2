@@ -8,6 +8,8 @@
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
 
+#include "controlplane/config/econtext.h"
+
 #include "ring.h"
 
 #define TSC_SHIFT 32
@@ -133,19 +135,17 @@ process_queue(
 
 void
 pdump_handle_packets(
-	struct dp_config *dp_config,
-	uint64_t worker_idx,
-	struct cp_module *cp_module,
-	struct counter_storage *counter_storage,
+	struct dp_worker *dp_worker,
+	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 ) {
-	(void)dp_config;
-	(void)counter_storage;
+	struct pdump_module_config *config = container_of(
+		ADDR_OF(&module_ectx->cp_module),
+		struct pdump_module_config,
+		cp_module
+	);
 
-	struct pdump_module_config *config =
-		container_of(cp_module, struct pdump_module_config, cp_module);
-
-	struct ring_buffer *ring = ADDR_OF(&config->rings) + worker_idx;
+	struct ring_buffer *ring = ADDR_OF(&config->rings) + dp_worker->idx;
 
 	struct rte_bpf *bpf_shm = ADDR_OF(&config->ebpf_program);
 	struct rte_bpf bpf = *bpf_shm;
@@ -160,7 +160,7 @@ pdump_handle_packets(
 			packet_front->drop.first,
 			&bpf,
 			ring,
-			(uint32_t)worker_idx,
+			dp_worker->idx,
 			config->snaplen,
 			PDUMP_DROPS
 		);
@@ -172,24 +172,11 @@ pdump_handle_packets(
 			packet_front->input.first,
 			&bpf,
 			ring,
-			(uint32_t)worker_idx,
+			dp_worker->idx,
 			config->snaplen,
 			PDUMP_INPUT
 		);
 	}
-
-	// And then process the input packets.
-	if (config->mode & PDUMP_BYPASS && packet_front->bypass.first != NULL) {
-		process_queue(
-			packet_front->bypass.first,
-			&bpf,
-			ring,
-			(uint32_t)worker_idx,
-			config->snaplen,
-			PDUMP_BYPASS
-		);
-	}
-
 	// We should always pass the packets in the input queue
 	packet_front_pass(packet_front);
 }

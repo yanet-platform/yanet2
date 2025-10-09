@@ -151,8 +151,10 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 	);
 
 	parse_packet(pf->input.first);
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(&module_ectx.cp_module, fuzz_params.cp_module);
 	// Process packet through dscp module
-	fuzz_params.module->handler(NULL, 0, fuzz_params.cp_module, NULL, pf);
+	fuzz_params.module->handler(NULL, &module_ectx, pf);
 
 	return 0;
 }

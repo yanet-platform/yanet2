@@ -41,10 +41,9 @@ type DevicePipelineConfig struct {
 }
 
 type DeviceConfig struct {
-	Name      string
-	DeviceId  uint16
-	Vlan      uint16
-	Pipelines []DevicePipelineConfig
+	Name   string
+	Input  []DevicePipelineConfig
+	Output []DevicePipelineConfig
 }
 
 type functionConfig struct {
@@ -153,43 +152,5 @@ func (m *pipelineConfig) Free() {
 }
 
 func (m *pipelineConfig) AsRawPtr() *C.struct_cp_pipeline_config {
-	return m.ptr
-}
-
-// TODO: docs
-func newDeviceConfig(config DeviceConfig) (*deviceConfig, error) {
-	cName := C.CString(config.Name)
-	defer C.free(unsafe.Pointer(cName))
-
-	ptr, err := C.cp_device_config_create(cName, C.uint16_t(config.DeviceId), C.uint16_t(config.Vlan), C.uint64_t(len(config.Pipelines)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create ffi pipeline config: %w", err)
-	}
-	if ptr == nil {
-		return nil, fmt.Errorf("failed to create ffi pipeline config")
-	}
-
-	for idx, pipeline := range config.Pipelines {
-		pName := C.CString(pipeline.Name)
-		defer C.free(unsafe.Pointer(pName))
-
-		if C.cp_device_config_set_pipeline(ptr, C.uint64_t(idx), pName, C.uint64_t(pipeline.Weight)) != 0 {
-			C.cp_device_config_free(ptr)
-			return nil, fmt.Errorf("failed to create ffi pipeline config")
-		}
-	}
-
-	return &deviceConfig{ptr: ptr}, nil
-}
-
-// TODO: docs
-func (m *deviceConfig) Free() {
-	if m.ptr != nil {
-		C.cp_device_config_free(m.ptr)
-		m.ptr = nil
-	}
-}
-
-func (m *deviceConfig) AsRawPtr() *C.struct_cp_device_config {
 	return m.ptr
 }

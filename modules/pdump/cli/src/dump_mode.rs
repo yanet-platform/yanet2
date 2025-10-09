@@ -23,10 +23,7 @@ pub const INPUT: pdump_mode = mode::pdump_mode_PDUMP_INPUT;
 /// Capture dropped packets mode flag
 pub const DROPS: pdump_mode = mode::pdump_mode_PDUMP_DROPS;
 #[allow(dead_code)]
-/// Capture bypassed packets mode flag
-pub const BYPASS: pdump_mode = mode::pdump_mode_PDUMP_BYPASS;
-#[allow(dead_code)]
-/// Capture all packets (input, drops, and bypass) mode flag
+/// Capture all packets (input, drops) mode flag
 pub const ALL: pdump_mode = mode::pdump_mode_PDUMP_ALL;
 
 #[derive(Args, Debug, Clone, Copy)]
@@ -52,29 +49,22 @@ pub struct Mode {
 pub fn to_str(mode: pdump_mode) -> &'static str {
     let input = mode & mode::pdump_mode_PDUMP_INPUT != 0;
     let drops = mode & mode::pdump_mode_PDUMP_DROPS != 0;
-    let bypass = mode & mode::pdump_mode_PDUMP_BYPASS != 0;
 
     // This match covers all combinations to avoid allocations
-    match (input, drops, bypass) {
-        (false, false, false) => "UNKNOWN",
-        (false, false, true) => "BYPASS",
-        (false, true, false) => "DROPS",
-        (false, true, true) => "DROPS|BYPASS",
-        (true, false, false) => "INPUT",
-        (true, false, true) => "INPUT|BYPASS",
-        (true, true, false) => "INPUT|DROPS",
-        (true, true, true) => "INPUT|DROPS|BYPASS",
+    match (input, drops) {
+        (false, false) => "UNKNOWN",
+        (false, true) => "DROPS",
+        (true, false) => "INPUT",
+        (true, true) => "INPUT|DROPS",
     }
 }
 
 pub fn to_char(mode: pdump_mode) -> char {
     let input = mode & mode::pdump_mode_PDUMP_INPUT != 0;
     let drops = mode & mode::pdump_mode_PDUMP_DROPS != 0;
-    let bypass = mode & mode::pdump_mode_PDUMP_BYPASS != 0;
-    match (input, drops, bypass) {
-        (true, false, false) => 'I',
-        (false, true, false) => 'D',
-        (false, false, true) => 'B',
+    match (input, drops) {
+        (true, false) => 'I',
+        (false, true) => 'D',
         _ => 'U', // Multiple modes active or unknown mode, return 'U' for 'UNKNOWN'
     }
 }
@@ -87,9 +77,6 @@ impl From<Mode> for u32 {
         }
         if val.drops {
             mode.bitor_assign(mode::pdump_mode_PDUMP_DROPS);
-        }
-        if val.bypass {
-            mode.bitor_assign(mode::pdump_mode_PDUMP_BYPASS);
         }
         if val.all {
             mode.bitor_assign(mode::pdump_mode_PDUMP_ALL);

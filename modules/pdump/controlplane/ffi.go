@@ -130,9 +130,6 @@ func (m *ModuleConfig) SetDumpMode(pbMode uint32) error {
 	if pbMode&C.PDUMP_DROPS != 0 {
 		mode |= C.PDUMP_DROPS
 	}
-	if pbMode&C.PDUMP_BYPASS != 0 {
-		mode |= C.PDUMP_BYPASS
-	}
 
 	if pbMode != uint32(mode) {
 		// This check validates the exhaustiveness of the preceding if

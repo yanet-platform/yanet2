@@ -23,6 +23,10 @@ struct cp_module;
  */
 typedef void (*cp_module_free_handler)(struct cp_module *cp_module);
 
+struct cp_module_device {
+	char name[CP_DEVICE_NAME_LEN];
+};
+
 struct cp_module {
 	struct registry_item config_item;
 
@@ -54,7 +58,15 @@ struct cp_module {
 	cp_module_free_handler free_handler;
 	// Memory context for additional resources inside the configuration
 	struct memory_context memory_context;
+
+	uint64_t device_count;
+	struct cp_module_device *devices;
 };
+
+int
+cp_module_link_device(
+	struct cp_module *cp_module, const char *name, uint64_t *index
+);
 
 int
 cp_module_init(

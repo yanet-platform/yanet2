@@ -34,12 +34,12 @@ service ForwardService {
 
 message L3ForwardEntry {
 	string network = 1;
-	uint32 dst_dev_id = 2;
+	string dst_dev_id = 2;
 }
 
 message ForwardDeviceConfig {
-	uint32 src_dev_id = 1;
-	uint32 dst_dev_id = 2;
+	string src_dev_id = 1;
+	string dst_dev_id = 2;
 	repeated L3ForwardEntry forwards = 3;
 }
 
@@ -77,8 +77,8 @@ message ShowConfigResponse {
 // L2ForwardEnableRequest enables Layer 2 forwarding between specified devices.
 message L2ForwardEnableRequest {
 	commonpb.TargetModule target = 1;
-	uint32 src_dev_id = 2;
-	uint32 dst_dev_id = 3;
+	string src_dev_id = 2;
+	string dst_dev_id = 3;
 }
 
 message L2ForwardEnableResponse {
@@ -89,7 +89,7 @@ message L2ForwardEnableResponse {
 // forward rule is present, it will be replaced.
 message AddL3ForwardRequest {
 	commonpb.TargetModule target = 1;
-	uint32 src_dev_id = 2;
+	string src_dev_id = 2;
 	L3ForwardEntry forward = 3;
 }
 
@@ -100,7 +100,7 @@ message AddL3ForwardResponse {
 // from which to remove the forward entry for the specified network.
 message RemoveL3ForwardRequest {
 	commonpb.TargetModule target = 1;
-	uint32 src_dev_id = 2;
+	string src_dev_id = 2;
 	string network = 3;
 }
 

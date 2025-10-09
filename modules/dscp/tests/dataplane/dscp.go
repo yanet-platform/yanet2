@@ -14,12 +14,22 @@ uint8_t dscp_mark_always = DSCP_MARK_ALWAYS;
 
 void
 dscp_handle_packets(
-	struct dp_config *dp_config,
-	uint64_t worker_idx,
-	struct cp_module *cp_module,
-	struct counter_storage *counter_storage,
+	struct dp_worker *dp_worker,
+	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 );
+
+void
+test_dscp_handle_packets(
+	struct dp_worker *dp_worker,
+	struct cp_module *cp_module,
+	struct packet_front *packet_front
+) {
+	struct module_ectx module_ectx = {};
+	SET_OFFSET_OF(&module_ectx.cp_module, cp_module);
+	dscp_handle_packets(dp_worker, &module_ectx, packet_front);
+}
+
 */
 import "C"
 import (
@@ -91,7 +101,7 @@ func dscpHandlePackets(mc *C.struct_dscp_module_config, packets ...gopacket.Pack
 	payload := common.PacketsToPaylod(packets)
 	pf := common.PacketFrontFromPayload(payload)
 	common.ParsePackets(pf)
-	C.dscp_handle_packets(nil, 0, &mc.cp_module, nil, (*C.struct_packet_front)(unsafe.Pointer(pf)))
+	C.test_dscp_handle_packets(nil, &mc.cp_module, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	result := common.PacketFrontToPayload(pf)
 	return result
 }

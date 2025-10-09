@@ -8,22 +8,26 @@
 
 #include "controlplane/config/registry.h"
 
-struct cp_pipeline_weight {
+struct cp_device_pipeline {
 	char name[CP_PIPELINE_NAME_LEN];
 	uint64_t weight;
+};
+
+struct cp_device_entry {
+	uint64_t pipeline_count;
+	struct cp_device_pipeline pipelines[];
 };
 
 struct cp_device {
 	struct registry_item config_item;
 	char name[CP_DEVICE_NAME_LEN];
 
-	uint16_t device_id;
-	uint16_t vlan;
+	uint32_t type;
 
 	struct counter_registry counter_registry;
 
-	uint64_t pipeline_count;
-	struct cp_pipeline_weight pipeline_weights[];
+	struct cp_device_entry *input_pipelines;
+	struct cp_device_entry *output_pipelines;
 };
 
 struct dp_config;
@@ -34,12 +38,16 @@ struct cp_pipeline_weight_config {
 	uint64_t weight;
 };
 
+struct cp_device_entry_config {
+	uint64_t count;
+	struct cp_pipeline_weight_config pipelines[];
+};
+
 struct cp_device_config {
 	char name[CP_DEVICE_NAME_LEN];
-	uint16_t device_id;
-	uint16_t vlan;
-	uint64_t pipeline_weight_count;
-	struct cp_pipeline_weight_config pipeline_weights[];
+	uint64_t type;
+	struct cp_device_entry_config *input_pipelines;
+	struct cp_device_entry_config *output_pipelines;
 };
 
 struct cp_device *

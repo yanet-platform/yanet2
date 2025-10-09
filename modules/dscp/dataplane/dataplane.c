@@ -55,17 +55,16 @@ dscp_handle(struct dscp_module_config *config, struct packet *packet) {
 
 void
 dscp_handle_packets(
-	struct dp_config *dp_config,
-	uint64_t worker_idx,
-	struct cp_module *cp_module,
-	struct counter_storage *counter_storage,
+	struct dp_worker *dp_worker,
+	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 ) {
-	(void)dp_config;
-	(void)worker_idx;
-	(void)counter_storage;
-	struct dscp_module_config *dscp_config =
-		container_of(cp_module, struct dscp_module_config, cp_module);
+	(void)dp_worker;
+	struct dscp_module_config *dscp_config = container_of(
+		ADDR_OF(&module_ectx->cp_module),
+		struct dscp_module_config,
+		cp_module
+	);
 
 	if (dscp_config->dscp.flag != DSCP_MARK_NEVER) {
 		struct packet *packet;

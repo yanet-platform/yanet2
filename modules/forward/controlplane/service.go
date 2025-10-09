@@ -24,7 +24,7 @@ type ForwardService struct {
 	mu          sync.Mutex
 	agents      []*ffi.Agent
 	log         *zap.SugaredLogger
-	configs     map[instanceKey][]ForwardDeviceConfig
+	configs     map[instanceKey]map[DeviceID]ForwardDeviceConfig
 	deviceCount uint16
 	updater     ffiConfigUpdater
 }
@@ -33,7 +33,7 @@ func NewForwardService(agents []*ffi.Agent, log *zap.SugaredLogger, deviceCount 
 	return &ForwardService{
 		agents:      agents,
 		log:         log,
-		configs:     make(map[instanceKey][]ForwardDeviceConfig),
+		configs:     make(map[instanceKey]map[DeviceID]ForwardDeviceConfig),
 		deviceCount: deviceCount,
 		updater:     updateModuleConfig,
 	}
@@ -81,15 +81,15 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 		devices := make([]*forwardpb.ForwardDeviceConfig, 0, m.deviceCount)
 		for srcDevIdx, device := range config {
 			deviceConfig := &forwardpb.ForwardDeviceConfig{
-				SrcDevId: uint32(srcDevIdx),
-				DstDevId: uint32(device.DstDevId),
+				SrcDevId: string(srcDevIdx),
+				DstDevId: string(device.DstDevId),
 				Forwards: make([]*forwardpb.L3ForwardEntry, 0, len(device.Forwards)),
 			}
 
 			for network, targetDevice := range device.Forwards {
 				deviceConfig.Forwards = append(deviceConfig.Forwards, &forwardpb.L3ForwardEntry{
 					Network:  network.String(),
-					DstDevId: uint32(targetDevice),
+					DstDevId: string(targetDevice),
 				})
 			}
 			slices.SortFunc(deviceConfig.Forwards, func(a, b *forwardpb.L3ForwardEntry) int {
@@ -137,7 +137,9 @@ func (m *ForwardService) EnableL2Forward(ctx context.Context, req *forwardpb.L2F
 	}
 
 	// Update in-memory configuration
-	config[srcDevId].DstDevId = dstDevId
+	cfg := config[srcDevId]
+	cfg.DstDevId = dstDevId
+	config[srcDevId] = cfg
 
 	// FIXME: Commit in-memory config only if SHM updates are successful?
 
@@ -148,8 +150,8 @@ func (m *ForwardService) EnableL2Forward(ctx context.Context, req *forwardpb.L2F
 
 	m.log.Infow("successfully enable l2 forward",
 		zap.String("name", name),
-		zap.Uint16("src_dev_id", uint16(srcDevId)),
-		zap.Uint16("dst_dev_id", uint16(dstDevId)),
+		zap.String("src_dev_id", string(srcDevId)),
+		zap.String("dst_dev_id", string(dstDevId)),
 		zap.Uint32("instance", inst),
 	)
 
@@ -180,11 +182,12 @@ func (m *ForwardService) AddL3Forward(ctx context.Context, req *forwardpb.AddL3F
 		m.configs[key] = config
 	}
 
-	sourceDev := &config[srcDevId]
+	sourceDev := config[srcDevId]
 	if sourceDev.Forwards == nil {
 		sourceDev.Forwards = make(map[netip.Prefix]DeviceID)
 	}
 	sourceDev.Forwards[network] = dstDevId
+	config[srcDevId] = sourceDev
 
 	// FIXME: Commit in-memory config only if SHM updates are successful?
 
@@ -195,9 +198,9 @@ func (m *ForwardService) AddL3Forward(ctx context.Context, req *forwardpb.AddL3F
 
 	m.log.Infow("successfully added forward",
 		zap.String("name", name),
-		zap.Uint32("src_dev_id", uint32(srcDevId)),
+		zap.String("src_dev_id", string(srcDevId)),
 		zap.String("network", network.String()),
-		zap.Uint32("dst_dev_id", uint32(dstDevId)),
+		zap.String("dst_dev_id", string(dstDevId)),
 	)
 
 	return &forwardpb.AddL3ForwardResponse{}, nil
@@ -208,7 +211,7 @@ func (m *ForwardService) RemoveL3Forward(ctx context.Context, req *forwardpb.Rem
 	if err != nil {
 		return nil, err
 	}
-	srcDevId, network, _, err := m.validateForwardParams(req.SrcDevId, req.Network, 0)
+	srcDevId, network, _, err := m.validateForwardParams(req.SrcDevId, req.Network, "0")
 	if err != nil {
 		return nil, err
 	}
@@ -223,11 +226,12 @@ func (m *ForwardService) RemoveL3Forward(ctx context.Context, req *forwardpb.Rem
 		return &forwardpb.RemoveL3ForwardResponse{}, nil
 	}
 
-	sourceDev := &config[srcDevId]
+	sourceDev := config[srcDevId]
 	if sourceDev.Forwards == nil {
 		return &forwardpb.RemoveL3ForwardResponse{}, nil
 	}
 	delete(sourceDev.Forwards, network)
+	config[srcDevId] = sourceDev
 
 	// FIXME: Commit in-memory config only if SHM updates are successful?
 
@@ -238,7 +242,7 @@ func (m *ForwardService) RemoveL3Forward(ctx context.Context, req *forwardpb.Rem
 
 	m.log.Infow("successfully removed forward",
 		zap.String("name", name),
-		zap.Uint16("src_dev_id", uint16(srcDevId)),
+		zap.String("src_dev_id", string(srcDevId)),
 		zap.String("network", network.String()),
 	)
 
@@ -266,28 +270,14 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 	return response, nil
 }
 
-func (m *ForwardService) validateForwardParams(srcDeviceId uint32, network string, dstDeviceId uint32) (DeviceID, netip.Prefix, DeviceID, error) {
+func (m *ForwardService) validateForwardParams(srcDeviceId string, network string, dstDeviceId string) (DeviceID, netip.Prefix, DeviceID, error) {
 	prefix, err := netip.ParsePrefix(network)
 	if err != nil {
-		return 0, netip.Prefix{}, 0, status.Errorf(codes.InvalidArgument, "failed to parse network: %v", err)
+		return "0", netip.Prefix{}, "0", status.Errorf(codes.InvalidArgument, "failed to parse network: %v", err)
 	}
 
 	sourceDeviceId := DeviceID(srcDeviceId)
-	if uint32(sourceDeviceId) != srcDeviceId {
-		return 0, netip.Prefix{}, 0, status.Errorf(codes.InvalidArgument, "source device ID is too large for uint16")
-	}
-
-	if uint16(sourceDeviceId) >= m.deviceCount {
-		return 0, netip.Prefix{}, 0, status.Errorf(codes.InvalidArgument, "source device ID %d is out of range [0..%d)", sourceDeviceId, m.deviceCount)
-	}
-
 	targetDeviceId := DeviceID(dstDeviceId)
-	if uint32(targetDeviceId) != dstDeviceId {
-		return 0, netip.Prefix{}, 0, status.Errorf(codes.InvalidArgument, "destination device ID is too large for uint16")
-	}
-	if uint16(targetDeviceId) >= m.deviceCount {
-		return 0, netip.Prefix{}, 0, status.Errorf(codes.InvalidArgument, "destination device ID %d is out of range [0..%d)", targetDeviceId, m.deviceCount)
-	}
 
 	return sourceDeviceId, prefix, targetDeviceId, nil
 }
@@ -322,13 +312,13 @@ func updateModuleConfig(
 		dstDeviceID := device.DstDevId
 
 		if err := moduleConfig.L2ForwardEnable(srcDeviceID, dstDeviceID); err != nil {
-			return fmt.Errorf("failed to enable forward from dev(%d) to dev(%d) on instance %d: %w", srcDeviceID, dstDeviceID, instance, err)
+			return fmt.Errorf("failed to enable forward from dev(%s) to dev(%s) on instance %d: %w", srcDeviceID, dstDeviceID, instance, err)
 		}
 
 		// Then configure all forwards for this device
 		for network, targetDevice := range device.Forwards {
 			if err := moduleConfig.L3ForwardEnable(network, srcDeviceID, targetDevice); err != nil {
-				return fmt.Errorf("failed to enable forward from dev(%d) to dev(%d) for network %s on instance %d: %w",
+				return fmt.Errorf("failed to enable forward from dev(%s) to dev(%s) for network %s on instance %d: %w",
 					srcDeviceID, targetDevice, network, instance, err)
 			}
 		}
@@ -345,10 +335,7 @@ func updateModuleConfig(
 	return nil
 }
 
-func defaultForwardConfig(deviceCount uint16) []ForwardDeviceConfig {
-	config := make([]ForwardDeviceConfig, deviceCount)
-	for idx := range config {
-		config[idx].DstDevId = DeviceID(idx)
-	}
+func defaultForwardConfig(deviceCount uint16) map[DeviceID]ForwardDeviceConfig {
+	config := make(map[DeviceID]ForwardDeviceConfig)
 	return config
 }

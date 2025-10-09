@@ -49,16 +49,23 @@ struct cp_device_config;
 struct cp_device_config *
 cp_device_config_create(
 	const char *name,
-	uint16_t device_id,
-	uint16_t vlan,
-	uint64_t pipeline_count
+	uint64_t input_pipeline_count,
+	uint64_t output_pipeline_count
 );
 
 void
 cp_device_config_free(struct cp_device_config *config);
 
 int
-cp_device_config_set_pipeline(
+cp_device_config_set_input_pipeline(
+	struct cp_device_config *config,
+	uint64_t index,
+	const char *name,
+	uint64_t weight
+);
+
+int
+cp_device_config_set_output_pipeline(
 	struct cp_device_config *config,
 	uint64_t index,
 	const char *name,

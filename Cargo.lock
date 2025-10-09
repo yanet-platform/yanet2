@@ -4403,6 +4403,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-device"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "log",
+ "prost",
+ "prost-types",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
+]
+
+[[package]]
 name = "yanet-cli-dscp"
 version = "0.1.0"
 dependencies = [

@@ -312,18 +312,16 @@ balancer_route(
 
 void
 balancer_handle_packets(
-	struct dp_config *dp_config,
-	uint64_t worker_idx,
-	struct cp_module *cp_module,
-	struct counter_storage *counter_storage,
+	struct dp_worker *dp_worker,
+	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 ) {
-	(void)dp_config;
-	(void)worker_idx;
-	(void)counter_storage;
+	(void)dp_worker;
 
 	struct balancer_module_config *balancer_config = container_of(
-		cp_module, struct balancer_module_config, cp_module
+		ADDR_OF(&module_ectx->cp_module),
+		struct balancer_module_config,
+		cp_module
 	);
 
 	struct packet *packet;

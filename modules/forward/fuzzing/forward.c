@@ -34,9 +34,7 @@ forward_test_config(struct cp_module **cp_module) {
 
 	struct forward_module_config *config =
 		(struct forward_module_config *)memory_balloc(
-			&fuzz_params.mctx,
-			sizeof(struct forward_module_config
-			) + sizeof(struct forward_device_config) * device_count
+			&fuzz_params.mctx, sizeof(struct forward_module_config)
 		);
 
 	if (!config) {
@@ -57,26 +55,52 @@ forward_test_config(struct cp_module **cp_module) {
 	config->cp_module.agent = NULL;
 	config->device_count = device_count;
 	config->cp_module.free_handler = forward_module_config_free;
-
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
 
+	struct forward_device_config **devices =
+		(struct forward_device_config **)memory_balloc(
+			memory_context,
+			sizeof(struct forward_device_config *) * device_count
+		);
+	if (devices == NULL) {
+		goto fail;
+	}
+	memset(devices, 0, sizeof(struct forward_device_config *) * device_count
+	);
+	SET_OFFSET_OF(&config->devices, devices);
+
 	for (uint16_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
-		struct forward_device_config *device_forward =
-			config->device_forwards + dev_idx;
-		device_forward->l2_dst_device_id = dev_idx;
-		if (lpm_init(&device_forward->lpm_v4, memory_context)) {
+		struct forward_device_config *device =
+			(struct forward_device_config *)memory_balloc(
+				memory_context,
+				sizeof(struct forward_device_config)
+			);
+		if (device == NULL) {
 			goto fail;
 		}
-		if (lpm_init(&device_forward->lpm_v6, memory_context)) {
+		SET_OFFSET_OF(devices + dev_idx, device);
+
+		device->target_count = 0;
+		SET_OFFSET_OF(&device->targets, NULL);
+
+		device->l2_target_id = LPM_VALUE_INVALID;
+		if (lpm_init(&device->lpm_v4, memory_context)) {
+			goto fail;
+		}
+		if (lpm_init(&device->lpm_v6, memory_context)) {
 			goto fail;
 		}
 	}
+	const char *dev_names[] = {"dev0", "dev1"};
 	for (uint16_t idx = 0; idx < device_count; idx++) {
 		uint16_t from_dev = idx;
 		uint16_t to_dev = device_count - idx - 1;
 		int rc = forward_module_config_enable_l2(
-			&config->cp_module, from_dev, to_dev, 0
+			&config->cp_module,
+			dev_names[from_dev],
+			dev_names[to_dev],
+			"cnt"
 		);
 		if (rc != 0) {
 			goto fail;
@@ -87,9 +111,9 @@ forward_test_config(struct cp_module **cp_module) {
 			&config->cp_module,
 			(uint8_t[4]){127, 0, 0, 0},
 			(uint8_t[4]){127, 0, 0, 0xff},
-			from_dev,
-			to_dev,
-			0
+			dev_names[from_dev],
+			dev_names[to_dev],
+			"cnt"
 		);
 		if (rc != 0) {
 			goto fail;
@@ -104,9 +128,9 @@ forward_test_config(struct cp_module **cp_module) {
 				      [13] = 0xff,
 				      [14] = 0xff,
 				      [15] = 0xff},
-			from_dev,
-			to_dev,
-			0
+			dev_names[from_dev],
+			dev_names[to_dev],
+			"cnt"
 		);
 		if (rc != 0) {
 			goto fail;
@@ -171,8 +195,10 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 	);
 
 	parse_packet(pf->input.first);
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(&module_ectx.cp_module, fuzz_params.cp_module);
 	// Process packet through forward module
-	fuzz_params.module->handler(NULL, 0, fuzz_params.cp_module, NULL, pf);
+	fuzz_params.module->handler(NULL, &module_ectx, pf);
 
 	return 0;
 }

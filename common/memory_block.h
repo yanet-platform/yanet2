@@ -107,9 +107,6 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 	if (!size)
 		return NULL;
 
-	if (size < MEMORY_BLOCK_ALLOCATOR_MIN_SIZE)
-		size = MEMORY_BLOCK_ALLOCATOR_MIN_SIZE;
-
 	if (size > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE)
 		return NULL;
 

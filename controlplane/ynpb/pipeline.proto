@@ -62,9 +62,15 @@ message UpdateDevicesRequest {
 
 message Device {
 	string name = 1;
-	uint32 device_id = 2;
-	uint32 vlan = 3;
-	repeated DevicePipeline pipelines = 4;
+	repeated DevicePipeline input = 2;
+	repeated DevicePipeline output = 3;
+}
+
+message VlanDevice {
+	string name = 1;
+	uint32 vlan = 2;
+	repeated DevicePipeline input = 3;
+	repeated DevicePipeline output = 4;
 }
 
 message DevicePipeline {

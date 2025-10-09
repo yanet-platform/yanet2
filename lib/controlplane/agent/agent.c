@@ -673,9 +673,10 @@ cp_device_list_info_free(struct cp_device_list_info *device_list_info) {
 
 static struct cp_device_info *
 yanet_build_device_info(struct cp_device *device) {
-	size_t device_info_size =
-		sizeof(struct cp_device_info) +
-		sizeof(struct cp_device_pipeline_info) * device->pipeline_count;
+	size_t device_info_size = sizeof(struct cp_device_info) +
+				  // FIXME
+				  sizeof(struct cp_device_pipeline_info) *
+					  0; // device->pipeline_count;
 	struct cp_device_info *device_info =
 		(struct cp_device_info *)malloc(device_info_size);
 	if (device_info == NULL) {
@@ -683,16 +684,17 @@ yanet_build_device_info(struct cp_device *device) {
 	}
 	memset(device_info, 0, device_info_size);
 
-	device_info->pipeline_count = device->pipeline_count;
+	// FIXME
+	device_info->pipeline_count = 0; // device->pipeline_count;
 	strtcpy(device_info->name, device->name, CP_DEVICE_NAME_LEN);
-	for (uint64_t idx = 0; idx < device->pipeline_count; ++idx) {
-		// FIXME
-		device_info->pipelines[idx].pipeline_idx =
-			-1; // device->pipeline_map[link_idx];
-		device_info->pipelines[idx].weight =
-			device->pipeline_weights[idx].weight;
-	}
-
+	/*	for (uint64_t idx = 0; idx < device->pipeline_count; ++idx) {
+			// FIXME
+			device_info->pipelines[idx].pipeline_idx =
+				-1; // device->pipeline_map[link_idx];
+			device_info->pipelines[idx].weight =
+				device->pipeline_weights[idx].weight;
+		}
+	*/
 	return device_info;
 }
 
@@ -867,47 +869,88 @@ unlock:
 struct cp_device_config *
 cp_device_config_create(
 	const char *name,
-	uint16_t device_id,
-	uint16_t vlan,
-	uint64_t pipeline_count
+	uint64_t input_pipeline_count,
+	uint64_t output_pipeline_count
 ) {
-	struct cp_device_config *config = (struct cp_device_config *)malloc(
-		sizeof(struct cp_device_config) +
-		sizeof(struct cp_pipeline_weight_config) * pipeline_count
-	);
+	struct cp_device_config *config =
+		(struct cp_device_config *)malloc(sizeof(struct cp_device_config
+		));
 
 	if (config == NULL)
 		return NULL;
 
-	memset(config,
-	       0,
-	       sizeof(struct cp_device_config
-	       ) + sizeof(struct cp_pipeline_weight_config) * pipeline_count);
+	memset(config, 0, sizeof(struct cp_device_config));
 	strtcpy(config->name, name, CP_DEVICE_NAME_LEN);
-	config->device_id = device_id;
-	config->vlan = vlan;
-	config->pipeline_weight_count = pipeline_count;
+	config->input_pipelines = (struct cp_device_entry_config *)malloc(
+		sizeof(struct cp_device_entry_config) +
+		sizeof(struct cp_pipeline_weight_config) * input_pipeline_count
+	);
+	if (config->input_pipelines == NULL) {
+		cp_device_config_free(config);
+		return NULL;
+	}
+	memset(config->input_pipelines,
+	       0,
+	       sizeof(struct cp_device_entry_config) +
+		       sizeof(struct cp_pipeline_weight_config) *
+			       input_pipeline_count);
+	config->input_pipelines->count = input_pipeline_count;
+
+	config->output_pipelines = (struct cp_device_entry_config *)malloc(
+		sizeof(struct cp_device_entry_config) +
+		sizeof(struct cp_pipeline_weight_config) * output_pipeline_count
+	);
+	if (config->output_pipelines == NULL) {
+		cp_device_config_free(config);
+		return NULL;
+	}
+	memset(config->output_pipelines,
+	       0,
+	       sizeof(struct cp_device_entry_config) +
+		       sizeof(struct cp_pipeline_weight_config) *
+			       output_pipeline_count);
+	config->output_pipelines->count = output_pipeline_count;
 
 	return config;
 }
 
 void
 cp_device_config_free(struct cp_device_config *config) {
+	free(config->output_pipelines);
+	free(config->input_pipelines);
 	free(config);
 }
 
 int
-cp_device_config_set_pipeline(
+cp_device_config_set_input_pipeline(
 	struct cp_device_config *device,
 	uint64_t index,
 	const char *name,
 	uint64_t weight
 ) {
-	if (index >= device->pipeline_weight_count)
+	if (index >= device->input_pipelines->count)
 		return -1;
-	strtcpy(device->pipeline_weights[index].name, name, CP_PIPELINE_NAME_LEN
-	);
-	device->pipeline_weights[index].weight = weight;
+	strtcpy(device->input_pipelines->pipelines[index].name,
+		name,
+		CP_PIPELINE_NAME_LEN);
+	device->input_pipelines->pipelines[index].weight = weight;
+
+	return 0;
+}
+
+int
+cp_device_config_set_output_pipeline(
+	struct cp_device_config *device,
+	uint64_t index,
+	const char *name,
+	uint64_t weight
+) {
+	if (index >= device->output_pipelines->count)
+		return -1;
+	strtcpy(device->output_pipelines->pipelines[index].name,
+		name,
+		CP_PIPELINE_NAME_LEN);
+	device->output_pipelines->pipelines[index].weight = weight;
 
 	return 0;
 }

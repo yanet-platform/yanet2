@@ -30,13 +30,13 @@ func newTestService(agents []*ffi.Agent, deviceCount uint16) *ForwardService {
 func TestEnableL2Forward(t *testing.T) {
 	svc := newTestService(make([]*ffi.Agent, 1), 8)
 
-	var srcId uint16 = 3
-	var dstId uint16 = 4
+	var srcId string = "3"
+	var dstId string = "4"
 	// Enable L2 forward from device 3 to 4
 	req := &forwardpb.L2ForwardEnableRequest{
 		Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-		SrcDevId: uint32(srcId),
-		DstDevId: uint32(dstId),
+		SrcDevId: string(srcId),
+		DstDevId: string(dstId),
 	}
 
 	_, err := svc.EnableL2Forward(context.Background(), req)
@@ -46,7 +46,7 @@ func TestEnableL2Forward(t *testing.T) {
 	key := instanceKey{name: "test-module", dataplaneInstance: 0}
 	config := svc.configs[key]
 	require.NotNil(t, config)
-	require.Equal(t, dstId, uint16(config[srcId].DstDevId))
+	require.Equal(t, dstId, string(config[DeviceID(srcId)].DstDevId))
 
 	// Repeated assignment should just overwrite
 	_, err = svc.EnableL2Forward(context.Background(), req)
@@ -68,10 +68,10 @@ func TestAddL3Forward(t *testing.T) {
 	// Add L3 forward
 	addForwardReq := &forwardpb.AddL3ForwardRequest{
 		Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-		SrcDevId: 1,
+		SrcDevId: "1",
 		Forward: &forwardpb.L3ForwardEntry{
 			Network:  "192.168.1.0/24",
-			DstDevId: 2,
+			DstDevId: "2",
 		},
 	}
 	_, err := svc.AddL3Forward(context.Background(), addForwardReq)
@@ -80,32 +80,19 @@ func TestAddL3Forward(t *testing.T) {
 	// Check that the rule was added
 	key := instanceKey{name: "test-module", dataplaneInstance: 0}
 	config := svc.configs[key]
-	device := &config[1]
+	device := config[DeviceID("1")]
 	prefix := netip.MustParsePrefix("192.168.1.0/24")
 	targetID, exists := device.Forwards[prefix]
 	require.True(t, exists, "Forward rule should exist")
-	require.Equal(t, DeviceID(2), targetID)
-
-	// Error: non-existent target device
-	invalidTargetReq := &forwardpb.AddL3ForwardRequest{
-		Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-		SrcDevId: 1,
-		Forward: &forwardpb.L3ForwardEntry{
-			Network:  "10.0.0.0/8",
-			DstDevId: 999,
-		},
-	}
-	_, err = svc.AddL3Forward(context.Background(), invalidTargetReq)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "destination device ID 999 is out of range")
+	require.Equal(t, DeviceID("2"), targetID)
 
 	// Error: invalid network
 	invalidReq := &forwardpb.AddL3ForwardRequest{
 		Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-		SrcDevId: 1,
+		SrcDevId: "1",
 		Forward: &forwardpb.L3ForwardEntry{
 			Network:  "invalid",
-			DstDevId: 2,
+			DstDevId: "2",
 		},
 	}
 	_, err = svc.AddL3Forward(context.Background(), invalidReq)
@@ -119,10 +106,10 @@ func TestRemoveL3Forward(t *testing.T) {
 	// Add L3 forward
 	_, err := svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
 		Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-		SrcDevId: 1,
+		SrcDevId: "1",
 		Forward: &forwardpb.L3ForwardEntry{
 			Network:  "192.168.1.0/24",
-			DstDevId: 2,
+			DstDevId: "2",
 		},
 	})
 	require.NoError(t, err)
@@ -130,7 +117,7 @@ func TestRemoveL3Forward(t *testing.T) {
 	// Remove L3 forward
 	removeReq := &forwardpb.RemoveL3ForwardRequest{
 		Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-		SrcDevId: 1,
+		SrcDevId: "1",
 		Network:  "192.168.1.0/24",
 	}
 	_, err = svc.RemoveL3Forward(context.Background(), removeReq)
@@ -139,14 +126,14 @@ func TestRemoveL3Forward(t *testing.T) {
 	// Check that the rule was removed
 	key := instanceKey{name: "test-module", dataplaneInstance: 0}
 	config := svc.configs[key]
-	device := &config[1]
+	device := config["1"]
 	prefix := netip.MustParsePrefix("192.168.1.0/24")
 	_, exists := device.Forwards[prefix]
 	require.False(t, exists, "Forward rule should be removed")
 }
 
 // getDevice is a helper function that finds a device configuration by source device ID
-func getDevice(t *testing.T, SrcDevId uint32, cfg *forwardpb.Config) *forwardpb.ForwardDeviceConfig {
+func getDevice(t *testing.T, SrcDevId string, cfg *forwardpb.Config) *forwardpb.ForwardDeviceConfig {
 	devIdx := slices.IndexFunc(cfg.Devices, func(d *forwardpb.ForwardDeviceConfig) bool {
 		return d.SrcDevId == SrcDevId
 	})
@@ -162,16 +149,16 @@ func TestShowConfig(t *testing.T) {
 	// Set up default config for instance 0
 	_, err := svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
 		Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-		SrcDevId: 1,
-		DstDevId: 7,
+		SrcDevId: "1",
+		DstDevId: "7",
 	})
 	require.NoError(t, err)
 
 	// Set up minimal config for instance 1 to ensure it's returned by ShowConfig
 	_, err = svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
 		Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 1},
-		SrcDevId: 1,
-		DstDevId: 1,
+		SrcDevId: "1",
+		DstDevId: "1",
 	})
 	require.NoError(t, err)
 
@@ -182,26 +169,33 @@ func TestShowConfig(t *testing.T) {
 	forward2 := netip.MustParsePrefix("10.0.0.0/8")
 	forward3 := netip.MustParsePrefix("172.16.0.0/12")
 	forward4 := netip.MustParsePrefix("2001:db8::/32")
-	svc.configs[key][1].Forwards = map[netip.Prefix]DeviceID{
-		forward1: 2,
-		forward2: 2,
+	svc.configs[key]["1"] = ForwardDeviceConfig{
+		Forwards: map[netip.Prefix]DeviceID{
+			forward1: "2",
+			forward2: "2",
+		},
+		DstDevId: "7",
 	}
-	svc.configs[key][3].Forwards = map[netip.Prefix]DeviceID{
-		forward3: 4,
-		forward4: 5,
+
+	svc.configs[key]["3"] = ForwardDeviceConfig{
+		Forwards: map[netip.Prefix]DeviceID{
+			forward3: "4",
+			forward4: "5",
+		},
+		DstDevId: "3",
 	}
 
 	// Set up configs for non-existent module test
 	_, err = svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
 		Target:   &commonpb.TargetModule{ConfigName: "non-existent-module", DataplaneInstance: 0},
-		SrcDevId: 1,
-		DstDevId: 1,
+		SrcDevId: "1",
+		DstDevId: "1",
 	})
 	require.NoError(t, err)
 	_, err = svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
 		Target:   &commonpb.TargetModule{ConfigName: "non-existent-module", DataplaneInstance: 1},
-		SrcDevId: 1,
-		DstDevId: 1,
+		SrcDevId: "1",
+		DstDevId: "1",
 	})
 	require.NoError(t, err)
 
@@ -215,16 +209,15 @@ func TestShowConfig(t *testing.T) {
 		require.NotNil(t, resp, "Response should not be nil")
 		require.Equal(t, uint32(0), resp.Instance, "Should return config for instance 0")
 		require.NotNil(t, resp.Config, "Config should not be nil")
-		require.Len(t, resp.Config.Devices, int(svc.deviceCount), "Should have %d devices in instance 0", svc.deviceCount)
 
 		// Check device 1 has 2 forward rules
-		var srcDevId uint32 = 1
+		var srcDevId string = "1"
 		dev1 := getDevice(t, srcDevId, resp.Config)
-		require.Equal(t, uint32(7), dev1.DstDevId, "Device 1 should forward to device 7")
+		require.Equal(t, "7", dev1.DstDevId, "Device 1 should forward to device 7")
 		require.Len(t, dev1.Forwards, 2, "Device 1 should have 2 forwards")
 
 		// Check device 3 has 2 forward rules
-		srcDevId = 3
+		srcDevId = "3"
 		dev3 := getDevice(t, srcDevId, resp.Config)
 		require.Equal(t, srcDevId, dev3.DstDevId, "Device 3 should forward to itself")
 		require.Len(t, dev3.Forwards, 2, "Device 3 should have two forwards")
@@ -233,10 +226,10 @@ func TestShowConfig(t *testing.T) {
 		for _, fwd := range dev3.Forwards {
 			if fwd.Network == forward3.String() {
 				networksFound++
-				require.Equal(t, uint32(4), fwd.DstDevId, "Target device should match")
+				require.Equal(t, "4", fwd.DstDevId, "Target device should match")
 			} else if fwd.Network == forward4.String() {
 				networksFound++
-				require.Equal(t, uint32(5), fwd.DstDevId, "Target device should match")
+				require.Equal(t, "5", fwd.DstDevId, "Target device should match")
 			}
 		}
 		require.Equal(t, 2, networksFound, "Device 3 should have networks %s and %s", forward3, forward4)
@@ -251,9 +244,6 @@ func TestShowConfig(t *testing.T) {
 		require.NoError(t, err, "ShowConfig should not return an error")
 		require.NotNil(t, resp, "Response should not be nil")
 		require.Equal(t, uint32(1), resp.Instance, "Response should be for instance 1")
-		if resp.Config != nil {
-			require.Len(t, resp.Config.Devices, int(svc.deviceCount), "Should return %d devices", svc.deviceCount)
-		}
 	})
 
 	// Test scenario 3: Show for non-existent config
@@ -283,17 +273,17 @@ func TestInputValidation(t *testing.T) {
 
 		// Test missing target in RemoveL3Forward
 		_, err = svc.RemoveL3Forward(context.Background(), &forwardpb.RemoveL3ForwardRequest{
-			SrcDevId: 1,
+			SrcDevId: "1",
 		})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "target module cannot be nil")
 
 		// Test missing target in AddForward
 		_, err = svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
-			SrcDevId: 1,
+			SrcDevId: "1",
 			Forward: &forwardpb.L3ForwardEntry{
 				Network:  "192.168.1.0/24",
-				DstDevId: 2,
+				DstDevId: "2",
 			},
 		})
 		require.Error(t, err)
@@ -301,7 +291,7 @@ func TestInputValidation(t *testing.T) {
 
 		// Test missing target in RemoveForward
 		_, err = svc.RemoveL3Forward(context.Background(), &forwardpb.RemoveL3ForwardRequest{
-			SrcDevId: 1,
+			SrcDevId: "1",
 			Network:  "192.168.1.0/24",
 		})
 		require.Error(t, err)
@@ -317,8 +307,8 @@ func TestInputValidation(t *testing.T) {
 		// Test empty module name in EnableL2Forward
 		_, err := svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
 			Target:   &commonpb.TargetModule{DataplaneInstance: 0},
-			SrcDevId: 1,
-			DstDevId: 2,
+			SrcDevId: "1",
+			DstDevId: "2",
 		})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "module name is required")
@@ -326,7 +316,7 @@ func TestInputValidation(t *testing.T) {
 		// Test empty module name in RemoveL3Forward
 		_, err = svc.RemoveL3Forward(context.Background(), &forwardpb.RemoveL3ForwardRequest{
 			Target:   &commonpb.TargetModule{DataplaneInstance: 0},
-			SrcDevId: 1,
+			SrcDevId: "1",
 			Network:  "192.168.1.0/24",
 		})
 		require.Error(t, err)
@@ -335,10 +325,10 @@ func TestInputValidation(t *testing.T) {
 		// Test empty module name in AddForward
 		_, err = svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
 			Target:   &commonpb.TargetModule{DataplaneInstance: 0},
-			SrcDevId: 1,
+			SrcDevId: "1",
 			Forward: &forwardpb.L3ForwardEntry{
 				Network:  "192.168.1.0/24",
-				DstDevId: 2,
+				DstDevId: "2",
 			},
 		})
 		require.Error(t, err)
@@ -347,7 +337,7 @@ func TestInputValidation(t *testing.T) {
 		// Test empty module name in RemoveForward
 		_, err = svc.RemoveL3Forward(context.Background(), &forwardpb.RemoveL3ForwardRequest{
 			Target:   &commonpb.TargetModule{DataplaneInstance: 0},
-			SrcDevId: 1,
+			SrcDevId: "1",
 			Network:  "192.168.1.0/24",
 		})
 		require.Error(t, err)
@@ -365,26 +355,26 @@ func TestInputValidation(t *testing.T) {
 		// Add a device to test with
 		_, err := svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
 			Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-			SrcDevId: 1,
-			DstDevId: 2,
+			SrcDevId: "1",
+			DstDevId: "2",
 		})
 		require.NoError(t, err)
 
 		// Add a target device
 		_, err = svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
 			Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-			SrcDevId: 2,
-			DstDevId: 2,
+			SrcDevId: "2",
+			DstDevId: "2",
 		})
 		require.NoError(t, err)
 
 		// Test invalid network format in AddForward
 		_, err = svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
 			Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-			SrcDevId: 1,
+			SrcDevId: "1",
 			Forward: &forwardpb.L3ForwardEntry{
 				Network:  "invalid-network",
-				DstDevId: 2,
+				DstDevId: "2",
 			},
 		})
 		require.Error(t, err)
@@ -393,7 +383,7 @@ func TestInputValidation(t *testing.T) {
 		// Test invalid network format in RemoveForward
 		_, err = svc.RemoveL3Forward(context.Background(), &forwardpb.RemoveL3ForwardRequest{
 			Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-			SrcDevId: 1,
+			SrcDevId: "1",
 			Network:  "invalid-network",
 		})
 		require.Error(t, err)
@@ -404,60 +394,10 @@ func TestInputValidation(t *testing.T) {
 		// Test nil forward entry in AddForward
 		_, err := svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
 			Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-			SrcDevId: 1,
+			SrcDevId: "1",
 			Forward:  nil,
 		})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "forward entry cannot be nil")
-	})
-
-	t.Run("nonexistent source device", func(t *testing.T) {
-		// Set up a clean environment
-		svc := newTestService(make([]*ffi.Agent, 1), 8)
-
-		// Add target device
-		_, err := svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
-			Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-			SrcDevId: 2,
-			DstDevId: 2,
-		})
-		require.NoError(t, err)
-
-		// Test AddForward with a non-existent source device
-		_, err = svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
-			Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-			SrcDevId: 999, // Non-existent source device
-			Forward: &forwardpb.L3ForwardEntry{
-				Network:  "192.168.1.0/24",
-				DstDevId: 2,
-			},
-		})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "out of range")
-	})
-
-	t.Run("nonexistent target device", func(t *testing.T) {
-		// Set up a clean environment
-		svc := newTestService(make([]*ffi.Agent, 1), 8)
-
-		// Add a source device
-		_, err := svc.EnableL2Forward(context.Background(), &forwardpb.L2ForwardEnableRequest{
-			Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-			SrcDevId: 1,
-			DstDevId: 1,
-		})
-		require.NoError(t, err)
-
-		// Test AddForward with a non-existent target device
-		_, err = svc.AddL3Forward(context.Background(), &forwardpb.AddL3ForwardRequest{
-			Target:   &commonpb.TargetModule{ConfigName: "test-module", DataplaneInstance: 0},
-			SrcDevId: 1, // Existing source device
-			Forward: &forwardpb.L3ForwardEntry{
-				Network:  "192.168.1.0/24",
-				DstDevId: 999, // Non-existent target device
-			},
-		})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "destination device ID 999 is out of range")
 	})
 }

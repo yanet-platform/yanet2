@@ -239,6 +239,28 @@ dataplane_load_module(
 	return 0;
 }
 
+static void
+device_empty_handler(
+	struct dp_worker *dp_worker,
+	struct device_ectx *device_ectx,
+	struct packet *packet
+) {
+	(void)dp_worker;
+	(void)device_ectx;
+	(void)packet;
+}
+
+static void
+device_vlan_handler(
+	struct dp_worker *dp_worker,
+	struct device_ectx *device_ectx,
+	struct packet *packet
+) {
+	(void)dp_worker;
+	(void)device_ectx;
+	(void)packet;
+}
+
 int
 dataplane_init_storage(
 	uint32_t numa_idx,
@@ -294,9 +316,6 @@ dataplane_init_storage(
 		);
 	cp_agent_registry->count = 0;
 	SET_OFFSET_OF(&cp_config->agent_registry, cp_agent_registry);
-
-	struct cp_config_gen *cp_config_gen = cp_config_gen_create(cp_config);
-	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
 
 	SET_OFFSET_OF(&dp_config->cp_config, cp_config);
 	SET_OFFSET_OF(&cp_config->dp_config, dp_config);
@@ -401,6 +420,27 @@ dataplane_init(
 
 		instance->dp_config->dp_topology.device_count =
 			config->device_count;
+		struct dp_device *devices = (struct dp_device *)memory_balloc(
+			&instance->dp_config->memory_context,
+			sizeof(struct dp_device) *
+				instance->dp_config->dp_topology.device_count
+		);
+		for (uint64_t idx = 0; idx < config->device_count; ++idx) {
+			strtcpy(devices[idx].port_name,
+				config->devices[idx].port_name,
+				sizeof(devices[idx].port_name));
+		}
+
+		SET_OFFSET_OF(
+			&instance->dp_config->dp_topology.devices, devices
+		);
+
+		struct cp_config_gen *cp_config_gen =
+			cp_config_gen_create(instance->cp_config);
+		SET_OFFSET_OF(
+			&instance->cp_config->cp_config_gen, cp_config_gen
+		);
+
 		instance->dp_config->instance_idx = instance_idx;
 		instance->dp_config->instance_count = dataplane->instance_count;
 
@@ -453,6 +493,21 @@ dataplane_init(
 		if (rc == -1) {
 			return -1;
 		}
+
+		struct dp_device_handler *handlers =
+			(struct dp_device_handler *)memory_balloc(
+				&instance->dp_config->memory_context,
+				sizeof(struct dp_device_handler) * 2
+			);
+		handlers[0].input = device_empty_handler;
+		handlers[0].output = device_empty_handler;
+		handlers[1].input = device_empty_handler;
+		handlers[1].output = device_vlan_handler;
+
+		SET_OFFSET_OF(
+			&instance->dp_config->dp_device_handlers, handlers
+		);
+		instance->dp_config->device_handler_count = 2;
 
 		instance_offset +=
 			instance_config->dp_memory + instance_config->cp_memory;
@@ -615,33 +670,6 @@ dataplane_start(struct dataplane *dataplane) {
 	for (size_t dev_idx = 0; dev_idx < dataplane->device_count; ++dev_idx) {
 		dataplane_device_start(dataplane, dataplane->devices + dev_idx);
 	}
-
-	for (size_t dev_idx = 0; dev_idx < dataplane->device_count; ++dev_idx) {
-		struct dataplane_device *device = dataplane->devices + dev_idx;
-
-		struct cp_device_config cp_device_config;
-		strtcpy(cp_device_config.name,
-			device->port_name,
-			CP_DEVICE_NAME_LEN);
-		cp_device_config.pipeline_weight_count = 0;
-		for (uint64_t node_idx = 0;
-		     node_idx < dataplane->instance_count;
-		     ++node_idx) {
-			struct dataplane_instance *node =
-				dataplane->instances + node_idx;
-
-			struct cp_device_config *cp_device_configs =
-				&cp_device_config;
-
-			cp_config_update_devices(
-				node->dp_config,
-				node->cp_config,
-				1,
-				&cp_device_configs
-			);
-		}
-	}
-
 	pthread_t thread_id;
 	pthread_create(&thread_id, NULL, stat_thread, dataplane);
 

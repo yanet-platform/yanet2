@@ -150,27 +150,49 @@ func (m *Agent) UpdateDevices(deviceConfigs []DeviceConfig) error {
 		deviceName := C.CString(cfg.Name)
 		defer C.free(unsafe.Pointer(deviceName))
 
-		config := C.cp_device_config_create(deviceName, C.uint16_t(cfg.DeviceId), C.uint16_t(cfg.Vlan), C.uint64_t(len(cfg.Pipelines)))
+		config := C.cp_device_config_create(deviceName, C.uint64_t(len(cfg.Input)), C.uint64_t(len(cfg.Output)))
 		if config == nil {
 			return fmt.Errorf("failed to create device pipeline map")
 		}
 		defer C.cp_device_config_free(config)
 
-		idx := uint64(0)
-		// Add each pipeline to the device pipeline map.
-		for _, pipeline := range cfg.Pipelines {
-			cPipelineName := C.CString(pipeline.Name)
-			defer C.free(unsafe.Pointer(cPipelineName))
+		{
+			idx := uint64(0)
+			// Add each pipeline to the device pipeline map.
+			for _, pipeline := range cfg.Input {
+				cPipelineName := C.CString(pipeline.Name)
+				defer C.free(unsafe.Pointer(cPipelineName))
 
-			rc := C.cp_device_config_set_pipeline(
-				config,
-				C.uint64_t(idx),
-				cPipelineName,
-				C.uint64_t(pipeline.Weight),
-			)
-			idx++
-			if rc != 0 {
-				return fmt.Errorf("failed to add pipeline to device pipeline map")
+				rc := C.cp_device_config_set_input_pipeline(
+					config,
+					C.uint64_t(idx),
+					cPipelineName,
+					C.uint64_t(pipeline.Weight),
+				)
+				idx++
+				if rc != 0 {
+					return fmt.Errorf("failed to add pipeline to device pipeline map")
+				}
+			}
+		}
+
+		{
+			idx := uint64(0)
+			// Add each pipeline to the device pipeline map.
+			for _, pipeline := range cfg.Output {
+				cPipelineName := C.CString(pipeline.Name)
+				defer C.free(unsafe.Pointer(cPipelineName))
+
+				rc := C.cp_device_config_set_output_pipeline(
+					config,
+					C.uint64_t(idx),
+					cPipelineName,
+					C.uint64_t(pipeline.Weight),
+				)
+				idx++
+				if rc != 0 {
+					return fmt.Errorf("failed to add pipeline to device pipeline map")
+				}
 			}
 		}
 

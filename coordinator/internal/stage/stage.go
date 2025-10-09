@@ -37,7 +37,7 @@ type Stage struct {
 	cfg      Config
 	registry *registry.Registry
 	pipeline ynpb.PipelineServiceClient
-	device ynpb.DeviceServiceClient
+	device   ynpb.DeviceServiceClient
 	log      *zap.SugaredLogger
 }
 
@@ -96,7 +96,7 @@ func (m *Stage) setupPipelines(ctx context.Context, instance DataplaneInstanceId
 
 	for _, pipeline := range pipelines {
 		req.Pipelines = append(req.Pipelines, &ynpb.Pipeline{
-			Name: pipeline.Name,
+			Name:      pipeline.Name,
 			Functions: pipeline.Functions,
 		})
 	}
@@ -125,11 +125,15 @@ func (m *Stage) setupDevices(ctx context.Context, instance DataplaneInstanceIdx,
 	for _, device := range devices {
 		reqDevice := &ynpb.Device{
 			Name: device.Name,
-			DeviceId: device.DeviceId,
-			Vlan: device.Vlan,
 		}
-		for _, pipeline := range device.Pipelines {
-			reqDevice.Pipelines = append(reqDevice.Pipelines, &ynpb.DevicePipeline{
+		for _, pipeline := range device.Input {
+			reqDevice.Input = append(reqDevice.Input, &ynpb.DevicePipeline{
+				Name:   pipeline.Name,
+				Weight: pipeline.Weight,
+			})
+		}
+		for _, pipeline := range device.Output {
+			reqDevice.Output = append(reqDevice.Output, &ynpb.DevicePipeline{
 				Name:   pipeline.Name,
 				Weight: pipeline.Weight,
 			})

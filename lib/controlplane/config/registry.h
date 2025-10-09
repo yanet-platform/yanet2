@@ -7,6 +7,7 @@
 
 struct registry_item {
 	uint64_t refcnt;
+	uint64_t index;
 };
 
 static inline void
@@ -246,6 +247,7 @@ registry_replace(
 	struct registry_item *old_item = registry_get(registry, index);
 	if (new_item != NULL) {
 		registry_item_ref(new_item);
+		new_item->index = index;
 	}
 
 	registry_set(registry, index, new_item);
