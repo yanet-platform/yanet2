@@ -16,6 +16,7 @@
 
 #include "../utils/balancer.h"
 #include "../utils/packet.h"
+#include "../utils/rng.h"
 
 #include "helpers.h"
 #include "state.h"
@@ -24,7 +25,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define ARENA_SIZE (1 << 25)
+#define ARENA_SIZE (1 << 27)
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -586,9 +587,146 @@ basic(void *arena) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+static inline int
+service_network_proto(size_t i) {
+	if (i % 2 == 0) {
+		return IPPROTO_IP;
+	} else {
+		return IPPROTO_IPV6;
+	}
+}
+
+static inline int
+service_transport_proto(size_t i) {
+	if (i % 3 == 0) {
+		return IPPROTO_TCP;
+	} else {
+		return IPPROTO_UDP;
+	}
+}
+
+static void
+service_addr(size_t i, uint8_t *addr) {
+	if (service_network_proto(i) == IPPROTO_IPV6) {
+		for (size_t k = 0; k < 16; ++k) {
+			addr[k] = ((i + 1) * (k + 1)) & 0xFF;
+		}
+	} else {
+		for (size_t k = 0; k < 4; ++k) {
+			addr[k] = ((i + 1) * (k + 1)) & 0xFF;
+		}
+	}
+}
+
+static uint16_t
+service_port(size_t i) {
+	if (i % 10 == 0) {
+		return 0;
+	} else {
+		return i & 0xFFFF;
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+fill_lookups_correct(
+	struct lookup_config *lookups, size_t services, uint64_t *rng
+) {
+	for (size_t i = 0; i < services; ++i) {
+		struct lookup_config *lookup = &lookups[i];
+		service_addr(i, lookup->dst_ip);
+		lookup->network_proto = service_network_proto(i);
+		lookup->dst_port = service_port(i);
+		if (lookup->dst_port == 0) {
+			lookup->dst_port = rng_next(rng) & 0xFFFF;
+		}
+		lookup->src_port = rng_next(rng) & 0xFFFF;
+		lookup->transport_proto = service_transport_proto(i);
+		lookup->tcp_flags = rng_next(rng);
+		memset(lookup->src_ip, 0, 16);
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 int
 many_services(void *arena) {
-	(void)arena;
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	block_allocator_put_arena(&alloc, arena, ARENA_SIZE);
+	TEST_ASSERT_EQUAL(res, 0, "failed to init block allocator");
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to init memory context");
+	struct balancer_state *balancer_state =
+		make_balancer_state(&mctx, 1, 100);
+	TEST_ASSERT_NOT_NULL(balancer_state, "failed to init balancer state");
+	struct balancer_session_timeouts timeouts = {1, 1, 1, 1, 1, 1};
+	struct cp_module *balancer =
+		make_balancer(&mctx, &timeouts, balancer_state);
+	TEST_ASSERT_NOT_NULL(balancer, "failed to init balancer");
+	const size_t services = 100;
+	uint8_t src_ip[16];
+	memset(src_ip, 0, 16);
+
+	struct lookup_config *lookups =
+		malloc(sizeof(struct lookup_config) * services);
+	uint8_t *addresses = malloc(16 * services);
+
+	for (size_t i = 0; i < services; ++i) {
+		uint8_t *dst_ip = &addresses[16 * i];
+		service_addr(i, dst_ip);
+		struct balancer_service_config *service =
+			balancer_service_config_create(
+				service_network_proto(i),
+				dst_ip,
+				service_port(i),
+				service_transport_proto(i),
+				0,
+				1
+			);
+		TEST_ASSERT_NOT_NULL(
+			service, "failed to create %zu service", i
+		);
+		balancer_service_config_set_src_prefix(
+			service, 0, src_ip, src_ip
+		);
+		res = balancer_module_config_add_service(balancer, service);
+		TEST_ASSERT_EQUAL(res, 0, "failed to add %zu service", i);
+		lookups[i].expected_addr = dst_ip;
+	}
+
+	struct balancer_module_config *balancer_config = container_of(
+		balancer, struct balancer_module_config, cp_module
+	);
+
+	uint64_t rng = 123123;
+	fill_lookups_correct(lookups, services, &rng);
+	res = make_lookups(lookups, services, balancer_config);
+	TEST_ASSERT_EQUAL(res, 0, "Failed to make lookups");
+
+	// change port and dst
+	for (size_t i = 0; i < services; ++i) {
+		lookups[i].dst_ip[rng_next(&rng) % 4] = 55;
+		lookups[i].dst_port = rng_next(&rng) & 0xFFFF;
+		lookups[i].expected_addr = NULL;
+	}
+
+	res = make_lookups(lookups, services, balancer_config);
+	TEST_ASSERT_EQUAL(res, 0, "Failed to make lookups after port change");
+
+	fill_lookups_correct(lookups, services, &rng);
+	for (size_t i = 0; i < services; ++i) {
+		lookups[i].transport_proto =
+			IPPROTO_UDP ^ IPPROTO_TCP ^ service_transport_proto(i);
+	}
+
+	res = make_lookups(lookups, services, balancer_config);
+	TEST_ASSERT_EQUAL(res, 0, "Failed to make lookups after proto change");
+
+	free(addresses);
+	free(lookups);
 	return 0;
 }
 
