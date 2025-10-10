@@ -17,7 +17,7 @@ state_test_exe = executable(
   link_args: yanet_link_args,
   sources: state_test_sources,
   include_directories: state_test_includes,
-  dependencies: [lib_logging_dep, lib_balancer_dp_dep],
+  dependencies: [lib_logging_dep, lib_balancer_test_utils_dep],
 )
 
 test(

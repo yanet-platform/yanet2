@@ -1,3 +1,4 @@
+subdir('utils')
 subdir('dataplane')
 subdir('ring')
 subdir('state')

@@ -4,7 +4,7 @@ test_includes = [
 ]
 
 lookup_vs_test_sources = files(
-  'lookup_vs.c', 'utils.c'
+  'lookup_vs.c',
 )
 
 lookup_vs_exe = executable(
@@ -18,7 +18,8 @@ lookup_vs_exe = executable(
     lib_balancer_cp_dep, 
     lib_balancer_dp_dep,
     libdpdk_dep, 
-    lib_config_dp_dep
+    lib_config_dp_dep,
+    lib_balancer_test_utils_dep
   ],
 )
 

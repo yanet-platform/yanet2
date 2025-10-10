@@ -1,6 +1,5 @@
 #include "helpers.h"
 #include "common/memory.h"
-#include "defines.h"
 #include "session.h"
 #include <netinet/in.h>
 
@@ -22,7 +21,7 @@ gen_sessions(
 	for (size_t i = 0; i < sessions_cnt; ++i) {
 		struct balancer_session_id *session = &sessions[i];
 		if (rng_next(&rng) % 2 == 0) { // ipv4 session
-			session->network_proto = METADATA_NETWORK_PROTO_V4;
+			session->network_proto = IPPROTO_IP;
 			memset(session->ip_source, 0, 16);
 			memset(session->ip_destination, 0, 16);
 			for (size_t j = 0; j < 4; ++j) {
@@ -31,7 +30,7 @@ gen_sessions(
 					rng_next(&rng) & 0xFF;
 			}
 		} else { // ipv6 session
-			session->network_proto = METADATA_NETWORK_PROTO_V6;
+			session->network_proto = IPPROTO_IPV6;
 			for (size_t j = 0; j < 16; ++j) {
 				session->ip_source[j] = rng_next(&rng) & 0xFF;
 				session->ip_destination[j] =

@@ -12,6 +12,8 @@
 
 #include <pthread.h>
 
+#include "../utils/balancer.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static void *
@@ -67,9 +69,9 @@ run(void *arena,
 	LOG(INFO, "Initialized memory context");
 
 	// Init balancer state
-	struct balancer_state balancer;
-	res = balancer_state_init(&balancer, workers_cnt, capacity, &mctx);
-	if (res != 0) {
+	struct balancer_state *balancer =
+		make_balancer_state(&mctx, workers_cnt, capacity);
+	if (balancer == NULL) {
 		LOG(ERROR, "Failed to initialize balancer state");
 		return 1;
 	}
@@ -77,7 +79,7 @@ run(void *arena,
 
 	// Init controlplane
 	struct cp_config cp_config;
-	cp_config.balancer = &balancer;
+	cp_config.balancer = balancer;
 	__c11_atomic_store(&cp_config.stop, 0, __ATOMIC_SEQ_CST);
 
 	// Run controlplance
@@ -116,7 +118,7 @@ run(void *arena,
 		cfg->session_count = sessions;
 		cfg->iterations = iterations;
 		cfg->worker_idx = i;
-		cfg->balancer = &balancer;
+		cfg->balancer = balancer;
 		cfg->iterations = iterations;
 		cfg->timeout_min = timeout_min;
 		cfg->timeout_max = timeout_max;
@@ -184,7 +186,7 @@ run(void *arena,
 		return 1;
 	}
 
-	balancer_state_free(&balancer);
+	balancer_state_free(balancer);
 
 	LOG(INFO, "OK");
 

@@ -1,14 +1,13 @@
 #include "common/memory.h"
 #include "common/memory_block.h"
-#include "config.h"
 #include "controlplane/config/cp_module.h"
-#include "utils.h"
+#include "session.h"
 #include <assert.h>
 #include <stdlib.h>
 
 #include "controlplane.h"
-#include "vs.h"
-#include "vs_def.h"
+
+#include "../utils/balancer.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -31,10 +30,9 @@ main() {
 	if (memory_context_init(&mctx, "test", &alloc)) {
 		return 1;
 	}
-	struct balancer_state_config config = {
-		.timeouts = {1, 2, 3, 4, 5, 6}, .sessions_to_reserve = 100
-	};
-	struct cp_module *balancer = make_balancer(&mctx, 1, &config);
+	struct balancer_session_timeouts timeouts = {1, 2, 3, 4, 5, 6};
+	struct balancer_state *state = make_balancer_state(&mctx, 1, 100);
+	struct cp_module *balancer = make_balancer(&mctx, &timeouts, state);
 	assert(balancer != NULL);
 	uint8_t addr[4] = {1, 1, 1, 1};
 	struct balancer_service_config *service =

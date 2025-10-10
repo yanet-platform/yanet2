@@ -45,13 +45,55 @@ struct balancer_service_config {
 ////////////////////////////////////////////////////////////////////////////////
 
 int
+balancer_state_init(
+	struct agent *agent,
+	struct balancer_state *state,
+	size_t sessions_to_reserve
+) {
+	SET_OFFSET_OF(&state->mctx, &agent->memory_context);
+	state->current_gen = 0;
+	state->workers_cnt = ADDR_OF(&agent->dp_config)->worker_count;
+	int res = TTLMAP_INIT(
+		&state->generations[0].session_table,
+		&agent->memory_context,
+		struct balancer_session_id,
+		struct balancer_session_state,
+		sessions_to_reserve
+	);
+	for (size_t i = 0; i < state->workers_cnt; ++i) {
+		struct worker_info *worker_info =
+			&state->generations[0].worker_info[i];
+		worker_info_init(worker_info);
+	}
+	clock_init(&state->clock);
+	return res;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+balancer_state_free(struct balancer_state *state) {
+	struct balancer_session_table_gen *cur_storage =
+		balancer_get_cur_storage_gen(state);
+	if (balancer_session_table_capacity(cur_storage) > 0) {
+		TTLMAP_FREE(&cur_storage->session_table);
+	}
+
+	struct balancer_session_table_gen *prev_storage =
+		balancer_get_prev_storage_gen(state);
+	if (balancer_session_table_capacity(prev_storage) > 0) {
+		TTLMAP_FREE(&prev_storage->session_table);
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+int
 config_data_init(
 	struct balancer_module_config *config,
 	struct memory_context *mctx,
-	size_t workers_cnt
+	struct balancer_state *state
 ) {
-	clock_init(&config->clock);
-
 	int ret = balancer_vsv4_table_init(config, mctx, NULL, 0);
 	if (ret < 0) {
 		return -1;
@@ -62,16 +104,14 @@ config_data_init(
 		return -1;
 	}
 
-	return balancer_state_init(
-		&config->state,
-		workers_cnt,
-		config->state_config.sessions_to_reserve,
-		mctx
-	);
+	SET_OFFSET_OF(&config->state, state);
+	return 0;
 }
 
 struct cp_module *
-zbalancer_module_config_init(struct agent *agent, const char *name) {
+balancer_module_config_init(
+	struct agent *agent, struct balancer_state *state, const char *name
+) {
 	struct balancer_module_config *config =
 		(struct balancer_module_config *)memory_balloc(
 			&agent->memory_context,
@@ -96,11 +136,7 @@ zbalancer_module_config_init(struct agent *agent, const char *name) {
 		return NULL;
 	}
 
-	config_data_init(
-		config,
-		&config->cp_module.memory_context,
-		ADDR_OF(&agent->dp_config)->worker_count
-	);
+	config_data_init(config, &config->cp_module.memory_context, state);
 
 	return &config->cp_module;
 }
@@ -169,8 +205,6 @@ balancer_module_config_free(struct cp_module *cp_module) {
 	balancer_vsv4_table_free(config);
 	v6_vs_lookup_free(config);
 
-	balancer_state_free(&config->state);
-
 	memory_bfree(
 		&agent->memory_context,
 		config,
@@ -192,8 +226,7 @@ balancer_module_config_set_timeouts(
 		cp_module, struct balancer_module_config, cp_module
 	);
 
-	struct balancer_session_timeouts *timeouts =
-		&config->state_config.timeouts;
+	struct balancer_session_timeouts *timeouts = &config->timeouts;
 	timeouts->tcp_syn_ack_timeout = tcp_syn_ack_timeout;
 	timeouts->tcp_syn_timeout = tcp_syn_timeout;
 	timeouts->tcp_fin_timeout = tcp_fin_timeout;
@@ -584,5 +617,5 @@ balancer_module_config_update_current_time(struct cp_module *cp_module) {
 	struct balancer_module_config *config = container_of(
 		cp_module, struct balancer_module_config, cp_module
 	);
-	clock_update_time(&config->clock);
+	clock_update_time(&config->state->clock);
 }

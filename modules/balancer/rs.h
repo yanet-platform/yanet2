@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/memory_address.h"
 #include "config.h"
 #include "dataplane/packet/encap.h"
 #include "ring.h"
@@ -45,10 +46,9 @@ balancer_select_rs(
 		return &reals[real_id];
 	}
 
-	uint32_t now = clock_get_time(&config->clock);
-	uint32_t timeout = balancer_session_timeout(
-		&config->state_config.timeouts, metadata
-	);
+	uint32_t now = clock_get_time(&ADDR_OF(&config->state)->clock);
+	uint32_t timeout =
+		balancer_session_timeout(&config->timeouts, metadata);
 
 	struct balancer_session_id session_id;
 	fill_session_id(&session_id, metadata, vs->flags & VS_PURE_L3);
@@ -56,7 +56,7 @@ balancer_select_rs(
 	struct balancer_session_state *session_state;
 	balancer_session_lock_t *session_lock;
 	int get_session_result = balancer_get_or_create_session(
-		&config->state,
+		ADDR_OF(&config->state),
 		worker_idx,
 		now,
 		timeout,

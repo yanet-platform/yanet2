@@ -1,4 +1,3 @@
-#include "common/memory.h"
 #include "common/memory_address.h"
 #include "common/ttlmap.h"
 #include "rte_common.h"
@@ -20,52 +19,8 @@ worker_info_init(struct worker_info *info) {
 ////////////////////////////////////////////////////////////////////////////////
 
 int
-balancer_state_init(
-	struct balancer_state *state,
-	size_t workers_cnt,
-	size_t capacity,
-	struct memory_context *mctx
-) {
-	SET_OFFSET_OF(&state->mctx, mctx);
-	state->current_gen = 0;
-	state->workers_cnt = workers_cnt;
-	int res = TTLMAP_INIT(
-		&state->generations[0].session_table,
-		mctx,
-		struct balancer_session_id,
-		struct balancer_session_state,
-		capacity
-	);
-	for (size_t i = 0; i < workers_cnt; ++i) {
-		struct worker_info *worker_info =
-			&state->generations[0].worker_info[i];
-		worker_info_init(worker_info);
-	}
-	return res;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void
-balancer_state_free(struct balancer_state *state) {
-	struct balancer_sessions_storage_gen *cur_storage =
-		balancer_get_cur_storage_gen(state);
-	if (balancer_session_table_capacity(cur_storage) > 0) {
-		TTLMAP_FREE(&cur_storage->session_table);
-	}
-
-	struct balancer_sessions_storage_gen *prev_storage =
-		balancer_get_prev_storage_gen(state);
-	if (balancer_session_table_capacity(prev_storage) > 0) {
-		TTLMAP_FREE(&prev_storage->session_table);
-	}
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-int
 balancer_extend_state_on_demand(struct balancer_state *state) {
-	struct balancer_sessions_storage_gen *sessions_cur =
+	struct balancer_session_table_gen *sessions_cur =
 		balancer_get_cur_storage_gen(state);
 	size_t active_sessions = 0;
 	uint32_t density_factor = 0;
@@ -95,7 +50,7 @@ balancer_extend_state_on_demand(struct balancer_state *state) {
 
 	if (density_factor >= 7) {
 		balancer_try_free_unused(state);
-		struct balancer_sessions_storage_gen *sessions_next =
+		struct balancer_session_table_gen *sessions_next =
 			balancer_get_prev_storage_gen(state);
 		size_t next_gen_cap = current_table_cap * 2;
 		int ret = TTLMAP_INIT(
@@ -134,7 +89,7 @@ balancer_extend_state_on_demand(struct balancer_state *state) {
 
 int
 balancer_try_free_unused(struct balancer_state *state) {
-	struct balancer_sessions_storage_gen *sessions_cur =
+	struct balancer_session_table_gen *sessions_cur =
 		balancer_get_cur_storage_gen(state);
 	for (size_t i = 0; i < state->workers_cnt; ++i) {
 		if (WORKER_GET_ATOMIC(
@@ -143,7 +98,7 @@ balancer_try_free_unused(struct balancer_state *state) {
 			return 0;
 		}
 	}
-	struct balancer_sessions_storage_gen *sessions_prev =
+	struct balancer_session_table_gen *sessions_prev =
 		balancer_get_prev_storage_gen(state);
 	if (balancer_session_table_capacity(sessions_prev) > 0) {
 		TTLMAP_FREE(&sessions_prev->session_table);

@@ -9,11 +9,28 @@
 struct agent;
 struct cp_module;
 
+////////////////////////////////////////////////////////////////////////////////
+
+struct balancer_state;
+
+int
+balancer_state_init(
+	struct agent *agent,
+	struct balancer_state *state,
+	size_t sessions_to_reserve
+);
+
+void
+balancer_state_free(struct balancer_state *state);
+
+////////////////////////////////////////////////////////////////////////////////
+
 struct cp_module *
-balancer_module_config_init(struct agent *agent, const char *name);
+balancer_module_config_init(
+	struct agent *agent, struct balancer_state *state, const char *name
+);
 
 struct balancer_module_config;
-struct memory_context;
 
 int
 balancer_module_config_update_real_weight(

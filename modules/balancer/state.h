@@ -1,5 +1,6 @@
 #pragma once
 
+#include "clock.h"
 #include "common/detail/ttlmap/bucket.h"
 #include "common/ttlmap.h"
 #include "subprojects/dpdk/lib/eal/include/rte_common.h"
@@ -46,7 +47,7 @@ worker_info_init(struct worker_info *info);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct balancer_sessions_storage_gen {
+struct balancer_session_table_gen {
 	struct ttlmap session_table;
 	struct worker_info worker_info[BALANCER_MAX_WORKERS_NUM];
 };
@@ -54,33 +55,26 @@ struct balancer_sessions_storage_gen {
 ////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_state {
-	struct balancer_sessions_storage_gen generations[2];
+	struct balancer_session_table_gen generations[2];
 	_Atomic uint32_t current_gen; // workers read, cp modify
 	uint32_t workers_cnt;
+	struct balancer_clock clock;
 	struct memory_context *mctx;
 };
-
-int
-balancer_state_init(
-	struct balancer_state *state,
-	size_t workers_cnt,
-	size_t capacity,
-	struct memory_context *mctx
-);
 
 void
 balancer_state_free(struct balancer_state *state);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline struct balancer_sessions_storage_gen *
+static inline struct balancer_session_table_gen *
 balancer_get_cur_storage_gen(struct balancer_state *state) {
 	uint32_t current_gen =
 		__c11_atomic_load(&state->current_gen, __ATOMIC_SEQ_CST);
 	return &state->generations[current_gen & 1];
 }
 
-static inline struct balancer_sessions_storage_gen *
+static inline struct balancer_session_table_gen *
 balancer_get_prev_storage_gen(struct balancer_state *state) {
 	uint32_t current_gen =
 		__c11_atomic_load(&state->current_gen, __ATOMIC_SEQ_CST);
@@ -99,7 +93,7 @@ balancer_get_or_create_session(
 	struct balancer_session_state **session_state,
 	balancer_session_lock_t **lock
 ) {
-	struct balancer_sessions_storage_gen *sessions_cur =
+	struct balancer_session_table_gen *sessions_cur =
 		balancer_get_cur_storage_gen(state);
 
 	int res = TTLMAP_GET(
@@ -138,7 +132,7 @@ balancer_get_or_create_session(
 				WORKER_SET_ATOMIC(worker_info, use_prev_gen, 0);
 				return BALANCER_SESSION_CREATED;
 			}
-			struct balancer_sessions_storage_gen *sessions_prev =
+			struct balancer_session_table_gen *sessions_prev =
 				balancer_get_prev_storage_gen(state);
 			status = TTLMAP_LOOKUP(
 				&sessions_prev->session_table,
@@ -172,7 +166,7 @@ balancer_session_unlock(balancer_session_lock_t *lock) {
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline size_t
-balancer_session_table_capacity(struct balancer_sessions_storage_gen *storage) {
+balancer_session_table_capacity(struct balancer_session_table_gen *storage) {
 	return ttlmap_capacity(&storage->session_table);
 }
 
