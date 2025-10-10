@@ -31,6 +31,9 @@ make_balancer(
 	if (res != 0) {
 		return NULL;
 	}
+	memory_context_init_from(
+		&cfg->cp_module.memory_context, mctx, "balancer_cp"
+	);
 	return &cfg->cp_module;
 }
 

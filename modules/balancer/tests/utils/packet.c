@@ -1,5 +1,6 @@
 #include "packet.h"
 
+#include <netinet/in.h>
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
@@ -94,9 +95,10 @@ make_mbuf6(
 		return NULL;
 	}
 
-	uint16_t total_len = sizeof(struct rte_ether_hdr) +
-			     sizeof(struct rte_ipv6_hdr) +
-			     sizeof(struct rte_udp_hdr);
+	uint16_t total_len =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv6_hdr) +
+		(proto == IPPROTO_UDP ? sizeof(struct rte_udp_hdr)
+				      : sizeof(struct rte_tcp_hdr));
 
 	mbuf->buf_addr = ((char *)mbuf) + sizeof(struct rte_mbuf);
 	mbuf->data_len = 2048;
@@ -106,17 +108,23 @@ make_mbuf6(
 	mbuf->pkt_len = total_len;
 	mbuf->l2_len = sizeof(struct rte_ether_hdr);
 	mbuf->l3_len = sizeof(struct rte_ipv6_hdr);
-	mbuf->l4_len = sizeof(struct rte_udp_hdr);
+	mbuf->l4_len =
+		(proto == IPPROTO_UDP ? sizeof(struct rte_udp_hdr)
+				      : sizeof(struct rte_tcp_hdr));
 	mbuf->packet_type =
-		RTE_PTYPE_L2_ETHER | RTE_PTYPE_L3_IPV6 | RTE_PTYPE_L4_UDP;
+		RTE_PTYPE_L2_ETHER | RTE_PTYPE_L3_IPV6 |
+		(proto == IPPROTO_UDP ? RTE_PTYPE_L4_UDP : RTE_PTYPE_L4_TCP);
 
 	struct rte_ether_hdr *eth =
 		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
 	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
 
 	struct rte_ipv6_hdr *ip = (struct rte_ipv6_hdr *)(eth + 1);
-	ip->proto = IPPROTO_UDP;
-	ip->payload_len = rte_cpu_to_be_16(sizeof(struct rte_udp_hdr));
+	ip->proto = proto;
+	ip->payload_len = rte_cpu_to_be_16(
+		proto == IPPROTO_UDP ? sizeof(struct rte_udp_hdr)
+				     : sizeof(struct rte_tcp_hdr)
+	);
 	memcpy(ip->src_addr, src_ip, 16);
 	memcpy(ip->dst_addr, dst_ip, 16);
 

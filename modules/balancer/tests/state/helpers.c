@@ -3,6 +3,8 @@
 #include "session.h"
 #include <netinet/in.h>
 
+#include "../utils/rng.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_session_id *

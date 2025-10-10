@@ -5,8 +5,6 @@
 #include "common/lpm.h"
 #include "common/range_collector.h"
 
-#include "util.h"
-
 #include "common/registry.h"
 #include "dataplane/packet/packet.h"
 

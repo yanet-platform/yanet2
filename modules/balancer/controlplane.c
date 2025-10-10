@@ -10,6 +10,7 @@
 
 #include "controlplane/agent/agent.h"
 #include "rs_def.h"
+#include "rule.h"
 #include "session.h"
 #include "vs.h"
 #include "vs_def.h"
@@ -94,6 +95,12 @@ config_data_init(
 	struct memory_context *mctx,
 	struct balancer_state *state
 ) {
+	config->services = NULL;
+	config->service_count = 0;
+
+	config->real_count = 0;
+	config->reals = NULL;
+
 	int ret = balancer_vsv4_table_init(config, mctx, NULL, 0);
 	if (ret < 0) {
 		return -1;
@@ -274,20 +281,20 @@ build_v4_service_lookup(
 			if (rule->transport.dsts == NULL) {
 				goto free_on_error;
 			}
-			rule->transport.dsts[0] = (struct filter_port_range
-			){service->port, service->port};
 
-			rule->transport.proto_count = 1;
-			rule->transport.protos = memory_balloc(
-				mctx, sizeof(struct filter_proto_range)
-			);
-			if (rule->transport.protos == NULL) {
-				goto free_on_error;
+			if (service->port == 0) {
+				rule->transport.dsts[0] =
+					(struct filter_port_range){0, 0xFFFF};
+			} else {
+				rule->transport.dsts[0] =
+					(struct filter_port_range
+					){service->port, service->port};
 			}
-			rule->transport.protos[0] = (struct filter_proto_range
-			){service->proto, service->proto};
 
-			rule->action = v4_service_index;
+			rule->transport.proto =
+				(struct filter_proto){service->proto, 0, 0};
+
+			rule->action = i;
 			++v4_service_index;
 		}
 	}
@@ -341,23 +348,19 @@ build_v6_service_lookup(
 			rule->transport.dsts = memory_balloc(
 				mctx, sizeof(struct filter_port_range)
 			);
-			rule->transport.dsts[0] = (struct filter_port_range
-			){service->port, service->port};
-			if (rule->transport.dsts == NULL) {
-				goto free_on_error;
+			if (service->port == 0) {
+				rule->transport.dsts[0] =
+					(struct filter_port_range){0, 0xFFFF};
+			} else {
+				rule->transport.dsts[0] =
+					(struct filter_port_range
+					){service->port, service->port};
 			}
 
-			rule->transport.proto_count = 1;
-			rule->transport.protos = memory_balloc(
-				mctx, sizeof(struct filter_proto_range)
-			);
-			if (rule->transport.protos == NULL) {
-				goto free_on_error;
-			}
-			rule->transport.protos[0] = (struct filter_proto_range
-			){service->proto, service->proto};
+			rule->transport.proto =
+				(struct filter_proto){service->proto, 0, 0};
 
-			rule->action = v6_service_index;
+			rule->action = i;
 			++v6_service_index;
 		}
 	}
@@ -434,12 +437,22 @@ balancer_module_config_add_service(
 		return -1;
 	}
 
+	SET_OFFSET_OF(&config->services, services);
+
 	struct balancer_vs *service = (struct balancer_vs *)memory_balloc(
 		&config->cp_module.memory_context, sizeof(struct balancer_vs)
 	);
 
 	if (service == NULL)
 		return -1;
+
+	memcpy(service->address, service_config->address, 16);
+	service->port = service_config->port;
+	service->proto = service_config->proto;
+	service->flags = service_config->flags;
+
+	service->real_count = service_config->real_count;
+	service->real_start = real_start;
 
 	if (ring_init(
 		    &service->real_ring,
@@ -448,8 +461,6 @@ balancer_module_config_add_service(
 	    )) {
 		return -1;
 	}
-
-	service->proto = service_config->proto;
 
 	for (uint64_t real_idx = 0; real_idx < service_config->real_count;
 	     ++real_idx) {
@@ -468,10 +479,6 @@ balancer_module_config_add_service(
 		SET_OFFSET_OF(&services[service_idx], services[service_idx]);
 	}
 
-	service->flags = service_config->flags;
-	memcpy(service->address, service_config->address, 16);
-	service->real_start = real_start;
-	service->real_count = service_config->real_count;
 	if (!(service_config->flags & VS_TYPE_V6)) {
 		build_v4_service_lookup(
 			config, &config->cp_module.memory_context
@@ -507,7 +514,6 @@ balancer_module_config_add_service(
 		}
 	}
 
-	SET_OFFSET_OF(&config->services, services);
 	return 0;
 }
 
@@ -522,6 +528,11 @@ balancer_service_config_create(
 ) {
 	if (prefixes_count == 0) {
 		return NULL;
+	}
+
+	if ((flags & VS_PURE_L3) || port == 0) {
+		port = 0;
+		flags |= VS_PURE_L3;
 	}
 
 	struct balancer_service_config *config =
@@ -553,7 +564,7 @@ balancer_service_config_create(
 	config->flags = flags;
 	if (!(flags & VS_TYPE_V6)) {
 		memcpy(config->address, address, 4);
-	} else if (flags & VS_TYPE_V6) {
+	} else { // IPv6
 		memcpy(config->address, address, 16);
 	}
 	config->real_count = real_count;

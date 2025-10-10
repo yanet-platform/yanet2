@@ -7,6 +7,8 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "../utils/rng.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static _Atomic uint32_t iterations = 0;
