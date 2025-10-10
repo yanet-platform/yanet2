@@ -30,7 +30,7 @@ src_port(void *memory) {
 	res = FILTER_INIT(&filter, sign, &rule1, 1, &memory_context);
 	assert(res == 0);
 
-	struct packet packet = make_packet(
+	struct packet packet = make_packet4(
 		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 4000, 0, IPPROTO_UDP, 0, 0
 	);
 	uint32_t *actions;

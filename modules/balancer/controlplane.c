@@ -12,6 +12,7 @@
 #include "rs_def.h"
 #include "session.h"
 #include "vs.h"
+#include "vs_def.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -41,27 +42,26 @@ struct balancer_service_config {
 	struct balancer_real_config reals[];
 };
 
+////////////////////////////////////////////////////////////////////////////////
+
 int
 config_data_init(
 	struct balancer_module_config *config,
 	struct memory_context *mctx,
 	size_t workers_cnt
 ) {
-	struct balancer_session_timeouts *timeouts =
-		&config->state_config.timeouts;
-	memset(timeouts, 0, sizeof(struct balancer_session_timeouts));
-	config->state_config.sessions_to_reserve = 1;
-
 	clock_init(&config->clock);
 
 	int ret = balancer_vsv4_table_init(config, mctx, NULL, 0);
 	if (ret < 0) {
 		return -1;
 	}
+
 	ret = balancer_vsv6_table_init(config, mctx, NULL, 0);
 	if (ret < 0) {
 		return -1;
 	}
+
 	return balancer_state_init(
 		&config->state,
 		workers_cnt,
@@ -210,7 +210,7 @@ build_v4_service_lookup(
 	size_t v4_service_count = 0;
 	for (size_t i = 0; i < config->service_count; ++i) {
 		struct balancer_vs *service = ADDR_OF(&services[i]);
-		if (service->flags & VS_TYPE_V4) {
+		if (!(service->flags & VS_TYPE_V6)) {
 			++v4_service_count;
 		}
 	}
@@ -224,7 +224,7 @@ build_v4_service_lookup(
 	size_t v4_service_index = 0;
 	for (size_t i = 0; i < config->service_count; ++i) {
 		struct balancer_vs *service = ADDR_OF(&services[i]);
-		if (service->flags & VS_TYPE_V4) {
+		if (!(service->flags & VS_TYPE_V6)) {
 			struct filter_rule *rule = &rules[v4_service_index];
 			rule->net4.dst_count = 1;
 			rule->net4.dsts =
@@ -260,7 +260,8 @@ build_v4_service_lookup(
 	}
 
 	balancer_vsv4_table_free(config);
-	int ret = balancer_vsv4_table_init(config, mctx, rules, v4_service_count);
+	int ret =
+		balancer_vsv4_table_init(config, mctx, rules, v4_service_count);
 	if (ret < 0) {
 		goto free_on_error;
 	}
@@ -328,7 +329,8 @@ build_v6_service_lookup(
 		}
 	}
 	v6_vs_lookup_free(config);
-	int ret = balancer_vsv6_table_init(config, mctx, rules, v6_service_count);
+	int ret =
+		balancer_vsv6_table_init(config, mctx, rules, v6_service_count);
 	if (ret < 0) {
 		goto free_on_error;
 	}
@@ -437,7 +439,7 @@ balancer_module_config_add_service(
 	memcpy(service->address, service_config->address, 16);
 	service->real_start = real_start;
 	service->real_count = service_config->real_count;
-	if (service_config->flags & VS_TYPE_V4) {
+	if (!(service_config->flags & VS_TYPE_V6)) {
 		build_v4_service_lookup(
 			config, &config->cp_module.memory_context
 		);
@@ -453,7 +455,7 @@ balancer_module_config_add_service(
 	     ++prefix_idx) {
 		struct balancer_src_prefix prefix =
 			service_config->prefixes[prefix_idx];
-		if (service_config->flags & VS_TYPE_V4) {
+		if (!(service_config->flags & VS_TYPE_V6)) {
 			lpm_insert(
 				&service->src_filter,
 				4,
@@ -478,7 +480,7 @@ balancer_module_config_add_service(
 
 struct balancer_service_config *
 balancer_service_config_create(
-	uint64_t type,
+	balancer_vs_flags_t flags,
 	uint8_t *address,
 	uint16_t port,
 	uint8_t proto,
@@ -515,10 +517,10 @@ balancer_service_config_create(
 	       sizeof(struct balancer_src_prefix) * prefixes_count);
 	config->prefixes_count = prefixes_count;
 
-	config->flags = type;
-	if (type & VS_TYPE_V4) {
+	config->flags = flags;
+	if (!(flags & VS_TYPE_V6)) {
 		memcpy(config->address, address, 4);
-	} else if (type & VS_TYPE_V6) {
+	} else if (flags & VS_TYPE_V6) {
 		memcpy(config->address, address, 16);
 	}
 	config->real_count = real_count;
@@ -536,7 +538,7 @@ void
 balancer_service_config_set_real(
 	struct balancer_service_config *service_config,
 	uint64_t index,
-	uint64_t flags,
+	balancer_rs_flags_t flags,
 	uint16_t weight,
 	uint8_t *dst_addr,
 	uint8_t *src_addr,
@@ -569,7 +571,7 @@ balancer_service_config_set_src_prefix(
 	if (service_config->flags & VS_TYPE_V6) {
 		memcpy(src_prefix->start_addr, start_addr, 16);
 		memcpy(src_prefix->end_addr, end_addr, 16);
-	} else if (service_config->flags & VS_TYPE_V4) {
+	} else if (!(service_config->flags & VS_TYPE_V6)) {
 		memcpy(src_prefix->start_addr, start_addr, 4);
 		memcpy(src_prefix->end_addr, end_addr, 4);
 	}

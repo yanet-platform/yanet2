@@ -1,5 +1,8 @@
 #pragma once
 
+#include "rs_def.h"
+#include "vs_def.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -38,7 +41,7 @@ struct balancer_service_config;
 
 struct balancer_service_config *
 balancer_service_config_create(
-	uint64_t flags,
+	balancer_vs_flags_t flags,
 	uint8_t *address,
 	uint16_t port,
 	uint8_t proto,
@@ -53,7 +56,7 @@ void
 balancer_service_config_set_real(
 	struct balancer_service_config *config,
 	uint64_t index,
-	uint64_t flags,
+	balancer_rs_flags_t flags,
 	uint16_t weight,
 	uint8_t *dst_addr,
 	uint8_t *src_addr,

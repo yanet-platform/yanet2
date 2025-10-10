@@ -87,7 +87,7 @@ check_single_attribute(void *memory) {
 		};
 
 		for (size_t i = 0; i < queries; ++i) {
-			struct packet packet = make_packet(
+			struct packet packet = make_packet4(
 				ip(0, 0, 0, 0),
 				ip(0, 0, 0, 0),
 				query_ports[i],
@@ -111,7 +111,7 @@ check_single_attribute(void *memory) {
 
 		uint16_t query_ports[queries] = {45, 1, 2, 3, 4, 25};
 		for (size_t i = 0; i < queries; ++i) {
-			struct packet packet = make_packet(
+			struct packet packet = make_packet4(
 				ip(0, 0, 0, 0),
 				ip(0, 0, 0, 0),
 				query_ports[i],

@@ -141,7 +141,7 @@ free_packet(struct packet *packet) {
 }
 
 struct packet
-make_packet(
+make_packet4(
 	uint8_t *src_ip,
 	uint8_t *dst_ip,
 	uint16_t src_port,
@@ -162,7 +162,7 @@ make_packet(
 
 // IPv6 in host byte order
 struct packet
-make_packet_net6(
+make_packet6(
 	const uint8_t src_ip[NET6_LEN],
 	const uint8_t dst_ip[NET6_LEN],
 	uint16_t src_port,

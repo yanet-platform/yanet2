@@ -11,7 +11,7 @@ struct balancer_clock {
 
 static inline void
 clock_init(struct balancer_clock *clock) {
-	clock->current_time = 0;
+	clock->current_time = time(NULL);
 }
 
 static inline int

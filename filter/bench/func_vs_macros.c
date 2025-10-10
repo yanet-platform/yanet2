@@ -36,7 +36,7 @@ gen_packets(size_t count) {
 		uint16_t src_port = (123 * i + 17) % MAX_PORT;
 		uint16_t dst_port = (127 * i + 121) % MAX_PORT;
 
-		packets[i] = make_packet(
+		packets[i] = make_packet4(
 			ip(src_ip, 1, 1, 5),
 			ip(dst_ip, 2, 3, 1),
 			src_port,

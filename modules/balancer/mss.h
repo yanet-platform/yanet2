@@ -170,15 +170,14 @@ balancer_fix_mss_ipv6(struct packet *packet) {
 		);
 		tcp_header->cksum = (cksum == 0xffff) ? cksum : ~cksum;
 
-        struct rte_ipv6_hdr *ipv6_header =
-            rte_pktmbuf_mtod_offset(
-                mbuf,
-                struct rte_ipv6_hdr *,
-                packet->network_header.offset
-            );
-        ipv6_header->payload_len = rte_cpu_to_be_16(
-            rte_be_to_cpu_16(ipv6_header->payload_len) +
-            TCP_OPTION_MSS_LEN
-        );
+		struct rte_ipv6_hdr *ipv6_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
+		);
+		ipv6_header->payload_len = rte_cpu_to_be_16(
+			rte_be_to_cpu_16(ipv6_header->payload_len) +
+			TCP_OPTION_MSS_LEN
+		);
 	}
 }
