@@ -177,6 +177,26 @@ make_packet6(
 	return parse_packet(packet);
 }
 
+int
+make_packet_generic(
+	struct packet *packet,
+	const uint8_t *src_ip,
+	const uint8_t *dst_ip,
+	uint16_t src_port,
+	uint16_t dst_port,
+	uint8_t transport_proto,
+	uint8_t network_proto,
+	uint16_t flags
+) {
+	if (network_proto == IPPROTO_IP) {
+		return make_packet4(packet, src_ip, dst_ip, src_port, dst_port, transport_proto, flags);
+	} else if (network_proto == IPPROTO_IPV6) {
+		return make_packet6(packet, src_ip, dst_ip, src_port, dst_port, transport_proto, flags);
+	} else {
+		return -1;
+	}
+}
+
 void
 free_packet(struct packet *packet) {
 	free(packet->mbuf);

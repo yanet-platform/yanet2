@@ -106,7 +106,7 @@ make_lookups(
 ////////////////////////////////////////////////////////////////////////////////
 
 int
-basic(void *arena) {
+pure_l3_and_ops_and_weigth_matters(void *arena) {
 	struct block_allocator alloc;
 	int res = block_allocator_init(&alloc);
 	TEST_ASSERT_EQUAL(res, 0, "can not init block allocator");
@@ -742,7 +742,7 @@ main() {
 	}
 
 	LOG(INFO, "Running 'basic' test...");
-	if (basic(arena) == TEST_FAILED) {
+	if (pure_l3_and_ops_and_weigth_matters(arena) == TEST_FAILED) {
 		LOG(ERROR, "Test 'basic' failed");
 		return 1;
 	}

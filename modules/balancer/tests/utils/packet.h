@@ -30,5 +30,17 @@ make_packet6(
 	uint16_t flags
 );
 
+int
+make_packet_generic(
+	struct packet *packet,
+	const uint8_t *src_ip,
+	const uint8_t *dst_ip,
+	uint16_t src_port,
+	uint16_t dst_port,
+	uint8_t transport_proto,
+	uint8_t network_proto,
+	uint16_t flags
+);
+
 void
 free_packet(struct packet *packet);

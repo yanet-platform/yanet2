@@ -3,6 +3,8 @@ test_includes = [
   '../..', 
 ]
 
+# lookup vs tests
+
 lookup_vs_test_sources = files(
   'lookup_vs.c',
 )
@@ -29,3 +31,27 @@ test(
   timeout: 30,
   suite: 'balancer',
 )
+
+# select real tests
+
+select_real_test_sources = files(
+  'select_real.c',
+)
+
+select_real = executable(
+  'select_real',
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  sources: select_real_test_sources,
+  include_directories: test_includes,
+  dependencies: [
+    lib_logging_dep,
+    lib_balancer_cp_dep, 
+    lib_balancer_dp_dep,
+    libdpdk_dep, 
+    lib_config_dp_dep,
+    lib_balancer_test_utils_dep
+  ],
+)
+
+test('select_real', select_real, timeout: 30, suite: 'balancer')
