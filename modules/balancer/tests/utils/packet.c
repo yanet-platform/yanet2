@@ -189,9 +189,25 @@ make_packet_generic(
 	uint16_t flags
 ) {
 	if (network_proto == IPPROTO_IP) {
-		return make_packet4(packet, src_ip, dst_ip, src_port, dst_port, transport_proto, flags);
+		return make_packet4(
+			packet,
+			src_ip,
+			dst_ip,
+			src_port,
+			dst_port,
+			transport_proto,
+			flags
+		);
 	} else if (network_proto == IPPROTO_IPV6) {
-		return make_packet6(packet, src_ip, dst_ip, src_port, dst_port, transport_proto, flags);
+		return make_packet6(
+			packet,
+			src_ip,
+			dst_ip,
+			src_port,
+			dst_port,
+			transport_proto,
+			flags
+		);
 	} else {
 		return -1;
 	}
