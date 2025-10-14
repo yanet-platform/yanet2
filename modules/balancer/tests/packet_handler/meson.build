@@ -55,3 +55,26 @@ select_real = executable(
 )
 
 test('select_real', select_real, timeout: 30, suite: 'balancer')
+
+
+metadata_test_sources = files(
+  'metadata.c',
+)
+
+metadata = executable(
+  'metadata',
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  sources: metadata_test_sources,
+  include_directories: test_includes,
+  dependencies: [
+    lib_logging_dep,
+    lib_balancer_cp_dep, 
+    lib_balancer_dp_dep,
+    libdpdk_dep, 
+    lib_config_dp_dep,
+    lib_balancer_test_utils_dep
+  ],
+)
+
+test('metadata', metadata, timeout: 30, suite: 'balancer')

@@ -88,6 +88,7 @@ lookup_rs(
 	tuple.dst_port = dst_port;
 	tuple.proto = transport_proto;
 	meta.hash = rte_hash_crc(&tuple, sizeof(struct tuple), 0);
+	free_packet(&packet);
 	/// @todo
 	///	calculate hash during packet parsing
 	return balancer_select_rs(balancer, 0, vs, &meta);
