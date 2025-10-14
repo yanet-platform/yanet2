@@ -80,10 +80,13 @@ lookup_rs(
 	if (network_proto == IPPROTO_IP) {
 		memcpy(tuple.src_ip, src_ip, NET4_LEN);
 		memcpy(tuple.dst_ip, dst_ip, NET4_LEN);
-		tuple.src_port = src_port;
-		tuple.dst_port = dst_port;
-		tuple.proto = transport_proto;
+	} else {
+		memcpy(tuple.src_ip, src_ip, NET6_LEN);
+		memcpy(tuple.dst_ip, dst_ip, NET6_LEN);
 	}
+	tuple.src_port = src_port;
+	tuple.dst_port = dst_port;
+	tuple.proto = transport_proto;
 	meta.hash = rte_hash_crc(&tuple, sizeof(struct tuple), 0);
 	/// @todo
 	///	calculate hash during packet parsing
