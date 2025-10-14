@@ -2,6 +2,7 @@
 #include "../utils/packet.h"
 #include "../utils/rng.h"
 #include "common/memory_block.h"
+#include "common/network.h"
 #include "helpers.h"
 
 #include "logging/log.h"
@@ -12,12 +13,14 @@
 
 #include "config.h"
 #include "controlplane.h"
+#include "rte_hash_crc.h"
 #include "rte_tcp.h"
 #include "session.h"
 #include "state.h"
 #include "vs.h"
 #include "vs_def.h"
 #include <assert.h>
+#include <math.h>
 #include <netinet/in.h>
 
 #include <stdatomic.h>
@@ -65,6 +68,25 @@ lookup_rs(
 		LOG(ERROR, "failed to fill packet metadata");
 		return NULL;
 	}
+	struct tuple {
+		uint8_t src_ip[NET6_LEN];
+		uint8_t dst_ip[NET6_LEN];
+		uint16_t src_port;
+		uint16_t dst_port;
+		uint8_t proto;
+	} tuple;
+	memset(tuple.src_ip, 0, NET6_LEN);
+	memset(tuple.dst_ip, 0, NET6_LEN);
+	if (network_proto == IPPROTO_IP) {
+		memcpy(tuple.src_ip, src_ip, NET4_LEN);
+		memcpy(tuple.dst_ip, dst_ip, NET4_LEN);
+		tuple.src_port = src_port;
+		tuple.dst_port = dst_port;
+		tuple.proto = transport_proto;
+	}
+	meta.hash = rte_hash_crc(&tuple, sizeof(struct tuple), 0);
+	/// @todo
+	///	calculate hash during packet parsing
 	return balancer_select_rs(balancer, 0, vs, &meta);
 }
 
@@ -82,6 +104,7 @@ ops_distribution(
 	size_t probes,
 	size_t result[2]
 ) {
+	(void)src_port;
 	memset(result, 0, 2 * 8);
 	struct balancer_rs *first = NULL;
 	struct balancer_rs *second = NULL;
@@ -99,7 +122,7 @@ ops_distribution(
 			balancer,
 			src_ip,
 			dst_ip,
-			src_port,
+			i & 0xFFFF,
 			dst_port,
 			transport_proto,
 			IPPROTO_IP,
@@ -114,6 +137,11 @@ ops_distribution(
 			second = rs;
 			++result[1];
 		}
+	}
+	if (first->weight < second->weight) {
+		size_t tmp = result[0];
+		result[0] = result[1];
+		result[1] = tmp;
 	}
 	return TEST_SUCCESS;
 }
@@ -459,10 +487,14 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 			TEST_SUCCESS,
 			"failed to make ops for the third service"
 		);
+		double frac = (double)result[0] / result[1];
 		LOG(INFO,
-		    "Third service session/real distribution: [%lu, %lu]",
+		    "Third service session/real distribution: [%lu, %lu] "
+		    "(d[0]/d[1]=%.3lf)",
 		    result[0],
-		    result[1]);
+		    result[1],
+		    frac);
+		TEST_ASSERT(fabs(frac - 2.0) / 2.0 <= 0.25, "bad distribution");
 	}
 
 	LOG(INFO, "Make probes for the fourth service [OPS + PURE_L3]");
@@ -485,10 +517,14 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 			TEST_SUCCESS,
 			"failed to make ops for the fourth service"
 		);
+		double frac = (double)result[0] / result[1];
 		LOG(INFO,
-		    "Fourth service session/real distribution: [%lu, %lu]",
+		    "Fourth service session/real distribution: [%lu, %lu] "
+		    "(d[0]/d[1]=%.3lf)",
 		    result[0],
-		    result[1]);
+		    result[1],
+		    frac);
+		TEST_ASSERT(fabs(frac - 2.0) / 2.0 <= 0.25, "bad distribution");
 	}
 
 	return TEST_SUCCESS;
