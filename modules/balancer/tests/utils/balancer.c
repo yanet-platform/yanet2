@@ -50,6 +50,7 @@ make_balancer_state(
 	assert((uintptr_t)memory % align == 0);
 	struct balancer_state *state = (struct balancer_state *)memory;
 	__c11_atomic_store(&state->clock.current_time, 1, __ATOMIC_SEQ_CST);
+	__c11_atomic_store(&state->current_gen, 0, __ATOMIC_SEQ_CST);
 	SET_OFFSET_OF(&state->mctx, mctx);
 	int res = TTLMAP_INIT(
 		&state->generations[0].session_table,
