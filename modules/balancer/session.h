@@ -34,13 +34,13 @@ static inline void
 fill_session_id(
 	struct balancer_session_id *id,
 	struct balancer_packet_metadata *data,
-	bool vs_pure_ls
+	bool vs_pure_l3
 ) {
 	id->transport_proto = data->transport_proto;
 	id->network_proto = data->network_proto;
 	memcpy(id->ip_source, data->src_addr, 16);
 	memcpy(id->ip_destination, data->dst_addr, 16);
-	if (vs_pure_ls) {
+	if (vs_pure_l3) {
 		id->port_source = 0;
 		id->port_destination = 0;
 	} else {

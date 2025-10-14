@@ -164,6 +164,8 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "memory context init failed");
 
 	struct balancer_state *state = make_balancer_state(&mctx, 1, 10);
+	__c11_atomic_store(&state->clock.current_time, 1, __ATOMIC_SEQ_CST);
+
 	struct balancer_session_timeouts timeouts = {1, 2, 3, 4, 5, 6};
 	struct cp_module *cp_module = make_balancer(&mctx, &timeouts, state);
 	struct balancer_module_config *balancer = container_of(

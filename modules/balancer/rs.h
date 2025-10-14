@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/memory_address.h"
+#include "common/network.h"
 #include "config.h"
 #include "dataplane/packet/encap.h"
 #include "ring.h"
@@ -11,6 +12,7 @@
 #include <assert.h>
 #include <filter/filter.h>
 #include <netinet/in.h>
+#include <sched.h>
 #include <stdint.h>
 
 #include "mss.h"
@@ -111,21 +113,35 @@ balancer_tunnel_packet(
 		balancer_fix_mss_ipv6(packet);
 	}
 
-	if (rs->flags & YANET_BALANCER_FLAG_DST_IPV6) { // IPv6
-		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-		struct rte_ipv6_hdr *ipv6_header = rte_pktmbuf_mtod_offset(
+	struct rte_ipv4_hdr *ipv4_header = NULL;
+	struct rte_ipv6_hdr *ipv6_header = NULL;
+	if (vs_flags & VS_TYPE_V6) {
+		ipv6_header = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_ipv6_hdr *,
 			packet->network_header.offset
 		);
+	} else {
+		ipv4_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv4_hdr *,
+			packet->network_header.offset
+		);
+	}
 
-		uint8_t src[16];
-		for (uint8_t i = 0; i < 16; i++) {
-			// rs->src_addr is already masked.
-			src[i] = (ipv6_header->src_addr[i] & (~rs->src_mask[i])
-				 ) |
-				 rs->src_addr[i];
+	if (rs->flags & YANET_BALANCER_FLAG_DST_IPV6) { // IPv6
+		// rs->src_addr is already masked.
+
+		uint8_t src[NET6_LEN];
+		memcpy(src, rs->src_addr, NET6_LEN);
+		uint8_t len = (ipv4_header != NULL ? NET4_LEN : NET6_LEN);
+		uint8_t *src_user =
+			(ipv4_header != NULL ? (uint8_t *)&ipv4_header->src_addr
+					     : ipv6_header->src_addr);
+		for (uint8_t i = 0; i < len; i++) {
+			src[i] |= src_user[i] & (~rs->src_mask[i]);
 		}
 
 		if (vs_flags & VS_GRE_FORWARDING) {
@@ -133,18 +149,16 @@ balancer_tunnel_packet(
 		}
 
 		return packet_ip6_encap(packet, rs->dst_addr, src);
-	} else {
-		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
-		struct rte_ipv4_hdr *ipv4_header = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv4_hdr *,
-			packet->network_header.offset
-		);
-		uint32_t src_mask = *(uint32_t *)(&rs->src_mask[0]);
-		uint32_t src_addr = *(uint32_t *)(&rs->src_addr[0]);
+	} else { // IPv4
 		// rs->src_addr is already masked.
-		uint32_t src = (ipv4_header->src_addr & ~src_mask) | src_addr;
+
+		uint32_t src_mask = *(uint32_t *)(rs->src_mask);
+		uint32_t src_addr = *(uint32_t *)(rs->src_addr);
+		uint32_t src_user =
+			(ipv4_header != NULL)
+				? ipv4_header->src_addr
+				: *(uint32_t *)ipv6_header->src_addr;
+		uint32_t src = (src_user & ~src_mask) | src_addr;
 
 		if (vs_flags & VS_GRE_FORWARDING) {
 			/// @todo: support GRE
