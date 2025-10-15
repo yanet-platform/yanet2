@@ -75,7 +75,6 @@ acl_handle_packets(
 		}
 
 		for (uint32_t idx = 0; idx < count; ++idx) {
-			fprintf(stderr, "act %d\n", actions[idx]);
 			if (!(actions[idx] & ACTION_NON_TERMINATE)) {
 				if (actions[idx] == 1) {
 					packet_front_output(
