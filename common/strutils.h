@@ -20,8 +20,8 @@ strtcpy(char *restrict dst, const char *restrict src, size_t dsize) {
 	slen = strnlen(src, dsize);
 	trunc = (slen == dsize);
 	dlen = slen - trunc;
-
-	stpcpy(mempcpy(dst, src, dlen), "");
+	char *res = mempcpy(dst, src, dlen);
+	stpcpy(res, "");
 	if (trunc)
 		errno = E2BIG;
 	return trunc ? -1 : (ssize_t)slen;

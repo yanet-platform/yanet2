@@ -1,5 +1,6 @@
 package balancer_test
 
+//#cgo LDFLAGS: -ldpdk -ldl -lrt -lpcap -lm -lpthread
 //#cgo CFLAGS: -I../../../../../build
 //#cgo CFLAGS: -I../../../../.. -I../../../../../lib -I../../../../../common
 //#cgo CFLAGS: -I../../../
@@ -111,7 +112,7 @@ func balancerModuleConfigAddService(mc *C.struct_balancer_module_config, sc bala
 	if sc.addr.Is4() {
 		typ = typ | C.VS_TYPE_V4
 	} else {
-		typ = typ | C.VS_TYPE_V6
+		typ = typ | C.BALANCER_VS_IPV6_FLAG
 	}
 	csc := C.balancer_service_config_create(typ, toCPtr(sc.addr), C.uint64_t(len(sc.reals)), C.uint64_t(len(sc.prefixes)))
 	defer C.balancer_service_config_free(csc)

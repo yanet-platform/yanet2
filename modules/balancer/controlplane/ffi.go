@@ -1,12 +1,13 @@
 package balancer
 
-//#cgo CFLAGS: -I../../../ -I../../../lib
-//#cgo LDFLAGS: -L../../../build/modules/balancer/ -lbalancer_cp -llogging
+//#cgo CFLAGS: -I../../../ -I../../../lib -I../../../build
+//#cgo LDFLAGS: -L../../../build/modules/balancer/ -lbalancer_cp
 //#cgo LDFLAGS: -L../../../build/lib/logging/ -llogging
+//#cgo LDFLAGS: -L../../../build/filter -lfilter
 //
 //#include "api/agent.h"
 //#include "modules/balancer/controlplane.h"
-//#include "modules/balancer/defines.h"
+//#include <netinet/ip.h>
 import "C"
 
 import (
@@ -17,13 +18,30 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
+type PersistentStatePtr struct {
+	inner *C.struct_balancer_state
+}
+
 // ModuleConfig wraps C module configuration
 type ModuleConfig struct {
 	ptr ffi.ModuleConfig
 }
 
+func NewPersistentState(agent *ffi.Agent, sessionsToReserve uint64) (*PersistentStatePtr, error) {
+	state := &PersistentStatePtr{}
+	res, err := C.balancer_state_init((*C.struct_agent)(agent.AsRawPtr()), C.uint64_t(sessionsToReserve))
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize balancer persistent state: %w", err)
+	}
+	if res == nil {
+		return nil, fmt.Errorf("failed to initialize balancer persistent state, null pointer returned")
+	}
+	state.inner = (*C.struct_balancer_state)(res)
+	return state, nil
+}
+
 // NewModuleConfig creates a new balancer module configuration
-func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
+func NewModuleConfig(agent *ffi.Agent, persistentState *PersistentStatePtr, name string) (*ModuleConfig, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("agent cannot be nil")
 	}
@@ -31,7 +49,7 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.balancer_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName)
+	ptr, err := C.balancer_module_config_init((*C.struct_agent)(agent.AsRawPtr()), (*C.struct_balancer_state)(persistentState.inner), cName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize balancer module config: %w", err)
 	}
@@ -57,23 +75,31 @@ func sliceToPtr(s []byte) *C.uint8_t {
 	return (*C.uint8_t)(&s[0])
 }
 
-func (m *ModuleConfig) AddService(service Service) error {
-	typ := C.uint64_t(0)
-	switch service.ForwardingMethod {
-	case TUN:
-		typ = typ | C.VS_OPT_ENCAP
-	case GRE:
-		typ = typ | C.VS_OPT_GRE
-	}
-	if service.Addr.Is4() {
-		typ = typ | C.VS_TYPE_V4
+func (proto *ServiceProto) asInt() C.uint8_t {
+	if *proto == ServiceProtoUdp {
+		return C.IPPROTO_UDP
 	} else {
-		typ = typ | C.VS_TYPE_V6
+		return C.IPPROTO_TCP
+	}
+}
+
+func (m *ModuleConfig) AddService(service Service) error {
+	flags := C.balancer_vs_flags_t(0)
+	if service.GRE {
+		flags |= C.BALANCER_VS_GRE_FLAG
+	}
+	if service.FixMss {
+		flags |= C.BALANCER_VS_FIX_MSS_FLAG
+	}
+	if service.OnePacketScheduler {
+		flags |= C.BALANCER_VS_OPS_FLAG
 	}
 
 	ptr, err := C.balancer_service_config_create(
-		typ,
+		flags,
 		sliceToPtr(service.Addr.AsSlice()),
+		C.uint16_t(service.Port),
+		service.Proto.asInt(),
 		C.uint64_t(len(service.Reals)),
 		C.uint64_t(len(service.Prefixes)),
 	)
@@ -98,16 +124,14 @@ func (m *ModuleConfig) AddService(service Service) error {
 	}
 
 	for i, r := range service.Reals {
-		typ := C.uint64_t(0)
-		if r.DstAddr.Is4() {
-			typ = typ | C.RS_TYPE_V4
-		} else {
-			typ = typ | C.RS_TYPE_V6
+		flags := C.balancer_rs_flags_t(0)
+		if r.DstAddr.Is6() {
+			flags = flags | C.BALANCER_RS_IPV6_FLAG
 		}
 		C.balancer_service_config_set_real(
 			ptr,
 			C.uint64_t(i),
-			typ,
+			flags,
 			C.uint16_t(r.Weight),
 			sliceToPtr(r.DstAddr.AsSlice()),
 			sliceToPtr(r.SrcAddr.AsSlice()),
@@ -123,15 +147,15 @@ func (m *ModuleConfig) AddService(service Service) error {
 	return nil
 }
 
-func (m *ModuleConfig) SetStateConfig(stateConfig StateConfig) {
-	C.balancer_module_config_set_state_config(
+func (m *ModuleConfig) SetStateConfig(timeouts Timeouts) {
+	C.balancer_module_config_set_timeouts(
 		m.asRawPtr(),
-		C.uint32_t(stateConfig.TcpSynAckTtl),
-		C.uint32_t(stateConfig.TcpSynTtl),
-		C.uint32_t(stateConfig.TcpFinTtl),
-		C.uint32_t(stateConfig.TcpTtl),
-		C.uint32_t(stateConfig.UdpTtl),
-		C.uint32_t(stateConfig.DefaultTtl),
+		C.uint32_t(timeouts.TcpSynAckTtl),
+		C.uint32_t(timeouts.TcpSynTtl),
+		C.uint32_t(timeouts.TcpFinTtl),
+		C.uint32_t(timeouts.TcpTtl),
+		C.uint32_t(timeouts.UdpTtl),
+		C.uint32_t(timeouts.DefaultTtl),
 	)
 }
 

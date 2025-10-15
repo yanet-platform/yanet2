@@ -13,12 +13,8 @@ struct cp_module;
 
 struct balancer_state;
 
-int
-balancer_state_init(
-	struct agent *agent,
-	struct balancer_state *state,
-	size_t sessions_to_reserve
-);
+struct balancer_state *
+balancer_state_init(struct agent *agent, size_t sessions_to_reserve);
 
 void
 balancer_state_free(struct balancer_state *state);

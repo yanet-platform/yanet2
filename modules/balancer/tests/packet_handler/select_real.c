@@ -186,7 +186,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	const uint8_t vs1_proto = IPPROTO_TCP;
 	struct balancer_service_config *vs1_config =
 		balancer_service_config_create(
-			VS_TYPE_V6, vip1, vs1_port, vs1_proto, 2, 1
+			BALANCER_VS_IPV6_FLAG, vip1, vs1_port, vs1_proto, 2, 1
 		);
 	balancer_service_config_set_src_prefix(
 		vs1_config, 0, null_addr, full_addr
@@ -203,7 +203,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	balancer_service_config_set_real(
 		vs1_config,
 		0,
-		YANET_BALANCER_FLAG_DST_IPV6,
+		BALANCER_RS_IPV6_FLAG,
 		1,
 		real1_dst,
 		null_addr,
@@ -224,7 +224,12 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	const uint8_t vs2_proto = IPPROTO_UDP;
 	struct balancer_service_config *vs2_config =
 		balancer_service_config_create(
-			VS_PURE_L3, vip2, vs2_port, vs2_proto, 2, 1
+			BALANCER_VS_PURE_L3_FLAG,
+			vip2,
+			vs2_port,
+			vs2_proto,
+			2,
+			1
 		);
 
 	balancer_service_config_set_src_prefix(
@@ -242,7 +247,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	balancer_service_config_set_real(
 		vs2_config,
 		0,
-		YANET_BALANCER_FLAG_DST_IPV6,
+		BALANCER_RS_IPV6_FLAG,
 		1,
 		real3_dst,
 		null_addr,
@@ -261,7 +266,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	uint8_t real6_dst[4] = {6, 6, 6, 6};
 	struct balancer_service_config *vs3_config =
 		balancer_service_config_create(
-			YANET_BALANCER_OPS_FLAG, vip3, vs3_port, vs3_proto, 2, 1
+			BALANCER_VS_OPS_FLAG, vip3, vs3_port, vs3_proto, 2, 1
 		);
 	TEST_ASSERT_NOT_NULL(
 		vs3_config, "can not create third virtual service"
@@ -288,7 +293,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	uint8_t real8_dst[4] = {8, 8, 8, 8};
 	struct balancer_service_config *vs4_config =
 		balancer_service_config_create(
-			YANET_BALANCER_OPS_FLAG | VS_PURE_L3,
+			BALANCER_VS_OPS_FLAG | BALANCER_VS_PURE_L3_FLAG,
 			vip4,
 			vs4_port,
 			vs4_proto,

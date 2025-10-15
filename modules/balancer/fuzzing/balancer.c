@@ -147,7 +147,7 @@ balancer_test_config(struct cp_module **cp_module) {
 	parse_address(AF_INET6, "2a01:db8::853a:0:3", &address);
 	struct balancer_service_config *svc_cfg_ipv6 =
 		balancer_service_config_create(
-			VS_OPT_ENCAP | VS_TYPE_V6,
+			VS_OPT_ENCAP | BALANCER_VS_IPV6_FLAG,
 			address.s6_addr,
 			real_count,
 			1

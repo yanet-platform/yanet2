@@ -10,7 +10,7 @@ typedef uint8_t balancer_rs_flags_t;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define YANET_BALANCER_FLAG_DST_IPV6 ((uint8_t)(1u << 1))
+#define BALANCER_RS_IPV6_FLAG ((uint8_t)(1u << 1))
 
 #define IPv4_OUTER_SOURCE_NETWORK_FLAG ((uint8_t)(1u << 2))
 #define IPv6_OUTER_SOURCE_NETWORK_FLAG ((uint8_t)(1u << 3))

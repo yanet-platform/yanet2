@@ -39,7 +39,7 @@ balancer_select_rs(
 ) {
 	struct balancer_rs *reals = ADDR_OF(&config->reals);
 
-	if (vs->flags & YANET_BALANCER_OPS_FLAG) {
+	if (vs->flags & BALANCER_VS_OPS_FLAG) {
 		uint32_t real_id = ring_get(&vs->real_ring, metadata->hash);
 		if (real_id == RING_VALUE_INVALID) {
 			return NULL;
@@ -53,7 +53,9 @@ balancer_select_rs(
 		balancer_session_timeout(&config->timeouts, metadata);
 
 	struct balancer_session_id session_id;
-	fill_session_id(&session_id, metadata, vs->flags & VS_PURE_L3);
+	fill_session_id(
+		&session_id, metadata, vs->flags & BALANCER_VS_PURE_L3_FLAG
+	);
 
 	struct balancer_session_state *session_state;
 	balancer_session_lock_t *session_lock;
@@ -109,7 +111,8 @@ balancer_tunnel_packet(
 	struct balancer_rs *rs,
 	struct packet *packet
 ) {
-	if ((vs_flags & VS_FIX_MSS) && (vs_flags & VS_TYPE_V6)) {
+	if ((vs_flags & BALANCER_VS_FIX_MSS_FLAG) &&
+	    (vs_flags & BALANCER_VS_IPV6_FLAG)) {
 		balancer_fix_mss_ipv6(packet);
 	}
 
@@ -117,7 +120,7 @@ balancer_tunnel_packet(
 
 	struct rte_ipv4_hdr *ipv4_header = NULL;
 	struct rte_ipv6_hdr *ipv6_header = NULL;
-	if (vs_flags & VS_TYPE_V6) {
+	if (vs_flags & BALANCER_VS_IPV6_FLAG) {
 		ipv6_header = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_ipv6_hdr *,
@@ -131,7 +134,7 @@ balancer_tunnel_packet(
 		);
 	}
 
-	if (rs->flags & YANET_BALANCER_FLAG_DST_IPV6) { // IPv6
+	if (rs->flags & BALANCER_RS_IPV6_FLAG) { // IPv6
 		// rs->src_addr is already masked.
 
 		uint8_t src[NET6_LEN];
@@ -144,7 +147,7 @@ balancer_tunnel_packet(
 			src[i] |= src_user[i] & (~rs->src_mask[i]);
 		}
 
-		if (vs_flags & VS_GRE_FORWARDING) {
+		if (vs_flags & BALANCER_VS_GRE_FLAG) {
 			/// @todo: support GRE
 		}
 
@@ -160,7 +163,7 @@ balancer_tunnel_packet(
 				: *(uint32_t *)ipv6_header->src_addr;
 		uint32_t src = (src_user & ~src_mask) | src_addr;
 
-		if (vs_flags & VS_GRE_FORWARDING) {
+		if (vs_flags & BALANCER_VS_GRE_FLAG) {
 			/// @todo: support GRE
 		}
 

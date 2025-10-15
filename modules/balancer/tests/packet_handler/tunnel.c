@@ -216,7 +216,7 @@ tunnel(struct balancer_module_config *balancer,
 
 	struct packet packet;
 	uint8_t user_to_vs_network_proto =
-		(vs_flags & VS_TYPE_V6) ? IPPROTO_IPV6 : IPPROTO_IP;
+		(vs_flags & BALANCER_VS_IPV6_FLAG) ? IPPROTO_IPV6 : IPPROTO_IP;
 	res = make_packet_generic(
 		&packet,
 		u_src,
@@ -236,8 +236,7 @@ tunnel(struct balancer_module_config *balancer,
 	TEST_ASSERT_EQUAL(res, 0, "parse packet failed");
 
 	uint8_t vs_to_rs_network_proto =
-		(rs_flags & YANET_BALANCER_FLAG_DST_IPV6) ? IPPROTO_IPV6
-							  : IPPROTO_IP;
+		(rs_flags & BALANCER_RS_IPV6_FLAG) ? IPPROTO_IPV6 : IPPROTO_IP;
 
 	uint8_t expected_src[NET6_LEN];
 	memcpy(expected_src,
@@ -301,9 +300,11 @@ tunnel_packets(
 		const uint8_t vs_proto =
 			rng_next(rng) % 2 == 0 ? IPPROTO_TCP : IPPROTO_UDP;
 		balancer_vs_flags_t vs_flags =
-			(hop1_network_proto == IPPROTO_IPV6 ? VS_TYPE_V6 : 0);
+			(hop1_network_proto == IPPROTO_IPV6
+				 ? BALANCER_VS_IPV6_FLAG
+				 : 0);
 		if (rng_next(rng) % 2 == 0) {
-			vs_flags |= VS_PURE_L3;
+			vs_flags |= BALANCER_VS_PURE_L3_FLAG;
 		}
 
 		uint8_t rs_dst[NET6_LEN];
@@ -323,7 +324,7 @@ tunnel_packets(
 
 		const balancer_rs_flags_t rs_flags =
 			(hop2_network_proto == IPPROTO_IPV6
-				 ? YANET_BALANCER_FLAG_DST_IPV6
+				 ? BALANCER_RS_IPV6_FLAG
 				 : 0);
 
 		uint8_t u_src[NET6_LEN];
@@ -346,9 +347,10 @@ tunnel_packets(
 
 		if (res != TEST_SUCCESS) {
 			LOG(ERROR,
-			    "Tunneling %lu failed: vs_pure_l3=%u, proto=%s",
+			    "Tunneling %lu failed: "
+			    "BALANCER_VS_PURE_L3_FLAG=%u, proto=%s",
 			    i,
-			    !((vs_flags & VS_PURE_L3) == 0),
+			    !((vs_flags & BALANCER_VS_PURE_L3_FLAG) == 0),
 			    vs_proto == IPPROTO_TCP ? "TCP" : "UDP");
 			return TEST_FAILED;
 		}
@@ -386,14 +388,6 @@ static int
 tunnel_ipv4_ipv4(struct balancer_module_config *balancer) {
 	uint64_t rng = 11;
 	return tunnel_packets(balancer, IPPROTO_IP, IPPROTO_IP, 75, 100, &rng);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-static int
-fix_mss(struct balancer_module_config *balancer) {
-	(void)balancer;
-	return TEST_SUCCESS;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -446,7 +440,6 @@ main() {
 		{tunnel_ipv6_ipv4, "IPv6 virtual and IPv4 real"},
 		{tunnel_ipv4_ipv4, "IPv4 virtual and IPv4 real"},
 		{tunnel_ipv4_ipv6, "IPv4 virtual and IPv6 real"},
-		{fix_mss, "Fix MSS"}
 	};
 
 	size_t failed_tests = 0;

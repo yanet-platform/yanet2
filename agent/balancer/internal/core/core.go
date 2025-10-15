@@ -83,9 +83,8 @@ func convertService(s *Service) *balancerpb.Service {
 	}
 	switch s.ForwardingMethod {
 	case TUN:
-		service.ForwardingMethod = balancerpb.ForwardingMethod_FORWARDING_METHOD_TUN
 	case GRE:
-		service.ForwardingMethod = balancerpb.ForwardingMethod_FORWARDING_METHOD_GRE
+		service.GRE = true
 	}
 	return service
 }

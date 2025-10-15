@@ -1,5 +1,5 @@
 subdir('utils')
-subdir('dataplane')
+# subdir('dataplane')
 subdir('ring')
 subdir('state')
 subdir('packet_handler')

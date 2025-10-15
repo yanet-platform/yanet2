@@ -22,7 +22,6 @@ struct balancer_real_config {
 	uint16_t weight;
 	uint8_t dst_addr[16];
 
-	// FIXME: why we need these two?
 	uint8_t src_addr[16];
 	uint8_t src_mask[16];
 };
@@ -45,12 +44,18 @@ struct balancer_service_config {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-int
-balancer_state_init(
-	struct agent *agent,
-	struct balancer_state *state,
-	size_t sessions_to_reserve
-) {
+struct balancer_state *
+balancer_state_init(struct agent *agent, size_t sessions_to_reserve) {
+	const size_t align = alignof(struct balancer_state);
+	uint8_t *memory = memory_balloc(
+		&agent->memory_context, sizeof(struct balancer_state) + align
+	);
+	if (memory == NULL) {
+		return NULL;
+	}
+	memory += (align - ((uintptr_t)memory) % align) % align;
+	assert((uintptr_t)memory % align == 0);
+	struct balancer_state *state = (struct balancer_state *)memory;
 	SET_OFFSET_OF(&state->mctx, &agent->memory_context);
 	state->current_gen = 0;
 	state->workers_cnt = ADDR_OF(&agent->dp_config)->worker_count;
@@ -61,13 +66,21 @@ balancer_state_init(
 		struct balancer_session_state,
 		sessions_to_reserve
 	);
+	if (res != 0) {
+		memory_bfree(
+			&agent->memory_context,
+			memory,
+			sizeof(struct balancer_state) + align
+		);
+		return NULL;
+	}
 	for (size_t i = 0; i < state->workers_cnt; ++i) {
 		struct worker_info *worker_info =
 			&state->generations[0].worker_info[i];
 		worker_info_init(worker_info);
 	}
 	clock_init(&state->clock);
-	return res;
+	return state;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -250,7 +263,7 @@ build_v4_service_lookup(
 	size_t v4_service_count = 0;
 	for (size_t i = 0; i < config->service_count; ++i) {
 		struct balancer_vs *service = ADDR_OF(&services[i]);
-		if (!(service->flags & VS_TYPE_V6)) {
+		if (!(service->flags & BALANCER_VS_IPV6_FLAG)) {
 			++v4_service_count;
 		}
 	}
@@ -264,7 +277,7 @@ build_v4_service_lookup(
 	size_t v4_service_index = 0;
 	for (size_t i = 0; i < config->service_count; ++i) {
 		struct balancer_vs *service = ADDR_OF(&services[i]);
-		if (!(service->flags & VS_TYPE_V6)) {
+		if (!(service->flags & BALANCER_VS_IPV6_FLAG)) {
 			struct filter_rule *rule = &rules[v4_service_index];
 			rule->net4.dst_count = 1;
 			rule->net4.dsts =
@@ -320,7 +333,7 @@ build_v6_service_lookup(
 	size_t v6_service_count = 0;
 	for (size_t i = 0; i < config->service_count; ++i) {
 		struct balancer_vs *service = ADDR_OF(&services[i]);
-		if (service->flags & VS_TYPE_V6) {
+		if (service->flags & BALANCER_VS_IPV6_FLAG) {
 			++v6_service_count;
 		}
 	}
@@ -334,7 +347,7 @@ build_v6_service_lookup(
 	size_t v6_service_index = 0;
 	for (size_t i = 0; i < config->service_count; ++i) {
 		struct balancer_vs *service = ADDR_OF(&services[i]);
-		if (service->flags & VS_TYPE_V6) {
+		if (service->flags & BALANCER_VS_IPV6_FLAG) {
 			struct filter_rule *rule = &rules[v6_service_index];
 			rule->net6.dst_count = 1;
 			rule->net6.dsts =
@@ -479,11 +492,11 @@ balancer_module_config_add_service(
 		SET_OFFSET_OF(&services[service_idx], services[service_idx]);
 	}
 
-	if (!(service_config->flags & VS_TYPE_V6)) {
+	if (!(service_config->flags & BALANCER_VS_IPV6_FLAG)) {
 		build_v4_service_lookup(
 			config, &config->cp_module.memory_context
 		);
-	} else if (service_config->flags & VS_TYPE_V6) {
+	} else if (service_config->flags & BALANCER_VS_IPV6_FLAG) {
 		build_v6_service_lookup(
 			config, &config->cp_module.memory_context
 		);
@@ -495,7 +508,7 @@ balancer_module_config_add_service(
 	     ++prefix_idx) {
 		struct balancer_src_prefix prefix =
 			service_config->prefixes[prefix_idx];
-		if (!(service_config->flags & VS_TYPE_V6)) {
+		if (!(service_config->flags & BALANCER_VS_IPV6_FLAG)) {
 			lpm_insert(
 				&service->src_filter,
 				4,
@@ -503,7 +516,7 @@ balancer_module_config_add_service(
 				prefix.end_addr,
 				1
 			);
-		} else if (service_config->flags & VS_TYPE_V6) {
+		} else if (service_config->flags & BALANCER_VS_IPV6_FLAG) {
 			lpm_insert(
 				&service->src_filter,
 				16,
@@ -530,9 +543,9 @@ balancer_service_config_create(
 		return NULL;
 	}
 
-	if ((flags & VS_PURE_L3) || port == 0) {
+	if ((flags & BALANCER_VS_PURE_L3_FLAG) || port == 0) {
 		port = 0;
-		flags |= VS_PURE_L3;
+		flags |= BALANCER_VS_PURE_L3_FLAG;
 	}
 
 	struct balancer_service_config *config =
@@ -562,7 +575,7 @@ balancer_service_config_create(
 	config->prefixes_count = prefixes_count;
 
 	config->flags = flags;
-	if (!(flags & VS_TYPE_V6)) {
+	if (!(flags & BALANCER_VS_IPV6_FLAG)) {
 		memcpy(config->address, address, 4);
 	} else { // IPv6
 		memcpy(config->address, address, 16);
@@ -592,7 +605,7 @@ balancer_service_config_set_real(
 		service_config->reals + index;
 	real_config->flags = flags;
 	real_config->weight = weight;
-	if (flags & YANET_BALANCER_FLAG_DST_IPV6) {
+	if (flags & BALANCER_RS_IPV6_FLAG) {
 		memcpy(real_config->dst_addr, dst_addr, 16);
 		memcpy(real_config->src_addr, src_addr, 16);
 		memcpy(real_config->src_mask, src_mask, 16);
@@ -612,10 +625,10 @@ balancer_service_config_set_src_prefix(
 ) {
 	struct balancer_src_prefix *src_prefix =
 		service_config->prefixes + index;
-	if (service_config->flags & VS_TYPE_V6) {
+	if (service_config->flags & BALANCER_VS_IPV6_FLAG) {
 		memcpy(src_prefix->start_addr, start_addr, 16);
 		memcpy(src_prefix->end_addr, end_addr, 16);
-	} else if (!(service_config->flags & VS_TYPE_V6)) {
+	} else if (!(service_config->flags & BALANCER_VS_IPV6_FLAG)) {
 		memcpy(src_prefix->start_addr, start_addr, 4);
 		memcpy(src_prefix->end_addr, end_addr, 4);
 	}

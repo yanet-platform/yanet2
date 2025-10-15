@@ -76,20 +76,22 @@ message Real {
 	bytes src_mask = 4;
 }
 
-enum ForwardingMethod {
-	FORWARDING_METHOD_UNSPECIFIED = 0;
-	FORWARDING_METHOD_TUN = 1;
-	FORWARDING_METHOD_GRE = 2;
-}
-
 message Service {
 	// Virtual IP address.
 	bytes addr = 1;
 	// List of CIDR subnets from which incoming requests are allowed.
 	repeated Prefix prefixes = 2;
 	repeated Real reals = 3;
-	// ForwardingMethod specifies the method for tunneling the packet.
-	ForwardingMethod forwarding_method = 4;
+	// If GRE flag is set, GRE is used for tunneling packets to every balancer real
+	// Else, TUN is used. False by default.
+	bool GRE = 4;
+	// fix_mss flag specifies if TCP MSS option must be fixed. False by default.
+	bool fix_mss = 5;
+	// OPS flag specifies if one packet scheduler should be used for selecting reals of service. 
+	// False by default.
+	bool OPS = 6;
+	// PureL3 flag specifies if we need to schedule based on L3 address only. False by default.
+	bool pure_l3 = 7;
 }
 
 // StateConfig contains session TTL for different types of packets.

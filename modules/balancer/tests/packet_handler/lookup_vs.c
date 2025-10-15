@@ -81,7 +81,7 @@ make_lookups(
 				vs, "expected vs, but not found some"
 			);
 			TEST_ASSERT_EQUAL(
-				(vs->flags & VS_TYPE_V6) != 0,
+				(vs->flags & BALANCER_VS_IPV6_FLAG) != 0,
 				lookup->network_proto == IPPROTO_IPV6,
 				"got vs with bad address type"
 			);
@@ -176,7 +176,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	uint8_t second_service_proto = IPPROTO_UDP;
 	struct balancer_service_config *second_service_config =
 		balancer_service_config_create(
-			VS_TYPE_V6,
+			BALANCER_VS_IPV6_FLAG,
 			second_service_addr,
 			second_service_port,
 			second_service_proto,
@@ -426,7 +426,12 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	// Add with specified port
 	struct balancer_service_config *third_service =
 		balancer_service_config_create(
-			VS_PURE_L3, third_service_ip, 123, IPPROTO_UDP, 0, 1
+			BALANCER_VS_PURE_L3_FLAG,
+			third_service_ip,
+			123,
+			IPPROTO_UDP,
+			0,
+			1
 		);
 	uint8_t start_addr[16];
 	memset(start_addr, 0, 16);

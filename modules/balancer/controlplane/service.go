@@ -14,7 +14,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 )
 
-type StateConfig struct {
+type Timeouts struct {
 	TcpSynAckTtl uint32
 	TcpSynTtl    uint32
 	TcpFinTtl    uint32
@@ -32,29 +32,31 @@ type Real struct {
 	SrcMask netip.Addr
 }
 
-type ForwardingMethod string
-
-func (fm ForwardingMethod) String() string {
-	return string(fm)
-}
+type ServiceProto string
 
 const (
-	TUN ForwardingMethod = "TUN"
-	GRE ForwardingMethod = "GRE"
+	ServiceProtoUdp ServiceProto = "UDP"
+	ServiceProtoTcp ServiceProto = "TCP"
 )
 
 type Service struct {
-	Addr             netip.Addr
-	Prefixes         []netip.Prefix
-	Reals            []Real
-	ForwardingMethod ForwardingMethod
+	Addr               netip.Addr
+	Port               uint16
+	Proto              ServiceProto
+	Prefixes           []netip.Prefix
+	Reals              []Real
+	GRE                bool
+	FixMss             bool
+	OnePacketScheduler bool
+	PureL3             bool
 }
 
 // BalancerConfig represents the configuration for a Balancer instance
 type BalancerConfig struct {
-	StateConfig  StateConfig
-	Services     []Service
-	ModuleConfig *ModuleConfig
+	StateConfig     Timeouts
+	Services        []Service
+	PersistentState *PersistentStatePtr
+	ModuleConfig    *ModuleConfig
 }
 
 func (cfg *BalancerConfig) DeepCopy() *BalancerConfig {
@@ -62,15 +64,19 @@ func (cfg *BalancerConfig) DeepCopy() *BalancerConfig {
 		return nil
 	}
 	newCfg := &BalancerConfig{
-		StateConfig: cfg.StateConfig,
-		Services:    make([]Service, 0, len(cfg.Services)),
+		StateConfig:     cfg.StateConfig,
+		Services:        make([]Service, 0, len(cfg.Services)),
+		PersistentState: cfg.PersistentState,
 	}
 	for _, s := range cfg.Services {
 		newService := Service{
-			Addr:             s.Addr,
-			Prefixes:         make([]netip.Prefix, len(s.Prefixes)),
-			Reals:            make([]Real, len(s.Reals)),
-			ForwardingMethod: s.ForwardingMethod,
+			Addr:               s.Addr,
+			Prefixes:           make([]netip.Prefix, len(s.Prefixes)),
+			Reals:              make([]Real, len(s.Reals)),
+			GRE:                s.GRE,
+			FixMss:             s.FixMss,
+			OnePacketScheduler: s.OnePacketScheduler,
+			PureL3:             s.PureL3,
 		}
 		copy(newService.Prefixes, s.Prefixes)
 		copy(newService.Reals, s.Reals)
@@ -147,26 +153,6 @@ func (s *BalancerService) ListConfigs(
 
 }
 
-func forwardingMethodToProto(forwardingMethod ForwardingMethod) balancerpb.ForwardingMethod {
-	switch forwardingMethod {
-	case TUN:
-		return balancerpb.ForwardingMethod_FORWARDING_METHOD_TUN
-	case GRE:
-		return balancerpb.ForwardingMethod_FORWARDING_METHOD_GRE
-	}
-	return balancerpb.ForwardingMethod_FORWARDING_METHOD_UNSPECIFIED
-}
-
-func forwardingMethodFromProto(forwardingMethod balancerpb.ForwardingMethod) (ForwardingMethod, error) {
-	switch forwardingMethod {
-	case balancerpb.ForwardingMethod_FORWARDING_METHOD_TUN:
-		return TUN, nil
-	case balancerpb.ForwardingMethod_FORWARDING_METHOD_GRE:
-		return GRE, nil
-	}
-	return "", fmt.Errorf("Unknown forwarding method: %v", forwardingMethod)
-}
-
 // ShowConfig returns the current configuration of the balancer module.
 func (s *BalancerService) ShowConfig(
 	_ context.Context,
@@ -200,10 +186,13 @@ func (s *BalancerService) ShowConfig(
 	}
 	for _, s := range config.Services {
 		service := balancerpb.Service{
-			Addr:             s.Addr.AsSlice(),
-			Prefixes:         make([]*balancerpb.Prefix, 0, len(s.Prefixes)),
-			Reals:            make([]*balancerpb.Real, 0, len(s.Reals)),
-			ForwardingMethod: forwardingMethodToProto(s.ForwardingMethod),
+			Addr:     s.Addr.AsSlice(),
+			Prefixes: make([]*balancerpb.Prefix, 0, len(s.Prefixes)),
+			Reals:    make([]*balancerpb.Real, 0, len(s.Reals)),
+			FixMss:   s.FixMss,
+			GRE:      s.GRE,
+			OPS:      s.OnePacketScheduler,
+			PureL3:   s.PureL3,
 		}
 		for _, p := range s.Prefixes {
 			service.Prefixes = append(service.Prefixes, &balancerpb.Prefix{
@@ -234,25 +223,26 @@ func (s *BalancerService) AddService(
 		return nil, err
 	}
 
-	forwardingMethod, err := forwardingMethodFromProto(req.GetService().GetForwardingMethod())
 	newService := Service{
-		Prefixes:         make([]netip.Prefix, 0, len(req.GetService().GetPrefixes())),
-		Reals:            make([]Real, 0, len(req.GetService().GetReals())),
-		ForwardingMethod: forwardingMethod,
+		Prefixes:           make([]netip.Prefix, 0, len(req.GetService().GetPrefixes())),
+		Reals:              make([]Real, 0, len(req.GetService().GetReals())),
+		FixMss:             req.GetService().FixMss,
+		GRE:                req.GetService().GRE,
+		OnePacketScheduler: req.GetService().OPS,
 	}
 	var ok bool
 	newService.Addr, ok = netip.AddrFromSlice(req.GetService().GetAddr())
 	if !ok {
-		return nil, errors.New("Address invalid")
+		return nil, errors.New("address invalid")
 	}
 	for _, p := range req.GetService().GetPrefixes() {
 		addr, ok := netip.AddrFromSlice(p.GetAddr())
 		if !ok {
-			return nil, errors.New("Prefix address invalid")
+			return nil, errors.New("prefix address invalid")
 		}
 		prefix := netip.PrefixFrom(addr, int(p.GetSize()))
 		if prefix.Bits() == -1 {
-			return nil, errors.New("Prefix size invalid")
+			return nil, errors.New("prefix size invalid")
 		}
 		newService.Prefixes = append(newService.Prefixes, prefix.Masked())
 	}
@@ -292,7 +282,10 @@ func (s *BalancerService) AddService(
 		zap.String("name", name),
 		zap.Uint32("instance", inst),
 		zap.Stringer("address", newService.Addr),
-		zap.Stringer("forwarding_method", newService.ForwardingMethod),
+		zap.Bool("fix_mss", newService.FixMss),
+		zap.Bool("one_packet_scheduler", newService.OnePacketScheduler),
+		zap.Bool("pure_l3", newService.PureL3),
+		zap.Bool("gre", newService.GRE),
 		zap.Int("reals_count", len(newService.Reals)),
 		zap.Int("prefixes_count", len(newService.Prefixes)),
 	)
@@ -416,7 +409,7 @@ func (s *BalancerService) SetStateConfig(
 
 	cfg := s.getConfigCopy(name, inst)
 
-	cfg.StateConfig = StateConfig{
+	cfg.StateConfig = Timeouts{
 		TcpSynAckTtl: req.GetStateConfig().TcpSynAckTtl,
 		TcpSynTtl:    req.GetStateConfig().TcpSynTtl,
 		TcpFinTtl:    req.GetStateConfig().TcpFinTtl,
@@ -461,7 +454,7 @@ func (s *BalancerService) updateModuleConfig(
 		return fmt.Errorf("agent for instance %d is nil", inst)
 	}
 
-	moduleConfig, err := NewModuleConfig(agent, name)
+	moduleConfig, err := NewModuleConfig(agent, cfg.PersistentState, name)
 	if err != nil {
 		return fmt.Errorf("failed to create module config for instance %d: %w", inst, err)
 	}

@@ -24,9 +24,6 @@ struct balancer_module_config {
 	// Relative pointer, externally configured
 	struct balancer_state *state;
 
-	/// @todo: Should we store array of `balancer_vs` instead of
-	/// `balancer_vs
-	// *`?
 	uint64_t service_count;
 	struct balancer_vs **services;
 

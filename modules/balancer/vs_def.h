@@ -13,13 +13,13 @@ typedef uint8_t balancer_vs_flags_t;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define VS_PURE_L3 ((uint8_t)(1u << 0))
-#define VS_TYPE_V6 ((uint8_t)(1u << 3))
+#define BALANCER_VS_PURE_L3_FLAG ((uint8_t)(1u << 0))
+#define BALANCER_VS_IPV6_FLAG ((uint8_t)(1u << 3))
 
-#define VS_FIX_MSS ((uint8_t)(1u << 1))
-#define VS_GRE_FORWARDING ((uint8_t)(1u << 4))
+#define BALANCER_VS_FIX_MSS_FLAG ((uint8_t)(1u << 1))
+#define BALANCER_VS_GRE_FLAG ((uint8_t)(1u << 4))
 
-#define YANET_BALANCER_OPS_FLAG ((uint8_t)(1u << 2))
+#define BALANCER_VS_OPS_FLAG ((uint8_t)(1u << 2))
 
 ////////////////////////////////////////////////////////////////////////////////
 
