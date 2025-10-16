@@ -19,12 +19,18 @@ import (
 )
 
 type PersistentStatePtr struct {
-	inner *C.struct_balancer_state
+	Inner *C.struct_balancer_state
+}
+
+func MakePersistentStatePtr(p unsafe.Pointer) PersistentStatePtr {
+	return PersistentStatePtr{
+		Inner: (*C.struct_balancer_state)(p),
+	}
 }
 
 // ModuleConfig wraps C module configuration
 type ModuleConfig struct {
-	ptr ffi.ModuleConfig
+	Ptr ffi.ModuleConfig
 }
 
 func NewPersistentState(agent *ffi.Agent, sessionsToReserve uint64) (*PersistentStatePtr, error) {
@@ -36,7 +42,7 @@ func NewPersistentState(agent *ffi.Agent, sessionsToReserve uint64) (*Persistent
 	if res == nil {
 		return nil, fmt.Errorf("failed to initialize balancer persistent state, null pointer returned")
 	}
-	state.inner = (*C.struct_balancer_state)(res)
+	state.Inner = (*C.struct_balancer_state)(res)
 	return state, nil
 }
 
@@ -49,7 +55,7 @@ func NewModuleConfig(agent *ffi.Agent, persistentState *PersistentStatePtr, name
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.balancer_module_config_init((*C.struct_agent)(agent.AsRawPtr()), (*C.struct_balancer_state)(persistentState.inner), cName)
+	ptr, err := C.balancer_module_config_init((*C.struct_agent)(agent.AsRawPtr()), (*C.struct_balancer_state)(persistentState.Inner), cName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize balancer module config: %w", err)
 	}
@@ -58,17 +64,17 @@ func NewModuleConfig(agent *ffi.Agent, persistentState *PersistentStatePtr, name
 	}
 
 	return &ModuleConfig{
-		ptr: ffi.NewModuleConfig(unsafe.Pointer(ptr)),
+		Ptr: ffi.NewModuleConfig(unsafe.Pointer(ptr)),
 	}, nil
 }
 
 func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
-	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
+	return (*C.struct_cp_module)(m.Ptr.AsRawPtr())
 }
 
 // AsFFIModule returns the module configuration as an FFI module
 func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
-	return m.ptr
+	return m.Ptr
 }
 
 func sliceToPtr(s []byte) *C.uint8_t {
@@ -85,6 +91,9 @@ func (proto *ServiceProto) asInt() C.uint8_t {
 
 func (m *ModuleConfig) AddService(service Service) error {
 	flags := C.balancer_vs_flags_t(0)
+	if service.Addr.Is6() {
+		flags |= C.BALANCER_VS_IPV6_FLAG
+	}
 	if service.GRE {
 		flags |= C.BALANCER_VS_GRE_FLAG
 	}
@@ -147,7 +156,7 @@ func (m *ModuleConfig) AddService(service Service) error {
 	return nil
 }
 
-func (m *ModuleConfig) SetStateConfig(timeouts Timeouts) {
+func (m *ModuleConfig) SetTimeouts(timeouts Timeouts) {
 	C.balancer_module_config_set_timeouts(
 		m.asRawPtr(),
 		C.uint32_t(timeouts.TcpSynAckTtl),

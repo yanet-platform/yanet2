@@ -606,10 +606,16 @@ balancer_service_config_set_real(
 	real_config->flags = flags;
 	real_config->weight = weight;
 	if (flags & BALANCER_RS_IPV6_FLAG) {
+		for (size_t i = 0; i < 16; ++i) {
+			src_addr[i] &= src_mask[i];
+		}
 		memcpy(real_config->dst_addr, dst_addr, 16);
 		memcpy(real_config->src_addr, src_addr, 16);
 		memcpy(real_config->src_mask, src_mask, 16);
 	} else {
+		for (size_t i = 0; i < 4; ++i) {
+			src_addr[i] &= src_mask[i];
+		}
 		memcpy(real_config->dst_addr, dst_addr, 4);
 		memcpy(real_config->src_addr, src_addr, 4);
 		memcpy(real_config->src_mask, src_mask, 4);

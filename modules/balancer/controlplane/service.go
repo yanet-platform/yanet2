@@ -53,7 +53,7 @@ type Service struct {
 
 // BalancerConfig represents the configuration for a Balancer instance
 type BalancerConfig struct {
-	StateConfig     Timeouts
+	Timeouts        Timeouts
 	Services        []Service
 	PersistentState *PersistentStatePtr
 	ModuleConfig    *ModuleConfig
@@ -64,7 +64,7 @@ func (cfg *BalancerConfig) DeepCopy() *BalancerConfig {
 		return nil
 	}
 	newCfg := &BalancerConfig{
-		StateConfig:     cfg.StateConfig,
+		Timeouts:        cfg.Timeouts,
 		Services:        make([]Service, 0, len(cfg.Services)),
 		PersistentState: cfg.PersistentState,
 	}
@@ -175,12 +175,12 @@ func (s *BalancerService) ShowConfig(
 
 	response.Config = &balancerpb.Config{
 		StateConfig: &balancerpb.StateConfig{
-			TcpSynAckTtl: config.StateConfig.TcpSynAckTtl,
-			TcpSynTtl:    config.StateConfig.TcpSynTtl,
-			TcpFinTtl:    config.StateConfig.TcpFinTtl,
-			TcpTtl:       config.StateConfig.TcpTtl,
-			UdpTtl:       config.StateConfig.UdpTtl,
-			DefaultTtl:   config.StateConfig.DefaultTtl,
+			TcpSynAckTtl: config.Timeouts.TcpSynAckTtl,
+			TcpSynTtl:    config.Timeouts.TcpSynTtl,
+			TcpFinTtl:    config.Timeouts.TcpFinTtl,
+			TcpTtl:       config.Timeouts.TcpTtl,
+			UdpTtl:       config.Timeouts.UdpTtl,
+			DefaultTtl:   config.Timeouts.DefaultTtl,
 		},
 		Services: make([]*balancerpb.Service, 0, len(config.Services)),
 	}
@@ -409,7 +409,7 @@ func (s *BalancerService) SetStateConfig(
 
 	cfg := s.getConfigCopy(name, inst)
 
-	cfg.StateConfig = Timeouts{
+	cfg.Timeouts = Timeouts{
 		TcpSynAckTtl: req.GetStateConfig().TcpSynAckTtl,
 		TcpSynTtl:    req.GetStateConfig().TcpSynTtl,
 		TcpFinTtl:    req.GetStateConfig().TcpFinTtl,
@@ -425,12 +425,12 @@ func (s *BalancerService) SetStateConfig(
 	s.log.Infow("successfully set state config",
 		zap.String("name", name),
 		zap.Uint32("instance", inst),
-		zap.Uint32("tcp_syn_ack_ttl", cfg.StateConfig.TcpSynAckTtl),
-		zap.Uint32("tcp_syn_ttl", cfg.StateConfig.TcpSynTtl),
-		zap.Uint32("tcp_fin_ttl", cfg.StateConfig.TcpFinTtl),
-		zap.Uint32("tcp_ttl", cfg.StateConfig.TcpTtl),
-		zap.Uint32("udp_ttl", cfg.StateConfig.UdpTtl),
-		zap.Uint32("default_ttl", cfg.StateConfig.DefaultTtl),
+		zap.Uint32("tcp_syn_ack_ttl", cfg.Timeouts.TcpSynAckTtl),
+		zap.Uint32("tcp_syn_ttl", cfg.Timeouts.TcpSynTtl),
+		zap.Uint32("tcp_fin_ttl", cfg.Timeouts.TcpFinTtl),
+		zap.Uint32("tcp_ttl", cfg.Timeouts.TcpTtl),
+		zap.Uint32("udp_ttl", cfg.Timeouts.UdpTtl),
+		zap.Uint32("default_ttl", cfg.Timeouts.DefaultTtl),
 	)
 
 	return &balancerpb.SetStateConfigResponse{}, nil
@@ -464,7 +464,7 @@ func (s *BalancerService) updateModuleConfig(
 			return fmt.Errorf("failed to add prefix on instance %d: %w", inst, err)
 		}
 	}
-	moduleConfig.SetStateConfig(cfg.StateConfig)
+	moduleConfig.SetTimeouts(cfg.Timeouts)
 
 	if err := agent.UpdateModules([]ffi.ModuleConfig{moduleConfig.AsFFIModule()}); err != nil {
 		return fmt.Errorf("failed to update module on instance %d: %w", inst, err)

@@ -26,9 +26,14 @@ make_balancer(
 	struct balancer_state *state
 ) {
 	struct balancer_module_config *cfg = memory_balloc(mctx, sizeof(*cfg));
-	cfg->timeouts = *timeouts;
+	if (timeouts != NULL) {
+		cfg->timeouts = *timeouts;
+	} else {
+		memset(&cfg->timeouts, 0, sizeof(cfg->timeouts));
+	}
 	int res = config_data_init(cfg, mctx, state);
 	if (res != 0) {
+		memory_bfree(mctx, cfg, sizeof(*cfg));
 		return NULL;
 	}
 	memory_context_init_from(
@@ -67,4 +72,11 @@ make_balancer_state(
 		worker_info_init(&state->generations[0].worker_info[i]);
 	}
 	return state;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+set_current_time(struct balancer_state *state, uint32_t value) {
+	__c11_atomic_store(&state->clock.current_time, value, __ATOMIC_SEQ_CST);
 }
