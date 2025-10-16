@@ -1,0 +1,83 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+
+	"github.com/yanet-platform/yanet2/tests/migration/converter/internal"
+)
+
+func main() {
+	var (
+		inputDir  = flag.String("input", "", "Path to yanet1 tests directory (e.g., yanet1/autotest/units)")
+		outputDir = flag.String("output", "", "Path to directory for generated yanet2 tests")
+		testName  = flag.String("test", "", "Name of specific test to convert (optional)")
+		batch     = flag.Bool("batch", false, "Convert all tests in directory")
+		verbose   = flag.Bool("v", false, "Verbose output")
+		debug     = flag.Bool("debug", false, "Enable debug logging for conversions")
+		statsFile = flag.String("stats", "", "File to save statistics (markdown)")
+		skiplist  = flag.String("skiplist", "", "Path to skiplist YAML (optional)")
+	)
+	flag.Parse()
+
+	if *inputDir == "" || *outputDir == "" {
+		fmt.Fprintf(os.Stderr, "Usage: %s -input <yanet1_tests_dir> -output <yanet2_tests_dir> [-test <test_name>] [-batch] [-v] [-stats <file>] [-skiplist <file>]\n", os.Args[0])
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
+	// Default skiplist path if not provided and file exists one level up
+	if *skiplist == "" {
+		def := filepath.Join("..", "skiplist.yaml")
+		if _, err := os.Stat(def); err == nil {
+			*skiplist = def
+		}
+	}
+
+	converter := internal.NewConverter(&internal.Config{
+		InputDir:     *inputDir,
+		OutputDir:    *outputDir,
+		Verbose:      *verbose,
+		Debug:        *debug,
+		SkiplistPath: *skiplist,
+	})
+
+	if *testName != "" {
+		// Convert single test
+		// inputDir should already point to the test directory or its parent
+		// Check if inputDir already contains the test, otherwise join
+		testPath := *inputDir
+		if filepath.Base(*inputDir) != *testName {
+			testPath = filepath.Join(*inputDir, *testName)
+		}
+		if err := converter.ConvertSingleTest(testPath, *testName); err != nil {
+			log.Fatalf("Error converting test %s: %v", *testName, err)
+		}
+		fmt.Printf("Test %s successfully converted\n", *testName)
+	} else if *batch {
+		// Batch convert all tests with statistics
+		stats, err := converter.ConvertAllTestsWithStats()
+		if err != nil {
+			log.Fatalf("Error converting tests: %v", err)
+		}
+
+		// Print statistics
+		stats.Print()
+
+		// Save statistics to file if specified
+		if *statsFile != "" {
+			if err := stats.SaveToFile(*statsFile); err != nil {
+				log.Fatalf("Error saving statistics: %v", err)
+			}
+		}
+	} else {
+		// Convert all tests (old method)
+		if err := converter.ConvertAllTests(); err != nil {
+			log.Fatalf("Error converting tests: %v", err)
+		}
+		fmt.Println("All tests successfully converted")
+	}
+}

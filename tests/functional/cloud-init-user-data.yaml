@@ -67,10 +67,34 @@ packages:
   - vim-tiny
   - iputils-ping
   - net-tools
+
 runcmd:
   - exec &> /var/log/cloud-init-output.log
   - apt-get update -y
   - apt-get install -y linux-modules-extra-$(uname -r) --no-install-recommends
+
+  # 1. Disable snap (- ~10s)
+  - |
+    systemctl disable snapd.service snapd.socket snapd.seeded.service 2>/dev/null || true
+    systemctl mask snapd.service snapd.socket snapd.seeded.service 2>/dev/null || true
+
+  # 2. Disable apport (- ~5s)
+  - |
+    systemctl disable apport.service 2>/dev/null || true
+    systemctl mask apport.service 2>/dev/null || true
+
+  # 3. Disable apparmor (- ~2s)
+  - |
+    systemctl disable apparmor.service 2>/dev/null || true
+    systemctl mask apparmor.service 2>/dev/null || true
+
+  # 4. Disable maintenance timers
+  - |
+    for timer in apt-daily.timer apt-daily-upgrade.timer motd-news.timer fstrim.timer systemd-tmpfiles-clean.timer dpkg-db-backup.timer e2scrub_all.timer; do
+      systemctl disable "$timer" 2>/dev/null || true
+      systemctl mask "$timer" 2>/dev/null || true
+    done
+
   - |
     # Remove password for ubuntu user
     passwd -d ubuntu
