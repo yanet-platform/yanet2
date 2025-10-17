@@ -1,4 +1,4 @@
-package balancer
+package main
 
 import (
 	"fmt"
@@ -55,7 +55,7 @@ func (c *Config) Validate() error {
 func DefaultConfig() *Config {
 	return &Config{
 		MemoryPath:         "/dev/hugepages/yanet",
-		MemoryRequirements: 16 * datasize.MB,
+		MemoryRequirements: 256 * datasize.MB,
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",
 	}

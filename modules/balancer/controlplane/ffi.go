@@ -1,4 +1,4 @@
-package balancer
+package main
 
 //#cgo CFLAGS: -I../../../ -I../../../lib -I../../../build
 //#cgo LDFLAGS: -L../../../build/modules/balancer/ -lbalancer_cp
@@ -66,6 +66,14 @@ func NewModuleConfig(agent *ffi.Agent, persistentState *PersistentStatePtr, name
 	return &ModuleConfig{
 		Ptr: ffi.NewModuleConfig(unsafe.Pointer(ptr)),
 	}, nil
+}
+
+func (m *ModuleConfig) UpdateCurrentTime() error {
+	_, err := C.balancer_module_config_update_current_time(m.asRawPtr())
+	if err != nil {
+		return fmt.Errorf("failed to update current time: %w", err)
+	}
+	return nil
 }
 
 func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {

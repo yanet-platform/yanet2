@@ -1,9 +1,13 @@
-package balancer
+package main
 
 import (
+	"log"
+	"os"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 )
@@ -77,4 +81,15 @@ func (m *BalancerModule) Close() error {
 	}
 
 	return nil
+}
+
+func main() {
+	if err := Run(&RunConfig{
+		MemoryPath: "/dev/hugepages",
+		Memory:     256 * datasize.MB,
+		Sessions:   100,
+	}); err != nil {
+		log.Printf("failed: %s\n", err)
+		os.Exit(1)
+	}
 }

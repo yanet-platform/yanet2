@@ -1,4 +1,4 @@
-package balancer
+package main
 
 import (
 	"context"
@@ -51,19 +51,19 @@ type Service struct {
 	PureL3             bool
 }
 
-// BalancerConfig represents the configuration for a Balancer instance
-type BalancerConfig struct {
+// BalancerModuleConfig represents the configuration for a Balancer instance
+type BalancerModuleConfig struct {
 	Timeouts        Timeouts
 	Services        []Service
 	PersistentState *PersistentStatePtr
 	ModuleConfig    *ModuleConfig
 }
 
-func (cfg *BalancerConfig) DeepCopy() *BalancerConfig {
+func (cfg *BalancerModuleConfig) DeepCopy() *BalancerModuleConfig {
 	if cfg == nil {
 		return nil
 	}
-	newCfg := &BalancerConfig{
+	newCfg := &BalancerModuleConfig{
 		Timeouts:        cfg.Timeouts,
 		Services:        make([]Service, 0, len(cfg.Services)),
 		PersistentState: cfg.PersistentState,
@@ -92,7 +92,7 @@ type BalancerService struct {
 	mu      sync.Mutex
 	agents  []*ffi.Agent
 	log     *zap.SugaredLogger
-	configs map[instanceKey]*BalancerConfig
+	configs map[instanceKey]*BalancerModuleConfig
 }
 
 func NewBalancerService(
@@ -102,26 +102,26 @@ func NewBalancerService(
 	return &BalancerService{
 		agents:  agents,
 		log:     log,
-		configs: make(map[instanceKey]*BalancerConfig),
+		configs: make(map[instanceKey]*BalancerModuleConfig),
 	}
 }
 
-func (s *BalancerService) getConfig(name string, inst uint32) *BalancerConfig {
+func (s *BalancerService) getConfig(name string, inst uint32) *BalancerModuleConfig {
 	key := instanceKey{name: name, dataplaneInstance: inst}
 
 	cfg := s.configs[key]
 	return cfg
 }
 
-func (s *BalancerService) getConfigCopy(name string, inst uint32) *BalancerConfig {
+func (s *BalancerService) getConfigCopy(name string, inst uint32) *BalancerModuleConfig {
 	cfg := s.getConfig(name, inst)
 	if cfg != nil {
 		return cfg.DeepCopy()
 	}
-	return new(BalancerConfig)
+	return new(BalancerModuleConfig)
 }
 
-func (s *BalancerService) setConfig(name string, inst uint32, cfg *BalancerConfig) {
+func (s *BalancerService) setConfig(name string, inst uint32, cfg *BalancerModuleConfig) {
 	key := instanceKey{name: name, dataplaneInstance: inst}
 	s.configs[key] = cfg
 }
@@ -224,6 +224,7 @@ func (s *BalancerService) AddService(
 	}
 
 	newService := Service{
+		Port:               uint16(0), //fixme
 		Prefixes:           make([]netip.Prefix, 0, len(req.GetService().GetPrefixes())),
 		Reals:              make([]Real, 0, len(req.GetService().GetReals())),
 		FixMss:             req.GetService().FixMss,
@@ -439,7 +440,7 @@ func (s *BalancerService) SetStateConfig(
 func (s *BalancerService) updateModuleConfig(
 	name string,
 	inst uint32,
-	cfg *BalancerConfig,
+	cfg *BalancerModuleConfig,
 ) error {
 	s.log.Debugw("updating configuration",
 		zap.String("module", name),

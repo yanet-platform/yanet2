@@ -25,6 +25,8 @@ func New(config *Config) (*App, error) {
 }
 
 func (a *App) Run(ctx context.Context) error {
+	// todo: add time updater
+
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
