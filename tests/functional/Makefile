@@ -94,12 +94,11 @@ test-converted: prepare-vm
 		echo "No converted tests found. Run 'make convert' or 'make convert-one TEST=name' first."; \
 		exit 1; \
 	fi
+ifdef TEST
+	go test -v -run "$(TEST)" ./converted/
+else
 	go test -v -run "^Test.*" ./converted/
-
-# Clean converted tests
-clean-converted:
-	@echo "Removing converted tests..."
-	rm -rf converted/
+endif
 
 # Create QEMU image
 $(QEMU_IMAGE): $(UBUNTU_IMAGE) $(CLOUD_INIT_AUTOLOGIN_ISO)

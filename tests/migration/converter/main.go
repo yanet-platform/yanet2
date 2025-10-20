@@ -12,21 +12,27 @@ import (
 
 func main() {
 	var (
-		inputDir  = flag.String("input", "", "Path to yanet1 tests directory (e.g., yanet1/autotest/units)")
-		outputDir = flag.String("output", "", "Path to directory for generated yanet2 tests")
-		testName  = flag.String("test", "", "Name of specific test to convert (optional)")
-		batch     = flag.Bool("batch", false, "Convert all tests in directory")
-		verbose   = flag.Bool("v", false, "Verbose output")
-		debug     = flag.Bool("debug", false, "Enable debug logging for conversions")
-		statsFile = flag.String("stats", "", "File to save statistics (markdown)")
-		skiplist  = flag.String("skiplist", "", "Path to skiplist YAML (optional)")
+		inputDir   = flag.String("input", "", "Path to yanet1 tests directory (e.g., yanet1/autotest/units)")
+		outputDir  = flag.String("output", "", "Path to directory for generated yanet2 tests")
+		testName   = flag.String("test", "", "Name of specific test to convert (optional)")
+		batch      = flag.Bool("batch", false, "Convert all tests in directory")
+		verbose    = flag.Bool("v", false, "Verbose output")
+		debug      = flag.Bool("debug", false, "Enable debug logging for conversions")
+		statsFile  = flag.String("stats", "", "File to save statistics (markdown)")
+		skiplist   = flag.String("skiplist", "", "Path to skiplist YAML (optional)")
+		updateSkip = flag.Bool("update-skiplist", false, "Update skiplist.yaml in-place at the auto-generated marker")
 	)
 	flag.Parse()
 
-	if *inputDir == "" || *outputDir == "" {
-		fmt.Fprintf(os.Stderr, "Usage: %s -input <yanet1_tests_dir> -output <yanet2_tests_dir> [-test <test_name>] [-batch] [-v] [-stats <file>] [-skiplist <file>]\n", os.Args[0])
+	if *inputDir == "" {
+		fmt.Fprintf(os.Stderr, "Usage: %s -input <yanet1_tests_dir> [-output <yanet2_tests_dir>] [-test <test_name>] [-batch] [-v] [-stats <file>] [-skiplist <file>]\n", os.Args[0])
 		flag.PrintDefaults()
 		os.Exit(1)
+	}
+
+	// Default output dir if not provided
+	if *outputDir == "" {
+		*outputDir = filepath.Join("..", "..", "functional", "converted")
 	}
 
 	// Default skiplist path if not provided and file exists one level up
@@ -45,7 +51,12 @@ func main() {
 		SkiplistPath: *skiplist,
 	})
 
-	if *testName != "" {
+	if *updateSkip {
+		if err := converter.UpdateSkiplist(); err != nil {
+			log.Fatalf("Error updating skiplist: %v", err)
+		}
+		fmt.Println("Skiplist updated successfully")
+	} else if *testName != "" {
 		// Convert single test
 		// inputDir should already point to the test directory or its parent
 		// Check if inputDir already contains the test, otherwise join
