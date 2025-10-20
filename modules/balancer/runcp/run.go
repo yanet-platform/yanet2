@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"log"
 	"net/netip"
+	"os"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	cp "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
@@ -31,16 +33,16 @@ func Run(cfg *RunConfig) error {
 		return fmt.Errorf("failed to attach agent: %w", err)
 	}
 	agent := agents[0]
-	state, err := NewPersistentState(agent, cfg.Sessions)
+	state, err := cp.NewPersistentState(agent, cfg.Sessions)
 	if err != nil {
 		return fmt.Errorf("failed to make new persistent state: %w", err)
 	}
-	moduleConfig, err := NewModuleConfig(agent, state, "balancer")
+	moduleConfig, err := cp.NewModuleConfig(agent, state, "balancer")
 	if err != nil {
 		return err
 	}
 
-	moduleConfig.SetTimeouts(Timeouts{
+	moduleConfig.SetTimeouts(cp.Timeouts{
 		TcpSynAckTtl: 5,
 		TcpSynTtl:    5,
 		TcpFinTtl:    5,
@@ -49,14 +51,14 @@ func Run(cfg *RunConfig) error {
 		DefaultTtl:   5,
 	})
 
-	service := Service{
+	service := cp.Service{
 		Addr:  common.Unwrap(netip.ParseAddr("192.132.1.1")),
 		Port:  80,
-		Proto: ServiceProtoTcp,
+		Proto: cp.ServiceProtoTcp,
 		Prefixes: []netip.Prefix{
 			common.Unwrap(netip.ParsePrefix("0.0.0.0/0")),
 		},
-		Reals: []Real{{
+		Reals: []cp.Real{{
 			Weight:  1,
 			DstAddr: common.Unwrap(netip.ParseAddr("198.166.3.5")),
 			SrcAddr: common.Unwrap(netip.ParseAddr("255.127.0.0")),
@@ -91,5 +93,16 @@ func Run(cfg *RunConfig) error {
 			return fmt.Errorf("failed to update current time: %s", err)
 		}
 		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func main() {
+	if err := Run(&RunConfig{
+		MemoryPath: "/dev/hugepages",
+		Memory:     256 * datasize.MB,
+		Sessions:   100,
+	}); err != nil {
+		log.Printf("failed: %s\n", err)
+		os.Exit(1)
 	}
 }

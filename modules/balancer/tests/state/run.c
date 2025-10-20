@@ -80,7 +80,7 @@ run(void *arena,
 	// Init controlplane
 	struct cp_config cp_config;
 	cp_config.balancer = balancer;
-	__c11_atomic_store(&cp_config.stop, 0, __ATOMIC_SEQ_CST);
+	atomic_store(&cp_config.stop, 0);
 
 	// Run controlplance
 	pthread_t cp;
@@ -179,7 +179,7 @@ run(void *arena,
 
 	// Stop controlplane
 	LOG(INFO, "Waiting for controlplane...");
-	__c11_atomic_store(&cp_config.stop, 1, __ATOMIC_SEQ_CST);
+	atomic_store(&cp_config.stop, 1);
 	res = pthread_join(cp, NULL);
 	if (res != 0) {
 		LOG(ERROR, "Controlplane failed");

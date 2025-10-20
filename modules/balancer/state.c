@@ -75,7 +75,7 @@ balancer_extend_state_on_demand(struct balancer_state *state) {
 				prev_worker_info->max_deadline_current_gen;
 			worker_info->use_prev_gen = 1;
 		}
-		__c11_atomic_fetch_add(
+		atomic_fetch_add_explicit(
 			&state->current_gen, 1, __ATOMIC_SEQ_CST
 		);
 		/// @todo: add memory barrier here

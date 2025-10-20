@@ -15,7 +15,7 @@ static _Atomic uint32_t iterations = 0;
 
 void
 workers_prepare_globals() {
-	__c11_atomic_store(&iterations, 0, __ATOMIC_SEQ_CST);
+	atomic_store_explicit(&iterations, 0, __ATOMIC_SEQ_CST);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -37,7 +37,7 @@ run_worker(struct worker_config *config) {
 				   (rng_next(&rng) % (config->timeout_max -
 						      config->timeout_min + 1) +
 				    config->timeout_min);
-		uint32_t now = __c11_atomic_fetch_add(
+		uint32_t now = atomic_fetch_add_explicit(
 			&iterations, 1, __ATOMIC_SEQ_CST
 		);
 		struct balancer_session_state *session_state;

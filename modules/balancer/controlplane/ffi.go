@@ -1,4 +1,4 @@
-package main
+package balancer
 
 //#cgo CFLAGS: -I../../../ -I../../../lib -I../../../build
 //#cgo LDFLAGS: -L../../../build/modules/balancer/ -lbalancer_cp

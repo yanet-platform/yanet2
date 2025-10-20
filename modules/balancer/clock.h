@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <time.h>
+#include <stdatomic.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -18,7 +19,7 @@ static inline int
 clock_update_time(struct balancer_clock *clock) {
 	uint32_t now = time(NULL);
 	if (now != clock->current_time) {
-		__c11_atomic_store(&clock->current_time, now, __ATOMIC_SEQ_CST);
+		atomic_store(&clock->current_time, now);
 		return 1;
 	}
 	return 0;
@@ -26,5 +27,5 @@ clock_update_time(struct balancer_clock *clock) {
 
 static inline uint32_t
 clock_get_time(struct balancer_clock *clock) {
-	return __c11_atomic_load(&clock->current_time, __ATOMIC_SEQ_CST);
+	return atomic_load(&clock->current_time);
 }

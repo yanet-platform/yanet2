@@ -12,7 +12,7 @@ run_controlplane(struct cp_config *config) {
 
 	const uint32_t sleep_time_ms = 100;
 	const uint32_t sleep_time_us = sleep_time_ms * 1000; // 100 ms
-	while (__c11_atomic_load(&config->stop, __ATOMIC_SEQ_CST) == 0) {
+	while (atomic_load(&config->stop) == 0) {
 		int extend_result =
 			balancer_extend_state_on_demand(config->balancer);
 		if (extend_result == 1) {

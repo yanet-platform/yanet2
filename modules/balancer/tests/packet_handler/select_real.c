@@ -448,7 +448,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	}
 
 	// Update current time
-	__c11_atomic_store(&state->clock.current_time, 10000, __ATOMIC_SEQ_CST);
+	atomic_store_explicit(&state->clock.current_time, 10000, __ATOMIC_SEQ_CST);
 
 	// Check sessions removed
 
