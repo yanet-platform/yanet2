@@ -57,7 +57,7 @@ balancer_select_rs(
 		&session_id, metadata, vs->flags & BALANCER_VS_PURE_L3_FLAG
 	);
 
-	struct balancer_session_state *session_state;
+	struct balancer_session_state *session_state = nullptr;
 	balancer_session_lock_t *session_lock;
 	int get_session_result = balancer_get_or_create_session(
 		ADDR_OF(&config->state),
