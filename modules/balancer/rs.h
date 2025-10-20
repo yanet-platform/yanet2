@@ -81,6 +81,7 @@ balancer_select_rs(
 			return rs;
 		}
 	}
+	assert(session_state != nullptr);
 	if (!balancer_reschedule_real(metadata)) {
 		balancer_session_invalidate(session_state);
 		balancer_session_unlock(session_lock);
