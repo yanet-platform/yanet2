@@ -278,7 +278,7 @@ ttlmap_init_and_get_buckets(
 	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, kv_entries);
 	assert(res == 0);
 
-	for (size_t i = 0; i < (1 << map.buckets_exp); ++i) {
+	for (size_t i = 0; i < ((size_t)1 << map.buckets_exp); ++i) {
 		void *bucket = __TTLMAP_BUCKET_FIND_WITH_ID(
 			&map, i, test_key_t, test_value_t
 		);
