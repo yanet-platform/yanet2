@@ -1,5 +1,6 @@
 package ffi
 
+//#cgo CFLAGS: -I../../build
 //#cgo CFLAGS: -I../../ -I../../lib
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
