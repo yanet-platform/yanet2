@@ -184,7 +184,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	memset(vip1, 1, 16);
 	const uint16_t vs1_port = 80;
 	const uint8_t vs1_proto = IPPROTO_TCP;
-	struct balancer_service_config *vs1_config =
+	struct balancer_vs_config *vs1_config =
 		balancer_service_config_create(
 			BALANCER_VS_IPV6_FLAG, vip1, vs1_port, vs1_proto, 2, 1
 		);
@@ -222,7 +222,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	memset(vip2, 2, 4);
 	const uint16_t vs2_port = 0;
 	const uint8_t vs2_proto = IPPROTO_UDP;
-	struct balancer_service_config *vs2_config =
+	struct balancer_vs_config *vs2_config =
 		balancer_service_config_create(
 			BALANCER_VS_PURE_L3_FLAG,
 			vip2,
@@ -264,7 +264,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	const uint8_t vs3_proto = IPPROTO_UDP;
 	uint8_t real5_dst[4] = {5, 5, 5, 5};
 	uint8_t real6_dst[4] = {6, 6, 6, 6};
-	struct balancer_service_config *vs3_config =
+	struct balancer_vs_config *vs3_config =
 		balancer_service_config_create(
 			BALANCER_VS_OPS_FLAG, vip3, vs3_port, vs3_proto, 2, 1
 		);
@@ -291,7 +291,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	const uint8_t vs4_proto = IPPROTO_TCP;
 	uint8_t real7_dst[4] = {7, 7, 7, 7};
 	uint8_t real8_dst[4] = {8, 8, 8, 8};
-	struct balancer_service_config *vs4_config =
+	struct balancer_vs_config *vs4_config =
 		balancer_service_config_create(
 			BALANCER_VS_OPS_FLAG | BALANCER_VS_PURE_L3_FLAG,
 			vip4,

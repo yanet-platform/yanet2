@@ -129,7 +129,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	uint8_t first_service_addr[4] = {1, 1, 1, 1};
 	uint16_t first_service_port = 80;
 	uint8_t first_service_proto = IPPROTO_TCP;
-	struct balancer_service_config *first_service_config =
+	struct balancer_vs_config *first_service_config =
 		balancer_service_config_create(
 			0,
 			first_service_addr,
@@ -174,7 +174,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	memset(second_service_addr, 2, 16);
 	uint16_t second_service_port = 1010;
 	uint8_t second_service_proto = IPPROTO_UDP;
-	struct balancer_service_config *second_service_config =
+	struct balancer_vs_config *second_service_config =
 		balancer_service_config_create(
 			BALANCER_VS_IPV6_FLAG,
 			second_service_addr,
@@ -424,7 +424,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	uint8_t third_service_ip[4] = {3, 3, 3, 3};
 
 	// Add with specified port
-	struct balancer_service_config *third_service =
+	struct balancer_vs_config *third_service =
 		balancer_service_config_create(
 			BALANCER_VS_PURE_L3_FLAG,
 			third_service_ip,
@@ -448,7 +448,7 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	// Add fourth IPv6 service with pure L3 balancing
 	uint8_t fourth_service_ip[16];
 	memset(fourth_service_ip, 4, 16);
-	struct balancer_service_config *fourth_service =
+	struct balancer_vs_config *fourth_service =
 		balancer_service_config_create(
 			IPPROTO_IPV6, fourth_service_ip, 0, IPPROTO_TCP, 0, 1
 		);
@@ -682,7 +682,7 @@ many_services(void *arena) {
 	for (size_t i = 0; i < services; ++i) {
 		uint8_t *dst_ip = &addresses[16 * i];
 		service_addr(i, dst_ip);
-		struct balancer_service_config *service =
+		struct balancer_vs_config *service =
 			balancer_service_config_create(
 				service_network_proto(i),
 				dst_ip,

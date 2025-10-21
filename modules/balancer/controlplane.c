@@ -31,7 +31,7 @@ struct balancer_src_prefix {
 	uint8_t end_addr[16];
 };
 
-struct balancer_service_config {
+struct balancer_vs_config {
 	uint64_t flags;
 	uint8_t address[16];
 	uint16_t port;
@@ -129,7 +129,7 @@ config_data_init(
 }
 
 struct cp_module *
-balancer_module_config_init(
+balancer_module_config_create(
 	struct agent *agent, struct balancer_state *state, const char *name
 ) {
 	struct balancer_module_config *config =
@@ -392,7 +392,7 @@ free_on_error:
 int
 balancer_module_config_add_service(
 	struct cp_module *cp_module,
-	struct balancer_service_config *service_config
+	struct balancer_vs_config *service_config
 ) {
 	struct balancer_module_config *config = container_of(
 		cp_module, struct balancer_module_config, cp_module
@@ -530,7 +530,7 @@ balancer_module_config_add_service(
 	return 0;
 }
 
-struct balancer_service_config *
+struct balancer_vs_config *
 balancer_service_config_create(
 	balancer_vs_flags_t flags,
 	uint8_t *address,
@@ -548,9 +548,9 @@ balancer_service_config_create(
 		flags |= BALANCER_VS_PURE_L3_FLAG;
 	}
 
-	struct balancer_service_config *config =
-		(struct balancer_service_config *)malloc(
-			sizeof(struct balancer_service_config) +
+	struct balancer_vs_config *config =
+		(struct balancer_vs_config *)malloc(
+			sizeof(struct balancer_vs_config) +
 			sizeof(struct balancer_real_config) * real_count
 		);
 	if (config == NULL) {
@@ -558,7 +558,7 @@ balancer_service_config_create(
 	}
 	memset(config,
 	       0,
-	       sizeof(struct balancer_service_config) +
+	       sizeof(struct balancer_vs_config) +
 		       sizeof(struct balancer_real_config) * real_count);
 	config->port = port;
 	config->proto = proto;
@@ -586,14 +586,14 @@ balancer_service_config_create(
 }
 
 void
-balancer_service_config_free(struct balancer_service_config *config) {
+balancer_service_config_free(struct balancer_vs_config *config) {
 	free(config->prefixes);
 	free(config);
 }
 
 void
 balancer_service_config_set_real(
-	struct balancer_service_config *service_config,
+	struct balancer_vs_config *service_config,
 	uint64_t index,
 	balancer_rs_flags_t flags,
 	uint16_t weight,
@@ -624,7 +624,7 @@ balancer_service_config_set_real(
 
 void
 balancer_service_config_set_src_prefix(
-	struct balancer_service_config *service_config,
+	struct balancer_vs_config *service_config,
 	uint64_t index,
 	uint8_t *start_addr,
 	uint8_t *end_addr

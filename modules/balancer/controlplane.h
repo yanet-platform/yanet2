@@ -22,7 +22,7 @@ balancer_state_free(struct balancer_state *state);
 ////////////////////////////////////////////////////////////////////////////////
 
 struct cp_module *
-balancer_module_config_init(
+balancer_module_config_create(
 	struct agent *agent, struct balancer_state *state, const char *name
 );
 
@@ -50,9 +50,9 @@ balancer_module_config_set_timeouts(
 void
 balancer_module_config_free(struct cp_module *cp_module);
 
-struct balancer_service_config;
+struct balancer_vs_config;
 
-struct balancer_service_config *
+struct balancer_vs_config *
 balancer_service_config_create(
 	balancer_vs_flags_t flags,
 	uint8_t *address,
@@ -63,11 +63,11 @@ balancer_service_config_create(
 );
 
 void
-balancer_service_config_free(struct balancer_service_config *service_config);
+balancer_service_config_free(struct balancer_vs_config *service_config);
 
 void
 balancer_service_config_set_real(
-	struct balancer_service_config *config,
+	struct balancer_vs_config *config,
 	uint64_t index,
 	balancer_rs_flags_t flags,
 	uint16_t weight,
@@ -78,7 +78,7 @@ balancer_service_config_set_real(
 
 void
 balancer_service_config_set_src_prefix(
-	struct balancer_service_config *service_config,
+	struct balancer_vs_config *service_config,
 	uint64_t index,
 	uint8_t *start_addr,
 	uint8_t *end_addr
@@ -86,7 +86,7 @@ balancer_service_config_set_src_prefix(
 
 int
 balancer_module_config_add_service(
-	struct cp_module *cp_module, struct balancer_service_config *service
+	struct cp_module *cp_module, struct balancer_vs_config *service
 );
 
 void

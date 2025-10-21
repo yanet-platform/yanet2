@@ -47,7 +47,7 @@ add_service(
 	uint8_t *real_src,
 	uint8_t *real_mask
 ) {
-	struct balancer_service_config *vs_config =
+	struct balancer_vs_config *vs_config =
 		balancer_service_config_create(
 			vs_flags, vip, vs_port, vs_proto, 1, 1
 		);
