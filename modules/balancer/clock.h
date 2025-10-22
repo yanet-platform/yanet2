@@ -1,8 +1,8 @@
 #pragma once
 
+#include <stdatomic.h>
 #include <stdint.h>
 #include <time.h>
-#include <stdatomic.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 

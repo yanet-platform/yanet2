@@ -391,8 +391,7 @@ free_on_error:
 
 int
 balancer_module_config_add_service(
-	struct cp_module *cp_module,
-	struct balancer_vs_config *service_config
+	struct cp_module *cp_module, struct balancer_vs_config *service_config
 ) {
 	struct balancer_module_config *config = container_of(
 		cp_module, struct balancer_module_config, cp_module
@@ -548,11 +547,10 @@ balancer_service_config_create(
 		flags |= BALANCER_VS_PURE_L3_FLAG;
 	}
 
-	struct balancer_vs_config *config =
-		(struct balancer_vs_config *)malloc(
-			sizeof(struct balancer_vs_config) +
-			sizeof(struct balancer_real_config) * real_count
-		);
+	struct balancer_vs_config *config = (struct balancer_vs_config *)malloc(
+		sizeof(struct balancer_vs_config) +
+		sizeof(struct balancer_real_config) * real_count
+	);
 	if (config == NULL) {
 		return NULL;
 	}

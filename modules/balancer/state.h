@@ -37,13 +37,17 @@ void
 worker_info_init(struct worker_info *info);
 
 #define WORKER_SET_ATOMIC(worker_info_ptr, field, value)                       \
-	atomic_store_explicit(&(worker_info_ptr)->field, value, __ATOMIC_SEQ_CST)
+	atomic_store_explicit(                                                 \
+		&(worker_info_ptr)->field, value, __ATOMIC_SEQ_CST             \
+	)
 
 #define WORKER_GET_ATOMIC(worker_info_ptr, field)                              \
 	atomic_load_explicit(&(worker_info_ptr)->field, __ATOMIC_SEQ_CST)
 
 #define WORKER_INC_ATOMIC(worker_info_ptr, field)                              \
-	atomic_fetch_add_explicit(&(worker_info_ptr)->field, 1, __ATOMIC_SEQ_CST)
+	atomic_fetch_add_explicit(                                             \
+		&(worker_info_ptr)->field, 1, __ATOMIC_SEQ_CST                 \
+	)
 
 ////////////////////////////////////////////////////////////////////////////////
 

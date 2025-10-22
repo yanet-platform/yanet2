@@ -47,10 +47,9 @@ add_service(
 	uint8_t *real_src,
 	uint8_t *real_mask
 ) {
-	struct balancer_vs_config *vs_config =
-		balancer_service_config_create(
-			vs_flags, vip, vs_port, vs_proto, 1, 1
-		);
+	struct balancer_vs_config *vs_config = balancer_service_config_create(
+		vs_flags, vip, vs_port, vs_proto, 1, 1
+	);
 	TEST_ASSERT_NOT_NULL(vs_config, "can not create service config");
 	balancer_service_config_set_src_prefix(
 		vs_config, 0, null_addr, full_addr
