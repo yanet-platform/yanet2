@@ -12,7 +12,7 @@
 
 struct worker_info {
 	_Atomic uint8_t use_prev_gen; // atomic
-	uint8_t pad[63];	       
+	uint8_t pad[63];
 	_Atomic uint32_t max_deadline_current_gen;
 	_Atomic uint32_t max_deadline_prev_gen;
 	_Atomic uint32_t active_sessions; // sessions created by worker
@@ -29,17 +29,17 @@ struct session_table_gen {
 ////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_session_table {
-    struct session_table_gen generations[2];
+	struct session_table_gen generations[2];
 	_Atomic uint32_t current_gen; // workers read, cp modify
 	uint32_t workers_cnt;
 
-    // relative pointer to the memory context of the
-    // agent who created session table
+	// relative pointer to the memory context of the
+	// agent who created session table
 	struct memory_context *mctx;
 
-    // shift of &balancer_session_table in memory
-    // which allows to deallocate table properly.
-    uint32_t memory_shift;
+	// shift of &balancer_session_table in memory
+	// which allows to deallocate table properly.
+	uint32_t memory_shift;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

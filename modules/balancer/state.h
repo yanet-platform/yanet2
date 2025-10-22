@@ -26,7 +26,7 @@
 
 struct worker_info {
 	_Atomic uint8_t use_prev_gen; // atomic
-	uint8_t __padding[63];	       // NOLINT
+	uint8_t __padding[63];	      // NOLINT
 	_Atomic uint32_t max_deadline_current_gen;
 	_Atomic uint32_t max_deadline_prev_gen;
 	_Atomic uint32_t active_sessions; // sessions created by worker
