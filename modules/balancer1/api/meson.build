@@ -8,7 +8,9 @@ cp_dependencies = [
 includes = include_directories('../dataplane')
 
 sources = files(
-  'controlplane.c',
+  'module.c',
+  'vs.c',
+  'session_table.c'
 )
 
 lib_balancer_cp = static_library(
