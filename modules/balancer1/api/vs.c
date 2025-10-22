@@ -1,4 +1,5 @@
 #include "vs.h"
+#include "common/network.h"
 #include "module.h"
 
 #include "common/lpm.h"
@@ -7,6 +8,8 @@
 #include "../dataplane/module.h"
 #include "../dataplane/real.h"
 #include "../dataplane/vs.h"
+
+#include "lib/controlplane/agent/agent.h"
 
 #include "filter/filter.h"
 #include "filter/rule.h"
@@ -320,4 +323,80 @@ free_vs:
 	);
 
 	return -1;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+struct balancer_vs_config *
+balancer_vs_config_create(
+    struct agent *agent,
+	uint64_t flags,
+	uint8_t *ip,
+	uint16_t port,
+	uint8_t proto,
+	size_t real_count,
+	size_t allowed_src_count
+) {
+    uint8_t *memory = memory_balloc(&agent->memory_context, sizeof(struct balancer_vs_config) + sizeof(struct real) * real_count + sizeof(struct addr_range) * allowed_src_count);
+    if (memory == NULL) {
+        return NULL;
+    }
+    struct balancer_vs_config *vs_config = (struct balancer_vs_config *)memory;
+    vs_config->real_count = real_count;
+    vs_config->allowed_src_count = allowed_src_count;
+    vs_config->allowed_src = (struct addr_range *)(memory + sizeof(struct balancer_vs_config) + sizeof(struct real) * real_count);
+    vs_config->flags = (vs_flags_t)flags;
+    if (vs_config->flags & VS_IPV6_FLAG) {
+        memcpy(vs_config->address, ip, NET6_LEN);
+    } else {
+        memcpy(vs_config->address, ip, NET4_LEN);
+    }
+    if (vs_config->flags & VS_PURE_L3_FLAG) {
+        vs_config->port = 0;
+    } else {
+        vs_config->port = port;
+    }
+    vs_config->proto = proto;
+    return vs_config;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+balancer_vs_config_free(struct agent *agent, struct balancer_vs_config *vs_config) {
+    memory_bfree(&agent->memory_context, vs_config, sizeof(struct balancer_vs_config) + sizeof(struct real) * vs_config->real_count + sizeof(struct addr_range) * vs_config->allowed_src_count);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+balancer_vs_config_set_real(
+	struct balancer_vs_config *vs_config,
+	size_t index,
+	uint64_t flags,
+	uint16_t weight,
+	uint8_t *dst_addr,
+	uint8_t *src_addr,
+	uint8_t *src_mask
+) {
+    struct real *real = &vs_config->reals[index];
+    real->flags = (real_flags_t)flags;
+    real->weight = weight;
+    size_t len = (real->flags & REAL_IPV6_FLAG) ? NET6_LEN : NET4_LEN;
+    memcpy(real->dst_addr, dst_addr, len);
+    memcpy(real->src_addr, src_addr, len);
+    memcpy(real->src_mask, src_mask, len);
+}
+
+void
+balancer_vs_config_set_allowed_src_range(
+	struct balancer_vs_config *vs_config,
+	size_t index,
+	uint8_t *from,
+	uint8_t *to
+) {
+    struct addr_range *addr_range = &vs_config->allowed_src[index];
+    size_t len = (vs_config->flags & VS_IPV6_FLAG) ? NET6_LEN : NET4_LEN;
+    memcpy(addr_range->start_addr, from, len);
+    memcpy(addr_range->end_addr, to, len);
 }

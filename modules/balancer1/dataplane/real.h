@@ -2,10 +2,12 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-typedef uint8_t balancer_real_flags_t;
+typedef uint8_t real_flags_t;
+
+#define REAL_IPV6_FLAG ((real_flags_t)(1u << 0))
 
 struct real {
-	balancer_real_flags_t flags;
+	real_flags_t flags;
 	uint16_t weight;
 	uint8_t dst_addr[16];
 	uint8_t src_addr[16];
