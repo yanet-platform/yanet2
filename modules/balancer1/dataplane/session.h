@@ -25,3 +25,12 @@ struct session_state {
 };
 
 typedef ttlmap_lock_t balancer_session_lock_t;
+
+struct sessions_timeouts {
+	uint32_t tcp_syn_ack_timeout;
+	uint32_t tcp_syn_timeout;
+	uint32_t tcp_fin_timeout;
+	uint32_t tcp_timeout;
+	uint32_t udp_timeout;
+	uint32_t default_timeout;
+};

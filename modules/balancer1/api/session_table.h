@@ -18,8 +18,8 @@ balancer_session_table_free(struct balancer_session_table *session_table);
 
 // Extend session table if it is small enough
 int
-balancer_session_table_extend_on_demand(
-	struct balancer_session_table *session_table, uint8_t force
+balancer_session_table_extend(
+	struct balancer_session_table *session_table, bool force
 );
 
 // Try free unused memory occupied by session table

@@ -109,7 +109,7 @@ config_data_init(
 	struct balancer_state *state
 ) {
 	config->services = NULL;
-	config->service_count = 0;
+	config->vs_count = 0;
 
 	config->real_count = 0;
 	config->reals = NULL;
@@ -172,7 +172,7 @@ balancer_module_config_update_real_weight(
 		cp_module, struct balancer_module_config, cp_module
 	);
 
-	if (service_idx >= config->service_count) {
+	if (service_idx >= config->vs_count) {
 		return -1;
 	}
 	struct balancer_vs *service =
@@ -204,7 +204,7 @@ balancer_module_config_free(struct cp_module *cp_module) {
 		config->real_count
 	);
 
-	for (uint64_t service_idx = 0; service_idx < config->service_count;
+	for (uint64_t service_idx = 0; service_idx < config->vs_count;
 	     service_idx++) {
 		struct balancer_vs **vs_ptr =
 			ADDR_OF(&config->services) + service_idx;
@@ -219,7 +219,7 @@ balancer_module_config_free(struct cp_module *cp_module) {
 		&agent->memory_context,
 		ADDR_OF(&config->services),
 		sizeof(struct balancer_vs),
-		config->service_count
+		config->vs_count
 	);
 
 	balancer_vsv4_table_free(config);
@@ -261,7 +261,7 @@ build_v4_service_lookup(
 ) {
 	struct balancer_vs **services = ADDR_OF(&config->services);
 	size_t v4_service_count = 0;
-	for (size_t i = 0; i < config->service_count; ++i) {
+	for (size_t i = 0; i < config->vs_count; ++i) {
 		struct balancer_vs *service = ADDR_OF(&services[i]);
 		if (!(service->flags & BALANCER_VS_IPV6_FLAG)) {
 			++v4_service_count;
@@ -275,7 +275,7 @@ build_v4_service_lookup(
 	}
 
 	size_t v4_service_index = 0;
-	for (size_t i = 0; i < config->service_count; ++i) {
+	for (size_t i = 0; i < config->vs_count; ++i) {
 		struct balancer_vs *service = ADDR_OF(&services[i]);
 		if (!(service->flags & BALANCER_VS_IPV6_FLAG)) {
 			struct filter_rule *rule = &rules[v4_service_index];
@@ -331,7 +331,7 @@ build_v6_service_lookup(
 ) {
 	struct balancer_vs **services = ADDR_OF(&config->services);
 	size_t v6_service_count = 0;
-	for (size_t i = 0; i < config->service_count; ++i) {
+	for (size_t i = 0; i < config->vs_count; ++i) {
 		struct balancer_vs *service = ADDR_OF(&services[i]);
 		if (service->flags & BALANCER_VS_IPV6_FLAG) {
 			++v6_service_count;
@@ -345,7 +345,7 @@ build_v6_service_lookup(
 	}
 
 	size_t v6_service_index = 0;
-	for (size_t i = 0; i < config->service_count; ++i) {
+	for (size_t i = 0; i < config->vs_count; ++i) {
 		struct balancer_vs *service = ADDR_OF(&services[i]);
 		if (service->flags & BALANCER_VS_IPV6_FLAG) {
 			struct filter_rule *rule = &rules[v6_service_index];
@@ -435,7 +435,7 @@ balancer_module_config_add_service(
 
 	struct balancer_vs **services = ADDR_OF(&config->services);
 
-	for (uint64_t service_idx = 0; service_idx < config->service_count;
+	for (uint64_t service_idx = 0; service_idx < config->vs_count;
 	     service_idx++) {
 		services[service_idx] = ADDR_OF(&services[service_idx]);
 	}
@@ -444,7 +444,7 @@ balancer_module_config_add_service(
 		    &config->cp_module.memory_context,
 		    (void **)&services,
 		    sizeof(struct balancer_vs *),
-		    &config->service_count
+		    &config->vs_count
 	    )) {
 		return -1;
 	}
@@ -484,9 +484,9 @@ balancer_module_config_add_service(
 			return -1;
 		}
 	}
-	services[config->service_count - 1] = service;
+	services[config->vs_count - 1] = service;
 
-	for (uint64_t service_idx = 0; service_idx < config->service_count;
+	for (uint64_t service_idx = 0; service_idx < config->vs_count;
 	     service_idx++) {
 		SET_OFFSET_OF(&services[service_idx], services[service_idx]);
 	}

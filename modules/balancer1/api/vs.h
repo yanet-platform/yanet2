@@ -9,7 +9,7 @@ struct balancer_vs_config;
 // Create new virtual service config
 struct balancer_vs_config *
 balancer_vs_config_create(
-	uint8_t flags,
+	uint64_t flags,
 	uint8_t *ip,
 	uint16_t port,
 	uint8_t proto,
@@ -26,7 +26,7 @@ void
 balancer_vs_config_set_real(
 	struct balancer_vs_config *config,
 	size_t index,
-	uint8_t flags,
+	uint64_t flags,
 	uint16_t weight,
 	uint8_t *dst_addr,
 	uint8_t *src_addr,
@@ -41,10 +41,4 @@ balancer_vs_config_set_allowed_src_range(
 	size_t index,
 	uint8_t *from,
 	uint8_t *to
-);
-
-// Add virtual services
-int
-balancer_module_config_add_vs(
-	struct cp_module *module, struct balancer_vs_config **vs, size_t count
 );

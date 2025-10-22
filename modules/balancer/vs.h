@@ -147,7 +147,7 @@ balancer_lookup_vsv4(
 		return NULL;
 	}
 
-	if (balancer_config->service_count <= service_id) {
+	if (balancer_config->vs_count <= service_id) {
 		// If the service_id is out of range of available
 		// services
 		return NULL;
@@ -180,7 +180,7 @@ balancer_lookup_vsv6(
 		return NULL;
 	}
 
-	if (balancer_config->service_count <= service_id) {
+	if (balancer_config->vs_count <= service_id) {
 		// If the service_id is out of range of available
 		// services
 		return NULL;

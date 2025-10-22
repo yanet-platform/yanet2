@@ -1,10 +1,9 @@
 #pragma once
 
+#include "session.h"
 #include <controlplane/config/cp_module.h>
 
 #include <filter/filter.h>
-
-#include "state.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -24,7 +23,7 @@ struct balancer_module_config {
 	// Relative pointer, externally configured
 	struct balancer_state *state;
 
-	uint64_t service_count;
+	uint64_t vs_count;
 	struct balancer_vs **services;
 
 	uint64_t real_count;

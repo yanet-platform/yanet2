@@ -26,7 +26,8 @@ balancer_module_config_create(
 	struct agent *agent, struct balancer_state *state, const char *name
 );
 
-struct balancer_module_config;
+void
+balancer_module_config_free(struct cp_module *cp_module);
 
 int
 balancer_module_config_update_real_weight(
@@ -46,9 +47,6 @@ balancer_module_config_set_timeouts(
 	uint32_t udp_timeout,
 	uint32_t default_timeout
 );
-
-void
-balancer_module_config_free(struct cp_module *cp_module);
 
 struct balancer_vs_config;
 

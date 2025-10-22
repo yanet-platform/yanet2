@@ -103,8 +103,8 @@ balancer_session_table_free(struct balancer_session_table *session_table) {
 
 // Allows to extend session table if it is filled enough
 int
-balancer_session_table_extend_on_demand(
-	struct balancer_session_table *session_table, uint8_t force
+balancer_session_table_extend(
+	struct balancer_session_table *session_table, bool force
 ) {
 	struct session_table_gen *sessions_cur =
 		session_table_current_gen(session_table);
@@ -152,7 +152,7 @@ balancer_session_table_extend_on_demand(
 			next_gen_cap
 		);
 		if (ret != 0) {
-			// failed to extend state
+			// failed to extend session table
 			// probably, memory not enough
 			return -1;
 		}
@@ -170,10 +170,10 @@ balancer_session_table_extend_on_demand(
 		atomic_fetch_add_explicit(
 			&session_table->current_gen, 1, __ATOMIC_SEQ_CST
 		);
-		// sucessfully extended state
+		// sucessfully extended session table
 		return 1;
 	} else {
-		// no need to extend state
+		// no need to extend session table
 		return 0;
 	}
 }
