@@ -340,9 +340,9 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration) ([]byte, error) {
 		// Parse the packet to check SrcMAC
 		packetInfo, err := parser.ParsePacket(packetData)
 		if err != nil {
-			sc.log.Warnf("Failed to parse packet: %v", err)
-			// Continue reading packets
-			continue
+			// If packet parsing fails, return it anyway (may be intentionally invalid)
+			sc.log.Warnf("Failed to parse packet (may be intentionally invalid), returning anyway: %v", err)
+			return packetData, nil
 		}
 
 		// Check if the packet has the correct SrcMAC

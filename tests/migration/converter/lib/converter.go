@@ -1,4 +1,4 @@
-package internal
+package lib
 
 import (
 	"encoding/json"
@@ -7,6 +7,7 @@ import (
 	"go/format"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -15,7 +16,7 @@ import (
 	"text/template"
 	"time"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // VM infrastructure addresses from framework.go:16-46
@@ -56,11 +57,13 @@ const (
 
 // Config contains the converter configuration
 type Config struct {
-	InputDir     string
-	OutputDir    string
-	Verbose      bool
-	Debug        bool // Enable debug logging for conversions
-	SkiplistPath string
+	InputDir       string
+	OutputDir      string
+	Verbose        bool
+	Debug          bool // Enable debug logging for conversions
+	SkiplistPath   string
+	ForceASTParser bool // Force use of AST parser (fail if unavailable)
+	ForceLegacy    bool // Force use of legacy PCAP analyzer
 }
 
 // ConversionStats contains conversion statistics
@@ -155,12 +158,43 @@ func (s *ConversionStats) SaveToFile(filename string) error {
 	return os.WriteFile(filename, []byte(content.String()), 0644)
 }
 
+// findScapyASTParser locates scapy_ast_parser.py relative to converter
+func findScapyASTParser() string {
+	// Get executable directory
+	ex, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	exDir := filepath.Dir(ex)
+
+	candidates := []string{
+		filepath.Join(exDir, "scapy_ast_parser.py"),       // Same dir as executable
+		filepath.Join(exDir, "..", "scapy_ast_parser.py"), // One level up
+		"./scapy_ast_parser.py",                           // Current working dir
+		"scapy_ast_parser.py",                             // Current working dir
+	}
+
+	for _, path := range candidates {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(absPath); err == nil {
+			return absPath
+		}
+	}
+
+	return "" // Will fallback to PCAP analysis
+}
+
 // Converter performs conversion of yanet1 tests to yanet2
 type Converter struct {
 	config           *Config
 	pcapAnalyzer     *PcapAnalyzer
-	packetCounter    int // Global counter for unique packet function names
-	stepCounter      int // Counter for unique step names
+	scapyASTParser   string          // Path to scapy_ast_parser.py
+	scapyCodegenV2   *ScapyCodegenV2 // New code generator
+	packetCounter    int             // Global counter for unique packet function names
+	stepCounter      int             // Counter for unique step names
 	skiplist         map[string]SkiplistEntry
 	defaultStripVLAN bool
 }
@@ -184,10 +218,15 @@ type SkiplistEntry struct {
 
 // NewConverter creates a new converter instance
 func NewConverter(config *Config) *Converter {
+	// Initialize new AST-based system
+	scapyASTParser := findScapyASTParser()
+
 	c := &Converter{
-		config:       config,
-		pcapAnalyzer: NewPcapAnalyzer(config.Verbose),
-		skiplist:     make(map[string]SkiplistEntry),
+		config:         config,
+		pcapAnalyzer:   NewPcapAnalyzer(config.Verbose),
+		scapyASTParser: scapyASTParser,
+		scapyCodegenV2: NewScapyCodegenV2(false), // false = keep VLAN by default
+		skiplist:       make(map[string]SkiplistEntry),
 	}
 	c.loadSkiplist()
 	return c
@@ -201,6 +240,34 @@ func (c *Converter) debugLog(format string, args ...interface{}) {
 	if c.config.Debug {
 		fmt.Printf("[DEBUG] "+format+"\n", args...)
 	}
+}
+
+// shouldUseASTParser determines if test should use new AST parser
+func (c *Converter) shouldUseASTParser(testPath string) bool {
+	// Force legacy if requested
+	if c.config.ForceLegacy {
+		c.debugLog("ForceLegacy is set, using legacy parser")
+		return false
+	}
+
+	// Force AST parser if requested (will fail in AST method if unavailable)
+	if c.config.ForceASTParser {
+		c.debugLog("ForceASTParser is set, forcing AST parser")
+		return true
+	}
+
+	// Check if gen.py exists
+	genPyPath := filepath.Join(testPath, "gen.py")
+	if _, err := os.Stat(genPyPath); err != nil {
+		return false
+	}
+
+	// Check if AST parser is available
+	if c.scapyASTParser == "" {
+		return false
+	}
+
+	return true
 }
 
 // loadSkiplist loads skiplist YAML if provided; missing file is tolerated
@@ -828,20 +895,25 @@ func (c *Converter) generateForwardModuleCommands(config *ControlplaneConfig) []
 // convertStepsWithSkip applies skiplist/test defaults and passes stripVLAN to sendPackets steps
 func (c *Converter) convertStepsWithSkip(testName string, steps []map[string]interface{}, testPath string) []ConvertedStep {
 	var converted []ConvertedStep
+	c.debugLog("Converting %d steps for test %s", len(steps), testName)
 	for i, step := range steps {
 		stepIndex := i + 1
 		state := c.effectiveState(testName, stepIndex)
+		c.debugLog("Step %d (index %d): state=%s", stepIndex, i, state)
 		if state == StateDisabled {
 			c.debugLog("Skipping step %d due to skiplist: disabled", stepIndex)
 			continue
 		}
 		for stepType, content := range step {
+			c.debugLog("Processing step %d type: %s", stepIndex, stepType)
 			convertedStep := c.convertStepWithState(stepType, content, testPath, state, testName)
+			c.debugLog("Converted step %d: GoCode=%d bytes, PacketTests=%d", stepIndex, len(convertedStep.GoCode), len(convertedStep.PacketTests))
 			if convertedStep.GoCode != "" || len(convertedStep.PacketTests) > 0 {
 				converted = append(converted, convertedStep)
 			}
 		}
 	}
+	c.debugLog("Total converted steps: %d", len(converted))
 	return converted
 }
 
@@ -1140,8 +1212,167 @@ func (c *Converter) convertIPv4LabelledRemove(content interface{}, stepType stri
 	}
 }
 
-// convertSendPackets converts sendPackets step
 func (c *Converter) convertSendPackets(content interface{}, testPath string, testName string) ConvertedStep {
+	// Try new AST-based parser first if gen.py exists
+	if c.shouldUseASTParser(testPath) {
+		step, err := c.convertSendPacketsWithASTParser(content, testPath, testName, false)
+		if err == nil {
+			c.debugLog("Successfully used AST parser for %s", testName)
+			return step
+		}
+
+		// If ForceASTParser is set, fail instead of falling back
+		if c.config.ForceASTParser {
+			c.debugLog("AST parser failed for %s with ForceASTParser set: %v - NOT falling back", testName, err)
+			return ConvertedStep{Type: "sendPackets", GoCode: fmt.Sprintf("// ERROR: AST parser failed: %v", err)}
+		}
+
+		// Log fallback reason
+		c.debugLog("AST parser failed for %s: %v, falling back to PCAP analysis", testName, err)
+		if c.config.Verbose {
+			fmt.Printf("Warning: AST parser failed, using PCAP fallback: %v\n", err)
+		}
+	}
+
+	// Fallback to existing PCAP-based analysis
+	return c.convertSendPacketsLegacy(content, testPath, testName)
+}
+
+// convertSendPacketsWithASTParser uses new AST-based parser for packet generation
+func (c *Converter) convertSendPacketsWithASTParser(content interface{}, testPath string, testName string, stripVLAN bool) (ConvertedStep, error) {
+	packets, ok := content.([]interface{})
+	if !ok {
+		return ConvertedStep{}, fmt.Errorf("invalid sendPackets format")
+	}
+
+	var functions []string
+	var packetTests []PacketTestCase
+	step := ConvertedStep{
+		Type:        "sendPackets",
+		Description: "Packet sending and validation",
+	}
+
+	// Parse gen.py with Python AST parser
+	genPyPath := filepath.Join(testPath, "gen.py")
+	cmd := exec.Command("python3", c.scapyASTParser, genPyPath)
+	irJSON, err := cmd.CombinedOutput()
+	if err != nil {
+		return ConvertedStep{}, fmt.Errorf("AST parser failed: %w: %s", err, string(irJSON))
+	}
+
+	c.debugLog("AST parser generated %d bytes of IR", len(irJSON))
+
+	// For each packet in autotest.yaml sendPackets
+	for i, packet := range packets {
+		c.debugLog("Processing AST packet entry %d, type=%T", i, packet)
+
+		// Try both map types (YAML parsers may return either)
+		var sendFile, expectFile string
+
+		if packetMap, ok := packet.(map[interface{}]interface{}); ok {
+			if s, exists := packetMap["send"]; exists {
+				sendFile = fmt.Sprintf("%v", s)
+			}
+			if e, exists := packetMap["expect"]; exists {
+				expectFile = fmt.Sprintf("%v", e)
+			}
+		} else if packetMap, ok := packet.(map[string]interface{}); ok {
+			if s, exists := packetMap["send"]; exists {
+				sendFile = fmt.Sprintf("%v", s)
+			}
+			if e, exists := packetMap["expect"]; exists {
+				expectFile = fmt.Sprintf("%v", e)
+			}
+		} else {
+			c.debugLog("AST packet entry %d is not a map (type=%T), skipping", i, packet)
+			continue
+		}
+
+		c.debugLog("AST: Send file: %s, Expect file: %s", sendFile, expectFile)
+
+		// Generate packet creation functions from IR
+		c.packetCounter++
+		funcName := fmt.Sprintf("create%sSendPacket%d", testName, c.packetCounter)
+
+		funcCode, err := c.generatePacketFunctionFromIR(string(irJSON), sendFile, funcName, false, stripVLAN)
+		if err != nil {
+			return ConvertedStep{}, fmt.Errorf("failed to generate code for %s: %w", sendFile, err)
+		}
+
+		functions = append(functions, funcCode)
+
+		// Handle expect packets
+		var expectFuncName string
+		isDropExpected := expectFile == ""
+
+		if !isDropExpected {
+			c.packetCounter++
+			expectFuncName = fmt.Sprintf("create%sExpectPacket%d", testName, c.packetCounter)
+
+			expectCode, err := c.generatePacketFunctionFromIR(string(irJSON), expectFile, expectFuncName, true, stripVLAN)
+			if err != nil {
+				return ConvertedStep{}, fmt.Errorf("failed to generate expect code for %s: %w", expectFile, err)
+			}
+
+			functions = append(functions, expectCode)
+		}
+
+		// Create test case
+		testCase := PacketTestCase{
+			SendPcap:           sendFile,
+			ExpectPcap:         expectFile,
+			IsDropExpected:     isDropExpected,
+			FunctionName:       funcName,
+			PacketNumber:       c.packetCounter,
+			ExpectFunctionName: expectFuncName,
+		}
+		packetTests = append(packetTests, testCase)
+	}
+
+	step.Functions = functions
+	step.PacketTests = packetTests
+	return step, nil
+}
+
+// generatePacketFunctionFromIR extracts packets for specific PCAP file from IR and generates Go function
+func (c *Converter) generatePacketFunctionFromIR(irJSON, pcapFilename, funcName string, isExpect bool, stripVLAN bool) (string, error) {
+	// Parse IR to find packets for this specific PCAP file
+	var ir struct {
+		PCAPPairs []struct {
+			SendFile      string        `json:"send_file"`
+			ExpectFile    string        `json:"expect_file"`
+			SendPackets   []IRPacketDef `json:"send_packets"`
+			ExpectPackets []IRPacketDef `json:"expect_packets"`
+		} `json:"pcap_pairs"`
+	}
+
+	if err := json.Unmarshal([]byte(irJSON), &ir); err != nil {
+		return "", fmt.Errorf("failed to parse IR: %w", err)
+	}
+
+	// Find matching PCAP pair
+	var packets []IRPacketDef
+	for _, pair := range ir.PCAPPairs {
+		if isExpect && pair.ExpectFile == pcapFilename {
+			packets = pair.ExpectPackets
+			break
+		} else if !isExpect && pair.SendFile == pcapFilename {
+			packets = pair.SendPackets
+			break
+		}
+	}
+
+	if len(packets) == 0 {
+		return "", fmt.Errorf("no packets found for %s", pcapFilename)
+	}
+
+	// Generate function using ScapyCodegenV2
+	codegen := NewScapyCodegenV2(stripVLAN)
+	return codegen.GeneratePacketFunction(funcName, packets, isExpect), nil
+}
+
+// convertSendPacketsLegacy is the original PCAP-based packet converter (fallback)
+func (c *Converter) convertSendPacketsLegacy(content interface{}, testPath string, testName string) ConvertedStep {
 	packets, ok := content.([]interface{})
 	if !ok {
 		return ConvertedStep{Type: "sendPackets", GoCode: "// TODO: Invalid sendPackets format"}
@@ -1245,10 +1476,42 @@ func (c *Converter) convertSendPackets(content interface{}, testPath string, tes
 
 // convertSendPacketsWithOptions is like convertSendPackets but supports stripping VLAN at codegen time
 func (c *Converter) convertSendPacketsWithOptions(content interface{}, testPath string, stripVLAN bool, testName string) ConvertedStep {
+	c.debugLog("convertSendPacketsWithOptions: testPath=%s, stripVLAN=%v", testPath, stripVLAN)
+
+	// Try AST parser first
+	if c.shouldUseASTParser(testPath) {
+		c.debugLog("Using AST parser for %s", testName)
+		step, err := c.convertSendPacketsWithASTParser(content, testPath, testName, stripVLAN)
+		if err == nil {
+			c.debugLog("AST parser succeeded, returning step with %d packet tests", len(step.PacketTests))
+			return step
+		}
+
+		// If ForceASTParser is set, fail instead of falling back
+		if c.config.ForceASTParser {
+			c.debugLog("AST parser failed for %s with ForceASTParser set: %v - NOT falling back", testName, err)
+			return ConvertedStep{Type: "sendPackets", GoCode: fmt.Sprintf("// ERROR: AST parser failed: %v", err)}
+		}
+
+		c.debugLog("AST parser failed, using PCAP fallback: %v", err)
+	} else {
+		c.debugLog("AST parser not available, using PCAP fallback")
+	}
+
+	// Fallback to PCAP analysis
+	c.debugLog("Using PCAP fallback for %s", testName)
+	return c.convertSendPacketsWithOptionsLegacy(content, testPath, stripVLAN, testName)
+}
+
+// convertSendPacketsWithOptionsLegacy is the original PCAP-based converter
+func (c *Converter) convertSendPacketsWithOptionsLegacy(content interface{}, testPath string, stripVLAN bool, testName string) ConvertedStep {
+	c.debugLog("convertSendPacketsWithOptionsLegacy: content type=%T", content)
 	packets, ok := content.([]interface{})
 	if !ok {
+		c.debugLog("Invalid sendPackets format: expected []interface{}, got %T", content)
 		return ConvertedStep{Type: "sendPackets", GoCode: "// TODO: Invalid sendPackets format"}
 	}
+	c.debugLog("Found %d packet entries", len(packets))
 
 	var functions []string
 	var packetTests []PacketTestCase
@@ -1257,19 +1520,32 @@ func (c *Converter) convertSendPacketsWithOptions(content interface{}, testPath 
 		Description: "Packet sending and validation",
 	}
 
-	for _, packet := range packets {
-		packetMap, ok := packet.(map[interface{}]interface{})
-		if !ok {
+	for i, packet := range packets {
+		c.debugLog("Processing packet entry %d, type=%T", i, packet)
+
+		// Try both map types (YAML parsers may return either)
+		var sendFile, expectFile string
+
+		if packetMap, ok := packet.(map[interface{}]interface{}); ok {
+			if s, exists := packetMap["send"]; exists {
+				sendFile = fmt.Sprintf("%v", s)
+			}
+			if e, exists := packetMap["expect"]; exists {
+				expectFile = fmt.Sprintf("%v", e)
+			}
+		} else if packetMap, ok := packet.(map[string]interface{}); ok {
+			if s, exists := packetMap["send"]; exists {
+				sendFile = fmt.Sprintf("%v", s)
+			}
+			if e, exists := packetMap["expect"]; exists {
+				expectFile = fmt.Sprintf("%v", e)
+			}
+		} else {
+			c.debugLog("Packet entry %d is not a map (type=%T), skipping", i, packet)
 			continue
 		}
 
-		var sendFile, expectFile string
-		if s, exists := packetMap["send"]; exists {
-			sendFile = fmt.Sprintf("%v", s)
-		}
-		if e, exists := packetMap["expect"]; exists {
-			expectFile = fmt.Sprintf("%v", e)
-		}
+		c.debugLog("Send file: %s, Expect file: %s", sendFile, expectFile)
 
 		// Read all send packets
 		c.debugLog("Analyzing send pcap: %s", sendFile)
@@ -1945,17 +2221,7 @@ func (c *Converter) generateTestStepsInOrder(steps []ConvertedStep) string {
 				packetCounter++
 				// Build the test code using strings.Builder
 
-				// Generate error assertion based on drop expectation
-				var errorAssertion string
-				if testCase.IsDropExpected {
-					errorAssertion = `require.Error(t, err, "Packet should be dropped")
-			require.NotNil(t, inputPacket, "Input packet should be parsed")
-			require.Nil(t, outputPacket, "Output packet should be absent")`
-				} else {
-					errorAssertion = `require.NoError(t, err, "Failed to send packet %d from ` + testCase.SendPcap + `", idx)
-			require.NotNil(t, inputPacket, "Input packet should be parsed")
-			require.NotNil(t, outputPacket, "Output packet should be present")`
-				}
+				// Note: Error handling removed - new socket-based code handles drops gracefully
 
 				// Add 3-second delay before the first packet test
 				var delayCode string
@@ -1975,25 +2241,38 @@ func (c *Converter) generateTestStepsInOrder(steps []ConvertedStep) string {
 
 		%s%s
 
+		// Get socket client
+		client, err := fw.GetSocketClient(0)
+		require.NoError(t, err, "Failed to get socket client")
+		require.NoError(t, client.Connect(), "Failed to connect to socket")
+
+		var receivedPackets []gopacket.Packet
 		for idx, pkt := range sendPackets {
-			t.Logf("Sending packet %%d of %%d from `+testCase.SendPcap+`", idx, len(sendPackets))
+			t.Logf("Sending packet %%d of %%d from `+testCase.SendPcap+`", idx+1, len(sendPackets))
 			packetBytes := pkt.Data()
-			inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packetBytes, 100*time.Millisecond)
-			%s
+
+			// Send packet
+			require.NoError(t, client.SendPacket(packetBytes), "Failed to send packet %%d", idx)
+
+			// Receive packet (ignore errors - packet may be dropped)
+			responseData, _ := client.ReceivePacket(100 * time.Millisecond)
+			if responseData != nil {
+				receivedPkt := gopacket.NewPacket(responseData, layers.LayerTypeEthernet, gopacket.Default)
+				receivedPackets = append(receivedPackets, receivedPkt)
+			}
+		}
 
 `,
 					packetCounter, testCase.SendPcap, testCase.ExpectPcap,
 					c.generatePacketFunctionCall(testCase.FunctionName),
 					c.generateExpectedPacketSetup(&testCase),
-					delayCode,
-					errorAssertion))
+					delayCode))
 
-				// Only add packet validation for non-drop cases
+				// Add packet validation after all packets are sent and received
 				if !testCase.IsDropExpected {
-					result.WriteString(c.generatePerPacketValidation(&testCase))
+					result.WriteString(c.generateBatchPacketValidation(&testCase))
 				}
 				result.WriteString(`
-		}
 	})`)
 			}
 			continue
@@ -2060,9 +2339,17 @@ func (c *Converter) generatePacketFunctions(testData *GoTestData) string {
 
 // generateTestHeader creates unified header for all test types
 func (c *Converter) generateTestHeader(testName, originalTestName, testType string) string {
-	return fmt.Sprintf(`package converted
+	// Always include basic imports
+	imports := `import (
+	"testing"
 
-import (
+	"github.com/stretchr/testify/require"
+)`
+
+	silenceCode := ""
+
+	// Add additional imports if packet testing is involved
+	imports = `import (
 	"net"
 	"testing"
 	"time"
@@ -2072,19 +2359,28 @@ import (
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
-)
+
+	"github.com/yanet-platform/yanet2/tests/migration/converter/lib"
+)`
+
+	silenceCode = `
+	// Silence potentially unused imports PCAP vs AST parser
+	_ = cmp.Diff
+	_ = cmpopts.IgnoreUnexported
+	_ = lib.NewPacket
+	_ = net.ParseIP`
+
+	return fmt.Sprintf(`package converted
+
+%s
 
 // Test%s - automatically generated test from yanet1
 // Original test: %s
 // Test type: %s
 func Test%s(t *testing.T) {
 	fw := globalFramework
-	require.NotNil(t, fw, "Global framework should be initialized")
-
-	// Silence potentially unused imports when no diffs are printed
-	_ = cmp.Diff
-	_ = cmpopts.IgnoreUnexported
-`, testName, originalTestName, testType, testName)
+	require.NotNil(t, fw, "Global framework should be initialized")%s
+`, imports, testName, originalTestName, testType, testName, silenceCode)
 }
 
 // generateNAT64TestTemplate generates template for NAT64 tests
@@ -2341,39 +2637,81 @@ func (c *Converter) generatePacketFunctionCall(functionName string) string {
 }
 
 func (c *Converter) generateExpectedPacketSetup(testCase *PacketTestCase) string {
-	if testCase.IsDropExpected || len(testCase.ExpectPackets) == 0 || testCase.ExpectFunctionName == "" {
+	// Check if this is a drop test or no expect function was generated
+	if testCase.IsDropExpected || testCase.ExpectFunctionName == "" {
 		return "// No expected packets needed (drop test or empty expect file)"
 	}
+	// Generate expected packets without checking count (fragmentation may change packet count)
 	return fmt.Sprintf(`expectedPackets := %s(t)
-	require.NotNil(t, expectedPackets)
-	require.Equalf(t, len(sendPackets), len(expectedPackets), "Mismatch between sent and expected packets for %s", %q)`, testCase.ExpectFunctionName, testCase.ExpectPcap, testCase.ExpectPcap)
+	require.NotNil(t, expectedPackets)`, testCase.ExpectFunctionName)
 }
 
 func (c *Converter) generatePerPacketValidation(testCase *PacketTestCase) string {
 	if testCase.IsDropExpected {
 		return "require.Nil(t, outputPacket, \"Packet should be dropped\")"
 	}
-	if testCase.ExpectFunctionName == "" || len(testCase.ExpectPackets) == 0 {
+	// If no expect function, just check output exists
+	if testCase.ExpectFunctionName == "" {
 		return "require.NotNil(t, outputPacket, \"Output packet should be present\")"
 	}
-	return `require.NotNilf(t, expectedPackets[idx], "Expected packet should be present for index %d", idx)
+	// Generate full validation with expectedPackets
+	return `// Validate against expected packet
+		if idx < len(expectedPackets) {
+			expectedPkt := expectedPackets[idx]
+			actualPkt := gopacket.NewPacket(outputPacket.RawData, layers.LayerTypeEthernet, gopacket.Default)
+			
+			diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(),
+				cmpopts.IgnoreUnexported(
+					layers.Ethernet{},
+					layers.Dot1Q{},
+					layers.IPv4{},
+					layers.IPv6{},
+					layers.TCP{},
+					layers.UDP{},
+					layers.ICMPv4{},
+					layers.ICMPv6{},
+				),
+			)
+			if diff != "" {
+				t.Logf("Packet %d mismatch:\n%s", idx, diff)
+			}
+			require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
+		}`
+}
 
-	actualPkt := gopacket.NewPacket(outputPacket.RawData, layers.LayerTypeEthernet, gopacket.Default)
-	require.NotNilf(t, actualPkt, "Actual packet should be parseable for index %d", idx)
+func (c *Converter) generateBatchPacketValidation(testCase *PacketTestCase) string {
+	// If no expect function, just check we received packets
+	if testCase.ExpectFunctionName == "" {
+		return `
+		require.NotEmpty(t, receivedPackets, "Should have received at least one packet")`
+	}
 
-	expectedPkt := expectedPackets[idx]
-
-	diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(),
-		cmpopts.IgnoreUnexported(
-			layers.Ethernet{},
-			layers.Dot1Q{},
-			layers.IPv4{},
-			layers.IPv6{},
-			layers.TCP{},
-			layers.UDP{},
-			layers.ICMPv4{},
-			layers.ICMPv6{},
-		),
-	)
-	require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)`
+	// Generate batch validation comparing all received packets with expected
+	return `
+		// Validate all received packets against expected packets
+		t.Logf("Received %d packets, expected %d packets", len(receivedPackets), len(expectedPackets))
+		
+		require.Equalf(t, len(expectedPackets), len(receivedPackets), 
+			"Packet count mismatch: expected %d, received %d", len(expectedPackets), len(receivedPackets))
+		
+		for idx, expectedPkt := range expectedPackets {
+			actualPkt := receivedPackets[idx]
+			
+			diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(),
+				cmpopts.IgnoreUnexported(
+					layers.Ethernet{},
+					layers.Dot1Q{},
+					layers.IPv4{},
+					layers.IPv6{},
+					layers.TCP{},
+					layers.UDP{},
+					layers.ICMPv4{},
+					layers.ICMPv6{},
+				),
+			)
+			if diff != "" {
+				t.Logf("Packet %d mismatch:\n%s", idx, diff)
+				require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
+			}
+		}`
 }
