@@ -1,4 +1,4 @@
-package internal
+package lib
 
 import (
 	"fmt"
@@ -982,4 +982,48 @@ func Fragment(pkt gopacket.Packet, fragSize int) ([]gopacket.Packet, error) {
 	}
 
 	return fragments, nil
+}
+
+// IPv6ExtHdrDestOptBuilder is a placeholder builder for unsupported IPv6 Destination Options header
+type IPv6ExtHdrDestOptBuilder struct{}
+
+// IPv6ExtHdrDestOptOption is an option for IPv6ExtHdrDestOpt
+type IPv6ExtHdrDestOptOption func(*IPv6ExtHdrDestOptBuilder)
+
+// IPv6ExtHdrDestOpt is a placeholder for unsupported IPv6 Destination Options header
+func IPv6ExtHdrDestOpt(opts ...IPv6ExtHdrDestOptOption) *IPv6ExtHdrDestOptBuilder {
+	builder := &IPv6ExtHdrDestOptBuilder{}
+	for _, opt := range opts {
+		opt(builder)
+	}
+	return builder
+}
+
+// Build returns nil as this is an unsupported layer placeholder
+func (b *IPv6ExtHdrDestOptBuilder) Build() gopacket.SerializableLayer {
+	// Return nil to skip this layer in packet construction
+	// TODO: Implement proper IPv6 Destination Options header support
+	return nil
+}
+
+// MPLSBuilder is a placeholder builder for unsupported MPLS layer
+type MPLSBuilder struct{}
+
+// MPLSOption is an option for MPLS
+type MPLSOption func(*MPLSBuilder)
+
+// MPLS is a placeholder for unsupported MPLS layer
+func MPLS(opts ...MPLSOption) *MPLSBuilder {
+	builder := &MPLSBuilder{}
+	for _, opt := range opts {
+		opt(builder)
+	}
+	return builder
+}
+
+// Build returns nil as this is an unsupported layer placeholder
+func (b *MPLSBuilder) Build() gopacket.SerializableLayer {
+	// Return nil to skip this layer in packet construction
+	// TODO: Implement proper MPLS layer support
+	return nil
 }

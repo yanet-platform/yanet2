@@ -1,8 +1,9 @@
-package internal
+package lib
 
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -61,20 +62,20 @@ func (cg *ScapyCodegenV2) GenerateFromIR(irJSON string) (string, error) {
 	code.WriteString("\t\"github.com/gopacket/gopacket\"\n")
 	code.WriteString("\t\"github.com/gopacket/gopacket/layers\"\n")
 	code.WriteString("\t\"github.com/stretchr/testify/require\"\n\n")
-	code.WriteString("\t\"github.com/yanet-platform/yanet2/tests/migration/converter/internal\"\n")
+	code.WriteString("\t\"github.com/yanet-platform/yanet2/tests/migration/converter/lib\"\n")
 	code.WriteString(")\n\n")
 
 	// Generate functions for each PCAP pair
 	for i, pair := range ir.PCAPPairs {
 		if len(pair.SendPackets) > 0 {
 			funcName := fmt.Sprintf("Generate%sSend", sanitizeName(pair.SendFile))
-			code.WriteString(cg.generatePacketFunction(funcName, pair.SendPackets, false))
+			code.WriteString(cg.GeneratePacketFunction(funcName, pair.SendPackets, false))
 			code.WriteString("\n")
 		}
 
 		if len(pair.ExpectPackets) > 0 {
 			funcName := fmt.Sprintf("Generate%sExpect", sanitizeName(pair.ExpectFile))
-			code.WriteString(cg.generatePacketFunction(funcName, pair.ExpectPackets, true))
+			code.WriteString(cg.GeneratePacketFunction(funcName, pair.ExpectPackets, true))
 			code.WriteString("\n")
 		}
 
@@ -84,8 +85,8 @@ func (cg *ScapyCodegenV2) GenerateFromIR(irJSON string) (string, error) {
 	return code.String(), nil
 }
 
-// generatePacketFunction generates a function that creates packets
-func (cg *ScapyCodegenV2) generatePacketFunction(funcName string, packets []IRPacketDef, isExpect bool) string {
+// GeneratePacketFunction generates a function that creates packets
+func (cg *ScapyCodegenV2) GeneratePacketFunction(funcName string, packets []IRPacketDef, isExpect bool) string {
 	var code strings.Builder
 
 	code.WriteString(fmt.Sprintf("// %s generates packets\n", funcName))
@@ -138,7 +139,7 @@ func (cg *ScapyCodegenV2) generatePacketFunction(funcName string, packets []IRPa
 func (cg *ScapyCodegenV2) generatePacketConstruction(pkt IRPacketDef, isExpect bool) string {
 	var code strings.Builder
 
-	code.WriteString("\t\tpkt, err := internal.NewPacket(\n")
+	code.WriteString("\t\tpkt, err := lib.NewPacket(\n")
 
 	for _, layer := range pkt.Layers {
 		// Skip VLAN if stripVLAN is enabled
@@ -149,16 +150,61 @@ func (cg *ScapyCodegenV2) generatePacketConstruction(pkt IRPacketDef, isExpect b
 		code.WriteString(cg.generateLayerCall(layer, isExpect))
 	}
 
+	// Add Raw layer for unknown/invalid next headers
+	if cg.needsRawLayer(pkt) {
+		code.WriteString("\t\t\tlib.Raw([]byte{}),\n")
+	}
+
 	code.WriteString("\t\t)\n")
 
 	return code.String()
+}
+
+// needsRawLayer checks if a packet needs a Raw layer added for unknown protocols
+func (cg *ScapyCodegenV2) needsRawLayer(pkt IRPacketDef) bool {
+	// Find the last layer (could be IPv6, IP, etc.)
+	if len(pkt.Layers) == 0 {
+		return false
+	}
+
+	lastLayer := pkt.Layers[len(pkt.Layers)-1]
+
+	// Check if it's IPv6 with unknown next header
+	if lastLayer.Type == "IPv6" {
+		if nh, ok := lastLayer.Params["nh"]; ok {
+			nhValue := int(formatValueToInt(nh))
+			// Known protocols that have layers: TCP(6), UDP(17), ICMP(1), ICMPv6(58)
+			// Unknown protocols like RUDP(27) need Raw layer
+			switch nhValue {
+			case 6, 17, 1, 58: // TCP, UDP, ICMP, ICMPv6
+				return false
+			default:
+				return true // Unknown protocol, needs Raw layer
+			}
+		}
+	}
+
+	// Check if it's IPv4 with unknown protocol
+	if lastLayer.Type == "IP" {
+		if proto, ok := lastLayer.Params["proto"]; ok {
+			protoValue := int(formatValueToInt(proto))
+			switch protoValue {
+			case 6, 17, 1: // TCP, UDP, ICMP
+				return false
+			default:
+				return true // Unknown protocol, needs Raw layer
+			}
+		}
+	}
+
+	return false
 }
 
 // generateLayerCall generates a single layer constructor call
 func (cg *ScapyCodegenV2) generateLayerCall(layer IRLayer, isExpect bool) string {
 	var code strings.Builder
 
-	code.WriteString(fmt.Sprintf("\t\t\tinternal.%s(\n", layer.Type))
+	code.WriteString(fmt.Sprintf("\t\t\tlib.%s(\n", layer.Type))
 
 	// Generate options based on layer type
 	switch layer.Type {
@@ -207,8 +253,8 @@ func (cg *ScapyCodegenV2) generateEtherOptions(layer IRLayer, isExpect bool) str
 		srcMAC, dstMAC = dstMAC, srcMAC
 	}
 
-	code.WriteString(fmt.Sprintf("\t\t\t\tinternal.EtherDst(%q),\n", dstMAC))
-	code.WriteString(fmt.Sprintf("\t\t\t\tinternal.EtherSrc(%q),\n", srcMAC))
+	code.WriteString(fmt.Sprintf("\t\t\t\tlib.EtherDst(%q),\n", dstMAC))
+	code.WriteString(fmt.Sprintf("\t\t\t\tlib.EtherSrc(%q),\n", srcMAC))
 
 	return code.String()
 }
@@ -218,7 +264,7 @@ func (cg *ScapyCodegenV2) generateDot1QOptions(layer IRLayer) string {
 	var code strings.Builder
 
 	if vlan, ok := layer.Params["vlan"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.VLANId(%v),\n", formatValue(vlan)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.VLANId(%v),\n", formatValue(vlan)))
 	}
 
 	return code.String()
@@ -230,23 +276,23 @@ func (cg *ScapyCodegenV2) generateIPOptions(layer IRLayer) string {
 
 	if src, ok := layer.Params["src"]; ok {
 		srcStr := stripCIDR(fmt.Sprintf("%v", src))
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPSrc(%q),\n", srcStr))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPSrc(%q),\n", srcStr))
 	}
 	if dst, ok := layer.Params["dst"]; ok {
 		dstStr := stripCIDR(fmt.Sprintf("%v", dst))
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPDst(%q),\n", dstStr))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPDst(%q),\n", dstStr))
 	}
 	if ttl, ok := layer.Params["ttl"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPTTL(%v),\n", formatValue(ttl)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPTTL(%v),\n", formatValue(ttl)))
 	}
 	if tos, ok := layer.Params["tos"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPTOS(%v),\n", formatValue(tos)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPTOS(%v),\n", formatValue(tos)))
 	}
 	if proto, ok := layer.Params["proto"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPProto(layers.IPProtocol(%v)),\n", formatValue(proto)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPProto(layers.IPProtocol(%v)),\n", formatValue(proto)))
 	}
 	if id, ok := layer.Params["id"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPId(%v),\n", formatValue(id)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPId(%v),\n", formatValue(id)))
 	}
 
 	return code.String()
@@ -258,23 +304,27 @@ func (cg *ScapyCodegenV2) generateIPv6Options(layer IRLayer) string {
 
 	if src, ok := layer.Params["src"]; ok {
 		srcStr := stripCIDR(fmt.Sprintf("%v", src))
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPv6Src(%q),\n", srcStr))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6Src(%q),\n", srcStr))
 	}
 	if dst, ok := layer.Params["dst"]; ok {
 		dstStr := stripCIDR(fmt.Sprintf("%v", dst))
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPv6Dst(%q),\n", dstStr))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6Dst(%q),\n", dstStr))
 	}
 	if hlim, ok := layer.Params["hlim"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPv6HopLimit(%v),\n", formatValue(hlim)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6HopLimit(%v),\n", formatValue(hlim)))
 	}
 	if tc, ok := layer.Params["tc"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPv6TrafficClass(%v),\n", formatValue(tc)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6TrafficClass(%v),\n", formatValue(tc)))
 	}
 	if fl, ok := layer.Params["fl"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPv6FlowLabel(%v),\n", formatValue(fl)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6FlowLabel(%v),\n", formatValue(fl)))
 	}
 	if nh, ok := layer.Params["nh"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPv6NextHeader(layers.IPProtocol(%v)),\n", formatValue(nh)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6NextHeader(layers.IPProtocol(%v)),\n", formatValue(nh)))
+	}
+	// Add plen if specified (for testing invalid packets with wrong payload length)
+	if plen, ok := layer.Params["plen"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\t// TODO: Set payload length to %v (not supported by lib yet)\n", formatValue(plen)))
 	}
 
 	return code.String()
@@ -285,19 +335,19 @@ func (cg *ScapyCodegenV2) generateTCPOptions(layer IRLayer) string {
 	var code strings.Builder
 
 	if sport, ok := layer.Params["sport"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.TCPSport(%v),\n", formatValue(sport)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.TCPSport(%v),\n", formatValue(sport)))
 	}
 	if dport, ok := layer.Params["dport"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.TCPDport(%v),\n", formatValue(dport)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.TCPDport(%v),\n", formatValue(dport)))
 	}
 	if flags, ok := layer.Params["flags"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.TCPFlags(%q),\n", flags))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.TCPFlags(%q),\n", flags))
 	}
 	if seq, ok := layer.Params["seq"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.TCPSeq(%v),\n", formatValue(seq)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.TCPSeq(%v),\n", formatValue(seq)))
 	}
 	if ack, ok := layer.Params["ack"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.TCPAck(%v),\n", formatValue(ack)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.TCPAck(%v),\n", formatValue(ack)))
 	}
 
 	return code.String()
@@ -308,10 +358,10 @@ func (cg *ScapyCodegenV2) generateUDPOptions(layer IRLayer) string {
 	var code strings.Builder
 
 	if sport, ok := layer.Params["sport"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.UDPSport(%v),\n", formatValue(sport)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.UDPSport(%v),\n", formatValue(sport)))
 	}
 	if dport, ok := layer.Params["dport"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.UDPDport(%v),\n", formatValue(dport)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.UDPDport(%v),\n", formatValue(dport)))
 	}
 
 	return code.String()
@@ -324,17 +374,17 @@ func (cg *ScapyCodegenV2) generateICMPOptions(layer IRLayer) string {
 	// Parse type field
 	if typeVal, ok := layer.Params["type"]; ok {
 		if codeVal, ok2 := layer.Params["code"]; ok2 {
-			code.WriteString(fmt.Sprintf("\t\t\t\tinternal.ICMPTypeCode(%v, %v),\n",
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPTypeCode(%v, %v),\n",
 				formatValue(typeVal), formatValue(codeVal)))
 		} else {
-			code.WriteString(fmt.Sprintf("\t\t\t\tinternal.ICMPTypeCode(%v, 0),\n", formatValue(typeVal)))
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPTypeCode(%v, 0),\n", formatValue(typeVal)))
 		}
 	}
 	if id, ok := layer.Params["id"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.ICMPId(%v),\n", formatValue(id)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPId(%v),\n", formatValue(id)))
 	}
 	if seq, ok := layer.Params["seq"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.ICMPSeq(%v),\n", formatValue(seq)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPSeq(%v),\n", formatValue(seq)))
 	}
 
 	return code.String()
@@ -345,13 +395,13 @@ func (cg *ScapyCodegenV2) generateICMPv6Options(layer IRLayer) string {
 	var code strings.Builder
 
 	if id, ok := layer.Params["id"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.ICMPv6Id(%v),\n", formatValue(id)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Id(%v),\n", formatValue(id)))
 	}
 	if seq, ok := layer.Params["seq"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.ICMPv6Seq(%v),\n", formatValue(seq)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Seq(%v),\n", formatValue(seq)))
 	}
 	if codeVal, ok := layer.Params["code"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.ICMPv6Code(%v),\n", formatValue(codeVal)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Code(%v),\n", formatValue(codeVal)))
 	}
 
 	return code.String()
@@ -362,14 +412,14 @@ func (cg *ScapyCodegenV2) generateIPv6FragmentOptions(layer IRLayer) string {
 	var code strings.Builder
 
 	if id, ok := layer.Params["id"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPv6FragId(%v),\n", formatValue(id)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6FragId(%v),\n", formatValue(id)))
 	}
 	if offset, ok := layer.Params["offset"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPv6FragOffset(%v),\n", formatValue(offset)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6FragOffset(%v),\n", formatValue(offset)))
 	}
 	if m, ok := layer.Params["m"]; ok {
 		mVal := formatValue(m) != "0"
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.IPv6FragM(%v),\n", mVal))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6FragM(%v),\n", mVal))
 	}
 
 	return code.String()
@@ -380,19 +430,19 @@ func (cg *ScapyCodegenV2) generateGREOptions(layer IRLayer) string {
 	var code strings.Builder
 
 	if chksum, ok := layer.Params["chksum_present"]; ok && formatValue(chksum) != "0" {
-		code.WriteString("\t\t\t\tinternal.GREChecksumPresent(true),\n")
+		code.WriteString("\t\t\t\tlib.GREChecksumPresent(true),\n")
 	}
 	if key, ok := layer.Params["key_present"]; ok && formatValue(key) != "0" {
-		code.WriteString("\t\t\t\tinternal.GREKeyPresent(true),\n")
+		code.WriteString("\t\t\t\tlib.GREKeyPresent(true),\n")
 	}
 	if seq, ok := layer.Params["seqnum_present"]; ok && formatValue(seq) != "0" {
-		code.WriteString("\t\t\t\tinternal.GRESeqPresent(true),\n")
+		code.WriteString("\t\t\t\tlib.GRESeqPresent(true),\n")
 	}
 	if ver, ok := layer.Params["version"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.GREVersion(%v),\n", formatValue(ver)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.GREVersion(%v),\n", formatValue(ver)))
 	}
 	if keyVal, ok := layer.Params["key"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tinternal.GREKey(%v),\n", formatValue(keyVal)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.GREKey(%v),\n", formatValue(keyVal)))
 	}
 
 	return code.String()
@@ -406,7 +456,7 @@ func (cg *ScapyCodegenV2) generateRawOptions(layer IRLayer) string {
 			if payloadType, ok := payload["type"].(string); ok && payloadType == "string_mult" {
 				content := payload["content"].(string)
 				count := payload["count"]
-				return fmt.Sprintf("\t\t\t\tinternal.Raw(internal.Payload(%q, %v)),\n", content, formatValue(count))
+				return fmt.Sprintf("\t\t\t\tlib.Raw(lib.Payload(%q, %v)),\n", content, formatValue(count))
 			}
 		}
 	}
@@ -414,7 +464,7 @@ func (cg *ScapyCodegenV2) generateRawOptions(layer IRLayer) string {
 	// Direct string payloads
 	for key, val := range layer.Params {
 		if strings.HasPrefix(key, "_arg") {
-			return fmt.Sprintf("\t\t\t\tinternal.Raw([]byte(%q)),\n", val)
+			return fmt.Sprintf("\t\t\t\tlib.Raw([]byte(%q)),\n", val)
 		}
 	}
 
@@ -466,7 +516,7 @@ func (cg *ScapyCodegenV2) generatePortRangePackets(pkt IRPacketDef, idx int, por
 	start := int(rangeVals[0].(float64))
 	end := int(rangeVals[1].(float64))
 
-	code.WriteString(fmt.Sprintf("\tfor _, port := range internal.PortRange(%d, %d) {\n", start, end))
+	code.WriteString(fmt.Sprintf("\tfor _, port := range lib.PortRange(%d, %d) {\n", start, end))
 
 	// Temporarily set the port value
 	originalValue := portLayer.Params[field]
@@ -493,7 +543,7 @@ func (cg *ScapyCodegenV2) generateParamArrayPackets(pkt IRPacketDef, idx int, pa
 	values := arrayInfo["values"].([]interface{})
 
 	code.WriteString(fmt.Sprintf("\t// Generate packets with different %s values\n", field))
-	code.WriteString(fmt.Sprintf("\tfor _, val := range []int{"))
+	code.WriteString("\tfor _, val := range []int{")
 
 	// Write all values
 	for i, val := range values {
@@ -542,7 +592,7 @@ func (cg *ScapyCodegenV2) generateFragmentedPacket(pkt IRPacketDef, idx int, fra
 	code.WriteString("\t\t// Base packet for fragmentation\n")
 	code.WriteString(cg.generatePacketConstruction(pkt, false))
 	code.WriteString("\t\trequire.NoError(t, err)\n")
-	code.WriteString(fmt.Sprintf("\t\tfrags, err := internal.%s(pkt, %d)\n",
+	code.WriteString(fmt.Sprintf("\t\tfrags, err := lib.%s(pkt, %d)\n",
 		strings.Title(fragType), fragSize))
 	code.WriteString("\t\trequire.NoError(t, err)\n")
 
@@ -568,6 +618,24 @@ func stripCIDR(s string) string {
 		return s[:idx]
 	}
 	return s
+}
+
+// formatValueToInt converts a value to int for protocol checking
+func formatValueToInt(val interface{}) int64 {
+	switch v := val.(type) {
+	case float64:
+		return int64(v)
+	case int:
+		return int64(v)
+	case string:
+		// Try to parse as int
+		if i, err := strconv.ParseInt(v, 0, 64); err == nil {
+			return i
+		}
+		return 0
+	default:
+		return 0
+	}
 }
 
 // formatValue formats a value for Go code
