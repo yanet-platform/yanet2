@@ -4,6 +4,17 @@ package balancer
 
 //#cgo CFLAGS: -I../../../
 //#cgo LDFLAGS: -L../../../build/modules/balancer1/api -lbalancer_cp
+//#cgo CFLAGS: -I../
+//#cgo CFLAGS: -I../../../../
+//#cgo CFLAGS: -I../../../../build
+//#cgo CFLAGS: -I../../../../../ -I../../../../../../lib -I../../../../../common
+//#cgo LDFLAGS: -L../../../../build/filter -lfilter
+//#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
+/*
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+*/
 //
 //#include "modules/balancer1/api/vs.h"
 //#include "modules/balancer1/api/module.h"

@@ -1,4 +1,5 @@
 #include "vs.h"
+#include "common/memory_address.h"
 #include "common/network.h"
 #include "module.h"
 
@@ -89,7 +90,7 @@ vs_v4_table_init(
 			holder->vs_ports.from = vs_config->port;
 			holder->vs_ports.to = vs_config->port;
 		}
-		rule->action = j;
+		rule->action = i;
 		rule->net4.dst_count = 1;
 		rule->net4.dsts = &holder->vs_addr;
 		rule->transport.proto =
@@ -171,14 +172,14 @@ vs_v6_table_init(
 		struct filter_rule *rule = &rules[j];
 		memcpy(holder->vs_addr.addr, vs_config, NET4_LEN);
 		memset(holder->vs_addr.mask, 0xFF, NET4_LEN);
-		if (vs_config->flags & BALANCER_VS_IPV6_FLAG) {
+		if (vs_config->flags & BALANCER_VS_PURE_L3_FLAG) {
 			holder->vs_ports.from = 0;
 			holder->vs_ports.to = -1;
 		} else {
 			holder->vs_ports.from = vs_config->port;
 			holder->vs_ports.to = vs_config->port;
 		}
-		rule->action = j;
+		rule->action = i;
 		rule->net6.dst_count = 1;
 		rule->net6.dsts = &holder->vs_addr;
 		rule->transport.proto =
@@ -230,21 +231,23 @@ balancer_vs_init(
 	config->real_count = real_count;
 	config->vs_count = vs_count;
 
-	config->vs = memory_balloc(
+	struct virtual_service *config_vs = memory_balloc(
 		&config->cp_module.memory_context,
 		config->vs_count * sizeof(struct virtual_service)
 	);
-	if (config->vs == NULL) {
+	if (config_vs == NULL) {
 		return -1;
 	}
+	SET_OFFSET_OF(&config->vs, config_vs);
 
-	config->reals = memory_balloc(
+	struct real *config_reals =  memory_balloc(
 		&config->cp_module.memory_context,
 		config->real_count * sizeof(struct real)
 	);
-	if (config->reals == NULL) {
+	if (config_reals == NULL) {
 		goto free_vs;
 	}
+	SET_OFFSET_OF(&config->reals, config_reals);
 
 	size_t real_idx = 0;
 
@@ -253,7 +256,7 @@ balancer_vs_init(
 	     ++initialized_vs_count) {
 		struct balancer_vs_config *vs_config =
 			vs_configs[initialized_vs_count];
-		struct virtual_service *vs = &config->vs[initialized_vs_count];
+		struct virtual_service *vs = &config_vs[initialized_vs_count];
 		vs->flags = vs_config->flags;
 		memcpy(vs->address, vs_config->address, NET6_LEN);
 		vs->port = vs_config->port;
@@ -289,7 +292,7 @@ balancer_vs_init(
 				goto free_initalized_vs;
 			}
 		}
-		memcpy(config->reals,
+		memcpy(config_reals,
 		       vs_config->reals,
 		       sizeof(struct real) * vs->real_count);
 		real_idx += vs->real_count;
@@ -312,7 +315,7 @@ balancer_vs_init(
 
 free_initalized_vs:
 	for (size_t i = 0; i < initialized_vs_count; ++i) {
-		struct virtual_service *vs = &config->vs[initialized_vs_count];
+		struct virtual_service *vs = &config_vs[initialized_vs_count];
 		ring_free(&vs->real_ring);
 		lpm_free(&vs->src_filter);
 	}
@@ -320,7 +323,7 @@ free_initalized_vs:
 free_vs:
 	memory_bfree(
 		&config->cp_module.memory_context,
-		config->vs,
+		config_vs,
 		config->vs_count * sizeof(struct virtual_service)
 	);
 
@@ -376,9 +379,7 @@ balancer_vs_config_create(
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-balancer_vs_config_free(
-	struct balancer_vs_config *vs_config
-) {
+balancer_vs_config_free(struct balancer_vs_config *vs_config) {
 	memory_bfree(
 		vs_config->mctx,
 		vs_config,
@@ -403,7 +404,8 @@ balancer_vs_config_set_real(
 	struct real *real = &vs_config->reals[index];
 	real->flags = (real_flags_t)flags;
 	real->weight = weight;
-	size_t len = (real->flags & BALANCER_REAL_IPV6_FLAG) ? NET6_LEN : NET4_LEN;
+	size_t len =
+		(real->flags & BALANCER_REAL_IPV6_FLAG) ? NET6_LEN : NET4_LEN;
 	memcpy(real->dst_addr, dst_addr, len);
 	memcpy(real->src_addr, src_addr, len);
 	memcpy(real->src_mask, src_mask, len);
@@ -417,7 +419,8 @@ balancer_vs_config_set_allowed_src_range(
 	uint8_t *to
 ) {
 	struct addr_range *addr_range = &vs_config->allowed_src[index];
-	size_t len = (vs_config->flags & BALANCER_VS_IPV6_FLAG) ? NET6_LEN : NET4_LEN;
+	size_t len = (vs_config->flags & BALANCER_VS_IPV6_FLAG) ? NET6_LEN
+								: NET4_LEN;
 	memcpy(addr_range->start_addr, from, len);
 	memcpy(addr_range->end_addr, to, len);
 }

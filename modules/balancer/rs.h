@@ -16,9 +16,9 @@
 #include <sched.h>
 #include <stdint.h>
 
+#include "clock.h"
 #include "mss.h"
 #include "session.h"
-#include "clock.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 

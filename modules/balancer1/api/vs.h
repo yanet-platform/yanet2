@@ -30,10 +30,7 @@ balancer_vs_config_create(
 
 // Allows to free virtual service config
 void
-balancer_vs_config_free(
-	struct balancer_vs_config *vs_config
-);
-
+balancer_vs_config_free(struct balancer_vs_config *vs_config);
 
 // Allows to setup one real of the virtual service
 void

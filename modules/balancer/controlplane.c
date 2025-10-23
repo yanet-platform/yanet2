@@ -12,9 +12,9 @@
 #include "rs_def.h"
 #include "rule.h"
 #include "session.h"
+#include "state.h"
 #include "vs.h"
 #include "vs_def.h"
-#include "state.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 

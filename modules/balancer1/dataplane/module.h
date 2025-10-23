@@ -16,10 +16,10 @@ struct balancer_module_config {
 	// relative pointer to the table of the established sessions
 	struct balancer_session_table *session_table;
 
-    // timeouts to sessions with different kinds
+	// timeouts to sessions with different kinds
 	struct sessions_timeouts timeouts;
 
-    // mapping: (address,port,proto) -> vs_id
+	// mapping: (address,port,proto) -> vs_id
 	struct filter vs_v4_table;
 	struct filter vs_v6_table;
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/ttlmap.h"
+#include "meta.h"
 
 #include <stdint.h>
 
@@ -24,7 +25,7 @@ struct session_state {
 	uint32_t timeout;
 };
 
-typedef ttlmap_lock_t balancer_session_lock_t;
+typedef ttlmap_lock_t session_lock_t;
 
 struct sessions_timeouts {
 	uint32_t tcp_syn_ack_timeout;
@@ -34,3 +35,48 @@ struct sessions_timeouts {
 	uint32_t udp_timeout;
 	uint32_t default_timeout;
 };
+
+static inline void
+fill_session_id(
+	struct session_id *id,
+	struct packet_metadata *data,
+	bool balancer_pure_l3_flag
+) {
+	id->transport_proto = data->transport_proto;
+	id->network_proto = data->network_proto;
+	memcpy(id->ip_source, data->src_addr, 16);
+	memcpy(id->ip_destination, data->dst_addr, 16);
+	if (balancer_pure_l3_flag) {
+		id->port_source = 0;
+		id->port_destination = 0;
+	} else {
+		id->port_source = data->src_port;
+		id->port_destination = data->dst_port;
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+static inline uint32_t
+session_timeout(
+	struct sessions_timeouts *timeouts, struct packet_metadata *metadata
+) {
+	if (metadata->transport_proto == IPPROTO_UDP) {
+		return timeouts->udp_timeout;
+	}
+	if (metadata->transport_proto != IPPROTO_TCP) {
+		return timeouts->default_timeout;
+	}
+
+	if ((metadata->tcp_flags & RTE_TCP_SYN_FLAG) == RTE_TCP_SYN_FLAG) {
+		if ((metadata->tcp_flags & RTE_TCP_ACK_FLAG) ==
+		    RTE_TCP_ACK_FLAG) {
+			return timeouts->tcp_syn_ack_timeout;
+		}
+		return timeouts->tcp_syn_timeout;
+	}
+	if (metadata->tcp_flags & RTE_TCP_FIN_FLAG) {
+		return timeouts->tcp_fin_timeout;
+	}
+	return timeouts->tcp_timeout;
+}

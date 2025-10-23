@@ -22,9 +22,10 @@ type BalancerConfig struct {
 }
 
 type BalancerInstance struct {
-	Config       *BalancerConfig
-	SessionTable SessionTable
-	ModuleConfig ModuleConfig
+	agent        *ffi.Agent
+	config       *BalancerConfig
+	sessionTable SessionTable
+	moduleConfig ModuleConfig
 }
 
 func NewBalancerInstance(agent *ffi.Agent, config *BalancerConfig, sessionTableSize uint64) (*BalancerInstance, error) {
@@ -36,29 +37,28 @@ func NewBalancerInstance(agent *ffi.Agent, config *BalancerConfig, sessionTableS
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cp module: %w", err)
 	}
-	if err := moduleConfig.InsertIntoRegistry(agent); err != nil {
-		return nil, fmt.Errorf("failed to insert balancer module into modules registry: %w", err)
-	}
 	return &BalancerInstance{
-		Config:       config,
-		SessionTable: sessionTable,
-		ModuleConfig: moduleConfig,
+		agent:        agent,
+		config:       config,
+		sessionTable: sessionTable,
+		moduleConfig: moduleConfig,
 	}, nil
 }
 
-func (balancer *BalancerInstance) UpdateConfig(agent *ffi.Agent, config *BalancerConfig) error {
-	moduleConfig, err := NewModuleconfig(agent, &balancer.SessionTable, config)
+func (balancer *BalancerInstance) UpdateConfig(config *BalancerConfig) error {
+	moduleConfig, err := NewModuleconfig(balancer.agent, &balancer.sessionTable, config)
 	if err != nil {
 		return fmt.Errorf("failed to create cp module: %w", err)
 	}
-	if err := moduleConfig.InsertIntoRegistry(agent); err != nil {
-		return fmt.Errorf("failed to insert balancer module into modules registry: %w", err)
-	}
-	balancer.ModuleConfig = moduleConfig
+	balancer.moduleConfig = moduleConfig
 	return nil
 }
 
+func (balancer *BalancerInstance) UpdateModules(agent *ffi.Agent, config *BalancerConfig) error {
+	return balancer.moduleConfig.InsertIntoRegistry(balancer.agent)
+}
+
 func (balancer *BalancerInstance) Free() {
-	FreeSessionTable(&balancer.SessionTable)
-	FreeModuleConfig(&balancer.ModuleConfig)
+	FreeSessionTable(&balancer.sessionTable)
+	FreeModuleConfig(&balancer.moduleConfig)
 }

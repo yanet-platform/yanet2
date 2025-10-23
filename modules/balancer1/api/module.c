@@ -1,12 +1,12 @@
 #include "module.h"
-#include "../dataplane/module.h"
 
 #include "common/memory.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 
 #include "../dataplane/real.h"
-#include "../dataplane/vs.h"
+#include "../dataplane/module.h"
+
 #include "modules/balancer1/dataplane/session.h"
 
 ////////////////////////////////////////////////////////////////////////////////

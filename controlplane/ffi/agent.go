@@ -34,6 +34,12 @@ type Agent struct {
 	ptr *C.struct_agent
 }
 
+func NewAgent(ptr unsafe.Pointer) Agent {
+	return Agent{
+		ptr: (*C.struct_agent)(ptr),
+	}
+}
+
 func (m *Agent) Close() error {
 	_, err := C.agent_detach(m.ptr)
 	return err
