@@ -75,18 +75,12 @@ get_or_create_session(
 		session_table_current_gen(session_table);
 
 	int res = TTLMAP_GET(
-		&cur->map,
-		session_id,
-		session_state,
-		lock,
-		now,
-		timeout
+		&cur->map, session_id, session_state, lock, now, timeout
 	);
 	int status = TTLMAP_STATUS(res);
 	uint32_t meta = TTLMAP_META(res);
 
-	struct worker_info *worker_info =
-		&cur->worker_info[worker_idx];
+	struct worker_info *worker_info = &cur->worker_info[worker_idx];
 	uint32_t new_density_factor =
 		RTE_MAX(meta, worker_info->density_factor);
 	atomic_store_explicit(
@@ -133,10 +127,7 @@ get_or_create_session(
 			struct session_table_gen *prev =
 				session_table_previous_gen(session_table);
 			status = TTLMAP_LOOKUP(
-				&prev->map,
-				session_id,
-				*session_state,
-				now
+				&prev->map, session_id, *session_state, now
 			);
 			if (status == TTLMAP_FOUND) {
 				return SESSION_FOUND;

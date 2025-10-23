@@ -13,4 +13,3 @@ mock_free(struct mock *mock);
 
 struct agent *
 mock_create_agent(struct mock *mock, size_t memory);
-

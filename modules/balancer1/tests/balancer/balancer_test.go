@@ -4,18 +4,21 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer1/controlplane"
+	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func TestCreateBalancer(t *testing.T) {
+func TestBalancerBasic(t *testing.T) {
 	mock, err := NewMock(1 << 21)
 	require.Nil(t, err, "failed to create mock: %s", err)
 	defer FreeMock(&mock)
 	agent, err := mock.CreateAgent(1 << 20)
 	require.Nil(t, err, "failed to create agent: %s", err)
+
 	config := balancer.BalancerConfig{
 		Services: []balancer.VirtualService{
 			{
@@ -45,5 +48,22 @@ func TestCreateBalancer(t *testing.T) {
 	}
 	b, err := balancer.NewBalancerInstance(&agent, &config, 100)
 	require.Nil(t, err, "failed to create new balancer instance")
-	b.Free()
+	defer b.Free()
+
+	inLayers := MakeTCPPacket("10.12.15.1", 1005, "192.166.13.22", 1000, &layers.TCP{SYN: true})
+	originPacket := common.LayersToPacket(t, inLayers...)
+	t.Log("Origin packet", originPacket)
+
+	expectedPacket := Encap(t, inLayers, "3.12.3.1", "1.1.1.1")
+	t.Log("Expected packet", expectedPacket)
+
+	result, err := HandlePackets(b, originPacket)
+	require.Nil(t, err, "failed to handle packet1: %s", err)
+
+	require.True(t, len(result.Output) == 1, "failed to handle packet #1")
+	resultPacket := common.ParseEtherPacket(result.Output[0])
+	t.Log("Result packet", resultPacket)
+
+	// Ensure packets equal
+	CheckPacketsEqual(t, resultPacket, expectedPacket)
 }

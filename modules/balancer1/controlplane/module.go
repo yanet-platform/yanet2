@@ -62,3 +62,7 @@ func (balancer *BalancerInstance) Free() {
 	FreeSessionTable(&balancer.sessionTable)
 	FreeModuleConfig(&balancer.moduleConfig)
 }
+
+func (balancer *BalancerInstance) ModuleConfig() *ModuleConfig {
+	return &balancer.moduleConfig
+}

@@ -4,8 +4,8 @@
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 
-#include "../dataplane/real.h"
 #include "../dataplane/module.h"
+#include "../dataplane/real.h"
 
 #include "modules/balancer1/dataplane/session.h"
 

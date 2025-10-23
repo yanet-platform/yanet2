@@ -2,6 +2,8 @@ dependencies = [
   lib_common_dep,
   lib_config_cp_dep,
   lib_agent_cp_dep,
+  lib_balancer_cp_dep,
+  lib_balancer_dp_dep,
 ]
 
 includes = include_directories('../../')

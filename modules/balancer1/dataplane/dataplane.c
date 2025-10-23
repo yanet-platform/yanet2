@@ -3,14 +3,14 @@
 #include <rte_tcp.h>
 #include <rte_udp.h>
 
+#include "dataplane.h"
 #include "dataplane/config/zone.h"
 #include "meta.h"
 #include "modules/balancer1/dataplane/module.h"
 #include "real.h"
-#include "vs.h"
-#include "dataplane.h"
-#include "tunnel.h"
 #include "select.h"
+#include "tunnel.h"
+#include "vs.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -37,8 +37,7 @@ balancer_handle_packets(
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		// 1. Lookup service packet is dirrected to
 
-		struct virtual_service *vs =
-			vs_lookup(config, packet);
+		struct virtual_service *vs = vs_lookup(config, packet);
 		if (vs == NULL) {
 			packet_front_drop(packet_front, packet);
 			continue;
@@ -56,9 +55,7 @@ balancer_handle_packets(
 
 		// 3. Select real service packet should be forwarded
 
-		struct real *rs = select_real(
-			config, worker_idx, vs, &meta
-		);
+		struct real *rs = select_real(config, worker_idx, vs, &meta);
 		if (rs == NULL) {
 			// real lookup failed
 			packet_front_drop(packet_front, packet);

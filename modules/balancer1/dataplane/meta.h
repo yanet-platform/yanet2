@@ -29,9 +29,7 @@ struct packet_metadata {
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline int
-fill_packet_metadata(
-	struct packet *packet, struct packet_metadata *metadata
-) {
+fill_packet_metadata(struct packet *packet, struct packet_metadata *metadata) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	if (packet->network_header.type ==

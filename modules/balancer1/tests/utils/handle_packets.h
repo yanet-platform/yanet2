@@ -6,7 +6,4 @@ struct cp_module;
 struct packet_front;
 
 void
-handle_packets(
-    struct cp_module *cp_module, 
-    struct packet_front *packet_front
-);
+handle_packets(struct cp_module *cp_module, struct packet_front *packet_front);

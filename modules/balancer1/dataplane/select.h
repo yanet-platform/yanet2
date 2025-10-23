@@ -11,10 +11,10 @@
 #include <sched.h>
 #include <stdint.h>
 
+#include "real.h"
 #include "session.h"
 #include "session_table.h"
 #include "vs.h"
-#include "real.h"
 
 #include "../api/vs.h"
 
@@ -50,8 +50,7 @@ select_real(
 	}
 
 	uint32_t now = time(NULL);
-	uint32_t timeout =
-		session_timeout(&config->timeouts, metadata);
+	uint32_t timeout = session_timeout(&config->timeouts, metadata);
 
 	struct session_id session_id;
 	fill_session_id(
@@ -75,11 +74,11 @@ select_real(
 
 	if (get_session_result == SESSION_FOUND) {
 		struct real *real = &reals[session_state->real_id];
-        assert(real->weight > 0);
-        session_state->timeout = timeout;
-        session_state->last_packet_timestamp = now;
-        session_unlock(session_lock);
-        return real;
+		assert(real->weight > 0);
+		session_state->timeout = timeout;
+		session_state->last_packet_timestamp = now;
+		session_unlock(session_lock);
+		return real;
 	}
 	assert(session_state != nullptr);
 	if (!reschedule_real(metadata)) {

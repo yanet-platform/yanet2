@@ -16,5 +16,5 @@ balancer_handle_packets(
 
 void
 handle_packets(struct cp_module *cp_module, struct packet_front *packet_front) {
-    balancer_handle_packets(NULL, 0, cp_module, NULL, packet_front);
+	balancer_handle_packets(NULL, 0, cp_module, NULL, packet_front);
 }

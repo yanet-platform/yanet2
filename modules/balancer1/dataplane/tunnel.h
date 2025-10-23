@@ -1,20 +1,16 @@
 #pragma once
 
-#include "mss.h"
 #include "lib/dataplane/packet/encap.h"
-#include "vs.h"
+#include "mss.h"
 #include "real.h"
+#include "vs.h"
 
 #include "../api/vs.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline int
-tunnel_packet(
-	vs_flags_t vs_flags,
-	struct real *real,
-	struct packet *packet
-) {
+tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 	if ((vs_flags & BALANCER_VS_FIX_MSS_FLAG) &&
 	    (vs_flags & BALANCER_VS_IPV6_FLAG)) {
 		fix_mss_ipv6(packet);

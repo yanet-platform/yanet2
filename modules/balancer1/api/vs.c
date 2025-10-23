@@ -14,6 +14,7 @@
 
 #include "filter/filter.h"
 #include "filter/rule.h"
+#include "ring.h"
 
 #include <string.h>
 
@@ -81,22 +82,25 @@ vs_v4_table_init(
 		}
 		struct rule_holder *holder = &holders[j];
 		struct filter_rule *rule = &rules[j];
-		memcpy(holder->vs_addr.addr, vs_config, NET4_LEN);
-		memset(holder->vs_addr.mask, 0xFF, NET4_LEN);
-		if (vs_config->flags & BALANCER_VS_IPV6_FLAG) {
-			holder->vs_ports.from = 0;
-			holder->vs_ports.to = -1;
-		} else {
-			holder->vs_ports.from = vs_config->port;
-			holder->vs_ports.to = vs_config->port;
-		}
-		rule->action = i;
 		rule->net4.dst_count = 1;
 		rule->net4.dsts = &holder->vs_addr;
-		rule->transport.proto =
-			(struct filter_proto){.proto = vs_config->proto, 0, 0};
+		memcpy(rule->net4.dsts[0].addr, vs_config->address, NET4_LEN);
+		memset(rule->net4.dsts[0].mask, 0xFF, NET4_LEN);
 		rule->transport.dst_count = 1;
 		rule->transport.dsts = &holder->vs_ports;
+
+		if (vs_config->flags & BALANCER_VS_PURE_L3_FLAG) {
+			rule->transport.dsts[0] =
+				(struct filter_port_range){0, 0xFFFF};
+		} else {
+			rule->transport.dsts[0] = (struct filter_port_range
+			){vs_config->port, vs_config->port};
+		}
+
+		rule->transport.proto =
+			(struct filter_proto){vs_config->proto, 0, 0};
+
+		rule->action = i;
 		++j;
 	}
 
@@ -240,7 +244,7 @@ balancer_vs_init(
 	}
 	SET_OFFSET_OF(&config->vs, config_vs);
 
-	struct real *config_reals =  memory_balloc(
+	struct real *config_reals = memory_balloc(
 		&config->cp_module.memory_context,
 		config->real_count * sizeof(struct real)
 	);
@@ -270,6 +274,17 @@ balancer_vs_init(
 		);
 		if (res < 0) {
 			goto free_initalized_vs;
+		}
+		for (size_t real = 0; real < vs->real_count; ++real) {
+			config_reals[real_idx + real] = vs_config->reals[real];
+			res = ring_change_weight(
+				&vs->real_ring,
+				real,
+				vs_config->reals[real].weight
+			);
+			if (res < 0) {
+				goto free_initalized_vs;
+			}
 		}
 		res = lpm_init(
 			&vs->src_filter, &config->cp_module.memory_context
@@ -342,6 +357,11 @@ balancer_vs_config_create(
 	size_t real_count,
 	size_t allowed_src_count
 ) {
+	if ((flags & BALANCER_VS_PURE_L3_FLAG) || port == 0) {
+		port = 0;
+		flags |= BALANCER_VS_PURE_L3_FLAG;
+	}
+
 	uint8_t *memory = memory_balloc(
 		&agent->memory_context,
 		sizeof(struct balancer_vs_config) +
@@ -409,6 +429,9 @@ balancer_vs_config_set_real(
 	memcpy(real->dst_addr, dst_addr, len);
 	memcpy(real->src_addr, src_addr, len);
 	memcpy(real->src_mask, src_mask, len);
+	for (size_t i = 0; i < len; ++i) {
+		real->src_addr[i] &= real->src_mask[i];
+	}
 }
 
 void
