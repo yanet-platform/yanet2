@@ -6,14 +6,6 @@
 
 typedef uint8_t vs_flags_t;
 
-#define VS_PURE_L3_FLAG ((vs_flags_t)(1u << 0))
-#define VS_IPV6_FLAG ((vs_flags_t)(1u << 1))
-
-#define VS_FIX_MSS_FLAG ((vs_flags_t)(1u << 2))
-#define VS_GRE_FLAG ((vs_flags_t)(1u << 3))
-
-#define VS_OPS_FLAG ((vs_flags_t)(1u << 4))
-
 ////////////////////////////////////////////////////////////////////////////////
 
 struct virtual_service {

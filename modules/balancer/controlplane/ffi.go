@@ -55,7 +55,7 @@ func NewModuleConfig(agent *ffi.Agent, persistentState *PersistentStatePtr, name
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.balancer_module_config_init((*C.struct_agent)(agent.AsRawPtr()), (*C.struct_balancer_state)(persistentState.Inner), cName)
+	ptr, err := C.balancer_module_config_create((*C.struct_agent)(agent.AsRawPtr()), (*C.struct_balancer_state)(persistentState.Inner), cName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize balancer module config: %w", err)
 	}

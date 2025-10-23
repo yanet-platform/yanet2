@@ -8,6 +8,7 @@
 #include "rs_def.h"
 #include "rte_tcp.h"
 #include "session.h"
+#include "state.h"
 #include "vs_def.h"
 #include <assert.h>
 #include <filter/filter.h>
@@ -16,6 +17,8 @@
 #include <stdint.h>
 
 #include "mss.h"
+#include "session.h"
+#include "clock.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 

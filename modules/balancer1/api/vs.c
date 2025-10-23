@@ -25,6 +25,8 @@ struct addr_range {
 
 // Represents config of the virtual service
 struct balancer_vs_config {
+	// FIXME: relative pointer?
+	struct memory_context *mctx;
 	vs_flags_t flags;
 	uint8_t address[16];
 	uint16_t port;
@@ -40,13 +42,13 @@ struct balancer_vs_config {
 static int
 vs_v4_table_init(
 	struct balancer_module_config *config,
-	struct balancer_vs_config *vs_configs,
+	struct balancer_vs_config **vs_configs,
 	size_t count
 ) {
 	size_t ipv4_count = 0;
 	for (size_t i = 0; i < count; ++i) {
-		struct balancer_vs_config *vs_config = &vs_configs[i];
-		if (!(vs_config->flags & VS_IPV6_FLAG)) {
+		struct balancer_vs_config *vs_config = vs_configs[i];
+		if (!(vs_config->flags & BALANCER_VS_IPV6_FLAG)) {
 			++ipv4_count;
 		}
 	}
@@ -72,15 +74,15 @@ vs_v4_table_init(
 		goto free_holders;
 	}
 	for (size_t i = 0, j = 0; i < count; ++i) {
-		struct balancer_vs_config *vs_config = &vs_configs[i];
-		if (vs_config->flags & VS_IPV6_FLAG) {
+		struct balancer_vs_config *vs_config = vs_configs[i];
+		if (vs_config->flags & BALANCER_VS_IPV6_FLAG) {
 			continue;
 		}
 		struct rule_holder *holder = &holders[j];
 		struct filter_rule *rule = &rules[j];
 		memcpy(holder->vs_addr.addr, vs_config, NET4_LEN);
 		memset(holder->vs_addr.mask, 0xFF, NET4_LEN);
-		if (vs_config->flags & VS_OPS_FLAG) {
+		if (vs_config->flags & BALANCER_VS_IPV6_FLAG) {
 			holder->vs_ports.from = 0;
 			holder->vs_ports.to = -1;
 		} else {
@@ -129,13 +131,13 @@ free_holders:
 static int
 vs_v6_table_init(
 	struct balancer_module_config *config,
-	struct balancer_vs_config *vs_configs,
+	struct balancer_vs_config **vs_configs,
 	size_t count
 ) {
 	size_t ipv6_count = 0;
 	for (size_t i = 0; i < count; ++i) {
-		struct balancer_vs_config *vs_config = &vs_configs[i];
-		if (vs_config->flags & VS_IPV6_FLAG) {
+		struct balancer_vs_config *vs_config = vs_configs[i];
+		if (vs_config->flags & BALANCER_VS_IPV6_FLAG) {
 			++ipv6_count;
 		}
 	}
@@ -161,15 +163,15 @@ vs_v6_table_init(
 		goto free_holders;
 	}
 	for (size_t i = 0, j = 0; i < count; ++i) {
-		struct balancer_vs_config *vs_config = &vs_configs[i];
-		if (!(vs_config->flags & VS_IPV6_FLAG)) {
+		struct balancer_vs_config *vs_config = vs_configs[i];
+		if (!(vs_config->flags & BALANCER_VS_IPV6_FLAG)) {
 			continue;
 		}
 		struct rule_holder *holder = &holders[j];
 		struct filter_rule *rule = &rules[j];
 		memcpy(holder->vs_addr.addr, vs_config, NET4_LEN);
 		memset(holder->vs_addr.mask, 0xFF, NET4_LEN);
-		if (vs_config->flags & VS_OPS_FLAG) {
+		if (vs_config->flags & BALANCER_VS_IPV6_FLAG) {
 			holder->vs_ports.from = 0;
 			holder->vs_ports.to = -1;
 		} else {
@@ -219,11 +221,11 @@ int
 balancer_vs_init(
 	struct balancer_module_config *config,
 	size_t vs_count,
-	struct balancer_vs_config *vs_configs
+	struct balancer_vs_config **vs_configs
 ) {
 	size_t real_count = 0;
 	for (size_t i = 0; i < vs_count; ++i) {
-		real_count += vs_configs[i].real_count;
+		real_count += vs_configs[i]->real_count;
 	}
 	config->real_count = real_count;
 	config->vs_count = vs_count;
@@ -250,7 +252,7 @@ balancer_vs_init(
 	for (initialized_vs_count = 0; initialized_vs_count < vs_count;
 	     ++initialized_vs_count) {
 		struct balancer_vs_config *vs_config =
-			&vs_configs[initialized_vs_count];
+			vs_configs[initialized_vs_count];
 		struct virtual_service *vs = &config->vs[initialized_vs_count];
 		vs->flags = vs_config->flags;
 		memcpy(vs->address, vs_config->address, NET6_LEN);
@@ -276,7 +278,7 @@ balancer_vs_init(
 		for (size_t i = 0; i < vs_config->allowed_src_count; ++i) {
 			res = lpm_insert(
 				&vs->src_filter,
-				(vs->flags & VS_IPV6_FLAG) ? 16 : 4,
+				(vs->flags & BALANCER_VS_IPV6_FLAG) ? 16 : 4,
 				vs_config->allowed_src[i].start_addr,
 				vs_config->allowed_src[i].end_addr,
 				1
@@ -329,7 +331,7 @@ free_vs:
 
 struct balancer_vs_config *
 balancer_vs_config_create(
-    struct agent *agent,
+	struct agent *agent,
 	uint64_t flags,
 	uint8_t *ip,
 	uint16_t port,
@@ -337,34 +339,53 @@ balancer_vs_config_create(
 	size_t real_count,
 	size_t allowed_src_count
 ) {
-    uint8_t *memory = memory_balloc(&agent->memory_context, sizeof(struct balancer_vs_config) + sizeof(struct real) * real_count + sizeof(struct addr_range) * allowed_src_count);
-    if (memory == NULL) {
-        return NULL;
-    }
-    struct balancer_vs_config *vs_config = (struct balancer_vs_config *)memory;
-    vs_config->real_count = real_count;
-    vs_config->allowed_src_count = allowed_src_count;
-    vs_config->allowed_src = (struct addr_range *)(memory + sizeof(struct balancer_vs_config) + sizeof(struct real) * real_count);
-    vs_config->flags = (vs_flags_t)flags;
-    if (vs_config->flags & VS_IPV6_FLAG) {
-        memcpy(vs_config->address, ip, NET6_LEN);
-    } else {
-        memcpy(vs_config->address, ip, NET4_LEN);
-    }
-    if (vs_config->flags & VS_PURE_L3_FLAG) {
-        vs_config->port = 0;
-    } else {
-        vs_config->port = port;
-    }
-    vs_config->proto = proto;
-    return vs_config;
+	uint8_t *memory = memory_balloc(
+		&agent->memory_context,
+		sizeof(struct balancer_vs_config) +
+			sizeof(struct real) * real_count +
+			sizeof(struct addr_range) * allowed_src_count
+	);
+	if (memory == NULL) {
+		return NULL;
+	}
+	struct balancer_vs_config *vs_config =
+		(struct balancer_vs_config *)memory;
+	// FIXME: relative pointer?
+	vs_config->mctx = &agent->memory_context;
+	vs_config->real_count = real_count;
+	vs_config->allowed_src_count = allowed_src_count;
+	vs_config->allowed_src =
+		(struct addr_range *)(memory +
+				      sizeof(struct balancer_vs_config) +
+				      sizeof(struct real) * real_count);
+	vs_config->flags = (vs_flags_t)flags;
+	if (vs_config->flags & BALANCER_VS_IPV6_FLAG) {
+		memcpy(vs_config->address, ip, NET6_LEN);
+	} else {
+		memcpy(vs_config->address, ip, NET4_LEN);
+	}
+	if (vs_config->flags & BALANCER_VS_PURE_L3_FLAG) {
+		vs_config->port = 0;
+	} else {
+		vs_config->port = port;
+	}
+	vs_config->proto = proto;
+	return vs_config;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-balancer_vs_config_free(struct agent *agent, struct balancer_vs_config *vs_config) {
-    memory_bfree(&agent->memory_context, vs_config, sizeof(struct balancer_vs_config) + sizeof(struct real) * vs_config->real_count + sizeof(struct addr_range) * vs_config->allowed_src_count);
+balancer_vs_config_free(
+	struct balancer_vs_config *vs_config
+) {
+	memory_bfree(
+		vs_config->mctx,
+		vs_config,
+		sizeof(struct balancer_vs_config) +
+			sizeof(struct real) * vs_config->real_count +
+			sizeof(struct addr_range) * vs_config->allowed_src_count
+	);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -379,13 +400,13 @@ balancer_vs_config_set_real(
 	uint8_t *src_addr,
 	uint8_t *src_mask
 ) {
-    struct real *real = &vs_config->reals[index];
-    real->flags = (real_flags_t)flags;
-    real->weight = weight;
-    size_t len = (real->flags & REAL_IPV6_FLAG) ? NET6_LEN : NET4_LEN;
-    memcpy(real->dst_addr, dst_addr, len);
-    memcpy(real->src_addr, src_addr, len);
-    memcpy(real->src_mask, src_mask, len);
+	struct real *real = &vs_config->reals[index];
+	real->flags = (real_flags_t)flags;
+	real->weight = weight;
+	size_t len = (real->flags & BALANCER_REAL_IPV6_FLAG) ? NET6_LEN : NET4_LEN;
+	memcpy(real->dst_addr, dst_addr, len);
+	memcpy(real->src_addr, src_addr, len);
+	memcpy(real->src_mask, src_mask, len);
 }
 
 void
@@ -395,8 +416,8 @@ balancer_vs_config_set_allowed_src_range(
 	uint8_t *from,
 	uint8_t *to
 ) {
-    struct addr_range *addr_range = &vs_config->allowed_src[index];
-    size_t len = (vs_config->flags & VS_IPV6_FLAG) ? NET6_LEN : NET4_LEN;
-    memcpy(addr_range->start_addr, from, len);
-    memcpy(addr_range->end_addr, to, len);
+	struct addr_range *addr_range = &vs_config->allowed_src[index];
+	size_t len = (vs_config->flags & BALANCER_VS_IPV6_FLAG) ? NET6_LEN : NET4_LEN;
+	memcpy(addr_range->start_addr, from, len);
+	memcpy(addr_range->end_addr, to, len);
 }

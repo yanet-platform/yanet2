@@ -14,7 +14,7 @@ balancer_module_config_create(
 	const char *name,
 	struct balancer_session_table *session_table,
 	size_t vs_count,
-	struct balancer_vs_config *vs_configs,
+	struct balancer_vs_config **vs_configs,
 	uint32_t tcp_syn_ack_timeout,
 	uint32_t tcp_syn_timeout,
 	uint32_t tcp_fin_timeout,

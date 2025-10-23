@@ -4,7 +4,7 @@
 
 typedef uint8_t real_flags_t;
 
-#define REAL_IPV6_FLAG ((real_flags_t)(1u << 0))
+////////////////////////////////////////////////////////////////////////////////
 
 struct real {
 	real_flags_t flags;

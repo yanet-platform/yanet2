@@ -3,6 +3,8 @@
 #include "common/ttlmap.h"
 #include <assert.h>
 
+#include "../../state.h"
+
 #include "balancer.h"
 
 #include "clock.h"
