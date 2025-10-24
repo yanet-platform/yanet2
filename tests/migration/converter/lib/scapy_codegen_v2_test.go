@@ -60,13 +60,13 @@ func TestCodegenV2_SimplePacket(t *testing.T) {
 	// Check that code contains expected elements
 	require.Contains(t, code, "package converted")
 	require.Contains(t, code, "func GenerateTest_SendSend(t *testing.T)")
-	require.Contains(t, code, "internal.Ether(")
-	require.Contains(t, code, "internal.IP(")
-	require.Contains(t, code, "internal.TCP(")
-	require.Contains(t, code, `internal.IPSrc("1.2.3.4")`)
-	require.Contains(t, code, `internal.IPDst("5.6.7.8")`)
-	require.Contains(t, code, "internal.TCPSport(1234)")
-	require.Contains(t, code, "internal.TCPDport(80)")
+	require.Contains(t, code, "lib.Ether(")
+	require.Contains(t, code, "lib.IP(")
+	require.Contains(t, code, "lib.TCP(")
+	require.Contains(t, code, `lib.IPSrc("1.2.3.4")`)
+	require.Contains(t, code, `lib.IPDst("5.6.7.8")`)
+	require.Contains(t, code, "lib.TCPSport(1234)")
+	require.Contains(t, code, "lib.TCPDport(80)")
 }
 
 func TestCodegenV2_EndToEnd(t *testing.T) {
@@ -162,10 +162,10 @@ func TestCodegenV2_WithVLAN(t *testing.T) {
 	code, err := codegen.GenerateFromIR(irJSON)
 	require.NoError(t, err)
 
-	require.Contains(t, code, "internal.Dot1Q(")
-	require.Contains(t, code, "internal.VLANId(100)")
-	require.Contains(t, code, "internal.IPv6(")
-	require.Contains(t, code, "internal.UDP(")
+	require.Contains(t, code, "lib.Dot1Q(")
+	require.Contains(t, code, "lib.VLANId(100)")
+	require.Contains(t, code, "lib.IPv6(")
+	require.Contains(t, code, "lib.UDP(")
 }
 
 func TestCodegenV2_StripVLAN(t *testing.T) {
@@ -194,13 +194,13 @@ func TestCodegenV2_StripVLAN(t *testing.T) {
 	codegen := NewScapyCodegenV2(false)
 	code, err := codegen.GenerateFromIR(irJSON)
 	require.NoError(t, err)
-	require.Contains(t, code, "internal.Dot1Q(")
+	require.Contains(t, code, "lib.Dot1Q(")
 
 	// With strip VLAN
 	codegenStrip := NewScapyCodegenV2(true)
 	codeStripped, err := codegenStrip.GenerateFromIR(irJSON)
 	require.NoError(t, err)
-	require.NotContains(t, codeStripped, "internal.Dot1Q(")
+	require.NotContains(t, codeStripped, "lib.Dot1Q(")
 }
 
 func TestCodegenV2_ICMPv6(t *testing.T) {
@@ -229,9 +229,9 @@ func TestCodegenV2_ICMPv6(t *testing.T) {
 	code, err := codegen.GenerateFromIR(irJSON)
 	require.NoError(t, err)
 
-	require.Contains(t, code, "internal.ICMPv6EchoRequest(")
-	require.Contains(t, code, "internal.ICMPv6Id(4660)")
-	require.Contains(t, code, "internal.ICMPv6Seq(30309)")
+	require.Contains(t, code, "lib.ICMPv6EchoRequest(")
+	require.Contains(t, code, "lib.ICMPv6Id(4660)")
+	require.Contains(t, code, "lib.ICMPv6Seq(30309)")
 }
 
 func TestCodegenV2_GRE(t *testing.T) {
@@ -262,9 +262,9 @@ func TestCodegenV2_GRE(t *testing.T) {
 	code, err := codegen.GenerateFromIR(irJSON)
 	require.NoError(t, err)
 
-	require.Contains(t, code, "internal.GRE(")
-	require.Contains(t, code, "internal.GREChecksumPresent(true)")
-	require.Contains(t, code, "internal.GREKeyPresent(true)")
+	require.Contains(t, code, "lib.GRE(")
+	require.Contains(t, code, "lib.GREChecksumPresent(true)")
+	require.Contains(t, code, "lib.GREKeyPresent(true)")
 }
 
 func TestCodegenV2_ConvertAll96Tests(t *testing.T) {

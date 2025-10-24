@@ -3,8 +3,12 @@ package lib
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // IRLayer represents a layer in the IR JSON
@@ -31,6 +35,31 @@ type IRPCAPPair struct {
 type IRJSON struct {
 	PCAPPairs       []IRPCAPPair `json:"pcap_pairs"`
 	HelperFunctions []string     `json:"helper_functions"`
+}
+
+// ToJSON converts IRJSON to JSON string
+func (ir *IRJSON) ToJSON() (string, error) {
+	jsonBytes, err := json.Marshal(ir)
+	if err != nil {
+		return "", err
+	}
+	return string(jsonBytes), nil
+}
+
+// IRPacketPattern represents a detected pattern in packet definitions
+type IRPacketPattern struct {
+	CommonLayers  []IRLayer        // Layers with constant params
+	VaryingParams []IRVaryingParam // Parameters that change across packets
+	StartIndex    int              // Index of first packet in the pattern group
+	EndIndex      int              // Index of last packet in the pattern group (exclusive)
+}
+
+// IRVaryingParam represents a parameter that varies across packets
+type IRVaryingParam struct {
+	LayerIndex int           // Which layer (0-based)
+	LayerType  string        // "IP", "IPv6", etc.
+	ParamName  string        // "dst", "src", etc.
+	Values     []interface{} // All values across packets
 }
 
 // ScapyCodegenV2 generates Go code from IR JSON
@@ -87,6 +116,15 @@ func (cg *ScapyCodegenV2) GenerateFromIR(irJSON string) (string, error) {
 
 // GeneratePacketFunction generates a function that creates packets
 func (cg *ScapyCodegenV2) GeneratePacketFunction(funcName string, packets []IRPacketDef, isExpect bool) string {
+	// Try pattern detection first (for ≥10 packets with same structure)
+	pattern := cg.detectIRPacketPattern(packets)
+
+	if pattern != nil {
+		// Generate mixed code: helper for pattern group + inline for others
+		return cg.generateMixedCode(funcName, pattern, packets, isExpect)
+	}
+
+	// Fall back to existing inline generation
 	var code strings.Builder
 
 	code.WriteString(fmt.Sprintf("// %s generates packets\n", funcName))
@@ -107,6 +145,13 @@ func (cg *ScapyCodegenV2) GeneratePacketFunction(funcName string, packets []IRPa
 			}
 		}
 
+		// Check for CIDR expansion in layers
+		cidrLayer, cidrField := cg.findCIDRExpansion(pkt)
+		if cidrLayer != nil {
+			code.WriteString(cg.generateCIDRExpansionPackets(pkt, i, cidrLayer, cidrField))
+			continue
+		}
+
 		// Check for port ranges in layers
 		portRangeLayer, portRangeField := cg.findPortRange(pkt)
 		if portRangeLayer != nil {
@@ -121,12 +166,16 @@ func (cg *ScapyCodegenV2) GeneratePacketFunction(funcName string, packets []IRPa
 			continue
 		}
 
-		// Regular packet
+		// Regular packet - use template for better readability
+		packetTemplate := `%s
+		require.NoError(t, err)
+		packets = append(packets, pkt)
+	}
+
+`
 		code.WriteString("\t{\n")
 		code.WriteString(cg.generatePacketConstruction(pkt, isExpect))
-		code.WriteString("\t\trequire.NoError(t, err)\n")
-		code.WriteString("\t\tpackets = append(packets, pkt)\n")
-		code.WriteString("\t}\n\n")
+		code.WriteString(fmt.Sprintf(packetTemplate, ""))
 	}
 
 	code.WriteString("\treturn packets\n")
@@ -275,12 +324,34 @@ func (cg *ScapyCodegenV2) generateIPOptions(layer IRLayer) string {
 	var code strings.Builder
 
 	if src, ok := layer.Params["src"]; ok {
-		srcStr := stripCIDR(fmt.Sprintf("%v", src))
-		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPSrc(%q),\n", srcStr))
+		srcStr := fmt.Sprintf("%v", src)
+		// Check if this is a loop variable (from CIDR expansion)
+		if srcStr == "ip" {
+			code.WriteString("\t\t\t\tlib.IPSrc(ip),\n")
+		} else {
+			// Just use the value as-is, CIDR will be stripped
+			// CIDR expansion is handled at packet level via _special marker
+			cleanIP := stripCIDR(srcStr)
+			if err := validateIP(cleanIP); err != nil {
+				code.WriteString(fmt.Sprintf("\t\t\t\t// WARNING: %s\n", err.Error()))
+			}
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPSrc(%q),\n", cleanIP))
+		}
 	}
 	if dst, ok := layer.Params["dst"]; ok {
-		dstStr := stripCIDR(fmt.Sprintf("%v", dst))
-		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPDst(%q),\n", dstStr))
+		dstStr := fmt.Sprintf("%v", dst)
+		// Check if this is a loop variable (from CIDR expansion)
+		if dstStr == "ip" {
+			code.WriteString("\t\t\t\tlib.IPDst(ip),\n")
+		} else {
+			// Just use the value as-is, CIDR will be stripped
+			// CIDR expansion is handled at packet level via _special marker
+			cleanIP := stripCIDR(dstStr)
+			if err := validateIP(cleanIP); err != nil {
+				code.WriteString(fmt.Sprintf("\t\t\t\t// WARNING: %s\n", err.Error()))
+			}
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPDst(%q),\n", cleanIP))
+		}
 	}
 	if ttl, ok := layer.Params["ttl"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPTTL(%v),\n", formatValue(ttl)))
@@ -303,12 +374,32 @@ func (cg *ScapyCodegenV2) generateIPv6Options(layer IRLayer) string {
 	var code strings.Builder
 
 	if src, ok := layer.Params["src"]; ok {
-		srcStr := stripCIDR(fmt.Sprintf("%v", src))
-		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6Src(%q),\n", srcStr))
+		srcStr := fmt.Sprintf("%v", src)
+		// Check if this is a loop variable (from CIDR expansion)
+		if srcStr == "ip" {
+			code.WriteString("\t\t\t\tlib.IPv6Src(ip),\n")
+		} else {
+			// CIDR expansion is handled at packet level via _special marker
+			cleanIP := stripCIDR(srcStr)
+			if err := validateIP(cleanIP); err != nil {
+				code.WriteString(fmt.Sprintf("\t\t\t\t// WARNING: %s\n", err.Error()))
+			}
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6Src(%q),\n", cleanIP))
+		}
 	}
 	if dst, ok := layer.Params["dst"]; ok {
-		dstStr := stripCIDR(fmt.Sprintf("%v", dst))
-		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6Dst(%q),\n", dstStr))
+		dstStr := fmt.Sprintf("%v", dst)
+		// Check if this is a loop variable (from CIDR expansion)
+		if dstStr == "ip" {
+			code.WriteString("\t\t\t\tlib.IPv6Dst(ip),\n")
+		} else {
+			// CIDR expansion is handled at packet level via _special marker
+			cleanIP := stripCIDR(dstStr)
+			if err := validateIP(cleanIP); err != nil {
+				code.WriteString(fmt.Sprintf("\t\t\t\t// WARNING: %s\n", err.Error()))
+			}
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6Dst(%q),\n", cleanIP))
+		}
 	}
 	if hlim, ok := layer.Params["hlim"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6HopLimit(%v),\n", formatValue(hlim)))
@@ -505,6 +596,23 @@ func (cg *ScapyCodegenV2) findParamArray(pkt IRPacketDef) (*IRLayer, string) {
 	return nil, ""
 }
 
+// findCIDRExpansion finds CIDR expansion in packet layers
+func (cg *ScapyCodegenV2) findCIDRExpansion(pkt IRPacketDef) (*IRLayer, string) {
+	for i := range pkt.Layers {
+		layer := &pkt.Layers[i]
+		if special, ok := layer.Params["_special"].(map[string]interface{}); ok {
+			for field, handling := range special {
+				if handlingMap, ok := handling.(map[string]interface{}); ok {
+					if handlingType, ok := handlingMap["type"].(string); ok && handlingType == "cidr_expansion" {
+						return layer, field
+					}
+				}
+			}
+		}
+	}
+	return nil, ""
+}
+
 // generatePortRangePackets generates packets with port ranges
 func (cg *ScapyCodegenV2) generatePortRangePackets(pkt IRPacketDef, idx int, portLayer *IRLayer, field string) string {
 	var code strings.Builder
@@ -522,10 +630,15 @@ func (cg *ScapyCodegenV2) generatePortRangePackets(pkt IRPacketDef, idx int, por
 	originalValue := portLayer.Params[field]
 	portLayer.Params[field] = "port"
 
+	// Use template for better readability
+	portRangeTemplate := `%s
+		require.NoError(t, err)
+		packets = append(packets, pkt)
+	}
+
+`
 	code.WriteString(cg.generatePacketConstruction(pkt, false))
-	code.WriteString("\t\trequire.NoError(t, err)\n")
-	code.WriteString("\t\tpackets = append(packets, pkt)\n")
-	code.WriteString("\t}\n\n")
+	code.WriteString(fmt.Sprintf(portRangeTemplate, ""))
 
 	// Restore original
 	portLayer.Params[field] = originalValue
@@ -558,10 +671,15 @@ func (cg *ScapyCodegenV2) generateParamArrayPackets(pkt IRPacketDef, idx int, pa
 	originalValue := paramLayer.Params[field]
 	paramLayer.Params[field] = "val"
 
+	// Use template for better readability
+	paramArrayTemplate := `%s
+		require.NoError(t, err)
+		packets = append(packets, pkt)
+	}
+
+`
 	code.WriteString(cg.generatePacketConstruction(pkt, false))
-	code.WriteString("\t\trequire.NoError(t, err)\n")
-	code.WriteString("\t\tpackets = append(packets, pkt)\n")
-	code.WriteString("\t}\n\n")
+	code.WriteString(fmt.Sprintf(paramArrayTemplate, ""))
 
 	// Restore original
 	paramLayer.Params[field] = originalValue
@@ -570,6 +688,46 @@ func (cg *ScapyCodegenV2) generateParamArrayPackets(pkt IRPacketDef, idx int, pa
 	delete(special, field)
 	if len(special) == 0 {
 		delete(paramLayer.Params, "_special")
+	}
+
+	return code.String()
+}
+
+// generateCIDRExpansionPackets generates packets for all IPs in CIDR subnet
+func (cg *ScapyCodegenV2) generateCIDRExpansionPackets(pkt IRPacketDef, idx int, cidrLayer *IRLayer, field string) string {
+	var code strings.Builder
+
+	// Extract CIDR from special handling
+	special := cidrLayer.Params["_special"].(map[string]interface{})
+	cidrInfo := special[field].(map[string]interface{})
+	cidrStr := cidrInfo["cidr"].(string)
+
+	code.WriteString(fmt.Sprintf("\t// Generate packets for all IPs in CIDR %s\n", cidrStr))
+	code.WriteString(fmt.Sprintf("\tfor _, ip := range lib.ExpandCIDR(%q) {\n", cidrStr))
+
+	// Temporarily replace the IP value with loop variable "ip"
+	originalValue := cidrLayer.Params[field]
+	cidrLayer.Params[field] = "ip"
+
+	// Generate packet construction with loop variable
+	code.WriteString(cg.generatePacketConstruction(pkt, false))
+
+	// Use template for better readability
+	cidrTemplate := `
+		require.NoError(t, err)
+		packets = append(packets, pkt)
+	}
+
+`
+	code.WriteString(cidrTemplate)
+
+	// Restore original
+	cidrLayer.Params[field] = originalValue
+
+	// Remove the _special entry to avoid issues in subsequent processing
+	delete(special, field)
+	if len(special) == 0 {
+		delete(cidrLayer.Params, "_special")
 	}
 
 	return code.String()
@@ -588,26 +746,33 @@ func (cg *ScapyCodegenV2) generateFragmentedPacket(pkt IRPacketDef, idx int, fra
 		}
 	}
 
-	code.WriteString("\t{\n")
-	code.WriteString("\t\t// Base packet for fragmentation\n")
-	code.WriteString(cg.generatePacketConstruction(pkt, false))
-	code.WriteString("\t\trequire.NoError(t, err)\n")
-	code.WriteString(fmt.Sprintf("\t\tfrags, err := lib.%s(pkt, %d)\n",
-		strings.Title(fragType), fragSize))
-	code.WriteString("\t\trequire.NoError(t, err)\n")
+	// Use template for fragmentation with better readability
+	fragTemplate := `	{
+		// Base packet for fragmentation
+%s
+		require.NoError(t, err)
+		frags, err := lib.%s(pkt, %d)
+		require.NoError(t, err)
+%s
+	}
 
+`
+	var fragAppend string
 	// Check if we need specific fragment index
 	if pkt.SpecialHandling != nil {
 		if fragIdx, ok := pkt.SpecialHandling["fragment_index"]; ok && fragIdx != nil {
-			code.WriteString(fmt.Sprintf("\t\tpackets = append(packets, frags[%v])\n", formatValue(fragIdx)))
+			fragAppend = fmt.Sprintf("\t\tpackets = append(packets, frags[%v])", formatValue(fragIdx))
 		} else {
-			code.WriteString("\t\tpackets = append(packets, frags...)\n")
+			fragAppend = "\t\tpackets = append(packets, frags...)"
 		}
 	} else {
-		code.WriteString("\t\tpackets = append(packets, frags...)\n")
+		fragAppend = "\t\tpackets = append(packets, frags...)"
 	}
 
-	code.WriteString("\t}\n\n")
+	code.WriteString(fmt.Sprintf(fragTemplate,
+		cg.generatePacketConstruction(pkt, false),
+		cases.Title(language.English).String(fragType), fragSize,
+		fragAppend))
 
 	return code.String()
 }
@@ -682,4 +847,809 @@ func sanitizeName(filename string) string {
 	name = strings.Join(parts, "_")
 
 	return name
+}
+
+// validateIP validates IP address format
+func validateIP(ip string) error {
+	if net.ParseIP(ip) == nil {
+		return fmt.Errorf("invalid IP address %q", ip)
+	}
+	return nil
+}
+
+// detectIRPacketPattern analyzes packets to find common structure and varying parameters
+// It tries to find the largest group of consecutive packets with the same layer structure
+func (cg *ScapyCodegenV2) detectIRPacketPattern(packets []IRPacketDef) *IRPacketPattern {
+	if len(packets) < 3 {
+		return nil
+	}
+
+	// Find the largest consecutive group with the same layer structure
+	bestStart := 0
+	bestEnd := 0
+	bestCount := 0
+
+	for start := 0; start < len(packets); start++ {
+		refPacket := packets[start]
+
+		// Skip packets with special handling
+		if len(refPacket.SpecialHandling) > 0 {
+			continue
+		}
+
+		// Find how many consecutive packets match this structure
+		end := start
+		for end < len(packets) {
+			pkt := packets[end]
+
+			// Check special handling
+			if len(pkt.SpecialHandling) > 0 {
+				break
+			}
+
+			// Check layer structure
+			if len(pkt.Layers) != len(refPacket.Layers) {
+				break
+			}
+
+			matches := true
+			for i := range pkt.Layers {
+				if pkt.Layers[i].Type != refPacket.Layers[i].Type {
+					matches = false
+					break
+				}
+			}
+
+			if !matches {
+				break
+			}
+
+			end++
+		}
+
+		count := end - start
+		if count > bestCount {
+			bestCount = count
+			bestStart = start
+			bestEnd = end
+		}
+	}
+
+	// Need at least 3 packets in the group
+	if bestCount < 3 {
+		return nil
+	}
+
+	// Use the best group for pattern detection
+	groupPackets := packets[bestStart:bestEnd]
+	refPacket := groupPackets[0]
+
+	// Now analyze each layer to find varying parameters
+	pattern := &IRPacketPattern{
+		CommonLayers:  make([]IRLayer, len(refPacket.Layers)),
+		VaryingParams: []IRVaryingParam{},
+		StartIndex:    bestStart,
+		EndIndex:      bestEnd,
+	}
+
+	// For each layer
+	for layerIdx, refLayer := range refPacket.Layers {
+		commonParams := make(map[string]interface{})
+		varyingParamNames := make(map[string]bool)
+
+		// Check each parameter
+		for paramName, refValue := range refLayer.Params {
+			isConstant := true
+			values := []interface{}{refValue}
+
+			// Compare with all other packets in the group
+			for _, pkt := range groupPackets[1:] {
+				if pkt.Layers[layerIdx].Params[paramName] != refValue {
+					// Check if values are comparable (both exist and different)
+					otherValue, exists := pkt.Layers[layerIdx].Params[paramName]
+					if !exists {
+						// Parameter missing in some packets - can't pattern match
+						return nil
+					}
+
+					// Values differ - this is a varying parameter
+					isConstant = false
+					values = append(values, otherValue)
+				} else {
+					values = append(values, refValue)
+				}
+			}
+
+			if isConstant {
+				commonParams[paramName] = refValue
+			} else {
+				varyingParamNames[paramName] = true
+				pattern.VaryingParams = append(pattern.VaryingParams, IRVaryingParam{
+					LayerIndex: layerIdx,
+					LayerType:  refLayer.Type,
+					ParamName:  paramName,
+					Values:     values,
+				})
+			}
+		}
+
+		// Create common layer with only constant parameters
+		pattern.CommonLayers[layerIdx] = IRLayer{
+			Type:   refLayer.Type,
+			Params: commonParams,
+		}
+	}
+
+	// If no varying parameters found, no point in pattern matching
+	if len(pattern.VaryingParams) == 0 {
+		return nil
+	}
+
+	return pattern
+}
+
+// generateMixedCode generates code that uses a helper for the pattern group and inline for other packets
+func (cg *ScapyCodegenV2) generateMixedCode(funcName string, pattern *IRPacketPattern, packets []IRPacketDef, isExpect bool) string {
+	var code strings.Builder
+
+	// Generate helper function first
+	helperCode := cg.generateHelperFunction(funcName, pattern, packets, isExpect)
+	code.WriteString(helperCode)
+	code.WriteString("\n")
+
+	// Generate main function
+	code.WriteString(fmt.Sprintf("// %s generates packets\n", funcName))
+	code.WriteString(fmt.Sprintf("func %s(t *testing.T) []gopacket.Packet {\n", funcName))
+	code.WriteString("\tvar packets []gopacket.Packet\n\n")
+
+	// Generate inline code for packets before the pattern group
+	for i := 0; i < pattern.StartIndex; i++ {
+		pkt := packets[i]
+		code.WriteString(fmt.Sprintf("\t// Packet %d\n", i))
+		code.WriteString("\t{\n")
+		code.WriteString(cg.generateSinglePacketCode(pkt, isExpect))
+		code.WriteString("\t}\n\n")
+	}
+
+	// Generate helper call for the pattern group
+	if pattern.StartIndex < pattern.EndIndex {
+		code.WriteString(fmt.Sprintf("\t// Packets %d-%d (using helper)\n", pattern.StartIndex, pattern.EndIndex-1))
+		code.WriteString(cg.generateHelperCallCode(funcName, pattern, packets))
+		code.WriteString("\n")
+	}
+
+	// Generate inline code for packets after the pattern group
+	for i := pattern.EndIndex; i < len(packets); i++ {
+		pkt := packets[i]
+		code.WriteString(fmt.Sprintf("\t// Packet %d\n", i))
+		code.WriteString("\t{\n")
+		code.WriteString(cg.generateSinglePacketCode(pkt, isExpect))
+		code.WriteString("\t}\n\n")
+	}
+
+	code.WriteString("\treturn packets\n")
+	code.WriteString("}\n")
+
+	return code.String()
+}
+
+// generateHelperFunction generates only the helper function for pattern-based packets
+func (cg *ScapyCodegenV2) generateHelperFunction(funcName string, pattern *IRPacketPattern, packets []IRPacketDef, isExpect bool) string {
+	var code strings.Builder
+
+	helperName := funcName + "Helper"
+
+	// Count active varying parameters (excluding stripped layers)
+	activeParams := 0
+	for _, vp := range pattern.VaryingParams {
+		if cg.stripVLAN && vp.LayerType == "Dot1Q" {
+			continue
+		}
+		activeParams++
+	}
+
+	// Determine if we need a struct or simple parameters
+	useStruct := activeParams > 1
+
+	// Generate parameter struct if needed
+	if useStruct {
+		structName := funcName + "Params"
+		code.WriteString(fmt.Sprintf("// %s holds varying parameters for packet generation\n", structName))
+		code.WriteString(fmt.Sprintf("type %s struct {\n", structName))
+		for _, vp := range pattern.VaryingParams {
+			// Skip parameters for layers that will be stripped
+			if cg.stripVLAN && vp.LayerType == "Dot1Q" {
+				continue
+			}
+			fieldName := cg.makeFieldName(vp.LayerType, vp.ParamName)
+			fieldType := cg.inferFieldTypeForParam(vp.LayerType, vp.ParamName, vp.Values)
+			code.WriteString(fmt.Sprintf("\t%s %s\n", fieldName, fieldType))
+		}
+		code.WriteString("}\n\n")
+	}
+
+	// Generate helper function
+	code.WriteString(fmt.Sprintf("// %s generates a single packet with varying parameters\n", helperName))
+	if useStruct {
+		structName := funcName + "Params"
+		code.WriteString(fmt.Sprintf("func %s(t *testing.T, params %s) gopacket.Packet {\n", helperName, structName))
+	} else {
+		// Single parameter - find the active one
+		var activeVP *IRVaryingParam
+		for i, vp := range pattern.VaryingParams {
+			if cg.stripVLAN && vp.LayerType == "Dot1Q" {
+				continue
+			}
+			activeVP = &pattern.VaryingParams[i]
+			break
+		}
+		if activeVP != nil {
+			paramName := cg.makeParamName(activeVP.LayerType, activeVP.ParamName)
+			paramType := cg.inferFieldTypeForParam(activeVP.LayerType, activeVP.ParamName, activeVP.Values)
+			code.WriteString(fmt.Sprintf("func %s(t *testing.T, %s %s) gopacket.Packet {\n", helperName, paramName, paramType))
+		}
+	}
+
+	// Generate lib.NewPacket call with layers
+	code.WriteString("\tpkt, err := lib.NewPacket(\n")
+
+	for layerIdx, layer := range pattern.CommonLayers {
+		// Skip VLAN if stripVLAN is enabled
+		if cg.stripVLAN && layer.Type == "Dot1Q" {
+			continue
+		}
+
+		code.WriteString(cg.generateLayerCallWithPattern(layer, layerIdx, pattern, isExpect, useStruct, funcName))
+	}
+
+	code.WriteString("\t)\n")
+	code.WriteString("\trequire.NoError(t, err)\n")
+	code.WriteString("\treturn pkt\n")
+	code.WriteString("}\n")
+
+	return code.String()
+}
+
+// generateHelperCallCode generates the code that calls the helper function for the pattern group
+func (cg *ScapyCodegenV2) generateHelperCallCode(funcName string, pattern *IRPacketPattern, packets []IRPacketDef) string {
+	var code strings.Builder
+
+	helperName := funcName + "Helper"
+
+	// Count active varying parameters (excluding stripped layers)
+	activeParams := 0
+	for _, vp := range pattern.VaryingParams {
+		if cg.stripVLAN && vp.LayerType == "Dot1Q" {
+			continue
+		}
+		activeParams++
+	}
+
+	useStruct := activeParams > 1
+
+	if useStruct {
+		// Generate slice of structs
+		structName := funcName + "Params"
+		code.WriteString(fmt.Sprintf("\tparamsList := []%s{\n", structName))
+		for i := pattern.StartIndex; i < pattern.EndIndex; i++ {
+			code.WriteString("\t\t{")
+			firstField := true
+			for _, vp := range pattern.VaryingParams {
+				// Skip parameters for layers that will be stripped
+				if cg.stripVLAN && vp.LayerType == "Dot1Q" {
+					continue
+				}
+				if !firstField {
+					code.WriteString(", ")
+				}
+				firstField = false
+				fieldName := cg.makeFieldName(vp.LayerType, vp.ParamName)
+				code.WriteString(fmt.Sprintf("%s: %s", fieldName, cg.formatValueForCode(vp.Values[i-pattern.StartIndex])))
+			}
+			code.WriteString("},\n")
+		}
+		code.WriteString("\t}\n\n")
+		code.WriteString("\tfor _, params := range paramsList {\n")
+		code.WriteString(fmt.Sprintf("\t\tpackets = append(packets, %s(t, params))\n", helperName))
+		code.WriteString("\t}\n")
+	} else {
+		// Generate slice of values - find the active parameter
+		var activeVP *IRVaryingParam
+		for i, vp := range pattern.VaryingParams {
+			if cg.stripVLAN && vp.LayerType == "Dot1Q" {
+				continue
+			}
+			activeVP = &pattern.VaryingParams[i]
+			break
+		}
+
+		if activeVP != nil {
+			varName := cg.makeParamName(activeVP.LayerType, activeVP.ParamName) + "s"
+			varType := cg.inferFieldTypeForParam(activeVP.LayerType, activeVP.ParamName, activeVP.Values)
+			code.WriteString(fmt.Sprintf("\t%s := []%s{\n", varName, varType))
+			for _, val := range activeVP.Values {
+				code.WriteString(fmt.Sprintf("\t\t%s,\n", cg.formatValueForCode(val)))
+			}
+			code.WriteString("\t}\n\n")
+			code.WriteString(fmt.Sprintf("\tfor _, val := range %s {\n", varName))
+			code.WriteString(fmt.Sprintf("\t\tpackets = append(packets, %s(t, val))\n", helperName))
+			code.WriteString("\t}\n")
+		}
+	}
+
+	return code.String()
+}
+
+// generateSinglePacketCode generates inline code for a single packet
+func (cg *ScapyCodegenV2) generateSinglePacketCode(pkt IRPacketDef, isExpect bool) string {
+	var code strings.Builder
+
+	// Check for special handling
+	if len(pkt.SpecialHandling) > 0 {
+		code.WriteString(fmt.Sprintf("\t\t// Special handling: %v\n", pkt.SpecialHandling))
+		code.WriteString("\t\t// TODO: implement special handling\n")
+		code.WriteString("\t\tpackets = append(packets, nil) // placeholder\n")
+		return code.String()
+	}
+
+	code.WriteString("\t\tpkt, err := lib.NewPacket(\n")
+
+	for _, layer := range pkt.Layers {
+		code.WriteString(cg.generateLayerCall(layer, isExpect))
+	}
+
+	code.WriteString("\t\t)\n\n")
+	code.WriteString("\t\trequire.NoError(t, err)\n")
+	code.WriteString("\t\tpackets = append(packets, pkt)\n")
+
+	return code.String()
+}
+
+// generateLayerCallWithPattern generates layer call with pattern-based parameters
+func (cg *ScapyCodegenV2) generateLayerCallWithPattern(layer IRLayer, layerIdx int, pattern *IRPacketPattern, isExpect bool, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	code.WriteString(fmt.Sprintf("\t\tlib.%s(\n", layer.Type))
+
+	// Find varying params for this layer
+	varyingParams := make(map[string]IRVaryingParam)
+	for _, vp := range pattern.VaryingParams {
+		if vp.LayerIndex == layerIdx {
+			varyingParams[vp.ParamName] = vp
+		}
+	}
+
+	// Generate options based on layer type
+	switch layer.Type {
+	case "Ether":
+		code.WriteString(cg.generateEtherOptionsWithPattern(layer, varyingParams, isExpect, useStruct, funcName))
+	case "Dot1Q":
+		code.WriteString(cg.generateDot1QOptionsWithPattern(layer, varyingParams, useStruct, funcName))
+	case "IP":
+		code.WriteString(cg.generateIPOptionsWithPattern(layer, varyingParams, useStruct, funcName))
+	case "IPv6":
+		code.WriteString(cg.generateIPv6OptionsWithPattern(layer, varyingParams, useStruct, funcName))
+	case "TCP":
+		code.WriteString(cg.generateTCPOptionsWithPattern(layer, varyingParams, useStruct, funcName))
+	case "UDP":
+		code.WriteString(cg.generateUDPOptionsWithPattern(layer, varyingParams, useStruct, funcName))
+	case "ICMP":
+		code.WriteString(cg.generateICMPOptionsWithPattern(layer, varyingParams, useStruct, funcName))
+	case "ICMPv6EchoRequest", "ICMPv6EchoReply", "ICMPv6DestUnreach":
+		code.WriteString(cg.generateICMPv6OptionsWithPattern(layer, varyingParams, useStruct, funcName))
+	case "IPv6ExtHdrFragment":
+		code.WriteString(cg.generateIPv6FragmentOptionsWithPattern(layer, varyingParams, useStruct, funcName))
+	case "GRE":
+		code.WriteString(cg.generateGREOptionsWithPattern(layer, varyingParams, useStruct, funcName))
+	case "Raw":
+		code.WriteString(cg.generateRawOptionsWithPattern(layer, varyingParams, useStruct, funcName))
+	}
+
+	code.WriteString("\t\t),\n")
+
+	return code.String()
+}
+
+// Helper functions for pattern-based generation
+func (cg *ScapyCodegenV2) makeFieldName(layerType, paramName string) string {
+	// Capitalize first letter
+	caser := cases.Title(language.English)
+	return caser.String(layerType) + caser.String(paramName)
+}
+
+func (cg *ScapyCodegenV2) makeParamName(layerType, paramName string) string {
+	// Keep lowercase for parameter name
+	return strings.ToLower(layerType) + strings.Title(paramName)
+}
+
+// inferFieldTypeForParam infers the type based on layer type, parameter name, and values
+func (cg *ScapyCodegenV2) inferFieldTypeForParam(layerType, paramName string, values []interface{}) string {
+	// Special cases for known parameter types
+	if layerType == "TCP" || layerType == "UDP" {
+		if paramName == "sport" || paramName == "dport" {
+			return "uint16" // Ports are always uint16
+		}
+	}
+
+	// Fall back to value-based inference
+	return cg.inferFieldTypeFromValues(values)
+}
+
+// inferFieldTypeFromValues infers the type from all values (not just the first one)
+func (cg *ScapyCodegenV2) inferFieldTypeFromValues(values []interface{}) string {
+	if len(values) == 0 {
+		return "interface{}"
+	}
+
+	// Check if all values are strings
+	allStrings := true
+	allBools := true
+	maxInt := int64(0)
+	minInt := int64(0)
+	allInts := true
+
+	for _, val := range values {
+		switch v := val.(type) {
+		case string:
+			allBools = false
+			allInts = false
+		case bool:
+			allStrings = false
+			allInts = false
+		case int:
+			allStrings = false
+			allBools = false
+			if int64(v) > maxInt {
+				maxInt = int64(v)
+			}
+			if int64(v) < minInt {
+				minInt = int64(v)
+			}
+		case int64:
+			allStrings = false
+			allBools = false
+			if v > maxInt {
+				maxInt = v
+			}
+			if v < minInt {
+				minInt = v
+			}
+		case float64:
+			allStrings = false
+			allBools = false
+			if v == float64(int(v)) {
+				if int64(v) > maxInt {
+					maxInt = int64(v)
+				}
+				if int64(v) < minInt {
+					minInt = int64(v)
+				}
+			} else {
+				allInts = false
+			}
+		default:
+			allStrings = false
+			allBools = false
+			allInts = false
+		}
+	}
+
+	if allStrings {
+		return "string"
+	}
+	if allBools {
+		return "bool"
+	}
+	if allInts {
+		// Choose type based on range
+		if minInt >= 0 && maxInt <= 255 {
+			return "uint8"
+		} else if minInt >= 0 && maxInt <= 65535 {
+			return "uint16"
+		} else if minInt >= 0 && maxInt <= 4294967295 {
+			return "uint32"
+		}
+		return "int"
+	}
+
+	return "interface{}"
+}
+
+func (cg *ScapyCodegenV2) inferFieldType(value interface{}) string {
+	return cg.inferFieldTypeFromValues([]interface{}{value})
+}
+
+func (cg *ScapyCodegenV2) formatValueForCode(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return fmt.Sprintf("%q", v)
+	case int:
+		return fmt.Sprintf("%d", v)
+	case int64:
+		return fmt.Sprintf("%d", v)
+	case float64:
+		if v == float64(int(v)) {
+			return fmt.Sprintf("%d", int(v))
+		}
+		return fmt.Sprintf("%v", v)
+	case bool:
+		return fmt.Sprintf("%v", v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// Pattern-based option generators
+func (cg *ScapyCodegenV2) generateEtherOptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, isExpect bool, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	// Framework standard MACs
+	srcMAC := "52:54:00:6b:ff:a1" // client
+	dstMAC := "52:54:00:6b:ff:a5" // yanet
+
+	if isExpect {
+		srcMAC, dstMAC = dstMAC, srcMAC
+	}
+
+	code.WriteString(fmt.Sprintf("\t\t\tlib.EtherDst(%q),\n", dstMAC))
+	code.WriteString(fmt.Sprintf("\t\t\tlib.EtherSrc(%q),\n", srcMAC))
+
+	return code.String()
+}
+
+func (cg *ScapyCodegenV2) generateDot1QOptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	if vp, ok := varyingParams["vlan"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("VLANId", vp, useStruct, funcName))
+	} else if vlan, ok := layer.Params["vlan"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.VLANId(%v),\n", formatValue(vlan)))
+	}
+
+	return code.String()
+}
+
+func (cg *ScapyCodegenV2) generateIPOptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	// Source IP
+	if vp, ok := varyingParams["src"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("IPSrc", vp, useStruct, funcName))
+	} else if src, ok := layer.Params["src"]; ok {
+		srcStr := fmt.Sprintf("%v", src)
+		cleanIP := stripCIDR(srcStr)
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPSrc(%q),\n", cleanIP))
+	}
+
+	// Destination IP
+	if vp, ok := varyingParams["dst"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("IPDst", vp, useStruct, funcName))
+	} else if dst, ok := layer.Params["dst"]; ok {
+		dstStr := fmt.Sprintf("%v", dst)
+		cleanIP := stripCIDR(dstStr)
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPDst(%q),\n", cleanIP))
+	}
+
+	// TTL
+	if vp, ok := varyingParams["ttl"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("IPTTL", vp, useStruct, funcName))
+	} else if ttl, ok := layer.Params["ttl"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPTTL(%v),\n", formatValue(ttl)))
+	}
+
+	// TOS
+	if vp, ok := varyingParams["tos"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("IPTOS", vp, useStruct, funcName))
+	} else if tos, ok := layer.Params["tos"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPTOS(%v),\n", formatValue(tos)))
+	}
+
+	// ID
+	if id, ok := layer.Params["id"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPId(%v),\n", formatValue(id)))
+	}
+
+	// Flags
+	if flags, ok := layer.Params["flags"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPFlags(%v),\n", formatValue(flags)))
+	}
+
+	return code.String()
+}
+
+func (cg *ScapyCodegenV2) generateIPv6OptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	// Source IP
+	if vp, ok := varyingParams["src"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("IPv6Src", vp, useStruct, funcName))
+	} else if src, ok := layer.Params["src"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPv6Src(%q),\n", fmt.Sprintf("%v", src)))
+	}
+
+	// Destination IP
+	if vp, ok := varyingParams["dst"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("IPv6Dst", vp, useStruct, funcName))
+	} else if dst, ok := layer.Params["dst"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPv6Dst(%q),\n", fmt.Sprintf("%v", dst)))
+	}
+
+	// Hop Limit
+	if vp, ok := varyingParams["hlim"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("IPv6HopLimit", vp, useStruct, funcName))
+	} else if hlim, ok := layer.Params["hlim"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPv6HopLimit(%v),\n", formatValue(hlim)))
+	}
+
+	// Traffic Class
+	if tc, ok := layer.Params["tc"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPv6TrafficClass(%v),\n", formatValue(tc)))
+	}
+
+	// Flow Label
+	if fl, ok := layer.Params["fl"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPv6FlowLabel(%v),\n", formatValue(fl)))
+	}
+
+	return code.String()
+}
+
+func (cg *ScapyCodegenV2) generateTCPOptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	// Source Port
+	if vp, ok := varyingParams["sport"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("TCPSport", vp, useStruct, funcName))
+	} else if sport, ok := layer.Params["sport"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.TCPSport(%v),\n", formatValue(sport)))
+	}
+
+	// Destination Port
+	if vp, ok := varyingParams["dport"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("TCPDport", vp, useStruct, funcName))
+	} else if dport, ok := layer.Params["dport"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.TCPDport(%v),\n", formatValue(dport)))
+	}
+
+	// Flags
+	if flags, ok := layer.Params["flags"]; ok {
+		flagsStr := fmt.Sprintf("%v", flags)
+		code.WriteString(fmt.Sprintf("\t\t\tlib.TCPFlags(%q),\n", flagsStr))
+	}
+
+	// Seq
+	if seq, ok := layer.Params["seq"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.TCPSeq(%v),\n", formatValue(seq)))
+	}
+
+	// Ack
+	if ack, ok := layer.Params["ack"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.TCPAck(%v),\n", formatValue(ack)))
+	}
+
+	return code.String()
+}
+
+func (cg *ScapyCodegenV2) generateUDPOptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	// Source Port
+	if vp, ok := varyingParams["sport"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("UDPSport", vp, useStruct, funcName))
+	} else if sport, ok := layer.Params["sport"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.UDPSport(%v),\n", formatValue(sport)))
+	}
+
+	// Destination Port
+	if vp, ok := varyingParams["dport"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("UDPDport", vp, useStruct, funcName))
+	} else if dport, ok := layer.Params["dport"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.UDPDport(%v),\n", formatValue(dport)))
+	}
+
+	return code.String()
+}
+
+func (cg *ScapyCodegenV2) generateICMPOptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	// Type
+	if vp, ok := varyingParams["type"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("ICMPType", vp, useStruct, funcName))
+	} else if icmpType, ok := layer.Params["type"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPType(%v),\n", formatValue(icmpType)))
+	}
+
+	// Code - ICMP uses TypeCode, not separate Code
+	if icmpCode, ok := layer.Params["code"]; ok {
+		// Code is part of TypeCode, so we skip it if Type is already set
+		// The TypeCode value should include both type and code
+		_ = icmpCode
+	}
+
+	return code.String()
+}
+
+func (cg *ScapyCodegenV2) generateICMPv6OptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	// Type
+	if vp, ok := varyingParams["type"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("ICMPv6Type", vp, useStruct, funcName))
+	} else if icmpType, ok := layer.Params["type"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPv6Type(%v),\n", formatValue(icmpType)))
+	}
+
+	// Code - ICMPv6 uses TypeCode, not separate Code
+	if icmpCode, ok := layer.Params["code"]; ok {
+		// Code is part of TypeCode, so we skip it if Type is already set
+		_ = icmpCode
+	}
+
+	return code.String()
+}
+
+func (cg *ScapyCodegenV2) generateIPv6FragmentOptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	if offset, ok := layer.Params["offset"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPv6FragmentOffset(%v),\n", formatValue(offset)))
+	}
+
+	if m, ok := layer.Params["m"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPv6FragmentM(%v),\n", formatValue(m)))
+	}
+
+	if id, ok := layer.Params["id"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPv6FragmentID(%v),\n", formatValue(id)))
+	}
+
+	return code.String()
+}
+
+func (cg *ScapyCodegenV2) generateGREOptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	if proto, ok := layer.Params["proto"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.GREProto(%v),\n", formatValue(proto)))
+	}
+
+	return code.String()
+}
+
+func (cg *ScapyCodegenV2) generateRawOptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
+	var code strings.Builder
+
+	if load, ok := layer.Params["load"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.RawLoad(%v),\n", formatValue(load)))
+	}
+
+	return code.String()
+}
+
+// generateVaryingParamRef generates reference to varying parameter
+func (cg *ScapyCodegenV2) generateVaryingParamRef(optionFunc string, vp IRVaryingParam, useStruct bool, funcName string) string {
+	if useStruct {
+		fieldName := cg.makeFieldName(vp.LayerType, vp.ParamName)
+		return fmt.Sprintf("\t\t\tlib.%s(params.%s),\n", optionFunc, fieldName)
+	} else {
+		// Use parameter name from function signature
+		paramName := cg.makeParamName(vp.LayerType, vp.ParamName)
+		return fmt.Sprintf("\t\t\tlib.%s(%s),\n", optionFunc, paramName)
+	}
+}
+
+// expandCIDR expands a CIDR notation to all IP addresses in the subnet
+func (cg *ScapyCodegenV2) expandCIDR(cidr string) ([]string, error) {
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return nil, err
+	}
+
+	var ips []string
+	for ip := ipNet.IP.Mask(ipNet.Mask); ipNet.Contains(ip); incIP(ip) {
+		ips = append(ips, ip.String())
+	}
+
+	return ips, nil
 }

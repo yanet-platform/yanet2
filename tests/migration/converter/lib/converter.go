@@ -1423,7 +1423,7 @@ func (c *Converter) convertSendPacketsLegacy(content interface{}, testPath strin
 			c.debugLog("tcpdump failed for %s: %v", sendFile, err)
 			tcpdumpComment = fmt.Sprintf("// tcpdump error: %v\n", err)
 		}
-		funcCode := tcpdumpComment + c.pcapAnalyzer.GeneratePacketCreationCodeWithOptions(sendPackets, funcName, CodegenOpts{StripVLAN: c.defaultStripVLAN})
+		funcCode := tcpdumpComment + c.pcapAnalyzer.GeneratePacketCreationCodeWithOptions(sendPackets, funcName, CodegenOpts{StripVLAN: c.defaultStripVLAN, UseFrameworkMACs: true})
 		functions = append(functions, funcCode)
 
 		var expectPackets []*PacketInfo
@@ -1451,7 +1451,7 @@ func (c *Converter) convertSendPacketsLegacy(content interface{}, testPath strin
 				c.debugLog("tcpdump failed for expect %s: %v", expectFile, err)
 				tcpdumpExpect = fmt.Sprintf("// tcpdump error: %v\n", err)
 			}
-			expectFuncCode := tcpdumpExpect + c.pcapAnalyzer.GeneratePacketCreationCodeWithOptions(expectPackets, expectFuncName, CodegenOpts{StripVLAN: c.defaultStripVLAN, IsExpect: true})
+			expectFuncCode := tcpdumpExpect + c.pcapAnalyzer.GeneratePacketCreationCodeWithOptions(expectPackets, expectFuncName, CodegenOpts{StripVLAN: c.defaultStripVLAN, IsExpect: true, UseFrameworkMACs: true})
 			functions = append(functions, expectFuncCode)
 		}
 
@@ -1572,7 +1572,7 @@ func (c *Converter) convertSendPacketsWithOptionsLegacy(content interface{}, tes
 			c.debugLog("tcpdump failed for %s: %v", sendFile, err)
 			tcpdumpComment = fmt.Sprintf("// tcpdump error: %v\n", err)
 		}
-		funcCode := tcpdumpComment + c.pcapAnalyzer.GeneratePacketCreationCodeWithOptions(sendPackets, funcName, CodegenOpts{StripVLAN: stripVLAN})
+		funcCode := tcpdumpComment + c.pcapAnalyzer.GeneratePacketCreationCodeWithOptions(sendPackets, funcName, CodegenOpts{StripVLAN: stripVLAN, UseFrameworkMACs: true})
 		functions = append(functions, funcCode)
 
 		// Read expected packets
@@ -1610,7 +1610,7 @@ func (c *Converter) convertSendPacketsWithOptionsLegacy(content interface{}, tes
 				c.debugLog("tcpdump failed for expect %s: %v", expectFile, err)
 				tcpdumpExpect = fmt.Sprintf("// tcpdump error: %v\n", err)
 			}
-			expectFuncCode := tcpdumpExpect + c.pcapAnalyzer.GeneratePacketCreationCodeWithOptions(expectPackets, expectFuncName, CodegenOpts{StripVLAN: stripVLAN, IsExpect: true})
+			expectFuncCode := tcpdumpExpect + c.pcapAnalyzer.GeneratePacketCreationCodeWithOptions(expectPackets, expectFuncName, CodegenOpts{StripVLAN: stripVLAN, IsExpect: true, UseFrameworkMACs: true})
 			functions = append(functions, expectFuncCode)
 		}
 
@@ -2351,6 +2351,7 @@ func (c *Converter) generateTestHeader(testName, originalTestName, testType stri
 	// Add additional imports if packet testing is involved
 	imports = `import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -2368,7 +2369,8 @@ func (c *Converter) generateTestHeader(testName, originalTestName, testType stri
 	_ = cmp.Diff
 	_ = cmpopts.IgnoreUnexported
 	_ = lib.NewPacket
-	_ = net.ParseIP`
+	_ = net.ParseIP
+	_ = strings.Join`
 
 	return fmt.Sprintf(`package converted
 

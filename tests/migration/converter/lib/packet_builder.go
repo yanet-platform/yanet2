@@ -1027,3 +1027,34 @@ func (b *MPLSBuilder) Build() gopacket.SerializableLayer {
 	// TODO: Implement proper MPLS layer support
 	return nil
 }
+
+// ExpandCIDR expands a CIDR notation to all IP addresses in the subnet
+// This mimics Scapy's behavior where IP(dst="172.20.29.5/30") generates
+// packets for 172.20.29.5, 172.20.29.6, 172.20.29.7, 172.20.29.8
+func ExpandCIDR(cidr string) []string {
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		// Return the base IP if CIDR parsing fails
+		if ip := net.ParseIP(cidr); ip != nil {
+			return []string{ip.String()}
+		}
+		return []string{cidr}
+	}
+
+	var ips []string
+	for ip := ipNet.IP.Mask(ipNet.Mask); ipNet.Contains(ip); incIP(ip) {
+		ips = append(ips, ip.String())
+	}
+
+	return ips
+}
+
+// incIP increments an IP address (helper for ExpandCIDR)
+func incIP(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
+		}
+	}
+}
