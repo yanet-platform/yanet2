@@ -12,17 +12,17 @@ import (
 
 func main() {
 	var (
-		inputDir     = flag.String("input", "", "Path to yanet1 tests directory (e.g., yanet1/autotest/units)")
-		outputDir    = flag.String("output", "", "Path to directory for generated yanet2 tests")
-		testName     = flag.String("test", "", "Name of specific test to convert (optional)")
-		batch        = flag.Bool("batch", false, "Convert all tests in directory")
-		verbose      = flag.Bool("v", false, "Verbose output")
-		debug        = flag.Bool("debug", false, "Enable debug logging for conversions")
-		statsFile    = flag.String("stats", "", "File to save statistics (markdown)")
-		skiplist     = flag.String("skiplist", "", "Path to skiplist YAML (optional)")
-		updateSkip   = flag.Bool("update-skiplist", false, "Update skiplist.yaml in-place at the auto-generated marker")
-		forceAST     = flag.Bool("force-ast", false, "Force use of AST parser (fail if unavailable)")
-		forceLegacy  = flag.Bool("force-legacy", false, "Force use of legacy PCAP analyzer")
+		inputDir    = flag.String("input", "", "Path to yanet1 tests directory (e.g., yanet1/autotest/units)")
+		outputDir   = flag.String("output", "", "Path to directory for generated yanet2 tests")
+		testName    = flag.String("test", "", "Name of specific test to convert (optional)")
+		batch       = flag.Bool("batch", false, "Convert all tests in directory")
+		verbose     = flag.Bool("v", false, "Verbose output")
+		debug       = flag.Bool("debug", false, "Enable debug logging for conversions")
+		statsFile   = flag.String("stats", "", "File to save statistics (markdown)")
+		skiplist    = flag.String("skiplist", "", "Path to skiplist YAML (optional)")
+		updateSkip  = flag.Bool("update-skiplist", false, "Update skiplist.yaml in-place at the auto-generated marker")
+		forceAST    = flag.Bool("force-ast", false, "Force use of AST parser (fail if unavailable)")
+		forceLegacy = flag.Bool("force-legacy", false, "Force use of legacy PCAP analyzer")
 	)
 	flag.Parse()
 
@@ -46,13 +46,13 @@ func main() {
 	}
 
 	converter := lib.NewConverter(&lib.Config{
-		InputDir:        *inputDir,
-		OutputDir:       *outputDir,
-		Verbose:         *verbose,
-		Debug:           *debug,
-		SkiplistPath:    *skiplist,
-		ForceASTParser:  *forceAST,
-		ForceLegacy:     *forceLegacy,
+		InputDir:       *inputDir,
+		OutputDir:      *outputDir,
+		Verbose:        *verbose,
+		Debug:          *debug,
+		SkiplistPath:   *skiplist,
+		ForceASTParser: *forceAST,
+		ForceLegacy:    *forceLegacy,
 	})
 
 	if *updateSkip {

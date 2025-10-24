@@ -279,7 +279,17 @@ class ScapyASTParser(ast.NodeVisitor):
                 }
             else:
                 value = self._eval_node(keyword.value)
-                params[key] = value
+                # Check for CIDR notation in IP addresses
+                if isinstance(value, str) and '/' in value and (key in ['src', 'dst']):
+                    # This is CIDR notation: Scapy generates packets for all IPs in subnet
+                    special_handling[key] = {
+                        "type": "cidr_expansion",
+                        "cidr": value
+                    }
+                    # Keep the base IP for the layer params (CIDR will be stripped later)
+                    params[key] = value
+                else:
+                    params[key] = value
         
         # Extract positional arguments (rare in Scapy, but handle payload strings)
         for i, arg in enumerate(node.args):
@@ -397,9 +407,8 @@ class ScapyASTParser(ast.NodeVisitor):
         """Safely evaluate an AST node to get its value"""
         try:
             value = ast.literal_eval(node)
-            # Strip CIDR notation from IP addresses (e.g., "192.168.1.0/24" -> "192.168.1.0")
-            if isinstance(value, str) and '/' in value:
-                value = value.split('/')[0]
+            # Handle CIDR notation - keep full CIDR string for special processing
+            # Scapy generates packets for all IPs in the subnet when CIDR is used
             return value
         except (ValueError, TypeError):
             # Handle more complex expressions

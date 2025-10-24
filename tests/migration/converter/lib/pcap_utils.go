@@ -164,8 +164,9 @@ func (p *PcapAnalyzer) analyzePacket(packet gopacket.Packet) *PacketInfo {
 
 // CodegenOpts controls packet creation code generation
 type CodegenOpts struct {
-	StripVLAN bool
-	IsExpect  bool // Generate expected (response) packet with adapted TTL and swapped MACs
+	StripVLAN        bool
+	IsExpect         bool // Generate expected (response) packet with adapted TTL and swapped MACs
+	UseFrameworkMACs bool // Force use of framework standard MACs (52:54:00:6b:ff:a1/a5)
 }
 
 // GeneratePacketCreationCode generates Go code for packet creation based on pcap analysis
@@ -198,99 +199,462 @@ func (p *PcapAnalyzer) GeneratePacketCreationCode(info *PacketInfo, functionName
 	return code.String()
 }
 
+// ConvertPacketInfoToIR converts PacketInfo slice to IR JSON structure
+func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile string, expectFile string, opts CodegenOpts) (*IRJSON, error) {
+	var sendPackets []IRPacketDef
+	var expectPackets []IRPacketDef
+
+	targetList := &sendPackets
+	if opts.IsExpect {
+		targetList = &expectPackets
+	}
+
+	for _, info := range packets {
+		pkt := gopacket.NewPacket(info.RawData, layers.LayerTypeEthernet, gopacket.Default)
+		packetLayers := pkt.Layers()
+
+		var irLayers []IRLayer
+		for _, layer := range packetLayers {
+			irLayer, err := p.convertLayerToIR(layer, opts)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert layer: %w", err)
+			}
+			if irLayer != nil {
+				// Skip VLAN if StripVLAN is enabled
+				if opts.StripVLAN && irLayer.Type == "Dot1Q" {
+					continue
+				}
+				irLayers = append(irLayers, *irLayer)
+			}
+		}
+
+		*targetList = append(*targetList, IRPacketDef{
+			Layers:          irLayers,
+			SpecialHandling: nil,
+		})
+	}
+
+	pcapPair := IRPCAPPair{
+		SendFile:      sendFile,
+		ExpectFile:    expectFile,
+		SendPackets:   sendPackets,
+		ExpectPackets: expectPackets,
+	}
+
+	return &IRJSON{
+		PCAPPairs:       []IRPCAPPair{pcapPair},
+		HelperFunctions: []string{},
+	}, nil
+}
+
+// convertLayerToIR converts a gopacket layer to IR representation
+func (p *PcapAnalyzer) convertLayerToIR(layer gopacket.Layer, opts CodegenOpts) (*IRLayer, error) {
+	switch l := layer.(type) {
+	case *layers.Ethernet:
+		return p.convertEthernetToIR(l, opts), nil
+	case *layers.Dot1Q:
+		return p.convertDot1QToIR(l), nil
+	case *layers.IPv4:
+		return p.convertIPv4ToIR(l, opts), nil
+	case *layers.IPv6:
+		return p.convertIPv6ToIR(l, opts), nil
+	case *layers.TCP:
+		return p.convertTCPToIR(l), nil
+	case *layers.UDP:
+		return p.convertUDPToIR(l), nil
+	case *layers.ICMPv4:
+		return p.convertICMPv4ToIR(l), nil
+	case *layers.ICMPv6:
+		return p.convertICMPv6ToIR(l), nil
+	case *layers.ICMPv6Echo:
+		return p.convertICMPv6EchoToIR(l), nil
+	case *layers.IPv6Fragment:
+		return p.convertIPv6FragmentToIR(l), nil
+	case *layers.IPv6Destination:
+		// Skip for now, not commonly used
+		return nil, nil
+	case gopacket.Payload:
+		if len(l) > 0 {
+			return p.convertPayloadToIR(l), nil
+		}
+		return nil, nil
+	default:
+		// Unknown layer type, skip
+		return nil, nil
+	}
+}
+
+// convertEthernetToIR converts Ethernet layer to IR
+func (p *PcapAnalyzer) convertEthernetToIR(eth *layers.Ethernet, opts CodegenOpts) *IRLayer {
+	params := make(map[string]interface{})
+
+	// Handle MAC addresses based on options
+	if opts.UseFrameworkMACs {
+		// Use framework standard MACs
+		if opts.IsExpect {
+			// Swap: YANET sends back to client
+			params["src"] = "52:54:00:6b:ff:a5" // YANET
+			params["dst"] = "52:54:00:6b:ff:a1" // client
+		} else {
+			// client -> YANET
+			params["src"] = "52:54:00:6b:ff:a1" // client
+			params["dst"] = "52:54:00:6b:ff:a5" // YANET
+		}
+	} else {
+		// Extract MACs from PCAP
+		params["src"] = eth.SrcMAC.String()
+		params["dst"] = eth.DstMAC.String()
+	}
+
+	return &IRLayer{
+		Type:   "Ether",
+		Params: params,
+	}
+}
+
+// convertDot1QToIR converts VLAN layer to IR
+func (p *PcapAnalyzer) convertDot1QToIR(vlan *layers.Dot1Q) *IRLayer {
+	params := make(map[string]interface{})
+	params["vlan"] = int(vlan.VLANIdentifier)
+
+	return &IRLayer{
+		Type:   "Dot1Q",
+		Params: params,
+	}
+}
+
+// convertIPv4ToIR converts IPv4 layer to IR
+func (p *PcapAnalyzer) convertIPv4ToIR(ipv4 *layers.IPv4, opts CodegenOpts) *IRLayer {
+	params := make(map[string]interface{})
+
+	params["src"] = ipv4.SrcIP.String()
+	params["dst"] = ipv4.DstIP.String()
+	params["ttl"] = int(ipv4.TTL)
+
+	if ipv4.TOS != 0 {
+		params["tos"] = int(ipv4.TOS)
+	}
+	if ipv4.Id != 0 {
+		params["id"] = int(ipv4.Id)
+	}
+	if ipv4.Protocol != 0 {
+		params["proto"] = int(ipv4.Protocol)
+	}
+
+	return &IRLayer{
+		Type:   "IP",
+		Params: params,
+	}
+}
+
+// convertIPv6ToIR converts IPv6 layer to IR
+func (p *PcapAnalyzer) convertIPv6ToIR(ipv6 *layers.IPv6, opts CodegenOpts) *IRLayer {
+	params := make(map[string]interface{})
+
+	params["src"] = ipv6.SrcIP.String()
+	params["dst"] = ipv6.DstIP.String()
+	params["hlim"] = int(ipv6.HopLimit)
+
+	if ipv6.TrafficClass != 0 {
+		params["tc"] = int(ipv6.TrafficClass)
+	}
+	if ipv6.FlowLabel != 0 {
+		params["fl"] = int(ipv6.FlowLabel)
+	}
+	if ipv6.NextHeader != 0 {
+		params["nh"] = int(ipv6.NextHeader)
+	}
+
+	return &IRLayer{
+		Type:   "IPv6",
+		Params: params,
+	}
+}
+
+// convertTCPToIR converts TCP layer to IR
+func (p *PcapAnalyzer) convertTCPToIR(tcp *layers.TCP) *IRLayer {
+	params := make(map[string]interface{})
+
+	params["sport"] = int(tcp.SrcPort)
+	params["dport"] = int(tcp.DstPort)
+
+	if tcp.Seq != 0 {
+		params["seq"] = int(tcp.Seq)
+	}
+	if tcp.Ack != 0 {
+		params["ack"] = int(tcp.Ack)
+	}
+
+	// Build flags string
+	var flags []string
+	if tcp.FIN {
+		flags = append(flags, "F")
+	}
+	if tcp.SYN {
+		flags = append(flags, "S")
+	}
+	if tcp.RST {
+		flags = append(flags, "R")
+	}
+	if tcp.PSH {
+		flags = append(flags, "P")
+	}
+	if tcp.ACK {
+		flags = append(flags, "A")
+	}
+	if tcp.URG {
+		flags = append(flags, "U")
+	}
+	if tcp.ECE {
+		flags = append(flags, "E")
+	}
+	if tcp.CWR {
+		flags = append(flags, "C")
+	}
+	if len(flags) > 0 {
+		params["flags"] = strings.Join(flags, "")
+	}
+
+	return &IRLayer{
+		Type:   "TCP",
+		Params: params,
+	}
+}
+
+// convertUDPToIR converts UDP layer to IR
+func (p *PcapAnalyzer) convertUDPToIR(udp *layers.UDP) *IRLayer {
+	params := make(map[string]interface{})
+
+	params["sport"] = int(udp.SrcPort)
+	params["dport"] = int(udp.DstPort)
+
+	return &IRLayer{
+		Type:   "UDP",
+		Params: params,
+	}
+}
+
+// convertICMPv4ToIR converts ICMPv4 layer to IR
+func (p *PcapAnalyzer) convertICMPv4ToIR(icmp *layers.ICMPv4) *IRLayer {
+	params := make(map[string]interface{})
+
+	typeCode := uint16(icmp.TypeCode)
+	params["type"] = int(typeCode >> 8)
+	params["code"] = int(typeCode & 0xff)
+
+	if icmp.Id != 0 {
+		params["id"] = int(icmp.Id)
+	}
+	if icmp.Seq != 0 {
+		params["seq"] = int(icmp.Seq)
+	}
+
+	return &IRLayer{
+		Type:   "ICMP",
+		Params: params,
+	}
+}
+
+// convertICMPv6ToIR converts ICMPv6 layer to IR
+func (p *PcapAnalyzer) convertICMPv6ToIR(icmp *layers.ICMPv6) *IRLayer {
+	params := make(map[string]interface{})
+
+	typeCode := uint16(icmp.TypeCode)
+	icmpType := int(typeCode >> 8)
+	code := int(typeCode & 0xff)
+
+	// Determine layer type based on ICMPv6 type
+	var layerType string
+	switch icmpType {
+	case 128: // Echo Request
+		layerType = "ICMPv6EchoRequest"
+	case 129: // Echo Reply
+		layerType = "ICMPv6EchoReply"
+	case 1: // Destination Unreachable
+		layerType = "ICMPv6DestUnreach"
+		params["code"] = code
+	default:
+		layerType = "ICMPv6EchoRequest" // Default fallback
+	}
+
+	return &IRLayer{
+		Type:   layerType,
+		Params: params,
+	}
+}
+
+// convertICMPv6EchoToIR converts ICMPv6 Echo layer to IR
+func (p *PcapAnalyzer) convertICMPv6EchoToIR(echo *layers.ICMPv6Echo) *IRLayer {
+	params := make(map[string]interface{})
+
+	if echo.Identifier != 0 {
+		params["id"] = int(echo.Identifier)
+	}
+	if echo.SeqNumber != 0 {
+		params["seq"] = int(echo.SeqNumber)
+	}
+
+	// Note: The type should be determined by the parent ICMPv6 layer
+	// This is a supplementary layer, so we return nil to avoid duplication
+	return nil
+}
+
+// convertIPv6FragmentToIR converts IPv6 Fragment header to IR
+func (p *PcapAnalyzer) convertIPv6FragmentToIR(frag *layers.IPv6Fragment) *IRLayer {
+	params := make(map[string]interface{})
+
+	params["id"] = int(frag.Identification)
+	params["offset"] = int(frag.FragmentOffset)
+	if frag.MoreFragments {
+		params["m"] = 1
+	} else {
+		params["m"] = 0
+	}
+
+	return &IRLayer{
+		Type:   "IPv6ExtHdrFragment",
+		Params: params,
+	}
+}
+
+// convertPayloadToIR converts payload to IR
+func (p *PcapAnalyzer) convertPayloadToIR(payload gopacket.Payload) *IRLayer {
+	params := make(map[string]interface{})
+
+	// Store payload as hex string or raw bytes
+	// For simplicity, we'll use a special _arg0 parameter
+	params["_arg0"] = string(payload)
+
+	return &IRLayer{
+		Type:   "Raw",
+		Params: params,
+	}
+}
+
+// renameFunctionInGeneratedCode extracts and renames the generated function
+func (p *PcapAnalyzer) renameFunctionInGeneratedCode(code string, desiredName string) string {
+	// The generated code may include helper functions and the main function
+	// We need to rename both the helper and the main function
+
+	lines := strings.Split(code, "\n")
+	var result strings.Builder
+	inFunction := false
+	braceCount := 0
+	foundFunction := false
+	isFirstFunction := true
+
+	for _, line := range lines {
+		// Look for function definitions (including helpers and main function)
+		if strings.HasPrefix(line, "func Generate") && strings.Contains(line, "(t *testing.T)") {
+
+			// Replace the function name
+			funcStart := strings.Index(line, "func ")
+			if funcStart != -1 {
+				funcStart += 5 // Skip "func "
+				funcEnd := strings.Index(line[funcStart:], "(")
+				if funcEnd != -1 {
+					oldName := line[funcStart : funcStart+funcEnd]
+					// If this is a helper function (ends with "Helper"), rename it accordingly
+					if strings.HasSuffix(oldName, "Helper") {
+						line = "func " + desiredName + "Helper" + line[funcStart+funcEnd:]
+					} else {
+						// Main function
+						line = "func " + desiredName + line[funcStart+funcEnd:]
+					}
+				}
+			}
+			inFunction = true
+			foundFunction = true
+
+			// Add a newline before subsequent functions (but not the first one)
+			if !isFirstFunction {
+				result.WriteString("\n")
+			}
+			isFirstFunction = false
+
+			result.WriteString(line)
+			result.WriteString("\n")
+
+			// Count braces on the same line
+			braceCount += strings.Count(line, "{") - strings.Count(line, "}")
+			continue
+		}
+
+		// Look for struct definitions (for pattern-based params)
+		if strings.HasPrefix(line, "type Generate") && strings.Contains(line, "Params struct") {
+			// Replace the struct name
+			typeStart := strings.Index(line, "type ")
+			if typeStart != -1 {
+				typeStart += 5 // Skip "type "
+				typeEnd := strings.Index(line[typeStart:], " ")
+				if typeEnd != -1 {
+					line = "type " + desiredName + "Params" + line[typeStart+typeEnd:]
+				}
+			}
+			result.WriteString(line)
+			result.WriteString("\n")
+			continue
+		}
+
+		// If we're in a function, copy lines and track braces
+		if inFunction {
+			result.WriteString(line)
+			result.WriteString("\n")
+
+			braceCount += strings.Count(line, "{") - strings.Count(line, "}")
+
+			// If braceCount reaches 0, we've finished the function
+			if braceCount == 0 {
+				inFunction = false
+			}
+		} else if foundFunction && (strings.HasPrefix(line, "//") || strings.TrimSpace(line) == "") {
+			// Copy comments and empty lines between functions
+			result.WriteString(line)
+			result.WriteString("\n")
+		}
+	}
+
+	// If we didn't find a function, return the original code
+	if !foundFunction {
+		return code
+	}
+
+	return result.String()
+}
+
 // GeneratePacketCreationCodeWithOptions generates packet creation code with additional options (e.g., StripVLAN)
+// This method uses the same code generation path as AST parser for consistency
 func (p *PcapAnalyzer) GeneratePacketCreationCodeWithOptions(packets []*PacketInfo, functionName string, opts CodegenOpts) string {
 	if len(packets) == 0 {
 		return fmt.Sprintf("// %s returns no packets (empty PCAP)\nfunc %s(t *testing.T) []gopacket.Packet {\n\treturn nil\n}\n", functionName, functionName)
 	}
 
-	var body strings.Builder
-	body.WriteString(fmt.Sprintf("// %s creates packet slice based on pcap file analysis\n", functionName))
-	body.WriteString(fmt.Sprintf("func %s(t *testing.T) []gopacket.Packet {\n", functionName))
-	body.WriteString("\tvar packets []gopacket.Packet\n\n")
-
-	for idx, info := range packets {
-		body.WriteString(fmt.Sprintf("\t// Packet %d\n\t{\n", idx))
-
-		// Parse original packet to extract all layer details
-		pkt := gopacket.NewPacket(info.RawData, layers.LayerTypeEthernet, gopacket.Default)
-
-		body.WriteString("\t\tvar layersToSerialize []gopacket.SerializableLayer\n\n")
-
-		// Collect layers and determine if VLAN will be stripped
-		packetLayers := pkt.Layers()
-		hasVLAN := false
-		for _, layer := range packetLayers {
-			if _, ok := layer.(*layers.Dot1Q); ok {
-				hasVLAN = true
-				break
-			}
-		}
-
-		// Generate code for each layer
-		for _, layer := range packetLayers {
-			switch l := layer.(type) {
-			case *layers.Ethernet:
-				// If VLAN is stripped, adjust EtherType to point to next layer
-				body.WriteString(p.generateEthernetLayerCode(l, hasVLAN && opts.StripVLAN, packetLayers, opts.IsExpect))
-
-			case *layers.Dot1Q:
-				if !opts.StripVLAN {
-					body.WriteString(p.generateVLANLayerCode(l))
-				} else {
-					body.WriteString("\t\t// VLAN layer stripped (StripVLAN enabled)\n\n")
-				}
-
-			case *layers.IPv4:
-				body.WriteString(p.generateIPv4LayerCode(l, opts.IsExpect))
-
-			case *layers.IPv6:
-				body.WriteString(p.generateIPv6LayerCode(l))
-
-			case *layers.IPv6Fragment:
-				body.WriteString(p.generateIPv6FragmentLayerCode(l))
-
-			case *layers.TCP:
-				body.WriteString(p.generateTCPLayerCode(l))
-
-			case *layers.UDP:
-				body.WriteString(p.generateUDPLayerCode(l))
-
-			case *layers.ICMPv4:
-				body.WriteString(p.generateICMPv4LayerCode(l))
-
-			case *layers.ICMPv6:
-				body.WriteString(p.generateICMPv6LayerCode(l))
-
-			case *layers.ICMPv6Echo:
-				body.WriteString(p.generateICMPv6EchoLayerCode(l))
-
-			case *layers.IPv6Destination:
-				body.WriteString(p.generateIPv6DestOptLayerCode(l))
-
-			case gopacket.Payload:
-				if len(l) > 0 {
-					body.WriteString(p.generatePayloadCode(l))
-				}
-			}
-		}
-
-		body.WriteString(`
-		// Serialize layers
-		buf := gopacket.NewSerializeBuffer()
-		serializeOpts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
-		err := gopacket.SerializeLayers(buf, serializeOpts, layersToSerialize...)
-		require.NoError(t, err, "Failed to serialize packet")
-		
-		pkt := gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
-		require.Empty(t, pkt.ErrorLayer())
-		packets = append(packets, pkt)
-	}
-`)
+	// Convert PacketInfo to IR
+	ir, err := p.ConvertPacketInfoToIR(packets, "send.pcap", "expect.pcap", opts)
+	if err != nil {
+		// Fallback to error comment if conversion fails
+		return fmt.Sprintf("// %s - conversion error: %v\nfunc %s(t *testing.T) []gopacket.Packet {\n\treturn nil\n}\n", functionName, err, functionName)
 	}
 
-	body.WriteString("\n\treturn packets\n}\n")
-	return body.String()
+	// Extract packets from IR (same as AST parser does)
+	var irPackets []IRPacketDef
+	if len(ir.PCAPPairs) > 0 {
+		if opts.IsExpect {
+			irPackets = ir.PCAPPairs[0].ExpectPackets
+		} else {
+			irPackets = ir.PCAPPairs[0].SendPackets
+		}
+	}
+
+	if len(irPackets) == 0 {
+		return fmt.Sprintf("// %s - no packets in IR\nfunc %s(t *testing.T) []gopacket.Packet {\n\treturn nil\n}\n", functionName, functionName)
+	}
+
+	// Use ScapyCodegenV2 to generate code directly from packets (same path as AST parser)
+	codegen := NewScapyCodegenV2(opts.StripVLAN)
+	code := codegen.GeneratePacketFunction(functionName, irPackets, opts.IsExpect)
+
+	return code
 }
 
 // generateEthernetLayerCode generates code for Ethernet layer with adapted MAC addresses
@@ -610,69 +974,6 @@ func (p *PcapAnalyzer) GenerateTcpdumpComment(pcapPath string, packets []*Packet
 	}
 
 	return b.String(), nil
-}
-
-// generateTcpdumpLikeComment generates tcpdump-like detailed packet information
-func (p *PcapAnalyzer) generateTcpdumpLikeComment(info *PacketInfo) string {
-	var comment strings.Builder
-
-	// Ethernet layer
-	comment.WriteString(fmt.Sprintf("//   Ethernet: %s > %s, ethertype ", info.SrcMAC, info.DstMAC))
-	if info.IsIPv4 {
-		comment.WriteString("IPv4 (0x0800)")
-	} else if info.IsIPv6 {
-		comment.WriteString("IPv6 (0x86dd)")
-	}
-	if info.VLANID > 0 {
-		comment.WriteString(fmt.Sprintf(", vlan %d", info.VLANID))
-	}
-	comment.WriteString(fmt.Sprintf(", length %d\n", len(info.RawData)))
-
-	// IP layer
-	if info.IsIPv4 {
-		comment.WriteString(fmt.Sprintf("//   IP: %s > %s, proto ", info.SrcIP, info.DstIP))
-		if info.IsTCP {
-			comment.WriteString("TCP (6)")
-		} else if info.IsUDP {
-			comment.WriteString("UDP (17)")
-		} else if info.IsICMP {
-			comment.WriteString("ICMP (1)")
-		} else {
-			comment.WriteString(fmt.Sprintf("(%s)", info.Protocol))
-		}
-		comment.WriteString(fmt.Sprintf(", length %d, ttl %d\n", info.PayloadSize, 64))
-	} else if info.IsIPv6 {
-		comment.WriteString(fmt.Sprintf("//   IPv6: %s > %s, ", info.SrcIP, info.DstIP))
-		if info.IsTCP {
-			comment.WriteString("next TCP")
-		} else if info.IsUDP {
-			comment.WriteString("next UDP")
-		} else if info.IsICMP {
-			comment.WriteString("next ICMPv6")
-		} else {
-			comment.WriteString(fmt.Sprintf("next %s", info.Protocol))
-		}
-		comment.WriteString(fmt.Sprintf(", length %d, hlim %d\n", info.PayloadSize, 64))
-	}
-
-	// Transport layer
-	if info.IsTCP {
-		comment.WriteString(fmt.Sprintf("//   TCP: %d > %d\n",
-			info.SrcPort, info.DstPort))
-	} else if info.IsUDP {
-		comment.WriteString(fmt.Sprintf("//   UDP: %d > %d\n",
-			info.SrcPort, info.DstPort))
-	} else if info.IsICMP {
-		comment.WriteString("//   ICMP\n")
-	}
-
-	return comment.String()
-}
-
-// getTCPFlags returns string representation of TCP flags
-func (p *PcapAnalyzer) getTCPFlags(info *PacketInfo) string {
-	// PacketInfo does not currently store per-flag booleans; return placeholder
-	return "n/a"
 }
 
 // generateRawPacket generates code for creating packet from raw data
