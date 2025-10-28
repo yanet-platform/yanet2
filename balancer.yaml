@@ -1,0 +1,24 @@
+timeouts:
+  tcp_syn_ack: 10
+  tcp_syn: 10
+  tcp_fin: 10
+  tcp: 20
+  udp: 30
+  default: 60
+vs:
+  - ip: "192.0.2.1"
+    proto: "TCP"
+    port: 5005
+    flags:
+      gre: false
+      ops: false
+      fix_mss: false
+      pure_l3: false
+    allowed_srcs:
+      - "192.0.0.0/8"
+    reals:
+      - weight: 1
+        dst: "4.5.6.7"
+        src: "3.3.4.0"
+        src_mask: "0.255.0.255"
+        enabled: true

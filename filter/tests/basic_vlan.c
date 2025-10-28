@@ -15,7 +15,7 @@
 
 void
 query_packet(struct filter *filter, uint16_t vlan, uint32_t expected) {
-	struct packet packet = make_packet(
+	struct packet packet = make_packet4(
 		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 0, 0, IPPROTO_UDP, 0, vlan
 	);
 	const uint32_t *actions;

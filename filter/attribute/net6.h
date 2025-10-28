@@ -1,11 +1,8 @@
 #pragma once
 
-#include "../helper.h"
 #include "../rule.h"
 #include "common/lpm.h"
 #include "common/range_collector.h"
-
-#include "util.h"
 
 #include "common/registry.h"
 #include "dataplane/packet/packet.h"
@@ -42,13 +39,13 @@ typedef void (*net6_get_part_func)(
 	struct net6 *net, uint8_t **addr, uint8_t **mask
 );
 
-static void
+static inline void
 net6_get_hi_part(struct net6 *net, uint8_t **addr, uint8_t **mask) {
 	*addr = net->addr;
 	*mask = net->mask;
 }
 
-static void
+static inline void
 net6_get_lo_part(struct net6 *net, uint8_t **addr, uint8_t **mask) {
 	*addr = net->addr + 8;
 	*mask = net->mask + 8;
@@ -64,7 +61,7 @@ net6_normalize(struct net6 *src, struct net6 *dst) {
 		dst->addr[idx] &= src->mask[idx];
 }
 
-static int
+static inline int
 collect_net6_range(
 	struct memory_context *memory_context,
 	const struct filter_rule *actions,
@@ -126,7 +123,7 @@ error:
 	return -1;
 }
 
-static int
+static inline int
 merge_net6_range(
 	struct memory_context *memory_context,
 	const struct filter_rule *actions,
@@ -302,7 +299,6 @@ merge_net6_range(
 		struct net6 *nets;
 		uint32_t net_count;
 		get_net6(action, &nets, &net_count);
-
 		for (struct net6 *rule_net = nets; rule_net < nets + net_count;
 		     ++rule_net) {
 			struct net6 net6;
@@ -348,7 +344,7 @@ init_net6(
 		memory_balloc(memory_context, sizeof(struct net6_classifier));
 	if (net6 == NULL)
 		return -1;
-	*data = net6;
+	SET_OFFSET_OF(data, net6);
 
 	struct range_index ri_hi;
 	if (collect_net6_range(

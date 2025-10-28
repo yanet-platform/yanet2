@@ -15,6 +15,7 @@ members = [
     "modules/forward/cli",
     "modules/nat64/cli",
     "modules/pdump/cli",
+    "modules/balancer/cli",
     "modules/route/cli/neighbour",
     "modules/route/cli/route",
     "web",

@@ -1,0 +1,69 @@
+package test_balancer
+
+import (
+	"net/netip"
+	"testing"
+
+	"github.com/gopacket/gopacket/layers"
+	"github.com/stretchr/testify/require"
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
+	"github.com/yanet-platform/yanet2/tests/go/common"
+)
+
+////////////////////////////////////////////////////////////////////////////////
+
+func TestBalancerBasic(t *testing.T) {
+	mock, err := NewMock(1 << 21)
+	require.Nil(t, err, "failed to create mock: %s", err)
+	defer FreeMock(&mock)
+	agent, err := mock.CreateAgent(1 << 20)
+	require.Nil(t, err, "failed to create agent: %s", err)
+
+	config := balancer.BalancerConfig{
+		Services: []balancer.VirtualService{
+			{
+				Address: IpAddr("192.166.13.22"),
+				Port:    1000,
+				Flags: balancer.VsFlags{
+					GRE:    false,
+					OPS:    false,
+					PureL3: false,
+					FixMSS: false,
+				},
+				Proto: balancer.VsProtoTcp,
+				AllowedSrc: []netip.Prefix{
+					IpPrefix("10.12.0.0/8"),
+				},
+				Reals: []balancer.Real{
+					{
+						Weight:  1,
+						DstAddr: IpAddr("1.1.1.1"),
+						SrcAddr: IpAddr("3.3.3.3"),
+						SrcMask: IpAddr("255.240.255.0"),
+						Enabled: true,
+					},
+				},
+			},
+		},
+	}
+	b, err := balancer.NewBalancerInstance(&agent, "balancer", &config, 100)
+	require.Nil(t, err, "failed to create new balancer instance")
+	defer b.Free()
+
+	inLayers := MakeTCPPacket("10.12.15.1", 1005, "192.166.13.22", 1000, &layers.TCP{SYN: true})
+	originPacket := common.LayersToPacket(t, inLayers...)
+	t.Log("Origin packet", originPacket)
+
+	expectedPacket := Encap(t, inLayers, "3.12.3.1", "1.1.1.1")
+	t.Log("Expected packet", expectedPacket)
+
+	result, err := HandlePackets(b, originPacket)
+	require.Nil(t, err, "failed to handle packet1: %s", err)
+
+	require.True(t, len(result.Output) == 1, "failed to handle packet #1")
+	resultPacket := common.ParseEtherPacket(result.Output[0])
+	t.Log("Result packet", resultPacket)
+
+	// Ensure packets equal
+	CheckPacketsEqual(t, resultPacket, expectedPacket)
+}

@@ -15,7 +15,7 @@ query_and_expect_actions(
 	uint32_t action_count,
 	uint32_t *actions
 ) {
-	struct packet packet = make_packet(
+	struct packet packet = make_packet4(
 		ip(0, 0, 0, 123),
 		ip(0, 0, 1, 65),
 		src_port,

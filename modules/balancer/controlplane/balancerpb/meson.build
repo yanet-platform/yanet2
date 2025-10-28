@@ -14,7 +14,7 @@ protoc_gen = custom_target(
         '--go-grpc_out=paths=source_relative:' + proto_dir,
         '@INPUT@',
     ],
-    depends: [common_protoc_gen],
+    depends: [common_protoc_gen, lib_balancer_cp],
     build_by_default: true,
 )
 balancer_protoc_gen = protoc_gen

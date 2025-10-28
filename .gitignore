@@ -99,6 +99,7 @@ memory-bank
 
 # Ignore Cargo.lock for libraries.
 common/**/Cargo.lock
+Cargo.lock
 
 # local env
 .envrc

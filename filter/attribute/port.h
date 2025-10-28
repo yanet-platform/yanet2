@@ -1,4 +1,3 @@
-#include "../helper.h"
 #include "../rule.h"
 #include "common/memory.h"
 #include "common/registry.h"
@@ -166,7 +165,7 @@ init_port_dst(
 	if (table == NULL) {
 		return -1;
 	}
-	*data = (void *)table;
+	SET_OFFSET_OF(data, table);
 	return collect_port_values(
 		memory_context,
 		actions,
@@ -190,7 +189,7 @@ init_port_src(
 	if (table == NULL) {
 		return -1;
 	}
-	*data = (void *)table;
+	SET_OFFSET_OF(data, table);
 	return collect_port_values(
 		memory_context,
 		actions,
