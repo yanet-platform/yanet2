@@ -26,6 +26,8 @@ type BalancerModule struct {
 func NewBalancerModule(cfg *Config, log *zap.SugaredLogger) (*BalancerModule, error) {
 	log = log.With(zap.String("module", "balancerpb.BalancerService"))
 
+	log.Infof("attaching shared memory...")
+
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
 
 	if err != nil {
