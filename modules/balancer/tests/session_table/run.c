@@ -194,7 +194,13 @@ run(void *arena,
 
 	double insert_failure_perc = 100.0 * (double)insert_failures /
 				     (double)(iterations * workers_cnt);
-	LOG(INFO, "insert failures per: %.4lf%%", insert_failure_perc);
+	LOG(INFO, "insert failures: %.4lf%%", insert_failure_perc);
+
+	double elapsed_s = elapsed_ns / 1e9;
+	LOG(INFO,
+	    "elapsed: %.2lfs (%.2lf MRPS)",
+	    elapsed_s,
+	    (double)(iterations * workers_cnt) / 1e6 / elapsed_s);
 
 	return 0;
 }
