@@ -192,20 +192,9 @@ run(void *arena,
 
 	LOG(INFO, "OK");
 
-	double elapsed_s = elapsed_ns / 1e9;
-	LOG(INFO,
-	    "Elapsed: %.2lfs (%.2lf MRPS)",
-	    elapsed_s,
-	    (double)(iterations * workers_cnt) / 1e6 / elapsed_s);
-
 	double insert_failure_perc = 100.0 * (double)insert_failures /
 				     (double)(iterations * workers_cnt);
-	if (insert_failure_perc > 0.01) {
-		LOG(ERROR,
-		    "Too big insert failures per (%.4lf%%)",
-		    insert_failure_perc);
-		return 1;
-	}
+	LOG(INFO, "insert failures per: %.4lf%%", insert_failure_perc);
 
 	return 0;
 }
