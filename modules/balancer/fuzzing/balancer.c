@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "yanet_build_config.h" // MBUF_MAX_SIZE

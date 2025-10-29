@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 
+#include "common/strutils.h"
 #include "dpdk.h"
 #include "logging/log.h"
 
