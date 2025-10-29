@@ -230,6 +230,7 @@ func TestCodegenV2_ICMPv6(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Contains(t, code, "lib.ICMPv6EchoRequest(")
+	// ICMPv6EchoRequest uses ICMPv6Id/ICMPv6Seq (without "Echo" in function name)
 	require.Contains(t, code, "lib.ICMPv6Id(4660)")
 	require.Contains(t, code, "lib.ICMPv6Seq(30309)")
 }
@@ -400,4 +401,375 @@ func TestCodegenV2_ConvertAll96Tests(t *testing.T) {
 
 	t.Logf("\n✓ Conversion pipeline validated on %d tests with %.1f%% success rate",
 		totalTests, successRate)
+}
+
+func TestCodegenV2_ICMPv6Echo(t *testing.T) {
+	irJSON := `{
+		"pcap_pairs": [
+			{
+				"send_file": "icmpv6-echo-send.pcap",
+				"expect_file": "",
+				"send_packets": [
+					{
+						"layers": [
+							{
+								"type": "Ether",
+								"params": {
+									"dst": "00:11:22:33:44:55",
+									"src": "00:00:00:00:00:01"
+								}
+							},
+							{
+								"type": "IPv6",
+								"params": {
+									"src": "2001:db8::1",
+									"dst": "2001:db8::2"
+								}
+							},
+							{
+								"type": "ICMPv6",
+								"params": {
+									"type": 128,
+									"code": 0
+								}
+							},
+							{
+								"type": "ICMPv6Echo",
+								"params": {
+									"id": 1234,
+									"seq": 1
+								}
+							}
+						],
+						"special_handling": null
+					}
+				],
+				"expect_packets": []
+			}
+		]
+	}`
+
+	cg := NewScapyCodegenV2(false)
+	result, err := cg.GenerateFromIR(irJSON)
+	require.NoError(t, err)
+	require.Contains(t, result, "lib.ICMPv6Echo(")
+	require.Contains(t, result, "lib.ICMPv6EchoId(1234)")
+	require.Contains(t, result, "lib.ICMPv6EchoSeq(1)")
+}
+
+func TestCodegenV2_ICMPTypeCode(t *testing.T) {
+	// Test ICMP pattern path with varying type
+	irJSON := `{
+		"pcap_pairs": [
+			{
+				"send_file": "icmp-typecode-send.pcap",
+				"expect_file": "",
+				"send_packets": [
+					{
+						"layers": [
+							{"type": "Ether", "params": {"dst": "00:11:22:33:44:55", "src": "00:00:00:00:00:01"}},
+							{"type": "IP", "params": {"src": "1.2.3.4", "dst": "5.6.7.8"}},
+							{"type": "ICMP", "params": {"type": 0, "code": 0}}
+						],
+						"special_handling": null
+					},
+					{
+						"layers": [
+							{"type": "Ether", "params": {"dst": "00:11:22:33:44:55", "src": "00:00:00:00:00:01"}},
+							{"type": "IP", "params": {"src": "1.2.3.4", "dst": "5.6.7.8"}},
+							{"type": "ICMP", "params": {"type": 3, "code": 0}}
+						],
+						"special_handling": null
+					},
+					{
+						"layers": [
+							{"type": "Ether", "params": {"dst": "00:11:22:33:44:55", "src": "00:00:00:00:00:01"}},
+							{"type": "IP", "params": {"src": "1.2.3.4", "dst": "5.6.7.8"}},
+							{"type": "ICMP", "params": {"type": 8, "code": 0}}
+						],
+						"special_handling": null
+					}
+				],
+				"expect_packets": []
+			}
+		]
+	}`
+
+	cg := NewScapyCodegenV2(false)
+	result, err := cg.GenerateFromIR(irJSON)
+	require.NoError(t, err)
+	require.Contains(t, result, "lib.ICMPTypeCode")
+	require.Contains(t, result, "ICMPTypeCode(icmpType, 0)")
+}
+
+func TestConverter_ParseSendExpectFiles(t *testing.T) {
+	c := &Converter{}
+
+	// Test map[interface{}]interface{} format
+	packet1 := map[interface{}]interface{}{
+		"send":   "send1.pcap",
+		"expect": "expect1.pcap",
+	}
+	send1, expect1 := c.parseSendExpectFiles(packet1)
+	require.Equal(t, "send1.pcap", send1)
+	require.Equal(t, "expect1.pcap", expect1)
+
+	// Test map[string]interface{} format
+	packet2 := map[string]interface{}{
+		"send":   "send2.pcap",
+		"expect": "expect2.pcap",
+	}
+	send2, expect2 := c.parseSendExpectFiles(packet2)
+	require.Equal(t, "send2.pcap", send2)
+	require.Equal(t, "expect2.pcap", expect2)
+
+	// Test with only send file
+	packet3 := map[string]interface{}{
+		"send": "send3.pcap",
+	}
+	send3, expect3 := c.parseSendExpectFiles(packet3)
+	require.Equal(t, "send3.pcap", send3)
+	require.Equal(t, "", expect3)
+
+	// Test invalid type
+	send4, expect4 := c.parseSendExpectFiles("invalid")
+	require.Equal(t, "", send4)
+	require.Equal(t, "", expect4)
+}
+
+func TestCodegenV2_IPv6Fragment(t *testing.T) {
+	irJSON := `{
+		"pcap_pairs": [
+			{
+				"send_file": "frag-send.pcap",
+				"expect_file": "",
+				"send_packets": [
+					{
+						"layers": [
+							{
+								"type": "Ether",
+								"params": {}
+							},
+							{
+								"type": "IPv6",
+								"params": {
+									"src": "2001:db8::1",
+									"dst": "2001:db8::2"
+								}
+							},
+							{
+								"type": "IPv6ExtHdrFragment",
+								"params": {
+									"id": 12345,
+									"offset": 0,
+									"m": 1
+								}
+							},
+							{
+								"type": "UDP",
+								"params": {
+									"sport": 1234,
+									"dport": 5678
+								}
+							}
+						],
+						"special_handling": null
+					}
+				],
+				"expect_packets": []
+			}
+		],
+		"helper_functions": []
+	}`
+
+	codegen := NewScapyCodegenV2(false)
+	code, err := codegen.GenerateFromIR(irJSON)
+	require.NoError(t, err)
+
+	require.Contains(t, code, "lib.IPv6ExtHdrFragment(")
+	require.Contains(t, code, "lib.IPv6FragId(12345)")
+	require.Contains(t, code, "lib.IPv6FragOffset(0)")
+	require.Contains(t, code, "lib.IPv6FragM(true)")
+}
+
+func TestCodegenV2_GREWithVLAN(t *testing.T) {
+	irJSON := `{
+		"pcap_pairs": [
+			{
+				"send_file": "gre-vlan-send.pcap",
+				"expect_file": "",
+				"send_packets": [
+					{
+						"layers": [
+							{
+								"type": "Ether",
+								"params": {}
+							},
+							{
+								"type": "Dot1Q",
+								"params": {"vlan": 200}
+							},
+							{
+								"type": "IP",
+								"params": {
+									"src": "10.0.0.1",
+									"dst": "10.0.0.2"
+								}
+							},
+							{
+								"type": "GRE",
+								"params": {
+									"proto": 2048,
+									"chksum_present": 1
+								}
+							},
+							{
+								"type": "IP",
+								"params": {
+									"src": "192.168.1.1",
+									"dst": "192.168.1.2"
+								}
+							},
+							{
+								"type": "TCP",
+								"params": {
+									"sport": 80,
+									"dport": 443
+								}
+							}
+						],
+						"special_handling": null
+					}
+				],
+				"expect_packets": []
+			}
+		],
+		"helper_functions": []
+	}`
+
+	codegen := NewScapyCodegenV2(false)
+	code, err := codegen.GenerateFromIR(irJSON)
+	require.NoError(t, err)
+
+	require.Contains(t, code, "lib.Dot1Q(")
+	require.Contains(t, code, "lib.VLANId(200)")
+	require.Contains(t, code, "lib.GRE(")
+	require.Contains(t, code, "lib.GREChecksumPresent(true)")
+	// Should have two IP layers
+	ipCount := strings.Count(code, "lib.IP(")
+	require.GreaterOrEqual(t, ipCount, 2, "Should have at least 2 IP layers (outer and inner)")
+}
+
+func TestConverter_CLICheckNegative(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     interface{}
+		expectSkip  bool
+		skipMessage string
+	}{
+		{
+			name:        "invalid_format_not_string",
+			content:     12345,
+			expectSkip:  true,
+			skipMessage: "Invalid cli_check format",
+		},
+		{
+			name:        "empty_commands",
+			content:     "# Just a comment\n",
+			expectSkip:  true,
+			skipMessage: "cli_check has no commands to execute",
+		},
+		{
+			name: "valid_with_expect",
+			content: `YANET_FORMAT_COLUMNS=80 show version
+EXPECT_BEGIN
+Version: 1.0.0
+EXPECT_END`,
+			expectSkip: false,
+		},
+		{
+			name: "valid_with_regex",
+			content: `YANET_FORMAT_COLUMNS=80 show stats
+EXPECT_REGEX: packets:\\s+\\d+`,
+			expectSkip: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewConverter(&Config{Verbose: false})
+			result := c.convertCLICheck(tt.content)
+
+			require.Equal(t, "cli_check", result.Type)
+
+			if tt.expectSkip {
+				require.Contains(t, result.GoCode, "t.Skipf")
+				if tt.skipMessage != "" {
+					require.Contains(t, result.GoCode, tt.skipMessage)
+				}
+			} else {
+				require.NotContains(t, result.GoCode, "t.Skipf")
+				require.Contains(t, result.GoCode, "fw.CLI.ExecuteCommand")
+			}
+		})
+	}
+}
+
+func TestCodegenV2_ICMPv6EchoInPattern(t *testing.T) {
+	// Test that ICMPv6 echo parameters are preserved in pattern flows
+	irJSON := `{
+		"pcap_pairs": [
+			{
+				"send_file": "icmpv6-pattern.pcap",
+				"expect_file": "",
+				"send_packets": [
+					{
+						"layers": [
+							{"type": "Ether", "params": {}},
+							{"type": "IPv6", "params": {"src": "2001:db8::1", "dst": "2001:db8::2"}},
+							{"type": "ICMPv6EchoRequest", "params": {"id": 100, "seq": 1}}
+						],
+						"special_handling": null
+					},
+					{
+						"layers": [
+							{"type": "Ether", "params": {}},
+							{"type": "IPv6", "params": {"src": "2001:db8::1", "dst": "2001:db8::2"}},
+							{"type": "ICMPv6EchoRequest", "params": {"id": 100, "seq": 2}}
+						],
+						"special_handling": null
+					},
+					{
+						"layers": [
+							{"type": "Ether", "params": {}},
+							{"type": "IPv6", "params": {"src": "2001:db8::1", "dst": "2001:db8::2"}},
+							{"type": "ICMPv6EchoRequest", "params": {"id": 100, "seq": 3}}
+						],
+						"special_handling": null
+					}
+				],
+				"expect_packets": []
+			}
+		],
+		"helper_functions": []
+	}`
+
+	codegen := NewScapyCodegenV2(false)
+	code, err := codegen.GenerateFromIR(irJSON)
+	require.NoError(t, err)
+
+	// Should detect pattern and generate loop with varying seq
+	require.Contains(t, code, "ICMPv6EchoRequest")
+
+	// The codegen should handle ICMPv6 echo parameters correctly
+	// For ICMPv6EchoRequest/Reply, it should use ICMPv6Id/ICMPv6Seq (without "Echo")
+	hasId := strings.Contains(code, "lib.ICMPv6Id(100)")
+	hasSeq := strings.Contains(code, "lib.ICMPv6Seq")
+
+	require.True(t, hasId || hasSeq, "Should have ICMPv6 id or seq parameters")
+
+	// Log the generated code for debugging if needed
+	if !hasId && !hasSeq {
+		t.Logf("Generated code:\n%s", code)
+	}
 }

@@ -222,7 +222,7 @@ class ScapyASTParser(ast.NodeVisitor):
     def _parse_layer_chain(self, node: ast.BinOp) -> PacketDefinition:
         """Parse a chain of layers: Ether()/IP()/TCP() or with subscripts"""
         layers = []
-        
+
         def collect_layers(n: ast.AST):
             if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div):
                 collect_layers(n.left)
@@ -238,7 +238,22 @@ class ScapyASTParser(ast.NodeVisitor):
                 if packets and packets[0].layers:
                     # Add all layers from the subscripted packet as payload
                     layers.extend(packets[0].layers)
-        
+            elif isinstance(n, (ast.Constant, ast.Str)):
+                # Handle string literal payload: ICMPv6EchoRequest()/"payload string"
+                # Extract the string value
+                if isinstance(n, ast.Constant):
+                    payload_str = n.value
+                else:  # ast.Str (Python < 3.8)
+                    payload_str = n.s
+
+                if isinstance(payload_str, str):
+                    # Create a Raw layer with the payload
+                    raw_layer = PacketLayer(
+                        layer_type="Raw",
+                        params={"_arg0": payload_str}
+                    )
+                    layers.append(raw_layer)
+
         collect_layers(node)
         return PacketDefinition(layers)
     

@@ -3,10 +3,10 @@ package lib
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -271,7 +271,7 @@ func (cg *ScapyCodegenV2) generateLayerCall(layer IRLayer, isExpect bool) string
 		code.WriteString(cg.generateUDPOptions(layer))
 	case "ICMP":
 		code.WriteString(cg.generateICMPOptions(layer))
-	case "ICMPv6EchoRequest", "ICMPv6EchoReply", "ICMPv6DestUnreach":
+	case "ICMPv6EchoRequest", "ICMPv6EchoReply", "ICMPv6DestUnreach", "ICMPv6Echo":
 		code.WriteString(cg.generateICMPv6Options(layer))
 	case "IPv6ExtHdrFragment":
 		code.WriteString(cg.generateIPv6FragmentOptions(layer))
@@ -280,8 +280,9 @@ func (cg *ScapyCodegenV2) generateLayerCall(layer IRLayer, isExpect bool) string
 	case "Raw":
 		code.WriteString(cg.generateRawOptions(layer))
 	default:
-		// Unknown layer, add comment
-		code.WriteString(fmt.Sprintf("\t\t\t\t// TODO: Unsupported layer %s\n", layer.Type))
+		// Unknown or unsupported layer type
+		// This layer will be skipped during packet construction
+		code.WriteString(fmt.Sprintf("\t\t\t\t// UNSUPPORTED: Layer type %s is not supported by packet builder\n", layer.Type))
 	}
 
 	code.WriteString("\t\t\t),\n")
@@ -294,8 +295,8 @@ func (cg *ScapyCodegenV2) generateEtherOptions(layer IRLayer, isExpect bool) str
 	var code strings.Builder
 
 	// Framework standard MACs
-	srcMAC := "52:54:00:6b:ff:a1" // client
-	dstMAC := "52:54:00:6b:ff:a5" // yanet
+	srcMAC := framework.SrcMAC // client
+	dstMAC := framework.DstMAC // yanet
 
 	if isExpect {
 		// Swap for expect packets
@@ -332,9 +333,6 @@ func (cg *ScapyCodegenV2) generateIPOptions(layer IRLayer) string {
 			// Just use the value as-is, CIDR will be stripped
 			// CIDR expansion is handled at packet level via _special marker
 			cleanIP := stripCIDR(srcStr)
-			if err := validateIP(cleanIP); err != nil {
-				code.WriteString(fmt.Sprintf("\t\t\t\t// WARNING: %s\n", err.Error()))
-			}
 			code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPSrc(%q),\n", cleanIP))
 		}
 	}
@@ -347,9 +345,6 @@ func (cg *ScapyCodegenV2) generateIPOptions(layer IRLayer) string {
 			// Just use the value as-is, CIDR will be stripped
 			// CIDR expansion is handled at packet level via _special marker
 			cleanIP := stripCIDR(dstStr)
-			if err := validateIP(cleanIP); err != nil {
-				code.WriteString(fmt.Sprintf("\t\t\t\t// WARNING: %s\n", err.Error()))
-			}
 			code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPDst(%q),\n", cleanIP))
 		}
 	}
@@ -381,9 +376,6 @@ func (cg *ScapyCodegenV2) generateIPv6Options(layer IRLayer) string {
 		} else {
 			// CIDR expansion is handled at packet level via _special marker
 			cleanIP := stripCIDR(srcStr)
-			if err := validateIP(cleanIP); err != nil {
-				code.WriteString(fmt.Sprintf("\t\t\t\t// WARNING: %s\n", err.Error()))
-			}
 			code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6Src(%q),\n", cleanIP))
 		}
 	}
@@ -395,9 +387,6 @@ func (cg *ScapyCodegenV2) generateIPv6Options(layer IRLayer) string {
 		} else {
 			// CIDR expansion is handled at packet level via _special marker
 			cleanIP := stripCIDR(dstStr)
-			if err := validateIP(cleanIP); err != nil {
-				code.WriteString(fmt.Sprintf("\t\t\t\t// WARNING: %s\n", err.Error()))
-			}
 			code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6Dst(%q),\n", cleanIP))
 		}
 	}
@@ -414,8 +403,9 @@ func (cg *ScapyCodegenV2) generateIPv6Options(layer IRLayer) string {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6NextHeader(layers.IPProtocol(%v)),\n", formatValue(nh)))
 	}
 	// Add plen if specified (for testing invalid packets with wrong payload length)
+	// Note: gopacket does not support setting IPv6 payload length directly as it's calculated automatically
 	if plen, ok := layer.Params["plen"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\t// TODO: Set payload length to %v (not supported by lib yet)\n", formatValue(plen)))
+		code.WriteString(fmt.Sprintf("\t\t\t\t// LIMITATION: Payload length %v specified but cannot be set - gopacket calculates it automatically\n", formatValue(plen)))
 	}
 
 	return code.String()
@@ -485,12 +475,30 @@ func (cg *ScapyCodegenV2) generateICMPOptions(layer IRLayer) string {
 func (cg *ScapyCodegenV2) generateICMPv6Options(layer IRLayer) string {
 	var code strings.Builder
 
-	if id, ok := layer.Params["id"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Id(%v),\n", formatValue(id)))
+	// Handle ICMPv6 echo types (EchoRequest, EchoReply)
+	// These use ICMPv6Id/ICMPv6Seq (without "Echo" in the function name)
+	if layer.Type == "ICMPv6EchoRequest" || layer.Type == "ICMPv6EchoReply" {
+		if id, ok := layer.Params["id"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Id(%v),\n", formatValue(id)))
+		}
+		if seq, ok := layer.Params["seq"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Seq(%v),\n", formatValue(seq)))
+		}
+		return code.String()
 	}
-	if seq, ok := layer.Params["seq"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Seq(%v),\n", formatValue(seq)))
+
+	// Echo parameters come via a dedicated ICMPv6Echo layer in IR (for other cases)
+	// This uses ICMPv6EchoId/ICMPv6EchoSeq (with "Echo" in the function name)
+	if layer.Type == "ICMPv6Echo" {
+		if id, ok := layer.Params["id"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6EchoId(%v),\n", formatValue(id)))
+		}
+		if seq, ok := layer.Params["seq"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6EchoSeq(%v),\n", formatValue(seq)))
+		}
+		return code.String()
 	}
+
 	if codeVal, ok := layer.Params["code"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Code(%v),\n", formatValue(codeVal)))
 	}
@@ -547,7 +555,7 @@ func (cg *ScapyCodegenV2) generateRawOptions(layer IRLayer) string {
 			if payloadType, ok := payload["type"].(string); ok && payloadType == "string_mult" {
 				content := payload["content"].(string)
 				count := payload["count"]
-				return fmt.Sprintf("\t\t\t\tlib.Raw(lib.Payload(%q, %v)),\n", content, formatValue(count))
+				return fmt.Sprintf("\t\t\t\tlib.Payload(%q, %v),\n", content, formatValue(count))
 			}
 		}
 	}
@@ -555,7 +563,7 @@ func (cg *ScapyCodegenV2) generateRawOptions(layer IRLayer) string {
 	// Direct string payloads
 	for key, val := range layer.Params {
 		if strings.HasPrefix(key, "_arg") {
-			return fmt.Sprintf("\t\t\t\tlib.Raw([]byte(%q)),\n", val)
+			return fmt.Sprintf("\t\t\t\t[]byte(%q),\n", val)
 		}
 	}
 
@@ -849,14 +857,6 @@ func sanitizeName(filename string) string {
 	return name
 }
 
-// validateIP validates IP address format
-func validateIP(ip string) error {
-	if net.ParseIP(ip) == nil {
-		return fmt.Errorf("invalid IP address %q", ip)
-	}
-	return nil
-}
-
 // detectIRPacketPattern analyzes packets to find common structure and varying parameters
 // It tries to find the largest group of consecutive packets with the same layer structure
 func (cg *ScapyCodegenV2) detectIRPacketPattern(packets []IRPacketDef) *IRPacketPattern {
@@ -939,6 +939,11 @@ func (cg *ScapyCodegenV2) detectIRPacketPattern(packets []IRPacketDef) *IRPacket
 
 		// Check each parameter
 		for paramName, refValue := range refLayer.Params {
+			// Skip nil reference values
+			if refValue == nil {
+				continue
+			}
+
 			isConstant := true
 			values := []interface{}{refValue}
 
@@ -947,8 +952,8 @@ func (cg *ScapyCodegenV2) detectIRPacketPattern(packets []IRPacketDef) *IRPacket
 				if pkt.Layers[layerIdx].Params[paramName] != refValue {
 					// Check if values are comparable (both exist and different)
 					otherValue, exists := pkt.Layers[layerIdx].Params[paramName]
-					if !exists {
-						// Parameter missing in some packets - can't pattern match
+					if !exists || otherValue == nil {
+						// Parameter missing or nil in some packets - can't pattern match
 						return nil
 					}
 
@@ -1187,8 +1192,8 @@ func (cg *ScapyCodegenV2) generateSinglePacketCode(pkt IRPacketDef, isExpect boo
 	// Check for special handling
 	if len(pkt.SpecialHandling) > 0 {
 		code.WriteString(fmt.Sprintf("\t\t// Special handling: %v\n", pkt.SpecialHandling))
-		code.WriteString("\t\t// TODO: implement special handling\n")
-		code.WriteString("\t\tpackets = append(packets, nil) // placeholder\n")
+		code.WriteString("\t\t// Special handling not implemented yet; skipping packet generation for this entry\n")
+		code.WriteString("\t\t// t.Skipf(\"special handling not implemented: %v\")\n")
 		return code.String()
 	}
 
@@ -1235,7 +1240,7 @@ func (cg *ScapyCodegenV2) generateLayerCallWithPattern(layer IRLayer, layerIdx i
 		code.WriteString(cg.generateUDPOptionsWithPattern(layer, varyingParams, useStruct, funcName))
 	case "ICMP":
 		code.WriteString(cg.generateICMPOptionsWithPattern(layer, varyingParams, useStruct, funcName))
-	case "ICMPv6EchoRequest", "ICMPv6EchoReply", "ICMPv6DestUnreach":
+	case "ICMPv6EchoRequest", "ICMPv6EchoReply", "ICMPv6DestUnreach", "ICMPv6Echo":
 		code.WriteString(cg.generateICMPv6OptionsWithPattern(layer, varyingParams, useStruct, funcName))
 	case "IPv6ExtHdrFragment":
 		code.WriteString(cg.generateIPv6FragmentOptionsWithPattern(layer, varyingParams, useStruct, funcName))
@@ -1258,8 +1263,11 @@ func (cg *ScapyCodegenV2) makeFieldName(layerType, paramName string) string {
 }
 
 func (cg *ScapyCodegenV2) makeParamName(layerType, paramName string) string {
-	// Keep lowercase for parameter name
-	return strings.ToLower(layerType) + strings.Title(paramName)
+	// Keep lowercase for layer; capitalize first letter of paramName
+	if len(paramName) == 0 {
+		return strings.ToLower(layerType)
+	}
+	return strings.ToLower(layerType) + strings.ToUpper(paramName[:1]) + paramName[1:]
 }
 
 // inferFieldTypeForParam infers the type based on layer type, parameter name, and values
@@ -1384,8 +1392,8 @@ func (cg *ScapyCodegenV2) generateEtherOptionsWithPattern(layer IRLayer, varying
 	var code strings.Builder
 
 	// Framework standard MACs
-	srcMAC := "52:54:00:6b:ff:a1" // client
-	dstMAC := "52:54:00:6b:ff:a5" // yanet
+	srcMAC := framework.SrcMAC // client
+	dstMAC := framework.DstMAC // yanet
 
 	if isExpect {
 		srcMAC, dstMAC = dstMAC, srcMAC
@@ -1553,18 +1561,21 @@ func (cg *ScapyCodegenV2) generateUDPOptionsWithPattern(layer IRLayer, varyingPa
 func (cg *ScapyCodegenV2) generateICMPOptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
 	var code strings.Builder
 
-	// Type
-	if vp, ok := varyingParams["type"]; ok {
-		code.WriteString(cg.generateVaryingParamRef("ICMPType", vp, useStruct, funcName))
-	} else if icmpType, ok := layer.Params["type"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPType(%v),\n", formatValue(icmpType)))
+	// ICMP must use TypeCode(type, code). Support varying type and constant code.
+	codeVal := "0"
+	if v, ok := layer.Params["code"]; ok {
+		codeVal = formatValue(v)
 	}
-
-	// Code - ICMP uses TypeCode, not separate Code
-	if icmpCode, ok := layer.Params["code"]; ok {
-		// Code is part of TypeCode, so we skip it if Type is already set
-		// The TypeCode value should include both type and code
-		_ = icmpCode
+	if vp, ok := varyingParams["type"]; ok {
+		if useStruct {
+			fieldName := cg.makeFieldName(vp.LayerType, vp.ParamName)
+			code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPTypeCode(%s.%s, %s),\n", funcName+"Params", fieldName, codeVal))
+		} else {
+			paramName := cg.makeParamName(vp.LayerType, vp.ParamName)
+			code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPTypeCode(%s, %s),\n", paramName, codeVal))
+		}
+	} else if icmpType, ok := layer.Params["type"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPTypeCode(%v, %s),\n", formatValue(icmpType), codeVal))
 	}
 
 	return code.String()
@@ -1573,17 +1584,46 @@ func (cg *ScapyCodegenV2) generateICMPOptionsWithPattern(layer IRLayer, varyingP
 func (cg *ScapyCodegenV2) generateICMPv6OptionsWithPattern(layer IRLayer, varyingParams map[string]IRVaryingParam, useStruct bool, funcName string) string {
 	var code strings.Builder
 
-	// Type
+	// Handle echo requests/replies - use ICMPv6Id/ICMPv6Seq (without "Echo")
+	if layer.Type == "ICMPv6EchoRequest" || layer.Type == "ICMPv6EchoReply" {
+		if vp, ok := varyingParams["id"]; ok {
+			code.WriteString(cg.generateVaryingParamRef("ICMPv6Id", vp, useStruct, funcName))
+		} else if id, ok := layer.Params["id"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPv6Id(%v),\n", formatValue(id)))
+		}
+		if vp, ok := varyingParams["seq"]; ok {
+			code.WriteString(cg.generateVaryingParamRef("ICMPv6Seq", vp, useStruct, funcName))
+		} else if seq, ok := layer.Params["seq"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPv6Seq(%v),\n", formatValue(seq)))
+		}
+		return code.String()
+	}
+
+	// Handle dedicated ICMPv6Echo layer - use ICMPv6EchoId/ICMPv6EchoSeq (with "Echo")
+	if layer.Type == "ICMPv6Echo" {
+		if vp, ok := varyingParams["id"]; ok {
+			code.WriteString(cg.generateVaryingParamRef("ICMPv6EchoId", vp, useStruct, funcName))
+		} else if id, ok := layer.Params["id"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPv6EchoId(%v),\n", formatValue(id)))
+		}
+		if vp, ok := varyingParams["seq"]; ok {
+			code.WriteString(cg.generateVaryingParamRef("ICMPv6EchoSeq", vp, useStruct, funcName))
+		} else if seq, ok := layer.Params["seq"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPv6EchoSeq(%v),\n", formatValue(seq)))
+		}
+		return code.String()
+	}
+
+	// Type and code fallbacks
 	if vp, ok := varyingParams["type"]; ok {
 		code.WriteString(cg.generateVaryingParamRef("ICMPv6Type", vp, useStruct, funcName))
 	} else if icmpType, ok := layer.Params["type"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPv6Type(%v),\n", formatValue(icmpType)))
 	}
-
-	// Code - ICMPv6 uses TypeCode, not separate Code
-	if icmpCode, ok := layer.Params["code"]; ok {
-		// Code is part of TypeCode, so we skip it if Type is already set
-		_ = icmpCode
+	if vp, ok := varyingParams["code"]; ok {
+		code.WriteString(cg.generateVaryingParamRef("ICMPv6Code", vp, useStruct, funcName))
+	} else if icmpCode, ok := layer.Params["code"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.ICMPv6Code(%v),\n", formatValue(icmpCode)))
 	}
 
 	return code.String()
@@ -1601,7 +1641,7 @@ func (cg *ScapyCodegenV2) generateIPv6FragmentOptionsWithPattern(layer IRLayer, 
 	}
 
 	if id, ok := layer.Params["id"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\tlib.IPv6FragmentID(%v),\n", formatValue(id)))
+		code.WriteString(fmt.Sprintf("\t\t\tlib.IPv6FragId(%v),\n", formatValue(id)))
 	}
 
 	return code.String()
@@ -1640,16 +1680,4 @@ func (cg *ScapyCodegenV2) generateVaryingParamRef(optionFunc string, vp IRVaryin
 }
 
 // expandCIDR expands a CIDR notation to all IP addresses in the subnet
-func (cg *ScapyCodegenV2) expandCIDR(cidr string) ([]string, error) {
-	_, ipNet, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return nil, err
-	}
-
-	var ips []string
-	for ip := ipNet.IP.Mask(ipNet.Mask); ipNet.Contains(ip); incIP(ip) {
-		ips = append(ips, ip.String())
-	}
-
-	return ips, nil
-}
+// expandCIDR removed; use lib.ExpandCIDR instead

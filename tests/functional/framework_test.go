@@ -148,7 +148,21 @@ modules:
 	}
 
 	// Run tests
-	return m.Run()
+	code = m.Run()
+
+	if _, ok := os.LookupEnv("YANET_TEST_DEBUG"); ok {
+		sugar.Info("Copying logs from VM...")
+		debugCommands := []string{
+			"cp /var/log/yanet-controlplane.log /mnt/build/yanet-controlplane-0.log 2>/dev/null || echo 'No controlplane log found'",
+			"cp /var/log/yanet-dataplane.log /mnt/build/yanet-dataplane-0.log 2>/dev/null || echo 'No dataplane log found'",
+		}
+		_, err := fw.CLI.ExecuteCommands(debugCommands...)
+		if err != nil {
+			sugar.Errorf("Failed to copy logs from VM: %v", err)
+		}
+	}
+
+	return code
 }
 
 // TestFramework - comprehensive test for checking all yanet functionality

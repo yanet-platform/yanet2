@@ -8,10 +8,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 )
 
-// PacketBuilder provides a Scapy-like DSL for building packets
-type PacketBuilder struct {
-	layers []gopacket.SerializableLayer
-}
+// PacketBuilder placeholder removed (no longer used)
 
 // NewPacket creates a new packet from the given layers
 func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
@@ -82,6 +79,9 @@ func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
 					ip6.NextHeader = layers.IPProtocolUDP
 				case *layers.ICMPv6:
 					ip6.NextHeader = layers.IPProtocolICMPv6
+				case *icmpv6WithEcho:
+					// Treat icmpv6WithEcho as ICMPv6
+					ip6.NextHeader = layers.IPProtocolICMPv6
 				case *layers.IPv6Fragment:
 					ip6.NextHeader = layers.IPProtocolIPv6Fragment
 				case *layers.GRE:
@@ -128,7 +128,7 @@ func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
 		}
 	}
 
-	// Set network layer for TCP/UDP if present
+	// Set network layer for TCP/UDP/ICMP if present
 	if networkLayer != nil {
 		for _, layer := range serialLayers {
 			switch tl := layer.(type) {
@@ -138,6 +138,9 @@ func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
 				tl.SetNetworkLayerForChecksum(networkLayer)
 			case *layers.ICMPv6:
 				tl.SetNetworkLayerForChecksum(networkLayer)
+			case *icmpv6WithEcho:
+				// Set network layer on the inner ICMPv6 layer
+				tl.icmp.SetNetworkLayerForChecksum(networkLayer)
 			}
 		}
 	}
@@ -385,8 +388,7 @@ func IPv6NextHeader(nh layers.IPProtocol) IPv6Option {
 // ===== TCP Layer =====
 
 type TCPBuilder struct {
-	layer        *layers.TCP
-	networkLayer gopacket.NetworkLayer
+	layer *layers.TCP
 }
 
 func TCP(opts ...TCPOption) *TCPBuilder {
@@ -593,10 +595,41 @@ func ICMPv6DestUnreach(opts ...ICMPv6Option) *ICMPv6Builder {
 }
 
 func (b *ICMPv6Builder) Build() gopacket.SerializableLayer {
-	// ICMPv6 requires special handling - we return a multi-layer structure
-	// For now, return just the ICMPv6 layer
-	// The echo layer needs to be handled separately in packet construction
+	// For Echo Request/Reply, we need to return a composite layer that serializes both ICMPv6 and ICMPv6Echo
+	if b.echo != nil {
+		// Return a custom serializable that handles both layers
+		return &icmpv6WithEcho{icmp: b.layer, echo: b.echo}
+	}
 	return b.layer
+}
+
+// icmpv6WithEcho is a wrapper that serializes ICMPv6 + ICMPv6Echo together
+type icmpv6WithEcho struct {
+	icmp *layers.ICMPv6
+	echo *layers.ICMPv6Echo
+}
+
+func (ie *icmpv6WithEcho) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
+	// Serialize ICMPv6Echo first (it becomes the payload of ICMPv6)
+	echoBytes, err := b.PrependBytes(4) // ICMPv6Echo is 4 bytes (Identifier + SeqNumber)
+	if err != nil {
+		return err
+	}
+
+	// Write Identifier (2 bytes)
+	echoBytes[0] = byte(ie.echo.Identifier >> 8)
+	echoBytes[1] = byte(ie.echo.Identifier)
+
+	// Write SeqNumber (2 bytes)
+	echoBytes[2] = byte(ie.echo.SeqNumber >> 8)
+	echoBytes[3] = byte(ie.echo.SeqNumber)
+
+	// Now serialize ICMPv6 header
+	return ie.icmp.SerializeTo(b, opts)
+}
+
+func (ie *icmpv6WithEcho) LayerType() gopacket.LayerType {
+	return ie.icmp.LayerType()
 }
 
 type ICMPv6Option func(*ICMPv6Builder)
@@ -622,6 +655,38 @@ func ICMPv6Code(code uint8) ICMPv6Option {
 		// Extract current type and set new code
 		currentType := uint8(builder.layer.TypeCode >> 8)
 		builder.layer.TypeCode = layers.CreateICMPv6TypeCode(currentType, code)
+	}
+}
+
+// ICMPv6EchoBuilder builds an ICMPv6 Echo layer
+type ICMPv6EchoBuilder struct {
+	layer *layers.ICMPv6Echo
+}
+
+func ICMPv6Echo(opts ...ICMPv6EchoOption) *ICMPv6EchoBuilder {
+	echo := &layers.ICMPv6Echo{}
+	b := &ICMPv6EchoBuilder{layer: echo}
+	for _, opt := range opts {
+		opt(b)
+	}
+	return b
+}
+
+func (b *ICMPv6EchoBuilder) Build() gopacket.SerializableLayer {
+	return b.layer
+}
+
+type ICMPv6EchoOption func(*ICMPv6EchoBuilder)
+
+func ICMPv6EchoId(id uint16) ICMPv6EchoOption {
+	return func(b *ICMPv6EchoBuilder) {
+		b.layer.Identifier = id
+	}
+}
+
+func ICMPv6EchoSeq(seq uint16) ICMPv6EchoOption {
+	return func(b *ICMPv6EchoBuilder) {
+		b.layer.SeqNumber = seq
 	}
 }
 
@@ -999,7 +1064,10 @@ func IPv6ExtHdrDestOpt(opts ...IPv6ExtHdrDestOptOption) *IPv6ExtHdrDestOptBuilde
 	return builder
 }
 
-// Build returns nil as this is an unsupported layer placeholder
+// Build returns nil as this is an unsupported layer placeholder.
+// IPv6 Destination Options header is not currently supported by the packet builder.
+// This layer will be silently skipped during packet construction.
+// Status: UNSUPPORTED - No implementation planned
 func (b *IPv6ExtHdrDestOptBuilder) Build() gopacket.SerializableLayer {
 	// Return nil to skip this layer in packet construction
 	// TODO: Implement proper IPv6 Destination Options header support
@@ -1021,10 +1089,12 @@ func MPLS(opts ...MPLSOption) *MPLSBuilder {
 	return builder
 }
 
-// Build returns nil as this is an unsupported layer placeholder
+// Build returns nil as this is an unsupported layer placeholder.
+// MPLS layer is not currently supported by the packet builder.
+// This layer will be silently skipped during packet construction.
+// Status: UNSUPPORTED - No implementation planned
 func (b *MPLSBuilder) Build() gopacket.SerializableLayer {
 	// Return nil to skip this layer in packet construction
-	// TODO: Implement proper MPLS layer support
 	return nil
 }
 

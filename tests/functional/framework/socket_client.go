@@ -374,7 +374,9 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration) ([]byte, error) {
 //	}()
 func (sc *SocketClient) Close() error {
 	if sc.conn != nil {
-		return sc.conn.Close()
+		err := sc.conn.Close()
+		sc.conn = nil // Make Close() idempotent - safe to call multiple times
+		return err
 	}
 	return nil
 }
