@@ -8,20 +8,19 @@ option go_package = "github.com/yanet-platform/yanet2/modules/"
 		    "balancer/controlplane/balancerpb;balancerpb";
 
 service BalancerService {
-	rpc EnableBalancing(EnableBalancingRequest)
-		returns (EnableBalancingResponse);
-
-	// todo
-	// rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+	rpc EnableBalancing(EnableBalancingRequest) returns (EnableBalancingResponse);
 
 	// Allows to update reals with optional buffering updates
 	rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
 
 	// Allows to flush buffered reals updates
-	rpc FlushRealsUpdates(FlushRealsUpdatesRequest) returns (FlushRealsUpdatesResponse);
+	rpc FlushRealUpdates(FlushRealUpdatesRequest) returns (FlushRealUpdatesResponse);
 	
 	// Allows to module reload config
 	rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
+
+	// todo
+	// rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
 
 	// Allows to show module config
 	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
@@ -55,6 +54,9 @@ message VirtualService {
 
 	// `TCP` or `UDP`
 	string proto = 3;
+
+	// todo: scheduler
+	// scheduler: wrr/prr/wlc
 
 	// List of CIDR subnets from which incoming requests are allowed.
 	repeated string allowed_srcs = 4;
@@ -96,23 +98,24 @@ message RealUpdate {
 	// Optional new weight
 	// Zero weight means no update
 	uint32 weight = 6;
-
-	// Allows to delay request applying 
-	// until `flush` will be called
-	bool buffer = 7;
 }
 
 message UpdateRealsRequest {
 	commonpb.TargetModule target = 1;
 	repeated RealUpdate updates = 2;
+	// Allows to delay request applying 
+	// until `flush` will be called
+	bool buffer = 3;
 }
 
 message UpdateRealsResponse {
 }
 
-message FlushRealsUpdatesRequest {}
+message FlushRealUpdatesRequest {
+	commonpb.TargetModule target = 1;
+}
 
-message FlushRealsUpdatesResponse {
+message FlushRealUpdatesResponse {
 	// Number of updates applied
 	uint32 updates_flushed = 1;
 }

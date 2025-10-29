@@ -111,14 +111,14 @@ func (service *BalancerService) ReloadConfig(
 	instance, exists := service.instances[key]
 
 	if exists {
-		prevInstance := *instance
+		prevInstance := instance.Clone()
 		err = instance.UpdateConfig(config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to reload instance config: %w", err)
 		}
 		err = instance.UpdateModules()
 		if err != nil {
-			*instance = prevInstance
+			*instance = *prevInstance
 			return nil, fmt.Errorf("failed to update modules: %w", err)
 		}
 		return &balancerpb.ReloadConfigResponse{}, nil
@@ -133,8 +133,65 @@ func (service *BalancerService) UpdateReals(
 	ctx context.Context,
 	req *balancerpb.UpdateRealsRequest,
 ) (*balancerpb.UpdateRealsResponse, error) {
-	// TODO: implement
-	return nil, fmt.Errorf("not implelemented")
+	name, inst, err := req.GetTarget().Validate(uint32(len(service.agents)))
+	if err != nil {
+		return nil, fmt.Errorf("incorrect target module: %w", err)
+	}
+
+	service.mu.Lock()
+	defer service.mu.Unlock()
+
+	key := moduleKey{name: name, dataplaneInstance: inst}
+	instance, exists := service.instances[key]
+
+	if !exists {
+		return nil, fmt.Errorf("module [name=%s, inst=%d] not exists", name, inst)
+	}
+
+	instanceClone := instance.Clone()
+	if err = instanceClone.HandleRealUpdates(req.Updates, req.Buffer); err != nil {
+		return nil, fmt.Errorf("failed to handle real updates: %s", err)
+	}
+	if err = instanceClone.UpdateModules(); err != nil {
+		return nil, fmt.Errorf("failed to dataplane update module")
+	}
+	*instance = *instanceClone
+	return &balancerpb.UpdateRealsResponse{}, nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func (service *BalancerService) FlushRealUpdates(
+	ctx context.Context,
+	req *balancerpb.FlushRealUpdatesRequest,
+) (*balancerpb.FlushRealUpdatesResponse, error) {
+	name, inst, err := req.GetTarget().Validate(uint32(len(service.agents)))
+	if err != nil {
+		return nil, fmt.Errorf("incorrect target module: %w", err)
+	}
+
+	service.mu.Lock()
+	defer service.mu.Unlock()
+
+	key := moduleKey{name: name, dataplaneInstance: inst}
+	instance, exists := service.instances[key]
+
+	if !exists {
+		return nil, fmt.Errorf("module [name=%s, inst=%d] not exists", name, inst)
+	}
+
+	instanceClone := instance.Clone()
+	flushed, err := instanceClone.FlushRealUpdatesBuffer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to handle real updates: %s", err)
+	}
+	if err = instanceClone.UpdateModules(); err != nil {
+		return nil, fmt.Errorf("failed to dataplane update module")
+	}
+	*instance = *instanceClone
+	return &balancerpb.FlushRealUpdatesResponse{
+		UpdatesFlushed: flushed,
+	}, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
