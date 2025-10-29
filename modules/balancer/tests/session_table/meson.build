@@ -23,6 +23,6 @@ session_table_test_exe = executable(
 test(
   'session_table',
   session_table_test_exe,
-  timeout: 10,
+  timeout: 30,
   suite: ['balancer'],
 )

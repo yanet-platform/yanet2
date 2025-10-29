@@ -14,12 +14,19 @@ service BalancerService {
 	// todo
 	// rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
 
+	// Allows to update reals with optional buffering updates
 	rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
 
+	// Allows to flush buffered reals updates
+	rpc FlushRealsUpdates(FlushRealsUpdatesRequest) returns (FlushRealsUpdatesResponse);
+	
+	// Allows to module reload config
 	rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
 
+	// Allows to show module config
 	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
+	// Allows to list configs of the modules for which balancing was enabled
 	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 }
 
@@ -70,19 +77,44 @@ message VirtualService {
 	bool pure_l3 = 9;
 }
 
-message RealChange {
-	bytes dst_addr = 1;
+message RealUpdate {
+	// IP of the virtual service real belongs to
+	bytes virtual_ip = 1;
 
-	uint32 weight = 2;
+	// Virtual service proto
+	string proto = 2;
 
-	bool enabled = 3;
+	// Virtual service port
+	uint32 port = 3;
+
+	// Ip of the real
+	bytes real_ip = 4;
+
+	// Enable or disable real
+	bool enable = 5;
+
+	// Optional new weight
+	// Zero weight means no update
+	uint32 weight = 6;
+
+	// Allows to delay request applying 
+	// until `flush` will be called
+	bool buffer = 7;
 }
 
 message UpdateRealsRequest {
-	repeated RealChange changes = 1;
+	commonpb.TargetModule target = 1;
+	repeated RealUpdate updates = 2;
 }
 
 message UpdateRealsResponse {
+}
+
+message FlushRealsUpdatesRequest {}
+
+message FlushRealsUpdatesResponse {
+	// Number of updates applied
+	uint32 updates_flushed = 1;
 }
 
 message EnableBalancingRequest {
