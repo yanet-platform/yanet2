@@ -5,132 +5,133 @@ package balancerpb;
 import "common/proto/target.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/"
-                    "balancer/controlplane/balancerpb;balancerpb";
-
+		    "balancer/controlplane/balancerpb;balancerpb";
 
 service BalancerService {
-  rpc EnableBalancing(EnableBalancingRequest) returns (EnableBalancingResponse);
+	rpc EnableBalancing(EnableBalancingRequest)
+		returns (EnableBalancingResponse);
 
-  // todo
-  // rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+	// todo
+	// rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
 
-  rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
+	rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
 
-  rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
+	rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
 
-  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 }
 
 // Message representing a real server in the configuration.
 message Real {
-  // Weight assigned to the real server.
-  uint32 weight = 1;
+	// Weight assigned to the real server.
+	uint32 weight = 1;
 
-  // Destination address of the real server.
-  bytes dst_addr = 2;
+	// Destination address of the real server.
+	bytes dst_addr = 2;
 
-  // When encapsulation is enabled, the source address is calculated as:
-  // src = (src_addr & src_mask) | (original_src & (~ src_mask)).
-  bytes src_addr = 3;
-  bytes src_mask = 4;
+	// When encapsulation is enabled, the source address is calculated as:
+	// src = (src_addr & src_mask) | (original_src & (~ src_mask)).
+	bytes src_addr = 3;
+	bytes src_mask = 4;
 
-  // False by default.
-  bool enabled = 5;
+	// False by default.
+	bool enabled = 5;
 }
 
 message VirtualService {
-  // Virtual IP address.
-  bytes addr = 1;
+	// Virtual IP address.
+	bytes addr = 1;
 
-  uint32 port = 2;
+	uint32 port = 2;
 
-  // `TCP` or `UDP`
-  string proto = 3;
-  
-  // List of CIDR subnets from which incoming requests are allowed.
-  repeated string allowed_srcs = 4;
-  repeated Real reals = 5;
-  
-  // If GRE flag is set, GRE is used for tunneling packets to 
-  // every balancer real. Else, TUN is used. False by default.
-  bool gre = 6;
+	// `TCP` or `UDP`
+	string proto = 3;
 
-  // fix_mss flag specifies if TCP MSS option must be fixed. False by default.
-  bool fix_mss = 7;
+	// List of CIDR subnets from which incoming requests are allowed.
+	repeated string allowed_srcs = 4;
+	repeated Real reals = 5;
 
-  // OPS flag specifies if one packet scheduler should be used for 
-  // selecting reals of service. False by default. 
-  bool ops = 8;
+	// If GRE flag is set, GRE is used for tunneling packets to
+	// every balancer real. Else, TUN is used. False by default.
+	bool gre = 6;
 
-  // PureL3 flag specifies if we need to schedule based on L3 address only. 
-  // False by default.
-  bool pure_l3 = 9;
+	// fix_mss flag specifies if TCP MSS option must be fixed. False by
+	// default.
+	bool fix_mss = 7;
+
+	// OPS flag specifies if one packet scheduler should be used for
+	// selecting reals of service. False by default.
+	bool ops = 8;
+
+	// PureL3 flag specifies if we need to schedule based on L3 address
+	// only. False by default.
+	bool pure_l3 = 9;
 }
 
 message RealChange {
-  bytes dst_addr = 1;
+	bytes dst_addr = 1;
 
-  uint32 weight = 2;
+	uint32 weight = 2;
 
-  bool enabled = 3;
+	bool enabled = 3;
 }
 
 message UpdateRealsRequest {
-  repeated RealChange changes = 1;
+	repeated RealChange changes = 1;
 }
 
 message UpdateRealsResponse {
 }
 
 message EnableBalancingRequest {
-  commonpb.TargetModule target = 1;
-  BalancerInstanceConfig config = 2;
-  uint64 session_table_size = 3;
+	commonpb.TargetModule target = 1;
+	BalancerInstanceConfig config = 2;
+	uint64 session_table_size = 3;
 }
 
 message EnableBalancingResponse {
 }
 
 message ReloadConfigRequest {
-  commonpb.TargetModule target = 1;
-  BalancerInstanceConfig config = 2;
+	commonpb.TargetModule target = 1;
+	BalancerInstanceConfig config = 2;
 }
 
 message ReloadConfigResponse {
 }
 
 message SessionsTimeouts {
-  uint32 tcp_syn_ack = 1;
-  uint32 tcp_syn = 2;
-  uint32 tcp_fin = 3;
-  uint32 tcp = 4;
-  uint32 udp = 5;
-  uint32 default = 6;
+	uint32 tcp_syn_ack = 1;
+	uint32 tcp_syn = 2;
+	uint32 tcp_fin = 3;
+	uint32 tcp = 4;
+	uint32 udp = 5;
+	uint32 default = 6;
 }
 
 message BalancerInstanceConfig {
-  SessionsTimeouts sessions_timeouts = 2;
-  repeated VirtualService virtual_services = 3;
+	SessionsTimeouts sessions_timeouts = 2;
+	repeated VirtualService virtual_services = 3;
 }
 
 message ShowConfigRequest {
-  commonpb.TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 }
 
 message ShowConfigResponse {
-  BalancerInstanceConfig config = 1;
+	BalancerInstanceConfig config = 1;
 }
 
 message BalancerInstanceConfigInfo {
-  commonpb.TargetModule module = 1;
-  BalancerInstanceConfig config = 2;
+	commonpb.TargetModule module = 1;
+	BalancerInstanceConfig config = 2;
 }
 
 message ListConfigsRequest {
 }
 
 message ListConfigsResponse {
-  repeated BalancerInstanceConfigInfo configs = 1;
+	repeated BalancerInstanceConfigInfo configs = 1;
 }
