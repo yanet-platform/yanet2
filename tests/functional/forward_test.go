@@ -137,7 +137,7 @@ func TestForward(t *testing.T) {
 		// Forward-specific configuration
 		commands := []string{
 			// Configure pipelines
-			"/mnt/target/release/yanet-cli-pipeline update --name=test --modules forward:forward0 --modules route:route0 --instance=0",
+			framework.CLIPipeline + " update --name=test --modules forward:forward0 --modules route:route0 --instance=0",
 		}
 
 		_, err := fw.CLI.ExecuteCommands(commands...)
@@ -164,8 +164,8 @@ func TestForward(t *testing.T) {
 
 	t.Run("Test_ICMP4_Echo", func(t *testing.T) {
 		packet := createICMPPacket(
-			net.ParseIP("203.0.113.1"),
-			net.ParseIP("203.0.113.14"),
+			net.ParseIP(framework.VMIPv4Gateway),
+			net.ParseIP(framework.VMIPv4Host),
 			[]byte("icmp test"),
 		)
 
@@ -176,15 +176,15 @@ func TestForward(t *testing.T) {
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 
-		assert.Equal(t, "203.0.113.14", outputPacket.SrcIP.String(), "Source IP should be the destination of the request")
-		assert.Equal(t, "203.0.113.1", outputPacket.DstIP.String(), "Destination IP should be the source of the request")
+		assert.Equal(t, framework.VMIPv4Host, outputPacket.SrcIP.String(), "Source IP should be the destination of the request")
+		assert.Equal(t, framework.VMIPv4Gateway, outputPacket.DstIP.String(), "Destination IP should be the source of the request")
 	})
 
 	t.Run("Test_ICMP6_Echo", func(t *testing.T) {
-		// Test ICMPv6 echo request to fe80::5054:ff:fe6b:ffa5
+		// Test ICMPv6 echo request to VMIPv6Host
 		packet := createICMPv6Packet(
-			net.ParseIP("fe80::1"),                 // src IP
-			net.ParseIP("fe80::5054:ff:fe6b:ffa5"), // dst IP (in L3 forwarding table)
+			net.ParseIP(framework.VMIPv6Gateway), // src IP
+			net.ParseIP(framework.VMIPv6Host),     // dst IP (in L3 forwarding table)
 			[]byte("icmpv6 test"),
 		)
 
@@ -198,7 +198,7 @@ func TestForward(t *testing.T) {
 		// Verify that we received an ICMPv6 echo reply
 		// For ICMPv6 echo reply, the type should be 129 (EchoReply)
 		// and the addresses should be swapped
-		assert.Equal(t, "fe80::5054:ff:fe6b:ffa5", outputPacket.SrcIP.String(), "Source IP should be the destination of the request")
-		assert.Equal(t, "fe80::1", outputPacket.DstIP.String(), "Destination IP should be the source of the request")
+		assert.Equal(t, framework.VMIPv6Host, outputPacket.SrcIP.String(), "Source IP should be the destination of the request")
+		assert.Equal(t, framework.VMIPv6Gateway, outputPacket.DstIP.String(), "Destination IP should be the source of the request")
 	})
 }

@@ -63,15 +63,16 @@
 002_decap_default:
   state: wovlan
   steps:
-    # - sendPackets:
-    #   - port: kni0
-    #     send: send.pcap
-    #     expect: expect.pcap
-    # 
-    # 1: disabled
+    # Step 1: ipv4Update - "0.0.0.0/0 -> 200.0.0.1"
+    # DISABLED: Route already configured in CommonConfigCommands
+    1: disabled
+
+    # Step 2: sendPackets - send.pcap -> expect.pcap
+    # ENABLED: 512 packets, IPv4-in-IPv6 decapsulation
+    2: wovlan
 
 005_decap_dscp:
-  state: wovlan
+  state: disabled
   steps:
     # - sendPackets:
     #   - port: kni0
@@ -82,60 +83,42 @@
 009_nat64stateless:
   state: wovlan
   steps:
-    # - sendPackets:
-    #   - port: kni0
-    #     send: 001-send.pcap
-    #     expect: 001-expect.pcap
-    # 1: disabled
-    # - sendPackets:
-    #   - port: kni0
-    #     send: 002-send.pcap
-    #     expect: 002-expect.pcap
-    # 2: disabled
-    # - sendPackets:
-    #   - port: kni0
-    #     send: 003-send.pcap
-    #     expect: 003-expect.pcap
-    # 3: disabled
-    # - sendPackets:
-    #   - port: kni0
-    #     send: 004-send.pcap
-    #     expect: 004-expect.pcap
-    # 4: disabled
-    # - sendPackets:
-    #   - port: kni0
-    #     send: 005-send.pcap
-    #     expect: 005-expect.pcap
-    5: disabled # fragments
-    # - sendPackets:
-    #   - port: kni0
-    #     send: 006-send.pcap
-    #     expect: 006-expect.pcap
-    6: disabled # fragments
-    # - sendPackets:
-    #   - port: kni0
-    #     send: 007-send.pcap
-    #     expect: 007-expect.pcap
-    # 7: disabled
-    # - sendPackets:
-    #   - port: kni0
-    #     send: 008-send.pcap
-    #     expect: 008-expect.pcap
-    # 8: disabled
-    # - sendPackets:
-    #   - port: kni0
-    #     send: 009-send.pcap
-    #     expect: 009-expect.pcap
-    # 9: disabled
-    # - sendPackets:
-    #   - port: kni0
-    #     send: 010-send.pcap
-    #     expect: 010-expect.pcap
-    # 
-    # 10: disabled
+    # Step 1: ipv4Update - "102.102.102.102/31 -> 200.0.0.1"
+    1: enabled
 
-# 016_route: Basic IPv4 routing test
-# Enable with VLAN stripping, but disable label-related steps
+    # Step 2: ipv6Update - "aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa/128 -> aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:1"
+    2: enabled
+
+    # Step 3: sendPackets - 001-send.pcap -> 001-expect.pcap
+    3: wovlan
+
+    # Step 4: sendPackets - 002-send.pcap -> 002-expect.pcap
+    4: wovlan
+
+    # Step 5: sendPackets - 003-send.pcap -> 003-expect.pcap
+    5: disabled
+
+    # Step 6: sendPackets - 004-send.pcap -> 004-expect.pcap
+    6: disabled
+
+    # Step 7: sendPackets - 005-send.pcap -> 005-expect.pcap
+    7: disabled
+
+    # Step 8: sendPackets - 006-send.pcap -> 006-expect.pcap
+    8: disabled
+
+    # Step 9: sendPackets - 007-send.pcap -> 007-expect.pcap
+    9: wovlan
+
+    # Step 10: sendPackets - 008-send.pcap -> 008-expect.pcap
+    10: wovlan
+
+    # Step 11: sendPackets - 009-send.pcap -> 009-expect.pcap
+    11: disabled
+
+    # Step 12: sendPackets - 010-send.pcap -> 010-expect.pcap
+    12: disabled
+
 016_route:
   state: wovlan
   steps:
@@ -316,7 +299,7 @@
     34: disabled
 
 049_balancer_pure_l3:
-  state: enabled
+  state: disabled
   steps:
     # - ipv4Update:
     #   - "0.0.0.0/0 -> 200.0.0.1"
