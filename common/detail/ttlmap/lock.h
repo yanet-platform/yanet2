@@ -1,13 +1,8 @@
 #pragma once
 
-#include <rte_spinlock.h>
 #include <stdatomic.h>
 
 ////////////////////////////////////////////////////////////////////////////////
-
-typedef struct ttlmap_lock_1 {
-	rte_spinlock_t lock;
-} ttlmap_lock_t_1;
 
 typedef struct ttlmap_lock {
 	atomic_flag flag;

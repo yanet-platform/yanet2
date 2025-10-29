@@ -1,11 +1,11 @@
 mod cfg;
-mod rpc;
 mod cmd;
+mod rpc;
 mod service;
 
-use core::error::Error;
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
+use core::error::Error;
 use ync::logging;
 
 use crate::{cmd::Cmd, service::BalancerService};

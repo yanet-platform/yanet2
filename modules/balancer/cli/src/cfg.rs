@@ -29,7 +29,7 @@ impl From<Real> for balancerpb::Real {
 
 impl TryFrom<balancerpb::Real> for Real {
     type Error = FromUtf8Error;
-    
+
     fn try_from(real: balancerpb::Real) -> Result<Self, Self::Error> {
         Ok(Self {
             weight: real.weight as u16,
@@ -82,9 +82,18 @@ impl TryFrom<balancerpb::VirtualService> for VirtualService {
             ip: String::from_utf8(vs.addr)?,
             proto: vs.proto,
             port: vs.port as u16,
-            flags: VsFlags { gre: vs.gre, ops: vs.ops, fix_mss: vs.fix_mss, pure_l3: vs.pure_l3 },
+            flags: VsFlags {
+                gre: vs.gre,
+                ops: vs.ops,
+                fix_mss: vs.fix_mss,
+                pure_l3: vs.pure_l3,
+            },
             allowed_srcs: vs.allowed_srcs,
-            reals: vs.reals.into_iter().map(TryFrom::try_from).collect::<Result<Vec<_>, _>>()?,
+            reals: vs
+                .reals
+                .into_iter()
+                .map(TryFrom::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
         })
     }
 }
@@ -146,8 +155,15 @@ impl TryFrom<balancerpb::BalancerInstanceConfig> for BalancerConfig {
     type Error = Box<dyn Error>;
     fn try_from(cfg: balancerpb::BalancerInstanceConfig) -> Result<Self, Self::Error> {
         Ok(Self {
-            timeouts: cfg.sessions_timeouts.ok_or("sessions timeouts not specified")?.try_into()?,
-            vs: cfg.virtual_services.into_iter().map(TryFrom::try_from).collect::<Result<Vec<_>, _>>()?,
+            timeouts: cfg
+                .sessions_timeouts
+                .ok_or("sessions timeouts not specified")?
+                .into(),
+            vs: cfg
+                .virtual_services
+                .into_iter()
+                .map(TryFrom::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
         })
     }
 }

@@ -2,9 +2,9 @@
 
 #include <stddef.h>
 
-#include "common/memory.h"
-#include "common/memory_address.h"
-#include "common/memory_block.h"
+#include "../../memory.h"
+#include "../../memory_address.h"
+#include "../../memory_block.h"
 
 #include "bucket.h"
 
@@ -18,7 +18,7 @@ typedef struct ttlmap {
 	size_t buckets_per_chunk_exp; // buckets_per_chunk =
 				      // 2**buckets_per_chunk_exp
 	size_t buckets_exp;	      // buckets = 2**buckets_exp
-} __rte_cache_aligned ttlmap_t;
+} __attribute__((__aligned__(64))) ttlmap_t;
 
 ////////////////////////////////////////////////////////////////////////////////
 
