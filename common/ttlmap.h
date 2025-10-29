@@ -43,6 +43,12 @@ ttlmap_release_lock(ttlmap_lock_t *lock) {
 	__ttlmap_unlock(lock);
 }
 
+static inline void
+ttlmap_init_empty(ttlmap_t *map) {
+	memset(map, 0, sizeof(*map));
+	map->buckets_exp = -1;
+}
+
 static inline uint64_t
 ttlmap_capacity(ttlmap_t *map) {
 	if (map->buckets_exp == (size_t)-1) {

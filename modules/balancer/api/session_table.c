@@ -59,6 +59,8 @@ balancer_session_table_create(struct agent *agent, size_t size) {
 		return NULL;
 	}
 
+	ttlmap_init_empty(&session_table->generations[1].map);
+
 	for (size_t i = 0; i < session_table->workers_cnt; ++i) {
 		struct worker_info *info =
 			&session_table->generations[0].worker_info[i];
