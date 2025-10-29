@@ -25,6 +25,8 @@ struct virtual_service {
 	struct lpm src_filter;
 
 	struct ring real_ring;
+
+	uint64_t round_robin_counter;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

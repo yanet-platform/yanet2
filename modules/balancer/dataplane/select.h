@@ -88,7 +88,11 @@ select_real(
 
 	// Select new real
 
-	uint32_t real_id = ring_get(&vs->real_ring, metadata->hash);
+	uint32_t real_id = ring_get(
+		&vs->real_ring,
+		vs->flags & BALANCER_VS_PRR_FLAG ? vs->round_robin_counter++
+						 : metadata->hash
+	);
 	if (real_id == RING_VALUE_INVALID) {
 		session_unlock(session_lock);
 		return NULL;

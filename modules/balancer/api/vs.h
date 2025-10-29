@@ -11,6 +11,8 @@
 
 #define BALANCER_VS_OPS_FLAG ((uint64_t)(1ull << 4))
 
+#define BALANCER_VS_PRR_FLAG ((uint64_t)(1ull << 5))
+
 #define BALANCER_REAL_IPV6_FLAG ((uint64_t)(1ull << 0))
 
 struct agent;

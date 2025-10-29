@@ -264,6 +264,7 @@ balancer_vs_init(
 		struct balancer_vs_config *vs_config =
 			vs_configs[initialized_vs_count];
 		struct virtual_service *vs = &config_vs[initialized_vs_count];
+		vs->round_robin_counter = 0;
 		vs->flags = vs_config->flags;
 		memcpy(vs->address, vs_config->address, NET6_LEN);
 		vs->port = vs_config->port;
