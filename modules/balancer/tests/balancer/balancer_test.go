@@ -7,16 +7,17 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestBalancerBasic(t *testing.T) {
-	mock, err := NewMock(1 << 21)
+	mock, err := NewMock(1 << 25)
 	require.Nil(t, err, "failed to create mock: %s", err)
 	defer FreeMock(&mock)
-	agent, err := mock.CreateAgent(1 << 20)
+	agent, err := mock.CreateAgent(1 << 24)
 	require.Nil(t, err, "failed to create agent: %s", err)
 
 	config := balancer.BalancerConfig{
@@ -66,4 +67,22 @@ func TestBalancerBasic(t *testing.T) {
 
 	// Ensure packets equal
 	CheckPacketsEqual(t, resultPacket, expectedPacket)
+
+	err = b.HandleRealUpdates([]*balancerpb.RealUpdate{
+		{
+			VirtualIp: []byte("192.166.13.22"),
+			Proto:     "TCP",
+			Port:      1000,
+			RealIp:    []byte("1.1.1.1"),
+			Weight:    5,
+			Enable:    true,
+		},
+	}, true)
+	require.NoError(t, err, "failed to handle real update")
+
+	flushed, err := b.FlushRealUpdatesBuffer()
+	require.NoError(t, err, "failed to flush real updates buffer")
+	require.Equal(t, uint32(1), flushed)
+
+	require.Equal(t, uint16(5), b.GetConfig().Services[0].Reals[0].Weight)
 }

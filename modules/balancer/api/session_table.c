@@ -134,7 +134,7 @@ balancer_session_table_extend(
 	size_t current_table_cap = ttlmap_capacity(&sessions_cur->map);
 
 	LOG(TRACE,
-	    "[balancer state] density_factor=%u, active_sessions=%zu, "
+	    "density_factor=%u, active_sessions=%zu, "
 	    "session_table_capacity=%zu (filled by "
 	    "%.2lf%%)",
 	    density_factor,
@@ -143,6 +143,7 @@ balancer_session_table_extend(
 	    100.0 * active_sessions / current_table_cap);
 
 	if (density_factor >= 7 || force) {
+		LOG(INFO, "extending sessions table...");
 		balancer_session_table_free_unused(session_table);
 		struct session_table_gen *sessions_next =
 			session_table_previous_gen(session_table);
@@ -155,6 +156,7 @@ balancer_session_table_extend(
 			next_gen_cap
 		);
 		if (ret != 0) {
+			LOG(INFO, "failed to initialize new sessions table");
 			// failed to extend session table
 			// probably, memory not enough
 			return -1;
@@ -173,10 +175,11 @@ balancer_session_table_extend(
 		atomic_fetch_add_explicit(
 			&session_table->current_gen, 1, __ATOMIC_SEQ_CST
 		);
-		// successfully extended session table
+		// successfully extended sessions table
+		LOG(INFO, "successfully extended sessions table");
 		return 1;
 	} else {
-		// no need to extend session table
+		// no need to extend sessions table
 		return 0;
 	}
 }
@@ -194,15 +197,19 @@ balancer_session_table_free_unused(struct balancer_session_table *session_table
 			    &sessions_cur->worker_info[i].use_prev_gen,
 			    __ATOMIC_SEQ_CST
 		    ) == 1) {
+			LOG(DEBUG, "failed to free previous table gen as worker %zu uses it", i);
 			return 0;
 		}
 	}
 	struct session_table_gen *sessions_prev =
 		session_table_previous_gen(session_table);
 	if (ttlmap_capacity(&sessions_prev->map) > 0) {
+		LOG(DEBUG, "trying to free previous table gen...");
 		TTLMAP_FREE(&sessions_prev->map);
 		// successfully free memory
+		LOG(DEBUG, "successfully free previous table gen");
 		return 1;
 	}
+	LOG(DEBUG, "previous table gen is not initialized, nothing to do");
 	return 0;
 }

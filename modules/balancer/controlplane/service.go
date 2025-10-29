@@ -78,7 +78,7 @@ func (service *BalancerService) EnableBalancing(
 		return nil, fmt.Errorf("failed to create new balancer instance: %w", err)
 	}
 
-	err = instance.UpdateModules()
+	err = instance.UpdateDataplaneModule()
 	if err != nil {
 		return nil, fmt.Errorf("failed to update modules: %w", err)
 	}
@@ -116,7 +116,7 @@ func (service *BalancerService) ReloadConfig(
 		if err != nil {
 			return nil, fmt.Errorf("failed to reload instance config: %w", err)
 		}
-		err = instance.UpdateModules()
+		err = instance.UpdateDataplaneModule()
 		if err != nil {
 			*instance = *prevInstance
 			return nil, fmt.Errorf("failed to update modules: %w", err)
@@ -148,14 +148,14 @@ func (service *BalancerService) UpdateReals(
 		return nil, fmt.Errorf("module [name=%s, inst=%d] not exists", name, inst)
 	}
 
-	instanceClone := instance.Clone()
-	if err = instanceClone.HandleRealUpdates(req.Updates, req.Buffer); err != nil {
+	if err = instance.HandleRealUpdates(req.Updates, req.Buffer); err != nil {
 		return nil, fmt.Errorf("failed to handle real updates: %s", err)
 	}
-	if err = instanceClone.UpdateModules(); err != nil {
-		return nil, fmt.Errorf("failed to dataplane update module")
+	if !req.Buffer {
+		if err = instance.UpdateDataplaneModule(); err != nil {
+			return nil, fmt.Errorf("dataplane failed to update modules")
+		}
 	}
-	*instance = *instanceClone
 	return &balancerpb.UpdateRealsResponse{}, nil
 }
 
@@ -165,9 +165,12 @@ func (service *BalancerService) FlushRealUpdates(
 	ctx context.Context,
 	req *balancerpb.FlushRealUpdatesRequest,
 ) (*balancerpb.FlushRealUpdatesResponse, error) {
+	service.log.Debugf("handling 'FlushRealUpdates' request")
+
 	name, inst, err := req.GetTarget().Validate(uint32(len(service.agents)))
 	if err != nil {
-		return nil, fmt.Errorf("incorrect target module: %w", err)
+		service.log.Debugf("incorrect target module: %s", err)
+		return nil, fmt.Errorf("incorrect target module: %s", err)
 	}
 
 	service.mu.Lock()
@@ -177,18 +180,25 @@ func (service *BalancerService) FlushRealUpdates(
 	instance, exists := service.instances[key]
 
 	if !exists {
+		service.log.Debugf("module not exists")
 		return nil, fmt.Errorf("module [name=%s, inst=%d] not exists", name, inst)
 	}
 
-	instanceClone := instance.Clone()
-	flushed, err := instanceClone.FlushRealUpdatesBuffer()
+	flushed, err := instance.FlushRealUpdatesBuffer()
 	if err != nil {
-		return nil, fmt.Errorf("failed to handle real updates: %s", err)
+		service.log.Debugf("failed to flush real updates: %s", err)
+		return nil, fmt.Errorf("failed to flush real updates: %s", err)
 	}
-	if err = instanceClone.UpdateModules(); err != nil {
-		return nil, fmt.Errorf("failed to dataplane update module")
+
+	service.log.Debugf("flushed buffer")
+
+	if err = instance.UpdateDataplaneModule(); err != nil {
+		service.log.Debugf("failed to update dataplane module config: %s", err)
+		return nil, fmt.Errorf("dataplane failed to update modules")
 	}
-	*instance = *instanceClone
+
+	service.log.Debugf("updated dataplane module config")
+
 	return &balancerpb.FlushRealUpdatesResponse{
 		UpdatesFlushed: flushed,
 	}, nil
@@ -256,16 +266,15 @@ func (service *BalancerService) RunChecks(ctx context.Context, period time.Durat
 	for {
 		select {
 		case <-ctx.Done():
-			println("herer!")
 			return nil
 		case <-ticker.C:
 		}
 
 		service.mu.Lock()
 
-		for _, value := range service.instances {
+		for m, value := range service.instances {
 			if err := value.CheckSessionTable(); err != nil {
-				println("failed to check session table!")
+				service.log.Errorf("failed to check session table for module [name=%s, instance=%d]", m.name, m.dataplaneInstance)
 			}
 		}
 

@@ -68,8 +68,8 @@ func NewBalancerConfigFromProto(
 }
 
 func (config *BalancerConfig) Clone() *BalancerConfig {
-	timeouts := config.SessionTimeouts
 	services := config.Services
+	timeouts := config.SessionTimeouts
 	return &BalancerConfig{
 		Services:        services,
 		SessionTimeouts: timeouts,
@@ -88,11 +88,13 @@ func (config *BalancerConfig) IntoProto() *balancerpb.BalancerInstanceConfig {
 }
 
 func (config *BalancerConfig) FindReal(vip *netip.Addr, realIp *netip.Addr, port uint16) *Real {
-	for _, service := range config.Services {
-		if service.Address == *vip && port == service.Port || (service.Flags.PureL3 && port == 0) {
-			for _, real := range service.Reals {
+	for service_idx := range config.Services {
+		service := &config.Services[service_idx]
+		if service.Address == *vip && (port == service.Port || (service.Flags.PureL3 && port == 0)) {
+			for idx := range service.Reals {
+				real := &service.Reals[idx]
 				if real.DstAddr == *realIp {
-					return &real
+					return real
 				}
 			}
 		}
@@ -114,8 +116,8 @@ func (config *BalancerConfig) ValidateRealUpdate(
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse real ip: %s", err)
 	}
-	if real := config.FindReal(&vip, &realIp, uint16(update.Port)); real != nil {
-		return nil, nil
+	if real := config.FindReal(&vip, &realIp, uint16(update.Port)); real == nil {
+		return nil, fmt.Errorf("real with address %s not found on virtual service [%s, %d]", realIp, vip, update.Port)
 	} else {
 		update := RealUpdate{
 			VirtualIp: vip,
@@ -125,7 +127,7 @@ func (config *BalancerConfig) ValidateRealUpdate(
 			Enable:    update.Enable,
 			Weight:    update.Weight,
 		}
-		return &update, fmt.Errorf("real with address %s not found on virtual service [%s, %d]", realIp, vip, update.Port)
+		return &update, nil
 	}
 }
 
@@ -180,6 +182,7 @@ func (balancer *BalancerInstance) Clone() *BalancerInstance {
 	return &BalancerInstance{
 		agent:            balancer.agent,
 		name:             balancer.name,
+		sessionTable:     balancer.sessionTable,
 		config:           balancer.config.Clone(),
 		moduleConfig:     balancer.moduleConfig,
 		realUpdateBuffer: balancer.realUpdateBuffer,
@@ -210,7 +213,7 @@ func (balancer *BalancerInstance) UpdateConfig(config *BalancerConfig) error {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (balancer *BalancerInstance) UpdateModules() error {
+func (balancer *BalancerInstance) UpdateDataplaneModule() error {
 	return balancer.moduleConfig.InsertIntoRegistry(balancer.agent)
 }
 
@@ -236,6 +239,9 @@ func (balancer *BalancerInstance) HandleRealUpdates(
 		if err != nil {
 			return fmt.Errorf("update request no. %d is invalid: %s", idx+1, err)
 		}
+		if validated_update == nil {
+			return fmt.Errorf("update request no. %d is invalid", idx+1)
+		}
 		validated = append(validated, validated_update)
 	}
 	if buffer {
@@ -248,7 +254,12 @@ func (balancer *BalancerInstance) HandleRealUpdates(
 				return fmt.Errorf("failed to make update no. %d: %s", idx+1, err)
 			}
 		}
+		moduleConfig, err := NewModuleConfig(balancer.agent, &balancer.sessionTable, newConfig, balancer.name)
+		if err != nil {
+			return fmt.Errorf("failed to create new module config after reals update: %s", err)
+		}
 		*balancer.config = *newConfig
+		balancer.moduleConfig = moduleConfig
 	}
 	return nil
 }
@@ -264,8 +275,13 @@ func (balancer *BalancerInstance) FlushRealUpdatesBuffer() (uint32, error) {
 			return 0, fmt.Errorf("failed to make update no. %d: %s", idx+1, err)
 		}
 	}
-	*balancer.config = *newConfig
 	flushed := balancer.realUpdateBuffer.Clear()
+	moduleConfig, err := NewModuleConfig(balancer.agent, &balancer.sessionTable, newConfig, balancer.name)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create new module config after reals flush: %s", err)
+	}
+	*balancer.config = *newConfig
+	balancer.moduleConfig = moduleConfig
 	return flushed, nil
 }
 
