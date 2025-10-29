@@ -4,7 +4,7 @@ use crate::rpc::{balancerpb, commonpb};
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// CLI interface of the Balancer Module.
+/// Command line interface of the Balancer Module.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
 #[command(flatten_help = true)]
@@ -53,7 +53,7 @@ pub struct ShowConfigCmd {
     pub instance: u32,
 }
 
-/// Allows to enable real.
+/// Allows to schedule enable of the real server.
 #[derive(Debug, Clone, Parser)]
 pub struct EnableRealCmd {
     /// Name of the module config.
@@ -109,7 +109,7 @@ impl From<EnableRealCmd> for balancerpb::UpdateRealsRequest {
     }
 }
 
-/// Allows to enable real.
+/// Allows to schedule enable of the real server.
 #[derive(Debug, Clone, Parser)]
 pub struct DisableRealCmd {
     /// Name of the module config.
@@ -165,7 +165,7 @@ impl From<DisableRealCmd> for balancerpb::UpdateRealsRequest {
     }
 }
 
-/// Allows to flush updates of real services.
+/// Allows to flush scheduled updates of the real servers.
 #[derive(Debug, Clone, Parser)]
 pub struct FlushRealUpdatesCmd {
     /// Name of the module config.
@@ -189,13 +189,14 @@ impl From<FlushRealUpdatesCmd> for balancerpb::FlushRealUpdatesRequest {
 }
 
 #[derive(Debug, Clone, Parser)]
+#[command(flatten_help = true)]
 pub enum RealMode {
     Enable(EnableRealCmd),
     Disable(DisableRealCmd),
     Flush(FlushRealUpdatesCmd),
 }
 
-/// Allows to enable and disable reals
+/// Allows to enable and disable reals.
 #[derive(Debug, Clone, Parser)]
 pub struct RealCmds {
     #[clap(subcommand)]

@@ -100,7 +100,9 @@ func (config *BalancerConfig) FindReal(vip *netip.Addr, realIp *netip.Addr, port
 	return nil
 }
 
-func (config *BalancerConfig) ValidateRealUpdate(update *balancerpb.RealUpdate) (*RealUpdate, error) {
+func (config *BalancerConfig) ValidateRealUpdate(
+	update *balancerpb.RealUpdate,
+) (*RealUpdate, error) {
 	if update.Weight > math.MaxUint16 {
 		return nil, fmt.Errorf("real weight can not exceed %d", math.MaxUint16)
 	}
@@ -224,7 +226,10 @@ func (balancer *BalancerInstance) GetConfig() *BalancerConfig {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (balancer *BalancerInstance) HandleRealUpdates(updates []*balancerpb.RealUpdate, buffer bool) error {
+func (balancer *BalancerInstance) HandleRealUpdates(
+	updates []*balancerpb.RealUpdate,
+	buffer bool,
+) error {
 	validated := make([]*RealUpdate, 0)
 	for idx, update := range updates {
 		validated_update, err := balancer.config.ValidateRealUpdate(update)

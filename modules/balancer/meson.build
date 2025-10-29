@@ -1,5 +1,7 @@
 subdir('api')
 subdir('dataplane')
 subdir('controlplane')
-subdir('app')
 subdir('tests')
+
+# not needed for now, disable
+# subdir('app')
