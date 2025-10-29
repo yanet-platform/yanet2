@@ -197,7 +197,10 @@ balancer_session_table_free_unused(struct balancer_session_table *session_table
 			    &sessions_cur->worker_info[i].use_prev_gen,
 			    __ATOMIC_SEQ_CST
 		    ) == 1) {
-			LOG(DEBUG, "failed to free previous table gen as worker %zu uses it", i);
+			LOG(DEBUG,
+			    "failed to free previous table gen as worker %zu "
+			    "uses it",
+			    i);
 			return 0;
 		}
 	}
