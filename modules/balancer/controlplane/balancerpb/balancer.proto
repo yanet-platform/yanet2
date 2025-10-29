@@ -8,14 +8,16 @@ option go_package = "github.com/yanet-platform/yanet2/modules/"
 		    "balancer/controlplane/balancerpb;balancerpb";
 
 service BalancerService {
-	rpc EnableBalancing(EnableBalancingRequest) returns (EnableBalancingResponse);
+	rpc EnableBalancing(EnableBalancingRequest)
+		returns (EnableBalancingResponse);
 
 	// Allows to update reals with optional buffering updates
 	rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
 
 	// Allows to flush buffered reals updates
-	rpc FlushRealUpdates(FlushRealUpdatesRequest) returns (FlushRealUpdatesResponse);
-	
+	rpc FlushRealUpdates(FlushRealUpdatesRequest)
+		returns (FlushRealUpdatesResponse);
+
 	// Allows to module reload config
 	rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
 
@@ -103,7 +105,7 @@ message RealUpdate {
 message UpdateRealsRequest {
 	commonpb.TargetModule target = 1;
 	repeated RealUpdate updates = 2;
-	// Allows to delay request applying 
+	// Allows to delay request applying
 	// until `flush` will be called
 	bool buffer = 3;
 }
