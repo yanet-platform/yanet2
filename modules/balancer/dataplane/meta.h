@@ -81,6 +81,7 @@ fill_packet_metadata(struct packet *packet, struct packet_metadata *metadata) {
 
 		metadata->dst_port = udp_header->dst_port;
 		metadata->src_port = udp_header->src_port;
+		metadata->tcp_flags = 0;
 	} else {
 		return -1;
 	}
