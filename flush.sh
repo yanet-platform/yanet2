@@ -1,0 +1,1 @@
+/mnt/target/release/yanet-cli-balancer real flush --cfg balancer0

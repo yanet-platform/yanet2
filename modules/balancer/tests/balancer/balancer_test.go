@@ -8,12 +8,15 @@ import (
 	"github.com/stretchr/testify/require"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestBalancerBasic(t *testing.T) {
+	packetParser := framework.NewPacketParser()
+
 	mock, err := NewMock(1 << 25)
 	require.Nil(t, err, "failed to create mock: %s", err)
 	defer FreeMock(&mock)
@@ -62,11 +65,16 @@ func TestBalancerBasic(t *testing.T) {
 	require.Nil(t, err, "failed to handle packet1: %s", err)
 
 	require.True(t, len(result.Output) == 1, "failed to handle packet #1")
-	resultPacket := common.ParseEtherPacket(result.Output[0])
+
+	resultPacket, err := packetParser.ParsePacket(result.Output[0])
+	resultPac := common.ParseEtherPacket(result.Output[0])
+	require.Nil(t, err, "failed to parse packet %s", err)
+
 	t.Log("Result packet", resultPacket)
+	require.True(t, resultPacket.IsTunneled, "result packet is not tunneled")
 
 	// Ensure packets equal
-	CheckPacketsEqual(t, resultPacket, expectedPacket)
+	CheckPacketsEqual(t, resultPac, expectedPacket)
 
 	err = b.HandleRealUpdates([]*balancerpb.RealUpdate{
 		{
