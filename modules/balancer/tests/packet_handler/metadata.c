@@ -3,6 +3,7 @@
 #include "../utils/rng.h"
 #include "common/network.h"
 #include "dataplane/meta.h"
+#include "dataplane/select.h"
 #include "logging/log.h"
 #include "rte_ether.h"
 #include "rte_ip.h"
@@ -12,7 +13,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-int
+static int
 check_meta(struct packet *packet) {
 	struct packet_metadata meta;
 	fill_packet_metadata(packet, &meta);
@@ -106,6 +107,36 @@ check_meta(struct packet *packet) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+static int
+reschedule() {
+	struct packet_metadata meta;
+	meta.transport_proto = IPPROTO_UDP;
+	TEST_ASSERT(reschedule_real(&meta), "udp packets must be rescheduled");
+
+	meta.transport_proto = IPPROTO_TCP;
+	meta.tcp_flags = 0;
+	TEST_ASSERT(
+		!reschedule_real(&meta),
+		"tcp packets without SYN flag must not be rescheduled"
+	);
+
+	meta.tcp_flags = RTE_TCP_SYN_FLAG;
+	TEST_ASSERT(
+		reschedule_real(&meta),
+		"tcp packets with SYN flag must be rescheduled"
+	);
+
+	meta.tcp_flags = RTE_TCP_SYN_FLAG | RTE_TCP_RST_FLAG;
+	TEST_ASSERT(
+		!reschedule_real(&meta),
+		"tcp packets with SYN and RST flags must not be rescheduled"
+	);
+
+	return TEST_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 int
 main() {
 	log_enable_name("debug");
@@ -164,6 +195,11 @@ main() {
 			LOG(INFO, "%lu-th test iteration succeed", i);
 		}
 	}
+
+	LOG(INFO, "testing reschedule...");
+	int res = reschedule();
+	TEST_ASSERT_EQUAL(res, TEST_SUCCESS, "reschedule failed");
+
 	LOG(INFO, "Test passed");
 
 	return 0;
