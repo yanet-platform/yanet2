@@ -33,7 +33,7 @@
 	typedef struct __bucket {                                              \
 		__bucket_entry_t entries[__TTLMAP_BUCKET_ENTRIES];             \
 		ttlmap_lock_t lock;                                            \
-	} __rte_cache_aligned __bucket_t
+	} __attribute__((__aligned__(64))) __bucket_t
 
 #define __TTLMAP_BUCKET_INIT(bucket_ptr, key_type, value_type)                 \
 	__extension__({                                                        \
