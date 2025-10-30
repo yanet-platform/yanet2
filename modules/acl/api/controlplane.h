@@ -2,6 +2,9 @@
 
 #include <stdint.h>
 
+#define ACTION_LOG_FLAG ((uint64_t)(1ull << 0))
+#define ACTION_KEEP_STATE_FLAG ((uint64_t)(1ull << 1))
+
 struct agent;
 struct cp_module;
 
