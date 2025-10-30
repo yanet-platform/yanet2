@@ -67,10 +67,9 @@ func TestBalancerBasic(t *testing.T) {
 	require.True(t, len(result.Output) == 1, "failed to handle packet #1")
 
 	resultPacket, err := packetParser.ParsePacket(result.Output[0])
-	resultPac := common.ParseEtherPacket(result.Output[0])
 	require.Nil(t, err, "failed to parse packet %s", err)
-
-	t.Log("Result packet", resultPacket)
+	resultPac := common.ParseEtherPacket(result.Output[0])
+	t.Log("Result packet", resultPac)
 	require.True(t, resultPacket.IsTunneled, "result packet is not tunneled")
 
 	// Ensure packets equal
@@ -93,4 +92,65 @@ func TestBalancerBasic(t *testing.T) {
 	require.Equal(t, uint32(1), flushed)
 
 	require.Equal(t, uint16(5), b.GetConfig().Services[0].Reals[0].Weight)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func TestBalancerGRE(t *testing.T) {
+	packetParser := framework.NewPacketParser()
+
+	mock, err := NewMock(1 << 25)
+	require.Nil(t, err, "failed to create mock: %s", err)
+	defer FreeMock(&mock)
+	agent, err := mock.CreateAgent(1 << 24)
+	require.Nil(t, err, "failed to create agent: %s", err)
+
+	config := balancer.BalancerConfig{
+		Services: []balancer.VirtualService{
+			{
+				Address: IpAddr("192.166.13.22"),
+				Port:    1000,
+				Flags: balancer.VsFlags{
+					GRE:    true,
+					OPS:    false,
+					PureL3: false,
+					FixMSS: false,
+				},
+				Proto: balancer.VsProtoTcp,
+				AllowedSrc: []netip.Prefix{
+					IpPrefix("10.12.0.0/8"),
+				},
+				Reals: []balancer.Real{
+					{
+						Weight:  1,
+						DstAddr: IpAddr("1.1.1.1"),
+						SrcAddr: IpAddr("3.3.3.3"),
+						SrcMask: IpAddr("255.240.255.0"),
+						Enabled: true,
+					},
+				},
+			},
+		},
+	}
+	b, err := balancer.NewBalancerInstance(&agent, "balancer", &config, 100)
+	require.Nil(t, err, "failed to create new balancer instance")
+	defer b.Free()
+
+	inLayers := MakeTCPPacket("10.12.15.1", 1005, "192.166.13.22", 1000, &layers.TCP{SYN: true})
+	originPacket := common.LayersToPacket(t, inLayers...)
+	t.Log("Origin packet", originPacket)
+
+	result, err := HandlePackets(b, originPacket)
+	require.Nil(t, err, "failed to handle packet1: %s", err)
+
+	require.True(t, len(result.Output) == 1, "failed to handle packet #1")
+
+	resultPacket, err := packetParser.ParsePacket(result.Output[0])
+	require.Nil(t, err, "failed to parse packet %s", err)
+	require.True(t, resultPacket.IsTunneled, "result packet is not tunneled")
+	require.Equal(t, resultPacket.TunnelType, "gre-ip4", "tunnel type must be GRE")
+
+	resultPac := common.ParseEtherPacket(result.Output[0])
+	t.Log("Result packet", resultPac)
+
 }
