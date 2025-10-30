@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package plainpb;
+
+import "common/proto/target.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb;plainpb";
+
+// BalancerService is a control-plane service for managing balancer module.
+service DevicePlainService {
+	rpc UpdateDevice(UpdateDevicePlainRequest)
+		returns (UpdateDevicePlainResponse);
+}
+
+message UpdateDevicePlainRequest {
+	commonpb.TargetDevice target = 1;
+	commonpb.Device device = 2;
+}
+
+message UpdateDevicePlainResponse {
+	string error = 1;
+}

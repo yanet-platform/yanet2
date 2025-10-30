@@ -52,6 +52,9 @@ forward_module_config_free(struct cp_module *cp_module) {
 	struct forward_device_config **devices = ADDR_OF(&config->devices);
 	for (uint64_t idx = 0; idx < config->device_count; ++idx) {
 		struct forward_device_config *device = ADDR_OF(devices + idx);
+		if (device == NULL)
+			continue;
+
 		lpm_free(&device->lpm_v4);
 		lpm_free(&device->lpm_v6);
 		memory_bfree(

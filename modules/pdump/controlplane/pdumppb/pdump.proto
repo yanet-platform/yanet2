@@ -80,7 +80,7 @@ message Config {
 	// Pcap style filter.
 	string filter = 1;
 	// Mode specifies a bitmap of queues that should be dumped.
-	// For now available queues are INPUT, OUTPUT, DROP, BYPASS.
+	// For now available queues are INPUT, OUTPUT, DROP.
 	uint32 mode = 2;
 	// Snaplen specifies maximum packet length to capture.
 	uint32 snaplen = 3;

@@ -37,7 +37,6 @@ type Stage struct {
 	cfg      Config
 	registry *registry.Registry
 	pipeline ynpb.PipelineServiceClient
-	device   ynpb.DeviceServiceClient
 	log      *zap.SugaredLogger
 }
 
@@ -72,9 +71,6 @@ func (m *Stage) Setup(ctx context.Context) error {
 		if err := m.setupPipelines(ctx, instance, instanceConfig.Pipelines); err != nil {
 			return fmt.Errorf("failed to setup pipeline: %w", err)
 		}
-		if err := m.setupDevices(ctx, instance, instanceConfig.Devices); err != nil {
-			return fmt.Errorf("failed to assign pipeline to devices: %w", err)
-		}
 	}
 
 	return nil
@@ -103,47 +99,6 @@ func (m *Stage) setupPipelines(ctx context.Context, instance DataplaneInstanceId
 
 	if _, err := m.pipeline.Update(ctx, req); err != nil {
 		return fmt.Errorf("failed to update pipeline: %w", err)
-	}
-
-	return nil
-}
-
-func (m *Stage) setupDevices(ctx context.Context, instance DataplaneInstanceIdx, devices []DeviceConfig) error {
-	m.log.Infow("setting up devices",
-		zap.Uint32("instance", uint32(instance)),
-		zap.Any("devices", devices),
-	)
-	defer m.log.Infow("finished setting up devices",
-		zap.Uint32("instance", uint32(instance)),
-		zap.Any("devices", devices),
-	)
-
-	req := &ynpb.UpdateDevicesRequest{
-		Instance: uint32(instance),
-	}
-
-	for _, device := range devices {
-		reqDevice := &ynpb.Device{
-			Name: device.Name,
-		}
-		for _, pipeline := range device.Input {
-			reqDevice.Input = append(reqDevice.Input, &ynpb.DevicePipeline{
-				Name:   pipeline.Name,
-				Weight: pipeline.Weight,
-			})
-		}
-		for _, pipeline := range device.Output {
-			reqDevice.Output = append(reqDevice.Output, &ynpb.DevicePipeline{
-				Name:   pipeline.Name,
-				Weight: pipeline.Weight,
-			})
-		}
-
-		req.Devices = append(req.Devices, reqDevice)
-	}
-
-	if _, err := m.device.Update(ctx, req); err != nil {
-		return fmt.Errorf("failed to set up devices: %w", err)
 	}
 
 	return nil

@@ -19,7 +19,6 @@ module_ectx_process(
 ) {
 	(void)dp_config;
 	(void)cp_config_gen;
-
 	module_ectx->handler(dp_worker, module_ectx, packet_front);
 
 	LOG_TRACEX(int in = packet_list_counter(&packet_front->input);

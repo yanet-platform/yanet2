@@ -12,6 +12,7 @@ struct route {
 	 */
 	struct ether_addr dst_addr;
 	struct ether_addr src_addr;
+	uint64_t device_id;
 };
 
 struct route_list {

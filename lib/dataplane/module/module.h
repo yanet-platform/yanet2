@@ -81,6 +81,8 @@ struct module {
 
 typedef struct module *(*module_load_handler)();
 
+// FIXME move the code bellow to a separate file
+#define DEVICE_NAME_LEN 80
 struct device_ectx;
 
 typedef void (*device_handler)(
@@ -88,3 +90,11 @@ typedef void (*device_handler)(
 	struct device_ectx *device_ectx,
 	struct packet *packet
 );
+
+struct device {
+	char name[DEVICE_NAME_LEN];
+	device_handler input_handler;
+	device_handler output_handler;
+};
+
+typedef struct device *(*device_load_handler)();

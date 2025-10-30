@@ -15,6 +15,9 @@ import (
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
+
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
 )
 
 type Config config
@@ -28,6 +31,8 @@ type config struct {
 	Gateway *gateway.Config `json:"gateway" yaml:"gateway"`
 	// Modules configuration.
 	Modules ModulesConfig `json:"modules" yaml:"modules"`
+	// Devices configuration.
+	Devices DevicesConfig `json:"devices" yaml:"devices"`
 }
 
 func DefaultConfig() *Config {
@@ -45,6 +50,10 @@ func DefaultConfig() *Config {
 			NAT64:    nat64.DefaultConfig(),
 			Pdump:    pdump.DefaultConfig(),
 			Balancer: balancer.DefaultConfig(),
+		},
+		Devices: DevicesConfig{
+			Plain: plain.DefaultConfig(),
+			Vlan:  vlan.DefaultConfig(),
 		},
 	}
 }
@@ -94,6 +103,13 @@ type ModulesConfig struct {
 	Balancer *balancer.Config `yaml:"balancer"`
 }
 
+type DevicesConfig struct {
+	// Plain is the configuration for the plain device.
+	Plain *plain.Config `yaml:"plain"`
+	// Vlan is the configuration for the plain device.
+	Vlan *vlan.Config `yaml:"vlan"`
+}
+
 // UnmarshalYAML serves as a proxy for validation.
 //
 // To avoid infinite recursion, the validating wrapper casts itself to the
@@ -109,7 +125,11 @@ func (m *Config) UnmarshalYAML(value *yaml.Node) error {
 
 // Validate validates the control plane configuration.
 func (m *Config) Validate() error {
-	return m.Modules.Validate()
+	err := m.Modules.Validate()
+	if err != nil {
+		return err
+	}
+	return m.Devices.Validate()
 }
 
 func (m *ModulesConfig) Validate() error {
@@ -130,6 +150,16 @@ func (m *ModulesConfig) Validate() error {
 	}
 	if m.Balancer == nil {
 		return fmt.Errorf("balancer module is not configured")
+	}
+	return nil
+}
+
+func (m *DevicesConfig) Validate() error {
+	if m.Plain == nil {
+		return fmt.Errorf("plain device is not configured")
+	}
+	if m.Vlan == nil {
+		return fmt.Errorf("vlan device is not configured")
 	}
 	return nil
 }
