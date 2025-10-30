@@ -100,6 +100,7 @@ memory-bank
 # Ignore Cargo.lock for libraries.
 common/**/Cargo.lock
 Cargo.lock
+subprojects/.wraplock
 
 # local env
 .envrc
