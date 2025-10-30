@@ -6,6 +6,54 @@
 
 #include "controlplane/config/zone.h"
 
+int
+cp_device_config_init(
+	struct cp_device_config *cp_device_config,
+	const char *type,
+	const char *name,
+	uint64_t input_pipeline_count,
+	uint64_t output_pipeline_count
+) {
+	memset(cp_device_config, 0, sizeof(struct cp_device_config));
+	strtcpy(cp_device_config->type, type, sizeof(cp_device_config->type));
+	strtcpy(cp_device_config->name, name, CP_DEVICE_NAME_LEN);
+	cp_device_config->input_pipelines = (struct cp_device_entry_config *)
+		malloc(sizeof(struct cp_device_entry_config) +
+		       sizeof(struct cp_pipeline_weight_config) *
+			       input_pipeline_count);
+	if (cp_device_config->input_pipelines == NULL) {
+		goto error;
+	}
+	memset(cp_device_config->input_pipelines,
+	       0,
+	       sizeof(struct cp_device_entry_config) +
+		       sizeof(struct cp_pipeline_weight_config) *
+			       input_pipeline_count);
+	cp_device_config->input_pipelines->count = input_pipeline_count;
+
+	cp_device_config->output_pipelines = (struct cp_device_entry_config *)
+		malloc(sizeof(struct cp_device_entry_config) +
+		       sizeof(struct cp_pipeline_weight_config) *
+			       output_pipeline_count);
+	if (cp_device_config->output_pipelines == NULL) {
+		goto error_output;
+	}
+	memset(cp_device_config->output_pipelines,
+	       0,
+	       sizeof(struct cp_device_entry_config) +
+		       sizeof(struct cp_pipeline_weight_config) *
+			       output_pipeline_count);
+	cp_device_config->output_pipelines->count = output_pipeline_count;
+
+	return 0;
+
+error_output:
+	free(cp_device_config->input_pipelines);
+
+error:
+	return -1;
+}
+
 static inline uint64_t
 cp_device_entry_alloc_size(uint64_t pipeline_count) {
 	return sizeof(struct cp_device_entry) +
@@ -39,50 +87,73 @@ cp_device_entry_create(
 	return cp_device_entry;
 }
 
-struct cp_device *
-cp_device_create(
-	struct memory_context *memory_context,
-	struct dp_config *dp_config,
-	struct cp_config_gen *cp_config_gen,
-	struct cp_device_config *device_config
+int
+cp_device_init(
+	struct cp_device *cp_device,
+	struct agent *agent,
+	const struct cp_device_config *cp_device_config
 ) {
-	// FIXME
-	(void)dp_config;
-	(void)cp_config_gen;
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 
+	if (dp_config_lookup_device(
+		    dp_config, cp_device_config->type, &cp_device->dp_device_idx
+	    )) {
+		errno = ENXIO;
+		return -1;
+	}
+
+	memset(cp_device, 0, sizeof(struct cp_device_config));
+	strtcpy(cp_device->type, cp_device_config->type, sizeof(cp_device->type)
+	);
+	strtcpy(cp_device->name, cp_device_config->name, sizeof(cp_device->name)
+	);
+	memory_context_init_from(
+		&cp_device->memory_context,
+		&agent->memory_context,
+		cp_device_config->name
+	);
+
+	SET_OFFSET_OF(&cp_device->agent, agent);
+
+	struct memory_context *memory_context = &cp_device->memory_context;
+
+	SET_OFFSET_OF(
+		&cp_device->input_pipelines,
+		cp_device_entry_create(
+			memory_context, cp_device_config->input_pipelines
+		)
+	);
+	if (cp_device->input_pipelines == NULL)
+		return -1;
+
+	SET_OFFSET_OF(
+		&cp_device->output_pipelines,
+		cp_device_entry_create(
+			memory_context, cp_device_config->output_pipelines
+		)
+	);
+	if (cp_device->output_pipelines == NULL)
+		return -1;
+
+	registry_item_init(&cp_device->config_item);
+	counter_registry_init(&cp_device->counter_registry, memory_context, 0);
+
+	return 0;
+}
+
+struct cp_device *
+cp_device_create(struct agent *agent, struct cp_device_config *device_config) {
 	struct cp_device *new_device = (struct cp_device *)memory_balloc(
-		memory_context, sizeof(struct cp_device)
+		&agent->memory_context, sizeof(struct cp_device)
 	);
 	if (new_device == NULL) {
 		return NULL;
 	}
-	memset(new_device, 0, sizeof(struct cp_device_config));
-	strtcpy(new_device->name, device_config->name, CP_DEVICE_NAME_LEN);
 
-	SET_OFFSET_OF(
-		&new_device->input_pipelines,
-		cp_device_entry_create(
-			memory_context, device_config->input_pipelines
-		)
-	);
-	if (new_device->input_pipelines == NULL) {
-		cp_device_free(memory_context, new_device);
+	if (cp_device_init(new_device, agent, device_config)) {
+		cp_device_free(&agent->memory_context, new_device);
 		return NULL;
 	}
-
-	SET_OFFSET_OF(
-		&new_device->output_pipelines,
-		cp_device_entry_create(
-			memory_context, device_config->output_pipelines
-		)
-	);
-	if (new_device->output_pipelines == NULL) {
-		cp_device_free(memory_context, new_device);
-		return NULL;
-	}
-
-	registry_item_init(&new_device->config_item);
-	counter_registry_init(&new_device->counter_registry, memory_context, 0);
 
 	return new_device;
 }
@@ -102,7 +173,7 @@ cp_device_entry_free(
 }
 
 void
-cp_device_free(
+cp_device_destroy(
 	struct memory_context *memory_context, struct cp_device *cp_device
 ) {
 	cp_device_entry_free(
@@ -112,7 +183,13 @@ cp_device_free(
 	cp_device_entry_free(
 		memory_context, ADDR_OF(&cp_device->input_pipelines)
 	);
+}
 
+void
+cp_device_free(
+	struct memory_context *memory_context, struct cp_device *cp_device
+) {
+	cp_device_destroy(memory_context, cp_device);
 	memory_bfree(memory_context, cp_device, sizeof(struct cp_device));
 }
 

@@ -75,7 +75,25 @@ dp_config_lookup_module(
 ) {
 	struct dp_module *modules = ADDR_OF(&dp_config->dp_modules);
 	for (uint64_t idx = 0; idx < dp_config->module_count; ++idx) {
-		if (!strncmp(modules[idx].name, name, 80)) {
+		if (!strncmp(
+			    modules[idx].name, name, sizeof(modules[idx].name)
+		    )) {
+			*index = idx;
+			return 0;
+		}
+	}
+	return -1;
+}
+
+int
+dp_config_lookup_device(
+	struct dp_config *dp_config, const char *name, uint64_t *index
+) {
+	struct dp_device *devices = ADDR_OF(&dp_config->dp_devices);
+	for (uint64_t idx = 0; idx < dp_config->device_count; ++idx) {
+		if (!strncmp(
+			    devices[idx].name, name, sizeof(devices[idx].name)
+		    )) {
 			*index = idx;
 			return 0;
 		}

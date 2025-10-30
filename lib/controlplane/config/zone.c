@@ -161,27 +161,6 @@ cp_config_delete_module(
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 
-	// check if module is referenced by some pipeline
-	// FIXME
-	/*	for (uint64_t pipeline_idx = 0;
-		     pipeline_idx <
-		     cp_pipeline_registry_capacity(&old_config_gen->pipeline_registry);
-		     ++pipeline_idx) {
-			struct cp_pipeline *pipeline =
-	   cp_config_gen_get_pipeline( old_config_gen, pipeline_idx
-			);
-			if (pipeline == NULL) {
-				continue;
-			}
-
-			// if module is referenced by some pipeline
-			// return error
-			if (cp_pipeline_find_module(
-				    old_config_gen, pipeline, module_type,
-	   module_name ) != -1) { goto error_unlock;
-			}
-		}
-	*/
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
@@ -479,7 +458,7 @@ cp_config_update_devices(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t device_count,
-	struct cp_device_config *device_configs[]
+	struct cp_device *devices[]
 ) {
 	// TODO weight clamp
 	cp_config_lock(cp_config);
@@ -493,21 +472,10 @@ cp_config_update_devices(
 	}
 
 	for (uint64_t idx = 0; idx < device_count; ++idx) {
-		struct cp_device *device = cp_device_create(
-			&cp_config->memory_context,
-			dp_config,
-			new_config_gen,
-			device_configs[idx]
-		);
-
-		if (device == NULL) {
-			goto error_free;
-		}
-
 		if (cp_device_registry_upsert(
 			    &new_config_gen->device_registry,
-			    device->name,
-			    device
+			    devices[idx]->name,
+			    devices[idx]
 		    )) {
 			goto error_free;
 		}
@@ -526,8 +494,9 @@ error_unlock:
 }
 
 struct cp_config_gen *
-cp_config_gen_create(struct cp_config *cp_config) {
-	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
+cp_config_gen_create(struct agent *agent) {
+	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	struct cp_config_gen *cp_config_gen =
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
@@ -566,17 +535,14 @@ cp_config_gen_create(struct cp_config *cp_config) {
 		strtcpy(device_config.name,
 			ADDR_OF(&dp_config->dp_topology.devices)[idx].port_name,
 			CP_DEVICE_NAME_LEN);
-		device_config.type = 0;
+		strtcpy(device_config.type, "plain", sizeof(device_config.type)
+		);
 		struct cp_device_entry_config pipe_cfg;
 		pipe_cfg.count = 0;
 		device_config.input_pipelines = &pipe_cfg;
 		device_config.output_pipelines = &pipe_cfg;
-		struct cp_device *cp_device = cp_device_create(
-			&cp_config->memory_context,
-			dp_config,
-			cp_config_gen,
-			&device_config
-		);
+		struct cp_device *cp_device =
+			cp_device_create(agent, &device_config);
 		// FIXME check cp_device and upsert
 		cp_device_registry_upsert(
 			&cp_config_gen->device_registry,

@@ -239,26 +239,42 @@ dataplane_load_module(
 	return 0;
 }
 
-static void
-device_empty_handler(
-	struct dp_worker *dp_worker,
-	struct device_ectx *device_ectx,
-	struct packet *packet
+int
+dataplane_load_device(
+	struct dp_config *dp_config, void *bin_hndl, const char *name
 ) {
-	(void)dp_worker;
-	(void)device_ectx;
-	(void)packet;
-}
+	LOG(INFO, "load device %s", name);
+	char loader_name[64];
+	snprintf(loader_name, sizeof(loader_name), "%s%s", "new_device_", name);
+	device_load_handler loader =
+		(device_load_handler)dlsym(bin_hndl, loader_name);
+	if (loader == NULL) {
+		LOG(ERROR, "failed to load dyn symbol %s", loader_name);
+		return -1;
+	}
+	struct device *device = loader();
 
-static void
-device_vlan_handler(
-	struct dp_worker *dp_worker,
-	struct device_ectx *device_ectx,
-	struct packet *packet
-) {
-	(void)dp_worker;
-	(void)device_ectx;
-	(void)packet;
+	struct dp_device *dp_devices = ADDR_OF(&dp_config->dp_devices);
+	if (mem_array_expand_exp(
+		    &dp_config->memory_context,
+		    (void **)&dp_devices,
+		    sizeof(*dp_devices),
+		    &dp_config->device_count
+	    )) {
+		LOG(ERROR, "failed to allocate memory for device %s", name);
+		// FIXME: free device
+		return -1;
+	}
+
+	struct dp_device *dp_device = dp_devices + dp_config->device_count - 1;
+
+	strtcpy(dp_device->name, device->name, sizeof(dp_device->name));
+	dp_device->input_handler = device->input_handler;
+	dp_device->output_handler = device->output_handler;
+
+	SET_OFFSET_OF(&dp_config->dp_devices, dp_devices);
+
+	return 0;
 }
 
 int
@@ -418,28 +434,30 @@ dataplane_init(
 			return -1;
 		}
 
+		// FIXME: Stub agent for the instance configuration
+		struct agent agent;
+		memory_context_init_from(
+			&agent.memory_context,
+			&instance->cp_config->memory_context,
+			"stub agent"
+		);
+		SET_OFFSET_OF(&agent.dp_config, instance->dp_config);
+		SET_OFFSET_OF(&agent.cp_config, instance->cp_config);
+
 		instance->dp_config->dp_topology.device_count =
 			config->device_count;
-		struct dp_device *devices = (struct dp_device *)memory_balloc(
+		struct dp_port *ports = (struct dp_port *)memory_balloc(
 			&instance->dp_config->memory_context,
-			sizeof(struct dp_device) *
+			sizeof(struct dp_port) *
 				instance->dp_config->dp_topology.device_count
 		);
 		for (uint64_t idx = 0; idx < config->device_count; ++idx) {
-			strtcpy(devices[idx].port_name,
+			strtcpy(ports[idx].port_name,
 				config->devices[idx].port_name,
-				sizeof(devices[idx].port_name));
+				sizeof(ports[idx].port_name));
 		}
 
-		SET_OFFSET_OF(
-			&instance->dp_config->dp_topology.devices, devices
-		);
-
-		struct cp_config_gen *cp_config_gen =
-			cp_config_gen_create(instance->cp_config);
-		SET_OFFSET_OF(
-			&instance->cp_config->cp_config_gen, cp_config_gen
-		);
+		SET_OFFSET_OF(&instance->dp_config->dp_topology.devices, ports);
 
 		instance->dp_config->instance_idx = instance_idx;
 		instance->dp_config->instance_count = dataplane->instance_count;
@@ -494,20 +512,25 @@ dataplane_init(
 			return -1;
 		}
 
-		struct dp_device_handler *handlers =
-			(struct dp_device_handler *)memory_balloc(
-				&instance->dp_config->memory_context,
-				sizeof(struct dp_device_handler) * 2
-			);
-		handlers[0].input = device_empty_handler;
-		handlers[0].output = device_empty_handler;
-		handlers[1].input = device_empty_handler;
-		handlers[1].output = device_vlan_handler;
-
-		SET_OFFSET_OF(
-			&instance->dp_config->dp_device_handlers, handlers
+		rc = dataplane_load_device(
+			instance->dp_config, bin_hndl, "plain"
 		);
-		instance->dp_config->device_handler_count = 2;
+		if (rc == -1) {
+			return -1;
+		}
+
+		rc = dataplane_load_device(
+			instance->dp_config, bin_hndl, "vlan"
+		);
+		if (rc == -1) {
+			return -1;
+		}
+
+		struct cp_config_gen *cp_config_gen =
+			cp_config_gen_create(&agent);
+		SET_OFFSET_OF(
+			&instance->cp_config->cp_config_gen, cp_config_gen
+		);
 
 		instance_offset +=
 			instance_config->dp_memory + instance_config->cp_memory;

@@ -147,9 +147,13 @@ forward_handle_packets(
 			struct config_gen_ectx *config_gen_ectx =
 				ADDR_OF(&module_ectx->config_gen_ectx);
 
+			uint64_t device_id = module_ectx_encode_device(
+				module_ectx, target->device_id
+			);
+
 			struct device_ectx *device_ectx =
 				config_gen_ectx_get_device(
-					config_gen_ectx, target->device_id
+					config_gen_ectx, device_id
 				);
 			if (device_ectx == NULL) {
 				packet_front_drop(packet_front, packet);

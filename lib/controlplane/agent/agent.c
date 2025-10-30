@@ -443,9 +443,7 @@ cp_pipeline_config_set_function(
 
 int
 agent_update_devices(
-	struct agent *agent,
-	uint64_t device_count,
-	struct cp_device_config *devices[]
+	struct agent *agent, uint64_t device_count, struct cp_device *devices[]
 ) {
 	return cp_config_update_devices(
 		ADDR_OF(&agent->dp_config),

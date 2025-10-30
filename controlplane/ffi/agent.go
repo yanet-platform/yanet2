@@ -25,6 +25,20 @@ func NewModuleConfig(ptr unsafe.Pointer) ModuleConfig {
 	}
 }
 
+type ShmDeviceConfig struct {
+	ptr *C.struct_cp_device
+}
+
+func NewShmDeviceConfig(ptr unsafe.Pointer) ShmDeviceConfig {
+	return ShmDeviceConfig{
+		ptr: (*C.struct_cp_device)(ptr),
+	}
+}
+
+func (m *ShmDeviceConfig) AsRawPtr() unsafe.Pointer {
+	return unsafe.Pointer(m.ptr)
+}
+
 func (m *ModuleConfig) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
@@ -137,79 +151,29 @@ func (m *Agent) UpdatePipelines(pipelinesConfigs []PipelineConfig) error {
 }
 
 // UpdateDevices attaches the given pipelines to the given device IDs.
-func (m *Agent) UpdateDevices(deviceConfigs []DeviceConfig) error {
-	// If there are no devices, do nothing.
-	if len(deviceConfigs) == 0 {
+func (m *Agent) UpdateDevices(devices []ShmDeviceConfig) error {
+	if len(devices) == 0 {
 		return nil
 	}
 
-	configs := make([]*C.struct_cp_device_config, 0, len(deviceConfigs))
-
-	// Create a device pipeline map for each device.
-	for _, cfg := range deviceConfigs {
-		deviceName := C.CString(cfg.Name)
-		defer C.free(unsafe.Pointer(deviceName))
-
-		config := C.cp_device_config_create(deviceName, C.uint64_t(len(cfg.Input)), C.uint64_t(len(cfg.Output)))
-		if config == nil {
-			return fmt.Errorf("failed to create device pipeline map")
+	configs := make([]*C.struct_cp_device, len(devices))
+	for i, device := range devices {
+		if device.ptr == nil {
+			return fmt.Errorf("device config at index %d is nil", i)
 		}
-		defer C.cp_device_config_free(config)
-
-		{
-			idx := uint64(0)
-			// Add each pipeline to the device pipeline map.
-			for _, pipeline := range cfg.Input {
-				cPipelineName := C.CString(pipeline.Name)
-				defer C.free(unsafe.Pointer(cPipelineName))
-
-				rc := C.cp_device_config_set_input_pipeline(
-					config,
-					C.uint64_t(idx),
-					cPipelineName,
-					C.uint64_t(pipeline.Weight),
-				)
-				idx++
-				if rc != 0 {
-					return fmt.Errorf("failed to add pipeline to device pipeline map")
-				}
-			}
-		}
-
-		{
-			idx := uint64(0)
-			// Add each pipeline to the device pipeline map.
-			for _, pipeline := range cfg.Output {
-				cPipelineName := C.CString(pipeline.Name)
-				defer C.free(unsafe.Pointer(cPipelineName))
-
-				rc := C.cp_device_config_set_output_pipeline(
-					config,
-					C.uint64_t(idx),
-					cPipelineName,
-					C.uint64_t(pipeline.Weight),
-				)
-				idx++
-				if rc != 0 {
-					return fmt.Errorf("failed to add pipeline to device pipeline map")
-				}
-			}
-		}
-
-		configs = append(configs, config)
+		configs[i] = (*C.struct_cp_device)(device.AsRawPtr())
 	}
 
-	// Update the devices.
 	rc, err := C.agent_update_devices(
-		m.ptr,
-		C.uint64_t(len(configs)),
+		(*C.struct_agent)(m.AsRawPtr()),
+		C.size_t(len(devices)),
 		&configs[0],
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to update devices: %w", err)
 	}
 	if rc != 0 {
-		return fmt.Errorf("error code: %d", rc)
+		return fmt.Errorf("failed to update devices: %d code", rc)
 	}
 
 	return nil

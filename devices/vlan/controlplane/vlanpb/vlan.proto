@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package vlanpb;
+
+import "common/proto/target.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb;vlanpb";
+
+// BalancerService is a control-plane service for managing balancer module.
+service DeviceVlanService {
+	rpc UpdateDevice(UpdateDeviceVlanRequest)
+		returns (UpdateDeviceVlanResponse);
+}
+
+message UpdateDeviceVlanRequest {
+	commonpb.TargetDevice target = 1;
+	commonpb.Device device = 2;
+	uint32 vlan = 3;
+}
+
+message UpdateDeviceVlanResponse {
+	string error = 1;
+}

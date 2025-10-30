@@ -41,6 +41,13 @@ func WithBuiltInModule(module BuiltInModule) GatewayOption {
 	}
 }
 
+// WithBuiltInModule adds a built-in module to the Gateway.
+func WithBuiltInDevice(device BuiltInModule) GatewayOption {
+	return func(o *gatewayOptions) {
+		o.BuiltInModules = append(o.BuiltInModules, device)
+	}
+}
+
 // WithLog sets the logger for the Gateway.
 func WithLog(log *zap.SugaredLogger) GatewayOption {
 	return func(o *gatewayOptions) {
@@ -111,7 +118,6 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *G
 	gatewayService := NewGatewayService(registry, opts.Log)
 	loggingService := NewLoggingService(opts.LogLevel, opts.Log)
 	inspectService := NewInspectService(shm)
-	deviceService := NewDeviceService(shm, opts.Log)
 	pipelineService := NewPipelineService(shm, opts.Log)
 	functionService := NewFunctionService(shm, opts.Log)
 	countersService := NewCountersService(shm)
@@ -124,9 +130,6 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *G
 
 	ynpb.RegisterInspectServiceServer(server, inspectService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", inspectService)))
-
-	ynpb.RegisterDeviceServiceServer(server, deviceService)
-	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", deviceService)))
 
 	ynpb.RegisterPipelineServiceServer(server, pipelineService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", pipelineService)))

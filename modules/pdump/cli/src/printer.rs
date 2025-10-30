@@ -1580,12 +1580,12 @@ mod tests {
         let output_str = String::from_utf8(output.clone()).unwrap();
         assert_eq!(output_str, "00:00:01.234.567 Q:I W:1 P:2 RX:3 TX:4 ");
 
-        meta.queue = dump_mode::BYPASS;
+        meta.queue = dump_mode::DROPS;
         output.clear();
         pretty_print_metadata_concise(&mut output, &meta).unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
-        assert_eq!(output_str, "00:00:01.234.567 Q:B W:1 P:2 RX:3 TX:4 ");
+        assert_eq!(output_str, "00:00:01.234.567 Q:D W:1 P:2 RX:3 TX:4 ");
     }
 
     #[test]
@@ -1598,7 +1598,7 @@ mod tests {
             data_size: 1000,
             rx_device_id: 3,
             tx_device_id: 4,
-            queue: dump_mode::BYPASS,
+            queue: dump_mode::DROPS,
         };
 
         let mut output = Vec::new();
@@ -1614,7 +1614,7 @@ mod tests {
   Data Size:      1000
   RX Device ID:   3
   TX Device ID:   4
-  Packet Queue:   BYPASS
+  Packet Queue:   DROPS
 ----------------------
 ";
         assert_eq!(output_str, expected);

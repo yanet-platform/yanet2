@@ -32,7 +32,7 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 	log = log.With(zap.String("module", "routepb.RouteService"))
 
 	neighbourCache := discovery.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
-	neighbourDiscovery := neigh.NewNeighMonitor(neighbourCache, neigh.WithLog(log))
+	neighbourDiscovery := neigh.NewNeighMonitor(neighbourCache, neigh.WithLog(log), neigh.WithLinkMap(cfg.LinkMap))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
 	if err != nil {

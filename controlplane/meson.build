@@ -23,6 +23,8 @@ custom_target(
         route_protoc_gen,
         pdump_protoc_gen,
         balancer_protoc_gen,
+        plain_protoc_gen,
+        vlan_protoc_gen,
     ],
     install: true,
     install_dir: get_option('bindir'),

@@ -178,11 +178,11 @@ cp_config_update_devices(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t device_count,
-	struct cp_device_config *device_configs[]
+	struct cp_device *devices[]
 );
 
 struct cp_config_gen *
-cp_config_gen_create(struct cp_config *cp_config);
+cp_config_gen_create(struct agent *agent);
 
 /*
 static inline struct cp_module *

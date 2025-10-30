@@ -129,6 +129,14 @@ cp_device_config_set_input_pipeline(
 	uint64_t weight
 );
 
+int
+cp_device_config_set_output_pipeline(
+	struct cp_device_config *config,
+	uint64_t index,
+	const char *name,
+	uint64_t weight
+);
+
 void
 agent_free_unused_modules(struct agent *agent);
 

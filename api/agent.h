@@ -18,6 +18,8 @@ struct agent;
 // TODO: docs.
 struct cp_module;
 
+struct cp_device;
+
 // Attaches to YANET shared memory segment.
 //
 // This is the primary entry point for accessing YANET's shared memory. The
@@ -143,7 +145,5 @@ agent_delete_pipeline(struct agent *agent, const char *pipeline_name);
 
 int
 agent_update_devices(
-	struct agent *agent,
-	uint64_t device_count,
-	struct cp_device_config *devices[]
+	struct agent *agent, uint64_t device_count, struct cp_device *devices[]
 );
