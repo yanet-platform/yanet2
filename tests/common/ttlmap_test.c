@@ -9,6 +9,7 @@
 
 #include <pthread.h>
 #include <stdalign.h>
+#include <unistd.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -332,8 +333,7 @@ ttlmap_init_and_get_buckets(
 
 	LOG(INFO, "print stat...");
 
-	int fd = 2;
-	TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, fd);
+	TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, STDERR_FILENO);
 	LOG(INFO,
 	    "\tPer-entry memory overhead: %.2lf%%\n",
 	    100.0 * (double)(map.mctx.balloc_size) /
@@ -413,14 +413,13 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 	assert(inserted == found);
 
 	LOG(INFO, "print stat...");
-	int fd = 2;
 
 	LOG(INFO,
 	    "- Inserted: %lu/%lu entries (%.2lf%%)\n",
 	    inserted,
 	    kv_entries,
 	    100.0 * (double)inserted / kv_entries);
-	TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, fd);
+	TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, STDERR_FILENO);
 
 	TTLMAP_FREE(&map);
 	assert(map.mctx.balloc_size == map.mctx.bfree_size);

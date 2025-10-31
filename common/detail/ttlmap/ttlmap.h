@@ -275,4 +275,5 @@ __ttlmap_init_internal( // NOLINT
 				fprintf(__file, "]\n");                        \
 			}                                                      \
 		}                                                              \
+		fflush(__file);                                                \
 	})
