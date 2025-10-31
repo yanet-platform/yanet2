@@ -331,7 +331,7 @@ ttlmap_init_and_get_buckets(
 		__ttlmap_unlock(lock);
 	}
 
-	LOG(INFO, "print stat...");
+	LOG(DEBUG, "print stat...");
 
 	TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, STDERR_FILENO);
 	LOG(INFO,
@@ -412,7 +412,7 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 	}
 	assert(inserted == found);
 
-	LOG(INFO, "print stat...");
+	LOG(DEBUG, "print stat...");
 
 	LOG(INFO,
 	    "- Inserted: %lu/%lu entries (%.2lf%%)\n",
