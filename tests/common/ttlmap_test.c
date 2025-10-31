@@ -1,4 +1,5 @@
 #include "common/memory_block.h"
+#include "lib/logging/log.h"
 #include "rte_common.h"
 #include <assert.h>
 
@@ -13,7 +14,7 @@
 
 void
 bucket_basic() {
-	alignas(4096) uint8_t bucket[4096];
+	alignas(64) uint8_t bucket[4096];
 	[[maybe_unused]] void *bucket_ptr = bucket;
 	__TTLMAP_BUCKET_INIT(bucket_ptr, size_t, size_t);
 	int res;
@@ -27,6 +28,7 @@ bucket_basic() {
 		);
 		assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED);
 		assert(value != NULL);
+		assert(lock != NULL);
 		*value = i;
 		__ttlmap_unlock(lock);
 	}
@@ -39,6 +41,8 @@ bucket_basic() {
 			bucket_ptr, &i, &value, &lock, 0, 10, 0
 		);
 		assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
+		assert(value != NULL);
+		assert(lock != NULL);
 		assert(*value == i);
 		__ttlmap_unlock(lock);
 	}
@@ -66,6 +70,7 @@ bucket_basic() {
 		assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED ||
 		       TTLMAP_STATUS(res) == TTLMAP_REPLACED);
 		assert(value != NULL);
+		assert(lock != NULL);
 		__ttlmap_unlock(lock);
 	}
 
@@ -78,6 +83,8 @@ bucket_basic() {
 			bucket_ptr, &key, &value, &lock, 9, 10, 0
 		);
 		assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
+		assert(value != NULL);
+		assert(lock != NULL);
 		assert(*value == key);
 		__ttlmap_unlock(lock);
 	}
@@ -91,6 +98,8 @@ bucket_basic() {
 			bucket_ptr, &key, &value, &lock, 11, 10, 0
 		);
 		assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
+		assert(value != NULL);
+		assert(lock != NULL);
 		*value = 100;
 		__ttlmap_unlock(lock);
 	}
@@ -104,6 +113,8 @@ bucket_basic() {
 			bucket_ptr, &key, &value, &lock, 11, 10, 0
 		);
 		assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
+		assert(value != NULL);
+		assert(lock != NULL);
 		assert(*value == 100);
 		__ttlmap_unlock(lock);
 	}
@@ -119,6 +130,7 @@ bucket_basic() {
 		assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED ||
 		       TTLMAP_STATUS(res) == TTLMAP_REPLACED);
 		assert(*value != 100);
+		assert(lock != NULL);
 		*value = 500;
 		__ttlmap_unlock(lock);
 	}
@@ -138,6 +150,8 @@ thread_func(void *bucket) {
 		if (TTLMAP_STATUS(res) != TTLMAP_FOUND) {
 			return (void *)1;
 		}
+		assert(value != NULL);
+		assert(lock != NULL);
 		*value = *value + 1;
 		__ttlmap_unlock(lock);
 	}
@@ -146,7 +160,7 @@ thread_func(void *bucket) {
 
 void
 bucket_multithread() {
-	alignas(4096) uint8_t bucket[4096];
+	alignas(64) uint8_t bucket[4096];
 	[[maybe_unused]] void *bucket_ptr = bucket;
 	__TTLMAP_BUCKET_INIT(bucket_ptr, size_t, size_t);
 	size_t key = 0;
@@ -155,6 +169,8 @@ bucket_multithread() {
 	int res =
 		__TTLMAP_BUCKET_GET(bucket_ptr, &key, &value, &lock, 0, 10, 0);
 	assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED);
+	assert(value != NULL);
+	assert(lock != NULL);
 	*value = 0;
 	__ttlmap_unlock(lock);
 	pthread_t threads[10];
@@ -175,7 +191,10 @@ bucket_multithread() {
 		bucket_ptr, &key, &lookup_value, &lock, 0, 10, 0
 	);
 	assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
+	assert(lookup_value != NULL);
 	assert(*lookup_value == 1000000);
+	assert(lock != NULL);
+	__ttlmap_unlock(lock);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -190,7 +209,7 @@ bucket_big_alignment() {
 		int x;
 	} __rte_cache_aligned value_t;
 
-	alignas(4096) uint8_t bucket[4096];
+	alignas(64) uint8_t bucket[4096];
 	[[maybe_unused]] void *bucket_ptr = bucket;
 	__TTLMAP_BUCKET_INIT(bucket_ptr, key_t, value_t);
 
@@ -200,17 +219,23 @@ bucket_big_alignment() {
 	int res =
 		__TTLMAP_BUCKET_GET(bucket_ptr, &key, &value, &lock, 0, 10, 0);
 	assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED);
+	assert(value != NULL);
+	assert(lock != NULL);
 	*value = (value_t){.x = 0};
 	__ttlmap_unlock(lock);
 
 	res = __TTLMAP_BUCKET_GET(bucket_ptr, &key, &value, &lock, 0, 10, 0);
 	assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
+	assert(value != NULL);
+	assert(lock != NULL);
 	assert(value->x == 0);
 	value->x += 10;
 	__ttlmap_unlock(lock);
 
 	res = __TTLMAP_BUCKET_GET(bucket_ptr, &key, &value, &lock, 0, 10, 0);
 	assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
+	assert(value != NULL);
+	assert(lock != NULL);
 	value->x += 10;
 	assert(value->x == 20);
 	__ttlmap_unlock(lock);
@@ -221,7 +246,7 @@ bucket_big_alignment() {
 void
 bucket_alignment() {
 	__TTLMAP_BUCKET_DECLARE(uint8_t, uint8_t);
-	static_assert(alignof(__bucket_t) >= 64, "not cache aligned");
+	static_assert(alignof(__bucket_t) == 64, "not cache aligned");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -305,13 +330,14 @@ ttlmap_init_and_get_buckets(
 		__ttlmap_unlock(lock);
 	}
 
-	int fd = 0;
+	LOG(INFO, "print stat...");
+
+	int fd = 2;
 	TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, fd);
-	fprintf(fdopen(fd, "w"),
-		"\tPer-entry memory overhead: %.2lf%%\n",
-		100.0 * (double)(map.mctx.balloc_size) /
-			(kv_entries *
-			 (sizeof(test_key_t) + sizeof(test_value_t))));
+	LOG(INFO,
+	    "\tPer-entry memory overhead: %.2lf%%\n",
+	    100.0 * (double)(map.mctx.balloc_size) /
+		    (kv_entries * (sizeof(test_key_t) + sizeof(test_value_t))));
 
 	TTLMAP_FREE(&map);
 }
@@ -386,11 +412,15 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 	}
 	assert(inserted == found);
 
-	printf("- Inserted: %lu/%lu entries (%.2lf%%)\n",
-	       inserted,
-	       kv_entries,
-	       100.0 * (double)inserted / kv_entries);
-	TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, 0);
+	LOG(INFO, "print stat...");
+	int fd = 2;
+
+	LOG(INFO,
+	    "- Inserted: %lu/%lu entries (%.2lf%%)\n",
+	    inserted,
+	    kv_entries,
+	    100.0 * (double)inserted / kv_entries);
+	TTLMAP_PRINT_STAT(&map, test_key_t, test_value_t, fd);
 
 	TTLMAP_FREE(&map);
 	assert(map.mctx.balloc_size == map.mctx.bfree_size);
@@ -414,47 +444,51 @@ ttlmap_strike_many_entries(void *memory, size_t memory_size) {
 
 int
 main() {
+	log_enable_name("debug");
+
 	// buckets
-	puts("Test bucket_basic...");
+	LOG(INFO, "test bucket_basic...");
 	bucket_basic();
 
-	puts("Test bucket_multithread_lookup...");
+	LOG(INFO, "test bucket_multithread...");
 	bucket_multithread();
 
-	puts("Test bucket_alignment...");
+	LOG(INFO, "test bucket_alignment...");
 	bucket_alignment();
 
-	puts("Test bucket_big_alignment...");
+	LOG(INFO, "test bucket_big_alignment...");
 	bucket_big_alignment();
 
 	// ttlmap
 	size_t memory_size = 1 << 30;
 	void *memory = malloc(memory_size);
-	puts("Test ttlmap_init...");
+	LOG(INFO, "test ttlmap_init...");
 	ttlmap_init(memory, memory_size, 100);
 
 	for (size_t entries = 1; entries <= 10000;
 	     entries = (size_t)((double)(entries + 1) * 1.6)) {
-		printf("\nTest ttlmap_init_and_get_buckets [entries=%zu]...\n",
-		       entries);
+		LOG(INFO,
+		    "test ttlmap_init_and_get_buckets [entries=%zu]...",
+		    entries);
 		ttlmap_init_and_get_buckets(memory, memory_size, entries);
 	}
 
 	for (size_t entries = 1; entries <= 10000;
 	     entries = (size_t)((double)(entries + 1) * 1.6)) {
-		printf("\nTest ttlmap_strike_entries [entries=%zu]...\n",
-		       entries);
+		LOG(INFO, "test ttlmap_strike_entries [entries=%zu]...", entries
+		);
 		ttlmap_strike_entries(memory, memory_size, entries);
 	}
 
-	puts("Test ttlmap_init_and_get_buckets_many_entries...");
+	LOG(INFO, "test ttlmap_init_and_get_buckets_many_entries...");
 	ttlmap_init_and_get_buckets_many_entries(memory, memory_size);
 
-	puts("Test ttlmap_strike_many_entries...");
+	LOG(INFO, "test ttlmap_strike_many_entries...");
 	ttlmap_strike_many_entries(memory, memory_size);
 
+	LOG(INFO, "free memory");
 	free(memory);
 
-	puts("OK!");
+	LOG(INFO, "all tests have been passed");
 	return 0;
 }

@@ -32,6 +32,6 @@ ttlmap_test = executable(
   ['ttlmap_test.c'],
   c_args: yanet_test_c_args,
   link_args: yanet_link_args,
-  dependencies: dependencies + [libdpdk_dep]
+  dependencies: dependencies + [libdpdk_dep, lib_logging_dep]
 )
 test('ttlmap', ttlmap_test, suite: ['common'])
