@@ -7,7 +7,7 @@
 struct balancer_sessions_timeouts;
 struct agent;
 
-// Allows to initialize timeouts of sessions with different types.
+/// Initialize timeouts of sessions with different types.
 struct balancer_sessions_timeouts *
 balancer_sessions_timeouts_create(
 	struct agent *agent,

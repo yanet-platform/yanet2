@@ -27,7 +27,6 @@ struct addr_range {
 
 // Represents config of the virtual service
 struct balancer_vs_config {
-	// FIXME: relative pointer?
 	struct memory_context *mctx;
 	vs_flags_t flags;
 	uint8_t address[16];
@@ -377,7 +376,6 @@ balancer_vs_config_create(
 	}
 	struct balancer_vs_config *vs_config =
 		(struct balancer_vs_config *)memory;
-	// FIXME: relative pointer?
 	vs_config->mctx = &agent->memory_context;
 	vs_config->real_count = real_count;
 	vs_config->allowed_src_count = allowed_src_count;
