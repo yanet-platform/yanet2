@@ -34,18 +34,18 @@ balancer_module_config_create(
 	struct balancer_vs_config **vs_configs,
 	struct balancer_sessions_timeouts *sessions_timeouts
 ) {
-	struct balancer_module_config *config =
+	struct balancer_module_config *balancer_config =
 		(struct balancer_module_config *)memory_balloc(
 			&agent->memory_context,
 			sizeof(struct balancer_module_config)
 		);
-	if (config == NULL) {
+	if (balancer_config == NULL) {
 		return NULL;
 	}
 
 	// Init cp_module
 	if (cp_module_init(
-		    &config->cp_module,
+		    &balancer_config->cp_module,
 		    agent,
 		    "balancer",
 		    name,
@@ -55,27 +55,27 @@ balancer_module_config_create(
 	}
 
 	// Set sessions timeouts
-	config->timeouts = *sessions_timeouts;
+	balancer_config->timeouts = *sessions_timeouts;
 
 	// Set session table
-	SET_OFFSET_OF(&config->session_table, session_table);
+	SET_OFFSET_OF(&balancer_config->session_table, session_table);
 
 	// Set default values to safe free on error
-	config->vs_count = 0;
-	config->vs = NULL;
-	config->real_count = 0;
-	config->reals = NULL;
-	int ret = balancer_vs_init(config, vs_count, vs_configs);
+	balancer_config->vs_count = 0;
+	balancer_config->vs = NULL;
+	balancer_config->real_count = 0;
+	balancer_config->reals = NULL;
+	int ret = balancer_vs_init(balancer_config, vs_count, vs_configs);
 	if (ret < 0) {
 		goto free_config;
 	}
 
-	return &config->cp_module;
+	return &balancer_config->cp_module;
 
 free_config:
 	memory_bfree(
 		&agent->memory_context,
-		config,
+		balancer_config,
 		sizeof(struct balancer_module_config)
 	);
 	return NULL;
@@ -86,9 +86,10 @@ balancer_module_config_free(struct cp_module *config) {
 	struct balancer_module_config *balancer_config =
 		container_of(config, struct balancer_module_config, cp_module);
 
-	for (size_t vs = 0; vs < balancer_config->vs_count; ++vs) {
-		lpm_free(&balancer_config->vs[vs].src_filter);
-		ring_free(&balancer_config->vs[vs].real_ring);
+	for (size_t i = 0; i < balancer_config->vs_count; ++i) {
+		struct virtual_service *vs = ADDR_OF(&balancer_config->vs) + i;
+		lpm_free(&vs->src_filter);
+		ring_free(&vs->real_ring);
 	}
 
 	memory_bfree(
@@ -107,7 +108,7 @@ balancer_module_config_free(struct cp_module *config) {
 
 	memory_bfree(
 		&ADDR_OF(&config->agent)->memory_context,
-		config,
+		balancer_config,
 		sizeof(struct balancer_module_config)
 	);
 }

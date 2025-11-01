@@ -28,11 +28,12 @@ handle_packets(
 ) {
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
-		// 1. Lookup service packet is dirrected to
+		// 1. Lookup single virtual service for which packet is
+		// dirrected to
 
 		struct virtual_service *vs = vs_lookup(config, packet);
 
-		if (vs == NULL) {
+		if (vs == NULL) { // not found virtual service
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
@@ -42,27 +43,24 @@ handle_packets(
 		struct packet_metadata meta;
 		int res = fill_packet_metadata(packet, &meta);
 
-		if (res != 0) {
-			// unexpected packet type
+		if (res != 0) { // unexpected packet type
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
 
-		// 3. Select real service packet should be forwarded
+		// 3. Select real packet for which packet will be forwarded
 
 		struct real *rs =
 			select_real(config, now, worker_idx, vs, &meta);
-		if (rs == NULL) {
-			// real lookup failed
+		if (rs == NULL) { // failed to select real
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
 
-		// 4. Add IP header to the packet to forward it to the selected
-		// real
+		// 4. Tunnel packet to forward in to the selected real
 
 		res = tunnel_packet(vs->flags, rs, packet);
-		if (res != 0) {
+		if (res != 0) { // failed to tunnel packet
 			packet_front_drop(packet_front, packet);
 			continue;
 		}

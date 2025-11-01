@@ -32,8 +32,8 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define ARENA_SIZE (1 << 27) + 100000
-#define AGENT_MEMORY (1 << 27)
+#define ARENA_SIZE (1 << 28) + 100000
+#define AGENT_MEMORY (1 << 28)
 
 static uint8_t null_addr[NET6_LEN];
 static uint8_t full_addr[NET6_LEN];

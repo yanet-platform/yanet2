@@ -6,7 +6,7 @@ import (
 
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
-	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
+	balancer_cp "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"github.com/yanet-platform/yanet2/tests/go/common"
@@ -23,22 +23,22 @@ func TestBalancerBasic(t *testing.T) {
 	agent, err := mock.CreateAgent(1 << 24)
 	require.Nil(t, err, "failed to create agent: %s", err)
 
-	config := balancer.BalancerConfig{
-		Services: []balancer.VirtualService{
+	config := balancer_cp.BalancerConfig{
+		Services: []balancer_cp.VirtualService{
 			{
 				Address: IpAddr("192.166.13.22"),
 				Port:    1000,
-				Flags: balancer.VsFlags{
+				Flags: balancer_cp.VsFlags{
 					GRE:    false,
 					OPS:    false,
 					PureL3: false,
 					FixMSS: false,
 				},
-				Proto: balancer.VsProtoTcp,
+				Proto: balancer_cp.VsProtoTcp,
 				AllowedSrc: []netip.Prefix{
 					IpPrefix("10.12.0.0/8"),
 				},
-				Reals: []balancer.Real{
+				Reals: []balancer_cp.Real{
 					{
 						Weight:  1,
 						DstAddr: IpAddr("1.1.1.1"),
@@ -50,9 +50,9 @@ func TestBalancerBasic(t *testing.T) {
 			},
 		},
 	}
-	b, err := balancer.NewBalancerInstance(&agent, "balancer", &config, 100)
+	balancer, err := balancer_cp.NewBalancerInstance(&agent, "balancer", &config, 100)
 	require.Nil(t, err, "failed to create new balancer instance")
-	defer b.Free()
+	defer balancer.Free()
 
 	inLayers := MakeTCPPacket("10.12.15.1", 1005, "192.166.13.22", 1000, &layers.TCP{SYN: true})
 	originPacket := common.LayersToPacket(t, inLayers...)
@@ -61,7 +61,7 @@ func TestBalancerBasic(t *testing.T) {
 	expectedPacket := Encap(t, inLayers, "3.12.3.1", "1.1.1.1")
 	t.Log("Expected packet", expectedPacket)
 
-	result, err := HandlePackets(b, originPacket)
+	result, err := HandlePackets(balancer, originPacket)
 	require.Nil(t, err, "failed to handle packet1: %s", err)
 
 	require.True(t, len(result.Output) == 1, "failed to handle packet #1")
@@ -75,7 +75,7 @@ func TestBalancerBasic(t *testing.T) {
 	// Ensure packets equal
 	CheckPacketsEqual(t, resultPac, expectedPacket)
 
-	err = b.HandleRealUpdates([]*balancerpb.RealUpdate{
+	err = balancer.HandleRealUpdates([]*balancerpb.RealUpdate{
 		{
 			VirtualIp: []byte("192.166.13.22"),
 			Proto:     "TCP",
@@ -87,11 +87,11 @@ func TestBalancerBasic(t *testing.T) {
 	}, true)
 	require.NoError(t, err, "failed to handle real update")
 
-	flushed, err := b.FlushRealUpdatesBuffer()
+	flushed, err := balancer.FlushRealUpdatesBuffer()
 	require.NoError(t, err, "failed to flush real updates buffer")
 	require.Equal(t, uint32(1), flushed)
 
-	require.Equal(t, uint16(5), b.GetConfig().Services[0].Reals[0].Weight)
+	require.Equal(t, uint16(5), balancer.GetConfig().Services[0].Reals[0].Weight)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -105,22 +105,22 @@ func TestBalancerGRE(t *testing.T) {
 	agent, err := mock.CreateAgent(1 << 24)
 	require.Nil(t, err, "failed to create agent: %s", err)
 
-	config := balancer.BalancerConfig{
-		Services: []balancer.VirtualService{
+	config := balancer_cp.BalancerConfig{
+		Services: []balancer_cp.VirtualService{
 			{
 				Address: IpAddr("192.166.13.22"),
 				Port:    1000,
-				Flags: balancer.VsFlags{
+				Flags: balancer_cp.VsFlags{
 					GRE:    true,
 					OPS:    false,
 					PureL3: false,
 					FixMSS: false,
 				},
-				Proto: balancer.VsProtoTcp,
+				Proto: balancer_cp.VsProtoTcp,
 				AllowedSrc: []netip.Prefix{
 					IpPrefix("10.12.0.0/8"),
 				},
-				Reals: []balancer.Real{
+				Reals: []balancer_cp.Real{
 					{
 						Weight:  1,
 						DstAddr: IpAddr("1.1.1.1"),
@@ -132,7 +132,7 @@ func TestBalancerGRE(t *testing.T) {
 			},
 		},
 	}
-	b, err := balancer.NewBalancerInstance(&agent, "balancer", &config, 100)
+	b, err := balancer_cp.NewBalancerInstance(&agent, "balancer", &config, 100)
 	require.Nil(t, err, "failed to create new balancer instance")
 	defer b.Free()
 

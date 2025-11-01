@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/network.h"
 #include "dataplane/packet/packet.h"
 #include "rte_byteorder.h"
 #include "rte_ether.h"
@@ -41,10 +42,12 @@ fill_packet_metadata(struct packet *packet, struct packet_metadata *metadata) {
 			packet->network_header.offset
 		);
 
-		memcpy(metadata->dst_addr, (uint8_t *)&ipv4_header->dst_addr, 4
-		);
-		memcpy(metadata->src_addr, (uint8_t *)&ipv4_header->src_addr, 4
-		);
+		memcpy(metadata->dst_addr,
+		       (uint8_t *)&ipv4_header->dst_addr,
+		       NET4_LEN);
+		memcpy(metadata->src_addr,
+		       (uint8_t *)&ipv4_header->src_addr,
+		       NET4_LEN);
 	} else if (packet->network_header.type ==
 		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 		metadata->network_proto = IPPROTO_IPV6;
@@ -54,9 +57,9 @@ fill_packet_metadata(struct packet *packet, struct packet_metadata *metadata) {
 			packet->network_header.offset
 		);
 
-		memcpy(metadata->dst_addr, ipv6_header->dst_addr, 16);
-		memcpy(metadata->src_addr, ipv6_header->src_addr, 16);
-	} else {
+		memcpy(metadata->dst_addr, ipv6_header->dst_addr, NET6_LEN);
+		memcpy(metadata->src_addr, ipv6_header->src_addr, NET6_LEN);
+	} else { // unsupported
 		return -1;
 	}
 
@@ -82,7 +85,7 @@ fill_packet_metadata(struct packet *packet, struct packet_metadata *metadata) {
 		metadata->dst_port = udp_header->dst_port;
 		metadata->src_port = udp_header->src_port;
 		metadata->tcp_flags = 0;
-	} else {
+	} else { // unsupported
 		return -1;
 	}
 

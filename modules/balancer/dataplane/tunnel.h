@@ -14,10 +14,13 @@
 
 static inline int
 tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
+	// fix packet MSS if flag is specified and vs is IPv6
 	if ((vs_flags & BALANCER_VS_FIX_MSS_FLAG) &&
 	    (vs_flags & BALANCER_VS_IPV6_FLAG)) {
 		fix_mss_ipv6(packet);
 	}
+
+	// encapsulate packet
 
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
@@ -75,8 +78,9 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 		return ec;
 	}
 
+	// use GRE for encap
 	if (vs_flags & BALANCER_VS_GRE_FLAG) {
-		// update data in ip headers and insert gre
+		// update data in ip headers and insert GRE
 		rte_pktmbuf_prepend(mbuf, sizeof(struct rte_gre_hdr));
 
 		if (real->flags & BALANCER_REAL_IPV6_FLAG) {

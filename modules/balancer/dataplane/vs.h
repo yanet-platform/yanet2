@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/memory_address.h"
+#include "common/network.h"
 #include "filter/filter.h"
 #include "module.h"
 #include "ring.h"
@@ -103,21 +104,25 @@ vs_v4_lookup(struct balancer_module_config *config, struct packet *packet) {
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
+	// get id of the virtual service
 	uint32_t service_id = vs_v4_table_lookup(config, packet);
 	if (service_id == (uint32_t)-1) {
 		return NULL;
 	}
 
 	if (config->vs_count <= service_id) {
-		// If the service_id is out of range of available
+		// if the service_id is out of range of available
 		// services
 		return NULL;
 	}
 
 	struct virtual_service *vs = ADDR_OF(&config->vs) + service_id;
 
-	if (lpm_lookup(&vs->src_filter, 4, (uint8_t *)&ipv4_hdr->src_addr) ==
-	    LPM_VALUE_INVALID) {
+	// check if packet source is allowed for the service
+	/// @todo: use lpm4_lookup
+	if (lpm_lookup(
+		    &vs->src_filter, NET4_LEN, (uint8_t *)&ipv4_hdr->src_addr
+	    ) == LPM_VALUE_INVALID) {
 		return NULL;
 	}
 
@@ -145,8 +150,11 @@ vs_v6_lookup(struct balancer_module_config *config, struct packet *packet) {
 
 	struct virtual_service *vs = ADDR_OF(&config->vs) + service_id;
 
-	if (lpm_lookup(&vs->src_filter, 16, (uint8_t *)&ipv6_hdr->src_addr) ==
-	    LPM_VALUE_INVALID) {
+	// check if packet source is allowed for the service
+	/// @todo: use lpm16_lookup
+	if (lpm_lookup(
+		    &vs->src_filter, NET6_LEN, (uint8_t *)&ipv6_hdr->src_addr
+	    ) == LPM_VALUE_INVALID) {
 		return NULL;
 	}
 	return vs;
@@ -162,7 +170,7 @@ vs_lookup(struct balancer_module_config *config, struct packet *packet) {
 	} else if (packet->network_header.type ==
 		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 		return vs_v6_lookup(config, packet);
-	} else {
+	} else { // unsupported
 		return NULL;
 	}
 }

@@ -53,9 +53,6 @@ vs_v4_table_init(
 			++ipv4_count;
 		}
 	}
-	if (ipv4_count == 0) {
-		return 0;
-	}
 	struct rule_holder {
 		struct net4 vs_addr;
 		struct filter_port_range vs_ports;
@@ -64,14 +61,14 @@ vs_v4_table_init(
 		&config->cp_module.memory_context,
 		sizeof(struct rule_holder) * ipv4_count
 	);
-	if (holders == NULL) {
+	if (holders == NULL && ipv4_count > 0) {
 		return -1;
 	}
 	struct filter_rule *rules = memory_balloc(
 		&config->cp_module.memory_context,
 		sizeof(struct filter_rule) * ipv4_count
 	);
-	if (rules == NULL) {
+	if (rules == NULL && ipv4_count > 0) {
 		goto free_holders;
 	}
 	for (size_t i = 0, j = 0; i < count; ++i) {
@@ -145,9 +142,6 @@ vs_v6_table_init(
 			++ipv6_count;
 		}
 	}
-	if (ipv6_count == 0) {
-		return 0;
-	}
 	struct rule_holder {
 		struct net6 vs_addr;
 		struct filter_port_range vs_ports;
@@ -156,14 +150,14 @@ vs_v6_table_init(
 		&config->cp_module.memory_context,
 		sizeof(struct rule_holder) * ipv6_count
 	);
-	if (holders == NULL) {
+	if (holders == NULL && ipv6_count > 0) {
 		return -1;
 	}
 	struct filter_rule *rules = memory_balloc(
 		&config->cp_module.memory_context,
 		sizeof(struct filter_rule) * ipv6_count
 	);
-	if (rules == NULL) {
+	if (rules == NULL && ipv6_count > 0) {
 		goto free_holders;
 	}
 	for (size_t i = 0, j = 0; i < count; ++i) {
@@ -333,7 +327,7 @@ balancer_vs_init(
 
 free_initalized_vs:
 	for (size_t i = 0; i < initialized_vs_count; ++i) {
-		struct virtual_service *vs = &config_vs[initialized_vs_count];
+		struct virtual_service *vs = &config_vs[i];
 		ring_free(&vs->real_ring);
 		lpm_free(&vs->src_filter);
 	}
