@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,8 +26,8 @@ import (
 type Config struct {
 	InputDir       string
 	OutputDir      string
-	Verbose        bool
-	Debug          bool // Enable debug logging for conversions
+	Verbose        bool // Enable verbose output (user-facing progress messages)
+	Debug          bool // Enable debug logging (technical details, automatically enables Verbose)
 	SkiplistPath   string
 	ForceASTParser bool // Force use of AST parser (fail if unavailable)
 	ForceLegacy    bool // Force use of legacy PCAP analyzer
@@ -223,7 +224,14 @@ var ErrTestSkipped = errors.New("test skipped by skiplist")
 // debugLog outputs debug information if debug mode is enabled
 func (c *Converter) debugLog(format string, args ...interface{}) {
 	if c.config.Debug {
-		fmt.Printf("[DEBUG] "+format+"\n", args...)
+		log.Printf("[DEBUG] "+format, args...)
+	}
+}
+
+// verbose outputs verbose information if verbose mode is enabled
+func (c *Converter) verbose(format string, args ...interface{}) {
+	if c.config.Verbose {
+		log.Printf(format, args...)
 	}
 }
 
@@ -560,9 +568,7 @@ func (c *Converter) ConvertAllTests() error {
 			return filepath.SkipDir
 		}
 		testName := filepath.Base(path)
-		if c.config.Verbose {
-			fmt.Printf("Processing test: %s\n", testName)
-		}
+		c.verbose("Processing test: %s", testName)
 		if err := c.ConvertSingleTest(path, testName); err != nil {
 			return err
 		}
@@ -598,27 +604,21 @@ func (c *Converter) ConvertAllTestsWithStats() (*ConversionStats, error) {
 			testName := filepath.Base(path)
 			stats.TotalTests++
 
-			if c.config.Verbose {
-				fmt.Printf("Converting test %d: %s\n", stats.TotalTests, testName)
-			}
+			c.verbose("Converting test %d: %s", stats.TotalTests, testName)
 
 			// Convert the test
 			err := c.ConvertSingleTest(path, testName)
 			if err != nil {
 				if errors.Is(err, ErrTestSkipped) {
 					stats.SkippedTests++
-					if c.config.Verbose {
-						fmt.Printf("  ⏭️  Skipped by skiplist\n")
-					}
+					c.verbose("  ⏭️  Skipped by skiplist")
 				} else {
 					stats.FailedTests++
 					stats.FailedTestsDetails = append(stats.FailedTestsDetails, FailedTest{
 						Name:  testName,
 						Error: err.Error(),
 					})
-					if c.config.Verbose {
-						fmt.Printf("  ❌ Error: %v\n", err)
-					}
+					c.verbose("  ❌ Error: %v", err)
 				}
 			} else {
 				stats.SuccessTests++
@@ -636,9 +636,7 @@ func (c *Converter) ConvertAllTestsWithStats() (*ConversionStats, error) {
 					testType = "decap"
 				}
 				stats.TestsByType[testType]++
-				if c.config.Verbose {
-					fmt.Printf("  ✅ Successful\n")
-				}
+				c.verbose("  ✅ Successful")
 			}
 
 			return filepath.SkipDir
@@ -680,9 +678,7 @@ func (c *Converter) ConvertSingleTest(testPath, testName string) error {
 	c.debugLog("Test %s effective state: %s", testName, testState)
 
 	if testState == StateDisabled {
-		if c.config.Verbose {
-			fmt.Printf("Skipping test %s due to skiplist: disabled\n", testName)
-		}
+		c.verbose("Skipping test %s due to skiplist: disabled", testName)
 		return ErrTestSkipped
 	}
 	if testState == StateWoVLAN {
@@ -722,8 +718,8 @@ func (c *Converter) ConvertSingleTest(testPath, testName string) error {
 			controlplaneConfig = string(configData)
 			// Parse the configuration
 			parsedConfig, err = c.parseControlplaneConfig(controlplanePath)
-			if err != nil && c.config.Verbose {
-				fmt.Printf("Warning: failed to parse controlplane.conf: %v\n", err)
+			if err != nil {
+				c.verbose("Warning: failed to parse controlplane.conf: %v", err)
 			}
 		}
 	}
@@ -1531,10 +1527,7 @@ func (c *Converter) convertSendPacketsWithOptionsLegacy(content interface{}, tes
 		sendPcapPath := filepath.Join(testPath, sendFile)
 		sendPackets, err := c.pcapAnalyzer.ReadAllPacketsFromFile(sendPcapPath)
 		if err != nil {
-			c.debugLog("Failed to analyze %s: %v", sendFile, err)
-			if c.config.Verbose {
-				fmt.Printf("Warning: failed to analyze pcap file %s: %v\n", sendFile, err)
-			}
+			c.verbose("Warning: failed to analyze pcap file %s: %v", sendFile, err)
 			continue
 		}
 		if len(sendPackets) == 0 {
@@ -1565,15 +1558,9 @@ func (c *Converter) convertSendPacketsWithOptionsLegacy(content interface{}, tes
 			if err != nil {
 				if fileInfo.Size() <= 24 {
 					isDropExpected = true
-					c.debugLog("Empty expect file %s - packet should be dropped", expectFile)
-					if c.config.Verbose {
-						fmt.Printf("Detected empty expect file %s - packet should be dropped\n", expectFile)
-					}
+					c.verbose("Detected empty expect file %s - packet should be dropped", expectFile)
 				} else {
-					c.debugLog("Failed to analyze expect %s: %v", expectFile, err)
-					if c.config.Verbose {
-						fmt.Printf("Warning: failed to analyze expect file %s: %v\n", expectFile, err)
-					}
+					c.verbose("Warning: failed to analyze expect file %s: %v", expectFile, err)
 				}
 			} else {
 				c.debugLog("Expect packets count: %d", len(expectPackets))
@@ -2072,9 +2059,7 @@ func (c *Converter) analyzePcapFiles(testPath string) ([]PcapFileInfo, error) {
 			pcapPath := filepath.Join(testPath, fileName)
 			packetInfo, err := c.pcapAnalyzer.AnalyzePcapFile(pcapPath)
 			if err != nil {
-				if c.config.Verbose {
-					fmt.Printf("Warning: failed to analyze pcap file %s: %v\n", fileName, err)
-				}
+				c.verbose("Warning: failed to analyze pcap file %s: %v", fileName, err)
 				packetInfo = nil
 			}
 
@@ -2148,9 +2133,7 @@ func (c *Converter) formatGoCode(code string) string {
 	formatted, err := format.Source([]byte(code))
 	if err != nil {
 		// If formatting fails, log warning and return original
-		if c.config.Verbose {
-			fmt.Printf("Warning: failed to format code with go/format: %v\n", err)
-		}
+		c.verbose("Warning: failed to format code with go/format: %v", err)
 		return code
 	}
 	return string(formatted)
@@ -2238,9 +2221,7 @@ func (c *Converter) generateGoTest(testData *GoTestData) error {
 	}
 
 	c.debugLog("Successfully generated test file: %s", outputFile)
-	if c.config.Verbose {
-		fmt.Printf("Generated test: %s\n", outputFile)
-	}
+	c.verbose("Generated test: %s", outputFile)
 
 	return nil
 }
