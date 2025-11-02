@@ -17,7 +17,7 @@ func main() {
 		testName    = flag.String("test", "", "Name of specific test to convert (optional)")
 		batch       = flag.Bool("batch", false, "Convert all tests in directory")
 		verbose     = flag.Bool("v", false, "Verbose output")
-		debug       = flag.Bool("debug", false, "Enable debug logging for conversions")
+		debug       = flag.Bool("debug", false, "Enable debug logging for conversions (automatically enables verbose)")
 		statsFile   = flag.String("stats", "", "File to save statistics (markdown)")
 		skiplist    = flag.String("skiplist", "", "Path to skiplist YAML (optional)")
 		updateSkip  = flag.Bool("update-skiplist", false, "Update skiplist.yaml in-place at the auto-generated marker")
@@ -25,6 +25,11 @@ func main() {
 		forceLegacy = flag.Bool("force-legacy", false, "Force use of legacy PCAP analyzer")
 	)
 	flag.Parse()
+
+	// Debug mode automatically enables verbose output
+	if *debug {
+		*verbose = true
+	}
 
 	if *inputDir == "" {
 		fmt.Fprintf(os.Stderr, "Usage: %s -input <yanet1_tests_dir> [-output <yanet2_tests_dir>] [-test <test_name>] [-batch] [-v] [-stats <file>] [-skiplist <file>]\n", os.Args[0])
