@@ -31,6 +31,8 @@ type Config struct {
 	SkiplistPath   string
 	ForceASTParser bool // Force use of AST parser (fail if unavailable)
 	ForceLegacy    bool // Force use of legacy PCAP analyzer
+	StrictMode     bool // Fail on unsupported layers/special handling (for CI)
+	TolerantMode   bool // Continue with warnings on unsupported features (default)
 }
 
 // ConversionStats contains conversion statistics
@@ -51,11 +53,19 @@ type FailedTest struct {
 
 // Print outputs statistics to console
 func (s *ConversionStats) Print() {
-	fmt.Println("\n" + strings.Repeat("=", 60))
-	fmt.Println("TEST CONVERSION STATISTICS")
-	fmt.Println(strings.Repeat("=", 60))
-	fmt.Printf("Total tests:        %d\n", s.TotalTests)
+	markdown := s.FormatStats()
+	// Convert markdown to simple console format
+	console := s.markdownToConsole(markdown)
+	fmt.Print(console)
+}
 
+// FormatStats formats statistics as markdown string
+func (s *ConversionStats) FormatStats() string {
+	var output strings.Builder
+
+	output.WriteString("## General statistics\n\n")
+
+	// Basic stats
 	successPct := 0.0
 	failedPct := 0.0
 	if s.TotalTests > 0 {
@@ -63,78 +73,109 @@ func (s *ConversionStats) Print() {
 		failedPct = float64(s.FailedTests) / float64(s.TotalTests) * 100
 	}
 
-	fmt.Printf("Successful:         %d (%.1f%%)\n", s.SuccessTests, successPct)
-	fmt.Printf("Errors:             %d (%.1f%%)\n", s.FailedTests, failedPct)
-	fmt.Printf("Skipped:            %d\n", s.SkippedTests)
+	output.WriteString(fmt.Sprintf("- **Total tests**: %d\n", s.TotalTests))
+	output.WriteString(fmt.Sprintf("- **Successful**: %d (%.1f%%)\n", s.SuccessTests, successPct))
+	output.WriteString(fmt.Sprintf("- **Errors**: %d (%.1f%%)\n", s.FailedTests, failedPct))
+	output.WriteString(fmt.Sprintf("- **Skipped**: %d\n\n", s.SkippedTests))
 
+	// Tests by type
 	if len(s.TestsByType) > 0 {
-		fmt.Println("\nTests by type:")
+		output.WriteString("## Tests by type\n\n")
+		output.WriteString("| Type | Count |\n")
+		output.WriteString("|------|-------|\n")
 		for testType, count := range s.TestsByType {
-			fmt.Printf("  %-15s: %d\n", testType, count)
+			output.WriteString(fmt.Sprintf("| %s | %d |\n", testType, count))
+		}
+		output.WriteString("\n")
+	}
+
+	// Failed tests
+	if len(s.FailedTestsDetails) > 0 {
+		output.WriteString("## Failed tests\n\n")
+		for _, failed := range s.FailedTestsDetails {
+			output.WriteString(fmt.Sprintf("### %s\n\n", failed.Name))
+			output.WriteString(fmt.Sprintf("```\n%s\n```\n\n", failed.Error))
 		}
 	}
 
-	if len(s.FailedTestsDetails) > 0 {
-		fmt.Println("\nFailed tests:")
-		for _, failed := range s.FailedTestsDetails {
-			fmt.Printf("  ❌ %s: %s\n", failed.Name, failed.Error)
+	return output.String()
+}
+
+// markdownToConsole converts markdown formatted stats to simple console format
+func (s *ConversionStats) markdownToConsole(markdown string) string {
+	var output strings.Builder
+
+	lines := strings.Split(markdown, "\n")
+	inCodeBlock := false
+
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "## "):
+			// Header
+			title := strings.TrimPrefix(line, "## ")
+			output.WriteString("\n" + strings.Repeat("=", 60) + "\n")
+			output.WriteString(strings.ToUpper(title) + "\n")
+			output.WriteString(strings.Repeat("=", 60) + "\n")
+		case strings.HasPrefix(line, "- **") && strings.Contains(line, "**:"):
+			// Bold list item
+			parts := strings.SplitN(line, "**: ", 2)
+			if len(parts) == 2 {
+				label := strings.TrimPrefix(parts[0], "- **")
+				value := parts[1]
+				output.WriteString(fmt.Sprintf("%-20s %s\n", label+":", value))
+			} else {
+				output.WriteString(line + "\n")
+			}
+		case strings.HasPrefix(line, "| ") && strings.Contains(line, " | "):
+			// Table row (skip header separator)
+			if !strings.Contains(line, "---") {
+				parts := strings.Split(strings.Trim(line, "| "), " | ")
+				if len(parts) >= 2 {
+					output.WriteString(fmt.Sprintf("  %-15s: %s\n", parts[0], parts[1]))
+				}
+			}
+		case strings.HasPrefix(line, "### "):
+			// Subheader for failed test
+			name := strings.TrimPrefix(line, "### ")
+			output.WriteString(fmt.Sprintf("%s:\n", name))
+		case strings.HasPrefix(line, "```"):
+			// Code block start/end
+			inCodeBlock = !inCodeBlock
+			if inCodeBlock {
+				output.WriteString("  ")
+			}
+		case inCodeBlock:
+			// Code block content
+			output.WriteString("  " + line + "\n")
+		case line == "":
+			// Empty line
+			output.WriteString("\n")
+		default:
+			// Regular text
+			if line != "" {
+				output.WriteString(line + "\n")
+			}
 		}
 	}
-	fmt.Println(strings.Repeat("=", 60))
+
+	return output.String()
 }
 
 // SaveToFile saves statistics to markdown file
 func (s *ConversionStats) SaveToFile(filename string) error {
-	var content strings.Builder
+	content := "# Test conversion statistics yanet1 → yanet2\n\n"
+	content += fmt.Sprintf("Date: %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
+	content += s.FormatStats()
 
-	content.WriteString("# Test conversion statistics yanet1 → yanet2\n\n")
-	content.WriteString(fmt.Sprintf("Date: %s\n\n", time.Now().Format("2006-01-02 15:04:05")))
-
-	content.WriteString(fmt.Sprintf(`## General statistics
-
-- **Total tests**: %d
-`, s.TotalTests))
-
-	successPct := 0.0
-	failedPct := 0.0
-	if s.TotalTests > 0 {
-		successPct = float64(s.SuccessTests) / float64(s.TotalTests) * 100
-		failedPct = float64(s.FailedTests) / float64(s.TotalTests) * 100
-	}
-
-	content.WriteString(fmt.Sprintf(`- **Successful**: %d (%.1f%%)
-- **Errors**: %d (%.1f%%)
-- **Skipped**: %d
-
-`, s.SuccessTests, successPct, s.FailedTests, failedPct, s.SkippedTests))
-
-	if len(s.TestsByType) > 0 {
-		content.WriteString("## Tests by type\n\n")
-		content.WriteString("| Type | Count |\n")
-		content.WriteString("|------|-------|\n")
-		for testType, count := range s.TestsByType {
-			content.WriteString(fmt.Sprintf("| %s | %d |\n", testType, count))
-		}
-		content.WriteString("\n")
-	}
-
-	if len(s.FailedTestsDetails) > 0 {
-		content.WriteString("## Failed tests\n\n")
-		for _, failed := range s.FailedTestsDetails {
-			content.WriteString(fmt.Sprintf("### %s\n\n", failed.Name))
-			content.WriteString(fmt.Sprintf("```\n%s\n```\n\n", failed.Error))
-		}
-	}
-
-	return os.WriteFile(filename, []byte(content.String()), 0644)
+	return os.WriteFile(filename, []byte(content), 0644)
 }
 
 // findScapyASTParser locates scapy_ast_parser.py relative to converter
-func findScapyASTParser() string {
+func findScapyASTParser() (string, error) {
 	// Get executable directory
 	ex, err := os.Executable()
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("could not determine executable path: %w", err)
 	}
 	exDir := filepath.Dir(ex)
 
@@ -151,24 +192,28 @@ func findScapyASTParser() string {
 			continue
 		}
 		if _, err := os.Stat(absPath); err == nil {
-			return absPath
+			log.Printf("[INFO] Found scapy_ast_parser.py at: %s", absPath)
+			return absPath, nil
 		}
 	}
 
-	return "" // Will fallback to PCAP analysis
+	// Not found - return error with helpful message
+	return "", fmt.Errorf("scapy_ast_parser.py not found. Searched locations: %v. To install, run: just dsetup", candidates)
 }
 
 // Converter performs conversion of yanet1 tests to yanet2
 type Converter struct {
-	config           *Config
-	pcapAnalyzer     *PcapAnalyzer
-	scapyASTParser   string          // Path to scapy_ast_parser.py
-	scapyCodegenV2   *ScapyCodegenV2 // New code generator
-	packetCounter    int             // Global counter for unique packet function names
-	stepCounter      int             // Counter for unique step names
-	skiplist         map[string]SkiplistEntry
-	defaultStripVLAN bool
-	moduleInventory  moduleInventory
+	config                *Config
+	pcapAnalyzer          *PcapAnalyzer
+	scapyASTParser        string          // Path to scapy_ast_parser.py
+	scapyCodegenV2        *ScapyCodegenV2 // New code generator
+	packetCounter         int             // Global counter for unique packet function names
+	stepCounter           int             // Counter for unique step names
+	skiplist              map[string]SkiplistEntry
+	defaultStripVLAN      bool
+	moduleInventory       moduleInventory
+	specialHandlingSkips  map[string]int // Track special handling types that were skipped
+	unsupportedLayerTypes map[string]int // Track unsupported layer types
 }
 
 type moduleInventory struct {
@@ -200,22 +245,43 @@ type SkiplistEntry struct {
 }
 
 // NewConverter creates a new converter instance
-func NewConverter(config *Config) *Converter {
+func NewConverter(config *Config) (*Converter, error) {
 	// Initialize new AST-based system
-	scapyASTParser := findScapyASTParser()
+	scapyASTParser, err := findScapyASTParser()
+	if err != nil {
+		// In strict mode or when AST is forced, fail immediately
+		if config.StrictMode || config.ForceASTParser {
+			return nil, fmt.Errorf("scapy AST parser required but not found: %w", err)
+		}
+		// In tolerant mode, log warning and continue with PCAP fallback
+		if config.Verbose {
+			log.Printf("[WARNING] %v", err)
+			log.Printf("[INFO] Falling back to legacy PCAP analysis")
+		}
+		scapyASTParser = "" // Use PCAP fallback
+	}
 
 	c := &Converter{
-		config:         config,
-		pcapAnalyzer:   NewPcapAnalyzer(config.Verbose),
-		scapyASTParser: scapyASTParser,
-		scapyCodegenV2: NewScapyCodegenV2(false), // false = keep VLAN by default
-		skiplist:       make(map[string]SkiplistEntry),
+		config:                config,
+		pcapAnalyzer:          NewPcapAnalyzer(config.Verbose),
+		scapyASTParser:        scapyASTParser,
+		scapyCodegenV2:        NewScapyCodegenV2(false), // false = keep VLAN by default
+		skiplist:              make(map[string]SkiplistEntry),
+		specialHandlingSkips:  make(map[string]int),
+		unsupportedLayerTypes: make(map[string]int),
 		moduleInventory: moduleInventory{
 			balancerModules: make(map[string]struct{}),
 		},
 	}
-	c.loadSkiplist()
-	return c
+	// Connect tracking maps to code generator
+	c.scapyCodegenV2.SetTrackingMaps(&c.specialHandlingSkips, &c.unsupportedLayerTypes)
+	c.scapyCodegenV2.SetStrictMode(config.StrictMode)
+
+	if err := c.loadSkiplist(); err != nil {
+		return nil, fmt.Errorf("failed to load skiplist: %w", err)
+	}
+
+	return c, nil
 }
 
 // ErrTestSkipped is returned when a test is disabled by skiplist
@@ -233,6 +299,37 @@ func (c *Converter) verbose(format string, args ...interface{}) {
 	if c.config.Verbose {
 		log.Printf(format, args...)
 	}
+}
+
+// printConversionSummary prints a summary of special handling and unsupported layers
+func (c *Converter) printConversionSummary() {
+	if len(c.specialHandlingSkips) == 0 && len(c.unsupportedLayerTypes) == 0 {
+		return // Nothing to report
+	}
+
+	fmt.Println("\n" + strings.Repeat("=", 60))
+	fmt.Println("CONVERSION WARNINGS SUMMARY")
+	fmt.Println(strings.Repeat("=", 60))
+
+	if len(c.specialHandlingSkips) > 0 {
+		fmt.Println("\nSpecial handling types skipped:")
+		for handlingType, count := range c.specialHandlingSkips {
+			fmt.Printf("  - %-20s: %d packet(s)\n", handlingType, count)
+		}
+		fmt.Println("\nNote: Packets with special handling were commented out in generated tests.")
+		fmt.Println("      Uncomment and implement if needed for your test scenarios.")
+	}
+
+	if len(c.unsupportedLayerTypes) > 0 {
+		fmt.Println("\nUnsupported layer types encountered:")
+		for layerType, count := range c.unsupportedLayerTypes {
+			fmt.Printf("  - %-20s: %d occurrence(s)\n", layerType, count)
+		}
+		fmt.Println("\nNote: Unsupported layers may result in incomplete packet generation.")
+		fmt.Println("      Check generated code and packet_builder.go for implementation.")
+	}
+
+	fmt.Println(strings.Repeat("=", 60))
 }
 
 // shouldUseASTParser determines if test should use new AST parser
@@ -264,23 +361,22 @@ func (c *Converter) shouldUseASTParser(testPath string) bool {
 }
 
 // loadSkiplist loads skiplist YAML if provided; missing file is tolerated
-func (c *Converter) loadSkiplist() {
+func (c *Converter) loadSkiplist() error {
 	path := strings.TrimSpace(c.config.SkiplistPath)
 	if path == "" {
-		return
+		return nil // No skiplist specified, not an error
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		c.debugLog("Skiplist not loaded: %v", err)
-		return
+		return fmt.Errorf("failed to read skiplist file %s: %w", path, err)
 	}
 	var m map[string]SkiplistEntry
 	if err := yaml.Unmarshal(data, &m); err != nil {
-		c.debugLog("Skiplist parse error: %v", err)
-		return
+		return fmt.Errorf("failed to parse skiplist YAML: %w", err)
 	}
 	c.skiplist = m
 	c.debugLog("Loaded skiplist with %d entries", len(m))
+	return nil
 }
 
 // effectiveState returns the effective state for a step (1-based index).
@@ -530,27 +626,9 @@ func nextStepOrDedent(baseIndent int) *regexp.Regexp {
 	return regexp.MustCompile(fmt.Sprintf(`^\s{0,%d}-\s+[A-Za-z0-9_]+:\s*$`, baseIndent))
 }
 
-// getAddressMappings is deprecated. Use AdaptIPAddress instead.
-// This method is kept for backward compatibility but delegates to AdaptIPAddress.
-func (c *Converter) getAddressMappings() map[string]string {
-	// Return a copy of the mappings for backward compatibility
-	// Note: This creates a new map each time, but it's only used for compatibility
-	mappings := make(map[string]string)
-	for k, v := range addressMappings {
-		mappings[k] = v
-	}
-	return mappings
-}
-
 // YanetTest represents the structure of a yanet1 test
 type YanetTest struct {
 	Steps []map[string]interface{} `yaml:"steps"`
-}
-
-// TestStep represents one test step
-type TestStep struct {
-	Type    string
-	Content interface{}
 }
 
 // ConvertAllTests converts all tests in the specified directory
@@ -644,6 +722,9 @@ func (c *Converter) ConvertAllTestsWithStats() (*ConversionStats, error) {
 
 		return nil
 	})
+
+	// Print summary of special handling and unsupported layers
+	c.printConversionSummary()
 
 	return stats, err
 }
@@ -1027,15 +1108,15 @@ func (c *Converter) convertStepsWithSkip(testName string, steps []map[string]int
 func (c *Converter) convertStepWithState(stepType string, content interface{}, testPath string, state StepState, testName string) ConvertedStep {
 	switch stepType {
 	case "ipv4Update":
-		return c.convertIPv4Update(content, stepType)
+		return c.convertRouteUpdate(content, stepType, false)
 	case "ipv6Update":
-		return c.convertIPv6Update(content, stepType)
+		return c.convertRouteUpdate(content, stepType, true)
 	case "ipv4LabelledUpdate":
 		return c.convertIPv4LabelledUpdate(content, stepType)
 	case "ipv4Remove":
-		return c.convertIPv4Remove(content, stepType)
+		return c.convertRouteRemove(content, stepType, false)
 	case "ipv4LabelledRemove":
-		return c.convertIPv4LabelledRemove(content, stepType)
+		return c.convertRouteRemove(content, stepType, true)
 	case "sendPackets":
 		stripVLAN := (state == StateWoVLAN)
 		return c.convertSendPacketsWithOptions(content, testPath, stripVLAN, testName)
@@ -1063,9 +1144,14 @@ func (c *Converter) generateYAMLComment(stepType string, items []string) string 
 	return yaml.String()
 }
 
-// convertIPv4Update converts ipv4Update step
-func (c *Converter) convertIPv4Update(content interface{}, stepType string) ConvertedStep {
-	c.debugLog("Converting ipv4Update step")
+// convertRouteUpdate is a unified function for both IPv4 and IPv6 route updates
+func (c *Converter) convertRouteUpdate(content interface{}, stepType string, isIPv6 bool) ConvertedStep {
+	protocol := "IPv4"
+	if isIPv6 {
+		protocol = "IPv6"
+	}
+
+	c.debugLog("Converting %s route update", protocol)
 	var routeStrings []string
 
 	// Handle as string or array
@@ -1079,7 +1165,7 @@ func (c *Converter) convertIPv4Update(content interface{}, stepType string) Conv
 			}
 		}
 	default:
-		return NewSkipStep("ipv4Update", "Invalid ipv4Update format")
+		return NewSkipStep(stepType, fmt.Sprintf("Invalid %sUpdate format", protocol))
 	}
 
 	// Generate YAML comment
@@ -1087,8 +1173,8 @@ func (c *Converter) convertIPv4Update(content interface{}, stepType string) Conv
 
 	var commands []string
 	for _, routeStr := range routeStrings {
-		c.debugLog("  IPv4 route: %s", routeStr)
-		// Parse "1.1.0.0/16 -> 200.0.0.1"
+		c.debugLog("  %s route: %s", protocol, routeStr)
+		// Parse "10.0.0.0/24 -> 192.168.1.1" or "2000::/124 -> fe80::1"
 		parts := strings.Split(routeStr, " -> ")
 		if len(parts) == 2 {
 			prefix := strings.TrimSpace(parts[0])
@@ -1106,80 +1192,31 @@ func (c *Converter) convertIPv4Update(content interface{}, stepType string) Conv
 	}
 
 	if len(commands) == 0 {
-		return NewSkipStep("ipv4Update", "No valid IPv4 routes found")
+		return NewSkipStep(stepType, fmt.Sprintf("No valid %s routes found", protocol))
 	}
 
 	goCode := fmt.Sprintf(`%scommands := []string{
 		%s,
 	}
 	_, err := fw.CLI.ExecuteCommands(commands...)
-	require.NoError(t, err, "Failed to configure IPv4 routes")`, yamlComment, strings.Join(commands, ",\n\t\t"))
+	require.NoError(t, err, "Failed to configure %s routes")`, yamlComment, strings.Join(commands, ",\n\t\t"), protocol)
 
 	return ConvertedStep{
-		Type:         "ipv4Update",
+		Type:         stepType,
 		GoCode:       goCode,
-		Description:  "IPv4 routes configuration",
+		Description:  fmt.Sprintf("%s routes configuration", protocol),
 		OriginalYAML: yamlComment,
 	}
 }
 
-// convertIPv6Update converts ipv6Update step
+// convertIPv4Update converts ipv4Update step - wrapper around convertRouteUpdate
+func (c *Converter) convertIPv4Update(content interface{}, stepType string) ConvertedStep {
+	return c.convertRouteUpdate(content, stepType, false)
+}
+
+// convertIPv6Update converts ipv6Update step - wrapper around convertRouteUpdate
 func (c *Converter) convertIPv6Update(content interface{}, stepType string) ConvertedStep {
-	c.debugLog("Converting ipv6Update step")
-	var routeStrings []string
-
-	// Handle as string or array
-	switch v := content.(type) {
-	case string:
-		routeStrings = []string{v}
-	case []interface{}:
-		for _, route := range v {
-			if routeStr, ok := route.(string); ok {
-				routeStrings = append(routeStrings, routeStr)
-			}
-		}
-	default:
-		return NewSkipStep("ipv6Update", "Invalid ipv6Update format")
-	}
-
-	// Generate YAML comment
-	yamlComment := c.generateYAMLComment(stepType, routeStrings)
-
-	var commands []string
-	for _, routeStr := range routeStrings {
-		c.debugLog("  IPv6 route: %s", routeStr)
-		// Parse "2000::/124 -> fe80::1"
-		parts := strings.Split(routeStr, " -> ")
-		if len(parts) == 2 {
-			prefix := strings.TrimSpace(parts[0])
-			nexthop := strings.TrimSpace(parts[1])
-
-			// Adapt nexthop IP address to yanet2 infrastructure
-			adaptedNexthop := c.adaptIPAddress(nexthop)
-			c.debugLog("  Adapted nexthop: %s -> %s", nexthop, adaptedNexthop)
-
-			cmd := fmt.Sprintf(`"%s insert --cfg route0 --instances 0 --via %s %s"`, framework.CLIRoute, adaptedNexthop, prefix)
-			commands = append(commands, cmd)
-			c.debugLog("  Generated route insert: %s", cmd)
-		}
-	}
-
-	if len(commands) == 0 {
-		return NewSkipStep("ipv6Update", "No valid IPv6 routes found")
-	}
-
-	goCode := fmt.Sprintf(`%scommands := []string{
-		%s,
-	}
-	_, err := fw.CLI.ExecuteCommands(commands...)
-	require.NoError(t, err, "Failed to configure IPv6 routes")`, yamlComment, strings.Join(commands, ",\n\t\t"))
-
-	return ConvertedStep{
-		Type:         "ipv6Update",
-		GoCode:       goCode,
-		Description:  "IPv6 routes configuration",
-		OriginalYAML: yamlComment,
-	}
+	return c.convertRouteUpdate(content, stepType, true)
 }
 
 // convertIPv4LabelledUpdate converts ipv4LabelledUpdate step
@@ -1238,76 +1275,106 @@ func (c *Converter) convertIPv4LabelledUpdate(content interface{}, stepType stri
 	}
 }
 
-// convertIPv4Remove converts ipv4Remove step
+// convertRouteRemove is a unified function for both regular and labelled route removals
+func (c *Converter) convertRouteRemove(content interface{}, stepType string, isLabelled bool) ConvertedStep {
+	c.debugLog("Converting %s route removal", stepType)
+	routes, ok := content.([]interface{})
+	if !ok {
+		return NewSkipStep(stepType, fmt.Sprintf("Invalid %s format", stepType))
+	}
+
+	var routeStrings []string
+	for _, route := range routes {
+		routeStr, ok := route.(string)
+		if !ok {
+			continue
+		}
+		routeStrings = append(routeStrings, routeStr)
+	}
+
+	// Generate YAML comment
+	yamlComment := c.generateYAMLComment(stepType, routeStrings)
+
+	var commands []string
+	for _, routeStr := range routeStrings {
+		c.debugLog("  Route to remove: %s", routeStr)
+		// Parse "10.0.0.0/24 -> 192.168.1.1" or "10.0.0.0/24 -> 192.168.1.1 label:transport1"
+		parts := strings.Split(routeStr, " -> ")
+		if len(parts) >= 2 {
+			prefix := strings.TrimSpace(parts[0])
+			routeRest := strings.TrimSpace(parts[1])
+
+			// Extract nexthop and possibly label
+			nexthopParts := strings.Split(routeRest, " label:")
+			nexthop := strings.TrimSpace(nexthopParts[0])
+			var label string
+			if len(nexthopParts) > 1 {
+				label = strings.TrimSpace(nexthopParts[1])
+			}
+
+			// Adapt nexthop IP address to yanet2 infrastructure
+			adaptedNexthop := c.adaptIPAddress(nexthop)
+			c.debugLog("  Adapted nexthop: %s -> %s", nexthop, adaptedNexthop)
+
+			// Generate remove command (yanet2 CLI supports remove operation)
+			if isLabelled && label != "" {
+				// Labelled route removal
+				cmd := fmt.Sprintf(`"%s remove --cfg route0 --instances 0 --via %s %s --label %s"`, framework.CLIRoute, adaptedNexthop, prefix, label)
+				commands = append(commands, cmd)
+				c.debugLog("  Generated labelled route remove: %s", cmd)
+			} else {
+				// Regular route removal
+				cmd := fmt.Sprintf(`"%s remove --cfg route0 --instances 0 --via %s %s"`, framework.CLIRoute, adaptedNexthop, prefix)
+				commands = append(commands, cmd)
+				c.debugLog("  Generated route remove: %s", cmd)
+			}
+		}
+	}
+
+	if len(commands) == 0 {
+		description := "IPv4 routes removal"
+		if isLabelled {
+			description = "IPv4 routes removal with labels"
+		}
+		goCode := fmt.Sprintf(`%s// No valid routes found for removal
+    t.Logf("No %s to process")`, yamlComment, strings.ToLower(description))
+
+		return ConvertedStep{
+			Type:         stepType,
+			GoCode:       goCode,
+			Description:  description,
+			OriginalYAML: yamlComment,
+		}
+	}
+
+	protocol := "IPv4"
+	description := "IPv4 routes removal"
+	if isLabelled {
+		description = "IPv4 routes removal with labels"
+	}
+
+	goCode := fmt.Sprintf(`%scommands := []string{
+		%s,
+	}
+	_, err := fw.CLI.ExecuteCommands(commands...)
+	require.NoError(t, err, "Failed to remove %s routes")`, yamlComment, strings.Join(commands, ",\n\t\t"), strings.ToLower(protocol))
+
+	return ConvertedStep{
+		Type:         stepType,
+		GoCode:       goCode,
+		Description:  description,
+		OriginalYAML: yamlComment,
+	}
+}
+
+// convertIPv4Remove converts ipv4Remove step - wrapper around convertRouteRemove
 func (c *Converter) convertIPv4Remove(content interface{}, stepType string) ConvertedStep {
-	c.debugLog("Converting ipv4Remove step")
-	routes, ok := content.([]interface{})
-	if !ok {
-		return NewSkipStep("ipv4Remove", "Invalid ipv4Remove format")
-	}
-
-	var routeStrings []string
-	for _, route := range routes {
-		routeStr, ok := route.(string)
-		if !ok {
-			continue
-		}
-		routeStrings = append(routeStrings, routeStr)
-
-		// yanet2 CLI route doesn't support remove command
-		c.debugLog("  Route remove commented out: %s", routeStr)
-	}
-
-	// Generate YAML comment
-	yamlComment := c.generateYAMLComment(stepType, routeStrings)
-
-	goCode := fmt.Sprintf(`%s// Route removal is not supported in yanet2 CLI; skipping execution
-    t.Logf("Skipping IPv4 route removals")`, yamlComment)
-
-	return ConvertedStep{
-		Type:         "ipv4Remove",
-		GoCode:       goCode,
-		Description:  "IPv4 routes removal",
-		OriginalYAML: yamlComment,
-	}
+	return c.convertRouteRemove(content, stepType, false)
 }
 
-// convertIPv4LabelledRemove converts ipv4LabelledRemove step
+// convertIPv4LabelledRemove converts ipv4LabelledRemove step - wrapper around convertRouteRemove
 func (c *Converter) convertIPv4LabelledRemove(content interface{}, stepType string) ConvertedStep {
-	c.debugLog("Converting ipv4LabelledRemove step")
-	routes, ok := content.([]interface{})
-	if !ok {
-		return NewSkipStep("ipv4LabelledRemove", "Invalid ipv4LabelledRemove format")
-	}
-
-	var routeStrings []string
-	for _, route := range routes {
-		routeStr, ok := route.(string)
-		if !ok {
-			continue
-		}
-		routeStrings = append(routeStrings, routeStr)
-
-		// yanet2 CLI route doesn't support remove command
-		c.debugLog("  Labeled route remove commented out: %s", routeStr)
-	}
-
-	// Generate YAML comment
-	yamlComment := c.generateYAMLComment(stepType, routeStrings)
-
-	goCode := fmt.Sprintf(`%s// Labeled route removal is not supported in yanet2 CLI; skipping execution
-    t.Logf("Skipping IPv4 labeled route removals")`, yamlComment)
-
-	return ConvertedStep{
-		Type:         "ipv4LabelledRemove",
-		GoCode:       goCode,
-		Description:  "IPv4 routes removal with labels",
-		OriginalYAML: yamlComment,
-	}
-}
-
-func (c *Converter) convertSendPackets(content interface{}, testPath string, testName string) ConvertedStep {
-	return c.convertSendPacketsWithOptions(content, testPath, false, testName)
+	return c.convertRouteRemove(content, stepType, true)
 }
 
 // convertSendPacketsWithASTParser uses new AST-based parser for packet generation
@@ -1599,52 +1666,92 @@ func (c *Converter) convertSendPacketsWithOptionsLegacy(content interface{}, tes
 
 // convertCheckCounters converts checkCounters step
 func (c *Converter) convertCheckCounters(content interface{}) ConvertedStep {
-	// Best-effort: parse expected counters and log them. Detailed validation TBD.
-	expected := make(map[int]int)
-	if m, ok := content.(map[interface{}]interface{}); ok {
-		for k, v := range m {
-			// keys are typically numeric (flow ids), values expected counts
-			var keyInt, valInt int
-			switch kt := k.(type) {
-			case int:
-				keyInt = kt
-			case int64:
-				keyInt = int(kt)
-			case string:
-				if n, err := strconv.Atoi(kt); err == nil {
-					keyInt = n
-				}
-			}
-			switch vt := v.(type) {
-			case int:
-				valInt = vt
-			case int64:
-				valInt = int(vt)
-			case string:
-				if n, err := strconv.Atoi(vt); err == nil {
-					valInt = n
-				}
-			}
-			if keyInt != 0 {
-				expected[keyInt] = valInt
-			}
+	// Parse counter validation content with proper error handling
+	contentMap, ok := content.(map[interface{}]interface{})
+	if !ok {
+		return ConvertedStep{
+			Type:        "skip",
+			GoCode:      "// Skipping checkCounters: invalid content format\n",
+			Description: "Check counters (skipped - invalid format)",
 		}
 	}
 
-	// Generate minimal Go code that logs expectations; real CLI-based checks can be added later
-	var pairs []string
-	for k, v := range expected {
-		pairs = append(pairs, fmt.Sprintf("%d:%d", k, v))
-	}
-	sort.Strings(pairs)
-	joined := strings.Join(pairs, ", ")
+	var counterValidations []string
+	var counterNames []string
 
-	goCode := fmt.Sprintf(`t.Logf("Expected counters: %s")`, joined)
+	// Extract counters from the content
+	for key, value := range contentMap {
+		// Convert key to string (counter name/flow id)
+		var counterName string
+		switch k := key.(type) {
+		case string:
+			counterName = k
+		case int:
+			counterName = fmt.Sprintf("flow_%d", k)
+		case int64:
+			counterName = fmt.Sprintf("flow_%d", k)
+		default:
+			continue // Skip unsupported key types
+		}
+
+		// Convert value to expected count
+		var expectedValue int
+		switch v := value.(type) {
+		case int:
+			expectedValue = v
+		case int64:
+			expectedValue = int(v)
+		case string:
+			if parsed, err := strconv.Atoi(v); err == nil {
+				expectedValue = parsed
+			} else {
+				continue // Skip unparseable values
+			}
+		default:
+			continue // Skip unsupported value types
+		}
+
+		// Generate validation code for this counter
+		validation := fmt.Sprintf(
+			"err = fw.ValidateCounter(%q, %d)",
+			counterName,
+			expectedValue,
+		)
+		counterValidations = append(counterValidations, validation)
+		counterNames = append(counterNames, fmt.Sprintf("%s:%d", counterName, expectedValue))
+	}
+
+	// If no valid counters found, skip
+	if len(counterValidations) == 0 {
+		return ConvertedStep{
+			Type:        "skip",
+			GoCode:      "// Skipping checkCounters: no valid counters found\n",
+			Description: "Check counters (skipped - no valid counters)",
+		}
+	}
+
+	// Generate validation code with better error aggregation
+	var goCode strings.Builder
+	goCode.WriteString("// Validate counter values\n")
+	goCode.WriteString("\t{\n")
+	goCode.WriteString("\t\tvar counterErrors []string\n")
+
+	for i, validation := range counterValidations {
+		goCode.WriteString(fmt.Sprintf("\t\tif %s; err != nil {\n", validation))
+		goCode.WriteString(fmt.Sprintf("\t\t\tcounterErrors = append(counterErrors, \"Counter %s: %%v\", err)\n", counterNames[i]))
+		goCode.WriteString("\t\t}\n")
+	}
+
+	goCode.WriteString("\t\tif len(counterErrors) > 0 {\n")
+	goCode.WriteString("\t\t\tt.Errorf(\"Counter validation failed (%d/%d counters):\\n  - %%s\", len(counterErrors), ")
+	goCode.WriteString(fmt.Sprintf("%d, strings.Join(counterErrors, \"\\n  - \"))\n", len(counterValidations)))
+	goCode.WriteString("\t\t}\n")
+	goCode.WriteString("\t}\n")
 
 	return ConvertedStep{
 		Type:        "checkCounters",
-		GoCode:      goCode,
-		Description: "Counters checking (logging expectations)",
+		GoCode:      goCode.String() + "\n",
+		Description: fmt.Sprintf("Validate counters: %s", strings.Join(counterNames, ", ")),
 	}
 }
 
@@ -1803,10 +1910,24 @@ func buildCLICommandBlock(stepType, yamlComment string, commands, expectedLines,
 			code.WriteString(fmt.Sprintf("\t\t\t\"%s\",\n", escapedLine))
 		}
 		code.WriteString(`		}
+		var missingLines []string
 		for _, expected := range expectedOutput {
 			if !strings.Contains(output, expected) {
-				t.Errorf("Expected output not found: %s", expected)
+				missingLines = append(missingLines, expected)
 			}
+		}
+		if len(missingLines) > 0 {
+			// Show first 3 missing lines and output preview
+			preview := strings.Join(missingLines[:min(3, len(missingLines))], "\n  - ")
+			if len(missingLines) > 3 {
+				preview += fmt.Sprintf("\n  ... and %d more", len(missingLines)-3)
+			}
+			outputPreview := output
+			if len(outputPreview) > 500 {
+				outputPreview = outputPreview[:500] + "... (truncated)"
+			}
+			t.Errorf("Expected output not found (%d lines missing):\n  - %s\n\nActual output:\n%s", 
+				len(missingLines), preview, outputPreview)
 		}
 
 `)
@@ -1825,9 +1946,17 @@ func buildCLICommandBlock(stepType, yamlComment string, commands, expectedLines,
 		}
 		code.WriteString(`		}
 		for _, pattern := range regexPatterns {
-			re := regexp.MustCompile(pattern)
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				t.Fatalf("Invalid regex pattern: %s (error: %v)", pattern, err)
+			}
 			if !re.MatchString(output) {
-				t.Errorf("Regex pattern not matched: %s", pattern)
+				// Show first 500 chars of output for context
+				outputPreview := output
+				if len(outputPreview) > 500 {
+					outputPreview = outputPreview[:500] + "... (truncated)"
+				}
+				t.Errorf("Regex pattern not matched: %s\nOutput preview:\n%s", pattern, outputPreview)
 			}
 		}
 `)
@@ -1846,178 +1975,190 @@ func (c *Converter) adaptIPAddress(ipAddr string) string {
 	return AdaptIPAddress(ipAddr)
 }
 
-// convertCLICommand converts yanet1 command to yanet2 CLI command
+// convertCLICommand converts yanet1 command to yanet2 CLI command using CLI parsing utilities
 func (c *Converter) convertCLICommand(cmd string) string {
 	c.debugLog("Converting CLI command: %s", cmd)
-	originalCmd := cmd
-	cmd = strings.TrimSpace(cmd)
 
-	// Balancer command conversion
-	if strings.HasPrefix(cmd, "balancer real enable") {
-		// Example: "balancer real enable balancer0 10.0.0.16 tcp any 100.0.0.1 any"
-		parts := strings.Fields(cmd)
-		if len(parts) >= 8 {
-			module := parts[3]
-
-			// Validate module name
-			if err := c.validateModuleName(module, "balancer"); err != nil {
-				c.debugLog("Warning: %v, using module anyway", err)
-			}
-
-			virtualIP := parts[4]
-			proto := parts[5]
-			virtualPort := parts[6]
-			realIP := parts[7]
-			realPort := "any"
-			if len(parts) > 8 {
-				realPort = parts[8]
-			}
-
-			result := fmt.Sprintf(`"%s real enable --cfg %s --instances 0 --virtual-ip %s --proto %s --virtual-port %s --real-ip %s --real-port %s"`,
-				framework.CLIBalancer, module, virtualIP, proto, virtualPort, realIP, realPort)
-			c.debugLog("Converted CLI command: %s -> %s", originalCmd, result)
-			return result
-		}
+	// Parse the command using new utilities
+	parsedCmd, err := ParseCLICommand(cmd)
+	if err != nil {
+		c.debugLog("Failed to parse CLI command: %v", err)
+		return fmt.Sprintf(`"# ERROR: Could not parse command: %s"`, cmd)
 	}
 
-	if strings.HasPrefix(cmd, "balancer real disable") {
-		// Example: "balancer real disable balancer0 203.0.113.1 tcp 80 2000::1 80"
-		parts := strings.Fields(cmd)
-		if len(parts) >= 8 {
-			module := parts[3]
-
-			// Validate module name
-			if err := c.validateModuleName(module, "balancer"); err != nil {
-				c.debugLog("Warning: %v, using module anyway", err)
-			}
-
-			virtualIP := parts[4]
-			proto := parts[5]
-			virtualPort := parts[6]
-			realIP := parts[7]
-			realPort := "any"
-			if len(parts) > 8 {
-				realPort = parts[8]
-			}
-
-			result := fmt.Sprintf(`"%s real disable --cfg %s --instances 0 --virtual-ip %s --proto %s --virtual-port %s --real-ip %s --real-port %s"`,
-				framework.CLIBalancer, module, virtualIP, proto, virtualPort, realIP, realPort)
-			c.debugLog("Converted CLI command: %s -> %s", originalCmd, result)
-			return result
-		}
+	// Validate the command structure
+	if err := ValidateCLICommand(parsedCmd); err != nil {
+		c.debugLog("CLI command validation failed: %v", err)
 	}
 
-	if strings.HasPrefix(cmd, "balancer real flush") {
-		// Use default balancer module or extract from command if provided
-		module := c.getDefaultModuleName("balancer")
-		if module == "" {
-			module = "balancer0" // fallback
-		}
-
-		result := fmt.Sprintf(`"%s real flush --cfg %s --instances 0"`, framework.CLIBalancer, module)
-		c.debugLog("Converted CLI command: %s -> %s", originalCmd, result)
-		return result
+	// Convert based on command type
+	switch parsedCmd.Command {
+	case "balancer":
+		return c.convertBalancerCommand(parsedCmd)
+	case "nat64":
+		return c.convertNat64Command(parsedCmd)
+	case "route":
+		return c.convertRouteCommand(parsedCmd)
+	default:
+		c.debugLog("Unsupported command type: %s", parsedCmd.Command)
+		return fmt.Sprintf(`"# Unsupported command: %s"`, parsedCmd.Raw)
 	}
-
-	// NAT64 command conversion
-	if strings.HasPrefix(cmd, "nat64") {
-		// NAT64 commands need more complex transformation
-		// Examples:
-		// "nat64 prefix add 64:ff9b::/96"
-		// "nat64 mapping add 1.1.1.1 2001::1.1.1.1"
-
-		// Get NAT64 module name from inventory
-		nat64Module := c.getDefaultModuleName("nat64")
-		if nat64Module == "" {
-			nat64Module = "nat64_0" // fallback
-			c.debugLog("Warning: NAT64 module not found in config, using fallback: %s", nat64Module)
-		}
-
-		// Remove "nat64" prefix and add CLI prefix
-		nat64Cmd := strings.TrimPrefix(cmd, "nat64")
-		nat64Cmd = strings.TrimSpace(nat64Cmd)
-
-		// Transform specific commands
-		if strings.HasPrefix(nat64Cmd, "prefix add") {
-			// "prefix add 64:ff9b::/96" -> "prefix add --cfg nat64_0 --instances 0 --prefix 64:ff9b::/96"
-			parts := strings.Fields(nat64Cmd)
-			if len(parts) >= 3 {
-				prefix := parts[2]
-				return fmt.Sprintf(`"%s prefix add --cfg %s --instances 0 --prefix %s"`, framework.CLINAT64, nat64Module, prefix)
-			}
-		} else if strings.HasPrefix(nat64Cmd, "mapping add") {
-			// "mapping add 1.1.1.1 2001::1.1.1.1" -> "mapping add --cfg nat64_0 --instances 0 --ipv4 1.1.1.1 --ipv6 2001::1.1.1.1 --prefix-index 0"
-			parts := strings.Fields(nat64Cmd)
-			if len(parts) >= 3 {
-				ipv4 := parts[2]
-				ipv6 := ""
-				if len(parts) >= 4 {
-					ipv6 = parts[3]
-				}
-				return fmt.Sprintf(`"%s mapping add --cfg %s --instances 0 --ipv4 %s --ipv6 %s --prefix-index 0"`, framework.CLINAT64, nat64Module, ipv4, ipv6)
-			}
-		} else if strings.HasPrefix(nat64Cmd, "drop") {
-			// "nat64 drop enable" -> "drop --cfg nat64_0 --instances 0 --enable"
-			dropCmd := strings.TrimPrefix(nat64Cmd, "drop")
-			dropCmd = strings.TrimSpace(dropCmd)
-			return fmt.Sprintf(`"%s drop --cfg %s --instances 0 %s"`, framework.CLINAT64, nat64Module, dropCmd)
-		}
-
-		// Default for NAT64 commands
-		return fmt.Sprintf(`"%s %s"`, framework.CLINAT64, nat64Cmd)
-	}
-
-	// Route command conversion
-	if strings.HasPrefix(cmd, "route") {
-		// Examples:
-		// "route insert 1.1.1.0/24 via 10.0.0.1"
-		// "route remove 1.1.1.0/24"
-
-		routeCmd := strings.TrimPrefix(cmd, "route")
-		routeCmd = strings.TrimSpace(routeCmd)
-
-		if strings.HasPrefix(routeCmd, "insert") {
-			// "insert 1.1.1.0/24 via 10.0.0.1" -> "insert --cfg route0 --instances 0 --via 10.0.0.1 1.1.1.0/24"
-			parts := strings.Fields(routeCmd)
-			if len(parts) >= 4 && parts[2] == "via" {
-				prefix := parts[1]
-				via := parts[3]
-				return fmt.Sprintf(`"%s insert --cfg route0 --instances 0 --via %s %s"`, framework.CLIRoute, via, prefix)
-			} else if len(parts) >= 6 && parts[2] == "label" && parts[4] == "via" {
-				// "insert 200.1.1.1/32 label 111 via 200.0.0.1" -> "insert --cfg route0 --instances 0 --via 200.0.0.1 --label 111 200.1.1.1/32"
-				prefix := parts[1]
-				label := parts[3]
-				via := parts[5]
-				return fmt.Sprintf(`"%s insert --cfg route0 --instances 0 --via %s --label %s %s"`, framework.CLIRoute, via, label, prefix)
-			}
-		} else if strings.HasPrefix(routeCmd, "remove") {
-			// "remove 1.1.1.0/24" -> "remove --cfg route0 --instances 0 1.1.1.0/24"
-			parts := strings.Fields(routeCmd)
-			if len(parts) >= 2 {
-				prefix := parts[1]
-				return fmt.Sprintf(`"%s remove --cfg route0 --instances 0 %s"`, framework.CLIRoute, prefix)
-			}
-		}
-
-		// Default for route commands
-		return fmt.Sprintf(`"%s %s"`, framework.CLIRoute, routeCmd)
-	}
-
-	// ACL command conversion
-	if strings.HasPrefix(cmd, "acl") {
-		// Examples:
-		// "acl rule add ..."
-
-		aclCmd := strings.TrimPrefix(cmd, "acl")
-		aclCmd = strings.TrimSpace(aclCmd)
-		return fmt.Sprintf(`"%s %s"`, framework.CLIACL, aclCmd)
-	}
-
-	// By default return as is, with yanet-cli prefix
-	result := fmt.Sprintf(`"%s %s"`, framework.CLIGeneric, cmd)
-	c.debugLog("Converted CLI command: %s -> %s", originalCmd, result)
-	return result
 }
+
+// convertBalancerCommand converts balancer commands using CLI utilities
+func (c *Converter) convertBalancerCommand(cmd *CLICommand) string {
+	if cmd.Subcommand != "real" {
+		return fmt.Sprintf(`"# Unsupported balancer subcommand: %s"`, cmd.Subcommand)
+	}
+
+	if len(cmd.Parameters) < 2 {
+		return fmt.Sprintf(`"# Invalid balancer real command: %s"`, cmd.Raw)
+	}
+
+	action := cmd.Parameters[0] // enable, disable, flush
+	module := cmd.Parameters[1]
+
+	// Validate module name
+	if err := c.validateModuleName(module, "balancer"); err != nil {
+		c.debugLog("Warning: %v, using module anyway", err)
+	}
+
+	builder := NewCommandBuilder(framework.CLIBalancer).
+		Action("real").
+		Config(module).
+		Instances(0)
+
+	switch action {
+	case "enable", "disable":
+		if len(cmd.Parameters) >= 6 {
+			virtualIP := cmd.Parameters[2]
+			proto := cmd.Parameters[3]
+			virtualPort := cmd.Parameters[4]
+			realIP := cmd.Parameters[5]
+			realPort := "any"
+			if len(cmd.Parameters) >= 7 {
+				realPort = cmd.Parameters[6]
+			}
+
+			builder.Param("virtual-ip", virtualIP).
+				Param("proto", proto).
+				Param("virtual-port", virtualPort).
+				Param("real-ip", realIP).
+				Param("real-port", realPort).
+				Param(action, "")
+		}
+	case "flush":
+		builder.Param(action, "")
+	default:
+		return fmt.Sprintf(`"# Unsupported balancer real action: %s"`, action)
+	}
+
+	return fmt.Sprintf(`"%s"`, builder.Build())
+}
+
+// convertNat64Command converts nat64 commands using CLI utilities
+func (c *Converter) convertNat64Command(cmd *CLICommand) string {
+	// Get NAT64 module name from inventory
+	nat64Module := c.getDefaultModuleName("nat64")
+	if nat64Module == "" {
+		nat64Module = "nat64_0" // fallback
+		c.debugLog("Warning: NAT64 module not found in config, using fallback: %s", nat64Module)
+	}
+
+	if cmd.Subcommand == "prefix" && len(cmd.Parameters) >= 2 && cmd.Parameters[0] == "add" {
+		prefix := cmd.Parameters[1]
+		return NewCommandBuilder(framework.CLINAT64).
+			Action("prefix").
+			Action("add").
+			Config(nat64Module).
+			Instances(0).
+			Param("prefix", prefix).
+			Build()
+	}
+
+	if cmd.Subcommand == "mapping" && len(cmd.Parameters) >= 2 && cmd.Parameters[0] == "add" {
+		ipv4 := cmd.Parameters[1]
+		ipv6 := ""
+		if len(cmd.Parameters) >= 3 {
+			ipv6 = cmd.Parameters[2]
+		}
+
+		return NewCommandBuilder(framework.CLINAT64).
+			Action("mapping").
+			Action("add").
+			Config(nat64Module).
+			Instances(0).
+			Param("ipv4", ipv4).
+			Param("ipv6", ipv6).
+			Param("prefix-index", "0").
+			Build()
+	}
+
+	if cmd.Subcommand == "drop" {
+		dropCmd := strings.Join(cmd.Parameters, " ")
+		return NewCommandBuilder(framework.CLINAT64).
+			Action("drop").
+			Config(nat64Module).
+			Instances(0).
+			Build() + " " + dropCmd
+	}
+
+	// Default for NAT64 commands
+	return fmt.Sprintf(`"%s %s"`, framework.CLINAT64, cmd.Subcommand)
+}
+
+// convertRouteCommand converts route commands using CLI utilities
+func (c *Converter) convertRouteCommand(cmd *CLICommand) string {
+	if cmd.Subcommand != "insert" && cmd.Subcommand != "remove" {
+		return fmt.Sprintf(`"# Unsupported route subcommand: %s"`, cmd.Subcommand)
+	}
+
+	builder := NewCommandBuilder(framework.CLIRoute).
+		Action(cmd.Subcommand).
+		Config("route0").
+		Instances(0)
+
+	if cmd.Subcommand == "insert" {
+		via, found := ExtractParameter(cmd, "via")
+		if found {
+			builder.Param("via", via)
+		}
+
+		label, found := ExtractParameter(cmd, "label")
+		if found {
+			builder.Param("label", label)
+		}
+
+		// Add network prefix as final parameter
+		if len(cmd.Parameters) > 0 {
+			// Find the network prefix (usually first parameter or after 'via')
+			prefix := cmd.Parameters[0]
+			if prefix == "insert" {
+				// Skip the action keyword
+				if len(cmd.Parameters) > 1 {
+					prefix = cmd.Parameters[1]
+				}
+			}
+			result := builder.Build()
+			return fmt.Sprintf(`"%s %s"`, result, prefix)
+		}
+	} else if cmd.Subcommand == "remove" && len(cmd.Parameters) > 0 {
+		// Remove command - prefix is usually first parameter
+		prefix := cmd.Parameters[0]
+		if prefix == "remove" {
+			if len(cmd.Parameters) > 1 {
+				prefix = cmd.Parameters[1]
+			}
+		}
+		result := builder.Build()
+		return fmt.Sprintf(`"%s %s"`, result, prefix)
+	}
+
+	return fmt.Sprintf(`"%s"`, builder.Build())
+}
+
+// Note: convertCLICommand refactor completed - old prefix-based implementation removed
+// New implementation uses ParseCLICommand() utility with command-specific functions
 
 // convertSleep converts sleep step
 func (c *Converter) convertSleep(content interface{}) ConvertedStep {
@@ -2632,41 +2773,6 @@ func (c *Converter) generateExpectedPacketSetup(testCase *PacketTestCase) string
 	require.NotNil(t, expectedPackets)`, testCase.ExpectFunctionName)
 }
 
-func (c *Converter) generatePerPacketValidation(testCase *PacketTestCase) string {
-	if testCase.IsDropExpected {
-		return "require.Nil(t, outputPacket, \"Packet should be dropped\")"
-	}
-	// If no expect function, just check output exists
-	if testCase.ExpectFunctionName == "" {
-		return "require.NotNil(t, outputPacket, \"Output packet should be present\")"
-	}
-	// Generate full validation with expectedPackets
-	return `// Validate against expected packet
-		if idx < len(expectedPackets) {
-			expectedPkt := expectedPackets[idx]
-			actualPkt := gopacket.NewPacket(outputPacket.RawData, layers.LayerTypeEthernet, gopacket.Default)
-			
-			diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(),
-				cmpopts.IgnoreUnexported(
-					layers.Ethernet{},
-					layers.Dot1Q{},
-					layers.IPv4{},
-					layers.IPv6{},
-					layers.TCP{},
-					layers.UDP{},
-					layers.ICMPv4{},
-					layers.ICMPv6{},
-					gopacket.DecodeFailure{},
-				),
-				cmpopts.IgnoreFields(layers.Ethernet{}, "BaseLayer"),
-			)
-			if diff != "" {
-				t.Logf("Packet %d mismatch:\n%s", idx, diff)
-			}
-			require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
-		}`
-}
-
 func (c *Converter) generateBatchPacketValidation(testCase *PacketTestCase) string {
 	// If no expect function, just check we received packets
 	if testCase.ExpectFunctionName == "" {
@@ -2678,13 +2784,13 @@ func (c *Converter) generateBatchPacketValidation(testCase *PacketTestCase) stri
 	return `
 		// Validate all received packets against expected packets
 		t.Logf("Received %d packets, expected %d packets", len(receivedPackets), len(expectedPackets))
-		
-		require.Equalf(t, len(expectedPackets), len(receivedPackets), 
+
+		require.Equalf(t, len(expectedPackets), len(receivedPackets),
 			"Packet count mismatch: expected %d, received %d", len(expectedPackets), len(receivedPackets))
-		
+
 		for idx, expectedPkt := range expectedPackets {
 			actualPkt := receivedPackets[idx]
-			
+
 			diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(),
 				cmpopts.IgnoreUnexported(
 					layers.Ethernet{},

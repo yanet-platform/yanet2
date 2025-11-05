@@ -23,6 +23,8 @@ func main() {
 		updateSkip  = flag.Bool("update-skiplist", false, "Update skiplist.yaml in-place at the auto-generated marker")
 		forceAST    = flag.Bool("force-ast", false, "Force use of AST parser (fail if unavailable)")
 		forceLegacy = flag.Bool("force-legacy", false, "Force use of legacy PCAP analyzer")
+		strict      = flag.Bool("strict", false, "Strict mode: fail on unsupported layers/special handling (for CI)")
+		tolerant    = flag.Bool("tolerant", true, "Tolerant mode: continue with warnings on unsupported features (default)")
 	)
 	flag.Parse()
 
@@ -50,7 +52,7 @@ func main() {
 		}
 	}
 
-	converter := lib.NewConverter(&lib.Config{
+	converter, err := lib.NewConverter(&lib.Config{
 		InputDir:       *inputDir,
 		OutputDir:      *outputDir,
 		Verbose:        *verbose,
@@ -58,7 +60,12 @@ func main() {
 		SkiplistPath:   *skiplist,
 		ForceASTParser: *forceAST,
 		ForceLegacy:    *forceLegacy,
+		StrictMode:     *strict,
+		TolerantMode:   *tolerant,
 	})
+	if err != nil {
+		log.Fatalf("Failed to create converter: %v", err)
+	}
 
 	if *updateSkip {
 		if err := converter.UpdateSkiplist(); err != nil {

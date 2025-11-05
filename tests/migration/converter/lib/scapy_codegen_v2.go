@@ -64,7 +64,10 @@ type IRVaryingParam struct {
 
 // ScapyCodegenV2 generates Go code from IR JSON
 type ScapyCodegenV2 struct {
-	stripVLAN bool
+	stripVLAN             bool
+	specialHandlingSkips  *map[string]int // Pointer to converter's tracking map
+	unsupportedLayerTypes *map[string]int // Pointer to converter's tracking map
+	strictMode            bool            // Fail on unsupported features
 }
 
 // NewScapyCodegenV2 creates a new code generator
@@ -72,6 +75,17 @@ func NewScapyCodegenV2(stripVLAN bool) *ScapyCodegenV2 {
 	return &ScapyCodegenV2{
 		stripVLAN: stripVLAN,
 	}
+}
+
+// SetTrackingMaps sets the tracking maps for special handling and unsupported layers
+func (cg *ScapyCodegenV2) SetTrackingMaps(specialHandling, unsupportedLayers *map[string]int) {
+	cg.specialHandlingSkips = specialHandling
+	cg.unsupportedLayerTypes = unsupportedLayers
+}
+
+// SetStrictMode enables or disables strict mode
+func (cg *ScapyCodegenV2) SetStrictMode(strict bool) {
+	cg.strictMode = strict
 }
 
 // GenerateFromIR generates Go code from IR JSON string
@@ -275,14 +289,30 @@ func (cg *ScapyCodegenV2) generateLayerCall(layer IRLayer, isExpect bool) string
 		code.WriteString(cg.generateICMPv6Options(layer))
 	case "IPv6ExtHdrFragment":
 		code.WriteString(cg.generateIPv6FragmentOptions(layer))
+	case "IPv6ExtHdrDestOpt":
+		code.WriteString(cg.generateIPv6DestOptOptions(layer))
 	case "GRE":
 		code.WriteString(cg.generateGREOptions(layer))
+	case "MPLS":
+		code.WriteString(cg.generateMPLSOptions(layer))
 	case "Raw":
 		code.WriteString(cg.generateRawOptions(layer))
 	default:
 		// Unknown or unsupported layer type
-		// This layer will be skipped during packet construction
-		code.WriteString(fmt.Sprintf("\t\t\t\t// UNSUPPORTED: Layer type %s is not supported by packet builder\n", layer.Type))
+		// Track this for reporting
+		if cg.unsupportedLayerTypes != nil {
+			(*cg.unsupportedLayerTypes)[layer.Type]++
+		}
+
+		// In strict mode, generate error instead of comment
+		if cg.strictMode {
+			code.WriteString(fmt.Sprintf("\t\t\t\t// ERROR: Layer type %s is not supported\n", layer.Type))
+			code.WriteString(fmt.Sprintf("\t\t\t\tt.Fatalf(\"Unsupported layer type: %s (strict mode enabled)\")\n", layer.Type))
+		} else {
+			// This layer will be skipped during packet construction
+			code.WriteString(fmt.Sprintf("\t\t\t\t// UNSUPPORTED: Layer type %s is not supported by packet builder\n", layer.Type))
+			code.WriteString(fmt.Sprintf("\t\t\t\t// TODO: Implement %s layer in packet_builder.go if needed\n", layer.Type))
+		}
 	}
 
 	code.WriteString("\t\t\t),\n")
@@ -542,6 +572,46 @@ func (cg *ScapyCodegenV2) generateGREOptions(layer IRLayer) string {
 	}
 	if keyVal, ok := layer.Params["key"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.GREKey(%v),\n", formatValue(keyVal)))
+	}
+
+	return code.String()
+}
+
+// generateIPv6DestOptOptions generates IPv6 Destination Options extension header options
+func (cg *ScapyCodegenV2) generateIPv6DestOptOptions(layer IRLayer) string {
+	var code strings.Builder
+
+	// Next header field (nh parameter in Scapy)
+	if nh, ok := layer.Params["nh"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6DestOptNextHeader(%v),\n", formatValue(nh)))
+	}
+
+	// Options field (if present)
+	if options, ok := layer.Params["options"]; ok {
+		// Options is typically a list in Scapy
+		code.WriteString(fmt.Sprintf("\t\t\t\t// Options: %v (custom option handling may be needed)\n", options))
+	}
+
+	return code.String()
+}
+
+// generateMPLSOptions generates MPLS layer options
+func (cg *ScapyCodegenV2) generateMPLSOptions(layer IRLayer) string {
+	var code strings.Builder
+
+	if label, ok := layer.Params["label"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.MPLSLabel(%v),\n", formatValue(label)))
+	}
+	if ttl, ok := layer.Params["ttl"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.MPLSTTL(%v),\n", formatValue(ttl)))
+	}
+	if stackBit, ok := layer.Params["s"]; ok {
+		// s is the bottom-of-stack bit
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.MPLSStackBit(%v == 1),\n", formatValue(stackBit)))
+	}
+	if tc, ok := layer.Params["cos"]; ok {
+		// cos is the traffic class (experimental bits)
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.MPLSTrafficClass(%v),\n", formatValue(tc)))
 	}
 
 	return code.String()
@@ -1191,9 +1261,26 @@ func (cg *ScapyCodegenV2) generateSinglePacketCode(pkt IRPacketDef, isExpect boo
 
 	// Check for special handling
 	if len(pkt.SpecialHandling) > 0 {
+		// Track special handling type
+		handlingType := "unknown"
+		if t, ok := pkt.SpecialHandling["type"].(string); ok {
+			handlingType = t
+		}
+		if cg.specialHandlingSkips != nil {
+			(*cg.specialHandlingSkips)[handlingType]++
+		}
+
 		code.WriteString(fmt.Sprintf("\t\t// Special handling: %v\n", pkt.SpecialHandling))
-		code.WriteString("\t\t// Special handling not implemented yet; skipping packet generation for this entry\n")
-		code.WriteString("\t\t// t.Skipf(\"special handling not implemented: %v\")\n")
+
+		if cg.strictMode {
+			// In strict mode, generate fatal error
+			code.WriteString(fmt.Sprintf("\t\t// ERROR: Special handling type '%s' not implemented\n", handlingType))
+			code.WriteString(fmt.Sprintf("\t\tt.Fatalf(\"Special handling not implemented: %s (strict mode enabled)\")\n", handlingType))
+		} else {
+			// In tolerant mode, generate commented-out skip
+			code.WriteString(fmt.Sprintf("\t\t// Special handling type '%s' not fully implemented; skipping packet generation for this entry\n", handlingType))
+			code.WriteString(fmt.Sprintf("\t\t// t.Skipf(\"special handling not implemented: %s\")\n", handlingType))
+		}
 		return code.String()
 	}
 

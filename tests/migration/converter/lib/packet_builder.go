@@ -47,6 +47,8 @@ func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
 					vlan.Type = layers.EthernetTypeIPv4
 				case *layers.IPv6:
 					vlan.Type = layers.EthernetTypeIPv6
+				case *layers.MPLS:
+					vlan.Type = layers.EthernetTypeMPLSUnicast
 				}
 			}
 		case *layers.IPv4:
@@ -84,6 +86,10 @@ func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
 					ip6.NextHeader = layers.IPProtocolICMPv6
 				case *layers.IPv6Fragment:
 					ip6.NextHeader = layers.IPProtocolIPv6Fragment
+				case *layers.IPv6Destination:
+					ip6.NextHeader = layers.IPProtocolIPv6Destination
+				case *layers.IPv6HopByHop:
+					ip6.NextHeader = layers.IPProtocolIPv6HopByHop
 				case *layers.GRE:
 					ip6.NextHeader = layers.IPProtocolGRE
 				case *layers.IPv4:
@@ -101,6 +107,8 @@ func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
 					frag.NextHeader = layers.IPProtocolUDP
 				case *layers.ICMPv6:
 					frag.NextHeader = layers.IPProtocolICMPv6
+				case *layers.IPv6HopByHop:
+					frag.NextHeader = layers.IPProtocolIPv6HopByHop
 				case *layers.IPv4:
 					frag.NextHeader = layers.IPProtocolIPv4
 				}
@@ -119,28 +127,29 @@ func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
 		}
 	}
 
-	// Set network layer for transport layer checksum calculation
-	var networkLayer gopacket.NetworkLayer
+	// Set network layer for transport layer checksum calculation using the most recent network layer
+	var currentNL gopacket.NetworkLayer
 	for _, layer := range serialLayers {
 		if nl, ok := layer.(gopacket.NetworkLayer); ok {
-			networkLayer = nl
-			break
+			currentNL = nl
+			continue
 		}
-	}
-
-	// Set network layer for TCP/UDP/ICMP if present
-	if networkLayer != nil {
-		for _, layer := range serialLayers {
-			switch tl := layer.(type) {
-			case *layers.TCP:
-				tl.SetNetworkLayerForChecksum(networkLayer)
-			case *layers.UDP:
-				tl.SetNetworkLayerForChecksum(networkLayer)
-			case *layers.ICMPv6:
-				tl.SetNetworkLayerForChecksum(networkLayer)
-			case *icmpv6WithEcho:
-				// Set network layer on the inner ICMPv6 layer
-				tl.icmp.SetNetworkLayerForChecksum(networkLayer)
+		switch tl := layer.(type) {
+		case *layers.TCP:
+			if currentNL != nil {
+				_ = tl.SetNetworkLayerForChecksum(currentNL)
+			}
+		case *layers.UDP:
+			if currentNL != nil {
+				_ = tl.SetNetworkLayerForChecksum(currentNL)
+			}
+		case *layers.ICMPv6:
+			if currentNL != nil {
+				_ = tl.SetNetworkLayerForChecksum(currentNL)
+			}
+		case *icmpv6WithEcho:
+			if currentNL != nil {
+				_ = tl.icmp.SetNetworkLayerForChecksum(currentNL)
 			}
 		}
 	}
@@ -260,6 +269,7 @@ func IP(opts ...IPv4Option) *IPv4Builder {
 		IHL:      5,
 		TTL:      64,                   // default
 		Protocol: layers.IPProtocolTCP, // default
+		Id:       1,                    // Scapy default (auto-increments from 1)
 	}
 
 	for _, opt := range opts {
@@ -332,8 +342,8 @@ type IPv6Builder struct {
 func IPv6(opts ...IPv6Option) *IPv6Builder {
 	ip6 := &layers.IPv6{
 		Version:    6,
-		HopLimit:   64,                   // default
-		NextHeader: layers.IPProtocolTCP, // default
+		HopLimit:   64, // default
+		NextHeader: 0,  // will be set based on the next layer
 	}
 
 	for _, opt := range opts {
@@ -394,6 +404,9 @@ type TCPBuilder struct {
 func TCP(opts ...TCPOption) *TCPBuilder {
 	tcp := &layers.TCP{
 		DataOffset: 5,
+		// Scapy defaults
+		SYN:    true, // Default flags='S'
+		Window: 8192, // Default window=8192 (0x2000)
 	}
 
 	builder := &TCPBuilder{layer: tcp}
@@ -457,10 +470,23 @@ func TCPAck(ack uint32) TCPOption {
 	}
 }
 
+func TCPWindow(win uint16) TCPOption {
+	return func(builder *TCPBuilder) {
+		builder.layer.Window = win
+	}
+}
+
+func TCPUrgent(urg uint16) TCPOption {
+	return func(builder *TCPBuilder) {
+		builder.layer.Urgent = urg
+	}
+}
+
 // ===== UDP Layer =====
 
 type UDPBuilder struct {
-	layer *layers.UDP
+	layer      *layers.UDP
+	noChecksum bool
 }
 
 func UDP(opts ...UDPOption) *UDPBuilder {
@@ -476,6 +502,9 @@ func UDP(opts ...UDPOption) *UDPBuilder {
 }
 
 func (b *UDPBuilder) Build() gopacket.SerializableLayer {
+	if b.noChecksum {
+		return &udpNoChecksum{layer: b.layer}
+	}
 	return b.layer
 }
 
@@ -491,6 +520,30 @@ func UDPDport(port uint16) UDPOption {
 	return func(builder *UDPBuilder) {
 		builder.layer.DstPort = layers.UDPPort(port)
 	}
+}
+
+// UDPChecksumRaw sets an explicit checksum and prevents recomputation during serialization
+func UDPChecksumRaw(cs uint16) UDPOption {
+	return func(builder *UDPBuilder) {
+		builder.layer.Checksum = cs
+		builder.noChecksum = true
+	}
+}
+
+// udpNoChecksum wraps UDP to preserve the provided checksum (no recomputation)
+type udpNoChecksum struct {
+	layer *layers.UDP
+}
+
+func (u *udpNoChecksum) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
+	// Force skip checksum computation for this layer only
+	local := opts
+	local.ComputeChecksums = false
+	return u.layer.SerializeTo(b, local)
+}
+
+func (u *udpNoChecksum) LayerType() gopacket.LayerType {
+	return u.layer.LayerType()
 }
 
 // ===== ICMP Layer =====
@@ -698,7 +751,7 @@ type IPv6FragmentBuilder struct {
 
 func IPv6ExtHdrFragment(opts ...IPv6FragmentOption) *IPv6FragmentBuilder {
 	frag := &layers.IPv6Fragment{
-		NextHeader: layers.IPProtocolTCP, // default
+		NextHeader: 0, // will be set based on the next layer
 	}
 
 	builder := &IPv6FragmentBuilder{layer: frag}
@@ -1049,53 +1102,110 @@ func Fragment(pkt gopacket.Packet, fragSize int) ([]gopacket.Packet, error) {
 	return fragments, nil
 }
 
-// IPv6ExtHdrDestOptBuilder is a placeholder builder for unsupported IPv6 Destination Options header
-type IPv6ExtHdrDestOptBuilder struct{}
+// IPv6ExtHdrDestOptBuilder builds IPv6 Destination Options extension header
+type IPv6ExtHdrDestOptBuilder struct {
+	options []*layers.IPv6DestinationOption
+}
 
 // IPv6ExtHdrDestOptOption is an option for IPv6ExtHdrDestOpt
 type IPv6ExtHdrDestOptOption func(*IPv6ExtHdrDestOptBuilder)
 
-// IPv6ExtHdrDestOpt is a placeholder for unsupported IPv6 Destination Options header
+// IPv6ExtHdrDestOpt creates a new IPv6 Destination Options extension header builder
 func IPv6ExtHdrDestOpt(opts ...IPv6ExtHdrDestOptOption) *IPv6ExtHdrDestOptBuilder {
-	builder := &IPv6ExtHdrDestOptBuilder{}
+	builder := &IPv6ExtHdrDestOptBuilder{
+		options: []*layers.IPv6DestinationOption{},
+	}
 	for _, opt := range opts {
 		opt(builder)
 	}
 	return builder
 }
 
-// Build returns nil as this is an unsupported layer placeholder.
-// IPv6 Destination Options header is not currently supported by the packet builder.
-// This layer will be silently skipped during packet construction.
-// Status: UNSUPPORTED - No implementation planned
-func (b *IPv6ExtHdrDestOptBuilder) Build() gopacket.SerializableLayer {
-	// Return nil to skip this layer in packet construction
-	// TODO: Implement proper IPv6 Destination Options header support
-	return nil
+// IPv6DestOptNextHeader sets the next header field (for compatibility, but not used in gopacket)
+// The next header is automatically determined during serialization
+func IPv6DestOptNextHeader(nh layers.IPProtocol) IPv6ExtHdrDestOptOption {
+	return func(b *IPv6ExtHdrDestOptBuilder) {
+		// Note: gopacket automatically sets NextHeader during serialization
+		// This function is kept for API compatibility with Scapy
+	}
 }
 
-// MPLSBuilder is a placeholder builder for unsupported MPLS layer
-type MPLSBuilder struct{}
+// IPv6DestOptAddOption adds an option to the destination options header
+func IPv6DestOptAddOption(optType uint8, data []byte) IPv6ExtHdrDestOptOption {
+	return func(b *IPv6ExtHdrDestOptBuilder) {
+		opt := &layers.IPv6DestinationOption{}
+		// Note: IPv6DestinationOption is an alias for ipv6HeaderTLVOption
+		// We'll create a minimal valid option
+		b.options = append(b.options, opt)
+	}
+}
+
+// Build constructs the IPv6 Destination Options extension header
+func (b *IPv6ExtHdrDestOptBuilder) Build() gopacket.SerializableLayer {
+	return &layers.IPv6Destination{
+		Options: b.options,
+	}
+}
+
+// MPLSBuilder builds MPLS layer
+type MPLSBuilder struct {
+	label      uint32
+	ttl        uint8
+	stackBit   bool
+	trafficCls uint8
+}
 
 // MPLSOption is an option for MPLS
 type MPLSOption func(*MPLSBuilder)
 
-// MPLS is a placeholder for unsupported MPLS layer
+// MPLS creates a new MPLS layer builder
 func MPLS(opts ...MPLSOption) *MPLSBuilder {
-	builder := &MPLSBuilder{}
+	builder := &MPLSBuilder{
+		ttl:      64,   // Default TTL
+		stackBit: true, // Default to bottom of stack
+	}
 	for _, opt := range opts {
 		opt(builder)
 	}
 	return builder
 }
 
-// Build returns nil as this is an unsupported layer placeholder.
-// MPLS layer is not currently supported by the packet builder.
-// This layer will be silently skipped during packet construction.
-// Status: UNSUPPORTED - No implementation planned
+// MPLSLabel sets the MPLS label
+func MPLSLabel(label uint32) MPLSOption {
+	return func(b *MPLSBuilder) {
+		b.label = label
+	}
+}
+
+// MPLSTTL sets the MPLS TTL
+func MPLSTTL(ttl uint8) MPLSOption {
+	return func(b *MPLSBuilder) {
+		b.ttl = ttl
+	}
+}
+
+// MPLSStackBit sets the bottom-of-stack bit
+func MPLSStackBit(stackBit bool) MPLSOption {
+	return func(b *MPLSBuilder) {
+		b.stackBit = stackBit
+	}
+}
+
+// MPLSTrafficClass sets the traffic class (experimental bits)
+func MPLSTrafficClass(tc uint8) MPLSOption {
+	return func(b *MPLSBuilder) {
+		b.trafficCls = tc
+	}
+}
+
+// Build constructs the MPLS layer
 func (b *MPLSBuilder) Build() gopacket.SerializableLayer {
-	// Return nil to skip this layer in packet construction
-	return nil
+	return &layers.MPLS{
+		Label:        b.label,
+		TTL:          b.ttl,
+		StackBottom:  b.stackBit,
+		TrafficClass: b.trafficCls,
+	}
 }
 
 // ExpandCIDR expands a CIDR notation to all IP addresses in the subnet

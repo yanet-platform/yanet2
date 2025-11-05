@@ -200,6 +200,17 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 			}
 		}
 
+		// Append application payload as Raw layer if present
+		if app := pkt.ApplicationLayer(); app != nil {
+			payload := app.Payload()
+			if len(payload) > 0 {
+				irLayers = append(irLayers, IRLayer{
+					Type:   "Raw",
+					Params: map[string]interface{}{"_arg0": string(payload)},
+				})
+			}
+		}
+
 		*targetList = append(*targetList, IRPacketDef{
 			Layers:          irLayers,
 			SpecialHandling: nil,
@@ -240,12 +251,18 @@ func (p *PcapAnalyzer) convertLayerToIR(layer gopacket.Layer, opts CodegenOpts) 
 	case *layers.ICMPv6:
 		return p.convertICMPv6ToIR(l), nil
 	case *layers.ICMPv6Echo:
-		return []*IRLayer{p.convertICMPv6EchoToIR(l)}, nil
+		// Handled inline by convertICMPv6ToIR (to avoid duplicate echo serialization)
+		return nil, nil
+	case *layers.MPLS:
+		return []*IRLayer{p.convertMPLSToIR(l)}, nil
 	case *layers.IPv6Fragment:
 		return []*IRLayer{p.convertIPv6FragmentToIR(l)}, nil
 	case *layers.IPv6Destination:
-		// Skip for now, not commonly used
-		return nil, nil
+		return []*IRLayer{p.convertIPv6DestinationToIR(l)}, nil
+	case *layers.IPv6HopByHop:
+		return []*IRLayer{p.convertIPv6HopByHopToIR(l)}, nil
+	case *layers.IPv6Routing:
+		return []*IRLayer{p.convertIPv6RoutingToIR(l)}, nil
 	case gopacket.Payload:
 		if len(l) > 0 {
 			return []*IRLayer{p.convertPayloadToIR(l)}, nil
@@ -312,6 +329,12 @@ func (p *PcapAnalyzer) convertIPv4ToIR(ipv4 *layers.IPv4, opts CodegenOpts) *IRL
 	}
 	if ipv4.Protocol != 0 {
 		params["proto"] = int(ipv4.Protocol)
+	}
+	if ipv4.Flags != 0 {
+		params["flags"] = int(ipv4.Flags)
+	}
+	if ipv4.FragOffset != 0 {
+		params["frag"] = int(ipv4.FragOffset)
 	}
 
 	return &IRLayer{
@@ -388,6 +411,13 @@ func (p *PcapAnalyzer) convertTCPToIR(tcp *layers.TCP) *IRLayer {
 		params["flags"] = strings.Join(flags, "")
 	}
 
+	if tcp.Window != 0 {
+		params["window"] = int(tcp.Window)
+	}
+	if tcp.Urgent != 0 {
+		params["urg"] = int(tcp.Urgent)
+	}
+
 	return &IRLayer{
 		Type:   "TCP",
 		Params: params,
@@ -400,6 +430,8 @@ func (p *PcapAnalyzer) convertUDPToIR(udp *layers.UDP) *IRLayer {
 
 	params["sport"] = int(udp.SrcPort)
 	params["dport"] = int(udp.DstPort)
+	// Preserve checksum as seen in PCAP (including zero)
+	params["chksum"] = int(udp.Checksum)
 
 	return &IRLayer{
 		Type:   "UDP",
@@ -451,6 +483,21 @@ func (p *PcapAnalyzer) convertICMPv6ToIR(icmp *layers.ICMPv6) []*IRLayer {
 		layerType = "ICMPv6EchoRequest" // Default fallback
 	}
 
+	// For Echo Request/Reply, capture Echo Identifier/Seq from the first 4 bytes of payload
+	if icmpType == 128 || icmpType == 129 {
+		pl := icmp.LayerPayload()
+		if len(pl) >= 4 {
+			id := int(pl[0])<<8 | int(pl[1])
+			seq := int(pl[2])<<8 | int(pl[3])
+			if id != 0 {
+				params["id"] = id
+			}
+			if seq != 0 {
+				params["seq"] = seq
+			}
+		}
+	}
+
 	icmpLayer := &IRLayer{
 		Type:   layerType,
 		Params: params,
@@ -471,8 +518,6 @@ func (p *PcapAnalyzer) convertICMPv6ToIR(icmp *layers.ICMPv6) []*IRLayer {
 						"_arg0": string(actualPayload),
 					},
 				}
-				// Raw layer will be added after ICMPv6Echo layer
-				// Note: ICMPv6Echo layer is parsed separately by gopacket
 				result = append(result, rawLayer)
 			}
 		}
@@ -499,6 +544,32 @@ func (p *PcapAnalyzer) convertICMPv6EchoToIR(echo *layers.ICMPv6Echo) *IRLayer {
 	}
 }
 
+// convertMPLSToIR converts MPLS layer to IR
+func (p *PcapAnalyzer) convertMPLSToIR(mpls *layers.MPLS) *IRLayer {
+	params := make(map[string]interface{})
+
+	if mpls.Label != 0 {
+		params["label"] = int(mpls.Label)
+	}
+	if mpls.TTL != 0 {
+		params["ttl"] = int(mpls.TTL)
+	}
+	// s is bottom-of-stack bit
+	if mpls.StackBottom {
+		params["s"] = 1
+	} else {
+		params["s"] = 0
+	}
+	if mpls.TrafficClass != 0 {
+		params["cos"] = int(mpls.TrafficClass)
+	}
+
+	return &IRLayer{
+		Type:   "MPLS",
+		Params: params,
+	}
+}
+
 // convertIPv6FragmentToIR converts IPv6 Fragment header to IR
 func (p *PcapAnalyzer) convertIPv6FragmentToIR(frag *layers.IPv6Fragment) *IRLayer {
 	params := make(map[string]interface{})
@@ -510,10 +581,37 @@ func (p *PcapAnalyzer) convertIPv6FragmentToIR(frag *layers.IPv6Fragment) *IRLay
 	} else {
 		params["m"] = 0
 	}
+	if frag.NextHeader != 0 {
+		params["nh"] = int(frag.NextHeader)
+	}
 
 	return &IRLayer{
 		Type:   "IPv6ExtHdrFragment",
 		Params: params,
+	}
+}
+
+// convertIPv6HopByHopToIR converts IPv6 Hop-by-Hop extension header to IR as raw bytes
+func (p *PcapAnalyzer) convertIPv6HopByHopToIR(hbh *layers.IPv6HopByHop) *IRLayer {
+	return &IRLayer{
+		Type:   "Raw",
+		Params: map[string]interface{}{"_arg0": string(hbh.BaseLayer.Contents)},
+	}
+}
+
+// convertIPv6DestinationToIR converts IPv6 Destination Options header to IR as raw bytes
+func (p *PcapAnalyzer) convertIPv6DestinationToIR(dst *layers.IPv6Destination) *IRLayer {
+	return &IRLayer{
+		Type:   "Raw",
+		Params: map[string]interface{}{"_arg0": string(dst.BaseLayer.Contents)},
+	}
+}
+
+// convertIPv6RoutingToIR converts IPv6 Routing header to IR as raw bytes
+func (p *PcapAnalyzer) convertIPv6RoutingToIR(r *layers.IPv6Routing) *IRLayer {
+	return &IRLayer{
+		Type:   "Raw",
+		Params: map[string]interface{}{"_arg0": string(r.BaseLayer.Contents)},
 	}
 }
 

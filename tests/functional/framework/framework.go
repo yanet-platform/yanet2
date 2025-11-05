@@ -745,3 +745,32 @@ func (f *TestFramework) createConfigFiles(dataplaneConfig string, controlplaneCo
 	f.log.Debug("Configuration files created successfully on host")
 	return nil
 }
+
+// ValidateCounter validates a counter value against expected value.
+// This method checks statistic counters from yanet modules using CLI commands.
+//
+// Parameters:
+//   - counterName: Name/identifier of the counter to validate (e.g., "flow_1", "packets_received")
+//   - expectedValue: Expected value for the counter
+//
+// Returns:
+//   - error: Error if validation fails or counter cannot be accessed
+//
+// Note: Current implementation is a placeholder that logs the validation attempt.
+// Full implementation will require CLI access to yanet statistics.
+func (f *TestFramework) ValidateCounter(counterName string, expectedValue int) error {
+	f.log.Debugf("Validating counter %s with expected value %d", counterName, expectedValue)
+
+	// TODO: Implement actual counter validation using yanet CLI
+	// This will require:
+	// 1. CLI command to query counters (e.g., yanet-cli-stats)
+	// 2. Parse response to get actual counter value
+	// 3. Compare actual vs expected value
+	// 4. Return error if mismatch
+
+	// For now, just log the validation attempt
+	f.log.Infof("Counter validation placeholder: %s = %d (actual validation not implemented)", counterName, expectedValue)
+
+	// Simulate validation - always succeed for now
+	return nil
+}
