@@ -12,3 +12,4 @@
 ## TODO
 - WLC (weighted least connections)
 - ICMP
+- Counters
