@@ -6,39 +6,38 @@ import (
 
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
-	balancer_cp "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
+	cp "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
-	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"github.com/yanet-platform/yanet2/tests/go/common"
+	test_utils "github.com/yanet-platform/yanet2/tests/utils/go"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func TestBalancerBasic(t *testing.T) {
-	packetParser := framework.NewPacketParser()
+func TestPacketPlusUpdateReals(t *testing.T) {
+	mock, err := test_utils.NewYanetMock(1<<20, 1<<27, []string{"balancer"})
+	require.Nil(t, err, "failed to create mock: %w", err)
+	defer mock.Free()
 
-	mock, err := NewMock(1 << 25)
-	require.Nil(t, err, "failed to create mock: %s", err)
-	defer FreeMock(&mock)
-	agent, err := mock.CreateAgent(1 << 24)
-	require.Nil(t, err, "failed to create agent: %s", err)
+	agent, err := mock.AttachAgent("balancer", 1<<24)
+	require.Nil(t, err, "failed to create agent: %w", err)
 
-	config := balancer_cp.BalancerConfig{
-		Services: []balancer_cp.VirtualService{
+	config := cp.ModuleInstanceConfig{
+		Services: []cp.VirtualService{
 			{
 				Address: IpAddr("192.166.13.22"),
 				Port:    1000,
-				Flags: balancer_cp.VsFlags{
+				Flags: cp.VsFlags{
 					GRE:    false,
 					OPS:    false,
 					PureL3: false,
 					FixMSS: false,
 				},
-				Proto: balancer_cp.VsProtoTcp,
+				Proto: cp.VsProtoTcp,
 				AllowedSrc: []netip.Prefix{
 					IpPrefix("10.12.0.0/8"),
 				},
-				Reals: []balancer_cp.Real{
+				Reals: []cp.Real{
 					{
 						Weight:  1,
 						DstAddr: IpAddr("1.1.1.1"),
@@ -50,7 +49,11 @@ func TestBalancerBasic(t *testing.T) {
 			},
 		},
 	}
-	balancer, err := balancer_cp.NewBalancerInstance(&agent, "balancer", &config, 100)
+
+	err = mock.PrepareForCpUpdate()
+	require.Nil(t, err, "failed to prepare mock for cp update before create balancer instance")
+
+	balancer, err := cp.NewModuleInstance(agent, "balancer", &config, 100)
 	require.Nil(t, err, "failed to create new balancer instance")
 	defer balancer.Free()
 
@@ -58,24 +61,21 @@ func TestBalancerBasic(t *testing.T) {
 	originPacket := common.LayersToPacket(t, inLayers...)
 	t.Log("Origin packet", originPacket)
 
-	expectedPacket := Encap(t, inLayers, "3.12.3.1", "1.1.1.1")
-	t.Log("Expected packet", expectedPacket)
-
-	result, err := HandlePackets(balancer, originPacket)
+	result, err := HandlePackets(balancer, mock, originPacket)
 	require.Nil(t, err, "failed to handle packet1: %s", err)
 
 	require.True(t, len(result.Output) == 1, "failed to handle packet #1")
+	require.True(t, len(result.Input) == 0)
+	require.True(t, len(result.Drop) == 0)
 
-	resultPacket, err := packetParser.ParsePacket(result.Output[0])
-	require.Nil(t, err, "failed to parse packet %s", err)
-	resultPac := common.ParseEtherPacket(result.Output[0])
-	t.Log("Result packet", resultPac)
+	resultPacket := result.Output[0]
+	t.Log("Result packet", resultPacket)
 	require.True(t, resultPacket.IsTunneled, "result packet is not tunneled")
 
-	// Ensure packets equal
-	CheckPacketsEqual(t, resultPac, expectedPacket)
+	err = mock.PrepareForCpUpdate()
+	require.Nil(t, err, "failed to prepare mock for cp update before update reals")
 
-	err = balancer.HandleRealUpdates([]*balancerpb.RealUpdate{
+	err = balancer.UpdateReals([]*balancerpb.RealUpdate{
 		{
 			VirtualIp: []byte("192.166.13.22"),
 			Proto:     "TCP",
@@ -96,31 +96,30 @@ func TestBalancerBasic(t *testing.T) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func TestBalancerGRE(t *testing.T) {
-	packetParser := framework.NewPacketParser()
+func TestGRE(t *testing.T) {
+	mock, err := test_utils.NewYanetMock(1<<20, 1<<27, []string{"balancer"})
+	require.Nil(t, err, "failed to create mock: %w", err)
+	defer mock.Free()
 
-	mock, err := NewMock(1 << 25)
-	require.Nil(t, err, "failed to create mock: %s", err)
-	defer FreeMock(&mock)
-	agent, err := mock.CreateAgent(1 << 24)
-	require.Nil(t, err, "failed to create agent: %s", err)
+	agent, err := mock.AttachAgent("balancer", 1<<24)
+	require.Nil(t, err, "failed to attach agent: %w", err)
 
-	config := balancer_cp.BalancerConfig{
-		Services: []balancer_cp.VirtualService{
+	config := cp.ModuleInstanceConfig{
+		Services: []cp.VirtualService{
 			{
 				Address: IpAddr("192.166.13.22"),
 				Port:    1000,
-				Flags: balancer_cp.VsFlags{
+				Flags: cp.VsFlags{
 					GRE:    true,
 					OPS:    false,
 					PureL3: false,
 					FixMSS: false,
 				},
-				Proto: balancer_cp.VsProtoTcp,
+				Proto: cp.VsProtoTcp,
 				AllowedSrc: []netip.Prefix{
 					IpPrefix("10.12.0.0/8"),
 				},
-				Reals: []balancer_cp.Real{
+				Reals: []cp.Real{
 					{
 						Weight:  1,
 						DstAddr: IpAddr("1.1.1.1"),
@@ -132,25 +131,34 @@ func TestBalancerGRE(t *testing.T) {
 			},
 		},
 	}
-	b, err := balancer_cp.NewBalancerInstance(&agent, "balancer", &config, 100)
+
+	err = mock.PrepareForCpUpdate()
+	require.Nil(t, err, "failed to prepare for cp update")
+
+	balancer, err := cp.NewModuleInstance(agent, "balancer", &config, 100)
 	require.Nil(t, err, "failed to create new balancer instance")
-	defer b.Free()
+	defer balancer.Free()
 
 	inLayers := MakeTCPPacket("10.12.15.1", 1005, "192.166.13.22", 1000, &layers.TCP{SYN: true})
 	originPacket := common.LayersToPacket(t, inLayers...)
 	t.Log("Origin packet", originPacket)
 
-	result, err := HandlePackets(b, originPacket)
+	result, err := HandlePackets(balancer, mock, originPacket)
 	require.Nil(t, err, "failed to handle packet1: %s", err)
 
 	require.True(t, len(result.Output) == 1, "failed to handle packet #1")
+	require.True(t, len(result.Input) == 0)
+	require.True(t, len(result.Drop) == 0)
 
-	resultPacket, err := packetParser.ParsePacket(result.Output[0])
-	require.Nil(t, err, "failed to parse packet %s", err)
+	resultPacket := result.Output[0]
 	require.True(t, resultPacket.IsTunneled, "result packet is not tunneled")
 	require.Equal(t, resultPacket.TunnelType, "gre-ip4", "tunnel type must be GRE")
 
-	resultPac := common.ParseEtherPacket(result.Output[0])
-	t.Log("Result packet", resultPac)
+	require.Equal(t, resultPacket.Protocol, layers.IPProtocolGRE)
+	require.Equal(t, resultPacket.DstIP.String(), "1.1.1.1")
+	require.Equal(t, resultPacket.DstPort, uint16(1000))
 
+	require.Equal(t, resultPacket.InnerPacket.DstIP.String(), "192.166.13.22")
+	require.Equal(t, resultPacket.InnerPacket.SrcIP.String(), "10.12.15.1")
+	require.Equal(t, resultPacket.InnerPacket.Protocol, layers.IPProtocolTCP)
 }

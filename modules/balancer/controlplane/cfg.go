@@ -2,6 +2,7 @@ package balancer
 
 import "github.com/c2h5oh/datasize"
 
+// Config for the balancer service
 type Config struct {
 	// MemoryPath is the path to the shared-memory file that is used to
 	// communicate with dataplane.

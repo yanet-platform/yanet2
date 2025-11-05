@@ -43,6 +43,7 @@ func sliceToPtr(s []byte) *C.uint8_t {
 // Session Table
 ////////////////////////////////////////////////////////////////////////////////
 
+// Table of the sessions between clients and real servers
 type SessionTable struct {
 	inner *C.struct_balancer_session_table
 }
@@ -61,15 +62,18 @@ func NewSessionTable(agent *ffi.Agent, size uint64) (SessionTable, error) {
 	return SessionTable{inner: table}, nil
 }
 
+// Free memory occupied by the session table
 func FreeSessionTable(table *SessionTable) {
 	C.balancer_session_table_free(table.inner)
 }
 
+// Extend session table on demand (use `force` to force extension)
 func ExtendSessionTable(table *SessionTable, force bool) error {
 	_, err := C.balancer_session_table_extend(table.inner, (C.bool)(force))
 	return err
 }
 
+// Free memory unused by session table
 func FreeUnusedInSessionTable(table *SessionTable) error {
 	_, err := C.balancer_session_table_free_unused(table.inner)
 	return err
@@ -79,10 +83,12 @@ func FreeUnusedInSessionTable(table *SessionTable) error {
 // Virtual service config
 ////////////////////////////////////////////////////////////////////////////////
 
+// Virtual service config
 type VsConfig struct {
 	inner *C.struct_balancer_vs_config
 }
 
+// Create Virtual service config from `Virtual Service` (only enabled reals will be used)
 func NewVsConfig(agent *ffi.Agent, vs *VirtualService) (VsConfig, error) {
 	flags := 0
 	if vs.Address.Is6() {
@@ -141,13 +147,13 @@ func NewVsConfig(agent *ffi.Agent, vs *VirtualService) (VsConfig, error) {
 		)
 		if err != nil {
 			FreeVsConfig(&vsConfig)
-			return VsConfig{inner: nil}, fmt.Errorf("failed to create vs config: %w", err)
+			return VsConfig{inner: nil}, fmt.Errorf("failed to set %d-th allowed src: %w", idx+1, err)
 		}
 	}
 
 	// Add to config only enabled reals
 	counter := 0
-	for _, real := range vs.Reals {
+	for idx, real := range vs.Reals {
 		if !real.Enabled {
 			continue
 		}
@@ -166,7 +172,7 @@ func NewVsConfig(agent *ffi.Agent, vs *VirtualService) (VsConfig, error) {
 		)
 		if err != nil {
 			FreeVsConfig(&vsConfig)
-			return VsConfig{inner: nil}, fmt.Errorf("failed to create vs config: %w", err)
+			return VsConfig{inner: nil}, fmt.Errorf("failed to set %d-th real: %w", idx+1, err)
 		}
 		counter += 1
 	}
@@ -186,10 +192,12 @@ type ModuleConfig struct {
 	inner *C.struct_cp_module
 }
 
+// Create new `cp_module`
+// No update dataplane modules
 func NewModuleConfig(
 	agent *ffi.Agent,
 	sessionTable *SessionTable,
-	config *BalancerConfig,
+	config *ModuleInstanceConfig,
 	name string,
 ) (ModuleConfig, error) {
 	cName := C.CString(name)
@@ -206,7 +214,7 @@ func NewModuleConfig(
 			return ModuleConfig{
 					inner: nil,
 				}, fmt.Errorf(
-					"failed to create virtual service config: %s",
+					"failed to create virtual service config: %w",
 					err,
 				)
 		}
@@ -225,7 +233,7 @@ func NewModuleConfig(
 		return ModuleConfig{
 				inner: nil,
 			}, fmt.Errorf(
-				"failed to create sessions timeouts: %s",
+				"failed to create sessions timeouts: %w",
 				err,
 			)
 	}

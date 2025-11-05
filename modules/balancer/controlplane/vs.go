@@ -9,7 +9,7 @@ import (
 )
 
 type VsFlags struct {
-	// Use GRE for incapsulation
+	// Use GRE for encapsulation
 	GRE bool
 
 	// One packet scheduler
@@ -19,7 +19,7 @@ type VsFlags struct {
 	// service listens to all ports (but transport protocol is fixed)
 	PureL3 bool
 
-	// Fix MSS tcp option
+	// Fix MSS TCP option
 	FixMSS bool
 }
 
@@ -30,6 +30,7 @@ const (
 	VsProtoTcp VsProto = "TCP"
 )
 
+// Virtual service description
 type VirtualService struct {
 	Address    netip.Addr
 	Port       uint16

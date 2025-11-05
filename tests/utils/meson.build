@@ -26,5 +26,5 @@ lib_yanet_test_utils_dep = declare_dependency(
   link_with: lib_yanet_test_utils,
 )
 
-test_mock = executable('test_mock', sources: ['test_mock.c'], dependencies: dependencies + [lib_yanet_test_utils_dep])
+test_mock = executable('mock_test', sources: ['mock_test.c'], dependencies: dependencies + [lib_yanet_test_utils_dep])
 test('mock', test_mock)

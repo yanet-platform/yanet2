@@ -11,6 +11,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 static inline int
 dataplane_register_module(struct dp_config *dp_config, const char *name) {
@@ -48,6 +49,7 @@ dataplane_init(
 	struct cp_config **res_cp_config
 ) {
 	struct dp_config *dp_config = (struct dp_config *)storage;
+	memset(dp_config, 0, sizeof(*dp_config));
 
 	dp_config->numa_idx = numa_idx;
 	dp_config->instance_idx = instance_idx;
@@ -70,6 +72,7 @@ dataplane_init(
 
 	struct cp_config *cp_config =
 		(struct cp_config *)((uintptr_t)storage + dp_memory);
+	memset(cp_config, 0, sizeof(*cp_config));
 
 	block_allocator_init(&cp_config->block_allocator);
 	block_allocator_put_arena(
@@ -93,6 +96,7 @@ dataplane_init(
 	SET_OFFSET_OF(&cp_config->dp_config, dp_config);
 
 	struct cp_config_gen *cp_config_gen = cp_config_gen_create(cp_config);
+	cp_config_gen->config_gen_ectx = NULL;
 	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
 
 	dp_config->instance_idx = instance_idx;
@@ -127,14 +131,20 @@ dataplane_init(
 }
 
 void
-yanet_mock_prepare_for_next_cp_gen(struct yanet_mock *mock) {
+yanet_mock_cp_update_prepare(struct yanet_mock *mock) {
 	struct dp_config *dp_config = ADDR_OF(&mock->dp_config);
 	struct cp_config *cp_config = ADDR_OF(&mock->cp_config);
+	uint64_t cur_gen = ADDR_OF(&cp_config->cp_config_gen)->gen;
 	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
 	for (size_t i = 0; i < dp_config->worker_count; ++i) {
 		struct dp_worker *worker = ADDR_OF(&workers[i]);
-		worker->gen = ADDR_OF(&cp_config->cp_config_gen)->gen + 1;
+		worker->gen = cur_gen + 1;
 	}
+}
+
+void
+yanet_mock_free(struct yanet_mock *mock) {
+	(void)mock;
 }
 
 int
@@ -146,6 +156,9 @@ yanet_mock_init(
 	char **module_types,
 	size_t module_types_cnt
 ) {
+	if ((uintptr_t)storage % 64 != 0) {
+		return -1;
+	}
 	SET_OFFSET_OF(&mock->shm, storage);
 	struct cp_config *cp_config;
 	struct dp_config *dp_config;

@@ -69,7 +69,7 @@
 //
 // To get the final classifier of the packet, first algorithm classifier every
 // packet attribute separately. For this, it calls user-provided classification
-// function for every attribute. After that algirthm gets classifiers of the
+// function for every attribute. After that algorithm gets classifiers of the
 // higher level and so no, until the result classifier is calculated. For every
 // such vertex, it stores mapping table table[c1][c2] -> c`, where c1 is the
 // classifier in the left son vertex, c2 is the classifier in the right son
@@ -89,10 +89,10 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Represents vertex in the classfication tree.
+// Represents vertex in the classification tree.
 //
 // If vertex is a leaf, it corresponds to the classifier of the single packet
-// attribute. If vertex is not a leaf, it corresonds to the combined classifier
+// attribute. If vertex is not a leaf, it corresponds to the combined classifier
 // of the left vertex son and the right vertex son.
 struct filter_vertex {
 	// Corresponds to the mapping from classifier to the list of rules
@@ -101,7 +101,7 @@ struct filter_vertex {
 	// rule actions instead of the rule numbers.
 	struct value_registry registry;
 
-	// 2-dimentional table
+	// 2-dimensional table
 	// [left son classifier][right son classifier]
 	// -> combined classifier
 	//

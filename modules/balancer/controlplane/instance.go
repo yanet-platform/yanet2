@@ -1,5 +1,3 @@
-// Represents instance of the balancer module
-
 package balancer
 
 import (
@@ -11,6 +9,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 )
 
+// Timeouts of sessions with different types
 type SessionsTimeouts struct {
 	TcpSynAck uint32
 	TcpSyn    uint32
@@ -44,14 +43,16 @@ func (timeouts *SessionsTimeouts) IntoProto() *balancerpb.SessionsTimeouts {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-type BalancerConfig struct {
+// Config of the current balancer instance.
+// One ModuleInstanceConfig corresponds to one balancer_module_config.
+type ModuleInstanceConfig struct {
 	Services        []VirtualService
 	SessionTimeouts SessionsTimeouts
 }
 
-func NewBalancerConfigFromProto(
+func NewModuleInstanceConfig(
 	proto *balancerpb.BalancerInstanceConfig,
-) (*BalancerConfig, error) {
+) (*ModuleInstanceConfig, error) {
 	services := make([]VirtualService, 0)
 	for idx, vs := range proto.VirtualServices {
 		service, err := NewVirtualServiceFromProto(vs)
@@ -61,22 +62,22 @@ func NewBalancerConfigFromProto(
 		services = append(services, *service)
 	}
 	timeouts := NewSessionsTimeoutsFromProto(proto.SessionsTimeouts)
-	return &BalancerConfig{
+	return &ModuleInstanceConfig{
 		Services:        services,
 		SessionTimeouts: *timeouts,
 	}, nil
 }
 
-func (config *BalancerConfig) Clone() *BalancerConfig {
+func (config *ModuleInstanceConfig) Clone() *ModuleInstanceConfig {
 	services := config.Services
 	timeouts := config.SessionTimeouts
-	return &BalancerConfig{
+	return &ModuleInstanceConfig{
 		Services:        services,
 		SessionTimeouts: timeouts,
 	}
 }
 
-func (config *BalancerConfig) IntoProto() *balancerpb.BalancerInstanceConfig {
+func (config *ModuleInstanceConfig) IntoProto() *balancerpb.BalancerInstanceConfig {
 	vs := make([]*balancerpb.VirtualService, 0)
 	for _, service := range config.Services {
 		vs = append(vs, service.IntoProto())
@@ -87,7 +88,7 @@ func (config *BalancerConfig) IntoProto() *balancerpb.BalancerInstanceConfig {
 	}
 }
 
-func (config *BalancerConfig) FindReal(vip *netip.Addr, realIp *netip.Addr, port uint16) *Real {
+func (config *ModuleInstanceConfig) FindReal(vip *netip.Addr, realIp *netip.Addr, port uint16) *Real {
 	for service_idx := range config.Services {
 		service := &config.Services[service_idx]
 		if service.Address == *vip && (port == service.Port || (service.Flags.PureL3 && port == 0)) {
@@ -102,7 +103,7 @@ func (config *BalancerConfig) FindReal(vip *netip.Addr, realIp *netip.Addr, port
 	return nil
 }
 
-func (config *BalancerConfig) ValidateRealUpdate(
+func (config *ModuleInstanceConfig) ValidateRealUpdate(
 	update *balancerpb.RealUpdate,
 ) (*RealUpdate, error) {
 	if update.Weight > math.MaxUint16 {
@@ -110,14 +111,14 @@ func (config *BalancerConfig) ValidateRealUpdate(
 	}
 	vip, err := netip.ParseAddr(string(update.VirtualIp))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse virtual ip: %s", err)
+		return nil, fmt.Errorf("failed to parse virtual ip: %w", err)
 	}
 	realIp, err := netip.ParseAddr(string(update.RealIp))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse real ip: %s", err)
+		return nil, fmt.Errorf("failed to parse real ip: %w", err)
 	}
 	if real := config.FindReal(&vip, &realIp, uint16(update.Port)); real == nil {
-		return nil, fmt.Errorf("real with address %s not found on virtual service [%s, %d]", realIp, vip, update.Port)
+		return nil, fmt.Errorf("real with address %s not found on virtual service %s:%d", realIp, vip, update.Port)
 	} else {
 		update := RealUpdate{
 			VirtualIp: vip,
@@ -131,7 +132,7 @@ func (config *BalancerConfig) ValidateRealUpdate(
 	}
 }
 
-func (config *BalancerConfig) UpdateReal(update *RealUpdate) error {
+func (config *ModuleInstanceConfig) UpdateReal(update *RealUpdate) error {
 	real := config.FindReal(&update.VirtualIp, &update.RealIp, update.Port)
 	if real == nil {
 		return fmt.Errorf("failed to find real")
@@ -145,21 +146,39 @@ func (config *BalancerConfig) UpdateReal(update *RealUpdate) error {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-type BalancerInstance struct {
-	agent            *ffi.Agent
-	name             string
-	config           *BalancerConfig
-	sessionTable     SessionTable
-	moduleConfig     ModuleConfig
+// Represents instance of the balancer module.
+// ModuleInstance = {session_table + current_config}
+// Logically, one instance corresponds to one balancer module instance.
+// It maintains current config (virtual services list + session timeouts) and session_table
+// On request to update enabled reals, or change list of virtual services,
+// it modifies current config and creates new cp_module with new config and with
+// the same session_table.
+type ModuleInstance struct {
+	agent *ffi.Agent
+
+	// name of the `cp_module`
+	name string
+
+	config *ModuleInstanceConfig
+
+	// instance owns session table
+	sessionTable SessionTable
+
+	// `cp_module`
+	moduleConfig ModuleConfig
+
+	// buffer of real updates
 	realUpdateBuffer RealUpdateBuffer
 }
 
-func NewBalancerInstance(
+// Create new balancer module instance.
+// Insert created module config into dataplane registry.
+func NewModuleInstance(
 	agent *ffi.Agent,
 	name string,
-	config *BalancerConfig,
+	config *ModuleInstanceConfig,
 	sessionTableSize uint64,
-) (*BalancerInstance, error) {
+) (*ModuleInstance, error) {
 	sessionTable, err := NewSessionTable(agent, sessionTableSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session table: %w", err)
@@ -168,7 +187,10 @@ func NewBalancerInstance(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cp module: %w", err)
 	}
-	return &BalancerInstance{
+	if err = moduleConfig.InsertIntoRegistry(agent); err != nil {
+		return nil, fmt.Errorf("failed to insert module config into dataplane registry: %w", err)
+	}
+	return &ModuleInstance{
 		agent:            agent,
 		name:             name,
 		config:           config,
@@ -178,66 +200,59 @@ func NewBalancerInstance(
 	}, nil
 }
 
-func (balancer *BalancerInstance) Clone() *BalancerInstance {
-	return &BalancerInstance{
-		agent:            balancer.agent,
-		name:             balancer.name,
-		sessionTable:     balancer.sessionTable,
-		config:           balancer.config.Clone(),
-		moduleConfig:     balancer.moduleConfig,
-		realUpdateBuffer: balancer.realUpdateBuffer,
-	}
-}
-
-func (balancer *BalancerInstance) Free() {
-	FreeSessionTable(&balancer.sessionTable)
-	FreeModuleConfig(&balancer.moduleConfig)
+func (instance *ModuleInstance) Free() {
+	FreeSessionTable(&instance.sessionTable)
+	FreeModuleConfig(&instance.moduleConfig)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (balancer *BalancerInstance) UpdateConfig(config *BalancerConfig) error {
+// Atomically update config.
+// On error, the previous config state is assigned back.
+// Clears update reals buffer.
+// Insert created config into dataplane registry.
+func (instance *ModuleInstance) UpdateConfig(config *ModuleInstanceConfig) error {
 	moduleConfig, err := NewModuleConfig(
-		balancer.agent,
-		&balancer.sessionTable,
+		instance.agent,
+		&instance.sessionTable,
 		config,
-		balancer.name,
+		instance.name,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create cp module: %w", err)
 	}
-	balancer.moduleConfig = moduleConfig
-	balancer.realUpdateBuffer.Clear()
+	if err = moduleConfig.InsertIntoRegistry(instance.agent); err != nil {
+		return fmt.Errorf("failed to insert updated config into dataplane registry: %w", err)
+	}
+	instance.moduleConfig = moduleConfig
+	instance.realUpdateBuffer.Clear()
 	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (balancer *BalancerInstance) UpdateDataplaneModule() error {
-	return balancer.moduleConfig.InsertIntoRegistry(balancer.agent)
+func (instance *ModuleInstance) ModuleConfig() *ModuleConfig {
+	return &instance.moduleConfig
+}
+
+func (instance *ModuleInstance) GetConfig() *ModuleInstanceConfig {
+	return instance.config
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (balancer *BalancerInstance) ModuleConfig() *ModuleConfig {
-	return &balancer.moduleConfig
-}
-
-func (balancer *BalancerInstance) GetConfig() *BalancerConfig {
-	return balancer.config
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-func (balancer *BalancerInstance) HandleRealUpdates(
+// Update reals
+// If `buffer` flag is specified, append updates to buffer.
+// Else, make provided updates and CLEAR update buffer (without applying).
+func (instance *ModuleInstance) UpdateReals(
 	updates []*balancerpb.RealUpdate,
 	buffer bool,
 ) error {
 	validated := make([]*RealUpdate, 0)
 	for idx, update := range updates {
-		validated_update, err := balancer.config.ValidateRealUpdate(update)
+		validated_update, err := instance.config.ValidateRealUpdate(update)
 		if err != nil {
-			return fmt.Errorf("update request no. %d is invalid: %s", idx+1, err)
+			return fmt.Errorf("update request no. %d is invalid: %w", idx+1, err)
 		}
 		if validated_update == nil {
 			return fmt.Errorf("update request no. %d is invalid", idx+1)
@@ -245,56 +260,59 @@ func (balancer *BalancerInstance) HandleRealUpdates(
 		validated = append(validated, validated_update)
 	}
 	if buffer {
-		balancer.realUpdateBuffer.Append(validated)
+		instance.realUpdateBuffer.Append(validated)
 	} else {
-		currentConfig := balancer.config
-		newConfig := currentConfig.Clone()
+		newConfig := instance.config.Clone()
 		for idx, update := range validated {
 			if err := newConfig.UpdateReal(update); err != nil {
-				return fmt.Errorf("failed to make update no. %d: %s", idx+1, err)
+				return fmt.Errorf("failed to make update for real no. %d: %s", idx+1, err)
 			}
 		}
-		moduleConfig, err := NewModuleConfig(balancer.agent, &balancer.sessionTable, newConfig, balancer.name)
-		if err != nil {
-			return fmt.Errorf("failed to create new module config after reals update: %s", err)
+		if err := instance.UpdateConfig(newConfig); err != nil {
+			return fmt.Errorf("failed to update config: %w", err)
 		}
-		*balancer.config = *newConfig
-		balancer.moduleConfig = moduleConfig
 	}
 	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (balancer *BalancerInstance) FlushRealUpdatesBuffer() (uint32, error) {
-	updates := balancer.realUpdateBuffer.updates
-	currentConfig := balancer.config
-	newConfig := currentConfig.Clone()
+// Apply real updates from the update buffer.
+func (instance *ModuleInstance) FlushRealUpdatesBuffer() (uint32, error) {
+	updates := instance.realUpdateBuffer.updates
+	newConfig := instance.config.Clone()
 	for idx, update := range updates {
 		if err := newConfig.UpdateReal(update); err != nil {
-			return 0, fmt.Errorf("failed to make update no. %d: %s", idx+1, err)
+			return 0, fmt.Errorf("failed to make update no. %d: %w", idx+1, err)
 		}
 	}
-	flushed := balancer.realUpdateBuffer.Clear()
-	moduleConfig, err := NewModuleConfig(balancer.agent, &balancer.sessionTable, newConfig, balancer.name)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create new module config after reals flush: %s", err)
+	flushed := instance.realUpdateBuffer.Clear()
+	if err := instance.UpdateConfig(newConfig); err != nil {
+		return 0, fmt.Errorf("failed to update config: %w", err)
 	}
-	*balancer.config = *newConfig
-	balancer.moduleConfig = moduleConfig
 	return flushed, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (balancer *BalancerInstance) CheckSessionTable() error {
-	err := ExtendSessionTable(&balancer.sessionTable, false)
+// Extend session table if it is filled enough and free unused data.
+func (instance *ModuleInstance) CheckSessionTable() error {
+	err := ExtendSessionTable(&instance.sessionTable, false)
 	if err != nil {
 		return fmt.Errorf("failed to extend session table: %w", err)
 	}
-	err = FreeUnusedInSessionTable(&balancer.sessionTable)
+	err = FreeUnusedInSessionTable(&instance.sessionTable)
 	if err != nil {
 		return fmt.Errorf("failed to free unused data in session table: %w", err)
+	}
+	return nil
+}
+
+// Force session table extension (for example, if there are many warnings about table overflow)
+func (instance *ModuleInstance) ForceExtendSessionTable() error {
+	err := ExtendSessionTable(&instance.sessionTable, false)
+	if err != nil {
+		return fmt.Errorf("failed to extend session table: %w", err)
 	}
 	return nil
 }

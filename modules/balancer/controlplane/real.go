@@ -8,6 +8,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 )
 
+// Real server description
 type Real struct {
 	Weight uint16
 

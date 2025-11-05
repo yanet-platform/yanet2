@@ -14,6 +14,7 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Module instance identifier
 type moduleKey struct {
 	name              string
 	dataplaneInstance uint32
@@ -21,6 +22,7 @@ type moduleKey struct {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// gRPC service for controlling balancer module instances
 type BalancerService struct {
 	balancerpb.UnimplementedBalancerServiceServer
 
@@ -28,7 +30,7 @@ type BalancerService struct {
 
 	/// FIXME: make separated locks for balancer instances
 
-	instances map[moduleKey]*BalancerInstance
+	instances map[moduleKey]*ModuleInstance
 	agents    []*ffi.Agent
 	log       *zap.SugaredLogger
 }
@@ -40,19 +42,21 @@ func NewBalancerService(agents []*ffi.Agent, log *zap.SugaredLogger) *BalancerSe
 		mu:        sync.Mutex{},
 		agents:    agents,
 		log:       log,
-		instances: make(map[moduleKey]*BalancerInstance),
+		instances: make(map[moduleKey]*ModuleInstance),
 	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Enable balancing for the specified module.
+// Creates balancer instance with provided config.
 func (service *BalancerService) EnableBalancing(
 	ctx context.Context,
 	req *balancerpb.EnableBalancingRequest,
 ) (*balancerpb.EnableBalancingResponse, error) {
 	name, inst, err := req.GetTarget().Validate(uint32(len(service.agents)))
 	if err != nil {
-		return nil, fmt.Errorf("incorrect target module: %w", err)
+		return nil, fmt.Errorf("incorrect target module: %v", err)
 	}
 
 	service.mu.Lock()
@@ -68,19 +72,14 @@ func (service *BalancerService) EnableBalancing(
 		)
 	}
 
-	config, err := NewBalancerConfigFromProto(req.Config)
+	config, err := NewModuleInstanceConfig(req.Config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse provided config: %w", err)
+		return nil, fmt.Errorf("failed to parse config: %v", err)
 	}
 
-	instance, err := NewBalancerInstance(service.agents[inst], name, config, req.SessionTableSize)
+	instance, err := NewModuleInstance(service.agents[inst], name, config, req.SessionTableSize)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create new balancer instance: %w", err)
-	}
-
-	err = instance.UpdateDataplaneModule()
-	if err != nil {
-		return nil, fmt.Errorf("failed to update modules: %w", err)
+		return nil, fmt.Errorf("failed to create new balancer instance: %v", err)
 	}
 
 	service.instances[key] = instance
@@ -90,18 +89,19 @@ func (service *BalancerService) EnableBalancing(
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Reload config for the balancer instance.,
 func (service *BalancerService) ReloadConfig(
 	ctx context.Context,
 	req *balancerpb.ReloadConfigRequest,
 ) (*balancerpb.ReloadConfigResponse, error) {
 	name, inst, err := req.GetTarget().Validate(uint32(len(service.agents)))
 	if err != nil {
-		return nil, fmt.Errorf("incorrect target module: %w", err)
+		return nil, fmt.Errorf("incorrect target module: %v", err)
 	}
 
-	config, err := NewBalancerConfigFromProto(req.Config)
+	config, err := NewModuleInstanceConfig(req.Config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse config: %w", err)
+		return nil, fmt.Errorf("failed to parse config: %v", err)
 	}
 
 	service.mu.Lock()
@@ -111,15 +111,8 @@ func (service *BalancerService) ReloadConfig(
 	instance, exists := service.instances[key]
 
 	if exists {
-		prevInstance := instance.Clone()
-		err = instance.UpdateConfig(config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to reload instance config: %w", err)
-		}
-		err = instance.UpdateDataplaneModule()
-		if err != nil {
-			*instance = *prevInstance
-			return nil, fmt.Errorf("failed to update modules: %w", err)
+		if err = instance.UpdateConfig(config); err != nil {
+			return nil, fmt.Errorf("failed to reload instance config: %v", err)
 		}
 		return &balancerpb.ReloadConfigResponse{}, nil
 	} else {
@@ -129,13 +122,14 @@ func (service *BalancerService) ReloadConfig(
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Update reals for the instance config
 func (service *BalancerService) UpdateReals(
 	ctx context.Context,
 	req *balancerpb.UpdateRealsRequest,
 ) (*balancerpb.UpdateRealsResponse, error) {
 	name, inst, err := req.GetTarget().Validate(uint32(len(service.agents)))
 	if err != nil {
-		return nil, fmt.Errorf("incorrect target module: %w", err)
+		return nil, fmt.Errorf("incorrect target module: %v", err)
 	}
 
 	service.mu.Lock()
@@ -148,29 +142,22 @@ func (service *BalancerService) UpdateReals(
 		return nil, fmt.Errorf("module [name=%s, inst=%d] not exists", name, inst)
 	}
 
-	if err = instance.HandleRealUpdates(req.Updates, req.Buffer); err != nil {
-		return nil, fmt.Errorf("failed to handle real updates: %s", err)
-	}
-	if !req.Buffer {
-		if err = instance.UpdateDataplaneModule(); err != nil {
-			return nil, fmt.Errorf("dataplane failed to update modules")
-		}
+	if err = instance.UpdateReals(req.Updates, req.Buffer); err != nil {
+		return nil, fmt.Errorf("failed to handle real updates: %v", err)
 	}
 	return &balancerpb.UpdateRealsResponse{}, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Flush buffered update real requests for instance config
 func (service *BalancerService) FlushRealUpdates(
 	ctx context.Context,
 	req *balancerpb.FlushRealUpdatesRequest,
 ) (*balancerpb.FlushRealUpdatesResponse, error) {
-	service.log.Debugf("handling 'FlushRealUpdates' request")
-
 	name, inst, err := req.GetTarget().Validate(uint32(len(service.agents)))
 	if err != nil {
-		service.log.Debugf("incorrect target module: %s", err)
-		return nil, fmt.Errorf("incorrect target module: %s", err)
+		return nil, fmt.Errorf("incorrect target module: %v", err)
 	}
 
 	service.mu.Lock()
@@ -180,24 +167,13 @@ func (service *BalancerService) FlushRealUpdates(
 	instance, exists := service.instances[key]
 
 	if !exists {
-		service.log.Debugf("module not exists")
 		return nil, fmt.Errorf("module [name=%s, inst=%d] not exists", name, inst)
 	}
 
 	flushed, err := instance.FlushRealUpdatesBuffer()
 	if err != nil {
-		service.log.Debugf("failed to flush real updates: %s", err)
 		return nil, fmt.Errorf("failed to flush real updates: %s", err)
 	}
-
-	service.log.Debugf("flushed buffer")
-
-	if err = instance.UpdateDataplaneModule(); err != nil {
-		service.log.Debugf("failed to update dataplane module config: %s", err)
-		return nil, fmt.Errorf("dataplane failed to update modules")
-	}
-
-	service.log.Debugf("updated dataplane module config")
 
 	return &balancerpb.FlushRealUpdatesResponse{
 		UpdatesFlushed: flushed,
@@ -206,6 +182,7 @@ func (service *BalancerService) FlushRealUpdates(
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Show config for the specified balancer instance
 func (service *BalancerService) ShowConfig(
 	ctx context.Context,
 	req *balancerpb.ShowConfigRequest,
@@ -221,9 +198,8 @@ func (service *BalancerService) ShowConfig(
 	key := moduleKey{name: name, dataplaneInstance: inst}
 	instance, exists := service.instances[key]
 	if exists {
-		config := instance.GetConfig()
 		return &balancerpb.ShowConfigResponse{
-			Config: config.IntoProto(),
+			Config: instance.GetConfig().IntoProto(),
 		}, nil
 	} else {
 		return nil, fmt.Errorf("module [name=%s, inst=%d] not exists", name, inst)
@@ -232,6 +208,7 @@ func (service *BalancerService) ShowConfig(
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// List configs for the existing balancer instances
 func (service *BalancerService) ListConfigs(
 	ctx context.Context,
 	req *balancerpb.ListConfigsRequest,
@@ -259,7 +236,9 @@ func (service *BalancerService) ListConfigs(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (service *BalancerService) RunChecks(ctx context.Context, period time.Duration) error {
+// Make periodical check for the session table of all balancer instances.
+// Periodically try to extend tables if it is needed and free unused data.
+func (service *BalancerService) MakeChecks(ctx context.Context, period time.Duration) error {
 	ticker := time.NewTicker(period)
 	defer ticker.Stop()
 

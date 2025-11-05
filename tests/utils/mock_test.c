@@ -1,3 +1,4 @@
+#include "common/container_of.h"
 #include "common/memory.h"
 #include "dataplane/module/module.h"
 #include "lib/controlplane/agent/agent.h"
@@ -29,6 +30,7 @@ dummy_module_config_create(struct agent *agent, char *text) {
 	if (dummy == NULL) {
 		return NULL;
 	}
+	memset(dummy->text, 0, sizeof(dummy->text));
 	memcpy(dummy->text, text, strlen(text));
 	int res = cp_module_init(
 		&dummy->cp_module, agent, "dummy", "dummy0", dummy_module_free
@@ -48,7 +50,6 @@ handle_packets(
 	struct packet_front *packet_front
 ) {
 	(void)dp_worker;
-	(void)module_ectx;
 	(void)packet_front;
 	struct dummy_module_config *config = container_of(
 		ADDR_OF(&module_ectx->cp_module),
@@ -63,7 +64,7 @@ handle_packets(
 int
 basic() {
 	// create storage for mock
-	void *storage = malloc(1 << 28);
+	void *storage = aligned_alloc(64, 1 << 28);
 	TEST_ASSERT_NOT_NULL(storage, "failed to alloc storage");
 
 	// init mock with single dummy module (in could be `balancer`, `forward`
@@ -78,12 +79,15 @@ basic() {
 	TEST_ASSERT_NOT_NULL(agent, "failed to attach agent");
 
 	// prepare for next controlplane generation
-	yanet_mock_prepare_for_next_cp_gen(&mock);
+	yanet_mock_cp_update_prepare(&mock);
 
 	// create module config
 	struct cp_module *dummy =
 		dummy_module_config_create(agent, "im dummy module");
 	TEST_ASSERT_NOT_NULL(dummy, "failed to create dummy module");
+	struct dummy_module_config *config =
+		container_of(dummy, struct dummy_module_config, cp_module);
+	LOG(DEBUG, "dummy text: %s", config->text);
 
 	// insert `cp_module` into dataplane registry
 	res = agent_update_modules(agent, 1, &dummy);
@@ -118,7 +122,9 @@ basic() {
 int
 main() {
 	log_enable_name("debug");
-	TEST_ASSERT_EQUAL(basic(), TEST_SUCCESS, "test `basic` failed");
-	LOG(INFO, "passed");
+	LOG(INFO, "running test `basic` ...");
+	int res = basic();
+	TEST_ASSERT_EQUAL(res, TEST_SUCCESS, "test `basic` failed");
+	LOG(INFO, "all tests have been passed");
 	return 0;
 }

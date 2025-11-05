@@ -26,15 +26,11 @@ type BalancerModule struct {
 func NewBalancerModule(cfg *Config, log *zap.SugaredLogger) (*BalancerModule, error) {
 	log = log.With(zap.String("module", "balancerpb.BalancerService"))
 
-	log.Infof("attaching shared memory...")
-
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to shared memory: %w", err)
 	}
-
-	log.Infof("attached shared memory")
 
 	instances := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
@@ -42,18 +38,12 @@ func NewBalancerModule(cfg *Config, log *zap.SugaredLogger) (*BalancerModule, er
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	log.Infof("attaching agents")
-
 	agents, err := shm.AgentsAttach(agentName, instances, uint(cfg.MemoryRequirements))
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	log.Infof("attached agents")
-
 	service := NewBalancerService(agents, log)
-
-	log.Infof("made balancer service")
 
 	return &BalancerModule{
 		cfg:     cfg,
@@ -99,5 +89,5 @@ func (m *BalancerModule) Close() error {
 }
 
 func (m *BalancerModule) Run(ctx context.Context) error {
-	return m.service.RunChecks(ctx, 500*time.Millisecond)
+	return m.service.MakeChecks(ctx, 500*time.Millisecond)
 }

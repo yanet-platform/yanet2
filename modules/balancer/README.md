@@ -1,7 +1,5 @@
 # Balancer
 
-
-
 - Balancer Module:
    - C API for controlplane
    - Application (useful for tests, not used in the final build)
@@ -12,5 +10,5 @@
    - Regression tests using Testing Framework (`../../tests/functional/balancer_test.go`)
 
 ## TODO
-- WLC
+- WLC (weighted least connections)
 - ICMP

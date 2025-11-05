@@ -18,7 +18,7 @@ service BalancerService {
 	rpc FlushRealUpdates(FlushRealUpdatesRequest)
 		returns (FlushRealUpdatesResponse);
 
-	// Allows to module reload config
+	// Allows to reload module config
 	rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
 
 	// todo
