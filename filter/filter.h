@@ -339,6 +339,6 @@ filter_free(struct filter *filter);
 
 // Allows to find actions with fixed category.
 uint32_t
-find_actions_with_category(
+filter_actions_with_category(
 	uint32_t *actions, uint32_t count, uint32_t category
 );

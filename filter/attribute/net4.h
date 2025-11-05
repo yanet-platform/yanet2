@@ -1,3 +1,5 @@
+#pragma once
+
 #include "../rule.h"
 #include "common/lpm.h"
 #include "common/range_collector.h"

@@ -1,10 +1,11 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "common/network.h"
 
-#define ACTION_MASK ((uint32_t)0xffff)
+#define ACTION_MASK ((uint32_t)0xFFFF)
 #define ACTION_NON_TERMINATE ((uint32_t)0x8000)
 #define CATEGORY_SHIFT ((uint32_t)16)
 #define MAKE_ACTION_CATEGORY_MASK(category_mask)                               \
@@ -69,3 +70,11 @@ struct filter_rule {
 	// which is 0 if rule is for all categories.
 	uint32_t action;
 };
+
+#define FILTER_ACTION_CATEGORY_MASK(action) ((uint16_t)((action) >> CATEGORY_SHIFT))
+#define FILTER_ACTION_TERMINATE(action) (((action) >> (15)) == 0)
+
+static inline uint32_t
+filter_action_create(uint16_t category_mask, bool non_terminate_flag, uint16_t user_action) {
+	return ((uint32_t)category_mask) << CATEGORY_SHIFT | ((uint32_t)non_terminate_flag) << 15 | user_action;
+}

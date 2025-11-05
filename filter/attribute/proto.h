@@ -1,3 +1,5 @@
+#pragma once
+
 #include "../rule.h"
 #include "common/registry.h"
 #include "common/value.h"

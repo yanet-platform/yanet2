@@ -1,3 +1,3 @@
 subdir('api')
-#subdir('controlplane')
+subdir('controlplane')
 subdir('dataplane')

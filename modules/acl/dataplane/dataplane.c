@@ -1,5 +1,5 @@
 #include "dataplane.h"
-#include "config.h"
+#include "module.h"
 
 #include <rte_ether.h>
 #include <rte_ip.h>
@@ -8,33 +8,11 @@
 
 #include <rte_mbuf.h>
 
-#include "dataplane/module/module.h"
+#include "filter.h"
 
 struct acl_module {
 	struct module module;
 };
-
-int
-acl_handle_v4(
-	struct filter *filter,
-	struct packet *packet,
-	const uint32_t **actions,
-	uint32_t *count
-) {
-	filter_query(filter, packet, actions, count);
-	return 0;
-}
-
-int
-acl_handle_v6(
-	struct filter *filter,
-	struct packet *packet,
-	const uint32_t **actions,
-	uint32_t *count
-) {
-	filter_query(filter, packet, actions, count);
-	return 0;
-}
 
 static void
 acl_handle_packets(
@@ -49,8 +27,6 @@ acl_handle_packets(
 		cp_module
 	);
 
-	struct filter *compiler = &acl_config->filter;
-
 	/*
 	 * There are two major options:
 	 *  - process packets one by one
@@ -60,14 +36,14 @@ acl_handle_packets(
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
-		const uint32_t *actions = NULL;
+		uint32_t *actions = NULL;
 		uint32_t count = 0;
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			acl_handle_v4(compiler, packet, &actions, &count);
+			net4_filter_query(&acl_config->net4_filter, packet, &actions, &count);
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			acl_handle_v6(compiler, packet, &actions, &count);
+			net6_filter_query(&acl_config->net4_filter, packet,&actions, &count);
 		} else {
 			packet_front_output(packet_front, packet);
 			continue;

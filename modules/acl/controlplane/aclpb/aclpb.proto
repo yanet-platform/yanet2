@@ -7,13 +7,23 @@ import "common/proto/target.proto";
 option go_package = "a.yandex-team.ru/noc/yanet/agents/acl/proto/aclpb;aclpb";
 
 service ACLService {
+  // Enable ACL
+  rpc EnableAcl (EnableAclRequest) returns (EnableAclResponse);
   // Updates the complete ACL configuration with a new set of rules
   rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse);
 }
 
+message EnableAclRequest {
+  commonpb.TargetModule target = 1;
+  repeated Rule rules = 2;
+}
+
+message EnableAclResponse {
+}
+
 message UpdateConfigRequest {
-  repeated Rule rules = 1;
-  commonpb.TargetModule target = 2;
+  commonpb.TargetModule target = 1;
+  repeated Rule rules = 2;
 }
 
 message UpdateConfigResponse {
@@ -69,8 +79,8 @@ message ProtoRange {
 // Defines possible actions for matched traffic
 enum ActionKind {
   ACTION_KIND_UNSPECIFIED = 0;
-  ACTION_PASS = 1;
-  ACTION_DENY = 2;
-  ACTION_COUNT = 3;
-  ACTION_CHECK_STATE = 5;
+  ACTION_KIND_PASS = 1;
+  ACTION_KIND_DENY = 2;
+  ACTION_KIND_COUNT = 3;
+  ACTION_KIND_CHECK_STATE = 5;
 }

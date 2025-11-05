@@ -1,12 +1,11 @@
 #pragma once
 
+#include "filter/filter.h"
 #include "controlplane/config/zone.h"
 
-#include "filter/filter.h"
-
-// FIXME: make the structure private?
 struct acl_module_config {
 	struct cp_module cp_module;
 
-	struct filter filter;
+	struct filter net4_filter;
+	struct filter net6_filter;
 };

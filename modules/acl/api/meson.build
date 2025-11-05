@@ -9,7 +9,7 @@ cp_dependencies = [
 includes = include_directories('../dataplane')
 
 sources = files(
-  'controlplane.c',
+  'module.c', 'rule.c'
 )
 
 lib_acl_cp = static_library(
