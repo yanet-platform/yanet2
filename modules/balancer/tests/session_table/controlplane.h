@@ -1,0 +1,16 @@
+#pragma once
+
+#include "dataplane/session_table.h"
+#include <stdint.h>
+
+////////////////////////////////////////////////////////////////////////////////
+
+struct watcher {
+	struct balancer_session_table *session_table;
+	_Atomic uint8_t stop;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+run_watcher(struct watcher *watcher);

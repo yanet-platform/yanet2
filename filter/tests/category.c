@@ -16,7 +16,7 @@ query_and_check_actions(
 	uint32_t ref_actions_count,
 	const uint32_t *ref_actions
 ) {
-	struct packet packet = make_packet(
+	struct packet packet = make_packet4(
 		ip(0, 0, 0, 123),
 		ip(0, 0, 1, 65),
 		src_port,

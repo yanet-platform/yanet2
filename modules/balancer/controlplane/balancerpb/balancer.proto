@@ -4,62 +4,31 @@ package balancerpb;
 
 import "common/proto/target.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb;balancerpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/"
+		    "balancer/controlplane/balancerpb;balancerpb";
 
-// BalancerService is a control-plane service for managing balancer module.
 service BalancerService {
-	// Lists existing configurations per dataplane instance.
-	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse) {
-	}
+	rpc EnableBalancing(EnableBalancingRequest)
+		returns (EnableBalancingResponse);
 
-	// ShowConfig returns the current configuration of the balancer module.
-	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {
-	}
+	// Allows to update reals with optional buffering updates
+	rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
 
-	// AddService a new virtual service to the configuration.
-	rpc AddService(AddServiceRequest) returns (AddServiceResponse) {
-	}
+	// Allows to flush buffered reals updates
+	rpc FlushRealUpdates(FlushRealUpdatesRequest)
+		returns (FlushRealUpdatesResponse);
 
-	// RemoveService removes a virtual service from the configuration.
-	rpc RemoveService(RemoveServiceRequest)
-		returns (RemoveServiceResponse) {
-	}
+	// Allows to reload module config
+	rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
 
-	// SetRealWeight sets weight a real server.
-	rpc SetRealWeight(SetRealWeightRequest)
-		returns (SetRealWeightResponse) {
-	}
+	// todo
+	// rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
 
-	// SetStateConfig sets state TTLs config to the configuration.
-	rpc SetStateConfig(SetStateConfigRequest)
-		returns (SetStateConfigResponse) {
-	}
-}
+	// Allows to show module config
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-// Represents config names of dataplane instances.
-message InstanceConfigs {
-	// Dataplane instance
-	uint32 instance = 1;
-	repeated string configs = 2;
-}
-
-message ListConfigsRequest {
-}
-
-// ListConfigsResponse contains existing configurations per dataplane instance.
-message ListConfigsResponse {
-	repeated InstanceConfigs instance_configs = 1;
-}
-
-// ShowConfigRequest requests the current configuration.
-message ShowConfigRequest {
-	commonpb.TargetModule target = 1;
-}
-
-// Represents a subnet in CIDR notation.
-message Prefix {
-	bytes addr = 1;
-	uint32 size = 2;
+	// Allows to list configs of the modules for which balancing was enabled
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 }
 
 // Message representing a real server in the configuration.
@@ -74,77 +43,132 @@ message Real {
 	// src = (src_addr & src_mask) | (original_src & (~ src_mask)).
 	bytes src_addr = 3;
 	bytes src_mask = 4;
+
+	// False by default.
+	bool enabled = 5;
 }
 
-enum ForwardingMethod {
-	FORWARDING_METHOD_UNSPECIFIED = 0;
-	FORWARDING_METHOD_TUN = 1;
-	FORWARDING_METHOD_GRE = 2;
-}
-
-message Service {
+message VirtualService {
 	// Virtual IP address.
 	bytes addr = 1;
+
+	uint32 port = 2;
+
+	// `TCP` or `UDP`
+	string proto = 3;
+
+	// todo: scheduler
+	// scheduler: wrr/prr/wlc
+
 	// List of CIDR subnets from which incoming requests are allowed.
-	repeated Prefix prefixes = 2;
-	repeated Real reals = 3;
-	// ForwardingMethod specifies the method for tunneling the packet.
-	ForwardingMethod forwarding_method = 4;
+	repeated string allowed_srcs = 4;
+	repeated Real reals = 5;
+
+	// If GRE flag is set, GRE is used for tunneling packets to
+	// every balancer real. Else, TUN is used. False by default.
+	bool gre = 6;
+
+	// fix_mss flag specifies if TCP MSS option must be fixed. False by
+	// default.
+	bool fix_mss = 7;
+
+	// OPS flag specifies if one packet scheduler should be used for
+	// selecting reals of service. False by default.
+	bool ops = 8;
+
+	// PureL3 flag specifies if we need to schedule based on L3 address
+	// only. False by default.
+	bool pure_l3 = 9;
 }
 
-// StateConfig contains session TTL for different types of packets.
-// The system uses the most specific TTL value applicable to a packet.
-message StateConfig {
-	uint32 tcp_syn_ack_ttl = 1;
-	uint32 tcp_syn_ttl = 2;
-	uint32 tcp_fin_ttl = 3;
-	uint32 tcp_ttl = 4;
-	uint32 udp_ttl = 5;
-	uint32 default_ttl = 6;
+message RealUpdate {
+	// IP of the virtual service real belongs to
+	bytes virtual_ip = 1;
+
+	// Virtual service proto
+	string proto = 2;
+
+	// Virtual service port
+	uint32 port = 3;
+
+	// Ip of the real
+	bytes real_ip = 4;
+
+	// Enable or disable real
+	bool enable = 5;
+
+	// Optional new weight
+	// Zero weight means no update
+	uint32 weight = 6;
 }
 
-// Config represents configuration for a single dataplane instance.
-message Config {
-	repeated Service services = 1;
-	StateConfig state_config = 2;
+message UpdateRealsRequest {
+	commonpb.TargetModule target = 1;
+	repeated RealUpdate updates = 2;
+	// Allows to delay request applying
+	// until `flush` will be called
+	bool buffer = 3;
 }
 
-// ShowConfigResponse contains the current configuration
+message UpdateRealsResponse {
+}
+
+message FlushRealUpdatesRequest {
+	commonpb.TargetModule target = 1;
+}
+
+message FlushRealUpdatesResponse {
+	// Number of updates applied
+	uint32 updates_flushed = 1;
+}
+
+message EnableBalancingRequest {
+	commonpb.TargetModule target = 1;
+	BalancerInstanceConfig config = 2;
+	uint64 session_table_size = 3;
+}
+
+message EnableBalancingResponse {
+}
+
+message ReloadConfigRequest {
+	commonpb.TargetModule target = 1;
+	BalancerInstanceConfig config = 2;
+}
+
+message ReloadConfigResponse {
+}
+
+message SessionsTimeouts {
+	uint32 tcp_syn_ack = 1;
+	uint32 tcp_syn = 2;
+	uint32 tcp_fin = 3;
+	uint32 tcp = 4;
+	uint32 udp = 5;
+	uint32 default = 6;
+}
+
+message BalancerInstanceConfig {
+	SessionsTimeouts sessions_timeouts = 2;
+	repeated VirtualService virtual_services = 3;
+}
+
+message ShowConfigRequest {
+	commonpb.TargetModule target = 1;
+}
+
 message ShowConfigResponse {
-	uint32 instance = 1;
-	Config config = 2;
+	BalancerInstanceConfig config = 1;
 }
 
-message AddServiceRequest {
-	commonpb.TargetModule target = 1;
-	Service service = 2;
+message BalancerInstanceConfigInfo {
+	commonpb.TargetModule module = 1;
+	BalancerInstanceConfig config = 2;
 }
 
-message AddServiceResponse {
+message ListConfigsRequest {
 }
 
-message RemoveServiceRequest {
-	commonpb.TargetModule target = 1;
-	bytes service_addr = 2;
-}
-
-message RemoveServiceResponse {
-}
-
-message SetRealWeightRequest {
-	commonpb.TargetModule target = 1;
-	bytes service_addr = 2;
-	bytes real_addr = 3;
-	uint32 weight = 4;
-}
-
-message SetRealWeightResponse {
-}
-
-message SetStateConfigRequest {
-	commonpb.TargetModule target = 1;
-	StateConfig state_config = 2;
-}
-
-message SetStateConfigResponse {
+message ListConfigsResponse {
+	repeated BalancerInstanceConfigInfo configs = 1;
 }

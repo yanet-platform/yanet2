@@ -1,68 +1,26 @@
 package balancer
 
-import (
-	"fmt"
-	"net"
+import "github.com/c2h5oh/datasize"
 
-	"github.com/c2h5oh/datasize"
-)
-
-// Config represents balancer module configuration
+// Config for the balancer service
 type Config struct {
-	// MemoryPath is the path to the shared memory file
+	// MemoryPath is the path to the shared-memory file that is used to
+	// communicate with dataplane.
 	MemoryPath string `yaml:"memory_path"`
 
-	// MemoryRequirements specifies memory requirements for the module
+	// MemoryRequirements is the amount of memory that is required for a single
+	// agent
 	MemoryRequirements datasize.ByteSize `yaml:"memory_requirements"`
 
-	// Endpoint is the gRPC endpoint address
-	Endpoint string `yaml:"endpoint"`
-
-	// GatewayEndpoint is the address of the gateway service
+	Endpoint        string `yaml:"endpoint"`
 	GatewayEndpoint string `yaml:"gateway_endpoint"`
 }
 
-// Validate checks if the configuration is valid
-func (c *Config) Validate() error {
-	if c.MemoryPath == "" {
-		return fmt.Errorf("memory path is required")
-	}
-
-	if c.MemoryRequirements == 0 {
-		return fmt.Errorf("memory requirements must be greater than 0")
-	}
-
-	if c.Endpoint == "" {
-		return fmt.Errorf("endpoint is required")
-	}
-
-	if _, err := net.ResolveTCPAddr("tcp", c.Endpoint); err != nil {
-		return fmt.Errorf("invalid endpoint address: %w", err)
-	}
-
-	if c.GatewayEndpoint == "" {
-		return fmt.Errorf("gateway endpoint is required")
-	}
-
-	if _, err := net.ResolveTCPAddr("tcp", c.GatewayEndpoint); err != nil {
-		return fmt.Errorf("invalid gateway endpoint address: %w", err)
-	}
-
-	return nil
-}
-
-// DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
 		MemoryPath:         "/dev/hugepages/yanet",
-		MemoryRequirements: 16 * datasize.MB,
+		MemoryRequirements: 256 * datasize.MB,
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",
 	}
-}
-
-// instanceKey uniquely identifies a module instance on a dataplane instance
-type instanceKey struct {
-	name              string
-	dataplaneInstance uint32
 }

@@ -36,7 +36,7 @@ gen_packets(size_t count) {
 		uint16_t src_port = (123 * i + 17) % MAX_PORT;
 		uint16_t dst_port = (127 * i + 121) % MAX_PORT;
 
-		packets[i] = make_packet(
+		packets[i] = make_packet4(
 			ip(src_ip, 1, 1, 5),
 			ip(dst_ip, 2, 3, 1),
 			src_port,
@@ -75,8 +75,8 @@ test_macro_filter(struct filter_rule *rules, struct packet *packets) {
 	clock_t new_filter_init_start_time = clock();
 
 	struct filter filter;
-	FILTER_INIT(
-		&filter, sign, rules, MAX_IP * MAX_IP, &memory_context, &res
+	res = FILTER_INIT(
+		&filter, sign, rules, MAX_IP * MAX_IP, &memory_context
 	);
 	assert(res == 0);
 	double filter_init_time =

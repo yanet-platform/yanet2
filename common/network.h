@@ -6,6 +6,7 @@ struct ether_addr {
 	uint8_t addr[6];
 };
 
+#define NET4_LEN 4
 #define NET6_LEN 16
 
 struct net6 {

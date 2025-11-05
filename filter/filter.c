@@ -139,7 +139,7 @@ filter_query(
 
 		// store calculated classifier in the parent vertex
 		filter->v[vertex / 2].slots[vertex & 1] =
-			attr->query_func(packet, v->data);
+			attr->query_func(packet, ADDR_OF(&v->data));
 	}
 
 	// calculate classifiers for the rest vertices except root
@@ -177,7 +177,7 @@ filter_free(struct filter *filter) {
 	for (size_t i = 0; i < filter->n; ++i) {
 		struct filter_attribute *attr = filter->attr[i];
 		struct filter_vertex *v = &filter->v[filter->n + i];
-		attr->free_func(v->data, &filter->memory_context);
+		attr->free_func(ADDR_OF(&v->data), &filter->memory_context);
 	}
 	for (size_t i = 1; i < 2 * filter->n; ++i) {
 		value_registry_free(&filter->v[i].registry);

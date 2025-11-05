@@ -97,8 +97,8 @@ memory-bank
 # generated files
 *.pb.go
 
-# Ignore Cargo.lock for libraries.
-common/**/Cargo.lock
+# Ignore lock for subprojects
+subprojects/.wraplock
 
 # local env
 .envrc

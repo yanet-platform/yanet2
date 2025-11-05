@@ -6,12 +6,12 @@ dataplane:
       cp_memory: 1073741824
       numa_id: 0
   devices:
-    - port_name: 07:00.0
+    - port_name: 01:00.0
       mtu: 7000
       max_lro_packet_size: 7200
       rss_hash: 0
       workers:
-        - core_id: 4
+        - core_id: 1
           instance_id: 0
           rx_queue_len: 1024
           tx_queue_len: 1024
@@ -21,7 +21,7 @@ dataplane:
       max_lro_packet_size: 7200
       rss_hash: 0
       workers:
-        - core_id: 5
+        - core_id: 2
           instance_id: 0
           rx_queue_len: 1024
           tx_queue_len: 1024

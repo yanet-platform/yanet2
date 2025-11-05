@@ -1,5 +1,5 @@
-ring_test_sources = files(
-  'ring_test.c',
+test_sources = files(
+  'ring.c',
 )
 
 ring_test_includes = [
@@ -8,16 +8,17 @@ ring_test_includes = [
 ]
 
 ring_test_exe = executable(
-  'ring_test',
+  'ring',
   c_args: yanet_test_c_args,
   link_args: yanet_link_args,
-  sources: ring_test_sources,
+  sources: test_sources,
   include_directories: ring_test_includes,
   dependencies: [lib_logging_dep],
 )
 
 test(
-  'balancer_ring',
+  'ring',
   ring_test_exe,
-  timeout: 30,
+  timeout: 10,
+  suite: ['balancer'],
 )

@@ -15,7 +15,7 @@
 
 void
 query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
-	struct packet packet = make_packet(
+	struct packet packet = make_packet4(
 		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 0, 0, IPPROTO_TCP, flags, 0
 	);
 	query_filter_and_expect_action(filter, &packet, expected);
@@ -24,7 +24,7 @@ query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
 
 void
 query_udp_packet(struct filter *filter, uint32_t expected) {
-	struct packet packet = make_packet(
+	struct packet packet = make_packet4(
 		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 0, 0, IPPROTO_UDP, 0, 0
 	);
 	query_filter_and_expect_action(filter, &packet, expected);
@@ -45,15 +45,15 @@ test_proto_1(void *memory) {
 	assert(res == 0);
 
 	struct filter_rule_builder b1;
-	builer_set_proto(&b1, IPPROTO_TCP, 0b101, 0b010);
+	builder_set_proto(&b1, IPPROTO_TCP, 0b101, 0b010);
 	struct filter_rule r1 = build_rule(&b1, 1);
 
 	struct filter_rule_builder b2;
-	builer_set_proto(&b2, IPPROTO_UDP, 0, 0);
+	builder_set_proto(&b2, IPPROTO_UDP, 0, 0);
 	struct filter_rule r2 = build_rule(&b2, 2);
 
 	struct filter_rule_builder b3;
-	builer_set_proto(&b3, PROTO_UNSPEC, 0, 0);
+	builder_set_proto(&b3, PROTO_UNSPEC, 0, 0);
 	struct filter_rule r3 = build_rule(&b3, 3);
 
 	struct filter_rule rules[3] = {r1, r2, r3};

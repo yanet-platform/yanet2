@@ -44,7 +44,7 @@ main() {
 	assert(res == 0);
 
 	{
-		struct packet packet = make_packet(
+		struct packet packet = make_packet4(
 			ip(192, 255, 168, 1),
 			ip(192, 255, 168, 10),
 			0,
@@ -59,7 +59,7 @@ main() {
 
 	{
 		// no action because src ip mismatch
-		struct packet packet = make_packet(
+		struct packet packet = make_packet4(
 			ip(195, 255, 168, 1),
 			ip(192, 255, 168, 10),
 			0,
@@ -74,7 +74,7 @@ main() {
 
 	{
 		// no action because dst ip mismatch
-		struct packet packet = make_packet(
+		struct packet packet = make_packet4(
 			ip(192, 255, 168, 10),
 			ip(195, 255, 168, 1),
 			0,
