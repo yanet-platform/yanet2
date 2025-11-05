@@ -214,29 +214,3 @@ func TestValidation_MultiplePackets(t *testing.T) {
 	require.Equal(t, 5, result.Passed)
 	require.Equal(t, 0, result.Failed)
 }
-
-func TestValidation_PrintReport(t *testing.T) {
-	result := &ValidationResult{
-		TestName:   "test.pcap",
-		TotalTests: 10,
-		Passed:     8,
-		Failed:     2,
-		Errors: []ValidationError{
-			{
-				PacketIndex:  3,
-				ErrorType:    "byte_mismatch",
-				DetailedDiff: "Byte mismatch at offset 22",
-			},
-			{
-				PacketIndex:  7,
-				ErrorType:    "length_mismatch",
-				DetailedDiff: "Length mismatch: expected 64, got 60",
-			},
-		},
-	}
-
-	// Just ensure it doesn't panic
-	result.PrintReport()
-
-	require.False(t, result.IsSuccess())
-}

@@ -697,7 +697,8 @@ EXPECT_REGEX: packets:\\s+\\d+`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := NewConverter(&Config{Verbose: false})
+            c, err := NewConverter(&Config{Verbose: false})
+            require.NoError(t, err)
 			result := c.convertCLICheck(tt.content)
 
 			require.Equal(t, "cli_check", result.Type)
