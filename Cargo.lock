@@ -4329,11 +4329,16 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "yanet-cli-device-plain"
+=======
+name = "yanet-cli-device"
+>>>>>>> 9f6b40a (Added Cargo.lock)
 version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
+<<<<<<< HEAD
  "colored 3.0.0",
  "ipnet",
  "log",
@@ -4362,6 +4367,11 @@ dependencies = [
  "ptree",
  "serde",
  "serde_json",
+=======
+ "log",
+ "prost",
+ "prost-types",
+>>>>>>> 9f6b40a (Added Cargo.lock)
  "tokio",
  "tonic",
  "tonic-build",
