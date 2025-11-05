@@ -110,7 +110,6 @@ jobs:
 
       - name: Build and run tests
         run: |
-          set -eo pipefail
           make test
       - name: Show meson test log
         run:
