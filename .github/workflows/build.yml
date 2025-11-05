@@ -111,15 +111,7 @@ jobs:
       - name: Build and run tests
         run: |
           set -eo pipefail
-          make test || {
-            echo "===== meson test log ====="
-            if [ -f build/meson-logs/testlog.txt ]; then
-              sed '/Inherited environment/d' build/meson-logs/testlog.txt
-            else
-              echo "No meson log found at build/meson-logs/testlog.txt"
-            fi
-            exit 1
-          }
+          make test
       - name: Show meson test log
         run:
           grep -v 'Inherited environment' build/meson-logs/testlog.txt
