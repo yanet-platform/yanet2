@@ -23,6 +23,20 @@ route_handle_v4(struct route_module_config *config, struct packet *packet) {
 	struct rte_ipv4_hdr *header = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
+	if (header->time_to_live <= 1) {
+		return LPM_VALUE_INVALID;
+	}
+	header->time_to_live -= 1;
+
+	/*
+	 * Recalculate IPv4 header checksum using RFC 1624 incremental update.
+	 * When TTL is decremented by 1, we add 0xFEFF to the complemented
+	 * checksum. This is equivalent to subtracting 0x0100 from the original
+	 * checksum (TTL field change).
+	 */
+	unsigned int sum =
+		((~rte_be_to_cpu_16(header->hdr_checksum)) & 0xFFFF) + 0xFEFF;
+	header->hdr_checksum = ~rte_cpu_to_be_16(sum + (sum >> 16));
 
 	return lpm_lookup(&config->lpm_v4, 4, (uint8_t *)&header->dst_addr);
 }
@@ -34,6 +48,10 @@ route_handle_v6(struct route_module_config *config, struct packet *packet) {
 	struct rte_ipv6_hdr *header = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
+	if (header->hop_limits <= 1) {
+		return LPM_VALUE_INVALID;
+	}
+	header->hop_limits -= 1;
 
 	return lpm_lookup(&config->lpm_v6, 16, header->dst_addr);
 }
