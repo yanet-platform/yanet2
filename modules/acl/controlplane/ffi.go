@@ -307,3 +307,10 @@ func (config *ModuleConfig) LinkIntoDataplane(agent *ffi.Agent) error {
 	}
 	return nil
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Useful in tests
+func (config *ModuleConfig) AsRawPtr() unsafe.Pointer {
+	return unsafe.Pointer(config.inner)
+}

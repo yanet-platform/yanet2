@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-// ACLModule реализует модуль управления ACL
+// ACLModule implements module for ACL control
 type ACLModule struct {
 	cfg     *Config
 	shm     *ffi.SharedMemory

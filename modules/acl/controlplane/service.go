@@ -13,6 +13,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+////////////////////////////////////////////////////////////////////////////////
+
 // ACLService реализует gRPC сервис для управления ACL
 type ACLService struct {
 	aclpb.UnimplementedACLServiceServer
@@ -31,10 +33,14 @@ func NewACLService(agents []*ffi.Agent, log *zap.SugaredLogger) *ACLService {
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 type instanceKey struct {
 	name     string
 	instance uint32
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 func makeAndLinkNewConfig(agent *ffi.Agent, name string, rules []*aclpb.Rule) (*ModuleConfig, error) {
 	// try create new config
@@ -55,6 +61,8 @@ func makeAndLinkNewConfig(agent *ffi.Agent, name string, rules []*aclpb.Rule) (*
 
 	return newConfig, nil
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 func (s *ACLService) EnableAcl(ctx context.Context, req *aclpb.EnableAclRequest) (*aclpb.EnableAclResponse, error) {
 	s.mu.Lock()
@@ -88,6 +96,8 @@ func (s *ACLService) EnableAcl(ctx context.Context, req *aclpb.EnableAclRequest)
 
 	return &aclpb.EnableAclResponse{}, nil
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 func (s *ACLService) UpdateConfig(ctx context.Context, req *aclpb.UpdateConfigRequest) (*aclpb.UpdateConfigResponse, error) {
 	s.mu.Lock()
