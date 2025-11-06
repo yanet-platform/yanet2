@@ -141,7 +141,7 @@ free_packet(struct packet *packet) {
 }
 
 struct packet
-make_packet(
+make_packet4(
 	uint8_t *src_ip,
 	uint8_t *dst_ip,
 	uint16_t src_port,
@@ -162,7 +162,7 @@ make_packet(
 
 // IPv6 in host byte order
 struct packet
-make_packet_net6(
+make_packet6(
 	const uint8_t src_ip[NET6_LEN],
 	const uint8_t dst_ip[NET6_LEN],
 	uint16_t src_port,
@@ -293,7 +293,7 @@ builder_add_port_src_range(
 }
 
 void
-builer_set_proto(
+builder_set_proto(
 	struct filter_rule_builder *builder,
 	uint8_t proto,
 	uint16_t enable_bits,
@@ -313,6 +313,14 @@ builder_init(struct filter_rule_builder *builder) {
 	memset(builder, 0, sizeof(struct filter_rule_builder));
 	builder->proto.proto = PROTO_UNSPEC;
 	builder->vlan = VLAN_UNSPEC;
+}
+
+void
+builder_add_proto_range(
+	struct filter_rule_builder *builder, uint16_t from, uint16_t to
+) {
+	builder->proto_ranges[builder->proto_ranges_count++] =
+		(struct filter_proto_range){from, to};
 }
 
 struct filter_rule
@@ -340,8 +348,8 @@ build_rule(struct filter_rule_builder *builder, uint32_t action) {
 				.dsts = builder->dst_port_ranges,
 				.src_count = builder->port_src_ranges_count,
 				.srcs = builder->src_port_ranges,
-				.protos = &builder->proto_range,
-				.proto_count = 1,
+				.protos = builder->proto_ranges,
+				.proto_count = builder->proto_ranges_count,
 			},
 		.vlan = builder->vlan,
 	};

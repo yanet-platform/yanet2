@@ -18,7 +18,7 @@ query_and_expect_action(
 	uint16_t dst_port,
 	uint32_t expected
 ) {
-	struct packet packet = make_packet(
+	struct packet packet = make_packet4(
 		ip(0, 0, 0, 0),
 		ip(0, 0, 0, 0),
 		src_port,
@@ -35,7 +35,7 @@ void
 query_and_expect_no_action(
 	struct filter *filter, uint16_t src_port, uint16_t dst_port
 ) {
-	struct packet packet = make_packet(
+	struct packet packet = make_packet4(
 		ip(0, 0, 0, 0),
 		ip(0, 0, 0, 0),
 		src_port,

@@ -13,7 +13,7 @@ query_packet_and_expect_action(
 	uint8_t dst_ip[NET6_LEN],
 	uint32_t action
 ) {
-	struct packet packet = make_packet_net6(src_ip, dst_ip, 100, 200);
+	struct packet packet = make_packet6(src_ip, dst_ip, 100, 200);
 	query_filter_and_expect_action(filter, &packet, action);
 	free_packet(&packet);
 }
@@ -24,7 +24,7 @@ query_packet_and_expect_no_actions(
 	uint8_t src_ip[NET6_LEN],
 	uint8_t dst_ip[NET6_LEN]
 ) {
-	struct packet packet = make_packet_net6(src_ip, dst_ip, 100, 200);
+	struct packet packet = make_packet6(src_ip, dst_ip, 100, 200);
 	query_filter_and_expect_no_actions(filter, &packet);
 	free_packet(&packet);
 }

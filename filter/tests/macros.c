@@ -1,4 +1,5 @@
 #include "../filter.h"
+#include "logging/log.h"
 #include "utils.h"
 #include <assert.h>
 #include <netinet/in.h>
@@ -27,10 +28,10 @@ src_port(void *memory) {
 	FILTER_DECLARE(sign, &attribute_port_src);
 
 	struct filter filter;
-	FILTER_INIT(&filter, sign, &rule1, 1, &memory_context, &res);
+	res = FILTER_INIT(&filter, sign, &rule1, 1, &memory_context);
 	assert(res == 0);
 
-	struct packet packet = make_packet(
+	struct packet packet = make_packet4(
 		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 4000, 0, IPPROTO_UDP, 0, 0
 	);
 	uint32_t *actions;
@@ -47,6 +48,7 @@ src_port(void *memory) {
 
 int
 main() {
+	log_enable_name("debug");
 	void *memory = malloc(1 << 24);
 	src_port(memory);
 	free(memory);

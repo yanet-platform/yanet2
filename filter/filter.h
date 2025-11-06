@@ -69,7 +69,7 @@
 //
 // To get the final classifier of the packet, first algorithm classifier every
 // packet attribute separately. For this, it calls user-provided classification
-// function for every attribute. After that algirthm gets classifiers of the
+// function for every attribute. After that algorithm gets classifiers of the
 // higher level and so no, until the result classifier is calculated. For every
 // such vertex, it stores mapping table table[c1][c2] -> c`, where c1 is the
 // classifier in the left son vertex, c2 is the classifier in the right son
@@ -89,23 +89,23 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Represents vertex in the classfication tree.
+// Represents vertex in the classification tree.
 //
 // If vertex is a leaf, it corresponds to the classifier of the single packet
-// attribute. If vertex is not a leaf, it corresonds to the combined classifier
+// attribute. If vertex is not a leaf, it corresponds to the combined classifier
 // of the left vertex son and the right vertex son.
 struct filter_vertex {
 	// Corresponds to the mapping from classifier to the list of rules
 	// which classifier satisfies to.
-	// It vertex is a root, then it maps classifier to the list of
+	// If vertex is a root, then it maps classifier to the list of
 	// rule actions instead of the rule numbers.
 	struct value_registry registry;
 
-	// 2-dimentional table
+	// 2-dimensional table
 	// [left son classifier][right son classifier]
 	// -> combined classifier
 	//
-	// This table is not filled to leaves.
+	// This table is not filled for leaves.
 	struct value_table table;
 
 	// This values are used during packet classification.
@@ -115,15 +115,17 @@ struct filter_vertex {
 	// the classifier for the current vertex can be calculated in the
 	// following way:
 	// 	result classifier = table[slots[0]][slots[1]].
-	// After that, the calculated classifier must be stored in the slots
+	// After that, the calculated classifier must be stored in the slot
 	// of the parent vertex.
 	uint32_t slots[2];
 
 	// This data is dedicated for user.
 	// It is passed in the initialization function for
 	// the packet attribute classifier, and can be filled by user
-	// in any way. After that, user uses this data to classifiy packet
+	// in any way. After that, user uses this data to classify packet
 	// attribute.
+	//
+	// As working in shared memory, data is relative pointer.
 	void *data;
 };
 
@@ -150,6 +152,9 @@ struct filter {
 ////////////////////////////////////////////////////////////////////////////////
 
 // Allows to initialize filter with provided attributes and rules.
+//
+// !!! Not inter-process Safe !!!
+// !!! Dont use when in shared memory, use macros instead !!!
 int
 filter_init(
 	struct filter *filter,
@@ -161,6 +166,9 @@ filter_init(
 );
 
 // Allows to query actions corresponds to the provided packet.
+//
+// !!! Not inter-process Safe !!!
+// !!! Dont use when in shared memory, use macros instead !!!
 int
 filter_query(
 	struct filter *filter,
@@ -170,6 +178,9 @@ filter_query(
 );
 
 // Allows to free filter memory.
+//
+// !!! Not inter-process Safe !!!
+// !!! Dont use when in shared memory, use macros instead !!!
 void
 filter_free(struct filter *filter);
 
@@ -180,16 +191,19 @@ filter_free(struct filter *filter);
 		__VA_ARGS__                                                    \
 	};
 
-#define FILTER_INIT(filter, tag, rules, rule_count, ctx, res)                  \
-	do {                                                                   \
+#define FILTER_INIT(filter, tag, rules, rule_count, ctx)                       \
+	__extension__({                                                        \
+		__label__ init_failed;                                         \
+		__label__ init_finish;                                         \
+		int res;                                                       \
 		if (sizeof(__filter_attrs_##tag) == 0) {                       \
-			*(res) = -1;                                           \
+			res = -1;                                              \
 			goto init_failed;                                      \
 		}                                                              \
-		*(res) = memory_context_init_from(                             \
+		res = memory_context_init_from(                                \
 			&(filter)->memory_context, ctx, "filter"               \
 		);                                                             \
-		if (*(res) < 0) {                                              \
+		if (res < 0) {                                                 \
 			goto init_failed;                                      \
 		}                                                              \
 		const size_t n = sizeof(__filter_attrs_##tag) /                \
@@ -198,33 +212,34 @@ filter_free(struct filter *filter);
 			const struct filter_attribute *attr =                  \
 				__filter_attrs_##tag[i];                       \
 			struct filter_vertex *v = &(filter)->v[n + i];         \
-			*(res) = value_registry_init(                          \
+			res = value_registry_init(                             \
 				&v->registry, &(filter)->memory_context        \
 			);                                                     \
-			if (*(res) < 0) {                                      \
+			if (res < 0) {                                         \
 				goto init_failed;                              \
 			}                                                      \
-			*(res) = attr->init_func(                              \
+			v->data = NULL;                                        \
+			res = attr->init_func(                                 \
 				&v->registry,                                  \
 				&v->data,                                      \
 				rules,                                         \
 				rule_count,                                    \
 				&(filter)->memory_context                      \
 			);                                                     \
-			if (*(res) < 0) {                                      \
+			if (res < 0) {                                         \
 				goto init_failed;                              \
 			}                                                      \
 		}                                                              \
 		if (n == 1) {                                                  \
 			struct value_registry dummy;                           \
-			*(res) = init_dummy_registry(                          \
+			res = init_dummy_registry(                             \
 				&(filter)->memory_context, rule_count, &dummy  \
 			);                                                     \
-			if (*(res) < 0) {                                      \
+			if (res < 0) {                                         \
 				value_registry_free(&dummy);                   \
 				goto init_failed;                              \
 			}                                                      \
-			*(res) = merge_and_set_registry_values(                \
+			res = merge_and_set_registry_values(                   \
 				&(filter)->memory_context,                     \
 				rules,                                         \
 				&dummy,                                        \
@@ -232,7 +247,7 @@ filter_free(struct filter *filter);
 				&(filter)->v[0].table,                         \
 				&(filter)->v[0].registry                       \
 			);                                                     \
-			if (*(res) < 0) {                                      \
+			if (res < 0) {                                         \
 				value_registry_free(&dummy);                   \
 				goto init_failed;                              \
 			}                                                      \
@@ -240,18 +255,18 @@ filter_free(struct filter *filter);
 			goto init_finish;                                      \
 		}                                                              \
 		for (size_t idx = n - 1; idx >= 2; --idx) {                    \
-			*(res) = merge_and_collect_registry(                   \
+			res = merge_and_collect_registry(                      \
 				&(filter)->memory_context,                     \
 				&(filter)->v[2 * idx].registry,                \
 				&(filter)->v[2 * idx + 1].registry,            \
 				&(filter)->v[idx].table,                       \
 				&(filter)->v[idx].registry                     \
 			);                                                     \
-			if (*(res) < 0) {                                      \
+			if (res < 0) {                                         \
 				goto init_failed;                              \
 			}                                                      \
 		}                                                              \
-		*(res) = merge_and_set_registry_values(                        \
+		res = merge_and_set_registry_values(                           \
 			&(filter)->memory_context,                             \
 			rules,                                                 \
 			&(filter)->v[2 * 1].registry,                          \
@@ -259,14 +274,15 @@ filter_free(struct filter *filter);
 			&(filter)->v[1].table,                                 \
 			&(filter)->v[1].registry                               \
 		);                                                             \
-	} while (0);                                                           \
 	init_failed:                                                           \
-	init_finish:
+	init_finish:                                                           \
+		res;                                                           \
+	})
 
 ////////////////////////////////////////////////////////////////////////////////
 
 #define FILTER_QUERY(filter, tag, packet, actions, actions_count)              \
-	do {                                                                   \
+	__extension__({                                                        \
 		const size_t n = sizeof(__filter_attrs_##tag) /                \
 				 sizeof(struct filter_attribute *);            \
 		for (size_t attr_idx = 0; attr_idx < n; ++attr_idx) {          \
@@ -275,7 +291,7 @@ filter_free(struct filter *filter);
 				__filter_attrs_##tag[attr_idx];                \
 			struct filter_vertex *v = &((filter)->v)[vertex];      \
 			(filter)->v[vertex / 2].slots[vertex & 1] =            \
-				attr->query_func(packet, v->data);             \
+				attr->query_func(packet, ADDR_OF(&v->data));   \
 		}                                                              \
 		for (size_t vertex = n - 1; vertex >= 2; --vertex) {           \
 			struct filter_vertex *v = &((filter)->v)[vertex];      \
@@ -292,22 +308,21 @@ filter_free(struct filter *filter);
 			ADDR_OF(&r->registry.ranges) + result;                 \
 		*(actions) = ADDR_OF(&range->values);                          \
 		*(actions_count) = range->count;                               \
-	} while (0)
+	})
 
 ////////////////////////////////////////////////////////////////////////////////
 
 #define FILTER_FREE(filter, tag)                                               \
-	do {                                                                   \
+	__extension__({                                                        \
 		const size_t n = sizeof(__filter_attrs_##tag) /                \
 				 sizeof(struct filter_attribute *);            \
-		if (n == 0) {                                                  \
-			goto free_finish;                                      \
-		}                                                              \
 		for (size_t i = 0; i < n; ++i) {                               \
 			const struct filter_attribute *attr =                  \
 				__filter_attrs_##tag[i];                       \
 			struct filter_vertex *v = &(filter)->v[n + i];         \
-			attr->free_func(v->data, &(filter)->memory_context);   \
+			attr->free_func(                                       \
+				ADDR_OF(&v->data), &(filter)->memory_context   \
+			);                                                     \
 		}                                                              \
 		for (size_t i = 1; i < 2 * n; ++i) {                           \
 			value_registry_free(&(filter)->v[i].registry);         \
@@ -320,13 +335,12 @@ filter_free(struct filter *filter);
 			value_registry_free(&v->registry);                     \
 			value_table_free(&v->table);                           \
 		}                                                              \
-	} while (0);                                                           \
-	free_finish:
+	});
 
 ////////////////////////////////////////////////////////////////////////////////
 
 // Allows to find actions with fixed category.
 uint32_t
-find_actions_with_category(
+filter_actions_with_category(
 	uint32_t *actions, uint32_t count, uint32_t category
 );

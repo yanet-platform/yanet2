@@ -1,3 +1,5 @@
+#pragma once
+
 #include "common/memory.h"
 #include "common/registry.h"
 #include "common/value.h"

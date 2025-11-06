@@ -8,8 +8,8 @@
 static int
 filter_build(
 	struct filter *filter,
-	const struct filter_rule *actions,
-	uint32_t actions_count
+	const struct filter_rule *rules,
+	uint32_t rule_count
 ) {
 	// build leaves
 	for (size_t i = 0; i < filter->n; ++i) {
@@ -26,8 +26,8 @@ filter_build(
 		res = attr->init_func(
 			&v->registry,
 			&v->data,
-			actions,
-			actions_count,
+			rules,
+			rule_count,
 			&filter->memory_context
 		);
 		if (res < 0) {
@@ -35,17 +35,17 @@ filter_build(
 		}
 	}
 
-	// n=1 is corner case becase
+	// n=1 is corner case because
 	// leaf for attribute 0 is vertex 1,
 	// but vertex 1 is root for cases n>1.
 	if (filter->n == 1) {
 		// in this case,
 		// root is vertex 0, 1 is leaf, and also there is
-		// dummy registry used for build root.
+		// dummy registry used to build root.
 		// dummy registry contains classifier 0 for every action.
 		struct value_registry dummy;
 		int res = init_dummy_registry(
-			&filter->memory_context, actions_count, &dummy
+			&filter->memory_context, rule_count, &dummy
 		);
 		if (res < 0) {
 			value_registry_free(&dummy);
@@ -53,7 +53,7 @@ filter_build(
 		}
 		res = merge_and_set_registry_values(
 			&filter->memory_context,
-			actions,
+			rules,
 			&dummy,
 			&filter->v[1].registry,
 			&filter->v[0].table,
@@ -87,7 +87,7 @@ filter_build(
 	// build root
 	return merge_and_set_registry_values(
 		&filter->memory_context,
-		actions,
+		rules,
 		&filter->v[2 * 1].registry,
 		&filter->v[2 * 1 + 1].registry,
 		&filter->v[1].table,
@@ -139,7 +139,7 @@ filter_query(
 
 		// store calculated classifier in the parent vertex
 		filter->v[vertex / 2].slots[vertex & 1] =
-			attr->query_func(packet, v->data);
+			attr->query_func(packet, ADDR_OF(&v->data));
 	}
 
 	// calculate classifiers for the rest vertices except root
@@ -177,7 +177,7 @@ filter_free(struct filter *filter) {
 	for (size_t i = 0; i < filter->n; ++i) {
 		struct filter_attribute *attr = filter->attr[i];
 		struct filter_vertex *v = &filter->v[filter->n + i];
-		attr->free_func(v->data, &filter->memory_context);
+		attr->free_func(ADDR_OF(&v->data), &filter->memory_context);
 	}
 	for (size_t i = 1; i < 2 * filter->n; ++i) {
 		value_registry_free(&filter->v[i].registry);

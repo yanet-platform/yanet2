@@ -85,7 +85,7 @@ test('basic_vlan', test_filter_vlan, suite: ['filter'])
 
 # test filter macros
 filter_macros = executable('macros',
- ['macros.c'],
+  ['macros.c'],
   c_args: yanet_test_c_args + ['-O3'],
   link_args: yanet_link_args,
   dependencies: test_deps,
@@ -111,3 +111,14 @@ category = executable('category',
   link_language: 'c'
 )
 test('category', category, suite: ['filter'])
+
+basic_proto_range = executable('basic_proto_range',
+  ['basic_proto_range.c'], 
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('basic_proto_range', basic_proto_range, suite: ['filter'])
+
+subdir('shm')

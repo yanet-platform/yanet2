@@ -16,7 +16,7 @@ query_and_check_actions(
 	uint32_t ref_actions_count,
 	const uint32_t *ref_actions
 ) {
-	struct packet packet = make_packet(
+	struct packet packet = make_packet4(
 		ip(0, 0, 0, 123),
 		ip(0, 0, 1, 65),
 		src_port,
@@ -136,7 +136,7 @@ test1(void *memory) {
 	{
 		uint32_t actions[3] = {action6, action7, action8};
 		query_and_check_actions(&filter, 440, 3, actions);
-		uint32_t found = find_actions_with_category(actions, 3, 1);
+		uint32_t found = filter_actions_with_category(actions, 3, 1);
 		assert(found == 2);
 		assert(actions[0] == action6 && actions[1] == action7);
 	}
@@ -150,7 +150,8 @@ test1(void *memory) {
 		{
 			uint32_t tmp[3];
 			memcpy(tmp, actions, 3 * 4);
-			uint32_t found = find_actions_with_category(tmp, 3, 0);
+			uint32_t found =
+				filter_actions_with_category(tmp, 3, 0);
 			assert(found == 2);
 			assert(tmp[0] == action1 && tmp[1] == action2);
 		}
@@ -158,7 +159,7 @@ test1(void *memory) {
 		// check for category 1
 		{
 			uint32_t found =
-				find_actions_with_category(actions, 3, 1);
+				filter_actions_with_category(actions, 3, 1);
 			assert(found == 2);
 			assert(actions[0] == action1 && actions[1] == action2);
 		}
@@ -179,7 +180,8 @@ test1(void *memory) {
 		{
 			uint32_t tmp[4];
 			memcpy(tmp, actions, 4 * 4);
-			uint32_t found = find_actions_with_category(tmp, 4, 0);
+			uint32_t found =
+				filter_actions_with_category(tmp, 4, 0);
 			assert(found == 1);
 			assert(tmp[0] == action2);
 		}
@@ -187,7 +189,7 @@ test1(void *memory) {
 		// check for category 1
 		{
 			uint32_t found =
-				find_actions_with_category(actions, 4, 0);
+				filter_actions_with_category(actions, 4, 0);
 			assert(found == 1);
 			assert(actions[0] == action2);
 		}
@@ -202,7 +204,8 @@ test1(void *memory) {
 		{
 			uint32_t tmp[3];
 			memcpy(tmp, actions, 3 * 4);
-			uint32_t found = find_actions_with_category(tmp, 3, 0);
+			uint32_t found =
+				filter_actions_with_category(tmp, 3, 0);
 			assert(found == 1);
 			assert(tmp[0] == action6);
 		}
@@ -210,7 +213,7 @@ test1(void *memory) {
 		// check for category 1
 		{
 			uint32_t found =
-				find_actions_with_category(actions, 3, 1);
+				filter_actions_with_category(actions, 3, 1);
 			assert(found == 2);
 			assert(actions[0] == action6 && actions[1] == action7);
 		}
@@ -234,14 +237,16 @@ test2() {
 		{
 			uint32_t tmp[3];
 			memcpy(tmp, actions, 3 * 4);
-			uint32_t found = find_actions_with_category(tmp, 3, 0);
+			uint32_t found =
+				filter_actions_with_category(tmp, 3, 0);
 			assert(found == 1);
 			assert(tmp[0] == actions[0]);
 		}
 		{
 			uint32_t tmp[3];
 			memcpy(tmp, actions, 3 * 4);
-			uint32_t found = find_actions_with_category(tmp, 3, 1);
+			uint32_t found =
+				filter_actions_with_category(tmp, 3, 1);
 			assert(found == 1);
 			assert(tmp[0] == actions[1]);
 		}
@@ -256,21 +261,24 @@ test2() {
 		{
 			uint32_t tmp[3];
 			memcpy(tmp, actions, 3 * 4);
-			uint32_t found = find_actions_with_category(tmp, 3, 0);
+			uint32_t found =
+				filter_actions_with_category(tmp, 3, 0);
 			assert(found == 1);
 			assert(tmp[0] == actions[0]);
 		}
 		{
 			uint32_t tmp[3];
 			memcpy(tmp, actions, 3 * 4);
-			uint32_t found = find_actions_with_category(tmp, 3, 1);
+			uint32_t found =
+				filter_actions_with_category(tmp, 3, 1);
 			assert(found == 2);
 			assert(tmp[0] == actions[1] && tmp[1] == actions[2]);
 		}
 		{
 			uint32_t tmp[3];
 			memcpy(tmp, actions, 3 * 4);
-			uint32_t found = find_actions_with_category(tmp, 3, 2);
+			uint32_t found =
+				filter_actions_with_category(tmp, 3, 2);
 			assert(found == 1);
 			assert(tmp[0] == actions[1]);
 		}

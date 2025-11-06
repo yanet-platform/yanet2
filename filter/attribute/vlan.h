@@ -1,4 +1,5 @@
-#include "../helper.h"
+#pragma once
+
 #include "../rule.h"
 #include "common/memory.h"
 #include "common/registry.h"
@@ -30,7 +31,7 @@ init_vlan(
 	if (res < 0) {
 		return res;
 	}
-	*data = t;
+	SET_OFFSET_OF(data, t);
 	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
 		if (r->vlan == VLAN_UNSPEC) {
 			continue;

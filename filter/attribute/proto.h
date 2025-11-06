@@ -1,5 +1,7 @@
-#include "../helper.h"
+#pragma once
+
 #include "../rule.h"
+#include "common/memory.h"
 #include "common/registry.h"
 #include "common/value.h"
 
@@ -27,7 +29,7 @@ struct proto_classifier {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static int
+static inline int
 proto_classifier_init(
 	struct value_registry *registry,
 	struct proto_classifier *c,
@@ -124,7 +126,7 @@ init_proto(
 ) {
 	struct proto_classifier *c =
 		memory_balloc(memory_context, sizeof(struct proto_classifier));
-	*data = c;
+	SET_OFFSET_OF(data, c);
 	return proto_classifier_init(
 		registry, c, rules, rule_count, memory_context
 	);
@@ -136,24 +138,23 @@ static inline uint32_t
 lookup_proto(struct packet *packet, void *data) {
 	struct proto_classifier *c = (struct proto_classifier *)data;
 
-	struct rte_ether_hdr *eth_hdr =
-		rte_pktmbuf_mtod(packet->mbuf, struct rte_ether_hdr *);
-	struct rte_ipv4_hdr *ip_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
-
-	if (ip_hdr->next_proto_id == IPPROTO_UDP) {
+	if (packet->transport_header.type == IPPROTO_UDP) {
 		return c->max_tcp_class + 1;
-	} else if (ip_hdr->next_proto_id == IPPROTO_ICMP) {
+	} else if (packet->transport_header.type == IPPROTO_ICMP) {
 		return c->max_tcp_class + 2;
 	} else { // TCP
-		struct rte_tcp_hdr *tcp_hdr =
-			(struct rte_tcp_hdr *)(ip_hdr + 1);
-		return value_table_get(&c->tcp_flags, 0, tcp_hdr->tcp_flags);
+		struct rte_tcp_hdr *tcp_header = rte_pktmbuf_mtod_offset(
+			packet_to_mbuf(packet),
+			struct rte_tcp_hdr *,
+			packet->transport_header.offset
+		);
+		return value_table_get(&c->tcp_flags, 0, tcp_header->tcp_flags);
 	}
 }
 
 static inline void
 free_proto(void *data, struct memory_context *memory_context) {
-	(void)memory_context;
 	struct proto_classifier *c = (struct proto_classifier *)data;
 	value_table_free(&c->tcp_flags);
+	memory_bfree(memory_context, c, sizeof(*c));
 }

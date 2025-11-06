@@ -8,13 +8,33 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
+static inline uint64_t
+wyhash64(uint64_t wyhash64_x) {
+	wyhash64_x += 0x60bee2bee120fc15;
+	__uint128_t tmp;
+	tmp = (__uint128_t)wyhash64_x * 0xa3b195354a39b70d;
+	uint64_t m1 = (tmp >> 64) ^ tmp;
+	tmp = (__uint128_t)m1 * 0x1b03738712fad5c9;
+	uint64_t m2 = (tmp >> 64) ^ tmp;
+	return m2;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+static inline uint64_t
+rng_next(uint64_t *rng) {
+	return *rng = wyhash64(*rng);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 #define MAX_RULES 10
 
 void
 free_packet(struct packet *packet);
 
 struct packet
-make_packet(
+make_packet4(
 	uint8_t *src_ip,
 	uint8_t *dst_ip,
 	uint16_t src_port,
@@ -25,7 +45,7 @@ make_packet(
 );
 
 struct packet
-make_packet_net6(
+make_packet6(
 	const uint8_t src_ip[NET6_LEN],
 	const uint8_t dst_ip[NET6_LEN],
 	uint16_t src_port,
@@ -71,7 +91,8 @@ struct filter_rule_builder {
 	struct filter_port_range src_port_ranges[MAX_RULES];
 	size_t port_src_ranges_count;
 
-	struct filter_proto_range proto_range;
+	struct filter_proto_range proto_ranges[MAX_RULES];
+	size_t proto_ranges_count;
 
 	uint16_t vlan;
 };
@@ -106,7 +127,12 @@ builder_add_port_src_range(
 );
 
 void
-builer_set_proto(
+builder_add_proto_range(
+	struct filter_rule_builder *builder, uint16_t from, uint16_t to
+);
+
+void
+builder_set_proto(
 	struct filter_rule_builder *builder,
 	uint8_t proto,
 	uint16_t enable_bits,

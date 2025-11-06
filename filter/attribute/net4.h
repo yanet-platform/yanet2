@@ -1,8 +1,9 @@
-#include "../helper.h"
+#pragma once
+
 #include "../rule.h"
 #include "common/lpm.h"
 #include "common/range_collector.h"
-#include "dataplane/packet/packet.h"
+#include "lib/dataplane/packet/packet.h"
 
 #include "util.h"
 
@@ -95,7 +96,6 @@ collect_net4_values(
 	struct lpm *lpm,
 	struct value_registry *registry
 ) {
-
 	struct range_collector collector;
 	if (range_collector_init(&collector, memory_context))
 		goto error;
@@ -160,7 +160,6 @@ collect_net4_values(
 	value_table_compact(&table);
 	lpm4_remap(lpm, &table);
 	lpm4_compact(lpm);
-
 	for (const struct filter_rule *action = actions;
 	     action < actions + count;
 	     ++action) {
@@ -199,7 +198,7 @@ init_net4_src(
 	struct memory_context *memory_context
 ) {
 	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
-	*data = lpm;
+	SET_OFFSET_OF(data, lpm);
 	return collect_net4_values(
 		memory_context,
 		actions,
@@ -231,7 +230,7 @@ init_net4_dst(
 	struct memory_context *memory_context
 ) {
 	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
-	*data = lpm;
+	SET_OFFSET_OF(data, lpm);
 	return collect_net4_values(
 		memory_context,
 		actions,
@@ -252,7 +251,6 @@ lookup_net4_dst(struct packet *packet, void *data) {
 	);
 
 	struct lpm *lpm = (struct lpm *)data;
-
 	return lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->dst_addr);
 }
 

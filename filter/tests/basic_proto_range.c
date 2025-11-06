@@ -9,9 +9,8 @@
 #include <rte_ip.h>
 
 #include <assert.h>
-#include <stdio.h>
 
-////////////////////////////////////////////////////////////////////////////////
+#include <lib/logging/log.h>
 
 void
 query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
@@ -45,33 +44,29 @@ test_proto_1(void *memory) {
 	assert(res == 0);
 
 	struct filter_rule_builder b1;
-	builder_set_proto(&b1, IPPROTO_TCP, 0b101, 0b010);
+	builder_init(&b1);
+	builder_add_proto_range(&b1, IPPROTO_TCP, IPPROTO_TCP);
 	struct filter_rule r1 = build_rule(&b1, 1);
 
 	struct filter_rule_builder b2;
-	builder_set_proto(&b2, IPPROTO_UDP, 0, 0);
+	builder_init(&b2);
+	builder_add_proto_range(&b2, IPPROTO_UDP, IPPROTO_UDP);
 	struct filter_rule r2 = build_rule(&b2, 2);
 
-	struct filter_rule_builder b3;
-	builder_set_proto(&b3, PROTO_UNSPEC, 0, 0);
-	struct filter_rule r3 = build_rule(&b3, 3);
+	struct filter_rule rules[2] = {r1, r2};
 
-	struct filter_rule rules[3] = {r1, r2, r3};
-
-	const struct filter_attribute *attrs[1] = {&attribute_proto};
+	const struct filter_attribute *attrs[1] = {&attribute_proto_range};
 
 	struct filter filter;
-	res = filter_init(&filter, attrs, 1, rules, 3, &memory_context);
+
+	LOG(INFO, "filter init...");
+	res = filter_init(&filter, attrs, 1, rules, 2, &memory_context);
 	assert(res == 0);
 
-	query_tcp_packet(&filter, 0b101, 1);
-	query_tcp_packet(&filter, 0b10101, 1);
-	query_tcp_packet(&filter, 0b1101, 1);
-	query_tcp_packet(&filter, (1 << 9) - 1 - 2, 1);
-	query_tcp_packet(&filter, 0b010, 3);
-	query_tcp_packet(&filter, 0b011, 3);
-	query_tcp_packet(&filter, 0b1110, 3);
+	LOG(INFO, "query tcp packet...");
+	query_tcp_packet(&filter, 0, 1);
 
+	LOG(INFO, "query udp packet...");
 	query_udp_packet(&filter, 2);
 
 	filter_free(&filter);
@@ -79,13 +74,15 @@ test_proto_1(void *memory) {
 
 int
 main() {
+	log_enable_name("debug");
+
 	void *memory = malloc(1 << 24);
 
 	test_proto_1(memory);
 
 	free(memory);
 
-	puts("OK");
+	LOG(INFO, "passed");
 
 	return 0;
 }

@@ -56,7 +56,7 @@ test(void *memory, const struct filter_attribute *attrs[4]) {
 	// make queries
 
 	{
-		struct packet p = make_packet(
+		struct packet p = make_packet4(
 			ip(198, 233, 10, 15),
 			ip(192, 1, 1, 1),
 			200,
@@ -70,7 +70,7 @@ test(void *memory, const struct filter_attribute *attrs[4]) {
 	}
 
 	{
-		struct packet p = make_packet(
+		struct packet p = make_packet4(
 			ip(198, 233, 10, 15),
 			ip(192, 1, 1, 1),
 			200,
