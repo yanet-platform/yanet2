@@ -90,12 +90,8 @@ func TestAclBasic(t *testing.T) {
 	err = mock.PrepareForCpUpdate()
 	require.Nil(t, err, "failed to prepare for cp update")
 
-	// link created module config into dataplane so it can process packets (not necessary)
-	// err = acl.LinkIntoDataplane(agent)
-	// require.Nil(t, err, "failed to link into dataplane")
-
 	// check tcp packet passes
-	t.Run("Check_TCP_IPv4_packet_passes", func(t *testing.T) {
+	t.Run("Check_TCP_IPv4_Packet_Passes", func(t *testing.T) {
 		tcpPacketLayers := MakeTCPPacket("10.3.15.2", 15, "15.1.5.254", 10, &layers.TCP{})
 		tcpPacket := common.LayersToPacket(t, tcpPacketLayers...)
 		result, err := HandlePackets(mock, acl, tcpPacket)
@@ -105,7 +101,7 @@ func TestAclBasic(t *testing.T) {
 	})
 
 	// check udp packet passes
-	t.Run("Check_UDP_IPv6_packet_passes", func(t *testing.T) {
+	t.Run("Check_UDP_IPv6_Packet_Passes", func(t *testing.T) {
 		udpPacketLayers := MakeUDPPacket(
 			"a02:5:101:101:101:101:101:101",
 			1505,
