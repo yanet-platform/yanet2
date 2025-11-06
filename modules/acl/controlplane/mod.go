@@ -38,14 +38,13 @@ func NewACLModule(cfg *Config, log *zap.SugaredLogger) (*ACLModule, error) {
 		return nil, fmt.Errorf("failed to attach agents: %w", err)
 	}
 
-	// service := NewACLService(agents, log)
-	// service := nil
+	service := NewACLService(agents, log)
 
 	return &ACLModule{
 		cfg:     cfg,
 		shm:     shm,
 		agents:  agents,
-		service: nil,
+		service: service,
 		log:     log,
 	}, nil
 }

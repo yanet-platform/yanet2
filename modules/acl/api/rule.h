@@ -18,6 +18,8 @@ typedef struct filter_rule acl_rule_t;
 enum acl_action {
 	acl_action_pass,
 	acl_action_deny,
+	acl_action_action_count,
+	acl_action_check_state,
 	/// @todo: add more actions here
 	acl_actions_count, // number of actions, dont move
 };

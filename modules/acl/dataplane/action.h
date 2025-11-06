@@ -9,6 +9,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+////////////////////////////////////////////////////////////////////////////////
+
 /// @todo: fixme
 #define DEVICE_COUNT 1
 
@@ -19,7 +21,7 @@ device_id(const char *device) {
 	(void)device;
 
 	/// @todo: fixme
-	/// for now, there is only one stub device
+	/// for now, there is only one device
 	return 0;
 }
 
@@ -41,7 +43,7 @@ filter_action_pack(
 		devices_mask |= 1 << device_id(devices[id]);
 	}
 	bool non_terminate_flag = (flags & ACL_RULE_NON_TERMINATE_FLAG) != 0;
-	uint16_t action = action_kind | ((uint16_t)flags << 7);
+	uint16_t action = action_kind | (((uint16_t)flags) << 7);
 	*result =
 		filter_action_create(devices_mask, non_terminate_flag, action);
 	return 0;
@@ -90,9 +92,17 @@ process_packet_action(
 		}
 		break;
 	}
+	case acl_action_action_count:
+		/// @todo
+		break;
+	case acl_action_check_state:
+		/// @todo
+		break;
 	case acl_actions_count: {
-		assert(0 && "impossible");
+		assert(0 && "impossible value: acl_actions_count");
 	}
+	default:
+		assert(0 && "hit default value which is impossible");
 	}
 	return 0;
 }

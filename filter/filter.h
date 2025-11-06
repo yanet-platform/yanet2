@@ -83,9 +83,9 @@
 
 #pragma once
 
-#include "helper.h"
 #include "attribute.h"
 #include "common/registry.h"
+#include "helper.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 

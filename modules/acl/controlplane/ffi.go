@@ -16,19 +16,12 @@ import "C"
 
 import (
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 )
-
-type Rule struct {
-	inner C.acl_rule_t
-}
-
-type ModuleConfig struct {
-	ptr ffi.ModuleConfig
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -105,9 +98,9 @@ func makeRuleTransport(rulePb *aclpb.Rule, pool *memoryPool) C.struct_filter_tra
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func fillNet(len int, fromAddr *[]byte, prefixLen uint32, toAddr []C.uint8_t, toMask []C.uint8_t) {
+func fillNet(len int, fromAddr []byte, prefixLen uint32, toAddr []C.uint8_t, toMask []C.uint8_t) {
 	for b := range len {
-		toAddr[b] = C.uint8_t((*fromAddr)[b])
+		toAddr[b] = C.uint8_t(fromAddr[b])
 	}
 	for b := range len {
 		toMask[b] = C.uint8_t(0)
@@ -130,7 +123,7 @@ func makeNets4(netsPb []*aclpb.IPNet, pool *memoryPool) (*C.struct_net4, C.uint3
 	for idx := range netsPb {
 		netPb := netsPb[idx]
 		net := &nets[idx]
-		fillNet(4, &netPb.Ip, netPb.PrefixLen, net.addr[:], net.mask[:])
+		fillNet(4, netPb.Ip, netPb.PrefixLen, net.addr[:], net.mask[:])
 	}
 	return &nets[0], C.uint32_t(count)
 }
@@ -144,7 +137,7 @@ func makeNets6(netsPb []*aclpb.IPNet, pool *memoryPool) (*C.struct_net6, C.uint3
 	for idx := range netsPb {
 		netPb := netsPb[idx]
 		net := &nets[idx]
-		fillNet(16, &netPb.Ip, netPb.PrefixLen, net.addr[:], net.mask[:])
+		fillNet(16, netPb.Ip, netPb.PrefixLen, net.addr[:], net.mask[:])
 	}
 	return &nets[0], C.uint32_t(count)
 }
@@ -188,6 +181,8 @@ func makeRuleAction(rulePb *aclpb.Rule) (C.enum_acl_action, C.uint8_t) {
 		flags |= C.ACL_RULE_KEEP_STATE_FLAG
 	}
 
+	// todo: more flags?
+
 	action := 0
 	switch rulePb.Action {
 	case aclpb.ActionKind_ACTION_KIND_PASS:
@@ -198,13 +193,31 @@ func makeRuleAction(rulePb *aclpb.Rule) (C.enum_acl_action, C.uint8_t) {
 		{
 			action = C.acl_action_deny
 		}
+	case aclpb.ActionKind_ACTION_KIND_COUNT:
+		{
+			action = C.acl_action_action_count
+			flags |= C.ACL_RULE_NON_TERMINATE_FLAG
+		}
+	case aclpb.ActionKind_ACTION_KIND_CHECK_STATE:
+		{
+			action = C.acl_action_check_state
+			flags |= C.ACL_RULE_NON_TERMINATE_FLAG
+		}
 	}
-	// todo
+
+	// todo: handle all cases
 
 	return (C.enum_acl_action)(action), flags
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Module Config public API
+////////////////////////////////////////////////////////////////////////////////
+
+// Config of the ACL module
+type ModuleConfig struct {
+	inner *C.struct_cp_module
+}
 
 func NewModuleConfig(agent *ffi.Agent, name string, rulesPb []*aclpb.Rule) (*ModuleConfig, error) {
 	if agent == nil {
@@ -231,7 +244,7 @@ func NewModuleConfig(agent *ffi.Agent, name string, rulesPb []*aclpb.Rule) (*Mod
 	}()
 
 	ruleCount := len(rulesPb)
-	rules := make([]Rule, ruleCount)
+	rules := make([]C.acl_rule_t, ruleCount)
 	for idx, rulePb := range rulesPb {
 		transport := makeRuleTransport(rulePb, &memoryPool)
 		net4 := makeRuleNet4(rulePb, &memoryPool)
@@ -257,25 +270,40 @@ func NewModuleConfig(agent *ffi.Agent, name string, rulesPb []*aclpb.Rule) (*Mod
 
 		// get action and flags
 		action, flags := makeRuleAction(rulePb)
+
+		// fill rule
+		_, err := C.acl_rule_fill(&rules[idx], net4, net6, transport, C.size_t(deviceCount), &devices[0], action, flags)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fill rule no. %d: %w", idx+1, err)
+		}
 	}
 
-	tr, err := C.acl_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName)
+	// create module config
+
+	config, err := C.acl_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName, C.size_t(ruleCount), &rules[0])
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize acl module config: %w", err)
+		return nil, fmt.Errorf("failed to create acl module config: %w", err)
 	}
-	if ptr == nil {
-		return nil, fmt.Errorf("failed to initialize acl module config: module %q not found", name)
+	if config == nil {
+		return nil, fmt.Errorf("failed to create acl module config")
 	}
+
+	// memory pool must be alive until module config created
+	runtime.KeepAlive(memoryPool)
 
 	return &ModuleConfig{
-		ptr: ffi.NewModuleConfig(unsafe.Pointer(ptr)),
+		inner: config,
 	}, nil
 }
 
-func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
-	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
+func (config *ModuleConfig) Free() {
+	C.acl_module_config_free(config.inner)
 }
 
-func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
-	return m.ptr
+func (config *ModuleConfig) LinkIntoDataplane(agent *ffi.Agent) error {
+	_, err := C.agent_update_modules((*C.struct_agent)(agent.AsRawPtr()), C.size_t(1), &config.inner)
+	if err != nil {
+		return fmt.Errorf("failed to update modules: %w", err)
+	}
+	return nil
 }

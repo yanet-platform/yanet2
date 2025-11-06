@@ -2,11 +2,15 @@ package acl
 
 import "C"
 import (
+	"context"
+	"fmt"
 	"sync"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ACLService реализует gRPC сервис для управления ACL
@@ -16,89 +20,111 @@ type ACLService struct {
 	mu      sync.Mutex
 	agents  []*ffi.Agent
 	log     *zap.SugaredLogger
-	configs map[instanceKey]*ACLConfig
+	configs map[instanceKey]*ModuleConfig
 }
 
-// func NewACLService(agents []*ffi.Agent, log *zap.SugaredLogger) *ACLService {
-// 	return &ACLService{
-// 		agents:  agents,
-// 		log:     log,
-// 		configs: make(map[instanceKey]*ACLConfig),
-// 	}
-// }
+func NewACLService(agents []*ffi.Agent, log *zap.SugaredLogger) *ACLService {
+	return &ACLService{
+		agents:  agents,
+		log:     log,
+		configs: make(map[instanceKey]*ModuleConfig),
+	}
+}
 
 type instanceKey struct {
 	name     string
 	instance uint32
 }
 
-type ACLConfig struct {
-	Name   string
-	Rules  []*aclpb.Rule
-	Module *ModuleConfig
+func makeAndLinkNewConfig(agent *ffi.Agent, name string, rules []*aclpb.Rule) (*ModuleConfig, error) {
+	// try create new config
+	newConfig, err := NewModuleConfig(agent, name, rules)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create module config: %s", err)
+	}
+
+	// new config is not nil
+
+	// try update config in dataplane
+	if err := newConfig.LinkIntoDataplane(agent); err != nil {
+		newConfig.Free()
+		return nil, fmt.Errorf("failed to update dataplane modules: %s", err)
+	}
+
+	// new config has been linked into dataplane and can handle packets
+
+	return newConfig, nil
 }
 
-// func (s *ACLService) GetConfig(name string, instance uint32) (*ACLConfig, bool) {
-// 	s.mu.RLock()
-// 	defer s.mu.RUnlock()
+func (s *ACLService) EnableAcl(ctx context.Context, req *aclpb.EnableAclRequest) (*aclpb.EnableAclResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-// 	key := instanceKey{name: name, instance: instance}
-// 	config, exists := s.configs[key]
-// 	return config, exists
-// }
+	name, instance, err := req.GetTarget().Validate(uint32(len(s.agents)))
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
-// func (s *ACLService) UpdateConfig(ctx context.Context, req *aclpb.UpdateConfigRequest) (*aclpb.UpdateConfigResponse, error) {
-// 	s.mu.Lock()
-// 	defer s.mu.Unlock()
+	key := instanceKey{
+		name:     name,
+		instance: instance,
+	}
 
-// 	name, instance, err := req.GetTarget().Validate(uint32(len(s.agents)))
-// 	if err != nil {
-// 		return nil, status.Error(codes.InvalidArgument, err.Error())
-// 	}
+	if _, exists := s.configs[key]; exists {
+		return nil, fmt.Errorf("ACL is already enabled for module config [name=%s, instance=%d]", name, instance)
+	}
+	config, err := makeAndLinkNewConfig(s.agents[instance], name, req.Rules)
+	if err != nil { // old config is still alive and usable
+		return nil, err
+	}
 
-// 	key := instanceKey{
-// 		name:     name,
-// 		instance: instance,
-// 	}
+	s.configs[key] = config
 
-// 	// освобождаем старый конфиг для этого инстанса
-// 	if oldConfig, exists := s.configs[key]; exists && oldConfig.Module != nil {
-// 		C.acl_module_config_free(oldConfig.Module.ptr)
-// 	}
+	s.log.Infow("successfully enabled ACL",
+		"name", key.name,
+		"instance", key.instance,
+		"rules", len(req.Rules),
+	)
 
-// 	// новый конфиг
-// 	config := &ACLConfig{
-// 		Name:  key.name,
-// 		Rules: req.Rules,
-// 	}
+	return &aclpb.EnableAclResponse{}, nil
+}
 
-// 	// новый модуль для инстанса
-// 	module, err := NewModuleConfig(s.agents[key.instance], key.name)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed to create module for instance %d: %w", key.instance, err)
-// 	}
+func (s *ACLService) UpdateConfig(ctx context.Context, req *aclpb.UpdateConfigRequest) (*aclpb.UpdateConfigResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-// 	// компилируем правила
-// 	if err := s.compileRules(module, req.Rules); err != nil {
-// 		return nil, fmt.Errorf("failed to compile rules for instance %d: %w", key.instance, err)
-// 	}
+	name, instance, err := req.GetTarget().Validate(uint32(len(s.agents)))
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
-// 	// обновляем модуль в dataplane
-// 	if err := s.agents[key.instance].UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-// 		return nil, fmt.Errorf("failed to update module on instance %d: %w", key.instance, err)
-// 	}
+	key := instanceKey{
+		name:     name,
+		instance: instance,
+	}
 
-// 	config.Module = module
-// 	s.configs[key] = config
+	if oldConfig, exists := s.configs[key]; exists {
+		// try create updated config
+		newConfig, err := makeAndLinkNewConfig(s.agents[instance], name, req.Rules)
+		if err != nil { // old config is still alive and usable
+			return nil, err
+		}
 
-// 	s.log.Infow("successfully updated ACL config",
-// 		"name", key.name,
-// 		"instance", key.instance,
-// 		"rules", len(req.Rules),
-// 	)
+		// on success, free old config and store new
+		oldConfig.Free()
+		s.configs[key] = newConfig
+	} else {
+		return nil, fmt.Errorf("config [name=%s, instance=%d] not found", name, instance)
+	}
 
-// 	return &aclpb.UpdateConfigResponse{}, nil
-// }
+	s.log.Infow("successfully updated ACL config",
+		"name", key.name,
+		"instance", key.instance,
+		"rules", len(req.Rules),
+	)
+
+	return &aclpb.UpdateConfigResponse{}, nil
+}
 
 // func (s *ACLService) compileRules(module *ModuleConfig, rules []*aclpb.Rule) error {
 // 	if len(rules) == 0 {
