@@ -57,8 +57,9 @@ struct filter_transport {
 	struct filter_proto proto;
 
 	uint16_t src_count;
-	uint16_t dst_count;
 	struct filter_port_range *srcs;
+
+	uint16_t dst_count;	
 	struct filter_port_range *dsts;
 };
 

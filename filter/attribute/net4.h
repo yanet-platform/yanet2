@@ -3,7 +3,7 @@
 #include "../rule.h"
 #include "common/lpm.h"
 #include "common/range_collector.h"
-#include "dataplane/packet/packet.h"
+#include "lib/dataplane/packet/packet.h"
 
 #include "util.h"
 

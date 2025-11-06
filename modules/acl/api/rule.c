@@ -18,7 +18,7 @@ acl_rule_fill(
 		action, action_flags, device_count, devices, &rule->action
 	);
 	if (result != 0) {
-		return 1;
+		return -1;
 	}
 	rule->net4 = net4;
 	rule->net6 = net6;
