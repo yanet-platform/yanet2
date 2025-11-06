@@ -4,7 +4,8 @@ package acl
 //#cgo LDFLAGS: -L../../../build/modules/acl/api -lacl_cp
 //
 //#include "api/agent.h"
-//#include "modules/acl/api/controlplane.h"
+//#include "modules/acl/api/module.h"
+//#include "modules/acl/api/rule.h"
 import "C"
 
 import (

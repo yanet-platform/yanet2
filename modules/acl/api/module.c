@@ -3,8 +3,8 @@
 #include "common/memory.h"
 #include "controlplane/agent/agent.h"
 
-#include "../dataplane/module.h"
 #include "../dataplane/filter.h"
+#include "../dataplane/module.h"
 #include "filter.h"
 
 #include "module.h"
@@ -12,19 +12,38 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 static int
-filter_net4_compile(struct filter *filter, size_t rule_count, struct filter_rule *rules, struct memory_context *mctx) {
-	return FILTER_INIT(filter, ACL_FILTER_NET4_TAG, rules, rule_count, mctx);
+filter_net4_compile(
+	struct filter *filter,
+	size_t rule_count,
+	struct filter_rule *rules,
+	struct memory_context *mctx
+) {
+	return FILTER_INIT(
+		filter, ACL_FILTER_NET4_TAG, rules, rule_count, mctx
+	);
 }
 
 static int
-filter_net6_compile(struct filter *filter, size_t rule_count, struct filter_rule *rules, struct memory_context *mctx) {
-	return FILTER_INIT(filter, ACL_FILTER_NET6_TAG, rules, rule_count, mctx);
+filter_net6_compile(
+	struct filter *filter,
+	size_t rule_count,
+	struct filter_rule *rules,
+	struct memory_context *mctx
+) {
+	return FILTER_INIT(
+		filter, ACL_FILTER_NET6_TAG, rules, rule_count, mctx
+	);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 struct cp_module *
-acl_module_config_create(struct agent *agent, const char *name, size_t rule_count, acl_rule_t *rules) {
+acl_module_config_create(
+	struct agent *agent,
+	const char *name,
+	size_t rule_count,
+	acl_rule_t *rules
+) {
 	struct acl_module_config *config =
 		(struct acl_module_config *)memory_balloc(
 			&agent->memory_context, sizeof(struct acl_module_config)
@@ -44,15 +63,24 @@ acl_module_config_create(struct agent *agent, const char *name, size_t rule_coun
 		goto fail;
 	}
 
-	struct memory_context *mctx =
-		&config->cp_module.memory_context;
+	struct memory_context *mctx = &config->cp_module.memory_context;
 
-	if (filter_net4_compile(&config->net4_filter, rule_count, acl_rules_into_filter_rules(rules), mctx) != 0) {
+	if (filter_net4_compile(
+		    &config->net4_filter,
+		    rule_count,
+		    acl_rules_into_filter_rules(rules),
+		    mctx
+	    ) != 0) {
 		errno = ENOMEM;
 		goto fail;
 	}
 
-	if (filter_net6_compile(&config->net6_filter, rule_count, acl_rules_into_filter_rules(rules), mctx) != 0) {
+	if (filter_net6_compile(
+		    &config->net6_filter,
+		    rule_count,
+		    acl_rules_into_filter_rules(rules),
+		    mctx
+	    ) != 0) {
 		errno = ENOMEM;
 		goto free_filter4;
 	}
@@ -81,5 +109,7 @@ acl_module_config_free(struct cp_module *cp_module) {
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 
-	memory_bfree(&agent->memory_context, config, sizeof(struct acl_module_config));
+	memory_bfree(
+		&agent->memory_context, config, sizeof(struct acl_module_config)
+	);
 }

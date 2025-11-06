@@ -315,6 +315,14 @@ builder_init(struct filter_rule_builder *builder) {
 	builder->vlan = VLAN_UNSPEC;
 }
 
+void
+builder_add_proto_range(
+	struct filter_rule_builder *builder, uint16_t from, uint16_t to
+) {
+	builder->proto_ranges[builder->proto_ranges_count++] =
+		(struct filter_proto_range){from, to};
+}
+
 struct filter_rule
 build_rule(struct filter_rule_builder *builder, uint32_t action) {
 	struct filter_rule result_action = {
@@ -340,8 +348,8 @@ build_rule(struct filter_rule_builder *builder, uint32_t action) {
 				.dsts = builder->dst_port_ranges,
 				.src_count = builder->port_src_ranges_count,
 				.srcs = builder->src_port_ranges,
-				.protos = &builder->proto_range,
-				.proto_count = 1,
+				.protos = builder->proto_ranges,
+				.proto_count = builder->proto_ranges_count,
 			},
 		.vlan = builder->vlan,
 	};

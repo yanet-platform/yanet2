@@ -30,7 +30,7 @@ acl_handle_packets(
 	/*
 	 * There are two major options:
 	 *  - process packets one by one
-	 *  - process stages ony by one
+	 *  - process stages one by one
 	 * For the second option we have to split v4 and v6 processing.
 	 */
 
@@ -40,10 +40,20 @@ acl_handle_packets(
 		uint32_t count = 0;
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			net4_filter_query(&acl_config->net4_filter, packet, &actions, &count);
+			net4_filter_query(
+				&acl_config->net4_filter,
+				packet,
+				&actions,
+				&count
+			);
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			net6_filter_query(&acl_config->net4_filter, packet,&actions, &count);
+			net6_filter_query(
+				&acl_config->net4_filter,
+				packet,
+				&actions,
+				&count
+			);
 		} else {
 			packet_front_output(packet_front, packet);
 			continue;

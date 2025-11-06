@@ -16,11 +16,20 @@
 typedef struct filter_rule acl_rule_t;
 
 enum acl_action {
-    acl_action_pass,
-    acl_action_deny,
-    /// @todo: add more actions here
-    acl_actions_count, // number of actions, dont move
+	acl_action_pass,
+	acl_action_deny,
+	/// @todo: add more actions here
+	acl_actions_count, // number of actions, dont move
 };
 
 int
-acl_rule_fill(acl_rule_t *rule, struct filter_net4 net4, struct filter_net6 net6, struct filter_transport transport, size_t device_count, const char **devices, enum acl_action action, uint8_t action_flags);
+acl_rule_fill(
+	acl_rule_t *rule,
+	struct filter_net4 net4,
+	struct filter_net6 net6,
+	struct filter_transport transport,
+	size_t device_count,
+	const char **devices,
+	enum acl_action action,
+	uint8_t action_flags
+);

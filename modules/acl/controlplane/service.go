@@ -2,7 +2,8 @@ package acl
 
 //#include "common/network.h"
 //#include "filter/rule.h"
-//#include "modules/acl/api/controlplane.h"
+//#include "modules/acl/api/module.h"
+//#include "modules/acl/api/rule.h"
 import "C"
 
 import (

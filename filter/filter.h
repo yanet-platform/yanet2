@@ -97,7 +97,7 @@
 struct filter_vertex {
 	// Corresponds to the mapping from classifier to the list of rules
 	// which classifier satisfies to.
-	// It vertex is a root, then it maps classifier to the list of
+	// If vertex is a root, then it maps classifier to the list of
 	// rule actions instead of the rule numbers.
 	struct value_registry registry;
 
@@ -105,7 +105,7 @@ struct filter_vertex {
 	// [left son classifier][right son classifier]
 	// -> combined classifier
 	//
-	// This table is not filled to leaves.
+	// This table is not filled for leaves.
 	struct value_table table;
 
 	// This values are used during packet classification.
@@ -115,7 +115,7 @@ struct filter_vertex {
 	// the classifier for the current vertex can be calculated in the
 	// following way:
 	// 	result classifier = table[slots[0]][slots[1]].
-	// After that, the calculated classifier must be stored in the slots
+	// After that, the calculated classifier must be stored in the slot
 	// of the parent vertex.
 	uint32_t slots[2];
 
@@ -123,7 +123,9 @@ struct filter_vertex {
 	// It is passed in the initialization function for
 	// the packet attribute classifier, and can be filled by user
 	// in any way. After that, user uses this data to classify packet
-	// attribute. As working in shared memory, data is relative pointer.
+	// attribute.
+	//
+	// As working in shared memory, data is relative pointer.
 	void *data;
 };
 

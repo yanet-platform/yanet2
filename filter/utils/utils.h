@@ -91,7 +91,8 @@ struct filter_rule_builder {
 	struct filter_port_range src_port_ranges[MAX_RULES];
 	size_t port_src_ranges_count;
 
-	struct filter_proto_range proto_range;
+	struct filter_proto_range proto_ranges[MAX_RULES];
+	size_t proto_ranges_count;
 
 	uint16_t vlan;
 };
@@ -122,6 +123,11 @@ builder_add_port_dst_range(
 
 void
 builder_add_port_src_range(
+	struct filter_rule_builder *builder, uint16_t from, uint16_t to
+);
+
+void
+builder_add_proto_range(
 	struct filter_rule_builder *builder, uint16_t from, uint16_t to
 );
 
