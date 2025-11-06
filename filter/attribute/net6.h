@@ -2,6 +2,7 @@
 
 #include "../rule.h"
 #include "common/lpm.h"
+#include "common/memory.h"
 #include "common/range_collector.h"
 
 #include "common/registry.h"
@@ -10,6 +11,8 @@
 #include <endian.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
+#include <stdio.h>
+#include <unistd.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -64,7 +67,7 @@ net6_normalize(struct net6 *src, struct net6 *dst) {
 static inline int
 collect_net6_range(
 	struct memory_context *memory_context,
-	const struct filter_rule *actions,
+	const struct filter_rule *rules,
 	uint32_t count,
 	action_get_net6_func get_net6,
 	net6_get_part_func get_part,
@@ -75,13 +78,12 @@ collect_net6_range(
 	if (range_collector_init(&collector, memory_context))
 		goto error;
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
+	for (const struct filter_rule *rule = rules; rule < rules + count;
+	     ++rule) {
 
 		struct net6 *nets;
 		uint32_t net_count;
-		get_net6(action, &nets, &net_count);
+		get_net6(rule, &nets, &net_count);
 
 		for (struct net6 *rule_net = nets; rule_net < nets + net_count;
 		     ++rule_net) {
@@ -126,7 +128,7 @@ error:
 static inline int
 merge_net6_range(
 	struct memory_context *memory_context,
-	const struct filter_rule *actions,
+	const struct filter_rule *rules,
 	uint32_t count,
 	action_get_net6_func get_net6,
 	const struct range_index *ri_hi,
@@ -146,8 +148,7 @@ merge_net6_range(
 	struct radix rdx;
 	radix_init(&rdx, memory_context);
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
+	for (const struct filter_rule *action = rules; action < rules + count;
 	     ++action) {
 
 		value_table_new_gen(table);
@@ -224,13 +225,12 @@ merge_net6_range(
 	struct value_registry net_registry;
 	value_registry_init(&net_registry, memory_context);
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
+	for (const struct filter_rule *rule = rules; rule < rules + count;
+	     ++rule) {
 
 		struct net6 *nets;
 		uint32_t net_count;
-		get_net6(action, &nets, &net_count);
+		get_net6(rule, &nets, &net_count);
 
 		for (struct net6 *rule_net = nets; rule_net < nets + net_count;
 		     ++rule_net) {
@@ -289,8 +289,7 @@ merge_net6_range(
 
 	value_registry_init(registry, memory_context);
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
+	for (const struct filter_rule *action = rules; action < rules + count;
 	     ++action) {
 
 		if (value_registry_start(registry))
@@ -342,8 +341,9 @@ init_net6(
 ) {
 	struct net6_classifier *net6 =
 		memory_balloc(memory_context, sizeof(struct net6_classifier));
-	if (net6 == NULL)
+	if (net6 == NULL) {
 		return -1;
+	}
 	SET_OFFSET_OF(data, net6);
 
 	struct range_index ri_hi;
@@ -410,7 +410,7 @@ init_net6_src(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *rules,
-	size_t actions_count,
+	size_t rule_count,
 	struct memory_context *memory_context
 ) {
 	return init_net6(
@@ -418,7 +418,7 @@ init_net6_src(
 		action_get_net6_src,
 		data,
 		rules,
-		actions_count,
+		rule_count,
 		memory_context
 	);
 }
@@ -429,7 +429,7 @@ init_net6_dst(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *rules,
-	size_t actions_count,
+	size_t rule_count,
 	struct memory_context *memory_context
 ) {
 	return init_net6(
@@ -437,7 +437,7 @@ init_net6_dst(
 		action_get_net6_dst,
 		data,
 		rules,
-		actions_count,
+		rule_count,
 		memory_context
 	);
 }
@@ -486,10 +486,10 @@ lookup_net6_src(struct packet *packet, void *data) {
 
 // Allows to free data for IPv6 classification.
 static inline void
-free_net6(void *data, struct memory_context *memory_context) {
-	(void)memory_context;
+free_net6(void *data, struct memory_context *mctx) {
 	struct net6_classifier *c = (struct net6_classifier *)data;
-	lpm_free(&c->lo);
 	lpm_free(&c->hi);
+	lpm_free(&c->lo);
 	value_table_free(&c->comb);
+	memory_bfree(mctx, c, sizeof(struct net6_classifier));
 }

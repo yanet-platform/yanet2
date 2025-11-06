@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <stdio.h>
 
 #include "common/memory.h"
 #include "controlplane/agent/agent.h"
@@ -6,7 +7,6 @@
 #include "../dataplane/filter.h"
 #include "../dataplane/module.h"
 #include "filter.h"
-
 #include "module.h"
 
 ////////////////////////////////////////////////////////////////////////////////

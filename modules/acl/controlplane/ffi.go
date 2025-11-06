@@ -26,7 +26,8 @@ import (
 ////////////////////////////////////////////////////////////////////////////////
 
 type pool[T any] struct {
-	pool [][]T
+	pool   [][]T
+	pinner runtime.Pinner
 }
 
 func newPool[T any]() pool[T] {
@@ -36,10 +37,18 @@ func newPool[T any]() pool[T] {
 }
 
 func (p *pool[T]) new(count int) []T {
+	if count <= 0 {
+		panic("count <= 0")
+	}
 	// pin array to heap
 	array := make([]T, count)
+	p.pinner.Pin(&array[0])
 	p.pool = append(p.pool, array)
 	return p.pool[len(p.pool)-1]
+}
+
+func (p *pool[T]) release() {
+	p.pinner.Unpin()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -50,6 +59,14 @@ type memoryPool struct {
 	net4       pool[C.struct_net4]
 	net6       pool[C.struct_net6]
 	devices    pool[*C.char]
+}
+
+func (pool *memoryPool) release() {
+	pool.protoRange.release()
+	pool.portRange.release()
+	pool.net4.release()
+	pool.net6.release()
+	pool.devices.release()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -234,6 +251,7 @@ func NewModuleConfig(agent *ffi.Agent, name string, rulesPb []*aclpb.Rule) (*Mod
 		net6:       newPool[C.struct_net6](),
 		devices:    newPool[*C.char](),
 	}
+	defer memoryPool.release()
 
 	cDeviceNames := make([]*C.char, 0)
 	deviceNames := make([]string, 0)
@@ -245,7 +263,8 @@ func NewModuleConfig(agent *ffi.Agent, name string, rulesPb []*aclpb.Rule) (*Mod
 
 	ruleCount := len(rulesPb)
 	rules := make([]C.acl_rule_t, ruleCount)
-	for idx, rulePb := range rulesPb {
+
+	for ruleIdx, rulePb := range rulesPb {
 		transport := makeRuleTransport(rulePb, &memoryPool)
 		net4 := makeRuleNet4(rulePb, &memoryPool)
 		net6 := makeRuleNet6(rulePb, &memoryPool)
@@ -272,15 +291,29 @@ func NewModuleConfig(agent *ffi.Agent, name string, rulesPb []*aclpb.Rule) (*Mod
 		action, flags := makeRuleAction(rulePb)
 
 		// fill rule
-		_, err := C.acl_rule_fill(&rules[idx], net4, net6, transport, C.size_t(deviceCount), &devices[0], action, flags)
+		_, err := C.acl_rule_fill(
+			&rules[ruleIdx],
+			net4,
+			net6,
+			transport,
+			C.size_t(deviceCount),
+			&devices[0],
+			action,
+			flags,
+		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fill rule no. %d: %w", idx+1, err)
+			return nil, fmt.Errorf("failed to fill rule no. %d: %w", ruleIdx+1, err)
 		}
 	}
 
 	// create module config
 
-	config, err := C.acl_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName, C.size_t(ruleCount), &rules[0])
+	config, err := C.acl_module_config_create(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		cName,
+		C.size_t(ruleCount),
+		&rules[0],
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create acl module config: %w", err)
 	}
@@ -288,7 +321,8 @@ func NewModuleConfig(agent *ffi.Agent, name string, rulesPb []*aclpb.Rule) (*Mod
 		return nil, fmt.Errorf("failed to create acl module config")
 	}
 
-	// memory pool must be alive until module config created
+	// memory pool and rules must be alive until module config created
+	runtime.KeepAlive(rules)
 	runtime.KeepAlive(memoryPool)
 
 	return &ModuleConfig{
@@ -301,7 +335,11 @@ func (config *ModuleConfig) Free() {
 }
 
 func (config *ModuleConfig) LinkIntoDataplane(agent *ffi.Agent) error {
-	_, err := C.agent_update_modules((*C.struct_agent)(agent.AsRawPtr()), C.size_t(1), &config.inner)
+	_, err := C.agent_update_modules(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		C.size_t(1),
+		&config.inner,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to update modules: %w", err)
 	}

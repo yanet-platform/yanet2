@@ -42,7 +42,11 @@ type instanceKey struct {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func makeAndLinkNewConfig(agent *ffi.Agent, name string, rules []*aclpb.Rule) (*ModuleConfig, error) {
+func makeAndLinkNewConfig(
+	agent *ffi.Agent,
+	name string,
+	rules []*aclpb.Rule,
+) (*ModuleConfig, error) {
 	// try create new config
 	newConfig, err := NewModuleConfig(agent, name, rules)
 	if err != nil {
@@ -64,7 +68,10 @@ func makeAndLinkNewConfig(agent *ffi.Agent, name string, rules []*aclpb.Rule) (*
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (s *ACLService) EnableAcl(ctx context.Context, req *aclpb.EnableAclRequest) (*aclpb.EnableAclResponse, error) {
+func (s *ACLService) EnableAcl(
+	ctx context.Context,
+	req *aclpb.EnableAclRequest,
+) (*aclpb.EnableAclResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -79,7 +86,11 @@ func (s *ACLService) EnableAcl(ctx context.Context, req *aclpb.EnableAclRequest)
 	}
 
 	if _, exists := s.configs[key]; exists {
-		return nil, fmt.Errorf("ACL is already enabled for module config [name=%s, instance=%d]", name, instance)
+		return nil, fmt.Errorf(
+			"ACL is already enabled for module config [name=%s, instance=%d]",
+			name,
+			instance,
+		)
 	}
 	config, err := makeAndLinkNewConfig(s.agents[instance], name, req.Rules)
 	if err != nil { // old config is still alive and usable
@@ -99,7 +110,10 @@ func (s *ACLService) EnableAcl(ctx context.Context, req *aclpb.EnableAclRequest)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (s *ACLService) UpdateConfig(ctx context.Context, req *aclpb.UpdateConfigRequest) (*aclpb.UpdateConfigResponse, error) {
+func (s *ACLService) UpdateConfig(
+	ctx context.Context,
+	req *aclpb.UpdateConfigRequest,
+) (*aclpb.UpdateConfigResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

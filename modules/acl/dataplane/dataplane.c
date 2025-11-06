@@ -1,4 +1,5 @@
 #include "dataplane.h"
+#include "dataplane/module/module.h"
 #include "module.h"
 
 #include <rte_ether.h>
@@ -7,14 +8,18 @@
 #include <rte_udp.h>
 
 #include <rte_mbuf.h>
+#include <stdio.h>
 
+#include "action.h"
 #include "filter.h"
+
+////////////////////////////////////////////////////////////////////////////////
 
 struct acl_module {
 	struct module module;
 };
 
-static void
+void
 acl_handle_packets(
 	struct dp_worker *dp_worker,
 	struct module_ectx *module_ectx,
@@ -30,7 +35,7 @@ acl_handle_packets(
 	/*
 	 * There are two major options:
 	 *  - process packets one by one
-	 *  - process stages one by one
+	 *  - process stages ony by one
 	 * For the second option we have to split v4 and v6 processing.
 	 */
 
@@ -49,7 +54,7 @@ acl_handle_packets(
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 			net6_filter_query(
-				&acl_config->net4_filter,
+				&acl_config->net6_filter,
 				packet,
 				&actions,
 				&count
@@ -59,16 +64,12 @@ acl_handle_packets(
 			continue;
 		}
 
-		for (uint32_t idx = 0; idx < count; ++idx) {
-			if (!(actions[idx] & ACTION_NON_TERMINATE)) {
-				if (actions[idx] == 1) {
-					packet_front_output(
-						packet_front, packet
-					);
-				} else if (actions[idx] == 2) {
-					packet_front_drop(packet_front, packet);
-				}
-			}
+		int res = process_packet_actions(
+			count, actions, packet, packet_front
+		);
+		if (res != 0) {
+			// failed to process packet actions
+			packet_front_drop(packet_front, packet);
 		}
 	}
 }

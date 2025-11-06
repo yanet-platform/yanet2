@@ -2,6 +2,7 @@
 
 #include "../rule.h"
 #include "common/lpm.h"
+#include "common/memory.h"
 #include "common/range_collector.h"
 #include "lib/dataplane/packet/packet.h"
 
@@ -198,6 +199,9 @@ init_net4_src(
 	struct memory_context *memory_context
 ) {
 	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
+	if (lpm == NULL) {
+		return -1;
+	}
 	SET_OFFSET_OF(data, lpm);
 	return collect_net4_values(
 		memory_context,
@@ -230,6 +234,9 @@ init_net4_dst(
 	struct memory_context *memory_context
 ) {
 	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
+	if (lpm == NULL) {
+		return -1;
+	}
 	SET_OFFSET_OF(data, lpm);
 	return collect_net4_values(
 		memory_context,
@@ -257,7 +264,7 @@ lookup_net4_dst(struct packet *packet, void *data) {
 // Allows to free data for IPv4 classification.
 static inline void
 free_net4(void *data, struct memory_context *memory_context) {
-	(void)memory_context;
 	struct lpm *lpm = (struct lpm *)data;
 	lpm_free(lpm);
+	memory_bfree(memory_context, lpm, sizeof(struct lpm));
 }
