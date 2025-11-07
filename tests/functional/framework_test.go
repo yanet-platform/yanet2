@@ -142,8 +142,17 @@ logging:
 		return 1
 	}
 
+	rc := m.Run()
+
+	sugar.Info("Copying logs from VM...")
+	debugCommands := []string{
+		"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",
+		"cp /var/log/yanet-dataplane.log /mnt/build/ 2>/dev/null || echo 'No dataplane log found'",
+	}
+	fw.CLI.ExecuteCommands(debugCommands...)
+
 	// Run tests
-	return m.Run()
+	return rc
 }
 
 // TestFramework - comprehensive test for checking all yanet functionality

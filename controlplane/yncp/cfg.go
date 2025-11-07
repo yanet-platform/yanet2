@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
+	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
@@ -45,6 +46,7 @@ func DefaultConfig() *Config {
 			NAT64:    nat64.DefaultConfig(),
 			Pdump:    pdump.DefaultConfig(),
 			Balancer: balancer.DefaultConfig(),
+			ACL:      acl.DefaultConfig(),
 		},
 	}
 }
@@ -92,6 +94,9 @@ type ModulesConfig struct {
 
 	// Balancer is the configuration for the balancer module.
 	Balancer *balancer.Config `yaml:"balancer"`
+
+	// ACL is the configuration for the ACL module.
+	ACL *acl.Config `yaml:"acl"`
 }
 
 // UnmarshalYAML serves as a proxy for validation.
@@ -130,6 +135,9 @@ func (m *ModulesConfig) Validate() error {
 	}
 	if m.Balancer == nil {
 		return fmt.Errorf("balancer module is not configured")
+	}
+	if m.ACL == nil {
+		return fmt.Errorf("ACL module is not configured")
 	}
 	return nil
 }

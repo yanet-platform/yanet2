@@ -4,7 +4,8 @@ package aclpb;
 
 import "common/proto/target.proto";
 
-option go_package = "a.yandex-team.ru/noc/yanet/agents/acl/proto/aclpb;aclpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/"
+		    "acl/controlplane/aclpb;aclpb";
 
 service ACLService {
   // Enable ACL

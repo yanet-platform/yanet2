@@ -9,6 +9,9 @@ import (
 	"google.golang.org/grpc"
 )
 
+const agentName = "acl"
+const serviceName = "aclpb.ACLService"
+
 // ACLModule implements module for ACL control
 type ACLModule struct {
 	cfg     *Config
@@ -20,7 +23,7 @@ type ACLModule struct {
 
 // NewACLModule creates a new ACL module instance
 func NewACLModule(cfg *Config, log *zap.SugaredLogger) (*ACLModule, error) {
-	log = log.With(zap.String("module", "acl"))
+	log = log.With(zap.String("module", serviceName))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
 	if err != nil {
@@ -28,12 +31,12 @@ func NewACLModule(cfg *Config, log *zap.SugaredLogger) (*ACLModule, error) {
 	}
 
 	instanceIndices := shm.InstanceIndices()
-	log.Debugw("attached to shared memory",
-		"instances", instanceIndices,
-		"size", cfg.MemoryRequirements,
+	log.Debugw("mapping shared memory",
+		zap.Uint32s("instances", instanceIndices),
+		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("acl", instanceIndices, uint(cfg.MemoryRequirements))
+	agents, err := shm.AgentsAttach(agentName, instanceIndices, uint(cfg.MemoryRequirements))
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agents: %w", err)
 	}
@@ -58,7 +61,7 @@ func (m *ACLModule) Endpoint() string {
 }
 
 func (m *ACLModule) ServicesNames() []string {
-	return []string{"aclpb.ACLService"}
+	return []string{serviceName}
 }
 
 func (m *ACLModule) RegisterService(server *grpc.Server) {

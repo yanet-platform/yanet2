@@ -19,7 +19,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		MemoryPath:         "/dev/hugepages/yanet",
-		MemoryRequirements: 256 * datasize.MB,
+		MemoryRequirements: 32 * datasize.MB,
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",
 	}

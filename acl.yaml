@@ -1,0 +1,17 @@
+rules:
+- src_net:
+    addr: 192.0.2.0
+    prefix: 24
+  dst_net:
+    addr: 192.0.3.0
+    prefix: 24
+  src_ports:
+    from: 100
+    to: 200
+  dst_ports:
+    from: 500
+    to: 1000
+  protos:
+    from: 17
+    to: 17
+  action: Allow

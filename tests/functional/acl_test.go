@@ -13,7 +13,7 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func createTcpPacket(srcIP, dstIP net.IP, payload []byte, SYN bool) []byte {
+func createUdpPacket(srcIP, dstIP net.IP, srcPort, dstPort uint16, payload []byte) []byte {
 	eth := layers.Ethernet{
 		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
 		DstMAC:       framework.MustParseMAC(framework.DstMAC),
@@ -25,17 +25,16 @@ func createTcpPacket(srcIP, dstIP net.IP, payload []byte, SYN bool) []byte {
 		IHL:      5,
 		Id:       1,
 		TTL:      64,
-		Protocol: layers.IPProtocolTCP,
+		Protocol: layers.IPProtocolUDP,
 		SrcIP:    srcIP,
 		DstIP:    dstIP,
 	}
 
-	tcp := layers.TCP{
-		SrcPort: 12345,
-		DstPort: 5005,
-		SYN:     SYN,
+	udp := layers.UDP{
+		SrcPort: layers.UDPPort(srcPort),
+		DstPort: layers.UDPPort(dstPort),
 	}
-	err := tcp.SetNetworkLayerForChecksum(&ip4)
+	err := udp.SetNetworkLayerForChecksum(&ip4)
 	if err != nil {
 		panic(err)
 	}
@@ -45,7 +44,7 @@ func createTcpPacket(srcIP, dstIP net.IP, payload []byte, SYN bool) []byte {
 		FixLengths:       true,
 		ComputeChecksums: true,
 	}
-	err = gopacket.SerializeLayers(buf, opts, &eth, &ip4, &tcp, gopacket.Payload(payload))
+	err = gopacket.SerializeLayers(buf, opts, &eth, &ip4, &udp, gopacket.Payload(payload))
 	if err != nil {
 		panic(err)
 	}
@@ -54,33 +53,33 @@ func createTcpPacket(srcIP, dstIP net.IP, payload []byte, SYN bool) []byte {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func TestBalancer(t *testing.T) {
+func TestACL(t *testing.T) {
 	fw := globalFramework
 	require.NotNil(t, fw, "Global framework should be initialized")
 
-	t.Run("Configure_Balancer_Module", func(t *testing.T) {
+	t.Run("Configure_ACL_Module", func(t *testing.T) {
 		// Forward-specific configuration
 		commands := []string{
 			// Configure module
-			"/mnt/target/release/yanet-cli-balancer enable --cfg balancer0 --services /mnt/yanet2/balancer.yaml",
+			"/mnt/target/release/yanet-cli-acl enable --cfg acl0 --rules /mnt/yanet2/acl.yaml",
 
 			// Configure functions
-			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:2=balancer:balancer0,route:route0 --instance=0",
+			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:2=acl:acl0,route:route0 --instance=0",
 
 			// Configure pipelines
 			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
 		}
 
 		_, err := fw.CLI.ExecuteCommands(commands...)
-		require.NoError(t, err, "Failed to configure balancer module")
+		require.NoError(t, err, "Failed to configure acl module")
 	})
 
 	t.Run("Test_IPv4_Packet", func(t *testing.T) {
-		packet := createTcpPacket(
+		packet := createUdpPacket(
 			net.ParseIP("192.0.2.2"),
-			net.ParseIP("192.0.2.1"),
-			[]byte("test balancer"),
-			true,
+			net.ParseIP("192.0.3.1"),
+			150, 600,
+			[]byte("test acl"),
 		)
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
 		t.Log("inputPacket", inputPacket)
@@ -88,22 +87,10 @@ func TestBalancer(t *testing.T) {
 		require.NoError(t, err, "Failed to send packet")
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
-		require.True(t, outputPacket.IsTunneled, "Output packet should be tunneled")
-		require.Equal(t, outputPacket.DstIP.String(), "4.5.6.7")
-		require.Equal(t, outputPacket.InnerPacket.SrcIP.String(), "192.0.2.2")
-		require.True(t, outputPacket.InnerPacket.IsIPv4)
-	})
 
-	t.Run("Enable_Enabled_Real", func(t *testing.T) {
-		commands := []string{
-			// Enable already enabled real
-			"/mnt/target/release/yanet-cli-balancer real enable --cfg balancer0 --virtual-ip \"192.0.2.1\" --proto \"TCP\" --virtual-port 5005 --real-ip \"4.5.6.7\" --real-weight 5",
-
-			// Flush enable
-			"/mnt/target/release/yanet-cli-balancer real flush --cfg balancer0",
-		}
-
-		_, err := fw.CLI.ExecuteCommands(commands...)
-		require.NoError(t, err, "Failed to enable real")
+		require.Equal(t, inputPacket.SrcIP, outputPacket.SrcIP)
+		require.Equal(t, inputPacket.DstIP, outputPacket.DstIP)
+		require.Equal(t, inputPacket.SrcPort, outputPacket.SrcPort)
+		require.Equal(t, inputPacket.DstPort, outputPacket.DstPort)
 	})
 }

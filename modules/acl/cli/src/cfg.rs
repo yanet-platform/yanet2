@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, net::IpAddr};
 
 use serde::{Deserialize, Serialize};
 
@@ -14,8 +14,12 @@ struct Net {
 
 impl From<Net> for aclpb::IpNet {
     fn from(value: Net) -> Self {
+        let net: IpAddr = value.addr.parse().unwrap();
         Self {
-            ip: value.addr.into(),
+            ip: match net {
+                IpAddr::V4(ipv4) => ipv4.octets().into(),
+                IpAddr::V6(ipv6) => ipv6.octets().into(),
+            },
             prefix_len: value.prefix,
         }
     }
@@ -97,8 +101,8 @@ pub struct AclConfig {
 }
 
 impl From<AclConfig> for Vec<aclpb::Rule> {
-    fn from(_value: AclConfig) -> Self {
-        todo!()
+    fn from(config: AclConfig) -> Self {
+        config.rules.into_iter().map(From::from).collect()
     }
 }
 
@@ -161,5 +165,16 @@ mod tests {
 "#;
         let cfg: AclConfig = serde_yaml::from_str(s).unwrap();
         assert_eq!(cfg.rules.len(), 1);
+    }
+
+    #[test]
+    fn net() {
+        let net = Net {
+            addr: "192.0.3.1".to_string(),
+            prefix: 24,
+        };
+        let net: aclpb::IpNet = net.into();
+        assert_eq!(net.ip, [192, 0, 3, 1]);
+        assert_eq!(net.prefix_len, 24);
     }
 }
