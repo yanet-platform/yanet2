@@ -470,6 +470,7 @@ dataplane_worker_init(
 		LOG(ERROR, "failed to create worker rx pool %s", mempool_name);
 		return -1;
 	}
+	dp_worker->rx_mempool = worker->rx_mempool;
 
 	if (rte_eth_rx_queue_setup(
 		    device->port_id,

@@ -41,7 +41,10 @@ struct dp_worker {
 
 	uint64_t *remote_rx_count;
 	uint64_t *remote_tx_count;
-	uint64_t pad[7];
+
+	struct rte_mempool *rx_mempool;
+
+	uint64_t pad[6];
 };
 
 struct dp_config {
