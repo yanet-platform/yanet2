@@ -45,7 +45,6 @@ acl_handle_packets(
 		uint32_t count = 0;
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			fprintf(stderr, "acl handle packets: ipv4\n");
 			net4_filter_query(
 				&acl_config->net4_filter,
 				packet,
@@ -54,7 +53,6 @@ acl_handle_packets(
 			);
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			fprintf(stderr, "acl handle packets: ipv6\n");
 			net6_filter_query(
 				&acl_config->net6_filter,
 				packet,
@@ -65,8 +63,6 @@ acl_handle_packets(
 			packet_front_output(packet_front, packet);
 			continue;
 		}
-
-		fprintf(stderr, "count=%u\n", count);
 
 		int res = process_packet_actions(
 			count, actions, packet, packet_front
