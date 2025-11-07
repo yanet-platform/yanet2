@@ -92,6 +92,8 @@ packet_decap(struct packet *packet) {
 		packet->network_header.offset - sizeof(uint16_t)
 	);
 	*prev_eth_type = next_ether_type;
+	// Update network_header meta to reflect inner packet type
+	packet->network_header.type = next_ether_type;
 	// And transport_header meta
 	packet->transport_header.type = next_transport;
 	packet->transport_header.offset = next_offset - tun_hdrs_size;

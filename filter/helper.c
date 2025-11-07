@@ -33,9 +33,6 @@ struct value_set_ctx {
 	struct value_registry *registry;
 };
 
-#define CAN_TERMINATE(action) (((action) >> 15) == 0)
-#define CATEGORY(action) ((action) >> 16)
-
 static int
 action_list_is_term(struct value_registry *registry, uint32_t range_idx) {
 	struct value_range *range = ADDR_OF(&registry->ranges) + range_idx;
@@ -43,18 +40,18 @@ action_list_is_term(struct value_registry *registry, uint32_t range_idx) {
 		return 0;
 
 	uint32_t action = ADDR_OF(&range->values)[range->count - 1];
-	return CAN_TERMINATE(action);
+	return FILTER_ACTION_TERMINATE(action);
 }
 
 uint32_t
-find_actions_with_category(
+filter_actions_with_category(
 	uint32_t *actions, uint32_t count, uint16_t category
 ) {
 	uint32_t count_category = 0;
 
 	for (uint32_t i = 0; i < count; ++i) {
 		uint32_t action = actions[i];
-		uint16_t cat = CATEGORY(action);
+		uint16_t cat = FILTER_ACTION_CATEGORY_MASK(action);
 
 		// check if action corresponds to category
 		if (cat == 0 || (cat & (1 << category))) {

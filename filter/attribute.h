@@ -7,6 +7,7 @@
 #include "attribute/net6.h"
 #include "attribute/port.h"
 #include "attribute/proto.h"
+#include "attribute/proto_range.h"
 #include "attribute/vlan.h"
 #include "rule.h"
 
@@ -69,6 +70,13 @@ static const struct filter_attribute attribute_port_dst = {
 // Packet protocol and flags
 static const struct filter_attribute attribute_proto = {
 	init_proto, lookup_proto, free_proto
+};
+
+// Packet protocol and flags but in the format of range
+static const struct filter_attribute attribute_proto_range = {
+	proto_range_classifier_init,
+	proto_range_classifier_lookup,
+	proto_range_classifier_free
 };
 
 ////////////////////////////////////////////////////////////////////////////////

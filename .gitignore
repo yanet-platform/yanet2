@@ -117,3 +117,6 @@ stat.log
 .gdb_history
 /tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
 /tests/functional/yanet-test.qcow2
+
+# meson 1.9
+subprojects/.wraplock

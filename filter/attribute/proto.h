@@ -1,4 +1,7 @@
+#pragma once
+
 #include "../rule.h"
+#include "common/memory.h"
 #include "common/registry.h"
 #include "common/value.h"
 
@@ -151,7 +154,7 @@ lookup_proto(struct packet *packet, void *data) {
 
 static inline void
 free_proto(void *data, struct memory_context *memory_context) {
-	(void)memory_context;
 	struct proto_classifier *c = (struct proto_classifier *)data;
 	value_table_free(&c->tcp_flags);
+	memory_bfree(memory_context, c, sizeof(*c));
 }

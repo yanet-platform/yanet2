@@ -1799,6 +1799,8 @@ nat64_handle_v6(
 
 	*next_header_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
+	packet->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+
 	return 0;
 }
 
@@ -2799,6 +2801,8 @@ nat64_handle_v4(
 		return -1;
 	}
 	eth_header->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+
+	packet->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
 
 	return 0;
 }
