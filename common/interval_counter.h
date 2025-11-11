@@ -80,7 +80,9 @@ interval_counter_free(struct interval_counter *counter) {
 static inline int64_t *interval_counter_get(struct interval_counter *counter, uint32_t point) {
     typedef typeof(*counter->values) value_t;
     value_t *value = ADDR_OF(&counter->values) + (point & (counter->range_size - 1));
-    value->value = value->value * (uint32_t)((point >> counter->range_size_bits) == value->gen);
+    uint32_t gen = point >> counter->range_size_bits;
+    value->value = value->value * (int64_t)(gen == value->gen);
+    value->gen = gen;
     return &value->value;
 }
 
@@ -97,7 +99,7 @@ interval_counter_advance_time(struct interval_counter *counter, uint32_t to) {
 
 static inline uint64_t
 interval_counter_current_count(struct interval_counter *counter) {
-    int64_t value = counter->values[counter->now & (counter->range_size - 1)].value;
+    int64_t value = (ADDR_OF(&counter->values) + (counter->now & (counter->range_size - 1)))->value;
     assert(value >= 0);
     return (uint64_t)value;
 }
