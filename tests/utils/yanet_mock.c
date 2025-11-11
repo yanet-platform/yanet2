@@ -95,7 +95,14 @@ dataplane_init(
 	SET_OFFSET_OF(&dp_config->cp_config, cp_config);
 	SET_OFFSET_OF(&cp_config->dp_config, dp_config);
 
-	struct cp_config_gen *cp_config_gen = cp_config_gen_create(cp_config);
+	cp_config->cp_config_gen = NULL;
+	struct agent agent;
+	memory_context_init_from(
+		&agent.memory_context, &cp_config->memory_context, "stub agent"
+	);
+	SET_OFFSET_OF(&agent.dp_config, dp_config);
+	SET_OFFSET_OF(&agent.cp_config, cp_config);
+	struct cp_config_gen *cp_config_gen = cp_config_gen_create(&agent);
 	cp_config_gen->config_gen_ectx = NULL;
 	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
 
