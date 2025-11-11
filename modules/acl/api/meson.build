@@ -4,12 +4,13 @@ cp_dependencies = [
   lib_packet_dp_dep,
   lib_config_cp_dep,
   lib_counters_dep,
+  libdpdk_inc_dep,
 ]
 
 includes = include_directories('../dataplane')
 
 sources = files(
-  'controlplane.c',
+  'controlplane.c'
 )
 
 lib_acl_cp = static_library(
@@ -23,5 +24,6 @@ lib_acl_cp = static_library(
 )
 
 lib_acl_cp_dep = declare_dependency(
-  link_with: lib_acl_cp,
+  link_with: [lib_acl_cp, lib_filter],
+  dependencies: [lib_filter_dep]
 )

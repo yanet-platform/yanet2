@@ -16,5 +16,3 @@ func GetStringFromAnyMap(m interface{}, key string) (string, bool) {
 	}
 	return "", false
 }
-
-

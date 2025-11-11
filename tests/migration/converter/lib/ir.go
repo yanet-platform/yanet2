@@ -62,5 +62,3 @@ func (ir *IRJSON) ToJSON() (string, error) {
 	}
 	return string(jsonBytes), nil
 }
-
-

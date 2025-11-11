@@ -13,6 +13,8 @@
 #define MAKE_ACTION_CATEGORY_MASK(category_mask)                               \
 	((uint32_t)(category_mask) << CATEGORY_SHIFT)
 
+#define ACL_DEVICE_NAME_LEN 80
+
 ////////////////////////////////////////////////////////////////////////////////
 
 struct filter_net6 {
@@ -63,12 +65,28 @@ struct filter_transport {
 	struct filter_port_range *dsts;
 };
 
+struct filter_device {
+	char name[ACL_DEVICE_NAME_LEN];
+	uint64_t id;
+};
+
+struct filter_vlan_range {
+	uint16_t from;
+	uint16_t to;
+};
+
 #define VLAN_UNSPEC ((uint16_t)-1)
 
 struct filter_rule {
 	struct filter_net6 net6;
 	struct filter_net4 net4;
 	struct filter_transport transport;
+	uint16_t device_count;
+	struct filter_device *devices;
+
+	uint16_t vlan_range_count;
+	struct filter_vlan_range *vlan_ranges;
+
 	uint16_t vlan;
 
 	// first 15 bits are for user action

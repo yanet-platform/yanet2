@@ -37,6 +37,7 @@ struct packet {
 
 	uint16_t rx_device_id;
 	uint16_t tx_device_id;
+	uint16_t module_device_id;
 
 	uint16_t tx_result;
 
@@ -127,6 +128,9 @@ packet_to_mbuf(const struct packet *packet) {
 
 struct packet *
 mbuf_to_packet(struct rte_mbuf *mbuf);
+
+uint16_t
+packet_data_len(struct packet *packet);
 
 void
 packet_list_print(struct packet_list *list);

@@ -87,7 +87,7 @@ vlan_output_handle(
 		);
 
 		// Just update the tag
-		vlan_hdr->vlan_tci = cp_device_vlan->vlan;
+		vlan_hdr->vlan_tci = rte_cpu_to_be_16(cp_device_vlan->vlan);
 
 		return;
 	}

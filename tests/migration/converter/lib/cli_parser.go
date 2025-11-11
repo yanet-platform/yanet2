@@ -253,7 +253,7 @@ func FormatYanet2Command(module, action string, params map[string]string, instan
 			keys = append(keys, key)
 		}
 	}
-	
+
 	// Sort keys alphabetically for consistent output
 	sortKeys := func(keys []string) {
 		for i := 0; i < len(keys); i++ {

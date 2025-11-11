@@ -7,11 +7,11 @@ import (
 // ConversionError represents an error that occurred during test conversion.
 // It includes context about which test and step caused the error.
 type ConversionError struct {
-	TestName string // Name of the test being converted
-	StepType string // Type of step that failed (e.g., "ipv4Update", "sendPackets")
-	StepIndex int   // 1-based index of the step (0 if test-level error)
-	Message  string // Error message
-	Err      error  // Wrapped error if any
+	TestName  string // Name of the test being converted
+	StepType  string // Type of step that failed (e.g., "ipv4Update", "sendPackets")
+	StepIndex int    // 1-based index of the step (0 if test-level error)
+	Message   string // Error message
+	Err       error  // Wrapped error if any
 }
 
 // Error implements the error interface
@@ -39,10 +39,10 @@ func NewConversionError(testName, stepType, message string) *ConversionError {
 // NewConversionErrorWithStep creates a new ConversionError with step context
 func NewConversionErrorWithStep(testName, stepType string, stepIndex int, message string) *ConversionError {
 	return &ConversionError{
-		TestName: testName,
-		StepType: stepType,
+		TestName:  testName,
+		StepType:  stepType,
 		StepIndex: stepIndex,
-		Message:  message,
+		Message:   message,
 	}
 }
 
@@ -74,4 +74,3 @@ func NewErrorStep(stepType, reason string) ConvertedStep {
 		GoCode: fmt.Sprintf("t.Fatalf(\"Step failed: %s\")", reason),
 	}
 }
-

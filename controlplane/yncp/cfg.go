@@ -10,6 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 
+	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
@@ -52,6 +53,7 @@ func DefaultConfig() *Config {
 			NAT64:    nat64.DefaultConfig(),
 			Pdump:    pdump.DefaultConfig(),
 			Balancer: balancer.DefaultConfig(),
+			ACL:      acl.DefaultConfig(),
 		},
 		Devices: DevicesConfig{
 			Plain: plain.DefaultConfig(),
@@ -97,6 +99,9 @@ type ModulesConfig struct {
 
 	// Balancer is the configuration for the balancer module.
 	Balancer *balancer.Config `yaml:"balancer"`
+
+	// ACL is the configuration for the acl module.
+	ACL *acl.Config `yaml:"acl"`
 }
 
 type DevicesConfig struct {

@@ -15,36 +15,15 @@ service ForwardService {
 	// ShowConfig returns the current configuration for the forward module.
 	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-	// EnableL2Forward enables Layer 2 forwarding between devices.
-	rpc EnableL2Forward(L2ForwardEnableRequest)
-		returns (L2ForwardEnableResponse);
-
-	// AddL3Forward adds a Layer 3 forwarding rule to the configuration.
-	rpc AddL3Forward(AddL3ForwardRequest) returns (AddL3ForwardResponse);
-
-	// RemoveL3Forward removes a Layer 3 forwarding rule from the
-	// configuration.
-	rpc RemoveL3Forward(RemoveL3ForwardRequest)
-		returns (RemoveL3ForwardResponse);
+	rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
 
 	// Allows to delete forward config if it is not referenced
 	// by any pipeline.
 	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
 }
 
-message L3ForwardEntry {
-	string network = 1;
-	string dst_dev_id = 2;
-}
-
-message ForwardDeviceConfig {
-	string src_dev_id = 1;
-	string dst_dev_id = 2;
-	repeated L3ForwardEntry forwards = 3;
-}
-
 message Config {
-	repeated ForwardDeviceConfig devices = 1;
+	// TODO
 }
 
 // Represents config names of dataplane instances
@@ -74,37 +53,34 @@ message ShowConfigResponse {
 	Config config = 2;
 }
 
-// L2ForwardEnableRequest enables Layer 2 forwarding between specified devices.
-message L2ForwardEnableRequest {
+message VlanRange {
+	uint32 from = 1;
+	uint32 to = 2;
+}
+
+message IPNet {
+	bytes ip = 1;
+	uint32 prefix_len = 2;
+}
+
+message ForwardRule {
+	string target = 1;
+	bool output = 2;
+	string counter = 3;
+
+	repeated string devices = 4;
+	repeated VlanRange vlan_ranges = 5;
+	repeated IPNet srcs = 6;
+	repeated IPNet dsts = 7;
+}
+
+message UpdateConfigRequest {
 	commonpb.TargetModule target = 1;
-	string src_dev_id = 2;
-	string dst_dev_id = 3;
+	repeated ForwardRule rules = 2;
 }
 
-message L2ForwardEnableResponse {
-}
-
-// AddL3ForwardRequest specifies the target module to which a forward rule
-// should be added for the device identified by the device ID. If an existing
-// forward rule is present, it will be replaced.
-message AddL3ForwardRequest {
-	commonpb.TargetModule target = 1;
-	string src_dev_id = 2;
-	L3ForwardEntry forward = 3;
-}
-
-message AddL3ForwardResponse {
-}
-
-// RemoveL3ForwardRequest specifies the device ID within the target module
-// from which to remove the forward entry for the specified network.
-message RemoveL3ForwardRequest {
-	commonpb.TargetModule target = 1;
-	string src_dev_id = 2;
-	string network = 3;
-}
-
-message RemoveL3ForwardResponse {
+message UpdateConfigResponse {
+	string error = 1;
 }
 
 // Delete config with specified name.

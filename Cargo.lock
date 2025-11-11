@@ -2251,6 +2251,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-acl"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored",
+ "ipnet",
+ "log",
+ "prost",
+ "prost-types",
+ "ptree",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
+]
+
+[[package]]
 name = "yanet-cli-balancer"
 version = "0.1.0"
 dependencies = [
@@ -2399,6 +2420,7 @@ dependencies = [
  "ptree",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tokio",
  "tonic",
  "tonic-build",

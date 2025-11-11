@@ -307,4 +307,3 @@ func (c *Converter) convertRouteCommand(cmd *CLICommand) string {
 
 	return fmt.Sprintf(`"%s"`, builder.Build())
 }
-

@@ -5,7 +5,8 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{
-    function_service_client::FunctionServiceClient, DeleteFunctionRequest, Function, FunctionChain, Chain, ChainModule, UpdateFunctionsRequest,
+    function_service_client::FunctionServiceClient, Chain, ChainModule, DeleteFunctionRequest, Function, FunctionChain,
+    UpdateFunctionsRequest,
 };
 use tonic::transport::Channel;
 use ync::logging;
@@ -99,11 +100,13 @@ impl FunctionService {
             instance: cmd.instance,
             functions: vec![Function {
                 name: cmd.name,
-                chains: cmd.chains.into_iter()
+                chains: cmd
+                    .chains
+                    .into_iter()
                     .map(|m| {
                         let chain_modules: Vec<&str> = m.split('=').collect();
                         if chain_modules.len() != 2 {
-                            panic!("Invalid chain format");   
+                            panic!("Invalid chain format");
                         }
                         let chain_weight: Vec<&str> = chain_modules[0].split(':').collect();
                         if chain_weight.len() != 2 {
@@ -112,27 +115,25 @@ impl FunctionService {
                         let modules: Vec<&str> = chain_modules[1].split(',').collect();
                         FunctionChain {
                             weight: chain_weight[1].parse::<u64>().expect("invalid chain format"),
-                            chain: Some(Chain{
+                            chain: Some(Chain {
                                 name: chain_weight[0].to_string(),
-                                modules: modules.into_iter().
-                                map(|m| {
-                                    let parts: Vec<&str> = m.split(':').collect();
-                                    if parts.len() != 2 {
-                                        panic!("Invalid module format. Expected 'module_name:config_name'");
-                                    }
-                                        ChainModule{
+                                modules: modules
+                                    .into_iter()
+                                    .map(|m| {
+                                        let parts: Vec<&str> = m.split(':').collect();
+                                        if parts.len() != 2 {
+                                            panic!("Invalid module format. Expected 'module_name:config_name'");
+                                        }
+                                        ChainModule {
                                             r#type: parts[0].to_string(),
                                             name: parts[1].to_string(),
                                         }
-
-                                    },
-                                ).collect(),
-
+                                    })
+                                    .collect(),
                             }),
                         }
                     })
                     .collect(),
-
             }],
         };
 

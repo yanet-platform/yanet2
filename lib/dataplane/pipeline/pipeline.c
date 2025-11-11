@@ -19,6 +19,14 @@ module_ectx_process(
 ) {
 	(void)dp_config;
 	(void)cp_config_gen;
+
+	for (struct packet *packet = packet_front->input.first; packet != NULL;
+	     packet = packet->next) {
+		packet->module_device_id = module_ectx_decode_device(
+			module_ectx, packet->tx_device_id
+		);
+	}
+
 	module_ectx->handler(dp_worker, module_ectx, packet_front);
 
 	LOG_TRACEX(int in = packet_list_counter(&packet_front->input);

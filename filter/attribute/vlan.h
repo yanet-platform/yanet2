@@ -33,30 +33,36 @@ init_vlan(
 	}
 	SET_OFFSET_OF(data, t);
 	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
-		if (r->vlan == VLAN_UNSPEC) {
+		if (r->vlan_range_count == 0) {
 			continue;
 		}
 		value_table_new_gen(t);
-		value_table_touch(t, 0, r->vlan);
-	}
-	value_table_compact(t);
-	uint16_t max_class = 0;
-	for (uint16_t vlan = 0; vlan < 4096; ++vlan) {
-		uint16_t value = value_table_get(t, 0, vlan);
-		if (max_class < value) {
-			max_class = value;
+		for (uint32_t idx = 0; idx < r->vlan_range_count; ++idx) {
+			for (uint16_t vlan = r->vlan_ranges[idx].from;
+			     vlan <= r->vlan_ranges[idx].to;
+			     ++vlan) {
+				value_table_touch(t, 0, vlan);
+			}
 		}
 	}
+	value_table_compact(t);
 	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
 		value_registry_start(registry);
-		if (r->vlan == VLAN_UNSPEC) {
-			for (uint16_t class = 0; class <= max_class; ++class) {
-				value_registry_collect(registry, class);
+		if (r->vlan_range_count == 0) {
+			for (uint16_t vlan = 0; vlan <= 4095; ++vlan) {
+				value_registry_collect(
+					registry, value_table_get(t, 0, vlan)
+				);
 			}
-		} else {
-			value_registry_collect(
-				registry, value_table_get(t, 0, r->vlan)
-			);
+		}
+		for (uint32_t idx = 0; idx < r->vlan_range_count; ++idx) {
+			for (uint16_t vlan = r->vlan_ranges[idx].from;
+			     vlan <= r->vlan_ranges[idx].to;
+			     ++vlan) {
+				value_registry_collect(
+					registry, value_table_get(t, 0, vlan)
+				);
+			}
 		}
 	}
 	return 0;

@@ -1,7 +1,9 @@
 package forward
 
 //#cgo CFLAGS: -I../../../
+//#cgo CFLAGS: -I../../../lib
 //#cgo LDFLAGS: -L../../../build/modules/forward/api -lforward_cp
+//#cgo LDFLAGS: -L../../../build/filter -lfilter
 //
 //#include "api/agent.h"
 //#include "modules/forward/api/controlplane.h"
@@ -10,9 +12,9 @@ import "C"
 import (
 	"fmt"
 	"net/netip"
+	"runtime"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -49,102 +51,267 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
+type vlanRange struct {
+	from uint16
+	to   uint16
+}
+
+type forwardRule struct {
+	target     string
+	output     bool
+	counter    string
+	devices    []string
+	vlanRanges []vlanRange
+	srcs       []netip.Prefix
+	dsts       []netip.Prefix
+}
+
 // L2ForwardEnable configures a device for L2 forwarding
-func (m *ModuleConfig) L2ForwardEnable(srcDeviceID DeviceID, dstDeviceID DeviceID) error {
-	cname := C.CString("l2")
-	defer C.free(unsafe.Pointer(cname))
-	sName := C.CString(string(srcDeviceID))
-	defer C.free(unsafe.Pointer(sName))
-	dName := C.CString(string(dstDeviceID))
-	defer C.free(unsafe.Pointer(dName))
-	rc, err := C.forward_module_config_enable_l2(
+func (m *ModuleConfig) Update(rules []forwardRule) error {
+	deviceCount := 0
+	vlanRangeCount := 0
+
+	srcNet4Count := 0
+	dstNet4Count := 0
+
+	srcNet6Count := 0
+	dstNet6Count := 0
+
+	for _, rule := range rules {
+		for _, src := range rule.srcs {
+			if src.Addr().Is4() {
+				srcNet4Count++
+			} else {
+				srcNet6Count++
+			}
+		}
+
+		for _, dst := range rule.dsts {
+			if dst.Addr().Is4() {
+				dstNet4Count++
+			} else {
+				dstNet6Count++
+			}
+		}
+
+		deviceCount = deviceCount + len(rule.devices)
+		vlanRangeCount = vlanRangeCount + len(rule.vlanRanges)
+	}
+
+	cRules := make([]C.struct_forward_rule, 0, len(rules))
+	cSrc4Nets := make([]C.struct_net4, 0, srcNet4Count)
+	cDst4Nets := make([]C.struct_net4, 0, dstNet4Count)
+	cSrc6Nets := make([]C.struct_net6, 0, srcNet6Count)
+	cDst6Nets := make([]C.struct_net6, 0, dstNet6Count)
+	cDevices := make([]C.struct_filter_device, 0, deviceCount)
+	cVlanRanges := make([]C.struct_filter_vlan_range, 0, vlanRangeCount)
+
+	for _, rule := range rules {
+		for _, src := range rule.srcs {
+			addr := src.Addr().AsSlice()
+			if src.Addr().Is4() {
+				net := C.struct_net4{}
+				for idx := range addr {
+					net.addr[idx] = C.uint8_t(addr[idx])
+					if (idx+1)*8 <= src.Bits() {
+						net.mask[idx] = 0xff
+					} else if idx*8 >= src.Bits() {
+						net.mask[idx] = 0
+					} else {
+						net.mask[idx] = 0xff << (src.Bits() - idx*8)
+					}
+				}
+
+				cSrc4Nets = append(cSrc4Nets, net)
+			} else {
+				net := C.struct_net6{}
+				for idx := range addr {
+					net.addr[idx] = C.uint8_t(addr[idx])
+					if (idx+1)*8 <= src.Bits() {
+						net.mask[idx] = 0xff
+					} else if idx*8 >= src.Bits() {
+						net.mask[idx] = 0
+					} else {
+						net.mask[idx] = 0xff << (src.Bits() - idx*8)
+					}
+				}
+
+				cSrc6Nets = append(cSrc6Nets, net)
+			}
+		}
+
+		for _, dst := range rule.dsts {
+			addr := dst.Addr().AsSlice()
+			if dst.Addr().Is4() {
+				net := C.struct_net4{}
+				for idx := range addr {
+					net.addr[idx] = C.uint8_t(addr[idx])
+					if (idx+1)*8 <= dst.Bits() {
+						net.mask[idx] = 0xff
+					} else if idx*8 >= dst.Bits() {
+						net.mask[idx] = 0
+					} else {
+						net.mask[idx] = 0xff << (dst.Bits() - idx*8)
+					}
+				}
+
+				cDst4Nets = append(cDst4Nets, net)
+			} else {
+				net := C.struct_net6{}
+				for idx := range addr {
+					net.addr[idx] = C.uint8_t(addr[idx])
+					if (idx+1)*8 <= dst.Bits() {
+						net.mask[idx] = 0xff
+					} else if idx*8 >= dst.Bits() {
+						net.mask[idx] = 0
+					} else {
+						net.mask[idx] = 0xff << (dst.Bits() - idx*8)
+					}
+				}
+
+				cDst6Nets = append(cDst6Nets, net)
+			}
+		}
+
+		for _, device := range rule.devices {
+			cDevice := C.struct_filter_device{
+				id: 0,
+			}
+			cStr := C.CString(device)
+			C.strncpy(&cDevice.name[0], cStr, C.ACL_DEVICE_NAME_LEN)
+			C.free(unsafe.Pointer(cStr))
+			cDevices = append(
+				cDevices,
+				cDevice,
+			)
+		}
+
+		for _, vlanRange := range rule.vlanRanges {
+			cVlanRanges = append(
+				cVlanRanges,
+				C.struct_filter_vlan_range{
+					from: C.uint16_t(vlanRange.from),
+					to:   C.uint16_t(vlanRange.to),
+				},
+			)
+		}
+	}
+
+	src4Idx := 0
+	dst4Idx := 0
+	src6Idx := 0
+	dst6Idx := 0
+	deviceIdx := 0
+	vlanRangeIdx := 0
+
+	pinner := runtime.Pinner{}
+	defer pinner.Unpin()
+
+	for _, rule := range rules {
+		cRule := C.struct_forward_rule{
+			net4: C.struct_filter_net4{
+				src_count: 0,
+				srcs:      nil,
+				dst_count: 0,
+				dsts:      nil,
+			},
+
+			net6: C.struct_filter_net6{
+				src_count: 0,
+				srcs:      nil,
+				dst_count: 0,
+				dsts:      nil,
+			},
+
+			device_count: C.uint16_t(len(rule.devices)),
+			devices:      nil,
+
+			vlan_range_count: C.uint16_t(len(rule.vlanRanges)),
+			vlan_ranges:      nil,
+		}
+
+		for _, src := range rule.srcs {
+			if src.Addr().Is4() {
+				cRule.net4.src_count = cRule.net4.src_count + 1
+			} else {
+				cRule.net6.src_count = cRule.net6.src_count + 1
+			}
+		}
+
+		for _, dst := range rule.dsts {
+			if dst.Addr().Is4() {
+				cRule.net4.dst_count = cRule.net4.dst_count + 1
+			} else {
+				cRule.net6.dst_count = cRule.net6.dst_count + 1
+			}
+		}
+
+		cTarget := C.CString(rule.target)
+		C.strncpy(&cRule.target[0], cTarget, C.CP_DEVICE_NAME_LEN)
+		C.free(unsafe.Pointer(cTarget))
+
+		if rule.output {
+			cRule.direction = C.FORWARD_DIRECTION_OUT
+		} else {
+
+			cRule.direction = C.FORWARD_DIRECTION_IN
+		}
+
+		cCounter := C.CString(rule.counter)
+		C.strncpy(&cRule.counter[0], cCounter, C.COUNTER_NAME_LEN)
+		C.free(unsafe.Pointer(cCounter))
+
+		if cRule.net4.src_count > 0 {
+			pinner.Pin(&cSrc4Nets[src4Idx])
+			cRule.net4.srcs = &cSrc4Nets[src4Idx]
+		}
+		src4Idx = src4Idx + int(cRule.net4.src_count)
+
+		if cRule.net4.dst_count > 0 {
+			pinner.Pin(&cDst4Nets[dst4Idx])
+			cRule.net4.dsts = &cDst4Nets[dst4Idx]
+		}
+		dst4Idx = dst4Idx + int(cRule.net4.dst_count)
+
+		if cRule.net6.src_count > 0 {
+			pinner.Pin(&cSrc6Nets[src6Idx])
+			cRule.net6.srcs = &cSrc6Nets[src6Idx]
+		}
+		src6Idx = src6Idx + int(cRule.net6.src_count)
+
+		if cRule.net6.dst_count > 0 {
+			pinner.Pin(&cDst6Nets[dst6Idx])
+			cRule.net6.dsts = &cDst6Nets[dst6Idx]
+		}
+		dst6Idx = dst6Idx + int(cRule.net6.dst_count)
+
+		if cRule.device_count > 0 {
+			pinner.Pin(&cDevices[deviceIdx])
+			cRule.devices = &cDevices[deviceIdx]
+		}
+		deviceIdx = deviceIdx + len(rule.devices)
+
+		if cRule.vlan_range_count > 0 {
+			pinner.Pin(&cVlanRanges[vlanRangeIdx])
+			cRule.vlan_ranges = &cVlanRanges[vlanRangeIdx]
+		}
+		vlanRangeIdx = vlanRangeIdx + len(rule.vlanRanges)
+
+		cRules = append(cRules, cRule)
+	}
+
+	rc, err := C.forward_module_config_update(
 		m.asRawPtr(),
-		sName,
-		dName,
-		cname,
+		&cRules[0],
+		C.uint32_t(len(cRules)),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to enable device %s: %w", dstDeviceID, err)
+		return fmt.Errorf("failed to update config %w", err)
 	}
 	if rc != 0 {
-		return fmt.Errorf("failed to enable device %s: return code=%d", dstDeviceID, rc)
+		return fmt.Errorf("failed to update config with return code=%d", rc)
 	}
 	return nil
-}
-
-// ForwardEnable configures forwarding for a specified IP prefix from a source device to a target device.
-// The prefix can be either IPv4 or IPv6.
-func (m *ModuleConfig) L3ForwardEnable(prefix netip.Prefix, srcDeviceID DeviceID, dstDeviceID DeviceID) error {
-	addrStart := prefix.Addr()
-	addrEnd := xnetip.LastAddr(prefix)
-
-	if addrStart.Is4() {
-		start := addrStart.As4()
-		end := addrEnd.As4()
-		return m.forwardEnableV4(start, end, srcDeviceID, dstDeviceID)
-	}
-
-	if addrStart.Is6() {
-		start := addrStart.As16()
-		end := addrEnd.As16()
-		return m.forwardEnableV6(start, end, srcDeviceID, dstDeviceID)
-	}
-
-	return fmt.Errorf("unsupported prefix: %s must be either IPv4 or IPv6", prefix)
-}
-
-func (m *ModuleConfig) forwardEnableV4(addrStart [4]byte, addrEnd [4]byte, srcDeviceID DeviceID, dstDeviceID DeviceID) error {
-	cname := C.CString("v4")
-	defer C.free(unsafe.Pointer(cname))
-	sName := C.CString(string(srcDeviceID))
-	defer C.free(unsafe.Pointer(sName))
-	dName := C.CString(string(dstDeviceID))
-	defer C.free(unsafe.Pointer(dName))
-
-	rc, err := C.forward_module_config_enable_v4(
-		m.asRawPtr(),
-		(*C.uint8_t)(&addrStart[0]),
-		(*C.uint8_t)(&addrEnd[0]),
-		sName,
-		dName,
-		cname,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to enable v4 forward from device %s to %s: %w", srcDeviceID, dstDeviceID, err)
-	}
-	if rc != 0 {
-		return fmt.Errorf("failed to enable v4 forward from device %s to %s: return code=%d", srcDeviceID, dstDeviceID, rc)
-	}
-	return nil
-}
-
-func (m *ModuleConfig) forwardEnableV6(addrStart [16]byte, addrEnd [16]byte, srcDeviceID DeviceID, dstDeviceID DeviceID) error {
-	cname := C.CString("v6")
-	defer C.free(unsafe.Pointer(cname))
-	sName := C.CString(string(srcDeviceID))
-	defer C.free(unsafe.Pointer(sName))
-	dName := C.CString(string(dstDeviceID))
-	defer C.free(unsafe.Pointer(dName))
-
-	rc, err := C.forward_module_config_enable_v6(
-		m.asRawPtr(),
-		(*C.uint8_t)(&addrStart[0]),
-		(*C.uint8_t)(&addrEnd[0]),
-		sName,
-		dName,
-		cname,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to enable v6 forward from device %s to %s: %w", srcDeviceID, dstDeviceID, err)
-	}
-	if rc != 0 {
-		return fmt.Errorf("failed to enable v6 forward from device %s to %s: return code=%d", srcDeviceID, dstDeviceID, rc)
-	}
-	return nil
-}
-
-func topologyDeviceCount(agent *ffi.Agent) uint64 {
-	return uint64(C.forward_module_topology_device_count((*C.struct_agent)(agent.AsRawPtr())))
 }
 
 func DeleteConfig(m *ForwardService, configName string, instance uint32) bool {

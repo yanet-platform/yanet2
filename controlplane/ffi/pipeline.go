@@ -90,7 +90,14 @@ func newFunctionConfig(config FunctionConfig) (*functionConfig, error) {
 			names = append(names, cName)
 		}
 
-		chainPtr, err := C.cp_chain_config_create(chainName, C.uint64_t(len(chain.Chain.Modules)), &types[0], &names[0])
+		cTypes := (**C.char)(nil)
+		cNames := (**C.char)(nil)
+		if len(chain.Chain.Modules) > 0 {
+			cTypes = &types[0]
+			cNames = &names[0]
+		}
+
+		chainPtr, err := C.cp_chain_config_create(chainName, C.uint64_t(len(chain.Chain.Modules)), cTypes, cNames)
 		if err != nil {
 			C.cp_function_config_free(ptr)
 			return nil, fmt.Errorf("failed to create ffi function config: %w", err)

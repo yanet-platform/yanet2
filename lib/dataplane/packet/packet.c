@@ -236,6 +236,11 @@ mbuf_to_packet(struct rte_mbuf *mbuf) {
 	return (struct packet *)((void *)mbuf->buf_addr);
 }
 
+uint16_t
+packet_data_len(struct packet *packet) {
+	return rte_pktmbuf_data_len(packet_to_mbuf(packet));
+}
+
 void
 logtrace_rte_mbuf(struct rte_mbuf *mbuf) {
 #ifdef ENABLE_TRACE_LOG

@@ -45,12 +45,16 @@ test_proto_1(void *memory) {
 
 	struct filter_rule_builder b1;
 	builder_init(&b1);
-	builder_add_proto_range(&b1, IPPROTO_TCP, IPPROTO_TCP);
+	builder_add_proto_range(
+		&b1, 256 * IPPROTO_TCP, 256 * IPPROTO_TCP + 255
+	);
 	struct filter_rule r1 = build_rule(&b1, 1);
 
 	struct filter_rule_builder b2;
 	builder_init(&b2);
-	builder_add_proto_range(&b2, IPPROTO_UDP, IPPROTO_UDP);
+	builder_add_proto_range(
+		&b2, 256 * IPPROTO_UDP, 256 * IPPROTO_UDP + 255
+	);
 	struct filter_rule r2 = build_rule(&b2, 2);
 
 	struct filter_rule rules[2] = {r1, r2};

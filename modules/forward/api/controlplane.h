@@ -2,6 +2,15 @@
 
 #include <stdint.h>
 
+#include "filter/rule.h"
+
+#include "counters/counters.h"
+
+#include "controlplane/config/defines.h"
+
+#define FORWARD_DIRECTION_IN 0
+#define FORWARD_DIRECTION_OUT 1
+
 struct agent;
 struct cp_module;
 
@@ -11,36 +20,28 @@ forward_module_config_init(struct agent *agent, const char *name);
 void
 forward_module_config_free(struct cp_module *cp_module);
 
-int
-forward_module_config_enable_v4(
-	struct cp_module *cp_module,
-	const uint8_t *from,
-	const uint8_t *to,
-	const char *src_name,
-	const char *dst_name,
-	const char *counter_name
-);
+struct forward_rule {
+	struct filter_net6 net6;
+	struct filter_net4 net4;
+
+	uint16_t device_count;
+	struct filter_device *devices;
+
+	uint16_t vlan_range_count;
+	struct filter_vlan_range *vlan_ranges;
+
+	char target[CP_DEVICE_NAME_LEN];
+	char counter[COUNTER_NAME_LEN];
+
+	uint8_t direction;
+};
 
 int
-forward_module_config_enable_v6(
+forward_module_config_update(
 	struct cp_module *cp_module,
-	const uint8_t *from,
-	const uint8_t *to,
-	const char *src_name,
-	const char *dst_name,
-	const char *counter_name
+	struct forward_rule *rules,
+	uint32_t rule_count
 );
-
-int
-forward_module_config_enable_l2(
-	struct cp_module *cp_module,
-	const char *src_name,
-	const char *dst_name,
-	const char *counter_name
-);
-
-uint64_t
-forward_module_topology_device_count(struct agent *agent);
 
 // Enables deletion of configurations for the forwarding module.
 // @return Returns -1 on error and 0 on success.

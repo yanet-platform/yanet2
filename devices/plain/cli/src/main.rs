@@ -2,13 +2,10 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
-use code::{
-    device_plain_service_client::DevicePlainServiceClient, UpdateDevicePlainRequest,
-};
-use commonpb::{TargetDevice, Device, DevicePipeline};
+use code::{UpdateDevicePlainRequest, device_plain_service_client::DevicePlainServiceClient};
+use commonpb::{Device, DevicePipeline, TargetDevice};
 use tonic::transport::Channel;
 use ync::logging;
-
 
 #[allow(non_snake_case)]
 pub mod code {
@@ -133,7 +130,6 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
     }
 }
-
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {

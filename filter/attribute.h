@@ -3,6 +3,7 @@
 #include "common/registry.h"
 #include "lib/dataplane/packet/packet.h"
 
+#include "attribute/device.h"
 #include "attribute/net4.h"
 #include "attribute/net6.h"
 #include "attribute/port.h"
@@ -113,4 +114,9 @@ static const struct filter_attribute attribute_net6_dst = {
 
 static const struct filter_attribute attribute_vlan = {
 	init_vlan, lookup_vlan, free_vlan
+};
+
+// Device
+static const struct filter_attribute attribute_device = {
+	init_device, lookup_device, free_device
 };

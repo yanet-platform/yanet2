@@ -10,106 +10,23 @@
 #include "dataplane/packet/packet.h"
 #include "dataplane/pipeline/pipeline.h"
 
-static struct forward_target *
-forward_handle_v4(
-	struct module_ectx *module_ectx,
-	struct forward_module_config *config,
-	struct packet *packet
-) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+FILTER_DECLARE(FWD_FILTER_VLAN_TAG, &attribute_device, &attribute_vlan);
 
-	struct rte_ipv4_hdr *header = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
-	);
+FILTER_DECLARE(
+	FWD_FILTER_IP4_TAG,
+	&attribute_device,
+	&attribute_vlan,
+	&attribute_net4_src,
+	&attribute_net4_dst
+);
 
-	uint64_t src_device_idx =
-		module_ectx_decode_device(module_ectx, packet->tx_device_id);
-
-	// Validate that the RX device ID exists in the configuration.
-	// If not found, return the original TX device ID unchanged.
-	if (src_device_idx >= config->device_count) {
-		return NULL;
-	}
-
-	struct forward_device_config **devices = ADDR_OF(&config->devices);
-
-	struct forward_device_config *fdc = ADDR_OF(devices + src_device_idx);
-
-	// Perform LPM lookup on the destination IPv4 address using the
-	// LPM table associated with the RX device to determine the
-	// target forwarding device ID.
-	uint32_t forward_target_id =
-		lpm_lookup(&fdc->lpm_v4, 4, (uint8_t *)&header->dst_addr);
-
-	if (forward_target_id == LPM_VALUE_INVALID) {
-		return NULL;
-	}
-
-	return ADDR_OF(&fdc->targets) + forward_target_id;
-}
-
-static struct forward_target *
-forward_handle_v6(
-	struct module_ectx *module_ectx,
-	struct forward_module_config *config,
-	struct packet *packet
-) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
-	struct rte_ipv6_hdr *header = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
-	);
-
-	uint64_t src_device_idx =
-		module_ectx_decode_device(module_ectx, packet->tx_device_id);
-
-	// Validate that the RX device ID exists in the configuration.
-	// If not found, return the original TX device ID unchanged.
-	if (src_device_idx >= config->device_count) {
-		return NULL;
-	}
-
-	struct forward_device_config **devices = ADDR_OF(&config->devices);
-
-	struct forward_device_config *fdc = ADDR_OF(devices + src_device_idx);
-
-	// Perform LPM lookup on the destination IPv6 address using the
-	// LPM table associated with the RX device to determine the
-	// target forwarding device ID.
-	uint32_t forward_target_id =
-		lpm_lookup(&fdc->lpm_v6, 16, (uint8_t *)&header->dst_addr);
-
-	if (forward_target_id == LPM_VALUE_INVALID) {
-		return NULL;
-	}
-
-	return ADDR_OF(&fdc->targets) + forward_target_id;
-}
-
-static struct forward_target *
-forward_handle_l2(
-	struct module_ectx *module_ectx,
-	struct forward_module_config *config,
-	struct packet *packet
-) {
-	uint64_t src_device_idx =
-		module_ectx_decode_device(module_ectx, packet->tx_device_id);
-
-	// Validate that the RX device ID exists in the configuration.
-	// If not found, return the original TX device ID unchanged.
-	if (src_device_idx >= config->device_count) {
-		return NULL;
-	}
-
-	struct forward_device_config **devices = ADDR_OF(&config->devices);
-
-	struct forward_device_config *fdc = ADDR_OF(devices + src_device_idx);
-
-	if (fdc->l2_target_id == LPM_VALUE_INVALID) {
-		return NULL;
-	}
-	return ADDR_OF(&fdc->targets) + fdc->l2_target_id;
-}
+FILTER_DECLARE(
+	FWD_FILTER_IP6_TAG,
+	&attribute_device,
+	&attribute_vlan,
+	&attribute_net6_src,
+	&attribute_net6_dst
+);
 
 static void
 forward_handle_packets(
@@ -127,23 +44,71 @@ forward_handle_packets(
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		struct forward_target *target = NULL;
 
+		const uint32_t *actions = NULL;
+		uint32_t action_count = 0;
+
+		const uint32_t *vlan_actions;
+		uint32_t vlan_action_count;
+		FILTER_QUERY(
+			&forward_config->filter_vlan,
+			FWD_FILTER_VLAN_TAG,
+			packet,
+			&vlan_actions,
+			&vlan_action_count
+		);
+
+		// Set vlan as default
+		actions = vlan_actions;
+		action_count = vlan_action_count;
+
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			target = forward_handle_v4(
-				module_ectx, forward_config, packet
+			const uint32_t *ip4_actions;
+			uint32_t ip4_action_count;
+			FILTER_QUERY(
+				&forward_config->filter_ip4,
+				FWD_FILTER_IP4_TAG,
+				packet,
+				&ip4_actions,
+				&ip4_action_count
 			);
+
+			if (ip4_action_count && (action_count == 0 ||
+						 ip4_actions[0] < actions[0])) {
+				actions = ip4_actions;
+				action_count = ip4_action_count;
+			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			target = forward_handle_v6(
-				module_ectx, forward_config, packet
+			const uint32_t *ip6_actions;
+			uint32_t ip6_action_count;
+			FILTER_QUERY(
+				&forward_config->filter_ip6,
+				FWD_FILTER_IP6_TAG,
+				packet,
+				&ip6_actions,
+				&ip6_action_count
 			);
-		} else {
-			target = forward_handle_l2(
-				module_ectx, forward_config, packet
-			);
+
+			if (ip6_action_count && (action_count == 0 ||
+						 ip6_actions[0] < actions[0])) {
+				actions = ip6_actions;
+				action_count = ip6_action_count;
+			}
 		}
 
+		if (action_count)
+			target = ADDR_OF(&forward_config->targets) + actions[0];
+
 		if (target != NULL) {
+			uint64_t *counters = counter_get_address(
+				target->counter_id,
+				dp_worker->idx,
+				ADDR_OF(&module_ectx->counter_storage)
+			);
+			counters[0] += 1;
+			counters[1] += packet_data_len(packet);
+
 			struct config_gen_ectx *config_gen_ectx =
 				ADDR_OF(&module_ectx->config_gen_ectx);
 
@@ -159,14 +124,7 @@ forward_handle_packets(
 				packet_front_drop(packet_front, packet);
 			}
 
-			uint64_t *counters = counter_get_address(
-				target->counter_id,
-				dp_worker->idx,
-				ADDR_OF(&module_ectx->counter_storage)
-			);
-			counters[0] += 1;
-
-			if (0) {
+			if (target->direction == FORWARD_DIRECTION_IN) {
 				device_ectx_process_input(
 					dp_worker,
 					device_ectx,

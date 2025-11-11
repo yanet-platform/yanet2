@@ -175,7 +175,9 @@ cp_config_delete_module(
 		goto error_free;
 	}
 
-	cp_config_gen_install(dp_config, cp_config, new_config_gen);
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		goto error_free;
+	}
 	cp_config_unlock(cp_config);
 
 	return 0;
@@ -217,7 +219,9 @@ cp_config_update_modules(
 		}
 	}
 
-	cp_config_gen_install(dp_config, cp_config, new_config_gen);
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		goto error_free;
+	}
 	cp_config_unlock(cp_config);
 
 	return 0;
@@ -269,7 +273,9 @@ cp_config_update_functions(
 		}
 	}
 
-	cp_config_gen_install(dp_config, cp_config, new_config_gen);
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		goto error_free;
+	}
 	cp_config_unlock(cp_config);
 
 	return 0;
@@ -305,7 +311,9 @@ cp_config_delete_function(
 		goto error_free;
 	}
 
-	cp_config_gen_install(dp_config, cp_config, new_config_gen);
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		goto error_free;
+	}
 	cp_config_unlock(cp_config);
 
 	return 0;
@@ -357,7 +365,9 @@ cp_config_update_pipelines(
 		}
 	}
 
-	cp_config_gen_install(dp_config, cp_config, new_config_gen);
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		goto error_free;
+	}
 	cp_config_unlock(cp_config);
 
 	return 0;
@@ -398,7 +408,9 @@ cp_config_delete_pipeline(
 		goto error_free;
 	}
 
-	cp_config_gen_install(dp_config, cp_config, new_config_gen);
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		goto error_free;
+	}
 	cp_config_unlock(cp_config);
 
 	return 0;
@@ -483,7 +495,9 @@ cp_config_update_devices(
 		}
 	}
 
-	cp_config_gen_install(dp_config, cp_config, new_config_gen);
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		goto error_free;
+	}
 	cp_config_unlock(cp_config);
 
 	return 0;

@@ -45,6 +45,11 @@ cp_module_init(
 		return -1;
 	}
 
+	uint64_t any_idx;
+	if (cp_module_link_device(cp_module, "", &any_idx)) {
+		return -1;
+	}
+
 	return 0;
 }
 

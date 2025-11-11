@@ -111,5 +111,3 @@ func ParseTopLevelKeysBeforeMarkerFromContent(content, marker string) []string {
 	}
 	return keys
 }
-
-

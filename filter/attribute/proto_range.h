@@ -10,7 +10,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define PROTO_RANGE_CLASSIFIER_MAX_VALUE ((1 << 10))
+#define PROTO_RANGE_CLASSIFIER_MAX_VALUE ((1 << 16))
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -102,8 +102,7 @@ proto_range_classifier_lookup(struct packet *packet, void *data) {
 	(void)packet;
 	struct proto_range_classifier *c =
 		(struct proto_range_classifier *)data;
-	uint16_t proto = packet->transport_header
-				 .type; /// < get proto of the packet here
+	uint16_t proto = packet->transport_header.type * 256;
 	return value_table_get(&c->table, 0, proto);
 }
 

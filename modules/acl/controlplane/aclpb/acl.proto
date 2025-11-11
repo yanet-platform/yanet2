@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package aclpb;
+
+import "common/proto/target.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/"
+		    "acl/controlplane/aclpb;aclpb";
+
+service AclService {
+	// Updates the complete Acl configuration with a new set of rules
+	rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+	// Allows to delete forward config if it is not referenced
+	// by any pipeline.
+	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+}
+
+message UpdateConfigRequest {
+	commonpb.TargetModule target = 1;
+	repeated Rule rules = 2;
+}
+
+message UpdateConfigResponse {
+}
+
+message Rule {
+	repeated IPNet srcs = 1;
+	repeated IPNet dsts = 2;
+	repeated PortRange src_port_ranges = 3;
+	repeated PortRange dst_port_ranges = 4;
+	// List of network device names where this rule applies
+	repeated string devices = 5;
+	repeated VlanRange vlan_ranges = 6;
+	// List of protocol ranges to match
+	// Can match specific protocols or protocol+flag combinations
+	repeated ProtoRange proto_ranges = 7;
+	bool keep_state = 8;
+	// For hitcount; pass and deny only
+	string counter = 9;
+
+	// Action to take when traffic matches the filter
+	ActionKind action = 10;
+}
+
+message IPNet {
+	// IP address in network byte order
+	// 4 bytes for IPv4, 16 bytes for IPv6
+	bytes ip = 1;
+	// Network prefix length in bits (e.g., 24 for 10.0.0.0/24)
+	uint32 prefix_len = 2;
+}
+
+// Represents a TCP/UDP port range [from; to]
+message PortRange {
+	uint32 from = 1;
+	uint32 to = 2;
+}
+
+// Represents a protocol number range [from; to]
+// For transport protocols, upper byte may contain flag bits
+message ProtoRange {
+	uint32 from = 1;
+	uint32 to = 2;
+}
+
+message VlanRange {
+	uint32 from = 1;
+	uint32 to = 2;
+}
+
+// Defines possible actions for matched traffic
+enum ActionKind {
+	ACTION_KIND_PASS = 0;
+	ACTION_KIND_DENY = 1;
+	ACTION_KIND_COUNT = 2;
+	ACTION_KIND_CHECK_STATE = 3;
+}
+
+// Delete config with specified name.
+message DeleteConfigRequest {
+	// Specifies module name and
+	// dataplane instance of forward agent to delete.
+	commonpb.TargetModule target = 1;
+}
+
+message DeleteConfigResponse {
+	bool deleted = 1;
+}

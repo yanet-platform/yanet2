@@ -39,13 +39,8 @@ func TestBasic(t *testing.T) {
 				{
 					Weight: 1,
 					Chain: ffi.ChainConfig{
-						Name: "ch0",
-						Modules: []ffi.ChainModuleConfig{
-							{
-								Type: "balancer",
-								Name: "b0",
-							},
-						},
+						Name:    "ch0",
+						Modules: []ffi.ChainModuleConfig{},
 					},
 				},
 			},
@@ -66,18 +61,30 @@ func TestBasic(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
+	{
+		pipelineConfig := ffi.PipelineConfig{
+			Name:      "dummy",
+			Functions: []string{},
+		}
+
+		err = agent.UpdatePipelines([]ffi.PipelineConfig{pipelineConfig})
+		assert.NoError(t, err)
+	}
+
 	// update devices
 	{
 		deviceConfig := ffi.DeviceConfig{
 			Name: "01:00.0",
 			Input: []ffi.DevicePipelineConfig{
 				{
-					Name: "test",
+					Name:   "test",
+					Weight: 1,
 				},
 			},
 			Output: []ffi.DevicePipelineConfig{
 				{
-					Name: "dummy",
+					Name:   "dummy",
+					Weight: 1,
 				},
 			},
 		}

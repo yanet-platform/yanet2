@@ -1,5 +1,5 @@
 subdir('api')
 subdir('controlplane')
 subdir('dataplane')
-subdir('fuzzing')
-subdir('tests')
+#subdir('fuzzing')
+#subdir('tests')

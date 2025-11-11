@@ -307,9 +307,8 @@ function_ectx_create(
 	);
 	if (chains == NULL)
 		goto error;
-	memset(chains,
-	       0,
-	       sizeof(struct chain_ectx *) * function_ectx->chain_count);
+	memset(chains, 0, sizeof(struct chain_ectx *) * cp_function->chain_count
+	);
 	SET_OFFSET_OF(&function_ectx->chains, chains);
 	function_ectx->chain_count = cp_function->chain_count;
 
@@ -767,7 +766,7 @@ link_module_ectx(
 	if (config_gen_ectx->device_count && cm_index == NULL)
 		goto error;
 	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx)
-		cm_index[idx] = -1;
+		cm_index[idx] = 0;
 	SET_OFFSET_OF(&module_ectx->cm_index, cm_index);
 	module_ectx->cm_index_size = config_gen_ectx->device_count;
 

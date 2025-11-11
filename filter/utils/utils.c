@@ -305,14 +305,15 @@ builder_set_proto(
 
 void
 builder_set_vlan(struct filter_rule_builder *builder, uint16_t vlan) {
-	builder->vlan = vlan;
+	builder->vlan_ranges[0].from = vlan;
+	builder->vlan_ranges[0].to = vlan;
+	builder->vlan_range_count = 1;
 }
 
 void
 builder_init(struct filter_rule_builder *builder) {
 	memset(builder, 0, sizeof(struct filter_rule_builder));
 	builder->proto.proto = PROTO_UNSPEC;
-	builder->vlan = VLAN_UNSPEC;
 }
 
 void
@@ -351,7 +352,8 @@ build_rule(struct filter_rule_builder *builder, uint32_t action) {
 				.protos = builder->proto_ranges,
 				.proto_count = builder->proto_ranges_count,
 			},
-		.vlan = builder->vlan,
+		.vlan_ranges = builder->vlan_ranges,
+		.vlan_range_count = builder->vlan_range_count,
 	};
 	return result_action;
 }

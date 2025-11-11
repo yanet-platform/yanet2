@@ -16,7 +16,6 @@ import (
 	"github.com/yanet-platform/yanet2/coordinator/internal/builtin"
 	"github.com/yanet-platform/yanet2/coordinator/internal/registry"
 	"github.com/yanet-platform/yanet2/coordinator/internal/stage"
-	forwardcoord "github.com/yanet-platform/yanet2/modules/forward/coordinator"
 )
 
 type options struct {
@@ -68,14 +67,7 @@ func NewCoordinator(cfg *Config, options ...CoordinatorOption) (*Coordinator, er
 
 	const builtInModuleEndpoint = "[::1]:0"
 
-	builtInModules := []*builtin.BuiltInModuleRunner{
-		builtin.NewBuiltInModuleRunner(
-			forwardcoord.NewModule(cfg.Gateway.Endpoint, log),
-			builtInModuleEndpoint,
-			cfg.Coordinator.Endpoint,
-			log,
-		),
-	}
+	builtInModules := []*builtin.BuiltInModuleRunner{}
 
 	return &Coordinator{
 		cfg:            cfg,

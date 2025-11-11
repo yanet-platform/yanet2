@@ -12,11 +12,11 @@ import (
 var addressMappings = map[string]string{
 	// IPv4 gateway addresses adaptation
 	"200.0.0.1": framework.VMIPv4Gateway, // 203.0.113.1
-	"200.0.0.2": framework.VMIPv4Host,     // 203.0.113.14
+	"200.0.0.2": framework.VMIPv4Host,    // 203.0.113.14
 
 	// IPv6 gateway addresses adaptation
 	"fe80::1": framework.VMIPv6Gateway, // fe80::1 (same)
-	"fe80::2": framework.VMIPv6Host,     // fe80::5054:ff:fe6b:ffa5
+	"fe80::2": framework.VMIPv6Host,    // fe80::5054:ff:fe6b:ffa5
 
 	// Common test addresses from yanet1 that should be adapted
 	// These are frequently used in yanet1 tests
@@ -43,4 +43,3 @@ func AdaptIPAddress(ipAddr string) string {
 
 	return ipAddr
 }
-

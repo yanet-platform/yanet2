@@ -4,10 +4,7 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use code::{
-    pipeline_service_client::PipelineServiceClient, DeletePipelineRequest,
-    Pipeline, UpdatePipelinesRequest,
-};
+use code::{pipeline_service_client::PipelineServiceClient, DeletePipelineRequest, Pipeline, UpdatePipelinesRequest};
 use tonic::transport::Channel;
 use ync::logging;
 

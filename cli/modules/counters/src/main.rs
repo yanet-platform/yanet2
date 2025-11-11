@@ -4,7 +4,7 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use code::{counters_service_client::CountersServiceClient, PipelineCountersRequest, ModuleCountersRequest};
+use code::{counters_service_client::CountersServiceClient, ModuleCountersRequest, PipelineCountersRequest};
 use tonic::transport::Channel;
 use ync::logging;
 
@@ -84,10 +84,22 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = CountersService::new(cmd.endpoint).await?;
 
     match cmd.mode {
-        ModeCmd::Pipeline(cmd) => service.show_pipeline(cmd.instance, cmd.device_name, cmd.pipeline_name).await?,
+        ModeCmd::Pipeline(cmd) => {
+            service
+                .show_pipeline(cmd.instance, cmd.device_name, cmd.pipeline_name)
+                .await?
+        }
         ModeCmd::Module(cmd) => {
             service
-                .show_module(cmd.instance, cmd.device_name, cmd.pipeline_name, cmd.function_name, cmd.chain_name, cmd.module_type, cmd.module_name)
+                .show_module(
+                    cmd.instance,
+                    cmd.device_name,
+                    cmd.pipeline_name,
+                    cmd.function_name,
+                    cmd.chain_name,
+                    cmd.module_type,
+                    cmd.module_name,
+                )
                 .await?
         }
     }
@@ -105,7 +117,12 @@ impl CountersService {
         Ok(Self { client })
     }
 
-    pub async fn show_pipeline(&mut self, instance: u32, device_name: String, pipeline_name: String) -> Result<(), Box<dyn Error>> {
+    pub async fn show_pipeline(
+        &mut self,
+        instance: u32,
+        device_name: String,
+        pipeline_name: String,
+    ) -> Result<(), Box<dyn Error>> {
         let request = PipelineCountersRequest {
             dp_instance: instance,
             device: device_name,

@@ -14,27 +14,25 @@ struct acl_module {
 	struct module module;
 };
 
-int
-acl_handle_v4(
-	struct filter *filter,
-	struct packet *packet,
-	const uint32_t **actions,
-	uint32_t *count
-) {
-	filter_query(filter, packet, actions, count);
-	return 0;
-}
+FILTER_DECLARE(FWD_FILTER_VLAN_TAG, &attribute_device, &attribute_vlan);
 
-int
-acl_handle_v6(
-	struct filter *filter,
-	struct packet *packet,
-	const uint32_t **actions,
-	uint32_t *count
-) {
-	filter_query(filter, packet, actions, count);
-	return 0;
-}
+FILTER_DECLARE(
+	FWD_FILTER_IP4_TAG,
+	&attribute_device,
+	&attribute_vlan,
+	&attribute_net4_src,
+	&attribute_net4_dst,
+	&attribute_proto_range,
+);
+
+FILTER_DECLARE(
+	FWD_FILTER_IP6_TAG,
+	&attribute_device,
+	&attribute_vlan,
+	&attribute_net6_src,
+	&attribute_net6_dst,
+	&attribute_proto_range
+);
 
 static void
 acl_handle_packets(
@@ -42,14 +40,11 @@ acl_handle_packets(
 	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 ) {
-	(void)dp_worker;
 	struct acl_module_config *acl_config = container_of(
 		ADDR_OF(&module_ectx->cp_module),
 		struct acl_module_config,
 		cp_module
 	);
-
-	struct filter *compiler = &acl_config->filter;
 
 	/*
 	 * There are two major options:
@@ -60,29 +55,81 @@ acl_handle_packets(
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
+		struct acl_target *target = NULL;
+
 		const uint32_t *actions = NULL;
-		uint32_t count = 0;
+		uint32_t action_count = 0;
+
+		const uint32_t *vlan_actions;
+		uint32_t vlan_action_count;
+		FILTER_QUERY(
+			&acl_config->filter_vlan,
+			FWD_FILTER_VLAN_TAG,
+			packet,
+			&vlan_actions,
+			&vlan_action_count
+		);
+
+		// Set vlan as default
+		actions = vlan_actions;
+		action_count = vlan_action_count;
+
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			acl_handle_v4(compiler, packet, &actions, &count);
+			const uint32_t *ip4_actions;
+			uint32_t ip4_action_count;
+			FILTER_QUERY(
+				&acl_config->filter_ip4,
+				FWD_FILTER_IP4_TAG,
+				packet,
+				&ip4_actions,
+				&ip4_action_count
+			);
+
+			if (ip4_action_count && (action_count == 0 ||
+						 ip4_actions[0] < actions[0])) {
+				actions = ip4_actions;
+				action_count = ip4_action_count;
+			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			acl_handle_v6(compiler, packet, &actions, &count);
-		} else {
-			packet_front_output(packet_front, packet);
-			continue;
+			const uint32_t *ip6_actions;
+			uint32_t ip6_action_count;
+			FILTER_QUERY(
+				&acl_config->filter_ip6,
+				FWD_FILTER_IP6_TAG,
+				packet,
+				&ip6_actions,
+				&ip6_action_count
+			);
+
+			if (ip6_action_count && (action_count == 0 ||
+						 ip6_actions[0] < actions[0])) {
+				actions = ip6_actions;
+				action_count = ip6_action_count;
+			}
 		}
 
-		for (uint32_t idx = 0; idx < count; ++idx) {
-			if (!(actions[idx] & ACTION_NON_TERMINATE)) {
-				if (actions[idx] == 1) {
-					packet_front_output(
-						packet_front, packet
-					);
-				} else if (actions[idx] == 2) {
-					packet_front_drop(packet_front, packet);
-				}
+		if (action_count)
+			target = ADDR_OF(&acl_config->targets) + actions[0];
+
+		if (target != NULL) {
+			uint64_t *counters = counter_get_address(
+				target->counter_id,
+				dp_worker->idx,
+				ADDR_OF(&module_ectx->counter_storage)
+			);
+			counters[0] += 1;
+			counters[1] += packet_data_len(packet);
+
+			if (target->action == ACL_ACTION_ALLOW) {
+				packet_front_output(packet_front, packet);
+			} else {
+				packet_front_drop(packet_front, packet);
 			}
+
+		} else {
+			packet_front_drop(packet_front, packet);
 		}
 	}
 }

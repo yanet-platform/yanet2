@@ -94,7 +94,8 @@ struct filter_rule_builder {
 	struct filter_proto_range proto_ranges[MAX_RULES];
 	size_t proto_ranges_count;
 
-	uint16_t vlan;
+	struct filter_vlan_range vlan_ranges[MAX_RULES];
+	size_t vlan_range_count;
 };
 
 void

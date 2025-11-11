@@ -67,11 +67,11 @@ func ApplyFrameworkMapping(pkt gopacket.Packet, isExpect bool) ([]byte, error) {
 			opts = append(opts, IPFlags(ipv4.Flags))
 		}
 		if ipv4.FragOffset != 0 {
-		opts = append(opts, IPFragOffset(ipv4.FragOffset))
-	}
+			opts = append(opts, IPFragOffset(ipv4.FragOffset))
+		}
 
-	layerBuilders = append(layerBuilders, IPv4(opts...))
-}
+		layerBuilders = append(layerBuilders, IPv4(opts...))
+	}
 
 	// Process IPv6 layer
 	if ipv6Layer := pkt.Layer(layers.LayerTypeIPv6); ipv6Layer != nil {
