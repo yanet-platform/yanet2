@@ -46,8 +46,7 @@ func (timeouts *SessionsTimeouts) IntoProto() *balancerpb.SessionsTimeouts {
 // Config of the current balancer instance.
 // One ModuleInstanceConfig corresponds to one balancer_module_config.
 type ModuleInstanceConfig struct {
-	Services        []VirtualService
-	SessionTimeouts SessionsTimeouts
+	Services []VirtualService
 }
 
 func NewModuleInstanceConfig(
@@ -61,19 +60,15 @@ func NewModuleInstanceConfig(
 		}
 		services = append(services, *service)
 	}
-	timeouts := NewSessionsTimeoutsFromProto(proto.SessionsTimeouts)
 	return &ModuleInstanceConfig{
-		Services:        services,
-		SessionTimeouts: *timeouts,
+		Services: services,
 	}, nil
 }
 
 func (config *ModuleInstanceConfig) Clone() *ModuleInstanceConfig {
 	services := config.Services
-	timeouts := config.SessionTimeouts
 	return &ModuleInstanceConfig{
-		Services:        services,
-		SessionTimeouts: timeouts,
+		Services: services,
 	}
 }
 
@@ -83,8 +78,7 @@ func (config *ModuleInstanceConfig) IntoProto() *balancerpb.BalancerInstanceConf
 		vs = append(vs, service.IntoProto())
 	}
 	return &balancerpb.BalancerInstanceConfig{
-		SessionsTimeouts: config.SessionTimeouts.IntoProto(),
-		VirtualServices:  vs,
+		VirtualServices: vs,
 	}
 }
 
@@ -162,7 +156,7 @@ type ModuleInstance struct {
 	config *ModuleInstanceConfig
 
 	// instance owns session table
-	sessionTable SessionTable
+	state BalancerState
 
 	// `cp_module`
 	moduleConfig ModuleConfig
@@ -178,12 +172,13 @@ func NewModuleInstance(
 	name string,
 	config *ModuleInstanceConfig,
 	sessionTableSize uint64,
+	timeouts *SessionsTimeouts,
 ) (*ModuleInstance, error) {
-	sessionTable, err := NewSessionTable(agent, sessionTableSize)
+	state, err := NewState(agent, sessionTableSize, timeouts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create session table: %w", err)
+		return nil, fmt.Errorf("failed to create state: %w", err)
 	}
-	moduleConfig, err := NewModuleConfig(agent, &sessionTable, config, name)
+	moduleConfig, err := state.NewModuleConfig(agent, config, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cp module: %w", err)
 	}
@@ -194,15 +189,15 @@ func NewModuleInstance(
 		agent:            agent,
 		name:             name,
 		config:           config,
-		sessionTable:     sessionTable,
 		moduleConfig:     moduleConfig,
+		state:            state,
 		realUpdateBuffer: NewRealUpdateBuffer(),
 	}, nil
 }
 
 func (instance *ModuleInstance) Free() {
-	FreeSessionTable(&instance.sessionTable)
-	FreeModuleConfig(&instance.moduleConfig)
+	instance.state.Free()
+	instance.moduleConfig.Free()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -212,9 +207,8 @@ func (instance *ModuleInstance) Free() {
 // Clears update reals buffer.
 // Insert created config into dataplane registry.
 func (instance *ModuleInstance) UpdateConfig(config *ModuleInstanceConfig) error {
-	moduleConfig, err := NewModuleConfig(
+	moduleConfig, err := instance.state.NewModuleConfig(
 		instance.agent,
-		&instance.sessionTable,
 		config,
 		instance.name,
 	)
@@ -297,12 +291,10 @@ func (instance *ModuleInstance) FlushRealUpdatesBuffer() (uint32, error) {
 
 // Extend session table if it is filled enough and free unused data.
 func (instance *ModuleInstance) CheckSessionTable() error {
-	err := ExtendSessionTable(&instance.sessionTable, false)
-	if err != nil {
+	if err := instance.state.ExtendSessionTable(false); err != nil {
 		return fmt.Errorf("failed to extend session table: %w", err)
 	}
-	err = FreeUnusedInSessionTable(&instance.sessionTable)
-	if err != nil {
+	if err := instance.state.FreeUnusedInSessionTable(); err != nil {
 		return fmt.Errorf("failed to free unused data in session table: %w", err)
 	}
 	return nil
@@ -310,8 +302,7 @@ func (instance *ModuleInstance) CheckSessionTable() error {
 
 // Force session table extension (for example, if there are many warnings about table overflow)
 func (instance *ModuleInstance) ForceExtendSessionTable() error {
-	err := ExtendSessionTable(&instance.sessionTable, false)
-	if err != nil {
+	if err := instance.state.ExtendSessionTable(true); err != nil {
 		return fmt.Errorf("failed to extend session table: %w", err)
 	}
 	return nil

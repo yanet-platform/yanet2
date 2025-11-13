@@ -1,8 +1,8 @@
-#include "api/session_table.h"
+#include "api/state.h"
 
 #include "controlplane.h"
-#include "dataplane/session_table.h"
 #include "run.h"
+#include "state/session_table.h"
 #include "tests/utils/mock.h"
 #include "worker.h"
 
@@ -70,9 +70,11 @@ run(void *arena,
 	}
 
 	// Init balancer state
-	struct balancer_session_table *session_table =
-		balancer_session_table_create(agent, capacity);
-	if (session_table == NULL) {
+	struct session_table session_table;
+	int res = session_table_init(
+		&session_table, &agent->memory_context, capacity, workers_cnt
+	);
+	if (res != 0) {
 		LOG(ERROR, "failed to initialize balancer session table");
 		return 1;
 	}
@@ -80,12 +82,12 @@ run(void *arena,
 
 	// init watcher
 	struct watcher watcher;
-	watcher.session_table = session_table;
+	watcher.session_table = &session_table;
 	atomic_store(&watcher.stop, 0);
 
 	// Run controlplance
 	pthread_t cp;
-	int res = pthread_create(&cp, NULL, run_cp, &watcher);
+	res = pthread_create(&cp, NULL, run_cp, &watcher);
 	if (res != 0) {
 		LOG(ERROR, "failed to create watcher thread, errno=%d\n", errno
 		);
@@ -120,7 +122,7 @@ run(void *arena,
 		cfg->session_count = sessions;
 		cfg->iterations = iterations;
 		cfg->worker_idx = i;
-		cfg->session_table = session_table;
+		cfg->session_table = &session_table;
 		cfg->iterations = iterations;
 		cfg->timeout_min = timeout_min;
 		cfg->timeout_max = timeout_max;
@@ -188,7 +190,7 @@ run(void *arena,
 		return 1;
 	}
 
-	balancer_session_table_free(session_table);
+	session_table_free(&session_table);
 
 	LOG(INFO, "OK");
 

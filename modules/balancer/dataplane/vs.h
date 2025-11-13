@@ -6,6 +6,8 @@
 #include "module.h"
 #include "ring.h"
 
+#include "../state/registry.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 typedef uint8_t vs_flags_t;
@@ -20,7 +22,6 @@ struct virtual_service {
 	uint16_t port;
 	uint8_t proto;
 
-	uint64_t real_start;
 	uint64_t real_count;
 
 	struct lpm src_filter;
@@ -28,6 +29,9 @@ struct virtual_service {
 	struct ring real_ring;
 
 	uint64_t round_robin_counter;
+
+	// per worker state of the service
+	struct service_state *state;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

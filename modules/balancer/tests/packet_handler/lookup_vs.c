@@ -1,9 +1,6 @@
 #include "api/module.h"
-#include "api/session.h"
-#include "api/session_table.h"
+#include "api/state.h"
 #include "api/vs.h"
-
-#include "dataplane/session.h"
 
 #include "common/network.h"
 
@@ -18,6 +15,7 @@
 
 #include "dataplane/vs.h"
 
+#include "state/state.h"
 #include "tests/utils/helpers.h"
 #include "tests/utils/mock.h"
 #include "tests/utils/packet.h"
@@ -27,6 +25,28 @@
 
 #define ARENA_SIZE ((1 << 27) + 1000000)
 #define AGENT_MEMORY (1 << 27)
+
+////////////////////////////////////////////////////////////////////////////////
+
+struct balancer_vs_config *
+vs_create(
+	struct agent *agent,
+	struct balancer_state *state,
+	uint64_t flags,
+	uint8_t *ip,
+	uint16_t port,
+	uint8_t proto,
+	size_t real_count,
+	size_t allowed_src_count
+) {
+	size_t id = balancer_state_register_vs(state, flags, ip, port, proto);
+	assert(id != (size_t)-1);
+	struct balancer_vs_config *vs = balancer_vs_config_create(
+		agent, id, flags, ip, port, proto, real_count, allowed_src_count
+	);
+	assert(vs != NULL);
+	return vs;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -114,29 +134,25 @@ pure_l3_and_ops_and_weight_matters(void *arena) {
 	struct agent *agent = mock_create_agent(mock, AGENT_MEMORY);
 	TEST_ASSERT_NOT_NULL(agent, "can not create agent");
 
-	struct balancer_session_table *session_table =
-		balancer_session_table_create(agent, 100);
-	TEST_ASSERT_NOT_NULL(session_table, "can not create session table");
-
-	struct balancer_sessions_timeouts *timeouts =
-		balancer_sessions_timeouts_create(agent, 1, 2, 3, 4, 5, 6);
-	TEST_ASSERT_NOT_NULL(timeouts, "can not create sessions timeouts");
+	struct balancer_state *state =
+		balancer_state_create(agent, 100, 1, 2, 3, 4, 5, 6);
+	TEST_ASSERT_NOT_NULL(state, "failed to create state");
 
 	// configure first service (1.1.1.1)
 
 	uint8_t first_service_addr[4] = {1, 1, 1, 1};
 	uint16_t first_service_port = 80;
 	uint8_t first_service_proto = IPPROTO_TCP;
-	struct balancer_vs_config *first_service_config =
-		balancer_vs_config_create(
-			agent,
-			0,
-			first_service_addr,
-			first_service_port,
-			first_service_proto,
-			0,
-			2
-		);
+	struct balancer_vs_config *first_service_config = vs_create(
+		agent,
+		state,
+		0,
+		first_service_addr,
+		first_service_port,
+		first_service_proto,
+		0,
+		2
+	);
 	TEST_ASSERT_NOT_NULL(
 		first_service_config,
 		"cannot create config for the first service"
@@ -166,18 +182,18 @@ pure_l3_and_ops_and_weight_matters(void *arena) {
 	memset(second_service_addr, 2, 16);
 	uint16_t second_service_port = 1010;
 	uint8_t second_service_proto = IPPROTO_UDP;
-	struct balancer_vs_config *second_service_config =
-		balancer_vs_config_create(
-			agent,
-			BALANCER_VS_IPV6_FLAG,
-			second_service_addr,
-			second_service_port,
-			second_service_proto,
-			0,
-			2
-		);
+	struct balancer_vs_config *second_service_config = vs_create(
+		agent,
+		state,
+		BALANCER_VS_IPV6_FLAG,
+		second_service_addr,
+		second_service_port,
+		second_service_proto,
+		0,
+		2
+	);
 	TEST_ASSERT_NOT_NULL(
-		first_service_config,
+		second_service_config,
 		"cannot create config for the first service"
 	);
 
@@ -208,7 +224,7 @@ pure_l3_and_ops_and_weight_matters(void *arena) {
 	};
 
 	struct cp_module *balancer_module = balancer_module_config_create(
-		agent, "balancer", session_table, 2, vs_configs, timeouts
+		agent, "balancer", state, 2, vs_configs
 	);
 	TEST_ASSERT_NOT_NULL(
 		balancer_module, "failed to create balancer module config"
@@ -425,8 +441,9 @@ pure_l3_and_ops_and_weight_matters(void *arena) {
 	uint8_t third_service_ip[4] = {3, 3, 3, 3};
 
 	// Add with specified port
-	struct balancer_vs_config *third_service = balancer_vs_config_create(
+	struct balancer_vs_config *third_service = vs_create(
 		agent,
+		state,
 		BALANCER_VS_PURE_L3_FLAG,
 		third_service_ip,
 		123,
@@ -445,8 +462,9 @@ pure_l3_and_ops_and_weight_matters(void *arena) {
 	// Add fourth IPv6 service with pure L3 balancing
 	uint8_t fourth_service_ip[16];
 	memset(fourth_service_ip, 4, 16);
-	struct balancer_vs_config *fourth_service = balancer_vs_config_create(
+	struct balancer_vs_config *fourth_service = vs_create(
 		agent,
+		state,
 		BALANCER_VS_PURE_L3_FLAG | BALANCER_VS_IPV6_FLAG,
 		fourth_service_ip,
 		0,
@@ -464,7 +482,7 @@ pure_l3_and_ops_and_weight_matters(void *arena) {
 		fourth_service
 	};
 	balancer_module = balancer_module_config_create(
-		agent, "balancer1", session_table, 4, new_vs_configs, timeouts
+		agent, "balancer1", state, 4, new_vs_configs
 	);
 	TEST_ASSERT_NOT_NULL(
 		balancer_module,
@@ -677,13 +695,9 @@ many_services(void *arena) {
 	struct agent *agent = mock_create_agent(mock, AGENT_MEMORY);
 	TEST_ASSERT_NOT_NULL(agent, "can not create agent");
 
-	struct balancer_session_table *session_table =
-		balancer_session_table_create(agent, 1000);
-	TEST_ASSERT_NOT_NULL(session_table, "can not create session table");
-
-	struct balancer_sessions_timeouts *timeouts =
-		balancer_sessions_timeouts_create(agent, 1, 2, 3, 4, 5, 6);
-	TEST_ASSERT_NOT_NULL(timeouts, "can not create sessions timeouts");
+	struct balancer_state *state =
+		balancer_state_create(agent, 1000, 1, 2, 3, 4, 5, 6);
+	TEST_ASSERT_NOT_NULL(state, "failed to create state");
 
 	const size_t services = 100;
 	uint8_t src_ip[16];
@@ -696,8 +710,9 @@ many_services(void *arena) {
 	for (size_t i = 0; i < services; ++i) {
 		uint8_t *dst_ip = &addresses[16 * i];
 		service_addr(i, dst_ip);
-		struct balancer_vs_config *service = balancer_vs_config_create(
+		struct balancer_vs_config *service = vs_create(
 			agent,
+			state,
 			service_network_proto(i) == IPPROTO_IPV6
 				? BALANCER_VS_IPV6_FLAG
 				: 0,
@@ -718,7 +733,7 @@ many_services(void *arena) {
 	}
 
 	struct cp_module *balancer = balancer_module_config_create(
-		agent, "balancer", session_table, services, vs_configs, timeouts
+		agent, "balancer", state, services, vs_configs
 	);
 	TEST_ASSERT_NOT_NULL(
 		balancer, "failed to create balancer module config"

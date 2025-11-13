@@ -138,14 +138,12 @@ impl From<balancerpb::SessionsTimeouts> for SessionsTimeouts {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BalancerConfig {
-    timeouts: SessionsTimeouts,
     vs: Vec<VirtualService>,
 }
 
 impl From<BalancerConfig> for balancerpb::BalancerInstanceConfig {
     fn from(cfg: BalancerConfig) -> Self {
         Self {
-            sessions_timeouts: Some(cfg.timeouts.into()),
             virtual_services: cfg.vs.into_iter().map(Into::into).collect(),
         }
     }
@@ -155,10 +153,6 @@ impl TryFrom<balancerpb::BalancerInstanceConfig> for BalancerConfig {
     type Error = Box<dyn Error>;
     fn try_from(cfg: balancerpb::BalancerInstanceConfig) -> Result<Self, Self::Error> {
         Ok(Self {
-            timeouts: cfg
-                .sessions_timeouts
-                .ok_or("sessions timeouts not specified")?
-                .into(),
             vs: cfg
                 .virtual_services
                 .into_iter()
@@ -184,13 +178,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let config = r#"timeouts:
-  tcp_syn_ack: 10
-  tcp_syn: 10
-  tcp_fin: 10
-  tcp: 20
-  udp: 30
-  default: 60
+        let config = r#"
 vs:
   - ip: "195.13.22.16"
     proto: "TCP"
@@ -211,17 +199,6 @@ vs:
 "#;
 
         let cfg: BalancerConfig = serde_yaml::from_str(config).unwrap();
-        assert_eq!(
-            cfg.timeouts,
-            SessionsTimeouts {
-                tcp_syn_ack: 10,
-                tcp_syn: 10,
-                tcp_fin: 10,
-                tcp: 20,
-                udp: 30,
-                default: 60
-            }
-        );
         assert_eq!(cfg.vs.len(), 1);
 
         let vs = &cfg.vs[0];

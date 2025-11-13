@@ -4,9 +4,8 @@
 #include <stdint.h>
 
 struct agent;
-struct balancer_session_table;
 struct balancer_vs_config;
-struct balancer_sessions_timeouts;
+struct balancer_state;
 
 /// Creates new config for the balancer module.
 /// @param agent Balancer agent.
@@ -22,10 +21,9 @@ struct cp_module *
 balancer_module_config_create(
 	struct agent *agent,
 	const char *name,
-	struct balancer_session_table *session_table,
+	struct balancer_state *state,
 	size_t vs_count,
-	struct balancer_vs_config **vs_configs,
-	struct balancer_sessions_timeouts *sessions_timeouts
+	struct balancer_vs_config **vs_configs
 );
 
 /// Frees module memory if it is not used in dataplane.

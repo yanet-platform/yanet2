@@ -77,7 +77,8 @@ func (service *BalancerService) EnableBalancing(
 		return nil, fmt.Errorf("failed to parse config: %v", err)
 	}
 
-	instance, err := NewModuleInstance(service.agents[inst], name, config, req.SessionTableSize)
+	timeouts := NewSessionsTimeoutsFromProto(req.SessionsTimeouts)
+	instance, err := NewModuleInstance(service.agents[inst], name, config, req.SessionTableSize, timeouts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new balancer instance: %v", err)
 	}

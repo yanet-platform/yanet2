@@ -48,6 +48,7 @@ impl BalancerService {
                     config_name: cmd.config_name,
                     dataplane_instance: cmd.instance,
                 }),
+                sessions_timeouts: Some(balancerpb::SessionsTimeouts { tcp_syn_ack: 60, tcp_syn: 60, tcp_fin: 60, tcp: 60, udp: 60, default: 60 }),
                 config: Some(config),
                 session_table_size: cmd.sessions_table_reserve,
             })
