@@ -1,17 +1,28 @@
 #include <stddef.h>
 
+#include "lib/counters/counters.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 struct dp_config;
 struct cp_config;
+
+struct counter_mock {
+	struct counter_storage *storage;
+	char module_type[80];
+	char module_name[80];
+};
 
 /// Mock of the single instance of YANET dataplane (dp_config+cp_config).
 /// Supports only module configs without pipelines, network functions and packet
 /// processing flow. Also, supports module-local packet processing.
 struct yanet_mock {
 	void *shm;
-	struct dp_config *dp_config;
-	struct cp_config *cp_config;
+	struct dp_config *dp_config; // relative pointer
+	struct cp_config *cp_config; // relative pointer
+
+	size_t counters_count;
+	struct counter_mock counters[100];
 };
 
 ////////////////////////////////////////////////////////////////////////////////

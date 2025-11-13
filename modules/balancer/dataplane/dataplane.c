@@ -3,7 +3,9 @@
 #include <rte_tcp.h>
 #include <rte_udp.h>
 
+#include "common/memory_address.h"
 #include "controlplane/config/econtext.h"
+#include "counters/counters.h"
 #include "dataplane.h"
 #include "dataplane/config/zone.h"
 #include "meta.h"
@@ -23,17 +25,32 @@ void
 handle_packets(
 	struct balancer_module_config *config,
 	struct packet_front *packet_front,
+	struct counter_storage *counter_storage,
 	uint32_t worker_idx,
 	uint32_t now
 ) {
+	struct module_config_packets_counter *packets_counter =
+		balancer_module_config_packets_counter(
+			config, worker_idx, counter_storage
+		);
+	struct module_config_bytes_counter *bytes_counter =
+		balancer_module_config_bytes_counter(
+			config, worker_idx, counter_storage
+		);
+
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
+		// update module config counters
+		packets_counter->in += 1;
+		bytes_counter->in += packet->mbuf->pkt_len;
+
 		// 1. Lookup single virtual service for which packet is
 		// dirrected to
 
 		struct virtual_service *vs = vs_lookup(config, packet);
 
 		if (vs == NULL) { // not found virtual service
+			packets_counter->select_vs_failed += 1;
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
@@ -44,6 +61,7 @@ handle_packets(
 		int res = fill_packet_metadata(packet, &meta);
 
 		if (res != 0) { // unexpected packet type
+			packets_counter->invalid_packet += 1;
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
@@ -53,6 +71,7 @@ handle_packets(
 		struct real *rs =
 			select_real(config, now, worker_idx, vs, &meta);
 		if (rs == NULL) { // failed to select real
+			packets_counter->select_real_failed += 1;
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
@@ -61,6 +80,7 @@ handle_packets(
 
 		res = tunnel_packet(vs->flags, rs, packet);
 		if (res != 0) { // failed to tunnel packet
+			packets_counter->tunnel_failed += 1;
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
@@ -68,6 +88,10 @@ handle_packets(
 		// 5. Pass packet to the next module
 
 		packet_front_output(packet_front, packet);
+
+		// update module config counters
+		packets_counter->out += 1;
+		bytes_counter->out += packet->mbuf->pkt_len;
 	}
 }
 
@@ -88,7 +112,13 @@ balancer_handle_packets(
 
 	uint32_t worker_idx = dp_worker->idx;
 
-	handle_packets(config, packet_front, worker_idx, now);
+	handle_packets(
+		config,
+		packet_front,
+		ADDR_OF(&module_ectx->counter_storage),
+		worker_idx,
+		now
+	);
 }
 
 struct module *
