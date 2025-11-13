@@ -1,6 +1,7 @@
 cp_dependencies = [
   lib_common_dep,
   lib_filter_dep,
+  lib_balancer_state_dep,
   lib_config_cp_dep,
   lib_counters_dep,
   lib_agent_cp_dep,
@@ -12,8 +13,7 @@ includes = include_directories('../dataplane')
 sources = files(
   'module.c',
   'vs.c',
-  'session_table.c',
-  'session.c'
+  'state.c',
 )
 
 lib_balancer_cp = static_library(
@@ -27,6 +27,6 @@ lib_balancer_cp = static_library(
 )
 
 lib_balancer_cp_dep = declare_dependency(
-  link_with: [lib_balancer_cp, lib_filter],
-  dependencies: lib_filter_dep,
+  link_with: [lib_balancer_cp, lib_filter, lib_balancer_state],
+  dependencies: [lib_filter_dep, lib_balancer_state_dep],
 )

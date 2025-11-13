@@ -8,12 +8,11 @@
 #include "../utils/rng.h"
 
 #include "api/module.h"
-#include "api/session.h"
-#include "api/session_table.h"
+#include "api/state.h"
 #include "api/vs.h"
 
-#include "dataplane/session.h"
-#include "dataplane/session_table.h"
+#include "state/state.h"
+
 #include "lib/controlplane/agent/agent.h"
 #include "lib/dataplane/packet/decap.h"
 #include "lib/dataplane/packet/packet.h"
@@ -42,8 +41,7 @@ static uint8_t full_addr[NET6_LEN];
 
 struct balancer_instance {
 	struct agent *agent;
-	struct balancer_session_table *session_table;
-	struct balancer_sessions_timeouts *timeouts;
+	struct balancer_state *state;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -51,6 +49,7 @@ struct balancer_instance {
 static int
 create_service(
 	struct balancer_vs_config **vs_config,
+	struct balancer_state *state,
 	struct agent *agent,
 	vs_flags_t vs_flags,
 	uint8_t *vip,
@@ -61,15 +60,33 @@ create_service(
 	uint8_t *real_src,
 	uint8_t *real_mask
 ) {
+	size_t vs_id = balancer_state_register_vs(
+		state, vs_flags, vip, vs_port, vs_proto
+	);
+	TEST_ASSERT(vs_id != (size_t)-1, "failed to insert vs");
+
 	*vs_config = balancer_vs_config_create(
-		agent, vs_flags, vip, vs_port, vs_proto, 1, 1
+		agent, vs_id, vs_flags, vip, vs_port, vs_proto, 1, 1
 	);
 	TEST_ASSERT_NOT_NULL(*vs_config, "failed to create service config");
+
 	balancer_vs_config_set_allowed_src_range(
 		*vs_config, 0, null_addr, full_addr
 	);
+	size_t real_id = balancer_state_register_real(
+		state, rs_flags, real_dst, vs_proto
+	);
+	TEST_ASSERT(real_id != (size_t)-1, "failed to insert real");
+
 	balancer_vs_config_set_real(
-		*vs_config, 0, rs_flags, 1, real_dst, real_src, real_mask
+		*vs_config,
+		real_id,
+		0,
+		rs_flags,
+		1,
+		real_dst,
+		real_src,
+		real_mask
 	);
 	return TEST_SUCCESS;
 }
@@ -214,6 +231,7 @@ tunnel(struct balancer_instance *instance,
 	struct balancer_vs_config *vs_config;
 	int res = create_service(
 		&vs_config,
+		instance->state,
 		instance->agent,
 		vs_flags,
 		vs_dst,
@@ -227,12 +245,7 @@ tunnel(struct balancer_instance *instance,
 	TEST_ASSERT_EQUAL(res, TEST_SUCCESS, "failed to create vs config");
 
 	struct cp_module *cp_module = balancer_module_config_create(
-		instance->agent,
-		"balancer",
-		instance->session_table,
-		1,
-		&vs_config,
-		instance->timeouts
+		instance->agent, "balancer", instance->state, 1, &vs_config
 	);
 	TEST_ASSERT_NOT_NULL(
 		cp_module, "failed to create balancer module config"
@@ -445,15 +458,11 @@ main() {
 	struct agent *agent = mock_create_agent(mock, AGENT_MEMORY);
 	TEST_ASSERT_NOT_NULL(agent, "failed to create agent");
 
-	struct balancer_session_table *session_table =
-		balancer_session_table_create(agent, 1000);
-	TEST_ASSERT_NOT_NULL(session_table, "failed to create session table");
+	struct balancer_state *state =
+		balancer_state_create(agent, 1000, 1, 2, 3, 4, 5, 6);
+	TEST_ASSERT_NOT_NULL(state, "failed to create balancer state");
 
-	struct balancer_sessions_timeouts *timeouts =
-		balancer_sessions_timeouts_create(agent, 1, 2, 3, 4, 5, 6);
-	TEST_ASSERT_NOT_NULL(timeouts, "failed to create sessions timeouts");
-
-	struct balancer_instance balancer = {agent, session_table, timeouts};
+	struct balancer_instance balancer = {agent, state};
 
 	typedef int (*test_func)(struct balancer_instance *);
 

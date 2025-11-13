@@ -9,7 +9,9 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// As working in shared memory, all pointers are relative.
 struct interval_counter {
+	// relative pointer
 	struct memory_context *mctx;
 
 	// power of 2 (range_size=2^k)
@@ -17,6 +19,7 @@ struct interval_counter {
 
 	uint32_t range_size_bits;
 
+	// relative pointer
 	struct {
 		int64_t value;
 		uint32_t gen;
@@ -30,6 +33,21 @@ struct interval_counter {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
+
+static inline void
+interval_counter_copy(
+	struct interval_counter *dst, struct interval_counter *src
+) {
+	struct memory_context *mctx = ADDR_OF(&src->mctx);
+	SET_OFFSET_OF(&dst->mctx, mctx);
+	dst->range_size = src->range_size;
+	dst->range_size_bits = src->range_size_bits;
+	SET_OFFSET_OF(&dst->values, ADDR_OF(&src->values));
+#ifndef NDEBUG
+	dst->max_timeout = src->max_timeout;
+#endif
+	dst->now = src->now;
+}
 
 static inline int
 interval_counter_init(
@@ -77,6 +95,7 @@ interval_counter_init(
 	if (counter->values == NULL) {
 		return -1;
 	}
+
 	memset(counter->values,
 	       0,
 	       (size_t)counter->range_size * sizeof(*counter->values));
@@ -115,6 +134,9 @@ static inline void
 interval_counter_advance_time(struct interval_counter *counter, uint32_t to) {
 	assert(counter->now <= to);
 	typeof(*counter->values) *values = ADDR_OF(&counter->values);
+	if (counter->now + counter->range_size < to) {
+		counter->now = to;
+	}
 	while (counter->now < to) {
 		uint64_t prev = values[counter->now & (counter->range_size - 1)]
 					.value; // because power of 2

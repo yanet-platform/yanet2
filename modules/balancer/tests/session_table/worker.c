@@ -7,8 +7,7 @@
 
 #include "../utils/rng.h"
 
-#include "dataplane/session.h"
-#include "dataplane/session_table.h"
+#include "state/session_table.h"
 
 #include "lib/logging/log.h"
 

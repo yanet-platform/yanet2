@@ -126,6 +126,7 @@ message EnableBalancingRequest {
 	commonpb.TargetModule target = 1;
 	BalancerInstanceConfig config = 2;
 	uint64 session_table_size = 3;
+	SessionsTimeouts sessions_timeouts = 4;
 }
 
 message EnableBalancingResponse {
@@ -149,7 +150,6 @@ message SessionsTimeouts {
 }
 
 message BalancerInstanceConfig {
-	SessionsTimeouts sessions_timeouts = 2;
 	repeated VirtualService virtual_services = 3;
 }
 

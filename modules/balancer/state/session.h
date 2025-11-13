@@ -1,7 +1,8 @@
 #pragma once
 
 #include "common/ttlmap.h"
-#include "meta.h"
+
+#include "../dataplane/meta.h"
 
 #include <stdint.h>
 
@@ -27,7 +28,7 @@ struct session_state {
 
 typedef ttlmap_lock_t session_lock_t;
 
-struct balancer_sessions_timeouts {
+struct sessions_timeouts {
 	uint32_t tcp_syn_ack;
 	uint32_t tcp_syn;
 	uint32_t tcp_fin;
@@ -59,8 +60,7 @@ fill_session_id(
 
 static inline uint32_t
 session_timeout(
-	struct balancer_sessions_timeouts *timeouts,
-	struct packet_metadata *metadata
+	struct sessions_timeouts *timeouts, struct packet_metadata *metadata
 ) {
 	if (metadata->transport_proto == IPPROTO_UDP) {
 		return timeouts->udp;

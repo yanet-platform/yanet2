@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dataplane/session_table.h"
+#include "state/session_table.h"
 #include <stddef.h>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -22,7 +22,7 @@ struct worker_config {
 	uint32_t timeout_max;
 	uint32_t worker_idx;
 	uint32_t iterations;
-	struct balancer_session_table *session_table;
+	struct session_table *session_table;
 	struct worker_run_result *run_result;
 };
 

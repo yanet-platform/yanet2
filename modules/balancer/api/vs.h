@@ -26,7 +26,6 @@
 
 /// Use Pure Round Robin, which means schedule subsequent packets based on
 /// monotonic counter (and not based on 5-tuple hash).
-/// TODO: WLC
 #define BALANCER_VS_PRR_FLAG ((uint64_t)(1ull << 5))
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -36,6 +35,9 @@
 /// If real serves on the IPv6 address.
 #define BALANCER_REAL_IPV6_FLAG ((uint64_t)(1ull << 0))
 
+/// If real is enabled.
+#define BALANCER_REAL_DISABLED_FLAG ((uint64_t)(1ull << 1))
+
 ////////////////////////////////////////////////////////////////////////////////
 
 struct agent;
@@ -43,6 +45,7 @@ struct balancer_vs_config;
 
 /// Create new config of the virtual service.
 /// @param agent Agent in which memory config will be allocated.
+/// @param id Index of the virtual service in the balancer vs registry
 /// @param flags Mask of virtual service configuration flags.
 /// @param ip IP address of the service (IPv6 if BALANCER_VS_IPV6_FLAG is
 /// specified).
@@ -55,6 +58,7 @@ struct balancer_vs_config;
 struct balancer_vs_config *
 balancer_vs_config_create(
 	struct agent *agent,
+	size_t id,
 	uint64_t flags,
 	uint8_t *ip,
 	uint16_t port,
@@ -68,7 +72,8 @@ void
 balancer_vs_config_free(struct balancer_vs_config *vs_config);
 
 /// Allows to setup one real of the virtual service.
-/// @param index Index of the real.
+/// @param id Index of the real in the balancer state registry
+/// @param index Index of the real in virtual service list.
 /// @param flags Real flags.
 /// @param weight Weight of the real (more weight -> more requests to the real).
 /// @param dst_addr Address of the real.
@@ -78,6 +83,7 @@ balancer_vs_config_free(struct balancer_vs_config *vs_config);
 void
 balancer_vs_config_set_real(
 	struct balancer_vs_config *vs_config,
+	size_t id,
 	size_t index,
 	uint64_t flags,
 	uint16_t weight,

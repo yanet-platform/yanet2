@@ -5,6 +5,8 @@
 #include "session.h"
 #include <stdatomic.h>
 
+#include "worker.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 #define SESSION_FOUND TTLMAP_FOUND
@@ -22,8 +24,6 @@ struct worker_info {
 	_Atomic uint32_t density_factor;
 } __rte_cache_aligned;
 
-#define MAX_WORKERS_NUM 64
-
 struct session_table_gen {
 	struct ttlmap map;
 	struct worker_info worker_info[MAX_WORKERS_NUM];
@@ -31,31 +31,40 @@ struct session_table_gen {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct balancer_session_table {
+struct session_table {
 	struct session_table_gen generations[2];
 	_Atomic uint32_t current_gen; // workers read, cp modify
-	uint32_t workers_cnt;
+	size_t workers;
 
 	// relative pointer to the memory context of the
 	// agent who created session table
 	struct memory_context *mctx;
-
-	// shift of &balancer_session_table in memory
-	// which allows to deallocate table properly.
-	uint32_t memory_shift;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 
+int
+session_table_init(
+	struct session_table *table,
+	struct memory_context *mctx,
+	size_t size,
+	size_t workers
+);
+
+void
+session_table_free(struct session_table *table);
+
+////////////////////////////////////////////////////////////////////////////////
+
 static inline struct session_table_gen *
-session_table_current_gen(struct balancer_session_table *state) {
+session_table_current_gen(struct session_table *state) {
 	uint32_t current_gen =
 		atomic_load_explicit(&state->current_gen, __ATOMIC_SEQ_CST);
 	return &state->generations[current_gen & 1];
 }
 
 static inline struct session_table_gen *
-session_table_previous_gen(struct balancer_session_table *state) {
+session_table_previous_gen(struct session_table *state) {
 	uint32_t current_gen =
 		atomic_load_explicit(&state->current_gen, __ATOMIC_SEQ_CST);
 	return &state->generations[(current_gen & 1) ^ 1];
@@ -63,7 +72,7 @@ session_table_previous_gen(struct balancer_session_table *state) {
 
 static inline int
 get_or_create_session(
-	struct balancer_session_table *session_table,
+	struct session_table *session_table,
 	uint32_t worker_idx,
 	uint32_t now,
 	uint32_t timeout,
@@ -143,7 +152,7 @@ get_or_create_session(
 }
 
 static inline void
-session_invalidate(struct session_state *session_state) {
+session_remove(struct session_state *session_state) {
 	TTLMAP_REMOVE(struct session_id, session_state);
 }
 
@@ -152,4 +161,8 @@ session_unlock(session_lock_t *lock) {
 	ttlmap_release_lock(lock);
 }
 
-#undef MAX_WORKERS_NUM
+int
+session_table_extend(struct session_table *table, bool force);
+
+int
+session_table_free_unused(struct session_table *table);

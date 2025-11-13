@@ -2,21 +2,42 @@
 
 #include "common/memory_address.h"
 #include "meta.h"
-#include "ring.h"
+#include "modules/balancer/state/registry.h"
 #include "rte_tcp.h"
-#include "session.h"
 #include <assert.h>
 #include <filter/filter.h>
 #include <netinet/in.h>
-#include <sched.h>
 #include <stdint.h>
 
 #include "real.h"
-#include "session.h"
-#include "session_table.h"
 #include "vs.h"
 
+#include "../state/session.h"
+#include "../state/session_table.h"
+
 #include "../api/vs.h"
+
+////////////////////////////////////////////////////////////////////////////////
+
+static inline void
+put_session(
+	struct real *real,
+	struct virtual_service *vs,
+	size_t worker,
+	uint32_t now,
+	uint32_t from,
+	uint32_t timeout
+) {
+	// update for real
+	struct service_state *real_state = ADDR_OF(&real->state) + worker;
+	service_state_put_session(real_state, now, from, timeout);
+	service_state_update(real_state, now);
+
+	// update for vs
+	struct service_state *vs_state = ADDR_OF(&vs->state) + worker;
+	service_state_put_session(vs_state, now, from, timeout);
+	service_state_update(vs_state, now);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -45,6 +66,7 @@ select_real(
 	struct virtual_service *vs,
 	struct packet_metadata *metadata
 ) {
+	struct balancer_state *balancer_state = ADDR_OF(&config->state);
 	struct real *reals = ADDR_OF(&config->reals);
 
 	// if `One Packet Scheduling` flag is set,
@@ -55,12 +77,11 @@ select_real(
 		if (real_id == RING_VALUE_INVALID) {
 			return NULL;
 		}
-		real_id += vs->real_start;
 		return &reals[real_id];
 	}
 
 	// get timeout for the session based on transport protocol flags
-	uint32_t timeout = session_timeout(&config->timeouts, metadata);
+	uint32_t timeout = session_timeout(&balancer_state->timeouts, metadata);
 
 	// setup id for the session between client and virtual service
 	struct session_id session_id;
@@ -72,7 +93,7 @@ select_real(
 	struct session_state *session_state = NULL;
 	session_lock_t *session_lock;
 	int get_session_result = get_or_create_session(
-		ADDR_OF(&config->session_table),
+		&balancer_state->session_table,
 		worker_idx,
 		now,
 		timeout,
@@ -91,20 +112,32 @@ select_real(
 	if (get_session_result == SESSION_FOUND) { // session with such id found
 		struct real *real = &reals[session_state->real_id];
 		assert(real->weight > 0);
+
+		// calculate until session was encountered
+		uint32_t until = session_state->last_packet_timestamp +
+				 session_state->timeout;
+		uint32_t time_from = now > until ? now : until;
+
+		// update session and unlock it
 		session_state->timeout = timeout;
 		session_state->last_packet_timestamp = now;
 		session_unlock(session_lock);
+
+		// put prolonged session into state
+		put_session(real, vs, worker_idx, now, time_from, timeout);
 		return real;
 	}
 
 	// session with such id not found, but table inserted this session and
 	// returned pointer to session state with acquired lock.
 
+	// so, here session is created
+
 	assert(session_state != NULL);
 	if (!reschedule_real(metadata
 	    )) { // packet type not allows to create new session
-		session_invalidate(session_state); // free created state
-		session_unlock(session_lock);	   // unlock state
+		session_remove(session_state); // free created state
+		session_unlock(session_lock);  // unlock state
 		return NULL;
 	}
 
@@ -115,11 +148,17 @@ select_real(
 		session_unlock(session_lock);
 		return NULL;
 	}
-	real_id += vs->real_start;
 	session_state->create_timestamp = now;
 	session_state->last_packet_timestamp = now;
 	session_state->real_id = real_id;
 	session_state->timeout = timeout;
+
 	session_unlock(session_lock);
-	return &reals[real_id];
+
+	struct real *real = &reals[real_id];
+
+	// put session into state
+	put_session(real, vs, worker_idx, now, now, timeout);
+
+	return real;
 }

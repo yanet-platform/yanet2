@@ -12,7 +12,6 @@
 #include "../dataplane/real.h"
 #include "../dataplane/vs.h"
 
-#include "modules/balancer/dataplane/session.h"
 #include "ring.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -29,10 +28,9 @@ struct cp_module *
 balancer_module_config_create(
 	struct agent *agent,
 	const char *name,
-	struct balancer_session_table *session_table,
+	struct balancer_state *state,
 	size_t vs_count,
-	struct balancer_vs_config **vs_configs,
-	struct balancer_sessions_timeouts *sessions_timeouts
+	struct balancer_vs_config **vs_configs
 ) {
 	struct balancer_module_config *balancer_config =
 		(struct balancer_module_config *)memory_balloc(
@@ -54,11 +52,8 @@ balancer_module_config_create(
 		goto free_config;
 	}
 
-	// Set sessions timeouts
-	balancer_config->timeouts = *sessions_timeouts;
-
-	// Set session table
-	SET_OFFSET_OF(&balancer_config->session_table, session_table);
+	// Set balancer state
+	SET_OFFSET_OF(&balancer_config->state, state);
 
 	// Set default values to safe free on error
 	balancer_config->vs_count = 0;

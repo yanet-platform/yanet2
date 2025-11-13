@@ -1,8 +1,10 @@
+#include "../utils/helpers.h"
+#include "../utils/mock.h"
 #include "../utils/packet.h"
 #include "../utils/rng.h"
+
 #include "api/module.h"
-#include "api/session.h"
-#include "api/session_table.h"
+#include "api/state.h"
 #include "api/vs.h"
 #include "common/network.h"
 
@@ -10,7 +12,6 @@
 #include "dataplane/select.h"
 #include "dataplane/vs.h"
 #include "logging/log.h"
-#include "modules/pdump/tests/helpers.h"
 #include "rte_common.h"
 
 #include "rte_hash_crc.h"
@@ -22,12 +23,54 @@
 #include <stdatomic.h>
 
 #include "dataplane/module.h"
-#include "tests/utils/mock.h"
+#include "dataplane/vs.h"
+#include "state/state.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
 #define ARENA_SIZE (1 << 27) + 1000000
 #define AGENT_MEMORY (1 << 27)
+
+////////////////////////////////////////////////////////////////////////////////
+
+static struct balancer_vs_config *
+vs_create(
+	struct agent *agent,
+	struct balancer_state *state,
+	uint64_t flags,
+	uint8_t *ip,
+	uint16_t port,
+	uint8_t proto,
+	size_t real_count,
+	size_t allowed_src_count
+) {
+	size_t id = balancer_state_register_vs(state, flags, ip, port, proto);
+	assert(id != (size_t)-1);
+	struct balancer_vs_config *vs = balancer_vs_config_create(
+		agent, id, flags, ip, port, proto, real_count, allowed_src_count
+	);
+	assert(vs != NULL);
+	return vs;
+}
+
+static void
+set_real(
+	struct balancer_state *state,
+	struct balancer_vs_config *vs,
+	size_t index,
+	uint8_t proto,
+	uint64_t flags,
+	uint16_t weight,
+	uint8_t *dst_addr,
+	uint8_t *src_addr,
+	uint8_t *src_mask
+) {
+	size_t id = balancer_state_register_real(state, flags, dst_addr, proto);
+	assert(id != (size_t)-1);
+	balancer_vs_config_set_real(
+		vs, id, index, flags, weight, dst_addr, src_addr, src_mask
+	);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -155,7 +198,7 @@ ops_distribution(
 ////////////////////////////////////////////////////////////////////////////////
 
 int
-pure_l3_and_ops_and_weigth_matters(void *arena) {
+pure_l3_and_ops_and_weight_matters(void *arena) {
 	current_time = 1;
 
 	struct mock *mock = mock_init(arena, ARENA_SIZE);
@@ -164,13 +207,9 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	struct agent *agent = mock_create_agent(mock, AGENT_MEMORY);
 	TEST_ASSERT_NOT_NULL(agent, "failed to create agent");
 
-	struct balancer_session_table *session_table =
-		balancer_session_table_create(agent, 10);
-	TEST_ASSERT_NOT_NULL(session_table, "failed to create session table");
-
-	struct balancer_sessions_timeouts *timeouts =
-		balancer_sessions_timeouts_create(agent, 1, 1, 1, 1, 1, 1);
-	TEST_ASSERT_NOT_NULL(timeouts, "failed to create sessions timeouts");
+	struct balancer_state *state =
+		balancer_state_create(agent, 10, 1, 1, 1, 1, 1, 1);
+	TEST_ASSERT_NOT_NULL(state, "failed to create state");
 
 	uint8_t null_addr[16];
 	memset(null_addr, 0, 16);
@@ -184,8 +223,15 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	memset(vip1, 1, 16);
 	const uint16_t vs1_port = 80;
 	const uint8_t vs1_proto = IPPROTO_TCP;
-	struct balancer_vs_config *vs1_config = balancer_vs_config_create(
-		agent, BALANCER_VS_IPV6_FLAG, vip1, vs1_port, vs1_proto, 2, 1
+	struct balancer_vs_config *vs1_config = vs_create(
+		agent,
+		state,
+		BALANCER_VS_IPV6_FLAG,
+		vip1,
+		vs1_port,
+		vs1_proto,
+		2,
+		1
 	);
 	balancer_vs_config_set_allowed_src_range(
 		vs1_config, 0, null_addr, full_addr
@@ -195,21 +241,32 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	uint8_t real1_dst[16];
 	memset(real1_dst, 0x11, 16);
 
-	// Add first real on the first virtual service on 22.22.22.22
+	// Add second real on the first virtual service on 22.22.22.22
 	uint8_t real2_dst[4];
-	memset(real1_dst, 0x22, 4);
+	memset(real2_dst, 0x22, 4);
 
-	balancer_vs_config_set_real(
+	set_real(
+		state,
 		vs1_config,
 		0,
+		vs1_proto,
 		BALANCER_REAL_IPV6_FLAG,
 		1,
 		real1_dst,
 		null_addr,
 		full_addr
 	);
-	balancer_vs_config_set_real(
-		vs1_config, 1, 0, 1, real2_dst, null_addr, full_addr
+
+	set_real(
+		state,
+		vs1_config,
+		1,
+		vs1_proto,
+		0,
+		1,
+		real2_dst,
+		null_addr,
+		full_addr
 	);
 
 	// Add the second virtual service on udp 2.2.2.2:0 (pure l3 balancing)
@@ -218,8 +275,15 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	memset(vip2, 2, 4);
 	const uint16_t vs2_port = 0;
 	const uint8_t vs2_proto = IPPROTO_UDP;
-	struct balancer_vs_config *vs2_config = balancer_vs_config_create(
-		agent, BALANCER_VS_PURE_L3_FLAG, vip2, vs2_port, vs2_proto, 2, 1
+	struct balancer_vs_config *vs2_config = vs_create(
+		agent,
+		state,
+		BALANCER_VS_PURE_L3_FLAG,
+		vip2,
+		vs2_port,
+		vs2_proto,
+		2,
+		1
 	);
 
 	balancer_vs_config_set_allowed_src_range(
@@ -234,17 +298,27 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	uint8_t real4_dst[4];
 	memset(real4_dst, 0x44, 4);
 
-	balancer_vs_config_set_real(
+	set_real(
+		state,
 		vs2_config,
 		0,
+		vs2_proto,
 		BALANCER_REAL_IPV6_FLAG,
 		1,
 		real3_dst,
 		null_addr,
 		full_addr
 	);
-	balancer_vs_config_set_real(
-		vs2_config, 1, 0, 1, real4_dst, null_addr, full_addr
+	set_real(
+		state,
+		vs2_config,
+		1,
+		vs2_proto,
+		0,
+		1,
+		real4_dst,
+		null_addr,
+		full_addr
 	);
 
 	// Add the third virtual service on tcp 3.3.3.3:80 with OPS flag
@@ -253,8 +327,15 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	const uint8_t vs3_proto = IPPROTO_UDP;
 	uint8_t real5_dst[4] = {5, 5, 5, 5};
 	uint8_t real6_dst[4] = {6, 6, 6, 6};
-	struct balancer_vs_config *vs3_config = balancer_vs_config_create(
-		agent, BALANCER_VS_OPS_FLAG, vip3, vs3_port, vs3_proto, 2, 1
+	struct balancer_vs_config *vs3_config = vs_create(
+		agent,
+		state,
+		BALANCER_VS_OPS_FLAG,
+		vip3,
+		vs3_port,
+		vs3_proto,
+		2,
+		1
 	);
 	TEST_ASSERT_NOT_NULL(
 		vs3_config, "can not create third virtual service"
@@ -262,11 +343,27 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	balancer_vs_config_set_allowed_src_range(
 		vs3_config, 0, null_addr, full_addr
 	);
-	balancer_vs_config_set_real(
-		vs3_config, 0, 0, 1, real5_dst, null_addr, full_addr
+	set_real(
+		state,
+		vs3_config,
+		0,
+		vs3_proto,
+		0,
+		1,
+		real5_dst,
+		null_addr,
+		full_addr
 	);
-	balancer_vs_config_set_real(
-		vs3_config, 1, 0, 2, real6_dst, null_addr, full_addr
+	set_real(
+		state,
+		vs3_config,
+		1,
+		vs3_proto,
+		0,
+		2,
+		real6_dst,
+		null_addr,
+		full_addr
 	);
 
 	// Add the fourth virtual service on udp 3.3.3.3:0 (pure l3) with OPS
@@ -277,8 +374,9 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	const uint8_t vs4_proto = IPPROTO_TCP;
 	uint8_t real7_dst[4] = {7, 7, 7, 7};
 	uint8_t real8_dst[4] = {8, 8, 8, 8};
-	struct balancer_vs_config *vs4_config = balancer_vs_config_create(
+	struct balancer_vs_config *vs4_config = vs_create(
 		agent,
+		state,
 		BALANCER_VS_OPS_FLAG | BALANCER_VS_PURE_L3_FLAG,
 		vip4,
 		vs4_port,
@@ -292,18 +390,34 @@ pure_l3_and_ops_and_weigth_matters(void *arena) {
 	balancer_vs_config_set_allowed_src_range(
 		vs4_config, 0, null_addr, full_addr
 	);
-	balancer_vs_config_set_real(
-		vs4_config, 0, 0, 1, real7_dst, null_addr, full_addr
+	set_real(
+		state,
+		vs4_config,
+		0,
+		vs4_proto,
+		0,
+		1,
+		real7_dst,
+		null_addr,
+		full_addr
 	);
-	balancer_vs_config_set_real(
-		vs4_config, 1, 0, 2, real8_dst, null_addr, full_addr
+	set_real(
+		state,
+		vs4_config,
+		1,
+		vs4_proto,
+		0,
+		2,
+		real8_dst,
+		null_addr,
+		full_addr
 	);
 
 	struct balancer_vs_config *vs_configs[4] = {
 		vs1_config, vs2_config, vs3_config, vs4_config
 	};
 	struct cp_module *cp_module = balancer_module_config_create(
-		agent, "balancer", session_table, 4, vs_configs, timeouts
+		agent, "balancer", state, 4, vs_configs
 	);
 	TEST_ASSERT_NOT_NULL(
 		cp_module, "failed to create balancer module config"
@@ -551,7 +665,7 @@ main() {
 	}
 
 	LOG(INFO, "Running test `pure_l3_and_ops_and_weigth_matters`...");
-	int res = pure_l3_and_ops_and_weigth_matters(arena);
+	int res = pure_l3_and_ops_and_weight_matters(arena);
 	TEST_ASSERT_EQUAL(
 		res,
 		TEST_SUCCESS,
