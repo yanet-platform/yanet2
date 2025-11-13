@@ -18,9 +18,9 @@ service_state_init(
 	struct memory_context *mctx,
 	uint32_t max_timeout
 ) {
-	state->last_seen = 0;
+	state->last_packet_timestamp = 0;
 	int res = interval_counter_init(
-		&state->active_sessions, 0, max_timeout, mctx
+		&state->active_connections, 0, max_timeout, mctx
 	);
 	if (res != 0) {
 		return -1;
@@ -30,7 +30,7 @@ service_state_init(
 
 static void
 service_state_free(struct service_state *state) {
-	interval_counter_free(&state->active_sessions);
+	interval_counter_free(&state->active_connections);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
