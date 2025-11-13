@@ -65,6 +65,19 @@ balancer_module_config_create(
 		goto free_config;
 	}
 
+	// init module config counters
+
+	balancer_config->packets_counter_id = counter_registry_register(
+		&balancer_config->cp_module.counter_registry,
+		"module_packets",
+		BALANCER_MODULE_PACKETS_COUNTER_SIZE
+	);
+	balancer_config->bytes_counter_id = counter_registry_register(
+		&balancer_config->cp_module.counter_registry,
+		"module_bytes",
+		BALANCER_MODULE_BYTES_COUNTER_SIZE
+	);
+
 	return &balancer_config->cp_module;
 
 free_config:

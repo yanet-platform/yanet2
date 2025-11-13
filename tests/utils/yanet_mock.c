@@ -4,6 +4,7 @@
 #include "common/memory.h"
 #include "common/memory_address.h"
 #include "controlplane/config/econtext.h"
+#include "counters/counters.h"
 #include "dataplane/worker.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/zone.h"
@@ -34,6 +35,32 @@ dataplane_register_module(struct dp_config *dp_config, const char *name) {
 
 	SET_OFFSET_OF(&dp_config->dp_modules, dp_modules);
 	return 0;
+}
+
+static inline struct counter_storage *
+find_or_insert_counter_storage(
+	struct yanet_mock *mock,
+	struct counter_registry *registry,
+	char *module_type,
+	char *module_name
+) {
+	for (size_t i = 0; i < mock->counters_count; ++i) {
+		if (strcmp(module_type, mock->counters[i].module_type) ||
+		    strcmp(module_name, mock->counters[i].module_name)) {
+			continue;
+		}
+		return mock->counters[i].storage;
+	}
+	struct counter_mock *counter = &mock->counters[mock->counters_count++];
+
+	struct cp_config *cp_config = ADDR_OF(&mock->cp_config);
+
+	return counter->storage = counter_storage_spawn(
+		       &cp_config->memory_context,
+		       &cp_config->counter_storage_allocator,
+		       NULL,
+		       registry
+	       );
 }
 
 static inline int
@@ -181,10 +208,21 @@ yanet_mock_init(
 		&cp_config
 	);
 	if (res != 0) {
-		return res;
+		return -1;
 	}
 	SET_OFFSET_OF(&mock->dp_config, dp_config);
 	SET_OFFSET_OF(&mock->cp_config, cp_config);
+
+	// init counters
+
+	counter_storage_allocator_init(
+		&cp_config->counter_storage_allocator,
+		&cp_config->memory_context,
+		dp_config->worker_count
+	);
+
+	mock->counters_count = 0;
+
 	return 0;
 }
 
@@ -207,8 +245,15 @@ yanet_mock_handle_packets(
 	struct packet_front *packet_front,
 	packets_handler handler
 ) {
-	(void)mock;
 	struct module_ectx ctx;
+	struct counter_storage *counter_storage =
+		find_or_insert_counter_storage(
+			mock,
+			&cp_module->counter_registry,
+			cp_module->type,
+			cp_module->name
+		);
+	SET_OFFSET_OF(&ctx.counter_storage, counter_storage);
 	struct dp_worker worker;
 	worker.idx = 0;
 	SET_OFFSET_OF(&ctx.cp_module, cp_module);
