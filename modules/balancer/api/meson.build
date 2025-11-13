@@ -14,6 +14,7 @@ sources = files(
   'module.c',
   'vs.c',
   'state.c',
+  'info.c',
 )
 
 lib_balancer_cp = static_library(
