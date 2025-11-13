@@ -7,7 +7,7 @@
 int
 main(int argc, char **argv) {
 	if (argc != 2) {
-		fprintf(stderr, "%s", "usage: yanet-dataplane <config>");
+		fprintf(stderr, "Usage: %s CONFIG_PATH\n", argv[0]);
 		return -1;
 	}
 	// This function initializes and enables logging
