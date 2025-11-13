@@ -74,7 +74,7 @@ create_service(
 		*vs_config, 0, null_addr, full_addr
 	);
 	size_t real_id = balancer_state_register_real(
-		state, rs_flags, real_dst, vs_proto
+		state, vip, vs_flags, vs_port, vs_proto, rs_flags, real_dst
 	);
 	TEST_ASSERT(real_id != (size_t)-1, "failed to insert real");
 

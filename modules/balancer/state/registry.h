@@ -11,22 +11,39 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// sharded between workers
 struct service_state {
 	struct interval_counter active_sessions;
 	uint32_t last_seen;
-} __attribute__((__aligned__(64))); // because of sharded between workers
+} __attribute__((__aligned__(64)));
 
 void
 service_state_copy(struct service_state *dst, struct service_state *src);
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Info about virtual service or real.
 struct service_info {
+	// address of the virtual service
+	uint8_t vip_address[16];
+
+	// type of vip address
+	int vip_proto;
+
+	// destination ip address (equals to vip in case of virtual service)
 	uint8_t ip_address[16];
-	int ip_proto;	     // IPPROTO_IPV4 or IPPROTO_IPV6
-	uint16_t port;	     // does not matter for reals
+
+	// type of ip address
+	int ip_proto; // IPPROTO_IPV4 or IPPROTO_IPV6
+
+	// zero in case of pure l3 scheduling
+	uint16_t port;
+
+	// tcp or udp
 	int transport_proto; // IPPROTO_TCP or IPPROTO_UDP
-	struct service_state state[MAX_WORKERS_NUM]; // per worker service state
+
+	// per worker service state
+	struct service_state state[MAX_WORKERS_NUM];
 };
 
 struct service_registry {

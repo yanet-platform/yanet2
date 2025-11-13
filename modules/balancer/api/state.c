@@ -85,7 +85,7 @@ balancer_state_register_vs(
 	uint64_t flags,
 	uint8_t *ip_address,
 	uint16_t port,
-	uint8_t proto
+	int transport_proto
 ) {
 	struct service_info *res = NULL;
 	return balancer_state_find_or_insert_vs(
@@ -93,7 +93,7 @@ balancer_state_register_vs(
 		ip_address,
 		flags & BALANCER_VS_IPV6_FLAG ? IPPROTO_IPV6 : IPPROTO_IP,
 		port,
-		proto,
+		transport_proto,
 		&res
 	);
 }
@@ -101,16 +101,24 @@ balancer_state_register_vs(
 ssize_t
 balancer_state_register_real(
 	struct balancer_state *state,
-	uint64_t flags,
-	uint8_t *ip_address,
-	uint8_t proto
+	uint8_t *vip_address,
+	uint64_t virtual_flags,
+	uint16_t port,
+	int transport_proto,
+	uint64_t real_flags,
+	uint8_t *ip_address
 ) {
 	struct service_info *res = NULL;
 	return balancer_state_find_or_insert_real(
 		state,
+		vip_address,
+		virtual_flags & BALANCER_VS_IPV6_FLAG ? IPPROTO_IPV6
+						      : IPPROTO_IP,
+		port,
+		transport_proto,
 		ip_address,
-		flags & BALANCER_REAL_IPV6_FLAG ? IPPROTO_IPV6 : IPPROTO_IP,
-		proto,
+		real_flags & BALANCER_REAL_IPV6_FLAG ? IPPROTO_IPV6
+						     : IPPROTO_IP,
 		&res
 	);
 }
