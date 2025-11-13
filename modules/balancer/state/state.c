@@ -146,14 +146,24 @@ static ssize_t
 find_or_insert_into_registry(
 	struct balancer_state *state,
 	struct service_registry *registry,
-	uint8_t *ip_address,
-	int ip_proto,
+	uint8_t *vip_address,
+	int vip_proto,
 	uint16_t port,
 	int transport_proto,
+	uint8_t *ip_address,
+	int ip_proto,
 	struct service_info **service_info
 ) {
 	for (size_t i = 0; i < registry->service_count; ++i) {
 		struct service_info *service = &registry->services[i];
+		if (service->vip_proto != vip_proto) {
+			continue;
+		}
+		if (memcmp(service->vip_address,
+			   vip_address,
+			   (vip_proto == IPPROTO_IPV6 ? NET6_LEN : NET4_LEN))) {
+			continue;
+		}
 		if (service->ip_proto != ip_proto) {
 			continue;
 		}
@@ -206,6 +216,10 @@ find_or_insert_into_registry(
 
 	size_t idx = registry->service_count - 1;
 	struct service_info *service = &registry->services[idx];
+	service->vip_proto = vip_proto;
+	memcpy(&service->vip_address,
+	       vip_address,
+	       (vip_proto == IPPROTO_IPV6 ? NET6_LEN : NET4_LEN));
 	service->ip_proto = ip_proto;
 	service->port = port;
 	service->transport_proto = transport_proto;
@@ -244,6 +258,8 @@ balancer_state_find_or_insert_vs(
 		ip_proto,
 		port,
 		transport_proto,
+		ip_address,
+		ip_proto,
 		service_info
 	);
 }
@@ -259,18 +275,23 @@ balancer_state_get_vs(struct balancer_state *state, size_t idx) {
 ssize_t
 balancer_state_find_or_insert_real(
 	struct balancer_state *state,
+	uint8_t *vip_address,
+	int vip_proto,
+	uint16_t port,
+	int transport_proto,
 	uint8_t *ip_address,
 	int ip_proto,
-	int transport_proto,
 	struct service_info **service_info
 ) {
 	return find_or_insert_into_registry(
 		state,
 		&state->real_registry,
+		vip_address,
+		vip_proto,
+		port,
+		transport_proto,
 		ip_address,
 		ip_proto,
-		0 /* real port always equals to vs port */,
-		transport_proto,
 		service_info
 	);
 }

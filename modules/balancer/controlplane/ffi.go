@@ -124,7 +124,7 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 		C.uint64_t(flags),
 		sliceToPtr(vs.Address.AsSlice()),
 		C.uint16_t(vs.Port),
-		C.uint8_t(proto),
+		C.int(proto),
 	)
 	if err != nil {
 		return VsConfig{inner: nil}, fmt.Errorf("failed to register vs: %w", err)
@@ -183,9 +183,12 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 
 		realIdx, err := C.balancer_state_register_real(
 			state.inner,
+			sliceToPtr(vs.Address.AsSlice()),
+			C.uint64_t(flags),
+			C.uint16_t(vs.Port),
+			C.int(proto),
 			C.uint64_t(realFlags),
 			sliceToPtr(real.DstAddr.AsSlice()),
-			C.uint8_t(proto),
 		)
 		if err != nil {
 			FreeVsConfig(&vsConfig)

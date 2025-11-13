@@ -78,9 +78,12 @@ balancer_state_get_vs(struct balancer_state *state, size_t idx);
 ssize_t
 balancer_state_find_or_insert_real(
 	struct balancer_state *state,
+	uint8_t *vip_address,
+	int vip_proto,
+	uint16_t port,
+	int transport_proto,
 	uint8_t *ip_address,
 	int ip_proto,
-	int transport_proto,
 	struct service_info **service_info
 );
 
