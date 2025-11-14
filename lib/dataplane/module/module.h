@@ -10,8 +10,7 @@
 /*
  * The structure enumerated packets processed by pipeline modules.
  * Each module reads a packet from an input list and then writes result to
- * an output list or bypass the pipeline landing the packet to a send or drop
- * list.
+ * an output list or drop list.
  *
  * Before module invocation input and output exchange packets so ouptut of
  * one module connects with input of the following.
