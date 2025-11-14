@@ -1,9 +1,10 @@
 #include "api/state.h"
 
 #include "controlplane.h"
+#include "controlplane/agent/agent.h"
 #include "run.h"
 #include "state/session_table.h"
-#include "tests/utils/mock.h"
+#include "test_utils/yanet_mock.h"
 #include "worker.h"
 
 #include "helpers.h"
@@ -55,15 +56,27 @@ run(void *arena,
 	    timeout_min,
 	    timeout_max);
 
-	void *sessions_memory = arena - workers_cnt * (1 << 20);
+	void *sessions_memory = arena + arena_size - workers_cnt * (1 << 20);
 	arena_size -= workers_cnt * (1 << 20);
 
-	struct mock *mock = mock_init(arena, arena_size);
-	if (mock == NULL) {
+	const size_t dp_memory = 1 << 20;
+	const size_t cp_memory_without_agent = 1 << 20;
+	const size_t agent_memory =
+		arena_size - dp_memory - cp_memory_without_agent;
+	const size_t cp_memory = agent_memory + cp_memory_without_agent;
+
+	char *module_type = "balancer";
+	struct yanet_mock mock;
+	int res = yanet_mock_init(
+		&mock, arena, dp_memory, cp_memory, &module_type, 1
+	);
+	if (res != 0) {
 		LOG(ERROR, "failed to init mock");
 		return 1;
 	}
-	struct agent *agent = mock_create_agent(mock, arena_size - (1 << 20));
+
+	struct agent *agent =
+		yanet_mock_agent_attach(&mock, "balancer", agent_memory);
 	if (agent == NULL) {
 		LOG(ERROR, "failed to create mock agent");
 		return 1;
@@ -71,7 +84,7 @@ run(void *arena,
 
 	// Init balancer state
 	struct session_table session_table;
-	int res = session_table_init(
+	res = session_table_init(
 		&session_table, &agent->memory_context, capacity, workers_cnt
 	);
 	if (res != 0) {

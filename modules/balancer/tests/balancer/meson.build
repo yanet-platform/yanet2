@@ -1,21 +1,11 @@
-test_env = environment(
-  {
-    'MALLOC_PERTURB_': '0',
-    'ASAN_OPTIONS': '',
-    'UBSAN_OPTIONS': '',
-    'MSAN_OPTIONS': '',
-  },
-)
-
 test(
   'balancer',
   find_program('go'),
   args: ['test'] + (get_option('b_coverage') ? ['-cover', '-args', '-test.gocoverdir=' + meson.current_build_dir()]: []),
   workdir: meson.current_source_dir(),
-  timeout: 120,
-  env: test_env,
+  timeout: 30,
   depends: [
-    lib_testing_module_dp, lib_balancer_test_utils
+    lib_testing_module_dp, lib_yanet_test_utils
   ],
   suite: 'balancer',
 )

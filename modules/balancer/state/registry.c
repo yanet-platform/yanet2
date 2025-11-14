@@ -18,6 +18,17 @@ service_state_copy(struct service_state *dst, struct service_state *src) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void
+balancer_real_stats_add(
+	struct balancer_real_stats *to, struct balancer_real_stats *stats
+) {
+	to->bytes += stats->bytes;
+	to->created_sessions += stats->created_sessions;
+	to->disabled += stats->disabled;
+	to->ops_packets += stats->ops_packets;
+	to->packets += stats->packets;
+}
+
+void
 service_info_accumulate_into_real_info(
 	struct service_info *service_info,
 	struct balancer_real_info *real_info,
@@ -54,14 +65,28 @@ service_info_accumulate_into_real_info(
 			real_info->last_packet_timestamp =
 				state->last_packet_timestamp;
 		}
-		real_info->created_connections += state->created_connections;
-		real_info->send_packets += state->out_packets;
-		real_info->send_bytes += state->out_bytes;
-		real_info->dropped_packets += state->dropped_packets;
+		balancer_real_stats_add(&real_info->stats, &state->stats.real);
 	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+void
+balancer_vs_stats_add(
+	struct balancer_vs_stats *to, struct balancer_vs_stats *stats
+) {
+	to->incoming_packets += stats->incoming_packets;
+	to->incoming_bytes += stats->incoming_bytes;
+	to->packet_src_not_allowed += stats->packet_src_not_allowed;
+	to->no_reals += stats->no_reals;
+	to->ops_packets += stats->ops_packets;
+	to->session_table_overflow += stats->session_table_overflow;
+	to->real_is_disabled += stats->real_is_disabled;
+	to->packet_not_rescheduled += stats->packet_not_rescheduled;
+	to->created_sessions += stats->created_sessions;
+	to->outgoing_packets += stats->outgoing_packets;
+	to->outgoing_bytes += stats->outgoing_bytes;
+}
 
 void
 service_info_accumulate_into_vs_info(
@@ -94,13 +119,6 @@ service_info_accumulate_into_vs_info(
 			vs_info->last_packet_timestamp =
 				state->last_packet_timestamp;
 		}
-		vs_info->created_connections += state->created_connections;
-		vs_info->in_packets += state->in_packets;
-		vs_info->out_packets += state->out_packets;
-		vs_info->in_bytes += state->in_bytes;
-		vs_info->out_bytes += state->out_bytes;
-		vs_info->denied_packets += state->denied_packets;
-		vs_info->discarded_packets += state->discarded_packets;
-		vs_info->dropped_packets += state->dropped_packets;
+		balancer_vs_stats_add(&vs_info->stats, &state->stats.vs);
 	}
 }

@@ -1,8 +1,11 @@
 #pragma once
 
 #include "common/memory_address.h"
+
+#include "ctx.h"
 #include "meta.h"
 #include "modules/balancer/state/registry.h"
+#include "modules/balancer/state/state.h"
 #include "rte_tcp.h"
 #include <assert.h>
 #include <filter/filter.h>
@@ -75,9 +78,16 @@ select_real(
 		uint32_t real_id =
 			ring_get(&vs->real_ring, next_rnd(vs, metadata));
 		if (real_id == RING_VALUE_INVALID) {
+			// discard packet because there are no enabled reals
+			packet_ctx_no_reals();
 			return NULL;
 		}
-		return &reals[real_id];
+
+		// select real
+		struct real *real = &reals[real_id];
+		packet_ctx_select_real_ops(real);
+
+		return real;
 	}
 
 	// get timeout for the session based on transport protocol flags
@@ -106,36 +116,49 @@ select_real(
 	    SESSION_TABLE_OVERFLOW) { // session with such id is not present and
 				      // there is no enough space in the session
 				      // table to create new state, so error
+		packet_ctx_session_table_overflow();
 		return NULL;
 	}
 
 	if (get_session_result == SESSION_FOUND) { // session with such id found
 		struct real *real = &reals[session_state->real_id];
-		assert(real->weight > 0);
 
-		// calculate until session was encountered
-		uint32_t until = session_state->last_packet_timestamp +
-				 session_state->timeout;
-		uint32_t time_from = now > until ? now : until;
+		if (!(real->flags & BALANCER_REAL_DISABLED_FLAG
+		    )) { // real not disabled
+			// real selected
 
-		// update session and unlock it
-		session_state->timeout = timeout;
-		session_state->last_packet_timestamp = now;
-		session_unlock(session_lock);
+			// calculate until session was encountered
+			uint32_t until = session_state->last_packet_timestamp +
+					 session_state->timeout;
+			uint32_t time_from = now > until ? now : until;
 
-		// put prolonged session into state
-		put_session(real, vs, worker_idx, now, time_from, timeout);
-		return real;
+			// update session and unlock it
+			session_state->timeout = timeout;
+			session_state->last_packet_timestamp = now;
+			session_unlock(session_lock);
+
+			// put prolonged session into state
+			packet_ctx_extend_session(real, time_from, timeout);
+
+			return real;
+		} else {
+			// real for the session is disabled,
+			// just mark it and try to find new real
+			// if packet can be rescheduled
+			packet_ctx_real_disabled(real);
+		}
 	}
 
-	// session with such id not found, but table inserted this session and
-	// returned pointer to session state with acquired lock.
+	// session not found or real is disabled
+	// but session inserted into table and
+	// we have pointer to session state with acquired lock.
 
-	// so, here session is created
+	// now we need to select real for packet
 
 	assert(session_state != NULL);
 	if (!reschedule_real(metadata
 	    )) { // packet type not allows to create new session
+		packet_ctx_packet_not_rescheduled();
 		session_remove(session_state); // free created state
 		session_unlock(session_lock);  // unlock state
 		return NULL;
@@ -145,9 +168,14 @@ select_real(
 
 	uint32_t real_id = ring_get(&vs->real_ring, next_rnd(vs, metadata));
 	if (real_id == RING_VALUE_INVALID) {
+		packet_ctx_no_reals(); // there are no alive reals
+		session_remove(session_state);
 		session_unlock(session_lock);
 		return NULL;
 	}
+
+	// real selected, new session is created
+
 	session_state->create_timestamp = now;
 	session_state->last_packet_timestamp = now;
 	session_state->real_id = real_id;
@@ -155,10 +183,10 @@ select_real(
 
 	session_unlock(session_lock);
 
-	struct real *real = &reals[real_id];
+	// select real
 
-	// put session into state
-	put_session(real, vs, worker_idx, now, now, timeout);
+	struct real *real = &reals[real_id];
+	packet_ctx_new_session(real, now, timeout);
 
 	return real;
 }

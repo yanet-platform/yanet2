@@ -7,10 +7,11 @@ dependencies = [
   libdpdk_dep,
 ]
 
-includes = include_directories('../../')
+includes = include_directories('../')
 
 sources = files(
   'yanet_mock.c',
+  'packet.c',
 )
 
 lib_yanet_test_utils = static_library(

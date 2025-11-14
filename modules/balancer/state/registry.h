@@ -5,9 +5,12 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "common/interval_counter.h"
-
 #include "worker.h"
+
+#include "../api/info.h"
+#include "../dataplane/real.h"
+
+#include "common/interval_counter.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -20,33 +23,10 @@ struct service_state {
 	// last packet timestamp
 	uint32_t last_packet_timestamp;
 
-	// number of created connections so far
-	size_t created_connections;
-
-	// number of incoming packets
-	size_t in_packets;
-
-	// number of outgoing packets (meanless for reals, always zero)
-	size_t out_packets;
-
-	// number of incoming traffic bytes
-	size_t in_bytes;
-
-	// number of outgoing traffic bytes (meanless for reals, always zero)
-	size_t out_bytes;
-
-	// number of packets which were denied because
-	// of src address not allowed (meanless for reals)
-	size_t denied_packets;
-
-	// number of packets which were discarded because
-	// it is impossible to determine destination real
-	// (meanless for reals)
-	size_t discarded_packets;
-
-	// number of packets which
-	// are dropped because its destination real is disabled
-	size_t dropped_packets;
+	union {
+		struct balancer_real_stats real;
+		struct balancer_vs_stats vs;
+	} stats;
 } __attribute__((__aligned__(64)));
 
 void

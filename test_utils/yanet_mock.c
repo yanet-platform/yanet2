@@ -63,6 +63,18 @@ find_or_insert_counter_storage(
 	       );
 }
 
+void
+yanet_mock_register_cp_module(
+	struct yanet_mock *mock,
+	struct cp_module *cp_module,
+	char *module_type,
+	char *module_name
+) {
+	find_or_insert_counter_storage(
+		mock, &cp_module->counter_registry, module_type, module_name
+	);
+}
+
 static inline int
 dataplane_init(
 	uint32_t numa_idx,

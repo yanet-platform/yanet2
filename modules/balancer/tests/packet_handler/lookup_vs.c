@@ -4,6 +4,7 @@
 
 #include "common/network.h"
 
+#include "dataplane/lookup.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/logging/log.h"
 
@@ -16,15 +17,18 @@
 #include "dataplane/vs.h"
 
 #include "state/state.h"
-#include "tests/utils/helpers.h"
-#include "tests/utils/mock.h"
-#include "tests/utils/packet.h"
-#include "tests/utils/rng.h"
+#include "tests_utils/helpers.h"
+#include "tests_utils/mock.h"
+#include "tests_utils/packet.h"
+#include "tests_utils/rng.h"
+#include "tests_utils/yanet_mock.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define ARENA_SIZE ((1 << 27) + 1000000)
 #define AGENT_MEMORY (1 << 27)
+#define DP_MEMORY (1 << 25)
+#define CP_MEMORY (1 << 28)
+#define ARENA_SIZE (AGENT_MEMORY + DP_MEMORY + CP_MEMORY + 1000000)
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -128,10 +132,15 @@ make_lookups(
 
 int
 pure_l3_and_ops_and_weight_matters(void *arena) {
-	struct mock *mock = mock_init(arena, ARENA_SIZE);
-	TEST_ASSERT_NOT_NULL(mock, "can not init mock for test");
+	char *module_type = "balancer";
+	struct yanet_mock mock;
+	int res = yanet_mock_init(
+		&mock, arena, DP_MEMORY, CP_MEMORY, &module_type, 1
+	);
+	TEST_ASSERT_EQUAL(res, 0, "failed to init yanet mock");
 
-	struct agent *agent = mock_create_agent(mock, AGENT_MEMORY);
+	struct agent *agent =
+		yanet_mock_agent_attach(&mock, "balancer", AGENT_MEMORY);
 	TEST_ASSERT_NOT_NULL(agent, "can not create agent");
 
 	struct balancer_state *state =
@@ -228,6 +237,10 @@ pure_l3_and_ops_and_weight_matters(void *arena) {
 	);
 	TEST_ASSERT_NOT_NULL(
 		balancer_module, "failed to create balancer module config"
+	);
+
+	yanet_mock_register_cp_module(
+		&mock, balancer_module, "balancer", "balancer"
 	);
 
 	struct balancer_module_config *balancer = container_of(
@@ -433,7 +446,7 @@ pure_l3_and_ops_and_weight_matters(void *arena) {
 	};
 
 	size_t lookups_cnt = sizeof(lookups) / sizeof(struct lookup_config);
-	int res = make_lookups(lookups, lookups_cnt, balancer);
+	res = make_lookups(lookups, lookups_cnt, balancer);
 	TEST_ASSERT_EQUAL(res, 0, "Failed to make first lookups");
 
 	// Add third service with pure L3 balancing
@@ -689,11 +702,16 @@ fill_lookups_correct(
 
 int
 many_services(void *arena) {
-	struct mock *mock = mock_init(arena, ARENA_SIZE);
-	TEST_ASSERT_NOT_NULL(mock, "can not init mock for test");
+	char *module_type = "balancer";
+	struct yanet_mock mock;
+	int res = yanet_mock_init(
+		&mock, arena, 1 << 20, AGENT_MEMORY, &module_type, 1
+	);
+	TEST_ASSERT_EQUAL(res, 0, "failed to init mock");
 
-	struct agent *agent = mock_create_agent(mock, AGENT_MEMORY);
-	TEST_ASSERT_NOT_NULL(agent, "can not create agent");
+	struct agent *agent =
+		yanet_mock_agent_attach(&mock, "balancer", AGENT_MEMORY);
+	TEST_ASSERT_NOT_NULL(agent, "can not attach agent");
 
 	struct balancer_state *state =
 		balancer_state_create(agent, 1000, 1, 2, 3, 4, 5, 6);
@@ -739,13 +757,15 @@ many_services(void *arena) {
 		balancer, "failed to create balancer module config"
 	);
 
+	yanet_mock_register_cp_module(&mock, balancer, "balancer", "balancer");
+
 	struct balancer_module_config *balancer_config = container_of(
 		balancer, struct balancer_module_config, cp_module
 	);
 
 	uint64_t rng = 123123;
 	fill_lookups_correct(lookups, services, &rng);
-	int res = make_lookups(lookups, services, balancer_config);
+	res = make_lookups(lookups, services, balancer_config);
 	TEST_ASSERT_EQUAL(res, 0, "Failed to make lookups");
 
 	// change port and dst

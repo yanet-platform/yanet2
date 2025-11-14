@@ -1,7 +1,8 @@
 package test_utils
 
 //#cgo CFLAGS: -I../
-//#cgo CFLAGS: -I../../../
+//#cgo CFLAGS: -I../../
+//#cgo CFLAGS: -I../../lib
 //#cgo LDFLAGS: -L../ -lyanet_test_utils
 /*
 #include <stdlib.h>

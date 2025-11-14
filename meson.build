@@ -72,6 +72,7 @@ libdpdk_inc_dep = libdpdk_dep.partial_dependency(includes: true)
 
 subdir('common')
 subdir('lib')
+subdir('test_utils')
 subdir('filter')
 subdir('modules')
 subdir('devices')

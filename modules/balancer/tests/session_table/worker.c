@@ -5,7 +5,7 @@
 #include <sys/time.h>
 #include <time.h>
 
-#include "../utils/rng.h"
+#include "test_utils/rng.h"
 
 #include "state/session_table.h"
 

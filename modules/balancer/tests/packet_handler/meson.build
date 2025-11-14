@@ -21,7 +21,8 @@ lookup_vs_exe = executable(
     lib_balancer_dp_dep,
     libdpdk_dep, 
     lib_config_dp_dep,
-    lib_balancer_test_utils_dep
+    lib_balancer_test_utils_dep,
+    lib_yanet_test_utils,
   ],
 )
 
@@ -50,7 +51,8 @@ select_real = executable(
     lib_balancer_dp_dep,
     libdpdk_dep, 
     lib_config_dp_dep,
-    lib_balancer_test_utils_dep
+    lib_balancer_test_utils_dep,
+    lib_yanet_test_utils
   ],
 )
 
@@ -74,7 +76,8 @@ metadata = executable(
     lib_balancer_dp_dep,
     libdpdk_dep, 
     lib_config_dp_dep,
-    lib_balancer_test_utils_dep
+    lib_balancer_test_utils_dep,
+    lib_yanet_test_utils
   ],
 )
 
@@ -98,7 +101,8 @@ tunnel = executable(
     lib_balancer_dp_dep,
     libdpdk_dep, 
     lib_config_dp_dep,
-    lib_balancer_test_utils_dep
+    lib_balancer_test_utils_dep,
+    lib_yanet_test_utils
   ],
 )
 

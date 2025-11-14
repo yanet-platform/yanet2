@@ -1,0 +1,8 @@
+#include "hash.h"
+
+////////////////////////////////////////////////////////////////////////////////
+
+static inline uint64_t
+rng_next(uint64_t *rng) {
+	return *rng = wyhash64(*rng);
+}
