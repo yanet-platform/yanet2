@@ -23,16 +23,14 @@ module_ectx_process(
 
 	LOG_TRACEX(int in = packet_list_counter(&packet_front->input);
 		   int out = packet_list_counter(&packet_front->output);
-		   int bypass = packet_list_counter(&packet_front->bypass);
 		   int drop = packet_list_counter(&packet_front->drop);
 		   packet_list_print(&packet_front->output);
 		   ,
 		   "processed packets with module %s, in %d, out "
-		   "%d, bypass %d, drop %d. Output list printed above.",
+		   "%d, drop %d. Output list printed above.",
 		   dp_module->name,
 		   in,
 		   out,
-		   bypass,
 		   drop);
 }
 
