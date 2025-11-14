@@ -31,7 +31,7 @@ module_ectx_process(
 		   ,
 		   "processed packets with module %s, in %d, out "
 		   "%d, drop %d. Output list printed above.",
-		   cp_module->name,
+		   dp_module->name,
 		   in,
 		   out,
 		   drop);
