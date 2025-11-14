@@ -24,11 +24,14 @@ module_ectx_process(
 	LOG_TRACEX(int in = packet_list_counter(&packet_front->input);
 		   int out = packet_list_counter(&packet_front->output);
 		   int drop = packet_list_counter(&packet_front->drop);
+		   struct cp_module *cp_module =
+			   ADDR_OF(&module_ectx->cp_module);
+
 		   packet_list_print(&packet_front->output);
 		   ,
 		   "processed packets with module %s, in %d, out "
 		   "%d, drop %d. Output list printed above.",
-		   dp_module->name,
+		   cp_module->name,
 		   in,
 		   out,
 		   drop);
