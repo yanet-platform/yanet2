@@ -3,7 +3,7 @@
 #include <netinet/in.h>
 #include <time.h>
 
-#include "../utils/rng.h"
+#include "test_utils/rng.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 

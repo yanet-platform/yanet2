@@ -1,11 +1,15 @@
 #include "vs.h"
 #include "common/memory_address.h"
 #include "common/network.h"
+#include "counters/counters.h"
+#include "info.h"
+#include "lookup.h"
 #include "module.h"
 
 #include "common/lpm.h"
 #include "common/memory.h"
 
+#include "../dataplane/counter.h"
 #include "../dataplane/module.h"
 #include "../dataplane/real.h"
 #include "../dataplane/vs.h"
@@ -18,7 +22,11 @@
 #include "filter/filter.h"
 #include "filter/rule.h"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -43,6 +51,64 @@ struct balancer_vs_config {
 	size_t real_count;
 	struct real reals[];
 };
+
+////////////////////////////////////////////////////////////////////////////////
+
+static void
+addr_serialize(uint8_t *addr, int proto, char *buf) {
+	if (proto == IPPROTO_IPV6) {
+		struct in6_addr inaddr;
+		memcpy(&inaddr, addr, sizeof(struct in6_addr));
+		inet_ntop(AF_INET6, &inaddr, buf, INET6_ADDRSTRLEN);
+	} else {
+		struct in_addr inaddr;
+		memcpy(&inaddr, addr, sizeof(struct in_addr));
+		inet_ntop(AF_INET, &inaddr, buf, INET_ADDRSTRLEN);
+	}
+}
+
+static void
+vs_serialize(struct balancer_vs_config *vs, char *buf) {
+	char addr[INET6_ADDRSTRLEN + 1];
+	memset(addr, 0, sizeof(addr));
+	addr_serialize(
+		vs->address,
+		vs->flags & BALANCER_VS_IPV6_FLAG ? IPPROTO_IPV6 : IPPROTO_IP,
+		addr
+	);
+	sprintf(buf,
+		"virtual[%s %s:%d]",
+		vs->proto == IPPROTO_TCP ? "tcp" : "udp",
+		addr,
+		vs->port);
+}
+
+static void
+real_serialize(struct balancer_vs_config *vs, struct real *real, char *buf) {
+	char vip[INET6_ADDRSTRLEN + 1];
+	memset(vip, 0, sizeof(vip));
+	addr_serialize(
+		vs->address,
+		vs->flags & BALANCER_VS_IPV6_FLAG ? IPPROTO_IPV6 : IPPROTO_IP,
+		vip
+	);
+
+	char real_ip[INET6_ADDRSTRLEN + 1];
+	memset(real_ip, 0, sizeof(real_ip));
+	addr_serialize(
+		real->dst_addr,
+		real->flags & BALANCER_REAL_IPV6_FLAG ? IPPROTO_IPV6
+						      : IPPROTO_IP,
+		real_ip
+	);
+
+	sprintf(buf,
+		"real[%s %s:%d -> %s]",
+		vs->proto == IPPROTO_TCP ? "tcp" : "udp",
+		vip,
+		vs->port,
+		real_ip);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -296,6 +362,17 @@ balancer_vs_init(
 		if (res < 0) {
 			goto free_initalized_vs;
 		}
+
+		// init counter
+		char vs_counter_name[80];
+		memset(vs_counter_name, 0, sizeof(vs_counter_name));
+		vs_serialize(vs_config, vs_counter_name);
+		vs->counter_id = counter_registry_register(
+			&config->cp_module.counter_registry,
+			vs_counter_name,
+			VS_COUNTER_SIZE
+		);
+
 		for (size_t real = 0; real < vs->real_count; ++real) {
 			struct real *current_real = &vs_config->reals[real];
 			struct real *setup_real =
@@ -312,6 +389,18 @@ balancer_vs_init(
 			if (setup_real->flags & BALANCER_REAL_DISABLED_FLAG) {
 				setup_real->weight = 0;
 			}
+
+			// init counter
+			char real_counter_name[80];
+			memset(real_counter_name, 0, sizeof(real_counter_name));
+			real_serialize(
+				vs_config, current_real, real_counter_name
+			);
+			setup_real->counter_id = counter_registry_register(
+				&config->cp_module.counter_registry,
+				real_counter_name,
+				REAL_COUNTER_SIZE
+			);
 		}
 		res = lpm_init(
 			&vs->src_filter, &config->cp_module.memory_context

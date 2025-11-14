@@ -9,6 +9,7 @@
 #include "vs.h"
 
 #include "../api/vs.h"
+#include <assert.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -74,9 +75,7 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 		);
 	}
 
-	if (ec != 0) {
-		return ec;
-	}
+	assert(ec == 0);
 
 	// use GRE for encap
 	if (vs_flags & BALANCER_VS_GRE_FLAG) {

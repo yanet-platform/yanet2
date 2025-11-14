@@ -11,6 +11,7 @@
 #include "api/state.h"
 #include "api/vs.h"
 
+#include "dataplane/lookup.h"
 #include "state/state.h"
 
 #include "lib/controlplane/agent/agent.h"

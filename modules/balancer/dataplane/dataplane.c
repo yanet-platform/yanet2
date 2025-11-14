@@ -6,14 +6,15 @@
 #include "common/memory_address.h"
 #include "controlplane/config/econtext.h"
 #include "counters/counters.h"
+#include "ctx.h"
 #include "dataplane.h"
 #include "dataplane/config/zone.h"
+#include "lookup.h"
 #include "meta.h"
 #include "modules/balancer/dataplane/module.h"
 #include "real.h"
 #include "select.h"
 #include "tunnel.h"
-#include "vs.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -29,20 +30,18 @@ handle_packets(
 	uint32_t worker_idx,
 	uint32_t now
 ) {
-	struct module_config_packets_counter *packets_counter =
-		balancer_module_config_packets_counter(
+	packet_ctx_setup(
+		counter_storage,
+		balancer_module_config_counter(
 			config, worker_idx, counter_storage
-		);
-	struct module_config_bytes_counter *bytes_counter =
-		balancer_module_config_bytes_counter(
-			config, worker_idx, counter_storage
-		);
+		),
+		worker_idx
+	);
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
-		// update module config counters
-		packets_counter->in += 1;
-		bytes_counter->in += packet->mbuf->pkt_len;
+		// set incoming packet
+		packet_ctx_incoming_packet(packet);
 
 		// 1. Lookup single virtual service for which packet is
 		// dirrected to
@@ -50,7 +49,6 @@ handle_packets(
 		struct virtual_service *vs = vs_lookup(config, packet);
 
 		if (vs == NULL) { // not found virtual service
-			packets_counter->select_vs_failed += 1;
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
@@ -61,7 +59,6 @@ handle_packets(
 		int res = fill_packet_metadata(packet, &meta);
 
 		if (res != 0) { // unexpected packet type
-			packets_counter->invalid_packet += 1;
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
@@ -71,7 +68,6 @@ handle_packets(
 		struct real *rs =
 			select_real(config, now, worker_idx, vs, &meta);
 		if (rs == NULL) { // failed to select real
-			packets_counter->select_real_failed += 1;
 			packet_front_drop(packet_front, packet);
 			continue;
 		}
@@ -79,19 +75,11 @@ handle_packets(
 		// 4. Tunnel packet to forward in to the selected real
 
 		res = tunnel_packet(vs->flags, rs, packet);
-		if (res != 0) { // failed to tunnel packet
-			packets_counter->tunnel_failed += 1;
-			packet_front_drop(packet_front, packet);
-			continue;
-		}
+		assert(res == 0);
 
 		// 5. Pass packet to the next module
 
 		packet_front_output(packet_front, packet);
-
-		// update module config counters
-		packets_counter->out += 1;
-		bytes_counter->out += packet->mbuf->pkt_len;
 	}
 }
 

@@ -12,7 +12,6 @@
 #include "dataplane/select.h"
 #include "dataplane/vs.h"
 #include "logging/log.h"
-#include "rte_common.h"
 
 #include "rte_hash_crc.h"
 #include "rte_tcp.h"
@@ -22,6 +21,7 @@
 
 #include <stdatomic.h>
 
+#include "dataplane/lookup.h"
 #include "dataplane/module.h"
 #include "dataplane/vs.h"
 #include "state/state.h"

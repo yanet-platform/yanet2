@@ -1,5 +1,6 @@
 #include <stddef.h>
 
+#include "lib/controlplane/config/cp_module.h"
 #include "lib/counters/counters.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -26,6 +27,14 @@ struct yanet_mock {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
+
+void
+yanet_mock_register_cp_module(
+	struct yanet_mock *mock,
+	struct cp_module *cp_module,
+	char *module_type,
+	char *module_name
+);
 
 int
 yanet_mock_init(

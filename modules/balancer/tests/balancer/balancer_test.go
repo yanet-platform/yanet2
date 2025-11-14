@@ -8,18 +8,18 @@ import (
 	"github.com/stretchr/testify/require"
 	cp "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	test_utils "github.com/yanet-platform/yanet2/test_utils/go"
 	"github.com/yanet-platform/yanet2/tests/go/common"
-	test_utils "github.com/yanet-platform/yanet2/tests/utils/go"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestPacketPlusUpdateReals(t *testing.T) {
-	mock, err := test_utils.NewYanetMock(1<<20, 1<<27, []string{"balancer"})
+	mock, err := test_utils.NewYanetMock(1<<22, 1<<27, []string{"balancer"})
 	require.Nil(t, err, "failed to create mock: %w", err)
 	defer mock.Free()
 
-	agent, err := mock.AttachAgent("balancer", 1<<24)
+	agent, err := mock.AttachAgent("balancer", 1<<25)
 	require.Nil(t, err, "failed to create agent: %w", err)
 
 	config := cp.ModuleInstanceConfig{

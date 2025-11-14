@@ -4,8 +4,7 @@ package test_balancer
 //#cgo CFLAGS: -I../../../../
 //#cgo CFLAGS: -I../../../../build
 //#cgo CFLAGS: -I../../../../../ -I../../../../../../lib -I../../../../../common
-//#cgo LDFLAGS: -L../../../../build/tests/utils -lyanet_test_utils
-//#cgo LDFLAGS: -L../../../../build/modules/balancer/tests/utils -lbalancer_test_utils
+//#cgo LDFLAGS: -L../../../../build/test_utils -lyanet_test_utils
 //#cgo LDFLAGS: -L../../../../build/modules/balancer/api -lbalancer_cp
 //#cgo LDFLAGS: -L../../../../build/modules/balancer/dataplane -lbalancer_dp
 //#cgo LDFLAGS: -L../../../../build/filter -lfilter
@@ -31,7 +30,7 @@ import "C"
 import (
 	"github.com/gopacket/gopacket"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
-	test_utils "github.com/yanet-platform/yanet2/tests/utils/go"
+	test_utils "github.com/yanet-platform/yanet2/test_utils/go"
 )
 
 func HandlePackets(

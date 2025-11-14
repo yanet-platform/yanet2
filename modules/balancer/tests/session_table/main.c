@@ -28,7 +28,7 @@ int
 main() {
 	log_enable_name("debug");
 
-	void *arena = malloc(ARENA_SIZE);
+	void *arena = aligned_alloc(64, ARENA_SIZE);
 	if (arena == NULL) {
 		LOG(ERROR, "Failed to allocate memory arena");
 		return 1;
