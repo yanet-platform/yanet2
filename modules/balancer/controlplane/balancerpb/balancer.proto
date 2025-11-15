@@ -3,6 +3,7 @@ syntax = "proto3";
 package balancerpb;
 
 import "common/proto/target.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/"
 		    "balancer/controlplane/balancerpb;balancerpb";
@@ -20,6 +21,12 @@ service BalancerService {
 
 	// Allows to reload module config
 	rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
+
+	// Information about balancer state
+	rpc StateInfo(StateInfoRequest) returns (StateInfoResponse);
+
+	// Information about balancer module config
+	rpc ConfigInfo(ConfigInfoRequest) returns (ConfigInfoResponse);
 
 	// todo
 	// rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
@@ -48,22 +55,7 @@ message Real {
 	bool enabled = 5;
 }
 
-message VirtualService {
-	// Virtual IP address.
-	bytes addr = 1;
-
-	uint32 port = 2;
-
-	// `TCP` or `UDP`
-	string proto = 3;
-
-	// todo: scheduler
-	// scheduler: wrr/prr/wlc
-
-	// List of CIDR subnets from which incoming requests are allowed.
-	repeated string allowed_srcs = 4;
-	repeated Real reals = 5;
-
+message VsFlags {
 	// If GRE flag is set, GRE is used for tunneling packets to
 	// every balancer real. Else, TUN is used. False by default.
 	bool gre = 6;
@@ -81,12 +73,46 @@ message VirtualService {
 	bool pure_l3 = 9;
 }
 
+message Subnet {
+	bytes addr = 1;
+	uint32 size = 2;
+}
+
+// TCP or UDP
+enum TransportProto {
+	TCP = 0;
+  	UDP = 1;
+}
+
+enum VsScheduler {
+	// Round robin based on hash
+	VS_SCHEDULER_WRR = 0;
+	// Round robin with counter
+	VS_SCHEDULER_PRR = 1;
+}
+
+message VirtualService {
+	// Virtual IP address.
+	bytes addr = 1;
+
+	uint32 port = 2;
+
+	TransportProto proto = 3;
+
+	VsScheduler scheduler = 4;
+
+	repeated Subnet allowed_srcs = 5;
+	repeated Real reals = 6;
+
+	VsFlags flags = 7;
+}
+
 message RealUpdate {
 	// IP of the virtual service real belongs to
 	bytes virtual_ip = 1;
 
 	// Virtual service proto
-	string proto = 2;
+	TransportProto proto = 2;
 
 	// Virtual service port
 	uint32 port = 3;
@@ -171,4 +197,104 @@ message ListConfigsRequest {
 
 message ListConfigsResponse {
 	repeated BalancerInstanceConfigInfo configs = 1;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+message VsStats {
+	uint64 incoming_packets = 1;
+	uint64 incoming_bytes = 2;
+	uint64 packet_src_not_allowed = 3;
+	uint64 no_reals = 4;
+	uint64 ops_packets = 5;
+	uint64 session_table_overflow = 6;
+	uint64 real_is_disabled = 7;
+	uint64 packet_not_rescheduled = 8;
+	uint64 created_sessions = 9;
+	uint64 outgoing_packets = 10;
+	uint64 outgoing_bytes = 11;
+}
+
+message RealStats {
+	uint64 real_disabled_packets = 1;
+	uint64 ops_packets = 2;
+	uint64 created_sessions = 3;
+	uint64 send_packets = 4;
+	uint64 send_bytes = 5;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+message StateVsInfo {
+	bytes ip = 1;
+	uint32 port = 2;
+	TransportProto transport_proto = 3;
+	uint64 active_connections = 4;
+	google.protobuf.Timestamp last_packet_timestamp = 5;
+	VsStats stats = 6;
+}
+
+message StateRealInfo {
+	bytes vip = 1;
+	uint32 virtual_port = 2;
+	bytes real_ip = 3;
+	TransportProto vs_proto = 4;
+	uint64 active_connections = 5;
+	google.protobuf.Timestamp last_packet_timestamp = 6;
+	RealStats stats = 7;
+}
+
+message StateInfo {
+	repeated StateVsInfo vs = 1;
+	repeated StateRealInfo real = 2;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+message StateInfoRequest {
+	commonpb.TargetModule target = 1;
+}
+
+message StateInfoResponse {
+	StateInfo info = 1;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+message ConfigRealInfo {
+	uint32 weight = 1;
+	bytes dst_addr = 2;
+	bytes src_addr = 3;
+	bytes src_mask = 4;
+	bool enabled = 5;
+	RealStats stats = 6;
+}
+
+message ConfigVsInfo {
+	bytes ip = 1;
+	uint32 port = 2;
+	TransportProto proto = 3;
+	repeated Subnet allowed_srcs = 4;
+	repeated ConfigRealInfo reals = 5;
+	VsFlags flags = 6;
+	VsStats stats = 7;
+}
+
+message ConfigInfo {
+	repeated ConfigVsInfo vs_info = 1;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+message ConfigInfoRequest {
+	uint32 dataplane_instance = 1;
+	string device = 2;
+	string pipeline = 3;
+	string function = 4;
+	string chain = 5;
+	string config = 6;
+}
+
+message ConfigInfoResponse {
+	ConfigInfo info = 1;
 }

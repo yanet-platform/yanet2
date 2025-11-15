@@ -10,14 +10,15 @@ import (
 
 // Real server description
 type Real struct {
-	Weight uint16
-
+	Weight  uint16
 	DstAddr netip.Addr
-
 	SrcAddr netip.Addr
 	SrcMask netip.Addr
-
 	Enabled bool
+
+	// State registry index
+	// -1 in case real was not registered yet
+	Idx int64
 }
 
 func NewRealFromProto(proto *balancerpb.Real) (*Real, error) {
@@ -55,6 +56,7 @@ func NewRealFromProto(proto *balancerpb.Real) (*Real, error) {
 		SrcAddr: srcAddr,
 		SrcMask: srcMask,
 		Enabled: proto.Enabled,
+		Idx:     -1,
 	}, nil
 }
 

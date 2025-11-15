@@ -5,6 +5,7 @@ go 1.24.1
 require (
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v5 v5.0.2
+	github.com/golang/protobuf v1.5.4
 	github.com/google/go-cmp v0.7.0
 	github.com/gopacket/gopacket v1.3.1
 	github.com/siderolabs/grpc-proxy v0.5.1

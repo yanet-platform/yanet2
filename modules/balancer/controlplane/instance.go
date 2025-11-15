@@ -116,7 +116,7 @@ func (config *ModuleInstanceConfig) ValidateRealUpdate(
 	} else {
 		update := RealUpdate{
 			VirtualIp: vip,
-			Proto:     update.Proto,
+			Proto:     TransportProtoFromProto(update.Proto),
 			Port:      uint16(update.Port),
 			RealIp:    realIp,
 			Enable:    update.Enable,
@@ -150,7 +150,7 @@ func (config *ModuleInstanceConfig) UpdateReal(update *RealUpdate) error {
 type ModuleInstance struct {
 	agent *ffi.Agent
 
-	// name of the `cp_module`
+	// name of the `cp_module`, balancer0 for example
 	name string
 
 	config *ModuleInstanceConfig
@@ -198,6 +198,17 @@ func NewModuleInstance(
 func (instance *ModuleInstance) Free() {
 	instance.state.Free()
 	instance.moduleConfig.Free()
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func (instance *ModuleInstance) StateInfo() (*StateInfo, error) {
+	return instance.state.Info()
+}
+
+func (instance *ModuleInstance) ConfigInfo(device *string, pipeline *string, function *string, chain *string) (*ConfigInfo, error) {
+	// todo: check if device, pipeline, function or chain is empty and traverse all variants then
+	return instance.config.Info(instance.agent.DPConfig(), *device, *pipeline, *function, *chain, instance.name)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
