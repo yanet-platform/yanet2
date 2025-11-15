@@ -30,7 +30,7 @@ dataplane_register_module(struct dp_config *dp_config, const char *name) {
 
 	dp_module->handler = NULL;
 
-	memset(dp_module->name, 0, sizeof(sizeof(dp_module->name)));
+	memset(dp_module->name, 0, sizeof(dp_module->name));
 	memcpy(dp_module->name, name, strlen(name));
 
 	SET_OFFSET_OF(&dp_config->dp_modules, dp_modules);
