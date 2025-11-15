@@ -86,9 +86,9 @@ enum TransportProto {
 
 enum VsScheduler {
 	// Round robin based on hash
-	VS_SCHEDULER_WRR = 0;
+	WRR = 0;
 	// Round robin with counter
-	VS_SCHEDULER_PRR = 1;
+	PRR = 1;
 }
 
 message VirtualService {
@@ -277,7 +277,8 @@ message ConfigVsInfo {
 	repeated Subnet allowed_srcs = 4;
 	repeated ConfigRealInfo reals = 5;
 	VsFlags flags = 6;
-	VsStats stats = 7;
+	VsScheduler scheduler = 7;
+	VsStats stats = 8;
 }
 
 message ConfigInfo {

@@ -236,6 +236,10 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 	if vs.Flags.PureL3 {
 		flags |= C.BALANCER_VS_PURE_L3_FLAG
 	}
+	if vs.Scheduler == VsSchedulerPRR {
+		flags |= C.BALANCER_VS_PRR_FLAG
+	}
+
 	proto := C.IPPROTO_TCP
 	if vs.Proto == TransportProtoUdp {
 		proto = C.IPPROTO_UDP
