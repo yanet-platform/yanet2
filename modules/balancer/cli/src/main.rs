@@ -2,6 +2,7 @@ mod cfg;
 mod cmd;
 mod rpc;
 mod service;
+mod info;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
