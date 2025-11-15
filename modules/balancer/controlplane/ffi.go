@@ -70,7 +70,11 @@ type BalancerState struct {
 	inner *C.struct_balancer_state
 }
 
-func NewState(agent *ffi.Agent, tableSize uint64, timeouts *SessionsTimeouts) (BalancerState, error) {
+func NewState(
+	agent *ffi.Agent,
+	tableSize uint64,
+	timeouts *SessionsTimeouts,
+) (BalancerState, error) {
 	state, err := C.balancer_state_create(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		C.size_t(tableSize),
@@ -176,7 +180,10 @@ func convertToRealsInfo(cRealsInfo *C.struct_balancer_reals_info) []StateRealInf
 		curRealInfo := &realsInfo[idx]
 		curCRealInfo := &unsafe.Slice((*C.struct_balancer_real_info)(unsafe.Pointer(cRealsInfo.info)), int(cRealsInfo.count))[idx]
 		*curRealInfo = StateRealInfo{
-			Vip:                 addressToSlice(&curCRealInfo.vip[0], curCRealInfo.virtual_ip_proto),
+			Vip: addressToSlice(
+				&curCRealInfo.vip[0],
+				curCRealInfo.virtual_ip_proto,
+			),
 			VirtualPort:         uint16(curCRealInfo.virtual_port),
 			RealIp:              addressToSlice(&curCRealInfo.ip[0], curCRealInfo.real_ip_proto),
 			TransportProto:      vsProtoFromIpProto(curCRealInfo.transport_proto),
@@ -282,7 +289,13 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 		)
 		if err != nil {
 			FreeVsConfig(&vsConfig)
-			return VsConfig{inner: nil}, fmt.Errorf("failed to set %d-th allowed src: %w", idx+1, err)
+			return VsConfig{
+					inner: nil,
+				}, fmt.Errorf(
+					"failed to set %d-th allowed src: %w",
+					idx+1,
+					err,
+				)
 		}
 	}
 
