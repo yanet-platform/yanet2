@@ -221,9 +221,59 @@ pub struct RealCmds {
     pub mode: RealMode,
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Debug, Clone, Parser)]
+pub struct StateInfoCmd {
+    /// Name of the module config.
+    #[arg(long = "cfg", short = 'c')]
+    pub config_name: String,
+
+    /// Index of the dataplane instance.
+    #[arg(long, short, required = false, default_value_t = 0)]
+    pub instance: u32,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct ConfigInfoCmd {
+    /// Index of the dataplane instance.
+    #[arg(long, short, required = false, default_value_t = 0)]
+    pub instance: u32,
+
+    #[arg(long = "cfg", short = 'c')]
+    pub config_name: String,
+
+    #[arg(long)]
+    pub device: Option<String>,
+
+    #[arg(long)]
+    pub pipeline: Option<String>,
+
+    #[arg(long)]
+    pub function: Option<String>,
+
+    #[arg(long)]
+    pub chain: Option<String>,
+}
+
+#[derive(Debug, Clone, Parser)]
+#[command(flatten_help = true)]
+pub enum InfoMode {
+    State(StateInfoCmd),
+    Config(ConfigInfoCmd),
+}
+
+/// Allows to print statistics about balancer.
+#[derive(Debug, Clone, Parser)]
+pub struct InfoCmds {
+    #[clap(subcommand)]
+    pub mode: InfoMode,
+}
+
 #[derive(Debug, Clone, Parser)]
 pub enum Mode {
     Enable(EnableBalancingCmd),
     ShowConfig(ShowConfigCmd),
     Real(RealCmds),
+    Info(InfoCmds),
 }

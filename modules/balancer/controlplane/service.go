@@ -236,7 +236,7 @@ func (service *BalancerService) ConfigInfo(
 		)
 	}
 
-	configInfo, err := instance.ConfigInfo(&req.Device, &req.Pipeline, &req.Function, &req.Chain)
+	configInfo, err := instance.ConfigInfo(req.Device, req.Pipeline, req.Function, req.Chain)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get state info: %v", err)
 	}
