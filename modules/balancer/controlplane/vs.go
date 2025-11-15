@@ -60,6 +60,23 @@ func (p TransportProto) IntoProto() balancerpb.TransportProto {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+type VsScheduler balancerpb.VsScheduler
+
+const (
+	VsSchedulerWRR VsScheduler = VsScheduler(balancerpb.VsScheduler_WRR)
+	VsSchedulerPRR VsScheduler = VsScheduler(balancerpb.VsScheduler_PRR)
+)
+
+func VsSchedulerFromProto(p balancerpb.VsScheduler) VsScheduler {
+	return VsScheduler(p)
+}
+
+func (p VsScheduler) IntoProto() balancerpb.VsScheduler {
+	return balancerpb.VsScheduler(p)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 // Virtual service description
 type VirtualService struct {
 	Address    netip.Addr
@@ -68,6 +85,7 @@ type VirtualService struct {
 	AllowedSrc []netip.Prefix
 	Reals      []Real
 	Flags      VsFlags
+	Scheduler  VsScheduler
 
 	// State registry index
 	// -1 in case vs was not registered yet
@@ -119,6 +137,8 @@ func NewVirtualServiceFromProto(proto *balancerpb.VirtualService) (*VirtualServi
 		reals = append(reals, *r)
 	}
 
+	scheduler := VsSchedulerFromProto(proto.Scheduler)
+
 	return &VirtualService{
 		Address:    addr,
 		Port:       port,
@@ -126,6 +146,7 @@ func NewVirtualServiceFromProto(proto *balancerpb.VirtualService) (*VirtualServi
 		AllowedSrc: allowedSrc,
 		Reals:      reals,
 		Flags:      flags,
+		Scheduler:  scheduler,
 		Idx:        -1,
 	}, nil
 }
@@ -155,5 +176,6 @@ func (vs *VirtualService) IntoProto() *balancerpb.VirtualService {
 		AllowedSrcs: allowedSrc,
 		Reals:       reals,
 		Flags:       &flags,
+		Scheduler:   vs.Scheduler.IntoProto(),
 	}
 }

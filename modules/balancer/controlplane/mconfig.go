@@ -38,6 +38,7 @@ type ConfigVsInfo struct {
 	AllowedSrc []netip.Prefix
 	Reals      []ConfigRealInfo
 	Flags      VsFlags
+	Scheduler  VsScheduler
 	Stats      VsStats
 }
 
