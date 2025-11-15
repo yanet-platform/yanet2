@@ -69,17 +69,13 @@ struct balancer_vs_config {
 
 static size_t
 vs_serialize(struct balancer_vs_config *vs, char *buf) {
-	sprintf(buf,
-		"v%lu",
-		vs->idx);
+	sprintf(buf, "v%lu", vs->idx);
 	return strlen(buf);
 }
 
 static void
 real_serialize(struct real *real, char *buf) {
-	sprintf(buf,
-		"r%lu",
-		real->idx);
+	sprintf(buf, "r%lu", real->idx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -365,9 +361,7 @@ balancer_vs_init(
 			// init counter
 			char real_counter_name[80];
 			memset(real_counter_name, 0, sizeof(real_counter_name));
-			real_serialize(
-				current_real, real_counter_name
-			);
+			real_serialize(current_real, real_counter_name);
 			setup_real->counter_id = counter_registry_register(
 				&config->cp_module.counter_registry,
 				real_counter_name,

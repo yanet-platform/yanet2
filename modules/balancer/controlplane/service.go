@@ -78,7 +78,13 @@ func (service *BalancerService) EnableBalancing(
 	}
 
 	timeouts := NewSessionsTimeoutsFromProto(req.SessionsTimeouts)
-	instance, err := NewModuleInstance(service.agents[inst], name, config, req.SessionTableSize, timeouts)
+	instance, err := NewModuleInstance(
+		service.agents[inst],
+		name,
+		config,
+		req.SessionTableSize,
+		timeouts,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new balancer instance: %v", err)
 	}
@@ -183,7 +189,10 @@ func (service *BalancerService) FlushRealUpdates(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (service *BalancerService) StateInfo(ctx context.Context, req *balancerpb.StateInfoRequest) (*balancerpb.StateInfoResponse, error) {
+func (service *BalancerService) StateInfo(
+	ctx context.Context,
+	req *balancerpb.StateInfoRequest,
+) (*balancerpb.StateInfoResponse, error) {
 	name, inst, err := req.GetTarget().Validate(uint32(len(service.agents)))
 	if err != nil {
 		return nil, fmt.Errorf("incorrect target module: %v", err)
@@ -209,8 +218,10 @@ func (service *BalancerService) StateInfo(ctx context.Context, req *balancerpb.S
 	}, nil
 }
 
-func (service *BalancerService) ConfigInfo(ctx context.Context, req *balancerpb.ConfigInfoRequest) (*balancerpb.ConfigInfoResponse, error) {
-
+func (service *BalancerService) ConfigInfo(
+	ctx context.Context,
+	req *balancerpb.ConfigInfoRequest,
+) (*balancerpb.ConfigInfoResponse, error) {
 	service.mu.Lock()
 	defer service.mu.Unlock()
 
@@ -218,7 +229,11 @@ func (service *BalancerService) ConfigInfo(ctx context.Context, req *balancerpb.
 	instance, exists := service.instances[key]
 
 	if !exists {
-		return nil, fmt.Errorf("module [name=%s, inst=%d] not exists", req.Config, req.DataplaneInstance)
+		return nil, fmt.Errorf(
+			"module [name=%s, inst=%d] not exists",
+			req.Config,
+			req.DataplaneInstance,
+		)
 	}
 
 	configInfo, err := instance.ConfigInfo(&req.Device, &req.Pipeline, &req.Function, &req.Chain)
@@ -302,7 +317,11 @@ func (service *BalancerService) MakeChecks(ctx context.Context, period time.Dura
 
 		for m, value := range service.instances {
 			if err := value.CheckSessionTable(); err != nil {
-				service.log.Errorf("failed to check session table for module [name=%s, instance=%d]", m.name, m.dataplaneInstance)
+				service.log.Errorf(
+					"failed to check session table for module [name=%s, instance=%d]",
+					m.name,
+					m.dataplaneInstance,
+				)
 			}
 		}
 

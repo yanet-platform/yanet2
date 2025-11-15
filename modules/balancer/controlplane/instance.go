@@ -82,10 +82,15 @@ func (config *ModuleInstanceConfig) IntoProto() *balancerpb.BalancerInstanceConf
 	}
 }
 
-func (config *ModuleInstanceConfig) FindReal(vip *netip.Addr, realIp *netip.Addr, port uint16) *Real {
+func (config *ModuleInstanceConfig) FindReal(
+	vip *netip.Addr,
+	realIp *netip.Addr,
+	port uint16,
+) *Real {
 	for service_idx := range config.Services {
 		service := &config.Services[service_idx]
-		if service.Address == *vip && (port == service.Port || (service.Flags.PureL3 && port == 0)) {
+		if service.Address == *vip &&
+			(port == service.Port || (service.Flags.PureL3 && port == 0)) {
 			for idx := range service.Reals {
 				real := &service.Reals[idx]
 				if real.DstAddr == *realIp {
@@ -112,7 +117,12 @@ func (config *ModuleInstanceConfig) ValidateRealUpdate(
 		return nil, fmt.Errorf("failed to parse real ip: %w", err)
 	}
 	if real := config.FindReal(&vip, &realIp, uint16(update.Port)); real == nil {
-		return nil, fmt.Errorf("real with address %s not found on virtual service %s:%d", realIp, vip, update.Port)
+		return nil, fmt.Errorf(
+			"real with address %s not found on virtual service %s:%d",
+			realIp,
+			vip,
+			update.Port,
+		)
 	} else {
 		update := RealUpdate{
 			VirtualIp: vip,
@@ -206,9 +216,21 @@ func (instance *ModuleInstance) StateInfo() (*StateInfo, error) {
 	return instance.state.Info()
 }
 
-func (instance *ModuleInstance) ConfigInfo(device *string, pipeline *string, function *string, chain *string) (*ConfigInfo, error) {
+func (instance *ModuleInstance) ConfigInfo(
+	device *string,
+	pipeline *string,
+	function *string,
+	chain *string,
+) (*ConfigInfo, error) {
 	// todo: check if device, pipeline, function or chain is empty and traverse all variants then
-	return instance.config.Info(instance.agent.DPConfig(), *device, *pipeline, *function, *chain, instance.name)
+	return instance.config.Info(
+		instance.agent.DPConfig(),
+		*device,
+		*pipeline,
+		*function,
+		*chain,
+		instance.name,
+	)
 }
 
 ////////////////////////////////////////////////////////////////////////////////

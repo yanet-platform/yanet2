@@ -149,7 +149,14 @@ func findRealCounters(real *Real, counters []ffi.CounterInfo) *ffi.CounterInfo {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (config *ModuleInstanceConfig) Info(dpConfig *ffi.DPConfig, device string, pipeline string, function string, chain string, name string) (*ConfigInfo, error) {
+func (config *ModuleInstanceConfig) Info(
+	dpConfig *ffi.DPConfig,
+	device string,
+	pipeline string,
+	function string,
+	chain string,
+	name string,
+) (*ConfigInfo, error) {
 	counters := dpConfig.ModuleCounters(device, pipeline, function, chain, "balancer", name)
 	configInfo := ConfigInfo{
 		Vs: make([]ConfigVsInfo, 0, len(config.Services)),
