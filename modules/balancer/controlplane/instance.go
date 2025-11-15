@@ -217,18 +217,18 @@ func (instance *ModuleInstance) StateInfo() (*StateInfo, error) {
 }
 
 func (instance *ModuleInstance) ConfigInfo(
-	device *string,
-	pipeline *string,
-	function *string,
-	chain *string,
+	device string,
+	pipeline string,
+	function string,
+	chain string,
 ) (*ConfigInfo, error) {
 	// todo: check if device, pipeline, function or chain is empty and traverse all variants then
 	return instance.config.Info(
 		instance.agent.DPConfig(),
-		*device,
-		*pipeline,
-		*function,
-		*chain,
+		device,
+		pipeline,
+		function,
+		chain,
 		instance.name,
 	)
 }

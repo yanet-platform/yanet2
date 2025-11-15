@@ -4,7 +4,7 @@ use tonic::transport::Channel;
 
 use crate::{
     cfg,
-    cmd::{DisableRealCmd, EnableBalancingCmd, EnableRealCmd, FlushRealUpdatesCmd, Mode, RealMode, ShowConfigCmd},
+    cmd::{ConfigInfoCmd, DisableRealCmd, EnableBalancingCmd, EnableRealCmd, FlushRealUpdatesCmd, InfoMode, Mode, RealMode, ShowConfigCmd, StateInfoCmd},
     rpc::{BalancerServiceClient, balancerpb, commonpb},
 };
 
@@ -85,6 +85,31 @@ impl BalancerService {
         Ok(())
     }
 
+    async fn display_state_info(&mut self, cmd: StateInfoCmd) -> Result<(), Box<dyn Error>> {
+        let request = balancerpb::StateInfoRequest {
+            target: Some(commonpb::TargetModule { config_name: cmd.config_name, dataplane_instance: cmd.instance })
+        };
+        let result = self.client.state_info(request).await?.into_inner();
+        // todo: pretty print
+        println!("{:?}", result);
+        Ok(())
+    }
+
+    async fn display_config_info(&mut self, cmd: ConfigInfoCmd) -> Result<(), Box<dyn Error>> {
+        let request = balancerpb::ConfigInfoRequest {
+            dataplane_instance: cmd.instance,
+            config: cmd.config_name,
+            pipeline: cmd.pipeline.unwrap_or_default(),
+            function: cmd.function.unwrap_or_default(),
+            chain: cmd.chain.unwrap_or_default(),
+            device: cmd.device.unwrap_or_default(),
+        };
+        let result = self.client.config_info(request).await?.into_inner();
+        // todo: pretty print
+        println!("{:?}", result);
+        Ok(())
+    }
+
     pub async fn handle_cmd(&mut self, mode: Mode) -> Result<(), Box<dyn Error>> {
         log::trace!("{mode:?}");
         match mode {
@@ -95,6 +120,10 @@ impl BalancerService {
                 RealMode::Disable(cmd) => self.disable_real(cmd).await,
                 RealMode::Flush(cmd) => self.flush_real_updates(cmd).await,
             },
+            Mode::Info(cmd) => match cmd.mode {
+                InfoMode::State(cmd) => self.display_state_info(cmd).await,
+                InfoMode::Config(cmd) => self.display_config_info(cmd).await,
+            }
         }
     }
 }
