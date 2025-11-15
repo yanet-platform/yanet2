@@ -4,11 +4,8 @@
 #include <pthread.h>
 #include <stdlib.h>
 
+#include "arena.h"
 #include "run.h"
-
-////////////////////////////////////////////////////////////////////////////////
-
-#define ARENA_SIZE ((size_t)1 << 30)
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -77,7 +74,6 @@ main() {
 			    test_params->description);
 			int run_result =
 				run(arena,
-				    ARENA_SIZE,
 				    test_params->workers_cnt,
 				    test_params->session_table_capacity,
 				    test_params->sessions_per_worker,

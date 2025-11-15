@@ -34,7 +34,6 @@ run_dp_worker(void *cfg) {
 
 int
 run(void *arena,
-    size_t arena_size,
     uint32_t workers_cnt,
     uint32_t capacity,
     uint32_t sessions,
@@ -56,14 +55,11 @@ run(void *arena,
 	    timeout_min,
 	    timeout_max);
 
-	void *sessions_memory = arena + arena_size - workers_cnt * (1 << 20);
-	arena_size -= workers_cnt * (1 << 20);
+	void *sessions_memory = arena - workers_cnt * (1 << 20);
 
-	const size_t dp_memory = 1 << 20;
-	const size_t cp_memory_without_agent = 1 << 20;
-	const size_t agent_memory =
-		arena_size - dp_memory - cp_memory_without_agent;
-	const size_t cp_memory = agent_memory + cp_memory_without_agent;
+	const size_t dp_memory = 1 << 26;
+	const size_t agent_memory = (1 << 28) + (1 << 27);
+	const size_t cp_memory = agent_memory + (1 << 26);
 
 	char *module_type = "balancer";
 	struct yanet_mock mock;

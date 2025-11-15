@@ -8,6 +8,8 @@
 struct dp_config;
 struct cp_config;
 
+////////////////////////////////////////////////////////////////////////////////
+
 struct counter_mock {
 	struct counter_storage *storage;
 	char module_type[80];

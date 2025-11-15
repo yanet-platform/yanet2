@@ -5,7 +5,6 @@
 
 int
 run(void *arena,
-    size_t arena_size,
     uint32_t workers_cnt,
     uint32_t capacity,
     uint32_t sessions,
