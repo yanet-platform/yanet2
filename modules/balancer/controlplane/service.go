@@ -183,6 +183,54 @@ func (service *BalancerService) FlushRealUpdates(
 
 ////////////////////////////////////////////////////////////////////////////////
 
+func (service *BalancerService) StateInfo(ctx context.Context, req *balancerpb.StateInfoRequest) (*balancerpb.StateInfoResponse, error) {
+	name, inst, err := req.GetTarget().Validate(uint32(len(service.agents)))
+	if err != nil {
+		return nil, fmt.Errorf("incorrect target module: %v", err)
+	}
+
+	service.mu.Lock()
+	defer service.mu.Unlock()
+
+	key := moduleKey{name: name, dataplaneInstance: inst}
+	instance, exists := service.instances[key]
+
+	if !exists {
+		return nil, fmt.Errorf("module [name=%s, inst=%d] not exists", name, inst)
+	}
+
+	stateInfo, err := instance.StateInfo()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get state info: %v", err)
+	}
+
+	return &balancerpb.StateInfoResponse{
+		Info: stateInfo.IntoProto(),
+	}, nil
+}
+
+func (service *BalancerService) ConfigInfo(ctx context.Context, req *balancerpb.ConfigInfoRequest) (*balancerpb.ConfigInfoResponse, error) {
+
+	service.mu.Lock()
+	defer service.mu.Unlock()
+
+	key := moduleKey{name: req.Config, dataplaneInstance: req.DataplaneInstance}
+	instance, exists := service.instances[key]
+
+	if !exists {
+		return nil, fmt.Errorf("module [name=%s, inst=%d] not exists", req.Config, req.DataplaneInstance)
+	}
+
+	configInfo, err := instance.ConfigInfo(&req.Device, &req.Pipeline, &req.Function, &req.Chain)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get state info: %v", err)
+	}
+
+	return &balancerpb.ConfigInfoResponse{Info: configInfo.IntoProto()}, nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 // Show config for the specified balancer instance
 func (service *BalancerService) ShowConfig(
 	ctx context.Context,

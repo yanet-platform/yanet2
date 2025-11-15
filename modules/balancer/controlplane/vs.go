@@ -23,21 +23,55 @@ type VsFlags struct {
 	FixMSS bool
 }
 
-type VsProto string
+func (flags *VsFlags) IntoProto() balancerpb.VsFlags {
+	return balancerpb.VsFlags{
+		Gre:    flags.GRE,
+		FixMss: flags.FixMSS,
+		Ops:    flags.OPS,
+		PureL3: flags.PureL3,
+	}
+}
+
+func VsFlagsFromProto(flags *balancerpb.VsFlags) VsFlags {
+	return VsFlags{
+		GRE:    flags.Gre,
+		OPS:    flags.Ops,
+		PureL3: flags.PureL3,
+		FixMSS: flags.FixMss,
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type TransportProto balancerpb.TransportProto
 
 const (
-	VsProtoUdp VsProto = "UDP"
-	VsProtoTcp VsProto = "TCP"
+	TransportProtoUdp TransportProto = TransportProto(balancerpb.TransportProto_UDP)
+	TransportProtoTcp TransportProto = TransportProto(balancerpb.TransportProto_TCP)
 )
+
+func TransportProtoFromProto(p balancerpb.TransportProto) TransportProto {
+	return TransportProto(p)
+}
+
+func (p TransportProto) IntoProto() balancerpb.TransportProto {
+	return balancerpb.TransportProto(p)
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 // Virtual service description
 type VirtualService struct {
 	Address    netip.Addr
 	Port       uint16
-	Proto      VsProto
+	Proto      TransportProto
 	AllowedSrc []netip.Prefix
 	Reals      []Real
 	Flags      VsFlags
+
+	// State registry index
+	// -1 in case vs was not registered yet
+	Idx int64
 }
 
 func NewVirtualServiceFromProto(proto *balancerpb.VirtualService) (*VirtualService, error) {
@@ -59,30 +93,19 @@ func NewVirtualServiceFromProto(proto *balancerpb.VirtualService) (*VirtualServi
 	port := uint16(proto.Port)
 
 	// Get protocol
-	protocol := VsProtoTcp
-	if proto.Proto == string(VsProtoTcp) {
-
-	} else if proto.Proto == string(VsProtoUdp) {
-		protocol = VsProtoUdp
-	} else {
-		return nil, fmt.Errorf("incorrect proto: '%s', only '%s' and '%s' allowed", proto.Proto, VsProtoUdp, VsProtoTcp)
-	}
+	protocol := TransportProtoFromProto(proto.Proto)
 
 	// Get flags
-	flags := VsFlags{
-		GRE:    proto.Gre,
-		OPS:    proto.Ops,
-		PureL3: proto.PureL3,
-		FixMSS: proto.FixMss,
-	}
+	flags := VsFlagsFromProto(proto.Flags)
 
 	// Get allowed src
 	allowedSrc := make([]netip.Prefix, 0)
 	for idx, subnet := range proto.AllowedSrcs {
-		allowedPrefix, err := netip.ParsePrefix(subnet)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse allowed subnet no. %d: %w", idx+1, err)
+		addr, ok := netip.AddrFromSlice(subnet.Addr)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse subnet address no. %d", idx+1)
 		}
+		allowedPrefix := netip.PrefixFrom(addr, int(subnet.Size))
 		allowedSrc = append(allowedSrc, allowedPrefix)
 	}
 
@@ -103,14 +126,18 @@ func NewVirtualServiceFromProto(proto *balancerpb.VirtualService) (*VirtualServi
 		AllowedSrc: allowedSrc,
 		Reals:      reals,
 		Flags:      flags,
+		Idx:        -1,
 	}, nil
 }
 
 func (vs *VirtualService) IntoProto() *balancerpb.VirtualService {
 	// Make allowed src
-	allowedSrc := make([]string, 0)
-	for _, prefix := range vs.AllowedSrc {
-		allowedSrc = append(allowedSrc, prefix.String())
+	allowedSrc := make([]*balancerpb.Subnet, 0)
+	for _, subnet := range vs.AllowedSrc {
+		allowedSrc = append(allowedSrc, &balancerpb.Subnet{
+			Addr: subnet.Addr().AsSlice(),
+			Size: uint32(subnet.Bits()),
+		})
 	}
 
 	// Make reals
@@ -119,15 +146,14 @@ func (vs *VirtualService) IntoProto() *balancerpb.VirtualService {
 		reals = append(reals, real.IntoProto())
 	}
 
+	flags := vs.Flags.IntoProto()
+
 	return &balancerpb.VirtualService{
 		Addr:        []byte(vs.Address.String()),
 		Port:        uint32(vs.Port),
-		Proto:       string(vs.Proto),
+		Proto:       vs.Proto.IntoProto(),
 		AllowedSrcs: allowedSrc,
 		Reals:       reals,
-		Gre:         vs.Flags.GRE,
-		FixMss:      vs.Flags.FixMSS,
-		Ops:         vs.Flags.OPS,
-		PureL3:      vs.Flags.PureL3,
+		Flags:       &flags,
 	}
 }

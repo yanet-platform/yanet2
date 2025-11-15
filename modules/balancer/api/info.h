@@ -147,11 +147,11 @@ struct balancer_reals_info {
 /// Fills real info.
 /// @returns -1 on error.
 int
-balancer_fill_real_info(
+balancer_fill_reals_info(
 	struct balancer_state *state, struct balancer_reals_info *info
 );
 
 void
-balancer_free_real_info(
+balancer_free_reals_info(
 	struct balancer_state *state, struct balancer_reals_info *info
 );

@@ -19,12 +19,14 @@ package balancer
 //#include "modules/balancer/api/vs.h"
 //#include "modules/balancer/api/module.h"
 //#include "modules/balancer/api/state.h"
+//#include "modules/balancer/api/info.h"
 //
 // #include <netinet/in.h>
 // #include <stdlib.h>
 import "C"
 import (
 	"fmt"
+	"time"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
@@ -37,6 +39,26 @@ import (
 
 func sliceToPtr(s []byte) *C.uint8_t {
 	return (*C.uint8_t)(&s[0])
+}
+
+func ptrToSlice(p *C.uint8_t, len int) []byte {
+	return C.GoBytes(unsafe.Pointer(p), C.int(len))
+}
+
+func addressToSlice(p *C.uint8_t, addr C.int) []byte {
+	len := 16
+	if addr == C.IPPROTO_IP {
+		len = 4
+	}
+	return ptrToSlice(p, len)
+}
+
+func vsProtoFromIpProto(proto C.int) TransportProto {
+	if proto == C.IPPROTO_TCP {
+		return TransportProtoTcp
+	} else {
+		return TransportProtoUdp
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -72,6 +94,101 @@ func NewState(agent *ffi.Agent, tableSize uint64, timeouts *SessionsTimeouts) (B
 func (state *BalancerState) Free() {
 	C.balancer_state_destroy(state.inner)
 }
+
+// Fills state info
+func (state *BalancerState) Info() (*StateInfo, error) {
+	// Get vs info
+
+	vsInfo := C.struct_balancer_virtual_services_info{}
+	res, err := C.balancer_fill_vs_info(state.inner, &vsInfo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fill vs info: %w", err)
+	}
+	if res != 0 {
+		return nil, fmt.Errorf("failed to fill vs info")
+	}
+	defer C.balancer_free_vs_info(state.inner, &vsInfo)
+
+	// Get real info
+
+	realsInfo := C.struct_balancer_reals_info{}
+	res, err = C.balancer_fill_reals_info(state.inner, &realsInfo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fill reals info: %w", err)
+	}
+	if res != 0 {
+		return nil, fmt.Errorf("failed to fill reals info")
+	}
+	defer C.balancer_free_reals_info(state.inner, &realsInfo)
+
+	return &StateInfo{
+		VsInfo:   convertToVsInfo(&vsInfo),
+		RealInfo: convertToRealsInfo(&realsInfo),
+	}, nil
+}
+
+func convertToVsStats(stats *C.struct_balancer_vs_stats) VsStats {
+	return VsStats{
+		IncomingPackets:      uint64(stats.incoming_packets),
+		IncomingBytes:        uint64(stats.incoming_bytes),
+		PacketSrcNotAllowed:  uint64(stats.packet_src_not_allowed),
+		NoReals:              uint64(stats.no_reals),
+		OpsPackets:           uint64(stats.ops_packets),
+		SessionTableOverflow: uint64(stats.session_table_overflow),
+		RealIsDisabled:       uint64(stats.real_is_disabled),
+		PacketNotRescheduled: uint64(stats.packet_not_rescheduled),
+		CreatedSessions:      uint64(stats.created_sessions),
+		OutgoingPackets:      uint64(stats.outgoing_packets),
+		OutgoingBytes:        uint64(stats.outgoing_bytes),
+	}
+}
+
+func convertToRealStats(stats *C.struct_balancer_real_stats) RealStats {
+	return RealStats{
+		RealDisabledPackets: uint64(stats.disabled),
+		OpsPackets:          uint64(stats.ops_packets),
+		CreatedSessions:     uint64(stats.created_sessions),
+		SendPackets:         uint64(stats.packets),
+		SendBytes:           uint64(stats.bytes),
+	}
+}
+
+func convertToVsInfo(cVsInfo *C.struct_balancer_virtual_services_info) []StateVsInfo {
+	vsInfo := make([]StateVsInfo, int(cVsInfo.count))
+	for idx := range len(vsInfo) {
+		curVsInfo := &vsInfo[idx]
+		curCVsInfo := &unsafe.Slice((*C.struct_balancer_vs_info)(unsafe.Pointer(cVsInfo.info)), int(cVsInfo.count))[idx]
+		*curVsInfo = StateVsInfo{
+			Ip:                  addressToSlice(&curCVsInfo.ip[0], curCVsInfo.ip_proto),
+			Port:                uint16(curCVsInfo.virtual_port),
+			TransportProto:      vsProtoFromIpProto(curCVsInfo.transport_proto),
+			ActiveConnections:   uint64(curCVsInfo.active_connections),
+			LastPacketTimestamp: time.Unix(int64(curCVsInfo.last_packet_timestamp), 0),
+			Stats:               convertToVsStats(&curCVsInfo.stats),
+		}
+	}
+	return vsInfo
+}
+
+func convertToRealsInfo(cRealsInfo *C.struct_balancer_reals_info) []StateRealInfo {
+	realsInfo := make([]StateRealInfo, int(cRealsInfo.count))
+	for idx := range len(realsInfo) {
+		curRealInfo := &realsInfo[idx]
+		curCRealInfo := &unsafe.Slice((*C.struct_balancer_real_info)(unsafe.Pointer(cRealsInfo.info)), int(cRealsInfo.count))[idx]
+		*curRealInfo = StateRealInfo{
+			Vip:                 addressToSlice(&curCRealInfo.vip[0], curCRealInfo.virtual_ip_proto),
+			VirtualPort:         uint16(curCRealInfo.virtual_port),
+			RealIp:              addressToSlice(&curCRealInfo.ip[0], curCRealInfo.real_ip_proto),
+			TransportProto:      vsProtoFromIpProto(curCRealInfo.transport_proto),
+			ActiveConnections:   uint64(curCRealInfo.active_connections),
+			LastPacketTimestamp: time.Unix(int64(curCRealInfo.last_packet_timestamp), 0),
+			Stats:               convertToRealStats(&curCRealInfo.stats),
+		}
+	}
+	return realsInfo
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 // Extend session table on demand (use `force` to force extension)
 func (state *BalancerState) ExtendSessionTable(force bool) error {
@@ -113,7 +230,7 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 		flags |= C.BALANCER_VS_PURE_L3_FLAG
 	}
 	proto := C.IPPROTO_TCP
-	if vs.Proto == VsProtoUdp {
+	if vs.Proto == TransportProtoUdp {
 		proto = C.IPPROTO_UDP
 	}
 
@@ -132,6 +249,7 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 	if idx == -1 {
 		return VsConfig{inner: nil}, fmt.Errorf("failed to register vs")
 	}
+	vs.Idx = int64(idx)
 
 	// create vs config
 	config, err := C.balancer_vs_config_create(
@@ -170,7 +288,8 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 
 	// Add to config only enabled reals
 	counter := 0
-	for idx, real := range vs.Reals {
+	for idx := range vs.Reals {
+		real := &vs.Reals[idx]
 		realFlags := 0
 		if real.DstAddr.Is6() {
 			realFlags |= C.BALANCER_REAL_IPV6_FLAG
@@ -198,6 +317,7 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 			FreeVsConfig(&vsConfig)
 			return VsConfig{inner: nil}, fmt.Errorf("failed to register real")
 		}
+		real.Idx = int64(realIdx)
 
 		_, err = C.balancer_vs_config_set_real(
 			config,
@@ -294,3 +414,5 @@ func (config *ModuleConfig) InsertIntoRegistry(agent *ffi.Agent) error {
 	}
 	return nil
 }
+
+////////////////////////////////////////////////////////////////////////////////

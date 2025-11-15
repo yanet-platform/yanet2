@@ -6,7 +6,7 @@ import (
 
 type RealUpdate struct {
 	VirtualIp netip.Addr
-	Proto     string
+	Proto     TransportProto
 	Port      uint16
 	RealIp    netip.Addr
 	Enable    bool

@@ -40,7 +40,7 @@ struct balancer_vs_config {
 	struct memory_context *mctx;
 
 	// index of the vs in the balancer registry
-	size_t id;
+	size_t idx;
 
 	vs_flags_t flags;
 	uint8_t address[16];
@@ -54,60 +54,32 @@ struct balancer_vs_config {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static void
-addr_serialize(uint8_t *addr, int proto, char *buf) {
-	if (proto == IPPROTO_IPV6) {
-		struct in6_addr inaddr;
-		memcpy(&inaddr, addr, sizeof(struct in6_addr));
-		inet_ntop(AF_INET6, &inaddr, buf, INET6_ADDRSTRLEN);
-	} else {
-		struct in_addr inaddr;
-		memcpy(&inaddr, addr, sizeof(struct in_addr));
-		inet_ntop(AF_INET, &inaddr, buf, INET_ADDRSTRLEN);
-	}
-}
+// static void
+// addr_serialize(uint8_t *addr, int proto, char *buf) {
+// 	if (proto == IPPROTO_IPV6) {
+// 		struct in6_addr inaddr;
+// 		memcpy(&inaddr, addr, sizeof(struct in6_addr));
+// 		inet_ntop(AF_INET6, &inaddr, buf, INET6_ADDRSTRLEN);
+// 	} else {
+// 		struct in_addr inaddr;
+// 		memcpy(&inaddr, addr, sizeof(struct in_addr));
+// 		inet_ntop(AF_INET, &inaddr, buf, INET_ADDRSTRLEN);
+// 	}
+// }
 
-static void
+static size_t
 vs_serialize(struct balancer_vs_config *vs, char *buf) {
-	char addr[INET6_ADDRSTRLEN + 1];
-	memset(addr, 0, sizeof(addr));
-	addr_serialize(
-		vs->address,
-		vs->flags & BALANCER_VS_IPV6_FLAG ? IPPROTO_IPV6 : IPPROTO_IP,
-		addr
-	);
 	sprintf(buf,
-		"virtual[%s %s:%d]",
-		vs->proto == IPPROTO_TCP ? "tcp" : "udp",
-		addr,
-		vs->port);
+		"v%lu",
+		vs->idx);
+	return strlen(buf);
 }
 
 static void
-real_serialize(struct balancer_vs_config *vs, struct real *real, char *buf) {
-	char vip[INET6_ADDRSTRLEN + 1];
-	memset(vip, 0, sizeof(vip));
-	addr_serialize(
-		vs->address,
-		vs->flags & BALANCER_VS_IPV6_FLAG ? IPPROTO_IPV6 : IPPROTO_IP,
-		vip
-	);
-
-	char real_ip[INET6_ADDRSTRLEN + 1];
-	memset(real_ip, 0, sizeof(real_ip));
-	addr_serialize(
-		real->dst_addr,
-		real->flags & BALANCER_REAL_IPV6_FLAG ? IPPROTO_IPV6
-						      : IPPROTO_IP,
-		real_ip
-	);
-
+real_serialize(struct real *real, char *buf) {
 	sprintf(buf,
-		"real[%s %s:%d -> %s]",
-		vs->proto == IPPROTO_TCP ? "tcp" : "udp",
-		vip,
-		vs->port,
-		real_ip);
+		"r%lu",
+		real->idx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -168,7 +140,7 @@ vs_v4_table_init(
 		rule->transport.proto =
 			(struct filter_proto){vs_config->proto, 0, 0};
 
-		rule->action = vs_config->id;
+		rule->action = vs_config->idx;
 		++j;
 	}
 
@@ -257,7 +229,7 @@ vs_v6_table_init(
 		rule->transport.proto =
 			(struct filter_proto){vs_config->proto, 0, 0};
 
-		rule->action = vs_config->id;
+		rule->action = vs_config->idx;
 		++j;
 	}
 
@@ -303,8 +275,8 @@ balancer_vs_init(
 	config->vs_count = 0;
 	config->real_count = 0;
 	for (size_t vs_idx = 0; vs_idx < vs_count; ++vs_idx) {
-		if (vs_configs[vs_idx]->id + 1 > config->vs_count) {
-			config->vs_count = vs_configs[vs_idx]->id + 1;
+		if (vs_configs[vs_idx]->idx + 1 > config->vs_count) {
+			config->vs_count = vs_configs[vs_idx]->idx + 1;
 		}
 		for (size_t inner_real_idx = 0;
 		     inner_real_idx < vs_configs[vs_idx]->real_count;
@@ -344,8 +316,8 @@ balancer_vs_init(
 			vs_configs[initialized_vs_count];
 
 		struct service_info *info =
-			balancer_state_get_vs(balancer_state, vs_config->id);
-		struct virtual_service *vs = &config_vs[vs_config->id];
+			balancer_state_get_vs(balancer_state, vs_config->idx);
+		struct virtual_service *vs = &config_vs[vs_config->idx];
 		SET_OFFSET_OF(&vs->state, (struct service_state *)info->state);
 		vs->round_robin_counter = 0;
 		vs->flags = vs_config->flags;
@@ -394,7 +366,7 @@ balancer_vs_init(
 			char real_counter_name[80];
 			memset(real_counter_name, 0, sizeof(real_counter_name));
 			real_serialize(
-				vs_config, current_real, real_counter_name
+				current_real, real_counter_name
 			);
 			setup_real->counter_id = counter_registry_register(
 				&config->cp_module.counter_registry,
@@ -444,7 +416,7 @@ free_initalized_vs:
 	for (size_t i = 0; i < initialized_vs_count; ++i) {
 		struct balancer_vs_config *vs_config =
 			vs_configs[initialized_vs_count];
-		struct virtual_service *vs = &config_vs[vs_config->id];
+		struct virtual_service *vs = &config_vs[vs_config->idx];
 		ring_free(&vs->real_ring);
 		lpm_free(&vs->src_filter);
 	}
@@ -488,7 +460,7 @@ balancer_vs_config_create(
 	}
 	struct balancer_vs_config *vs_config =
 		(struct balancer_vs_config *)memory;
-	vs_config->id = id;
+	vs_config->idx = id;
 	vs_config->mctx = &agent->memory_context;
 	vs_config->real_count = real_count;
 	vs_config->allowed_src_count = allowed_src_count;

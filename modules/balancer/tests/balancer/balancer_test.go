@@ -33,7 +33,7 @@ func TestPacketPlusUpdateReals(t *testing.T) {
 					PureL3: false,
 					FixMSS: false,
 				},
-				Proto: cp.VsProtoTcp,
+				Proto: cp.TransportProtoTcp,
 				AllowedSrc: []netip.Prefix{
 					IpPrefix("10.12.0.0/8"),
 				},
@@ -54,12 +54,11 @@ func TestPacketPlusUpdateReals(t *testing.T) {
 	require.Nil(t, err, "failed to prepare mock for cp update before create balancer instance")
 
 	timeouts := cp.SessionsTimeouts{
-		TcpSynAck: 60,
-		TcpSyn:    30,
-		TcpFin:    60,
-		Tcp:       30,
-		Udp:       60,
-		Default:   30,
+		TcpSyn:  30,
+		TcpFin:  60,
+		Tcp:     30,
+		Udp:     60,
+		Default: 30,
 	}
 
 	balancer, err := cp.NewModuleInstance(agent, "balancer", &config, 100, &timeouts)
@@ -87,7 +86,7 @@ func TestPacketPlusUpdateReals(t *testing.T) {
 	err = balancer.UpdateReals([]*balancerpb.RealUpdate{
 		{
 			VirtualIp: []byte("192.166.13.22"),
-			Proto:     "TCP",
+			Proto:     cp.TransportProtoTcp.IntoProto(),
 			Port:      1000,
 			RealIp:    []byte("1.1.1.1"),
 			Weight:    5,
@@ -101,82 +100,87 @@ func TestPacketPlusUpdateReals(t *testing.T) {
 	require.Equal(t, uint32(1), flushed)
 
 	require.Equal(t, uint16(5), balancer.GetConfig().Services[0].Reals[0].Weight)
+
+	info, err := balancer.StateInfo()
+	require.NoError(t, err, "failed to get state info")
+
+	t.Log("state info", info.JsonPretty())
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// `func TestGRE(t *testing.T) {
-// 	mock, err := test_utils.NewYanetMock(1<<20, 1<<27, []string{"balancer"})
-// 	require.Nil(t, err, "failed to create mock: %w", err)
-// 	defer mock.Free()
+func TestGRE(t *testing.T) {
+	mock, err := test_utils.NewYanetMock(1<<20, 1<<27, []string{"balancer"})
+	require.Nil(t, err, "failed to create mock: %w", err)
+	defer mock.Free()
 
-// 	agent, err := mock.AttachAgent("balancer", 1<<24)
-// 	require.Nil(t, err, "failed to attach agent: %w", err)
+	agent, err := mock.AttachAgent("balancer", 1<<24)
+	require.Nil(t, err, "failed to attach agent: %w", err)
 
-// 	config := cp.ModuleInstanceConfig{
-// 		Services: []cp.VirtualService{
-// 			{
-// 				Address: IpAddr("192.166.13.22"),
-// 				Port:    1000,
-// 				Flags: cp.VsFlags{
-// 					GRE:    true,
-// 					OPS:    false,
-// 					PureL3: false,
-// 					FixMSS: false,
-// 				},
-// 				Proto: cp.VsProtoTcp,
-// 				AllowedSrc: []netip.Prefix{
-// 					IpPrefix("10.12.0.0/8"),
-// 				},
-// 				Reals: []cp.Real{
-// 					{
-// 						Weight:  1,
-// 						DstAddr: IpAddr("1.1.1.1"),
-// 						SrcAddr: IpAddr("3.3.3.3"),
-// 						SrcMask: IpAddr("255.240.255.0"),
-// 						Enabled: true,
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
+	config := cp.ModuleInstanceConfig{
+		Services: []cp.VirtualService{
+			{
+				Address: IpAddr("192.166.13.22"),
+				Port:    1000,
+				Flags: cp.VsFlags{
+					GRE:    true,
+					OPS:    false,
+					PureL3: false,
+					FixMSS: false,
+				},
+				Proto: cp.TransportProtoTcp,
+				AllowedSrc: []netip.Prefix{
+					IpPrefix("10.12.0.0/8"),
+				},
+				Reals: []cp.Real{
+					{
+						Weight:  1,
+						DstAddr: IpAddr("1.1.1.1"),
+						SrcAddr: IpAddr("3.3.3.3"),
+						SrcMask: IpAddr("255.240.255.0"),
+						Enabled: true,
+					},
+				},
+			},
+		},
+	}
 
-// 	err = mock.PrepareForCpUpdate()
-// 	require.Nil(t, err, "failed to prepare for cp update")
+	err = mock.PrepareForCpUpdate()
+	require.Nil(t, err, "failed to prepare for cp update")
 
-// 	timeouts := cp.SessionsTimeouts{
-// 		TcpSynAck: 60,
-// 		TcpSyn:    30,
-// 		TcpFin:    60,
-// 		Tcp:       30,
-// 		Udp:       60,
-// 		Default:   30,
-// 	}
+	timeouts := cp.SessionsTimeouts{
+		TcpSynAck: 60,
+		TcpSyn:    30,
+		TcpFin:    60,
+		Tcp:       30,
+		Udp:       60,
+		Default:   30,
+	}
 
-// 	balancer, err := cp.NewModuleInstance(agent, "balancer", &config, 100, &timeouts)
-// 	require.Nil(t, err, "failed to create new balancer instance")
-// 	defer balancer.Free()
+	balancer, err := cp.NewModuleInstance(agent, "balancer", &config, 100, &timeouts)
+	require.Nil(t, err, "failed to create new balancer instance")
+	defer balancer.Free()
 
-// 	inLayers := MakeTCPPacket("10.12.15.1", 1005, "192.166.13.22", 1000, &layers.TCP{SYN: true})
-// 	originPacket := common.LayersToPacket(t, inLayers...)
-// 	t.Log("Origin packet", originPacket)
+	inLayers := MakeTCPPacket("10.12.15.1", 1005, "192.166.13.22", 1000, &layers.TCP{SYN: true})
+	originPacket := common.LayersToPacket(t, inLayers...)
+	t.Log("Origin packet", originPacket)
 
-// 	result, err := HandlePackets(balancer, mock, originPacket)
-// 	require.Nil(t, err, "failed to handle packet1: %s", err)
+	result, err := HandlePackets(balancer, mock, originPacket)
+	require.Nil(t, err, "failed to handle packet1: %s", err)
 
-// 	require.True(t, len(result.Output) == 1, "failed to handle packet #1")
-// 	require.True(t, len(result.Input) == 0)
-// 	require.True(t, len(result.Drop) == 0)
+	require.True(t, len(result.Output) == 1, "failed to handle packet #1")
+	require.True(t, len(result.Input) == 0)
+	require.True(t, len(result.Drop) == 0)
 
-// 	resultPacket := result.Output[0]
-// 	require.True(t, resultPacket.IsTunneled, "result packet is not tunneled")
-// 	require.Equal(t, resultPacket.TunnelType, "gre-ip4", "tunnel type must be GRE")
+	resultPacket := result.Output[0]
+	require.True(t, resultPacket.IsTunneled, "result packet is not tunneled")
+	require.Equal(t, resultPacket.TunnelType, "gre-ip4", "tunnel type must be GRE")
 
-// 	require.Equal(t, resultPacket.Protocol, layers.IPProtocolGRE)
-// 	require.Equal(t, resultPacket.DstIP.String(), "1.1.1.1")
-// 	require.Equal(t, resultPacket.DstPort, uint16(1000))
+	require.Equal(t, resultPacket.Protocol, layers.IPProtocolGRE)
+	require.Equal(t, resultPacket.DstIP.String(), "1.1.1.1")
+	require.Equal(t, resultPacket.DstPort, uint16(1000))
 
-// 	require.Equal(t, resultPacket.InnerPacket.DstIP.String(), "192.166.13.22")
-// 	require.Equal(t, resultPacket.InnerPacket.SrcIP.String(), "10.12.15.1")
-// 	require.Equal(t, resultPacket.InnerPacket.Protocol, layers.IPProtocolTCP)
-// }`
+	require.Equal(t, resultPacket.InnerPacket.DstIP.String(), "192.166.13.22")
+	require.Equal(t, resultPacket.InnerPacket.SrcIP.String(), "10.12.15.1")
+	require.Equal(t, resultPacket.InnerPacket.Protocol, layers.IPProtocolTCP)
+}
