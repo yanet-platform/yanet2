@@ -7,7 +7,6 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .emit_rerun_if_changed(true)
         .build_server(false)
-        .message_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
         .compile_protos(
             &["common/proto/target.proto", "balancerpb/balancer.proto"],
             &["../../..", "../controlplane"],

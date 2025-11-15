@@ -7,13 +7,14 @@ timeouts:
   default: 60
 vs:
   - ip: "192.0.2.1"
-    proto: "TCP"
+    proto: "tcp"
     port: 5005
     flags:
       gre: false
       ops: false
       fix_mss: false
       pure_l3: false
+    scheduler: "wrr"
     allowed_srcs:
       - "192.0.0.0/8"
     reals:
