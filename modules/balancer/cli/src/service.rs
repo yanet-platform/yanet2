@@ -4,7 +4,10 @@ use tonic::transport::Channel;
 
 use crate::{
     cfg,
-    cmd::{ConfigInfoCmd, DisableRealCmd, EnableBalancingCmd, EnableRealCmd, FlushRealUpdatesCmd, InfoMode, Mode, RealMode, ShowConfigCmd, StateInfoCmd},
+    cmd::{
+        ConfigInfoCmd, DisableRealCmd, EnableBalancingCmd, EnableRealCmd, FlushRealUpdatesCmd, InfoMode, Mode,
+        RealMode, ShowConfigCmd, StateInfoCmd,
+    },
     rpc::{BalancerServiceClient, balancerpb, commonpb},
 };
 
@@ -87,7 +90,10 @@ impl BalancerService {
 
     async fn display_state_info(&mut self, cmd: StateInfoCmd) -> Result<(), Box<dyn Error>> {
         let request = balancerpb::StateInfoRequest {
-            target: Some(commonpb::TargetModule { config_name: cmd.config_name, dataplane_instance: cmd.instance })
+            target: Some(commonpb::TargetModule {
+                config_name: cmd.config_name,
+                dataplane_instance: cmd.instance,
+            }),
         };
         let result = self.client.state_info(request).await?.into_inner();
         // todo: pretty print
@@ -123,7 +129,7 @@ impl BalancerService {
             Mode::Info(cmd) => match cmd.mode {
                 InfoMode::State(cmd) => self.display_state_info(cmd).await,
                 InfoMode::Config(cmd) => self.display_config_info(cmd).await,
-            }
+            },
         }
     }
 }
