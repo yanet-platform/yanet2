@@ -229,7 +229,7 @@ message StateVsInfo {
 	bytes ip = 1;
 	uint32 port = 2;
 	TransportProto transport_proto = 3;
-	uint64 active_connections = 4;
+	uint64 active_sessions = 4;
 	google.protobuf.Timestamp last_packet_timestamp = 5;
 	VsStats stats = 6;
 }
@@ -239,7 +239,7 @@ message StateRealInfo {
 	uint32 virtual_port = 2;
 	bytes real_ip = 3;
 	TransportProto vs_proto = 4;
-	uint64 active_connections = 5;
+	uint64 active_sessions = 5;
 	google.protobuf.Timestamp last_packet_timestamp = 6;
 	RealStats stats = 7;
 }

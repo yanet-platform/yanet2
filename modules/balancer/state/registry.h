@@ -18,7 +18,7 @@
 // Sharded between workers.
 struct service_state {
 	// used to track active connections
-	struct interval_counter active_connections;
+	struct interval_counter active_sessions;
 
 	// last packet timestamp
 	uint32_t last_packet_timestamp;
@@ -91,11 +91,11 @@ service_state_put_session(
 	uint32_t from,
 	uint32_t timeout
 ) {
-	interval_counter_put(&state->active_connections, from, timeout, 1);
+	interval_counter_put(&state->active_sessions, from, timeout, 1);
 	state->last_packet_timestamp = now;
 }
 
 static inline void
 service_state_update(struct service_state *state, uint32_t now) {
-	interval_counter_advance_time(&state->active_connections, now);
+	interval_counter_advance_time(&state->active_sessions, now);
 }

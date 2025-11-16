@@ -25,7 +25,7 @@ type StateRealInfo struct {
 	VirtualPort         uint16
 	RealIp              ipJson
 	TransportProto      TransportProto
-	ActiveConnections   uint64
+	ActiveSessions      uint64
 	LastPacketTimestamp time.Time
 	Stats               RealStats
 }
@@ -37,7 +37,7 @@ func (info *StateRealInfo) IntoProto() *balancerpb.StateRealInfo {
 		VirtualPort:         uint32(info.VirtualPort),
 		RealIp:              info.RealIp,
 		VsProto:             info.TransportProto.IntoProto(),
-		ActiveConnections:   info.ActiveConnections,
+		ActiveSessions:      info.ActiveSessions,
 		LastPacketTimestamp: timestamppb.New(info.LastPacketTimestamp),
 		Stats:               &stats,
 	}
@@ -47,7 +47,7 @@ type StateVsInfo struct {
 	Ip                  ipJson
 	Port                uint16
 	TransportProto      TransportProto
-	ActiveConnections   uint64
+	ActiveSessions      uint64
 	LastPacketTimestamp time.Time
 	Stats               VsStats
 }
@@ -58,7 +58,7 @@ func (info *StateVsInfo) IntoProto() *balancerpb.StateVsInfo {
 		Ip:                  info.Ip,
 		Port:                uint32(info.Port),
 		TransportProto:      info.TransportProto.IntoProto(),
-		ActiveConnections:   info.ActiveConnections,
+		ActiveSessions:      info.ActiveSessions,
 		LastPacketTimestamp: timestamppb.New(info.LastPacketTimestamp),
 		Stats:               &stats,
 	}
