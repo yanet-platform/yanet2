@@ -151,6 +151,47 @@ define run_qemu
 		-display none
 endef
 
+define run_qemu_ssh
+	# Find project root directory (contains meson.build and build directory)
+	$(eval PROJECT_ROOT := $(shell pwd | sed 's|/tests/functional||'))
+	$(eval BUILD_DIR := $(PROJECT_ROOT)/build)
+	$(eval TARGET_DIR := $(PROJECT_ROOT)/target)
+
+	# Create target directory if it doesn't exist
+	mkdir -p $(TARGET_DIR)
+
+	# Start QEMU with configuration
+	qemu-system-x86_64 \
+		-netdev user,id=n1,hostfwd=tcp:127.0.0.1:2222-:22 \
+		-device virtio-net-pci,netdev=n1,mac=AA:BB:CC:DD:CA:B0 \
+		-name yanet-test-debug \
+		-machine q35,kernel-irqchip=split \
+		-cpu max \
+		-smp 4 \
+		-m 8G $(QEMU_ACCEL) \
+		-device intel-iommu,intremap=on,device-iotlb=on \
+		-device ioh3420,id=pcie.1,chassis=1 \
+		-device ioh3420,id=pcie.2,chassis=2 \
+		-drive file=$(QEMU_IMAGE),if=virtio,format=qcow2 $(1) \
+		-netdev stream,id=net1,server=on,addr.type=unix,addr.path=/tmp/yanetvm_sockdev_0.sock \
+		-device virtio-net-pci,bus=pcie.1,netdev=net1,mac=52:54:00:6b:ff:a5,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10 \
+		-netdev stream,id=net2,server=on,addr.type=unix,addr.path=/tmp/yanetvm_sockdev_1.sock \
+		-device virtio-net-pci,bus=pcie.2,netdev=net2,mac=52:54:00:11:00:03,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10 \
+		-fsdev local,id=fsdev0,path=/tmp,security_model=none \
+		-device virtio-9p-pci,fsdev=fsdev0,mount_tag=binaries \
+		-fsdev local,id=fsdev1,path=/tmp,security_model=none \
+		-device virtio-9p-pci,fsdev=fsdev1,mount_tag=config \
+		-fsdev local,id=fsdev2,path=$(BUILD_DIR),security_model=none \
+		-device virtio-9p-pci,fsdev=fsdev2,mount_tag=build \
+		-fsdev local,id=fsdev3,path=$(TARGET_DIR),security_model=none \
+		-device virtio-9p-pci,fsdev=fsdev3,mount_tag=target \
+		-fsdev local,id=fsdev4,path=$(PROJECT_ROOT),security_model=none \
+		-device virtio-9p-pci,fsdev=fsdev4,mount_tag=yanet2 \
+		-serial mon:stdio \
+		-no-reboot \
+		-display none
+endef
+
 # Create autologin cloud-init ISO (main ISO with autologin)
 $(CLOUD_INIT_AUTOLOGIN_ISO): cloud-init-user-data.yaml meta-data
 	@echo "Creating cloud-init ISO with autologin..."
@@ -179,6 +220,17 @@ debug-vm: $(QEMU_IMAGE)
 
 	# Start QEMU in debug mode (no cloud-init)
 	$(call run_qemu,)
+
+# Debug target ssh
+debug-vm-ssh: $(QEMU_IMAGE)
+	@echo "Starting VM in debug mode with passwordless login..."
+	@echo "VM will start with serial console output and automatic login"
+	@echo "Listens to SSH connections on port 2222"
+	@echo "Use Ctrl+A, X to exit QEMU"
+	@echo ""
+
+	# Start QEMU in debug mode (no cloud-init)
+	$(call run_qemu_ssh,)
 
 # Show help
 help:
