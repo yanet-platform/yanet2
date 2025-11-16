@@ -13,8 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "dataplane/vs.h"
 #include "dataplane/lookup.h"
+#include "dataplane/vs.h"
 
 #include "state/state.h"
 #include "tests_utils/helpers.h"
