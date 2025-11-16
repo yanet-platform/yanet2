@@ -10,9 +10,7 @@
 void
 service_state_copy(struct service_state *dst, struct service_state *src) {
 	dst->last_packet_timestamp = src->last_packet_timestamp;
-	interval_counter_copy(
-		&dst->active_connections, &src->active_connections
-	);
+	interval_counter_copy(&dst->active_sessions, &src->active_sessions);
 	memcpy(&dst->stats, &src->stats, sizeof(dst->stats));
 }
 
@@ -58,9 +56,8 @@ service_info_accumulate_into_real_info(
 	// set stats
 	for (size_t i = 0; i < workers; ++i) {
 		struct service_state *state = &service_info->state[i];
-		real_info->active_connections += interval_counter_current_count(
-			&state->active_connections
-		);
+		real_info->active_sessions +=
+			interval_counter_current_count(&state->active_sessions);
 		if (state->last_packet_timestamp >
 		    real_info->last_packet_timestamp) {
 			real_info->last_packet_timestamp =
@@ -112,9 +109,8 @@ service_info_accumulate_into_vs_info(
 	// set stats
 	for (size_t i = 0; i < workers; ++i) {
 		struct service_state *state = &service_info->state[i];
-		vs_info->active_connections += interval_counter_current_count(
-			&state->active_connections
-		);
+		vs_info->active_sessions +=
+			interval_counter_current_count(&state->active_sessions);
 		if (state->last_packet_timestamp >
 		    vs_info->last_packet_timestamp) {
 			vs_info->last_packet_timestamp =

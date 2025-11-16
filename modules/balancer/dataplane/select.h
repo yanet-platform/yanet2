@@ -138,7 +138,9 @@ select_real(
 			session_unlock(session_lock);
 
 			// put prolonged session into state
-			packet_ctx_extend_session(real, now, time_from, timeout);
+			packet_ctx_extend_session(
+				real, now, time_from, timeout
+			);
 
 			return real;
 		} else {

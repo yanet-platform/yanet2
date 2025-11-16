@@ -185,12 +185,12 @@ packet_ctx_select_real(
 	}
 
 	struct interval_counter *vs_active_sessions =
-		&ctx.vs.persistent_state->active_connections;
+		&ctx.vs.persistent_state->active_sessions;
 	interval_counter_put(vs_active_sessions, from, timeout, 1);
 	interval_counter_advance_time(vs_active_sessions, now);
 
 	struct interval_counter *real_active_sessions =
-		&ctx.real.persistent_state->active_connections;
+		&ctx.real.persistent_state->active_sessions;
 	interval_counter_put(real_active_sessions, from, timeout, 1);
 	interval_counter_advance_time(real_active_sessions, now);
 }

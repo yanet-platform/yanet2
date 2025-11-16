@@ -166,7 +166,7 @@ func convertToVsInfo(cVsInfo *C.struct_balancer_virtual_services_info) []StateVs
 			Ip:                  addressToSlice(&curCVsInfo.ip[0], curCVsInfo.ip_proto),
 			Port:                uint16(curCVsInfo.virtual_port),
 			TransportProto:      vsProtoFromIpProto(curCVsInfo.transport_proto),
-			ActiveConnections:   uint64(curCVsInfo.active_connections),
+			ActiveSessions:      uint64(curCVsInfo.active_sessions),
 			LastPacketTimestamp: time.Unix(int64(curCVsInfo.last_packet_timestamp), 0),
 			Stats:               convertToVsStats(&curCVsInfo.stats),
 		}
@@ -187,7 +187,7 @@ func convertToRealsInfo(cRealsInfo *C.struct_balancer_reals_info) []StateRealInf
 			VirtualPort:         uint16(curCRealInfo.virtual_port),
 			RealIp:              addressToSlice(&curCRealInfo.ip[0], curCRealInfo.real_ip_proto),
 			TransportProto:      vsProtoFromIpProto(curCRealInfo.transport_proto),
-			ActiveConnections:   uint64(curCRealInfo.active_connections),
+			ActiveSessions:      uint64(curCRealInfo.active_sessions),
 			LastPacketTimestamp: time.Unix(int64(curCRealInfo.last_packet_timestamp), 0),
 			Stats:               convertToRealStats(&curCRealInfo.stats),
 		}

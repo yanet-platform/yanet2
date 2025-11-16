@@ -63,8 +63,8 @@ struct balancer_vs_info {
 	// virtual service transport protocol
 	int transport_proto; // IPPROTO_TCP or IPPROTO_UDP
 
-	// number of active connections
-	size_t active_connections;
+	// number of active session
+	size_t active_sessions;
 
 	// last packet timestamp
 	uint32_t last_packet_timestamp;
@@ -130,7 +130,7 @@ struct balancer_real_info {
 	int transport_proto; // IPPROTO_TCP or IPPROTO_UDP
 
 	// number of active connections
-	size_t active_connections;
+	size_t active_sessions;
 
 	// last packet timestamp
 	uint32_t last_packet_timestamp;
