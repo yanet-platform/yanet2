@@ -81,7 +81,7 @@ message Subnet {
 // TCP or UDP
 enum TransportProto {
 	TCP = 0;
-  	UDP = 1;
+	UDP = 1;
 }
 
 enum VsScheduler {
