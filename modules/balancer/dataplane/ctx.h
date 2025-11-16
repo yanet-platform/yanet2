@@ -2,6 +2,7 @@
 
 #include <threads.h>
 
+#include "common/interval_counter.h"
 #include "common/memory_address.h"
 #include "counter.h"
 #include "counters/counters.h"
@@ -165,7 +166,11 @@ packet_ctx_select_real_raw(struct real *real) {
 // helper
 static inline void
 packet_ctx_select_real(
-	struct real *real, bool new_session, uint32_t from, uint32_t timeout
+	struct real *real,
+	bool new_session,
+	uint32_t now,
+	uint32_t from,
+	uint32_t timeout
 ) {
 	// select real
 	packet_ctx_select_real_raw(real);
@@ -179,22 +184,27 @@ packet_ctx_select_real(
 		real_state_counter()->created_sessions += 1;
 	}
 
-	interval_counter_put(
-		&ctx.vs.persistent_state->active_connections, from, timeout, 1
-	);
-	interval_counter_put(
-		&ctx.real.persistent_state->active_connections, from, timeout, 1
-	);
+	struct interval_counter *vs_active_sessions =
+		&ctx.vs.persistent_state->active_connections;
+	interval_counter_put(vs_active_sessions, from, timeout, 1);
+	interval_counter_advance_time(vs_active_sessions, now);
+
+	struct interval_counter *real_active_sessions =
+		&ctx.real.persistent_state->active_connections;
+	interval_counter_put(real_active_sessions, from, timeout, 1);
+	interval_counter_advance_time(real_active_sessions, now);
 }
 
 static inline void
 packet_ctx_new_session(struct real *real, uint32_t now, uint32_t timeout) {
-	packet_ctx_select_real(real, true, now, timeout);
+	packet_ctx_select_real(real, true, now, now, timeout);
 }
 
 static inline void
-packet_ctx_extend_session(struct real *real, uint32_t from, uint32_t timeout) {
-	packet_ctx_select_real(real, false, from, timeout);
+packet_ctx_extend_session(
+	struct real *real, uint32_t now, uint32_t from, uint32_t timeout
+) {
+	packet_ctx_select_real(real, false, now, from, timeout);
 }
 
 static inline void

@@ -25,6 +25,7 @@ service_state_init(
 	if (res != 0) {
 		return -1;
 	}
+	memset(&state->stats, 0, sizeof(state->stats));
 	return 0;
 }
 

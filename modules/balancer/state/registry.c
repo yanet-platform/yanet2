@@ -13,6 +13,7 @@ service_state_copy(struct service_state *dst, struct service_state *src) {
 	interval_counter_copy(
 		&dst->active_connections, &src->active_connections
 	);
+	memcpy(&dst->stats, &src->stats, sizeof(dst->stats));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
