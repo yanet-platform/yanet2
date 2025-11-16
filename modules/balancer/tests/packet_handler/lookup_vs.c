@@ -4,7 +4,6 @@
 
 #include "common/network.h"
 
-#include "dataplane/lookup.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/logging/log.h"
 
@@ -15,6 +14,7 @@
 #include <string.h>
 
 #include "dataplane/vs.h"
+#include "dataplane/lookup.h"
 
 #include "state/state.h"
 #include "tests_utils/helpers.h"

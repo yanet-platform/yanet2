@@ -4,9 +4,6 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-#include "../utils/packet.h"
-#include "../utils/rng.h"
-
 #include "api/module.h"
 #include "api/state.h"
 #include "api/vs.h"
@@ -28,7 +25,6 @@
 #include "rte_byteorder.h"
 #include "rte_ip.h"
 #include "rte_tcp.h"
-#include "tests/utils/mock.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
