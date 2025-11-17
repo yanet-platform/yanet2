@@ -32,6 +32,9 @@ struct agent {
 	struct cp_module *unused_module;
 };
 
+struct dp_config *
+agent_dp_config(struct agent *agent);
+
 void
 agent_cleanup(struct agent *agent);
 

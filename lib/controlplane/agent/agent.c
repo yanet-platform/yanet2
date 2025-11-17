@@ -1146,3 +1146,8 @@ agent_free_unused_agents(struct agent *agent) {
 		agent = prev_agent;
 	}
 }
+
+struct dp_config *
+agent_dp_config(struct agent *agent) {
+	return ADDR_OF(&agent->dp_config);
+}

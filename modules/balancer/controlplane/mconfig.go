@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
-	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
@@ -112,7 +111,19 @@ func vsStatsFromCounters(counters [][]uint64) VsStats {
 			counters[0][k] += counters[instance][k]
 		}
 	}
-	return *(*VsStats)(unsafe.Pointer(&counters[0]))
+	return VsStats{
+		IncomingPackets:      counters[0][0],
+		IncomingBytes:        counters[0][1],
+		PacketSrcNotAllowed:  counters[0][2],
+		NoReals:              counters[0][3],
+		OpsPackets:           counters[0][4],
+		SessionTableOverflow: counters[0][5],
+		RealIsDisabled:       counters[0][6],
+		PacketNotRescheduled: counters[0][7],
+		CreatedSessions:      counters[0][8],
+		OutgoingPackets:      counters[0][9],
+		OutgoingBytes:        counters[0][10],
+	}
 }
 
 func realStatsFromCounters(counters [][]uint64) RealStats {
@@ -121,7 +132,13 @@ func realStatsFromCounters(counters [][]uint64) RealStats {
 			counters[0][k] += counters[instance][k]
 		}
 	}
-	return *(*RealStats)(unsafe.Pointer(&counters[0]))
+	return RealStats{
+		RealDisabledPackets: counters[0][0],
+		OpsPackets:          counters[0][1],
+		CreatedSessions:     counters[0][2],
+		SendPackets:         counters[0][3],
+		SendBytes:           counters[0][4],
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -105,6 +105,8 @@ func TestPacketPlusUpdateReals(t *testing.T) {
 	require.NoError(t, err, "failed to get state info")
 
 	t.Log("state info", info.JsonPretty())
+
+	require.NotEqual(t, balancer.GetConfig().Services[0].Idx, int64(-1), "failed to init service indices")
 }
 
 ////////////////////////////////////////////////////////////////////////////////

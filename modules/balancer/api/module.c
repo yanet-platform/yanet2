@@ -70,7 +70,7 @@ balancer_module_config_create(
 
 	balancer_config->counter_id = counter_registry_register(
 		&balancer_config->cp_module.counter_registry,
-		"module_packets",
+		"balancer_counter",
 		MODULE_CONFIG_COUNTER_SIZE
 	);
 

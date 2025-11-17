@@ -66,8 +66,8 @@ func TestBalancer(t *testing.T) {
 			// Configure pipelines
 			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
 
-			// Configure devices
-			"/mnt/target/release/yanet-cli-device-plain update --name=01:00.0 --input=test:1 --output=test:1 --instance=0",
+			// Show counters
+			"/mnt/target/release/yanet-cli-balancer info config --instance=0 --cfg=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",
 		}
 
 		_, err := fw.CLI.ExecuteCommands(commands...)
@@ -105,4 +105,5 @@ func TestBalancer(t *testing.T) {
 		_, err := fw.CLI.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to enable real")
 	})
+
 }

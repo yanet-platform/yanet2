@@ -383,8 +383,9 @@ func (state *BalancerState) NewModuleConfig(
 			FreeVsConfig(&VsConfig{inner: vs})
 		}
 	}()
-	for _, vs := range config.Services {
-		vsConfig, err := state.NewVsConfig(agent, &vs)
+	for idx := range config.Services {
+		vs := &config.Services[idx]
+		vsConfig, err := state.NewVsConfig(agent, vs)
 		if err != nil {
 			return ModuleConfig{
 					inner: nil,
