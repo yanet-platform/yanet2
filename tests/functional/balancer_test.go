@@ -65,6 +65,9 @@ func TestBalancer(t *testing.T) {
 
 			// Configure pipelines
 			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
+
+			// Configure devices
+			"/mnt/target/release/yanet-cli-device-plain update --name=01:00.0 --input=test:1 --output=test:1 --instance=0",
 		}
 
 		_, err := fw.CLI.ExecuteCommands(commands...)
