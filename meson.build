@@ -7,7 +7,7 @@ project(
     'buildtype=release',
     'warning_level=2',
     'werror=true',
-    'optimization=0',
+    'optimization=2',
     'prefix=/usr',
     'libdir=lib',
     'bindir=bin',
@@ -15,7 +15,7 @@ project(
 )
 
 add_global_arguments(
-  ['-march=corei7', '-g', '-D_GNU_SOURCE', '-O0'],
+  ['-march=corei7', '-g', '-D_GNU_SOURCE',],
   language: 'c',
 )
 
