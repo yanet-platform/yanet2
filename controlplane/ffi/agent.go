@@ -94,7 +94,7 @@ func (m *Agent) UpdateModules(modules []ModuleConfig) error {
 
 func (m *Agent) DPConfig() *DPConfig {
 	return &DPConfig{
-		ptr: m.ptr.dp_config,
+		ptr: C.agent_dp_config(m.ptr),
 	}
 }
 

@@ -11,12 +11,15 @@ sleep 1
 /mnt/build/controlplane/yanet-controlplane -c /mnt/build/controlplane.yaml > /mnt/build/yanet-controlplane.log 2>&1 &
 CONTROLPLANE_PID=$!
 echo "Started controlplane with PID: $CONTROLPLANE_PID"
-sleep 1
+sleep 3
 
 ip link set kni0 up
 ip nei add fe80::1 lladdr 52:54:00:6b:ff:a1 dev kni0
 ip nei add 203.0.113.1 lladdr 52:54:00:6b:ff:a1 dev kni0
-sleep 1
+sleep 3
+
+/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via fe80::1 ::/0
+/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 0.0.0.0/0
 
 /mnt/target/release/yanet-cli-balancer enable --cfg balancer0 --services /mnt/yanet2/balancer.yaml
 
@@ -25,3 +28,7 @@ sleep 1
 /mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0
 
 /mnt/target/release/yanet-cli-pipeline update --name=dummy --instance=0
+
+/mnt/target/release/yanet-cli-device-plain update --name=01:00.0 --input test:1 --output dummy:1 --instance=0
+
+/mnt/target/release/yanet-cli-balancer info config --instance=0 --cfg=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0

@@ -1,1 +1,0 @@
-/mnt/target/release/yanet-cli-device-plain update --name=01:00.0 --input test:1 --output dummy:1 --instance=0

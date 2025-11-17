@@ -54,19 +54,6 @@ struct balancer_vs_config {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// static void
-// addr_serialize(uint8_t *addr, int proto, char *buf) {
-// 	if (proto == IPPROTO_IPV6) {
-// 		struct in6_addr inaddr;
-// 		memcpy(&inaddr, addr, sizeof(struct in6_addr));
-// 		inet_ntop(AF_INET6, &inaddr, buf, INET6_ADDRSTRLEN);
-// 	} else {
-// 		struct in_addr inaddr;
-// 		memcpy(&inaddr, addr, sizeof(struct in_addr));
-// 		inet_ntop(AF_INET, &inaddr, buf, INET_ADDRSTRLEN);
-// 	}
-// }
-
 static size_t
 vs_serialize(struct balancer_vs_config *vs, char *buf) {
 	sprintf(buf, "v%lu", vs->idx);
