@@ -1,5 +1,5 @@
 dependencies = [
-  lib_common_dep, lib_packet_dp_dep
+  lib_common_dep, lib_packet_dp_dep, libdpdk_inc_dep
 ]
 
 sources = files(

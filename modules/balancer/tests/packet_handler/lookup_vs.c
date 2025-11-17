@@ -7,7 +7,6 @@
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/logging/log.h"
 
-#include "rte_tcp.h"
 #include <assert.h>
 #include <netinet/in.h>
 #include <stdlib.h>
@@ -17,18 +16,17 @@
 #include "dataplane/vs.h"
 
 #include "state/state.h"
-#include "tests_utils/helpers.h"
-#include "tests_utils/mock.h"
-#include "tests_utils/packet.h"
-#include "tests_utils/rng.h"
-#include "tests_utils/yanet_mock.h"
+#include "test_utils/helpers.h"
+#include "test_utils/packet.h"
+#include "test_utils/rng.h"
+#include "test_utils/yanet_mock.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
 #define AGENT_MEMORY (1 << 27)
 #define DP_MEMORY (1 << 25)
 #define CP_MEMORY (1 << 28)
-#define ARENA_SIZE (AGENT_MEMORY + DP_MEMORY + CP_MEMORY + 1000000)
+#define ARENA_SIZE (DP_MEMORY + CP_MEMORY + 1000000)
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -705,7 +703,7 @@ many_services(void *arena) {
 	char *module_type = "balancer";
 	struct yanet_mock mock;
 	int res = yanet_mock_init(
-		&mock, arena, 1 << 20, AGENT_MEMORY, &module_type, 1
+		&mock, arena, DP_MEMORY, CP_MEMORY, &module_type, 1
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to init mock");
 

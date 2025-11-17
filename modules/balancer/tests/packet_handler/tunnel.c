@@ -26,6 +26,10 @@
 #include "rte_ip.h"
 #include "rte_tcp.h"
 
+#include "test_utils/packet.h"
+#include "test_utils/rng.h"
+#include "test_utils/yanet_mock.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 #define ARENA_SIZE (1 << 28) + 100000
@@ -449,10 +453,15 @@ main() {
 	void *arena = malloc(ARENA_SIZE);
 	TEST_ASSERT_NOT_NULL(arena, "failed to allocate arena");
 
-	struct mock *mock = mock_init(arena, ARENA_SIZE);
-	TEST_ASSERT_NOT_NULL(mock, "failed to init mock");
+	char *module_type = "balancer";
+	struct yanet_mock mock;
+	int res = yanet_mock_init(
+		&mock, arena, 1 << 20, ARENA_SIZE - (1 << 24), &module_type, 1
+	);
+	TEST_ASSERT_EQUAL(res, 0, "failed to init mock");
 
-	struct agent *agent = mock_create_agent(mock, AGENT_MEMORY);
+	struct agent *agent =
+		yanet_mock_agent_attach(&mock, "balancer", AGENT_MEMORY);
 	TEST_ASSERT_NOT_NULL(agent, "failed to create agent");
 
 	struct balancer_state *state =
