@@ -14,6 +14,7 @@ default:
 
 # Build all targets
 build:
+    @go clean -cache
     @meson setup build
     @meson compile -C build
 
