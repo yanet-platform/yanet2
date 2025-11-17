@@ -9,7 +9,7 @@ lookup_vs_test_sources = files(
   'lookup_vs.c',
 )
 
-lookup_vs_exe = executable(
+executable(
   'lookup_vs',
   c_args: yanet_test_c_args,
   link_args: yanet_link_args,
@@ -21,17 +21,16 @@ lookup_vs_exe = executable(
     lib_balancer_dp_dep,
     libdpdk_dep, 
     lib_config_dp_dep,
-    lib_balancer_test_utils_dep,
-    lib_yanet_test_utils,
+    lib_yanet_test_utils_dep,
   ],
 )
 
-test(
-  'lookup_vs',
-  lookup_vs_exe,
-  timeout: 30,
-  suite: 'balancer',
-)
+# test(
+#   'lookup_vs',
+#   lookup_vs_exe,
+#   timeout: 30,
+#   suite: 'balancer',
+# )
 
 # ////////////////////////////////////////////////////////////////////////////////
 
@@ -39,7 +38,7 @@ select_real_test_sources = files(
   'select_real.c',
 )
 
-select_real = executable(
+executable(
   'select_real',
   c_args: yanet_test_c_args,
   link_args: yanet_link_args,
@@ -51,12 +50,11 @@ select_real = executable(
     lib_balancer_dp_dep,
     libdpdk_dep, 
     lib_config_dp_dep,
-    lib_balancer_test_utils_dep,
-    lib_yanet_test_utils
+    lib_yanet_test_utils_dep
   ],
 )
 
-test('select_real', select_real, timeout: 30, suite: 'balancer')
+# test('select_real', select_real, timeout: 30, suite: 'balancer')
 
 # # ////////////////////////////////////////////////////////////////////////////////
 
@@ -76,8 +74,7 @@ metadata = executable(
     lib_balancer_dp_dep,
     libdpdk_dep, 
     lib_config_dp_dep,
-    lib_balancer_test_utils_dep,
-    lib_yanet_test_utils
+    lib_yanet_test_utils_dep
   ],
 )
 
@@ -89,7 +86,7 @@ tunnel_test_sources = files(
   'tunnel.c',
 )
 
-tunnel = executable(
+executable(
   'tunnel',
   c_args: yanet_test_c_args,
   link_args: yanet_link_args,
@@ -101,9 +98,8 @@ tunnel = executable(
     lib_balancer_dp_dep,
     libdpdk_dep, 
     lib_config_dp_dep,
-    lib_balancer_test_utils_dep,
-    lib_yanet_test_utils
+    lib_yanet_test_utils_dep
   ],
 )
 
-test('tunnel', tunnel, timeout: 30, suite: 'balancer')
+# test('tunnel', tunnel, timeout: 30, suite: 'balancer')

@@ -8,6 +8,10 @@
 #include <netinet/in.h>
 #include <string.h>
 
+#include "test_utils/helpers.h"
+#include "test_utils/packet.h"
+#include "test_utils/rng.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static int

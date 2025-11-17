@@ -21,6 +21,11 @@
 #include "dataplane/vs.h"
 #include "state/state.h"
 
+#include "test_utils/helpers.h"
+#include "test_utils/packet.h"
+#include "test_utils/rng.h"
+#include "test_utils/yanet_mock.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 #define ARENA_SIZE (1 << 27) + 1000000
@@ -207,10 +212,15 @@ int
 pure_l3_and_ops_and_weight_matters(void *arena) {
 	current_time = 1;
 
-	struct mock *mock = mock_init(arena, ARENA_SIZE);
-	TEST_ASSERT_NOT_NULL(mock, "failed to create mock");
+	char *type = "balancer";
+	struct yanet_mock mock;
+	int res = yanet_mock_init(
+		&mock, arena, 1 << 20, ARENA_SIZE - (1 << 24), &type, 1
+	);
+	TEST_ASSERT_EQUAL(res, 0, "failed to create mock");
 
-	struct agent *agent = mock_create_agent(mock, AGENT_MEMORY);
+	struct agent *agent =
+		yanet_mock_agent_attach(&mock, "balancer", AGENT_MEMORY);
 	TEST_ASSERT_NOT_NULL(agent, "failed to create agent");
 
 	struct balancer_state *state =
