@@ -89,6 +89,8 @@ enum VsScheduler {
 	WRR = 0;
 	// Round robin with counter
 	PRR = 1;
+	// Weighted Least Connections
+	WLC = 2;
 }
 
 message VirtualService {

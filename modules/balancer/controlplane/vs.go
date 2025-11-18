@@ -65,6 +65,7 @@ type VsScheduler balancerpb.VsScheduler
 const (
 	VsSchedulerWRR VsScheduler = VsScheduler(balancerpb.VsScheduler_WRR)
 	VsSchedulerPRR VsScheduler = VsScheduler(balancerpb.VsScheduler_PRR)
+	VsSchedulerWLC VsScheduler = VsScheduler(balancerpb.VsScheduler_WLC)
 )
 
 func VsSchedulerFromProto(p balancerpb.VsScheduler) VsScheduler {
@@ -90,6 +91,8 @@ type VirtualService struct {
 	// State registry index
 	// -1 in case vs was not registered yet
 	Idx int64
+
+	Wlc *WlcInfo
 }
 
 func NewVirtualServiceFromProto(proto *balancerpb.VirtualService) (*VirtualService, error) {

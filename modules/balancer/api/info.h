@@ -144,11 +144,20 @@ struct balancer_reals_info {
 	struct balancer_real_info *info;
 };
 
-/// Fills real info.
+/// Fills reals info.
 /// @returns -1 on error.
 int
 balancer_fill_reals_info(
 	struct balancer_state *state, struct balancer_reals_info *info
+);
+
+/// Fills real info.
+/// @return -1 if such real not found.
+int
+balancer_fill_real_info(
+	struct balancer_state *state,
+	size_t real_idx,
+	struct balancer_real_info *info
 );
 
 void
