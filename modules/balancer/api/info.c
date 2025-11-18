@@ -78,3 +78,20 @@ balancer_free_reals_info(
 		info->count * sizeof(struct balancer_reals_info)
 	);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+int
+balancer_fill_real_info(
+	struct balancer_state *state,
+	size_t real_idx,
+	struct balancer_real_info *info
+) {
+	if (real_idx >= state->real_registry.service_count) {
+		return -1;
+	}
+	service_info_accumulate_into_real_info(
+		&state->real_registry.services[real_idx], info, state->workers
+	);
+	return 0;
+}

@@ -184,6 +184,7 @@ impl TryFrom<balancerpb::VirtualService> for VirtualService {
         let scheduler = match vs.scheduler() {
             balancerpb::VsScheduler::Wrr => "wrr",
             balancerpb::VsScheduler::Prr => "prr",
+            balancerpb::VsScheduler::Wlc => "wlc",
         }
         .to_string();
 

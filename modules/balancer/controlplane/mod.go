@@ -89,5 +89,5 @@ func (m *BalancerModule) Close() error {
 }
 
 func (m *BalancerModule) Run(ctx context.Context) error {
-	return m.service.MakeChecks(ctx, 500*time.Millisecond)
+	return m.service.Background(ctx, 500*time.Millisecond)
 }

@@ -298,11 +298,10 @@ func (service *BalancerService) ListConfigs(
 	}, nil
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 // Make periodical check for the session table of all balancer instances.
 // Periodically try to extend tables if it is needed and free unused data.
-func (service *BalancerService) MakeChecks(ctx context.Context, period time.Duration) error {
+// Also, periodically update WLC.
+func (service *BalancerService) Background(ctx context.Context, period time.Duration) error {
 	ticker := time.NewTicker(period)
 	defer ticker.Stop()
 
@@ -315,12 +314,24 @@ func (service *BalancerService) MakeChecks(ctx context.Context, period time.Dura
 
 		service.mu.Lock()
 
-		for m, value := range service.instances {
-			if err := value.CheckSessionTable(); err != nil {
+		for m, instance := range service.instances {
+			// check session table
+			if err := instance.CheckSessionTable(); err != nil {
 				service.log.Errorf(
-					"failed to check session table for module [name=%s, instance=%d]",
+					"failed to check session table for module [name=%s, instance=%d]: %s",
 					m.name,
 					m.dataplaneInstance,
+					err,
+				)
+			}
+
+			// update wlc
+			if err := instance.UpdateWlc(); err != nil {
+				service.log.Errorf(
+					"failed to update wlc for module [name=%s, instance=%d]: %s",
+					m.name,
+					m.dataplaneInstance,
+					err,
 				)
 			}
 		}

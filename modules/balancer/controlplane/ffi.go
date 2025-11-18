@@ -210,6 +210,21 @@ func (state *BalancerState) FreeUnusedInSessionTable() error {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+func (state *BalancerState) RealActiveSessionCount(realIdx uint64) (uint64, error) {
+	info := C.struct_balancer_real_info{}
+	ec, err := C.balancer_fill_real_info(
+		state.inner, C.size_t(realIdx), &info)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get real info: %w", err)
+	}
+	if ec != 0 {
+		return 0, fmt.Errorf("failed to get real info: ec=%d", ec)
+	}
+	return uint64(info.active_sessions), nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Virtual service config
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -218,8 +233,18 @@ type VsConfig struct {
 	inner *C.struct_balancer_vs_config
 }
 
-// Create Virtual service config from `Virtual Service` (only enabled reals will be used)
-func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (VsConfig, error) {
+func realFlags(real *Real) uint64 {
+	realFlags := 0
+	if real.DstAddr.Is6() {
+		realFlags |= C.BALANCER_REAL_IPV6_FLAG
+	}
+	if !real.Enabled {
+		realFlags |= C.BALANCER_REAL_DISABLED_FLAG
+	}
+	return uint64(realFlags)
+}
+
+func vsFlags(vs *VirtualService) uint64 {
 	flags := 0
 	if vs.Address.Is6() {
 		flags |= C.BALANCER_VS_IPV6_FLAG
@@ -236,9 +261,22 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 	if vs.Flags.PureL3 {
 		flags |= C.BALANCER_VS_PURE_L3_FLAG
 	}
-	if vs.Scheduler == VsSchedulerPRR {
+	if vs.Scheduler == VsSchedulerPRR || vs.Scheduler == VsSchedulerWLC {
 		flags |= C.BALANCER_VS_PRR_FLAG
 	}
+	return uint64(flags)
+}
+
+// Create Virtual service config from `Virtual Service`
+func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (VsConfig, error) {
+	// make current wlc info
+	if vs.Scheduler == VsSchedulerWLC {
+		vs.Wlc = NewWlcInfo(10, 1024)
+	} else {
+		vs.Wlc = nil
+	}
+
+	flags := vsFlags(vs)
 
 	proto := C.IPPROTO_TCP
 	if vs.Proto == TransportProtoUdp {
@@ -303,19 +341,10 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 		}
 	}
 
-	// Add to config only enabled reals
-	counter := 0
+	// first, register all reals and update their info in WLC if needed
 	for idx := range vs.Reals {
 		real := &vs.Reals[idx]
-		realFlags := 0
-		if real.DstAddr.Is6() {
-			realFlags |= C.BALANCER_REAL_IPV6_FLAG
-		}
-		if !real.Enabled {
-			realFlags |= C.BALANCER_REAL_DISABLED_FLAG
-		}
-
-		// register real
+		realFlags := realFlags(real)
 
 		realIdx, err := C.balancer_state_register_real(
 			state.inner,
@@ -326,6 +355,7 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 			C.uint64_t(realFlags),
 			sliceToPtr(real.DstAddr.AsSlice()),
 		)
+
 		if err != nil {
 			FreeVsConfig(&vsConfig)
 			return VsConfig{inner: nil}, fmt.Errorf("failed to register real: %w", err)
@@ -334,14 +364,39 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 			FreeVsConfig(&vsConfig)
 			return VsConfig{inner: nil}, fmt.Errorf("failed to register real")
 		}
+
 		real.Idx = int64(realIdx)
+
+		// update info on WLC
+		if vs.Wlc != nil {
+			activeConnections, err := state.RealActiveSessionCount(uint64(real.Idx))
+			if err != nil {
+				FreeVsConfig(&vsConfig)
+				return VsConfig{inner: nil}, fmt.Errorf("failed to get active session count for real %d: %w", real.Idx, err)
+			}
+			vs.Wlc.UpdateOrRegisterReal(uint64(vs.Idx), uint64(real.Idx), uint64(real.Weight), activeConnections, real.Enabled)
+		}
+	}
+
+	if vs.Wlc != nil {
+		// calculate WLC weights for real
+		vs.Wlc.RecalculateWlcWeights()
+	}
+
+	for idx := range vs.Reals {
+		real := &vs.Reals[idx]
+
+		effectiveRealWeight := real.Weight
+		if vs.Wlc != nil && real.Enabled {
+			effectiveRealWeight = uint16(vs.Wlc.GetRealWlcWeight(uint64(real.Idx)))
+		}
 
 		_, err = C.balancer_vs_config_set_real(
 			config,
-			C.size_t(realIdx),
-			(C.size_t)(counter),
+			C.size_t(real.Idx),
+			(C.size_t)(idx),
 			(C.uint64_t)(flags),
-			(C.uint16_t)(real.Weight),
+			(C.uint16_t)(effectiveRealWeight),
 			sliceToPtr(real.DstAddr.AsSlice()),
 			sliceToPtr(real.SrcAddr.AsSlice()),
 			sliceToPtr(real.SrcMask.AsSlice()),
@@ -350,7 +405,6 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 			FreeVsConfig(&vsConfig)
 			return VsConfig{inner: nil}, fmt.Errorf("failed to set %d-th real: %w", idx+1, err)
 		}
-		counter += 1
 	}
 
 	return vsConfig, err

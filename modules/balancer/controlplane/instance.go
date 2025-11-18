@@ -165,11 +165,13 @@ type ModuleInstance struct {
 
 	config *ModuleInstanceConfig
 
-	// instance owns session table
+	// instance owns session table, service registry and wlc info
 	state BalancerState
 
 	// `cp_module`
 	moduleConfig ModuleConfig
+
+	Wlc *WlcInfo
 
 	// buffer of real updates
 	realUpdateBuffer RealUpdateBuffer
@@ -337,6 +339,31 @@ func (instance *ModuleInstance) CheckSessionTable() error {
 func (instance *ModuleInstance) ForceExtendSessionTable() error {
 	if err := instance.state.ExtendSessionTable(true); err != nil {
 		return fmt.Errorf("failed to extend session table: %w", err)
+	}
+	return nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func (instance *ModuleInstance) UpdateWlc() error {
+	for idx := range instance.config.Services {
+		vs := &instance.config.Services[idx]
+		if vs.Wlc != nil {
+			for realIdx := range vs.Reals {
+				real := &vs.Reals[realIdx]
+				if real.Enabled {
+					currentConnections, err := instance.state.RealActiveSessionCount(uint64(real.Idx))
+					if err != nil {
+						return fmt.Errorf("failed to get active session count for real %d: %w", real.Idx, err)
+					}
+					vs.Wlc.UpdateActiveConnections(uint64(real.Idx), currentConnections)
+				}
+			}
+			updated := vs.Wlc.RecalculateWlcWeights()
+			if updated {
+				instance.UpdateConfig(instance.config)
+			}
+		}
 	}
 	return nil
 }
