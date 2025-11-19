@@ -95,6 +95,7 @@ func (stateInfo *StateInfo) Json() string {
 	}
 }
 
+// useful for debug
 func (stateInfo *StateInfo) JsonPretty() string {
 	if b, err := json.MarshalIndent(stateInfo, "", "  "); err != nil {
 		return ""

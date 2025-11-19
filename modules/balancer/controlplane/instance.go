@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"fmt"
-	"math"
 	"net/netip"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -103,36 +102,17 @@ func (config *ModuleInstanceConfig) FindReal(
 }
 
 func (config *ModuleInstanceConfig) ValidateRealUpdate(
-	update *balancerpb.RealUpdate,
-) (*RealUpdate, error) {
-	if update.Weight > math.MaxUint16 {
-		return nil, fmt.Errorf("real weight can not exceed %d", math.MaxUint16)
-	}
-	vip, err := netip.ParseAddr(string(update.VirtualIp))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse virtual ip: %w", err)
-	}
-	realIp, err := netip.ParseAddr(string(update.RealIp))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse real ip: %w", err)
-	}
-	if real := config.FindReal(&vip, &realIp, uint16(update.Port)); real == nil {
-		return nil, fmt.Errorf(
+	update *RealUpdate,
+) error {
+	if real := config.FindReal(&update.VirtualIp, &update.RealIp, update.Port); real == nil {
+		return fmt.Errorf(
 			"real with address %s not found on virtual service %s:%d",
-			realIp,
-			vip,
+			update.RealIp,
+			update.VirtualIp,
 			update.Port,
 		)
 	} else {
-		update := RealUpdate{
-			VirtualIp: vip,
-			Proto:     TransportProtoFromProto(update.Proto),
-			Port:      uint16(update.Port),
-			RealIp:    realIp,
-			Enable:    update.Enable,
-			Weight:    update.Weight,
-		}
-		return &update, nil
+		return nil
 	}
 }
 
@@ -274,25 +254,19 @@ func (instance *ModuleInstance) GetConfig() *ModuleInstanceConfig {
 // If `buffer` flag is specified, append updates to buffer.
 // Else, make provided updates and CLEAR update buffer (without applying).
 func (instance *ModuleInstance) UpdateReals(
-	updates []*balancerpb.RealUpdate,
+	updates []*RealUpdate,
 	buffer bool,
 ) error {
-	validated := make([]*RealUpdate, 0)
 	for idx, update := range updates {
-		validated_update, err := instance.config.ValidateRealUpdate(update)
-		if err != nil {
-			return fmt.Errorf("update request no. %d is invalid: %w", idx+1, err)
+		if err := instance.config.ValidateRealUpdate(update); err != nil {
+			return fmt.Errorf("update request no. %d is invalid: %w", idx, err)
 		}
-		if validated_update == nil {
-			return fmt.Errorf("update request no. %d is invalid", idx+1)
-		}
-		validated = append(validated, validated_update)
 	}
 	if buffer {
-		instance.realUpdateBuffer.Append(validated)
+		instance.realUpdateBuffer.Append(updates)
 	} else {
 		newConfig := instance.config.Clone()
-		for idx, update := range validated {
+		for idx, update := range updates {
 			if err := newConfig.UpdateReal(update); err != nil {
 				return fmt.Errorf("failed to make update for real no. %d: %s", idx+1, err)
 			}

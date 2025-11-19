@@ -1,4 +1,4 @@
-package test_balancer
+package balancer
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -7,13 +7,17 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"reflect"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
@@ -121,15 +125,18 @@ func MakeUDPPacket(
 }
 
 func MakeTCPPacket(
-	srcIP string,
+	srcIP netip.Addr,
 	srcPort uint16,
-	dstIP string,
+	dstIP netip.Addr,
 	dstPort uint16,
 	tcp *layers.TCP,
 ) []gopacket.SerializableLayer {
 
-	src := net.ParseIP(srcIP)
-	dst := net.ParseIP(dstIP)
+	src := net.IP(srcIP.AsSlice())
+	dst := net.IP(dstIP.AsSlice())
+
+	// src := net.ParseIP(srcIP)
+	// dst := net.ParseIP(dstIP)
 
 	var ip gopacket.NetworkLayer
 	ethernetType := layers.EthernetTypeIPv6
@@ -163,7 +170,7 @@ func MakeTCPPacket(
 	tcp.DstPort = layers.TCPPort(dstPort)
 	tcp.SetNetworkLayerForChecksum(ip)
 
-	payload := []byte("PING TEST PAYLOAD 1234567890")
+	payload := []byte("BALANCER TEST PAYLOAD 12345678910")
 	layers := []gopacket.SerializableLayer{
 		eth,
 		ip.(gopacket.SerializableLayer),
@@ -318,4 +325,56 @@ func InsertOrUpdateMSS(p gopacket.Packet, newMSS uint16) (*gopacket.Packet, erro
 	out := buf.Bytes()
 	p2 := gopacket.NewPacket(out, layers.LayerTypeEthernet, gopacket.Default)
 	return &p2, nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func ValidatePacket(t *testing.T, config *balancer.ModuleInstanceConfig, originalGoPacket gopacket.Packet, resultPacket *framework.PacketInfo) {
+	t.Helper()
+	originalPacket, err := framework.NewPacketParser().ParsePacket(originalGoPacket.Data())
+	if err != nil {
+		t.Errorf("failed to parse packet: %v", err)
+		return
+	}
+	if !resultPacket.IsTunneled {
+		t.Error("result packet is not tunneled")
+		return
+	}
+
+	resultInner := resultPacket.InnerPacket
+	assert.Equal(t, originalPacket.DstIP, resultInner.DstIP, "encapsulated packet dst ip mismatch")
+	assert.Equal(t, originalPacket.SrcIP, resultInner.SrcIP, "encapsulated packet src ip mismatch")
+	if originalPacket.IsIPv4 {
+		assert.Equal(t, originalPacket.Protocol, resultInner.Protocol, "encapsulated packet protocol mismatch")
+	} else {
+		assert.Equal(t, originalPacket.NextHeader, resultInner.NextHeader, "encapsulated packet protocol mismatch")
+	}
+
+	// todo: check tcp layers (MSS matters if FixMSS flag is enabled)
+
+	for idx := range config.Services {
+		service := &config.Services[idx]
+		if reflect.DeepEqual(net.IP(service.Address.AsSlice()), originalPacket.DstIP) && (service.Port == originalPacket.DstPort || service.Flags.PureL3) {
+			// found service
+			if service.Flags.GRE {
+				assert.Equal(t, resultPacket.TunnelType, "gre", "packet tunnel type must be gre")
+			}
+
+			// todo: check tcp layers (if FixMSS enabled)
+
+			for realIdx := range service.Reals {
+				real := service.Reals[realIdx]
+				if reflect.DeepEqual(net.IP(real.DstAddr.AsSlice()), resultPacket.DstIP) { // found real
+					assert.True(t, real.Enabled, "send packet to disabled real")
+					// todo: check src address
+					// correct
+					return
+				}
+			}
+			t.Errorf("not found real in service %d", idx)
+			break
+		}
+	}
+
+	t.Error("not found service which can serve packet")
 }

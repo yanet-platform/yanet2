@@ -56,6 +56,11 @@ func (m *Agent) Close() error {
 	return err
 }
 
+func (m *Agent) CleanUp() error {
+	_, err := C.agent_cleanup(m.ptr)
+	return err
+}
+
 func (m *Agent) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }

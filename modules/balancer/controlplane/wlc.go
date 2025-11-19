@@ -19,6 +19,7 @@ type WlcInfo struct {
 
 func NewWlcInfo(power uint64, maxRealWeight uint64) *WlcInfo {
 	return &WlcInfo{
+		reals:         map[uint64]*RealWlcInfo{},
 		power:         power,
 		maxRealWeight: maxRealWeight,
 	}

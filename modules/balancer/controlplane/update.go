@@ -1,7 +1,11 @@
 package balancer
 
 import (
+	"fmt"
+	"math"
 	"net/netip"
+
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 )
 
 type RealUpdate struct {
@@ -11,6 +15,28 @@ type RealUpdate struct {
 	RealIp    netip.Addr
 	Enable    bool
 	Weight    uint32
+}
+
+func NewRealUpdateFromProto(update *balancerpb.RealUpdate) (*RealUpdate, error) {
+	if update.Weight > math.MaxUint16 {
+		return nil, fmt.Errorf("real weight can not exceed %d", math.MaxUint16)
+	}
+	vip, err := netip.ParseAddr(string(update.VirtualIp))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse virtual ip: %w", err)
+	}
+	realIp, err := netip.ParseAddr(string(update.RealIp))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse real ip: %w", err)
+	}
+	return &RealUpdate{
+		VirtualIp: vip,
+		Proto:     TransportProtoFromProto(update.Proto),
+		Port:      uint16(update.Port),
+		RealIp:    realIp,
+		Enable:    update.Enable,
+		Weight:    update.Weight,
+	}, nil
 }
 
 type RealUpdateBuffer struct {

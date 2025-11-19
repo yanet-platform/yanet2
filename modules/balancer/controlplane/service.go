@@ -149,7 +149,16 @@ func (service *BalancerService) UpdateReals(
 		return nil, fmt.Errorf("module [name=%s, inst=%d] not exists", name, inst)
 	}
 
-	if err = instance.UpdateReals(req.Updates, req.Buffer); err != nil {
+	updates := make([]*RealUpdate, 0, len(req.Updates))
+	for idx, update := range req.Updates {
+		if parsed, err := NewRealUpdateFromProto(update); err != nil {
+			return nil, fmt.Errorf("failed to parse update %d: %v", idx, err)
+		} else {
+			updates = append(updates, parsed)
+		}
+	}
+
+	if err = instance.UpdateReals(updates, req.Buffer); err != nil {
 		return nil, fmt.Errorf("failed to handle real updates: %v", err)
 	}
 	return &balancerpb.UpdateRealsResponse{}, nil
