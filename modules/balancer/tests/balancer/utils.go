@@ -329,7 +329,12 @@ func InsertOrUpdateMSS(p gopacket.Packet, newMSS uint16) (*gopacket.Packet, erro
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func ValidatePacket(t *testing.T, config *balancer.ModuleInstanceConfig, originalGoPacket gopacket.Packet, resultPacket *framework.PacketInfo) {
+func ValidatePacket(
+	t *testing.T,
+	config *balancer.ModuleInstanceConfig,
+	originalGoPacket gopacket.Packet,
+	resultPacket *framework.PacketInfo,
+) {
 	t.Helper()
 	originalPacket, err := framework.NewPacketParser().ParsePacket(originalGoPacket.Data())
 	if err != nil {
@@ -345,7 +350,12 @@ func ValidatePacket(t *testing.T, config *balancer.ModuleInstanceConfig, origina
 	assert.Equal(t, originalPacket.DstIP, resultInner.DstIP, "encapsulated packet dst ip mismatch")
 	assert.Equal(t, originalPacket.SrcIP, resultInner.SrcIP, "encapsulated packet src ip mismatch")
 	if originalPacket.IsIPv4 {
-		assert.Equal(t, originalPacket.Protocol, resultInner.Protocol, "encapsulated packet protocol mismatch")
+		assert.Equal(
+			t,
+			originalPacket.Protocol,
+			resultInner.Protocol,
+			"encapsulated packet protocol mismatch",
+		)
 	} else {
 		assert.Equal(t, originalPacket.NextHeader, resultInner.NextHeader, "encapsulated packet protocol mismatch")
 	}
@@ -354,7 +364,8 @@ func ValidatePacket(t *testing.T, config *balancer.ModuleInstanceConfig, origina
 
 	for idx := range config.Services {
 		service := &config.Services[idx]
-		if reflect.DeepEqual(net.IP(service.Address.AsSlice()), originalPacket.DstIP) && (service.Port == originalPacket.DstPort || service.Flags.PureL3) {
+		if reflect.DeepEqual(net.IP(service.Address.AsSlice()), originalPacket.DstIP) &&
+			(service.Port == originalPacket.DstPort || service.Flags.PureL3) {
 			// found service
 			if service.Flags.GRE {
 				assert.Equal(t, resultPacket.TunnelType, "gre", "packet tunnel type must be gre")
@@ -364,7 +375,10 @@ func ValidatePacket(t *testing.T, config *balancer.ModuleInstanceConfig, origina
 
 			for realIdx := range service.Reals {
 				real := service.Reals[realIdx]
-				if reflect.DeepEqual(net.IP(real.DstAddr.AsSlice()), resultPacket.DstIP) { // found real
+				if reflect.DeepEqual(
+					net.IP(real.DstAddr.AsSlice()),
+					resultPacket.DstIP,
+				) { // found real
 					assert.True(t, real.Enabled, "send packet to disabled real")
 					// todo: check src address
 					// correct
@@ -377,4 +391,40 @@ func ValidatePacket(t *testing.T, config *balancer.ModuleInstanceConfig, origina
 	}
 
 	t.Error("not found service which can serve packet")
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func ValidateStateInfo(
+	t *testing.T,
+	info *balancer.StateInfo,
+	config *balancer.ModuleInstanceConfig,
+) {
+	t.Helper()
+	for vsIdx := range config.Services {
+		vs := &config.Services[vsIdx]
+		summaryActiveSession := uint64(0)
+		summaryPackets := uint64(0)
+		for realIdx := range vs.Reals {
+			real := &vs.Reals[realIdx]
+			summaryActiveSession += info.RealInfo[real.Idx].ActiveSessions
+			summaryPackets += info.RealInfo[realIdx].Stats.SendPackets
+		}
+
+		vsInfo := info.VsInfo[vs.Idx]
+		assert.Equalf(
+			t,
+			vsInfo.ActiveSessions,
+			summaryActiveSession,
+			"summary active sessions mismatch for vs %d",
+			vsIdx,
+		)
+		assert.Equal(
+			t,
+			vsInfo.Stats.OutgoingPackets,
+			summaryPackets,
+			"summary outgoing packets mismatch for vs %d",
+			vsIdx,
+		)
+	}
 }

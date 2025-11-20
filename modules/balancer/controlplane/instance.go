@@ -151,8 +151,6 @@ type ModuleInstance struct {
 	// `cp_module`
 	moduleConfig ModuleConfig
 
-	Wlc *WlcInfo
-
 	// buffer of real updates
 	realUpdateBuffer RealUpdateBuffer
 }
@@ -233,6 +231,7 @@ func (instance *ModuleInstance) UpdateConfig(config *ModuleInstanceConfig) error
 	if err = moduleConfig.InsertIntoRegistry(instance.agent); err != nil {
 		return fmt.Errorf("failed to insert updated config into dataplane registry: %w", err)
 	}
+	instance.config = config
 	instance.moduleConfig = moduleConfig
 	instance.realUpdateBuffer.Clear()
 	return nil

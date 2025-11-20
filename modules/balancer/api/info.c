@@ -38,8 +38,8 @@ balancer_free_vs_info(
 ) {
 	memory_bfree(
 		state->mctx,
-		info,
-		info->count * sizeof(struct balancer_virtual_services_info)
+		info->info,
+		info->count * sizeof(struct balancer_vs_info)
 	);
 }
 
@@ -51,7 +51,7 @@ balancer_fill_reals_info(
 ) {
 	size_t count = state->real_registry.service_count;
 	struct balancer_real_info *real_info = memory_balloc(
-		state->mctx, count * sizeof(struct balancer_reals_info)
+		state->mctx, count * sizeof(struct balancer_real_info)
 	);
 	if (real_info == NULL) {
 		return -1;
@@ -74,8 +74,8 @@ balancer_free_reals_info(
 ) {
 	memory_bfree(
 		state->mctx,
-		info,
-		info->count * sizeof(struct balancer_reals_info)
+		info->info,
+		info->count * sizeof(struct balancer_real_info)
 	);
 }
 

@@ -308,8 +308,8 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 		sliceToPtr(vs.Address.AsSlice()),
 		(C.uint16_t)(vs.Port),
 		(C.uint8_t)(proto),
-		(C.size_t)(len(vs.AllowedSrc)),
 		(C.size_t)(len(vs.Reals)),
+		(C.size_t)(len(vs.AllowedSrc)),
 	)
 	if err != nil {
 		return VsConfig{inner: nil}, fmt.Errorf("failed to create vs config: %w", err)
@@ -385,6 +385,7 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 
 	for idx := range vs.Reals {
 		real := &vs.Reals[idx]
+		realFlags := realFlags(real)
 
 		effectiveRealWeight := real.Weight
 		if vs.Wlc != nil && real.Enabled {
@@ -395,7 +396,7 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 			config,
 			C.size_t(real.Idx),
 			(C.size_t)(idx),
-			(C.uint64_t)(flags),
+			(C.uint64_t)(realFlags),
 			(C.uint16_t)(effectiveRealWeight),
 			sliceToPtr(real.DstAddr.AsSlice()),
 			sliceToPtr(real.SrcAddr.AsSlice()),
