@@ -4,11 +4,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
 func TestConvertCheckCounters_GeneratesValidation(t *testing.T) {
-    converter, err := NewConverter(&Config{})
-    require.NoError(t, err)
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
 
 	// Sample counter check content from YAML - needs to be map[interface{}]interface{}
 	content := map[interface{}]interface{}{
@@ -23,11 +24,16 @@ func TestConvertCheckCounters_GeneratesValidation(t *testing.T) {
 	require.Contains(t, result.GoCode, `"counter1", 100`, "Expected counter1 validation")
 	require.Contains(t, result.GoCode, `"counter2", 95`, "Expected counter2 validation")
 	require.Equal(t, "checkCounters", result.Type, "Expected step type to be checkCounters")
+
+	// Generated code should aggregate errors using fully formatted strings, not format verbs
+	require.Contains(t, result.GoCode, "var counterErrors []string")
+	require.NotContains(t, result.GoCode, "%%v\", err", "Should not append format verbs with err separately")
+	require.Contains(t, result.GoCode, "counterErrors = append(counterErrors, \"Counter counter1:100: \"+err.Error())")
 }
 
 func TestConvertCheckCounters_HandlesInvalidContent(t *testing.T) {
-    converter, err := NewConverter(&Config{})
-    require.NoError(t, err)
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
 
 	testCases := []struct {
 		name    string
@@ -176,4 +182,75 @@ func TestConvertRouteRemove_PreservesOriginalBehavior(t *testing.T) {
 
 	// Results should be different because step types are different
 	require.NotEqual(t, regularResult.Type, labelledResult.Type, "Regular and labelled types should differ")
+}
+
+// Table-driven tests for CLI conversion covering balancer, NAT64 and route
+// edge cases. These focus on convertCLICommand, which dispatches to
+// convertBalancerCommand/convertNat64Command/convertRouteCommand.
+func TestConvertCLICommand_DispatchAndErrors(t *testing.T) {
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name       string
+		input      string
+		wantPrefix string // substring that should appear in converted command
+	}{
+		{
+			name:       "unsupported raw command",
+			input:      "unknown command",
+			wantPrefix: "# Unsupported command:",
+		},
+		// Empty command is handled by ParseCLICommand and results in an error wrapper.
+		// We still expect the converted string to clearly indicate a parse failure.
+		{
+			name:       "malformed empty command",
+			input:      "",
+			wantPrefix: "# ERROR: Could not parse command:",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := converter.convertCLICommand(tc.input)
+			require.Contains(t, result, tc.wantPrefix)
+		})
+	}
+}
+
+func TestConvertCLICommand_KnownModules(t *testing.T) {
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name        string
+		input       string
+		wantSnippet string
+	}{
+		{
+			name:  "balancer real enable",
+			input: "balancer real enable balancer0 203.0.113.10 tcp 80 192.0.2.10 8080",
+			// We only assert that we routed to CLIBalancer and preserved module name.
+			wantSnippet: framework.CLIBalancer,
+		},
+		{
+			name:  "nat64 prefix add",
+			input: "nat64 prefix add 64:ff9b::/96",
+			// NAT64 commands should go through CLINAT64 helper.
+			wantSnippet: framework.CLINAT64,
+		},
+		{
+			name:  "route insert",
+			input: "route insert 10.0.0.0/24 --via 192.168.1.1",
+			// Route commands should use CLIRoute helper.
+			wantSnippet: framework.CLIRoute,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := converter.convertCLICommand(tc.input)
+			require.Contains(t, out, tc.wantSnippet)
+		})
+	}
 }

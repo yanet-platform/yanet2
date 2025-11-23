@@ -84,20 +84,19 @@ class ScapyASTParser(ast.NodeVisitor):
     
     def visit_FunctionDef(self, node: ast.FunctionDef):
         """Visit function definitions to extract helper functions"""
-        # Store helper functions but don't visit their bodies for write_pcap calls
-        if node.name.startswith('write_pcap') or node.name in ['ipv4_send', 'ipv4_recv', 'ipv6_send', 'ipv6_recv']:
-            # Skip write_pcap definition itself
-            if node.name == 'write_pcap':
-                return
-            
-            self.helper_functions[node.name] = node
-            if self.verbose:
-                print(f"Found helper function: {node.name}")
-            
-            # Don't visit children to avoid processing write_pcap calls inside function definitions
+        # Skip write_pcap definition itself (it's the main function)
+        if node.name == 'write_pcap':
             return
-        
-        self.generic_visit(node)
+
+        # Store ALL other functions as potential helper functions
+        # This includes ipv4_packet1(), ipv6_packet1(), etc.
+        self.helper_functions[node.name] = node
+        if self.verbose:
+            print(f"Found helper function: {node.name}")
+
+        # Don't visit children to avoid processing write_pcap calls inside function definitions
+        # (if a helper calls write_pcap, we don't want to extract that call)
+        return
     
     def visit_Assign(self, node: ast.Assign):
         """Visit assignments to track variables like ipv4_fragments1 = fragment(...)"""
@@ -227,10 +226,40 @@ class ScapyASTParser(ast.NodeVisitor):
             if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div):
                 collect_layers(n.left)
                 collect_layers(n.right)
+            elif isinstance(n, ast.BinOp) and isinstance(n.op, ast.Mult):
+                # Handle string multiplication for payload: "ABC"*100
+                if isinstance(n.left, ast.Constant) and isinstance(n.right, ast.Constant):
+                    content = n.left.value
+                    count = n.right.value
+                    if isinstance(content, str) and isinstance(count, int):
+                        # Create a Raw layer with special handling for multiplication
+                        raw_layer = PacketLayer(
+                            layer_type="Raw",
+                            params={
+                                "_arg0": content * count,  # Pre-multiply for now
+                                "_special": {
+                                    "payload": {
+                                        "type": "string_mult",
+                                        "content": content,
+                                        "count": count
+                                    }
+                                }
+                            }
+                        )
+                        layers.append(raw_layer)
             elif isinstance(n, ast.Call):
                 layer = self._parse_layer_call(n)
                 if layer:
                     layers.append(layer)
+            elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+                # Handle helper function calls like ipv4_packet1()/IP()
+                # Get the function definition and evaluate its return statement
+                helper_packets = self._handle_helper_function(n.id)
+                if helper_packets and helper_packets[0].layers:
+                    # Add all layers from the helper function instead of the name
+                    layers.extend(helper_packets[0].layers)
+                # Skip adding the helper function name as a layer - do nothing else
+                pass
             elif isinstance(n, ast.Subscript):
                 # Handle subscript to variable like ipv4_fragments1[0]
                 # This represents a Raw payload layer
@@ -267,6 +296,10 @@ class ScapyASTParser(ast.NodeVisitor):
         layer_type = self._get_call_name(node)
         if not layer_type:
             return None
+
+        # Skip helper functions - they should be handled by _handle_helper_function
+        if layer_type in self.helper_functions:
+            return None
         
         params = {}
         special_handling = {}
@@ -301,8 +334,8 @@ class ScapyASTParser(ast.NodeVisitor):
                         "type": "cidr_expansion",
                         "cidr": value
                     }
-                    # Keep the base IP for the layer params (CIDR will be stripped later)
-                    params[key] = value
+                    # Strip CIDR suffix and keep only the base IP for the layer params
+                    params[key] = value.split('/')[0]
                 else:
                     params[key] = value
         
@@ -392,22 +425,25 @@ class ScapyASTParser(ast.NodeVisitor):
         
         return []
     
-    def _handle_helper_function(self, node: ast.Call) -> List[PacketDefinition]:
-        """Handle calls to helper functions like ipv4_send()"""
-        func_name = self._get_call_name(node)
+    def _handle_helper_function(self, node_or_name: Union[ast.Call, str]) -> List[PacketDefinition]:
+        """Handle calls to helper functions like ipv4_send() or ipv4_packet1()"""
+        if isinstance(node_or_name, ast.Call):
+            func_name = self._get_call_name(node_or_name)
+        else:
+            func_name = node_or_name
+
         helper_func = self.helper_functions.get(func_name)
-        
+
         if not helper_func:
             return []
-        
-        # For now, we need to evaluate the helper function with the given arguments
-        # This is complex - we'd need to simulate the function execution
-        # For simplicity, we'll extract the return statement if it's a simple layer chain
-        
+
+        # For helper functions without parameters, just evaluate the return statement
+        # This handles functions like ipv4_packet1() that return Ether()/IP()/TCP()
+
         for stmt in helper_func.body:
             if isinstance(stmt, ast.Return) and stmt.value:
                 return self._extract_packet(stmt.value)
-        
+
         return []
     
     def _get_call_name(self, node: ast.Call) -> Optional[str]:
@@ -439,6 +475,11 @@ class ScapyASTParser(ast.NodeVisitor):
                     right = self._eval_node(node.right)
                     if isinstance(left, str) and isinstance(right, int):
                         return left * right
+                elif isinstance(node.op, ast.Div):
+                    # Handle CIDR notation like "90.90.90.0/30"
+                    # Return just the base address without /mask
+                    left = self._eval_node(node.left)
+                    return left
             elif isinstance(node, ast.Call):
                 # Function call - return a placeholder
                 func_name = self._get_call_name(node)

@@ -5,6 +5,76 @@ import (
 	"strings"
 )
 
+// CLICheckParse holds parsed data from a cli_check block
+type CLICheckParse struct {
+	CommandPayloads []string
+	ExpectedLines   []string
+	Regexes         []string
+	OriginalLines   []string
+}
+
+// ParseCLICheckBlock parses a cli_check block content:
+// - lines beginning with YANET_FORMAT_COLUMNS= are treated as command payloads
+// - EXPECT_BEGIN/EXPECT_END enclose expected output lines
+// - EXPECT_REGEX:<pattern> appends regex patterns
+func ParseCLICheckBlock(content string) (*CLICheckParse, error) {
+	lines := strings.Split(content, "\n")
+	var payloads []string
+	var expected []string
+	var regexes []string
+	var original []string
+	captureExpected := false
+
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			// terminate expected capture but keep structural blank lines in original comment
+			captureExpected = false
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		original = append(original, line)
+
+		switch {
+		case strings.HasPrefix(line, "YANET_FORMAT_COLUMNS="):
+			captureExpected = false
+			payload := strings.TrimPrefix(line, "YANET_FORMAT_COLUMNS=")
+			payloads = append(payloads, payload)
+		case strings.HasPrefix(line, "EXPECT_REGEX:"):
+			captureExpected = false
+			regex := strings.TrimSpace(strings.TrimPrefix(line, "EXPECT_REGEX:"))
+			if regex != "" {
+				regexes = append(regexes, regex)
+			}
+		case strings.EqualFold(line, "EXPECT_BEGIN"):
+			captureExpected = true
+		case strings.EqualFold(line, "EXPECT_END"):
+			captureExpected = false
+		case strings.Contains(line, "---------"):
+			if captureExpected {
+				expected = append(expected, line)
+			}
+		case captureExpected:
+			expected = append(expected, line)
+		default:
+			// heuristics: if no markers provided and line looks like output, track it
+			if len(line) > 0 && !strings.HasPrefix(line, "module") && len(payloads) > 0 {
+				expected = append(expected, line)
+			}
+		}
+	}
+
+	return &CLICheckParse{
+		CommandPayloads: payloads,
+		ExpectedLines:   expected,
+		Regexes:         regexes,
+		OriginalLines:   original,
+	}, nil
+}
+
 // CLICommand represents a parsed CLI command with its components
 type CLICommand struct {
 	Command    string   // Base command (e.g., "balancer")

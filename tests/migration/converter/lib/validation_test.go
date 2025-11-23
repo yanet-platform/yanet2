@@ -214,3 +214,114 @@ func TestValidation_MultiplePackets(t *testing.T) {
 	require.Equal(t, 5, result.Passed)
 	require.Equal(t, 0, result.Failed)
 }
+
+// Test that layer-aware validator tolerates Ethernet padding differences where
+// the raw-byte validator reports a length mismatch.
+func TestValidation_LayerMode_IgnoresEthernetPadding(t *testing.T) {
+	tmpDir := t.TempDir()
+	pcapPath := filepath.Join(tmpDir, "padded.pcap")
+
+	// Create a packet using the builder (this will typically serialize to >= 60 bytes)
+	basePkt, err := NewPacket(
+		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
+		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
+		UDP(UDPSport(1234), UDPDport(80)),
+	)
+	require.NoError(t, err)
+
+	raw := basePkt.Data()
+
+	// Simulate original PCAP with shorter frame by trimming only trailing zero padding bytes.
+	shortLen := len(raw)
+	for shortLen > 0 && raw[shortLen-1] == 0 {
+		shortLen--
+	}
+	require.Greater(t, len(raw), shortLen, "expected to trim at least some padding bytes")
+	short := raw[:shortLen]
+
+	f, err := os.Create(pcapPath)
+	require.NoError(t, err)
+	defer f.Close()
+
+	writer := pcapgo.NewWriter(f)
+	err = writer.WriteFileHeader(65536, layers.LinkTypeEthernet)
+	require.NoError(t, err)
+
+	err = writer.WritePacket(gopacket.CaptureInfo{
+		CaptureLength: len(short),
+		Length:        len(short),
+	}, short)
+	require.NoError(t, err)
+	f.Close()
+
+	// Byte-by-byte validator should report a length mismatch
+	byteValidator := NewPacketValidator(false)
+	byteResult, err := byteValidator.ValidateAgainstPCAP([]gopacket.Packet{basePkt}, pcapPath)
+	require.NoError(t, err)
+	require.False(t, byteResult.IsSuccess())
+	require.Greater(t, byteResult.Failed, 0)
+
+	// Layer-aware validator should treat this as success (padding-only difference)
+	layerValidator := NewPacketValidatorWithMode(false, true)
+	layerResult, err := layerValidator.ValidateAgainstPCAP([]gopacket.Packet{basePkt}, pcapPath)
+	require.NoError(t, err)
+	require.True(t, layerResult.IsSuccess())
+	require.Equal(t, 1, layerResult.Passed)
+	require.Equal(t, 0, layerResult.Failed)
+}
+
+// Test that layer-aware validator ignores checksum-only differences while
+// byte-by-byte validator reports a mismatch.
+func TestValidation_LayerMode_IgnoresChecksumDifferences(t *testing.T) {
+	tmpDir := t.TempDir()
+	pcapPath := filepath.Join(tmpDir, "checksum.pcap")
+
+	// Create a base IPv4/TCP packet
+	basePkt, err := NewPacket(
+		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
+		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
+		TCP(TCPSport(1234), TCPDport(80)),
+	)
+	require.NoError(t, err)
+
+	raw := append([]byte(nil), basePkt.Data()...)
+	require.GreaterOrEqual(t, len(raw), 34, "expected IPv4 header to be present")
+
+	// IPv4 checksum is at bytes 24-25 for a standard Ethernet+IPv4 packet (no options)
+	csOffset := 14 + 10
+	if csOffset+1 >= len(raw) {
+		t.Skip("packet too short to safely mutate checksum")
+	}
+	raw[csOffset] ^= 0xFF
+	raw[csOffset+1] ^= 0xFF
+
+	f, err := os.Create(pcapPath)
+	require.NoError(t, err)
+	defer f.Close()
+
+	writer := pcapgo.NewWriter(f)
+	err = writer.WriteFileHeader(65536, layers.LinkTypeEthernet)
+	require.NoError(t, err)
+
+	err = writer.WritePacket(gopacket.CaptureInfo{
+		CaptureLength: len(raw),
+		Length:        len(raw),
+	}, raw)
+	require.NoError(t, err)
+	f.Close()
+
+	// Byte-by-byte validator should fail due to checksum bytes mismatch
+	byteValidator := NewPacketValidator(false)
+	byteResult, err := byteValidator.ValidateAgainstPCAP([]gopacket.Packet{basePkt}, pcapPath)
+	require.NoError(t, err)
+	require.False(t, byteResult.IsSuccess())
+	require.Greater(t, byteResult.Failed, 0)
+
+	// Layer-aware validator should succeed because projected semantics are unchanged
+	layerValidator := NewPacketValidatorWithMode(false, true)
+	layerResult, err := layerValidator.ValidateAgainstPCAP([]gopacket.Packet{basePkt}, pcapPath)
+	require.NoError(t, err)
+	require.True(t, layerResult.IsSuccess())
+	require.Equal(t, 1, layerResult.Passed)
+	require.Equal(t, 0, layerResult.Failed)
+}

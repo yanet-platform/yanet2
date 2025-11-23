@@ -11,41 +11,6 @@ import (
 	"golang.org/x/text/language"
 )
 
-// IRLayer represents a layer in the IR JSON
-type IRLayer struct {
-	Type   string                 `json:"type"`
-	Params map[string]interface{} `json:"params"`
-}
-
-// IRPacketDef represents a packet definition in IR
-type IRPacketDef struct {
-	Layers          []IRLayer              `json:"layers"`
-	SpecialHandling map[string]interface{} `json:"special_handling"`
-}
-
-// IRPCAPPair represents a PCAP file pair in IR
-type IRPCAPPair struct {
-	SendFile      string        `json:"send_file"`
-	ExpectFile    string        `json:"expect_file"`
-	SendPackets   []IRPacketDef `json:"send_packets"`
-	ExpectPackets []IRPacketDef `json:"expect_packets"`
-}
-
-// IRJSON represents the complete IR from Python parser
-type IRJSON struct {
-	PCAPPairs       []IRPCAPPair `json:"pcap_pairs"`
-	HelperFunctions []string     `json:"helper_functions"`
-}
-
-// ToJSON converts IRJSON to JSON string
-func (ir *IRJSON) ToJSON() (string, error) {
-	jsonBytes, err := json.Marshal(ir)
-	if err != nil {
-		return "", err
-	}
-	return string(jsonBytes), nil
-}
-
 // IRPacketPattern represents a detected pattern in packet definitions
 type IRPacketPattern struct {
 	CommonLayers  []IRLayer        // Layers with constant params
@@ -68,6 +33,7 @@ type ScapyCodegenV2 struct {
 	specialHandlingSkips  *map[string]int // Pointer to converter's tracking map
 	unsupportedLayerTypes *map[string]int // Pointer to converter's tracking map
 	strictMode            bool            // Fail on unsupported features
+	libraryMode           bool            // Emit library-style functions without testing/require
 }
 
 // NewScapyCodegenV2 creates a new code generator
@@ -75,6 +41,11 @@ func NewScapyCodegenV2(stripVLAN bool) *ScapyCodegenV2 {
 	return &ScapyCodegenV2{
 		stripVLAN: stripVLAN,
 	}
+}
+
+// SetLibraryMode toggles library-style output (no testing/require, returns ([]gopacket.Packet, error))
+func (cg *ScapyCodegenV2) SetLibraryMode(enabled bool) {
+	cg.libraryMode = enabled
 }
 
 // SetTrackingMaps sets the tracking maps for special handling and unsupported layers
@@ -100,13 +71,30 @@ func (cg *ScapyCodegenV2) GenerateFromIR(irJSON string) (string, error) {
 	// Package and imports
 	code.WriteString("package converted\n\n")
 	code.WriteString("import (\n")
-	code.WriteString("\t\"testing\"\n")
-	code.WriteString("\t\"time\"\n\n")
+	code.WriteString("\t\"encoding/hex\"\n")
+	if !cg.libraryMode {
+		code.WriteString("\t\"testing\"\n")
+		code.WriteString("\t\"time\"\n\n")
+	}
 	code.WriteString("\t\"github.com/gopacket/gopacket\"\n")
 	code.WriteString("\t\"github.com/gopacket/gopacket/layers\"\n")
-	code.WriteString("\t\"github.com/stretchr/testify/require\"\n\n")
+	if !cg.libraryMode {
+		code.WriteString("\t\"github.com/stretchr/testify/require\"\n\n")
+	} else {
+		code.WriteString("\n")
+	}
 	code.WriteString("\t\"github.com/yanet-platform/yanet2/tests/migration/converter/lib\"\n")
 	code.WriteString(")\n\n")
+
+	// Add helper function for decoding hex strings
+	code.WriteString("// decodeHex decodes a hex string to bytes\n")
+	code.WriteString("func decodeHex(s string) []byte {\n")
+	code.WriteString("\tdata, err := hex.DecodeString(s)\n")
+	code.WriteString("\tif err != nil {\n")
+	code.WriteString("\t\tpanic(\"invalid hex string: \" + s)\n")
+	code.WriteString("\t}\n")
+	code.WriteString("\treturn data\n")
+	code.WriteString("}\n\n")
 
 	// Generate functions for each PCAP pair
 	for i, pair := range ir.PCAPPairs {
@@ -142,8 +130,13 @@ func (cg *ScapyCodegenV2) GeneratePacketFunction(funcName string, packets []IRPa
 	var code strings.Builder
 
 	code.WriteString(fmt.Sprintf("// %s generates packets\n", funcName))
-	code.WriteString(fmt.Sprintf("func %s(t *testing.T) []gopacket.Packet {\n", funcName))
-	code.WriteString("\tvar packets []gopacket.Packet\n\n")
+	if cg.libraryMode {
+		code.WriteString(fmt.Sprintf("func %s() ([]gopacket.Packet, error) {\n", funcName))
+		code.WriteString("\tvar packets []gopacket.Packet\n\n")
+	} else {
+		code.WriteString(fmt.Sprintf("func %s(t *testing.T) []gopacket.Packet {\n", funcName))
+		code.WriteString("\tvar packets []gopacket.Packet\n\n")
+	}
 
 	for i, pkt := range packets {
 		code.WriteString(fmt.Sprintf("\t// Packet %d\n", i))
@@ -181,18 +174,32 @@ func (cg *ScapyCodegenV2) GeneratePacketFunction(funcName string, packets []IRPa
 		}
 
 		// Regular packet - use template for better readability
-		packetTemplate := `%s
+		var packetTemplate string
+		if cg.libraryMode {
+			packetTemplate = `%s
+		if err != nil { return nil, err }
+		packets = append(packets, pkt)
+	}
+
+`
+		} else {
+			packetTemplate = `%s
 		require.NoError(t, err)
 		packets = append(packets, pkt)
 	}
 
 `
+		}
 		code.WriteString("\t{\n")
 		code.WriteString(cg.generatePacketConstruction(pkt, isExpect))
 		code.WriteString(fmt.Sprintf(packetTemplate, ""))
 	}
 
-	code.WriteString("\treturn packets\n")
+	if cg.libraryMode {
+		code.WriteString("\treturn packets, nil\n")
+	} else {
+		code.WriteString("\treturn packets\n")
+	}
 	code.WriteString("}\n")
 
 	return code.String()
@@ -275,7 +282,7 @@ func (cg *ScapyCodegenV2) generateLayerCall(layer IRLayer, isExpect bool) string
 		code.WriteString(cg.generateEtherOptions(layer, isExpect))
 	case "Dot1Q":
 		code.WriteString(cg.generateDot1QOptions(layer))
-	case "IP":
+	case "IP", "IPv4":
 		code.WriteString(cg.generateIPOptions(layer))
 	case "IPv6":
 		code.WriteString(cg.generateIPv6Options(layer))
@@ -295,6 +302,10 @@ func (cg *ScapyCodegenV2) generateLayerCall(layer IRLayer, isExpect bool) string
 		code.WriteString(cg.generateGREOptions(layer))
 	case "MPLS":
 		code.WriteString(cg.generateMPLSOptions(layer))
+	case "ARP":
+		code.WriteString(cg.generateARPOptions(layer))
+	case "IPSecESP":
+		code.WriteString(cg.generateIPSecESPOptions(layer))
 	case "Raw":
 		code.WriteString(cg.generateRawOptions(layer))
 	default:
@@ -390,6 +401,46 @@ func (cg *ScapyCodegenV2) generateIPOptions(layer IRLayer) string {
 	if id, ok := layer.Params["id"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPId(%v),\n", formatValue(id)))
 	}
+	if flags, ok := layer.Params["flags"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPFlags(%v),\n", formatValue(flags)))
+	}
+	if frag, ok := layer.Params["frag"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPFragOffset(%v),\n", formatValue(frag)))
+	}
+	if length, ok := layer.Params["len"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv4Length(%v),\n", formatValue(length)))
+	}
+	if chksum, ok := layer.Params["chksum"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv4ChecksumRaw(%v),\n", formatValue(chksum)))
+	}
+	if ihl, ok := layer.Params["ihl"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv4IHL(%v),\n", formatValue(ihl)))
+	}
+	// Handle IPv4 options
+	if optionsAny, ok := layer.Params["options"]; ok {
+		if options, ok := optionsAny.([]interface{}); ok && len(options) > 0 {
+			code.WriteString("\t\t\t\tlib.IPv4Options([]lib.IPv4OptionDef{\n")
+			for _, optAny := range options {
+				if optMap, ok := optAny.(map[string]interface{}); ok {
+					optType := int(formatValueToInt(optMap["type"]))
+					var optLen int
+					var optData string
+					if l, ok := optMap["len"]; ok {
+						optLen = int(formatValueToInt(l))
+					}
+					if d, ok := optMap["data"].(string); ok {
+						optData = d
+					}
+					if optData != "" {
+						code.WriteString(fmt.Sprintf("\t\t\t\t\t{Type: %d, Length: %d, Data: decodeHex(%q)},\n", optType, optLen, optData))
+					} else {
+						code.WriteString(fmt.Sprintf("\t\t\t\t\t{Type: %d, Length: %d},\n", optType, optLen))
+					}
+				}
+			}
+			code.WriteString("\t\t\t\t}),\n")
+		}
+	}
 
 	return code.String()
 }
@@ -432,10 +483,10 @@ func (cg *ScapyCodegenV2) generateIPv6Options(layer IRLayer) string {
 	if nh, ok := layer.Params["nh"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6NextHeader(layers.IPProtocol(%v)),\n", formatValue(nh)))
 	}
-	// Add plen if specified (for testing invalid packets with wrong payload length)
-	// Note: gopacket does not support setting IPv6 payload length directly as it's calculated automatically
+	// Add plen if specified (for testing malformed packets with wrong payload length)
+	// This uses customIPv6Layer to override the automatically calculated length
 	if plen, ok := layer.Params["plen"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\t// LIMITATION: Payload length %v specified but cannot be set - gopacket calculates it automatically\n", formatValue(plen)))
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.IPv6PayloadLength(%v),\n", formatValue(plen)))
 	}
 
 	return code.String()
@@ -459,6 +510,43 @@ func (cg *ScapyCodegenV2) generateTCPOptions(layer IRLayer) string {
 	}
 	if ack, ok := layer.Params["ack"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.TCPAck(%v),\n", formatValue(ack)))
+	}
+	if window, ok := layer.Params["window"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.TCPWindow(%v),\n", formatValue(window)))
+	}
+	if urgent, ok := layer.Params["urgent"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.TCPUrgent(%v),\n", formatValue(urgent)))
+	}
+	if chksum, ok := layer.Params["chksum"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.TCPChecksumRaw(%v),\n", formatValue(chksum)))
+	}
+	if dataofs, ok := layer.Params["dataofs"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.TCPDataOffset(%v),\n", formatValue(dataofs)))
+	}
+	// Handle TCP options
+	if optionsAny, ok := layer.Params["options"]; ok {
+		if options, ok := optionsAny.([]interface{}); ok && len(options) > 0 {
+			code.WriteString("\t\t\t\tlib.TCPOptions([]lib.TCPOptionDef{\n")
+			for _, optAny := range options {
+				if optMap, ok := optAny.(map[string]interface{}); ok {
+					optKind := int(formatValueToInt(optMap["kind"]))
+					var optLen int
+					var optData string
+					if l, ok := optMap["len"]; ok {
+						optLen = int(formatValueToInt(l))
+					}
+					if d, ok := optMap["data"].(string); ok {
+						optData = d
+					}
+					if optData != "" {
+						code.WriteString(fmt.Sprintf("\t\t\t\t\t{Kind: layers.TCPOptionKind(%d), Length: %d, Data: decodeHex(%q)},\n", optKind, optLen, optData))
+					} else {
+						code.WriteString(fmt.Sprintf("\t\t\t\t\t{Kind: layers.TCPOptionKind(%d), Length: %d},\n", optKind, optLen))
+					}
+				}
+			}
+			code.WriteString("\t\t\t\t}),\n")
+		}
 	}
 
 	return code.String()
@@ -560,18 +648,27 @@ func (cg *ScapyCodegenV2) generateGREOptions(layer IRLayer) string {
 
 	if chksum, ok := layer.Params["chksum_present"]; ok && formatValue(chksum) != "0" {
 		code.WriteString("\t\t\t\tlib.GREChecksumPresent(true),\n")
+		// Add actual checksum value if present
+		if chksumVal, ok := layer.Params["chksum"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.GREChecksum(%v),\n", formatValue(chksumVal)))
+		}
 	}
 	if key, ok := layer.Params["key_present"]; ok && formatValue(key) != "0" {
 		code.WriteString("\t\t\t\tlib.GREKeyPresent(true),\n")
+		// Add actual key value if present
+		if keyVal, ok := layer.Params["key"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.GREKey(%v),\n", formatValue(keyVal)))
+		}
 	}
 	if seq, ok := layer.Params["seqnum_present"]; ok && formatValue(seq) != "0" {
 		code.WriteString("\t\t\t\tlib.GRESeqPresent(true),\n")
+		// Add actual seq value if present
+		if seqVal, ok := layer.Params["seq"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.GRESeq(%v),\n", formatValue(seqVal)))
+		}
 	}
 	if ver, ok := layer.Params["version"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.GREVersion(%v),\n", formatValue(ver)))
-	}
-	if keyVal, ok := layer.Params["key"]; ok {
-		code.WriteString(fmt.Sprintf("\t\t\t\tlib.GREKey(%v),\n", formatValue(keyVal)))
 	}
 
 	return code.String()
@@ -612,6 +709,58 @@ func (cg *ScapyCodegenV2) generateMPLSOptions(layer IRLayer) string {
 	if tc, ok := layer.Params["cos"]; ok {
 		// cos is the traffic class (experimental bits)
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.MPLSTrafficClass(%v),\n", formatValue(tc)))
+	}
+
+	return code.String()
+}
+
+// generateARPOptions generates ARP layer options
+func (cg *ScapyCodegenV2) generateARPOptions(layer IRLayer) string {
+	var code strings.Builder
+
+	if operation, ok := layer.Params["operation"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ARPOperation(%v),\n", formatValue(operation)))
+	}
+	if hwtype, ok := layer.Params["hwtype"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ARPHwType(%v),\n", formatValue(hwtype)))
+	}
+	if ptype, ok := layer.Params["ptype"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ARPPType(%v),\n", formatValue(ptype)))
+	}
+	if hwlen, ok := layer.Params["hwlen"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ARPHwLen(%v),\n", formatValue(hwlen)))
+	}
+	if plen, ok := layer.Params["plen"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ARPPLen(%v),\n", formatValue(plen)))
+	}
+	if hwsrc, ok := layer.Params["hwsrc"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ARPHwSrc(%q),\n", hwsrc))
+	}
+	if psrc, ok := layer.Params["psrc"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ARPPSrc(%q),\n", psrc))
+	}
+	if hwdst, ok := layer.Params["hwdst"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ARPHwDst(%q),\n", hwdst))
+	}
+	if pdst, ok := layer.Params["pdst"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ARPPDst(%q),\n", pdst))
+	}
+
+	return code.String()
+}
+
+// generateIPSecESPOptions generates IPSec ESP layer options
+func (cg *ScapyCodegenV2) generateIPSecESPOptions(layer IRLayer) string {
+	var code strings.Builder
+
+	if spi, ok := layer.Params["spi"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ESPSPI(%v),\n", formatValue(spi)))
+	}
+	if seq, ok := layer.Params["seq"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ESPSeq(%v),\n", formatValue(seq)))
+	}
+	if encrypted, ok := layer.Params["encrypted"].(string); ok && len(encrypted) > 0 {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ESPEncrypted(decodeHex(%q)),\n", encrypted))
 	}
 
 	return code.String()
@@ -709,12 +858,22 @@ func (cg *ScapyCodegenV2) generatePortRangePackets(pkt IRPacketDef, idx int, por
 	portLayer.Params[field] = "port"
 
 	// Use template for better readability
-	portRangeTemplate := `%s
+	var portRangeTemplate string
+	if cg.libraryMode {
+		portRangeTemplate = `%s
+		if err != nil { return nil, err }
+		packets = append(packets, pkt)
+	}
+
+`
+	} else {
+		portRangeTemplate = `%s
 		require.NoError(t, err)
 		packets = append(packets, pkt)
 	}
 
 `
+	}
 	code.WriteString(cg.generatePacketConstruction(pkt, false))
 	code.WriteString(fmt.Sprintf(portRangeTemplate, ""))
 
@@ -750,12 +909,22 @@ func (cg *ScapyCodegenV2) generateParamArrayPackets(pkt IRPacketDef, idx int, pa
 	paramLayer.Params[field] = "val"
 
 	// Use template for better readability
-	paramArrayTemplate := `%s
+	var paramArrayTemplate string
+	if cg.libraryMode {
+		paramArrayTemplate = `%s
+		if err != nil { return nil, err }
+		packets = append(packets, pkt)
+	}
+
+`
+	} else {
+		paramArrayTemplate = `%s
 		require.NoError(t, err)
 		packets = append(packets, pkt)
 	}
 
 `
+	}
 	code.WriteString(cg.generatePacketConstruction(pkt, false))
 	code.WriteString(fmt.Sprintf(paramArrayTemplate, ""))
 
@@ -791,12 +960,22 @@ func (cg *ScapyCodegenV2) generateCIDRExpansionPackets(pkt IRPacketDef, idx int,
 	code.WriteString(cg.generatePacketConstruction(pkt, false))
 
 	// Use template for better readability
-	cidrTemplate := `
+	var cidrTemplate string
+	if cg.libraryMode {
+		cidrTemplate = `
+		if err != nil { return nil, err }
+		packets = append(packets, pkt)
+	}
+
+`
+	} else {
+		cidrTemplate = `
 		require.NoError(t, err)
 		packets = append(packets, pkt)
 	}
 
 `
+	}
 	code.WriteString(cidrTemplate)
 
 	// Restore original
@@ -825,7 +1004,20 @@ func (cg *ScapyCodegenV2) generateFragmentedPacket(pkt IRPacketDef, idx int, fra
 	}
 
 	// Use template for fragmentation with better readability
-	fragTemplate := `	{
+	var fragTemplate string
+	if cg.libraryMode {
+		fragTemplate = `	{
+		// Base packet for fragmentation
+%s
+		if err != nil { return nil, err }
+		frags, err := lib.%s(pkt, %d)
+		if err != nil { return nil, err }
+%s
+	}
+
+`
+	} else {
+		fragTemplate = `	{
 		// Base packet for fragmentation
 %s
 		require.NoError(t, err)
@@ -835,6 +1027,7 @@ func (cg *ScapyCodegenV2) generateFragmentedPacket(pkt IRPacketDef, idx int, fra
 	}
 
 `
+	}
 	var fragAppend string
 	// Check if we need specific fragment index
 	if pkt.SpecialHandling != nil {
@@ -930,6 +1123,10 @@ func sanitizeName(filename string) string {
 // detectIRPacketPattern analyzes packets to find common structure and varying parameters
 // It tries to find the largest group of consecutive packets with the same layer structure
 func (cg *ScapyCodegenV2) detectIRPacketPattern(packets []IRPacketDef) *IRPacketPattern {
+	if cg.libraryMode {
+		// Avoid generating helper functions that depend on testing.T in library mode
+		return nil
+	}
 	if len(packets) < 3 {
 		return nil
 	}
@@ -1272,14 +1469,16 @@ func (cg *ScapyCodegenV2) generateSinglePacketCode(pkt IRPacketDef, isExpect boo
 
 		code.WriteString(fmt.Sprintf("\t\t// Special handling: %v\n", pkt.SpecialHandling))
 
-		if cg.strictMode {
+		if cg.strictMode && !cg.libraryMode {
 			// In strict mode, generate fatal error
 			code.WriteString(fmt.Sprintf("\t\t// ERROR: Special handling type '%s' not implemented\n", handlingType))
 			code.WriteString(fmt.Sprintf("\t\tt.Fatalf(\"Special handling not implemented: %s (strict mode enabled)\")\n", handlingType))
 		} else {
 			// In tolerant mode, generate commented-out skip
 			code.WriteString(fmt.Sprintf("\t\t// Special handling type '%s' not fully implemented; skipping packet generation for this entry\n", handlingType))
-			code.WriteString(fmt.Sprintf("\t\t// t.Skipf(\"special handling not implemented: %s\")\n", handlingType))
+			if !cg.libraryMode {
+				code.WriteString(fmt.Sprintf("\t\t// t.Skipf(\"special handling not implemented: %s\")\n", handlingType))
+			}
 		}
 		return code.String()
 	}
@@ -1291,8 +1490,13 @@ func (cg *ScapyCodegenV2) generateSinglePacketCode(pkt IRPacketDef, isExpect boo
 	}
 
 	code.WriteString("\t\t)\n\n")
-	code.WriteString("\t\trequire.NoError(t, err)\n")
-	code.WriteString("\t\tpackets = append(packets, pkt)\n")
+	if cg.libraryMode {
+		code.WriteString("\t\tif err != nil { return nil, err }\n")
+		code.WriteString("\t\tpackets = append(packets, pkt)\n")
+	} else {
+		code.WriteString("\t\trequire.NoError(t, err)\n")
+		code.WriteString("\t\tpackets = append(packets, pkt)\n")
+	}
 
 	return code.String()
 }
@@ -1317,7 +1521,7 @@ func (cg *ScapyCodegenV2) generateLayerCallWithPattern(layer IRLayer, layerIdx i
 		code.WriteString(cg.generateEtherOptionsWithPattern(layer, varyingParams, isExpect, useStruct, funcName))
 	case "Dot1Q":
 		code.WriteString(cg.generateDot1QOptionsWithPattern(layer, varyingParams, useStruct, funcName))
-	case "IP":
+	case "IP", "IPv4":
 		code.WriteString(cg.generateIPOptionsWithPattern(layer, varyingParams, useStruct, funcName))
 	case "IPv6":
 		code.WriteString(cg.generateIPv6OptionsWithPattern(layer, varyingParams, useStruct, funcName))
