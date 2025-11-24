@@ -19,7 +19,8 @@ import (
 // NewPacket creates a new gopacket.Packet from the given LayerBuilder chain,
 // inferring protocol numbers and EtherType/VLAN types from layer order and
 // leaving checksums/lengths untouched unless a custom layer requests otherwise.
-func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
+// If opts is nil, default options (FixLengths: true, ComputeChecksums: true) are used.
+func NewPacket(opts *gopacket.SerializeOptions, layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
 	var serialLayers []gopacket.SerializableLayer
 
 	for _, builder := range layerBuilders {
@@ -114,6 +115,9 @@ func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
 						ip6.NextHeader = layers.IPProtocolGRE
 					case *layers.IPv4:
 						ip6.NextHeader = layers.IPProtocolIPv4
+					case *layers.IPv6, *customIPv6Layer:
+						// IPv6-in-IPv6 tunneling
+						ip6.NextHeader = layers.IPProtocolIPv6
 					}
 				}
 			}
@@ -194,206 +198,31 @@ func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
 		}
 	}
 
-	// Serialize the packet
+	// Serialize the packet with provided or default options
 	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
 
-	if err := gopacket.SerializeLayers(buf, opts, serialLayers...); err != nil {
-		return nil, err
-	}
-
-	// Parse back to packet
-	pkt := gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
-	return pkt, nil
-}
-
-// NewPacketWithOptions creates a new packet with custom serialization options
-func NewPacketWithOptions(serializeOpts gopacket.SerializeOptions, layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
-	var serialLayers []gopacket.SerializableLayer
-
-	for _, builder := range layerBuilders {
-		layer := builder.Build()
-		if layer != nil {
-			serialLayers = append(serialLayers, layer)
+	// Use provided options or defaults
+	var serializeOpts gopacket.SerializeOptions
+	if opts != nil {
+		serializeOpts = *opts
+	} else {
+		serializeOpts = gopacket.SerializeOptions{
+			FixLengths:       true,
+			ComputeChecksums: true,
 		}
 	}
-
-	// Fix layer types and protocols based on layer order (same logic as NewPacket)
-	// First pass: set ethernet/vlan types based on IMMEDIATE next layer
-	for i, layer := range serialLayers {
-		switch layer.(type) {
-		case *layers.Ethernet:
-			// Look ahead to next layer to set EthernetType
-			if i+1 < len(serialLayers) {
-				eth := layer.(*layers.Ethernet)
-				switch serialLayers[i+1].(type) {
-				case *layers.Dot1Q:
-					eth.EthernetType = layers.EthernetTypeDot1Q
-				case *layers.IPv4:
-					eth.EthernetType = layers.EthernetTypeIPv4
-				case *layers.IPv6, *customIPv6Layer:
-					eth.EthernetType = layers.EthernetTypeIPv6
-				}
-			}
-		case *layers.Dot1Q:
-			// Look ahead to next layer to set VLAN Type
-			if i+1 < len(serialLayers) {
-				vlan := layer.(*layers.Dot1Q)
-				switch serialLayers[i+1].(type) {
-				case *layers.IPv4:
-					vlan.Type = layers.EthernetTypeIPv4
-				case *layers.IPv6, *customIPv6Layer:
-					vlan.Type = layers.EthernetTypeIPv6
-				case *layers.MPLS:
-					vlan.Type = layers.EthernetTypeMPLSUnicast
-				case *layers.ARP:
-					vlan.Type = layers.EthernetTypeARP
-				}
-			}
-		}
-	}
-
-	// Second pass: set IPv4/IPv6 protocols
-	for i, layer := range serialLayers {
-		switch l := layer.(type) {
-		case *layers.IPv4:
-			// Look ahead to set Protocol
-			if i+1 < len(serialLayers) {
-				switch serialLayers[i+1].(type) {
-				case *layers.TCP:
-					l.Protocol = layers.IPProtocolTCP
-				case *layers.UDP:
-					l.Protocol = layers.IPProtocolUDP
-				case *layers.ICMPv4:
-					l.Protocol = layers.IPProtocolICMPv4
-				case *layers.GRE:
-					l.Protocol = layers.IPProtocolGRE
-				case *layers.IPv6:
-					l.Protocol = 41 // IPv6-in-IPv4
-				case *layers.IPv4:
-					l.Protocol = 4 // IPv4-in-IPv4
-				}
-			}
-		case *layers.IPv6:
-			// Look ahead to set NextHeader
-			if i+1 < len(serialLayers) {
-				ip6 := layer.(*layers.IPv6)
-				// Only set NextHeader if it wasn't provided via IR
-				if ip6.NextHeader == 0 {
-					switch serialLayers[i+1].(type) {
-					case *layers.TCP:
-						ip6.NextHeader = layers.IPProtocolTCP
-					case *layers.UDP:
-						ip6.NextHeader = layers.IPProtocolUDP
-					case *udpNoChecksum:
-						ip6.NextHeader = layers.IPProtocolUDP
-					case *layers.ICMPv6:
-						ip6.NextHeader = layers.IPProtocolICMPv6
-					case *icmpv6WithEcho:
-						ip6.NextHeader = layers.IPProtocolICMPv6
-					case *layers.IPv6Fragment:
-						ip6.NextHeader = layers.IPProtocolIPv6Fragment
-					case *layers.IPv6Destination:
-						ip6.NextHeader = layers.IPProtocolIPv6Destination
-					case *layers.IPv6HopByHop:
-						ip6.NextHeader = layers.IPProtocolIPv6HopByHop
-					case *layers.GRE:
-						ip6.NextHeader = layers.IPProtocolGRE
-					case *layers.IPv4:
-						ip6.NextHeader = layers.IPProtocolIPv4
-					}
-				}
-			}
-		case *layers.IPv6Fragment:
-			// Look ahead to set next header in fragment
-			if i+1 < len(serialLayers) {
-				frag := layer.(*layers.IPv6Fragment)
-				// Only infer NextHeader if not explicitly provided via IR
-				if frag.NextHeader == 0 {
-					switch serialLayers[i+1].(type) {
-					case *layers.TCP, *customTCPLayer:
-						frag.NextHeader = layers.IPProtocolTCP
-					case *layers.UDP:
-						frag.NextHeader = layers.IPProtocolUDP
-					case *udpNoChecksum:
-						frag.NextHeader = layers.IPProtocolUDP
-					case *layers.ICMPv6:
-						frag.NextHeader = layers.IPProtocolICMPv6
-					case *layers.IPv6HopByHop:
-						frag.NextHeader = layers.IPProtocolIPv6HopByHop
-					case *layers.IPv4:
-						frag.NextHeader = layers.IPProtocolIPv4
-					}
-				}
-			}
-		case *layers.GRE:
-			// Look ahead to set protocol for encapsulated packet
-			if i+1 < len(serialLayers) {
-				gre := layer.(*layers.GRE)
-				switch serialLayers[i+1].(type) {
-				case *layers.IPv4:
-					gre.Protocol = layers.EthernetTypeIPv4
-				case *layers.IPv6:
-					gre.Protocol = layers.EthernetTypeIPv6
-				}
-			}
-		}
-	}
-
-	// Set network layer for transport layer checksum calculation using the most recent network layer
-	var currentNL gopacket.NetworkLayer
-	for _, layer := range serialLayers {
-		if nl, ok := layer.(gopacket.NetworkLayer); ok {
-			currentNL = nl
-			continue
-		}
-		// Handle custom network layers that don't implement gopacket.NetworkLayer
-		switch nl := layer.(type) {
-		case *customIPv4Layer:
-			currentNL = nl.ipv4
-			continue
-		case *customIPv6Layer:
-			currentNL = nl.ipv6
-			continue
-		}
-		// Set network layer for transport layers
-		switch tl := layer.(type) {
-		case *layers.TCP:
-			if currentNL != nil {
-				_ = tl.SetNetworkLayerForChecksum(currentNL)
-			}
-		case *customTCPLayer:
-			if currentNL != nil {
-				_ = tl.tcp.SetNetworkLayerForChecksum(currentNL)
-			}
-		case *layers.UDP:
-			if currentNL != nil {
-				_ = tl.SetNetworkLayerForChecksum(currentNL)
-			}
-		case *layers.ICMPv6:
-			if currentNL != nil {
-				_ = tl.SetNetworkLayerForChecksum(currentNL)
-			}
-		case *icmpv6WithEcho:
-			if currentNL != nil {
-				_ = tl.icmp.SetNetworkLayerForChecksum(currentNL)
-			}
-		}
-	}
-
-	// Serialize the packet with provided options
-	buf := gopacket.NewSerializeBuffer()
 
 	if err := gopacket.SerializeLayers(buf, serializeOpts, serialLayers...); err != nil {
 		return nil, err
 	}
 
 	// Parse back to packet
-	// Use NoCopy option to preserve all bytes, including those beyond declared lengths
-	pkt := gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.NoCopy)
+	// Use NoCopy when custom options are provided to preserve all bytes
+	decodeOpts := gopacket.Default
+	if opts != nil {
+		decodeOpts = gopacket.NoCopy
+	}
+	pkt := gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, decodeOpts)
 	return pkt, nil
 }
 
@@ -409,7 +238,13 @@ type EthernetBuilder struct {
 }
 
 func Ether(opts ...EtherOption) *EthernetBuilder {
+	// Default MACs: client -> yanet (for tests without explicit MACs)
+	srcMAC, _ := net.ParseMAC("52:54:00:6b:ff:a1")
+	dstMAC, _ := net.ParseMAC("52:54:00:6b:ff:a5")
+
 	eth := &layers.Ethernet{
+		SrcMAC:       srcMAC,
+		DstMAC:       dstMAC,
 		EthernetType: layers.EthernetTypeIPv4, // default
 	}
 

@@ -23,10 +23,7 @@ func TestICMPv6PayloadConversion(t *testing.T) {
 	analyzer := NewPcapAnalyzer(false)
 
 	// Read ICMP packets from Test009
-	yanet1Root := os.Getenv("YANET1_ROOT")
-	if yanet1Root == "" {
-		yanet1Root = "../../../../../yanet1"
-	}
+	yanet1Root := GetYanet1Root()
 	pcapPath := filepath.Join(yanet1Root, "autotest/units/001_one_port/009_nat64stateless/007-send.pcap")
 	if _, err := os.Stat(pcapPath); os.IsNotExist(err) {
 		t.Skipf("PCAP file not found at %s. Set YANET1_ROOT to yanet1 repository location.", pcapPath)

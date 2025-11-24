@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewPacket_SimpleEtherIPTCP(t *testing.T) {
-	pkt, err := NewPacket(
+	pkt, err := NewPacket(nil,
 		Ether(
 			EtherDst("00:11:22:33:44:55"),
 			EtherSrc("00:00:00:00:00:01"),
@@ -55,7 +55,7 @@ func TestNewPacket_SimpleEtherIPTCP(t *testing.T) {
 }
 
 func TestNewPacket_IPv6WithVLAN(t *testing.T) {
-	pkt, err := NewPacket(
+	pkt, err := NewPacket(nil,
 		Ether(
 			EtherDst("00:11:22:33:44:55"),
 			EtherSrc("00:00:00:00:00:01"),
@@ -121,7 +121,7 @@ func TestTCPFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pkt, err := NewPacket(
+			pkt, err := NewPacket(nil,
 				Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 				IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 				TCP(TCPSport(1234), TCPDport(80), TCPFlags(tt.flags)),
@@ -168,7 +168,7 @@ func TestPayload(t *testing.T) {
 	require.Equal(t, []byte("XYXYXYXYXY"), data2)
 
 	// Test with packet
-	pkt, err := NewPacket(
+	pkt, err := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 		UDP(UDPSport(1234), UDPDport(80)),
@@ -186,7 +186,7 @@ func TestPayload(t *testing.T) {
 
 func TestICMP(t *testing.T) {
 	// Echo request (type 8)
-	pkt, err := NewPacket(
+	pkt, err := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 		ICMP(ICMPTypeCode(8, 0), ICMPId(0x1234), ICMPSeq(0x5678)),
@@ -206,7 +206,7 @@ func TestICMP(t *testing.T) {
 }
 
 func TestIPv6Fragment(t *testing.T) {
-	pkt, err := NewPacket(
+	pkt, err := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv6(IPv6Src("::1"), IPv6Dst("::2")),
 		IPv6ExtHdrFragment(
@@ -230,7 +230,7 @@ func TestIPv6Fragment(t *testing.T) {
 }
 
 func TestGRE(t *testing.T) {
-	pkt, err := NewPacket(
+	pkt, err := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv6(
 			IPv6Src("::"),
@@ -259,7 +259,7 @@ func TestGRE(t *testing.T) {
 // Benchmark tests
 func BenchmarkNewPacket_Simple(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_, _ = NewPacket(
+		_, _ = NewPacket(nil,
 			Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 			IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 			TCP(TCPSport(1234), TCPDport(80)),
@@ -269,7 +269,7 @@ func BenchmarkNewPacket_Simple(b *testing.B) {
 
 func BenchmarkNewPacket_Complex(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_, _ = NewPacket(
+		_, _ = NewPacket(nil,
 			Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 			Dot1Q(VLANId(100)),
 			IPv6(IPv6Src("::1"), IPv6Dst("::2"), IPv6HopLimit(64)),

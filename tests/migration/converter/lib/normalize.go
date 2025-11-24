@@ -232,7 +232,7 @@ func ApplyFrameworkMapping(pkt gopacket.Packet, isExpect bool) ([]byte, error) {
 	}
 
 	// Rebuild packet using lib.NewPacket
-	newPkt, err := NewPacket(layerBuilders...)
+	newPkt, err := NewPacket(nil, layerBuilders...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to rebuild packet: %w", err)
 	}

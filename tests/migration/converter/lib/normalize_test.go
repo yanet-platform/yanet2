@@ -10,7 +10,7 @@ import (
 
 func TestApplyFrameworkMapping_MACSwapAndPreserveVLAN(t *testing.T) {
 	// Build a simple packet with VLAN to verify preservation
-	pkt, err := NewPacket(
+	pkt, err := NewPacket(nil,
 		Ether(),
 		Dot1Q(VLANId(7)),
 		IPv4(IPSrc("192.0.2.1"), IPDst("198.51.100.1"), IPTTL(64), IPProto(layers.IPProtocolUDP)),

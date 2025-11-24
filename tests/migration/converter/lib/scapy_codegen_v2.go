@@ -210,7 +210,7 @@ func (cg *ScapyCodegenV2) GeneratePacketFunction(funcName string, packets []IRPa
 func (cg *ScapyCodegenV2) generatePacketConstruction(pkt IRPacketDef, isExpect bool) string {
 	var code strings.Builder
 
-	code.WriteString("\t\tpkt, err := lib.NewPacket(\n")
+	code.WriteString("\t\tpkt, err := lib.NewPacket(nil,\n")
 
 	for _, layer := range pkt.Layers {
 		// Skip VLAN if stripVLAN is enabled
@@ -1386,7 +1386,7 @@ func (cg *ScapyCodegenV2) generateHelperFunction(funcName string, pattern *IRPac
 	}
 
 	// Generate lib.NewPacket call with layers
-	code.WriteString("\tpkt, err := lib.NewPacket(\n")
+	code.WriteString("\tpkt, err := lib.NewPacket(nil,\n")
 
 	for layerIdx, layer := range pattern.CommonLayers {
 		// Skip VLAN if stripVLAN is enabled
@@ -1506,7 +1506,7 @@ func (cg *ScapyCodegenV2) generateSinglePacketCode(pkt IRPacketDef, isExpect boo
 		return code.String()
 	}
 
-	code.WriteString("\t\tpkt, err := lib.NewPacket(\n")
+	code.WriteString("\t\tpkt, err := lib.NewPacket(nil,\n")
 
 	for _, layer := range pkt.Layers {
 		code.WriteString(cg.generateLayerCall(layer, isExpect))

@@ -72,7 +72,7 @@ clean-all: clean
 
 # Convert tests from yanet1
 MIGRATION_DIR = ../migration
-YANET1_ROOT ?= ../../../../yanet1
+YANET1_ROOT ?= ../../../yanet1
 
 convert:
 	@echo "Converting all yanet1 tests..."

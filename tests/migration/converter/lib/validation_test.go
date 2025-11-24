@@ -29,7 +29,7 @@ func TestValidation_EmptyPCAP(t *testing.T) {
 	require.Equal(t, 1, result.Passed)
 
 	// Test with packets - should fail
-	pkt, _ := NewPacket(
+	pkt, _ := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 	)
@@ -44,7 +44,7 @@ func TestValidation_ByteByByte(t *testing.T) {
 	pcapPath := filepath.Join(tmpDir, "test.pcap")
 
 	// Create a packet
-	expectedPkt, err := NewPacket(
+	expectedPkt, err := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(64)),
 		TCP(TCPSport(1234), TCPDport(80)),
@@ -70,7 +70,7 @@ func TestValidation_ByteByByte(t *testing.T) {
 	validator := NewPacketValidator(true)
 
 	// Test with identical packet - should pass
-	gotPkt, err := NewPacket(
+	gotPkt, err := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(64)),
 		TCP(TCPSport(1234), TCPDport(80)),
@@ -89,7 +89,7 @@ func TestValidation_ByteMismatch(t *testing.T) {
 	pcapPath := filepath.Join(tmpDir, "test.pcap")
 
 	// Create expected packet
-	expectedPkt, err := NewPacket(
+	expectedPkt, err := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(64)),
 		TCP(TCPSport(1234), TCPDport(80)),
@@ -115,7 +115,7 @@ func TestValidation_ByteMismatch(t *testing.T) {
 	validator := NewPacketValidator(false)
 
 	// Test with different packet - should fail
-	gotPkt, err := NewPacket(
+	gotPkt, err := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(63)), // Different TTL
 		TCP(TCPSport(1234), TCPDport(80)),
@@ -136,11 +136,11 @@ func TestValidation_CountMismatch(t *testing.T) {
 	pcapPath := filepath.Join(tmpDir, "test.pcap")
 
 	// Create 2 packets in PCAP
-	pkt1, _ := NewPacket(
+	pkt1, _ := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 	)
-	pkt2, _ := NewPacket(
+	pkt2, _ := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv4(IPSrc("1.2.3.5"), IPDst("5.6.7.9")),
 	)
@@ -178,7 +178,7 @@ func TestValidation_MultiplePackets(t *testing.T) {
 	// Create multiple packets
 	packets := make([]gopacket.Packet, 0)
 	for i := 0; i < 5; i++ {
-		pkt, err := NewPacket(
+		pkt, err := NewPacket(nil,
 			Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 			IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPId(uint16(i))),
 			UDP(UDPSport(uint16(1000+i)), UDPDport(80)),
@@ -222,7 +222,7 @@ func TestValidation_LayerMode_IgnoresEthernetPadding(t *testing.T) {
 	pcapPath := filepath.Join(tmpDir, "padded.pcap")
 
 	// Create a packet using the builder (this will typically serialize to >= 60 bytes)
-	basePkt, err := NewPacket(
+	basePkt, err := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 		UDP(UDPSport(1234), UDPDport(80)),
@@ -277,7 +277,7 @@ func TestValidation_LayerMode_IgnoresChecksumDifferences(t *testing.T) {
 	pcapPath := filepath.Join(tmpDir, "checksum.pcap")
 
 	// Create a base IPv4/TCP packet
-	basePkt, err := NewPacket(
+	basePkt, err := NewPacket(nil,
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 		TCP(TCPSport(1234), TCPDport(80)),

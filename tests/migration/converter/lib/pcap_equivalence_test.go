@@ -1,7 +1,6 @@
 package lib
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +9,7 @@ import (
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcap"
+	"github.com/stretchr/testify/require"
 )
 
 // TestPCAPEquivalence verifies that the converter IR pipeline correctly processes PCAP files
@@ -20,139 +20,59 @@ import (
 // Set YANET1_ROOT environment variable to point to yanet1 directory.
 // Example: export YANET1_ROOT=/path/to/yanet1
 func TestPCAPEquivalence(t *testing.T) {
-	// Get yanet1 root from environment
-	yanet1Root := os.Getenv("YANET1_ROOT")
-	if yanet1Root == "" {
-		yanet1Root = "../../../../../yanet1"
-	}
-
-	// Check if yanet1 directory exists
-	onePortDir := filepath.Join(yanet1Root, "autotest/units/001_one_port")
-	if _, err := os.Stat(onePortDir); os.IsNotExist(err) {
-		t.Skipf("yanet1 directory not found at %s. Set YANET1_ROOT to yanet1 repository location.", onePortDir)
-	}
+	onePortDir, err := GetYanet1OnePortDir()
+	require.NoError(t, err)
 
 	// Get test filters from environment
 	onlyTest := os.Getenv("ONLY_TEST")
 	onlyStep := os.Getenv("ONLY_STEP")
 
-	// Discover tests
-	entries, err := os.ReadDir(onePortDir)
+	// Discover tests (no skip tests for this test suite)
+	tests, err := DiscoverTests(onePortDir, onlyTest, nil)
 	if err != nil {
-		t.Fatalf("Failed to read %s: %v", onePortDir, err)
+		t.Fatalf("Failed to discover tests: %v", err)
 	}
 
-	testCount := 0
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		testName := entry.Name()
-
-		// Apply test filter
-		if onlyTest != "" && testName != onlyTest {
-			continue
-		}
-
-		testDir := filepath.Join(onePortDir, testName)
-		autotestPath := filepath.Join(testDir, "autotest.yaml")
-
-		if _, err := os.Stat(autotestPath); os.IsNotExist(err) {
-			continue
-		}
-
-		testCount++
-
-		t.Run(testName, func(t *testing.T) {
-			runTestEquivalence(t, testDir, testName, onlyStep)
-		})
-	}
-
-	if testCount == 0 {
+	if len(tests) == 0 {
 		t.Skip("No tests found to run")
+	}
+
+	for _, testInfo := range tests {
+		testInfo := testInfo // capture loop variable
+		t.Run(testInfo.Name, func(t *testing.T) {
+			runTestEquivalence(t, testInfo, onlyStep)
+		})
 	}
 }
 
-func runTestEquivalence(t *testing.T, testDir, testName, onlyStep string) {
-	// Parse autotest.yaml using shared function from converter
-	test, err := ParseAutotestYAML(testDir)
+func runTestEquivalence(t *testing.T, testInfo TestInfo, onlyStep string) {
+	err := IterateSendPacketsSteps(testInfo, onlyStep, func(stepInfo StepInfo, sendFile, expectFile string) error {
+		t.Run(stepInfo.Name, func(t *testing.T) {
+			// Test send packets
+			sendPath := filepath.Join(testInfo.Dir, sendFile)
+			if _, err := os.Stat(sendPath); err == nil {
+				t.Run(sendFile, func(t *testing.T) {
+					verifyPCAPEquivalence(t, sendPath, false)
+				})
+			}
+
+			// Test expect packets
+			if expectFile != "" {
+				expectPath := filepath.Join(testInfo.Dir, expectFile)
+				if _, err := os.Stat(expectPath); err == nil {
+					t.Run(expectFile, func(t *testing.T) {
+						verifyPCAPEquivalence(t, expectPath, true)
+					})
+				}
+			}
+		})
+		return nil
+	})
 	if err != nil {
 		// Skip tests that cannot be parsed (e.g., malformed YAML in yanet1)
 		// These tests are typically disabled in skiplist.yaml anyway
 		t.Skipf("Cannot parse autotest.yaml (likely malformed in yanet1): %v", err)
-		return
 	}
-
-	// Process sendPackets steps
-	stepIndex := 0
-	for _, step := range test.Steps {
-		for stepType, content := range step {
-			if stepType != "sendPackets" {
-				continue
-			}
-
-			stepIndex++
-			stepName := fmt.Sprintf("Step_%03d", stepIndex)
-
-			// Apply step filter
-			if onlyStep != "" && stepName != fmt.Sprintf("Step_%s", onlyStep) {
-				continue
-			}
-
-			t.Run(stepName, func(t *testing.T) {
-				packets, ok := content.([]interface{})
-				if !ok {
-					t.Skip("Invalid sendPackets format")
-					return
-				}
-
-				for _, pkt := range packets {
-					sendFile, expectFile := parseSendExpectFiles(pkt)
-					if sendFile == "" {
-						continue
-					}
-
-					// Test send packets
-					sendPath := filepath.Join(testDir, sendFile)
-					if _, err := os.Stat(sendPath); err == nil {
-						t.Run(sendFile, func(t *testing.T) {
-							verifyPCAPEquivalence(t, sendPath, false)
-						})
-					}
-
-					// Test expect packets
-					if expectFile != "" {
-						expectPath := filepath.Join(testDir, expectFile)
-						if _, err := os.Stat(expectPath); err == nil {
-							t.Run(expectFile, func(t *testing.T) {
-								verifyPCAPEquivalence(t, expectPath, true)
-							})
-						}
-					}
-				}
-			})
-		}
-	}
-}
-
-func parseSendExpectFiles(packet interface{}) (sendFile, expectFile string) {
-	if packetMap, ok := packet.(map[interface{}]interface{}); ok {
-		if s, exists := packetMap["send"]; exists {
-			sendFile = fmt.Sprintf("%v", s)
-		}
-		if e, exists := packetMap["expect"]; exists {
-			expectFile = fmt.Sprintf("%v", e)
-		}
-	} else if packetMap, ok := packet.(map[string]interface{}); ok {
-		if s, exists := packetMap["send"]; exists {
-			sendFile = fmt.Sprintf("%v", s)
-		}
-		if e, exists := packetMap["expect"]; exists {
-			expectFile = fmt.Sprintf("%v", e)
-		}
-	}
-	return sendFile, expectFile
 }
 
 // verifyPCAPEquivalence validates the full pipeline: PCAP → IR → Code Generation → Packet Builder → Semantic Comparison
@@ -317,5 +237,5 @@ func generatePacketFromIRExact(irPkt IRPacketDef, opts CodegenOpts) (gopacket.Pa
 		FixLengths:       true,
 		ComputeChecksums: false,
 	}
-	return NewPacketWithOptions(serializeOpts, layerBuilders...)
+	return NewPacket(&serializeOpts, layerBuilders...)
 }

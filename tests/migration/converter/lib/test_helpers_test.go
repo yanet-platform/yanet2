@@ -69,7 +69,7 @@ func generatePacketFromIR(irPkt IRPacketDef, opts CodegenOpts) ([]byte, error) {
 			layerBuilders = append(layerBuilders, builder)
 		}
 	}
-	pkt, err := NewPacket(layerBuilders...)
+	pkt, err := NewPacket(nil, layerBuilders...)
 	if err != nil {
 		return nil, err
 	}

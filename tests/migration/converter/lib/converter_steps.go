@@ -56,6 +56,196 @@ type PcapFileInfo struct {
 	PacketInfo  *PacketInfo // Packet information
 }
 
+// TestInfo contains information about a discovered test
+type TestInfo struct {
+	Name string // Test directory name (e.g., "009_nat64stateless")
+	Dir  string // Full path to test directory
+	Path string // Full path to autotest.yaml
+}
+
+// StepInfo contains information about a test step
+type StepInfo struct {
+	Index   int         // 1-based step index
+	Name    string      // Formatted step name (e.g., "Step_001")
+	Type    string      // Step type (e.g., "sendPackets", "cli")
+	Content interface{} // Step content from YAML
+}
+
+// StepCallback is called for each step during iteration
+type StepCallback func(stepInfo StepInfo, testInfo TestInfo) error
+
+// DiscoverTests discovers all tests in the given one-port directory
+// Parameters:
+//   - onePortDir: Path to the 001_one_port directory
+//   - onlyTest: Optional test name filter (from ONLY_TEST env var)
+//   - skipTests: Map of test names to skip reasons (e.g., map[string]string{"059_rib": "known YAML parsing issues"})
+//
+// Returns:
+//   - []TestInfo: List of discovered tests
+//   - error: Error if directory cannot be read
+func DiscoverTests(onePortDir string, onlyTest string, skipTests map[string]string) ([]TestInfo, error) {
+	entries, err := os.ReadDir(onePortDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", onePortDir, err)
+	}
+
+	var tests []TestInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		testName := entry.Name()
+		if onlyTest != "" && testName != onlyTest {
+			continue
+		}
+
+		testDir := filepath.Join(onePortDir, testName)
+		autotestPath := filepath.Join(testDir, "autotest.yaml")
+		if _, err := os.Stat(autotestPath); os.IsNotExist(err) {
+			continue
+		}
+
+		// Check if test should be skipped
+		if _, shouldSkip := skipTests[testName]; shouldSkip && onlyTest != testName {
+			// Skip this test unless it's explicitly requested
+			continue
+		}
+
+		tests = append(tests, TestInfo{
+			Name: testName,
+			Dir:  testDir,
+			Path: autotestPath,
+		})
+	}
+
+	return tests, nil
+}
+
+// IterateSteps iterates over steps in a test, calling the callback for each matching step
+// Parameters:
+//   - testInfo: Test information
+//   - stepTypeFilter: Filter by step type (empty string means all types)
+//   - onlyStep: Optional step filter (e.g., "003" for Step_003)
+//   - callback: Function called for each matching step
+//
+// Returns:
+//   - error: Error if test cannot be parsed or callback returns error
+func IterateSteps(testInfo TestInfo, stepTypeFilter string, onlyStep string, callback StepCallback) error {
+	test, err := ParseAutotestYAML(testInfo.Dir)
+	if err != nil {
+		return fmt.Errorf("failed to parse autotest.yaml: %w", err)
+	}
+
+	stepIndex := 0
+	for _, step := range test.Steps {
+		for stepType, content := range step {
+			// Filter by step type if specified
+			if stepTypeFilter != "" && stepType != stepTypeFilter {
+				continue
+			}
+
+			stepIndex++
+			stepName := fmt.Sprintf("Step_%03d", stepIndex)
+
+			// Filter by step name if specified
+			if onlyStep != "" {
+				expectedStepName := fmt.Sprintf("Step_%s", onlyStep)
+				if stepName != expectedStepName {
+					continue
+				}
+			}
+
+			stepInfo := StepInfo{
+				Index:   stepIndex,
+				Name:    stepName,
+				Type:    stepType,
+				Content: content,
+			}
+
+			if err := callback(stepInfo, testInfo); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// IterateSendPacketsSteps iterates over sendPackets steps, extracting send/expect file pairs
+// Parameters:
+//   - testInfo: Test information
+//   - onlyStep: Optional step filter (e.g., "003" for Step_003)
+//   - callback: Function called for each packet in each sendPackets step
+//     Parameters: stepInfo, sendFile, expectFile
+//
+// Returns:
+//   - error: Error if test cannot be parsed or callback returns error
+func IterateSendPacketsSteps(testInfo TestInfo, onlyStep string, callback func(stepInfo StepInfo, sendFile, expectFile string) error) error {
+	return IterateSteps(testInfo, "sendPackets", onlyStep, func(stepInfo StepInfo, testInfo TestInfo) error {
+		packets, ok := stepInfo.Content.([]interface{})
+		if !ok {
+			// Invalid format, skip this step
+			return nil
+		}
+
+		for _, pkt := range packets {
+			sendFile, expectFile := ParseSendExpectFiles(pkt)
+			if sendFile == "" {
+				continue
+			}
+
+			if err := callback(stepInfo, sendFile, expectFile); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
+// ParseSendExpectFiles extracts send and expect file names from a packet entry
+// This is a standalone function that can be used in tests
+func ParseSendExpectFiles(packet interface{}) (sendFile, expectFile string) {
+	if packetMap, ok := packet.(map[interface{}]interface{}); ok {
+		if s, exists := packetMap["send"]; exists {
+			sendFile = fmt.Sprintf("%v", s)
+		}
+		if e, exists := packetMap["expect"]; exists {
+			expectFile = fmt.Sprintf("%v", e)
+		}
+	} else if packetMap, ok := packet.(map[string]interface{}); ok {
+		if s, exists := packetMap["send"]; exists {
+			sendFile = fmt.Sprintf("%v", s)
+		}
+		if e, exists := packetMap["expect"]; exists {
+			expectFile = fmt.Sprintf("%v", e)
+		}
+	}
+	return sendFile, expectFile
+}
+
+// GetYanet1Root gets the yanet1 root directory path from environment variable
+// Returns the default path "../../../../../yanet1" if YANET1_ROOT is not set
+func GetYanet1Root() string {
+	yanet1Root := os.Getenv("YANET1_ROOT")
+	if yanet1Root == "" {
+		yanet1Root = "../../../../../yanet1"
+	}
+	return yanet1Root
+}
+
+// GetYanet1OnePortDir gets the path to 001_one_port directory and validates it exists
+// Returns an error if the directory doesn't exist
+func GetYanet1OnePortDir() (string, error) {
+	yanet1Root := GetYanet1Root()
+	onePortDir := filepath.Join(yanet1Root, "autotest/units/001_one_port")
+	if _, err := os.Stat(onePortDir); os.IsNotExist(err) {
+		return "", fmt.Errorf("yanet1 directory not found at %s. Set YANET1_ROOT to yanet1 repository location", onePortDir)
+	}
+	return onePortDir, nil
+}
+
 // convertStepsWithSkip applies skiplist/test defaults and passes stripVLAN to sendPackets steps
 func (c *Converter) convertStepsWithSkip(testName string, steps []map[string]interface{}, testPath string) []ConvertedStep {
 	var converted []ConvertedStep
