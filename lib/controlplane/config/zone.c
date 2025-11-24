@@ -1,5 +1,6 @@
 #include "zone.h"
 
+#include <stdio.h>
 #include <unistd.h>
 
 #include "cp_device.h"
@@ -81,6 +82,7 @@ cp_config_gen_create_from(
 		&new_config_gen->module_registry,
 		&old_config_gen->module_registry
 	);
+
 	cp_function_registry_copy(
 		&cp_config->memory_context,
 		&new_config_gen->function_registry,
@@ -501,6 +503,7 @@ cp_config_gen_create(struct agent *agent) {
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
 		);
+
 	if (cp_config_gen == NULL)
 		return NULL;
 	cp_config_gen->gen = 0;
@@ -543,6 +546,7 @@ cp_config_gen_create(struct agent *agent) {
 		device_config.output_pipelines = &pipe_cfg;
 		struct cp_device *cp_device =
 			cp_device_create(agent, &device_config);
+		printf("create device=%p\n", cp_device);
 		// FIXME check cp_device and upsert
 		cp_device_registry_upsert(
 			&cp_config_gen->device_registry,

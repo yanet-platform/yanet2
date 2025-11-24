@@ -4,6 +4,8 @@
 #include <netinet/in.h>
 #include <stdalign.h>
 
+#include "common/memory_address.h"
+#include "common/memory_block.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/dataplane/config/zone.h"
 #include "modules/balancer/state/session_table.h"
@@ -27,7 +29,7 @@ balancer_state_create(
 	// allocate balancer state
 	const size_t align = alignof(struct balancer_state);
 	uint8_t *memory =
-		memory_balloc(mctx, sizeof(struct session_table) + align);
+		memory_balloc(mctx, sizeof(struct balancer_state) + align);
 	if (memory == NULL) {
 		return NULL;
 	}

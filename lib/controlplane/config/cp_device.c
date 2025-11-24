@@ -249,8 +249,9 @@ cp_device_registry_get(
 ) {
 	struct registry_item *item =
 		registry_get(&device_registry->registry, index);
-	if (item == NULL)
+	if (item == NULL) {
 		return NULL;
+	}
 	return container_of(item, struct cp_device, config_item);
 }
 

@@ -3,6 +3,7 @@
 #include "common/interval_counter.h"
 #include "common/network.h"
 #include <netinet/in.h>
+#include <stdio.h>
 #include <string.h>
 
 ////////////////////////////////////////////////////////////////////////////////

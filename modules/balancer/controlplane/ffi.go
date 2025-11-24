@@ -2,6 +2,7 @@ package balancer
 
 // This module gives GO API to configure balancer module
 
+//#cgo CFLAGS: -fsanitize=address,undefined
 //#cgo CFLAGS: -I../
 //#cgo CFLAGS: -I../../../
 //#cgo CFLAGS: -I../../../build
@@ -10,6 +11,7 @@ package balancer
 //#cgo LDFLAGS: -L../../../build/modules/balancer/state -lbalancer_state
 //#cgo LDFLAGS: -L../../../build/filter -lfilter
 //#cgo LDFLAGS: -L../../../build/lib/logging -llogging
+//#cgo LDFLAGS: -fsanitize=address,undefined
 /*
 #include <stdlib.h>
 #include <string.h>

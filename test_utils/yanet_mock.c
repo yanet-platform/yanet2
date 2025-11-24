@@ -177,7 +177,7 @@ dataplane_init(
 }
 
 void
-yanet_mock_cp_update_prepare(struct yanet_mock *mock) {
+yanet_mock_prepare_for_cp_update(struct yanet_mock *mock) {
 	struct dp_config *dp_config = ADDR_OF(&mock->dp_config);
 	struct cp_config *cp_config = ADDR_OF(&mock->cp_config);
 	uint64_t cur_gen = ADDR_OF(&cp_config->cp_config_gen)->gen;
@@ -239,7 +239,7 @@ yanet_mock_init(
 }
 
 struct agent *
-yanet_mock_agent_attach(
+yanet_mock_attach_agent(
 	struct yanet_mock *mock, const char *agent_name, size_t memory_limit
 ) {
 	return agent_attach(

@@ -14,10 +14,9 @@ project(
   ],
 )
 
-add_global_arguments(
-  ['-march=corei7', '-g', '-D_GNU_SOURCE', '-O0'],
-  language: 'c',
-)
+add_project_arguments('-march=corei7', '-g', '-D_GNU_SOURCE', '-O0',
+                      '-fsanitize=address,undefined', language: 'c')
+add_project_link_arguments('-fsanitize=address,undefined', '-lasan', '-lubsan', language: 'c')
 
 yanet_conf = configuration_data()
 yanet_conf.set('DEBUG_NAT64', get_option('buildtype') == 'debug')
@@ -31,9 +30,9 @@ configure_file(output: build_cfg, configuration: yanet_conf)
 go = find_program('go', required: true)
 protoc = find_program('protoc', required: true)
 
-yanet_test_c_args = ['-O0']
-yanet_c_args = []
-yanet_link_args = []
+yanet_test_c_args = ['-O0', '-fsanitize=address,undefined']
+yanet_c_args = ['-fsanitize=address,undefined']
+yanet_link_args = ['-fsanitize=address,undefined']
 if get_option('fuzzing').enabled()
   fuzz_args = [
     '-fsanitize=fuzzer-no-link,address',
@@ -63,7 +62,8 @@ libdpdk = subproject(
     'tests=false',
     'examples=',
     'werror=false',
-    'c_args=-Wno-stringop-overflow -Wno-array-bounds -Wno-stringop-overread -Wno-vla-larger-than',
+    'c_args=-Wno-stringop-overflow -Wno-array-bounds -Wno-stringop-overread -Wno-vla-larger-than -fsanitize=address,undefined',
+    'c_link_args=-fsanitize=address,undefined',
   ],
 )
 

@@ -461,7 +461,7 @@ main() {
 	TEST_ASSERT_EQUAL(res, 0, "failed to init mock");
 
 	struct agent *agent =
-		yanet_mock_agent_attach(&mock, "balancer", AGENT_MEMORY);
+		yanet_mock_attach_agent(&mock, "balancer", AGENT_MEMORY);
 	TEST_ASSERT_NOT_NULL(agent, "failed to create agent");
 
 	struct balancer_state *state =

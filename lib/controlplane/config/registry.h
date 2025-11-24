@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdio.h>
 
 #include "common/container_of.h"
 #include "common/memory.h"
@@ -71,13 +72,13 @@ registry_init(
 	struct registry_item **items = (struct registry_item **)memory_balloc(
 		memory_context, sizeof(struct registry_item *) * capacity
 	);
-	if (items == 0) {
+	if (items == NULL) {
 		return -1;
 	}
 	SET_OFFSET_OF(&registry->items, items);
 
 	for (uint64_t idx = 0; idx < capacity; ++idx) {
-		registry_set(registry, idx, 0);
+		registry_set(registry, idx, NULL);
 	}
 
 	return 0;
@@ -121,10 +122,11 @@ registry_copy(
 
 	for (uint64_t idx = 0; idx < old_registry->capacity; ++idx) {
 		struct registry_item *item = registry_get(old_registry, idx);
-		if (item == NULL)
-			continue;
 
-		registry_item_ref(item);
+		if (item != NULL) {
+			registry_item_ref(item);
+		}
+
 		registry_set(new_registry, idx, item);
 	}
 

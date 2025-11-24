@@ -430,12 +430,11 @@ balancer_vs_config_create(
 		flags |= BALANCER_VS_PURE_L3_FLAG;
 	}
 
-	uint8_t *memory = memory_balloc(
-		&agent->memory_context,
-		sizeof(struct balancer_vs_config) +
-			sizeof(struct real) * real_count +
-			sizeof(struct addr_range) * allowed_src_count
-	);
+	size_t size = sizeof(struct balancer_vs_config) +
+		      sizeof(struct real) * real_count +
+		      sizeof(struct addr_range) * allowed_src_count;
+
+	uint8_t *memory = memory_balloc(&agent->memory_context, size);
 	if (memory == NULL) {
 		return NULL;
 	}
@@ -468,13 +467,10 @@ balancer_vs_config_create(
 
 void
 balancer_vs_config_free(struct balancer_vs_config *vs_config) {
-	memory_bfree(
-		vs_config->mctx,
-		vs_config,
-		sizeof(struct balancer_vs_config) +
-			sizeof(struct real) * vs_config->real_count +
-			sizeof(struct addr_range) * vs_config->allowed_src_count
-	);
+	size_t size = sizeof(struct balancer_vs_config) +
+		      sizeof(struct real) * vs_config->real_count +
+		      sizeof(struct addr_range) * vs_config->allowed_src_count;
+	memory_bfree(vs_config->mctx, vs_config, size);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

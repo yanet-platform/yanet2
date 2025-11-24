@@ -37,12 +37,14 @@ import (
 )
 
 var (
-	dpMemory    uint64 = 1 << 20
-	agentMemory uint64 = 1 << 28
-	cpMemory    uint64 = 2*agentMemory + (1 << 28) // must be at least 2x agentMemory
+	dpMemory             uint64 = 1 << 25
+	agentMemory          uint64 = 1 << 28
+	cpMemoryWithoutAgent uint64 = 1 << 30
+	cpMemory             uint64 = agentMemory + cpMemoryWithoutAgent
 )
 
 var mock *test_utils.YanetMock
+var agent *ffi.Agent
 
 func HandlePackets(
 	instance *balancer.ModuleInstance,
@@ -50,15 +52,6 @@ func HandlePackets(
 ) (test_utils.HandlePacketsResult, error) {
 	cpModule := instance.ModuleConfig().AsRawPtr()
 	return mock.HandlePackets(cpModule, C.balancer_handle_packets, packets...)
-}
-
-func AttachAgent(t *testing.T) *ffi.Agent {
-	t.Helper()
-	agent, err := mock.AttachAgent("balancer", agentMemory)
-	if err != nil {
-		t.Fatalf("failed to attach agent to yanet mock: %v", err)
-	}
-	return agent
 }
 
 func PrepareForUpdate(t *testing.T) {

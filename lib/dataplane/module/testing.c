@@ -1,5 +1,6 @@
 #include "testing.h"
 #include "module.h"
+#include <assert.h>
 #include <rte_mbuf.h>
 
 static void
@@ -42,6 +43,12 @@ testing_packet_front(
 	struct packet_front *pf = (struct packet_front *)(arena);
 	packet_front_init(pf);
 	arena += sizeof(struct packet_front);
+
+	size_t miss_alignment = (uintptr_t)(arena) % 64;
+	if (miss_alignment > 0) {
+		arena += 64 - miss_alignment;
+	}
+	assert((uintptr_t)(arena) % 64 == 0);
 
 	for (uint64_t i = 0; i < mbuf_count; i++) {
 		struct rte_mbuf *m = (struct rte_mbuf *)(arena + mbuf_size * i);

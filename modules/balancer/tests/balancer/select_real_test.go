@@ -15,6 +15,14 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// test real selection respects weight and disabled reals
+// test select after update works
+// test select respects sessions
+// test OPS
+// test pure L3
+
+////////////////////////////////////////////////////////////////////////////////
+
 func smallConfig() (*balancer.ModuleInstanceConfig, *balancer.SessionsTimeouts) {
 	config := balancer.ModuleInstanceConfig{
 		Services: []balancer.VirtualService{
@@ -71,7 +79,7 @@ func smallConfig() (*balancer.ModuleInstanceConfig, *balancer.SessionsTimeouts) 
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func AllowedSrc(idx uint8) netip.Addr {
+func allowedSrc(idx uint8) netip.Addr {
 	return IpAddr(fmt.Sprintf("10.12.0.%d", idx))
 }
 
@@ -88,7 +96,7 @@ func sendRandomSYNs(
 	packets := make([]gopacket.Packet, 0, packetCount)
 	for packetIdx := range packetCount {
 		layers := MakeTCPPacket(
-			AllowedSrc(uint8(packetIdx+packetIdxOffset)),
+			allowedSrc(uint8(packetIdx+packetIdxOffset)),
 			42175,
 			vs.Address,
 			vs.Port,
@@ -114,14 +122,13 @@ func sendRandomSYNs(
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestSelectAfterUpdate(t *testing.T) {
-	agent := AttachAgent(t)
-
 	config, timeouts := smallConfig()
 
 	PrepareForUpdate(t)
 
 	balancerInstance, err := balancer.NewModuleInstance(agent, "balancer0", config, 2000, timeouts)
 	require.NoError(t, err, "failed to make balancer")
+	defer balancerInstance.Free()
 
 	packetCountBeforeRealUpdate := 10
 

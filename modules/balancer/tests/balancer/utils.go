@@ -69,15 +69,29 @@ func Encap(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func MakeUDPPacket(
-	srcIP string,
+func MakePacket(
+	srcIP netip.Addr,
 	srcPort uint16,
-	dstIP string,
+	dstIP netip.Addr,
+	dstPort uint16,
+	tcp *layers.TCP,
+) []gopacket.SerializableLayer {
+	if tcp == nil {
+		return MakeUDPPacket(srcIP, srcPort, dstIP, dstPort)
+	} else {
+		return MakeTCPPacket(srcIP, srcPort, dstIP, dstPort, tcp)
+	}
+}
+
+func MakeUDPPacket(
+	srcIP netip.Addr,
+	srcPort uint16,
+	dstIP netip.Addr,
 	dstPort uint16,
 ) []gopacket.SerializableLayer {
 
-	src := net.ParseIP(srcIP)
-	dst := net.ParseIP(dstIP)
+	src := net.IP(srcIP.AsSlice())
+	dst := net.IP(dstIP.AsSlice())
 
 	var ip gopacket.NetworkLayer
 	ethernetType := layers.EthernetTypeIPv6
@@ -134,9 +148,6 @@ func MakeTCPPacket(
 
 	src := net.IP(srcIP.AsSlice())
 	dst := net.IP(dstIP.AsSlice())
-
-	// src := net.ParseIP(srcIP)
-	// dst := net.ParseIP(dstIP)
 
 	var ip gopacket.NetworkLayer
 	ethernetType := layers.EthernetTypeIPv6
@@ -368,7 +379,11 @@ func ValidatePacket(
 			(service.Port == originalPacket.DstPort || service.Flags.PureL3) {
 			// found service
 			if service.Flags.GRE {
-				assert.Equal(t, resultPacket.TunnelType, "gre", "packet tunnel type must be gre")
+				expectedTunnelType := "gre-ip4"
+				if service.Address.Is6() {
+					expectedTunnelType = "gre-ip6"
+				}
+				assert.Equal(t, expectedTunnelType, resultPacket.TunnelType, "packet tunnel type must be gre")
 			}
 
 			// todo: check tcp layers (if FixMSS enabled)

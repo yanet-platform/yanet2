@@ -4,6 +4,7 @@
 #include "common/memory.h"
 #include "common/numutils.h"
 #include "common/strutils.h"
+#include <assert.h>
 
 int
 counter_registry_init(
@@ -81,8 +82,14 @@ counter_registry_expand(
 	 * FIXME: copying is not efficient here so names and links should be
 	 * turned into chunked arrays.
 	 */
-	memcpy(new_names, names, sizeof(struct counter_name) * old_capacity);
-	memcpy(new_links, links, sizeof(struct counter_link) * old_capacity);
+	if (old_capacity > 0) {
+		memcpy(new_names,
+		       names,
+		       sizeof(struct counter_name) * old_capacity);
+		memcpy(new_links,
+		       links,
+		       sizeof(struct counter_link) * old_capacity);
+	}
 
 	SET_OFFSET_OF(&registry->names, new_names);
 	SET_OFFSET_OF(&registry->links, new_links);
@@ -341,6 +348,7 @@ counter_storage_spawn(
 		);
 		if (new_blocks == NULL) {
 			// return FIXME;
+			assert(false);
 		}
 
 		SET_OFFSET_OF(&new_pool->blocks, new_blocks);
@@ -373,6 +381,7 @@ counter_storage_spawn(
 				counter_storage_allocator_new_pages(allocator);
 			if (pages == NULL) {
 				// FIXME
+				assert(false);
 			}
 			SET_OFFSET_OF(&block->pages, pages);
 

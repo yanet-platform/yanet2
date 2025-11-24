@@ -75,11 +75,11 @@ basic() {
 	TEST_ASSERT_EQUAL(res, 0, "failed to init mock");
 
 	// attach agent
-	struct agent *agent = yanet_mock_agent_attach(&mock, "agent", 1 << 12);
+	struct agent *agent = yanet_mock_attach_agent(&mock, "agent", 1 << 12);
 	TEST_ASSERT_NOT_NULL(agent, "failed to attach agent");
 
 	// prepare for next controlplane generation
-	yanet_mock_cp_update_prepare(&mock);
+	yanet_mock_prepare_for_cp_update(&mock);
 
 	// create module config
 	struct cp_module *dummy =

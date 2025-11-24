@@ -183,37 +183,36 @@ find_or_insert_into_registry(
 	}
 
 	// extend
-	void *services = registry->services;
-	int res = mem_array_expand_exp(
+	struct service_info *services = memory_balloc(
 		state->mctx,
-		&services,
-		sizeof(struct service_info),
-		&registry->service_count
+		sizeof(struct service_info) * (registry->service_count + 1)
 	);
-	if (res != 0) {
+	if (services == NULL) {
 		return -1;
 	}
 
 	// todo: fixme
 	assert((uintptr_t)services % alignof(struct service_info) == 0);
-	if (services !=
-	    registry->services) { // make explicit copy to fix relative pointers
-		struct service_info *services_dst =
-			(struct service_info *)services;
-		struct service_info *services_src = registry->services;
-		assert(registry->service_count > 0);
-		for (size_t i = 0; i < registry->service_count - 1; ++i) {
-			struct service_info *service_dst = &services_dst[i];
-			struct service_info *service_src = &services_src[i];
-			for (size_t w = 0; w < state->workers; ++w) {
-				service_state_copy(
-					&service_dst->state[w],
-					&service_src->state[w]
-				);
-			}
+	struct service_info *services_dst = (struct service_info *)services;
+	struct service_info *services_src = registry->services;
+	for (size_t i = 0; i < registry->service_count; ++i) {
+		struct service_info *service_dst = &services_dst[i];
+		struct service_info *service_src = &services_src[i];
+		memcpy(service_dst, service_src, sizeof(struct service_info));
+		for (size_t w = 0; w < state->workers; ++w) {
+			service_state_copy(
+				&service_dst->state[w], &service_src->state[w]
+			);
 		}
 	}
+
+	memory_bfree(
+		state->mctx,
+		registry->services,
+		sizeof(struct service_info) * registry->service_count
+	);
 	registry->services = (struct service_info *)services;
+	++registry->service_count;
 
 	size_t idx = registry->service_count - 1;
 	struct service_info *service = &registry->services[idx];
@@ -229,7 +228,7 @@ find_or_insert_into_registry(
 	       (ip_proto == IPPROTO_IPV6 ? NET6_LEN : NET4_LEN));
 	for (size_t worker = 0; worker < state->workers; ++worker) {
 		struct service_state *service_state = &service->state[worker];
-		res = service_state_init(
+		int res = service_state_init(
 			service_state, state->mctx, state->max_timeout
 		);
 		if (res != 0) {

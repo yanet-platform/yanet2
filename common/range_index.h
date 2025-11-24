@@ -59,7 +59,11 @@ range_index_insert(
 
 		if (new_values == NULL)
 			return -1;
-		memcpy(new_values, old_values, old_count * sizeof(uint32_t));
+		if (old_count > 0) {
+			memcpy(new_values,
+			       old_values,
+			       old_count * sizeof(uint32_t));
+		}
 	}
 
 	if (radix_insert(

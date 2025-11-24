@@ -138,7 +138,7 @@ pure_l3_and_ops_and_weight_matters(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to init yanet mock");
 
 	struct agent *agent =
-		yanet_mock_agent_attach(&mock, "balancer", AGENT_MEMORY);
+		yanet_mock_attach_agent(&mock, "balancer", AGENT_MEMORY);
 	TEST_ASSERT_NOT_NULL(agent, "can not create agent");
 
 	struct balancer_state *state =
@@ -708,7 +708,7 @@ many_services(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to init mock");
 
 	struct agent *agent =
-		yanet_mock_agent_attach(&mock, "balancer", AGENT_MEMORY);
+		yanet_mock_attach_agent(&mock, "balancer", AGENT_MEMORY);
 	TEST_ASSERT_NOT_NULL(agent, "can not attach agent");
 
 	struct balancer_state *state =

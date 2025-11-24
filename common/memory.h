@@ -98,10 +98,12 @@ memory_brealloc(
 	void *new_data = memory_balloc(context, new_size);
 	if (new_data == NULL)
 		return NULL;
-	if (old_size < new_size)
-		memcpy(new_data, data, old_size);
-	else
+	if (old_size < new_size) {
+		if (old_size)
+			memcpy(new_data, data, old_size);
+	} else {
 		memcpy(new_data, data, new_size);
+	}
 
 	if (old_size)
 		memory_bfree(context, data, old_size);
