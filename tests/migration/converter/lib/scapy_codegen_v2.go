@@ -70,32 +70,62 @@ func (cg *ScapyCodegenV2) GenerateFromIR(irJSON string) (string, error) {
 	var code strings.Builder
 
 	// Package and imports
-	code.WriteString("package converted\n\n")
-	code.WriteString("import (\n")
-	code.WriteString("\t\"encoding/hex\"\n")
-	if !cg.libraryMode {
-		code.WriteString("\t\"testing\"\n")
-		code.WriteString("\t\"time\"\n\n")
-	}
-	code.WriteString("\t\"github.com/gopacket/gopacket\"\n")
-	code.WriteString("\t\"github.com/gopacket/gopacket/layers\"\n")
-	if !cg.libraryMode {
-		code.WriteString("\t\"github.com/stretchr/testify/require\"\n\n")
+	if cg.libraryMode {
+		code.WriteString(`package converted
+
+import (
+	"encoding/hex"
+	"fmt"
+
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
+
+	"github.com/yanet-platform/yanet2/tests/migration/converter/lib"
+)
+
+`)
 	} else {
-		code.WriteString("\n")
+		code.WriteString(`package converted
+
+import (
+	"encoding/hex"
+	"testing"
+	"time"
+
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
+	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/yanet2/tests/migration/converter/lib"
+)
+
+`)
 	}
-	code.WriteString("\t\"github.com/yanet-platform/yanet2/tests/migration/converter/lib\"\n")
-	code.WriteString(")\n\n")
 
 	// Add helper function for decoding hex strings
-	code.WriteString("// decodeHex decodes a hex string to bytes\n")
-	code.WriteString("func decodeHex(s string) []byte {\n")
-	code.WriteString("\tdata, err := hex.DecodeString(s)\n")
-	code.WriteString("\tif err != nil {\n")
-	code.WriteString("\t\tpanic(\"invalid hex string: \" + s)\n")
-	code.WriteString("\t}\n")
-	code.WriteString("\treturn data\n")
-	code.WriteString("}\n\n")
+	if cg.libraryMode {
+		code.WriteString(`// decodeHex decodes a hex string to bytes
+func decodeHex(s string) ([]byte, error) {
+	data, err := hex.DecodeString(s)
+	if err != nil {
+		return nil, fmt.Errorf("invalid hex string: %s", s)
+	}
+	return data, nil
+}
+
+`)
+	} else {
+		code.WriteString(`// decodeHex decodes a hex string to bytes
+func decodeHex(t *testing.T, s string) []byte {
+	data, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatalf("invalid hex string: %s", s)
+	}
+	return data
+}
+
+`)
+	}
 
 	// Generate functions for each PCAP pair
 	for i, pair := range ir.PCAPPairs {
@@ -130,13 +160,18 @@ func (cg *ScapyCodegenV2) GeneratePacketFunction(funcName string, packets []IRPa
 	// Fall back to existing inline generation
 	var code strings.Builder
 
-	code.WriteString(fmt.Sprintf("// %s generates packets\n", funcName))
 	if cg.libraryMode {
-		code.WriteString(fmt.Sprintf("func %s() ([]gopacket.Packet, error) {\n", funcName))
-		code.WriteString("\tvar packets []gopacket.Packet\n\n")
+		code.WriteString(fmt.Sprintf(`// %s generates packets
+func %s() ([]gopacket.Packet, error) {
+	var packets []gopacket.Packet
+
+`, funcName, funcName))
 	} else {
-		code.WriteString(fmt.Sprintf("func %s(t *testing.T) []gopacket.Packet {\n", funcName))
-		code.WriteString("\tvar packets []gopacket.Packet\n\n")
+		code.WriteString(fmt.Sprintf(`// %s generates packets
+func %s(t *testing.T) []gopacket.Packet {
+	var packets []gopacket.Packet
+
+`, funcName, funcName))
 	}
 
 	for i, pkt := range packets {
@@ -197,11 +232,14 @@ func (cg *ScapyCodegenV2) GeneratePacketFunction(funcName string, packets []IRPa
 	}
 
 	if cg.libraryMode {
-		code.WriteString("\treturn packets, nil\n")
+		code.WriteString(`	return packets, nil
+}
+`)
 	} else {
-		code.WriteString("\treturn packets\n")
+		code.WriteString(`	return packets
+}
+`)
 	}
-	code.WriteString("}\n")
 
 	return code.String()
 }
@@ -432,6 +470,25 @@ func (cg *ScapyCodegenV2) generateIPOptions(layer IRLayer) string {
 	// Handle IPv4 options
 	if optionsAny, ok := layer.Params["options"]; ok {
 		if options, ok := optionsAny.([]interface{}); ok && len(options) > 0 {
+			// Generate helper variables for hex data before the struct literal
+			optVarIndex := 0
+			for _, optAny := range options {
+				if optMap, ok := optAny.(map[string]interface{}); ok {
+					if d, ok := optMap["data"].(string); ok && d != "" {
+						if cg.libraryMode {
+							code.WriteString(fmt.Sprintf(`			optData%d, err := decodeHex(%q)
+			if err != nil { return nil, err }
+`, optVarIndex, d))
+						} else {
+							code.WriteString(fmt.Sprintf(`			optData%d := decodeHex(t, %q)
+`, optVarIndex, d))
+						}
+						optVarIndex++
+					}
+				}
+			}
+
+			optVarIndex = 0
 			code.WriteString("\t\t\t\tlib.IPv4Options([]lib.IPv4OptionDef{\n")
 			for _, optAny := range options {
 				if optMap, ok := optAny.(map[string]interface{}); ok {
@@ -445,7 +502,8 @@ func (cg *ScapyCodegenV2) generateIPOptions(layer IRLayer) string {
 						optData = d
 					}
 					if optData != "" {
-						code.WriteString(fmt.Sprintf("\t\t\t\t\t{Type: %d, Length: %d, Data: decodeHex(%q)},\n", optType, optLen, optData))
+						code.WriteString(fmt.Sprintf("\t\t\t\t\t{Type: %d, Length: %d, Data: optData%d},\n", optType, optLen, optVarIndex))
+						optVarIndex++
 					} else {
 						code.WriteString(fmt.Sprintf("\t\t\t\t\t{Type: %d, Length: %d},\n", optType, optLen))
 					}
@@ -539,6 +597,25 @@ func (cg *ScapyCodegenV2) generateTCPOptions(layer IRLayer) string {
 	// Handle TCP options
 	if optionsAny, ok := layer.Params["options"]; ok {
 		if options, ok := optionsAny.([]interface{}); ok && len(options) > 0 {
+			// Generate helper variables for hex data before the struct literal
+			optVarIndex := 0
+			for _, optAny := range options {
+				if optMap, ok := optAny.(map[string]interface{}); ok {
+					if d, ok := optMap["data"].(string); ok && d != "" {
+						if cg.libraryMode {
+							code.WriteString(fmt.Sprintf(`			tcpOptData%d, err := decodeHex(%q)
+			if err != nil { return nil, err }
+`, optVarIndex, d))
+						} else {
+							code.WriteString(fmt.Sprintf(`			tcpOptData%d := decodeHex(t, %q)
+`, optVarIndex, d))
+						}
+						optVarIndex++
+					}
+				}
+			}
+
+			optVarIndex = 0
 			code.WriteString("\t\t\t\tlib.TCPOptions([]lib.TCPOptionDef{\n")
 			for _, optAny := range options {
 				if optMap, ok := optAny.(map[string]interface{}); ok {
@@ -552,7 +629,8 @@ func (cg *ScapyCodegenV2) generateTCPOptions(layer IRLayer) string {
 						optData = d
 					}
 					if optData != "" {
-						code.WriteString(fmt.Sprintf("\t\t\t\t\t{Kind: layers.TCPOptionKind(%d), Length: %d, Data: decodeHex(%q)},\n", optKind, optLen, optData))
+						code.WriteString(fmt.Sprintf("\t\t\t\t\t{Kind: layers.TCPOptionKind(%d), Length: %d, Data: tcpOptData%d},\n", optKind, optLen, optVarIndex))
+						optVarIndex++
 					} else {
 						code.WriteString(fmt.Sprintf("\t\t\t\t\t{Kind: layers.TCPOptionKind(%d), Length: %d},\n", optKind, optLen))
 					}
@@ -773,7 +851,17 @@ func (cg *ScapyCodegenV2) generateIPSecESPOptions(layer IRLayer) string {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ESPSeq(%v),\n", formatValue(seq)))
 	}
 	if encrypted, ok := layer.Params["encrypted"].(string); ok && len(encrypted) > 0 {
-		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ESPEncrypted(decodeHex(%q)),\n", encrypted))
+		// Generate helper variable for hex data
+		if cg.libraryMode {
+			code.WriteString(fmt.Sprintf(`			espEncrypted, err := decodeHex(%q)
+			if err != nil { return nil, err }
+			lib.ESPEncrypted(espEncrypted),
+`, encrypted))
+		} else {
+			code.WriteString(fmt.Sprintf(`			espEncrypted := decodeHex(t, %q)
+			lib.ESPEncrypted(espEncrypted),
+`, encrypted))
+		}
 	}
 
 	return code.String()
@@ -1494,13 +1582,18 @@ func (cg *ScapyCodegenV2) generateSinglePacketCode(pkt IRPacketDef, isExpect boo
 
 		if cg.strictMode && !cg.libraryMode {
 			// In strict mode, generate fatal error
-			code.WriteString(fmt.Sprintf("\t\t// ERROR: Special handling type '%s' not implemented\n", handlingType))
-			code.WriteString(fmt.Sprintf("\t\tt.Fatalf(\"Special handling not implemented: %s (strict mode enabled)\")\n", handlingType))
+			code.WriteString(fmt.Sprintf(`		// ERROR: Special handling type '%s' not implemented
+		t.Fatalf("Special handling not implemented: %s (strict mode enabled)")
+`, handlingType, handlingType))
 		} else {
 			// In tolerant mode, generate commented-out skip
-			code.WriteString(fmt.Sprintf("\t\t// Special handling type '%s' not fully implemented; skipping packet generation for this entry\n", handlingType))
 			if !cg.libraryMode {
-				code.WriteString(fmt.Sprintf("\t\t// t.Skipf(\"special handling not implemented: %s\")\n", handlingType))
+				code.WriteString(fmt.Sprintf(`		// Special handling type '%s' not fully implemented; skipping packet generation for this entry
+		// t.Skipf("special handling not implemented: %s")
+`, handlingType, handlingType))
+			} else {
+				code.WriteString(fmt.Sprintf(`		// Special handling type '%s' not fully implemented; skipping packet generation for this entry
+`, handlingType))
 			}
 		}
 		return code.String()
@@ -1514,8 +1607,9 @@ func (cg *ScapyCodegenV2) generateSinglePacketCode(pkt IRPacketDef, isExpect boo
 
 	code.WriteString("\t\t)\n\n")
 	if cg.libraryMode {
-		code.WriteString("\t\tif err != nil { return nil, err }\n")
-		code.WriteString("\t\tpackets = append(packets, pkt)\n")
+		code.WriteString(`		if err != nil { return nil, err }
+		packets = append(packets, pkt)
+`)
 	} else {
 		code.WriteString("\t\trequire.NoError(t, err)\n")
 		code.WriteString("\t\tpackets = append(packets, pkt)\n")

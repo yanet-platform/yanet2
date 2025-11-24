@@ -3,6 +3,7 @@ package lib
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -560,12 +561,33 @@ func (c *Converter) convertSendPacketsWithASTParser(content interface{}, testPat
 
 	// Parse gen.py with Python AST parser (with timeout)
 	genPyPath := filepath.Join(testPath, "gen.py")
+
+	// Validate gen.py file exists and check size
+	genPyInfo, err := os.Stat(genPyPath)
+	if err != nil {
+		return ConvertedStep{}, fmt.Errorf("gen.py file not found at %s: %w", genPyPath, err)
+	}
+	// Check file size (limit to 10MB to prevent DoS)
+	const maxFileSize = 10 * 1024 * 1024
+	if genPyInfo.Size() > maxFileSize {
+		return ConvertedStep{}, fmt.Errorf("gen.py file too large: %d bytes (max %d bytes)", genPyInfo.Size(), maxFileSize)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "python3", c.scapyASTParser, genPyPath)
 	irJSON, err := cmd.CombinedOutput()
 	if err != nil {
-		return ConvertedStep{}, fmt.Errorf("AST parser failed: %w: %s", err, string(irJSON))
+		// Provide more context about the failure
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return ConvertedStep{}, fmt.Errorf("AST parser failed (exit code %d) for %s: %w\nOutput: %s",
+				exitErr.ExitCode(), genPyPath, err, string(irJSON))
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return ConvertedStep{}, fmt.Errorf("AST parser timeout after 30s for %s: %w", genPyPath, err)
+		}
+		return ConvertedStep{}, fmt.Errorf("AST parser failed for %s: %w\nOutput: %s", genPyPath, err, string(irJSON))
 	}
 
 	c.debugLog("AST parser generated %d bytes of IR", len(irJSON))

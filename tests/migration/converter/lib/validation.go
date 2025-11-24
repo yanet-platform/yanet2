@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcap"
-	"github.com/google/go-cmp/cmp"
 )
 
 // ValidationResult represents the result of packet validation
@@ -191,6 +191,12 @@ func (v *PacketValidator) validateSinglePacket(index int, got, expected gopacket
 // createDetailedDiff creates a human-readable diff of two byte arrays
 func (v *PacketValidator) createDetailedDiff(got, expected []byte, firstDiff int) string {
 	var diff bytes.Buffer
+
+	// Validate firstDiff to prevent index out of range panic
+	if firstDiff < 0 || firstDiff >= len(expected) || firstDiff >= len(got) {
+		return fmt.Sprintf("Invalid diff offset: %d (expected len=%d, got len=%d)",
+			firstDiff, len(expected), len(got))
+	}
 
 	diff.WriteString(fmt.Sprintf("First difference at byte %d (0x%x)\n", firstDiff, firstDiff))
 

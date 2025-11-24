@@ -546,6 +546,14 @@ func ParseAutotestYAML(testDir string) (*YanetTest, error) {
 		return nil, fmt.Errorf("failed to parse autotest.yaml: %w", err)
 	}
 
+	// Validate that test has steps
+	if test.Steps == nil {
+		return nil, fmt.Errorf("autotest.yaml has no steps")
+	}
+	if len(test.Steps) == 0 {
+		return nil, fmt.Errorf("autotest.yaml has empty steps array")
+	}
+
 	return &test, nil
 }
 
@@ -706,13 +714,14 @@ func (c *Converter) ConvertSingleTest(testPath, testName string) error {
 	controlplanePath := filepath.Join(testPath, "controlplane.conf")
 	if _, err := os.Stat(controlplanePath); err == nil {
 		configData, err := os.ReadFile(controlplanePath)
-		if err == nil {
-			controlplaneConfig = string(configData)
-			// Parse the configuration
-			parsedConfig, err = c.parseControlplaneConfig(controlplanePath)
-			if err != nil {
-				c.verbose("Warning: failed to parse controlplane.conf: %v", err)
-			}
+		if err != nil {
+			return NewConversionErrorWrap(testName, "", err, "failed to read controlplane.conf")
+		}
+		controlplaneConfig = string(configData)
+		// Parse the configuration
+		parsedConfig, err = c.parseControlplaneConfig(controlplanePath)
+		if err != nil {
+			return NewConversionErrorWrap(testName, "", err, "failed to parse controlplane.conf")
 		}
 	}
 
@@ -804,14 +813,38 @@ func (c *Converter) determineTestType(steps []map[string]interface{}, controlpla
 // sanitizeTestName cleans test name for use in Go and prevents path traversal
 func (c *Converter) sanitizeTestName(name string) string {
 	// Security: Remove any path separators to prevent path traversal
+	// Use filepath.Base to get only the base name, removing any directory components
 	name = filepath.Base(name)
+
+	// Additional security: remove any remaining path traversal attempts
 	name = strings.ReplaceAll(name, "..", "")
 	name = strings.ReplaceAll(name, "/", "_")
 	name = strings.ReplaceAll(name, "\\", "_")
 
-	// Replace invalid characters
+	// Validate that the name is not empty after sanitization
+	if name == "" || name == "." || name == ".." {
+		name = "InvalidTestName"
+	}
+
+	// Replace invalid characters for Go identifiers
 	name = strings.ReplaceAll(name, "-", "_")
 	name = strings.ReplaceAll(name, " ", "_")
+
+	// Remove any non-alphanumeric characters except underscore
+	var builder strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			builder.WriteRune(r)
+		} else {
+			builder.WriteRune('_')
+		}
+	}
+	name = builder.String()
+
+	// Ensure name doesn't start with a number (invalid Go identifier)
+	if len(name) > 0 && name[0] >= '0' && name[0] <= '9' {
+		name = "Test_" + name
+	}
 
 	// Remove prefix if it looks like full path (e.g., "001_one_port_002_decap_default")
 	name = strings.TrimPrefix(name, "001_one_port_")
@@ -819,6 +852,11 @@ func (c *Converter) sanitizeTestName(name string) string {
 	// Make first letter uppercase
 	if len(name) > 0 {
 		name = strings.ToUpper(name[:1]) + name[1:]
+	}
+
+	// Final validation: ensure name is not empty
+	if name == "" {
+		name = "InvalidTestName"
 	}
 
 	return name
