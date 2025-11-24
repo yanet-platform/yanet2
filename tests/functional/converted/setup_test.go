@@ -137,13 +137,15 @@ logging:
 	// Run tests
 	code = m.Run()
 
-	// Copy logs from VM for debugging
-	sugar.Info("Copying logs from VM...")
-	debugCommands := []string{
-		"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",
-		"cp /var/log/yanet-dataplane.log /mnt/build/ 2>/dev/null || echo 'No dataplane log found'",
+	if _, ok := os.LookupEnv("YANET_TEST_DEBUG"); ok {
+		// Copy logs from VM for debugging
+		sugar.Info("Copying logs from VM...")
+		debugCommands := []string{
+			"cp /var/log/yanet-controlplane.log /mnt/build/yanet-controlplane-converted.log 2>/dev/null || echo 'No controlplane log found'",
+			"cp /var/log/yanet-dataplane.log /mnt/build/yanet-dataplane-converted.log 2>/dev/null || echo 'No dataplane log found'",
+		}
+		fw.CLI.ExecuteCommands(debugCommands...)
 	}
-	fw.CLI.ExecuteCommands(debugCommands...)
 
 	return code
 }

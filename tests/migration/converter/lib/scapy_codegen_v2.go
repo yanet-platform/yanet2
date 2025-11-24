@@ -3,6 +3,7 @@ package lib
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -271,10 +272,22 @@ func (cg *ScapyCodegenV2) needsRawLayer(pkt IRPacketDef) bool {
 }
 
 // generateLayerCall generates a single layer constructor call
+//
+// WARNING: This function is mirrored in ir_pipeline_test.go's buildLayerFromIR
+// for fast test execution without code generation/compilation.
+// Keep both implementations in sync when adding new layer types or parameters!
+//
+// See: yanet2/tests/migration/converter/lib/ir_pipeline_test.go (buildLayerFromIR)
 func (cg *ScapyCodegenV2) generateLayerCall(layer IRLayer, isExpect bool) string {
 	var code strings.Builder
 
-	code.WriteString(fmt.Sprintf("\t\t\tlib.%s(\n", layer.Type))
+	// Map layer type to function name (IP -> IPv4 for packet_builder.go compatibility)
+	layerTypeName := layer.Type
+	if layerTypeName == "IP" {
+		layerTypeName = "IPv4"
+	}
+
+	code.WriteString(fmt.Sprintf("\t\t\tlib.%s(\n", layerTypeName))
 
 	// Generate options based on layer type
 	switch layer.Type {
@@ -322,7 +335,7 @@ func (cg *ScapyCodegenV2) generateLayerCall(layer IRLayer, isExpect bool) string
 		} else {
 			// This layer will be skipped during packet construction
 			code.WriteString(fmt.Sprintf("\t\t\t\t// UNSUPPORTED: Layer type %s is not supported by packet builder\n", layer.Type))
-			code.WriteString(fmt.Sprintf("\t\t\t\t// TODO: Implement %s layer in packet_builder.go if needed\n", layer.Type))
+			code.WriteString(fmt.Sprintf("\t\t\t\t// NOTE: To add support for %s, extend packet_builder.go and update scapy_codegen_v2.go accordingly\n", layer.Type))
 		}
 	}
 
@@ -1211,19 +1224,29 @@ func (cg *ScapyCodegenV2) detectIRPacketPattern(packets []IRPacketDef) *IRPacket
 				continue
 			}
 
+			// Skip map parameters (like _special) - they can't be compared directly
+			if _, isMap := refValue.(map[string]interface{}); isMap {
+				continue
+			}
+
 			isConstant := true
 			values := []interface{}{refValue}
 
 			// Compare with all other packets in the group
 			for _, pkt := range groupPackets[1:] {
-				if pkt.Layers[layerIdx].Params[paramName] != refValue {
-					// Check if values are comparable (both exist and different)
-					otherValue, exists := pkt.Layers[layerIdx].Params[paramName]
-					if !exists || otherValue == nil {
-						// Parameter missing or nil in some packets - can't pattern match
-						return nil
-					}
+				otherValue, exists := pkt.Layers[layerIdx].Params[paramName]
+				if !exists || otherValue == nil {
+					// Parameter missing or nil in some packets - can't pattern match
+					return nil
+				}
 
+				// Skip map parameters in comparison
+				if _, isMap := otherValue.(map[string]interface{}); isMap {
+					continue
+				}
+
+				// Use reflect.DeepEqual for safe comparison of interface{} values
+				if !reflect.DeepEqual(otherValue, refValue) {
 					// Values differ - this is a varying parameter
 					isConstant = false
 					values = append(values, otherValue)
@@ -1505,7 +1528,13 @@ func (cg *ScapyCodegenV2) generateSinglePacketCode(pkt IRPacketDef, isExpect boo
 func (cg *ScapyCodegenV2) generateLayerCallWithPattern(layer IRLayer, layerIdx int, pattern *IRPacketPattern, isExpect bool, useStruct bool, funcName string) string {
 	var code strings.Builder
 
-	code.WriteString(fmt.Sprintf("\t\tlib.%s(\n", layer.Type))
+	// Map layer type to function name (IP -> IPv4 for packet_builder.go compatibility)
+	layerTypeName := layer.Type
+	if layerTypeName == "IP" {
+		layerTypeName = "IPv4"
+	}
+
+	code.WriteString(fmt.Sprintf("\t\tlib.%s(\n", layerTypeName))
 
 	// Find varying params for this layer
 	varyingParams := make(map[string]IRVaryingParam)

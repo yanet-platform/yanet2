@@ -13,7 +13,7 @@ func TestNewPacket_SimpleEtherIPTCP(t *testing.T) {
 			EtherDst("00:11:22:33:44:55"),
 			EtherSrc("00:00:00:00:00:01"),
 		),
-		IP(
+		IPv4(
 			IPSrc("1.2.3.4"),
 			IPDst("5.6.7.8"),
 			IPTTL(64),
@@ -123,7 +123,7 @@ func TestTCPFlags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			pkt, err := NewPacket(
 				Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-				IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
+				IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 				TCP(TCPSport(1234), TCPDport(80), TCPFlags(tt.flags)),
 			)
 
@@ -170,7 +170,7 @@ func TestPayload(t *testing.T) {
 	// Test with packet
 	pkt, err := NewPacket(
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
+		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 		UDP(UDPSport(1234), UDPDport(80)),
 		Raw(Payload("TEST", 10)),
 	)
@@ -188,7 +188,7 @@ func TestICMP(t *testing.T) {
 	// Echo request (type 8)
 	pkt, err := NewPacket(
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
+		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 		ICMP(ICMPTypeCode(8, 0), ICMPId(0x1234), ICMPSeq(0x5678)),
 	)
 
@@ -241,7 +241,7 @@ func TestGRE(t *testing.T) {
 			GREChecksumPresent(true),
 			GREKeyPresent(true),
 		),
-		IP(IPSrc("0.0.0.0"), IPDst("1.2.3.0")),
+		IPv4(IPSrc("0.0.0.0"), IPDst("1.2.3.0")),
 		ICMP(ICMPTypeCode(8, 0)),
 	)
 
@@ -261,7 +261,7 @@ func BenchmarkNewPacket_Simple(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, _ = NewPacket(
 			Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-			IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
+			IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 			TCP(TCPSport(1234), TCPDport(80)),
 		)
 	}

@@ -61,7 +61,7 @@ func TestCodegenV2_SimplePacket(t *testing.T) {
 	require.Contains(t, code, "package converted")
 	require.Contains(t, code, "func GenerateTest_SendSend(t *testing.T)")
 	require.Contains(t, code, "lib.Ether(")
-	require.Contains(t, code, "lib.IP(")
+	require.Contains(t, code, "lib.IPv4(")
 	require.Contains(t, code, "lib.TCP(")
 	require.Contains(t, code, `lib.IPSrc("1.2.3.4")`)
 	require.Contains(t, code, `lib.IPDst("5.6.7.8")`)
@@ -70,15 +70,17 @@ func TestCodegenV2_SimplePacket(t *testing.T) {
 }
 
 func TestCodegenV2_EndToEnd(t *testing.T) {
-	// Find a test gen.py file
+	// This test requires yanet1 repository to be available
+	// Set YANET1_PATH environment variable to point to yanet1 directory
+	// Example: export YANET1_PATH=/path/to/yanet1
 	yanet1Path := os.Getenv("YANET1_PATH")
 	if yanet1Path == "" {
-		yanet1Path = "../../../../yanet1"
+		yanet1Path = "../../../../../yanet1"
 	}
 
 	genPyPath := filepath.Join(yanet1Path, "autotest/units/001_one_port/009_nat64stateless/gen.py")
 	if _, err := os.Stat(genPyPath); os.IsNotExist(err) {
-		t.Skip("Test gen.py file not found")
+		t.Skipf("Test gen.py file not found at %s. Set YANET1_PATH to yanet1 repository location.", genPyPath)
 	}
 
 	// Run Python parser
@@ -99,7 +101,7 @@ func TestCodegenV2_EndToEnd(t *testing.T) {
 	// Verify code structure
 	require.Contains(t, code, "package converted")
 	require.Contains(t, code, "func Generate")
-	require.Contains(t, code, "internal.NewPacket(")
+	require.Contains(t, code, "lib.NewPacket(")
 
 	t.Logf("Generated %d bytes of Go code", len(code))
 
@@ -271,12 +273,12 @@ func TestCodegenV2_GRE(t *testing.T) {
 func TestCodegenV2_ConvertAll96Tests(t *testing.T) {
 	yanet1Path := os.Getenv("YANET1_PATH")
 	if yanet1Path == "" {
-		yanet1Path = "../../../../yanet1"
+		yanet1Path = "../../../../../yanet1"
 	}
 
 	// Check if yanet1 directory exists
 	if _, err := os.Stat(yanet1Path); os.IsNotExist(err) {
-		t.Skip("yanet1 directory not found, skipping full conversion test")
+		t.Skipf("yanet1 directory not found at %s. Set YANET1_PATH environment variable.", yanet1Path)
 	}
 
 	// Find all gen.py files
@@ -364,14 +366,6 @@ func TestCodegenV2_ConvertAll96Tests(t *testing.T) {
 			t.Logf("✓ Generated %d lines, %d PCAP pairs", lines, pcapPairs)
 		})
 	}
-
-	// Print summary - always show it, not just on error
-	fmt.Printf("\n=== Conversion Summary ===\n")
-	fmt.Printf("Total tests:          %d\n", totalTests)
-	fmt.Printf("Successful parse:     %d (%.1f%%)\n", successfulParse, float64(successfulParse)/float64(totalTests)*100)
-	fmt.Printf("Successful codegen:   %d (%.1f%%)\n", successfulCodegen, float64(successfulCodegen)/float64(totalTests)*100)
-	fmt.Printf("Successful compile:   %d (%.1f%%)\n", successfulCompile, float64(successfulCompile)/float64(totalTests)*100)
-	fmt.Printf("Failed:               %d (%.1f%%)\n", len(failedTests), float64(len(failedTests))/float64(totalTests)*100)
 
 	t.Logf("\n=== Conversion Summary ===")
 	t.Logf("Total tests:          %d", totalTests)
@@ -656,8 +650,8 @@ func TestCodegenV2_GREWithVLAN(t *testing.T) {
 	require.Contains(t, code, "lib.GRE(")
 	require.Contains(t, code, "lib.GREChecksumPresent(true)")
 	// Should have two IP layers
-	ipCount := strings.Count(code, "lib.IP(")
-	require.GreaterOrEqual(t, ipCount, 2, "Should have at least 2 IP layers (outer and inner)")
+	ipCount := strings.Count(code, "lib.IPv4(")
+	require.GreaterOrEqual(t, ipCount, 2, "Should have at least 2 IPv4 layers (outer and inner)")
 }
 
 func TestConverter_CLICheckNegative(t *testing.T) {
@@ -697,8 +691,8 @@ EXPECT_REGEX: packets:\\s+\\d+`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-            c, err := NewConverter(&Config{Verbose: false})
-            require.NoError(t, err)
+			c, err := NewConverter(&Config{Verbose: false})
+			require.NoError(t, err)
 			result := c.convertCLICheck(tt.content)
 
 			require.Equal(t, "cli_check", result.Type)

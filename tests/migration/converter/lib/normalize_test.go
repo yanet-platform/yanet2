@@ -13,7 +13,7 @@ func TestApplyFrameworkMapping_MACSwapAndPreserveVLAN(t *testing.T) {
 	pkt, err := NewPacket(
 		Ether(),
 		Dot1Q(VLANId(7)),
-		IP(IPSrc("192.0.2.1"), IPDst("198.51.100.1"), IPTTL(64), IPProto(layers.IPProtocolUDP)),
+		IPv4(IPSrc("192.0.2.1"), IPDst("198.51.100.1"), IPTTL(64), IPProto(layers.IPProtocolUDP)),
 		UDP(UDPSport(1000), UDPDport(2000)),
 		Raw([]byte("x")),
 	)
@@ -49,5 +49,3 @@ func TestApplyFrameworkMapping_MACSwapAndPreserveVLAN(t *testing.T) {
 		t.Fatalf("vlan should be preserved in expect mapping")
 	}
 }
-
-

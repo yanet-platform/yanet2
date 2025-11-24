@@ -564,3 +564,4 @@ func (c *Converter) generateBatchPacketValidation(testCase *PacketTestCase) stri
 		}`
 }
 
+

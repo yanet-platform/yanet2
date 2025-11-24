@@ -31,7 +31,7 @@ func TestValidation_EmptyPCAP(t *testing.T) {
 	// Test with packets - should fail
 	pkt, _ := NewPacket(
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
+		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 	)
 	result, err = validator.ValidateAgainstPCAP([]gopacket.Packet{pkt}, pcapPath)
 	require.NoError(t, err)
@@ -46,7 +46,7 @@ func TestValidation_ByteByByte(t *testing.T) {
 	// Create a packet
 	expectedPkt, err := NewPacket(
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(64)),
+		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(64)),
 		TCP(TCPSport(1234), TCPDport(80)),
 	)
 	require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestValidation_ByteByByte(t *testing.T) {
 	// Test with identical packet - should pass
 	gotPkt, err := NewPacket(
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(64)),
+		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(64)),
 		TCP(TCPSport(1234), TCPDport(80)),
 	)
 	require.NoError(t, err)
@@ -91,7 +91,7 @@ func TestValidation_ByteMismatch(t *testing.T) {
 	// Create expected packet
 	expectedPkt, err := NewPacket(
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(64)),
+		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(64)),
 		TCP(TCPSport(1234), TCPDport(80)),
 	)
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestValidation_ByteMismatch(t *testing.T) {
 	// Test with different packet - should fail
 	gotPkt, err := NewPacket(
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(63)), // Different TTL
+		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPTTL(63)), // Different TTL
 		TCP(TCPSport(1234), TCPDport(80)),
 	)
 	require.NoError(t, err)
@@ -138,11 +138,11 @@ func TestValidation_CountMismatch(t *testing.T) {
 	// Create 2 packets in PCAP
 	pkt1, _ := NewPacket(
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
+		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 	)
 	pkt2, _ := NewPacket(
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-		IP(IPSrc("1.2.3.5"), IPDst("5.6.7.9")),
+		IPv4(IPSrc("1.2.3.5"), IPDst("5.6.7.9")),
 	)
 
 	f, err := os.Create(pcapPath)
@@ -180,7 +180,7 @@ func TestValidation_MultiplePackets(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		pkt, err := NewPacket(
 			Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-			IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPId(uint16(i))),
+			IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPId(uint16(i))),
 			UDP(UDPSport(uint16(1000+i)), UDPDport(80)),
 		)
 		require.NoError(t, err)
@@ -224,7 +224,7 @@ func TestValidation_LayerMode_IgnoresEthernetPadding(t *testing.T) {
 	// Create a packet using the builder (this will typically serialize to >= 60 bytes)
 	basePkt, err := NewPacket(
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
+		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 		UDP(UDPSport(1234), UDPDport(80)),
 	)
 	require.NoError(t, err)
@@ -279,7 +279,7 @@ func TestValidation_LayerMode_IgnoresChecksumDifferences(t *testing.T) {
 	// Create a base IPv4/TCP packet
 	basePkt, err := NewPacket(
 		Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
-		IP(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
+		IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8")),
 		TCP(TCPSport(1234), TCPDport(80)),
 	)
 	require.NoError(t, err)

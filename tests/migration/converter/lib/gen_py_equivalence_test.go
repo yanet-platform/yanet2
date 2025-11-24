@@ -18,6 +18,10 @@ import (
 // TestGenPyEquivalence verifies that packets generated from gen.py AST match original PCAP files.
 // This test parses gen.py files using scapy_ast_parser.py, generates packets from the IR,
 // and compares them byte-by-byte with the original PCAP files.
+//
+// This test requires yanet1 repository to be available.
+// Set YANET1_ROOT environment variable to point to yanet1 directory.
+// Example: export YANET1_ROOT=/path/to/yanet1
 func TestGenPyEquivalence(t *testing.T) {
 	// Get yanet1 root from environment
 	yanet1Root := os.Getenv("YANET1_ROOT")
@@ -28,7 +32,7 @@ func TestGenPyEquivalence(t *testing.T) {
 	// Check if yanet1 directory exists
 	onePortDir := filepath.Join(yanet1Root, "autotest/units/001_one_port")
 	if _, err := os.Stat(onePortDir); os.IsNotExist(err) {
-		t.Skipf("yanet1 directory not found: %s", onePortDir)
+		t.Skipf("yanet1 directory not found at %s. Set YANET1_ROOT to yanet1 repository location.", onePortDir)
 	}
 
 	// Get test filter from environment

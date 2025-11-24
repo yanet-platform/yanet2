@@ -160,6 +160,16 @@ func NewPacket(layerBuilders ...LayerBuilder) (gopacket.Packet, error) {
 			currentNL = nl
 			continue
 		}
+		// Handle custom network layers that don't implement gopacket.NetworkLayer
+		switch nl := layer.(type) {
+		case *customIPv4Layer:
+			currentNL = nl.ipv4
+			continue
+		case *customIPv6Layer:
+			currentNL = nl.ipv6
+			continue
+		}
+		// Set network layer for transport layers
 		switch tl := layer.(type) {
 		case *layers.TCP:
 			if currentNL != nil {
@@ -340,6 +350,16 @@ func NewPacketWithOptions(serializeOpts gopacket.SerializeOptions, layerBuilders
 			currentNL = nl
 			continue
 		}
+		// Handle custom network layers that don't implement gopacket.NetworkLayer
+		switch nl := layer.(type) {
+		case *customIPv4Layer:
+			currentNL = nl.ipv4
+			continue
+		case *customIPv6Layer:
+			currentNL = nl.ipv6
+			continue
+		}
+		// Set network layer for transport layers
 		switch tl := layer.(type) {
 		case *layers.TCP:
 			if currentNL != nil {
@@ -471,7 +491,8 @@ type IPv4Builder struct {
 	explicitLen *uint16 // If set, override len after serialization
 }
 
-func IP(opts ...IPv4Option) *IPv4Builder {
+// IPv4 creates an IPv4 layer builder for packet construction
+func IPv4(opts ...IPv4Option) *IPv4Builder {
 	ip := &layers.IPv4{
 		Version: 4,
 		IHL:     5,

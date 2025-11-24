@@ -72,11 +72,11 @@ clean-all: clean
 
 # Convert tests from yanet1
 MIGRATION_DIR = ../migration
-YANET1_DIR ?= ../../../../yanet1
+YANET1_ROOT ?= ../../../../yanet1
 
 convert:
 	@echo "Converting all yanet1 tests..."
-	cd $(MIGRATION_DIR) && $(MAKE) convert
+	cd $(MIGRATION_DIR) && $(MAKE) convert YANET1_ROOT=$(YANET1_ROOT)
 
 convert-one:
 	@if [ -z "$(TEST)" ]; then \
@@ -85,7 +85,7 @@ convert-one:
 		exit 1; \
 	fi
 	@echo "Converting test $(TEST)..."
-	cd $(MIGRATION_DIR) && $(MAKE) convert-one TEST=$(TEST)
+	cd $(MIGRATION_DIR) && $(MAKE) convert-one TEST=$(TEST) YANET1_ROOT=$(YANET1_ROOT)
 
 # Run converted tests
 test-converted: prepare-vm

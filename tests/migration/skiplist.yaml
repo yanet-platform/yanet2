@@ -5809,7 +5809,7 @@
     #     default  10000     2.0.0.0/24  autotest  11.11.11.1  ipv4 mpls-vpn  5.5.5.5:5555      5.5.5.5  1100    0                         incomplete  0    n/s          13238:1:1
     #     default  10000     fe80::/64   static    ::                                           ::               0                                     0    n/s          n/s
     # 
-    # #TODO: would be interesting to check what was in prefixes_rebuild table on every step of tests with rib_save()/rib_load()
+    # Note: for deeper debugging you can inspect prefixes_rebuild table on every step of tests with rib_save()/rib_load()
     # 
     # - echo: "30 rib_insert() -> rib_save() -> rib_clear() -> rib_insert() SOME OTHER_PREFIXES!! -> rib_load() - only loaded prefixes are present - DONE"
     # 

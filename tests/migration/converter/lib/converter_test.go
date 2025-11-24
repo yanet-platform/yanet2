@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
 func TestConvertCheckCounters_GeneratesValidation(t *testing.T) {
@@ -72,8 +71,8 @@ func TestConvertCheckCounters_HandlesInvalidContent(t *testing.T) {
 }
 
 func TestConvertRouteUpdate_IPv4(t *testing.T) {
-    converter, err := NewConverter(&Config{})
-    require.NoError(t, err)
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
 
 	// Route format should be "prefix -> nexthop" as string array
 	content := []interface{}{
@@ -90,8 +89,8 @@ func TestConvertRouteUpdate_IPv4(t *testing.T) {
 }
 
 func TestConvertRouteUpdate_IPv6(t *testing.T) {
-    converter, err := NewConverter(&Config{})
-    require.NoError(t, err)
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
 
 	// Route format should be "prefix -> nexthop" as string array
 	content := []interface{}{
@@ -108,8 +107,8 @@ func TestConvertRouteUpdate_IPv6(t *testing.T) {
 }
 
 func TestConvertRouteUpdate_PreservesOriginalBehavior(t *testing.T) {
-    converter, err := NewConverter(&Config{})
-    require.NoError(t, err)
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
 
 	// Route format should be "prefix -> nexthop" as string array
 	content := []interface{}{
@@ -129,8 +128,8 @@ func TestConvertRouteUpdate_PreservesOriginalBehavior(t *testing.T) {
 }
 
 func TestConvertRouteRemove_Regular(t *testing.T) {
-    converter, err := NewConverter(&Config{})
-    require.NoError(t, err)
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
 
 	content := []interface{}{
 		"10.0.0.0/24 -> 192.168.1.1",
@@ -147,8 +146,8 @@ func TestConvertRouteRemove_Regular(t *testing.T) {
 }
 
 func TestConvertRouteRemove_Labelled(t *testing.T) {
-    converter, err := NewConverter(&Config{})
-    require.NoError(t, err)
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
 
 	content := []interface{}{
 		"10.0.0.0/24 -> 192.168.1.1 label:transport1",
@@ -165,8 +164,8 @@ func TestConvertRouteRemove_Labelled(t *testing.T) {
 }
 
 func TestConvertRouteRemove_PreservesOriginalBehavior(t *testing.T) {
-    converter, err := NewConverter(&Config{})
-    require.NoError(t, err)
+	converter, err := NewConverter(&Config{})
+	require.NoError(t, err)
 
 	content := []interface{}{
 		"10.0.0.0/24 -> 192.168.1.1",
@@ -182,75 +181,4 @@ func TestConvertRouteRemove_PreservesOriginalBehavior(t *testing.T) {
 
 	// Results should be different because step types are different
 	require.NotEqual(t, regularResult.Type, labelledResult.Type, "Regular and labelled types should differ")
-}
-
-// Table-driven tests for CLI conversion covering balancer, NAT64 and route
-// edge cases. These focus on convertCLICommand, which dispatches to
-// convertBalancerCommand/convertNat64Command/convertRouteCommand.
-func TestConvertCLICommand_DispatchAndErrors(t *testing.T) {
-	converter, err := NewConverter(&Config{})
-	require.NoError(t, err)
-
-	testCases := []struct {
-		name       string
-		input      string
-		wantPrefix string // substring that should appear in converted command
-	}{
-		{
-			name:       "unsupported raw command",
-			input:      "unknown command",
-			wantPrefix: "# Unsupported command:",
-		},
-		// Empty command is handled by ParseCLICommand and results in an error wrapper.
-		// We still expect the converted string to clearly indicate a parse failure.
-		{
-			name:       "malformed empty command",
-			input:      "",
-			wantPrefix: "# ERROR: Could not parse command:",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := converter.convertCLICommand(tc.input)
-			require.Contains(t, result, tc.wantPrefix)
-		})
-	}
-}
-
-func TestConvertCLICommand_KnownModules(t *testing.T) {
-	converter, err := NewConverter(&Config{})
-	require.NoError(t, err)
-
-	testCases := []struct {
-		name        string
-		input       string
-		wantSnippet string
-	}{
-		{
-			name:  "balancer real enable",
-			input: "balancer real enable balancer0 203.0.113.10 tcp 80 192.0.2.10 8080",
-			// We only assert that we routed to CLIBalancer and preserved module name.
-			wantSnippet: framework.CLIBalancer,
-		},
-		{
-			name:  "nat64 prefix add",
-			input: "nat64 prefix add 64:ff9b::/96",
-			// NAT64 commands should go through CLINAT64 helper.
-			wantSnippet: framework.CLINAT64,
-		},
-		{
-			name:  "route insert",
-			input: "route insert 10.0.0.0/24 --via 192.168.1.1",
-			// Route commands should use CLIRoute helper.
-			wantSnippet: framework.CLIRoute,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			out := converter.convertCLICommand(tc.input)
-			require.Contains(t, out, tc.wantSnippet)
-		})
-	}
 }

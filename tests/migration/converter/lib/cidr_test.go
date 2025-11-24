@@ -176,6 +176,15 @@ func TestExpandCIDR_LargeSubnet(t *testing.T) {
 	require.Equal(t, "10.0.0.255", ips[255])
 }
 
+func TestExpandCIDR_Basic(t *testing.T) {
+	// Basic functionality test for CIDR expansion
+	got := ExpandCIDR("172.20.29.5/30")
+	require.Len(t, got, 4, "expected 4 addresses for /30 subnet")
+	// Ensure first and last addresses are non-empty
+	require.NotEmpty(t, got[0], "first IP should not be empty")
+	require.NotEmpty(t, got[len(got)-1], "last IP should not be empty")
+}
+
 func TestScapyASTParser_CIDR(t *testing.T) {
 	// This test verifies that the Python parser correctly marks CIDR notation
 	// We can't run Python from Go test, but we document the expected behavior:

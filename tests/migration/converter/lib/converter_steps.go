@@ -487,7 +487,7 @@ func (c *Converter) generatePacketFunctionFromIR(irJSON, pcapFilename, funcName 
 		codegen.SetTrackingMaps(&c.specialHandlingSkips, &c.unsupportedLayerTypes)
 	}
 	codegen.SetStrictMode(c.config.StrictMode)
-	
+
 	return codegen.GeneratePacketFunction(funcName, packets, isExpect), nil
 }
 
@@ -987,4 +987,3 @@ func (c *Converter) analyzePcapFiles(testPath string) ([]PcapFileInfo, error) {
 
 	return pcapFiles, nil
 }
-

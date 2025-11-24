@@ -2,6 +2,8 @@ package lib
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gopacket/gopacket"
@@ -10,11 +12,27 @@ import (
 )
 
 func TestICMPv6PayloadConversion(t *testing.T) {
+	// This test verifies that ICMP packets with payload are correctly converted to IR
+	// and that the payload is not lost during conversion.
+	//
+	// This test requires yanet1 repository to be available.
+	// Set YANET1_ROOT environment variable to point to yanet1 directory.
+	// Example: export YANET1_ROOT=/path/to/yanet1
+
 	// Create analyzer
 	analyzer := NewPcapAnalyzer(false)
 
 	// Read ICMP packets from Test009
-	packets, err := analyzer.ReadAllPacketsFromFile("/Users/moonug/projects/yanet/yanet1/autotest/units/001_one_port/009_nat64stateless/007-send.pcap")
+	yanet1Root := os.Getenv("YANET1_ROOT")
+	if yanet1Root == "" {
+		yanet1Root = "../../../../../yanet1"
+	}
+	pcapPath := filepath.Join(yanet1Root, "autotest/units/001_one_port/009_nat64stateless/007-send.pcap")
+	if _, err := os.Stat(pcapPath); os.IsNotExist(err) {
+		t.Skipf("PCAP file not found at %s. Set YANET1_ROOT to yanet1 repository location.", pcapPath)
+	}
+
+	packets, err := analyzer.ReadAllPacketsFromFile(pcapPath)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(packets), "Expected 2 packets in 007-send.pcap")
 
