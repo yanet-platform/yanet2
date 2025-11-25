@@ -99,7 +99,9 @@ func (c *Converter) generateGoTest(testData *GoTestData) error {
 	}
 
 	// Create test file
-	outputFile := filepath.Join(c.config.OutputDir, fmt.Sprintf("%s_test.go", strings.ToLower(testData.TestName)))
+	// Use OriginalTestName to preserve the original format (e.g., "001_nat64stateless")
+	// instead of sanitized TestName which may have "Test_" prefix
+	outputFile := filepath.Join(c.config.OutputDir, fmt.Sprintf("%s_test.go", strings.ToLower(testData.OriginalTestName)))
 	c.debugLog("Creating test file: %s", outputFile)
 	file, err := os.Create(outputFile)
 	if err != nil {
@@ -339,7 +341,8 @@ func (c *Converter) generateNAT64TestTemplate(testData *GoTestData, functions []
 	t.Run("Step_000_Configure_NAT64_Environment", func(t *testing.T) {
 		// Configure NAT64 module
 		commands := []string{%s%s
-			"%s update --name=test --modules forward:forward0 --modules nat64:%s --modules route:route0 --instance=0",
+			"%s update --name=test --chains chain2:1=forward:forward0,nat64:%s,route:route0 --instance=0",
+			"%s update --name=test --functions test --instance=0",
 		}
 		_, err := fw.CLI.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure NAT64 module")
@@ -353,8 +356,9 @@ func (c *Converter) generateNAT64TestTemplate(testData *GoTestData, functions []
 `, header,
 		c.generateForwardModuleConfig(testData.ParsedConfig),
 		nat64Cmds,
-		framework.CLIPipeline,
+		framework.CLIFunction,
 		nat64ModuleName,
+		framework.CLIPipeline,
 		c.generateTestStepsInOrder(testData.Steps),
 		c.generatePacketFunctions(testData))
 }
@@ -381,7 +385,8 @@ func (c *Converter) generateBalancerTestTemplate(testData *GoTestData, functions
 		// Configure balancer module
 		commands := []string{
 			"%s service add --cfg balancer0 --instances 0 --virtual-ip 10.0.0.16 --proto tcp --virtual-port any",
-			"%s update --name=test --modules balancer:balancer0 --modules route:route0 --instance=0",
+			"%s update --name=test --chains chain2:1=balancer:balancer0,route:route0 --instance=0",
+			"%s update --name=test --functions test --instance=0",
 		}
 		_, err := fw.CLI.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure balancer module")
@@ -394,6 +399,7 @@ func (c *Converter) generateBalancerTestTemplate(testData *GoTestData, functions
 %s
 `, header,
 		framework.CLIBalancer,
+		framework.CLIFunction,
 		framework.CLIPipeline,
 		c.generateTestStepsInOrder(testData.Steps),
 		c.generatePacketFunctions(testData))
@@ -419,7 +425,8 @@ func (c *Converter) generateACLTestTemplate(testData *GoTestData, functions []st
 	t.Run("Step_000_Configure_ACL_Environment", func(t *testing.T) {
 		// Configure ACL module
 		commands := []string{
-			"%s update --name=test --modules acl:acl0 --modules route:route0 --instance=0",
+			"%s update --name=test --chains chain2:1=acl:acl0,route:route0 --instance=0",
+			"%s update --name=test --functions test --instance=0",
 		}
 		_, err := fw.CLI.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure ACL module")
@@ -431,6 +438,7 @@ func (c *Converter) generateACLTestTemplate(testData *GoTestData, functions []st
 
 %s
 `, header,
+		framework.CLIFunction,
 		framework.CLIPipeline,
 		c.generateTestStepsInOrder(testData.Steps),
 		c.generatePacketFunctions(testData))
@@ -468,7 +476,8 @@ func (c *Converter) generateDecapTestTemplate(testData *GoTestData, functions []
 	t.Run("Step_000_Configure_Decap_Environment", func(t *testing.T) {
 		// Configure Decap module
 		commands := []string{%s
-			"%s update --name=test --modules forward:forward0 --modules decap:decap0 --modules route:route0 --instance=0",
+			"%s update --name=test --chains chain2:1=forward:forward0,decap:decap0,route:route0 --instance=0",
+			"%s update --name=test --functions test --instance=0",
 		}
 		_, err := fw.CLI.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure Decap module")
@@ -480,6 +489,7 @@ func (c *Converter) generateDecapTestTemplate(testData *GoTestData, functions []
 %s
 `, header,
 		decapCmds,
+		framework.CLIFunction,
 		framework.CLIPipeline,
 		c.generateTestStepsInOrder(testData.Steps),
 		c.generatePacketFunctions(testData))
@@ -492,7 +502,8 @@ func (c *Converter) generateGenericTestTemplate(testData *GoTestData, functions 
 	t.Run("Step_000_Configure_Test_Environment", func(t *testing.T) {
 		// Configure test environment with forward (required for packet processing)
 		commands := []string{
-			"%s update --name=test --modules forward:forward0 --modules route:route0 --instance=0",
+			"%s update --name=test --chains chain2:1=forward:forward0,route:route0 --instance=0",
+			"%s update --name=test --functions test --instance=0",
 		}
 		_, err := fw.CLI.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure test environment")
@@ -503,6 +514,7 @@ func (c *Converter) generateGenericTestTemplate(testData *GoTestData, functions 
 
 %s
 `, header,
+		framework.CLIFunction,
 		framework.CLIPipeline,
 		c.generateTestStepsInOrder(testData.Steps),
 		c.generatePacketFunctions(testData))
@@ -557,11 +569,6 @@ func (c *Converter) generateBatchPacketValidation(testCase *PacketTestCase) stri
 				),
 				cmpopts.IgnoreFields(layers.Ethernet{}, "BaseLayer"),
 			)
-			if diff != "" {
-				t.Logf("Packet %d mismatch:\n%s", idx, diff)
-				require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
-			}
+			require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
 		}`
 }
-
-

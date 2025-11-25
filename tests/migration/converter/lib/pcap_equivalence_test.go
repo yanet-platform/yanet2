@@ -27,15 +27,19 @@ func TestPCAPEquivalence(t *testing.T) {
 	onlyTest := os.Getenv("ONLY_TEST")
 	onlyStep := os.Getenv("ONLY_STEP")
 
-	// Discover tests (no skip tests for this test suite)
-	tests, err := DiscoverTests(onePortDir, onlyTest, nil)
+	// Skip tests with known issues (malformed autotest.yaml, no steps, etc.)
+	skipTests := map[string]string{
+		"056_balancer_icmp_rate_limit": "autotest.yaml has no steps",
+		"059_rib":                      "autotest.yaml has YAML syntax error at line 1809",
+	}
+
+	// Discover tests
+	tests, err := DiscoverTests(onePortDir, onlyTest, skipTests)
 	if err != nil {
 		t.Fatalf("Failed to discover tests: %v", err)
 	}
 
-	if len(tests) == 0 {
-		t.Skip("No tests found to run")
-	}
+	require.NotEmpty(t, tests, "No tests found to run")
 
 	for _, testInfo := range tests {
 		testInfo := testInfo // capture loop variable
@@ -68,21 +72,18 @@ func runTestEquivalence(t *testing.T, testInfo TestInfo, onlyStep string) {
 		})
 		return nil
 	})
-	if err != nil {
-		// Skip tests that cannot be parsed (e.g., malformed YAML in yanet1)
-		// These tests are typically disabled in skiplist.yaml anyway
-		t.Skipf("Cannot parse autotest.yaml (likely malformed in yanet1): %v", err)
-	}
+	require.NoError(t, err, "Failed to iterate send packets steps")
 }
 
 // verifyPCAPEquivalence validates the full pipeline: PCAP → IR → Code Generation → Packet Builder → Semantic Comparison
 func verifyPCAPEquivalence(t *testing.T, pcapPath string, isExpect bool) {
-	// Read original PCAP
-	originalPackets, err := readPCAPBytes(pcapPath)
+	// Read and analyze PCAP → PacketInfo
+	analyzer := NewPcapAnalyzer(false)
+	packetInfos, err := analyzer.ReadAllPacketsFromFile(pcapPath)
 	if err != nil {
-		t.Fatalf("Failed to read original PCAP: %v", err)
+		t.Fatalf("Failed to read packet infos: %v", err)
 	}
-	if len(originalPackets) == 0 {
+	if len(packetInfos) == 0 {
 		t.Skip("Empty PCAP file")
 		return
 	}
@@ -92,11 +93,6 @@ func verifyPCAPEquivalence(t *testing.T, pcapPath string, isExpect bool) {
 		UseFrameworkMACs: false,
 		IsExpect:         isExpect,
 		StripVLAN:        false,
-	}
-	analyzer := NewPcapAnalyzer(false)
-	packetInfos, err := analyzer.ReadAllPacketsFromFile(pcapPath)
-	if err != nil {
-		t.Fatalf("Failed to read packet infos: %v", err)
 	}
 	ir, err := analyzer.ConvertPacketInfoToIR(packetInfos, "send.pcap", "expect.pcap", opts)
 	if err != nil {
@@ -113,8 +109,8 @@ func verifyPCAPEquivalence(t *testing.T, pcapPath string, isExpect bool) {
 		}
 	}
 
-	if len(originalPackets) != len(irPackets) {
-		t.Fatalf("Packet count mismatch: original=%d, IR=%d", len(originalPackets), len(irPackets))
+	if len(packetInfos) != len(irPackets) {
+		t.Fatalf("Packet count mismatch: original=%d, IR=%d", len(packetInfos), len(irPackets))
 	}
 
 	// Generate packets from IR using packet builder
@@ -128,79 +124,29 @@ func verifyPCAPEquivalence(t *testing.T, pcapPath string, isExpect bool) {
 	}
 
 	// Semantic comparison
-	for i := range originalPackets {
-		expPkt := gopacket.NewPacket(originalPackets[i], layers.LayerTypeEthernet, gopacket.Default)
+	for i, info := range packetInfos {
+		originalBytes := info.RawData
+		expPkt := gopacket.NewPacket(originalBytes, layers.LayerTypeEthernet, gopacket.Default)
 		actPkt := generatedPackets[i]
 
-		// Check if original packet has DecodeFailure
-		hasDecodeFailure := false
-		for _, layer := range expPkt.Layers() {
-			if layer.LayerType() == gopacket.LayerTypeDecodeFailure {
-				hasDecodeFailure = true
-				break
-			}
-		}
+		// // Check if original packet has DecodeFailure
+		// hasDecodeFailure := false
+		// for _, layer := range expPkt.Layers() {
+		// 	if layer.LayerType() == gopacket.LayerTypeDecodeFailure {
+		// 		hasDecodeFailure = true
+		// 		break
+		// 	}
+		// }
 
-		if hasDecodeFailure {
-			// For packets with DecodeFailure, compare raw bytes instead of parsed layers
-			// This is because gopacket may incorrectly parse the original (e.g., GRE with unsupported flags)
-			// but our IR conversion extracts the correct structure from raw bytes and uses custom serialization
-			originalBytes := originalPackets[i]
-			generatedBytes := actPkt.Data()
-
-			// Compare bytes ignoring trailing zero padding (Ethernet padding)
-			if bytesEqualIgnorePadding(originalBytes, generatedBytes) {
-				if len(originalBytes) != len(generatedBytes) {
-					t.Logf("Packet %d: Raw bytes match with padding (DecodeFailure, orig=%d, gen=%d)", i, len(originalBytes), len(generatedBytes))
-				} else {
-					t.Logf("Packet %d: Raw bytes match (DecodeFailure handled correctly)", i)
-				}
-				continue
-			}
-
-			diff := cmp.Diff(originalBytes, generatedBytes)
-			if diff != "" {
-				t.Errorf("Packet %d: Raw bytes mismatch:\n%s", i, diff)
-			}
-			continue
-		}
-
-		// For normal packets, compare semantic content but handle Ethernet padding
-		// gopacket always pads to 60 bytes, but original PCAPs may have shorter packets
-		originalBytes := originalPackets[i]
 		generatedBytes := actPkt.Data()
 
-		// Handle Ethernet padding: ONLY allow padding if original < 60 and generated == 60
-		// Ethernet frames must be at least 60 bytes, but PCAPs may contain shorter frames
-		// gopacket always pads to 60 bytes with zeros
-
-		// Check if this is valid Ethernet padding (orig < 60, gen = 60)
-		isValidPadding := len(originalBytes) < 60 && len(generatedBytes) == 60
-
-		if isValidPadding && bytesEqualIgnorePadding(originalBytes, generatedBytes) {
-			t.Logf("Packet %d: Content matches (Ethernet padding: orig=%d, gen=%d)", i, len(originalBytes), len(generatedBytes))
+		if bytesEqualIgnorePadding(originalBytes, generatedBytes) {
 			continue
 		}
 
-		expProj := projectPacketForDiff(expPkt)
-		actProj := projectPacketForDiff(actPkt)
-		if diff := cmp.Diff(expProj, actProj); diff != "" {
-			t.Errorf("Packet %d semantic diff (-want +got):\n%s", i, diff)
-		}
+		diff := cmp.Diff(expPkt.Layers(), actPkt.Layers(), cmpStdOpts...)
+		require.Emptyf(t, diff, "Packet layers mismatch for index %d", i)
 	}
-}
-
-// bytesEqual compares two byte slices for equality
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func readPCAPBytes(pcapPath string) ([][]byte, error) {
@@ -231,10 +177,11 @@ func generatePacketFromIRExact(irPkt IRPacketDef, opts CodegenOpts) (gopacket.Pa
 		}
 	}
 
-	// Use FixLengths: true to ensure all layers (including Raw) are serialized
-	// customIPv6Layer will handle explicit plen values during serialization
+	// Use FixLengths: false to preserve explicit length/checksum values from custom layers
+	// Custom layers (customIPv4Layer, customIPv6Layer, etc.) handle lengths explicitly
+	// Setting FixLengths: true would overwrite our explicit (potentially invalid) values
 	serializeOpts := gopacket.SerializeOptions{
-		FixLengths:       true,
+		FixLengths:       false,
 		ComputeChecksums: false,
 	}
 	return NewPacket(&serializeOpts, layerBuilders...)

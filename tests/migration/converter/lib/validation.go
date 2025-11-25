@@ -305,6 +305,11 @@ func projectPacketForDiff(pkt gopacket.Packet) []interface{} {
 			out = append(out, struct {
 				Src, Dst uint16
 			}{Src: uint16(v.SrcPort), Dst: uint16(v.DstPort)})
+		case *layers.ICMPv6:
+			out = append(out, struct {
+				Type uint8
+				Code uint8
+			}{Type: uint8(v.TypeCode.Type()), Code: uint8(v.TypeCode.Code())})
 		case *layers.ICMPv4:
 			out = append(out, struct {
 				Type uint8
@@ -340,6 +345,10 @@ func projectPacketForDiff(pkt gopacket.Packet) []interface{} {
 
 // bytesEqualIgnorePadding compares two byte slices, ignoring trailing zero bytes (Ethernet padding).
 func bytesEqualIgnorePadding(a, b []byte) bool {
+	isValidPadding := len(a) < 60 && len(b) == 60
+	if !isValidPadding {
+		return false
+	}
 	// Find the actual content length (without trailing zeros) for both
 	aLen := len(a)
 	for aLen > 0 && a[aLen-1] == 0 {

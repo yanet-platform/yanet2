@@ -216,13 +216,10 @@ func NewPacket(opts *gopacket.SerializeOptions, layerBuilders ...LayerBuilder) (
 		return nil, err
 	}
 
-	// Parse back to packet
-	// Use NoCopy when custom options are provided to preserve all bytes
-	decodeOpts := gopacket.Default
-	if opts != nil {
-		decodeOpts = gopacket.NoCopy
-	}
-	pkt := gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, decodeOpts)
+	// Parse back to packet using the standard decoder so that layer stacks
+	// (including ICMPv6 control subtypes) match those produced when reading
+	// original PCAPs via NewPacketSource.
+	pkt := gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 	return pkt, nil
 }
 
@@ -1025,6 +1022,15 @@ func UDPDport(port uint16) UDPOption {
 	}
 }
 
+// UDPLengthRaw sets an explicit UDP length value from the original PCAP header.
+// This is required for PCAP equivalence tests where we must preserve even
+// malformed or unusual length values byte-for-byte.
+func UDPLengthRaw(length uint16) UDPOption {
+	return func(builder *UDPBuilder) {
+		builder.layer.Length = length
+	}
+}
+
 // UDPChecksumRaw sets an explicit checksum and prevents recomputation during serialization
 func UDPChecksumRaw(cs uint16) UDPOption {
 	return func(builder *UDPBuilder) {
@@ -1052,7 +1058,8 @@ func (u *udpNoChecksum) LayerType() gopacket.LayerType {
 // ===== ICMP Layer =====
 
 type ICMPBuilder struct {
-	layer *layers.ICMPv4
+	layer      *layers.ICMPv4
+	noChecksum bool // If true, use explicit checksum from layer
 }
 
 func ICMP(opts ...ICMPOption) *ICMPBuilder {
@@ -1070,7 +1077,27 @@ func ICMP(opts ...ICMPOption) *ICMPBuilder {
 }
 
 func (b *ICMPBuilder) Build() gopacket.SerializableLayer {
+	// If explicit checksum is set, wrap in custom type to prevent recomputation
+	if b.noChecksum {
+		return &icmpNoChecksum{layer: b.layer}
+	}
 	return b.layer
+}
+
+// icmpNoChecksum wraps ICMPv4 to preserve the provided checksum (no recomputation)
+type icmpNoChecksum struct {
+	layer *layers.ICMPv4
+}
+
+func (ic *icmpNoChecksum) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
+	// Force skip checksum computation for this layer only
+	local := opts
+	local.ComputeChecksums = false
+	return ic.layer.SerializeTo(b, local)
+}
+
+func (ic *icmpNoChecksum) LayerType() gopacket.LayerType {
+	return ic.layer.LayerType()
 }
 
 type ICMPOption func(*ICMPBuilder)
@@ -1102,14 +1129,31 @@ func ICMPSeq(seq uint16) ICMPOption {
 func ICMPChecksum(checksum uint16) ICMPOption {
 	return func(builder *ICMPBuilder) {
 		builder.layer.Checksum = checksum
+		builder.noChecksum = true
 	}
 }
 
 // ===== ICMPv6 Layer =====
 
 type ICMPv6Builder struct {
-	layer *layers.ICMPv6
-	echo  *layers.ICMPv6Echo
+	layer      *layers.ICMPv6
+	echo       *layers.ICMPv6Echo
+	noChecksum bool // If true, use explicit checksum from layer
+}
+
+// ICMPv6 creates a generic ICMPv6 message. The concrete type/code can be
+// provided via ICMPv6Type / ICMPv6Code options, which is useful for control
+// messages like Router Solicitation that are not modeled as dedicated builders.
+func ICMPv6(opts ...ICMPv6Option) *ICMPv6Builder {
+	icmp := &layers.ICMPv6{}
+
+	builder := &ICMPv6Builder{layer: icmp}
+
+	for _, opt := range opts {
+		opt(builder)
+	}
+
+	return builder
 }
 
 func ICMPv6EchoRequest(opts ...ICMPv6Option) *ICMPv6Builder {
@@ -1202,15 +1246,20 @@ func (b *ICMPv6Builder) Build() gopacket.SerializableLayer {
 	// For Echo Request/Reply, we need to return a composite layer that serializes both ICMPv6 and ICMPv6Echo
 	if b.echo != nil {
 		// Return a custom serializable that handles both layers
-		return &icmpv6WithEcho{icmp: b.layer, echo: b.echo}
+		return &icmpv6WithEcho{icmp: b.layer, echo: b.echo, noChecksum: b.noChecksum}
+	}
+	// If explicit checksum is set, wrap in custom type to prevent recomputation
+	if b.noChecksum {
+		return &icmpv6NoChecksum{layer: b.layer}
 	}
 	return b.layer
 }
 
 // icmpv6WithEcho is a wrapper that serializes ICMPv6 + ICMPv6Echo together
 type icmpv6WithEcho struct {
-	icmp *layers.ICMPv6
-	echo *layers.ICMPv6Echo
+	icmp       *layers.ICMPv6
+	echo       *layers.ICMPv6Echo
+	noChecksum bool // If true, preserve explicit checksum
 }
 
 func (ie *icmpv6WithEcho) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
@@ -1229,11 +1278,33 @@ func (ie *icmpv6WithEcho) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.
 	echoBytes[3] = byte(ie.echo.SeqNumber)
 
 	// Now serialize ICMPv6 header
+	// If explicit checksum is set, disable checksum computation for this layer
+	if ie.noChecksum {
+		local := opts
+		local.ComputeChecksums = false
+		return ie.icmp.SerializeTo(b, local)
+	}
 	return ie.icmp.SerializeTo(b, opts)
 }
 
 func (ie *icmpv6WithEcho) LayerType() gopacket.LayerType {
 	return ie.icmp.LayerType()
+}
+
+// icmpv6NoChecksum wraps ICMPv6 to preserve the provided checksum (no recomputation)
+type icmpv6NoChecksum struct {
+	layer *layers.ICMPv6
+}
+
+func (ic *icmpv6NoChecksum) SerializeTo(b gopacket.SerializeBuffer, opts gopacket.SerializeOptions) error {
+	// Force skip checksum computation for this layer only
+	local := opts
+	local.ComputeChecksums = false
+	return ic.layer.SerializeTo(b, local)
+}
+
+func (ic *icmpv6NoChecksum) LayerType() gopacket.LayerType {
+	return ic.layer.LayerType()
 }
 
 type ICMPv6Option func(*ICMPv6Builder)
@@ -1259,6 +1330,23 @@ func ICMPv6Code(code uint8) ICMPv6Option {
 		// Extract current type and set new code
 		currentType := uint8(builder.layer.TypeCode >> 8)
 		builder.layer.TypeCode = layers.CreateICMPv6TypeCode(currentType, code)
+	}
+}
+
+// ICMPv6Type sets the ICMPv6 type while preserving the current code. This is
+// used for generic control messages (e.g. Router Solicitation) where the type
+// comes directly from the original PCAP.
+func ICMPv6Type(typ uint8) ICMPv6Option {
+	return func(builder *ICMPv6Builder) {
+		currentCode := uint8(builder.layer.TypeCode.Code())
+		builder.layer.TypeCode = layers.CreateICMPv6TypeCode(typ, currentCode)
+	}
+}
+
+func ICMPv6Checksum(checksum uint16) ICMPv6Option {
+	return func(builder *ICMPv6Builder) {
+		builder.layer.Checksum = checksum
+		builder.noChecksum = true
 	}
 }
 
@@ -1292,6 +1380,64 @@ func ICMPv6EchoSeq(seq uint16) ICMPv6EchoOption {
 	return func(b *ICMPv6EchoBuilder) {
 		b.layer.SeqNumber = seq
 	}
+}
+
+// ===== ICMPv6 NDP Messages =====
+
+// ICMPv6RouterSolicitationBuilder builds an ICMPv6 Router Solicitation layer
+type ICMPv6RouterSolicitationBuilder struct {
+	layer *layers.ICMPv6RouterSolicitation
+}
+
+func ICMPv6RouterSolicitation() *ICMPv6RouterSolicitationBuilder {
+	rs := &layers.ICMPv6RouterSolicitation{}
+	return &ICMPv6RouterSolicitationBuilder{layer: rs}
+}
+
+func (b *ICMPv6RouterSolicitationBuilder) Build() gopacket.SerializableLayer {
+	return b.layer
+}
+
+// ICMPv6RouterAdvertisementBuilder builds an ICMPv6 Router Advertisement layer
+type ICMPv6RouterAdvertisementBuilder struct {
+	layer *layers.ICMPv6RouterAdvertisement
+}
+
+func ICMPv6RouterAdvertisement() *ICMPv6RouterAdvertisementBuilder {
+	ra := &layers.ICMPv6RouterAdvertisement{}
+	return &ICMPv6RouterAdvertisementBuilder{layer: ra}
+}
+
+func (b *ICMPv6RouterAdvertisementBuilder) Build() gopacket.SerializableLayer {
+	return b.layer
+}
+
+// ICMPv6NeighborSolicitationBuilder builds an ICMPv6 Neighbor Solicitation layer
+type ICMPv6NeighborSolicitationBuilder struct {
+	layer *layers.ICMPv6NeighborSolicitation
+}
+
+func ICMPv6NeighborSolicitation() *ICMPv6NeighborSolicitationBuilder {
+	ns := &layers.ICMPv6NeighborSolicitation{}
+	return &ICMPv6NeighborSolicitationBuilder{layer: ns}
+}
+
+func (b *ICMPv6NeighborSolicitationBuilder) Build() gopacket.SerializableLayer {
+	return b.layer
+}
+
+// ICMPv6NeighborAdvertisementBuilder builds an ICMPv6 Neighbor Advertisement layer
+type ICMPv6NeighborAdvertisementBuilder struct {
+	layer *layers.ICMPv6NeighborAdvertisement
+}
+
+func ICMPv6NeighborAdvertisement() *ICMPv6NeighborAdvertisementBuilder {
+	na := &layers.ICMPv6NeighborAdvertisement{}
+	return &ICMPv6NeighborAdvertisementBuilder{layer: na}
+}
+
+func (b *ICMPv6NeighborAdvertisementBuilder) Build() gopacket.SerializableLayer {
+	return b.layer
 }
 
 // ===== IPv6 Extension Headers =====

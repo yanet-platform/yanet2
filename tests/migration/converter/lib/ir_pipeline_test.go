@@ -326,6 +326,12 @@ func validateUDPIRWithIndex(t *testing.T, udp *layers.UDP, irPkt IRPacketDef, in
 		"Packet %d UDP[%d]: sport mismatch", index, occurrence)
 	assert.Equal(t, int(udp.DstPort), udpLayer.Params["dport"],
 		"Packet %d UDP[%d]: dport mismatch", index, occurrence)
+
+	// Length is required for exact reconstruction in PCAP equivalence tests.
+	if udp.Length != 0 {
+		assert.Equal(t, int(udp.Length), udpLayer.Params["len"],
+			"Packet %d UDP[%d]: length mismatch", index, occurrence)
+	}
 }
 
 func validateICMPv4IR(t *testing.T, icmp *layers.ICMPv4, irPkt IRPacketDef, index int) {
@@ -385,6 +391,8 @@ func buildLayerFromIR(layer IRLayer, isExpect bool) LayerBuilder {
 		return buildICMPFromIR(layer)
 	case "ICMPv6", "ICMPv6EchoRequest", "ICMPv6EchoReply", "ICMPv6DestUnreach", "ICMPv6PacketTooBig", "ICMPv6TimeExceeded", "ICMPv6ParamProblem":
 		return buildICMPv6FromIR(layer)
+	case "ICMPv6RouterSolicitation", "ICMPv6RouterAdvertisement", "ICMPv6NeighborSolicitation", "ICMPv6NeighborAdvertisement":
+		return buildICMPv6NDPFromIR(layer)
 	case "GRE":
 		return buildGREFromIR(layer)
 	case "MPLS":
@@ -624,6 +632,9 @@ func buildUDPFromIR(layer IRLayer) LayerBuilder {
 	if chksum, ok := asInt(layer.Params["chksum"]); ok {
 		opts = append(opts, UDPChecksumRaw(uint16(chksum)))
 	}
+	if length, ok := asInt(layer.Params["len"]); ok {
+		opts = append(opts, UDPLengthRaw(uint16(length)))
+	}
 	return UDP(opts...)
 }
 
@@ -661,6 +672,9 @@ func buildICMPv6FromIR(layer IRLayer) LayerBuilder {
 	if code, ok := asInt(layer.Params["code"]); ok {
 		opts = append(opts, ICMPv6Code(uint8(code)))
 	}
+	if chksum, ok := asInt(layer.Params["chksum"]); ok {
+		opts = append(opts, ICMPv6Checksum(uint16(chksum)))
+	}
 
 	// Return appropriate ICMPv6 type based on layer.Type
 	switch layer.Type {
@@ -676,9 +690,34 @@ func buildICMPv6FromIR(layer IRLayer) LayerBuilder {
 		return ICMPv6TimeExceeded(opts...)
 	case "ICMPv6ParamProblem":
 		return ICMPv6ParamProblem(opts...)
+	case "ICMPv6":
+		// Generic ICMPv6 control message (e.g. Router Solicitation) where the
+		// type comes directly from the original PCAP.
+		if icmpType, ok := asInt(layer.Params["type"]); ok {
+			opts = append(opts, ICMPv6Type(uint8(icmpType)))
+		}
+		return ICMPv6(opts...)
 	default:
-		// Default to echo request
-		return ICMPv6EchoRequest(opts...)
+		// Fallback to generic ICMPv6 if an unknown subtype appears.
+		return ICMPv6(opts...)
+	}
+}
+
+func buildICMPv6NDPFromIR(layer IRLayer) LayerBuilder {
+	// For NDP messages (Router Solicitation, Router Advertisement, etc.),
+	// we build a Raw layer with the serialized NDP message.
+	// The options are embedded in the layer and will be serialized by gopacket.
+	switch layer.Type {
+	case "ICMPv6RouterSolicitation":
+		return ICMPv6RouterSolicitation()
+	case "ICMPv6RouterAdvertisement":
+		return ICMPv6RouterAdvertisement()
+	case "ICMPv6NeighborSolicitation":
+		return ICMPv6NeighborSolicitation()
+	case "ICMPv6NeighborAdvertisement":
+		return ICMPv6NeighborAdvertisement()
+	default:
+		return nil
 	}
 }
 
@@ -721,6 +760,11 @@ func buildGREFromIR(layer IRLayer) LayerBuilder {
 	// Handle routing_present flag
 	if routingPresent, ok := asInt(layer.Params["routing_present"]); ok && routingPresent != 0 {
 		opts = append(opts, GRERoutingPresent(true))
+	}
+
+	// Handle version field
+	if version, ok := asInt(layer.Params["version"]); ok {
+		opts = append(opts, GREVersion(uint8(version)))
 	}
 
 	return GRE(opts...)

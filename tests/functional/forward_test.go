@@ -136,9 +136,9 @@ func TestForward(t *testing.T) {
 	t.Run("Configure_Forward_Module", func(t *testing.T) {
 		// Forward-specific configuration
 		commands := []string{
-			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:4=forward:forward0,route:route0 --instance=0",
+			framework.CLIFunction + " update --name=test --chains ch0:4=forward:forward0,route:route0 --instance=0",
 			// Configure pipelines
-			framework.CLIPipeline + " update --name=test --modules forward:forward0 --modules route:route0 --instance=0",
+			framework.CLIPipeline + " update --name=test --functions test --instance=0",
 		}
 
 		_, err := fw.CLI.ExecuteCommands(commands...)
@@ -185,7 +185,7 @@ func TestForward(t *testing.T) {
 		// Test ICMPv6 echo request to VMIPv6Host
 		packet := createICMPv6Packet(
 			net.ParseIP(framework.VMIPv6Gateway), // src IP
-			net.ParseIP(framework.VMIPv6Host),     // dst IP (in L3 forwarding table)
+			net.ParseIP(framework.VMIPv6Host),    // dst IP (in L3 forwarding table)
 			[]byte("icmpv6 test"),
 		)
 

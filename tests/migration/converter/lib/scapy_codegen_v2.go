@@ -343,8 +343,11 @@ func (cg *ScapyCodegenV2) generateLayerCall(layer IRLayer, isExpect bool) string
 		code.WriteString(cg.generateUDPOptions(layer))
 	case "ICMP":
 		code.WriteString(cg.generateICMPOptions(layer))
-	case "ICMPv6EchoRequest", "ICMPv6EchoReply", "ICMPv6DestUnreach", "ICMPv6Echo":
+	case "ICMPv6", "ICMPv6EchoRequest", "ICMPv6EchoReply", "ICMPv6DestUnreach", "ICMPv6Echo":
 		code.WriteString(cg.generateICMPv6Options(layer))
+	case "ICMPv6RouterSolicitation", "ICMPv6RouterAdvertisement", "ICMPv6NeighborSolicitation", "ICMPv6NeighborAdvertisement":
+		// NDP messages don't need options - they are standalone layers
+		// The layer constructor itself is sufficient
 	case "IPv6ExtHdrFragment":
 		code.WriteString(cg.generateIPv6FragmentOptions(layer))
 	case "IPv6ExtHdrDestOpt":
@@ -653,6 +656,12 @@ func (cg *ScapyCodegenV2) generateUDPOptions(layer IRLayer) string {
 	if dport, ok := layer.Params["dport"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.UDPDport(%v),\n", formatValue(dport)))
 	}
+	if chksum, ok := layer.Params["chksum"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.UDPChecksumRaw(%v),\n", formatValue(chksum)))
+	}
+	if length, ok := layer.Params["len"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.UDPLengthRaw(%v),\n", formatValue(length)))
+	}
 
 	return code.String()
 }
@@ -676,6 +685,9 @@ func (cg *ScapyCodegenV2) generateICMPOptions(layer IRLayer) string {
 	if seq, ok := layer.Params["seq"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPSeq(%v),\n", formatValue(seq)))
 	}
+	if chksum, ok := layer.Params["chksum"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPChecksum(%v),\n", formatValue(chksum)))
+	}
 
 	return code.String()
 }
@@ -693,6 +705,9 @@ func (cg *ScapyCodegenV2) generateICMPv6Options(layer IRLayer) string {
 		if seq, ok := layer.Params["seq"]; ok {
 			code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Seq(%v),\n", formatValue(seq)))
 		}
+		if chksum, ok := layer.Params["chksum"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Checksum(%v),\n", formatValue(chksum)))
+		}
 		return code.String()
 	}
 
@@ -705,11 +720,21 @@ func (cg *ScapyCodegenV2) generateICMPv6Options(layer IRLayer) string {
 		if seq, ok := layer.Params["seq"]; ok {
 			code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6EchoSeq(%v),\n", formatValue(seq)))
 		}
+		if chksum, ok := layer.Params["chksum"]; ok {
+			code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Checksum(%v),\n", formatValue(chksum)))
+		}
 		return code.String()
 	}
 
+	// Generic ICMPv6 control messages (including Router Solicitation) use type/code/checksum.
+	if icmpType, ok := layer.Params["type"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Type(%v),\n", formatValue(icmpType)))
+	}
 	if codeVal, ok := layer.Params["code"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Code(%v),\n", formatValue(codeVal)))
+	}
+	if chksum, ok := layer.Params["chksum"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\t\tlib.ICMPv6Checksum(%v),\n", formatValue(chksum)))
 	}
 
 	return code.String()
@@ -1654,7 +1679,7 @@ func (cg *ScapyCodegenV2) generateLayerCallWithPattern(layer IRLayer, layerIdx i
 		code.WriteString(cg.generateUDPOptionsWithPattern(layer, varyingParams, useStruct, funcName))
 	case "ICMP":
 		code.WriteString(cg.generateICMPOptionsWithPattern(layer, varyingParams, useStruct, funcName))
-	case "ICMPv6EchoRequest", "ICMPv6EchoReply", "ICMPv6DestUnreach", "ICMPv6Echo":
+	case "ICMPv6EchoRequest", "ICMPv6EchoReply", "ICMPv6DestUnreach", "ICMPv6Echo", "ICMPv6RouterSolicitation":
 		code.WriteString(cg.generateICMPv6OptionsWithPattern(layer, varyingParams, useStruct, funcName))
 	case "IPv6ExtHdrFragment":
 		code.WriteString(cg.generateIPv6FragmentOptionsWithPattern(layer, varyingParams, useStruct, funcName))
@@ -1967,6 +1992,11 @@ func (cg *ScapyCodegenV2) generateUDPOptionsWithPattern(layer IRLayer, varyingPa
 		code.WriteString(cg.generateVaryingParamRef("UDPDport", vp, useStruct, funcName))
 	} else if dport, ok := layer.Params["dport"]; ok {
 		code.WriteString(fmt.Sprintf("\t\t\tlib.UDPDport(%v),\n", formatValue(dport)))
+	}
+
+	// Length is always constant in current pattern use-cases; preserve it if present.
+	if length, ok := layer.Params["len"]; ok {
+		code.WriteString(fmt.Sprintf("\t\t\tlib.UDPLengthRaw(%v),\n", formatValue(length)))
 	}
 
 	return code.String()

@@ -768,3 +768,77 @@ func TestCodegenV2_ICMPv6EchoInPattern(t *testing.T) {
 		t.Logf("Generated code:\n%s", code)
 	}
 }
+
+func TestCodegenV2_ICMPv6RouterSolicitation(t *testing.T) {
+	irJSON := `{
+		"pcap_pairs": [
+			{
+				"send_file": "test-send.pcap",
+				"expect_file": "",
+				"send_packets": [
+					{
+						"layers": [
+							{
+								"type": "Ether",
+								"params": {
+									"dst": "33:33:00:00:00:02",
+									"src": "52:54:00:6b:ff:a1"
+								}
+							},
+							{
+								"type": "IPv6",
+								"params": {
+									"src": "fe80::1",
+									"dst": "ff02::2",
+									"hlim": 255
+								}
+							},
+							{
+								"type": "ICMPv6",
+								"params": {
+									"type": 133,
+									"code": 0,
+									"chksum": 7374
+								}
+							},
+							{
+								"type": "ICMPv6RouterSolicitation",
+								"params": {}
+							}
+						],
+						"special_handling": null
+					}
+				],
+				"expect_packets": []
+			}
+		],
+		"helper_functions": []
+	}`
+
+	codegen := NewScapyCodegenV2(false)
+	code, err := codegen.GenerateFromIR(irJSON)
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+
+	// Check that code contains expected elements
+	require.Contains(t, code, "lib.ICMPv6(")
+	require.Contains(t, code, "lib.ICMPv6Type(133)")
+	require.Contains(t, code, "lib.ICMPv6RouterSolicitation(")
+
+	// Should NOT contain generic ICMPv6 options inside RouterSolicitation
+	// The RouterSolicitation layer should be standalone without options
+	lines := strings.Split(code, "\n")
+	var inRouterSolicitation bool
+	for _, line := range lines {
+		if strings.Contains(line, "lib.ICMPv6RouterSolicitation(") {
+			inRouterSolicitation = true
+		}
+		if inRouterSolicitation && strings.Contains(line, ")") && !strings.Contains(line, "lib.ICMPv6RouterSolicitation(") {
+			inRouterSolicitation = false
+		}
+		// Inside RouterSolicitation block, should not have any options
+		if inRouterSolicitation && strings.Contains(line, "lib.ICMPv6") && !strings.Contains(line, "lib.ICMPv6RouterSolicitation(") {
+			t.Errorf("Found unexpected ICMPv6 option inside RouterSolicitation: %s", line)
+		}
+	}
+}

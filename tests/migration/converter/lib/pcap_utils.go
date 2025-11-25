@@ -1193,9 +1193,23 @@ func (p *PcapAnalyzer) convertIPv4ToIR(ipv4 *layers.IPv4, opts CodegenOpts) *IRL
 	// Always preserve protocol field from PCAP (even if 0) for exact packet reconstruction
 	params["proto"] = int(ipv4.Protocol)
 	// Always preserve checksum from PCAP (even if 0) for exact reconstruction
-	params["chksum"] = int(ipv4.Checksum)
+	// Read from raw bytes to avoid gopacket's automatic corrections
+	if len(ipv4.Contents) >= 12 {
+		// IPv4 checksum is at bytes 10-11 of the header
+		rawChecksum := int(ipv4.Contents[10])<<8 | int(ipv4.Contents[11])
+		params["chksum"] = rawChecksum
+	} else {
+		params["chksum"] = int(ipv4.Checksum)
+	}
 	// Always preserve length from PCAP (even if 0) for malformed packet testing
-	params["len"] = int(ipv4.Length)
+	// Read from raw bytes to avoid gopacket's automatic corrections
+	if len(ipv4.Contents) >= 4 {
+		// IPv4 length is at bytes 2-3 of the header
+		rawLength := int(ipv4.Contents[2])<<8 | int(ipv4.Contents[3])
+		params["len"] = rawLength
+	} else {
+		params["len"] = int(ipv4.Length)
+	}
 	// Preserve IHL for packets with options
 	if ipv4.IHL != 5 {
 		params["ihl"] = int(ipv4.IHL)
@@ -1263,7 +1277,14 @@ func (p *PcapAnalyzer) convertTCPToIR(tcp *layers.TCP) *IRLayer {
 	params["sport"] = int(tcp.SrcPort)
 	params["dport"] = int(tcp.DstPort)
 	// Preserve checksum as seen in PCAP (including zero)
-	params["chksum"] = int(tcp.Checksum)
+	// Read from raw bytes to avoid gopacket's automatic corrections
+	if len(tcp.Contents) >= 18 {
+		// TCP checksum is at bytes 16-17 of the header
+		rawChecksum := int(tcp.Contents[16])<<8 | int(tcp.Contents[17])
+		params["chksum"] = rawChecksum
+	} else {
+		params["chksum"] = int(tcp.Checksum)
+	}
 	// Preserve DataOffset for packets with options
 	if tcp.DataOffset != 5 {
 		params["dataofs"] = int(tcp.DataOffset)
@@ -1342,8 +1363,24 @@ func (p *PcapAnalyzer) convertUDPToIR(udp *layers.UDP) *IRLayer {
 
 	params["sport"] = int(udp.SrcPort)
 	params["dport"] = int(udp.DstPort)
+	// Preserve length exactly as in the PCAP header (including malformed values).
+	// UDP length field is at bytes 4-5 of the header.
+	if len(udp.Contents) >= 6 {
+		rawLen := int(udp.Contents[4])<<8 | int(udp.Contents[5])
+		params["len"] = rawLen
+	} else if udp.Length != 0 {
+		// Fallback to parsed Length when raw header bytes are unavailable.
+		params["len"] = int(udp.Length)
+	}
 	// Preserve checksum as seen in PCAP (including zero)
-	params["chksum"] = int(udp.Checksum)
+	// Read from raw bytes to avoid gopacket's automatic corrections
+	if len(udp.Contents) >= 8 {
+		// UDP checksum is at bytes 6-7 of the header
+		rawChecksum := int(udp.Contents[6])<<8 | int(udp.Contents[7])
+		params["chksum"] = rawChecksum
+	} else {
+		params["chksum"] = int(udp.Checksum)
+	}
 
 	return &IRLayer{
 		Type:   "UDP",
@@ -1366,7 +1403,14 @@ func (p *PcapAnalyzer) convertICMPv4ToIR(icmp *layers.ICMPv4) *IRLayer {
 		params["seq"] = int(icmp.Seq)
 	}
 	// Always preserve checksum from PCAP for exact reconstruction
-	params["chksum"] = int(icmp.Checksum)
+	// Read from raw bytes to avoid gopacket's automatic corrections
+	if len(icmp.Contents) >= 4 {
+		// ICMP checksum is at bytes 2-3 of the header
+		rawChecksum := int(icmp.Contents[2])<<8 | int(icmp.Contents[3])
+		params["chksum"] = rawChecksum
+	} else {
+		params["chksum"] = int(icmp.Checksum)
+	}
 
 	return &IRLayer{
 		Type:   "ICMP",
@@ -1382,6 +1426,22 @@ func (p *PcapAnalyzer) convertICMPv6ToIR(icmp *layers.ICMPv6) []*IRLayer {
 	typeCode := uint16(icmp.TypeCode)
 	icmpType := int(typeCode >> 8)
 	code := int(typeCode & 0xff)
+
+	// Preserve type and code for generic ICMPv6 control messages
+	params["type"] = icmpType
+	if code != 0 {
+		params["code"] = code
+	}
+
+	// Always preserve checksum from PCAP for exact reconstruction
+	// Read from raw bytes to avoid gopacket's automatic corrections
+	if len(icmp.Contents) >= 4 {
+		// ICMPv6 checksum is at bytes 2-3 of the header
+		rawChecksum := int(icmp.Contents[2])<<8 | int(icmp.Contents[3])
+		params["chksum"] = rawChecksum
+	} else {
+		params["chksum"] = int(icmp.Checksum)
+	}
 
 	// Determine layer type based on ICMPv6 type
 	var layerType string
@@ -1414,7 +1474,8 @@ func (p *PcapAnalyzer) convertICMPv6ToIR(icmp *layers.ICMPv6) []*IRLayer {
 			params["pointer"] = int(pointer)
 		}
 	default:
-		layerType = "ICMPv6EchoRequest" // Default fallback
+		// Generic ICMPv6 control message (e.g., Router Solicitation, Router Advertisement)
+		layerType = "ICMPv6"
 	}
 
 	// For Echo Request/Reply, capture Echo Identifier/Seq from the first 4 bytes of payload
