@@ -118,6 +118,11 @@ dataplane:
 	controlplaneConfig := `
 logging:
   level: debug
+
+modules:
+  route:
+    link_map:
+      kni0: 01:00.0
 `
 
 	sugar.Info("Starting YANET (dataplane + controlplane)...")

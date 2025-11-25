@@ -24,15 +24,17 @@ const (
 	VMIPv6Host    = "fe80::5054:ff:fe6b:ffa5"
 
 	// CLI tool paths
-	CLIBasePath = "/mnt/target/release"
-	CLIRoute    = CLIBasePath + "/yanet-cli-route"
-	CLIBalancer = CLIBasePath + "/yanet-cli-balancer"
-	CLINAT64    = CLIBasePath + "/yanet-cli-nat64"
-	CLIACL      = CLIBasePath + "/yanet-cli-acl"
-	CLIPipeline = CLIBasePath + "/yanet-cli-pipeline"
-	CLIDecap    = CLIBasePath + "/yanet-cli-decap"
-	CLIForward  = CLIBasePath + "/yanet-cli-forward"
-	CLIGeneric  = CLIBasePath + "/yanet-cli"
+	CLIBasePath    = "/mnt/target/release"
+	CLIRoute       = CLIBasePath + "/yanet-cli-route"
+	CLIBalancer    = CLIBasePath + "/yanet-cli-balancer"
+	CLINAT64       = CLIBasePath + "/yanet-cli-nat64"
+	CLIACL         = CLIBasePath + "/yanet-cli-acl"
+	CLIPipeline    = CLIBasePath + "/yanet-cli-pipeline"
+	CLIFunction    = CLIBasePath + "/yanet-cli-function"
+	CLIDevicePlain = CLIBasePath + "/yanet-cli-device-plain"
+	CLIDecap       = CLIBasePath + "/yanet-cli-decap"
+	CLIForward     = CLIBasePath + "/yanet-cli-forward"
+	CLIGeneric     = CLIBasePath + "/yanet-cli"
 )
 
 var (
@@ -44,23 +46,27 @@ var (
 		"ip addr add " + VMIPv4Host + "/24 dev kni0",
 
 		// Configure L2 and L3 forwarding
-		CLIForward + " l2-enable --cfg=forward0 --instances 0 --src 0 --dst 1",
-		CLIForward + " l2-enable --cfg=forward0 --instances 0 --src 1 --dst 0",
-		CLIForward + " l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net " + VMIPv4Host + "/32",
-		CLIForward + " l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net " + VMIPv6Host + "/64",
-		CLIForward + " l3-add --cfg=forward0 --instances 0 --src 0 --dst 1 --net ff02::/16",
-		CLIForward + " l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net 0.0.0.0/0",
-		CLIForward + " l3-add --cfg=forward0 --instances 0 --src 1 --dst 0 --net ::/0",
+		CLIForward + " l2-enable --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0",
+		CLIForward + " l2-enable --cfg=forward0 --instances 0 --src virtio_user_kni0 --dst 01:00.0",
+		CLIForward + " l3-add --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0 --net " + VMIPv4Host + "/32",
+		CLIForward + " l3-add --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0 --net " + VMIPv6Host + "/64",
+		CLIForward + " l3-add --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0 --net ff02::/16",
+		CLIForward + " l3-add --cfg=forward0 --instances 0 --src virtio_user_kni0 --dst 01:00.0 --net 0.0.0.0/0",
+		CLIForward + " l3-add --cfg=forward0 --instances 0 --src virtio_user_kni0 --dst 01:00.0 --net ::/0",
 
 		// Configure routing
 		CLIRoute + " insert --cfg route0 --instances 0 --via " + VMIPv6Gateway + " ::/0",
 		CLIRoute + " insert --cfg route0 --instances 0 --via " + VMIPv4Gateway + " 0.0.0.0/0",
 
-		CLIPipeline + " update --name=bootstrap --modules forward:forward0 --instance=0",
-		CLIPipeline + " update --name=test --modules forward:forward0 --modules route:route0 --instance=0",
+		CLIFunction + " update --name=virt --chains chain0:10=forward:forward0 --instance=0",
+		CLIFunction + " update --name=test --chains chain2:1=forward:forward0,route:route0 --instance=0",
 
-		CLIPipeline + " assign --instance=0 --device=01:00.0 --pipelines test:1",
-		CLIPipeline + " assign --instance=0 --device=virtio_user_kni0 --pipelines bootstrap:1",
+		CLIPipeline + " update --name=bootstrap --functions virt --instance=0",
+		CLIPipeline + " update --name=test --functions test --instance=0",
+		CLIPipeline + " update --name=dummy --instance=0",
+
+		CLIDevicePlain + " update --instance=0 --name=01:00.0 --input test:1 --output dummy:1",
+		CLIDevicePlain + " update --instance=0 --name=virtio_user_kni0 --input bootstrap:1 --output dummy:1",
 	}
 	DebugCommands = []string{
 		"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",
