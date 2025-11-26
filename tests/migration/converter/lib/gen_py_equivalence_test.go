@@ -12,7 +12,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
-	"github.com/stretchr/testify/require"
 )
 
 // TestGenPyEquivalence verifies that packets generated from gen.py AST match original PCAP files.
@@ -23,14 +22,17 @@ import (
 // Set YANET1_ROOT environment variable to point to yanet1 directory.
 // Example: export YANET1_ROOT=/path/to/yanet1
 func TestGenPyEquivalence(t *testing.T) {
-	onePortDir, err := GetYanet1OnePortDir()
-	require.NoError(t, err)
-
 	// Get test filter from environment
 	onlyTest := os.Getenv("ONLY_TEST")
 
 	if onlyTest == "" {
 		t.Skip("ast parser variant not completed use ONLY_TEST environment variable to run a specific test")
+		return
+	}
+
+	onePortDir, err := GetYanet1OnePortDir()
+	if err != nil {
+		t.Skipf("Failed to get one port directory (yanet1 repository not available): %v", err)
 		return
 	}
 

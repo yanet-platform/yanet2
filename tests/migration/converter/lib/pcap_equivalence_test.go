@@ -21,7 +21,10 @@ import (
 // Example: export YANET1_ROOT=/path/to/yanet1
 func TestPCAPEquivalence(t *testing.T) {
 	onePortDir, err := GetYanet1OnePortDir()
-	require.NoError(t, err)
+	if err != nil {
+		t.Skipf("Failed to get one port directory (yanet1 repository not available): %v", err)
+		return
+	}
 
 	// Get test filters from environment
 	onlyTest := os.Getenv("ONLY_TEST")
