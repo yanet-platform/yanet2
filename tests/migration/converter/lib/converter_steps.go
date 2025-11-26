@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
@@ -312,6 +311,61 @@ func (c *Converter) generateYAMLComment(stepType string, items []string) string 
 	return yaml.String()
 }
 
+// parseRouteString parses a route string in format "prefix -> nexthop" or "prefix -> nexthop:label"
+// Returns prefix, nexthop (adapted), and whether parsing succeeded
+func (c *Converter) parseRouteString(routeStr string, stripLabel bool) (prefix, nexthop string, ok bool) {
+	parts := strings.Split(routeStr, " -> ")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+
+	prefix = strings.TrimSpace(parts[0])
+	nexthopPart := strings.TrimSpace(parts[1])
+
+	// Strip label if requested (for labelled routes)
+	if stripLabel {
+		labelParts := strings.Split(nexthopPart, ":")
+		if len(labelParts) >= 1 {
+			nexthopPart = strings.TrimSpace(labelParts[0])
+		}
+	}
+
+	// Adapt nexthop IP address to yanet2 infrastructure
+	nexthop = c.adaptIPAddress(nexthopPart)
+	c.debugLog("  Adapted nexthop: %s -> %s", nexthopPart, nexthop)
+
+	return prefix, nexthop, true
+}
+
+// generateRouteCommands generates CLI commands for route operations
+func (c *Converter) generateRouteCommands(routeStrings []string, operation string, stripLabel bool) []string {
+	var commands []string
+	for _, routeStr := range routeStrings {
+		prefix, nexthop, ok := c.parseRouteString(routeStr, stripLabel)
+		if !ok {
+			c.debugLog("  Skipping invalid route string: %s", routeStr)
+			continue
+		}
+
+		var cmd string
+		switch operation {
+		case "insert":
+			cmd = fmt.Sprintf(`"%s insert --cfg route0 --instances 0 --via %s %s"`,
+				framework.CLIRoute, nexthop, prefix)
+		case "remove":
+			cmd = fmt.Sprintf(`"%s remove --cfg route0 --instances 0 %s"`,
+				framework.CLIRoute, prefix)
+		default:
+			c.debugLog("  Unknown route operation: %s", operation)
+			continue
+		}
+
+		commands = append(commands, cmd)
+		c.debugLog("  Generated route %s: %s", operation, cmd)
+	}
+	return commands
+}
+
 // convertRouteUpdate is a unified function for both IPv4 and IPv6 route updates
 func (c *Converter) convertRouteUpdate(content interface{}, stepType string, isIPv6 bool) ConvertedStep {
 	protocol := "IPv4"
@@ -339,25 +393,8 @@ func (c *Converter) convertRouteUpdate(content interface{}, stepType string, isI
 	// Generate YAML comment
 	yamlComment := c.generateYAMLComment(stepType, routeStrings)
 
-	var commands []string
-	for _, routeStr := range routeStrings {
-		c.debugLog("  %s route: %s", protocol, routeStr)
-		// Parse "10.0.0.0/24 -> 192.168.1.1" or "2000::/124 -> fe80::1"
-		parts := strings.Split(routeStr, " -> ")
-		if len(parts) == 2 {
-			prefix := strings.TrimSpace(parts[0])
-			nexthop := strings.TrimSpace(parts[1])
-
-			// Adapt nexthop IP address to yanet2 infrastructure
-			adaptedNexthop := c.adaptIPAddress(nexthop)
-			c.debugLog("  Adapted nexthop: %s -> %s", nexthop, adaptedNexthop)
-
-			// yanet2 CLI format: insert --cfg <config> --instances <instances> --via <nexthop> <prefix>
-			cmd := fmt.Sprintf(`"%s insert --cfg route0 --instances 0 --via %s %s"`, framework.CLIRoute, adaptedNexthop, prefix)
-			commands = append(commands, cmd)
-			c.debugLog("  Generated route insert: %s", cmd)
-		}
-	}
+	// Generate route commands using helper
+	commands := c.generateRouteCommands(routeStrings, "insert", false)
 
 	if len(commands) == 0 {
 		return NewSkipStep(stepType, fmt.Sprintf("No valid %s routes found", protocol))
@@ -396,38 +433,21 @@ func (c *Converter) convertIPv4LabelledUpdate(content interface{}, stepType stri
 	}
 
 	var routeStrings []string
-	var commands []string
 	for _, route := range routes {
-		routeStr, ok := route.(string)
-		if !ok {
-			continue
-		}
-		routeStrings = append(routeStrings, routeStr)
-
-		// Parse "200.1.1.1/32 -> 200.0.0.1:111"
-		// In yanet2 there are no labeled routes, convert to regular routes without label
-		parts := strings.Split(routeStr, " -> ")
-		if len(parts) == 2 {
-			prefix := strings.TrimSpace(parts[0])
-			nexthopLabel := strings.TrimSpace(parts[1])
-			labelParts := strings.Split(nexthopLabel, ":")
-			if len(labelParts) >= 1 {
-				nexthop := strings.TrimSpace(labelParts[0])
-
-				// Adapt nexthop IP address to yanet2 infrastructure
-				adaptedNexthop := c.adaptIPAddress(nexthop)
-				c.debugLog("  Adapted nexthop: %s -> %s", nexthop, adaptedNexthop)
-
-				// yanet2 doesn't support labels, use regular route insert
-				cmd := fmt.Sprintf(`"%s insert --cfg route0 --instances 0 --via %s %s"`, framework.CLIRoute, adaptedNexthop, prefix)
-				commands = append(commands, cmd)
-				c.debugLog("  Converted labeled route to regular route: %s (label ignored)", routeStr)
-			}
+		if routeStr, ok := route.(string); ok {
+			routeStrings = append(routeStrings, routeStr)
 		}
 	}
 
 	// Generate YAML comment
 	yamlComment := c.generateYAMLComment(stepType, routeStrings)
+
+	// Generate route commands using helper (strip labels)
+	commands := c.generateRouteCommands(routeStrings, "insert", true)
+
+	if len(commands) == 0 {
+		return NewSkipStep(stepType, "No valid labelled routes found")
+	}
 
 	goCode := fmt.Sprintf(`%scommands := []string{
 		%s,
@@ -573,7 +593,7 @@ func (c *Converter) convertSendPacketsWithASTParser(content interface{}, testPat
 		return ConvertedStep{}, fmt.Errorf("gen.py file too large: %d bytes (max %d bytes)", genPyInfo.Size(), maxFileSize)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), ASTParserTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "python3", c.scapyASTParser, genPyPath)
 	irJSON, err := cmd.CombinedOutput()

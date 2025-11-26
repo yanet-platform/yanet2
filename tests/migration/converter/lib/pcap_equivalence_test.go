@@ -129,15 +129,6 @@ func verifyPCAPEquivalence(t *testing.T, pcapPath string, isExpect bool) {
 		expPkt := gopacket.NewPacket(originalBytes, layers.LayerTypeEthernet, gopacket.Default)
 		actPkt := generatedPackets[i]
 
-		// // Check if original packet has DecodeFailure
-		// hasDecodeFailure := false
-		// for _, layer := range expPkt.Layers() {
-		// 	if layer.LayerType() == gopacket.LayerTypeDecodeFailure {
-		// 		hasDecodeFailure = true
-		// 		break
-		// 	}
-		// }
-
 		generatedBytes := actPkt.Data()
 
 		if bytesEqualIgnorePadding(originalBytes, generatedBytes) {

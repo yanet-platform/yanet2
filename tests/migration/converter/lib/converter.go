@@ -1,3 +1,30 @@
+// Package lib implements the yanet1 to yanet2 functional test converter.
+//
+// The converter translates yanet1 autotests (YAML + PCAP + gen.py) into Go-based
+// functional tests for yanet2. It supports multiple conversion modes:
+//
+//   - AST-based conversion: Parses gen.py using Python AST to extract Scapy packet definitions
+//   - PCAP-based conversion: Directly reads PCAP files when gen.py is not available
+//   - Hybrid mode: Falls back to PCAP if AST parsing fails
+//
+// The converter handles:
+//
+//   - Module configuration (NAT64, balancer, route, forward, decap, ACL)
+//   - Pipeline setup and CLI command generation
+//   - IP address adaptation (yanet1 test addresses → yanet2 infrastructure)
+//   - MAC address normalization (framework.SrcMAC, framework.DstMAC)
+//   - Packet generation from PCAP or Scapy definitions
+//   - VLAN handling (strip or preserve)
+//   - Test skiplist management (enabled/wovlan/disabled states)
+//
+// Main entry points:
+//
+//   - NewConverter: Creates a new converter instance
+//   - ConvertAllTestsWithStats: Batch convert all tests with statistics
+//   - ConvertSingleTest: Convert one test
+//
+// The generated tests use the yanet2 functional test framework and follow
+// the structure: Configure → Send packets → Validate responses.
 package lib
 
 import (
@@ -342,10 +369,25 @@ func (c *Converter) loadSkiplist() error {
 	if path == "" {
 		return nil // No skiplist specified, not an error
 	}
+
+	// Validate file size before reading
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("failed to stat skiplist file %s: %w", path, err)
+	}
+	if fileInfo.Size() > MaxSkiplistFileSize {
+		return fmt.Errorf("skiplist file too large: %d bytes (max %d)", fileInfo.Size(), MaxSkiplistFileSize)
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("failed to read skiplist file %s: %w", path, err)
 	}
+
+	if len(data) == 0 {
+		return fmt.Errorf("skiplist file %s is empty", path)
+	}
+
 	var m map[string]SkiplistEntry
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return fmt.Errorf("failed to parse skiplist YAML: %w", err)
@@ -534,11 +576,19 @@ type YanetTest struct {
 
 // ParseAutotestYAML reads and parses autotest.yaml from the given test directory
 func ParseAutotestYAML(testDir string) (*YanetTest, error) {
+	if testDir == "" {
+		return nil, fmt.Errorf("testDir cannot be empty")
+	}
+
 	autotestPath := filepath.Join(testDir, "autotest.yaml")
 
 	data, err := os.ReadFile(autotestPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read autotest.yaml: %w", err)
+	}
+
+	if len(data) == 0 {
+		return nil, fmt.Errorf("autotest.yaml is empty")
 	}
 
 	var test YanetTest

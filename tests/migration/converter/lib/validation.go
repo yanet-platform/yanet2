@@ -200,12 +200,12 @@ func (v *PacketValidator) createDetailedDiff(got, expected []byte, firstDiff int
 
 	diff.WriteString(fmt.Sprintf("First difference at byte %d (0x%x)\n", firstDiff, firstDiff))
 
-	// Show context around the difference (16 bytes before and after)
-	start := firstDiff - 16
+	// Show context around the difference (HexDumpContextBytes before and after)
+	start := firstDiff - HexDumpContextBytes
 	if start < 0 {
 		start = 0
 	}
-	end := firstDiff + 16
+	end := firstDiff + HexDumpContextBytes
 	if end > len(expected) {
 		end = len(expected)
 	}

@@ -81,10 +81,6 @@ func (p *PcapAnalyzer) ReadAllPacketsFromFile(filename string) ([]*PacketInfo, e
 		packets = append(packets, p.analyzePacket(packet))
 	}
 
-	// if len(packets) == 0 {
-	// 	return nil, fmt.Errorf("pcap file %s contains no packets", filename)
-	// }
-
 	return packets, nil
 }
 
@@ -1075,6 +1071,170 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 	}, nil
 }
 
+// ipv6MalformationInfo contains information about IPv6 malformed packets
+type ipv6MalformationInfo struct {
+	collapseToRaw bool
+	payloadBytes  []byte
+	hasExtHeaders bool
+}
+
+// detectIPv6Malformation checks if an IPv6 packet has malformed payload length or extension headers
+func (p *PcapAnalyzer) detectIPv6Malformation(pkt gopacket.Packet, info *PacketInfo) *ipv6MalformationInfo {
+	result := &ipv6MalformationInfo{}
+
+	ipv6Layer := pkt.Layer(layers.LayerTypeIPv6)
+	if ipv6Layer == nil {
+		return result
+	}
+
+	ipv6 := ipv6Layer.(*layers.IPv6)
+	expectedPayloadLen := int(ipv6.Length)
+	ipv6PayloadBytes := ipv6.LayerPayload()
+	actualPayloadLen := len(ipv6PayloadBytes)
+	result.payloadBytes = ipv6PayloadBytes
+
+	// Determine if any transport was parsed beyond IPv6
+	hasTransport := pkt.Layer(layers.LayerTypeTCP) != nil ||
+		pkt.Layer(layers.LayerTypeUDP) != nil ||
+		pkt.Layer(layers.LayerTypeICMPv6) != nil ||
+		pkt.Layer(layers.LayerTypeICMPv4) != nil
+
+	// Check if packet has IPv6 extension headers
+	result.hasExtHeaders = pkt.Layer(layers.LayerTypeIPv6Destination) != nil ||
+		pkt.Layer(layers.LayerTypeIPv6HopByHop) != nil ||
+		pkt.Layer(layers.LayerTypeIPv6Routing) != nil ||
+		pkt.Layer(layers.LayerTypeIPv6Fragment) != nil
+
+	// Check if we need to extract actual payload from raw data
+	if (ipv6.NextHeader == 0x1B || expectedPayloadLen != actualPayloadLen || result.hasExtHeaders) && !hasTransport {
+		// Calculate the offset of IPv6 payload in raw data
+		var payloadOffset int
+
+		// Find Ethernet layer
+		if pkt.Layer(layers.LayerTypeEthernet) != nil {
+			payloadOffset += 14 // Ethernet header
+
+			// Check for VLAN
+			if pkt.Layer(layers.LayerTypeDot1Q) != nil {
+				payloadOffset += 4 // VLAN tag
+			}
+
+			payloadOffset += 40 // IPv6 header
+
+			// Extract payload bytes from raw data
+			if payloadOffset < len(info.RawData) {
+				actualPayloadFromRaw := info.RawData[payloadOffset:]
+				if len(actualPayloadFromRaw) > 0 {
+					result.payloadBytes = actualPayloadFromRaw
+					result.collapseToRaw = true
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+// greDecodeFailureInfo contains information about GRE decode failures
+type greDecodeFailureInfo struct {
+	hasGRE           bool
+	hasDecodeFailure bool
+	hasIPv6WithGRE   bool
+}
+
+// detectGREDecodeFailure checks if a packet has GRE with decode failures
+func (p *PcapAnalyzer) detectGREDecodeFailure(pkt gopacket.Packet) *greDecodeFailureInfo {
+	result := &greDecodeFailureInfo{
+		hasGRE: pkt.Layer(layers.LayerTypeGRE) != nil,
+	}
+
+	for _, layer := range pkt.Layers() {
+		if layer.LayerType() == gopacket.LayerTypeDecodeFailure {
+			result.hasDecodeFailure = true
+		}
+		if layer.LayerType() == layers.LayerTypeIPv6 {
+			ipv6 := layer.(*layers.IPv6)
+			if ipv6.NextHeader == layers.IPProtocolGRE {
+				result.hasIPv6WithGRE = true
+			}
+		}
+	}
+
+	return result
+}
+
+// handleGREWithDecodeFailure processes GRE packets that have decode failures
+func (p *PcapAnalyzer) handleGREWithDecodeFailure(greLayer *layers.GRE, info *PacketInfo, opts CodegenOpts) ([]IRLayer, error) {
+	var result []IRLayer
+
+	// Get the full packet data and find GRE layer position
+	rawData := info.RawData
+	greContents := greLayer.LayerContents()
+
+	// Find GRE header in raw data
+	var actualPayload []byte
+	for i := 0; i < len(rawData)-len(greContents); i++ {
+		// Check if we found the GRE header
+		if len(greContents) >= 4 && i+len(greContents) <= len(rawData) {
+			match := true
+			for j := 0; j < len(greContents) && j < 4; j++ {
+				if rawData[i+j] != greContents[j] {
+					match = false
+					break
+				}
+			}
+			if match {
+				// Found GRE header, now find IP header after it
+				for j := i + 4; j < len(rawData)-MinIPv4HeaderSize && j < i+16; j++ {
+					if rawData[j] == 0x45 || (rawData[j]&0xF0) == 0x40 || (rawData[j]&0xF0) == 0x60 {
+						actualPayload = rawData[j:]
+						break
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// Try to parse as IPv4 if protocol is 0x0800
+	if greLayer.Protocol == layers.EthernetTypeIPv4 && len(actualPayload) > 0 {
+		ipv4Packet := gopacket.NewPacket(actualPayload, layers.LayerTypeIPv4, gopacket.Default)
+		for _, innerLayer := range ipv4Packet.Layers() {
+			if innerLayer.LayerType() == gopacket.LayerTypeDecodeFailure {
+				continue
+			}
+			innerConverted, err := p.convertLayerToIR(innerLayer, opts)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert GRE inner layer: %w", err)
+			}
+			for _, innerIR := range innerConverted {
+				if innerIR != nil {
+					result = append(result, *innerIR)
+				}
+			}
+		}
+	} else if greLayer.Protocol == layers.EthernetTypeIPv6 && len(actualPayload) > 0 {
+		// Try to parse as IPv6 if protocol is 0x86DD
+		ipv6Packet := gopacket.NewPacket(actualPayload, layers.LayerTypeIPv6, gopacket.Default)
+		for _, innerLayer := range ipv6Packet.Layers() {
+			if innerLayer.LayerType() == gopacket.LayerTypeDecodeFailure {
+				continue
+			}
+			innerConverted, err := p.convertLayerToIR(innerLayer, opts)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert GRE inner layer: %w", err)
+			}
+			for _, innerIR := range innerConverted {
+				if innerIR != nil {
+					result = append(result, *innerIR)
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
 // convertLayerToIR converts a gopacket layer to IR representation
 // Returns a slice of IRLayer to support layers that need to generate multiple IR layers (e.g. ICMPv6 + payload)
 func (p *PcapAnalyzer) convertLayerToIR(layer gopacket.Layer, opts CodegenOpts) ([]*IRLayer, error) {
@@ -1754,12 +1914,6 @@ func (p *PcapAnalyzer) GenerateTcpdumpComment(pcapPath string, packets []*Packet
 
 	return b.String(), nil
 }
-
-// formatByteArray formats byte array for Go code
-// formatByteArray was unused and removed
-
-// formatMAC formats MAC address for Go code
-// formatMAC was unused and removed
 
 // convertARPToIR converts ARP layer to IR
 func (p *PcapAnalyzer) convertARPToIR(arp *layers.ARP) *IRLayer {

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This directory contains tools for automatic conversion of autotests from yanet1 to yanet2 format.
+The converter generates Go-based functional tests from yanet1 autotests (YAML + PCAP + optional gen.py).
 
 - By default the yanet1 tree is expected to be checked out next to `yanet2`, e.g.:
   - `.../projects/yanet/yanet1`
