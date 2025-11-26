@@ -4,41 +4,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"testing"
-
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/gopacket/gopacket"
-	"github.com/gopacket/gopacket/layers"
-)
-
-var (
-	cmpStdOpts = []cmp.Option{
-		cmpopts.IgnoreUnexported(
-			layers.Ethernet{},
-			layers.Dot1Q{},
-			layers.IPv4{},
-			layers.IPv6{},
-			layers.TCP{},
-			layers.UDP{},
-			layers.ICMPv4{},
-			layers.ICMPv6{},
-			layers.IPv6Destination{},
-			layers.IPv6Routing{},
-			layers.IPv6HopByHop{},
-			gopacket.DecodeFailure{},
-		),
-		cmpopts.IgnoreFields(layers.Ethernet{}, "BaseLayer"),
-		cmpopts.IgnoreFields(layers.Dot1Q{}, "BaseLayer"),
-		cmpopts.IgnoreFields(layers.IPv4{}, "BaseLayer"),
-		cmpopts.IgnoreFields(layers.IPv6{}, "BaseLayer"),
-		cmpopts.IgnoreFields(layers.TCP{}, "BaseLayer"),
-		cmpopts.IgnoreFields(layers.UDP{}, "BaseLayer"),
-		cmpopts.IgnoreFields(layers.ICMPv4{}, "BaseLayer"),
-		cmpopts.IgnoreFields(layers.ICMPv6{}, "BaseLayer"),
-		cmpopts.IgnoreFields(layers.IPv6Destination{}, "BaseLayer"),
-		cmpopts.IgnoreFields(layers.IPv6Routing{}, "BaseLayer"),
-		cmpopts.IgnoreFields(layers.IPv6HopByHop{}, "BaseLayer"),
-	}
 )
 
 // asInt converts common numeric JSON types to int.

@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
@@ -277,23 +276,9 @@ func packetsMatchIgnoringMACs(expected, actual []byte) bool {
 		return out
 	})
 
-	diff := cmp.Diff(expPkt.Layers(), actPkt.Layers(),
-		cmpopts.IgnoreUnexported(
-			layers.Ethernet{},
-			layers.Dot1Q{},
-			layers.IPv4{},
-			layers.IPv6{},
-			layers.IPv6HopByHop{},
-			layers.IPv6Routing{},
-			layers.IPv6Destination{},
-			layers.TCP{},
-			layers.UDP{},
-			layers.ICMPv4{},
-			layers.ICMPv6{},
-			gopacket.DecodeFailure{},
-		),
-		projectLayers,
-	)
+	// Combine standard options with custom projection
+	opts := append(CmpStdOpts, projectLayers)
+	diff := cmp.Diff(expPkt.Layers(), actPkt.Layers(), opts...)
 
 	return diff == ""
 }

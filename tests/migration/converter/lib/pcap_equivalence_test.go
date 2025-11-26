@@ -144,7 +144,7 @@ func verifyPCAPEquivalence(t *testing.T, pcapPath string, isExpect bool) {
 			continue
 		}
 
-		diff := cmp.Diff(expPkt.Layers(), actPkt.Layers(), cmpStdOpts...)
+		diff := cmp.Diff(expPkt.Layers(), actPkt.Layers(), CmpStdOpts...)
 		require.Emptyf(t, diff, "Packet layers mismatch for index %d", i)
 	}
 }

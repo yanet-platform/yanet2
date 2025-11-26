@@ -247,7 +247,6 @@ func (c *Converter) generateTestHeader(testName, originalTestName, testType stri
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
@@ -258,7 +257,7 @@ func (c *Converter) generateTestHeader(testName, originalTestName, testType stri
 	silenceCode := `
 	// Silence potentially unused imports PCAP vs AST parser
 	_ = cmp.Diff
-	_ = cmpopts.IgnoreUnexported
+	_ = lib.CmpStdOpts
 	_ = lib.NewPacket
 	_ = net.ParseIP
 	_ = strings.Join`
@@ -555,20 +554,7 @@ func (c *Converter) generateBatchPacketValidation(testCase *PacketTestCase) stri
 		for idx, expectedPkt := range expectedPackets {
 			actualPkt := receivedPackets[idx]
 
-			diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(),
-				cmpopts.IgnoreUnexported(
-					layers.Ethernet{},
-					layers.Dot1Q{},
-					layers.IPv4{},
-					layers.IPv6{},
-					layers.TCP{},
-					layers.UDP{},
-					layers.ICMPv4{},
-					layers.ICMPv6{},
-					gopacket.DecodeFailure{},
-				),
-				cmpopts.IgnoreFields(layers.Ethernet{}, "BaseLayer"),
-			)
+			diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), lib.CmpStdOpts...)
 			require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
 		}`
 }
