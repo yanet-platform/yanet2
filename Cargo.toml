@@ -19,7 +19,6 @@ members = [
     "modules/route/cli/route",
     "devices/plain/cli",
     "devices/vlan/cli",
-    "web",
 ]
 
 [profile.release]
