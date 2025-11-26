@@ -80,3 +80,15 @@ Description: Yanet2 meta-package
  .
  This meta-package installs the complete Yanet2 network stack,
  including dataplane, controlplane, coordinator and CLI utilities.
+
+Package: yanet2-bird-adapter
+Architecture: any
+Depends: ${shlibs:Depends}
+ , ${misc:Depends}
+ , yanet2-controlplane
+ , libyaml-0-2
+Description: Yanet2 BIRD adapter component
+ Control plane for Yanet2 BIRD import adapter.
+ .
+ This package contains the control-plane services that manage the BIRD import configurations that enable the BIRD import feed to push routes into route-instance configurations.
+

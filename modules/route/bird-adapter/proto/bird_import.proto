@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package adapterpb;
+
+import "common/proto/target.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/route/bird-adapter/proto;adapterpb";
+
+// AdapterService provides configuration for the BIRD import adapter.
+service AdapterService {
+	// SetupConfig configures the BIRD import settings for a specific module
+	// instance.
+	rpc SetupConfig(SetupConfigRequest) returns (SetupConfigResponse);
+}
+
+// SetupConfigRequest configures BIRD import for a module instance.
+message SetupConfigRequest {
+	commonpb.TargetModule target = 1;
+	ImportConfig config = 2;
+}
+
+message SetupConfigResponse {
+}
+
+// ImportConfig defines the BIRD import configuration.
+message ImportConfig {
+	// Paths to the Unix sockets provided by the BIRD daemon.
+	repeated string sockets = 1;
+	// Buffer size for the parser in bytes. Should be large enough to hold
+	// at least one update message. Every goroutine spawned for each socket
+	// will allocate its own buffer.
+	uint64 parser_buf_size = 2;
+	// DumpTimeout configures the timeout after which routes are forcibly
+	// dumped (in nanoseconds).
+	int64 dump_timeout = 3;
+	// DumpThreshold configures the threshold beyond which routes are
+	// forcibly dumped.
+	int32 dump_threshold = 4;
+}

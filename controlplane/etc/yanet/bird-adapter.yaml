@@ -1,0 +1,12 @@
+# YANET BIRD Adapter Configuration
+
+# Logging configuration
+logging:
+  # Log level: debug, info, warn, error
+  level: info
+
+# gRPC endpoint to listen on for adapter service
+listen_addr: "localhost:50051"
+
+# gRPC endpoint of the RouteService gateway for RIB updates
+gateway_endpoint: "localhost:50052"

@@ -1,5 +1,3 @@
-go = find_program('go', required: true)
-
 custom_target(
   'balancer_app',         
   output: 'yanet-balancer-app',

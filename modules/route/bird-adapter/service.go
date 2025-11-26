@@ -1,4 +1,4 @@
-package coordinator
+package bird_adapter
 
 import (
 	"context"
@@ -9,16 +9,13 @@ import (
 
 	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v3"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/proto"
-	"github.com/yanet-platform/yanet2/coordinator/coordinatorpb"
+	adapterpb "github.com/yanet-platform/yanet2/modules/route/bird-adapter/proto"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/bird"
 	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
@@ -29,9 +26,9 @@ type instanceKey struct {
 	dataplaneInstance uint32
 }
 
-// ModuleService implements the Module gRPC service for the route module.
-type ModuleService struct {
-	coordinatorpb.UnimplementedModuleServiceServer
+// AdapterService implements the Adapter gRPC service for the route module.
+type AdapterService struct {
+	adapterpb.UnimplementedAdapterServiceServer
 
 	importsMu       sync.Mutex
 	imports         map[instanceKey]*importHolder
@@ -40,11 +37,11 @@ type ModuleService struct {
 	log             *zap.SugaredLogger
 }
 
-func NewModuleService(
+func NewAdapterService(
 	gatewayEndpoint string,
 	log *zap.SugaredLogger,
-) *ModuleService {
-	return &ModuleService{
+) *AdapterService {
+	return &AdapterService{
 		imports:         make(map[instanceKey]*importHolder),
 		gatewayEndpoint: gatewayEndpoint,
 		quitCh:          make(chan bool),
@@ -52,75 +49,39 @@ func NewModuleService(
 	}
 }
 
-func (m *ModuleService) SetupConfig(
+func (m *AdapterService) SetupConfig(
 	ctx context.Context,
-	req *coordinatorpb.SetupConfigRequest,
-) (*coordinatorpb.SetupConfigResponse, error) {
-	instance := req.GetInstance()
-	configName := req.GetConfigName()
+	req *adapterpb.SetupConfigRequest,
+) (*adapterpb.SetupConfigResponse, error) {
+	target := req.GetTarget()
 
-	m.log.Infow("setting up configuration",
-		zap.String("name", configName),
-		zap.Uint32("instance", instance),
+	m.log.Infow("setting up the configuration",
+		zap.String("name", target.ConfigName),
+		zap.Uint32("instance", target.DataplaneInstance),
 	)
 
-	cfg := DefaultConfig()
-	if err := yaml.Unmarshal(req.GetConfig(), cfg); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to unmarshal configuration: %v", err)
+	cfg := bird.DefaultConfig()
+	req.GetConfig().ToConfig(cfg)
+	if len(cfg.Sockets) == 0 {
+		// We do not need this connection if there is no background stream for import
+		return nil, fmt.Errorf("no export sockets provided")
 	}
 
-	if err := m.setupConfig(ctx, instance, configName, cfg); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to setup configuration: %v", err)
-	}
-
-	return &coordinatorpb.SetupConfigResponse{}, nil
-}
-
-func (m *ModuleService) setupConfig(
-	ctx context.Context,
-	instance uint32,
-	configName string,
-	config *Config,
-) error {
 	conn, err := grpc.NewClient(
 		m.gatewayEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to connect to the gateway: %w", err)
-	}
-	client := routepb.NewRouteServiceClient(conn)
-	target := &commonpb.TargetModule{
-		ConfigName:        configName,
-		DataplaneInstance: instance,
-	}
-	flushRequest := &routepb.FlushRoutesRequest{Target: target}
-
-	// Insert and flush static routes first.
-	for _, route := range config.Routes {
-		request := &routepb.InsertRouteRequest{
-			Target:      target,
-			Prefix:      route.Prefix.String(),
-			NexthopAddr: route.Nexthop.String(),
-		}
-
-		if _, err = client.InsertRoute(ctx, request); err != nil {
-			return fmt.Errorf("failed to insert static route: %w", err)
-		}
-	}
-
-	if _, err = client.FlushRoutes(ctx, flushRequest); err != nil {
-		return fmt.Errorf("failed to flush static routes for %s: %w", configName, err)
-	}
-
-	if len(config.BirdImport.Sockets) == 0 {
-		// We do not need this connection if there is no background stream for import
-		_ = conn.Close()
-		return nil
+		return nil, fmt.Errorf("failed to connect to the gateway: %w", err)
 	}
 
 	// And then add dynamic routes, if any.
-	return m.processBirdImport(conn, config.BirdImport, target)
+	if err := m.processBirdImport(conn, cfg, target); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("failed to setup bird import reader: %w ", err)
+	}
+
+	return &adapterpb.SetupConfigResponse{}, nil
 }
 
 var errStreamClosed = fmt.Errorf("stream closed")
@@ -139,7 +100,7 @@ type importHolder struct {
 // Handles automatic reconnection and graceful cleanup of existing imports.
 // It establishes the initial gRPC stream to the RouteService (gateway), sets up
 // callbacks for the bird.Export reader, and manages replacement of existing imports.
-func (m *ModuleService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Config, target *commonpb.TargetModule) error {
+func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Config, target *commonpb.TargetModule) error {
 	// streamCtx governs this specific import's gRPC stream and BIRD reader.
 	// Cancelled via holder.cancel on replacement or service stop.
 	streamCtx, cancel := context.WithCancel(context.Background())
@@ -222,7 +183,7 @@ func (m *ModuleService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Confi
 // It runs the BIRD data reader (holder.export.Run) and, if the reader or gRPC stream fails,
 // attempts to re-establish the stream via reconnectStream.
 // Terminates if its context (ctx) is cancelled or the service's quitCh is closed.
-func (m *ModuleService) runBirdImportLoop(
+func (m *AdapterService) runBirdImportLoop(
 	ctx context.Context,
 	holder *importHolder,
 	client routepb.RouteServiceClient,
@@ -316,7 +277,7 @@ func (m *ModuleService) runBirdImportLoop(
 // reconnectStream attempts to re-establish the gRPC stream with exponential backoff.
 // Returns true if reconnection succeeds, false if aborted by context or quit signal.
 // Updates `currentStream` with the new stream on success.
-func (m *ModuleService) reconnectStream(
+func (m *AdapterService) reconnectStream(
 	ctx context.Context,
 	client routepb.RouteServiceClient,
 	currentStream *grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary],

@@ -29,3 +29,25 @@ custom_target(
     install: true,
     install_dir: get_option('bindir'),
 )
+
+custom_target(
+    'yanet-bird-adapter',
+    output: 'yanet-bird-adapter',
+    command: [
+        go,
+        'build',
+        '-ldflags=' + ld_flags,
+        '-o', '@OUTPUT@',
+        join_paths(meson.current_source_dir(), 'cmd', 'bird-adapter'),
+    ],
+    build_by_default: true,
+    build_always_stale: true,
+    depends: [
+        ynpb_gen,
+        bird_adapter_protoc_gen,
+        route_protoc_gen,
+        common_protoc_gen,
+    ],
+    install: true,
+    install_dir: get_option('bindir'),
+)
