@@ -31,10 +31,6 @@ package mock
 #include <stdint.h>
 #include <errno.h>
 
-void setErrno(int err) {
-	errno = err;
-}
-
 #include "mock.h"
 #include "config.h"
 */
@@ -77,8 +73,6 @@ func NewYanetMock(config *YanetMockConfig) (*YanetMock, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open aggregator: %v", err)
 	}
-
-	C.setErrno(0)
 
 	cConfig := C.struct_yanet_mock_config{}
 	C.memset(unsafe.Pointer(&cConfig), 0, C.size_t(unsafe.Sizeof(cConfig)))

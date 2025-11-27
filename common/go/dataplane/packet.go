@@ -29,7 +29,14 @@ func NewPacketData(txDeviceId uint16, rxDeviceId uint16, packet gopacket.Packet)
 func PacketsData(txDeviceId uint16, rxDeviceId uint16, packets ...gopacket.Packet) []PacketData {
 	payload := make([]PacketData, 0, len(packets))
 	for idx := range packets {
-		payload = append(payload, PacketData{Payload: packets[idx].Data(), TxDeviceId: txDeviceId, RxDeviceId: rxDeviceId})
+		payload = append(
+			payload,
+			PacketData{
+				Payload:    packets[idx].Data(),
+				TxDeviceId: txDeviceId,
+				RxDeviceId: rxDeviceId,
+			},
+		)
 	}
 	return payload
 }
@@ -165,7 +172,12 @@ type PacketFrontPayload struct {
 	Drop   [][]byte
 }
 
-func NewPacketFront(pinner *runtime.Pinner, input *PacketList, output *PacketList, drop *PacketList) *PacketFront {
+func NewPacketFront(
+	pinner *runtime.Pinner,
+	input *PacketList,
+	output *PacketList,
+	drop *PacketList,
+) *PacketFront {
 	packetFront := C.struct_packet_front{}
 	pinner.Pin(&packetFront)
 
