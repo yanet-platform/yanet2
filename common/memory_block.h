@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "asan.h"
+
 #include "memory_address.h"
 
 #define MEMORY_BLOCK_ALLOCATOR_EXP 24
@@ -74,9 +76,13 @@ block_allocator_pool_get(
 	(void)allocator;
 
 	void *result = ADDR_OF(&pool->free_list);
+	asan_unpoison_memory_region(result, sizeof(void *));
 	SET_OFFSET_OF(&pool->free_list, ADDR_OF((void **)result));
+	asan_poison_memory_region(result, sizeof(void *));
+
 	++pool->allocate;
 	--pool->free;
+
 	return result;
 }
 
@@ -87,19 +93,26 @@ block_allocator_pool_borrow(
 	// Get a memory chunk from parent pool
 	struct block_allocator_pool *parent_pool =
 		allocator->pools + pool_index + 1;
+
 	void *data = block_allocator_pool_get(allocator, parent_pool);
+	asan_unpoison_memory_region(data, sizeof(void *));
 
 	struct block_allocator_pool *pool = allocator->pools + pool_index;
 
 	// Split the memory chunk into two piece and insert into free list
 	size_t size = block_allocator_pool_size(allocator, pool_index);
 	void *next_data = (void *)((uintptr_t)data + size);
+	asan_unpoison_memory_region(next_data, sizeof(void *));
+
 	SET_OFFSET_OF((void **)next_data, ADDR_OF(&pool->free_list));
 	SET_OFFSET_OF((void **)data, next_data);
 	SET_OFFSET_OF(&pool->free_list, data);
 
 	++parent_pool->borrow;
 	pool->free += 2;
+
+	asan_poison_memory_region(next_data, sizeof(void *));
+	asan_poison_memory_region(data, sizeof(void *));
 }
 
 static inline void *
@@ -166,7 +179,10 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 		}
 	}
 
-	return block_allocator_pool_get(allocator, pool);
+	void *memory = block_allocator_pool_get(allocator, pool);
+	asan_unpoison_memory_region(memory, size);
+
+	return memory;
 }
 
 static inline void
@@ -176,12 +192,22 @@ block_allocator_bfree(
 	if (!size)
 		return;
 
+	if (size < sizeof(void *))
+		asan_unpoison_memory_region(
+			block + size, sizeof(void *) - size
+		);
+
 	size_t pool_index = block_allocator_pool_index(allocator, size);
 	struct block_allocator_pool *pool = allocator->pools + pool_index;
 
 	SET_OFFSET_OF((void **)block, ADDR_OF(&pool->free_list));
 	SET_OFFSET_OF(&pool->free_list, block);
 	++pool->free;
+
+	asan_poison_memory_region(block, size);
+	if (size < sizeof(void *)) {
+		asan_poison_memory_region(block + size, sizeof(void *) - size);
+	}
 }
 
 static inline void
@@ -209,4 +235,14 @@ block_allocator_put_arena(
 		block_allocator_bfree(allocator, (void *)pos, align);
 		pos += align;
 	}
+}
+
+static inline size_t
+block_allocator_free_size(struct block_allocator *alloc) {
+	size_t size = 0;
+	for (size_t i = 0; i < MEMORY_BLOCK_ALLOCATOR_EXP; ++i) {
+		struct block_allocator_pool *pool = &alloc->pools[i];
+		size += pool->free * block_allocator_pool_size(alloc, i);
+	}
+	return size;
 }
