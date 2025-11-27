@@ -2,15 +2,31 @@ package yncp
 
 import (
 	"fmt"
+	"os"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"golang.org/x/term"
 )
 
 // InitLogging initializes the logging subsystem.
 func InitLogging(cfg *LoggingConfig) (*zap.SugaredLogger, zap.AtomicLevel, error) {
-	config := zap.NewDevelopmentConfig()
-	config.Development = false
-	config.Level.SetLevel(cfg.Level)
+	encoderConfig := zap.NewDevelopmentEncoderConfig()
+
+	if term.IsTerminal(int(os.Stderr.Fd())) {
+		encoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	} else {
+		encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
+	}
+
+	config := zap.Config{
+		Level:            zap.NewAtomicLevelAt(cfg.Level),
+		Development:      false,
+		Encoding:         "console",
+		EncoderConfig:    encoderConfig,
+		OutputPaths:      []string{"stderr"},
+		ErrorOutputPaths: []string{"stderr"},
+	}
 
 	logger, err := config.Build()
 	if err != nil {
