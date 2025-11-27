@@ -1,8 +1,8 @@
 package mock
 
 type YanetMockDeviceConfig struct {
-	id   uint64
-	name string
+	Id   uint64
+	Name string
 }
 
 type YanetMockConfig struct {

@@ -82,11 +82,11 @@ func NewYanetMock(config *YanetMockConfig) (*YanetMock, error) {
 	cConfig.worker_count = C.size_t(config.Workers)
 	for idx := range config.Devices {
 		device := &config.Devices[idx]
-		bytes := []byte(device.name)
+		bytes := []byte(device.Name)
 		C.memcpy(
 			unsafe.Pointer(&cConfig.devices[idx].name[0]),
 			unsafe.Pointer(&bytes[0]),
-			C.size_t(len(device.name)),
+			C.size_t(len(device.Name)),
 		)
 	}
 

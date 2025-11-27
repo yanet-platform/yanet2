@@ -124,8 +124,6 @@ func sendRandomSYNs(
 func TestSelectAfterUpdate(t *testing.T) {
 	config, timeouts := smallConfig()
 
-	PrepareForUpdate(t)
-
 	balancerInstance, err := balancer.NewModuleInstance(agent, "balancer0", config, 2000, timeouts)
 	require.NoError(t, err, "failed to make balancer")
 	defer balancerInstance.Free()

@@ -17,8 +17,8 @@ func TestBasic(t *testing.T) {
 		Workers:  1,
 		Devices: []YanetMockDeviceConfig{
 			{
-				id:   0,
-				name: "01:00.0",
+				Id:   0,
+				Name: "01:00.0",
 			},
 		},
 	}
