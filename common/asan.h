@@ -1,6 +1,10 @@
 #pragma once
 
 #include <stddef.h>
+<<<<<<< HEAD
+=======
+
+>>>>>>> 9399aac (continue merge)
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
 #define HAVE_ASAN 1
