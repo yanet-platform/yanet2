@@ -14,20 +14,20 @@ var BalancerConfigName string = "balancer0"
 
 ////////////////////////////////////////////////////////////////////////////////
 
-type TestContextConfig struct {
+type TestConfig struct {
 	mock             *mock.YanetMockConfig
 	balancer         *balancer.ModuleInstanceConfig
 	timeouts         *balancer.SessionsTimeouts
 	sessionTableSize int
 }
 
-type TestContext struct {
+type TestSetup struct {
 	mock     *mock.YanetMock
 	agent    *ffi.Agent
 	balancer *balancer.ModuleInstance
 }
 
-func CreateTestContext(config *TestContextConfig) (*TestContext, error) {
+func SetupTest(config *TestConfig) (*TestSetup, error) {
 	if config.mock == nil {
 		config.mock = &mock.YanetMockConfig{
 			CpMemory: 1 << 28,
@@ -76,7 +76,13 @@ func CreateTestContext(config *TestContextConfig) (*TestContext, error) {
 		return nil, fmt.Errorf("failed to attach agent: %w", err)
 	}
 
-	balancer, err := balancer.NewModuleInstance(agent, BalancerConfigName, config.balancer, uint64(sessionTableSize), config.timeouts)
+	balancer, err := balancer.NewModuleInstance(
+		agent,
+		BalancerConfigName,
+		config.balancer,
+		uint64(sessionTableSize),
+		config.timeouts,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new balancer module instance: %w", err)
 	}
@@ -85,7 +91,7 @@ func CreateTestContext(config *TestContextConfig) (*TestContext, error) {
 		return nil, fmt.Errorf("failed to setup yanet mock: %w", err)
 	}
 
-	return &TestContext{
+	return &TestSetup{
 		mock:     mock,
 		agent:    agent,
 		balancer: balancer,
@@ -160,7 +166,7 @@ func setupCp(agent *ffi.Agent) error {
 	return nil
 }
 
-func (ctx *TestContext) Free() {
+func (ctx *TestSetup) Free() {
 	ctx.balancer.Free()
 	ctx.agent.Close()
 	ctx.mock.Free()

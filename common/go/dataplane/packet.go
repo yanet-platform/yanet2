@@ -115,6 +115,7 @@ func (packetList *PacketList) Info() []*framework.PacketInfo {
 			break
 		}
 		info = append(info, packet.Info())
+		packet = packet.Next()
 	}
 	return info
 }
@@ -132,7 +133,7 @@ func (packetList *PacketList) Data() []PacketData {
 	return data
 }
 
-func NewPacketList(pinner runtime.Pinner, packets []*Packet) *PacketList {
+func NewPacketList(pinner *runtime.Pinner, packets []*Packet) *PacketList {
 	packetList := PacketList{}
 	pinner.Pin(&packetList)
 
@@ -144,7 +145,7 @@ func NewPacketList(pinner runtime.Pinner, packets []*Packet) *PacketList {
 	return &packetList
 }
 
-func NewPacketListFromData(pinner runtime.Pinner, data ...PacketData) (*PacketList, error) {
+func NewPacketListFromData(pinner *runtime.Pinner, data ...PacketData) (*PacketList, error) {
 	packetList := NewPacketList(pinner, make([]*Packet, 0))
 	pinner.Pin(packetList)
 

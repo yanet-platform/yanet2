@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
+	moduleBalancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
@@ -24,24 +24,24 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func smallConfig() (*balancer.ModuleInstanceConfig, *balancer.SessionsTimeouts) {
-	config := balancer.ModuleInstanceConfig{
-		Services: []balancer.VirtualService{
+func smallConfig() (*moduleBalancer.ModuleInstanceConfig, *moduleBalancer.SessionsTimeouts) {
+	config := moduleBalancer.ModuleInstanceConfig{
+		Services: []moduleBalancer.VirtualService{
 			{
 				Address: IpAddr("192.166.13.22"),
 				Port:    1000,
-				Flags: balancer.VsFlags{
+				Flags: moduleBalancer.VsFlags{
 					GRE:    false,
 					OPS:    false,
 					PureL3: false,
 					FixMSS: false,
 				},
-				Scheduler: balancer.VsSchedulerPRR,
-				Proto:     balancer.TransportProtoTcp,
+				Scheduler: moduleBalancer.VsSchedulerPRR,
+				Proto:     moduleBalancer.TransportProtoTcp,
 				AllowedSrc: []netip.Prefix{
 					IpPrefix("10.12.0.0/8"),
 				},
-				Reals: []balancer.Real{
+				Reals: []moduleBalancer.Real{
 					{
 						Weight:  1,
 						DstAddr: IpAddr("1.1.1.1"),
@@ -67,7 +67,7 @@ func smallConfig() (*balancer.ModuleInstanceConfig, *balancer.SessionsTimeouts) 
 			},
 		},
 	}
-	timeouts := balancer.SessionsTimeouts{
+	timeouts := moduleBalancer.SessionsTimeouts{
 		TcpSynAck: 60,
 		TcpSyn:    60,
 		TcpFin:    60,
@@ -76,6 +76,19 @@ func smallConfig() (*balancer.ModuleInstanceConfig, *balancer.SessionsTimeouts) 
 		Default:   60,
 	}
 	return &config, &timeouts
+}
+
+func smallSetup(t *testing.T) *TestSetup {
+	balancer, timeouts := smallConfig()
+
+	setup, err := SetupTest(&TestConfig{
+		balancer:         balancer,
+		timeouts:         timeouts,
+		sessionTableSize: 1024,
+	})
+	require.NoError(t, err)
+
+	return setup
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -89,7 +102,7 @@ func allowedSrc(idx uint8) netip.Addr {
 func sendRandomSYNs(
 	t *testing.T,
 	mock *mock.YanetMock,
-	balancerInstance *balancer.ModuleInstance,
+	balancerInstance *moduleBalancer.ModuleInstance,
 	vsIdx int,
 	packetIdxOffset int,
 	packetCount int,
@@ -123,27 +136,22 @@ func sendRandomSYNs(
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestSelectAfterUpdate(t *testing.T) {
-	config, timeouts := smallConfig()
-	context, err := CreateTestContext(&TestContextConfig{
-		balancer: config,
-		timeouts: timeouts,
-	})
-	require.NoError(t, err)
-	defer context.Free()
+	setup := smallSetup(t)
+	defer setup.Free()
 
 	packetCountBeforeRealUpdate := 10
 
-	mock := context.mock
-	balancerInstance := context.balancer
+	mock := setup.mock
+	balancer := setup.balancer
 
 	// send some syn packets to the first virtual service from different sources
 	t.Run("Send_Some_Packets_Before_Update", func(t *testing.T) {
 		// send random SYNs from unique sources
-		sendRandomSYNs(t, mock, balancerInstance, 0, 0, packetCountBeforeRealUpdate)
+		sendRandomSYNs(t, mock, balancer, 0, 0, packetCountBeforeRealUpdate)
 
 		// check balancer state info
 
-		info, err := balancerInstance.StateInfo()
+		info, err := balancer.StateInfo()
 		assert.NotNil(t, info)
 		assert.Nil(t, err)
 
@@ -170,18 +178,18 @@ func TestSelectAfterUpdate(t *testing.T) {
 		}
 
 		// validate state info
-		ValidateStateInfo(t, info, balancerInstance.GetConfig())
+		ValidateStateInfo(t, info, balancer.GetConfig())
 	})
 
 	// enabled disabled reals
 
 	t.Run("Enable_Disabled_Reals", func(t *testing.T) {
 		// update CP config gen
-		vs := &config.Services[0]
-		updates := make([]*balancer.RealUpdate, 0, 2)
+		vs := &balancer.GetConfig().Services[0]
+		updates := make([]*moduleBalancer.RealUpdate, 0, 2)
 		for _, realIdx := range []uint64{1, 2} {
 			real := &vs.Reals[realIdx]
-			updates = append(updates, &balancer.RealUpdate{
+			updates = append(updates, &moduleBalancer.RealUpdate{
 				VirtualIp: vs.Address,
 				Proto:     vs.Proto,
 				Port:      vs.Port,
@@ -190,7 +198,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 			})
 		}
 
-		err := balancerInstance.UpdateReals(updates, false)
+		err := balancer.UpdateReals(updates, false)
 		require.Nil(t, err, "failed to update reals")
 	})
 
@@ -203,7 +211,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 		sendRandomSYNs(
 			t,
 			mock,
-			balancerInstance,
+			balancer,
 			0,
 			packetCountBeforeRealUpdate,
 			packetCountAfterRealUpdate,
@@ -211,7 +219,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 		// check balancer state info
 
-		info, err := balancerInstance.StateInfo()
+		info, err := balancer.StateInfo()
 		assert.NotNil(t, info)
 		assert.Nil(t, err)
 
@@ -253,18 +261,18 @@ func TestSelectAfterUpdate(t *testing.T) {
 		assert.Equal(t, packetsSum, packetCountBeforeRealUpdate+packetCountAfterRealUpdate)
 
 		// validate state info
-		ValidateStateInfo(t, info, balancerInstance.GetConfig())
+		ValidateStateInfo(t, info, balancer.GetConfig())
 	})
 
 	// disabled first and second reals
 
 	t.Run("Disable_First_and_Second_Reals", func(t *testing.T) {
 		// update CP config gen
-		vs := &config.Services[0]
-		updates := make([]*balancer.RealUpdate, 0, 2)
+		vs := &balancer.GetConfig().Services[0]
+		updates := make([]*moduleBalancer.RealUpdate, 0, 2)
 		for _, realIdx := range []uint64{0, 1} {
 			real := &vs.Reals[realIdx]
-			updates = append(updates, &balancer.RealUpdate{
+			updates = append(updates, &moduleBalancer.RealUpdate{
 				VirtualIp: vs.Address,
 				Proto:     vs.Proto,
 				Port:      vs.Port,
@@ -273,7 +281,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 			})
 		}
 
-		err := balancerInstance.UpdateReals(updates, false)
+		err := balancer.UpdateReals(updates, false)
 		require.Nil(t, err, "failed to update reals")
 	})
 
@@ -283,7 +291,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 	t.Run("Send_Some_Packets_After_Second_Update", func(t *testing.T) {
 		// set prev state info
-		infoBefore, err := balancerInstance.StateInfo()
+		infoBefore, err := balancer.StateInfo()
 		require.NotNil(t, infoBefore)
 		require.Nil(t, err)
 
@@ -291,7 +299,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 		sendRandomSYNs(
 			t,
 			mock,
-			balancerInstance,
+			balancer,
 			0,
 			packetCountBeforeRealUpdate+packetCountAfterRealUpdate,
 			packetCountAfterSecondUpdate,
@@ -299,7 +307,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 		// check balancer state info
 
-		info, err := balancerInstance.StateInfo()
+		info, err := balancer.StateInfo()
 		require.NotNil(t, info)
 		require.Nil(t, err)
 
@@ -335,6 +343,6 @@ func TestSelectAfterUpdate(t *testing.T) {
 		assert.Greater(t, realInfo.Stats.SendPackets, realInfoBefore.Stats.SendPackets)
 
 		// validate state info
-		ValidateStateInfo(t, info, balancerInstance.GetConfig())
+		ValidateStateInfo(t, info, balancer.GetConfig())
 	})
 }

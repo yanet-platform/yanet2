@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
+	moduleBalancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"github.com/yanet-platform/yanet2/tests/go/common"
 )
@@ -21,10 +21,10 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func allCombinationsConfig() (*balancer.ModuleInstanceConfig, *balancer.SessionsTimeouts) {
-	serviceConfigs := make([]balancer.VirtualService, 0, 2*2*2*2*2)
+func allCombinationsConfig() (*moduleBalancer.ModuleInstanceConfig, *moduleBalancer.SessionsTimeouts) {
+	serviceConfigs := make([]moduleBalancer.VirtualService, 0, 2*2*2*2*2)
 	for _, vsAddrVersion := range []int{4, 6} {
-		for _, proto := range []balancer.TransportProto{balancer.TransportProtoTcp, balancer.TransportProtoUdp} {
+		for _, proto := range []moduleBalancer.TransportProto{moduleBalancer.TransportProtoTcp, moduleBalancer.TransportProtoUdp} {
 			for _, greEnabled := range []bool{false, true} {
 				for _, fixMssEnabled := range []bool{false, true} {
 					for _, realAddr := range []netip.Addr{IpAddr("10.1.1.1"), IpAddr("fe80::1")} {
@@ -35,14 +35,14 @@ func allCombinationsConfig() (*balancer.ModuleInstanceConfig, *balancer.Sessions
 							vsAddr = IpAddr(fmt.Sprintf("2001:db8::%d", counter))
 							allowed = IpPrefix("ffff::0/16")
 						}
-						serviceConfig := balancer.VirtualService{
+						serviceConfig := moduleBalancer.VirtualService{
 							Address: vsAddr,
 							Proto:   proto,
 							Port:    8080,
 							AllowedSrc: []netip.Prefix{
 								allowed,
 							},
-							Reals: []balancer.Real{
+							Reals: []moduleBalancer.Real{
 								{
 									Weight:  1,
 									DstAddr: realAddr,
@@ -51,7 +51,7 @@ func allCombinationsConfig() (*balancer.ModuleInstanceConfig, *balancer.Sessions
 									Enabled: true,
 								},
 							},
-							Flags: balancer.VsFlags{
+							Flags: moduleBalancer.VsFlags{
 								GRE:    greEnabled,
 								OPS:    false,
 								PureL3: false,
@@ -64,9 +64,9 @@ func allCombinationsConfig() (*balancer.ModuleInstanceConfig, *balancer.Sessions
 			}
 		}
 	}
-	return &balancer.ModuleInstanceConfig{
+	return &moduleBalancer.ModuleInstanceConfig{
 			Services: serviceConfigs,
-		}, &balancer.SessionsTimeouts{
+		}, &moduleBalancer.SessionsTimeouts{
 			TcpSynAck: 10,
 			TcpSyn:    10,
 			TcpFin:    10,
@@ -74,6 +74,24 @@ func allCombinationsConfig() (*balancer.ModuleInstanceConfig, *balancer.Sessions
 			Udp:       10,
 			Default:   10,
 		}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func allCombinationsTestConfig() *TestConfig {
+	balancerConfig, timeouts := allCombinationsConfig()
+	return &TestConfig{
+		balancer:         balancerConfig,
+		timeouts:         timeouts,
+		sessionTableSize: 1024,
+	}
+}
+
+func allCombinationsSetup(t *testing.T) *TestSetup {
+	config := allCombinationsTestConfig()
+	setup, err := SetupTest(config)
+	require.NoError(t, err)
+	return setup
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -90,7 +108,7 @@ func clientIpv6() netip.Addr {
 
 type VsSelector struct {
 	VsIp   uint64 // 4 or 6
-	Proto  balancer.TransportProto
+	Proto  moduleBalancer.TransportProto
 	Gre    bool
 	FixMSS bool
 	RealIp uint64 // 4 or 6
@@ -107,9 +125,9 @@ func (vs *VsSelector) Json() string {
 func SendPacket(
 	t *testing.T,
 	mock *mock.YanetMock,
-	b *balancer.ModuleInstance,
+	b *moduleBalancer.ModuleInstance,
 	selector VsSelector,
-) (*framework.PacketInfo, *balancer.VirtualService) {
+) (*framework.PacketInfo, *moduleBalancer.VirtualService) {
 	t.Log("send packet to vs:", selector.Json())
 	virtualServices := b.GetConfig().Services
 	for vsIdx := range virtualServices {
@@ -136,8 +154,8 @@ func SendPacket(
 func SendPacketToVs(
 	t *testing.T,
 	mock *mock.YanetMock,
-	b *balancer.ModuleInstance,
-	vs *balancer.VirtualService,
+	b *moduleBalancer.ModuleInstance,
+	vs *moduleBalancer.VirtualService,
 ) *framework.PacketInfo {
 	clientAddr := clientIpv4()
 	if vs.Address.Is6() {
@@ -149,7 +167,7 @@ func SendPacketToVs(
 	vsPort := vs.Port
 
 	tcp := &layers.TCP{SYN: true}
-	if vs.Proto == balancer.TransportProtoUdp {
+	if vs.Proto == moduleBalancer.TransportProtoUdp {
 		tcp = nil
 	}
 	layers := MakePacketLayers(clientAddr, clientPort, vsAddr, vsPort, tcp)
@@ -166,21 +184,15 @@ func SendPacketToVs(
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestPacketGRE(t *testing.T) {
-	balancerConfig, timeouts := allCombinationsConfig()
+	setup := allCombinationsSetup(t)
+	defer setup.Free()
 
-	context, err := CreateTestContext(&TestContextConfig{
-		balancer: balancerConfig,
-		timeouts: timeouts,
-	})
-	require.NoError(t, err)
-	defer context.Free()
+	mock := setup.mock
+	balancer := setup.balancer
 
-	mock := context.mock
-	bal := context.balancer
-
-	SendPacket(t, mock, bal, VsSelector{
+	SendPacket(t, mock, balancer, VsSelector{
 		VsIp:   4,
-		Proto:  balancer.TransportProtoTcp,
+		Proto:  moduleBalancer.TransportProtoTcp,
 		RealIp: 4,
 		Gre:    true,
 		FixMSS: false,

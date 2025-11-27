@@ -132,12 +132,13 @@ func (mock *YanetMock) HandlePackets(packets ...gopacket.Packet) (*HandlePackets
 			RxDeviceId: uint16(rxDeviceId),
 		})
 	}
-	packetList, err := dataplane.NewPacketListFromData(pinner, data...)
+	packetList, err := dataplane.NewPacketListFromData(&pinner, data...)
 	if err != nil {
 		return nil, err
 	}
 
 	pinner.Pin(mock)
+
 	result, err := C.yanet_mock_handle_packets(
 		&mock.inner,
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),

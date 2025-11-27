@@ -383,7 +383,12 @@ func ValidatePacket(
 				if service.Address.Is6() {
 					expectedTunnelType = "gre-ip6"
 				}
-				assert.Equal(t, expectedTunnelType, resultPacket.TunnelType, "packet tunnel type must be gre")
+				assert.Equal(
+					t,
+					expectedTunnelType,
+					resultPacket.TunnelType,
+					"packet tunnel type must be gre",
+				)
 			}
 
 			// todo: check tcp layers (if FixMSS enabled)
