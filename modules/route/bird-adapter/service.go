@@ -105,8 +105,6 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 	// Cancelled via holder.cancel on replacement or service stop.
 	streamCtx, cancel := context.WithCancel(context.Background())
 	client := routepb.NewRouteServiceClient(conn)
-	flushRequest := &routepb.FlushRoutesRequest{Target: target}
-
 	stream, err := client.FeedRIB(streamCtx)
 	if err != nil {
 		cancel() // cleanup context if stream setup fails
@@ -144,7 +142,8 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 
 	// onFlush commits updates to dataplane. Called by bird.Export.
 	onFlush := func() error {
-		_, err := client.FlushRoutes(streamCtx, flushRequest) // Use stream's lifecycle context
+		// update without route indicates flush event
+		err := (*holder.currentStream).Send(&routepb.Update{Target: target})
 		if err != nil {
 			return fmt.Errorf("flush BIRD routes failed: %w", err)
 		}

@@ -251,14 +251,22 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 			err = stream.SendAndClose(&routepb.UpdateSummary{}) // Gracefully close our side.
 			break
 		}
-
-		route, convertErr := routepb.ToRIBRoute(update.GetRoute(), update.GetIsDelete())
-		if convertErr != nil {
-			m.log.Errorf("failed to convert proto route to RIB route for session %d: %v. Update: %+v", sessionId, convertErr, update)
-			continue // Skip this invalid route update.
+		if update.GetRoute() == nil { // flush event
+			m.log.Infof("sync routes in session %d for %s:%d due to flush event in FeedRIB stream", sessionId, name, instance)
+			err = m.syncRouteUpdates(ribRef, name, instance)
+			if err != nil {
+				break
+			}
+		} else {
+			route, convertErr := routepb.ToRIBRoute(update.GetRoute(), update.GetIsDelete())
+			if convertErr != nil {
+				m.log.Errorf("failed to convert proto route to RIB route for session %d: %v. Update: %+v", sessionId, convertErr, update)
+				continue // Skip this invalid route update.
+			}
+			route.SessionID = sessionId // Tag route with current session ID.
+			ribRef.Update(*route)
 		}
-		route.SessionID = sessionId // Tag route with current session ID.
-		ribRef.Update(*route)
+
 	}
 
 	// If a RIB was established for this stream, schedule cleanup for its session.
