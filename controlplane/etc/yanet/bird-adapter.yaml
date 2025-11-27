@@ -9,4 +9,4 @@ logging:
 listen_addr: "localhost:50051"
 
 # gRPC endpoint of the RouteService gateway for RIB updates
-gateway_endpoint: "localhost:50052"
+gateway_endpoint: "localhost:8080"

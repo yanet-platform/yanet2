@@ -10,7 +10,13 @@ import (
 
 func (m *ImportConfig) ToConfig(cfg *bird.Config) {
 	cfg.Sockets = slices.Clone(m.Sockets)
-	cfg.ParserBufSize = datasize.ByteSize(m.ParserBufSize)
-	cfg.DumpThreshold = int(m.DumpThreshold)
-	cfg.DumpTimeout = time.Duration(m.DumpTimeout)
+	if m.ParserBufSize != 0 {
+		cfg.ParserBufSize = datasize.ByteSize(m.ParserBufSize)
+	}
+	if m.DumpThreshold != 0 {
+		cfg.DumpThreshold = int(m.DumpThreshold)
+	}
+	if m.DumpTimeout != 0 {
+		cfg.DumpTimeout = time.Duration(m.DumpTimeout)
+	}
 }
