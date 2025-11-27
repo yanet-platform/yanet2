@@ -26,7 +26,8 @@ int
 route_module_config_add_route(
 	struct cp_module *cp_module,
 	struct ether_addr dst_addr,
-	struct ether_addr src_addr
+	struct ether_addr src_addr,
+	const char *device_name
 );
 
 int

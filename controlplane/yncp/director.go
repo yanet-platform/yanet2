@@ -16,6 +16,9 @@ import (
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
+
+	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
 )
 
 type options struct {
@@ -115,6 +118,16 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize balancer built-in module: %w", err)
 	}
 
+	plainDevice, err := plain.NewDevicePlainDevice(cfg.Devices.Plain, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize plain built-in device: %w", err)
+	}
+
+	vlanDevice, err := vlan.NewDeviceVlanDevice(cfg.Devices.Vlan, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize vlan built-in device: %w", err)
+	}
+
 	aclModule, err := acl.NewACLModule(cfg.Modules.ACL, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize acl built-in module: %w", err)
@@ -143,6 +156,12 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		),
 		gateway.WithBuiltInModule(
 			balancerModule,
+		),
+		gateway.WithBuiltInDevice(
+			plainDevice,
+		),
+		gateway.WithBuiltInDevice(
+			vlanDevice,
 		),
 		gateway.WithBuiltInModule(
 			aclModule,

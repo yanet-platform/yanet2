@@ -16,6 +16,7 @@ type Config struct {
 	Endpoint           string            `yaml:"endpoint"`
 	GatewayEndpoint    string            `yaml:"gateway_endpoint"`
 	RibTTL             time.Duration     `yaml:"rib_ttl"`
+	LinkMap            map[string]string `yaml:"link_map"`
 }
 
 func DefaultConfig() *Config {
@@ -25,6 +26,7 @@ func DefaultConfig() *Config {
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",
 		RibTTL:             time.Minute,
+		LinkMap:            make(map[string]string),
 	}
 }
 

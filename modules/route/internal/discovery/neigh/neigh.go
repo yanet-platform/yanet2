@@ -33,6 +33,12 @@ func WithUpdateInterval(interval time.Duration) Option {
 	}
 }
 
+func WithLinkMap(linkMap map[string]string) Option {
+	return func(o *options) {
+		o.LinkMap = linkMap
+	}
+}
+
 // WithLog configures the neighbour monitor with a logger.
 func WithLog(log *zap.SugaredLogger) Option {
 	return func(o *options) {
@@ -42,12 +48,14 @@ func WithLog(log *zap.SugaredLogger) Option {
 
 type options struct {
 	UpdateInterval time.Duration
+	LinkMap        map[string]string
 	Log            *zap.SugaredLogger
 }
 
 func newOptions() *options {
 	return &options{
 		UpdateInterval: 5 * time.Minute,
+		LinkMap:        make(map[string]string),
 		Log:            zap.NewNop().Sugar(),
 	}
 }
@@ -59,6 +67,7 @@ func newOptions() *options {
 type NeighMonitor struct {
 	nexthopCache   *NexthopCache
 	updateInterval time.Duration
+	linkMap        map[string]string
 	log            *zap.SugaredLogger
 }
 
@@ -71,6 +80,7 @@ func NewNeighMonitor(neighbours *NexthopCache, options ...Option) *NeighMonitor 
 
 	m := &NeighMonitor{
 		nexthopCache:   neighbours,
+		linkMap:        opts.LinkMap,
 		updateInterval: opts.UpdateInterval,
 		log:            opts.Log,
 	}
@@ -170,6 +180,8 @@ func (m *NeighMonitor) updateNeighbours() error {
 		return fmt.Errorf("failed to list links: %w", err)
 	}
 
+	linkIndexToName := map[int]string{}
+
 	// Create a map of link indexes to hardware addresses for quick lookup
 	linkIndexToHardwareAddr := map[int]net.HardwareAddr{}
 	for _, link := range links {
@@ -183,6 +195,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 		}
 
 		linkIndexToHardwareAddr[attrs.Index] = hardwareAddr
+		linkIndexToName[attrs.Index] = attrs.Name
 	}
 
 	view := m.nexthopCache.View()
@@ -213,12 +226,18 @@ func (m *NeighMonitor) updateNeighbours() error {
 			continue
 		}
 
+		device, ok := m.linkMap[linkIndexToName[neigh.LinkIndex]]
+		if !ok {
+			device = linkIndexToName[neigh.LinkIndex]
+		}
+
 		// Create the entry with resolved hardware addresses
 		entry := NeighbourEntry{
 			NextHop: nexthopAddr,
 			HardwareRoute: HardwareRoute{
 				SourceMAC:      [6]byte(hardwareAddr),
 				DestinationMAC: [6]byte(neigh.HardwareAddr),
+				Device:         device,
 			},
 			UpdatedAt: time.Now(),
 			State:     NeighbourState(neigh.State),
@@ -234,6 +253,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 			zap.Stringer("nexthop_addr", entry.NextHop),
 			zap.Stringer("nexthop_hardware_addr", neigh.HardwareAddr),
 			zap.Stringer("iface_hardware_addr", hardwareAddr),
+			zap.String("device", device),
 			zap.Stringer("state", entry.State),
 		)
 

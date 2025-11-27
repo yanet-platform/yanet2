@@ -130,6 +130,11 @@ dataplane:
 	controlplaneConfig := `
 logging:
   level: debug
+
+modules:
+  route:
+    link_map:
+      kni0: 01:00.0
 `
 
 	if err := fw.StartYANET(dataplaneConfig, controlplaneConfig); err != nil {

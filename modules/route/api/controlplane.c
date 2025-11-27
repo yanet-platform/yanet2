@@ -115,11 +115,17 @@ int
 route_module_config_add_route(
 	struct cp_module *cp_module,
 	struct ether_addr dst_addr,
-	struct ether_addr src_addr
+	struct ether_addr src_addr,
+	const char *device_name
 ) {
 	struct route_module_config *config =
 		container_of(cp_module, struct route_module_config, cp_module);
 	struct route *routes = ADDR_OF(&config->routes);
+
+	uint64_t device_index;
+	if (cp_module_link_device(cp_module, device_name, &device_index)) {
+		return -1;
+	}
 
 	if (mem_array_expand_exp(
 		    &config->cp_module.memory_context,
@@ -133,6 +139,7 @@ route_module_config_add_route(
 	routes[config->route_count - 1] = (struct route){
 		.dst_addr = dst_addr,
 		.src_addr = src_addr,
+		.device_id = device_index,
 	};
 	SET_OFFSET_OF(&config->routes, routes);
 

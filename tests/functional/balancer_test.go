@@ -11,8 +11,6 @@ import (
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
-////////////////////////////////////////////////////////////////////////////////
-
 func createTcpPacket(srcIP, dstIP net.IP, payload []byte, SYN bool) []byte {
 	eth := layers.Ethernet{
 		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
@@ -51,8 +49,6 @@ func createTcpPacket(srcIP, dstIP net.IP, payload []byte, SYN bool) []byte {
 	}
 	return buf.Bytes()
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 func TestBalancer(t *testing.T) {
 	fw := globalFramework

@@ -8,6 +8,8 @@
 
 #include "controlplane/config/registry.h"
 
+struct agent;
+
 struct cp_device_pipeline {
 	char name[CP_PIPELINE_NAME_LEN];
 	uint64_t weight;
@@ -20,9 +22,14 @@ struct cp_device_entry {
 
 struct cp_device {
 	struct registry_item config_item;
+	char type[80];
 	char name[CP_DEVICE_NAME_LEN];
 
-	uint32_t type;
+	uint64_t dp_device_idx;
+
+	struct agent *agent;
+
+	struct memory_context memory_context;
 
 	struct counter_registry counter_registry;
 
@@ -45,21 +52,39 @@ struct cp_device_entry_config {
 
 struct cp_device_config {
 	char name[CP_DEVICE_NAME_LEN];
-	uint64_t type;
+	char type[80];
 	struct cp_device_entry_config *input_pipelines;
 	struct cp_device_entry_config *output_pipelines;
 };
 
+int
+cp_device_config_init(
+	struct cp_device_config *cp_device_config,
+	const char *type,
+	const char *name,
+	uint64_t input_pipeline_count,
+	uint64_t output_pipeline_count
+);
+
 struct cp_device *
-cp_device_create(
-	struct memory_context *memory_context,
-	struct dp_config *dp_config,
-	struct cp_config_gen *cp_config_gen,
-	struct cp_device_config *device_config
+cp_device_create(struct agent *agent, struct cp_device_config *device_config);
+
+void
+cp_device_free(
+	struct memory_context *memory_context, struct cp_device *cp_device
+);
+
+int
+cp_device_init(
+	struct cp_device *cp_device,
+	struct agent *agent,
+	const struct cp_device_config *cp_device_config
 );
 
 void
-cp_device_free(struct memory_context *memory_context, struct cp_device *device);
+cp_device_destroy(
+	struct memory_context *memory_context, struct cp_device *cp_device
+);
 
 /*
  * Pipeline registry contains all existing devices.

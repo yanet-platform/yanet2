@@ -53,9 +53,6 @@ cp_function_create(
 	new_function->counter_packet_drop_count = counter_registry_register(
 		&new_function->counter_registry, "drop", 1
 	);
-	new_function->counter_packet_bypass_count = counter_registry_register(
-		&new_function->counter_registry, "bypass", 1
-	);
 	new_function->counter_packet_in_hist = counter_registry_register(
 		&new_function->counter_registry, "input histogram", 8
 	);

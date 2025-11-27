@@ -1,8 +1,0 @@
-[build]
-target = "index.html"
-
-[serve]
-addr = "127.0.0.1"
-
-[tools]
-wasm_bindgen = "0.2.100"

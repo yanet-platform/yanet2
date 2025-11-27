@@ -19,21 +19,21 @@ module_ectx_process(
 ) {
 	(void)dp_config;
 	(void)cp_config_gen;
-
 	module_ectx->handler(dp_worker, module_ectx, packet_front);
 
 	LOG_TRACEX(int in = packet_list_counter(&packet_front->input);
 		   int out = packet_list_counter(&packet_front->output);
-		   int bypass = packet_list_counter(&packet_front->bypass);
 		   int drop = packet_list_counter(&packet_front->drop);
+		   struct cp_module *cp_module =
+			   ADDR_OF(&module_ectx->cp_module);
+
 		   packet_list_print(&packet_front->output);
 		   ,
 		   "processed packets with module %s, in %d, out "
-		   "%d, bypass %d, drop %d. Output list printed above.",
-		   dp_module->name,
+		   "%d, drop %d. Output list printed above.",
+		   cp_module->name,
 		   in,
 		   out,
-		   bypass,
 		   drop);
 }
 

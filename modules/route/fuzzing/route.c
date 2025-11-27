@@ -79,7 +79,8 @@ route_test_config(struct cp_module **cp_module) {
 		},
 		(struct ether_addr){
 			.addr = {0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c},
-		}
+		},
+		"dev0"
 	);
 	if (route_idx == -1) {
 		goto error_lpm_v6;

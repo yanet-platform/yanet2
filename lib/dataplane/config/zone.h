@@ -21,9 +21,10 @@ struct dp_module {
 	module_handler handler;
 };
 
-struct dp_device_handler {
-	device_handler input;
-	device_handler output;
+struct dp_device {
+	char name[DEVICE_NAME_LEN];
+	device_handler input_handler;
+	device_handler output_handler;
 };
 
 struct dp_worker {
@@ -68,8 +69,8 @@ struct dp_config {
 	uint64_t module_count;
 	struct dp_module *dp_modules;
 
-	uint64_t device_handler_count;
-	struct dp_device_handler *dp_device_handlers;
+	uint64_t device_count;
+	struct dp_device *dp_devices;
 
 	struct cp_config *cp_config;
 
@@ -98,6 +99,11 @@ dp_config_unlock(struct dp_config *dp_config);
 
 int
 dp_config_lookup_module(
+	struct dp_config *dp_config, const char *name, uint64_t *index
+);
+
+int
+dp_config_lookup_device(
 	struct dp_config *dp_config, const char *name, uint64_t *index
 );
 

@@ -676,14 +676,14 @@ device_ectx_create(
 
 	SET_OFFSET_OF(&device_ectx->counter_storage, counter_storage);
 
-	struct dp_device_handler *handlers =
-		ADDR_OF(&dp_config->dp_device_handlers) + cp_device->type;
+	struct dp_device *dp_device =
+		ADDR_OF(&dp_config->dp_devices) + cp_device->dp_device_idx;
 
 	struct device_entry_ectx *input = device_entry_ectx_create(
 		cp_config_gen,
 		config_gen_ectx,
 		device_ectx,
-		handlers->input,
+		dp_device->input_handler,
 		ADDR_OF(&cp_device->input_pipelines),
 		old_config_gen
 	);
@@ -695,7 +695,7 @@ device_ectx_create(
 		cp_config_gen,
 		config_gen_ectx,
 		device_ectx,
-		handlers->output,
+		dp_device->output_handler,
 		ADDR_OF(&cp_device->output_pipelines),
 		old_config_gen
 	);

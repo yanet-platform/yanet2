@@ -1,7 +1,7 @@
 //! Packet dump mode configuration and utilities.
 //!
 //! This module provides types and functions for configuring packet capture modes,
-//! including input packets, dropped packets, and bypassed packets.
+//! including input packets and dropped packets
 
 use clap::Args;
 use std::ops::BitOrAssign;
@@ -37,11 +37,7 @@ pub struct Mode {
     #[arg(long)]
     pub drops: bool,
 
-    /// Capture bypassed packets
-    #[arg(long)]
-    pub bypass: bool,
-
-    /// Capture all packets (input, drops, and bypass)
+    /// Capture all packets (input and drops)
     #[arg(long)]
     pub all: bool,
 }

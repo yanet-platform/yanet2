@@ -15,7 +15,7 @@ dataplane:
 	meson compile -C build
 
 cli:
-	cargo build --release --workspace --exclude=yanetweb
+	cargo build --release --workspace
 
 cli-install: cli-core-install $(foreach module,$(MODULES),cli-install/$(module))
 

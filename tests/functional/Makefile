@@ -10,7 +10,7 @@ ifeq ($(UNAME_S),Darwin)
 	MKISOFS := hdiutil makehybrid -iso -joliet -default-volume-name cidata -o
 	QEMU_ACCEL :=
 else
-	MKISOFS := genisoimage -output
+	MKISOFS := mkisofs -output
 	# Check if KVM is available
 	KVM_AVAILABLE := $(shell [ -r /dev/kvm ] && echo "yes" || echo "no")
 	ifeq ($(KVM_AVAILABLE),yes)
@@ -37,7 +37,7 @@ check-deps:
 ifeq ($(UNAME_S),Darwin)
 	@which hdiutil > /dev/null || (echo "Error: hdiutil not found" && exit 1)
 else
-	@which genisoimage > /dev/null || (echo "Please install genisoimage package" && exit 1)
+	@which mkisofs > /dev/null || (echo "Please install mkisofs package" && exit 1)
 endif
 	@which qemu-img > /dev/null || (echo "Please install QEMU" && exit 1)
 	@which qemu-system-x86_64 > /dev/null || (echo "Please install QEMU" && exit 1)

@@ -10,8 +10,7 @@
 /*
  * The structure enumerated packets processed by pipeline modules.
  * Each module reads a packet from an input list and then writes result to
- * an output list or bypass the pipeline landing the packet to a send or drop
- * list.
+ * an output list or drop list.
  *
  * Before module invocation input and output exchange packets so ouptut of
  * one module connects with input of the following.
@@ -81,6 +80,8 @@ struct module {
 
 typedef struct module *(*module_load_handler)();
 
+// FIXME move the code bellow to a separate file
+#define DEVICE_NAME_LEN 80
 struct device_ectx;
 
 typedef void (*device_handler)(
@@ -88,3 +89,11 @@ typedef void (*device_handler)(
 	struct device_ectx *device_ectx,
 	struct packet *packet
 );
+
+struct device {
+	char name[DEVICE_NAME_LEN];
+	device_handler input_handler;
+	device_handler output_handler;
+};
+
+typedef struct device *(*device_load_handler)();

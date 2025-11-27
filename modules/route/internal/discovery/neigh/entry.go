@@ -27,6 +27,8 @@ type HardwareRoute struct {
 	SourceMAC [6]byte
 	// DestinationMAC is the MAC address of the next hop.
 	DestinationMAC [6]byte
+	// Device name
+	Device string
 }
 
 func (m HardwareRoute) String() string {

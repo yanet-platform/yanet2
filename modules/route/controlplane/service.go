@@ -351,6 +351,7 @@ func (m *RouteService) updateModuleConfig(
 			idx, err := config.RouteAdd(
 				entry.HardwareRoute.SourceMAC[:],
 				entry.HardwareRoute.DestinationMAC[:],
+				entry.HardwareRoute.Device,
 			)
 			if err != nil {
 				return fmt.Errorf("failed to add hardware route %q: %w", entry.HardwareRoute, err)
