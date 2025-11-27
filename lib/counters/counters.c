@@ -348,7 +348,6 @@ counter_storage_spawn(
 		);
 		if (new_blocks == NULL) {
 			// return FIXME;
-			assert(false);
 		}
 
 		SET_OFFSET_OF(&new_pool->blocks, new_blocks);
