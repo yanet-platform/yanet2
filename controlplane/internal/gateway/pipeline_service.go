@@ -54,10 +54,8 @@ func (m *PipelineService) Update(
 
 	for _, pipelineConfig := range pipelines {
 		cfg := ffi.PipelineConfig{
-			Name: pipelineConfig.GetName(),
-		}
-		for _, functionName := range pipelineConfig.GetFunctions() {
-			cfg.Functions = append(cfg.Functions, functionName)
+			Name:      pipelineConfig.GetName(),
+			Functions: pipelineConfig.GetFunctions(),
 		}
 
 		configs = append(configs, cfg)
