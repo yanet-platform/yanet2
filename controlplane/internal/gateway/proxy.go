@@ -12,6 +12,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 )
@@ -67,10 +71,20 @@ func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Read request body (binary protobuf payload).
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	requestMsg, err := m.jsonToProtobuf(fullMethodName, body, true)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse JSON request: %v", err), http.StatusBadRequest)
+		return
+	}
+	protobufBody, err := proto.Marshal(requestMsg)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal protobuf: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -103,7 +117,7 @@ func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	err = conn.Invoke(
 		outCtx,
 		fullMethodName,
-		proxy.NewFrame(body),
+		proxy.NewFrame(protobufBody),
 		responseBuffer,
 		grpc.ForceCodecV2(proxy.Codec()),
 	)
@@ -140,19 +154,98 @@ func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Reque
 
 	// Materialize the buffer slice.
 	respData := bufSlice.Materialize()
+	responseMessage, err := m.protobufToMessage(fullMethodName, respData, false)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to unmarshal protobuf response: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-	// Set our special content type header.
-	w.Header().Set("Content-Type", "application/x-protobuf")
+	options := protojson.MarshalOptions{
+		UseEnumNumbers: true,
+	}
+	responseBody, err := options.Marshal(responseMessage)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal JSON response: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-	// Write the binary payload to the response.
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write(respData); err != nil {
+	if _, err := w.Write(responseBody); err != nil {
 		m.log.Errorw("failed to write HTTP response",
 			zap.String("service", service),
 			zap.String("method", method),
 			zap.Error(err),
 		)
 	}
+}
+
+// jsonToProtobuf converts JSON to protobuf message for the given method.
+func (m *TransparentWebGRPCProxy) jsonToProtobuf(fullMethodName string, jsonData []byte, isRequest bool) (proto.Message, error) {
+	ty, err := m.getMessageType(fullMethodName, isRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	msg := ty.New().Interface()
+	if err := protojson.Unmarshal(jsonData, msg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+
+	return msg, nil
+}
+
+// protobufToMessage converts protobuf bytes to message.
+func (m *TransparentWebGRPCProxy) protobufToMessage(fullMethodName string, protobufData []byte, isRequest bool) (proto.Message, error) {
+	ty, err := m.getMessageType(fullMethodName, isRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	msg := ty.New().Interface()
+	if err := proto.Unmarshal(protobufData, msg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal protobuf: %w", err)
+	}
+
+	return msg, nil
+}
+
+// getMessageType returns the protobuf message type for the given method.
+func (m *TransparentWebGRPCProxy) getMessageType(fullMethodName string, isRequest bool) (protoreflect.MessageType, error) {
+	service, method, err := xgrpc.ParseFullMethod(fullMethodName)
+	if err != nil {
+		return nil, err
+	}
+
+	serviceName := protoreflect.FullName(service)
+	serviceDesc, err := protoregistry.GlobalFiles.FindDescriptorByName(serviceName)
+	if err != nil {
+		return nil, fmt.Errorf("service not found: %s", service)
+	}
+
+	svcDesc, ok := serviceDesc.(protoreflect.ServiceDescriptor)
+	if !ok {
+		return nil, fmt.Errorf("descriptor is not a service: %s", service)
+	}
+
+	methodDesc := svcDesc.Methods().ByName(protoreflect.Name(method))
+	if methodDesc == nil {
+		return nil, fmt.Errorf("method not found: %s.%s", service, method)
+	}
+
+	var msgDesc protoreflect.MessageDescriptor
+	if isRequest {
+		msgDesc = methodDesc.Input()
+	} else {
+		msgDesc = methodDesc.Output()
+	}
+
+	msgType, err := protoregistry.GlobalTypes.FindMessageByName(msgDesc.FullName())
+	if err != nil {
+		return nil, fmt.Errorf("message type not found: %s", msgDesc.FullName())
+	}
+
+	return msgType, nil
 }
 
 // grpcCodeToHTTPStatus maps gRPC status codes to HTTP status codes.
