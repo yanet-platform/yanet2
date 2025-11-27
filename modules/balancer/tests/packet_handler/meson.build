@@ -21,7 +21,6 @@ executable(
     lib_balancer_dp_dep,
     libdpdk_dep, 
     lib_config_dp_dep,
-    lib_yanet_test_utils_dep,
   ],
 )
 

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <lib/logging/log.h>
+
+/* Test framework macros */
 #define TEST_SUCCESS 0
 #define TEST_FAILED -1
 
@@ -8,6 +11,13 @@
 		if (!(cond)) {                                                 \
 			LOG(ERROR, "ASSERT FAILED: " msg, ##__VA_ARGS__);      \
 			return TEST_FAILED;                                    \
+		}                                                              \
+	} while (0)
+
+#define TEST_ASSERT_SUCCESS(value, msg, ...)                                   \
+	do {                                                                   \
+		if ((value) != TEST_SUCCESS) {                                 \
+			LOG(ERROR, "ASSERT FAILED: " msg, ##__VA_ARGS__);      \
 		}                                                              \
 	} while (0)
 

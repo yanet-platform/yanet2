@@ -110,3 +110,10 @@ cp_device_plain_config_set_output_pipeline(
 		&cp_device_plain_config->cp_device_config, index, name, weight
 	);
 }
+
+void
+cp_device_plain_config_free(
+	struct cp_device_plain_config *cp_device_plain_config
+) {
+	free(cp_device_plain_config);
+}

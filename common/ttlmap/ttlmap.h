@@ -2,9 +2,9 @@
 
 #include <stddef.h>
 
-#include "detail/ttlmap/bucket.h"
-#include "detail/ttlmap/lock.h"
-#include "detail/ttlmap/ttlmap.h"
+#include "detail/bucket.h"
+#include "detail/lock.h"
+#include "detail/ttlmap.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 

@@ -16,6 +16,8 @@ cp_module_init(
 	const char *module_name,
 	cp_module_free_handler free_handler
 ) {
+	memset(cp_module, 0, sizeof(struct cp_module));
+
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 
 	if (dp_config_lookup_module(

@@ -18,7 +18,7 @@ yanet_worker_mock_handle_packets(
 	struct config_gen_ectx *config_gen_ectx =
 		ADDR_OF(&cp_config_gen->config_gen_ectx);
 
-	worker->dp_worker.gen = cp_config_gen->gen;
+	// do not update worker gen as it set to very big number previously
 
 	struct packet_handle_result result;
 	packet_list_init(&result.output_packets);

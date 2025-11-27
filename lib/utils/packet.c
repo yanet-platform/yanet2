@@ -1,4 +1,5 @@
 #include "packet.h"
+#include "rte_mbuf_core.h"
 
 #include <netinet/in.h>
 #include <rte_ether.h>
@@ -8,6 +9,14 @@
 #include <rte_udp.h>
 
 #include <assert.h>
+#include <stdlib.h>
+
+#include <rte_build_config.h>
+#include <string.h>
+
+#include "lib/dataplane/packet/packet.h"
+
+////////////////////////////////////////////////////////////////////////////////
 
 static struct rte_mbuf *
 make_mbuf4(
@@ -20,12 +29,13 @@ make_mbuf4(
 ) {
 	size_t total_size =
 		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + 2048;
-	struct rte_mbuf *mbuf = malloc(total_size);
+	struct rte_mbuf *mbuf = aligned_alloc(64, total_size);
+	if (!mbuf) {
+		return NULL;
+	}
+
 	memset(mbuf, 0, sizeof(struct rte_mbuf));
 	mbuf->refcnt = 1;
-
-	if (!mbuf)
-		return NULL;
 
 	uint16_t total_len = sizeof(struct rte_ether_hdr) +
 			     sizeof(struct rte_ipv4_hdr) +
@@ -87,13 +97,12 @@ make_mbuf6(
 ) {
 	size_t total_size =
 		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + 2048;
-	struct rte_mbuf *mbuf = malloc(total_size);
-	memset(mbuf, 0, sizeof(struct rte_mbuf));
-	mbuf->refcnt = 1;
-
+	struct rte_mbuf *mbuf = aligned_alloc(64, total_size);
 	if (!mbuf) {
 		return NULL;
 	}
+	memset(mbuf, 0, sizeof(struct rte_mbuf));
+	mbuf->refcnt = 1;
 
 	uint16_t total_len =
 		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv6_hdr) +
@@ -145,7 +154,7 @@ make_mbuf6(
 }
 
 int
-make_packet4(
+fill_packet_net4(
 	struct packet *packet,
 	const uint8_t src_ip[NET4_LEN],
 	const uint8_t dst_ip[NET4_LEN],
@@ -162,7 +171,7 @@ make_packet4(
 
 // IPv6 in host byte order
 int
-make_packet6(
+fill_packet_net6(
 	struct packet *packet,
 	const uint8_t src_ip[NET6_LEN],
 	const uint8_t dst_ip[NET6_LEN],
@@ -178,7 +187,7 @@ make_packet6(
 }
 
 int
-make_packet_generic(
+fill_packet(
 	struct packet *packet,
 	const uint8_t *src_ip,
 	const uint8_t *dst_ip,
@@ -189,7 +198,7 @@ make_packet_generic(
 	uint16_t flags
 ) {
 	if (network_proto == IPPROTO_IP) {
-		return make_packet4(
+		return fill_packet_net4(
 			packet,
 			src_ip,
 			dst_ip,
@@ -199,7 +208,7 @@ make_packet_generic(
 			flags
 		);
 	} else if (network_proto == IPPROTO_IPV6) {
-		return make_packet6(
+		return fill_packet_net6(
 			packet,
 			src_ip,
 			dst_ip,
@@ -216,4 +225,174 @@ make_packet_generic(
 void
 free_packet(struct packet *packet) {
 	free(packet->mbuf);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+static void
+init_mbuf(struct rte_mbuf *m, struct packet_data *data, uint16_t buf_len) {
+	m->priv_size = 0;
+	m->buf_len = buf_len;
+	uint32_t mbuf_size = sizeof(struct rte_mbuf) + m->priv_size;
+
+	/* start of buffer is after mbuf structure and priv data */
+	m->buf_addr = (char *)m + mbuf_size;
+
+	// what for?
+	// rte_mbuf_iova_set(m, rte_mempool_virt2iova(m) + mbuf_size);
+
+	/* keep some headroom between start of buffer and data */
+	m->data_off = RTE_MIN(RTE_PKTMBUF_HEADROOM, m->buf_len);
+
+	/* init some constant fields */
+	m->pool = NULL;
+	m->nb_segs = 1;
+	m->port = 1; // fix RTE_MBUF_PORT_INVALID;
+	rte_mbuf_refcnt_set(m, 1);
+	m->next = NULL;
+
+	// Initialize mbuf data
+	m->data_len = data->size;
+	// TODO: multisegment packets
+	m->pkt_len = (uint32_t)data->size;
+	memcpy(rte_pktmbuf_mtod(m, uint8_t *), data->data, data->size);
+}
+
+static int
+init_packet_with_mbuf(
+	struct packet *packet, struct rte_mbuf *mbuf, struct packet_data *data
+) {
+	// here mbuf is initialized
+	memset(packet, 0, sizeof(struct packet));
+	packet->mbuf = mbuf;
+	packet->tx_device_id = data->tx_device_id;
+	packet->rx_device_id = data->rx_device_id;
+	return parse_packet(packet);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+static int
+fill_packets(
+	size_t packets_count,
+	struct packet_data *packets,
+	size_t mbuf_size,
+	struct packet_list *packet_list,
+	void *arena,
+	size_t arena_size
+) {
+	(void)arena_size;
+	assert(arena_size >= packets_count * mbuf_size);
+	assert((uintptr_t)arena % alignof(struct rte_mbuf) == 0);
+
+	packet_list_init(packet_list);
+
+	for (size_t i = 0; i < packets_count; i++) {
+		struct packet_data *data = &packets[i];
+		struct rte_mbuf *m =
+			(struct rte_mbuf *)((uint8_t *)arena + mbuf_size * i);
+		init_mbuf(m, data, mbuf_size);
+		struct packet *p = mbuf_to_packet(m);
+		if (init_packet_with_mbuf(p, m, data) != 0) {
+			return -1;
+		}
+		packet_list_add(packet_list, p);
+	}
+
+	return 0;
+}
+
+int
+fill_packet_list(
+	struct packet_list *packet_list,
+	size_t packets_count,
+	struct packet_data *packets,
+	uint16_t mbuf_size
+) {
+	packet_list_init(packet_list);
+
+	for (size_t i = 0; i < packets_count; i++) {
+		struct packet_data *data = &packets[i];
+		struct rte_mbuf *m =
+			aligned_alloc(alignof(struct rte_mbuf), mbuf_size);
+		init_mbuf(m, data, mbuf_size);
+		struct packet *p = mbuf_to_packet(m);
+		if (init_packet_with_mbuf(p, m, data) != 0) {
+			return -1;
+		}
+
+		// Initialize packet
+		memset(p, 0, sizeof(struct packet));
+		p->mbuf = m;
+		p->rx_device_id = data->rx_device_id;
+		p->tx_device_id = data->tx_device_id;
+		packet_list_add(packet_list, p);
+	}
+
+	return 0;
+}
+
+int
+fill_packet_list_arena(
+	struct packet_list *packet_list,
+	size_t packets_count,
+	struct packet_data *packets,
+	uint16_t mbuf_size,
+	void *arena,
+	size_t arena_size
+) {
+	(void)arena_size;
+	if ((uintptr_t)arena % alignof(struct rte_mbuf) != 0) {
+		size_t align = alignof(struct rte_mbuf);
+		size_t d = align - (uintptr_t)arena % align;
+		arena += d;
+		arena_size -= d;
+		assert((uintptr_t)arena % align == 0);
+	}
+	return fill_packets(
+		packets_count,
+		packets,
+		mbuf_size,
+		packet_list,
+		arena,
+		arena_size
+	);
+}
+
+void
+free_packet_list(struct packet_list *packet_list) {
+	while (1) {
+		struct packet *packet = packet_list_pop(packet_list);
+		if (packet == NULL) {
+			break;
+		}
+		free_packet(packet);
+	}
+}
+
+struct packet_data
+packet_data(const struct packet *p) {
+	struct rte_mbuf *m = packet_to_mbuf(p);
+	// TODO: multisegment packets
+	size_t size = m->data_len;
+	uint8_t *data = rte_pktmbuf_mtod(m, uint8_t *);
+	return (struct packet_data){data, size, p->tx_device_id, p->rx_device_id
+	};
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+int
+fill_packet_from_data(struct packet *packet, struct packet_data *data) {
+	size_t buf_len = RTE_PKTMBUF_HEADROOM + data->size;
+	if (buf_len % alignof(struct rte_mbuf) != 0) {
+		size_t a = alignof(struct rte_mbuf);
+		buf_len += a - buf_len % a;
+	}
+	struct rte_mbuf *mbuf = aligned_alloc(
+		alignof(struct rte_mbuf), sizeof(struct rte_mbuf) + buf_len
+	);
+	init_mbuf(mbuf, data, buf_len);
+	init_packet_with_mbuf(packet, mbuf, data);
+	return parse_packet(packet);
 }

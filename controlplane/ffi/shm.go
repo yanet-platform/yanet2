@@ -17,6 +17,10 @@ type SharedMemory struct {
 	ptr *C.struct_yanet_shm
 }
 
+func NewSharedMemoryFromRaw(ptr unsafe.Pointer) *SharedMemory {
+	return &SharedMemory{ptr: (*C.struct_yanet_shm)(ptr)}
+}
+
 // AttachSharedMemory attaches to YANET shared memory segment.
 func AttachSharedMemory(path string) (*SharedMemory, error) {
 	cPath := C.CString(path)

@@ -45,7 +45,9 @@ if get_option('fuzzing').enabled()
   yanet_c_args += fuzz_args
   yanet_link_args += fuzz_args
 endif
+
 yanet_rootdir = include_directories('.')
+yanet_builddir = include_directories('./build')
 
 libdpdk = subproject(
   'dpdk',
@@ -72,12 +74,12 @@ libdpdk_inc_dep = libdpdk_dep.partial_dependency(includes: true)
 
 subdir('common')
 subdir('lib')
-subdir('test_utils')
 subdir('filter')
 subdir('modules')
 subdir('devices')
 subdir('controlplane')
 subdir('dataplane')
+subdir('mock')
 subdir('sock-send')
 subdir('tests')
 subdir('coordinator')

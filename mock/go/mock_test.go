@@ -1,0 +1,88 @@
+package mock
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+)
+
+////////////////////////////////////////////////////////////////////////////////
+
+func TestBasic(t *testing.T) {
+	config := YanetMockConfig{
+		CpMemory: 1 << 27,
+		DpMemory: 1 << 20,
+		Workers:  1,
+		Devices: []YanetMockDeviceConfig{
+			{
+				id:   0,
+				name: "01:00.0",
+			},
+		},
+	}
+	mock, err := NewYanetMock(&config)
+	require.NoError(t, err)
+
+	defer mock.Free()
+
+	shm := mock.SharedMemory()
+	agent, err := shm.AgentAttach("config", 0, 1<<20)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+
+	{
+		functionConfig := ffi.FunctionConfig{
+			Name: "test",
+			Chains: []ffi.FunctionChainConfig{
+				{
+					Weight: 1,
+					Chain: ffi.ChainConfig{
+						Name: "ch0",
+						Modules: []ffi.ChainModuleConfig{
+							{
+								Type: "balancer",
+								Name: "b0",
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err = agent.UpdateFunctions([]ffi.FunctionConfig{functionConfig})
+		assert.NoError(t, err)
+	}
+
+	// update pipelines
+	{
+		pipelineConfig := ffi.PipelineConfig{
+			Name:      "test",
+			Functions: []string{"test"},
+		}
+
+		err = agent.UpdatePipelines([]ffi.PipelineConfig{pipelineConfig})
+		assert.NoError(t, err)
+	}
+
+	// update devices
+	{
+		deviceConfig := ffi.DeviceConfig{
+			Name: "01:00.0",
+			Input: []ffi.DevicePipelineConfig{
+				{
+					Name: "test",
+				},
+			},
+			Output: []ffi.DevicePipelineConfig{
+				{
+					Name: "dummy",
+				},
+			},
+		}
+
+		err = agent.UpdatePlainDevices([]ffi.DeviceConfig{deviceConfig})
+		assert.NoError(t, err)
+	}
+}

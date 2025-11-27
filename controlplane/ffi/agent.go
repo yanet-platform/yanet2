@@ -5,6 +5,14 @@ package ffi
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/counters/ -lcounters
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
+//#cgo LDFLAGS: -L../../build/devices/plain/api -ldev_plain_api
+//#cgo LDFLAGS: -L../../build/devices/vlan/api -ldev_vlan_api
+//#cgo LDFLAGS: -L../../build/lib/logging/ -llogging
+//
+//#include "api/agent.h"
+//#include "api/config.h"
+//#include "devices/plain/api/controlplane.h"
+//#include "devices/vlan/api/controlplane.h"
 //
 //#define _GNU_SOURCE
 //#include "api/agent.h"
@@ -158,6 +166,61 @@ func (m *Agent) UpdatePipelines(pipelinesConfigs []PipelineConfig) error {
 
 	return nil
 }
+
+func (agent *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
+	configs := make([]ShmDeviceConfig, 0, len(devices))
+
+	for idx := range devices {
+		device := &devices[idx]
+
+		name := device.Name
+		input := device.Input
+		output := device.Output
+
+		cName := C.CString(name)
+		defer C.free(unsafe.Pointer(cName))
+
+		cCfg := C.cp_device_plain_config_create(cName, C.uint64_t(len(input)), C.uint64_t(len(output)))
+
+		for idx := range input {
+			pipeline := &input[idx]
+			cName := C.CString(pipeline.Name)
+			defer C.free(unsafe.Pointer(cName))
+			C.cp_device_plain_config_set_input_pipeline(
+				cCfg,
+				C.uint64_t(idx),
+				cName,
+				C.uint64_t(pipeline.Weight),
+			)
+		}
+
+		for idx := range output {
+			pipeline := &output[idx]
+			cName := C.CString(pipeline.Name)
+			defer C.free(unsafe.Pointer(cName))
+			C.cp_device_plain_config_set_output_pipeline(
+				cCfg,
+				C.uint64_t(idx),
+				cName,
+				C.uint64_t(pipeline.Weight),
+			)
+		}
+
+		ptr, err := C.cp_device_plain_create((*C.struct_agent)(agent.AsRawPtr()), cCfg)
+		if err != nil {
+			return fmt.Errorf("failed to initialize plain device config: %w", err)
+		}
+		if ptr == nil {
+			return fmt.Errorf("failed to initialize plain device config: device %q not found", name)
+		}
+
+		configs = append(configs, NewShmDeviceConfig(unsafe.Pointer(ptr)))
+	}
+
+	return agent.UpdateDevices(configs)
+}
+
+// TODO: (*Agent).UpdateVlanDevices
 
 // UpdateDevices attaches the given pipelines to the given device IDs.
 func (m *Agent) UpdateDevices(devices []ShmDeviceConfig) error {

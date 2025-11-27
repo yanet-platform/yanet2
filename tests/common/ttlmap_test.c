@@ -1,12 +1,13 @@
 #include "common/memory_block.h"
 #include "lib/logging/log.h"
 #include "rte_common.h"
+
+#include <common/ttlmap/detail/bucket.h>
+#include <common/ttlmap/detail/lock.h>
+
+#include <common/ttlmap/ttlmap.h>
+
 #include <assert.h>
-
-#include <common/detail/ttlmap/bucket.h>
-#include <common/detail/ttlmap/lock.h>
-#include <common/ttlmap.h>
-
 #include <pthread.h>
 #include <stdalign.h>
 #include <unistd.h>
