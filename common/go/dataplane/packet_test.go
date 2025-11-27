@@ -138,7 +138,7 @@ func TestPacketList(t *testing.T) {
 
 	packets := genPackets(t, &pinner, 5)
 
-	packetList := NewPacketList(&pinner, packets)
+	packetList := NewPacketList(pinner, packets)
 	defer packetList.Free()
 
 	packet := packetList.First()
@@ -156,9 +156,9 @@ func TestPacketFront(t *testing.T) {
 
 	packets := genPackets(t, &pinner, 2)
 
-	packetList := NewPacketList(&pinner, packets)
+	packetList := NewPacketList(pinner, packets)
 
-	pf := NewPacketFront(&pinner, packetList, nil, nil)
+	pf := NewPacketFront(pinner, packetList, nil, nil)
 	defer pf.Free()
 
 	assert.Equal(t, pf.InputList(), packetList)

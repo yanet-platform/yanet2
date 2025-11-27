@@ -454,12 +454,18 @@ func (state *BalancerState) NewModuleConfig(
 		vsConfigs = append(vsConfigs, vsConfig.inner)
 	}
 
+	configsPtr := (**C.struct_balancer_vs_config)(nil)
+	if len(vsConfigs) > 0 {
+		configsPtr = (**C.struct_balancer_vs_config)(&vsConfigs[0])
+	}
+
 	cpModule, err := C.balancer_module_config_create(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
 		state.inner,
 		(C.size_t)(len(vsConfigs)),
-		(**C.struct_balancer_vs_config)(&vsConfigs[0]))
+		configsPtr,
+	)
 	if err != nil {
 		return ModuleConfig{
 				inner: nil,

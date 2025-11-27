@@ -69,7 +69,7 @@ func Encap(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func MakePacket(
+func MakePacketLayers(
 	srcIP netip.Addr,
 	srcPort uint16,
 	dstIP netip.Addr,

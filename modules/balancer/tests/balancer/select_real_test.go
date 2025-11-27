@@ -9,6 +9,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	mock "github.com/yanet-platform/yanet2/mock/go"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/tests/go/common"
 )
@@ -87,6 +88,7 @@ func allowedSrc(idx uint8) netip.Addr {
 
 func sendRandomSYNs(
 	t *testing.T,
+	mock *mock.YanetMock,
 	balancerInstance *balancer.ModuleInstance,
 	vsIdx int,
 	packetIdxOffset int,
@@ -106,11 +108,10 @@ func sendRandomSYNs(
 		packets = append(packets, packet)
 	}
 
-	result, err := HandlePackets(balancerInstance, packets...)
+	result, err := mock.HandlePackets(packets...)
 	assert.Nil(t, err)
 	assert.Equal(t, packetCount, len(result.Output))
 	assert.Empty(t, result.Drop)
-	assert.Empty(t, result.Input)
 
 	for packetIdx := range packetCount {
 		resultPacket := result.Output[packetIdx]
@@ -123,17 +124,22 @@ func sendRandomSYNs(
 
 func TestSelectAfterUpdate(t *testing.T) {
 	config, timeouts := smallConfig()
-
-	balancerInstance, err := balancer.NewModuleInstance(agent, "balancer0", config, 2000, timeouts)
-	require.NoError(t, err, "failed to make balancer")
-	defer balancerInstance.Free()
+	context, err := CreateTestContext(&TestContextConfig{
+		balancer: config,
+		timeouts: timeouts,
+	})
+	require.NoError(t, err)
+	defer context.Free()
 
 	packetCountBeforeRealUpdate := 10
+
+	mock := context.mock
+	balancerInstance := context.balancer
 
 	// send some syn packets to the first virtual service from different sources
 	t.Run("Send_Some_Packets_Before_Update", func(t *testing.T) {
 		// send random SYNs from unique sources
-		sendRandomSYNs(t, balancerInstance, 0, 0, packetCountBeforeRealUpdate)
+		sendRandomSYNs(t, mock, balancerInstance, 0, 0, packetCountBeforeRealUpdate)
 
 		// check balancer state info
 
@@ -171,8 +177,6 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 	t.Run("Enable_Disabled_Reals", func(t *testing.T) {
 		// update CP config gen
-		PrepareForUpdate(t)
-
 		vs := &config.Services[0]
 		updates := make([]*balancer.RealUpdate, 0, 2)
 		for _, realIdx := range []uint64{1, 2} {
@@ -198,6 +202,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 		// send random SYNs from unique sources
 		sendRandomSYNs(
 			t,
+			mock,
 			balancerInstance,
 			0,
 			packetCountBeforeRealUpdate,
@@ -255,8 +260,6 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 	t.Run("Disable_First_and_Second_Reals", func(t *testing.T) {
 		// update CP config gen
-		PrepareForUpdate(t)
-
 		vs := &config.Services[0]
 		updates := make([]*balancer.RealUpdate, 0, 2)
 		for _, realIdx := range []uint64{0, 1} {
@@ -287,6 +290,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 		// send random SYNs from unique sources
 		sendRandomSYNs(
 			t,
+			mock,
 			balancerInstance,
 			0,
 			packetCountBeforeRealUpdate+packetCountAfterRealUpdate,

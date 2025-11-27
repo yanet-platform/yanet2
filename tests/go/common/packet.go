@@ -35,7 +35,10 @@ func ParsePackets(pf *CPacketFront) error {
 
 func PacketFrontFromPayload(payload [][]byte) *CPacketFront {
 	testData := []C.struct_test_data{}
-	var payloadPinner runtime.Pinner
+
+	payloadPinner := runtime.Pinner{}
+	defer payloadPinner.Unpin()
+
 	for _, data := range payload {
 		payloadPinner.Pin(&data[0])
 		testData = append(testData, C.struct_test_data{
@@ -52,7 +55,6 @@ func PacketFrontFromPayload(payload [][]byte) *CPacketFront {
 		C.uint64_t(len(testData)),                           // mbuf_count
 		C.uint16_t(mbufSize),
 	)
-	payloadPinner.Unpin()
 
 	return (*CPacketFront)(pf)
 }

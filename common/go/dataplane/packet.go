@@ -132,7 +132,7 @@ func (packetList *PacketList) Data() []PacketData {
 	return data
 }
 
-func NewPacketList(pinner *runtime.Pinner, packets []*Packet) *PacketList {
+func NewPacketList(pinner runtime.Pinner, packets []*Packet) *PacketList {
 	packetList := PacketList{}
 	pinner.Pin(&packetList)
 
@@ -144,15 +144,18 @@ func NewPacketList(pinner *runtime.Pinner, packets []*Packet) *PacketList {
 	return &packetList
 }
 
-func NewPacketListFromData(pinner *runtime.Pinner, data ...PacketData) (*PacketList, error) {
+func NewPacketListFromData(pinner runtime.Pinner, data ...PacketData) (*PacketList, error) {
 	packetList := NewPacketList(pinner, make([]*Packet, 0))
 	pinner.Pin(packetList)
 
 	for idx := range data {
+		packetData := data[idx]
+		pinner.Pin(&packetData.Payload[0])
 		packet, err := NewPacketFromData(data[idx])
 		if err != nil {
 			return nil, fmt.Errorf("failed to create new packet from data[%d]: %v", idx, err)
 		}
+		pinner.Pin(packet)
 		packetList.Add(packet)
 	}
 	return packetList, nil
@@ -173,7 +176,7 @@ type PacketFrontPayload struct {
 }
 
 func NewPacketFront(
-	pinner *runtime.Pinner,
+	pinner runtime.Pinner,
 	input *PacketList,
 	output *PacketList,
 	drop *PacketList,

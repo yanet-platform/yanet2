@@ -50,7 +50,8 @@ import (
 ////////////////////////////////////////////////////////////////////////////////
 
 func openAggregator() (unsafe.Pointer, error) {
-	path := C.CString("../../build/mock/libdataplane_aggregator.so")
+	// path := C.CString("../../build/mock/libdataplane_aggregator.so")
+	path := C.CString("/home/egnees/yanet1/yanet2/build/mock/libdataplane_aggregator.so")
 	defer C.free(unsafe.Pointer(path))
 
 	h, err := C.dlopen(path, C.RTLD_NOW|C.RTLD_GLOBAL)
@@ -131,15 +132,16 @@ func (mock *YanetMock) HandlePackets(packets ...gopacket.Packet) (*HandlePackets
 			RxDeviceId: uint16(rxDeviceId),
 		})
 	}
-	packetList, err := dataplane.NewPacketListFromData(&pinner, data...)
+	packetList, err := dataplane.NewPacketListFromData(pinner, data...)
 	if err != nil {
 		return nil, err
 	}
 
 	pinner.Pin(mock)
-	result, err := C.yanet_worker_mock_handle_packets(
-		&mock.inner.workers[0],
+	result, err := C.yanet_mock_handle_packets(
+		&mock.inner,
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
+		C.size_t(0), // use the first worker for now
 	)
 	if err != nil {
 		return nil, err

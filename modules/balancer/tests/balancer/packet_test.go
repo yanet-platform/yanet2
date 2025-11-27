@@ -9,6 +9,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	mock "github.com/yanet-platform/yanet2/mock/go"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"github.com/yanet-platform/yanet2/tests/go/common"
@@ -105,6 +106,7 @@ func (vs *VsSelector) Json() string {
 
 func SendPacket(
 	t *testing.T,
+	mock *mock.YanetMock,
 	b *balancer.ModuleInstance,
 	selector VsSelector,
 ) (*framework.PacketInfo, *balancer.VirtualService) {
@@ -120,7 +122,7 @@ func SendPacket(
 					if (real.DstAddr.Is4() && selector.RealIp == 4) ||
 						(real.DstAddr.Is6() && selector.RealIp == 6) {
 						// found
-						resultPacket := SendPacketToVs(t, b, vs)
+						resultPacket := SendPacketToVs(t, mock, b, vs)
 						return resultPacket, vs
 					}
 				}
@@ -133,6 +135,7 @@ func SendPacket(
 
 func SendPacketToVs(
 	t *testing.T,
+	mock *mock.YanetMock,
 	b *balancer.ModuleInstance,
 	vs *balancer.VirtualService,
 ) *framework.PacketInfo {
@@ -149,12 +152,11 @@ func SendPacketToVs(
 	if vs.Proto == balancer.TransportProtoUdp {
 		tcp = nil
 	}
-	layers := MakePacket(clientAddr, clientPort, vsAddr, vsPort, tcp)
+	layers := MakePacketLayers(clientAddr, clientPort, vsAddr, vsPort, tcp)
 	packet := common.LayersToPacket(t, layers...)
-	result, err := HandlePackets(b, packet)
+	result, err := mock.HandlePackets(packet)
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(result.Output))
-	assert.Empty(t, result.Input)
 	assert.Empty(t, result.Drop)
 	resultPacket := result.Output[0]
 	ValidatePacket(t, b.GetConfig(), packet, resultPacket)
@@ -164,16 +166,19 @@ func SendPacketToVs(
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestPacketGRE(t *testing.T) {
-	config, timeouts := allCombinationsConfig()
+	balancerConfig, timeouts := allCombinationsConfig()
 
-	PrepareForUpdate(t)
+	context, err := CreateTestContext(&TestContextConfig{
+		balancer: balancerConfig,
+		timeouts: timeouts,
+	})
+	require.NoError(t, err)
+	defer context.Free()
 
-	// create balancer instance
-	balancerInstance, err := balancer.NewModuleInstance(agent, "balancer0", config, 100, timeouts)
-	require.Nil(t, err)
-	defer balancerInstance.Free()
+	mock := context.mock
+	bal := context.balancer
 
-	SendPacket(t, balancerInstance, VsSelector{
+	SendPacket(t, mock, bal, VsSelector{
 		VsIp:   4,
 		Proto:  balancer.TransportProtoTcp,
 		RealIp: 4,

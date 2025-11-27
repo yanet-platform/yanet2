@@ -41,6 +41,5 @@ balancer_module_config_counter(
 ) {
 	uint64_t *counter =
 		counter_get_address(config->counter_id, worker, storage);
-	fprintf(stderr, "counter=%p\n", counter);
 	return (struct module_config_counter *)counter;
 }
