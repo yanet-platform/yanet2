@@ -16,7 +16,8 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
+	"github.com/yanet-platform/yanet2/common/go/xpacket"
+	mbalancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"github.com/yanet-platform/yanet2/tests/go/common"
 )
@@ -194,7 +195,11 @@ func MakeTCPPacket(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func CheckPacketsEqual(t *testing.T, result gopacket.Packet, expected gopacket.Packet) {
+func CheckPacketsEqual(
+	t *testing.T,
+	result gopacket.Packet,
+	expected gopacket.Packet,
+) {
 	// Find diff
 	diff := cmp.Diff(expected.Layers(), result.Layers(),
 		cmpopts.IgnoreUnexported(
@@ -233,13 +238,19 @@ func padTCPOptions(opts []layers.TCPOption) ([]layers.TCPOption, error) {
 	}
 	// Pad with NOPs to 4-byte boundary
 	for (length % 4) != 0 {
-		opts = append(opts, layers.TCPOption{OptionType: layers.TCPOptionKindNop})
+		opts = append(
+			opts,
+			layers.TCPOption{OptionType: layers.TCPOptionKindNop},
+		)
 		length++
 	}
 	return opts, nil
 }
 
-func InsertOrUpdateMSS(p gopacket.Packet, newMSS uint16) (*gopacket.Packet, error) {
+func InsertOrUpdateMSS(
+	p gopacket.Packet,
+	newMSS uint16,
+) (*gopacket.Packet, error) {
 	// Decode (assumes Ethernet; adjust if you have raw IP)
 	tcpL := p.Layer(layers.LayerTypeTCP)
 	if tcpL == nil {
@@ -342,12 +353,13 @@ func InsertOrUpdateMSS(p gopacket.Packet, newMSS uint16) (*gopacket.Packet, erro
 
 func ValidatePacket(
 	t *testing.T,
-	config *balancer.ModuleInstanceConfig,
+	config *mbalancer.ModuleInstanceConfig,
 	originalGoPacket gopacket.Packet,
 	resultPacket *framework.PacketInfo,
 ) {
 	t.Helper()
-	originalPacket, err := framework.NewPacketParser().ParsePacket(originalGoPacket.Data())
+	originalPacket, err := framework.NewPacketParser().
+		ParsePacket(originalGoPacket.Data())
 	if err != nil {
 		t.Errorf("failed to parse packet: %v", err)
 		return
@@ -358,8 +370,25 @@ func ValidatePacket(
 	}
 
 	resultInner := resultPacket.InnerPacket
-	assert.Equal(t, originalPacket.DstIP, resultInner.DstIP, "encapsulated packet dst ip mismatch")
-	assert.Equal(t, originalPacket.SrcIP, resultInner.SrcIP, "encapsulated packet src ip mismatch")
+	if resultInner == nil {
+		t.Error("no inner packet")
+		return
+	}
+
+	assert.Equal(
+		t,
+		originalPacket.DstIP,
+		resultInner.DstIP,
+		"encapsulated packet dst ip mismatch",
+	)
+	assert.Equal(
+		t,
+		originalPacket.SrcIP,
+		resultInner.SrcIP,
+		"encapsulated packet src ip mismatch",
+	)
+
+	var originPacketProto layers.IPProtocol
 	if originalPacket.IsIPv4 {
 		assert.Equal(
 			t,
@@ -367,16 +396,37 @@ func ValidatePacket(
 			resultInner.Protocol,
 			"encapsulated packet protocol mismatch",
 		)
+		originPacketProto = originalPacket.Protocol
 	} else {
-		assert.Equal(t, originalPacket.NextHeader, resultInner.NextHeader, "encapsulated packet protocol mismatch")
+		assert.Equal(
+			t,
+			originalPacket.NextHeader,
+			resultInner.NextHeader,
+			"encapsulated packet protocol mismatch",
+		)
+		originPacketProto = originalPacket.NextHeader
+	}
+
+	// get packet proto
+
+	var packetProto mbalancer.TransportProto
+	if originPacketProto.LayerType() == layers.LayerTypeTCP {
+		packetProto = mbalancer.Tcp
+	} else if originPacketProto.LayerType() == layers.LayerTypeUDP {
+		packetProto = mbalancer.Udp
+	} else {
+		t.Errorf("invalid packet protocol: %s", originPacketProto.String())
+		return
 	}
 
 	// todo: check tcp layers (MSS matters if FixMSS flag is enabled)
 
 	for idx := range config.Services {
 		service := &config.Services[idx]
-		if reflect.DeepEqual(net.IP(service.Address.AsSlice()), originalPacket.DstIP) &&
-			(service.Port == originalPacket.DstPort || service.Flags.PureL3) {
+		if reflect.DeepEqual(
+			net.IP(service.Address.AsSlice()),
+			originalPacket.DstIP,
+		) && (service.Port == originalPacket.DstPort || service.Flags.PureL3) && service.Proto == packetProto {
 			// found service
 			if service.Flags.GRE {
 				expectedTunnelType := "gre-ip4"
@@ -392,9 +442,32 @@ func ValidatePacket(
 			}
 
 			// todo: check tcp layers (if FixMSS enabled)
+			if service.Flags.FixMSS {
+				originalMSS, err := xpacket.PacketMSS(originalGoPacket)
+				hadMSS := err != nil
+
+				packet := gopacket.NewPacket(resultPacket.RawData, layers.LayerTypeEthernet, gopacket.Default)
+				resultMSS, err := xpacket.PacketMSS(packet)
+				hasMSS := err != nil
+				if !hasMSS {
+					t.Error("no mss in packet, but fix mss flag is present")
+					return
+				}
+				expectedMSS := uint16(0)
+				if hadMSS {
+					if originalMSS < 1220 {
+						expectedMSS = originalMSS
+					} else {
+						expectedMSS = 1220
+					}
+				} else {
+					expectedMSS = 536
+				}
+				assert.Equal(t, expectedMSS, resultMSS, "incorrect mss after fix")
+			}
 
 			for realIdx := range service.Reals {
-				real := service.Reals[realIdx]
+				real := &service.Reals[realIdx]
 				if reflect.DeepEqual(
 					net.IP(real.DstAddr.AsSlice()),
 					resultPacket.DstIP,
@@ -405,20 +478,24 @@ func ValidatePacket(
 					return
 				}
 			}
-			t.Errorf("not found real in service %d", idx)
+			t.Error("not found real which can accept packet sent by balancer")
+			t.Log("user packet", originalPacket)
+			t.Log("balancer packet", resultPacket)
 			break
 		}
 	}
 
-	t.Error("not found service which can serve packet")
+	t.Error("not found service which could serve packet")
+	t.Log("user packet", originalPacket)
+	t.Log("balancer packet", resultPacket)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 func ValidateStateInfo(
 	t *testing.T,
-	info *balancer.StateInfo,
-	config *balancer.ModuleInstanceConfig,
+	info *mbalancer.StateInfo,
+	config *mbalancer.ModuleInstanceConfig,
 ) {
 	t.Helper()
 	for vsIdx := range config.Services {

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	moduleBalancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
+	mbalancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
@@ -24,24 +24,24 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func smallConfig() (*moduleBalancer.ModuleInstanceConfig, *moduleBalancer.SessionsTimeouts) {
-	config := moduleBalancer.ModuleInstanceConfig{
-		Services: []moduleBalancer.VirtualService{
+func smallConfig() (*mbalancer.ModuleInstanceConfig, *mbalancer.SessionsTimeouts) {
+	config := mbalancer.ModuleInstanceConfig{
+		Services: []mbalancer.VirtualService{
 			{
 				Address: IpAddr("192.166.13.22"),
 				Port:    1000,
-				Flags: moduleBalancer.VsFlags{
+				Flags: mbalancer.VsFlags{
 					GRE:    false,
 					OPS:    false,
 					PureL3: false,
 					FixMSS: false,
 				},
-				Scheduler: moduleBalancer.VsSchedulerPRR,
-				Proto:     moduleBalancer.TransportProtoTcp,
+				Scheduler: mbalancer.VsSchedulerPRR,
+				Proto:     mbalancer.Tcp,
 				AllowedSrc: []netip.Prefix{
 					IpPrefix("10.12.0.0/8"),
 				},
-				Reals: []moduleBalancer.Real{
+				Reals: []mbalancer.Real{
 					{
 						Weight:  1,
 						DstAddr: IpAddr("1.1.1.1"),
@@ -67,7 +67,7 @@ func smallConfig() (*moduleBalancer.ModuleInstanceConfig, *moduleBalancer.Sessio
 			},
 		},
 	}
-	timeouts := moduleBalancer.SessionsTimeouts{
+	timeouts := mbalancer.SessionsTimeouts{
 		TcpSynAck: 60,
 		TcpSyn:    60,
 		TcpFin:    60,
@@ -102,7 +102,7 @@ func allowedSrc(idx uint8) netip.Addr {
 func sendRandomSYNs(
 	t *testing.T,
 	mock *mock.YanetMock,
-	balancerInstance *moduleBalancer.ModuleInstance,
+	balancerInstance *mbalancer.ModuleInstance,
 	vsIdx int,
 	packetIdxOffset int,
 	packetCount int,
@@ -129,7 +129,12 @@ func sendRandomSYNs(
 	for packetIdx := range packetCount {
 		resultPacket := result.Output[packetIdx]
 		originalPacket := packets[packetIdx]
-		ValidatePacket(t, balancerInstance.GetConfig(), originalPacket, resultPacket)
+		ValidatePacket(
+			t,
+			balancerInstance.GetConfig(),
+			originalPacket,
+			resultPacket,
+		)
 	}
 }
 
@@ -157,8 +162,16 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 		// check vs
 		assert.Equal(t, 1, len(info.VsInfo))
-		assert.Equal(t, packetCountBeforeRealUpdate, int(info.VsInfo[0].ActiveSessions))
-		assert.Equal(t, packetCountBeforeRealUpdate, int(info.VsInfo[0].Stats.IncomingPackets))
+		assert.Equal(
+			t,
+			packetCountBeforeRealUpdate,
+			int(info.VsInfo[0].ActiveSessions),
+		)
+		assert.Equal(
+			t,
+			packetCountBeforeRealUpdate,
+			int(info.VsInfo[0].Stats.IncomingPackets),
+		)
 
 		// check reals
 		assert.Equal(t, 3, len(info.RealInfo))
@@ -166,15 +179,31 @@ func TestSelectAfterUpdate(t *testing.T) {
 		// check first real
 		{
 			info := &info.RealInfo[0]
-			assert.Equal(t, packetCountBeforeRealUpdate, int(info.ActiveSessions))
-			assert.Equal(t, packetCountBeforeRealUpdate, int(info.Stats.SendPackets))
-			assert.Equal(t, int(info.ActiveSessions), int(info.Stats.SendPackets))
+			assert.Equal(
+				t,
+				packetCountBeforeRealUpdate,
+				int(info.ActiveSessions),
+			)
+			assert.Equal(
+				t,
+				packetCountBeforeRealUpdate,
+				int(info.Stats.SendPackets),
+			)
+			assert.Equal(
+				t,
+				int(info.ActiveSessions),
+				int(info.Stats.SendPackets),
+			)
 		}
 
 		// check disabled reals
 		for _, disabledReal := range []uint64{1, 2} {
 			assert.Equal(t, 0, int(info.RealInfo[disabledReal].ActiveSessions))
-			assert.Equal(t, 0, int(info.RealInfo[disabledReal].Stats.SendPackets))
+			assert.Equal(
+				t,
+				0,
+				int(info.RealInfo[disabledReal].Stats.SendPackets),
+			)
 		}
 
 		// validate state info
@@ -186,10 +215,10 @@ func TestSelectAfterUpdate(t *testing.T) {
 	t.Run("Enable_Disabled_Reals", func(t *testing.T) {
 		// update CP config gen
 		vs := &balancer.GetConfig().Services[0]
-		updates := make([]*moduleBalancer.RealUpdate, 0, 2)
+		updates := make([]*mbalancer.RealUpdate, 0, 2)
 		for _, realIdx := range []uint64{1, 2} {
 			real := &vs.Reals[realIdx]
-			updates = append(updates, &moduleBalancer.RealUpdate{
+			updates = append(updates, &mbalancer.RealUpdate{
 				VirtualIp: vs.Address,
 				Proto:     vs.Proto,
 				Port:      vs.Port,
@@ -243,9 +272,21 @@ func TestSelectAfterUpdate(t *testing.T) {
 		packetsSum := 0
 		{
 			info := &info.RealInfo[0]
-			assert.Less(t, packetCountBeforeRealUpdate, int(info.ActiveSessions))
-			assert.Less(t, packetCountBeforeRealUpdate, int(info.Stats.SendPackets))
-			assert.Equal(t, int(info.ActiveSessions), int(info.Stats.SendPackets))
+			assert.Less(
+				t,
+				packetCountBeforeRealUpdate,
+				int(info.ActiveSessions),
+			)
+			assert.Less(
+				t,
+				packetCountBeforeRealUpdate,
+				int(info.Stats.SendPackets),
+			)
+			assert.Equal(
+				t,
+				int(info.ActiveSessions),
+				int(info.Stats.SendPackets),
+			)
 			packetsSum += int(info.Stats.SendPackets)
 		}
 
@@ -254,11 +295,19 @@ func TestSelectAfterUpdate(t *testing.T) {
 			info := &info.RealInfo[disabledReal]
 			assert.Less(t, 0, int(info.ActiveSessions))
 			assert.Less(t, 0, int(info.Stats.SendPackets))
-			assert.Equal(t, int(info.ActiveSessions), int(info.Stats.SendPackets))
+			assert.Equal(
+				t,
+				int(info.ActiveSessions),
+				int(info.Stats.SendPackets),
+			)
 			packetsSum += int(info.Stats.SendPackets)
 		}
 
-		assert.Equal(t, packetsSum, packetCountBeforeRealUpdate+packetCountAfterRealUpdate)
+		assert.Equal(
+			t,
+			packetsSum,
+			packetCountBeforeRealUpdate+packetCountAfterRealUpdate,
+		)
 
 		// validate state info
 		ValidateStateInfo(t, info, balancer.GetConfig())
@@ -269,10 +318,10 @@ func TestSelectAfterUpdate(t *testing.T) {
 	t.Run("Disable_First_and_Second_Reals", func(t *testing.T) {
 		// update CP config gen
 		vs := &balancer.GetConfig().Services[0]
-		updates := make([]*moduleBalancer.RealUpdate, 0, 2)
+		updates := make([]*mbalancer.RealUpdate, 0, 2)
 		for _, realIdx := range []uint64{0, 1} {
 			real := &vs.Reals[realIdx]
-			updates = append(updates, &moduleBalancer.RealUpdate{
+			updates = append(updates, &mbalancer.RealUpdate{
 				VirtualIp: vs.Address,
 				Proto:     vs.Proto,
 				Port:      vs.Port,
@@ -330,8 +379,16 @@ func TestSelectAfterUpdate(t *testing.T) {
 		for disabled := range []uint64{0, 1} {
 			realInfo := &info.RealInfo[disabled]
 			realInfoBefore := &infoBefore.RealInfo[disabled]
-			assert.Equal(t, realInfo.ActiveSessions, realInfoBefore.ActiveSessions)
-			assert.Equal(t, realInfo.Stats.SendPackets, realInfoBefore.Stats.SendPackets)
+			assert.Equal(
+				t,
+				realInfo.ActiveSessions,
+				realInfoBefore.ActiveSessions,
+			)
+			assert.Equal(
+				t,
+				realInfo.Stats.SendPackets,
+				realInfoBefore.Stats.SendPackets,
+			)
 		}
 
 		// check enabled real
@@ -339,8 +396,16 @@ func TestSelectAfterUpdate(t *testing.T) {
 		enabled := 2
 		realInfo := &info.RealInfo[enabled]
 		realInfoBefore := &infoBefore.RealInfo[enabled]
-		assert.Greater(t, realInfo.ActiveSessions, realInfoBefore.ActiveSessions)
-		assert.Greater(t, realInfo.Stats.SendPackets, realInfoBefore.Stats.SendPackets)
+		assert.Greater(
+			t,
+			realInfo.ActiveSessions,
+			realInfoBefore.ActiveSessions,
+		)
+		assert.Greater(
+			t,
+			realInfo.Stats.SendPackets,
+			realInfoBefore.Stats.SendPackets,
+		)
 
 		// validate state info
 		ValidateStateInfo(t, info, balancer.GetConfig())

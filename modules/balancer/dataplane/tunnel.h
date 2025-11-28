@@ -27,8 +27,8 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 
 	uint32_t original_transport_offset = packet->transport_header.offset;
 
-	struct rte_ipv4_hdr *ipv4_header_inner = NULL;
 	struct rte_ipv6_hdr *ipv6_header_inner = NULL;
+	struct rte_ipv4_hdr *ipv4_header_inner = NULL;
 	if (vs_flags & BALANCER_VS_IPV6_FLAG) {
 		ipv6_header_inner = rte_pktmbuf_mtod_offset(
 			mbuf,

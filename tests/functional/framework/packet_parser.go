@@ -146,31 +146,30 @@ func (p *PacketParser) ParsePacket(data []byte) (*PacketInfo, error) {
 // Returns:
 //   - error: An error if IP layer parsing or tunnel detection fails
 func (p *PacketParser) parseIPLayers(packet gopacket.Packet, info *PacketInfo) error {
-	// Check for IPv4
-	if ipv4Layer := packet.Layer(layers.LayerTypeIPv4); ipv4Layer != nil {
-		ipv4 := ipv4Layer.(*layers.IPv4)
-		info.IsIPv4 = true
-		info.SrcIP = ipv4.SrcIP
-		info.DstIP = ipv4.DstIP
-		info.Protocol = ipv4.Protocol
+	if networkLayer := packet.NetworkLayer(); networkLayer != nil {
+		// Check for IPv4
+		if networkLayer.LayerType() == layers.LayerTypeIPv4 {
+			ipv4 := networkLayer.(*layers.IPv4)
+			info.IsIPv4 = true
+			info.SrcIP = ipv4.SrcIP
+			info.DstIP = ipv4.DstIP
+			info.Protocol = ipv4.Protocol
 
-		// Check for tunneled packets
-		if err := p.checkTunnelInIPv4(packet, ipv4, info); err != nil {
-			return err
-		}
-	}
+			// Check for tunneled packets
+			if err := p.checkTunnelInIPv4(packet, ipv4, info); err != nil {
+				return err
+			}
+		} else if networkLayer.LayerType() == layers.LayerTypeIPv6 { // Check for Ipv6
+			ipv6 := networkLayer.(*layers.IPv6)
+			info.IsIPv6 = true
+			info.SrcIP = ipv6.SrcIP
+			info.DstIP = ipv6.DstIP
+			info.NextHeader = ipv6.NextHeader
 
-	// Check for IPv6
-	if ipv6Layer := packet.Layer(layers.LayerTypeIPv6); ipv6Layer != nil {
-		ipv6 := ipv6Layer.(*layers.IPv6)
-		info.IsIPv6 = true
-		info.SrcIP = ipv6.SrcIP
-		info.DstIP = ipv6.DstIP
-		info.NextHeader = ipv6.NextHeader
-
-		// Check for tunneled packets
-		if err := p.checkTunnelInIPv6(packet, ipv6, info); err != nil {
-			return err
+			// Check for tunneled packets
+			if err := p.checkTunnelInIPv6(packet, ipv6, info); err != nil {
+				return err
+			}
 		}
 	}
 

@@ -71,7 +71,8 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		return nil, fmt.Errorf("failed to create new yanet mock: %w", err)
 	}
 
-	agent, err := mock.SharedMemory().AgentAttach("balancer", 0, uint(config.mock.CpMemory)-(1<<26))
+	agent, err := mock.SharedMemory().
+		AgentAttach("balancer", 0, uint(config.mock.CpMemory)-(1<<26))
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent: %w", err)
 	}
@@ -84,7 +85,10 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		config.timeouts,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create new balancer module instance: %w", err)
+		return nil, fmt.Errorf(
+			"failed to create new balancer module instance: %w",
+			err,
+		)
 	}
 
 	if err := setupCp(agent); err != nil {

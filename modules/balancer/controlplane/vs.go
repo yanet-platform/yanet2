@@ -46,8 +46,8 @@ func VsFlagsFromProto(flags *balancerpb.VsFlags) VsFlags {
 type TransportProto balancerpb.TransportProto
 
 const (
-	TransportProtoUdp TransportProto = TransportProto(balancerpb.TransportProto_UDP)
-	TransportProtoTcp TransportProto = TransportProto(balancerpb.TransportProto_TCP)
+	Udp TransportProto = TransportProto(balancerpb.TransportProto_UDP)
+	Tcp TransportProto = TransportProto(balancerpb.TransportProto_TCP)
 )
 
 func TransportProtoFromProto(p balancerpb.TransportProto) TransportProto {

@@ -11,7 +11,6 @@ package balancer
 //#cgo LDFLAGS: -L../../../build/modules/balancer/state -lbalancer_state
 //#cgo LDFLAGS: -L../../../build/filter -lfilter
 //#cgo LDFLAGS: -L../../../build/lib/logging -llogging
-//#cgo LDFLAGS: -fsanitize=address,undefined
 /*
 #include <stdlib.h>
 #include <string.h>
@@ -57,9 +56,9 @@ func addressToSlice(p *C.uint8_t, addr C.int) []byte {
 
 func vsProtoFromIpProto(proto C.int) TransportProto {
 	if proto == C.IPPROTO_TCP {
-		return TransportProtoTcp
+		return Tcp
 	} else {
-		return TransportProtoUdp
+		return Udp
 	}
 }
 
@@ -281,7 +280,7 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 	flags := vsFlags(vs)
 
 	proto := C.IPPROTO_TCP
-	if vs.Proto == TransportProtoUdp {
+	if vs.Proto == Udp {
 		proto = C.IPPROTO_UDP
 	}
 
