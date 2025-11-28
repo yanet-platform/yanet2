@@ -17,7 +17,7 @@ lib_yanet_mock = static_library(
   'yanet_mock',
   sources,
   c_args: yanet_c_args,
-  link_args: yanet_link_args,
+  link_args: yanet_link_args + ['-Wl,-E',],
   dependencies: dependencies,
   include_directories: [yanet_rootdir],
   install: false,
@@ -25,36 +25,6 @@ lib_yanet_mock = static_library(
 
 lib_yanet_mock_dep = declare_dependency(
   link_with: [lib_yanet_mock],
-)
-
-# build shared aggregator for modules and devices
-
-modules_dep = [
-  lib_balancer_dp_dep,
-  lib_decap_dp_dep,
-  lib_dscp_dp_dep,
-  lib_acl_dp_dep,
-  lib_forward_dp_dep,
-  lib_route_dp_dep,
-  lib_nat64_dp_dep,
-  lib_pdump_dp_dep,
-]
-
-devices_dep = [
-  lib_dev_plain_dp_dep,
-  lib_dev_vlan_dp_dep,
-]
-
-dataplane_aggregator = shared_library(
-  'dataplane_aggregator',
-  ['aggregator.c'],
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
-  dependencies: modules_dep + devices_dep + lib_dependencies,
-  include_directories: [yanet_rootdir],
-)
-dataplane_aggregator_dep = declare_dependency(
-  link_with: dataplane_aggregator
 )
 
 subdir('tests')

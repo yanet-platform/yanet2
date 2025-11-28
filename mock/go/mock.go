@@ -6,6 +6,7 @@ package mock
 #cgo CFLAGS: -I../../lib
 #cgo CFLAGS: -I../../build/subprojects/dpdk/lib
 #cgo CFLAGS: -I../../build/mock
+
 #cgo LDFLAGS: -L../../build/modules/balancer/dataplane -lbalancer_dp
 #cgo LDFLAGS: -L../../build/modules/decap/dataplane -ldecap_dp
 #cgo LDFLAGS: -L../../build/modules/dscp/dataplane -ldscp_dp
@@ -16,16 +17,19 @@ package mock
 #cgo LDFLAGS: -L../../build/modules/pdump/dataplane -lpdump_dp
 #cgo LDFLAGS: -L../../build/devices/plain/dataplane -lplain_dp
 #cgo LDFLAGS: -L../../build/devices/vlan/dataplane -lvlan_dp
+
 #cgo LDFLAGS: -L../../build/mock -lyanet_mock
 #cgo LDFLAGS: -L../../build/lib/dataplane/pipeline -lpipeline
 #cgo LDFLAGS: -L../../build/lib/logging  -llogging
 #cgo LDFLAGS: -L../../build/lib/controlplane/agent  -lagent
 #cgo LDFLAGS: -L../../build/lib/counters  -lcounters
 #cgo LDFLAGS: -L../../build/filter -lfilter
+
 #cgo LDFLAGS: -lnuma
 #cgo LDFLAGS: -ldl
 
-#include <dlfcn.h>
+#cgo LDFLAGS: -Wl,-E
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -33,6 +37,33 @@ package mock
 
 #include "mock.h"
 #include "config.h"
+
+void
+keep_refs(void **ptrs) {
+	extern struct module *new_module_balancer(void);
+	extern struct module *new_module_decap(void);
+	extern struct module *new_module_dscp(void);
+	extern struct module *new_module_acl(void);
+	extern struct module *new_module_forward(void);
+	extern struct module *new_module_route(void);
+	extern struct module *new_module_nat64(void);
+	extern struct module *new_module_pdump(void);
+
+	extern struct device *new_device_plain(void);
+	extern struct device *new_device_vlan(void);
+
+	ptrs[0] = (void *)new_module_balancer;
+	ptrs[1] = (void *)new_module_decap;
+	ptrs[2] = (void *)new_module_dscp;
+	ptrs[3] = (void *)new_module_acl;
+	ptrs[4] = (void *)new_module_forward;
+	ptrs[5] = (void *)new_module_route;
+	ptrs[6] = (void *)new_module_nat64;
+	ptrs[7] = (void *)new_module_pdump;
+	ptrs[8] = (void *)new_device_plain;
+	ptrs[9] = (void *)new_device_vlan;
+}
+
 */
 import "C"
 import (
@@ -49,32 +80,11 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func openAggregator() (unsafe.Pointer, error) {
-	// path := C.CString("../../build/mock/libdataplane_aggregator.so")
-	path := C.CString("/home/egnees/yanet1/yanet2/build/mock/libdataplane_aggregator.so")
-	defer C.free(unsafe.Pointer(path))
-
-	h, err := C.dlopen(path, C.RTLD_NOW|C.RTLD_GLOBAL)
-	if h == nil {
-		return nil, fmt.Errorf("dlopen failed: %w", err)
-	}
-
-	return h, nil
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 type YanetMock struct {
-	aggregator unsafe.Pointer
-	inner      C.struct_yanet_mock
+	inner C.struct_yanet_mock
 }
 
 func NewYanetMock(config *YanetMockConfig) (*YanetMock, error) {
-	h, err := openAggregator()
-	if err != nil {
-		return nil, fmt.Errorf("failed to open aggregator: %v", err)
-	}
-
 	cConfig := C.struct_yanet_mock_config{}
 	C.memset(unsafe.Pointer(&cConfig), 0, C.size_t(unsafe.Sizeof(cConfig)))
 	cConfig.cp_memory = C.size_t(config.CpMemory)
@@ -99,11 +109,10 @@ func NewYanetMock(config *YanetMockConfig) (*YanetMock, error) {
 	if ec != C.int(0) {
 		return nil, fmt.Errorf("failed to init mock: ec=%d", ec)
 	}
-	return &YanetMock{inner: mock, aggregator: h}, nil
+	return &YanetMock{inner: mock}, nil
 }
 
 func (mock *YanetMock) Free() {
-	C.dlclose(mock.aggregator)
 	C.yanet_mock_free(&mock.inner)
 }
 

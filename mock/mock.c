@@ -18,11 +18,10 @@ static int
 dataplane_load_module(
 	struct dp_config *dp_config, void *handle, const char *name
 ) { // duplicates real dataplane method
-	(void)handle;
 	char loader_name[64];
 	snprintf(loader_name, sizeof(loader_name), "%s%s", "new_module_", name);
 	module_load_handler loader =
-		(module_load_handler)dlsym(RTLD_DEFAULT, loader_name);
+		(module_load_handler)dlsym(handle, loader_name);
 	if (loader == NULL) {
 		return -1;
 	}
@@ -53,11 +52,10 @@ static int
 dataplane_load_device(
 	struct dp_config *dp_config, void *bin_hndl, const char *name
 ) { // duplicates real dataplane method
-	(void)bin_hndl;
 	char loader_name[64];
 	snprintf(loader_name, sizeof(loader_name), "%s%s", "new_device_", name);
 	device_load_handler loader =
-		(device_load_handler)dlsym(RTLD_DEFAULT, loader_name);
+		(device_load_handler)dlsym(bin_hndl, loader_name);
 	if (loader == NULL) {
 		return -1;
 	}
@@ -146,7 +144,7 @@ dataplane_initialize(
 	SET_OFFSET_OF(&dp_config->cp_config, cp_config);
 	SET_OFFSET_OF(&cp_config->dp_config, dp_config);
 
-	void *bin_hndl = NULL;
+	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 
 	int rc = dataplane_load_module(dp_config, bin_hndl, "forward");
 	if (rc == -1) {
