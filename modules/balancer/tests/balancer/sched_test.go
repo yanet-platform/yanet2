@@ -5,4 +5,4 @@ package balancer
 // sessions are created
 // pure l3
 // test timeouts (how?)
-// session timeouts
+// session table

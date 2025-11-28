@@ -32,42 +32,6 @@ func IpPrefix(prefix string) netip.Prefix {
 	return common.Unwrap(netip.ParsePrefix(prefix))
 }
 
-func Encap(
-	t *testing.T,
-	origLayers []gopacket.SerializableLayer,
-	srcIP string,
-	dstIP string,
-) gopacket.Packet {
-	src := net.ParseIP(srcIP)
-	dst := net.ParseIP(dstIP)
-
-	var ip gopacket.SerializableLayer
-	if src.To4() != nil {
-		ip = &layers.IPv4{
-			Version:  4,
-			IHL:      5,
-			TTL:      64,
-			Protocol: layers.IPProtocolIPv4,
-			SrcIP:    src,
-			DstIP:    dst,
-		}
-	} else {
-		ip = &layers.IPv6{
-			Version:    6,
-			NextHeader: layers.IPProtocolIPv6,
-			HopLimit:   64,
-			SrcIP:      src,
-			DstIP:      dst,
-		}
-	}
-
-	newLayers := make([]gopacket.SerializableLayer, 0, len(origLayers)+1)
-	newLayers = append(newLayers, origLayers[0], ip)
-	newLayers = append(newLayers, origLayers[1:]...)
-
-	return common.LayersToPacket(t, newLayers...)
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 func MakePacketLayers(
@@ -386,6 +350,11 @@ func ValidatePacket(
 		originalPacket.SrcIP,
 		resultInner.SrcIP,
 		"encapsulated packet src ip mismatch",
+	)
+	assert.Equal(
+		t,
+		originalGoPacket.ApplicationLayer().Payload(),
+		resultPacket.Payload,
 	)
 
 	var originPacketProto layers.IPProtocol
