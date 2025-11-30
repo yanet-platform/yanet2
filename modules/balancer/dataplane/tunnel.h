@@ -25,8 +25,6 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	uint32_t original_transport_offset = packet->transport_header.offset;
-
 	struct rte_ipv6_hdr *ipv6_header_inner = NULL;
 	struct rte_ipv4_hdr *ipv4_header_inner = NULL;
 	if (vs_flags & BALANCER_VS_IPV6_FLAG) {
@@ -79,16 +77,19 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 
 	// use GRE for encap
 	if (vs_flags & BALANCER_VS_GRE_FLAG) {
-		// update data in ip headers and insert GRE
-		rte_pktmbuf_prepend(mbuf, sizeof(struct rte_gre_hdr));
+		const uint16_t gre_hdr_size = sizeof(struct rte_gre_hdr);
+
+		if (rte_pktmbuf_prepend(mbuf, gre_hdr_size) == NULL) {
+			// not enough headroom to insert GRE
+			return -1;
+		}
+
+		// move L2 + outer L3 back to head to open a gap at transport offset
+		memmove(rte_pktmbuf_mtod(mbuf, char *),
+			rte_pktmbuf_mtod_offset(mbuf, char *, gre_hdr_size),
+			packet->transport_header.offset);
 
 		if (real->flags & BALANCER_REAL_IPV6_FLAG) {
-			memmove(rte_pktmbuf_mtod(mbuf, char *),
-				rte_pktmbuf_mtod_offset(
-					mbuf, char *, sizeof(struct rte_gre_hdr)
-				),
-				original_transport_offset);
-
 			struct rte_ipv6_hdr *ipv6_header =
 				rte_pktmbuf_mtod_offset(
 					mbuf,
@@ -98,15 +99,9 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 			ipv6_header->proto = IPPROTO_GRE;
 			ipv6_header->payload_len = rte_cpu_to_be_16(
 				rte_be_to_cpu_16(ipv6_header->payload_len) +
-				sizeof(struct rte_gre_hdr)
+				gre_hdr_size
 			);
 		} else {
-			memmove(rte_pktmbuf_mtod(mbuf, char *),
-				rte_pktmbuf_mtod_offset(
-					mbuf, char *, sizeof(struct rte_gre_hdr)
-				),
-				original_transport_offset);
-
 			struct rte_ipv4_hdr *ipv4_header =
 				rte_pktmbuf_mtod_offset(
 					mbuf,
@@ -116,16 +111,16 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 			ipv4_header->next_proto_id = IPPROTO_GRE;
 			ipv4_header->total_length = rte_cpu_to_be_16(
 				rte_be_to_cpu_16(ipv4_header->total_length) +
-				sizeof(struct rte_gre_hdr)
+				gre_hdr_size
 			);
 
 			ipv4_header->hdr_checksum = 0;
 			ipv4_header->hdr_checksum = rte_ipv4_cksum(ipv4_header);
 		}
 
-		// add gre data
+		// place GRE header in the created gap
 		struct rte_gre_hdr *gre_header = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_gre_hdr *, original_transport_offset
+			mbuf, struct rte_gre_hdr *, packet->transport_header.offset
 		);
 		memset(gre_header, 0, sizeof(struct rte_gre_hdr));
 		gre_header->ver = 0; // default version
@@ -134,7 +129,8 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 						  : RTE_ETHER_TYPE_IPV6
 		);
 
-		packet->transport_header.offset += sizeof(struct rte_gre_hdr);
+		// advance transport offset past GRE header
+		packet->transport_header.offset += gre_hdr_size;
 	}
 
 	return 0;
