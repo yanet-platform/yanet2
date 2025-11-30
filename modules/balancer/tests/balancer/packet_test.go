@@ -112,7 +112,7 @@ type VsSelector struct {
 	VsIp   int // 4 or 6
 	Proto  mbalancer.TransportProto
 	Gre    bool
-	FixMSS int
+	FixMSS bool
 	RealIp int // 4 or 6
 }
 
@@ -128,6 +128,7 @@ func SendAndValidatePacket(
 	t *testing.T,
 	mock *mock.YanetMock,
 	b *mbalancer.ModuleInstance,
+	options *PacketOptions,
 	selector VsSelector,
 ) (*framework.PacketInfo, *mbalancer.VirtualService) {
 	virtualServices := b.GetConfig().Services
@@ -137,7 +138,7 @@ func SendAndValidatePacket(
 			(vs.Address.Is6() && selector.VsIp == 6) {
 			if vs.Proto == selector.Proto {
 				flags := &vs.Flags
-				if flags.FixMSS == (selector.FixMSS > 0) &&
+				if flags.FixMSS == selector.FixMSS &&
 					flags.GRE == selector.Gre {
 					real := &vs.Reals[0]
 					if (real.DstAddr.Is4() && selector.RealIp == 4) ||
@@ -147,8 +148,8 @@ func SendAndValidatePacket(
 							t,
 							mock,
 							b,
+							options,
 							vs,
-							uint16(selector.FixMSS),
 						)
 						return resultPacket, vs
 					}
@@ -160,12 +161,16 @@ func SendAndValidatePacket(
 	return nil, nil
 }
 
+type PacketOptions struct {
+	MSS uint16
+}
+
 func SendPacketToVsAndValidate(
 	t *testing.T,
 	mock *mock.YanetMock,
 	balancer *mbalancer.ModuleInstance,
+	options *PacketOptions,
 	vs *mbalancer.VirtualService,
-	mss uint16,
 ) *framework.PacketInfo {
 	clientAddr := clientIpv4()
 	if vs.Address.Is6() {
@@ -182,8 +187,8 @@ func SendPacketToVsAndValidate(
 	}
 	layers := MakePacketLayers(clientAddr, clientPort, vsAddr, vsPort, tcp)
 	packet := xpacket.LayersToPacket(t, layers...)
-	if tcp != nil {
-		p, err := InsertOrUpdateMSS(packet, 1200)
+	if tcp != nil && options != nil {
+		p, err := InsertOrUpdateMSS(packet, options.MSS)
 		require.Nil(t, err, "failed to insert mss")
 		packet = *p
 	}
@@ -210,29 +215,7 @@ func TestPacketBasic(t *testing.T) {
 	mock := setup.mock
 	balancer := setup.balancer
 
-	// t.Run("Send_GRE_IpV4_IpV6", func(t *testing.T) {
-	// 	result, vs := SendAndValidatePacket(t, mock, balancer, VsSelector{
-	// 		VsIp:   4,
-	// 		Proto:  mbalancer.Tcp,
-	// 		RealIp: 6,
-	// 		Gre:    true,
-	// 		FixMSS: 0,
-	// 	})
-
-	// 	assert.NotNil(t, result)
-	// 	assert.NotNil(t, vs)
-
-	// 	if result != nil {
-	// 		assert.True(t, result.IsTunneled)
-	// 		assert.Equal(t, result.TunnelType, "gre")
-	// 	}
-
-	// 	if vs != nil {
-	// 		assert.True(t, vs.Flags.GRE)
-	// 	}
-	// })
-
-	// test packet encapsulation
+	// test packet encapsulation without GRE and MSS
 
 	t.Run("Encap", func(t *testing.T) {
 		for _, proto := range []mbalancer.TransportProto{mbalancer.Tcp, mbalancer.Udp} {
@@ -243,7 +226,7 @@ func TestPacketBasic(t *testing.T) {
 						Proto:  proto,
 						RealIp: realIp,
 						Gre:    false,
-						FixMSS: 0,
+						FixMSS: false,
 					}
 					t.Logf(
 						"send packet: vsIp=%d, realIp=%d, proto=%s",
@@ -256,6 +239,7 @@ func TestPacketBasic(t *testing.T) {
 						t,
 						mock,
 						balancer,
+						nil,
 						selector,
 					)
 
@@ -266,95 +250,76 @@ func TestPacketBasic(t *testing.T) {
 		}
 	})
 
-	// test gre packets
+	// test GRE tunneling
 
-	// t.Run("GRE", func(t *testing.T) {
-	// 	result, vs := SendAndValidatePacket(t, mock, balancer, VsSelector{
-	// 		VsIp:   4,
-	// 		Proto:  mbalancer.Tcp,
-	// 		RealIp: 4,
-	// 		Gre:    true,
-	// 		FixMSS: false,
-	// 	})
+	t.Run("GRE", func(t *testing.T) {
+		for _, proto := range []mbalancer.TransportProto{mbalancer.Tcp, mbalancer.Udp} {
+			for _, vsIp := range []int{4, 6} {
+				for _, realIp := range []int{4, 6} {
+					selector := VsSelector{
+						VsIp:   vsIp,
+						Proto:  proto,
+						RealIp: realIp,
+						Gre:    true,
+						FixMSS: false,
+					}
 
-	// 	assert.NotNil(t, result)
-	// 	assert.NotNil(t, vs)
+					t.Logf(
+						"send packet to GRE service: vsIp=%d, realIp=%d, proto=%s",
+						selector.VsIp,
+						selector.RealIp,
+						selector.Proto.IntoProto().String(),
+					)
 
-	// 	if result != nil {
-	// 		assert.True(t, result.IsTunneled)
-	// 		assert.Equal(t, result.TunnelType, "gre-ip4")
-	// 	}
+					result, vs := SendAndValidatePacket(t, mock, balancer, nil, selector)
 
-	// 	if vs != nil {
-	// 		assert.True(t, vs.Flags.GRE)
-	// 	}
-	// })
+					assert.NotNil(t, result)
+					assert.NotNil(t, vs)
 
-	// t.Run("Send_GRE_IpV6_IpV4", func(t *testing.T) {
-	// 	result, vs := SendPacket(t, mock, balancer, VsSelector{
-	// 		VsIp:   6,
-	// 		Proto:  moduleBalancer.TransportProtoTcp,
-	// 		RealIp: 4,
-	// 		Gre:    true,
-	// 		FixMSS: false,
-	// 	})
-	// 	assert.NotNil(t, result)
-	// 	assert.NotNil(t, vs)
+					if result != nil {
+						assert.True(t, result.IsTunneled)
+					}
 
-	// 	if result != nil {
-	// 		assert.True(t, result.IsTunneled)
-	// 		assert.Equal(t, result.TunnelType, "gre-ip6")
-	// 	}
+					if vs != nil {
+						assert.True(t, vs.Flags.GRE)
+					}
+				}
+			}
+		}
+	})
 
-	// 	if vs != nil {
-	// 		assert.True(t, vs.Flags.GRE)
-	// 	}
-	// })
-
-	// t.Run("Send_GRE_IpV6_IpV6", func(t *testing.T) {
-	// 	result, vs := SendAndValidatePacket(t, mock, balancer, VsSelector{
-	// 		VsIp:   6,
-	// 		Proto:  mbalancer.Tcp,
-	// 		RealIp: 6,
-	// 		Gre:    true,
-	// 		FixMSS: false,
-	// 	})
-
-	// 	assert.NotNil(t, result)
-	// 	assert.NotNil(t, vs)
-
-	// 	if result != nil {
-	// 		assert.True(t, result.IsTunneled)
-	// 		assert.Equal(t, result.TunnelType, "gre-ip6")
-	// 	}
-
-	// 	if vs != nil {
-	// 		assert.True(t, vs.Flags.GRE)
-	// 	}
-	// })
+	// test mss fix works
 
 	t.Run("FixMSS", func(t *testing.T) {
-		for _, vsIp := range []int{4, 6} {
+		for _, mss := range []uint16{0, 500, 1200, 1400} {
 			for _, realIp := range []int{4, 6} {
 				selector := VsSelector{
-					VsIp:   vsIp,
+					VsIp:   6,
 					Proto:  mbalancer.Tcp,
 					RealIp: realIp,
 					Gre:    false,
-					FixMSS: 1000,
+					FixMSS: true,
 				}
 				t.Logf(
 					"send packet: vsIp=%d, realIp=%d, proto=%s, mss=%d",
 					selector.VsIp,
 					selector.RealIp,
 					selector.Proto.IntoProto().String(),
-					selector.FixMSS,
+					mss,
 				)
+
+				options := &PacketOptions{
+					MSS: mss,
+				}
+				if mss == 0 {
+					options = nil
+				}
 
 				result, vs := SendAndValidatePacket(
 					t,
 					mock,
 					balancer,
+					options,
 					selector,
 				)
 

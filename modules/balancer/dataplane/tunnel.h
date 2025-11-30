@@ -41,7 +41,6 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 		);
 	}
 
-	int ec;
 	if (real->flags & BALANCER_REAL_IPV6_FLAG) { // IPv6
 		// rs->src_addr is already masked.
 
@@ -56,7 +55,7 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 			src[i] |= src_user[i] & (~real->src_mask[i]);
 		}
 
-		ec = packet_ip6_encap(packet, real->dst_addr, src);
+		packet_ip6_encap(packet, real->dst_addr, src);
 	} else { // IPv4
 		// rs->src_addr is already masked.
 
@@ -68,12 +67,8 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 				: *(uint32_t *)ipv6_header_inner->src_addr;
 		uint32_t src = (src_user & ~src_mask) | src_addr;
 
-		ec = packet_ip4_encap(
-			packet, real->dst_addr, (uint8_t *)(&src)
-		);
+		packet_ip4_encap(packet, real->dst_addr, (uint8_t *)(&src));
 	}
-
-	assert(ec == 0);
 
 	// use GRE for encap
 	if (vs_flags & BALANCER_VS_GRE_FLAG) {
@@ -84,10 +79,17 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 			return -1;
 		}
 
-		// move L2 + outer L3 back to head to open a gap at transport offset
+		const uint16_t len_before_gre =
+			packet->network_header.offset +
+			((real->flags & BALANCER_REAL_IPV6_FLAG)
+				 ? sizeof(struct rte_ipv6_hdr)
+				 : sizeof(struct rte_ipv4_hdr));
+
+		// move L2 + outer L3 back to head to open a gap right after
+		// outer L3
 		memmove(rte_pktmbuf_mtod(mbuf, char *),
 			rte_pktmbuf_mtod_offset(mbuf, char *, gre_hdr_size),
-			packet->transport_header.offset);
+			len_before_gre);
 
 		if (real->flags & BALANCER_REAL_IPV6_FLAG) {
 			struct rte_ipv6_hdr *ipv6_header =
@@ -118,9 +120,9 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 			ipv4_header->hdr_checksum = rte_ipv4_cksum(ipv4_header);
 		}
 
-		// place GRE header in the created gap
+		// place GRE header in the created gap (right after outer L3)
 		struct rte_gre_hdr *gre_header = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_gre_hdr *, packet->transport_header.offset
+			mbuf, struct rte_gre_hdr *, len_before_gre
 		);
 		memset(gre_header, 0, sizeof(struct rte_gre_hdr));
 		gre_header->ver = 0; // default version
@@ -129,7 +131,8 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 						  : RTE_ETHER_TYPE_IPV6
 		);
 
-		// advance transport offset past GRE header
+		// advance transport offset past GRE header (inner transport
+		// shifts forward)
 		packet->transport_header.offset += gre_hdr_size;
 	}
 

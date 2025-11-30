@@ -413,11 +413,11 @@ func ValidatePacket(
 			// todo: check tcp layers (if FixMSS enabled)
 			if service.Flags.FixMSS {
 				originalMSS, err := xpacket.PacketMSS(originalGoPacket)
-				hadMSS := err != nil
+				hadMSS := err == nil
 
 				packet := gopacket.NewPacket(resultPacket.RawData, layers.LayerTypeEthernet, gopacket.Default)
 				resultMSS, err := xpacket.PacketMSS(packet)
-				hasMSS := err != nil
+				hasMSS := err == nil
 				if !hasMSS {
 					t.Error("no mss in packet, but fix mss flag is present")
 					return
