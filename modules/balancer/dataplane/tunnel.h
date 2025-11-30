@@ -58,14 +58,13 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 		packet_ip6_encap(packet, real->dst_addr, src);
 	} else { // IPv4
 		// rs->src_addr is already masked.
-
-		uint32_t src_mask = *(uint32_t *)(real->src_mask);
-		uint32_t src_addr = *(uint32_t *)(real->src_addr);
-		uint32_t src_user =
-			(ipv4_header_inner != NULL)
-				? ipv4_header_inner->src_addr
-				: *(uint32_t *)ipv6_header_inner->src_addr;
-		uint32_t src = (src_user & ~src_mask) | src_addr;
+		uint8_t src[4];
+		uint8_t *src_user = (ipv4_header_inner != NULL)
+				? (uint8_t *)&ipv4_header_inner->src_addr
+				: ipv6_header_inner->src_addr;
+		for (size_t i = 0; i < 4; ++i) {
+			src[i] = (src_user[i] & ~real->src_mask[i]) | real->src_addr[i];
+		}
 
 		packet_ip4_encap(packet, real->dst_addr, (uint8_t *)(&src));
 	}

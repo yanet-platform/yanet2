@@ -28,7 +28,6 @@ cp_function_create(
 	if (new_function == NULL) {
 		return NULL;
 	}
-	printf( "cp_function [%p, %p)\n", new_function, (void *)new_function + alloc_size);
 	
 	memset(new_function,
 	       0,
@@ -74,9 +73,6 @@ cp_function_create(
 		if (new_chain == NULL) {
 			goto error;
 		}
-
-		printf("new_function->chains=%p\n", new_function->chains);
-		printf("cp_function_config->chains=%p\n", cp_function_config->chains);
 
 		SET_OFFSET_OF(
 			&new_function->chains[chain_idx].cp_chain, new_chain

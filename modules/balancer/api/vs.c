@@ -301,6 +301,7 @@ balancer_vs_init(
 		struct service_info *info =
 			balancer_state_get_vs(balancer_state, vs_config->idx);
 		struct virtual_service *vs = &config_vs[vs_config->idx];
+		printf("init vs: vs=%p\n", vs);
 		SET_OFFSET_OF(&vs->state, (struct service_state *)info->state);
 		vs->round_robin_counter = 0;
 		vs->flags = vs_config->flags;

@@ -12,7 +12,7 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func TestBasic(t *testing.T) {
+func TestBalancerBasics(t *testing.T) {
 	vsIp := IpAddr("1.1.1.1")
 	vsPort := uint16(80)
 	realAddr := IpAddr("2.2.2.2")
@@ -76,5 +76,19 @@ func TestBasic(t *testing.T) {
 	// validate response packet
 	ValidatePacket(t, balancer.GetConfig(), packet, result.Output[0])
 
-	// checkout info and counters
+	// check info and counters
+
+	t.Run("Read_State_Info", func(t *testing.T) {
+		state, err := balancer.StateInfo()
+		require.NoError(t, err)
+		t.Log(state.JsonPretty())
+		// todo: add checkout
+	})
+
+	t.Run("Read_Config_Info", func(t *testing.T) {
+		configInfo, err := balancer.ConfigInfo(defaultDeviceName, defaultPipelineName, defaultFunctionName, defaultChainName)
+		require.NoError(t, err)
+		t.Log(configInfo.JsonPretty())
+		// todo: add checkout
+	})
 }

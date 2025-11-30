@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdint.h>
+#include <assert.h>
+#include <stdio.h>
 
 #include "common/memory.h"
 
@@ -122,18 +124,23 @@ counter_get_value_handle(
 
 	struct counter_storage_pool *pool =
 		counter_storage->pools + link->pool_idx;
+
+	// Diagnostics: compute indices and sizes
 	uint64_t block_idx = link->offset / COUNTER_STORAGE_PAGE_SIZE;
 	uint64_t offset = link->offset % COUNTER_STORAGE_PAGE_SIZE;
 
 #ifdef COUNTERS_CHECK
 	if (block_idx >= pool->block_count)
 		return NULL;
+	if (byte_offset + slot_size_bytes > COUNTER_STORAGE_PAGE_SIZE)
+		return NULL;
 #endif
 
 	struct counter_storage_block *block =
 		ADDR_OF(ADDR_OF(&pool->blocks) + block_idx);
-	return (struct counter_value_handle *)(ADDR_OF(&block->pages)->values +
-					       offset);
+
+	uint8_t *base = (uint8_t *)ADDR_OF(&block->pages);
+	return (struct counter_value_handle *)(base + offset);
 }
 
 static inline uint64_t *
@@ -150,14 +157,13 @@ counter_get_address(
 	uint64_t instance_id,
 	struct counter_storage *storage
 ) {
-
 	struct counter_value_handle *value_handle =
 		counter_get_value_handle(counter_id, storage);
 
 #ifdef COUNTERS_CHECK
 	if (value_handle == NULL)
 		return NULL;
-	if (instance_id >= storage->instance_count)
+	if (instance_id >= instances)
 		return NULL;
 #endif
 

@@ -10,7 +10,11 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-var BalancerConfigName string = "balancer0"
+var defaultDeviceName string = "01:00.0"
+var defaultPipelineName string = "pipeline0"
+var defaultFunctionName string = "function0"
+var defaultChainName string = "chain0"
+var defaultConfigName string = "balancer0"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -36,7 +40,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 			Devices: []mock.YanetMockDeviceConfig{
 				{
 					Id:   0,
-					Name: "01:00.0",
+					Name: defaultDeviceName,
 				},
 			},
 		}
@@ -79,7 +83,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 
 	balancer, err := balancer.NewModuleInstance(
 		agent,
-		BalancerConfigName,
+		defaultConfigName,
 		config.balancer,
 		uint64(sessionTableSize),
 		config.timeouts,
@@ -105,16 +109,16 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 func setupCp(agent *ffi.Agent) error {
 	{
 		functionConfig := ffi.FunctionConfig{
-			Name: "test",
+			Name: defaultFunctionName,
 			Chains: []ffi.FunctionChainConfig{
 				{
 					Weight: 1,
 					Chain: ffi.ChainConfig{
-						Name: "ch0",
+						Name: defaultChainName,
 						Modules: []ffi.ChainModuleConfig{
 							{
 								Type: "balancer",
-								Name: BalancerConfigName,
+								Name: defaultConfigName,
 							},
 						},
 					},
@@ -130,8 +134,8 @@ func setupCp(agent *ffi.Agent) error {
 	// update pipelines
 	{
 		inputPipelineConfig := ffi.PipelineConfig{
-			Name:      "test",
-			Functions: []string{"test"},
+			Name:      defaultPipelineName,
+			Functions: []string{defaultFunctionName},
 		}
 
 		dummyPipelineConfig := ffi.PipelineConfig{
@@ -147,10 +151,10 @@ func setupCp(agent *ffi.Agent) error {
 	// update devices
 	{
 		deviceConfig := ffi.DeviceConfig{
-			Name: "01:00.0",
+			Name: defaultDeviceName,
 			Input: []ffi.DevicePipelineConfig{
 				{
-					Name:   "test",
+					Name:   defaultPipelineName,
 					Weight: 1,
 				},
 			},
