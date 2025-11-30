@@ -9,6 +9,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	mbalancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/tests/go/common"
@@ -410,4 +411,64 @@ func TestSelectAfterUpdate(t *testing.T) {
 		// validate state info
 		ValidateStateInfo(t, info, balancer.GetConfig())
 	})
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func TestNewConfig(t *testing.T) {
+	// first, balancer with some config is instantiated
+
+	setup := smallSetup(t)
+	defer setup.Free()
+
+	mock := setup.mock
+	balancer := setup.balancer
+
+	// virtual service config
+
+	vsIp := IpAddr("192.160.11.1")
+	vsPort := uint16(1015)
+	vsProto := mbalancer.Tcp
+	vsAllowedSrc := []netip.Prefix{
+		IpPrefix("10.0.1.0/24"),
+	}
+
+	// make new balancer config
+
+	config := mbalancer.ModuleInstanceConfig{
+		Services: []mbalancer.VirtualService{
+			{
+				Address:    vsIp,
+				Port:       vsPort,
+				Proto:      vsProto,
+				AllowedSrc: vsAllowedSrc,
+				Reals: []mbalancer.Real{
+					{
+						DstAddr: IpAddr("10.1.1.1"),
+						Weight:  1,
+						Enabled: true,
+						SrcAddr: IpAddr("1.1.1.1"),
+						SrcMask: IpAddr("1.1.1.1"),
+					},
+				},
+			},
+		},
+	}
+
+	// update config
+	err := balancer.UpdateConfig(&config)
+	require.NoError(t, err, "got error")
+
+	// send packet, it is scheduled on the first real
+
+	clientIp := IpAddr("10.0.1.22")
+	clientPort := uint16(1000)
+
+	packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{ACK: true})
+	packet := xpacket.LayersToPacket(t, packetLayers...)
+
+	result, err := mock.HandlePackets(packet)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(result.Output))
+	ValidatePacket(t, balancer.GetConfig(), packet, result.Output[0])
 }

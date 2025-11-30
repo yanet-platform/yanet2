@@ -63,6 +63,7 @@ next_rnd(struct virtual_service *vs, struct packet_metadata *meta) {
 
 static inline struct real *
 select_real(
+	struct packet_ctx *ctx,
 	struct balancer_module_config *config,
 	uint32_t now,
 	uint32_t worker_idx,
@@ -79,13 +80,13 @@ select_real(
 			ring_get(&vs->real_ring, next_rnd(vs, metadata));
 		if (real_id == RING_VALUE_INVALID) {
 			// discard packet because there are no enabled reals
-			packet_ctx_no_reals();
+			packet_ctx_no_reals(ctx);
 			return NULL;
 		}
 
 		// select real
 		struct real *real = &reals[real_id];
-		packet_ctx_select_real_ops(real);
+		packet_ctx_select_real_ops(ctx, real);
 
 		return real;
 	}
@@ -116,7 +117,7 @@ select_real(
 	    SESSION_TABLE_OVERFLOW) { // session with such id is not present and
 				      // there is no enough space in the session
 				      // table to create new state, so error
-		packet_ctx_session_table_overflow();
+		packet_ctx_session_table_overflow(ctx);
 		return NULL;
 	}
 
@@ -139,7 +140,7 @@ select_real(
 
 			// put prolonged session into state
 			packet_ctx_extend_session(
-				real, now, time_from, timeout
+				ctx, real, now, time_from, timeout
 			);
 
 			return real;
@@ -147,7 +148,7 @@ select_real(
 			// real for the session is disabled,
 			// just mark it and try to find new real
 			// if packet can be rescheduled
-			packet_ctx_real_disabled(real);
+			packet_ctx_real_disabled(ctx, real);
 		}
 	}
 
@@ -160,7 +161,7 @@ select_real(
 	assert(session_state != NULL);
 	if (!reschedule_real(metadata
 	    )) { // packet type not allows to create new session
-		packet_ctx_packet_not_rescheduled();
+		packet_ctx_packet_not_rescheduled(ctx);
 		session_remove(session_state); // free created state
 		session_unlock(session_lock);  // unlock state
 		return NULL;
@@ -170,7 +171,7 @@ select_real(
 
 	uint32_t real_id = ring_get(&vs->real_ring, next_rnd(vs, metadata));
 	if (real_id == RING_VALUE_INVALID) {
-		packet_ctx_no_reals(); // there are no alive reals
+		packet_ctx_no_reals(ctx); // there are no alive reals
 		session_remove(session_state);
 		session_unlock(session_lock);
 		return NULL;
@@ -188,7 +189,7 @@ select_real(
 	// select real
 
 	struct real *real = &reals[real_id];
-	packet_ctx_new_session(real, now, timeout);
+	packet_ctx_new_session(ctx, real, now, timeout);
 
 	return real;
 }

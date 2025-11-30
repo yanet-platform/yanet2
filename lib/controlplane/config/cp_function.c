@@ -10,7 +10,7 @@
 static inline uint64_t
 cp_function_alloc_size(uint64_t chain_count) {
 	return sizeof(struct cp_function) +
-	       sizeof(struct cp_function_chain *) * chain_count;
+	       sizeof(struct cp_function_chain) * chain_count;
 }
 
 struct cp_function *
@@ -20,13 +20,16 @@ cp_function_create(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_function_config *cp_function_config
 ) {
+	const size_t alloc_size = cp_function_alloc_size(cp_function_config->chain_count);
 	struct cp_function *new_function = (struct cp_function *)memory_balloc(
 		memory_context,
-		cp_function_alloc_size(cp_function_config->chain_count)
+		alloc_size
 	);
 	if (new_function == NULL) {
 		return NULL;
 	}
+	printf( "cp_function [%p, %p)\n", new_function, (void *)new_function + alloc_size);
+	
 	memset(new_function,
 	       0,
 	       cp_function_alloc_size(cp_function_config->chain_count));
@@ -71,6 +74,9 @@ cp_function_create(
 		if (new_chain == NULL) {
 			goto error;
 		}
+
+		printf("new_function->chains=%p\n", new_function->chains);
+		printf("cp_function_config->chains=%p\n", cp_function_config->chains);
 
 		SET_OFFSET_OF(
 			&new_function->chains[chain_idx].cp_chain, new_chain

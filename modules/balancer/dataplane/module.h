@@ -12,6 +12,8 @@ struct session_table;
 struct virtual_service;
 struct real;
 
+////////////////////////////////////////////////////////////////////////////////
+
 struct balancer_module_config {
 	struct cp_module cp_module;
 

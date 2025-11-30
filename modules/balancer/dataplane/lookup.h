@@ -76,7 +76,7 @@ vs_v6_table_lookup(
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline struct virtual_service *
-vs_v4_lookup(struct balancer_module_config *config, struct packet *packet) {
+vs_v4_lookup(struct packet_ctx *ctx, struct balancer_module_config *config, struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
@@ -96,14 +96,14 @@ vs_v4_lookup(struct balancer_module_config *config, struct packet *packet) {
 	}
 
 	struct virtual_service *vs = ADDR_OF(&config->vs) + service_id;
-	packet_ctx_select_vs(vs);
+	packet_ctx_select_vs(ctx, vs);
 
 	// check if packet source is allowed for the service
 	/// @todo: use lpm4_lookup
 	if (lpm_lookup(
 		    &vs->src_filter, NET4_LEN, (uint8_t *)&ipv4_hdr->src_addr
 	    ) == LPM_VALUE_INVALID) {
-		packet_ctx_packet_src_not_allowed();
+		packet_ctx_packet_src_not_allowed(ctx);
 		return NULL;
 	}
 
@@ -111,7 +111,7 @@ vs_v4_lookup(struct balancer_module_config *config, struct packet *packet) {
 }
 
 static inline struct virtual_service *
-vs_v6_lookup(struct balancer_module_config *config, struct packet *packet) {
+vs_v6_lookup(struct packet_ctx *ctx, struct balancer_module_config *config, struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
@@ -130,14 +130,14 @@ vs_v6_lookup(struct balancer_module_config *config, struct packet *packet) {
 	}
 
 	struct virtual_service *vs = ADDR_OF(&config->vs) + service_id;
-	packet_ctx_select_vs(vs);
+	packet_ctx_select_vs(ctx, vs);
 
 	// check if packet source is allowed for the service
 	/// @todo: use lpm16_lookup
 	if (lpm_lookup(
 		    &vs->src_filter, NET6_LEN, (uint8_t *)&ipv6_hdr->src_addr
 	    ) == LPM_VALUE_INVALID) {
-		packet_ctx_packet_src_not_allowed();
+		packet_ctx_packet_src_not_allowed(ctx);
 		return NULL;
 	}
 	return vs;
@@ -146,13 +146,13 @@ vs_v6_lookup(struct balancer_module_config *config, struct packet *packet) {
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline struct virtual_service *
-vs_lookup(struct balancer_module_config *config, struct packet *packet) {
+vs_lookup(struct packet_ctx *ctx, struct balancer_module_config *config, struct packet *packet) {
 	if (packet->network_header.type ==
 	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		return vs_v4_lookup(config, packet);
+		return vs_v4_lookup(ctx, config, packet);
 	} else if (packet->network_header.type ==
 		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		return vs_v6_lookup(config, packet);
+		return vs_v6_lookup(ctx, config, packet);
 	} else { // unsupported
 		return NULL;
 	}

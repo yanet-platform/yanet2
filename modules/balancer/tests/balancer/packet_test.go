@@ -208,7 +208,7 @@ func SendPacketToVsAndValidate(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func TestPacketBasic(t *testing.T) {
+func TestPacketEncapGreMSS(t *testing.T) {
 	setup := allCombinationsSetup(t)
 	defer setup.Free()
 

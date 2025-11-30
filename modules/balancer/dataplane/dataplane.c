@@ -5,7 +5,6 @@
 
 #include "common/memory_address.h"
 #include "controlplane/config/econtext.h"
-#include "counters/counters.h"
 #include "ctx.h"
 #include "dataplane.h"
 #include "dataplane/config/zone.h"
@@ -26,27 +25,27 @@ void
 handle_packets(
 	struct balancer_module_config *config,
 	struct packet_front *packet_front,
-	struct counter_storage *counter_storage,
+	struct module_ectx *ectx,
 	uint32_t worker_idx,
 	uint32_t now
 ) {
+	struct packet_ctx ctx;
 	packet_ctx_setup(
-		counter_storage,
-		balancer_module_config_counter(
-			config, worker_idx, counter_storage
-		),
-		worker_idx
+		&ctx,
+		worker_idx,
+		ectx,
+		config
 	);
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		// set incoming packet
-		packet_ctx_incoming_packet(packet);
+		packet_ctx_incoming_packet(&ctx, packet);
 
 		// 1. Lookup single virtual service for which packet is
 		// dirrected to
 
-		struct virtual_service *vs = vs_lookup(config, packet);
+		struct virtual_service *vs = vs_lookup(&ctx, config, packet);
 
 		if (vs == NULL) { // not found virtual service
 			packet_front_drop(packet_front, packet);
@@ -66,7 +65,7 @@ handle_packets(
 		// 3. Select real packet for which packet will be forwarded
 
 		struct real *rs =
-			select_real(config, now, worker_idx, vs, &meta);
+			select_real(&ctx, config, now, worker_idx, vs, &meta);
 		if (rs == NULL) { // failed to select real
 			packet_front_drop(packet_front, packet);
 			continue;
@@ -103,7 +102,7 @@ balancer_handle_packets(
 	handle_packets(
 		config,
 		packet_front,
-		ADDR_OF(&module_ectx->counter_storage),
+		module_ectx,
 		worker_idx,
 		now
 	);

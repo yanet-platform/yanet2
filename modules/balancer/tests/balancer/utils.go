@@ -424,11 +424,7 @@ func ValidatePacket(
 				}
 				expectedMSS := uint16(0)
 				if hadMSS {
-					if originalMSS < 1220 {
-						expectedMSS = originalMSS
-					} else {
-						expectedMSS = 1220
-					}
+					expectedMSS = min(originalMSS, 1220)
 				} else {
 					expectedMSS = 536
 				}
