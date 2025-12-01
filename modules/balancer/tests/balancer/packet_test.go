@@ -328,4 +328,45 @@ func TestPacketEncapGreMSS(t *testing.T) {
 			}
 		}
 	})
+
+	// mss + gre
+
+	t.Run("FixMSS_GRE", func(t *testing.T) {
+		for _, mss := range []uint16{0, 500, 1200, 1400} {
+			for _, realIp := range []int{4, 6} {
+				selector := VsSelector{
+					VsIp:   6,
+					Proto:  mbalancer.Tcp,
+					RealIp: realIp,
+					Gre:    true,
+					FixMSS: true,
+				}
+				t.Logf(
+					"send packet to GRE service: vsIp=%d, realIp=%d, proto=%s, mss=%d",
+					selector.VsIp,
+					selector.RealIp,
+					selector.Proto.IntoProto().String(),
+					mss,
+				)
+
+				options := &PacketOptions{
+					MSS: mss,
+				}
+				if mss == 0 {
+					options = nil
+				}
+
+				result, vs := SendAndValidatePacket(
+					t,
+					mock,
+					balancer,
+					options,
+					selector,
+				)
+
+				assert.NotNil(t, result)
+				assert.NotNil(t, vs)
+			}
+		}
+	})
 }

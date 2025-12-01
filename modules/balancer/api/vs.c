@@ -62,7 +62,7 @@ vs_serialize(struct balancer_vs_config *vs, char *buf) {
 
 static void
 real_serialize(struct real *real, char *buf) {
-	sprintf(buf, "r%lu", real->idx);
+	sprintf(buf, "r%lu", real->registry_idx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -264,8 +264,9 @@ balancer_vs_init(
 		for (size_t inner_real_idx = 0;
 		     inner_real_idx < vs_configs[vs_idx]->real_count;
 		     ++inner_real_idx) {
-			size_t real_id =
-				vs_configs[vs_idx]->reals[inner_real_idx].idx;
+			size_t real_id = vs_configs[vs_idx]
+						 ->reals[inner_real_idx]
+						 .registry_idx;
 			if (real_id + 1 > config->real_count) {
 				config->real_count = real_id + 1;
 			}
@@ -280,6 +281,7 @@ balancer_vs_init(
 	if (config_vs == NULL && vs_count > 0) {
 		return -1;
 	}
+	memset(config_vs, 0, config->vs_count * sizeof(struct virtual_service));
 	SET_OFFSET_OF(&config->vs, config_vs);
 
 	// allocate reals
@@ -290,6 +292,7 @@ balancer_vs_init(
 	if (config_reals == NULL && config->real_count > 0) {
 		goto free_vs;
 	}
+	memset(config_reals, 0, config->real_count * sizeof(struct real));
 	SET_OFFSET_OF(&config->reals, config_reals);
 
 	size_t initialized_vs_count;
@@ -301,10 +304,9 @@ balancer_vs_init(
 		struct service_info *info =
 			balancer_state_get_vs(balancer_state, vs_config->idx);
 		struct virtual_service *vs = &config_vs[vs_config->idx];
-		printf("init vs: vs=%p\n", vs);
 		SET_OFFSET_OF(&vs->state, (struct service_state *)info->state);
 		vs->round_robin_counter = 0;
-		vs->flags = vs_config->flags;
+		vs->flags = vs_config->flags | VS_PRESENT_IN_CONFIG_FLAG;
 		memcpy(vs->address, vs_config->address, NET6_LEN);
 		vs->port = vs_config->port;
 		vs->proto = vs_config->proto;
@@ -332,11 +334,12 @@ balancer_vs_init(
 		for (size_t real = 0; real < vs->real_count; ++real) {
 			struct real *current_real = &vs_config->reals[real];
 			struct real *setup_real =
-				&config_reals[current_real->idx];
+				&config_reals[current_real->registry_idx];
 			*setup_real = *current_real;
+			setup_real->flags |= REAL_PRESENT_IN_CONFIG_FLAG;
 			struct service_info *real_info =
 				balancer_state_get_real(
-					balancer_state, setup_real->idx
+					balancer_state, setup_real->registry_idx
 				);
 			SET_OFFSET_OF(
 				&setup_real->state,
@@ -488,7 +491,7 @@ balancer_vs_config_set_real(
 	uint8_t *src_mask
 ) {
 	struct real *real = &vs_config->reals[index];
-	real->idx = id;
+	real->registry_idx = id;
 	real->flags = (real_flags_t)flags;
 	real->weight = weight;
 	size_t len =

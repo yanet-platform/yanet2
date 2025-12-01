@@ -1,7 +1,7 @@
 #pragma once
 
-#include <stdint.h>
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #include "common/memory.h"

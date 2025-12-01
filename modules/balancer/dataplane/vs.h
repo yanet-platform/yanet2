@@ -12,6 +12,8 @@
 
 typedef uint8_t vs_flags_t;
 
+#define VS_PRESENT_IN_CONFIG_FLAG (1 << 7)
+
 ////////////////////////////////////////////////////////////////////////////////
 
 struct virtual_service {

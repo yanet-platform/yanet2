@@ -76,7 +76,9 @@ packet_ctx_setup(
 	memset(ctx, 0, sizeof(struct packet_ctx));
 	ctx->counter_storage = ADDR_OF(&ectx->counter_storage);
 	ctx->worker = worker;
-	ctx->module_config_counter = balancer_module_config_counter(config, worker, ctx->counter_storage);
+	ctx->module_config_counter = balancer_module_config_counter(
+		config, worker, ctx->counter_storage
+	);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -102,7 +104,8 @@ packet_ctx_failed_to_select_vs(struct packet_ctx *ctx) {
 
 static inline void
 packet_ctx_select_vs(struct packet_ctx *ctx, struct virtual_service *vs) {
-	ctx->vs.config_counter = vs_counter(vs, ctx->worker, ctx->counter_storage);
+	ctx->vs.config_counter =
+		vs_counter(vs, ctx->worker, ctx->counter_storage);
 	ctx->vs.persistent_state = ADDR_OF(&vs->state) + ctx->worker;
 	vs_counter_incoming_packet(vs_config_counter(ctx), ctx->packet_len);
 	vs_counter_incoming_packet(vs_state_counter(ctx), ctx->packet_len);
@@ -202,13 +205,22 @@ packet_ctx_select_real(
 }
 
 static inline void
-packet_ctx_new_session(struct packet_ctx *ctx, struct real *real, uint32_t now, uint32_t timeout) {
+packet_ctx_new_session(
+	struct packet_ctx *ctx,
+	struct real *real,
+	uint32_t now,
+	uint32_t timeout
+) {
 	packet_ctx_select_real(ctx, real, true, now, now, timeout);
 }
 
 static inline void
 packet_ctx_extend_session(
-	struct packet_ctx *ctx, struct real *real, uint32_t now, uint32_t from, uint32_t timeout
+	struct packet_ctx *ctx,
+	struct real *real,
+	uint32_t now,
+	uint32_t from,
+	uint32_t timeout
 ) {
 	packet_ctx_select_real(ctx, real, false, now, from, timeout);
 }

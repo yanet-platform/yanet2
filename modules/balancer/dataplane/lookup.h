@@ -76,7 +76,11 @@ vs_v6_table_lookup(
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline struct virtual_service *
-vs_v4_lookup(struct packet_ctx *ctx, struct balancer_module_config *config, struct packet *packet) {
+vs_v4_lookup(
+	struct packet_ctx *ctx,
+	struct balancer_module_config *config,
+	struct packet *packet
+) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
@@ -111,7 +115,11 @@ vs_v4_lookup(struct packet_ctx *ctx, struct balancer_module_config *config, stru
 }
 
 static inline struct virtual_service *
-vs_v6_lookup(struct packet_ctx *ctx, struct balancer_module_config *config, struct packet *packet) {
+vs_v6_lookup(
+	struct packet_ctx *ctx,
+	struct balancer_module_config *config,
+	struct packet *packet
+) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
@@ -146,7 +154,11 @@ vs_v6_lookup(struct packet_ctx *ctx, struct balancer_module_config *config, stru
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline struct virtual_service *
-vs_lookup(struct packet_ctx *ctx, struct balancer_module_config *config, struct packet *packet) {
+vs_lookup(
+	struct packet_ctx *ctx,
+	struct balancer_module_config *config,
+	struct packet *packet
+) {
 	if (packet->network_header.type ==
 	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 		return vs_v4_lookup(ctx, config, packet);

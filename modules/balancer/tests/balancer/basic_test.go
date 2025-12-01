@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gopacket/gopacket/layers"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mbalancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
@@ -74,21 +75,59 @@ func TestBalancerBasics(t *testing.T) {
 	require.Empty(t, result.Drop)
 
 	// validate response packet
-	ValidatePacket(t, balancer.GetConfig(), packet, result.Output[0])
+	response := result.Output[0]
+	ValidatePacket(t, balancer.GetConfig(), packet, response)
 
 	// check info and counters
+
+	expectedVsStats := mbalancer.VsStats{
+		IncomingPackets: 1,
+		OutgoingPackets: 1,
+
+		PacketSrcNotAllowed:  0,
+		NoReals:              0,
+		OpsPackets:           0,
+		SessionTableOverflow: 0,
+		RealIsDisabled:       0,
+		CreatedSessions:      1,
+
+		IncomingBytes: uint64(len(packet.Data())),
+		OutgoingBytes: uint64(len(packet.Data())),
+	}
+
+	expectedRealStats := mbalancer.RealStats{
+		RealDisabledPackets: 0,
+		OpsPackets:          0,
+		CreatedSessions:     1,
+		SendPackets:         1,
+		SendBytes:           uint64(len(packet.Data())),
+	}
 
 	t.Run("Read_State_Info", func(t *testing.T) {
 		state, err := balancer.StateInfo()
 		require.NoError(t, err)
-		t.Log(state.JsonPretty())
-		// todo: add checkout
+
+		require.Equal(t, 1, len(state.RealInfo))
+		realInfo := &state.RealInfo[0]
+		assert.Equal(t, realInfo.ActiveSessions, uint64(1))
+		assert.Equal(t, realInfo.Stats, expectedRealStats)
+
+		assert.Equal(t, 1, len(state.VsInfo))
+		vsInfo := &state.VsInfo[0]
+		assert.Equal(t, vsInfo.ActiveSessions, uint64(1))
+		assert.Equal(t, vsInfo.Stats, expectedVsStats)
 	})
 
 	t.Run("Read_Config_Info", func(t *testing.T) {
 		configInfo, err := balancer.ConfigInfo(defaultDeviceName, defaultPipelineName, defaultFunctionName, defaultChainName)
 		require.NoError(t, err)
-		t.Log(configInfo.JsonPretty())
-		// todo: add checkout
+		assert.Equal(t, 1, len(configInfo.Vs))
+		vsInfo := configInfo.Vs[0]
+
+		assert.Equal(t, 1, len(vsInfo.Reals))
+		realInfo := &vsInfo.Reals[0]
+
+		assert.Equal(t, vsInfo.Stats, expectedVsStats)
+		assert.Equal(t, realInfo.Stats, expectedRealStats)
 	})
 }

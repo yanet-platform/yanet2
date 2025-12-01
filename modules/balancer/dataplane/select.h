@@ -124,8 +124,9 @@ select_real(
 	if (get_session_result == SESSION_FOUND) { // session with such id found
 		struct real *real = &reals[session_state->real_id];
 
-		if (!(real->flags & BALANCER_REAL_DISABLED_FLAG
-		    )) { // real not disabled
+		if (!(real->flags & (BALANCER_REAL_DISABLED_FLAG)) &&
+		    (real->flags & REAL_PRESENT_IN_CONFIG_FLAG
+		    )) { // real not disabled and present in config
 			// real selected
 
 			// calculate until session was encountered

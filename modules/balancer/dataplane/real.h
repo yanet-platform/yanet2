@@ -7,12 +7,14 @@
 
 typedef uint8_t real_flags_t;
 
+#define REAL_PRESENT_IN_CONFIG_FLAG (1 << 7)
+
 ////////////////////////////////////////////////////////////////////////////////
 
 // Represents real as part of the virtual service
 struct real {
 	// index in the balancer registry
-	size_t idx;
+	size_t registry_idx;
 
 	real_flags_t flags;
 	uint16_t weight;

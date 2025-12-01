@@ -20,18 +20,15 @@ cp_function_create(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_function_config *cp_function_config
 ) {
-	const size_t alloc_size = cp_function_alloc_size(cp_function_config->chain_count);
-	struct cp_function *new_function = (struct cp_function *)memory_balloc(
-		memory_context,
-		alloc_size
-	);
+	const size_t alloc_size =
+		cp_function_alloc_size(cp_function_config->chain_count);
+	struct cp_function *new_function =
+		(struct cp_function *)memory_balloc(memory_context, alloc_size);
 	if (new_function == NULL) {
 		return NULL;
 	}
-	
-	memset(new_function,
-	       0,
-	       cp_function_alloc_size(cp_function_config->chain_count));
+
+	memset(new_function, 0, alloc_size);
 
 	registry_item_init(&new_function->config_item);
 

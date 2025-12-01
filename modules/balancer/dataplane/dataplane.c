@@ -30,12 +30,7 @@ handle_packets(
 	uint32_t now
 ) {
 	struct packet_ctx ctx;
-	packet_ctx_setup(
-		&ctx,
-		worker_idx,
-		ectx,
-		config
-	);
+	packet_ctx_setup(&ctx, worker_idx, ectx, config);
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
@@ -99,13 +94,7 @@ balancer_handle_packets(
 
 	uint32_t worker_idx = dp_worker->idx;
 
-	handle_packets(
-		config,
-		packet_front,
-		module_ectx,
-		worker_idx,
-		now
-	);
+	handle_packets(config, packet_front, module_ectx, worker_idx, now);
 }
 
 struct module *

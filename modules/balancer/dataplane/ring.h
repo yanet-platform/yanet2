@@ -49,7 +49,7 @@ ring_init(
 				 ? 0
 				 : reals[i].weight);
 		for (size_t copy = 0; copy < weight; ++copy) {
-			ids[idx++] = reals[i].idx;
+			ids[idx++] = reals[i].registry_idx;
 		}
 	}
 	SET_OFFSET_OF(&ring->ids, ids);

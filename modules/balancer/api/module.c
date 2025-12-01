@@ -90,11 +90,11 @@ balancer_module_config_free(struct cp_module *config) {
 	struct balancer_module_config *balancer_config =
 		container_of(config, struct balancer_module_config, cp_module);
 
-	printf("free: balancer_config=%p\n", balancer_config);
-
 	for (size_t i = 0; i < balancer_config->vs_count; ++i) {
 		struct virtual_service *vs = ADDR_OF(&balancer_config->vs) + i;
-		printf("free: vs=%p\n", vs);
+		if (!(vs->flags & VS_PRESENT_IN_CONFIG_FLAG)) {
+			continue;
+		}
 		lpm_free(&vs->src_filter);
 		ring_free(&vs->real_ring);
 	}

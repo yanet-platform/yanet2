@@ -15,7 +15,7 @@
 static void
 fill_real(struct real *real, size_t idx, uint16_t weight) {
 	memset(real, 0, sizeof(struct real));
-	real->idx = idx;
+	real->registry_idx = idx;
 	real->weight = weight;
 }
 

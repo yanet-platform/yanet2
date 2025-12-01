@@ -464,7 +464,7 @@ func TestNewConfig(t *testing.T) {
 	clientIp := IpAddr("10.0.1.22")
 	clientPort := uint16(1000)
 
-	packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{ACK: true})
+	packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{SYN: true})
 	packet := xpacket.LayersToPacket(t, packetLayers...)
 
 	result, err := mock.HandlePackets(packet)
