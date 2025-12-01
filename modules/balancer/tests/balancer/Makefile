@@ -6,4 +6,4 @@ compile:
 	go test -c -v -asan .
 
 run: compile
-	./balancer.test -test.run 'TestNewConfig' -test.v
+	./balancer.test -test.v
