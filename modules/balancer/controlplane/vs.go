@@ -1,4 +1,4 @@
-package balancer
+package mbalancer
 
 import (
 	"fmt"
@@ -76,26 +76,41 @@ func (p VsScheduler) IntoProto() balancerpb.VsScheduler {
 	return balancerpb.VsScheduler(p)
 }
 
-////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////å
 
-// Virtual service description
+// Description of the Virtual Service related to the
+// current module configuration.
 type VirtualService struct {
+	// Info about virtual service
+	Info VirtualServiceInfo
+
+	// Reals
+	Reals []Real
+
+	// Index in the virtual service registry
+	RegistryIdx uint64
+
+	// Wlc info if service used with WLC scheduler (and `nil` else)
+	Wlc *Wlc
+}
+
+// Info of the virtual service
+type VirtualServiceInfo struct {
 	Address    netip.Addr
 	Port       uint16
 	Proto      TransportProto
 	AllowedSrc []netip.Prefix
-	Reals      []Real
 	Flags      VsFlags
 	Scheduler  VsScheduler
-
-	// State registry index
-	// -1 in case vs was not registered yet
-	Idx int64
-
-	Wlc *WlcInfo
 }
 
-func NewVirtualServiceFromProto(proto *balancerpb.VirtualService) (*VirtualService, error) {
+// Config of the virtual service
+type VirtualServiceConfig struct {
+	Info  VirtualServiceInfo
+	Reals []RealConfig
+}
+
+func NewVirtualServiceConfigFromProto(proto *balancerpb.VirtualService) (*VirtualServiceConfig, error) {
 	// Get address
 	addr, err := netip.ParseAddr(string(proto.Addr))
 	if err != nil {
@@ -131,7 +146,7 @@ func NewVirtualServiceFromProto(proto *balancerpb.VirtualService) (*VirtualServi
 	}
 
 	// Get reals
-	reals := make([]Real, 0)
+	reals := make([]RealConfig, 0)
 	for idx, real := range proto.Reals {
 		r, err := NewRealFromProto(real)
 		if err != nil {
@@ -142,22 +157,25 @@ func NewVirtualServiceFromProto(proto *balancerpb.VirtualService) (*VirtualServi
 
 	scheduler := VsSchedulerFromProto(proto.Scheduler)
 
-	return &VirtualService{
+	info := VirtualServiceInfo{
 		Address:    addr,
 		Port:       port,
 		Proto:      protocol,
 		AllowedSrc: allowedSrc,
-		Reals:      reals,
 		Flags:      flags,
 		Scheduler:  scheduler,
-		Idx:        -1,
+	}
+
+	return &VirtualServiceConfig{
+		Info:  info,
+		Reals: reals,
 	}, nil
 }
 
-func (vs *VirtualService) IntoProto() *balancerpb.VirtualService {
+func (vs *VirtualServiceConfig) IntoProto() *balancerpb.VirtualService {
 	// Make allowed src
 	allowedSrc := make([]*balancerpb.Subnet, 0)
-	for _, subnet := range vs.AllowedSrc {
+	for _, subnet := range vs.Info.AllowedSrc {
 		allowedSrc = append(allowedSrc, &balancerpb.Subnet{
 			Addr: subnet.Addr().AsSlice(),
 			Size: uint32(subnet.Bits()),
@@ -170,15 +188,15 @@ func (vs *VirtualService) IntoProto() *balancerpb.VirtualService {
 		reals = append(reals, real.IntoProto())
 	}
 
-	flags := vs.Flags.IntoProto()
+	flags := vs.Info.Flags.IntoProto()
 
 	return &balancerpb.VirtualService{
-		Addr:        []byte(vs.Address.String()),
-		Port:        uint32(vs.Port),
-		Proto:       vs.Proto.IntoProto(),
+		Addr:        []byte(vs.Info.Address.String()),
+		Port:        uint32(vs.Info.Port),
+		Proto:       vs.Info.Proto.IntoProto(),
 		AllowedSrcs: allowedSrc,
 		Reals:       reals,
 		Flags:       &flags,
-		Scheduler:   vs.Scheduler.IntoProto(),
+		Scheduler:   vs.Info.Scheduler.IntoProto(),
 	}
 }

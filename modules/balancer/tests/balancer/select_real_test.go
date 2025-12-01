@@ -27,22 +27,24 @@ import (
 
 func smallConfig() (*mbalancer.ModuleInstanceConfig, *mbalancer.SessionsTimeouts) {
 	config := mbalancer.ModuleInstanceConfig{
-		Services: []mbalancer.VirtualService{
+		Services: []mbalancer.VirtualServiceConfig{
 			{
-				Address: IpAddr("192.166.13.22"),
-				Port:    1000,
-				Flags: mbalancer.VsFlags{
-					GRE:    false,
-					OPS:    false,
-					PureL3: false,
-					FixMSS: false,
+				Info: mbalancer.VirtualServiceInfo{
+					Address: IpAddr("192.166.13.22"),
+					Port:    1000,
+					Flags: mbalancer.VsFlags{
+						GRE:    false,
+						OPS:    false,
+						PureL3: false,
+						FixMSS: false,
+					},
+					Scheduler: mbalancer.VsSchedulerPRR,
+					Proto:     mbalancer.Tcp,
+					AllowedSrc: []netip.Prefix{
+						IpPrefix("10.12.0.0/8"),
+					},
 				},
-				Scheduler: mbalancer.VsSchedulerPRR,
-				Proto:     mbalancer.Tcp,
-				AllowedSrc: []netip.Prefix{
-					IpPrefix("10.12.0.0/8"),
-				},
-				Reals: []mbalancer.Real{
+				Reals: []mbalancer.RealConfig{
 					{
 						Weight:  1,
 						DstAddr: IpAddr("1.1.1.1"),
@@ -114,8 +116,8 @@ func sendRandomSYNs(
 		layers := MakeTCPPacket(
 			allowedSrc(uint8(packetIdx+packetIdxOffset)),
 			42175,
-			vs.Address,
-			vs.Port,
+			vs.Info.Address,
+			vs.Info.Port,
 			&layers.TCP{SYN: true},
 		)
 		packet := common.LayersToPacket(t, layers...)
@@ -208,7 +210,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 		}
 
 		// validate state info
-		ValidateStateInfo(t, info, balancer.GetConfig())
+		ValidateStateInfo(t, info, balancer.VirtualServices())
 	})
 
 	// enabled disabled reals
@@ -220,9 +222,9 @@ func TestSelectAfterUpdate(t *testing.T) {
 		for _, realIdx := range []uint64{1, 2} {
 			real := &vs.Reals[realIdx]
 			updates = append(updates, &mbalancer.RealUpdate{
-				VirtualIp: vs.Address,
-				Proto:     vs.Proto,
-				Port:      vs.Port,
+				VirtualIp: vs.Info.Address,
+				Proto:     vs.Info.Proto,
+				Port:      vs.Info.Port,
 				RealIp:    real.DstAddr,
 				Enable:    true,
 			})
@@ -311,7 +313,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 		)
 
 		// validate state info
-		ValidateStateInfo(t, info, balancer.GetConfig())
+		ValidateStateInfo(t, info, balancer.VirtualServices())
 	})
 
 	// disabled first and second reals
@@ -323,9 +325,9 @@ func TestSelectAfterUpdate(t *testing.T) {
 		for _, realIdx := range []uint64{0, 1} {
 			real := &vs.Reals[realIdx]
 			updates = append(updates, &mbalancer.RealUpdate{
-				VirtualIp: vs.Address,
-				Proto:     vs.Proto,
-				Port:      vs.Port,
+				VirtualIp: vs.Info.Address,
+				Proto:     vs.Info.Proto,
+				Port:      vs.Info.Port,
 				RealIp:    real.DstAddr,
 				Enable:    false,
 			})
@@ -409,7 +411,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 		)
 
 		// validate state info
-		ValidateStateInfo(t, info, balancer.GetConfig())
+		ValidateStateInfo(t, info, balancer.VirtualServices())
 	})
 }
 
@@ -436,13 +438,16 @@ func TestNewConfig(t *testing.T) {
 	// make new balancer config
 
 	config := mbalancer.ModuleInstanceConfig{
-		Services: []mbalancer.VirtualService{
+		Services: []mbalancer.VirtualServiceConfig{
 			{
-				Address:    vsIp,
-				Port:       vsPort,
-				Proto:      vsProto,
-				AllowedSrc: vsAllowedSrc,
-				Reals: []mbalancer.Real{
+				Info: mbalancer.VirtualServiceInfo{
+					Address:    vsIp,
+					Port:       vsPort,
+					Proto:      vsProto,
+					AllowedSrc: vsAllowedSrc,
+					Scheduler:  mbalancer.VsSchedulerPRR,
+				},
+				Reals: []mbalancer.RealConfig{
 					{
 						DstAddr: IpAddr("10.1.1.1"),
 						Weight:  1,
@@ -477,13 +482,16 @@ func TestNewConfig(t *testing.T) {
 	// update config
 
 	config = mbalancer.ModuleInstanceConfig{
-		Services: []mbalancer.VirtualService{
+		Services: []mbalancer.VirtualServiceConfig{
 			{
-				Address:    vsIp,
-				Port:       vsPort,
-				Proto:      vsProto,
-				AllowedSrc: vsAllowedSrc,
-				Reals: []mbalancer.Real{
+				Info: mbalancer.VirtualServiceInfo{
+					Address:    vsIp,
+					Port:       vsPort,
+					Proto:      vsProto,
+					AllowedSrc: vsAllowedSrc,
+					Scheduler:  mbalancer.VsSchedulerPRR,
+				},
+				Reals: []mbalancer.RealConfig{
 					{
 						DstAddr: IpAddr("10.12.2.2"),
 						Weight:  1,

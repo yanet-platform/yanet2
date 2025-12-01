@@ -1,4 +1,4 @@
-package balancer
+package mbalancer
 
 import "github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 

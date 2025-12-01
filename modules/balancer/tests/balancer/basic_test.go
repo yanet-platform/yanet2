@@ -22,14 +22,16 @@ func TestBalancerBasics(t *testing.T) {
 	// make balancer config
 
 	config := mbalancer.ModuleInstanceConfig{
-		Services: []mbalancer.VirtualService{
+		Services: []mbalancer.VirtualServiceConfig{
 			{
-				Address:    vsIp,
-				Port:       vsPort,
-				Proto:      mbalancer.Tcp,
-				AllowedSrc: []netip.Prefix{IpPrefix("3.3.3.0/24")},
-				Scheduler:  mbalancer.VsSchedulerPRR,
-				Reals: []mbalancer.Real{
+				Info: mbalancer.VirtualServiceInfo{
+					Address:    vsIp,
+					Port:       vsPort,
+					Proto:      mbalancer.Tcp,
+					AllowedSrc: []netip.Prefix{IpPrefix("3.3.3.0/24")},
+					Scheduler:  mbalancer.VsSchedulerPRR,
+				},
+				Reals: []mbalancer.RealConfig{
 					{
 						DstAddr: realAddr,
 						Weight:  1,
@@ -112,7 +114,7 @@ func TestBalancerBasics(t *testing.T) {
 		assert.Equal(t, realInfo.ActiveSessions, uint64(1))
 		assert.Equal(t, realInfo.Stats, expectedRealStats)
 
-		assert.Equal(t, 1, len(state.VsInfo))
+		require.Equal(t, 1, len(state.VsInfo))
 		vsInfo := &state.VsInfo[0]
 		assert.Equal(t, vsInfo.ActiveSessions, uint64(1))
 		assert.Equal(t, vsInfo.Stats, expectedVsStats)
@@ -121,10 +123,10 @@ func TestBalancerBasics(t *testing.T) {
 	t.Run("Read_Config_Info", func(t *testing.T) {
 		configInfo, err := balancer.ConfigInfo(defaultDeviceName, defaultPipelineName, defaultFunctionName, defaultChainName)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(configInfo.Vs))
+		require.Equal(t, 1, len(configInfo.Vs))
 		vsInfo := configInfo.Vs[0]
 
-		assert.Equal(t, 1, len(vsInfo.Reals))
+		require.Equal(t, 1, len(vsInfo.Reals))
 		realInfo := &vsInfo.Reals[0]
 
 		assert.Equal(t, vsInfo.Stats, expectedVsStats)

@@ -393,13 +393,13 @@ func ValidatePacket(
 	for idx := range config.Services {
 		service := &config.Services[idx]
 		if reflect.DeepEqual(
-			net.IP(service.Address.AsSlice()),
+			net.IP(service.Info.Address.AsSlice()),
 			originalPacket.DstIP,
-		) && (service.Port == originalPacket.DstPort || service.Flags.PureL3) && service.Proto == packetProto {
+		) && (service.Info.Port == originalPacket.DstPort || service.Info.Flags.PureL3) && service.Info.Proto == packetProto {
 			// found service
-			if service.Flags.GRE {
+			if service.Info.Flags.GRE {
 				expectedTunnelType := "gre-ip4"
-				if service.Address.Is6() {
+				if service.Info.Address.Is6() {
 					expectedTunnelType = "gre-ip6"
 				}
 				assert.Equal(
@@ -411,7 +411,7 @@ func ValidatePacket(
 			}
 
 			// todo: check tcp layers (if FixMSS enabled)
-			if service.Flags.FixMSS {
+			if service.Info.Flags.FixMSS {
 				originalMSS, err := xpacket.PacketMSS(originalGoPacket)
 				hadMSS := err == nil
 
@@ -460,20 +460,20 @@ func ValidatePacket(
 func ValidateStateInfo(
 	t *testing.T,
 	info *mbalancer.StateInfo,
-	config *mbalancer.ModuleInstanceConfig,
+	virtualServices []mbalancer.VirtualService,
 ) {
 	t.Helper()
-	for vsIdx := range config.Services {
-		vs := &config.Services[vsIdx]
+	for vsIdx := range virtualServices {
+		vs := &virtualServices[vsIdx]
 		summaryActiveSession := uint64(0)
 		summaryPackets := uint64(0)
 		for realIdx := range vs.Reals {
 			real := &vs.Reals[realIdx]
-			summaryActiveSession += info.RealInfo[real.Idx].ActiveSessions
+			summaryActiveSession += info.RealInfo[real.RegistryIdx].ActiveSessions
 			summaryPackets += info.RealInfo[realIdx].Stats.SendPackets
 		}
 
-		vsInfo := info.VsInfo[vs.Idx]
+		vsInfo := info.VsInfo[vs.RegistryIdx]
 		assert.Equalf(
 			t,
 			vsInfo.ActiveSessions,

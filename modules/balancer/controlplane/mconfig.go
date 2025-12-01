@@ -1,4 +1,4 @@
-package balancer
+package mbalancer
 
 import (
 	"encoding/json"
@@ -105,6 +105,55 @@ func (configInfo *ConfigInfo) JsonPretty() string {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+func (config *ModuleInstanceConfig) FindReal(
+	vip *netip.Addr,
+	realIp *netip.Addr,
+	port uint16,
+) *RealConfig {
+	for serviceIdx := range config.Services {
+		service := &config.Services[serviceIdx]
+		if service.Info.Address == *vip &&
+			(port == service.Info.Port || (service.Info.Flags.PureL3 && port == 0)) {
+			for idx := range service.Reals {
+				real := &service.Reals[idx]
+				if real.DstAddr == *realIp {
+					return real
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (config *ModuleInstanceConfig) ValidateRealUpdate(
+	update *RealUpdate,
+) error {
+	if real := config.FindReal(&update.VirtualIp, &update.RealIp, update.Port); real == nil {
+		return fmt.Errorf(
+			"real with address %s not found on virtual service %s:%d",
+			update.RealIp,
+			update.VirtualIp,
+			update.Port,
+		)
+	} else {
+		return nil
+	}
+}
+
+func (config *ModuleInstanceConfig) UpdateReal(update *RealUpdate) error {
+	real := config.FindReal(&update.VirtualIp, &update.RealIp, update.Port)
+	if real == nil {
+		return fmt.Errorf("failed to find real")
+	}
+	real.Enabled = update.Enable
+	if update.Weight != 0 {
+		real.Weight = uint16(update.Weight)
+	}
+	return nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 func vsStatsFromCounters(counters [][]uint64) VsStats {
 	for instance := 1; instance < len(counters); instance += 1 {
 		for k := range counters[instance] {
@@ -146,7 +195,7 @@ func realStatsFromCounters(counters [][]uint64) RealStats {
 func findVsCounters(vs *VirtualService, counters []ffi.CounterInfo) *ffi.CounterInfo {
 	for idx := range counters {
 		counter := &counters[idx]
-		if counter.Name == fmt.Sprintf("v%d", vs.Idx) {
+		if counter.Name == fmt.Sprintf("v%d", vs.RegistryIdx) {
 			// found
 			return counter
 		}
@@ -157,7 +206,7 @@ func findVsCounters(vs *VirtualService, counters []ffi.CounterInfo) *ffi.Counter
 func findRealCounters(real *Real, counters []ffi.CounterInfo) *ffi.CounterInfo {
 	for idx := range counters {
 		counter := &counters[idx]
-		if counter.Name == fmt.Sprintf("r%d", real.Idx) {
+		if counter.Name == fmt.Sprintf("r%d", real.RegistryIdx) {
 			// found
 			return counter
 		}
@@ -166,51 +215,3 @@ func findRealCounters(real *Real, counters []ffi.CounterInfo) *ffi.CounterInfo {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-func (config *ModuleInstanceConfig) Info(
-	dpConfig *ffi.DPConfig,
-	device string,
-	pipeline string,
-	function string,
-	chain string,
-	name string,
-) (*ConfigInfo, error) {
-	counters := dpConfig.ModuleCounters(device, pipeline, function, chain, "balancer", name)
-	configInfo := ConfigInfo{
-		Vs: make([]ConfigVsInfo, 0, len(config.Services)),
-	}
-	for vsIdx := range config.Services {
-		vs := &config.Services[vsIdx]
-		vsCounters := findVsCounters(vs, counters)
-		if vsCounters == nil {
-			return nil, fmt.Errorf("failed to find counters for vs %d", vs.Idx)
-		}
-		vsInfo := ConfigVsInfo{
-			Address:    vs.Address,
-			Port:       vs.Port,
-			Proto:      vs.Proto,
-			AllowedSrc: vs.AllowedSrc,
-			Reals:      make([]ConfigRealInfo, 0, len(vs.Reals)),
-			Flags:      vs.Flags,
-			Stats:      vsStatsFromCounters(vsCounters.Values),
-		}
-		for realIdx := range len(vs.Reals) {
-			real := &vs.Reals[realIdx]
-			realCounters := findRealCounters(real, counters)
-			if realCounters == nil {
-				return nil, fmt.Errorf("failed to find counters for real %d", real.Idx)
-			}
-			realInfo := ConfigRealInfo{
-				Weight:  real.Weight,
-				DstAddr: real.DstAddr,
-				SrcAddr: real.SrcAddr,
-				SrcMask: real.SrcMask,
-				Enabled: real.Enabled,
-				Stats:   realStatsFromCounters(realCounters.Values),
-			}
-			vsInfo.Reals = append(vsInfo.Reals, realInfo)
-		}
-		configInfo.Vs = append(configInfo.Vs, vsInfo)
-	}
-	return &configInfo, nil
-}

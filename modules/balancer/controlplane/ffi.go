@@ -1,4 +1,4 @@
-package balancer
+package mbalancer
 
 // This module gives GO API to configure balancer module
 
@@ -65,11 +65,15 @@ func vsProtoFromIpProto(proto C.int) TransportProto {
 // Session Table
 ////////////////////////////////////////////////////////////////////////////////
 
-// Table of the sessions between clients and real servers
+// State of the balancer, composed of session table, sessions timeouts description
+// and registry of virtual and real services.
+// Some services may not be used in the current config.
 type BalancerState struct {
 	inner *C.struct_balancer_state
 }
 
+// Create new state of the balancer with provided
+// session table size and timeouts.
 func NewState(
 	agent *ffi.Agent,
 	tableSize uint64,
@@ -94,12 +98,16 @@ func NewState(
 	return BalancerState{inner: state}, nil
 }
 
-// Free memory occupied by the session table
+// Free memory occupied by the balancer state
 func (state *BalancerState) Free() {
 	C.balancer_state_destroy(state.inner)
 }
 
-// Fills state info
+////////////////////////////////////////////////////////////////////////////////
+// State Info and Counters
+////////////////////////////////////////////////////////////////////////////////
+
+// Get state info: virtual and real services info.
 func (state *BalancerState) Info() (*StateInfo, error) {
 	// Get vs info
 
@@ -225,7 +233,7 @@ func (state *BalancerState) RealActiveSessionCount(realIdx uint64) (uint64, erro
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Virtual service config
+// Virtual Service Config
 ////////////////////////////////////////////////////////////////////////////////
 
 // Virtual service config
@@ -233,7 +241,7 @@ type VsConfig struct {
 	inner *C.struct_balancer_vs_config
 }
 
-func realFlags(real *Real) uint64 {
+func realFlags(real *RealConfig) uint64 {
 	realFlags := 0
 	if real.DstAddr.Is6() {
 		realFlags |= C.BALANCER_REAL_IPV6_FLAG
@@ -244,42 +252,46 @@ func realFlags(real *Real) uint64 {
 	return uint64(realFlags)
 }
 
-func vsFlags(vs *VirtualService) uint64 {
+func vsFlags(vs *VirtualServiceConfig) uint64 {
 	flags := 0
-	if vs.Address.Is6() {
+	info := &vs.Info
+	if info.Address.Is6() {
 		flags |= C.BALANCER_VS_IPV6_FLAG
 	}
-	if vs.Flags.GRE {
+	if info.Flags.GRE {
 		flags |= C.BALANCER_VS_GRE_FLAG
 	}
-	if vs.Flags.FixMSS {
+	if info.Flags.FixMSS {
 		flags |= C.BALANCER_VS_FIX_MSS_FLAG
 	}
-	if vs.Flags.OPS {
+	if info.Flags.OPS {
 		flags |= C.BALANCER_VS_OPS_FLAG
 	}
-	if vs.Flags.PureL3 {
+	if info.Flags.PureL3 {
 		flags |= C.BALANCER_VS_PURE_L3_FLAG
 	}
-	if vs.Scheduler == VsSchedulerPRR || vs.Scheduler == VsSchedulerWLC {
+	if info.Scheduler == VsSchedulerPRR || info.Scheduler == VsSchedulerWLC {
 		flags |= C.BALANCER_VS_PRR_FLAG
 	}
 	return uint64(flags)
 }
 
 // Create Virtual service config from `Virtual Service`
-func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (VsConfig, error) {
+func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualServiceConfig, virtualService *VirtualService) (VsConfig, error) {
+	// setup info of the virtual service
+	virtualService.Info = vs.Info
+
 	// make current wlc info
-	if vs.Scheduler == VsSchedulerWLC {
-		vs.Wlc = NewWlcInfo(10, 1024)
+	if vs.Info.Scheduler == VsSchedulerWLC {
+		virtualService.Wlc = NewWlcInfo(10, 1024)
 	} else {
-		vs.Wlc = nil
+		virtualService.Wlc = nil
 	}
 
 	flags := vsFlags(vs)
 
 	proto := C.IPPROTO_TCP
-	if vs.Proto == Udp {
+	if vs.Info.Proto == Udp {
 		proto = C.IPPROTO_UDP
 	}
 
@@ -288,8 +300,8 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 	idx, err := C.balancer_state_register_vs(
 		state.inner,
 		C.uint64_t(flags),
-		sliceToPtr(vs.Address.AsSlice()),
-		C.uint16_t(vs.Port),
+		sliceToPtr(vs.Info.Address.AsSlice()),
+		C.uint16_t(vs.Info.Port),
 		C.int(proto),
 	)
 	if err != nil {
@@ -298,18 +310,18 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 	if idx == -1 {
 		return VsConfig{inner: nil}, fmt.Errorf("failed to register vs")
 	}
-	vs.Idx = int64(idx)
+	virtualService.RegistryIdx = uint64(idx)
 
 	// create vs config
 	config, err := C.balancer_vs_config_create(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		C.size_t(idx),
 		(C.uint64_t)(flags),
-		sliceToPtr(vs.Address.AsSlice()),
-		(C.uint16_t)(vs.Port),
+		sliceToPtr(vs.Info.Address.AsSlice()),
+		(C.uint16_t)(vs.Info.Port),
 		(C.uint8_t)(proto),
 		(C.size_t)(len(vs.Reals)),
-		(C.size_t)(len(vs.AllowedSrc)),
+		(C.size_t)(len(vs.Info.AllowedSrc)),
 	)
 	if err != nil {
 		return VsConfig{inner: nil}, fmt.Errorf("failed to create vs config: %w", err)
@@ -320,7 +332,7 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 	vsConfig := VsConfig{
 		inner: config,
 	}
-	for idx, prefix := range vs.AllowedSrc {
+	for idx, prefix := range vs.Info.AllowedSrc {
 		startAddr := prefix.Addr()
 		endAddr := xnetip.LastAddr(prefix)
 		_, err := C.balancer_vs_config_set_allowed_src_range(
@@ -348,9 +360,9 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 
 		realIdx, err := C.balancer_state_register_real(
 			state.inner,
-			sliceToPtr(vs.Address.AsSlice()),
+			sliceToPtr(vs.Info.Address.AsSlice()),
 			C.uint64_t(flags),
-			C.uint16_t(vs.Port),
+			C.uint16_t(vs.Info.Port),
 			C.int(proto),
 			C.uint64_t(realFlags),
 			sliceToPtr(real.DstAddr.AsSlice()),
@@ -365,42 +377,45 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualService) (V
 			return VsConfig{inner: nil}, fmt.Errorf("failed to register real")
 		}
 
-		real.Idx = int64(realIdx)
+		virtualService.Reals = append(virtualService.Reals, Real{
+			Config:      *real,
+			RegistryIdx: uint64(realIdx),
+		})
 
 		// update info on WLC
-		if vs.Wlc != nil {
-			activeConnections, err := state.RealActiveSessionCount(uint64(real.Idx))
+		if virtualService.Wlc != nil {
+			activeConnections, err := state.RealActiveSessionCount(uint64(realIdx))
 			if err != nil {
 				FreeVsConfig(&vsConfig)
-				return VsConfig{inner: nil}, fmt.Errorf("failed to get active session count for real %d: %w", real.Idx, err)
+				return VsConfig{inner: nil}, fmt.Errorf("failed to get active session count for real %d: %w", uint64(realIdx), err)
 			}
-			vs.Wlc.UpdateOrRegisterReal(uint64(vs.Idx), uint64(real.Idx), uint64(real.Weight), activeConnections, real.Enabled)
+			virtualService.Wlc.UpdateOrRegisterReal(uint64(virtualService.RegistryIdx), uint64(realIdx), uint64(real.Weight), activeConnections, real.Enabled)
 		}
 	}
 
-	if vs.Wlc != nil {
+	if virtualService.Wlc != nil {
 		// calculate WLC weights for real
-		vs.Wlc.RecalculateWlcWeights()
+		virtualService.Wlc.RecalculateWlcWeights()
 	}
 
-	for idx := range vs.Reals {
-		real := &vs.Reals[idx]
-		realFlags := realFlags(real)
+	for idx := range virtualService.Reals {
+		real := &virtualService.Reals[idx]
+		realFlags := realFlags(&real.Config)
 
-		effectiveRealWeight := real.Weight
-		if vs.Wlc != nil && real.Enabled {
-			effectiveRealWeight = uint16(vs.Wlc.GetRealWlcWeight(uint64(real.Idx)))
+		effectiveRealWeight := real.Config.Weight
+		if virtualService.Wlc != nil && real.Config.Enabled {
+			effectiveRealWeight = uint16(virtualService.Wlc.GetRealWlcWeight(real.RegistryIdx))
 		}
 
 		_, err = C.balancer_vs_config_set_real(
 			config,
-			C.size_t(real.Idx),
+			C.size_t(real.RegistryIdx),
 			(C.size_t)(idx),
 			(C.uint64_t)(realFlags),
 			(C.uint16_t)(effectiveRealWeight),
-			sliceToPtr(real.DstAddr.AsSlice()),
-			sliceToPtr(real.SrcAddr.AsSlice()),
-			sliceToPtr(real.SrcMask.AsSlice()),
+			sliceToPtr(real.Config.DstAddr.AsSlice()),
+			sliceToPtr(real.Config.SrcAddr.AsSlice()),
+			sliceToPtr(real.Config.SrcMask.AsSlice()),
 		)
 		if err != nil {
 			FreeVsConfig(&vsConfig)
@@ -429,6 +444,7 @@ func (state *BalancerState) NewModuleConfig(
 	agent *ffi.Agent,
 	config *ModuleInstanceConfig,
 	name string,
+	virtualServices *[]VirtualService,
 ) (ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
@@ -439,8 +455,9 @@ func (state *BalancerState) NewModuleConfig(
 		}
 	}()
 	for idx := range config.Services {
-		vs := &config.Services[idx]
-		vsConfig, err := state.NewVsConfig(agent, vs)
+		vs1 := &config.Services[idx]
+		virtualService := VirtualService{}
+		vsConfig, err := state.NewVsConfig(agent, vs1, &virtualService)
 		if err != nil {
 			return ModuleConfig{
 					inner: nil,
@@ -450,6 +467,7 @@ func (state *BalancerState) NewModuleConfig(
 				)
 		}
 		vsConfigs = append(vsConfigs, vsConfig.inner)
+		*virtualServices = append(*virtualServices, virtualService)
 	}
 
 	configsPtr := (**C.struct_balancer_vs_config)(nil)

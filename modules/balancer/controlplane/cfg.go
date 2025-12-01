@@ -1,4 +1,4 @@
-package balancer
+package mbalancer
 
 import "github.com/c2h5oh/datasize"
 

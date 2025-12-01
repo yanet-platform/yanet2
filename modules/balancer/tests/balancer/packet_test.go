@@ -22,7 +22,7 @@ import (
 ////////////////////////////////////////////////////////////////////////////////
 
 func allCombinationsConfig() (*mbalancer.ModuleInstanceConfig, *mbalancer.SessionsTimeouts) {
-	serviceConfigs := make([]mbalancer.VirtualService, 0, 2*2*2*2*2)
+	serviceConfigs := make([]mbalancer.VirtualServiceConfig, 0, 2*2*2*2*2)
 	for _, vsAddrVersion := range []int{4, 6} {
 		for _, proto := range []mbalancer.TransportProto{mbalancer.Tcp, mbalancer.Udp} {
 			for _, greEnabled := range []bool{false, true} {
@@ -37,14 +37,22 @@ func allCombinationsConfig() (*mbalancer.ModuleInstanceConfig, *mbalancer.Sessio
 							)
 							allowed = IpPrefix("ffff::0/16")
 						}
-						serviceConfig := mbalancer.VirtualService{
-							Address: vsAddr,
-							Proto:   proto,
-							Port:    8080,
-							AllowedSrc: []netip.Prefix{
-								allowed,
+						serviceConfig := mbalancer.VirtualServiceConfig{
+							Info: mbalancer.VirtualServiceInfo{
+								Address: vsAddr,
+								Proto:   proto,
+								Port:    8080,
+								AllowedSrc: []netip.Prefix{
+									allowed,
+								},
+								Flags: mbalancer.VsFlags{
+									GRE:    greEnabled,
+									OPS:    false,
+									PureL3: false,
+									FixMSS: fixMssEnabled,
+								},
 							},
-							Reals: []mbalancer.Real{
+							Reals: []mbalancer.RealConfig{
 								{
 									Weight:  1,
 									DstAddr: realAddr,
@@ -52,14 +60,7 @@ func allCombinationsConfig() (*mbalancer.ModuleInstanceConfig, *mbalancer.Sessio
 									SrcMask: realAddr,
 									Enabled: true,
 								},
-							},
-							Flags: mbalancer.VsFlags{
-								GRE:    greEnabled,
-								OPS:    false,
-								PureL3: false,
-								FixMSS: fixMssEnabled,
-							},
-						}
+							}}
 						serviceConfigs = append(serviceConfigs, serviceConfig)
 					}
 				}
@@ -130,14 +131,15 @@ func SendAndValidatePacket(
 	b *mbalancer.ModuleInstance,
 	options *PacketOptions,
 	selector VsSelector,
-) (*framework.PacketInfo, *mbalancer.VirtualService) {
+) (*framework.PacketInfo, *mbalancer.VirtualServiceConfig) {
 	virtualServices := b.GetConfig().Services
 	for vsIdx := range virtualServices {
 		vs := &virtualServices[vsIdx]
-		if (vs.Address.Is4() && selector.VsIp == 4) ||
-			(vs.Address.Is6() && selector.VsIp == 6) {
-			if vs.Proto == selector.Proto {
-				flags := &vs.Flags
+		vsInfo := vs.Info
+		if (vsInfo.Address.Is4() && selector.VsIp == 4) ||
+			(vsInfo.Address.Is6() && selector.VsIp == 6) {
+			if vsInfo.Proto == selector.Proto {
+				flags := &vsInfo.Flags
 				if flags.FixMSS == selector.FixMSS &&
 					flags.GRE == selector.Gre {
 					real := &vs.Reals[0]
@@ -170,19 +172,19 @@ func SendPacketToVsAndValidate(
 	mock *mock.YanetMock,
 	balancer *mbalancer.ModuleInstance,
 	options *PacketOptions,
-	vs *mbalancer.VirtualService,
+	vs *mbalancer.VirtualServiceConfig,
 ) *framework.PacketInfo {
 	clientAddr := clientIpv4()
-	if vs.Address.Is6() {
+	if vs.Info.Address.Is6() {
 		clientAddr = clientIpv6()
 	}
 	clientPort := uint16(40441)
 
-	vsAddr := vs.Address
-	vsPort := vs.Port
+	vsAddr := vs.Info.Address
+	vsPort := vs.Info.Port
 
 	tcp := &layers.TCP{SYN: true}
-	if vs.Proto == mbalancer.Udp {
+	if vs.Info.Proto == mbalancer.Udp {
 		tcp = nil
 	}
 	layers := MakePacketLayers(clientAddr, clientPort, vsAddr, vsPort, tcp)
@@ -281,7 +283,7 @@ func TestPacketEncapGreMSS(t *testing.T) {
 					}
 
 					if vs != nil {
-						assert.True(t, vs.Flags.GRE)
+						assert.True(t, vs.Info.Flags.GRE)
 					}
 				}
 			}
