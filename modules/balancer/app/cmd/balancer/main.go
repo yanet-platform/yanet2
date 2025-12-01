@@ -27,7 +27,7 @@ func listen(cfg *balancer.Config, balancer *balancer.BalancerModule, log *zap.Su
 	healthpb.RegisterHealthServer(srv, health.NewServer())
 	reflection.Register(srv)
 
-	log.Infof("Registered balancer and helth servers")
+	log.Infof("Registered balancer and health servers")
 
 	go func() {
 		log.Infof("gRPC server listening on %s", lis.Addr())

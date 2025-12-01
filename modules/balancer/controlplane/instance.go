@@ -282,15 +282,21 @@ func (instance *ModuleInstance) ForceExtendSessionTable() error {
 
 func (instance *ModuleInstance) UpdateWlc() error {
 	var updated bool = false
-	for idx := range instance.config.Services {
+	for idx := range instance.vs {
 		vs := &instance.vs[idx]
 		if vs.Wlc != nil {
 			for realIdx := range vs.Reals {
 				real := &vs.Reals[realIdx]
 				if real.Config.Enabled {
-					currentConnections, err := instance.state.RealActiveSessionCount(uint64(real.RegistryIdx))
+					currentConnections, err := instance.state.RealActiveSessionCount(
+						uint64(real.RegistryIdx),
+					)
 					if err != nil {
-						return fmt.Errorf("failed to get active session count for real %d: %w", real.RegistryIdx, err)
+						return fmt.Errorf(
+							"failed to get active session count for real %d: %w",
+							real.RegistryIdx,
+							err,
+						)
 					}
 					vs.Wlc.UpdateActiveConnections(uint64(real.RegistryIdx), currentConnections)
 				}

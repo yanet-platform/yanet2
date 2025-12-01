@@ -213,5 +213,3 @@ func findRealCounters(real *Real, counters []ffi.CounterInfo) *ffi.CounterInfo {
 	}
 	return nil
 }
-
-////////////////////////////////////////////////////////////////////////////////

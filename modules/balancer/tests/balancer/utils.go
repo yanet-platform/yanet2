@@ -415,7 +415,11 @@ func ValidatePacket(
 				originalMSS, err := xpacket.PacketMSS(originalGoPacket)
 				hadMSS := err == nil
 
-				packet := gopacket.NewPacket(resultPacket.RawData, layers.LayerTypeEthernet, gopacket.Default)
+				packet := gopacket.NewPacket(
+					resultPacket.RawData,
+					layers.LayerTypeEthernet,
+					gopacket.Default,
+				)
 				resultMSS, err := xpacket.PacketMSS(packet)
 				hasMSS := err == nil
 				if !hasMSS {

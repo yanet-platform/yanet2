@@ -3,13 +3,13 @@ package mbalancer
 import "fmt"
 
 type RealWlcInfo struct {
-	VsIdx             uint64
 	ActiveConnections uint64
 	Weight            uint64
 	WlcWeight         uint64
 	Enabled           bool
 }
 
+// Weighted least connections for the virtual service
 type Wlc struct {
 	// map from real index to real info
 	reals         map[uint64]*RealWlcInfo
@@ -19,15 +19,19 @@ type Wlc struct {
 
 func NewWlcInfo(power uint64, maxRealWeight uint64) *Wlc {
 	return &Wlc{
-		reals:         map[uint64]*RealWlcInfo{},
+		reals:         make(map[uint64]*RealWlcInfo, 0),
 		power:         power,
 		maxRealWeight: maxRealWeight,
 	}
 }
 
-func (wlc *Wlc) UpdateOrRegisterReal(vsIdx uint64, realIdx uint64, weight uint64, connections uint64, enabled bool) {
+func (wlc *Wlc) UpdateOrRegisterReal(
+	realIdx uint64,
+	weight uint64,
+	connections uint64,
+	enabled bool,
+) {
 	wlc.reals[realIdx] = &RealWlcInfo{
-		VsIdx:             vsIdx,
 		Weight:            weight,
 		ActiveConnections: connections,
 		WlcWeight:         weight,
@@ -48,20 +52,25 @@ func (wlc *Wlc) UpdateActiveConnections(realIdx uint64, connections uint64) erro
 func (wlc *Wlc) RecalculateWlcWeights() bool {
 	// vsIdx -> connections/weights
 	// typically there is only one virtual service, but...
-	connectionsSum := map[uint64]uint64{}
-	weightsSum := map[uint64]uint64{}
+	connectionsSum := uint64(0)
+	weightsSum := uint64(0)
 	for _, real := range wlc.reals {
 		if real.Enabled {
-			connectionsSum[real.VsIdx] += real.ActiveConnections
-			weightsSum[real.VsIdx] += real.Weight
+			connectionsSum += real.ActiveConnections
+			weightsSum += real.Weight
 		}
 	}
 	updated := false
 	for _, real := range wlc.reals {
 		if real.Enabled {
-			newWeight := wlc.calcWlcWeight(real.Weight, real.ActiveConnections, weightsSum[real.VsIdx], connectionsSum[real.VsIdx])
-			if real.Weight != newWeight {
-				real.Weight = newWeight
+			newWeight := wlc.calcWlcWeight(
+				real.Weight,
+				real.ActiveConnections,
+				weightsSum,
+				connectionsSum,
+			)
+			if real.WlcWeight != newWeight {
+				real.WlcWeight = newWeight
 				updated = true
 			}
 		}
@@ -69,7 +78,12 @@ func (wlc *Wlc) RecalculateWlcWeights() bool {
 	return updated
 }
 
-func (wlc *Wlc) calcWlcWeight(weight uint64, connections uint64, weightSum uint64, connectionsSum uint64) uint64 {
+func (wlc *Wlc) calcWlcWeight(
+	weight uint64,
+	connections uint64,
+	weightSum uint64,
+	connectionsSum uint64,
+) uint64 {
 	if weight == 0 || weightSum == 0 || connectionsSum < weightSum {
 		return weight
 	}

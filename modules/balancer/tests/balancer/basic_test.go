@@ -121,7 +121,12 @@ func TestBalancerBasics(t *testing.T) {
 	})
 
 	t.Run("Read_Config_Info", func(t *testing.T) {
-		configInfo, err := balancer.ConfigInfo(defaultDeviceName, defaultPipelineName, defaultFunctionName, defaultChainName)
+		configInfo, err := balancer.ConfigInfo(
+			defaultDeviceName,
+			defaultPipelineName,
+			defaultFunctionName,
+			defaultChainName,
+		)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(configInfo.Vs))
 		vsInfo := configInfo.Vs[0]

@@ -277,7 +277,11 @@ func vsFlags(vs *VirtualServiceConfig) uint64 {
 }
 
 // Create Virtual service config from `Virtual Service`
-func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualServiceConfig, virtualService *VirtualService) (VsConfig, error) {
+func (state *BalancerState) NewVsConfig(
+	agent *ffi.Agent,
+	vs *VirtualServiceConfig,
+	virtualService *VirtualService,
+) (VsConfig, error) {
 	// setup info of the virtual service
 	virtualService.Info = vs.Info
 
@@ -387,9 +391,20 @@ func (state *BalancerState) NewVsConfig(agent *ffi.Agent, vs *VirtualServiceConf
 			activeConnections, err := state.RealActiveSessionCount(uint64(realIdx))
 			if err != nil {
 				FreeVsConfig(&vsConfig)
-				return VsConfig{inner: nil}, fmt.Errorf("failed to get active session count for real %d: %w", uint64(realIdx), err)
+				return VsConfig{
+						inner: nil,
+					}, fmt.Errorf(
+						"failed to get active session count for real %d: %w",
+						uint64(realIdx),
+						err,
+					)
 			}
-			virtualService.Wlc.UpdateOrRegisterReal(uint64(virtualService.RegistryIdx), uint64(realIdx), uint64(real.Weight), activeConnections, real.Enabled)
+			virtualService.Wlc.UpdateOrRegisterReal(
+				uint64(realIdx),
+				uint64(real.Weight),
+				activeConnections,
+				real.Enabled,
+			)
 		}
 	}
 
@@ -455,9 +470,9 @@ func (state *BalancerState) NewModuleConfig(
 		}
 	}()
 	for idx := range config.Services {
-		vs1 := &config.Services[idx]
+		vs := &config.Services[idx]
 		virtualService := VirtualService{}
-		vsConfig, err := state.NewVsConfig(agent, vs1, &virtualService)
+		vsConfig, err := state.NewVsConfig(agent, vs, &virtualService)
 		if err != nil {
 			return ModuleConfig{
 					inner: nil,
@@ -511,5 +526,3 @@ func (config *ModuleConfig) InsertIntoRegistry(agent *ffi.Agent) error {
 	}
 	return nil
 }
-
-////////////////////////////////////////////////////////////////////////////////

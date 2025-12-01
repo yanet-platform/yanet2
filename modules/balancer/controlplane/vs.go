@@ -110,7 +110,9 @@ type VirtualServiceConfig struct {
 	Reals []RealConfig
 }
 
-func NewVirtualServiceConfigFromProto(proto *balancerpb.VirtualService) (*VirtualServiceConfig, error) {
+func NewVirtualServiceConfigFromProto(
+	proto *balancerpb.VirtualService,
+) (*VirtualServiceConfig, error) {
 	// Get address
 	addr, err := netip.ParseAddr(string(proto.Addr))
 	if err != nil {
