@@ -1,9 +1,9 @@
 fuzz_targets = {
   'route': [
-    lib_testing_module_dp_dep,
     lib_packet_dp_dep,
     lib_route_dp_dep,
     lib_route_cp_dep,
+    lib_lib_utils_dep,
   ],
 }
 

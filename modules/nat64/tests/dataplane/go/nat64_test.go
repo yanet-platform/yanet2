@@ -5,7 +5,8 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/yanet-platform/yanet2/tests/go/common"
+	"github.com/yanet-platform/yanet2/common/go/xerror"
+	"github.com/yanet-platform/yanet2/common/go/xpacket"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -17,8 +18,8 @@ import (
 // testingLayers returns predefined layers for tests
 func testingLayers() (layers.Ethernet, layers.IPv6, layers.IPv4) {
 	eth := layers.Ethernet{
-		SrcMAC:       common.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
-		DstMAC:       common.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
 		EthernetType: layers.EthernetTypeIPv6,
 	}
 
@@ -67,13 +68,13 @@ func TestNat64_ICMP_v6_to_v4_Echo(t *testing.T) {
 	}
 	require.NoError(t, gopacket.SerializeLayers(buf, opts, &icmp6, &icmp6Echo, gopacket.Payload(payload)))
 
-	pkt := common.LayersToPacket(t, &eth, &ip6, &icmp6, &icmp6Echo, gopacket.Payload(payload))
+	pkt := xpacket.LayersToPacket(t, &eth, &ip6, &icmp6, &icmp6Echo, gopacket.Payload(payload))
 	t.Log("Origin packet", pkt)
 
 	mappings := []mapping{
 		{
-			common.Unwrap(netip.ParseAddr("192.0.2.1")),
-			common.Unwrap(netip.ParseAddr("2001:db8::1")),
+			xerror.Unwrap(netip.ParseAddr("192.0.2.1")),
+			xerror.Unwrap(netip.ParseAddr("2001:db8::1")),
 		},
 	}
 	m := nat64ModuleConfig(mappings)
@@ -82,7 +83,7 @@ func TestNat64_ICMP_v6_to_v4_Echo(t *testing.T) {
 	// Process packet
 	result := nat64HandlePackets(m, pkt)
 	require.NotEmpty(t, result.Output, "No output packets")
-	resultPkt := common.ParseEtherPacket(result.Output[0])
+	resultPkt := xpacket.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
 
 	// Create expected ICMPv4 packet
@@ -93,7 +94,7 @@ func TestNat64_ICMP_v6_to_v4_Echo(t *testing.T) {
 	icmp4.Seq = 37
 
 	eth.EthernetType = layers.EthernetTypeIPv4
-	expectedPkt := common.LayersToPacket(t, &eth, &ip4, &icmp4, gopacket.Payload(payload))
+	expectedPkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp4, gopacket.Payload(payload))
 	t.Log("Expected packet", expectedPkt)
 
 	// Compare result with expected packet

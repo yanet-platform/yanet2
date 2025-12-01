@@ -1,10 +1,10 @@
 fuzz_targets = {
   'nat64w': [
-    lib_testing_module_dp_dep,
     lib_packet_dp_dep,
     lib_nat64_dp_dep,
     lib_nat64_cp_dep,
     libdpdk_inc_dep,
+    lib_lib_utils_dep,
   ],
 }
 

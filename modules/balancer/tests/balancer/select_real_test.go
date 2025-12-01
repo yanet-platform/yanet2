@@ -12,7 +12,6 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	mbalancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
-	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -120,7 +119,7 @@ func sendRandomSYNs(
 			vs.Info.Port,
 			&layers.TCP{SYN: true},
 		)
-		packet := common.LayersToPacket(t, layers...)
+		packet := xpacket.LayersToPacket(t, layers...)
 		packets = append(packets, packet)
 	}
 

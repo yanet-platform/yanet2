@@ -23,6 +23,5 @@ test(
   env: test_env,
   depends: [
     lib_dscp_cp,
-    lib_testing_module_dp,
   ],
 )

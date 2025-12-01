@@ -45,10 +45,12 @@ test_nat64_handle_packets(
 */
 import "C"
 import (
+	"fmt"
 	"net/netip"
+	"runtime"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/tests/go/common"
+	"github.com/yanet-platform/yanet2/common/go/dataplane"
 
 	"log"
 
@@ -109,11 +111,15 @@ func nat64ModuleConfig(mappings []mapping) *C.struct_nat64_module_config {
 }
 
 // nat64HandlePackets processes packets through NAT64 module
-func nat64HandlePackets(mc *C.struct_nat64_module_config, packets ...gopacket.Packet) common.PacketFrontResult {
-	payload := common.PacketsToPaylod(packets)
-	pf := common.PacketFrontFromPayload(payload)
-	common.ParsePackets(pf)
+func nat64HandlePackets(mc *C.struct_nat64_module_config, packets ...gopacket.Packet) dataplane.PacketFrontPayload {
+	pinner := runtime.Pinner{}
+	defer pinner.Unpin()
+
+	pf, err := dataplane.NewPacketFrontFromPackets(&pinner, packets...)
+	if err != nil {
+		msg := fmt.Sprintf("failed to create packet front: %v", err)
+		panic(msg)
+	}
 	C.test_nat64_handle_packets(nil, &mc.cp_module, (*C.struct_packet_front)(unsafe.Pointer(pf)))
-	result := common.PacketFrontToPayload(pf)
-	return result
+	return pf.Payload()
 }

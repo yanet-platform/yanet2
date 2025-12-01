@@ -34,12 +34,13 @@ test_dscp_handle_packets(
 import "C"
 import (
 	"net/netip"
+	"runtime"
 	"unsafe"
 
 	"github.com/gopacket/gopacket"
 
+	"github.com/yanet-platform/yanet2/common/go/dataplane"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
-	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
 var (
@@ -97,11 +98,14 @@ func dscpModuleConfig(prefixes []netip.Prefix, flag, dscp uint8, memCtx *C.struc
 	return m
 }
 
-func dscpHandlePackets(mc *C.struct_dscp_module_config, packets ...gopacket.Packet) common.PacketFrontResult {
-	payload := common.PacketsToPaylod(packets)
-	pf := common.PacketFrontFromPayload(payload)
-	common.ParsePackets(pf)
+func dscpHandlePackets(mc *C.struct_dscp_module_config, packets ...gopacket.Packet) dataplane.PacketFrontPayload {
+	pinner := runtime.Pinner{}
+	defer pinner.Unpin()
+
+	pf, err := dataplane.NewPacketFrontFromPackets(&pinner, packets...)
+	if err != nil {
+		panic(err)
+	}
 	C.test_dscp_handle_packets(nil, &mc.cp_module, (*C.struct_packet_front)(unsafe.Pointer(pf)))
-	result := common.PacketFrontToPayload(pf)
-	return result
+	return pf.Payload()
 }

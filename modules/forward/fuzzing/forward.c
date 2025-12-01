@@ -6,11 +6,12 @@
 #include <rte_build_config.h>	// RTE_PKTMBUF_HEADROOM
 
 #include "dataplane/module/module.h"
-#include "dataplane/module/testing.h"
 #include "dataplane/packet/packet.h"
 #include "modules/forward/api/controlplane.h"
 #include "modules/forward/dataplane/config.h"
 #include "modules/forward/dataplane/dataplane.h"
+
+#include "lib/utils/packet.h"
 
 #define ARENA_SIZE (1 << 20)
 
@@ -184,21 +185,24 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 	if (size > (MBUF_MAX_SIZE - RTE_PKTMBUF_HEADROOM)) {
 		return 0;
 	}
-	struct test_data payload[] = {{.payload = data, .size = size}};
-
-	struct packet_front *pf = testing_packet_front(
-		payload,
-		fuzz_params.payload_arena,
-		sizeof(struct packet_front) + MBUF_MAX_SIZE * 4,
+	struct packet_front pf;
+	packet_front_init(&pf);
+	struct packet_data packet_data = {
+		.rx_device_id = 0, .tx_device_id = 0, .data = data, .size = size
+	};
+	fill_packet_list_arena(
+		&pf.input,
 		1,
-		MBUF_MAX_SIZE
+		&packet_data,
+		MBUF_MAX_SIZE,
+		fuzz_params.payload_arena,
+		MBUF_MAX_SIZE * 4
 	);
-
-	parse_packet(pf->input.first);
+	parse_packet(pf.input.first);
 	struct module_ectx module_ectx;
 	SET_OFFSET_OF(&module_ectx.cp_module, fuzz_params.cp_module);
-	// Process packet through forward module
-	fuzz_params.module->handler(NULL, &module_ectx, pf);
+	// Process packet through decap module
+	fuzz_params.module->handler(NULL, &module_ectx, &pf);
 
 	return 0;
 }

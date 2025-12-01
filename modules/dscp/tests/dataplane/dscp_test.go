@@ -12,7 +12,8 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/yanet2/tests/go/common"
+	"github.com/yanet-platform/yanet2/common/go/xerror"
+	"github.com/yanet-platform/yanet2/common/go/xpacket"
 )
 
 func mark(t *testing.T, pkt gopacket.Packet, dscp uint8) gopacket.Packet {
@@ -46,8 +47,8 @@ func mark(t *testing.T, pkt gopacket.Packet, dscp uint8) gopacket.Packet {
 
 func TestDSCP(t *testing.T) {
 	eth := layers.Ethernet{
-		SrcMAC:       common.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
-		DstMAC:       common.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
 		EthernetType: layers.EthernetTypeDot1Q,
 	}
 	eth4 := eth
@@ -85,18 +86,18 @@ func TestDSCP(t *testing.T) {
 	}
 
 	prefixes := []netip.Prefix{
-		common.Unwrap(netip.ParsePrefix("1:2:3:4::/64")),
-		common.Unwrap(netip.ParsePrefix("1.1.0.0/32")),
+		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::/64")),
+		xerror.Unwrap(netip.ParsePrefix("1.1.0.0/32")),
 	}
 
 	testData := []struct {
 		name string
 		pkt  gopacket.Packet
 	}{
-		{"v4", common.LayersToPacket(t, &eth4, &ip4, &icmp)},
-		{"v6", common.LayersToPacket(t, &eth6, &ip6, &icmp)},
-		{"vlan>v4", common.LayersToPacket(t, &eth, &vlan4, &ip4, &icmp)},
-		{"vlan>v6", common.LayersToPacket(t, &eth, &vlan6, &ip6, &icmp)},
+		{"v4", xpacket.LayersToPacket(t, &eth4, &ip4, &icmp)},
+		{"v6", xpacket.LayersToPacket(t, &eth6, &ip6, &icmp)},
+		{"vlan>v4", xpacket.LayersToPacket(t, &eth, &vlan4, &ip4, &icmp)},
+		{"vlan>v6", xpacket.LayersToPacket(t, &eth, &vlan6, &ip6, &icmp)},
 	}
 
 	cases := []struct {
@@ -133,7 +134,7 @@ func TestDSCP(t *testing.T) {
 				result := dscpHandlePackets(m, pkt)
 				require.NotEmpty(t, result.Output, "result.Output")
 
-				resultPkt := common.ParseEtherPacket(result.Output[0])
+				resultPkt := xpacket.ParseEtherPacket(result.Output[0])
 				t.Log("Result packet", resultPkt)
 
 				expectedPkt := mark(t, p.pkt, c.expt)

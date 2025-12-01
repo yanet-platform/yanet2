@@ -12,14 +12,15 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/yanet2/tests/go/common"
+	"github.com/yanet-platform/yanet2/common/go/xerror"
+	"github.com/yanet-platform/yanet2/common/go/xpacket"
 )
 
 // A set of predefined layers for these tests
 func testingLayers() (layers.Ethernet, layers.Dot1Q, layers.IPv6, layers.IPv4, layers.ICMPv4) {
 	eth := layers.Ethernet{
-		SrcMAC:       common.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
-		DstMAC:       common.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
 		EthernetType: layers.EthernetTypeDot1Q,
 	}
 	vlan := layers.Dot1Q{
@@ -62,11 +63,11 @@ func TestDecap_IPIP6(t *testing.T) {
 	}
 	icmp.SetNetworkLayerForChecksum(&ip6)
 
-	pkt := common.LayersToPacket(t, &eth, &vlan, &ip4, &ip6, &icmp)
+	pkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip4, &ip6, &icmp)
 	t.Log("Origin packet", pkt)
 
 	prefixes := []netip.Prefix{
-		common.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
+		xerror.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
 	}
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
@@ -74,11 +75,11 @@ func TestDecap_IPIP6(t *testing.T) {
 	result, err := decapHandlePackets(m, pkt)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Output)
-	resultPkt := common.ParseEtherPacket(result.Output[0])
+	resultPkt := xpacket.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
 
 	vlan.Type = layers.EthernetTypeIPv6
-	expectedPkt := common.LayersToPacket(t, &eth, &vlan, &ip6, &icmp)
+	expectedPkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip6, &icmp)
 	t.Log("Expected packet", expectedPkt)
 
 	diff := cmp.Diff(expectedPkt.Layers(), resultPkt.Layers(),
@@ -94,11 +95,11 @@ func TestDecap_IPIP(t *testing.T) {
 	ip4tun.DstIP = net.ParseIP("4.5.6.7")
 	ip4tun.Protocol = layers.IPProtocolIPv4
 
-	pkt := common.LayersToPacket(t, &eth, &vlan, &ip4tun, &ip4, &icmp)
+	pkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip4tun, &ip4, &icmp)
 	t.Log("Origin packet", pkt)
 
 	prefixes := []netip.Prefix{
-		common.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
+		xerror.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
 	}
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
@@ -106,11 +107,11 @@ func TestDecap_IPIP(t *testing.T) {
 	result, err := decapHandlePackets(m, pkt)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Output)
-	resultPkt := common.ParseEtherPacket(result.Output[0])
+	resultPkt := xpacket.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
 
 	vlan.Type = layers.EthernetTypeIPv4
-	expectedPkt := common.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
+	expectedPkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
 	t.Log("Expected packet", expectedPkt)
 
 	diff := cmp.Diff(expectedPkt.Layers(), resultPkt.Layers())
@@ -120,11 +121,11 @@ func TestDecap_IPIP(t *testing.T) {
 func TestDecap_IP6IP(t *testing.T) {
 	eth, vlan, ip6tun, ip4, icmp := testingLayers()
 
-	pkt := common.LayersToPacket(t, &eth, &vlan, &ip6tun, &ip4, &icmp)
+	pkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &ip4, &icmp)
 	t.Log("Origin packet", pkt)
 
 	prefixes := []netip.Prefix{
-		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
+		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
@@ -132,11 +133,11 @@ func TestDecap_IP6IP(t *testing.T) {
 	result, err := decapHandlePackets(m, pkt)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Output)
-	resultPkt := common.ParseEtherPacket(result.Output[0])
+	resultPkt := xpacket.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
 
 	vlan.Type = layers.EthernetTypeIPv4
-	expectedPkt := common.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
+	expectedPkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
 	t.Log("Expected packet", expectedPkt)
 
 	diff := cmp.Diff(expectedPkt.Layers(), resultPkt.Layers())
@@ -157,11 +158,11 @@ func TestDecap_IP6IP6(t *testing.T) {
 	}
 	icmp.SetNetworkLayerForChecksum(&ip6)
 
-	pkt := common.LayersToPacket(t, &eth, &vlan, &ip6tun, &ip6, &icmp)
+	pkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &ip6, &icmp)
 	t.Log("Origin packet", pkt)
 
 	prefixes := []netip.Prefix{
-		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
+		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
@@ -169,10 +170,10 @@ func TestDecap_IP6IP6(t *testing.T) {
 	result, err := decapHandlePackets(m, pkt)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Output)
-	resultPkt := common.ParseEtherPacket(result.Output[0])
+	resultPkt := xpacket.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
 
-	expectedPkt := common.LayersToPacket(t, &eth, &vlan, &ip6, &icmp)
+	expectedPkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip6, &icmp)
 	t.Log("Expected packet", expectedPkt)
 
 	diff := cmp.Diff(expectedPkt.Layers(), resultPkt.Layers(),
@@ -185,11 +186,11 @@ func TestDecap_IP6IP_noVlan(t *testing.T) {
 	eth, _, ip6tun, ip4, icmp := testingLayers()
 
 	eth.EthernetType = layers.EthernetTypeIPv6
-	pkt := common.LayersToPacket(t, &eth, &ip6tun, &ip4, &icmp)
+	pkt := xpacket.LayersToPacket(t, &eth, &ip6tun, &ip4, &icmp)
 	t.Log("Origin packet", pkt)
 
 	prefixes := []netip.Prefix{
-		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
+		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
@@ -197,11 +198,11 @@ func TestDecap_IP6IP_noVlan(t *testing.T) {
 	result, err := decapHandlePackets(m, pkt)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Output)
-	resultPkt := common.ParseEtherPacket(result.Output[0])
+	resultPkt := xpacket.ParseEtherPacket(result.Output[0])
 	t.Log("Result packet", resultPkt)
 
 	eth.EthernetType = layers.EthernetTypeIPv4
-	expectedPkt := common.LayersToPacket(t, &eth, &ip4, &icmp)
+	expectedPkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
 	t.Log("Expected packet", expectedPkt)
 
 	diff := cmp.Diff(expectedPkt.Layers(), resultPkt.Layers())
@@ -220,29 +221,29 @@ func TestDecap_GRE(t *testing.T) {
 
 	input := []gopacket.Packet{
 		// 0. The packet to be dropped
-		common.LayersToPacket(t, &eth, &vlan, &ip6noTUN, &icmp),
+		xpacket.LayersToPacket(t, &eth, &vlan, &ip6noTUN, &icmp),
 		// 1. Valid ip6-gre-ip tunnel
-		common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp),
+		xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp),
 		// 2. ok checksum
 		func() gopacket.Packet {
 			gre := gre
 			gre.ChecksumPresent = true
 			ip4.DstIP = net.ParseIP("1.2.3.2")
-			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
 		// 3. ok key
 		func() gopacket.Packet {
 			gre := gre
 			gre.KeyPresent = true
 			ip4.DstIP = net.ParseIP("1.2.3.3")
-			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
 		// 4. ok SeqPresent
 		func() gopacket.Packet {
 			gre := gre
 			gre.SeqPresent = true
 			ip4.DstIP = net.ParseIP("1.2.3.4")
-			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
 		// 5. ok all opts present
 		func() gopacket.Packet {
@@ -251,7 +252,7 @@ func TestDecap_GRE(t *testing.T) {
 			gre.KeyPresent = true
 			gre.SeqPresent = true
 			ip4.DstIP = net.ParseIP("1.2.3.5")
-			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
 		// 6. Valid ip-gre-ip tunnel
 		func() gopacket.Packet {
@@ -261,49 +262,49 @@ func TestDecap_GRE(t *testing.T) {
 			ip4out.DstIP = net.ParseIP("1.2.3.4")
 			ip4out.Protocol = layers.IPProtocolGRE
 			ip4.DstIP = net.ParseIP("1.2.3.6")
-			return common.LayersToPacket(t, &eth, &vlan, &ip4out, &gre, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip4out, &gre, &ip4, &icmp)
 		}(),
 		// 7. drop version=1
 		func() gopacket.Packet {
 			gre := gre
 			gre.Version = 1
 			ip4.DstIP = net.ParseIP("1.2.3.7")
-			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
 		// 8. drop version=4
 		func() gopacket.Packet {
 			gre := gre
 			gre.Version = 4
 			ip4.DstIP = net.ParseIP("1.2.3.8")
-			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
 		// 9. drop - RecursionControl
 		func() gopacket.Packet {
 			gre := gre
 			gre.RecursionControl = 1
 			ip4.DstIP = net.ParseIP("1.2.3.9")
-			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
 		// 10. drop - RecursionControl
 		func() gopacket.Packet {
 			gre := gre
 			gre.RecursionControl = 4
 			ip4.DstIP = net.ParseIP("1.2.3.10")
-			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
 		// 11. drop - StrictSourceRoute
 		func() gopacket.Packet {
 			gre := gre
 			gre.StrictSourceRoute = true
 			ip4.DstIP = net.ParseIP("1.2.3.11")
-			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
 		// 12. drop - RoutingPresent
 		func() gopacket.Packet {
 			gre := gre
 			gre.RoutingPresent = true
 			ip4.DstIP = net.ParseIP("1.2.3.12")
-			return common.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &gre, &ip4, &icmp)
 		}(),
 	}
 
@@ -312,27 +313,27 @@ func TestDecap_GRE(t *testing.T) {
 		nil,
 		func() gopacket.Packet {
 			ip4.DstIP = net.ParseIP("1.1.0.0")
-			return common.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
 		}(),
 		func() gopacket.Packet {
 			ip4.DstIP = net.ParseIP("1.2.3.2")
-			return common.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
 		}(),
 		func() gopacket.Packet {
 			ip4.DstIP = net.ParseIP("1.2.3.3")
-			return common.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
 		}(),
 		func() gopacket.Packet {
 			ip4.DstIP = net.ParseIP("1.2.3.4")
-			return common.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
 		}(),
 		func() gopacket.Packet {
 			ip4.DstIP = net.ParseIP("1.2.3.5")
-			return common.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
 		}(),
 		func() gopacket.Packet {
 			ip4.DstIP = net.ParseIP("1.2.3.6")
-			return common.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
+			return xpacket.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
 		}(),
 		nil,
 		nil,
@@ -352,14 +353,14 @@ func TestDecap_GRE(t *testing.T) {
 	}
 
 	prefixes := []netip.Prefix{
-		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
-		common.Unwrap(netip.ParsePrefix("1.2.3.4/24")),
+		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
+		xerror.Unwrap(netip.ParsePrefix("1.2.3.4/24")),
 	}
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
 
 	result, err := decapHandlePackets(m, input...)
-	require.NoError(t, err)
+	require.NoError(t, err, "failed to handle packets")
 	require.Equal(t, len(expected)-len(drop), len(result.Output), "output")
 	require.Equal(t, len(drop), len(result.Drop), "drop")
 
@@ -370,12 +371,12 @@ func TestDecap_GRE(t *testing.T) {
 		var resultPkt gopacket.Packet
 		if p != nil {
 			t.Logf("Expected packet(idx=%d)\n%s", outputIdx, p)
-			resultPkt = common.ParseEtherPacket(result.Output[outputIdx])
+			resultPkt = xpacket.ParseEtherPacket(result.Output[outputIdx])
 			outputIdx++
 		} else {
 			p = drop[dropIdx]
 			t.Logf("Expected Dropped packet(idx=%d)\n%s", dropIdx, p)
-			resultPkt = common.ParseEtherPacket(result.Drop[dropIdx])
+			resultPkt = xpacket.ParseEtherPacket(result.Drop[dropIdx])
 			dropIdx++
 		}
 		t.Log("Result packet", resultPkt)
@@ -415,27 +416,27 @@ func TestDecap_Fragment_ipv4(t *testing.T) {
 		ip4.FragOffset = uint16(offset / 8)
 
 		vlan.Type = layers.EthernetTypeIPv6
-		pkt := common.LayersToPacket(t, &eth, &vlan, &ip6tun, &ip4, payloadFragment)
+		pkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &ip4, payloadFragment)
 		input = append(input, pkt)
 
 		vlan.Type = layers.EthernetTypeIPv4
-		ePkt := common.LayersToPacket(t, &eth, &vlan, &ip4, payloadFragment)
+		ePkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip4, payloadFragment)
 		expected = append(expected, ePkt)
 
 	}
 
 	prefixes := []netip.Prefix{
-		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
+		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
 
 	result, err := decapHandlePackets(m, input...)
-	require.NoError(t, err)
+	require.NoError(t, err, "failed to handle packets")
 	require.NotEmpty(t, result.Output)
 	for idx, expectedPkt := range expected {
 		t.Logf("Origin packet idx=%d\n%s", idx, input[idx])
-		resultPkt := common.ParseEtherPacket(result.Output[idx])
+		resultPkt := xpacket.ParseEtherPacket(result.Output[idx])
 		t.Logf("Result packet idx=%d\n%s", idx, resultPkt)
 
 		vlan.Type = layers.EthernetTypeIPv4
@@ -480,21 +481,21 @@ func TestDecap_Fragment_ipv6(t *testing.T) {
 
 		vlan.Type = layers.EthernetTypeIPv6
 		ip6tun.NextHeader = layers.IPProtocolIPv6Fragment
-		pkt := common.LayersToPacket(t, &eth, &vlan, &ip6tun, &frag, &ip4, payloadFragment)
+		pkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip6tun, &frag, &ip4, payloadFragment)
 		input = append(input, pkt)
 	}
 	require.Greater(t, len(input), 1)
 
 	prefixes := []netip.Prefix{
-		common.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
+		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
 	memCtx := memCtxCreate()
 	m := decapModuleConfig(prefixes, memCtx)
 
 	result, err := decapHandlePackets(m, input...)
-	require.NoError(t, err)
+	require.NoError(t, err, "failed to handle packets")
 	if len(result.Output) > 0 {
-		t.Log("Unexpected packet", common.ParseEtherPacket(result.Output[0]))
+		t.Log("Unexpected packet", xpacket.ParseEtherPacket(result.Output[0]))
 	}
 	require.Equal(t, len(input), len(result.Drop))
 	require.Empty(t, result.Output)

@@ -145,6 +145,11 @@ func NewPacketList(pinner *runtime.Pinner, packets []*Packet) *PacketList {
 	return &packetList
 }
 
+func NewPacketListFromPackets(pinner *runtime.Pinner, packets ...gopacket.Packet) (*PacketList, error) {
+	data := PacketsData(0, 0, packets...)
+	return NewPacketListFromData(pinner, data...)
+}
+
 func NewPacketListFromData(pinner *runtime.Pinner, data ...PacketData) (*PacketList, error) {
 	packetList := NewPacketList(pinner, make([]*Packet, 0))
 	pinner.Pin(packetList)
@@ -177,7 +182,7 @@ type PacketFrontPayload struct {
 }
 
 func NewPacketFront(
-	pinner runtime.Pinner,
+	pinner *runtime.Pinner,
 	input *PacketList,
 	output *PacketList,
 	drop *PacketList,
@@ -233,4 +238,28 @@ func (pf *PacketFront) Free() {
 	pf.OutputList().Free()
 	pf.InputList().Free()
 	pf.DropList().Free()
+}
+
+func NewPacketFrontFromPackets(pinner *runtime.Pinner, packets ...gopacket.Packet) (*PacketFront, error) {
+	packetList, err := NewPacketListFromPackets(pinner, packets...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create packet list: %w", err)
+	}
+	return NewPacketFront(pinner, packetList, nil, nil), nil
+}
+
+func NewPacketFrontFromPayload(pinner *runtime.Pinner, payload [][]byte) (*PacketFront, error) {
+	packets := []PacketData{}
+	for idx := range payload {
+		packets = append(packets, PacketData{
+			Payload:    payload[idx],
+			TxDeviceId: 0,
+			RxDeviceId: 0,
+		})
+	}
+	packetList, err := NewPacketListFromData(pinner, packets...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create new packet list: %w", err)
+	}
+	return NewPacketFront(pinner, packetList, nil, nil), nil
 }

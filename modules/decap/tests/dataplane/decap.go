@@ -31,13 +31,15 @@ test_decap_handle_packets(
 */
 import "C"
 import (
+	"fmt"
 	"net/netip"
+	"runtime"
 	"unsafe"
 
 	"github.com/gopacket/gopacket"
 
+	"github.com/yanet-platform/yanet2/common/go/dataplane"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
-	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
 func memCtxCreate() *C.struct_memory_context {
@@ -84,18 +86,15 @@ func decapModuleConfig(prefixes []netip.Prefix, memCtx *C.struct_memory_context)
 	return m
 }
 
-func decapHandlePackets(mc *C.struct_decap_module_config, packets ...gopacket.Packet) (common.PacketFrontResult, error) {
-	payload := common.PacketsToPaylod(packets)
-	pf := common.PacketFrontFromPayload(payload)
-	err := common.ParsePackets(pf)
+func decapHandlePackets(mc *C.struct_decap_module_config, packets ...gopacket.Packet) (*dataplane.PacketFrontPayload, error) {
+	pinner := runtime.Pinner{}
+	defer pinner.Unpin()
+
+	pf, err := dataplane.NewPacketFrontFromPackets(&pinner, packets...)
 	if err != nil {
-		return common.PacketFrontResult{}, err
+		return nil, fmt.Errorf("failed to create packet front: %w", err)
 	}
-
-	return cDecapHandlePackets(mc, pf), nil
-}
-
-func cDecapHandlePackets(mc *C.struct_decap_module_config, pf *common.CPacketFront) common.PacketFrontResult {
 	C.test_decap_handle_packets(nil, &mc.cp_module, (*C.struct_packet_front)(unsafe.Pointer(pf)))
-	return common.PacketFrontToPayload(pf)
+	payload := pf.Payload()
+	return &payload, nil
 }

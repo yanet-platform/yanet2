@@ -16,20 +16,20 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mbalancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
-	"github.com/yanet-platform/yanet2/tests/go/common"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 
 func IpAddr(addr string) netip.Addr {
-	return common.Unwrap(netip.ParseAddr(addr))
+	return xerror.Unwrap(netip.ParseAddr(addr))
 }
 
 func IpPrefix(prefix string) netip.Prefix {
-	return common.Unwrap(netip.ParsePrefix(prefix))
+	return xerror.Unwrap(netip.ParsePrefix(prefix))
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -81,8 +81,8 @@ func MakeUDPPacket(
 	}
 
 	eth := &layers.Ethernet{
-		SrcMAC:       common.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
-		DstMAC:       common.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
 		EthernetType: ethernetType,
 	}
 
@@ -137,8 +137,8 @@ func MakeTCPPacket(
 	}
 
 	eth := &layers.Ethernet{
-		SrcMAC:       common.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
-		DstMAC:       common.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
 		EthernetType: ethernetType,
 	}
 
