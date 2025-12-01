@@ -6,6 +6,7 @@
 #include "dataplane/packet/packet.h"
 #include "filter/filter.h"
 #include "module.h"
+#include "vs.h"
 
 #include <threads.h>
 
@@ -100,6 +101,9 @@ vs_v4_lookup(
 	}
 
 	struct virtual_service *vs = ADDR_OF(&config->vs) + service_id;
+	if (!(vs->flags & VS_PRESENT_IN_CONFIG_FLAG)) {
+		return NULL;
+	}
 	packet_ctx_select_vs(ctx, vs);
 
 	// check if packet source is allowed for the service
@@ -138,6 +142,9 @@ vs_v6_lookup(
 	}
 
 	struct virtual_service *vs = ADDR_OF(&config->vs) + service_id;
+	if (!(vs->flags & VS_PRESENT_IN_CONFIG_FLAG)) {
+		return NULL;
+	}
 	packet_ctx_select_vs(ctx, vs);
 
 	// check if packet source is allowed for the service

@@ -144,8 +144,11 @@ packet_ctx_session_table_overflow(struct packet_ctx *ctx) {
 // so packet not dropped here
 static inline void
 packet_ctx_real_disabled(struct packet_ctx *ctx, struct real *real) {
-	real_counter(real, ctx->worker, ctx->counter_storage)->disabled += 1;
-	ADDR_OF(&real->state)[ctx->worker].stats.real.disabled += 1;
+	if (real->flags & REAL_PRESENT_IN_CONFIG_FLAG) {
+		real_counter(real, ctx->worker, ctx->counter_storage)
+			->disabled += 1;
+		ADDR_OF(&real->state)[ctx->worker].stats.real.disabled += 1;
+	}
 }
 
 static inline void

@@ -457,18 +457,96 @@ func TestNewConfig(t *testing.T) {
 
 	// update config
 	err := balancer.UpdateConfig(&config)
-	require.NoError(t, err, "got error")
+	require.NoError(t, err)
 
 	// send packet, it is scheduled on the first real
 
 	clientIp := IpAddr("10.0.1.22")
 	clientPort := uint16(1000)
 
-	packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{SYN: true})
-	packet := xpacket.LayersToPacket(t, packetLayers...)
+	t.Run("Send_First_Packet", func(t *testing.T) {
+		packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{SYN: true})
+		packet := xpacket.LayersToPacket(t, packetLayers...)
 
-	result, err := mock.HandlePackets(packet)
+		result, err := mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Output))
+		ValidatePacket(t, balancer.GetConfig(), packet, result.Output[0])
+	})
+
+	// update config
+
+	config = mbalancer.ModuleInstanceConfig{
+		Services: []mbalancer.VirtualService{
+			{
+				Address:    vsIp,
+				Port:       vsPort,
+				Proto:      vsProto,
+				AllowedSrc: vsAllowedSrc,
+				Reals: []mbalancer.Real{
+					{
+						DstAddr: IpAddr("10.12.2.2"),
+						Weight:  1,
+						Enabled: true,
+						SrcAddr: IpAddr("133.12.13.11"),
+						SrcMask: IpAddr("255.0.240.192"),
+					},
+				},
+			},
+		},
+	}
+
+	err = balancer.UpdateConfig(&config)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(result.Output))
-	ValidatePacket(t, balancer.GetConfig(), packet, result.Output[0])
+
+	// send packet to the same virtual service (not SYN),
+	// ensure it is dropped because its real was removed
+
+	t.Run("Send_Second_Packet_Without_Reschedule", func(t *testing.T) {
+		packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{})
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+
+		// Check packet is dropped because its real was removed
+
+		result, err := mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Drop))
+		require.Empty(t, len(result.Output))
+	})
+
+	// send packet to real with reschedule
+
+	t.Run("Send_Second_Packet_With_Reschedule", func(t *testing.T) {
+		packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{SYN: true})
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+
+		// Check packet is dropped because its real was removed
+
+		result, err := mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Output))
+		require.Empty(t, result.Drop)
+
+		ValidatePacket(t, balancer.GetConfig(), packet, result.Output[0])
+	})
+
+	// remove virtual service from config
+
+	config = mbalancer.ModuleInstanceConfig{}
+
+	err = balancer.UpdateConfig(&config)
+	require.NoError(t, err)
+
+	//send packet when no virtual services are enabled
+
+	t.Run("Send_Second_Packet_With_Reschedule_no_Vs", func(t *testing.T) {
+		packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{SYN: true})
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+
+		// Check packet is dropped because its real was removed
+		result, err := mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Drop))
+		require.Empty(t, len(result.Output))
+	})
 }
