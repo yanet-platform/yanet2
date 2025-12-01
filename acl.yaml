@@ -1,17 +1,676 @@
-rules:
-- src_net:
-    addr: 192.0.2.0
-    prefix: 24
-  dst_net:
-    addr: 192.0.3.0
-    prefix: 24
-  src_ports:
-    from: 100
-    to: 200
-  dst_ports:
-    from: 500
-    to: 1000
-  protos:
-    from: 17
-    to: 17
-  action: Allow
+#  ACL Rules Configuration
+#  =============================================
+#
+#  Формат: YAML
+#
+#  Структура:
+#    Rule:
+#      - Filter:    # Условия фильтрации
+#          Src6s:   # IPv6 источники (массив)
+#            - ip: string   # Адрес
+#              prefix: int  # Длина префикса (0-128)
+#          Src4s:   # IPv4 источники (аналогично)
+#            - ip: string   # Адрес
+#              prefix: int  # Длина префикса (0-128)
+#          DstPortRanges:   # Диапазоны портов
+#            - from: int
+#              to: int
+#          ProtoRanges:     # Диапазоны протоколов
+#                           # Значения from/to содержат:
+#                               - В старшем байте (биты 8-15): номер протокола (IPPROTO_*)
+#                               - В младшем байте (биты 0-7): параметры протокола (тип ICMP, для TCP - флаги итд)
+#            - from: int
+#              to: int
+#          Devices:
+#          KeepState: bool  # Сохранять состояние
+#        Action:      enum(Pass|Deny|Count|CheckState)
+#        Log:         bool  # Логировать действие
+#        SkipToCount: int   # Количество SkipTo, которые привели к этому правилу в изначальном рулсете (0 по умолчанию)
+#
+
+Rule:
+  # ===== BASIC ALLOW/DENY RULES =====
+  # Allow UDP 192.0.2.2 -> 192.0.3.1 ports 150-450,600
+  # 1
+  # add allow udp from 192.0.2.2 to 192.0.3.1 150-450,600
+  - Filter:
+      Src4s:
+        - ip: "192.0.2.2"
+          prefix: 32
+      Dst4s:
+        - ip: "192.0.3.1"
+          prefix: 32
+      Src6s: []
+      Dst6s: []
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges:
+        - from: 150
+          to: 450
+        - from: 600
+          to: 600
+      ProtoRanges:
+        - from: 4352
+          to: 4607
+      Devices: []
+      KeepState: false
+    Action: Pass
+    Log: false
+    SkipToCount: 0
+
+  # Deny UDP 192.0.2.99 -> 192.0.3.1 port 600
+  # 2
+  # add deny udp from 192.0.2.99 to 192.0.3.1 600
+  - Filter:
+      Src4s:
+        - ip: "192.0.2.99"
+          prefix: 32
+      Dst4s:
+        - ip: "192.0.3.1"
+          prefix: 32
+      Src6s: []
+      Dst6s: []
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges:
+        - from: 600
+          to: 600
+      ProtoRanges:
+        - from: 4352
+          to: 4607
+      Devices: []
+      KeepState: false
+    Action: Deny
+    Log: false
+    SkipToCount: 0
+
+  # ===== PROTOCOL-SPECIFIC RULES =====
+  # Allow TCP SYN (setup flag)
+  # 3
+  # add allow tcp from 192.0.2.2 to 192.0.3.1 600 tcpflags syn
+  - Filter:
+      Src4s:
+        - ip: "192.0.2.2"
+          prefix: 32
+      Dst4s:
+        - ip: "192.0.3.1"
+          prefix: 32
+      Src6s: []
+      Dst6s: []
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges: # (all ports)
+        - from: 600
+          to: 600
+      ProtoRanges: # all protos where for i := 1 to 255: i & SYN != 0 (SYN = 0x02)
+        - from: 1538
+          to: 1539
+        - from: 1542
+          to: 1543
+        - from: 1546
+          to: 1547
+        - from: 1550
+          to: 1551
+        - from: 1554
+          to: 1555
+        - from: 1558
+          to: 1559
+        - from: 1562
+          to: 1563
+        - from: 1566
+          to: 1567
+        - from: 1570
+          to: 1571
+        - from: 1574
+          to: 1575
+        - from: 1578
+          to: 1579
+        - from: 1582
+          to: 1583
+        - from: 1586
+          to: 1587
+        - from: 1590
+          to: 1591
+        - from: 1594
+          to: 1595
+        - from: 1598
+          to: 1599
+        - from: 1602
+          to: 1603
+        - from: 1606
+          to: 1607
+        - from: 1610
+          to: 1611
+        - from: 1614
+          to: 1615
+        - from: 1618
+          to: 1619
+        - from: 1622
+          to: 1623
+        - from: 1626
+          to: 1627
+        - from: 1630
+          to: 1631
+        - from: 1634
+          to: 1635
+        - from: 1638
+          to: 1639
+        - from: 1642
+          to: 1643
+        - from: 1646
+          to: 1647
+        - from: 1650
+          to: 1651
+        - from: 1654
+          to: 1655
+        - from: 1658
+          to: 1659
+        - from: 1662
+          to: 1663
+        - from: 1666
+          to: 1667
+        - from: 1670
+          to: 1671
+        - from: 1674
+          to: 1675
+        - from: 1678
+          to: 1679
+        - from: 1682
+          to: 1683
+        - from: 1686
+          to: 1687
+        - from: 1690
+          to: 1691
+        - from: 1694
+          to: 1695
+        - from: 1698
+          to: 1699
+        - from: 1702
+          to: 1703
+        - from: 1706
+          to: 1707
+        - from: 1710
+          to: 1711
+        - from: 1714
+          to: 1715
+        - from: 1718
+          to: 1719
+        - from: 1722
+          to: 1723
+        - from: 1726
+          to: 1727
+        - from: 1730
+          to: 1731
+        - from: 1734
+          to: 1735
+        - from: 1738
+          to: 1739
+        - from: 1742
+          to: 1743
+        - from: 1746
+          to: 1747
+        - from: 1750
+          to: 1751
+        - from: 1754
+          to: 1755
+        - from: 1758
+          to: 1759
+        - from: 1762
+          to: 1763
+        - from: 1766
+          to: 1767
+        - from: 1770
+          to: 1771
+        - from: 1774
+          to: 1775
+        - from: 1778
+          to: 1779
+        - from: 1782
+          to: 1783
+        - from: 1786
+          to: 1787
+        - from: 1790
+          to: 1791
+      Devices: []
+      KeepState: false
+    Action: Pass
+    Log: false
+    SkipToCount: 0
+
+
+  # Deny TCP RST
+  # 4
+  # add deny tcp from any to any tcpflags rst
+  - Filter:
+      Src4s: # (IPv4 any)
+        - ip: "0.0.0.0"
+          prefix: 0
+      Dst4s: # (IPv4 any)
+        - ip: "0.0.0.0"
+          prefix: 0
+      Src6s: # (IPv6 any)
+        - ip: "::"
+          prefix: 0
+      Dst6s: # (IPv6 any)
+        - ip: "::"
+          prefix: 0
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      ProtoRanges:
+        - from: 1540
+          to: 1543
+        - from: 1548
+          to: 1551
+        - from: 1556
+          to: 1559
+        - from: 1564
+          to: 1567
+        - from: 1572
+          to: 1575
+        - from: 1580
+          to: 1583
+        - from: 1588
+          to: 1591
+        - from: 1596
+          to: 1599
+        - from: 1604
+          to: 1607
+        - from: 1612
+          to: 1615
+        - from: 1620
+          to: 1623
+        - from: 1628
+          to: 1631
+        - from: 1636
+          to: 1639
+        - from: 1644
+          to: 1647
+        - from: 1652
+          to: 1655
+        - from: 1660
+          to: 1663
+        - from: 1668
+          to: 1671
+        - from: 1676
+          to: 1679
+        - from: 1684
+          to: 1687
+        - from: 1692
+          to: 1695
+        - from: 1700
+          to: 1703
+        - from: 1708
+          to: 1711
+        - from: 1716
+          to: 1719
+        - from: 1724
+          to: 1727
+        - from: 1732
+          to: 1735
+        - from: 1740
+          to: 1743
+        - from: 1748
+          to: 1751
+        - from: 1756
+          to: 1759
+        - from: 1764
+          to: 1767
+        - from: 1772
+          to: 1775
+        - from: 1780
+          to: 1783
+        - from: 1788
+          to: 1791
+      Devices: []
+      KeepState: false
+    Action: Deny
+    Log: false
+    SkipToCount: 0
+
+  # Allow ICMP Echo
+  # 5
+  # add allow icmp from 192.0.2.2 to 192.0.3.1 icmptypes 8
+  - Filter:
+      Src4s:
+        - ip: "192.0.2.2"
+          prefix: 32
+      Dst4s:
+        - ip: "192.0.3.1"
+          prefix: 32
+      Src6s: []
+      Dst6s: []
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      ProtoRanges:
+        - from: 264
+          to: 264
+      Devices: []
+      KeepState: false
+    Action: Pass
+    Log: false
+    SkipToCount: 0
+
+  # ===== PORT RANGE VALIDATION =====
+  # Allow UDP ports 150-450
+  # 6
+  # add allow udp from 192.0.2.2 to 192.0.3.1 150-450
+  - Filter:
+      Src4s:
+        - ip: "192.0.2.2"
+          prefix: 32
+      Dst4s:
+        - ip: "192.0.3.1"
+          prefix: 32
+      Src6s: []
+      Dst6s: []
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges:
+        - from: 150
+          to: 450
+      ProtoRanges:
+        - from: 4352
+          to: 4607
+      Devices: []
+      KeepState: false
+    Action: Pass
+    Log: false
+    SkipToCount: 0
+
+  # ===== SUBNET VALIDATION =====
+  # Allow subnet 192.0.2.0/24
+  # 7
+  # add allow udp from 192.0.2.0/24 to 192.0.3.1 600
+  - Filter:
+      Src4s:
+        - ip: "192.0.2.0"
+          prefix: 24
+      Dst4s:
+        - ip: "192.0.3.1"
+          prefix: 32
+      Src6s: []
+      Dst6s: []
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges:
+        - from: 600
+          to: 600
+      ProtoRanges: # UDP
+        - from: 4352
+          to: 4607
+      Devices: []
+      KeepState: false
+    Action: Pass
+    Log: false
+    SkipToCount: 0
+
+  # Deny subnet 192.0.99.0/24
+  # 8
+  # add deny udp from 192.0.99.0/24 to any
+  - Filter:
+      Src4s:
+        - ip: "192.0.99.0"
+          prefix: 24
+      Dst4s: # (IPv4 any)
+        - ip: "0.0.0.0"
+          prefix: 0
+      Src6s: # (IPv6 any)
+        - ip: "::"
+          prefix: 0
+      Dst6s: []
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      ProtoRanges: # UDP
+        - from: 4352
+          to: 4607
+      Devices: []
+      KeepState: false
+    Action: Deny
+    Log: false
+    SkipToCount: 0
+
+  # ===== IPv6 RULES =====
+  # Allow TCPv6
+  # 9
+  # add allow tcp from 2001:db8::1 to 2001:db8::2 600
+  - Filter:
+      Src4s: []
+      Dst4s: []
+      Src6s:
+        - ip: "2001:db8::1"
+          prefix: 128
+      Dst6s:
+        - ip: "2001:db8::2"
+          prefix: 128
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges:
+        - from: 600
+          to: 600
+      ProtoRanges: # TCPv6
+        - from: 1536
+          to: 1791
+      Devices: []
+      KeepState: false
+    Action: Pass
+    Log: false
+    SkipToCount: 0
+
+  # Allow ICMPv6 Echo
+  # 10
+  # add allow ipv6-icmp from 2001:db8::1 to 2001:db8::2 icmp6types 128,129
+  - Filter:
+      Src4s: []
+      Dst4s: []
+      Src6s:
+        - ip: "2001:db8::1"
+          prefix: 128
+      Dst6s:
+        - ip: "2001:db8::2"
+          prefix: 128
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      ProtoRanges: # ICMPv6 (128,129)
+        - from: 14976
+          to: 14976
+        - from: 14977
+          to: 14977
+      Devices: []
+      KeepState: false
+    Action: Pass
+    Log: false
+    SkipToCount: 0
+
+  # Deny UDPv6
+  # 11
+  # add deny udp from 2001:db8::99 to 2001:db8::2 600
+  - Filter:
+      Src4s: []
+      Dst4s: []
+      Src6s:
+        - ip: "2001:db8::99"
+          prefix: 128
+      Dst6s:
+        - ip: "2001:db8::2"
+          prefix: 128
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges:
+        - from: 600
+          to: 600
+      ProtoRanges: # UDP
+        - from: 4352
+          to: 4607
+      Devices: []
+      KeepState: false
+    Action: Deny
+    Log: false
+    SkipToCount: 0
+
+  # ===== OVERLAPPING RULES =====
+  # Rule pyramid (ordered from most specific to most general)
+  # 12
+  # add allow udp from 192.0.2.0/31 to any 100-200
+  - Filter:
+      Src4s:
+        - ip: "192.0.2.0"
+          prefix: 31
+      Dst4s: # (IPv4 any)
+        - ip: "0.0.0.0"
+          prefix: 0
+      Src6s: # (IPv6 any)
+        - ip: "::"
+          prefix: 0
+      Dst6s: []
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges:
+        - from: 100
+          to: 200
+      ProtoRanges: # UDP
+        - from: 4352
+          to: 4607
+      Devices: []
+      KeepState: false
+    Action: Pass
+    Log: false
+    SkipToCount: 0
+
+  # 13
+  # add deny udp from 192.0.2.0/28 to any
+  - Filter:
+      Src4s:
+        - ip: "192.0.2.0"
+          prefix: 28
+      Dst4s: # (IPv4 any)
+        - ip: "0.0.0.0"
+          prefix: 0
+      Src6s: # (IPv6 any)
+        - ip: "::"
+          prefix: 0
+      Dst6s: []
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      ProtoRanges: # UDP
+        - from: 4352
+          to: 4607
+      Devices: []
+      KeepState: false
+    Action: Deny
+    Log: false
+    SkipToCount: 0
+
+  # 14
+  # add allow udp from 192.0.2.0/24 to any
+  - Filter:
+      Src4s:
+        - ip: "192.0.2.0"
+          prefix: 24
+      Dst4s: # (IPv4 any)
+        - ip: "0.0.0.0"
+          prefix: 0
+      Src6s: # (IPv6 any)
+        - ip: "::"
+          prefix: 0
+      Dst6s: []
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      ProtoRanges: # UDP
+        - from: 4352
+          to: 4607
+      Devices: []
+      KeepState: false
+    Action: Pass
+    Log: false
+    SkipToCount: 0
+
+  # 15
+  # add deny udp from 192.0.0.0/16 to any
+  - Filter:
+      Src4s:
+        - ip: "192.0.0.0"
+          prefix: 16
+      Dst4s: # (IPv4 any)
+        - ip: "0.0.0.0"
+          prefix: 0
+      Src6s: # (IPv6 any)
+        - ip: "::"
+          prefix: 0
+      Dst6s: []
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      ProtoRanges: # UDP
+        - from: 4352
+          to: 4607
+      Devices: []
+      KeepState: false
+    Action: Deny
+    Log: false
+    SkipToCount: 0
+
+  # ===== LOGGING =====
+  # 16
+  # add deny log all from any to any
+  - Filter:
+      Src4s: # (IPv4 any)
+        - ip: "0.0.0.0"
+          prefix: 0
+      Dst4s: # (IPv4 any)
+        - ip: "0.0.0.0"
+          prefix: 0
+      Src6s: # (IPv6 any)
+        - ip: "::"
+          prefix: 0
+      Dst6s: # (IPv6 any)
+        - ip: "::"
+          prefix: 0
+      SrcPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      DstPortRanges: # (all ports)
+        - from: 0
+          to: 65535
+      ProtoRanges:
+        - from: 0
+          to: 65535
+      Devices: []
+      KeepState: false
+    Action: Deny
+    Log: true
+    SkipToCount: 0

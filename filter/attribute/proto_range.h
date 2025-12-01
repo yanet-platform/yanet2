@@ -6,11 +6,18 @@
 
 #include <filter/rule.h>
 
+#include <netinet/icmp6.h>
+#include <netinet/ip_icmp.h>
+
+#include <rte_tcp.h>
+#include <rte_ether.h>
+#include <rte_ip.h>
+
 #include <lib/dataplane/packet/packet.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define PROTO_RANGE_CLASSIFIER_MAX_VALUE ((1 << 10))
+#define PROTO_RANGE_CLASSIFIER_MAX_VALUE ((1 << 16))
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -99,13 +106,39 @@ proto_range_classifier_init(
 
 static inline uint32_t
 proto_range_classifier_lookup(struct packet *packet, void *data) {
-	(void)packet;
-	struct proto_range_classifier *c =
-		(struct proto_range_classifier *)data;
-	uint16_t proto = packet->transport_header
-				 .type; /// < get proto of the packet here
-	return value_table_get(&c->table, 0, proto);
+	struct proto_range_classifier *c = (struct proto_range_classifier *)data;
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	uint16_t protocol = packet->transport_header.type;
+	uint8_t parameter = 0;
+	uint8_t *proto_data = rte_pktmbuf_mtod_offset(mbuf, uint8_t *, packet->transport_header.offset);
+
+	switch (protocol) {
+	case IPPROTO_TCP: {
+		struct rte_tcp_hdr *tcp_hdr = (struct rte_tcp_hdr *)proto_data;
+		parameter = tcp_hdr->tcp_flags & 0xFF;
+		break;
+	}
+	case IPPROTO_ICMP: {
+		struct icmphdr *icmp_hdr = (struct icmphdr *)proto_data;
+		parameter = icmp_hdr->type;
+		break;
+	}
+	case IPPROTO_ICMPV6: {
+		struct icmp6_hdr *icmp6_hdr = (struct icmp6_hdr *)proto_data;
+		parameter = icmp6_hdr->icmp6_type;
+		break;
+	}
+	default:
+		parameter = 0;
+		break;
+	}
+
+	uint16_t proto_combined = ((uint16_t)protocol << 8) | ((uint16_t)parameter);
+	uint32_t action = value_table_get(&c->table, 0, proto_combined);
+
+	return action;
 }
+
 
 static inline void
 proto_range_classifier_free(void *data, struct memory_context *memory_context) {
