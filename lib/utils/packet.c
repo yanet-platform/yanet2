@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "lib/dataplane/packet/packet.h"
+#include "yanet_build_config.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -28,7 +29,7 @@ make_mbuf4(
 	uint16_t flags
 ) {
 	size_t total_size =
-		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + 2048;
+		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + MBUF_MAX_SIZE;
 	struct rte_mbuf *mbuf = aligned_alloc(64, total_size);
 	if (!mbuf) {
 		return NULL;
@@ -42,9 +43,9 @@ make_mbuf4(
 			     sizeof(struct rte_udp_hdr);
 
 	mbuf->buf_addr = ((char *)mbuf) + sizeof(struct rte_mbuf);
-	mbuf->data_len = 2048;
+	mbuf->data_len = MBUF_MAX_SIZE;
 	mbuf->data_off = RTE_PKTMBUF_HEADROOM;
-	mbuf->buf_len = 2048 + RTE_PKTMBUF_HEADROOM;
+	mbuf->buf_len = MBUF_MAX_SIZE + RTE_PKTMBUF_HEADROOM;
 
 	mbuf->pkt_len = total_len;
 	mbuf->l2_len = sizeof(struct rte_ether_hdr);
@@ -96,7 +97,7 @@ make_mbuf6(
 	uint8_t flags
 ) {
 	size_t total_size =
-		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + 2048;
+		sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM + MBUF_MAX_SIZE;
 	struct rte_mbuf *mbuf = aligned_alloc(64, total_size);
 	if (!mbuf) {
 		return NULL;
@@ -110,9 +111,9 @@ make_mbuf6(
 				      : sizeof(struct rte_tcp_hdr));
 
 	mbuf->buf_addr = ((char *)mbuf) + sizeof(struct rte_mbuf);
-	mbuf->data_len = 2048;
+	mbuf->data_len = MBUF_MAX_SIZE;
 	mbuf->data_off = RTE_PKTMBUF_HEADROOM;
-	mbuf->buf_len = 2048 + RTE_PKTMBUF_HEADROOM;
+	mbuf->buf_len = MBUF_MAX_SIZE + RTE_PKTMBUF_HEADROOM;
 
 	mbuf->pkt_len = total_len;
 	mbuf->l2_len = sizeof(struct rte_ether_hdr);
@@ -237,9 +238,6 @@ init_mbuf(struct rte_mbuf *m, struct packet_data *data, uint16_t buf_len) {
 
 	/* start of buffer is after mbuf structure and priv data */
 	m->buf_addr = (char *)m + mbuf_size;
-
-	// what for?
-	// rte_mbuf_iova_set(m, rte_mempool_virt2iova(m) + mbuf_size);
 
 	/* keep some headroom between start of buffer and data */
 	m->data_off = RTE_MIN(RTE_PKTMBUF_HEADROOM, m->buf_len);

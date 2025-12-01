@@ -142,7 +142,3 @@ func Free(pf *PacketFront) {
 	pf.InputList().Free()
 	pf.DropList().Free()
 }
-
-func main() {
-	println("hello")
-}
