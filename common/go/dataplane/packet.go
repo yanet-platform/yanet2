@@ -1,7 +1,7 @@
 package dataplane
 
-//#cgo CFLAGS: -I../../.. -I../../../lib -fsanitize=address,leak,undefined
-//#cgo LDFLAGS: -L../../../build/lib/utils -llib_utils -fsanitize=address,leak,undefined
+//#cgo CFLAGS: -I../../.. -I../../../lib
+//#cgo LDFLAGS: -L../../../build/lib/utils -llib_utils
 //#cgo LDFLAGS: -L../../../build/lib/dataplane/packet -lpacket
 //#cgo LDFLAGS: -L../../../build/lib/logging -llogging
 //
