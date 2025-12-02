@@ -184,12 +184,10 @@ cp_config_update_devices(
 struct cp_config_gen *
 cp_config_gen_create(struct agent *agent);
 
-/*
 static inline struct cp_module *
 cp_config_gen_get_module(struct cp_config_gen *config_gen, uint64_t index) {
 	return cp_module_registry_get(&config_gen->module_registry, index);
 }
-*/
 
 static inline struct cp_function *
 cp_config_gen_get_function(struct cp_config_gen *config_gen, uint64_t index) {

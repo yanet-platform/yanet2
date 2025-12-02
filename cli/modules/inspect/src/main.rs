@@ -106,8 +106,7 @@ impl InspectService {
 
             tree.begin_child("Controlplane Configurations".to_string());
             for cfg in &info.cp_configs {
-                let module = &info.dp_modules[cfg.module_idx as usize];
-                tree.add_empty_child(format!("{}:{} (gen: {})", module.name, cfg.name, cfg.generation));
+                tree.add_empty_child(format!("{}:{} (gen: {})", cfg.r#type, cfg.name, cfg.generation));
             }
             tree.end_child();
 
@@ -128,27 +127,48 @@ impl InspectService {
             }
             tree.end_child();
 
+            tree.begin_child("Functions".to_string());
+            for function in &info.functions {
+                tree.begin_child(format!("Function {}", function.name));
+                for chain in &function.chains {
+                    tree.begin_child(format!("Chain {} (weight {})", chain.name, chain.weight));
+                    for module in &chain.modules {
+                        tree.add_empty_child(format!("Module {}:{}", module.r#type, module.name));
+                    }
+                    tree.end_child();
+                }
+                tree.end_child();
+            }
+            tree.end_child();
+
             tree.begin_child("Pipelines".to_string());
             for pipeline in &info.pipelines {
                 tree.begin_child(format!("Pipeline {}", pipeline.name));
                 tree.add_empty_child("rx".to_string());
-                for stage in &pipeline.modules {
-                    let cp_cfg = &info.cp_configs[stage.config_index as usize];
-                    let dp_cfg = &info.dp_modules[cp_cfg.module_idx as usize];
-                    tree.add_empty_child(format!("{}:{}", dp_cfg.name, cp_cfg.name));
+                for function in &pipeline.functions {
+                    tree.add_empty_child(format!("{}", function));
                 }
                 tree.add_empty_child("tx".to_string());
                 tree.end_child();
             }
             tree.end_child();
 
-            tree.begin_child("Pipelines bindings".to_string());
+            tree.begin_child("Devices".to_string());
             for device in &info.devices {
-                tree.begin_child(format!("Device {}", device.device_id));
-                for pipeline in &device.pipelines {
-                    let pipeline_info = &info.pipelines[pipeline.pipeline_idx as usize];
-                    tree.add_empty_child(format!("Pipeline {} (weight: {})", pipeline_info.name, pipeline.weight));
+                tree.begin_child(format!("Device {}:{}", device.r#type, device.name));
+
+                tree.begin_child("input".to_string());
+                for pipeline in &device.input_pipelines {
+                    tree.add_empty_child(format!("Pipeline {} (weight: {})", pipeline.name, pipeline.weight));
                 }
+                tree.end_child();
+
+                tree.begin_child("output".to_string());
+                for pipeline in &device.output_pipelines {
+                    tree.add_empty_child(format!("Pipeline {} (weight: {})", pipeline.name, pipeline.weight));
+                }
+                tree.end_child();
+
                 tree.end_child();
             }
             tree.end_child();

@@ -498,6 +498,8 @@ unlock:
 	return module_list_info;
 }
 
+// Modules
+
 void
 cp_module_list_info_free(struct cp_module_list_info *module_list_info) {
 	free(module_list_info);
@@ -521,32 +523,25 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	if (module_list_info == NULL)
 		goto unlock;
 
-	module_list_info->gen = config_gen->gen;
 	module_list_info->module_count = 0;
-	/*
+
 	for (uint64_t module_idx = 0;
 	     module_idx < module_registry->registry.capacity;
 	     ++module_idx) {
+		struct cp_module_info *info = module_list_info->modules +
+					      module_list_info->module_count;
+
 		struct cp_module *cp_module =
 			cp_config_gen_get_module(config_gen, module_idx);
 		if (cp_module == NULL) {
 			continue;
 		}
-		module_list_info->modules[module_list_info->module_count]
-			.index = cp_module->type;
-		strtcpy(module_list_info
-				->modules[module_list_info->module_count]
-				.config_name,
-			cp_module->name,
-			sizeof(module_list_info
-				       ->modules[module_list_info->module_count]
-				       .config_name));
-		module_list_info->modules[module_list_info->module_count].gen =
-			cp_module->gen;
+		strtcpy(info->type, cp_module->type, sizeof(info->type));
+		strtcpy(info->name, cp_module->name, sizeof(info->name));
+		info->gen = cp_module->gen;
 
 		module_list_info->module_count += 1;
 	}
-	*/
 
 unlock:
 	cp_config_unlock(cp_config);
@@ -554,17 +549,170 @@ unlock:
 	return module_list_info;
 }
 
-int
+struct cp_module_info *
 yanet_get_cp_module_info(
-	struct cp_module_list_info *module_list,
-	uint64_t index,
-	struct cp_module_info *module_info
+	struct cp_module_list_info *module_list, uint64_t index
 ) {
 	if (index >= module_list->module_count)
-		return -1;
-	*module_info = module_list->modules[index];
-	return 0;
+		return NULL;
+	return module_list->modules + index;
 }
+
+// Functions
+
+static void
+cp_function_info_free(struct cp_function_info *function_info) {
+	for (uint64_t idx = 0; idx < function_info->chain_count; ++idx) {
+		free(function_info->chains[idx]);
+	}
+
+	free(function_info);
+}
+
+void
+cp_function_list_info_free(struct cp_function_list_info *function_list_info) {
+	for (uint64_t idx = 0; idx < function_list_info->function_count;
+	     ++idx) {
+		struct cp_function_info *function_info =
+			function_list_info->functions[idx];
+		cp_function_info_free(function_info);
+	}
+
+	free(function_list_info);
+}
+
+struct cp_function_list_info *
+yanet_get_cp_function_list_info(struct dp_config *dp_config) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+
+	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_function_registry *function_registry =
+		&config_gen->function_registry;
+
+	struct cp_function_list_info *function_list_info =
+		(struct cp_function_list_info *)malloc(
+			sizeof(struct cp_function_list_info) +
+			sizeof(struct cp_function_info *) *
+				function_registry->registry.capacity
+		);
+	if (function_list_info == NULL)
+		goto unlock;
+
+	function_list_info->function_count = 0;
+
+	for (uint64_t function_idx = 0;
+	     function_idx < function_registry->registry.capacity;
+	     ++function_idx) {
+		struct cp_function *cp_function =
+			cp_config_gen_get_function(config_gen, function_idx);
+		if (cp_function == NULL) {
+			continue;
+		}
+
+		struct cp_function_info *function_info =
+			(struct cp_function_info *)malloc(
+				sizeof(struct cp_function_info) +
+				sizeof(struct cp_chain_info *) *
+					cp_function->chain_count
+			);
+
+		strtcpy(function_info->name,
+			cp_function->name,
+			sizeof(function_info->name));
+		function_info->chain_count = 0;
+
+		for (uint64_t chain_idx = 0;
+		     chain_idx < cp_function->chain_count;
+		     ++chain_idx) {
+			struct cp_function_chain *cp_function_chain =
+				cp_function->chains + chain_idx;
+			struct cp_chain *cp_chain =
+				ADDR_OF(&cp_function_chain->cp_chain);
+
+			struct cp_chain_info *chain_info =
+				(struct cp_chain_info *)malloc(
+					sizeof(struct cp_chain_info) +
+					sizeof(struct cp_module_info_id) *
+						cp_chain->length
+				);
+			if (chain_info == NULL) {
+				goto error_free;
+			}
+
+			strtcpy(chain_info->name,
+				cp_chain->name,
+				sizeof(chain_info->name));
+			chain_info->weight = cp_function_chain->weight;
+			chain_info->length = cp_chain->length;
+			for (uint64_t module_idx = 0;
+			     module_idx < cp_chain->length;
+			     ++module_idx) {
+				strtcpy(chain_info->modules[module_idx].type,
+					cp_chain->modules[module_idx].type,
+					sizeof(chain_info->modules[module_idx]
+						       .type));
+				strtcpy(chain_info->modules[module_idx].name,
+					cp_chain->modules[module_idx].name,
+					sizeof(chain_info->modules[module_idx]
+						       .name));
+			}
+
+			function_info->chains[chain_idx] = chain_info;
+			function_info->chain_count += 1;
+		}
+
+		function_list_info
+			->functions[function_list_info->function_count] =
+			function_info;
+		function_list_info->function_count += 1;
+	}
+
+	cp_config_unlock(cp_config);
+
+	return function_list_info;
+
+error_free:
+	cp_function_list_info_free(function_list_info);
+	function_list_info = NULL;
+
+unlock:
+	cp_config_unlock(cp_config);
+
+	return function_list_info;
+}
+
+struct cp_function_info *
+yanet_get_cp_function_info(
+	struct cp_function_list_info *function_list, uint64_t index
+) {
+	if (index >= function_list->function_count)
+		return NULL;
+
+	return function_list->functions[index];
+}
+
+struct cp_chain_info *
+yanet_get_cp_function_chain_info(
+	struct cp_function_info *function_info, uint64_t index
+) {
+	if (index >= function_info->chain_count)
+		return NULL;
+
+	return function_info->chains[index];
+}
+
+struct cp_module_info_id *
+yanet_get_cp_function_chain_module_info(
+	struct cp_chain_info *chain_info, uint64_t index
+) {
+	if (index >= chain_info->length)
+		return NULL;
+
+	return chain_info->modules + index;
+}
+
+// Pipelines
 
 void
 cp_pipeline_list_info_free(struct cp_pipeline_list_info *pipeline_list_info) {
@@ -618,12 +766,11 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 			cp_pipeline->name,
 			CP_PIPELINE_NAME_LEN);
 		pipeline_info->length = cp_pipeline->length;
-		/*
 		for (uint64_t idx = 0; idx < cp_pipeline->length; ++idx) {
-			pipeline_info->modules[idx] =
-				cp_pipeline->modules[idx].index;
+			strtcpy(pipeline_info->functions[idx].name,
+				cp_pipeline->functions[idx].name,
+				sizeof(pipeline_info->functions[idx].name));
 		}
-		*/
 		pipeline_list_info->pipelines[pipeline_list_info->count++] =
 			pipeline_info;
 	}
@@ -634,65 +781,76 @@ unlock:
 	return pipeline_list_info;
 }
 
-int
+struct cp_pipeline_info *
 yanet_get_cp_pipeline_info(
-	struct cp_pipeline_list_info *pipeline_list_info,
-	uint64_t index,
-	struct cp_pipeline_info **pipeline_info
+	struct cp_pipeline_list_info *pipeline_list_info, uint64_t index
 ) {
 	if (index >= pipeline_list_info->count)
-		return -1;
+		return NULL;
 
-	*pipeline_info = pipeline_list_info->pipelines[index];
-
-	return 0;
+	return pipeline_list_info->pipelines[index];
 }
 
-int
-yanet_get_cp_pipeline_module_info(
-	struct cp_pipeline_info *pipeline_info,
-	uint64_t index,
-	uint64_t *config_index
+struct cp_function_info_id *
+yanet_get_cp_pipeline_function_info_id(
+	struct cp_pipeline_info *pipeline_info, uint64_t index
 ) {
 	if (index >= pipeline_info->length)
-		return -1;
+		return NULL;
 
-	*config_index = pipeline_info->modules[index];
-	return 0;
+	return pipeline_info->functions + index;
 }
+
+// Devices
 
 void
 cp_device_list_info_free(struct cp_device_list_info *device_list_info) {
-	for (uint64_t idx = 0; idx < device_list_info->device_count; ++idx)
+	for (uint64_t idx = 0; idx < device_list_info->device_count; ++idx) {
 		free(device_list_info->devices[idx]);
+	}
 
 	free(device_list_info);
 }
 
 static struct cp_device_info *
 yanet_build_device_info(struct cp_device *device) {
-	size_t device_info_size = sizeof(struct cp_device_info) +
-				  // FIXME
-				  sizeof(struct cp_device_pipeline_info) *
-					  0; // device->pipeline_count;
-	struct cp_device_info *device_info =
-		(struct cp_device_info *)malloc(device_info_size);
+	struct cp_device_entry *input = ADDR_OF(&device->input_pipelines);
+	struct cp_device_entry *output = ADDR_OF(&device->output_pipelines);
+
+	struct cp_device_info *device_info = (struct cp_device_info *)malloc(
+		sizeof(struct cp_device_info) +
+		sizeof(struct cp_device_pipeline_info) *
+			(input->pipeline_count + output->pipeline_count)
+	);
 	if (device_info == NULL) {
 		return NULL;
 	}
-	memset(device_info, 0, device_info_size);
 
-	// FIXME
-	device_info->pipeline_count = 0; // device->pipeline_count;
+	strtcpy(device_info->type, device->type, CP_DEVICE_TYPE_LEN);
 	strtcpy(device_info->name, device->name, CP_DEVICE_NAME_LEN);
-	/*	for (uint64_t idx = 0; idx < device->pipeline_count; ++idx) {
-			// FIXME
-			device_info->pipelines[idx].pipeline_idx =
-				-1; // device->pipeline_map[link_idx];
-			device_info->pipelines[idx].weight =
-				device->pipeline_weights[idx].weight;
-		}
-	*/
+
+	device_info->input_count = input->pipeline_count;
+	device_info->output_count = output->pipeline_count;
+	for (uint64_t idx = 0; idx < input->pipeline_count; ++idx) {
+		strtcpy(device_info->pipelines[idx].name,
+			input->pipelines[idx].name,
+			sizeof(device_info->pipelines[idx].name));
+		device_info->pipelines[idx].weight =
+			input->pipelines[idx].weight;
+	}
+
+	for (uint64_t idx = 0; idx < output->pipeline_count; ++idx) {
+		strtcpy(device_info->pipelines[device_info->input_count + idx]
+				.name,
+			output->pipelines[idx].name,
+			sizeof(device_info
+				       ->pipelines
+					       [device_info->input_count + idx]
+				       .name));
+		device_info->pipelines[device_info->input_count + idx].weight =
+			output->pipelines[idx].weight;
+	}
+
 	return device_info;
 }
 
@@ -716,17 +874,16 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 		goto unlock;
 
 	memset(device_list_info, 0, device_list_info_size);
-	device_list_info->gen = cp_config_gen->gen;
 	device_list_info->device_count = 0;
 	for (uint64_t idx = 0; idx < device_registry->registry.capacity;
 	     ++idx) {
-		struct cp_device *device =
+		struct cp_device *cp_device =
 			cp_config_gen_get_device(cp_config_gen, idx);
-		if (device == NULL) {
+		if (cp_device == NULL) {
 			continue;
 		}
 		struct cp_device_info *device_info =
-			yanet_build_device_info(device);
+			yanet_build_device_info(cp_device);
 		if (device_info == NULL) {
 			cp_device_list_info_free(device_list_info);
 			device_list_info = NULL;
@@ -750,16 +907,28 @@ yanet_get_cp_device_info(
 ) {
 	if (idx >= device_list_info->device_count)
 		return NULL;
+
 	return device_list_info->devices[idx];
 }
 
 struct cp_device_pipeline_info *
-yanet_get_cp_device_pipeline_info(
+yanet_get_cp_device_input_pipeline_info(
 	struct cp_device_info *device_info, uint64_t idx
 ) {
-	if (idx >= device_info->pipeline_count)
+	if (idx >= device_info->input_count)
 		return NULL;
+
 	return device_info->pipelines + idx;
+}
+
+struct cp_device_pipeline_info *
+yanet_get_cp_device_output_pipeline_info(
+	struct cp_device_info *device_info, uint64_t idx
+) {
+	if (idx >= device_info->output_count)
+		return NULL;
+
+	return device_info->pipelines + device_info->input_count + idx;
 }
 
 int

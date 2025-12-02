@@ -34,12 +34,14 @@ message InstanceInfo {
 	repeated DPModuleInfo dp_modules = 3;
 	// Control plane configurations in this dataplane instance.
 	repeated CPConfigInfo cp_configs = 4;
+	// Controlplane function configurations
+	repeated FunctionInfo functions = 5;
 	// Pipelines configured in this dataplane instance.
-	repeated PipelineInfo pipelines = 5;
+	repeated PipelineInfo pipelines = 6;
 	// Agents running in this dataplane instance.
-	repeated AgentInfo agents = 6;
+	repeated AgentInfo agents = 7;
 	// Devices configured in this dataplane instance.
-	repeated DeviceInfo devices = 7;
+	repeated DeviceInfo devices = 8;
 }
 
 // DPModuleInfo contains information about a dataplane module.
@@ -52,13 +54,28 @@ message DPModuleInfo {
 
 // CPConfigInfo contains information about a control plane configuration.
 message CPConfigInfo {
-	// ModuleIdx is the index of the dataplane module this configuration
-	// belongs to.
-	uint32 module_idx = 1;
-	// Name is the unique identifier for this configuration.
+	// Type defines the packet handler for the module
+	string type = 1;
+	// Type:Name is the unique identifier for this configuration.
 	string name = 2;
 	// Generation is the generation number of the control plane module.
 	uint64 generation = 3;
+}
+
+message ChainModuleInfo {
+	string type = 1;
+	string name = 2;
+}
+
+message FunctionChainInfo {
+	string Name = 1;
+	uint64 Weight = 2;
+	repeated ChainModuleInfo modules = 3;
+}
+
+message FunctionInfo {
+	string Name = 1;
+	repeated FunctionChainInfo chains = 2;
 }
 
 // PipelineInfo contains information about a packet processing pipeline.
@@ -67,13 +84,7 @@ message PipelineInfo {
 	string name = 1;
 	// Modules is a list of module configurations in the pipeline's
 	// processing order.
-	repeated PipelineModuleInfo modules = 2;
-}
-
-// PipelineModuleInfo contains information about a module in a pipeline.
-message PipelineModuleInfo {
-	// ConfigIndex is the index in the control plane configurations list.
-	uint32 config_index = 1;
+	repeated string functions = 2;
 }
 
 // AgentInfo contains information about a control plane agent.
@@ -102,16 +113,17 @@ message AgentInstanceInfo {
 
 // DeviceInfo contains information about a device.
 message DeviceInfo {
-	// DeviceId is the unique identifier for this device.
-	uint32 device_id = 1;
+	string type = 1;
+	string name = 2;
 	// Pipelines is a list of pipelines configured for this device.
-	repeated DevicePipelineInfo pipelines = 2;
+	repeated DevicePipelineInfo input_pipelines = 3;
+	repeated DevicePipelineInfo output_pipelines = 4;
 }
 
 // DevicePipelineInfo contains information about a pipeline in a device.
 message DevicePipelineInfo {
-	// PipelineIdx is the index of the pipeline in the pipeline list.
-	uint32 pipeline_idx = 1;
+	// Pipeline name
+	string name = 1;
 	// Weight is the weight of this pipeline in the device.
 	uint64 weight = 2;
 }

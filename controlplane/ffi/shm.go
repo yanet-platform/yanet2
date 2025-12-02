@@ -129,21 +129,67 @@ func (m *DPConfig) CPConfigs() []CPConfig {
 	out := make([]CPConfig, 0, cpModulesListInfo.module_count)
 
 	for idx := C.uint64_t(0); idx < cpModulesListInfo.module_count; idx++ {
-		cpModuleInfo := C.struct_cp_module_info{}
-
-		// SAFETY: safe, because we query using index within valid range.
-		rc := C.yanet_get_cp_module_info(cpModulesListInfo, idx, &cpModuleInfo)
-		if rc != 0 {
-			panic("FFI corruption: module index became invalid")
-		}
-
-		configName := C.GoString(&cpModuleInfo.config_name[0])
+		moduleInfo := C.yanet_get_cp_module_info(cpModulesListInfo, idx)
 
 		out = append(out, CPConfig{
-			ModuleIndex: uint32(cpModuleInfo.index),
-			ConfigName:  configName,
-			Gen:         uint64(cpModuleInfo.gen),
+			Type: C.GoString(&moduleInfo._type[0]),
+			Name: C.GoString(&moduleInfo.name[0]),
+			Gen:  uint64(moduleInfo.gen),
 		})
+	}
+
+	return out
+}
+
+type ChainModule struct {
+	Type string
+	Name string
+}
+
+type Chain struct {
+	Name    string
+	Weight  uint64
+	Modules []ChainModule
+}
+
+type Function struct {
+	Name   string
+	Chains []Chain
+}
+
+// Pipelines returns all pipeline configurations from the dataplane.
+func (m *DPConfig) Functions() []Function {
+	functionListInfo := C.yanet_get_cp_function_list_info(m.ptr)
+	defer C.cp_function_list_info_free(functionListInfo)
+
+	out := make([]Function, functionListInfo.function_count)
+	for idx := C.uint64_t(0); idx < functionListInfo.function_count; idx++ {
+		functionInfo := C.yanet_get_cp_function_info(functionListInfo, idx)
+
+		chains := make([]Chain, functionInfo.chain_count)
+		for idx := C.uint64_t(0); idx < functionInfo.chain_count; idx++ {
+			chainInfo := C.yanet_get_cp_function_chain_info(functionInfo, idx)
+
+			modules := make([]ChainModule, chainInfo.length)
+			for idx := C.uint64_t(0); idx < chainInfo.length; idx++ {
+				modInfo := C.yanet_get_cp_function_chain_module_info(chainInfo, idx)
+				modules[idx] = ChainModule{
+					Type: C.GoString(&modInfo._type[0]),
+					Name: C.GoString(&modInfo.name[0]),
+				}
+			}
+
+			chains[idx] = Chain{
+				Name:    C.GoString(&chainInfo.name[0]),
+				Weight:  uint64(chainInfo.weight),
+				Modules: modules,
+			}
+		}
+
+		out[idx] = Function{
+			Name:   C.GoString(&functionInfo.name[0]),
+			Chains: chains,
+		}
 	}
 
 	return out
@@ -156,25 +202,17 @@ func (m *DPConfig) Pipelines() []Pipeline {
 
 	out := make([]Pipeline, pipelineListInfo.count)
 	for idx := C.uint64_t(0); idx < pipelineListInfo.count; idx++ {
-		var pipelineInfo *C.struct_cp_pipeline_info
-		rc := C.yanet_get_cp_pipeline_info(pipelineListInfo, idx, &pipelineInfo)
-		if rc != 0 {
-			panic("FFI corruption: pipeline index became invalid")
-		}
+		pipelineInfo := C.yanet_get_cp_pipeline_info(pipelineListInfo, idx)
 
-		moduleConfigs := make([]uint64, pipelineInfo.length)
-		for moduleIdx := C.uint64_t(0); moduleIdx < pipelineInfo.length; moduleIdx++ {
-			var configIndex C.uint64_t
-			rc := C.yanet_get_cp_pipeline_module_info(pipelineInfo, moduleIdx, &configIndex)
-			if rc != 0 {
-				panic("FFI corruption: pipeline module index became invalid")
-			}
-			moduleConfigs[moduleIdx] = uint64(configIndex)
+		functions := make([]string, pipelineInfo.length)
+		for idx := C.uint64_t(0); idx < pipelineInfo.length; idx++ {
+			function := C.yanet_get_cp_pipeline_function_info_id(pipelineInfo, idx)
+			functions[idx] = C.GoString(&function.name[0])
 		}
 
 		out[idx] = Pipeline{
-			Name:          C.GoString(&pipelineInfo.name[0]),
-			ModuleConfigs: moduleConfigs,
+			Name:      C.GoString(&pipelineInfo.name[0]),
+			Functions: functions,
 		}
 	}
 
@@ -227,20 +265,17 @@ type DPModule struct {
 
 // CPConfig represents a control plane configuration associated with a module.
 type CPConfig struct {
-	ModuleIndex uint32
-	ConfigName  string
-	Gen         uint64
+	Type string
+	Name string
+	Gen  uint64
 }
 
 // Pipeline represents a dataplane packet processing pipeline configuration.
 type Pipeline struct {
 	// Name is the name of the pipeline.
 	Name string
-	// ModuleConfigs is a list of module configurations indices.
-	//
-	// The index is the index of the module configuration in the dataplane
-	// configuration.
-	ModuleConfigs []uint64
+	// Functions is the list of functions in the pipeline
+	Functions []string
 }
 
 // AgentInfo represents information about a control plane agent.
@@ -274,15 +309,16 @@ func (m DPModule) String() string {
 
 // DevicePipelineInfo represents information about a pipeline in a device.
 type DevicePipelineInfo struct {
-	PipelineIndex uint32
-	Weight        uint64
+	Name   string
+	Weight uint64
 }
 
 // DeviceInfo represents information about a device.
 type DeviceInfo struct {
-	DeviceID  uint16
-	Name      string
-	Pipelines []DevicePipelineInfo
+	Type            string
+	Name            string
+	InputPipelines  []DevicePipelineInfo
+	OutputPipelines []DevicePipelineInfo
 }
 
 // Devices returns all device information from the dataplane.
@@ -300,23 +336,37 @@ func (m *DPConfig) Devices() []DeviceInfo {
 			continue
 		}
 
-		pipelines := make([]DevicePipelineInfo, deviceInfo.pipeline_count)
-		for pipelineIdx := C.uint64_t(0); pipelineIdx < deviceInfo.pipeline_count; pipelineIdx++ {
-			pipelineInfo := C.yanet_get_cp_device_pipeline_info(deviceInfo, pipelineIdx)
+		input_pipelines := make([]DevicePipelineInfo, deviceInfo.input_count)
+		for pipelineIdx := C.uint64_t(0); pipelineIdx < deviceInfo.input_count; pipelineIdx++ {
+			pipelineInfo := C.yanet_get_cp_device_input_pipeline_info(deviceInfo, pipelineIdx)
 			if pipelineInfo == nil {
 				continue
 			}
 
-			pipelines[pipelineIdx] = DevicePipelineInfo{
-				PipelineIndex: uint32(pipelineInfo.pipeline_idx),
-				Weight:        uint64(pipelineInfo.weight),
+			input_pipelines[pipelineIdx] = DevicePipelineInfo{
+				Name:   C.GoString(&pipelineInfo.name[0]),
+				Weight: uint64(pipelineInfo.weight),
+			}
+		}
+
+		output_pipelines := make([]DevicePipelineInfo, deviceInfo.output_count)
+		for pipelineIdx := C.uint64_t(0); pipelineIdx < deviceInfo.output_count; pipelineIdx++ {
+			pipelineInfo := C.yanet_get_cp_device_output_pipeline_info(deviceInfo, pipelineIdx)
+			if pipelineInfo == nil {
+				continue
+			}
+
+			output_pipelines[pipelineIdx] = DevicePipelineInfo{
+				Name:   C.GoString(&pipelineInfo.name[0]),
+				Weight: uint64(pipelineInfo.weight),
 			}
 		}
 
 		out[idx] = DeviceInfo{
-			DeviceID:  uint16(idx),
-			Name:      C.GoString(&deviceInfo.name[0]),
-			Pipelines: pipelines,
+			Type:            C.GoString(&deviceInfo._type[0]),
+			Name:            C.GoString(&deviceInfo.name[0]),
+			InputPipelines:  input_pipelines,
+			OutputPipelines: output_pipelines,
 		}
 	}
 

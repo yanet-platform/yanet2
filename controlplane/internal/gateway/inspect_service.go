@@ -37,6 +37,7 @@ func (m *InspectService) Inspect(
 			DpModules: m.dpModules(dpConfig),
 			CpConfigs: m.cpConfigs(dpConfig),
 			Pipelines: m.pipelines(dpConfig),
+			Functions: m.functions(dpConfig),
 			Agents:    m.agents(dpConfig),
 			Devices:   m.devices(dpConfig),
 		}
@@ -66,10 +67,44 @@ func (m *InspectService) cpConfigs(dpConfig *ffi.DPConfig) []*ynpb.CPConfigInfo 
 	out := make([]*ynpb.CPConfigInfo, len(configs))
 	for idx, config := range configs {
 		out[idx] = &ynpb.CPConfigInfo{
-			ModuleIdx:  config.ModuleIndex,
-			Name:       config.ConfigName,
+			Type:       config.Type,
+			Name:       config.Name,
 			Generation: config.Gen,
 		}
+	}
+
+	return out
+}
+
+func (m *InspectService) functions(dpConfig *ffi.DPConfig) []*ynpb.FunctionInfo {
+	functions := dpConfig.Functions()
+	if len(functions) == 0 {
+		return nil
+	}
+
+	out := make([]*ynpb.FunctionInfo, len(functions))
+	for idx, function := range functions {
+		functionInfo := &ynpb.FunctionInfo{
+			Name:   function.Name,
+			Chains: make([]*ynpb.FunctionChainInfo, len(function.Chains)),
+		}
+
+		for chainIdx, chain := range function.Chains {
+			modules := make([]*ynpb.ChainModuleInfo, len(chain.Modules))
+			for modIdx, module := range chain.Modules {
+				modules[modIdx] = &ynpb.ChainModuleInfo{
+					Type: module.Type,
+					Name: module.Name,
+				}
+			}
+			functionInfo.Chains[chainIdx] = &ynpb.FunctionChainInfo{
+				Name:    chain.Name,
+				Weight:  chain.Weight,
+				Modules: modules,
+			}
+		}
+
+		out[idx] = functionInfo
 	}
 
 	return out
@@ -81,14 +116,11 @@ func (m *InspectService) pipelines(dpConfig *ffi.DPConfig) []*ynpb.PipelineInfo 
 	out := make([]*ynpb.PipelineInfo, len(pipelines))
 	for idx, pipeline := range pipelines {
 		pipelineInfo := &ynpb.PipelineInfo{
-			Name:    pipeline.Name,
-			Modules: make([]*ynpb.PipelineModuleInfo, len(pipeline.ModuleConfigs)),
+			Name: pipeline.Name,
 		}
 
-		for modIdx, configIdx := range pipeline.ModuleConfigs {
-			pipelineInfo.Modules[modIdx] = &ynpb.PipelineModuleInfo{
-				ConfigIndex: uint32(configIdx),
-			}
+		for _, function := range pipeline.Functions {
+			pipelineInfo.Functions = append(pipelineInfo.Functions, function)
 		}
 
 		out[idx] = pipelineInfo
@@ -132,14 +164,23 @@ func (m *InspectService) devices(dpConfig *ffi.DPConfig) []*ynpb.DeviceInfo {
 	out := make([]*ynpb.DeviceInfo, len(devices))
 	for idx, device := range devices {
 		deviceInfo := &ynpb.DeviceInfo{
-			DeviceId:  uint32(device.DeviceID),
-			Pipelines: make([]*ynpb.DevicePipelineInfo, len(device.Pipelines)),
+			Type:            device.Type,
+			Name:            device.Name,
+			InputPipelines:  make([]*ynpb.DevicePipelineInfo, len(device.InputPipelines)),
+			OutputPipelines: make([]*ynpb.DevicePipelineInfo, len(device.OutputPipelines)),
 		}
 
-		for pipelineIdx, pipeline := range device.Pipelines {
-			deviceInfo.Pipelines[pipelineIdx] = &ynpb.DevicePipelineInfo{
-				PipelineIdx: pipeline.PipelineIndex,
-				Weight:      pipeline.Weight,
+		for idx, pipeline := range device.InputPipelines {
+			deviceInfo.InputPipelines[idx] = &ynpb.DevicePipelineInfo{
+				Name:   pipeline.Name,
+				Weight: pipeline.Weight,
+			}
+		}
+
+		for idx, pipeline := range device.OutputPipelines {
+			deviceInfo.OutputPipelines[idx] = &ynpb.DevicePipelineInfo{
+				Name:   pipeline.Name,
+				Weight: pipeline.Weight,
 			}
 		}
 
