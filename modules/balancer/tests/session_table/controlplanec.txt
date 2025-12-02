@@ -1,6 +1,6 @@
 #include "controlplane.h"
 
-#include "state/session_table.h"
+#include "../../state/session_table.h"
 
 #include <stdatomic.h>
 
