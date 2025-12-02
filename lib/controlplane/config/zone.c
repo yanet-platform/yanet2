@@ -546,7 +546,6 @@ cp_config_gen_create(struct agent *agent) {
 		device_config.output_pipelines = &pipe_cfg;
 		struct cp_device *cp_device =
 			cp_device_create(agent, &device_config);
-		printf("create device=%p\n", cp_device);
 		// FIXME check cp_device and upsert
 		cp_device_registry_upsert(
 			&cp_config_gen->device_registry,
