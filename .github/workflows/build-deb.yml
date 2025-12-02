@@ -70,7 +70,9 @@ jobs:
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
       - name: Build packages  
-        run: sudo -E env "PATH=$PATH" ./scripts/build-deb.sh
+        run: 
+          sudo -E env "PATH=$PATH" ./scripts/build-deb.sh
+          sudo chown -R $(id -u) ~/.cargo  # fix caching for Rust
         
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
