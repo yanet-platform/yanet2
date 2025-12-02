@@ -1,4 +1,4 @@
-package yncp
+package logging
 
 import (
 	"fmt"
@@ -9,8 +9,8 @@ import (
 	"golang.org/x/term"
 )
 
-// InitLogging initializes the logging subsystem.
-func InitLogging(cfg *LoggingConfig) (*zap.SugaredLogger, zap.AtomicLevel, error) {
+// Init initializes the logging subsystem.
+func Init(cfg *Config) (*zap.SugaredLogger, zap.AtomicLevel, error) {
 	encoderConfig := zap.NewDevelopmentEncoderConfig()
 
 	if term.IsTerminal(int(os.Stderr.Fd())) {

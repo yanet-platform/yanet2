@@ -13,8 +13,8 @@ import (
 	"google.golang.org/grpc"
 	"gopkg.in/yaml.v3"
 
+	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
-	"github.com/yanet-platform/yanet2/controlplane/yncp"
 	birdAdapter "github.com/yanet-platform/yanet2/modules/route/bird-adapter"
 	adapterpb "github.com/yanet-platform/yanet2/modules/route/bird-adapter/proto"
 )
@@ -46,7 +46,7 @@ func init() {
 // ServerConfig is the configuration for the bird-adapter server.
 type ServerConfig struct {
 	// Logging configuration.
-	Logging yncp.LoggingConfig `yaml:"logging"`
+	Logging logging.Config `yaml:"logging"`
 	// ListenAddr is the gRPC endpoint to listen on (e.g., "localhost:50051").
 	ListenAddr string `yaml:"listen_addr"`
 	// GatewayEndpoint is the gRPC endpoint of the RouteService gateway for RIB updates.
@@ -56,7 +56,7 @@ type ServerConfig struct {
 // DefaultServerConfig returns the default configuration.
 func DefaultServerConfig() *ServerConfig {
 	return &ServerConfig{
-		Logging: yncp.LoggingConfig{
+		Logging: logging.Config{
 			Level: zapcore.InfoLevel,
 		},
 		ListenAddr:      "localhost:50051",
@@ -85,7 +85,7 @@ func runServer() error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	log, _, err := yncp.InitLogging(&cfg.Logging)
+	log, _, err := logging.Init(&cfg.Logging)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logging: %w", err)
 	}

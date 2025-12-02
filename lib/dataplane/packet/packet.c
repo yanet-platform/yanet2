@@ -1,5 +1,7 @@
 #include "packet.h"
 
+#include "yanet_build_config.h"
+
 #include <stdint.h>
 
 #include <netinet/icmp6.h>
@@ -12,8 +14,9 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
+#ifdef ENABLE_TRACE_LOG
 #include "lib/logging/log.h"
-#include "yanet_build_config.h"
+#endif
 
 /*
  * TODO: analyze if the valid packet parsing may

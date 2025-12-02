@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
 	"github.com/yanet-platform/yanet2/controlplane/yncp"
 )
@@ -55,7 +56,7 @@ func run(cmd Cmd) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	log, atomicLevel, err := yncp.InitLogging(&cfg.Logging)
+	log, atomicLevel, err := logging.Init(&cfg.Logging)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logging: %w", err)
 	}

@@ -7,7 +7,9 @@ import (
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
 
+	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
+
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
@@ -23,7 +25,7 @@ import (
 type Config config
 type config struct {
 	// Logging configuration.
-	Logging LoggingConfig `json:"logging" yaml:"logging"`
+	Logging logging.Config `json:"logging" yaml:"logging"`
 	// MemoryPath is the path to the shared-memory file that is used to
 	// communicate with dataplane.
 	MemoryPath string `yaml:"memory_path"`
@@ -37,7 +39,7 @@ type config struct {
 
 func DefaultConfig() *Config {
 	return &Config{
-		Logging: LoggingConfig{
+		Logging: logging.Config{
 			Level: zapcore.InfoLevel,
 		},
 		MemoryPath: "/dev/hugepages/yanet",
@@ -71,12 +73,6 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
-}
-
-// LoggingConfig is the configuration for the logging subsystem.
-type LoggingConfig struct {
-	// Level is the logging level.
-	Level zapcore.Level `yaml:"level"`
 }
 
 // ModulesConfig describes built-in modules.
