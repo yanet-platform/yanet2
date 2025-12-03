@@ -5,7 +5,7 @@ BINDIR ?= $(PREFIX)/bin
 ROOT_DIR    := ../../..
 TARGET_DIR  := $(ROOT_DIR)/target
 RELEASE_DIR := $(TARGET_DIR)/release
-BUILD_DIR   := $(ROOT_DIR)/build/modules/forward/cli
+BUILD_DIR   := $(ROOT_DIR)/build/modules/acl/cli
 
 MODULES  := acl
 BINARIES := $(addprefix yanet-cli-,$(MODULES))

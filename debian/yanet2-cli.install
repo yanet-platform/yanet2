@@ -1,4 +1,5 @@
 usr/bin/yanet-cli
+usr/bin/yanet-cli-acl
 usr/bin/yanet-cli-common
 usr/bin/yanet-cli-inspect
 usr/bin/yanet-cli-function
@@ -11,4 +12,3 @@ usr/bin/yanet-cli-route
 usr/bin/yanet-cli-neighbour
 usr/bin/yanet-cli-pdump
 usr/bin/yanet-cli-counters
-usr/bin/yanet-cli-acl
