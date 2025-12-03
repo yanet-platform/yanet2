@@ -11,3 +11,4 @@ usr/bin/yanet-cli-route
 usr/bin/yanet-cli-neighbour
 usr/bin/yanet-cli-pdump
 usr/bin/yanet-cli-counters
+usr/bin/yanet-cli-acl

@@ -10,7 +10,7 @@ option go_package = "github.com/yanet-platform/yanet2/modules/"
 service AclService {
 	// Updates the complete Acl configuration with a new set of rules
 	rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
-	// Allows to delete forward config if it is not referenced
+	// Allows to delete acl config if it is not referenced
 	// by any pipeline.
 	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
 }
@@ -79,7 +79,7 @@ enum ActionKind {
 // Delete config with specified name.
 message DeleteConfigRequest {
 	// Specifies module name and
-	// dataplane instance of forward agent to delete.
+	// dataplane instance of acl agent to delete.
 	commonpb.TargetModule target = 1;
 }
 
