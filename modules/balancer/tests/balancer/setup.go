@@ -126,8 +126,8 @@ func setupCp(agent *ffi.Agent) error {
 			},
 		}
 
-		if err := agent.UpdateFunctions([]ffi.FunctionConfig{functionConfig}); err != nil {
-			return fmt.Errorf("failed to update functions: %w", err)
+		if err := agent.UpdateFunction(functionConfig); err != nil {
+			return fmt.Errorf("failed to update function: %w", err)
 		}
 	}
 
@@ -143,8 +143,12 @@ func setupCp(agent *ffi.Agent) error {
 			Functions: []string{},
 		}
 
-		if err := agent.UpdatePipelines([]ffi.PipelineConfig{inputPipelineConfig, dummyPipelineConfig}); err != nil {
-			return fmt.Errorf("failed to update pipelines: %w", err)
+		if err := agent.UpdatePipeline(inputPipelineConfig); err != nil {
+			return fmt.Errorf("failed to update pipeline: %w", err)
+		}
+
+		if err := agent.UpdatePipeline(dummyPipelineConfig); err != nil {
+			return fmt.Errorf("failed to update pipeline: %w", err)
 		}
 	}
 

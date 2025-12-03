@@ -4,12 +4,21 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
+
+use commonpb::{FunctionId, ModuleId};
+
 use code::{
-    function_service_client::FunctionServiceClient, Chain, ChainModule, DeleteFunctionRequest, Function, FunctionChain,
-    UpdateFunctionsRequest,
+    function_service_client::FunctionServiceClient, Chain, DeleteFunctionRequest, Function, FunctionChain,
+    UpdateFunctionRequest,
 };
+
 use tonic::transport::Channel;
 use ync::logging;
+
+#[allow(non_snake_case)]
+pub mod commonpb {
+    tonic::include_proto!("commonpb");
+}
 
 #[allow(non_snake_case)]
 pub mod code {
@@ -96,10 +105,10 @@ impl FunctionService {
     }
 
     pub async fn update_functions(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        let request = UpdateFunctionsRequest {
+        let request = UpdateFunctionRequest {
             instance: cmd.instance,
-            functions: vec![Function {
-                name: cmd.name,
+            function: Some(Function {
+                id: Some(FunctionId { name: cmd.name }),
                 chains: cmd
                     .chains
                     .into_iter()
@@ -124,7 +133,7 @@ impl FunctionService {
                                         if parts.len() != 2 {
                                             panic!("Invalid module format. Expected 'module_name:config_name'");
                                         }
-                                        ChainModule {
+                                        ModuleId {
                                             r#type: parts[0].to_string(),
                                             name: parts[1].to_string(),
                                         }
@@ -134,7 +143,7 @@ impl FunctionService {
                         }
                     })
                     .collect(),
-            }],
+            }),
         };
 
         self.client.update(request).await?;
@@ -145,7 +154,7 @@ impl FunctionService {
     pub async fn delete_function(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
         let request = DeleteFunctionRequest {
             instance: cmd.instance,
-            function_name: cmd.name,
+            id: Some(FunctionId { name: cmd.name }),
         };
         self.client.delete(request).await?;
         log::info!("Successfully deleted function");

@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package ynpb;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
+
+import "common/proto/target.proto";
+
+// TODO: docs
+service ModuleService {
+	// Lists all configured devices
+	rpc List(ListModulesRequest) returns (ListModulesResponse);
+}
+
+message ListModulesRequest {
+	uint32 instance = 1;
+}
+
+message ListModulesResponse {
+	repeated commonpb.ModuleId ids = 1;
+}

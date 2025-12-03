@@ -4,47 +4,56 @@ package ynpb;
 
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
+import "common/proto/target.proto";
+
 // TODO: docs.
 service PipelineService {
-	// TODO: docs.
-	rpc Update(UpdatePipelinesRequest) returns (UpdatePipelinesResponse) {
-	}
+	// Lists all configured pipelines
+	rpc List(ListPipelinesRequest) returns (ListPipelinesResponse);
+
+	// Returns pipeline definition
+	rpc Get(GetPipelineRequest) returns (GetPipelineResponse);
+
+	// Update or insert pipeline
+	rpc Update(UpdatePipelineRequest) returns (UpdatePipelineResponse);
 
 	// Allows to delete pipeline with specified name
-	// if it is not assigned to device.
 	rpc Delete(DeletePipelineRequest) returns (DeletePipelineResponse);
 }
 
-// TODO: docs.
-message UpdatePipelinesRequest {
-	// Dataplane instance
+message ListPipelinesRequest {
 	uint32 instance = 1;
-	// TODO: docs.
-	repeated Pipeline pipelines = 2;
 }
 
-// A pipeline chain.
+message ListPipelinesResponse {
+	repeated commonpb.PipelineId ids = 1;
+}
+
+message GetPipelineRequest {
+	uint32 instance = 1;
+	commonpb.PipelineId id = 2;
+}
+
+message GetPipelineResponse {
+	Pipeline pipeline = 1;
+}
+
+message UpdatePipelineRequest {
+	uint32 instance = 1;
+	Pipeline pipeline = 2;
+}
+
+message UpdatePipelineResponse {
+}
+
 message Pipeline {
-	// Name of the pipeline.
-	//
-	// This name is used to identify the pipeline in the controlplane.
-	string name = 1;
-	// Nodes in the pipeline chain.
-	//
-	// The nodes are executed in order.
-	repeated string functions = 2;
-}
-
-// TODO: docs.
-message UpdatePipelinesResponse {
+	commonpb.PipelineId id = 1;
+	repeated commonpb.FunctionId functions = 2;
 }
 
 message DeletePipelineRequest {
-	// Dataplane instance
 	uint32 instance = 1;
-
-	// Name of the pipeline
-	string pipeline_name = 2;
+	commonpb.PipelineId id = 2;
 }
 
 message DeletePipelineResponse {

@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/common/proto"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
@@ -36,13 +37,84 @@ func NewFunctionService(shm *ffi.SharedMemory, log *zap.SugaredLogger) *Function
 	}
 }
 
+func (m *FunctionService) List(
+	ctx context.Context,
+	request *ynpb.ListFunctionsRequest,
+) (*ynpb.ListFunctionsResponse, error) {
+	instance := request.Instance
+	dpConfig := m.shm.DPConfig(instance)
+
+	functions := dpConfig.Functions()
+
+	response := &ynpb.ListFunctionsResponse{
+		Ids: make([]*commonpb.FunctionId, len(functions)),
+	}
+	for idx, function := range functions {
+		response.Ids[idx] = &commonpb.FunctionId{
+			Name: function.Name,
+		}
+	}
+
+	return response, nil
+}
+
+func (m *FunctionService) Get(
+	ctx context.Context,
+	request *ynpb.GetFunctionRequest,
+) (*ynpb.GetFunctionResponse, error) {
+	instance := request.Instance
+	dpConfig := m.shm.DPConfig(instance)
+
+	reqId := request.Id
+
+	functions := dpConfig.Functions()
+	for _, function := range functions {
+		if reqId.Name == function.Name {
+			respChains := make([]*ynpb.FunctionChain, len(function.Chains))
+			for idx, chain := range function.Chains {
+				respModules := make([]*commonpb.ModuleId, len(chain.Modules))
+				for idx, module := range chain.Modules {
+					respModules[idx] = &commonpb.ModuleId{
+						Type: module.Type,
+						Name: module.Name,
+					}
+				}
+
+				respChain := &ynpb.Chain{
+					Name:    chain.Name,
+					Modules: respModules,
+				}
+
+				respChains[idx] = &ynpb.FunctionChain{
+					Chain:  respChain,
+					Weight: chain.Weight,
+				}
+			}
+
+			respFunction := ynpb.Function{
+				Id: &commonpb.FunctionId{
+					Name: function.Name,
+				},
+				Chains: respChains,
+			}
+
+			return &ynpb.GetFunctionResponse{
+				Function: &respFunction,
+			}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("not found")
+
+}
+
 // TODO: docs.
 func (m *FunctionService) Update(
 	ctx context.Context,
-	request *ynpb.UpdateFunctionsRequest,
-) (*ynpb.UpdateFunctionsResponse, error) {
-	instance := request.GetInstance()
-	functions := request.GetFunctions()
+	request *ynpb.UpdateFunctionRequest,
+) (*ynpb.UpdateFunctionResponse, error) {
+	instance := request.Instance
+	reqFunction := request.Function
 
 	agent, err := m.shm.AgentAttach(functionAgentName, instance, functionAgentMemory)
 	if err != nil {
@@ -50,51 +122,45 @@ func (m *FunctionService) Update(
 	}
 	defer agent.Close()
 
-	configs := make([]ffi.FunctionConfig, 0, len(functions))
-
-	for _, functionConfig := range functions {
-		cfg := ffi.FunctionConfig{
-			Name: functionConfig.GetName(),
+	function := ffi.FunctionConfig{
+		Name: reqFunction.Id.Name,
+	}
+	for _, reqFunctionChain := range reqFunction.Chains {
+		reqChain := reqFunctionChain.Chain
+		modules := make([]ffi.ChainModuleConfig, 0, len(reqChain.Modules))
+		for _, reqChainModule := range reqChain.Modules {
+			modules = append(modules, ffi.ChainModuleConfig{
+				Type: reqChainModule.Type,
+				Name: reqChainModule.Name,
+			})
 		}
-		for _, funcChain := range functionConfig.GetChains() {
-			chain := funcChain.GetChain()
-			chainModules := make([]ffi.ChainModuleConfig, 0, len(chain.GetModules()))
-			for _, chainModule := range chain.GetModules() {
-				chainModules = append(chainModules, ffi.ChainModuleConfig{
-					Type: chainModule.GetType(),
-					Name: chainModule.GetName(),
-				})
-			}
-			chainCfg := ffi.ChainConfig{
-				Name:    chain.GetName(),
-				Modules: chainModules,
-			}
-
-			funcChainCfg := ffi.FunctionChainConfig{
-				Weight: funcChain.GetWeight(),
-				Chain:  chainCfg,
-			}
-			cfg.Chains = append(cfg.Chains, funcChainCfg)
+		chain := ffi.ChainConfig{
+			Name:    reqChain.Name,
+			Modules: modules,
 		}
 
-		configs = append(configs, cfg)
+		functionChain := ffi.FunctionChainConfig{
+			Weight: reqFunctionChain.Weight,
+			Chain:  chain,
+		}
+		function.Chains = append(function.Chains, functionChain)
 	}
 
-	m.log.Infow("updating functions",
+	m.log.Infow("updating function",
 		zap.Uint32("instance", instance),
-		zap.Any("configs", configs),
+		zap.Any("config", function),
 	)
 
-	if err := agent.UpdateFunctions(configs); err != nil {
-		return nil, fmt.Errorf("failed to update functions: %w", err)
+	if err := agent.UpdateFunction(function); err != nil {
+		return nil, fmt.Errorf("failed to update function: %w", err)
 	}
 
-	m.log.Infow("updated functions",
+	m.log.Infow("updated function",
 		zap.Uint32("instance", instance),
-		zap.Any("configs", configs),
+		zap.Any("config", function),
 	)
 
-	return &ynpb.UpdateFunctionsResponse{}, nil
+	return &ynpb.UpdateFunctionResponse{}, nil
 }
 
 func (m *FunctionService) Delete(
@@ -102,7 +168,7 @@ func (m *FunctionService) Delete(
 	request *ynpb.DeleteFunctionRequest,
 ) (*ynpb.DeleteFunctionResponse, error) {
 	instance := request.GetInstance()
-	function_name := request.GetFunctionName()
+	function_name := request.Id.Name
 
 	agent, err := m.shm.AgentAttach(functionAgentName, instance, functionAgentMemory)
 	if err != nil {

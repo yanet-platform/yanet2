@@ -18,6 +18,19 @@ message TargetDevice {
 	string name = 2;
 }
 
+message ModuleId {
+	string type = 1;
+	string name = 2;
+}
+
+message FunctionId {
+	string name = 1;
+}
+
+message PipelineId {
+	string name = 1;
+}
+
 message Device {
 	repeated DevicePipeline input = 2;
 	repeated DevicePipeline output = 3;

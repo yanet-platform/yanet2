@@ -4,56 +4,66 @@ package ynpb;
 
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
+import "common/proto/target.proto";
+
 // TODO: docs.
 service FunctionService {
-	// TODO: docs.
-	rpc Update(UpdateFunctionsRequest) returns (UpdateFunctionsResponse) {
-	}
+	// Lists all configured functions
+	rpc List(ListFunctionsRequest) returns (ListFunctionsResponse);
 
-	// Allows to delete pipeline with specified name
-	// if it is not assigned to device.
+	// Returns function definition
+	rpc Get(GetFunctionRequest) returns (GetFunctionResponse);
+
+	// Updates or inserts function
+	rpc Update(UpdateFunctionRequest) returns (UpdateFunctionResponse);
+
+	// Deletes function with specified name
 	rpc Delete(DeleteFunctionRequest) returns (DeleteFunctionResponse);
 }
 
-// TODO: docs.
-message UpdateFunctionsRequest {
-	// Dataplane instance
+message ListFunctionsRequest {
 	uint32 instance = 1;
+}
 
-	repeated Function functions = 2;
+message ListFunctionsResponse {
+	repeated commonpb.FunctionId ids = 1;
+}
+
+message GetFunctionRequest {
+	uint32 instance = 1;
+	commonpb.FunctionId id = 2;
+}
+
+message GetFunctionResponse {
+	Function function = 1;
+}
+
+message UpdateFunctionRequest {
+	uint32 instance = 1;
+	Function function = 2;
+}
+
+message UpdateFunctionResponse {
 }
 
 message Function {
-	// TODO: docs.
-	string Name = 1;
+	commonpb.FunctionId id = 1;
 	repeated FunctionChain chains = 2;
 };
 
 message FunctionChain {
 	Chain chain = 1;
-	uint64 Weight = 2;
+	uint64 weight = 2;
 }
 
 message Chain {
-	string Name = 1;
-	repeated ChainModule modules = 2;
-}
-
-message ChainModule {
-	string Type = 1;
-	string Name = 2;
-}
-
-// TODO: docs.
-message UpdateFunctionsResponse {
+	string name = 1;
+	repeated commonpb.ModuleId modules = 2;
 }
 
 message DeleteFunctionRequest {
-	// Dataplane instance
 	uint32 instance = 1;
-
-	// Name of the pipeline
-	string function_name = 2;
+	commonpb.FunctionId id = 2;
 }
 
 message DeleteFunctionResponse {

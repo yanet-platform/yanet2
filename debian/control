@@ -57,29 +57,17 @@ Description: Yanet2 CLI utilities
  This package provides command-line utilities for configuring and
  managing Yanet2 network functions.
 
-Package: yanet2-coordinator
-Architecture: any
-Depends: ${shlibs:Depends}
- , ${misc:Depends}
- , libyaml-0-2
-Description: Yanet2 coordinator component
- Coordinator service for Yanet2 network stack.
- .
- This package contains the coordinator service that manages module
- lifecycle, configuration distribution, and service orchestration
- across the Yanet2 infrastructure.
 
 Package: yanet2
 Architecture: all
 Depends: yanet2-dataplane (= ${binary:Version}),
  yanet2-controlplane (= ${binary:Version}),
- yanet2-cli (= ${binary:Version}),
- yanet2-coordinator (= ${binary:Version})
+ yanet2-cli (= ${binary:Version})
 Description: Yanet2 meta-package
  Installs all main Yanet2 components.
  .
  This meta-package installs the complete Yanet2 network stack,
- including dataplane, controlplane, coordinator and CLI utilities.
+ including dataplane, controlplane and CLI utilities.
 
 Package: yanet2-bird-adapter
 Architecture: any

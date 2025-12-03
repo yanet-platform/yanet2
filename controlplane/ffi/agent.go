@@ -111,50 +111,45 @@ func (m *Agent) DPConfig() *DPConfig {
 	}
 }
 
-func (m *Agent) UpdateFunctions(functionConfigs []FunctionConfig) error {
-	functions := make([]*C.struct_cp_function_config, 0, len(functionConfigs))
-
-	for _, cfg := range functionConfigs {
-		function, err := newFunctionConfig(cfg)
-		if err != nil {
-			return fmt.Errorf("failed to create pipeline config: %w", err)
-		}
-		defer function.Free()
-
-		functions = append(functions, function.AsRawPtr())
+func (m *Agent) UpdateFunction(functionConfig FunctionConfig) error {
+	function, err := newFunctionConfig(functionConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create pipeline config: %w", err)
 	}
+	defer function.Free()
+
+	functions := make([]*C.struct_cp_function_config, 1)
+	functions[0] = function.AsRawPtr()
 
 	rc, err := C.agent_update_functions(
 		m.ptr,
-		C.uint64_t(len(functionConfigs)),
+		1,
 		&functions[0],
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update pipelines: %w", err)
+		return fmt.Errorf("failed to update function: %w", err)
 	}
 	if rc != 0 {
-		return fmt.Errorf("failed to update pipelines: %d code", rc)
+		return fmt.Errorf("failed to update function: %d code", rc)
 	}
 
 	return nil
 }
 
-func (m *Agent) UpdatePipelines(pipelinesConfigs []PipelineConfig) error {
-	pipelines := make([]*C.struct_cp_pipeline_config, 0, len(pipelinesConfigs))
+func (m *Agent) UpdatePipeline(pipelineConfig PipelineConfig) error {
+	pipelines := make([]*C.struct_cp_pipeline_config, 0, 1)
 
-	for _, cfg := range pipelinesConfigs {
-		pipeline, err := newPipelineConfig(cfg)
-		if err != nil {
-			return fmt.Errorf("failed to create pipeline config: %w", err)
-		}
-		defer pipeline.Free()
-
-		pipelines = append(pipelines, pipeline.AsRawPtr())
+	pipeline, err := newPipelineConfig(pipelineConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create pipeline config: %w", err)
 	}
+	defer pipeline.Free()
+
+	pipelines = append(pipelines, pipeline.AsRawPtr())
 
 	rc, err := C.agent_update_pipelines(
 		m.ptr,
-		C.uint64_t(len(pipelinesConfigs)),
+		1,
 		&pipelines[0],
 	)
 	if err != nil {

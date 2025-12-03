@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/common/proto"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
@@ -36,13 +37,69 @@ func NewPipelineService(shm *ffi.SharedMemory, log *zap.SugaredLogger) *Pipeline
 	}
 }
 
+func (m *PipelineService) List(
+	ctx context.Context,
+	request *ynpb.ListPipelinesRequest,
+) (*ynpb.ListPipelinesResponse, error) {
+	instance := request.Instance
+	dpConfig := m.shm.DPConfig(instance)
+
+	pipelines := dpConfig.Pipelines()
+
+	response := &ynpb.ListPipelinesResponse{
+		Ids: make([]*commonpb.PipelineId, len(pipelines)),
+	}
+	for idx, pipeline := range pipelines {
+		response.Ids[idx] = &commonpb.PipelineId{
+			Name: pipeline.Name,
+		}
+	}
+
+	return response, nil
+}
+
+func (m *PipelineService) Get(
+	ctx context.Context,
+	request *ynpb.GetPipelineRequest,
+) (*ynpb.GetPipelineResponse, error) {
+	instance := request.Instance
+	dpConfig := m.shm.DPConfig(instance)
+
+	reqId := request.Id
+
+	pipelines := dpConfig.Pipelines()
+	for _, pipeline := range pipelines {
+		if reqId.Name == pipeline.Name {
+			respFunctions := make([]*commonpb.FunctionId, len(pipeline.Functions))
+			for idx, function := range pipeline.Functions {
+				respFunctions[idx] = &commonpb.FunctionId{
+					Name: function,
+				}
+			}
+
+			respPipeline := ynpb.Pipeline{
+				Id: &commonpb.PipelineId{
+					Name: pipeline.Name,
+				},
+				Functions: respFunctions,
+			}
+
+			return &ynpb.GetPipelineResponse{
+				Pipeline: &respPipeline,
+			}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("not found")
+
+}
+
 // TODO: docs.
 func (m *PipelineService) Update(
 	ctx context.Context,
-	request *ynpb.UpdatePipelinesRequest,
-) (*ynpb.UpdatePipelinesResponse, error) {
-	instance := request.GetInstance()
-	pipelines := request.GetPipelines()
+	request *ynpb.UpdatePipelineRequest,
+) (*ynpb.UpdatePipelineResponse, error) {
+	instance := request.Instance
 
 	agent, err := m.shm.AgentAttach(agentName, instance, defaultAgentMemory)
 	if err != nil {
@@ -50,32 +107,32 @@ func (m *PipelineService) Update(
 	}
 	defer agent.Close()
 
-	configs := make([]ffi.PipelineConfig, 0, len(pipelines))
+	reqPipeline := request.Pipeline
 
-	for _, pipelineConfig := range pipelines {
-		cfg := ffi.PipelineConfig{
-			Name:      pipelineConfig.GetName(),
-			Functions: pipelineConfig.GetFunctions(),
-		}
-
-		configs = append(configs, cfg)
+	pipeline := ffi.PipelineConfig{
+		Name:      reqPipeline.Id.Name,
+		Functions: make([]string, len(reqPipeline.Functions)),
 	}
 
-	m.log.Infow("updating pipelines",
-		zap.Uint32("instance", instance),
-		zap.Any("configs", configs),
-	)
-
-	if err := agent.UpdatePipelines(configs); err != nil {
-		return nil, fmt.Errorf("failed to update pipelines: %w", err)
+	for idx, reqFunctionId := range reqPipeline.Functions {
+		pipeline.Functions[idx] = reqFunctionId.Name
 	}
 
-	m.log.Infow("updated pipelines",
+	m.log.Infow("updating pipeline",
 		zap.Uint32("instance", instance),
-		zap.Any("configs", configs),
+		zap.Any("config", pipeline),
 	)
 
-	return &ynpb.UpdatePipelinesResponse{}, nil
+	if err := agent.UpdatePipeline(pipeline); err != nil {
+		return nil, fmt.Errorf("failed to update function: %w", err)
+	}
+
+	m.log.Infow("updated pipeline",
+		zap.Uint32("instance", instance),
+		zap.Any("config", pipeline),
+	)
+
+	return &ynpb.UpdatePipelineResponse{}, nil
 }
 
 func (m *PipelineService) Delete(
@@ -83,7 +140,7 @@ func (m *PipelineService) Delete(
 	request *ynpb.DeletePipelineRequest,
 ) (*ynpb.DeletePipelineResponse, error) {
 	instance := request.GetInstance()
-	pipeline_name := request.GetPipelineName()
+	pipeline_name := request.Id.Name
 
 	agent, err := m.shm.AgentAttach(agentName, instance, defaultAgentMemory)
 	if err != nil {

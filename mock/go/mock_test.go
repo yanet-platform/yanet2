@@ -46,7 +46,7 @@ func TestBasic(t *testing.T) {
 			},
 		}
 
-		err = agent.UpdateFunctions([]ffi.FunctionConfig{functionConfig})
+		err = agent.UpdateFunction(functionConfig)
 		assert.NoError(t, err)
 	}
 
@@ -57,7 +57,7 @@ func TestBasic(t *testing.T) {
 			Functions: []string{"test"},
 		}
 
-		err = agent.UpdatePipelines([]ffi.PipelineConfig{pipelineConfig})
+		err = agent.UpdatePipeline(pipelineConfig)
 		assert.NoError(t, err)
 	}
 
@@ -67,7 +67,7 @@ func TestBasic(t *testing.T) {
 			Functions: []string{},
 		}
 
-		err = agent.UpdatePipelines([]ffi.PipelineConfig{pipelineConfig})
+		err = agent.UpdatePipeline(pipelineConfig)
 		assert.NoError(t, err)
 	}
 

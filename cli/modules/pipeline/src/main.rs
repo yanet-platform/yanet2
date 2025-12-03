@@ -4,9 +4,18 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use code::{pipeline_service_client::PipelineServiceClient, DeletePipelineRequest, Pipeline, UpdatePipelinesRequest};
+
+use commonpb::{FunctionId, PipelineId};
+
+use code::{pipeline_service_client::PipelineServiceClient, DeletePipelineRequest, Pipeline, UpdatePipelineRequest};
+
 use tonic::transport::Channel;
 use ync::logging;
+
+#[allow(non_snake_case)]
+pub mod commonpb {
+    tonic::include_proto!("commonpb");
+}
 
 #[allow(non_snake_case)]
 pub mod code {
@@ -76,7 +85,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = PipelineService::new(cmd.endpoint).await?;
 
     match cmd.mode {
-        ModeCmd::Update(cmd) => service.update_pipelines(cmd).await,
+        ModeCmd::Update(cmd) => service.update_pipeline(cmd).await,
         ModeCmd::Delete(cmd) => service.delete_pipeline(cmd).await,
     }
 }
@@ -92,13 +101,17 @@ impl PipelineService {
         Ok(Self { client })
     }
 
-    pub async fn update_pipelines(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        let request = UpdatePipelinesRequest {
+    pub async fn update_pipeline(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
+        let request = UpdatePipelineRequest {
             instance: cmd.instance,
-            pipelines: vec![Pipeline {
-                name: cmd.name,
-                functions: cmd.functions,
-            }],
+            pipeline: Some(Pipeline {
+                id: Some(PipelineId { name: cmd.name }),
+                functions: cmd
+                    .functions
+                    .into_iter()
+                    .map(|m| FunctionId { name: m.to_string() })
+                    .collect(),
+            }),
         };
 
         self.client.update(request).await?;
@@ -109,7 +122,7 @@ impl PipelineService {
     pub async fn delete_pipeline(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
         let request = DeletePipelineRequest {
             instance: cmd.instance,
-            pipeline_name: cmd.name,
+            id: Some(PipelineId { name: cmd.name }),
         };
         self.client.delete(request).await?;
         log::info!("Successfully deleted pipeline");
