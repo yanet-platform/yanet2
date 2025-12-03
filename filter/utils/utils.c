@@ -29,9 +29,9 @@ make_mbuf(
 	if (!mbuf)
 		return NULL;
 
-	uint16_t total_len = sizeof(struct rte_ether_hdr) +
-			     sizeof(struct rte_ipv4_hdr) +
-			     sizeof(struct rte_udp_hdr);
+	uint16_t total_len =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_vlan_hdr) +
+		sizeof(struct rte_ipv4_hdr) + sizeof(struct rte_udp_hdr);
 
 	mbuf->buf_addr = ((char *)mbuf) + sizeof(struct rte_mbuf);
 	mbuf->data_len = 2048;
@@ -39,25 +39,23 @@ make_mbuf(
 	mbuf->buf_len = 2048 + RTE_PKTMBUF_HEADROOM;
 
 	mbuf->pkt_len = total_len;
-	mbuf->l2_len = sizeof(struct rte_ether_hdr);
+	mbuf->l2_len =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_vlan_hdr);
 	mbuf->l3_len = sizeof(struct rte_ipv4_hdr);
-
-	if (vlan != 0) {
-		mbuf->l2_len += sizeof(struct rte_ether_hdr);
-		mbuf->vlan_tci = rte_cpu_to_be_16(vlan);
-		int res = rte_vlan_insert(&mbuf);
-		assert(res == 0);
-	}
 
 	struct rte_ether_hdr *eth =
 		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
-	struct rte_ipv4_hdr *ip = (struct rte_ipv4_hdr *)(eth + 1);
+	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
+	struct rte_vlan_hdr *vlan_hdr = (struct rte_vlan_hdr *)(eth + 1);
+	vlan_hdr->vlan_tci = rte_cpu_to_be_16(vlan);
+	vlan_hdr->eth_proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
+	struct rte_ipv4_hdr *ip = (struct rte_ipv4_hdr *)(vlan_hdr + 1);
 	ip->version_ihl = 0x45;
 	ip->type_of_service = 0;
-	ip->total_length = rte_cpu_to_be_16(total_len - sizeof(*eth));
+	ip->total_length =
+		rte_cpu_to_be_16(total_len - sizeof(*eth) - sizeof(*vlan_hdr));
 	ip->packet_id = 0;
 	ip->fragment_offset = 0;
 	ip->time_to_live = 64;

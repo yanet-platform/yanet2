@@ -141,7 +141,7 @@ chain_ectx_free(
 
 	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
 		struct module_ectx *module_ectx =
-			ADDR_OF(chain_ectx->modules + idx);
+			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
 		if (module_ectx == NULL)
 			continue;
 
@@ -157,7 +157,7 @@ chain_ectx_free(
 		memory_context,
 		chain_ectx,
 		sizeof(struct chain_ectx) +
-			sizeof(struct module_ectx *) * chain_ectx->length
+			sizeof(struct chain_module_ectx) * chain_ectx->length
 	);
 }
 
@@ -174,8 +174,9 @@ chain_ectx_create(
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
 
-	uint64_t ectx_size = sizeof(struct chain_ectx) +
-			     sizeof(struct module_ectx *) * cp_chain->length;
+	uint64_t ectx_size =
+		sizeof(struct chain_ectx) +
+		sizeof(struct chain_module_ectx) * cp_chain->length;
 	struct chain_ectx *chain_ectx =
 		(struct chain_ectx *)memory_balloc(memory_context, ectx_size);
 	if (chain_ectx == NULL) {
@@ -272,7 +273,11 @@ chain_ectx_create(
 			goto error;
 		}
 
-		SET_OFFSET_OF(chain_ectx->modules + idx, module_ectx);
+		SET_OFFSET_OF(
+			&chain_ectx->modules[idx].module_ectx, module_ectx
+		);
+		chain_ectx->modules[idx].tsc_counter_id =
+			cp_chain->modules[idx].tsc_counter_id;
 	}
 
 	return chain_ectx;
@@ -964,7 +969,7 @@ link_chain_ectx(
 ) {
 	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
 		struct module_ectx *module_ectx =
-			ADDR_OF(chain_ectx->modules + idx);
+			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
 		if (module_ectx == NULL)
 			continue;
 		if (link_module_ectx(

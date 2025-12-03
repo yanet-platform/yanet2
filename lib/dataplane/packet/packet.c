@@ -53,7 +53,7 @@ parse_vlan_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 	const struct rte_vlan_hdr *vlan_hdr =
 		rte_pktmbuf_mtod_offset(mbuf, struct rte_vlan_hdr *, *offset);
 
-	packet->vlan = rte_be_to_cpu_16(vlan_hdr->vlan_tci);
+	packet->vlan = rte_be_to_cpu_16(vlan_hdr->vlan_tci) & 0x0fff;
 
 	*type = vlan_hdr->eth_proto;
 	*offset += sizeof(struct rte_vlan_hdr);

@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"sync"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 	"google.golang.org/grpc/codes"
@@ -15,19 +16,24 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
+type aclConfig struct {
+	rules  []*aclpb.Rule
+	module *ModuleConfig
+}
+
 // ACLService implements the gRPC service for ACL management.
 type ACLService struct {
 	aclpb.UnimplementedAclServiceServer
 
 	mu      sync.Mutex
 	agents  []*ffi.Agent
-	configs map[instanceKey]*ModuleConfig
+	configs map[instanceKey]aclConfig
 }
 
 func NewACLService(agents []*ffi.Agent) *ACLService {
 	return &ACLService{
 		agents:  agents,
-		configs: make(map[instanceKey]*ModuleConfig),
+		configs: make(map[instanceKey]aclConfig),
 	}
 }
 
@@ -60,8 +66,8 @@ func (m *ACLService) UpdateConfig(
 			counter:       reqRule.Counter,
 			devices:       reqRule.Devices,
 			vlanRanges:    make([]vlanRange, 0, len(reqRule.VlanRanges)),
-			srcs:          make([]netip.Prefix, 0, len(reqRule.Srcs)),
-			dsts:          make([]netip.Prefix, 0, len(reqRule.Dsts)),
+			srcs:          make([]network, 0, len(reqRule.Srcs)),
+			dsts:          make([]network, 0, len(reqRule.Dsts)),
 			protoRanges:   make([]protoRange, 0, len(reqRule.ProtoRanges)),
 			srcPortRanges: make([]portRange, 0, len(reqRule.SrcPortRanges)),
 			dstPortRanges: make([]portRange, 0, len(reqRule.DstPortRanges)),
@@ -81,21 +87,29 @@ func (m *ACLService) UpdateConfig(
 		}
 
 		for _, reqSrc := range reqRule.Srcs {
-			if len(reqSrc.Ip) != 4 && len(reqSrc.Ip) != 16 {
+			if (len(reqSrc.Addr) != 4 && len(reqSrc.Addr) != 16) || len(reqSrc.Addr) != len(reqSrc.Mask) {
 				return nil, fmt.Errorf("invalid network address length")
 			}
 
-			addr, _ := netip.AddrFromSlice(reqSrc.Ip)
-			rule.srcs = append(rule.srcs, netip.PrefixFrom(addr, int(reqSrc.PrefixLen)))
+			addr, _ := netip.AddrFromSlice(reqSrc.Addr)
+			mask, _ := netip.AddrFromSlice(reqSrc.Mask)
+			rule.srcs = append(rule.srcs, network{
+				addr: addr,
+				mask: mask,
+			})
 		}
 
 		for _, reqDst := range reqRule.Dsts {
-			if len(reqDst.Ip) != 4 && len(reqDst.Ip) != 16 {
+			if (len(reqDst.Addr) != 4 && len(reqDst.Addr) != 16) || len(reqDst.Addr) != len(reqDst.Mask) {
 				return nil, fmt.Errorf("invalid network address length")
 			}
 
-			addr, _ := netip.AddrFromSlice(reqDst.Ip)
-			rule.dsts = append(rule.dsts, netip.PrefixFrom(addr, int(reqDst.PrefixLen)))
+			addr, _ := netip.AddrFromSlice(reqDst.Addr)
+			mask, _ := netip.AddrFromSlice(reqDst.Mask)
+			rule.dsts = append(rule.dsts, network{
+				addr: addr,
+				mask: mask,
+			})
 		}
 
 		for _, reqProtoRange := range reqRule.ProtoRanges {
@@ -134,12 +148,115 @@ func (m *ACLService) UpdateConfig(
 	}
 
 	if err := module.Update(rules); err != nil {
+		FreeModuleConfig(module)
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
 	if err := agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
+		FreeModuleConfig(module)
 		return nil, fmt.Errorf("failed to update module on instance %d: %w", inst, err)
 	}
 
+	// Module was updated - it is time to delete an old one
+	key := instanceKey{
+		instance: inst,
+		name:     name,
+	}
+	if oldModule, ok := m.configs[key]; ok {
+		FreeModuleConfig(oldModule.module)
+	}
+
+	m.configs[key] = aclConfig{
+		rules:  reqRules,
+		module: module,
+	}
+
 	return &aclpb.UpdateConfigResponse{}, nil
+}
+
+func (m *ACLService) ShowConfig(
+	ctx context.Context,
+	req *aclpb.ShowConfigRequest,
+) (*aclpb.ShowConfigResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	key := instanceKey{
+		instance: inst,
+		name:     name,
+	}
+
+	config, ok := m.configs[key]
+
+	if !ok {
+		return nil, status.Error(codes.InvalidArgument, "not found")
+	}
+
+	response := &aclpb.ShowConfigResponse{
+		Target: &commonpb.TargetModule{
+			DataplaneInstance: inst,
+			ConfigName:        name,
+		},
+		Rules: config.rules,
+	}
+
+	return response, nil
+}
+
+func (m *ACLService) ListConfigs(
+	ctx context.Context,
+	req *aclpb.ListConfigsRequest,
+) (*aclpb.ListConfigsResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	response := &aclpb.ListConfigsResponse{}
+
+	for key := range m.configs {
+		response.Targets = append(response.Targets, &commonpb.TargetModule{
+			DataplaneInstance: key.instance,
+			ConfigName:        key.name,
+		})
+	}
+
+	return response, nil
+}
+
+func (m *ACLService) DeleteConfig(
+	ctx context.Context,
+	req *aclpb.DeleteConfigRequest,
+) (*aclpb.DeleteConfigResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	key := instanceKey{
+		instance: inst,
+		name:     name,
+	}
+
+	_, ok := m.configs[key]
+
+	if !ok {
+		return nil, status.Error(codes.InvalidArgument, "not found")
+	}
+
+	if DeleteModule(m, name, inst) {
+		return nil, fmt.Errorf("could not deletee module on instance %d", inst)
+	}
+
+	delete(m.configs, key)
+
+	response := &aclpb.DeleteConfigResponse{}
+
+	return response, nil
 }

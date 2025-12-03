@@ -113,6 +113,8 @@ collect_net6_range(
 		goto error_collector;
 	}
 
+	range_collector_free(&collector, 8);
+
 	return 0;
 
 error_lpm:
@@ -134,12 +136,14 @@ merge_net6_range(
 	struct value_table *table,
 	struct value_registry *registry
 ) {
-	value_table_init(
-		table,
-		memory_context,
-		ri_hi->max_value + 1,
-		ri_lo->max_value + 1
-	);
+	if (value_table_init(
+		    table,
+		    memory_context,
+		    ri_hi->max_value + 1,
+		    ri_lo->max_value + 1
+	    )) {
+		return -1;
+	}
 
 	uint32_t net_cnt = 0;
 
@@ -207,11 +211,13 @@ merge_net6_range(
 					for (uint32_t idx_lo = start_lo;
 					     idx_lo < stop_lo;
 					     ++idx_lo) {
-						value_table_touch(
-							table,
-							values_hi[idx_hi],
-							values_lo[idx_lo]
-						);
+						if (value_table_touch(
+							    table,
+							    values_hi[idx_hi],
+							    values_lo[idx_lo]
+						    ) < 0) {
+							return -1;
+						}
 					}
 				}
 			}
@@ -274,14 +280,16 @@ merge_net6_range(
 				for (uint32_t idx_lo = start_lo;
 				     idx_lo < stop_lo;
 				     ++idx_lo) {
-					value_registry_collect(
-						&net_registry,
-						value_table_get(
-							table,
-							values_hi[idx_hi],
-							values_lo[idx_lo]
-						)
-					);
+					if (value_registry_collect(
+						    &net_registry,
+						    value_table_get(
+							    table,
+							    values_hi[idx_hi],
+							    values_lo[idx_lo]
+						    )
+					    )) {
+						return -1;
+					}
 				}
 			}
 		}
@@ -309,10 +317,18 @@ merge_net6_range(
 			struct value_range *rng =
 				ADDR_OF(&net_registry.ranges) + net_idx;
 			uint32_t *vls = ADDR_OF(&rng->values);
-			for (uint32_t idx = 0; idx < rng->count; ++idx)
-				value_registry_collect(registry, vls[idx]);
+			for (uint32_t idx = 0; idx < rng->count; ++idx) {
+				if (value_registry_collect(
+					    registry, vls[idx]
+				    )) {
+					return -1;
+				}
+			}
 		}
 	}
+
+	radix_free(&rdx);
+	value_registry_free(&net_registry);
 
 	// FIXME: free temporary resources
 
@@ -487,9 +503,13 @@ lookup_net6_src(struct packet *packet, void *data) {
 // Allows to free data for IPv6 classification.
 static inline void
 free_net6(void *data, struct memory_context *memory_context) {
-	(void)memory_context;
+	if (data == NULL)
+		return;
 	struct net6_classifier *c = (struct net6_classifier *)data;
+	if (c == NULL)
+		return;
 	lpm_free(&c->lo);
 	lpm_free(&c->hi);
 	value_table_free(&c->comb);
+	memory_bfree(memory_context, c, sizeof(struct net6_classifier));
 }

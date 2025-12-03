@@ -76,7 +76,7 @@ func sanitizeMessage(msg proto.Message) map[string]any {
 		fieldName := string(fd.Name())
 
 		// Check if field has skip_logging option.
-		if shouldSkipLogging(fd) {
+		if true || shouldSkipLogging(fd) {
 			result[fieldName] = "<skipped>"
 			return true
 		}

@@ -31,13 +31,7 @@ nat64_module_config_create(struct agent *agent, const char *name) {
 		return NULL;
 	}
 
-	if (cp_module_init(
-		    &config->cp_module,
-		    agent,
-		    "nat64",
-		    name,
-		    nat64_module_config_free
-	    )) {
+	if (cp_module_init(&config->cp_module, agent, "nat64", name)) {
 		goto error_init;
 	}
 

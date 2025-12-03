@@ -69,11 +69,7 @@ balancer_module_config_create(
 
 	// Init cp_module
 	if (cp_module_init(
-		    &balancer_config->cp_module,
-		    agent,
-		    "balancer",
-		    name,
-		    balancer_module_config_free
+		    &balancer_config->cp_module, agent, "balancer", name
 	    )) {
 		goto free_config_no_lpm;
 	}

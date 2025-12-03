@@ -285,6 +285,33 @@ cp_function_registry_upsert(
 		return -1;
 	}
 
+	for (uint64_t idx = 0; idx < new_function->chain_count; ++idx) {
+		struct cp_chain *new_chain =
+			ADDR_OF(&new_function->chains[idx].cp_chain);
+
+		struct cp_chain *old_chain = NULL;
+		for (uint64_t idx = 0;
+		     old_function != NULL && idx < old_function->chain_count;
+		     ++idx) {
+			if (!strncmp(
+				    new_chain->name,
+				    ADDR_OF(&old_function->chains[idx].cp_chain)
+					    ->name,
+				    CP_CHAIN_NAME_LEN
+			    )) {
+				old_chain = ADDR_OF(
+					&old_function->chains[idx].cp_chain
+				);
+				break;
+			}
+		}
+		counter_registry_link(
+			&new_chain->counter_registry,
+			(old_chain != NULL) ? &old_chain->counter_registry
+					    : NULL
+		);
+	}
+
 	return registry_replace(
 		&function_registry->registry,
 		cp_function_registry_item_cmp,

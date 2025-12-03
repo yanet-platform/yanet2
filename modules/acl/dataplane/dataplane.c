@@ -26,12 +26,34 @@ FILTER_DECLARE(
 );
 
 FILTER_DECLARE(
+	FWD_FILTER_IP4_PROTO_PORT_TAG,
+	&attribute_device,
+	&attribute_vlan,
+	&attribute_net4_src,
+	&attribute_net4_dst,
+	&attribute_proto_range,
+	&attribute_port_src,
+	&attribute_port_dst
+);
+
+FILTER_DECLARE(
 	FWD_FILTER_IP6_TAG,
 	&attribute_device,
 	&attribute_vlan,
 	&attribute_net6_src,
 	&attribute_net6_dst,
 	&attribute_proto_range
+);
+
+FILTER_DECLARE(
+	FWD_FILTER_IP6_PROTO_PORT_TAG,
+	&attribute_device,
+	&attribute_vlan,
+	&attribute_net6_src,
+	&attribute_net6_dst,
+	&attribute_proto_range,
+	&attribute_port_src,
+	&attribute_port_dst
 );
 
 static void
@@ -91,6 +113,26 @@ acl_handle_packets(
 				actions = ip4_actions;
 				action_count = ip4_action_count;
 			}
+
+			if (packet->transport_header.type == IPPROTO_TCP ||
+			    packet->transport_header.type == IPPROTO_UDP) {
+				const uint32_t *ip4_port_actions;
+				uint32_t ip4_port_action_count;
+				FILTER_QUERY(
+					&acl_config->filter_ip4_port,
+					FWD_FILTER_IP4_PROTO_PORT_TAG,
+					packet,
+					&ip4_port_actions,
+					&ip4_port_action_count
+				);
+
+				if (ip4_port_action_count &&
+				    (action_count == 0 ||
+				     ip4_port_actions[0] < actions[0])) {
+					actions = ip4_port_actions;
+					action_count = ip4_port_action_count;
+				}
+			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 			const uint32_t *ip6_actions;
@@ -107,6 +149,26 @@ acl_handle_packets(
 						 ip6_actions[0] < actions[0])) {
 				actions = ip6_actions;
 				action_count = ip6_action_count;
+			}
+
+			if (packet->transport_header.type == IPPROTO_TCP ||
+			    packet->transport_header.type == IPPROTO_UDP) {
+				const uint32_t *ip6_port_actions;
+				uint32_t ip6_port_action_count;
+				FILTER_QUERY(
+					&acl_config->filter_ip6_port,
+					FWD_FILTER_IP6_PROTO_PORT_TAG,
+					packet,
+					&ip6_port_actions,
+					&ip6_port_action_count
+				);
+
+				if (ip6_port_action_count &&
+				    (action_count == 0 ||
+				     ip6_port_actions[0] < actions[0])) {
+					actions = ip6_port_actions;
+					action_count = ip6_port_action_count;
+				}
 			}
 		}
 

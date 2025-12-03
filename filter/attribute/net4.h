@@ -57,7 +57,7 @@ net4_collect_values(
 			);
 
 		for (uint32_t idx = start; idx < stop; ++idx) {
-			if (value_table_touch(table, 0, values[idx])) {
+			if (value_table_touch(table, 0, values[idx]) < 0) {
 				return -1;
 			}
 		}
@@ -157,6 +157,8 @@ collect_net4_values(
 		}
 	}
 
+	range_index_free(&range_index);
+
 	value_table_compact(&table);
 	lpm4_remap(lpm, &table);
 	lpm4_compact(lpm);
@@ -173,6 +175,7 @@ collect_net4_values(
 	}
 
 	value_table_free(&table);
+	range_collector_free(&collector, 4);
 	return 0;
 
 error_collector:
@@ -257,7 +260,9 @@ lookup_net4_dst(struct packet *packet, void *data) {
 // Allows to free data for IPv4 classification.
 static inline void
 free_net4(void *data, struct memory_context *memory_context) {
-	(void)memory_context;
 	struct lpm *lpm = (struct lpm *)data;
+	if (lpm == NULL)
+		return;
 	lpm_free(lpm);
+	memory_bfree(memory_context, lpm, sizeof(struct lpm));
 }

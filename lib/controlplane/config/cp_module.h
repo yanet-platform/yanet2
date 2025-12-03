@@ -50,12 +50,6 @@ struct cp_module {
 	struct cp_module *prev;
 	// Controlplane agent the configuration belongs to
 	struct agent *agent;
-	/*
-	 * The function valid only in execution context of owning agent.
-	 * If owning agent is `dead` the data should be freed
-	 * during agent destroy.
-	 */
-	cp_module_free_handler free_handler;
 	// Memory context for additional resources inside the configuration
 	struct memory_context memory_context;
 
@@ -73,8 +67,7 @@ cp_module_init(
 	struct cp_module *cp_module,
 	struct agent *agent,
 	const char *module_type,
-	const char *module_name,
-	cp_module_free_handler free_handler
+	const char *module_name
 );
 
 struct cp_module_registry {

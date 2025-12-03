@@ -135,6 +135,8 @@ agent_attach(
 		goto unlock;
 	}
 
+	memset(arenas, 0, sizeof(void *) * arena_count);
+
 	while (new_agent->arena_count < arena_count) {
 		void *arena = memory_balloc(
 			&cp_config->memory_context,
@@ -234,7 +236,7 @@ agent_cleanup(struct agent *agent) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
 	void **arenas = ADDR_OF(&agent->arenas);
-	if (arenas != NULL) {
+	if (arenas) {
 		for (uint64_t arena_idx = 0; arena_idx < agent->arena_count;
 		     ++arena_idx) {
 			memory_bfree(
@@ -274,7 +276,6 @@ agent_update_modules(
 		"failed to update modules"
 	);
 
-	agent_free_unused_modules(agent);
 	agent_free_unused_agents(agent);
 
 	return res;
@@ -295,7 +296,6 @@ agent_delete_module(
 		"failed to delete module"
 	);
 
-	agent_free_unused_modules(agent);
 	agent_free_unused_agents(agent);
 
 	return res;
@@ -315,15 +315,16 @@ cp_chain_config_create(
 	if (cp_chain_config == NULL)
 		return NULL;
 
-	// FIXME memset
-
 	strtcpy(cp_chain_config->name, name, CP_CHAIN_NAME_LEN);
 	cp_chain_config->length = length;
 
 	for (uint64_t idx = 0; idx < length; ++idx) {
-		// FIXME 80
-		strtcpy(cp_chain_config->modules[idx].type, types[idx], 80);
-		strtcpy(cp_chain_config->modules[idx].name, names[idx], 80);
+		strtcpy(cp_chain_config->modules[idx].type,
+			types[idx],
+			sizeof(cp_chain_config->modules[idx].type));
+		strtcpy(cp_chain_config->modules[idx].name,
+			names[idx],
+			sizeof(cp_chain_config->modules[idx].name));
 	}
 	return cp_chain_config;
 }
@@ -335,16 +336,13 @@ cp_chain_config_free(struct cp_chain_config *cp_chain_config) {
 
 struct cp_function_config *
 cp_function_config_create(const char *name, uint64_t chain_count) {
-	struct cp_function_config *config = (struct cp_function_config *)malloc(
+	struct cp_function_config *config = (struct cp_function_config *)calloc(
+		1,
 		sizeof(struct cp_function_config) +
-		sizeof(struct cp_function_chain_config) * chain_count
+			sizeof(struct cp_function_chain_config) * chain_count
 	);
 	if (config == NULL)
 		return NULL;
-	memset(config,
-	       0,
-	       sizeof(struct cp_function_config) +
-		       sizeof(struct cp_function_chain_config) * chain_count);
 	strtcpy(config->name, name, CP_FUNCTION_NAME_LEN);
 	config->chain_count = chain_count;
 
@@ -1226,6 +1224,121 @@ yanet_get_module_counters(
 }
 
 struct counter_handle_list *
+yanet_get_chain_counters(
+	struct dp_config *dp_config,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name
+) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *cp_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
+
+	struct counter_registry *counter_registry;
+	struct counter_storage *counter_storage;
+
+	struct counter_storage *cs = cp_config_gen_get_chain_counter_storage(
+		cp_config_gen,
+		device_name,
+		pipeline_name,
+		function_name,
+		chain_name
+	);
+
+	if (cs == NULL) {
+		cp_config_unlock(cp_config);
+		return NULL;
+	}
+	counter_storage = cs;
+	counter_registry = ADDR_OF(&counter_storage->registry);
+
+	uint64_t count = counter_registry->count;
+	struct counter_name *names = ADDR_OF(&counter_registry->names);
+
+	// FIXME: unlock is correct
+	cp_config_unlock(cp_config);
+
+	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
+		sizeof(struct counter_handle_list) +
+		sizeof(struct counter_handle) * count
+	);
+
+	if (list == NULL)
+		return NULL;
+	list->instance_count =
+		ADDR_OF(&counter_storage->allocator)->instance_count;
+	list->count = count;
+	struct counter_handle *handlers = list->counters;
+
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		strtcpy(handlers[idx].name, names[idx].name, 60);
+		handlers[idx].size = names[idx].size;
+		handlers[idx].gen = names[idx].gen;
+		handlers[idx].value_handle =
+			counter_get_value_handle(idx, counter_storage);
+	}
+
+	return list;
+}
+
+struct counter_handle_list *
+yanet_get_function_counters(
+	struct dp_config *dp_config,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name
+) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *cp_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
+
+	struct counter_registry *counter_registry;
+	struct counter_storage *counter_storage;
+
+	struct counter_storage *cs = cp_config_gen_get_function_counter_storage(
+		cp_config_gen, device_name, pipeline_name, function_name
+	);
+
+	if (cs == NULL) {
+		cp_config_unlock(cp_config);
+		return NULL;
+	}
+	counter_storage = cs;
+	counter_registry = ADDR_OF(&counter_storage->registry);
+
+	uint64_t count = counter_registry->count;
+	struct counter_name *names = ADDR_OF(&counter_registry->names);
+
+	// FIXME: unlock is correct
+	cp_config_unlock(cp_config);
+
+	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
+		sizeof(struct counter_handle_list) +
+		sizeof(struct counter_handle) * count
+	);
+
+	if (list == NULL)
+		return NULL;
+	list->instance_count =
+		ADDR_OF(&counter_storage->allocator)->instance_count;
+	list->count = count;
+	struct counter_handle *handlers = list->counters;
+
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		strtcpy(handlers[idx].name, names[idx].name, 60);
+		handlers[idx].size = names[idx].size;
+		handlers[idx].gen = names[idx].gen;
+		handlers[idx].value_handle =
+			counter_get_value_handle(idx, counter_storage);
+	}
+
+	return list;
+}
+
+struct counter_handle_list *
 yanet_get_pipeline_counters(
 	struct dp_config *dp_config,
 	const char *device_name,
@@ -1241,6 +1354,58 @@ yanet_get_pipeline_counters(
 
 	struct counter_storage *cs = cp_config_gen_get_pipeline_counter_storage(
 		cp_config_gen, device_name, pipeline_name
+	);
+
+	if (cs == NULL) {
+		cp_config_unlock(cp_config);
+		return NULL;
+	}
+	counter_storage = cs;
+	counter_registry = ADDR_OF(&counter_storage->registry);
+
+	uint64_t count = counter_registry->count;
+	struct counter_name *names = ADDR_OF(&counter_registry->names);
+
+	// FIXME: unlock is correct
+	cp_config_unlock(cp_config);
+
+	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
+		sizeof(struct counter_handle_list) +
+		sizeof(struct counter_handle) * count
+	);
+
+	if (list == NULL)
+		return NULL;
+	list->instance_count =
+		ADDR_OF(&counter_storage->allocator)->instance_count;
+	list->count = count;
+	struct counter_handle *handlers = list->counters;
+
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		strtcpy(handlers[idx].name, names[idx].name, 60);
+		handlers[idx].size = names[idx].size;
+		handlers[idx].gen = names[idx].gen;
+		handlers[idx].value_handle =
+			counter_get_value_handle(idx, counter_storage);
+	}
+
+	return list;
+}
+
+struct counter_handle_list *
+yanet_get_device_counters(
+	struct dp_config *dp_config, const char *device_name
+) {
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+	cp_config_lock(cp_config);
+	struct cp_config_gen *cp_config_gen =
+		ADDR_OF(&cp_config->cp_config_gen);
+
+	struct counter_registry *counter_registry;
+	struct counter_storage *counter_storage;
+
+	struct counter_storage *cs = cp_config_gen_get_device_counter_storage(
+		cp_config_gen, device_name
 	);
 
 	if (cs == NULL) {
@@ -1329,15 +1494,6 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 void
 yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 	free(counters);
-}
-
-void
-agent_free_unused_modules(struct agent *agent) {
-	while (agent->unused_module != NULL) {
-		struct cp_module *cp_module = ADDR_OF(&agent->unused_module);
-		SET_OFFSET_OF(&agent->unused_module, ADDR_OF(&cp_module->prev));
-		cp_module->free_handler(cp_module);
-	}
 }
 
 void

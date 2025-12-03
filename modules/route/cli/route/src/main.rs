@@ -253,7 +253,7 @@ impl RouteService {
                 }),
             };
 
-            self.client.flush_routes(request).await?;            
+            self.client.flush_routes(request).await?;
         }
 
         println!("OK");

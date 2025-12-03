@@ -20,6 +20,32 @@ struct value_table {
 	uint32_t **values;
 };
 
+static inline void
+value_table_free(struct value_table *value_table) {
+	remap_table_free(&value_table->remap_table);
+	struct memory_context *memory_context =
+		ADDR_OF(&value_table->memory_context);
+
+	uint32_t chunk_count = (value_table->h_dim * value_table->v_dim +
+				VALUE_TABLE_CHUNK_SIZE - 1) /
+			       VALUE_TABLE_CHUNK_SIZE;
+
+	uint32_t **values = ADDR_OF(&value_table->values);
+	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
+		uint32_t *chunk = ADDR_OF(values + chunk_idx);
+		if (chunk == NULL)
+			continue;
+		memory_bfree(
+			memory_context,
+			chunk,
+			VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t)
+		);
+		SET_OFFSET_OF(values + chunk_idx, NULL);
+	}
+	memory_bfree(memory_context, values, chunk_count * sizeof(uint32_t *));
+	SET_OFFSET_OF(&value_table->values, NULL);
+}
+
 static inline int
 value_table_init(
 	struct value_table *value_table,
@@ -35,7 +61,10 @@ value_table_init(
 		return -1;
 	}
 
-	uint32_t chunk_count = (h_dim * v_dim + VALUE_TABLE_CHUNK_SIZE - 1) /
+	uint64_t value_count = h_dim;
+	value_count *= v_dim;
+
+	uint32_t chunk_count = (value_count + VALUE_TABLE_CHUNK_SIZE - 1) /
 			       VALUE_TABLE_CHUNK_SIZE;
 
 	uint32_t **values = (uint32_t **)memory_balloc(
@@ -46,45 +75,26 @@ value_table_init(
 		remap_table_free(&value_table->remap_table);
 		return -1;
 	}
+	memset(values, 0, chunk_count * sizeof(uint32_t *));
+	SET_OFFSET_OF(&value_table->values, values);
 
 	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
 		uint32_t *chunk = (uint32_t *)memory_balloc(
 			memory_context,
 			VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t)
 		);
-		// FIXME check result
+		if (chunk == NULL) {
+			value_table_free(value_table);
+			return -1;
+		}
 		memset(chunk, 0, VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t));
 		SET_OFFSET_OF(values + chunk_idx, chunk);
 	}
-
-	SET_OFFSET_OF(&value_table->values, values);
 
 	value_table->h_dim = h_dim;
 	value_table->v_dim = v_dim;
 
 	return 0;
-}
-
-static inline void
-value_table_free(struct value_table *value_table) {
-	remap_table_free(&value_table->remap_table);
-	struct memory_context *memory_context =
-		ADDR_OF(&value_table->memory_context);
-
-	uint32_t chunk_count = (value_table->h_dim * value_table->v_dim +
-				VALUE_TABLE_CHUNK_SIZE - 1) /
-			       VALUE_TABLE_CHUNK_SIZE;
-
-	uint32_t **values = ADDR_OF(&value_table->values);
-	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
-		uint32_t *chunk = ADDR_OF(values + chunk_idx);
-		memory_bfree(
-			memory_context,
-			chunk,
-			VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t)
-		);
-	}
-	memory_bfree(memory_context, values, chunk_count * sizeof(uint32_t *));
 }
 
 static inline void

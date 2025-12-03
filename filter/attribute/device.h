@@ -83,6 +83,8 @@ lookup_device(struct packet *packet, void *data) {
 static inline void
 free_device(void *data, struct memory_context *memory_context) {
 	struct value_table *t = (struct value_table *)data;
+	if (t == NULL)
+		return;
 	value_table_free(t);
 	memory_bfree(memory_context, t, sizeof(struct value_table));
 }

@@ -11,6 +11,7 @@
 struct cp_chain_module {
 	char type[80];
 	char name[CP_MODULE_NAME_LEN];
+	uint64_t tsc_counter_id;
 };
 
 struct cp_chain {

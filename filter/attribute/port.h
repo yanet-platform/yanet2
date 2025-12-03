@@ -27,7 +27,7 @@ packet_src_port(const struct packet *packet) {
 		);
 		return rte_be_to_cpu_16(udp_hdr->src_port);
 	} else {
-		// TODO
+		// FIXME: assert - the code should not be called for non tcp/udp
 		return 0;
 	}
 }
@@ -50,7 +50,7 @@ packet_dst_port(const struct packet *packet) {
 		);
 		return rte_be_to_cpu_16(udp_hdr->dst_port);
 	} else {
-		// TODO
+		// FIXME: assert - the code should not be called for non tcp/udp
 		return 0;
 	}
 }
@@ -117,6 +117,16 @@ collect_port_values(
 		     ++ports) {
 			for (uint32_t port = ports->from; port <= ports->to;
 			     ++port) {
+				value_registry_collect(
+					registry,
+					value_table_get(table, 0, port)
+				);
+			}
+		}
+
+		// Handle default - the full range
+		if (!port_range_count) {
+			for (uint32_t port = 0; port <= 65535; ++port) {
 				value_registry_collect(
 					registry,
 					value_table_get(table, 0, port)
@@ -204,8 +214,10 @@ init_port_src(
 
 static inline void
 free_port(void *data, struct memory_context *memory_context) {
-	(void)memory_context;
-
 	struct value_table *table = (struct value_table *)data;
+	if (table == NULL)
+		return;
+
 	value_table_free(table);
+	memory_bfree(memory_context, table, sizeof(struct value_table));
 }

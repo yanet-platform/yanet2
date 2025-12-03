@@ -3,7 +3,7 @@ dataplane:
   dpdk_memory: 1024
   instances:
     - dp_memory: 1073741824
-      cp_memory: 1073741824
+      cp_memory: 2147483648
       numa_id: 0
   devices:
     - port_name: 01:00.0

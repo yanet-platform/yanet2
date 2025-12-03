@@ -48,7 +48,11 @@ func (m *GatewayService) Register(
 
 			return dialer.DialContext(ctx, "tcp", endpoint)
 		}),
-		grpc.WithDefaultCallOptions(grpc.ForceCodecV2(proxy.Codec())),
+		grpc.WithDefaultCallOptions(
+			grpc.ForceCodecV2(proxy.Codec()),
+			grpc.MaxCallRecvMsgSize(1024*1024*256),
+			grpc.MaxCallSendMsgSize(1024*1024*256),
+		),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {

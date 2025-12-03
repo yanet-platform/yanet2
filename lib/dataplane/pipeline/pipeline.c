@@ -61,7 +61,7 @@ chain_ectx_process(
 		packet_front_switch(packet_front);
 
 		struct module_ectx *module_ectx =
-			ADDR_OF(chain_ectx->modules + idx);
+			ADDR_OF(&chain_ectx->modules[idx].module_ectx);
 
 		module_ectx_process(
 			dp_config,
@@ -71,20 +71,17 @@ chain_ectx_process(
 			packet_front
 		);
 
-		if (0) {
-			uint64_t tsc_stop = rte_rdtsc();
-			counter_hist_exp2_inc(
-				0, // module_ectx->tsc_counter_id,
-				dp_worker->idx,
-				ADDR_OF(&chain_ectx->counter_storage),
-				0,
-				7,
-				input_size,
-				tsc_stop - tsc_start
-			);
-
-			tsc_start = tsc_stop;
-		}
+		uint64_t tsc_stop = rte_rdtsc();
+		counter_hist_exp2_inc(
+			chain_ectx->modules[idx].tsc_counter_id,
+			dp_worker->idx,
+			ADDR_OF(&chain_ectx->counter_storage),
+			0,
+			7,
+			input_size,
+			tsc_stop - tsc_start
+		);
+		tsc_start = tsc_stop;
 	}
 }
 
@@ -163,6 +160,14 @@ device_ectx_process_input(
 	struct packet_front *packet_front,
 	struct packet *packet
 ) {
+	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
+	uint64_t *counters = counter_get_address(
+		cp_device->counter_packet_rx_count,
+		dp_worker->idx,
+		ADDR_OF(&device_ectx->counter_storage)
+	);
+	counters[0] += 1;
+
 	struct device_entry_ectx *entry_ectx =
 		ADDR_OF(&device_ectx->input_pipelines);
 	device_entry_ectx_process(
@@ -177,6 +182,14 @@ device_ectx_process_output(
 	struct packet_front *packet_front,
 	struct packet *packet
 ) {
+	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
+	uint64_t *counters = counter_get_address(
+		cp_device->counter_packet_tx_count,
+		dp_worker->idx,
+		ADDR_OF(&device_ectx->counter_storage)
+	);
+	counters[0] += 1;
+
 	struct device_entry_ectx *entry_ectx =
 		ADDR_OF(&device_ectx->output_pipelines);
 	device_entry_ectx_process(

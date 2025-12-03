@@ -24,13 +24,7 @@ dscp_module_config_create(struct agent *agent, const char *name) {
 		return NULL;
 	}
 
-	if (cp_module_init(
-		    &config->cp_module,
-		    agent,
-		    "dscp",
-		    name,
-		    dscp_module_config_free
-	    )) {
+	if (cp_module_init(&config->cp_module, agent, "dscp", name)) {
 		memory_bfree(
 			&agent->memory_context,
 			config,
