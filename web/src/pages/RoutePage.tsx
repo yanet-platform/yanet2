@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Box } from '@gravity-ui/uikit';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import { API } from '../api';
+import { toaster } from '../utils';
 import type { Route } from '../api/routes';
 import { PageLayout, PageLoader, EmptyState, InstanceTabs } from '../components';
 import { useInstanceTabs } from '../hooks';
@@ -79,14 +79,7 @@ const RoutePage: React.FC = () => {
 
     const handleDeleteRouteClick = useCallback((): void => {
         if (isDeleteDisabled) {
-            toaster.add({
-                name: 'delete-route-warning',
-                title: 'Warning',
-                content: 'Please select routes to delete',
-                theme: 'warning',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.warning('delete-route-warning', 'Please select routes to delete');
             return;
         }
         setDeleteDialogOpen(true);
@@ -96,26 +89,12 @@ const RoutePage: React.FC = () => {
         const configName = addRouteForm.configName.trim();
 
         if (!configName) {
-            toaster.add({
-                name: 'add-route-config-error',
-                title: 'Error',
-                content: 'Please enter a config name',
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.error('add-route-config-error', 'Please enter a config name');
             return;
         }
 
         if (!addRouteForm.prefix || !addRouteForm.nexthopAddr) {
-            toaster.add({
-                name: 'add-route-validation-error',
-                title: 'Error',
-                content: 'Please fill in all required fields',
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.error('add-route-validation-error', 'Please fill in all required fields');
             return;
         }
 
@@ -133,27 +112,13 @@ const RoutePage: React.FC = () => {
                     errorMessage = 'Invalid IP address in prefix';
                     break;
             }
-            toaster.add({
-                name: 'add-route-prefix-error',
-                title: 'Error',
-                content: errorMessage,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('add-route-prefix-error', errorMessage);
             return;
         }
 
         const prefixLength = prefixResult.value.prefixLength;
         if (prefixLength === null) {
-            toaster.add({
-                name: 'add-route-prefix-error',
-                title: 'Error',
-                content: 'Invalid prefix length',
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('add-route-prefix-error', 'Invalid prefix length');
             return;
         }
 
@@ -163,14 +128,7 @@ const RoutePage: React.FC = () => {
             if (nexthopResult.error === IPParseError.InvalidFormat) {
                 errorMessage = 'Invalid nexthop address format. Use valid IPv4 (e.g., 192.168.1.1) or IPv6 (e.g., 2001:db8::1) address';
             }
-            toaster.add({
-                name: 'add-route-nexthop-error',
-                title: 'Error',
-                content: errorMessage,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('add-route-nexthop-error', errorMessage);
             return;
         }
 
@@ -216,24 +174,9 @@ const RoutePage: React.FC = () => {
                 return newMap;
             });
 
-            toaster.add({
-                name: 'add-route-success',
-                title: 'Success',
-                content: 'Route added successfully',
-                theme: 'success',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.success('add-route-success', 'Route added successfully');
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-            toaster.add({
-                name: 'add-route-error',
-                title: 'Error',
-                content: `Failed to add route: ${errorMessage}`,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('add-route-error', 'Failed to add route', err);
         }
     }, [addRouteForm, currentInstance, currentConfigs, currentTabIndex, reloadRoutes, setInstanceConfigs, setActiveConfigTab, setInstanceRoutes]);
 
@@ -275,14 +218,7 @@ const RoutePage: React.FC = () => {
             }
 
             if (skippedInvalidRoute) {
-                toaster.add({
-                    name: 'delete-route-skip-warning',
-                    title: 'Warning',
-                    content: 'Skipped routes without prefix or nexthop address',
-                    theme: 'warning',
-                    isClosable: true,
-                    autoHiding: 3000,
-                });
+                toaster.warning('delete-route-skip-warning', 'Skipped routes without prefix or nexthop address');
             }
 
             const reloadedConfigRoutesMap = await reloadRoutes(currentInstance, currentConfigs);
@@ -302,24 +238,9 @@ const RoutePage: React.FC = () => {
 
             setDeleteDialogOpen(false);
 
-            toaster.add({
-                name: 'delete-route-success',
-                title: 'Success',
-                content: `Deleted ${selectedRoutesList.length} route(s)`,
-                theme: 'success',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.success('delete-route-success', `Deleted ${selectedRoutesList.length} route(s)`);
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-            toaster.add({
-                name: 'delete-route-error',
-                title: 'Error',
-                content: `Failed to delete routes: ${errorMessage}`,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('delete-route-error', 'Failed to delete routes', err);
         }
     }, [currentSelected, currentInstance, currentActiveConfig, currentConfigs, instanceRoutes, reloadRoutes, setInstanceRoutes, setSelectedRoutes]);
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box, Text, Dialog, TextInput, Select, Loader } from '@gravity-ui/uikit';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
+import { toaster } from '../../utils';
 import { API } from '../../api';
 import type { FunctionId } from '../../api/pipelines';
 
@@ -34,14 +34,7 @@ export const FunctionSelectDialog: React.FC<FunctionSelectDialogProps> = ({
                 setAvailableFunctions(response.ids || []);
             } catch (err) {
                 console.error('Failed to load functions:', err);
-                toaster.add({
-                    name: 'load-functions-error',
-                    title: 'Error',
-                    content: 'Failed to load available functions',
-                    theme: 'danger',
-                    isClosable: true,
-                    autoHiding: 3000,
-                });
+                toaster.error('load-functions-error', 'Failed to load available functions');
             } finally {
                 setLoading(false);
             }
@@ -58,14 +51,7 @@ export const FunctionSelectDialog: React.FC<FunctionSelectDialogProps> = ({
 
     const handleSave = useCallback(() => {
         if (!name.trim()) {
-            toaster.add({
-                name: 'validation-error',
-                title: 'Validation Error',
-                content: 'Function name is required',
-                theme: 'warning',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.warning('validation-error', 'Function name is required', 'Validation Error');
             return;
         }
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
+import { toaster } from '../utils';
 import { API } from '../api';
 import type { InstanceInfo } from '../api/inspect';
 import { PageLayout, PageLoader, InstanceTabs } from '../components';
@@ -25,15 +25,7 @@ const InspectPage = (): React.JSX.Element => {
                 setInspectData(data.instanceInfo || []);
             } catch (err) {
                 if (!isMounted) return;
-                const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-                toaster.add({
-                    name: 'inspect-error',
-                    title: 'Error',
-                    content: `Failed to fetch inspect data: ${errorMessage}`,
-                    theme: 'danger',
-                    isClosable: true,
-                    autoHiding: 5000,
-                });
+                toaster.error('inspect-error', 'Failed to fetch inspect data', err);
             } finally {
                 if (isMounted) {
                     setLoading(false);

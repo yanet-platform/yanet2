@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box, Text, Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import { API } from '../api';
+import { toaster } from '../utils';
 import type { Function } from '../api/functions';
 import type { FunctionId } from '../api';
 import { PageLayout, PageLoader, InstanceTabs } from '../components';
@@ -32,15 +32,7 @@ const NetworkFunctionsPage = (): React.JSX.Element => {
                 setInstances(instanceIndices);
             } catch (err) {
                 if (!isMounted) return;
-                const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-                toaster.add({
-                    name: 'instances-error',
-                    title: 'Error',
-                    content: `Failed to fetch instances: ${errorMessage}`,
-                    theme: 'danger',
-                    isClosable: true,
-                    autoHiding: 5000,
-                });
+                toaster.error('instances-error', 'Failed to fetch instances', err);
             } finally {
                 if (isMounted) {
                     setInitialLoading(false);
@@ -82,15 +74,7 @@ const NetworkFunctionsPage = (): React.JSX.Element => {
 
             setFunctions(functionsData);
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-            toaster.add({
-                name: 'functions-error',
-                title: 'Error',
-                content: `Failed to fetch functions: ${errorMessage}`,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('functions-error', 'Failed to fetch functions', err);
             setFunctions([]);
         } finally {
             setFunctionsLoading(false);

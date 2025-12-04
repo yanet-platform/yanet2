@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, Button, Icon } from '@gravity-ui/uikit';
 import { TrashBin, FloppyDisk } from '@gravity-ui/icons';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import { API } from '../../api';
+import { toaster } from '../../utils';
 import type { Function, ModuleId, FunctionChain } from '../../api/functions';
 import { GraphView, GraphViewHandle, ChainPath, ChainsResult } from './Graph';
 import { ModuleEditDialog } from './ModuleEditDialog';
@@ -72,26 +72,11 @@ export const FunctionGraph: React.FC<FunctionGraphProps> = ({
         setDeleting(true);
         try {
             await API.functions.delete({ instance, id: { name: functionName } });
-            toaster.add({
-                name: 'function-deleted',
-                title: 'Success',
-                content: `Function "${functionName}" deleted`,
-                theme: 'success',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.success('function-deleted', `Function "${functionName}" deleted`);
             onDeleted();
             setDeleteDialogOpen(false);
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-            toaster.add({
-                name: 'delete-error',
-                title: 'Error',
-                content: `Failed to delete function: ${errorMessage}`,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('delete-error', 'Failed to delete function', err);
         } finally {
             setDeleting(false);
         }
@@ -105,14 +90,7 @@ export const FunctionGraph: React.FC<FunctionGraphProps> = ({
             const message = result.orphanedBlocks.length > 0
                 ? `Some blocks are not connected: ${result.orphanedBlocks.length} orphaned block(s)`
                 : 'All chains must connect from Input to Output';
-            toaster.add({
-                name: 'invalid-chain',
-                title: 'Invalid Configuration',
-                content: message,
-                theme: 'warning',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.warning('invalid-chain', message, 'Invalid Configuration');
             return;
         }
 
@@ -135,27 +113,12 @@ export const FunctionGraph: React.FC<FunctionGraphProps> = ({
                 },
             });
 
-            toaster.add({
-                name: 'function-saved',
-                title: 'Success',
-                content: `Function "${functionName}" saved with ${result.chains.length} chain(s)`,
-                theme: 'success',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.success('function-saved', `Function "${functionName}" saved with ${result.chains.length} chain(s)`);
             setLastSavedChains(result.chains);
             setGraphChains(result.chains);
             onSaved();
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-            toaster.add({
-                name: 'save-error',
-                title: 'Error',
-                content: `Failed to save function: ${errorMessage}`,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('save-error', 'Failed to save function', err);
         } finally {
             setSaving(false);
         }

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box, Text, Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
+import { toaster } from '../utils';
 import { API } from '../api';
 import type { Pipeline, PipelineId } from '../api/pipelines';
 import { PageLayout, PageLoader, InstanceTabs } from '../components';
@@ -31,15 +31,7 @@ const PipelinesPage = (): React.JSX.Element => {
                 setInstances(instanceIndices);
             } catch (err) {
                 if (!isMounted) return;
-                const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-                toaster.add({
-                    name: 'instances-error',
-                    title: 'Error',
-                    content: `Failed to fetch instances: ${errorMessage}`,
-                    theme: 'danger',
-                    isClosable: true,
-                    autoHiding: 5000,
-                });
+                toaster.error('instances-error', 'Failed to fetch instances', err);
             } finally {
                 if (isMounted) {
                     setInitialLoading(false);
@@ -81,15 +73,7 @@ const PipelinesPage = (): React.JSX.Element => {
 
             setPipelines(pipelinesData);
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-            toaster.add({
-                name: 'pipelines-error',
-                title: 'Error',
-                content: `Failed to fetch pipelines: ${errorMessage}`,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('pipelines-error', 'Failed to fetch pipelines', err);
             setPipelines([]);
         } finally {
             setPipelinesLoading(false);

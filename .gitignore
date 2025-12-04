@@ -120,3 +120,7 @@ stat.log
 
 # meson 1.9
 subprojects/.wraplock
+
+# node
+node_modules/
+.vite/

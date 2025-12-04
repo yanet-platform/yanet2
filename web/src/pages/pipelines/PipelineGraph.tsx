@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, Button, Icon } from '@gravity-ui/uikit';
 import { TrashBin, FloppyDisk } from '@gravity-ui/icons';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import { API } from '../../api';
+import { toaster } from '../../utils';
 import type { Pipeline, FunctionId } from '../../api/pipelines';
 import { PipelineGraphView, PipelineGraphViewHandle, PipelineResult } from './PipelineGraphView';
 import { FunctionSelectDialog } from './FunctionSelectDialog';
@@ -60,26 +60,11 @@ export const PipelineGraph: React.FC<PipelineGraphProps> = ({
         setDeleting(true);
         try {
             await API.pipelines.delete({ instance, id: { name: pipelineName } });
-            toaster.add({
-                name: 'pipeline-deleted',
-                title: 'Success',
-                content: `Pipeline "${pipelineName}" deleted`,
-                theme: 'success',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.success('pipeline-deleted', `Pipeline "${pipelineName}" deleted`);
             onDeleted();
             setDeleteDialogOpen(false);
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-            toaster.add({
-                name: 'delete-error',
-                title: 'Error',
-                content: `Failed to delete pipeline: ${errorMessage}`,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('delete-error', 'Failed to delete pipeline', err);
         } finally {
             setDeleting(false);
         }
@@ -93,14 +78,7 @@ export const PipelineGraph: React.FC<PipelineGraphProps> = ({
             const message = result.orphanedBlocks.length > 0
                 ? `Some blocks are not connected: ${result.orphanedBlocks.length} orphaned block(s)`
                 : 'Pipeline must connect from Input to Output';
-            toaster.add({
-                name: 'invalid-pipeline',
-                title: 'Invalid Configuration',
-                content: message,
-                theme: 'warning',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.warning('invalid-pipeline', message, 'Invalid Configuration');
             return;
         }
 
@@ -114,27 +92,12 @@ export const PipelineGraph: React.FC<PipelineGraphProps> = ({
                 },
             });
 
-            toaster.add({
-                name: 'pipeline-saved',
-                title: 'Success',
-                content: `Pipeline "${pipelineName}" saved with ${result.functions.length} function(s)`,
-                theme: 'success',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.success('pipeline-saved', `Pipeline "${pipelineName}" saved with ${result.functions.length} function(s)`);
             setLastSavedFunctions(result.functions);
             setGraphFunctions(result.functions);
             onSaved();
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-            toaster.add({
-                name: 'save-error',
-                title: 'Error',
-                content: `Failed to save pipeline: ${errorMessage}`,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('save-error', 'Failed to save pipeline', err);
         } finally {
             setSaving(false);
         }
@@ -249,4 +212,3 @@ export const PipelineGraph: React.FC<PipelineGraphProps> = ({
         </Box>
     );
 };
-

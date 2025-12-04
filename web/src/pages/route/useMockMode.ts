@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import { MOCK_CONFIGS, createMockRouteGenerator } from './mockData';
+import { toaster } from '../../utils';
 import type { MockRouteGenerator } from './mockData';
 
 export interface UseMockModeResult {
@@ -26,14 +26,7 @@ export const useMockMode = (): UseMockModeResult => {
             const generator = createMockRouteGenerator(config.routeCount);
             setMockGenerator(generator);
             setMockSelectedIds(new Set());
-            toaster.add({
-                name: 'mock-mode-enabled',
-                title: 'Mock Mode',
-                content: `Enabled with ${config.label}`,
-                theme: 'info',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.info('mock-mode-enabled', `Enabled with ${config.label}`, 'Mock Mode');
         } else {
             setMockGenerator(null);
             setMockSelectedIds(new Set());
@@ -47,14 +40,7 @@ export const useMockMode = (): UseMockModeResult => {
             const generator = createMockRouteGenerator(config.routeCount);
             setMockGenerator(generator);
             setMockSelectedIds(new Set());
-            toaster.add({
-                name: 'mock-size-changed',
-                title: 'Mock Mode',
-                content: `Changed to ${config.label}`,
-                theme: 'info',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.info('mock-size-changed', `Changed to ${config.label}`, 'Mock Mode');
         }
     }, [mockEnabled]);
 
@@ -68,4 +54,3 @@ export const useMockMode = (): UseMockModeResult => {
         handleMockSizeChange,
     };
 };
-

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import { API } from '../../api';
+import { toaster } from '../../utils';
 import type { InstanceConfigs, Route } from '../../api/routes';
 
 export interface UseRouteDataResult {
@@ -62,15 +62,7 @@ export const useRouteData = (): UseRouteDataResult => {
                                     configRoutesMap.set(configName, routes);
                                 } catch (err) {
                                     if (!isMounted) return;
-                                    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-                                    toaster.add({
-                                        name: `route-fetch-error-${instance}-${configName}`,
-                                        title: 'Error',
-                                        content: `Failed to load routes for ${configName} (instance ${instance}): ${errorMessage}`,
-                                        theme: 'danger',
-                                        isClosable: true,
-                                        autoHiding: 5000,
-                                    });
+                                    toaster.error(`route-fetch-error-${instance}-${configName}`, `Failed to load routes for ${configName} (instance ${instance})`, err);
                                 }
                             })
                         );
@@ -86,15 +78,7 @@ export const useRouteData = (): UseRouteDataResult => {
                 setActiveConfigTab(configTabsMap);
             } catch (err) {
                 if (!isMounted) return;
-                const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-                toaster.add({
-                    name: 'route-error',
-                    title: 'Error',
-                    content: `Failed to fetch route data: ${errorMessage}`,
-                    theme: 'danger',
-                    isClosable: true,
-                    autoHiding: 5000,
-                });
+                toaster.error('route-error', 'Failed to fetch route data', err);
             } finally {
                 if (isMounted) {
                     setLoading(false);
@@ -142,15 +126,7 @@ export const useRouteData = (): UseRouteDataResult => {
                 });
                 configRoutesMap.set(configName, routesResponse.routes || []);
             } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-                toaster.add({
-                    name: `reload-route-error-${instance}-${configName}`,
-                    title: 'Error',
-                    content: `Failed to reload routes for ${configName} (instance ${instance}): ${errorMessage}`,
-                    theme: 'danger',
-                    isClosable: true,
-                    autoHiding: 5000,
-                });
+                toaster.error(`reload-route-error-${instance}-${configName}`, `Failed to reload routes for ${configName} (instance ${instance})`, err);
             }
         }
 
@@ -172,4 +148,3 @@ export const useRouteData = (): UseRouteDataResult => {
         reloadRoutes,
     };
 };
-

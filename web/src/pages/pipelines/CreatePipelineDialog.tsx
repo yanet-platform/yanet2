@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box, Text, Dialog, TextInput } from '@gravity-ui/uikit';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import { API } from '../../api';
+import { toaster } from '../../utils';
 
 export interface CreatePipelineDialogProps {
     open: boolean;
@@ -21,14 +21,7 @@ export const CreatePipelineDialog: React.FC<CreatePipelineDialogProps> = ({
 
     const handleCreate = useCallback(async () => {
         if (!name.trim()) {
-            toaster.add({
-                name: 'validation-error',
-                title: 'Validation Error',
-                content: 'Pipeline name is required',
-                theme: 'warning',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.warning('validation-error', 'Pipeline name is required', 'Validation Error');
             return;
         }
 
@@ -42,28 +35,13 @@ export const CreatePipelineDialog: React.FC<CreatePipelineDialogProps> = ({
                 },
             });
 
-            toaster.add({
-                name: 'pipeline-created',
-                title: 'Success',
-                content: `Pipeline "${name}" created`,
-                theme: 'success',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.success('pipeline-created', `Pipeline "${name}" created`);
 
             setName('');
             onClose();
             onCreated();
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-            toaster.add({
-                name: 'create-error',
-                title: 'Error',
-                content: `Failed to create pipeline: ${errorMessage}`,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('create-error', 'Failed to create pipeline', err);
         } finally {
             setCreating(false);
         }
@@ -119,4 +97,3 @@ export const CreatePipelineDialog: React.FC<CreatePipelineDialogProps> = ({
         </Dialog>
     );
 };
-

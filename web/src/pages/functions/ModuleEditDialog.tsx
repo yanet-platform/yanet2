@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box, Text, Dialog, TextInput } from '@gravity-ui/uikit';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
+import { toaster } from '../../utils';
 import type { ModuleId } from '../../api/functions';
 
 export interface ModuleEditDialogProps {
@@ -28,14 +28,7 @@ export const ModuleEditDialog: React.FC<ModuleEditDialogProps> = ({
 
     const handleSave = useCallback(() => {
         if (!type.trim() || !name.trim()) {
-            toaster.add({
-                name: 'validation-error',
-                title: 'Validation Error',
-                content: 'Both type and name are required',
-                theme: 'warning',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.warning('validation-error', 'Both type and name are required', 'Validation Error');
             return;
         }
 
@@ -97,4 +90,3 @@ export const ModuleEditDialog: React.FC<ModuleEditDialogProps> = ({
         </Dialog>
     );
 };
-

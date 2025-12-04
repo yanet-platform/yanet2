@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box, Text, Dialog, TextInput } from '@gravity-ui/uikit';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import { API } from '../../api';
+import { toaster } from '../../utils';
 
 export interface CreateFunctionDialogProps {
     open: boolean;
@@ -21,14 +21,7 @@ export const CreateFunctionDialog: React.FC<CreateFunctionDialogProps> = ({
 
     const handleCreate = useCallback(async () => {
         if (!name.trim()) {
-            toaster.add({
-                name: 'validation-error',
-                title: 'Validation Error',
-                content: 'Function name is required',
-                theme: 'warning',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.warning('validation-error', 'Function name is required', 'Validation Error');
             return;
         }
 
@@ -50,28 +43,13 @@ export const CreateFunctionDialog: React.FC<CreateFunctionDialogProps> = ({
                 },
             });
 
-            toaster.add({
-                name: 'function-created',
-                title: 'Success',
-                content: `Function "${name}" created`,
-                theme: 'success',
-                isClosable: true,
-                autoHiding: 3000,
-            });
+            toaster.success('function-created', `Function "${name}" created`);
 
             setName('');
             onClose();
             onCreated();
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-            toaster.add({
-                name: 'create-error',
-                title: 'Error',
-                content: `Failed to create function: ${errorMessage}`,
-                theme: 'danger',
-                isClosable: true,
-                autoHiding: 5000,
-            });
+            toaster.error('create-error', 'Failed to create function', err);
         } finally {
             setCreating(false);
         }
@@ -127,4 +105,3 @@ export const CreateFunctionDialog: React.FC<CreateFunctionDialogProps> = ({
         </Dialog>
     );
 };
-

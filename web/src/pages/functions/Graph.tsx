@@ -4,7 +4,7 @@ import { EAnchorType, GraphState, ConnectionLayer } from '@gravity-ui/graph';
 import { GraphBlock, GraphCanvas, useGraph, useGraphEvent, useLayer } from '@gravity-ui/graph/react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { BarsAscendingAlignLeftArrowDown } from '@gravity-ui/icons';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
+import { toaster } from '../../utils';
 import { ActionBlock } from './ActionBlock';
 import type { ModuleId } from '../../api/functions';
 import { graphConfig } from './graphConfig';
@@ -106,27 +106,13 @@ export const GraphView = forwardRef<GraphViewHandle, GraphViewProps>(
                 const targetAnchor = targetBlock?.getAnchorById(targetAnchorId);
 
                 if (sourceAnchor?.state.type !== EAnchorType.OUT || targetAnchor?.state.type !== EAnchorType.IN) {
-                    toaster.add({
-                        name: 'invalid-direction',
-                        title: 'Invalid connection',
-                        content: 'Connect from output (right) to input (left)',
-                        theme: 'warning',
-                        isClosable: true,
-                        autoHiding: 3000,
-                    });
+                    toaster.warning('invalid-direction', 'Connect from output (right) to input (left)', 'Invalid connection');
                     return;
                 }
 
                 const validation = validateConnection(sourceBlockId, targetBlockId);
                 if (!validation.valid) {
-                    toaster.add({
-                        name: 'invalid-connection',
-                        title: 'Invalid connection',
-                        content: validation.message || 'Connection not allowed',
-                        theme: 'warning',
-                        isClosable: true,
-                        autoHiding: 3000,
-                    });
+                    toaster.warning('invalid-connection', validation.message || 'Connection not allowed', 'Invalid connection');
                     return;
                 }
 
@@ -148,28 +134,14 @@ export const GraphView = forwardRef<GraphViewHandle, GraphViewProps>(
             const sourceBlockState = graph.rootStore.blocksList.getBlockState(sourceBlockId);
             const sourceAnchor = sourceBlockState?.getAnchorById(sourceAnchorId);
             if (!sourceAnchor || sourceAnchor.state.type !== EAnchorType.OUT) {
-                toaster.add({
-                    name: 'invalid-creation',
-                    title: 'Cannot create block',
-                    content: 'New blocks can only be created from output anchors',
-                    theme: 'info',
-                    isClosable: true,
-                    autoHiding: 3000,
-                });
+                toaster.info('invalid-creation', 'New blocks can only be created from output anchors', 'Cannot create block');
                 return;
             }
 
             // INPUT block can have multiple outgoing connections (for multiple chains)
             // Other blocks can only have one outgoing connection
             if (sourceBlockId !== 'input' && hasOutgoingConnection(sourceBlockId)) {
-                toaster.add({
-                    name: 'output-limit',
-                    title: 'Connection limit',
-                    content: 'Output already has a connection',
-                    theme: 'warning',
-                    isClosable: true,
-                    autoHiding: 3000,
-                });
+                toaster.warning('output-limit', 'Output already has a connection', 'Connection limit');
                 return;
             }
 

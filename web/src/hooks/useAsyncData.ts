@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
+import { toaster } from '../utils';
 
 export interface UseAsyncDataOptions<T> {
     /** Function that fetches the data */
@@ -55,14 +55,7 @@ export const useAsyncData = <T>({
             if (isMountedRef.current) {
                 const errorObj = err instanceof Error ? err : new Error('Unknown error');
                 setError(errorObj);
-                toaster.add({
-                    name: errorToastName,
-                    title: 'Error',
-                    content: `${errorMessage}: ${errorObj.message}`,
-                    theme: 'danger',
-                    isClosable: true,
-                    autoHiding: 5000,
-                });
+                toaster.error(errorToastName, errorMessage, errorObj);
             }
         } finally {
             if (isMountedRef.current) {
@@ -126,14 +119,7 @@ export const usePollingData = <T>({
             if (isMountedRef.current) {
                 const errorObj = err instanceof Error ? err : new Error('Unknown error');
                 setError(errorObj);
-                toaster.add({
-                    name: errorToastName,
-                    title: 'Error',
-                    content: `${errorMessage}: ${errorObj.message}`,
-                    theme: 'danger',
-                    isClosable: true,
-                    autoHiding: 5000,
-                });
+                toaster.error(errorToastName, errorMessage, errorObj);
             }
         } finally {
             if (isMountedRef.current && showLoader) {
@@ -163,4 +149,3 @@ export const usePollingData = <T>({
 
     return { data, loading, error, refetch };
 };
-

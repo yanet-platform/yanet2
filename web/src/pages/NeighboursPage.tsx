@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Table, withTableSorting, Box } from '@gravity-ui/uikit';
 import type { TableColumnConfig, TableSortState } from '@gravity-ui/uikit';
-import { toaster } from '@gravity-ui/uikit/toaster-singleton';
+import { toaster } from '../utils';
 import { API } from '../api';
 import type { Neighbour } from '../api/neighbours';
 import { formatMACAddress, getMACAddressValue, compareMACAddressValues } from '../utils/mac';
@@ -93,15 +93,7 @@ const NeighboursPage = (): React.JSX.Element => {
                 if (!isMounted) {
                     return;
                 }
-                const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-                toaster.add({
-                    name: 'neighbours-error',
-                    title: 'Error',
-                    content: `Failed to fetch neighbours: ${errorMessage}`,
-                    theme: 'danger',
-                    isClosable: true,
-                    autoHiding: 5000,
-                });
+                toaster.error('neighbours-error', 'Failed to fetch neighbours', err);
             } finally {
                 if (withLoader && isMounted) {
                     setLoading(false);
