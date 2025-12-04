@@ -1,10 +1,7 @@
 import { createService } from './client';
+import type { FunctionId } from './common';
 
 // Function types based on function.proto
-
-export interface FunctionId {
-    name?: string;
-}
 
 export interface ModuleId {
     type?: string;
