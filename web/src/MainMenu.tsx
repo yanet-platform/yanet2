@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AsideHeader } from '@gravity-ui/navigation';
 import type { MenuItem as AsideHeaderMenuItem } from '@gravity-ui/navigation';
-import { Link, Eye, Route, Server, LayoutList } from '@gravity-ui/icons';
+import { Link, Eye, Route, Pipeline, CurlyBracketsFunction } from '@gravity-ui/icons';
 import Logo from './icons/Logo';
 import type { PageId } from './types';
 
@@ -31,8 +31,8 @@ const MainMenu = ({ currentPage, onPageChange, renderContent }: MainMenuProps): 
         },
         {
             id: 'functions',
-            title: 'Network Functions',
-            icon: Server,
+            title: 'Functions',
+            icon: CurlyBracketsFunction,
             current: currentPage === 'functions',
             onItemClick: () => {
                 onPageChange('functions');
@@ -41,7 +41,7 @@ const MainMenu = ({ currentPage, onPageChange, renderContent }: MainMenuProps): 
         {
             id: 'pipelines',
             title: 'Pipelines',
-            icon: LayoutList,
+            icon: Pipeline,
             current: currentPage === 'pipelines',
             onItemClick: () => {
                 onPageChange('pipelines');
