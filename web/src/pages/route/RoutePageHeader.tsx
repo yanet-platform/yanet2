@@ -1,0 +1,54 @@
+import React from 'react';
+import { Box, Text, Flex, Button, Select, Switch, Label } from '@gravity-ui/uikit';
+import type { RoutePageHeaderProps } from './types';
+import { MOCK_CONFIGS } from './mockData';
+
+const mockOptions = Object.entries(MOCK_CONFIGS).map(([key, value]) => ({
+    value: key,
+    content: value.label,
+}));
+
+export const RoutePageHeader: React.FC<RoutePageHeaderProps> = ({
+    onAddRoute,
+    onDeleteRoute,
+    isDeleteDisabled,
+    mockEnabled,
+    onMockToggle,
+    mockSize,
+    onMockSizeChange,
+}) => (
+    <Flex style={{ width: '100%', alignItems: 'center' }}>
+        <Text variant="header-1">Route</Text>
+        <Box style={{ flex: 1 }} />
+        <Box style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+            {/* Mock mode controls */}
+            <Box style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '0 16px', borderRight: '1px solid var(--g-color-line-generic)' }}>
+                <Switch
+                    checked={mockEnabled}
+                    onUpdate={onMockToggle}
+                    size="m"
+                />
+                <Label size="m">Mock Mode</Label>
+                {mockEnabled && (
+                    <Select
+                        value={[mockSize]}
+                        onUpdate={(values) => onMockSizeChange(values[0])}
+                        options={mockOptions}
+                        size="m"
+                        width={140}
+                    />
+                )}
+            </Box>
+            <Button view="action" onClick={onAddRoute} disabled={mockEnabled}>
+                Add Route
+            </Button>
+            <Button
+                view="outlined-danger"
+                onClick={onDeleteRoute}
+                disabled={isDeleteDisabled || mockEnabled}
+            >
+                Delete Route
+            </Button>
+        </Box>
+    </Flex>
+);
