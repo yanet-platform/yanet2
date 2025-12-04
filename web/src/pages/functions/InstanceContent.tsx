@@ -1,12 +1,12 @@
 import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
 import { PageLoader } from '../../components';
-import type { Function as NetworkFunction } from '../../api/functions';
+import type { Function } from '../../api/functions';
 import { FunctionGraph } from './FunctionGraph';
 
 export interface InstanceContentProps {
     instance: number;
-    functions: NetworkFunction[];
+    functions: Function[];
     loading: boolean;
     onRefresh: () => void;
 }

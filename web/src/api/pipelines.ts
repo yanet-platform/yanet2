@@ -1,4 +1,5 @@
 import { createService } from './client';
+import type { FunctionId } from './common';
 
 // Pipeline types based on pipeline.proto
 
@@ -6,9 +7,7 @@ export interface PipelineId {
     name?: string;
 }
 
-export interface FunctionId {
-    name?: string;
-}
+export type { FunctionId };
 
 export interface Pipeline {
     id?: PipelineId;

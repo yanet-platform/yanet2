@@ -3,7 +3,6 @@ import { Box, Text, Dialog, TextInput, Select, Loader } from '@gravity-ui/uikit'
 import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import { API } from '../../api';
 import type { FunctionId } from '../../api/pipelines';
-import type { FunctionId as ApiFunctionId } from '../../api/functions';
 
 export interface FunctionSelectDialogProps {
     open: boolean;
@@ -21,7 +20,7 @@ export const FunctionSelectDialog: React.FC<FunctionSelectDialogProps> = ({
     instance,
 }) => {
     const [name, setName] = useState(functionId?.name || '');
-    const [availableFunctions, setAvailableFunctions] = useState<ApiFunctionId[]>([]);
+    const [availableFunctions, setAvailableFunctions] = useState<FunctionId[]>([]);
     const [loading, setLoading] = useState(false);
 
     // Load available functions when dialog opens

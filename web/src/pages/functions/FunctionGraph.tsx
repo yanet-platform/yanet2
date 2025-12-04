@@ -3,14 +3,14 @@ import { Box, Text, Button, Icon } from '@gravity-ui/uikit';
 import { TrashBin, FloppyDisk } from '@gravity-ui/icons';
 import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import { API } from '../../api';
-import type { Function as NetworkFunction, ModuleId, FunctionChain } from '../../api/functions';
+import type { Function, ModuleId, FunctionChain } from '../../api/functions';
 import { GraphView, GraphViewHandle, ChainPath, ChainsResult } from './Graph';
 import { ModuleEditDialog } from './ModuleEditDialog';
 import { DeleteFunctionDialog } from './DeleteFunctionDialog';
 import { ChainSettingsDialog } from './ChainSettingsDialog';
 
 export interface FunctionGraphProps {
-    functionData: NetworkFunction;
+    functionData: Function;
     instance: number;
     onDeleted: () => void;
     onSaved: () => void;

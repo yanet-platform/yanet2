@@ -3,7 +3,8 @@ import { Box, Text, Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
 import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import { API } from '../api';
-import type { Function as NetworkFunction, FunctionId } from '../api/functions';
+import type { Function } from '../api/functions';
+import type { FunctionId } from '../api';
 import { PageLayout, PageLoader, InstanceTabs } from '../components';
 import { useInstanceTabs } from '../hooks';
 import { InstanceContent, CreateFunctionDialog } from './functions';
@@ -11,7 +12,7 @@ import { InstanceContent, CreateFunctionDialog } from './functions';
 const NetworkFunctionsPage = (): React.JSX.Element => {
     const [initialLoading, setInitialLoading] = useState<boolean>(true);
     const [functionsLoading, setFunctionsLoading] = useState<boolean>(true);
-    const [functions, setFunctions] = useState<NetworkFunction[]>([]);
+    const [functions, setFunctions] = useState<Function[]>([]);
     const [instances, setInstances] = useState<number[]>([]);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
@@ -64,7 +65,7 @@ const NetworkFunctionsPage = (): React.JSX.Element => {
             const listResponse = await API.functions.list({ instance: selectedInstance });
             const functionIds: FunctionId[] = listResponse.ids || [];
 
-            const functionsData: NetworkFunction[] = [];
+            const functionsData: Function[] = [];
             for (const funcId of functionIds) {
                 try {
                     const getResponse = await API.functions.get({
