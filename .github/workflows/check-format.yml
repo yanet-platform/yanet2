@@ -3,8 +3,16 @@ name: Formatting check
 on:
   push:
     branches: ["main"]
+    paths:
+      - "**.h"
+      - "**.c"
+      - "**/meson.build"
   pull_request:
     branches: ["main"]
+    paths:
+      - "**.h"
+      - "**.c"
+      - "**/meson.build"
 
 jobs:
   fmt:

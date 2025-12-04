@@ -3,8 +3,12 @@ name: Build DEB Packages
 on:
   push:
     tags: ['v*']
+    paths-ignore:
+      - "web/**"
   pull_request:
     branches: [ "**" ]
+    paths-ignore:
+      - "web/**"
   workflow_dispatch:
 
 jobs:
