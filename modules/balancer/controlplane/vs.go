@@ -96,18 +96,19 @@ type VirtualService struct {
 
 // Info of the virtual service
 type VirtualServiceInfo struct {
-	Address    netip.Addr
-	Port       uint16
-	Proto      TransportProto
-	AllowedSrc []netip.Prefix
-	Flags      VsFlags
-	Scheduler  VsScheduler
+	Address netip.Addr
+	Port    uint16
+	Proto   TransportProto
+	Flags   VsFlags
 }
 
 // Config of the virtual service
 type VirtualServiceConfig struct {
-	Info  VirtualServiceInfo
-	Reals []RealConfig
+	Info       VirtualServiceInfo
+	Reals      []RealConfig
+	Peers      []netip.Addr
+	AllowedSrc []netip.Prefix
+	Scheduler  VsScheduler
 }
 
 func NewVirtualServiceConfigFromProto(
@@ -160,24 +161,24 @@ func NewVirtualServiceConfigFromProto(
 	scheduler := VsSchedulerFromProto(proto.Scheduler)
 
 	info := VirtualServiceInfo{
-		Address:    addr,
-		Port:       port,
-		Proto:      protocol,
-		AllowedSrc: allowedSrc,
-		Flags:      flags,
-		Scheduler:  scheduler,
+		Address: addr,
+		Port:    port,
+		Proto:   protocol,
+		Flags:   flags,
 	}
 
 	return &VirtualServiceConfig{
-		Info:  info,
-		Reals: reals,
+		Info:       info,
+		Reals:      reals,
+		AllowedSrc: allowedSrc,
+		Scheduler:  scheduler,
 	}, nil
 }
 
 func (vs *VirtualServiceConfig) IntoProto() *balancerpb.VirtualService {
 	// Make allowed src
 	allowedSrc := make([]*balancerpb.Subnet, 0)
-	for _, subnet := range vs.Info.AllowedSrc {
+	for _, subnet := range vs.AllowedSrc {
 		allowedSrc = append(allowedSrc, &balancerpb.Subnet{
 			Addr: subnet.Addr().AsSlice(),
 			Size: uint32(subnet.Bits()),
@@ -199,6 +200,6 @@ func (vs *VirtualServiceConfig) IntoProto() *balancerpb.VirtualService {
 		AllowedSrcs: allowedSrc,
 		Reals:       reals,
 		Flags:       &flags,
-		Scheduler:   vs.Info.Scheduler.IntoProto(),
+		Scheduler:   vs.Scheduler.IntoProto(),
 	}
 }

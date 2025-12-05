@@ -2,7 +2,6 @@
 
 #include <assert.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include "common/memory.h"
 
@@ -169,3 +168,14 @@ counter_get_address(
 
 	return counter_handle_get_value(value_handle, instance_id);
 }
+
+struct counter_handle;
+
+// Accumulates `instances` counters into one `accum` counter.
+void
+counter_handle_accum(
+	uint64_t *accum,
+	size_t instances,
+	size_t counter_size,
+	struct counter_value_handle *handle
+);

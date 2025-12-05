@@ -270,7 +270,7 @@ func vsFlags(vs *VirtualServiceConfig) uint64 {
 	if info.Flags.PureL3 {
 		flags |= C.BALANCER_VS_PURE_L3_FLAG
 	}
-	if info.Scheduler == VsSchedulerPRR || info.Scheduler == VsSchedulerWLC {
+	if vs.Scheduler == VsSchedulerPRR || vs.Scheduler == VsSchedulerWLC {
 		flags |= C.BALANCER_VS_PRR_FLAG
 	}
 	return uint64(flags)
@@ -286,7 +286,7 @@ func (state *BalancerState) NewVsConfig(
 	virtualService.Info = vs.Info
 
 	// make current wlc info
-	if vs.Info.Scheduler == VsSchedulerWLC {
+	if vs.Scheduler == VsSchedulerWLC {
 		virtualService.Wlc = NewWlcInfo(10, 1024)
 	} else {
 		virtualService.Wlc = nil
@@ -316,6 +316,16 @@ func (state *BalancerState) NewVsConfig(
 	}
 	virtualService.RegistryIdx = uint64(idx)
 
+	v4Peers := 0
+	v6Peers := 0
+	for _, peer := range vs.Peers {
+		if peer.Is6() {
+			v6Peers++
+		} else {
+			v4Peers++
+		}
+	}
+
 	// create vs config
 	config, err := C.balancer_vs_config_create(
 		(*C.struct_agent)(agent.AsRawPtr()),
@@ -325,7 +335,9 @@ func (state *BalancerState) NewVsConfig(
 		(C.uint16_t)(vs.Info.Port),
 		(C.uint8_t)(proto),
 		(C.size_t)(len(vs.Reals)),
-		(C.size_t)(len(vs.Info.AllowedSrc)),
+		(C.size_t)(len(vs.AllowedSrc)),
+		(C.size_t)(v4Peers),
+		(C.size_t)(v6Peers),
 	)
 	if err != nil {
 		return VsConfig{inner: nil}, fmt.Errorf("failed to create vs config: %w", err)
@@ -333,10 +345,13 @@ func (state *BalancerState) NewVsConfig(
 	if config == nil {
 		return VsConfig{inner: nil}, fmt.Errorf("failed to create vs config")
 	}
+
 	vsConfig := VsConfig{
 		inner: config,
 	}
-	for idx, prefix := range vs.Info.AllowedSrc {
+
+	// set allowed src
+	for idx, prefix := range vs.AllowedSrc {
 		startAddr := prefix.Addr()
 		endAddr := xnetip.LastAddr(prefix)
 		_, err := C.balancer_vs_config_set_allowed_src_range(
@@ -354,6 +369,37 @@ func (state *BalancerState) NewVsConfig(
 					idx+1,
 					err,
 				)
+		}
+	}
+
+	// set peers
+	v4PeerIdx := 0
+	v6PeerIdx := 0
+	for idx, peer := range vs.Peers {
+		var err error
+		if peer.Is4() {
+			_, err = C.balancer_vs_config_set_peer_v4(
+				config,
+				(C.size_t)(v4PeerIdx),
+				sliceToPtr(peer.AsSlice()),
+			)
+			v4PeerIdx += 1
+		} else { // net6 addr
+			_, err = C.balancer_vs_config_set_peer_v6(
+				config,
+				(C.size_t)(v6PeerIdx),
+				sliceToPtr(peer.AsSlice()),
+			)
+			v6PeerIdx += 1
+		}
+		if err != nil {
+			FreeVsConfig(&vsConfig)
+			return VsConfig{
+					inner: nil,
+				}, fmt.Errorf(
+					"failed to set %d-th peer: %w",
+					idx+1,
+					err)
 		}
 	}
 
@@ -490,12 +536,41 @@ func (state *BalancerState) NewModuleConfig(
 		configsPtr = (**C.struct_balancer_vs_config)(&vsConfigs[0])
 	}
 
+	sourceIpv4 := C.struct_net4_addr{}
+	sourceIpv6 := C.struct_net6_addr{}
+
+	C.memcpy(unsafe.Pointer(&sourceIpv4.bytes[0]), unsafe.Pointer(&config.SourceIpV4[0]), 4)
+	C.memcpy(unsafe.Pointer(&sourceIpv6.bytes[0]), unsafe.Pointer(&config.SourceIpV6[0]), 16)
+
+	decapIpv4 := make([]C.struct_net4_addr, 0)
+	decapIpv6 := make([]C.struct_net6_addr, 0)
+
+	for _, addr := range config.DecapAddrs {
+		if addr.Is4() {
+			ipv4 := C.struct_net4_addr{}
+			slice := addr.AsSlice()
+			C.memcpy(unsafe.Pointer(&ipv4.bytes[0]), unsafe.Pointer(&slice[0]), 4)
+			decapIpv4 = append(decapIpv4, ipv4)
+		} else {
+			ipv6 := C.struct_net6_addr{}
+			slice := addr.AsSlice()
+			C.memcpy(unsafe.Pointer(&ipv6.bytes[0]), unsafe.Pointer(&slice[0]), 16)
+			decapIpv6 = append(decapIpv6, ipv6)
+		}
+	}
+
 	cpModule, err := C.balancer_module_config_create(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
 		state.inner,
 		(C.size_t)(len(vsConfigs)),
 		configsPtr,
+		&sourceIpv4,
+		&sourceIpv6,
+		(C.size_t)(len(decapIpv4)),
+		&decapIpv4[0],
+		(C.size_t)(len(decapIpv6)),
+		&decapIpv6[0],
 	)
 	if err != nil {
 		return ModuleConfig{

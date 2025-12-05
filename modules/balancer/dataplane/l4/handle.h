@@ -1,0 +1,49 @@
+#pragma once
+
+#include "../ctx.h"
+#include "../lookup.h"
+#include "../select.h"
+#include "../tunnel.h"
+
+////////////////////////////////////////////////////////////////////////////////
+
+static inline void
+handle_l4_packet(struct packet_ctx *ctx) {
+	// 1. Lookup virtual service for which packet is
+	// directed to
+
+	struct virtual_service *vs = vs_lookup_and_fw(ctx);
+	if (vs == NULL) { // not found virtual service
+		packet_ctx_drop_packet(ctx);
+		return;
+	}
+
+	// 2. Fill packet metadata
+
+	struct packet_metadata meta;
+	int res = fill_packet_metadata(ctx->packet, &meta);
+
+	if (res != 0) { // unexpected packet type
+		packet_ctx_drop_packet(ctx);
+		return;
+	}
+
+	// 3. Select real for which packet will be forwarded
+
+	struct real *rs = select_real(
+		ctx, ctx->config, ctx->now, ctx->worker->idx, vs, &meta
+	);
+	if (rs == NULL) { // failed to select real
+		packet_ctx_drop_packet(ctx);
+		return;
+	}
+
+	// 4. Add tunnel to the selected real for the packet
+
+	res = tunnel_packet(vs->flags, rs, ctx->packet);
+	assert(res == 0);
+
+	// 5. Pass packet to the next module
+
+	packet_ctx_send_packet(ctx);
+}

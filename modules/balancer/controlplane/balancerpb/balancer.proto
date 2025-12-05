@@ -107,6 +107,10 @@ message VirtualService {
 	repeated Real reals = 6;
 
 	VsFlags flags = 7;
+
+	// Addresses of the balancer which serves this vs
+	// (except of this balancer address)
+	repeated bytes peers = 8;
 }
 
 message RealUpdate {
@@ -178,7 +182,13 @@ message SessionsTimeouts {
 }
 
 message BalancerInstanceConfig {
-	repeated VirtualService virtual_services = 3;
+	repeated VirtualService virtual_services = 1;
+	bytes source_address = 2;
+	bytes source_address_v6 = 3;
+
+	// if balancer receives packet with destination address 
+	// from this list, it tries to make decap
+	repeated bytes decap_addresses = 4;
 }
 
 message ShowConfigRequest {

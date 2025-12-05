@@ -64,7 +64,9 @@ balancer_vs_config_create(
 	uint16_t port,
 	uint8_t proto,
 	size_t real_count,
-	size_t allowed_src_count
+	size_t allowed_src_count,
+	size_t peers_v4_count,
+	size_t peers_v6_count
 );
 
 /// Free virtual service config.
@@ -99,4 +101,16 @@ balancer_vs_config_set_allowed_src_range(
 	size_t index,
 	uint8_t *from,
 	uint8_t *to
+);
+
+/// Set address of v4 peer
+void
+balancer_vs_config_set_peer_v4(
+	struct balancer_vs_config *vs_config, size_t index, uint8_t *addr
+);
+
+/// Set address of v6 peer
+void
+balancer_vs_config_set_peer_v6(
+	struct balancer_vs_config *vs_config, size_t index, uint8_t *addr
 );

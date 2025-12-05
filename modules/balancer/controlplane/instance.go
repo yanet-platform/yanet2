@@ -2,6 +2,7 @@ package mbalancer
 
 import (
 	"fmt"
+	"net/netip"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
@@ -44,7 +45,10 @@ func (timeouts *SessionsTimeouts) IntoProto() *balancerpb.SessionsTimeouts {
 // Config of the current balancer instance.
 // One ModuleInstanceConfig corresponds to one `C.balancer_module_config`.
 type ModuleInstanceConfig struct {
-	Services []VirtualServiceConfig
+	Services   []VirtualServiceConfig
+	SourceIpV4 [4]byte
+	SourceIpV6 [16]byte
+	DecapAddrs []netip.Addr
 }
 
 func NewModuleInstanceConfig(
@@ -330,6 +334,7 @@ func (balancer *ModuleInstance) Info(
 	}
 	for vsIdx := range balancer.vs {
 		vs := &balancer.vs[vsIdx]
+		vsConfig := balancer.config.Services[vsIdx]
 		vsCounters := findVsCounters(vs, counters)
 		if vsCounters == nil {
 			return nil, fmt.Errorf("failed to find counters for vs %d", vs.RegistryIdx)
@@ -338,7 +343,7 @@ func (balancer *ModuleInstance) Info(
 			Address:    vs.Info.Address,
 			Port:       vs.Info.Port,
 			Proto:      vs.Info.Proto,
-			AllowedSrc: vs.Info.AllowedSrc,
+			AllowedSrc: vsConfig.AllowedSrc,
 			Reals:      make([]ConfigRealInfo, 0, len(vs.Reals)),
 			Flags:      vs.Info.Flags,
 			Stats:      vsStatsFromCounters(vsCounters.Values),

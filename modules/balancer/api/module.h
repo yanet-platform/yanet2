@@ -1,5 +1,7 @@
 #pragma once
 
+#include <common/network.h>
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -23,7 +25,13 @@ balancer_module_config_create(
 	const char *name,
 	struct balancer_state *state,
 	size_t vs_count,
-	struct balancer_vs_config **vs_configs
+	struct balancer_vs_config **vs_configs,
+	struct net4_addr *source_addr,
+	struct net6_addr *source_addr_v6,
+	size_t decap_addr_count,
+	struct net4_addr *decap_addrs,
+	size_t decap_addr_v6_count,
+	struct net6_addr *decap_addrs_v6
 );
 
 /// Frees module memory if it is not used in dataplane.

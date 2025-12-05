@@ -3,13 +3,13 @@
 #include "common/network.h"
 #include "counters/counters.h"
 #include "info.h"
-#include "lookup.h"
 #include "module.h"
 
 #include "common/lpm.h"
 #include "common/memory.h"
 
 #include "../dataplane/counter.h"
+#include "../dataplane/lookup.h"
 #include "../dataplane/module.h"
 #include "../dataplane/real.h"
 #include "../dataplane/vs.h"
@@ -48,8 +48,15 @@ struct balancer_vs_config {
 	uint8_t proto;
 	size_t allowed_src_count;
 	struct addr_range *allowed_src;
+
+	size_t peers_v4_count;
+	struct net4_addr *peers_v4_addr;
+
+	size_t peers_v6_count;
+	struct net6_addr *peers_v6_addr;
+
 	size_t real_count;
-	struct real reals[];
+	struct real *reals;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -427,31 +434,41 @@ balancer_vs_config_create(
 	uint16_t port,
 	uint8_t proto,
 	size_t real_count,
-	size_t allowed_src_count
+	size_t allowed_src_count,
+	size_t peers_v4_count,
+	size_t peers_v6_count
 ) {
 	if ((flags & BALANCER_VS_PURE_L3_FLAG) || port == 0) {
 		port = 0;
 		flags |= BALANCER_VS_PURE_L3_FLAG;
 	}
 
-	size_t size = sizeof(struct balancer_vs_config) +
-		      sizeof(struct real) * real_count +
-		      sizeof(struct addr_range) * allowed_src_count;
-
-	uint8_t *memory = memory_balloc(&agent->memory_context, size);
-	if (memory == NULL) {
+	// allocate config
+	struct balancer_vs_config *vs_config = memory_balloc(
+		&agent->memory_context, sizeof(struct balancer_vs_config)
+	);
+	if (vs_config == NULL) {
 		return NULL;
 	}
-	struct balancer_vs_config *vs_config =
-		(struct balancer_vs_config *)memory;
-	vs_config->idx = id;
+
+	memset(vs_config, 0, sizeof(*vs_config));
 	vs_config->mctx = &agent->memory_context;
+	vs_config->idx = id;
 	vs_config->real_count = real_count;
+
+	// allocate allowed src list
 	vs_config->allowed_src_count = allowed_src_count;
-	vs_config->allowed_src =
-		(struct addr_range *)(memory +
-				      sizeof(struct balancer_vs_config) +
-				      sizeof(struct real) * real_count);
+	vs_config->allowed_src = memory_balloc(
+		&agent->memory_context,
+		sizeof(struct addr_range) * allowed_src_count
+	);
+	if (vs_config->allowed_src == NULL) {
+		balancer_vs_config_free(vs_config);
+		return NULL;
+	}
+
+	// fill flags, port, proto
+
 	vs_config->flags = (vs_flags_t)flags;
 	if (vs_config->flags & BALANCER_VS_IPV6_FLAG) {
 		memcpy(vs_config->address, ip, NET6_LEN);
@@ -464,6 +481,42 @@ balancer_vs_config_create(
 		vs_config->port = port;
 	}
 	vs_config->proto = proto;
+
+	// allocate v4 peers for this virtual service
+
+	vs_config->peers_v4_count = peers_v4_count;
+	vs_config->peers_v4_addr = memory_balloc(
+		&agent->memory_context,
+		sizeof(struct net4_addr) * peers_v4_count
+	);
+	if (vs_config->peers_v4_addr == NULL) {
+		balancer_vs_config_free(vs_config);
+		return NULL;
+	}
+
+	// allocate v6 peers for this virtual service
+
+	vs_config->peers_v6_count = peers_v6_count;
+	vs_config->peers_v6_addr = memory_balloc(
+		&agent->memory_context,
+		sizeof(struct net6_addr) * peers_v6_count
+	);
+	if (vs_config->peers_v6_addr == NULL) {
+		balancer_vs_config_free(vs_config);
+		return NULL;
+	}
+
+	// allocate reals
+
+	vs_config->real_count = real_count;
+	vs_config->reals = memory_balloc(
+		&agent->memory_context, sizeof(struct real) * real_count
+	);
+	if (vs_config->reals == NULL) {
+		balancer_vs_config_free(vs_config);
+		return NULL;
+	}
+
 	return vs_config;
 }
 
@@ -471,10 +524,28 @@ balancer_vs_config_create(
 
 void
 balancer_vs_config_free(struct balancer_vs_config *vs_config) {
-	size_t size = sizeof(struct balancer_vs_config) +
-		      sizeof(struct real) * vs_config->real_count +
-		      sizeof(struct addr_range) * vs_config->allowed_src_count;
-	memory_bfree(vs_config->mctx, vs_config, size);
+	struct memory_context *mctx = vs_config->mctx;
+	memory_bfree(
+		mctx,
+		vs_config->allowed_src,
+		vs_config->allowed_src_count * sizeof(struct addr_range)
+	);
+	memory_bfree(
+		mctx,
+		vs_config->peers_v4_addr,
+		vs_config->peers_v4_count * sizeof(struct net6_addr)
+	);
+	memory_bfree(
+		mctx,
+		vs_config->peers_v6_addr,
+		vs_config->peers_v6_count * sizeof(struct net6_addr)
+	);
+	memory_bfree(
+		mctx,
+		vs_config->reals,
+		vs_config->real_count * sizeof(struct real)
+	);
+	memory_bfree(mctx, vs_config, sizeof(struct balancer_vs_config));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -516,4 +587,20 @@ balancer_vs_config_set_allowed_src_range(
 								: NET4_LEN;
 	memcpy(addr_range->start_addr, from, len);
 	memcpy(addr_range->end_addr, to, len);
+}
+
+void
+balancer_vs_config_set_peer_v4(
+	struct balancer_vs_config *vs_config, size_t index, uint8_t *addr
+) {
+	struct net4_addr *peer = &vs_config->peers_v4_addr[index];
+	memcpy(peer->bytes, addr, NET4_LEN);
+}
+
+void
+balancer_vs_config_set_peer_v6(
+	struct balancer_vs_config *vs_config, size_t index, uint8_t *addr
+) {
+	struct net6_addr *peer = &vs_config->peers_v6_addr[index];
+	memcpy(peer->bytes, addr, NET6_LEN);
 }

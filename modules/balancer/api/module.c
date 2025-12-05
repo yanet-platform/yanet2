@@ -1,19 +1,28 @@
-#include "module.h"
-#include "counter.h"
-#include "lookup.h"
+#include "../dataplane/module.h"
+#include "../dataplane/lookup.h"
+#include "../dataplane/real.h"
+#include "../dataplane/vs.h"
 
 #include "common/lpm.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
+#include "common/network.h"
+
+#include "counters/counters.h"
+#include "module.h"
+
 #include "filter.h"
+
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 
-#include "../dataplane/module.h"
-#include "../dataplane/real.h"
-#include "../dataplane/vs.h"
-
 #include "ring.h"
+#include <string.h>
+
+////////////////////////////////////////////////////////////////////////////////
+
+extern void
+balancer_register_module_counters(struct counter_registry *registry);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -31,7 +40,13 @@ balancer_module_config_create(
 	const char *name,
 	struct balancer_state *state,
 	size_t vs_count,
-	struct balancer_vs_config **vs_configs
+	struct balancer_vs_config **vs_configs,
+	struct net4_addr *source_addr,
+	struct net6_addr *source_addr_v6,
+	size_t decap_addr_count,
+	struct net4_addr *decap_addrs,
+	size_t decap_addr_v6_count,
+	struct net6_addr *decap_addrs_v6
 ) {
 	struct balancer_module_config *balancer_config =
 		(struct balancer_module_config *)memory_balloc(
@@ -57,24 +72,81 @@ balancer_module_config_create(
 	SET_OFFSET_OF(&balancer_config->state, state);
 
 	// Set default values to safe free on error
+	if (lpm_init(
+		    &balancer_config->decap_filter_v4, &agent->memory_context
+	    )) {
+		goto free_config;
+	}
+	if (lpm_init(
+		    &balancer_config->decap_filter_v6, &agent->memory_context
+	    )) {
+		lpm_free(&balancer_config->decap_filter_v4);
+		goto free_config;
+	}
 	balancer_config->vs_count = 0;
 	balancer_config->vs = NULL;
 	balancer_config->real_count = 0;
 	balancer_config->reals = NULL;
 	int ret = balancer_vs_init(balancer_config, vs_count, vs_configs);
 	if (ret < 0) {
-		goto free_config;
+		goto free_config_with_lpm;
 	}
 
-	// init module config counters
+	// register module counters
 
 	balancer_config->counter_id = counter_registry_register(
 		&balancer_config->cp_module.counter_registry,
-		"balancer_counter",
-		MODULE_CONFIG_COUNTER_SIZE
+		balancer_common_module_counter_name,
+		COMMON_MODULE_COUNTER_SIZE
 	);
 
+	balancer_config->icmp_counter_id = counter_registry_register(
+		&balancer_config->cp_module.counter_registry,
+		balancer_icmp_module_counter_name,
+		ICMP_MODULE_COUNTER_SIZE
+	);
+
+	balancer_config->l4_counter_id = counter_registry_register(
+		&balancer_config->cp_module.counter_registry,
+		balancer_l4_module_counter_name,
+		L4_MODULE_COUNTER_SIZE
+	);
+
+	// set source address
+	memcpy(balancer_config->source_ip, source_addr, NET4_LEN);
+	memcpy(balancer_config->source_ip_v6, source_addr_v6, NET6_LEN);
+
+	// setup decap lpm for ipv4 addresses
+	for (size_t i = 0; i < decap_addr_count; ++i) {
+		if (lpm_insert(
+			    &balancer_config->decap_filter_v4,
+			    NET4_LEN,
+			    decap_addrs[i].bytes,
+			    decap_addrs[i].bytes,
+			    1
+		    )) {
+			goto free_config_with_lpm;
+		}
+	}
+
+	// setup decap lpm for ipv6 addresses
+	for (size_t i = 0; i < decap_addr_v6_count; ++i) {
+		if (lpm_insert(
+			    &balancer_config->decap_filter_v6,
+			    NET6_LEN,
+			    decap_addrs_v6[i].bytes,
+			    decap_addrs_v6[i].bytes,
+			    1
+		    )) {
+			goto free_config_with_lpm;
+		}
+	}
+
 	return &balancer_config->cp_module;
+
+free_config_with_lpm:
+	lpm_free(&balancer_config->decap_filter_v4);
+	lpm_free(&balancer_config->decap_filter_v6);
 
 free_config:
 	memory_bfree(

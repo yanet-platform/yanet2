@@ -3,6 +3,7 @@
 #include "common/ttlmap/ttlmap.h"
 
 #include "session.h"
+#include <assert.h>
 #include <stdatomic.h>
 
 #include "worker.h"
@@ -148,6 +149,40 @@ get_or_create_session(
 		}
 	} else { // status == TTLMAP_FAILED
 		return SESSION_TABLE_OVERFLOW;
+	}
+}
+
+static inline uint32_t
+get_session_real(
+	struct session_table *session_table,
+	struct session_id *session_id,
+	uint32_t now,
+	uint32_t worker_idx
+) {
+	struct session_table_gen *cur =
+		session_table_current_gen(session_table);
+
+	struct session_state session_state;
+	int res = TTLMAP_LOOKUP(&cur->map, session_id, &session_state, now);
+	int status = TTLMAP_STATUS(res);
+
+	if (status == TTLMAP_FOUND) {
+		return session_state.real_id;
+	} else {
+		assert(status == TTLMAP_FAILED);
+		struct worker_info *worker_info = &cur->worker_info[worker_idx];
+		if (worker_info->use_prev_gen == 1) {
+			struct session_table_gen *prev =
+				session_table_previous_gen(session_table);
+			int res = TTLMAP_LOOKUP(
+				&prev->map, session_id, &session_state, now
+			);
+			status = TTLMAP_STATUS(res);
+			if (status == TTLMAP_FOUND) {
+				return session_state.real_id;
+			}
+		}
+		return (uint32_t)-1;
 	}
 }
 

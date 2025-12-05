@@ -1,10 +1,11 @@
 #include "counters.h"
 
-#include "common/exp_array.h"
 #include "common/memory.h"
 #include "common/numutils.h"
 #include "common/strutils.h"
 #include <assert.h>
+
+#include "api/counter.h"
 
 int
 counter_registry_init(
@@ -426,5 +427,23 @@ counter_storage_free(struct counter_storage *storage) {
 	for (uint64_t pool_idx = 0; pool_idx < COUNTER_POOL_SIZE; ++pool_idx) {
 		struct counter_storage_pool *pool = storage->pools + pool_idx;
 		counter_storage_pool_destroy(storage, pool);
+	}
+}
+
+void
+counter_handle_accum(
+	uint64_t *accum,
+	size_t instances,
+	size_t counter_size,
+	struct counter_value_handle *handle
+) {
+	memset(accum, 0, counter_size);
+	for (size_t instance_idx = 0; instance_idx < instances;
+	     ++instance_idx) {
+		uint64_t *value =
+			counter_handle_get_value(handle, instance_idx);
+		for (size_t idx = 0; idx < counter_size; ++idx) {
+			accum[idx] += value[idx];
+		}
 	}
 }

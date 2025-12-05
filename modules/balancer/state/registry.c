@@ -23,7 +23,7 @@ balancer_real_stats_add(
 ) {
 	to->bytes += stats->bytes;
 	to->created_sessions += stats->created_sessions;
-	to->disabled += stats->disabled;
+	to->packets_real_disabled += stats->packets_real_disabled;
 	to->ops_packets += stats->ops_packets;
 	to->packets += stats->packets;
 }

@@ -6,6 +6,7 @@
 #include "dataplane/packet/packet.h"
 #include "filter/filter.h"
 #include "module.h"
+#include "rte_ip.h"
 #include "vs.h"
 
 #include <threads.h>
@@ -77,19 +78,10 @@ vs_v6_table_lookup(
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline struct virtual_service *
-vs_v4_lookup(
-	struct packet_ctx *ctx,
-	struct balancer_module_config *config,
-	struct packet *packet
-) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
-	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
-	);
-
+vs_v4_lookup(struct packet_ctx *ctx) {
+	struct balancer_module_config *config = ctx->config;
 	// get id of the virtual service
-	uint32_t service_id = vs_v4_table_lookup(config, packet);
+	uint32_t service_id = vs_v4_table_lookup(config, ctx->packet);
 	if (service_id == (uint32_t)-1) {
 		return NULL;
 	}
@@ -106,36 +98,41 @@ vs_v4_lookup(
 	}
 	packet_ctx_select_vs(ctx, vs);
 
+	return vs;
+}
+
+static inline bool
+vs_v4_fw(
+	struct packet_ctx *ctx,
+	struct virtual_service *vs,
+	struct packet *packet
+) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
+	);
 	// check if packet source is allowed for the service
 	/// @todo: use lpm4_lookup
 	if (lpm_lookup(
 		    &vs->src_filter, NET4_LEN, (uint8_t *)&ipv4_hdr->src_addr
 	    ) == LPM_VALUE_INVALID) {
 		packet_ctx_packet_src_not_allowed(ctx);
-		return NULL;
+		return false;
 	}
-
-	return vs;
+	return true;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 static inline struct virtual_service *
-vs_v6_lookup(
-	struct packet_ctx *ctx,
-	struct balancer_module_config *config,
-	struct packet *packet
-) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
-	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
-	);
-
-	uint32_t service_id = vs_v6_table_lookup(config, packet);
+vs_v6_lookup(struct packet_ctx *ctx) {
+	struct balancer_module_config *config = ctx->config;
+	uint32_t service_id = vs_v6_table_lookup(config, ctx->packet);
 	if (service_id == (uint32_t)-1) {
 		return NULL;
 	}
 
-	if (config->vs_count <= service_id) {
+	if (ctx->config->vs_count <= service_id) {
 		// If the service_id is out of range of available
 		// services
 		return NULL;
@@ -146,32 +143,52 @@ vs_v6_lookup(
 		return NULL;
 	}
 	packet_ctx_select_vs(ctx, vs);
+	return vs;
+}
+
+static inline bool
+vs_v6_fw(
+	struct packet_ctx *ctx,
+	struct virtual_service *vs,
+	struct packet *packet
+) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+
+	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
+	);
 
 	// check if packet source is allowed for the service
-	/// @todo: use lpm16_lookup
+	/// @todo: use lpm4_lookup
 	if (lpm_lookup(
 		    &vs->src_filter, NET6_LEN, (uint8_t *)&ipv6_hdr->src_addr
 	    ) == LPM_VALUE_INVALID) {
 		packet_ctx_packet_src_not_allowed(ctx);
-		return NULL;
+		return false;
 	}
-	return vs;
+
+	return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline struct virtual_service *
-vs_lookup(
-	struct packet_ctx *ctx,
-	struct balancer_module_config *config,
-	struct packet *packet
-) {
+vs_lookup_and_fw(struct packet_ctx *ctx) {
+	struct packet *packet = ctx->packet;
 	if (packet->network_header.type ==
 	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		return vs_v4_lookup(ctx, config, packet);
+		struct virtual_service *vs = vs_v4_lookup(ctx);
+		if (vs == NULL || !vs_v4_fw(ctx, vs, packet)) {
+			return NULL;
+		}
+		return vs;
 	} else if (packet->network_header.type ==
 		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		return vs_v6_lookup(ctx, config, packet);
+		struct virtual_service *vs = vs_v6_lookup(ctx);
+		if (vs == NULL || !vs_v6_fw(ctx, vs, packet)) {
+			return NULL;
+		}
+		return vs;
 	} else { // unsupported
 		return NULL;
 	}

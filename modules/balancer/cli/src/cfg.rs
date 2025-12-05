@@ -109,6 +109,7 @@ struct VirtualService {
     flags: VsFlags,
     allowed_srcs: Vec<String>,
     reals: Vec<Real>,
+    peers: Vec<String>,
 }
 
 impl TryFrom<VirtualService> for balancerpb::VirtualService {
@@ -166,6 +167,7 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
             reals: vs.reals.into_iter().map(Into::into).collect(),
             flags: Some(vs.flags.into()),
             scheduler: scheduler as i32,
+            peers: Default::default()
         })
     }
 }
@@ -224,6 +226,7 @@ impl TryFrom<balancerpb::VirtualService> for VirtualService {
             allowed_srcs,
             reals,
             scheduler,
+            peers: Default::default(),
         })
     }
 }
@@ -269,6 +272,9 @@ impl From<balancerpb::SessionsTimeouts> for SessionsTimeouts {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BalancerConfig {
     vs: Vec<VirtualService>,
+    source: String,
+    source_ipv6: String,
+    decap: Vec<String>,
 }
 
 impl TryFrom<BalancerConfig> for balancerpb::BalancerInstanceConfig {
@@ -277,7 +283,9 @@ impl TryFrom<BalancerConfig> for balancerpb::BalancerInstanceConfig {
         let vs: Result<Vec<balancerpb::VirtualService>, Self::Error> =
             cfg.vs.into_iter().map(TryInto::try_into).collect();
         let vs = vs?;
-        Ok(Self { virtual_services: vs })
+        let source = cfg.source.into();
+        let source_ipv6 = cfg.source_ipv6.into();
+        Ok(Self { virtual_services: vs, source_address: source, source_address_v6: source_ipv6, decap_addresses: Default::default() })
     }
 }
 
@@ -290,6 +298,9 @@ impl TryFrom<balancerpb::BalancerInstanceConfig> for BalancerConfig {
                 .into_iter()
                 .map(TryFrom::try_from)
                 .collect::<Result<Vec<_>, _>>()?,
+            source: "source".into(),
+            source_ipv6: "source_ipv6".into(),
+            decap: Default::default(),
         })
     }
 }
@@ -311,24 +322,40 @@ mod tests {
     #[test]
     fn basic() {
         let config = r#"
+timeouts:
+  tcp_syn_ack: 10
+  tcp_syn: 10
+  tcp_fin: 10
+  tcp: 20
+  udp: 30
+  default: 60
 vs:
-  - ip: "195.13.22.16"
-    proto: "TCP"
+  - ip: "192.0.2.1"
+    proto: "tcp"
     port: 5005
-    scheduler: "prr"
     flags:
       gre: false
       ops: false
       fix_mss: false
       pure_l3: false
+    scheduler: "wrr"
     allowed_srcs:
-      - "4.4.4.4/8"
+      - "192.0.0.0/8"
     reals:
       - weight: 1
-        dst: "1.1.1.1"
+        dst: "4.5.6.7"
         src: "3.3.4.0"
         src_mask: "0.255.0.255"
         enabled: true
+    peers:
+      - "192.0.2.2"
+      - "195.0.2.5"
+      - "2001:db1::5"
+source: "191.11.13.15"
+source_ipv6: "2001:db8::1"
+decap:
+  - "191.11.13.15"
+  - "2001:db8::1"
 "#;
 
         let cfg: BalancerConfig = serde_yaml::from_str(config).unwrap();
@@ -344,15 +371,15 @@ vs:
                 pure_l3: false
             }
         );
-        assert_eq!(vs.scheduler, "prr");
+        assert_eq!(vs.scheduler, "wrr");
         assert_eq!(vs.port, 5005);
-        assert_eq!(vs.proto, "TCP");
+        assert_eq!(vs.proto, "tcp");
         assert_eq!(vs.allowed_srcs.len(), 1);
-        assert_eq!(vs.allowed_srcs[0], "4.4.4.4/8");
+        assert_eq!(vs.allowed_srcs[0], "192.0.0.0/8");
         assert_eq!(vs.reals.len(), 1);
 
         let real = &vs.reals[0];
-        assert_eq!(real.dst, "1.1.1.1");
+        assert_eq!(real.dst, "4.5.6.7");
         assert_eq!(real.src, "3.3.4.0");
         assert_eq!(real.src_mask, "0.255.0.255");
         assert_eq!(real.enabled, true);
