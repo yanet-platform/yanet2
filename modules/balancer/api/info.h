@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "common/network.h"
 #include "modules/balancer/api/stats.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -15,7 +16,7 @@ struct balancer_state;
 /// Persistent config-independent info about virtual service
 struct balancer_vs_info {
 	// ip
-	uint8_t ip[16];
+	uint8_t ip[NET6_LEN];
 	int ip_proto; // IPPROTO_IPV4 or IPPROTO_IPV6
 
 	// port of the virtual service

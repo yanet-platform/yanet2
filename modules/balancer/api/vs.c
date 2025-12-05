@@ -8,7 +8,6 @@
 #include "common/lpm.h"
 #include "common/memory.h"
 
-#include "../dataplane/counter.h"
 #include "../dataplane/lookup.h"
 #include "../dataplane/module.h"
 #include "../dataplane/real.h"
@@ -30,6 +29,16 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
+extern uint64_t
+register_vs_counter(struct counter_registry *registry, size_t vs_registry_idx);
+
+extern uint64_t
+register_real_counter(
+	struct counter_registry *registry, size_t real_registry_idx
+);
+
+////////////////////////////////////////////////////////////////////////////////
+
 struct addr_range {
 	uint8_t start_addr[16];
 	uint8_t end_addr[16];
@@ -40,7 +49,7 @@ struct balancer_vs_config {
 	struct memory_context *mctx;
 
 	// index of the vs in the balancer registry
-	size_t idx;
+	size_t registry_idx;
 
 	vs_flags_t flags;
 	uint8_t address[16];
@@ -58,19 +67,6 @@ struct balancer_vs_config {
 	size_t real_count;
 	struct real *reals;
 };
-
-////////////////////////////////////////////////////////////////////////////////
-
-static size_t
-vs_serialize(struct balancer_vs_config *vs, char *buf) {
-	sprintf(buf, "v%lu", vs->idx);
-	return strlen(buf);
-}
-
-static void
-real_serialize(struct real *real, char *buf) {
-	sprintf(buf, "r%lu", real->registry_idx);
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -130,7 +126,7 @@ vs_v4_table_init(
 		rule->transport.proto =
 			(struct filter_proto){vs_config->proto, 0, 0};
 
-		rule->action = vs_config->idx;
+		rule->action = vs_config->registry_idx;
 		++j;
 	}
 
@@ -219,7 +215,7 @@ vs_v6_table_init(
 		rule->transport.proto =
 			(struct filter_proto){vs_config->proto, 0, 0};
 
-		rule->action = vs_config->idx;
+		rule->action = vs_config->registry_idx;
 		++j;
 	}
 
@@ -265,8 +261,8 @@ balancer_vs_init(
 	config->vs_count = 0;
 	config->real_count = 0;
 	for (size_t vs_idx = 0; vs_idx < vs_count; ++vs_idx) {
-		if (vs_configs[vs_idx]->idx + 1 > config->vs_count) {
-			config->vs_count = vs_configs[vs_idx]->idx + 1;
+		if (vs_configs[vs_idx]->registry_idx + 1 > config->vs_count) {
+			config->vs_count = vs_configs[vs_idx]->registry_idx + 1;
 		}
 		for (size_t inner_real_idx = 0;
 		     inner_real_idx < vs_configs[vs_idx]->real_count;
@@ -308,9 +304,11 @@ balancer_vs_init(
 		struct balancer_vs_config *vs_config =
 			vs_configs[initialized_vs_count];
 
-		struct service_info *info =
-			balancer_state_get_vs(balancer_state, vs_config->idx);
-		struct virtual_service *vs = &config_vs[vs_config->idx];
+		struct service_info *info = balancer_state_get_vs(
+			balancer_state, vs_config->registry_idx
+		);
+		struct virtual_service *vs =
+			&config_vs[vs_config->registry_idx];
 		SET_OFFSET_OF(&vs->state, (struct service_state *)info->state);
 		vs->round_robin_counter = 0;
 		vs->flags = vs_config->flags | VS_PRESENT_IN_CONFIG_FLAG;
@@ -329,13 +327,9 @@ balancer_vs_init(
 		}
 
 		// init counter
-		char vs_counter_name[80];
-		memset(vs_counter_name, 0, sizeof(vs_counter_name));
-		vs_serialize(vs_config, vs_counter_name);
-		vs->counter_id = counter_registry_register(
+		vs->counter_id = register_vs_counter(
 			&config->cp_module.counter_registry,
-			vs_counter_name,
-			VS_COUNTER_SIZE
+			vs_config->registry_idx
 		);
 
 		for (size_t real = 0; real < vs->real_count; ++real) {
@@ -357,13 +351,9 @@ balancer_vs_init(
 			}
 
 			// init counter
-			char real_counter_name[80];
-			memset(real_counter_name, 0, sizeof(real_counter_name));
-			real_serialize(current_real, real_counter_name);
-			setup_real->counter_id = counter_registry_register(
+			setup_real->counter_id = register_real_counter(
 				&config->cp_module.counter_registry,
-				real_counter_name,
-				REAL_COUNTER_SIZE
+				current_real->registry_idx
 			);
 		}
 		res = lpm_init(
@@ -408,7 +398,8 @@ free_initalized_vs:
 	for (size_t i = 0; i < initialized_vs_count; ++i) {
 		struct balancer_vs_config *vs_config =
 			vs_configs[initialized_vs_count];
-		struct virtual_service *vs = &config_vs[vs_config->idx];
+		struct virtual_service *vs =
+			&config_vs[vs_config->registry_idx];
 		ring_free(&vs->real_ring);
 		lpm_free(&vs->src_filter);
 	}
@@ -453,7 +444,7 @@ balancer_vs_config_create(
 
 	memset(vs_config, 0, sizeof(*vs_config));
 	vs_config->mctx = &agent->memory_context;
-	vs_config->idx = id;
+	vs_config->registry_idx = id;
 	vs_config->real_count = real_count;
 
 	// allocate allowed src list

@@ -4,6 +4,7 @@
 #include "controlplane/config/econtext.h"
 #include "counters/counters.h"
 #include "filter/filter.h"
+#include "stats.h"
 #include <assert.h>
 #include <stdint.h>
 
@@ -34,14 +35,20 @@ struct balancer_module_config {
 	size_t real_count;
 	struct real *reals;
 
-	// counter index
-	uint64_t counter_id;
+	// counters
+	struct {
+		// common counter
+		uint64_t common;
 
-	// icmp counter id
-	uint64_t icmp_counter_id;
+		// icmp v4 counter
+		uint64_t icmp_v4;
 
-	// l4 packet counter id
-	uint64_t l4_counter_id;
+		// icmp v6 counter
+		uint64_t icmp_v6;
+
+		// l4 (tcp and udp) counter
+		uint64_t l4;
+	} counter;
 
 	// if packet destination id is from decap list,
 	// then we make decap
@@ -62,19 +69,30 @@ get_module_counter(
 	struct counter_storage *storage
 ) {
 	uint64_t *counter =
-		counter_get_address(config->counter_id, worker, storage);
+		counter_get_address(config->counter.common, worker, storage);
 	return (struct balancer_common_module_stats *)counter;
 }
 
-static inline struct balancer_icmp_module_stats *
-get_icmp_module_counter(
+static inline struct balancer_icmp_stats *
+get_icmp_v4_module_counter(
 	struct balancer_module_config *config,
 	size_t worker,
 	struct counter_storage *storage
 ) {
 	uint64_t *counter =
-		counter_get_address(config->icmp_counter_id, worker, storage);
-	return (struct balancer_icmp_module_stats *)counter;
+		counter_get_address(config->counter.icmp_v4, worker, storage);
+	return (struct balancer_icmp_stats *)counter;
+}
+
+static inline struct balancer_icmp_stats *
+get_icmp_v6_module_counter(
+	struct balancer_module_config *config,
+	size_t worker,
+	struct counter_storage *storage
+) {
+	uint64_t *counter =
+		counter_get_address(config->counter.icmp_v6, worker, storage);
+	return (struct balancer_icmp_stats *)counter;
 }
 
 static inline struct balancer_l4_module_stats *
@@ -84,6 +102,6 @@ get_l4_module_counter(
 	struct counter_storage *storage
 ) {
 	uint64_t *counter =
-		counter_get_address(config->l4_counter_id, worker, storage);
+		counter_get_address(config->counter.l4, worker, storage);
 	return (struct balancer_l4_module_stats *)counter;
 }

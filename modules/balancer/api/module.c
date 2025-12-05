@@ -21,8 +21,17 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-extern void
-balancer_register_module_counters(struct counter_registry *registry);
+extern uint64_t
+register_common_counter(struct counter_registry *registry);
+
+extern uint64_t
+register_icmp_v4_counter(struct counter_registry *registry);
+
+extern uint64_t
+register_icmp_v6_counter(struct counter_registry *registry);
+
+extern uint64_t
+register_l4_counter(struct counter_registry *registry);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -65,7 +74,7 @@ balancer_module_config_create(
 		    name,
 		    balancer_module_config_free
 	    )) {
-		goto free_config;
+		goto free_config_no_lpm;
 	}
 
 	// Set balancer state
@@ -75,13 +84,13 @@ balancer_module_config_create(
 	if (lpm_init(
 		    &balancer_config->decap_filter_v4, &agent->memory_context
 	    )) {
-		goto free_config;
+		goto free_config_no_lpm;
 	}
 	if (lpm_init(
 		    &balancer_config->decap_filter_v6, &agent->memory_context
 	    )) {
 		lpm_free(&balancer_config->decap_filter_v4);
-		goto free_config;
+		goto free_config_no_lpm;
 	}
 	balancer_config->vs_count = 0;
 	balancer_config->vs = NULL;
@@ -89,28 +98,23 @@ balancer_module_config_create(
 	balancer_config->reals = NULL;
 	int ret = balancer_vs_init(balancer_config, vs_count, vs_configs);
 	if (ret < 0) {
-		goto free_config_with_lpm;
+		goto free_config;
 	}
 
 	// register module counters
 
-	balancer_config->counter_id = counter_registry_register(
-		&balancer_config->cp_module.counter_registry,
-		balancer_common_module_counter_name,
-		COMMON_MODULE_COUNTER_SIZE
-	);
-
-	balancer_config->icmp_counter_id = counter_registry_register(
-		&balancer_config->cp_module.counter_registry,
-		balancer_icmp_module_counter_name,
-		ICMP_MODULE_COUNTER_SIZE
-	);
-
-	balancer_config->l4_counter_id = counter_registry_register(
-		&balancer_config->cp_module.counter_registry,
-		balancer_l4_module_counter_name,
-		L4_MODULE_COUNTER_SIZE
-	);
+	struct counter_registry *registry =
+		&balancer_config->cp_module.counter_registry;
+	balancer_config->counter.common = register_common_counter(registry);
+	balancer_config->counter.icmp_v4 = register_icmp_v4_counter(registry);
+	balancer_config->counter.icmp_v6 = register_icmp_v6_counter(registry);
+	balancer_config->counter.l4 = register_l4_counter(registry);
+	if (balancer_config->counter.common == (uint64)-1 ||
+	    balancer_config->counter.icmp_v4 == (uint64)-1 ||
+	    balancer_config->counter.icmp_v6 == (uint64)-1 ||
+	    balancer_config->counter.l4 == (uint64)-1) {
+		goto free_config;
+	}
 
 	// set source address
 	memcpy(balancer_config->source_ip, source_addr, NET4_LEN);
@@ -125,7 +129,7 @@ balancer_module_config_create(
 			    decap_addrs[i].bytes,
 			    1
 		    )) {
-			goto free_config_with_lpm;
+			goto free_config;
 		}
 	}
 
@@ -138,17 +142,17 @@ balancer_module_config_create(
 			    decap_addrs_v6[i].bytes,
 			    1
 		    )) {
-			goto free_config_with_lpm;
+			goto free_config;
 		}
 	}
 
 	return &balancer_config->cp_module;
 
-free_config_with_lpm:
+free_config:
 	lpm_free(&balancer_config->decap_filter_v4);
 	lpm_free(&balancer_config->decap_filter_v6);
 
-free_config:
+free_config_no_lpm:
 	memory_bfree(
 		&agent->memory_context,
 		balancer_config,

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "counters/counters.h"
 #include <stddef.h>
 #include <stdint.h>
 

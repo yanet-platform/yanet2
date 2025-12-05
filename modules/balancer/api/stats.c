@@ -5,6 +5,7 @@
 
 #include "counters/counters.h"
 #include "lib/controlplane/agent/agent.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +13,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 static const char *common_module_counter_name = "common_counter";
-static const char *icmp_module_counter_name = "icmp_counter";
+static const char *icmp_v4_module_counter_name = "icmp_v4_counter";
+static const char *icmp_v6_module_counter_name = "icmp_v6_counter";
 static const char *l4_module_counter_name = "l4_counter";
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -20,7 +22,7 @@ static const char *l4_module_counter_name = "l4_counter";
 ////////////////////////////////////////////////////////////////////////////////
 
 uint64_t
-balancer_register_common_counter(struct counter_registry *registry) {
+register_common_counter(struct counter_registry *registry) {
 	return counter_registry_register(
 		registry,
 		common_module_counter_name,
@@ -29,16 +31,25 @@ balancer_register_common_counter(struct counter_registry *registry) {
 }
 
 uint64_t
-balancer_register_icmp_counter(struct counter_registry *registry) {
+register_icmp_v4_counter(struct counter_registry *registry) {
 	return counter_registry_register(
 		registry,
-		icmp_module_counter_name,
-		sizeof(struct balancer_icmp_module_stats) / sizeof(uint64_t)
+		icmp_v4_module_counter_name,
+		sizeof(struct balancer_icmp_stats) / sizeof(uint64_t)
 	);
 }
 
 uint64_t
-balancer_register_l4_counter(struct counter_registry *registry) {
+register_icmp_v6_counter(struct counter_registry *registry) {
+	return counter_registry_register(
+		registry,
+		icmp_v6_module_counter_name,
+		sizeof(struct balancer_icmp_stats) / sizeof(uint64_t)
+	);
+}
+
+uint64_t
+register_l4_counter(struct counter_registry *registry) {
 	return counter_registry_register(
 		registry,
 		l4_module_counter_name,
@@ -51,9 +62,7 @@ balancer_register_l4_counter(struct counter_registry *registry) {
 ////////////////////////////////////////////////////////////////////////////////
 
 uint64_t
-balancer_register_vs_counter(
-	struct counter_registry *registry, size_t vs_registry_idx
-) {
+register_vs_counter(struct counter_registry *registry, size_t vs_registry_idx) {
 	char name[60];
 	sprintf(name, "vs_%zu", vs_registry_idx);
 	return counter_registry_register(
@@ -64,7 +73,7 @@ balancer_register_vs_counter(
 }
 
 uint64_t
-balancer_register_real_counter(
+register_real_counter(
 	struct counter_registry *registry, size_t real_registry_idx
 ) {
 	char name[60];
@@ -96,10 +105,17 @@ fill_module_counters(
 			counter->size,
 			counter->value_handle
 		);
-	} else if (strcmp(counter->name, icmp_module_counter_name) ==
+	} else if (strcmp(counter->name, icmp_v4_module_counter_name) ==
 		   0) { // icmp module counter
 		counter_handle_accum(
-			(uint64_t *)&stats->icmp,
+			(uint64_t *)&stats->icmp.ipv4,
+			instances,
+			counter->size,
+			counter->value_handle
+		);
+	} else if (strcmp(counter->name, icmp_v6_module_counter_name) == 0) {
+		counter_handle_accum(
+			(uint64_t *)&stats->icmp.ipv6,
 			instances,
 			counter->size,
 			counter->value_handle
@@ -164,6 +180,12 @@ balancer_stats_fill(
 	const char *chain,
 	const char *module
 ) {
+	assert(device != NULL);
+	assert(pipeline != NULL);
+	assert(function != NULL);
+	assert(chain != NULL);
+	assert(module != NULL);
+
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	struct counter_handle_list *counter_handles = yanet_get_module_counters(
 		dp_config, device, pipeline, function, chain, "balancer", module
