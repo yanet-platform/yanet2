@@ -264,7 +264,7 @@ export const apiToGraph = (func: APIFunction): FunctionGraphState => {
                 source: INPUT_NODE_ID,
                 target: OUTPUT_NODE_ID,
                 data: {
-                    weight: chain.weight,
+                    weight: chain.weight ?? 0,
                     chainName: chain.chain?.name,
                 },
             });
@@ -275,7 +275,7 @@ export const apiToGraph = (func: APIFunction): FunctionGraphState => {
                 source: INPUT_NODE_ID,
                 target: moduleNodeMap.get(`${chainIdx}-0`)!,
                 data: {
-                    weight: chain.weight,
+                    weight: chain.weight ?? 0,
                     chainName: chain.chain?.name,
                 },
             });
@@ -337,7 +337,7 @@ const findAllPaths = (nodes: FunctionNode[], edges: FunctionEdge[]): ChainPath[]
             // Found a complete path
             paths.push({
                 chainName: chainName || `chain-${paths.length}`,
-                weight: weight || '1',
+                weight: weight ?? '1',
                 moduleIds: currentPath.filter(id => id !== INPUT_NODE_ID && id !== OUTPUT_NODE_ID),
             });
             return;
