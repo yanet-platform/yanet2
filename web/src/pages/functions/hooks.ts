@@ -7,6 +7,8 @@ import { toaster } from '../../utils';
 import type { FunctionNode, FunctionEdge, FunctionGraphState } from './types';
 import { apiToGraph, graphToApi, createEmptyGraph, validateGraph } from './utils';
 
+export type FunctionMapByInstance = Record<number, Record<string, APIFunction>>;
+
 export interface InstanceData {
     instance: number;
     functionIds: FunctionId[];
@@ -15,6 +17,8 @@ export interface InstanceData {
 export interface UseFunctionDataResult {
     instances: InstanceData[];
     loading: boolean;
+    functionsLoading: boolean;
+    functionsByInstance: FunctionMapByInstance;
     error: string | null;
     reloadInstances: () => Promise<void>;
     loadFunction: (instance: number, functionId: FunctionId) => Promise<APIFunction | null>;
@@ -28,11 +32,14 @@ export interface UseFunctionDataResult {
  */
 export const useFunctionData = (): UseFunctionDataResult => {
     const [instances, setInstances] = useState<InstanceData[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [instancesLoading, setInstancesLoading] = useState(true);
+    const [functionsLoading, setFunctionsLoading] = useState(true);
+    const [functionsByInstance, setFunctionsByInstance] = useState<FunctionMapByInstance>({});
     const [error, setError] = useState<string | null>(null);
 
     const loadInstancesAndFunctions = useCallback(async (): Promise<void> => {
-        setLoading(true);
+        setInstancesLoading(true);
+        setFunctionsLoading(true);
         setError(null);
 
         try {
@@ -59,12 +66,43 @@ export const useFunctionData = (): UseFunctionDataResult => {
 
             const instanceData = await Promise.all(instanceDataPromises);
             setInstances(instanceData);
+
+            // Preload functions for all instances to avoid per-card loading flashes
+            const functionsPerInstance = await Promise.all(instanceData.map(async ({ instance, functionIds }) => {
+                if (functionIds.length === 0) {
+                    return { instance, functions: {} as Record<string, APIFunction> };
+                }
+
+                const functions: Record<string, APIFunction> = {};
+
+                await Promise.all(functionIds.map(async (functionId) => {
+                    try {
+                        const response = await API.functions.get({ instance, id: functionId });
+                        const func = response.function;
+                        const key = func?.id?.name || functionId.name;
+                        if (func && key) {
+                            functions[key] = func;
+                        }
+                    } catch (err) {
+                        toaster.error('function-get-error', `Failed to load function ${functionId.name}`, err);
+                    }
+                }));
+
+                return { instance, functions };
+            }));
+
+            const nextFunctionsByInstance: FunctionMapByInstance = {};
+            functionsPerInstance.forEach(({ instance, functions }) => {
+                nextFunctionsByInstance[instance] = functions;
+            });
+            setFunctionsByInstance(nextFunctionsByInstance);
         } catch (err) {
             const message = err instanceof Error ? err.message : 'Failed to load instances';
             setError(message);
             toaster.error('functions-load-error', 'Failed to load functions', err);
         } finally {
-            setLoading(false);
+            setInstancesLoading(false);
+            setFunctionsLoading(false);
         }
     }, []);
 
@@ -76,14 +114,32 @@ export const useFunctionData = (): UseFunctionDataResult => {
         instance: number,
         functionId: FunctionId
     ): Promise<APIFunction | null> => {
+        const cached = functionsByInstance[instance]?.[functionId.name || ''];
+        if (cached) {
+            return cached;
+        }
+
         try {
             const response = await API.functions.get({ instance, id: functionId });
-            return response.function || null;
+            const func = response.function || null;
+
+            const funcName = func?.id?.name;
+            if (func && funcName) {
+                setFunctionsByInstance(prev => ({
+                    ...prev,
+                    [instance]: {
+                        ...(prev[instance] || {}),
+                        [funcName]: func,
+                    },
+                }));
+            }
+
+            return func;
         } catch (err) {
             toaster.error('function-get-error', `Failed to load function ${functionId.name}`, err);
             return null;
         }
-    }, []);
+    }, [functionsByInstance]);
 
     const createFunction = useCallback(async (
         instance: number,
@@ -115,6 +171,18 @@ export const useFunctionData = (): UseFunctionDataResult => {
         try {
             await API.functions.update({ instance, function: func });
             toaster.success('function-update-success', `Function "${func.id?.name}" saved`);
+
+            const funcName = func.id?.name;
+            if (funcName) {
+                setFunctionsByInstance(prev => ({
+                    ...prev,
+                    [instance]: {
+                        ...(prev[instance] || {}),
+                        [funcName]: func,
+                    },
+                }));
+            }
+
             return true;
         } catch (err) {
             toaster.error('function-update-error', `Failed to save function "${func.id?.name}"`, err);
@@ -142,6 +210,21 @@ export const useFunctionData = (): UseFunctionDataResult => {
                 return inst;
             }));
 
+            const functionName = functionId.name;
+            if (functionName) {
+                setFunctionsByInstance(prev => {
+                    const instanceFunctions = prev[instance];
+                    if (!instanceFunctions) {
+                        return prev;
+                    }
+                    const { [functionName]: _removed, ...rest } = instanceFunctions;
+                    return {
+                        ...prev,
+                        [instance]: rest,
+                    };
+                });
+            }
+
             toaster.success('function-delete-success', `Function "${functionId.name}" deleted`);
             return true;
         } catch (err) {
@@ -150,9 +233,13 @@ export const useFunctionData = (): UseFunctionDataResult => {
         }
     }, []);
 
+    const loading = instancesLoading || functionsLoading;
+
     return {
         instances,
         loading,
+        functionsLoading,
+        functionsByInstance,
         error,
         reloadInstances: loadInstancesAndFunctions,
         loadFunction,

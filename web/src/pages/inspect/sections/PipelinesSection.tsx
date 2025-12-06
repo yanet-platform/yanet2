@@ -1,39 +1,90 @@
 import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
-import type { InstanceInfo } from '../../../api/inspect';
+import type { InstanceInfo, PipelineInfo } from '../../../api/inspect';
+import './PipelinesSection.css';
 
 export interface PipelinesSectionProps {
     instance: InstanceInfo;
 }
 
-export const PipelinesSection: React.FC<PipelinesSectionProps> = ({ instance }) => {
+interface PipelineFlowProps {
+    pipelineName: string;
+    functions?: string[];
+}
+
+const PipelineFlow: React.FC<PipelineFlowProps> = ({ pipelineName, functions }) => {
+    const segments = ['rx', ...(functions ?? []), 'tx'];
+
     return (
-        <Box style={{ marginBottom: '24px' }}>
-            <Text variant="header-1" style={{ marginBottom: '12px' }}>
+        <Box className="pipelineFlow">
+            {segments.map((segment, idx) => {
+                const isFunction = idx > 0 && idx < segments.length - 1;
+
+                return (
+                    <React.Fragment key={`${pipelineName}-${segment}-${idx}`}>
+                        {isFunction ? (
+                            <Box className="pipelineFunction">
+                                <Text variant="body-2">{segment}</Text>
+                            </Box>
+                        ) : (
+                            <Text variant="body-2" color="secondary">
+                                {segment}
+                            </Text>
+                        )}
+                        {idx < segments.length - 1 && (
+                            <Text variant="body-2" color="secondary">
+                                -&gt;
+                            </Text>
+                        )}
+                    </React.Fragment>
+                );
+            })}
+        </Box>
+    );
+};
+
+const PipelineItem: React.FC<{ pipeline: PipelineInfo; fallbackName: string }> = ({ pipeline, fallbackName }) => {
+    const displayName = pipeline.name || fallbackName;
+
+    return (
+        <Box className="pipelineItem">
+            <Box className="pipelineRow">
+                <Text variant="body-1" className="pipelineTitle">
+                    {displayName}:
+                </Text>
+                <PipelineFlow pipelineName={displayName} functions={pipeline.functions} />
+            </Box>
+        </Box>
+    );
+};
+
+const PipelinesContent: React.FC<{ pipelines: PipelineInfo[] }> = ({ pipelines }) => {
+    if (pipelines.length === 0) {
+        return (
+            <Text variant="body-1" color="secondary" className="pipelinesEmpty">
+                No pipelines
+            </Text>
+        );
+    }
+
+    return (
+        <Box className="pipelineList">
+            {pipelines.map((pipeline, idx) => (
+                <PipelineItem key={pipeline.name ?? idx} pipeline={pipeline} fallbackName={`pipeline-${idx}`} />
+            ))}
+        </Box>
+    );
+};
+
+export const PipelinesSection: React.FC<PipelinesSectionProps> = ({ instance }) => {
+    const pipelines = instance.pipelines ?? [];
+
+    return (
+        <Box className="pipelinesSection">
+            <Text variant="header-1" className="pipelinesHeader">
                 Pipelines
             </Text>
-            {instance.pipelines && instance.pipelines.length > 0 ? (
-                <Box>
-                    {instance.pipelines.map((pipeline, idx) => (
-                        <Box key={idx} style={{ marginBottom: '16px' }}>
-                            <Text variant="body-1" style={{ marginBottom: '8px', fontWeight: 'bold' }}>
-                                Pipeline {pipeline.name}
-                            </Text>
-                            <Box style={{ marginLeft: '16px' }}>
-                                <Text variant="body-1" style={{ marginBottom: '4px' }}>rx</Text>
-                                {pipeline.functions?.map((funcName, funcIdx) => (
-                                    <Text key={funcIdx} variant="body-1" style={{ marginLeft: '16px', marginBottom: '4px' }}>
-                                        {funcName}
-                                    </Text>
-                                ))}
-                                <Text variant="body-1" style={{ marginTop: '4px' }}>tx</Text>
-                            </Box>
-                        </Box>
-                    ))}
-                </Box>
-            ) : (
-                <Text variant="body-1" color="secondary" style={{ display: 'block' }}>No pipelines</Text>
-            )}
+            <PipelinesContent pipelines={pipelines} />
         </Box>
     );
 };

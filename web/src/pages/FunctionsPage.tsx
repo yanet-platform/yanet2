@@ -15,6 +15,7 @@ const FunctionsPage: React.FC = () => {
         instances,
         loading,
         error,
+        functionsByInstance,
         loadFunction,
         createFunction,
         updateFunction,
@@ -110,6 +111,7 @@ const FunctionsPage: React.FC = () => {
                                         key={funcId.name}
                                         instance={inst.instance}
                                         functionId={funcId}
+                                        initialFunction={functionsByInstance[inst.instance]?.[funcId.name || '']}
                                         loadFunction={loadFunction}
                                         updateFunction={updateFunction}
                                         deleteFunction={deleteFunction}

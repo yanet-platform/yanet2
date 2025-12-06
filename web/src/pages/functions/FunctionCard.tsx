@@ -13,6 +13,7 @@ import { NODE_TYPE_MODULE, INPUT_NODE_ID } from './types';
 export interface FunctionCardProps {
     instance: number;
     functionId: FunctionId;
+    initialFunction?: APIFunction | null;
     loadFunction: (instance: number, functionId: FunctionId) => Promise<APIFunction | null>;
     updateFunction: (instance: number, func: APIFunction) => Promise<boolean>;
     deleteFunction: (instance: number, functionId: FunctionId) => Promise<boolean>;
@@ -21,11 +22,12 @@ export interface FunctionCardProps {
 export const FunctionCard: React.FC<FunctionCardProps> = ({
     instance,
     functionId,
+    initialFunction,
     loadFunction,
     updateFunction,
     deleteFunction,
 }) => {
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(() => !initialFunction);
     const [saving, setSaving] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -48,20 +50,33 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
         loadFromApi,
         toApi,
         markClean,
-    } = useFunctionGraph();
+    } = useFunctionGraph(initialFunction || undefined);
     
-    // Load function data on mount
+    // Load function data on mount or when instance/function changes
     useEffect(() => {
+        let cancelled = false;
+
         const load = async (): Promise<void> => {
+            if (initialFunction) {
+                loadFromApi(initialFunction);
+                setLoading(false);
+                return;
+            }
+
             setLoading(true);
             const func = await loadFunction(instance, functionId);
-            if (func) {
+            if (!cancelled && func) {
                 loadFromApi(func);
             }
-            setLoading(false);
+            if (!cancelled) {
+                setLoading(false);
+            }
         };
         load();
-    }, [instance, functionId, loadFunction, loadFromApi]);
+        return () => {
+            cancelled = true;
+        };
+    }, [instance, functionId, loadFunction, loadFromApi, initialFunction]);
     
     const handleSave = useCallback(async () => {
         if (!isValid) {

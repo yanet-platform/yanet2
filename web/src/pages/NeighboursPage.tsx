@@ -15,6 +15,7 @@ import {
     formatUnixSeconds,
     getUnixSecondsValue,
 } from '../utils/sorting';
+import './NeighboursPage.css';
 
 const REFRESH_INTERVAL_MS = 5000;
 
@@ -175,6 +176,8 @@ const NeighboursPage = (): React.JSX.Element => {
         },
     ], [utcOffsetString]);
 
+    const getRowDescriptor = useCallback(() => ({ classNames: ['neighbours-row'] }), []);
+
     if (loading) {
         return (
             <PageLayout title="Neighbours">
@@ -192,6 +195,7 @@ const NeighboursPage = (): React.JSX.Element => {
                     width="max"
                     defaultSortState={sortState}
                     onSortStateChange={handleSortStateChange}
+                    getRowDescriptor={getRowDescriptor}
                 />
             </Box>
         </PageLayout>
