@@ -4,7 +4,7 @@ import MainMenu from './MainMenu';
 import NeighboursPage from './pages/NeighboursPage';
 import InspectPage from './pages/InspectPage';
 import RoutePage from './pages/RoutePage';
-import NetworkFunctionsPage from './pages/NetworkFunctionsPage';
+import FunctionsPage from './pages/FunctionsPage';
 import PipelinesPage from './pages/PipelinesPage';
 import type { PageId } from './types';
 import { PAGE_IDS } from './types';
@@ -36,11 +36,11 @@ const AppContent = (): React.JSX.Element => {
             renderContent={() => (
                 <Routes>
                     <Route path="/" element={<Navigate to="/inspect" replace />} />
-                    <Route path="/functions" element={<NetworkFunctionsPage />} />
-                    <Route path="/pipelines" element={<PipelinesPage />} />
                     <Route path="/neighbours" element={<NeighboursPage />} />
                     <Route path="/inspect" element={<InspectPage />} />
                     <Route path="/route" element={<RoutePage />} />
+                    <Route path="/functions" element={<FunctionsPage />} />
+                    <Route path="/pipelines" element={<PipelinesPage />} />
                 </Routes>
             )}
         />

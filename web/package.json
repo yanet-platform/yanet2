@@ -8,19 +8,20 @@
         "preview": "vite preview"
     },
     "dependencies": {
-        "@gravity-ui/graph": "^1.6.1",
         "@gravity-ui/icons": "^2",
         "@gravity-ui/navigation": "^3",
         "@gravity-ui/uikit": "^7",
         "@tanstack/react-virtual": "^3.13.12",
         "react": "^19",
         "react-dom": "^19",
-        "react-router-dom": "^7.9.6"
+        "react-router-dom": "^7.9.6",
+        "@xyflow/react": "^12"
     },
     "devDependencies": {
         "@types/react": "^19",
         "@types/react-dom": "^19",
         "@vitejs/plugin-react": "^5",
+        "babel-plugin-react-compiler": "^1.0.0",
         "typescript": "^5",
         "vite": "^7"
     }

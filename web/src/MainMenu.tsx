@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AsideHeader } from '@gravity-ui/navigation';
 import type { MenuItem as AsideHeaderMenuItem } from '@gravity-ui/navigation';
-import { Link, Eye, Route, Pipeline, CurlyBracketsFunction } from '@gravity-ui/icons';
+import { Link, Eye, Route, CurlyBracketsFunction, ListUl } from '@gravity-ui/icons';
 import Logo from './icons/Logo';
 import type { PageId } from './types';
 
@@ -41,7 +41,7 @@ const MainMenu = ({ currentPage, onPageChange, renderContent }: MainMenuProps): 
         {
             id: 'pipelines',
             title: 'Pipelines',
-            icon: Pipeline,
+            icon: ListUl,
             current: currentPage === 'pipelines',
             onItemClick: () => {
                 onPageChange('pipelines');

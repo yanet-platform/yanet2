@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from 'react';
+import React from 'react';
 import { Box, Text, Icon } from '@gravity-ui/uikit';
 import { ChevronUp, ChevronDown } from '@gravity-ui/icons';
 import type { SortState, SortableColumn } from './types';
@@ -12,12 +12,12 @@ export interface SortableHeaderProps {
     disabled?: boolean;
 }
 
-export const SortableHeader = memo(({ column, label, style, sortState, onSort, disabled }: SortableHeaderProps) => {
-    const handleClick = useCallback(() => {
+export const SortableHeader = ({ column, label, style, sortState, onSort, disabled }: SortableHeaderProps) => {
+    const handleClick = () => {
         if (!disabled) {
             onSort(column);
         }
-    }, [column, onSort, disabled]);
+    };
 
     const isActive = sortState.column === column;
 
@@ -39,6 +39,4 @@ export const SortableHeader = memo(({ column, label, style, sortState, onSort, d
             )}
         </Box>
     );
-});
-
-SortableHeader.displayName = 'SortableHeader';
+};

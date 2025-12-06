@@ -19,7 +19,8 @@ export interface InstanceTabsProps<T> {
 }
 
 /**
- * Reusable instance tabs component
+ * Reusable instance tabs component with lazy rendering.
+ * Only the active tab content is rendered to save memory.
  */
 export const InstanceTabs = <T,>({
     items,
@@ -30,6 +31,9 @@ export const InstanceTabs = <T,>({
     tabListStyle = { marginBottom: '20px' },
     contentStyle,
 }: InstanceTabsProps<T>): React.JSX.Element => {
+    const activeIndex = parseInt(activeTab, 10);
+    const activeItem = items[activeIndex];
+
     return (
         <TabProvider value={activeTab} onUpdate={onTabChange}>
             <TabList style={tabListStyle}>
@@ -40,13 +44,12 @@ export const InstanceTabs = <T,>({
                 ))}
             </TabList>
             <Box style={contentStyle}>
-                {items.map((item, idx) => (
-                    <TabPanel key={idx} value={String(idx)}>
-                        {renderContent(item, idx)}
+                {activeItem !== undefined && (
+                    <TabPanel value={activeTab}>
+                        {renderContent(activeItem, activeIndex)}
                     </TabPanel>
-                ))}
+                )}
             </Box>
         </TabProvider>
     );
 };
-

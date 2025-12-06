@@ -1,4 +1,3 @@
-import { memo, useCallback } from 'react';
 import { Checkbox } from '@gravity-ui/uikit';
 import type { Route } from '../../api/routes';
 import { cellStyles, TOTAL_WIDTH, ROW_HEIGHT, ROUTE_SOURCES } from './constants';
@@ -11,10 +10,10 @@ export interface VirtualRowProps {
     onSelect: (route: Route, checked: boolean) => void;
 }
 
-export const VirtualRow = memo(({ route, index, start, isSelected, onSelect }: VirtualRowProps) => {
-    const handleCheckboxChange = useCallback((checked: boolean) => {
+export const VirtualRow = ({ route, index, start, isSelected, onSelect }: VirtualRowProps) => {
+    const handleCheckboxChange = (checked: boolean) => {
         onSelect(route, checked);
-    }, [route, onSelect]);
+    };
 
     return (
         <div
@@ -51,6 +50,4 @@ export const VirtualRow = memo(({ route, index, start, isSelected, onSelect }: V
             <div style={cellStyles.source}>{ROUTE_SOURCES[route.source ?? 0] || 'Unknown'}</div>
         </div>
     );
-});
-
-VirtualRow.displayName = 'VirtualRow';
+};

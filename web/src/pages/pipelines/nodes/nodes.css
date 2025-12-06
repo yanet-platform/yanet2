@@ -1,0 +1,45 @@
+/* Import shared styles from functions */
+@import '../../functions/nodes/nodes.css';
+
+/* ============================================
+   Function Reference Node Styles
+   ============================================ */
+.function-ref-node {
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--g-color-base-float);
+    border: 2px solid var(--g-color-line-generic);
+    min-width: 140px;
+    height: 70px;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+    cursor: pointer;
+}
+
+.function-ref-node:hover {
+    border-color: var(--g-color-line-generic-hover);
+    background: var(--g-color-base-generic-ultralight);
+}
+
+.function-ref-node.selected {
+    border-color: var(--g-color-line-brand);
+}
+
+.function-ref-node__content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.function-ref-node__row {
+    display: flex;
+    align-items: center;
+}
+
+.function-ref-node__label {
+    color: var(--g-color-text-secondary);
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}

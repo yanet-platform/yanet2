@@ -123,11 +123,6 @@ export class IPv6Address {
             // Use URL constructor to validate - it throws for invalid IPs
             new URL(`http://[${ip}]`);
 
-            // Check for common IPv6 errors
-            if (ip.endsWith(':')) {
-                return err(IPv6ParseError.EndsWithColon);
-            }
-
             const parts = ip.split(':');
             const doubleColonCount = (ip.match(/::/g) || []).length;
 

@@ -3,23 +3,23 @@ import { Box, Alert } from '@gravity-ui/uikit';
 import { PageLayout, PageLoader, EmptyState, InstanceTabs } from '../components';
 import { useInstanceTabs } from '../hooks';
 import {
-    PipelinePageHeader,
-    PipelineCard,
-    CreatePipelineDialog,
-    usePipelineData,
-} from './pipelines';
+    FunctionPageHeader,
+    FunctionCard,
+    CreateFunctionDialog,
+    useFunctionData,
+} from './functions';
+import './FunctionsPage.css';
 
-const PipelinesPage: React.FC = () => {
+const FunctionsPage: React.FC = () => {
     const {
         instances,
         loading,
         error,
-        loadPipeline,
-        createPipeline,
-        updatePipeline,
-        deletePipeline,
-        loadFunctionList,
-    } = usePipelineData();
+        loadFunction,
+        createFunction,
+        updateFunction,
+        deleteFunction,
+    } = useFunctionData();
     
     const { activeTab, setActiveTab, currentTabIndex } = useInstanceTabs({ items: instances });
     
@@ -28,24 +28,24 @@ const PipelinesPage: React.FC = () => {
     const currentInstance = instances[currentTabIndex];
     const currentInstanceNumber = currentInstance?.instance ?? currentTabIndex;
     
-    const handleCreatePipeline = useCallback(() => {
+    const handleCreateFunction = useCallback(() => {
         setCreateDialogOpen(true);
     }, []);
     
     const handleCreateConfirm = useCallback(async (name: string) => {
-        const success = await createPipeline(currentInstanceNumber, name);
+        const success = await createFunction(currentInstanceNumber, name);
         if (success) {
             setCreateDialogOpen(false);
         }
-    }, [createPipeline, currentInstanceNumber]);
+    }, [createFunction, currentInstanceNumber]);
     
     const headerContent = (
-        <PipelinePageHeader onCreatePipeline={handleCreatePipeline} />
+        <FunctionPageHeader onCreateFunction={handleCreateFunction} />
     );
     
     if (loading) {
         return (
-            <PageLayout title="Pipelines">
+            <PageLayout title="Functions">
                 <PageLoader loading={loading} size="l" />
             </PageLayout>
         );
@@ -63,7 +63,7 @@ const PipelinesPage: React.FC = () => {
                     <EmptyState message="No instances found." />
                 </Box>
                 
-                <CreatePipelineDialog
+                <CreateFunctionDialog
                     open={createDialogOpen}
                     onClose={() => setCreateDialogOpen(false)}
                     onConfirm={handleCreateConfirm}
@@ -102,18 +102,17 @@ const PipelinesPage: React.FC = () => {
                             flex: 1,
                             minHeight: 0,
                         }}>
-                            {inst.pipelineIds.length === 0 ? (
-                                <EmptyState message="No pipelines in this instance. Click 'Create pipeline' to add one." />
+                            {inst.functionIds.length === 0 ? (
+                                <EmptyState message="No functions in this instance. Click 'Create function' to add one." />
                             ) : (
-                                inst.pipelineIds.map((pipelineId) => (
-                                    <PipelineCard
-                                        key={pipelineId.name}
+                                inst.functionIds.map((funcId) => (
+                                    <FunctionCard
+                                        key={funcId.name}
                                         instance={inst.instance}
-                                        pipelineId={pipelineId}
-                                        loadPipeline={loadPipeline}
-                                        updatePipeline={updatePipeline}
-                                        deletePipeline={deletePipeline}
-                                        loadFunctionList={loadFunctionList}
+                                        functionId={funcId}
+                                        loadFunction={loadFunction}
+                                        updateFunction={updateFunction}
+                                        deleteFunction={deleteFunction}
                                     />
                                 ))
                             )}
@@ -123,7 +122,7 @@ const PipelinesPage: React.FC = () => {
                 />
             </Box>
             
-            <CreatePipelineDialog
+            <CreateFunctionDialog
                 open={createDialogOpen}
                 onClose={() => setCreateDialogOpen(false)}
                 onConfirm={handleCreateConfirm}
@@ -132,5 +131,5 @@ const PipelinesPage: React.FC = () => {
     );
 };
 
-export default PipelinesPage;
+export default FunctionsPage;
 

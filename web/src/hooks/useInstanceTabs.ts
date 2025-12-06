@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export interface UseInstanceTabsOptions<T> {
     /** Array of items to create tabs for */
@@ -71,17 +71,17 @@ export const useNestedTabs = ({
 }: UseNestedTabsOptions = {}): UseNestedTabsResult => {
     const [activeConfigTab, setActiveConfigTab] = useState<Map<number, string>>(initialTabs);
 
-    const getActiveTab = useCallback((parentIndex: number, defaultValue: string): string => {
+    const getActiveTab = (parentIndex: number, defaultValue: string): string => {
         return activeConfigTab.get(parentIndex) || defaultValue;
-    }, [activeConfigTab]);
+    };
 
-    const setActiveTab = useCallback((parentIndex: number, tab: string): void => {
+    const setActiveTab = (parentIndex: number, tab: string): void => {
         setActiveConfigTab(prev => {
             const newMap = new Map(prev);
             newMap.set(parentIndex, tab);
             return newMap;
         });
-    }, []);
+    };
 
     return {
         activeConfigTab,
@@ -90,4 +90,3 @@ export const useNestedTabs = ({
         setActiveConfigTab,
     };
 };
-
