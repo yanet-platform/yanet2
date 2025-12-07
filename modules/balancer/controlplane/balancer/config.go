@@ -49,10 +49,10 @@ func tryCreateNewModuleConfig(
 ) (*balancer_ffi.ModuleConfigPtr, error) {
 	cHandle, err := balancer_ffi.NewModuleConfig(agent, name, state, virtualServices, addresses, sessionsTimeouts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create new module config: %w", err)
+		return nil, fmt.Errorf("failed to create new C `cp_module`: %w", err)
 	}
 	if err := cHandle.UpdateShmModule(agent); err != nil {
-		return nil, fmt.Errorf("failed to insert module: %w", err)
+		return nil, fmt.Errorf("failed to insert C `cp_module`: %w", err)
 	}
 	return &cHandle, nil
 }
@@ -272,7 +272,43 @@ func convertAddrsToBytes(addrs []netip.Addr) [][]byte {
 
 // GetStats returns configuration statistics
 func (config *ModuleConfig) GetStats(dataplaneInstance uint32, device, pipeline, function, chain string) module.BalancerStats {
-	// TODO: Implement stats collection from dataplane
-	// For now, return empty stats
-	return module.BalancerStats{}
+	// Get state info which contains the stats
+	stateInfo := config.state.GetInfo()
+
+	// Build VS stats from state info
+	vsStats := make([]module.VsStatsInfo, 0, len(config.VirtualServices))
+	for i := range config.VirtualServices {
+		vs := &config.VirtualServices[i]
+		if vs.RegistryIdx < uint(len(stateInfo.VsInfo)) {
+			vsInfo := stateInfo.VsInfo[vs.RegistryIdx]
+			vsStats = append(vsStats, module.VsStatsInfo{
+				VsRegistryIdx: vsInfo.VsRegistryIdx,
+				VsIdentifier:  vsInfo.VsIdentifier,
+				Stats:         vsInfo.Stats,
+			})
+		}
+	}
+
+	// Build real stats from state info
+	realStats := make([]module.RealStatsInfo, 0)
+	for i := range config.VirtualServices {
+		vs := &config.VirtualServices[i]
+		for j := range vs.Reals {
+			real := &vs.Reals[j]
+			if real.RegistryIdx < uint64(len(stateInfo.RealInfo)) {
+				realInfo := stateInfo.RealInfo[real.RegistryIdx]
+				realStats = append(realStats, module.RealStatsInfo{
+					RealRegistryIdx: realInfo.RealRegistryIdx,
+					RealIdentifier:  realInfo.RealIdentifier,
+					Stats:           realInfo.Stats,
+				})
+			}
+		}
+	}
+
+	return module.BalancerStats{
+		Module: stateInfo.Module,
+		Vs:     vsStats,
+		Reals:  realStats,
+	}
 }

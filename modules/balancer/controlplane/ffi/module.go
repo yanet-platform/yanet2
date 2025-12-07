@@ -70,7 +70,7 @@ func NewModuleConfig(
 			return ModuleConfigPtr{
 					inner: nil,
 				}, fmt.Errorf(
-					"failed to create virtual service config [%d]: %w",
+					"failed to create virtual service config at index %d: %w",
 					idx,
 					err,
 				)
@@ -79,7 +79,7 @@ func NewModuleConfig(
 			return ModuleConfigPtr{
 					inner: nil,
 				}, fmt.Errorf(
-					"failed to create virtual service config [%d]",
+					"failed to create virtual service config at index %d",
 					idx,
 				)
 		}
@@ -89,7 +89,12 @@ func NewModuleConfig(
 	// Prepare pointer to array of VS configs
 	var vsConfigsPtr **C.struct_balancer_vs_config
 	if len(vsConfigs) > 0 {
-		vsConfigsPtr = (**C.struct_balancer_vs_config)(vsConfigs[0].AsRawPtr())
+		// Create a C array of pointers to vs_config structs
+		cArray := make([]*C.struct_balancer_vs_config, len(vsConfigs))
+		for i := range vsConfigs {
+			cArray[i] = vsConfigs[i].inner
+		}
+		vsConfigsPtr = &cArray[0]
 	} else {
 		vsConfigsPtr = nil
 	}

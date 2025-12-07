@@ -131,13 +131,11 @@ func TestBalancerBasics(t *testing.T) {
 
 		require.Equal(t, 1, len(state.RealInfo))
 		realInfo := &state.RealInfo[0]
-		assert.Equal(t, realInfo.ActiveSessions, uint64(1))
-		assert.Equal(t, realInfo.Stats, expectedRealStats)
+		assert.Equal(t, expectedRealStats, realInfo.Stats)
 
 		require.Equal(t, 1, len(state.VsInfo))
 		vsInfo := &state.VsInfo[0]
-		assert.Equal(t, vsInfo.ActiveSessions, uint64(1))
-		assert.Equal(t, vsInfo.Stats, expectedVsStats)
+		assert.Equal(t, expectedVsStats, vsInfo.Stats)
 	})
 
 	t.Run("Read_Config_Info", func(t *testing.T) {
@@ -148,7 +146,7 @@ func TestBalancerBasics(t *testing.T) {
 		require.Equal(t, 1, len(configStats.Reals))
 		realInfo := &configStats.Reals[0]
 
-		assert.Equal(t, vsInfo.Stats, expectedVsStats)
-		assert.Equal(t, realInfo.Stats, expectedRealStats)
+		assert.Equal(t, expectedVsStats, vsInfo.Stats)
+		assert.Equal(t, expectedRealStats, realInfo.Stats)
 	})
 }

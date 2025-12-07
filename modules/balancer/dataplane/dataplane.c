@@ -79,6 +79,7 @@ balancer_handle_packets(
 		// and decap failed, drop packet.
 		if (packet_ctx_try_decap(&ctx) != 0) {
 			packet_ctx_drop_packet(&ctx);
+			return;
 		}
 
 		// Handle incoming packet.

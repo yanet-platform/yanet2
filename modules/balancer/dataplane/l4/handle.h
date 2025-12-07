@@ -33,6 +33,9 @@ handle_l4_packet(struct packet_ctx *ctx) {
 		return;
 	}
 
+	// update VS incoming stats
+	packet_ctx_update_vs_stats_on_incoming_packet(ctx);
+
 	// 3. Select real for which packet will be forwarded
 
 	struct real *rs = select_real(

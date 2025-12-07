@@ -62,9 +62,9 @@ try_decap(struct packet_ctx *ctx) {
 	// decap is allowed if destination address
 	// of the packet is in the decap list of the balancer.
 	int decap_is_allowed;
-	if (network_protocol == IPPROTO_IP) {
+	if (network_protocol == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 		decap_is_allowed = decap_ip(packet, config);
-	} else if (network_protocol == IPPROTO_IPV6) {
+	} else if (network_protocol == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 		decap_is_allowed = decap_ipv6(packet, config);
 	} else {
 		COMMON_STATS_INC(unexpected_network_proto, ctx);

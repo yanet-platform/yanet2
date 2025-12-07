@@ -128,10 +128,10 @@ func NewVsConfig(
 		(C.size_t)(peersIpv6),
 	)
 	if err != nil {
-		return VsConfigPtr{inner: nil}, fmt.Errorf("failed to create virtual service config: %w", err)
+		return VsConfigPtr{inner: nil}, fmt.Errorf("failed to create C virtual service config: %w", err)
 	}
 	if cVsConfig == nil {
-		return VsConfigPtr{inner: nil}, fmt.Errorf("failed to create virtual service config")
+		return VsConfigPtr{inner: nil}, fmt.Errorf("failed to create C virtual service config")
 	}
 
 	// Set allowed sources
@@ -149,7 +149,7 @@ func NewVsConfig(
 			return VsConfigPtr{
 					inner: nil,
 				}, fmt.Errorf(
-					"failed to set allowed sources [%d]: %w",
+					"failed to set allowed sources at index %d: %w",
 					idx,
 					err,
 				)
@@ -181,7 +181,7 @@ func NewVsConfig(
 			return VsConfigPtr{
 					inner: nil,
 				}, fmt.Errorf(
-					"failed to set peer [%d]: %w",
+					"failed to set peer at index %d: %w",
 					idx,
 					err,
 				)
@@ -208,7 +208,7 @@ func NewVsConfig(
 			return VsConfigPtr{
 					inner: nil,
 				}, fmt.Errorf(
-					"failed to set real [%d]: %w",
+					"failed to set real at index %d: %w",
 					idx,
 					err,
 				)

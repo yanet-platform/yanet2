@@ -35,8 +35,8 @@ type TestSetup struct {
 func SetupTest(config *TestConfig) (*TestSetup, error) {
 	if config.mock == nil {
 		config.mock = &mock.YanetMockConfig{
-			CpMemory: 1 << 28,
-			DpMemory: 1 << 26,
+			CpMemory: 1 << 29,
+			DpMemory: 1 << 27,
 			Workers:  1,
 			Devices: []mock.YanetMockDeviceConfig{
 				{

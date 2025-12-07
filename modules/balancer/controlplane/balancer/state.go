@@ -284,10 +284,8 @@ func (s *ModuleConfigState) RegisterVsWithReals(virtualService *balancerpb.Virtu
 ////////////////////////////////////////////////////////////////////////////////
 
 // GetInfo returns balancer state information
+// Note: Caller must hold the lock
 func (s *ModuleConfigState) GetInfo() module.BalancerInfo {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
 	// Get VS info from state
 	vsInfoList := s.cHandle.VirtualServicesInfo()
 

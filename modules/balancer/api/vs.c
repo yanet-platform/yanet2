@@ -486,7 +486,7 @@ balancer_vs_config_create(
 		&agent->memory_context,
 		sizeof(struct net4_addr) * peers_v4_count
 	);
-	if (vs_config->peers_v4_addr == NULL) {
+	if (peers_v4_count > 0 && vs_config->peers_v4_addr == NULL) {
 		balancer_vs_config_free(vs_config);
 		return NULL;
 	}
@@ -498,7 +498,7 @@ balancer_vs_config_create(
 		&agent->memory_context,
 		sizeof(struct net6_addr) * peers_v6_count
 	);
-	if (vs_config->peers_v6_addr == NULL) {
+	if (peers_v6_count > 0 && vs_config->peers_v6_addr == NULL) {
 		balancer_vs_config_free(vs_config);
 		return NULL;
 	}
