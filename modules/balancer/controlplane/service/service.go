@@ -474,3 +474,72 @@ func (service *BalancerService) ConfigStats(
 		Stats:  stats.IntoProto(),
 	}, nil
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+// SessionsInfo returns info about active balancer sessions
+func (service *BalancerService) SessionsInfo(
+	ctx context.Context,
+	req *balancerpb.SessionsInfoRequest,
+) (*balancerpb.SessionsInfoResponse, error) {
+	if req.Target == nil {
+		return nil, fmt.Errorf("target is required")
+	}
+
+	name := req.Target.ConfigName
+	inst := req.Target.DataplaneInstance
+
+	key := moduleKey{name: name, dataplaneInstance: inst}
+
+	// Get balancer instance (hold lock only for map access)
+	service.mu.Lock()
+	balancerInstance, exists := service.instances[key]
+	service.mu.Unlock()
+
+	if !exists {
+		service.log.Warnw("balancer not found", "name", name, "instance", inst)
+		return nil, fmt.Errorf(
+			"balancer [name=%s, inst=%d] not found",
+			name,
+			inst,
+		)
+	}
+
+	service.log.Debugw("getting sessions info", "name", name, "instance", inst)
+
+	// Get sessions info (no service lock held)
+	sessionsInfo, err := balancerInstance.GetSessionsInfo()
+	if err != nil {
+		service.log.Errorw(
+			"failed to get sessions info",
+			"name",
+			name,
+			"instance",
+			inst,
+			"error",
+			err,
+		)
+		return nil, fmt.Errorf("failed to get sessions info: %w", err)
+	}
+
+	// Convert to protobuf
+	sessionsPb := make([]*balancerpb.SessionInfo, 0, len(sessionsInfo.Sessions))
+	for idx := range sessionsInfo.Sessions {
+		sessionsPb = append(sessionsPb, sessionsInfo.Sessions[idx].IntoProto())
+	}
+
+	service.log.Infow(
+		"sessions info retrieved",
+		"name",
+		name,
+		"instance",
+		inst,
+		"count",
+		sessionsInfo.SessionsCount,
+	)
+
+	return &balancerpb.SessionsInfoResponse{
+		Target:       req.Target,
+		SessionsInfo: sessionsPb,
+	}, nil
+}

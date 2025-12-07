@@ -3,8 +3,10 @@ package module
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 type WlcConfig struct {
@@ -31,8 +33,17 @@ func NewWlcConfigFromProto(proto *balancerpb.WlcConfig) (WlcConfig, error) {
 	return WlcConfig{
 		Power:          proto.WlcPower,
 		MaxRealWeight:  uint16(proto.MaxRealWeight),
-		UpdatePeriodMs: proto.UpdatePeriodMs,
+		UpdatePeriodMs: uint32(proto.UpdatePeriod.AsDuration().Milliseconds()),
 	}, nil
+}
+
+// IntoProto converts WlcConfig to protobuf message
+func (w WlcConfig) IntoProto() *balancerpb.WlcConfig {
+	return &balancerpb.WlcConfig{
+		WlcPower:      w.Power,
+		MaxRealWeight: uint32(w.MaxRealWeight),
+		UpdatePeriod:  durationpb.New(time.Duration(w.UpdatePeriodMs) * time.Millisecond),
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////

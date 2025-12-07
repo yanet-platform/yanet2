@@ -303,6 +303,7 @@ func (config *ModuleConfig) IntoProto() *balancerpb.ModuleConfig {
 		SourceAddressV6:  config.Addresses.SourceIpV6[:],
 		DecapAddresses:   convertAddrsToBytes(config.Addresses.DecapAddresses),
 		SessionsTimeouts: config.SessionTimeouts.IntoProto(),
+		Wlc:              config.wlc.IntoProto(),
 	}
 }
 
@@ -382,7 +383,7 @@ func (config *ModuleConfig) runBackgroundTasks() {
 					config.lock.Lock()
 					err := config.UpdateEffectiveWeights()
 					if err != nil {
-						config.log.Errorw(
+						config.log.Warnw(
 							"failed to update effective weights",
 							zap.Error(err),
 						)

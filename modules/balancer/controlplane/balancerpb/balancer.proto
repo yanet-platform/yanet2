@@ -32,6 +32,9 @@ service Balancer {
 
   // Stats of the balancer config
   rpc ConfigStats(ConfigStatsRequest) returns (ConfigStatsResponse);
+
+  // Info about active balancer sessions
+  rpc SessionsInfo(SessionsInfoRequest) returns (SessionsInfoResponse);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -113,4 +116,15 @@ message ConfigStatsRequest {
 message ConfigStatsResponse {
   commonpb.TargetModule target = 1;
   BalancerStats stats = 2;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+message SessionsInfoRequest {
+  commonpb.TargetModule target = 1;
+}
+
+message SessionsInfoResponse {
+  commonpb.TargetModule target = 1;
+  repeated SessionInfo sessions_info = 2;
 }

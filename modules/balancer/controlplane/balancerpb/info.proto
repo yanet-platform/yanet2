@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package balancerpb;
 
+import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "modules/balancer/controlplane/balancerpb/module.proto";
 import "modules/balancer/controlplane/balancerpb/stats.proto";
@@ -28,7 +29,8 @@ message RealInfo {
   bytes real_ip = 5;
 
   // Number of active sessions with this real
-  uint64 active_sessions = 6;
+  // We update this variable asynchronously.
+  AsyncInfo active_sessions = 6;
 
   // Timestamp of the last packet
   google.protobuf.Timestamp last_packet_timestamp = 7;
@@ -53,7 +55,9 @@ message VsInfo {
   TransportProto vs_proto = 4;
 
   // Number of active sessions established with virtual service
-  uint64 active_sessions = 5;
+  // We update it asynchronously, so last update timestamp
+  // included.
+  AsyncInfo active_sessions = 5;
 
   // Timestamp of the last packet
   google.protobuf.Timestamp last_packet_timestamp = 6;
@@ -64,6 +68,11 @@ message VsInfo {
 
 // Mirrors module.BalancerInfo
 message BalancerInfo {
+  // Number of active sessions established 
+  // between clients and real servers
+  // using balancer
+  AsyncInfo active_sessions = 5;
+
   // Module-level statistics
   ModuleStats module = 1;
 
@@ -72,4 +81,29 @@ message BalancerInfo {
 
   // Information about reals
   repeated RealInfo real_info = 3;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+message SessionInfo {
+  bytes client_addr = 1;
+  uint32 client_port = 2;
+  bytes real_addr = 3;
+
+  // For now, real port always equal to vs port.
+  // Does not have it in the rest of the codebase.
+  uint32 real_port = 4;
+  
+  google.protobuf.Timestamp create_timestamp = 5;
+  google.protobuf.Timestamp last_packet_timestamp = 6;
+  google.protobuf.Duration timeout = 7;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Variable, which we update asynchronously,
+// so we include last update timestamp for it.
+message AsyncInfo {
+  uint64 value = 1;
+  google.protobuf.Timestamp updated_at = 2;
 }

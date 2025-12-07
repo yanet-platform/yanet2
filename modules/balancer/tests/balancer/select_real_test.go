@@ -209,7 +209,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 		}
 
 		// validate state info
-		ValidateStateInfo(t, &info, balancer.GetModuleConfig().VirtualServices)
+		ValidateStateInfo(t, info, balancer.GetModuleConfig().VirtualServices)
 	})
 
 	// enabled disabled reals
@@ -281,7 +281,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 		)
 
 		// validate state info
-		ValidateStateInfo(t, &info, balancer.GetModuleConfig().VirtualServices)
+		ValidateStateInfo(t, info, balancer.GetModuleConfig().VirtualServices)
 	})
 
 	// disabled first and second reals
@@ -357,7 +357,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 		)
 
 		// validate state info
-		ValidateStateInfo(t, &info, balancer.GetModuleConfig().VirtualServices)
+		ValidateStateInfo(t, info, balancer.GetModuleConfig().VirtualServices)
 	})
 }
 

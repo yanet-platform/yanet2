@@ -154,7 +154,7 @@ balancer_fill_info(struct balancer_state *state, struct balancer_info *info) {
 			&state->stats[worker];
 		add((uint64_t *)&info->stats,
 		    (uint64_t *)current_worker_stats,
-		    sizeof(info->stats));
+		    sizeof(info->stats) / sizeof(uint64_t));
 	}
 
 	return 0;

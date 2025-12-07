@@ -3,11 +3,13 @@ package balancer
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -42,7 +44,7 @@ func NewBalancerFromProto(
 		agent,
 		lock,
 		uint(moduleStateConfig.SessionTableCapacity),
-		uint(moduleStateConfig.SessionTableScanPeriodMs),
+		uint(moduleStateConfig.SessionTableScanPeriod.AsDuration().Milliseconds()),
 		moduleStateConfig.SessionTableMaxLoadFactor,
 		stateLog,
 	)
@@ -208,7 +210,7 @@ func (b *Balancer) Update(
 	if moduleStateConfig != nil {
 		b.moduleConfigState.Update(
 			uint(moduleStateConfig.SessionTableCapacity),
-			uint(moduleStateConfig.SessionTableScanPeriodMs),
+			uint(moduleStateConfig.SessionTableScanPeriod.AsDuration().Milliseconds()),
 			moduleStateConfig.SessionTableMaxLoadFactor,
 		)
 		b.log.Debug("updated state configuration")
@@ -245,8 +247,8 @@ func (b *Balancer) GetConfig() (*balancerpb.ModuleConfig, *balancerpb.ModuleStat
 		SessionTableCapacity: uint64(
 			b.moduleConfigState.SessionTableCapacity(),
 		),
-		SessionTableScanPeriodMs: uint32(
-			b.moduleConfigState.ScanSessionTablePeriodMs,
+		SessionTableScanPeriod: durationpb.New(
+			time.Duration(b.moduleConfigState.ScanSessionTablePeriodMs) * time.Millisecond,
 		),
 		SessionTableMaxLoadFactor: float32(b.moduleConfigState.MaxLoadFactor),
 	}
@@ -255,11 +257,19 @@ func (b *Balancer) GetConfig() (*balancerpb.ModuleConfig, *balancerpb.ModuleStat
 }
 
 // GetStateInfo returns state information
-func (b *Balancer) GetStateInfo() module.BalancerInfo {
+func (b *Balancer) GetStateInfo() *module.BalancerInfo {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
 	return b.moduleConfigState.GetInfo()
+}
+
+// GetSessionsInfo returns information about active sessions
+func (b *Balancer) GetSessionsInfo() (module.SessionsInfo, error) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	return b.moduleConfigState.SessionsInfo()
 }
 
 // GetConfigStats returns configuration statistics

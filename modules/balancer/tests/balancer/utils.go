@@ -470,18 +470,18 @@ func ValidateStateInfo(
 	t.Helper()
 	for vsIdx := range virtualServices {
 		vs := &virtualServices[vsIdx]
-		summaryActiveSession := uint64(0)
+		summaryActiveSession := uint(0)
 		summaryPackets := uint64(0)
 		for realIdx := range vs.Reals {
 			real := &vs.Reals[realIdx]
-			summaryActiveSession += info.RealInfo[real.RegistryIdx].ActiveSessions
+			summaryActiveSession += info.RealInfo[real.RegistryIdx].ActiveSessions.Value
 			summaryPackets += info.RealInfo[realIdx].Stats.Packets
 		}
 
 		vsInfo := info.VsInfo[vs.RegistryIdx]
 		assert.Equalf(
 			t,
-			vsInfo.ActiveSessions,
+			vsInfo.ActiveSessions.Value,
 			summaryActiveSession,
 			"summary active sessions mismatch for vs %d",
 			vsIdx,

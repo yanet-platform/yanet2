@@ -42,6 +42,9 @@ type ModuleConfigState struct {
 	// Real active sessions information
 	RealActiveSessions map[module.RealIdentifier]uint
 
+	// Active sessions update time
+	ActiveSessionsUpdateTimestamp time.Time
+
 	// The background operations with state must use this lock.
 	lock *sync.Mutex
 
@@ -102,7 +105,7 @@ func (s *ModuleConfigState) Update(
 			zap.Uint("new_capacity", newTableCapacity),
 		)
 		if err := s.cHandle.ResizeSessionTable(newTableCapacity); err != nil {
-			s.log.Errorw(
+			s.log.Warnw(
 				"failed to resize session table",
 				zap.Uint("new_capacity", newTableCapacity),
 				zap.Error(err),
@@ -137,7 +140,7 @@ func (s *ModuleConfigState) SessionsInfo() (module.SessionsInfo, error) {
 	now := time.Now()
 	sessions := s.cHandle.SessionsInfo(uint32(now.Unix()), false)
 	if sessions == nil {
-		s.log.Error("failed to get sessions info from C handle")
+		s.log.Warn("failed to get sessions info from C handle")
 		return module.SessionsInfo{}, fmt.Errorf("failed to scan session table")
 	}
 
@@ -289,7 +292,7 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 					err := s.ScanActiveSessionsAndResizeOnDemand()
 					s.lock.Unlock()
 					if err != nil {
-						s.log.Errorw(
+						s.log.Warnw(
 							"session table scan failed",
 							zap.Error(err),
 						)
@@ -433,31 +436,45 @@ func (s *ModuleConfigState) RegisterVsWithReals(
 
 // GetInfo returns balancer state information
 // Note: Caller must hold the lock
-func (s *ModuleConfigState) GetInfo() module.BalancerInfo {
-	// Get VS info from state
-	vsInfoList := s.cHandle.VirtualServicesInfo()
+func (s *ModuleConfigState) GetInfo() *module.BalancerInfo {
+	info := s.cHandle.BalancerInfo()
 
 	// Setup active sessions for virtual services
-	for idx := range vsInfoList {
-		vs := &vsInfoList[idx]
-		vs.ActiveSessions = uint64(s.VsActiveSessions[vs.VsIdentifier])
+	summaryVsSessions := uint(0)
+	for idx := range info.VsInfo {
+		vs := &info.VsInfo[idx]
+		vs.ActiveSessions = module.AsyncInfo{
+			Value:     s.VsActiveSessions[vs.VsIdentifier],
+			UpdatedAt: s.ActiveSessionsUpdateTimestamp,
+		}
+		summaryVsSessions += vs.ActiveSessions.Value
 	}
-
-	// Get real info from state
-	realInfoList := s.cHandle.RealsInfo()
 
 	// Set active session for reals
-	for idx := range realInfoList {
-		real := &realInfoList[idx]
-		real.ActiveSessions = uint64(s.RealActiveSessions[real.RealIdentifier])
+	summaryRealSessions := uint(0)
+	for idx := range info.RealInfo {
+		real := &info.RealInfo[idx]
+		real.ActiveSessions = module.AsyncInfo{
+			Value:     s.RealActiveSessions[real.RealIdentifier],
+			UpdatedAt: s.ActiveSessionsUpdateTimestamp,
+		}
+		summaryRealSessions += real.ActiveSessions.Value
 	}
 
-	// TODO: Get module stats from dataplane
-	moduleStats := module.ModuleStats{}
-
-	return module.BalancerInfo{
-		Module:   moduleStats,
-		VsInfo:   vsInfoList,
-		RealInfo: realInfoList,
+	// Log error, which should not occur
+	if summaryVsSessions != summaryRealSessions {
+		s.log.Errorf(
+			"virtual service active sessions (%d) do not match real active sessions (%d)",
+			summaryVsSessions,
+			summaryRealSessions,
+		)
 	}
+
+	// Set active sessions
+	info.ActiveSessions = module.AsyncInfo{
+		Value:     summaryVsSessions,
+		UpdatedAt: s.ActiveSessionsUpdateTimestamp,
+	}
+
+	return info
 }

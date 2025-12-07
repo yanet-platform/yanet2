@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -22,7 +23,7 @@ type RealInfo struct {
 	RealIdentifier RealIdentifier
 
 	// Number of active sessions with this real.
-	ActiveSessions uint64
+	ActiveSessions AsyncInfo
 
 	// Timestamp of the last packet.
 	LastPacketTimestamp time.Time
@@ -39,7 +40,7 @@ func (i RealInfo) IntoProto() *balancerpb.RealInfo {
 		VsPort:              uint32(i.RealIdentifier.Vs.Port),
 		VsProto:             i.RealIdentifier.Vs.Proto.IntoProto(),
 		RealIp:              i.RealIdentifier.Ip.AsSlice(),
-		ActiveSessions:      i.ActiveSessions,
+		ActiveSessions:      i.ActiveSessions.IntoProto(),
 		LastPacketTimestamp: timestamppb.New(i.LastPacketTimestamp),
 		Stats:               i.Stats.IntoProto(),
 	}
@@ -84,7 +85,7 @@ func NewRealInfoFromProto(pb *balancerpb.RealInfo) (*RealInfo, error) {
 	return &RealInfo{
 		RealRegistryIdx:     uint(pb.RealRegistryIdx),
 		RealIdentifier:      realId,
-		ActiveSessions:      pb.ActiveSessions,
+		ActiveSessions:      *NewAsyncInfoFromProto(pb.ActiveSessions),
 		LastPacketTimestamp: lastPacketTime,
 		Stats:               *NewRealStatsFromProto(pb.Stats),
 	}, nil
@@ -116,7 +117,7 @@ type VsInfo struct {
 
 	// Number of active sessions established with
 	// virtual service.
-	ActiveSessions uint64
+	ActiveSessions AsyncInfo
 
 	// Timestamp of the last packet.
 	LastPacketTimestamp time.Time
@@ -132,7 +133,7 @@ func (i VsInfo) IntoProto() *balancerpb.VsInfo {
 		VsIp:                i.VsIdentifier.Ip.AsSlice(),
 		VsPort:              uint32(i.VsIdentifier.Port),
 		VsProto:             i.VsIdentifier.Proto.IntoProto(),
-		ActiveSessions:      i.ActiveSessions,
+		ActiveSessions:      i.ActiveSessions.IntoProto(),
 		LastPacketTimestamp: timestamppb.New(i.LastPacketTimestamp),
 		Stats:               i.Stats.IntoProto(),
 	}
@@ -167,7 +168,7 @@ func NewVsInfoFromProto(pb *balancerpb.VsInfo) (*VsInfo, error) {
 	return &VsInfo{
 		VsRegistryIdx:       uint(pb.VsRegistryIdx),
 		VsIdentifier:        vsId,
-		ActiveSessions:      pb.ActiveSessions,
+		ActiveSessions:      *NewAsyncInfoFromProto(pb.ActiveSessions),
 		LastPacketTimestamp: lastPacketTime,
 		Stats:               *NewVsStatsFromProto(pb.Stats),
 	}, nil
@@ -199,9 +200,10 @@ func NewVsStatsFromProto(pb *balancerpb.VsStats) *VsStats {
 
 // Config-independent state of the balancer.
 type BalancerInfo struct {
-	Module   ModuleStats
-	VsInfo   []VsInfo
-	RealInfo []RealInfo
+	ActiveSessions AsyncInfo
+	Module         ModuleStats
+	VsInfo         []VsInfo
+	RealInfo       []RealInfo
 }
 
 // IntoProto converts BalancerInfo to protobuf message.
@@ -217,9 +219,10 @@ func (i BalancerInfo) IntoProto() *balancerpb.BalancerInfo {
 	}
 
 	return &balancerpb.BalancerInfo{
-		Module:   i.Module.IntoProto(),
-		VsInfo:   vsInfo,
-		RealInfo: realInfo,
+		ActiveSessions: i.ActiveSessions.IntoProto(),
+		Module:         i.Module.IntoProto(),
+		VsInfo:         vsInfo,
+		RealInfo:       realInfo,
 	}
 }
 
@@ -333,6 +336,19 @@ type SessionInfo struct {
 	Timeout             time.Duration
 }
 
+// IntoProto converts SessionInfo to protobuf message
+func (s SessionInfo) IntoProto() *balancerpb.SessionInfo {
+	return &balancerpb.SessionInfo{
+		ClientAddr:          s.ClientAddr.AsSlice(),
+		ClientPort:          uint32(s.ClientPort),
+		RealAddr:            s.Real.Ip.AsSlice(),
+		RealPort:            uint32(s.Real.Vs.Port),
+		CreateTimestamp:     timestamppb.New(s.CreateTimestamp),
+		LastPacketTimestamp: timestamppb.New(s.LastPacketTimestamp),
+		Timeout:             durationpb.New(s.Timeout),
+	}
+}
+
 // Info about active sessions
 type SessionsInfo struct {
 	// Number of active sessions
@@ -344,4 +360,32 @@ type SessionsInfo struct {
 	Sessions []SessionInfo
 }
 
-// TODO: Add SessionInfo.IntoProto()
+////////////////////////////////////////////////////////////////////////////////
+
+// Info about value which we update asynchronously
+type AsyncInfo struct {
+	Value     uint
+	UpdatedAt time.Time
+}
+
+func (info AsyncInfo) IntoProto() *balancerpb.AsyncInfo {
+	return &balancerpb.AsyncInfo{
+		Value:     uint64(info.Value),
+		UpdatedAt: timestamppb.New(info.UpdatedAt),
+	}
+}
+
+// NewAsyncInfoFromProto creates AsyncInfo from protobuf message.
+func NewAsyncInfoFromProto(pb *balancerpb.AsyncInfo) *AsyncInfo {
+	if pb == nil {
+		return &AsyncInfo{}
+	}
+	var updatedAt time.Time
+	if pb.UpdatedAt != nil {
+		updatedAt = pb.UpdatedAt.AsTime()
+	}
+	return &AsyncInfo{
+		Value:     uint(pb.Value),
+		UpdatedAt: updatedAt,
+	}
+}

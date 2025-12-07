@@ -87,7 +87,11 @@ handle_icmp_echo_ipv6(struct packet_ctx *ctx) {
 	struct rte_icmp_hdr *icmp = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_icmp_hdr *, packet->transport_header.offset
 	);
+	RTE_LOG(DEBUG, USER1, "ICMPv6 Echo: Before - type=%u, expected ICMP6_ECHO_REQUEST=%u\n",
+		icmp->icmp_type, ICMP6_ECHO_REQUEST);
 	setup_icmp_header_on_echo_request(icmp);
+	RTE_LOG(DEBUG, USER1, "ICMPv6 Echo: After setup - type=%u, should be ICMP6_ECHO_REPLY=%u but got ICMP_ECHOREPLY=%u\n",
+		icmp->icmp_type, ICMP6_ECHO_REPLY, ICMP_ECHOREPLY);
 
 	struct rte_ipv6_hdr *ip = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
