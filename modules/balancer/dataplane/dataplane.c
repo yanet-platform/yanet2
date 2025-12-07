@@ -4,12 +4,15 @@
 #include <rte_tcp.h>
 #include <rte_udp.h>
 
+#include "flow/setup.h"
+#include "flow/stats.h"
+
 #include "common/memory_address.h"
 #include "controlplane/config/econtext.h"
-#include "ctx.h"
 #include "dataplane.h"
 #include "dataplane/config/zone.h"
 #include "decap.h"
+#include "flow/stats.h"
 #include "modules/balancer/dataplane/module.h"
 
 #include "icmp/handle.h"
@@ -33,9 +36,9 @@ packet_ctx_handle(struct packet_ctx *ctx) {
 	}
 }
 
-static inline void
+static inline int
 packet_ctx_try_decap(struct packet_ctx *ctx) {
-	try_decap(ctx);
+	return try_decap(ctx);
 }
 
 void
@@ -44,15 +47,18 @@ balancer_handle_packets(
 	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 ) {
+	// Get balancer module config as container of provided cp_module.
 	struct balancer_module_config *config = container_of(
 		ADDR_OF(&module_ectx->cp_module),
 		struct balancer_module_config,
 		cp_module
 	);
 
-	// TODO: FIXME
+	// Get current time.
+	// TODO: FIXME, take time from the worker context.
 	uint32_t now = time(NULL);
 
+	// Setup packet context.
 	struct packet_ctx ctx;
 	packet_ctx_setup(
 		&ctx, now, dp_worker, module_ectx, config, packet_front
@@ -60,14 +66,26 @@ balancer_handle_packets(
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
-		// set incoming packet
-		packet_ctx_incoming_packet(&ctx, packet);
+		// Set incoming packet
+		packet_ctx_set_packet(&ctx, packet);
 
-		// try decap packet if its destination
-		// is from the balancer decap list
-		packet_ctx_try_decap(&ctx);
+		// Update module common stats
+		packet_ctx_update_common_stats_on_incoming_packet(&ctx);
 
-		// handle incoming packet
+		// Try decap packet if its destination
+		// is from the balancer decap list.
+		//
+		// If packet dst is from the destination list
+		// and decap failed, drop packet.
+		if (packet_ctx_try_decap(&ctx) != 0) {
+			packet_ctx_drop_packet(&ctx);
+		}
+
+		// Handle incoming packet.
+		// This function drop packet
+		// or passes it to the next module
+		// under the hood. Or crafts new ICMP packets
+		// and also passes it to the next module.
 		packet_ctx_handle(&ctx);
 	}
 }

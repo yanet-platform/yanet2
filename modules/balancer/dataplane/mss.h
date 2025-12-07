@@ -2,8 +2,6 @@
 
 #include "lib/dataplane/packet/packet.h"
 
-#include "checksum.h"
-
 #include <netinet/in.h>
 #include <rte_ether.h>
 #include <rte_ip.h>
@@ -11,6 +9,8 @@
 #include <rte_mbuf_core.h>
 #include <rte_tcp.h>
 #include <rte_udp.h>
+
+#include "checksum.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 

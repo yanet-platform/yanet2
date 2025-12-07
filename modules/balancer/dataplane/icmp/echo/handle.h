@@ -1,10 +1,14 @@
 #pragma once
 
 #include "common/network.h"
+#include "flow/helpers.h"
 #include "lib/dataplane/packet/packet.h"
 
 #include "../../checksum.h"
-#include "../../ctx.h"
+
+#include "../../flow/common.h"
+#include "../../flow/context.h"
+#include "../../flow/stats.h"
 
 #include <netinet/icmp6.h>
 #include <netinet/in.h>
@@ -23,6 +27,16 @@ setup_icmp_header_on_echo_request(struct rte_icmp_hdr *icmp) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+static inline void
+send_packet(struct packet_ctx *ctx) {
+	// update counters
+	ICMP_V4_STATS_INC(echo_responses, ctx);
+	packet_ctx_update_common_stats_on_outgoing_packet(ctx);
+
+	// send packet to the next module
+	packet_ctx_send_packet(ctx);
+}
 
 static inline void
 handle_icmp_echo_ipv4(struct packet_ctx *ctx) {
@@ -58,8 +72,9 @@ handle_icmp_echo_ipv4(struct packet_ctx *ctx) {
 	icmp_checksum = csum_plus(icmp_checksum, ICMP_ECHOREPLY);
 	icmp->icmp_cksum = ~icmp_checksum;
 
-	// update counter
-	ctx->counter.icmp->generated_echo_response_ipv4 += 1;
+	// update counters and pass packet
+	ctx->counter.icmp_v4->echo_responses += 1;
+	send_packet(ctx); // updates common counters under the hood.
 }
 
 static inline void
@@ -89,6 +104,7 @@ handle_icmp_echo_ipv6(struct packet_ctx *ctx) {
 	checksum = csum_plus(checksum, ICMP6_ECHO_REPLY);
 	icmp->icmp_cksum = ~checksum;
 
-	// update counter
-	ctx->counter.icmp->generated_echo_response_ipv6 += 1;
+	// update counter and pass packet
+	ctx->counter.icmp_v6->echo_responses += 1;
+	send_packet(ctx); // updates common counters under the hood.
 }

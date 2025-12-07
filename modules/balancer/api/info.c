@@ -8,18 +8,20 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 int
-balancer_fill_vs_info(
+balancer_fill_virtual_services_info(
 	struct balancer_state *state,
 	struct balancer_virtual_services_info *info
 ) {
 	size_t count = state->vs_registry.service_count;
-	struct balancer_vs_info *vs_info = memory_balloc(
-		state->mctx, count * sizeof(struct balancer_vs_info)
+	struct balancer_virtual_service_info *vs_info = memory_balloc(
+		state->mctx,
+		count * sizeof(struct balancer_virtual_service_info)
 	);
 	if (vs_info == NULL) {
 		return -1;
 	}
 	for (size_t i = 0; i < count; ++i) {
+		memset(&vs_info[i], 0, sizeof(vs_info[i]));
 		service_info_accumulate_into_vs_info(
 			&state->vs_registry.services[i],
 			&vs_info[i],
@@ -31,15 +33,35 @@ balancer_fill_vs_info(
 	return 0;
 }
 
+/// Fills virtual service info.
+/// @returns -1 on error.
+int
+balancer_fill_virtual_service_info(
+	struct balancer_state *state,
+	size_t virtual_service_idx,
+	struct balancer_virtual_service_info *info
+) {
+	if (virtual_service_idx >= state->vs_registry.service_count) {
+		return -1;
+	}
+	memset(info, 0, sizeof(*info));
+	service_info_accumulate_into_vs_info(
+		&state->vs_registry.services[virtual_service_idx],
+		info,
+		state->workers
+	);
+	return 0;
+}
+
 void
-balancer_free_vs_info(
+balancer_free_virtual_services_info(
 	struct balancer_state *state,
 	struct balancer_virtual_services_info *info
 ) {
 	memory_bfree(
 		state->mctx,
 		info->info,
-		info->count * sizeof(struct balancer_vs_info)
+		info->count * sizeof(struct balancer_virtual_service_info)
 	);
 }
 
@@ -94,4 +116,52 @@ balancer_fill_real_info(
 		&state->real_registry.services[real_idx], info, state->workers
 	);
 	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Helper function to add one uint64 array to another.
+static inline void
+add(uint64_t *dst, uint64_t *src, size_t size) {
+	for (size_t i = 0; i < size; ++i) {
+		dst[i] += src[i];
+	}
+}
+
+int
+balancer_fill_info(struct balancer_state *state, struct balancer_info *info) {
+	// Fill virtual services stats
+	if (balancer_fill_virtual_services_info(
+		    state, &info->virtual_services
+	    ) != 0) {
+		return -1;
+	}
+
+	// Fill real stats
+	if (balancer_fill_reals_info(state, &info->reals) != 0) {
+		balancer_free_virtual_services_info(
+			state, &info->virtual_services
+		);
+		return -1;
+	}
+
+	// Fill stats
+
+	// Aggregate stats from multiple workers
+	memset(&info->stats, 0, sizeof(info->stats));
+	for (size_t worker = 0; worker < state->workers; ++worker) {
+		struct balancer_stats *current_worker_stats =
+			&state->stats[worker];
+		add((uint64_t *)&info->stats,
+		    (uint64_t *)current_worker_stats,
+		    sizeof(info->stats));
+	}
+
+	return 0;
+}
+
+void
+balancer_free_info(struct balancer_state *state, struct balancer_info *info) {
+	balancer_free_virtual_services_info(state, &info->virtual_services);
+	balancer_free_reals_info(state, &info->reals);
 }

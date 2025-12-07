@@ -23,6 +23,8 @@ handle_icmp_packet(struct packet_ctx *ctx) {
 		ctx->packet->transport_header.offset
 	);
 
+	// this functions send or drop packets under the hood
+	// (and update corresponding counters)
 	switch (icmp->icmp_type) {
 	case ICMP_ECHO:
 		handle_icmp_echo_ipv4(ctx);

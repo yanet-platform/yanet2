@@ -4,9 +4,12 @@
 #include <stdint.h>
 
 #include "common/network.h"
-#include "modules/balancer/api/stats.h"
+
+#include "stats.h"
 
 ////////////////////////////////////////////////////////////////////////////////
+
+/// Info about balancer state.
 
 // Balancer state
 struct balancer_state;
@@ -14,7 +17,7 @@ struct balancer_state;
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Persistent config-independent info about virtual service
-struct balancer_vs_info {
+struct balancer_virtual_service_info {
 	// ip
 	uint8_t ip[NET6_LEN];
 	int ip_proto; // IPPROTO_IPV4 or IPPROTO_IPV6
@@ -38,19 +41,28 @@ struct balancer_vs_info {
 
 struct balancer_virtual_services_info {
 	size_t count;
-	struct balancer_vs_info *info;
+	struct balancer_virtual_service_info *info;
 };
 
 /// Fills virtual services info.
 /// @returns -1 on error.
 int
-balancer_fill_vs_info(
+balancer_fill_virtual_services_info(
 	struct balancer_state *state,
 	struct balancer_virtual_services_info *info
 );
 
+/// Fills virtual service info.
+/// @returns -1 on error.
+int
+balancer_fill_virtual_service_info(
+	struct balancer_state *state,
+	size_t virtual_service_idx,
+	struct balancer_virtual_service_info *info
+);
+
 void
-balancer_free_vs_info(
+balancer_free_virtual_services_info(
 	struct balancer_state *state,
 	struct balancer_virtual_services_info *info
 );
@@ -109,3 +121,23 @@ void
 balancer_free_reals_info(
 	struct balancer_state *state, struct balancer_reals_info *info
 );
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Info about balancer state.
+struct balancer_info {
+	// Statistics of the balancer.
+	struct balancer_stats stats;
+
+	// Info about virtual services.
+	struct balancer_virtual_services_info virtual_services;
+
+	// Info about real services.
+	struct balancer_reals_info reals;
+};
+
+int
+balancer_fill_info(struct balancer_state *state, struct balancer_info *info);
+
+void
+balancer_free_info(struct balancer_state *state, struct balancer_info *info);

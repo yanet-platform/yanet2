@@ -5,7 +5,6 @@
 #include <stdalign.h>
 
 #include "common/memory_address.h"
-#include "common/memory_block.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/dataplane/config/zone.h"
 #include "modules/balancer/state/session_table.h"
@@ -14,16 +13,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_state *
-balancer_state_create(
-	struct agent *agent,
-	size_t table_size,
-	uint32_t tcp_syn_ack_timeout,
-	uint32_t tcp_syn_timeout,
-	uint32_t tcp_fin_timeout,
-	uint32_t tcp_timeout,
-	uint32_t udp_timeout,
-	uint32_t default_timeout
-) {
+balancer_state_create(struct agent *agent, size_t table_size) {
 	struct memory_context *mctx = &agent->memory_context;
 
 	// allocate balancer state
@@ -45,18 +35,8 @@ balancer_state_create(
 	size_t workers = ADDR_OF(&agent->dp_config)->worker_count;
 
 	// init balancer state
-	int res = balancer_state_init(
-		balancer_state,
-		mctx,
-		workers,
-		table_size,
-		tcp_syn_ack_timeout,
-		tcp_syn_timeout,
-		tcp_fin_timeout,
-		tcp_timeout,
-		udp_timeout,
-		default_timeout
-	);
+	int res =
+		balancer_state_init(balancer_state, mctx, workers, table_size);
 	if (res != 0) {
 		memory_bfree(
 			mctx, memory, sizeof(struct session_table) + align
@@ -84,43 +64,36 @@ balancer_state_destroy(struct balancer_state *state) {
 ssize_t
 balancer_state_register_vs(
 	struct balancer_state *state,
-	uint64_t flags,
+	int transport_proto,
+	int network_proto,
 	uint8_t *ip_address,
-	uint16_t port,
-	int transport_proto
+	uint16_t port
 ) {
 	struct service_info *res = NULL;
 	return balancer_state_find_or_insert_vs(
-		state,
-		ip_address,
-		flags & BALANCER_VS_IPV6_FLAG ? IPPROTO_IPV6 : IPPROTO_IP,
-		port,
-		transport_proto,
-		&res
+		state, ip_address, network_proto, port, transport_proto, &res
 	);
 }
 
 ssize_t
 balancer_state_register_real(
 	struct balancer_state *state,
-	uint8_t *vip_address,
-	uint64_t virtual_flags,
-	uint16_t port,
 	int transport_proto,
-	uint64_t real_flags,
+	int vip_network_proto,
+	uint8_t *vip_address,
+	uint16_t port,
+	int real_network_proto,
 	uint8_t *ip_address
 ) {
 	struct service_info *res = NULL;
 	return balancer_state_find_or_insert_real(
 		state,
 		vip_address,
-		virtual_flags & BALANCER_VS_IPV6_FLAG ? IPPROTO_IPV6
-						      : IPPROTO_IP,
+		vip_network_proto,
 		port,
 		transport_proto,
 		ip_address,
-		real_flags & BALANCER_REAL_IPV6_FLAG ? IPPROTO_IPV6
-						     : IPPROTO_IP,
+		real_network_proto,
 		&res
 	);
 }

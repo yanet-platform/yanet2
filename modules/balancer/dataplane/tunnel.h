@@ -13,7 +13,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline int
+static inline void
 tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 	// fix packet MSS if flag is specified and vs is IPv6
 	if ((vs_flags & BALANCER_VS_FIX_MSS_FLAG) &&
@@ -77,7 +77,7 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 
 		if (rte_pktmbuf_prepend(mbuf, gre_hdr_size) == NULL) {
 			// not enough headroom to insert GRE
-			return -1;
+			assert(false);
 		}
 
 		const uint16_t len_before_gre =
@@ -136,6 +136,4 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 		// shifts forward)
 		packet->transport_header.offset += gre_hdr_size;
 	}
-
-	return 0;
 }

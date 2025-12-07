@@ -1,29 +1,34 @@
 #pragma once
 
-#include "../ctx.h"
+#include "flow/helpers.h"
+#include "flow/stats.h"
+#include "select.h"
+
 #include "../lookup.h"
-#include "../select.h"
 #include "../tunnel.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline void
 handle_l4_packet(struct packet_ctx *ctx) {
-	// 1. Lookup virtual service for which packet is
-	// directed to
+	// update stats
+	L4_STATS_INC(incoming_packets, ctx);
 
-	struct virtual_service *vs = vs_lookup_and_fw(ctx);
-	if (vs == NULL) { // not found virtual service
+	// 1. Validate packet and set metadata
+	struct packet_metadata meta;
+	int res = fill_packet_metadata(ctx->packet, &meta);
+	if (res != 0) { // unexpected packet type
+		L4_STATS_INC(invalid_packets, ctx);
 		packet_ctx_drop_packet(ctx);
 		return;
 	}
 
-	// 2. Fill packet metadata
+	// 2. Lookup virtual service for which packet is
+	// directed to
 
-	struct packet_metadata meta;
-	int res = fill_packet_metadata(ctx->packet, &meta);
-
-	if (res != 0) { // unexpected packet type
+	struct virtual_service *vs = vs_lookup_and_fw(ctx);
+	if (vs == NULL) { // not found virtual service
+		L4_STATS_INC(select_vs_failed, ctx);
 		packet_ctx_drop_packet(ctx);
 		return;
 	}
@@ -34,16 +39,21 @@ handle_l4_packet(struct packet_ctx *ctx) {
 		ctx, ctx->config, ctx->now, ctx->worker->idx, vs, &meta
 	);
 	if (rs == NULL) { // failed to select real
+		// update stats
+		L4_STATS_INC(select_real_failed, ctx);
 		packet_ctx_drop_packet(ctx);
 		return;
 	}
 
 	// 4. Add tunnel to the selected real for the packet
 
-	res = tunnel_packet(vs->flags, rs, ctx->packet);
-	assert(res == 0);
+	tunnel_packet(vs->flags, rs, ctx->packet);
 
 	// 5. Pass packet to the next module
 
 	packet_ctx_send_packet(ctx);
+
+	// update stats
+	L4_STATS_INC(outgoing_packets, ctx);
+	packet_ctx_update_common_stats_on_outgoing_packet(ctx);
 }

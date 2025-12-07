@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package balancerpb;
+
+import "modules/balancer/controlplane/balancerpb/module.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/"
+    "balancer/controlplane/balancerpb;balancerpb";
+
+// Mirrors module.L4Stats
+message L4Stats {
+  uint64 incoming_packets = 1;
+  uint64 select_vs_failed = 2;
+  uint64 invalid_packets = 3;
+  uint64 select_real_failed = 4;
+  uint64 outgoing_packets = 5;
+}
+
+// Mirrors module.ICMPStats
+message IcmpStats {
+  uint64 incoming_packets = 1;
+  uint64 echo_responses = 2;
+  uint64 payload_too_short_ip = 3;
+  uint64 unmatching_src_from_original = 4;
+  uint64 payload_too_short_port = 5;
+  uint64 unexpected_transport = 6;
+  uint64 unrecognized_vs = 7;
+  uint64 forwarded_packets = 8;
+  uint64 broadcasted_packets = 9;
+  uint64 packet_clones = 10;
+  uint64 packet_clone_failures = 11;
+}
+
+// Mirrors module.CommonStats
+message CommonStats {
+  uint64 incoming_packets = 1;
+  uint64 incoming_bytes = 2;
+  uint64 unexpected_network_proto = 3;
+  uint64 decap_successful = 4;
+  uint64 decap_failed = 5;
+  uint64 outgoing_packets = 6;
+  uint64 outgoing_bytes = 7;
+}
+
+// Mirrors module.VsStats (renamed to avoid conflict)
+message VsStats {
+  uint64 incoming_packets = 1;
+  uint64 incoming_bytes = 2;
+  uint64 packet_src_not_allowed = 3;
+  uint64 no_reals = 4;
+  uint64 ops_packets = 5;
+  uint64 session_table_overflow = 6;
+  uint64 echo_icmp_packets = 7;
+  uint64 error_icmp_packets = 8;
+  uint64 real_is_disabled = 9;
+  uint64 real_is_removed = 10;
+  uint64 not_rescheduled_packets = 11;
+  uint64 broadcasted_icmp_packets = 12;
+  uint64 created_sessions = 13;
+  uint64 outgoing_packets = 14;
+  uint64 outgoing_bytes = 15;
+}
+
+// Mirrors module.RealStats (renamed to avoid conflict)
+message RealStats {
+  uint64 packets_real_disabled = 1;
+  uint64 packets_real_not_present = 2;
+  uint64 ops_packets = 3;
+  uint64 error_icmp_packets = 4;
+  uint64 created_sessions = 5;
+  uint64 packets = 6;
+  uint64 bytes = 7;
+}
+
+// Mirrors module.VsStatsInfo
+message VsStatsInfo {
+  uint32 vs_registry_idx = 1;
+  bytes ip = 2;
+  uint32 port = 3;
+  TransportProto proto = 4;
+  VsStats stats = 5;
+}
+
+// Mirrors module.RealStatsInfo
+message RealStatsInfo {
+  uint32 real_registry_idx = 1;
+  bytes vs_ip = 2;
+  uint32 port = 3;
+  TransportProto proto = 4;
+  bytes real_ip = 5;
+  RealStats stats = 6;
+}
+
+// Mirrors module.ModuleStats
+message ModuleStats {
+  L4Stats l4 = 1;
+  IcmpStats icmpv4 = 2;
+  IcmpStats icmpv6 = 3;
+  CommonStats common = 4;
+}
+
+// Mirrors module.BalancerStats
+message BalancerStats {
+  ModuleStats module = 1;
+  repeated VsStatsInfo vs = 2;
+  repeated RealStatsInfo reals = 3;
+}

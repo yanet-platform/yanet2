@@ -1,9 +1,7 @@
 #include "state.h"
-#include "common/exp_array.h"
 #include "common/memory.h"
 #include "common/network.h"
 #include "modules/balancer/state/registry.h"
-#include "modules/balancer/state/session.h"
 #include "modules/balancer/state/session_table.h"
 #include "session_table.h"
 #include <assert.h>
@@ -13,25 +11,10 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 static int
-service_state_init(
-	struct service_state *state,
-	struct memory_context *mctx,
-	uint32_t max_timeout
-) {
+service_state_init(struct service_state *state) {
 	state->last_packet_timestamp = 0;
-	int res = interval_counter_init(
-		&state->active_sessions, 0, max_timeout, mctx
-	);
-	if (res != 0) {
-		return -1;
-	}
 	memset(&state->stats, 0, sizeof(state->stats));
 	return 0;
-}
-
-static void
-service_state_free(struct service_state *state) {
-	interval_counter_free(&state->active_sessions);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -45,16 +28,8 @@ service_registry_init(struct service_registry *registry) {
 
 static void
 service_registry_free(
-	struct service_registry *registry,
-	struct memory_context *mctx,
-	size_t workers
+	struct service_registry *registry, struct memory_context *mctx
 ) {
-	for (size_t i = 0; i < registry->service_count; ++i) {
-		struct service_info *service = &registry->services[i];
-		for (size_t w = 0; w < workers; ++w) {
-			service_state_free(&service->state[w]);
-		}
-	}
 	memory_bfree(
 		mctx,
 		registry->services,
@@ -69,13 +44,7 @@ balancer_state_init(
 	struct balancer_state *state,
 	struct memory_context *mctx,
 	size_t workers,
-	size_t table_size,
-	uint32_t tcp_syn_ack_timeout,
-	uint32_t tcp_syn_timeout,
-	uint32_t tcp_fin_timeout,
-	uint32_t tcp_timeout,
-	uint32_t udp_timeout,
-	uint32_t default_timeout
+	size_t table_size
 ) {
 	assert((uintptr_t)state % alignof(struct balancer_state) == 0);
 
@@ -84,30 +53,6 @@ balancer_state_init(
 
 	// workers
 	state->workers = workers;
-
-	// init timeouts
-	state->timeouts =
-		(struct sessions_timeouts){.tcp_syn_ack = tcp_syn_ack_timeout,
-					   .tcp_syn = tcp_syn_timeout,
-					   .tcp_fin = tcp_fin_timeout,
-					   .tcp = tcp_timeout,
-					   .udp = udp_timeout,
-					   .default_timeout = default_timeout};
-
-	// set max timeout
-	state->max_timeout = default_timeout;
-	if (tcp_syn_ack_timeout > state->max_timeout) {
-		state->max_timeout = tcp_syn_ack_timeout;
-	}
-	if (tcp_fin_timeout > state->max_timeout) {
-		state->max_timeout = tcp_fin_timeout;
-	}
-	if (tcp_timeout > state->max_timeout) {
-		state->max_timeout = tcp_timeout;
-	}
-	if (udp_timeout > state->max_timeout) {
-		state->max_timeout = udp_timeout;
-	}
 
 	// init session table
 	int res = session_table_init(
@@ -129,16 +74,17 @@ balancer_state_init(
 		return -1;
 	}
 
+	// setup stats
+	memset(state->stats, 0, sizeof(state->stats));
+
 	return 0;
 }
 
 void
 balancer_state_free(struct balancer_state *state) {
 	session_table_free(&state->session_table);
-	service_registry_free(&state->vs_registry, state->mctx, state->workers);
-	service_registry_free(
-		&state->real_registry, state->mctx, state->workers
-	);
+	service_registry_free(&state->vs_registry, state->mctx);
+	service_registry_free(&state->real_registry, state->mctx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -228,9 +174,7 @@ find_or_insert_into_registry(
 	       (ip_proto == IPPROTO_IPV6 ? NET6_LEN : NET4_LEN));
 	for (size_t worker = 0; worker < state->workers; ++worker) {
 		struct service_state *service_state = &service->state[worker];
-		int res = service_state_init(
-			service_state, state->mctx, state->max_timeout
-		);
+		int res = service_state_init(service_state);
 		if (res != 0) {
 			return -1;
 		}

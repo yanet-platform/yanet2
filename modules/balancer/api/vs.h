@@ -74,8 +74,8 @@ void
 balancer_vs_config_free(struct balancer_vs_config *vs_config);
 
 /// Allows to setup one real of the virtual service.
-/// @param id Index of the real in the balancer state registry
-/// @param index Index of the real in virtual service list.
+/// @param real_registry_idx Index of the real in the balancer state registry
+/// @param idx Index of the real in virtual service list.
 /// @param flags Real flags.
 /// @param weight Weight of the real (more weight -> more requests to the real).
 /// @param dst_addr Address of the real.
@@ -85,8 +85,8 @@ balancer_vs_config_free(struct balancer_vs_config *vs_config);
 void
 balancer_vs_config_set_real(
 	struct balancer_vs_config *vs_config,
-	size_t id,
-	size_t index,
+	size_t real_registry_idx,
+	size_t idx,
 	uint64_t flags,
 	uint16_t weight,
 	uint8_t *dst_addr,

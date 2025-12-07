@@ -10,16 +10,11 @@
 #include "../api/info.h"
 #include "../dataplane/real.h"
 
-#include "common/interval_counter.h"
-
 ////////////////////////////////////////////////////////////////////////////////
 
 // Persistent state of the service (virtual or real).
 // Sharded between workers.
 struct service_state {
-	// used to track active connections
-	struct interval_counter active_sessions;
-
 	// last packet timestamp
 	uint32_t last_packet_timestamp;
 
@@ -59,7 +54,7 @@ struct service_info {
 };
 
 struct balancer_real_info;
-struct balancer_vs_info;
+struct balancer_virtual_service_info;
 
 void
 service_info_accumulate_into_real_info(
@@ -71,7 +66,7 @@ service_info_accumulate_into_real_info(
 void
 service_info_accumulate_into_vs_info(
 	struct service_info *service_info,
-	struct balancer_vs_info *vs_info,
+	struct balancer_virtual_service_info *vs_info,
 	size_t workers
 );
 
@@ -85,17 +80,6 @@ struct service_registry {
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline void
-service_state_put_session(
-	struct service_state *state,
-	uint32_t now,
-	uint32_t from,
-	uint32_t timeout
-) {
-	interval_counter_put(&state->active_sessions, from, timeout, 1);
-	state->last_packet_timestamp = now;
-}
-
-static inline void
-service_state_update(struct service_state *state, uint32_t now) {
-	interval_counter_advance_time(&state->active_sessions, now);
+service_state_register_packet(struct service_state *state, uint32_t timestamp) {
+	state->last_packet_timestamp = timestamp;
 }

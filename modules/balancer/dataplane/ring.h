@@ -64,15 +64,12 @@ ring_free(struct ring *ring) {
 	);
 }
 
-/**
- * Selects a real server based on weighted random selection.
- * Caller must ensure rnd changes on each call for proper distribution.
- */
+// Selects a real server based on passed index.
 static inline uint32_t
-ring_get(struct ring *ring, uint64_t rnd) {
+ring_get(struct ring *ring, uint64_t index) {
 	if (!ring->len) {
 		return RING_VALUE_INVALID;
 	}
-	uint64_t idx = rnd % ring->len;
+	uint64_t idx = index % ring->len;
 	return *(ADDR_OF(&ring->ids) + idx);
 }

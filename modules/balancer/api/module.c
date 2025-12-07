@@ -48,6 +48,7 @@ balancer_module_config_create(
 	struct agent *agent,
 	const char *name,
 	struct balancer_state *state,
+	struct balancer_sessions_timeouts *sessions_timeouts,
 	size_t vs_count,
 	struct balancer_vs_config **vs_configs,
 	struct net4_addr *source_addr,
@@ -76,6 +77,11 @@ balancer_module_config_create(
 	    )) {
 		goto free_config_no_lpm;
 	}
+
+	// Init sessions timeouts
+	memcpy(&balancer_config->sessions_timeouts,
+	       sessions_timeouts,
+	       sizeof(struct balancer_sessions_timeouts));
 
 	// Set balancer state
 	SET_OFFSET_OF(&balancer_config->state, state);

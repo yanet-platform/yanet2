@@ -6,17 +6,18 @@
 #include <netinet/in.h>
 #include <netinet/ip_icmp.h>
 
+#include "../../flow/helpers.h"
 #include "../../module.h"
-
 #include "../../tunnel.h"
 #include "../../vs.h"
 
+#include "flow/stats.h"
 #include "validate.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-handle_icmp_error_packet(struct packet_ctx *ctx) { // todo: packet -> packet_ctx
+handle_icmp_error_packet(struct packet_ctx *ctx) {
 	// If session with goal real is present on the balancer,
 	// forward packet to this real.
 	//
@@ -24,6 +25,7 @@ handle_icmp_error_packet(struct packet_ctx *ctx) { // todo: packet -> packet_ctx
 	// balancers.
 
 	// First, validate and parse packet.
+	// On errors, update corresponding counters.
 	enum validate_packet_result validate_result =
 		validate_and_parse_packet(ctx);
 
@@ -31,6 +33,15 @@ handle_icmp_error_packet(struct packet_ctx *ctx) { // todo: packet -> packet_ctx
 
 	// If packet is invalid, drop it.
 	case validate_packet_error:
+		// counters already updated
+		packet_ctx_drop_packet(ctx);
+		break;
+
+	case validate_packet_vs_not_found:
+		// virtual service not found,
+		// so we can not broadcast packet nor
+		// forward it.
+		// counters already updated.
 		packet_ctx_drop_packet(ctx);
 		break;
 
@@ -44,21 +55,35 @@ handle_icmp_error_packet(struct packet_ctx *ctx) { // todo: packet -> packet_ctx
 	// tunnel packet to real.
 	case validate_packet_session_found:
 		// send packet to real
-		if (tunnel_packet( // added tunneling for packet
-			    ctx->vs.ptr->flags,
-			    ctx->real.ptr,
-			    ctx->packet
-		    ) == 0) {
+		tunnel_packet(
+			ctx->vs.ptr->flags,
+			ctx->real.ptr,
+			ctx->packet
+		); // added tunneling for packet
 
-			// successfully tunnel packet
-			packet_ctx_send_packet(ctx);
+		// send packet to the next module
+		packet_ctx_send_packet(ctx);
+
+		// update stats
+
+		// update module stats
+
+		// update icmp stats
+		if (ctx->packet->transport_header.type == IPPROTO_ICMP) {
+			ICMP_V4_STATS_INC(forwarded_packets, ctx);
 		} else {
-			// todo: handle tunnel errors
-			assert(false);
-
-			// drop packet
-			packet_ctx_drop_packet(ctx);
+			ICMP_V6_STATS_INC(forwarded_packets, ctx);
 		}
+
+		// update common module stats
+		packet_ctx_update_common_stats_on_outgoing_packet(ctx);
+
+		// update vs counter
+		VS_STATS_INC(error_icmp_packets, ctx);
+
+		// update real counter
+		REAL_STATS_INC(error_icmp_packets, ctx);
+
 		break;
 	}
 }

@@ -2,9 +2,14 @@
 
 #include "common/lpm.h"
 #include "common/network.h"
-#include "ctx.h"
-#include "rte_ip.h"
+
 #include <netinet/in.h>
+#include <rte_ip.h>
+
+#include "flow/context.h"
+
+#include "flow/helpers.h"
+#include "lib/dataplane/packet/decap.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -43,20 +48,43 @@ decap_ipv6(struct packet *packet, struct balancer_module_config *config) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline void
+// Try to decapsulate packet if its destination address is from the allowed
+// list. On decap failure, returns -1. Else, returns 0 (as in the case decap is
+// not allowed).
+static inline int
 try_decap(struct packet_ctx *ctx) {
 	struct packet *packet = ctx->packet;
 	struct balancer_module_config *config = ctx->config;
+
 	uint16_t network_protocol = packet->network_header.type;
-	int decap_result;
+
+	// check if decap is allowed.
+	// decap is allowed if destination address
+	// of the packet is in the decap list of the balancer.
+	int decap_is_allowed;
 	if (network_protocol == IPPROTO_IP) {
-		decap_result = decap_ip(packet, config);
+		decap_is_allowed = decap_ip(packet, config);
 	} else if (network_protocol == IPPROTO_IPV6) {
-		decap_result = decap_ipv6(packet, config);
+		decap_is_allowed = decap_ipv6(packet, config);
 	} else {
-		// todo: handle error
-		decap_result = -1;
+		COMMON_STATS_INC(unexpected_network_proto, ctx);
+		return -1;
 	}
-	(void)decap_result;
-	// todo: counters
+
+	// check if decap is allowed
+	if (decap_is_allowed) {
+		// if decap is allowed, make decap
+		// and check result
+		int decap_result = packet_decap(packet);
+		if (decap_result != 0) {
+			// decap failed
+			COMMON_STATS_INC(decap_failed, ctx);
+			return -1;
+		} else {
+			// successfully made decap
+			COMMON_STATS_INC(decap_successful, ctx);
+		}
+	}
+
+	return 0;
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../api/module.h"
+#include "../api/state.h"
 #include "../dataplane/meta.h"
 #include "common/ttlmap/ttlmap.h"
 
@@ -7,38 +9,13 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct session_id {
-	uint8_t transport_proto;
-	uint8_t network_proto;
-
-	uint8_t ip_source[16];
-	uint8_t ip_destination[16];
-
-	uint16_t port_source;
-	uint16_t port_destination;
-};
-
-struct session_state {
-	uint32_t real_id; // global id of real
-	uint32_t create_timestamp;
-	uint32_t last_packet_timestamp;
-	uint32_t timeout;
-};
-
 typedef ttlmap_lock_t session_lock_t;
 
-struct sessions_timeouts {
-	uint32_t tcp_syn_ack;
-	uint32_t tcp_syn;
-	uint32_t tcp_fin;
-	uint32_t tcp;
-	uint32_t udp;
-	uint32_t default_timeout;
-};
+////////////////////////////////////////////////////////////////////////////////
 
 static inline void
 fill_session_id(
-	struct session_id *id,
+	struct balancer_session_id *id,
 	struct packet_metadata *data,
 	bool balancer_pure_l3_flag
 ) {
@@ -59,13 +36,14 @@ fill_session_id(
 
 static inline uint32_t
 session_timeout(
-	struct sessions_timeouts *timeouts, struct packet_metadata *metadata
+	struct balancer_sessions_timeouts *timeouts,
+	struct packet_metadata *metadata
 ) {
 	if (metadata->transport_proto == IPPROTO_UDP) {
 		return timeouts->udp;
 	}
 	if (metadata->transport_proto != IPPROTO_TCP) {
-		return timeouts->default_timeout;
+		return timeouts->def;
 	}
 
 	if ((metadata->tcp_flags & RTE_TCP_SYN_FLAG) == RTE_TCP_SYN_FLAG) {

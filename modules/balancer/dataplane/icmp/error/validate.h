@@ -1,19 +1,21 @@
 #pragma once
 
+#include "flow/common.h"
 #include "icmp/error/info.h"
 #include "lib/dataplane/packet/packet.h"
 
 #include "lookup.h"
 #include "meta.h"
+#include "modules/balancer/api/stats.h"
 #include "modules/balancer/api/vs.h"
 #include "modules/balancer/state/session_table.h"
 #include "rte_icmp.h"
 
 #include <netinet/in.h>
 
-#include "../../vs.h"
-
 #include "../../../state/session.h"
+#include "../../flow/context.h"
+#include "../../vs.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -24,8 +26,11 @@ enum validate_packet_result {
 	// Not found session with the real on the current balancer
 	validate_packet_session_not_found = 0,
 
+	// Virtual service not recognized
+	validate_packet_vs_not_found = 1,
+
 	// Found session with real on the current balancer
-	validate_packet_session_found = 1
+	validate_packet_session_found = 2
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -71,10 +76,10 @@ validate_packet_ipv4(
 	info->inner.network.offset =
 		packet->transport_header.offset + sizeof(struct rte_icmp_hdr);
 
-	struct balancer_icmp_module_stats *counter = ctx->counter.icmp;
+	struct balancer_icmp_module_stats *counter = ctx->counter.icmp_v4;
 
 	if (!fill_icmp_packet_info_ipv4(mbuf, info)) {
-		counter->drop_icmpv4_payload_too_short_ip += 1;
+		counter->payload_too_short_ip += 1;
 		return -1;
 	}
 
@@ -84,23 +89,26 @@ validate_packet_ipv4(
 		packet->transport_header.offset + sizeof(struct rte_icmp_hdr)
 	);
 	if (inner_ip_hdr->src_addr != outer_ip_hdr->dst_addr) {
-		counter->drop_icmpv4_umatching_src_from_original += 1;
+		counter->unmatching_src_from_original += 1;
 		return -1;
 	}
 
 	if (mbuf->pkt_len <
 	    info->inner.transport.offset + 2 * sizeof(rte_be16_t)) {
-		counter->drop_icmpv4_payload_too_short_port += 1;
+		counter->payload_too_short_port += 1;
 		return -1;
 	}
 
 	fill_packet_metadata_ipv4(inner_ip_hdr, meta);
 	if (fill_packet_meta_transport(meta, info, mbuf)) {
-		counter->drop_icmpv4_unexpected_transport += 1;
+		counter->unexpected_transport += 1;
 		return -1;
 	}
 
 	*vs = vs_v4_lookup(ctx);
+	if (*vs == NULL) {
+		counter->unrecognized_vs += 1;
+	}
 
 	return 0;
 }
@@ -123,10 +131,10 @@ validate_packet_ipv6(
 	info->inner.network.offset =
 		packet->transport_header.offset + sizeof(struct rte_icmp_hdr);
 
-	struct balancer_icmp_module_stats *counter = ctx->counter.icmp;
+	struct balancer_icmp_module_stats *counter = ctx->counter.icmp_v6;
 
 	if (!fill_icmp_packet_info_ipv6(mbuf, info)) {
-		counter->drop_icmpv6_payload_too_short_ip += 1;
+		counter->payload_too_short_ip += 1;
 		return -1;
 	}
 
@@ -137,23 +145,26 @@ validate_packet_ipv6(
 	);
 
 	if (memcmp(inner_ip_hdr->src_addr, outer_ip_hdr->dst_addr, 16)) {
-		counter->drop_icmpv6_umatching_src_from_original += 1;
+		counter->unmatching_src_from_original += 1;
 		return -1;
 	}
 
 	if (mbuf->pkt_len <
 	    info->inner.transport.offset + 2 * sizeof(rte_be16_t)) {
-		counter->drop_icmpv6_payload_too_short_port += 1;
+		counter->payload_too_short_port += 1;
 		return -1;
 	}
 
 	fill_packet_metadata_ipv6(inner_ip_hdr, meta);
 	if (fill_packet_meta_transport(meta, info, mbuf)) {
-		counter->drop_icmpv6_unexpected_transport += 1;
+		counter->unexpected_transport += 1;
 		return -1;
 	}
 
 	*vs = vs_v4_lookup(ctx);
+	if (*vs == NULL) {
+		counter->unrecognized_vs += 1;
+	}
 
 	return 0;
 }
@@ -171,6 +182,9 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 	struct packet_metadata meta;
 	struct virtual_service *vs;
 
+	// validate packet, set metadata and packet icmp info
+	// (in the packet context).
+	// if validation failed, update corresponding counters.
 	int validate_result;
 	switch (ctx->packet->transport_header.type) {
 	case IPPROTO_ICMP: {
@@ -182,7 +196,9 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 		break;
 	}
 	default: {
-		validate_result = -1;
+		// impossible, because previously it was
+		// checked packet is icmp or icmpv6
+		assert(false);
 	}
 	}
 
@@ -195,20 +211,22 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 	// there can not be session with real on the current balancer.
 	// so, we return corresponding status.
 	if (vs == NULL) {
-		return validate_packet_session_not_found;
+		return validate_packet_vs_not_found;
+	} else {
+		packet_ctx_set_vs(ctx, vs);
 	}
 
 	// try to find session by id
 
 	// fill session id
-	struct session_id session_id;
+	struct balancer_session_id session_id;
 	fill_session_id(
 		&session_id, &meta, vs->flags & BALANCER_VS_PURE_L3_FLAG
 	);
 
 	// get real for the session
 	uint32_t real_id = get_session_real(
-		&ctx->state->session_table,
+		&ctx->state.ptr->session_table,
 		&session_id,
 		ctx->now,
 		ctx->worker->idx
@@ -219,8 +237,8 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 	} else { // real found
 		struct real *reals = ADDR_OF(&ctx->config->reals);
 		struct real *real = &reals[real_id];
-		packet_ctx_select_vs_icmp(ctx, vs, true);
-		packet_ctx_select_real_icmp(ctx, real);
+		packet_ctx_set_vs(ctx, vs);
+		packet_ctx_set_real(ctx, real);
 		return validate_packet_session_found;
 	}
 }

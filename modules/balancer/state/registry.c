@@ -1,7 +1,9 @@
 #include "registry.h"
+
 #include "../api/info.h"
-#include "common/interval_counter.h"
+
 #include "common/network.h"
+
 #include <netinet/in.h>
 #include <stdio.h>
 #include <string.h>
@@ -11,7 +13,6 @@
 void
 service_state_copy(struct service_state *dst, struct service_state *src) {
 	dst->last_packet_timestamp = src->last_packet_timestamp;
-	interval_counter_copy(&dst->active_sessions, &src->active_sessions);
 	memcpy(&dst->stats, &src->stats, sizeof(dst->stats));
 }
 
@@ -57,8 +58,7 @@ service_info_accumulate_into_real_info(
 	// set stats
 	for (size_t i = 0; i < workers; ++i) {
 		struct service_state *state = &service_info->state[i];
-		real_info->active_sessions +=
-			interval_counter_current_count(&state->active_sessions);
+		real_info->active_sessions = 0; // todo: calculate
 		if (state->last_packet_timestamp >
 		    real_info->last_packet_timestamp) {
 			real_info->last_packet_timestamp =
@@ -81,7 +81,7 @@ balancer_vs_stats_add(
 	to->ops_packets += stats->ops_packets;
 	to->session_table_overflow += stats->session_table_overflow;
 	to->real_is_disabled += stats->real_is_disabled;
-	to->packet_not_rescheduled += stats->packet_not_rescheduled;
+	to->not_rescheduled_packets += stats->not_rescheduled_packets;
 	to->created_sessions += stats->created_sessions;
 	to->outgoing_packets += stats->outgoing_packets;
 	to->outgoing_bytes += stats->outgoing_bytes;
@@ -90,10 +90,10 @@ balancer_vs_stats_add(
 void
 service_info_accumulate_into_vs_info(
 	struct service_info *service_info,
-	struct balancer_vs_info *vs_info,
+	struct balancer_virtual_service_info *vs_info,
 	size_t workers
 ) {
-	memset(vs_info, 0, sizeof(struct balancer_vs_info));
+	memset(vs_info, 0, sizeof(struct balancer_virtual_service_info));
 
 	// set ip
 	memcpy(vs_info->ip,
@@ -110,8 +110,7 @@ service_info_accumulate_into_vs_info(
 	// set stats
 	for (size_t i = 0; i < workers; ++i) {
 		struct service_state *state = &service_info->state[i];
-		vs_info->active_sessions +=
-			interval_counter_current_count(&state->active_sessions);
+		vs_info->active_sessions += 0; // calculate somehow
 		if (state->last_packet_timestamp >
 		    vs_info->last_packet_timestamp) {
 			vs_info->last_packet_timestamp =

@@ -2,14 +2,20 @@
 
 #include "common/memory_address.h"
 #include "common/network.h"
-#include "ctx.h"
-#include "dataplane/packet/packet.h"
+
+#include "lib/dataplane/packet/packet.h"
+
 #include "filter/filter.h"
+
+#include <assert.h>
+#include <rte_ip.h>
+
 #include "module.h"
-#include "rte_ip.h"
 #include "vs.h"
 
-#include <threads.h>
+#include "flow/common.h"
+#include "flow/context.h"
+#include "flow/helpers.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -94,9 +100,12 @@ vs_v4_lookup(struct packet_ctx *ctx) {
 
 	struct virtual_service *vs = ADDR_OF(&config->vs) + service_id;
 	if (!(vs->flags & VS_PRESENT_IN_CONFIG_FLAG)) {
+		// todo: maybe add counter here?
 		return NULL;
 	}
-	packet_ctx_select_vs(ctx, vs);
+
+	// set virtual service
+	packet_ctx_set_vs(ctx, vs);
 
 	return vs;
 }
@@ -116,7 +125,10 @@ vs_v4_fw(
 	if (lpm_lookup(
 		    &vs->src_filter, NET4_LEN, (uint8_t *)&ipv4_hdr->src_addr
 	    ) == LPM_VALUE_INVALID) {
-		packet_ctx_packet_src_not_allowed(ctx);
+
+		// update counter
+		VS_STATS_INC(packet_src_not_allowed, ctx);
+
 		return false;
 	}
 	return true;
@@ -140,9 +152,13 @@ vs_v6_lookup(struct packet_ctx *ctx) {
 
 	struct virtual_service *vs = ADDR_OF(&config->vs) + service_id;
 	if (!(vs->flags & VS_PRESENT_IN_CONFIG_FLAG)) {
+		// todo: may add counter here?
 		return NULL;
 	}
-	packet_ctx_select_vs(ctx, vs);
+
+	// set virtual service
+	packet_ctx_set_vs(ctx, vs);
+
 	return vs;
 }
 
@@ -163,7 +179,10 @@ vs_v6_fw(
 	if (lpm_lookup(
 		    &vs->src_filter, NET6_LEN, (uint8_t *)&ipv6_hdr->src_addr
 	    ) == LPM_VALUE_INVALID) {
-		packet_ctx_packet_src_not_allowed(ctx);
+
+		// update counter
+		VS_STATS_INC(packet_src_not_allowed, ctx);
+
 		return false;
 	}
 
@@ -189,7 +208,9 @@ vs_lookup_and_fw(struct packet_ctx *ctx) {
 			return NULL;
 		}
 		return vs;
-	} else { // unsupported
-		return NULL;
+	} else {
+		// packet was previously validated,
+		// impossible scenario
+		assert(false);
 	}
 }

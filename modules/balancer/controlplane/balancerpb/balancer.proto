@@ -2,312 +2,115 @@ syntax = "proto3";
 
 package balancerpb;
 
-import "common/commonpb/target.proto";
-import "google/protobuf/timestamp.proto";
+import "common/proto/target.proto";
+import "modules/balancer/controlplane/balancerpb/info.proto";
+import "modules/balancer/controlplane/balancerpb/module.proto";
+import "modules/balancer/controlplane/balancerpb/stats.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/"
-		    "balancer/controlplane/balancerpb;balancerpb";
+    "balancer/controlplane/balancerpb;balancerpb";
 
-service BalancerService {
-	rpc EnableBalancing(EnableBalancingRequest)
-		returns (EnableBalancingResponse);
+service Balancer {
+  // Update or enable balancer config
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
 
-	// Allows to update reals with optional buffering updates
-	rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
+  // Update reals with optional buffering updates
+  rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
 
-	// Allows to flush buffered reals updates
-	rpc FlushRealUpdates(FlushRealUpdatesRequest)
-		returns (FlushRealUpdatesResponse);
+  // Flush buffered reals updates
+  rpc FlushRealUpdates(FlushRealUpdatesRequest) 
+    returns (FlushRealUpdatesResponse);
+    
+  // Show balancer config
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-	// Allows to reload module config
-	rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
+  // List balancer configs
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 
-	// Information about balancer state
-	rpc StateInfo(StateInfoRequest) returns (StateInfoResponse);
+  // Info of the balancer state
+  rpc StateInfo(StateInfoRequest) returns (StateInfoResponse);
 
-	// Information about balancer module config
-	rpc ConfigInfo(ConfigInfoRequest) returns (ConfigInfoResponse);
-
-	// todo
-	// rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
-
-	// Allows to show module config
-	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
-
-	// Allows to list configs of the modules for which balancing was enabled
-	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+  // Stats of the balancer config
+  rpc ConfigStats(ConfigStatsRequest) returns (ConfigStatsResponse);
 }
 
-// Message representing a real server in the configuration.
-message Real {
-	// Weight assigned to the real server.
-	uint32 weight = 1;
+////////////////////////////////////////////////////////////////////////////////
 
-	// Destination address of the real server.
-	bytes dst_addr = 2;
-
-	// When encapsulation is enabled, the source address is calculated as:
-	// src = (src_addr & src_mask) | (original_src & (~ src_mask)).
-	bytes src_addr = 3;
-	bytes src_mask = 4;
-
-	// False by default.
-	bool enabled = 5;
+message UpdateConfigRequest {
+  commonpb.TargetModule target = 1;
+  ModuleConfig module_config = 2;
+  ModuleStateConfig module_state_config = 3;
 }
 
-message VsFlags {
-	// If GRE flag is set, GRE is used for tunneling packets to
-	// every balancer real. Else, TUN is used. False by default.
-	bool gre = 6;
-
-	// fix_mss flag specifies if TCP MSS option must be fixed. False by
-	// default.
-	bool fix_mss = 7;
-
-	// OPS flag specifies if one packet scheduler should be used for
-	// selecting reals of service. False by default.
-	bool ops = 8;
-
-	// PureL3 flag specifies if we need to schedule based on L3 address
-	// only. False by default.
-	bool pure_l3 = 9;
+message UpdateConfigResponse {
 }
 
-message Subnet {
-	bytes addr = 1;
-	uint32 size = 2;
-}
-
-// TCP or UDP
-enum TransportProto {
-	TCP = 0;
-	UDP = 1;
-}
-
-enum VsScheduler {
-	// Round robin based on hash
-	WRR = 0;
-	// Round robin with counter
-	PRR = 1;
-	// Weighted Least Connections
-	WLC = 2;
-}
-
-message VirtualService {
-	// Virtual IP address.
-	bytes addr = 1;
-
-	uint32 port = 2;
-
-	TransportProto proto = 3;
-
-	VsScheduler scheduler = 4;
-
-	repeated Subnet allowed_srcs = 5;
-	repeated Real reals = 6;
-
-	VsFlags flags = 7;
-
-	// Addresses of the balancer which serves this vs
-	// (except of this balancer address)
-	repeated bytes peers = 8;
-}
-
-message RealUpdate {
-	// IP of the virtual service real belongs to
-	bytes virtual_ip = 1;
-
-	// Virtual service proto
-	TransportProto proto = 2;
-
-	// Virtual service port
-	uint32 port = 3;
-
-	// Ip of the real
-	bytes real_ip = 4;
-
-	// Enable or disable real
-	bool enable = 5;
-
-	// Optional new weight
-	// Zero weight means no update
-	uint32 weight = 6;
-}
+////////////////////////////////////////////////////////////////////////////////
 
 message UpdateRealsRequest {
-	commonpb.TargetModule target = 1;
-	repeated RealUpdate updates = 2;
-	// Allows to delay request applying
-	// until `flush` will be called
-	bool buffer = 3;
+  commonpb.TargetModule target = 1;
+  repeated RealUpdate updates = 2;
+
+  // Allows to delay request applying
+  // until `flush` will be called
+  bool buffer = 3;
 }
 
 message UpdateRealsResponse {
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 message FlushRealUpdatesRequest {
-	commonpb.TargetModule target = 1;
+  commonpb.TargetModule target = 1;
 }
 
 message FlushRealUpdatesResponse {
-	// Number of updates applied
-	uint32 updates_flushed = 1;
+  // Number of updates applied
+  uint32 updates_flushed = 1;
 }
 
-message EnableBalancingRequest {
-	commonpb.TargetModule target = 1;
-	BalancerInstanceConfig config = 2;
-	uint64 session_table_size = 3;
-	SessionsTimeouts sessions_timeouts = 4;
-}
-
-message EnableBalancingResponse {
-}
-
-message ReloadConfigRequest {
-	commonpb.TargetModule target = 1;
-	BalancerInstanceConfig config = 2;
-}
-
-message ReloadConfigResponse {
-}
-
-message SessionsTimeouts {
-	uint32 tcp_syn_ack = 1;
-	uint32 tcp_syn = 2;
-	uint32 tcp_fin = 3;
-	uint32 tcp = 4;
-	uint32 udp = 5;
-	uint32 default = 6;
-}
-
-message BalancerInstanceConfig {
-	repeated VirtualService virtual_services = 1;
-	bytes source_address = 2;
-	bytes source_address_v6 = 3;
-
-	// if balancer receives packet with destination address 
-	// from this list, it tries to make decap
-	repeated bytes decap_addresses = 4;
-}
+////////////////////////////////////////////////////////////////////////////////
 
 message ShowConfigRequest {
-	commonpb.TargetModule target = 1;
+  commonpb.TargetModule target = 1;
 }
 
 message ShowConfigResponse {
-	BalancerInstanceConfig config = 1;
-}
-
-message BalancerInstanceConfigInfo {
-	commonpb.TargetModule module = 1;
-	BalancerInstanceConfig config = 2;
+  commonpb.TargetModule target = 1;
+  ModuleConfig module_config = 2;
+  ModuleStateConfig module_state_config = 3;
+  repeated RealUpdate buffered_real_updates = 4;
 }
 
 message ListConfigsRequest {
 }
 
 message ListConfigsResponse {
-	repeated BalancerInstanceConfigInfo configs = 1;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-message VsStats {
-	uint64 incoming_packets = 1;
-	uint64 incoming_bytes = 2;
-	uint64 packet_src_not_allowed = 3;
-	uint64 no_reals = 4;
-	uint64 ops_packets = 5;
-	uint64 session_table_overflow = 6;
-	uint64 real_is_disabled = 7;
-	uint64 packet_not_rescheduled = 8;
-	uint64 created_sessions = 9;
-	uint64 outgoing_packets = 10;
-	uint64 outgoing_bytes = 11;
-}
-
-message RealStats {
-	uint64 real_disabled_packets = 1;
-	uint64 ops_packets = 2;
-	uint64 created_sessions = 3;
-	uint64 send_packets = 4;
-	uint64 send_bytes = 5;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-message StateVsInfo {
-	bytes ip = 1;
-	uint32 port = 2;
-	TransportProto transport_proto = 3;
-	uint64 active_sessions = 4;
-	google.protobuf.Timestamp last_packet_timestamp = 5;
-	VsStats stats = 6;
-}
-
-message StateRealInfo {
-	bytes vip = 1;
-	uint32 virtual_port = 2;
-	bytes real_ip = 3;
-	TransportProto vs_proto = 4;
-	uint64 active_sessions = 5;
-	google.protobuf.Timestamp last_packet_timestamp = 6;
-	RealStats stats = 7;
-}
-
-message StateInfo {
-	repeated StateVsInfo vs = 1;
-	repeated StateRealInfo real = 2;
+  repeated ShowConfigResponse configs = 1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 message StateInfoRequest {
-	commonpb.TargetModule target = 1;
+  commonpb.TargetModule target = 1;
 }
 
 message StateInfoResponse {
-	StateInfo info = 1;
+  commonpb.TargetModule target = 1;
+  BalancerInfo info = 2;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-message ConfigRealInfo {
-	uint32 weight = 1;
-	bytes dst_addr = 2;
-	bytes src_addr = 3;
-	bytes src_mask = 4;
-	bool enabled = 5;
-	RealStats stats = 6;
+message ConfigStatsRequest {
+  commonpb.TargetModule target = 1;
+  uint32 dataplane_instance = 2;
+  string device = 3;
+  string pipeline = 4;
+  string function = 5;
+  string chain = 6;
 }
 
-message ConfigVsInfo {
-	bytes ip = 1;
-	uint32 port = 2;
-	TransportProto proto = 3;
-	repeated Subnet allowed_srcs = 4;
-	repeated ConfigRealInfo reals = 5;
-	VsFlags flags = 6;
-	VsScheduler scheduler = 7;
-	VsStats stats = 8;
-}
-
-message ConfigInfo {
-	repeated ConfigVsInfo vs_info = 1;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-message ConfigInfoRequest {
-	uint32 dataplane_instance = 1;
-	string device = 2;
-	string pipeline = 3;
-	string function = 4;
-	string chain = 5;
-	string config = 6;
-}
-
-message ConfigInfoResponse {
-	ConfigInfo info = 1;
+message ConfigStatsResponse {
+  commonpb.TargetModule target = 1;
+  BalancerStats stats = 2;
 }

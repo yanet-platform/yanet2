@@ -35,7 +35,7 @@ register_icmp_v4_counter(struct counter_registry *registry) {
 	return counter_registry_register(
 		registry,
 		icmp_v4_module_counter_name,
-		sizeof(struct balancer_icmp_stats) / sizeof(uint64_t)
+		sizeof(struct balancer_icmp_module_stats) / sizeof(uint64_t)
 	);
 }
 
@@ -44,7 +44,7 @@ register_icmp_v6_counter(struct counter_registry *registry) {
 	return counter_registry_register(
 		registry,
 		icmp_v6_module_counter_name,
-		sizeof(struct balancer_icmp_stats) / sizeof(uint64_t)
+		sizeof(struct balancer_icmp_module_stats) / sizeof(uint64_t)
 	);
 }
 
@@ -91,12 +91,13 @@ register_real_counter(
 
 static inline void
 fill_module_counters(
-	struct balancer_stats *stats,
+	struct balancer_stats_info *stats_info,
 	const size_t instances,
 	struct counter_handle *counter,
 	size_t *vs_count,
 	size_t *real_count
 ) {
+	struct balancer_stats *stats = &stats_info->stats;
 	if (strcmp(counter->name, common_module_counter_name) ==
 	    0) { // common module counter
 		counter_handle_accum(
@@ -108,14 +109,14 @@ fill_module_counters(
 	} else if (strcmp(counter->name, icmp_v4_module_counter_name) ==
 		   0) { // icmp module counter
 		counter_handle_accum(
-			(uint64_t *)&stats->icmp.ipv4,
+			(uint64_t *)&stats->icmp_ipv4,
 			instances,
 			counter->size,
 			counter->value_handle
 		);
 	} else if (strcmp(counter->name, icmp_v6_module_counter_name) == 0) {
 		counter_handle_accum(
-			(uint64_t *)&stats->icmp.ipv6,
+			(uint64_t *)&stats->icmp_ipv6,
 			instances,
 			counter->size,
 			counter->value_handle
@@ -137,7 +138,7 @@ fill_module_counters(
 
 static inline void
 fill_vs_and_real_counters(
-	struct balancer_stats *stats,
+	struct balancer_stats_info *stats,
 	const size_t instances,
 	struct counter_handle *counter,
 	size_t *vs_idx,
@@ -171,8 +172,8 @@ fill_vs_and_real_counters(
 ////////////////////////////////////////////////////////////////////////////////
 
 int
-balancer_stats_fill(
-	struct balancer_stats *stats,
+balancer_stats_info_fill(
+	struct balancer_stats_info *stats,
 	struct agent *agent,
 	const char *device,
 	const char *pipeline,
@@ -254,7 +255,9 @@ balancer_stats_fill(
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-balancer_stats_free(struct balancer_stats *stats, struct agent *agent) {
+balancer_stats_info_free(
+	struct balancer_stats_info *stats, struct agent *agent
+) {
 	struct memory_context *mctx = &agent->memory_context;
 	memory_bfree(
 		mctx,
@@ -267,3 +270,26 @@ balancer_stats_free(struct balancer_stats *stats, struct agent *agent) {
 		stats->real_count * sizeof(struct balancer_real_stats)
 	);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+static_assert(
+	sizeof(struct balancer_vs_stats) / sizeof(uint64_t) <= 16,
+	"too big vs counter"
+);
+static_assert(
+	sizeof(struct balancer_real_stats) / sizeof(uint64_t) <= 16,
+	"too big real counter"
+);
+static_assert(
+	sizeof(struct balancer_common_module_stats) / sizeof(uint64_t) <= 16,
+	"too big common module counter"
+);
+static_assert(
+	sizeof(struct balancer_icmp_module_stats) / sizeof(uint64_t) <= 16,
+	"too big icmp module counter"
+);
+static_assert(
+	sizeof(struct balancer_l4_module_stats) / sizeof(uint64_t) <= 16,
+	"too big l4 module counter"
+);

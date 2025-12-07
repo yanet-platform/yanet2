@@ -13,7 +13,7 @@ struct icmp_packet_info {
 	struct {
 		struct network_header network;
 		struct transport_header transport;
-	} inner; // inner from the icmp packet layout
+	} inner; // inner for the icmp packet layout
 };
 
 ////////////////////////////////////////////////////////////////////////////////

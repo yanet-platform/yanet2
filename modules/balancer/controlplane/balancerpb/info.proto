@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package balancerpb;
+
+import "google/protobuf/timestamp.proto";
+import "modules/balancer/controlplane/balancerpb/module.proto";
+import "modules/balancer/controlplane/balancerpb/stats.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/"
+    "balancer/controlplane/balancerpb;balancerpb";
+
+// Mirrors module.RealInfo with flattened RealIdentifier fields
+message RealInfo {
+  // Index of the real in balancer module state registry
+  uint32 real_registry_idx = 1;
+
+  // Flattened RealIdentifier fields:
+  // Virtual service IP address (from RealIdentifier.Vs.Ip)
+  bytes vs_ip = 2;
+
+  // Virtual service port (from RealIdentifier.Vs.Port)
+  uint32 vs_port = 3;
+
+  // Virtual service protocol (from RealIdentifier.Vs.Proto)
+  TransportProto vs_proto = 4;
+
+  // Real server IP address (from RealIdentifier.Ip)
+  bytes real_ip = 5;
+
+  // Number of active sessions with this real
+  uint64 active_sessions = 6;
+
+  // Timestamp of the last packet
+  google.protobuf.Timestamp last_packet_timestamp = 7;
+
+  // Config-independent statistics of real
+  RealStats stats = 8;
+}
+
+// Mirrors module.VsInfo with flattened VsIdentifier fields
+message VsInfo {
+  // Index of the virtual service in balancer module state registry
+  uint32 vs_registry_idx = 1;
+
+  // Flattened VsIdentifier fields:
+  // Virtual service IP address (from VsIdentifier.Ip)
+  bytes vs_ip = 2;
+
+  // Virtual service port (from VsIdentifier.Port)
+  uint32 vs_port = 3;
+
+  // Virtual service protocol (from VsIdentifier.Proto)
+  TransportProto vs_proto = 4;
+
+  // Number of active sessions established with virtual service
+  uint64 active_sessions = 5;
+
+  // Timestamp of the last packet
+  google.protobuf.Timestamp last_packet_timestamp = 6;
+
+  // Config-independent statistics of virtual service
+  VsStats stats = 7;
+}
+
+// Mirrors module.BalancerInfo
+message BalancerInfo {
+  // Module-level statistics
+  ModuleStats module = 1;
+
+  // Information about virtual services
+  repeated VsInfo vs_info = 2;
+
+  // Information about reals
+  repeated RealInfo real_info = 3;
+}

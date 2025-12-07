@@ -4,7 +4,6 @@
 #include "module.h"
 #include "ring.h"
 
-#include "../api/counter.h"
 #include "../state/registry.h"
 
 ////////////////////////////////////////////////////////////////////////////////

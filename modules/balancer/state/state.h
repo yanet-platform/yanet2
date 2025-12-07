@@ -1,8 +1,8 @@
 #pragma once
 
 #include "common/memory.h"
+#include "modules/balancer/state/worker.h"
 #include "registry.h"
-#include "session.h"
 #include "session_table.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -20,10 +20,6 @@ struct balancer_state {
 	// session table
 	struct session_table session_table;
 
-	// session timeouts
-	struct sessions_timeouts timeouts;
-	uint32_t max_timeout;
-
 	// registry of virtual services
 	struct service_registry vs_registry;
 
@@ -32,6 +28,9 @@ struct balancer_state {
 
 	// shift in memory which allows to deallocate state properly
 	size_t memory_shift;
+
+	// stats of the balancer state
+	struct balancer_stats stats[MAX_WORKERS_NUM];
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -41,13 +40,7 @@ balancer_state_init(
 	struct balancer_state *state,
 	struct memory_context *mctx,
 	size_t workers,
-	size_t table_size,
-	uint32_t tcp_syn_ack_timeout,
-	uint32_t tcp_syn_timeout,
-	uint32_t tcp_fin_timeout,
-	uint32_t tcp_timeout,
-	uint32_t udp_timeout,
-	uint32_t default_timeout
+	size_t table_size
 );
 
 void

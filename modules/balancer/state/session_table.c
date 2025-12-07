@@ -23,8 +23,8 @@ session_table_init(
 	int res = TTLMAP_INIT(
 		&table->generations[0].map,
 		mctx,
-		struct session_id,
-		struct session_state,
+		struct balancer_session_id,
+		struct balancer_session_state,
 		size
 	);
 	if (res != 0) {
@@ -101,8 +101,8 @@ session_table_extend(struct session_table *table, bool force) {
 		int ret = TTLMAP_INIT(
 			&sessions_next->map,
 			ADDR_OF(&table->mctx),
-			struct session_id,
-			struct session_state,
+			struct balancer_session_id,
+			struct balancer_session_state,
 			next_gen_cap
 		);
 		if (ret != 0) {

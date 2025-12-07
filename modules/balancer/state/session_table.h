@@ -77,8 +77,8 @@ get_or_create_session(
 	uint32_t worker_idx,
 	uint32_t now,
 	uint32_t timeout,
-	struct session_id *session_id,
-	struct session_state **session_state,
+	struct balancer_session_id *session_id,
+	struct balancer_session_state **session_state,
 	session_lock_t **lock
 ) {
 	struct session_table_gen *cur =
@@ -155,14 +155,14 @@ get_or_create_session(
 static inline uint32_t
 get_session_real(
 	struct session_table *session_table,
-	struct session_id *session_id,
+	struct balancer_session_id *session_id,
 	uint32_t now,
 	uint32_t worker_idx
 ) {
 	struct session_table_gen *cur =
 		session_table_current_gen(session_table);
 
-	struct session_state session_state;
+	struct balancer_session_state session_state;
 	int res = TTLMAP_LOOKUP(&cur->map, session_id, &session_state, now);
 	int status = TTLMAP_STATUS(res);
 
@@ -187,8 +187,8 @@ get_session_real(
 }
 
 static inline void
-session_remove(struct session_state *session_state) {
-	TTLMAP_REMOVE(struct session_id, session_state);
+session_remove(struct balancer_session_state *session_state) {
+	TTLMAP_REMOVE(struct balancer_session_id, session_state);
 }
 
 static inline void

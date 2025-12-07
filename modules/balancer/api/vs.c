@@ -8,6 +8,8 @@
 #include "common/lpm.h"
 #include "common/memory.h"
 
+#include <filter/filter.h>
+
 #include "../dataplane/lookup.h"
 #include "../dataplane/module.h"
 #include "../dataplane/real.h"
@@ -40,15 +42,16 @@ register_real_counter(
 ////////////////////////////////////////////////////////////////////////////////
 
 struct addr_range {
-	uint8_t start_addr[16];
-	uint8_t end_addr[16];
+	uint8_t start_addr[NET6_LEN];
+	uint8_t end_addr[NET6_LEN];
 };
 
 // Represents config of the virtual service
 struct balancer_vs_config {
 	struct memory_context *mctx;
 
-	// index of the vs in the balancer registry
+	// index of the virtual service
+	// in the balancer registry
 	size_t registry_idx;
 
 	vs_flags_t flags;
@@ -76,6 +79,9 @@ vs_v4_table_init(
 	struct balancer_vs_config **vs_configs,
 	size_t count
 ) {
+	// to supress stupid clang warning.
+	(void)vs_v4_lookup;
+
 	size_t ipv4_count = 0;
 	for (size_t i = 0; i < count; ++i) {
 		struct balancer_vs_config *vs_config = vs_configs[i];

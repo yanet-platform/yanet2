@@ -1,6 +1,8 @@
-package mbalancer
+package controlplane
 
 import "github.com/c2h5oh/datasize"
+
+////////////////////////////////////////////////////////////////////////////////
 
 // Config for the balancer service
 type Config struct {
@@ -19,7 +21,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		MemoryPath:         "/dev/hugepages/yanet",
-		MemoryRequirements: 256 * datasize.MB,
+		MemoryRequirements: 128 * datasize.MB,
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",
 	}
