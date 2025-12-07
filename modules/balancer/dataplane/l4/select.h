@@ -126,11 +126,18 @@ select_real(
 		// and try to reschedule packet on the other one.
 		if (!(real->flags & REAL_PRESENT_IN_CONFIG_FLAG)) {
 			// real is not present in current config
-			packet_ctx_real_state_stats(ctx)
-				->packets_real_not_present += 1;
+			// deselect real
+			packet_ctx_unset_real(ctx);
 		} else if (real->flags & BALANCER_REAL_DISABLED_FLAG) {
 			// real is disabled
+
+			// select real to update its counters
+			packet_ctx_set_real(ctx, real);
+			
 			REAL_STATS_INC(packets_real_disabled, ctx);
+
+			// deselect real
+			packet_ctx_unset_real(ctx);
 		} else {
 			// real enabled and present in config, so we select it.
 			// calculate until session was encountered

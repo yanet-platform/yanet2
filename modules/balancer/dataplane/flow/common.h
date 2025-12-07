@@ -22,6 +22,13 @@ packet_ctx_set_real(struct packet_ctx *ctx, struct real *real) {
 	ctx->real.state = ADDR_OF(&real->state) + ctx->worker->idx;
 }
 
+static inline void
+packet_ctx_unset_real(struct packet_ctx *ctx) {
+	ctx->real.ptr = NULL;
+	ctx->real.counter = NULL;
+	ctx->real.state = NULL;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline void
