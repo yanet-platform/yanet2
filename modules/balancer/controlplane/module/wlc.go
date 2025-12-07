@@ -13,6 +13,13 @@ type WlcConfig struct {
 }
 
 func NewWlcConfigFromProto(proto *balancerpb.WlcConfig) (WlcConfig, error) {
+	if proto == nil {
+		// Return default WLC config when not provided
+		return WlcConfig{
+			Power:         10,
+			MaxRealWeight: 1000,
+		}, nil
+	}
 	if proto.MaxRealWeight > math.MaxUint16 {
 		return WlcConfig{}, fmt.Errorf("max real weight can not exceed %d", math.MaxUint16)
 	}

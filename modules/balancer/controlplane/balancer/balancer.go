@@ -198,6 +198,11 @@ func (b *Balancer) GetConfigStats(dataplaneInstance uint32, device, pipeline, fu
 	return b.moduleConfig.GetStats(dataplaneInstance, device, pipeline, function, chain)
 }
 
+// GetModuleConfig returns the internal module configuration for testing
+func (b *Balancer) GetModuleConfig() *ModuleConfig {
+	return b.moduleConfig
+}
+
 // Free releases resources
 func (b *Balancer) Free() {
 	b.lock.Lock()

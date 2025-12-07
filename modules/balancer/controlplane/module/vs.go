@@ -55,6 +55,14 @@ func (flags VsFlags) IntoProto() *balancerpb.VsFlags {
 }
 
 func NewFlagsFromProto(flags *balancerpb.VsFlags) VsFlags {
+	if flags == nil {
+		return VsFlags{
+			GRE:    false,
+			OPS:    false,
+			PureL3: false,
+			FixMSS: false,
+		}
+	}
 	return VsFlags{
 		GRE:    flags.Gre,
 		OPS:    flags.Ops,

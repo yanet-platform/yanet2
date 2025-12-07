@@ -4,6 +4,29 @@
 #include "../../lib/controlplane/config/zone.h"
 #include "dataplane/pipeline/pipeline.h"
 #include "packet.h"
+#include "utils/mbuf.h"
+#include <stdlib.h>
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Mock dp worker library.
+
+struct packet *
+worker_clone_packet(struct dp_worker *dp_worker, struct packet *packet) {
+	(void)dp_worker;
+	struct rte_mbuf *mbuf = aligned_alloc(64, rte_pktmbuf_data_len(packet->mbuf));
+	if (mbuf == NULL) {
+		return NULL;
+	}
+
+	struct packet *packet_clone = mbuf_to_packet(mbuf);
+	rte_memcpy(packet_clone, packet, sizeof(struct packet));
+	packet_clone->mbuf = mbuf;
+	packet_clone->next = NULL;
+
+	mbuf_copy(packet_clone->mbuf, packet->mbuf);
+	return packet_clone;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
