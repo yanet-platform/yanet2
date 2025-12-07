@@ -95,6 +95,7 @@ vs_v4_lookup(struct packet_ctx *ctx) {
 	if (config->vs_count <= service_id) {
 		// if the service_id is out of range of available
 		// services
+		// todo: remove it, impossible case.
 		return NULL;
 	}
 

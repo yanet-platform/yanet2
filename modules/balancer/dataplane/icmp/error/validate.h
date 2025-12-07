@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/network.h"
 #include "flow/common.h"
 #include "icmp/error/info.h"
 #include "lib/dataplane/packet/packet.h"
@@ -7,8 +8,8 @@
 #include "lookup.h"
 #include "meta.h"
 #include "modules/balancer/api/stats.h"
-#include "modules/balancer/api/vs.h"
 #include "modules/balancer/state/session_table.h"
+#include "rte_byteorder.h"
 #include "rte_icmp.h"
 
 #include <netinet/in.h>
@@ -35,28 +36,88 @@ enum validate_packet_result {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline int
-fill_packet_meta_transport(
-	struct packet_metadata *meta,
-	struct icmp_packet_info *info,
-	struct rte_mbuf *mbuf
+static inline void
+packet_swap_headers(
+	struct packet *packet,
+	struct network_header *network,
+	struct transport_header *transport
 ) {
-	if (info->inner.transport.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_tcp_hdr *, info->inner.transport.offset
-		);
-		fill_packet_metadata_tcp(tcp, meta);
-		return 0;
-	} else if (info->inner.transport.type == IPPROTO_UDP) {
-		struct rte_udp_hdr *udp = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_udp_hdr *, info->inner.transport.offset
-		);
-		fill_packet_metadata_udp(udp, meta);
-		return 0;
-	} else {
-		return -1;
+	// set network heder
+	{
+		struct network_header tmp = packet->network_header;
+		packet->network_header = *network;
+		*network = tmp;
+	}
+
+	// set transport header
+	{
+		struct transport_header tmp = packet->transport_header;
+		packet->transport_header = *transport;
+		*transport = tmp;
 	}
 }
+
+static inline void
+packet_swap_src_dst(struct packet *packet) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	
+	// Swap IP addresses
+	if (packet->network_header.type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+		struct rte_ipv4_hdr *inner_ip_hdr = rte_pktmbuf_mtod_offset(
+			mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
+		);
+		uint32_t tmp = inner_ip_hdr->src_addr;
+		inner_ip_hdr->src_addr = inner_ip_hdr->dst_addr;
+		inner_ip_hdr->dst_addr = tmp;
+	} else { // ipv6
+		struct rte_ipv6_hdr *inner_ip_hdr = rte_pktmbuf_mtod_offset(
+			mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
+		);
+		uint8_t tmp[16];
+		memcpy(tmp, inner_ip_hdr->src_addr, NET6_LEN);
+		memcpy(inner_ip_hdr->src_addr, inner_ip_hdr->dst_addr, NET6_LEN);
+		memcpy(inner_ip_hdr->dst_addr, tmp, NET6_LEN);
+	}
+	
+	// Swap transport ports
+	if (packet->transport_header.type == IPPROTO_TCP) {
+		struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+			mbuf, struct rte_tcp_hdr *, packet->transport_header.offset
+		);
+		uint16_t tmp_port = tcp->src_port;
+		tcp->src_port = tcp->dst_port;
+		tcp->dst_port = tmp_port;
+	} else if (packet->transport_header.type == IPPROTO_UDP) {
+		struct rte_udp_hdr *udp = rte_pktmbuf_mtod_offset(
+			mbuf, struct rte_udp_hdr *, packet->transport_header.offset
+		);
+		uint16_t tmp_port = udp->src_port;
+		udp->src_port = udp->dst_port;
+		udp->dst_port = tmp_port;
+	}
+}
+
+// static inline int
+// fill_packet_meta_transport(
+// 	struct packet_metadata *meta,
+// ) {
+// 	if (info->inner.transport.type == IPPROTO_TCP) {
+// 		struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
+// 			mbuf, struct rte_tcp_hdr *, info->inner.transport.offset
+// 		);
+// 		fill_packet_metadata_tcp(tcp, meta);
+// 		return 0;
+// 	} else if (info->inner.transport.type == IPPROTO_UDP) {
+// 		struct rte_udp_hdr *udp = rte_pktmbuf_mtod_offset(
+// 			mbuf, struct rte_udp_hdr *, info->inner.transport.offset
+// 		);
+// 		fill_packet_metadata_udp(udp, meta);
+// 		return 0;
+// 	} else {
+// 		// should be impossible (todo: check)
+// 		return -1;
+// 	}
+// }
 
 static inline int
 validate_packet_ipv4(
@@ -78,7 +139,7 @@ validate_packet_ipv4(
 
 	struct balancer_icmp_module_stats *counter = ctx->counter.icmp_v4;
 
-	if (!fill_icmp_packet_info_ipv4(mbuf, info)) {
+	if (fill_icmp_packet_info_ipv4(mbuf, info) != 0) {
 		counter->payload_too_short_ip += 1;
 		return -1;
 	}
@@ -99,16 +160,30 @@ validate_packet_ipv4(
 		return -1;
 	}
 
-	fill_packet_metadata_ipv4(inner_ip_hdr, meta);
-	if (fill_packet_meta_transport(meta, info, mbuf)) {
+	// swap source address and destination address
+	// on the inner packet. after that, destination address should be equal
+	// to the virtual service address. also, we need to swap transport 
+	// proto source and destination.
+	packet_swap_headers(ctx->packet, &info->inner.network, &info->inner.transport);
+	packet_swap_src_dst(ctx->packet);
+
+	// fill packet metadata
+	if (fill_packet_metadata(packet, meta)) {
 		counter->unexpected_transport += 1;
+		packet_swap_src_dst(ctx->packet);
+		packet_swap_headers(ctx->packet, &info->inner.network, &info->inner.transport);
 		return -1;
 	}
 
+	// lookup virtual service
 	*vs = vs_v4_lookup(ctx);
 	if (*vs == NULL) {
 		counter->unrecognized_vs += 1;
 	}
+
+	// swap headers and src dst back
+	packet_swap_src_dst(ctx->packet);
+	packet_swap_headers(ctx->packet, &info->inner.network, &info->inner.transport);
 
 	return 0;
 }
@@ -133,7 +208,7 @@ validate_packet_ipv6(
 
 	struct balancer_icmp_module_stats *counter = ctx->counter.icmp_v6;
 
-	if (!fill_icmp_packet_info_ipv6(mbuf, info)) {
+	if (fill_icmp_packet_info_ipv6(mbuf, info) != 0) {
 		counter->payload_too_short_ip += 1;
 		return -1;
 	}
@@ -155,11 +230,7 @@ validate_packet_ipv6(
 		return -1;
 	}
 
-	fill_packet_metadata_ipv6(inner_ip_hdr, meta);
-	if (fill_packet_meta_transport(meta, info, mbuf)) {
-		counter->unexpected_transport += 1;
-		return -1;
-	}
+	fill_packet_metadata(packet, meta); // todo
 
 	*vs = vs_v4_lookup(ctx);
 	if (*vs == NULL) {
@@ -212,7 +283,7 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 	// so, we return corresponding status.
 	if (vs == NULL) {
 		return validate_packet_vs_not_found;
-	} else {
+	} else { // todo: vs already selected here
 		packet_ctx_set_vs(ctx, vs);
 	}
 

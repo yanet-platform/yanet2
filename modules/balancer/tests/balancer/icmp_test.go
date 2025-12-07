@@ -123,15 +123,14 @@ func MakeICMPv4DestUnreachable(
 		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeDestinationUnreachable, 3), // Port unreachable
 	}
 
-	// Extract the original IP header and first 8 bytes of transport layer
-	// This is what ICMP error messages typically include
+	// Extract the full original IP packet for the balancer to process
+	// The balancer needs the complete packet to validate and look up sessions
 	originalData := originalPacket.Data()
 	// Find the IP layer start (skip Ethernet header)
 	ipStart := 14 // Ethernet header size
 	if ipStart < len(originalData) {
-		// Include IP header + 8 bytes of transport layer (minimum for ICMP error)
-		payloadLen := min(len(originalData)-ipStart, 28) // 20 (IP) + 8 (transport)
-		payload := originalData[ipStart : ipStart+payloadLen]
+		// Include the entire IP packet
+		payload := originalData[ipStart:]
 		return []gopacket.SerializableLayer{eth, ip, icmp, gopacket.Payload(payload)}
 	}
 
@@ -390,9 +389,15 @@ func TestICMPv4ErrorWithExistingSession(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, len(result.Output), "TCP packet should be forwarded")
 
-	// Now send an ICMP Destination Unreachable error containing the original packet
-	// The error is sent from the VS IP back to the client
-	icmpLayers := MakeICMPv4DestUnreachable(vsIP, clientIP, tcpPacket)
+	// Now simulate the real server's response packet (which would trigger an ICMP error)
+	// The real server responds with src=vsIP (as configured), dst=clientIP
+	responsePacket := MakeTCPPacket(vsIP, vsPort, clientIP, clientPort, &layers.TCP{SYN: true, ACK: true})
+	responsePacketData := xpacket.LayersToPacket(t, responsePacket...)
+
+	// Now send an ICMP Destination Unreachable error containing the response packet
+	// The ICMP error comes from the client network to the VS IP (balancer)
+	// because the response packet had src=vsIP
+	icmpLayers := MakeICMPv4DestUnreachable(clientIP, vsIP, responsePacketData)
 	icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
 	result, err = setup.mock.HandlePackets(icmpPacket)

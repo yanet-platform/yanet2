@@ -10,6 +10,7 @@
 #include <rte_ip.h>
 #include <rte_tcp.h>
 #include <rte_udp.h>
+#include <string.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -72,6 +73,8 @@ fill_packet_metadata_udp(
 
 static inline int
 fill_packet_metadata(struct packet *packet, struct packet_metadata *metadata) {
+	memset(metadata, 0, sizeof(struct packet_metadata));
+	
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	if (packet->network_header.type ==
