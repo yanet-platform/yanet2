@@ -80,7 +80,8 @@ func flags(virtualService *module.VirtualService) C.uint64_t {
 	if virtualService.Flags.PureL3 {
 		flags |= C.BALANCER_VS_PURE_L3_FLAG
 	}
-	if virtualService.Scheduler == module.SchedulerPRR || virtualService.Scheduler == module.SchedulerWLC {
+	if virtualService.Scheduler == module.SchedulerPRR ||
+		virtualService.Scheduler == module.SchedulerWLC {
 		// WLC -> PRR + least connections info update
 		flags |= C.BALANCER_VS_PRR_FLAG
 	}
@@ -128,10 +129,19 @@ func NewVsConfig(
 		(C.size_t)(peersIpv6),
 	)
 	if err != nil {
-		return VsConfigPtr{inner: nil}, fmt.Errorf("failed to create C virtual service config: %w", err)
+		return VsConfigPtr{
+				inner: nil,
+			}, fmt.Errorf(
+				"failed to create C virtual service config: %w",
+				err,
+			)
 	}
 	if cVsConfig == nil {
-		return VsConfigPtr{inner: nil}, fmt.Errorf("failed to create C virtual service config")
+		return VsConfigPtr{
+				inner: nil,
+			}, fmt.Errorf(
+				"failed to create C virtual service config",
+			)
 	}
 
 	// Set allowed sources

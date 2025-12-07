@@ -18,6 +18,10 @@ typedef uint8_t vs_flags_t;
 
 // Virtual service which is served by a list of reals.
 struct virtual_service {
+	// Index of the virtual service in the balancer
+	// module state registry.
+	size_t registry_idx;
+
 	// virtual service flags
 	vs_flags_t flags;
 

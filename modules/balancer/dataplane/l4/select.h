@@ -93,9 +93,7 @@ select_real(
 
 	// setup id for the session between client and virtual service
 	struct balancer_session_id session_id;
-	fill_session_id(
-		&session_id, metadata, vs->flags & BALANCER_VS_PURE_L3_FLAG
-	);
+	fill_session_id(&session_id, metadata, vs);
 
 	// get state for the session
 	struct balancer_session_state *session_state = NULL;

@@ -17,7 +17,9 @@ type SessionsTimeouts struct {
 }
 
 // NewSessionsTimeoutsFromProto creates SessionsTimeouts from protobuf message.
-func NewSessionsTimeoutsFromProto(pb *balancerpb.SessionsTimeouts) SessionsTimeouts {
+func NewSessionsTimeoutsFromProto(
+	pb *balancerpb.SessionsTimeouts,
+) SessionsTimeouts {
 	if pb == nil {
 		return SessionsTimeouts{}
 	}

@@ -14,7 +14,8 @@
 struct packet *
 worker_clone_packet(struct dp_worker *dp_worker, struct packet *packet) {
 	(void)dp_worker;
-	struct rte_mbuf *mbuf = aligned_alloc(64, rte_pktmbuf_data_len(packet->mbuf));
+	struct rte_mbuf *mbuf =
+		aligned_alloc(64, rte_pktmbuf_data_len(packet->mbuf));
 	if (mbuf == NULL) {
 		return NULL;
 	}

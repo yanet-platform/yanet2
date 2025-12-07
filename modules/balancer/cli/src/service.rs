@@ -3,23 +3,22 @@ use std::error::Error;
 use tonic::transport::Channel;
 
 use crate::{
-    cfg,
     cmd::{
         ConfigInfoCmd, DisableRealCmd, EnableBalancingCmd, EnableRealCmd, FlushRealUpdatesCmd, InfoMode, Mode,
         RealMode, ShowConfigCmd, StateInfoCmd,
     },
-    rpc::{BalancerServiceClient, balancerpb, commonpb},
+    rpc::{BalancerClient, balancerpb, commonpb},
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 
 pub struct BalancerService {
-    client: BalancerServiceClient<Channel>,
+    client: BalancerClient<Channel>,
 }
 
 impl BalancerService {
     pub async fn connect(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = BalancerServiceClient::connect(endpoint).await?;
+        let client = BalancerClient::connect(endpoint).await?;
         Ok(Self { client })
     }
 

@@ -44,27 +44,35 @@ balancer_state_register_real(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-int
-balancer_state_extend_session_table(struct balancer_state *state, bool force);
+// Capacity of the session table.
+size_t
+balancer_state_session_table_capacity(struct balancer_state *state);
 
+// Resize sessions table. Return -1 on error
+// and new 0 on success.
+int
+balancer_state_resize_session_table(
+	struct balancer_state *state, size_t new_size
+);
+
+// Free unused memory.
 int
 balancer_state_gc_session_table(struct balancer_state *state);
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Id of the sessions between client and virtual service.
 struct balancer_session_id {
-	uint8_t transport_proto;
-	uint8_t network_proto;
-
-	uint8_t ip_source[16];
-	uint8_t ip_destination[16];
-
-	uint16_t port_source;
-	uint16_t port_destination;
+	// registry id of the virtual service
+	uint32_t vs_id;
+	uint8_t client_ip[16];
+	uint16_t client_port;
 };
 
+// Represents state info of the session between client and virtual service.
 struct balancer_session_state {
-	uint32_t real_id; // registry id of real
+	// registry id of real which serves session
+	uint32_t real_id;
 	uint32_t create_timestamp;
 	uint32_t last_packet_timestamp;
 	uint32_t timeout;

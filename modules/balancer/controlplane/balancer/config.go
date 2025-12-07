@@ -1,17 +1,24 @@
 package balancer
 
 import (
+	"context"
 	"fmt"
 	"net/netip"
+	"sync"
+	"time"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	balancer_ffi "github.com/yanet-platform/yanet2/modules/balancer/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"go.uber.org/zap"
 )
 
 // Balancer module configuration
 type ModuleConfig struct {
+	// Agent which memory module config lives in.
+	agent ffi.Agent
+
 	// Mirrors C struct balancer_module_config
 	cHandle balancer_ffi.ModuleConfigPtr
 
@@ -35,6 +42,16 @@ type ModuleConfig struct {
 
 	// State of the module config
 	state *ModuleConfigState
+
+	// Lock for background tasks
+	lock *sync.Mutex
+
+	// Logger for config operations
+	log *zap.SugaredLogger
+
+	// Context for background tasks cancellation
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -47,7 +64,14 @@ func tryCreateNewModuleConfig(
 	addresses module.BalancerAddresses,
 	sessionsTimeouts module.SessionsTimeouts,
 ) (*balancer_ffi.ModuleConfigPtr, error) {
-	cHandle, err := balancer_ffi.NewModuleConfig(agent, name, state, virtualServices, addresses, sessionsTimeouts)
+	cHandle, err := balancer_ffi.NewModuleConfig(
+		agent,
+		name,
+		state,
+		virtualServices,
+		addresses,
+		sessionsTimeouts,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new C `cp_module`: %w", err)
 	}
@@ -59,8 +83,12 @@ func tryCreateNewModuleConfig(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func updateEffectiveWeights(wlc *module.WlcConfig, vs []module.VirtualService, state *ModuleConfigState) bool {
-	activeSessions := state.RealsActiveSessions(vs)
+func updateEffectiveWeights(
+	wlc *module.WlcConfig,
+	vs []module.VirtualService,
+	state *ModuleConfigState,
+) bool {
+	activeSessions := state.RealActiveSessions
 	updated := false
 	for vsIdx := range vs {
 		if vs[vsIdx].UpdateEffectiveWeights(wlc, activeSessions) {
@@ -80,26 +108,21 @@ func NewModuleConfig(
 	addresses module.BalancerAddresses,
 	sessionsTimeouts module.SessionsTimeouts,
 	wlc module.WlcConfig,
+	log *zap.SugaredLogger,
 ) (*ModuleConfig, error) {
-	// Calculate effective weights for reals of virtual services
-	updateEffectiveWeights(&wlc, virtualServices, state)
+	moduleConfig := ModuleConfig{
+		agent:       agent,
+		realUpdates: module.RealUpdateBuffer{},
+		Name:        name,
+		state:       state,
+		log:         log,
+	}
 
-	// Try create and insert new controlplane module
-	cHandle, err := tryCreateNewModuleConfig(agent, name, state.CHandle(), virtualServices, addresses, sessionsTimeouts)
-	if err != nil {
+	if err := moduleConfig.Update(virtualServices, addresses, sessionsTimeouts, wlc); err != nil {
 		return nil, err
 	}
 
-	return &ModuleConfig{
-		cHandle:         *cHandle,
-		VirtualServices: virtualServices,
-		Addresses:       addresses,
-		SessionTimeouts: sessionsTimeouts,
-		realUpdates:     module.RealUpdateBuffer{},
-		Name:            name,
-		state:           state,
-		wlc:             wlc,
-	}, nil
+	return &moduleConfig, nil
 }
 
 func (config *ModuleConfig) Free() {
@@ -109,7 +132,6 @@ func (config *ModuleConfig) Free() {
 ////////////////////////////////////////////////////////////////////////////////
 
 func (config *ModuleConfig) Update(
-	agent ffi.Agent,
 	virtualServices []module.VirtualService,
 	addresses module.BalancerAddresses,
 	sessionsTimeouts module.SessionsTimeouts,
@@ -120,7 +142,7 @@ func (config *ModuleConfig) Update(
 
 	// Try create and insert new controlplane module
 	cHandle, err := tryCreateNewModuleConfig(
-		agent,
+		config.agent,
 		config.Name,
 		config.state.CHandle(),
 		virtualServices,
@@ -130,6 +152,10 @@ func (config *ModuleConfig) Update(
 	if err != nil {
 		return err
 	}
+
+	// Here new module already inserted into controlplane
+
+	config.cancelBackgroundTasks()
 
 	// Update C handle
 	config.cHandle = *cHandle
@@ -142,14 +168,25 @@ func (config *ModuleConfig) Update(
 	// clear real updates buffer
 	config.realUpdates.Clear()
 
+	config.runBackgroundTasks()
+
 	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (config *ModuleConfig) UpdateEffectiveWeights(agent ffi.Agent) error {
-	if updateEffectiveWeights(&config.wlc, config.VirtualServices, config.state) {
-		return config.Update(agent, config.VirtualServices, config.Addresses, config.SessionTimeouts, config.wlc)
+func (config *ModuleConfig) UpdateEffectiveWeights() error {
+	if updateEffectiveWeights(
+		&config.wlc,
+		config.VirtualServices,
+		config.state,
+	) {
+		return config.Update(
+			config.VirtualServices,
+			config.Addresses,
+			config.SessionTimeouts,
+			config.wlc,
+		)
 	} else {
 		return nil
 	}
@@ -157,7 +194,10 @@ func (config *ModuleConfig) UpdateEffectiveWeights(agent ffi.Agent) error {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (config *ModuleConfig) UpdateReals(agent ffi.Agent, updates []module.RealUpdate, buffer bool) error {
+func (config *ModuleConfig) UpdateReals(
+	updates []module.RealUpdate,
+	buffer bool,
+) error {
 	if buffer {
 		config.realUpdates.Append(updates)
 		return nil
@@ -175,7 +215,7 @@ func (config *ModuleConfig) UpdateReals(agent ffi.Agent, updates []module.RealUp
 				}
 			}
 			if updateVs == nil {
-				return fmt.Errorf("update[%d]: failed to find virtual service", updateIdx)
+				return fmt.Errorf("failed to find virtual service for update at index %d", updateIdx)
 			}
 			found := false
 			for realIdx := range updateVs.Reals {
@@ -187,16 +227,16 @@ func (config *ModuleConfig) UpdateReals(agent ffi.Agent, updates []module.RealUp
 				}
 			}
 			if !found {
-				return fmt.Errorf("update[%d]: failed to find real", updateIdx)
+				return fmt.Errorf("failed to find real for update at index %d", updateIdx)
 			}
 		}
-		return config.Update(agent, cloneVirtualServices, config.Addresses, config.SessionTimeouts, config.wlc)
+		return config.Update(cloneVirtualServices, config.Addresses, config.SessionTimeouts, config.wlc)
 	}
 }
 
-func (config *ModuleConfig) FlushRealUpdates(agent ffi.Agent) (int, error) {
+func (config *ModuleConfig) FlushRealUpdates() (int, error) {
 	updates := config.realUpdates.Clear()
-	err := config.UpdateReals(agent, updates, false)
+	err := config.UpdateReals(updates, false)
 	if err != nil {
 		return 0, err
 	}
@@ -208,7 +248,11 @@ func (config *ModuleConfig) FlushRealUpdates(agent ffi.Agent) (int, error) {
 // IntoProto converts ModuleConfig to protobuf message
 func (config *ModuleConfig) IntoProto() *balancerpb.ModuleConfig {
 	// Convert virtual services
-	virtualServices := make([]*balancerpb.VirtualService, 0, len(config.VirtualServices))
+	virtualServices := make(
+		[]*balancerpb.VirtualService,
+		0,
+		len(config.VirtualServices),
+	)
 	for i := range config.VirtualServices {
 		vs := &config.VirtualServices[i]
 
@@ -271,7 +315,10 @@ func convertAddrsToBytes(addrs []netip.Addr) [][]byte {
 }
 
 // GetStats returns configuration statistics
-func (config *ModuleConfig) GetStats(dataplaneInstance uint32, device, pipeline, function, chain string) module.BalancerStats {
+func (config *ModuleConfig) GetStats(
+	dataplaneInstance uint32,
+	device, pipeline, function, chain string,
+) module.BalancerStats {
 	// Get state info which contains the stats
 	stateInfo := config.state.GetInfo()
 
@@ -310,5 +357,45 @@ func (config *ModuleConfig) GetStats(dataplaneInstance uint32, device, pipeline,
 		Module: stateInfo.Module,
 		Vs:     vsStats,
 		Reals:  realStats,
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func (config *ModuleConfig) runBackgroundTasks() {
+	// Create a new context for background tasks
+	config.ctx, config.cancel = context.WithCancel(context.Background())
+
+	// Start update effective weights task
+	if config.wlc.UpdatePeriodMs > 0 {
+		period := time.Duration(config.wlc.UpdatePeriodMs) * time.Millisecond
+		ctx := config.ctx
+		go func() {
+			ticker := time.NewTicker(period)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					config.lock.Lock()
+					err := config.UpdateEffectiveWeights()
+					if err != nil {
+						config.log.Errorw(
+							"failed to update effective weights",
+							zap.Error(err),
+						)
+					}
+					config.lock.Unlock()
+				}
+			}
+		}()
+	}
+}
+
+func (config *ModuleConfig) cancelBackgroundTasks() {
+	if config.cancel != nil {
+		config.cancel()
 	}
 }

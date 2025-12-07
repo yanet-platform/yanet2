@@ -58,7 +58,6 @@ service_info_accumulate_into_real_info(
 	// set stats
 	for (size_t i = 0; i < workers; ++i) {
 		struct service_state *state = &service_info->state[i];
-		real_info->active_sessions = 0; // todo: calculate
 		if (state->last_packet_timestamp >
 		    real_info->last_packet_timestamp) {
 			real_info->last_packet_timestamp =
@@ -110,7 +109,6 @@ service_info_accumulate_into_vs_info(
 	// set stats
 	for (size_t i = 0; i < workers; ++i) {
 		struct service_state *state = &service_info->state[i];
-		vs_info->active_sessions += 0; // calculate somehow
 		if (state->last_packet_timestamp >
 		    vs_info->last_packet_timestamp) {
 			vs_info->last_packet_timestamp =

@@ -114,8 +114,16 @@ func NewModuleConfig(
 	// Set source addresses
 	var sourceIpv4 C.struct_net4_addr
 	var sourceIpv6 C.struct_net6_addr
-	C.memcpy(unsafe.Pointer(&sourceIpv4.bytes[0]), unsafe.Pointer(&addresses.SourceIpV4[0]), C.size_t(4))
-	C.memcpy(unsafe.Pointer(&sourceIpv6.bytes[0]), unsafe.Pointer(&addresses.SourceIpV6[0]), C.size_t(16))
+	C.memcpy(
+		unsafe.Pointer(&sourceIpv4.bytes[0]),
+		unsafe.Pointer(&addresses.SourceIpV4[0]),
+		C.size_t(4),
+	)
+	C.memcpy(
+		unsafe.Pointer(&sourceIpv6.bytes[0]),
+		unsafe.Pointer(&addresses.SourceIpV6[0]),
+		C.size_t(16),
+	)
 
 	// Set decap addresses
 	decapIpv4 := make([]C.struct_net4_addr, 0, len(addresses.DecapAddresses))
@@ -124,7 +132,11 @@ func NewModuleConfig(
 		if addr.Is4() {
 			var ipv4 C.struct_net4_addr
 			s := addr.AsSlice()
-			C.memcpy(unsafe.Pointer(&ipv4.bytes[0]), unsafe.Pointer(&s[0]), C.size_t(4))
+			C.memcpy(
+				unsafe.Pointer(&ipv4.bytes[0]),
+				unsafe.Pointer(&s[0]),
+				C.size_t(4),
+			)
 			decapIpv4 = append(decapIpv4, ipv4)
 		} else {
 			var ipv6 C.struct_net6_addr
@@ -173,7 +185,11 @@ func NewModuleConfig(
 			)
 	}
 	if cpModule == nil {
-		return ModuleConfigPtr{inner: nil}, fmt.Errorf("failed to create balancer module config")
+		return ModuleConfigPtr{
+				inner: nil,
+			}, fmt.Errorf(
+				"failed to create balancer module config",
+			)
 	}
 
 	return ModuleConfigPtr{inner: cpModule}, nil

@@ -11,6 +11,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	balancer_ffi "github.com/yanet-platform/yanet2/modules/balancer/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"go.uber.org/zap"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -23,44 +24,60 @@ type ModuleConfigState struct {
 	// Mirrors C struct balancer_module_config_state
 	cHandle balancer_ffi.ModuleConfigStatePtr
 
-	// Initial size of the session table
-	SessionTableSize uint
-
-	// Period to try extend the session table
-	ExtendPeriodMs uint
-
-	// Period to try free unused memory in the session table
-	FreeUnusedPeriodMs uint
-
 	// Period to scan the state of the session table
 	// to update active connections and WLC.
 	ScanSessionTablePeriodMs uint
 
-	// Module Config which works with this state.
-	config *ModuleConfig
+	// If the relation of active sessions
+	// and table capacity is greater than
+	// this limit, we extend session table.
+	MaxLoadFactor float32
+
+	// Total number of active sessions.
+	ActiveSessions uint
+
+	// Virtual services active sessions information
+	VsActiveSessions map[module.VsIdentifier]uint
+
+	// Real active sessions information
+	RealActiveSessions map[module.RealIdentifier]uint
 
 	// The background operations with state must use this lock.
 	lock *sync.Mutex
+
+	// Logger for state operations
+	log *zap.SugaredLogger
 
 	// Context for background tasks cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func NewModuleConfigState(agent ffi.Agent, lock *sync.Mutex, initialTableSize, extendPeriodMs, freeUnusedPeriodMs, scanSessionTablePeriodMs uint) (*ModuleConfigState, error) {
+func NewModuleConfigState(
+	agent ffi.Agent,
+	lock *sync.Mutex,
+	initialTableSize, scanSessionTablePeriodMs uint,
+	maxLoadFactor float32,
+	log *zap.SugaredLogger,
+) (*ModuleConfigState, error) {
 	state, err := balancer_ffi.NewModuleConfigState(agent, initialTableSize)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create new module config state: %w", err)
+		return nil, fmt.Errorf(
+			"failed to create new module config state: %w",
+			err,
+		)
 	}
 	s := &ModuleConfigState{
 		agent:                    agent,
 		cHandle:                  state,
-		SessionTableSize:         initialTableSize,
-		ExtendPeriodMs:           extendPeriodMs,
-		FreeUnusedPeriodMs:       freeUnusedPeriodMs,
 		ScanSessionTablePeriodMs: scanSessionTablePeriodMs,
+		MaxLoadFactor:            maxLoadFactor,
 		lock:                     lock,
+		log:                      log,
+		VsActiveSessions:         map[module.VsIdentifier]uint{},
+		RealActiveSessions:       map[module.RealIdentifier]uint{},
 	}
+	s.runBackgroundTasks()
 	return s, nil
 }
 
@@ -71,23 +88,41 @@ func (s *ModuleConfigState) Free() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (s *ModuleConfigState) ScheduleBackgroundTasks(config *ModuleConfig) {
-	s.config = config
-	s.runBackgroundTasks()
+func (s *ModuleConfigState) SessionTableCapacity() uint {
+	return s.cHandle.SessionTableCapacity()
 }
 
-////////////////////////////////////////////////////////////////////////////////
+func (s *ModuleConfigState) Update(
+	newTableCapacity, scanSessionTablePeriodMs uint,
+	maxLoadFactor float32,
+) error {
+	if newTableCapacity != 0 {
+		s.log.Infow(
+			"resizing session table",
+			zap.Uint("new_capacity", newTableCapacity),
+		)
+		if err := s.cHandle.ResizeSessionTable(newTableCapacity); err != nil {
+			s.log.Errorw(
+				"failed to resize session table",
+				zap.Uint("new_capacity", newTableCapacity),
+				zap.Error(err),
+			)
+			return fmt.Errorf("failed to resize session table: %w", err)
+		}
+	}
 
-func (s *ModuleConfigState) Update(tableSize, extendPeriodMs, freeUnusedPeriodMs, scanSessionTablePeriodMs uint) {
-	// allow make force extension of session table.
-	// todo: configure session table extension with strict size.
-	s.cHandle.ExtendSessionTable(true)
-	s.SessionTableSize = tableSize
-	s.ExtendPeriodMs = extendPeriodMs
-	s.FreeUnusedPeriodMs = freeUnusedPeriodMs
-	s.ScanSessionTablePeriodMs = scanSessionTablePeriodMs
+	if scanSessionTablePeriodMs != 0 {
+		s.ScanSessionTablePeriodMs = scanSessionTablePeriodMs
+	}
+
+	if maxLoadFactor > 0.01 {
+		s.MaxLoadFactor = maxLoadFactor
+	}
+
 	s.cancelBackgroundTasks()
 	s.runBackgroundTasks()
+
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -98,18 +133,135 @@ func (s *ModuleConfigState) CHandle() balancer_ffi.ModuleConfigStatePtr {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (s *ModuleConfigState) updateEffectiveWeights() error {
-	// todo: scan session table to find active sessions, update effective weights
-	s.config.UpdateEffectiveWeights(s.agent)
+func (s *ModuleConfigState) SessionsInfo() (module.SessionsInfo, error) {
+	now := time.Now()
+	sessions := s.cHandle.SessionsInfo(uint32(now.Unix()), false)
+	if sessions == nil {
+		s.log.Error("failed to get sessions info from C handle")
+		return module.SessionsInfo{}, fmt.Errorf("failed to scan session table")
+	}
+
+	s.log.Debugw("retrieved sessions from C handle",
+		zap.Uint("raw_count", sessions.SessionsCount))
+
+	// Remove duplicates - keep session with most recent LastPacketTimestamp
+	type sessionKey struct {
+		clientAddr netip.Addr
+		clientPort uint16
+		real       module.RealIdentifier
+	}
+
+	sessionMap := make(map[sessionKey]module.SessionInfo)
+
+	for _, sessionInfo := range sessions.Sessions {
+		key := sessionKey{
+			clientAddr: sessionInfo.ClientAddr,
+			clientPort: sessionInfo.ClientPort,
+			real:       sessionInfo.Real,
+		}
+
+		// Keep only the session with most recent LastPacketTimestamp
+		if existing, found := sessionMap[key]; !found ||
+			sessionInfo.LastPacketTimestamp.After(
+				existing.LastPacketTimestamp,
+			) {
+			sessionMap[key] = sessionInfo
+		}
+	}
+
+	// Convert map to slice
+	dedupedSessions := make([]module.SessionInfo, 0, len(sessionMap))
+	for _, session := range sessionMap {
+		dedupedSessions = append(dedupedSessions, session)
+	}
+
+	duplicatesRemoved := sessions.SessionsCount - uint(len(dedupedSessions))
+	if duplicatesRemoved > 0 {
+		s.log.Debugw("removed duplicate sessions",
+			zap.Uint("duplicates", duplicatesRemoved),
+			zap.Uint("unique_sessions", uint(len(dedupedSessions))))
+	}
+
+	return module.SessionsInfo{
+		SessionsCount: uint(len(dedupedSessions)),
+		Sessions:      dedupedSessions,
+	}, nil
+}
+
+func (s *ModuleConfigState) ScanActiveSessionsAndResizeOnDemand() error {
+	// Update active connections info
+	sessions, err := s.SessionsInfo()
+	if err != nil {
+		s.log.Errorw(
+			"failed to get sessions info during table scan",
+			zap.Error(err),
+		)
+		return fmt.Errorf("failed to scan session table: %w", err)
+	}
+
+	// remove old active sessions info for real
+	for k := range s.RealActiveSessions {
+		delete(s.RealActiveSessions, k)
+	}
+
+	// remove old active sessions info for virtual services
+	for k := range s.VsActiveSessions {
+		delete(s.VsActiveSessions, k)
+	}
+
+	// Update active sessions
+	for _, session := range sessions.Sessions {
+		s.RealActiveSessions[session.Real]++
+		s.VsActiveSessions[session.Real.Vs]++
+	}
+
+	s.ActiveSessions = sessions.SessionsCount
+
+	sessionTableCapacity := s.SessionTableCapacity()
+	loadFactor := float32(s.ActiveSessions) / float32(sessionTableCapacity)
+
+	s.log.Debugw("session table scan completed",
+		zap.Uint("active_sessions", s.ActiveSessions),
+		zap.Uint("table_capacity", sessionTableCapacity),
+		zap.Float32("load_factor", loadFactor),
+		zap.Float32("max_load_factor", s.MaxLoadFactor))
+
+	if loadFactor > s.MaxLoadFactor {
+		newCapacity := sessionTableCapacity * 2
+		s.log.Infow("session table load factor exceeded, resizing",
+			zap.Float32("load_factor", loadFactor),
+			zap.Float32("max_load_factor", s.MaxLoadFactor),
+			zap.Uint("old_capacity", sessionTableCapacity),
+			zap.Uint("new_capacity", newCapacity))
+
+		if err := s.cHandle.ResizeSessionTable(newCapacity); err != nil {
+			s.log.Errorw("failed to resize session table",
+				zap.Uint("new_capacity", newCapacity),
+				zap.Error(err))
+			return fmt.Errorf(
+				"failed to resize session table to capacity %d: %w",
+				newCapacity,
+				err,
+			)
+		}
+		s.log.Infow(
+			"session table resized successfully",
+			zap.Uint("new_capacity", newCapacity),
+		)
+	}
+
+	if err := s.cHandle.FreeUnusedInSessionTable(); err != nil {
+		s.log.Warnw(
+			"failed to free unused memory in session table",
+			zap.Error(err),
+		)
+		return fmt.Errorf(
+			"failed to free unused memory in session table: %w",
+			err,
+		)
+	}
+
 	return nil
-}
-
-func (s *ModuleConfigState) freeUnused() error {
-	return s.cHandle.FreeUnusedInSessionTable()
-}
-
-func (s *ModuleConfigState) extendSessionTable() error {
-	return s.cHandle.ExtendSessionTable(false)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -120,17 +272,31 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 
 	// Start scanSessionTable task
 	if s.ScanSessionTablePeriodMs > 0 {
-		go s.runPeriodicTask(s.ctx, time.Duration(s.ScanSessionTablePeriodMs)*time.Millisecond, s.updateEffectiveWeights)
-	}
+		period := time.Duration(s.ScanSessionTablePeriodMs) * time.Millisecond
+		ctx := s.ctx
 
-	// Start freeUnused task
-	if s.FreeUnusedPeriodMs > 0 {
-		go s.runPeriodicTask(s.ctx, time.Duration(s.FreeUnusedPeriodMs)*time.Millisecond, s.freeUnused)
-	}
+		// run periodic task
+		go func() {
+			ticker := time.NewTicker(period)
+			defer ticker.Stop()
 
-	// Start extendSessionTable task
-	if s.ExtendPeriodMs > 0 {
-		go s.runPeriodicTask(s.ctx, time.Duration(s.ExtendPeriodMs)*time.Millisecond, s.extendSessionTable)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					s.lock.Lock()
+					err := s.ScanActiveSessionsAndResizeOnDemand()
+					s.lock.Unlock()
+					if err != nil {
+						s.log.Errorw(
+							"session table scan failed",
+							zap.Error(err),
+						)
+					}
+				}
+			}
+		}()
 	}
 }
 
@@ -140,40 +306,11 @@ func (s *ModuleConfigState) cancelBackgroundTasks() {
 	}
 }
 
-// runPeriodicTask runs a task periodically with the given period
-func (s *ModuleConfigState) runPeriodicTask(ctx context.Context, period time.Duration, task func() error) {
-	ticker := time.NewTicker(period)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.lock.Lock()
-			_ = task()
-			s.lock.Unlock()
-		}
-	}
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
-func (s *ModuleConfigState) RealsActiveSessions(virtualServices []module.VirtualService) map[module.RealIdentifier]uint64 {
-	result := make(map[module.RealIdentifier]uint64)
-	for vsIdx := range virtualServices {
-		vs := &virtualServices[vsIdx]
-		for realIdx := range vs.Reals {
-			real := &vs.Reals[realIdx]
-			result[real.Identifier] = s.cHandle.RealInfo(uint(real.RegistryIdx)).ActiveSessions
-		}
-	}
-	return result
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-func (s *ModuleConfigState) RegisterVsWithReals(virtualService *balancerpb.VirtualService) (*module.VirtualService, error) {
+func (s *ModuleConfigState) RegisterVsWithReals(
+	virtualService *balancerpb.VirtualService,
+) (*module.VirtualService, error) {
 	// Parse VS IP address
 	vsAddr, ok := netip.AddrFromSlice(virtualService.Addr)
 	if !ok {
@@ -201,11 +338,18 @@ func (s *ModuleConfigState) RegisterVsWithReals(virtualService *balancerpb.Virtu
 	for i, subnet := range virtualService.AllowedSrcs {
 		addr, ok := netip.AddrFromSlice(subnet.Addr)
 		if !ok {
-			return nil, fmt.Errorf("invalid allowed source address at index %d", i)
+			return nil, fmt.Errorf(
+				"invalid allowed source address at index %d",
+				i,
+			)
 		}
 		prefix, err := addr.Prefix(int(subnet.Size))
 		if err != nil {
-			return nil, fmt.Errorf("invalid allowed source prefix at index %d: %w", i, err)
+			return nil, fmt.Errorf(
+				"invalid allowed source prefix at index %d: %w",
+				i,
+				err,
+			)
 		}
 		allowedSources = append(allowedSources, prefix)
 	}
@@ -238,7 +382,11 @@ func (s *ModuleConfigState) RegisterVsWithReals(virtualService *balancerpb.Virtu
 		// Register real in state registry
 		realRegistryIdx, err := s.cHandle.RegisterReal(&realIdentifier)
 		if err != nil {
-			return nil, fmt.Errorf("failed to register real at index %d: %w", i, err)
+			return nil, fmt.Errorf(
+				"failed to register real at index %d: %w",
+				i,
+				err,
+			)
 		}
 
 		// Parse source address and mask
@@ -289,8 +437,20 @@ func (s *ModuleConfigState) GetInfo() module.BalancerInfo {
 	// Get VS info from state
 	vsInfoList := s.cHandle.VirtualServicesInfo()
 
+	// Setup active sessions for virtual services
+	for idx := range vsInfoList {
+		vs := &vsInfoList[idx]
+		vs.ActiveSessions = uint64(s.VsActiveSessions[vs.VsIdentifier])
+	}
+
 	// Get real info from state
 	realInfoList := s.cHandle.RealsInfo()
+
+	// Set active session for reals
+	for idx := range realInfoList {
+		real := &realInfoList[idx]
+		real.ActiveSessions = uint64(s.RealActiveSessions[real.RealIdentifier])
+	}
 
 	// TODO: Get module stats from dataplane
 	moduleStats := module.ModuleStats{}

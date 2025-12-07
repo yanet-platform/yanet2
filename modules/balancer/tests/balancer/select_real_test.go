@@ -102,10 +102,7 @@ func smallSetup(t *testing.T) *TestSetup {
 	setup, err := SetupTest(&TestConfig{
 		balancer: balancer,
 		stateConfig: &balancerpb.ModuleStateConfig{
-			SessionTableSize:         1024,
-			ExtendPeriodMs:           1000,
-			FreeUnusedPeriodMs:       1000,
-			ScanSessionTablePeriodMs: 1000,
+			SessionTableCapacity: 100,
 		},
 	})
 	require.NoError(t, err)

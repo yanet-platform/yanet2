@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 #include "detail/bucket.h"
+#include "detail/iter.h"
 #include "detail/lock.h"
 #include "detail/ttlmap.h"
 
@@ -35,6 +36,9 @@ typedef struct ttlmap_lock ttlmap_lock_t;
 
 #define TTLMAP_PRINT_STAT(map_ptr, key_type, value_type, fd)                   \
 	__TTLMAP_PRINT_STAT_INTERNAL(map_ptr, key_type, value_type, fd)
+
+#define TTLMAP_ITER(map_ptr, key_type, value_type, now, cb, data)              \
+	__TTLMAP_ITER_INTERNAL(map_ptr, key_type, value_type, now, cb, data)
 
 ////////////////////////////////////////////////////////////////////////////////
 

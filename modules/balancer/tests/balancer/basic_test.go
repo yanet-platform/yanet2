@@ -68,10 +68,7 @@ func TestBalancerBasics(t *testing.T) {
 	}
 
 	stateConfig := &balancerpb.ModuleStateConfig{
-		SessionTableSize:         10,
-		ExtendPeriodMs:           1000,
-		FreeUnusedPeriodMs:       1000,
-		ScanSessionTablePeriodMs: 1000,
+		SessionTableCapacity: 100,
 	}
 
 	// setup test

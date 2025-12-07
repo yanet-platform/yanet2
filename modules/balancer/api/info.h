@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -28,9 +29,6 @@ struct balancer_virtual_service_info {
 
 	// virtual service transport protocol
 	int transport_proto; // IPPROTO_TCP or IPPROTO_UDP
-
-	// number of active session
-	size_t active_sessions;
 
 	// last packet timestamp
 	uint32_t last_packet_timestamp;
@@ -86,9 +84,6 @@ struct balancer_real_info {
 	// virtual service transport protocol
 	int transport_proto; // IPPROTO_TCP or IPPROTO_UDP
 
-	// number of active connections
-	size_t active_sessions;
-
 	// last packet timestamp
 	uint32_t last_packet_timestamp;
 
@@ -141,3 +136,38 @@ balancer_fill_info(struct balancer_state *state, struct balancer_info *info);
 
 void
 balancer_free_info(struct balancer_state *state, struct balancer_info *info);
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Info about balancer session between
+// client and reals server.
+struct balancer_session_info {
+	uint32_t vs_id;
+
+	uint8_t client_ip[16];
+	uint16_t client_port;
+
+	uint32_t real_id;
+	uint32_t create_timestamp;
+	uint32_t last_packet_timestamp;
+	uint32_t timeout;
+};
+
+// Info about balancer sessions with
+// possible duplicates.
+struct balancer_sessions_info {
+	size_t count;
+	struct balancer_session_info *sessions;
+};
+
+// Fill info about active sessions with possible duplicates.
+int
+balancer_fill_sessions_info(
+	struct balancer_state *state, struct balancer_sessions_info *info, uint32_t now, bool count_only
+);
+
+// Free info about active sessions.
+void
+balancer_free_sessions_info(
+	struct balancer_state *state, struct balancer_sessions_info *info
+);

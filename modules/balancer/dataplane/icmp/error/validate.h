@@ -220,9 +220,7 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 
 	// fill session id
 	struct balancer_session_id session_id;
-	fill_session_id(
-		&session_id, &meta, vs->flags & BALANCER_VS_PURE_L3_FLAG
-	);
+	fill_session_id(&session_id, &meta, vs);
 
 	// get real for the session
 	uint32_t real_id = get_session_real(

@@ -5,6 +5,8 @@
 #include "../dataplane/meta.h"
 #include "common/ttlmap/ttlmap.h"
 
+#include "../dataplane/vs.h"
+
 #include <stdint.h>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -17,19 +19,11 @@ static inline void
 fill_session_id(
 	struct balancer_session_id *id,
 	struct packet_metadata *data,
-	bool balancer_pure_l3_flag
+	struct virtual_service *vs
 ) {
-	id->transport_proto = data->transport_proto;
-	id->network_proto = data->network_proto;
-	memcpy(id->ip_source, data->src_addr, 16);
-	memcpy(id->ip_destination, data->dst_addr, 16);
-	if (balancer_pure_l3_flag) {
-		id->port_source = 0;
-		id->port_destination = 0;
-	} else {
-		id->port_source = data->src_port;
-		id->port_destination = data->dst_port;
-	}
+	memcpy(id->client_ip, data->src_addr, 16);
+	id->client_port = data->src_port;
+	id->vs_id = vs->registry_idx;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

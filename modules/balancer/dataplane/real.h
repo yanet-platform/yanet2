@@ -13,7 +13,7 @@ typedef uint8_t real_flags_t;
 
 // Represents real as part of the virtual service
 struct real {
-	// index in the balancer registry
+	// index of real in the balancer module state registry
 	size_t registry_idx;
 
 	real_flags_t flags;

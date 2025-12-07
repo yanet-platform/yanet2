@@ -124,7 +124,8 @@ type VsIdentifier struct {
 type VirtualService struct {
 	// Index of the virtual service
 	// in the module state registry.
-	RegistryIdx    uint
+	RegistryIdx uint
+
 	Identifier     VsIdentifier
 	Flags          VsFlags
 	Reals          []Real

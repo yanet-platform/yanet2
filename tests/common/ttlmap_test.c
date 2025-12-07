@@ -443,6 +443,65 @@ ttlmap_strike_many_entries(void *memory, size_t memory_size) {
 ////////////////////////////////////////////////////////////////////////////////
 
 int
+iter_callback(test_key_t *key, test_value_t *value, size_t *cnt) {
+	assert(key->proto == 55);
+	assert(key->port_dst == 10);
+	assert(key->port_src == 20);
+	assert(key->proto == 20);
+	assert(value->session_id == 0);
+	assert(value->counter2 - value->counter1 == 1);
+	++*cnt;
+	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+ttlmap_iter(void *memory, size_t memory_size) {
+	int res;
+
+	struct block_allocator alloc;
+	res = block_allocator_init(&alloc);
+	assert(res == 0);
+	block_allocator_put_arena(&alloc, memory, memory_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	assert(res == 0);
+
+	ttlmap_t map;
+	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, 100);
+	assert(res == 0);
+
+	size_t inserted = 0;
+	for (size_t i = 0; i < 100; ++i) {
+		test_key_t key = {
+			.ip_dst = i + 0x01010,
+			.ip_src = i + 0x10101,
+			.port_dst = 10,
+			.port_src = 20,
+			.proto = 55,
+			.tcp_flags = i
+		};
+		test_value_t *value;
+		ttlmap_lock_t *lock;
+		int res = TTLMAP_GET(&map, &key, &value, &lock, 0, 10);
+		if (TTLMAP_STATUS(res) == TTLMAP_INSERTED) {
+			++inserted;
+			*value = (test_value_t
+			){.counter1 = i, .counter2 = i + 1, .session_id = 0};
+			ttlmap_release_lock(lock);
+		} else {
+			assert(TTLMAP_STATUS(res) == TTLMAP_FAILED);
+		}
+	}
+
+	size_t cnt = 0;
+	TTLMAP_ITER(&map, test_key_t, test_value_t, 7, iter_callback, &cnt);
+	assert(cnt == inserted);
+}
+
+int
 main() {
 	log_enable_name("debug");
 
@@ -485,6 +544,9 @@ main() {
 
 	LOG(INFO, "test ttlmap_strike_many_entries...");
 	ttlmap_strike_many_entries(memory, memory_size);
+
+	LOG(INFO, "test ttlmap_iter...");
+	ttlmap_iter(memory, memory_size);
 
 	LOG(INFO, "free memory");
 	free(memory);

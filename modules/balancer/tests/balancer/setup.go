@@ -56,10 +56,9 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 
 	if config.stateConfig == nil {
 		config.stateConfig = &balancerpb.ModuleStateConfig{
-			SessionTableSize:         128,
-			ExtendPeriodMs:           1000,
-			FreeUnusedPeriodMs:       1000,
-			ScanSessionTablePeriodMs: 1000,
+			SessionTableCapacity:      128,
+			SessionTableScanPeriodMs:  1000,
+			SessionTableMaxLoadFactor: 0.75,
 		}
 	}
 

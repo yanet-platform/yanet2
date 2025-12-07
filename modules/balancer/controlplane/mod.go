@@ -22,7 +22,10 @@ type BalancerModule struct {
 	log     *zap.SugaredLogger
 }
 
-func NewBalancerModule(cfg *Config, log *zap.SugaredLogger) (*BalancerModule, error) {
+func NewBalancerModule(
+	cfg *Config,
+	log *zap.SugaredLogger,
+) (*BalancerModule, error) {
 	log = log.With(zap.String("module", "balancerpb.BalancerService"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
@@ -39,9 +42,17 @@ func NewBalancerModule(cfg *Config, log *zap.SugaredLogger) (*BalancerModule, er
 
 	agents := make([]ffi.Agent, 0, len(instances))
 	for _, instanceIdx := range instances {
-		agent, err := shm.AgentAttach(agentName, instanceIdx, uint(cfg.MemoryRequirements))
+		agent, err := shm.AgentAttach(
+			agentName,
+			instanceIdx,
+			uint(cfg.MemoryRequirements),
+		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to attach agent to shared memory on instances[%d]: %w", instanceIdx, err)
+			return nil, fmt.Errorf(
+				"failed to attach agent to shared memory on instances[%d]: %w",
+				instanceIdx,
+				err,
+			)
 		}
 
 		agents = append(agents, *agent)
@@ -86,7 +97,10 @@ func (m *BalancerModule) Close() error {
 	}
 
 	if err := m.shm.Detach(); err != nil {
-		m.log.Warnw("failed to detach from shared memory mapping", zap.Error(err))
+		m.log.Warnw(
+			"failed to detach from shared memory mapping",
+			zap.Error(err),
+		)
 	}
 
 	return nil

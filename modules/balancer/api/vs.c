@@ -290,7 +290,11 @@ balancer_vs_init(
 	if (config_vs == NULL && vs_count > 0) {
 		return -1;
 	}
-	memset(config_vs, 0, config->vs_count * sizeof(struct virtual_service));
+	if (vs_count > 0) {
+		memset(config_vs,
+		       0,
+		       config->vs_count * sizeof(struct virtual_service));
+	}
 	SET_OFFSET_OF(&config->vs, config_vs);
 
 	// allocate reals
@@ -301,7 +305,10 @@ balancer_vs_init(
 	if (config_reals == NULL && config->real_count > 0) {
 		goto free_vs;
 	}
-	memset(config_reals, 0, config->real_count * sizeof(struct real));
+	if (config->real_count > 0) {
+		memset(config_reals, 0, config->real_count * sizeof(struct real)
+		);
+	}
 	SET_OFFSET_OF(&config->reals, config_reals);
 
 	size_t initialized_vs_count;
@@ -316,6 +323,7 @@ balancer_vs_init(
 		struct virtual_service *vs =
 			&config_vs[vs_config->registry_idx];
 		SET_OFFSET_OF(&vs->state, (struct service_state *)info->state);
+		vs->registry_idx = vs_config->registry_idx;
 		vs->round_robin_counter = 0;
 		vs->flags = vs_config->flags | VS_PRESENT_IN_CONFIG_FLAG;
 		memcpy(vs->address, vs_config->address, NET6_LEN);

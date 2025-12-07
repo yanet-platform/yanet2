@@ -8,6 +8,7 @@ option go_package = "github.com/yanet-platform/yanet2/modules/"
 message WlcConfig {
   uint64 wlc_power = 1;
   uint32 max_real_weight = 2;
+  uint32 update_period_ms = 3;
 }
 
 // Represents network subnet.
@@ -32,19 +33,6 @@ enum VsScheduler {
 
   // Weighted Least Connections
   WLC = 2;
-}
-
-// Mirrors module.VsIdentifier
-message VsIdentifier {
-  bytes ip = 1;
-  uint32 port = 2;
-  TransportProto proto = 3;
-}
-
-// Mirrors module.RealIdentifier
-message RealIdentifier {
-  VsIdentifier vs = 1;
-  bytes ip = 2;
 }
 
 // Virtual service configuration.
@@ -83,6 +71,10 @@ message Real {
 
   // False by default.
   bool enabled = 5;
+
+  // Unused for now,
+  // not present in the rest codebase.
+  uint32 port = 6;
 }
 
 // Flags of the virtual service
@@ -153,15 +145,12 @@ message ModuleConfig {
 
 message ModuleStateConfig {
   // Size of the session table
-  uint64 session_table_size = 1;
-
-  // Period to try extend the session table
-  uint32 extend_period_ms = 2;
-
-  // Period to try free unused memory in the session table
-  uint32 free_unused_period_ms = 3;
+  uint64 session_table_capacity = 1;
 
   // Period to scan the state of the session table
   // to update active connections and WLC.
-  uint32 scan_session_table_period_ms = 4;
+  uint32 session_table_scan_period_ms = 2;
+
+  // Max load factor of the session table.
+  float session_table_max_load_factor = 3;
 }

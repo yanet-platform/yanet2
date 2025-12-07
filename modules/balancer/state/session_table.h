@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/memory.h"
 #include "common/ttlmap/ttlmap.h"
 
 #include "session.h"
@@ -22,7 +23,6 @@ struct worker_info {
 	_Atomic uint32_t max_deadline_current_gen;
 	_Atomic uint32_t max_deadline_prev_gen;
 	_Atomic uint32_t active_sessions; // sessions created by worker
-	_Atomic uint32_t density_factor;
 } __rte_cache_aligned;
 
 struct session_table_gen {
@@ -54,6 +54,26 @@ session_table_init(
 
 void
 session_table_free(struct session_table *table);
+
+size_t
+session_table_capacity(struct session_table *table);
+
+////////////////////////////////////////////////////////////////////////////////
+
+int
+session_table_fill_sessions_info(
+	struct session_table *table,
+	struct balancer_sessions_info *info,
+	struct memory_context *mctx,
+	uint32_t now,
+	bool only_count
+);
+
+void
+session_table_free_sessions_info(
+	struct balancer_sessions_info *info,
+	struct memory_context *mctx
+);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -88,16 +108,8 @@ get_or_create_session(
 		&cur->map, session_id, session_state, lock, now, timeout
 	);
 	int status = TTLMAP_STATUS(res);
-	uint32_t meta = TTLMAP_META(res);
 
 	struct worker_info *worker_info = &cur->worker_info[worker_idx];
-	uint32_t new_density_factor =
-		RTE_MAX(meta, worker_info->density_factor);
-	atomic_store_explicit(
-		&worker_info->density_factor,
-		new_density_factor,
-		__ATOMIC_SEQ_CST
-	);
 
 	if (status == TTLMAP_FOUND) {
 		uint32_t new_max_deadline =
@@ -197,7 +209,7 @@ session_unlock(session_lock_t *lock) {
 }
 
 int
-session_table_extend(struct session_table *table, bool force);
+session_table_free_unused(struct session_table *table);
 
 int
-session_table_free_unused(struct session_table *table);
+session_table_resize(struct session_table *table, size_t new_size);

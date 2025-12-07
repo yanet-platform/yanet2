@@ -16,9 +16,14 @@ type RealUpdate struct {
 	Enable bool
 }
 
-func NewRealUpdateFromProto(update *balancerpb.RealUpdate) (*RealUpdate, error) {
+func NewRealUpdateFromProto(
+	update *balancerpb.RealUpdate,
+) (*RealUpdate, error) {
 	if update.Weight > math.MaxUint16 {
-		return nil, fmt.Errorf("incorrect real weight: real weight can not exceed %d", math.MaxUint16)
+		return nil, fmt.Errorf(
+			"incorrect real weight: real weight can not exceed %d",
+			math.MaxUint16,
+		)
 	}
 	vip, ok := netip.AddrFromSlice(update.VirtualIp)
 	if !ok {

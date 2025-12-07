@@ -17,7 +17,9 @@ type BalancerAddresses struct {
 }
 
 // NewBalancerAddressesFromProto creates BalancerAddresses from protobuf ModuleConfig.
-func NewBalancerAddressesFromProto(pb *balancerpb.ModuleConfig) (BalancerAddresses, error) {
+func NewBalancerAddressesFromProto(
+	pb *balancerpb.ModuleConfig,
+) (BalancerAddresses, error) {
 	if pb == nil {
 		return BalancerAddresses{}, fmt.Errorf("module config is nil")
 	}
@@ -28,19 +30,29 @@ func NewBalancerAddressesFromProto(pb *balancerpb.ModuleConfig) (BalancerAddress
 
 	// Convert source IPv4 (required)
 	if len(pb.SourceAddressV4) == 0 {
-		return BalancerAddresses{}, fmt.Errorf("source IPv4 address is required")
+		return BalancerAddresses{}, fmt.Errorf(
+			"source IPv4 address is required",
+		)
 	}
 	if len(pb.SourceAddressV4) != 4 {
-		return BalancerAddresses{}, fmt.Errorf("invalid IPv4 source address length: expected 4, got %d", len(pb.SourceAddressV4))
+		return BalancerAddresses{}, fmt.Errorf(
+			"invalid IPv4 source address length: expected 4, got %d",
+			len(pb.SourceAddressV4),
+		)
 	}
 	copy(ba.SourceIpV4[:], pb.SourceAddressV4)
 
 	// Convert source IPv6 (required)
 	if len(pb.SourceAddressV6) == 0 {
-		return BalancerAddresses{}, fmt.Errorf("source IPv6 address is required")
+		return BalancerAddresses{}, fmt.Errorf(
+			"source IPv6 address is required",
+		)
 	}
 	if len(pb.SourceAddressV6) != 16 {
-		return BalancerAddresses{}, fmt.Errorf("invalid IPv6 source address length: expected 16, got %d", len(pb.SourceAddressV6))
+		return BalancerAddresses{}, fmt.Errorf(
+			"invalid IPv6 source address length: expected 16, got %d",
+			len(pb.SourceAddressV6),
+		)
 	}
 	copy(ba.SourceIpV6[:], pb.SourceAddressV6)
 
@@ -48,7 +60,10 @@ func NewBalancerAddressesFromProto(pb *balancerpb.ModuleConfig) (BalancerAddress
 	for i, addrBytes := range pb.DecapAddresses {
 		addr, ok := netip.AddrFromSlice(addrBytes)
 		if !ok {
-			return BalancerAddresses{}, fmt.Errorf("invalid decap address at index %d", i)
+			return BalancerAddresses{}, fmt.Errorf(
+				"invalid decap address at index %d",
+				i,
+			)
 		}
 		ba.DecapAddresses = append(ba.DecapAddresses, addr)
 	}

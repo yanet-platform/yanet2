@@ -8,31 +8,40 @@ import (
 )
 
 type WlcConfig struct {
-	Power         uint64
-	MaxRealWeight uint16
+	Power          uint64
+	MaxRealWeight  uint16
+	UpdatePeriodMs uint32
 }
 
 func NewWlcConfigFromProto(proto *balancerpb.WlcConfig) (WlcConfig, error) {
 	if proto == nil {
 		// Return default WLC config when not provided
 		return WlcConfig{
-			Power:         10,
-			MaxRealWeight: 1000,
+			Power:          10,
+			MaxRealWeight:  1000,
+			UpdatePeriodMs: 500,
 		}, nil
 	}
 	if proto.MaxRealWeight > math.MaxUint16 {
-		return WlcConfig{}, fmt.Errorf("max real weight can not exceed %d", math.MaxUint16)
+		return WlcConfig{}, fmt.Errorf(
+			"max real weight can not exceed %d",
+			math.MaxUint16,
+		)
 	}
 	return WlcConfig{
-		Power:         proto.WlcPower,
-		MaxRealWeight: uint16(proto.MaxRealWeight),
+		Power:          proto.WlcPower,
+		MaxRealWeight:  uint16(proto.MaxRealWeight),
+		UpdatePeriodMs: proto.UpdatePeriodMs,
 	}, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 // Calculate effective weights of reals and returns true if some weights changed.
-func (vs *VirtualService) UpdateEffectiveWeights(wlc *WlcConfig, activeSessions map[RealIdentifier]uint64) bool {
+func (vs *VirtualService) UpdateEffectiveWeights(
+	wlc *WlcConfig,
+	activeSessions map[RealIdentifier]uint,
+) bool {
 	if vs.Scheduler != SchedulerWLC {
 		return false
 	}
@@ -41,7 +50,7 @@ func (vs *VirtualService) UpdateEffectiveWeights(wlc *WlcConfig, activeSessions 
 	for realIdx := range vs.Reals {
 		real := vs.Reals[realIdx]
 		if real.Enabled {
-			connectionsSum += activeSessions[real.Identifier]
+			connectionsSum += uint64(activeSessions[real.Identifier])
 			weightsSum += uint64(real.EffectiveWeight)
 		}
 	}
@@ -71,7 +80,7 @@ func (vs *VirtualService) UpdateEffectiveWeights(wlc *WlcConfig, activeSessions 
 func calcWlcWeight(
 	wlc *WlcConfig,
 	weight uint16,
-	connections uint64,
+	connections uint,
 	weightSum uint64,
 	connectionsSum uint64,
 ) uint16 {
@@ -79,7 +88,7 @@ func calcWlcWeight(
 		return weight
 	}
 
-	scaledConnections := connections * weightSum
+	scaledConnections := uint64(connections) * weightSum
 	scaledWeight := uint64(weight) * connectionsSum
 	connectionsRatio := float64(scaledConnections) / float64(scaledWeight)
 
@@ -88,6 +97,9 @@ func calcWlcWeight(
 		wlcRatio = 1.0
 	}
 
-	newWeight := min(uint64(float64(weight)*wlcRatio), uint64(wlc.MaxRealWeight))
+	newWeight := min(
+		uint64(float64(weight)*wlcRatio),
+		uint64(wlc.MaxRealWeight),
+	)
 	return uint16(newWeight)
 }

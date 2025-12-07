@@ -98,14 +98,23 @@ balancer_state_register_real(
 	);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-int
-balancer_state_extend_session_table(struct balancer_state *state, bool force) {
-	return session_table_extend(&state->session_table, force);
-}
+///////////////////////////////////////////////////////////////////////////////
 
 int
 balancer_state_gc_session_table(struct balancer_state *state) {
 	return session_table_free_unused(&state->session_table);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+size_t
+balancer_state_session_table_capacity(struct balancer_state *state) {
+	return session_table_capacity(&state->session_table);
+}
+
+int
+balancer_state_resize_session_table(
+	struct balancer_state *state, size_t new_size
+) {
+	return session_table_resize(&state->session_table, new_size);
 }

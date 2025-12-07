@@ -165,3 +165,19 @@ balancer_free_info(struct balancer_state *state, struct balancer_info *info) {
 	balancer_free_virtual_services_info(state, &info->virtual_services);
 	balancer_free_reals_info(state, &info->reals);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+int
+balancer_fill_sessions_info(
+	struct balancer_state *state, struct balancer_sessions_info *info, uint32_t now, bool count_only
+) {
+	return session_table_fill_sessions_info(&state->session_table, info, state->mctx, now, count_only);
+}
+
+void
+balancer_free_sessions_info(
+	struct balancer_state *state, struct balancer_sessions_info *info
+) {
+	session_table_free_sessions_info(info, state->mctx);
+}

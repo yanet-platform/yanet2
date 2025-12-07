@@ -14,10 +14,6 @@ import (
 
 // Balancer module
 type Balancer struct {
-	// Agent in which memory balancer config state
-	// lives in.
-	agent ffi.Agent
-
 	// Balancer module config
 	moduleConfig *ModuleConfig
 
@@ -31,37 +27,87 @@ type Balancer struct {
 	log *zap.SugaredLogger
 }
 
-func NewBalancerFromProto(agent ffi.Agent, name string, moduleConfig *balancerpb.ModuleConfig, moduleStateConfig *balancerpb.ModuleStateConfig, log *zap.SugaredLogger) (*Balancer, error) {
+func NewBalancerFromProto(
+	agent ffi.Agent,
+	name string,
+	moduleConfig *balancerpb.ModuleConfig,
+	moduleStateConfig *balancerpb.ModuleStateConfig,
+	log *zap.SugaredLogger,
+) (*Balancer, error) {
 	log.Infow("creating balancer instance", "name", name)
 
 	lock := &sync.Mutex{}
-	state, err := NewModuleConfigState(agent, lock, uint(moduleStateConfig.SessionTableSize), uint(moduleStateConfig.ExtendPeriodMs), uint(moduleStateConfig.FreeUnusedPeriodMs), uint(moduleStateConfig.ScanSessionTablePeriodMs))
+	stateLog := log.With("component", "state")
+	state, err := NewModuleConfigState(
+		agent,
+		lock,
+		uint(moduleStateConfig.SessionTableCapacity),
+		uint(moduleStateConfig.SessionTableScanPeriodMs),
+		moduleStateConfig.SessionTableMaxLoadFactor,
+		stateLog,
+	)
 	if err != nil {
-		log.Errorw("failed to create module config state", "name", name, "error", err)
+		log.Errorw(
+			"failed to create module config state",
+			"name",
+			name,
+			"error",
+			err,
+		)
 		return nil, fmt.Errorf("failed to create module config state: %w", err)
 	}
 
 	// Parse balancer addresses
 	addresses, err := module.NewBalancerAddressesFromProto(moduleConfig)
 	if err != nil {
-		log.Errorw("failed to parse balancer addresses", "name", name, "error", err)
+		log.Errorw(
+			"failed to parse balancer addresses",
+			"name",
+			name,
+			"error",
+			err,
+		)
 		return nil, fmt.Errorf("failed to parse balancer addresses: %w", err)
 	}
 
 	// Parse session timeouts
-	sessionTimeouts := module.NewSessionsTimeoutsFromProto(moduleConfig.SessionsTimeouts)
+	sessionTimeouts := module.NewSessionsTimeoutsFromProto(
+		moduleConfig.SessionsTimeouts,
+	)
 
 	// Register virtual services with their reals
-	virtualServices := make([]module.VirtualService, 0, len(moduleConfig.VirtualServices))
+	virtualServices := make(
+		[]module.VirtualService,
+		0,
+		len(moduleConfig.VirtualServices),
+	)
 	for i, protoVs := range moduleConfig.VirtualServices {
 		vs, err := state.RegisterVsWithReals(protoVs)
 		if err != nil {
-			log.Errorw("failed to register virtual service", "name", name, "index", i, "error", err)
-			return nil, fmt.Errorf("failed to register virtual service at index %d: %w", i, err)
+			log.Errorw(
+				"failed to register virtual service",
+				"name",
+				name,
+				"index",
+				i,
+				"error",
+				err,
+			)
+			return nil, fmt.Errorf(
+				"failed to register virtual service at index %d: %w",
+				i,
+				err,
+			)
 		}
 		virtualServices = append(virtualServices, *vs)
 	}
-	log.Debugw("registered virtual services", "name", name, "count", len(virtualServices))
+	log.Debugw(
+		"registered virtual services",
+		"name",
+		name,
+		"count",
+		len(virtualServices),
+	)
 
 	wlc, err := module.NewWlcConfigFromProto(moduleConfig.Wlc)
 	if err != nil {
@@ -70,20 +116,25 @@ func NewBalancerFromProto(agent ffi.Agent, name string, moduleConfig *balancerpb
 	}
 
 	// Create module config
-	config, err := NewModuleConfig(agent, name, state, virtualServices, addresses, sessionTimeouts, wlc)
+	configLog := log.With("component", "config")
+	config, err := NewModuleConfig(
+		agent,
+		name,
+		state,
+		virtualServices,
+		addresses,
+		sessionTimeouts,
+		wlc,
+		configLog,
+	)
 	if err != nil {
 		log.Errorw("failed to create module config", "name", name, "error", err)
 		state.Free()
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 	}
 
-	// Schedule background tasks
-	state.ScheduleBackgroundTasks(config)
-	log.Debugw("scheduled background tasks", "name", name)
-
 	log.Infow("balancer instance created successfully", "name", name)
 	return &Balancer{
-		agent:             agent,
 		moduleConfig:      config,
 		moduleConfigState: state,
 		lock:              lock,
@@ -94,7 +145,10 @@ func NewBalancerFromProto(agent ffi.Agent, name string, moduleConfig *balancerpb
 ////////////////////////////////////////////////////////////////////////////////
 
 // Update updates the balancer configuration
-func (b *Balancer) Update(moduleConfig *balancerpb.ModuleConfig, moduleStateConfig *balancerpb.ModuleStateConfig) error {
+func (b *Balancer) Update(
+	moduleConfig *balancerpb.ModuleConfig,
+	moduleStateConfig *balancerpb.ModuleStateConfig,
+) error {
 	b.log.Info("updating balancer configuration")
 	b.lock.Lock()
 	defer b.lock.Unlock()
@@ -107,15 +161,31 @@ func (b *Balancer) Update(moduleConfig *balancerpb.ModuleConfig, moduleStateConf
 	}
 
 	// Parse session timeouts
-	sessionTimeouts := module.NewSessionsTimeoutsFromProto(moduleConfig.SessionsTimeouts)
+	sessionTimeouts := module.NewSessionsTimeoutsFromProto(
+		moduleConfig.SessionsTimeouts,
+	)
 
 	// Register virtual services with their reals
-	virtualServices := make([]module.VirtualService, 0, len(moduleConfig.VirtualServices))
+	virtualServices := make(
+		[]module.VirtualService,
+		0,
+		len(moduleConfig.VirtualServices),
+	)
 	for i, protoVs := range moduleConfig.VirtualServices {
 		vs, err := b.moduleConfigState.RegisterVsWithReals(protoVs)
 		if err != nil {
-			b.log.Errorw("failed to register virtual service", "index", i, "error", err)
-			return fmt.Errorf("failed to register virtual service at index %d: %w", i, err)
+			b.log.Errorw(
+				"failed to register virtual service",
+				"index",
+				i,
+				"error",
+				err,
+			)
+			return fmt.Errorf(
+				"failed to register virtual service at index %d: %w",
+				i,
+				err,
+			)
 		}
 		virtualServices = append(virtualServices, *vs)
 	}
@@ -129,7 +199,7 @@ func (b *Balancer) Update(moduleConfig *balancerpb.ModuleConfig, moduleStateConf
 	}
 
 	// Update module config
-	if err := b.moduleConfig.Update(b.agent, virtualServices, addresses, sessionTimeouts, wlc); err != nil {
+	if err := b.moduleConfig.Update(virtualServices, addresses, sessionTimeouts, wlc); err != nil {
 		b.log.Errorw("failed to update module config", "error", err)
 		return fmt.Errorf("failed to update module config: %w", err)
 	}
@@ -137,10 +207,9 @@ func (b *Balancer) Update(moduleConfig *balancerpb.ModuleConfig, moduleStateConf
 	// Update state config if provided
 	if moduleStateConfig != nil {
 		b.moduleConfigState.Update(
-			uint(moduleStateConfig.SessionTableSize),
-			uint(moduleStateConfig.ExtendPeriodMs),
-			uint(moduleStateConfig.FreeUnusedPeriodMs),
-			uint(moduleStateConfig.ScanSessionTablePeriodMs),
+			uint(moduleStateConfig.SessionTableCapacity),
+			uint(moduleStateConfig.SessionTableScanPeriodMs),
+			moduleStateConfig.SessionTableMaxLoadFactor,
 		)
 		b.log.Debug("updated state configuration")
 	}
@@ -154,7 +223,7 @@ func (b *Balancer) UpdateReals(updates []module.RealUpdate, buffer bool) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	return b.moduleConfig.UpdateReals(b.agent, updates, buffer)
+	return b.moduleConfig.UpdateReals(updates, buffer)
 }
 
 // FlushRealUpdates flushes buffered real updates
@@ -162,7 +231,7 @@ func (b *Balancer) FlushRealUpdates() (int, error) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	return b.moduleConfig.FlushRealUpdates(b.agent)
+	return b.moduleConfig.FlushRealUpdates()
 }
 
 // GetConfig returns the current configuration as proto
@@ -173,10 +242,13 @@ func (b *Balancer) GetConfig() (*balancerpb.ModuleConfig, *balancerpb.ModuleStat
 	moduleConfigProto := b.moduleConfig.IntoProto()
 
 	moduleStateConfigProto := &balancerpb.ModuleStateConfig{
-		SessionTableSize:         uint64(b.moduleConfigState.SessionTableSize),
-		ExtendPeriodMs:           uint32(b.moduleConfigState.ExtendPeriodMs),
-		FreeUnusedPeriodMs:       uint32(b.moduleConfigState.FreeUnusedPeriodMs),
-		ScanSessionTablePeriodMs: uint32(b.moduleConfigState.ScanSessionTablePeriodMs),
+		SessionTableCapacity: uint64(
+			b.moduleConfigState.SessionTableCapacity(),
+		),
+		SessionTableScanPeriodMs: uint32(
+			b.moduleConfigState.ScanSessionTablePeriodMs,
+		),
+		SessionTableMaxLoadFactor: float32(b.moduleConfigState.MaxLoadFactor),
 	}
 
 	return moduleConfigProto, moduleStateConfigProto
@@ -191,11 +263,20 @@ func (b *Balancer) GetStateInfo() module.BalancerInfo {
 }
 
 // GetConfigStats returns configuration statistics
-func (b *Balancer) GetConfigStats(dataplaneInstance uint32, device, pipeline, function, chain string) module.BalancerStats {
+func (b *Balancer) GetConfigStats(
+	dataplaneInstance uint32,
+	device, pipeline, function, chain string,
+) module.BalancerStats {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	return b.moduleConfig.GetStats(dataplaneInstance, device, pipeline, function, chain)
+	return b.moduleConfig.GetStats(
+		dataplaneInstance,
+		device,
+		pipeline,
+		function,
+		chain,
+	)
 }
 
 // GetModuleConfig returns the internal module configuration for testing

@@ -1,3 +1,5 @@
+#pragma once
+
 #include "chunk.h"
 
 #include <stddef.h>

@@ -24,6 +24,7 @@ package ffi
 import "C"
 import (
 	"fmt"
+	"net/netip"
 	"time"
 	"unsafe"
 
@@ -51,28 +52,50 @@ func (state *ModuleConfigStatePtr) Free() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+func (state *ModuleConfigStatePtr) SessionTableCapacity() uint {
+	return uint(C.balancer_state_session_table_capacity(state.inner))
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 // Create new state of the balancer with provided
 // session table size and timeouts.
 func NewModuleConfigState(
 	agent ffi.Agent,
 	initialTableSize uint,
 ) (ModuleConfigStatePtr, error) {
+	if initialTableSize == 0 {
+		// default value
+		initialTableSize = 1024
+	}
 	state, err := C.balancer_state_create(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		C.size_t(initialTableSize),
 	)
 	if err != nil {
-		return ModuleConfigStatePtr{inner: nil}, fmt.Errorf("failed to create state: %w", err)
+		return ModuleConfigStatePtr{
+				inner: nil,
+			}, fmt.Errorf(
+				"failed to create state: %w",
+				err,
+			)
 	}
 	if state == nil {
-		return ModuleConfigStatePtr{inner: nil}, fmt.Errorf("failed to create state")
+		return ModuleConfigStatePtr{
+				inner: nil,
+			}, fmt.Errorf(
+				"failed to create state",
+			)
 	}
 	return ModuleConfigStatePtr{inner: state}, nil
 }
 
 // Extend session table on demand (use `force` to force extension).
-func (state *ModuleConfigStatePtr) ExtendSessionTable(force bool) error {
-	_, err := C.balancer_state_extend_session_table(state.inner, (C.bool)(force))
+func (state *ModuleConfigStatePtr) ResizeSessionTable(newSize uint) error {
+	_, err := C.balancer_state_resize_session_table(
+		state.inner,
+		C.size_t(newSize),
+	)
 	return err
 }
 
@@ -85,12 +108,20 @@ func (state *ModuleConfigStatePtr) FreeUnusedInSessionTable() error {
 ////////////////////////////////////////////////////////////////////////////////
 
 // Register virtual service in the module state registry.
-func (state *ModuleConfigStatePtr) RegisterVs(id *module.VsIdentifier) (uint, error) {
+func (state *ModuleConfigStatePtr) RegisterVs(
+	id *module.VsIdentifier,
+) (uint, error) {
 	networkProto := addrToIpProto(&id.Ip)
 	transportProto := transportProtoToIpProto(id.Proto)
 	port := C.uint16_t(id.Port)
 	vsIp := sliceToPtr(id.Ip.AsSlice())
-	idx, err := C.balancer_state_register_vs(state.inner, transportProto, networkProto, vsIp, port)
+	idx, err := C.balancer_state_register_vs(
+		state.inner,
+		transportProto,
+		networkProto,
+		vsIp,
+		port,
+	)
 	if err != nil {
 		return 0, fmt.Errorf("failed to register real: %w", err)
 	}
@@ -101,14 +132,24 @@ func (state *ModuleConfigStatePtr) RegisterVs(id *module.VsIdentifier) (uint, er
 }
 
 // Register real in the module state registry.
-func (state *ModuleConfigStatePtr) RegisterReal(id *module.RealIdentifier) (uint, error) {
+func (state *ModuleConfigStatePtr) RegisterReal(
+	id *module.RealIdentifier,
+) (uint, error) {
 	vsNetworkProto := addrToIpProto(&id.Vs.Ip)
 	transportProto := transportProtoToIpProto(id.Vs.Proto)
 	realNetworkProto := addrToIpProto(&id.Ip)
 	vsIp := sliceToPtr(id.Vs.Ip.AsSlice())
 	realIp := sliceToPtr(id.Ip.AsSlice())
 	port := C.uint16_t(id.Vs.Port)
-	idx, err := C.balancer_state_register_real(state.inner, transportProto, vsNetworkProto, vsIp, port, realNetworkProto, realIp)
+	idx, err := C.balancer_state_register_real(
+		state.inner,
+		transportProto,
+		vsNetworkProto,
+		vsIp,
+		port,
+		realNetworkProto,
+		realIp,
+	)
 	if err != nil {
 		return 0, fmt.Errorf("failed to register real: %w", err)
 	}
@@ -165,7 +206,10 @@ func (state *ModuleConfigStatePtr) VirtualServicesInfo() []module.VsInfo {
 	if count == 0 || info.info == nil {
 		return nil
 	}
-	cArr := unsafe.Slice((*C.struct_balancer_virtual_service_info)(info.info), count)
+	cArr := unsafe.Slice(
+		(*C.struct_balancer_virtual_service_info)(info.info),
+		count,
+	)
 	out := make([]module.VsInfo, count)
 	for i := range count {
 		entry := cArr[i]
@@ -178,11 +222,14 @@ func (state *ModuleConfigStatePtr) VirtualServicesInfo() []module.VsInfo {
 		stats := vsStatsFromC(&entry.stats)
 
 		out[i] = module.VsInfo{
-			VsRegistryIdx:       uint(i),
-			VsIdentifier:        id,
-			ActiveSessions:      uint64(entry.active_sessions),
-			LastPacketTimestamp: time.Unix(int64(entry.last_packet_timestamp), 0),
-			Stats:               stats,
+			VsRegistryIdx:  uint(i),
+			VsIdentifier:   id,
+			ActiveSessions: 0, // fill active session after scan session table
+			LastPacketTimestamp: time.Unix(
+				int64(entry.last_packet_timestamp),
+				0,
+			),
+			Stats: stats,
 		}
 	}
 	return out
@@ -219,11 +266,14 @@ func (state *ModuleConfigStatePtr) RealsInfo() []module.RealInfo {
 		stats := realStatsFromC(&entry.stats)
 
 		out[i] = module.RealInfo{
-			RealRegistryIdx:     uint(i),
-			RealIdentifier:      realId,
-			ActiveSessions:      uint64(entry.active_sessions),
-			LastPacketTimestamp: time.Unix(int64(entry.last_packet_timestamp), 0),
-			Stats:               stats,
+			RealRegistryIdx: uint(i),
+			RealIdentifier:  realId,
+			ActiveSessions:  0,
+			LastPacketTimestamp: time.Unix(
+				int64(entry.last_packet_timestamp),
+				0,
+			),
+			Stats: stats,
 		}
 	}
 	return out
@@ -232,7 +282,11 @@ func (state *ModuleConfigStatePtr) RealsInfo() []module.RealInfo {
 // VirtualServiceInfo returns info for a single VS by registry index.
 func (state *ModuleConfigStatePtr) VirtualServiceInfo(idx uint) *module.VsInfo {
 	var entry C.struct_balancer_virtual_service_info
-	rc, err := C.balancer_fill_virtual_service_info(state.inner, C.size_t(idx), &entry)
+	rc, err := C.balancer_fill_virtual_service_info(
+		state.inner,
+		C.size_t(idx),
+		&entry,
+	)
 	if err != nil || int(rc) != 0 {
 		return nil
 	}
@@ -247,7 +301,7 @@ func (state *ModuleConfigStatePtr) VirtualServiceInfo(idx uint) *module.VsInfo {
 	out := module.VsInfo{
 		VsRegistryIdx:       idx,
 		VsIdentifier:        id,
-		ActiveSessions:      uint64(entry.active_sessions),
+		ActiveSessions:      0, // fill active session after scan session table
 		LastPacketTimestamp: time.Unix(int64(entry.last_packet_timestamp), 0),
 		Stats:               stats,
 	}
@@ -277,9 +331,80 @@ func (state *ModuleConfigStatePtr) RealInfo(idx uint) *module.RealInfo {
 	out := module.RealInfo{
 		RealRegistryIdx:     idx,
 		RealIdentifier:      realId,
-		ActiveSessions:      uint64(entry.active_sessions),
+		ActiveSessions:      0,
 		LastPacketTimestamp: time.Unix(int64(entry.last_packet_timestamp), 0),
 		Stats:               stats,
 	}
 	return &out
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// SessionsInfo returns info about active sessions in the balancer.
+// If countOnly is true, only the count is returned without session details.
+// The now parameter should be the current timestamp in seconds.
+func (state *ModuleConfigStatePtr) SessionsInfo(
+	now uint32,
+	countOnly bool,
+) *module.SessionsInfo {
+	var info C.struct_balancer_sessions_info
+	rc, err := C.balancer_fill_sessions_info(
+		state.inner,
+		&info,
+		C.uint32_t(now),
+		C.bool(countOnly),
+	)
+	if err != nil || int(rc) != 0 {
+		return nil
+	}
+	defer C.balancer_free_sessions_info(state.inner, &info)
+
+	count := uint(info.count)
+	result := &module.SessionsInfo{
+		SessionsCount: count,
+	}
+
+	if countOnly || count == 0 || info.sessions == nil {
+		return result
+	}
+
+	cArr := unsafe.Slice(
+		(*C.struct_balancer_session_info)(info.sessions),
+		count,
+	)
+	result.Sessions = make([]module.SessionInfo, count)
+
+	for i := range count {
+		entry := cArr[i]
+
+		// Get VS info to determine IP protocol for client IP
+		vsInfo := state.VirtualServiceInfo(uint(entry.vs_id))
+		var clientIp netip.Addr
+		var ipProto C.int = C.IPPROTO_IP // default to IPv4
+		if vsInfo != nil {
+			ipProto = addrToIpProto(&vsInfo.VsIdentifier.Ip)
+		}
+		clientIp = ipFromC(&entry.client_ip[0], ipProto)
+
+		// Get Real info to build RealIdentifier
+		realInfo := state.RealInfo(uint(entry.real_id))
+		var realId module.RealIdentifier
+		if realInfo != nil {
+			realId = realInfo.RealIdentifier
+		}
+
+		result.Sessions[i] = module.SessionInfo{
+			ClientAddr:      clientIp,
+			ClientPort:      uint16(entry.client_port),
+			Real:            realId,
+			CreateTimestamp: time.Unix(int64(entry.create_timestamp), 0),
+			LastPacketTimestamp: time.Unix(
+				int64(entry.last_packet_timestamp),
+				0,
+			),
+			Timeout: time.Duration(entry.timeout) * time.Second,
+		}
+	}
+
+	return result
 }

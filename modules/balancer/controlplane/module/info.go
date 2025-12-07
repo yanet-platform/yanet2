@@ -224,7 +224,9 @@ func (i BalancerInfo) IntoProto() *balancerpb.BalancerInfo {
 }
 
 // NewBalancerInfoFromProto creates BalancerInfo from protobuf message with validation.
-func NewBalancerInfoFromProto(pb *balancerpb.BalancerInfo) (*BalancerInfo, error) {
+func NewBalancerInfoFromProto(
+	pb *balancerpb.BalancerInfo,
+) (*BalancerInfo, error) {
 	if pb == nil {
 		return nil, fmt.Errorf("nil BalancerInfo message")
 	}
@@ -318,3 +320,28 @@ func NewCommonStatsFromProto(pb *balancerpb.CommonStats) *CommonStats {
 		OutgoingBytes:          pb.OutgoingBytes,
 	}
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Represents info about session
+type SessionInfo struct {
+	ClientAddr          netip.Addr
+	ClientPort          uint16
+	Real                RealIdentifier
+	CreateTimestamp     time.Time
+	LastPacketTimestamp time.Time
+	Timeout             time.Duration
+}
+
+// Info about active sessions
+type SessionsInfo struct {
+	// Number of active sessions
+	SessionsCount uint
+
+	// May be empty if only sessions count
+	// was requested. Else, its len equals
+	// to `SessionsCount`.
+	Sessions []SessionInfo
+}
+
+// TODO: Add SessionInfo.IntoProto()
