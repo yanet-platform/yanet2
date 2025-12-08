@@ -417,8 +417,13 @@ agent_delete_pipeline(struct agent *agent, const char *pipeline_name) {
 struct cp_pipeline_config *
 cp_pipeline_config_create(const char *name, uint64_t length) {
 	struct cp_pipeline_config *config = (struct cp_pipeline_config *)malloc(
-		sizeof(struct cp_pipeline_config) + sizeof(char[80]) * length
+		sizeof(struct cp_pipeline_config) +
+		sizeof(char[CP_FUNCTION_NAME_LEN]) * length
 	);
+	if (config == NULL) {
+		return NULL;
+	}
+
 	strtcpy(config->name, name, CP_PIPELINE_NAME_LEN);
 	config->length = length;
 
