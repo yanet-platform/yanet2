@@ -11,6 +11,12 @@ all: go-cache-clean dataplane cli
 go-cache-clean:
 	go clean -cache
 
+setup:
+	meson setup build
+
+setup-debug:
+	meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build
+
 dataplane:
 	meson compile -C build
 
@@ -30,6 +36,10 @@ cli-clean/%:
 
 test: dataplane
 	go test $$(go list ./... | grep -v 'tests/functional')
+	meson test -C build
+
+test-debug: dataplane
+	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test $$(go list ./... | grep -v 'tests/functional')
 	meson test -C build
 
 test-functional:

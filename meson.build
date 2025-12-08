@@ -31,6 +31,31 @@ configure_file(output: build_cfg, configuration: yanet_conf)
 go = find_program('go', required: true)
 protoc = find_program('protoc', required: true)
 
+# Build CGO flags based on b_sanitize option
+yanet_go_env = {}
+yanet_cgo_cflags = []
+yanet_cgo_ldflags = []
+b_sanitize = get_option('b_sanitize')
+if b_sanitize != 'none'
+    sanitize_flags = []
+    if b_sanitize.contains('address')
+        sanitize_flags += 'address'
+    endif
+    if b_sanitize.contains('undefined')
+        sanitize_flags += 'undefined'
+    endif
+    if sanitize_flags.length() > 0
+        sanitize_str = ','.join(sanitize_flags)
+        cgo_flags = '-fsanitize=' + sanitize_str + ' -g'
+        yanet_go_env = {
+            'CGO_CFLAGS': cgo_flags,
+            'CGO_LDFLAGS': cgo_flags,
+        }
+        yanet_cgo_cflags += cgo_flags
+        yanet_cgo_ldflags += cgo_flags
+    endif
+endif
+
 yanet_test_c_args = ['-O0']
 yanet_c_args = []
 yanet_link_args = []

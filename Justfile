@@ -18,6 +18,12 @@ build:
     @meson setup build
     @meson compile -C build
 
+# Build all targets in debug
+build-debug:
+    @go clean -cache
+    @meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build
+    @meson compile -C build
+
 # Setup build environment with optional coverage
 setup COVERAGE_MODE="false":
     @meson setup build -Dbuildtype=debug -Db_coverage={{ COVERAGE_MODE }}
@@ -110,6 +116,10 @@ dbloody *FILES:
 # Build in Docker
 dbuild:
     @just _docker_run -it "just build"
+
+# Build in Docker
+dbuild-debug:
+    @just _docker_run -it "just build-debug"
 
 # Start shell in Docker
 dshell:

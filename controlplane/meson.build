@@ -12,6 +12,7 @@ custom_target(
         '-o', '@OUTPUT@',
         join_paths(meson.current_source_dir(), 'cmd', 'yncp-director', 'main.go'),
     ],
+    env: yanet_go_env,
     build_by_default: true,
     build_always_stale: true,
     depends: [
@@ -40,6 +41,7 @@ custom_target(
         '-o', '@OUTPUT@',
         join_paths(meson.current_source_dir(), 'cmd', 'bird-adapter'),
     ],
+    env: yanet_go_env,
     build_by_default: true,
     build_always_stale: true,
     depends: [

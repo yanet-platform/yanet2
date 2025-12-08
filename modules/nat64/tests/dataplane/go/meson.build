@@ -6,8 +6,8 @@ sources = files(
 test_env = environment(
   {
     'MALLOC_PERTURB_': '0',
-    'CGO_CFLAGS': '--coverage',
-    'CGO_LDFLAGS': '--coverage',
+    'CGO_CFLAGS': ' '.join(['--coverage'] + yanet_cgo_cflags),
+    'CGO_LDFLAGS': ' '.join(['--coverage'] + yanet_cgo_ldflags),
     'ASAN_OPTIONS': '',
     'UBSAN_OPTIONS': '',
     'MSAN_OPTIONS': '',
