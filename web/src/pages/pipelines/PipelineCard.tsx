@@ -219,7 +219,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
                 {/* Validation errors */}
                 {validationErrors.length > 0 && (
                     <Box style={{ padding: '8px 16px' }}>
-                        <Alert theme="danger" message={validationErrors.join('. ')} />
+                        <Alert theme="danger" message={validationErrors[0]} />
                     </Box>
                 )}
                 

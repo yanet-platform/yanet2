@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { TextInput, Box, Text } from '@gravity-ui/uikit';
+import { Select, Box } from '@gravity-ui/uikit';
+import type { SelectOption } from '@gravity-ui/uikit';
 import { FormDialog, FormField } from '../../../components';
 import type { FunctionRefNodeData } from '../types';
 import type { FunctionId } from '../../../api/common';
@@ -22,51 +23,71 @@ export const FunctionRefEditorDialog: React.FC<FunctionRefEditorDialogProps> = (
     loadingFunctions = false,
 }) => {
     const [functionName, setFunctionName] = useState('');
-    const [showSuggestions, setShowSuggestions] = useState(false);
-    
+    const [filterText, setFilterText] = useState('');
+
     useEffect(() => {
         if (open) {
             setFunctionName(initialData.functionName || '');
-            setShowSuggestions(false);
+            setFilterText('');
         }
     }, [open, initialData]);
-    
+
     const handleConfirm = useCallback(() => {
         onConfirm({
             functionName: functionName.trim(),
         });
     }, [functionName, onConfirm]);
-    
-    // Filter suggestions based on input
-    const suggestions = useMemo(() => {
-        if (!functionName.trim()) {
-            return availableFunctions;
+
+    // Build options: available functions + custom input option if needed
+    const selectOptions = useMemo((): SelectOption[] => {
+        const options: SelectOption[] = availableFunctions.map(f => ({
+            value: f.name || '',
+            content: f.name || '',
+        }));
+
+        // If there's filter text that doesn't match any existing function exactly,
+        // add it as a "create new" option
+        const trimmedFilter = filterText.trim();
+        if (trimmedFilter && !availableFunctions.some(f => f.name === trimmedFilter)) {
+            options.unshift({
+                value: trimmedFilter,
+                content: `Use "${trimmedFilter}"`,
+            });
         }
-        const lowerInput = functionName.toLowerCase();
-        return availableFunctions.filter(f => 
-            f.name?.toLowerCase().includes(lowerInput)
-        );
-    }, [functionName, availableFunctions]);
-    
-    const handleInputChange = useCallback((value: string) => {
-        setFunctionName(value);
-        setShowSuggestions(true);
+
+        return options;
+    }, [availableFunctions, filterText]);
+
+    const handleSelectChange = useCallback((values: string[]) => {
+        if (values.length > 0) {
+            setFunctionName(values[0]);
+        } else {
+            setFunctionName('');
+        }
     }, []);
-    
-    const handleSuggestionClick = useCallback((name: string) => {
-        setFunctionName(name);
-        setShowSuggestions(false);
+
+    const handleFilterChange = useCallback((filter: string) => {
+        setFilterText(filter);
     }, []);
-    
-    const handleInputFocus = useCallback(() => {
-        setShowSuggestions(true);
+
+    // Custom filter: show all options that contain the filter text
+    const filterOption = useCallback((option: SelectOption, filter: string): boolean => {
+        const optionText = String(option.content || option.value).toLowerCase();
+        const filterLower = filter.toLowerCase().trim();
+
+        // Always show the "Use ..." option for custom input
+        if (optionText.startsWith('use "')) {
+            return true;
+        }
+
+        return optionText.includes(filterLower);
     }, []);
-    
-    const handleInputBlur = useCallback(() => {
-        // Delay hiding to allow click on suggestion
-        setTimeout(() => setShowSuggestions(false), 200);
-    }, []);
-    
+
+    // Selected value for the Select component
+    const selectedValue = useMemo(() => {
+        return functionName ? [functionName] : [];
+    }, [functionName]);
+
     return (
         <FormDialog
             open={open}
@@ -79,75 +100,24 @@ export const FunctionRefEditorDialog: React.FC<FunctionRefEditorDialogProps> = (
             <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <FormField
                     label="Function Name"
-                    hint="Name of the function to reference. You can enter a name that doesn't exist yet."
+                    hint="Select from available functions or type a custom name."
                 >
-                    <div style={{ position: 'relative' }}>
-                        <TextInput
-                            value={functionName}
-                            onUpdate={handleInputChange}
-                            onFocus={handleInputFocus}
-                            onBlur={handleInputBlur}
-                            placeholder={loadingFunctions ? 'Loading functions...' : 'Enter function name'}
-                            style={{ width: '100%' }}
-                            autoFocus
-                        />
-                        {showSuggestions && suggestions.length > 0 && (
-                            <Box
-                                style={{
-                                    position: 'absolute',
-                                    top: '100%',
-                                    left: 0,
-                                    right: 0,
-                                    maxHeight: '200px',
-                                    overflowY: 'auto',
-                                    background: 'var(--g-color-base-float)',
-                                    border: '1px solid var(--g-color-line-generic)',
-                                    borderRadius: '4px',
-                                    marginTop: '4px',
-                                    zIndex: 1000,
-                                    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-                                }}
-                            >
-                                {suggestions.map((func) => (
-                                    <Box
-                                        key={func.name}
-                                        style={{
-                                            padding: '8px 12px',
-                                            cursor: 'pointer',
-                                            borderBottom: '1px solid var(--g-color-line-generic)',
-                                        }}
-                                        onClick={() => handleSuggestionClick(func.name || '')}
-                                        onMouseDown={(e) => e.preventDefault()}
-                                    >
-                                        <Text variant="body-1">{func.name}</Text>
-                                    </Box>
-                                ))}
-                            </Box>
-                        )}
-                        {showSuggestions && suggestions.length === 0 && functionName.trim() && !loadingFunctions && (
-                            <Box
-                                style={{
-                                    position: 'absolute',
-                                    top: '100%',
-                                    left: 0,
-                                    right: 0,
-                                    background: 'var(--g-color-base-float)',
-                                    border: '1px solid var(--g-color-line-generic)',
-                                    borderRadius: '4px',
-                                    marginTop: '4px',
-                                    padding: '8px 12px',
-                                    zIndex: 1000,
-                                }}
-                            >
-                                <Text variant="body-2" color="secondary">
-                                    No matching functions. You can still use this name.
-                                </Text>
-                            </Box>
-                        )}
-                    </div>
+                    <Select
+                        value={selectedValue}
+                        onUpdate={handleSelectChange}
+                        options={selectOptions}
+                        filterable
+                        filter={filterText}
+                        onFilterChange={handleFilterChange}
+                        filterOption={filterOption}
+                        placeholder={loadingFunctions ? 'Loading functions...' : 'Select or type function name'}
+                        disabled={loadingFunctions}
+                        popupWidth="fit"
+                        width="max"
+                        hasClear
+                    />
                 </FormField>
             </Box>
         </FormDialog>
     );
 };
-

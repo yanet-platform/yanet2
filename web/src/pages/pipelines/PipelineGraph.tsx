@@ -10,6 +10,8 @@ import {
     ReactFlowProvider,
     Panel,
     useOnSelectionChange,
+    getBezierPath,
+    BaseEdge,
 } from '@xyflow/react';
 import type {
     Connection,
@@ -17,8 +19,10 @@ import type {
     OnConnectEnd,
     OnConnectStart,
     NodeTypes,
+    EdgeTypes,
     Node,
     Edge,
+    EdgeProps,
     OnSelectionChangeParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -41,6 +45,42 @@ const nodeTypes: NodeTypes = {
     [NODE_TYPE_INPUT]: InputNode as NodeTypes[string],
     [NODE_TYPE_OUTPUT]: OutputNode as NodeTypes[string],
     [NODE_TYPE_FUNCTION_REF]: FunctionRefNode as NodeTypes[string],
+};
+
+// Custom edge with selection highlighting
+const SelectableEdge: React.FC<EdgeProps> = ({
+    id,
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    style,
+    markerEnd,
+    selected,
+}) => {
+    const [edgePath] = getBezierPath({
+        sourceX,
+        sourceY,
+        sourcePosition,
+        targetX,
+        targetY,
+        targetPosition,
+    });
+
+    // Apply selection styles
+    const edgeStyle = {
+        ...style,
+        strokeWidth: selected ? 3 : 2,
+        stroke: selected ? 'var(--g-color-line-brand)' : style?.stroke,
+    };
+
+    return <BaseEdge id={id} path={edgePath} style={edgeStyle} markerEnd={markerEnd} />;
+};
+
+const edgeTypes: EdgeTypes = {
+    default: SelectableEdge,
 };
 
 export interface PipelineGraphProps {
@@ -432,6 +472,7 @@ const PipelineGraphInner: React.FC<PipelineGraphProps> = ({
                 onConnectEnd={onConnectEnd}
                 onNodeDoubleClick={handleNodeDoubleClick}
                 nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
                 isValidConnection={isValidConnection}
                 defaultEdgeOptions={defaultEdgeOptions}
                 fitView
