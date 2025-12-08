@@ -300,6 +300,7 @@ function_ectx_create(
 
 	memset(function_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&function_ectx->cp_function, cp_function);
+	function_ectx->chain_map_size = weight_sum;
 
 	struct chain_ectx **chains = (struct chain_ectx **)memory_balloc(
 		memory_context,
@@ -601,6 +602,7 @@ device_entry_ectx_create(
 	return device_entry_ectx;
 
 error:
+	device_entry_ectx_free(new_config_gen, device_entry_ectx);
 	return NULL;
 }
 
