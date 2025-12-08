@@ -754,7 +754,8 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 		struct cp_pipeline_info *pipeline_info =
 			(struct cp_pipeline_info *)malloc(
 				sizeof(struct cp_pipeline_info) +
-				sizeof(uint64_t) * cp_pipeline->length
+				sizeof(struct cp_function_info_id) *
+					cp_pipeline->length
 			);
 		if (pipeline_info == NULL) {
 			cp_pipeline_list_info_free(pipeline_list_info);
