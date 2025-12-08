@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
@@ -41,11 +42,15 @@ func NewBuiltInModuleRunner(
 	gatewayEndpoint string,
 	log *zap.SugaredLogger,
 ) *BuiltInModuleRunner {
+	log = log.Named(module.Name()).With(zap.String("module", module.Name()))
+
 	return &BuiltInModuleRunner{
 		module:          module,
 		gatewayEndpoint: gatewayEndpoint,
-		server:          grpc.NewServer(),
-		log:             log.Named(module.Name()).With(zap.String("module", module.Name())),
+		server: grpc.NewServer(
+			grpc.ChainUnaryInterceptor(xgrpc.AccessLogInterceptor(log)),
+		),
+		log: log,
 	}
 }
 

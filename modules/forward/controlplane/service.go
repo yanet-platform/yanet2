@@ -6,8 +6,6 @@ import (
 	"net/netip"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
@@ -19,15 +17,13 @@ type ForwardService struct {
 
 	mu          sync.Mutex
 	agents      []*ffi.Agent
-	log         *zap.SugaredLogger
 	deviceCount uint16
 	updater     ffiConfigUpdater
 }
 
-func NewForwardService(agents []*ffi.Agent, log *zap.SugaredLogger) *ForwardService {
+func NewForwardService(agents []*ffi.Agent) *ForwardService {
 	return &ForwardService{
 		agents: agents,
-		log:    log,
 	}
 }
 
@@ -136,28 +132,18 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		return nil, fmt.Errorf("failed to update module on instance %d: %w", inst, err)
 	}
 
-	m.log.Infow("successfully update forward config",
-		zap.String("name", name),
-		zap.Uint32("instance", inst),
-	)
-
 	return &forwardpb.UpdateConfigResponse{}, nil
 }
 
 func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.DeleteConfigRequest) (*forwardpb.DeleteConfigResponse, error) {
-	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
+	name, instance, err := req.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
 		return nil, err
 	}
 	// Remove module configuration from the control plane.
 	// TODO
 
-	deleted := DeleteConfig(m, name, inst)
-	m.log.Infow("deleted module config",
-		zap.String("name", name),
-		zap.Uint32("instance", inst),
-		zap.Bool("dataplane_hit", deleted),
-	)
+	deleted := DeleteConfig(m, name, instance)
 
 	response := &forwardpb.DeleteConfigResponse{
 		Deleted: deleted,

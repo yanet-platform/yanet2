@@ -6,7 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/yanet-platform/yanet2/common/proto"
+	commonpb "github.com/yanet-platform/yanet2/common/proto"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
@@ -118,19 +118,9 @@ func (m *PipelineService) Update(
 		pipeline.Functions[idx] = reqFunctionId.Name
 	}
 
-	m.log.Infow("updating pipeline",
-		zap.Uint32("instance", instance),
-		zap.Any("config", pipeline),
-	)
-
 	if err := agent.UpdatePipeline(pipeline); err != nil {
 		return nil, fmt.Errorf("failed to update function: %w", err)
 	}
-
-	m.log.Infow("updated pipeline",
-		zap.Uint32("instance", instance),
-		zap.Any("config", pipeline),
-	)
 
 	return &ynpb.UpdatePipelineResponse{}, nil
 }
@@ -140,7 +130,7 @@ func (m *PipelineService) Delete(
 	request *ynpb.DeletePipelineRequest,
 ) (*ynpb.DeletePipelineResponse, error) {
 	instance := request.GetInstance()
-	pipeline_name := request.Id.Name
+	pipelineName := request.GetId().GetName()
 
 	agent, err := m.shm.AgentAttach(agentName, instance, defaultAgentMemory)
 	if err != nil {
@@ -148,7 +138,7 @@ func (m *PipelineService) Delete(
 	}
 	defer agent.Close()
 
-	if err := agent.DeletePipeline(pipeline_name); err != nil {
+	if err := agent.DeletePipeline(pipelineName); err != nil {
 		return nil, fmt.Errorf("failed to delete pipeline: %w", err)
 	}
 

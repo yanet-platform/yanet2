@@ -6,7 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/yanet-platform/yanet2/common/proto"
+	commonpb "github.com/yanet-platform/yanet2/common/proto"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
@@ -146,19 +146,9 @@ func (m *FunctionService) Update(
 		function.Chains = append(function.Chains, functionChain)
 	}
 
-	m.log.Infow("updating function",
-		zap.Uint32("instance", instance),
-		zap.Any("config", function),
-	)
-
 	if err := agent.UpdateFunction(function); err != nil {
 		return nil, fmt.Errorf("failed to update function: %w", err)
 	}
-
-	m.log.Infow("updated function",
-		zap.Uint32("instance", instance),
-		zap.Any("config", function),
-	)
 
 	return &ynpb.UpdateFunctionResponse{}, nil
 }

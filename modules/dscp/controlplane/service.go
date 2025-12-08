@@ -256,9 +256,5 @@ func (m *DscpService) updateModuleConfig(
 		return fmt.Errorf("failed to update module: %w", err)
 	}
 
-	m.log.Infow("successfully updated module",
-		zap.String("name", name),
-		zap.Uint32("instance", instance),
-	)
 	return nil
 }

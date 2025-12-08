@@ -17,7 +17,7 @@ type AclModule struct {
 	cfg     *Config
 	shm     *ffi.SharedMemory
 	agents  []*ffi.Agent
-	service *AclService
+	service *ACLService
 	log     *zap.SugaredLogger
 }
 
@@ -41,7 +41,7 @@ func NewAclModule(cfg *Config, log *zap.SugaredLogger) (*AclModule, error) {
 		return nil, fmt.Errorf("failed to attach agents: %w", err)
 	}
 
-	service := NewAclService(agents, log)
+	service := NewACLService(agents)
 
 	return &AclModule{
 		cfg:     cfg,

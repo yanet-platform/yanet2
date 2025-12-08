@@ -4,33 +4,29 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"sync"
-
 	"net/netip"
+	"sync"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// AclService реализует gRPC сервис для управления ACL
-type AclService struct {
+// ACLService implements the gRPC service for ACL management.
+type ACLService struct {
 	aclpb.UnimplementedAclServiceServer
 
 	mu      sync.Mutex
 	agents  []*ffi.Agent
-	log     *zap.SugaredLogger
 	configs map[instanceKey]*ModuleConfig
 }
 
-func NewAclService(agents []*ffi.Agent, log *zap.SugaredLogger) *AclService {
-	return &AclService{
+func NewACLService(agents []*ffi.Agent) *ACLService {
+	return &ACLService{
 		agents:  agents,
-		log:     log,
 		configs: make(map[instanceKey]*ModuleConfig),
 	}
 }
@@ -44,7 +40,7 @@ type instanceKey struct {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (m *AclService) UpdateConfig(
+func (m *ACLService) UpdateConfig(
 	ctx context.Context,
 	req *aclpb.UpdateConfigRequest,
 ) (*aclpb.UpdateConfigResponse, error) {
@@ -144,11 +140,6 @@ func (m *AclService) UpdateConfig(
 	if err := agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
 		return nil, fmt.Errorf("failed to update module on instance %d: %w", inst, err)
 	}
-
-	m.log.Infow("successfully update acl config",
-		zap.String("name", name),
-		zap.Uint32("instance", inst),
-	)
 
 	return &aclpb.UpdateConfigResponse{}, nil
 }

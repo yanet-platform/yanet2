@@ -277,11 +277,6 @@ func (s *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropU
 }
 
 func (s *NAT64Service) updateModuleConfig(name string, instance uint32) error {
-	s.log.Debugw("updating configuration",
-		zap.String("module", name),
-		zap.Uint32("instance", instance),
-	)
-
 	if int(instance) >= len(s.agents) {
 		return fmt.Errorf("instance index %d is out of range (agents length: %d)", instance, len(s.agents))
 	}
@@ -302,21 +297,21 @@ func (s *NAT64Service) updateModuleConfig(name string, instance uint32) error {
 		s.configs[key] = config
 	}
 
-	// Configure all prefixes
+	// Configure all prefixes.
 	for _, prefix := range config.Prefixes {
 		if err := moduleConfig.AddPrefix(prefix); err != nil {
 			return fmt.Errorf("failed to add prefix on instance %d: %w", instance, err)
 		}
 	}
 
-	// Configure all mappings
+	// Configure all mappings.
 	for _, mapping := range config.Mappings {
 		if err := moduleConfig.AddMapping(mapping.IPv4, mapping.IPv6, mapping.PrefixIndex); err != nil {
 			return fmt.Errorf("failed to add mapping on instance %d: %w", instance, err)
 		}
 	}
 
-	// Set drop unknown flags
+	// Set drop unknown flags.
 	if err := moduleConfig.SetDropUnknown(config.DropUnknownPrefix, config.DropUnknownMapping); err != nil {
 		return fmt.Errorf("failed to set drop unknown flags on instance %d: %w", instance, err)
 	}
@@ -324,11 +319,6 @@ func (s *NAT64Service) updateModuleConfig(name string, instance uint32) error {
 	if err := agent.UpdateModules([]ffi.ModuleConfig{moduleConfig.AsFFIModule()}); err != nil {
 		return fmt.Errorf("failed to update module on instance %d: %w", instance, err)
 	}
-
-	s.log.Debugw("successfully updated module config",
-		zap.String("name", name),
-		zap.Uint32("instance", instance),
-	)
 
 	return nil
 }

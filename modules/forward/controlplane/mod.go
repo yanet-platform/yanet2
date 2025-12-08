@@ -39,7 +39,7 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 		return nil, err
 	}
 
-	forwardService := NewForwardService(agents, log)
+	forwardService := NewForwardService(agents)
 
 	return &ForwardModule{
 		cfg:            cfg,

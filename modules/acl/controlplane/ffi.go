@@ -391,7 +391,7 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 	return nil
 }
 
-func DeleteConfig(m *AclService, configName string, instance uint32) bool {
+func DeleteConfig(m *ACLService, configName string, instance uint32) bool {
 	cTypeName := C.CString(agentName)
 	defer C.free(unsafe.Pointer(cTypeName))
 

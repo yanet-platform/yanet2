@@ -37,7 +37,7 @@ func NewDeviceVlanDevice(cfg *Config, log *zap.SugaredLogger) (*DeviceVlanDevice
 		return nil, err
 	}
 
-	vlanService := NewDeviceVlanService(agents, log)
+	vlanService := NewDeviceVlanService(agents)
 
 	return &DeviceVlanDevice{
 		cfg:     cfg,

@@ -37,7 +37,7 @@ func NewDevicePlainDevice(cfg *Config, log *zap.SugaredLogger) (*DevicePlainDevi
 		return nil, err
 	}
 
-	plainService := NewDevicePlainService(agents, log)
+	plainService := NewDevicePlainService(agents)
 
 	return &DevicePlainDevice{
 		cfg:     cfg,

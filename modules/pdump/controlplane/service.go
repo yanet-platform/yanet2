@@ -281,10 +281,6 @@ func (m *PdumpService) updateModuleConfig(
 		return fmt.Errorf("failed to update module %s: %w", name, err)
 	}
 
-	m.log.Infow("successfully updated module",
-		zap.String("name", name),
-		zap.Uint32("instance", instance),
-	)
 	return nil
 }
 
