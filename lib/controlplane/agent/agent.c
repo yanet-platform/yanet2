@@ -378,8 +378,6 @@ agent_update_functions(
 		function_count,
 		functions
 	);
-
-	return 0;
 }
 
 int

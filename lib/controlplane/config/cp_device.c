@@ -102,7 +102,7 @@ cp_device_init(
 		return -1;
 	}
 
-	memset(cp_device, 0, sizeof(struct cp_device_config));
+	memset(cp_device, 0, sizeof(struct cp_device));
 	strtcpy(cp_device->type, cp_device_config->type, sizeof(cp_device->type)
 	);
 	strtcpy(cp_device->name, cp_device_config->name, sizeof(cp_device->name)

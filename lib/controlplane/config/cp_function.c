@@ -180,7 +180,7 @@ cp_function_registry_item_cmp(
 		container_of(item, struct cp_function, config_item);
 
 	return strncmp(
-		function->name, (const char *)data, CP_PIPELINE_NAME_LEN
+		function->name, (const char *)data, CP_FUNCTION_NAME_LEN
 	);
 }
 
