@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -15,6 +16,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // test gre, fix mss, encap, not standard packets
@@ -87,6 +89,7 @@ func allCombinationsConfig() (*balancerpb.ModuleConfig, *balancerpb.SessionsTime
 			Wlc: &balancerpb.WlcConfig{
 				WlcPower:      10,
 				MaxRealWeight: 1000,
+				UpdatePeriod:  durationpb.New(2 * time.Second),
 			},
 		}, &balancerpb.SessionsTimeouts{
 			TcpSynAck: 10,

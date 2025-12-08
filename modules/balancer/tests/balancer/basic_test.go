@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"testing"
+	"time"
 
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -9,6 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -64,6 +66,7 @@ func TestBalancerBasics(t *testing.T) {
 		Wlc: &balancerpb.WlcConfig{
 			WlcPower:      10,
 			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
 		},
 	}
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -13,6 +14,7 @@ import (
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	balancermod "github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancer"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -83,6 +85,7 @@ func smallConfig() (*balancerpb.ModuleConfig, *balancerpb.SessionsTimeouts) {
 		Wlc: &balancerpb.WlcConfig{
 			WlcPower:      10,
 			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
 		},
 	}
 	timeouts := &balancerpb.SessionsTimeouts{
@@ -424,6 +427,7 @@ func TestNewConfig(t *testing.T) {
 		Wlc: &balancerpb.WlcConfig{
 			WlcPower:      10,
 			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
 		},
 	}
 
@@ -492,6 +496,7 @@ func TestNewConfig(t *testing.T) {
 		Wlc: &balancerpb.WlcConfig{
 			WlcPower:      10,
 			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
 		},
 	}
 
@@ -557,6 +562,7 @@ func TestNewConfig(t *testing.T) {
 		Wlc: &balancerpb.WlcConfig{
 			WlcPower:      10,
 			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
 		},
 	}
 
