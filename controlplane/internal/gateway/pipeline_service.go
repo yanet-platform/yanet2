@@ -6,7 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
-	commonpb "github.com/yanet-platform/yanet2/common/proto"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )

@@ -4,7 +4,7 @@ package commonpb;
 
 import "google/protobuf/descriptor.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/common/proto;commonpb";
+option go_package = "github.com/yanet-platform/yanet2/common/commonpb;commonpb";
 
 extend google.protobuf.FieldOptions {
 	// SkipLogging marks a field that should not be logged.

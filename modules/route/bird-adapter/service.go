@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
-	commonpb "github.com/yanet-platform/yanet2/common/proto"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	adapterpb "github.com/yanet-platform/yanet2/modules/route/bird-adapter/proto"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/bird"

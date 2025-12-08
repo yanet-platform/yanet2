@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/common/proto"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 

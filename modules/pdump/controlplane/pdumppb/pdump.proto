@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package pdumppb;
 
-import "common/proto/target.proto";
+import "common/commonpb/target.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/pdump/pdumppb;pdumppb";
 

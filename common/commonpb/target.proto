@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package commonpb;
 
-option go_package = "github.com/yanet-platform/yanet2/common/proto;commonpb";
+option go_package = "github.com/yanet-platform/yanet2/common/commonpb;commonpb";
 
 // TargetModule specifies which module the request should be performed on.
 message TargetModule {

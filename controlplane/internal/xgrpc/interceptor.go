@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	commonpb "github.com/yanet-platform/yanet2/common/proto"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 )
 
 // AccessLogInterceptor returns a gRPC unary server interceptor that logs
