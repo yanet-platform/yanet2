@@ -2,12 +2,14 @@ package balancer
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancer"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -21,9 +23,9 @@ var defaultConfigName string = "balancer0"
 ////////////////////////////////////////////////////////////////////////////////
 
 type TestConfig struct {
-	mock        *mock.YanetMockConfig
-	balancer    *balancerpb.ModuleConfig
-	stateConfig *balancerpb.ModuleStateConfig
+	mock         *mock.YanetMockConfig
+	moduleConfig *balancerpb.ModuleConfig
+	stateConfig  *balancerpb.ModuleStateConfig
 }
 
 type TestSetup struct {
@@ -50,14 +52,15 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		return nil, fmt.Errorf("need at least 128MB for the controlplane")
 	}
 
-	if config.balancer == nil {
-		config.balancer = &balancerpb.ModuleConfig{}
+	if config.moduleConfig == nil {
+		config.moduleConfig = &balancerpb.ModuleConfig{}
 	}
 
 	if config.stateConfig == nil {
 		config.stateConfig = &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      128,
 			SessionTableMaxLoadFactor: 0.75,
+			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
 		}
 	}
 
@@ -81,7 +84,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 	balancerInstance, err := balancer.NewBalancerFromProto(
 		*agent,
 		defaultConfigName,
-		config.balancer,
+		config.moduleConfig,
 		config.stateConfig,
 		sugaredLogger,
 	)

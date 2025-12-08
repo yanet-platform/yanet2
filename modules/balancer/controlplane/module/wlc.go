@@ -17,12 +17,7 @@ type WlcConfig struct {
 
 func NewWlcConfigFromProto(proto *balancerpb.WlcConfig) (WlcConfig, error) {
 	if proto == nil {
-		// Return default WLC config when not provided
-		return WlcConfig{
-			MaxRealWeight:  uint16(1000),
-			UpdatePeriodMs: uint32(2000),
-			Power:          uint64(10),
-		}, nil
+		return WlcConfig{}, fmt.Errorf("wlc config is required")
 	}
 
 	// validate

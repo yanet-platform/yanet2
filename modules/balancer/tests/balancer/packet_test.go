@@ -106,9 +106,11 @@ func allCombinationsConfig() (*balancerpb.ModuleConfig, *balancerpb.SessionsTime
 func allCombinationsTestConfig() *TestConfig {
 	moduleConfig, _ := allCombinationsConfig()
 	return &TestConfig{
-		balancer: moduleConfig,
+		moduleConfig: moduleConfig,
 		stateConfig: &balancerpb.ModuleStateConfig{
-			SessionTableCapacity: 100,
+			SessionTableCapacity:      100,
+			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableMaxLoadFactor: 0.5,
 		},
 	}
 }

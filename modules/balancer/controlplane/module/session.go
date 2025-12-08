@@ -1,6 +1,8 @@
 package module
 
 import (
+	"fmt"
+
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 )
 
@@ -19,9 +21,14 @@ type SessionsTimeouts struct {
 // NewSessionsTimeoutsFromProto creates SessionsTimeouts from protobuf message.
 func NewSessionsTimeoutsFromProto(
 	pb *balancerpb.SessionsTimeouts,
-) SessionsTimeouts {
+) (SessionsTimeouts, error) {
 	if pb == nil {
-		return SessionsTimeouts{}
+		return SessionsTimeouts{}, fmt.Errorf("sessions timeouts is required")
+	}
+	if pb.TcpSynAck == 0 || pb.TcpSyn == 0 ||
+		pb.TcpFin == 0 || pb.Tcp == 0 ||
+		pb.Udp == 0 || pb.Default == 0 {
+		return SessionsTimeouts{}, fmt.Errorf("sessions timeouts must be positive")
 	}
 	return SessionsTimeouts{
 		TcpSynAck: pb.TcpSynAck,
@@ -30,7 +37,7 @@ func NewSessionsTimeoutsFromProto(
 		Tcp:       pb.Tcp,
 		Udp:       pb.Udp,
 		Default:   pb.Default,
-	}
+	}, nil
 }
 
 // IntoProto converts SessionsTimeouts to protobuf message.

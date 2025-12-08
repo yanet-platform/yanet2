@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -12,6 +13,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -299,12 +301,19 @@ func TestICMPEchoRequest(t *testing.T) {
 			Udp:       60,
 			Default:   60,
 		},
+		Wlc: &balancerpb.WlcConfig{
+			WlcPower:      10,
+			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
+		},
 	}
 
 	setup, err := SetupTest(&TestConfig{
-		balancer: config,
+		moduleConfig: config,
 		stateConfig: &balancerpb.ModuleStateConfig{
-			SessionTableCapacity: 100,
+			SessionTableCapacity:      100,
+			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableMaxLoadFactor: 0.5,
 		},
 	})
 	require.NoError(t, err)
@@ -515,12 +524,19 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 			Udp:       60,
 			Default:   60,
 		},
+		Wlc: &balancerpb.WlcConfig{
+			WlcPower:      10,
+			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
+		},
 	}
 
 	setup, err := SetupTest(&TestConfig{
-		balancer: config,
+		moduleConfig: config,
 		stateConfig: &balancerpb.ModuleStateConfig{
-			SessionTableCapacity: 100,
+			SessionTableCapacity:      100,
+			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableMaxLoadFactor: 0.5,
 		},
 	})
 	require.NoError(t, err)
@@ -748,12 +764,19 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 			Udp:       60,
 			Default:   60,
 		},
+		Wlc: &balancerpb.WlcConfig{
+			WlcPower:      10,
+			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
+		},
 	}
 
 	setup, err := SetupTest(&TestConfig{
-		balancer: config,
+		moduleConfig: config,
 		stateConfig: &balancerpb.ModuleStateConfig{
-			SessionTableCapacity: 100,
+			SessionTableCapacity:      100,
+			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableMaxLoadFactor: 0.5,
 		},
 	})
 	require.NoError(t, err)
@@ -907,12 +930,19 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 			Udp:       60,
 			Default:   60,
 		},
+		Wlc: &balancerpb.WlcConfig{
+			WlcPower:      10,
+			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
+		},
 	}
 
 	setup, err := SetupTest(&TestConfig{
-		balancer: config,
+		moduleConfig: config,
 		stateConfig: &balancerpb.ModuleStateConfig{
-			SessionTableCapacity: 100,
+			SessionTableCapacity:      100,
+			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableMaxLoadFactor: 0.5,
 		},
 	})
 	require.NoError(t, err)

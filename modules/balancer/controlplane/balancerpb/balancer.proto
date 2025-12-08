@@ -27,11 +27,11 @@ service Balancer {
   // List balancer configs
   rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 
-  // Info of the balancer state
-  rpc StateInfo(StateInfoRequest) returns (StateInfoResponse);
-
   // Stats of the balancer config
   rpc ConfigStats(ConfigStatsRequest) returns (ConfigStatsResponse);
+
+  // Info about the balancer state
+  rpc StateInfo(StateInfoRequest) returns (StateInfoResponse);
 
   // Info about active balancer sessions
   rpc SessionsInfo(SessionsInfoRequest) returns (SessionsInfoResponse);
@@ -107,6 +107,8 @@ message StateInfoResponse {
 message ConfigStatsRequest {
   commonpb.TargetModule target = 1;
   uint32 dataplane_instance = 2;
+
+  // required for now – will be optional later
   string device = 3;
   string pipeline = 4;
   string function = 5;

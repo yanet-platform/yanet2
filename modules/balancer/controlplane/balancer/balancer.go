@@ -40,6 +40,19 @@ func NewBalancerFromProto(
 ) (*Balancer, error) {
 	log.Infow("creating balancer instance", "name", name)
 
+	// Validate ModuleConfig
+	if moduleConfig == nil {
+		return nil, fmt.Errorf("module config is required")
+	}
+
+	// Validate ModuleStateConfig
+	if moduleStateConfig == nil {
+		return nil, fmt.Errorf("module state config is required")
+	}
+	if moduleStateConfig.SessionTableScanPeriod == nil {
+		return nil, fmt.Errorf("session table scan period is required")
+	}
+
 	lock := &sync.Mutex{}
 	stateLog := log.With("component", "state")
 	state, err := NewModuleConfigState(
@@ -75,9 +88,19 @@ func NewBalancerFromProto(
 	}
 
 	// Parse session timeouts
-	sessionTimeouts := module.NewSessionsTimeoutsFromProto(
+	sessionTimeouts, err := module.NewSessionsTimeoutsFromProto(
 		moduleConfig.SessionsTimeouts,
 	)
+	if err != nil {
+		log.Errorw(
+			"failed to parse session timeouts",
+			"name",
+			name,
+			"error",
+			err,
+		)
+		return nil, fmt.Errorf("failed to parse session timeouts: %w", err)
+	}
 
 	// Register virtual services with their reals
 	virtualServices := make(
@@ -154,6 +177,12 @@ func (b *Balancer) Update(
 	moduleStateConfig *balancerpb.ModuleStateConfig,
 ) error {
 	b.log.Info("updating balancer configuration")
+
+	// Validate ModuleConfig
+	if moduleConfig == nil {
+		return fmt.Errorf("module config is required")
+	}
+
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
@@ -165,9 +194,13 @@ func (b *Balancer) Update(
 	}
 
 	// Parse session timeouts
-	sessionTimeouts := module.NewSessionsTimeoutsFromProto(
+	sessionTimeouts, err := module.NewSessionsTimeoutsFromProto(
 		moduleConfig.SessionsTimeouts,
 	)
+	if err != nil {
+		b.log.Errorw("failed to parse session timeouts", "error", err)
+		return fmt.Errorf("failed to parse session timeouts: %w", err)
+	}
 
 	// Register virtual services with their reals
 	virtualServices := make(
@@ -210,6 +243,9 @@ func (b *Balancer) Update(
 
 	// Update state config if provided
 	if moduleStateConfig != nil {
+		if moduleStateConfig.SessionTableScanPeriod == nil {
+			return fmt.Errorf("session table scan period is required")
+		}
 		b.moduleConfigState.Update(
 			uint(moduleStateConfig.SessionTableCapacity),
 			uint(moduleStateConfig.SessionTableScanPeriod.AsDuration().Milliseconds()),

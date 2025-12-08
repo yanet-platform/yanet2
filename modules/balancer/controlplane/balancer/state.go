@@ -70,6 +70,18 @@ func NewModuleConfigState(
 			err,
 		)
 	}
+
+	// not null check
+	if maxLoadFactor < 0.001 {
+		state.Free()
+		return nil, fmt.Errorf("max load factor must be greater than 0.001")
+	}
+
+	if scanSessionTablePeriodMs == 0 {
+		state.Free()
+		return nil, fmt.Errorf("scan session table period must be greater than 0")
+	}
+
 	s := &ModuleConfigState{
 		agent:                    agent,
 		cHandle:                  state,
@@ -80,7 +92,9 @@ func NewModuleConfigState(
 		VsActiveSessions:         map[module.VsIdentifier]uint{},
 		RealActiveSessions:       map[module.RealIdentifier]uint{},
 	}
+
 	s.runBackgroundTasks()
+
 	return s, nil
 }
 
@@ -99,28 +113,32 @@ func (s *ModuleConfigState) Update(
 	newTableCapacity, scanSessionTablePeriodMs uint,
 	maxLoadFactor float32,
 ) error {
-	if newTableCapacity != 0 {
-		s.log.Infow(
-			"resizing session table",
+	// not null check
+	if newTableCapacity == 0 {
+		return fmt.Errorf("new table capacity must be greater than 0")
+	}
+
+	// not null check
+	if maxLoadFactor < 0.001 {
+		return fmt.Errorf("max load factor must be greater than 0.001")
+	}
+
+	s.log.Infow(
+		"resizing session table",
+		zap.Uint("new_capacity", newTableCapacity),
+	)
+	if err := s.cHandle.ResizeSessionTable(newTableCapacity); err != nil {
+		s.log.Warnw(
+			"failed to resize session table",
 			zap.Uint("new_capacity", newTableCapacity),
+			zap.Error(err),
 		)
-		if err := s.cHandle.ResizeSessionTable(newTableCapacity); err != nil {
-			s.log.Warnw(
-				"failed to resize session table",
-				zap.Uint("new_capacity", newTableCapacity),
-				zap.Error(err),
-			)
-			return fmt.Errorf("failed to resize session table: %w", err)
-		}
+		return fmt.Errorf("failed to resize session table: %w", err)
 	}
 
-	if scanSessionTablePeriodMs != 0 {
-		s.ScanSessionTablePeriodMs = scanSessionTablePeriodMs
-	}
+	s.ScanSessionTablePeriodMs = scanSessionTablePeriodMs
 
-	if maxLoadFactor > 0.1 {
-		s.MaxLoadFactor = maxLoadFactor
-	}
+	s.MaxLoadFactor = maxLoadFactor
 
 	s.cancelBackgroundTasks()
 	s.runBackgroundTasks()
@@ -223,21 +241,17 @@ func (s *ModuleConfigState) ScanActiveSessionsAndResizeOnDemand() error {
 	sessionTableCapacity := s.SessionTableCapacity()
 	loadFactor := float32(s.ActiveSessions) / float32(sessionTableCapacity)
 
-	maxLoadFactor := s.MaxLoadFactor
-	if maxLoadFactor < 0.1 {
-		maxLoadFactor = 0.1
-	}
 	s.log.Debugw("session table scan completed",
 		zap.Uint("active_sessions", s.ActiveSessions),
 		zap.Uint("table_capacity", sessionTableCapacity),
 		zap.Float32("load_factor", loadFactor),
-		zap.Float32("max_load_factor", maxLoadFactor))
+		zap.Float32("max_load_factor", s.MaxLoadFactor))
 
-	if loadFactor > maxLoadFactor {
+	if loadFactor > s.MaxLoadFactor {
 		newCapacity := sessionTableCapacity * 2
 		s.log.Infow("session table load factor exceeded, resizing",
 			zap.Float32("load_factor", loadFactor),
-			zap.Float32("max_load_factor", maxLoadFactor),
+			zap.Float32("max_load_factor", s.MaxLoadFactor),
 			zap.Uint("old_capacity", sessionTableCapacity),
 			zap.Uint("new_capacity", newCapacity))
 

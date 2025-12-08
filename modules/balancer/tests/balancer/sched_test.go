@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -97,10 +98,11 @@ func TestWlc(t *testing.T) {
 	}
 
 	setup, err := SetupTest(&TestConfig{
-		balancer: config,
+		moduleConfig: config,
 		stateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      2000,
 			SessionTableMaxLoadFactor: 0.5,
+			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
 		},
 	})
 	require.NoError(t, err, "failed to setup test")

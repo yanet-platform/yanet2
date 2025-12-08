@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -13,6 +14,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -404,12 +406,19 @@ func TestICMPBroadcastLogic(t *testing.T) {
 			Udp:       60,
 			Default:   60,
 		},
+		Wlc: &balancerpb.WlcConfig{
+			WlcPower:      10,
+			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
+		},
 	}
 
 	setup, err := SetupTest(&TestConfig{
-		balancer: config,
+		moduleConfig: config,
 		stateConfig: &balancerpb.ModuleStateConfig{
-			SessionTableCapacity: 100,
+			SessionTableCapacity:      100,
+			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableMaxLoadFactor: 0.8,
 		},
 	})
 	require.NoError(t, err)
@@ -791,6 +800,11 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 			Udp:       60,
 			Default:   60,
 		},
+		Wlc: &balancerpb.WlcConfig{
+			WlcPower:      10,
+			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
+		},
 	}
 
 	// Configure Balancer2 - can decap packets from Balancer1
@@ -880,13 +894,20 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 			Udp:       60,
 			Default:   60,
 		},
+		Wlc: &balancerpb.WlcConfig{
+			WlcPower:      10,
+			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(2 * time.Second),
+		},
 	}
 
 	// Setup Balancer1
 	setup1, err := SetupTest(&TestConfig{
-		balancer: config1,
+		moduleConfig: config1,
 		stateConfig: &balancerpb.ModuleStateConfig{
-			SessionTableCapacity: 100,
+			SessionTableCapacity:      100,
+			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableMaxLoadFactor: 0.8,
 		},
 	})
 	require.NoError(t, err)
@@ -894,9 +915,11 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 
 	// Setup Balancer2
 	setup2, err := SetupTest(&TestConfig{
-		balancer: config2,
+		moduleConfig: config2,
 		stateConfig: &balancerpb.ModuleStateConfig{
-			SessionTableCapacity: 100,
+			SessionTableCapacity:      100,
+			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableMaxLoadFactor: 0.5,
 		},
 	})
 	require.NoError(t, err)

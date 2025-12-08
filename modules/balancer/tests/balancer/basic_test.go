@@ -71,14 +71,16 @@ func TestBalancerBasics(t *testing.T) {
 	}
 
 	stateConfig := &balancerpb.ModuleStateConfig{
-		SessionTableCapacity: 100,
+		SessionTableCapacity:      100,
+		SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+		SessionTableMaxLoadFactor: 0.8,
 	}
 
 	// setup test
 
 	setup, err := SetupTest(&TestConfig{
-		balancer:    config,
-		stateConfig: stateConfig,
+		moduleConfig: config,
+		stateConfig:  stateConfig,
 	})
 	require.NoError(t, err)
 	defer setup.Free()
