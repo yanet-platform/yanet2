@@ -303,7 +303,8 @@ func NewICMPStatsFromProto(pb *balancerpb.IcmpStats) *ICMPStats {
 		UnrecognizedVS:            pb.UnrecognizedVs,
 		ForwardedPackets:          pb.ForwardedPackets,
 		BroadcastedPackets:        pb.BroadcastedPackets,
-		PacketClones:              pb.PacketClones,
+		PacketClonesSent:          pb.PacketClonesSent,
+		PacketClonesReceived:      pb.PacketClonesReceived,
 		PacketCloneFailures:       pb.PacketCloneFailures,
 	}
 }

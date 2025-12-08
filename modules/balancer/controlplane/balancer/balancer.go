@@ -29,6 +29,8 @@ type Balancer struct {
 	log *zap.SugaredLogger
 }
 
+// todo: add proto validations
+
 func NewBalancerFromProto(
 	agent ffi.Agent,
 	name string,
@@ -301,4 +303,16 @@ func (b *Balancer) Free() {
 
 	b.moduleConfigState.Free()
 	b.moduleConfig.Free()
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func (balancer *Balancer) UpdateActiveSessions() error {
+	if err := balancer.moduleConfigState.ScanActiveSessionsAndResizeOnDemand(); err != nil {
+		return fmt.Errorf("failed to scan for active sessions: %w", err)
+	}
+	if err := balancer.moduleConfig.UpdateEffectiveWeights(); err != nil {
+		return fmt.Errorf("failed to update effective weights: %w", err)
+	}
+	return nil
 }

@@ -102,16 +102,16 @@ func NewYanetMock(config *YanetMockConfig) (*YanetMock, error) {
 		)
 	}
 
-	mock := new(YanetMock)
-	mock.inner = C.struct_yanet_mock{}
-	ec, err := C.yanet_mock_init(&mock.inner, &cConfig, nil)
+	// Allocate YanetMock on heap first, then initialize inner in-place
+	yanetMock := &YanetMock{}
+	ec, err := C.yanet_mock_init(&yanetMock.inner, &cConfig, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init mock: %w", err)
 	}
 	if ec != C.int(0) {
 		return nil, fmt.Errorf("failed to init mock: ec=%d", ec)
 	}
-	return mock, nil
+	return yanetMock, nil
 }
 
 func (mock *YanetMock) Free() {

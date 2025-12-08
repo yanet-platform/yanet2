@@ -165,7 +165,8 @@ func copyFromC(
 		BroadcastedPackets: uint64(
 			cstats.stats.icmp_ipv4.broadcasted_packets,
 		),
-		PacketClones: uint64(cstats.stats.icmp_ipv4.packet_clones),
+		PacketClonesSent:     uint64(cstats.stats.icmp_ipv4.packet_clones_sent),
+		PacketClonesReceived: uint64(cstats.stats.icmp_ipv4.packet_clones_received),
 		PacketCloneFailures: uint64(
 			cstats.stats.icmp_ipv4.packet_clone_failures,
 		),
@@ -200,7 +201,8 @@ func copyFromC(
 		BroadcastedPackets: uint64(
 			cstats.stats.icmp_ipv6.broadcasted_packets,
 		),
-		PacketClones: uint64(cstats.stats.icmp_ipv6.packet_clones),
+		PacketClonesSent:     uint64(cstats.stats.icmp_ipv6.packet_clones_sent),
+		PacketClonesReceived: uint64(cstats.stats.icmp_ipv6.packet_clones_received),
 		PacketCloneFailures: uint64(
 			cstats.stats.icmp_ipv6.packet_clone_failures,
 		),

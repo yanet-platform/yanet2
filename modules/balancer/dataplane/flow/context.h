@@ -12,8 +12,6 @@
 #include "real.h"
 #include "vs.h"
 
-#include "icmp/error/info.h"
-
 #include "../state/state.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -66,4 +64,7 @@ struct packet_ctx {
 		struct service_state *state;
 		struct real *ptr;
 	} real;
+
+	// if packet was decapsulated
+	bool decap;
 };

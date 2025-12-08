@@ -39,7 +39,7 @@ ring_init(
 		len += weight;
 	}
 	uint64_t *ids = memory_balloc(mctx, len * sizeof(uint64_t));
-	if (ids == NULL && real_count > 0) {
+	if (ids == NULL && len > 0) {
 		return -1;
 	}
 	size_t idx = 0;

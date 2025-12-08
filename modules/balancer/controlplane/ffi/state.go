@@ -438,7 +438,8 @@ func (state *ModuleConfigStatePtr) BalancerInfo() *module.BalancerInfo {
 			UnrecognizedVS:            uint64(info.stats.icmp_ipv4.unrecognized_vs),
 			ForwardedPackets:          uint64(info.stats.icmp_ipv4.forwarded_packets),
 			BroadcastedPackets:        uint64(info.stats.icmp_ipv4.broadcasted_packets),
-			PacketClones:              uint64(info.stats.icmp_ipv4.packet_clones),
+			PacketClonesSent:          uint64(info.stats.icmp_ipv4.packet_clones_sent),
+			PacketClonesReceived:      uint64(info.stats.icmp_ipv4.packet_clones_received),
 			PacketCloneFailures:       uint64(info.stats.icmp_ipv4.packet_clone_failures),
 		},
 		ICMPv6: module.ICMPStats{
@@ -451,7 +452,8 @@ func (state *ModuleConfigStatePtr) BalancerInfo() *module.BalancerInfo {
 			UnrecognizedVS:            uint64(info.stats.icmp_ipv6.unrecognized_vs),
 			ForwardedPackets:          uint64(info.stats.icmp_ipv6.forwarded_packets),
 			BroadcastedPackets:        uint64(info.stats.icmp_ipv6.broadcasted_packets),
-			PacketClones:              uint64(info.stats.icmp_ipv6.packet_clones),
+			PacketClonesSent:          uint64(info.stats.icmp_ipv6.packet_clones_sent),
+			PacketClonesReceived:      uint64(info.stats.icmp_ipv6.packet_clones_received),
 			PacketCloneFailures:       uint64(info.stats.icmp_ipv6.packet_clone_failures),
 		},
 		Common: module.CommonStats{

@@ -118,7 +118,7 @@ func (s *ModuleConfigState) Update(
 		s.ScanSessionTablePeriodMs = scanSessionTablePeriodMs
 	}
 
-	if maxLoadFactor > 0.01 {
+	if maxLoadFactor > 0.1 {
 		s.MaxLoadFactor = maxLoadFactor
 	}
 
@@ -223,17 +223,21 @@ func (s *ModuleConfigState) ScanActiveSessionsAndResizeOnDemand() error {
 	sessionTableCapacity := s.SessionTableCapacity()
 	loadFactor := float32(s.ActiveSessions) / float32(sessionTableCapacity)
 
+	maxLoadFactor := s.MaxLoadFactor
+	if maxLoadFactor < 0.1 {
+		maxLoadFactor = 0.1
+	}
 	s.log.Debugw("session table scan completed",
 		zap.Uint("active_sessions", s.ActiveSessions),
 		zap.Uint("table_capacity", sessionTableCapacity),
 		zap.Float32("load_factor", loadFactor),
-		zap.Float32("max_load_factor", s.MaxLoadFactor))
+		zap.Float32("max_load_factor", maxLoadFactor))
 
-	if loadFactor > s.MaxLoadFactor {
+	if loadFactor > maxLoadFactor {
 		newCapacity := sessionTableCapacity * 2
 		s.log.Infow("session table load factor exceeded, resizing",
 			zap.Float32("load_factor", loadFactor),
-			zap.Float32("max_load_factor", s.MaxLoadFactor),
+			zap.Float32("max_load_factor", maxLoadFactor),
 			zap.Uint("old_capacity", sessionTableCapacity),
 			zap.Uint("new_capacity", newCapacity))
 

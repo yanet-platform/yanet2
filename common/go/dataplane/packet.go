@@ -158,9 +158,9 @@ func NewPacketListFromData(pinner *runtime.Pinner, data ...PacketData) (*PacketL
 	for idx := range data {
 		packetData := data[idx]
 		pinner.Pin(&packetData.Payload[0])
-		packet, err := NewPacketFromData(data[idx])
+		packet, err := NewPacketFromData(packetData)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create new packet from data[%d]: %v", idx, err)
+			return nil, fmt.Errorf("failed to create new packet from data at index %d: %v, packet_data=%v", idx, err, packetData.Payload)
 		}
 		pinner.Pin(packet)
 		packetList.Add(packet)

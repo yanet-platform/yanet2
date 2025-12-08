@@ -165,6 +165,9 @@ func (config *ModuleConfig) Update(
 	config.Addresses = addresses
 	config.SessionTimeouts = sessionsTimeouts
 
+	// Set wlc
+	config.wlc = wlc
+
 	// clear real updates buffer
 	config.realUpdates.Clear()
 

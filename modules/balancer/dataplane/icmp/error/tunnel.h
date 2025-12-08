@@ -108,7 +108,7 @@ tunnel_v6(struct packet *packet, uint8_t *src, uint8_t *dst) {
 
 	outer_ip_hdr->vtc_flow = rte_cpu_to_be_32((0x6 << 28));
 	outer_ip_hdr->payload_len = rte_cpu_to_be_16(
-		(uint16_t)(mbuf->pkt_len - packet->network_header.offset)
+		(uint16_t)(mbuf->pkt_len - packet->network_header.offset - sizeof(struct rte_ipv6_hdr))
 	);
 	outer_ip_hdr->hop_limits = 64;
 

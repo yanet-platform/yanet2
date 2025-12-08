@@ -110,7 +110,7 @@ func NewPacketListFromData(data ...PacketData) (*PacketList, error) {
 	for idx := range data {
 		packet, err := NewPacketFromData(data[idx], nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create new packet from data[%d]: %v", idx, err)
+			return nil, fmt.Errorf("failed to create new packet from data at index %d: %v", idx, err)
 		}
 		packetList.Add(packet)
 	}

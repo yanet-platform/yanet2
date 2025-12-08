@@ -14,7 +14,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline int
-decap_ip(struct packet *packet, struct balancer_module_config *config) {
+decap_ipv4(struct packet *packet, struct balancer_module_config *config) {
 	struct rte_ipv4_hdr *ipv4 = rte_pktmbuf_mtod_offset(
 		packet->mbuf,
 		struct rte_ipv4_hdr *,
@@ -49,10 +49,12 @@ decap_ipv6(struct packet *packet, struct balancer_module_config *config) {
 ////////////////////////////////////////////////////////////////////////////////
 
 // Try to decapsulate packet if its destination address is from the allowed
-// list. On decap failure, returns -1. Else, returns 0 (as in the case decap is
-// not allowed).
+// list. If decap failed, just pass packet further. Returns -1 only if packet network proto
+// is invalid.
 static inline int
 try_decap(struct packet_ctx *ctx) {
+	ctx->decap = false;
+
 	struct packet *packet = ctx->packet;
 	struct balancer_module_config *config = ctx->config;
 
@@ -63,7 +65,7 @@ try_decap(struct packet_ctx *ctx) {
 	// of the packet is in the decap list of the balancer.
 	int decap_is_allowed;
 	if (network_protocol == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		decap_is_allowed = decap_ip(packet, config);
+		decap_is_allowed = decap_ipv4(packet, config);
 	} else if (network_protocol == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 		decap_is_allowed = decap_ipv6(packet, config);
 	} else {
@@ -77,12 +79,12 @@ try_decap(struct packet_ctx *ctx) {
 		// and check result
 		int decap_result = packet_decap(packet);
 		if (decap_result != 0) {
-			// decap failed
+			// decap failed, but it is ok
 			COMMON_STATS_INC(decap_failed, ctx);
-			return -1;
 		} else {
 			// successfully made decap
 			COMMON_STATS_INC(decap_successful, ctx);
+			ctx->decap = true;
 		}
 	}
 

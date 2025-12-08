@@ -12,6 +12,7 @@
 
 #include "tunnel.h"
 #include <assert.h>
+#include <linux/magic.h>
 #include <netinet/in.h>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -31,14 +32,7 @@ send_cloned_packet(struct packet_ctx *ctx, struct packet *packet) {
 	COMMON_STATS_INC(outgoing_packets, ctx);
 
 	// update icmp module counters
-	if (packet->transport_header.type == IPPROTO_ICMP) {
-		ICMP_V4_STATS_INC(packet_clones, ctx);
-	} else if (packet->transport_header.type == IPPROTO_ICMPV6) {
-		ICMP_V6_STATS_INC(packet_clones, ctx);
-	} else {
-		// impossible
-		assert(false);
-	}
+	ICMP_STATS_INC(packet_clones_sent, packet->transport_header.type, ctx);
 
 	// we send cloned packets to other balancer,
 	// so we dont update vs or real counters here.
@@ -52,11 +46,42 @@ send_cloned_packet(struct packet_ctx *ctx, struct packet *packet) {
 static inline void
 update_counters_on_packet_clone_failed(struct packet_ctx *ctx) {
 	struct packet *packet = ctx->packet;
-	if (packet->transport_header.type == IPPROTO_ICMP) {
-		ICMP_V4_STATS_INC(packet_clone_failures, ctx);
-	} else if (packet->transport_header.type == IPPROTO_ICMPV6) {
-		ICMP_V6_STATS_INC(packet_clone_failures, ctx);
-	}
+	uint16_t type = packet->transport_header.type;
+	ICMP_STATS_INC(packet_clone_failures, type, ctx);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// ICMP error message header structure
+// For error messages, the format is: [type:1][code:1][checksum:2][unused:4][original packet...]
+// We use the first 2 bytes of the unused field to store our broadcast marker
+struct icmp_error_hdr {
+	uint8_t type;
+	uint8_t code;
+	rte_be16_t checksum;
+	rte_be16_t unused_marker;  // We use this for ICMP_BROADCAST_IDENT
+	rte_be16_t unused_rest;
+} __rte_packed;
+
+static inline struct icmp_error_hdr *
+icmp_error_hdr(struct packet *packet) {
+	struct icmp_error_hdr *icmp = rte_pktmbuf_mtod_offset(
+		packet->mbuf,
+		struct icmp_error_hdr *,
+		packet->transport_header.offset
+	);
+	return icmp;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+#define ICMP_BROADCAST_IDENT 0xBDC
+
+////////////////////////////////////////////////////////////////////////////////
+
+static inline void
+set_cloned_mark(struct packet *packet) {
+	icmp_error_hdr(packet)->unused_marker = rte_cpu_to_be_16(ICMP_BROADCAST_IDENT);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -69,12 +94,14 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 	// we iterate over virtual service peers and broadcast packet
 	// to them.
 
-	// todo: check if icmp info is null,
-	// In that case we dont clone as packet is already cloned by
-	// sender peer.
-	// if (cloned) { <- todo
-	//	return;
-	// }
+	// Check if packet is a cloned already
+	if (ctx->decap && icmp_error_hdr(ctx->packet)->unused_marker == rte_cpu_to_be_16(ICMP_BROADCAST_IDENT)) {
+		// Update module counters
+		uint16_t header_type = ctx->packet->transport_header.type;
+		ICMP_STATS_INC(packet_clones_received, header_type, ctx);
+		packet_ctx_drop_packet(ctx);
+		return;
+	}
 
 	struct virtual_service *vs = ctx->vs.ptr;
 	assert(vs != NULL);
@@ -105,6 +132,9 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 			continue;
 		}
 
+		// set mark that the packet is cloned
+		set_cloned_mark(clone);
+
 		// tunnel packet to peer
 		struct net4_addr *peer = &vs->peers_v4[i];
 		tunnel_v4(clone, balancer_src_v4, peer->bytes);
@@ -122,6 +152,9 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 			continue;
 		}
 
+		// set mark that the packet is cloned
+		set_cloned_mark(clone);
+
 		// tunnel packet to peer
 		struct net6_addr *peer = &vs->peers_v6[i];
 		tunnel_v6(clone, balancer_src_v6, peer->bytes);
@@ -133,3 +166,7 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 	// Drop the initial packet
 	packet_ctx_drop_packet(ctx);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+#undef ICMP_BROADCAST_IDENT

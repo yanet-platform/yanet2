@@ -33,7 +33,8 @@ type ICMPStats struct {
 	UnrecognizedVS            uint64
 	ForwardedPackets          uint64
 	BroadcastedPackets        uint64
-	PacketClones              uint64
+	PacketClonesSent          uint64
+	PacketClonesReceived      uint64
 	PacketCloneFailures       uint64
 }
 
@@ -49,7 +50,8 @@ func (s ICMPStats) IntoProto() *balancerpb.IcmpStats {
 		UnrecognizedVs:            s.UnrecognizedVS,
 		ForwardedPackets:          s.ForwardedPackets,
 		BroadcastedPackets:        s.BroadcastedPackets,
-		PacketClones:              s.PacketClones,
+		PacketClonesSent:          s.PacketClonesSent,
+		PacketClonesReceived:      s.PacketClonesReceived,
 		PacketCloneFailures:       s.PacketCloneFailures,
 	}
 }

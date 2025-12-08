@@ -66,8 +66,11 @@ struct balancer_icmp_module_stats {
 	// Number of broadcasted (cloned) packets.
 	uint64_t broadcasted_packets;
 
-	// Number of clones of the packets.
-	uint64_t packet_clones;
+	// Number of clones of the packets sent.
+	uint64_t packet_clones_sent;
+
+	// Number of clones of the packets received.
+	uint64_t packet_clones_received;
 
 	// Number of times we failed to make packet clone.
 	uint64_t packet_clone_failures;

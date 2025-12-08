@@ -19,21 +19,39 @@ func NewWlcConfigFromProto(proto *balancerpb.WlcConfig) (WlcConfig, error) {
 	if proto == nil {
 		// Return default WLC config when not provided
 		return WlcConfig{
-			Power:          10,
-			MaxRealWeight:  1000,
-			UpdatePeriodMs: 500,
+			MaxRealWeight:  uint16(1000),
+			UpdatePeriodMs: uint32(2000),
+			Power:          uint64(10),
 		}, nil
 	}
+
+	// validate
 	if proto.MaxRealWeight > math.MaxUint16 {
 		return WlcConfig{}, fmt.Errorf(
 			"max real weight can not exceed %d",
 			math.MaxUint16,
 		)
 	}
+
+	// validate max real weight
+	if proto.MaxRealWeight == 0 {
+		return WlcConfig{}, fmt.Errorf("max real weight can not be 0")
+	}
+
+	// validate update period
+	if proto.UpdatePeriod == nil {
+		return WlcConfig{}, fmt.Errorf("update period is required")
+	}
+
+	// validate power
+	if proto.WlcPower == 0 {
+		return WlcConfig{}, fmt.Errorf("WLC power can not be 0")
+	}
+
 	return WlcConfig{
 		Power:          proto.WlcPower,
 		MaxRealWeight:  uint16(proto.MaxRealWeight),
-		UpdatePeriodMs: uint32(proto.UpdatePeriod.AsDuration().Milliseconds()),
+		UpdatePeriodMs: uint32(time.Duration(proto.UpdatePeriod.AsDuration().Milliseconds())),
 	}, nil
 }
 
@@ -56,32 +74,33 @@ func (vs *VirtualService) UpdateEffectiveWeights(
 	if vs.Scheduler != SchedulerWLC {
 		return false
 	}
+
 	connectionsSum := uint64(0)
 	weightsSum := uint64(0)
 	for realIdx := range vs.Reals {
-		real := vs.Reals[realIdx]
+		real := &vs.Reals[realIdx]
 		if real.Enabled {
 			connectionsSum += uint64(activeSessions[real.Identifier])
-			weightsSum += uint64(real.EffectiveWeight)
+			weightsSum += uint64(real.Weight)
 		}
 	}
 
 	updated := false
 	for realIdx := range vs.Reals {
-		real := vs.Reals[realIdx]
+		real := &vs.Reals[realIdx]
+		newWeight := uint16(0)
 		if real.Enabled {
-			newWeight := calcWlcWeight(
+			newWeight = calcWlcWeight(
 				wlc,
 				real.Weight,
 				activeSessions[real.Identifier],
 				weightsSum,
 				connectionsSum,
 			)
-
-			if real.EffectiveWeight != newWeight {
-				real.EffectiveWeight = newWeight
-				updated = true
-			}
+		}
+		if real.EffectiveWeight != newWeight {
+			real.EffectiveWeight = newWeight
+			updated = true
 		}
 	}
 
@@ -99,18 +118,15 @@ func calcWlcWeight(
 		return weight
 	}
 
-	scaledConnections := uint64(connections) * weightSum
-	scaledWeight := uint64(weight) * connectionsSum
-	connectionsRatio := float64(scaledConnections) / float64(scaledWeight)
+	scaledConnections := float64(connections) * float64(weightSum)
+	scaledWeight := float64(connectionsSum) * float64(weight)
+	connectionsRatio := scaledConnections / scaledWeight
 
-	wlcRatio := float64(wlc.Power) * (1.0 - connectionsRatio)
-	if wlcRatio < 1.0 {
-		wlcRatio = 1.0
-	}
+	const minRatio = 1.0
+	wlcRatio := math.Max(minRatio, float64(wlc.Power)*(1.0-connectionsRatio))
 
-	newWeight := min(
-		uint64(float64(weight)*wlcRatio),
-		uint64(wlc.MaxRealWeight),
-	)
+	newWeight := uint64(math.Round(float64(weight) * wlcRatio))
+	newWeight = min(newWeight, uint64(wlc.MaxRealWeight))
+
 	return uint16(newWeight)
 }

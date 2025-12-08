@@ -85,6 +85,16 @@ packet_ctx_l4_state_stats(struct packet_ctx *ctx) {
 		packet_ctx_icmp_v6_state_stats(ctx)->name += 1;                \
 	} while (0)
 
+#define ICMP_STATS_INC(name, header_type, ctx) \
+	do { \
+		if ((header_type) == IPPROTO_ICMP) { \
+			ICMP_V4_STATS_INC(name, ctx); \
+		} else if ((header_type) == IPPROTO_ICMPV6) { \
+			ICMP_V6_STATS_INC(name, ctx); \
+		} else { \
+			assert(false); \
+		} \
+	} while (0) \
 ////////////////////////////////////////////////////////////////////////////////
 // Vs Stats and Info
 ////////////////////////////////////////////////////////////////////////////////

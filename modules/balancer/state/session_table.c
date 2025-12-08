@@ -24,6 +24,7 @@ session_table_init(
 	}
 	table->current_gen = 0;
 	table->workers = workers;
+	SET_OFFSET_OF(&table->mctx, mctx);
 
 	int res = TTLMAP_INIT(
 		&table->generations[0].map,
@@ -115,14 +116,15 @@ iter_callback(
 		.timeout = state->timeout,
 	};
 	memcpy(current_session_info.client_ip, id->client_ip, 16);
-	// extend ctx->info
-	void *memory = ctx->info;
+	// extend ctx->info->sessions array
+	void *memory = ctx->info->sessions;
 	uint64_t *count = &ctx->info->count;
 	int res = mem_array_expand_exp(
 		ctx->mctx, &memory, sizeof(struct balancer_session_info), count
 	);
 	if (res != 0) {
 		// break iteration
+		ctx->failed = true;
 		return 1;
 	}
 	ctx->info->sessions = memory;
