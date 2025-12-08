@@ -101,9 +101,16 @@ impl From<Net> for code::IpNet {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+enum ModeKind {
+    None,
+    In,
+    Out,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct ForwardRule {
     target: String,
-    output: bool,
+    mode: ModeKind,
     counter: String,
     devices: Vec<String>,
     vlan_ranges: Vec<VlanRange>,
@@ -115,7 +122,11 @@ impl From<ForwardRule> for code::ForwardRule {
     fn from(forward_rule: ForwardRule) -> Self {
         Self {
             target: forward_rule.target,
-            output: forward_rule.output,
+            mode: match forward_rule.mode {
+                ModeKind::None => code::ForwardMode::None.into(),
+                ModeKind::In => code::ForwardMode::In.into(),
+                ModeKind::Out => code::ForwardMode::Out.into(),
+            },
             counter: forward_rule.counter,
             devices: forward_rule.devices,
             vlan_ranges: forward_rule.vlan_ranges.into_iter().map(|m| m.into()).collect(),

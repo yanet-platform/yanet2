@@ -8,8 +8,9 @@
 
 #include "controlplane/config/defines.h"
 
-#define FORWARD_DIRECTION_IN 0
-#define FORWARD_DIRECTION_OUT 1
+#define FORWARD_MODE_NONE 0
+#define FORWARD_MODE_IN 1
+#define FORWARD_MODE_OUT 2
 
 struct agent;
 struct cp_module;
@@ -33,7 +34,7 @@ struct forward_rule {
 	char target[CP_DEVICE_NAME_LEN];
 	char counter[COUNTER_NAME_LEN];
 
-	uint8_t direction;
+	uint8_t mode;
 };
 
 int

@@ -77,12 +77,19 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 	for _, reqRule := range reqRules {
 		rule := forwardRule{
 			target:     reqRule.Target,
-			output:     reqRule.Output,
+			mode:       modeNone,
 			counter:    reqRule.Counter,
 			devices:    reqRule.Devices,
 			vlanRanges: make([]vlanRange, 0, len(reqRule.VlanRanges)),
 			srcs:       make([]netip.Prefix, 0, len(reqRule.Srcs)),
 			dsts:       make([]netip.Prefix, 0, len(reqRule.Dsts)),
+		}
+
+		if reqRule.Mode == forwardpb.ForwardMode_IN {
+			rule.mode = modeIn
+		}
+		if reqRule.Mode == forwardpb.ForwardMode_OUT {
+			rule.mode = modeOut
 		}
 
 		for _, reqVlanRange := range reqRule.VlanRanges {

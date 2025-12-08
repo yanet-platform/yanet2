@@ -121,7 +121,7 @@ forward_module_config_update(
 			goto error_target;
 		}
 
-		targets[idx].direction = rule->direction;
+		targets[idx].mode = rule->mode;
 
 		if ((targets[idx].counter_id = counter_registry_register(
 			     &cp_module->counter_registry, rule->counter, 2

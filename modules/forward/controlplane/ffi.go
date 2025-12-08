@@ -56,9 +56,17 @@ type vlanRange struct {
 	to   uint16
 }
 
+type forwardMode int
+
+const (
+	modeNone forwardMode = 0
+	modeIn   forwardMode = 1
+	modeOut  forwardMode = 2
+)
+
 type forwardRule struct {
 	target     string
-	output     bool
+	mode       forwardMode
 	counter    string
 	devices    []string
 	vlanRanges []vlanRange
@@ -250,11 +258,12 @@ func (m *ModuleConfig) Update(rules []forwardRule) error {
 		C.strncpy(&cRule.target[0], cTarget, C.CP_DEVICE_NAME_LEN)
 		C.free(unsafe.Pointer(cTarget))
 
-		if rule.output {
-			cRule.direction = C.FORWARD_DIRECTION_OUT
+		if rule.mode == modeIn {
+			cRule.mode = C.FORWARD_MODE_IN
+		} else if rule.mode == modeOut {
+			cRule.mode = C.FORWARD_MODE_OUT
 		} else {
-
-			cRule.direction = C.FORWARD_DIRECTION_IN
+			cRule.mode = C.FORWARD_MODE_NONE
 		}
 
 		cCounter := C.CString(rule.counter)

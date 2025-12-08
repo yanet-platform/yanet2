@@ -10,7 +10,11 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .build_server(false)
         .message_attribute(".", "#[derive(Serialize)]")
         .compile_protos(
-            &["common/commonpb/target.proto", "decappb/decap.proto", "ynpb/inspect.proto"],
+            &[
+                "common/commonpb/target.proto",
+                "decappb/decap.proto",
+                "ynpb/inspect.proto",
+            ],
             &["../../..", "../controlplane", "../../../controlplane"],
         )?;
 

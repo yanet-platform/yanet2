@@ -4,13 +4,14 @@
 
 #include "controlplane/config/zone.h"
 
-#define FORWARD_DIRECTION_IN 0
-#define FORWARD_DIRECTION_OUT 1
+#define FORWARD_MODE_NONE 0
+#define FORWARD_MODE_IN 1
+#define FORWARD_MODE_OUT 2
 
 struct forward_target {
 	uint64_t device_id;
 	uint64_t counter_id;
-	uint8_t direction;
+	uint8_t mode;
 };
 
 struct forward_module_config {

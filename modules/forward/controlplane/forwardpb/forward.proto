@@ -63,9 +63,15 @@ message IPNet {
 	uint32 prefix_len = 2;
 }
 
+enum ForwardMode {
+	NONE = 0;
+	IN = 1;
+	OUT = 2;
+}
+
 message ForwardRule {
 	string target = 1;
-	bool output = 2;
+	ForwardMode mode = 2;
 	string counter = 3;
 
 	repeated string devices = 4;

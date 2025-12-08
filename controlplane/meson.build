@@ -38,6 +38,7 @@ custom_target(
         go,
         'build',
         '-ldflags=' + ld_flags,
+        '-buildvcs=false',
         '-o', '@OUTPUT@',
         join_paths(meson.current_source_dir(), 'cmd', 'bird-adapter'),
     ],

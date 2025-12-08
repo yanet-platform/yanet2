@@ -124,20 +124,22 @@ forward_handle_packets(
 				packet_front_drop(packet_front, packet);
 			}
 
-			if (target->direction == FORWARD_DIRECTION_IN) {
+			if (target->mode == FORWARD_MODE_IN) {
 				device_ectx_process_input(
 					dp_worker,
 					device_ectx,
 					packet_front,
 					packet
 				);
-			} else {
+			} else if (target->mode == FORWARD_MODE_OUT) {
 				device_ectx_process_output(
 					dp_worker,
 					device_ectx,
 					packet_front,
 					packet
 				);
+			} else {
+				packet_front_output(packet_front, packet);
 			}
 
 		} else {

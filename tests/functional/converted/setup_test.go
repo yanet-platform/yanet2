@@ -85,7 +85,7 @@ dataplane:
   loglevel: trace
   instances:
     - dp_memory: 1073741824
-      cp_memory: 1073741824
+      cp_memory: 1342177280
       numa_id: 0
   devices:
     - port_name: 01:00.0
@@ -125,9 +125,76 @@ modules:
       kni0: 01:00.0
 `
 
+	forwardConfig := `
+rules:
+  - target: virtio_user_kni0
+    counter: to_virtio_user_kni0
+    vlan_ranges:
+      - from: 0
+        to: 4095
+    srcs:
+      - addr: 0.0.0.0
+        prefix: 0
+      - addr: 0::0
+        prefix: 0
+    dsts:
+      - addr: ` + framework.VMIPv4Host + `
+        prefix: 32
+      - addr: ` + framework.VMIPv6Host + `
+        prefix: 64
+      - addr: ff02::0
+        prefix: 16
+    mode: Out
+    devices:
+      - 01:00.0
+  - target: 01:00.0
+    counter: to_pass
+    vlan_ranges:
+      - from: 0
+        to: 4095
+    srcs:
+      - addr: 0.0.0.0
+        prefix: 0
+      - addr: 0::0
+        prefix: 0
+    dsts:
+      - addr: 0.0.0.0
+        prefix: 0
+      - addr: 0::0
+        prefix: 0
+    mode: None
+    devices:
+      - 01:00.0
+  - target:
+    counter: to_virtio_user_kni0
+    vlan_ranges:
+      - from: 0
+        to: 4095
+    srcs:
+    dsts:
+    mode: Out
+    devices:
+      - 01:00.0
+  - target: 01:00.0
+    counter: to_01:00.0
+    vlan_ranges:
+      - from: 0
+        to: 4095
+    srcs:
+    dsts:
+    mode: Out
+    devices:
+      - virtio_user_kni0
+`
+
 	sugar.Info("Starting YANET (dataplane + controlplane)...")
 	if err := fw.StartYANET(dataplaneConfig, controlplaneConfig); err != nil {
 		sugar.Errorf("Failed to start YANET: %v", err)
+		return 1
+	}
+
+	if err := fw.CreateConfigFile("forward.yaml", forwardConfig); err != nil {
+		sugar.Errorf("Failed to create forward config: %v", err)
 		return 1
 	}
 

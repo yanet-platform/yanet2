@@ -46,13 +46,7 @@ var (
 		"ip addr add " + VMIPv4Host + "/24 dev kni0",
 
 		// Configure L2 and L3 forwarding
-		CLIForward + " l2-enable --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0",
-		CLIForward + " l2-enable --cfg=forward0 --instances 0 --src virtio_user_kni0 --dst 01:00.0",
-		CLIForward + " l3-add --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0 --net " + VMIPv4Host + "/32",
-		CLIForward + " l3-add --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0 --net " + VMIPv6Host + "/64",
-		CLIForward + " l3-add --cfg=forward0 --instances 0 --src 01:00.0 --dst virtio_user_kni0 --net ff02::/16",
-		CLIForward + " l3-add --cfg=forward0 --instances 0 --src virtio_user_kni0 --dst 01:00.0 --net 0.0.0.0/0",
-		CLIForward + " l3-add --cfg=forward0 --instances 0 --src virtio_user_kni0 --dst 01:00.0 --net ::/0",
+		CLIForward + " update --cfg=forward0 --instance 0 --rules  /mnt/config/forward.yaml",
 
 		// Configure routing
 		CLIRoute + " insert --cfg route0 --instances 0 --via " + VMIPv6Gateway + " ::/0",
@@ -698,6 +692,22 @@ func (f *TestFramework) waitOutputPresent(cmd string, checker func(string) bool,
 	return fmt.Errorf("timeout waiting for output to be present: %s", cmd)
 }
 
+func (f *TestFramework) CreateConfigFile(name string, config string) error {
+	// Get the config directory path from QEMU manager
+	configDir := f.QEMU.ConfigDir
+	if configDir == "" {
+		return fmt.Errorf("config directory not set in QEMU manager")
+	}
+
+	// Create dataplane config file
+	configPath := filepath.Join(configDir, name)
+	if err := os.WriteFile(configPath, []byte(config), 0644); err != nil {
+		return fmt.Errorf("failed to write config to %s: %w", configPath, err)
+	}
+	f.log.Debugf("Created config: %s", configPath)
+	return nil
+}
+
 // createConfigFiles creates YANET configuration files in the host filesystem
 // within the mounted config directory that is accessible from the virtual machine.
 // This method handles the host-side file creation for VM-accessible configuration.
@@ -726,26 +736,12 @@ func (f *TestFramework) createConfigFiles(dataplaneConfig string, controlplaneCo
 		return fmt.Errorf("config directory not set in QEMU manager")
 	}
 
-	// Create dataplane config file
-	dataplaneConfigPath := filepath.Join(configDir, "dataplane.yaml")
-	if err := os.WriteFile(dataplaneConfigPath, []byte(dataplaneConfig), 0644); err != nil {
-		return fmt.Errorf("failed to write dataplane config to %s: %w", dataplaneConfigPath, err)
+	if err := f.CreateConfigFile("dataplane.yaml", dataplaneConfig); err != nil {
+		return err
 	}
-	f.log.Debugf("Created dataplane config: %s", dataplaneConfigPath)
 
-	// Create controlplane config file
-	controlplaneConfigPath := filepath.Join(configDir, "controlplane.yaml")
-	if err := os.WriteFile(controlplaneConfigPath, []byte(controlplaneConfig), 0644); err != nil {
-		return fmt.Errorf("failed to write controlplane config to %s: %w", controlplaneConfigPath, err)
-	}
-	f.log.Debugf("Created controlplane config: %s", controlplaneConfigPath)
-
-	// Verify files were created successfully
-	if _, err := os.Stat(dataplaneConfigPath); err != nil {
-		return fmt.Errorf("dataplane config file not found after creation: %w", err)
-	}
-	if _, err := os.Stat(controlplaneConfigPath); err != nil {
-		return fmt.Errorf("controlplane config file not found after creation: %w", err)
+	if err := f.CreateConfigFile("controlplane.yaml", controlplaneConfig); err != nil {
+		return err
 	}
 
 	f.log.Debug("Configuration files created successfully on host")
