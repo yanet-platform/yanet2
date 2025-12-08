@@ -194,7 +194,7 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 #define __TTLMAP_BUCKET_ITER(                                                  \
 	map_ptr, bucket_id, key_type, value_type, now, cb, data                \
 )                                                                              \
-	__extension__({   \
+	__extension__({                                                        \
 		int __result = 0;                                              \
 		void *__addr = __TTLMAP_BUCKET_FIND_WITH_ID(                   \
 			map_ptr, bucket_id, key_type, value_type               \
@@ -204,11 +204,15 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 		__ttlmap_lock(&__bucket->lock);                                \
 		for (size_t __i = 0; __i < __TTLMAP_BUCKET_ENTRIES; ++__i) {   \
 			if (__bucket->entries[__i].deadline > (now)) {         \
-				if ((cb)(&__bucket->entries[__i].key,              \
-				     &__bucket->entries[__i].value,            \
-				     (data))) { __ttlmap_unlock(&__bucket->lock); __result = 1; break; }                                  \
+				if ((cb)(&__bucket->entries[__i].key,          \
+					 &__bucket->entries[__i].value,        \
+					 (data))) {                            \
+					__ttlmap_unlock(&__bucket->lock);      \
+					__result = 1;                          \
+					break;                                 \
+				}                                              \
 			}                                                      \
 		}                                                              \
-		__ttlmap_unlock(&__bucket->lock); \
-		__result;                              \
+		__ttlmap_unlock(&__bucket->lock);                              \
+		__result;                                                      \
 	})

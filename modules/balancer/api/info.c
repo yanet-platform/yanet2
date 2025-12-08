@@ -170,9 +170,14 @@ balancer_free_info(struct balancer_state *state, struct balancer_info *info) {
 
 int
 balancer_fill_sessions_info(
-	struct balancer_state *state, struct balancer_sessions_info *info, uint32_t now, bool count_only
+	struct balancer_state *state,
+	struct balancer_sessions_info *info,
+	uint32_t now,
+	bool count_only
 ) {
-	return session_table_fill_sessions_info(&state->session_table, info, state->mctx, now, count_only);
+	return session_table_fill_sessions_info(
+		&state->session_table, info, state->mctx, now, count_only
+	);
 }
 
 void

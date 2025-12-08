@@ -101,7 +101,11 @@ struct iter_context {
 };
 
 static int
-iter_callback(struct balancer_session_id *id, struct balancer_session_state *state, struct iter_context *ctx) {
+iter_callback(
+	struct balancer_session_id *id,
+	struct balancer_session_state *state,
+	struct iter_context *ctx
+) {
 	struct balancer_session_info current_session_info = {
 		.vs_id = id->vs_id,
 		.real_id = state->real_id,
@@ -114,7 +118,9 @@ iter_callback(struct balancer_session_id *id, struct balancer_session_state *sta
 	// extend ctx->info
 	void *memory = ctx->info;
 	uint64_t *count = &ctx->info->count;
-	int res = mem_array_expand_exp(ctx->mctx, &memory, sizeof(struct balancer_session_info), count);
+	int res = mem_array_expand_exp(
+		ctx->mctx, &memory, sizeof(struct balancer_session_info), count
+	);
 	if (res != 0) {
 		// break iteration
 		return 1;
@@ -138,7 +144,14 @@ sessions_table_gen_sessions_info(
 		.failed = false,
 		.mctx = mctx
 	};
-	TTLMAP_ITER(&gen->map, struct balancer_session_id, struct balancer_session_state, now, iter_callback, &ctx);
+	TTLMAP_ITER(
+		&gen->map,
+		struct balancer_session_id,
+		struct balancer_session_state,
+		now,
+		iter_callback,
+		&ctx
+	);
 	return ctx.failed ? -1 : 0;
 }
 
@@ -154,23 +167,31 @@ session_table_fill_sessions_info(
 
 	// iterate over current gen
 	struct session_table_gen *cur = session_table_current_gen(table);
-	int res = sessions_table_gen_sessions_info(cur, info, mctx, now, only_count);
+	int res = sessions_table_gen_sessions_info(
+		cur, info, mctx, now, only_count
+	);
 	if (res != 0) {
 		return -1;
 	}
 
 	// iterate over previous gen
 	struct session_table_gen *prev = session_table_previous_gen(table);
-	return sessions_table_gen_sessions_info(prev, info, mctx, now, only_count);
+	return sessions_table_gen_sessions_info(
+		prev, info, mctx, now, only_count
+	);
 }
 
 void
 session_table_free_sessions_info(
-	struct balancer_sessions_info *info,
-	struct memory_context *mctx
+	struct balancer_sessions_info *info, struct memory_context *mctx
 ) {
 	if (info->sessions != NULL) {
-		mem_array_free_exp(mctx, info->sessions, sizeof(struct balancer_session_info), info->count);
+		mem_array_free_exp(
+			mctx,
+			info->sessions,
+			sizeof(struct balancer_session_info),
+			info->count
+		);
 	}
 }
 
@@ -206,9 +227,7 @@ session_table_resize(struct session_table *table, size_t new_size) {
 			prev_worker_info->max_deadline_current_gen;
 		worker_info->use_prev_gen = 1;
 	}
-	atomic_fetch_add_explicit(
-		&table->current_gen, 1, __ATOMIC_SEQ_CST
-	);
+	atomic_fetch_add_explicit(&table->current_gen, 1, __ATOMIC_SEQ_CST);
 
 	return 0;
 }

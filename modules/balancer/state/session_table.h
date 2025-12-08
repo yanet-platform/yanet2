@@ -71,8 +71,7 @@ session_table_fill_sessions_info(
 
 void
 session_table_free_sessions_info(
-	struct balancer_sessions_info *info,
-	struct memory_context *mctx
+	struct balancer_sessions_info *info, struct memory_context *mctx
 );
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -163,7 +163,10 @@ struct balancer_sessions_info {
 // Fill info about active sessions with possible duplicates.
 int
 balancer_fill_sessions_info(
-	struct balancer_state *state, struct balancer_sessions_info *info, uint32_t now, bool count_only
+	struct balancer_state *state,
+	struct balancer_sessions_info *info,
+	uint32_t now,
+	bool count_only
 );
 
 // Free info about active sessions.

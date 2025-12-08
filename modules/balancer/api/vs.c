@@ -397,15 +397,18 @@ balancer_vs_init(
 		if (vs_config->peers_v4_count > 0) {
 			vs->peers_v4 = memory_balloc(
 				&config->cp_module.memory_context,
-				sizeof(struct net4_addr) * vs_config->peers_v4_count
+				sizeof(struct net4_addr) *
+					vs_config->peers_v4_count
 			);
 			if (vs->peers_v4 == NULL) {
 				ring_free(&vs->real_ring);
 				lpm_free(&vs->src_filter);
 				goto free_initalized_vs;
 			}
-			memcpy(vs->peers_v4, vs_config->peers_v4_addr,
-			       sizeof(struct net4_addr) * vs_config->peers_v4_count);
+			memcpy(vs->peers_v4,
+			       vs_config->peers_v4_addr,
+			       sizeof(struct net4_addr) *
+				       vs_config->peers_v4_count);
 		} else {
 			vs->peers_v4 = NULL;
 		}
@@ -415,22 +418,27 @@ balancer_vs_init(
 		if (vs_config->peers_v6_count > 0) {
 			vs->peers_v6 = memory_balloc(
 				&config->cp_module.memory_context,
-				sizeof(struct net6_addr) * vs_config->peers_v6_count
+				sizeof(struct net6_addr) *
+					vs_config->peers_v6_count
 			);
 			if (vs->peers_v6 == NULL) {
 				if (vs->peers_v4 != NULL) {
 					memory_bfree(
-						&config->cp_module.memory_context,
+						&config->cp_module
+							 .memory_context,
 						vs->peers_v4,
-						sizeof(struct net4_addr) * vs_config->peers_v4_count
+						sizeof(struct net4_addr
+						) * vs_config->peers_v4_count
 					);
 				}
 				ring_free(&vs->real_ring);
 				lpm_free(&vs->src_filter);
 				goto free_initalized_vs;
 			}
-			memcpy(vs->peers_v6, vs_config->peers_v6_addr,
-			       sizeof(struct net6_addr) * vs_config->peers_v6_count);
+			memcpy(vs->peers_v6,
+			       vs_config->peers_v6_addr,
+			       sizeof(struct net6_addr) *
+				       vs_config->peers_v6_count);
 		} else {
 			vs->peers_v6 = NULL;
 		}
@@ -453,8 +461,7 @@ balancer_vs_init(
 
 free_initalized_vs:
 	for (size_t i = 0; i < initialized_vs_count; ++i) {
-		struct balancer_vs_config *vs_config =
-			vs_configs[i];
+		struct balancer_vs_config *vs_config = vs_configs[i];
 		struct virtual_service *vs =
 			&config_vs[vs_config->registry_idx];
 		if (vs->peers_v4 != NULL) {

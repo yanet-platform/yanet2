@@ -60,36 +60,46 @@ packet_swap_headers(
 static inline void
 packet_swap_src_dst(struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	
+
 	// Swap IP addresses
-	if (packet->network_header.type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+	if (packet->network_header.type ==
+	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 		struct rte_ipv4_hdr *inner_ip_hdr = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
+			mbuf,
+			struct rte_ipv4_hdr *,
+			packet->network_header.offset
 		);
 		uint32_t tmp = inner_ip_hdr->src_addr;
 		inner_ip_hdr->src_addr = inner_ip_hdr->dst_addr;
 		inner_ip_hdr->dst_addr = tmp;
 	} else { // ipv6
 		struct rte_ipv6_hdr *inner_ip_hdr = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
 		);
 		uint8_t tmp[16];
 		memcpy(tmp, inner_ip_hdr->src_addr, NET6_LEN);
-		memcpy(inner_ip_hdr->src_addr, inner_ip_hdr->dst_addr, NET6_LEN);
+		memcpy(inner_ip_hdr->src_addr, inner_ip_hdr->dst_addr, NET6_LEN
+		);
 		memcpy(inner_ip_hdr->dst_addr, tmp, NET6_LEN);
 	}
-	
+
 	// Swap transport ports
 	if (packet->transport_header.type == IPPROTO_TCP) {
 		struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_tcp_hdr *, packet->transport_header.offset
+			mbuf,
+			struct rte_tcp_hdr *,
+			packet->transport_header.offset
 		);
 		uint16_t tmp_port = tcp->src_port;
 		tcp->src_port = tcp->dst_port;
 		tcp->dst_port = tmp_port;
 	} else if (packet->transport_header.type == IPPROTO_UDP) {
 		struct rte_udp_hdr *udp = rte_pktmbuf_mtod_offset(
-			mbuf, struct rte_udp_hdr *, packet->transport_header.offset
+			mbuf,
+			struct rte_udp_hdr *,
+			packet->transport_header.offset
 		);
 		uint16_t tmp_port = udp->src_port;
 		udp->src_port = udp->dst_port;
@@ -112,11 +122,11 @@ validate_packet_ipv4(
 	meta->network_proto = IPPROTO_IP;
 	struct icmp_packet_info info;
 	info.network.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
-	
-	// ICMPv4 error messages use 8-byte header (type + code + checksum + 4-byte unused)
-	// This matches sizeof(struct rte_icmp_hdr) which is 8 bytes
-	info.network.offset =
-		packet->transport_header.offset + 8;
+
+	// ICMPv4 error messages use 8-byte header (type + code + checksum +
+	// 4-byte unused) This matches sizeof(struct rte_icmp_hdr) which is 8
+	// bytes
+	info.network.offset = packet->transport_header.offset + 8;
 
 	struct balancer_icmp_module_stats *counter = ctx->counter.icmp_v4;
 
@@ -135,15 +145,14 @@ validate_packet_ipv4(
 		return -1;
 	}
 
-	if (mbuf->pkt_len <
-	    info.transport.offset + 2 * sizeof(rte_be16_t)) {
+	if (mbuf->pkt_len < info.transport.offset + 2 * sizeof(rte_be16_t)) {
 		counter->payload_too_short_port += 1;
 		return -1;
 	}
 
 	// swap source address and destination address
 	// on the inner packet. after that, destination address should be equal
-	// to the virtual service address. also, we need to swap transport 
+	// to the virtual service address. also, we need to swap transport
 	// proto source and destination.
 	packet_swap_headers(ctx->packet, &info.network, &info.transport);
 	packet_swap_src_dst(ctx->packet);
@@ -152,7 +161,9 @@ validate_packet_ipv4(
 	if (fill_packet_metadata(packet, meta)) {
 		counter->unexpected_transport += 1;
 		packet_swap_src_dst(ctx->packet);
-		packet_swap_headers(ctx->packet, &info.network, &info.transport);
+		packet_swap_headers(
+			ctx->packet, &info.network, &info.transport
+		);
 		return -1;
 	}
 
@@ -185,11 +196,11 @@ validate_packet_ipv6(
 	meta->network_proto = IPPROTO_IPV6;
 	struct icmp_packet_info info;
 	info.network.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
-	
-	// ICMPv6 error messages use 8-byte header (type + code + checksum + 4-byte unused)
-	// This is different from rte_icmp_hdr which is for echo messages
-	info.network.offset =
-		packet->transport_header.offset + 8;
+
+	// ICMPv6 error messages use 8-byte header (type + code + checksum +
+	// 4-byte unused) This is different from rte_icmp_hdr which is for echo
+	// messages
+	info.network.offset = packet->transport_header.offset + 8;
 
 	struct balancer_icmp_module_stats *counter = ctx->counter.icmp_v6;
 
@@ -209,8 +220,7 @@ validate_packet_ipv6(
 		return -1;
 	}
 
-	if (mbuf->pkt_len <
-	    info.transport.offset + 2 * sizeof(rte_be16_t)) {
+	if (mbuf->pkt_len < info.transport.offset + 2 * sizeof(rte_be16_t)) {
 		counter->payload_too_short_port += 1;
 		return -1;
 	}
@@ -226,7 +236,9 @@ validate_packet_ipv6(
 	if (fill_packet_metadata(packet, meta)) {
 		counter->unexpected_transport += 1;
 		packet_swap_src_dst(ctx->packet);
-		packet_swap_headers(ctx->packet, &info.network, &info.transport);
+		packet_swap_headers(
+			ctx->packet, &info.network, &info.transport
+		);
 		return -1;
 	}
 

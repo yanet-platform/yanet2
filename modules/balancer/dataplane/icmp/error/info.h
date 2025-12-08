@@ -61,9 +61,8 @@ fill_icmp_packet_info_ipv4(
 	} else {
 
 		info->transport.type = ipv4_hdr->next_proto_id;
-		info->transport.offset =
-			info->network.offset +
-			4 * (ipv4_hdr->version_ihl & 0x0F);
+		info->transport.offset = info->network.offset +
+					 4 * (ipv4_hdr->version_ihl & 0x0F);
 	}
 
 	if (rte_be_to_cpu_16(ipv4_hdr->total_length) <

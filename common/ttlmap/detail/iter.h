@@ -10,14 +10,16 @@
 		size_t __buckets = 1ull << (map_ptr)->buckets_exp;             \
 		for (size_t __bucket_idx = 0; __bucket_idx < __buckets;        \
 		     ++__bucket_idx) {                                         \
-			if (__TTLMAP_BUCKET_ITER(                                  \
-				map_ptr,                                       \
-				__bucket_idx,                                  \
-				key_type,                                      \
-				value_type,                                    \
-				now,                                           \
-				cb,                                            \
-				data                                           \
-			) == 1) { break; }                                                   \
+			if (__TTLMAP_BUCKET_ITER(                              \
+				    map_ptr,                                   \
+				    __bucket_idx,                              \
+				    key_type,                                  \
+				    value_type,                                \
+				    now,                                       \
+				    cb,                                        \
+				    data                                       \
+			    ) == 1) {                                          \
+				break;                                         \
+			}                                                      \
 		}                                                              \
 	})
