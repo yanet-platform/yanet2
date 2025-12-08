@@ -1,5 +1,9 @@
 package rib
 
+import (
+	"maps"
+)
+
 // MapTrieKey defines requirements for keys used in the MapTrie data structure.
 //
 // The type parameter T represents the concrete type implementing this
@@ -184,10 +188,19 @@ func (m MapTrie[K, Q, V]) Dump() map[K]V {
 
 	// Traverse from longest to shortest prefixes.
 	for idx := len(m) - 1; idx >= 0; idx-- {
-		for key, v := range m[idx] {
-			out[key] = v
-		}
+		maps.Copy(out, m[idx])
 	}
 
+	return out
+}
+
+// Clone returns a copy of m.  This is a shallow clone:
+// the new keys and values are set using ordinary assignment.
+func (m MapTrie[K, Q, V]) Clone() MapTrie[K, Q, V] {
+	out := MapTrie[K, Q, V]{}
+
+	for idx := range out {
+		out[idx] = maps.Clone(m[idx])
+	}
 	return out
 }

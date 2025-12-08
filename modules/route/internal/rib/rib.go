@@ -69,19 +69,22 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	return nil
 }
 
-func (m *RIB) DumpRoutes() map[netip.Prefix]RoutesList {
+func (m *RIB) DumpRoutes() MapTrie[netip.Prefix, netip.Addr, RoutesList] {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// Since `RoutesList` is passed by value, there's no need to create a
 	// separate copy of it. However, since the `Routes` member within
 	// the struct is a reference like type (slice), we need to replace it.
-	dump := m.routes.Dump()
-	for key := range dump {
-		dump[key] = RoutesList{
-			// replace with a copy of the routes slice to avoid sharing data
-			Routes: slices.Clone(dump[key].Routes),
+	dump := m.routes.Clone()
+	for idx := range dump {
+		for key := range dump[idx] {
+			dump[idx][key] = RoutesList{
+				// replace with a copy of the routes slice to avoid sharing data
+				Routes: slices.Clone(dump[idx][key].Routes),
+			}
 		}
 	}
+
 	return dump
 }
 

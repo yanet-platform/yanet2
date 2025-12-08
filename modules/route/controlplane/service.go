@@ -90,26 +90,28 @@ func (m *RouteService) ShowRoutes(
 	if !ok {
 		return &routepb.ShowRoutesResponse{}, nil
 	}
-	routes := holder.DumpRoutes()
+	ribDump := holder.DumpRoutes()
 
 	response := &routepb.ShowRoutesResponse{}
 
-	for prefix, routesList := range routes {
-		if len(routesList.Routes) == 0 {
-			continue
-		}
+	for prefixLen := range ribDump {
+		for prefix, routesList := range ribDump[prefixLen] {
+			if len(routesList.Routes) == 0 {
+				continue
+			}
 
-		// Apply IPv4/IPv6 filters if specified.
-		if request.Ipv4Only && !prefix.Addr().Is4() {
-			continue
-		}
-		if request.Ipv6Only && !prefix.Addr().Is6() {
-			continue
-		}
+			// Apply IPv4/IPv6 filters if specified.
+			if request.Ipv4Only && !prefix.Addr().Is4() {
+				continue
+			}
+			if request.Ipv6Only && !prefix.Addr().Is6() {
+				continue
+			}
 
-		for idx, r := range routesList.Routes {
-			isBest := idx == 0
-			response.Routes = append(response.Routes, routepb.FromRIBRoute(&r, isBest))
+			for idx, r := range routesList.Routes {
+				isBest := idx == 0
+				response.Routes = append(response.Routes, routepb.FromRIBRoute(&r, isBest))
+			}
 		}
 	}
 
@@ -300,12 +302,12 @@ func (m *RouteService) getOrCreateRib(name string, instance uint32) *rib.RIB {
 }
 
 func (m *RouteService) syncRouteUpdates(ribRef *rib.RIB, name string, dpInstance uint32) error {
-	routes := ribRef.DumpRoutes()
+	ribDump := ribRef.DumpRoutes()
 
 	// Huge mutex, but our shared memory must be protected from concurrent access.
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	err := m.updateModuleConfig(name, dpInstance, routes)
+	err := m.updateModuleConfig(name, dpInstance, ribDump)
 	if err != nil {
 		return err
 	}
@@ -315,7 +317,7 @@ func (m *RouteService) syncRouteUpdates(ribRef *rib.RIB, name string, dpInstance
 func (m *RouteService) updateModuleConfig(
 	name string,
 	inst uint32,
-	routes map[netip.Prefix]rib.RoutesList,
+	ribDump rib.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
 ) error {
 	agent := m.agents[inst]
 
@@ -332,56 +334,58 @@ func (m *RouteService) updateModuleConfig(
 
 	routeInsertionStart := time.Now()
 	totalRoutes := 0
-	for prefix, routesList := range routes {
-		routesListSetKey := bitset.TinyBitset{}
+	for prefixLen := range ribDump {
+		for prefix, routesList := range ribDump[prefixLen] {
+			routesListSetKey := bitset.TinyBitset{}
 
-		if len(routesList.Routes) == 0 {
-			m.log.Debugw("skip prefix with no routes", zap.Stringer("prefix", prefix))
-			// FIXME add telemetry
-			continue
-		}
+			if len(routesList.Routes) == 0 {
+				m.log.Debugw("skip prefix with no routes", zap.Stringer("prefix", prefix))
+				// FIXME add telemetry
+				continue
+			}
 
-		totalRoutes += len(routesList.Routes)
-		for _, route := range routesList.Routes {
-			// Lookup hwaddress for the route
-			entry, ok := neighbours.Lookup(route.NextHop.Unmap())
+			totalRoutes += len(routesList.Routes)
+			for _, route := range routesList.Routes {
+				// Lookup hwaddress for the route
+				entry, ok := neighbours.Lookup(route.NextHop.Unmap())
+				if !ok {
+					// FIXME: add telemetry?
+					m.log.Warnf("neighbour with %q nexthop IP address not found, skip", route.NextHop)
+					continue
+				}
+
+				if idx, ok := hardwareRoutes[entry.HardwareRoute]; ok {
+					routesListSetKey.Insert(idx)
+					continue
+				}
+
+				idx, err := config.RouteAdd(
+					entry.HardwareRoute.SourceMAC[:],
+					entry.HardwareRoute.DestinationMAC[:],
+					entry.HardwareRoute.Device,
+				)
+				if err != nil {
+					return fmt.Errorf("failed to add hardware route %q: %w", entry.HardwareRoute, err)
+				}
+				hardwareRoutes[entry.HardwareRoute] = uint32(idx)
+				routesListSetKey.Insert(uint32(idx))
+			}
+
+			if routesListSetKey.Count() == 0 {
+				continue
+			}
+			idx, ok := routesListsSet[routesListSetKey]
 			if !ok {
-				// FIXME: add telemetry?
-				m.log.Warnf("neighbour with %q nexthop IP address not found, skip", route.NextHop)
-				continue
+				routeListIdx, err := config.RouteListAdd(routesListSetKey.AsSlice())
+				if err != nil {
+					return fmt.Errorf("failed to add routes list: %w", err)
+				}
+				idx = routeListIdx
 			}
 
-			if idx, ok := hardwareRoutes[entry.HardwareRoute]; ok {
-				routesListSetKey.Insert(idx)
-				continue
+			if err := config.PrefixAdd(prefix, uint32(idx)); err != nil {
+				return fmt.Errorf("failed to add prefix %q: %w", prefix, err)
 			}
-
-			idx, err := config.RouteAdd(
-				entry.HardwareRoute.SourceMAC[:],
-				entry.HardwareRoute.DestinationMAC[:],
-				entry.HardwareRoute.Device,
-			)
-			if err != nil {
-				return fmt.Errorf("failed to add hardware route %q: %w", entry.HardwareRoute, err)
-			}
-			hardwareRoutes[entry.HardwareRoute] = uint32(idx)
-			routesListSetKey.Insert(uint32(idx))
-		}
-
-		if routesListSetKey.Count() == 0 {
-			continue
-		}
-		idx, ok := routesListsSet[routesListSetKey]
-		if !ok {
-			routeListIdx, err := config.RouteListAdd(routesListSetKey.AsSlice())
-			if err != nil {
-				return fmt.Errorf("failed to add routes list: %w", err)
-			}
-			idx = routeListIdx
-		}
-
-		if err := config.PrefixAdd(prefix, uint32(idx)); err != nil {
-			return fmt.Errorf("failed to add prefix %q: %w", prefix, err)
 		}
 	}
 	m.log.Debugw("finished inserting routes",
