@@ -1,4 +1,4 @@
-clear:
+clean:
 	go clean -cache
 	rm -rf balancer.test
 
