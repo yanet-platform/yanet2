@@ -38,5 +38,4 @@ packet_ctx_setup(
 static inline void
 packet_ctx_set_packet(struct packet_ctx *ctx, struct packet *packet) {
 	ctx->packet = packet;
-	memset(&ctx->icmp_info, 0, sizeof(ctx->icmp_info));
 }

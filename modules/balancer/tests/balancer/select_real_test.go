@@ -437,7 +437,13 @@ func TestNewConfig(t *testing.T) {
 	clientPort := uint16(1000)
 
 	t.Run("Send_First_Packet", func(t *testing.T) {
-		packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{SYN: true})
+		packetLayers := MakeTCPPacket(
+			clientIp,
+			clientPort,
+			vsIp,
+			vsPort,
+			&layers.TCP{SYN: true},
+		)
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 
 		result, err := mock.HandlePackets(packet)
@@ -496,7 +502,13 @@ func TestNewConfig(t *testing.T) {
 	// ensure it is dropped because its real was removed
 
 	t.Run("Send_Second_Packet_Without_Reschedule", func(t *testing.T) {
-		packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{})
+		packetLayers := MakeTCPPacket(
+			clientIp,
+			clientPort,
+			vsIp,
+			vsPort,
+			&layers.TCP{},
+		)
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 
 		// Check packet is dropped because its real was removed
@@ -510,7 +522,13 @@ func TestNewConfig(t *testing.T) {
 	// send packet to real with reschedule
 
 	t.Run("Send_Second_Packet_With_Reschedule", func(t *testing.T) {
-		packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{SYN: true})
+		packetLayers := MakeTCPPacket(
+			clientIp,
+			clientPort,
+			vsIp,
+			vsPort,
+			&layers.TCP{SYN: true},
+		)
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 
 		// Check packet is dropped because its real was removed
@@ -548,7 +566,13 @@ func TestNewConfig(t *testing.T) {
 	//send packet when no virtual services are enabled
 
 	t.Run("Send_Second_Packet_With_Reschedule_no_Vs", func(t *testing.T) {
-		packetLayers := MakeTCPPacket(clientIp, clientPort, vsIp, vsPort, &layers.TCP{SYN: true})
+		packetLayers := MakeTCPPacket(
+			clientIp,
+			clientPort,
+			vsIp,
+			vsPort,
+			&layers.TCP{SYN: true},
+		)
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 
 		// Check packet is dropped because its real was removed

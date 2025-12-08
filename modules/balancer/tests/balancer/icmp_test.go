@@ -51,7 +51,12 @@ func MakeICMPv4EchoRequest(
 
 	payload := []byte("ICMP Echo Request Payload")
 
-	return []gopacket.SerializableLayer{eth, ip, icmp, gopacket.Payload(payload)}
+	return []gopacket.SerializableLayer{
+		eth,
+		ip,
+		icmp,
+		gopacket.Payload(payload),
+	}
 }
 
 // MakeICMPv6EchoRequest creates an ICMPv6 Echo Request packet
@@ -91,7 +96,12 @@ func MakeICMPv6EchoRequest(
 	payload[3] = byte(seq)
 	copy(payload[4:], []byte("ICMP Echo Request Payload"))
 
-	return []gopacket.SerializableLayer{eth, ip, icmp, gopacket.Payload(payload)}
+	return []gopacket.SerializableLayer{
+		eth,
+		ip,
+		icmp,
+		gopacket.Payload(payload),
+	}
 }
 
 // MakeICMPv4DestUnreachable creates an ICMPv4 Destination Unreachable error packet
@@ -120,7 +130,10 @@ func MakeICMPv4DestUnreachable(
 	}
 
 	icmp := &layers.ICMPv4{
-		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeDestinationUnreachable, 3), // Port unreachable
+		TypeCode: layers.CreateICMPv4TypeCode(
+			layers.ICMPv4TypeDestinationUnreachable,
+			3,
+		), // Port unreachable
 	}
 
 	// Extract the full original IP packet for the balancer to process
@@ -131,26 +144,98 @@ func MakeICMPv4DestUnreachable(
 	if ipStart < len(originalData) {
 		// Include the entire IP packet
 		payload := originalData[ipStart:]
-		return []gopacket.SerializableLayer{eth, ip, icmp, gopacket.Payload(payload)}
+		return []gopacket.SerializableLayer{
+			eth,
+			ip,
+			icmp,
+			gopacket.Payload(payload),
+		}
 	}
 
-	return []gopacket.SerializableLayer{eth, ip, icmp, gopacket.Payload([]byte{})}
+	return []gopacket.SerializableLayer{
+		eth,
+		ip,
+		icmp,
+		gopacket.Payload([]byte{}),
+	}
+}
+
+// MakeICMPv6DestUnreachable creates an ICMPv6 Destination Unreachable error packet
+// containing the original packet that triggered the error
+func MakeICMPv6DestUnreachable(
+	srcIP netip.Addr,
+	dstIP netip.Addr,
+	originalPacket gopacket.Packet,
+) []gopacket.SerializableLayer {
+	src := net.IP(srcIP.AsSlice())
+	dst := net.IP(dstIP.AsSlice())
+
+	eth := &layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("00:00:00:00:00:01")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("00:11:22:33:44:55")),
+		EthernetType: layers.EthernetTypeIPv6,
+	}
+
+	ip := &layers.IPv6{
+		Version:    6,
+		NextHeader: layers.IPProtocolICMPv6,
+		HopLimit:   64,
+		SrcIP:      src,
+		DstIP:      dst,
+	}
+
+	icmp := &layers.ICMPv6{
+		TypeCode: layers.CreateICMPv6TypeCode(
+			layers.ICMPv6TypeDestinationUnreachable,
+			4,
+		), // Port unreachable
+	}
+	icmp.SetNetworkLayerForChecksum(ip)
+
+	// Extract the full original IP packet for the balancer to process
+	// The balancer needs the complete packet to validate and look up sessions
+	originalData := originalPacket.Data()
+	// Find the IP layer start (skip Ethernet header)
+	ipStart := 14 // Ethernet header size
+	if ipStart < len(originalData) {
+		// ICMPv6 error messages have a 4-byte unused field after the ICMP header
+		// before the original packet data (RFC 4443)
+		unused := []byte{0, 0, 0, 0}
+		// Include the entire IP packet
+		originalIPPacket := originalData[ipStart:]
+		payload := append(unused, originalIPPacket...)
+		return []gopacket.SerializableLayer{
+			eth,
+			ip,
+			icmp,
+			gopacket.Payload(payload),
+		}
+	}
+
+	return []gopacket.SerializableLayer{
+		eth,
+		ip,
+		icmp,
+		gopacket.Payload([]byte{}),
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Test: ICMP Echo Request/Reply for IPv4
+// Test: ICMP Echo Request/Reply for IPv4 and IPv6
 ////////////////////////////////////////////////////////////////////////////////
 
-func TestICMPv4EchoRequest(t *testing.T) {
-	vsIP := IpAddr("10.1.1.1")
-	clientIP := IpAddr("10.0.1.1")
+func TestICMPEchoRequest(t *testing.T) {
+	vsIPv4 := IpAddr("10.1.1.1")
+	clientIPv4 := IpAddr("10.0.1.1")
+	vsIPv6 := IpAddr("2001:db8::1")
+	clientIPv6 := IpAddr("2001:db8:1::1")
 
 	config := &balancerpb.ModuleConfig{
 		SourceAddressV4: IpAddr("5.5.5.5").AsSlice(),
 		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
 		VirtualServices: []*balancerpb.VirtualService{
 			{
-				Addr:  vsIP.AsSlice(),
+				Addr:  vsIPv4.AsSlice(),
 				Port:  80,
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
@@ -176,73 +261,8 @@ func TestICMPv4EchoRequest(t *testing.T) {
 					},
 				},
 			},
-		},
-		SessionsTimeouts: &balancerpb.SessionsTimeouts{
-			TcpSynAck: 60,
-			TcpSyn:    60,
-			TcpFin:    60,
-			Tcp:       60,
-			Udp:       60,
-			Default:   60,
-		},
-	}
-
-	setup, err := SetupTest(&TestConfig{
-		balancer: config,
-		stateConfig: &balancerpb.ModuleStateConfig{
-			SessionTableCapacity: 100,
-		},
-	})
-	require.NoError(t, err)
-	defer setup.Free()
-
-	// Create ICMP Echo Request
-	packetLayers := MakeICMPv4EchoRequest(clientIP, vsIP, 1234, 1)
-	packet := xpacket.LayersToPacket(t, packetLayers...)
-
-	// Send packet
-	result, err := setup.mock.HandlePackets(packet)
-	require.NoError(t, err)
-	require.Equal(t, 1, len(result.Output), "should have one output packet")
-	require.Empty(t, result.Drop, "should not drop packet")
-
-	// Parse response
-	responsePacket := gopacket.NewPacket(result.Output[0].RawData, layers.LayerTypeEthernet, gopacket.Default)
-
-	// Verify it's an ICMP Echo Reply
-	icmpLayer := responsePacket.Layer(layers.LayerTypeICMPv4)
-	require.NotNil(t, icmpLayer, "response should have ICMPv4 layer")
-
-	icmp := icmpLayer.(*layers.ICMPv4)
-	assert.Equal(t, uint8(layers.ICMPv4TypeEchoReply), uint8(icmp.TypeCode.Type()), "should be Echo Reply")
-	assert.Equal(t, uint8(0), uint8(icmp.TypeCode.Code()), "code should be 0")
-	assert.Equal(t, uint16(1234), icmp.Id, "ID should match request")
-	assert.Equal(t, uint16(1), icmp.Seq, "sequence should match request")
-
-	// Verify IP addresses are swapped
-	ipLayer := responsePacket.Layer(layers.LayerTypeIPv4)
-	require.NotNil(t, ipLayer, "response should have IPv4 layer")
-
-	ip := ipLayer.(*layers.IPv4)
-	assert.Equal(t, net.IP(vsIP.AsSlice()), ip.SrcIP, "src IP should be VS IP")
-	assert.Equal(t, net.IP(clientIP.AsSlice()), ip.DstIP, "dst IP should be client IP")
-	assert.Equal(t, uint8(64), ip.TTL, "TTL should be reset to 64")
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Test: ICMP Echo Request/Reply for IPv6
-////////////////////////////////////////////////////////////////////////////////
-
-func TestICMPv6EchoRequest(t *testing.T) {
-	vsIP := IpAddr("2001:db8::1")
-	clientIP := IpAddr("2001:db8:1::1")
-
-	config := &balancerpb.ModuleConfig{
-		SourceAddressV4: IpAddr("5.5.5.5").AsSlice(),
-		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
-		VirtualServices: []*balancerpb.VirtualService{
 			{
-				Addr:  vsIP.AsSlice(),
+				Addr:  vsIPv6.AsSlice(),
 				Port:  80,
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
@@ -263,7 +283,9 @@ func TestICMPv6EchoRequest(t *testing.T) {
 						DstAddr: IpAddr("2001:db8:2::2").AsSlice(),
 						Weight:  1,
 						SrcAddr: IpAddr("2001:db8:2::2").AsSlice(),
-						SrcMask: IpAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").AsSlice(),
+						SrcMask: IpAddr(
+							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+						).AsSlice(),
 						Enabled: true,
 					},
 				},
@@ -288,45 +310,139 @@ func TestICMPv6EchoRequest(t *testing.T) {
 	require.NoError(t, err)
 	defer setup.Free()
 
-	// Create ICMPv6 Echo Request
-	packetLayers := MakeICMPv6EchoRequest(clientIP, vsIP, 5678, 2)
-	packet := xpacket.LayersToPacket(t, packetLayers...)
+	t.Run("IPv4", func(t *testing.T) {
+		// Create ICMP Echo Request
+		packetLayers := MakeICMPv4EchoRequest(clientIPv4, vsIPv4, 1234, 1)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
 
-	// Send packet
-	result, err := setup.mock.HandlePackets(packet)
-	require.NoError(t, err)
-	require.Equal(t, 1, len(result.Output), "should have one output packet")
-	require.Empty(t, result.Drop, "should not drop packet")
+		// Send packet
+		result, err := setup.mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Output), "should have one output packet")
+		require.Empty(t, result.Drop, "should not drop packet")
 
-	// Parse response
-	responsePacket := gopacket.NewPacket(result.Output[0].RawData, layers.LayerTypeEthernet, gopacket.Default)
+		// Parse response
+		responsePacket := gopacket.NewPacket(
+			result.Output[0].RawData,
+			layers.LayerTypeEthernet,
+			gopacket.Default,
+		)
 
-	// Verify it's an ICMPv6 Echo Reply
-	icmpLayer := responsePacket.Layer(layers.LayerTypeICMPv6)
-	require.NotNil(t, icmpLayer, "response should have ICMPv6 layer")
+		// Verify it's an ICMP Echo Reply
+		icmpLayer := responsePacket.Layer(layers.LayerTypeICMPv4)
+		require.NotNil(t, icmpLayer, "response should have ICMPv4 layer")
 
-	icmp := icmpLayer.(*layers.ICMPv6)
-	assert.Equal(t, uint8(layers.ICMPv6TypeEchoReply), uint8(icmp.TypeCode.Type()), "should be Echo Reply")
-	assert.Equal(t, uint8(0), uint8(icmp.TypeCode.Code()), "code should be 0")
+		icmp := icmpLayer.(*layers.ICMPv4)
+		assert.Equal(
+			t,
+			uint8(layers.ICMPv4TypeEchoReply),
+			uint8(icmp.TypeCode.Type()),
+			"should be Echo Reply",
+		)
+		assert.Equal(
+			t,
+			uint8(0),
+			uint8(icmp.TypeCode.Code()),
+			"code should be 0",
+		)
+		assert.Equal(t, uint16(1234), icmp.Id, "ID should match request")
+		assert.Equal(t, uint16(1), icmp.Seq, "sequence should match request")
 
-	// Verify IP addresses are swapped
-	ipLayer := responsePacket.Layer(layers.LayerTypeIPv6)
-	require.NotNil(t, ipLayer, "response should have IPv6 layer")
+		// Verify IP addresses are swapped
+		ipLayer := responsePacket.Layer(layers.LayerTypeIPv4)
+		require.NotNil(t, ipLayer, "response should have IPv4 layer")
 
-	ip := ipLayer.(*layers.IPv6)
-	assert.Equal(t, net.IP(vsIP.AsSlice()), ip.SrcIP, "src IP should be VS IP")
-	assert.Equal(t, net.IP(clientIP.AsSlice()), ip.DstIP, "dst IP should be client IP")
-	assert.Equal(t, uint8(64), ip.HopLimit, "hop limit should be reset to 64")
+		ip := ipLayer.(*layers.IPv4)
+		assert.Equal(
+			t,
+			net.IP(vsIPv4.AsSlice()),
+			ip.SrcIP,
+			"src IP should be VS IP",
+		)
+		assert.Equal(
+			t,
+			net.IP(clientIPv4.AsSlice()),
+			ip.DstIP,
+			"dst IP should be client IP",
+		)
+		assert.Equal(t, uint8(64), ip.TTL, "TTL should be reset to 64")
+	})
+
+	t.Run("IPv6", func(t *testing.T) {
+		// Create ICMPv6 Echo Request
+		packetLayers := MakeICMPv6EchoRequest(clientIPv6, vsIPv6, 5678, 2)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+
+		// Send packet
+		result, err := setup.mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Output), "should have one output packet")
+		require.Empty(t, result.Drop, "should not drop packet")
+
+		// Parse response
+		responsePacket := gopacket.NewPacket(
+			result.Output[0].RawData,
+			layers.LayerTypeEthernet,
+			gopacket.Default,
+		)
+
+		// Verify it's an ICMPv6 Echo Reply
+		icmpLayer := responsePacket.Layer(layers.LayerTypeICMPv6)
+		require.NotNil(t, icmpLayer, "response should have ICMPv6 layer")
+
+		icmp := icmpLayer.(*layers.ICMPv6)
+		assert.Equal(
+			t,
+			uint8(layers.ICMPv6TypeEchoReply),
+			uint8(icmp.TypeCode.Type()),
+			"should be Echo Reply",
+		)
+		assert.Equal(
+			t,
+			uint8(0),
+			uint8(icmp.TypeCode.Code()),
+			"code should be 0",
+		)
+
+		// Verify IP addresses are swapped
+		ipLayer := responsePacket.Layer(layers.LayerTypeIPv6)
+		require.NotNil(t, ipLayer, "response should have IPv6 layer")
+
+		ip := ipLayer.(*layers.IPv6)
+		assert.Equal(
+			t,
+			net.IP(vsIPv6.AsSlice()),
+			ip.SrcIP,
+			"src IP should be VS IP",
+		)
+		assert.Equal(
+			t,
+			net.IP(clientIPv6.AsSlice()),
+			ip.DstIP,
+			"dst IP should be client IP",
+		)
+		assert.Equal(
+			t,
+			uint8(64),
+			ip.HopLimit,
+			"hop limit should be reset to 64",
+		)
+	})
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Test: ICMP Error packet forwarding when session exists
 ////////////////////////////////////////////////////////////////////////////////
 
-func TestICMPv4ErrorWithExistingSession(t *testing.T) {
-	vsIP := IpAddr("10.1.1.1")
-	realIP := IpAddr("10.2.2.2")
-	clientIP := IpAddr("10.0.1.1")
+func TestICMPErrorWithExistingSession(t *testing.T) {
+	vsIPv4 := IpAddr("10.1.1.1")
+	realIPv4 := IpAddr("10.2.2.2")
+	clientIPv4 := IpAddr("10.0.1.1")
+
+	vsIPv6 := IpAddr("2001:db8::1")
+	realIPv6 := IpAddr("2001:db8:2::2")
+	clientIPv6 := IpAddr("2001:db8:1::1")
+
 	clientPort := uint16(12345)
 	vsPort := uint16(80)
 
@@ -335,7 +451,7 @@ func TestICMPv4ErrorWithExistingSession(t *testing.T) {
 		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
 		VirtualServices: []*balancerpb.VirtualService{
 			{
-				Addr:  vsIP.AsSlice(),
+				Addr:  vsIPv4.AsSlice(),
 				Port:  uint32(vsPort),
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
@@ -353,10 +469,39 @@ func TestICMPv4ErrorWithExistingSession(t *testing.T) {
 				},
 				Reals: []*balancerpb.Real{
 					{
-						DstAddr: realIP.AsSlice(),
+						DstAddr: realIPv4.AsSlice(),
 						Weight:  1,
-						SrcAddr: realIP.AsSlice(),
+						SrcAddr: realIPv4.AsSlice(),
 						SrcMask: IpAddr("255.255.255.255").AsSlice(),
+						Enabled: true,
+					},
+				},
+			},
+			{
+				Addr:  vsIPv6.AsSlice(),
+				Port:  uint32(vsPort),
+				Proto: balancerpb.TransportProto_TCP,
+				AllowedSrcs: []*balancerpb.Subnet{
+					{
+						Addr: IpAddr("2001:db8::").AsSlice(),
+						Size: 32,
+					},
+				},
+				Scheduler: balancerpb.VsScheduler_PRR,
+				Flags: &balancerpb.VsFlags{
+					Gre:    false,
+					FixMss: false,
+					Ops:    false,
+					PureL3: false,
+				},
+				Reals: []*balancerpb.Real{
+					{
+						DstAddr: realIPv6.AsSlice(),
+						Weight:  1,
+						SrcAddr: realIPv6.AsSlice(),
+						SrcMask: IpAddr(
+							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+						).AsSlice(),
 						Enabled: true,
 					},
 				},
@@ -381,46 +526,156 @@ func TestICMPv4ErrorWithExistingSession(t *testing.T) {
 	require.NoError(t, err)
 	defer setup.Free()
 
-	// First, create a session by sending a TCP SYN packet
-	tcpLayers := MakeTCPPacket(clientIP, clientPort, vsIP, vsPort, &layers.TCP{SYN: true})
-	tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
+	t.Run("IPv4", func(t *testing.T) {
+		// First, create a session by sending a TCP SYN packet
+		tcpLayers := MakeTCPPacket(
+			clientIPv4,
+			clientPort,
+			vsIPv4,
+			vsPort,
+			&layers.TCP{SYN: true},
+		)
+		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
 
-	result, err := setup.mock.HandlePackets(tcpPacket)
-	require.NoError(t, err)
-	require.Equal(t, 1, len(result.Output), "TCP packet should be forwarded")
+		result, err := setup.mock.HandlePackets(tcpPacket)
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			1,
+			len(result.Output),
+			"TCP packet should be forwarded",
+		)
 
-	// Now simulate the real server's response packet (which would trigger an ICMP error)
-	// The real server responds with src=vsIP (as configured), dst=clientIP
-	responsePacket := MakeTCPPacket(vsIP, vsPort, clientIP, clientPort, &layers.TCP{SYN: true, ACK: true})
-	responsePacketData := xpacket.LayersToPacket(t, responsePacket...)
+		// Now simulate the real server's response packet (which would trigger an ICMP error)
+		// The real server responds with src=vsIP (as configured), dst=clientIP
+		responsePacket := MakeTCPPacket(
+			vsIPv4,
+			vsPort,
+			clientIPv4,
+			clientPort,
+			&layers.TCP{SYN: true, ACK: true},
+		)
+		responsePacketData := xpacket.LayersToPacket(t, responsePacket...)
 
-	// Now send an ICMP Destination Unreachable error containing the response packet
-	// The ICMP error comes from the client network to the VS IP (balancer)
-	// because the response packet had src=vsIP
-	icmpLayers := MakeICMPv4DestUnreachable(clientIP, vsIP, responsePacketData)
-	icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
+		// Now send an ICMP Destination Unreachable error containing the response packet
+		// The ICMP error comes from the client network to the VS IP (balancer)
+		// because the response packet had src=vsIP
+		icmpLayers := MakeICMPv4DestUnreachable(
+			clientIPv4,
+			vsIPv4,
+			responsePacketData,
+		)
+		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-	result, err = setup.mock.HandlePackets(icmpPacket)
-	require.NoError(t, err)
+		result, err = setup.mock.HandlePackets(icmpPacket)
+		require.NoError(t, err)
 
-	// The ICMP error should be forwarded to the real server (tunneled)
-	require.Equal(t, 1, len(result.Output), "ICMP error should be forwarded")
-	require.Empty(t, result.Drop, "ICMP error should not be dropped")
+		// The ICMP error should be forwarded to the real server (tunneled)
+		require.Equal(
+			t,
+			1,
+			len(result.Output),
+			"ICMP error should be forwarded",
+		)
+		require.Empty(t, result.Drop, "ICMP error should not be dropped")
 
-	// Verify the packet is tunneled
-	outputPacket := result.Output[0]
-	assert.True(t, outputPacket.IsTunneled, "ICMP error should be tunneled to real")
-	assert.Equal(t, net.IP(realIP.AsSlice()), outputPacket.DstIP, "should be sent to real server")
+		// Verify the packet is tunneled
+		outputPacket := result.Output[0]
+		assert.True(
+			t,
+			outputPacket.IsTunneled,
+			"ICMP error should be tunneled to real",
+		)
+		assert.Equal(
+			t,
+			net.IP(realIPv4.AsSlice()),
+			outputPacket.DstIP,
+			"should be sent to real server",
+		)
+	})
+
+	t.Run("IPv6", func(t *testing.T) {
+		// First, create a session by sending a TCP SYN packet
+		tcpLayers := MakeTCPPacket(
+			clientIPv6,
+			clientPort,
+			vsIPv6,
+			vsPort,
+			&layers.TCP{SYN: true},
+		)
+		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
+
+		result, err := setup.mock.HandlePackets(tcpPacket)
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			1,
+			len(result.Output),
+			"TCP packet should be forwarded",
+		)
+
+		// Now simulate the real server's response packet (which would trigger an ICMPv6 error)
+		// The real server responds with src=vsIP (as configured), dst=clientIP
+		responsePacket := MakeTCPPacket(
+			vsIPv6,
+			vsPort,
+			clientIPv6,
+			clientPort,
+			&layers.TCP{SYN: true, ACK: true},
+		)
+		responsePacketData := xpacket.LayersToPacket(t, responsePacket...)
+
+		// Now send an ICMPv6 Destination Unreachable error containing the response packet
+		// The ICMPv6 error comes from the client network to the VS IP (balancer)
+		// because the response packet had src=vsIP
+		icmpLayers := MakeICMPv6DestUnreachable(
+			clientIPv6,
+			vsIPv6,
+			responsePacketData,
+		)
+		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
+
+		result, err = setup.mock.HandlePackets(icmpPacket)
+		require.NoError(t, err)
+
+		// The ICMPv6 error should be forwarded to the real server (tunneled)
+		require.Equal(
+			t,
+			1,
+			len(result.Output),
+			"ICMPv6 error should be forwarded",
+		)
+		require.Empty(t, result.Drop, "ICMPv6 error should not be dropped")
+
+		// Verify the packet is tunneled
+		outputPacket := result.Output[0]
+		assert.True(
+			t,
+			outputPacket.IsTunneled,
+			"ICMPv6 error should be tunneled to real",
+		)
+		assert.Equal(
+			t,
+			net.IP(realIPv6.AsSlice()),
+			outputPacket.DstIP,
+			"should be sent to real server",
+		)
+	})
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Test: ICMP Error packet drop when VS not found
 ////////////////////////////////////////////////////////////////////////////////
 
-func TestICMPv4ErrorWithUnknownVS(t *testing.T) {
-	vsIP := IpAddr("10.1.1.1")
-	unknownVsIP := IpAddr("10.99.99.99") // Not configured
-	clientIP := IpAddr("10.0.1.1")
+func TestICMPErrorWithUnknownVS(t *testing.T) {
+	vsIPv4 := IpAddr("10.1.1.1")
+	unknownVsIPv4 := IpAddr("10.99.99.99") // Not configured
+	clientIPv4 := IpAddr("10.0.1.1")
+
+	vsIPv6 := IpAddr("2001:db8::1")
+	unknownVsIPv6 := IpAddr("2001:db8:99::99") // Not configured
+	clientIPv6 := IpAddr("2001:db8:1::1")
+
 	clientPort := uint16(12345)
 	vsPort := uint16(80)
 
@@ -429,7 +684,7 @@ func TestICMPv4ErrorWithUnknownVS(t *testing.T) {
 		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
 		VirtualServices: []*balancerpb.VirtualService{
 			{
-				Addr:  vsIP.AsSlice(),
+				Addr:  vsIPv4.AsSlice(),
 				Port:  uint32(vsPort),
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
@@ -455,6 +710,35 @@ func TestICMPv4ErrorWithUnknownVS(t *testing.T) {
 					},
 				},
 			},
+			{
+				Addr:  vsIPv6.AsSlice(),
+				Port:  uint32(vsPort),
+				Proto: balancerpb.TransportProto_TCP,
+				AllowedSrcs: []*balancerpb.Subnet{
+					{
+						Addr: IpAddr("2001:db8::").AsSlice(),
+						Size: 32,
+					},
+				},
+				Scheduler: balancerpb.VsScheduler_PRR,
+				Flags: &balancerpb.VsFlags{
+					Gre:    false,
+					FixMss: false,
+					Ops:    false,
+					PureL3: false,
+				},
+				Reals: []*balancerpb.Real{
+					{
+						DstAddr: IpAddr("2001:db8:2::2").AsSlice(),
+						Weight:  1,
+						SrcAddr: IpAddr("2001:db8:2::2").AsSlice(),
+						SrcMask: IpAddr(
+							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+						).AsSlice(),
+						Enabled: true,
+					},
+				},
+			},
 		},
 		SessionsTimeouts: &balancerpb.SessionsTimeouts{
 			TcpSynAck: 60,
@@ -475,38 +759,85 @@ func TestICMPv4ErrorWithUnknownVS(t *testing.T) {
 	require.NoError(t, err)
 	defer setup.Free()
 
-	// Create a TCP packet to an unknown VS
-	tcpLayers := MakeTCPPacket(clientIP, clientPort, unknownVsIP, vsPort, &layers.TCP{SYN: true})
-	tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
+	t.Run("IPv4", func(t *testing.T) {
+		// Create a TCP packet to an unknown VS
+		tcpLayers := MakeTCPPacket(
+			unknownVsIPv4,
+			vsPort,
+			clientIPv4,
+			clientPort,
+			&layers.TCP{SYN: true},
+		)
+		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
 
-	// Create ICMP error for the unknown VS
-	icmpLayers := MakeICMPv4DestUnreachable(unknownVsIP, clientIP, tcpPacket)
-	icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
+		// Create ICMP error for the unknown VS
+		icmpLayers := MakeICMPv4DestUnreachable(
+			clientIPv4,
+			unknownVsIPv4,
+			tcpPacket,
+		)
+		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-	result, err := setup.mock.HandlePackets(icmpPacket)
-	require.NoError(t, err)
+		result, err := setup.mock.HandlePackets(icmpPacket)
+		require.NoError(t, err)
 
-	// The ICMP error should be dropped because VS is not found
-	require.Empty(t, result.Output, "ICMP error should not be forwarded")
-	require.Equal(t, 1, len(result.Drop), "ICMP error should be dropped")
+		// The ICMP error should be dropped because VS is not found
+		require.Empty(t, result.Output, "ICMP error should not be forwarded")
+		require.Equal(t, 1, len(result.Drop), "ICMP error should be dropped")
+	})
+
+	t.Run("IPv6", func(t *testing.T) {
+		// Create a TCP packet to an unknown VS
+		tcpLayers := MakeTCPPacket(
+			unknownVsIPv6,
+			vsPort,
+			clientIPv6,
+			clientPort,
+			&layers.TCP{SYN: true},
+		)
+		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
+
+		// Create ICMPv6 error for the unknown VS
+		icmpLayers := MakeICMPv6DestUnreachable(
+			clientIPv6,
+			unknownVsIPv6,
+			tcpPacket,
+		)
+		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
+
+		result, err := setup.mock.HandlePackets(icmpPacket)
+		require.NoError(t, err)
+
+		// The ICMPv6 error should be dropped because VS is not found
+		require.Empty(t, result.Output, "ICMPv6 error should not be forwarded")
+		require.Equal(t, 1, len(result.Drop), "ICMPv6 error should be dropped")
+	})
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Test: ICMP Error packet drop when session not found
 ////////////////////////////////////////////////////////////////////////////////
 
-func TestICMPv4ErrorWithNoSession(t *testing.T) {
-	vsIP := IpAddr("10.1.1.1")
-	clientIP := IpAddr("10.0.1.1")
+func TestICMPErrorWithNoSession(t *testing.T) {
+	// In this test packet must be broadcasted to peers
+	vsIPv4 := IpAddr("10.1.1.1")
+	clientIPv4 := IpAddr("10.0.1.1")
+
+	vsIPv6 := IpAddr("2001:db8::1")
+	clientIPv6 := IpAddr("2001:db8:1::1")
+
 	clientPort := uint16(12345)
 	vsPort := uint16(80)
+
+	peer1 := IpAddr("10.12.11.13")
+	peer2 := IpAddr("fe80::11")
 
 	config := &balancerpb.ModuleConfig{
 		SourceAddressV4: IpAddr("5.5.5.5").AsSlice(),
 		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
 		VirtualServices: []*balancerpb.VirtualService{
 			{
-				Addr:  vsIP.AsSlice(),
+				Addr:  vsIPv4.AsSlice(),
 				Port:  uint32(vsPort),
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
@@ -531,7 +862,41 @@ func TestICMPv4ErrorWithNoSession(t *testing.T) {
 						Enabled: true,
 					},
 				},
-				Peers: [][]byte{}, // No peers configured
+				Peers: [][]byte{
+					peer1.AsSlice(), peer2.AsSlice(),
+				},
+			},
+			{
+				Addr:  vsIPv6.AsSlice(),
+				Port:  uint32(vsPort),
+				Proto: balancerpb.TransportProto_TCP,
+				AllowedSrcs: []*balancerpb.Subnet{
+					{
+						Addr: IpAddr("2001:db8::").AsSlice(),
+						Size: 32,
+					},
+				},
+				Scheduler: balancerpb.VsScheduler_PRR,
+				Flags: &balancerpb.VsFlags{
+					Gre:    false,
+					FixMss: false,
+					Ops:    false,
+					PureL3: false,
+				},
+				Reals: []*balancerpb.Real{
+					{
+						DstAddr: IpAddr("2001:db8:2::2").AsSlice(),
+						Weight:  1,
+						SrcAddr: IpAddr("2001:db8:2::2").AsSlice(),
+						SrcMask: IpAddr(
+							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+						).AsSlice(),
+						Enabled: true,
+					},
+				},
+				Peers: [][]byte{
+					peer1.AsSlice(), peer2.AsSlice(),
+				},
 			},
 		},
 		SessionsTimeouts: &balancerpb.SessionsTimeouts{
@@ -553,19 +918,69 @@ func TestICMPv4ErrorWithNoSession(t *testing.T) {
 	require.NoError(t, err)
 	defer setup.Free()
 
-	// Create a TCP packet (but don't send it to create a session)
-	tcpLayers := MakeTCPPacket(clientIP, clientPort, vsIP, vsPort, &layers.TCP{SYN: true})
-	tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
+	t.Run("IPv4", func(t *testing.T) {
+		// Create a TCP packet (but don't send it to create a session)
+		tcpLayers := MakeTCPPacket(
+			vsIPv4,
+			vsPort,
+			clientIPv4,
+			clientPort,
+			&layers.TCP{SYN: true},
+		)
+		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
 
-	// Create ICMP error for a non-existent session
-	icmpLayers := MakeICMPv4DestUnreachable(vsIP, clientIP, tcpPacket)
-	icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
+		// Create ICMP error for a non-existent session
+		icmpLayers := MakeICMPv4DestUnreachable(clientIPv4, vsIPv4, tcpPacket)
+		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-	result, err := setup.mock.HandlePackets(icmpPacket)
-	require.NoError(t, err)
+		result, err := setup.mock.HandlePackets(icmpPacket)
+		require.NoError(t, err)
 
-	// Since there's no session and no peers, the packet should be dropped
-	// (In a real scenario with peers, it would be broadcast)
-	require.Empty(t, result.Output, "ICMP error should not be forwarded without session")
-	require.Equal(t, 1, len(result.Drop), "ICMP error should be dropped")
+		// Since there's no session, the packet should be broadcasted to peers
+		require.Equal(
+			t,
+			2,
+			len(result.Output),
+			"ICMP error clone must be broadcasted to both peers",
+		)
+		require.Equal(
+			t,
+			1,
+			len(result.Drop),
+			"The original packet must be dropped",
+		)
+	})
+
+	t.Run("IPv6", func(t *testing.T) {
+		// Create a TCP packet (but don't send it to create a session)
+		tcpLayers := MakeTCPPacket(
+			vsIPv6,
+			vsPort,
+			clientIPv6,
+			clientPort,
+			&layers.TCP{SYN: true},
+		)
+		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
+
+		// Create ICMPv6 error for a non-existent session
+		icmpLayers := MakeICMPv6DestUnreachable(clientIPv6, vsIPv6, tcpPacket)
+		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
+
+		result, err := setup.mock.HandlePackets(icmpPacket)
+		require.NoError(t, err)
+
+		// Since there's no session, the packet should be broadcasted to peers
+		require.Equal(
+			t,
+			2,
+			len(result.Output),
+			"ICMPv6 error clone must be broadcasted to both peers",
+		)
+		require.Equal(
+			t,
+			1,
+			len(result.Drop),
+			"The original packet must be dropped",
+		)
+	})
 }

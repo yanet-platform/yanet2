@@ -242,7 +242,13 @@ func SendPacketToVsAndValidate(
 	if vs.Proto == balancerpb.TransportProto_UDP {
 		tcp = nil
 	}
-	packetLayers := MakePacketLayers(clientAddr, clientPort, vsAddr, vsPort, tcp)
+	packetLayers := MakePacketLayers(
+		clientAddr,
+		clientPort,
+		vsAddr,
+		vsPort,
+		tcp,
+	)
 	packet := xpacket.LayersToPacket(t, packetLayers...)
 	if tcp != nil && options != nil {
 		p, err := InsertOrUpdateMSS(packet, options.MSS)
@@ -328,7 +334,13 @@ func TestPacketEncapGreMSS(t *testing.T) {
 						selector.Proto.String(),
 					)
 
-					result, vs := SendAndValidatePacket(t, mock, balancer, nil, selector)
+					result, vs := SendAndValidatePacket(
+						t,
+						mock,
+						balancer,
+						nil,
+						selector,
+					)
 
 					assert.NotNil(t, result)
 					assert.NotNil(t, vs)

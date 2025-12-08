@@ -85,7 +85,13 @@ func TestBalancerBasics(t *testing.T) {
 
 	// send packet and expect response
 
-	packetLayers := MakeTCPPacket(clientIp, 1000, vsIp, vsPort, &layers.TCP{SYN: true})
+	packetLayers := MakeTCPPacket(
+		clientIp,
+		1000,
+		vsIp,
+		vsPort,
+		&layers.TCP{SYN: true},
+	)
 	packet := xpacket.LayersToPacket(t, packetLayers...)
 	result, err := mock.HandlePackets(packet)
 	require.NoError(t, err)
@@ -136,7 +142,13 @@ func TestBalancerBasics(t *testing.T) {
 	})
 
 	t.Run("Read_Config_Info", func(t *testing.T) {
-		configStats := balancer.GetConfigStats(0, defaultDeviceName, defaultPipelineName, defaultFunctionName, defaultChainName)
+		configStats := balancer.GetConfigStats(
+			0,
+			defaultDeviceName,
+			defaultPipelineName,
+			defaultFunctionName,
+			defaultChainName,
+		)
 		require.Equal(t, 1, len(configStats.Vs))
 		vsInfo := configStats.Vs[0]
 

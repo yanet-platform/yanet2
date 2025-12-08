@@ -5,6 +5,7 @@
 #include "common/network.h"
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
+#include "flow/common.h"
 #include "flow/helpers.h"
 #include "lib/dataplane/worker/worker.h"
 #include "vs.h"
@@ -117,7 +118,7 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 	for (size_t i = 0; i < vs->peers_v6_count; ++i) {
 		struct packet *clone = clone_packet(ctx->worker, ctx->packet);
 		if (clone == NULL) {
-			// todo: update counter
+			update_counters_on_packet_clone_failed(ctx);
 			continue;
 		}
 
@@ -128,4 +129,7 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 		// send packet
 		send_cloned_packet(ctx, clone);
 	}
+
+	// Drop the initial packet
+	packet_ctx_drop_packet(ctx);
 }

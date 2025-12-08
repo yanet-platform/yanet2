@@ -15,7 +15,7 @@
 // Tunnel packet from this balancer (src address) to another (dst address)
 
 static inline void
-fix_ether_header(struct rte_mbuf *mbuf) {
+fix_ether_header(struct rte_mbuf *mbuf, uint16_t ether_type) {
 	struct rte_ether_hdr *ether_header =
 		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
 
@@ -26,10 +26,9 @@ fix_ether_header(struct rte_mbuf *mbuf) {
 			struct rte_vlan_hdr *,
 			sizeof(struct rte_ether_hdr)
 		);
-		vlan_header->eth_proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+		vlan_header->eth_proto = rte_cpu_to_be_16(ether_type);
 	} else {
-		ether_header->ether_type =
-			rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+		ether_header->ether_type = rte_cpu_to_be_16(ether_type);
 	}
 }
 
@@ -77,7 +76,10 @@ tunnel_v4(struct packet *packet, uint8_t *src, uint8_t *dst) {
 	// might need to change next protocol type in ethernet/vlan header in
 	// cloned packet
 
-	fix_ether_header(mbuf);
+	fix_ether_header(mbuf, RTE_ETHER_TYPE_IPV4);
+
+	// Update mbuf metadata for the new outer IP header
+	mbuf->l3_len = sizeof(struct rte_ipv4_hdr);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -117,5 +119,8 @@ tunnel_v6(struct packet *packet, uint8_t *src, uint8_t *dst) {
 		outer_ip_hdr->proto = IPPROTO_IPV6;
 	}
 
-	fix_ether_header(mbuf);
+	fix_ether_header(mbuf, RTE_ETHER_TYPE_IPV6);
+
+	// Update mbuf metadata for the new outer IP header
+	mbuf->l3_len = sizeof(struct rte_ipv6_hdr);
 }

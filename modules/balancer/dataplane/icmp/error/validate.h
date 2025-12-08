@@ -97,28 +97,6 @@ packet_swap_src_dst(struct packet *packet) {
 	}
 }
 
-// static inline int
-// fill_packet_meta_transport(
-// 	struct packet_metadata *meta,
-// ) {
-// 	if (info->inner.transport.type == IPPROTO_TCP) {
-// 		struct rte_tcp_hdr *tcp = rte_pktmbuf_mtod_offset(
-// 			mbuf, struct rte_tcp_hdr *, info->inner.transport.offset
-// 		);
-// 		fill_packet_metadata_tcp(tcp, meta);
-// 		return 0;
-// 	} else if (info->inner.transport.type == IPPROTO_UDP) {
-// 		struct rte_udp_hdr *udp = rte_pktmbuf_mtod_offset(
-// 			mbuf, struct rte_udp_hdr *, info->inner.transport.offset
-// 		);
-// 		fill_packet_metadata_udp(udp, meta);
-// 		return 0;
-// 	} else {
-// 		// should be impossible (todo: check)
-// 		return -1;
-// 	}
-// }
-
 static inline int
 validate_packet_ipv4(
 	struct packet_ctx *ctx,
@@ -132,14 +110,17 @@ validate_packet_ipv4(
 	);
 
 	meta->network_proto = IPPROTO_IP;
-	struct icmp_packet_info *info = &ctx->icmp_info;
-	info->inner.network.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
-	info->inner.network.offset =
-		packet->transport_header.offset + sizeof(struct rte_icmp_hdr);
+	struct icmp_packet_info info;
+	info.network.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	
+	// ICMPv4 error messages use 8-byte header (type + code + checksum + 4-byte unused)
+	// This matches sizeof(struct rte_icmp_hdr) which is 8 bytes
+	info.network.offset =
+		packet->transport_header.offset + 8;
 
 	struct balancer_icmp_module_stats *counter = ctx->counter.icmp_v4;
 
-	if (fill_icmp_packet_info_ipv4(mbuf, info) != 0) {
+	if (fill_icmp_packet_info_ipv4(mbuf, &info) != 0) {
 		counter->payload_too_short_ip += 1;
 		return -1;
 	}
@@ -155,7 +136,7 @@ validate_packet_ipv4(
 	}
 
 	if (mbuf->pkt_len <
-	    info->inner.transport.offset + 2 * sizeof(rte_be16_t)) {
+	    info.transport.offset + 2 * sizeof(rte_be16_t)) {
 		counter->payload_too_short_port += 1;
 		return -1;
 	}
@@ -164,14 +145,14 @@ validate_packet_ipv4(
 	// on the inner packet. after that, destination address should be equal
 	// to the virtual service address. also, we need to swap transport 
 	// proto source and destination.
-	packet_swap_headers(ctx->packet, &info->inner.network, &info->inner.transport);
+	packet_swap_headers(ctx->packet, &info.network, &info.transport);
 	packet_swap_src_dst(ctx->packet);
 
 	// fill packet metadata
 	if (fill_packet_metadata(packet, meta)) {
 		counter->unexpected_transport += 1;
 		packet_swap_src_dst(ctx->packet);
-		packet_swap_headers(ctx->packet, &info->inner.network, &info->inner.transport);
+		packet_swap_headers(ctx->packet, &info.network, &info.transport);
 		return -1;
 	}
 
@@ -183,7 +164,7 @@ validate_packet_ipv4(
 
 	// swap headers and src dst back
 	packet_swap_src_dst(ctx->packet);
-	packet_swap_headers(ctx->packet, &info->inner.network, &info->inner.transport);
+	packet_swap_headers(ctx->packet, &info.network, &info.transport);
 
 	return 0;
 }
@@ -201,14 +182,18 @@ validate_packet_ipv6(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	struct icmp_packet_info *info = &ctx->icmp_info;
-	info->inner.network.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
-	info->inner.network.offset =
-		packet->transport_header.offset + sizeof(struct rte_icmp_hdr);
+	meta->network_proto = IPPROTO_IPV6;
+	struct icmp_packet_info info;
+	info.network.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+	
+	// ICMPv6 error messages use 8-byte header (type + code + checksum + 4-byte unused)
+	// This is different from rte_icmp_hdr which is for echo messages
+	info.network.offset =
+		packet->transport_header.offset + 8;
 
 	struct balancer_icmp_module_stats *counter = ctx->counter.icmp_v6;
 
-	if (fill_icmp_packet_info_ipv6(mbuf, info) != 0) {
+	if (fill_icmp_packet_info_ipv6(mbuf, &info) != 0) {
 		counter->payload_too_short_ip += 1;
 		return -1;
 	}
@@ -225,17 +210,35 @@ validate_packet_ipv6(
 	}
 
 	if (mbuf->pkt_len <
-	    info->inner.transport.offset + 2 * sizeof(rte_be16_t)) {
+	    info.transport.offset + 2 * sizeof(rte_be16_t)) {
 		counter->payload_too_short_port += 1;
 		return -1;
 	}
 
-	fill_packet_metadata(packet, meta); // todo
+	// swap source address and destination address
+	// on the inner packet. after that, destination address should be equal
+	// to the virtual service address. also, we need to swap transport
+	// proto source and destination.
+	packet_swap_headers(ctx->packet, &info.network, &info.transport);
+	packet_swap_src_dst(ctx->packet);
 
-	*vs = vs_v4_lookup(ctx);
+	// fill packet metadata
+	if (fill_packet_metadata(packet, meta)) {
+		counter->unexpected_transport += 1;
+		packet_swap_src_dst(ctx->packet);
+		packet_swap_headers(ctx->packet, &info.network, &info.transport);
+		return -1;
+	}
+
+	// lookup virtual service
+	*vs = vs_v6_lookup(ctx);
 	if (*vs == NULL) {
 		counter->unrecognized_vs += 1;
 	}
+
+	// swap headers and src dst back
+	packet_swap_src_dst(ctx->packet);
+	packet_swap_headers(ctx->packet, &info.network, &info.transport);
 
 	return 0;
 }

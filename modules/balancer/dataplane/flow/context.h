@@ -66,7 +66,4 @@ struct packet_ctx {
 		struct service_state *state;
 		struct real *ptr;
 	} real;
-
-	// info about icmp payload if any
-	struct icmp_packet_info icmp_info;
 };

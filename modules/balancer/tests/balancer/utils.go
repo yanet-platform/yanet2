@@ -433,7 +433,12 @@ func ValidatePacket(
 				} else {
 					expectedMSS = 536
 				}
-				assert.Equal(t, expectedMSS, resultMSS, "incorrect mss after fix")
+				assert.Equal(
+					t,
+					expectedMSS,
+					resultMSS,
+					"incorrect mss after fix",
+				)
 			}
 
 			for realIdx := range service.Reals {
