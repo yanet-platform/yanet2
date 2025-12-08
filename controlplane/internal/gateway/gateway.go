@@ -12,6 +12,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -140,6 +142,9 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *G
 	ynpb.RegisterCountersServiceServer(server, countersService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", countersService)))
 
+	// Register built-in services in the registry for HTTP gateway access
+	registerBuiltInServices(registry, cfg.Server.Endpoint, log)
+
 	builtInModules := make([]*BuiltInModuleRunner, 0)
 	for _, mod := range opts.BuiltInModules {
 		builtInModules = append(builtInModules, NewBuiltInModuleRunner(
@@ -237,4 +242,44 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// registerBuiltInServices registers built-in services in the registry for HTTP
+// gateway access.
+func registerBuiltInServices(registry *BackendRegistry, endpoint string, log *zap.SugaredLogger) {
+	conn, err := grpc.NewClient(
+		"passthrough:target",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			dialer := net.Dialer{}
+			return dialer.DialContext(ctx, "tcp", endpoint)
+		}),
+		grpc.WithDefaultCallOptions(grpc.ForceCodecV2(proxy.Codec())),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		log.Warnw("failed to create gRPC client for built-in services", zap.Error(err))
+		return
+	}
+
+	backend := &proxy.SingleBackend{
+		GetConn: func(ctx context.Context) (context.Context, *grpc.ClientConn, error) {
+			md, _ := metadata.FromIncomingContext(ctx)
+			outCtx := metadata.NewOutgoingContext(ctx, md.Copy())
+			return outCtx, conn, nil
+		},
+	}
+
+	builtInServices := []string{
+		"ynpb.Gateway",
+		"ynpb.Logging",
+		"ynpb.InspectService",
+		"ynpb.PipelineService",
+		"ynpb.FunctionService",
+		"ynpb.CountersService",
+	}
+
+	for _, serviceName := range builtInServices {
+		registry.RegisterBackend(serviceName, backend)
+		log.Debugw("registered built-in service in registry", zap.String("service", serviceName))
+	}
 }
