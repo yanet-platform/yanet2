@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <threads.h>
+#include <time.h>
 
 #include "common/exp_array.h"
 #include "common/memory.h"
@@ -304,6 +306,8 @@ yanet_mock_init(
 	mock->cp_config = cp_config;
 	mock->dp_config = dp_config;
 
+	memset(&mock->current_time, 0, sizeof(struct timespec));
+
 	return 0;
 }
 
@@ -325,10 +329,38 @@ yanet_mock_shm(struct yanet_mock *mock) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+extern thread_local struct timespec current_time;
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+yanet_mock_set_current_time(struct yanet_mock *mock, struct timespec *ts) {
+	mock->current_time = *ts;
+}
+
+struct timespec
+yanet_mock_current_time(struct yanet_mock *mock) {
+	return mock->current_time;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 struct packet_handle_result
 yanet_mock_handle_packets(
 	struct yanet_mock *mock, struct packet_list *packets, size_t worker_idx
 ) {
 	struct yanet_worker_mock *worker = &mock->workers[worker_idx];
-	return yanet_worker_mock_handle_packets(worker, packets);
+
+	// Set global time to the current mock time.
+	struct timespec prev_time = current_time;
+	current_time = mock->current_time;
+
+	// Handle packets.
+	struct packet_handle_result result =
+		yanet_worker_mock_handle_packets(worker, packets);
+
+	// Restore global time to the previous value.
+	current_time = prev_time;
+
+	return result;
 }

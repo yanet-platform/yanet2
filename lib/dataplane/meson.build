@@ -1,3 +1,4 @@
+subdir('time')
 subdir('packet')
 subdir('module')
 subdir('pipeline')

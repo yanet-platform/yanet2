@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -7,6 +8,8 @@
 #include "common/memory.h"
 
 #include "dataplane/module/module.h"
+
+#include "dataplane/time/clock.h"
 
 #include "dataplane/config/topology.h"
 
@@ -32,6 +35,19 @@ struct dp_worker {
 
 	uint64_t gen;
 
+	// Allows to get current worker time.
+	//
+	// Currently, we init it only once
+	// and dont adjust.
+	// So, we have some drift, which is small but
+	// (see tsc_clock docs).
+	//
+	// It is not importand for now
+	// and fix should be easy, but need discuss.
+	//
+	// TODO: FIXME
+	struct tsc_clock clock;
+
 	uint64_t *iterations;
 
 	uint64_t *rx_count;
@@ -44,9 +60,10 @@ struct dp_worker {
 	uint64_t *remote_tx_count;
 
 	struct rte_mempool *rx_mempool;
-
-	uint64_t pad[6];
-};
+} __attribute__((aligned(64)));
+// todo: 128 cache line CPUs?
+// add cache line size in build_config.h,
+// or use dpdk.
 
 struct dp_config {
 	uint32_t instance_count;

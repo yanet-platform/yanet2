@@ -6,6 +6,7 @@ lib_dependencies = [
   lib_common_dep,
   lib_logging_dep,
   lib_pipeline_dp_dep,
+  lib_time_dp_dep,
   lib_config_dp_dep,
   lib_config_cp_dep,
 ]

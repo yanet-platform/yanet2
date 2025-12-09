@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "worker.h"
+#include <time.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -26,6 +27,9 @@ struct yanet_mock {
 
 	// Shared memory where yanet lives in
 	void *storage;
+
+	// Current real time of the mock.
+	struct timespec current_time;
 
 	size_t worker_count;
 	struct yanet_worker_mock workers[YANET_MOCK_MAX_WORKERS];
@@ -62,3 +66,11 @@ struct packet_handle_result
 yanet_mock_handle_packets(
 	struct yanet_mock *mock, struct packet_list *packets, size_t worker_idx
 );
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+yanet_mock_set_current_time(struct yanet_mock *mock, struct timespec *ts);
+
+struct timespec
+yanet_mock_current_time(struct yanet_mock *mock);

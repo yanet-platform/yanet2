@@ -33,6 +33,7 @@
  *  - anything else
  */
 
+#include "dataplane/time/clock.h"
 #include "yanet_build_config.h"
 
 #include "worker.h"
@@ -40,15 +41,17 @@
 #include "dataplane/dataplane.h"
 #include "dataplane/device.h"
 
-#include "dataplane/pipeline/pipeline.h"
+#include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/pipeline/pipeline.h"
+#include "lib/dataplane/time/clock.h"
 
-#include "controlplane/config/zone.h"
-#include "dataplane/config/zone.h"
+#include "lib/controlplane/config/zone.h"
 
 #include "common/data_pipe.h"
 #include "logging/log.h"
 
 #include <rte_ethdev.h>
+#include <time.h>
 
 static void
 worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
@@ -398,6 +401,12 @@ dataplane_worker_init(
 	}
 	memset(dp_worker, 0, sizeof(struct dp_worker));
 	dp_worker->idx = dp_config->worker_count;
+
+	// Init worker clock
+	int init_clock_result = tsc_clock_init(&dp_worker->clock);
+	if (init_clock_result != 0) {
+		return -1;
+	}
 
 	worker->dp_worker = dp_worker;
 	struct dp_worker **new_workers = (struct dp_worker **)memory_balloc(

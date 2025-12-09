@@ -11,6 +11,7 @@ lib_dependencies = [
 sources = files(
   'mock.c',
   'worker.c',
+  'time.c',
 )
 
 lib_yanet_mock = static_library(

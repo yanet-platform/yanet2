@@ -17,6 +17,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "lib/controlplane/config/econtext.h"
 
@@ -211,6 +212,10 @@ main() {
 	res = setup_cp(agent, &my_module->cp_module);
 	TEST_ASSERT_SUCCESS(res, "failed to setup cp");
 
+	// Set current time
+	struct timespec current_time = {123, 321};
+	yanet_mock_set_current_time(&mock, &current_time);
+
 	LOG(INFO, "send packet...");
 	res = send_packet(&mock);
 	TEST_ASSERT_SUCCESS(res, "failed to send packet");
@@ -219,10 +224,29 @@ main() {
 	    "packets passed throw my module: %lu",
 	    my_module->packet_counter);
 
+	struct timespec *last_packet_timestamp =
+		&my_module->last_packet_timestamp;
+	LOG(INFO,
+	    "last packet timestamp: sec=%lu, nsec=%lu\n",
+	    last_packet_timestamp->tv_sec,
+	    last_packet_timestamp->tv_nsec);
+
 	TEST_ASSERT_EQUAL(
 		my_module->packet_counter,
 		1,
 		"my module packet counter not updated"
+	);
+
+	TEST_ASSERT_EQUAL(
+		my_module->last_packet_timestamp.tv_sec,
+		current_time.tv_sec,
+		"current time invalid (seconds)"
+	);
+
+	TEST_ASSERT_EQUAL(
+		my_module->last_packet_timestamp.tv_nsec,
+		current_time.tv_nsec,
+		"current time invalid (nanoseconds)"
 	);
 
 	LOG(INFO, "success");
