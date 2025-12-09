@@ -1,0 +1,156 @@
+{
+  "target": {
+    "config_name": "my-balancer",
+    "dataplane_instance": 0
+  },
+  "device": "eth0",
+  "pipeline": "main",
+  "function": "balancer",
+  "chain": "forward",
+  "stats": {
+    "module": {
+      "l4": {
+        "incoming_packets": 1200000,
+        "select_vs_failed": 100,
+        "invalid_packets": 350,
+        "select_real_failed": 50,
+        "outgoing_packets": 1199500
+      },
+      "icmpv4": {
+        "incoming_packets": 34567,
+        "echo_responses": 30000,
+        "payload_too_short_ip": 12,
+        "unmatching_src_from_original": 8,
+        "payload_too_short_port": 5,
+        "unexpected_transport": 3,
+        "unrecognized_vs": 2,
+        "forwarded_packets": 4500,
+        "broadcasted_packets": 67,
+        "packet_clones_sent": 150,
+        "packet_clones_received": 145,
+        "packet_clone_failures": 5
+      },
+      "icmpv6": {
+        "incoming_packets": 1234,
+        "echo_responses": 1200,
+        "payload_too_short_ip": 2,
+        "unmatching_src_from_original": 1,
+        "payload_too_short_port": 1,
+        "unexpected_transport": 0,
+        "unrecognized_vs": 0,
+        "forwarded_packets": 34,
+        "broadcasted_packets": 2,
+        "packet_clones_sent": 10,
+        "packet_clones_received": 9,
+        "packet_clone_failures": 1
+      },
+      "common": {
+        "incoming_packets": 1234567,
+        "incoming_bytes": 1288490188,
+        "unexpected_network_proto": 0,
+        "decap_successful": 50000,
+        "decap_failed": 123,
+        "outgoing_packets": 1234000,
+        "outgoing_bytes": 1181116006
+      }
+    },
+    "vs": [
+      {
+        "vs_registry_idx": 0,
+        "ip": "192.0.2.1",
+        "port": 80,
+        "proto": "TCP",
+        "stats": {
+          "incoming_packets": 800000,
+          "incoming_bytes": 800000000,
+          "packet_src_not_allowed": 0,
+          "no_reals": 0,
+          "ops_packets": 0,
+          "session_table_overflow": 0,
+          "echo_icmp_packets": 0,
+          "error_icmp_packets": 0,
+          "real_is_disabled": 0,
+          "real_is_removed": 0,
+          "not_rescheduled_packets": 0,
+          "broadcasted_icmp_packets": 0,
+          "created_sessions": 50000,
+          "outgoing_packets": 799500,
+          "outgoing_bytes": 799500000
+        }
+      },
+      {
+        "vs_registry_idx": 1,
+        "ip": "192.0.2.2",
+        "port": 443,
+        "proto": "TCP",
+        "stats": {
+          "incoming_packets": 400000,
+          "incoming_bytes": 400000000,
+          "packet_src_not_allowed": 0,
+          "no_reals": 0,
+          "ops_packets": 0,
+          "session_table_overflow": 0,
+          "echo_icmp_packets": 0,
+          "error_icmp_packets": 0,
+          "real_is_disabled": 0,
+          "real_is_removed": 0,
+          "not_rescheduled_packets": 0,
+          "broadcasted_icmp_packets": 0,
+          "created_sessions": 25000,
+          "outgoing_packets": 400000,
+          "outgoing_bytes": 400000000
+        }
+      }
+    ],
+    "reals": [
+      {
+        "real_registry_idx": 0,
+        "vs_ip": "192.0.2.1",
+        "port": 80,
+        "proto": "TCP",
+        "real_ip": "10.1.1.1",
+        "stats": {
+          "packets_real_disabled": 0,
+          "packets_real_not_present": 0,
+          "ops_packets": 0,
+          "error_icmp_packets": 0,
+          "created_sessions": 30000,
+          "packets": 500000,
+          "bytes": 629145600
+        }
+      },
+      {
+        "real_registry_idx": 1,
+        "vs_ip": "192.0.2.1",
+        "port": 80,
+        "proto": "TCP",
+        "real_ip": "10.1.1.2",
+        "stats": {
+          "packets_real_disabled": 0,
+          "packets_real_not_present": 0,
+          "ops_packets": 0,
+          "error_icmp_packets": 0,
+          "created_sessions": 20000,
+          "packets": 300000,
+          "bytes": 366503875
+        }
+      },
+      {
+        "real_registry_idx": 2,
+        "vs_ip": "192.0.2.2",
+        "port": 443,
+        "proto": "TCP",
+        "real_ip": "10.2.1.1",
+        "stats": {
+          "packets_real_disabled": 0,
+          "packets_real_not_present": 0,
+          "ops_packets": 0,
+          "error_icmp_packets": 0,
+          "created_sessions": 25000,
+          "packets": 400000,
+          "bytes": 503316480
+        }
+      }
+    ]
+  }
+}

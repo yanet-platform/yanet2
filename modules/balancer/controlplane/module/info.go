@@ -342,6 +342,8 @@ func (s SessionInfo) IntoProto() *balancerpb.SessionInfo {
 	return &balancerpb.SessionInfo{
 		ClientAddr:          s.ClientAddr.AsSlice(),
 		ClientPort:          uint32(s.ClientPort),
+		VsAddr:              s.Real.Vs.Ip.AsSlice(),
+		VsPort:              uint32(s.Real.Vs.Port),
 		RealAddr:            s.Real.Ip.AsSlice(),
 		RealPort:            uint32(s.Real.Vs.Port),
 		CreateTimestamp:     timestamppb.New(s.CreateTimestamp),

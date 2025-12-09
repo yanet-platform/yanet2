@@ -117,7 +117,13 @@ message ConfigStatsRequest {
 
 message ConfigStatsResponse {
   commonpb.TargetModule target = 1;
-  BalancerStats stats = 2;
+
+  string device = 2;
+  string pipeline = 3;
+  string function = 4;
+  string chain = 5;
+
+  BalancerStats stats = 6;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

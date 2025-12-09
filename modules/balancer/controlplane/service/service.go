@@ -470,8 +470,12 @@ func (service *BalancerService) ConfigStats(
 	)
 
 	return &balancerpb.ConfigStatsResponse{
-		Target: req.Target,
-		Stats:  stats.IntoProto(),
+		Target:   req.Target,
+		Device:   req.Device,
+		Pipeline: req.Pipeline,
+		Function: req.Function,
+		Chain:    req.Chain,
+		Stats:    stats.IntoProto(),
 	}, nil
 }
 

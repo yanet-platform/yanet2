@@ -1,0 +1,181 @@
+{
+  "target": {
+    "config_name": "my-balancer",
+    "dataplane_instance": 0
+  },
+  "info": {
+    "active_sessions": {
+      "value": 15234,
+      "updated_at": "2024-01-15T10:50:45+00:00"
+    },
+    "module": {
+      "l4": {
+        "incoming_packets": 1200000,
+        "select_vs_failed": 100,
+        "invalid_packets": 350,
+        "select_real_failed": 50,
+        "outgoing_packets": 1199500
+      },
+      "icmpv4": {
+        "incoming_packets": 34567,
+        "echo_responses": 30000,
+        "payload_too_short_ip": 0,
+        "unmatching_src_from_original": 0,
+        "payload_too_short_port": 0,
+        "unexpected_transport": 0,
+        "unrecognized_vs": 0,
+        "forwarded_packets": 4500,
+        "broadcasted_packets": 67,
+        "packet_clones_sent": 0,
+        "packet_clones_received": 0,
+        "packet_clone_failures": 0
+      },
+      "icmpv6": {
+        "incoming_packets": 1234,
+        "echo_responses": 1200,
+        "payload_too_short_ip": 0,
+        "unmatching_src_from_original": 0,
+        "payload_too_short_port": 0,
+        "unexpected_transport": 0,
+        "unrecognized_vs": 0,
+        "forwarded_packets": 34,
+        "broadcasted_packets": 0,
+        "packet_clones_sent": 0,
+        "packet_clones_received": 0,
+        "packet_clone_failures": 0
+      },
+      "common": {
+        "incoming_packets": 1234567,
+        "incoming_bytes": 1288490188,
+        "unexpected_network_proto": 0,
+        "decap_successful": 50000,
+        "decap_failed": 123,
+        "outgoing_packets": 1234000,
+        "outgoing_bytes": 1181116006
+      }
+    },
+    "vs_info": [
+      {
+        "vs_registry_idx": 0,
+        "vs_ip": "192.0.2.1",
+        "vs_port": 80,
+        "vs_proto": "TCP",
+        "active_sessions": {
+          "value": 10234,
+          "updated_at": "2024-01-15T10:50:44+00:00"
+        },
+        "last_packet_timestamp": "2024-01-15T10:50:44+00:00",
+        "stats": {
+          "incoming_packets": 800000,
+          "incoming_bytes": 800000000,
+          "packet_src_not_allowed": 100,
+          "no_reals": 50,
+          "ops_packets": 1000,
+          "session_table_overflow": 25,
+          "echo_icmp_packets": 500,
+          "error_icmp_packets": 200,
+          "real_is_disabled": 150,
+          "real_is_removed": 75,
+          "not_rescheduled_packets": 300,
+          "broadcasted_icmp_packets": 400,
+          "created_sessions": 50000,
+          "outgoing_packets": 799500,
+          "outgoing_bytes": 799500000
+        }
+      },
+      {
+        "vs_registry_idx": 1,
+        "vs_ip": "192.0.2.2",
+        "vs_port": 443,
+        "vs_proto": "TCP",
+        "active_sessions": {
+          "value": 5000,
+          "updated_at": "2024-01-15T10:50:45+00:00"
+        },
+        "last_packet_timestamp": "2024-01-15T10:50:45+00:00",
+        "stats": {
+          "incoming_packets": 400000,
+          "incoming_bytes": 400000000,
+          "packet_src_not_allowed": 50,
+          "no_reals": 25,
+          "ops_packets": 500,
+          "session_table_overflow": 10,
+          "echo_icmp_packets": 250,
+          "error_icmp_packets": 100,
+          "real_is_disabled": 75,
+          "real_is_removed": 40,
+          "not_rescheduled_packets": 150,
+          "broadcasted_icmp_packets": 200,
+          "created_sessions": 25000,
+          "outgoing_packets": 400000,
+          "outgoing_bytes": 400000000
+        }
+      }
+    ],
+    "real_info": [
+      {
+        "real_registry_idx": 0,
+        "vs_ip": "192.0.2.1",
+        "vs_port": 80,
+        "vs_proto": "TCP",
+        "real_ip": "10.1.1.1",
+        "active_sessions": {
+          "value": 6000,
+          "updated_at": "2024-01-15T10:50:43+00:00"
+        },
+        "last_packet_timestamp": "2024-01-15T10:50:44+00:00",
+        "stats": {
+          "packets_real_disabled": 50,
+          "packets_real_not_present": 25,
+          "ops_packets": 500,
+          "error_icmp_packets": 100,
+          "created_sessions": 30000,
+          "packets": 500000,
+          "bytes": 629145600
+        }
+      },
+      {
+        "real_registry_idx": 1,
+        "vs_ip": "192.0.2.1",
+        "vs_port": 80,
+        "vs_proto": "TCP",
+        "real_ip": "10.1.1.2",
+        "active_sessions": {
+          "value": 4234,
+          "updated_at": "2024-01-15T10:50:44+00:00"
+        },
+        "last_packet_timestamp": "2024-01-15T10:50:43+00:00",
+        "stats": {
+          "packets_real_disabled": 30,
+          "packets_real_not_present": 15,
+          "ops_packets": 300,
+          "error_icmp_packets": 60,
+          "created_sessions": 20000,
+          "packets": 300000,
+          "bytes": 366503875
+        }
+      },
+      {
+        "real_registry_idx": 2,
+        "vs_ip": "192.0.2.2",
+        "vs_port": 443,
+        "vs_proto": "TCP",
+        "real_ip": "10.2.1.1",
+        "active_sessions": {
+          "value": 5000,
+          "updated_at": "2024-01-15T10:50:45+00:00"
+        },
+        "last_packet_timestamp": "2024-01-15T10:50:45+00:00",
+        "stats": {
+          "packets_real_disabled": 40,
+          "packets_real_not_present": 20,
+          "ops_packets": 400,
+          "error_icmp_packets": 80,
+          "created_sessions": 25000,
+          "packets": 400000,
+          "bytes": 503316480
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,114 @@
+Balancer State Info
+└─ Config: my-balancer (Instance: 0)
+   ├─ Active Sessions: 15,234 (updated: 2024-01-15 10:50:45)
+   ├─ Module Stats
+   │  ├─ Common
+   │  │  ├─ Incoming: 1,234,567 pkts, 1.2 GB
+   │  │  ├─ Outgoing: 1,234,000 pkts, 1.1 GB
+   │  │  ├─ Unexpected Network Proto: 0
+   │  │  ├─ Decap Successful: 50,000
+   │  │  └─ Decap Failed: 123
+   │  ├─ L4
+   │  │  ├─ Incoming Packets: 1,200,000
+   │  │  ├─ Outgoing Packets: 1,199,500
+   │  │  ├─ Select VS Failed: 100
+   │  │  ├─ Select Real Failed: 50
+   │  │  └─ Invalid Packets: 350
+   │  ├─ ICMPv4
+   │  │  ├─ Incoming Packets: 34,567
+   │  │  ├─ Echo Responses: 30,000
+   │  │  ├─ Payload Too Short IP: 0
+   │  │  ├─ Unmatching Src From Original: 0
+   │  │  ├─ Payload Too Short Port: 0
+   │  │  ├─ Unexpected Transport: 0
+   │  │  ├─ Unrecognized VS: 0
+   │  │  ├─ Forwarded: 4,500
+   │  │  ├─ Broadcasted: 67
+   │  │  ├─ Packet Clones Sent: 0
+   │  │  ├─ Packet Clones Received: 0
+   │  │  └─ Packet Clone Failures: 0
+   │  └─ ICMPv6
+   │     ├─ Incoming Packets: 1,234
+   │     ├─ Echo Responses: 1,200
+   │     ├─ Payload Too Short IP: 0
+   │     ├─ Unmatching Src From Original: 0
+   │     ├─ Payload Too Short Port: 0
+   │     ├─ Unexpected Transport: 0
+   │     ├─ Unrecognized VS: 0
+   │     ├─ Forwarded: 34
+   │     ├─ Broadcasted: 0
+   │     ├─ Packet Clones Sent: 0
+   │     ├─ Packet Clones Received: 0
+   │     └─ Packet Clone Failures: 0
+   ├─ Virtual Services (2)
+   │  ├─ [0] 192.0.2.1:80/TCP
+   │  │  ├─ Active Sessions: 10,234
+   │  │  ├─ Last Packet: 2024-01-15 10:50:44
+   │  │  └─ Stats
+   │  │     ├─ Incoming: 800,000 pkts, 762.9 MB
+   │  │     ├─ Outgoing: 799,500 pkts, 762.5 MB
+   │  │     ├─ Created Sessions: 50,000
+   │  │     ├─ Packet Src Not Allowed: 100
+   │  │     ├─ No Reals: 50
+   │  │     ├─ OPS Packets: 1,000
+   │  │     ├─ Session Table Overflow: 25
+   │  │     ├─ Echo ICMP Packets: 500
+   │  │     ├─ Error ICMP Packets: 200
+   │  │     ├─ Real Is Disabled: 150
+   │  │     ├─ Real Is Removed: 75
+   │  │     ├─ Not Rescheduled Packets: 300
+   │  │     └─ Broadcasted ICMP Packets: 400
+   │  └─ [1] 192.0.2.2:443/TCP
+   │     ├─ Active Sessions: 5,000
+   │     ├─ Last Packet: 2024-01-15 10:50:45
+   │     └─ Stats
+   │        ├─ Incoming: 400,000 pkts, 381.5 MB
+   │        ├─ Outgoing: 400,000 pkts, 381.5 MB
+   │        ├─ Created Sessions: 25,000
+   │        ├─ Packet Src Not Allowed: 50
+   │        ├─ No Reals: 25
+   │        ├─ OPS Packets: 500
+   │        ├─ Session Table Overflow: 10
+   │        ├─ Echo ICMP Packets: 250
+   │        ├─ Error ICMP Packets: 100
+   │        ├─ Real Is Disabled: 75
+   │        ├─ Real Is Removed: 40
+   │        ├─ Not Rescheduled Packets: 150
+   │        └─ Broadcasted ICMP Packets: 200
+   └─ Reals (3)
+      ├─ [0] 10.1.1.1:80
+      │  ├─ VS: 192.0.2.1:80/TCP
+      │  ├─ Active Sessions: 6,000
+      │  ├─ Last Packet: 2024-01-15 10:50:44
+      │  └─ Stats
+      │     ├─ Packets: 500,000
+      │     ├─ Bytes: 600.0 MB
+      │     ├─ Created Sessions: 30,000
+      │     ├─ Packets Real Disabled: 50
+      │     ├─ Packets Real Not Present: 25
+      │     ├─ OPS Packets: 500
+      │     └─ Error ICMP Packets: 100
+      ├─ [1] 10.1.1.2:80
+      │  ├─ VS: 192.0.2.1:80/TCP
+      │  ├─ Active Sessions: 4,234
+      │  ├─ Last Packet: 2024-01-15 10:50:43
+      │  └─ Stats
+      │     ├─ Packets: 300,000
+      │     ├─ Bytes: 349.5 MB
+      │     ├─ Created Sessions: 20,000
+      │     ├─ Packets Real Disabled: 30
+      │     ├─ Packets Real Not Present: 15
+      │     ├─ OPS Packets: 300
+      │     └─ Error ICMP Packets: 60
+      └─ [2] 10.2.1.1:443
+         ├─ VS: 192.0.2.2:443/TCP
+         ├─ Active Sessions: 5,000
+         ├─ Last Packet: 2024-01-15 10:50:45
+         └─ Stats
+            ├─ Packets: 400,000
+            ├─ Bytes: 480.0 MB
+            ├─ Created Sessions: 25,000
+            ├─ Packets Real Disabled: 40
+            ├─ Packets Real Not Present: 20
+            ├─ OPS Packets: 400
+            └─ Error ICMP Packets: 80

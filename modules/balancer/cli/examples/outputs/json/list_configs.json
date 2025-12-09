@@ -1,0 +1,222 @@
+{
+  "configs": [
+    {
+      "target": {
+        "config_name": "my-balancer",
+        "dataplane_instance": 0
+      },
+      "module_config": {
+        "virtual_services": [
+          {
+            "addr": "192.0.2.1",
+            "port": 80,
+            "proto": "TCP",
+            "scheduler": "WRR",
+            "allowed_srcs": [
+              {
+                "addr": "10.0.0.0",
+                "size": 8
+              },
+              {
+                "addr": "172.16.0.0",
+                "size": 12
+              }
+            ],
+            "reals": [
+              {
+                "weight": 100,
+                "dst_addr": "10.1.1.1",
+                "src_addr": "192.0.2.1",
+                "src_mask": "255.255.255.255",
+                "enabled": true,
+                "port": 80
+              },
+              {
+                "weight": 50,
+                "dst_addr": "10.1.1.2",
+                "src_addr": "192.0.2.1",
+                "src_mask": "255.255.255.255",
+                "enabled": true,
+                "port": 80
+              }
+            ],
+            "flags": {
+              "gre": true,
+              "fix_mss": true,
+              "ops": true,
+              "pure_l3": false
+            },
+            "peers": [
+              "192.0.2.10",
+              "192.0.2.11"
+            ]
+          },
+          {
+            "addr": "192.0.2.2",
+            "port": 443,
+            "proto": "TCP",
+            "scheduler": "WLC",
+            "allowed_srcs": [
+              {
+                "addr": "0.0.0.0",
+                "size": 0
+              }
+            ],
+            "reals": [
+              {
+                "weight": 100,
+                "dst_addr": "10.2.1.1",
+                "src_addr": "192.0.2.2",
+                "src_mask": "255.255.255.255",
+                "enabled": true,
+                "port": 443
+              },
+              {
+                "weight": 100,
+                "dst_addr": "10.2.1.2",
+                "src_addr": "192.0.2.2",
+                "src_mask": "255.255.255.255",
+                "enabled": true,
+                "port": 443
+              },
+              {
+                "weight": 50,
+                "dst_addr": "10.2.1.3",
+                "src_addr": "192.0.2.2",
+                "src_mask": "255.255.255.255",
+                "enabled": false,
+                "port": 443
+              }
+            ],
+            "flags": {
+              "gre": false,
+              "fix_mss": true,
+              "ops": true,
+              "pure_l3": true
+            },
+            "peers": [
+              "192.0.2.10"
+            ]
+          }
+        ],
+        "source_address_v4": "192.0.2.1",
+        "source_address_v6": "2001:db8::1",
+        "decap_addresses": [
+          "192.0.2.1",
+          "2001:db8::1"
+        ],
+        "sessions_timeouts": {
+          "tcp_syn_ack": 10,
+          "tcp_syn": 10,
+          "tcp_fin": 10,
+          "tcp": 60,
+          "udp": 30,
+          "default": 60
+        },
+        "wlc": {
+          "wlc_power": 10,
+          "max_real_weight": 1000,
+          "update_period_ms": 5000
+        }
+      },
+      "module_state_config": {
+        "session_table_capacity": 1000000,
+        "session_table_scan_period_ms": 1000,
+        "session_table_max_load_factor": 0.75
+      },
+      "buffered_real_updates": [
+        {
+          "virtual_ip": "192.0.2.1",
+          "port": 80,
+          "proto": "TCP",
+          "real_ip": "10.1.1.3",
+          "enable": true,
+          "weight": 75
+        }
+      ]
+    },
+    {
+      "target": {
+        "config_name": "test-balancer",
+        "dataplane_instance": 1
+      },
+      "module_config": {
+        "virtual_services": [
+          {
+            "addr": "198.51.100.1",
+            "port": 8080,
+            "proto": "TCP",
+            "scheduler": "PRR",
+            "allowed_srcs": [],
+            "reals": [
+              {
+                "weight": 100,
+                "dst_addr": "10.10.1.1",
+                "src_addr": "198.51.100.1",
+                "src_mask": "255.255.255.255",
+                "enabled": true,
+                "port": 8080
+              },
+              {
+                "weight": 100,
+                "dst_addr": "10.10.1.2",
+                "src_addr": "198.51.100.1",
+                "src_mask": "255.255.255.255",
+                "enabled": false,
+                "port": 8080
+              }
+            ],
+            "flags": {
+              "gre": true,
+              "fix_mss": true,
+              "ops": false,
+              "pure_l3": true
+            },
+            "peers": []
+          }
+        ],
+        "source_address_v4": "198.51.100.1",
+        "source_address_v6": "2001:db8::2",
+        "decap_addresses": [
+          "198.51.100.1"
+        ],
+        "sessions_timeouts": {
+          "tcp_syn_ack": 5,
+          "tcp_syn": 5,
+          "tcp_fin": 5,
+          "tcp": 30,
+          "udp": 15,
+          "default": 30
+        },
+        "wlc": {
+          "wlc_power": 5,
+          "max_real_weight": 500,
+          "update_period_ms": 10000
+        }
+      },
+      "module_state_config": {
+        "session_table_capacity": 500000,
+        "session_table_scan_period_ms": 2000,
+        "session_table_max_load_factor": 0.8
+      },
+      "buffered_real_updates": [
+        {
+          "virtual_ip": "198.51.100.1",
+          "port": 8080,
+          "proto": "TCP",
+          "real_ip": "10.10.1.2",
+          "enable": true,
+          "weight": 150
+        },
+        {
+          "virtual_ip": "198.51.100.1",
+          "port": 8080,
+          "proto": "TCP",
+          "real_ip": "10.10.1.3",
+          "enable": true,
+          "weight": 100
+        }
+      ]
+    }
+  ]
+}

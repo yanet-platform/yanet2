@@ -1,0 +1,125 @@
+# Example Balancer Configuration
+# This file demonstrates the structure for yanet-balancer update-config command
+
+# Module configuration
+module_config:
+  # Virtual services configuration
+  virtual_services:
+    # Example HTTP service
+    - ip: "192.0.2.1"
+      port: 80
+      proto: tcp
+      scheduler: wrr  # Options: wrr, prr, wlc
+      flags:
+        gre: false
+        fix_mss: true
+        ops: false
+        pure_l3: false
+      allowed_srcs:
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+      reals:
+        - weight: 100
+          dst: "10.1.1.1"
+          src: "192.0.2.1"
+          src_mask: "255.255.255.255"
+          enabled: true
+        - weight: 50
+          dst: "10.1.1.2"
+          src: "192.0.2.1"
+          src_mask: "255.255.255.255"
+          enabled: true
+      peers:
+        - "192.0.2.10"
+        - "192.0.2.11"
+
+    # Example HTTPS service with WLC scheduler
+    - ip: "192.0.2.2"
+      port: 443
+      proto: tcp
+      scheduler: wlc
+      flags:
+        gre: false
+        fix_mss: true
+        ops: false
+        pure_l3: false
+      allowed_srcs:
+        - "0.0.0.0/0"  # Allow all sources
+      reals:
+        - weight: 100
+          dst: "10.2.1.1"
+          src: "192.0.2.2"
+          src_mask: "255.255.255.255"
+          enabled: true
+        - weight: 100
+          dst: "10.2.1.2"
+          src: "192.0.2.2"
+          src_mask: "255.255.255.255"
+          enabled: true
+        - weight: 50
+          dst: "10.2.1.3"
+          src: "192.0.2.2"
+          src_mask: "255.255.255.255"
+          enabled: false  # Disabled real
+      peers:
+        - "192.0.2.10"
+
+    # Example UDP service
+    - ip: "192.0.2.3"
+      port: 53
+      proto: udp
+      scheduler: prr
+      flags:
+        gre: false
+        fix_mss: false
+        ops: true
+        pure_l3: false
+      allowed_srcs:
+        - "10.0.0.0/8"
+      reals:
+        - weight: 1
+          dst: "10.3.1.1"
+          src: "192.0.2.3"
+          src_mask: "255.255.255.255"
+          enabled: true
+        - weight: 1
+          dst: "10.3.1.2"
+          src: "192.0.2.3"
+          src_mask: "255.255.255.255"
+          enabled: true
+      peers: []
+
+  # Source addresses for the balancer
+  source_address_v4: "192.0.2.1"
+  source_address_v6: "2001:db8::1"
+
+  # Addresses for decapsulation
+  decap_addresses:
+    - "192.0.2.1"
+    - "2001:db8::1"
+
+  # Session timeouts (in seconds)
+  sessions_timeouts:
+    tcp_syn_ack: 10
+    tcp_syn: 10
+    tcp_fin: 10
+    tcp: 60
+    udp: 30
+    default: 60
+
+  # Weighted Least Connections configuration
+  wlc:
+    power: 10
+    max_real_weight: 1000
+    update_period_ms: 5000
+
+# Module state configuration
+module_state_config:
+  # Maximum number of sessions in the session table
+  session_table_capacity: 1000000
+
+  # Period to scan the session table (in milliseconds)
+  session_table_scan_period_ms: 1000
+
+  # Maximum load factor for the session table (0.0 to 1.0)
+  session_table_max_load_factor: 0.75

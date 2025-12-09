@@ -86,17 +86,25 @@ message BalancerInfo {
 ////////////////////////////////////////////////////////////////////////////////
 
 message SessionInfo {
+  // client info
   bytes client_addr = 1;
   uint32 client_port = 2;
-  bytes real_addr = 3;
+
+  // virtual service info
+  bytes vs_addr = 4;
+  uint32 vs_port = 5;
+
+  // real info
+  bytes real_addr = 6;
 
   // For now, real port always equal to vs port.
   // Does not have it in the rest of the codebase.
-  uint32 real_port = 4;
+  uint32 real_port = 7;
   
-  google.protobuf.Timestamp create_timestamp = 5;
-  google.protobuf.Timestamp last_packet_timestamp = 6;
-  google.protobuf.Duration timeout = 7;
+  // session meta info
+  google.protobuf.Timestamp create_timestamp = 8;
+  google.protobuf.Timestamp last_packet_timestamp = 9;
+  google.protobuf.Duration timeout = 10;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
