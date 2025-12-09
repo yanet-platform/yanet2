@@ -1,6 +1,10 @@
 #pragma once
 
 #include <stdint.h>
+<<<<<<< HEAD
+=======
+#include <time.h>
+>>>>>>> 33f5f20 (feat: dataplane worker clock)
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -20,8 +24,13 @@
 // clock drift on TSC with 1ppm drift
 // (modern CPUs have drift of 0.1-1 ppm).
 struct tsc_clock {
+<<<<<<< HEAD
 	// Real time when clock was init in nanoseconds.
 	uint64_t real_time_ns;
+=======
+	// Real time when clock was init.
+	struct timespec real_time;
+>>>>>>> 33f5f20 (feat: dataplane worker clock)
 
 	// Timestamp counter when clock was init.
 	uint64_t timestamp_counter;
@@ -35,6 +44,12 @@ tsc_clock_init(struct tsc_clock *clock);
 int
 tsc_clock_adjust(struct tsc_clock *clock);
 
+<<<<<<< HEAD
 // Get current real time in nanoseconds.
 uint64_t
 tsc_clock_get_time_ns(struct tsc_clock *clock);
+=======
+// Get current real time.
+struct timespec
+tsc_clock_get_time(struct tsc_clock *clock);
+>>>>>>> 33f5f20 (feat: dataplane worker clock)
