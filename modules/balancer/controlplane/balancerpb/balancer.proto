@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package balancerpb;
 
-import "common/proto/target.proto";
+import "common/commonpb/target.proto";
 import "modules/balancer/controlplane/balancerpb/info.proto";
 import "modules/balancer/controlplane/balancerpb/module.proto";
 import "modules/balancer/controlplane/balancerpb/stats.proto";
