@@ -343,12 +343,15 @@ func (b *Balancer) Free() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (balancer *Balancer) UpdateActiveSessions() error {
-	if err := balancer.moduleConfigState.ScanActiveSessionsAndResizeOnDemand(); err != nil {
-		return fmt.Errorf("failed to scan for active sessions: %w", err)
+// Allows to sync WLC, active sessions and resize session table.
+// The balancer makes it himself with corresponding periods.
+// We can add proto method to use this function in future.
+func (balancer *Balancer) SyncActiveSessionsAndWlcAndResizeTableOnDemand() error {
+	if err := balancer.moduleConfigState.SyncActiveSessionsAndResizeTableOnDemand(); err != nil {
+		return fmt.Errorf("failed to scan session table to sync active sessions: %w", err)
 	}
 	if err := balancer.moduleConfig.UpdateEffectiveWeights(); err != nil {
-		return fmt.Errorf("failed to update effective weights: %w", err)
+		return fmt.Errorf("failed to update WLC: %w", err)
 	}
 	return nil
 }

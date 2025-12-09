@@ -140,7 +140,7 @@ func TestWlc(t *testing.T) {
 
 		// Scan active sessions, update them,
 		// and recalculate effective weights
-		err = balancer.UpdateActiveSessions()
+		err = balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand()
 		require.NoError(t, err)
 
 		stateInfo := balancer.GetStateInfo()
@@ -169,7 +169,7 @@ func TestWlc(t *testing.T) {
 		packets = 5 * packets
 		for packetIdx := range packets {
 			if packetIdx%50 == 0 {
-				if err := balancer.UpdateActiveSessions(); err != nil {
+				if err := balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(); err != nil {
 					t.Errorf("failed to update active sessions: packetIdx=%d", packetIdx)
 				}
 				result, err := mock.HandlePackets(packetsToSend...)

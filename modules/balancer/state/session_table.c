@@ -9,6 +9,26 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
+static inline int
+session_table_worker_use_prev_gen(struct session_table_gen *cur, size_t worker) {
+	struct worker_info *info = &cur->worker_info[worker];
+	return worker_info_use_prev_gen(info);
+}
+
+static inline int
+session_table_workers_use_prev_gen(struct session_table *table) {
+	struct session_table_gen *sessions_cur =
+		session_table_current_gen(table);
+	for (size_t i = 0; i < table->workers; ++i) {
+		if (session_table_worker_use_prev_gen(sessions_cur, i)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 int
 session_table_init(
 	struct session_table *table,
@@ -63,25 +83,25 @@ session_table_free(struct session_table *table) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-int
-session_table_free_unused(struct session_table *table) {
-	struct session_table_gen *sessions_cur =
-		session_table_current_gen(table);
-	for (size_t i = 0; i < table->workers; ++i) {
-		if (atomic_load_explicit(
-			    &sessions_cur->worker_info[i].use_prev_gen,
-			    __ATOMIC_SEQ_CST
-		    ) == 1) {
-			return 0;
-		}
+static int
+try_free_prev_gen(struct session_table *table) {
+	if (session_table_workers_use_prev_gen(table)) {
+		// some workers use prev gen, can not free
+		return 0;
 	}
 	struct session_table_gen *sessions_prev =
 		session_table_previous_gen(table);
 	if (ttlmap_capacity(&sessions_prev->map) > 0) {
 		TTLMAP_FREE(&sessions_prev->map);
-		return 1;
 	}
-	return 0;
+
+	// successfully free or it was empty
+	return 1;
+}
+
+int
+session_table_free_unused(struct session_table *table) {
+	return try_free_prev_gen(table);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -201,7 +221,12 @@ session_table_free_sessions_info(
 
 int
 session_table_resize(struct session_table *table, size_t new_size) {
-	session_table_free_unused(table);
+	if (try_free_prev_gen(table) == 0) {
+		// Failed to resize, because prev gen is still 
+		// used by some workers.
+		return 0;
+	} 
+	
 	struct session_table_gen *sessions_cur =
 		session_table_current_gen(table);
 	struct session_table_gen *sessions_next =
@@ -219,16 +244,18 @@ session_table_resize(struct session_table *table, size_t new_size) {
 		return -1;
 	}
 	for (size_t i = 0; i < table->workers; ++i) {
-		struct worker_info *worker_info =
+		struct worker_info *next_worker_info =
 			&sessions_next->worker_info[i];
-		struct worker_info *prev_worker_info =
+		struct worker_info *cur_worker_info =
 			&sessions_cur->worker_info[i];
-		memset(worker_info, 0, sizeof(*worker_info));
+		memset(next_worker_info, 0, sizeof(*next_worker_info));
 
-		worker_info->max_deadline_prev_gen =
-			prev_worker_info->max_deadline_current_gen;
-		worker_info->use_prev_gen = 1;
+		next_worker_info->max_deadline_prev_gen =
+			cur_worker_info->max_deadline_current_gen;
+		next_worker_info->max_deadline_current_gen = 0;
+		next_worker_info->last_timestamp = cur_worker_info->last_timestamp;
 	}
+
 	atomic_fetch_add_explicit(&table->current_gen, 1, __ATOMIC_SEQ_CST);
 
 	return 0;

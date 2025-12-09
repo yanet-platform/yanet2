@@ -140,6 +140,9 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 	size_t buckets = (kv_entries + __TTLMAP_BUCKET_ENTRIES - 1) /
 			 __TTLMAP_BUCKET_ENTRIES;
 	size_t max_bit = 63 - __builtin_clzll(buckets);
+	if (buckets != (1ull << max_bit)) {
+		++max_bit;
+	}
 	size_t res = 1ull << max_bit;
 	return res;
 }

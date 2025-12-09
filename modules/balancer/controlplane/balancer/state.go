@@ -163,7 +163,7 @@ func (s *ModuleConfigState) SessionsInfo() (module.SessionsInfo, error) {
 	}
 
 	s.log.Debugw("retrieved sessions from C handle",
-		zap.Uint("raw_count", sessions.SessionsCount))
+		zap.Uint("count_with_duplications", sessions.SessionsCount))
 
 	// Remove duplicates - keep session with most recent LastPacketTimestamp
 	type sessionKey struct {
@@ -197,11 +197,9 @@ func (s *ModuleConfigState) SessionsInfo() (module.SessionsInfo, error) {
 	}
 
 	duplicatesRemoved := sessions.SessionsCount - uint(len(dedupedSessions))
-	if duplicatesRemoved > 0 {
-		s.log.Debugw("removed duplicate sessions",
-			zap.Uint("duplicates", duplicatesRemoved),
-			zap.Uint("unique_sessions", uint(len(dedupedSessions))))
-	}
+	s.log.Debugw("removed duplicate sessions",
+		zap.Uint("duplicates", duplicatesRemoved),
+		zap.Uint("unique_sessions", uint(len(dedupedSessions))))
 
 	return module.SessionsInfo{
 		SessionsCount: uint(len(dedupedSessions)),
@@ -209,7 +207,7 @@ func (s *ModuleConfigState) SessionsInfo() (module.SessionsInfo, error) {
 	}, nil
 }
 
-func (s *ModuleConfigState) ScanActiveSessionsAndResizeOnDemand() error {
+func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand() error {
 	// Update active connections info
 	sessions, err := s.SessionsInfo()
 	if err != nil {
@@ -248,23 +246,26 @@ func (s *ModuleConfigState) ScanActiveSessionsAndResizeOnDemand() error {
 		zap.Float32("max_load_factor", s.MaxLoadFactor))
 
 	if loadFactor > s.MaxLoadFactor {
-		newCapacity := sessionTableCapacity * 2
+		requestedCapacity := sessionTableCapacity * 2
 		s.log.Infow("session table load factor exceeded, resizing",
 			zap.Float32("load_factor", loadFactor),
 			zap.Float32("max_load_factor", s.MaxLoadFactor),
 			zap.Uint("old_capacity", sessionTableCapacity),
-			zap.Uint("new_capacity", newCapacity))
+			zap.Uint("requested_capacity", requestedCapacity))
 
-		if err := s.cHandle.ResizeSessionTable(newCapacity); err != nil {
+		if err := s.cHandle.ResizeSessionTable(requestedCapacity); err != nil {
 			s.log.Errorw("failed to resize session table",
-				zap.Uint("new_capacity", newCapacity),
+				zap.Uint("requested_capacity", requestedCapacity),
 				zap.Error(err))
 			return fmt.Errorf(
 				"failed to resize session table to capacity %d: %w",
-				newCapacity,
+				requestedCapacity,
 				err,
 			)
 		}
+
+		newCapacity := s.SessionTableCapacity()
+
 		s.log.Infow(
 			"session table resized successfully",
 			zap.Uint("new_capacity", newCapacity),
@@ -307,7 +308,7 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 					return
 				case <-ticker.C:
 					s.lock.Lock()
-					err := s.ScanActiveSessionsAndResizeOnDemand()
+					err := s.SyncActiveSessionsAndResizeTableOnDemand()
 					s.lock.Unlock()
 					if err != nil {
 						s.log.Warnw(

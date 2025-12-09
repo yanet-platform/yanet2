@@ -18,12 +18,20 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 struct worker_info {
-	_Atomic uint8_t use_prev_gen; // atomic
+	// updated on the start of handle modules
+	_Atomic uint32_t last_timestamp;
+
 	uint8_t pad[63];
 	_Atomic uint32_t max_deadline_current_gen;
 	_Atomic uint32_t max_deadline_prev_gen;
-	_Atomic uint32_t active_sessions; // sessions created by worker
 } __rte_cache_aligned;
+
+static inline int
+worker_info_use_prev_gen(struct worker_info *info) {
+	return info->last_timestamp < info->max_deadline_prev_gen;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 struct session_table_gen {
 	struct ttlmap map;
@@ -90,6 +98,18 @@ session_table_previous_gen(struct session_table *state) {
 	return &state->generations[(current_gen & 1) ^ 1];
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+static inline void
+session_table_update_worker_time(struct session_table *table, size_t worker, uint32_t now) {
+	struct session_table_gen *sessions_cur =
+		session_table_current_gen(table);
+	struct worker_info *worker_info = &sessions_cur->worker_info[worker];
+	worker_info->last_timestamp = now;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 static inline int
 get_or_create_session(
 	struct session_table *session_table,
@@ -124,27 +144,7 @@ get_or_create_session(
 		);
 		return SESSION_FOUND;
 	} else if (status == TTLMAP_INSERTED || status == TTLMAP_REPLACED) {
-		if (status == TTLMAP_INSERTED) {
-			atomic_fetch_add_explicit(
-				&worker_info->active_sessions,
-				1,
-				__ATOMIC_SEQ_CST
-			);
-		}
-		if (atomic_load_explicit(
-			    &worker_info->use_prev_gen, __ATOMIC_SEQ_CST
-		    ) == 1) {
-			if (atomic_load_explicit(
-				    &worker_info->max_deadline_prev_gen,
-				    __ATOMIC_SEQ_CST
-			    ) < now) {
-				atomic_store_explicit(
-					&worker_info->use_prev_gen,
-					0,
-					__ATOMIC_SEQ_CST
-				);
-				return SESSION_CREATED;
-			}
+		if (worker_info_use_prev_gen(worker_info)) {
 			struct session_table_gen *prev =
 				session_table_previous_gen(session_table);
 			status = TTLMAP_LOOKUP(
@@ -152,12 +152,10 @@ get_or_create_session(
 			);
 			if (status == TTLMAP_FOUND) {
 				return SESSION_FOUND;
-			} else {
-				return SESSION_CREATED;
-			}
-		} else {
-			return SESSION_CREATED;
+			} 
 		}
+
+		return SESSION_CREATED;
 	} else { // status == TTLMAP_FAILED
 		return SESSION_TABLE_OVERFLOW;
 	}
@@ -182,7 +180,7 @@ get_session_real(
 	} else {
 		assert(status == TTLMAP_FAILED);
 		struct worker_info *worker_info = &cur->worker_info[worker_idx];
-		if (worker_info->use_prev_gen == 1) {
+		if (worker_info_use_prev_gen(worker_info)) {
 			struct session_table_gen *prev =
 				session_table_previous_gen(session_table);
 			int res = TTLMAP_LOOKUP(
