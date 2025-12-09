@@ -41,7 +41,7 @@ struct dp_worker {
 	// Currently, we init it only once
 	// and dont adjust.
 	// So, we have some drift, which is small but...
-	// (see tsc_clock docs). It is not importand
+	// (see tsc_clock docs). It is not important
 	// for now and fix should be easy, but need discuss.
 	//
 	// TODO: FIXME

@@ -9,6 +9,7 @@
 thread_local struct timespec current_time = {0, 0};
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 void
 set_current_time(struct timespec *ts) {
@@ -16,6 +17,8 @@ set_current_time(struct timespec *ts) {
 }
 
 >>>>>>> a8887a2 (feat: dataplane worker clock)
+=======
+>>>>>>> 79d7935 (cosmetics)
 // Mock tsc clock
 
 struct tsc_clock;

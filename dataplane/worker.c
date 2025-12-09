@@ -51,7 +51,6 @@
 #include "logging/log.h"
 
 #include <rte_ethdev.h>
-#include <time.h>
 
 static void
 worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
