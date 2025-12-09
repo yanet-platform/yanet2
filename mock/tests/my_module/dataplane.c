@@ -26,8 +26,12 @@ my_module_handle_packets(
 		cp_module
 	);
 	config->packet_counter += 1;
+<<<<<<< HEAD
 	config->last_packet_timestamp =
 		tsc_clock_get_time_ns(&dp_worker->clock);
+=======
+	config->last_packet_timestamp = tsc_clock_get_time(&dp_worker->clock);
+>>>>>>> 33f5f20 (feat: dataplane worker clock)
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {

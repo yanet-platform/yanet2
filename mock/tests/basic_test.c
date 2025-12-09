@@ -224,11 +224,20 @@ main() {
 	    "packets passed throw my module: %lu",
 	    my_module->packet_counter);
 
+<<<<<<< HEAD
 	uint64_t last_packet_timestamp = my_module->last_packet_timestamp;
 	LOG(INFO,
 	    "last packet timestamp: sec=%lu, nsec=%lu\n",
 	    last_packet_timestamp / (uint64_t)1e9,
 	    last_packet_timestamp % (uint64_t)1e9);
+=======
+	struct timespec *last_packet_timestamp =
+		&my_module->last_packet_timestamp;
+	LOG(INFO,
+	    "last packet timestamp: sec=%lu, nsec=%lu\n",
+	    last_packet_timestamp->tv_sec,
+	    last_packet_timestamp->tv_nsec);
+>>>>>>> 33f5f20 (feat: dataplane worker clock)
 
 	TEST_ASSERT_EQUAL(
 		my_module->packet_counter,
@@ -237,10 +246,22 @@ main() {
 	);
 
 	TEST_ASSERT_EQUAL(
+<<<<<<< HEAD
 		my_module->last_packet_timestamp,
 		current_time.tv_sec * (uint64_t)1000 * 1000 * 1000 +
 			current_time.tv_nsec,
 		"incorrect current time"
+=======
+		my_module->last_packet_timestamp.tv_sec,
+		current_time.tv_sec,
+		"current time invalid (seconds)"
+	);
+
+	TEST_ASSERT_EQUAL(
+		my_module->last_packet_timestamp.tv_nsec,
+		current_time.tv_nsec,
+		"current time invalid (nanoseconds)"
+>>>>>>> 33f5f20 (feat: dataplane worker clock)
 	);
 
 	LOG(INFO, "success");
