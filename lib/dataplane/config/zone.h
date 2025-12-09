@@ -58,11 +58,9 @@ struct dp_worker {
 	uint64_t *remote_tx_count;
 
 	struct rte_mempool *rx_mempool;
-} __attribute__((aligned(64)));
-// todo: 128 cache line CPUs?
-// add cache line size in build_config.h,
-// or use dpdk.
 
+	uint8_t pad[24];
+};
 struct dp_config {
 	uint32_t instance_count;
 	uint32_t instance_idx;
