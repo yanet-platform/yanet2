@@ -4,11 +4,6 @@
 
 thread_local struct timespec current_time = {0, 0};
 
-void
-set_current_time(struct timespec *ts) {
-	current_time = *ts;
-}
-
 // Mock tsc clock
 
 struct tsc_clock;
