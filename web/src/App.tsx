@@ -6,6 +6,7 @@ import InspectPage from './pages/InspectPage';
 import RoutePage from './pages/RoutePage';
 import FunctionsPage from './pages/FunctionsPage';
 import PipelinesPage from './pages/PipelinesPage';
+import DevicesPage from './pages/DevicesPage';
 import type { PageId } from './types';
 import { PAGE_IDS } from './types';
 
@@ -41,6 +42,7 @@ const AppContent = (): React.JSX.Element => {
                     <Route path="/route" element={<RoutePage />} />
                     <Route path="/functions" element={<FunctionsPage />} />
                     <Route path="/pipelines" element={<PipelinesPage />} />
+                    <Route path="/devices" element={<DevicesPage />} />
                 </Routes>
             )}
         />
