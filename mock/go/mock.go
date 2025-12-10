@@ -81,6 +81,8 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Never move this object in memory after
+// construction!
 type YanetMock struct {
 	inner C.struct_yanet_mock
 }

@@ -1,7 +1,7 @@
 //! Common data creation functions for examples
 
-use yanet_balancer::rpc::balancerpb;
-use yanet_balancer::rpc::commonpb;
+use yanet_cli_balancer::rpc::balancerpb;
+use yanet_cli_balancer::rpc::commonpb;
 
 #[allow(dead_code)]
 pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {

@@ -6,7 +6,7 @@ mod common;
 
 use std::env;
 use std::error::Error;
-use yanet_balancer::output::{self, OutputFormat};
+use yanet_cli_balancer::output::{self, OutputFormat};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let response = common::create_show_config_example();
