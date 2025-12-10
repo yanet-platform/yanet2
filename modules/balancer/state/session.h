@@ -21,6 +21,7 @@ fill_session_id(
 	struct packet_metadata *data,
 	struct virtual_service *vs
 ) {
+	memset(id, 0, sizeof(*id));
 	memcpy(id->client_ip, data->src_addr, 16);
 	id->client_port = data->src_port;
 	id->vs_id = vs->registry_idx;

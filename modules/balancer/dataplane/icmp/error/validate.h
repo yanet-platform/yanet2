@@ -210,9 +210,7 @@ validate_packet_ipv6(
 	}
 
 	struct rte_ipv6_hdr *inner_ip_hdr = rte_pktmbuf_mtod_offset(
-		mbuf,
-		struct rte_ipv6_hdr *,
-		packet->transport_header.offset + sizeof(struct rte_icmp_hdr)
+		mbuf, struct rte_ipv6_hdr *, info.network.offset
 	);
 
 	if (memcmp(inner_ip_hdr->src_addr, outer_ip_hdr->dst_addr, 16)) {
