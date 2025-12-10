@@ -41,5 +41,5 @@ func (m *DevicePlainService) UpdateDevice(
 		return nil, fmt.Errorf("failed to update module on instance %d: %w", instance, err)
 	}
 
-	return nil, nil
+	return &plainpb.UpdateDevicePlainResponse{}, nil
 }
