@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
 import { MODULE_DESCRIPTIONS } from './constants';
 import { formatModuleName } from './utils';
+import './inspect.css';
 
 export interface ModuleCardProps {
     module: { name?: string };
@@ -17,34 +18,9 @@ export const ModuleCard: React.FC<ModuleCardProps> = ({
     pipelineUsage,
 }) => {
     return (
-        <Box
-            style={{
-                border: '1px solid var(--g-color-line-generic)',
-                borderRadius: '8px',
-                padding: '12px 16px',
-                backgroundColor: 'var(--g-color-base-float)',
-                display: 'flex',
-                flexDirection: 'column',
-                width: '200px',
-                transition: 'all 0.2s ease',
-            }}
-            onMouseEnter={(e) => {
-                const target = e.currentTarget as unknown as HTMLElement;
-                if (target) {
-                    target.style.borderColor = 'var(--g-color-line-brand)';
-                    target.style.backgroundColor = 'var(--g-color-base-simple-hover)';
-                }
-            }}
-            onMouseLeave={(e) => {
-                const target = e.currentTarget as unknown as HTMLElement;
-                if (target) {
-                    target.style.borderColor = 'var(--g-color-line-generic)';
-                    target.style.backgroundColor = 'var(--g-color-base-float)';
-                }
-            }}
-        >
-            <Box style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: '1', minHeight: 0 }}>
-                <Box style={{ minHeight: '60px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <Box className="module-card">
+            <Box className="module-card__content">
+                <Box className="module-card__header">
                     <Text variant="subheader-1" style={{ fontWeight: '500' }}>
                         {module.name ? formatModuleName(module.name) : `Module ${idx}`}
                     </Text>
@@ -54,23 +30,22 @@ export const ModuleCard: React.FC<ModuleCardProps> = ({
                         </Text>
                     )}
                 </Box>
-                <Box style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', width: '100%' }}>
+                <Box className="module-card__row">
                     <Text variant="body-1" color="secondary">ID</Text>
-                    <Box style={{ flex: '1', borderBottom: '1px dotted var(--g-color-line-generic)', margin: '0 8px 2px 8px', height: '1px' }} />
+                    <Box className="module-card__separator" />
                     <Text variant="body-1" style={{ fontWeight: 'bold' }}>{idx}</Text>
                 </Box>
-                <Box style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', width: '100%' }}>
+                <Box className="module-card__row">
                     <Text variant="body-1" color="secondary">Configs</Text>
-                    <Box style={{ flex: '1', borderBottom: '1px dotted var(--g-color-line-generic)', margin: '0 8px 2px 8px', height: '1px' }} />
+                    <Box className="module-card__separator" />
                     <Text variant="body-1" style={{ fontWeight: 'bold' }}>{configCount}</Text>
                 </Box>
-                <Box style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', width: '100%' }}>
+                <Box className="module-card__row">
                     <Text variant="body-1" color="secondary">Pipelines</Text>
-                    <Box style={{ flex: '1', borderBottom: '1px dotted var(--g-color-line-generic)', margin: '0 8px 2px 8px', height: '1px' }} />
+                    <Box className="module-card__separator" />
                     <Text variant="body-1" style={{ fontWeight: 'bold' }}>{pipelineUsage}</Text>
                 </Box>
             </Box>
         </Box>
     );
 };
-

@@ -1,0 +1,11 @@
+.pipelineTable {
+    overflow: hidden;
+}
+
+.pipelineTables>div:first-child .pipelineTable {
+    border-right: 1px solid var(--g-color-line-generic);
+}
+
+.pipelineTables>div:last-child .pipelineTable {
+    border-left: 1px solid var(--g-color-line-generic);
+}

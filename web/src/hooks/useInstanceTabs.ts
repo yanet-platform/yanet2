@@ -3,8 +3,6 @@ import { useEffect, useState } from 'react';
 export interface UseInstanceTabsOptions<T> {
     /** Array of items to create tabs for */
     items: T[];
-    /** Function to get the instance index from an item */
-    getInstanceIndex?: (item: T, idx: number) => number;
 }
 
 export interface UseInstanceTabsResult {
@@ -21,7 +19,6 @@ export interface UseInstanceTabsResult {
  */
 export const useInstanceTabs = <T>({
     items,
-    getInstanceIndex,
 }: UseInstanceTabsOptions<T>): UseInstanceTabsResult => {
     const [activeTab, setActiveTab] = useState<string>('0');
 
@@ -36,9 +33,6 @@ export const useInstanceTabs = <T>({
     }, [items, activeTab]);
 
     const currentTabIndex = parseInt(activeTab, 10);
-
-    // Expose getInstanceIndex for convenience
-    void getInstanceIndex;
 
     return {
         activeTab,

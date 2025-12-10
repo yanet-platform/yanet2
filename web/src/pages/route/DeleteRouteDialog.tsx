@@ -14,17 +14,17 @@ export const DeleteRouteDialog: React.FC<DeleteRouteDialogProps> = ({
 
     return (
         <Dialog open={open} onClose={onClose}>
-            <Dialog.Header caption="Удаление маршрутов" />
+            <Dialog.Header caption="Delete Routes" />
             <Dialog.Body>
                 <Box style={{ marginBottom: '16px' }}>
                     <Text variant="body-1">
-                        Вы уверены, что хотите удалить {count} {formatRouteCount(count)}?
+                        Are you sure you want to delete {count} {formatRouteCount(count)}?
                     </Text>
                 </Box>
                 {selectedRoutes.length > 0 && (
                     <Box style={{ maxHeight: '300px', overflowY: 'auto', marginTop: '16px' }}>
                         <Text variant="subheader-2" style={{ marginBottom: '8px' }}>
-                            Выбранные маршруты:
+                            Selected routes:
                         </Text>
                         <Box style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {selectedRoutes.map((route, idx) => (
@@ -37,8 +37,8 @@ export const DeleteRouteDialog: React.FC<DeleteRouteDialogProps> = ({
             <Dialog.Footer
                 onClickButtonApply={onConfirm}
                 onClickButtonCancel={onClose}
-                textButtonApply="Удалить"
-                textButtonCancel="Отмена"
+                textButtonApply="Delete"
+                textButtonCancel="Cancel"
                 propsButtonApply={{ view: 'outlined-danger' as const }}
             />
         </Dialog>

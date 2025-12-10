@@ -4,7 +4,8 @@ import type { Function as APIFunction } from '../../api/functions';
 import type { FunctionId } from '../../api/common';
 import type { InspectResponse } from '../../api/inspect';
 import { toaster } from '../../utils';
-import type { FunctionNode, FunctionEdge, FunctionGraphState } from './types';
+import { useGraphEditor } from '../../hooks';
+import type { FunctionNode, FunctionEdge } from './types';
 import { apiToGraph, graphToApi, createEmptyGraph, validateGraph } from './utils';
 
 export type FunctionMapByInstance = Record<number, Record<string, APIFunction>>;
@@ -270,76 +271,47 @@ export interface UseFunctionGraphResult {
  * Hook for managing graph state for a single function
  */
 export const useFunctionGraph = (initialFunction?: APIFunction): UseFunctionGraphResult => {
-    const [graphState, setGraphState] = useState<FunctionGraphState>(() => {
-        if (initialFunction) {
-            return apiToGraph(initialFunction);
-        }
-        return createEmptyGraph();
+    const initialState = initialFunction ? apiToGraph(initialFunction) : undefined;
+
+    const validateFn = useCallback((nodes: FunctionNode[], edges: FunctionEdge[]) => {
+        const validation = validateGraph(nodes, edges);
+        return validation.errors;
+    }, []);
+
+    const {
+        nodes,
+        edges,
+        isValid,
+        validationErrors,
+        isDirty,
+        setNodes,
+        setEdges,
+        setNodesWithoutDirty,
+        setEdgesWithoutDirty,
+        updateNode,
+        loadState,
+        reset,
+        markClean,
+    } = useGraphEditor<FunctionNode, FunctionEdge>({
+        initialState,
+        createEmptyState: createEmptyGraph,
+        validate: validateFn,
     });
-    const [isDirty, setIsDirty] = useState(false);
-    const [originalState, setOriginalState] = useState<FunctionGraphState | null>(null);
-
-    const validation = validateGraph(graphState.nodes, graphState.edges);
-
-    const setNodes = useCallback((nodes: FunctionNode[]) => {
-        setGraphState(prev => ({ ...prev, nodes }));
-        setIsDirty(true);
-    }, []);
-
-    const setNodesWithoutDirty = useCallback((nodes: FunctionNode[]) => {
-        setGraphState(prev => ({ ...prev, nodes }));
-    }, []);
-
-    const setEdges = useCallback((edges: FunctionEdge[]) => {
-        setGraphState(prev => ({ ...prev, edges }));
-        setIsDirty(true);
-    }, []);
-
-    const setEdgesWithoutDirty = useCallback((edges: FunctionEdge[]) => {
-        setGraphState(prev => ({ ...prev, edges }));
-    }, []);
-
-    const updateNode = useCallback((nodeId: string, data: Record<string, unknown>) => {
-        setGraphState(prev => ({
-            ...prev,
-            nodes: prev.nodes.map(node =>
-                node.id === nodeId ? { ...node, data } as FunctionNode : node
-            ),
-        }));
-        setIsDirty(true);
-    }, []);
 
     const loadFromApi = useCallback((func: APIFunction) => {
         const newState = apiToGraph(func);
-        setGraphState(newState);
-        setOriginalState(newState);
-        setIsDirty(false);
-    }, []);
+        loadState(newState);
+    }, [loadState]);
 
     const toApi = useCallback((functionId: string): APIFunction => {
-        return graphToApi(functionId, graphState.nodes, graphState.edges);
-    }, [graphState]);
-
-    const reset = useCallback(() => {
-        if (originalState) {
-            setGraphState(originalState);
-            setIsDirty(false);
-        } else {
-            setGraphState(createEmptyGraph());
-            setIsDirty(false);
-        }
-    }, [originalState]);
-
-    const markClean = useCallback(() => {
-        setOriginalState(graphState);
-        setIsDirty(false);
-    }, [graphState]);
+        return graphToApi(functionId, nodes, edges);
+    }, [nodes, edges]);
 
     return {
-        nodes: graphState.nodes,
-        edges: graphState.edges,
-        isValid: validation.isValid,
-        validationErrors: validation.errors,
+        nodes,
+        edges,
+        isValid,
+        validationErrors,
         isDirty,
         setNodes,
         setEdges,

@@ -1,5 +1,48 @@
-/* Import shared styles from functions */
-@import '../../functions/nodes/nodes.css';
+/* Import shared graph styles */
+@import '../../../components/GraphEditor/GraphEditor.css';
+
+/* ============================================
+   Input/Output Node Styles
+   ============================================ */
+.input-node {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: var(--g-color-base-float);
+    border: 2px solid var(--g-color-line-generic);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--g-color-text-secondary);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+    cursor: pointer;
+}
+
+.output-node {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: var(--g-color-base-float);
+    border: 2px solid var(--g-color-line-generic);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--g-color-text-secondary);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+    cursor: pointer;
+}
+
+.input-node:hover,
+.output-node:hover {
+    border-color: var(--g-color-line-generic-hover);
+    background: var(--g-color-base-generic-ultralight);
+}
+
+.input-node.selected,
+.output-node.selected {
+    border-color: var(--g-color-line-brand);
+    color: var(--g-color-text-brand);
+}
 
 /* ============================================
    Function Reference Node Styles
@@ -42,4 +85,22 @@
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+
+/* ============================================
+   Handle Styles
+   ============================================ */
+.node-handle {
+    width: 10px !important;
+    height: 10px !important;
+    background: var(--g-color-base-float) !important;
+    border: 2px solid var(--g-color-line-generic) !important;
+    transition: all 0.15s ease;
+}
+
+.node-handle:hover {
+    width: 14px !important;
+    height: 14px !important;
+    background: var(--g-color-base-brand) !important;
+    border-color: var(--g-color-line-brand) !important;
 }

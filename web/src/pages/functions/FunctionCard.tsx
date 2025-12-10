@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Text, Button, Flex, Card, Alert } from '@gravity-ui/uikit';
-import { TrashBin, FloppyDisk } from '@gravity-ui/icons';
+import { Box, Text, Card, Alert } from '@gravity-ui/uikit';
 import type { FunctionId } from '../../api/common';
 import type { Function as APIFunction } from '../../api/functions';
+import { CardHeader } from '../../components';
 import { FunctionGraph } from './FunctionGraph';
 import { DeleteFunctionDialog, ModuleEditorDialog, SingleWeightEditorDialog } from './dialogs';
 import type { ChainEditorResult } from './dialogs/SingleWeightEditorDialog';
@@ -214,46 +214,14 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     return (
         <Card style={{ marginBottom: '16px' }}>
             <Box style={{ display: 'flex', flexDirection: 'column', height: '450px' }}>
-                {/* Header */}
-                <Flex
-                    alignItems="center"
-                    justifyContent="space-between"
-                    style={{
-                        padding: '12px 16px',
-                        borderBottom: '1px solid var(--g-color-line-generic)',
-                    }}
-                >
-                    <Flex alignItems="center" gap={2}>
-                        <Text variant="subheader-2">{functionId.name}</Text>
-                        {isDirty && (
-                            <Text variant="caption-1" color="secondary">
-                                (unsaved changes)
-                            </Text>
-                        )}
-                    </Flex>
-                    <Flex gap={2}>
-                        <Button
-                            view="action"
-                            onClick={handleSave}
-                            disabled={!isValid || !isDirty}
-                            loading={saving}
-                        >
-                            <Button.Icon>
-                                <FloppyDisk />
-                            </Button.Icon>
-                            Save
-                        </Button>
-                        <Button
-                            view="outlined-danger"
-                            onClick={() => setDeleteDialogOpen(true)}
-                        >
-                            <Button.Icon>
-                                <TrashBin />
-                            </Button.Icon>
-                            Delete
-                        </Button>
-                    </Flex>
-                </Flex>
+                <CardHeader
+                    title={functionId.name || ''}
+                    isDirty={isDirty}
+                    onSave={handleSave}
+                    onDelete={() => setDeleteDialogOpen(true)}
+                    saveDisabled={!isValid}
+                    saving={saving}
+                />
                 
                 {/* Validation errors */}
                 {validationErrors.length > 0 && (

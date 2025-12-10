@@ -4,7 +4,8 @@ import type { Pipeline, PipelineId } from '../../api/pipelines';
 import type { FunctionId } from '../../api/common';
 import type { InspectResponse } from '../../api/inspect';
 import { toaster } from '../../utils';
-import type { PipelineNode, PipelineEdge, PipelineGraphState } from './types';
+import { useGraphEditor } from '../../hooks';
+import type { PipelineNode, PipelineEdge } from './types';
 import { apiToGraph, graphToApi, createEmptyGraph, validateLinkedList } from './utils';
 
 export interface InstanceData {
@@ -195,76 +196,47 @@ export interface UsePipelineGraphResult {
  * Hook for managing graph state for a single pipeline
  */
 export const usePipelineGraph = (initialPipeline?: Pipeline): UsePipelineGraphResult => {
-    const [graphState, setGraphState] = useState<PipelineGraphState>(() => {
-        if (initialPipeline) {
-            return apiToGraph(initialPipeline);
-        }
-        return createEmptyGraph();
+    const initialState = initialPipeline ? apiToGraph(initialPipeline) : undefined;
+
+    const validateFn = useCallback((nodes: PipelineNode[], edges: PipelineEdge[]) => {
+        const validation = validateLinkedList(nodes, edges);
+        return validation.errors;
+    }, []);
+
+    const {
+        nodes,
+        edges,
+        isValid,
+        validationErrors,
+        isDirty,
+        setNodes,
+        setEdges,
+        setNodesWithoutDirty,
+        setEdgesWithoutDirty,
+        updateNode,
+        loadState,
+        reset,
+        markClean,
+    } = useGraphEditor<PipelineNode, PipelineEdge>({
+        initialState,
+        createEmptyState: createEmptyGraph,
+        validate: validateFn,
     });
-    const [isDirty, setIsDirty] = useState(false);
-    const [originalState, setOriginalState] = useState<PipelineGraphState | null>(null);
-
-    const validation = validateLinkedList(graphState.nodes, graphState.edges);
-
-    const setNodes = useCallback((nodes: PipelineNode[]) => {
-        setGraphState(prev => ({ ...prev, nodes }));
-        setIsDirty(true);
-    }, []);
-
-    const setNodesWithoutDirty = useCallback((nodes: PipelineNode[]) => {
-        setGraphState(prev => ({ ...prev, nodes }));
-    }, []);
-
-    const setEdges = useCallback((edges: PipelineEdge[]) => {
-        setGraphState(prev => ({ ...prev, edges }));
-        setIsDirty(true);
-    }, []);
-
-    const setEdgesWithoutDirty = useCallback((edges: PipelineEdge[]) => {
-        setGraphState(prev => ({ ...prev, edges }));
-    }, []);
-
-    const updateNode = useCallback((nodeId: string, data: Record<string, unknown>) => {
-        setGraphState(prev => ({
-            ...prev,
-            nodes: prev.nodes.map(node =>
-                node.id === nodeId ? { ...node, data } as PipelineNode : node
-            ),
-        }));
-        setIsDirty(true);
-    }, []);
 
     const loadFromApi = useCallback((pipeline: Pipeline) => {
         const newState = apiToGraph(pipeline);
-        setGraphState(newState);
-        setOriginalState(newState);
-        setIsDirty(false);
-    }, []);
+        loadState(newState);
+    }, [loadState]);
 
     const toApi = useCallback((pipelineId: string): Pipeline => {
-        return graphToApi(pipelineId, graphState.nodes, graphState.edges);
-    }, [graphState]);
-
-    const reset = useCallback(() => {
-        if (originalState) {
-            setGraphState(originalState);
-            setIsDirty(false);
-        } else {
-            setGraphState(createEmptyGraph());
-            setIsDirty(false);
-        }
-    }, [originalState]);
-
-    const markClean = useCallback(() => {
-        setOriginalState(graphState);
-        setIsDirty(false);
-    }, [graphState]);
+        return graphToApi(pipelineId, nodes, edges);
+    }, [nodes, edges]);
 
     return {
-        nodes: graphState.nodes,
-        edges: graphState.edges,
-        isValid: validation.isValid,
-        validationErrors: validation.errors,
+        nodes,
+        edges,
+        isValid,
+        validationErrors,
         isDirty,
         setNodes,
         setEdges,

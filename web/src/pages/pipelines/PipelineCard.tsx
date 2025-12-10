@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Text, Button, Flex, Card, Alert } from '@gravity-ui/uikit';
-import { TrashBin, FloppyDisk } from '@gravity-ui/icons';
+import { Box, Text, Card, Alert } from '@gravity-ui/uikit';
 import type { PipelineId, Pipeline } from '../../api/pipelines';
 import type { FunctionId } from '../../api/common';
+import { CardHeader } from '../../components';
 import { PipelineGraph } from './PipelineGraph';
 import { DeletePipelineDialog, FunctionRefEditorDialog } from './dialogs';
 import { usePipelineGraph } from './hooks';
@@ -35,7 +35,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
     const [availableFunctions, setAvailableFunctions] = useState<FunctionId[]>([]);
     const [loadingFunctions, setLoadingFunctions] = useState(false);
-    
+
     const {
         nodes,
         edges,
@@ -51,7 +51,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
         toApi,
         markClean,
     } = usePipelineGraph();
-    
+
     // Load pipeline data on mount
     useEffect(() => {
         const load = async (): Promise<void> => {
@@ -64,7 +64,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
         };
         load();
     }, [instance, pipelineId, loadPipeline, loadFromApi]);
-    
+
     // Load available functions when dialog opens
     useEffect(() => {
         if (functionRefDialogOpen && availableFunctions.length === 0) {
@@ -77,12 +77,12 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
             loadFunctions();
         }
     }, [functionRefDialogOpen, availableFunctions.length, loadFunctionList, instance]);
-    
+
     const handleSave = useCallback(async () => {
         if (!isValid) {
             return;
         }
-        
+
         setSaving(true);
         try {
             const pipeline = toApi(pipelineId.name || '');
@@ -96,34 +96,34 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
         }
         setSaving(false);
     }, [isValid, toApi, pipelineId, updatePipeline, instance, markClean]);
-    
+
     const handleDelete = useCallback(async () => {
         setDeleting(true);
         await deletePipeline(instance, pipelineId);
         setDeleting(false);
         setDeleteDialogOpen(false);
     }, [deletePipeline, instance, pipelineId]);
-    
+
     const handleNodeDoubleClick = useCallback((nodeId: string, nodeType: string) => {
         if (nodeType === NODE_TYPE_FUNCTION_REF) {
             setSelectedNodeId(nodeId);
             setFunctionRefDialogOpen(true);
         }
     }, []);
-    
+
     const handleFunctionRefConfirm = useCallback((data: FunctionRefNodeData) => {
         if (!selectedNodeId) return;
-        
+
         updateNode(selectedNodeId, data);
         setFunctionRefDialogOpen(false);
         setSelectedNodeId(null);
     }, [selectedNodeId, updateNode]);
-    
+
     // Handle position-only changes (don't mark dirty)
     const handleNodesChange = useCallback((newNodes: PipelineNode[]) => {
         const oldNodeMap = new Map(nodes.map(n => [n.id, n]));
-        
-        const onlyNonDataChanges = nodes.length === newNodes.length && 
+
+        const onlyNonDataChanges = nodes.length === newNodes.length &&
             newNodes.every(newNode => {
                 const oldNode = oldNodeMap.get(newNode.id);
                 if (!oldNode) return false;
@@ -131,37 +131,37 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
                 const newData = JSON.stringify(newNode.data);
                 return oldData === newData && oldNode.type === newNode.type;
             });
-        
+
         if (onlyNonDataChanges) {
             setNodesWithoutDirty(newNodes);
         } else {
             setNodes(newNodes);
         }
     }, [nodes, setNodes, setNodesWithoutDirty]);
-    
+
     // Handle selection-only changes for edges (don't mark dirty)
     const handleEdgesChange = useCallback((newEdges: PipelineEdge[]) => {
         const oldEdgeMap = new Map(edges.map(e => [e.id, e]));
-        
-        const onlyNonDataChanges = edges.length === newEdges.length && 
+
+        const onlyNonDataChanges = edges.length === newEdges.length &&
             newEdges.every(newEdge => {
                 const oldEdge = oldEdgeMap.get(newEdge.id);
                 if (!oldEdge) return false;
-                return oldEdge.source === newEdge.source && 
+                return oldEdge.source === newEdge.source &&
                     oldEdge.target === newEdge.target;
             });
-        
+
         if (onlyNonDataChanges) {
             setEdgesWithoutDirty(newEdges);
         } else {
             setEdges(newEdges);
         }
     }, [edges, setEdges, setEdgesWithoutDirty]);
-    
+
     const selectedNode = selectedNodeId
         ? nodes.find(n => n.id === selectedNodeId)
         : null;
-    
+
     if (loading) {
         return (
             <Card style={{ marginBottom: '16px' }}>
@@ -171,58 +171,26 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
             </Card>
         );
     }
-    
+
     return (
         <Card style={{ marginBottom: '16px' }}>
             <Box style={{ display: 'flex', flexDirection: 'column', height: '350px' }}>
-                {/* Header */}
-                <Flex
-                    alignItems="center"
-                    justifyContent="space-between"
-                    style={{
-                        padding: '12px 16px',
-                        borderBottom: '1px solid var(--g-color-line-generic)',
-                    }}
-                >
-                    <Flex alignItems="center" gap={2}>
-                        <Text variant="subheader-2">{pipelineId.name}</Text>
-                        {isDirty && (
-                            <Text variant="caption-1" color="secondary">
-                                (unsaved changes)
-                            </Text>
-                        )}
-                    </Flex>
-                    <Flex gap={2}>
-                        <Button
-                            view="action"
-                            onClick={handleSave}
-                            disabled={!isValid || !isDirty}
-                            loading={saving}
-                        >
-                            <Button.Icon>
-                                <FloppyDisk />
-                            </Button.Icon>
-                            Save
-                        </Button>
-                        <Button
-                            view="outlined-danger"
-                            onClick={() => setDeleteDialogOpen(true)}
-                        >
-                            <Button.Icon>
-                                <TrashBin />
-                            </Button.Icon>
-                            Delete
-                        </Button>
-                    </Flex>
-                </Flex>
-                
+                <CardHeader
+                    title={pipelineId.name || ''}
+                    isDirty={isDirty}
+                    onSave={handleSave}
+                    onDelete={() => setDeleteDialogOpen(true)}
+                    saveDisabled={!isValid}
+                    saving={saving}
+                />
+
                 {/* Validation errors */}
                 {validationErrors.length > 0 && (
                     <Box style={{ padding: '8px 16px' }}>
                         <Alert theme="danger" message={validationErrors[0]} />
                     </Box>
                 )}
-                
+
                 {/* Graph */}
                 <Box style={{ flex: 1, minHeight: 0 }}>
                     <PipelineGraph
@@ -234,7 +202,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
                     />
                 </Box>
             </Box>
-            
+
             {/* Dialogs */}
             <DeletePipelineDialog
                 open={deleteDialogOpen}
@@ -243,7 +211,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
                 pipelineName={pipelineId.name || ''}
                 loading={deleting}
             />
-            
+
             <FunctionRefEditorDialog
                 open={functionRefDialogOpen}
                 onClose={() => {
@@ -262,4 +230,3 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
         </Card>
     );
 };
-

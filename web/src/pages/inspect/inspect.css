@@ -1,0 +1,111 @@
+/* ============================================
+   Instance Card Styles
+   ============================================ */
+.instance-card {
+    border: 1px solid var(--g-color-line-generic);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    background-color: var(--g-color-base-background);
+}
+
+/* ============================================
+   Module Card Styles
+   ============================================ */
+.module-card {
+    border: 1px solid var(--g-color-line-generic);
+    border-radius: 8px;
+    padding: 12px 16px;
+    background-color: var(--g-color-base-float);
+    display: flex;
+    flex-direction: column;
+    width: 200px;
+    transition: all 0.2s ease;
+}
+
+.module-card:hover {
+    border-color: var(--g-color-line-brand);
+    background-color: var(--g-color-base-simple-hover);
+}
+
+.module-card__content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
+}
+
+.module-card__header {
+    min-height: 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.module-card__row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.module-card__separator {
+    flex: 1;
+    border-bottom: 1px dotted var(--g-color-line-generic);
+    margin: 0 8px 2px 8px;
+    height: 1px;
+}
+
+/* ============================================
+   Devices Section Styles
+   ============================================ */
+.devices-section__device {
+    margin-bottom: 12px;
+}
+
+.devices-section__device-name {
+    margin-bottom: 8px;
+    font-weight: bold;
+}
+
+.devices-section__pipeline-group {
+    margin-left: 16px;
+    margin-bottom: 8px;
+}
+
+.devices-section__pipeline-label {
+    margin-bottom: 4px;
+}
+
+.devices-section__pipeline-item {
+    margin-left: 16px;
+    margin-bottom: 4px;
+}
+
+.devices-section__no-pipelines {
+    margin-left: 16px;
+    display: block;
+}
+
+/* ============================================
+   Section Styles
+   ============================================ */
+.inspect-section {
+    margin-bottom: 24px;
+}
+
+.inspect-section__header {
+    margin-bottom: 12px;
+}
+
+.inspect-section__content {
+    padding: 12px;
+}
+
+.inspect-section__modules-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: stretch;
+}

@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Text, Button, Flex, Card, TextInput, Label } from '@gravity-ui/uikit';
-import { FloppyDisk } from '@gravity-ui/icons';
+import { Box, Text, Flex, Card, TextInput, Label } from '@gravity-ui/uikit';
 import type { PipelineId } from '../../api/pipelines';
 import type { DevicePipeline } from '../../api/devices';
+import { CardHeader } from '../../components';
 import { PipelineTable } from './PipelineTable';
 import type { LocalDevice } from './types';
 
@@ -53,47 +53,26 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({
         onUpdate({ vlanId: isNaN(value) ? 0 : value });
     }, [onUpdate]);
 
+    const typeLabel = (
+        <Label theme={device.type === 'vlan' ? 'info' : 'normal'}>
+            {device.type}
+        </Label>
+    );
+
     return (
         <Card style={{ marginBottom: '16px' }}>
             <Box style={{ display: 'flex', flexDirection: 'column' }}>
-                {/* Header */}
-                <Flex
-                    alignItems="center"
-                    justifyContent="space-between"
-                    style={{
-                        padding: '12px 16px',
-                        borderBottom: '1px solid var(--g-color-line-generic)',
-                    }}
-                >
-                    <Flex alignItems="center" gap={2}>
-                        <Label theme={device.type === 'vlan' ? 'info' : 'normal'}>
-                            {device.type}
-                        </Label>
-                        <Text variant="subheader-2">{device.id.name}</Text>
-                        {device.isNew && (
-                            <Label theme="warning">new</Label>
-                        )}
-                        {device.isDirty && !device.isNew && (
-                            <Text variant="caption-1" color="secondary">
-                                (unsaved changes)
-                            </Text>
-                        )}
-                    </Flex>
-                    <Button
-                        view="action"
-                        onClick={handleSave}
-                        disabled={!device.isDirty}
-                        loading={saving}
-                    >
-                        <Button.Icon>
-                            <FloppyDisk />
-                        </Button.Icon>
-                        Save
-                    </Button>
-                </Flex>
+                <CardHeader
+                    title={device.id.name || ''}
+                    isDirty={device.isDirty}
+                    isNew={device.isNew}
+                    onSave={handleSave}
+                    saving={saving}
+                    labels={typeLabel}
+                />
 
                 {/* Content */}
-                <Box style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                     {/* VLAN ID field for vlan devices */}
                     {device.type === 'vlan' && (
                         <Flex alignItems="center" gap={2}>
@@ -108,10 +87,10 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({
                     )}
 
                     {/* Pipeline tables */}
-                    <Flex gap={4} style={{ flexWrap: 'wrap' }}>
+                    <Flex gap={4} className="pipelineTables" style={{ flexWrap: 'wrap' }}>
                         <Box style={{ flex: 1, minWidth: '300px' }}>
                             <PipelineTable
-                                title="Input Pipelines"
+                                pipelineLabel="RX Pipeline"
                                 pipelines={device.inputPipelines}
                                 availablePipelines={availablePipelines}
                                 loadingPipelines={loadingPipelines}
@@ -120,7 +99,7 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({
                         </Box>
                         <Box style={{ flex: 1, minWidth: '300px' }}>
                             <PipelineTable
-                                title="Output Pipelines"
+                                pipelineLabel="TX Pipeline"
                                 pipelines={device.outputPipelines}
                                 availablePipelines={availablePipelines}
                                 loadingPipelines={loadingPipelines}

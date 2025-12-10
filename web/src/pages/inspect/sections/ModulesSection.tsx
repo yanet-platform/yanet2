@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
 import type { InstanceInfo } from '../../../api/inspect';
 import { ModuleCard } from '../ModuleCard';
+import '../inspect.css';
 
 export interface ModulesSectionProps {
     instance: InstanceInfo;
@@ -9,13 +10,13 @@ export interface ModulesSectionProps {
 
 export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
     return (
-        <Box style={{ marginBottom: '24px' }}>
-            <Text variant="header-1" style={{ marginBottom: '12px' }}>
+        <Box className="inspect-section">
+            <Text variant="header-1" className="inspect-section__header">
                 Dataplane Modules
             </Text>
             {instance.dpModules && instance.dpModules.length > 0 ? (
-                <Box style={{ padding: '12px' }}>
-                    <Box style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'stretch' }}>
+                <Box className="inspect-section__content">
+                    <Box className="inspect-section__modules-grid">
                         {instance.dpModules.map((module, idx) => {
                             const configCount = instance.cpConfigs?.filter(
                                 (cfg) => cfg.type?.toLowerCase() === module.name?.toLowerCase()
@@ -51,4 +52,3 @@ export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
         </Box>
     );
 };
-

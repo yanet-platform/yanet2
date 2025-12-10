@@ -1,0 +1,18 @@
+.card-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--g-color-line-generic);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.card-header__title-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.card-header__actions {
+    display: flex;
+    gap: 8px;
+}

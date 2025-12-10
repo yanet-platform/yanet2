@@ -55,7 +55,6 @@ export const validateNexthop = (nexthop: string): string | undefined => {
 };
 
 export const formatRouteCount = (count: number): string => {
-    if (count === 1) return 'маршрут';
-    if (count >= 2 && count <= 4) return 'маршрута';
-    return 'маршрутов';
+    if (count === 1) return 'route';
+    return 'routes';
 };

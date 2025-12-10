@@ -9,6 +9,7 @@ import {
     AgentsSection,
     DevicesSection,
 } from './sections';
+import './inspect.css';
 
 export interface InstanceCardProps {
     instance: InstanceInfo;
@@ -16,15 +17,7 @@ export interface InstanceCardProps {
 
 export const InstanceCard: React.FC<InstanceCardProps> = ({ instance }) => {
     return (
-        <Box
-            style={{
-                border: '1px solid var(--g-color-line-generic)',
-                borderRadius: '8px',
-                padding: '20px',
-                marginBottom: '20px',
-                backgroundColor: 'var(--g-color-base-background)',
-            }}
-        >
+        <Box className="instance-card">
             <ModulesSection instance={instance} />
             <Divider style={{ marginBottom: '24px' }} />
             <ConfigurationsSection instance={instance} />
@@ -39,4 +32,3 @@ export const InstanceCard: React.FC<InstanceCardProps> = ({ instance }) => {
         </Box>
     );
 };
-
