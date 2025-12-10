@@ -270,8 +270,12 @@ worker_loop_round(struct dataplane_worker *worker) {
 	// on the start of loop round
 	{
 		struct dp_worker *dp_worker = worker->dp_worker;
+<<<<<<< HEAD
 		dp_worker->current_time =
 			tsc_clock_get_time_ns(&dp_worker->clock);
+=======
+		dp_worker->current_time = tsc_clock_get_time(&dp_worker->clock);
+>>>>>>> 1106f4f (introduce current worker time)
 	}
 
 	struct dp_config *dp_config = worker->instance->dp_config;
