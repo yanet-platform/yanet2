@@ -3,6 +3,7 @@
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "common/memory.h"
@@ -45,6 +46,11 @@ struct dp_worker {
 	//
 	// TODO: FIXME
 	struct tsc_clock clock;
+
+	// Current worker time,
+	// initialized on the start of current
+	// loop round.
+	struct timespec current_time;
 
 	uint64_t *iterations;
 
