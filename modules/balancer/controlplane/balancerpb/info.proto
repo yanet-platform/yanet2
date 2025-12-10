@@ -8,103 +8,103 @@ import "modules/balancer/controlplane/balancerpb/module.proto";
 import "modules/balancer/controlplane/balancerpb/stats.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/"
-    "balancer/controlplane/balancerpb;balancerpb";
+		    "balancer/controlplane/balancerpb;balancerpb";
 
 // Mirrors module.RealInfo with flattened RealIdentifier fields
 message RealInfo {
-  // Index of the real in balancer module state registry
-  uint32 real_registry_idx = 1;
+	// Index of the real in balancer module state registry
+	uint32 real_registry_idx = 1;
 
-  // Flattened RealIdentifier fields:
-  // Virtual service IP address (from RealIdentifier.Vs.Ip)
-  bytes vs_ip = 2;
+	// Flattened RealIdentifier fields:
+	// Virtual service IP address (from RealIdentifier.Vs.Ip)
+	bytes vs_ip = 2;
 
-  // Virtual service port (from RealIdentifier.Vs.Port)
-  uint32 vs_port = 3;
+	// Virtual service port (from RealIdentifier.Vs.Port)
+	uint32 vs_port = 3;
 
-  // Virtual service protocol (from RealIdentifier.Vs.Proto)
-  TransportProto vs_proto = 4;
+	// Virtual service protocol (from RealIdentifier.Vs.Proto)
+	TransportProto vs_proto = 4;
 
-  // Real server IP address (from RealIdentifier.Ip)
-  bytes real_ip = 5;
+	// Real server IP address (from RealIdentifier.Ip)
+	bytes real_ip = 5;
 
-  // Number of active sessions with this real
-  // We update this variable asynchronously.
-  AsyncInfo active_sessions = 6;
+	// Number of active sessions with this real
+	// We update this variable asynchronously.
+	AsyncInfo active_sessions = 6;
 
-  // Timestamp of the last packet
-  google.protobuf.Timestamp last_packet_timestamp = 7;
+	// Timestamp of the last packet
+	google.protobuf.Timestamp last_packet_timestamp = 7;
 
-  // Config-independent statistics of real
-  RealStats stats = 8;
+	// Config-independent statistics of real
+	RealStats stats = 8;
 }
 
 // Mirrors module.VsInfo with flattened VsIdentifier fields
 message VsInfo {
-  // Index of the virtual service in balancer module state registry
-  uint32 vs_registry_idx = 1;
+	// Index of the virtual service in balancer module state registry
+	uint32 vs_registry_idx = 1;
 
-  // Flattened VsIdentifier fields:
-  // Virtual service IP address (from VsIdentifier.Ip)
-  bytes vs_ip = 2;
+	// Flattened VsIdentifier fields:
+	// Virtual service IP address (from VsIdentifier.Ip)
+	bytes vs_ip = 2;
 
-  // Virtual service port (from VsIdentifier.Port)
-  uint32 vs_port = 3;
+	// Virtual service port (from VsIdentifier.Port)
+	uint32 vs_port = 3;
 
-  // Virtual service protocol (from VsIdentifier.Proto)
-  TransportProto vs_proto = 4;
+	// Virtual service protocol (from VsIdentifier.Proto)
+	TransportProto vs_proto = 4;
 
-  // Number of active sessions established with virtual service
-  // We update it asynchronously, so last update timestamp
-  // included.
-  AsyncInfo active_sessions = 5;
+	// Number of active sessions established with virtual service
+	// We update it asynchronously, so last update timestamp
+	// included.
+	AsyncInfo active_sessions = 5;
 
-  // Timestamp of the last packet
-  google.protobuf.Timestamp last_packet_timestamp = 6;
+	// Timestamp of the last packet
+	google.protobuf.Timestamp last_packet_timestamp = 6;
 
-  // Config-independent statistics of virtual service
-  VsStats stats = 7;
+	// Config-independent statistics of virtual service
+	VsStats stats = 7;
 }
 
 // Mirrors module.BalancerInfo
 message BalancerInfo {
-  // Number of active sessions established 
-  // between clients and real servers
-  // using balancer
-  AsyncInfo active_sessions = 5;
+	// Number of active sessions established
+	// between clients and real servers
+	// using balancer
+	AsyncInfo active_sessions = 5;
 
-  // Module-level statistics
-  ModuleStats module = 1;
+	// Module-level statistics
+	ModuleStats module = 1;
 
-  // Information about virtual services
-  repeated VsInfo vs_info = 2;
+	// Information about virtual services
+	repeated VsInfo vs_info = 2;
 
-  // Information about reals
-  repeated RealInfo real_info = 3;
+	// Information about reals
+	repeated RealInfo real_info = 3;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 message SessionInfo {
-  // client info
-  bytes client_addr = 1;
-  uint32 client_port = 2;
+	// client info
+	bytes client_addr = 1;
+	uint32 client_port = 2;
 
-  // virtual service info
-  bytes vs_addr = 4;
-  uint32 vs_port = 5;
+	// virtual service info
+	bytes vs_addr = 4;
+	uint32 vs_port = 5;
 
-  // real info
-  bytes real_addr = 6;
+	// real info
+	bytes real_addr = 6;
 
-  // For now, real port always equal to vs port.
-  // Does not have it in the rest of the codebase.
-  uint32 real_port = 7;
-  
-  // session meta info
-  google.protobuf.Timestamp create_timestamp = 8;
-  google.protobuf.Timestamp last_packet_timestamp = 9;
-  google.protobuf.Duration timeout = 10;
+	// For now, real port always equal to vs port.
+	// Does not have it in the rest of the codebase.
+	uint32 real_port = 7;
+
+	// session meta info
+	google.protobuf.Timestamp create_timestamp = 8;
+	google.protobuf.Timestamp last_packet_timestamp = 9;
+	google.protobuf.Duration timeout = 10;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -112,6 +112,6 @@ message SessionInfo {
 // Variable, which we update asynchronously,
 // so we include last update timestamp for it.
 message AsyncInfo {
-  uint64 value = 1;
-  google.protobuf.Timestamp updated_at = 2;
+	uint64 value = 1;
+	google.protobuf.Timestamp updated_at = 2;
 }

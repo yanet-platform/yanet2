@@ -8,41 +8,41 @@ import "modules/balancer/controlplane/balancerpb/module.proto";
 import "modules/balancer/controlplane/balancerpb/stats.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/"
-    "balancer/controlplane/balancerpb;balancerpb";
+		    "balancer/controlplane/balancerpb;balancerpb";
 
 service Balancer {
-  // Update or enable balancer config
-  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+	// Update or enable balancer config
+	rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
 
-  // Update reals with optional buffering updates
-  rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
+	// Update reals with optional buffering updates
+	rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
 
-  // Flush buffered reals updates
-  rpc FlushRealUpdates(FlushRealUpdatesRequest) 
-    returns (FlushRealUpdatesResponse);
-    
-  // Show balancer config
-  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+	// Flush buffered reals updates
+	rpc FlushRealUpdates(FlushRealUpdatesRequest)
+		returns (FlushRealUpdatesResponse);
 
-  // List balancer configs
-  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+	// Show balancer config
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-  // Stats of the balancer config
-  rpc ConfigStats(ConfigStatsRequest) returns (ConfigStatsResponse);
+	// List balancer configs
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 
-  // Info about the balancer state
-  rpc StateInfo(StateInfoRequest) returns (StateInfoResponse);
+	// Stats of the balancer config
+	rpc ConfigStats(ConfigStatsRequest) returns (ConfigStatsResponse);
 
-  // Info about active balancer sessions
-  rpc SessionsInfo(SessionsInfoRequest) returns (SessionsInfoResponse);
+	// Info about the balancer state
+	rpc StateInfo(StateInfoRequest) returns (StateInfoResponse);
+
+	// Info about active balancer sessions
+	rpc SessionsInfo(SessionsInfoRequest) returns (SessionsInfoResponse);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 message UpdateConfigRequest {
-  commonpb.TargetModule target = 1;
-  ModuleConfig module_config = 2;
-  ModuleStateConfig module_state_config = 3;
+	commonpb.TargetModule target = 1;
+	ModuleConfig module_config = 2;
+	ModuleStateConfig module_state_config = 3;
 }
 
 message UpdateConfigResponse {
@@ -51,12 +51,12 @@ message UpdateConfigResponse {
 ////////////////////////////////////////////////////////////////////////////////
 
 message UpdateRealsRequest {
-  commonpb.TargetModule target = 1;
-  repeated RealUpdate updates = 2;
+	commonpb.TargetModule target = 1;
+	repeated RealUpdate updates = 2;
 
-  // Allows to delay request applying
-  // until `flush` will be called
-  bool buffer = 3;
+	// Allows to delay request applying
+	// until `flush` will be called
+	bool buffer = 3;
 }
 
 message UpdateRealsResponse {
@@ -65,74 +65,74 @@ message UpdateRealsResponse {
 ////////////////////////////////////////////////////////////////////////////////
 
 message FlushRealUpdatesRequest {
-  commonpb.TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 }
 
 message FlushRealUpdatesResponse {
-  // Number of updates applied
-  uint32 updates_flushed = 1;
+	// Number of updates applied
+	uint32 updates_flushed = 1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 message ShowConfigRequest {
-  commonpb.TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 }
 
 message ShowConfigResponse {
-  commonpb.TargetModule target = 1;
-  ModuleConfig module_config = 2;
-  ModuleStateConfig module_state_config = 3;
-  repeated RealUpdate buffered_real_updates = 4;
+	commonpb.TargetModule target = 1;
+	ModuleConfig module_config = 2;
+	ModuleStateConfig module_state_config = 3;
+	repeated RealUpdate buffered_real_updates = 4;
 }
 
 message ListConfigsRequest {
 }
 
 message ListConfigsResponse {
-  repeated ShowConfigResponse configs = 1;
+	repeated ShowConfigResponse configs = 1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 message StateInfoRequest {
-  commonpb.TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 }
 
 message StateInfoResponse {
-  commonpb.TargetModule target = 1;
-  BalancerInfo info = 2;
+	commonpb.TargetModule target = 1;
+	BalancerInfo info = 2;
 }
 
 message ConfigStatsRequest {
-  commonpb.TargetModule target = 1;
-  uint32 dataplane_instance = 2;
+	commonpb.TargetModule target = 1;
+	uint32 dataplane_instance = 2;
 
-  // required for now – will be optional later
-  string device = 3;
-  string pipeline = 4;
-  string function = 5;
-  string chain = 6;
+	// required for now – will be optional later
+	string device = 3;
+	string pipeline = 4;
+	string function = 5;
+	string chain = 6;
 }
 
 message ConfigStatsResponse {
-  commonpb.TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 
-  string device = 2;
-  string pipeline = 3;
-  string function = 4;
-  string chain = 5;
+	string device = 2;
+	string pipeline = 3;
+	string function = 4;
+	string chain = 5;
 
-  BalancerStats stats = 6;
+	BalancerStats stats = 6;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 message SessionsInfoRequest {
-  commonpb.TargetModule target = 1;
+	commonpb.TargetModule target = 1;
 }
 
 message SessionsInfoResponse {
-  commonpb.TargetModule target = 1;
-  repeated SessionInfo sessions_info = 2;
+	commonpb.TargetModule target = 1;
+	repeated SessionInfo sessions_info = 2;
 }

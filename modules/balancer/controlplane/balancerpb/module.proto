@@ -5,154 +5,154 @@ package balancerpb;
 import "google/protobuf/duration.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/"
-    "balancer/controlplane/balancerpb;balancerpb";
+		    "balancer/controlplane/balancerpb;balancerpb";
 
 message WlcConfig {
-  uint64 wlc_power = 1;
-  uint32 max_real_weight = 2;
-  google.protobuf.Duration update_period = 3;
+	uint64 wlc_power = 1;
+	uint32 max_real_weight = 2;
+	google.protobuf.Duration update_period = 3;
 }
 
 // Represents network subnet.
 message Subnet {
-  bytes addr = 1;
-  uint32 size = 2;
+	bytes addr = 1;
+	uint32 size = 2;
 }
 
 // Transport protocol (TCP or UDP).
 enum TransportProto {
-  TCP = 0;
-  UDP = 1;
+	TCP = 0;
+	UDP = 1;
 }
 
 // Virtual service scheduler
 enum VsScheduler {
-  // Round robin based on hash
-  WRR = 0;
+	// Round robin based on hash
+	WRR = 0;
 
-  // Round robin with counter
-  PRR = 1;
+	// Round robin with counter
+	PRR = 1;
 
-  // Weighted Least Connections
-  WLC = 2;
+	// Weighted Least Connections
+	WLC = 2;
 }
 
 // Virtual service configuration.
 message VirtualService {
-  // Virtual IP address.
-  bytes addr = 1;
+	// Virtual IP address.
+	bytes addr = 1;
 
-  uint32 port = 2;
+	uint32 port = 2;
 
-  TransportProto proto = 3;
+	TransportProto proto = 3;
 
-  VsScheduler scheduler = 4;
+	VsScheduler scheduler = 4;
 
-  repeated Subnet allowed_srcs = 5;
-  repeated Real reals = 6;
+	repeated Subnet allowed_srcs = 5;
+	repeated Real reals = 6;
 
-  VsFlags flags = 7;
+	VsFlags flags = 7;
 
-  // Addresses of the balancer which serves this vs
-  // (except of this balancer address)
-  repeated bytes peers = 8;
+	// Addresses of the balancer which serves this vs
+	// (except of this balancer address)
+	repeated bytes peers = 8;
 }
 
 // Represents a real server in the configuration.
 message Real {
-  // Weight assigned to the real server.
-  uint32 weight = 1;
+	// Weight assigned to the real server.
+	uint32 weight = 1;
 
-  // Destination address of the real server.
-  bytes dst_addr = 2;
+	// Destination address of the real server.
+	bytes dst_addr = 2;
 
-  // When encapsulation is enabled, the source address is calculated as:
-  // src = (src_addr & src_mask) | (original_src & (~ src_mask)).
-  bytes src_addr = 3;
-  bytes src_mask = 4;
+	// When encapsulation is enabled, the source address is calculated as:
+	// src = (src_addr & src_mask) | (original_src & (~ src_mask)).
+	bytes src_addr = 3;
+	bytes src_mask = 4;
 
-  // False by default.
-  bool enabled = 5;
+	// False by default.
+	bool enabled = 5;
 
-  // Unused for now,
-  // not present in the rest codebase.
-  uint32 port = 6;
+	// Unused for now,
+	// not present in the rest codebase.
+	uint32 port = 6;
 }
 
 // Flags of the virtual service
 message VsFlags {
-  // If GRE flag is set, GRE is used for tunneling packets to
-  // every balancer real. Else, TUN is used. False by default.
-  bool gre = 6;
+	// If GRE flag is set, GRE is used for tunneling packets to
+	// every balancer real. Else, TUN is used. False by default.
+	bool gre = 6;
 
-  // fix_mss flag specifies if TCP MSS option must be fixed. False by
-  // default.
-  bool fix_mss = 7;
+	// fix_mss flag specifies if TCP MSS option must be fixed. False by
+	// default.
+	bool fix_mss = 7;
 
-  // OPS flag specifies if one packet scheduler should be used for
-  // selecting reals of service. False by default.
-  bool ops = 8;
+	// OPS flag specifies if one packet scheduler should be used for
+	// selecting reals of service. False by default.
+	bool ops = 8;
 
-  // PureL3 flag specifies if we need to schedule based on L3 address
-  // only. False by default.
-  bool pure_l3 = 9;
+	// PureL3 flag specifies if we need to schedule based on L3 address
+	// only. False by default.
+	bool pure_l3 = 9;
 }
 
 // Message for update real.
 message RealUpdate {
-  // IP of the virtual service real belongs to
-  bytes virtual_ip = 1;
+	// IP of the virtual service real belongs to
+	bytes virtual_ip = 1;
 
-  // Virtual service proto
-  TransportProto proto = 2;
+	// Virtual service proto
+	TransportProto proto = 2;
 
-  // Virtual service port
-  uint32 port = 3;
+	// Virtual service port
+	uint32 port = 3;
 
-  // Ip of the real
-  bytes real_ip = 4;
+	// Ip of the real
+	bytes real_ip = 4;
 
-  // Enable or disable real
-  bool enable = 5;
+	// Enable or disable real
+	bool enable = 5;
 
-  // Optional new weight
-  // Zero weight means no update weight
-  uint32 weight = 6;
+	// Optional new weight
+	// Zero weight means no update weight
+	uint32 weight = 6;
 }
 
 message SessionsTimeouts {
-  uint32 tcp_syn_ack = 1;
-  uint32 tcp_syn = 2;
-  uint32 tcp_fin = 3;
-  uint32 tcp = 4;
-  uint32 udp = 5;
-  uint32 default = 6;
+	uint32 tcp_syn_ack = 1;
+	uint32 tcp_syn = 2;
+	uint32 tcp_fin = 3;
+	uint32 tcp = 4;
+	uint32 udp = 5;
+	uint32 default = 6;
 }
 
 message ModuleConfig {
-  repeated VirtualService virtual_services = 1;
-  bytes source_address_v4 = 2;
-  bytes source_address_v6 = 3;
+	repeated VirtualService virtual_services = 1;
+	bytes source_address_v4 = 2;
+	bytes source_address_v6 = 3;
 
-  // if balancer receives packet with destination address 
-  // from this list, it tries to make decap
-  repeated bytes decap_addresses = 4;
+	// if balancer receives packet with destination address
+	// from this list, it tries to make decap
+	repeated bytes decap_addresses = 4;
 
-  // timeouts of the sessions created by balancer
-  SessionsTimeouts sessions_timeouts = 5;
+	// timeouts of the sessions created by balancer
+	SessionsTimeouts sessions_timeouts = 5;
 
-  // Config of the weighted least connections scheme
-  WlcConfig wlc = 6;
+	// Config of the weighted least connections scheme
+	WlcConfig wlc = 6;
 }
 
 message ModuleStateConfig {
-  // Size of the session table
-  uint64 session_table_capacity = 1;
+	// Size of the session table
+	uint64 session_table_capacity = 1;
 
-  // Period to scan the state of the session table
-  // to update active connections and WLC.
-  google.protobuf.Duration session_table_scan_period = 2;
+	// Period to scan the state of the session table
+	// to update active connections and WLC.
+	google.protobuf.Duration session_table_scan_period = 2;
 
-  // Max load factor of the session table.
-  float session_table_max_load_factor = 3;
+	// Max load factor of the session table.
+	float session_table_max_load_factor = 3;
 }
