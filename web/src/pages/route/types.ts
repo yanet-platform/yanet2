@@ -25,7 +25,9 @@ export type RouteTableProps = RouteTableBaseProps;
 export interface RoutePageHeaderProps {
     onAddRoute: () => void;
     onDeleteRoute: () => void;
+    onFlush: () => void;
     isDeleteDisabled: boolean;
+    isFlushDisabled: boolean;
     mockEnabled?: boolean;
     onMockToggle?: (enabled: boolean) => void;
     mockSize?: string;

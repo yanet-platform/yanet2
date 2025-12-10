@@ -66,6 +66,13 @@ export interface DeleteRouteRequest {
 export interface DeleteRouteResponse {
 }
 
+export interface FlushRoutesRequest {
+    target?: TargetModule;
+}
+
+export interface FlushRoutesResponse {
+}
+
 const routeService = createService('routepb.RouteService');
 
 export const route = {
@@ -80,5 +87,8 @@ export const route = {
     },
     deleteRoute: (request: DeleteRouteRequest, signal?: AbortSignal): Promise<DeleteRouteResponse> => {
         return routeService.callWithBody<DeleteRouteResponse>('DeleteRoute', request, signal);
+    },
+    flushRoutes: (request: FlushRoutesRequest, signal?: AbortSignal): Promise<FlushRoutesResponse> => {
+        return routeService.callWithBody<FlushRoutesResponse>('FlushRoutes', request, signal);
     },
 };

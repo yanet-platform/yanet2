@@ -11,7 +11,9 @@ const mockOptions = Object.entries(MOCK_CONFIGS).map(([key, value]) => ({
 export const RoutePageHeader: React.FC<RoutePageHeaderProps> = ({
     onAddRoute,
     onDeleteRoute,
+    onFlush,
     isDeleteDisabled,
+    isFlushDisabled,
     mockEnabled,
     onMockToggle,
     mockSize,
@@ -48,6 +50,13 @@ export const RoutePageHeader: React.FC<RoutePageHeaderProps> = ({
                 disabled={isDeleteDisabled || mockEnabled}
             >
                 Delete Route
+            </Button>
+            <Button
+                view="outlined"
+                onClick={onFlush}
+                disabled={isFlushDisabled || mockEnabled}
+            >
+                Flush RIB → FIB
             </Button>
         </Box>
     </Flex>

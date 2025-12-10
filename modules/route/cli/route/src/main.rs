@@ -18,8 +18,8 @@ use tonic::transport::Channel;
 use yanet_cli_route::{
     commonpb::TargetModule,
     routepb::{
-        route_service_client::RouteServiceClient, InsertRouteRequest, ListConfigsRequest, LookupRouteRequest,
-        ShowRoutesRequest,
+        route_service_client::RouteServiceClient, FlushRoutesRequest, InsertRouteRequest, ListConfigsRequest,
+        LookupRouteRequest, ShowRoutesRequest,
     },
     RouteEntry,
 };
@@ -48,6 +48,8 @@ pub enum ModeCmd {
     Lookup(RouteLookupCmd),
     /// Inserts a unicast static route.
     Insert(RouteInsertCmd),
+    /// Flush RIB to FIB for a configuration.
+    Flush(RouteFlushCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -96,6 +98,16 @@ pub struct RouteInsertCmd {
     pub instances: Vec<u32>,
 }
 
+#[derive(Debug, Clone, Parser)]
+pub struct RouteFlushCmd {
+    /// Route config name.
+    #[arg(long = "cfg")]
+    pub config_name: String,
+    /// Dataplane instances where changes should be applied, optionally repeated.
+    #[arg(long, required = true)]
+    pub instances: Vec<u32>,
+}
+
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
@@ -116,6 +128,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Show(cmd) => service.show_routes(cmd).await,
         ModeCmd::Lookup(cmd) => service.lookup_route(cmd).await,
         ModeCmd::Insert(cmd) => service.insert_route(cmd).await,
+        ModeCmd::Flush(cmd) => service.flush_routes(cmd).await,
     }
 }
 
@@ -228,6 +241,22 @@ impl RouteService {
             log::debug!("InsertRouteResponse on instance {inst}: {resp:?}");
         }
 
+        Ok(())
+    }
+
+    pub async fn flush_routes(&mut self, cmd: RouteFlushCmd) -> Result<(), Box<dyn Error>> {
+        for inst in cmd.instances {
+            let request = FlushRoutesRequest {
+                target: Some(TargetModule {
+                    config_name: cmd.config_name.clone(),
+                    dataplane_instance: inst,
+                }),
+            };
+
+            self.client.flush_routes(request).await?;            
+        }
+
+        println!("OK");
         Ok(())
     }
 }

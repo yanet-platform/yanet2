@@ -66,6 +66,7 @@ const RoutePage: React.FC = () => {
     const currentSelectedMap = selectedRoutes.get(currentInstance);
     const currentSelected = currentSelectedMap?.get(currentActiveConfig);
     const isDeleteDisabled = !currentSelected || currentSelected.size === 0;
+    const isFlushDisabled = !currentActiveConfig;
 
     const handleAddRouteClick = useCallback((): void => {
         setAddRouteForm({
@@ -84,6 +85,25 @@ const RoutePage: React.FC = () => {
         }
         setDeleteDialogOpen(true);
     }, [isDeleteDisabled]);
+
+    const handleFlushClick = useCallback(async (): Promise<void> => {
+        if (!currentActiveConfig) {
+            toaster.warning('flush-route-config-warning', 'Please select a config to flush');
+            return;
+        }
+
+        try {
+            await API.route.flushRoutes({
+                target: {
+                    configName: currentActiveConfig,
+                    dataplaneInstance: currentInstance,
+                },
+            });
+            toaster.success('flush-route-success', `Flushed routes for ${currentActiveConfig} on instance ${currentInstance}`);
+        } catch (err) {
+            toaster.error('flush-route-error', 'Failed to flush routes', err);
+        }
+    }, [currentActiveConfig, currentInstance]);
 
     const handleAddRouteConfirm = useCallback(async (): Promise<void> => {
         const configName = addRouteForm.configName.trim();
@@ -256,7 +276,9 @@ const RoutePage: React.FC = () => {
         <RoutePageHeader
             onAddRoute={handleAddRouteClick}
             onDeleteRoute={handleDeleteRouteClick}
+            onFlush={handleFlushClick}
             isDeleteDisabled={mockEnabled ? mockSelectedIds.size === 0 : isDeleteDisabled}
+            isFlushDisabled={isFlushDisabled}
             mockEnabled={mockEnabled}
             onMockToggle={handleMockToggle}
             mockSize={mockSize}
