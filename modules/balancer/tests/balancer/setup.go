@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
@@ -60,7 +59,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		config.stateConfig = &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      128,
 			SessionTableMaxLoadFactor: 0.75,
-			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableScanPeriod:    durationpb.New(0),
 		}
 	}
 

@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"testing"
-	"time"
 
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -66,13 +65,13 @@ func TestBalancerBasics(t *testing.T) {
 		Wlc: &balancerpb.WlcConfig{
 			WlcPower:      10,
 			MaxRealWeight: 1000,
-			UpdatePeriod:  durationpb.New(2 * time.Second),
+			UpdatePeriod:  durationpb.New(0),
 		},
 	}
 
 	stateConfig := &balancerpb.ModuleStateConfig{
 		SessionTableCapacity:      100,
-		SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+		SessionTableScanPeriod:    durationpb.New(0),
 		SessionTableMaxLoadFactor: 0.8,
 	}
 

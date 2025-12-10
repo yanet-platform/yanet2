@@ -4,6 +4,7 @@
 #include <rte_tcp.h>
 #include <rte_udp.h>
 
+#include "dataplane/time/clock.h"
 #include "flow/setup.h"
 #include "flow/stats.h"
 
@@ -63,9 +64,8 @@ balancer_handle_packets(
 		cp_module
 	);
 
-	// Get current time.
-	// TODO: FIXME, take time from the worker context.
-	uint32_t now = time(NULL);
+	// Get current time in seconds.
+	uint32_t now = tsc_clock_get_time(&dp_worker->clock).tv_sec;
 
 	// update worker time
 	update_worker_time(ADDR_OF(&config->state), dp_worker, now);

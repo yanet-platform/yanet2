@@ -77,11 +77,6 @@ func NewModuleConfigState(
 		return nil, fmt.Errorf("max load factor must be greater than 0.001")
 	}
 
-	if scanSessionTablePeriodMs == 0 {
-		state.Free()
-		return nil, fmt.Errorf("scan session table period must be greater than 0")
-	}
-
 	s := &ModuleConfigState{
 		agent:                    agent,
 		cHandle:                  state,
@@ -154,9 +149,8 @@ func (s *ModuleConfigState) CHandle() balancer_ffi.ModuleConfigStatePtr {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (s *ModuleConfigState) SessionsInfo() (module.SessionsInfo, error) {
-	now := time.Now()
-	sessions := s.cHandle.SessionsInfo(uint32(now.Unix()), false)
+func (s *ModuleConfigState) SessionsInfo(time time.Time) (module.SessionsInfo, error) {
+	sessions := s.cHandle.SessionsInfo(uint32(time.Unix()), false)
 	if sessions == nil {
 		s.log.Warn("failed to get sessions info from C handle")
 		return module.SessionsInfo{}, fmt.Errorf("failed to scan session table")
@@ -207,9 +201,9 @@ func (s *ModuleConfigState) SessionsInfo() (module.SessionsInfo, error) {
 	}, nil
 }
 
-func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand() error {
+func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(now time.Time) error {
 	// Update active connections info
-	sessions, err := s.SessionsInfo()
+	sessions, err := s.SessionsInfo(now)
 	if err != nil {
 		s.log.Errorw(
 			"failed to get sessions info during table scan",
@@ -308,7 +302,7 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 					return
 				case <-ticker.C:
 					s.lock.Lock()
-					err := s.SyncActiveSessionsAndResizeTableOnDemand()
+					err := s.SyncActiveSessionsAndResizeTableOnDemand(time.Now())
 					s.lock.Unlock()
 					if err != nil {
 						s.log.Warnw(

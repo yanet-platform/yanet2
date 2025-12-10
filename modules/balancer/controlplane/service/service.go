@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -512,7 +513,7 @@ func (service *BalancerService) SessionsInfo(
 	service.log.Debugw("getting sessions info", "name", name, "instance", inst)
 
 	// Get sessions info (no service lock held)
-	sessionsInfo, err := balancerInstance.GetSessionsInfo()
+	sessionsInfo, err := balancerInstance.GetSessionsInfo(time.Now())
 	if err != nil {
 		service.log.Errorw(
 			"failed to get sessions info",

@@ -4,7 +4,6 @@ import (
 	"net"
 	"net/netip"
 	"testing"
-	"time"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -304,7 +303,7 @@ func TestICMPEchoRequest(t *testing.T) {
 		Wlc: &balancerpb.WlcConfig{
 			WlcPower:      10,
 			MaxRealWeight: 1000,
-			UpdatePeriod:  durationpb.New(2 * time.Second),
+			UpdatePeriod:  durationpb.New(0),
 		},
 	}
 
@@ -312,7 +311,7 @@ func TestICMPEchoRequest(t *testing.T) {
 		moduleConfig: config,
 		stateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
-			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.5,
 		},
 	})
@@ -527,7 +526,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 		Wlc: &balancerpb.WlcConfig{
 			WlcPower:      10,
 			MaxRealWeight: 1000,
-			UpdatePeriod:  durationpb.New(2 * time.Second),
+			UpdatePeriod:  durationpb.New(0),
 		},
 	}
 
@@ -535,7 +534,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 		moduleConfig: config,
 		stateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
-			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.5,
 		},
 	})
@@ -767,7 +766,7 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 		Wlc: &balancerpb.WlcConfig{
 			WlcPower:      10,
 			MaxRealWeight: 1000,
-			UpdatePeriod:  durationpb.New(2 * time.Second),
+			UpdatePeriod:  durationpb.New(0),
 		},
 	}
 
@@ -775,7 +774,7 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 		moduleConfig: config,
 		stateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
-			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.5,
 		},
 	})
@@ -933,7 +932,7 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 		Wlc: &balancerpb.WlcConfig{
 			WlcPower:      10,
 			MaxRealWeight: 1000,
-			UpdatePeriod:  durationpb.New(2 * time.Second),
+			UpdatePeriod:  durationpb.New(0),
 		},
 	}
 
@@ -941,7 +940,7 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 		moduleConfig: config,
 		stateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
-			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.5,
 		},
 	})

@@ -102,7 +102,7 @@ func TestWlc(t *testing.T) {
 		stateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      2000,
 			SessionTableMaxLoadFactor: 0.5,
-			SessionTableScanPeriod:    durationpb.New(2 * time.Second),
+			SessionTableScanPeriod:    durationpb.New(0),
 		},
 	})
 	require.NoError(t, err, "failed to setup test")
@@ -117,6 +117,9 @@ func TestWlc(t *testing.T) {
 
 	// send random SYNs to the first two reals
 	// expect uniform distribution
+
+	mock.SetCurrentTime(time.Unix(0, 0))
+	now := mock.GetCurrentTime()
 
 	t.Run("Send_Random_SYNs", func(t *testing.T) {
 		packetsToSend := make([]gopacket.Packet, 0, packets)
@@ -140,7 +143,7 @@ func TestWlc(t *testing.T) {
 
 		// Scan active sessions, update them,
 		// and recalculate effective weights
-		err = balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand()
+		err = balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(now)
 		require.NoError(t, err)
 
 		stateInfo := balancer.GetStateInfo()
@@ -169,7 +172,7 @@ func TestWlc(t *testing.T) {
 		packets = 5 * packets
 		for packetIdx := range packets {
 			if packetIdx%50 == 0 {
-				if err := balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(); err != nil {
+				if err := balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(now); err != nil {
 					t.Errorf("failed to update active sessions: packetIdx=%d", packetIdx)
 				}
 				result, err := mock.HandlePackets(packetsToSend...)
