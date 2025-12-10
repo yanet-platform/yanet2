@@ -179,13 +179,14 @@ func (mock *YanetMock) SetCurrentTime(time time.Time) {
 	C.yanet_mock_set_current_time(&mock.inner, &ts)
 }
 
-func (mock *YanetMock) AdvanceTime(duration time.Duration) {
-	now := mock.GetCurrentTime()
+func (mock *YanetMock) AdvanceTime(duration time.Duration) time.Time {
+	now := mock.CurrentTime()
 	now = now.Add(duration)
 	mock.SetCurrentTime(now)
+	return now
 }
 
-func (mock *YanetMock) GetCurrentTime() time.Time {
+func (mock *YanetMock) CurrentTime() time.Time {
 	ts := C.yanet_mock_current_time(&mock.inner)
 	return time.Unix(int64(ts.tv_sec), int64(ts.tv_nsec))
 }

@@ -332,6 +332,11 @@ func (b *Balancer) GetModuleConfig() *ModuleConfig {
 	return b.moduleConfig
 }
 
+// GetModuleConfig returns the internal module state configuration for testing
+func (b *Balancer) GetModuleConfigState() *ModuleConfigState {
+	return b.moduleConfigState
+}
+
 // Free releases resources
 func (b *Balancer) Free() {
 	b.lock.Lock()
@@ -350,7 +355,7 @@ func (balancer *Balancer) SyncActiveSessionsAndWlcAndResizeTableOnDemand(now tim
 	if err := balancer.moduleConfigState.SyncActiveSessionsAndResizeTableOnDemand(now); err != nil {
 		return fmt.Errorf("failed to scan session table to sync active sessions: %w", err)
 	}
-	if err := balancer.moduleConfig.UpdateEffectiveWeights(); err != nil {
+	if _, err := balancer.moduleConfig.UpdateEffectiveWeights(); err != nil {
 		return fmt.Errorf("failed to update WLC: %w", err)
 	}
 	return nil

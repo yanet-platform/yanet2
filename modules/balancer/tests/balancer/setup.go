@@ -3,11 +3,12 @@ package balancer
 import (
 	"fmt"
 
+	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancer"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -25,6 +26,7 @@ type TestConfig struct {
 	mock         *mock.YanetMockConfig
 	moduleConfig *balancerpb.ModuleConfig
 	stateConfig  *balancerpb.ModuleStateConfig
+	debug        bool
 }
 
 type TestSetup struct {
@@ -76,9 +78,14 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		return nil, fmt.Errorf("failed to attach agent: %w", err)
 	}
 
-	// Create logger for balancer
-	logger, _ := zap.NewDevelopment()
-	sugaredLogger := logger.Sugar()
+	// Create logger for balancer with colorful output
+	logLevel := zapcore.InfoLevel
+	if config.debug {
+		logLevel = zapcore.DebugLevel
+	}
+	sugaredLogger, _, _ := logging.Init(&logging.Config{
+		Level: logLevel,
+	})
 
 	balancerInstance, err := balancer.NewBalancerFromProto(
 		*agent,

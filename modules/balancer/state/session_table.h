@@ -6,6 +6,7 @@
 #include "session.h"
 #include <assert.h>
 #include <stdatomic.h>
+#include <stdio.h>
 
 #include "worker.h"
 
@@ -130,35 +131,42 @@ get_or_create_session(
 
 	struct worker_info *worker_info = &cur->worker_info[worker_idx];
 
+	int result_status;
 	if (status == TTLMAP_FOUND) {
-		uint32_t new_max_deadline =
-			RTE_MAX(atomic_load_explicit(
-					&worker_info->max_deadline_current_gen,
-					__ATOMIC_SEQ_CST
-				),
-				now + timeout);
-		atomic_store_explicit(
-			&worker_info->max_deadline_current_gen,
-			new_max_deadline,
-			__ATOMIC_SEQ_CST
-		);
-		return SESSION_FOUND;
+		result_status = SESSION_FOUND;
 	} else if (status == TTLMAP_INSERTED || status == TTLMAP_REPLACED) {
 		if (worker_info_use_prev_gen(worker_info)) {
 			struct session_table_gen *prev =
 				session_table_previous_gen(session_table);
-			status = TTLMAP_LOOKUP(
+			int lookup_res = TTLMAP_LOOKUP(
 				&prev->map, session_id, *session_state, now
 			);
-			if (status == TTLMAP_FOUND) {
-				return SESSION_FOUND;
-			} 
+			if (TTLMAP_STATUS(lookup_res) == TTLMAP_FOUND) {
+				result_status = SESSION_FOUND;
+			} else {
+				result_status = SESSION_CREATED;
+			}
+		} else {
+			result_status = SESSION_CREATED;
 		}
-
-		return SESSION_CREATED;
 	} else { // status == TTLMAP_FAILED
 		return SESSION_TABLE_OVERFLOW;
 	}
+
+	// update max deadline
+	uint32_t new_max_deadline =
+		RTE_MAX(atomic_load_explicit(
+				&worker_info->max_deadline_current_gen,
+				__ATOMIC_SEQ_CST
+			),
+			now + timeout);
+	atomic_store_explicit(
+		&worker_info->max_deadline_current_gen,
+		new_max_deadline,
+		__ATOMIC_SEQ_CST
+	);
+
+	return result_status;
 }
 
 static inline uint32_t
@@ -205,8 +213,18 @@ session_unlock(session_lock_t *lock) {
 	ttlmap_release_lock(lock);
 }
 
+// Try to free unused in session table.
+// Returns:
+// 	1 on free
+//	0 on no free
+// 	-1 on error
 int
 session_table_free_unused(struct session_table *table);
 
+// Try to resize session table.
+// Returns:
+// 	1 on resize
+//	0 on no resize
+// 	-1 on error (memory not enough)
 int
 session_table_resize(struct session_table *table, size_t new_size);

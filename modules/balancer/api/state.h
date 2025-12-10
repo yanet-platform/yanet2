@@ -48,14 +48,16 @@ balancer_state_register_real(
 size_t
 balancer_state_session_table_capacity(struct balancer_state *state);
 
-// Resize sessions table. Return -1 on error
-// and new 0 on success.
+// Resize sessions table. Returns -1 on error 
+// (memory not enough), 0 if we dont resized
+// and 1 if we successfully resized.
 int
 balancer_state_resize_session_table(
 	struct balancer_state *state, size_t new_size
 );
 
-// Free unused memory.
+// Free unused memory. 
+// Returns 0 if we dont free, 1 if we freed successfully and -1 if error occurs.
 int
 balancer_state_gc_session_table(struct balancer_state *state);
 

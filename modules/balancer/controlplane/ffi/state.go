@@ -65,8 +65,9 @@ func NewModuleConfigState(
 	initialTableSize uint,
 ) (ModuleConfigStatePtr, error) {
 	if initialTableSize == 0 {
-		// default value
-		initialTableSize = 1024
+		return ModuleConfigStatePtr{
+			inner: nil,
+		}, fmt.Errorf("initial table size must be greater than 0")
 	}
 	state, err := C.balancer_state_create(
 		(*C.struct_agent)(agent.AsRawPtr()),
@@ -91,18 +92,30 @@ func NewModuleConfigState(
 }
 
 // Extend session table on demand (use `force` to force extension).
-func (state *ModuleConfigStatePtr) ResizeSessionTable(newSize uint) error {
-	_, err := C.balancer_state_resize_session_table(
+func (state *ModuleConfigStatePtr) ResizeSessionTable(newSize uint) (bool, error) {
+	ec, err := C.balancer_state_resize_session_table(
 		state.inner,
 		C.size_t(newSize),
 	)
-	return err
+	if err != nil {
+		return false, fmt.Errorf("failed to resize session table: %w", err)
+	}
+	if ec == -1 {
+		return false, fmt.Errorf("failed to resize session table: memory not enough")
+	}
+	return ec == 1, nil
 }
 
 // Free memory unused by balancer session state.
-func (state *ModuleConfigStatePtr) FreeUnusedInSessionTable() error {
-	_, err := C.balancer_state_gc_session_table(state.inner)
-	return err
+func (state *ModuleConfigStatePtr) FreeUnusedInSessionTable() (bool, error) {
+	ec, err := C.balancer_state_gc_session_table(state.inner)
+	if err != nil {
+		return false, fmt.Errorf("failed to free unused in session table: %w", err)
+	}
+	if ec == -1 {
+		return false, fmt.Errorf("failed to free unused in session table")
+	}
+	return ec == 1, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////

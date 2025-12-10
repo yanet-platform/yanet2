@@ -33,7 +33,9 @@ func TestWlc(t *testing.T) {
 	real3Ip := IpAddr("4.4.4.4")
 
 	client := func(id int) netip.Addr {
-		return IpAddr(fmt.Sprintf("10.%d.%d.%d", id/(256*256)%256, (id/256)%256, id%256))
+		return IpAddr(
+			fmt.Sprintf("10.%d.%d.%d", id/(256*256)%256, (id/256)%256, id%256),
+		)
 	}
 
 	config := &balancerpb.ModuleConfig{
@@ -119,13 +121,19 @@ func TestWlc(t *testing.T) {
 	// expect uniform distribution
 
 	mock.SetCurrentTime(time.Unix(0, 0))
-	now := mock.GetCurrentTime()
+	now := mock.CurrentTime()
 
 	t.Run("Send_Random_SYNs", func(t *testing.T) {
 		packetsToSend := make([]gopacket.Packet, 0, packets)
 		for packetIdx := range packets {
 			client := client(packetIdx)
-			packetLayers := MakeTCPPacket(client, 1000, vsIp, vsPort, &layers.TCP{SYN: true})
+			packetLayers := MakeTCPPacket(
+				client,
+				1000,
+				vsIp,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
 			packet := xpacket.LayersToPacket(t, packetLayers...)
 			packetsToSend = append(packetsToSend, packet)
 		}
@@ -135,10 +143,24 @@ func TestWlc(t *testing.T) {
 		require.Equal(t, packets, len(result.Output))
 		require.Empty(t, result.Drop)
 
-		configStats := balancer.GetConfigStats(0, defaultDeviceName, defaultPipelineName, defaultFunctionName, defaultChainName)
+		configStats := balancer.GetConfigStats(
+			0,
+			defaultDeviceName,
+			defaultPipelineName,
+			defaultFunctionName,
+			defaultChainName,
+		)
 
-		assert.Equal(t, uint64(packets/2), configStats.Reals[0].Stats.CreatedSessions)
-		assert.Equal(t, uint64(packets/2), configStats.Reals[1].Stats.CreatedSessions)
+		assert.Equal(
+			t,
+			uint64(packets/2),
+			configStats.Reals[0].Stats.CreatedSessions,
+		)
+		assert.Equal(
+			t,
+			uint64(packets/2),
+			configStats.Reals[1].Stats.CreatedSessions,
+		)
 		assert.Equal(t, uint64(0), configStats.Reals[2].Stats.CreatedSessions)
 
 		// Scan active sessions, update them,
@@ -173,7 +195,10 @@ func TestWlc(t *testing.T) {
 		for packetIdx := range packets {
 			if packetIdx%50 == 0 {
 				if err := balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(now); err != nil {
-					t.Errorf("failed to update active sessions: packetIdx=%d", packetIdx)
+					t.Errorf(
+						"failed to update active sessions: packetIdx=%d",
+						packetIdx,
+					)
 				}
 				result, err := mock.HandlePackets(packetsToSend...)
 				assert.NoError(t, err)
@@ -182,7 +207,13 @@ func TestWlc(t *testing.T) {
 				packetsToSend = make([]gopacket.Packet, 0)
 			}
 			client := client(firstClient + packetIdx)
-			packetLayers := MakeTCPPacket(client, 1000, vsIp, vsPort, &layers.TCP{SYN: true})
+			packetLayers := MakeTCPPacket(
+				client,
+				1000,
+				vsIp,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
 			packet := xpacket.LayersToPacket(t, packetLayers...)
 			packetsToSend = append(packetsToSend, packet)
 		}
@@ -192,7 +223,13 @@ func TestWlc(t *testing.T) {
 		require.Equal(t, len(packetsToSend), len(result.Output))
 		require.Empty(t, result.Drop)
 
-		configStats := balancer.GetConfigStats(0, defaultDeviceName, defaultPipelineName, defaultFunctionName, defaultChainName)
+		configStats := balancer.GetConfigStats(
+			0,
+			defaultDeviceName,
+			defaultPipelineName,
+			defaultFunctionName,
+			defaultChainName,
+		)
 
 		firstTwoPackets := configStats.Reals[0].Stats.CreatedSessions + configStats.Reals[1].Stats.CreatedSessions
 		thirdPackets := configStats.Reals[2].Stats.CreatedSessions

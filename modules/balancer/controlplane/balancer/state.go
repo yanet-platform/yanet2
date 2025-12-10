@@ -63,18 +63,23 @@ func NewModuleConfigState(
 	maxLoadFactor float32,
 	log *zap.SugaredLogger,
 ) (*ModuleConfigState, error) {
+	if initialTableSize == 0 {
+		// Log warning, set default value
+		log.Warn("initial table size is 0, setting size to default value (1024)")
+		initialTableSize = 1024
+	}
+
+	// not null check
+	if maxLoadFactor < 0.001 {
+		return nil, fmt.Errorf("max load factor must be greater than 0.001")
+	}
+
 	state, err := balancer_ffi.NewModuleConfigState(agent, initialTableSize)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"failed to create new module config state: %w",
 			err,
 		)
-	}
-
-	// not null check
-	if maxLoadFactor < 0.001 {
-		state.Free()
-		return nil, fmt.Errorf("max load factor must be greater than 0.001")
 	}
 
 	s := &ModuleConfigState{
@@ -105,14 +110,9 @@ func (s *ModuleConfigState) SessionTableCapacity() uint {
 }
 
 func (s *ModuleConfigState) Update(
-	newTableCapacity, scanSessionTablePeriodMs uint,
+	requestedCapacity, scanSessionTablePeriodMs uint,
 	maxLoadFactor float32,
 ) error {
-	// not null check
-	if newTableCapacity == 0 {
-		return fmt.Errorf("new table capacity must be greater than 0")
-	}
-
 	// not null check
 	if maxLoadFactor < 0.001 {
 		return fmt.Errorf("max load factor must be greater than 0.001")
@@ -120,15 +120,35 @@ func (s *ModuleConfigState) Update(
 
 	s.log.Infow(
 		"resizing session table",
-		zap.Uint("new_capacity", newTableCapacity),
+		zap.Uint("requested_capacity", requestedCapacity),
 	)
-	if err := s.cHandle.ResizeSessionTable(newTableCapacity); err != nil {
-		s.log.Warnw(
-			"failed to resize session table",
-			zap.Uint("new_capacity", newTableCapacity),
-			zap.Error(err),
+
+	if requestedCapacity != 0 {
+		resized, err := s.cHandle.ResizeSessionTable(requestedCapacity)
+		if err != nil {
+			s.log.Errorf(
+				"failed to resize session table",
+				zap.Uint("requested_capacity", requestedCapacity),
+				zap.Error(err),
+			)
+			return fmt.Errorf("failed to resize session table: %w", err)
+		}
+
+		if !resized {
+			s.log.Errorf(
+				"failed to resize session table",
+				zap.Uint("requested_capacity", requestedCapacity),
+			)
+			return fmt.Errorf("failed to resize session table")
+		}
+
+		s.log.Infow(
+			"successfully resized session table",
+			zap.Uint("requested_capacity", requestedCapacity),
+			zap.Uint("new_capacity", s.SessionTableCapacity()),
 		)
-		return fmt.Errorf("failed to resize session table: %w", err)
+	} else {
+		s.log.Info("did not resize session table as zero size is requested")
 	}
 
 	s.ScanSessionTablePeriodMs = scanSessionTablePeriodMs
@@ -247,8 +267,9 @@ func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(now time.Ti
 			zap.Uint("old_capacity", sessionTableCapacity),
 			zap.Uint("requested_capacity", requestedCapacity))
 
-		if err := s.cHandle.ResizeSessionTable(requestedCapacity); err != nil {
-			s.log.Errorw("failed to resize session table",
+		resized, err := s.cHandle.ResizeSessionTable(requestedCapacity)
+		if err != nil {
+			s.log.Error("failed to resize session table",
 				zap.Uint("requested_capacity", requestedCapacity),
 				zap.Error(err))
 			return fmt.Errorf(
@@ -257,23 +278,34 @@ func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(now time.Ti
 				err,
 			)
 		}
-
-		newCapacity := s.SessionTableCapacity()
-
-		s.log.Infow(
-			"session table resized successfully",
-			zap.Uint("new_capacity", newCapacity),
-		)
+		if !resized {
+			s.log.Warnw("failed to resize session table",
+				zap.Uint("requested_capacity", requestedCapacity))
+		} else {
+			newCapacity := s.SessionTableCapacity()
+			s.log.Infow(
+				"session table resized successfully",
+				zap.Uint("requested_capacity", requestedCapacity),
+				zap.Uint("new_capacity", newCapacity),
+			)
+		}
 	}
 
-	if err := s.cHandle.FreeUnusedInSessionTable(); err != nil {
-		s.log.Warnw(
+	// try free unused memory in session table
+	freed, err := s.cHandle.FreeUnusedInSessionTable()
+	if err != nil {
+		s.log.Error(
 			"failed to free unused memory in session table",
 			zap.Error(err),
 		)
 		return fmt.Errorf(
 			"failed to free unused memory in session table: %w",
 			err,
+		)
+	}
+	if freed {
+		s.log.Infow(
+			"freed unused memory in session table successfully",
 		)
 	}
 
@@ -305,14 +337,16 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 					err := s.SyncActiveSessionsAndResizeTableOnDemand(time.Now())
 					s.lock.Unlock()
 					if err != nil {
-						s.log.Warnw(
-							"session table scan failed",
+						s.log.Errorw(
+							"background task failed",
 							zap.Error(err),
 						)
 					}
 				}
 			}
 		}()
+	} else {
+		s.log.Warn("passed zero period for session table scan routine, scanning routine not started")
 	}
 }
 
@@ -475,17 +509,13 @@ func (s *ModuleConfigState) GetInfo() *module.BalancerInfo {
 	}
 
 	// Log error, which should not occur
-	if summaryVsSessions != summaryRealSessions {
-		s.log.Errorf(
-			"virtual service active sessions (%d) do not match real active sessions (%d)",
-			summaryVsSessions,
-			summaryRealSessions,
-		)
+	if summaryVsSessions != summaryRealSessions || summaryVsSessions != s.ActiveSessions {
+		panic("active sessions invariant violation")
 	}
 
 	// Set active sessions
 	info.ActiveSessions = module.AsyncInfo{
-		Value:     summaryVsSessions,
+		Value:     s.ActiveSessions,
 		UpdatedAt: s.ActiveSessionsUpdateTimestamp,
 	}
 

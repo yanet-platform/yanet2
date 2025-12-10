@@ -178,20 +178,25 @@ func (config *ModuleConfig) Update(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (config *ModuleConfig) UpdateEffectiveWeights() error {
+func (config *ModuleConfig) UpdateEffectiveWeights() (bool, error) {
 	if updateEffectiveWeights(
 		&config.wlc,
 		config.VirtualServices,
 		config.state,
 	) {
-		return config.Update(
+		err := config.Update(
 			config.VirtualServices,
 			config.Addresses,
 			config.SessionTimeouts,
 			config.wlc,
 		)
+		if err != nil {
+			return false, fmt.Errorf("effective weights updated, but failed to update config")
+		} else {
+			return true, nil
+		}
 	} else {
-		return nil
+		return false, nil
 	}
 }
 
@@ -384,17 +389,23 @@ func (config *ModuleConfig) runBackgroundTasks() {
 					return
 				case <-ticker.C:
 					config.lock.Lock()
-					err := config.UpdateEffectiveWeights()
+					updated, err := config.UpdateEffectiveWeights()
+					config.lock.Unlock()
+
 					if err != nil {
-						config.log.Warnw(
+						config.log.Error(
 							"failed to update effective weights",
 							zap.Error(err),
 						)
 					}
-					config.lock.Unlock()
+					if updated {
+						config.log.Info("effective weights updated")
+					}
 				}
 			}
 		}()
+	} else {
+		config.log.Warn("passed zero WLC update period, updating routine not started")
 	}
 }
 

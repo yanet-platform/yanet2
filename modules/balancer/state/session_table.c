@@ -2,6 +2,7 @@
 #include "common/memory.h"
 #include "common/ttlmap/ttlmap.h"
 #include "modules/balancer/api/state.h"
+#include <assert.h>
 #include <stdalign.h>
 #include <string.h>
 
@@ -83,6 +84,9 @@ session_table_free(struct session_table *table) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// returns 0 if we previous gen still in use.
+// 1 if it we freed some memory.
+// 2 if it it already was free.
 static int
 try_free_prev_gen(struct session_table *table) {
 	if (session_table_workers_use_prev_gen(table)) {
@@ -93,15 +97,22 @@ try_free_prev_gen(struct session_table *table) {
 		session_table_previous_gen(table);
 	if (ttlmap_capacity(&sessions_prev->map) > 0) {
 		TTLMAP_FREE(&sessions_prev->map);
+		return 1;
+	} else {
+		// already was free, we did nothing
+		return 2;
 	}
-
-	// successfully free or it was empty
-	return 1;
 }
 
 int
 session_table_free_unused(struct session_table *table) {
-	return try_free_prev_gen(table);
+	int result = try_free_prev_gen(table);
+	if (result == 2) {
+		// already was free,
+		// we did nothing, so return zero
+		result = 0;
+	}
+	return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -119,6 +130,7 @@ struct iter_context {
 	struct balancer_sessions_info *info;
 	bool only_count;
 	bool failed;
+	uint32_t now;
 };
 
 static int
@@ -127,6 +139,11 @@ iter_callback(
 	struct balancer_session_state *state,
 	struct iter_context *ctx
 ) {
+	// skip outdated sessions
+	if (state->last_packet_timestamp + state->timeout <= ctx->now) {
+		return 0;
+	}
+
 	struct balancer_session_info current_session_info = {
 		.vs_id = id->vs_id,
 		.real_id = state->real_id,
@@ -136,6 +153,7 @@ iter_callback(
 		.timeout = state->timeout,
 	};
 	memcpy(current_session_info.client_ip, id->client_ip, 16);
+
 	// extend ctx->info->sessions array
 	void *memory = ctx->info->sessions;
 	uint64_t *count = &ctx->info->count;
@@ -164,7 +182,8 @@ sessions_table_gen_sessions_info(
 		.info = info,
 		.only_count = only_count,
 		.failed = false,
-		.mctx = mctx
+		.mctx = mctx,
+		.now = now,
 	};
 	TTLMAP_ITER(
 		&gen->map,
@@ -221,11 +240,12 @@ session_table_free_sessions_info(
 
 int
 session_table_resize(struct session_table *table, size_t new_size) {
-	if (try_free_prev_gen(table) == 0) {
-		// Failed to resize, because prev gen is still 
+	int can_free = try_free_prev_gen(table);
+	if (can_free == 0) {
+		// Failed to resize, because prev gen is still
 		// used by some workers.
 		return 0;
-	} 
+	}
 	
 	struct session_table_gen *sessions_cur =
 		session_table_current_gen(table);
@@ -252,11 +272,14 @@ session_table_resize(struct session_table *table, size_t new_size) {
 
 		next_worker_info->max_deadline_prev_gen =
 			cur_worker_info->max_deadline_current_gen;
+		
 		next_worker_info->max_deadline_current_gen = 0;
-		next_worker_info->last_timestamp = cur_worker_info->last_timestamp;
+
+		next_worker_info->last_timestamp =
+			cur_worker_info->last_timestamp;
 	}
 
 	atomic_fetch_add_explicit(&table->current_gen, 1, __ATOMIC_SEQ_CST);
 
-	return 0;
+	return 1;
 }
