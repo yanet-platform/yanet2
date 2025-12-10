@@ -2,7 +2,9 @@
 #include "common/memory_address.h"
 
 #include "../../lib/controlplane/config/zone.h"
+#include "dataplane/config/zone.h"
 #include "dataplane/pipeline/pipeline.h"
+#include "dataplane/time/clock.h"
 #include "packet.h"
 #include "utils/mbuf.h"
 #include <stdlib.h>
