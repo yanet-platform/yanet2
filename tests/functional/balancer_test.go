@@ -58,7 +58,7 @@ func TestBalancer(t *testing.T) {
 		// Forward-specific configuration
 		commands := []string{
 			// Configure module
-			"/mnt/target/release/yanet-cli-balancer enable --cfg balancer0 --services /mnt/yanet2/balancer.yaml",
+			"/mnt/target/release/yanet-cli-balancer update --name balancer0 --config-path /mnt/yanet2/balancer.yaml",
 
 			// Configure functions
 			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:2=balancer:balancer0,route:route0 --instance=0",
@@ -67,7 +67,7 @@ func TestBalancer(t *testing.T) {
 			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
 
 			// Show counters
-			"/mnt/target/release/yanet-cli-balancer info config --instance=0 --cfg=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",
+			"/mnt/target/release/yanet-cli-balancer config-stats --instance=0 --cfg=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",
 		}
 
 		_, err := fw.CLI.ExecuteCommands(commands...)
@@ -92,18 +92,4 @@ func TestBalancer(t *testing.T) {
 		require.Equal(t, outputPacket.InnerPacket.SrcIP.String(), "192.0.2.2")
 		require.True(t, outputPacket.InnerPacket.IsIPv4)
 	})
-
-	t.Run("Enable_Enabled_Real", func(t *testing.T) {
-		commands := []string{
-			// Enable already enabled real
-			"/mnt/target/release/yanet-cli-balancer real enable --cfg balancer0 --virtual-ip \"192.0.2.1\" --proto \"TCP\" --virtual-port 5005 --real-ip \"4.5.6.7\" --real-weight 5",
-
-			// Flush enable
-			"/mnt/target/release/yanet-cli-balancer real flush --cfg balancer0",
-		}
-
-		_, err := fw.CLI.ExecuteCommands(commands...)
-		require.NoError(t, err, "Failed to enable real")
-	})
-
 }
