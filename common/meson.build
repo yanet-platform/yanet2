@@ -5,3 +5,4 @@ lib_common_dep = declare_dependency(
 )
 
 subdir('commonpb')
+subdir('tls_stack')
