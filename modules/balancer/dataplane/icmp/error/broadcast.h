@@ -53,13 +53,14 @@ update_counters_on_packet_clone_failed(struct packet_ctx *ctx) {
 ////////////////////////////////////////////////////////////////////////////////
 
 // ICMP error message header structure
-// For error messages, the format is: [type:1][code:1][checksum:2][unused:4][original packet...]
-// We use the first 2 bytes of the unused field to store our broadcast marker
+// For error messages, the format is:
+// [type:1][code:1][checksum:2][unused:4][original packet...] We use the first 2
+// bytes of the unused field to store our broadcast marker
 struct icmp_error_hdr {
 	uint8_t type;
 	uint8_t code;
 	rte_be16_t checksum;
-	rte_be16_t unused_marker;  // We use this for ICMP_BROADCAST_IDENT
+	rte_be16_t unused_marker; // We use this for ICMP_BROADCAST_IDENT
 	rte_be16_t unused_rest;
 } __rte_packed;
 
@@ -81,7 +82,8 @@ icmp_error_hdr(struct packet *packet) {
 
 static inline void
 set_cloned_mark(struct packet *packet) {
-	icmp_error_hdr(packet)->unused_marker = rte_cpu_to_be_16(ICMP_BROADCAST_IDENT);
+	icmp_error_hdr(packet)->unused_marker =
+		rte_cpu_to_be_16(ICMP_BROADCAST_IDENT);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -95,7 +97,8 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 	// to them.
 
 	// Check if packet is a cloned already
-	if (ctx->decap && icmp_error_hdr(ctx->packet)->unused_marker == rte_cpu_to_be_16(ICMP_BROADCAST_IDENT)) {
+	if (ctx->decap && icmp_error_hdr(ctx->packet)->unused_marker ==
+				  rte_cpu_to_be_16(ICMP_BROADCAST_IDENT)) {
 		// Update module counters
 		uint16_t header_type = ctx->packet->transport_header.type;
 		ICMP_STATS_INC(packet_clones_received, header_type, ctx);

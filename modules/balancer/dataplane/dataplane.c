@@ -45,8 +45,12 @@ packet_ctx_try_decap(struct packet_ctx *ctx) {
 }
 
 static inline void
-update_worker_time(struct balancer_state *state, struct dp_worker *worker, uint32_t now) {
-	session_table_update_worker_time(&state->session_table, worker->idx, now);
+update_worker_time(
+	struct balancer_state *state, struct dp_worker *worker, uint32_t now
+) {
+	session_table_update_worker_time(
+		&state->session_table, worker->idx, now
+	);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -102,7 +102,9 @@ session_table_previous_gen(struct session_table *state) {
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline void
-session_table_update_worker_time(struct session_table *table, size_t worker, uint32_t now) {
+session_table_update_worker_time(
+	struct session_table *table, size_t worker, uint32_t now
+) {
 	struct session_table_gen *sessions_cur =
 		session_table_current_gen(table);
 	struct worker_info *worker_info = &sessions_cur->worker_info[worker];

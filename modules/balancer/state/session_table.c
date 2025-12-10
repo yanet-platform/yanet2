@@ -11,7 +11,9 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline int
-session_table_worker_use_prev_gen(struct session_table_gen *cur, size_t worker) {
+session_table_worker_use_prev_gen(
+	struct session_table_gen *cur, size_t worker
+) {
 	struct worker_info *info = &cur->worker_info[worker];
 	return worker_info_use_prev_gen(info);
 }
@@ -246,7 +248,7 @@ session_table_resize(struct session_table *table, size_t new_size) {
 		// used by some workers.
 		return 0;
 	}
-	
+
 	struct session_table_gen *sessions_cur =
 		session_table_current_gen(table);
 	struct session_table_gen *sessions_next =
@@ -272,7 +274,7 @@ session_table_resize(struct session_table *table, size_t new_size) {
 
 		next_worker_info->max_deadline_prev_gen =
 			cur_worker_info->max_deadline_current_gen;
-		
+
 		next_worker_info->max_deadline_current_gen = 0;
 
 		next_worker_info->last_timestamp =

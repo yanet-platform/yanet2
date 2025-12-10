@@ -49,8 +49,8 @@ decap_ipv6(struct packet *packet, struct balancer_module_config *config) {
 ////////////////////////////////////////////////////////////////////////////////
 
 // Try to decapsulate packet if its destination address is from the allowed
-// list. If decap failed, just pass packet further. Returns -1 only if packet network proto
-// is invalid.
+// list. If decap failed, just pass packet further. Returns -1 only if packet
+// network proto is invalid.
 static inline int
 try_decap(struct packet_ctx *ctx) {
 	ctx->decap = false;
