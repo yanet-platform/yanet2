@@ -11,6 +11,12 @@ struct packet_handle_result
 yanet_worker_mock_handle_packets(
 	struct yanet_worker_mock *worker, struct packet_list *input_packets
 ) {
+	// initialize worker time
+	{
+		struct dp_worker *dp_worker = &worker->dp_worker;
+		dp_worker->current_time = tsc_clock_get_time(&dp_worker->clock);
+	}
+
 	struct dp_config *dp_config = worker->dp_config;
 	struct cp_config *cp_config = worker->cp_config;
 	struct cp_config_gen *cp_config_gen =
