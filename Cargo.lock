@@ -2348,6 +2348,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-device"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored",
+ "yanet-cli",
+]
+
+[[package]]
 name = "yanet-cli-device-plain"
 version = "0.1.0"
 dependencies = [

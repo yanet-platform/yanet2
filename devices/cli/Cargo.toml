@@ -1,0 +1,13 @@
+[package]
+name = "yanet-cli-device"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+rust-version = "1.85"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "cargo"] }
+clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
+colored = "3"
+ync = { path = "../../cli/core", package = "yanet-cli" }
