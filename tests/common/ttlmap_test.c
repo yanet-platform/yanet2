@@ -447,7 +447,7 @@ iter_callback(test_key_t *key, test_value_t *value, size_t *cnt) {
 	assert(key->proto == 55);
 	assert(key->port_dst == 10);
 	assert(key->port_src == 20);
-	assert(key->proto == 20);
+	assert(key->proto == 55);
 	assert(value->session_id == 0);
 	assert(value->counter2 - value->counter1 == 1);
 	++*cnt;
