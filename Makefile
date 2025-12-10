@@ -6,7 +6,7 @@ MODULES := decap dscp route forward nat64
 # Default PREFIX for debian packaging
 PREFIX ?= /usr
 
-all: go-cache-clean dataplane cli
+all: dataplane cli
 
 go-cache-clean:
 	go clean -cache
