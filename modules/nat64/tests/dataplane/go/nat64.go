@@ -10,6 +10,8 @@ package nat64_test
 //#cgo LDFLAGS: -L../../../../../build/lib/dataplane/config -lconfig_dp
 //#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
 //#cgo LDFLAGS: -L../../../../../build/lib/logging -llogging
+//#cgo LDFLAGS: -L../../../../../build/lib/controlplane/diag -ldiag
+//#cgo LDFLAGS: -L../../../../../build/common/tls_stack -ltls_stack
 //#cgo LDFLAGS: -L../../../../../build/subprojects/dpdk/lib -l:librte_log.a
 /*
 #include <stdlib.h>
