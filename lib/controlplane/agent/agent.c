@@ -234,19 +234,21 @@ agent_cleanup(struct agent *agent) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
 	void **arenas = ADDR_OF(&agent->arenas);
-	for (uint64_t arena_idx = 0; arena_idx < agent->arena_count;
-	     ++arena_idx) {
+	if (arenas != NULL) {
+		for (uint64_t arena_idx = 0; arena_idx < agent->arena_count;
+		     ++arena_idx) {
+			memory_bfree(
+				&cp_config->memory_context,
+				ADDR_OF(arenas + arena_idx),
+				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+			);
+		}
 		memory_bfree(
 			&cp_config->memory_context,
-			ADDR_OF(arenas + arena_idx),
-			MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+			arenas,
+			sizeof(void *) * agent->arena_count
 		);
 	}
-	memory_bfree(
-		&cp_config->memory_context,
-		arenas,
-		sizeof(void *) * agent->arena_count
-	);
 	memory_bfree(&cp_config->memory_context, agent, sizeof(struct agent));
 }
 

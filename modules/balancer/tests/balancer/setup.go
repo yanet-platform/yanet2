@@ -73,9 +73,9 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 	}
 
 	agent, err := mockInstance.SharedMemory().
-		AgentAttach("balancer", 0, uint(config.mock.CpMemory)-(1<<26))
+		AgentAttach("balancer", 0, uint(config.mock.CpMemory)-(1<<27))
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach agent: %w", err)
+		return nil, err
 	}
 
 	// Create logger for balancer with colorful output

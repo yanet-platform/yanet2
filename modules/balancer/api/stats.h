@@ -168,7 +168,7 @@ struct balancer_vs_stats {
 
 	// Number of bytes successfully sent to the selected real.
 	uint64_t outgoing_bytes;
-} __attribute__((aligned(64)));
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Real counter
@@ -201,7 +201,7 @@ struct balancer_real_stats {
 
 	// Total number of bytes send to real (including OPS and ICMP packets)
 	uint64_t bytes;
-} __attribute__((aligned(64)));
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 

@@ -22,7 +22,7 @@ struct service_state {
 		struct balancer_real_stats real;
 		struct balancer_vs_stats vs;
 	} stats;
-} __attribute__((__aligned__(64)));
+};
 
 void
 service_state_copy(struct service_state *dst, struct service_state *src);
