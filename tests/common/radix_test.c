@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 struct radix_iterate_ctx {
 	uint8_t keys[4][10];
@@ -23,14 +24,14 @@ radix_iterate_cb(
 
 int
 main() {
-	void *arena0 = malloc(1 << 24); // 16MB
-	if (arena0 == NULL) {
+	void *arena = malloc(1 << 24); // 16MB
+	if (arena == NULL) {
 		return 1;
 	}
 
 	struct block_allocator alloc;
 	block_allocator_init(&alloc);
-	block_allocator_put_arena(&alloc, arena0, 1 << 24);
+	block_allocator_put_arena(&alloc, arena, 1 << 24);
 
 	struct memory_context mem_ctx;
 	if (memory_context_init(&mem_ctx, "test", &alloc) < 0) {
@@ -79,5 +80,8 @@ main() {
 	radix_free(&radix);
 
 	puts("OK!");
+	
+	free(arena);
+	
 	return 0;
 }

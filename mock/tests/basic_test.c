@@ -168,6 +168,8 @@ send_packet(struct yanet_mock *mock) {
 		"initial and result packets checksum mismatch"
 	);
 
+	free_packet(&packet);
+
 	return TEST_SUCCESS;
 }
 
@@ -226,7 +228,7 @@ main() {
 
 	uint64_t last_packet_timestamp = my_module->last_packet_timestamp;
 	LOG(INFO,
-	    "last packet timestamp: sec=%lu, nsec=%lu\n",
+	    "last packet timestamp: sec=%lu, nsec=%lu",
 	    last_packet_timestamp / (uint64_t)1e9,
 	    last_packet_timestamp % (uint64_t)1e9);
 
@@ -244,6 +246,8 @@ main() {
 	);
 
 	LOG(INFO, "success");
+
+	my_module_config_free(my_module);
 
 	yanet_mock_free(&mock);
 	return 0;

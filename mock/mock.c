@@ -47,6 +47,8 @@ dataplane_load_module(
 
 	SET_OFFSET_OF(&dp_config->dp_modules, dp_modules);
 
+	free(module);
+
 	return 0;
 }
 
@@ -81,6 +83,8 @@ dataplane_load_device(
 	dp_device->output_handler = device->output_handler;
 
 	SET_OFFSET_OF(&dp_config->dp_devices, dp_devices);
+
+	free(device);
 
 	return 0;
 }

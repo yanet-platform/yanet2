@@ -20,13 +20,13 @@ walk_func(
 ) {
 	(void)key_size;
 
-	if (*(uint32_t *)(from + 11) != htobe32(value * 256)) {
+	if (*(uint32_t *)(from + 8) != htobe32(value * 256)) {
 		return -1;
 	}
 	if (from[15] != 4)
 		return -1;
 
-	if (*(uint32_t *)(to + 11) != htobe32(value * 256)) {
+	if (*(uint32_t *)(to + 8) != htobe32(value * 256)) {
 		return -1;
 	}
 	if (to[15] != 8)
@@ -71,9 +71,9 @@ main(int argc, char **argv) {
 	// Put each value into new page to get out of memory error
 	uint32_t idx = 0;
 	do {
-		*(uint32_t *)(from + 11) = htobe32(idx * 256);
+		*(uint32_t *)(from + 8) = htobe32(idx * 256);
 		from[15] = 4;
-		*(uint32_t *)(to + 11) = htobe32(idx * 256);
+		*(uint32_t *)(to + 8) = htobe32(idx * 256);
 		to[15] = 8;
 		if (lpm_insert(&lpm, 16, from, to, idx))
 			break;
@@ -97,9 +97,9 @@ main(int argc, char **argv) {
 
 	// Check the lpm can allocate new pages after allocator space expansion
 	do {
-		*(uint32_t *)(from + 11) = htobe32(idx * 256);
+		*(uint32_t *)(from + 8) = htobe32(idx * 256);
 		from[15] = 4;
-		*(uint32_t *)(to + 11) = htobe32(idx * 256);
+		*(uint32_t *)(to + 8) = htobe32(idx * 256);
 		to[15] = 8;
 		if (lpm_insert(&lpm, 16, from, to, idx))
 			break;
