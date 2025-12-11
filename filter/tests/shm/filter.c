@@ -44,6 +44,7 @@ filter_packets(struct common *common) {
 			&actions,
 			&actions_count
 		);
+		free_packet(&packet);
 		if (res < 0) {
 			LOG(ERROR,
 			    "error occured durring classification: %d",

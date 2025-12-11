@@ -33,51 +33,64 @@ filter_key_apply_prefix(
 
 static inline int
 filter_key_cmp(uint8_t key_size, const uint8_t *l, const uint8_t *r) {
-	while (key_size >= 8) {
-		uint64_t lv = be64toh(*(uint64_t *)l);
-		uint64_t rv = be64toh(*(uint64_t *)r);
-		if (lv < rv)
+	for (size_t i = 0; i < key_size; ++i) {
+		if (l[i] < r[i])
 			return -1;
-		if (lv > rv)
-			return 1;
-
-		l += 8;
-		r += 8;
-		key_size -= 8;
-	}
-
-	if (key_size >= 4) {
-		uint32_t lv = be32toh(*(uint32_t *)l);
-		uint32_t rv = be32toh(*(uint32_t *)r);
-		if (lv < rv)
-			return -1;
-		if (lv > rv)
-			return 1;
-
-		l += 4;
-		r += 4;
-		key_size -= 4;
-	}
-
-	if (key_size >= 2) {
-		uint16_t lv = be16toh(*(uint16_t *)l);
-		uint16_t rv = be16toh(*(uint16_t *)r);
-		if (lv < rv)
-			return -1;
-		if (lv > rv)
-			return 1;
-
-		l += 2;
-		r += 2;
-		key_size -= 2;
-	}
-
-	if (key_size > 0) {
-		if (*l < *r)
-			return -1;
-		if (*l > *r)
+		if (l[i] > r[i])
 			return 1;
 	}
+	return 0;
+	// while (key_size >= 8) {
+	// 	for (size_t i = 7; i >= 0; --i) {
+	// 		if (l[i] < r[i])
+	// 			return -1;
+	// 		if (l[i] > r[i])
+	// 			return 1;
+	// 	}
+	// 	// uint64_t lv = be64toh(*(uint64_t *)l);
+	// 	// uint64_t rv = be64toh(*(uint64_t *)r);
+	// 	// if (lv < rv)
+	// 	// 	return -1;
+	// 	// if (lv > rv)
+	// 	// 	return 1;
+
+	// 	l += 8;
+	// 	r += 8;
+	// 	key_size -= 8;
+	// }
+
+	// if (key_size >= 4) {
+	// 	uint32_t lv = be32toh(*(uint32_t *)l);
+	// 	uint32_t rv = be32toh(*(uint32_t *)r);
+	// 	if (lv < rv)
+	// 		return -1;
+	// 	if (lv > rv)
+	// 		return 1;
+
+	// 	l += 4;
+	// 	r += 4;
+	// 	key_size -= 4;
+	// }
+
+	// if (key_size >= 2) {
+	// 	uint16_t lv = be16toh(*(uint16_t *)l);
+	// 	uint16_t rv = be16toh(*(uint16_t *)r);
+	// 	if (lv < rv)
+	// 		return -1;
+	// 	if (lv > rv)
+	// 		return 1;
+
+	// 	l += 2;
+	// 	r += 2;
+	// 	key_size -= 2;
+	// }
+
+	// if (key_size > 0) {
+	// 	if (*l < *r)
+	// 		return -1;
+	// 	if (*l > *r)
+	// 		return 1;
+	// }
 
 	return 0;
 }
