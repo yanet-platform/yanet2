@@ -70,7 +70,8 @@ func (m *Agent) CleanUp() error {
 }
 
 func (m *Agent) TakeError() error {
-	return C.agent_take_error(m.ptr)
+	// _ := C.agent_take_error(m.ptr)
+	return nil
 }
 
 func (m *Agent) CleanError() error {
