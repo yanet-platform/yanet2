@@ -21,6 +21,9 @@
 
 #include <stdio.h>
 
+#define AGENT_TRY(agent, call, ...)                                            \
+	__extension__({ DIAG_TRY(&(agent->diag), call, ##__VA_ARGS__); })
+
 struct yanet_shm *
 yanet_shm_attach(const char *path) {
 	int fd = open(path, O_RDWR, S_IRUSR | S_IWUSR);
@@ -258,11 +261,15 @@ int
 agent_update_modules(
 	struct agent *agent, size_t module_count, struct cp_module **modules
 ) {
-	int res = cp_config_update_modules(
-		ADDR_OF(&agent->dp_config),
-		ADDR_OF(&agent->cp_config),
-		module_count,
-		modules
+	int res = AGENT_TRY(
+		agent,
+		cp_config_update_modules(
+			ADDR_OF(&agent->dp_config),
+			ADDR_OF(&agent->cp_config),
+			module_count,
+			modules
+		),
+		"failed to update modules"
 	);
 
 	agent_free_unused_modules(agent);
@@ -278,8 +285,12 @@ agent_delete_module(
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
-	int res = cp_config_delete_module(
-		dp_config, cp_config, module_type, module_name
+	int res = AGENT_TRY(
+		agent,
+		cp_config_delete_module(
+			dp_config, cp_config, module_type, module_name
+		),
+		"failed to delete module"
 	);
 
 	agent_free_unused_modules(agent);
@@ -374,20 +385,28 @@ agent_update_functions(
 	uint64_t function_count,
 	struct cp_function_config *functions[]
 ) {
-	return cp_config_update_functions(
-		ADDR_OF(&agent->dp_config),
-		ADDR_OF(&agent->cp_config),
-		function_count,
-		functions
+	return AGENT_TRY(
+		agent,
+		cp_config_update_functions(
+			ADDR_OF(&agent->dp_config),
+			ADDR_OF(&agent->cp_config),
+			function_count,
+			functions
+		),
+		"failed to update functions"
 	);
 }
 
 int
 agent_delete_function(struct agent *agent, const char *function_name) {
-	return cp_config_delete_function(
-		ADDR_OF(&agent->dp_config),
-		ADDR_OF(&agent->cp_config),
-		function_name
+	return AGENT_TRY(
+		agent,
+		cp_config_delete_function(
+			ADDR_OF(&agent->dp_config),
+			ADDR_OF(&agent->cp_config),
+			function_name
+		),
+		"failed to delete function"
 	);
 }
 
@@ -397,20 +416,28 @@ agent_update_pipelines(
 	size_t pipeline_count,
 	struct cp_pipeline_config *pipelines[]
 ) {
-	return cp_config_update_pipelines(
-		ADDR_OF(&agent->dp_config),
-		ADDR_OF(&agent->cp_config),
-		pipeline_count,
-		pipelines
+	return AGENT_TRY(
+		agent,
+		cp_config_update_pipelines(
+			ADDR_OF(&agent->dp_config),
+			ADDR_OF(&agent->cp_config),
+			pipeline_count,
+			pipelines
+		),
+		"failed to update pipelines"
 	);
 }
 
 int
 agent_delete_pipeline(struct agent *agent, const char *pipeline_name) {
-	return cp_config_delete_pipeline(
-		ADDR_OF(&agent->dp_config),
-		ADDR_OF(&agent->cp_config),
-		pipeline_name
+	return AGENT_TRY(
+		agent,
+		cp_config_delete_pipeline(
+			ADDR_OF(&agent->dp_config),
+			ADDR_OF(&agent->cp_config),
+			pipeline_name
+		),
+		"failed to delete pipeline"
 	);
 }
 
@@ -450,11 +477,15 @@ int
 agent_update_devices(
 	struct agent *agent, uint64_t device_count, struct cp_device *devices[]
 ) {
-	return cp_config_update_devices(
-		ADDR_OF(&agent->dp_config),
-		ADDR_OF(&agent->cp_config),
-		device_count,
-		devices
+	return AGENT_TRY(
+		agent,
+		cp_config_update_devices(
+			ADDR_OF(&agent->dp_config),
+			ADDR_OF(&agent->cp_config),
+			device_count,
+			devices
+		),
+		"failed to update devices"
 	);
 }
 

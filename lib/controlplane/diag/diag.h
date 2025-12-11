@@ -77,3 +77,16 @@ diag_reset(struct diag *diag);
 		sprintf(__buffer, fmt ": ", ##__VA_ARGS__);                    \
 		tls_stack_push(__buffer, strlen(__buffer));                    \
 	} while (0)
+
+#define DIAG_TRY(diag, call, ...)                                              \
+	__extension__({                                                        \
+		errno = 0;                                                     \
+		int __ret = (call);                                            \
+		if (__ret) {                                                   \
+			PUSH_ERROR(__VA_ARGS__);                               \
+			diag_fill(diag);                                       \
+		} else {                                                       \
+			diag_reset(diag);                                      \
+		}                                                              \
+		__ret;                                                         \
+	})

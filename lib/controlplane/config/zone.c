@@ -132,8 +132,8 @@ cp_config_gen_create_from(
 	return new_config_gen;
 
 error:
-	// Don't call cp_config_gen_free here because registries may be partially initialized
-	// Just free the memory for new_config_gen itself
+	// Don't call cp_config_gen_free here because registries may be
+	// partially initialized Just free the memory for new_config_gen itself
 	memory_bfree(
 		&cp_config->memory_context,
 		new_config_gen,
@@ -701,8 +701,8 @@ cp_config_gen_create(struct agent *agent) {
 	return cp_config_gen;
 
 error:
-	// Don't call cp_config_gen_free here because registries may be partially initialized
-	// Just free the memory for cp_config_gen itself
+	// Don't call cp_config_gen_free here because registries may be
+	// partially initialized Just free the memory for cp_config_gen itself
 	memory_bfree(
 		&cp_config->memory_context,
 		cp_config_gen,
