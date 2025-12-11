@@ -47,10 +47,10 @@ struct dp_worker {
 	// TODO: FIXME
 	struct tsc_clock clock;
 
-	// Current worker time,
-	// initialized on the start of current
+	// Current worker time in nanoseconds,
+	// initialized on the start of the current
 	// loop round.
-	struct timespec current_time;
+	uint64_t current_time;
 
 	uint64_t *iterations;
 

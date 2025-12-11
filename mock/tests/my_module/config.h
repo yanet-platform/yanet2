@@ -9,5 +9,5 @@
 struct my_module_config {
 	struct cp_module cp_module;
 	size_t packet_counter;
-	struct timespec last_packet_timestamp;
+	uint64_t last_packet_timestamp;
 };
