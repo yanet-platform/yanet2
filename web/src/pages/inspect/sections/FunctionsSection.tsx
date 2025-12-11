@@ -1,53 +1,114 @@
-import React, { useMemo } from 'react';
-import { Box, Text } from '@gravity-ui/uikit';
-import type { TableColumnConfig } from '@gravity-ui/uikit';
-import type { InstanceInfo, FunctionInfo } from '../../../api/inspect';
-import { SortableDataTable } from '../../../components';
-import { compareNullableNumbers, compareNullableStrings } from '../../../utils/sorting';
+import React from 'react';
+import { Box, Text, Icon } from '@gravity-ui/uikit';
+import { ArrowRight } from '@gravity-ui/icons';
+import type { InstanceInfo, FunctionInfo, FunctionChainInfo } from '../../../api/inspect';
+import { formatUint64 } from '../utils';
+import './FunctionsSection.css';
 
 export interface FunctionsSectionProps {
     instance: InstanceInfo;
 }
 
-export const FunctionsSection: React.FC<FunctionsSectionProps> = ({ instance }) => {
-    const functionColumns: TableColumnConfig<FunctionInfo>[] = useMemo(() => [
-        {
-            id: 'name',
-            name: 'Name',
-            meta: {
-                sort: (a: FunctionInfo, b: FunctionInfo) => compareNullableStrings(a.Name, b.Name),
-            },
-            template: (item: FunctionInfo) => item.Name || '-',
-        },
-        {
-            id: 'chains',
-            name: 'Chains',
-            meta: {
-                sort: (a: FunctionInfo, b: FunctionInfo) =>
-                    compareNullableNumbers(a.chains?.length, b.chains?.length),
-            },
-            template: (item: FunctionInfo) => {
-                if (!item.chains || item.chains.length === 0) return '-';
-                return item.chains.map(chain => chain.Name || 'unnamed').join(', ');
-            },
-        },
-    ], []);
+const Arrow: React.FC = () => (
+    <span className="functionArrow">
+        <Icon data={ArrowRight} size={14} />
+    </span>
+);
+
+interface ModulesFlowProps {
+    chain: FunctionChainInfo;
+}
+
+const ModulesFlow: React.FC<ModulesFlowProps> = ({ chain }) => {
+    const modules = chain.modules ?? [];
+
+    if (modules.length === 0) {
+        return <Text variant="body-2" color="secondary">-</Text>;
+    }
 
     return (
-        <Box style={{ marginBottom: '24px' }}>
-            <Text variant="header-1" style={{ marginBottom: '12px' }}>
-                Functions
+        <Box className="functionModulesFlow">
+            {modules.map((mod, idx) => (
+                <React.Fragment key={`${chain.Name}-mod-${idx}`}>
+                    <Box className="functionModule">
+                        <Text variant="caption-2">{mod.name || mod.type || 'module'}</Text>
+                    </Box>
+                    {idx < modules.length - 1 && <Arrow />}
+                </React.Fragment>
+            ))}
+        </Box>
+    );
+};
+
+interface ChainRowProps {
+    chain: FunctionChainInfo;
+}
+
+const ChainRow: React.FC<ChainRowProps> = ({ chain }) => {
+    const weight = formatUint64(chain.Weight);
+
+    return (
+        <Box className="functionChainRow">
+            <Text variant="body-2" className="functionChainName">
+                {chain.Name || 'unnamed'}
             </Text>
-            {instance.functions && instance.functions.length > 0 ? (
-                <SortableDataTable
-                    data={instance.functions}
-                    columns={functionColumns}
-                    width="max"
-                />
+            <span className="functionChainSeparator" />
+            <Text variant="body-2" className="functionChainWeight">
+                {weight}
+            </Text>
+            <Box className="functionChainModules">
+                <ModulesFlow chain={chain} />
+            </Box>
+        </Box>
+    );
+};
+
+interface FunctionCardProps {
+    func: FunctionInfo;
+}
+
+const FunctionCard: React.FC<FunctionCardProps> = ({ func }) => {
+    const chains = func.chains ?? [];
+
+    return (
+        <Box className="functionCard">
+            <Text variant="body-1" className="functionCardName">
+                {func.Name || 'unnamed'}
+            </Text>
+            {chains.length > 0 ? (
+                <Box className="functionChainsList">
+                    {chains.map((chain, idx) => (
+                        <ChainRow key={chain.Name ?? idx} chain={chain} />
+                    ))}
+                </Box>
             ) : (
-                <Text variant="body-1" color="secondary" style={{ display: 'block' }}>No functions</Text>
+                <Text variant="body-2" color="secondary" className="functionNoChains">
+                    No chains
+                </Text>
             )}
         </Box>
     );
 };
 
+export const FunctionsSection: React.FC<FunctionsSectionProps> = ({ instance }) => {
+    const functions = instance.functions ?? [];
+
+    return (
+        <Box className="functionsSection">
+            <Text variant="header-1" className="functionsSectionHeader">
+                Functions
+            </Text>
+            {functions.length > 0 ? (
+                <Box className="functionsList">
+                    {functions.map((func, idx) => (
+                        <FunctionCard key={func.Name ?? idx} func={func} />
+                    ))}
+                </Box>
+            ) : (
+                <Text variant="body-1" color="secondary" style={{ display: 'block' }}>
+                    No functions
+                </Text>
+            )}
+        </Box>
+    );
+};

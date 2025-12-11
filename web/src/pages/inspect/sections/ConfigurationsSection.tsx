@@ -39,16 +39,18 @@ export const ConfigurationsSection: React.FC<ConfigurationsSectionProps> = ({ in
     ], []);
 
     return (
-        <Box style={{ marginBottom: '24px' }}>
+        <Box>
             <Text variant="header-1" style={{ marginBottom: '12px' }}>
                 Controlplane Configurations
             </Text>
             {instance.cpConfigs && instance.cpConfigs.length > 0 ? (
-                <SortableDataTable
-                    data={instance.cpConfigs}
-                    columns={cpConfigColumns}
-                    width="max"
-                />
+                <Box>
+                    <SortableDataTable
+                        data={instance.cpConfigs}
+                        columns={cpConfigColumns}
+                        width="max"
+                    />
+                </Box>
             ) : (
                 <Text variant="body-1" color="secondary" style={{ display: 'block' }}>No configurations</Text>
             )}

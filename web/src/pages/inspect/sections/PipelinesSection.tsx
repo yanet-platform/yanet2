@@ -1,5 +1,6 @@
 import React from 'react';
-import { Box, Text } from '@gravity-ui/uikit';
+import { Box, Text, Icon } from '@gravity-ui/uikit';
+import { ArrowRight } from '@gravity-ui/icons';
 import type { InstanceInfo, PipelineInfo } from '../../../api/inspect';
 import './PipelinesSection.css';
 
@@ -7,38 +8,43 @@ export interface PipelinesSectionProps {
     instance: InstanceInfo;
 }
 
+interface EndpointBadgeProps {
+    type: 'rx' | 'tx';
+}
+
+const EndpointBadge: React.FC<EndpointBadgeProps> = ({ type }) => (
+    <span className={`pipelineEndpoint pipelineEndpoint--${type}`}>
+        {type}
+    </span>
+);
+
+const Arrow: React.FC = () => (
+    <span className="pipelineArrow">
+        <Icon data={ArrowRight} size={14} />
+    </span>
+);
+
 interface PipelineFlowProps {
     pipelineName: string;
     functions?: string[];
 }
 
 const PipelineFlow: React.FC<PipelineFlowProps> = ({ pipelineName, functions }) => {
-    const segments = ['rx', ...(functions ?? []), 'tx'];
+    const funcList = functions ?? [];
 
     return (
         <Box className="pipelineFlow">
-            {segments.map((segment, idx) => {
-                const isFunction = idx > 0 && idx < segments.length - 1;
-
-                return (
-                    <React.Fragment key={`${pipelineName}-${segment}-${idx}`}>
-                        {isFunction ? (
-                            <Box className="pipelineFunction">
-                                <Text variant="body-2">{segment}</Text>
-                            </Box>
-                        ) : (
-                            <Text variant="body-2" color="secondary">
-                                {segment}
-                            </Text>
-                        )}
-                        {idx < segments.length - 1 && (
-                            <Text variant="body-2" color="secondary">
-                                -&gt;
-                            </Text>
-                        )}
-                    </React.Fragment>
-                );
-            })}
+            <EndpointBadge type="rx" />
+            <Arrow />
+            {funcList.map((func, idx) => (
+                <React.Fragment key={`${pipelineName}-${func}-${idx}`}>
+                    <Box className="pipelineFunction">
+                        <Text variant="body-2">{func}</Text>
+                    </Box>
+                    <Arrow />
+                </React.Fragment>
+            ))}
+            <EndpointBadge type="tx" />
         </Box>
     );
 };
@@ -88,4 +94,3 @@ export const PipelinesSection: React.FC<PipelinesSectionProps> = ({ instance }) 
         </Box>
     );
 };
-

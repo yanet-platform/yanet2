@@ -2,10 +2,6 @@
    Instance Card Styles
    ============================================ */
 .instance-card {
-    border: 1px solid var(--g-color-line-generic);
-    border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 20px;
     background-color: var(--g-color-base-background);
 }
 
@@ -60,32 +56,86 @@
 /* ============================================
    Devices Section Styles
    ============================================ */
-.devices-section__device {
+.devices-section__grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: stretch;
+    margin-top: 16px;
+}
+
+.device-card {
+    border: 1px solid var(--g-color-line-generic);
+    border-radius: 8px;
+    background-color: var(--g-color-base-float);
+    min-width: 280px;
+    max-width: 400px;
+    transition: all 0.2s ease;
+    overflow: hidden;
+}
+
+.device-card:hover {
+    border-color: var(--g-color-line-brand);
+    background-color: var(--g-color-base-simple-hover);
+}
+
+.device-card__header {
+    padding: 12px 16px;
+    background-color: var(--g-color-base-generic);
+    border-bottom: 1px solid var(--g-color-line-generic);
+}
+
+.device-card__title {
+    font-weight: 600;
+}
+
+.device-card__body {
+    padding: 12px 16px;
+}
+
+.device-card__section {
     margin-bottom: 12px;
 }
 
-.devices-section__device-name {
+.device-card__section:last-child {
+    margin-bottom: 0;
+}
+
+.device-card__section-label {
     margin-bottom: 8px;
-    font-weight: bold;
+    font-weight: 500;
 }
 
-.devices-section__pipeline-group {
-    margin-left: 16px;
-    margin-bottom: 8px;
+.device-card__pipeline-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
-.devices-section__pipeline-label {
-    margin-bottom: 4px;
+.device-card__pipeline-row {
+    display: flex;
+    align-items: flex-end;
+    width: 100%;
 }
 
-.devices-section__pipeline-item {
-    margin-left: 16px;
-    margin-bottom: 4px;
+.device-card__pipeline-name {
+    flex-shrink: 0;
 }
 
-.devices-section__no-pipelines {
-    margin-left: 16px;
-    display: block;
+.device-card__pipeline-separator {
+    flex: 1;
+    border-bottom: 1px dotted var(--g-color-line-generic);
+    min-width: 20px;
+    height: 1px;
+    margin: 0 8px 4px 8px;
+}
+
+.device-card__pipeline-weight {
+    flex-shrink: 0;
+}
+
+.device-card__no-pipelines {
+    color: var(--g-color-text-secondary);
 }
 
 /* ============================================
@@ -95,17 +145,10 @@
     margin-bottom: 24px;
 }
 
-.inspect-section__header {
-    margin-bottom: 12px;
-}
-
-.inspect-section__content {
-    padding: 12px;
-}
-
 .inspect-section__modules-grid {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
     align-items: stretch;
+    margin-top: 16px;
 }
