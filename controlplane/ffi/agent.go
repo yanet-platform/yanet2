@@ -112,6 +112,10 @@ func (m *Agent) TakeError() error {
 >>>>>>> 09fe6fd (wip)
 }
 
+func (m *Agent) CleanError() error {
+	return C.agent_clean_error(m.ptr)
+}
+
 func (m *Agent) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
