@@ -69,7 +69,7 @@ balancer_handle_packets(
 	);
 
 	// Get current time in seconds.
-	uint32_t now = dp_worker->current_time.tv_sec;
+	uint32_t now = dp_worker->current_time / (1000 * 1000 * 1000);
 
 	// update worker time
 	update_worker_time(ADDR_OF(&config->state), dp_worker, now);
