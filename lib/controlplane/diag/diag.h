@@ -84,14 +84,16 @@ diag_reset(struct diag *diag);
 // On success (zero return), resets the diagnostic structure.
 //
 // @param diag Pointer to the diagnostic structure to fill on error
-// @param call Function call expression that returns int (0=success, non-zero=error)
+// @param call Function call expression that returns int
+//             (0=success, non-zero=error)
 // @param ... Format string and arguments for error context (like printf)
 //
 // @return The return value from the wrapped call
 //
 // Usage example:
 //   struct diag d = {0};
-//   if (DIAG_TRY(&d, load_config(path), "Failed to load config from %s", path)) {
+//   if (DIAG_TRY(&d, load_config(path),
+//                "Failed to load config from %s", path)) {
 //       fprintf(stderr, "Error: %s\n", diag_msg(&d));
 //       diag_reset(&d);
 //       return -1;
