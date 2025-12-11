@@ -71,7 +71,6 @@ func (m *Agent) CleanUp() error {
 	return err
 }
 
-<<<<<<< HEAD
 // TakeError retrieves and clears the last error from the agent's diagnostic system.
 // It takes ownership of the error message from the C layer and returns it as a Go error.
 //
@@ -106,14 +105,6 @@ func (m *Agent) TakeError() error {
 // resets the diagnostic state.
 func (m *Agent) CleanError() {
 	C.agent_clean_error(m.ptr)
-=======
-func (m *Agent) TakeError() error {
-	return C.agent_take_error(m.ptr)
->>>>>>> 09fe6fd (wip)
-}
-
-func (m *Agent) CleanError() error {
-	return C.agent_clean_error(m.ptr)
 }
 
 func (m *Agent) AsRawPtr() unsafe.Pointer {
