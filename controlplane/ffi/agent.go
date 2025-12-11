@@ -133,11 +133,11 @@ func (m *Agent) UpdateModules(modules []ModuleConfig) error {
 		C.size_t(len(modules)),
 		&configs[0],
 	)
+	if rc != 0 {
+		return m.TakeError()
+	}
 	if err != nil {
 		return fmt.Errorf("failed to update modules: %w", err)
-	}
-	if rc != 0 {
-		return fmt.Errorf("failed to update modules: %d code", rc)
 	}
 
 	return nil
@@ -164,11 +164,11 @@ func (m *Agent) UpdateFunction(functionConfig FunctionConfig) error {
 		1,
 		&functions[0],
 	)
+	if rc != 0 {
+		return m.TakeError()
+	}
 	if err != nil {
 		return fmt.Errorf("failed to update function: %w", err)
-	}
-	if rc != 0 {
-		return fmt.Errorf("failed to update function: %d code", rc)
 	}
 
 	return nil
@@ -190,11 +190,11 @@ func (m *Agent) UpdatePipeline(pipelineConfig PipelineConfig) error {
 		1,
 		&pipelines[0],
 	)
+	if rc != 0 {
+		return m.TakeError()
+	}
 	if err != nil {
 		return fmt.Errorf("failed to update pipelines: %w", err)
-	}
-	if rc != 0 {
-		return fmt.Errorf("failed to update pipelines: %d code", rc)
 	}
 
 	return nil
@@ -274,11 +274,11 @@ func (m *Agent) UpdateDevices(devices []ShmDeviceConfig) error {
 		C.size_t(len(devices)),
 		&configs[0],
 	)
+	if rc != 0 {
+		return m.TakeError()
+	}
 	if err != nil {
 		return fmt.Errorf("failed to update devices: %w", err)
-	}
-	if rc != 0 {
-		return fmt.Errorf("failed to update devices: %d code", rc)
 	}
 
 	return nil
@@ -294,11 +294,11 @@ func (m *Agent) DeleteFunction(name string) error {
 	defer C.free(unsafe.Pointer(cName))
 
 	rc, err := C.agent_delete_function(m.ptr, cName)
+	if rc != 0 {
+		return m.TakeError()
+	}
 	if err != nil {
 		return err
-	}
-	if rc != 0 {
-		return fmt.Errorf("error code: %d", rc)
 	}
 
 	return nil
@@ -309,11 +309,11 @@ func (m *Agent) DeletePipeline(name string) error {
 	defer C.free(unsafe.Pointer(cName))
 
 	rc, err := C.agent_delete_pipeline(m.ptr, cName)
+	if rc != 0 {
+		return m.TakeError()
+	}
 	if err != nil {
 		return err
-	}
-	if rc != 0 {
-		return fmt.Errorf("error code: %d", rc)
 	}
 
 	return nil
