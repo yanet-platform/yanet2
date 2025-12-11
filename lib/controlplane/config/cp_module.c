@@ -7,6 +7,7 @@
 #include "controlplane/agent/agent.h"
 
 #include "controlplane/config/zone.h"
+#include "lib/controlplane/diag/diag.h"
 
 int
 cp_module_init(
@@ -23,6 +24,10 @@ cp_module_init(
 	if (dp_config_lookup_module(
 		    dp_config, module_type, &cp_module->dp_module_idx
 	    )) {
+		NEW_ERROR(
+			"module type '%s' not found in dataplane config",
+			module_type
+		);
 		errno = ENXIO;
 		return -1;
 	}
@@ -42,11 +47,22 @@ cp_module_init(
 	if (counter_registry_init(
 		    &cp_module->counter_registry, &cp_module->memory_context, 0
 	    )) {
+		NEW_ERROR(
+			"failed to initialize counter registry for module "
+			"'%s:%s'",
+			module_type,
+			module_name
+		);
 		return -1;
 	}
 
 	uint64_t any_idx;
 	if (cp_module_link_device(cp_module, "", &any_idx)) {
+		PUSH_ERROR(
+			"in cp_module_init for module '%s:%s'",
+			module_type,
+			module_name
+		);
 		return -1;
 	}
 
@@ -71,8 +87,10 @@ cp_module_link_device(
 		sizeof(struct cp_module_device) * cp_module->device_count,
 		sizeof(struct cp_module_device) * (cp_module->device_count + 1)
 	);
-	if (devices == NULL)
+	if (devices == NULL) {
+		NEW_ERROR("failed to reallocate devices array for module");
 		return -1;
+	}
 
 	strtcpy(devices[cp_module->device_count].name, name, CP_DEVICE_NAME_LEN
 	);
@@ -89,6 +107,7 @@ cp_module_registry_init(
 	struct cp_module_registry *new_module_registry
 ) {
 	if (registry_init(memory_context, &new_module_registry->registry, 8)) {
+		NEW_ERROR("failed to initialize module registry");
 		return -1;
 	}
 
@@ -107,6 +126,7 @@ cp_module_registry_copy(
 		    &new_module_registry->registry,
 		    &old_module_registry->registry
 	    )) {
+		NEW_ERROR("failed to copy module registry");
 		return -1;
 	};
 

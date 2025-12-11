@@ -3,7 +3,7 @@
 #include "common/container_of.h"
 
 #include "controlplane/config/zone.h"
-#include "dataplane/config/zone.h"
+#include "lib/controlplane/diag/diag.h"
 
 #include <string.h>
 
@@ -27,6 +27,10 @@ cp_pipeline_create(
 		cp_pipeline_alloc_size(cp_pipeline_config->length)
 	);
 	if (new_pipeline == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for pipeline '%s'",
+			cp_pipeline_config->name
+		);
 		return NULL;
 	}
 
@@ -43,22 +47,58 @@ cp_pipeline_create(
 	if (counter_registry_init(
 		    &new_pipeline->counter_registry, memory_context, 0
 	    )) {
+		NEW_ERROR(
+			"failed to initialize counter registry for pipeline "
+			"'%s'",
+			cp_pipeline_config->name
+		);
 		goto error;
 	}
 
-	// FIXME return error on counter failure
 	new_pipeline->counter_packet_in_count = counter_registry_register(
 		&new_pipeline->counter_registry, "input", 1
 	);
+	if (new_pipeline->counter_packet_in_count == COUNTER_INVALID) {
+		NEW_ERROR(
+			"failed to register 'input' counter for pipeline '%s'",
+			cp_pipeline_config->name
+		);
+		goto error;
+	}
+
 	new_pipeline->counter_packet_out_count = counter_registry_register(
 		&new_pipeline->counter_registry, "output", 1
 	);
+	if (new_pipeline->counter_packet_out_count == COUNTER_INVALID) {
+		NEW_ERROR(
+			"failed to register 'output' counter for pipeline '%s'",
+			cp_pipeline_config->name
+		);
+		goto error;
+	}
+
 	new_pipeline->counter_packet_drop_count = counter_registry_register(
 		&new_pipeline->counter_registry, "drop", 1
 	);
+	if (new_pipeline->counter_packet_drop_count == COUNTER_INVALID) {
+		NEW_ERROR(
+			"failed to register 'drop' counter for pipeline '%s'",
+			cp_pipeline_config->name
+		);
+		goto error;
+	}
+
 	new_pipeline->counter_packet_in_hist = counter_registry_register(
 		&new_pipeline->counter_registry, "input histogram", 8
 	);
+	if (new_pipeline->counter_packet_in_hist == COUNTER_INVALID) {
+		NEW_ERROR(
+			"failed to register 'input histogram' counter for "
+			"pipeline '%s'",
+			cp_pipeline_config->name
+		);
+		goto error;
+	}
 
 	for (uint64_t idx = 0; idx < cp_pipeline_config->length; ++idx) {
 		strtcpy(new_pipeline->functions[idx].name,
@@ -76,6 +116,16 @@ cp_pipeline_create(
 			counter_registry_register(
 				&new_pipeline->counter_registry, counter_name, 8
 			);
+		if (new_pipeline->functions[idx].tsc_counter_id ==
+		    COUNTER_INVALID) {
+			NEW_ERROR(
+				"failed to register '%s' counter for pipeline "
+				"'%s'",
+				counter_name,
+				cp_pipeline_config->name
+			);
+			goto error;
+		}
 	}
 
 	return new_pipeline;
@@ -110,6 +160,7 @@ cp_pipeline_registry_init(
 	if (registry_init(
 		    memory_context, &new_pipeline_registry->registry, 8
 	    )) {
+		NEW_ERROR("failed to initialize pipeline registry");
 		return -1;
 	}
 
@@ -128,6 +179,7 @@ cp_pipeline_registry_copy(
 		    &new_pipeline_registry->registry,
 		    &old_pipeline_registry->registry
 	    )) {
+		NEW_ERROR("failed to copy pipeline registry");
 		return -1;
 	};
 
@@ -218,10 +270,17 @@ cp_pipeline_registry_upsert(
 	struct cp_pipeline *old_pipeline =
 		cp_pipeline_registry_lookup(pipeline_registry, name);
 
-	counter_registry_link(
-		&new_pipeline->counter_registry,
-		(old_pipeline != NULL) ? &old_pipeline->counter_registry : NULL
-	);
+	if (counter_registry_link(
+		    &new_pipeline->counter_registry,
+		    (old_pipeline != NULL) ? &old_pipeline->counter_registry
+					   : NULL
+	    )) {
+		NEW_ERROR(
+			"failed to link counter registry for pipeline '%s'",
+			name
+		);
+		return -1;
+	}
 
 	return registry_replace(
 		&pipeline_registry->registry,

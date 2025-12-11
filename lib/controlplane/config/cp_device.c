@@ -5,6 +5,7 @@
 #include "dataplane/config/zone.h"
 
 #include "controlplane/config/zone.h"
+#include "lib/controlplane/diag/diag.h"
 
 int
 cp_device_config_init(
@@ -22,6 +23,11 @@ cp_device_config_init(
 		       sizeof(struct cp_pipeline_weight_config) *
 			       input_pipeline_count);
 	if (cp_device_config->input_pipelines == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for input pipelines of "
+			"device '%s'",
+			name
+		);
 		goto error;
 	}
 	memset(cp_device_config->input_pipelines,
@@ -36,6 +42,11 @@ cp_device_config_init(
 		       sizeof(struct cp_pipeline_weight_config) *
 			       output_pipeline_count);
 	if (cp_device_config->output_pipelines == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for output pipelines of "
+			"device '%s'",
+			name
+		);
 		goto error_output;
 	}
 	memset(cp_device_config->output_pipelines,
@@ -69,8 +80,10 @@ cp_device_entry_create(
 		cp_device_entry_alloc_size(cp_device_entry_config->count);
 	struct cp_device_entry *cp_device_entry = (struct cp_device_entry *)
 		memory_balloc(memory_context, alloc_size);
-	if (cp_device_entry == NULL)
+	if (cp_device_entry == NULL) {
+		NEW_ERROR("failed to allocate memory for device entry");
 		return NULL;
+	}
 	memset(cp_device_entry, 0, alloc_size);
 	cp_device_entry->pipeline_count = cp_device_entry_config->count;
 	for (uint64_t idx = 0; idx < cp_device_entry_config->count; ++idx) {
@@ -98,6 +111,10 @@ cp_device_init(
 	if (dp_config_lookup_device(
 		    dp_config, cp_device_config->type, &cp_device->dp_device_idx
 	    )) {
+		NEW_ERROR(
+			"device type '%s' not found in dataplane config",
+			cp_device_config->type
+		);
 		errno = ENXIO;
 		return -1;
 	}
@@ -123,8 +140,13 @@ cp_device_init(
 			memory_context, cp_device_config->input_pipelines
 		)
 	);
-	if (cp_device->input_pipelines == NULL)
+	if (cp_device->input_pipelines == NULL) {
+		NEW_ERROR(
+			"failed to create input pipelines for device '%s'",
+			cp_device_config->name
+		);
 		return -1;
+	}
 
 	SET_OFFSET_OF(
 		&cp_device->output_pipelines,
@@ -132,8 +154,13 @@ cp_device_init(
 			memory_context, cp_device_config->output_pipelines
 		)
 	);
-	if (cp_device->output_pipelines == NULL)
+	if (cp_device->output_pipelines == NULL) {
+		NEW_ERROR(
+			"failed to create output pipelines for device '%s'",
+			cp_device_config->name
+		);
 		return -1;
+	}
 
 	registry_item_init(&cp_device->config_item);
 	counter_registry_init(&cp_device->counter_registry, memory_context, 0);
@@ -147,10 +174,17 @@ cp_device_create(struct agent *agent, struct cp_device_config *device_config) {
 		&agent->memory_context, sizeof(struct cp_device)
 	);
 	if (new_device == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for device '%s'",
+			device_config->name
+		);
 		return NULL;
 	}
 
 	if (cp_device_init(new_device, agent, device_config)) {
+		PUSH_ERROR(
+			"failed to initialize device '%s'", device_config->name
+		);
 		cp_device_free(&agent->memory_context, new_device);
 		return NULL;
 	}
@@ -199,6 +233,7 @@ cp_device_registry_init(
 	struct cp_device_registry *new_device_registry
 ) {
 	if (registry_init(memory_context, &new_device_registry->registry, 8)) {
+		NEW_ERROR("failed to initialize device registry");
 		return -1;
 	}
 
@@ -217,6 +252,7 @@ cp_device_registry_copy(
 		    &new_device_registry->registry,
 		    &old_device_registry->registry
 	    )) {
+		NEW_ERROR("failed to copy device registry");
 		return -1;
 	};
 
@@ -295,10 +331,15 @@ cp_device_registry_upsert(
 	struct cp_device *old_device =
 		cp_device_registry_lookup(device_registry, name);
 
-	counter_registry_link(
-		&new_device->counter_registry,
-		(old_device != NULL) ? &old_device->counter_registry : NULL
-	);
+	if (counter_registry_link(
+		    &new_device->counter_registry,
+		    (old_device != NULL) ? &old_device->counter_registry : NULL
+	    )) {
+		NEW_ERROR(
+			"failed to link counter registry for device '%s'", name
+		);
+		return -1;
+	}
 
 	return registry_replace(
 		&device_registry->registry,

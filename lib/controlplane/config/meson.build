@@ -1,7 +1,8 @@
 dependencies = [
-lib_counters_dep,
+  lib_counters_dep,
   lib_module_dp_dep,
   lib_pipeline_dp_dep,
+  lib_diag_dep,
 ]
 
 sources = files(

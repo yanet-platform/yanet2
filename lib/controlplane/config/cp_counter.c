@@ -1,9 +1,10 @@
 #include "cp_counter.h"
 
+#include "common/container_of.h"
 #include "common/memory.h"
 
 #include "controlplane/config/defines.h"
-#include "controlplane/config/zone.h"
+#include "lib/controlplane/diag/diag.h"
 
 #define COUNTER_REGISTRY_PREALLOC 8
 
@@ -17,6 +18,8 @@ cp_config_counter_storage_registry_init(
 		    &registry->device_registry,
 		    COUNTER_REGISTRY_PREALLOC
 	    )) {
+		NEW_ERROR("failed to initialize device registry for counter "
+			  "storage");
 		return -1;
 	}
 
@@ -225,6 +228,11 @@ cp_config_counter_storage_registry_insert_device(
 			registry, device_name
 		);
 	if (device != NULL) {
+		NEW_ERROR(
+			"device '%s' already exists in counter storage "
+			"registry",
+			device_name
+		);
 		return -1;
 	}
 
@@ -234,8 +242,14 @@ cp_config_counter_storage_registry_insert_device(
 	device = (struct cp_config_counter_storage_device *)memory_balloc(
 		memory_context, sizeof(struct cp_config_counter_storage_device)
 	);
-	if (device == NULL)
+	if (device == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for device '%s' in counter "
+			"storage",
+			device_name
+		);
 		return -1;
+	}
 
 	registry_item_init(&device->item);
 	strtcpy(device->device_name, device_name, sizeof(device->device_name));
@@ -244,11 +258,21 @@ cp_config_counter_storage_registry_insert_device(
 		    &device->pipeline_registry,
 		    COUNTER_REGISTRY_PREALLOC
 	    )) {
+		NEW_ERROR(
+			"failed to initialize pipeline registry for device "
+			"'%s'",
+			device_name
+		);
 		goto error_init;
 	}
 	SET_OFFSET_OF(&device->counter_storage, counter_storage);
 
 	if (registry_insert(&registry->device_registry, &device->item)) {
+		NEW_ERROR(
+			"failed to insert device '%s' into counter storage "
+			"registry",
+			device_name
+		);
 		goto error_insert;
 	}
 
@@ -343,8 +367,13 @@ cp_config_counter_storage_registry_insert_pipeline(
 			registry, device_name
 		);
 
-	if (device == NULL)
+	if (device == NULL) {
+		NEW_ERROR(
+			"device '%s' not found in counter storage registry",
+			device_name
+		);
 		return -1;
+	}
 
 	struct cp_config_counter_storage_pipeline *pipeline =
 		cp_config_counter_storage_registry_lookup_pipeline_item(
@@ -352,6 +381,12 @@ cp_config_counter_storage_registry_insert_pipeline(
 		);
 
 	if (pipeline != NULL) {
+		NEW_ERROR(
+			"pipeline '%s' already exists for device '%s' in "
+			"counter storage",
+			pipeline_name,
+			device_name
+		);
 		return -1;
 	}
 
@@ -362,8 +397,15 @@ cp_config_counter_storage_registry_insert_pipeline(
 		memory_context,
 		sizeof(struct cp_config_counter_storage_pipeline)
 	);
-	if (pipeline == NULL)
+	if (pipeline == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for pipeline '%s' on device "
+			"'%s'",
+			pipeline_name,
+			device_name
+		);
 		return -1;
+	}
 
 	registry_item_init(&pipeline->item);
 	strtcpy(pipeline->pipeline_name,
@@ -374,11 +416,22 @@ cp_config_counter_storage_registry_insert_pipeline(
 		    &pipeline->function_registry,
 		    COUNTER_REGISTRY_PREALLOC
 	    )) {
+		NEW_ERROR(
+			"failed to initialize function registry for pipeline "
+			"'%s'",
+			pipeline_name
+		);
 		goto error_init;
 	}
 	SET_OFFSET_OF(&pipeline->counter_storage, counter_storage);
 
 	if (registry_insert(&device->pipeline_registry, &pipeline->item)) {
+		NEW_ERROR(
+			"failed to insert pipeline '%s' into device '%s' "
+			"registry",
+			pipeline_name,
+			device_name
+		);
 		goto error_insert;
 	}
 
@@ -477,16 +530,27 @@ cp_config_counter_storage_registry_insert_function(
 		cp_config_counter_storage_registry_lookup_device_item(
 			registry, device_name
 		);
-	if (device == NULL)
+	if (device == NULL) {
+		NEW_ERROR(
+			"device '%s' not found in counter storage registry",
+			device_name
+		);
 		return -1;
+	}
 
 	struct cp_config_counter_storage_pipeline *pipeline =
 		cp_config_counter_storage_registry_lookup_pipeline_item(
 			device, pipeline_name
 		);
 
-	if (pipeline == NULL)
+	if (pipeline == NULL) {
+		NEW_ERROR(
+			"pipeline '%s' not found on device '%s'",
+			pipeline_name,
+			device_name
+		);
 		return -1;
+	}
 
 	struct cp_config_counter_storage_function *function =
 		cp_config_counter_storage_registry_lookup_function_item(
@@ -494,6 +558,12 @@ cp_config_counter_storage_registry_insert_function(
 		);
 
 	if (function != NULL) {
+		NEW_ERROR(
+			"function '%s' already exists for pipeline '%s' in "
+			"counter storage",
+			function_name,
+			pipeline_name
+		);
 		return -1;
 	}
 
@@ -504,8 +574,15 @@ cp_config_counter_storage_registry_insert_function(
 		memory_context,
 		sizeof(struct cp_config_counter_storage_function)
 	);
-	if (function == NULL)
+	if (function == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for function '%s' on "
+			"pipeline '%s'",
+			function_name,
+			pipeline_name
+		);
 		return -1;
+	}
 
 	registry_item_init(&function->item);
 	strtcpy(function->function_name,
@@ -516,11 +593,21 @@ cp_config_counter_storage_registry_insert_function(
 		    &function->chain_registry,
 		    COUNTER_REGISTRY_PREALLOC
 	    )) {
+		NEW_ERROR(
+			"failed to initialize chain registry for function '%s'",
+			function_name
+		);
 		goto error_init;
 	}
 	SET_OFFSET_OF(&function->counter_storage, counter_storage);
 
 	if (registry_insert(&pipeline->function_registry, &function->item)) {
+		NEW_ERROR(
+			"failed to insert function '%s' into pipeline '%s' "
+			"registry",
+			function_name,
+			pipeline_name
+		);
 		goto error_insert;
 	}
 
@@ -626,22 +713,39 @@ cp_config_counter_storage_registry_insert_chain(
 		cp_config_counter_storage_registry_lookup_device_item(
 			registry, device_name
 		);
-	if (device == NULL)
+	if (device == NULL) {
+		NEW_ERROR(
+			"device '%s' not found in counter storage registry",
+			device_name
+		);
 		return -1;
+	}
 
 	struct cp_config_counter_storage_pipeline *pipeline =
 		cp_config_counter_storage_registry_lookup_pipeline_item(
 			device, pipeline_name
 		);
-	if (pipeline == NULL)
+	if (pipeline == NULL) {
+		NEW_ERROR(
+			"pipeline '%s' not found on device '%s'",
+			pipeline_name,
+			device_name
+		);
 		return -1;
+	}
 
 	struct cp_config_counter_storage_function *function =
 		cp_config_counter_storage_registry_lookup_function_item(
 			pipeline, function_name
 		);
-	if (function == NULL)
+	if (function == NULL) {
+		NEW_ERROR(
+			"function '%s' not found on pipeline '%s'",
+			function_name,
+			pipeline_name
+		);
 		return -1;
+	}
 
 	struct cp_config_counter_storage_chain *chain =
 		cp_config_counter_storage_registry_lookup_chain_item(
@@ -657,8 +761,15 @@ cp_config_counter_storage_registry_insert_chain(
 	chain = (struct cp_config_counter_storage_chain *)memory_balloc(
 		memory_context, sizeof(struct cp_config_counter_storage_chain)
 	);
-	if (chain == NULL)
+	if (chain == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for chain '%s' on function "
+			"'%s'",
+			chain_name,
+			function_name
+		);
 		return -1;
+	}
 
 	registry_item_init(&chain->item);
 	strtcpy(chain->chain_name, chain_name, sizeof(chain->chain_name));
@@ -667,11 +778,21 @@ cp_config_counter_storage_registry_insert_chain(
 		    &chain->module_registry,
 		    COUNTER_REGISTRY_PREALLOC
 	    )) {
+		NEW_ERROR(
+			"failed to initialize module registry for chain '%s'",
+			chain_name
+		);
 		goto error_init;
 	}
 	SET_OFFSET_OF(&chain->counter_storage, counter_storage);
 
 	if (registry_insert(&function->chain_registry, &chain->item)) {
+		NEW_ERROR(
+			"failed to insert chain '%s' into function '%s' "
+			"registry",
+			chain_name,
+			function_name
+		);
 		goto error_insert;
 	}
 
@@ -809,28 +930,50 @@ cp_config_counter_storage_registry_insert_module(
 		cp_config_counter_storage_registry_lookup_device_item(
 			registry, device_name
 		);
-	if (device == NULL)
+	if (device == NULL) {
+		NEW_ERROR(
+			"device '%s' not found in counter storage registry",
+			device_name
+		);
 		return -1;
+	}
 
 	struct cp_config_counter_storage_pipeline *pipeline =
 		cp_config_counter_storage_registry_lookup_pipeline_item(
 			device, pipeline_name
 		);
-	if (pipeline == NULL)
+	if (pipeline == NULL) {
+		NEW_ERROR(
+			"pipeline '%s' not found on device '%s'",
+			pipeline_name,
+			device_name
+		);
 		return -1;
+	}
 
 	struct cp_config_counter_storage_function *function =
 		cp_config_counter_storage_registry_lookup_function_item(
 			pipeline, function_name
 		);
-	if (function == NULL)
+	if (function == NULL) {
+		NEW_ERROR(
+			"function '%s' not found on pipeline '%s'",
+			function_name,
+			pipeline_name
+		);
 		return -1;
+	}
 
 	struct cp_config_counter_storage_chain *chain =
 		cp_config_counter_storage_registry_lookup_chain_item(
 			function, chain_name
 		);
 	if (chain == NULL) {
+		NEW_ERROR(
+			"chain '%s' not found on function '%s'",
+			chain_name,
+			function_name
+		);
 		return -1;
 	}
 
@@ -839,6 +982,13 @@ cp_config_counter_storage_registry_insert_module(
 			chain, module_type, module_name
 		);
 	if (module != NULL) {
+		NEW_ERROR(
+			"module '%s:%s' already exists for chain '%s' in "
+			"counter storage",
+			module_type,
+			module_name,
+			chain_name
+		);
 		return -1;
 	}
 
@@ -848,8 +998,16 @@ cp_config_counter_storage_registry_insert_module(
 	module = (struct cp_config_counter_storage_module *)memory_balloc(
 		memory_context, sizeof(struct cp_config_counter_storage_module)
 	);
-	if (module == NULL)
+	if (module == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for module '%s:%s' on chain "
+			"'%s'",
+			module_type,
+			module_name,
+			chain_name
+		);
 		return -1;
+	}
 
 	registry_item_init(&module->item);
 	strtcpy(module->module_type, module_type, sizeof(module->module_type));
@@ -857,6 +1015,13 @@ cp_config_counter_storage_registry_insert_module(
 	SET_OFFSET_OF(&module->counter_storage, counter_storage);
 
 	if (registry_insert(&chain->module_registry, &module->item)) {
+		NEW_ERROR(
+			"failed to insert module '%s:%s' into chain '%s' "
+			"registry",
+			module_type,
+			module_name,
+			chain_name
+		);
 		goto error;
 	}
 

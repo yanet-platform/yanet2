@@ -4,6 +4,7 @@
 
 #include "controlplane/config/cp_chain.h"
 #include "controlplane/config/zone.h"
+#include "lib/controlplane/diag/diag.h"
 
 #include <string.h>
 
@@ -25,6 +26,10 @@ cp_function_create(
 	struct cp_function *new_function =
 		(struct cp_function *)memory_balloc(memory_context, alloc_size);
 	if (new_function == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for function '%s'",
+			cp_function_config->name
+		);
 		return NULL;
 	}
 
@@ -40,21 +45,58 @@ cp_function_create(
 	if (counter_registry_init(
 		    &new_function->counter_registry, memory_context, 0
 	    )) {
+		NEW_ERROR(
+			"failed to initialize counter registry for function "
+			"'%s'",
+			cp_function_config->name
+		);
 		goto error;
 	}
 
 	new_function->counter_packet_in_count = counter_registry_register(
 		&new_function->counter_registry, "input", 1
 	);
+	if (new_function->counter_packet_in_count == COUNTER_INVALID) {
+		NEW_ERROR(
+			"failed to register 'input' counter for function '%s'",
+			cp_function_config->name
+		);
+		goto error;
+	}
+
 	new_function->counter_packet_out_count = counter_registry_register(
 		&new_function->counter_registry, "output", 1
 	);
+	if (new_function->counter_packet_out_count == COUNTER_INVALID) {
+		NEW_ERROR(
+			"failed to register 'output' counter for function '%s'",
+			cp_function_config->name
+		);
+		goto error;
+	}
+
 	new_function->counter_packet_drop_count = counter_registry_register(
 		&new_function->counter_registry, "drop", 1
 	);
+	if (new_function->counter_packet_drop_count == COUNTER_INVALID) {
+		NEW_ERROR(
+			"failed to register 'drop' counter for function '%s'",
+			cp_function_config->name
+		);
+		goto error;
+	}
+
 	new_function->counter_packet_in_hist = counter_registry_register(
 		&new_function->counter_registry, "input histogram", 8
 	);
+	if (new_function->counter_packet_in_hist == COUNTER_INVALID) {
+		NEW_ERROR(
+			"failed to register 'input histogram' counter for "
+			"function '%s'",
+			cp_function_config->name
+		);
+		goto error;
+	}
 
 	for (uint64_t chain_idx = 0;
 	     chain_idx < cp_function_config->chain_count;
@@ -68,6 +110,10 @@ cp_function_create(
 		);
 
 		if (new_chain == NULL) {
+			PUSH_ERROR(
+				"in cp_function_create for function '%s'",
+				cp_function_config->name
+			);
 			goto error;
 		}
 
@@ -117,6 +163,7 @@ cp_function_registry_init(
 	if (registry_init(
 		    memory_context, &new_function_registry->registry, 8
 	    )) {
+		NEW_ERROR("failed to initialize function registry");
 		return -1;
 	}
 
@@ -135,6 +182,7 @@ cp_function_registry_copy(
 		    &new_function_registry->registry,
 		    &old_function_registry->registry
 	    )) {
+		NEW_ERROR("failed to copy function registry");
 		return -1;
 	};
 
@@ -225,10 +273,17 @@ cp_function_registry_upsert(
 	struct cp_function *old_function =
 		cp_function_registry_lookup(function_registry, name);
 
-	counter_registry_link(
-		&new_function->counter_registry,
-		(old_function != NULL) ? &old_function->counter_registry : NULL
-	);
+	if (counter_registry_link(
+		    &new_function->counter_registry,
+		    (old_function != NULL) ? &old_function->counter_registry
+					   : NULL
+	    )) {
+		NEW_ERROR(
+			"failed to link counter registry for function '%s'",
+			name
+		);
+		return -1;
+	}
 
 	return registry_replace(
 		&function_registry->registry,

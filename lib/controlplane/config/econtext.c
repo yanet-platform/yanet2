@@ -4,6 +4,7 @@
 
 // cp_config and cp_config_gen
 #include "lib/controlplane/config/zone.h"
+#include "lib/controlplane/diag/diag.h"
 
 static void
 module_ectx_free(
@@ -56,8 +57,12 @@ module_ectx_create(
 	size_t ectx_size = sizeof(struct module_ectx);
 	struct module_ectx *module_ectx =
 		(struct module_ectx *)memory_balloc(memory_context, ectx_size);
-	if (module_ectx == NULL)
+	if (module_ectx == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for module execution context"
+		);
 		return NULL;
+	}
 
 	memset(module_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&module_ectx->cp_module, cp_module);
@@ -90,8 +95,14 @@ module_ectx_create(
 		old_counter_storage,
 		&cp_module->counter_registry
 	);
-	if (counter_storage == NULL)
+	if (counter_storage == NULL) {
+		NEW_ERROR(
+			"failed to spawn counter storage for module '%s:%s'",
+			cp_module->type,
+			cp_module->name
+		);
 		goto error;
+	}
 
 	if (cp_config_counter_storage_registry_insert_module(
 		    &cp_config_gen->counter_storage_registry,
@@ -103,6 +114,11 @@ module_ectx_create(
 		    cp_module->name,
 		    counter_storage
 	    )) {
+		PUSH_ERROR(
+			"failed to insert counter storage for module '%s:%s'",
+			cp_module->type,
+			cp_module->name
+		);
 		goto error;
 	}
 
@@ -162,8 +178,12 @@ chain_ectx_create(
 			     sizeof(struct module_ectx *) * cp_chain->length;
 	struct chain_ectx *chain_ectx =
 		(struct chain_ectx *)memory_balloc(memory_context, ectx_size);
-	if (chain_ectx == NULL)
+	if (chain_ectx == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for chain execution context"
+		);
 		return NULL;
+	}
 
 	memset(chain_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&chain_ectx->cp_chain, cp_chain);
@@ -188,8 +208,13 @@ chain_ectx_create(
 		old_counter_storage,
 		&cp_chain->counter_registry
 	);
-	if (counter_storage == NULL)
+	if (counter_storage == NULL) {
+		NEW_ERROR(
+			"failed to spawn counter storage for chain '%s'",
+			cp_chain->name
+		);
 		goto error;
+	}
 
 	if (cp_config_counter_storage_registry_insert_chain(
 		    &cp_config_gen->counter_storage_registry,
@@ -199,6 +224,10 @@ chain_ectx_create(
 		    cp_chain->name,
 		    counter_storage
 	    )) {
+		PUSH_ERROR(
+			"failed to insert counter storage for chain '%s'",
+			cp_chain->name
+		);
 		goto error;
 	}
 
@@ -212,8 +241,15 @@ chain_ectx_create(
 			cp_chain->modules[idx].name
 		);
 
-		if (cp_module == NULL)
+		if (cp_module == NULL) {
+			NEW_ERROR(
+				"module '%s:%s' not found in chain '%s'",
+				cp_chain->modules[idx].type,
+				cp_chain->modules[idx].name,
+				cp_chain->name
+			);
 			goto error;
+		}
 
 		struct module_ectx *module_ectx = module_ectx_create(
 			cp_config_gen,
@@ -225,8 +261,16 @@ chain_ectx_create(
 			function_ectx,
 			chain_ectx
 		);
-		if (module_ectx == NULL)
+		if (module_ectx == NULL) {
+			PUSH_ERROR(
+				"failed to create module execution context for "
+				"module '%s:%s' in chain '%s'",
+				cp_module->type,
+				cp_module->name,
+				cp_chain->name
+			);
 			goto error;
+		}
 
 		SET_OFFSET_OF(chain_ectx->modules + idx, module_ectx);
 	}
@@ -295,8 +339,11 @@ function_ectx_create(
 
 	struct function_ectx *function_ectx = (struct function_ectx *)
 		memory_balloc(memory_context, ectx_size);
-	if (function_ectx == NULL)
+	if (function_ectx == NULL) {
+		NEW_ERROR("failed to allocate memory for function execution "
+			  "context");
 		return NULL;
+	}
 
 	memset(function_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&function_ectx->cp_function, cp_function);
@@ -306,8 +353,14 @@ function_ectx_create(
 		memory_context,
 		sizeof(struct chain_ectx *) * cp_function->chain_count
 	);
-	if (chains == NULL)
+	if (chains == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for chains array in "
+			"function '%s'",
+			cp_function->name
+		);
 		goto error;
+	}
 	memset(chains, 0, sizeof(struct chain_ectx *) * cp_function->chain_count
 	);
 	SET_OFFSET_OF(&function_ectx->chains, chains);
@@ -330,8 +383,13 @@ function_ectx_create(
 		old_counter_storage,
 		&cp_function->counter_registry
 	);
-	if (counter_storage == NULL)
+	if (counter_storage == NULL) {
+		NEW_ERROR(
+			"failed to spawn counter storage for function '%s'",
+			cp_function->name
+		);
 		goto error;
+	}
 
 	if (cp_config_counter_storage_registry_insert_function(
 		    &cp_config_gen->counter_storage_registry,
@@ -340,6 +398,10 @@ function_ectx_create(
 		    cp_function->name,
 		    counter_storage
 	    )) {
+		PUSH_ERROR(
+			"failed to insert counter storage for function '%s'",
+			cp_function->name
+		);
 		goto error;
 	}
 
@@ -358,8 +420,15 @@ function_ectx_create(
 			pipeline_ectx,
 			function_ectx
 		);
-		if (chain_ectx == NULL)
+		if (chain_ectx == NULL) {
+			PUSH_ERROR(
+				"failed to create chain execution context for "
+				"chain '%s' in function '%s'",
+				cp_chain->name,
+				cp_function->name
+			);
 			goto error;
+		}
 		SET_OFFSET_OF(chains + idx, chain_ectx);
 
 		for (uint64_t weight_idx = 0;
@@ -423,8 +492,11 @@ pipeline_ectx_create(
 
 	struct pipeline_ectx *pipeline_ectx = (struct pipeline_ectx *)
 		memory_balloc(memory_context, ectx_size);
-	if (pipeline_ectx == NULL)
+	if (pipeline_ectx == NULL) {
+		NEW_ERROR("failed to allocate memory for pipeline execution "
+			  "context");
 		return NULL;
+	}
 	memset(pipeline_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&pipeline_ectx->cp_pipeline, cp_pipeline);
 	pipeline_ectx->length = cp_pipeline->length;
@@ -444,8 +516,13 @@ pipeline_ectx_create(
 		old_counter_storage,
 		&cp_pipeline->counter_registry
 	);
-	if (counter_storage == NULL)
+	if (counter_storage == NULL) {
+		NEW_ERROR(
+			"failed to spawn counter storage for pipeline '%s'",
+			cp_pipeline->name
+		);
 		goto error;
+	}
 
 	if (cp_config_counter_storage_registry_insert_pipeline(
 		    &cp_config_gen->counter_storage_registry,
@@ -453,6 +530,10 @@ pipeline_ectx_create(
 		    cp_pipeline->name,
 		    counter_storage
 	    )) {
+		PUSH_ERROR(
+			"failed to insert counter storage for pipeline '%s'",
+			cp_pipeline->name
+		);
 		goto error;
 	}
 
@@ -471,8 +552,15 @@ pipeline_ectx_create(
 			device_ectx,
 			pipeline_ectx
 		);
-		if (function_ectx == NULL)
+		if (function_ectx == NULL) {
+			PUSH_ERROR(
+				"failed to create function execution context "
+				"for function '%s' in pipeline '%s'",
+				cp_function->name,
+				cp_pipeline->name
+			);
 			goto error;
+		}
 
 		SET_OFFSET_OF(pipeline_ectx->functions + idx, function_ectx);
 	}
@@ -544,8 +632,11 @@ device_entry_ectx_create(
 		(struct device_entry_ectx *)memory_balloc(
 			memory_context, ectx_size
 		);
-	if (device_entry_ectx == NULL)
+	if (device_entry_ectx == NULL) {
+		NEW_ERROR("failed to allocate memory for device entry "
+			  "execution context");
 		return NULL;
+	}
 
 	memset(device_entry_ectx, 0, ectx_size);
 	device_entry_ectx->handler = handler;
@@ -559,8 +650,11 @@ device_entry_ectx_create(
 			sizeof(struct pipeline_ectx *) *
 				device_entry_ectx->pipeline_count
 		);
-	if (pipelines == NULL)
+	if (pipelines == NULL) {
+		NEW_ERROR("failed to allocate memory for pipelines array in "
+			  "device entry");
 		goto error;
+	}
 	memset(pipelines,
 	       0,
 	       sizeof(struct pipeline_ectx *) *
@@ -574,6 +668,10 @@ device_entry_ectx_create(
 			new_config_gen, cp_device_entry->pipelines[idx].name
 		);
 		if (cp_pipeline == NULL) {
+			NEW_ERROR(
+				"pipeline '%s' not found in device entry",
+				cp_device_entry->pipelines[idx].name
+			);
 			goto error;
 		}
 		struct pipeline_ectx *pipeline_ectx = pipeline_ectx_create(
@@ -583,8 +681,14 @@ device_entry_ectx_create(
 			config_gen_ectx,
 			device_ectx
 		);
-		if (pipeline_ectx == NULL)
+		if (pipeline_ectx == NULL) {
+			PUSH_ERROR(
+				"failed to create pipeline execution context "
+				"for pipeline '%s' in device entry",
+				cp_pipeline->name
+			);
 			goto error;
+		}
 
 		SET_OFFSET_OF(pipelines + idx, pipeline_ectx);
 
@@ -646,8 +750,12 @@ device_ectx_create(
 
 	struct device_ectx *device_ectx =
 		(struct device_ectx *)memory_balloc(memory_context, ectx_size);
-	if (device_ectx == NULL)
+	if (device_ectx == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for device execution context"
+		);
 		return NULL;
+	}
 
 	memset(device_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&device_ectx->cp_device, cp_device);
@@ -664,14 +772,23 @@ device_ectx_create(
 		old_counter_storage,
 		&cp_device->counter_registry
 	);
-	if (counter_storage == NULL)
+	if (counter_storage == NULL) {
+		NEW_ERROR(
+			"failed to spawn counter storage for device '%s'",
+			cp_device->name
+		);
 		goto error;
+	}
 
 	if (cp_config_counter_storage_registry_insert_device(
 		    &cp_config_gen->counter_storage_registry,
 		    cp_device->name,
 		    counter_storage
 	    )) {
+		PUSH_ERROR(
+			"failed to insert counter storage for device '%s'",
+			cp_device->name
+		);
 		goto error;
 	}
 
@@ -688,8 +805,14 @@ device_ectx_create(
 		ADDR_OF(&cp_device->input_pipelines),
 		old_config_gen
 	);
-	if (input == NULL)
+	if (input == NULL) {
+		PUSH_ERROR(
+			"failed to create input device entry execution context "
+			"for device '%s'",
+			cp_device->name
+		);
 		goto error;
+	}
 	SET_OFFSET_OF(&device_ectx->input_pipelines, input);
 
 	struct device_entry_ectx *output = device_entry_ectx_create(
@@ -700,8 +823,14 @@ device_ectx_create(
 		ADDR_OF(&cp_device->output_pipelines),
 		old_config_gen
 	);
-	if (output == NULL)
+	if (output == NULL) {
+		PUSH_ERROR(
+			"failed to create output device entry execution "
+			"context for device '%s'",
+			cp_device->name
+		);
 		goto error;
+	}
 	SET_OFFSET_OF(&device_ectx->output_pipelines, output);
 
 	return device_ectx;
@@ -765,8 +894,15 @@ link_module_ectx(
 	uint64_t *cm_index = (uint64_t *)memory_balloc(
 		memory_context, sizeof(uint64_t) * config_gen_ectx->device_count
 	);
-	if (config_gen_ectx->device_count && cm_index == NULL)
+	if (config_gen_ectx->device_count && cm_index == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for cm_index in module "
+			"'%s:%s'",
+			cp_module->type,
+			cp_module->name
+		);
 		goto error;
+	}
 	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx)
 		cm_index[idx] = 0;
 	SET_OFFSET_OF(&module_ectx->cm_index, cm_index);
@@ -775,8 +911,15 @@ link_module_ectx(
 	uint64_t *mc_index = (uint64_t *)memory_balloc(
 		memory_context, sizeof(uint64_t) * cp_module->device_count
 	);
-	if (cp_module->device_count && mc_index == NULL)
+	if (cp_module->device_count && mc_index == NULL) {
+		NEW_ERROR(
+			"failed to allocate memory for mc_index in module "
+			"'%s:%s'",
+			cp_module->type,
+			cp_module->name
+		);
 		goto error;
+	}
 	for (uint64_t idx = 0; idx < cp_module->device_count; ++idx)
 		mc_index[idx] = -1;
 	SET_OFFSET_OF(&module_ectx->mc_index, mc_index);
@@ -833,6 +976,7 @@ link_chain_ectx(
 			    chain_ectx,
 			    module_ectx
 		    )) {
+			PUSH_ERROR("failed to link module execution context");
 			goto error;
 		}
 	}
@@ -864,6 +1008,7 @@ link_function_ectx(
 			    function_ectx,
 			    chain_ectx
 		    )) {
+			PUSH_ERROR("failed to link chain execution context");
 			goto error;
 		}
 	}
@@ -893,6 +1038,7 @@ link_pipeline_ectx(
 			    pipeline_ectx,
 			    function_ectx
 		    )) {
+			PUSH_ERROR("failed to link function execution context");
 			goto error;
 		}
 	}
@@ -921,6 +1067,7 @@ link_device_entry_ectx(
 			    device_entry_ectx,
 			    pipeline_ectx
 		    )) {
+			PUSH_ERROR("failed to link pipeline execution context");
 			goto error;
 		}
 	}
@@ -940,6 +1087,8 @@ link_device_ectx(
 		    device_ectx,
 		    ADDR_OF(&device_ectx->input_pipelines)
 	    )) {
+		PUSH_ERROR("failed to link input device entry execution context"
+		);
 		goto error;
 	}
 	if (link_device_entry_ectx(
@@ -947,6 +1096,9 @@ link_device_ectx(
 		    device_ectx,
 		    ADDR_OF(&device_ectx->output_pipelines)
 	    )) {
+		PUSH_ERROR(
+			"failed to link output device entry execution context"
+		);
 		goto error;
 	}
 
@@ -964,6 +1116,7 @@ link_config_gen_ectx(struct config_gen_ectx *config_gen_ectx) {
 		if (device_ectx == NULL)
 			continue;
 		if (link_device_ectx(config_gen_ectx, device_ectx)) {
+			PUSH_ERROR("failed to link device execution context");
 			goto error;
 		}
 	}
@@ -990,8 +1143,11 @@ config_gen_ectx_create(
 
 	struct config_gen_ectx *config_gen_ectx = (struct config_gen_ectx *)
 		memory_balloc(memory_context, ectx_size);
-	if (config_gen_ectx == NULL)
-		return config_gen_ectx;
+	if (config_gen_ectx == NULL) {
+		NEW_ERROR("failed to allocate memory for config generation "
+			  "execution context");
+		return NULL;
+	}
 	memset(config_gen_ectx, 0, ectx_size);
 
 	SET_OFFSET_OF(&config_gen_ectx->cp_config_gen, cp_config_gen);
@@ -1018,14 +1174,18 @@ config_gen_ectx_create(
 			config_gen_ectx,
 			old_config_gen
 		);
-		if (device_ectx == NULL)
+		if (device_ectx == NULL) {
+			PUSH_ERROR("failed to create device execution context");
 			goto error;
+		}
 		SET_OFFSET_OF(
 			config_gen_ectx->devices + device_idx, device_ectx
 		);
 	}
 
 	if (link_config_gen_ectx(config_gen_ectx)) {
+		PUSH_ERROR("failed to link config generation execution context"
+		);
 		goto error;
 	}
 

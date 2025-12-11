@@ -1,6 +1,5 @@
 #include "zone.h"
 
-#include <stdio.h>
 #include <unistd.h>
 
 #include "cp_device.h"
@@ -10,6 +9,7 @@
 #include "lib/dataplane/config/zone.h"
 
 #include "lib/controlplane/agent/agent.h"
+#include "lib/controlplane/diag/diag.h"
 
 bool
 cp_config_try_lock(struct cp_config *cp_config) {
@@ -57,6 +57,11 @@ cp_config_unlock(struct cp_config *cp_config) {
 
 // ------------ cp_config_gen
 
+static inline void
+cp_config_gen_free(
+	struct cp_config *cp_config, struct cp_config_gen *config_gen
+);
+
 static inline struct cp_config_gen *
 cp_config_gen_create_from(
 	struct cp_config *cp_config, struct cp_config_gen *old_config_gen
@@ -65,8 +70,11 @@ cp_config_gen_create_from(
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
 		);
-	if (new_config_gen == NULL)
+	if (new_config_gen == NULL) {
+		NEW_ERROR("failed to allocate memory for new config generation"
+		);
 		return NULL;
+	}
 
 	new_config_gen->gen = old_config_gen->gen + 1;
 
@@ -77,34 +85,60 @@ cp_config_gen_create_from(
 		&new_config_gen->cp_config, ADDR_OF(&old_config_gen->cp_config)
 	);
 
-	cp_module_registry_copy(
-		&cp_config->memory_context,
-		&new_config_gen->module_registry,
-		&old_config_gen->module_registry
-	);
+	if (cp_module_registry_copy(
+		    &cp_config->memory_context,
+		    &new_config_gen->module_registry,
+		    &old_config_gen->module_registry
+	    )) {
+		NEW_ERROR("failed to copy module registry");
+		goto error;
+	}
 
-	cp_function_registry_copy(
-		&cp_config->memory_context,
-		&new_config_gen->function_registry,
-		&old_config_gen->function_registry
-	);
-	cp_pipeline_registry_copy(
-		&cp_config->memory_context,
-		&new_config_gen->pipeline_registry,
-		&old_config_gen->pipeline_registry
-	);
-	cp_device_registry_copy(
-		&cp_config->memory_context,
-		&new_config_gen->device_registry,
-		&old_config_gen->device_registry
-	);
+	if (cp_function_registry_copy(
+		    &cp_config->memory_context,
+		    &new_config_gen->function_registry,
+		    &old_config_gen->function_registry
+	    )) {
+		NEW_ERROR("failed to copy function registry");
+		goto error;
+	}
 
-	cp_config_counter_storage_registry_init(
-		&cp_config->memory_context,
-		&new_config_gen->counter_storage_registry
-	);
+	if (cp_pipeline_registry_copy(
+		    &cp_config->memory_context,
+		    &new_config_gen->pipeline_registry,
+		    &old_config_gen->pipeline_registry
+	    )) {
+		NEW_ERROR("failed to copy pipeline registry");
+		goto error;
+	}
+
+	if (cp_device_registry_copy(
+		    &cp_config->memory_context,
+		    &new_config_gen->device_registry,
+		    &old_config_gen->device_registry
+	    )) {
+		NEW_ERROR("failed to copy device registry");
+		goto error;
+	}
+
+	if (cp_config_counter_storage_registry_init(
+		    &cp_config->memory_context,
+		    &new_config_gen->counter_storage_registry
+	    )) {
+		NEW_ERROR("failed to initialize counter storage registry");
+		goto error;
+	}
 
 	return new_config_gen;
+
+error:
+	cp_config_gen_free(cp_config, new_config_gen);
+	memory_bfree(
+		&cp_config->memory_context,
+		new_config_gen,
+		sizeof(struct cp_config_gen)
+	);
+	return NULL;
 }
 
 static inline void
@@ -139,6 +173,7 @@ cp_config_gen_install(
 	struct config_gen_ectx *new_config_gen_ectx =
 		config_gen_ectx_create(new_config_gen, old_config_gen);
 	if (new_config_gen_ectx == NULL) {
+		PUSH_ERROR("in cp_config_gen_install");
 		return -1;
 	}
 
@@ -166,16 +201,25 @@ cp_config_delete_module(
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
+		PUSH_ERROR("failed to create new config generation in "
+			   "cp_config_delete_module");
 		goto error_unlock;
 	}
 
 	if (cp_module_registry_delete(
 		    &new_config_gen->module_registry, module_type, module_name
 	    )) {
+		NEW_ERROR(
+			"failed to delete module '%s:%s' from registry",
+			module_type,
+			module_name
+		);
 		goto error_free;
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		PUSH_ERROR("failed to install config generation in "
+			   "cp_config_delete_module");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -203,6 +247,8 @@ cp_config_update_modules(
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
+		PUSH_ERROR("failed to create new config generation in "
+			   "cp_config_update_modules");
 		goto error_unlock;
 	}
 
@@ -215,11 +261,18 @@ cp_config_update_modules(
 			    new_cp_module->name,
 			    new_cp_module
 		    )) {
+			NEW_ERROR(
+				"failed to upsert module '%s:%s' into registry",
+				new_cp_module->type,
+				new_cp_module->name
+			);
 			goto error_free;
 		}
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		PUSH_ERROR("failed to install config generation in "
+			   "cp_config_update_modules");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -250,6 +303,8 @@ cp_config_update_functions(
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
+		PUSH_ERROR("failed to create new config generation in "
+			   "cp_config_update_functions");
 		goto error_unlock;
 	}
 
@@ -261,6 +316,8 @@ cp_config_update_functions(
 			cp_function_configs[idx]
 		);
 		if (new_cp_function == NULL) {
+			PUSH_ERROR("failed to create function in "
+				   "cp_config_update_functions");
 			goto error_free;
 		}
 
@@ -269,11 +326,17 @@ cp_config_update_functions(
 			    new_cp_function->name,
 			    new_cp_function
 		    )) {
+			NEW_ERROR(
+				"failed to upsert function '%s' into registry",
+				new_cp_function->name
+			);
 			goto error_free;
 		}
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		PUSH_ERROR("failed to install config generation in "
+			   "cp_config_update_functions");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -302,16 +365,21 @@ cp_config_delete_function(
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
+		PUSH_ERROR("failed to create new config generation in "
+			   "cp_config_delete_function");
 		goto error_unlock;
 	}
 
 	if (cp_function_registry_delete(
 		    &new_config_gen->function_registry, name
 	    )) {
+		NEW_ERROR("failed to delete function '%s' from registry", name);
 		goto error_free;
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		PUSH_ERROR("failed to install config generation in "
+			   "cp_config_delete_function");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -343,6 +411,8 @@ cp_config_update_pipelines(
 		cp_config_gen_create_from(cp_config, old_config_gen);
 
 	if (new_config_gen == NULL) {
+		PUSH_ERROR("failed to create new config generation in "
+			   "cp_config_update_pipelines");
 		goto error_unlock;
 	}
 
@@ -353,6 +423,8 @@ cp_config_update_pipelines(
 			cp_pipeline_configs[idx]
 		);
 		if (new_cp_pipeline == NULL) {
+			PUSH_ERROR("failed to create pipeline in "
+				   "cp_config_update_pipelines");
 			goto error_free;
 		}
 
@@ -361,11 +433,17 @@ cp_config_update_pipelines(
 			    new_cp_pipeline->name,
 			    new_cp_pipeline
 		    )) {
+			NEW_ERROR(
+				"failed to upsert pipeline '%s' into registry",
+				new_cp_pipeline->name
+			);
 			goto error_free;
 		}
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		PUSH_ERROR("failed to install config generation in "
+			   "cp_config_update_pipelines");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -393,22 +471,28 @@ cp_config_delete_pipeline(
 
 	uint64_t index;
 	if (cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
+		NEW_ERROR("pipeline '%s' not found", name);
 		goto error_unlock;
 	}
 
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
+		PUSH_ERROR("failed to create new config generation in "
+			   "cp_config_delete_pipeline");
 		goto error_unlock;
 	}
 
 	if (cp_pipeline_registry_delete(
 		    &new_config_gen->pipeline_registry, name
 	    )) {
+		NEW_ERROR("failed to delete pipeline '%s' from registry", name);
 		goto error_free;
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		PUSH_ERROR("failed to install config generation in "
+			   "cp_config_delete_pipeline");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -482,6 +566,8 @@ cp_config_update_devices(
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
+		PUSH_ERROR("failed to create new config generation in "
+			   "cp_config_update_devices");
 		goto error_unlock;
 	}
 
@@ -491,11 +577,17 @@ cp_config_update_devices(
 			    devices[idx]->name,
 			    devices[idx]
 		    )) {
+			NEW_ERROR(
+				"failed to upsert device '%s' into registry",
+				devices[idx]->name
+			);
 			goto error_free;
 		}
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+		PUSH_ERROR("failed to install config generation in "
+			   "cp_config_update_devices");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -518,30 +610,54 @@ cp_config_gen_create(struct agent *agent) {
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
 		);
 
-	if (cp_config_gen == NULL)
+	if (cp_config_gen == NULL) {
+		NEW_ERROR("failed to allocate memory for initial config "
+			  "generation");
 		return NULL;
+	}
 	cp_config_gen->gen = 0;
 	SET_OFFSET_OF(
 		&cp_config_gen->dp_config, ADDR_OF(&cp_config->dp_config)
 	);
 	SET_OFFSET_OF(&cp_config_gen->cp_config, cp_config);
 
-	cp_module_registry_init(
-		&cp_config->memory_context, &cp_config_gen->module_registry
-	);
-	cp_function_registry_init(
-		&cp_config->memory_context, &cp_config_gen->function_registry
-	);
-	cp_pipeline_registry_init(
-		&cp_config->memory_context, &cp_config_gen->pipeline_registry
-	);
-	cp_device_registry_init(
-		&cp_config->memory_context, &cp_config_gen->device_registry
-	);
-	cp_config_counter_storage_registry_init(
-		&cp_config->memory_context,
-		&cp_config_gen->counter_storage_registry
-	);
+	if (cp_module_registry_init(
+		    &cp_config->memory_context, &cp_config_gen->module_registry
+	    )) {
+		NEW_ERROR("failed to initialize module registry");
+		goto error;
+	}
+
+	if (cp_function_registry_init(
+		    &cp_config->memory_context,
+		    &cp_config_gen->function_registry
+	    )) {
+		NEW_ERROR("failed to initialize function registry");
+		goto error;
+	}
+
+	if (cp_pipeline_registry_init(
+		    &cp_config->memory_context,
+		    &cp_config_gen->pipeline_registry
+	    )) {
+		NEW_ERROR("failed to initialize pipeline registry");
+		goto error;
+	}
+
+	if (cp_device_registry_init(
+		    &cp_config->memory_context, &cp_config_gen->device_registry
+	    )) {
+		NEW_ERROR("failed to initialize device registry");
+		goto error;
+	}
+
+	if (cp_config_counter_storage_registry_init(
+		    &cp_config->memory_context,
+		    &cp_config_gen->counter_storage_registry
+	    )) {
+		NEW_ERROR("failed to initialize counter storage registry");
+		goto error;
+	}
 
 	// Create phy devices
 	for (uint64_t idx = 0; idx < dp_config->dp_topology.device_count;
@@ -560,13 +676,35 @@ cp_config_gen_create(struct agent *agent) {
 		device_config.output_pipelines = &pipe_cfg;
 		struct cp_device *cp_device =
 			cp_device_create(agent, &device_config);
-		// FIXME check cp_device and upsert
-		cp_device_registry_upsert(
-			&cp_config_gen->device_registry,
-			device_config.name,
-			cp_device
-		);
+		if (cp_device == NULL) {
+			NEW_ERROR(
+				"failed to create physical device '%s'",
+				device_config.name
+			);
+			return NULL;
+		}
+		if (cp_device_registry_upsert(
+			    &cp_config_gen->device_registry,
+			    device_config.name,
+			    cp_device
+		    )) {
+			NEW_ERROR(
+				"failed to upsert physical device '%s' into "
+				"registry",
+				device_config.name
+			);
+			return NULL;
+		}
 	}
 
 	return cp_config_gen;
+
+error:
+	cp_config_gen_free(cp_config, cp_config_gen);
+	memory_bfree(
+		&cp_config->memory_context,
+		cp_config_gen,
+		sizeof(struct cp_config_gen)
+	);
+	return NULL;
 }

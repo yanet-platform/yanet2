@@ -24,7 +24,7 @@ diag_fill(struct diag *diag) {
 		diag->has_error = false;
 	} else {
 		diag->has_error = true;
-        diag->error = NULL;
+		diag->error = NULL;
 		char *error = malloc(error_len);
 		if (error == NULL) {
 			// no mem, so do nothing,
@@ -32,20 +32,20 @@ diag_fill(struct diag *diag) {
 			return;
 		}
 		memcpy(error, tls_stack_pop(error_len), error_len);
-        diag->error = error;
+		diag->error = error;
 	}
 }
 
 const char *
 diag_msg(struct diag *diag) {
-    errno = 0;
+	errno = 0;
 	if (!diag->has_error) {
 		return NULL;
 	} else if (diag->error != NULL) {
 		return diag->error;
 	} else {
 		errno = ENOMEM;
-        return NULL;
+		return NULL;
 	}
 }
 

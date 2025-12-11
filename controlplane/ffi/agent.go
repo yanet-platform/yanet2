@@ -2,6 +2,8 @@ package ffi
 
 //#cgo CFLAGS: -I../../ -I../../lib
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
+//#cgo LDFLAGS: -L../../build/lib/controlplane/diag -ldiag
+//#cgo LDFLAGS: -L../../build/common/tls_stack -ltls_stack
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/counters/ -lcounters
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp

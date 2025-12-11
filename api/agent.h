@@ -161,8 +161,8 @@ agent_update_devices(
 const char *
 agent_take_error(struct agent *agent);
 
-// Clears any error stored in the agent's diagnostic system without retrieving it.
-// This discards the error message and resets the diagnostic state.
+// Clears any error stored in the agent's diagnostic system without retrieving
+// it. This discards the error message and resets the diagnostic state.
 //
 // @param agent Handle to the module agent
 //

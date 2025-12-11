@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "common/memory.h"
+#include "common/memory_address.h"
 #include "dataplane/module/module.h"
 
 struct counter_storage;

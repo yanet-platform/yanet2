@@ -1,4 +1,5 @@
 #include "controlplane.h"
+#include "common/container_of.h"
 #include "config.h"
 #include "controlplane/config/cp_module.h"
 #include <stdlib.h>
