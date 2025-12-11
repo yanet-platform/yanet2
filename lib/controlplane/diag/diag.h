@@ -78,6 +78,34 @@ diag_reset(struct diag *diag);
 		tls_stack_push(__buffer, strlen(__buffer));                    \
 	} while (0)
 
+// Wraps a function call with automatic error handling and context propagation.
+// Executes the call, and if it returns non-zero (error), pushes additional
+// context onto the error chain and fills the diagnostic structure.
+// On success (zero return), resets the diagnostic structure.
+//
+// @param diag Pointer to the diagnostic structure to fill on error
+// @param call Function call expression that returns int (0=success, non-zero=error)
+// @param ... Format string and arguments for error context (like printf)
+//
+// @return The return value from the wrapped call
+//
+// Usage example:
+//   struct diag d = {0};
+//   if (DIAG_TRY(&d, load_config(path), "Failed to load config from %s", path)) {
+//       fprintf(stderr, "Error: %s\n", diag_msg(&d));
+//       diag_reset(&d);
+//       return -1;
+//   }
+//
+// Error chain example:
+//   // In load_config():
+//   NEW_ERROR("File not found: %s", path);
+//   return -1;
+//
+//   // In caller with DIAG_TRY:
+//   DIAG_TRY(&d, load_config(path), "Failed to load config");
+//
+//   // Results in: "Failed to load config: File not found: /path/to/file"
 #define DIAG_TRY(diag, call, ...)                                              \
 	__extension__({                                                        \
 		errno = 0;                                                     \

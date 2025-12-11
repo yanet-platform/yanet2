@@ -22,7 +22,7 @@
 #include <stdio.h>
 
 #define AGENT_TRY(agent, call, ...)                                            \
-	__extension__({ DIAG_TRY(&(agent->diag), call, ##__VA_ARGS__); })
+	DIAG_TRY(&(agent->diag), call, ##__VA_ARGS__);
 
 struct yanet_shm *
 yanet_shm_attach(const char *path) {
