@@ -23,6 +23,7 @@ query_packet(struct filter *filter, uint16_t vlan, uint32_t expected) {
 	filter_query(filter, &packet, &actions, &actions_count);
 	assert(actions_count == 1);
 	assert(actions[0] == expected);
+	free_packet(&packet);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

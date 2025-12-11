@@ -15,10 +15,12 @@ init_dummy_registry(
 	for (uint32_t i = 0; i < actions; ++i) {
 		res = value_registry_start(registry);
 		if (res < 0) {
+			value_registry_free(registry);
 			return res;
 		}
 		res = value_registry_collect(registry, 0);
 		if (res < 0) {
+			value_registry_free(registry);
 			return res;
 		}
 	}
@@ -133,7 +135,7 @@ merge_and_set_registry_values(
 	}
 
 	if (value_registry_start(registry))
-		return -1;
+		goto error_merge;
 
 	struct value_set_ctx set_ctx;
 	set_ctx.rules = rules;
@@ -161,7 +163,7 @@ error_merge:
 error_registry:
 	value_table_free(table);
 
-	return 0;
+	return -1;
 }
 
 static int

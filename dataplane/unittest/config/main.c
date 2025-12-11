@@ -33,4 +33,7 @@ main(int argc, char **argv) {
 	check_instance(config->instances, 0, 1024, 2048);
 	check_instance(config->instances + 1, 1, 512, 128);
 	check_instance(config->instances + 2, 0, 123, 124);
+
+	dataplane_config_free(config);
+	return 0;
 }

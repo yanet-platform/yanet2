@@ -1,3 +1,4 @@
+#include "common/memory.h"
 #include "utils.h"
 
 #include "attribute.h"
@@ -94,6 +95,10 @@ test_src_dst_ports(void *memory) {
 	query_and_expect_action(&filter, 8, 3, 2);
 
 	filter_free(&filter);
+
+	memory_bfree(&memory_context, memory, 1 << 24);
+	void *mem = memory_balloc(&memory_context, 1 << 24);
+	assert(mem == memory);
 }
 
 void
@@ -139,6 +144,10 @@ test_src_port_only(void *memory) {
 	query_and_expect_no_action(&filter, 801, 0);
 
 	filter_free(&filter);
+
+	memory_bfree(&memory_context, memory, 1 << 24);
+	void *mem = memory_balloc(&memory_context, 1 << 24);
+	assert(mem == memory);
 }
 
 int

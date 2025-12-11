@@ -45,21 +45,23 @@ static inline void
 value_collector_free(struct value_collector *collector) {
 	uint32_t **use_map = ADDR_OF(&collector->use_map);
 
-	for (uint32_t chunk_idx = 0; chunk_idx < collector->chunk_count;
-	     ++chunk_idx) {
-		uint32_t *chunk = ADDR_OF(&use_map[chunk_idx]);
-		if (chunk != NULL)
-			memory_bfree(
-				collector->memory_context,
-				chunk,
-				VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t)
-			);
+	if (use_map != NULL) {
+		for (uint32_t chunk_idx = 0; chunk_idx < collector->chunk_count;
+		     ++chunk_idx) {
+			uint32_t *chunk = ADDR_OF(&use_map[chunk_idx]);
+			if (chunk != NULL)
+				memory_bfree(
+					collector->memory_context,
+					chunk,
+					VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t)
+				);
+		}
+		memory_bfree(
+			collector->memory_context,
+			use_map,
+			collector->chunk_count * sizeof(uint32_t *)
+		);
 	}
-	memory_bfree(
-		collector->memory_context,
-		use_map,
-		collector->chunk_count * sizeof(uint32_t *)
-	);
 }
 
 static void

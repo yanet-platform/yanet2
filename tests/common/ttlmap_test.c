@@ -10,6 +10,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <stdalign.h>
+#include <string.h>
 #include <unistd.h>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -256,10 +257,11 @@ bucket_alignment() {
 typedef struct test_key {
 	size_t ip_src;
 	size_t ip_dst;
-	uint8_t proto;
+	uint64_t tcp_flags; // 64 bits just to be
 	uint16_t port_src;
 	uint16_t port_dst;
-	size_t tcp_flags; // 64 bits just to be
+	uint8_t proto;
+	uint8_t pad[3];
 } test_key_t;
 
 typedef struct test_value {
@@ -370,7 +372,8 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 			.port_dst = 10,
 			.port_src = 20,
 			.proto = 55,
-			.tcp_flags = i
+			.tcp_flags = i,
+			.pad = {0, 0, 0}
 		};
 		test_value_t *value;
 		ttlmap_lock_t *lock;
@@ -393,7 +396,8 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 			.port_dst = 10,
 			.port_src = 20,
 			.proto = 55,
-			.tcp_flags = i
+			.tcp_flags = i,
+			.pad = {0, 0, 0}
 		};
 		test_value_t ref_value = {
 			.counter1 = i, .counter2 = i + 1, .session_id = 0

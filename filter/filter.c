@@ -64,6 +64,9 @@ filter_build(
 			return res;
 		}
 
+		// Free the dummy registry after successful merge
+		value_registry_free(&dummy);
+
 		// dummy classifier is always 0
 		filter->v[0].slots[0] = 0;
 
