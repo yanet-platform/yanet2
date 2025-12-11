@@ -77,6 +77,7 @@ diag_reset(struct diag *diag);
 		tls_stack_push(__buffer, strlen(__buffer));                    \
 	} while (0)
 
+<<<<<<< HEAD
 // Wraps a function call with automatic error handling and context propagation.
 // Executes the call, and if it returns non-zero (error), pushes additional
 // context onto the error chain and fills the diagnostic structure.
@@ -107,6 +108,8 @@ diag_reset(struct diag *diag);
 //   DIAG_TRY(&d, load_config(path), "Failed to load config");
 //
 //   // Results in: "Failed to load config: File not found: /path/to/file"
+=======
+>>>>>>> 742024b (agent diag)
 #define DIAG_TRY(diag, call, ...)                                              \
 	__extension__({                                                        \
 		errno = 0;                                                     \
