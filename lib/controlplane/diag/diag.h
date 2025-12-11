@@ -49,14 +49,8 @@ diag_take_msg(struct diag *diag);
 void
 diag_reset(struct diag *diag);
 
-<<<<<<< HEAD
 // Creates a new error by clearing the TLS stack and pushing a formatted
 // message. This starts a new error chain.
-=======
-// Creates a new error by clearing the TLS stack and pushing a formatted message.
-// This starts a new error chain.
->>>>>>> bd1e669 (docs)
-//
 // Usage: NEW_ERROR("Failed to open file: %s", filename);
 #define NEW_ERROR(...)                                                         \
 	do {                                                                   \
