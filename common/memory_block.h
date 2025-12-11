@@ -1,5 +1,6 @@
 #pragma once
 
+#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -13,6 +14,16 @@
 	(MEMORY_BLOCK_ALLOCATOR_MIN_BITS + MEMORY_BLOCK_ALLOCATOR_EXP - 1)
 #define MEMORY_BLOCK_ALLOCATOR_MIN_SIZE (1 << MEMORY_BLOCK_ALLOCATOR_MIN_BITS)
 #define MEMORY_BLOCK_ALLOCATOR_MAX_SIZE (1 << MEMORY_BLOCK_ALLOCATOR_MAX_BITS)
+
+#ifdef HAVE_ASAN
+#define ASAN_RED_ZONE 32
+#else
+#define ASAN_RED_ZONE 0
+#endif
+
+static_assert(
+	ASAN_RED_ZONE == 0 || ASAN_RED_ZONE >= 8, "invalid red zone size"
+);
 
 struct block_allocator_pool {
 	uint64_t allocate;
@@ -120,6 +131,8 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 	if (!size)
 		return NULL;
 
+	size += 2 * ASAN_RED_ZONE;
+
 	if (size > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE)
 		return NULL;
 
@@ -180,7 +193,9 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 	}
 
 	void *memory = block_allocator_pool_get(allocator, pool);
-	asan_unpoison_memory_region(memory, size);
+	asan_unpoison_memory_region(
+		memory + ASAN_RED_ZONE, size - 2 * ASAN_RED_ZONE
+	);
 
 	return memory;
 }
@@ -192,10 +207,7 @@ block_allocator_bfree(
 	if (!size)
 		return;
 
-	if (size < sizeof(void *))
-		asan_unpoison_memory_region(
-			block + size, sizeof(void *) - size
-		);
+	size += 2 * ASAN_RED_ZONE;
 
 	size_t pool_index = block_allocator_pool_index(allocator, size);
 	struct block_allocator_pool *pool = allocator->pools + pool_index;
@@ -204,10 +216,9 @@ block_allocator_bfree(
 	SET_OFFSET_OF(&pool->free_list, block);
 	++pool->free;
 
-	asan_poison_memory_region(block, size);
-	if (size < sizeof(void *)) {
-		asan_poison_memory_region(block + size, sizeof(void *) - size);
-	}
+	asan_poison_memory_region(
+		block + ASAN_RED_ZONE, size - 2 * ASAN_RED_ZONE
+	);
 }
 
 static inline void
