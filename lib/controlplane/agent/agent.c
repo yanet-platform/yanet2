@@ -13,6 +13,7 @@
 #include "common/strutils.h"
 
 #include "controlplane/config/zone.h"
+#include "controlplane/diag/diag.h"
 #include "dataplane/config/zone.h"
 
 #include "api/agent.h"
@@ -1329,4 +1330,9 @@ agent_dp_config(struct agent *agent) {
 const char *
 agent_take_error(struct agent *agent) {
 	return diag_take_msg(&agent->diag);
+}
+
+void
+agent_clean_error(struct agent *agent) {
+	diag_reset(&agent->diag);
 }

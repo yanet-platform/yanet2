@@ -148,6 +148,8 @@ agent_update_devices(
 	struct agent *agent, uint64_t device_count, struct cp_device *devices[]
 );
 
-
 const char *
 agent_take_error(struct agent *agent);
+
+void
+agent_clean_error(struct agent *agent);
