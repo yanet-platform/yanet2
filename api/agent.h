@@ -148,8 +148,25 @@ agent_update_devices(
 	struct agent *agent, uint64_t device_count, struct cp_device *devices[]
 );
 
+// Retrieves and clears the last error from the agent's diagnostic system.
+// Transfers ownership of the error message to the caller.
+//
+// @param agent Handle to the module agent
+// @return Heap-allocated error message string that must be freed by the caller,
+//         or NULL if no error occurred. Sets errno=ENOMEM if memory allocation
+//         failed while capturing the error.
+//
+// Note: The caller MUST free the returned string when it's not NULL.
+//       After this call, the agent's error state is cleared.
 const char *
 agent_take_error(struct agent *agent);
 
+// Clears any error stored in the agent's diagnostic system without retrieving it.
+// This discards the error message and resets the diagnostic state.
+//
+// @param agent Handle to the module agent
+//
+// Note: Use this when you want to discard an error without processing it.
+//       Use agent_take_error() if you need to retrieve the error message.
 void
 agent_clean_error(struct agent *agent);

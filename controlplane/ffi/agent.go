@@ -69,13 +69,40 @@ func (m *Agent) CleanUp() error {
 	return err
 }
 
+// TakeError retrieves and clears the last error from the agent's diagnostic system.
+// It takes ownership of the error message from the C layer and returns it as a Go error.
+//
+// Returns:
+//   - nil if there is no error
+//   - An error containing the diagnostic message if an error occurred
+//   - An ENOMEM error if memory allocation failed while capturing the error
 func (m *Agent) TakeError() error {
-	// _ := C.agent_take_error(m.ptr)
-	return nil
+	cMsg, err := C.agent_take_error(m.ptr)
+	if cMsg == nil && err == nil {
+		return nil
+	}
+	if err != nil {
+		// then, it is enomem
+		return err
+	}
+
+	// Copy the C string to Go string before freeing
+	goMsg := C.GoString(cMsg)
+
+	// Free the C string - agent_take_error transfers ownership to the caller
+	C.free(unsafe.Pointer(cMsg))
+
+	return fmt.Errorf("%s", goMsg)
 }
 
-func (m *Agent) CleanError() error {
-	return C.agent_clean_error(m.ptr)
+// CleanError clears any error stored in the agent's diagnostic system without
+// retrieving it. This is useful when you want to discard an error without
+// processing it.
+//
+// Unlike TakeError, this method does not return the error message and simply
+// resets the diagnostic state.
+func (m *Agent) CleanError() {
+	C.agent_clean_error(m.ptr)
 }
 
 func (m *Agent) AsRawPtr() unsafe.Pointer {

@@ -28,7 +28,7 @@ diag_fill(struct diag *diag) {
 		char *error = malloc(error_len);
 		if (error == NULL) {
 			// no mem, so do nothing,
-			// print ENOMEM on `diag_msg`.
+			// will return errno = ENOMEM
 			return;
 		}
 		memcpy(error, tls_stack_pop(error_len), error_len);
@@ -38,12 +38,14 @@ diag_fill(struct diag *diag) {
 
 const char *
 diag_msg(struct diag *diag) {
+    errno = 0;
 	if (!diag->has_error) {
 		return NULL;
 	} else if (diag->error != NULL) {
 		return diag->error;
 	} else {
-		return strerror(ENOMEM);
+		errno = ENOMEM;
+        return NULL;
 	}
 }
 
