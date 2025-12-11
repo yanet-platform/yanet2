@@ -6,6 +6,8 @@
 
 #include "common/memory.h"
 
+#include "lib/controlplane/diag/diag.h"
+
 struct dp_config;
 struct cp_config;
 
@@ -30,6 +32,8 @@ struct agent {
 	void **arenas;
 
 	struct cp_module *unused_module;
+
+	struct diag diag;
 };
 
 struct dp_config *

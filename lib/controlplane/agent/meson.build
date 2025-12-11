@@ -2,6 +2,7 @@ dependencies = [
   lib_common_dep,
   lib_config_dp_dep,
   lib_config_cp_dep,
+  lib_diag_dep,
 ]
 
 sources = files(

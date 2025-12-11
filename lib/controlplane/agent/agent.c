@@ -16,6 +16,7 @@
 #include "dataplane/config/zone.h"
 
 #include "api/agent.h"
+#include "diag.h"
 
 #include <stdio.h>
 
@@ -1323,4 +1324,9 @@ agent_free_unused_agents(struct agent *agent) {
 struct dp_config *
 agent_dp_config(struct agent *agent) {
 	return ADDR_OF(&agent->dp_config);
+}
+
+const char *
+agent_take_error(struct agent *agent) {
+	return diag_take_msg(&agent->diag);
 }
