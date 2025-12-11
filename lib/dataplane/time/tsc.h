@@ -9,8 +9,6 @@
 
 static inline uint64_t
 tsc_timestamp_ns() {
-    // TODO: refactoring
-    
 	static uint64_t tsc_mult = ~0ULL;
 
 	// One-time initialization
