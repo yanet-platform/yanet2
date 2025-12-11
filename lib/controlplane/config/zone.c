@@ -133,11 +133,16 @@ cp_config_gen_create_from(
 
 error:
 <<<<<<< HEAD
+<<<<<<< HEAD
 	// Don't call cp_config_gen_free here because registries may be
 	// partially initialized Just free the memory for new_config_gen itself
 =======
 	cp_config_gen_free(cp_config, new_config_gen);
 >>>>>>> 08c17a0 (added errors handles)
+=======
+	// Don't call cp_config_gen_free here because registries may be partially initialized
+	// Just free the memory for new_config_gen itself
+>>>>>>> edbe0dd (fix tests)
 	memory_bfree(
 		&cp_config->memory_context,
 		new_config_gen,
@@ -704,7 +709,6 @@ cp_config_gen_create(struct agent *agent) {
 
 	return cp_config_gen;
 
-error:
 	memory_bfree(
 		&cp_config->memory_context,
 		cp_config_gen,
