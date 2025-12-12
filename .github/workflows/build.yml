@@ -29,6 +29,29 @@ jobs:
       cache_name: build-and-test
 
     steps:
+      - name: Free up disk space on GitHub runner
+        run: |
+          echo "=== Initial disk space ==="
+          df -h
+          
+          echo "=== Removing unnecessary software ==="
+          # Remove large packages that are not needed
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          
+          # Clean apt cache
+          sudo apt-get clean
+          
+          # Remove docker images
+          docker rmi $(docker images -q) 2>/dev/null || true
+          
+          echo "=== Disk space after cleanup ==="
+          df -h
+
       - name: update apt (act hack)
         if: ${{ env.ACT }}
         run: |
@@ -45,7 +68,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
@@ -54,6 +80,49 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+
+      - name: Diagnostic - Check for cached build artifacts
+        run: |
+          echo "=== DIAGNOSTIC: Checking for pre-existing cached artifacts ==="
+          echo "Current git commit: $(git rev-parse HEAD)"
+          echo "Current git commit short: $(git rev-parse --short HEAD)"
+          echo ""
+          
+          echo "Checking build/ directory:"
+          if [ -d "build" ]; then
+            echo "WARNING: build/ directory exists (from cache?)"
+            ls -lah build/ || true
+            if [ -f "build/dataplane/yanet-dataplane" ]; then
+              echo "WARNING: Cached yanet-dataplane found!"
+              stat build/dataplane/yanet-dataplane
+              md5sum build/dataplane/yanet-dataplane
+            fi
+            if [ -f "build/controlplane/yanet-controlplane" ]; then
+              echo "WARNING: Cached yanet-controlplane found!"
+              stat build/controlplane/yanet-controlplane
+              md5sum build/controlplane/yanet-controlplane
+            fi
+          else
+            echo "build/ directory does not exist (clean state)"
+          fi
+          
+          echo ""
+          echo "Checking target/ directory:"
+          if [ -d "target" ]; then
+            echo "WARNING: target/ directory exists (from Rust cache?)"
+            ls -lah target/ || true
+            if [ -d "target/release" ]; then
+              echo "target/release/ contents:"
+              ls -lah target/release/ || true
+              if ls target/release/yanet-cli* 1> /dev/null 2>&1; then
+                echo "WARNING: Cached yanet-cli binaries found!"
+                stat target/release/yanet-cli* || true
+                md5sum target/release/yanet-cli* || true
+              fi
+            fi
+          else
+            echo "target/ directory does not exist (clean state)"
+          fi
 
       - uses: hendrikmuhs/ccache-action@v1.2.18
         name: ccache
@@ -67,6 +136,7 @@ jobs:
             build/subprojects/dpdk
           key: ${{ runner.os }}-dpdk-${{ hashFiles('subprojects/dpdk/**') }}-${{ hashFiles('**/meson.build') }}
           restore-keys: |
+            ${{ runner.os }}-dpdk-${{ hashFiles('subprojects/dpdk/**') }}-
             ${{ runner.os }}-dpdk-
 
       - uses: actions/setup-go@v5
@@ -85,14 +155,23 @@ jobs:
           path: |
             ${{ env.cache }}
             ${{ env.modcache }}
-          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
+          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/*.go') }}
           restore-keys: |
+            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}-
             ${{ env.cache_name }}-${{ runner.os }}-go-
 
       - name: Install Go Protobuf Plugins
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Check disk space before debug build
+        run: |
+          echo "=== Disk space before debug build ==="
+          df -h
+          echo "=== Largest directories ==="
+          du -sh /* 2>/dev/null | sort -hr | head -20 || true
+          du -sh /home/runner/* 2>/dev/null | sort -hr | head -20 || true
 
       - name: Build YANET in debug (dataplane -> modules -> controlplane)
         run: |
@@ -107,10 +186,69 @@ jobs:
         run:
           grep -v 'Inherited environment' build/meson-logs/testlog.txt
 
+      - name: Clean debug build artifacts to free space
+        run: |
+          echo "=== Disk space before cleanup ==="
+          df -h
+          echo "=== Build directory size ==="
+          du -sh build/ || true
+          du -sh target/ || true
+          
+          echo "=== Cleaning debug build artifacts ==="
+          # Completely remove build directory to free maximum space
+          rm -rf build/
+          # Clean all Rust artifacts except release
+          cargo clean
+          rm -rf target/debug target/*/debug || true
+          
+          # Clean Docker build cache if exists
+          docker system prune -af 2>/dev/null || true
+          
+          echo "=== Disk space after cleanup ==="
+          df -h
+
       - name: Build YANET in release (dataplane -> modules -> controlplane)
         run: |
           meson setup --reconfigure build -Dbuildtype=release
           make dataplane cli
+
+      - name: Verify binaries before upload
+        run: |
+          echo "=== DIAGNOSTIC: Verifying binaries before artifact upload ==="
+          echo "Current git commit: $(git rev-parse HEAD)"
+          echo "Current git commit short: $(git rev-parse --short HEAD)"
+          echo ""
+          
+          echo "yanet-dataplane:"
+          if [ -f "build/dataplane/yanet-dataplane" ]; then
+            stat build/dataplane/yanet-dataplane
+            md5sum build/dataplane/yanet-dataplane
+            strings build/dataplane/yanet-dataplane | grep -E "yanet|version" | head -20 || true
+          else
+            echo "ERROR: build/dataplane/yanet-dataplane not found!"
+            exit 1
+          fi
+          
+          echo ""
+          echo "yanet-controlplane:"
+          if [ -f "build/controlplane/yanet-controlplane" ]; then
+            stat build/controlplane/yanet-controlplane
+            md5sum build/controlplane/yanet-controlplane
+            strings build/controlplane/yanet-controlplane | grep -E "yanet|version" | head -20 || true
+          else
+            echo "ERROR: build/controlplane/yanet-controlplane not found!"
+            exit 1
+          fi
+          
+          echo ""
+          echo "yanet-cli binaries:"
+          if ls target/release/yanet-cli* 1> /dev/null 2>&1; then
+            stat target/release/yanet-cli* || true
+            md5sum target/release/yanet-cli* || true
+          else
+            echo "ERROR: No yanet-cli binaries found in target/release/!"
+            exit 1
+          fi
 
       - name: Upload YANET binaries
         uses: actions/upload-artifact@v4
@@ -160,6 +298,12 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: true
+
+    - name: Clean any pre-existing build artifacts
+      run: |
+        echo "=== Cleaning any cached build artifacts before downloading from build job ==="
+        rm -rf build/ target/ || true
+        echo "Cleaned build/ and target/ directories"
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -227,25 +371,88 @@ jobs:
         echo "=== Target directory ==="
         ls -la target/ || echo "Target directory not found"
         
+        echo ""
+        echo "=== DIAGNOSTIC: Check for cached binaries BEFORE moving artifacts ==="
+        if [ -d "build/dataplane" ]; then
+          echo "build/dataplane exists (from cache?)"
+          ls -lah build/dataplane/ || true
+          if [ -f "build/dataplane/yanet-dataplane" ]; then
+            echo "WARNING: yanet-dataplane already exists in build/dataplane/ (cached?)"
+            stat build/dataplane/yanet-dataplane
+            md5sum build/dataplane/yanet-dataplane
+          fi
+        fi
+        if [ -d "build/controlplane" ]; then
+          echo "build/controlplane exists (from cache?)"
+          ls -lah build/controlplane/ || true
+          if [ -f "build/controlplane/yanet-controlplane" ]; then
+            echo "WARNING: yanet-controlplane already exists in build/controlplane/ (cached?)"
+            stat build/controlplane/yanet-controlplane
+            md5sum build/controlplane/yanet-controlplane
+          fi
+        fi
+        if [ -d "target/release" ]; then
+          echo "target/release exists (from cache?)"
+          ls -lah target/release/ || true
+          if ls target/release/yanet-cli* 1> /dev/null 2>&1; then
+            echo "WARNING: yanet-cli binaries already exist in target/release/ (cached?)"
+            stat target/release/yanet-cli* || true
+            md5sum target/release/yanet-cli* || true
+          fi
+        fi
+        
+        echo ""
+        echo "=== DIAGNOSTIC: Check downloaded artifact binaries ==="
+        if [ -f "./yanet-dataplane" ]; then
+          echo "Downloaded yanet-dataplane:"
+          stat ./yanet-dataplane
+          md5sum ./yanet-dataplane
+        fi
+        if [ -f "./yanet-controlplane" ]; then
+          echo "Downloaded yanet-controlplane:"
+          stat ./yanet-controlplane
+          md5sum ./yanet-controlplane
+        fi
+        if ls ./yanet-cli* 1> /dev/null 2>&1; then
+          echo "Downloaded yanet-cli binaries:"
+          stat ./yanet-cli* || true
+          md5sum ./yanet-cli* || true
+        fi
+        
         # Ensure directories exist
         mkdir -p build/dataplane build/controlplane
         mkdir -p target/release
         
         # Move binaries to correct locations if they were downloaded to root
         if [ -f "./yanet-dataplane" ]; then
-          mv ./yanet-dataplane build/dataplane/
+          echo "Moving yanet-dataplane to build/dataplane/"
+          mv -f ./yanet-dataplane build/dataplane/
         fi
         if [ -f "./yanet-controlplane" ]; then
-          mv ./yanet-controlplane build/controlplane/
+          echo "Moving yanet-controlplane to build/controlplane/"
+          mv -f ./yanet-controlplane build/controlplane/
         fi
         if [ -f "./yanet-cli-nat64" ]; then
-          mv ./yanet-cli-* target/release/
+          echo "Moving yanet-cli-* to target/release/"
+          mv -f ./yanet-cli-* target/release/
         fi
         
         # Make binaries executable
         chmod +x build/dataplane/yanet-dataplane || true
         chmod +x build/controlplane/yanet-controlplane || true
         chmod +x target/release/yanet-cli* || true
+        
+        echo ""
+        echo "=== DIAGNOSTIC: Final binary verification ==="
+        echo "yanet-dataplane:"
+        stat build/dataplane/yanet-dataplane
+        md5sum build/dataplane/yanet-dataplane
+        echo "yanet-controlplane:"
+        stat build/controlplane/yanet-controlplane
+        md5sum build/controlplane/yanet-controlplane
+        echo "yanet-cli binaries:"
+        stat target/release/yanet-cli* || true
+        md5sum target/release/yanet-cli* || true
         
     - name: Prepare test environment
       working-directory: tests/functional
