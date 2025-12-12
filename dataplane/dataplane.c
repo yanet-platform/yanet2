@@ -302,9 +302,15 @@ dataplane_init_storage(
 		storage + sizeof(struct dp_config),
 		dp_memory - sizeof(struct dp_config)
 	);
+	LOG(DEBUG, "Before memory_context_init: dp_config=%p, block_allocator=%p, memory_context=%p",
+	    (void*)dp_config, (void*)&dp_config->block_allocator, (void*)&dp_config->memory_context);
+	
 	memory_context_init(
 		&dp_config->memory_context, "dp", &dp_config->block_allocator
 	);
+	
+	LOG(DEBUG, "After memory_context_init: block_allocator field value=%p",
+	    (void*)dp_config->memory_context.block_allocator);
 
 	dp_config->config_lock = 0;
 
