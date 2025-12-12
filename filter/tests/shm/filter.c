@@ -1,4 +1,3 @@
-#include "filter.h"
 #include "common.h"
 #include "logging/log.h"
 #include <sys/mman.h>
@@ -11,6 +10,8 @@
 #include <unistd.h>
 
 #include "utils/utils.h"
+
+#include "../../filter.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 

@@ -178,6 +178,27 @@ jobs:
           meson setup --reconfigure build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
           make dataplane cli
 
+      - uses: cpp-linter/cpp-linter-action@main
+        id: linter
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          database: build
+          style: file
+          # Use .clang-tidy config file.
+          tidy-checks: ''
+          version: 19
+          thread-comments: false
+          step-summary: true
+          tidy-review: false
+          format-review: false
+          files-changed-only: true
+          ignore: '.github|build'
+      - name: Check code style violation
+        if: steps.linter.outputs.clang-tidy-checks-failed > 0
+        run: exit 1
+
       - name: Build and run tests (debug)
         run: |
           make go-cache-clean
@@ -211,6 +232,14 @@ jobs:
         run: |
           meson setup --reconfigure build -Dbuildtype=release
           make dataplane cli
+
+      - name: Build and run tests (release)
+        run: |
+          make go-cache-clean
+          make test
+      - name: Show meson test log
+        run:
+          grep -v 'Inherited environment' build/meson-logs/testlog.txt
 
       - name: Verify binaries before upload
         run: |
@@ -258,35 +287,6 @@ jobs:
             build/dataplane/yanet-dataplane
             build/controlplane/yanet-controlplane
             target/release/yanet-cli*
-
-      - name: Build and run tests (release)
-        run: |
-          make go-cache-clean
-          make test
-      - name: Show meson test log
-        run:
-          grep -v 'Inherited environment' build/meson-logs/testlog.txt
-
-      - uses: cpp-linter/cpp-linter-action@main
-        id: linter
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          database: build
-          style: file
-          # Use .clang-tidy config file.
-          tidy-checks: ''
-          version: 19
-          thread-comments: false
-          step-summary: true
-          tidy-review: false
-          format-review: false
-          files-changed-only: true
-          ignore: '.github|build'
-      - name: Check code style violation
-        if: steps.linter.outputs.clang-tidy-checks-failed > 0
-        run: exit 1
 
   functional-tests:
     name: Run Functional Tests
