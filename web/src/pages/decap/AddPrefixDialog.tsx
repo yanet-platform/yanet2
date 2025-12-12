@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Dialog, TextArea, Text } from '@gravity-ui/uikit';
+import { Box, Dialog, TextInput } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
 import type { AddPrefixDialogProps } from './types';
 import { parseCIDRPrefix, CIDRParseError } from '../../utils';
@@ -9,73 +9,52 @@ export const AddPrefixDialog: React.FC<AddPrefixDialogProps> = ({
     onClose,
     onConfirm,
 }) => {
-    const [prefixesInput, setPrefixesInput] = useState<string>('');
+    const [prefixInput, setPrefixInput] = useState<string>('');
     const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
     const handleClose = useCallback(() => {
-        setPrefixesInput('');
+        setPrefixInput('');
         onClose();
     }, [onClose]);
 
-    const parsePrefixes = useCallback((): { valid: string[]; errors: string[] } => {
-        const lines = prefixesInput
-            .split(/[\n,;]/)
-            .map((line) => line.trim())
-            .filter((line) => line.length > 0);
+    const validatePrefix = useCallback((): string | undefined => {
+        const trimmed = prefixInput.trim();
+        if (!trimmed) return undefined;
 
-        const valid: string[] = [];
-        const errors: string[] = [];
+        const result = parseCIDRPrefix(trimmed);
+        if (result.ok) return undefined;
 
-        for (const line of lines) {
-            const result = parseCIDRPrefix(line);
-            if (result.ok) {
-                valid.push(line);
-            } else {
-                let errorMsg = `"${line}": `;
-                switch (result.error) {
-                    case CIDRParseError.InvalidFormat:
-                        errorMsg += 'invalid CIDR format';
-                        break;
-                    case CIDRParseError.InvalidPrefixLength:
-                        errorMsg += 'invalid prefix length';
-                        break;
-                    case CIDRParseError.InvalidIPAddress:
-                        errorMsg += 'invalid IP address';
-                        break;
-                    default:
-                        errorMsg += 'unknown error';
-                }
-                errors.push(errorMsg);
-            }
+        switch (result.error) {
+            case CIDRParseError.InvalidFormat:
+                return 'Invalid CIDR format (e.g., 192.168.1.0/24)';
+            case CIDRParseError.InvalidPrefixLength:
+                return 'Invalid prefix length';
+            case CIDRParseError.InvalidIPAddress:
+                return 'Invalid IP address';
+            default:
+                return 'Invalid prefix';
         }
-
-        return { valid, errors };
-    }, [prefixesInput]);
+    }, [prefixInput]);
 
     const handleConfirm = useCallback(async () => {
-        const { valid, errors } = parsePrefixes();
+        const trimmed = prefixInput.trim();
+        if (!trimmed) return;
 
-        if (errors.length > 0) {
-            return;
-        }
-
-        if (valid.length === 0) {
-            return;
-        }
+        const error = validatePrefix();
+        if (error) return;
 
         setIsSubmitting(true);
         try {
-            await onConfirm(valid);
+            await onConfirm([trimmed]);
             handleClose();
         } finally {
             setIsSubmitting(false);
         }
-    }, [parsePrefixes, onConfirm, handleClose]);
+    }, [prefixInput, validatePrefix, onConfirm, handleClose]);
 
-    const { valid, errors } = parsePrefixes();
-    const hasErrors = errors.length > 0;
-    const isEmpty = prefixesInput.trim().length === 0;
-    const canSubmit = !hasErrors && !isEmpty && !isSubmitting;
+    const error = validatePrefix();
+    const isEmpty = prefixInput.trim().length === 0;
+    const canSubmit = !error && !isEmpty && !isSubmitting;
 
     // Handle Ctrl+Enter / Cmd+Enter
     useEffect(() => {
@@ -94,42 +73,24 @@ export const AddPrefixDialog: React.FC<AddPrefixDialogProps> = ({
 
     return (
         <Dialog open={open} onClose={handleClose}>
-            <Dialog.Header caption="Add Prefixes" />
+            <Dialog.Header caption="Add Prefix" />
             <Dialog.Body>
-                <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '500px', maxWidth: '90vw' }}>
+                <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '400px', maxWidth: '90vw' }}>
                     <FormField
-                        label="Prefixes (CIDR)"
+                        label="Prefix (CIDR)"
                         required
-                        hint="Enter one or more prefixes in CIDR notation, one per line or separated by commas. Press Ctrl+Enter to save."
+                        hint="Enter prefix in CIDR notation. Press Ctrl+Enter to save."
                     >
-                        <TextArea
-                            value={prefixesInput}
-                            onUpdate={setPrefixesInput}
-                            placeholder="192.168.1.0/24&#10;10.0.0.0/8&#10;2001:db8::/32"
-                            rows={6}
+                        <TextInput
+                            value={prefixInput}
+                            onUpdate={setPrefixInput}
+                            placeholder="192.168.1.0/24 or 2001:db8::/32"
                             style={{ width: '100%' }}
-                            validationState={hasErrors ? 'invalid' : undefined}
+                            validationState={error ? 'invalid' : undefined}
+                            errorMessage={error}
+                            autoFocus
                         />
                     </FormField>
-
-                    {hasErrors && (
-                        <Box style={{ color: 'var(--g-color-text-danger)' }}>
-                            <Text variant="body-1">Invalid prefixes:</Text>
-                            <Box component="ul" style={{ margin: '8px 0', paddingLeft: '20px' }}>
-                                {errors.map((error, idx) => (
-                                    <li key={idx}>
-                                        <Text variant="body-1">{error}</Text>
-                                    </li>
-                                ))}
-                            </Box>
-                        </Box>
-                    )}
-
-                    {!hasErrors && valid.length > 0 && (
-                        <Text variant="body-1" color="secondary">
-                            {valid.length} valid prefix(es) will be added
-                        </Text>
-                    )}
                 </Box>
             </Dialog.Body>
             <Dialog.Footer
