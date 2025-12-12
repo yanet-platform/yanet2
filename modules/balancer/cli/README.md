@@ -27,75 +27,78 @@ yanet-balancer [OPTIONS] <COMMAND>
 
 ### Commands
 
-#### 1. update-config
+#### 1. update
 
 Update balancer configuration from a YAML file.
 
 ```bash
-yanet-balancer update-config \
+yanet-balancer update \
   --name <CONFIG_NAME> \
   --instance <INSTANCE> \
-  --config-file <PATH_TO_YAML>
+  --config <PATH_TO_YAML>
 ```
 
 **Example:**
 ```bash
-yanet-balancer update-config \
+yanet-balancer update \
   --name my-balancer \
   --instance 0 \
-  --config-file example-config.yaml
+  --config example-config.yaml
 ```
 
 See [`example-config.yaml`](example-config.yaml) for configuration file format.
 
-#### 2. reals update
+#### 2. reals enable
 
-Update a real server (always buffered).
+Enable a real server (buffered).
 
 ```bash
-yanet-balancer reals update \
+yanet-balancer reals enable \
   --name <CONFIG_NAME> \
   --instance <INSTANCE> \
   --virtual-ip <VIP> \
   --proto <tcp|udp> \
   --virtual-port <PORT> \
   --real-ip <REAL_IP> \
-  [--enable | --disable] \
   [--weight <WEIGHT>]
 ```
 
-**Examples:**
+**Example:**
 ```bash
-# Enable a real server
-yanet-balancer reals update \
+yanet-balancer reals enable \
   --name my-balancer \
   --virtual-ip 192.0.2.1 \
   --proto tcp \
   --virtual-port 80 \
   --real-ip 10.1.1.1 \
-  --enable
-
-# Disable a real server
-yanet-balancer reals update \
-  --name my-balancer \
-  --virtual-ip 192.0.2.1 \
-  --proto tcp \
-  --virtual-port 80 \
-  --real-ip 10.1.1.2 \
-  --disable
-
-# Update weight
-yanet-balancer reals update \
-  --name my-balancer \
-  --virtual-ip 192.0.2.1 \
-  --proto tcp \
-  --virtual-port 80 \
-  --real-ip 10.1.1.1 \
-  --enable \
   --weight 200
 ```
 
-#### 3. reals flush
+#### 3. reals disable
+
+Disable a real server (buffered).
+
+```bash
+yanet-balancer reals disable \
+  --name <CONFIG_NAME> \
+  --instance <INSTANCE> \
+  --virtual-ip <VIP> \
+  --proto <tcp|udp> \
+  --virtual-port <PORT> \
+  --real-ip <REAL_IP>
+```
+
+**Example:**
+```bash
+yanet-balancer reals disable \
+  --name my-balancer \
+  --virtual-ip 192.0.2.1 \
+  --proto tcp \
+  --virtual-port 80 \
+  --real-ip 10.1.1.2
+```
+
+#### 4. reals flush
 
 Flush buffered real server updates.
 
@@ -110,12 +113,12 @@ yanet-balancer reals flush \
 yanet-balancer reals flush --name my-balancer --instance 0
 ```
 
-#### 4. show-config
+#### 5. config
 
 Show balancer configuration.
 
 ```bash
-yanet-balancer show-config \
+yanet-balancer config \
   --name <CONFIG_NAME> \
   --instance <INSTANCE> \
   [--format <table|json|tree>]
@@ -124,34 +127,34 @@ yanet-balancer show-config \
 **Examples:**
 ```bash
 # Show as table (default)
-yanet-balancer show-config --name my-balancer
+yanet-balancer config --name my-balancer
 
 # Show as JSON
-yanet-balancer show-config --name my-balancer --format json
+yanet-balancer config --name my-balancer --format json
 
 # Show as tree
-yanet-balancer show-config --name my-balancer --format tree
+yanet-balancer config --name my-balancer --format tree
 ```
 
-#### 5. list-configs
+#### 6. list
 
 List all balancer configurations.
 
 ```bash
-yanet-balancer list-configs [--format <table|json|tree>]
+yanet-balancer list [--format <table|json|tree>]
 ```
 
 **Example:**
 ```bash
-yanet-balancer list-configs --format table
+yanet-balancer list --format table
 ```
 
-#### 6. config-stats
+#### 7. stats
 
 Show configuration statistics.
 
 ```bash
-yanet-balancer config-stats \
+yanet-balancer stats \
   --name <CONFIG_NAME> \
   --instance <INSTANCE> \
   --device <DEVICE> \
@@ -163,7 +166,7 @@ yanet-balancer config-stats \
 
 **Example:**
 ```bash
-yanet-balancer config-stats \
+yanet-balancer stats \
   --name my-balancer \
   --instance 0 \
   --device eth0 \
@@ -173,12 +176,12 @@ yanet-balancer config-stats \
   --format table
 ```
 
-#### 7. state-info
+#### 8. state
 
 Show balancer state information (active sessions, VS info, real info).
 
 ```bash
-yanet-balancer state-info \
+yanet-balancer state \
   --name <CONFIG_NAME> \
   --instance <INSTANCE> \
   [--format <table|json|tree>]
@@ -186,15 +189,15 @@ yanet-balancer state-info \
 
 **Example:**
 ```bash
-yanet-balancer state-info --name my-balancer --format table
+yanet-balancer state --name my-balancer --format table
 ```
 
-#### 8. sessions-info
+#### 9. sessions
 
 Show active sessions information.
 
 ```bash
-yanet-balancer sessions-info \
+yanet-balancer sessions \
   --name <CONFIG_NAME> \
   --instance <INSTANCE> \
   [--format <table|json|tree>]
@@ -202,7 +205,7 @@ yanet-balancer sessions-info \
 
 **Example:**
 ```bash
-yanet-balancer sessions-info --name my-balancer --format table
+yanet-balancer sessions --name my-balancer --format table
 ```
 
 ## Output Formats
@@ -252,39 +255,37 @@ See [`example-config.yaml`](example-config.yaml) for a complete example.
 
 ```bash
 # 1. Update configuration
-yanet-balancer update-config \
+yanet-balancer update \
   --name my-balancer \
-  --config-file config.yaml
+  --config config.yaml
 
 # 2. Check configuration
-yanet-balancer show-config --name my-balancer
+yanet-balancer config --name my-balancer
 
 # 3. Disable a real server (buffered)
-yanet-balancer reals update \
+yanet-balancer reals disable \
   --name my-balancer \
   --virtual-ip 192.0.2.1 \
   --proto tcp \
   --virtual-port 80 \
-  --real-ip 10.1.1.1 \
-  --disable
+  --real-ip 10.1.1.1
 
 # 4. Enable another real server (buffered)
-yanet-balancer reals update \
+yanet-balancer reals enable \
   --name my-balancer \
   --virtual-ip 192.0.2.1 \
   --proto tcp \
   --virtual-port 80 \
-  --real-ip 10.1.1.2 \
-  --enable
+  --real-ip 10.1.1.2
 
 # 5. Apply all buffered changes
 yanet-balancer reals flush --name my-balancer
 
 # 6. Check state
-yanet-balancer state-info --name my-balancer
+yanet-balancer state --name my-balancer
 
 # 7. View statistics
-yanet-balancer config-stats \
+yanet-balancer stats \
   --name my-balancer \
   --device eth0 \
   --pipeline main \
@@ -292,7 +293,7 @@ yanet-balancer config-stats \
   --chain default
 
 # 8. View active sessions
-yanet-balancer sessions-info --name my-balancer
+yanet-balancer sessions --name my-balancer
 ```
 
 ## Development
@@ -324,11 +325,11 @@ cargo run --example show_outputs
 ```
 
 This will display sample outputs in all three formats (table, tree, JSON) for:
-- show-config
-- list-configs
-- state-info
-- config-stats
-- sessions-info
+- config
+- list
+- state
+- stats
+- sessions
 
 The example creates mock data structures and uses the actual output formatting functions to demonstrate what the CLI output looks like.
 

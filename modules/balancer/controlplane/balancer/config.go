@@ -108,6 +108,7 @@ func NewModuleConfig(
 	addresses module.BalancerAddresses,
 	sessionsTimeouts module.SessionsTimeouts,
 	wlc module.WlcConfig,
+	lock *sync.Mutex,
 	log *zap.SugaredLogger,
 ) (*ModuleConfig, error) {
 	moduleConfig := ModuleConfig{
@@ -115,6 +116,7 @@ func NewModuleConfig(
 		realUpdates: module.RealUpdateBuffer{},
 		Name:        name,
 		state:       state,
+		lock:        lock,
 		log:         log,
 	}
 

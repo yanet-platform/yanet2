@@ -92,6 +92,7 @@ _docker_run IT *COMMAND:
     set -euo pipefail
     docker run {{ IT }} --rm \
         --platform linux/amd64 \
+        --network=host \
         -v {{ ROOT_DIR }}:/yanet2 \
         -v {{ DOCKER_CACHE_DIR }}/gomodcache:/tmp/gomodcache:rw \
         -v {{ DOCKER_CACHE_DIR }}/gocache:/tmp/gocache:rw \

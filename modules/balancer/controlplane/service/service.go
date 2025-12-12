@@ -26,7 +26,7 @@ type moduleKey struct {
 
 // gRPC service for controlling balancer module instances
 type BalancerService struct {
-	balancerpb.UnimplementedBalancerServer
+	balancerpb.UnimplementedBalancerServiceServer
 
 	mu sync.Mutex
 

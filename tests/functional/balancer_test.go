@@ -11,7 +11,7 @@ import (
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
-func createTcpPacket(srcIP, dstIP net.IP, payload []byte, SYN bool) []byte {
+func createTcpPacket(srcIP, dstIP net.IP, srcPort, dstPort int, payload []byte, SYN bool) []byte {
 	eth := layers.Ethernet{
 		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
 		DstMAC:       framework.MustParseMAC(framework.DstMAC),
@@ -29,8 +29,8 @@ func createTcpPacket(srcIP, dstIP net.IP, payload []byte, SYN bool) []byte {
 	}
 
 	tcp := layers.TCP{
-		SrcPort: 12345,
-		DstPort: 5005,
+		SrcPort: layers.TCPPort(srcPort),
+		DstPort: layers.TCPPort(dstPort),
 		SYN:     SYN,
 	}
 	err := tcp.SetNetworkLayerForChecksum(&ip4)
@@ -58,7 +58,10 @@ func TestBalancer(t *testing.T) {
 		// Forward-specific configuration
 		commands := []string{
 			// Configure module
-			"/mnt/target/release/yanet-cli-balancer update --name balancer0 --config-path /mnt/yanet2/balancer.yaml",
+			"/mnt/target/release/yanet-cli-balancer update --name balancer0 --config /mnt/yanet2/balancer.yaml",
+
+			// See module stats
+			"/mnt/target/release/yanet-cli-balancer config --name balancer0",
 
 			// Configure functions
 			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:2=balancer:balancer0,route:route0 --instance=0",
@@ -66,8 +69,11 @@ func TestBalancer(t *testing.T) {
 			// Configure pipelines
 			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
 
-			// Show counters
-			"/mnt/target/release/yanet-cli-balancer config-stats --instance=0 --cfg=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",
+			// Configure devices
+			"/mnt/target/release/yanet-cli-device-plain update --name=01:00.0 --input test:1 --output dummy:1 --instance=0",
+
+			// Show config stats
+			"/mnt/target/release/yanet-cli-balancer stats --name=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",
 		}
 
 		_, err := fw.CLI.ExecuteCommands(commands...)
@@ -78,6 +84,8 @@ func TestBalancer(t *testing.T) {
 		packet := createTcpPacket(
 			net.ParseIP("192.0.2.2"),
 			net.ParseIP("192.0.2.1"),
+			12345,
+			80,
 			[]byte("test balancer"),
 			true,
 		)
@@ -88,7 +96,7 @@ func TestBalancer(t *testing.T) {
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 		require.True(t, outputPacket.IsTunneled, "Output packet should be tunneled")
-		require.Equal(t, outputPacket.DstIP.String(), "4.5.6.7")
+		require.True(t, outputPacket.DstIP.String() == "10.1.1.1" || outputPacket.DstIP.String() == "10.1.1.2")
 		require.Equal(t, outputPacket.InnerPacket.SrcIP.String(), "192.0.2.2")
 		require.True(t, outputPacket.InnerPacket.IsIPv4)
 	})

@@ -10,4 +10,4 @@ pub mod balancerpb {
     tonic::include_proto!("balancerpb");
 }
 
-pub use balancerpb::balancer_client::BalancerClient;
+pub use balancerpb::balancer_service_client::BalancerServiceClient;

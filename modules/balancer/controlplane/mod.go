@@ -82,7 +82,7 @@ func (m *BalancerModule) ServicesNames() []string {
 }
 
 func (m *BalancerModule) RegisterService(server *grpc.Server) {
-	balancerpb.RegisterBalancerServer(server, m.service)
+	balancerpb.RegisterBalancerServiceServer(server, m.service)
 }
 
 func (m *BalancerModule) Close() error {

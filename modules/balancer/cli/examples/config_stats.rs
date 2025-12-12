@@ -1,4 +1,4 @@
-//! Example: config-stats command output
+//! Example: stats command output
 //! Run with: cargo run --example config_stats [format]
 //! Where format is one of: table, tree, json (default: all formats)
 
@@ -29,13 +29,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             std::process::exit(1);
         }
         None => {
-            println!("=== config-stats: Table format ===\n");
+            println!("=== stats: Table format ===\n");
             output::print_config_stats(&response, OutputFormat::Table)?;
             
-            println!("\n\n=== config-stats: Tree format ===\n");
+            println!("\n\n=== stats: Tree format ===\n");
             output::print_config_stats(&response, OutputFormat::Tree)?;
             
-            println!("\n\n=== config-stats: JSON format ===\n");
+            println!("\n\n=== stats: JSON format ===\n");
             output::print_config_stats(&response, OutputFormat::Json)?;
         }
     }

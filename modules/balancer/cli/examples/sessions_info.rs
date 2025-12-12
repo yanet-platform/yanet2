@@ -1,4 +1,4 @@
-//! Example: sessions-info command output
+//! Example: sessions command output
 //! Run with: cargo run --example sessions_info [format]
 //! Where format is one of: table, tree, json (default: all formats)
 
@@ -29,13 +29,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             std::process::exit(1);
         }
         None => {
-            println!("=== sessions-info: Table format ===\n");
+            println!("=== sessions: Table format ===\n");
             output::print_sessions_info(&response, OutputFormat::Table)?;
             
-            println!("\n\n=== sessions-info: Tree format ===\n");
+            println!("\n\n=== sessions: Tree format ===\n");
             output::print_sessions_info(&response, OutputFormat::Tree)?;
             
-            println!("\n\n=== sessions-info: JSON format ===\n");
+            println!("\n\n=== sessions: JSON format ===\n");
             output::print_sessions_info(&response, OutputFormat::Json)?;
         }
     }

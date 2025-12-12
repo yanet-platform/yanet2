@@ -116,7 +116,7 @@ module_config:
 module_state_config:
   # Maximum number of sessions in the session table
   # (can be extended on demand automatically)
-  session_table_capacity: 1000000
+  session_table_capacity: 1000
 
   # Period to scan the session table (in milliseconds)
   session_table_scan_period_ms: 1000

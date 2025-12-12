@@ -152,6 +152,7 @@ func NewBalancerFromProto(
 		addresses,
 		sessionTimeouts,
 		wlc,
+		lock,
 		configLog,
 	)
 	if err != nil {

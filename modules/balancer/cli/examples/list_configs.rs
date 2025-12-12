@@ -1,4 +1,4 @@
-//! Example: list-configs command output
+//! Example: list command output
 //! Run with: cargo run --example list_configs [format]
 //! Where format is one of: table, tree, json (default: all formats)
 
@@ -29,13 +29,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             std::process::exit(1);
         }
         None => {
-            println!("=== list-configs: Table format ===\n");
+            println!("=== list: Table format ===\n");
             output::print_list_configs(&response, OutputFormat::Table)?;
             
-            println!("\n\n=== list-configs: Tree format ===\n");
+            println!("\n\n=== list: Tree format ===\n");
             output::print_list_configs(&response, OutputFormat::Tree)?;
             
-            println!("\n\n=== list-configs: JSON format ===\n");
+            println!("\n\n=== list: JSON format ===\n");
             output::print_list_configs(&response, OutputFormat::Json)?;
         }
     }

@@ -7,7 +7,7 @@ use crate::{
     cmd::*,
     entities::BalancerConfig,
     output,
-    rpc::{BalancerClient, balancerpb},
+    rpc::{BalancerServiceClient, balancerpb},
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -15,13 +15,13 @@ use crate::{
 ////////////////////////////////////////////////////////////////////////////////
 
 pub struct BalancerService {
-    client: BalancerClient<Channel>,
+    client: BalancerServiceClient<Channel>,
 }
 
 impl BalancerService {
     /// Connect to the gRPC endpoint
     pub async fn connect(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = BalancerClient::connect(endpoint).await?;
+        let client = BalancerServiceClient::connect(endpoint).await?;
         Ok(Self { client })
     }
 
@@ -30,21 +30,21 @@ impl BalancerService {
         log::trace!("Handling command: {:?}", mode);
         
         match mode {
-            Mode::UpdateConfig(cmd) => self.update_config(cmd).await,
+            Mode::Update(cmd) => self.update_config(cmd).await,
             Mode::Reals(cmd) => self.handle_reals(cmd).await,
-            Mode::ShowConfig(cmd) => self.show_config(cmd).await,
-            Mode::ListConfigs(cmd) => self.list_configs(cmd).await,
-            Mode::ConfigStats(cmd) => self.config_stats(cmd).await,
-            Mode::StateInfo(cmd) => self.state_info(cmd).await,
-            Mode::SessionsInfo(cmd) => self.sessions_info(cmd).await,
+            Mode::Config(cmd) => self.config(cmd).await,
+            Mode::List(cmd) => self.list(cmd).await,
+            Mode::Stats(cmd) => self.stats(cmd).await,
+            Mode::State(cmd) => self.state(cmd).await,
+            Mode::Sessions(cmd) => self.sessions(cmd).await,
         }
     }
 
     /// Update balancer configuration
-    async fn update_config(&mut self, cmd: UpdateConfigCmd) -> Result<(), Box<dyn Error>> {
-        log::info!("Loading configuration from: {}", cmd.config_file);
+    async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
+        log::info!("Loading configuration from: {}", cmd.config);
         
-        let config = BalancerConfig::from_yaml_file(&cmd.config_file)?;
+        let config = BalancerConfig::from_yaml_file(&cmd.config)?;
         let (module_config, module_state_config) = config.try_into()?;
 
         let request = balancerpb::UpdateConfigRequest {
@@ -66,23 +66,37 @@ impl BalancerService {
     /// Handle reals commands
     async fn handle_reals(&mut self, cmd: RealsCmd) -> Result<(), Box<dyn Error>> {
         match cmd.mode {
-            RealsMode::Update(cmd) => self.update_real(cmd).await,
+            RealsMode::Enable(cmd) => self.enable_real(cmd).await,
+            RealsMode::Disable(cmd) => self.disable_real(cmd).await,
             RealsMode::Flush(cmd) => self.flush_real_updates(cmd).await,
         }
     }
 
-    /// Update a real server
-    async fn update_real(&mut self, cmd: UpdateRealCmd) -> Result<(), Box<dyn Error>> {
-        let action = if cmd.disable { "disable" } else { "enable" };
-        log::info!("Buffering {} request for real {} in VS {}:{}/{}", 
-            action, cmd.real_ip, cmd.virtual_ip, cmd.virtual_port, cmd.proto);
+    /// Enable a real server
+    async fn enable_real(&mut self, cmd: EnableRealCmd) -> Result<(), Box<dyn Error>> {
+        log::info!("Buffering enable request for real {} in VS {}:{}/{}",
+            cmd.real_ip, cmd.virtual_ip, cmd.virtual_port, cmd.proto);
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
         
         log::debug!("Sending UpdateReals request");
         self.client.update_reals(request).await?;
         
-        log::info!("Successfully buffered real update");
+        log::info!("Successfully buffered real enable");
+        Ok(())
+    }
+
+    /// Disable a real server
+    async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Box<dyn Error>> {
+        log::info!("Buffering disable request for real {} in VS {}:{}/{}",
+            cmd.real_ip, cmd.virtual_ip, cmd.virtual_port, cmd.proto);
+
+        let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
+        
+        log::debug!("Sending UpdateReals request");
+        self.client.update_reals(request).await?;
+        
+        log::info!("Successfully buffered real disable");
         Ok(())
     }
 
@@ -100,7 +114,7 @@ impl BalancerService {
     }
 
     /// Show balancer configuration
-    async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
+    async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Box<dyn Error>> {
         log::debug!("Fetching configuration for '{}' (instance: {})", cmd.name, cmd.instance);
 
         let request: balancerpb::ShowConfigRequest = (&cmd).into();
@@ -111,7 +125,7 @@ impl BalancerService {
     }
 
     /// List all balancer configurations
-    async fn list_configs(&mut self, cmd: ListConfigsCmd) -> Result<(), Box<dyn Error>> {
+    async fn list(&mut self, cmd: ListCmd) -> Result<(), Box<dyn Error>> {
         log::debug!("Fetching all configurations");
 
         let request = balancerpb::ListConfigsRequest {};
@@ -122,7 +136,7 @@ impl BalancerService {
     }
 
     /// Show configuration statistics
-    async fn config_stats(&mut self, cmd: ConfigStatsCmd) -> Result<(), Box<dyn Error>> {
+    async fn stats(&mut self, cmd: StatsCmd) -> Result<(), Box<dyn Error>> {
         log::debug!("Fetching statistics for '{}' (instance: {})", cmd.name, cmd.instance);
 
         let request: balancerpb::ConfigStatsRequest = (&cmd).into();
@@ -133,7 +147,7 @@ impl BalancerService {
     }
 
     /// Show state information
-    async fn state_info(&mut self, cmd: StateInfoCmd) -> Result<(), Box<dyn Error>> {
+    async fn state(&mut self, cmd: StateCmd) -> Result<(), Box<dyn Error>> {
         log::debug!("Fetching state info for '{}' (instance: {})", cmd.name, cmd.instance);
 
         let request: balancerpb::StateInfoRequest = (&cmd).into();
@@ -144,7 +158,7 @@ impl BalancerService {
     }
 
     /// Show sessions information
-    async fn sessions_info(&mut self, cmd: SessionsInfoCmd) -> Result<(), Box<dyn Error>> {
+    async fn sessions(&mut self, cmd: SessionsCmd) -> Result<(), Box<dyn Error>> {
         log::debug!("Fetching sessions info for '{}' (instance: {})", cmd.name, cmd.instance);
 
         let request: balancerpb::SessionsInfoRequest = (&cmd).into();

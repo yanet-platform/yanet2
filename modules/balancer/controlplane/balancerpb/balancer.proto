@@ -10,7 +10,7 @@ import "modules/balancer/controlplane/balancerpb/stats.proto";
 option go_package = "github.com/yanet-platform/yanet2/modules/"
 		    "balancer/controlplane/balancerpb;balancerpb";
 
-service Balancer {
+service BalancerService {
 	// Update or enable balancer config
 	rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
 

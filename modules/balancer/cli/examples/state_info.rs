@@ -1,4 +1,4 @@
-//! Example: state-info command output
+//! Example: state command output
 //! Run with: cargo run --example state_info [format]
 //! Where format is one of: table, tree, json (default: all formats)
 
@@ -29,13 +29,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             std::process::exit(1);
         }
         None => {
-            println!("=== state-info: Table format ===\n");
+            println!("=== state: Table format ===\n");
             output::print_state_info(&response, OutputFormat::Table)?;
             
-            println!("\n\n=== state-info: Tree format ===\n");
+            println!("\n\n=== state: Tree format ===\n");
             output::print_state_info(&response, OutputFormat::Tree)?;
             
-            println!("\n\n=== state-info: JSON format ===\n");
+            println!("\n\n=== state: JSON format ===\n");
             output::print_state_info(&response, OutputFormat::Json)?;
         }
     }

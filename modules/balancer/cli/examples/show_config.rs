@@ -1,4 +1,4 @@
-//! Example: show-config command output
+//! Example: config command output
 //! Run with: cargo run --example show_config [format]
 //! Where format is one of: table, tree, json (default: all formats)
 
@@ -29,13 +29,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             std::process::exit(1);
         }
         None => {
-            println!("=== show-config: Table format ===\n");
+            println!("=== config: Table format ===\n");
             output::print_show_config(&response, OutputFormat::Table)?;
             
-            println!("\n\n=== show-config: Tree format ===\n");
+            println!("\n\n=== config: Tree format ===\n");
             output::print_show_config(&response, OutputFormat::Tree)?;
             
-            println!("\n\n=== show-config: JSON format ===\n");
+            println!("\n\n=== config: JSON format ===\n");
             output::print_show_config(&response, OutputFormat::Json)?;
         }
     }
