@@ -400,6 +400,16 @@ dataplane_worker_init(
 	worker->config = *config;
 
 	struct dp_config *dp_config = worker->instance->dp_config;
+	
+	// Diagnostic logging for ASAN issue
+	LOG(DEBUG, "dp_config=%p", (void*)dp_config);
+	LOG(DEBUG, "memory_context=%p", (void*)&dp_config->memory_context);
+	LOG(DEBUG, "block_allocator field=%p", (void*)&dp_config->memory_context.block_allocator);
+	LOG(DEBUG, "block_allocator value=%p", (void*)dp_config->memory_context.block_allocator);
+	
+	struct block_allocator *resolved_allocator = ADDR_OF(&dp_config->memory_context.block_allocator);
+	LOG(DEBUG, "resolved block_allocator=%p", (void*)resolved_allocator);
+	
 	struct dp_worker *dp_worker = (struct dp_worker *)memory_balloc(
 		&dp_config->memory_context, sizeof(struct dp_worker)
 	);
