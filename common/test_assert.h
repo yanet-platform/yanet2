@@ -1,6 +1,6 @@
 #pragma once
 
-#include <lib/logging/log.h>
+#include "lib/logging/log.h"
 
 /* Test framework macros */
 #define TEST_SUCCESS 0

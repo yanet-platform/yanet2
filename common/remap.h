@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common/memory.h"
-#include "common/memory_address.h"
+#include "memory.h"
+#include "memory_address.h"
 
 /*
  * Remap table allows to remap one unsinged into another and intended to spare

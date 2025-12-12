@@ -4,9 +4,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "common/exp_array.h"
-#include "common/memory.h"
-#include "value.h"
+#include "exp_array.h"
+#include "memory.h"
 
 /*
  * Value registry required to map a key into range of unique values.

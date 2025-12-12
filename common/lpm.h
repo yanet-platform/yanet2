@@ -15,12 +15,9 @@
 
 #include <string.h>
 
-#include "common/memory_address.h"
+#include "memory_address.h"
 #include "key.h"
 #include "value.h"
-
-#include "key.h"
-
 #include "memory.h"
 
 #define LPM_VALUE_INVALID 0xffffffff

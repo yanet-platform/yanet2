@@ -6,9 +6,8 @@
  */
 
 #include <stdint.h>
-#include <stdlib.h>
 
-#include "common/memory.h"
+#include "memory.h"
 #include "remap.h"
 
 #define VALUE_TABLE_CHUNK_SIZE 16384

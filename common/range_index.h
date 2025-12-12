@@ -1,9 +1,9 @@
 #pragma once
 
-#include "common/memory.h"
-#include "common/numutils.h"
-#include "common/radix.h"
-#include "common/value.h"
+#include "memory.h"
+#include "numutils.h"
+#include "radix.h"
+#include "value.h"
 
 #include <strings.h>
 

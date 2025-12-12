@@ -2,8 +2,8 @@
 
 #include <stdint.h>
 
-#include "common/exp_array.h"
-#include "common/memory.h"
+#include "exp_array.h"
+#include "memory.h"
 
 #include "key.h"
 #include "lpm.h"

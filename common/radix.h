@@ -7,8 +7,8 @@
 
 #include <string.h>
 
-#include "common/memory.h"
-#include "common/memory_address.h"
+#include "memory.h"
+#include "memory_address.h"
 
 #define RADIX_VALUE_INVALID 0xffffffff
 #define RADIX_CHUNK_SIZE 16

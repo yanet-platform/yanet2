@@ -1,8 +1,8 @@
 #pragma once
 
-#include "common/numutils.h"
+#include "numutils.h"
 
-#include "common/memory.h"
+#include "memory.h"
 
 static inline int
 mem_array_expand_exp(
