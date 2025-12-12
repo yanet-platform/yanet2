@@ -92,21 +92,30 @@ nat64_module_config_data_init(
 	struct nat64_module_config *config,
 	struct memory_context *memory_context
 ) {
+	LOG(DEBUG, "Starting nat64_module_config_data_init");
+	
 	// Initialize LPM structures
+	LOG(DEBUG, "Initializing v4_to_v6 LPM");
 	if (lpm_init(&config->mappings.v4_to_v6, memory_context)) {
 		LOG(ERROR, "Failed to initialize v4_to_v6 LPM");
 		goto error_lpm_v4;
 	}
+	LOG(DEBUG, "v4_to_v6 LPM initialized successfully");
+	
+	LOG(DEBUG, "Initializing v6_to_v4 LPM");
 	if (lpm_init(&config->mappings.v6_to_v4, memory_context)) {
 		LOG(ERROR, "Failed to initialize v6_to_v4 LPM");
 		goto error_lpm_v6;
 	}
+	LOG(DEBUG, "v6_to_v4 LPM initialized successfully");
 
 	// Initialize v6 prefixes LPM
+	LOG(DEBUG, "Initializing v6_prefixes LPM");
 	if (lpm_init(&config->prefixes.v6_prefixes, memory_context)) {
 		LOG(ERROR, "Failed to initialize v6_prefixes LPM");
 		goto error_lpm_prefixes;
 	}
+	LOG(DEBUG, "v6_prefixes LPM initialized successfully");
 
 	// Initialize other fields
 	config->mappings.count = 0;
