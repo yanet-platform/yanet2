@@ -349,6 +349,7 @@ counter_storage_spawn(
 		);
 		if (new_blocks == NULL) {
 			// return FIXME;
+			return NULL;
 		}
 
 		SET_OFFSET_OF(&new_pool->blocks, new_blocks);
@@ -381,7 +382,7 @@ counter_storage_spawn(
 				counter_storage_allocator_new_pages(allocator);
 			if (pages == NULL) {
 				// FIXME
-				assert(false);
+				return NULL;
 			}
 			SET_OFFSET_OF(&block->pages, pages);
 

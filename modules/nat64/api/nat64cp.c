@@ -93,7 +93,7 @@ nat64_module_config_data_init(
 	struct memory_context *memory_context
 ) {
 	LOG(DEBUG, "Starting nat64_module_config_data_init");
-	
+
 	// Initialize LPM structures
 	LOG(DEBUG, "Initializing v4_to_v6 LPM");
 	if (lpm_init(&config->mappings.v4_to_v6, memory_context)) {
@@ -101,7 +101,7 @@ nat64_module_config_data_init(
 		goto error_lpm_v4;
 	}
 	LOG(DEBUG, "v4_to_v6 LPM initialized successfully");
-	
+
 	LOG(DEBUG, "Initializing v6_to_v4 LPM");
 	if (lpm_init(&config->mappings.v6_to_v4, memory_context)) {
 		LOG(ERROR, "Failed to initialize v6_to_v4 LPM");

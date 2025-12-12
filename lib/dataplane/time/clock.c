@@ -37,10 +37,12 @@ tsc_clock_get_time_ns(struct tsc_clock *clock) {
 	// Split into whole seconds and fractional part
 	uint64_t whole_seconds = tsc_delta / tsc_hz;
 	uint64_t remaining_cycles = tsc_delta % tsc_hz;
-	
-	// Convert to nanoseconds: seconds * 1e9 + (remaining_cycles * 1e9 / tsc_hz)
-	uint64_t ns_delta = whole_seconds * k1e9 + (remaining_cycles * k1e9) / tsc_hz;
-	
+
+	// Convert to nanoseconds: seconds * 1e9 + (remaining_cycles * 1e9 /
+	// tsc_hz)
+	uint64_t ns_delta =
+		whole_seconds * k1e9 + (remaining_cycles * k1e9) / tsc_hz;
+
 	uint64_t ns_now = ns_delta + clock->real_time_ns;
 
 	return ns_now;

@@ -15,10 +15,10 @@
 
 #include <string.h>
 
-#include "memory_address.h"
 #include "key.h"
-#include "value.h"
 #include "memory.h"
+#include "memory_address.h"
+#include "value.h"
 
 #define LPM_VALUE_INVALID 0xffffffff
 #define LPM_VALUE_MASK 0x7fffffff

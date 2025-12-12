@@ -571,9 +571,12 @@ dataplane_init(
 	};
 
 	LOG(INFO, "connect devices");
-	dataplane_connect_devices(
-		dataplane, config->connection_count, config->connections
-	);
+	if (dataplane_connect_devices(
+		    dataplane, config->connection_count, config->connections
+	    )) {
+		LOG(ERROR, "failed to connect devices");
+		return -1;
+	}
 
 	// init dataplane instances
 	for (uint32_t instance_idx = 0;
@@ -601,15 +604,21 @@ dataplane_init(
 
 		counter_registry_link(&dp_config->worker_counters, NULL);
 
-		SET_OFFSET_OF(
-			&dp_config->worker_counter_storage,
-			counter_storage_spawn(
-				&dp_config->memory_context,
-				&dp_config->counter_storage_allocator,
-				NULL,
-				&dp_config->worker_counters
-			)
+		struct counter_storage *storage = counter_storage_spawn(
+			&dp_config->memory_context,
+			&dp_config->counter_storage_allocator,
+			NULL,
+			&dp_config->worker_counters
 		);
+
+		if (storage == NULL) {
+			LOG(ERROR,
+			    "failed to spawn counter storage for instance %u",
+			    instance_idx);
+			return -1;
+		}
+
+		SET_OFFSET_OF(&dp_config->worker_counter_storage, storage);
 	}
 
 	return 0;
