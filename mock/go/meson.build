@@ -1,6 +1,6 @@
 test(
   'go_mock',
-  find_program('go'),
+  go,
   env: yanet_go_env,
   args: ['test'] + (get_option('b_coverage') ? ['-cover', '-args', '-test.gocoverdir=' + meson.current_build_dir()]: []),
   workdir: meson.current_source_dir(),
