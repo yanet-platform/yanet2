@@ -572,6 +572,15 @@ dataplane_init(
 	}
 
 	LOG(INFO, "create devices");
+	
+	// Check if memory_context is still valid after DPDK init
+	for (uint32_t instance_idx = 0; instance_idx < dataplane->instance_count; ++instance_idx) {
+		struct dataplane_instance *instance = dataplane->instances + instance_idx;
+		struct dp_config *dp_config = instance->dp_config;
+		LOG(DEBUG, "Before device creation: instance=%u, dp_config=%p, memory_context.block_allocator=%p",
+		    instance_idx, (void*)dp_config, (void*)dp_config->memory_context.block_allocator);
+	}
+	
 	if (dataplane_create_devices(
 		    dataplane, config->device_count, config->devices
 	    )) {
