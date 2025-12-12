@@ -563,12 +563,35 @@ dataplane_init(
 	}
 
 	LOG(INFO, "initialize dpdk");
+	
+	// Log memory state BEFORE DPDK init
+	for (uint32_t instance_idx = 0; instance_idx < dataplane->instance_count; ++instance_idx) {
+		struct dataplane_instance *instance = dataplane->instances + instance_idx;
+		struct dp_config *dp_config = instance->dp_config;
+		LOG(DEBUG, "BEFORE DPDK: instance=%u, dp_config=%p, memory_context=%p, block_allocator_offset=%p",
+		    instance_idx, (void*)dp_config, (void*)&dp_config->memory_context,
+		    (void*)dp_config->memory_context.block_allocator);
+	}
+	
 	if (dpdk_init(
 		    binary, config->dpdk_memory, pci_port_count, pci_port_names
 	    ) == -1) {
 		LOG(ERROR, "failed to initialize dpdk");
 		errno = rte_errno;
 		return -1;
+	}
+	
+	// Log memory state AFTER DPDK init
+	for (uint32_t instance_idx = 0; instance_idx < dataplane->instance_count; ++instance_idx) {
+		struct dataplane_instance *instance = dataplane->instances + instance_idx;
+		struct dp_config *dp_config = instance->dp_config;
+		LOG(DEBUG, "AFTER DPDK: instance=%u, dp_config=%p, memory_context=%p, block_allocator_offset=%p",
+		    instance_idx, (void*)dp_config, (void*)&dp_config->memory_context,
+		    (void*)dp_config->memory_context.block_allocator);
+		
+		// Try to resolve the pointer
+		struct block_allocator *resolved = ADDR_OF(&dp_config->memory_context.block_allocator);
+		LOG(DEBUG, "AFTER DPDK: resolved block_allocator=%p", (void*)resolved);
 	}
 
 	LOG(INFO, "create devices");
@@ -607,6 +630,14 @@ dataplane_init(
 		dp_config->instance_idx = instance_idx;
 		dp_config->instance_count = dataplane->instance_count;
 
+		LOG(DEBUG, "Initializing counter storage allocator for instance %u", instance_idx);
+		LOG(DEBUG, "dp_config=%p, memory_context=%p, block_allocator_offset=%p",
+		    (void*)dp_config, (void*)&dp_config->memory_context,
+		    (void*)dp_config->memory_context.block_allocator);
+		
+		struct block_allocator *resolved_alloc = ADDR_OF(&dp_config->memory_context.block_allocator);
+		LOG(DEBUG, "Resolved block_allocator=%p", (void*)resolved_alloc);
+		
 		counter_storage_allocator_init(
 			&dp_config->counter_storage_allocator,
 			&dp_config->memory_context,
@@ -622,6 +653,10 @@ dataplane_init(
 
 		counter_registry_link(&dp_config->worker_counters, NULL);
 
+		LOG(DEBUG, "About to spawn counter storage for instance %u", instance_idx);
+		LOG(DEBUG, "worker_count=%lu, registry count=%lu",
+		    (unsigned long)dp_config->worker_count, (unsigned long)dp_config->worker_counters.count);
+		
 		struct counter_storage *storage = counter_storage_spawn(
 			&dp_config->memory_context,
 			&dp_config->counter_storage_allocator,
@@ -633,6 +668,9 @@ dataplane_init(
 			LOG(ERROR,
 			    "failed to spawn counter storage for instance %u",
 			    instance_idx);
+			LOG(ERROR, "Last known state: dp_config=%p, memory_context=%p, block_allocator=%p",
+			    (void*)dp_config, (void*)&dp_config->memory_context,
+			    (void*)ADDR_OF(&dp_config->memory_context.block_allocator));
 			return -1;
 		}
 

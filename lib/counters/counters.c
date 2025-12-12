@@ -315,10 +315,16 @@ counter_storage_spawn(
 	    ADDR_OF(&old_counter_storage->allocator) != allocator)
 		return NULL;
 
+	// Debug: log memory_context state
+	struct block_allocator *ba = ADDR_OF(&memory_context->block_allocator);
+	(void)ba; // Suppress unused warning in release builds
+	
 	struct counter_storage *new_counter_storage = (struct counter_storage *)
 		memory_balloc(memory_context, sizeof(struct counter_storage));
-	if (new_counter_storage == NULL)
+	if (new_counter_storage == NULL) {
+		// Failed to allocate counter_storage structure itself
 		return NULL;
+	}
 
 	counter_storage_init(
 		memory_context, new_counter_storage, allocator, counter_registry
@@ -348,7 +354,7 @@ counter_storage_spawn(
 			block_count * sizeof(struct counter_storage_block *)
 		);
 		if (new_blocks == NULL) {
-			// return FIXME;
+			// Failed to allocate blocks array for pool
 			return NULL;
 		}
 
@@ -377,11 +383,15 @@ counter_storage_spawn(
 					memory_context,
 					sizeof(struct counter_storage_block)
 				);
+			if (block == NULL) {
+				// Failed to allocate block structure
+				return NULL;
+			}
 			block->refcnt = 1;
 			struct counter_storage_page *pages =
 				counter_storage_allocator_new_pages(allocator);
 			if (pages == NULL) {
-				// FIXME
+				// Failed to allocate pages
 				return NULL;
 			}
 			SET_OFFSET_OF(&block->pages, pages);
