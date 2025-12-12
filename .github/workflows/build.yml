@@ -94,9 +94,21 @@ jobs:
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
-      - name: Build YANET (dataplane -> modules -> controlplane)
+      - name: Build YANET in debug (dataplane -> modules -> controlplane)
         run: |
-          meson setup build -Dbuildtype=debug
+          meson setup --reconfigure build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
+          make dataplane cli
+
+      - name: Build and run tests (debug)
+        run: |
+          make test-debug
+      - name: Show meson test log
+        run:
+          grep -v 'Inherited environment' build/meson-logs/testlog.txt
+
+      - name: Build YANET in release (dataplane -> modules -> controlplane)
+        run: |
+          meson setup --reconfigure build -Dbuildtype=release
           make dataplane cli
 
       - name: Upload YANET binaries
@@ -108,7 +120,7 @@ jobs:
             build/controlplane/yanet-controlplane
             target/release/yanet-cli*
 
-      - name: Build and run tests
+      - name: Build and run tests (release)
         run: |
           make test
       - name: Show meson test log
