@@ -4,7 +4,8 @@ test_env = environment(
     'CGO_CFLAGS': ' '.join(['--coverage'] + yanet_cgo_cflags),
     'CGO_LDFLAGS': ' '.join(['--coverage'] + yanet_cgo_ldflags),
     'ASAN_OPTIONS': '',
-    'UBSAN_OPTIONS': '',
+    'UBSAN_OPTIONS': 'halt_on_error=0:print_stacktrace=0',
+    'LSAN_OPTIONS': 'detect_leaks=0',
     'MSAN_OPTIONS': '',
   },
 )

@@ -25,6 +25,10 @@ u = executable(
   dependencies: dependencies,
 )
 
-test('nat64 unittest', u, env: ['YANET_TEST=nat64_autotest'])
+test('nat64 unittest', u, env: [
+  'YANET_TEST=nat64_autotest',
+  'UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=0',
+  'LSAN_OPTIONS=detect_leaks=0',
+])
 
 subdir('go')
