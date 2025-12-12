@@ -47,7 +47,7 @@ filter_packets(struct common *common) {
 		free_packet(&packet);
 		if (res < 0) {
 			LOG(ERROR,
-			    "error occured durring classification: %d",
+			    "error occurred durring classification: %d",
 			    res);
 			++errors;
 		} else if (actions_count > 0) {
@@ -60,7 +60,7 @@ filter_packets(struct common *common) {
 	    packets,
 	    100.0 * (double)found / packets);
 	if (errors > 0) {
-		LOG(ERROR, "%lu errors occured during classification", errors);
+		LOG(ERROR, "%lu errors occurred during classification", errors);
 		return 1;
 	} else {
 		return 0;
@@ -114,6 +114,21 @@ main(int argc, char **argv) {
 	struct common *common = (struct common *)memory;
 
 	LOG(INFO, "successfully attached to the shared memory (%p)", memory);
+
+	// Wait for compiler to finish (with timeout)
+	LOG(INFO, "waiting for compiler to finish...");
+	int timeout_ms = 5000;
+	int wait_interval_ms = 10;
+	int elapsed_ms = 0;
+	while (atomic_load(&common->ready) == 0) {
+		usleep(wait_interval_ms * 1000);
+		elapsed_ms += wait_interval_ms;
+		if (elapsed_ms >= timeout_ms) {
+			LOG(ERROR, "timeout waiting for compiler to finish");
+			return 1;
+		}
+	}
+	LOG(INFO, "compiler finished, proceeding with filtering");
 
 	// Query packets
 

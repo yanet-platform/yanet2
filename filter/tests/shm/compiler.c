@@ -107,6 +107,7 @@ main(int argc, char **argv) {
 
 	// Init common in the beginning of the shared memory
 	struct common *common = (struct common *)memory;
+	atomic_init(&common->ready, 0);
 	memset(&common->filter, 0, sizeof(struct filter));
 
 	struct block_allocator alloc;
@@ -136,6 +137,9 @@ main(int argc, char **argv) {
 	// Success
 
 	LOG(INFO, "successfully built filter");
+
+	// Signal that filter is ready
+	atomic_store(&common->ready, 1);
 
 	// Unlink shared memory
 
