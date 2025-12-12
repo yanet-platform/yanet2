@@ -392,6 +392,16 @@ dataplane_worker_init(
 	    config->instance_id,
 	    device->port_id);
 	worker->dataplane = dataplane;
+	
+	LOG(DEBUG, "instance_id=%u, dataplane->instance_count=%u",
+	    config->instance_id, dataplane->instance_count);
+	
+	if (config->instance_id >= dataplane->instance_count) {
+		LOG(ERROR, "invalid instance_id %u (max %u)",
+		    config->instance_id, dataplane->instance_count);
+		return -1;
+	}
+	
 	worker->instance = dataplane->instances + config->instance_id;
 	worker->device = device;
 	worker->device_id = device->device_id;
@@ -400,6 +410,11 @@ dataplane_worker_init(
 	worker->config = *config;
 
 	struct dp_config *dp_config = worker->instance->dp_config;
+	
+	if (dp_config == NULL) {
+		LOG(ERROR, "dp_config is NULL for instance %u", config->instance_id);
+		return -1;
+	}
 	
 	// Diagnostic logging for ASAN issue
 	LOG(DEBUG, "dp_config=%p", (void*)dp_config);
