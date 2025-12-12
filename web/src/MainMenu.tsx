@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AsideHeader } from '@gravity-ui/navigation';
 import type { MenuItem as AsideHeaderMenuItem } from '@gravity-ui/navigation';
-import { Link, Eye, Route, CurlyBracketsFunction, ListUl, HardDrive } from '@gravity-ui/icons';
+import { Link, Eye, Route, CurlyBracketsFunction, ListUl, HardDrive, LayoutCellsLarge } from '@gravity-ui/icons';
 import Logo from './icons/Logo';
 import type { PageId } from './types';
 
@@ -72,6 +72,15 @@ const MainMenu = ({ currentPage, onPageChange, renderContent }: MainMenuProps): 
             current: currentPage === 'route',
             onItemClick: () => {
                 onPageChange('route');
+            },
+        },
+        {
+            id: 'decap',
+            title: 'Decap',
+            icon: LayoutCellsLarge,
+            current: currentPage === 'decap',
+            onItemClick: () => {
+                onPageChange('decap');
             },
         },
     ];

@@ -1,10 +1,7 @@
 import { createService } from './client';
+import type { TargetModule } from './common';
 
 // Route types
-export interface TargetModule {
-    configName?: string; // config_name
-    dataplaneInstance?: number; // dataplane_instance
-}
 
 export interface LargeCommunity {
     globalAdministrator?: number; // global_administrator
