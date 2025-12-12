@@ -302,23 +302,17 @@ dataplane_init_storage(
 		storage + sizeof(struct dp_config),
 		dp_memory - sizeof(struct dp_config)
 	);
-	LOG(DEBUG, "Before memory_context_init: dp_config=%p, block_allocator=%p, memory_context=%p",
-	    (void*)dp_config, (void*)&dp_config->block_allocator, (void*)&dp_config->memory_context);
-	
 	memory_context_init(
 		&dp_config->memory_context, "dp", &dp_config->block_allocator
 	);
-	
-	LOG(DEBUG, "After memory_context_init: block_allocator field value=%p",
-	    (void*)dp_config->memory_context.block_allocator);
 
 	dp_config->config_lock = 0;
 
-	dp_config->workers = NULL;
-	dp_config->worker_count = 0;
-
 	dp_config->dp_modules = NULL;
 	dp_config->module_count = 0;
+
+	dp_config->workers = NULL;
+	dp_config->worker_count = 0;
 
 	struct cp_config *cp_config =
 		(struct cp_config *)((uintptr_t)storage + dp_memory);
@@ -563,16 +557,6 @@ dataplane_init(
 	}
 
 	LOG(INFO, "initialize dpdk");
-	
-	// Log memory state BEFORE DPDK init
-	for (uint32_t instance_idx = 0; instance_idx < dataplane->instance_count; ++instance_idx) {
-		struct dataplane_instance *instance = dataplane->instances + instance_idx;
-		struct dp_config *dp_config = instance->dp_config;
-		LOG(DEBUG, "BEFORE DPDK: instance=%u, dp_config=%p, memory_context=%p, block_allocator_offset=%p",
-		    instance_idx, (void*)dp_config, (void*)&dp_config->memory_context,
-		    (void*)dp_config->memory_context.block_allocator);
-	}
-	
 	if (dpdk_init(
 		    binary, config->dpdk_memory, pci_port_count, pci_port_names
 	    ) == -1) {
@@ -580,23 +564,21 @@ dataplane_init(
 		errno = rte_errno;
 		return -1;
 	}
-	
-	// Log memory state AFTER DPDK init
-	for (uint32_t instance_idx = 0; instance_idx < dataplane->instance_count; ++instance_idx) {
-		struct dataplane_instance *instance = dataplane->instances + instance_idx;
-		struct dp_config *dp_config = instance->dp_config;
-		LOG(DEBUG, "AFTER DPDK: instance=%u, dp_config=%p, memory_context=%p, block_allocator_offset=%p",
-		    instance_idx, (void*)dp_config, (void*)&dp_config->memory_context,
-		    (void*)dp_config->memory_context.block_allocator);
-		
-		// Try to resolve the pointer
-		struct block_allocator *resolved = ADDR_OF(&dp_config->memory_context.block_allocator);
-		LOG(DEBUG, "AFTER DPDK: resolved block_allocator=%p", (void*)resolved);
-	}
 
-	// Pre-initialize counter storage BEFORE creating devices/workers
-	// This ensures counter storage gets unfragmented memory blocks
-	LOG(INFO, "pre-initialize counter storage");
+	LOG(INFO, "create devices");
+	if (dataplane_create_devices(
+		    dataplane, config->device_count, config->devices
+	    )) {
+		LOG(ERROR, "failed to create devices");
+		return -1;
+	};
+
+	LOG(INFO, "connect devices");
+	dataplane_connect_devices(
+		dataplane, config->connection_count, config->connections
+	);
+
+	// init dataplane instances
 	for (uint32_t instance_idx = 0;
 	     instance_idx < dataplane->instance_count;
 	     ++instance_idx) {
@@ -607,78 +589,30 @@ dataplane_init(
 		dp_config->instance_idx = instance_idx;
 		dp_config->instance_count = dataplane->instance_count;
 
-		// Calculate expected worker count from config
-		uint32_t expected_worker_count = 0;
-		for (uint64_t dev_idx = 0; dev_idx < config->device_count; ++dev_idx) {
-			struct dataplane_device_config *device_config = config->devices + dev_idx;
-			for (uint32_t worker_idx = 0; worker_idx < device_config->worker_count; ++worker_idx) {
-				if (device_config->workers[worker_idx].instance_id == instance_idx) {
-					expected_worker_count++;
-				}
-			}
-		}
-
-		LOG(DEBUG, "Pre-initializing counter storage for instance %u with %u workers",
-		    instance_idx, expected_worker_count);
-
 		counter_storage_allocator_init(
 			&dp_config->counter_storage_allocator,
 			&dp_config->memory_context,
-			expected_worker_count
+			dp_config->worker_count
 		);
 
 		struct cp_config *cp_config = instance->cp_config;
 		counter_storage_allocator_init(
 			&cp_config->counter_storage_allocator,
 			&cp_config->memory_context,
-			expected_worker_count
+			dp_config->worker_count
 		);
-
-		// Initialize counter registry with expected counters
-		counter_registry_init(
-			&dp_config->worker_counters, &dp_config->memory_context, 0
-		);
-		
-		counter_registry_register(&dp_config->worker_counters, "iterations", 1);
-		counter_registry_register(&dp_config->worker_counters, "rx", 2);
-		counter_registry_register(&dp_config->worker_counters, "tx", 2);
-		counter_registry_register(&dp_config->worker_counters, "remote_rx", 2);
-		counter_registry_register(&dp_config->worker_counters, "remote_tx", 2);
 
 		counter_registry_link(&dp_config->worker_counters, NULL);
 
-		struct counter_storage *storage = counter_storage_spawn(
-			&dp_config->memory_context,
-			&dp_config->counter_storage_allocator,
-			NULL,
-			&dp_config->worker_counters
+		SET_OFFSET_OF(
+			&dp_config->worker_counter_storage,
+			counter_storage_spawn(
+				&dp_config->memory_context,
+				&dp_config->counter_storage_allocator,
+				NULL,
+				&dp_config->worker_counters
+			)
 		);
-
-		if (storage == NULL) {
-			LOG(ERROR,
-			    "failed to pre-allocate counter storage for instance %u",
-			    instance_idx);
-			return -1;
-		}
-
-		SET_OFFSET_OF(&dp_config->worker_counter_storage, storage);
-	}
-
-	LOG(INFO, "create devices");
-	
-	if (dataplane_create_devices(
-		    dataplane, config->device_count, config->devices
-	    )) {
-		LOG(ERROR, "failed to create devices");
-		return -1;
-	};
-
-	LOG(INFO, "connect devices");
-	if (dataplane_connect_devices(
-		    dataplane, config->connection_count, config->connections
-	    )) {
-		LOG(ERROR, "failed to connect devices");
-		return -1;
 	}
 
 	return 0;
