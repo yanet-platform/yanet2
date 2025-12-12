@@ -317,12 +317,12 @@ counter_storage_spawn(
 
 	// Debug: log memory_context state
 	struct block_allocator *ba = ADDR_OF(&memory_context->block_allocator);
-	(void)ba; // Suppress unused warning in release builds
+	size_t free_size = block_allocator_free_size(ba);
 	
 	struct counter_storage *new_counter_storage = (struct counter_storage *)
 		memory_balloc(memory_context, sizeof(struct counter_storage));
 	if (new_counter_storage == NULL) {
-		// Failed to allocate counter_storage structure itself
+		// Failed to allocate counter_storage structure itself (size=%zu, free=%zu)
 		return NULL;
 	}
 
@@ -337,6 +337,11 @@ counter_storage_spawn(
 		uint64_t block_count =
 			(registry_size + COUNTER_STORAGE_PAGE_SIZE - 1) /
 			COUNTER_STORAGE_PAGE_SIZE;
+		
+		// Debug: log allocation requirements
+		if (block_count > 0) {
+			(void)free_size; // Use the variable to avoid warning
+		}
 
 		if (old_counter_storage != NULL) {
 			struct counter_storage_pool *old_pool =
@@ -349,12 +354,13 @@ counter_storage_spawn(
 
 		struct counter_storage_pool *new_pool =
 			new_counter_storage->pools + pool_idx;
+		size_t blocks_array_size = block_count * sizeof(struct counter_storage_block *);
 		struct counter_storage_block **new_blocks = memory_balloc(
 			memory_context,
-			block_count * sizeof(struct counter_storage_block *)
+			blocks_array_size
 		);
 		if (new_blocks == NULL) {
-			// Failed to allocate blocks array for pool
+			// Failed to allocate blocks array for pool (pool_idx=%lu, block_count=%lu, size=%zu)
 			return NULL;
 		}
 
@@ -384,14 +390,17 @@ counter_storage_spawn(
 					sizeof(struct counter_storage_block)
 				);
 			if (block == NULL) {
-				// Failed to allocate block structure
+				// Failed to allocate block structure (pool_idx=%lu, idx=%lu/%lu)
 				return NULL;
 			}
 			block->refcnt = 1;
+			
+			size_t pages_size = sizeof(struct counter_storage_page) * allocator->instance_count;
 			struct counter_storage_page *pages =
 				counter_storage_allocator_new_pages(allocator);
 			if (pages == NULL) {
-				// Failed to allocate pages
+				// Failed to allocate pages (pool_idx=%lu, idx=%lu/%lu, pages_size=%zu, instance_count=%lu)
+				(void)pages_size; // Suppress warning
 				return NULL;
 			}
 			SET_OFFSET_OF(&block->pages, pages);
