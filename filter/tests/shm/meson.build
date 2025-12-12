@@ -5,6 +5,7 @@ compiler = executable('compiler',
     c_args: yanet_test_c_args,
     link_args: yanet_link_args,
     dependencies: deps,
+    include_directories: yanet_rootdir,
     link_language: 'c'
 )
 
@@ -13,6 +14,7 @@ filter = executable('filter',
     c_args: yanet_test_c_args,
     link_args: yanet_link_args,
     dependencies: deps,
+    include_directories: yanet_rootdir,
     link_language: 'c'
 )
 
