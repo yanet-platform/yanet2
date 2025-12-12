@@ -178,6 +178,14 @@ jobs:
           meson setup --reconfigure build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
           make dataplane cli
 
+      - name: Build and run tests (debug)
+        run: |
+          make go-cache-clean
+          make test-debug
+      - name: Show meson test log
+        run:
+          grep -v 'Inherited environment' build/meson-logs/testlog.txt
+
       - uses: cpp-linter/cpp-linter-action@main
         id: linter
         continue-on-error: true
@@ -198,14 +206,6 @@ jobs:
       - name: Check code style violation
         if: steps.linter.outputs.clang-tidy-checks-failed > 0
         run: exit 1
-
-      - name: Build and run tests (debug)
-        run: |
-          make go-cache-clean
-          make test-debug
-      - name: Show meson test log
-        run:
-          grep -v 'Inherited environment' build/meson-logs/testlog.txt
 
       - name: Clean debug build artifacts to free space
         run: |
@@ -233,7 +233,7 @@ jobs:
           meson setup --reconfigure build -Dbuildtype=release
           make dataplane cli
 
-      - name: Build and run tests (release)
+      - name: Build and run tests in release
         run: |
           make go-cache-clean
           make test
