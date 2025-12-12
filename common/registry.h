@@ -53,7 +53,8 @@ value_collector_free(struct value_collector *collector) {
 				memory_bfree(
 					collector->memory_context,
 					chunk,
-					VALUE_COLLECTOR_CHUNK_SIZE * sizeof(uint32_t)
+					VALUE_COLLECTOR_CHUNK_SIZE *
+						sizeof(uint32_t)
 				);
 		}
 		memory_bfree(

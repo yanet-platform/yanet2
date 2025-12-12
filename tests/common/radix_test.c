@@ -80,8 +80,8 @@ main() {
 	radix_free(&radix);
 
 	puts("OK!");
-	
+
 	free(arena);
-	
+
 	return 0;
 }
