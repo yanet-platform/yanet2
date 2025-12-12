@@ -101,7 +101,7 @@ jobs:
 
       - name: Build and run tests (debug)
         run: |
-          make go-clean-cache
+          make go-cache-clean
           make test-debug
       - name: Show meson test log
         run:
@@ -123,7 +123,7 @@ jobs:
 
       - name: Build and run tests (release)
         run: |
-          make go-clean-cache
+          make go-cache-clean
           make test
       - name: Show meson test log
         run:
