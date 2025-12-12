@@ -41,8 +41,8 @@ func NewACLService(agent *ffi.Agent, log *zap.SugaredLogger) *ACLService {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func convertRules(reqRules []*aclpb.Rule) ([]aclRule, error) {
-	rules := make([]aclRule, 0, len(reqRules))
+func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
+	rules := make([]AclRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
 		devices, err := filter.MakeDevices(reqRule.Devices)
 		if err != nil {
@@ -81,23 +81,23 @@ func convertRules(reqRules []*aclpb.Rule) ([]aclRule, error) {
 			return nil, err
 		}
 
-		rule := aclRule{
-			counter:       reqRule.Action.Counter,
-			devices:       devices,
-			vlanRanges:    vlanRanges,
-			src4s:         src4s,
-			dst4s:         dst4s,
-			src6s:         src6s,
-			dst6s:         dst6s,
-			protoRanges:   protoRanges,
-			srcPortRanges: srcPortRanges,
-			dstPortRanges: dstPortRanges,
+		rule := AclRule{
+			Counter:       reqRule.Action.Counter,
+			Devices:       devices,
+			VlanRanges:    vlanRanges,
+			Src4s:         src4s,
+			Dst4s:         dst4s,
+			Src6s:         src6s,
+			Dst6s:         dst6s,
+			ProtoRanges:   protoRanges,
+			SrcPortRanges: srcPortRanges,
+			DstPortRanges: dstPortRanges,
 		}
 
 		if reqRule.Action.Kind == aclpb.ActionKind_ACTION_KIND_PASS {
-			rule.action = 0
+			rule.Action = 0
 		} else {
-			rule.action = 1
+			rule.Action = 1
 		}
 
 		rules = append(rules, rule)

@@ -48,7 +48,7 @@ var (
 		"ip addr add " + VMIPv4Host + "/24 dev kni0",
 
 		// Configure L2 and L3 forwarding
-		CLIForward + " update --cfg=forward0 --rules /mnt/config/forward.yaml",
+		CLIForward + " update --cfg=forward0 --rules /mnt/yanet2/forward.yaml",
 
 		// Configure routing
 		CLIRoute + " insert --cfg route0 --via " + VMIPv6Gateway + " ::/0",

@@ -63,42 +63,42 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
-type aclRule struct {
-	action        uint64
-	counter       string
-	devices       []filter.Device
-	vlanRanges    []filter.VlanRange
-	src4s         []filter.IPNet4
-	dst4s         []filter.IPNet4
-	src6s         []filter.IPNet6
-	dst6s         []filter.IPNet6
-	protoRanges   []filter.ProtoRange
-	srcPortRanges []filter.PortRange
-	dstPortRanges []filter.PortRange
+type AclRule struct {
+	Action        uint64
+	Counter       string
+	Devices       []filter.Device
+	VlanRanges    []filter.VlanRange
+	Src4s         []filter.IPNet4
+	Dst4s         []filter.IPNet4
+	Src6s         []filter.IPNet6
+	Dst6s         []filter.IPNet6
+	ProtoRanges   []filter.ProtoRange
+	SrcPortRanges []filter.PortRange
+	DstPortRanges []filter.PortRange
 }
 
-func (m *aclRule) CBuild(pinner *runtime.Pinner) C.struct_acl_rule {
+func (m *AclRule) CBuild(pinner *runtime.Pinner) C.struct_acl_rule {
 	cRule := C.struct_acl_rule{}
 
-	cRule.action = C.uint64_t(m.action)
-	cCounter := C.CString(m.counter)
+	cRule.action = C.uint64_t(m.Action)
+	cCounter := C.CString(m.Counter)
 	C.strncpy(&cRule.counter[0], cCounter, C.COUNTER_NAME_LEN)
 	C.free(unsafe.Pointer(cCounter))
 
-	cRule.devices = *(*C.struct_filter_devices)(unsafe.Pointer(filter.Devices(m.devices).CBuild(pinner)))
-	cRule.vlan_ranges = *(*C.struct_filter_vlan_ranges)(unsafe.Pointer(filter.VlanRanges(m.vlanRanges).CBuild(pinner)))
-	cRule.src_net4s = *(*C.struct_filter_net4s)(unsafe.Pointer(filter.IPNet4s(m.src4s).CBuild(pinner)))
-	cRule.dst_net4s = *(*C.struct_filter_net4s)(unsafe.Pointer(filter.IPNet4s(m.dst4s).CBuild(pinner)))
-	cRule.src_net6s = *(*C.struct_filter_net6s)(unsafe.Pointer(filter.IPNet6s(m.src6s).CBuild(pinner)))
-	cRule.dst_net6s = *(*C.struct_filter_net6s)(unsafe.Pointer(filter.IPNet6s(m.dst6s).CBuild(pinner)))
-	cRule.proto_ranges = *(*C.struct_filter_proto_ranges)(unsafe.Pointer(filter.ProtoRanges(m.protoRanges).CBuild(pinner)))
-	cRule.src_port_ranges = *(*C.struct_filter_port_ranges)(unsafe.Pointer(filter.PortRanges(m.srcPortRanges).CBuild(pinner)))
-	cRule.dst_port_ranges = *(*C.struct_filter_port_ranges)(unsafe.Pointer(filter.PortRanges(m.dstPortRanges).CBuild(pinner)))
+	cRule.devices = *(*C.struct_filter_devices)(unsafe.Pointer(filter.Devices(m.Devices).CBuild(pinner)))
+	cRule.vlan_ranges = *(*C.struct_filter_vlan_ranges)(unsafe.Pointer(filter.VlanRanges(m.VlanRanges).CBuild(pinner)))
+	cRule.src_net4s = *(*C.struct_filter_net4s)(unsafe.Pointer(filter.IPNet4s(m.Src4s).CBuild(pinner)))
+	cRule.dst_net4s = *(*C.struct_filter_net4s)(unsafe.Pointer(filter.IPNet4s(m.Dst4s).CBuild(pinner)))
+	cRule.src_net6s = *(*C.struct_filter_net6s)(unsafe.Pointer(filter.IPNet6s(m.Src6s).CBuild(pinner)))
+	cRule.dst_net6s = *(*C.struct_filter_net6s)(unsafe.Pointer(filter.IPNet6s(m.Dst6s).CBuild(pinner)))
+	cRule.proto_ranges = *(*C.struct_filter_proto_ranges)(unsafe.Pointer(filter.ProtoRanges(m.ProtoRanges).CBuild(pinner)))
+	cRule.src_port_ranges = *(*C.struct_filter_port_ranges)(unsafe.Pointer(filter.PortRanges(m.SrcPortRanges).CBuild(pinner)))
+	cRule.dst_port_ranges = *(*C.struct_filter_port_ranges)(unsafe.Pointer(filter.PortRanges(m.DstPortRanges).CBuild(pinner)))
 
 	return cRule
 }
 
-func (m *ModuleConfig) Update(rules []aclRule) error {
+func (m *ModuleConfig) Update(rules []AclRule) error {
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
 

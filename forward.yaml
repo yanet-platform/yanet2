@@ -1,0 +1,42 @@
+rules:
+  - target: "virtio_user_kni0"
+    counter: "to_virtio_user_kni0"
+    mode: "Out"
+    devices:
+      - "01:00.0"
+    vlan_ranges:
+      - from: 0
+        to: 4095
+    srcs:
+      - "0.0.0.0/0"
+      - "::/0"
+    dsts:
+      - "203.0.113.14/32"
+      - "fe80::5054:ff:fe6b:ffa5/64"
+      - "ff02::/16"
+
+  - target: "01:00.0"
+    counter: "to_pass"
+    mode: "None"
+    devices:
+      - "01:00.0"
+    vlan_ranges:
+      - from: 0
+        to: 4095
+    srcs:
+      - "0.0.0.0/0"
+      - "::/0"
+    dsts:
+      - "0.0.0.0/0"
+      - "::/0"
+
+  - target: "01:00.0"
+    counter: "to_01:00.0"
+    mode: "Out"
+    devices:
+      - "virtio_user_kni0"
+    vlan_ranges:
+      - from: 0
+        to: 4095
+    srcs: []
+    dsts: []

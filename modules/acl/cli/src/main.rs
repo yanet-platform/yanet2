@@ -122,13 +122,7 @@ impl TryFrom<&Range> for filterpb::ProtoRange {
     type Error = Box<dyn Error>;
 
     fn try_from(r: &Range) -> Result<Self, Self::Error> {
-        // Protocol is 8 bits, so valid range is 0-255
-        if r.from > 255 {
-            return Err(format!("protocol 'from' value {} exceeds maximum 255", r.from).into());
-        }
-        if r.to > 255 {
-            return Err(format!("protocol 'to' value {} exceeds maximum 255", r.to).into());
-        }
+        // Protocol is 16 bits, so valid range is 0-65535
         if r.from > r.to {
             return Err(format!("protocol 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
         }
@@ -346,3 +340,4 @@ pub async fn main() {
         std::process::exit(1);
     }
 }
+
