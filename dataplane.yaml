@@ -2,7 +2,7 @@ dataplane:
   storage: /dev/shm/yanet
   dpdk_memory: 1024
   instances:
-    - dp_memory: 2147483648
+    - dp_memory: 4294967296
       cp_memory: 2147483648
       numa_id: 0
   devices:
