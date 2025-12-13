@@ -74,7 +74,7 @@ jobs:
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
+          packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
           version: 1.1
 
       - uses: actions/checkout@v4
@@ -192,14 +192,10 @@ jobs:
           df -h
           echo "=== Build directory size ==="
           du -sh build/ || true
-          du -sh target/ || true
           
           echo "=== Cleaning debug build artifacts ==="
           # Completely remove build directory to free maximum space
           rm -rf build/
-          # Clean all Rust artifacts except release
-          cargo clean
-          rm -rf target/debug target/*/debug || true
           
           # Clean Docker build cache if exists
           docker system prune -af 2>/dev/null || true
@@ -220,26 +216,16 @@ jobs:
         run:
           grep -v 'Inherited environment' build/meson-logs/testlog.txt
 
-      - uses: cpp-linter/cpp-linter-action@main
-        id: linter
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          database: build
-          style: file
-          # Use .clang-tidy config file.
-          tidy-checks: ''
-          version: 19
-          thread-comments: false
-          step-summary: true
-          tidy-review: false
-          format-review: false
-          files-changed-only: true
-          ignore: '.github|build'
-      - name: Check code style violation
-        if: steps.linter.outputs.clang-tidy-checks-failed > 0
-        run: exit 1
+      - name: Run clang-tidy
+        run: |
+          cd build
+          jq -r '.[].file' compile_commands.json \
+            | sort -u \
+            | grep '\.c$' \
+            | grep -v '/subprojects/' \
+            | xargs -n1 -P"$(nproc)" clang-tidy-19 \
+                -p . \
+                -header-filter='^(?!.*\/subprojects\/).*'
 
       - name: Verify binaries before upload
         run: |
