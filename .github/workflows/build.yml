@@ -178,34 +178,13 @@ jobs:
           meson setup --reconfigure build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
           make dataplane cli
 
-      - name: Build and run tests (debug)
+      - name: Build and run tests in debug
         run: |
           make go-cache-clean
           make test-debug
       - name: Show meson test log
         run:
           grep -v 'Inherited environment' build/meson-logs/testlog.txt
-
-      - uses: cpp-linter/cpp-linter-action@main
-        id: linter
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          database: build
-          style: file
-          # Use .clang-tidy config file.
-          tidy-checks: ''
-          version: 19
-          thread-comments: false
-          step-summary: true
-          tidy-review: false
-          format-review: false
-          files-changed-only: true
-          ignore: '.github|build'
-      - name: Check code style violation
-        if: steps.linter.outputs.clang-tidy-checks-failed > 0
-        run: exit 1
 
       - name: Clean debug build artifacts to free space
         run: |
@@ -240,6 +219,27 @@ jobs:
       - name: Show meson test log
         run:
           grep -v 'Inherited environment' build/meson-logs/testlog.txt
+
+      - uses: cpp-linter/cpp-linter-action@main
+        id: linter
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          database: build
+          style: file
+          # Use .clang-tidy config file.
+          tidy-checks: ''
+          version: 19
+          thread-comments: false
+          step-summary: true
+          tidy-review: false
+          format-review: false
+          files-changed-only: true
+          ignore: '.github|build'
+      - name: Check code style violation
+        if: steps.linter.outputs.clang-tidy-checks-failed > 0
+        run: exit 1
 
       - name: Verify binaries before upload
         run: |
