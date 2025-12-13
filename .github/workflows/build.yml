@@ -223,7 +223,7 @@ jobs:
             | sort -u \
             | grep '\.c$' \
             | grep -v '/subprojects/' \
-            | xargs -n1 -P"$(nproc)" clang-tidy-19 \
+            | xargs -n1 -P"$(nproc)" /usr/bin/clang-tidy-19 \
                 -p . \
                 -header-filter='^(?!.*\/subprojects\/).*'
 
