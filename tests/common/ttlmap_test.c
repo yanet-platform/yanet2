@@ -1,6 +1,6 @@
+#include "../../lib/logging/log.h"
 #include "common/memory_block.h"
 #include "rte_common.h"
-#include "../../lib/logging/log.h"
 
 #include <common/ttlmap/detail/bucket.h>
 #include <common/ttlmap/detail/lock.h>
