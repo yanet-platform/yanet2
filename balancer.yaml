@@ -111,7 +111,7 @@ module_config:
   wlc:
     power: 10
     max_real_weight: 1000
-    update_period_ms: 5000
+    update_period_ms: 10000 # 10 sec
 
 # Module state configuration
 module_state_config:
@@ -120,7 +120,7 @@ module_state_config:
   session_table_capacity: 1000
 
   # Period to scan the session table (in milliseconds)
-  session_table_scan_period_ms: 1000
+  session_table_scan_period_ms: 25000 # 25 sec
 
   # Maximum load factor for the session table (0.0 to 1.0)
   session_table_max_load_factor: 0.75
