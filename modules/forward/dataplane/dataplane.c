@@ -122,6 +122,7 @@ forward_handle_packets(
 				);
 			if (device_ectx == NULL) {
 				packet_front_drop(packet_front, packet);
+				continue;
 			}
 
 			if (target->mode == FORWARD_MODE_IN) {
