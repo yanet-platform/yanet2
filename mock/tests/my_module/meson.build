@@ -51,7 +51,9 @@ lib_my_module_dp = static_library(
 lib_my_module_dp_dep = declare_dependency(
   link_with: lib_my_module_dp,
   link_args: [
-    '-Wl,--export-dynamic-symbol=new_module_balancer',
+    '-Wl,--defsym',
+    '-Wl,new_module_balancer=new_module_balancer',
+    '-Wl,--export-dynamic-symbol=new_module_balancer'
   ],
 )
 
