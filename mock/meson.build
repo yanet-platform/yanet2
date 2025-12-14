@@ -33,7 +33,7 @@ lib_yanet_mock = static_library(
   sources,
   c_args: yanet_c_args,
   link_args: yanet_link_args + ['-Wl,-E',],
-  dependencies: dependencies,
+  dependencies: lib_dependencies,
   include_directories: [yanet_rootdir],
   install: false,
 )
