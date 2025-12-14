@@ -1,33 +1,53 @@
 #include "session_table.h"
 #include "common/memory.h"
+#include "common/memory_address.h"
+#include "common/ttlmap/detail/bucket.h"
 #include "common/ttlmap/ttlmap.h"
 #include "modules/balancer/api/state.h"
 #include <assert.h>
 #include <stdalign.h>
 #include <string.h>
+#include <time.h>
 
 #include "common/exp_array.h"
+#include "session.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline int
-session_table_worker_use_prev_gen(
-	struct session_table_gen *cur, size_t worker
-) {
-	struct worker_info *info = &cur->worker_info[worker];
-	return worker_info_use_prev_gen(info);
+static int
+worker_in_use(uint32_t mark) {
+	return mark & 1;
 }
 
-static inline int
-session_table_workers_use_prev_gen(struct session_table *table) {
-	struct session_table_gen *sessions_cur =
-		session_table_current_gen(table);
-	for (size_t i = 0; i < table->workers; ++i) {
-		if (session_table_worker_use_prev_gen(sessions_cur, i)) {
-			return 1;
+static int
+worker_gen(uint32_t mark) {
+	return mark >> 1;
+}
+
+static void
+wait_for_workers(struct session_table *table) {
+	uint32_t current_gen = atomic_load(&table->current_gen);
+	while (1) {
+		bool need_wait = false;
+		for (size_t w = 0; w < table->workers; ++w) {
+			struct worker_info *info = &table->worker_info[w];
+			uint32_t mark = worker_mark(info);
+			uint32_t gen = worker_gen(mark);
+			int in_use = worker_in_use(mark);
+			assert(gen <= current_gen);
+			if (gen < current_gen && in_use) {
+				need_wait = true;
+				break;
+			}
+		}
+		if (!need_wait) {
+			break;
+		} else {
+			// sleep for 1 ms
+			struct timespec ms = {0, 1000000}; // 1 ms
+			nanosleep(&ms, NULL);
 		}
 	}
-	return 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -50,7 +70,7 @@ session_table_init(
 	SET_OFFSET_OF(&table->mctx, mctx);
 
 	int res = TTLMAP_INIT(
-		&table->generations[0].map,
+		&table->maps[0],
 		mctx,
 		struct balancer_session_id,
 		struct balancer_session_state,
@@ -60,11 +80,10 @@ session_table_init(
 		return -1;
 	}
 
-	ttlmap_init_empty(&table->generations[1].map);
+	ttlmap_init_empty(&table->maps[1]);
 
 	for (size_t i = 0; i < table->workers; ++i) {
-		struct worker_info *info =
-			&table->generations[0].worker_info[i];
+		struct worker_info *info = &table->worker_info[i];
 		memset(info, 0, sizeof(*info));
 	}
 
@@ -73,61 +92,23 @@ session_table_init(
 
 void
 session_table_free(struct session_table *table) {
-	struct session_table_gen *cur = session_table_current_gen(table);
-	if (ttlmap_capacity(&cur->map) > 0) {
-		TTLMAP_FREE(&cur->map);
+	for (size_t i = 0; i < 2; ++i) {
+		TTLMAP_FREE(&table->maps[i]);
 	}
-
-	struct session_table_gen *prev = session_table_previous_gen(table);
-	if (ttlmap_capacity(&cur->map) > 0) {
-		TTLMAP_FREE(&prev->map);
-	}
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-// returns 0 if we previous gen still in use.
-// 1 if it we freed some memory.
-// 2 if it it already was free.
-static int
-try_free_prev_gen(struct session_table *table) {
-	if (session_table_workers_use_prev_gen(table)) {
-		// some workers use prev gen, can not free
-		return 0;
-	}
-	struct session_table_gen *sessions_prev =
-		session_table_previous_gen(table);
-	if (ttlmap_capacity(&sessions_prev->map) > 0) {
-		TTLMAP_FREE(&sessions_prev->map);
-		return 1;
-	} else {
-		// already was free, we did nothing
-		return 2;
-	}
-}
-
-int
-session_table_free_unused(struct session_table *table) {
-	int result = try_free_prev_gen(table);
-	if (result == 2) {
-		// already was free,
-		// we did nothing, so return zero
-		result = 0;
-	}
-	return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 size_t
 session_table_capacity(struct session_table *table) {
-	struct session_table_gen *cur = session_table_current_gen(table);
-	return ttlmap_capacity(&cur->map);
+	struct ttlmap *ttlmap =
+		session_table_map(table, session_table_current_gen(table));
+	return ttlmap_capacity(ttlmap);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct iter_context {
+struct fill_sessions_context {
 	struct memory_context *mctx;
 	struct balancer_sessions_info *info;
 	bool only_count;
@@ -136,10 +117,10 @@ struct iter_context {
 };
 
 static int
-iter_callback(
+fill_sessions_callback(
 	struct balancer_session_id *id,
 	struct balancer_session_state *state,
-	struct iter_context *ctx
+	struct fill_sessions_context *ctx
 ) {
 	// skip outdated sessions
 	if (state->last_packet_timestamp + state->timeout <= ctx->now) {
@@ -172,32 +153,6 @@ iter_callback(
 	return 0;
 }
 
-static int
-sessions_table_gen_sessions_info(
-	struct session_table_gen *gen,
-	struct balancer_sessions_info *info,
-	struct memory_context *mctx,
-	uint32_t now,
-	bool only_count
-) {
-	struct iter_context ctx = {
-		.info = info,
-		.only_count = only_count,
-		.failed = false,
-		.mctx = mctx,
-		.now = now,
-	};
-	TTLMAP_ITER(
-		&gen->map,
-		struct balancer_session_id,
-		struct balancer_session_state,
-		now,
-		iter_callback,
-		&ctx
-	);
-	return ctx.failed ? -1 : 0;
-}
-
 int
 session_table_fill_sessions_info(
 	struct session_table *table,
@@ -207,21 +162,26 @@ session_table_fill_sessions_info(
 	bool only_count
 ) {
 	memset(info, 0, sizeof(*info));
+	struct fill_sessions_context ctx = {
+		.info = info,
+		.only_count = only_count,
+		.failed = false,
+		.mctx = mctx,
+		.now = now,
+	};
 
-	// iterate over current gen
-	struct session_table_gen *cur = session_table_current_gen(table);
-	int res = sessions_table_gen_sessions_info(
-		cur, info, mctx, now, only_count
+	struct ttlmap *map =
+		session_table_map(table, session_table_current_gen(table));
+	TTLMAP_ITER(
+		map,
+		struct balancer_session_id,
+		struct balancer_session_state,
+		now,
+		fill_sessions_callback,
+		&ctx
 	);
-	if (res != 0) {
-		return -1;
-	}
 
-	// iterate over previous gen
-	struct session_table_gen *prev = session_table_previous_gen(table);
-	return sessions_table_gen_sessions_info(
-		prev, info, mctx, now, only_count
-	);
+	return ctx.failed ? -1 : 0;
 }
 
 void
@@ -240,48 +200,85 @@ session_table_free_sessions_info(
 
 ////////////////////////////////////////////////////////////////////////////////
 
+struct move_sessions_context {
+	struct ttlmap *next_map;
+};
+
+static int
+move_sessions_callback(
+	struct balancer_session_id *id,
+	struct balancer_session_state *state,
+	struct move_sessions_context *ctx
+) {
+	session_lock_t *lock;
+	uint32_t now = state->last_packet_timestamp;
+	uint32_t timeout = state->timeout;
+	struct balancer_session_state *found;
+	int res = TTLMAP_GET(ctx->next_map, id, &found, &lock, now, timeout);
+	if (TTLMAP_STATUS(res) != TTLMAP_FAILED) {
+		memcpy(found, state, sizeof(*state));
+		ttlmap_release_lock(lock);
+	}
+	return 0;
+}
+
 int
 session_table_resize(struct session_table *table, size_t new_size) {
-	int can_free = try_free_prev_gen(table);
-	if (can_free == 0) {
-		// Failed to resize, because prev gen is still
-		// used by some workers.
-		return 0;
-	}
+	uint32_t current_gen = session_table_current_gen(table);
 
-	struct session_table_gen *sessions_cur =
-		session_table_current_gen(table);
-	struct session_table_gen *sessions_next =
-		session_table_previous_gen(table);
-	int ret = TTLMAP_INIT(
-		&sessions_next->map,
-		ADDR_OF(&table->mctx),
+	struct ttlmap *next_map = session_table_prev_map(table, current_gen);
+	struct memory_context *mctx = ADDR_OF(&table->mctx);
+
+	int init_result = TTLMAP_INIT(
+		next_map,
+		mctx,
 		struct balancer_session_id,
 		struct balancer_session_state,
 		new_size
 	);
-	if (ret != 0) {
-		// failed to extend session table
-		// memory not enough (probably)
+	if (init_result != 0) {
+		// no memory
 		return -1;
 	}
-	for (size_t i = 0; i < table->workers; ++i) {
-		struct worker_info *next_worker_info =
-			&sessions_next->worker_info[i];
-		struct worker_info *cur_worker_info =
-			&sessions_cur->worker_info[i];
-		memset(next_worker_info, 0, sizeof(*next_worker_info));
 
-		next_worker_info->max_deadline_prev_gen =
-			cur_worker_info->max_deadline_current_gen;
+	// Update current gen, so all workers use primary `next_map`
+	// and fallbacks to the `current_map`
+	struct ttlmap *current_map = session_table_map(table, current_gen);
+	++current_gen;
+	atomic_store(&table->current_gen, current_gen);
 
-		next_worker_info->max_deadline_current_gen = 0;
+	// Wait while all workers consume update
+	wait_for_workers(table);
 
-		next_worker_info->last_timestamp =
-			cur_worker_info->last_timestamp;
-	}
+	// Now, workers can not update `current_map`.
+	// They insert only into the `next_map`.
 
-	atomic_fetch_add_explicit(&table->current_gen, 1, __ATOMIC_SEQ_CST);
+	// After that, we should move all sessions from the current_map to the
+	// next_map
 
-	return 1;
+	struct move_sessions_context ctx = {
+		.next_map = next_map,
+	};
+	TTLMAP_ITER(
+		current_map,
+		struct balancer_session_id,
+		struct balancer_session_state,
+		((uint32_t)-1),
+		move_sessions_callback,
+		&ctx
+	);
+
+	// Sessions are moved, so workers dont need to use previous map
+	++current_gen;
+	atomic_store(&table->current_gen, current_gen);
+
+	// Wait until all workers consume update
+	wait_for_workers(table);
+
+	// After that, workers will not use previous map
+
+	// So we can free current_map
+	TTLMAP_FREE(current_map);
+
+	return 0;
 }

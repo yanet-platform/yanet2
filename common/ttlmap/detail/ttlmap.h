@@ -92,16 +92,21 @@ typedef struct ttlmap {
 
 #define __TTLMAP_FREE_INTERNAL(map_ptr)                                        \
 	__extension__({                                                        \
-		for (size_t __i = 0; __i < __TTLMAP_MAX_CHUNKS; ++__i) {       \
-			if ((map_ptr)->chunks[__i] != NULL) {                  \
-				memory_bfree(                                  \
-					&(map_ptr)->mctx,                      \
-					ADDR_OF(&(map_ptr)->chunks[__i]),      \
-					(map_ptr)->chunk_sizes[__i]            \
-				);                                             \
+		if ((map_ptr)->buckets_exp != (size_t)-1) {                    \
+			for (size_t __i = 0; __i < __TTLMAP_MAX_CHUNKS;        \
+			     ++__i) {                                          \
+				if ((map_ptr)->chunks[__i] != NULL) {          \
+					memory_bfree(                          \
+						&(map_ptr)->mctx,              \
+						ADDR_OF(&(map_ptr)             \
+								 ->chunks[__i] \
+						),                             \
+						(map_ptr)->chunk_sizes[__i]    \
+					);                                     \
+				}                                              \
 			}                                                      \
+			(map_ptr)->buckets_exp = (size_t)-1;                   \
 		}                                                              \
-		(map_ptr)->buckets_exp = (size_t)-1;                           \
 	})
 
 static inline int

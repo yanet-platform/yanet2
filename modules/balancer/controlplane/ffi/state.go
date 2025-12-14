@@ -91,31 +91,17 @@ func NewModuleConfigState(
 	return ModuleConfigStatePtr{inner: state}, nil
 }
 
-// Extend session table on demand (use `force` to force extension).
-func (state *ModuleConfigStatePtr) ResizeSessionTable(newSize uint) (bool, error) {
-	ec, err := C.balancer_state_resize_session_table(
+// Extend session table
+func (state *ModuleConfigStatePtr) ResizeSessionTable(newSize uint) error {
+	ec := C.balancer_state_resize_session_table(
 		state.inner,
 		C.size_t(newSize),
 	)
-	if err != nil {
-		return false, fmt.Errorf("failed to resize session table: %w", err)
-	}
 	if ec == -1 {
-		return false, fmt.Errorf("failed to resize session table: memory not enough")
+		// todo: add diag
+		return fmt.Errorf("memory not enough")
 	}
-	return ec == 1, nil
-}
-
-// Free memory unused by balancer session state.
-func (state *ModuleConfigStatePtr) FreeUnusedInSessionTable() (bool, error) {
-	ec, err := C.balancer_state_gc_session_table(state.inner)
-	if err != nil {
-		return false, fmt.Errorf("failed to free unused in session table: %w", err)
-	}
-	if ec == -1 {
-		return false, fmt.Errorf("failed to free unused in session table")
-	}
-	return ec == 1, nil
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////

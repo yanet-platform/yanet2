@@ -301,7 +301,7 @@ func executeTestCase(t *testing.T, config *config, test *testCase) {
 	})
 }
 
-////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
 
 // TestSessionTable sends many random TCP SYN packets to a single
 // real of a single VS, calling SyncActiveSessionsAndWlcAndResizeTableOnDemand
@@ -425,23 +425,6 @@ func TestSessionTable(t *testing.T) {
 
 		// Make all sessions expire
 		mock.AdvanceTime(time.Duration(sessionsTimeout) * time.Second)
-
-		// Send invalid packet to update worker time,
-		// it will be dropped
-		{
-			packetLayers := MakeTCPPacket(
-				IpAddr("12.12.1.1"),
-				123,
-				vsIp,
-				vsPort,
-				&layers.TCP{},
-			)
-			packet := xpacket.LayersToPacket(t, packetLayers...)
-			result, err := mock.HandlePackets(packet)
-			require.NoError(t, err, "failed to handle packet")
-			require.Empty(t, result.Output)
-			require.Equal(t, 1, len(result.Drop))
-		}
 
 		// Sync active sessions
 		err = balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(

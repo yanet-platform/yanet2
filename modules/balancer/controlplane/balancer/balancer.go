@@ -304,7 +304,7 @@ func (b *Balancer) GetStateInfo() *module.BalancerInfo {
 }
 
 // GetSessionsInfo returns information about active sessions
-func (b *Balancer) GetSessionsInfo(time time.Time) (module.SessionsInfo, error) {
+func (b *Balancer) GetSessionsInfo(time time.Time) (*module.SessionsInfo, error) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
@@ -354,7 +354,7 @@ func (b *Balancer) Free() {
 // We can add proto method to use this function in future.
 func (balancer *Balancer) SyncActiveSessionsAndWlcAndResizeTableOnDemand(now time.Time) error {
 	if err := balancer.moduleConfigState.SyncActiveSessionsAndResizeTableOnDemand(now); err != nil {
-		return fmt.Errorf("failed to scan session table to sync active sessions: %w", err)
+		return fmt.Errorf("failed to scan sessions table to sync active sessions: %w", err)
 	}
 	if _, err := balancer.moduleConfig.UpdateEffectiveWeights(); err != nil {
 		return fmt.Errorf("failed to update WLC: %w", err)

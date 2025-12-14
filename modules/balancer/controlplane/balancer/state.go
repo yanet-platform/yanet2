@@ -124,7 +124,7 @@ func (s *ModuleConfigState) Update(
 	)
 
 	if requestedCapacity != 0 {
-		resized, err := s.cHandle.ResizeSessionTable(requestedCapacity)
+		err := s.cHandle.ResizeSessionTable(requestedCapacity)
 		if err != nil {
 			s.log.Errorf(
 				"failed to resize session table",
@@ -132,14 +132,6 @@ func (s *ModuleConfigState) Update(
 				zap.Error(err),
 			)
 			return fmt.Errorf("failed to resize session table: %w", err)
-		}
-
-		if !resized {
-			s.log.Errorf(
-				"failed to resize session table",
-				zap.Uint("requested_capacity", requestedCapacity),
-			)
-			return fmt.Errorf("failed to resize session table")
 		}
 
 		s.log.Infow(
@@ -169,56 +161,17 @@ func (s *ModuleConfigState) CHandle() balancer_ffi.ModuleConfigStatePtr {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (s *ModuleConfigState) SessionsInfo(time time.Time) (module.SessionsInfo, error) {
-	sessions := s.cHandle.SessionsInfo(uint32(time.Unix()), false)
+func (s *ModuleConfigState) SessionsInfo(now time.Time) (*module.SessionsInfo, error) {
+	sessions := s.cHandle.SessionsInfo(uint32(now.Unix()), false)
 	if sessions == nil {
 		s.log.Warn("failed to get sessions info from C handle")
-		return module.SessionsInfo{}, fmt.Errorf("failed to scan session table")
+		return nil, fmt.Errorf("failed to scan session table")
 	}
 
 	s.log.Debugw("retrieved sessions from C handle",
-		zap.Uint("count_with_duplications", sessions.SessionsCount))
+		zap.Uint("sessions_count", sessions.SessionsCount))
 
-	// Remove duplicates - keep session with most recent LastPacketTimestamp
-	type sessionKey struct {
-		clientAddr netip.Addr
-		clientPort uint16
-		real       module.RealIdentifier
-	}
-
-	sessionMap := make(map[sessionKey]module.SessionInfo)
-
-	for _, sessionInfo := range sessions.Sessions {
-		key := sessionKey{
-			clientAddr: sessionInfo.ClientAddr,
-			clientPort: sessionInfo.ClientPort,
-			real:       sessionInfo.Real,
-		}
-
-		// Keep only the session with most recent LastPacketTimestamp
-		if existing, found := sessionMap[key]; !found ||
-			sessionInfo.LastPacketTimestamp.After(
-				existing.LastPacketTimestamp,
-			) {
-			sessionMap[key] = sessionInfo
-		}
-	}
-
-	// Convert map to slice
-	dedupedSessions := make([]module.SessionInfo, 0, len(sessionMap))
-	for _, session := range sessionMap {
-		dedupedSessions = append(dedupedSessions, session)
-	}
-
-	duplicatesRemoved := sessions.SessionsCount - uint(len(dedupedSessions))
-	s.log.Debugw("removed duplicate sessions",
-		zap.Uint("duplicates", duplicatesRemoved),
-		zap.Uint("unique_sessions", uint(len(dedupedSessions))))
-
-	return module.SessionsInfo{
-		SessionsCount: uint(len(dedupedSessions)),
-		Sessions:      dedupedSessions,
-	}, nil
+	return sessions, nil
 }
 
 func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(now time.Time) error {
@@ -229,7 +182,7 @@ func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(now time.Ti
 			"failed to get sessions info during table scan",
 			zap.Error(err),
 		)
-		return fmt.Errorf("failed to scan session table: %w", err)
+		return fmt.Errorf("failed to scan sessions table: %w", err)
 	}
 
 	// remove old active sessions info for real
@@ -267,9 +220,9 @@ func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(now time.Ti
 			zap.Uint("old_capacity", sessionTableCapacity),
 			zap.Uint("requested_capacity", requestedCapacity))
 
-		resized, err := s.cHandle.ResizeSessionTable(requestedCapacity)
+		err := s.cHandle.ResizeSessionTable(requestedCapacity)
 		if err != nil {
-			s.log.Error("failed to resize session table",
+			s.log.Warnw("failed to resize session table",
 				zap.Uint("requested_capacity", requestedCapacity),
 				zap.Error(err))
 			return fmt.Errorf(
@@ -278,34 +231,11 @@ func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(now time.Ti
 				err,
 			)
 		}
-		if !resized {
-			s.log.Warnw("failed to resize session table",
-				zap.Uint("requested_capacity", requestedCapacity))
-		} else {
-			newCapacity := s.SessionTableCapacity()
-			s.log.Infow(
-				"session table resized successfully",
-				zap.Uint("requested_capacity", requestedCapacity),
-				zap.Uint("new_capacity", newCapacity),
-			)
-		}
-	}
-
-	// try free unused memory in session table
-	freed, err := s.cHandle.FreeUnusedInSessionTable()
-	if err != nil {
-		s.log.Error(
-			"failed to free unused memory in session table",
-			zap.Error(err),
-		)
-		return fmt.Errorf(
-			"failed to free unused memory in session table: %w",
-			err,
-		)
-	}
-	if freed {
+		newCapacity := s.SessionTableCapacity()
 		s.log.Infow(
-			"freed unused memory in session table successfully",
+			"session table resized successfully",
+			zap.Uint("requested_capacity", requestedCapacity),
+			zap.Uint("new_capacity", newCapacity),
 		)
 	}
 
