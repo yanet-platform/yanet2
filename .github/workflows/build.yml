@@ -74,8 +74,15 @@ jobs:
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
+          packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq clang-tidy-19
           version: 1.1
+
+      - name: Install LLVM 19 toolchain
+        id: llvm
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "19.1.1"
+          directory: ${{ runner.temp }}/llvm
 
       - uses: actions/checkout@v4
         with:
@@ -175,6 +182,7 @@ jobs:
 
       - name: Build YANET in debug (dataplane -> modules -> controlplane)
         run: |
+          make go-cache-clean
           meson setup --reconfigure build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
           make dataplane cli
 
@@ -205,27 +213,72 @@ jobs:
 
       - name: Build YANET in release (dataplane -> modules -> controlplane)
         run: |
-          meson setup --reconfigure build -Dbuildtype=release
+          # Fresh setup is required because the build/ dir was removed above
+          make go-cache-clean
+          meson setup build -Dbuildtype=release
           make dataplane cli
 
       - name: Build and run tests in release
         run: |
-          make go-cache-clean
           make test
       - name: Show meson test log
         run:
           grep -v 'Inherited environment' build/meson-logs/testlog.txt
 
-      - name: Run clang-tidy
+      - name: Run clang-tidy (LLVM 19, robust, DB-aware)
+        env:
+          LLVM_DIR: ${{ steps.llvm.outputs.directory }}
         run: |
-          cd build
-          jq -r '.[].file' compile_commands.json \
-            | sort -u \
-            | grep '\.c$' \
-            | grep -v '/subprojects/' \
-            | xargs -n1 -P"$(nproc)" /usr/bin/clang-tidy-19 \
-                -p . \
-                -header-filter='^(?!.*\/subprojects\/).*'
+          set -euo pipefail
+          # Ensure compilation database exists
+          test -f build/compile_commands.json || { echo "ERROR: build/compile_commands.json not found"; ls -la build || true; exit 1; }
+
+          # Prefer LLVM 19 installed by install-llvm-action
+          if [ -n "${LLVM_DIR:-}" ] && [ -x "$LLVM_DIR/bin/clang-tidy" ]; then
+            CTIDY="$LLVM_DIR/bin/clang-tidy"
+            # run-clang-tidy.py location in LLVM install
+            if [ -f "$LLVM_DIR/share/clang/run-clang-tidy.py" ]; then
+              RTIDY="$LLVM_DIR/share/clang/run-clang-tidy.py"
+            elif [ -f "$LLVM_DIR/lib/clang/run-clang-tidy.py" ]; then
+              RTIDY="$LLVM_DIR/lib/clang/run-clang-tidy.py"
+            else
+              RTIDY=""
+            fi
+          else
+            CTIDY="$(command -v clang-tidy-19 || true)"
+            [ -z "$CTIDY" ] && CTIDY="$(command -v clang-tidy || true)"
+            RTIDY="$(command -v run-clang-tidy.py || true)"
+          fi
+
+          if [ -z "${CTIDY:-}" ]; then
+            echo "ERROR: clang-tidy not found (checked LLVM_DIR, clang-tidy-19, clang-tidy)"; exit 1
+          fi
+          echo "Using clang-tidy binary: $CTIDY"
+          [ -n "${RTIDY:-}" ] && echo "Using run-clang-tidy helper: $RTIDY"
+
+          # Build file list from database (C files, exclude subprojects)
+          FILES="$(jq -r '.[].file' build/compile_commands.json | sort -u | grep '\.c$' | grep -v '/subprojects/' || true)"
+          if [ -z "$FILES" ]; then
+            echo "No source files to lint (after filtering)."; exit 0;
+          fi
+
+          if [ -n "${RTIDY:-}" ] && [ -f "$RTIDY" ]; then
+            # Use run-clang-tidy.py (handles DB well and parallelism)
+            python3 "$RTIDY" \
+              -p build \
+              -j "$(nproc)" \
+              -clang-tidy-binary "$CTIDY" \
+              -header-filter='^(?!.*\/subprojects\/).*' \
+              $FILES
+          else
+            # Fallback: invoke clang-tidy directly from DB directory
+            cd build
+            printf "%s\n" $FILES \
+              | xargs -n1 -P"$(nproc)" -I{} "$CTIDY" \
+                  -p . \
+                  -header-filter='^(?!.*\/subprojects\/).*' \
+                  {}
+          fi
 
       - name: Verify binaries before upload
         run: |
