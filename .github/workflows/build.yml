@@ -90,24 +90,34 @@ jobs:
 
       - name: Diagnostic - Check for cached build artifacts
         run: |
+          set -euo pipefail
           echo "=== DIAGNOSTIC: Checking for pre-existing cached artifacts ==="
           echo "Current git commit: $(git rev-parse HEAD)"
           echo "Current git commit short: $(git rev-parse --short HEAD)"
           echo ""
           
+          FAIL=0
+          REASONS=()
+
           echo "Checking build/ directory:"
           if [ -d "build" ]; then
-            echo "WARNING: build/ directory exists (from cache?)"
+            echo "build/ directory exists"
             ls -lah build/ || true
+
             if [ -f "build/dataplane/yanet-dataplane" ]; then
-              echo "WARNING: Cached yanet-dataplane found!"
-              stat build/dataplane/yanet-dataplane
-              md5sum build/dataplane/yanet-dataplane
+              echo "ERROR: Cached yanet-dataplane found in build/dataplane/"
+              stat build/dataplane/yanet-dataplane || true
+              md5sum build/dataplane/yanet-dataplane || true
+              FAIL=1
+              REASONS+=("cached build/dataplane/yanet-dataplane")
             fi
+
             if [ -f "build/controlplane/yanet-controlplane" ]; then
-              echo "WARNING: Cached yanet-controlplane found!"
-              stat build/controlplane/yanet-controlplane
-              md5sum build/controlplane/yanet-controlplane
+              echo "ERROR: Cached yanet-controlplane found in build/controlplane/"
+              stat build/controlplane/yanet-controlplane || true
+              md5sum build/controlplane/yanet-controlplane || true
+              FAIL=1
+              REASONS+=("cached build/controlplane/yanet-controlplane")
             fi
           else
             echo "build/ directory does not exist (clean state)"
@@ -116,19 +126,31 @@ jobs:
           echo ""
           echo "Checking target/ directory:"
           if [ -d "target" ]; then
-            echo "WARNING: target/ directory exists (from Rust cache?)"
+            echo "ERROR: target/ directory exists (cached Rust artifacts?)"
             ls -lah target/ || true
+            FAIL=1
+            REASONS+=("cached target/ directory")
+
             if [ -d "target/release" ]; then
               echo "target/release/ contents:"
               ls -lah target/release/ || true
               if ls target/release/yanet-cli* 1> /dev/null 2>&1; then
-                echo "WARNING: Cached yanet-cli binaries found!"
+                echo "Note: cached yanet-cli binaries present:"
                 stat target/release/yanet-cli* || true
                 md5sum target/release/yanet-cli* || true
               fi
             fi
           else
             echo "target/ directory does not exist (clean state)"
+          fi
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo ""
+            echo "Detected cached artifacts that must not be present:"
+            for r in "${REASONS[@]}"; do
+              echo " - $r"
+            done
+            exit 1
           fi
 
       - uses: hendrikmuhs/ccache-action@v1.2.18
@@ -172,21 +194,13 @@ jobs:
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
-      - name: Check disk space before debug build
-        run: |
-          echo "=== Disk space before debug build ==="
-          df -h
-          echo "=== Largest directories ==="
-          du -sh /* 2>/dev/null | sort -hr | head -20 || true
-          du -sh /home/runner/* 2>/dev/null | sort -hr | head -20 || true
-
-      - name: Build YANET in debug (dataplane -> modules -> controlplane)
+      - name: Build YANET (sanitize)
         run: |
           make go-cache-clean
-          meson setup --reconfigure build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
+          meson setup build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
           make dataplane cli
 
-      - name: Build and run tests in debug
+      - name: Build and run tests (sanitize)
         run: |
           make go-cache-clean
           make test-debug
@@ -211,58 +225,55 @@ jobs:
           echo "=== Disk space after cleanup ==="
           df -h
 
-      - name: Build YANET in release (dataplane -> modules -> controlplane)
+      - name: Build YANET (release)
         run: |
-          # Fresh setup is required because the build/ dir was removed above
           make go-cache-clean
           meson setup build -Dbuildtype=release
           make dataplane cli
 
-      - name: Build and run tests in release
+      - name: Build and run tests (release)
         run: |
           make test
       - name: Show meson test log
         run:
           grep -v 'Inherited environment' build/meson-logs/testlog.txt
 
-      - name: Run clang-tidy (LLVM 19, robust, DB-aware)
+      - name: Run clang-tidy
         env:
-          LLVM_DIR: ${{ steps.llvm.outputs.directory }}
+          # Use the same directory we asked the install-llvm-action to install to
+          LLVM_DIR: ${{ runner.temp }}/llvm
         run: |
           set -euo pipefail
           # Ensure compilation database exists
           test -f build/compile_commands.json || { echo "ERROR: build/compile_commands.json not found"; ls -la build || true; exit 1; }
-
-          # Prefer LLVM 19 installed by install-llvm-action
-          if [ -n "${LLVM_DIR:-}" ] && [ -x "$LLVM_DIR/bin/clang-tidy" ]; then
-            CTIDY="$LLVM_DIR/bin/clang-tidy"
-            # run-clang-tidy.py location in LLVM install
-            if [ -f "$LLVM_DIR/share/clang/run-clang-tidy.py" ]; then
-              RTIDY="$LLVM_DIR/share/clang/run-clang-tidy.py"
-            elif [ -f "$LLVM_DIR/lib/clang/run-clang-tidy.py" ]; then
-              RTIDY="$LLVM_DIR/lib/clang/run-clang-tidy.py"
-            else
-              RTIDY=""
-            fi
+  
+          # Force using the freshly installed LLVM 19 to avoid ABI/lib conflicts with system packages
+          if [ ! -x "$LLVM_DIR/bin/clang-tidy" ]; then
+            echo "ERROR: LLVM 19 clang-tidy not found at $LLVM_DIR/bin/clang-tidy"; ls -la "$LLVM_DIR/bin" || true; exit 1
+          fi
+          export PATH="$LLVM_DIR/bin:$PATH"
+          export LD_LIBRARY_PATH="$LLVM_DIR/lib:${LD_LIBRARY_PATH:-}"
+  
+          CTIDY="$LLVM_DIR/bin/clang-tidy"
+          # Locate run-clang-tidy.py shipped with LLVM
+          if   [ -f "$LLVM_DIR/share/clang/run-clang-tidy.py" ]; then
+            RTIDY="$LLVM_DIR/share/clang/run-clang-tidy.py"
+          elif [ -f "$LLVM_DIR/lib/clang/run-clang-tidy.py" ]; then
+            RTIDY="$LLVM_DIR/lib/clang/run-clang-tidy.py"
           else
-            CTIDY="$(command -v clang-tidy-19 || true)"
-            [ -z "$CTIDY" ] && CTIDY="$(command -v clang-tidy || true)"
-            RTIDY="$(command -v run-clang-tidy.py || true)"
+            RTIDY=""
           fi
-
-          if [ -z "${CTIDY:-}" ]; then
-            echo "ERROR: clang-tidy not found (checked LLVM_DIR, clang-tidy-19, clang-tidy)"; exit 1
-          fi
+  
           echo "Using clang-tidy binary: $CTIDY"
-          [ -n "${RTIDY:-}" ] && echo "Using run-clang-tidy helper: $RTIDY"
-
+          [ -n "$RTIDY" ] && echo "Using run-clang-tidy helper: $RTIDY"
+  
           # Build file list from database (C files, exclude subprojects)
           FILES="$(jq -r '.[].file' build/compile_commands.json | sort -u | grep '\.c$' | grep -v '/subprojects/' || true)"
           if [ -z "$FILES" ]; then
             echo "No source files to lint (after filtering)."; exit 0;
           fi
-
-          if [ -n "${RTIDY:-}" ] && [ -f "$RTIDY" ]; then
+  
+          if [ -n "$RTIDY" ] && [ -f "$RTIDY" ]; then
             # Use run-clang-tidy.py (handles DB well and parallelism)
             python3 "$RTIDY" \
               -p build \
@@ -274,7 +285,7 @@ jobs:
             # Fallback: invoke clang-tidy directly from DB directory
             cd build
             printf "%s\n" $FILES \
-              | xargs -n1 -P"$(nproc)" -I{} "$CTIDY" \
+              | xargs -P"$(nproc)" -I{} "$CTIDY" \
                   -p . \
                   -header-filter='^(?!.*\/subprojects\/).*' \
                   {}
