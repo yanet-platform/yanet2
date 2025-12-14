@@ -88,85 +88,12 @@ jobs:
         with:
           submodules: true
 
-      - name: Diagnostic - Check for cached build artifacts
-        run: |
-          set -euo pipefail
-          echo "=== DIAGNOSTIC: Checking for pre-existing cached artifacts ==="
-          echo "Current git commit: $(git rev-parse HEAD)"
-          echo "Current git commit short: $(git rev-parse --short HEAD)"
-          echo ""
-          
-          FAIL=0
-          REASONS=()
-
-          echo "Checking build/ directory:"
-          if [ -d "build" ]; then
-            echo "build/ directory exists"
-            ls -lah build/ || true
-
-            if [ -f "build/dataplane/yanet-dataplane" ]; then
-              echo "ERROR: Cached yanet-dataplane found in build/dataplane/"
-              stat build/dataplane/yanet-dataplane || true
-              md5sum build/dataplane/yanet-dataplane || true
-              FAIL=1
-              REASONS+=("cached build/dataplane/yanet-dataplane")
-            fi
-
-            if [ -f "build/controlplane/yanet-controlplane" ]; then
-              echo "ERROR: Cached yanet-controlplane found in build/controlplane/"
-              stat build/controlplane/yanet-controlplane || true
-              md5sum build/controlplane/yanet-controlplane || true
-              FAIL=1
-              REASONS+=("cached build/controlplane/yanet-controlplane")
-            fi
-          else
-            echo "build/ directory does not exist (clean state)"
-          fi
-          
-          echo ""
-          echo "Checking target/ directory:"
-          if [ -d "target" ]; then
-            echo "ERROR: target/ directory exists (cached Rust artifacts?)"
-            ls -lah target/ || true
-            FAIL=1
-            REASONS+=("cached target/ directory")
-
-            if [ -d "target/release" ]; then
-              echo "target/release/ contents:"
-              ls -lah target/release/ || true
-              if ls target/release/yanet-cli* 1> /dev/null 2>&1; then
-                echo "Note: cached yanet-cli binaries present:"
-                stat target/release/yanet-cli* || true
-                md5sum target/release/yanet-cli* || true
-              fi
-            fi
-          else
-            echo "target/ directory does not exist (clean state)"
-          fi
-
-          if [ "$FAIL" -ne 0 ]; then
-            echo ""
-            echo "Detected cached artifacts that must not be present:"
-            for r in "${REASONS[@]}"; do
-              echo " - $r"
-            done
-            exit 1
-          fi
 
       - uses: hendrikmuhs/ccache-action@v1.2.18
         name: ccache
         with:
           key: ${{ runner.os }}-build-cache
 
-      - name: Cache DPDK build
-        uses: actions/cache@v4
-        with:
-          path: |
-            build/subprojects/dpdk
-          key: ${{ runner.os }}-dpdk-${{ hashFiles('subprojects/dpdk/**') }}-${{ hashFiles('**/meson.build') }}
-          restore-keys: |
-            ${{ runner.os }}-dpdk-${{ hashFiles('subprojects/dpdk/**') }}-
-            ${{ runner.os }}-dpdk-
 
       - uses: actions/setup-go@v5
         with:
@@ -412,97 +339,17 @@ jobs:
         name: yanet2-binaries
         path: ./
 
-    - name: Display structure of downloaded files
+    - name: Place downloaded binaries
       run: |
-        echo "=== Downloaded files structure ==="
-        ls -la ./
-        echo "=== Build directory ==="
-        ls -la build/ || echo "Build directory not found"
-        echo "=== Target directory ==="
-        ls -la target/ || echo "Target directory not found"
-        
-        echo ""
-        echo "=== DIAGNOSTIC: Check for cached binaries BEFORE moving artifacts ==="
-        if [ -d "build/dataplane" ]; then
-          echo "build/dataplane exists (from cache?)"
-          ls -lah build/dataplane/ || true
-          if [ -f "build/dataplane/yanet-dataplane" ]; then
-            echo "WARNING: yanet-dataplane already exists in build/dataplane/ (cached?)"
-            stat build/dataplane/yanet-dataplane
-            md5sum build/dataplane/yanet-dataplane
-          fi
-        fi
-        if [ -d "build/controlplane" ]; then
-          echo "build/controlplane exists (from cache?)"
-          ls -lah build/controlplane/ || true
-          if [ -f "build/controlplane/yanet-controlplane" ]; then
-            echo "WARNING: yanet-controlplane already exists in build/controlplane/ (cached?)"
-            stat build/controlplane/yanet-controlplane
-            md5sum build/controlplane/yanet-controlplane
-          fi
-        fi
-        if [ -d "target/release" ]; then
-          echo "target/release exists (from cache?)"
-          ls -lah target/release/ || true
-          if ls target/release/yanet-cli* 1> /dev/null 2>&1; then
-            echo "WARNING: yanet-cli binaries already exist in target/release/ (cached?)"
-            stat target/release/yanet-cli* || true
-            md5sum target/release/yanet-cli* || true
-          fi
-        fi
-        
-        echo ""
-        echo "=== DIAGNOSTIC: Check downloaded artifact binaries ==="
-        if [ -f "./yanet-dataplane" ]; then
-          echo "Downloaded yanet-dataplane:"
-          stat ./yanet-dataplane
-          md5sum ./yanet-dataplane
-        fi
-        if [ -f "./yanet-controlplane" ]; then
-          echo "Downloaded yanet-controlplane:"
-          stat ./yanet-controlplane
-          md5sum ./yanet-controlplane
-        fi
+        mkdir -p build/dataplane build/controlplane target/release
+        [ -f "./yanet-dataplane" ] && mv -f ./yanet-dataplane build/dataplane/
+        [ -f "./yanet-controlplane" ] && mv -f ./yanet-controlplane build/controlplane/
         if ls ./yanet-cli* 1> /dev/null 2>&1; then
-          echo "Downloaded yanet-cli binaries:"
-          stat ./yanet-cli* || true
-          md5sum ./yanet-cli* || true
-        fi
-        
-        # Ensure directories exist
-        mkdir -p build/dataplane build/controlplane
-        mkdir -p target/release
-        
-        # Move binaries to correct locations if they were downloaded to root
-        if [ -f "./yanet-dataplane" ]; then
-          echo "Moving yanet-dataplane to build/dataplane/"
-          mv -f ./yanet-dataplane build/dataplane/
-        fi
-        if [ -f "./yanet-controlplane" ]; then
-          echo "Moving yanet-controlplane to build/controlplane/"
-          mv -f ./yanet-controlplane build/controlplane/
-        fi
-        if [ -f "./yanet-cli-nat64" ]; then
-          echo "Moving yanet-cli-* to target/release/"
           mv -f ./yanet-cli-* target/release/
         fi
-        
-        # Make binaries executable
-        chmod +x build/dataplane/yanet-dataplane || true
-        chmod +x build/controlplane/yanet-controlplane || true
-        chmod +x target/release/yanet-cli* || true
-        
-        echo ""
-        echo "=== DIAGNOSTIC: Final binary verification ==="
-        echo "yanet-dataplane:"
-        stat build/dataplane/yanet-dataplane
-        md5sum build/dataplane/yanet-dataplane
-        echo "yanet-controlplane:"
-        stat build/controlplane/yanet-controlplane
-        md5sum build/controlplane/yanet-controlplane
-        echo "yanet-cli binaries:"
-        stat target/release/yanet-cli* || true
-        md5sum target/release/yanet-cli* || true
+        chmod +x build/dataplane/yanet-dataplane 2>/dev/null || true
+        chmod +x build/controlplane/yanet-controlplane 2>/dev/null || true
+        chmod +x target/release/yanet-cli* 2>/dev/null || true
         
     - name: Prepare test environment
       working-directory: tests/functional
