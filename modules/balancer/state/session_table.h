@@ -161,7 +161,7 @@ get_or_create_session(
 			result_status = SESSION_CREATED;
 		}
 	} else { // status == TTLMAP_FAILED
-		return SESSION_TABLE_OVERFLOW;
+		result_status = SESSION_TABLE_OVERFLOW;
 	}
 
 	// Finish query
@@ -234,4 +234,6 @@ session_unlock(session_lock_t *lock) {
 // 	0 on resize
 // 	-1 on error (memory not enough)
 int
-session_table_resize(struct session_table *table, size_t new_size);
+session_table_resize(
+	struct session_table *table, size_t new_size, uint32_t now
+);

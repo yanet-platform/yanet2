@@ -11,16 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	balancermod "github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancer"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
+	module "github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // test gre, fix mss, encap, not standard packets
-// UDP
-// test packet source address is shuffled
+// UDP: <--- todo
+// test packet source address is shuffled: <--- todo
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -152,7 +152,7 @@ func (vs *VsSelector) Json() string {
 func SendAndValidatePacket(
 	t *testing.T,
 	mock *mock.YanetMock,
-	b *balancermod.Balancer,
+	b *module.Balancer,
 	options *PacketOptions,
 	selector VsSelector,
 ) (*framework.PacketInfo, *balancerpb.VirtualService) {
@@ -162,7 +162,7 @@ func SendAndValidatePacket(
 		vsAddr := vs.Identifier.Ip
 		if (vsAddr.Is4() && selector.VsIp == 4) ||
 			(vsAddr.Is6() && selector.VsIp == 6) {
-			if vs.Identifier.Proto == module.Proto(selector.Proto) {
+			if vs.Identifier.Proto == lib.Proto(selector.Proto) {
 				flags := vs.Flags
 				if flags.FixMSS == selector.FixMSS &&
 					flags.GRE == selector.Gre {
@@ -189,7 +189,7 @@ func SendAndValidatePacket(
 	return nil, nil
 }
 
-func vsToProto(vs *module.VirtualService) *balancerpb.VirtualService {
+func vsToProto(vs *lib.VirtualService) *balancerpb.VirtualService {
 	reals := make([]*balancerpb.Real, 0, len(vs.Reals))
 	for i := range vs.Reals {
 		real := &vs.Reals[i]
@@ -229,7 +229,7 @@ type PacketOptions struct {
 func SendPacketToVsAndValidate(
 	t *testing.T,
 	mock *mock.YanetMock,
-	balancer *balancermod.Balancer,
+	balancer *module.Balancer,
 	options *PacketOptions,
 	vs *balancerpb.VirtualService,
 ) *framework.PacketInfo {

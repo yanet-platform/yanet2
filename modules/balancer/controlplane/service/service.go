@@ -8,8 +8,8 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancer"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
 	"go.uber.org/zap"
 )
@@ -30,7 +30,7 @@ type BalancerService struct {
 
 	mu sync.Mutex
 
-	instances map[moduleKey]*balancer.Balancer
+	instances map[moduleKey]*module.Balancer
 	agents    []ffi.Agent
 	log       *zap.SugaredLogger
 }
@@ -45,7 +45,7 @@ func NewBalancerService(
 	return &BalancerService{
 		mu:        sync.Mutex{},
 		agents:    agents,
-		instances: make(map[moduleKey]*balancer.Balancer),
+		instances: make(map[moduleKey]*module.Balancer),
 		log:       log,
 	}
 }
@@ -122,7 +122,7 @@ func (service *BalancerService) UpdateConfig(
 	// Create new balancer (no service lock held during creation)
 	service.log.Infow("creating new balancer", "name", name, "instance", inst)
 	balancerLog := service.log.With("balancer", name, "instance", inst)
-	newBalancer, err := balancer.NewBalancerFromProto(
+	newBalancer, err := module.NewBalancerFromProto(
 		service.agents[inst],
 		name,
 		req.ModuleConfig,
@@ -200,9 +200,9 @@ func (service *BalancerService) UpdateReals(
 	)
 
 	// Parse real updates
-	updates := make([]module.RealUpdate, 0, len(req.Updates))
+	updates := make([]lib.RealUpdate, 0, len(req.Updates))
 	for i, protoUpdate := range req.Updates {
-		update, err := module.NewRealUpdateFromProto(protoUpdate)
+		update, err := lib.NewRealUpdateFromProto(protoUpdate)
 		if err != nil {
 			service.log.Errorw(
 				"failed to parse real update",

@@ -1,4 +1,4 @@
-package module
+package lib
 
 import (
 	"fmt"
@@ -44,9 +44,11 @@ func NewWlcConfigFromProto(proto *balancerpb.WlcConfig) (WlcConfig, error) {
 	}
 
 	return WlcConfig{
-		Power:          proto.WlcPower,
-		MaxRealWeight:  uint16(proto.MaxRealWeight),
-		UpdatePeriodMs: uint32(time.Duration(proto.UpdatePeriod.AsDuration().Milliseconds())),
+		Power:         proto.WlcPower,
+		MaxRealWeight: uint16(proto.MaxRealWeight),
+		UpdatePeriodMs: uint32(
+			time.Duration(proto.UpdatePeriod.AsDuration().Milliseconds()),
+		),
 	}, nil
 }
 
@@ -55,7 +57,9 @@ func (w WlcConfig) IntoProto() *balancerpb.WlcConfig {
 	return &balancerpb.WlcConfig{
 		WlcPower:      w.Power,
 		MaxRealWeight: uint32(w.MaxRealWeight),
-		UpdatePeriod:  durationpb.New(time.Duration(w.UpdatePeriodMs) * time.Millisecond),
+		UpdatePeriod: durationpb.New(
+			time.Duration(w.UpdatePeriodMs) * time.Millisecond,
+		),
 	}
 }
 

@@ -28,7 +28,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -51,18 +51,18 @@ func (vsConfig VsConfigPtr) AsRawPtr() unsafe.Pointer {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func proto(virtualService *module.VirtualService) C.uint8_t {
+func proto(virtualService *lib.VirtualService) C.uint8_t {
 	switch virtualService.Identifier.Proto {
-	case module.ProtoTcp:
+	case lib.ProtoTcp:
 		return C.IPPROTO_TCP
-	case module.ProtoUdp:
+	case lib.ProtoUdp:
 		return C.IPPROTO_UDP
 	default:
 		panic("unknown proto")
 	}
 }
 
-func flags(virtualService *module.VirtualService) C.uint64_t {
+func flags(virtualService *lib.VirtualService) C.uint64_t {
 	flags := 0
 	id := &virtualService.Identifier
 	if id.Ip.Is6() {
@@ -80,15 +80,15 @@ func flags(virtualService *module.VirtualService) C.uint64_t {
 	if virtualService.Flags.PureL3 {
 		flags |= C.BALANCER_VS_PURE_L3_FLAG
 	}
-	if virtualService.Scheduler == module.SchedulerPRR ||
-		virtualService.Scheduler == module.SchedulerWLC {
+	if virtualService.Scheduler == lib.SchedulerPRR ||
+		virtualService.Scheduler == lib.SchedulerWLC {
 		// WLC -> PRR + least connections info update
 		flags |= C.BALANCER_VS_PRR_FLAG
 	}
 	return C.uint64_t(flags)
 }
 
-func realFlags(real *module.Real) C.uint64_t {
+func realFlags(real *lib.Real) C.uint64_t {
 	realFlags := 0
 	if real.Identifier.Ip.Is6() {
 		realFlags |= C.BALANCER_REAL_IPV6_FLAG
@@ -104,7 +104,7 @@ func realFlags(real *module.Real) C.uint64_t {
 // Create Virtual service config from `Virtual Service`
 func NewVsConfig(
 	agent ffi.Agent,
-	virtualService *module.VirtualService,
+	virtualService *lib.VirtualService,
 ) (VsConfigPtr, error) {
 	// Fill virtual service flags.
 	flags := flags(virtualService)

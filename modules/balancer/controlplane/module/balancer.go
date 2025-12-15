@@ -1,4 +1,4 @@
-package balancer
+package module
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -59,7 +59,10 @@ func NewBalancerFromProto(
 		agent,
 		lock,
 		uint(moduleStateConfig.SessionTableCapacity),
-		uint(moduleStateConfig.SessionTableScanPeriod.AsDuration().Milliseconds()),
+		uint(
+			moduleStateConfig.SessionTableScanPeriod.AsDuration().
+				Milliseconds(),
+		),
 		moduleStateConfig.SessionTableMaxLoadFactor,
 		stateLog,
 	)
@@ -75,7 +78,7 @@ func NewBalancerFromProto(
 	}
 
 	// Parse balancer addresses
-	addresses, err := module.NewBalancerAddressesFromProto(moduleConfig)
+	addresses, err := lib.NewBalancerAddressesFromProto(moduleConfig)
 	if err != nil {
 		log.Errorw(
 			"failed to parse balancer addresses",
@@ -88,7 +91,7 @@ func NewBalancerFromProto(
 	}
 
 	// Parse session timeouts
-	sessionTimeouts, err := module.NewSessionsTimeoutsFromProto(
+	sessionTimeouts, err := lib.NewSessionsTimeoutsFromProto(
 		moduleConfig.SessionsTimeouts,
 	)
 	if err != nil {
@@ -104,7 +107,7 @@ func NewBalancerFromProto(
 
 	// Register virtual services with their reals
 	virtualServices := make(
-		[]module.VirtualService,
+		[]lib.VirtualService,
 		0,
 		len(moduleConfig.VirtualServices),
 	)
@@ -136,7 +139,7 @@ func NewBalancerFromProto(
 		len(virtualServices),
 	)
 
-	wlc, err := module.NewWlcConfigFromProto(moduleConfig.Wlc)
+	wlc, err := lib.NewWlcConfigFromProto(moduleConfig.Wlc)
 	if err != nil {
 		log.Errorw("failed to parse wlc config", "name", name, "error", err)
 		return nil, fmt.Errorf("failed to parse wlc config: %w", err)
@@ -188,14 +191,14 @@ func (b *Balancer) Update(
 	defer b.lock.Unlock()
 
 	// Parse balancer addresses
-	addresses, err := module.NewBalancerAddressesFromProto(moduleConfig)
+	addresses, err := lib.NewBalancerAddressesFromProto(moduleConfig)
 	if err != nil {
 		b.log.Errorw("failed to parse balancer addresses", "error", err)
 		return fmt.Errorf("failed to parse balancer addresses: %w", err)
 	}
 
 	// Parse session timeouts
-	sessionTimeouts, err := module.NewSessionsTimeoutsFromProto(
+	sessionTimeouts, err := lib.NewSessionsTimeoutsFromProto(
 		moduleConfig.SessionsTimeouts,
 	)
 	if err != nil {
@@ -205,7 +208,7 @@ func (b *Balancer) Update(
 
 	// Register virtual services with their reals
 	virtualServices := make(
-		[]module.VirtualService,
+		[]lib.VirtualService,
 		0,
 		len(moduleConfig.VirtualServices),
 	)
@@ -230,7 +233,7 @@ func (b *Balancer) Update(
 	b.log.Debugw("registered virtual services", "count", len(virtualServices))
 
 	// Parse WLC
-	wlc, err := module.NewWlcConfigFromProto(moduleConfig.Wlc)
+	wlc, err := lib.NewWlcConfigFromProto(moduleConfig.Wlc)
 	if err != nil {
 		b.log.Errorw("failed to parse WLC", "error", err)
 		return fmt.Errorf("failed to parse WLC: %w", err)
@@ -249,8 +252,12 @@ func (b *Balancer) Update(
 		}
 		b.moduleConfigState.Update(
 			uint(moduleStateConfig.SessionTableCapacity),
-			uint(moduleStateConfig.SessionTableScanPeriod.AsDuration().Milliseconds()),
+			uint(
+				moduleStateConfig.SessionTableScanPeriod.AsDuration().
+					Milliseconds(),
+			),
 			moduleStateConfig.SessionTableMaxLoadFactor,
+			time.Now(),
 		)
 		b.log.Debug("updated state configuration")
 	}
@@ -260,7 +267,7 @@ func (b *Balancer) Update(
 }
 
 // UpdateReals updates reals with optional buffering
-func (b *Balancer) UpdateReals(updates []module.RealUpdate, buffer bool) error {
+func (b *Balancer) UpdateReals(updates []lib.RealUpdate, buffer bool) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
@@ -287,7 +294,9 @@ func (b *Balancer) GetConfig() (*balancerpb.ModuleConfig, *balancerpb.ModuleStat
 			b.moduleConfigState.SessionTableCapacity(),
 		),
 		SessionTableScanPeriod: durationpb.New(
-			time.Duration(b.moduleConfigState.ScanSessionTablePeriodMs) * time.Millisecond,
+			time.Duration(
+				b.moduleConfigState.ScanSessionTablePeriodMs,
+			) * time.Millisecond,
 		),
 		SessionTableMaxLoadFactor: float32(b.moduleConfigState.MaxLoadFactor),
 	}
@@ -296,7 +305,7 @@ func (b *Balancer) GetConfig() (*balancerpb.ModuleConfig, *balancerpb.ModuleStat
 }
 
 // GetStateInfo returns state information
-func (b *Balancer) GetStateInfo() *module.BalancerInfo {
+func (b *Balancer) GetStateInfo() *lib.BalancerInfo {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
@@ -304,18 +313,18 @@ func (b *Balancer) GetStateInfo() *module.BalancerInfo {
 }
 
 // GetSessionsInfo returns information about active sessions
-func (b *Balancer) GetSessionsInfo(time time.Time) (*module.SessionsInfo, error) {
+func (b *Balancer) GetSessionsInfo(time time.Time) (*lib.SessionsInfo, error) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	return b.moduleConfigState.SessionsInfo(time)
+	return b.moduleConfigState.GetAndUpdateSessionsInfo(time)
 }
 
 // GetConfigStats returns configuration statistics
 func (b *Balancer) GetConfigStats(
 	dataplaneInstance uint32,
 	device, pipeline, function, chain string,
-) module.BalancerStats {
+) lib.BalancerStats {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
@@ -352,9 +361,14 @@ func (b *Balancer) Free() {
 // Allows to sync WLC, active sessions and resize session table.
 // The balancer makes it himself with corresponding periods.
 // We can add proto method to use this function in future.
-func (balancer *Balancer) SyncActiveSessionsAndWlcAndResizeTableOnDemand(now time.Time) error {
+func (balancer *Balancer) SyncActiveSessionsAndWlcAndResizeTableOnDemand(
+	now time.Time,
+) error {
 	if err := balancer.moduleConfigState.SyncActiveSessionsAndResizeTableOnDemand(now); err != nil {
-		return fmt.Errorf("failed to scan sessions table to sync active sessions: %w", err)
+		return fmt.Errorf(
+			"failed to scan sessions table to sync active sessions: %w",
+			err,
+		)
 	}
 	if _, err := balancer.moduleConfig.UpdateEffectiveWeights(); err != nil {
 		return fmt.Errorf("failed to update WLC: %w", err)

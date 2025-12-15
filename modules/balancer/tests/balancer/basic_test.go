@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -108,7 +108,7 @@ func TestBalancerBasics(t *testing.T) {
 
 	// check info and counters
 
-	expectedVsStats := module.VsStats{
+	expectedVsStats := lib.VsStats{
 		IncomingPackets: 1,
 		OutgoingPackets: 1,
 
@@ -123,7 +123,7 @@ func TestBalancerBasics(t *testing.T) {
 		OutgoingBytes: uint64(len(packet.Data())),
 	}
 
-	expectedRealStats := module.RealStats{
+	expectedRealStats := lib.RealStats{
 		PacketsRealDisabled:   0,
 		PacketsRealNotPresent: 0,
 		OpsPackets:            0,

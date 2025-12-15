@@ -107,7 +107,7 @@ balancer_state_session_table_capacity(struct balancer_state *state) {
 
 int
 balancer_state_resize_session_table(
-	struct balancer_state *state, size_t new_size
+	struct balancer_state *state, size_t new_size, uint32_t now
 ) {
-	return session_table_resize(&state->session_table, new_size);
+	return session_table_resize(&state->session_table, new_size, now);
 }

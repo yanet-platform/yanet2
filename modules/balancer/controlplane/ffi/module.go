@@ -24,7 +24,7 @@ import (
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -45,9 +45,9 @@ func NewModuleConfig(
 	agent ffi.Agent,
 	name string,
 	state ModuleConfigStatePtr,
-	virtualServices []module.VirtualService,
-	addresses module.BalancerAddresses,
-	sessionsTimeouts module.SessionsTimeouts,
+	virtualServices []lib.VirtualService,
+	addresses lib.BalancerAddresses,
+	sessionsTimeouts lib.SessionsTimeouts,
 ) (ModuleConfigPtr, error) {
 	// Name of the config
 	cName := C.CString(name)

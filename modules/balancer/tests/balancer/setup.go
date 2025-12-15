@@ -6,8 +6,8 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancer"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -32,7 +32,7 @@ type TestConfig struct {
 type TestSetup struct {
 	mock     *mock.YanetMock
 	agent    *ffi.Agent
-	balancer *balancer.Balancer
+	balancer *module.Balancer
 }
 
 func SetupTest(config *TestConfig) (*TestSetup, error) {
@@ -87,7 +87,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		Level: logLevel,
 	})
 
-	balancerInstance, err := balancer.NewBalancerFromProto(
+	balancerInstance, err := module.NewBalancerFromProto(
 		*agent,
 		defaultConfigName,
 		config.moduleConfig,

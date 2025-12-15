@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancer"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -28,7 +28,7 @@ type testCase struct {
 
 type config struct {
 	mock     *mock.YanetMock
-	balancer *balancer.Balancer
+	balancer *module.Balancer
 	rng      *rand.Rand
 	vsIp     netip.Addr
 	vsPort   uint16
@@ -273,7 +273,7 @@ func executeTestCase(t *testing.T, config *config, test *testCase) {
 		)
 
 		// Just ensure some packets not dropped
-		assert.Less(t, dropRate, 40.0)
+		assert.Less(t, dropRate, 10.0)
 
 		failedToFindRate := float64(
 			failedToFindActiveSession,
@@ -289,15 +289,7 @@ func executeTestCase(t *testing.T, config *config, test *testCase) {
 
 		// Just ensure not all active session packets
 		// were dropped
-		assert.Less(t, failedToFindRate, 40.0)
-
-		// Check info stats
-		// info := config.balancer.GetStateInfo()
-		// assert.Equal(t, uint64(failedToFindActiveSession+totalDropped), info.VsInfo[0].Stats.SessionTableOverflow, "Vs Info stats incorrect")
-
-		// Check counters
-		// stats := config.balancer.GetConfigStats(0, defaultDeviceName, defaultPipelineName, defaultFunctionName, defaultChainName)
-		// assert.Equal(t, uint64(failedToFindActiveSession+totalDropped), stats.Vs[0].Stats.SessionTableOverflow, "Vs Config stats incorrect")
+		assert.Less(t, failedToFindRate, 10.0)
 	})
 }
 
@@ -407,7 +399,7 @@ func TestSessionTable(t *testing.T) {
 	for _, test := range tests {
 		// Initially resize session table to the 90% of first batch size.
 		err = balancer.GetModuleConfigState().
-			Update(9*uint(test.batchSize)/10, 0, float32(maxLoadFactor))
+			Update(9*uint(test.batchSize)/10, 0, float32(maxLoadFactor), mock.CurrentTime())
 		require.NoError(t, err, "failed to shrink module config state")
 
 		// Run current test case

@@ -1,4 +1,4 @@
-package controlplane
+package balancer
 
 import "github.com/c2h5oh/datasize"
 

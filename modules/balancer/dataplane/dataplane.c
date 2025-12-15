@@ -4,7 +4,6 @@
 #include <rte_tcp.h>
 #include <rte_udp.h>
 
-#include "dataplane/time/clock.h"
 #include "flow/setup.h"
 #include "flow/stats.h"
 
@@ -18,8 +17,6 @@
 
 #include "icmp/handle.h"
 #include "l4/handle.h"
-#include "modules/balancer/state/session_table.h"
-#include "modules/balancer/state/state.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 

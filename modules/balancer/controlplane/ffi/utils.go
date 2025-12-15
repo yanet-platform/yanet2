@@ -10,7 +10,7 @@ import (
 	"net/netip"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
 )
 
 func sliceToPtr(s []byte) *C.uint8_t {
@@ -37,8 +37,8 @@ func addrToIpProto(addr *netip.Addr) C.int {
 	}
 }
 
-func transportProtoToIpProto(proto module.Proto) C.int {
-	if proto == module.ProtoTcp {
+func transportProtoToIpProto(proto lib.Proto) C.int {
+	if proto == lib.ProtoTcp {
 		return C.IPPROTO_TCP
 	} else {
 		return C.IPPROTO_UDP
@@ -53,9 +53,9 @@ func ipFromC(ptr *C.uint8_t, ipProto C.int) netip.Addr {
 	return netip.Addr{} // invalid
 }
 
-func moduleProtoFromC(p C.int) module.Proto {
+func moduleProtoFromC(p C.int) lib.Proto {
 	if p == C.IPPROTO_TCP {
-		return module.ProtoTcp
+		return lib.ProtoTcp
 	}
-	return module.ProtoUdp
+	return lib.ProtoUdp
 }

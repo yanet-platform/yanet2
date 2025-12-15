@@ -19,7 +19,7 @@ import (
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
 )
 
 // statsInfoC is a handle to C-allocated struct balancer_stats_info and its agent context
@@ -104,7 +104,7 @@ func BalancerConfigStats(
 	agent ffi.Agent,
 	state ModuleConfigStatePtr,
 	device, pipeline, function, chain, moduleName string,
-) (*module.BalancerStats, error) {
+) (*lib.BalancerStats, error) {
 	handle, err := FillBalancerStatsC(
 		agent,
 		device,
@@ -124,11 +124,11 @@ func BalancerConfigStats(
 func copyFromC(
 	state ModuleConfigStatePtr,
 	cstats *C.struct_balancer_stats_info,
-) *module.BalancerStats {
-	var out module.BalancerStats
+) *lib.BalancerStats {
+	var out lib.BalancerStats
 
 	// L4
-	out.Module.L4 = module.L4Stats{
+	out.Module.L4 = lib.L4Stats{
 		IncomingPackets:  uint64(cstats.stats.l4.incoming_packets),
 		SelectVSFailed:   uint64(cstats.stats.l4.select_vs_failed),
 		InvalidPackets:   uint64(cstats.stats.l4.invalid_packets),
@@ -137,7 +137,7 @@ func copyFromC(
 	}
 
 	// ICMP IPv4
-	out.Module.ICMPv4 = module.ICMPStats{
+	out.Module.ICMPv4 = lib.ICMPStats{
 		IncomingPackets: uint64(
 			cstats.stats.icmp_ipv4.incoming_packets,
 		),
@@ -165,15 +165,17 @@ func copyFromC(
 		BroadcastedPackets: uint64(
 			cstats.stats.icmp_ipv4.broadcasted_packets,
 		),
-		PacketClonesSent:     uint64(cstats.stats.icmp_ipv4.packet_clones_sent),
-		PacketClonesReceived: uint64(cstats.stats.icmp_ipv4.packet_clones_received),
+		PacketClonesSent: uint64(cstats.stats.icmp_ipv4.packet_clones_sent),
+		PacketClonesReceived: uint64(
+			cstats.stats.icmp_ipv4.packet_clones_received,
+		),
 		PacketCloneFailures: uint64(
 			cstats.stats.icmp_ipv4.packet_clone_failures,
 		),
 	}
 
 	// ICMP IPv6
-	out.Module.ICMPv6 = module.ICMPStats{
+	out.Module.ICMPv6 = lib.ICMPStats{
 		IncomingPackets: uint64(
 			cstats.stats.icmp_ipv6.incoming_packets,
 		),
@@ -201,15 +203,17 @@ func copyFromC(
 		BroadcastedPackets: uint64(
 			cstats.stats.icmp_ipv6.broadcasted_packets,
 		),
-		PacketClonesSent:     uint64(cstats.stats.icmp_ipv6.packet_clones_sent),
-		PacketClonesReceived: uint64(cstats.stats.icmp_ipv6.packet_clones_received),
+		PacketClonesSent: uint64(cstats.stats.icmp_ipv6.packet_clones_sent),
+		PacketClonesReceived: uint64(
+			cstats.stats.icmp_ipv6.packet_clones_received,
+		),
 		PacketCloneFailures: uint64(
 			cstats.stats.icmp_ipv6.packet_clone_failures,
 		),
 	}
 
 	// Common
-	out.Module.Common = module.CommonStats{
+	out.Module.Common = lib.CommonStats{
 		IncomingPackets: uint64(cstats.stats.common.incoming_packets),
 		IncomingBytes:   uint64(cstats.stats.common.incoming_bytes),
 		UnexpectedNetworkProto: uint64(
@@ -228,12 +232,12 @@ func copyFromC(
 			(*C.struct_balancer_vs_stats_info)(cstats.vs_info),
 			vsCount,
 		)
-		out.Vs = make([]module.VsStatsInfo, 0, vsCount)
+		out.Vs = make([]lib.VsStatsInfo, 0, vsCount)
 		for i := range vsCount {
 			entry := cArr[i]
 			vsIdx := uint(entry.vs_registry_idx)
 			vsId := state.VirtualServiceInfo(vsIdx).VsIdentifier
-			stats := module.VsStats{
+			stats := lib.VsStats{
 				IncomingPackets: uint64(entry.stats.incoming_packets),
 				IncomingBytes:   uint64(entry.stats.incoming_bytes),
 				PacketSrcNotAllowed: uint64(
@@ -259,7 +263,7 @@ func copyFromC(
 				OutgoingBytes:   uint64(entry.stats.outgoing_bytes),
 			}
 
-			out.Vs = append(out.Vs, module.VsStatsInfo{
+			out.Vs = append(out.Vs, lib.VsStatsInfo{
 				VsRegistryIdx: vsIdx,
 				VsIdentifier:  vsId,
 				Stats:         stats,
@@ -274,12 +278,12 @@ func copyFromC(
 			(*C.struct_balancer_real_stats_info)(cstats.real_info),
 			realCount,
 		)
-		out.Reals = make([]module.RealStatsInfo, 0, realCount)
+		out.Reals = make([]lib.RealStatsInfo, 0, realCount)
 		for i := range realCount {
 			entry := cArr[i]
 			realIdx := uint(entry.real_registry_idx)
 			realId := state.RealInfo(realIdx).RealIdentifier
-			stats := module.RealStats{
+			stats := lib.RealStats{
 				PacketsRealDisabled: uint64(
 					entry.stats.packets_real_disabled,
 				),
@@ -293,7 +297,7 @@ func copyFromC(
 				Bytes:            uint64(entry.stats.bytes),
 			}
 
-			out.Reals = append(out.Reals, module.RealStatsInfo{
+			out.Reals = append(out.Reals, lib.RealStatsInfo{
 				RealRegistryIdx: realIdx,
 				RealIdentifier:  realId,
 				Stats:           stats,

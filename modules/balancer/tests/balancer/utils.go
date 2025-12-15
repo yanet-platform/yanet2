@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancer"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
@@ -318,7 +318,7 @@ func InsertOrUpdateMSS(
 
 func ValidatePacket(
 	t *testing.T,
-	config *balancer.ModuleConfig,
+	config *module.ModuleConfig,
 	originalGoPacket gopacket.Packet,
 	resultPacket *framework.PacketInfo,
 ) {
@@ -379,17 +379,15 @@ func ValidatePacket(
 
 	// get packet proto
 
-	var packetProto module.Proto
+	var packetProto lib.Proto
 	if originPacketProto.LayerType() == layers.LayerTypeTCP {
-		packetProto = module.ProtoTcp
+		packetProto = lib.ProtoTcp
 	} else if originPacketProto.LayerType() == layers.LayerTypeUDP {
-		packetProto = module.ProtoUdp
+		packetProto = lib.ProtoUdp
 	} else {
 		t.Errorf("invalid packet protocol: %s", originPacketProto.String())
 		return
 	}
-
-	// todo: check tcp layers (MSS matters if FixMSS flag is enabled)
 
 	for idx := range config.VirtualServices {
 		service := &config.VirtualServices[idx]
@@ -411,7 +409,6 @@ func ValidatePacket(
 				)
 			}
 
-			// todo: check tcp layers (if FixMSS enabled)
 			if service.Flags.FixMSS {
 				originalMSS, err := xpacket.PacketMSS(originalGoPacket)
 				hadMSS := err == nil
@@ -448,8 +445,8 @@ func ValidatePacket(
 					resultPacket.DstIP,
 				) { // found real
 					assert.True(t, real.Enabled, "send packet to disabled real")
-					// todo: check src address
-					// correct
+					// TODO: check src address
+					// is correct
 					return
 				}
 			}
@@ -469,8 +466,8 @@ func ValidatePacket(
 
 func ValidateStateInfo(
 	t *testing.T,
-	info *module.BalancerInfo,
-	virtualServices []module.VirtualService,
+	info *lib.BalancerInfo,
+	virtualServices []lib.VirtualService,
 ) {
 	t.Helper()
 	for vsIdx := range virtualServices {

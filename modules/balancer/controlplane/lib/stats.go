@@ -1,4 +1,4 @@
-package module
+package lib
 
 import (
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"

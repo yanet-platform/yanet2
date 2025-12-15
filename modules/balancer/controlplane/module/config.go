@@ -1,4 +1,4 @@
-package balancer
+package module
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	balancer_ffi "github.com/yanet-platform/yanet2/modules/balancer/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
 	"go.uber.org/zap"
 )
 
@@ -23,22 +23,22 @@ type ModuleConfig struct {
 	cHandle balancer_ffi.ModuleConfigPtr
 
 	// Balancer virtual services
-	VirtualServices []module.VirtualService
+	VirtualServices []lib.VirtualService
 
 	// Balancer source and decap addresses
-	Addresses module.BalancerAddresses
+	Addresses lib.BalancerAddresses
 
 	// Timeouts of the balancer sessions
-	SessionTimeouts module.SessionsTimeouts
+	SessionTimeouts lib.SessionsTimeouts
 
 	// Weighted least connections config
-	wlc module.WlcConfig
+	wlc lib.WlcConfig
 
 	// Name of the module config
 	Name string
 
 	// Buffer for real updates
-	realUpdates module.RealUpdateBuffer
+	realUpdates lib.RealUpdateBuffer
 
 	// State of the module config
 	state *ModuleConfigState
@@ -60,9 +60,9 @@ func tryCreateNewModuleConfig(
 	agent ffi.Agent,
 	name string,
 	state balancer_ffi.ModuleConfigStatePtr,
-	virtualServices []module.VirtualService,
-	addresses module.BalancerAddresses,
-	sessionsTimeouts module.SessionsTimeouts,
+	virtualServices []lib.VirtualService,
+	addresses lib.BalancerAddresses,
+	sessionsTimeouts lib.SessionsTimeouts,
 ) (*balancer_ffi.ModuleConfigPtr, error) {
 	cHandle, err := balancer_ffi.NewModuleConfig(
 		agent,
@@ -84,8 +84,8 @@ func tryCreateNewModuleConfig(
 ////////////////////////////////////////////////////////////////////////////////
 
 func updateEffectiveWeights(
-	wlc *module.WlcConfig,
-	vs []module.VirtualService,
+	wlc *lib.WlcConfig,
+	vs []lib.VirtualService,
 	state *ModuleConfigState,
 ) bool {
 	activeSessions := state.RealActiveSessions
@@ -104,16 +104,16 @@ func NewModuleConfig(
 	agent ffi.Agent,
 	name string,
 	state *ModuleConfigState,
-	virtualServices []module.VirtualService,
-	addresses module.BalancerAddresses,
-	sessionsTimeouts module.SessionsTimeouts,
-	wlc module.WlcConfig,
+	virtualServices []lib.VirtualService,
+	addresses lib.BalancerAddresses,
+	sessionsTimeouts lib.SessionsTimeouts,
+	wlc lib.WlcConfig,
 	lock *sync.Mutex,
 	log *zap.SugaredLogger,
 ) (*ModuleConfig, error) {
 	moduleConfig := ModuleConfig{
 		agent:       agent,
-		realUpdates: module.RealUpdateBuffer{},
+		realUpdates: lib.RealUpdateBuffer{},
 		Name:        name,
 		state:       state,
 		lock:        lock,
@@ -134,10 +134,10 @@ func (config *ModuleConfig) Free() {
 ////////////////////////////////////////////////////////////////////////////////
 
 func (config *ModuleConfig) Update(
-	virtualServices []module.VirtualService,
-	addresses module.BalancerAddresses,
-	sessionsTimeouts module.SessionsTimeouts,
-	wlc module.WlcConfig,
+	virtualServices []lib.VirtualService,
+	addresses lib.BalancerAddresses,
+	sessionsTimeouts lib.SessionsTimeouts,
+	wlc lib.WlcConfig,
 ) error {
 	// Calculate effective weights for reals of virtual services
 	updateEffectiveWeights(&wlc, virtualServices, config.state)
@@ -193,7 +193,9 @@ func (config *ModuleConfig) UpdateEffectiveWeights() (bool, error) {
 			config.wlc,
 		)
 		if err != nil {
-			return false, fmt.Errorf("effective weights updated, but failed to update config")
+			return false, fmt.Errorf(
+				"effective weights updated, but failed to update config",
+			)
 		} else {
 			return true, nil
 		}
@@ -205,7 +207,7 @@ func (config *ModuleConfig) UpdateEffectiveWeights() (bool, error) {
 ////////////////////////////////////////////////////////////////////////////////
 
 func (config *ModuleConfig) UpdateReals(
-	updates []module.RealUpdate,
+	updates []lib.RealUpdate,
 	buffer bool,
 ) error {
 	if buffer {
@@ -216,7 +218,7 @@ func (config *ModuleConfig) UpdateReals(
 		cloneVirtualServices := config.VirtualServices
 		for updateIdx := range updates {
 			update := &updates[updateIdx]
-			var updateVs *module.VirtualService = nil
+			var updateVs *lib.VirtualService = nil
 			for vsIdx := range cloneVirtualServices {
 				vs := &config.VirtualServices[vsIdx]
 				if vs.Identifier == update.Real.Vs {
@@ -329,17 +331,17 @@ func convertAddrsToBytes(addrs []netip.Addr) [][]byte {
 func (config *ModuleConfig) GetStats(
 	dataplaneInstance uint32,
 	device, pipeline, function, chain string,
-) module.BalancerStats {
+) lib.BalancerStats {
 	// Get state info which contains the stats
 	stateInfo := config.state.GetInfo()
 
 	// Build VS stats from state info
-	vsStats := make([]module.VsStatsInfo, 0, len(config.VirtualServices))
+	vsStats := make([]lib.VsStatsInfo, 0, len(config.VirtualServices))
 	for i := range config.VirtualServices {
 		vs := &config.VirtualServices[i]
 		if vs.RegistryIdx < uint(len(stateInfo.VsInfo)) {
 			vsInfo := stateInfo.VsInfo[vs.RegistryIdx]
-			vsStats = append(vsStats, module.VsStatsInfo{
+			vsStats = append(vsStats, lib.VsStatsInfo{
 				VsRegistryIdx: vsInfo.VsRegistryIdx,
 				VsIdentifier:  vsInfo.VsIdentifier,
 				Stats:         vsInfo.Stats,
@@ -348,14 +350,14 @@ func (config *ModuleConfig) GetStats(
 	}
 
 	// Build real stats from state info
-	realStats := make([]module.RealStatsInfo, 0)
+	realStats := make([]lib.RealStatsInfo, 0)
 	for i := range config.VirtualServices {
 		vs := &config.VirtualServices[i]
 		for j := range vs.Reals {
 			real := &vs.Reals[j]
 			if real.RegistryIdx < uint64(len(stateInfo.RealInfo)) {
 				realInfo := stateInfo.RealInfo[real.RegistryIdx]
-				realStats = append(realStats, module.RealStatsInfo{
+				realStats = append(realStats, lib.RealStatsInfo{
 					RealRegistryIdx: realInfo.RealRegistryIdx,
 					RealIdentifier:  realInfo.RealIdentifier,
 					Stats:           realInfo.Stats,
@@ -364,7 +366,7 @@ func (config *ModuleConfig) GetStats(
 		}
 	}
 
-	return module.BalancerStats{
+	return lib.BalancerStats{
 		Module: stateInfo.Module,
 		Vs:     vsStats,
 		Reals:  realStats,

@@ -5,7 +5,9 @@
 #include "common/ttlmap/ttlmap.h"
 #include "modules/balancer/api/state.h"
 #include <assert.h>
+#include <netinet/in.h>
 #include <stdalign.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -132,7 +134,7 @@ fill_sessions_callback(
 		.real_id = state->real_id,
 		.create_timestamp = state->create_timestamp,
 		.last_packet_timestamp = state->last_packet_timestamp,
-		.client_port = id->client_port,
+		.client_port = ntohs(id->client_port),
 		.timeout = state->timeout,
 	};
 	memcpy(current_session_info.client_ip, id->client_ip, 16);
@@ -202,6 +204,7 @@ session_table_free_sessions_info(
 
 struct move_sessions_context {
 	struct ttlmap *next_map;
+	uint32_t now;
 };
 
 static int
@@ -210,20 +213,33 @@ move_sessions_callback(
 	struct balancer_session_state *state,
 	struct move_sessions_context *ctx
 ) {
+	if (state->last_packet_timestamp + state->timeout <= ctx->now) {
+		return 0;
+	}
+
 	session_lock_t *lock;
-	uint32_t now = state->last_packet_timestamp;
-	uint32_t timeout = state->timeout;
 	struct balancer_session_state *found;
-	int res = TTLMAP_GET(ctx->next_map, id, &found, &lock, now, timeout);
+	int res = TTLMAP_GET(
+		ctx->next_map,
+		id,
+		&found,
+		&lock,
+		state->last_packet_timestamp,
+		state->timeout
+	);
 	if (TTLMAP_STATUS(res) != TTLMAP_FAILED) {
-		memcpy(found, state, sizeof(*state));
+		// Copy the entire state to preserve all fields including
+		// timestamps
+		memcpy(found, state, sizeof(struct balancer_session_state));
 		ttlmap_release_lock(lock);
 	}
 	return 0;
 }
 
 int
-session_table_resize(struct session_table *table, size_t new_size) {
+session_table_resize(
+	struct session_table *table, size_t new_size, uint32_t now
+) {
 	uint32_t current_gen = session_table_current_gen(table);
 
 	struct ttlmap *next_map = session_table_prev_map(table, current_gen);
@@ -258,12 +274,13 @@ session_table_resize(struct session_table *table, size_t new_size) {
 
 	struct move_sessions_context ctx = {
 		.next_map = next_map,
+		.now = now,
 	};
 	TTLMAP_ITER(
 		current_map,
 		struct balancer_session_id,
 		struct balancer_session_state,
-		((uint32_t)-1),
+		now,
 		move_sessions_callback,
 		&ctx
 	);

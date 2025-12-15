@@ -1,4 +1,4 @@
-package module
+package lib
 
 import (
 	"fmt"
@@ -28,7 +28,9 @@ func NewSessionsTimeoutsFromProto(
 	if pb.TcpSynAck == 0 || pb.TcpSyn == 0 ||
 		pb.TcpFin == 0 || pb.Tcp == 0 ||
 		pb.Udp == 0 || pb.Default == 0 {
-		return SessionsTimeouts{}, fmt.Errorf("sessions timeouts must be positive")
+		return SessionsTimeouts{}, fmt.Errorf(
+			"sessions timeouts must be positive",
+		)
 	}
 	return SessionsTimeouts{
 		TcpSynAck: pb.TcpSynAck,

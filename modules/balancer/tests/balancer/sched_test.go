@@ -20,7 +20,7 @@ import (
 // one packet scheduler
 // sessions are created
 // pure l3
-// test timeouts (how?)
+// test timeouts with mock
 // session table
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -102,7 +102,7 @@ func TestWlc(t *testing.T) {
 	setup, err := SetupTest(&TestConfig{
 		moduleConfig: config,
 		stateConfig: &balancerpb.ModuleStateConfig{
-			SessionTableCapacity:      2000,
+			SessionTableCapacity:      8000,
 			SessionTableMaxLoadFactor: 0.5,
 			SessionTableScanPeriod:    durationpb.New(0),
 		},

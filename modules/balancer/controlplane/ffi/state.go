@@ -29,7 +29,7 @@ import (
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -92,10 +92,14 @@ func NewModuleConfigState(
 }
 
 // Extend session table
-func (state *ModuleConfigStatePtr) ResizeSessionTable(newSize uint) error {
+func (state *ModuleConfigStatePtr) ResizeSessionTable(
+	newSize uint,
+	now time.Time,
+) error {
 	ec := C.balancer_state_resize_session_table(
 		state.inner,
 		C.size_t(newSize),
+		C.uint32_t(now.Unix()),
 	)
 	if ec == -1 {
 		// todo: add diag
@@ -108,7 +112,7 @@ func (state *ModuleConfigStatePtr) ResizeSessionTable(newSize uint) error {
 
 // Register virtual service in the module state registry.
 func (state *ModuleConfigStatePtr) RegisterVs(
-	id *module.VsIdentifier,
+	id *lib.VsIdentifier,
 ) (uint, error) {
 	networkProto := addrToIpProto(&id.Ip)
 	transportProto := transportProtoToIpProto(id.Proto)
@@ -132,7 +136,7 @@ func (state *ModuleConfigStatePtr) RegisterVs(
 
 // Register real in the module state registry.
 func (state *ModuleConfigStatePtr) RegisterReal(
-	id *module.RealIdentifier,
+	id *lib.RealIdentifier,
 ) (uint, error) {
 	vsNetworkProto := addrToIpProto(&id.Vs.Ip)
 	transportProto := transportProtoToIpProto(id.Vs.Proto)
@@ -160,8 +164,8 @@ func (state *ModuleConfigStatePtr) RegisterReal(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func vsStatsFromC(s *C.struct_balancer_vs_stats) module.VsStats {
-	return module.VsStats{
+func vsStatsFromC(s *C.struct_balancer_vs_stats) lib.VsStats {
+	return lib.VsStats{
 		IncomingPackets:        uint64(s.incoming_packets),
 		IncomingBytes:          uint64(s.incoming_bytes),
 		PacketSrcNotAllowed:    uint64(s.packet_src_not_allowed),
@@ -180,8 +184,8 @@ func vsStatsFromC(s *C.struct_balancer_vs_stats) module.VsStats {
 	}
 }
 
-func realStatsFromC(s *C.struct_balancer_real_stats) module.RealStats {
-	return module.RealStats{
+func realStatsFromC(s *C.struct_balancer_real_stats) lib.RealStats {
+	return lib.RealStats{
 		PacketsRealDisabled:   uint64(s.packets_real_disabled),
 		PacketsRealNotPresent: uint64(s.packets_real_not_present),
 		OpsPackets:            uint64(s.ops_packets),
@@ -193,7 +197,7 @@ func realStatsFromC(s *C.struct_balancer_real_stats) module.RealStats {
 }
 
 // VirtualServicesInfo returns info for all VSes registered in state.
-func (state *ModuleConfigStatePtr) VirtualServicesInfo() []module.VsInfo {
+func (state *ModuleConfigStatePtr) VirtualServicesInfo() []lib.VsInfo {
 	var info C.struct_balancer_virtual_services_info
 	rc, err := C.balancer_fill_virtual_services_info(state.inner, &info)
 	if err != nil || int(rc) != 0 {
@@ -209,18 +213,18 @@ func (state *ModuleConfigStatePtr) VirtualServicesInfo() []module.VsInfo {
 		(*C.struct_balancer_virtual_service_info)(info.info),
 		count,
 	)
-	out := make([]module.VsInfo, count)
+	out := make([]lib.VsInfo, count)
 	for i := range count {
 		entry := cArr[i]
 		addr := ipFromC(&entry.ip[0], entry.ip_proto)
-		id := module.VsIdentifier{
+		id := lib.VsIdentifier{
 			Ip:    addr,
 			Port:  uint16(entry.virtual_port),
 			Proto: moduleProtoFromC(entry.transport_proto),
 		}
 		stats := vsStatsFromC(&entry.stats)
 
-		out[i] = module.VsInfo{
+		out[i] = lib.VsInfo{
 			VsRegistryIdx: uint(i),
 			VsIdentifier:  id,
 			LastPacketTimestamp: time.Unix(
@@ -234,7 +238,7 @@ func (state *ModuleConfigStatePtr) VirtualServicesInfo() []module.VsInfo {
 }
 
 // RealsInfo returns info for all reals registered in state.
-func (state *ModuleConfigStatePtr) RealsInfo() []module.RealInfo {
+func (state *ModuleConfigStatePtr) RealsInfo() []lib.RealInfo {
 	var info C.struct_balancer_reals_info
 	rc, err := C.balancer_fill_reals_info(state.inner, &info)
 	if err != nil || int(rc) != 0 {
@@ -247,23 +251,23 @@ func (state *ModuleConfigStatePtr) RealsInfo() []module.RealInfo {
 		return nil
 	}
 	cArr := unsafe.Slice((*C.struct_balancer_real_info)(info.info), count)
-	out := make([]module.RealInfo, count)
+	out := make([]lib.RealInfo, count)
 	for i := range count {
 		entry := cArr[i]
 		vip := ipFromC(&entry.vip[0], entry.virtual_ip_proto)
 		realIp := ipFromC(&entry.ip[0], entry.real_ip_proto)
-		vsId := module.VsIdentifier{
+		vsId := lib.VsIdentifier{
 			Ip:    vip,
 			Port:  uint16(entry.virtual_port),
 			Proto: moduleProtoFromC(entry.transport_proto),
 		}
-		realId := module.RealIdentifier{
+		realId := lib.RealIdentifier{
 			Vs: vsId,
 			Ip: realIp,
 		}
 		stats := realStatsFromC(&entry.stats)
 
-		out[i] = module.RealInfo{
+		out[i] = lib.RealInfo{
 			RealRegistryIdx: uint(i),
 			RealIdentifier:  realId,
 			LastPacketTimestamp: time.Unix(
@@ -277,7 +281,7 @@ func (state *ModuleConfigStatePtr) RealsInfo() []module.RealInfo {
 }
 
 // VirtualServiceInfo returns info for a single VS by registry index.
-func (state *ModuleConfigStatePtr) VirtualServiceInfo(idx uint) *module.VsInfo {
+func (state *ModuleConfigStatePtr) VirtualServiceInfo(idx uint) *lib.VsInfo {
 	var entry C.struct_balancer_virtual_service_info
 	rc, err := C.balancer_fill_virtual_service_info(
 		state.inner,
@@ -288,14 +292,14 @@ func (state *ModuleConfigStatePtr) VirtualServiceInfo(idx uint) *module.VsInfo {
 		return nil
 	}
 	addr := ipFromC(&entry.ip[0], entry.ip_proto)
-	id := module.VsIdentifier{
+	id := lib.VsIdentifier{
 		Ip:    addr,
 		Port:  uint16(entry.virtual_port),
 		Proto: moduleProtoFromC(entry.transport_proto),
 	}
 	stats := vsStatsFromC(&entry.stats)
 
-	out := module.VsInfo{
+	out := lib.VsInfo{
 		VsRegistryIdx:       idx,
 		VsIdentifier:        id,
 		LastPacketTimestamp: time.Unix(int64(entry.last_packet_timestamp), 0),
@@ -305,7 +309,7 @@ func (state *ModuleConfigStatePtr) VirtualServiceInfo(idx uint) *module.VsInfo {
 }
 
 // RealInfo returns info for a single real by registry index.
-func (state *ModuleConfigStatePtr) RealInfo(idx uint) *module.RealInfo {
+func (state *ModuleConfigStatePtr) RealInfo(idx uint) *lib.RealInfo {
 	var entry C.struct_balancer_real_info
 	rc, err := C.balancer_fill_real_info(state.inner, C.size_t(idx), &entry)
 	if err != nil || int(rc) != 0 {
@@ -313,18 +317,18 @@ func (state *ModuleConfigStatePtr) RealInfo(idx uint) *module.RealInfo {
 	}
 	vip := ipFromC(&entry.vip[0], entry.virtual_ip_proto)
 	realIp := ipFromC(&entry.ip[0], entry.real_ip_proto)
-	vsId := module.VsIdentifier{
+	vsId := lib.VsIdentifier{
 		Ip:    vip,
 		Port:  uint16(entry.virtual_port),
 		Proto: moduleProtoFromC(entry.transport_proto),
 	}
-	realId := module.RealIdentifier{
+	realId := lib.RealIdentifier{
 		Vs: vsId,
 		Ip: realIp,
 	}
 	stats := realStatsFromC(&entry.stats)
 
-	out := module.RealInfo{
+	out := lib.RealInfo{
 		RealRegistryIdx:     idx,
 		RealIdentifier:      realId,
 		LastPacketTimestamp: time.Unix(int64(entry.last_packet_timestamp), 0),
@@ -341,7 +345,7 @@ func (state *ModuleConfigStatePtr) RealInfo(idx uint) *module.RealInfo {
 func (state *ModuleConfigStatePtr) SessionsInfo(
 	now uint32,
 	countOnly bool,
-) *module.SessionsInfo {
+) *lib.SessionsInfo {
 	var info C.struct_balancer_sessions_info
 	rc, err := C.balancer_fill_sessions_info(
 		state.inner,
@@ -355,7 +359,7 @@ func (state *ModuleConfigStatePtr) SessionsInfo(
 	defer C.balancer_free_sessions_info(state.inner, &info)
 
 	count := uint(info.count)
-	result := &module.SessionsInfo{
+	result := &lib.SessionsInfo{
 		SessionsCount: count,
 	}
 
@@ -367,7 +371,7 @@ func (state *ModuleConfigStatePtr) SessionsInfo(
 		(*C.struct_balancer_session_info)(info.sessions),
 		count,
 	)
-	result.Sessions = make([]module.SessionInfo, count)
+	result.Sessions = make([]lib.SessionInfo, count)
 
 	for i := range count {
 		entry := cArr[i]
@@ -383,12 +387,12 @@ func (state *ModuleConfigStatePtr) SessionsInfo(
 
 		// Get Real info to build RealIdentifier
 		realInfo := state.RealInfo(uint(entry.real_id))
-		var realId module.RealIdentifier
+		var realId lib.RealIdentifier
 		if realInfo != nil {
 			realId = realInfo.RealIdentifier
 		}
 
-		result.Sessions[i] = module.SessionInfo{
+		result.Sessions[i] = lib.SessionInfo{
 			ClientAddr:      clientIp,
 			ClientPort:      uint16(entry.client_port),
 			Real:            realId,
@@ -408,7 +412,7 @@ func (state *ModuleConfigStatePtr) SessionsInfo(
 
 // BalancerInfo returns complete info about the balancer state including
 // module stats, virtual services info, and reals info.
-func (state *ModuleConfigStatePtr) BalancerInfo() *module.BalancerInfo {
+func (state *ModuleConfigStatePtr) BalancerInfo() *lib.BalancerInfo {
 	var info C.struct_balancer_info
 	rc, err := C.balancer_fill_info(state.inner, &info)
 	if err != nil || int(rc) != 0 {
@@ -416,53 +420,103 @@ func (state *ModuleConfigStatePtr) BalancerInfo() *module.BalancerInfo {
 	}
 	defer C.balancer_free_info(state.inner, &info)
 
-	result := &module.BalancerInfo{}
+	result := &lib.BalancerInfo{}
 
 	// Fill module stats
-	result.Module = module.ModuleStats{
-		L4: module.L4Stats{
+	result.Module = lib.ModuleStats{
+		L4: lib.L4Stats{
 			IncomingPackets:  uint64(info.stats.l4.incoming_packets),
 			SelectVSFailed:   uint64(info.stats.l4.select_vs_failed),
 			InvalidPackets:   uint64(info.stats.l4.invalid_packets),
 			SelectRealFailed: uint64(info.stats.l4.select_real_failed),
 			OutgoingPackets:  uint64(info.stats.l4.outgoing_packets),
 		},
-		ICMPv4: module.ICMPStats{
-			IncomingPackets:           uint64(info.stats.icmp_ipv4.incoming_packets),
-			EchoResponses:             uint64(info.stats.icmp_ipv4.echo_responses),
-			PayloadTooShortIP:         uint64(info.stats.icmp_ipv4.payload_too_short_ip),
-			UnmatchingSrcFromOriginal: uint64(info.stats.icmp_ipv4.unmatching_src_from_original),
-			PayloadTooShortPort:       uint64(info.stats.icmp_ipv4.payload_too_short_port),
-			UnexpectedTransport:       uint64(info.stats.icmp_ipv4.unexpected_transport),
-			UnrecognizedVS:            uint64(info.stats.icmp_ipv4.unrecognized_vs),
-			ForwardedPackets:          uint64(info.stats.icmp_ipv4.forwarded_packets),
-			BroadcastedPackets:        uint64(info.stats.icmp_ipv4.broadcasted_packets),
-			PacketClonesSent:          uint64(info.stats.icmp_ipv4.packet_clones_sent),
-			PacketClonesReceived:      uint64(info.stats.icmp_ipv4.packet_clones_received),
-			PacketCloneFailures:       uint64(info.stats.icmp_ipv4.packet_clone_failures),
+		ICMPv4: lib.ICMPStats{
+			IncomingPackets: uint64(
+				info.stats.icmp_ipv4.incoming_packets,
+			),
+			EchoResponses: uint64(
+				info.stats.icmp_ipv4.echo_responses,
+			),
+			PayloadTooShortIP: uint64(
+				info.stats.icmp_ipv4.payload_too_short_ip,
+			),
+			UnmatchingSrcFromOriginal: uint64(
+				info.stats.icmp_ipv4.unmatching_src_from_original,
+			),
+			PayloadTooShortPort: uint64(
+				info.stats.icmp_ipv4.payload_too_short_port,
+			),
+			UnexpectedTransport: uint64(
+				info.stats.icmp_ipv4.unexpected_transport,
+			),
+			UnrecognizedVS: uint64(
+				info.stats.icmp_ipv4.unrecognized_vs,
+			),
+			ForwardedPackets: uint64(
+				info.stats.icmp_ipv4.forwarded_packets,
+			),
+			BroadcastedPackets: uint64(
+				info.stats.icmp_ipv4.broadcasted_packets,
+			),
+			PacketClonesSent: uint64(
+				info.stats.icmp_ipv4.packet_clones_sent,
+			),
+			PacketClonesReceived: uint64(
+				info.stats.icmp_ipv4.packet_clones_received,
+			),
+			PacketCloneFailures: uint64(
+				info.stats.icmp_ipv4.packet_clone_failures,
+			),
 		},
-		ICMPv6: module.ICMPStats{
-			IncomingPackets:           uint64(info.stats.icmp_ipv6.incoming_packets),
-			EchoResponses:             uint64(info.stats.icmp_ipv6.echo_responses),
-			PayloadTooShortIP:         uint64(info.stats.icmp_ipv6.payload_too_short_ip),
-			UnmatchingSrcFromOriginal: uint64(info.stats.icmp_ipv6.unmatching_src_from_original),
-			PayloadTooShortPort:       uint64(info.stats.icmp_ipv6.payload_too_short_port),
-			UnexpectedTransport:       uint64(info.stats.icmp_ipv6.unexpected_transport),
-			UnrecognizedVS:            uint64(info.stats.icmp_ipv6.unrecognized_vs),
-			ForwardedPackets:          uint64(info.stats.icmp_ipv6.forwarded_packets),
-			BroadcastedPackets:        uint64(info.stats.icmp_ipv6.broadcasted_packets),
-			PacketClonesSent:          uint64(info.stats.icmp_ipv6.packet_clones_sent),
-			PacketClonesReceived:      uint64(info.stats.icmp_ipv6.packet_clones_received),
-			PacketCloneFailures:       uint64(info.stats.icmp_ipv6.packet_clone_failures),
+		ICMPv6: lib.ICMPStats{
+			IncomingPackets: uint64(
+				info.stats.icmp_ipv6.incoming_packets,
+			),
+			EchoResponses: uint64(
+				info.stats.icmp_ipv6.echo_responses,
+			),
+			PayloadTooShortIP: uint64(
+				info.stats.icmp_ipv6.payload_too_short_ip,
+			),
+			UnmatchingSrcFromOriginal: uint64(
+				info.stats.icmp_ipv6.unmatching_src_from_original,
+			),
+			PayloadTooShortPort: uint64(
+				info.stats.icmp_ipv6.payload_too_short_port,
+			),
+			UnexpectedTransport: uint64(
+				info.stats.icmp_ipv6.unexpected_transport,
+			),
+			UnrecognizedVS: uint64(
+				info.stats.icmp_ipv6.unrecognized_vs,
+			),
+			ForwardedPackets: uint64(
+				info.stats.icmp_ipv6.forwarded_packets,
+			),
+			BroadcastedPackets: uint64(
+				info.stats.icmp_ipv6.broadcasted_packets,
+			),
+			PacketClonesSent: uint64(
+				info.stats.icmp_ipv6.packet_clones_sent,
+			),
+			PacketClonesReceived: uint64(
+				info.stats.icmp_ipv6.packet_clones_received,
+			),
+			PacketCloneFailures: uint64(
+				info.stats.icmp_ipv6.packet_clone_failures,
+			),
 		},
-		Common: module.CommonStats{
-			IncomingPackets:        uint64(info.stats.common.incoming_packets),
-			IncomingBytes:          uint64(info.stats.common.incoming_bytes),
-			UnexpectedNetworkProto: uint64(info.stats.common.unexpected_network_proto),
-			DecapSuccessful:        uint64(info.stats.common.decap_successful),
-			DecapFailed:            uint64(info.stats.common.decap_failed),
-			OutgoingPackets:        uint64(info.stats.common.outgoing_packets),
-			OutgoingBytes:          uint64(info.stats.common.outgoing_bytes),
+		Common: lib.CommonStats{
+			IncomingPackets: uint64(info.stats.common.incoming_packets),
+			IncomingBytes:   uint64(info.stats.common.incoming_bytes),
+			UnexpectedNetworkProto: uint64(
+				info.stats.common.unexpected_network_proto,
+			),
+			DecapSuccessful: uint64(info.stats.common.decap_successful),
+			DecapFailed:     uint64(info.stats.common.decap_failed),
+			OutgoingPackets: uint64(info.stats.common.outgoing_packets),
+			OutgoingBytes:   uint64(info.stats.common.outgoing_bytes),
 		},
 	}
 
@@ -470,21 +524,23 @@ func (state *ModuleConfigStatePtr) BalancerInfo() *module.BalancerInfo {
 	vsCount := int(info.virtual_services.count)
 	if vsCount > 0 && info.virtual_services.info != nil {
 		cArr := unsafe.Slice(
-			(*C.struct_balancer_virtual_service_info)(info.virtual_services.info),
+			(*C.struct_balancer_virtual_service_info)(
+				info.virtual_services.info,
+			),
 			vsCount,
 		)
-		result.VsInfo = make([]module.VsInfo, vsCount)
+		result.VsInfo = make([]lib.VsInfo, vsCount)
 		for i := range vsCount {
 			entry := cArr[i]
 			addr := ipFromC(&entry.ip[0], entry.ip_proto)
-			id := module.VsIdentifier{
+			id := lib.VsIdentifier{
 				Ip:    addr,
 				Port:  uint16(entry.virtual_port),
 				Proto: moduleProtoFromC(entry.transport_proto),
 			}
 			stats := vsStatsFromC(&entry.stats)
 
-			result.VsInfo[i] = module.VsInfo{
+			result.VsInfo[i] = lib.VsInfo{
 				VsRegistryIdx: uint(i),
 				VsIdentifier:  id,
 				LastPacketTimestamp: time.Unix(
@@ -503,23 +559,23 @@ func (state *ModuleConfigStatePtr) BalancerInfo() *module.BalancerInfo {
 			(*C.struct_balancer_real_info)(info.reals.info),
 			realCount,
 		)
-		result.RealInfo = make([]module.RealInfo, realCount)
+		result.RealInfo = make([]lib.RealInfo, realCount)
 		for i := range realCount {
 			entry := cArr[i]
 			vip := ipFromC(&entry.vip[0], entry.virtual_ip_proto)
 			realIp := ipFromC(&entry.ip[0], entry.real_ip_proto)
-			vsId := module.VsIdentifier{
+			vsId := lib.VsIdentifier{
 				Ip:    vip,
 				Port:  uint16(entry.virtual_port),
 				Proto: moduleProtoFromC(entry.transport_proto),
 			}
-			realId := module.RealIdentifier{
+			realId := lib.RealIdentifier{
 				Vs: vsId,
 				Ip: realIp,
 			}
 			stats := realStatsFromC(&entry.stats)
 
-			result.RealInfo[i] = module.RealInfo{
+			result.RealInfo[i] = lib.RealInfo{
 				RealRegistryIdx: uint(i),
 				RealIdentifier:  realId,
 				LastPacketTimestamp: time.Unix(

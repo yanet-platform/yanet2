@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	balancermod "github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancer"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -125,7 +125,7 @@ func allowedSrc(idx uint8) netip.Addr {
 func sendRandomSYNs(
 	t *testing.T,
 	mock *mock.YanetMock,
-	balancerInstance *balancermod.Balancer,
+	balancerInstance *module.Balancer,
 	vsIdx int,
 	packetIdxOffset int,
 	packetCount int,
