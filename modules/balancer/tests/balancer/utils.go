@@ -145,6 +145,7 @@ func MakeTCPPacket(
 
 	tcp.SrcPort = layers.TCPPort(srcPort)
 	tcp.DstPort = layers.TCPPort(dstPort)
+
 	tcp.SetNetworkLayerForChecksum(ip)
 
 	payload := []byte("BALANCER TEST PAYLOAD 12345678910")
@@ -216,7 +217,6 @@ func InsertOrUpdateMSS(
 	p gopacket.Packet,
 	newMSS uint16,
 ) (*gopacket.Packet, error) {
-	// Decode (assumes Ethernet; adjust if you have raw IP)
 	tcpL := p.Layer(layers.LayerTypeTCP)
 	if tcpL == nil {
 		return nil, errors.New("no TCP layer")
@@ -410,32 +410,39 @@ func ValidatePacket(
 			}
 
 			if service.Flags.FixMSS {
-				originalMSS, err := xpacket.PacketMSS(originalGoPacket)
-				hadMSS := err == nil
+				// FixMSS only applies to TCP SYN packets
+				tcpLayer := originalGoPacket.Layer(layers.LayerTypeTCP)
+				if tcpLayer != nil {
+					tcp := tcpLayer.(*layers.TCP)
+					if tcp.SYN {
+						originalMSS, err := xpacket.PacketMSS(originalGoPacket)
+						hadMSS := err == nil
 
-				packet := gopacket.NewPacket(
-					resultPacket.RawData,
-					layers.LayerTypeEthernet,
-					gopacket.Default,
-				)
-				resultMSS, err := xpacket.PacketMSS(packet)
-				hasMSS := err == nil
-				if !hasMSS {
-					t.Error("no mss in packet, but fix mss flag is present")
-					return
+						packet := gopacket.NewPacket(
+							resultPacket.RawData,
+							layers.LayerTypeEthernet,
+							gopacket.Default,
+						)
+						resultMSS, err := xpacket.PacketMSS(packet)
+						hasMSS := err == nil
+						if !hasMSS {
+							t.Error("no mss in packet, but fix mss flag is present")
+							return
+						}
+						expectedMSS := uint16(0)
+						if hadMSS {
+							expectedMSS = min(originalMSS, 1220)
+						} else {
+							expectedMSS = 536
+						}
+						assert.Equal(
+							t,
+							expectedMSS,
+							resultMSS,
+							"incorrect mss after fix",
+						)
+					}
 				}
-				expectedMSS := uint16(0)
-				if hadMSS {
-					expectedMSS = min(originalMSS, 1220)
-				} else {
-					expectedMSS = 536
-				}
-				assert.Equal(
-					t,
-					expectedMSS,
-					resultMSS,
-					"incorrect mss after fix",
-				)
 			}
 
 			for realIdx := range service.Reals {

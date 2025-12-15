@@ -364,7 +364,7 @@ func TestPacketEncapGreMSS(t *testing.T) {
 	// test mss fix works
 
 	t.Run("FixMSS", func(t *testing.T) {
-		for _, mss := range []uint16{0, 500, 1200, 1400} {
+		for _, mss := range []uint16{0, 500, 1200, 1400, 1460} {
 			for _, realIp := range []int{4, 6} {
 				selector := VsSelector{
 					VsIp:   6,
