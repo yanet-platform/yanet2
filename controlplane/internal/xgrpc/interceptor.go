@@ -5,13 +5,26 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
-
-	"github.com/yanet-platform/yanet2/common/commonpb"
 )
+
+// ProtoLogValue is an interface for custom proto message serialization in logs.
+//
+// When a proto message implements this interface, the protoMarshaler will use
+// the returned value instead of recursively serializing the message fields.
+//
+// The returned value can be:
+//   - string: serialized as a string field
+//   - zapcore.ObjectMarshaler: serialized as a nested object
+//   - zapcore.ArrayMarshaler: serialized as an array
+//   - any other type: serialized via zap.Any (reflection-based)
+type ProtoLogValue interface {
+	AsLogValue() any
+}
 
 // AccessLogInterceptor returns a gRPC unary server interceptor that logs
 // requests and responses.
@@ -33,7 +46,7 @@ func AccessLogInterceptor(log *zap.SugaredLogger) grpc.UnaryServerInterceptor {
 			if log.Level().Enabled(zap.DebugLevel) {
 				log.Debugw("started gRPC execution",
 					zap.String("method", info.FullMethod),
-					zap.Any("request", sanitizeMessage(message)),
+					zap.Object("request", &protoMarshaler{message: message}),
 				)
 			}
 		} else {
@@ -65,73 +78,99 @@ func AccessLogInterceptor(log *zap.SugaredLogger) grpc.UnaryServerInterceptor {
 	}
 }
 
-// sanitizeMessage creates a sanitized copy of the proto message for logging.
-// Fields marked with skip_logging=true will have their values replaced with
-// "<skipped>".
-func sanitizeMessage(msg proto.Message) map[string]any {
-	result := map[string]any{}
+// protoMarshaler wraps a proto.Message to implement zapcore.ObjectMarshaler.
+type protoMarshaler struct {
+	message proto.Message
+}
 
-	msgReflect := msg.ProtoReflect()
-	msgReflect.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
-		fieldName := string(fd.Name())
+// MarshalLogObject implements zapcore.ObjectMarshaler.
+func (m *protoMarshaler) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	m.message.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		name := string(fd.Name())
 
-		// Check if field has skip_logging option.
-		if true || shouldSkipLogging(fd) {
-			result[fieldName] = "<skipped>"
-			return true
-		}
-
-		// Handle nested messages recursively.
 		if fd.Kind() == protoreflect.MessageKind && !fd.IsList() && !fd.IsMap() {
-			if nestedMsg := v.Message(); nestedMsg.IsValid() {
-				result[fieldName] = sanitizeMessage(nestedMsg.Interface())
+			if nested := v.Message(); nested.IsValid() {
+				encodeProtoField(enc, name, nested.Interface())
 			}
+
 			return true
 		}
 
-		// Handle repeated message fields.
 		if fd.IsList() && fd.Kind() == protoreflect.MessageKind {
 			list := v.List()
-			items := make([]any, list.Len())
-			for i := 0; i < list.Len(); i++ {
-				items[i] = sanitizeMessage(list.Get(i).Message().Interface())
-			}
-			result[fieldName] = items
+			_ = enc.AddArray(name, zapcore.ArrayMarshalerFunc(func(arr zapcore.ArrayEncoder) error {
+				for i := 0; i < list.Len(); i++ {
+					appendProtoValue(arr, list.Get(i).Message().Interface())
+				}
+				return nil
+			}))
+
 			return true
 		}
 
-		// Handle map fields with message values.
 		if fd.IsMap() && fd.MapValue().Kind() == protoreflect.MessageKind {
-			mapVal := v.Map()
-			mapResult := map[string]any{}
-			mapVal.Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
-				mapResult[k.String()] = sanitizeMessage(v.Message().Interface())
-				return true
-			})
-			result[fieldName] = mapResult
+			_ = enc.AddObject(name, zapcore.ObjectMarshalerFunc(func(obj zapcore.ObjectEncoder) error {
+				v.Map().Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
+					encodeProtoField(obj, k.String(), v.Message().Interface())
+					return true
+				})
+				return nil
+			}))
+
 			return true
 		}
 
-		// For other fields, use the interface value.
-		result[fieldName] = v.Interface()
+		m.encodeScalar(enc, name, fd, v)
 		return true
 	})
 
-	return result
+	return nil
 }
 
-// shouldSkipLogging checks if a field has the skip_logging option set to true.
-func shouldSkipLogging(fd protoreflect.FieldDescriptor) bool {
-	opts := fd.Options()
-	if opts == nil {
-		return false
+func encodeProtoField(enc zapcore.ObjectEncoder, name string, msg proto.Message) {
+	if v, ok := msg.(ProtoLogValue); ok {
+		zap.Any(name, v.AsLogValue()).AddTo(enc)
+		return
 	}
+	_ = enc.AddObject(name, &protoMarshaler{message: msg})
+}
 
-	// Get the skip_logging extension value.
-	ext := proto.GetExtension(opts, commonpb.E_SkipLogging)
-	if skip, ok := ext.(bool); ok {
-		return skip
+func appendProtoValue(enc zapcore.ArrayEncoder, msg proto.Message) {
+	if v, ok := msg.(ProtoLogValue); ok {
+		_ = enc.AppendReflected(v.AsLogValue())
+		return
 	}
+	_ = enc.AppendObject(&protoMarshaler{message: msg})
+}
 
-	return false
+func (m *protoMarshaler) encodeScalar(
+	enc zapcore.ObjectEncoder,
+	name string,
+	fd protoreflect.FieldDescriptor,
+	v protoreflect.Value,
+) {
+	switch fd.Kind() {
+	case protoreflect.BoolKind:
+		enc.AddBool(name, v.Bool())
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
+		enc.AddInt32(name, int32(v.Int()))
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		enc.AddInt64(name, v.Int())
+	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind:
+		enc.AddUint32(name, uint32(v.Uint()))
+	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		enc.AddUint64(name, v.Uint())
+	case protoreflect.FloatKind:
+		enc.AddFloat32(name, float32(v.Float()))
+	case protoreflect.DoubleKind:
+		enc.AddFloat64(name, v.Float())
+	case protoreflect.StringKind:
+		enc.AddString(name, v.String())
+	case protoreflect.BytesKind:
+		enc.AddBinary(name, v.Bytes())
+	case protoreflect.EnumKind:
+		enc.AddString(name, string(fd.Enum().Values().ByNumber(v.Enum()).Name()))
+	default:
+		_ = enc.AddReflected(name, v.Interface())
+	}
 }
