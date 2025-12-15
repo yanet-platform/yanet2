@@ -157,6 +157,8 @@ registry_extend(struct registry *registry) {
 		SET_OFFSET_OF(new_items + idx, NULL);
 	}
 
+	SET_OFFSET_OF(&registry->items, new_items);
+
 	memory_bfree(
 		memory_context,
 		old_items,

@@ -163,7 +163,18 @@ cp_device_init(
 	}
 
 	registry_item_init(&cp_device->config_item);
+
+	// FIXME: handle errors
 	counter_registry_init(&cp_device->counter_registry, memory_context, 0);
+
+	// FIXME return error on counter failure
+	cp_device->counter_packet_rx_count = counter_registry_register(
+		&cp_device->counter_registry, "rx", 1
+	);
+
+	cp_device->counter_packet_tx_count = counter_registry_register(
+		&cp_device->counter_registry, "tx", 1
+	);
 
 	return 0;
 }

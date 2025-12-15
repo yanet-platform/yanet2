@@ -309,7 +309,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 			ADDR_OF(config_gen_ectx->devices + packet->rx_device_id
 			);
 		if (device_ectx == NULL) {
-			packet_front_drop(&packet_front, packet);
+			packet_list_add(&drop_packets, packet);
 			continue;
 		}
 
@@ -317,6 +317,8 @@ worker_loop_round(struct dataplane_worker *worker) {
 			worker->dp_worker, device_ectx, &packet_front, packet
 		);
 	}
+
+	packet_list_concat(&drop_packets, &packet_front.drop);
 
 	// Now group packets by pipeline and build packet_front
 	while (packet_list_first(&packet_front.pending)) {
@@ -363,6 +365,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 	 * should be freed.
 	 */
 	packet_list_concat(&drop_packets, &output_packets);
+
 	dataplane_drop_packets(worker->dataplane, &drop_packets);
 }
 

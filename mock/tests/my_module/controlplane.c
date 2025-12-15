@@ -22,8 +22,6 @@ struct my_module_config *
 my_module_config_create(struct agent *agent, const char *name) {
 	struct my_module_config *config =
 		malloc(sizeof(struct my_module_config));
-	cp_module_init(
-		&config->cp_module, agent, "balancer", name, my_module_free
-	);
+	cp_module_init(&config->cp_module, agent, "balancer", name);
 	return config;
 }

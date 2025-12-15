@@ -14,8 +14,7 @@ cp_module_init(
 	struct cp_module *cp_module,
 	struct agent *agent,
 	const char *module_type,
-	const char *module_name,
-	cp_module_free_handler free_handler
+	const char *module_name
 ) {
 	memset(cp_module, 0, sizeof(struct cp_module));
 
@@ -39,8 +38,6 @@ cp_module_init(
 	);
 
 	SET_OFFSET_OF(&cp_module->agent, agent);
-
-	cp_module->free_handler = free_handler;
 
 	registry_item_init(&cp_module->config_item);
 

@@ -35,6 +35,9 @@ struct cp_device {
 
 	struct cp_device_entry *input_pipelines;
 	struct cp_device_entry *output_pipelines;
+
+	uint64_t counter_packet_rx_count;
+	uint64_t counter_packet_tx_count;
 };
 
 struct dp_config;

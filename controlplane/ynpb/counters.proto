@@ -6,10 +6,22 @@ option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
 service CountersService {
 	// Inspect retrieves the current configuration state.
+	rpc Device(DeviceCountersRequest) returns (CountersResponse) {
+	}
 	rpc Pipeline(PipelineCountersRequest) returns (CountersResponse) {
+	}
+	rpc Function(FunctionCountersRequest) returns (CountersResponse) {
+	}
+	rpc Chain(ChainCountersRequest) returns (CountersResponse) {
 	}
 	rpc Module(ModuleCountersRequest) returns (CountersResponse) {
 	}
+}
+
+message DeviceCountersRequest {
+	// Dataplane instance
+	uint32 dp_instance = 1;
+	string device = 2;
 }
 
 message PipelineCountersRequest {
@@ -17,6 +29,23 @@ message PipelineCountersRequest {
 	uint32 dp_instance = 1;
 	string device = 2;
 	string pipeline = 3;
+}
+
+message FunctionCountersRequest {
+	// Dataplane instance
+	uint32 dp_instance = 1;
+	string device = 2;
+	string pipeline = 3;
+	string function = 4;
+}
+
+message ChainCountersRequest {
+	// Dataplane instance
+	uint32 dp_instance = 1;
+	string device = 2;
+	string pipeline = 3;
+	string function = 4;
+	string chain = 5;
 }
 
 message ModuleCountersRequest {

@@ -20,13 +20,7 @@ forward_module_config_init(struct agent *agent, const char *name) {
 		return NULL;
 	}
 
-	if (cp_module_init(
-		    &config->cp_module,
-		    agent,
-		    "forward",
-		    name,
-		    forward_module_config_free
-	    )) {
+	if (cp_module_init(&config->cp_module, agent, "forward", name)) {
 		goto fail;
 	}
 

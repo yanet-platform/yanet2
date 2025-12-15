@@ -17,7 +17,9 @@ struct acl_module_config {
 	struct cp_module cp_module;
 
 	struct filter filter_ip4;
+	struct filter filter_ip4_port;
 	struct filter filter_ip6;
+	struct filter filter_ip6_port;
 	struct filter filter_vlan;
 
 	uint64_t target_count;

@@ -114,5 +114,7 @@ range_index_free(struct range_index *range_index) {
 		capacity * sizeof(uint32_t)
 	);
 
+	SET_OFFSET_OF(&range_index->values, NULL);
+
 	radix_free(&range_index->radix);
 }

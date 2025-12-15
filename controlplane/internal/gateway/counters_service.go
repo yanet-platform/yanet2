@@ -44,6 +44,22 @@ func (m *CountersService) encodeCounters(
 	return res
 }
 
+func (m *CountersService) Device(
+	ctx context.Context,
+	request *ynpb.DeviceCountersRequest,
+) (*ynpb.CountersResponse, error) {
+	instance := request.GetDpInstance()
+
+	dpConfig := m.shm.DPConfig(instance)
+	counterValues := dpConfig.DeviceCounters(request.Device)
+
+	response := &ynpb.CountersResponse{
+		Counters: m.encodeCounters(counterValues),
+	}
+
+	return response, nil
+}
+
 func (m *CountersService) Pipeline(
 	ctx context.Context,
 	request *ynpb.PipelineCountersRequest,
@@ -54,6 +70,38 @@ func (m *CountersService) Pipeline(
 
 	dpConfig := m.shm.DPConfig(instance)
 	counterValues := dpConfig.PipelineCounters(device, pipeline)
+
+	response := &ynpb.CountersResponse{
+		Counters: m.encodeCounters(counterValues),
+	}
+
+	return response, nil
+}
+
+func (m *CountersService) Function(
+	ctx context.Context,
+	request *ynpb.FunctionCountersRequest,
+) (*ynpb.CountersResponse, error) {
+	instance := request.GetDpInstance()
+
+	dpConfig := m.shm.DPConfig(instance)
+	counterValues := dpConfig.FunctionCounters(request.Device, request.Pipeline, request.Function)
+
+	response := &ynpb.CountersResponse{
+		Counters: m.encodeCounters(counterValues),
+	}
+
+	return response, nil
+}
+
+func (m *CountersService) Chain(
+	ctx context.Context,
+	request *ynpb.ChainCountersRequest,
+) (*ynpb.CountersResponse, error) {
+	instance := request.GetDpInstance()
+
+	dpConfig := m.shm.DPConfig(instance)
+	counterValues := dpConfig.ChainCounters(request.Device, request.Pipeline, request.Function, request.Chain)
 
 	response := &ynpb.CountersResponse{
 		Counters: m.encodeCounters(counterValues),

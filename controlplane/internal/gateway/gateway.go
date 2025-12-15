@@ -112,6 +112,8 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *G
 
 	server := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(xgrpc.AccessLogInterceptor(log)),
+		grpc.MaxRecvMsgSize(1024*1024*256),
+		grpc.MaxSendMsgSize(1024*1024*256),
 		grpc.ForceServerCodecV2(proxy.Codec()),
 		grpc.UnknownServiceHandler(
 			proxy.TransparentHandler(director),

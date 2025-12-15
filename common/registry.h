@@ -13,7 +13,7 @@
  * a sub-range of unique values inside the all values array.
  */
 
-#define VALUE_COLLECTOR_CHUNK_SIZE 4096
+#define VALUE_COLLECTOR_CHUNK_SIZE 8192
 #define VALUE_COLLECTOR_UNTOUCHED ((uint32_t)-1)
 
 /*
@@ -48,19 +48,23 @@ value_collector_free(struct value_collector *collector) {
 		for (uint32_t chunk_idx = 0; chunk_idx < collector->chunk_count;
 		     ++chunk_idx) {
 			uint32_t *chunk = ADDR_OF(&use_map[chunk_idx]);
-			if (chunk != NULL)
+			if (chunk != NULL) {
 				memory_bfree(
 					collector->memory_context,
 					chunk,
 					VALUE_COLLECTOR_CHUNK_SIZE *
 						sizeof(uint32_t)
 				);
+				SET_OFFSET_OF(use_map + chunk_idx, NULL);
+			}
 		}
 		memory_bfree(
 			collector->memory_context,
 			use_map,
 			collector->chunk_count * sizeof(uint32_t *)
 		);
+
+		SET_OFFSET_OF(&collector->use_map, NULL);
 	}
 }
 
@@ -274,13 +278,20 @@ value_registry_free(struct value_registry *registry) {
 			sizeof(uint32_t),
 			range->count
 		);
+
+		SET_OFFSET_OF(&range->values, NULL);
 	}
 
-	memory_bfree(
-		registry->memory_context,
-		ADDR_OF(&registry->ranges),
-		registry->range_count * sizeof(struct value_range)
-	);
+	if (registry->range_count) {
+		uint64_t capacity = 1 << uint64_log(registry->range_count);
+
+		memory_bfree(
+			registry->memory_context,
+			ADDR_OF(&registry->ranges),
+			capacity * sizeof(struct value_range)
+		);
+	}
+	SET_OFFSET_OF(&registry->ranges, NULL);
 }
 
 static inline uint32_t

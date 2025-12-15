@@ -323,6 +323,7 @@ filter_free(struct filter *filter);
 			attr->free_func(                                       \
 				ADDR_OF(&v->data), &(filter)->memory_context   \
 			);                                                     \
+			SET_OFFSET_OF(&v->data, NULL);                         \
 		}                                                              \
 		for (size_t i = 1; i < 2 * n; ++i) {                           \
 			value_registry_free(&(filter)->v[i].registry);         \

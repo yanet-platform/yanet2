@@ -52,6 +52,21 @@ cp_chain_create(
 		strtcpy(new_chain->modules[idx].name,
 			cp_chain_config->modules[idx].name,
 			sizeof(new_chain->modules[idx].name));
+
+		char tsc_counter_name[COUNTER_NAME_LEN];
+		snprintf(
+			tsc_counter_name,
+			sizeof(tsc_counter_name),
+			"stage %lu tsc",
+			idx
+		);
+
+		new_chain->modules[idx].tsc_counter_id =
+			counter_registry_register(
+				&new_chain->counter_registry,
+				tsc_counter_name,
+				8
+			);
 	}
 
 	return new_chain;

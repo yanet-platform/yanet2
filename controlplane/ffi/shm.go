@@ -411,6 +411,21 @@ func (M *DPConfig) encodeCounters(counters *C.struct_counter_handle_list) []Coun
 	return res
 }
 
+func (m *DPConfig) DeviceCounters(
+	device_name string,
+) []CounterInfo {
+	c_device_name := C.CString(device_name)
+	defer C.free(unsafe.Pointer(c_device_name))
+	counters := C.yanet_get_device_counters(m.ptr, c_device_name)
+	defer C.yanet_counter_handle_list_free(counters)
+
+	if counters == nil {
+		return nil
+	}
+
+	return m.encodeCounters(counters)
+}
+
 // PipelineCounters returns pipeline counters
 func (m *DPConfig) PipelineCounters(
 	device_name string,
@@ -421,6 +436,51 @@ func (m *DPConfig) PipelineCounters(
 	c_pipeline_name := C.CString(pipeline_name)
 	defer C.free(unsafe.Pointer(c_pipeline_name))
 	counters := C.yanet_get_pipeline_counters(m.ptr, c_device_name, c_pipeline_name)
+	defer C.yanet_counter_handle_list_free(counters)
+
+	if counters == nil {
+		return nil
+	}
+
+	return m.encodeCounters(counters)
+}
+
+func (m *DPConfig) FunctionCounters(
+	device_name string,
+	pipeline_name string,
+	function_name string,
+) []CounterInfo {
+	c_device_name := C.CString(device_name)
+	defer C.free(unsafe.Pointer(c_device_name))
+	c_pipeline_name := C.CString(pipeline_name)
+	defer C.free(unsafe.Pointer(c_pipeline_name))
+	c_function_name := C.CString(function_name)
+	defer C.free(unsafe.Pointer(c_function_name))
+	counters := C.yanet_get_function_counters(m.ptr, c_device_name, c_pipeline_name, c_function_name)
+	defer C.yanet_counter_handle_list_free(counters)
+
+	if counters == nil {
+		return nil
+	}
+
+	return m.encodeCounters(counters)
+}
+
+func (m *DPConfig) ChainCounters(
+	device_name string,
+	pipeline_name string,
+	function_name string,
+	chain_name string,
+) []CounterInfo {
+	c_device_name := C.CString(device_name)
+	defer C.free(unsafe.Pointer(c_device_name))
+	c_pipeline_name := C.CString(pipeline_name)
+	defer C.free(unsafe.Pointer(c_pipeline_name))
+	c_function_name := C.CString(function_name)
+	defer C.free(unsafe.Pointer(c_function_name))
+	c_chain_name := C.CString(chain_name)
+	defer C.free(unsafe.Pointer(c_chain_name))
+	counters := C.yanet_get_chain_counters(m.ptr, c_device_name, c_pipeline_name, c_function_name, c_chain_name)
 	defer C.yanet_counter_handle_list_free(counters)
 
 	if counters == nil {

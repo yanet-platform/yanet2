@@ -142,6 +142,7 @@ dpdk_port_init(
 
 int
 dpdk_port_start(uint16_t port_id) {
+	rte_eth_promiscuous_enable(port_id);
 	return rte_eth_dev_start(port_id);
 }
 

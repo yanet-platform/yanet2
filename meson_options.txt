@@ -14,7 +14,7 @@ option(
 option(
   'mbuf_max_size',
   type: 'integer',
-  value: 8192,
+  value: 16384,
   description: 'Default mempool element (mBuf) size for workers.',
 )
 

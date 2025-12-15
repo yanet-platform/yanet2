@@ -47,12 +47,21 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	}, nil
 }
 
+func FreeModuleConfig(module *ModuleConfig) {
+	C.acl_module_config_free(module.asRawPtr())
+}
+
 func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
 	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
 func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
+}
+
+type network struct {
+	addr netip.Addr
+	mask netip.Addr
 }
 
 type portRange struct {
@@ -75,8 +84,8 @@ type aclRule struct {
 	counter       string
 	devices       []string
 	vlanRanges    []vlanRange
-	srcs          []netip.Prefix
-	dsts          []netip.Prefix
+	srcs          []network
+	dsts          []network
 	protoRanges   []protoRange
 	srcPortRanges []portRange
 	dstPortRanges []portRange
@@ -99,7 +108,7 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 
 	for _, rule := range rules {
 		for _, src := range rule.srcs {
-			if src.Addr().Is4() {
+			if src.addr.Is4() {
 				srcNet4Count++
 			} else {
 				srcNet6Count++
@@ -107,7 +116,7 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 		}
 
 		for _, dst := range rule.dsts {
-			if dst.Addr().Is4() {
+			if dst.addr.Is4() {
 				dstNet4Count++
 			} else {
 				dstNet6Count++
@@ -134,18 +143,13 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 
 	for _, rule := range rules {
 		for _, src := range rule.srcs {
-			addr := src.Addr().AsSlice()
-			if src.Addr().Is4() {
+			addr := src.addr.AsSlice()
+			mask := src.mask.AsSlice()
+			if src.addr.Is4() {
 				net := C.struct_net4{}
 				for idx := range addr {
 					net.addr[idx] = C.uint8_t(addr[idx])
-					if (idx+1)*8 <= src.Bits() {
-						net.mask[idx] = 0xff
-					} else if idx*8 >= src.Bits() {
-						net.mask[idx] = 0
-					} else {
-						net.mask[idx] = 0xff << (src.Bits() - idx*8)
-					}
+					net.mask[idx] = C.uint8_t(mask[idx])
 				}
 
 				cSrc4Nets = append(cSrc4Nets, net)
@@ -153,13 +157,7 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 				net := C.struct_net6{}
 				for idx := range addr {
 					net.addr[idx] = C.uint8_t(addr[idx])
-					if (idx+1)*8 <= src.Bits() {
-						net.mask[idx] = 0xff
-					} else if idx*8 >= src.Bits() {
-						net.mask[idx] = 0
-					} else {
-						net.mask[idx] = 0xff << (src.Bits() - idx*8)
-					}
+					net.mask[idx] = C.uint8_t(mask[idx])
 				}
 
 				cSrc6Nets = append(cSrc6Nets, net)
@@ -167,18 +165,13 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 		}
 
 		for _, dst := range rule.dsts {
-			addr := dst.Addr().AsSlice()
-			if dst.Addr().Is4() {
+			addr := dst.addr.AsSlice()
+			mask := dst.mask.AsSlice()
+			if dst.addr.Is4() {
 				net := C.struct_net4{}
 				for idx := range addr {
 					net.addr[idx] = C.uint8_t(addr[idx])
-					if (idx+1)*8 <= dst.Bits() {
-						net.mask[idx] = 0xff
-					} else if idx*8 >= dst.Bits() {
-						net.mask[idx] = 0
-					} else {
-						net.mask[idx] = 0xff << (dst.Bits() - idx*8)
-					}
+					net.mask[idx] = C.uint8_t(mask[idx])
 				}
 
 				cDst4Nets = append(cDst4Nets, net)
@@ -186,13 +179,7 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 				net := C.struct_net6{}
 				for idx := range addr {
 					net.addr[idx] = C.uint8_t(addr[idx])
-					if (idx+1)*8 <= dst.Bits() {
-						net.mask[idx] = 0xff
-					} else if idx*8 >= dst.Bits() {
-						net.mask[idx] = 0
-					} else {
-						net.mask[idx] = 0xff << (dst.Bits() - idx*8)
-					}
+					net.mask[idx] = C.uint8_t(mask[idx])
 				}
 
 				cDst6Nets = append(cDst6Nets, net)
@@ -301,7 +288,7 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 		}
 
 		for _, src := range rule.srcs {
-			if src.Addr().Is4() {
+			if src.addr.Is4() {
 				cRule.net4.src_count = cRule.net4.src_count + 1
 			} else {
 				cRule.net6.src_count = cRule.net6.src_count + 1
@@ -309,7 +296,7 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 		}
 
 		for _, dst := range rule.dsts {
-			if dst.Addr().Is4() {
+			if dst.addr.Is4() {
 				cRule.net4.dst_count = cRule.net4.dst_count + 1
 			} else {
 				cRule.net6.dst_count = cRule.net6.dst_count + 1
@@ -377,9 +364,14 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 		cRules = append(cRules, cRule)
 	}
 
+	cRulesPtr := (*C.struct_acl_rule)(nil)
+	if len(cRules) > 0 {
+		cRulesPtr = &cRules[0]
+	}
+
 	rc, err := C.acl_module_config_update(
 		m.asRawPtr(),
-		&cRules[0],
+		cRulesPtr,
 		C.uint32_t(len(cRules)),
 	)
 	if err != nil {
@@ -391,7 +383,7 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 	return nil
 }
 
-func DeleteConfig(m *ACLService, configName string, instance uint32) bool {
+func DeleteModule(m *ACLService, configName string, instance uint32) bool {
 	cTypeName := C.CString(agentName)
 	defer C.free(unsafe.Pointer(cTypeName))
 

@@ -2,9 +2,15 @@ use core::error::Error;
 
 use std::net::IpAddr;
 
+use ipnetwork::IpNetwork;
+
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use code::{DeleteConfigRequest, UpdateConfigRequest, acl_service_client::AclServiceClient};
+use code::{
+    DeleteConfigRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
+    ListConfigsRequest, ListConfigsResponse,
+    acl_service_client::AclServiceClient,
+};
 use commonpb::TargetModule;
 use tonic::transport::Channel;
 use ync::logging;
@@ -44,6 +50,22 @@ pub struct Cmd {
 pub enum ModeCmd {
     Delete(DeleteCmd),
     Update(UpdateCmd),
+    Show(ShowCmd),
+    List(ListCmd),
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct ShowCmd {
+    /// The name of the module to delete
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
+    /// Dataplane instances from which to delete config
+    #[arg(long, short, required = true)]
+    pub instance: u32,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct ListCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -81,21 +103,57 @@ impl From<VlanRange> for code::VlanRange {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Net {
-    addr: String,
-    prefix: u32,
-}
+impl From<String> for code::IpNet {
+    fn from(value: String) -> Self {
+        let parts: Vec<&str> = value.split('/').collect();
+        if parts.len() == 1 {
+            let addr: IpAddr = value.parse().unwrap();
+            return match addr {
+                IpAddr::V4(v4) => Self {
+                    addr: v4.octets().to_vec(),
+                    mask: [0xff, 0xff, 0xff, 0xff].to_vec(),
+                },
+                IpAddr::V6(v6) => Self {
+                    addr: v6.octets().to_vec(),
+                    mask: [
+                        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                    ]
+                    .to_vec(),
+                },
+            };
+        }
 
-impl From<Net> for code::IpNet {
-    fn from(value: Net) -> Self {
-        let net: IpAddr = value.addr.parse().unwrap();
-        Self {
-            ip: match net {
-                IpAddr::V4(ipv4) => ipv4.octets().into(),
-                IpAddr::V6(ipv6) => ipv6.octets().into(),
+        if parts.len() != 2 {
+            panic!("invalid format");
+        }
+
+        let chmo: Result<IpNetwork, _> = value.parse();
+
+        match chmo {
+            Ok(net) => Self {
+                addr: match net.ip() {
+                    IpAddr::V4(v4) => v4.octets().to_vec(),
+                    IpAddr::V6(v6) => v6.octets().to_vec(),
+                },
+                mask: match net.mask() {
+                    IpAddr::V4(v4) => v4.octets().to_vec(),
+                    IpAddr::V6(v6) => v6.octets().to_vec(),
+                },
             },
-            prefix_len: value.prefix,
+            Err(_) => {
+                let addr: IpAddr = parts[0].parse().unwrap();
+                let mask: IpAddr = parts[1].parse().unwrap();
+                Self {
+                    addr: match addr {
+                        IpAddr::V4(v4) => v4.octets().to_vec(),
+                        IpAddr::V6(v6) => v6.octets().to_vec(),
+                    },
+                    mask: match mask {
+                        IpAddr::V4(v4) => v4.octets().to_vec(),
+                        IpAddr::V6(v6) => v6.octets().to_vec(),
+                    },
+                }
+            }
         }
     }
 }
@@ -132,8 +190,8 @@ enum ActionKind {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ACLRule {
-    srcs: Vec<Net>,
-    dsts: Vec<Net>,
+    srcs: Vec<String>,
+    dsts: Vec<String>,
     src_ports: Vec<Range>,
     dst_ports: Vec<Range>,
     proto_ranges: Vec<Range>,
@@ -191,10 +249,46 @@ pub struct ACLService {
     client: AclServiceClient<Channel>,
 }
 
+pub fn print_config_json(response: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
+    println!("{:}", serde_json::to_string(&response)?);
+    Ok(())
+}
+
+pub fn print_configs_json(response: &ListConfigsResponse) -> Result<(), Box<dyn Error>> {
+    println!("{:}", serde_json::to_string(&response)?);
+    Ok(())
+}
+
 impl ACLService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let client = AclServiceClient::connect(endpoint).await?;
+        let client = client.max_decoding_message_size(256 * 1024 * 1024);
+        let client = client.max_encoding_message_size(256 * 1024 * 1024);
         Ok(Self { client })
+    }
+
+    pub async fn list_configs(&mut self, _cmd: ListCmd) -> Result<(), Box<dyn Error>> {
+        let request = ListConfigsRequest {
+        };
+        let response = self.client.list_configs(request).await?.into_inner();
+
+        print_configs_json(&response)?;
+
+        Ok(())
+    }
+
+    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
+        let request = ShowConfigRequest {
+            target: Some(TargetModule {
+                config_name: cmd.config_name.clone(),
+                dataplane_instance: cmd.instance,
+            }),
+        };
+        let response = self.client.show_config(request).await?.into_inner();
+
+        print_config_json(&response)?;
+
+        Ok(())
     }
 
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
@@ -204,7 +298,7 @@ impl ACLService {
                 dataplane_instance: cmd.instance,
             }),
         };
-        self.client.delete_config(request).await?;
+        self.client.delete_config(request).await?.into_inner();
 
         Ok(())
     }
@@ -233,6 +327,8 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     match cmd.mode {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
+        ModeCmd::Show(cmd) => service.show_config(cmd).await,
+        ModeCmd::List(cmd) => service.list_configs(cmd).await,
     }
 }
 

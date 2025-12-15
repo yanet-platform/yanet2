@@ -103,15 +103,20 @@ radix_free(struct radix *radix) {
 		(radix->page_count + RADIX_CHUNK_SIZE - 1) / RADIX_CHUNK_SIZE;
 	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
 		radix_page_t *chunk = ADDR_OF(&pages[chunk_idx]);
+		if (chunk == NULL)
+			continue;
+
 		memory_bfree(
 			memory_context,
 			chunk,
 			sizeof(radix_page_t) * RADIX_CHUNK_SIZE
 		);
+		SET_OFFSET_OF(pages + chunk_idx, NULL);
 	}
 	memory_bfree(
 		memory_context, pages, sizeof(radix_page_t *) * chunk_count
 	);
+	SET_OFFSET_OF(&radix->pages, NULL);
 }
 
 static inline int

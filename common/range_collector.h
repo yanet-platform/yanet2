@@ -35,11 +35,15 @@ range_collector_init(
 
 static inline void
 range_collector_free(struct range_collector *collector, uint8_t key_size) {
-	memory_bfree(
-		collector->memory_context,
-		ADDR_OF(&collector->masks),
-		collector->mask_count * key_size
-	);
+	if (collector->mask_count) {
+		uint64_t capacity = 1 << uint64_log(collector->mask_count);
+		memory_bfree(
+			collector->memory_context,
+			ADDR_OF(&collector->masks),
+			capacity * key_size
+		);
+	}
+	SET_OFFSET_OF(&collector->masks, NULL);
 	radix_free(&collector->radix);
 }
 

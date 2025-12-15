@@ -108,6 +108,8 @@ proto_range_classifier_lookup(struct packet *packet, void *data) {
 
 static inline void
 proto_range_classifier_free(void *data, struct memory_context *memory_context) {
+	if (data == NULL)
+		return;
 	struct proto_range_classifier *c =
 		(struct proto_range_classifier *)data;
 	value_table_free(&c->table);

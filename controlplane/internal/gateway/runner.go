@@ -49,6 +49,7 @@ func NewBuiltInModuleRunner(
 		gatewayEndpoint: gatewayEndpoint,
 		server: grpc.NewServer(
 			grpc.ChainUnaryInterceptor(xgrpc.AccessLogInterceptor(log)),
+			grpc.MaxRecvMsgSize(1024*1024*256), grpc.MaxSendMsgSize(1024*1024*256),
 		),
 		log: log,
 	}

@@ -71,13 +71,15 @@ init_vlan(
 static inline uint32_t
 lookup_vlan(struct packet *packet, void *data) {
 	struct value_table *t = (struct value_table *)data;
-	uint16_t vlan = rte_be_to_cpu_16(packet->mbuf->vlan_tci);
+	uint16_t vlan = packet->vlan;
 	return value_table_get(t, 0, vlan);
 }
 
 static inline void
-free_vlan(void *data, struct memory_context *m) {
-	(void)m;
+free_vlan(void *data, struct memory_context *memory_context) {
 	struct value_table *t = (struct value_table *)data;
+	if (t == NULL)
+		return;
 	value_table_free(t);
+	memory_bfree(memory_context, t, sizeof(struct value_table));
 }

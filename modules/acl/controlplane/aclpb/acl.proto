@@ -13,6 +13,8 @@ service AclService {
 	// Allows to delete acl config if it is not referenced
 	// by any pipeline.
 	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 }
 
 message UpdateConfigRequest {
@@ -21,6 +23,15 @@ message UpdateConfigRequest {
 }
 
 message UpdateConfigResponse {
+}
+
+message ShowConfigRequest {
+	commonpb.TargetModule target = 1;
+}
+
+message ShowConfigResponse {
+	commonpb.TargetModule target = 1;
+	repeated Rule rules = 2;
 }
 
 message Rule {
@@ -45,9 +56,9 @@ message Rule {
 message IPNet {
 	// IP address in network byte order
 	// 4 bytes for IPv4, 16 bytes for IPv6
-	bytes ip = 1;
-	// Network prefix length in bits (e.g., 24 for 10.0.0.0/24)
-	uint32 prefix_len = 2;
+	bytes addr = 1;
+	// Network mask
+	bytes mask = 2;
 }
 
 // Represents a TCP/UDP port range [from; to]
@@ -85,4 +96,11 @@ message DeleteConfigRequest {
 
 message DeleteConfigResponse {
 	bool deleted = 1;
+}
+
+message ListConfigsRequest {
+}
+
+message ListConfigsResponse {
+	repeated commonpb.TargetModule targets = 1;
 }

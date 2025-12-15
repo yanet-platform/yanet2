@@ -40,11 +40,16 @@ module_ectx_decode_device(struct module_ectx *module_ectx, uint64_t index) {
 	return cm_index[index];
 }
 
+struct chain_module_ectx {
+	struct module_ectx *module_ectx;
+	uint64_t tsc_counter_id;
+};
+
 struct chain_ectx {
 	struct cp_chain *cp_chain;
 	struct counter_storage *counter_storage;
 	uint64_t length;
-	struct module_ectx *modules[];
+	struct chain_module_ectx modules[];
 };
 
 struct function_ectx {

@@ -52,7 +52,6 @@ route_test_config(struct cp_module **cp_module) {
 
 	config->cp_module.dp_module_idx = 0;
 	config->cp_module.agent = NULL;
-	config->cp_module.free_handler = route_module_config_free;
 
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
