@@ -12,7 +12,13 @@ yanet-cli-route insert --cfg route0 --instances 0 --via 5.255.198.70 0.0.0.0/0
 
 yanet-cli-function update --name=virt --chains chain0:10=forward:forward0 --instance=0
 
-yanet-cli-function update --name=phy --chains chain0:10=forward:forward0,balancer:balancer0,route:route0 --instance=0
+yanet-cli-function update --name=phy --chains chain0:10=forward:forward0,balancer:balancer0 --instance=0
+
+yanet-cli-pipeline update --name=virt --functions virt --instance=0
+
+yanet-cli-pipeline update --name=dummy --instance=0
+
+yanet-cli-pipeline update --name=phy --functions phy --instance=0
 
 yanet-cli-device-plain update --instance=0 --name=5e:00.0 --input phy:1 --output dummy:1
 

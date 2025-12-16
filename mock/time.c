@@ -2,18 +2,28 @@
 
 #include <stdint.h>
 #include <threads.h>
+#include <time.h>
 
 #include "common/spinlock.h"
 
 struct time {
 	struct spinlock lock;
-	struct timespec current_time;
+	struct timespec ts;
 };
 
-static thread_local struct time current_time = {.lock = {.locked = false}, .current_time = {0, 0}};
+static thread_local struct time current_time = {.lock = {.locked = false}, .ts = {0, 0}};
+
+void
+set_current_time(struct timespec *ts) {
+	spinlock_lock(&current_time.lock);
+	current_time.ts = *ts;
+	spinlock_unlock(&current_time.lock);
+}
+
 // Mock tsc clock
 
 struct tsc_clock;
+
 
 int
 tsc_clock_init(struct tsc_clock *clock) {
@@ -30,6 +40,9 @@ tsc_clock_adjust(struct tsc_clock *clock) {
 uint64_t
 tsc_clock_get_time_ns(struct tsc_clock *clock) {
 	(void)clock;
-	return current_time.tv_sec * (uint64_t)1000 * 1000 * 1000 +
-	       current_time.tv_nsec;
+	spinlock_lock(&current_time.lock);
+	uint64_t res = current_time.ts.tv_sec * (uint64_t)1000 * 1000 * 1000 +
+	       current_time.ts.tv_nsec;
+	spinlock_unlock(&current_time.lock);
+	return res;
 }
