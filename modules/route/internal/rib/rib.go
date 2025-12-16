@@ -36,8 +36,6 @@ func NewRIB(log *zap.SugaredLogger) *RIB {
 }
 
 func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error {
-	m.log.Debugf("adding unicast route %q via %q", prefix, nexthopAddr)
-
 	route := Route{
 		Prefix:    prefix,
 		NextHop:   nexthopAddr,
@@ -61,9 +59,9 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	m.mu.Unlock()
 	m.changedAt.Store(time.Now().UnixNano())
 
-	m.log.Infow("added unicast route",
-		zap.Stringer("prefix", prefix),
-		zap.Stringer("nexthop_addr", nexthopAddr),
+	m.log.Infow("RIB: added unicast route",
+		"prefix", prefix,
+		"nexthop", nexthopAddr,
 	)
 
 	return nil

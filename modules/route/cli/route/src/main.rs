@@ -236,9 +236,14 @@ impl RouteService {
                 do_flush: true,
             };
 
-            let resp = self.client.insert_route(request).await?;
-
-            log::debug!("InsertRouteResponse on instance {inst}: {resp:?}");
+            match self.client.insert_route(request).await {
+                Ok(_resp) => {
+                    log::info!("Route inserted successfully on instance {inst}: {} via {}", cmd.prefix, cmd.nexthop_addr);
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
         }
 
         Ok(())

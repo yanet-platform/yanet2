@@ -178,29 +178,74 @@ func (m *RouteService) InsertRoute(
 	ctx context.Context,
 	request *routepb.InsertRouteRequest,
 ) (*routepb.InsertRouteResponse, error) {
+	startTime := time.Now()
+
 	name, instance, err := request.GetTarget().Validate(uint32(len(m.agents)))
 	if err != nil {
+		m.log.Errorw("InsertRoute: target validation failed",
+			"error", err,
+			"config_name", request.GetTarget().GetConfigName(),
+			"dataplane_instance", request.GetTarget().GetDataplaneInstance(),
+		)
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
+
 	prefix, err := netip.ParsePrefix(request.GetPrefix())
 	if err != nil {
+		m.log.Errorw("InsertRoute: failed to parse prefix",
+			"error", err,
+			"prefix_str", request.GetPrefix(),
+			"name", name,
+			"instance", instance,
+		)
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
 	}
 
 	nexthopAddr, err := netip.ParseAddr(request.GetNexthopAddr())
 	if err != nil {
+		m.log.Errorw("InsertRoute: failed to parse nexthop address",
+			"error", err,
+			"nexthop_str", request.GetNexthopAddr(),
+			"prefix", prefix,
+			"name", name,
+			"instance", instance,
+		)
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop address: %v", err)
 	}
 
 	holder := m.getOrCreateRib(name, instance)
 
 	if err := holder.AddUnicastRoute(prefix, nexthopAddr); err != nil {
+		m.log.Errorw("InsertRoute: failed to add unicast route to RIB",
+			"error", err,
+			"prefix", prefix,
+			"nexthop", nexthopAddr,
+			"name", name,
+			"instance", instance,
+		)
 		return nil, fmt.Errorf("failed to add unicast route: %w", err)
 	}
 
 	if request.GetDoFlush() {
-		return &routepb.InsertRouteResponse{}, m.syncRouteUpdates(holder, name, instance)
+		if err := m.syncRouteUpdates(holder, name, instance); err != nil {
+			m.log.Errorw("InsertRoute: failed to sync route updates",
+				"error", err,
+				"prefix", prefix,
+				"nexthop", nexthopAddr,
+				"name", name,
+				"instance", instance,
+			)
+			return &routepb.InsertRouteResponse{}, err
+		}
 	}
+
+	m.log.Infow("InsertRoute completed successfully",
+		"prefix", prefix,
+		"nexthop", nexthopAddr,
+		"name", name,
+		"instance", instance,
+		"duration", time.Since(startTime),
+	)
 	return &routepb.InsertRouteResponse{}, nil
 }
 
@@ -293,10 +338,13 @@ func (m *RouteService) getRib(name string, instance uint32) (*rib.RIB, bool) {
 func (m *RouteService) getOrCreateRib(name string, instance uint32) *rib.RIB {
 	m.ribsLock.Lock()
 	defer m.ribsLock.Unlock()
-	ribRef, ok := m.ribs[instanceKey{name: name, dataplaneInstance: instance}]
+
+	key := instanceKey{name: name, dataplaneInstance: instance}
+	ribRef, ok := m.ribs[key]
 	if !ok {
+		m.log.Infow("creating new RIB", "name", name, "instance", instance)
 		ribRef = rib.NewRIB(m.log)
-		m.ribs[instanceKey{name: name, dataplaneInstance: instance}] = ribRef
+		m.ribs[key] = ribRef
 	}
 	return ribRef
 }
@@ -307,8 +355,14 @@ func (m *RouteService) syncRouteUpdates(ribRef *rib.RIB, name string, dpInstance
 	// Huge mutex, but our shared memory must be protected from concurrent access.
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	err := m.updateModuleConfig(name, dpInstance, ribDump)
 	if err != nil {
+		m.log.Errorw("syncRouteUpdates: failed to update module config",
+			"error", err,
+			"name", name,
+			"instance", dpInstance,
+		)
 		return err
 	}
 	return nil
@@ -323,34 +377,57 @@ func (m *RouteService) updateModuleConfig(
 
 	config, err := NewModuleConfig(agent, name)
 	if err != nil {
+		m.log.Errorw("updateModuleConfig: failed to create module config",
+			"error", err,
+			"name", name,
+			"instance", inst,
+		)
 		return fmt.Errorf("failed to create %q module config: %w", name, err)
 	}
 
 	// Obtain neighbor entry with resolved hardware addresses
 	neighbours := m.neighCache.View()
 
+	// Statistics for summary logging
+	var stats struct {
+		totalPrefixes       int
+		totalRoutes         int
+		skippedPrefixes     int
+		neighbourNotFound   int
+		hardwareRoutesAdded int
+		prefixesAdded       int
+	}
+
 	hardwareRoutes := map[neigh.HardwareRoute]uint32{}
 	routesListsSet := map[bitset.TinyBitset]int{}
 
 	routeInsertionStart := time.Now()
-	totalRoutes := 0
+
 	for prefixLen := range ribDump {
 		for prefix, routesList := range ribDump[prefixLen] {
+			stats.totalPrefixes++
 			routesListSetKey := bitset.TinyBitset{}
 
 			if len(routesList.Routes) == 0 {
-				m.log.Debugw("skip prefix with no routes", zap.Stringer("prefix", prefix))
+				stats.skippedPrefixes++
 				// FIXME add telemetry
 				continue
 			}
 
-			totalRoutes += len(routesList.Routes)
+			stats.totalRoutes += len(routesList.Routes)
+
 			for _, route := range routesList.Routes {
 				// Lookup hwaddress for the route
 				entry, ok := neighbours.Lookup(route.NextHop.Unmap())
 				if !ok {
+					m.log.Warnw("updateModuleConfig: neighbour not found for nexthop",
+						"nexthop", route.NextHop,
+						"prefix", prefix,
+						"name", name,
+						"instance", inst,
+					)
+					stats.neighbourNotFound++
 					// FIXME: add telemetry?
-					m.log.Warnf("neighbour with %q nexthop IP address not found, skip", route.NextHop)
 					continue
 				}
 
@@ -365,8 +442,16 @@ func (m *RouteService) updateModuleConfig(
 					entry.HardwareRoute.Device,
 				)
 				if err != nil {
+					m.log.Errorw("updateModuleConfig: failed to add hardware route",
+						"error", err,
+						"hardware_route", entry.HardwareRoute,
+						"prefix", prefix,
+						"name", name,
+						"instance", inst,
+					)
 					return fmt.Errorf("failed to add hardware route %q: %w", entry.HardwareRoute, err)
 				}
+				stats.hardwareRoutesAdded++
 				hardwareRoutes[entry.HardwareRoute] = uint32(idx)
 				routesListSetKey.Insert(uint32(idx))
 			}
@@ -374,28 +459,56 @@ func (m *RouteService) updateModuleConfig(
 			if routesListSetKey.Count() == 0 {
 				continue
 			}
+
 			idx, ok := routesListsSet[routesListSetKey]
 			if !ok {
 				routeListIdx, err := config.RouteListAdd(routesListSetKey.AsSlice())
 				if err != nil {
+					m.log.Errorw("updateModuleConfig: failed to add route list",
+						"error", err,
+						"route_indices", routesListSetKey.AsSlice(),
+						"prefix", prefix,
+						"name", name,
+						"instance", inst,
+					)
 					return fmt.Errorf("failed to add routes list: %w", err)
 				}
 				idx = routeListIdx
+				routesListsSet[routesListSetKey] = idx
 			}
 
 			if err := config.PrefixAdd(prefix, uint32(idx)); err != nil {
+				m.log.Errorw("updateModuleConfig: failed to add prefix",
+					"error", err,
+					"prefix", prefix,
+					"route_list_index", idx,
+					"name", name,
+					"instance", inst,
+				)
 				return fmt.Errorf("failed to add prefix %q: %w", prefix, err)
 			}
+			stats.prefixesAdded++
 		}
 	}
-	m.log.Debugw("finished inserting routes",
-		zap.String("module", name),
-		zap.Int("count", totalRoutes),
-		zap.Uint32("inst", inst),
-		zap.Stringer("took", time.Since(routeInsertionStart)),
+
+	m.log.Infow("updateModuleConfig: finished processing routes",
+		"module", name,
+		"instance", inst,
+		"total_prefixes", stats.totalPrefixes,
+		"total_routes", stats.totalRoutes,
+		"skipped_prefixes", stats.skippedPrefixes,
+		"neighbour_not_found", stats.neighbourNotFound,
+		"hardware_routes_added", stats.hardwareRoutesAdded,
+		"prefixes_added", stats.prefixesAdded,
+		"processing_duration", time.Since(routeInsertionStart),
 	)
 
 	if err := agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
+		m.log.Errorw("updateModuleConfig: failed to update modules via FFI",
+			"error", err,
+			"name", name,
+			"instance", inst,
+		)
 		return fmt.Errorf("failed to update module: %w", err)
 	}
 
