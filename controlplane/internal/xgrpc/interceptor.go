@@ -88,6 +88,18 @@ func (m *protoMarshaler) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	m.message.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
 		name := string(fd.Name())
 
+		// Handle repeated bytes fields (lists of byte arrays)
+		if fd.IsList() && fd.Kind() == protoreflect.BytesKind {
+			list := v.List()
+			_ = enc.AddArray(name, zapcore.ArrayMarshalerFunc(func(arr zapcore.ArrayEncoder) error {
+				for i := 0; i < list.Len(); i++ {
+					arr.AppendByteString(list.Get(i).Bytes())
+				}
+				return nil
+			}))
+			return true
+		}
+
 		if fd.Kind() == protoreflect.MessageKind && !fd.IsList() && !fd.IsMap() {
 			if nested := v.Message(); nested.IsValid() {
 				encodeProtoField(enc, name, nested.Interface())
