@@ -3,7 +3,14 @@
 #include <stdint.h>
 #include <threads.h>
 
-thread_local struct timespec current_time = {0, 0};
+#include "common/spinlock.h"
+
+struct time {
+	struct spinlock lock;
+	struct timespec current_time;
+};
+
+static thread_local struct time current_time = {.lock = {.locked = false}, .current_time = {0, 0}};
 // Mock tsc clock
 
 struct tsc_clock;

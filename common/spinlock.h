@@ -8,8 +8,6 @@ struct spinlock {
 	atomic_bool locked;
 };
 
-#define SPINLOCK_INITIALIZER {ATOMIC_VAR_INIT(false)}
-
 /* Initialize the spinlock to unlocked state */
 static inline void
 spinlock_init(struct spinlock *lock) {
