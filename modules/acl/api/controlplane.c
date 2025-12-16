@@ -1,8 +1,12 @@
 #include <errno.h>
+#include <stdint.h>
 
 #include "controlplane.h"
+#include "fwstate_cp.h"
 
+#include "common/memory_address.h"
 #include "config.h"
+#include "modules/fwstate/dataplane/config.h"
 
 #include "common/container_of.h"
 
@@ -62,7 +66,10 @@ acl_module_config_init(struct agent *agent, const char *name) {
 	}
 
 	if (cp_module_init(&config->cp_module, agent, "acl", name)) {
-		goto fail;
+		int prev_errno = errno;
+		acl_module_config_free(&config->cp_module);
+		errno = prev_errno;
+		return NULL;
 	}
 
 	SET_OFFSET_OF(&config->targets, NULL);
@@ -76,14 +83,10 @@ acl_module_config_init(struct agent *agent, const char *name) {
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
 	memset(&config->filter_ip6_port, 0, sizeof(config->filter_ip6_port));
 
-	return &config->cp_module;
+	// Initialize fwstate_cfg with NULL pointers
+	memset(&config->fwstate_cfg, 0, sizeof(struct fwstate_config));
 
-fail: {
-	int prev_errno = errno;
-	acl_module_config_free(&config->cp_module);
-	errno = prev_errno;
-	return NULL;
-}
+	return &config->cp_module;
 }
 
 void
@@ -99,6 +102,8 @@ acl_module_config_free(struct cp_module *cp_module) {
 	FILTER_FREE(&config->filter_ip6, FWD_FILTER_IP6_PROTO_TAG);
 	FILTER_FREE(&config->filter_ip6_port, FWD_FILTER_IP6_PROTO_PORT_TAG);
 
+	// Note: We don't destroy fwstate_cfg maps here because they're owned by
+	// the fwstate module. We only stored offsets to them.
 	memory_bfree(
 		&agent->memory_context,
 		cp_module,
@@ -413,4 +418,24 @@ error_target:
 
 error:
 	return -1;
+}
+
+void
+acl_module_config_set_fwstate_config(
+	struct cp_module *cp_module, struct cp_module *fwstate_cp_module
+) {
+	struct acl_module_config *config =
+		container_of(cp_module, struct acl_module_config, cp_module);
+
+	struct fwstate_module_config *fwstate_config = container_of(
+		fwstate_cp_module, struct fwstate_module_config, cp_module
+	);
+
+	config->fwstate_cfg.sync_config = fwstate_config->cfg.sync_config;
+	EQUATE_OFFSET(
+		&config->fwstate_cfg.fw4state, &fwstate_config->cfg.fw4state
+	);
+	EQUATE_OFFSET(
+		&config->fwstate_cfg.fw6state, &fwstate_config->cfg.fw6state
+	);
 }

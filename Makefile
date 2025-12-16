@@ -1,7 +1,7 @@
 .PHONY: all dataplane test test-functional cli cli-install fuzz clean $(foreach module,$(MODULES),cli/$(module) cli-install/$(module))
 
 # Define the list of modules to avoid repetition
-MODULES := decap dscp route forward nat64
+MODULES := decap dscp route forward nat64 pdump acl
 
 # Default PREFIX for debian packaging
 PREFIX ?= /usr

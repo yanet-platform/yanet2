@@ -1,15 +1,14 @@
 package acl
 
-//#cgo CFLAGS: -I../
-//#cgo CFLAGS: -I../../../
 //#cgo CFLAGS: -I../../../build
-//#cgo CFLAGS: -I../../../ -I../../../lib -I../../../common
+//#cgo CFLAGS: -I.. -I../../.. -I../../../lib -I../../../common
 //#cgo LDFLAGS: -L../../../build/modules/acl/api -lacl_cp
 //#cgo LDFLAGS: -L../../../build/filter -lfilter
 //#cgo LDFLAGS: -L../../../build/lib/logging -llogging
 //
 //#include "api/agent.h"
 //#include "modules/acl/api/controlplane.h"
+//#include "modules/acl/api/fwstate_cp.h"
 import "C"
 
 import (
@@ -21,11 +20,12 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
-// Config of the ACL module
+// ModuleConfig wraps the C ACL module configuration
 type ModuleConfig struct {
 	ptr ffi.ModuleConfig
 }
 
+// NewModuleConfig creates a new ACL module configuration
 func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("agent cannot be nil")
@@ -34,12 +34,13 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
+	// Create a new module config using the C API
 	ptr, err := C.acl_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize module config: %w", err)
-	}
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to initialize module config: module %q not found", name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize ACL module config: %w", err)
+		}
+		return nil, fmt.Errorf("failed to initialize ACL module config: module %q not found", name)
 	}
 
 	return &ModuleConfig{
@@ -51,10 +52,12 @@ func FreeModuleConfig(module *ModuleConfig) {
 	C.acl_module_config_free(module.asRawPtr())
 }
 
+// asRawPtr returns the raw C pointer
 func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
 	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
+// AsFFIModule returns the FFI module config
 func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
@@ -392,4 +395,8 @@ func DeleteModule(m *ACLService, configName string) bool {
 
 	result := C.agent_delete_module((*C.struct_agent)(m.agent.AsRawPtr()), cTypeName, cConfigName)
 	return result == 0
+}
+
+func (m *ModuleConfig) SetFwStateConfig(agent *ffi.Agent, fwstateConfig *FwStateConfig) {
+	C.acl_module_config_set_fwstate_config(m.asRawPtr(), fwstateConfig.asCPModule())
 }

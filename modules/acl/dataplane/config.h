@@ -3,9 +3,13 @@
 #include "controlplane/config/zone.h"
 
 #include "filter/filter.h"
+#include "lib/fwstate/config.h"
 
 #define ACL_ACTION_ALLOW 0
 #define ACL_ACTION_DENY 1
+#define ACL_ACTION_COUNT 2
+#define ACL_ACTION_CHECK_STATE 3
+#define ACL_ACTION_CREATE_STATE 4
 
 struct acl_target {
 	uint64_t action;
@@ -24,4 +28,6 @@ struct acl_module_config {
 
 	uint64_t target_count;
 	struct acl_target *targets;
+
+	struct fwstate_config fwstate_cfg;
 };

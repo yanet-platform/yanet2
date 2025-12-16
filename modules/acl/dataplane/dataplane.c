@@ -2,13 +2,17 @@
 #include "config.h"
 
 #include <rte_ether.h>
-#include <rte_ip.h>
-#include <rte_tcp.h>
-#include <rte_udp.h>
 
-#include <rte_mbuf.h>
+#include <stdint.h>
 
 #include "dataplane/module/module.h"
+#include "dataplane/packet/packet.h"
+#include "dataplane/worker.h"
+#include "dataplane/worker/worker.h"
+#include "fwstate/lookup.h"
+#include "fwstate/sync.h"
+#include "lib/dataplane/time/clock.h"
+#include "logging/log.h"
 
 struct acl_module {
 	struct module module;
@@ -68,13 +72,21 @@ acl_handle_packets(
 		cp_module
 	);
 
+	struct fwstate_config *fwstate_config = &acl_config->fwstate_cfg;
+	struct fwstate_sync_config *sync_config = &fwstate_config->sync_config;
+	fwmap_t *fw4state = ADDR_OF(&fwstate_config->fw4state);
+	fwmap_t *fw6state = ADDR_OF(&fwstate_config->fw6state);
+	fwmap_t *state_table = NULL;
+
+	// Time in nanoseconds is sufficient for keeping state up to 500 years
+	uint64_t now = tsc_clock_get_time_ns(&dp_worker->clock);
+
 	/*
 	 * There are two major options:
 	 *  - process packets one by one
-	 *  - process stages ony by one
+	 *  - process stages one by one
 	 * For the second option we have to split v4 and v6 processing.
 	 */
-
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		struct acl_target *target = NULL;
@@ -98,6 +110,8 @@ acl_handle_packets(
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+			state_table = fw4state;
+
 			const uint32_t *ip4_actions;
 			uint32_t ip4_action_count;
 			FILTER_QUERY(
@@ -135,6 +149,8 @@ acl_handle_packets(
 			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+			state_table = fw6state;
+
 			const uint32_t *ip6_actions;
 			uint32_t ip6_action_count;
 			FILTER_QUERY(
@@ -184,10 +200,58 @@ acl_handle_packets(
 			counters[0] += 1;
 			counters[1] += packet_data_len(packet);
 
-			if (target->action == ACL_ACTION_ALLOW) {
+			enum sync_packet_direction push_sync_packet = SYNC_NONE;
+
+			switch (target->action) {
+			case ACL_ACTION_ALLOW:
 				packet_front_output(packet_front, packet);
-			} else {
+				break;
+			case ACL_ACTION_DENY:
 				packet_front_drop(packet_front, packet);
+				break;
+			case ACL_ACTION_CREATE_STATE:
+				push_sync_packet = SYNC_INGRESS;
+				break;
+			case ACL_ACTION_CHECK_STATE:
+				if (fwstate_check_state(
+					    state_table,
+					    packet,
+					    now,
+					    &push_sync_packet
+				    )) {
+					packet_front_output(
+						packet_front, packet
+					);
+				} else {
+					packet_front_drop(packet_front, packet);
+				}
+				break;
+			}
+
+			if (push_sync_packet != SYNC_NONE) {
+				// Allocate a new packet for the sync frame
+				struct packet *sync_pkt =
+					worker_packet_alloc(dp_worker);
+				if (unlikely(sync_pkt == NULL)) {
+					LOG(ERROR,
+					    "failed to allocate sync packet");
+					continue;
+				}
+				if (unlikely(
+					    fwstate_craft_state_sync_packet(
+						    sync_config,
+						    packet,
+						    push_sync_packet,
+						    sync_pkt
+					    ) == -1
+				    )) {
+					worker_packet_free(sync_pkt);
+					LOG(ERROR,
+					    "failed to craft sync packet");
+					continue;
+				}
+
+				packet_front_output(packet_front, sync_pkt);
 			}
 
 		} else {

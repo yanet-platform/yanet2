@@ -113,7 +113,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize pdump built-in module: %w", err)
 	}
 
-	aclModule, err := acl.NewAclModule(cfg.Modules.ACL, log)
+	aclModule, err := acl.NewACLModule(cfg.Modules.ACL, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize acl built-in module: %w", err)
 	}
@@ -159,6 +159,9 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		),
 		gateway.WithBuiltInModule(
 			balancerModule,
+		),
+		gateway.WithBuiltInModule(
+			aclModule,
 		),
 		gateway.WithBuiltInDevice(
 			plainDevice,

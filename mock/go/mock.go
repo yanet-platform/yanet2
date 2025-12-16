@@ -10,7 +10,9 @@ package mock
 #cgo LDFLAGS: -L../../build/modules/balancer/dataplane -lbalancer_dp
 #cgo LDFLAGS: -L../../build/modules/decap/dataplane -ldecap_dp
 #cgo LDFLAGS: -L../../build/modules/dscp/dataplane -ldscp_dp
+// fwstate depends on acl, so the acl should come first
 #cgo LDFLAGS: -L../../build/modules/acl/dataplane -lacl_dp
+#cgo LDFLAGS: -L../../build/modules/fwstate/dataplane -lfwstate_dp
 #cgo LDFLAGS: -L../../build/modules/forward/dataplane -lforward_dp
 #cgo LDFLAGS: -L../../build/modules/route/dataplane -lroute_dp
 #cgo LDFLAGS: -L../../build/modules/nat64/dataplane -lnat64_dp
@@ -24,6 +26,8 @@ package mock
 #cgo LDFLAGS: -L../../build/lib/controlplane/agent  -lagent
 #cgo LDFLAGS: -L../../build/lib/counters  -lcounters
 #cgo LDFLAGS: -L../../build/filter -lfilter
+#cgo LDFLAGS: -L../../build/lib/fwstate  -lfwstate
+#cgo LDFLAGS: -L../../build/lib/dataplane/worker  -lworker_dp
 
 #cgo LDFLAGS: -lnuma
 #cgo LDFLAGS: -ldl
@@ -44,6 +48,7 @@ keep_refs(void **ptrs) {
 	extern struct module *new_module_decap(void);
 	extern struct module *new_module_dscp(void);
 	extern struct module *new_module_acl(void);
+	extern struct module *new_module_fwstate(void);
 	extern struct module *new_module_forward(void);
 	extern struct module *new_module_route(void);
 	extern struct module *new_module_nat64(void);
@@ -52,16 +57,22 @@ keep_refs(void **ptrs) {
 	extern struct device *new_device_plain(void);
 	extern struct device *new_device_vlan(void);
 
-	ptrs[0] = (void *)new_module_balancer;
-	ptrs[1] = (void *)new_module_decap;
-	ptrs[2] = (void *)new_module_dscp;
-	ptrs[3] = (void *)new_module_acl;
-	ptrs[4] = (void *)new_module_forward;
-	ptrs[5] = (void *)new_module_route;
-	ptrs[6] = (void *)new_module_nat64;
-	ptrs[7] = (void *)new_module_pdump;
-	ptrs[8] = (void *)new_device_plain;
-	ptrs[9] = (void *)new_device_vlan;
+	static void *funcs[] = {
+		new_module_balancer,
+		new_module_decap,
+		new_module_dscp,
+		new_module_acl,
+		new_module_fwstate,
+		new_module_forward,
+		new_module_route,
+		new_module_nat64,
+		new_module_pdump,
+
+		new_device_plain,
+		new_device_vlan,
+	};
+
+	*ptrs = funcs;
 }
 
 */

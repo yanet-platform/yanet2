@@ -6,8 +6,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "common/memory.h"
-
 #include "dataplane/module/module.h"
 
 #include "dataplane/time/clock.h"
@@ -19,6 +17,7 @@
 #include "controlplane/agent/agent.h"
 
 struct cp_config;
+struct rte_mempool;
 
 struct dp_module {
 	char name[80];

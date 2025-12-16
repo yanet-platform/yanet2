@@ -58,7 +58,7 @@ func (c *Config) Validate() error {
 func DefaultConfig() *Config {
 	return &Config{
 		MemoryPath:         "/dev/hugepages/yanet",
-		MemoryRequirements: 32 * datasize.MB,
+		MemoryRequirements: 64 * datasize.MB,
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",
 	}

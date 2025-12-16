@@ -5,3 +5,4 @@ subdir('counters')
 subdir('dataplane')
 subdir('controlplane')
 subdir('utils')
+subdir('fwstate') # depends on dataplane lib

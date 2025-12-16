@@ -607,6 +607,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 		return fmt.Errorf("failed to start dataplane: %w", err)
 	}
 	f.log.Infof("Dataplane started: %s", output)
+	f.log.Infof("Wait for the kni0 device to appear")
 	err = f.waitOutputPresent("ip link", func(output string) bool {
 		return strings.Contains(output, "kni0")
 	}, 10*time.Second)

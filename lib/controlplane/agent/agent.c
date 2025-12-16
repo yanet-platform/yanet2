@@ -81,6 +81,11 @@ dataplane_instance_numa_idx(struct dp_config *dp_config) {
 	return dp_config->numa_idx;
 }
 
+uint32_t
+dataplane_instance_worker_count(struct dp_config *dp_config) {
+	return (uint32_t)dp_config->worker_count;
+}
+
 struct agent *
 agent_attach(
 	struct yanet_shm *shm,

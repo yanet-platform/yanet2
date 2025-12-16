@@ -98,6 +98,14 @@ yanet_shm_instance_count(struct yanet_shm *shm);
 uint32_t
 dataplane_instance_numa_idx(struct dp_config *dp_config);
 
+// Returns number of workers in the dataplane instance
+//
+// @param dp_config Handle to the dataplane instance.
+//
+// @return Number of workers in the dataplane instance.
+uint32_t
+dataplane_instance_worker_count(struct dp_config *dp_config);
+
 // Detaches a module agent from shared memory, releasing associated resources.
 //
 // @param agent Handle to the module agent to detach
@@ -105,6 +113,18 @@ dataplane_instance_numa_idx(struct dp_config *dp_config);
 // @return 0 on success, -1 on failure
 int
 agent_detach(struct agent *agent);
+
+// Gets the dataplane configuration associated with an agent.
+//
+// Returns the dataplane configuration handle for the dataplane instance
+// that this agent is attached to. This provides access to dataplane-level
+// settings and state.
+//
+// @param agent Handle to the module agent
+//
+// @return Handle to the dataplane configuration
+struct dp_config *
+agent_dp_config(struct agent *agent);
 
 int
 agent_update_modules(
