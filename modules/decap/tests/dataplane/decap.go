@@ -31,31 +31,19 @@ test_decap_handle_packets(
 */
 import "C"
 import (
+	"cmp"
 	"fmt"
 	"net/netip"
 	"runtime"
+	"slices"
 	"unsafe"
 
 	"github.com/gopacket/gopacket"
 
 	"github.com/yanet-platform/yanet2/common/go/dataplane"
+	"github.com/yanet-platform/yanet2/common/go/testutils"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 )
-
-func memCtxCreate() *C.struct_memory_context {
-	var sizeOfArena C.size_t = 1 << 20
-
-	arena := C.malloc(sizeOfArena + C.sizeof_struct_memory_context + C.sizeof_struct_block_allocator)
-
-	memCtx := (*C.struct_memory_context)(arena)
-	arena = unsafe.Pointer(uintptr(arena) + C.sizeof_struct_memory_context)
-	blockAlloc := (*C.struct_block_allocator)(arena)
-	arena = unsafe.Pointer(uintptr(arena) + C.sizeof_struct_block_allocator)
-
-	C.block_allocator_put_arena(blockAlloc, arena, sizeOfArena)
-	C.memory_context_init(memCtx, C.CString("decap_test"), blockAlloc)
-	return memCtx
-}
 
 func buildLPMs(
 	prefixes []netip.Prefix,
@@ -65,6 +53,10 @@ func buildLPMs(
 ) {
 	C.lpm_init(lpm4, memCtx)
 	C.lpm_init(lpm6, memCtx)
+
+	slices.SortFunc(prefixes, func(a netip.Prefix, b netip.Prefix) int {
+		return cmp.Compare(a.Bits(), b.Bits())
+	})
 
 	for _, prefix := range prefixes {
 		if prefix.Addr().Is4() {
@@ -83,11 +75,11 @@ func buildLPMs(
 	}
 }
 
-func decapModuleConfig(prefixes []netip.Prefix, memCtx *C.struct_memory_context) *C.struct_decap_module_config {
+func decapModuleConfig(prefixes []netip.Prefix, memCtx testutils.MemoryContext) *C.struct_decap_module_config {
 	m := &C.struct_decap_module_config{
 		cp_module: C.struct_cp_module{},
 	}
-	buildLPMs(prefixes, memCtx, &m.prefixes4, &m.prefixes6)
+	buildLPMs(prefixes, (*C.struct_memory_context)(memCtx.AsRawPtr()), &m.prefixes4, &m.prefixes6)
 
 	return m
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/common/go/testutils"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 )
@@ -69,7 +70,10 @@ func TestDecap_IPIP6(t *testing.T) {
 	prefixes := []netip.Prefix{
 		xerror.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
 	}
-	memCtx := memCtxCreate()
+
+	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	defer memCtx.Free()
+
 	m := decapModuleConfig(prefixes, memCtx)
 
 	result, err := decapHandlePackets(m, pkt)
@@ -101,7 +105,10 @@ func TestDecap_IPIP(t *testing.T) {
 	prefixes := []netip.Prefix{
 		xerror.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
 	}
-	memCtx := memCtxCreate()
+
+	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	defer memCtx.Free()
+
 	m := decapModuleConfig(prefixes, memCtx)
 
 	result, err := decapHandlePackets(m, pkt)
@@ -127,7 +134,10 @@ func TestDecap_IP6IP(t *testing.T) {
 	prefixes := []netip.Prefix{
 		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
-	memCtx := memCtxCreate()
+
+	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	defer memCtx.Free()
+
 	m := decapModuleConfig(prefixes, memCtx)
 
 	result, err := decapHandlePackets(m, pkt)
@@ -164,7 +174,10 @@ func TestDecap_IP6IP6(t *testing.T) {
 	prefixes := []netip.Prefix{
 		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
-	memCtx := memCtxCreate()
+
+	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	defer memCtx.Free()
+
 	m := decapModuleConfig(prefixes, memCtx)
 
 	result, err := decapHandlePackets(m, pkt)
@@ -192,7 +205,10 @@ func TestDecap_IP6IP_noVlan(t *testing.T) {
 	prefixes := []netip.Prefix{
 		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
-	memCtx := memCtxCreate()
+
+	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	defer memCtx.Free()
+
 	m := decapModuleConfig(prefixes, memCtx)
 
 	result, err := decapHandlePackets(m, pkt)
@@ -356,7 +372,10 @@ func TestDecap_GRE(t *testing.T) {
 		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 		xerror.Unwrap(netip.ParsePrefix("1.2.3.4/24")),
 	}
-	memCtx := memCtxCreate()
+
+	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	defer memCtx.Free()
+
 	m := decapModuleConfig(prefixes, memCtx)
 
 	result, err := decapHandlePackets(m, input...)
@@ -428,7 +447,10 @@ func TestDecap_Fragment_ipv4(t *testing.T) {
 	prefixes := []netip.Prefix{
 		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
-	memCtx := memCtxCreate()
+
+	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	defer memCtx.Free()
+
 	m := decapModuleConfig(prefixes, memCtx)
 
 	result, err := decapHandlePackets(m, input...)
@@ -489,7 +511,10 @@ func TestDecap_Fragment_ipv6(t *testing.T) {
 	prefixes := []netip.Prefix{
 		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
-	memCtx := memCtxCreate()
+
+	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	defer memCtx.Free()
+
 	m := decapModuleConfig(prefixes, memCtx)
 
 	result, err := decapHandlePackets(m, input...)

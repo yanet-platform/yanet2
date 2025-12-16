@@ -19,7 +19,6 @@ package nat64_test
 #include <stdint.h>
 
 #include "common/memory.h"
-#include "common/lpm.h"
 #include "nat64cp.h"
 #include "config.h"
 #include "dataplane/module/module.h"
@@ -48,15 +47,15 @@ test_nat64_handle_packets(
 import "C"
 import (
 	"fmt"
+	"log"
 	"net/netip"
 	"runtime"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/common/go/dataplane"
-
-	"log"
-
 	"github.com/gopacket/gopacket"
+
+	"github.com/yanet-platform/yanet2/common/go/dataplane"
+	"github.com/yanet-platform/yanet2/common/go/testutils"
 )
 
 type mapping struct {
@@ -64,23 +63,8 @@ type mapping struct {
 	ip6 netip.Addr
 }
 
-func memCtxCreate() *C.struct_memory_context {
-	var sizeOfArena C.size_t = 1 << 20
-
-	arena := C.malloc(sizeOfArena + C.sizeof_struct_memory_context + C.sizeof_struct_block_allocator)
-
-	memCtx := (*C.struct_memory_context)(arena)
-	arena = unsafe.Pointer(uintptr(arena) + C.sizeof_struct_memory_context)
-	blockAlloc := (*C.struct_block_allocator)(arena)
-	arena = unsafe.Pointer(uintptr(arena) + C.sizeof_struct_block_allocator)
-
-	C.block_allocator_put_arena(blockAlloc, arena, sizeOfArena)
-	C.memory_context_init(memCtx, C.CString("dscp_test"), blockAlloc)
-	return memCtx
-}
-
 // nat64ModuleConfig creates and configures NAT64 module configuration
-func nat64ModuleConfig(mappings []mapping) *C.struct_nat64_module_config {
+func nat64ModuleConfig(mappings []mapping, memCtx testutils.MemoryContext) *C.struct_nat64_module_config {
 	cDebug := C.CString("debug")
 	defer C.free(unsafe.Pointer(cDebug))
 	_, err := C.log_enable_name(cDebug)
@@ -91,8 +75,7 @@ func nat64ModuleConfig(mappings []mapping) *C.struct_nat64_module_config {
 
 	config := new(C.struct_nat64_module_config)
 
-	memCtx := memCtxCreate()
-	if C.nat64_module_config_data_init(config, memCtx) != 0 {
+	if C.nat64_module_config_data_init(config, (*C.struct_memory_context)(memCtx.AsRawPtr())) != 0 {
 		log.Printf("nat64 module config init fail")
 		return nil
 	}
@@ -102,7 +85,7 @@ func nat64ModuleConfig(mappings []mapping) *C.struct_nat64_module_config {
 
 	C.memory_context_init_from(
 		&config.cp_module.memory_context,
-		memCtx,
+		(*C.struct_memory_context)(memCtx.AsRawPtr()),
 		cName)
 
 	// Add NAT64 prefix

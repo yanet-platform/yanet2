@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/yanet-platform/yanet2/common/go/testutils"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 
@@ -77,7 +78,10 @@ func TestNat64_ICMP_v6_to_v4_Echo(t *testing.T) {
 			xerror.Unwrap(netip.ParseAddr("2001:db8::1")),
 		},
 	}
-	m := nat64ModuleConfig(mappings)
+	memCtx := testutils.NewMemoryContext("nat64_test", 1<<20)
+	defer memCtx.Free()
+
+	m := nat64ModuleConfig(mappings, memCtx)
 	require.NotNil(t, m, "Failed to create NAT64 config")
 
 	// Process packet
