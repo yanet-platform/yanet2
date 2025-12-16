@@ -74,25 +74,16 @@ impl PdumpService {
         Ok(Self { client })
     }
 
-    async fn get_configs(
-        &mut self,
-        name: &str,
-        instances: Vec<u32>,
-    ) -> Result<Vec<ShowConfigResponse>, Box<dyn Error>> {
-        let mut responses = Vec::new();
-        for instance in instances {
-            let request = ShowConfigRequest {
-                target: Some(TargetModule {
-                    config_name: name.to_owned(),
-                    dataplane_instance: instance,
-                }),
-            };
-            log::trace!("show config request on dataplane instance {instance}: {request:?}");
-            let response = self.client.show_config(request).await?.into_inner();
-            log::debug!("show config response on dataplane instance {instance}: {response:?}");
-            responses.push(response);
-        }
-        Ok(responses)
+    async fn get_config(&mut self, name: &str) -> Result<ShowConfigResponse, Box<dyn Error>> {
+        let request = ShowConfigRequest {
+            target: Some(TargetModule {
+                config_name: name.to_owned(),
+            }),
+        };
+        log::trace!("show config request: {request:?}");
+        let response = self.client.show_config(request).await?.into_inner();
+        log::debug!("show config response: {response:?}");
+        Ok(response)
     }
 
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
@@ -101,58 +92,51 @@ impl PdumpService {
             return Ok(());
         };
 
-        let mut instances = cmd.instances;
-        if instances.is_empty() {
-            instances = self.get_dataplane_instances().await?;
-        }
-        let configs = self.get_configs(&name, instances).await?;
+        let config = self.get_config(&name).await?;
 
         match cmd.format {
-            ConfigOutputFormat::Json => print_json(configs)?,
-            ConfigOutputFormat::Tree => print_tree(configs)?,
+            ConfigOutputFormat::Json => print_json(&config)?,
+            ConfigOutputFormat::Tree => print_tree(&config)?,
         }
 
         Ok(())
     }
 
     pub async fn set_config(&mut self, cmd: SetConfigCmd) -> Result<(), Box<dyn Error>> {
-        for instance in cmd.instances {
-            let mut request = SetConfigRequest {
-                target: Some(TargetModule {
-                    config_name: cmd.config_name.clone(),
-                    dataplane_instance: instance,
-                }),
-                ..Default::default()
-            };
-            let mut cfg = request.config.unwrap_or_default();
-            let mut mask = request.update_mask.unwrap_or_default();
+        let mut request = SetConfigRequest {
+            target: Some(TargetModule {
+                config_name: cmd.config_name.clone(),
+            }),
+            ..Default::default()
+        };
+        let mut cfg = request.config.unwrap_or_default();
+        let mut mask = request.update_mask.unwrap_or_default();
 
-            if let Some(filter) = &cmd.filter {
-                cfg.filter = filter.to_string();
-                mask.paths.push("filter".to_string());
-            }
-
-            if let Some(mode) = cmd.mode {
-                cfg.mode = mode.into();
-                mask.paths.push("mode".to_string());
-            }
-
-            if let Some(snaplen) = cmd.snaplen {
-                cfg.snaplen = snaplen;
-                mask.paths.push("snaplen".to_string());
-            }
-
-            if let Some(ring_size) = cmd.ring_size {
-                cfg.ring_size = ring_size;
-                mask.paths.push("ring_size".to_string());
-            }
-
-            request.config = Some(cfg);
-            request.update_mask = Some(mask);
-            log::trace!("set config request on instance {instance}: {request:?}");
-            let response = self.client.set_config(request).await?.into_inner();
-            log::debug!("set config response on instance {instance}: {response:?}");
+        if let Some(filter) = &cmd.filter {
+            cfg.filter = filter.to_string();
+            mask.paths.push("filter".to_string());
         }
+
+        if let Some(mode) = cmd.mode {
+            cfg.mode = mode.into();
+            mask.paths.push("mode".to_string());
+        }
+
+        if let Some(snaplen) = cmd.snaplen {
+            cfg.snaplen = snaplen;
+            mask.paths.push("snaplen".to_string());
+        }
+
+        if let Some(ring_size) = cmd.ring_size {
+            cfg.ring_size = ring_size;
+            mask.paths.push("ring_size".to_string());
+        }
+
+        request.config = Some(cfg);
+        request.update_mask = Some(mask);
+        log::trace!("set config request: {request:?}");
+        let response = self.client.set_config(request).await?.into_inner();
+        log::debug!("set config response: {response:?}");
         Ok(())
     }
 
@@ -163,46 +147,34 @@ impl PdumpService {
         let mut reader_set = JoinSet::new();
         let (tx, rx) = tokio::sync::mpsc::channel::<pdumppb::Record>(16);
 
-        log::debug!("request current pdump configuration for instances: {:?}", cmd.instances);
-        let configs: Vec<_> = self
-            .get_configs(&cmd.config_name, cmd.instances.clone())
-            .await?
-            .into_iter()
-            .filter_map(|c| c.config)
-            .collect();
-
-        if configs.is_empty() {
+        log::debug!("request current pdump configuration");
+        let config = self.get_config(&cmd.config_name).await?;
+        let Some(config) = config.config else {
             return Err(Box::new(std::io::Error::new(
                 ErrorKind::NotFound,
-                format!(
-                    "Configuration {} not found on instances {:?}",
-                    cmd.config_name, cmd.instances
-                ),
+                format!("Configuration {} not found", cmd.config_name),
             )));
-        }
+        };
 
-        for instance in cmd.instances {
-            let request = ReadDumpRequest {
-                target: Some(TargetModule {
-                    config_name: cmd.config_name.clone(),
-                    dataplane_instance: instance,
-                }),
-            };
-            log::trace!("read_data request on instance {instance}: {request:?}");
-            let stream = self.client.read_dump(request).await?.into_inner();
-            log::debug!(
-                "read_data successfully acquired data stream on instance {instance} for {}",
-                cmd.config_name,
-            );
+        let request = ReadDumpRequest {
+            target: Some(TargetModule {
+                config_name: cmd.config_name.clone(),
+            }),
+        };
+        log::trace!("read_data request: {request:?}");
+        let stream = self.client.read_dump(request).await?.into_inner();
+        log::debug!(
+            "read_data successfully acquired data stream for {}",
+            cmd.config_name,
+        );
 
-            reader_set.spawn(writer::pdump_stream_reader(stream, tx.clone(), done.clone()));
-        }
+        reader_set.spawn(writer::pdump_stream_reader(stream, tx.clone(), done.clone()));
         drop(tx);
 
         // Spawn outside the reader_set to get unpinable join handler.
         let mut write_jh = tokio::task::spawn_blocking(move || {
             let output = cmd.output.unwrap_or("-".to_string());
-            writer::pdump_write(configs, rx, cmd.num, cmd.format, &output)
+            writer::pdump_write(vec![config], rx, cmd.num, cmd.format, &output)
         });
 
         let mut sig_pipe = unix::signal(SignalKind::pipe())?;
@@ -236,21 +208,12 @@ impl PdumpService {
         Ok(())
     }
 
-    async fn get_dataplane_instances(&mut self) -> Result<Vec<u32>, Box<dyn Error>> {
-        let request = ListConfigsRequest {};
-        let response = self.client.list_configs(request).await?.into_inner();
-        Ok(response.instance_configs.iter().map(|c| c.instance).collect())
-    }
-
     async fn print_config_list(&mut self) -> Result<(), Box<dyn Error>> {
         let request = ListConfigsRequest {};
         let response = self.client.list_configs(request).await?.into_inner();
         let mut tree = TreeBuilder::new("Pdump Configs".to_string());
-        for instance_config in response.instance_configs {
-            tree.begin_child(format!("Instance {}", instance_config.instance));
-            for config in instance_config.configs {
-                tree.add_empty_child(config);
-            }
+        for config in response.configs {
+            tree.add_empty_child(config);
         }
         let tree = tree.build();
         ptree::print_tree(&tree)?;
@@ -258,25 +221,19 @@ impl PdumpService {
     }
 }
 
-pub fn print_json(resp: Vec<ShowConfigResponse>) -> Result<(), Box<dyn Error>> {
-    println!("{}", serde_json::to_string(&resp)?);
+pub fn print_json(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
+    println!("{}", serde_json::to_string(resp)?);
     Ok(())
 }
 
-pub fn print_tree(configs: Vec<ShowConfigResponse>) -> Result<(), Box<dyn Error>> {
-    let mut tree = TreeBuilder::new("Pdump Configs".to_string());
+pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
+    let mut tree = TreeBuilder::new("Pdump Config".to_string());
 
-    for config in &configs {
-        tree.begin_child(format!("Instance {}", config.instance));
-
-        if let Some(config) = &config.config {
-            tree.add_empty_child(format!("Filter: {}", config.filter));
-            tree.add_empty_child(format!("Mode: {}", dump_mode::to_str(config.mode)));
-            tree.add_empty_child(format!("Snaplen: {}", config.snaplen));
-            tree.add_empty_child(format!("PerWorkerRingSize: {}", config.ring_size));
-        }
-
-        tree.end_child();
+    if let Some(config) = &resp.config {
+        tree.add_empty_child(format!("Filter: {}", config.filter));
+        tree.add_empty_child(format!("Mode: {}", dump_mode::to_str(config.mode)));
+        tree.add_empty_child(format!("Snaplen: {}", config.snaplen));
+        tree.add_empty_child(format!("PerWorkerRingSize: {}", config.ring_size));
     }
 
     let tree = tree.build();

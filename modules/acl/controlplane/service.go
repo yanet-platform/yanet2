@@ -7,11 +7,11 @@ import (
 	"net/netip"
 	"sync"
 
-	"github.com/yanet-platform/yanet2/common/commonpb"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -26,22 +26,15 @@ type ACLService struct {
 	aclpb.UnimplementedAclServiceServer
 
 	mu      sync.Mutex
-	agents  []*ffi.Agent
-	configs map[instanceKey]aclConfig
+	agent   *ffi.Agent
+	configs map[string]aclConfig
 }
 
-func NewACLService(agents []*ffi.Agent) *ACLService {
+func NewACLService(agent *ffi.Agent) *ACLService {
 	return &ACLService{
-		agents:  agents,
-		configs: make(map[instanceKey]aclConfig),
+		agent:   agent,
+		configs: make(map[string]aclConfig),
 	}
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-type instanceKey struct {
-	name     string
-	instance uint32
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -53,7 +46,7 @@ func (m *ACLService) UpdateConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := req.GetTarget().Validate()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -136,12 +129,7 @@ func (m *ACLService) UpdateConfig(
 		rules = append(rules, rule)
 	}
 
-	if inst >= uint32(len(m.agents)) {
-		return nil, fmt.Errorf("invalid instance id")
-	}
-	agent := m.agents[inst]
-
-	module, err := NewModuleConfig(agent, name)
+	module, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 
@@ -152,21 +140,17 @@ func (m *ACLService) UpdateConfig(
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
-	if err := agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
 		FreeModuleConfig(module)
-		return nil, fmt.Errorf("failed to update module on instance %d: %w", inst, err)
+		return nil, fmt.Errorf("failed to update module: %w", err)
 	}
 
 	// Module was updated - it is time to delete an old one
-	key := instanceKey{
-		instance: inst,
-		name:     name,
-	}
-	if oldModule, ok := m.configs[key]; ok {
+	if oldModule, ok := m.configs[name]; ok {
 		FreeModuleConfig(oldModule.module)
 	}
 
-	m.configs[key] = aclConfig{
+	m.configs[name] = aclConfig{
 		rules:  reqRules,
 		module: module,
 	}
@@ -181,28 +165,20 @@ func (m *ACLService) ShowConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := req.GetTarget().Validate()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	key := instanceKey{
-		instance: inst,
-		name:     name,
-	}
-
-	config, ok := m.configs[key]
+	config, ok := m.configs[name]
 
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "not found")
 	}
 
 	response := &aclpb.ShowConfigResponse{
-		Target: &commonpb.TargetModule{
-			DataplaneInstance: inst,
-			ConfigName:        name,
-		},
-		Rules: config.rules,
+		Target: req.Target,
+		Rules:  config.rules,
 	}
 
 	return response, nil
@@ -215,13 +191,12 @@ func (m *ACLService) ListConfigs(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	response := &aclpb.ListConfigsResponse{}
+	response := &aclpb.ListConfigsResponse{
+		Configs: make([]string, 0, len(m.configs)),
+	}
 
-	for key := range m.configs {
-		response.Targets = append(response.Targets, &commonpb.TargetModule{
-			DataplaneInstance: key.instance,
-			ConfigName:        key.name,
-		})
+	for name := range m.configs {
+		response.Configs = append(response.Configs, name)
 	}
 
 	return response, nil
@@ -234,27 +209,22 @@ func (m *ACLService) DeleteConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := req.GetTarget().Validate()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	key := instanceKey{
-		instance: inst,
-		name:     name,
-	}
-
-	_, ok := m.configs[key]
+	_, ok := m.configs[name]
 
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "not found")
 	}
 
-	if DeleteModule(m, name, inst) {
-		return nil, fmt.Errorf("could not deletee module on instance %d", inst)
+	if DeleteModule(m, name) {
+		return nil, fmt.Errorf("could not delete module")
 	}
 
-	delete(m.configs, key)
+	delete(m.configs, name)
 
 	response := &aclpb.DeleteConfigResponse{}
 

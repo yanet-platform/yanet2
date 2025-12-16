@@ -23,16 +23,13 @@ export interface Function {
     chains?: FunctionChain[];
 }
 
-export interface ListFunctionsRequest {
-    instance?: number;
-}
+export interface ListFunctionsRequest { }
 
 export interface ListFunctionsResponse {
     ids?: FunctionId[];
 }
 
 export interface GetFunctionRequest {
-    instance?: number;
     id?: FunctionId;
 }
 
@@ -41,14 +38,12 @@ export interface GetFunctionResponse {
 }
 
 export interface UpdateFunctionRequest {
-    instance?: number;
     function?: Function;
 }
 
 export interface UpdateFunctionResponse { }
 
 export interface DeleteFunctionRequest {
-    instance?: number;
     id?: FunctionId;
 }
 

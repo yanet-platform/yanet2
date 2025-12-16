@@ -46,21 +46,21 @@ var (
 		"ip addr add " + VMIPv4Host + "/24 dev kni0",
 
 		// Configure L2 and L3 forwarding
-		CLIForward + " update --cfg=forward0 --instance 0 --rules  /mnt/config/forward.yaml",
+		CLIForward + " update --cfg=forward0 --rules /mnt/config/forward.yaml",
 
 		// Configure routing
-		CLIRoute + " insert --cfg route0 --instances 0 --via " + VMIPv6Gateway + " ::/0",
-		CLIRoute + " insert --cfg route0 --instances 0 --via " + VMIPv4Gateway + " 0.0.0.0/0",
+		CLIRoute + " insert --cfg route0 --via " + VMIPv6Gateway + " ::/0",
+		CLIRoute + " insert --cfg route0 --via " + VMIPv4Gateway + " 0.0.0.0/0",
 
-		CLIFunction + " update --name=virt --chains chain0:10=forward:forward0 --instance=0",
-		CLIFunction + " update --name=test --chains chain2:1=forward:forward0,route:route0 --instance=0",
+		CLIFunction + " update --name=virt --chains chain0:10=forward:forward0",
+		CLIFunction + " update --name=test --chains chain2:1=forward:forward0,route:route0",
 
-		CLIPipeline + " update --name=bootstrap --functions virt --instance=0",
-		CLIPipeline + " update --name=test --functions test --instance=0",
-		CLIPipeline + " update --name=dummy --instance=0",
+		CLIPipeline + " update --name=bootstrap --functions virt",
+		CLIPipeline + " update --name=test --functions test",
+		CLIPipeline + " update --name=dummy",
 
-		CLIDevicePlain + " update --instance=0 --name=01:00.0 --input test:1 --output dummy:1",
-		CLIDevicePlain + " update --instance=0 --name=virtio_user_kni0 --input bootstrap:1 --output dummy:1",
+		CLIDevicePlain + " update --name=01:00.0 --input test:1 --output dummy:1",
+		CLIDevicePlain + " update --name=virtio_user_kni0 --input bootstrap:1 --output dummy:1",
 	}
 	DebugCommands = []string{
 		"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",

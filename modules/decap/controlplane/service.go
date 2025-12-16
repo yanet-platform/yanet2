@@ -20,15 +20,15 @@ type DecapService struct {
 	decappb.UnimplementedDecapServiceServer
 
 	mu      sync.Mutex
-	agents  []*ffi.Agent
-	configs map[instanceKey][]netip.Prefix
+	agent   *ffi.Agent
+	configs map[string][]netip.Prefix
 	log     *zap.SugaredLogger
 }
 
-func NewDecapService(agents []*ffi.Agent, log *zap.SugaredLogger) *DecapService {
+func NewDecapService(agent *ffi.Agent, log *zap.SugaredLogger) *DecapService {
 	return &DecapService{
-		agents:  agents,
-		configs: map[instanceKey][]netip.Prefix{},
+		agent:   agent,
+		configs: map[string][]netip.Prefix{},
 		log:     log,
 	}
 }
@@ -37,7 +37,7 @@ func (m *DecapService) ShowConfig(
 	ctx context.Context,
 	request *decappb.ShowConfigRequest,
 ) (*decappb.ShowConfigResponse, error) {
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -45,22 +45,20 @@ func (m *DecapService) ShowConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	prefixes, ok := m.configs[key]
+	prefixes, ok := m.configs[name]
 	if !ok {
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
 
-	instanceConfig := &decappb.InstanceConfig{
-		Instance: inst,
+	response := &decappb.ShowConfigResponse{
 		Prefixes: make([]string, 0, len(prefixes)),
 	}
 
 	for _, p := range prefixes {
-		instanceConfig.Prefixes = append(instanceConfig.Prefixes, p.String())
+		response.Prefixes = append(response.Prefixes, p.String())
 	}
 
-	return &decappb.ShowConfigResponse{Config: instanceConfig}, nil
+	return response, nil
 }
 
 func (m *DecapService) AddPrefixes(
@@ -68,7 +66,7 @@ func (m *DecapService) AddPrefixes(
 	request *decappb.AddPrefixesRequest,
 ) (*decappb.AddPrefixesResponse, error) {
 
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -85,12 +83,11 @@ func (m *DecapService) AddPrefixes(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	prefixes, ok := m.configs[key]
+	prefixes, ok := m.configs[name]
 	if !ok {
-		m.configs[key] = toAdd
+		m.configs[name] = toAdd
 	} else {
-		m.configs[key] = slices.Compact(
+		m.configs[name] = slices.Compact(
 			slices.SortedFunc(
 				slices.Values(slices.Concat(prefixes, toAdd)),
 				func(a netip.Prefix, b netip.Prefix) int {
@@ -99,14 +96,14 @@ func (m *DecapService) AddPrefixes(
 		)
 	}
 
-	return &decappb.AddPrefixesResponse{}, m.updateModuleConfig(name, inst)
+	return &decappb.AddPrefixesResponse{}, m.updateModuleConfig(name)
 }
 
 func (m *DecapService) RemovePrefixes(
 	ctx context.Context,
 	request *decappb.RemovePrefixesRequest,
 ) (*decappb.RemovePrefixesResponse, error) {
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -124,38 +121,32 @@ func (m *DecapService) RemovePrefixes(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	prefixes, ok := m.configs[key]
+	prefixes, ok := m.configs[name]
 	if !ok {
 		return &decappb.RemovePrefixesResponse{}, nil
 	}
 
-	m.configs[key] = slices.DeleteFunc(prefixes, func(prefix netip.Prefix) bool {
+	m.configs[name] = slices.DeleteFunc(prefixes, func(prefix netip.Prefix) bool {
 		return slices.Contains(toRemove, prefix)
 	})
 
-	return &decappb.RemovePrefixesResponse{}, m.updateModuleConfig(name, inst)
+	return &decappb.RemovePrefixesResponse{}, m.updateModuleConfig(name)
 }
 
-func (m *DecapService) updateModuleConfig(
-	name string,
-	inst uint32,
-) error {
-	m.log.Debugw("update config", zap.String("module", name), zap.Uint32("instance", inst))
+func (m *DecapService) updateModuleConfig(name string) error {
+	m.log.Debugw("update config", zap.String("module", name))
 
-	agent := m.agents[inst]
-
-	config, err := NewModuleConfig(agent, name)
+	config, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		return fmt.Errorf("failed to create %q module config: %w", name, err)
 	}
-	for _, prefix := range m.configs[instanceKey{name: name, dataplaneInstance: inst}] {
+	for _, prefix := range m.configs[name] {
 		if err := config.PrefixAdd(prefix); err != nil {
 			return fmt.Errorf("failed to add prefix for %s: %w", name, err)
 		}
 	}
 
-	if err := agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
 		return fmt.Errorf("failed to update module: %w", err)
 	}
 

@@ -144,7 +144,6 @@ func TestWlc(t *testing.T) {
 		require.Empty(t, result.Drop)
 
 		configStats := balancer.GetConfigStats(
-			0,
 			defaultDeviceName,
 			defaultPipelineName,
 			defaultFunctionName,
@@ -224,7 +223,6 @@ func TestWlc(t *testing.T) {
 		require.Empty(t, result.Drop)
 
 		configStats := balancer.GetConfigStats(
-			0,
 			defaultDeviceName,
 			defaultPipelineName,
 			defaultFunctionName,

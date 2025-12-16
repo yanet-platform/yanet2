@@ -47,9 +47,6 @@ pub enum ModeCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
-    /// Dataplane instance where the changes should be applied.
-    #[arg(long)]
-    pub instance: u32,
     /// Pipeline name.
     #[arg(long)]
     pub name: String,
@@ -60,9 +57,6 @@ pub struct UpdateCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
-    /// Dataplane instance where the changes should be applied.
-    #[arg(short, long)]
-    pub instance: u32,
     /// Pipeline name.
     #[arg(short, long)]
     pub name: String,
@@ -103,7 +97,6 @@ impl PipelineService {
 
     pub async fn update_pipeline(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         let request = UpdatePipelineRequest {
-            instance: cmd.instance,
             pipeline: Some(Pipeline {
                 id: Some(PipelineId { name: cmd.name }),
                 functions: cmd
@@ -121,7 +114,6 @@ impl PipelineService {
 
     pub async fn delete_pipeline(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
         let request = DeletePipelineRequest {
-            instance: cmd.instance,
             id: Some(PipelineId { name: cmd.name }),
         };
         self.client.delete(request).await?;

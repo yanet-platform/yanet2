@@ -1,7 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { Box, Alert } from '@gravity-ui/uikit';
-import { PageLayout, PageLoader, EmptyState, InstanceTabs } from '../components';
-import { useInstanceTabs } from '../hooks';
+import { PageLayout, PageLoader, EmptyState } from '../components';
 import type { DeviceType } from '../api/devices';
 import {
     DevicePageHeader,
@@ -12,7 +11,7 @@ import {
 
 const DevicesPage: React.FC = () => {
     const {
-        instances,
+        devices,
         loading,
         error,
         createDevice,
@@ -21,23 +20,18 @@ const DevicesPage: React.FC = () => {
         loadPipelineList,
     } = useDeviceData();
 
-    const { activeTab, setActiveTab, currentTabIndex } = useInstanceTabs({ items: instances });
-
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
-
-    const currentInstance = instances[currentTabIndex];
-    const currentInstanceNumber = currentInstance?.instance ?? currentTabIndex;
 
     const handleCreateDevice = useCallback(() => {
         setCreateDialogOpen(true);
     }, []);
 
     const handleCreateConfirm = useCallback((name: string, type: DeviceType) => {
-        createDevice(currentInstanceNumber, name, type);
+        createDevice(name, type);
         setCreateDialogOpen(false);
-    }, [createDevice, currentInstanceNumber]);
+    }, [createDevice]);
 
-    const existingDeviceNames = currentInstance?.devices.map(d => d.id.name || '') || [];
+    const existingDeviceNames = devices.map(d => d.id.name || '');
 
     const headerContent = (
         <DevicePageHeader onCreateDevice={handleCreateDevice} />
@@ -47,28 +41,6 @@ const DevicesPage: React.FC = () => {
         return (
             <PageLayout title="Devices">
                 <PageLoader loading={loading} size="l" />
-            </PageLayout>
-        );
-    }
-
-    if (instances.length === 0) {
-        return (
-            <PageLayout header={headerContent}>
-                {error && (
-                    <Box style={{ padding: '12px 20px' }}>
-                        <Alert theme="danger" message={error} />
-                    </Box>
-                )}
-                <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px' }}>
-                    <EmptyState message="No instances found." />
-                </Box>
-
-                <CreateDeviceDialog
-                    open={createDialogOpen}
-                    onClose={() => setCreateDialogOpen(false)}
-                    onConfirm={handleCreateConfirm}
-                    existingNames={existingDeviceNames}
-                />
             </PageLayout>
         );
     }
@@ -89,37 +61,28 @@ const DevicesPage: React.FC = () => {
                         <Alert theme="danger" message={error} />
                     </Box>
                 )}
-                <InstanceTabs
-                    items={instances}
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                    getTabLabel={(inst) => `Instance ${inst.instance}`}
-                    renderContent={(inst) => (
-                        <Box style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '16px',
-                            overflowY: 'auto',
-                            flex: 1,
-                            minHeight: 0,
-                        }}>
-                            {inst.devices.length === 0 ? (
-                                <EmptyState message="No devices in this instance. Click 'Create Device' to add one." />
-                            ) : (
-                                inst.devices.map((device) => (
-                                    <DeviceCard
-                                        key={device.id.name}
-                                        device={device}
-                                        loadPipelineList={() => loadPipelineList(inst.instance)}
-                                        onUpdate={(updates) => updateDevice(inst.instance, device.id.name || '', updates)}
-                                        onSave={() => saveDevice(inst.instance, device)}
-                                    />
-                                ))
-                            )}
-                        </Box>
+                <Box style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '16px',
+                    overflowY: 'auto',
+                    flex: 1,
+                    minHeight: 0,
+                }}>
+                    {devices.length === 0 ? (
+                        <EmptyState message="No devices found. Click 'Create Device' to add one." />
+                    ) : (
+                        devices.map((device) => (
+                            <DeviceCard
+                                key={device.id.name}
+                                device={device}
+                                loadPipelineList={loadPipelineList}
+                                onUpdate={(updates) => updateDevice(device.id.name || '', updates)}
+                                onSave={() => saveDevice(device)}
+                            />
+                        ))
                     )}
-                    contentStyle={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-                />
+                </Box>
             </Box>
 
             <CreateDeviceDialog

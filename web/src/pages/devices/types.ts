@@ -9,8 +9,3 @@ export interface LocalDevice {
     isNew: boolean; // True if device was created locally but not saved yet
     isDirty: boolean;
 }
-
-export interface InstanceDeviceData {
-    instance: number;
-    devices: LocalDevice[];
-}

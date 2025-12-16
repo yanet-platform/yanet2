@@ -4,5 +4,4 @@ export interface FunctionId {
 
 export interface TargetModule {
     configName?: string;
-    dataplaneInstance?: number;
 }

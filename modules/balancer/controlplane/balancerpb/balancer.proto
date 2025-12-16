@@ -106,13 +106,12 @@ message StateInfoResponse {
 
 message ConfigStatsRequest {
 	commonpb.TargetModule target = 1;
-	uint32 dataplane_instance = 2;
 
 	// required for now – will be optional later
-	string device = 3;
-	string pipeline = 4;
-	string function = 5;
-	string chain = 6;
+	string device = 2;
+	string pipeline = 3;
+	string function = 4;
+	string chain = 5;
 }
 
 message ConfigStatsResponse {

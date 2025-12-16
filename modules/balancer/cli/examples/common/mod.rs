@@ -8,7 +8,6 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
     balancerpb::ShowConfigResponse {
         target: Some(commonpb::TargetModule {
             config_name: "my-balancer".to_string(),
-            dataplane_instance: 0,
         }),
         module_config: Some(balancerpb::ModuleConfig {
             virtual_services: vec![
@@ -150,7 +149,6 @@ pub fn create_list_configs_example() -> balancerpb::ListConfigsResponse {
     let config2 = balancerpb::ShowConfigResponse {
         target: Some(commonpb::TargetModule {
             config_name: "test-balancer".to_string(),
-            dataplane_instance: 1,
         }),
         module_config: Some(balancerpb::ModuleConfig {
             virtual_services: vec![
@@ -245,7 +243,6 @@ pub fn create_state_info_example() -> balancerpb::StateInfoResponse {
     balancerpb::StateInfoResponse {
         target: Some(commonpb::TargetModule {
             config_name: "my-balancer".to_string(),
-            dataplane_instance: 0,
         }),
         info: Some(balancerpb::BalancerInfo {
             active_sessions: Some(balancerpb::AsyncInfo {
@@ -463,7 +460,6 @@ pub fn create_config_stats_example() -> balancerpb::ConfigStatsResponse {
     balancerpb::ConfigStatsResponse {
         target: Some(commonpb::TargetModule {
             config_name: "my-balancer".to_string(),
-            dataplane_instance: 0,
         }),
         device: "eth0".to_string(),
         pipeline: "main".to_string(),
@@ -623,7 +619,6 @@ pub fn create_sessions_info_example() -> balancerpb::SessionsInfoResponse {
     balancerpb::SessionsInfoResponse {
         target: Some(commonpb::TargetModule {
             config_name: "my-balancer".to_string(),
-            dataplane_instance: 0,
         }),
         sessions_info: vec![
             balancerpb::SessionInfo {

@@ -102,5 +102,5 @@ message ListConfigsRequest {
 }
 
 message ListConfigsResponse {
-	repeated commonpb.TargetModule targets = 1;
+	repeated string configs = 1;
 }

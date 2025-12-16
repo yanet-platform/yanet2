@@ -7,8 +7,11 @@ import (
 	"github.com/c2h5oh/datasize"
 )
 
-// Config represents balancer module configuration
+// Config represents VLAN device configuration
 type Config struct {
+	// InstanceID specifies which dataplane instance this device serves.
+	InstanceID uint32 `yaml:"instance_id"`
+
 	// MemoryPath is the path to the shared memory file
 	MemoryPath string `yaml:"memory_path"`
 
@@ -59,10 +62,4 @@ func DefaultConfig() *Config {
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",
 	}
-}
-
-// instanceKey uniquely identifies a module instance on a dataplane instance
-type instanceKey struct {
-	name              string
-	dataplaneInstance uint32
 }

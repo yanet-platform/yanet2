@@ -10,20 +10,20 @@ import (
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
 
-type ffiConfigUpdater func(m *ForwardService, name string, instance uint32) error
+type ffiConfigUpdater func(m *ForwardService, name string) error
 
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
 
 	mu          sync.Mutex
-	agents      []*ffi.Agent
+	agent       *ffi.Agent
 	deviceCount uint16
 	updater     ffiConfigUpdater
 }
 
-func NewForwardService(agents []*ffi.Agent) *ForwardService {
+func NewForwardService(agent *ffi.Agent) *ForwardService {
 	return &ForwardService{
-		agents: agents,
+		agent: agent,
 	}
 }
 
@@ -32,12 +32,7 @@ func (m *ForwardService) ListConfigs(
 ) (*forwardpb.ListConfigsResponse, error) {
 
 	response := &forwardpb.ListConfigsResponse{
-		InstanceConfigs: make([]*forwardpb.InstanceConfigs, len(m.agents)),
-	}
-	for inst := range m.agents {
-		response.InstanceConfigs[inst] = &forwardpb.InstanceConfigs{
-			Instance: uint32(inst),
-		}
+		Configs: make([]string, 0),
 	}
 
 	// Lock instances store and module updates
@@ -50,12 +45,12 @@ func (m *ForwardService) ListConfigs(
 }
 
 func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConfigRequest) (*forwardpb.ShowConfigResponse, error) {
-	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := req.GetTarget().Validate()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &forwardpb.ShowConfigResponse{Instance: inst}
+	response := &forwardpb.ShowConfigResponse{}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -66,7 +61,7 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 }
 
 func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.UpdateConfigRequest) (*forwardpb.UpdateConfigResponse, error) {
-	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := req.GetTarget().Validate()
 	if err != nil {
 		return nil, err
 	}
@@ -120,12 +115,7 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		rules = append(rules, rule)
 	}
 
-	if inst >= uint32(len(m.agents)) {
-		return nil, fmt.Errorf("invalid instance id")
-	}
-	agent := m.agents[inst]
-
-	module, err := NewModuleConfig(agent, name)
+	module, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 
@@ -135,22 +125,22 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
-	if err := agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		return nil, fmt.Errorf("failed to update module on instance %d: %w", inst, err)
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
+		return nil, fmt.Errorf("failed to update module: %w", err)
 	}
 
 	return &forwardpb.UpdateConfigResponse{}, nil
 }
 
 func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.DeleteConfigRequest) (*forwardpb.DeleteConfigResponse, error) {
-	name, instance, err := req.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := req.GetTarget().Validate()
 	if err != nil {
 		return nil, err
 	}
 	// Remove module configuration from the control plane.
 	// TODO
 
-	deleted := DeleteConfig(m, name, instance)
+	deleted := DeleteConfig(m, name)
 
 	response := &forwardpb.DeleteConfigResponse{
 		Deleted: deleted,

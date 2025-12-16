@@ -32,15 +32,9 @@ service RouteService {
 message ListConfigsRequest {
 }
 
-// ListConfigsResponse contains existing configurations per instance.
+// ListConfigsResponse contains existing configurations.
 message ListConfigsResponse {
-	repeated InstanceConfigs instance_configs = 1;
-}
-
-message InstanceConfigs {
-	// Dataplane instance
-	uint32 instance = 1;
-	repeated string configs = 2;
+	repeated string configs = 1;
 }
 
 // ShowRoutesRequest contains filters for route listing.

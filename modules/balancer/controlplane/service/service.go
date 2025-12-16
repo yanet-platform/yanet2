@@ -16,36 +16,28 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Module instance identifier
-type moduleKey struct {
-	name              string
-	dataplaneInstance uint32
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 // gRPC service for controlling balancer module instances
 type BalancerService struct {
 	balancerpb.UnimplementedBalancerServiceServer
 
 	mu sync.Mutex
 
-	instances map[moduleKey]*module.Balancer
-	agents    []ffi.Agent
+	instances map[string]*module.Balancer
+	agent     *ffi.Agent
 	log       *zap.SugaredLogger
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 func NewBalancerService(
-	agents []ffi.Agent,
+	agent *ffi.Agent,
 	log *zap.SugaredLogger,
 ) *BalancerService {
 	log.Info("initializing balancer service")
 	return &BalancerService{
 		mu:        sync.Mutex{},
-		agents:    agents,
-		instances: make(map[moduleKey]*module.Balancer),
+		agent:     agent,
+		instances: make(map[string]*module.Balancer),
 		log:       log,
 	}
 }
@@ -53,261 +45,132 @@ func NewBalancerService(
 ////////////////////////////////////////////////////////////////////////////////
 
 // UpdateConfig updates or enables balancer config
-func (service *BalancerService) UpdateConfig(
+func (m *BalancerService) UpdateConfig(
 	ctx context.Context,
 	req *balancerpb.UpdateConfigRequest,
 ) (*balancerpb.UpdateConfigResponse, error) {
-	if req.Target == nil {
-		return nil, fmt.Errorf("target is required")
+	name, err := req.GetTarget().Validate()
+	if err != nil {
+		return nil, err
 	}
-
-	name := req.Target.ConfigName
-	inst := req.Target.DataplaneInstance
-
-	if int(inst) >= len(service.agents) {
-		service.log.Errorw(
-			"invalid dataplane instance",
-			"name",
-			name,
-			"instance",
-			inst,
-			"max",
-			len(service.agents)-1,
-		)
-		return nil, fmt.Errorf(
-			"invalid dataplane instance: %d (max: %d)",
-			inst,
-			len(service.agents)-1,
-		)
-	}
-
-	key := moduleKey{name: name, dataplaneInstance: inst}
 
 	// Check if balancer exists (hold lock only for map access)
-	service.mu.Lock()
-	existingBalancer, exists := service.instances[key]
-	service.mu.Unlock()
+	m.mu.Lock()
+	existingBalancer, exists := m.instances[name]
+	m.mu.Unlock()
 
 	if exists {
 		// Update existing balancer (no service lock held)
-		service.log.Infow(
-			"updating existing balancer",
-			"name",
-			name,
-			"instance",
-			inst,
-		)
+		m.log.Infow("updating existing balancer", "name", name)
 		if err := existingBalancer.Update(req.ModuleConfig, req.ModuleStateConfig); err != nil {
-			service.log.Errorw(
-				"failed to update balancer",
-				"name",
-				name,
-				"instance",
-				inst,
-				"error",
-				err,
-			)
+			m.log.Errorw("failed to update balancer", "name", name, "error", err)
 			return nil, fmt.Errorf("failed to update balancer: %w", err)
 		}
-		service.log.Infow(
-			"balancer updated successfully",
-			"name",
-			name,
-			"instance",
-			inst,
-		)
+		m.log.Infow("balancer updated successfully", "name", name)
 		return &balancerpb.UpdateConfigResponse{}, nil
 	}
 
 	// Create new balancer (no service lock held during creation)
-	service.log.Infow("creating new balancer", "name", name, "instance", inst)
-	balancerLog := service.log.With("balancer", name, "instance", inst)
+	m.log.Infow("creating new balancer", "name", name)
+	balancerLog := m.log.With("balancer", name)
 	newBalancer, err := module.NewBalancerFromProto(
-		service.agents[inst],
+		*m.agent,
 		name,
 		req.ModuleConfig,
 		req.ModuleStateConfig,
 		balancerLog,
 	)
 	if err != nil {
-		service.log.Errorw(
-			"failed to create balancer",
-			"name",
-			name,
-			"instance",
-			inst,
-			"error",
-			err,
-		)
+		m.log.Errorw("failed to create balancer", "name", name, "error", err)
 		return nil, fmt.Errorf("failed to create balancer: %w", err)
 	}
 
 	// Add to map (hold lock only for map modification)
-	service.mu.Lock()
-	service.instances[key] = newBalancer
-	service.mu.Unlock()
+	m.mu.Lock()
+	m.instances[name] = newBalancer
+	m.mu.Unlock()
 
-	service.log.Infow(
-		"balancer created successfully",
-		"name",
-		name,
-		"instance",
-		inst,
-	)
+	m.log.Infow("balancer created successfully", "name", name)
 	return &balancerpb.UpdateConfigResponse{}, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 // UpdateReals updates reals with optional buffering
-func (service *BalancerService) UpdateReals(
+func (m *BalancerService) UpdateReals(
 	ctx context.Context,
 	req *balancerpb.UpdateRealsRequest,
 ) (*balancerpb.UpdateRealsResponse, error) {
-	if req.Target == nil {
-		return nil, fmt.Errorf("target is required")
+	name, err := req.GetTarget().Validate()
+	if err != nil {
+		return nil, err
 	}
-
-	name := req.Target.ConfigName
-	inst := req.Target.DataplaneInstance
-
-	key := moduleKey{name: name, dataplaneInstance: inst}
 
 	// Get balancer instance (hold lock only for map access)
-	service.mu.Lock()
-	balancerInstance, exists := service.instances[key]
-	service.mu.Unlock()
+	m.mu.Lock()
+	balancerInstance, exists := m.instances[name]
+	m.mu.Unlock()
 
 	if !exists {
-		service.log.Warnw("balancer not found", "name", name, "instance", inst)
-		return nil, fmt.Errorf(
-			"balancer [name=%s, inst=%d] not found",
-			name,
-			inst,
-		)
+		m.log.Warnw("balancer not found", "name", name)
+		return nil, fmt.Errorf("balancer [name=%s] not found", name)
 	}
 
-	service.log.Debugw(
-		"updating reals",
-		"name",
-		name,
-		"instance",
-		inst,
-		"count",
-		len(req.Updates),
-		"buffer",
-		req.Buffer,
-	)
+	m.log.Debugw("updating reals", "name", name, "count", len(req.Updates), "buffer", req.Buffer)
 
 	// Parse real updates
 	updates := make([]lib.RealUpdate, 0, len(req.Updates))
 	for i, protoUpdate := range req.Updates {
 		update, err := lib.NewRealUpdateFromProto(protoUpdate)
 		if err != nil {
-			service.log.Errorw(
-				"failed to parse real update",
-				"name",
-				name,
-				"instance",
-				inst,
-				"index",
-				i,
-				"error",
-				err,
-			)
-			return nil, fmt.Errorf(
-				"failed to parse update at index %d: %w",
-				i,
-				err,
-			)
+			m.log.Errorw("failed to parse real update", "name", name, "index", i, "error", err)
+			return nil, fmt.Errorf("failed to parse update at index %d: %w", i, err)
 		}
 		updates = append(updates, *update)
 	}
 
 	// Apply updates (no service lock held)
 	if err := balancerInstance.UpdateReals(updates, req.Buffer); err != nil {
-		service.log.Errorw(
-			"failed to update reals",
-			"name",
-			name,
-			"instance",
-			inst,
-			"error",
-			err,
-		)
+		m.log.Errorw("failed to update reals", "name", name, "error", err)
 		return nil, fmt.Errorf("failed to update reals: %w", err)
 	}
 
-	service.log.Infow(
-		"reals updated successfully",
-		"name",
-		name,
-		"instance",
-		inst,
-		"count",
-		len(updates),
-		"buffered",
-		req.Buffer,
-	)
+	m.log.Infow("reals updated successfully", "name", name, "count", len(updates), "buffered", req.Buffer)
 	return &balancerpb.UpdateRealsResponse{}, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 // FlushRealUpdates flushes buffered reals updates
-func (service *BalancerService) FlushRealUpdates(
+func (m *BalancerService) FlushRealUpdates(
 	ctx context.Context,
 	req *balancerpb.FlushRealUpdatesRequest,
 ) (*balancerpb.FlushRealUpdatesResponse, error) {
-	if req.Target == nil {
-		return nil, fmt.Errorf("target is required")
+	name, err := req.GetTarget().Validate()
+	if err != nil {
+		return nil, err
 	}
-
-	name := req.Target.ConfigName
-	inst := req.Target.DataplaneInstance
-
-	key := moduleKey{name: name, dataplaneInstance: inst}
 
 	// Get balancer instance (hold lock only for map access)
-	service.mu.Lock()
-	balancerInstance, exists := service.instances[key]
-	service.mu.Unlock()
+	m.mu.Lock()
+	balancerInstance, exists := m.instances[name]
+	m.mu.Unlock()
 
 	if !exists {
-		service.log.Warnw("balancer not found", "name", name, "instance", inst)
-		return nil, fmt.Errorf(
-			"balancer [name=%s, inst=%d] not found",
-			name,
-			inst,
-		)
+		m.log.Warnw("balancer not found", "name", name)
+		return nil, fmt.Errorf("balancer [name=%s] not found", name)
 	}
 
-	service.log.Debugw("flushing real updates", "name", name, "instance", inst)
+	m.log.Debugw("flushing real updates", "name", name)
 
 	// Flush updates (no service lock held)
 	count, err := balancerInstance.FlushRealUpdates()
 	if err != nil {
-		service.log.Errorw(
-			"failed to flush real updates",
-			"name",
-			name,
-			"instance",
-			inst,
-			"error",
-			err,
-		)
+		m.log.Errorw("failed to flush real updates", "name", name, "error", err)
 		return nil, fmt.Errorf("failed to flush real updates: %w", err)
 	}
 
-	service.log.Infow(
-		"real updates flushed",
-		"name",
-		name,
-		"instance",
-		inst,
-		"count",
-		count,
-	)
+	m.log.Infow("real updates flushed", "name", name, "count", count)
 	return &balancerpb.FlushRealUpdatesResponse{
 		UpdatesFlushed: uint32(count),
 	}, nil
@@ -316,34 +179,26 @@ func (service *BalancerService) FlushRealUpdates(
 ////////////////////////////////////////////////////////////////////////////////
 
 // ShowConfig shows balancer config
-func (service *BalancerService) ShowConfig(
+func (m *BalancerService) ShowConfig(
 	ctx context.Context,
 	req *balancerpb.ShowConfigRequest,
 ) (*balancerpb.ShowConfigResponse, error) {
-	if req.Target == nil {
-		return nil, fmt.Errorf("target is required")
+	name, err := req.GetTarget().Validate()
+	if err != nil {
+		return nil, err
 	}
-
-	name := req.Target.ConfigName
-	inst := req.Target.DataplaneInstance
-
-	key := moduleKey{name: name, dataplaneInstance: inst}
 
 	// Get balancer instance (hold lock only for map access)
-	service.mu.Lock()
-	balancerInstance, exists := service.instances[key]
-	service.mu.Unlock()
+	m.mu.Lock()
+	balancerInstance, exists := m.instances[name]
+	m.mu.Unlock()
 
 	if !exists {
-		service.log.Warnw("balancer not found", "name", name, "instance", inst)
-		return nil, fmt.Errorf(
-			"balancer [name=%s, inst=%d] not found",
-			name,
-			inst,
-		)
+		m.log.Warnw("balancer not found", "name", name)
+		return nil, fmt.Errorf("balancer [name=%s] not found", name)
 	}
 
-	service.log.Debugw("showing config", "name", name, "instance", inst)
+	m.log.Debugw("showing config", "name", name)
 
 	// Get config (no service lock held)
 	moduleConfigProto, moduleStateConfigProto := balancerInstance.GetConfig()
@@ -358,24 +213,23 @@ func (service *BalancerService) ShowConfig(
 ////////////////////////////////////////////////////////////////////////////////
 
 // ListConfigs lists balancer configs
-func (service *BalancerService) ListConfigs(
+func (m *BalancerService) ListConfigs(
 	ctx context.Context,
 	req *balancerpb.ListConfigsRequest,
 ) (*balancerpb.ListConfigsResponse, error) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	service.log.Debugw("listing configs", "count", len(service.instances))
+	m.log.Debugw("listing configs", "count", len(m.instances))
 
-	configs := make([]*balancerpb.ShowConfigResponse, 0, len(service.instances))
+	configs := make([]*balancerpb.ShowConfigResponse, 0, len(m.instances))
 
-	for key, balancerInstance := range service.instances {
+	for name, balancerInstance := range m.instances {
 		moduleConfigProto, moduleStateConfigProto := balancerInstance.GetConfig()
 
 		config := &balancerpb.ShowConfigResponse{
 			Target: &commonpb.TargetModule{
-				ConfigName:        key.name,
-				DataplaneInstance: key.dataplaneInstance,
+				ConfigName: name,
 			},
 			ModuleConfig:      moduleConfigProto,
 			ModuleStateConfig: moduleStateConfigProto,
@@ -391,34 +245,26 @@ func (service *BalancerService) ListConfigs(
 ////////////////////////////////////////////////////////////////////////////////
 
 // StateInfo returns info of the balancer state
-func (service *BalancerService) StateInfo(
+func (m *BalancerService) StateInfo(
 	ctx context.Context,
 	req *balancerpb.StateInfoRequest,
 ) (*balancerpb.StateInfoResponse, error) {
-	if req.Target == nil {
-		return nil, fmt.Errorf("target is required")
+	name, err := req.GetTarget().Validate()
+	if err != nil {
+		return nil, err
 	}
-
-	name := req.Target.ConfigName
-	inst := req.Target.DataplaneInstance
-
-	key := moduleKey{name: name, dataplaneInstance: inst}
 
 	// Get balancer instance (hold lock only for map access)
-	service.mu.Lock()
-	balancerInstance, exists := service.instances[key]
-	service.mu.Unlock()
+	m.mu.Lock()
+	balancerInstance, exists := m.instances[name]
+	m.mu.Unlock()
 
 	if !exists {
-		service.log.Warnw("balancer not found", "name", name, "instance", inst)
-		return nil, fmt.Errorf(
-			"balancer [name=%s, inst=%d] not found",
-			name,
-			inst,
-		)
+		m.log.Warnw("balancer not found", "name", name)
+		return nil, fmt.Errorf("balancer [name=%s] not found", name)
 	}
 
-	service.log.Debugw("getting state info", "name", name, "instance", inst)
+	m.log.Debugw("getting state info", "name", name)
 
 	// Get state info (no service lock held)
 	info := balancerInstance.GetStateInfo()
@@ -432,38 +278,29 @@ func (service *BalancerService) StateInfo(
 ////////////////////////////////////////////////////////////////////////////////
 
 // ConfigStats returns stats of the balancer config
-func (service *BalancerService) ConfigStats(
+func (m *BalancerService) ConfigStats(
 	ctx context.Context,
 	req *balancerpb.ConfigStatsRequest,
 ) (*balancerpb.ConfigStatsResponse, error) {
-	if req.Target == nil {
-		return nil, fmt.Errorf("target is required")
+	name, err := req.GetTarget().Validate()
+	if err != nil {
+		return nil, err
 	}
-
-	name := req.Target.ConfigName
-	inst := req.Target.DataplaneInstance
-
-	key := moduleKey{name: name, dataplaneInstance: inst}
 
 	// Get balancer instance (hold lock only for map access)
-	service.mu.Lock()
-	balancerInstance, exists := service.instances[key]
-	service.mu.Unlock()
+	m.mu.Lock()
+	balancerInstance, exists := m.instances[name]
+	m.mu.Unlock()
 
 	if !exists {
-		service.log.Warnw("balancer not found", "name", name, "instance", inst)
-		return nil, fmt.Errorf(
-			"balancer [name=%s, inst=%d] not found",
-			name,
-			inst,
-		)
+		m.log.Warnw("balancer not found", "name", name)
+		return nil, fmt.Errorf("balancer [name=%s] not found", name)
 	}
 
-	service.log.Debugw("getting config stats", "name", name, "instance", inst)
+	m.log.Debugw("getting config stats", "name", name)
 
 	// Get config stats (no service lock held)
 	stats := balancerInstance.GetConfigStats(
-		req.DataplaneInstance,
 		req.Device,
 		req.Pipeline,
 		req.Function,
@@ -483,47 +320,31 @@ func (service *BalancerService) ConfigStats(
 ////////////////////////////////////////////////////////////////////////////////
 
 // SessionsInfo returns info about active balancer sessions
-func (service *BalancerService) SessionsInfo(
+func (m *BalancerService) SessionsInfo(
 	ctx context.Context,
 	req *balancerpb.SessionsInfoRequest,
 ) (*balancerpb.SessionsInfoResponse, error) {
-	if req.Target == nil {
-		return nil, fmt.Errorf("target is required")
+	name, err := req.GetTarget().Validate()
+	if err != nil {
+		return nil, err
 	}
-
-	name := req.Target.ConfigName
-	inst := req.Target.DataplaneInstance
-
-	key := moduleKey{name: name, dataplaneInstance: inst}
 
 	// Get balancer instance (hold lock only for map access)
-	service.mu.Lock()
-	balancerInstance, exists := service.instances[key]
-	service.mu.Unlock()
+	m.mu.Lock()
+	balancerInstance, exists := m.instances[name]
+	m.mu.Unlock()
 
 	if !exists {
-		service.log.Warnw("balancer not found", "name", name, "instance", inst)
-		return nil, fmt.Errorf(
-			"balancer [name=%s, inst=%d] not found",
-			name,
-			inst,
-		)
+		m.log.Warnw("balancer not found", "name", name)
+		return nil, fmt.Errorf("balancer [name=%s] not found", name)
 	}
 
-	service.log.Debugw("getting sessions info", "name", name, "instance", inst)
+	m.log.Debugw("getting sessions info", "name", name)
 
 	// Get sessions info (no service lock held)
 	sessionsInfo, err := balancerInstance.GetSessionsInfo(time.Now())
 	if err != nil {
-		service.log.Errorw(
-			"failed to get sessions info",
-			"name",
-			name,
-			"instance",
-			inst,
-			"error",
-			err,
-		)
+		m.log.Errorw("failed to get sessions info", "name", name, "error", err)
 		return nil, fmt.Errorf("failed to get sessions info: %w", err)
 	}
 
@@ -533,15 +354,7 @@ func (service *BalancerService) SessionsInfo(
 		sessionsPb = append(sessionsPb, sessionsInfo.Sessions[idx].IntoProto())
 	}
 
-	service.log.Infow(
-		"sessions info retrieved",
-		"name",
-		name,
-		"instance",
-		inst,
-		"count",
-		sessionsInfo.SessionsCount,
-	)
+	m.log.Infow("sessions info retrieved", "name", name, "count", sessionsInfo.SessionsCount)
 
 	return &balancerpb.SessionsInfoResponse{
 		Target:       req.Target,

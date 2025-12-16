@@ -92,7 +92,7 @@ impl InspectService {
     fn format_tree_output(&self, response: &code::InspectResponse) -> Result<(), Box<dyn Error>> {
         let mut tree = TreeBuilder::new("YANET System".to_string());
 
-        for info in &response.instance_info {
+        if let Some(info) = &response.instance_info {
             tree.begin_child(format!("Instance {}", info.instance_idx));
 
             tree.begin_child(format!("Attached to NUMA {}", info.numa_idx));

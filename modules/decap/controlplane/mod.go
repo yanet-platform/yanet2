@@ -1,6 +1,8 @@
 package decap
 
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -13,7 +15,7 @@ import (
 type DecapModule struct {
 	cfg          *Config
 	shm          *ffi.SharedMemory
-	agents       []*ffi.Agent
+	agent        *ffi.Agent
 	decapService *DecapService
 	log          *zap.SugaredLogger
 }
@@ -26,23 +28,22 @@ func NewDecapModule(cfg *Config, log *zap.SugaredLogger) (*DecapModule, error) {
 		return nil, err
 	}
 
-	instanceIndices := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
-		zap.Uint32s("instances", instanceIndices),
+		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("decap", instanceIndices, uint(cfg.MemoryRequirements))
+	agent, err := shm.AgentAttach("decap", cfg.InstanceID, uint(cfg.MemoryRequirements))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	decapService := NewDecapService(agents, log)
+	decapService := NewDecapService(agent, log)
 
 	return &DecapModule{
 		cfg:          cfg,
 		shm:          shm,
-		agents:       agents,
+		agent:        agent,
 		decapService: decapService,
 		log:          log,
 	}, nil
@@ -66,10 +67,8 @@ func (m *DecapModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *DecapModule) Close() error {
-	for instance, agent := range m.agents {
-		if err := agent.Close(); err != nil {
-			m.log.Warnw("failed to close shared memory agent", zap.Int("instance", instance), zap.Error(err))
-		}
+	if err := m.agent.Close(); err != nil {
+		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {

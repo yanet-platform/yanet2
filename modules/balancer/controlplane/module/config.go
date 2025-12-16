@@ -329,7 +329,6 @@ func convertAddrsToBytes(addrs []netip.Addr) [][]byte {
 
 // GetStats returns configuration statistics
 func (config *ModuleConfig) GetStats(
-	dataplaneInstance uint32,
 	device, pipeline, function, chain string,
 ) lib.BalancerStats {
 	// Get state info which contains the stats

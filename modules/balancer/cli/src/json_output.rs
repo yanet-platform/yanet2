@@ -19,7 +19,6 @@ pub struct ShowConfigJson {
 #[derive(Serialize)]
 pub struct TargetJson {
     pub config_name: String,
-    pub dataplane_instance: u32,
 }
 
 #[derive(Serialize)]
@@ -359,7 +358,6 @@ pub fn convert_show_config(response: &balancerpb::ShowConfigResponse) -> ShowCon
     ShowConfigJson {
         target: response.target.as_ref().map(|t| TargetJson {
             config_name: t.config_name.clone(),
-            dataplane_instance: t.dataplane_instance,
         }),
         module_config: response.module_config.as_ref().map(|c| ModuleConfigJson {
             virtual_services: c.virtual_services.iter().map(|vs| VirtualServiceJson {
@@ -430,7 +428,6 @@ pub fn convert_state_info(response: &balancerpb::StateInfoResponse) -> StateInfo
     StateInfoJson {
         target: response.target.as_ref().map(|t| TargetJson {
             config_name: t.config_name.clone(),
-            dataplane_instance: t.dataplane_instance,
         }),
         info: response.info.as_ref().map(|i| BalancerInfoJson {
             active_sessions: i.active_sessions.as_ref().map(|a| AsyncInfoJson {
@@ -540,7 +537,6 @@ pub fn convert_config_stats(response: &balancerpb::ConfigStatsResponse) -> Confi
     ConfigStatsJson {
         target: response.target.as_ref().map(|t| TargetJson {
             config_name: t.config_name.clone(),
-            dataplane_instance: t.dataplane_instance,
         }),
         device: response.device.clone(),
         pipeline: response.pipeline.clone(),
@@ -640,7 +636,6 @@ pub fn convert_sessions_info(response: &balancerpb::SessionsInfoResponse) -> Ses
     SessionsInfoJson {
         target: response.target.as_ref().map(|t| TargetJson {
             config_name: t.config_name.clone(),
-            dataplane_instance: t.dataplane_instance,
         }),
         sessions_info: response.sessions_info.iter().map(|s| SessionInfoJson {
             client_addr: bytes_to_ip(&s.client_addr).map(|ip| ip.to_string()).unwrap_or_default(),

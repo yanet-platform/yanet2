@@ -7,6 +7,5 @@ export * from './FormField';
 export * from './FormDialog';
 export * from './ConfirmDialog';
 export * from './CreateEntityDialog';
-export * from './InstanceTabs';
 export * from './SortableDataTable';
 export * from './GraphEditor';

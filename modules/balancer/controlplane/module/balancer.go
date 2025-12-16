@@ -322,14 +322,12 @@ func (b *Balancer) GetSessionsInfo(time time.Time) (*lib.SessionsInfo, error) {
 
 // GetConfigStats returns configuration statistics
 func (b *Balancer) GetConfigStats(
-	dataplaneInstance uint32,
 	device, pipeline, function, chain string,
 ) lib.BalancerStats {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
 	return b.moduleConfig.GetStats(
-		dataplaneInstance,
 		device,
 		pipeline,
 		function,

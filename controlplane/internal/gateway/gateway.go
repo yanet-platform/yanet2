@@ -122,10 +122,10 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *G
 
 	gatewayService := NewGatewayService(registry, opts.Log)
 	loggingService := NewLoggingService(opts.LogLevel, opts.Log)
-	inspectService := NewInspectService(shm)
-	pipelineService := NewPipelineService(shm, opts.Log)
-	functionService := NewFunctionService(shm, opts.Log)
-	countersService := NewCountersService(shm)
+	inspectService := NewInspectService(cfg.InstanceID, shm)
+	pipelineService := NewPipelineService(cfg.InstanceID, shm, opts.Log)
+	functionService := NewFunctionService(cfg.InstanceID, shm, opts.Log)
+	countersService := NewCountersService(cfg.InstanceID, shm)
 
 	ynpb.RegisterGatewayServer(server, gatewayService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", gatewayService)))

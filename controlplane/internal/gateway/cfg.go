@@ -2,6 +2,8 @@ package gateway
 
 // Config is the configuration for the gateway.
 type Config struct {
+	// InstanceID specifies which dataplane instance this gateway serves.
+	InstanceID uint32 `yaml:"instance_id"`
 	// Server is the configuration for the gateway server.
 	Server ServerConfig `yaml:"server"`
 }

@@ -12,9 +12,6 @@ pub struct ShowConfigCmd {
     /// Pdump config name to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: Option<String>,
-    /// Indices of dataplane instances from which configurations should be retrieved.
-    #[arg(long, short, required = false)]
-    pub instances: Vec<u32>,
     /// Output format.
     #[clap(long, value_enum, default_value_t = ConfigOutputFormat::Tree)]
     pub format: ConfigOutputFormat,
@@ -25,9 +22,6 @@ pub struct SetConfigCmd {
     /// Pdump config name to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
-    /// Indices of dataplane instances where changes should be applied, optionally repeated.
-    #[arg(long, short, required = true)]
-    pub instances: Vec<u32>,
 
     /// Filter represents a pcap-style filter expression
     #[arg(long, short)]
@@ -51,9 +45,6 @@ pub struct ReadCmd {
     /// Pdump config name to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
-    /// Indices of dataplane instances where the data should be read.
-    #[arg(long, short, required = true)]
-    pub instances: Vec<u32>,
 
     /// Dump output format.
     #[clap(long, short = 'f', value_enum, default_value_t = DumpOutputFormat::Text)]

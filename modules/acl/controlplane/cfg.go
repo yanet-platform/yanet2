@@ -7,8 +7,11 @@ import (
 	"github.com/c2h5oh/datasize"
 )
 
-// Config represents balancer module configuration
+// Config represents ACL module configuration
 type Config struct {
+	// InstanceID specifies which dataplane instance this module serves.
+	InstanceID uint32 `yaml:"instance_id"`
+
 	// MemoryPath is the path to the shared memory file
 	MemoryPath string `yaml:"memory_path"`
 

@@ -64,13 +64,13 @@ func TestBalancer(t *testing.T) {
 			"/mnt/target/release/yanet-cli-balancer config --name balancer0",
 
 			// Configure functions
-			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:2=balancer:balancer0,route:route0 --instance=0",
+			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:2=balancer:balancer0,route:route0",
 
 			// Configure pipelines
-			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
+			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",
 
 			// Configure devices
-			"/mnt/target/release/yanet-cli-device-plain update --name=01:00.0 --input test:1 --output dummy:1 --instance=0",
+			"/mnt/target/release/yanet-cli-device-plain update --name=01:00.0 --input test:1 --output dummy:1",
 
 			// Show config stats
 			"/mnt/target/release/yanet-cli-balancer stats --name=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",

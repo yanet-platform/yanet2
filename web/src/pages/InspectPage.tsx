@@ -3,15 +3,12 @@ import { Box, Text } from '@gravity-ui/uikit';
 import { toaster } from '../utils';
 import { API } from '../api';
 import type { InstanceInfo } from '../api/inspect';
-import { PageLayout, PageLoader, InstanceTabs } from '../components';
-import { useInstanceTabs } from '../hooks';
+import { PageLayout, PageLoader } from '../components';
 import { InstanceCard } from './inspect';
 
 const InspectPage = (): React.JSX.Element => {
-    const [inspectData, setInspectData] = useState<InstanceInfo[]>([]);
+    const [instanceInfo, setInstanceInfo] = useState<InstanceInfo | null>(null);
     const [loading, setLoading] = useState<boolean>(true);
-
-    const { activeTab, setActiveTab } = useInstanceTabs({ items: inspectData });
 
     useEffect(() => {
         let isMounted = true;
@@ -22,7 +19,7 @@ const InspectPage = (): React.JSX.Element => {
             try {
                 const data = await API.inspect.inspect();
                 if (!isMounted) return;
-                setInspectData(data.instanceInfo || []);
+                setInstanceInfo(data.instanceInfo || null);
             } catch (err) {
                 if (!isMounted) return;
                 toaster.error('inspect-error', 'Failed to fetch inspect data', err);
@@ -48,12 +45,12 @@ const InspectPage = (): React.JSX.Element => {
         );
     }
 
-    if (inspectData.length === 0) {
+    if (!instanceInfo) {
         return (
             <PageLayout title="Inspect">
                 <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px' }}>
                     <Text variant="body-1" color="secondary" style={{ display: 'block' }}>
-                        No instances found
+                        No instance data found
                     </Text>
                 </Box>
             </PageLayout>
@@ -63,13 +60,7 @@ const InspectPage = (): React.JSX.Element => {
     return (
         <PageLayout title="Inspect">
             <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px' }}>
-                <InstanceTabs
-                    items={inspectData}
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                    getTabLabel={(instance, idx) => `Instance ${instance.instanceIdx ?? idx}`}
-                    renderContent={(instance) => <InstanceCard instance={instance} />}
-                />
+                <InstanceCard instance={instanceInfo} />
             </Box>
         </PageLayout>
     );

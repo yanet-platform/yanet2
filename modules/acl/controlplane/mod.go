@@ -16,7 +16,7 @@ const serviceName = "aclpb.AclService"
 type AclModule struct {
 	cfg     *Config
 	shm     *ffi.SharedMemory
-	agents  []*ffi.Agent
+	agent   *ffi.Agent
 	service *ACLService
 	log     *zap.SugaredLogger
 }
@@ -30,23 +30,22 @@ func NewAclModule(cfg *Config, log *zap.SugaredLogger) (*AclModule, error) {
 		return nil, fmt.Errorf("failed to attach shared memory: %w", err)
 	}
 
-	instanceIndices := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
-		zap.Uint32s("instances", instanceIndices),
+		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach(agentName, instanceIndices, uint(cfg.MemoryRequirements))
+	agent, err := shm.AgentAttach(agentName, cfg.InstanceID, uint(cfg.MemoryRequirements))
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach agents: %w", err)
+		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	service := NewACLService(agents)
+	service := NewACLService(agent)
 
 	return &AclModule{
 		cfg:     cfg,
 		shm:     shm,
-		agents:  agents,
+		agent:   agent,
 		service: service,
 		log:     log,
 	}, nil
@@ -69,10 +68,8 @@ func (m *AclModule) RegisterService(server *grpc.Server) {
 }
 
 func (m *AclModule) Close() error {
-	for i, agent := range m.agents {
-		if err := agent.Close(); err != nil {
-			m.log.Warnw("failed to close shared memory agent", "instance", i, "error", err)
-		}
+	if err := m.agent.Close(); err != nil {
+		m.log.Warnw("failed to close shared memory agent", "error", err)
 	}
 	if err := m.shm.Detach(); err != nil {
 		m.log.Warnw("failed to detach shared memory", "error", err)

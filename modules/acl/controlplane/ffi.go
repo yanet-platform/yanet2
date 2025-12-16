@@ -383,17 +383,13 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 	return nil
 }
 
-func DeleteModule(m *ACLService, configName string, instance uint32) bool {
+func DeleteModule(m *ACLService, configName string) bool {
 	cTypeName := C.CString(agentName)
 	defer C.free(unsafe.Pointer(cTypeName))
 
 	cConfigName := C.CString(configName)
 	defer C.free(unsafe.Pointer(cConfigName))
 
-	if instance >= uint32(len(m.agents)) {
-		return true
-	}
-	agent := m.agents[instance]
-	result := C.agent_delete_module((*C.struct_agent)(agent.AsRawPtr()), cTypeName, cConfigName)
+	result := C.agent_delete_module((*C.struct_agent)(m.agent.AsRawPtr()), cTypeName, cConfigName)
 	return result == 0
 }

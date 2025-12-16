@@ -14,16 +14,13 @@ export interface Pipeline {
     functions?: FunctionId[];
 }
 
-export interface ListPipelinesRequest {
-    instance?: number;
-}
+export interface ListPipelinesRequest { }
 
 export interface ListPipelinesResponse {
     ids?: PipelineId[];
 }
 
 export interface GetPipelineRequest {
-    instance?: number;
     id?: PipelineId;
 }
 
@@ -32,14 +29,12 @@ export interface GetPipelineResponse {
 }
 
 export interface UpdatePipelineRequest {
-    instance?: number;
     pipeline?: Pipeline;
 }
 
 export interface UpdatePipelineResponse { }
 
 export interface DeletePipelineRequest {
-    instance?: number;
     id?: PipelineId;
 }
 

@@ -19,7 +19,7 @@ export * from './RouteListItem';
 export * from './DeleteRouteDialog';
 export * from './AddRouteDialog';
 export * from './ConfigTabs';
-export * from './InstanceTabContent';
+export * from './RouteConfigContent';
 export * from './VirtualizedRouteTable';
 export * from './VirtualRow';
 export * from './SortableHeader';

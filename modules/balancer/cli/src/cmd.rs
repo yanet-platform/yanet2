@@ -81,10 +81,6 @@ pub struct UpdateCmd {
     #[arg(long, short = 'n')]
     pub name: String,
 
-    /// Index of the dataplane instance
-    #[arg(long, short, default_value_t = 0)]
-    pub instance: u32,
-
     /// Path to the YAML configuration file
     #[arg(long, short = 'c')]
     pub config: String,
@@ -115,10 +111,6 @@ pub struct EnableRealCmd {
     /// Name of the module config
     #[arg(long, short = 'n')]
     pub name: String,
-
-    /// Index of the dataplane instance
-    #[arg(long, short, default_value_t = 0)]
-    pub instance: u32,
 
     /// IP of the virtual service
     #[arg(long)]
@@ -154,7 +146,7 @@ impl TryFrom<EnableRealCmd> for balancerpb::UpdateRealsRequest {
         Ok(Self {
             target: Some(commonpb::TargetModule {
                 config_name: cmd.name,
-                dataplane_instance: cmd.instance,
+                
             }),
             updates: vec![balancerpb::RealUpdate {
                 virtual_ip: cmd.virtual_ip.into_bytes(),
@@ -174,10 +166,6 @@ pub struct DisableRealCmd {
     /// Name of the module config
     #[arg(long, short = 'n')]
     pub name: String,
-
-    /// Index of the dataplane instance
-    #[arg(long, short, default_value_t = 0)]
-    pub instance: u32,
 
     /// IP of the virtual service
     #[arg(long)]
@@ -209,7 +197,7 @@ impl TryFrom<DisableRealCmd> for balancerpb::UpdateRealsRequest {
         Ok(Self {
             target: Some(commonpb::TargetModule {
                 config_name: cmd.name,
-                dataplane_instance: cmd.instance,
+                
             }),
             updates: vec![balancerpb::RealUpdate {
                 virtual_ip: cmd.virtual_ip.into_bytes(),
@@ -229,10 +217,6 @@ pub struct FlushRealUpdatesCmd {
     /// Name of the module config
     #[arg(long, short = 'n')]
     pub name: String,
-
-    /// Index of the dataplane instance
-    #[arg(long, short, default_value_t = 0)]
-    pub instance: u32,
 }
 
 impl From<FlushRealUpdatesCmd> for balancerpb::FlushRealUpdatesRequest {
@@ -240,7 +224,7 @@ impl From<FlushRealUpdatesCmd> for balancerpb::FlushRealUpdatesRequest {
         Self {
             target: Some(commonpb::TargetModule {
                 config_name: cmd.name,
-                dataplane_instance: cmd.instance,
+                
             }),
         }
     }
@@ -256,10 +240,6 @@ pub struct ConfigCmd {
     #[arg(long, short = 'n')]
     pub name: String,
 
-    /// Index of the dataplane instance
-    #[arg(long, short, default_value_t = 0)]
-    pub instance: u32,
-
     /// Output format
     #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
     pub format: OutputFormat,
@@ -270,7 +250,7 @@ impl From<&ConfigCmd> for balancerpb::ShowConfigRequest {
         Self {
             target: Some(commonpb::TargetModule {
                 config_name: cmd.name.clone(),
-                dataplane_instance: cmd.instance,
+                
             }),
         }
     }
@@ -296,10 +276,6 @@ pub struct StatsCmd {
     /// Name of the module config
     #[arg(long, short = 'n')]
     pub name: String,
-
-    /// Index of the dataplane instance
-    #[arg(long, short, default_value_t = 0)]
-    pub instance: u32,
 
     /// Device name
     #[arg(long)]
@@ -327,9 +303,9 @@ impl From<&StatsCmd> for balancerpb::ConfigStatsRequest {
         Self {
             target: Some(commonpb::TargetModule {
                 config_name: cmd.name.clone(),
-                dataplane_instance: cmd.instance,
+                
             }),
-            dataplane_instance: cmd.instance,
+            
             device: cmd.device.clone(),
             pipeline: cmd.pipeline.clone(),
             function: cmd.function.clone(),
@@ -348,10 +324,6 @@ pub struct StateCmd {
     #[arg(long, short = 'n')]
     pub name: String,
 
-    /// Index of the dataplane instance
-    #[arg(long, short, default_value_t = 0)]
-    pub instance: u32,
-
     /// Output format
     #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
     pub format: OutputFormat,
@@ -362,7 +334,7 @@ impl From<&StateCmd> for balancerpb::StateInfoRequest {
         Self {
             target: Some(commonpb::TargetModule {
                 config_name: cmd.name.clone(),
-                dataplane_instance: cmd.instance,
+                
             }),
         }
     }
@@ -378,10 +350,6 @@ pub struct SessionsCmd {
     #[arg(long, short = 'n')]
     pub name: String,
 
-    /// Index of the dataplane instance
-    #[arg(long, short, default_value_t = 0)]
-    pub instance: u32,
-
     /// Output format
     #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
     pub format: OutputFormat,
@@ -392,7 +360,6 @@ impl From<&SessionsCmd> for balancerpb::SessionsInfoRequest {
         Self {
             target: Some(commonpb::TargetModule {
                 config_name: cmd.name.clone(),
-                dataplane_instance: cmd.instance,
             }),
         }
     }

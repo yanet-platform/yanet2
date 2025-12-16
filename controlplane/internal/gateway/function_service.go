@@ -21,19 +21,21 @@ const functionAgentName = "function"
 // sufficient.
 const functionAgentMemory = uint(1 << 20)
 
-// TODO: docs.
+// FunctionService is a gRPC service for managing functions.
 type FunctionService struct {
 	ynpb.UnimplementedFunctionServiceServer
 
-	shm *ffi.SharedMemory
-	log *zap.SugaredLogger
+	instanceID uint32
+	shm        *ffi.SharedMemory
+	log        *zap.SugaredLogger
 }
 
-// TODO: docs.
-func NewFunctionService(shm *ffi.SharedMemory, log *zap.SugaredLogger) *FunctionService {
+// NewFunctionService creates a new FunctionService.
+func NewFunctionService(instanceID uint32, shm *ffi.SharedMemory, log *zap.SugaredLogger) *FunctionService {
 	return &FunctionService{
-		shm: shm,
-		log: log,
+		instanceID: instanceID,
+		shm:        shm,
+		log:        log,
 	}
 }
 
@@ -41,8 +43,7 @@ func (m *FunctionService) List(
 	ctx context.Context,
 	request *ynpb.ListFunctionsRequest,
 ) (*ynpb.ListFunctionsResponse, error) {
-	instance := request.Instance
-	dpConfig := m.shm.DPConfig(instance)
+	dpConfig := m.shm.DPConfig(m.instanceID)
 
 	functions := dpConfig.Functions()
 
@@ -62,8 +63,7 @@ func (m *FunctionService) Get(
 	ctx context.Context,
 	request *ynpb.GetFunctionRequest,
 ) (*ynpb.GetFunctionResponse, error) {
-	instance := request.Instance
-	dpConfig := m.shm.DPConfig(instance)
+	dpConfig := m.shm.DPConfig(m.instanceID)
 
 	reqId := request.Id
 
@@ -108,15 +108,14 @@ func (m *FunctionService) Get(
 
 }
 
-// TODO: docs.
+// Update updates or inserts a function.
 func (m *FunctionService) Update(
 	ctx context.Context,
 	request *ynpb.UpdateFunctionRequest,
 ) (*ynpb.UpdateFunctionResponse, error) {
-	instance := request.Instance
 	reqFunction := request.Function
 
-	agent, err := m.shm.AgentAttach(functionAgentName, instance, functionAgentMemory)
+	agent, err := m.shm.AgentAttach(functionAgentName, m.instanceID, functionAgentMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", functionAgentName, err)
 	}
@@ -157,16 +156,15 @@ func (m *FunctionService) Delete(
 	ctx context.Context,
 	request *ynpb.DeleteFunctionRequest,
 ) (*ynpb.DeleteFunctionResponse, error) {
-	instance := request.GetInstance()
-	function_name := request.Id.Name
+	functionName := request.Id.Name
 
-	agent, err := m.shm.AgentAttach(functionAgentName, instance, functionAgentMemory)
+	agent, err := m.shm.AgentAttach(functionAgentName, m.instanceID, functionAgentMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", functionAgentName, err)
 	}
 	defer agent.Close()
 
-	if err := agent.DeleteFunction(function_name); err != nil {
+	if err := agent.DeleteFunction(functionName); err != nil {
 		return nil, fmt.Errorf("failed to delete function: %w", err)
 	}
 
