@@ -224,14 +224,17 @@ func (state *ModuleConfigStatePtr) VirtualServicesInfo() []lib.VsInfo {
 		}
 		stats := vsStatsFromC(&entry.stats)
 
+		lastPacketTime := time.Unix(int64(entry.last_packet_timestamp), 0)
+
+		// Debug logging for VS timestamp verification
+		fmt.Printf("[DEBUG] VS %d (%s:%d): last_packet_ts_raw=%d, last_packet_time=%v\n",
+			i, addr, entry.virtual_port, entry.last_packet_timestamp, lastPacketTime)
+
 		out[i] = lib.VsInfo{
-			VsRegistryIdx: uint(i),
-			VsIdentifier:  id,
-			LastPacketTimestamp: time.Unix(
-				int64(entry.last_packet_timestamp),
-				0,
-			),
-			Stats: stats,
+			VsRegistryIdx:       uint(i),
+			VsIdentifier:        id,
+			LastPacketTimestamp: lastPacketTime,
+			Stats:               stats,
 		}
 	}
 	return out
@@ -267,14 +270,17 @@ func (state *ModuleConfigStatePtr) RealsInfo() []lib.RealInfo {
 		}
 		stats := realStatsFromC(&entry.stats)
 
+		lastPacketTime := time.Unix(int64(entry.last_packet_timestamp), 0)
+
+		// Debug logging for Real timestamp verification
+		fmt.Printf("[DEBUG] Real %d (%s -> %s:%d): last_packet_ts_raw=%d, last_packet_time=%v\n",
+			i, realIp, vip, entry.virtual_port, entry.last_packet_timestamp, lastPacketTime)
+
 		out[i] = lib.RealInfo{
-			RealRegistryIdx: uint(i),
-			RealIdentifier:  realId,
-			LastPacketTimestamp: time.Unix(
-				int64(entry.last_packet_timestamp),
-				0,
-			),
-			Stats: stats,
+			RealRegistryIdx:     uint(i),
+			RealIdentifier:      realId,
+			LastPacketTimestamp: lastPacketTime,
+			Stats:               stats,
 		}
 	}
 	return out
@@ -392,16 +398,20 @@ func (state *ModuleConfigStatePtr) SessionsInfo(
 			realId = realInfo.RealIdentifier
 		}
 
+		createTime := time.Unix(int64(entry.create_timestamp), 0)
+		lastPacketTime := time.Unix(int64(entry.last_packet_timestamp), 0)
+
+		// Debug logging for timestamp verification
+		fmt.Printf("[DEBUG] Session %d: create_ts_raw=%d, last_packet_ts_raw=%d, create_time=%v, last_packet_time=%v\n",
+			i, entry.create_timestamp, entry.last_packet_timestamp, createTime, lastPacketTime)
+
 		result.Sessions[i] = lib.SessionInfo{
-			ClientAddr:      clientIp,
-			ClientPort:      uint16(entry.client_port),
-			Real:            realId,
-			CreateTimestamp: time.Unix(int64(entry.create_timestamp), 0),
-			LastPacketTimestamp: time.Unix(
-				int64(entry.last_packet_timestamp),
-				0,
-			),
-			Timeout: time.Duration(entry.timeout) * time.Second,
+			ClientAddr:          clientIp,
+			ClientPort:          uint16(entry.client_port),
+			Real:                realId,
+			CreateTimestamp:     createTime,
+			LastPacketTimestamp: lastPacketTime,
+			Timeout:             time.Duration(entry.timeout) * time.Second,
 		}
 	}
 
