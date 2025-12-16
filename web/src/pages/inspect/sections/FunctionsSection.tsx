@@ -10,7 +10,7 @@ export interface FunctionsSectionProps {
 }
 
 const Arrow: React.FC = () => (
-    <span className="functionArrow">
+    <span className="function-arrow">
         <Icon data={ArrowRight} size={14} />
     </span>
 );
@@ -27,10 +27,10 @@ const ModulesFlow: React.FC<ModulesFlowProps> = ({ chain }) => {
     }
 
     return (
-        <Box className="functionModulesFlow">
+        <Box className="function-modules-flow">
             {modules.map((mod, idx) => (
                 <React.Fragment key={`${chain.Name}-mod-${idx}`}>
-                    <Box className="functionModule">
+                    <Box className="function-module">
                         <Text variant="caption-2">{mod.name || mod.type || 'module'}</Text>
                     </Box>
                     {idx < modules.length - 1 && <Arrow />}
@@ -48,15 +48,15 @@ const ChainRow: React.FC<ChainRowProps> = ({ chain }) => {
     const weight = formatUint64(chain.Weight);
 
     return (
-        <Box className="functionChainRow">
-            <Text variant="body-2" className="functionChainName">
+        <Box className="function-chain-row">
+            <Text variant="body-2" className="function-chain__name">
                 {chain.Name || 'unnamed'}
             </Text>
-            <span className="functionChainSeparator" />
-            <Text variant="body-2" className="functionChainWeight">
+            <span className="function-chain__separator" />
+            <Text variant="body-2" className="function-chain__weight">
                 {weight}
             </Text>
-            <Box className="functionChainModules">
+            <Box className="function-chain__modules">
                 <ModulesFlow chain={chain} />
             </Box>
         </Box>
@@ -71,18 +71,18 @@ const FunctionCard: React.FC<FunctionCardProps> = ({ func }) => {
     const chains = func.chains ?? [];
 
     return (
-        <Box className="functionCard">
-            <Text variant="body-1" className="functionCardName">
+        <Box className="function-card">
+            <Text variant="body-1" className="function-card__name">
                 {func.Name || 'unnamed'}
             </Text>
             {chains.length > 0 ? (
-                <Box className="functionChainsList">
+                <Box className="function-chains-list">
                     {chains.map((chain, idx) => (
                         <ChainRow key={chain.Name ?? idx} chain={chain} />
                     ))}
                 </Box>
             ) : (
-                <Text variant="body-2" color="secondary" className="functionNoChains">
+                <Text variant="body-2" color="secondary" className="function-no-chains">
                     No chains
                 </Text>
             )}
@@ -94,12 +94,12 @@ export const FunctionsSection: React.FC<FunctionsSectionProps> = ({ instance }) 
     const functions = instance.functions ?? [];
 
     return (
-        <Box className="functionsSection">
-            <Text variant="header-1" className="functionsSectionHeader">
+        <Box className="inspect-section-box">
+            <Text variant="header-1">
                 Functions
             </Text>
             {functions.length > 0 ? (
-                <Box className="functionsList">
+                <Box className="functions-list">
                     {functions.map((func, idx) => (
                         <FunctionCard key={func.Name ?? idx} func={func} />
                     ))}

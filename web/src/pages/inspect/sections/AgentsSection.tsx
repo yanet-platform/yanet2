@@ -5,6 +5,7 @@ import type { InstanceInfo, AgentInfo, AgentInstanceInfo } from '../../../api/in
 import { SortableDataTable } from '../../../components';
 import { compareBigIntValues, compareNullableNumbers } from '../../../utils/sorting';
 import { formatAgentName, formatUint64 } from '../utils';
+import '../inspect.css';
 
 export interface AgentsSectionProps {
     instance: InstanceInfo;
@@ -66,8 +67,8 @@ export const AgentsSection: React.FC<AgentsSectionProps> = ({ instance }) => {
     }, [instance.agents, activeAgentTab]);
 
     return (
-        <Box style={{ marginBottom: '24px' }}>
-            <Text variant="header-1" style={{ marginBottom: '12px' }}>
+        <Box className="inspect-section-box">
+            <Text variant="header-1">
                 Agents
             </Text>
             {instance.agents && instance.agents.length > 0 ? (

@@ -19,15 +19,15 @@ export const InstanceCard: React.FC<InstanceCardProps> = ({ instance }) => {
     return (
         <Box className="instance-card">
             <ModulesSection instance={instance} />
-            <Divider style={{ marginBottom: '24px' }} />
+            <Divider />
             <ConfigurationsSection instance={instance} />
-            <Divider style={{ marginBottom: '24px' }} />
+            <Divider />
             <FunctionsSection instance={instance} />
-            <Divider style={{ marginBottom: '24px' }} />
+            <Divider />
             <PipelinesSection instance={instance} />
-            <Divider style={{ marginBottom: '24px' }} />
+            <Divider />
             <AgentsSection instance={instance} />
-            <Divider style={{ marginBottom: '24px' }} />
+            <Divider />
             <DevicesSection instance={instance} />
         </Box>
     );

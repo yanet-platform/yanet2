@@ -87,7 +87,7 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
     const devices = instance.devices ?? [];
 
     return (
-        <Box>
+        <Box className="inspect-section-box">
             <Text variant="header-1" className="inspect-section__header">
                 Devices
             </Text>

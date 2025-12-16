@@ -5,6 +5,7 @@ import type { InstanceInfo, CPConfigInfo } from '../../../api/inspect';
 import { SortableDataTable } from '../../../components';
 import { compareBigIntValues, compareNullableStrings } from '../../../utils/sorting';
 import { formatUint64 } from '../utils';
+import '../inspect.css';
 
 export interface ConfigurationsSectionProps {
     instance: InstanceInfo;
@@ -39,8 +40,8 @@ export const ConfigurationsSection: React.FC<ConfigurationsSectionProps> = ({ in
     ], []);
 
     return (
-        <Box>
-            <Text variant="header-1" style={{ marginBottom: '12px' }}>
+        <Box className="inspect-section-box">
+            <Text variant="header-1">
                 Controlplane Configurations
             </Text>
             {instance.cpConfigs && instance.cpConfigs.length > 0 ? (

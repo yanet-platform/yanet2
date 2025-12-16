@@ -3,6 +3,9 @@
    ============================================ */
 .instance-card {
     background-color: var(--g-color-base-background);
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
 }
 
 /* ============================================
@@ -61,7 +64,6 @@
     flex-wrap: wrap;
     gap: 16px;
     align-items: stretch;
-    margin-top: 16px;
 }
 
 .device-card {
@@ -141,8 +143,10 @@
 /* ============================================
    Section Styles
    ============================================ */
-.inspect-section {
-    margin-bottom: 24px;
+.inspect-section-box {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
 .inspect-section__modules-grid {
@@ -150,5 +154,4 @@
     flex-wrap: wrap;
     gap: 12px;
     align-items: stretch;
-    margin-top: 16px;
 }
