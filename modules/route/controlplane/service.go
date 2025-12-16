@@ -386,14 +386,14 @@ func (m *RouteService) updateModuleConfig(
 	}
 
 	// Obtain neighbor entry with resolved hardware addresses
-	neighbours := m.neighCache.View()
+	neighbors := m.neighCache.View()
 
 	// Statistics for summary logging
 	var stats struct {
 		totalPrefixes       int
 		totalRoutes         int
 		skippedPrefixes     int
-		neighbourNotFound   int
+		neighborNotFound    int
 		hardwareRoutesAdded int
 		prefixesAdded       int
 	}
@@ -417,15 +417,15 @@ func (m *RouteService) updateModuleConfig(
 
 			for _, route := range routesList.Routes {
 				// Lookup hwaddress for the route
-				entry, ok := neighbours.Lookup(route.NextHop.Unmap())
+				entry, ok := neighbors.Lookup(route.NextHop.Unmap())
 				if !ok {
-					m.log.Warnw("updateModuleConfig: neighbour not found for nexthop",
+					m.log.Warnw("updateModuleConfig: neighbor not found for nexthop",
 						"nexthop", route.NextHop,
 						"prefix", prefix,
 						"name", name,
 						"instance", inst,
 					)
-					stats.neighbourNotFound++
+					stats.neighborNotFound++
 					continue
 				}
 
@@ -495,7 +495,7 @@ func (m *RouteService) updateModuleConfig(
 		"total_prefixes", stats.totalPrefixes,
 		"total_routes", stats.totalRoutes,
 		"skipped_prefixes", stats.skippedPrefixes,
-		"neighbour_not_found", stats.neighbourNotFound,
+		"neighbor_not_found", stats.neighborNotFound,
 		"hardware_routes_added", stats.hardwareRoutesAdded,
 		"prefixes_added", stats.prefixesAdded,
 		"processing_duration", time.Since(routeInsertionStart),
