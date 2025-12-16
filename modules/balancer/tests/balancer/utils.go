@@ -70,14 +70,16 @@ func MakeUDPPacket(
 			Protocol: layers.IPProtocolUDP,
 			SrcIP:    src,
 			DstIP:    dst,
+			TOS:      123,
 		}
 	} else {
 		ip = &layers.IPv6{
-			Version:    6,
-			NextHeader: layers.IPProtocolUDP,
-			HopLimit:   64,
-			SrcIP:      src,
-			DstIP:      dst,
+			Version:      6,
+			NextHeader:   layers.IPProtocolUDP,
+			HopLimit:     64,
+			SrcIP:        src,
+			DstIP:        dst,
+			TrafficClass: 212,
 		}
 	}
 
@@ -126,14 +128,16 @@ func MakeTCPPacket(
 			Protocol: layers.IPProtocolTCP,
 			SrcIP:    src,
 			DstIP:    dst,
+			TOS:      214,
 		}
 	} else {
 		ip = &layers.IPv6{
-			Version:    6,
-			NextHeader: layers.IPProtocolTCP,
-			HopLimit:   64,
-			SrcIP:      src,
-			DstIP:      dst,
+			Version:      6,
+			NextHeader:   layers.IPProtocolTCP,
+			HopLimit:     64,
+			SrcIP:        src,
+			DstIP:        dst,
+			TrafficClass: 139,
 		}
 	}
 
@@ -357,6 +361,84 @@ func ValidatePacket(
 		originalGoPacket.ApplicationLayer().Payload(),
 		resultPacket.Payload,
 	)
+
+	// Validate ToS/TrafficClass consistency across original, outer, and inner packets
+	var originalToS uint8
+	if originalPacket.IsIPv4 {
+		if ipv4 := originalGoPacket.Layer(layers.LayerTypeIPv4); ipv4 != nil {
+			originalToS = ipv4.(*layers.IPv4).TOS
+		} else {
+			t.Error("no IPv4 layer in original packet to read TOS")
+			return
+		}
+	} else if originalPacket.IsIPv6 {
+		if ipv6 := originalGoPacket.Layer(layers.LayerTypeIPv6); ipv6 != nil {
+			originalToS = ipv6.(*layers.IPv6).TrafficClass
+		} else {
+			t.Error("no IPv6 layer in original packet to read TrafficClass")
+			return
+		}
+	}
+
+	// Parse the full tunneled packet to read outer and inner ToS/TrafficClass
+	tunneled := gopacket.NewPacket(resultPacket.RawData, layers.LayerTypeEthernet, gopacket.Default)
+	if tunneled.ErrorLayer() != nil {
+		t.Errorf("failed to parse tunneled packet for ToS/TrafficClass check: %v", tunneled.ErrorLayer().Error())
+		return
+	}
+
+	// Outer ToS/TrafficClass
+	var outerToS uint8
+	if resultPacket.IsIPv4 {
+		if ipv4 := tunneled.Layer(layers.LayerTypeIPv4); ipv4 != nil {
+			outerToS = ipv4.(*layers.IPv4).TOS
+		} else {
+			t.Error("no outer IPv4 layer to read TOS")
+			return
+		}
+	} else if resultPacket.IsIPv6 {
+		if ipv6 := tunneled.Layer(layers.LayerTypeIPv6); ipv6 != nil {
+			outerToS = ipv6.(*layers.IPv6).TrafficClass
+		} else {
+			t.Error("no outer IPv6 layer to read TrafficClass")
+			return
+		}
+	} else {
+		t.Error("unknown outer IP version for tunneled packet")
+		return
+	}
+
+	// Inner ToS/TrafficClass (second IP header in the packet)
+	var innerToS uint8
+	ipCount := 0
+	foundInner := false
+	for _, l := range tunneled.Layers() {
+		switch l.LayerType() {
+		case layers.LayerTypeIPv4:
+			ipCount++
+			if ipCount == 2 {
+				innerToS = l.(*layers.IPv4).TOS
+				foundInner = true
+			}
+		case layers.LayerTypeIPv6:
+			ipCount++
+			if ipCount == 2 {
+				innerToS = l.(*layers.IPv6).TrafficClass
+				foundInner = true
+			}
+		}
+		if foundInner {
+			break
+		}
+	}
+	if !foundInner {
+		t.Error("failed to locate inner IP header to read ToS/TrafficClass")
+		return
+	}
+
+	// Assertions: preserve ToS/TrafficClass through encapsulation
+	assert.Equal(t, originalToS, outerToS, "outer packet ToS/TrafficClass mismatch with original")
+	assert.Equal(t, originalToS, innerToS, "inner packet ToS/TrafficClass mismatch with original")
 
 	var originPacketProto layers.IPProtocol
 	if originalPacket.IsIPv4 {
