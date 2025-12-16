@@ -35,9 +35,8 @@ export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
 
                         return (
                             <ModuleCard
-                                key={idx}
+                                key={module.name}
                                 module={module}
-                                idx={idx}
                                 configCount={configCount}
                                 pipelineUsage={pipelineUsage}
                             />

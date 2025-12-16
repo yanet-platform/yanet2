@@ -1,6 +1,7 @@
 export const MODULE_DESCRIPTIONS: Record<string, string> = {
     forward: 'Packet forwarding module',
     route: 'Routing module',
+    decap: 'Packet decapulation',
     dscp: 'DSCP marking module',
     nat64: 'NAT64 translation module',
     balancer: 'Load balancer module',

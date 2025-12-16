@@ -2,7 +2,7 @@ import { createService } from './client';
 
 // Inspect types
 export interface DPModuleInfo {
-    name?: string;
+    name: string;
 }
 
 export interface CPConfigInfo {
