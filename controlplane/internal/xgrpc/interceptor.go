@@ -88,12 +88,12 @@ func (m *protoMarshaler) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	m.message.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
 		name := string(fd.Name())
 
-		// Handle repeated bytes fields (lists of byte arrays)
-		if fd.IsList() && fd.Kind() == protoreflect.BytesKind {
+		// Handle repeated scalar fields (lists of primitives)
+		if fd.IsList() && fd.Kind() != protoreflect.MessageKind {
 			list := v.List()
 			_ = enc.AddArray(name, zapcore.ArrayMarshalerFunc(func(arr zapcore.ArrayEncoder) error {
 				for i := 0; i < list.Len(); i++ {
-					arr.AppendByteString(list.Get(i).Bytes())
+					appendScalarValue(arr, fd, list.Get(i))
 				}
 				return nil
 			}))
@@ -184,5 +184,32 @@ func (m *protoMarshaler) encodeScalar(
 		enc.AddString(name, string(fd.Enum().Values().ByNumber(v.Enum()).Name()))
 	default:
 		_ = enc.AddReflected(name, v.Interface())
+	}
+}
+
+func appendScalarValue(arr zapcore.ArrayEncoder, fd protoreflect.FieldDescriptor, v protoreflect.Value) {
+	switch fd.Kind() {
+	case protoreflect.BoolKind:
+		arr.AppendBool(v.Bool())
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
+		arr.AppendInt32(int32(v.Int()))
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		arr.AppendInt64(v.Int())
+	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind:
+		arr.AppendUint32(uint32(v.Uint()))
+	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		arr.AppendUint64(v.Uint())
+	case protoreflect.FloatKind:
+		arr.AppendFloat32(float32(v.Float()))
+	case protoreflect.DoubleKind:
+		arr.AppendFloat64(v.Float())
+	case protoreflect.StringKind:
+		arr.AppendString(v.String())
+	case protoreflect.BytesKind:
+		arr.AppendByteString(v.Bytes())
+	case protoreflect.EnumKind:
+		arr.AppendString(string(fd.Enum().Values().ByNumber(v.Enum()).Name()))
+	default:
+		_ = arr.AppendReflected(v.Interface())
 	}
 }
