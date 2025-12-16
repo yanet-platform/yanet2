@@ -212,7 +212,7 @@ impl RouteService {
             let response = self.client.lookup_route(request).await?.into_inner();
 
             if response.routes.is_empty() {
-                println!("No routes found for {} on instance {inst}", cmd.addr);
+                log::info!("No routes found for {} on instance {inst}", cmd.addr);
                 continue;
             }
 
@@ -236,14 +236,13 @@ impl RouteService {
                 do_flush: true,
             };
 
-            match self.client.insert_route(request).await {
-                Ok(_resp) => {
-                    log::info!("Route inserted successfully on instance {inst}: {} via {}", cmd.prefix, cmd.nexthop_addr);
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-            }
+            self.client.insert_route(request).await?;
+
+            log::info!(
+                "Route inserted successfully on instance {inst}: {} via {}",
+                cmd.prefix,
+                cmd.nexthop_addr
+            );
         }
 
         Ok(())
@@ -259,9 +258,10 @@ impl RouteService {
             };
 
             self.client.flush_routes(request).await?;
+
+            log::info!("Routes flushed successfully on instance {inst}");
         }
 
-        println!("OK");
         Ok(())
     }
 }
