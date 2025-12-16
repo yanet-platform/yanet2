@@ -410,7 +410,6 @@ func (m *RouteService) updateModuleConfig(
 
 			if len(routesList.Routes) == 0 {
 				stats.skippedPrefixes++
-				// FIXME add telemetry
 				continue
 			}
 
@@ -427,7 +426,6 @@ func (m *RouteService) updateModuleConfig(
 						"instance", inst,
 					)
 					stats.neighbourNotFound++
-					// FIXME: add telemetry?
 					continue
 				}
 
