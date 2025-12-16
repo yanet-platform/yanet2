@@ -35,7 +35,7 @@ cli-clean/%:
 	$(MAKE) -C modules/$*/cli clean
 
 test: dataplane
-	go test $$(go list ./... | grep -v 'tests/functional')
+	go test -count=1 $$(go list ./... | grep -v 'tests/functional')
 	meson test -C build
 
 test-debug: dataplane

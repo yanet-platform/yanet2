@@ -64,6 +64,21 @@ type mapping struct {
 	ip6 netip.Addr
 }
 
+func memCtxCreate() *C.struct_memory_context {
+	var sizeOfArena C.size_t = 1 << 20
+
+	arena := C.malloc(sizeOfArena + C.sizeof_struct_memory_context + C.sizeof_struct_block_allocator)
+
+	memCtx := (*C.struct_memory_context)(arena)
+	arena = unsafe.Pointer(uintptr(arena) + C.sizeof_struct_memory_context)
+	blockAlloc := (*C.struct_block_allocator)(arena)
+	arena = unsafe.Pointer(uintptr(arena) + C.sizeof_struct_block_allocator)
+
+	C.block_allocator_put_arena(blockAlloc, arena, sizeOfArena)
+	C.memory_context_init(memCtx, C.CString("dscp_test"), blockAlloc)
+	return memCtx
+}
+
 // nat64ModuleConfig creates and configures NAT64 module configuration
 func nat64ModuleConfig(mappings []mapping) *C.struct_nat64_module_config {
 	cDebug := C.CString("debug")
@@ -76,15 +91,19 @@ func nat64ModuleConfig(mappings []mapping) *C.struct_nat64_module_config {
 
 	config := new(C.struct_nat64_module_config)
 
-	blockAlloc := C.struct_block_allocator{}
-	arena := C.malloc(1 << 20)
-	C.block_allocator_put_arena(&blockAlloc, arena, 1<<20)
-	C.memory_context_init(&config.cp_module.memory_context, C.CString("test"), &blockAlloc)
-
-	if C.nat64_module_config_data_init(config, &config.cp_module.memory_context) != 0 {
+	memCtx := memCtxCreate()
+	if C.nat64_module_config_data_init(config, memCtx) != 0 {
 		log.Printf("nat64 module config init fail")
 		return nil
 	}
+
+	cName := C.CString("nat64_go_test")
+	defer C.free(unsafe.Pointer(cName))
+
+	C.memory_context_init_from(
+		&config.cp_module.memory_context,
+		memCtx,
+		cName)
 
 	// Add NAT64 prefix
 	pfx := [12]byte{0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,

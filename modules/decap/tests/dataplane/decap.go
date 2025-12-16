@@ -43,12 +43,18 @@ import (
 )
 
 func memCtxCreate() *C.struct_memory_context {
-	blockAlloc := C.struct_block_allocator{}
-	arena := C.malloc(1 << 20)
-	C.block_allocator_put_arena(&blockAlloc, arena, 1<<20)
-	memCtx := C.struct_memory_context{}
-	C.memory_context_init(&memCtx, C.CString("test"), &blockAlloc)
-	return &memCtx
+	var sizeOfArena C.size_t = 1 << 20
+
+	arena := C.malloc(sizeOfArena + C.sizeof_struct_memory_context + C.sizeof_struct_block_allocator)
+
+	memCtx := (*C.struct_memory_context)(arena)
+	arena = unsafe.Pointer(uintptr(arena) + C.sizeof_struct_memory_context)
+	blockAlloc := (*C.struct_block_allocator)(arena)
+	arena = unsafe.Pointer(uintptr(arena) + C.sizeof_struct_block_allocator)
+
+	C.block_allocator_put_arena(blockAlloc, arena, sizeOfArena)
+	C.memory_context_init(memCtx, C.CString("decap_test"), blockAlloc)
+	return memCtx
 }
 
 func buildLPMs(
