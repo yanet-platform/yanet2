@@ -21,11 +21,11 @@ static inline void
 packet_ctx_update_common_stats_on_incoming_packet(struct packet_ctx *ctx) {
 	uint64_t pkt_len = ctx->packet->mbuf->pkt_len;
 
-	ctx->counter.common->outgoing_packets += 1;
-	ctx->counter.common->outgoing_bytes += pkt_len;
+	ctx->counter.common->incoming_packets += 1;
+	ctx->counter.common->incoming_bytes += pkt_len;
 
-	ctx->state.stats->common.outgoing_packets += 1;
-	ctx->state.stats->common.outgoing_bytes += pkt_len;
+	ctx->state.stats->common.incoming_packets += 1;
+	ctx->state.stats->common.incoming_bytes += pkt_len;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -52,6 +52,7 @@ packet_ctx_update_vs_stats_on_incoming_packet(struct packet_ctx *ctx) {
 
 	ctx->vs.state->stats.vs.incoming_packets += 1;
 	ctx->vs.state->stats.vs.incoming_bytes += pkt_len;
+	ctx->vs.state->last_packet_timestamp = ctx->now;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -67,4 +68,5 @@ packet_ctx_update_real_stats_on_packet(struct packet_ctx *ctx) {
 
 	ctx->real.state->stats.real.packets += 1;
 	ctx->real.state->stats.real.bytes += pkt_len;
+	ctx->real.state->last_packet_timestamp = ctx->now;
 }
