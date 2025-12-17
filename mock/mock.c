@@ -329,6 +329,14 @@ yanet_mock_init(
 
 void
 yanet_mock_free(struct yanet_mock *mock) {
+	if (mock->worker_count > 0) {
+		// All workers share the same mempool
+		struct rte_mempool *mp = mock->workers[0].dp_worker.rx_mempool;
+		if (mp != NULL) {
+			free(mp);
+		}
+	}
+
 	if (mock->arena != NULL) {
 		free(mock->arena);
 	}

@@ -3,13 +3,15 @@ package balancer
 import (
 	"fmt"
 
+	"github.com/c2h5oh/datasize"
+	"go.uber.org/zap/zapcore"
+	"google.golang.org/protobuf/types/known/durationpb"
+
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
-	"go.uber.org/zap/zapcore"
-	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -38,8 +40,8 @@ type TestSetup struct {
 func SetupTest(config *TestConfig) (*TestSetup, error) {
 	if config.mock == nil {
 		config.mock = &mock.YanetMockConfig{
-			CpMemory: 1 << 29,
-			DpMemory: 1 << 27,
+			CpMemory: datasize.MB * 512,
+			DpMemory: datasize.MB * 128,
 			Workers:  1,
 			Devices: []mock.YanetMockDeviceConfig{
 				{
@@ -49,7 +51,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 			},
 		}
 	}
-	if config.mock.CpMemory < (1 << 27) {
+	if config.mock.CpMemory < datasize.MB*128 {
 		return nil, fmt.Errorf("need at least 128MB for the controlplane")
 	}
 
@@ -73,7 +75,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 	}
 
 	agent, err := mockInstance.SharedMemory().
-		AgentAttach("balancer", 0, uint(config.mock.CpMemory)-(1<<27))
+		AgentAttach("balancer", 0, uint(config.mock.CpMemory-datasize.MB*128))
 	if err != nil {
 		return nil, err
 	}

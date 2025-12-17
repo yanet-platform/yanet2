@@ -25,7 +25,7 @@
 #define FWMAP_BUCKET_ENTRIES 4
 #define FWMAP_BUCKET_SIZE 64
 #define FWMAP_CHUNK_INDEX_MAX_SIZE                                             \
-	(MEMORY_BLOCK_ALLOCATOR_MAX_SIZE / FWMAP_BUCKET_SIZE)
+	(ALIGN_DOWN_POW2(MEMORY_BLOCK_ALLOCATOR_MAX_SIZE) / FWMAP_BUCKET_SIZE)
 #define FWMAP_CHUNK_INDEX_MASK (FWMAP_CHUNK_INDEX_MAX_SIZE - 1)
 
 // Function registry for cross-process compatibility.
@@ -135,9 +135,7 @@ typedef struct fwmap {
 
 	// Alignment offsets for cache-aligned allocations
 	uint8_t map_alloc_offset;
-	uint8_t buckets_alloc_offset;
 	uint8_t extra_buckets_alloc_offset;
-	uint8_t _padding;
 
 	uint32_t key_cursor;
 	uint32_t extra_free_idx;
@@ -150,6 +148,7 @@ typedef struct fwmap {
 
 	uint64_t max_deadline;
 	volatile struct fwmap *next;
+	uint8_t *buckets_offsets;
 	uint64_t padding[2];
 	fwmap_counter_t counters[];
 } __attribute__((__aligned__(64))) fwmap_t;
@@ -454,6 +453,10 @@ fwmap_get_stats(const fwmap_t *map) {
 	size_t chunks_array_size = sizeof(fwmap_bucket_t *) * chunk_count;
 	total_memory += chunks_array_size;
 
+	// 2.1 Bucket offsets array
+	size_t buckets_offsets_size = sizeof(uint8_t) * chunk_count;
+	total_memory += buckets_offsets_size;
+
 	// 3. Bucket chunks (actual bucket storage)
 	size_t index_chunk_size =
 		sizeof(fwmap_bucket_t) *
@@ -572,20 +575,28 @@ fwmap_destroy(fwmap_t *map, struct memory_context *ctx) {
 			sizeof(fwmap_bucket_t) *
 			((map->index_mask & FWMAP_CHUNK_INDEX_MASK) + 1);
 
-		for (size_t i = 0; i < chunk_count; i++) {
-			// In case of allocation failure, the first null pointer
-			// indicates the failed allocation.
-			if (!chunks[i]) {
-				break;
+		uint8_t *buckets_offsets = ADDR_OF(&map->buckets_offsets);
+		if (buckets_offsets) {
+			for (size_t i = 0; i < chunk_count; i++) {
+				// In case of allocation failure, the first null
+				// pointer indicates the failed allocation.
+				if (!chunks[i]) {
+					break;
+				}
+				fwmap_bucket_t *buckets = ADDR_OF(&chunks[i]);
+				// Free the bucket array with alignment offset
+				fwmap_bfree_aligned(
+					ctx,
+					buckets,
+					chunk_size,
+					64,
+					buckets_offsets[i]
+				);
 			}
-			fwmap_bucket_t *buckets = ADDR_OF(&chunks[i]);
-			// Free the bucket array with alignment offset
-			fwmap_bfree_aligned(
+			memory_bfree(
 				ctx,
-				buckets,
-				chunk_size,
-				64,
-				map->buckets_alloc_offset
+				buckets_offsets,
+				sizeof(uint8_t) * chunk_count
 			);
 		}
 		memory_bfree(
@@ -754,6 +765,7 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	fwmap_bucket_t *extra_buckets = NULL;
 	uint8_t **key_store = NULL;
 	uint8_t **value_store = NULL;
+	uint8_t *buckets_offsets = NULL;
 
 	// Allocate index.
 	uint32_t chunk_count =
@@ -765,13 +777,21 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	}
 	SET_OFFSET_OF(&map->buckets, chunks);
 
+	if (!(buckets_offsets =
+		      memory_balloc(ctx, sizeof(uint8_t) * chunk_count))) {
+		errno = ENOMEM;
+		goto fail;
+	}
+	memset(buckets_offsets, 0, chunk_count);
+	SET_OFFSET_OF(&map->buckets_offsets, buckets_offsets);
+
 	size_t index_chunk_size =
 		sizeof(fwmap_bucket_t) *
 		((map->index_mask & FWMAP_CHUNK_INDEX_MASK) + 1);
 	for (uint32_t i = 0; i < chunk_count; i++) {
 		// Allocate with 64-byte alignment
 		fwmap_bucket_t *chunk = fwmap_balloc_aligned(
-			ctx, index_chunk_size, 64, &map->buckets_alloc_offset
+			ctx, index_chunk_size, 64, &buckets_offsets[i]
 		);
 		if (!chunk) {
 			// Stop point for the deallocation code.

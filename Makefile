@@ -15,7 +15,11 @@ setup:
 	meson setup build
 
 setup-debug:
-	meson setup -Dbuildtype=debug -Doptimization=0 build
+	@if [ ! -d "build" ]; then \
+		meson setup -Dbuildtype=debug -Doptimization=0 build; \
+	else \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize="" build; \
+	fi
 
 setup-asan:
 	meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build

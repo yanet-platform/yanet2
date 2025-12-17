@@ -60,32 +60,14 @@ import (
 	"github.com/gopacket/gopacket"
 
 	"github.com/yanet-platform/yanet2/common/go/dataplane"
+	"github.com/yanet-platform/yanet2/common/go/testutils"
 )
 
-func memCtxCreate() *C.struct_memory_context {
-	var sizeOfArena C.size_t = 64 << 20
-
-	arena := C.malloc(sizeOfArena + C.sizeof_struct_memory_context + C.sizeof_struct_block_allocator)
-
-	memCtx := (*C.struct_memory_context)(arena)
-	arena = unsafe.Pointer(uintptr(arena) + C.sizeof_struct_memory_context)
-	blockAlloc := (*C.struct_block_allocator)(arena)
-	arena = unsafe.Pointer(uintptr(arena) + C.sizeof_struct_block_allocator)
-
-	C.block_allocator_put_arena(blockAlloc, arena, sizeOfArena)
-	C.memory_context_init(memCtx, C.CString("fwstate_test"), blockAlloc)
-
-	return memCtx
-}
-
-// memCtxDestroy frees the memory context and its arena
-func memCtxDestroy(memCtx *C.struct_memory_context) {
-	// The memory context is at the beginning of the arena
-	C.free(unsafe.Pointer(memCtx))
-}
-
-func fwstateModuleConfig(memCtx *C.struct_memory_context) *C.struct_fwstate_module_config {
-	m := (*C.struct_fwstate_module_config)(C.memory_balloc(memCtx, C.sizeof_struct_fwstate_module_config))
+func fwstateModuleConfig(memCtx testutils.MemoryContext) *C.struct_fwstate_module_config {
+	m := (*C.struct_fwstate_module_config)(C.memory_balloc(
+		(*C.struct_memory_context)(memCtx.AsRawPtr()),
+		C.sizeof_struct_fwstate_module_config),
+	)
 
 	// Create fw4state and fw6state maps using fwmap
 	fw4config := C.struct_fwmap_config{
@@ -102,7 +84,7 @@ func fwstateModuleConfig(memCtx *C.struct_memory_context) *C.struct_fwstate_modu
 		index_size:         1024,
 		extra_bucket_count: 64,
 	}
-	fw4state := C.fwmap_new(&fw4config, memCtx)
+	fw4state := C.fwmap_new(&fw4config, (*C.struct_memory_context)(memCtx.AsRawPtr()))
 	C.set_offset_of((*unsafe.Pointer)(unsafe.Pointer(&m.cfg.fw4state)), unsafe.Pointer(fw4state))
 
 	fw6config := C.struct_fwmap_config{
@@ -119,7 +101,7 @@ func fwstateModuleConfig(memCtx *C.struct_memory_context) *C.struct_fwstate_modu
 		index_size:         1024,
 		extra_bucket_count: 64,
 	}
-	fw6state := C.fwmap_new(&fw6config, memCtx)
+	fw6state := C.fwmap_new(&fw6config, (*C.struct_memory_context)(memCtx.AsRawPtr()))
 	C.set_offset_of((*unsafe.Pointer)(unsafe.Pointer(&m.cfg.fw6state)), unsafe.Pointer(fw6state))
 
 	// Configure sync settings

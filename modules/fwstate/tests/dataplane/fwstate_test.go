@@ -8,6 +8,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/common/go/testutils"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 )
@@ -48,8 +49,9 @@ func createSyncPacket(t *testing.T, isExternal bool, proto uint8) gopacket.Packe
 	udp.SetNetworkLayerForChecksum(&ip6)
 
 	// Create sync frame using the helper function
-	dstIP6 := []byte{0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01}
-	srcIP6 := make([]byte, 16) // All zeros for ::
+	// Use unicast addresses for the flow being synced
+	dstIP6 := net.ParseIP("2001:db8::2").To16()
+	srcIP6 := net.ParseIP("2001:db8::1").To16()
 	syncFrame := createSyncFrame(proto, 6, 12345, 9999, dstIP6, srcIP6)
 
 	payload := gopacket.Payload(syncFrame)
@@ -62,8 +64,8 @@ func TestFWStateInternalPacket(t *testing.T) {
 	pkt := createSyncPacket(t, false, 6) // TCP
 	t.Log("Internal sync packet:", pkt)
 
-	memCtx := memCtxCreate()
-	defer memCtxDestroy(memCtx)
+	memCtx := testutils.NewMemoryContext("fwstate_test", 64<<20)
+	defer memCtx.Free()
 	m := fwstateModuleConfig(memCtx)
 	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))
 
@@ -77,8 +79,8 @@ func TestFWStateExternalPacket(t *testing.T) {
 	pkt := createSyncPacket(t, true, 17) // UDP
 	t.Log("External sync packet:", pkt)
 
-	memCtx := memCtxCreate()
-	defer memCtxDestroy(memCtx)
+	memCtx := testutils.NewMemoryContext("fwstate_test", 64<<20)
+	defer memCtx.Free()
 	m := fwstateModuleConfig(memCtx)
 	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))
 
@@ -113,8 +115,8 @@ func TestFWStateNonSyncPacket(t *testing.T) {
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp, &payload)
 	t.Log("Non-sync packet:", pkt)
 
-	memCtx := memCtxCreate()
-	defer memCtxDestroy(memCtx)
+	memCtx := testutils.NewMemoryContext("fwstate_test", 64<<20)
+	defer memCtx.Free()
 	m := fwstateModuleConfig(memCtx)
 	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))
 
@@ -129,8 +131,8 @@ func TestFWStateStateCreation(t *testing.T) {
 	pkt := createSyncPacket(t, false, 6) // TCP
 	t.Log("Internal sync packet:", pkt)
 
-	memCtx := memCtxCreate()
-	defer memCtxDestroy(memCtx)
+	memCtx := testutils.NewMemoryContext("fwstate_test", 64<<20)
+	defer memCtx.Free()
 	m := fwstateModuleConfig(memCtx)
 	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))
 
@@ -138,7 +140,7 @@ func TestFWStateStateCreation(t *testing.T) {
 	require.NotEmpty(t, result.Output, "Internal packet should be forwarded")
 
 	// Check that state was created
-	// For IPv6: src=::, dst=ff02::1, proto=TCP, src_port=12345, dst_port=9999
-	stateExists := CheckStateExists(&m.cfg, true, 6, 12345, 9999, "::", "ff02::1")
+	// For IPv6: src=2001:db8::1, dst=2001:db8::2, proto=TCP, src_port=12345, dst_port=9999
+	stateExists := CheckStateExists(&m.cfg, true, 6, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, stateExists, "State should exist after processing sync packet")
 }

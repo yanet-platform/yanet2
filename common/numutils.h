@@ -29,3 +29,5 @@ align_up_pow2(uint64_t x) {
 	x |= x >> 32;
 	return x + 1;
 }
+
+#define ALIGN_DOWN_POW2(x) (1UL << (63 - __builtin_clzl(x)))

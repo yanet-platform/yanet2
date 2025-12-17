@@ -20,9 +20,8 @@ mock_pool_free(struct rte_mempool *mp) {
 
 static int
 mock_pool_enqueue(struct rte_mempool *mp, void *const *obj_table, unsigned n) {
-	(void)mp;
 	for (unsigned i = 0; i < n; i++) {
-		free(obj_table[i]);
+		free((char *)obj_table[i] - mp->header_size);
 	}
 	return 0;
 }
@@ -30,10 +29,22 @@ mock_pool_enqueue(struct rte_mempool *mp, void *const *obj_table, unsigned n) {
 static int
 mock_pool_dequeue(struct rte_mempool *mp, void **obj_table, unsigned n) {
 	for (unsigned i = 0; i < n; i++) {
-		obj_table[i] = calloc(1, mp->elt_size);
-		if (obj_table[i] == NULL) {
+		void *ptr = aligned_alloc(64, mp->header_size + mp->elt_size);
+		if (ptr == NULL) {
 			rte_panic("failed to allocate object");
 		}
+		memset(ptr, 0, mp->header_size + mp->elt_size);
+
+		struct rte_mempool_objhdr *hdr =
+			(struct rte_mempool_objhdr
+				 *)((char *)ptr + mp->header_size -
+				    sizeof(struct rte_mempool_objhdr));
+		hdr->mp = mp;
+		hdr->iova =
+			(rte_iova_t)(uintptr_t)((char *)ptr + mp->header_size);
+
+		obj_table[i] = (char *)ptr + mp->header_size;
+
 		// Set the fields of a packet mbuf to their default values.
 		rte_pktmbuf_init(mp, NULL, obj_table[i], 0);
 	}
@@ -75,7 +86,10 @@ mock_mempool_create() {
 	mp->socket_id = 0;
 	mp->cache_size = 0; // cache size is zero we always calloc data
 	mp->elt_size = sizeof(struct rte_mbuf) + RTE_MBUF_DEFAULT_BUF_SIZE;
-	// mp->header_size = objsz.header_size;
+	mp->header_size = sizeof(struct rte_mempool_objhdr);
+	if (mp->header_size % 64 != 0) {
+		mp->header_size += 64 - (mp->header_size % 64);
+	}
 	mp->private_data_size = private_data_size;
 	rte_pktmbuf_pool_init(mp, NULL);
 	return mp;
