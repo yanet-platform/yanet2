@@ -30,7 +30,9 @@ packet_skip_gre(struct packet *packet, uint16_t *type, uint16_t *offset) {
 		packet->transport_header.offset
 	);
 
-	if (((*(uint32_t *)gre_hdr) & 0x0000FF4F) != 0x00000000) {
+	uint32_t gre_hdr_u32;
+	rte_memcpy(&gre_hdr_u32, gre_hdr, sizeof(uint32_t));
+	if ((gre_hdr_u32 & 0x0000FF4F) != 0x00000000) {
 		// If any reserved bits or a version is set
 		return -1;
 	}
