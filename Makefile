@@ -15,6 +15,9 @@ setup:
 	meson setup build
 
 setup-debug:
+	meson setup -Dbuildtype=debug -Doptimization=0 build
+
+setup-asan:
 	meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build
 
 dataplane:
@@ -38,9 +41,9 @@ test: dataplane
 	go test -count=1 $$(go list ./... | grep -v 'tests/functional')
 	meson test -C build
 
-test-debug:
+test-asan:
 	@if [ ! -d "build" ]; then \
-		$(MAKE) setup-debug; \
+		$(MAKE) setup-asan; \
 	else \
 		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build; \
 	fi

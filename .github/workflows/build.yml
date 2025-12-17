@@ -130,7 +130,7 @@ jobs:
       - name: Build and run tests (sanitize)
         run: |
           make go-cache-clean
-          make test-debug
+          make test-asan
       - name: Show meson test log
         run:
           grep -v 'Inherited environment' build/meson-logs/testlog.txt
