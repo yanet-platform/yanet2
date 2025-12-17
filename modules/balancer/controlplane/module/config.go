@@ -227,7 +227,22 @@ func (config *ModuleConfig) UpdateReals(
 				}
 			}
 			if updateVs == nil {
-				return fmt.Errorf("failed to find virtual service for update at index %d", updateIdx)
+				config.log.Errorw(
+					"failed to find virtual service for real update",
+					"update_index", updateIdx,
+					"vs_ip", update.Real.Vs.Ip.String(),
+					"vs_port", update.Real.Vs.Port,
+					"vs_proto", update.Real.Vs.Proto,
+					"real_ip", update.Real.Ip.String(),
+				)
+				return fmt.Errorf(
+					"failed to find virtual service for update at index %d: vs=%s:%d/%d, real=%s",
+					updateIdx,
+					update.Real.Vs.Ip.String(),
+					update.Real.Vs.Port,
+					update.Real.Vs.Proto,
+					update.Real.Ip.String(),
+				)
 			}
 			found := false
 			for realIdx := range updateVs.Reals {
@@ -239,7 +254,22 @@ func (config *ModuleConfig) UpdateReals(
 				}
 			}
 			if !found {
-				return fmt.Errorf("failed to find real for update at index %d", updateIdx)
+				config.log.Errorw(
+					"failed to find real for update",
+					"update_index", updateIdx,
+					"vs_ip", update.Real.Vs.Ip.String(),
+					"vs_port", update.Real.Vs.Port,
+					"vs_proto", update.Real.Vs.Proto,
+					"real_ip", update.Real.Ip.String(),
+				)
+				return fmt.Errorf(
+					"failed to find real for update at index %d: vs=%s:%d/%d, real=%s",
+					updateIdx,
+					update.Real.Vs.Ip.String(),
+					update.Real.Vs.Port,
+					update.Real.Vs.Proto,
+					update.Real.Ip.String(),
+				)
 			}
 		}
 		return config.Update(cloneVirtualServices, config.Addresses, config.SessionTimeouts, config.wlc)
@@ -248,8 +278,34 @@ func (config *ModuleConfig) UpdateReals(
 
 func (config *ModuleConfig) FlushRealUpdates() (int, error) {
 	updates := config.realUpdates.Clear()
+
+	// Log the updates being flushed
+	if len(updates) > 0 {
+		config.log.Debugw(
+			"flushing real updates",
+			"count", len(updates),
+		)
+		for i, update := range updates {
+			config.log.Debugw(
+				"flushing real update",
+				"index", i,
+				"vs_ip", update.Real.Vs.Ip.String(),
+				"vs_port", update.Real.Vs.Port,
+				"vs_proto", update.Real.Vs.Proto,
+				"real_ip", update.Real.Ip.String(),
+				"weight", update.Weight,
+				"enable", update.Enable,
+			)
+		}
+	}
+
 	err := config.UpdateReals(updates, false)
 	if err != nil {
+		config.log.Errorw(
+			"failed to flush real updates",
+			"count", len(updates),
+			"error", err,
+		)
 		return 0, err
 	}
 	return len(updates), nil

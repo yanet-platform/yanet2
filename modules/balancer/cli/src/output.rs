@@ -2,7 +2,7 @@
 //! Output formatting for different display formats (JSON, Tree, Table)
 
 use std::error::Error;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Local};
 use colored::Colorize;
 use ptree::TreeBuilder;
 use tabled::{
@@ -62,6 +62,21 @@ fn print_boxed_header(title: &str, subtitle: Option<&str>) {
     println!("{}", format!("╚{}╝", "═".repeat(box_width)).cyan().bold());
 }
 
+/// Get timezone offset string for display (e.g., "UTC+3", "UTC-5")
+fn get_timezone_offset_string() -> String {
+    let local = Local::now();
+    let offset = local.offset();
+    let total_seconds = offset.local_minus_utc();
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds.abs() % 3600) / 60;
+    
+    if minutes == 0 {
+        format!("UTC{:+}", hours)
+    } else {
+        format!("UTC{:+}:{:02}", hours, minutes)
+    }
+}
+
 fn proto_to_string(proto: i32) -> String {
     match balancerpb::TransportProto::try_from(proto) {
         Ok(balancerpb::TransportProto::Tcp) => "TCP".to_string(),
@@ -81,10 +96,27 @@ fn scheduler_to_string(sched: i32) -> String {
 
 fn format_timestamp(ts: Option<&prost_types::Timestamp>) -> String {
     match ts {
+        Some(ts) if ts.seconds == 0 && ts.nanos == 0 => "N/A".to_string(),
         Some(ts) => {
             let dt = DateTime::<Utc>::from_timestamp(ts.seconds, ts.nanos as u32)
                 .unwrap_or_default();
-            dt.format("%Y-%m-%d %H:%M:%S").to_string()
+            let local = dt.with_timezone(&Local);
+            local.format("%Y-%m-%d %H:%M:%S").to_string()
+        }
+        None => "N/A".to_string(),
+    }
+}
+
+/// Format timestamp with timezone offset for tree output
+fn format_timestamp_with_tz(ts: Option<&prost_types::Timestamp>) -> String {
+    match ts {
+        Some(ts) if ts.seconds == 0 && ts.nanos == 0 => "N/A".to_string(),
+        Some(ts) => {
+            let dt = DateTime::<Utc>::from_timestamp(ts.seconds, ts.nanos as u32)
+                .unwrap_or_default();
+            let local = dt.with_timezone(&Local);
+            let tz_offset = get_timezone_offset_string();
+            format!("{} ({})", local.format("%Y-%m-%d %H:%M:%S"), tz_offset)
         }
         None => "N/A".to_string(),
     }
@@ -314,6 +346,20 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                 wlc.wlc_power.to_string().bright_green(),
                 wlc.max_real_weight.to_string().bright_green(),
                 period_ms.to_string().bright_green()
+            );
+            println!();
+        }
+
+        // Module State Config
+        if let Some(state_config) = &response.module_state_config {
+            println!("{}", "Module State Config:".bright_cyan().bold());
+            let scan_period_ms = state_config.session_table_scan_period.as_ref()
+                .map(|p| (p.seconds * 1000 + p.nanos as i64 / 1_000_000).to_string())
+                .unwrap_or_else(|| "N/A".to_string());
+            println!("  Session Table Capacity: {} | Scan Period: {}ms | Max Load Factor: {}",
+                format_number(state_config.session_table_capacity).bright_green(),
+                scan_period_ms.bright_green(),
+                format!("{:.2}", state_config.session_table_max_load_factor).bright_green()
             );
             println!();
         }
@@ -632,7 +678,7 @@ fn print_state_info_tree(response: &balancerpb::StateInfoResponse) -> Result<(),
         if let Some(active) = &info.active_sessions {
             tree.add_empty_child(format!("Active Sessions: {} (updated: {})",
                 format_number(active.value),
-                format_timestamp(active.updated_at.as_ref())
+                format_timestamp_with_tz(active.updated_at.as_ref())
             ));
         }
 
@@ -708,7 +754,7 @@ fn print_state_info_tree(response: &balancerpb::StateInfoResponse) -> Result<(),
                     if let Some(active) = &vs.active_sessions {
                         tree.add_empty_child(format!("Active Sessions: {}", format_number(active.value)));
                     }
-                    tree.add_empty_child(format!("Last Packet: {}", format_timestamp(vs.last_packet_timestamp.as_ref())));
+                    tree.add_empty_child(format!("Last Packet: {}", format_timestamp_with_tz(vs.last_packet_timestamp.as_ref())));
                     
                     if let Some(stats) = &vs.stats {
                         tree.begin_child("Stats".to_string());
@@ -745,7 +791,7 @@ fn print_state_info_tree(response: &balancerpb::StateInfoResponse) -> Result<(),
                     if let Some(active) = &real.active_sessions {
                         tree.add_empty_child(format!("Active Sessions: {}", format_number(active.value)));
                     }
-                    tree.add_empty_child(format!("Last Packet: {}", format_timestamp(real.last_packet_timestamp.as_ref())));
+                    tree.add_empty_child(format!("Last Packet: {}", format_timestamp_with_tz(real.last_packet_timestamp.as_ref())));
                     
                     if let Some(stats) = &real.stats {
                         tree.begin_child("Stats".to_string());
@@ -779,13 +825,12 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
     // Print header
     let subtitle = if let (Some(target), Some(info)) = (&response.target, &response.info) {
         let active_sessions = info.active_sessions.as_ref()
-            .map(|a| (format_number(a.value), format_timestamp(a.updated_at.as_ref())))
-            .unwrap_or_else(|| ("0".to_string(), "N/A".to_string()));
-        Some(format!("Config: {} | Instance: {} | Active Sessions: {} (updated: {})",
+            .map(|a| format_number(a.value))
+            .unwrap_or_else(|| "0".to_string());
+        Some(format!("Config: {} | Instance: {} | Active Sessions: {}",
             target.config_name,
             target.dataplane_instance,
-            active_sessions.0,
-            active_sessions.1
+            active_sessions
         ))
     } else {
         None
@@ -921,6 +966,8 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
             let mut vs_list = info.vs_info.clone();
             vs_list.sort_by_key(|vs| vs.vs_registry_idx);
 
+            let tz_offset = get_timezone_offset_string();
+            
             #[derive(Tabled)]
             struct VsInfoRow {
                 #[tabled(rename = "Index")]
@@ -939,7 +986,7 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
                 created_sessions: String,
                 #[tabled(rename = "Active Sessions")]
                 sessions: String,
-                #[tabled(rename = "Last Packet (UTC)")]
+                #[tabled(rename = "Last Packet")]
                 last_packet: String,
             }
 
@@ -961,9 +1008,17 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
                 }
             }).collect();
 
-            let table = Table::new(rows)
+            let mut table = Table::new(rows)
                 .with(Style::rounded())
                 .to_string();
+            
+            // Add timezone info to header - replace in the header row only
+            let lines: Vec<&str> = table.lines().collect();
+            if lines.len() >= 2 {
+                let header = lines[0].replace("Last Packet", &format!("Last Packet ({})", tz_offset));
+                let rest = lines[1..].join("\n");
+                table = format!("{}\n{}", header, rest);
+            }
             println!("{}", table);
             println!();
         }
@@ -975,6 +1030,8 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
             let mut real_list = info.real_info.clone();
             real_list.sort_by_key(|r| r.real_registry_idx);
 
+            let tz_offset = get_timezone_offset_string();
+            
             #[derive(Tabled)]
             struct RealInfoRow {
                 #[tabled(rename = "Index")]
@@ -995,7 +1052,7 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
                 created_sessions: String,
                 #[tabled(rename = "Active Sessions")]
                 sessions: String,
-                #[tabled(rename = "Last Packet (UTC)")]
+                #[tabled(rename = "Last Packet")]
                 last_packet: String,
             }
 
@@ -1016,9 +1073,17 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
                 }
             }).collect();
 
-            let table = Table::new(rows)
+            let mut table = Table::new(rows)
                 .with(Style::rounded())
                 .to_string();
+            
+            // Add timezone info to header - replace in the header row only
+            let lines: Vec<&str> = table.lines().collect();
+            if lines.len() >= 2 {
+                let header = lines[0].replace("Last Packet", &format!("Last Packet ({})", tz_offset));
+                let rest = lines[1..].join("\n");
+                table = format!("{}\n{}", header, rest);
+            }
             println!("{}", table);
         }
     }
@@ -1446,8 +1511,8 @@ fn print_sessions_info_tree(response: &balancerpb::SessionsInfoResponse) -> Resu
         ) {
             tree.begin_child(format!("[{}] {}:{} -> {}:{} -> {}:{}",
                 idx, client, session.client_port, vs, session.vs_port, real, session.real_port));
-            tree.add_empty_child(format!("Created: {}", format_timestamp(session.create_timestamp.as_ref())));
-            tree.add_empty_child(format!("Last Packet: {}", format_timestamp(session.last_packet_timestamp.as_ref())));
+            tree.add_empty_child(format!("Created: {}", format_timestamp_with_tz(session.create_timestamp.as_ref())));
+            tree.add_empty_child(format!("Last Packet: {}", format_timestamp_with_tz(session.last_packet_timestamp.as_ref())));
             tree.add_empty_child(format!("Timeout: {}", format_duration(session.timeout.as_ref())));
             tree.end_child();
         }
@@ -1474,6 +1539,8 @@ fn print_sessions_info_table(response: &balancerpb::SessionsInfoResponse) -> Res
     println!();
 
     if !response.sessions_info.is_empty() {
+        let tz_offset = get_timezone_offset_string();
+        
         #[derive(Tabled)]
         struct SessionRow {
             #[tabled(rename = "Client")]
@@ -1484,9 +1551,9 @@ fn print_sessions_info_table(response: &balancerpb::SessionsInfoResponse) -> Res
             real: String,
             #[tabled(rename = "Proto")]
             proto: String,
-            #[tabled(rename = "Created (UTC)")]
+            #[tabled(rename = "Created")]
             created: String,
-            #[tabled(rename = "Last Packet (UTC)")]
+            #[tabled(rename = "Last Packet")]
             last_packet: String,
             #[tabled(rename = "Timeout")]
             timeout: String,
@@ -1508,9 +1575,18 @@ fn print_sessions_info_table(response: &balancerpb::SessionsInfoResponse) -> Res
             }
         }).collect();
 
-        let table = Table::new(rows)
+        let mut table = Table::new(rows)
             .with(Style::rounded())
             .to_string();
+        
+        // Add timezone info to headers - replace in the header row only
+        let lines: Vec<&str> = table.lines().collect();
+        if lines.len() >= 2 {
+            let header = lines[0].replace("Created", &format!("Created ({})", tz_offset))
+                                  .replace("Last Packet", &format!("Last Packet ({})", tz_offset));
+            let rest = lines[1..].join("\n");
+            table = format!("{}\n{}", header, rest);
+        }
         println!("{}", table);
     }
 

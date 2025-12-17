@@ -264,6 +264,7 @@ pub fn create_state_info_example() -> balancerpb::StateInfoResponse {
                     outgoing_packets: 1_199_500,
                 }),
                 icmpv4: Some(balancerpb::IcmpStats {
+                    src_not_allowed: 1_215,
                     incoming_packets: 34_567,
                     echo_responses: 30_000,
                     payload_too_short_ip: 0,
@@ -278,6 +279,7 @@ pub fn create_state_info_example() -> balancerpb::StateInfoResponse {
                     packet_clone_failures: 0,
                 }),
                 icmpv6: Some(balancerpb::IcmpStats {
+                    src_not_allowed: 1_215,
                     incoming_packets: 1_234,
                     echo_responses: 1_200,
                     payload_too_short_ip: 0,
@@ -479,6 +481,7 @@ pub fn create_config_stats_example() -> balancerpb::ConfigStatsResponse {
                     outgoing_packets: 1_199_500,
                 }),
                 icmpv4: Some(balancerpb::IcmpStats {
+                    src_not_allowed: 1_215,
                     incoming_packets: 34_567,
                     echo_responses: 30_000,
                     payload_too_short_ip: 12,
@@ -493,6 +496,7 @@ pub fn create_config_stats_example() -> balancerpb::ConfigStatsResponse {
                     packet_clone_failures: 5,
                 }),
                 icmpv6: Some(balancerpb::IcmpStats {
+                    src_not_allowed: 1_215,
                     incoming_packets: 1_234,
                     echo_responses: 1_200,
                     payload_too_short_ip: 2,

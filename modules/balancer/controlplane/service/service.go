@@ -296,7 +296,7 @@ func (service *BalancerService) FlushRealUpdates(
 			"error",
 			err,
 		)
-		return nil, fmt.Errorf("failed to flush real updates: %w", err)
+		return nil, fmt.Errorf("failed to flush real updates for balancer [name=%s, inst=%d]: %w", name, inst, err)
 	}
 
 	service.log.Infow(
