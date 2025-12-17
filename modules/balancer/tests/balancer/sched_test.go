@@ -179,9 +179,9 @@ func TestWlc(t *testing.T) {
 	// enable third real
 
 	t.Run("Enable_Third_Real", func(t *testing.T) {
-		config, _ := balancer.GetConfig()
+		config, stateConfig := balancer.GetConfig()
 		config.VirtualServices[0].Reals[2].Enabled = true
-		err := balancer.Update(config, nil)
+		err := balancer.Update(config, stateConfig)
 		require.NoError(t, err)
 	})
 
