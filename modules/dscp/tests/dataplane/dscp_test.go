@@ -12,6 +12,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/common/go/testutils"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 )
@@ -129,7 +130,9 @@ func TestDSCP(t *testing.T) {
 				pkt := mark(t, p.pkt, c.from)
 				t.Log("Origin packet", pkt)
 
-				memCtx := memCtxCreate()
+				memCtx := testutils.NewMemoryContext("dscp_test", 1<<20)
+				defer memCtx.Free()
+
 				m := dscpModuleConfig(prefixes, c.flag, c.mark, memCtx)
 				result := dscpHandlePackets(m, pkt)
 				require.NotEmpty(t, result.Output, "result.Output")

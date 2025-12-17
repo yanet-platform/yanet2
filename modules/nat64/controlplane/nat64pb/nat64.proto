@@ -43,19 +43,12 @@ service NAT64Service {
 	}
 }
 
-// Represents config names of dataplane instances
-message InstanceConfigs {
-	// Dataplane instance
-	uint32 instance = 1;
-	repeated string configs = 2;
-}
-
 message ListConfigsRequest {
 }
 
-// ListConfigsResponse contains existing configurations per dataplane instance.
+// ListConfigsResponse contains existing configurations.
 message ListConfigsResponse {
-	repeated InstanceConfigs instance_configs = 1;
+	repeated string configs = 1;
 }
 
 // ShowConfigRequest requests the current configuration
@@ -92,8 +85,7 @@ message Config {
 
 // ShowConfigResponse contains the current configuration
 message ShowConfigResponse {
-	uint32 instance = 1;
-	Config config = 2;
+	Config config = 1;
 }
 
 // AddPrefixRequest specifies a prefix to add

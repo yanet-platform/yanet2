@@ -88,3 +88,6 @@ free_packet_list(struct packet_list *packet_list);
 
 int
 fill_packet_from_data(struct packet *packet, struct packet_data *data);
+
+void
+init_mbuf(struct rte_mbuf *m, struct packet_data *data, uint16_t buf_len);

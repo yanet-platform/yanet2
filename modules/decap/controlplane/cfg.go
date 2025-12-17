@@ -5,6 +5,8 @@ import (
 )
 
 type Config struct {
+	// InstanceID specifies which dataplane instance this module serves.
+	InstanceID uint32 `yaml:"instance_id"`
 	// MemoryPath is the path to the shared-memory file that is used to
 	// communicate with dataplane.
 	MemoryPath string `yaml:"memory_path"`
@@ -23,9 +25,4 @@ func DefaultConfig() *Config {
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",
 	}
-}
-
-type instanceKey struct {
-	name              string
-	dataplaneInstance uint32
 }

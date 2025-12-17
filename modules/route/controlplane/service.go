@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"maps"
 	"net/netip"
 	"sync"
 	"sync/atomic"
@@ -26,9 +25,9 @@ type RouteService struct {
 	routepb.UnimplementedRouteServiceServer
 
 	mu         sync.Mutex
-	agents     []*ffi.Agent
+	agent      *ffi.Agent
 	ribsLock   sync.RWMutex
-	ribs       map[instanceKey]*rib.RIB
+	ribs       map[string]*rib.RIB
 	neighCache *neigh.NexthopCache
 
 	ribTTL time.Duration
@@ -38,14 +37,14 @@ type RouteService struct {
 }
 
 func NewRouteService(
-	agents []*ffi.Agent,
+	agent *ffi.Agent,
 	neighCache *neigh.NexthopCache,
 	ribTTL time.Duration,
 	log *zap.SugaredLogger,
 ) *RouteService {
 	return &RouteService{
-		agents:     agents,
-		ribs:       map[instanceKey]*rib.RIB{},
+		agent:      agent,
+		ribs:       map[string]*rib.RIB{},
 		neighCache: neighCache,
 		ribTTL:     ribTTL,
 		quitCh:     make(chan bool),
@@ -57,19 +56,13 @@ func (m *RouteService) ListConfigs(
 	ctx context.Context,
 	request *routepb.ListConfigsRequest,
 ) (*routepb.ListConfigsResponse, error) {
-
 	response := &routepb.ListConfigsResponse{
-		InstanceConfigs: make([]*routepb.InstanceConfigs, len(m.agents)),
+		Configs: []string{},
 	}
-	for idx := range m.agents {
-		response.InstanceConfigs[idx] = &routepb.InstanceConfigs{
-			Instance: uint32(idx),
-		}
-	}
+
 	m.ribsLock.RLock()
-	for key := range maps.Keys(m.ribs) {
-		instanceConfigs := response.InstanceConfigs[key.dataplaneInstance]
-		instanceConfigs.Configs = append(instanceConfigs.Configs, key.name)
+	for key := range m.ribs {
+		response.Configs = append(response.Configs, key)
 	}
 	m.ribsLock.RUnlock()
 
@@ -81,12 +74,12 @@ func (m *RouteService) ShowRoutes(
 	request *routepb.ShowRoutesRequest,
 ) (*routepb.ShowRoutesResponse, error) {
 
-	name, instance, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	holder, ok := m.getRib(name, instance)
+	holder, ok := m.getRib(name)
 	if !ok {
 		return &routepb.ShowRoutesResponse{}, nil
 	}
@@ -123,7 +116,7 @@ func (m *RouteService) LookupRoute(
 	request *routepb.LookupRouteRequest,
 ) (*routepb.LookupRouteResponse, error) {
 
-	name, instance, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -133,7 +126,7 @@ func (m *RouteService) LookupRoute(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse IP address: %v", err)
 	}
 
-	holder, ok := m.getRib(name, instance)
+	holder, ok := m.getRib(name)
 	if !ok {
 		return &routepb.LookupRouteResponse{}, nil
 	}
@@ -161,17 +154,17 @@ func (m *RouteService) FlushRoutes(
 	ctx context.Context,
 	request *routepb.FlushRoutesRequest,
 ) (*routepb.FlushRoutesResponse, error) {
-	name, instance, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	ribRef, ok := m.getRib(name, instance)
+	ribRef, ok := m.getRib(name)
 	if !ok {
-		m.log.Warnf("no RIB found for module '%s' on dataplane instance %d", name, instance)
+		m.log.Warnf("no RIB found for module '%s'", name)
 		return &routepb.FlushRoutesResponse{}, nil
 	}
 
-	return &routepb.FlushRoutesResponse{}, m.syncRouteUpdates(ribRef, name, instance)
+	return &routepb.FlushRoutesResponse{}, m.syncRouteUpdates(ribRef, name)
 }
 
 func (m *RouteService) InsertRoute(
@@ -180,12 +173,11 @@ func (m *RouteService) InsertRoute(
 ) (*routepb.InsertRouteResponse, error) {
 	startTime := time.Now()
 
-	name, instance, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		m.log.Errorw("InsertRoute: target validation failed",
 			"error", err,
 			"config_name", request.GetTarget().GetConfigName(),
-			"dataplane_instance", request.GetTarget().GetDataplaneInstance(),
 		)
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -196,7 +188,6 @@ func (m *RouteService) InsertRoute(
 			"error", err,
 			"prefix_str", request.GetPrefix(),
 			"name", name,
-			"instance", instance,
 		)
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
 	}
@@ -208,12 +199,11 @@ func (m *RouteService) InsertRoute(
 			"nexthop_str", request.GetNexthopAddr(),
 			"prefix", prefix,
 			"name", name,
-			"instance", instance,
 		)
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop address: %v", err)
 	}
 
-	holder := m.getOrCreateRib(name, instance)
+	holder := m.getOrCreateRib(name)
 
 	if err := holder.AddUnicastRoute(prefix, nexthopAddr); err != nil {
 		m.log.Errorw("InsertRoute: failed to add unicast route to RIB",
@@ -221,19 +211,17 @@ func (m *RouteService) InsertRoute(
 			"prefix", prefix,
 			"nexthop", nexthopAddr,
 			"name", name,
-			"instance", instance,
 		)
 		return nil, fmt.Errorf("failed to add unicast route: %w", err)
 	}
 
 	if request.GetDoFlush() {
-		if err := m.syncRouteUpdates(holder, name, instance); err != nil {
+		if err := m.syncRouteUpdates(holder, name); err != nil {
 			m.log.Errorw("InsertRoute: failed to sync route updates",
 				"error", err,
 				"prefix", prefix,
 				"nexthop", nexthopAddr,
 				"name", name,
-				"instance", instance,
 			)
 			return &routepb.InsertRouteResponse{}, err
 		}
@@ -243,7 +231,6 @@ func (m *RouteService) InsertRoute(
 		"prefix", prefix,
 		"nexthop", nexthopAddr,
 		"name", name,
-		"instance", instance,
 		"duration", time.Since(startTime),
 	)
 	return &routepb.InsertRouteResponse{}, nil
@@ -262,7 +249,6 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 	var (
 		update     *routepb.Update
 		name       string
-		instance   uint32
 		err        error
 		ribRef     *rib.RIB     // Reference to the target RIB for this stream.
 		sessionId  uint64       // ID for the current route import session.
@@ -280,27 +266,27 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 
 		// On the first update, identify the target RIB and start a new session.
 		if ribRef == nil {
-			name, instance, err = update.GetTarget().Validate(uint32(len(m.agents)))
+			name, err = update.GetTarget().Validate()
 			if err != nil {
 				err = status.Error(codes.InvalidArgument, err.Error())
 				break // Invalid target, cannot proceed.
 			}
-			ribRef = m.getOrCreateRib(name, instance)
+			ribRef = m.getOrCreateRib(name)
 			// NewSession() increments RIB's session counter and returns the new ID.
 			// It also sets the termination flag for the *previous* session's stream.
 			sessionId, terminated = ribRef.NewSession()
-			m.log.Infof("new FeedRIB session %d started for %s on instance %d", sessionId, name, instance)
+			m.log.Infof("new FeedRIB session %d started for %s", sessionId, name)
 		}
 
 		// Check if this session has been superseded by a newer one.
 		if terminated.Load() {
-			m.log.Warnf("FeedRIB session %d for %s on instance %d terminated by a newer session", sessionId, name, instance)
+			m.log.Warnf("FeedRIB session %d for %s terminated by a newer session", sessionId, name)
 			err = stream.SendAndClose(&routepb.UpdateSummary{}) // Gracefully close our side.
 			break
 		}
 		if update.GetRoute() == nil { // flush event
-			m.log.Infof("sync routes in session %d for %s:%d due to flush event in FeedRIB stream", sessionId, name, instance)
-			err = m.syncRouteUpdates(ribRef, name, instance)
+			m.log.Infof("sync routes in session %d for %s due to flush event in FeedRIB stream", sessionId, name)
+			err = m.syncRouteUpdates(ribRef, name)
 			if err != nil {
 				break
 			}
@@ -319,7 +305,7 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 	// If a RIB was established for this stream, schedule cleanup for its session.
 	// This runs regardless of whether the stream ended cleanly or with an error.
 	if ribRef != nil {
-		m.log.Infof("FeedRIB session %d for %s on instance %d ended. Scheduling cleanup.", sessionId, name, instance)
+		m.log.Infof("FeedRIB session %d for %s ended. Scheduling cleanup.", sessionId, name)
 		// CleanupTask will remove routes from this sessionID (and older BIRD ones) after ribTTL.
 		go ribRef.CleanupTask(sessionId, m.quitCh, m.ribTTL)
 	}
@@ -328,40 +314,38 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 	return err
 }
 
-func (m *RouteService) getRib(name string, instance uint32) (*rib.RIB, bool) {
+func (m *RouteService) getRib(name string) (*rib.RIB, bool) {
 	m.ribsLock.RLock()
 	defer m.ribsLock.RUnlock()
-	rib, ok := m.ribs[instanceKey{name: name, dataplaneInstance: instance}]
+	rib, ok := m.ribs[name]
 	return rib, ok
 }
 
-func (m *RouteService) getOrCreateRib(name string, instance uint32) *rib.RIB {
+func (m *RouteService) getOrCreateRib(name string) *rib.RIB {
 	m.ribsLock.Lock()
 	defer m.ribsLock.Unlock()
 
-	key := instanceKey{name: name, dataplaneInstance: instance}
-	ribRef, ok := m.ribs[key]
+	ribRef, ok := m.ribs[name]
 	if !ok {
-		m.log.Infow("creating new RIB", "name", name, "instance", instance)
+		m.log.Infow("creating new RIB", "name", name)
 		ribRef = rib.NewRIB(m.log)
-		m.ribs[key] = ribRef
+		m.ribs[name] = ribRef
 	}
 	return ribRef
 }
 
-func (m *RouteService) syncRouteUpdates(ribRef *rib.RIB, name string, dpInstance uint32) error {
+func (m *RouteService) syncRouteUpdates(ribRef *rib.RIB, name string) error {
 	ribDump := ribRef.DumpRoutes()
 
 	// Huge mutex, but our shared memory must be protected from concurrent access.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	err := m.updateModuleConfig(name, dpInstance, ribDump)
+	err := m.updateModuleConfig(name, ribDump)
 	if err != nil {
 		m.log.Errorw("syncRouteUpdates: failed to update module config",
 			"error", err,
 			"name", name,
-			"instance", dpInstance,
 		)
 		return err
 	}
@@ -370,17 +354,13 @@ func (m *RouteService) syncRouteUpdates(ribRef *rib.RIB, name string, dpInstance
 
 func (m *RouteService) updateModuleConfig(
 	name string,
-	inst uint32,
 	ribDump rib.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
 ) error {
-	agent := m.agents[inst]
-
-	config, err := NewModuleConfig(agent, name)
+	config, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		m.log.Errorw("updateModuleConfig: failed to create module config",
 			"error", err,
 			"name", name,
-			"instance", inst,
 		)
 		return fmt.Errorf("failed to create %q module config: %w", name, err)
 	}
@@ -423,7 +403,6 @@ func (m *RouteService) updateModuleConfig(
 						"nexthop", route.NextHop,
 						"prefix", prefix,
 						"name", name,
-						"instance", inst,
 					)
 					stats.neighbourNotFound++
 					continue
@@ -445,7 +424,6 @@ func (m *RouteService) updateModuleConfig(
 						"hardware_route", entry.HardwareRoute,
 						"prefix", prefix,
 						"name", name,
-						"instance", inst,
 					)
 					return fmt.Errorf("failed to add hardware route %q: %w", entry.HardwareRoute, err)
 				}
@@ -467,7 +445,6 @@ func (m *RouteService) updateModuleConfig(
 						"route_indices", routesListSetKey.AsSlice(),
 						"prefix", prefix,
 						"name", name,
-						"instance", inst,
 					)
 					return fmt.Errorf("failed to add routes list: %w", err)
 				}
@@ -481,7 +458,6 @@ func (m *RouteService) updateModuleConfig(
 					"prefix", prefix,
 					"route_list_index", idx,
 					"name", name,
-					"instance", inst,
 				)
 				return fmt.Errorf("failed to add prefix %q: %w", prefix, err)
 			}
@@ -491,7 +467,6 @@ func (m *RouteService) updateModuleConfig(
 
 	m.log.Infow("updateModuleConfig: finished processing routes",
 		"module", name,
-		"instance", inst,
 		"total_prefixes", stats.totalPrefixes,
 		"total_routes", stats.totalRoutes,
 		"skipped_prefixes", stats.skippedPrefixes,
@@ -501,11 +476,10 @@ func (m *RouteService) updateModuleConfig(
 		"processing_duration", time.Since(routeInsertionStart),
 	)
 
-	if err := agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
 		m.log.Errorw("updateModuleConfig: failed to update modules via FFI",
 			"error", err,
 			"name", name,
-			"instance", inst,
 		)
 		return fmt.Errorf("failed to update module: %w", err)
 	}

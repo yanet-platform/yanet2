@@ -106,3 +106,10 @@ subdir('dataplane')
 subdir('mock')
 subdir('sock-send')
 subdir('tests')
+
+# Define a default test setup that excludes large tests
+add_test_setup(
+  'default',
+  exclude_suites: ['large'],
+  is_default: true,
+)

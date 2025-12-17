@@ -147,7 +147,6 @@ func TestBalancerBasics(t *testing.T) {
 
 	t.Run("Read_Config_Info", func(t *testing.T) {
 		configStats := balancer.GetConfigStats(
-			0,
 			defaultDeviceName,
 			defaultPipelineName,
 			defaultFunctionName,

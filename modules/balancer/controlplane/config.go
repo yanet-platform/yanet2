@@ -6,6 +6,8 @@ import "github.com/c2h5oh/datasize"
 
 // Config for the balancer service
 type Config struct {
+	// InstanceID specifies which dataplane instance this module serves.
+	InstanceID uint32 `yaml:"instance_id"`
 	// MemoryPath is the path to the shared-memory file that is used to
 	// communicate with dataplane.
 	MemoryPath string `yaml:"memory_path"`

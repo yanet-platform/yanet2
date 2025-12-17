@@ -7,15 +7,19 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
+// InspectService is a gRPC service for inspecting the dataplane configuration.
 type InspectService struct {
 	ynpb.UnimplementedInspectServiceServer
 
-	shm *ffi.SharedMemory
+	instanceID uint32
+	shm        *ffi.SharedMemory
 }
 
-func NewInspectService(shm *ffi.SharedMemory) *InspectService {
+// NewInspectService creates a new InspectService.
+func NewInspectService(instanceID uint32, shm *ffi.SharedMemory) *InspectService {
 	return &InspectService{
-		shm: shm,
+		instanceID: instanceID,
+		shm:        shm,
 	}
 }
 
@@ -23,26 +27,21 @@ func (m *InspectService) Inspect(
 	ctx context.Context,
 	request *ynpb.InspectRequest,
 ) (*ynpb.InspectResponse, error) {
-	instanceIndices := m.shm.InstanceIndices()
+	dpConfig := m.shm.DPConfig(m.instanceID)
 
-	response := &ynpb.InspectResponse{
-		InstanceIndices: instanceIndices,
+	instanceInfo := &ynpb.InstanceInfo{
+		InstanceIdx: m.instanceID,
+		NumaIdx:     m.numaIdx(dpConfig),
+		DpModules:   m.dpModules(dpConfig),
+		CpConfigs:   m.cpConfigs(dpConfig),
+		Pipelines:   m.pipelines(dpConfig),
+		Functions:   m.functions(dpConfig),
+		Agents:      m.agents(dpConfig),
+		Devices:     m.devices(dpConfig),
 	}
 
-	for _, instanceIdx := range instanceIndices {
-		dpConfig := m.shm.DPConfig(instanceIdx)
-
-		instanceInfo := &ynpb.InstanceInfo{
-			NumaIdx:   m.numaIdx(dpConfig),
-			DpModules: m.dpModules(dpConfig),
-			CpConfigs: m.cpConfigs(dpConfig),
-			Pipelines: m.pipelines(dpConfig),
-			Functions: m.functions(dpConfig),
-			Agents:    m.agents(dpConfig),
-			Devices:   m.devices(dpConfig),
-		}
-
-		response.InstanceInfo = append(response.InstanceInfo, instanceInfo)
+	response := &ynpb.InspectResponse{
+		InstanceInfo: instanceInfo,
 	}
 
 	return response, nil

@@ -3,8 +3,7 @@ import { Box } from '@gravity-ui/uikit';
 import { API } from '../api';
 import { toaster } from '../utils';
 import type { Route } from '../api/routes';
-import { PageLayout, PageLoader, EmptyState, InstanceTabs } from '../components';
-import { useInstanceTabs } from '../hooks';
+import { PageLayout, PageLoader, EmptyState } from '../components';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '../utils';
 import {
     type AddRouteFormData,
@@ -15,7 +14,7 @@ import {
     RoutePageHeader,
     DeleteRouteDialog,
     AddRouteDialog,
-    InstanceTabContent,
+    RouteConfigContent,
     VirtualizedRouteTable,
     useMockMode,
     useRouteData,
@@ -23,15 +22,14 @@ import {
 
 const RoutePage: React.FC = () => {
     const {
-        instanceConfigs,
-        instanceRoutes,
+        configs,
+        configRoutes,
         selectedRoutes,
         loading,
         activeConfigTab,
-        setInstanceConfigs,
-        setInstanceRoutes,
+        setConfigs,
+        setConfigRoutes,
         setSelectedRoutes,
-        setActiveConfigTab,
         handleSelectionChange,
         handleConfigTabChange,
         reloadRoutes,
@@ -47,8 +45,6 @@ const RoutePage: React.FC = () => {
         handleMockSizeChange,
     } = useMockMode();
 
-    const { activeTab, setActiveTab, currentTabIndex } = useInstanceTabs({ items: instanceConfigs });
-
     const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
     const [addDialogOpen, setAddDialogOpen] = useState<boolean>(false);
     const [addRouteForm, setAddRouteForm] = useState<AddRouteFormData>({
@@ -59,24 +55,19 @@ const RoutePage: React.FC = () => {
     });
 
     // Derived state
-    const currentInstanceConfig = instanceConfigs[currentTabIndex];
-    const currentInstance = currentInstanceConfig?.instance ?? currentTabIndex;
-    const currentConfigs = currentInstanceConfig?.configs || [];
-    const currentActiveConfig = activeConfigTab.get(currentInstance) || currentConfigs[0] || '';
-    const currentSelectedMap = selectedRoutes.get(currentInstance);
-    const currentSelected = currentSelectedMap?.get(currentActiveConfig);
+    const currentSelected = selectedRoutes.get(activeConfigTab);
     const isDeleteDisabled = !currentSelected || currentSelected.size === 0;
-    const isFlushDisabled = !currentActiveConfig;
+    const isFlushDisabled = !activeConfigTab;
 
     const handleAddRouteClick = useCallback((): void => {
         setAddRouteForm({
-            configName: currentActiveConfig,
+            configName: activeConfigTab,
             prefix: '',
             nexthopAddr: '',
             doFlush: false,
         });
         setAddDialogOpen(true);
-    }, [currentActiveConfig]);
+    }, [activeConfigTab]);
 
     const handleDeleteRouteClick = useCallback((): void => {
         if (isDeleteDisabled) {
@@ -87,7 +78,7 @@ const RoutePage: React.FC = () => {
     }, [isDeleteDisabled]);
 
     const handleFlushClick = useCallback(async (): Promise<void> => {
-        if (!currentActiveConfig) {
+        if (!activeConfigTab) {
             toaster.warning('flush-route-config-warning', 'Please select a config to flush');
             return;
         }
@@ -95,15 +86,14 @@ const RoutePage: React.FC = () => {
         try {
             await API.route.flushRoutes({
                 target: {
-                    configName: currentActiveConfig,
-                    dataplaneInstance: currentInstance,
+                    configName: activeConfigTab,
                 },
             });
-            toaster.success('flush-route-success', `Flushed routes for ${currentActiveConfig} on instance ${currentInstance}`);
+            toaster.success('flush-route-success', `Flushed routes for ${activeConfigTab}`);
         } catch (err) {
             toaster.error('flush-route-error', 'Failed to flush routes', err);
         }
-    }, [currentActiveConfig, currentInstance]);
+    }, [activeConfigTab]);
 
     const handleAddRouteConfirm = useCallback(async (): Promise<void> => {
         const configName = addRouteForm.configName.trim();
@@ -156,7 +146,6 @@ const RoutePage: React.FC = () => {
             await API.route.insertRoute({
                 target: {
                     configName,
-                    dataplaneInstance: currentInstance,
                 },
                 prefix: addRouteForm.prefix,
                 nexthopAddr: addRouteForm.nexthopAddr,
@@ -165,40 +154,22 @@ const RoutePage: React.FC = () => {
 
             setAddDialogOpen(false);
 
-            const updatedConfigsList = currentConfigs.includes(configName)
-                ? currentConfigs
-                : [...currentConfigs, configName];
+            const updatedConfigsList = configs.includes(configName)
+                ? configs
+                : [...configs, configName];
 
-            if (!currentConfigs.includes(configName)) {
-                setInstanceConfigs((prev) =>
-                    prev.map((instConfig, instIdx) =>
-                        instIdx === currentTabIndex
-                            ? { ...instConfig, configs: updatedConfigsList }
-                            : instConfig
-                    )
-                );
-
-                setActiveConfigTab((prev) => {
-                    const newMap = new Map(prev);
-                    if (!newMap.has(currentInstance)) {
-                        newMap.set(currentInstance, configName);
-                    }
-                    return newMap;
-                });
+            if (!configs.includes(configName)) {
+                setConfigs(updatedConfigsList);
             }
 
-            const configRoutesMap = await reloadRoutes(currentInstance, updatedConfigsList);
-            setInstanceRoutes((prev) => {
-                const newMap = new Map(prev);
-                newMap.set(currentInstance, configRoutesMap);
-                return newMap;
-            });
+            const reloadedRoutes = await reloadRoutes(updatedConfigsList);
+            setConfigRoutes(reloadedRoutes);
 
             toaster.success('add-route-success', 'Route added successfully');
         } catch (err) {
             toaster.error('add-route-error', 'Failed to add route', err);
         }
-    }, [addRouteForm, currentInstance, currentConfigs, currentTabIndex, reloadRoutes, setInstanceConfigs, setActiveConfigTab, setInstanceRoutes]);
+    }, [addRouteForm, configs, reloadRoutes, setConfigs, setConfigRoutes]);
 
     const handleDeleteConfirm = useCallback(async (): Promise<void> => {
         const selected = currentSelected;
@@ -208,8 +179,7 @@ const RoutePage: React.FC = () => {
             return;
         }
 
-        const configRoutesMap = instanceRoutes.get(currentInstance) || new Map<string, Route[]>();
-        const routes = configRoutesMap.get(currentActiveConfig) || [];
+        const routes = configRoutes.get(activeConfigTab) || [];
         const selectedRoutesList = routes.filter((route: Route) => selected.has(getRouteId(route)));
 
         if (selectedRoutesList.length === 0) {
@@ -228,8 +198,7 @@ const RoutePage: React.FC = () => {
 
                 await API.route.deleteRoute({
                     target: {
-                        configName: currentActiveConfig,
-                        dataplaneInstance: currentInstance,
+                        configName: activeConfigTab,
                     },
                     prefix: route.prefix,
                     nexthopAddr: route.nextHop,
@@ -241,18 +210,12 @@ const RoutePage: React.FC = () => {
                 toaster.warning('delete-route-skip-warning', 'Skipped routes without prefix or nexthop address');
             }
 
-            const reloadedConfigRoutesMap = await reloadRoutes(currentInstance, currentConfigs);
-            setInstanceRoutes((prev) => {
-                const newMap = new Map(prev);
-                newMap.set(currentInstance, reloadedConfigRoutesMap);
-                return newMap;
-            });
+            const reloadedRoutes = await reloadRoutes(configs);
+            setConfigRoutes(reloadedRoutes);
 
             setSelectedRoutes((prev) => {
-                const newInstanceMap = new Map(prev.get(currentInstance) || new Map<string, Set<string>>());
-                newInstanceMap.set(currentActiveConfig, new Set<string>());
                 const newSelected = new Map(prev);
-                newSelected.set(currentInstance, newInstanceMap);
+                newSelected.set(activeConfigTab, new Set<string>());
                 return newSelected;
             });
 
@@ -262,15 +225,14 @@ const RoutePage: React.FC = () => {
         } catch (err) {
             toaster.error('delete-route-error', 'Failed to delete routes', err);
         }
-    }, [currentSelected, currentInstance, currentActiveConfig, currentConfigs, instanceRoutes, reloadRoutes, setInstanceRoutes, setSelectedRoutes]);
+    }, [currentSelected, activeConfigTab, configs, configRoutes, reloadRoutes, setConfigRoutes, setSelectedRoutes]);
 
     // Compute selected routes for delete dialog
     const selectedRoutesForDialog = useMemo((): Route[] => {
         if (!currentSelected || currentSelected.size === 0) return [];
-        const configRoutesMap = instanceRoutes.get(currentInstance) || new Map<string, Route[]>();
-        const routes = configRoutesMap.get(currentActiveConfig) || [];
+        const routes = configRoutes.get(activeConfigTab) || [];
         return routes.filter((route: Route) => currentSelected.has(getRouteId(route)));
-    }, [currentSelected, currentInstance, currentActiveConfig, instanceRoutes]);
+    }, [currentSelected, activeConfigTab, configRoutes]);
 
     const headerContent = (
         <RoutePageHeader
@@ -309,52 +271,45 @@ const RoutePage: React.FC = () => {
         );
     }
 
-    if (instanceConfigs.length === 0) {
+    if (configs.length === 0) {
         return (
             <PageLayout header={headerContent}>
                 <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px' }}>
-                    <EmptyState message="No instances found. Enable Mock Mode to test with sample data." />
+                    <EmptyState message="No configs found. Use 'Add Route' to create a new configuration." />
                 </Box>
+
+                <AddRouteDialog
+                    open={addDialogOpen}
+                    onClose={() => setAddDialogOpen(false)}
+                    onConfirm={handleAddRouteConfirm}
+                    form={addRouteForm}
+                    onFormChange={setAddRouteForm}
+                    validatePrefix={validatePrefix}
+                    validateNexthop={validateNexthop}
+                />
             </PageLayout>
         );
     }
 
+    const getRoutesData = (configName: string): ConfigRoutesData => {
+        const routes = configRoutes.get(configName) || [];
+        const selectedSet = selectedRoutes.get(configName) || new Set<string>();
+        return {
+            routes,
+            selectedIds: Array.from(selectedSet),
+        };
+    };
+
     return (
         <PageLayout header={headerContent}>
             <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px', display: 'flex', flexDirection: 'column' }}>
-                <InstanceTabs
-                    items={instanceConfigs}
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                    getTabLabel={(instanceConfig, idx) => `Instance ${instanceConfig.instance ?? idx}`}
-                    renderContent={(instanceConfig, idx) => {
-                        const instance = instanceConfig.instance ?? idx;
-                        const configs = instanceConfig.configs || [];
-                        const configRoutesMap = instanceRoutes.get(instance) || new Map<string, Route[]>();
-                        const activeConfig = activeConfigTab.get(instance) || configs[0] || '';
-                        const instanceSelectedMap = selectedRoutes.get(instance) || new Map<string, Set<string>>();
-
-                        const getRoutesData = (configName: string): ConfigRoutesData => {
-                            const routes = configRoutesMap.get(configName) || [];
-                            const selectedSet = instanceSelectedMap.get(configName) || new Set<string>();
-                            return {
-                                routes,
-                                selectedIds: Array.from(selectedSet),
-                            };
-                        };
-
-                        return (
-                            <InstanceTabContent
-                                configs={configs}
-                                activeConfig={activeConfig}
-                                onConfigChange={(config) => handleConfigTabChange(instance, config)}
-                                getRoutesData={getRoutesData}
-                                onSelectionChange={(configName, ids) => handleSelectionChange(instance, configName, ids)}
-                                getRouteId={getRouteId}
-                            />
-                        );
-                    }}
-                    contentStyle={{ flex: 1, minHeight: 0 }}
+                <RouteConfigContent
+                    configs={configs}
+                    activeConfig={activeConfigTab}
+                    onConfigChange={handleConfigTabChange}
+                    getRoutesData={getRoutesData}
+                    onSelectionChange={handleSelectionChange}
+                    getRouteId={getRouteId}
                 />
             </Box>
 

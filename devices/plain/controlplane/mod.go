@@ -1,6 +1,8 @@
 package plain
 
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -12,7 +14,7 @@ import (
 type DevicePlainDevice struct {
 	cfg     *Config
 	shm     *ffi.SharedMemory
-	agents  []*ffi.Agent
+	agent   *ffi.Agent
 	service *DevicePlainService
 	log     *zap.SugaredLogger
 }
@@ -26,23 +28,22 @@ func NewDevicePlainDevice(cfg *Config, log *zap.SugaredLogger) (*DevicePlainDevi
 		return nil, err
 	}
 
-	instanceIndices := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
-		zap.Uint32s("instances", instanceIndices),
+		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("plain", instanceIndices, uint(cfg.MemoryRequirements))
+	agent, err := shm.AgentAttach("plain", cfg.InstanceID, uint(cfg.MemoryRequirements))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	plainService := NewDevicePlainService(agents)
+	plainService := NewDevicePlainService(agent)
 
 	return &DevicePlainDevice{
 		cfg:     cfg,
 		shm:     shm,
-		agents:  agents,
+		agent:   agent,
 		service: plainService,
 		log:     log,
 	}, nil
@@ -66,10 +67,8 @@ func (m *DevicePlainDevice) RegisterService(server *grpc.Server) {
 
 // Close closes the device and releases all resources
 func (m *DevicePlainDevice) Close() error {
-	for instance, agent := range m.agents {
-		if err := agent.Close(); err != nil {
-			m.log.Warnw("failed to close shared memory agent", zap.Int("instance", instance), zap.Error(err))
-		}
+	if err := m.agent.Close(); err != nil {
+		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {

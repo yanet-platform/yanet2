@@ -3,6 +3,7 @@ package mock
 import (
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -12,8 +13,8 @@ import (
 
 func TestBasic(t *testing.T) {
 	config := YanetMockConfig{
-		CpMemory: 1 << 27,
-		DpMemory: 1 << 20,
+		CpMemory: datasize.MB * 128,
+		DpMemory: datasize.MB,
 		Workers:  1,
 		Devices: []YanetMockDeviceConfig{
 			{

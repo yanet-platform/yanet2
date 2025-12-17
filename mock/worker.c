@@ -6,13 +6,14 @@
 #include "dataplane/pipeline/pipeline.h"
 #include "dataplane/time/clock.h"
 #include "packet.h"
-#include "utils/mbuf.h"
 #include <stdlib.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
 // Mock dp worker library.
 
+/*
+FIXME: confict with definition inside lib/dataplane/worker
 struct packet *
 worker_clone_packet(struct dp_worker *dp_worker, struct packet *packet) {
 	(void)dp_worker;
@@ -52,6 +53,7 @@ worker_clone_packet(struct dp_worker *dp_worker, struct packet *packet) {
 	mbuf_copy(packet_clone->mbuf, src_mbuf);
 	return packet_clone;
 }
+*/
 
 ////////////////////////////////////////////////////////////////////////////////
 

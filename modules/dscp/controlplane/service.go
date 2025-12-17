@@ -20,8 +20,8 @@ type DscpService struct {
 	dscppb.UnimplementedDscpServiceServer
 
 	mu      sync.Mutex
-	agents  []*ffi.Agent
-	configs map[instanceKey]*instanceConfig
+	agent   *ffi.Agent
+	configs map[string]*instanceConfig
 	log     *zap.SugaredLogger
 }
 
@@ -35,10 +35,10 @@ type dscpConfig struct {
 	mark uint8
 }
 
-func NewDscpService(agents []*ffi.Agent, log *zap.SugaredLogger) *DscpService {
+func NewDscpService(agent *ffi.Agent, log *zap.SugaredLogger) *DscpService {
 	return &DscpService{
-		agents:  agents,
-		configs: map[instanceKey]*instanceConfig{},
+		agent:   agent,
+		configs: map[string]*instanceConfig{},
 		log:     log,
 	}
 }
@@ -48,21 +48,15 @@ func (m *DscpService) ListConfigs(
 ) (*dscppb.ListConfigsResponse, error) {
 
 	response := &dscppb.ListConfigsResponse{
-		InstanceConfigs: make([]*dscppb.InstanceConfigs, len(m.agents)),
-	}
-	for inst := range m.agents {
-		response.InstanceConfigs[inst] = &dscppb.InstanceConfigs{
-			Instance: uint32(inst),
-		}
+		Configs: make([]string, 0),
 	}
 
 	// Lock instances store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for key := range m.configs {
-		instConfig := response.InstanceConfigs[key.dataplaneInstance]
-		instConfig.Configs = append(instConfig.Configs, key.name)
+	for name := range m.configs {
+		response.Configs = append(response.Configs, name)
 	}
 
 	return response, nil
@@ -72,18 +66,17 @@ func (m *DscpService) ShowConfig(
 	ctx context.Context,
 	request *dscppb.ShowConfigRequest,
 ) (*dscppb.ShowConfigResponse, error) {
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, err
 	}
 
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	response := &dscppb.ShowConfigResponse{Instance: inst}
+	response := &dscppb.ShowConfigResponse{}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if config, ok := m.configs[key]; ok {
+	if config, ok := m.configs[name]; ok {
 		instanceConfig := &dscppb.Config{
 			Prefixes: make([]string, 0, len(config.prefixes)),
 			DscpConfig: &dscppb.DscpConfig{
@@ -106,7 +99,7 @@ func (m *DscpService) AddPrefixes(
 	request *dscppb.AddPrefixesRequest,
 ) (*dscppb.AddPrefixesResponse, error) {
 
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, err
 	}
@@ -123,10 +116,9 @@ func (m *DscpService) AddPrefixes(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	config, ok := m.configs[key]
+	config, ok := m.configs[name]
 	if !ok {
-		m.configs[key] = &instanceConfig{
+		m.configs[name] = &instanceConfig{
 			prefixes: toAdd,
 			dscpCfg:  dscpConfig{flag: 0, mark: 0},
 		}
@@ -140,14 +132,14 @@ func (m *DscpService) AddPrefixes(
 		)
 	}
 
-	return &dscppb.AddPrefixesResponse{}, m.updateModuleConfig(name, inst)
+	return &dscppb.AddPrefixesResponse{}, m.updateModuleConfig(name)
 }
 
 func (m *DscpService) RemovePrefixes(
 	ctx context.Context,
 	request *dscppb.RemovePrefixesRequest,
 ) (*dscppb.RemovePrefixesResponse, error) {
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, err
 	}
@@ -165,22 +157,21 @@ func (m *DscpService) RemovePrefixes(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	config, ok := m.configs[key]
+	config, ok := m.configs[name]
 	if ok {
 		config.prefixes = slices.DeleteFunc(config.prefixes, func(prefix netip.Prefix) bool {
 			return slices.Contains(toRemove, prefix)
 		})
 	}
 
-	return &dscppb.RemovePrefixesResponse{}, m.updateModuleConfig(name, inst)
+	return &dscppb.RemovePrefixesResponse{}, m.updateModuleConfig(name)
 }
 
 func (m *DscpService) SetDscpMarking(
 	ctx context.Context,
 	request *dscppb.SetDscpMarkingRequest,
 ) (*dscppb.SetDscpMarkingResponse, error) {
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, err
 	}
@@ -206,10 +197,9 @@ func (m *DscpService) SetDscpMarking(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	config, ok := m.configs[key]
+	config, ok := m.configs[name]
 	if !ok {
-		m.configs[key] = &instanceConfig{
+		m.configs[name] = &instanceConfig{
 			prefixes: []netip.Prefix{},
 			dscpCfg: dscpConfig{
 				flag: flag,
@@ -221,23 +211,20 @@ func (m *DscpService) SetDscpMarking(
 		config.dscpCfg.mark = mark
 	}
 
-	return &dscppb.SetDscpMarkingResponse{}, m.updateModuleConfig(name, inst)
+	return &dscppb.SetDscpMarkingResponse{}, m.updateModuleConfig(name)
 }
 
 func (m *DscpService) updateModuleConfig(
 	name string,
-	instance uint32,
 ) error {
-	m.log.Debugw("update config", zap.String("module", name), zap.Uint32("instance", instance))
+	m.log.Debugw("update config", zap.String("module", name))
 
-	agent := m.agents[instance]
-
-	config, err := NewModuleConfig(agent, name)
+	config, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		return fmt.Errorf("failed to create %q module config: %w", name, err)
 	}
 
-	moduleConfig := m.configs[instanceKey{name: name, dataplaneInstance: instance}]
+	moduleConfig := m.configs[name]
 	if moduleConfig != nil {
 		// Add prefixes
 		for _, prefix := range moduleConfig.prefixes {
@@ -252,7 +239,7 @@ func (m *DscpService) updateModuleConfig(
 		}
 	}
 
-	if err := agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
 		return fmt.Errorf("failed to update module: %w", err)
 	}
 

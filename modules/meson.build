@@ -1,6 +1,7 @@
 subdir('decap')
 subdir('balancer')
-subdir('acl')
+subdir('fwstate')
+subdir('acl') # depends on fwstate
 subdir('route')
 subdir('forward')
 subdir('dscp')

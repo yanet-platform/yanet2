@@ -1,13 +1,15 @@
 package mock
 
+import "github.com/c2h5oh/datasize"
+
 type YanetMockDeviceConfig struct {
 	Id   uint64
 	Name string
 }
 
 type YanetMockConfig struct {
-	CpMemory uint64
-	DpMemory uint64
+	CpMemory datasize.ByteSize
+	DpMemory datasize.ByteSize
 	Workers  uint64
 	Devices  []YanetMockDeviceConfig
 }

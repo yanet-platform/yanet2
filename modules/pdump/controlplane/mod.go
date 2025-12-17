@@ -2,6 +2,7 @@ package pdump
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -15,7 +16,7 @@ import (
 type PdumpModule struct {
 	cfg     *Config
 	shm     *ffi.SharedMemory
-	agents  []*ffi.Agent
+	agent   *ffi.Agent
 	service *PdumpService
 	log     *zap.SugaredLogger
 }
@@ -35,23 +36,22 @@ func NewPdumpModule(cfg *Config, log *zap.SugaredLogger) (*PdumpModule, error) {
 		return nil, err
 	}
 
-	instanceIndices := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
-		zap.Uint32s("instances", instanceIndices),
+		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("pdump", instanceIndices, uint(cfg.MemoryRequirements))
+	agent, err := shm.AgentAttach("pdump", cfg.InstanceID, uint(cfg.MemoryRequirements))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	service := NewPdumpService(agents, log)
+	service := NewPdumpService(agent, log)
 
 	return &PdumpModule{
 		cfg:     cfg,
 		shm:     shm,
-		agents:  agents,
+		agent:   agent,
 		service: service,
 		log:     log,
 	}, nil
@@ -85,10 +85,8 @@ func (m *PdumpModule) Run(ctx context.Context) error {
 
 // Close closes the module.
 func (m *PdumpModule) Close() error {
-	for inst, agent := range m.agents {
-		if err := agent.Close(); err != nil {
-			m.log.Warnw("failed to close shared memory agent", zap.Int("instance", inst), zap.Error(err))
-		}
+	if err := m.agent.Close(); err != nil {
+		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {

@@ -3,17 +3,12 @@ import type { TargetModule } from './common';
 
 // Decap types based on decap.proto
 
-export interface InstanceConfig {
-    instance?: number;
-    prefixes?: string[];
-}
-
 export interface ShowConfigRequest {
     target?: TargetModule;
 }
 
 export interface ShowConfigResponse {
-    config?: InstanceConfig;
+    prefixes?: string[];
 }
 
 export interface AddPrefixesRequest {

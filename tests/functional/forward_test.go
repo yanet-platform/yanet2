@@ -136,9 +136,9 @@ func TestForward(t *testing.T) {
 	t.Run("Configure_Forward_Module", func(t *testing.T) {
 		// Forward-specific configuration
 		commands := []string{
-			framework.CLIFunction + " update --name=test --chains ch0:4=forward:forward0,route:route0 --instance=0",
+			framework.CLIFunction + " update --name=test --chains ch0:4=forward:forward0,route:route0",
 			// Configure pipelines
-			framework.CLIPipeline + " update --name=test --functions test --instance=0",
+			framework.CLIPipeline + " update --name=test --functions test",
 		}
 
 		_, err := fw.CLI.ExecuteCommands(commands...)

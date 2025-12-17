@@ -21,17 +21,12 @@ import (
 	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
 
-type instanceKey struct {
-	name              string
-	dataplaneInstance uint32
-}
-
 // AdapterService implements the Adapter gRPC service for the route module.
 type AdapterService struct {
 	adapterpb.UnimplementedAdapterServiceServer
 
 	importsMu       sync.Mutex
-	imports         map[instanceKey]*importHolder
+	imports         map[string]*importHolder
 	gatewayEndpoint string    // gRPC endpoint of the RouteService (gateway) for RIB updates
 	quitCh          chan bool // Signals all background BIRD import loops to stop
 	log             *zap.SugaredLogger
@@ -42,7 +37,7 @@ func NewAdapterService(
 	log *zap.SugaredLogger,
 ) *AdapterService {
 	return &AdapterService{
-		imports:         make(map[instanceKey]*importHolder),
+		imports:         make(map[string]*importHolder),
 		gatewayEndpoint: gatewayEndpoint,
 		quitCh:          make(chan bool),
 		log:             log,
@@ -57,7 +52,6 @@ func (m *AdapterService) SetupConfig(
 
 	m.log.Infow("setting up the configuration",
 		zap.String("name", target.ConfigName),
-		zap.Uint32("instance", target.DataplaneInstance),
 	)
 
 	cfg := bird.DefaultConfig()
@@ -113,7 +107,7 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 
 	holder := new(importHolder)
 	holder.currentStream = &stream
-	log := m.log.With("config", target.ConfigName, "instance", target.DataplaneInstance)
+	log := m.log.With("config", target.ConfigName)
 
 	// onUpdate sends route batches over the gRPC stream. Called by bird.Export.
 	onUpdate := func(ctx context.Context, routes []rib.Route) error {
@@ -151,13 +145,12 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 	}
 
 	export := bird.NewExportReader(cfg, onUpdate, onFlush, log)
-	key := instanceKey{name: target.ConfigName, dataplaneInstance: target.DataplaneInstance}
 
 	// Lock to safely access and modify m.imports.
 	m.importsMu.Lock()
 	defer m.importsMu.Unlock()
 	// Ensure only one active import per target: stop and replace if one exists.
-	if oldHolder, ok := m.imports[key]; ok {
+	if oldHolder, ok := m.imports[target.ConfigName]; ok {
 		log.Info("replacing existing BIRD import")
 		if oldHolder.cancel != nil { // Defensive check
 			oldHolder.cancel()
@@ -170,7 +163,7 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 	holder.export = export
 	holder.cancel = cancel
 	holder.conn = conn
-	m.imports[key] = holder
+	m.imports[target.ConfigName] = holder
 
 	// Launch goroutine for BIRD reading and stream lifecycle management.
 	go m.runBirdImportLoop(streamCtx, holder, client, log)

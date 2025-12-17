@@ -20,7 +20,7 @@ import (
 type RouteModule struct {
 	cfg                *Config
 	shm                *ffi.SharedMemory
-	agents             []*ffi.Agent
+	agent              *ffi.Agent
 	neighbourDiscovery *neigh.NeighMonitor
 	routeService       *RouteService
 	neighbourService   *NeighbourService
@@ -39,24 +39,23 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
 	}
 
-	instanceIndices := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
-		zap.Uint32s("instances", instanceIndices),
+		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("route", instanceIndices, uint(cfg.MemoryRequirements))
+	agent, err := shm.AgentAttach("route", cfg.InstanceID, uint(cfg.MemoryRequirements))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	routeService := NewRouteService(agents, neighbourCache, cfg.RibTTL, log)
+	routeService := NewRouteService(agent, neighbourCache, cfg.RibTTL, log)
 	neighbourService := NewNeighbourService(neighbourCache, log)
 
 	return &RouteModule{
 		cfg:                cfg,
 		shm:                shm,
-		agents:             agents,
+		agent:              agent,
 		neighbourDiscovery: neighbourDiscovery,
 		routeService:       routeService,
 		neighbourService:   neighbourService,
@@ -86,10 +85,8 @@ func (m *RouteModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *RouteModule) Close() error {
-	for inst, agent := range m.agents {
-		if err := agent.Close(); err != nil {
-			m.log.Warnw("failed to close shared memory agent", zap.Int("inst", inst), zap.Error(err))
-		}
+	if err := m.agent.Close(); err != nil {
+		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {

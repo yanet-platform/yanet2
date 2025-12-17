@@ -19,44 +19,34 @@ service CountersService {
 }
 
 message DeviceCountersRequest {
-	// Dataplane instance
-	uint32 dp_instance = 1;
-	string device = 2;
+	string device = 1;
 }
 
 message PipelineCountersRequest {
-	// Dataplane instance
-	uint32 dp_instance = 1;
-	string device = 2;
-	string pipeline = 3;
+	string device = 1;
+	string pipeline = 2;
 }
 
 message FunctionCountersRequest {
-	// Dataplane instance
-	uint32 dp_instance = 1;
-	string device = 2;
-	string pipeline = 3;
-	string function = 4;
+	string device = 1;
+	string pipeline = 2;
+	string function = 3;
 }
 
 message ChainCountersRequest {
-	// Dataplane instance
-	uint32 dp_instance = 1;
-	string device = 2;
-	string pipeline = 3;
-	string function = 4;
-	string chain = 5;
+	string device = 1;
+	string pipeline = 2;
+	string function = 3;
+	string chain = 4;
 }
 
 message ModuleCountersRequest {
-	// Dataplane instance
-	uint32 dp_instance = 1;
-	string device = 2;
-	string pipeline = 3;
-	string function = 4;
-	string chain = 5;
-	string module_type = 6;
-	string module_name = 7;
+	string device = 1;
+	string pipeline = 2;
+	string function = 3;
+	string chain = 4;
+	string module_type = 5;
+	string module_name = 6;
 }
 
 message CounterInstanceInfo {

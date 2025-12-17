@@ -7,10 +7,11 @@ cp_dependencies = [
   libdpdk_inc_dep,
 ]
 
-includes = include_directories('../dataplane')
+includes = include_directories('../dataplane', '../../fwstate/dataplane', '../../..')
 
 sources = files(
-  'controlplane.c'
+  'controlplane.c',
+  'fwstate_cp.c',
 )
 
 lib_acl_cp = static_library(

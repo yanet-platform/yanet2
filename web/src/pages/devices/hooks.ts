@@ -4,17 +4,17 @@ import type { DeviceType } from '../../api/devices';
 import type { PipelineId } from '../../api/pipelines';
 import type { InspectResponse, DeviceInfo } from '../../api/inspect';
 import { toaster } from '../../utils';
-import type { LocalDevice, InstanceDeviceData } from './types';
+import type { LocalDevice } from './types';
 
 export interface UseDeviceDataResult {
-    instances: InstanceDeviceData[];
+    devices: LocalDevice[];
     loading: boolean;
     error: string | null;
-    reloadInstances: () => Promise<void>;
-    createDevice: (instance: number, name: string, type: DeviceType) => void;
-    updateDevice: (instance: number, deviceName: string, updates: Partial<LocalDevice>) => void;
-    saveDevice: (instance: number, device: LocalDevice) => Promise<boolean>;
-    loadPipelineList: (instance: number) => Promise<PipelineId[]>;
+    reloadDevices: () => Promise<void>;
+    createDevice: (name: string, type: DeviceType) => void;
+    updateDevice: (deviceName: string, updates: Partial<LocalDevice>) => void;
+    saveDevice: (device: LocalDevice) => Promise<boolean>;
+    loadPipelineList: () => Promise<PipelineId[]>;
 }
 
 const parseWeight = (weight: string | number | undefined): number => {
@@ -45,27 +45,23 @@ const deviceInfoToLocal = (info: DeviceInfo): LocalDevice => {
  * Hook for managing device data and API interactions
  */
 export const useDeviceData = (): UseDeviceDataResult => {
-    const [instances, setInstances] = useState<InstanceDeviceData[]>([]);
+    const [devices, setDevices] = useState<LocalDevice[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const loadInstancesAndDevices = useCallback(async (): Promise<void> => {
+    const loadDevices = useCallback(async (): Promise<void> => {
         setLoading(true);
         setError(null);
 
         try {
-            // Get all instances and their devices from inspect
+            // Get devices from inspect
             const inspectResponse: InspectResponse = await API.inspect.inspect();
-            const instanceInfo = inspectResponse.instanceInfo || [];
+            const instanceInfo = inspectResponse.instanceInfo;
 
-            const instanceData: InstanceDeviceData[] = instanceInfo.map((info) => ({
-                instance: info.instanceIdx ?? 0,
-                devices: (info.devices || []).map(deviceInfoToLocal),
-            }));
-
-            setInstances(instanceData);
+            const loadedDevices = instanceInfo?.devices?.map(deviceInfoToLocal) || [];
+            setDevices(loadedDevices);
         } catch (err) {
-            const message = err instanceof Error ? err.message : 'Failed to load instances';
+            const message = err instanceof Error ? err.message : 'Failed to load devices';
             setError(message);
             toaster.error('devices-load-error', 'Failed to load devices', err);
         } finally {
@@ -74,10 +70,10 @@ export const useDeviceData = (): UseDeviceDataResult => {
     }, []);
 
     useEffect(() => {
-        loadInstancesAndDevices();
-    }, [loadInstancesAndDevices]);
+        loadDevices();
+    }, [loadDevices]);
 
-    const createDevice = useCallback((instance: number, name: string, type: DeviceType): void => {
+    const createDevice = useCallback((name: string, type: DeviceType): void => {
         const newDevice: LocalDevice = {
             id: { type, name },
             type,
@@ -88,44 +84,26 @@ export const useDeviceData = (): UseDeviceDataResult => {
             isDirty: true,
         };
 
-        setInstances(prev => prev.map(inst => {
-            if (inst.instance === instance) {
-                return {
-                    ...inst,
-                    devices: [...inst.devices, newDevice],
-                };
-            }
-            return inst;
-        }));
+        setDevices(prev => [...prev, newDevice]);
     }, []);
 
     const updateDevice = useCallback((
-        instance: number,
         deviceName: string,
         updates: Partial<LocalDevice>
     ): void => {
-        setInstances(prev => prev.map(inst => {
-            if (inst.instance === instance) {
+        setDevices(prev => prev.map(device => {
+            if (device.id.name === deviceName) {
                 return {
-                    ...inst,
-                    devices: inst.devices.map(device => {
-                        if (device.id.name === deviceName) {
-                            return {
-                                ...device,
-                                ...updates,
-                                isDirty: true,
-                            };
-                        }
-                        return device;
-                    }),
+                    ...device,
+                    ...updates,
+                    isDirty: true,
                 };
             }
-            return inst;
+            return device;
         }));
     }, []);
 
     const saveDevice = useCallback(async (
-        instance: number,
         device: LocalDevice
     ): Promise<boolean> => {
         try {
@@ -141,7 +119,6 @@ export const useDeviceData = (): UseDeviceDataResult => {
             };
 
             const target = {
-                instance,
                 name: device.id.name,
             };
 
@@ -164,19 +141,11 @@ export const useDeviceData = (): UseDeviceDataResult => {
             }
 
             // Mark device as clean
-            setInstances(prev => prev.map(inst => {
-                if (inst.instance === instance) {
-                    return {
-                        ...inst,
-                        devices: inst.devices.map(d => {
-                            if (d.id.name === device.id.name) {
-                                return { ...d, isDirty: false, isNew: false };
-                            }
-                            return d;
-                        }),
-                    };
+            setDevices(prev => prev.map(d => {
+                if (d.id.name === device.id.name) {
+                    return { ...d, isDirty: false, isNew: false };
                 }
-                return inst;
+                return d;
             }));
 
             toaster.success('device-save-success', `Device "${device.id.name}" saved`);
@@ -187,9 +156,9 @@ export const useDeviceData = (): UseDeviceDataResult => {
         }
     }, []);
 
-    const loadPipelineList = useCallback(async (instance: number): Promise<PipelineId[]> => {
+    const loadPipelineList = useCallback(async (): Promise<PipelineId[]> => {
         try {
-            const response = await API.pipelines.list({ instance });
+            const response = await API.pipelines.list({});
             return response.ids || [];
         } catch (err) {
             toaster.error('pipeline-list-error', 'Failed to load pipeline list', err);
@@ -198,10 +167,10 @@ export const useDeviceData = (): UseDeviceDataResult => {
     }, []);
 
     return {
-        instances,
+        devices,
         loading,
         error,
-        reloadInstances: loadInstancesAndDevices,
+        reloadDevices: loadDevices,
         createDevice,
         updateDevice,
         saveDevice,

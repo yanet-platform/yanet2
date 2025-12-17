@@ -13,7 +13,6 @@ service ModuleService {
 }
 
 message ListModulesRequest {
-	uint32 instance = 1;
 }
 
 message ListModulesResponse {

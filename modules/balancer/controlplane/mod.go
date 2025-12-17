@@ -12,12 +12,12 @@ import (
 
 const agentName = "balancer"
 
-// BalancerModule is a control-plane component of a module that is responsible for
-// balancing traffic.
+// BalancerModule is a control-plane component of a module that is responsible
+// for balancing traffic.
 type BalancerModule struct {
 	cfg     *Config
 	shm     *ffi.SharedMemory
-	agents  []ffi.Agent
+	agent   *ffi.Agent
 	service *service.BalancerService
 	log     *zap.SugaredLogger
 }
@@ -29,42 +29,27 @@ func NewBalancerModule(
 	log = log.With(zap.String("module", "balancerpb.BalancerService"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to shared memory: %w", err)
 	}
 
-	instances := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
-		zap.Uint32s("instances", instances),
+		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents := make([]ffi.Agent, 0, len(instances))
-	for _, instanceIdx := range instances {
-		agent, err := shm.AgentAttach(
-			agentName,
-			instanceIdx,
-			uint(cfg.MemoryRequirements),
-		)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"failed to attach agent to shared memory on instances[%d]: %w",
-				instanceIdx,
-				err,
-			)
-		}
-
-		agents = append(agents, *agent)
+	agent, err := shm.AgentAttach(agentName, cfg.InstanceID, uint(cfg.MemoryRequirements))
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	service := service.NewBalancerService(agents, log)
+	svc := service.NewBalancerService(agent, log)
 
 	return &BalancerModule{
 		cfg:     cfg,
 		shm:     shm,
-		agents:  agents,
-		service: service,
+		agent:   agent,
+		service: svc,
 		log:     log,
 	}, nil
 }
@@ -86,21 +71,12 @@ func (m *BalancerModule) RegisterService(server *grpc.Server) {
 }
 
 func (m *BalancerModule) Close() error {
-	for instance, agent := range m.agents {
-		if err := agent.Close(); err != nil {
-			m.log.Warnw(
-				"failed to close shared memory agent",
-				zap.Int("instance", instance),
-				zap.Error(err),
-			)
-		}
+	if err := m.agent.Close(); err != nil {
+		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {
-		m.log.Warnw(
-			"failed to detach from shared memory mapping",
-			zap.Error(err),
-		)
+		m.log.Warnw("failed to detach from shared memory mapping", zap.Error(err))
 	}
 
 	return nil

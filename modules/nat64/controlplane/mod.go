@@ -1,6 +1,8 @@
 package nat64
 
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -12,7 +14,7 @@ import (
 type NAT64Module struct {
 	cfg          *Config
 	shm          *ffi.SharedMemory
-	agents       []*ffi.Agent
+	agent        *ffi.Agent
 	nat64Service *NAT64Service
 	log          *zap.SugaredLogger
 }
@@ -26,23 +28,22 @@ func NewNAT64Module(cfg *Config, log *zap.SugaredLogger) (*NAT64Module, error) {
 		return nil, err
 	}
 
-	instanceIndices := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
-		zap.Uint32s("instances", instanceIndices),
+		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach("nat64", instanceIndices, uint(cfg.MemoryRequirements))
+	agent, err := shm.AgentAttach("nat64", cfg.InstanceID, uint(cfg.MemoryRequirements))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	nat64Service := NewNAT64Service(agents, log)
+	nat64Service := NewNAT64Service(agent, log)
 
 	return &NAT64Module{
 		cfg:          cfg,
 		shm:          shm,
-		agents:       agents,
+		agent:        agent,
 		nat64Service: nat64Service,
 		log:          log,
 	}, nil
@@ -66,10 +67,8 @@ func (m *NAT64Module) RegisterService(server *grpc.Server) {
 
 // Close closes the module and releases all resources
 func (m *NAT64Module) Close() error {
-	for instance, agent := range m.agents {
-		if err := agent.Close(); err != nil {
-			m.log.Warnw("failed to close shared memory agent", zap.Int("instance", instance), zap.Error(err))
-		}
+	if err := m.agent.Close(); err != nil {
+		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {

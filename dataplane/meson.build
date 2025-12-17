@@ -45,6 +45,7 @@ dependencies = lib_dependencies + [
   lib_route_dp_dep,
   lib_nat64_dp_dep,
   lib_pdump_dp_dep,
+  lib_fwstate_dp_dep,
 
   #devices
   lib_dev_plain_dp_dep,

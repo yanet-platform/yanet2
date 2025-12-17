@@ -152,6 +152,9 @@ func (m *ModulesConfig) Validate() error {
 	if m.Balancer == nil {
 		return fmt.Errorf("balancer module is not configured")
 	}
+	if m.ACL == nil {
+		return fmt.Errorf("acl module is not configured")
+	}
 	return nil
 }
 

@@ -230,7 +230,7 @@ free_packet(struct packet *packet) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static void
+void
 init_mbuf(struct rte_mbuf *m, struct packet_data *data, uint16_t buf_len) {
 	m->priv_size = 0;
 	m->buf_len = buf_len;

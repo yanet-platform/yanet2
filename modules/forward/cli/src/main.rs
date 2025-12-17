@@ -48,22 +48,16 @@ pub enum ModeCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
-    /// The name of the module to delete
+    /// The name of the module config to delete.
     #[arg(long = "cfg", short)]
     pub config_name: String,
-    /// Dataplane instances from which to delete config
-    #[arg(long, short, required = true)]
-    pub instance: u32,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
-    /// The name of the module to operate on.
+    /// The name of the module config to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
-    /// Dataplane instances where the changes should be applied.
-    #[arg(long, short, required = true)]
-    pub instance: u32,
     /// Ruleset file name.
     #[arg(required = true, long = "rules", value_name = "rules")]
     pub rules: String,
@@ -173,7 +167,7 @@ impl ForwardService {
         let request = DeleteConfigRequest {
             target: Some(TargetModule {
                 config_name: cmd.config_name.clone(),
-                dataplane_instance: cmd.instance,
+                
             }),
         };
         self.client.delete_config(request).await?;
@@ -187,7 +181,7 @@ impl ForwardService {
         let request = UpdateConfigRequest {
             target: Some(TargetModule {
                 config_name: cmd.config_name.clone(),
-                dataplane_instance: cmd.instance,
+                
             }),
             rules: rules,
         };

@@ -1,65 +1,47 @@
 package acl
 
-import "C"
 import (
 	"context"
-	"fmt"
 	"net/netip"
 	"sync"
 
-	"github.com/yanet-platform/yanet2/common/commonpb"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 )
-
-////////////////////////////////////////////////////////////////////////////////
-
-type aclConfig struct {
-	rules  []*aclpb.Rule
-	module *ModuleConfig
-}
 
 // ACLService implements the gRPC service for ACL management.
 type ACLService struct {
-	aclpb.UnimplementedAclServiceServer
+	aclpb.UnimplementedACLServiceServer
 
 	mu      sync.Mutex
-	agents  []*ffi.Agent
-	configs map[instanceKey]aclConfig
+	agent   *ffi.Agent
+	configs map[string]aclConfig
+
+	log *zap.SugaredLogger
 }
 
-func NewACLService(agents []*ffi.Agent) *ACLService {
+type aclConfig struct {
+	rules   []*aclpb.Rule
+	acl     *ModuleConfig
+	fwstate *FwStateConfig
+}
+
+// NewACLService creates a new ACL service
+func NewACLService(agent *ffi.Agent, log *zap.SugaredLogger) *ACLService {
 	return &ACLService{
-		agents:  agents,
-		configs: make(map[instanceKey]aclConfig),
+		agent:   agent,
+		configs: make(map[string]aclConfig),
+		log:     log,
 	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-type instanceKey struct {
-	name     string
-	instance uint32
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-func (m *ACLService) UpdateConfig(
-	ctx context.Context,
-	req *aclpb.UpdateConfigRequest,
-) (*aclpb.UpdateConfigResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
-	reqRules := req.Rules
-
+func convertRules(reqRules []*aclpb.Rule) ([]aclRule, error) {
 	rules := make([]aclRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
 		rule := aclRule{
@@ -88,7 +70,7 @@ func (m *ACLService) UpdateConfig(
 
 		for _, reqSrc := range reqRule.Srcs {
 			if (len(reqSrc.Addr) != 4 && len(reqSrc.Addr) != 16) || len(reqSrc.Addr) != len(reqSrc.Mask) {
-				return nil, fmt.Errorf("invalid network address length")
+				return nil, status.Error(codes.InvalidArgument, "invalid network address length")
 			}
 
 			addr, _ := netip.AddrFromSlice(reqSrc.Addr)
@@ -101,7 +83,7 @@ func (m *ACLService) UpdateConfig(
 
 		for _, reqDst := range reqRule.Dsts {
 			if (len(reqDst.Addr) != 4 && len(reqDst.Addr) != 16) || len(reqDst.Addr) != len(reqDst.Mask) {
-				return nil, fmt.Errorf("invalid network address length")
+				return nil, status.Error(codes.InvalidArgument, "invalid network address length")
 			}
 
 			addr, _ := netip.AddrFromSlice(reqDst.Addr)
@@ -135,40 +117,62 @@ func (m *ACLService) UpdateConfig(
 
 		rules = append(rules, rule)
 	}
+	return rules, nil
+}
 
-	if inst >= uint32(len(m.agents)) {
-		return nil, fmt.Errorf("invalid instance id")
-	}
-	agent := m.agents[inst]
+func (m *ACLService) UpdateConfig(
+	ctx context.Context,
+	req *aclpb.UpdateConfigRequest,
+) (*aclpb.UpdateConfigResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	module, err := NewModuleConfig(agent, name)
+	name, err := req.GetTarget().Validate()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create module config: %w", err)
-
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	if err := module.Update(rules); err != nil {
-		FreeModuleConfig(module)
-		return nil, fmt.Errorf("failed to update module config: %w", err)
+	reqRules := req.Rules
+
+	rules, err := convertRules(reqRules)
+	if err != nil {
+		return nil, err
 	}
 
-	if err := agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		FreeModuleConfig(module)
-		return nil, fmt.Errorf("failed to update module on instance %d: %w", inst, err)
+	config, err := NewModuleConfig(m.agent, name)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create module config: %v", err)
+	}
+
+	if err := config.Update(rules); err != nil {
+		config.Free()
+		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+	}
+
+	oldConfigs, ok := m.configs[name]
+	if ok && oldConfigs.fwstate != nil {
+		// We set fwstate config only if it's already present,
+		// effectively enabling firewall state tracking functionality
+		m.log.Infow("set fwstate config for ACL module config",
+			zap.String("config", name),
+		)
+		config.SetFwStateConfig(m.agent, oldConfigs.fwstate)
+	}
+
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
+		config.Free()
+		return nil, status.Errorf(codes.Internal, "failed to update module: %v", err)
 	}
 
 	// Module was updated - it is time to delete an old one
-	key := instanceKey{
-		instance: inst,
-		name:     name,
-	}
-	if oldModule, ok := m.configs[key]; ok {
-		FreeModuleConfig(oldModule.module)
+	if oldConfigs.acl != nil {
+		oldConfigs.acl.Free()
 	}
 
-	m.configs[key] = aclConfig{
-		rules:  reqRules,
-		module: module,
+	m.configs[name] = aclConfig{
+		rules:   reqRules,
+		acl:     config,
+		fwstate: oldConfigs.fwstate,
 	}
 
 	return &aclpb.UpdateConfigResponse{}, nil
@@ -181,28 +185,25 @@ func (m *ACLService) ShowConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := req.GetTarget().Validate()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	key := instanceKey{
-		instance: inst,
-		name:     name,
-	}
-
-	config, ok := m.configs[key]
-
+	config, ok := m.configs[name]
 	if !ok {
-		return nil, status.Error(codes.InvalidArgument, "not found")
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
 	response := &aclpb.ShowConfigResponse{
-		Target: &commonpb.TargetModule{
-			DataplaneInstance: inst,
-			ConfigName:        name,
-		},
-		Rules: config.rules,
+		Target: req.Target,
+		Rules:  config.rules,
+	}
+
+	// Get fwstate configuration if available
+	if config.fwstate != nil {
+		response.FwstateMap = config.fwstate.GetMapConfig()
+		response.FwstateSync = config.fwstate.GetSyncConfig()
 	}
 
 	return response, nil
@@ -215,16 +216,110 @@ func (m *ACLService) ListConfigs(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	response := &aclpb.ListConfigsResponse{}
+	response := &aclpb.ListConfigsResponse{
+		Configs: make([]string, 0, len(m.configs)),
+	}
 
-	for key := range m.configs {
-		response.Targets = append(response.Targets, &commonpb.TargetModule{
-			DataplaneInstance: key.instance,
-			ConfigName:        key.name,
-		})
+	for name := range m.configs {
+		response.Configs = append(response.Configs, name)
 	}
 
 	return response, nil
+}
+
+func (m *ACLService) UpdateFWStateConfig(
+	ctx context.Context, request *aclpb.UpdateFWStateConfigRequest,
+) (*aclpb.UpdateFWStateConfigResponse, error) {
+	name, err := request.GetTarget().Validate()
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	// Get fwstate configuration from request
+	if request.SyncConfig == nil {
+		return nil, status.Error(codes.InvalidArgument, "sync_config is required")
+	}
+	if request.MapConfig == nil {
+		return nil, status.Error(codes.InvalidArgument, "map_config is required")
+	}
+
+	m.log.Debugw("update fwstate config",
+		zap.String("config", name),
+	)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	config := m.configs[name]
+
+	config.fwstate, err = NewFWStateModuleConfig(m.agent, name, config.fwstate)
+	if err != nil {
+		m.log.Errorw("failed to create fwstate config",
+			zap.String("config", name),
+			zap.Error(err),
+		)
+		return nil, status.Errorf(codes.Internal, "failed to create fwstate config: %v", err)
+	}
+
+	dpConfig := m.agent.DPConfig()
+
+	if err = config.fwstate.CreateMaps(request.MapConfig, uint16(dpConfig.WorkerCount()), m.log); err != nil {
+		m.log.Errorw("failed to create fwstate maps",
+			zap.String("config", name),
+			zap.Error(err),
+		)
+		return nil, status.Errorf(codes.Internal, "failed to create fwstate maps: %v", err)
+	}
+
+	// Set sync config
+	config.fwstate.SetSyncConfig(request.SyncConfig)
+	m.log.Debugw("update fwstate module config",
+		zap.String("config", name),
+	)
+
+	if config.acl != nil {
+		newACLConfig, err := NewModuleConfig(m.agent, name)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create module config: %v", err)
+		}
+
+		rules, err := convertRules(config.rules)
+		if err != nil {
+			newACLConfig.Free()
+			return nil, err
+		}
+
+		if err := newACLConfig.Update(rules); err != nil {
+			newACLConfig.Free()
+			return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+		}
+
+		newACLConfig.SetFwStateConfig(m.agent, config.fwstate)
+
+		if err := m.agent.UpdateModules([]ffi.ModuleConfig{newACLConfig.AsFFIModule(), config.fwstate.asFFIModule()}); err != nil {
+			newACLConfig.Free()
+			return nil, status.Errorf(codes.Internal, "failed to update module: %v", err)
+		}
+
+		config.acl.Free()
+		config.acl = newACLConfig
+	} else {
+		if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.fwstate.asFFIModule()}); err != nil {
+			m.log.Errorw("failed to update fwstate module",
+				zap.String("config", name),
+				zap.Error(err),
+			)
+			return nil, status.Errorf(codes.Internal, "failed to update fwstate module: %v", err)
+		}
+	}
+
+	m.configs[name] = config
+
+	m.log.Infow("successfully updated FWState module",
+		zap.String("config", name),
+	)
+
+	return &aclpb.UpdateFWStateConfigResponse{}, nil
 }
 
 func (m *ACLService) DeleteConfig(
@@ -234,27 +329,29 @@ func (m *ACLService) DeleteConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	name, inst, err := req.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := req.GetTarget().Validate()
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	key := instanceKey{
-		instance: inst,
-		name:     name,
-	}
-
-	_, ok := m.configs[key]
-
+	_, ok := m.configs[name]
 	if !ok {
 		return nil, status.Error(codes.InvalidArgument, "not found")
 	}
 
-	if DeleteModule(m, name, inst) {
-		return nil, fmt.Errorf("could not deletee module on instance %d", inst)
+	if DeleteModule(m, name) {
+		return nil, status.Errorf(codes.Internal, "could not delete module config: %s", name)
 	}
 
-	delete(m.configs, key)
+	config := m.configs[name]
+	if config.acl != nil {
+		config.acl.Free()
+	}
+	if config.fwstate != nil {
+		config.fwstate.Free()
+	}
+
+	delete(m.configs, name)
 
 	response := &aclpb.DeleteConfigResponse{}
 

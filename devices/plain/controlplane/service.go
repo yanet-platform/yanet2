@@ -12,12 +12,12 @@ import (
 type DevicePlainService struct {
 	plainpb.UnimplementedDevicePlainServiceServer
 
-	agents []*ffi.Agent
+	agent *ffi.Agent
 }
 
-func NewDevicePlainService(agents []*ffi.Agent) *DevicePlainService {
+func NewDevicePlainService(agent *ffi.Agent) *DevicePlainService {
 	return &DevicePlainService{
-		agents: agents,
+		agent: agent,
 	}
 }
 
@@ -25,20 +25,18 @@ func (m *DevicePlainService) UpdateDevice(
 	ctx context.Context,
 	request *plainpb.UpdateDevicePlainRequest,
 ) (*plainpb.UpdateDevicePlainResponse, error) {
-	name, instance, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, err
 	}
 
-	agent := m.agents[instance]
-
-	deviceConfig, err := NewDeviceConfig(agent, name, request.GetDevice())
+	deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice())
 	if err != nil {
-		return nil, fmt.Errorf("failed to create device config for instance %d: %w", instance, err)
+		return nil, fmt.Errorf("failed to create device config: %w", err)
 	}
 
-	if err := agent.UpdateDevices([]ffi.ShmDeviceConfig{deviceConfig.AsFFIDevice()}); err != nil {
-		return nil, fmt.Errorf("failed to update module on instance %d: %w", instance, err)
+	if err := m.agent.UpdateDevices([]ffi.ShmDeviceConfig{deviceConfig.AsFFIDevice()}); err != nil {
+		return nil, fmt.Errorf("failed to update device: %w", err)
 	}
 
 	return &plainpb.UpdateDevicePlainResponse{}, nil

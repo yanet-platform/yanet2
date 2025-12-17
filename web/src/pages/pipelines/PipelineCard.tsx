@@ -11,16 +11,14 @@ import { NODE_TYPE_FUNCTION_REF } from './types';
 import { toaster } from '../../utils';
 
 export interface PipelineCardProps {
-    instance: number;
     pipelineId: PipelineId;
-    loadPipeline: (instance: number, pipelineId: PipelineId) => Promise<Pipeline | null>;
-    updatePipeline: (instance: number, pipeline: Pipeline) => Promise<boolean>;
-    deletePipeline: (instance: number, pipelineId: PipelineId) => Promise<boolean>;
-    loadFunctionList: (instance: number) => Promise<FunctionId[]>;
+    loadPipeline: (pipelineId: PipelineId) => Promise<Pipeline | null>;
+    updatePipeline: (pipeline: Pipeline) => Promise<boolean>;
+    deletePipeline: (pipelineId: PipelineId) => Promise<boolean>;
+    loadFunctionList: () => Promise<FunctionId[]>;
 }
 
 export const PipelineCard: React.FC<PipelineCardProps> = ({
-    instance,
     pipelineId,
     loadPipeline,
     updatePipeline,
@@ -56,27 +54,27 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     useEffect(() => {
         const load = async (): Promise<void> => {
             setLoading(true);
-            const pipeline = await loadPipeline(instance, pipelineId);
+            const pipeline = await loadPipeline(pipelineId);
             if (pipeline) {
                 loadFromApi(pipeline);
             }
             setLoading(false);
         };
         load();
-    }, [instance, pipelineId, loadPipeline, loadFromApi]);
+    }, [pipelineId, loadPipeline, loadFromApi]);
 
     // Load available functions when dialog opens
     useEffect(() => {
         if (functionRefDialogOpen && availableFunctions.length === 0) {
             const loadFunctions = async () => {
                 setLoadingFunctions(true);
-                const functions = await loadFunctionList(instance);
+                const functions = await loadFunctionList();
                 setAvailableFunctions(functions);
                 setLoadingFunctions(false);
             };
             loadFunctions();
         }
-    }, [functionRefDialogOpen, availableFunctions.length, loadFunctionList, instance]);
+    }, [functionRefDialogOpen, availableFunctions.length, loadFunctionList]);
 
     const handleSave = useCallback(async () => {
         if (!isValid) {
@@ -86,7 +84,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
         setSaving(true);
         try {
             const pipeline = toApi(pipelineId.name || '');
-            const success = await updatePipeline(instance, pipeline);
+            const success = await updatePipeline(pipeline);
             if (success) {
                 markClean();
             }
@@ -95,14 +93,14 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
             toaster.error('pipeline-validation', message, err);
         }
         setSaving(false);
-    }, [isValid, toApi, pipelineId, updatePipeline, instance, markClean]);
+    }, [isValid, toApi, pipelineId, updatePipeline, markClean]);
 
     const handleDelete = useCallback(async () => {
         setDeleting(true);
-        await deletePipeline(instance, pipelineId);
+        await deletePipeline(pipelineId);
         setDeleting(false);
         setDeleteDialogOpen(false);
-    }, [deletePipeline, instance, pipelineId]);
+    }, [deletePipeline, pipelineId]);
 
     const handleNodeDoubleClick = useCallback((nodeId: string, nodeType: string) => {
         if (nodeType === NODE_TYPE_FUNCTION_REF) {

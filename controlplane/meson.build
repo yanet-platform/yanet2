@@ -16,6 +16,7 @@ custom_target(
     build_by_default: true,
     build_always_stale: true,
     depends: [
+        # go proto gen deps
         ynpb_gen,
         decap_protoc_gen,
         dscp_protoc_gen,
@@ -24,8 +25,20 @@ custom_target(
         route_protoc_gen,
         pdump_protoc_gen,
         balancer_protoc_gen,
+        acl_protoc_gen,
         plain_protoc_gen,
         vlan_protoc_gen,
+
+        # cgo linker deps
+        lib_acl_dp,
+        lib_balancer_dp,
+        lib_decap_dp,
+        lib_dscp_dp,
+        lib_forward_dp,
+        lib_fwstate_dp,
+        lib_nat64_dp,
+        lib_pdump_dp,
+        lib_route_dp,
     ],
     install: true,
     install_dir: get_option('bindir'),

@@ -73,9 +73,9 @@ export interface RoutesByConfigProps {
     getRouteId: (route: Route) => string;
 }
 
-// Props for ConfigTabs and InstanceTabContent (without routeColumns since VirtualizedRouteTable doesn't need it)
+// Props for ConfigTabs and RouteConfigContent (without routeColumns since VirtualizedRouteTable doesn't need it)
 export interface ConfigTabsProps extends RoutesByConfigProps { }
-export interface InstanceTabContentProps extends RoutesByConfigProps { }
+export interface RouteConfigContentProps extends RoutesByConfigProps { }
 
 // Sorting types
 export type SortableColumn = 'prefix' | 'nextHop' | 'peer' | 'isBest' | 'pref' | 'asPathLen' | 'source';

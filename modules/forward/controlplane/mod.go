@@ -1,6 +1,8 @@
 package forward
 
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -15,7 +17,7 @@ const agentName = "forward"
 type ForwardModule struct {
 	cfg            *Config
 	shm            *ffi.SharedMemory
-	agents         []*ffi.Agent
+	agent          *ffi.Agent
 	forwardService *ForwardService
 	log            *zap.SugaredLogger
 }
@@ -28,23 +30,22 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 		return nil, err
 	}
 
-	instances := shm.InstanceIndices()
 	log.Debugw("mapping shared memory",
-		zap.Uint32s("instances", instances),
+		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agents, err := shm.AgentsAttach(agentName, instances, uint(cfg.MemoryRequirements))
+	agent, err := shm.AgentAttach(agentName, cfg.InstanceID, uint(cfg.MemoryRequirements))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	forwardService := NewForwardService(agents)
+	forwardService := NewForwardService(agent)
 
 	return &ForwardModule{
 		cfg:            cfg,
 		shm:            shm,
-		agents:         agents,
+		agent:          agent,
 		forwardService: forwardService,
 		log:            log,
 	}, nil
@@ -68,10 +69,8 @@ func (m *ForwardModule) RegisterService(server *grpc.Server) {
 
 // Close closes the module.
 func (m *ForwardModule) Close() error {
-	for instance, agent := range m.agents {
-		if err := agent.Close(); err != nil {
-			m.log.Warnw("failed to close shared memory agent", zap.Int("instance", instance), zap.Error(err))
-		}
+	if err := m.agent.Close(); err != nil {
+		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {

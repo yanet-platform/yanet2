@@ -19,7 +19,6 @@ package nat64_test
 #include <stdint.h>
 
 #include "common/memory.h"
-#include "common/lpm.h"
 #include "nat64cp.h"
 #include "config.h"
 #include "dataplane/module/module.h"
@@ -48,15 +47,15 @@ test_nat64_handle_packets(
 import "C"
 import (
 	"fmt"
+	"log"
 	"net/netip"
 	"runtime"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/common/go/dataplane"
-
-	"log"
-
 	"github.com/gopacket/gopacket"
+
+	"github.com/yanet-platform/yanet2/common/go/dataplane"
+	"github.com/yanet-platform/yanet2/common/go/testutils"
 )
 
 type mapping struct {
@@ -65,7 +64,7 @@ type mapping struct {
 }
 
 // nat64ModuleConfig creates and configures NAT64 module configuration
-func nat64ModuleConfig(mappings []mapping) *C.struct_nat64_module_config {
+func nat64ModuleConfig(mappings []mapping, memCtx testutils.MemoryContext) *C.struct_nat64_module_config {
 	cDebug := C.CString("debug")
 	defer C.free(unsafe.Pointer(cDebug))
 	_, err := C.log_enable_name(cDebug)
@@ -76,15 +75,18 @@ func nat64ModuleConfig(mappings []mapping) *C.struct_nat64_module_config {
 
 	config := new(C.struct_nat64_module_config)
 
-	blockAlloc := C.struct_block_allocator{}
-	arena := C.malloc(1 << 20)
-	C.block_allocator_put_arena(&blockAlloc, arena, 1<<20)
-	C.memory_context_init(&config.cp_module.memory_context, C.CString("test"), &blockAlloc)
-
-	if C.nat64_module_config_data_init(config, &config.cp_module.memory_context) != 0 {
+	if C.nat64_module_config_data_init(config, (*C.struct_memory_context)(memCtx.AsRawPtr())) != 0 {
 		log.Printf("nat64 module config init fail")
 		return nil
 	}
+
+	cName := C.CString("nat64_go_test")
+	defer C.free(unsafe.Pointer(cName))
+
+	C.memory_context_init_from(
+		&config.cp_module.memory_context,
+		(*C.struct_memory_context)(memCtx.AsRawPtr()),
+		cName)
 
 	// Add NAT64 prefix
 	pfx := [12]byte{0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,

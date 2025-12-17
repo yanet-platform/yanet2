@@ -69,8 +69,7 @@ export interface InstanceInfo {
 }
 
 export interface InspectResponse {
-    instanceIndices?: number[]; // instance_indices
-    instanceInfo?: InstanceInfo[]; // instance_info
+    instanceInfo?: InstanceInfo;
 }
 
 const inspectService = createService('ynpb.InspectService');

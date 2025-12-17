@@ -30,3 +30,8 @@ worker_clone_packet(struct dp_worker *dp_worker, struct packet *packet) {
 	mbuf_copy(packet_clone->mbuf, packet->mbuf);
 	return packet_clone;
 }
+
+void
+worker_packet_free(struct packet *packet) {
+	rte_pktmbuf_free(packet->mbuf);
+}

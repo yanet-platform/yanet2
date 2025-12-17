@@ -40,6 +40,7 @@ import (
 	"github.com/gopacket/gopacket"
 
 	"github.com/yanet-platform/yanet2/common/go/dataplane"
+	"github.com/yanet-platform/yanet2/common/go/testutils"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 )
 
@@ -48,15 +49,6 @@ var (
 	DSCPMarkAlways  uint8 = uint8(C.dscp_mark_always)
 	DSCPMarkDefault uint8 = uint8(C.dscp_mark_default)
 )
-
-func memCtxCreate() *C.struct_memory_context {
-	blockAlloc := C.struct_block_allocator{}
-	arena := C.malloc(1 << 20)
-	C.block_allocator_put_arena(&blockAlloc, arena, 1<<20)
-	memCtx := C.struct_memory_context{}
-	C.memory_context_init(&memCtx, C.CString("test"), &blockAlloc)
-	return &memCtx
-}
 
 func buildLPMs(
 	prefixes []netip.Prefix,
@@ -84,11 +76,11 @@ func buildLPMs(
 	}
 }
 
-func dscpModuleConfig(prefixes []netip.Prefix, flag, dscp uint8, memCtx *C.struct_memory_context) *C.struct_dscp_module_config {
+func dscpModuleConfig(prefixes []netip.Prefix, flag, dscp uint8, memCtx testutils.MemoryContext) *C.struct_dscp_module_config {
 	m := &C.struct_dscp_module_config{
 		cp_module: C.struct_cp_module{},
 	}
-	buildLPMs(prefixes, memCtx, &m.lpm_v4, &m.lpm_v6)
+	buildLPMs(prefixes, (*C.struct_memory_context)(memCtx.AsRawPtr()), &m.lpm_v4, &m.lpm_v6)
 
 	m.dscp = C.struct_dscp_config{
 		flag: C.uint8_t(flag),

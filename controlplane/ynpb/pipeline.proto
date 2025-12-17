@@ -22,7 +22,6 @@ service PipelineService {
 }
 
 message ListPipelinesRequest {
-	uint32 instance = 1;
 }
 
 message ListPipelinesResponse {
@@ -30,8 +29,7 @@ message ListPipelinesResponse {
 }
 
 message GetPipelineRequest {
-	uint32 instance = 1;
-	commonpb.PipelineId id = 2;
+	commonpb.PipelineId id = 1;
 }
 
 message GetPipelineResponse {
@@ -39,8 +37,7 @@ message GetPipelineResponse {
 }
 
 message UpdatePipelineRequest {
-	uint32 instance = 1;
-	Pipeline pipeline = 2;
+	Pipeline pipeline = 1;
 }
 
 message UpdatePipelineResponse {
@@ -52,8 +49,7 @@ message Pipeline {
 }
 
 message DeletePipelineRequest {
-	uint32 instance = 1;
-	commonpb.PipelineId id = 2;
+	commonpb.PipelineId id = 1;
 }
 
 message DeletePipelineResponse {

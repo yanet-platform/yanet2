@@ -200,7 +200,7 @@ func (m *Agent) UpdatePipeline(pipelineConfig PipelineConfig) error {
 	return nil
 }
 
-func (agent *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
+func (m *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
 	configs := make([]ShmDeviceConfig, 0, len(devices))
 
 	for idx := range devices {
@@ -239,7 +239,7 @@ func (agent *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
 			)
 		}
 
-		ptr, err := C.cp_device_plain_create((*C.struct_agent)(agent.AsRawPtr()), cCfg)
+		ptr, err := C.cp_device_plain_create((*C.struct_agent)(m.AsRawPtr()), cCfg)
 		if err != nil {
 			return fmt.Errorf("failed to initialize plain device config: %w", err)
 		}
@@ -250,7 +250,7 @@ func (agent *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
 		configs = append(configs, NewShmDeviceConfig(unsafe.Pointer(ptr)))
 	}
 
-	return agent.UpdateDevices(configs)
+	return m.UpdateDevices(configs)
 }
 
 // TODO: (*Agent).UpdateVlanDevices

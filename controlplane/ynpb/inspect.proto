@@ -15,13 +15,11 @@ service InspectService {
 message InspectRequest {
 }
 
-// InspectResponse contains the complete configuration state.
+// InspectResponse contains the configuration state for the served instance.
 message InspectResponse {
-	// Indices of the dataplane instances.
-	repeated uint32 instance_indices = 1;
-	// InstanceInfo contains detailed information about each dataplane
+	// InstanceInfo contains detailed information about the dataplane
 	// instance.
-	repeated InstanceInfo instance_info = 2;
+	InstanceInfo instance_info = 1;
 }
 
 // InstanceInfo contains information about a dataplane instance configuration.

@@ -1,29 +1,29 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API } from '../../api';
 import { toaster } from '../../utils';
-import type { InstanceConfigs, Route } from '../../api/routes';
+import type { Route } from '../../api/routes';
 
 export interface UseRouteDataResult {
-    instanceConfigs: InstanceConfigs[];
-    instanceRoutes: Map<number, Map<string, Route[]>>;
-    selectedRoutes: Map<number, Map<string, Set<string>>>;
+    configs: string[];
+    configRoutes: Map<string, Route[]>;
+    selectedRoutes: Map<string, Set<string>>;
     loading: boolean;
-    activeConfigTab: Map<number, string>;
-    setInstanceConfigs: React.Dispatch<React.SetStateAction<InstanceConfigs[]>>;
-    setInstanceRoutes: React.Dispatch<React.SetStateAction<Map<number, Map<string, Route[]>>>>;
-    setSelectedRoutes: React.Dispatch<React.SetStateAction<Map<number, Map<string, Set<string>>>>>;
-    setActiveConfigTab: React.Dispatch<React.SetStateAction<Map<number, string>>>;
-    handleSelectionChange: (instance: number, configName: string, selectedIds: string[]) => void;
-    handleConfigTabChange: (instance: number, config: string) => void;
-    reloadRoutes: (instance: number, configsList: string[]) => Promise<Map<string, Route[]>>;
+    activeConfigTab: string;
+    setConfigs: React.Dispatch<React.SetStateAction<string[]>>;
+    setConfigRoutes: React.Dispatch<React.SetStateAction<Map<string, Route[]>>>;
+    setSelectedRoutes: React.Dispatch<React.SetStateAction<Map<string, Set<string>>>>;
+    setActiveConfigTab: React.Dispatch<React.SetStateAction<string>>;
+    handleSelectionChange: (configName: string, selectedIds: string[]) => void;
+    handleConfigTabChange: (config: string) => void;
+    reloadRoutes: (configsList: string[]) => Promise<Map<string, Route[]>>;
 }
 
 export const useRouteData = (): UseRouteDataResult => {
-    const [instanceConfigs, setInstanceConfigs] = useState<InstanceConfigs[]>([]);
-    const [instanceRoutes, setInstanceRoutes] = useState<Map<number, Map<string, Route[]>>>(new Map());
-    const [selectedRoutes, setSelectedRoutes] = useState<Map<number, Map<string, Set<string>>>>(new Map());
+    const [configs, setConfigs] = useState<string[]>([]);
+    const [configRoutes, setConfigRoutes] = useState<Map<string, Route[]>>(new Map());
+    const [selectedRoutes, setSelectedRoutes] = useState<Map<string, Set<string>>>(new Map());
     const [loading, setLoading] = useState<boolean>(true);
-    const [activeConfigTab, setActiveConfigTab] = useState<Map<number, string>>(new Map());
+    const [activeConfigTab, setActiveConfigTab] = useState<string>('');
 
     // Data loading
     useEffect(() => {
@@ -34,48 +34,34 @@ export const useRouteData = (): UseRouteDataResult => {
 
             try {
                 const configsResponse = await API.route.listConfigs();
-                const configs = configsResponse.instanceConfigs || [];
+                const configsList = configsResponse.configs || [];
 
-                const routesMap = new Map<number, Map<string, Route[]>>();
-                const configTabsMap = new Map<number, string>();
+                const routesMap = new Map<string, Route[]>();
 
                 await Promise.all(
-                    configs.map(async (instanceConfig, idx) => {
-                        const instance = instanceConfig.instance ?? idx;
-                        const configsList = instanceConfig.configs || [];
-                        const configRoutesMap = new Map<string, Route[]>();
-
-                        await Promise.all(
-                            configsList.map(async (configName) => {
-                                if (!configTabsMap.has(instance)) {
-                                    configTabsMap.set(instance, configName);
-                                }
-
-                                try {
-                                    const routesResponse = await API.route.showRoutes({
-                                        target: {
-                                            configName,
-                                            dataplaneInstance: instance,
-                                        },
-                                    });
-                                    const routes = routesResponse.routes || [];
-                                    configRoutesMap.set(configName, routes);
-                                } catch (err) {
-                                    if (!isMounted) return;
-                                    toaster.error(`route-fetch-error-${instance}-${configName}`, `Failed to load routes for ${configName} (instance ${instance})`, err);
-                                }
-                            })
-                        );
-
-                        routesMap.set(instance, configRoutesMap);
+                    configsList.map(async (configName) => {
+                        try {
+                            const routesResponse = await API.route.showRoutes({
+                                target: {
+                                    configName,
+                                },
+                            });
+                            const routes = routesResponse.routes || [];
+                            routesMap.set(configName, routes);
+                        } catch (err) {
+                            if (!isMounted) return;
+                            toaster.error(`route-fetch-error-${configName}`, `Failed to load routes for ${configName}`, err);
+                        }
                     })
                 );
 
                 if (!isMounted) return;
 
-                setInstanceConfigs(configs);
-                setInstanceRoutes(routesMap);
-                setActiveConfigTab(configTabsMap);
+                setConfigs(configsList);
+                setConfigRoutes(routesMap);
+                if (configsList.length > 0) {
+                    setActiveConfigTab(configsList[0]);
+                }
             } catch (err) {
                 if (!isMounted) return;
                 toaster.error('route-error', 'Failed to fetch route data', err);
@@ -93,54 +79,45 @@ export const useRouteData = (): UseRouteDataResult => {
         };
     }, []);
 
-    const handleSelectionChange = useCallback((instance: number, configName: string, selectedIds: string[]): void => {
+    const handleSelectionChange = useCallback((configName: string, selectedIds: string[]): void => {
         setSelectedRoutes((prev) => {
-            const instanceSelectedMap = prev.get(instance) || new Map<string, Set<string>>();
-            const newConfigSelectedMap = new Map(instanceSelectedMap);
-            newConfigSelectedMap.set(configName, new Set(selectedIds));
-
             const newSelected = new Map(prev);
-            newSelected.set(instance, newConfigSelectedMap);
+            newSelected.set(configName, new Set(selectedIds));
             return newSelected;
         });
     }, []);
 
-    const handleConfigTabChange = useCallback((instance: number, config: string): void => {
-        setActiveConfigTab((prev) => {
-            const newMap = new Map(prev);
-            newMap.set(instance, config);
-            return newMap;
-        });
+    const handleConfigTabChange = useCallback((config: string): void => {
+        setActiveConfigTab(config);
     }, []);
 
-    const reloadRoutes = useCallback(async (instance: number, configsList: string[]): Promise<Map<string, Route[]>> => {
-        const configRoutesMap = new Map<string, Route[]>();
+    const reloadRoutes = useCallback(async (configsList: string[]): Promise<Map<string, Route[]>> => {
+        const routesMap = new Map<string, Route[]>();
 
         for (const configName of configsList) {
             try {
                 const routesResponse = await API.route.showRoutes({
                     target: {
                         configName,
-                        dataplaneInstance: instance,
                     },
                 });
-                configRoutesMap.set(configName, routesResponse.routes || []);
+                routesMap.set(configName, routesResponse.routes || []);
             } catch (err) {
-                toaster.error(`reload-route-error-${instance}-${configName}`, `Failed to reload routes for ${configName} (instance ${instance})`, err);
+                toaster.error(`reload-route-error-${configName}`, `Failed to reload routes for ${configName}`, err);
             }
         }
 
-        return configRoutesMap;
+        return routesMap;
     }, []);
 
     return {
-        instanceConfigs,
-        instanceRoutes,
+        configs,
+        configRoutes,
         selectedRoutes,
         loading,
         activeConfigTab,
-        setInstanceConfigs,
-        setInstanceRoutes,
+        setConfigs,
+        setConfigRoutes,
         setSelectedRoutes,
         setActiveConfigTab,
         handleSelectionChange,

@@ -50,7 +50,7 @@ impl BalancerService {
         let request = balancerpb::UpdateConfigRequest {
             target: Some(crate::rpc::commonpb::TargetModule {
                 config_name: cmd.name.clone(),
-                dataplane_instance: cmd.instance,
+                
             }),
             module_config: Some(module_config),
             module_state_config: Some(module_state_config),
@@ -59,7 +59,7 @@ impl BalancerService {
         log::debug!("Sending UpdateConfig request");
         self.client.update_config(request).await?;
         
-        log::info!("Successfully updated configuration for '{}' (instance: {})", cmd.name, cmd.instance);
+        log::info!("Successfully updated configuration for '{}'", cmd.name);
         Ok(())
     }
 
@@ -102,7 +102,7 @@ impl BalancerService {
 
     /// Flush buffered real updates
     async fn flush_real_updates(&mut self, cmd: FlushRealUpdatesCmd) -> Result<(), Box<dyn Error>> {
-        log::info!("Flushing buffered real updates for '{}' (instance: {})", cmd.name, cmd.instance);
+        log::info!("Flushing buffered real updates for '{}'", cmd.name);
 
         let request: balancerpb::FlushRealUpdatesRequest = cmd.into();
         
@@ -115,7 +115,7 @@ impl BalancerService {
 
     /// Show balancer configuration
     async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching configuration for '{}' (instance: {})", cmd.name, cmd.instance);
+        log::debug!("Fetching configuration for '{}'", cmd.name);
 
         let request: balancerpb::ShowConfigRequest = (&cmd).into();
         let response = self.client.show_config(request).await?.into_inner();
@@ -137,7 +137,7 @@ impl BalancerService {
 
     /// Show configuration statistics
     async fn stats(&mut self, cmd: StatsCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching statistics for '{}' (instance: {})", cmd.name, cmd.instance);
+        log::debug!("Fetching statistics for '{}'", cmd.name);
 
         let request: balancerpb::ConfigStatsRequest = (&cmd).into();
         let response = self.client.config_stats(request).await?.into_inner();
@@ -148,7 +148,7 @@ impl BalancerService {
 
     /// Show state information
     async fn state(&mut self, cmd: StateCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching state info for '{}' (instance: {})", cmd.name, cmd.instance);
+        log::debug!("Fetching state info for '{}'", cmd.name);
 
         let request: balancerpb::StateInfoRequest = (&cmd).into();
         let response = self.client.state_info(request).await?.into_inner();
@@ -159,7 +159,7 @@ impl BalancerService {
 
     /// Show sessions information
     async fn sessions(&mut self, cmd: SessionsCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching sessions info for '{}' (instance: {})", cmd.name, cmd.instance);
+        log::debug!("Fetching sessions info for '{}'", cmd.name);
 
         let request: balancerpb::SessionsInfoRequest = (&cmd).into();
         let response = self.client.sessions_info(request).await?.into_inner();

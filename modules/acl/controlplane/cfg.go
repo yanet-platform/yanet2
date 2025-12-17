@@ -7,8 +7,11 @@ import (
 	"github.com/c2h5oh/datasize"
 )
 
-// Config represents balancer module configuration
+// Config represents ACL module configuration
 type Config struct {
+	// InstanceID specifies which dataplane instance this module serves.
+	InstanceID uint32 `yaml:"instance_id"`
+
 	// MemoryPath is the path to the shared memory file
 	MemoryPath string `yaml:"memory_path"`
 
@@ -55,7 +58,7 @@ func (c *Config) Validate() error {
 func DefaultConfig() *Config {
 	return &Config{
 		MemoryPath:         "/dev/hugepages/yanet",
-		MemoryRequirements: 32 * datasize.MB,
+		MemoryRequirements: 64 * datasize.MB,
 		Endpoint:           "[::1]:0",
 		GatewayEndpoint:    "[::1]:8080",
 	}

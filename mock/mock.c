@@ -13,6 +13,7 @@
 #include "dataplane/config/zone.h"
 #include "lib/controlplane/config/zone.h"
 #include "worker.h"
+#include "worker_mempool.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -154,45 +155,51 @@ dataplane_initialize(
 
 	int rc = dataplane_load_module(dp_config, bin_hndl, "forward");
 	if (rc == -1) {
-		return -1;
+		// FIXME: Define a common error base and enum with errors for
+		// modules and other parts
+		return -2;
 	}
 	rc = dataplane_load_module(dp_config, bin_hndl, "route");
 	if (rc == -1) {
-		return -1;
+		return -3;
 	}
 	rc = dataplane_load_module(dp_config, bin_hndl, "decap");
 	if (rc == -1) {
-		return -1;
+		return -4;
 	}
 	rc = dataplane_load_module(dp_config, bin_hndl, "dscp");
 	if (rc == -1) {
-		return -1;
+		return -5;
 	}
 	rc = dataplane_load_module(dp_config, bin_hndl, "nat64");
 	if (rc == -1) {
-		return -1;
+		return -6;
 	}
 	rc = dataplane_load_module(dp_config, bin_hndl, "balancer");
 	if (rc == -1) {
-		return -1;
+		return -7;
 	}
 	rc = dataplane_load_module(dp_config, bin_hndl, "pdump");
 	if (rc == -1) {
-		return -1;
+		return -8;
 	}
 	rc = dataplane_load_module(dp_config, bin_hndl, "acl");
 	if (rc == -1) {
-		return -1;
+		return -9;
+	}
+	rc = dataplane_load_module(dp_config, bin_hndl, "fwstate");
+	if (rc == -1) {
+		return -10;
 	}
 
 	rc = dataplane_load_device(dp_config, bin_hndl, "plain");
 	if (rc == -1) {
-		return -1;
+		return -11;
 	}
 
 	rc = dataplane_load_device(dp_config, bin_hndl, "vlan");
 	if (rc == -1) {
-		return -1;
+		return -12;
 	}
 
 	cp_config->cp_config_gen = NULL;
@@ -279,8 +286,10 @@ yanet_mock_init(
 	);
 	if (res != 0) {
 		yanet_mock_free(mock);
-		return -1;
+		return res;
 	}
+
+	struct rte_mempool *mp = mock_mempool_create();
 
 	// init worker mocks
 	mock->worker_count = config->worker_count;
@@ -289,6 +298,7 @@ yanet_mock_init(
 		mock->workers[i].cp_config = cp_config;
 		mock->workers[i].dp_config = dp_config;
 		mock->workers[i].dp_worker.gen = 1000000000000000;
+		mock->workers[i].dp_worker.rx_mempool = mp;
 	}
 
 	dp_config->dp_topology.device_count = config->device_count;
@@ -319,6 +329,14 @@ yanet_mock_init(
 
 void
 yanet_mock_free(struct yanet_mock *mock) {
+	if (mock->worker_count > 0) {
+		// All workers share the same mempool
+		struct rte_mempool *mp = mock->workers[0].dp_worker.rx_mempool;
+		if (mp != NULL) {
+			free(mp);
+		}
+	}
+
 	if (mock->arena != NULL) {
 		free(mock->arena);
 	}

@@ -38,13 +38,33 @@
  *
  * This macro makes an assignment PTR1 = PTR2 in the sense of relative pointers.
  *
- * @param PTR1 Pointer to the destination relative pointer
- * @param PTR2 Pointer to the source relative pointer
+ * @param DST Pointer to the destination relative pointer
+ * @param SRC Pointer to the source relative pointer
  *
- * @note After this macro is called, it is guaranteed that ADDR_OF(PTR1) ==
- * ADDR_OF(PTR2).
+ * @note After this macro is called, it is guaranteed that ADDR_OF(DST) ==
+ * ADDR_OF(SRC).
  */
-#define EQUATE_OFFSET(PTR1, PTR2)                                              \
+#define EQUATE_OFFSET(DST, SRC)                                                \
 	do {                                                                   \
-		SET_OFFSET_OF(PTR1, ADDR_OF(PTR2));                            \
+		SET_OFFSET_OF(DST, ADDR_OF(SRC));                              \
 	} while (0)
+
+/*
+#define ATOMIC_ADDR_OF(OFFSET)                                                 \
+	__extension__({                                                        \
+		typeof(*OFFSET) _offset = atomic_load_explicit(                \
+			(_Atomic(typeof(*OFFSET)) *)OFFSET,                    \
+			memory_order_acquire                                   \
+		);                                                             \
+		(typeof(_offset))((uintptr_t)_offset +                         \
+				  (uintptr_t)(_offset ? (OFFSET) : NULL));     \
+	})
+
+#define ATOMIC_SET_OFFSET_OF(PTR, ADDR)                                        \
+	atomic_store_explicit(                                                 \
+		(_Atomic(typeof(*PTR)) *)PTR,                                  \
+		(typeof(ADDR))((uintptr_t)(ADDR) -                             \
+			       (uintptr_t)((ADDR) ? (PTR) : NULL)),            \
+		memory_order_release                                           \
+	)
+*/

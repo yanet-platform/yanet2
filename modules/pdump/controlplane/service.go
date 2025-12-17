@@ -1,6 +1,6 @@
 // Package pdump implements the control plane service for packet dumping.
 // This file defines PdumpService, which handles gRPC requests for configuring
-// and managing packet capture instances (identified by name and dataplane instance).
+// and managing packet capture instances (identified by name).
 // It interacts with data plane agents via FFI (Foreign Function Interface)
 // to apply capture settings (filters, mode, snaplen, ring buffer size)
 // and to facilitate reading captured packets from shared ring buffers.
@@ -20,13 +20,13 @@ import (
 )
 
 // PdumpService provides packet capture functionality through a gRPC interface.
-// It manages packet capture configurations and ring buffers across multiple dataplane instances.
+// It manages packet capture configurations and ring buffers.
 type PdumpService struct {
 	pdumppb.UnimplementedPdumpServiceServer
 
-	mu      sync.Mutex                      // Protects concurrent access to agents, configs, and ringReaders.
-	agents  []*ffi.Agent                    // Slice of FFI agents, typically one per dataplane instance, used for data plane interaction.
-	configs map[instanceKey]*instanceConfig // Map storing the active configuration for each packet capture instance, keyed by instanceKey.
+	mu      sync.Mutex                 // Protects concurrent access to agent, configs, and ringReaders.
+	agent   *ffi.Agent                 // FFI agent used for data plane interaction.
+	configs map[string]*instanceConfig // Map storing the active configuration for each packet capture instance, keyed by name.
 	// Slice of active ringBuffer instances, each corresponding to an ongoing ReadDump stream.
 	// Used to manage and terminate these readers during config updates or shutdown.
 	ringReaders []ringReader
@@ -44,44 +44,38 @@ type instanceConfig struct {
 }
 
 type ringReader struct {
-	key    instanceKey
+	name   string
 	ring   *ringBuffer
 	cancel context.CancelCauseFunc
 	doneCh chan bool
 }
 
-// NewPdumpService initializes a new packet capture service with the specified agents and logger.
-func NewPdumpService(agents []*ffi.Agent, log *zap.SugaredLogger) *PdumpService {
+// NewPdumpService initializes a new packet capture service with the specified agent and logger.
+func NewPdumpService(agent *ffi.Agent, log *zap.SugaredLogger) *PdumpService {
 	return &PdumpService{
-		agents:  agents,
-		configs: map[instanceKey]*instanceConfig{},
+		agent:   agent,
+		configs: map[string]*instanceConfig{},
 		quitCh:  make(chan bool),
 		log:     log,
 	}
 }
 
-// ListConfigs retrieves all configured packet capture instances across dataplane instance.
+// ListConfigs retrieves all configured packet capture instances.
 func (m *PdumpService) ListConfigs(
 	ctx context.Context,
 	request *pdumppb.ListConfigsRequest,
 ) (*pdumppb.ListConfigsResponse, error) {
 
 	response := &pdumppb.ListConfigsResponse{
-		InstanceConfigs: make([]*pdumppb.InstanceConfigs, len(m.agents)),
-	}
-	for inst := range m.agents {
-		response.InstanceConfigs[inst] = &pdumppb.InstanceConfigs{
-			Instance: uint32(inst),
-		}
+		Configs: make([]string, 0),
 	}
 
 	// Lock instances store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for key := range m.configs {
-		instConfig := response.InstanceConfigs[key.dataplaneInstance]
-		instConfig.Configs = append(instConfig.Configs, key.name)
+	for name := range m.configs {
+		response.Configs = append(response.Configs, name)
 	}
 
 	return response, nil
@@ -92,19 +86,18 @@ func (m *PdumpService) ShowConfig(
 	ctx context.Context,
 	request *pdumppb.ShowConfigRequest,
 ) (*pdumppb.ShowConfigResponse, error) {
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, err
 	}
 
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	response := &pdumppb.ShowConfigResponse{Instance: inst}
+	response := &pdumppb.ShowConfigResponse{}
 
 	// Lock instances store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if config, ok := m.configs[key]; ok {
+	if config, ok := m.configs[name]; ok {
 		response.Config = &pdumppb.Config{
 			Filter:   config.filter,
 			Mode:     config.dumpMode,
@@ -122,7 +115,7 @@ func (m *PdumpService) SetConfig(
 	ctx context.Context,
 	request *pdumppb.SetConfigRequest,
 ) (*pdumppb.SetConfigResponse, error) {
-	name, inst, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, err
 	}
@@ -135,9 +128,8 @@ func (m *PdumpService) SetConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	key := instanceKey{name: name, dataplaneInstance: inst}
 	newConfig := *defaultModuleConfig()
-	config, ok := m.configs[key]
+	config, ok := m.configs[name]
 	if ok {
 		// Create a copy of the config to ensure atomic updates.
 		newRing := newConfig.ring // Preserve the new ring.
@@ -194,15 +186,15 @@ func (m *PdumpService) SetConfig(
 	}
 	// If the updateMask is empty and no configuration exists for the key,
 	// a default configuration will be created.
-	m.configs[key] = &newConfig
+	m.configs[name] = &newConfig
 
-	return &pdumppb.SetConfigResponse{}, m.updateModuleConfig(name, inst)
+	return &pdumppb.SetConfigResponse{}, m.updateModuleConfig(name)
 }
 
 // updateModuleConfig applies the current configuration to the specified module instance.
 // This function assumes m.mu is already locked by the caller.
 // The process involves:
-//  1. Terminating all active ring readers for any instance to prevent memory access
+//  1. Terminating all active ring readers for the instance to prevent memory access
 //     violations, as reconfiguring a module can deallocate shared ring buffers.
 //  2. Creating a new FFI module configuration object for the specified instance.
 //  3. Applying the stored settings (capture mode, snaplen, filter, ring buffer parameters)
@@ -211,7 +203,6 @@ func (m *PdumpService) SetConfig(
 //  4. Updating the data plane module via the FFI interface with the new configuration.
 func (m *PdumpService) updateModuleConfig(
 	name string,
-	instance uint32,
 ) error {
 	// m.mu is held by the caller. First, terminate all active ring readers.
 	// This is crucial because changing the module configuration (via ffiConfig.AsFFIModule()
@@ -219,15 +210,11 @@ func (m *PdumpService) updateModuleConfig(
 	// used by the ring buffers. If readers were still active during or after this
 	// deallocation, they would attempt to access invalid memory, leading to segmentation faults.
 
-	// Terminate only the ring readers associated with the specific 'name' and 'instance'
-	// being updated.
-	key := instanceKey{name: name, dataplaneInstance: instance}
-
 	// First pass: terminate matching ring readers and wait for completion
 	for _, rr := range m.ringReaders {
-		if rr.key == key {
+		if rr.name == name {
 			rr.cancel(fmt.Errorf("terminated by config update"))
-			m.log.Infof("waiting for ring reader %v to complete", key)
+			m.log.Infof("waiting for ring reader %s to complete", name)
 			<-rr.doneCh
 		}
 	}
@@ -236,7 +223,7 @@ func (m *PdumpService) updateModuleConfig(
 	// We use a write index to compact the slice in-place, avoiding allocations
 	writeIdx := 0
 	for readIdx := range m.ringReaders {
-		if m.ringReaders[readIdx].key != key {
+		if m.ringReaders[readIdx].name != name {
 			if writeIdx != readIdx {
 				// Keep this ring reader - copy it to the write position
 				m.ringReaders[writeIdx] = m.ringReaders[readIdx]
@@ -248,36 +235,34 @@ func (m *PdumpService) updateModuleConfig(
 	// Truncate the slice to remove the terminated entries
 	m.ringReaders = m.ringReaders[:writeIdx]
 
-	m.log.Debugw("update config", zap.String("module", name), zap.Uint32("instance", instance))
+	m.log.Debugw("update config", zap.String("module", name))
 
-	agent := m.agents[instance]
-
-	ffiConfig, err := NewModuleConfig(agent, name)
+	ffiConfig, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		return fmt.Errorf("failed to create %q module config: %w", name, err)
 	}
 
-	instanceConfig := m.configs[key]
+	instanceConfig := m.configs[name]
 	if instanceConfig != nil {
-		m.log.Debugw("set dump mode", zap.String("module", name), zap.Uint32("instance", instance))
+		m.log.Debugw("set dump mode", zap.String("module", name))
 		if err := ffiConfig.SetDumpMode(instanceConfig.dumpMode); err != nil {
 			return fmt.Errorf("failed to set dump mode for %s: %w", name, err)
 		}
-		m.log.Debugw("set snaplen", zap.String("module", name), zap.Uint32("instance", instance))
+		m.log.Debugw("set snaplen", zap.String("module", name))
 		if err := ffiConfig.SetSnapLen(instanceConfig.snaplen); err != nil {
 			return fmt.Errorf("failed to set snaplen for %s: %w", name, err)
 		}
-		m.log.Debugw("set filter", zap.String("module", name), zap.Uint32("instance", instance))
+		m.log.Debugw("set filter", zap.String("module", name))
 		if err := ffiConfig.SetFilter(instanceConfig.filter); err != nil {
 			return fmt.Errorf("failed to set pdump filter for %s: %w", name, err)
 		}
-		m.log.Debugw("setup ring", zap.String("module", name), zap.Uint32("instance", instance))
+		m.log.Debugw("setup ring", zap.String("module", name))
 		if err := ffiConfig.SetupRing(instanceConfig.ring, m.log); err != nil {
 			return fmt.Errorf("failed to setup ring buffers for %s: %w", name, err)
 		}
 	}
 
-	if err := agent.UpdateModules([]ffi.ModuleConfig{ffiConfig.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{ffiConfig.AsFFIModule()}); err != nil {
 		return fmt.Errorf("failed to update module %s: %w", name, err)
 	}
 
@@ -286,7 +271,7 @@ func (m *PdumpService) updateModuleConfig(
 
 // ReadDump streams captured packets from the specified packet capture instance.
 // This function establishes a continuous stream of packet data by:
-//  1. Validating the target instance (name and dataplane instance identifier)
+//  1. Validating the target instance (name)
 //  2. Retrieving and cloning the ring buffer configuration for safe concurrent access
 //  3. Spawning ring buffer readers that continuously monitor shared memory
 //  4. Forwarding captured packet records to the gRPC stream
@@ -303,20 +288,19 @@ func (m *PdumpService) updateModuleConfig(
 func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.ServerStreamingServer[pdumppb.Record]) error {
 	ctx := stream.Context()
 
-	name, inst, err := req.Target.Validate(uint32(len(m.agents)))
+	name, err := req.Target.Validate()
 	if err != nil {
 		return fmt.Errorf("validate ReadDump target: %w", err)
 	}
-	key := instanceKey{name: name, dataplaneInstance: inst}
 	m.mu.Lock()
-	config, ok := m.configs[key]
+	config, ok := m.configs[name]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("config for %s on instance node %d does not exist", name, inst)
+		return fmt.Errorf("config for %s does not exist", name)
 	}
 	if len(config.ring.workers) == 0 {
 		m.mu.Unlock()
-		return fmt.Errorf("config for %s on instance node %d is not initialized properly", name, inst)
+		return fmt.Errorf("config for %s is not initialized properly", name)
 	}
 	// Clone the ring buffer configuration to ensure thread safety.
 	// This allows multiple concurrent ReadDump requests for the same instance
@@ -325,7 +309,7 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 
 	// Create a buffered channel for packet records to decouple ring reading from stream sending
 	recordCh := make(chan *pdumppb.Record, 16)
-	cancel := m.spawnRingReaders(ctx, key, ringCopy, recordCh)
+	cancel := m.spawnRingReaders(ctx, name, ringCopy, recordCh)
 	defer cancel(fmt.Errorf("streaming completed"))
 
 	// We can unlock only after spawning ring readers, as appending ringReader requires
@@ -359,10 +343,10 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 // spawnRingReaders initializes a new set of ring buffer readers for packet capture.
 // It launches a goroutine that continuously reads packets and forwards them to the record channel.
 // This function assumes m.mu is already locked by the caller.
-func (m *PdumpService) spawnRingReaders(ctx context.Context, key instanceKey, ring *ringBuffer, recordCh chan<- *pdumppb.Record) context.CancelCauseFunc {
+func (m *PdumpService) spawnRingReaders(ctx context.Context, name string, ring *ringBuffer, recordCh chan<- *pdumppb.Record) context.CancelCauseFunc {
 	ctx, cancel := context.WithCancelCause(ctx)
 	reader := ringReader{
-		key:    key,
+		name:   name,
 		ring:   ring,
 		cancel: cancel,
 		doneCh: make(chan bool),

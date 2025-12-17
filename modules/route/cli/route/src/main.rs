@@ -63,9 +63,6 @@ pub struct RouteShowCmd {
     /// Route config name.
     #[arg(long = "cfg")]
     pub config_name: Option<String>,
-    /// Dataplane instances where changes should be applied, optionally repeated.
-    #[arg(long, required = false)]
-    pub instances: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -75,9 +72,6 @@ pub struct RouteLookupCmd {
     /// Route config name.
     #[arg(long = "cfg")]
     pub config_name: String,
-    /// Dataplane instances where changes should be applied, optionally repeated.
-    #[arg(long, required = true)]
-    pub instances: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -93,9 +87,6 @@ pub struct RouteInsertCmd {
     /// The IP address of the nexthop router.
     #[arg(long = "via")]
     pub nexthop_addr: IpAddr,
-    /// Dataplane instances where changes should be applied, optionally repeated.
-    #[arg(long, required = true)]
-    pub instances: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -103,9 +94,6 @@ pub struct RouteFlushCmd {
     /// Route config name.
     #[arg(long = "cfg")]
     pub config_name: String,
-    /// Dataplane instances where changes should be applied, optionally repeated.
-    #[arg(long, required = true)]
-    pub instances: Vec<u32>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -148,21 +136,12 @@ impl RouteService {
         let request = ListConfigsRequest {};
         let response = self.client.list_configs(request).await?.into_inner();
         let mut tree = TreeBuilder::new("Route Configs".to_string());
-        for inst in response.instance_configs {
-            tree.begin_child(format!("Instance {}", inst.instance));
-            for config in inst.configs {
-                tree.add_empty_child(config);
-            }
+        for config in response.configs {
+            tree.add_empty_child(config);
         }
         let tree = tree.build();
         ptree::print_tree(&tree)?;
         Ok(())
-    }
-
-    pub async fn get_instances(&mut self) -> Result<Vec<u32>, Box<dyn Error>> {
-        let request = ListConfigsRequest {};
-        let response = self.client.list_configs(request).await?.into_inner();
-        Ok(response.instance_configs.iter().map(|c| c.instance).collect())
     }
 
     pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Box<dyn Error>> {
@@ -171,96 +150,77 @@ impl RouteService {
             return Ok(());
         };
 
-        let mut instances = cmd.instances;
-        if instances.is_empty() {
-            instances = self.get_instances().await?;
-        }
+        let request = ShowRoutesRequest {
+            target: Some(TargetModule {
+                config_name: name.clone(),
+            }),
+            ipv4_only: cmd.ipv4,
+            ipv6_only: cmd.ipv6,
+        };
 
-        for inst in instances {
-            let request = ShowRoutesRequest {
-                target: Some(TargetModule {
-                    config_name: name.clone(),
-                    dataplane_instance: inst,
-                }),
-                ipv4_only: cmd.ipv4,
-                ipv6_only: cmd.ipv6,
-            };
+        let response = self.client.show_routes(request).await?.into_inner();
 
-            let response = self.client.show_routes(request).await?.into_inner();
+        let mut entries = response.routes.into_iter().map(RouteEntry::from).collect::<Vec<_>>();
 
-            let mut entries = response.routes.into_iter().map(RouteEntry::from).collect::<Vec<_>>();
+        entries.sort_by(|a, b| a.prefix.0.cmp(&b.prefix.0));
 
-            entries.sort_by(|a, b| a.prefix.0.cmp(&b.prefix.0));
-
-            println!("Instance {inst}");
-            print_table(entries);
-        }
+        print_table(entries);
 
         Ok(())
     }
 
     pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Box<dyn Error>> {
-        for inst in cmd.instances {
-            let request = LookupRouteRequest {
-                target: Some(TargetModule {
-                    config_name: cmd.config_name.clone(),
-                    dataplane_instance: inst,
-                }),
-                ip_addr: cmd.addr.to_string(),
-            };
+        let request = LookupRouteRequest {
+            target: Some(TargetModule {
+                config_name: cmd.config_name.clone(),
+            }),
+            ip_addr: cmd.addr.to_string(),
+        };
 
-            let response = self.client.lookup_route(request).await?.into_inner();
+        let response = self.client.lookup_route(request).await?.into_inner();
 
-            if response.routes.is_empty() {
-                log::info!("No routes found for {} on instance {inst}", cmd.addr);
-                continue;
-            }
-
-            println!("Instance {inst}");
-            // NOTE: no sorting here, since routes are already sorted by their best.
-            print_table(response.routes.into_iter().map(RouteEntry::from));
+        if response.routes.is_empty() {
+            log::info!("No routes found for {}", cmd.addr);
+            return Ok(());
         }
+
+        // NOTE: no sorting here, since routes are already sorted by their best.
+        print_table(response.routes.into_iter().map(RouteEntry::from));
 
         Ok(())
     }
 
     pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Box<dyn Error>> {
-        for inst in cmd.instances {
-            let request = InsertRouteRequest {
-                target: Some(TargetModule {
-                    config_name: cmd.config_name.clone(),
-                    dataplane_instance: inst,
-                }),
-                prefix: cmd.prefix.to_string(),
-                nexthop_addr: cmd.nexthop_addr.to_string(),
-                do_flush: true,
-            };
+        let request = InsertRouteRequest {
+            target: Some(TargetModule {
+                config_name: cmd.config_name.clone(),
+            }),
+            prefix: cmd.prefix.to_string(),
+            nexthop_addr: cmd.nexthop_addr.to_string(),
+            do_flush: true,
+        };
 
-            self.client.insert_route(request).await?;
+        self.client.insert_route(request).await?;
 
-            log::info!(
-                "Route inserted successfully on instance {inst}: {} via {}",
-                cmd.prefix,
-                cmd.nexthop_addr
-            );
-        }
+        log::info!(
+            "Route inserted successfully: {} via {}",
+            cmd.prefix,
+            cmd.nexthop_addr
+        );
 
         Ok(())
     }
 
     pub async fn flush_routes(&mut self, cmd: RouteFlushCmd) -> Result<(), Box<dyn Error>> {
-        for inst in cmd.instances {
-            let request = FlushRoutesRequest {
-                target: Some(TargetModule {
-                    config_name: cmd.config_name.clone(),
-                    dataplane_instance: inst,
-                }),
-            };
+        let request = FlushRoutesRequest {
+            target: Some(TargetModule {
+                config_name: cmd.config_name.clone(),
+            }),
+        };
 
-            self.client.flush_routes(request).await?;
+        self.client.flush_routes(request).await?;
 
-            log::info!("Routes flushed successfully on instance {inst}");
-        }
+        log::info!("Routes flushed successfully");
 
         Ok(())
     }

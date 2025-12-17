@@ -58,16 +58,9 @@ message Record {
 message ListConfigsRequest {
 }
 
-// ListConfigsResponse contains existing configurations per dataplane instance.
+// ListConfigsResponse contains existing configurations.
 message ListConfigsResponse {
-	repeated InstanceConfigs instance_configs = 1;
-}
-
-// Represents pdump configs of dataplane instances
-message InstanceConfigs {
-	// Dataplane instance
-	uint32 instance = 1;
-	repeated string configs = 2;
+	repeated string configs = 1;
 }
 
 // ShowConfigResponse retrieves the runtime configuration for the pdump module.
@@ -90,9 +83,7 @@ message Config {
 
 // ShowConfigResponse contains the configuration details of the pdump module.
 message ShowConfigResponse {
-	// Dataplane instance
-	uint32 instance = 1;
-	Config config = 2;
+	Config config = 1;
 }
 
 // SetConfigRequest contains new configuration for the pdump module instance

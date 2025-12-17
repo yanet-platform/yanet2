@@ -21,19 +21,21 @@ const agentName = "pipeline"
 // sufficient.
 const defaultAgentMemory = uint(1 << 20)
 
-// TODO: docs.
+// PipelineService is a gRPC service for managing pipelines.
 type PipelineService struct {
 	ynpb.UnimplementedPipelineServiceServer
 
-	shm *ffi.SharedMemory
-	log *zap.SugaredLogger
+	instanceID uint32
+	shm        *ffi.SharedMemory
+	log        *zap.SugaredLogger
 }
 
-// TODO: docs.
-func NewPipelineService(shm *ffi.SharedMemory, log *zap.SugaredLogger) *PipelineService {
+// NewPipelineService creates a new PipelineService.
+func NewPipelineService(instanceID uint32, shm *ffi.SharedMemory, log *zap.SugaredLogger) *PipelineService {
 	return &PipelineService{
-		shm: shm,
-		log: log,
+		instanceID: instanceID,
+		shm:        shm,
+		log:        log,
 	}
 }
 
@@ -41,8 +43,7 @@ func (m *PipelineService) List(
 	ctx context.Context,
 	request *ynpb.ListPipelinesRequest,
 ) (*ynpb.ListPipelinesResponse, error) {
-	instance := request.Instance
-	dpConfig := m.shm.DPConfig(instance)
+	dpConfig := m.shm.DPConfig(m.instanceID)
 
 	pipelines := dpConfig.Pipelines()
 
@@ -62,8 +63,7 @@ func (m *PipelineService) Get(
 	ctx context.Context,
 	request *ynpb.GetPipelineRequest,
 ) (*ynpb.GetPipelineResponse, error) {
-	instance := request.Instance
-	dpConfig := m.shm.DPConfig(instance)
+	dpConfig := m.shm.DPConfig(m.instanceID)
 
 	reqId := request.Id
 
@@ -94,14 +94,12 @@ func (m *PipelineService) Get(
 
 }
 
-// TODO: docs.
+// Update updates or inserts a pipeline.
 func (m *PipelineService) Update(
 	ctx context.Context,
 	request *ynpb.UpdatePipelineRequest,
 ) (*ynpb.UpdatePipelineResponse, error) {
-	instance := request.Instance
-
-	agent, err := m.shm.AgentAttach(agentName, instance, defaultAgentMemory)
+	agent, err := m.shm.AgentAttach(agentName, m.instanceID, defaultAgentMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
 	}
@@ -129,10 +127,9 @@ func (m *PipelineService) Delete(
 	ctx context.Context,
 	request *ynpb.DeletePipelineRequest,
 ) (*ynpb.DeletePipelineResponse, error) {
-	instance := request.GetInstance()
 	pipelineName := request.GetId().GetName()
 
-	agent, err := m.shm.AgentAttach(agentName, instance, defaultAgentMemory)
+	agent, err := m.shm.AgentAttach(agentName, m.instanceID, defaultAgentMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
 	}

@@ -50,9 +50,6 @@ pub enum ModeCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
-    /// Dataplane instance where the changes should be applied.
-    #[arg(long)]
-    pub instance: u32,
     /// Function name.
     #[arg(long)]
     pub name: String,
@@ -63,9 +60,6 @@ pub struct UpdateCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
-    /// Dataplane instance where the changes should be applied.
-    #[arg(short, long)]
-    pub instance: u32,
     /// Function name.
     #[arg(short, long)]
     pub name: String,
@@ -106,7 +100,6 @@ impl FunctionService {
 
     pub async fn update_functions(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         let request = UpdateFunctionRequest {
-            instance: cmd.instance,
             function: Some(Function {
                 id: Some(FunctionId { name: cmd.name }),
                 chains: cmd
@@ -153,7 +146,6 @@ impl FunctionService {
 
     pub async fn delete_function(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
         let request = DeleteFunctionRequest {
-            instance: cmd.instance,
             id: Some(FunctionId { name: cmd.name }),
         };
         self.client.delete(request).await?;

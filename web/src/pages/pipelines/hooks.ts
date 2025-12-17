@@ -2,67 +2,40 @@ import { useState, useCallback, useEffect } from 'react';
 import { API } from '../../api';
 import type { Pipeline, PipelineId } from '../../api/pipelines';
 import type { FunctionId } from '../../api/common';
-import type { InspectResponse } from '../../api/inspect';
 import { toaster } from '../../utils';
 import { useGraphEditor } from '../../hooks';
 import type { PipelineNode, PipelineEdge } from './types';
 import { apiToGraph, graphToApi, createEmptyGraph, validateLinkedList } from './utils';
 
-export interface InstanceData {
-    instance: number;
-    pipelineIds: PipelineId[];
-}
-
 export interface UsePipelineDataResult {
-    instances: InstanceData[];
+    pipelineIds: PipelineId[];
     loading: boolean;
     error: string | null;
-    reloadInstances: () => Promise<void>;
-    loadPipeline: (instance: number, pipelineId: PipelineId) => Promise<Pipeline | null>;
-    createPipeline: (instance: number, name: string) => Promise<boolean>;
-    updatePipeline: (instance: number, pipeline: Pipeline) => Promise<boolean>;
-    deletePipeline: (instance: number, pipelineId: PipelineId) => Promise<boolean>;
-    loadFunctionList: (instance: number) => Promise<FunctionId[]>;
+    reloadPipelines: () => Promise<void>;
+    loadPipeline: (pipelineId: PipelineId) => Promise<Pipeline | null>;
+    createPipeline: (name: string) => Promise<boolean>;
+    updatePipeline: (pipeline: Pipeline) => Promise<boolean>;
+    deletePipeline: (pipelineId: PipelineId) => Promise<boolean>;
+    loadFunctionList: () => Promise<FunctionId[]>;
 }
 
 /**
  * Hook for managing pipeline data and API interactions
  */
 export const usePipelineData = (): UsePipelineDataResult => {
-    const [instances, setInstances] = useState<InstanceData[]>([]);
+    const [pipelineIds, setPipelineIds] = useState<PipelineId[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const loadInstancesAndPipelines = useCallback(async (): Promise<void> => {
+    const loadPipelines = useCallback(async (): Promise<void> => {
         setLoading(true);
         setError(null);
 
         try {
-            // First get all instances from inspect
-            const inspectResponse: InspectResponse = await API.inspect.inspect();
-            const instanceIndices = inspectResponse.instanceIndices || [];
-
-            // Then load pipeline list for each instance
-            const instanceDataPromises = instanceIndices.map(async (instanceIdx) => {
-                try {
-                    const response = await API.pipelines.list({ instance: instanceIdx });
-                    return {
-                        instance: instanceIdx,
-                        pipelineIds: response.ids || [],
-                    };
-                } catch (err) {
-                    console.error(`Failed to load pipelines for instance ${instanceIdx}:`, err);
-                    return {
-                        instance: instanceIdx,
-                        pipelineIds: [],
-                    };
-                }
-            });
-
-            const instanceData = await Promise.all(instanceDataPromises);
-            setInstances(instanceData);
+            const response = await API.pipelines.list({});
+            setPipelineIds(response.ids || []);
         } catch (err) {
-            const message = err instanceof Error ? err.message : 'Failed to load instances';
+            const message = err instanceof Error ? err.message : 'Failed to load pipelines';
             setError(message);
             toaster.error('pipelines-load-error', 'Failed to load pipelines', err);
         } finally {
@@ -71,15 +44,14 @@ export const usePipelineData = (): UsePipelineDataResult => {
     }, []);
 
     useEffect(() => {
-        loadInstancesAndPipelines();
-    }, [loadInstancesAndPipelines]);
+        loadPipelines();
+    }, [loadPipelines]);
 
     const loadPipeline = useCallback(async (
-        instance: number,
         pipelineId: PipelineId
     ): Promise<Pipeline | null> => {
         try {
-            const response = await API.pipelines.get({ instance, id: pipelineId });
+            const response = await API.pipelines.get({ id: pipelineId });
             return response.pipeline || null;
         } catch (err) {
             toaster.error('pipeline-get-error', `Failed to load pipeline ${pipelineId.name}`, err);
@@ -88,7 +60,6 @@ export const usePipelineData = (): UsePipelineDataResult => {
     }, []);
 
     const createPipeline = useCallback(async (
-        instance: number,
         name: string
     ): Promise<boolean> => {
         try {
@@ -97,10 +68,10 @@ export const usePipelineData = (): UsePipelineDataResult => {
                 functions: [],
             };
 
-            await API.pipelines.update({ instance, pipeline: newPipeline });
+            await API.pipelines.update({ pipeline: newPipeline });
 
             // Reload to get updated list
-            await loadInstancesAndPipelines();
+            await loadPipelines();
 
             toaster.success('pipeline-create-success', `Pipeline "${name}" created`);
             return true;
@@ -108,14 +79,13 @@ export const usePipelineData = (): UsePipelineDataResult => {
             toaster.error('pipeline-create-error', `Failed to create pipeline "${name}"`, err);
             return false;
         }
-    }, [loadInstancesAndPipelines]);
+    }, [loadPipelines]);
 
     const updatePipeline = useCallback(async (
-        instance: number,
         pipeline: Pipeline
     ): Promise<boolean> => {
         try {
-            await API.pipelines.update({ instance, pipeline });
+            await API.pipelines.update({ pipeline });
             toaster.success('pipeline-update-success', `Pipeline "${pipeline.id?.name}" saved`);
             return true;
         } catch (err) {
@@ -125,24 +95,13 @@ export const usePipelineData = (): UsePipelineDataResult => {
     }, []);
 
     const deletePipeline = useCallback(async (
-        instance: number,
         pipelineId: PipelineId
     ): Promise<boolean> => {
         try {
-            await API.pipelines.delete({ instance, id: pipelineId });
+            await API.pipelines.delete({ id: pipelineId });
 
             // Update local state
-            setInstances(prev => prev.map(inst => {
-                if (inst.instance === instance) {
-                    return {
-                        ...inst,
-                        pipelineIds: inst.pipelineIds.filter(
-                            id => id.name !== pipelineId.name
-                        ),
-                    };
-                }
-                return inst;
-            }));
+            setPipelineIds(prev => prev.filter(id => id.name !== pipelineId.name));
 
             toaster.success('pipeline-delete-success', `Pipeline "${pipelineId.name}" deleted`);
             return true;
@@ -152,9 +111,9 @@ export const usePipelineData = (): UsePipelineDataResult => {
         }
     }, []);
 
-    const loadFunctionList = useCallback(async (instance: number): Promise<FunctionId[]> => {
+    const loadFunctionList = useCallback(async (): Promise<FunctionId[]> => {
         try {
-            const response = await API.functions.list({ instance });
+            const response = await API.functions.list({});
             return response.ids || [];
         } catch (err) {
             toaster.error('function-list-error', 'Failed to load function list', err);
@@ -163,10 +122,10 @@ export const usePipelineData = (): UsePipelineDataResult => {
     }, []);
 
     return {
-        instances,
+        pipelineIds,
         loading,
         error,
-        reloadInstances: loadInstancesAndPipelines,
+        reloadPipelines: loadPipelines,
         loadPipeline,
         createPipeline,
         updatePipeline,

@@ -100,6 +100,10 @@ func (m *DPConfig) NumaIdx() uint32 {
 	return uint32(C.dataplane_instance_numa_idx(m.ptr))
 }
 
+func (m *DPConfig) WorkerCount() uint32 {
+	return uint32(C.dataplane_instance_worker_count(m.ptr))
+}
+
 // Modules returns a list of dataplane modules available.
 func (m *DPConfig) Modules() []DPModule {
 	ptr := C.yanet_get_dp_module_list_info(m.ptr)

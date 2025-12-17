@@ -12,12 +12,12 @@ import (
 type DeviceVlanService struct {
 	vlanpb.UnimplementedDeviceVlanServiceServer
 
-	agents []*ffi.Agent
+	agent *ffi.Agent
 }
 
-func NewDeviceVlanService(agents []*ffi.Agent) *DeviceVlanService {
+func NewDeviceVlanService(agent *ffi.Agent) *DeviceVlanService {
 	return &DeviceVlanService{
-		agents: agents,
+		agent: agent,
 	}
 }
 
@@ -25,20 +25,18 @@ func (m *DeviceVlanService) UpdateDevice(
 	ctx context.Context,
 	request *vlanpb.UpdateDeviceVlanRequest,
 ) (*vlanpb.UpdateDeviceVlanResponse, error) {
-	name, instance, err := request.GetTarget().Validate(uint32(len(m.agents)))
+	name, err := request.GetTarget().Validate()
 	if err != nil {
 		return nil, err
 	}
 
-	agent := m.agents[instance]
-
-	deviceConfig, err := NewDeviceConfig(agent, name, request.GetDevice(), uint16(request.GetVlan()))
+	deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice(), uint16(request.GetVlan()))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create device config for instance %d: %w", instance, err)
+		return nil, fmt.Errorf("failed to create device config: %w", err)
 	}
 
-	if err := agent.UpdateDevices([]ffi.ShmDeviceConfig{deviceConfig.AsFFIDevice()}); err != nil {
-		return nil, fmt.Errorf("failed to update module on instance %d: %w", instance, err)
+	if err := m.agent.UpdateDevices([]ffi.ShmDeviceConfig{deviceConfig.AsFFIDevice()}); err != nil {
+		return nil, fmt.Errorf("failed to update device: %w", err)
 	}
 
 	return nil, nil

@@ -30,19 +30,12 @@ message Config {
 	DscpConfig dscp_config = 3;
 }
 
-// Represents config names of dataplane instances
-message InstanceConfigs {
-	// Dataplane instance
-	uint32 instance = 1;
-	repeated string configs = 2;
-}
-
 message ListConfigsRequest {
 }
 
-// ListConfigsResponse contains existing configurations per dataplane instance.
+// ListConfigsResponse contains existing configurations.
 message ListConfigsResponse {
-	repeated InstanceConfigs instance_configs = 1;
+	repeated string configs = 1;
 }
 
 // ShowConfigResponse retrieves the runtime configuration for the dscp module.
@@ -61,8 +54,7 @@ message DscpConfig {
 
 // ShowConfigResponse contains the configuration details of the dscp module.
 message ShowConfigResponse {
-	uint32 instance = 1;
-	Config config = 2;
+	Config config = 1;
 }
 
 // AddPrefixesRequest adds prefixes to the input filter of the dscp module.

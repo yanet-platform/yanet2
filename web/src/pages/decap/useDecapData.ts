@@ -1,26 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API } from '../../api';
 import { toaster } from '../../utils';
-import type { DecapInstanceData } from './types';
+
+export interface DecapConfigData {
+    configs: string[];
+    configPrefixes: Map<string, string[]>;
+}
 
 export interface UseDecapDataResult {
-    instances: DecapInstanceData[];
+    data: DecapConfigData;
     loading: boolean;
-    selectedPrefixes: Map<number, Map<string, Set<string>>>;
-    setSelectedPrefixes: React.Dispatch<React.SetStateAction<Map<number, Map<string, Set<string>>>>>;
-    handleSelectionChange: (instance: number, configName: string, selectedIds: Set<string>) => void;
-    addConfig: (instance: number, configName: string) => void;
-    addPrefixes: (instance: number, configName: string, prefixes: string[]) => Promise<boolean>;
-    removePrefixes: (instance: number, configName: string, prefixes: string[]) => Promise<boolean>;
-    reloadConfig: (instance: number, configName: string) => Promise<void>;
+    selectedPrefixes: Map<string, Set<string>>;
+    setSelectedPrefixes: React.Dispatch<React.SetStateAction<Map<string, Set<string>>>>;
+    handleSelectionChange: (configName: string, selectedIds: Set<string>) => void;
+    addConfig: (configName: string) => void;
+    addPrefixes: (configName: string, prefixes: string[]) => Promise<boolean>;
+    removePrefixes: (configName: string, prefixes: string[]) => Promise<boolean>;
+    reloadConfig: (configName: string) => Promise<void>;
 }
 
 export const useDecapData = (): UseDecapDataResult => {
-    const [instances, setInstances] = useState<DecapInstanceData[]>([]);
+    const [data, setData] = useState<DecapConfigData>({ configs: [], configPrefixes: new Map() });
     const [loading, setLoading] = useState<boolean>(true);
-    const [selectedPrefixes, setSelectedPrefixes] = useState<Map<number, Map<string, Set<string>>>>(new Map());
+    const [selectedPrefixes, setSelectedPrefixes] = useState<Map<string, Set<string>>>(new Map());
 
-    // Load data for all instances
+    // Load data
     useEffect(() => {
         let isMounted = true;
 
@@ -28,72 +32,53 @@ export const useDecapData = (): UseDecapDataResult => {
             setLoading(true);
 
             try {
-                // First get list of all instances and their decap configs via Inspect API
+                // First get list of decap configs via Inspect API
                 const inspectResponse = await API.inspect.inspect();
-                
+
                 if (!isMounted) return;
 
-                const instanceInfos = inspectResponse.instanceInfo || [];
-                const loadedInstances: DecapInstanceData[] = [];
+                const info = inspectResponse.instanceInfo;
 
-                for (const info of instanceInfos) {
-                    const instanceIdx = info.instanceIdx ?? 0;
-                    
-                    // Find decap configs for this instance
-                    const decapConfigs = (info.cpConfigs || [])
-                        .filter((cfg) => cfg.type === 'decap')
-                        .map((cfg) => cfg.name || '');
+                // Find decap configs
+                const decapConfigs = (info?.cpConfigs || [])
+                    .filter((cfg) => cfg.type === 'decap')
+                    .map((cfg) => cfg.name || '');
 
-                    const configPrefixes = new Map<string, string[]>();
+                const configPrefixes = new Map<string, string[]>();
 
-                    // Load prefixes for each decap config
-                    for (const configName of decapConfigs) {
-                        if (!configName) continue;
+                // Load prefixes for each decap config
+                for (const configName of decapConfigs) {
+                    if (!configName) continue;
 
-                        try {
-                            const response = await API.decap.showConfig({
-                                target: {
-                                    configName,
-                                    dataplaneInstance: instanceIdx,
-                                },
-                            });
+                    try {
+                        const response = await API.decap.showConfig({
+                            target: {
+                                configName,
+                            },
+                        });
 
-                            const prefixes = response.config?.prefixes || [];
-                            configPrefixes.set(configName, prefixes);
-                        } catch (err) {
-                            // Config might not exist yet, just log and continue
-                            configPrefixes.set(configName, []);
-                        }
+                        const prefixes = response.prefixes || [];
+                        configPrefixes.set(configName, prefixes);
+                    } catch (err) {
+                        // Config might not exist yet, just log and continue
+                        configPrefixes.set(configName, []);
                     }
-
-                    loadedInstances.push({
-                        instance: instanceIdx,
-                        configs: decapConfigs,
-                        configPrefixes,
-                    });
                 }
 
                 if (!isMounted) return;
 
-                // If no instances found, create a default empty one
-                if (loadedInstances.length === 0) {
-                    loadedInstances.push({
-                        instance: 0,
-                        configs: [],
-                        configPrefixes: new Map(),
-                    });
-                }
-
-                setInstances(loadedInstances);
+                setData({
+                    configs: decapConfigs,
+                    configPrefixes,
+                });
             } catch (err) {
                 if (!isMounted) return;
                 toaster.error('decap-load-error', 'Failed to load decap configuration', err);
-                // Still set empty instance so UI can be shown
-                setInstances([{
-                    instance: 0,
+                // Still set empty data so UI can be shown
+                setData({
                     configs: [],
                     configPrefixes: new Map(),
-                }]);
+                });
             } finally {
                 if (isMounted) {
                     setLoading(false);
@@ -108,77 +93,61 @@ export const useDecapData = (): UseDecapDataResult => {
         };
     }, []);
 
-    const handleSelectionChange = useCallback((instance: number, configName: string, selectedIds: Set<string>): void => {
+    const handleSelectionChange = useCallback((configName: string, selectedIds: Set<string>): void => {
         setSelectedPrefixes((prev) => {
             const newMap = new Map(prev);
-            const instanceMap = newMap.get(instance) || new Map<string, Set<string>>();
-            const newInstanceMap = new Map(instanceMap);
-            newInstanceMap.set(configName, selectedIds);
-            newMap.set(instance, newInstanceMap);
+            newMap.set(configName, selectedIds);
             return newMap;
         });
     }, []);
 
-    const addConfig = useCallback((instance: number, configName: string): void => {
-        setInstances((prev) => {
-            return prev.map((inst) => {
-                if (inst.instance === instance) {
-                    // Don't add if already exists
-                    if (inst.configs.includes(configName)) {
-                        return inst;
-                    }
-                    const newConfigPrefixes = new Map(inst.configPrefixes);
-                    newConfigPrefixes.set(configName, []);
-                    return {
-                        ...inst,
-                        configs: [...inst.configs, configName],
-                        configPrefixes: newConfigPrefixes,
-                    };
-                }
-                return inst;
-            });
+    const addConfig = useCallback((configName: string): void => {
+        setData((prev) => {
+            // Don't add if already exists
+            if (prev.configs.includes(configName)) {
+                return prev;
+            }
+            const newConfigPrefixes = new Map(prev.configPrefixes);
+            newConfigPrefixes.set(configName, []);
+            return {
+                configs: [...prev.configs, configName],
+                configPrefixes: newConfigPrefixes,
+            };
         });
     }, []);
 
-    const reloadConfig = useCallback(async (instance: number, configName: string): Promise<void> => {
+    const reloadConfig = useCallback(async (configName: string): Promise<void> => {
         try {
             const response = await API.decap.showConfig({
                 target: {
                     configName,
-                    dataplaneInstance: instance,
                 },
             });
 
-            const prefixes = response.config?.prefixes || [];
-            setInstances((prev) => {
-                return prev.map((inst) => {
-                    if (inst.instance === instance) {
-                        const newConfigPrefixes = new Map(inst.configPrefixes);
-                        newConfigPrefixes.set(configName, prefixes);
-                        return {
-                            ...inst,
-                            configPrefixes: newConfigPrefixes,
-                        };
-                    }
-                    return inst;
-                });
+            const prefixes = response.prefixes || [];
+            setData((prev) => {
+                const newConfigPrefixes = new Map(prev.configPrefixes);
+                newConfigPrefixes.set(configName, prefixes);
+                return {
+                    ...prev,
+                    configPrefixes: newConfigPrefixes,
+                };
             });
         } catch (err) {
-            toaster.error(`decap-reload-error-${instance}-${configName}`, `Failed to reload decap config ${configName}`, err);
+            toaster.error(`decap-reload-error-${configName}`, `Failed to reload decap config ${configName}`, err);
         }
     }, []);
 
-    const addPrefixes = useCallback(async (instance: number, configName: string, prefixes: string[]): Promise<boolean> => {
+    const addPrefixes = useCallback(async (configName: string, prefixes: string[]): Promise<boolean> => {
         try {
             await API.decap.addPrefixes({
                 target: {
                     configName,
-                    dataplaneInstance: instance,
                 },
                 prefixes,
             });
 
-            await reloadConfig(instance, configName);
+            await reloadConfig(configName);
             toaster.success('decap-add-success', `Added ${prefixes.length} prefix(es)`);
             return true;
         } catch (err) {
@@ -187,32 +156,28 @@ export const useDecapData = (): UseDecapDataResult => {
         }
     }, [reloadConfig]);
 
-    const removePrefixes = useCallback(async (instance: number, configName: string, prefixes: string[]): Promise<boolean> => {
+    const removePrefixes = useCallback(async (configName: string, prefixes: string[]): Promise<boolean> => {
         try {
             await API.decap.removePrefixes({
                 target: {
                     configName,
-                    dataplaneInstance: instance,
                 },
                 prefixes,
             });
 
-            await reloadConfig(instance, configName);
-            
+            await reloadConfig(configName);
+
             // Clear selection for removed prefixes
             setSelectedPrefixes((prev) => {
-                const newMap = new Map(prev);
-                const instanceMap = newMap.get(instance) || new Map<string, Set<string>>();
-                const currentSelection = instanceMap.get(configName) || new Set();
+                const currentSelection = prev.get(configName) || new Set();
                 const newSelection = new Set<string>();
                 currentSelection.forEach((id) => {
                     if (!prefixes.includes(id)) {
                         newSelection.add(id);
                     }
                 });
-                const newInstanceMap = new Map(instanceMap);
-                newInstanceMap.set(configName, newSelection);
-                newMap.set(instance, newInstanceMap);
+                const newMap = new Map(prev);
+                newMap.set(configName, newSelection);
                 return newMap;
             });
 
@@ -225,7 +190,7 @@ export const useDecapData = (): UseDecapDataResult => {
     }, [reloadConfig]);
 
     return {
-        instances,
+        data,
         loading,
         selectedPrefixes,
         setSelectedPrefixes,

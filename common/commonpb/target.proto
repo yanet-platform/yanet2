@@ -8,14 +8,10 @@ option go_package = "github.com/yanet-platform/yanet2/common/commonpb;commonpb";
 message TargetModule {
 	// ConfigName is the name of the module config that should be affected.
 	string config_name = 1;
-	// dataplane_instance specifies the index of the dataplane instance to
-	// be affected.
-	uint32 dataplane_instance = 2;
 }
 
 message TargetDevice {
-	uint32 instance = 1;
-	string name = 2;
+	string name = 1;
 }
 
 message ModuleId {

@@ -52,12 +52,9 @@ pub enum ModeCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
-    /// The name of the module to delete
+    /// The name of the device
     #[arg(long, short)]
     pub name: String,
-    /// Dataplane instances from which to delete config
-    #[arg(long, short, required = true)]
-    pub instance: u32,
     /// Pipeline assignments in format "pipeline_name:weight"
     #[arg(short, long)]
     pub input: Vec<String>,
@@ -82,7 +79,6 @@ impl DeviceVlanService {
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         let request = UpdateDeviceVlanRequest {
             target: Some(TargetDevice {
-                instance: cmd.instance,
                 name: cmd.name,
             }),
             device: Some(Device {

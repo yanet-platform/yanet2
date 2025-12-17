@@ -29,6 +29,5 @@ test('nat64 unittest', u, env: [
   'YANET_TEST=nat64_autotest',
   'UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=0',
   'LSAN_OPTIONS=detect_leaks=0',
+  'DPDK_TEST_PARAMS=--no-huge --iova-mode=va',
 ])
-
-subdir('go')

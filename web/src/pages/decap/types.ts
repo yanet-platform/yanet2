@@ -1,16 +1,7 @@
-import type { InstanceConfig } from '../../api/decap';
-
 // Prefix item for table display
 export interface PrefixItem {
     id: string;
     prefix: string;
-}
-
-// Decap instance data with configs and their prefixes
-export interface DecapInstanceData {
-    instance: number;
-    configs: string[];
-    configPrefixes: Map<string, string[]>;
 }
 
 // Props for PrefixTable
@@ -35,5 +26,3 @@ export interface DeletePrefixDialogProps {
     onConfirm: () => Promise<void>;
     selectedPrefixes: string[];
 }
-
-export type { InstanceConfig };

@@ -18,14 +18,11 @@ export interface Device {
 }
 
 export interface TargetDevice {
-    instance?: number;
     name?: string;
 }
 
 // List devices request/response
-export interface ListDevicesRequest {
-    instance?: number;
-}
+export interface ListDevicesRequest { }
 
 export interface ListDevicesResponse {
     ids?: DeviceId[];

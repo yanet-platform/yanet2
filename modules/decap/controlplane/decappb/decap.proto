@@ -26,13 +26,9 @@ message ShowConfigRequest {
 	commonpb.TargetModule target = 1;
 }
 
-message InstanceConfig {
-	uint32 instance = 1;
-	repeated string prefixes = 2;
-}
 // ShowConfigResponse contains the configuration details of the decap module.
 message ShowConfigResponse {
-	InstanceConfig config = 1;
+	repeated string prefixes = 1;
 }
 
 // AddPrefixesRequest adds prefixes to the input filter of the decap module.

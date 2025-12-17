@@ -24,13 +24,8 @@ export interface Route {
     isBest?: boolean; // is_best
 }
 
-export interface InstanceConfigs {
-    instance?: number;
-    configs?: string[];
-}
-
 export interface ListConfigsResponse {
-    instanceConfigs?: InstanceConfigs[]; // instance_configs
+    configs?: string[];
 }
 
 export interface ShowRoutesRequest {

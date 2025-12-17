@@ -7,15 +7,19 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
+// CountersService is a gRPC service for retrieving counters.
 type CountersService struct {
 	ynpb.UnimplementedCountersServiceServer
 
-	shm *ffi.SharedMemory
+	instanceID uint32
+	shm        *ffi.SharedMemory
 }
 
-func NewCountersService(shm *ffi.SharedMemory) *CountersService {
+// NewCountersService creates a new CountersService.
+func NewCountersService(instanceID uint32, shm *ffi.SharedMemory) *CountersService {
 	return &CountersService{
-		shm: shm,
+		instanceID: instanceID,
+		shm:        shm,
 	}
 }
 
@@ -48,9 +52,7 @@ func (m *CountersService) Device(
 	ctx context.Context,
 	request *ynpb.DeviceCountersRequest,
 ) (*ynpb.CountersResponse, error) {
-	instance := request.GetDpInstance()
-
-	dpConfig := m.shm.DPConfig(instance)
+	dpConfig := m.shm.DPConfig(m.instanceID)
 	counterValues := dpConfig.DeviceCounters(request.Device)
 
 	response := &ynpb.CountersResponse{
@@ -64,11 +66,10 @@ func (m *CountersService) Pipeline(
 	ctx context.Context,
 	request *ynpb.PipelineCountersRequest,
 ) (*ynpb.CountersResponse, error) {
-	instance := request.GetDpInstance()
 	device := request.GetDevice()
 	pipeline := request.GetPipeline()
 
-	dpConfig := m.shm.DPConfig(instance)
+	dpConfig := m.shm.DPConfig(m.instanceID)
 	counterValues := dpConfig.PipelineCounters(device, pipeline)
 
 	response := &ynpb.CountersResponse{
@@ -82,9 +83,7 @@ func (m *CountersService) Function(
 	ctx context.Context,
 	request *ynpb.FunctionCountersRequest,
 ) (*ynpb.CountersResponse, error) {
-	instance := request.GetDpInstance()
-
-	dpConfig := m.shm.DPConfig(instance)
+	dpConfig := m.shm.DPConfig(m.instanceID)
 	counterValues := dpConfig.FunctionCounters(request.Device, request.Pipeline, request.Function)
 
 	response := &ynpb.CountersResponse{
@@ -98,9 +97,7 @@ func (m *CountersService) Chain(
 	ctx context.Context,
 	request *ynpb.ChainCountersRequest,
 ) (*ynpb.CountersResponse, error) {
-	instance := request.GetDpInstance()
-
-	dpConfig := m.shm.DPConfig(instance)
+	dpConfig := m.shm.DPConfig(m.instanceID)
 	counterValues := dpConfig.ChainCounters(request.Device, request.Pipeline, request.Function, request.Chain)
 
 	response := &ynpb.CountersResponse{
@@ -114,16 +111,15 @@ func (m *CountersService) Module(
 	ctx context.Context,
 	request *ynpb.ModuleCountersRequest,
 ) (*ynpb.CountersResponse, error) {
-	instance := request.GetDpInstance()
 	device := request.GetDevice()
 	pipeline := request.GetPipeline()
 	function := request.GetFunction()
 	chain := request.GetChain()
-	module_type := request.GetModuleType()
-	module_name := request.GetModuleName()
+	moduleType := request.GetModuleType()
+	moduleName := request.GetModuleName()
 
-	dpConfig := m.shm.DPConfig(instance)
-	counterValues := dpConfig.ModuleCounters(device, pipeline, function, chain, module_type, module_name)
+	dpConfig := m.shm.DPConfig(m.instanceID)
+	counterValues := dpConfig.ModuleCounters(device, pipeline, function, chain, moduleType, moduleName)
 
 	response := &ynpb.CountersResponse{
 		Counters: m.encodeCounters(counterValues),

@@ -1,7 +1,7 @@
 .PHONY: all dataplane test test-functional cli cli-install fuzz clean $(foreach module,$(MODULES),cli/$(module) cli-install/$(module))
 
 # Define the list of modules to avoid repetition
-MODULES := decap dscp route forward nat64
+MODULES := decap dscp route forward nat64 pdump acl
 
 # Default PREFIX for debian packaging
 PREFIX ?= /usr
@@ -15,6 +15,13 @@ setup:
 	meson setup build
 
 setup-debug:
+	@if [ ! -d "build" ]; then \
+		meson setup -Dbuildtype=debug -Doptimization=0 build; \
+	else \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize="" build; \
+	fi
+
+setup-asan:
 	meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build
 
 dataplane:
@@ -40,11 +47,17 @@ cli-clean/%:
 	$(MAKE) -C modules/$*/cli clean
 
 test: dataplane
-	go test $$(go list ./... | grep -v 'tests/functional')
+	go test -count=1 $$(go list ./... | grep -v 'tests/functional')
 	meson test -C build
 
-test-debug: dataplane
-	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test $$(go list ./... | grep -v 'tests/functional')
+test-asan:
+	@if [ ! -d "build" ]; then \
+		$(MAKE) setup-asan; \
+	else \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build; \
+	fi
+	meson compile -C build
+	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test -count=1 $$(go list ./... | grep -v 'tests/functional')
 	meson test -C build
 
 test-functional:
