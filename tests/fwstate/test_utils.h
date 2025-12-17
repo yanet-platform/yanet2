@@ -253,9 +253,9 @@ get_time(void) {
  */
 static inline char *
 numfmt(size_t num) {
-#define BUF_SIZE 32
+#define BUF_SIZE 1024
 	static int offset = 0;
-	static char buf_data[BUF_SIZE * 8];
+	static char buf_data[BUF_SIZE];
 	const char *units[] = {"", "K", "M", "G", "T"};
 
 	int unit_index = 0;

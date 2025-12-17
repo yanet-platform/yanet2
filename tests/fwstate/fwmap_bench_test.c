@@ -9,7 +9,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#define ARENA_SIZE (1 << 20) * 400 // 400MB arena
+#define ARENA_SIZE (1 << 20) * 1024 // MB arena
 
 #define NUM_REPETITIONS 10
 #define L3_CACHE_SIZE (32ULL * 1024 * 1024) // 32MB typical L3 cache
@@ -76,7 +76,7 @@ benchmark_performance(void *arena) {
 
 	// Benchmark lookups.
 	start = get_time();
-	volatile int checksum = 0; // Prevent compiler optimization.
+	volatile uint64_t checksum = 0; // Prevent compiler optimization.
 	for (int j = 0; j < NUM_REPETITIONS; j++) {
 		for (int i = 0; i < index_size; i++) {
 			int key = i;

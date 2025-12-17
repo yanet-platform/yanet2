@@ -354,6 +354,9 @@ fwmap_bfree_aligned(
 
 static inline uint8_t *
 fwmap_get_key(fwmap_t *map, uint32_t idx) {
+	if (idx > map->index_mask) {
+		return NULL;
+	}
 	uint32_t chunk_idx = 0;
 	// chunk_cnt is expected to be small
 	while (idx >= map->keys_in_chunk) {
@@ -369,6 +372,9 @@ fwmap_get_key(fwmap_t *map, uint32_t idx) {
 
 static inline uint8_t *
 fwmap_get_value(fwmap_t *map, uint32_t idx) {
+	if (idx > map->index_mask) {
+		return NULL;
+	}
 
 	uint32_t chunk_idx = 0;
 	// chunk_cnt is expected to be small
@@ -615,15 +621,27 @@ fwmap_destroy(fwmap_t *map, struct memory_context *ctx) {
 
 	uint8_t **key_chunks = ADDR_OF(&map->key_store);
 	if (key_chunks) {
-		size_t key_chunk_size = map->keys_in_chunk * map->key_size;
+		uint32_t remaining_keys = map->index_mask + 1;
 		for (size_t i = 0; i < map->keys_chunk_cnt; i++) {
 			// In case of allocation failure, the first null pointer
 			// indicates the failed allocation.
 			if (!key_chunks[i]) {
 				break;
 			}
+			uint32_t keys_in_this_chunk =
+				remaining_keys > map->keys_in_chunk
+					? map->keys_in_chunk
+					: remaining_keys;
+			size_t chunk_size = keys_in_this_chunk * map->key_size;
+
 			uint8_t *kchunk = ADDR_OF(&key_chunks[i]);
-			memory_bfree(ctx, kchunk, key_chunk_size);
+			memory_bfree(ctx, kchunk, chunk_size);
+
+			if (remaining_keys > map->keys_in_chunk) {
+				remaining_keys -= map->keys_in_chunk;
+			} else {
+				remaining_keys = 0;
+			}
 		}
 		memory_bfree(
 			ctx, key_chunks, sizeof(uint8_t *) * map->keys_chunk_cnt
@@ -632,16 +650,28 @@ fwmap_destroy(fwmap_t *map, struct memory_context *ctx) {
 
 	uint8_t **value_chunks = ADDR_OF(&map->value_store);
 	if (value_chunks) {
-		size_t value_chunk_size =
-			map->values_in_chunk * map->value_size;
+		uint32_t remaining_values = map->index_mask + 1;
 		for (size_t i = 0; i < map->values_chunk_cnt; i++) {
 			// In case of allocation failure, the first null pointer
 			// indicates the failed allocation.
 			if (!value_chunks[i]) {
 				break;
 			}
+			uint32_t values_in_this_chunk =
+				remaining_values > map->values_in_chunk
+					? map->values_in_chunk
+					: remaining_values;
+			size_t chunk_size =
+				values_in_this_chunk * map->value_size;
+
 			uint8_t *vchunk = ADDR_OF(&value_chunks[i]);
-			memory_bfree(ctx, vchunk, value_chunk_size);
+			memory_bfree(ctx, vchunk, chunk_size);
+
+			if (remaining_values > map->values_in_chunk) {
+				remaining_values -= map->values_in_chunk;
+			} else {
+				remaining_values = 0;
+			}
 		}
 		memory_bfree(
 			ctx,
