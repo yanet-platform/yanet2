@@ -2,8 +2,8 @@
 
 #include "common/network.h"
 #include "module.h"
-#include "worker.h"
 #include "ring.h"
+#include "worker.h"
 
 #include "../state/registry.h"
 
@@ -17,7 +17,7 @@ typedef uint8_t vs_flags_t;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Worker local info about 
+// Worker local info about
 // virtual service state.
 struct vs_worker_local {
 	// if virtual service schedule is PRR,

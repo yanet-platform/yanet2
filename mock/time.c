@@ -11,7 +11,9 @@ struct time {
 	struct timespec ts;
 };
 
-static thread_local struct time current_time = {.lock = {.locked = false}, .ts = {0, 0}};
+static thread_local struct time current_time = {
+	.lock = {.locked = false}, .ts = {0, 0}
+};
 
 void
 set_current_time(struct timespec *ts) {
@@ -23,7 +25,6 @@ set_current_time(struct timespec *ts) {
 // Mock tsc clock
 
 struct tsc_clock;
-
 
 int
 tsc_clock_init(struct tsc_clock *clock) {
@@ -42,7 +43,7 @@ tsc_clock_get_time_ns(struct tsc_clock *clock) {
 	(void)clock;
 	spinlock_lock(&current_time.lock);
 	uint64_t res = current_time.ts.tv_sec * (uint64_t)1000 * 1000 * 1000 +
-	       current_time.ts.tv_nsec;
+		       current_time.ts.tv_nsec;
 	spinlock_unlock(&current_time.lock);
 	return res;
 }

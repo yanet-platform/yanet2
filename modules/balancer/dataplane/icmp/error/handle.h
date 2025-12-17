@@ -25,7 +25,9 @@ handle_icmp_error_packet(struct packet_ctx *ctx) {
 	// balancers.
 
 	// update stats
-	ICMP_STATS_INC(incoming_packets, ctx->packet->transport_header.type, ctx);
+	ICMP_STATS_INC(
+		incoming_packets, ctx->packet->transport_header.type, ctx
+	);
 
 	// First, validate and parse packet.
 	// On errors, update corresponding counters.

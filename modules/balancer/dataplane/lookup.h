@@ -144,8 +144,10 @@ vs_v4_announced(struct packet_ctx *ctx) {
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 	return lpm_lookup(
-		&config->announce_ipv4, NET4_LEN, (uint8_t *)&ipv4_hdr->dst_addr
-	) != LPM_VALUE_INVALID;
+		       &config->announce_ipv4,
+		       NET4_LEN,
+		       (uint8_t *)&ipv4_hdr->dst_addr
+	       ) != LPM_VALUE_INVALID;
 }
 
 static inline bool
@@ -157,8 +159,10 @@ vs_v6_announced(struct packet_ctx *ctx) {
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 	return lpm_lookup(
-		&config->announce_ipv6, NET6_LEN, (uint8_t *)&ipv6_hdr->dst_addr
-	) != LPM_VALUE_INVALID;
+		       &config->announce_ipv6,
+		       NET6_LEN,
+		       (uint8_t *)&ipv6_hdr->dst_addr
+	       ) != LPM_VALUE_INVALID;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
