@@ -24,6 +24,7 @@ func NewMemoryContext(name string, size uint64) MemoryContext {
 	blockAlloc := (*C.struct_block_allocator)(arena)
 	arena = unsafe.Pointer(uintptr(arena) + C.sizeof_struct_block_allocator)
 
+	C.block_allocator_init(blockAlloc)
 	C.block_allocator_put_arena(blockAlloc, arena, sizeOfArena)
 
 	cName := C.CString(name)

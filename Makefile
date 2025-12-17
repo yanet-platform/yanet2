@@ -38,7 +38,13 @@ test: dataplane
 	go test -count=1 $$(go list ./... | grep -v 'tests/functional')
 	meson test -C build
 
-test-debug: dataplane
+test-debug:
+	@if [ ! -d "build" ]; then \
+		$(MAKE) setup-debug; \
+	else \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build; \
+	fi
+	meson compile -C build
 	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test -count=1 $$(go list ./... | grep -v 'tests/functional')
 	meson test -C build
 
