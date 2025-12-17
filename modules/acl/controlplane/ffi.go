@@ -48,8 +48,8 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	}, nil
 }
 
-func FreeModuleConfig(module *ModuleConfig) {
-	C.acl_module_config_free(module.asRawPtr())
+func (m *ModuleConfig) Free() {
+	C.acl_module_config_free(m.asRawPtr())
 }
 
 // asRawPtr returns the raw C pointer

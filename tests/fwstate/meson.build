@@ -7,7 +7,12 @@ fwmap_test_basic = executable(
   link_args: yanet_link_args,
   dependencies: dependencies,
 )
-test('fwmap_basic', fwmap_test_basic, suite: ['fwstate'])
+test(
+  'fwmap_basic',
+  fwmap_test_basic,
+  timeout: 15,
+  suite: ['fwstate'],
+)
 
 fwmap_bench_test = executable(
   'fwmap_bench_test',
@@ -43,4 +48,8 @@ layermap_test = executable(
   link_args: yanet_link_args,
   dependencies: dependencies,
 )
-test('layermap_basic', layermap_test, suite: ['fwstate'])
+test('layermap_basic',
+  layermap_test,
+  timeout: 15,
+  suite: ['fwstate'],
+)

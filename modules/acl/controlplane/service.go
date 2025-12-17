@@ -41,20 +41,7 @@ func NewACLService(agent *ffi.Agent, log *zap.SugaredLogger) *ACLService {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (m *ACLService) UpdateConfig(
-	ctx context.Context,
-	req *aclpb.UpdateConfigRequest,
-) (*aclpb.UpdateConfigResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
-	reqRules := req.Rules
-
+func convertRules(reqRules []*aclpb.Rule) ([]aclRule, error) {
 	rules := make([]aclRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
 		rule := aclRule{
@@ -130,6 +117,27 @@ func (m *ACLService) UpdateConfig(
 
 		rules = append(rules, rule)
 	}
+	return rules, nil
+}
+
+func (m *ACLService) UpdateConfig(
+	ctx context.Context,
+	req *aclpb.UpdateConfigRequest,
+) (*aclpb.UpdateConfigResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	name, err := req.GetTarget().Validate()
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	reqRules := req.Rules
+
+	rules, err := convertRules(reqRules)
+	if err != nil {
+		return nil, err
+	}
 
 	config, err := NewModuleConfig(m.agent, name)
 	if err != nil {
@@ -137,7 +145,7 @@ func (m *ACLService) UpdateConfig(
 	}
 
 	if err := config.Update(rules); err != nil {
-		FreeModuleConfig(config)
+		config.Free()
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
@@ -152,13 +160,13 @@ func (m *ACLService) UpdateConfig(
 	}
 
 	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
-		FreeModuleConfig(config)
+		config.Free()
 		return nil, status.Errorf(codes.Internal, "failed to update module: %v", err)
 	}
 
 	// Module was updated - it is time to delete an old one
 	if oldConfigs.acl != nil {
-		FreeModuleConfig(oldConfigs.acl)
+		oldConfigs.acl.Free()
 	}
 
 	m.configs[name] = aclConfig{
@@ -269,20 +277,43 @@ func (m *ACLService) UpdateFWStateConfig(
 		zap.String("config", name),
 	)
 
-	// FIXME: update acl module with the fwstate if ACL config is presnet
-	// - copy acl config
-	// - update acl to the new copy
-	// - FIXME(free): look at the free function of the acl config module functions
+	if config.acl != nil {
+		newACLConfig, err := NewModuleConfig(m.agent, name)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create module config: %v", err)
+		}
 
-	// Call updateModuleConfig to apply the configuration to ACL module
-	// Update module in dataplane
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.fwstate.asFFIModule()}); err != nil {
-		m.log.Errorw("failed to update fwstate module",
-			zap.String("config", name),
-			zap.Error(err),
-		)
-		return nil, status.Errorf(codes.Internal, "failed to update fwstate module: %v", err)
+		rules, err := convertRules(config.rules)
+		if err != nil {
+			newACLConfig.Free()
+			return nil, err
+		}
+
+		if err := newACLConfig.Update(rules); err != nil {
+			newACLConfig.Free()
+			return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
+		}
+
+		newACLConfig.SetFwStateConfig(m.agent, config.fwstate)
+
+		if err := m.agent.UpdateModules([]ffi.ModuleConfig{newACLConfig.AsFFIModule(), config.fwstate.asFFIModule()}); err != nil {
+			newACLConfig.Free()
+			return nil, status.Errorf(codes.Internal, "failed to update module: %v", err)
+		}
+
+		config.acl.Free()
+		config.acl = newACLConfig
+	} else {
+		if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.fwstate.asFFIModule()}); err != nil {
+			m.log.Errorw("failed to update fwstate module",
+				zap.String("config", name),
+				zap.Error(err),
+			)
+			return nil, status.Errorf(codes.Internal, "failed to update fwstate module: %v", err)
+		}
 	}
+
+	m.configs[name] = config
 
 	m.log.Infow("successfully updated FWState module",
 		zap.String("config", name),
@@ -308,9 +339,16 @@ func (m *ACLService) DeleteConfig(
 		return nil, status.Error(codes.InvalidArgument, "not found")
 	}
 
-	// FIXME! delete fwstate config too
 	if DeleteModule(m, name) {
 		return nil, status.Errorf(codes.Internal, "could not delete module config: %s", name)
+	}
+
+	config := m.configs[name]
+	if config.acl != nil {
+		config.acl.Free()
+	}
+	if config.fwstate != nil {
+		config.fwstate.Free()
 	}
 
 	delete(m.configs, name)
