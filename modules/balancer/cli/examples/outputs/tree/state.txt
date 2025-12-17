@@ -1,5 +1,5 @@
 Balancer State Info
-└─ Config: my-balancer (Instance: 0)
+└─ Config: my-balancer
    ├─ Active Sessions: 15,234 (updated: 2024-01-15 10:50:45)
    ├─ Module Stats
    │  ├─ Common

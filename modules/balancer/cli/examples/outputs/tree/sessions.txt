@@ -1,5 +1,5 @@
 Active Sessions
-└─ Config: my-balancer (Instance: 0)
+└─ Config: my-balancer
    ├─ Total Sessions: 5
    ├─ [0] 10.0.1.100:45678 -> 192.0.2.1:80 -> 10.1.1.1:80
    │  ├─ Created: 2024-01-15 10:45:30

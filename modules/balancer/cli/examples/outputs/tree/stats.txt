@@ -1,5 +1,5 @@
 Balancer Statistics
-└─ Config: my-balancer (Instance: 0)
+└─ Config: my-balancer
    ├─ Device: eth0
    ├─ Pipeline: main
    ├─ Function: balancer

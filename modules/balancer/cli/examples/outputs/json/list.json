@@ -2,8 +2,7 @@
   "configs": [
     {
       "target": {
-        "config_name": "my-balancer",
-        "dataplane_instance": 0
+        "config_name": "my-balancer"
       },
       "module_config": {
         "virtual_services": [
@@ -137,8 +136,7 @@
     },
     {
       "target": {
-        "config_name": "test-balancer",
-        "dataplane_instance": 1
+        "config_name": "test-balancer"
       },
       "module_config": {
         "virtual_services": [

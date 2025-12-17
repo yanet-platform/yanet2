@@ -1,5 +1,5 @@
 Balancer Configuration
-└─ Config: my-balancer (Instance: 0)
+└─ Config: my-balancer
    ├─ Module Config
    │  ├─ Source Addresses
    │  │  ├─ IPv4: 192.0.2.1

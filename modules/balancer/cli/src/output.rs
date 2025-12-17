@@ -981,9 +981,8 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
         let active_sessions = info.active_sessions.as_ref()
             .map(|a| format_number(a.value))
             .unwrap_or_else(|| "0".to_string());
-        Some(format!("Config: {} | Instance: {} | Active Sessions: {}",
+        Some(format!("Config: {} | Active Sessions: {}",
             target.config_name,
-            target.dataplane_instance,
             active_sessions
         ))
     } else {
@@ -1184,8 +1183,8 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
                         .map(|a| format_number(a.value))
                         .unwrap_or_else(|| "0".to_string()),
                     last_packet: format_timestamp(vs.last_packet_timestamp.as_ref()),
-                })
-                .collect();
+                }
+            }).collect();
 
             let table = Table::new(rows)
                 .with(Style::rounded())
