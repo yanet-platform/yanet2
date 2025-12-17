@@ -39,7 +39,7 @@ test: dataplane
 	meson test -C build
 
 test-debug: dataplane
-	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test $$(go list ./... | grep -v 'tests/functional')
+	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test -count=1 $$(go list ./... | grep -v 'tests/functional')
 	meson test -C build
 
 test-functional:

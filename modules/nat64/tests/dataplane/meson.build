@@ -30,5 +30,3 @@ test('nat64 unittest', u, env: [
   'UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=0',
   'LSAN_OPTIONS=detect_leaks=0',
 ])
-
-subdir('go')
