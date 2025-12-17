@@ -287,7 +287,7 @@ func (service *BalancerService) FlushRealUpdates(
 	// Flush updates (no service lock held)
 	count, err := balancerInstance.FlushRealUpdates()
 	if err != nil {
-		service.log.Errorw(
+		service.log.Warnw(
 			"failed to flush real updates",
 			"name",
 			name,

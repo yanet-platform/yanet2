@@ -27,6 +27,17 @@ func (p Proto) IntoProto() balancerpb.TransportProto {
 	return balancerpb.TransportProto(p)
 }
 
+func (p Proto) String() string {
+	switch p {
+	case ProtoTcp:
+		return "TCP"
+	case ProtoUdp:
+		return "UDP"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 // Virtual service flags.

@@ -227,20 +227,20 @@ func (config *ModuleConfig) UpdateReals(
 				}
 			}
 			if updateVs == nil {
-				config.log.Errorw(
+				config.log.Warnw(
 					"failed to find virtual service for real update",
 					"update_index", updateIdx,
 					"vs_ip", update.Real.Vs.Ip.String(),
 					"vs_port", update.Real.Vs.Port,
-					"vs_proto", update.Real.Vs.Proto,
+					"vs_proto", update.Real.Vs.Proto.String(),
 					"real_ip", update.Real.Ip.String(),
 				)
 				return fmt.Errorf(
-					"failed to find virtual service for update at index %d: vs=%s:%d/%d, real=%s",
+					"failed to find virtual service for update at index %d: vs=%s:%d/%s, real=%s",
 					updateIdx,
 					update.Real.Vs.Ip.String(),
 					update.Real.Vs.Port,
-					update.Real.Vs.Proto,
+					update.Real.Vs.Proto.String(),
 					update.Real.Ip.String(),
 				)
 			}
@@ -254,20 +254,20 @@ func (config *ModuleConfig) UpdateReals(
 				}
 			}
 			if !found {
-				config.log.Errorw(
+				config.log.Warnw(
 					"failed to find real for update",
 					"update_index", updateIdx,
 					"vs_ip", update.Real.Vs.Ip.String(),
 					"vs_port", update.Real.Vs.Port,
-					"vs_proto", update.Real.Vs.Proto,
+					"vs_proto", update.Real.Vs.Proto.String(),
 					"real_ip", update.Real.Ip.String(),
 				)
 				return fmt.Errorf(
-					"failed to find real for update at index %d: vs=%s:%d/%d, real=%s",
+					"failed to find real for update at index %d: vs=%s:%d/%s, real=%s",
 					updateIdx,
 					update.Real.Vs.Ip.String(),
 					update.Real.Vs.Port,
-					update.Real.Vs.Proto,
+					update.Real.Vs.Proto.String(),
 					update.Real.Ip.String(),
 				)
 			}
@@ -291,7 +291,7 @@ func (config *ModuleConfig) FlushRealUpdates() (int, error) {
 				"index", i,
 				"vs_ip", update.Real.Vs.Ip.String(),
 				"vs_port", update.Real.Vs.Port,
-				"vs_proto", update.Real.Vs.Proto,
+				"vs_proto", update.Real.Vs.Proto.String(),
 				"real_ip", update.Real.Ip.String(),
 				"weight", update.Weight,
 				"enable", update.Enable,
@@ -301,7 +301,7 @@ func (config *ModuleConfig) FlushRealUpdates() (int, error) {
 
 	err := config.UpdateReals(updates, false)
 	if err != nil {
-		config.log.Errorw(
+		config.log.Warnw(
 			"failed to flush real updates",
 			"count", len(updates),
 			"error", err,
