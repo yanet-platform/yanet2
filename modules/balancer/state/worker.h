@@ -1,3 +1,3 @@
 #pragma once
 
-#define MAX_WORKERS_NUM 8
+#include "../dataplane/worker.h"

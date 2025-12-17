@@ -324,7 +324,6 @@ balancer_vs_init(
 			&config_vs[vs_config->registry_idx];
 		SET_OFFSET_OF(&vs->state, (struct service_state *)info->state);
 		vs->registry_idx = vs_config->registry_idx;
-		vs->round_robin_counter = 0;
 		vs->flags = vs_config->flags | VS_PRESENT_IN_CONFIG_FLAG;
 		memcpy(vs->address, vs_config->address, NET6_LEN);
 		vs->port = vs_config->port;
@@ -339,6 +338,7 @@ balancer_vs_init(
 		if (res < 0) {
 			goto free_initalized_vs;
 		}
+		vs_worker_local_init(vs); // todo: move this code in the separated function
 
 		// init counter
 		vs->counter_id = register_vs_counter(

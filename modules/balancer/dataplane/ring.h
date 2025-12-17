@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "common/rng.h"
 #include "real.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -51,6 +52,14 @@ ring_init(
 		for (size_t copy = 0; copy < weight; ++copy) {
 			ids[idx++] = reals[i].registry_idx;
 		}
+	}
+	uint64_t rng = 0x123131;
+	for (size_t i = 1; i < len; ++i) {
+		// swap with random before me
+		size_t j = rng_next(&rng) % i;
+		uint64_t tmp = ids[i];
+		ids[i] = ids[j];
+		ids[j] = tmp;
 	}
 	SET_OFFSET_OF(&ring->ids, ids);
 	ring->len = len;
