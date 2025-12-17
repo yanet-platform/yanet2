@@ -121,6 +121,9 @@ func (s *ModuleConfigState) Update(
 		return fmt.Errorf("max load factor must be greater than 0.001")
 	}
 
+	// Track if resize failed
+	var resizeErr error
+
 	s.log.Infow(
 		"resizing session table",
 		zap.Uint("current_capacity", s.SessionTableCapacity()),
@@ -130,31 +133,39 @@ func (s *ModuleConfigState) Update(
 	if requestedCapacity != 0 {
 		err := s.cHandle.ResizeSessionTable(requestedCapacity, now)
 		if err != nil {
-			s.log.Errorf(
-				"failed to resize session table",
+			s.log.Warnw(
+				"failed to resize session table, continuing with config update",
 				zap.Uint("requested_capacity", requestedCapacity),
 				zap.Error(err),
 			)
-			return fmt.Errorf("failed to resize session table: %w", err)
+			resizeErr = fmt.Errorf("failed to resize session table: %w", err)
+		} else {
+			s.log.Infow(
+				"successfully resized session table",
+				zap.Uint("requested_capacity", requestedCapacity),
+				zap.Uint("new_capacity", s.SessionTableCapacity()),
+			)
 		}
-
-		s.log.Infow(
-			"successfully resized session table",
-			zap.Uint("requested_capacity", requestedCapacity),
-			zap.Uint("new_capacity", s.SessionTableCapacity()),
-		)
 	} else {
 		s.log.Info("did not resize session table as zero size is requested")
 	}
 
-	s.ScanSessionTablePeriodMs = scanSessionTablePeriodMs
+	// Always update scan period and restart background tasks,
+	// even if resize failed
+	s.log.Infow(
+		"updating scan period and restarting background tasks",
+		zap.Uint("old_period_ms", s.ScanSessionTablePeriodMs),
+		zap.Uint("new_period_ms", scanSessionTablePeriodMs),
+	)
 
+	s.ScanSessionTablePeriodMs = scanSessionTablePeriodMs
 	s.MaxLoadFactor = maxLoadFactor
 
 	s.cancelBackgroundTasks()
 	s.runBackgroundTasks()
 
-	return nil
+	// Return resize error if it occurred, but after updating everything else
+	return resizeErr
 }
 
 ////////////////////////////////////////////////////////////////////////////////

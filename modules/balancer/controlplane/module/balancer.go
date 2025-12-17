@@ -187,6 +187,11 @@ func (b *Balancer) Update(
 		return fmt.Errorf("module config is required")
 	}
 
+	// Validate ModuleStateConfig
+	if moduleStateConfig == nil {
+		return fmt.Errorf("module state config is required")
+	}
+
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
@@ -246,21 +251,24 @@ func (b *Balancer) Update(
 	}
 
 	// Update state config if provided
-	if moduleStateConfig != nil {
-		if moduleStateConfig.SessionTableScanPeriod == nil {
-			return fmt.Errorf("session table scan period is required")
-		}
-		b.moduleConfigState.Update(
-			uint(moduleStateConfig.SessionTableCapacity),
-			uint(
-				moduleStateConfig.SessionTableScanPeriod.AsDuration().
-					Milliseconds(),
-			),
-			moduleStateConfig.SessionTableMaxLoadFactor,
-			time.Now(),
-		)
-		b.log.Debug("updated state configuration")
+	if moduleStateConfig.SessionTableScanPeriod == nil {
+		return fmt.Errorf("session table scan period is required")
 	}
+	b.log.Infow(
+		"updating state configuration",
+		"old_scan_period_ms", b.moduleConfigState.ScanSessionTablePeriodMs,
+		"new_scan_period_ms", moduleStateConfig.SessionTableScanPeriod.AsDuration().Milliseconds(),
+	)
+	b.moduleConfigState.Update(
+		uint(moduleStateConfig.SessionTableCapacity),
+		uint(
+			moduleStateConfig.SessionTableScanPeriod.AsDuration().
+				Milliseconds(),
+		),
+		moduleStateConfig.SessionTableMaxLoadFactor,
+		time.Now(),
+	)
+	b.log.Debug("updated state configuration")
 
 	b.log.Info("balancer configuration updated successfully")
 	return nil
