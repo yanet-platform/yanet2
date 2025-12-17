@@ -263,16 +263,32 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 		period := time.Duration(s.ScanSessionTablePeriodMs) * time.Millisecond
 		ctx := s.ctx
 
+		s.log.Infow(
+			"starting session table scan background task",
+			zap.Uint("period_ms", s.ScanSessionTablePeriodMs),
+			zap.Duration("period", period),
+		)
+
 		// run periodic task
 		go func() {
 			ticker := time.NewTicker(period)
 			defer ticker.Stop()
 
+			s.log.Debugw(
+				"session table scan goroutine started",
+				zap.Duration("ticker_period", period),
+			)
+
 			for {
 				select {
 				case <-ctx.Done():
+					s.log.Info("session table scan goroutine cancelled")
 					return
 				case <-ticker.C:
+					s.log.Debugw(
+						"session table scan tick",
+						zap.Duration("period", period),
+					)
 					s.lock.Lock()
 					err := s.SyncActiveSessionsAndResizeTableOnDemand(
 						time.Now(),
@@ -294,6 +310,7 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 
 func (s *ModuleConfigState) cancelBackgroundTasks() {
 	if s.cancel != nil {
+		s.log.Info("cancelling session table scan background task")
 		s.cancel()
 	}
 }
