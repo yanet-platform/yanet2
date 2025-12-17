@@ -41,6 +41,9 @@ send_packet(struct packet_ctx *ctx) {
 
 static inline void
 handle_icmp_echo_ipv4(struct packet_ctx *ctx) {
+	// update stats
+	ICMP_V4_STATS_INC(incoming_packets, ctx);
+
 	struct packet *packet = ctx->packet;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
@@ -87,6 +90,9 @@ handle_icmp_echo_ipv4(struct packet_ctx *ctx) {
 
 static inline void
 handle_icmp_echo_ipv6(struct packet_ctx *ctx) {
+	// update stats
+	ICMP_V6_STATS_INC(incoming_packets, ctx);
+
 	struct packet *packet = ctx->packet;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
