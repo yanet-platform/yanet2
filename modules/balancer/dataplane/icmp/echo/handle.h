@@ -14,6 +14,7 @@
 #include <netinet/in.h>
 #include <netinet/ip_icmp.h>
 
+#include "lookup.h"
 #include "rte_icmp.h"
 #include "rte_ip.h"
 #include "rte_mbuf_core.h"
@@ -42,6 +43,13 @@ static inline void
 handle_icmp_echo_ipv4(struct packet_ctx *ctx) {
 	struct packet *packet = ctx->packet;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+
+	// validate virtual service
+	if (!vs_v4_announced(ctx)) {
+		ICMP_V4_STATS_INC(unrecognized_vs, ctx);
+		packet_ctx_drop_packet(ctx);
+		return;
+	}
 
 	// setup icmp header (type and code)
 	struct rte_icmp_hdr *icmp = rte_pktmbuf_mtod_offset(
@@ -80,9 +88,14 @@ handle_icmp_echo_ipv4(struct packet_ctx *ctx) {
 static inline void
 handle_icmp_echo_ipv6(struct packet_ctx *ctx) {
 	struct packet *packet = ctx->packet;
-	// not forward echo packet to real. instead, response from
-	// the balancer.
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+
+	// validate virtual service
+	if (!vs_v6_announced(ctx)) {
+		ICMP_V6_STATS_INC(unrecognized_vs, ctx);
+		packet_ctx_drop_packet(ctx);
+		return;
+	}
 
 	struct rte_icmp_hdr *icmp = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_icmp_hdr *, packet->transport_header.offset

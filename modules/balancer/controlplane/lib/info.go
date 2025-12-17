@@ -295,6 +295,7 @@ func NewICMPStatsFromProto(pb *balancerpb.IcmpStats) *ICMPStats {
 	}
 	return &ICMPStats{
 		IncomingPackets:           pb.IncomingPackets,
+		SrcNotAllowed:             pb.SrcNotAllowed,
 		EchoResponses:             pb.EchoResponses,
 		PayloadTooShortIP:         pb.PayloadTooShortIp,
 		UnmatchingSrcFromOriginal: pb.UnmatchingSrcFromOriginal,

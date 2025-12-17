@@ -25,6 +25,7 @@ func (s L4Stats) IntoProto() *balancerpb.L4Stats {
 
 type ICMPStats struct {
 	IncomingPackets           uint64
+	SrcNotAllowed             uint64
 	EchoResponses             uint64
 	PayloadTooShortIP         uint64
 	UnmatchingSrcFromOriginal uint64
@@ -42,6 +43,7 @@ type ICMPStats struct {
 func (s ICMPStats) IntoProto() *balancerpb.IcmpStats {
 	return &balancerpb.IcmpStats{
 		IncomingPackets:           s.IncomingPackets,
+		SrcNotAllowed:             s.SrcNotAllowed,
 		EchoResponses:             s.EchoResponses,
 		PayloadTooShortIp:         s.PayloadTooShortIP,
 		UnmatchingSrcFromOriginal: s.UnmatchingSrcFromOriginal,

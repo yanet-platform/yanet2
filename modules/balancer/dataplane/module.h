@@ -65,6 +65,10 @@ struct balancer_module_config {
 	// source address of the balancer
 	uint8_t source_ip[NET4_LEN];
 	uint8_t source_ip_v6[NET6_LEN];
+
+	// set of IP addresses announced by balancer
+	struct lpm announce_ipv4;
+	struct lpm announce_ipv6;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

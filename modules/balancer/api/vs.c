@@ -457,6 +457,33 @@ balancer_vs_init(
 		goto free_initalized_vs;
 	}
 
+	// setup list of IP addresses which are announced
+	// and served by balancer for now
+	
+	// init set of IPv4 addresses
+	if (lpm_init(&config->announce_ipv4, &config->cp_module.memory_context)) {
+		goto free_initalized_vs;
+	}
+
+	// init set of IPv6 addresses
+	if (lpm_init(&config->announce_ipv6, &config->cp_module.memory_context)) {
+		goto free_initalized_vs;
+	}
+
+	// insert addresses of virtual services
+	for (size_t i = 0; i < vs_count; ++i) {
+		struct balancer_vs_config *vs = vs_configs[i];
+		if (vs->flags & BALANCER_VS_IPV6_FLAG) {
+			if (lpm_insert(&config->announce_ipv6, NET6_LEN, vs->address, vs->address, 1)) {
+				goto free_initalized_vs;
+			}
+		} else {
+			if (lpm_insert(&config->announce_ipv4, NET4_LEN, vs->address, vs->address, 1)) {
+				goto free_initalized_vs;
+			}
+		}
+	}
+
 	return 0;
 
 free_initalized_vs:

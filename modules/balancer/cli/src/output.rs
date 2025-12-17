@@ -663,6 +663,7 @@ fn print_state_info_tree(response: &balancerpb::StateInfoResponse) -> Result<(),
             if let Some(icmpv4) = &module.icmpv4 {
                 tree.begin_child("ICMPv4".to_string());
                 tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv4.incoming_packets)));
+                tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv4.src_not_allowed)));
                 tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv4.echo_responses)));
                 tree.add_empty_child(format!("Payload Too Short IP: {}", format_number(icmpv4.payload_too_short_ip)));
                 tree.add_empty_child(format!("Unmatching Src From Original: {}", format_number(icmpv4.unmatching_src_from_original)));
@@ -680,6 +681,7 @@ fn print_state_info_tree(response: &balancerpb::StateInfoResponse) -> Result<(),
             if let Some(icmpv6) = &module.icmpv6 {
                 tree.begin_child("ICMPv6".to_string());
                 tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv6.incoming_packets)));
+                tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv6.src_not_allowed)));
                 tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv6.echo_responses)));
                 tree.add_empty_child(format!("Payload Too Short IP: {}", format_number(icmpv6.payload_too_short_ip)));
                 tree.add_empty_child(format!("Unmatching Src From Original: {}", format_number(icmpv6.unmatching_src_from_original)));
@@ -1082,7 +1084,9 @@ fn print_config_stats_tree(response: &balancerpb::ConfigStatsResponse) -> Result
             if let Some(icmpv4) = &module.icmpv4 {
                 tree.begin_child("ICMPv4".to_string());
                 tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv4.incoming_packets)));
+                tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv4.src_not_allowed)));
                 tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv4.echo_responses)));
+                tree.add_empty_child(format!("Unrecognized VS: {}", format_number(icmpv4.unrecognized_vs)));
                 tree.add_empty_child(format!("Forwarded: {}", format_number(icmpv4.forwarded_packets)));
                 tree.add_empty_child(format!("Broadcasted: {}", format_number(icmpv4.broadcasted_packets)));
                 tree.end_child();
@@ -1091,7 +1095,9 @@ fn print_config_stats_tree(response: &balancerpb::ConfigStatsResponse) -> Result
             if let Some(icmpv6) = &module.icmpv6 {
                 tree.begin_child("ICMPv6".to_string());
                 tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv6.incoming_packets)));
+                tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv6.src_not_allowed)));
                 tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv6.echo_responses)));
+                tree.add_empty_child(format!("Unrecognized VS: {}", format_number(icmpv6.unrecognized_vs)));
                 tree.add_empty_child(format!("Forwarded: {}", format_number(icmpv6.forwarded_packets)));
                 tree.add_empty_child(format!("Broadcasted: {}", format_number(icmpv6.broadcasted_packets)));
                 tree.end_child();
@@ -1258,8 +1264,18 @@ fn print_config_stats_table(response: &balancerpb::ConfigStatsResponse) -> Resul
                 });
                 rows.push(ModuleStatsRow {
                     category: "".to_string(),
+                    metric: "Src Not Allowed".to_string(),
+                    value: format_number(icmpv4.src_not_allowed),
+                });
+                rows.push(ModuleStatsRow {
+                    category: "".to_string(),
                     metric: "Echo Responses".to_string(),
                     value: format_number(icmpv4.echo_responses),
+                });
+                rows.push(ModuleStatsRow {
+                    category: "".to_string(),
+                    metric: "Unrecognized VS".to_string(),
+                    value: format_number(icmpv4.unrecognized_vs),
                 });
                 rows.push(ModuleStatsRow {
                     category: "".to_string(),
@@ -1281,8 +1297,18 @@ fn print_config_stats_table(response: &balancerpb::ConfigStatsResponse) -> Resul
                 });
                 rows.push(ModuleStatsRow {
                     category: "".to_string(),
+                    metric: "Src Not Allowed".to_string(),
+                    value: format_number(icmpv6.src_not_allowed),
+                });
+                rows.push(ModuleStatsRow {
+                    category: "".to_string(),
                     metric: "Echo Responses".to_string(),
                     value: format_number(icmpv6.echo_responses),
+                });
+                rows.push(ModuleStatsRow {
+                    category: "".to_string(),
+                    metric: "Unrecognized VS".to_string(),
+                    value: format_number(icmpv6.unrecognized_vs),
                 });
                 rows.push(ModuleStatsRow {
                     category: "".to_string(),
