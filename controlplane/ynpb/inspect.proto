@@ -17,7 +17,8 @@ message InspectRequest {
 
 // InspectResponse contains the configuration state for the served instance.
 message InspectResponse {
-	// InstanceInfo contains detailed information about the dataplane instance.
+	// InstanceInfo contains detailed information about the dataplane
+	// instance.
 	InstanceInfo instance_info = 1;
 }
 
