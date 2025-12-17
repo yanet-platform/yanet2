@@ -179,7 +179,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 		// check balancer state info
 
-		info := balancer.GetStateInfo()
+		info := balancer.GetStateInfo(mock.CurrentTime())
 		assert.NotNil(t, info)
 
 		// check vs
@@ -245,7 +245,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 		// check balancer state info
 
-		info := balancer.GetStateInfo()
+		info := balancer.GetStateInfo(mock.CurrentTime())
 		assert.NotNil(t, info)
 
 		// check vs
@@ -306,7 +306,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 	t.Run("Send_Some_Packets_After_Second_Update", func(t *testing.T) {
 		// set prev state info
-		infoBefore := balancer.GetStateInfo()
+		infoBefore := balancer.GetStateInfo(mock.CurrentTime())
 		require.NotNil(t, infoBefore)
 
 		// send random SYNs from unique sources
@@ -321,7 +321,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 		// check balancer state info
 
-		info := balancer.GetStateInfo()
+		info := balancer.GetStateInfo(mock.CurrentTime())
 		require.NotNil(t, info)
 
 		// check vs

@@ -312,10 +312,20 @@ func (b *Balancer) GetConfig() (*balancerpb.ModuleConfig, *balancerpb.ModuleStat
 	return moduleConfigProto, moduleStateConfigProto
 }
 
-// GetStateInfo returns state information
-func (b *Balancer) GetStateInfo() *lib.BalancerInfo {
+// GetStateInfo returns state information with fresh active session data
+func (b *Balancer) GetStateInfo(now time.Time) *lib.BalancerInfo {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+
+	// Scan session table to get fresh active session counts
+	if err := b.moduleConfigState.SyncActiveSessions(now); err != nil {
+		b.log.Warnw(
+			"failed to sync active sessions during StateInfo call",
+			"error", err,
+		)
+		// Continue and return info with potentially stale data
+		// rather than failing completely
+	}
 
 	return b.moduleConfigState.GetInfo()
 }

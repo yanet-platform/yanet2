@@ -421,7 +421,7 @@ func (service *BalancerService) StateInfo(
 	service.log.Debugw("getting state info", "name", name, "instance", inst)
 
 	// Get state info (no service lock held)
-	info := balancerInstance.GetStateInfo()
+	info := balancerInstance.GetStateInfo(time.Now())
 
 	return &balancerpb.StateInfoResponse{
 		Target: req.Target,

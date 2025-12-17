@@ -168,7 +168,7 @@ func TestWlc(t *testing.T) {
 		err = balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(now)
 		require.NoError(t, err)
 
-		stateInfo := balancer.GetStateInfo()
+		stateInfo := balancer.GetStateInfo(now)
 		reals := stateInfo.RealInfo
 
 		assert.Equal(t, uint(packets/2), reals[0].ActiveSessions.Value)

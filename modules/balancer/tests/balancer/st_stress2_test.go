@@ -504,7 +504,7 @@ func TestSessionTableStress2(t *testing.T) {
 			"tracked sessions should match balancer sessions")
 
 		// Get state info
-		stateInfo := balancer.GetStateInfo()
+		stateInfo := balancer.GetStateInfo(mock.CurrentTime())
 		t.Logf("Module active sessions: %d", stateInfo.ActiveSessions.Value)
 		t.Logf("Session table capacity: %d", balancer.GetModuleConfigState().SessionTableCapacity())
 
