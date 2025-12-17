@@ -7,10 +7,10 @@
 #include <netinet/in.h>
 #include <stdint.h>
 
+#include <rte_hash_crc.h>
 #include <rte_ip.h>
 #include <rte_tcp.h>
 #include <rte_udp.h>
-#include <rte_hash_crc.h>
 #include <string.h>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -84,7 +84,8 @@ fill_packet_metadata_udp(
 static inline uint64_t
 calculate_metadata_hash(const struct packet_metadata *metadata) {
 	// Use byte array to avoid alignment issues
-	uint8_t hash_input[40]; // Max: 16 (IPv6 src) + 16 (IPv6 dst) + 4 (ports) + 4 (proto)
+	uint8_t hash_input[40]; // Max: 16 (IPv6 src) + 16 (IPv6 dst) + 4
+				// (ports) + 4 (proto)
 	int hash_len = 0;
 
 	if (metadata->network_proto == IPPROTO_IPV6) {
