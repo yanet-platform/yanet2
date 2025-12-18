@@ -612,7 +612,7 @@ func testPacketSending(
 		totalPackets, totalOutput, outputRate, totalDrop, dropRate, correctPackets, correctRate)
 
 	// Get final state info
-	stateInfo := setup.balancer.GetStateInfo()
+	stateInfo := setup.balancer.GetStateInfo(setup.mock.CurrentTime())
 	t.Logf("Active sessions: %d", stateInfo.ActiveSessions.Value)
 	t.Logf("Session table capacity: %d",
 		setup.balancer.GetModuleConfigState().SessionTableCapacity())
