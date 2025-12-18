@@ -56,12 +56,17 @@ func MakeUDPPacket(
 	dstPort uint16,
 ) []gopacket.SerializableLayer {
 
+	// Ensure both addresses are the same IP version
+	if srcIP.Is4() != dstIP.Is4() {
+		panic(fmt.Sprintf("IP version mismatch: src=%v dst=%v", srcIP, dstIP))
+	}
+
 	src := net.IP(srcIP.AsSlice())
 	dst := net.IP(dstIP.AsSlice())
 
 	var ip gopacket.NetworkLayer
 	ethernetType := layers.EthernetTypeIPv6
-	if src.To4() != nil {
+	if srcIP.Is4() {
 		ethernetType = layers.EthernetTypeIPv4
 		ip = &layers.IPv4{
 			Version:  4,
@@ -112,12 +117,17 @@ func MakeTCPPacket(
 	tcp *layers.TCP,
 ) []gopacket.SerializableLayer {
 
+	// Ensure both addresses are the same IP version
+	if srcIP.Is4() != dstIP.Is4() {
+		panic(fmt.Sprintf("IP version mismatch: src=%v dst=%v", srcIP, dstIP))
+	}
+
 	src := net.IP(srcIP.AsSlice())
 	dst := net.IP(dstIP.AsSlice())
 
 	var ip gopacket.NetworkLayer
 	ethernetType := layers.EthernetTypeIPv6
-	if src.To4() != nil {
+	if srcIP.Is4() {
 		ethernetType = layers.EthernetTypeIPv4
 		ip = &layers.IPv4{
 			Version:  4,
@@ -484,7 +494,7 @@ func ValidateStateInfo(
 		for realIdx := range vs.Reals {
 			real := &vs.Reals[realIdx]
 			summaryActiveSession += info.RealInfo[real.RegistryIdx].ActiveSessions.Value
-			summaryPackets += info.RealInfo[realIdx].Stats.Packets
+			summaryPackets += info.RealInfo[real.RegistryIdx].Stats.Packets
 		}
 
 		vsInfo := info.VsInfo[vs.RegistryIdx]

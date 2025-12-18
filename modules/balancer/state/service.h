@@ -4,7 +4,6 @@
 #include "worker.h"
 #include <stdint.h>
 
-
 ////////////////////////////////////////////////////////////////////////////////
 
 // Persistent state of the service (virtual or real).
@@ -50,8 +49,8 @@ struct service_info {
 
 void
 service_info_init(
-    struct service_info *service_info,
-    uint8_t *vip_address,
+	struct service_info *service_info,
+	uint8_t *vip_address,
 	int vip_proto,
 	uint8_t *ip_address,
 	int ip_proto,

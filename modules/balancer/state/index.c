@@ -1,8 +1,8 @@
 #include "index.h"
 
+#include "array.h"
 #include "common/network.h"
 #include "service.h"
-#include "array.h"
 
 #include <netinet/in.h>
 #include <stdio.h>
@@ -56,27 +56,27 @@ registry_index_hash(
 	int transport_proto
 ) {
 	uint64_t hash = FNV_OFFSET_BASIS;
-	
+
 	// Hash VIP address (4 or 16 bytes depending on protocol)
 	size_t vip_len = (vip_proto == IPPROTO_IPV6) ? NET6_LEN : NET4_LEN;
 	hash = fnv1a_hash_buffer(hash, vip_address, vip_len);
-	
+
 	// Mix in VIP protocol
 	hash = fnv1a_hash_int(hash, vip_proto);
-	
+
 	// Hash real IP address (4 or 16 bytes depending on protocol)
 	size_t ip_len = (ip_proto == IPPROTO_IPV6) ? NET6_LEN : NET4_LEN;
 	hash = fnv1a_hash_buffer(hash, ip_address, ip_len);
-	
+
 	// Mix in real IP protocol
 	hash = fnv1a_hash_int(hash, ip_proto);
-	
+
 	// Mix in port
 	hash = fnv1a_hash_int(hash, port);
-	
+
 	// Mix in transport protocol
 	hash = fnv1a_hash_int(hash, transport_proto);
-	
+
 	return hash;
 }
 
@@ -96,42 +96,39 @@ service_index_matches(
 	    service->transport_proto != transport_proto) {
 		return 0;
 	}
-	
+
 	// Check port
 	if (service->port != port) {
 		return 0;
 	}
-	
+
 	// Check VIP address
 	size_t vip_len = (vip_proto == IPPROTO_IPV6) ? NET6_LEN : NET4_LEN;
 	if (memcmp(service->vip_address, vip_address, vip_len) != 0) {
 		return 0;
 	}
-	
+
 	// Check real IP address
 	size_t ip_len = (ip_proto == IPPROTO_IPV6) ? NET6_LEN : NET4_LEN;
 	if (memcmp(service->ip_address, ip_address, ip_len) != 0) {
 		return 0;
 	}
-	
+
 	return 1;
 }
 
 /// Allocate a new index entry
 static struct service_index_entry *
-registry_index_entry_alloc(
-	struct service_index *index, size_t service_idx
-) {
-	struct service_index_entry *entry = memory_balloc(
-		index->mctx, sizeof(struct service_index_entry)
-	);
+registry_index_entry_alloc(struct service_index *index, size_t service_idx) {
+	struct service_index_entry *entry =
+		memory_balloc(index->mctx, sizeof(struct service_index_entry));
 	if (entry == NULL) {
 		return NULL;
 	}
-	
+
 	entry->service_idx = service_idx;
 	entry->next = NULL;
-	
+
 	return entry;
 }
 
@@ -158,22 +155,23 @@ registry_index_resize(
 	if (new_buckets == NULL) {
 		return -1;
 	}
-	
+
 	// Initialize new buckets to NULL
 	memset(new_buckets,
 	       0,
 	       sizeof(struct service_index_entry *) * new_bucket_count);
-	
+
 	// Rehash all existing entries
 	for (size_t i = 0; i < index->bucket_count; ++i) {
 		struct service_index_entry *entry = index->buckets[i];
 		while (entry != NULL) {
 			struct service_index_entry *next = entry->next;
-			
+
 			// Get the service to recompute hash
-			struct service_info *service =
-				service_array_lookup(services, entry->service_idx);
-			
+			struct service_info *service = service_array_lookup(
+				services, entry->service_idx
+			);
+
 			// Compute new hash and bucket index
 			uint64_t hash = registry_index_hash(
 				service->vip_address,
@@ -184,15 +182,15 @@ registry_index_resize(
 				service->transport_proto
 			);
 			size_t bucket_idx = hash % new_bucket_count;
-			
+
 			// Insert at head of new bucket
 			entry->next = new_buckets[bucket_idx];
 			new_buckets[bucket_idx] = entry;
-			
+
 			entry = next;
 		}
 	}
-	
+
 	// Free old bucket array
 	if (index->buckets != NULL) {
 		memory_bfree(
@@ -202,11 +200,11 @@ registry_index_resize(
 				index->bucket_count
 		);
 	}
-	
+
 	// Update index
 	index->buckets = new_buckets;
 	index->bucket_count = new_bucket_count;
-	
+
 	return 0;
 }
 
@@ -218,7 +216,7 @@ service_index_init(struct service_index *index, struct memory_context *mctx) {
 	if (index == NULL || mctx == NULL) {
 		return -1;
 	}
-	
+
 	// Allocate initial bucket array
 	index->buckets = memory_balloc(
 		mctx,
@@ -228,17 +226,17 @@ service_index_init(struct service_index *index, struct memory_context *mctx) {
 	if (index->buckets == NULL) {
 		return -1;
 	}
-	
+
 	// Initialize buckets to NULL
 	memset(index->buckets,
 	       0,
 	       sizeof(struct service_index_entry *) *
 		       REGISTRY_INDEX_INITIAL_BUCKETS);
-	
+
 	index->bucket_count = REGISTRY_INDEX_INITIAL_BUCKETS;
 	index->entry_count = 0;
 	index->mctx = mctx;
-	
+
 	return 0;
 }
 
@@ -247,7 +245,7 @@ service_index_free(struct service_index *index) {
 	if (index == NULL || index->buckets == NULL) {
 		return;
 	}
-	
+
 	// Free all entries
 	for (size_t i = 0; i < index->bucket_count; ++i) {
 		struct service_index_entry *entry = index->buckets[i];
@@ -257,14 +255,14 @@ service_index_free(struct service_index *index) {
 			entry = next;
 		}
 	}
-	
+
 	// Free bucket array
 	memory_bfree(
 		index->mctx,
 		index->buckets,
 		sizeof(struct service_index_entry *) * index->bucket_count
 	);
-	
+
 	index->buckets = NULL;
 	index->bucket_count = 0;
 	index->entry_count = 0;
@@ -284,7 +282,7 @@ service_index_lookup(
 	if (index == NULL || index->buckets == NULL) {
 		return -1;
 	}
-	
+
 	// Compute hash and bucket index
 	uint64_t hash = registry_index_hash(
 		vip_address,
@@ -295,13 +293,14 @@ service_index_lookup(
 		transport_proto
 	);
 	size_t bucket_idx = hash % index->bucket_count;
-	
+
 	// Search in the bucket's chain
 	struct service_index_entry *entry = index->buckets[bucket_idx];
 	while (entry != NULL) {
 		// Get the service and compare keys
-		struct service_info *service = service_array_lookup(services, entry->service_idx);
-		
+		struct service_info *service =
+			service_array_lookup(services, entry->service_idx);
+
 		if (service_index_matches(
 			    service,
 			    vip_address,
@@ -313,10 +312,10 @@ service_index_lookup(
 		    )) {
 			return entry->service_idx;
 		}
-		
+
 		entry = entry->next;
 	}
-	
+
 	return -1;
 }
 
@@ -335,7 +334,7 @@ service_index_insert(
 	if (index == NULL || index->buckets == NULL) {
 		return -1;
 	}
-	
+
 	// Check if resize is needed (load factor > 0.75)
 	if (index->entry_count * REGISTRY_INDEX_LOAD_FACTOR_DEN >=
 	    index->bucket_count * REGISTRY_INDEX_LOAD_FACTOR_NUM) {
@@ -346,7 +345,7 @@ service_index_insert(
 			return -1;
 		}
 	}
-	
+
 	// Compute hash and bucket index
 	uint64_t hash = registry_index_hash(
 		vip_address,
@@ -357,18 +356,18 @@ service_index_insert(
 		transport_proto
 	);
 	size_t bucket_idx = hash % index->bucket_count;
-	
+
 	// Allocate new entry
 	struct service_index_entry *entry =
 		registry_index_entry_alloc(index, service_idx);
 	if (entry == NULL) {
 		return -1;
 	}
-	
+
 	// Insert at head of bucket
 	entry->next = index->buckets[bucket_idx];
 	index->buckets[bucket_idx] = entry;
 	++index->entry_count;
-	
+
 	return 0;
 }

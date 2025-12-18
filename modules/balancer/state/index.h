@@ -17,7 +17,7 @@ struct service_array;
 struct service_index_entry {
 	/// Index in service_registry->services array
 	size_t service_idx;
-	
+
 	/// Next entry in the collision chain (NULL if last)
 	struct service_index_entry *next;
 };
@@ -30,13 +30,13 @@ struct service_index_entry {
 struct service_index {
 	/// Array of bucket head pointers (separate chaining)
 	struct service_index_entry **buckets;
-	
+
 	/// Current number of buckets in the hash table
 	size_t bucket_count;
-	
+
 	/// Current number of entries in the hash table
 	size_t entry_count;
-	
+
 	/// Memory context for allocations
 	struct memory_context *mctx;
 };

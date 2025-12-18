@@ -9,7 +9,8 @@
 #define SERVICE_REGISTRY_BLOCK_SIZE (4096)
 
 static_assert(
-	sizeof(struct service_info) * SERVICE_REGISTRY_BLOCK_SIZE <= MEMORY_BLOCK_ALLOCATOR_MAX_SIZE, 
+	sizeof(struct service_info) * SERVICE_REGISTRY_BLOCK_SIZE <=
+		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE,
 	"too big block"
 );
 
@@ -29,15 +30,10 @@ struct service_info *
 service_array_lookup(struct service_array *array, size_t idx);
 
 void
-service_array_init(
-	struct service_array *array,
-	struct memory_context *mctx
-);
+service_array_init(struct service_array *array, struct memory_context *mctx);
 
 void
-service_array_free(
-	struct service_array *array
-);
+service_array_free(struct service_array *array);
 
 int
 service_array_push_back(

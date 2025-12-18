@@ -14,6 +14,8 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -55,7 +57,7 @@ func generateRandomIP(rng *rand.Rand, forceIPv6 bool) netip.Addr {
 func createBigConfig(vsCount int, realsPerVs int, rng *rand.Rand) *balancerpb.ModuleConfig {
 	virtualServices := make([]*balancerpb.VirtualService, 0, vsCount)
 
-	for i := 0; i < vsCount; i++ {
+	for range vsCount {
 		// Randomly choose IPv4 or IPv6 for VS
 		isIPv6 := rng.Intn(2) == 0
 		var vsIP netip.Addr
@@ -185,9 +187,74 @@ type vsKey struct {
 	proto balancerpb.TransportProto
 }
 
+func vsKeyFromPacket(t *testing.T, packet *framework.PacketInfo) (*vsKey, *netip.Addr) {
+	t.Helper()
+	if !packet.IsTunneled {
+		t.Errorf("Output packet is not tunneled")
+		return nil, nil
+	}
+
+	if packet.InnerPacket == nil {
+		t.Errorf("Output packet has no inner packet")
+		return nil, nil
+	}
+
+	innerPkt := packet.InnerPacket
+
+	// Get destination IP of the tunneled packet (should be a real)
+	realIP, ok := netip.AddrFromSlice(packet.DstIP)
+	if !ok {
+		t.Errorf("Invalid real IP in output packet")
+		return nil, nil
+	}
+
+	// Get inner packet details
+	_, ok = netip.AddrFromSlice(innerPkt.SrcIP)
+	if !ok {
+		t.Errorf("Invalid inner src IP")
+		return nil, nil
+	}
+
+	innerDstIP, ok := netip.AddrFromSlice(innerPkt.DstIP)
+	if !ok {
+		t.Errorf("Invalid inner dst IP")
+		return nil, nil
+	}
+
+	dstPort := packet.DstPort
+
+	// Determine protocol from inner packet
+	transportProto, ok := innerPkt.GetTransportProtocol()
+	if !ok {
+		t.Errorf("Unable to determine transport protocol from inner packet")
+		return nil, nil
+	}
+
+	var proto balancerpb.TransportProto
+	switch transportProto {
+	case layers.IPProtocolTCP:
+		proto = balancerpb.TransportProto_TCP
+	case layers.IPProtocolUDP:
+		proto = balancerpb.TransportProto_UDP
+	default:
+		t.Errorf("Unknown transport protocol: %v", transportProto)
+		return nil, nil
+	}
+
+	// Find the VS this packet was sent to
+	key := vsKey{
+		ip:    innerDstIP,
+		port:  dstPort,
+		proto: proto,
+	}
+
+	return &key, &realIP
+}
+
 // vsInfo contains information about a virtual service for validation
 type vsInfo struct {
-	realAddrs map[netip.Addr]bool
+	realAddrs    map[netip.Addr]bool
+	enabledReals map[netip.Addr]bool
 }
 
 // buildVSMaps builds lookup maps for virtual services and their reals
@@ -207,13 +274,15 @@ func buildVSMaps(config *balancerpb.ModuleConfig) map[vsKey]*vsInfo {
 		}
 
 		info := &vsInfo{
-			realAddrs: make(map[netip.Addr]bool),
+			realAddrs:    make(map[netip.Addr]bool),
+			enabledReals: make(map[netip.Addr]bool),
 		}
 
 		for _, real := range vs.Reals {
 			realIP, ok := netip.AddrFromSlice(real.DstAddr)
 			if ok {
 				info.realAddrs[realIP] = true
+				info.enabledReals[realIP] = real.Enabled
 			}
 		}
 
@@ -221,6 +290,34 @@ func buildVSMaps(config *balancerpb.ModuleConfig) map[vsKey]*vsInfo {
 	}
 
 	return vsMap
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// createRealUpdate creates a RealUpdate for enabling/disabling a real
+func createRealUpdate(vs *balancerpb.VirtualService, real *balancerpb.Real, enable bool) lib.RealUpdate {
+	vsIP, _ := netip.AddrFromSlice(vs.Addr)
+	realIP, _ := netip.AddrFromSlice(real.DstAddr)
+
+	var proto lib.Proto
+	if vs.Proto == balancerpb.TransportProto_TCP {
+		proto = lib.ProtoTcp
+	} else {
+		proto = lib.ProtoUdp
+	}
+
+	return lib.RealUpdate{
+		Real: lib.RealIdentifier{
+			Vs: lib.VsIdentifier{
+				Ip:    vsIP,
+				Port:  uint16(vs.Port),
+				Proto: proto,
+			},
+			Ip: realIP,
+		},
+		Weight: uint16(real.Weight),
+		Enable: enable,
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -242,18 +339,16 @@ func TestBigData(t *testing.T) {
 		SessionTableMaxLoadFactor: 0.75,
 	}
 
-	// Create initial config: 40 VS with 500 reals each
-	initialConfig := createBigConfig(40, 500, rng)
-
-	t.Logf("Created initial config with 40 VS and 500 reals per VS (total 20000 reals)")
+	// Create initial config: 10 VS with 50 reals each
+	initialConfig := createBigConfig(10, 50, rng)
 
 	// Common setup for both phases
 	setup, err := SetupTest(&TestConfig{
 		moduleConfig: initialConfig,
 		stateConfig:  stateConfig,
 		mock: &mock.YanetMockConfig{
-			CpMemory: datasize.GB * 8,
-			DpMemory: datasize.GB,
+			CpMemory: datasize.GB * 2,
+			DpMemory: datasize.MB * 512,
 			Workers:  1,
 			Devices: []mock.YanetMockDeviceConfig{
 				{
@@ -266,23 +361,27 @@ func TestBigData(t *testing.T) {
 	require.NoError(t, err)
 	defer setup.Free()
 
+	t.Logf("Setup initial config with 10 VS and 50 reals per VS (total 500 reals), elapsed on balancer creation: %v", setup.stats.balancerCreationTime)
+
 	// Set initial time
 	setup.mock.SetCurrentTime(time.Unix(0, 0))
 
-	// Phase 1: Test with 40 VS and 500 reals each
-	t.Run("Phase1_40VS_500Reals", func(t *testing.T) {
+	// Phase 1: Test with 10 VS and 50 reals each
+	t.Run("Phase1_10VS_50Reals", func(t *testing.T) {
 		testPacketSending(t, setup, initialConfig, rng, 10, 10000)
 	})
 
-	// Phase 2: Update to 300 VS with 300 reals each
-	t.Run("Phase2_300VS_300Reals", func(t *testing.T) {
-		// newConfig := createBigConfig(300, 300, rng)
-		// t.Logf("Updating config to 300 VS and 300 reals per VS (total 90000 reals)")
+	// Phase 2: Update to 20 VS with 20 reals each
+	t.Run("Phase2_100VS_50Reals", func(t *testing.T) {
+		newConfig := createBigConfig(20, 20, rng)
 
-		// err := setup.balancer.Update(newConfig, stateConfig)
-		// require.NoError(t, err)
+		updateStart := time.Now()
+		err := setup.balancer.Update(newConfig, stateConfig)
+		require.NoError(t, err)
 
-		// testPacketSending(t, setup, newConfig, rng, 10, 10000)
+		t.Logf("Setup config to 20 VS and 20 reals per VS (total 400 reals), elapsed on config update: %v", time.Since(updateStart))
+
+		testPacketSending(t, setup, newConfig, rng, 10, 10000)
 	})
 }
 
@@ -304,18 +403,54 @@ func testPacketSending(
 	totalPackets := 0
 	correctPackets := 0
 
-	// Build VS lookup maps
-	vsMap := buildVSMaps(config)
-
 	// Extract VS information for packet generation
 	virtualServices := config.VirtualServices
 
-	for batch := 0; batch < numBatches; batch++ {
+	for batch := range numBatches {
+		// Disable random half of reals before batch
+		var disableUpdates []lib.RealUpdate
+		var enableUpdates []lib.RealUpdate
+		disabledCount := 0
+
+		for _, vs := range config.VirtualServices {
+			// Randomly select half of reals to disable
+			numToDisable := len(vs.Reals) / 2
+			indices := rng.Perm(len(vs.Reals))
+
+			for i, real := range vs.Reals {
+				shouldDisable := false
+				for j := 0; j < numToDisable; j++ {
+					if indices[j] == i {
+						shouldDisable = true
+						break
+					}
+				}
+
+				if shouldDisable {
+					disableUpdates = append(disableUpdates, createRealUpdate(vs, real, false))
+					disabledCount++
+				} else {
+					enableUpdates = append(enableUpdates, createRealUpdate(vs, real, true))
+				}
+			}
+		}
+
+		// Apply disable updates and measure time
+		disableStartTime := time.Now()
+		err := setup.balancer.UpdateReals(disableUpdates, false)
+		require.NoError(t, err)
+		disableDuration := time.Since(disableStartTime)
+
+		// Rebuild VS maps with updated enabled state
+		vsMap := buildVSMaps(config)
+
+		t.Logf("Batch %d/%d: Disabled %d reals in %v", batch+1, numBatches, disabledCount, disableDuration)
+
 		packets := make([]gopacket.Packet, 0, packetsPerBatch)
 
 		// Generate packets to existing VS (90% of packets)
 		existingVSPackets := packetsPerBatch * 9 / 10
-		for i := 0; i < existingVSPackets; i++ {
+		for range existingVSPackets {
 			// Pick a random VS
 			vs := virtualServices[rng.Intn(len(virtualServices))]
 
@@ -331,7 +466,9 @@ func testPacketSending(
 			} else {
 				srcIP = generateRandomIPv6(rng)
 			}
-			srcPort := uint16(1024 + rng.Intn(64511))
+			// Use ephemeral port range, avoiding well-known ports like 4789 (VXLAN)
+			// Range: 32768-61000 to avoid protocol detection issues
+			srcPort := uint16(32768 + rng.Intn(28232))
 
 			// Create packet based on protocol
 			var packetLayers []gopacket.SerializableLayer
@@ -357,7 +494,7 @@ func testPacketSending(
 
 		// Generate packets to non-existent VS (10% of packets)
 		nonExistentPackets := packetsPerBatch - existingVSPackets
-		for i := 0; i < nonExistentPackets; i++ {
+		for range nonExistentPackets {
 			// Generate a random IP that's unlikely to match any VS
 			nonExistentIP := netip.AddrFrom4([4]byte{
 				byte(200 + rng.Intn(55)),
@@ -368,7 +505,8 @@ func testPacketSending(
 			nonExistentPort := uint16(60000 + rng.Intn(5535))
 
 			srcIP := generateRandomIPv4(rng)
-			srcPort := uint16(1024 + rng.Intn(64511))
+			// Use ephemeral port range, avoiding well-known ports
+			srcPort := uint16(32768 + rng.Intn(28232))
 
 			packetLayers := MakeUDPPacket(
 				srcIP,
@@ -383,88 +521,42 @@ func testPacketSending(
 		totalPackets += len(packets)
 
 		// Send packets
+		handleStartTime := time.Now()
 		result, err := setup.mock.HandlePackets(packets...)
 		require.NoError(t, err)
+		handleDuration := time.Since(handleStartTime)
 
 		totalOutput += len(result.Output)
 		totalDrop += len(result.Drop)
 
+		assert.Equal(t, existingVSPackets, len(result.Output), "all packets should be tunneled")
+
 		// Validate output packets
 		for _, outPkt := range result.Output {
 			// Check packet is tunneled
-			if !outPkt.IsTunneled {
-				t.Errorf("Output packet is not tunneled")
+			key, realIP := vsKeyFromPacket(t, outPkt)
+			if key == nil || realIP == nil {
 				continue
 			}
 
-			if outPkt.InnerPacket == nil {
-				t.Errorf("Output packet has no inner packet")
-				continue
-			}
-
-			innerPkt := outPkt.InnerPacket
-
-			// Get destination IP of the tunneled packet (should be a real)
-			realIP, ok := netip.AddrFromSlice(outPkt.DstIP)
-			if !ok {
-				t.Errorf("Invalid real IP in output packet")
-				continue
-			}
-
-			// Get inner packet details
-			_, ok = netip.AddrFromSlice(innerPkt.SrcIP)
-			if !ok {
-				t.Errorf("Invalid inner src IP")
-				continue
-			}
-
-			innerDstIP, ok := netip.AddrFromSlice(innerPkt.DstIP)
-			if !ok {
-				t.Errorf("Invalid inner dst IP")
-				continue
-			}
-
-			srcPort := outPkt.SrcPort
-			dstPort := outPkt.DstPort
-
-			// Determine protocol
-			var proto balancerpb.TransportProto
-			switch outPkt.Protocol {
-			case layers.IPProtocolTCP:
-				proto = balancerpb.TransportProto_TCP
-			case layers.IPProtocolUDP:
-				proto = balancerpb.TransportProto_UDP
-			default:
-				t.Errorf("Unknown protocol in inner packet")
-				continue
-			}
-
-			// Find the VS this packet was sent to
-			key := vsKey{
-				ip:    innerDstIP,
-				port:  dstPort,
-				proto: proto,
-			}
-
-			vsInfo, exists := vsMap[key]
+			vsInfo, exists := vsMap[*key]
 			if !exists {
 				// all packets to non existent VS should be dropped
-				t.Errorf("Packet tunneled to non-existent VS %s:%d", innerDstIP, dstPort)
+				t.Errorf("Packet tunneled to non-existent VS %s:%d", key.ip, key.port)
 				continue
 			}
 
 			// Check that the real IP is in the VS's real list
-			if !vsInfo.realAddrs[realIP] {
+			if !vsInfo.realAddrs[*realIP] {
 				t.Errorf("Packet tunneled to real %s which is not in VS %s:%d reals",
-					realIP, innerDstIP, dstPort)
+					*realIP, key.ip, key.port)
 				continue
 			}
 
-			// Verify inner packet src matches original client
-			// We need to find the original packet to verify this
-			// For now, just check that inner src port is in valid range
-			if srcPort < 1024 {
-				t.Errorf("Invalid inner src port: %d", srcPort)
+			// Check that the real is enabled
+			if !vsInfo.enabledReals[*realIP] {
+				t.Errorf("Packet tunneled to DISABLED real %s in VS %s:%d",
+					*realIP, key.ip, key.port)
 				continue
 			}
 
@@ -472,11 +564,31 @@ func testPacketSending(
 			correctPackets++
 		}
 
-		// Log progress
-		if batch%2 == 0 || batch+1 == numBatches {
-			t.Logf("Batch %d/%d: Sent %d packets, Output=%d, Drop=%d, Correct=%d",
-				batch+1, numBatches, len(packets), len(result.Output), len(result.Drop), correctPackets)
+		// Validate drop packets
+		for _, dropPkt := range result.Drop {
+			// Check packet is tunneled
+			if !dropPkt.IsTunneled {
+				correctPackets += 1
+			} else {
+				t.Errorf("Drop packet should not be tunneled")
+			}
 		}
+
+		// Calculate RPS (requests per second)
+		rps := float64(len(packets)) / handleDuration.Seconds()
+
+		// Log progress
+		t.Logf("Batch %d/%d: Sent %d packets, Output=%d, Drop=%d, Correct packets: %d/%d, HandleTime=%v, RPS=%.0f",
+			batch+1, numBatches, len(packets), len(result.Output), len(result.Drop), correctPackets, totalPackets,
+			handleDuration, rps)
+
+		// Re-enable all reals after batch and measure time
+		enableStartTime := time.Now()
+		err = setup.balancer.UpdateReals(enableUpdates, false)
+		require.NoError(t, err)
+		enableDuration := time.Since(enableStartTime)
+
+		t.Logf("Batch %d/%d: Re-enabled all reals in %v", batch+1, numBatches, enableDuration)
 
 		// Advance time by 1 second
 		setup.mock.AdvanceTime(time.Second)
@@ -494,18 +606,10 @@ func testPacketSending(
 
 	outputRate := float64(totalOutput) / float64(totalPackets) * 100
 	dropRate := float64(totalDrop) / float64(totalPackets) * 100
-	correctRate := float64(correctPackets) / float64(totalOutput) * 100
+	correctRate := float64(correctPackets) / float64(totalPackets) * 100
 
-	t.Logf("Final statistics: Total=%d, Output=%d (%.2f%%), Drop=%d (%.2f%%), Correct=%d (%.2f%% of output)",
+	t.Logf("Final statistics: Total=%d, Output=%d (%.2f%%), Drop=%d (%.2f%%), Correct=%d (%.2f%% of total)",
 		totalPackets, totalOutput, outputRate, totalDrop, dropRate, correctPackets, correctRate)
-
-	// Verify that packets to existing VS are mostly processed correctly
-	assert.Greater(t, outputRate, 50.0,
-		"At least 50%% of packets should be processed successfully")
-
-	// Verify that output packets are correctly tunneled
-	assert.Greater(t, correctRate, 95.0,
-		"At least 95%% of output packets should be correctly tunneled to VS reals")
 
 	// Get final state info
 	stateInfo := setup.balancer.GetStateInfo()

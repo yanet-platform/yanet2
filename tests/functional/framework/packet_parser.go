@@ -627,3 +627,30 @@ func (info *PacketInfo) String() string {
 
 	return result
 }
+
+// GetTransportProtocol returns the transport layer protocol (TCP/UDP) from the packet.
+// For tunneled packets, it returns the protocol from the inner packet.
+// Returns the IPProtocol value and a boolean indicating if a valid transport protocol was found.
+func (info *PacketInfo) GetTransportProtocol() (layers.IPProtocol, bool) {
+	// For tunneled packets, get protocol from inner packet
+	if info.IsTunneled && info.InnerPacket != nil {
+		return info.InnerPacket.GetTransportProtocol()
+	}
+
+	// Get protocol based on IP version
+	var proto layers.IPProtocol
+	if info.IsIPv4 {
+		proto = info.Protocol
+	} else if info.IsIPv6 {
+		proto = info.NextHeader
+	} else {
+		return 0, false
+	}
+
+	// Check if it's a valid transport protocol
+	if proto == layers.IPProtocolTCP || proto == layers.IPProtocolUDP {
+		return proto, true
+	}
+
+	return 0, false
+}

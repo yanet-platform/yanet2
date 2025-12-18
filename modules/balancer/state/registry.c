@@ -8,10 +8,12 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 int
-service_registry_init(struct service_registry *registry, struct memory_context *mctx) {
+service_registry_init(
+	struct service_registry *registry, struct memory_context *mctx
+) {
 	// initialize array
 	service_array_init(&registry->array, mctx);
-	
+
 	// initialize the hash table index
 	int res = service_index_init(&registry->index, mctx);
 	if (res != 0) {
@@ -19,14 +21,12 @@ service_registry_init(struct service_registry *registry, struct memory_context *
 	}
 
 	registry->mctx = mctx;
-	
+
 	return 0;
 }
 
 void
-service_registry_free(
-	struct service_registry *registry
-) {
+service_registry_free(struct service_registry *registry) {
 	// free the services array
 	service_array_free(&registry->array);
 
@@ -49,17 +49,43 @@ service_registry_find_or_insert_service(
 ) {
 	struct service_index *index = &registry->index;
 	struct service_array *array = &registry->array;
-	ssize_t idx = service_index_lookup(index, array, vip_address, vip_proto, ip_address, ip_proto, port, transport_proto);
+	ssize_t idx = service_index_lookup(
+		index,
+		array,
+		vip_address,
+		vip_proto,
+		ip_address,
+		ip_proto,
+		port,
+		transport_proto
+	);
 	if (idx == -1) {
-		int res = service_array_push_back(array, vip_address, vip_proto, ip_address, ip_proto, port, transport_proto);
+		int res = service_array_push_back(
+			array,
+			vip_address,
+			vip_proto,
+			ip_address,
+			ip_proto,
+			port,
+			transport_proto
+		);
 		if (res != 0) {
 			return -1;
 		}
 		idx = array->size - 1;
 
 		// Insert the new service into the index
-		res = service_index_insert(index, array, vip_address, vip_proto, 
-								ip_address, ip_proto, port, transport_proto, idx);
+		res = service_index_insert(
+			index,
+			array,
+			vip_address,
+			vip_proto,
+			ip_address,
+			ip_proto,
+			port,
+			transport_proto,
+			idx
+		);
 		if (res != 0) {
 			return -1;
 		}

@@ -44,7 +44,9 @@ balancer_fill_virtual_service_info(
 	}
 	memset(info, 0, sizeof(struct balancer_virtual_service_info));
 	service_info_accumulate_into_vs_info(
-		service_registry_lookup(&state->vs_registry, virtual_service_idx),
+		service_registry_lookup(
+			&state->vs_registry, virtual_service_idx
+		),
 		info,
 		state->workers
 	);
@@ -108,7 +110,9 @@ balancer_fill_real_info(
 		return -1;
 	}
 	service_info_accumulate_into_real_info(
-		service_registry_lookup(&state->real_registry, real_idx), info, state->workers
+		service_registry_lookup(&state->real_registry, real_idx),
+		info,
+		state->workers
 	);
 	return 0;
 }

@@ -20,14 +20,11 @@ struct service_registry {
 
 int
 service_registry_init(
-	struct service_registry *registry,
-	struct memory_context *mctx
+	struct service_registry *registry, struct memory_context *mctx
 );
 
 void
-service_registry_free(
-	struct service_registry *registry
-);
+service_registry_free(struct service_registry *registry);
 
 ////////////////////////////////////////////////////////////////////////////////
 

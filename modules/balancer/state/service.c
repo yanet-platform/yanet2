@@ -110,15 +110,15 @@ service_info_accumulate_into_vs_info(
 
 void
 service_info_init(
-    struct service_info *service,
-    uint8_t *vip_address,
+	struct service_info *service,
+	uint8_t *vip_address,
 	int vip_proto,
 	uint8_t *ip_address,
 	int ip_proto,
 	uint16_t port,
 	int transport_proto
 ) {
-    service->vip_proto = vip_proto;
+	service->vip_proto = vip_proto;
 	memcpy(&service->vip_address,
 	       vip_address,
 	       (vip_proto == IPPROTO_IPV6 ? NET6_LEN : NET4_LEN));
@@ -130,6 +130,6 @@ service_info_init(
 	       (ip_proto == IPPROTO_IPV6 ? NET6_LEN : NET4_LEN));
 	for (size_t worker = 0; worker < MAX_WORKERS_NUM; ++worker) {
 		struct service_state *service_state = &service->state[worker];
-        memset(service_state, 0, sizeof(struct service_state));
+		memset(service_state, 0, sizeof(struct service_state));
 	}
 }

@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap/zapcore"
@@ -31,10 +32,15 @@ type TestConfig struct {
 	debug        bool
 }
 
+type SetupStats struct {
+	balancerCreationTime time.Duration
+}
+
 type TestSetup struct {
 	mock     *mock.YanetMock
 	agent    *ffi.Agent
 	balancer *module.Balancer
+	stats    SetupStats
 }
 
 func SetupTest(config *TestConfig) (*TestSetup, error) {
@@ -89,6 +95,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		Level: logLevel,
 	})
 
+	balancerCreateStart := time.Now()
 	balancerInstance, err := module.NewBalancerFromProto(
 		*agent,
 		defaultConfigName,
@@ -103,6 +110,10 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		)
 	}
 
+	stats := SetupStats{
+		balancerCreationTime: time.Since(balancerCreateStart),
+	}
+
 	if err := setupCp(agent); err != nil {
 		return nil, fmt.Errorf("failed to setup yanet mock: %w", err)
 	}
@@ -111,6 +122,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		mock:     mockInstance,
 		agent:    agent,
 		balancer: balancerInstance,
+		stats:    stats,
 	}, nil
 }
 
