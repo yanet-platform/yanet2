@@ -49,7 +49,7 @@ test-asan:
 	@if [ ! -d "build" ]; then \
 		$(MAKE) setup-asan; \
 	else \
-		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build; \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined build; \
 	fi
 	meson compile -C build
 	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test -count=1 $$(go list ./... | grep -v 'tests/functional')
@@ -60,8 +60,20 @@ test-functional:
 	cd tests/functional && $(MAKE) test
 
 fuzz:
-	env CC=clang CXX=clang++ meson setup -Dfuzzing=enabled  buildfuzz
-	env CC=clang CXX=clang++ meson compile -C buildfuzz
+	@if [ -d build ] && ! meson introspect build --buildoptions | jq -er '.[] | select(.name=="fuzzing") | .value'|grep -q enabled; then \
+		echo "Wiping build for fuzzing..."; \
+		rm -rf build; \
+	fi
+	@if [ ! -d build ]; then \
+		env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled build; \
+	fi
+	env CC=clang CXX=clang++ meson compile -C build
+	@echo "Ready to fuzz the following modules:"
+	@find build/tests/fuzzing/ -type f -executable -printf '%f\n'
+	@if [ -n "$(MODULE)" ]; then \
+		mkdir -p corpus; \
+		./build/tests/fuzzing/$(MODULE) corpus/; \
+	fi
 
 install: dataplane cli-install
 	meson install -C build --skip-subprojects

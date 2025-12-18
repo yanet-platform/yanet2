@@ -2,6 +2,8 @@
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
 
+#include "yanet_build_config.h" // MBUF_MAX_SIZE
+
 ////////////////////////////////////////////////////////////////////////////////
 // mempool ops
 
@@ -85,7 +87,7 @@ mock_mempool_create() {
 	mp->flags |= RTE_MEMPOOL_F_POOL_CREATED;
 	mp->socket_id = 0;
 	mp->cache_size = 0; // cache size is zero we always calloc data
-	mp->elt_size = sizeof(struct rte_mbuf) + RTE_MBUF_DEFAULT_BUF_SIZE;
+	mp->elt_size = sizeof(struct rte_mbuf) + MBUF_MAX_SIZE;
 	mp->header_size = sizeof(struct rte_mempool_objhdr);
 	if (mp->header_size % 64 != 0) {
 		mp->header_size += 64 - (mp->header_size % 64);

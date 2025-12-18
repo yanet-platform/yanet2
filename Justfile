@@ -42,6 +42,27 @@ test-functional: build
 # Run all tests (unit + functional)
 test-all: test test-functional
 
+# Build fuzzing targets and optionally run a fuzzer
+# Usage: just fuzz [MODULE]
+# Example: just fuzz dscp
+fuzz MODULE="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -d build ] && ! meson introspect build --buildoptions | jq -er '.[] | select(.name=="fuzzing") | .value' | grep -q enabled; then
+        echo "Wiping build for fuzzing..."
+        rm -rf build
+    fi
+    if [ ! -d build ]; then
+        env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled build
+    fi
+    env CC=clang CXX=clang++ meson compile -C build
+    echo "Ready to fuzz the following modules:"
+    find build/tests/fuzzing/ -type f -executable -printf '%f\n'
+    if [ -n "{{ MODULE }}" ]; then
+        mkdir -p corpus
+        ./build/tests/fuzzing/{{ MODULE }} corpus/
+    fi
+
 # Clean coverage data
 # clean *.gcno file manually after remove c file
 covclean:
@@ -151,3 +172,8 @@ dcli:
 # Build deb packages for all main components inside Docker container (unified with CI)
 ddeb:
     @just _docker_run -q "./scripts/build-deb.sh"
+
+# Run fuzzing in Docker
+# Usage: just dfuzz [MODULE]
+dfuzz MODULE="":
+    @just _docker_run -it "just fuzz {{ MODULE }}"

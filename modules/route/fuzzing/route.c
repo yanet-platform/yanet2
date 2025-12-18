@@ -2,32 +2,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "yanet_build_config.h" // MBUF_MAX_SIZE
-#include <rte_build_config.h>	// RTE_PKTMBUF_HEADROOM
-
-#include "dataplane/module/module.h"
-#include "dataplane/packet/packet.h"
+#include "common/memory_address.h"
 #include "modules/route/api/controlplane.h"
 #include "modules/route/dataplane/config.h"
 #include "modules/route/dataplane/dataplane.h"
 
-#include "lib/utils/packet.h"
+#include "lib/fuzzing/fuzzing.h"
 
-#define ARENA_SIZE (1 << 20)
-
-struct route_fuzzing_params {
-	struct module *module;	     /**< Pointer to the module being tested */
-	struct cp_module *cp_module; /**< Module configuration */
-
-	void *arena;
-	void *payload_arena;
-	struct block_allocator ba;
-	struct memory_context mctx;
-};
-
-static struct route_fuzzing_params fuzz_params = {
-	.cp_module = NULL,
-};
+static struct fuzzing_params fuzz_params = {0};
 
 static int
 route_test_config(struct cp_module **cp_module) {
@@ -52,6 +34,8 @@ route_test_config(struct cp_module **cp_module) {
 
 	config->cp_module.dp_module_idx = 0;
 	config->cp_module.agent = NULL;
+	config->cp_module.device_count = 0;
+	SET_OFFSET_OF(&config->cp_module.devices, NULL);
 
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
@@ -131,30 +115,34 @@ error_lpm_v4:
 
 static int
 fuzz_setup() {
-	fuzz_params.arena = malloc(ARENA_SIZE);
-	if (fuzz_params.arena == NULL) {
+	if (fuzzing_params_init(
+		    &fuzz_params, "route fuzzing", new_module_route
+	    ) != 0) {
 		return EXIT_FAILURE;
 	}
 
-	block_allocator_init(&fuzz_params.ba);
-	block_allocator_put_arena(
-		&fuzz_params.ba, fuzz_params.arena, ARENA_SIZE
-	);
-
-	memory_context_init(
-		&fuzz_params.mctx, "route fuzzing", &fuzz_params.ba
-	);
-
-	fuzz_params.module = new_module_route();
-	fuzz_params.payload_arena = memory_balloc(
-		&fuzz_params.mctx,
-		sizeof(struct packet_front) + MBUF_MAX_SIZE * 4
-	);
-	if (fuzz_params.payload_arena == NULL) {
-		return -ENOMEM;
+	if (route_test_config(&fuzz_params.cp_module) != 0) {
+		return EXIT_FAILURE;
 	}
 
-	return route_test_config(&fuzz_params.cp_module);
+	// Configure module_ectx for route module
+	// Set up mc_index and config_gen_ectx stubs
+	// TODO: For more comprehensive fuzzing, we should:
+	// - Provide real device contexts instead of stubs (device_count > 0)
+	// - Test with multiple mc_index values to cover different routing paths
+	// - Vary config_gen_ectx to test different device configurations
+	// This would allow packets to actually be routed instead of always
+	// being dropped
+	fuzz_params.module_ectx.mc_index_size = 1;
+	SET_OFFSET_OF(
+		&fuzz_params.module_ectx.mc_index, &fuzz_params.mc_index_stub
+	);
+	SET_OFFSET_OF(
+		&fuzz_params.module_ectx.config_gen_ectx,
+		&fuzz_params.config_gen_ectx_stub
+	);
+
+	return 0;
 }
 
 int
@@ -165,28 +153,5 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 		}
 	}
 
-	if (size > (MBUF_MAX_SIZE - RTE_PKTMBUF_HEADROOM)) {
-		return 0;
-	}
-
-	struct packet_front pf;
-	packet_front_init(&pf);
-	struct packet_data packet_data = {
-		.rx_device_id = 0, .tx_device_id = 0, .data = data, .size = size
-	};
-	fill_packet_list_arena(
-		&pf.input,
-		1,
-		&packet_data,
-		MBUF_MAX_SIZE,
-		fuzz_params.payload_arena,
-		MBUF_MAX_SIZE * 4
-	);
-	parse_packet(pf.input.first);
-	struct module_ectx module_ectx;
-	SET_OFFSET_OF(&module_ectx.cp_module, fuzz_params.cp_module);
-	// Process packet through decap module
-	fuzz_params.module->handler(NULL, &module_ectx, &pf);
-
-	return 0;
+	return fuzzing_process_packet(&fuzz_params, data, size);
 }

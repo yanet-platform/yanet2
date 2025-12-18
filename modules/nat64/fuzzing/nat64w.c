@@ -5,31 +5,12 @@
 #include <rte_ip.h>
 #include <rte_mbuf.h>
 
-#include "yanet_build_config.h" // MBUF_MAX_SIZE
-#include <rte_build_config.h>	// RTE_PKTMBUF_HEADROOM
-
-#include "dataplane/module/module.h"
-#include "dataplane/packet/packet.h"
 #include "modules/nat64/api/nat64cp.h"
 #include "modules/nat64/dataplane/nat64dp.h"
 
-#include "lib/utils/packet.h"
+#include "lib/fuzzing/fuzzing.h"
 
-#define ARENA_SIZE (1 << 20)
-
-struct nat64_fuzzing_params {
-	struct module *module;	     /**< Pointer to the module being tested */
-	struct cp_module *cp_module; /**< Module configuration */
-
-	void *arena;
-	void *payload_arena;
-	struct block_allocator ba;
-	struct memory_context mctx;
-};
-
-static struct nat64_fuzzing_params fuzz_params = {
-	.cp_module = NULL,
-};
+static struct fuzzing_params fuzz_params = {0};
 
 static int
 nat64_test_config(struct cp_module **cp_module) {
@@ -69,12 +50,15 @@ nat64_test_config(struct cp_module **cp_module) {
 	if (lpm_init(&config->mappings.v6_to_v4, memory_context)) {
 		goto error_lpm_v4;
 	}
+	if (lpm_init(&config->prefixes.v6_prefixes, memory_context)) {
+		goto error_lpm_v6;
+	}
 
 	// Add prefix
 	uint8_t pfx[12] = {0x20, 0x01, 0x0d, 0xb8, [11] = 0x00};
 	if (nat64_module_config_add_prefix((struct cp_module *)config, pfx) <
 	    0) {
-		goto error_lpm_v6;
+		goto error_lpm_prefixes;
 	}
 
 	struct mapping_item {
@@ -82,20 +66,20 @@ nat64_test_config(struct cp_module **cp_module) {
 		uint32_t ip6[4];
 	} mappings[] = {
 		{
-			.ip4 = RTE_BE32(RTE_IPV4(198, 51, 100, 1)),
-			.ip6 = {RTE_BE32(0x20010DB8), 0, 0, RTE_BE32(0x4)},
+			.ip4 = RTE_BE32(0xC6336401U), // 198.51.100.1
+			.ip6 = {RTE_BE32(0x20010DB8U), 0, 0, RTE_BE32(0x4U)},
 		},
 		{
-			.ip4 = RTE_BE32(RTE_IPV4(198, 51, 100, 2)),
-			.ip6 = {RTE_BE32(0x20010DB8), 0, 0, RTE_BE32(0x3)},
+			.ip4 = RTE_BE32(0xC6336402U), // 198.51.100.2
+			.ip6 = {RTE_BE32(0x20010DB8U), 0, 0, RTE_BE32(0x3U)},
 		},
 		{
-			.ip4 = RTE_BE32(RTE_IPV4(198, 51, 100, 3)),
-			.ip6 = {RTE_BE32(0x20010DB8), 0, 0, RTE_BE32(0x2)},
+			.ip4 = RTE_BE32(0xC6336403U), // 198.51.100.3
+			.ip6 = {RTE_BE32(0x20010DB8U), 0, 0, RTE_BE32(0x2U)},
 		},
 		{
-			.ip4 = RTE_BE32(RTE_IPV4(198, 51, 100, 4)),
-			.ip6 = {RTE_BE32(0x20010DB8), 0, 0, RTE_BE32(0x1)},
+			.ip4 = RTE_BE32(0xC6336404U), // 198.51.100.4
+			.ip6 = {RTE_BE32(0x20010DB8U), 0, 0, RTE_BE32(0x1U)},
 		},
 	};
 
@@ -128,6 +112,9 @@ error_mappings:
 			sizeof(struct nat64_prefix) * config->prefixes.count
 		);
 
+error_lpm_prefixes:
+	lpm_free(&config->prefixes.v6_prefixes);
+
 error_lpm_v6:
 	lpm_free(&config->mappings.v6_to_v4);
 
@@ -147,27 +134,10 @@ error_config:
 
 static int
 fuzz_setup() {
-	fuzz_params.arena = malloc(ARENA_SIZE);
-	if (fuzz_params.arena == NULL) {
+	if (fuzzing_params_init(
+		    &fuzz_params, "nat64 fuzzing", new_module_nat64
+	    ) != 0) {
 		return EXIT_FAILURE;
-	}
-
-	block_allocator_init(&fuzz_params.ba);
-	block_allocator_put_arena(
-		&fuzz_params.ba, fuzz_params.arena, ARENA_SIZE
-	);
-
-	memory_context_init(
-		&fuzz_params.mctx, "nat64 fuzzing", &fuzz_params.ba
-	);
-
-	fuzz_params.module = new_module_nat64();
-	fuzz_params.payload_arena = memory_balloc(
-		&fuzz_params.mctx,
-		sizeof(struct packet_front) + MBUF_MAX_SIZE * 4
-	);
-	if (fuzz_params.payload_arena == NULL) {
-		return -ENOMEM;
 	}
 
 	return nat64_test_config(&fuzz_params.cp_module);
@@ -179,34 +149,14 @@ RTE_LOG_REGISTER_DEFAULT(nat64test_logtype, EMERG);
 int
 LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 	if (fuzz_params.module == NULL) {
+		// Disable all logging during fuzzing to avoid spam
+		rte_log_set_global_level(RTE_LOG_EMERG);
 		rte_log_set_level(RTE_LOGTYPE_NAT64_TEST, RTE_LOG_EMERG);
+
 		if (fuzz_setup() != 0) {
 			exit(1); // Proper setup is essential for continuing
 		}
 	}
 
-	if (size > (MBUF_MAX_SIZE - RTE_PKTMBUF_HEADROOM)) {
-		return 0;
-	}
-
-	struct packet_front pf;
-	packet_front_init(&pf);
-	struct packet_data packet_data = {
-		.rx_device_id = 0, .tx_device_id = 0, .data = data, .size = size
-	};
-	fill_packet_list_arena(
-		&pf.input,
-		1,
-		&packet_data,
-		MBUF_MAX_SIZE,
-		fuzz_params.payload_arena,
-		MBUF_MAX_SIZE * 4
-	);
-	parse_packet(pf.input.first);
-	struct module_ectx module_ectx;
-	SET_OFFSET_OF(&module_ectx.cp_module, fuzz_params.cp_module);
-	// Process packet through decap module
-	fuzz_params.module->handler(NULL, &module_ectx, &pf);
-
-	return 0;
+	return fuzzing_process_packet(&fuzz_params, data, size);
 }

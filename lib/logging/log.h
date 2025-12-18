@@ -116,4 +116,4 @@ log_reset(void);
  * @param log_name The name of the logger to enable.
  */
 void
-log_enable_name(char *log_name);
+log_enable_name(const char *log_name);

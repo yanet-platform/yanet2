@@ -61,7 +61,7 @@ yanet_c_args = []
 yanet_link_args = []
 if get_option('fuzzing').enabled()
   fuzz_args = [
-    '-fsanitize=fuzzer-no-link,address',
+    '-fsanitize=fuzzer-no-link,address,undefined',
     '-fsanitize-coverage=edge,indirect-calls,trace-cmp',
     '-fprofile-instr-generate',
     '-fcoverage-mapping',
@@ -70,9 +70,22 @@ if get_option('fuzzing').enabled()
   # For fuzzing builds, all libraries should be instrumented with coverage counters.
   yanet_c_args += fuzz_args
   yanet_link_args += fuzz_args
+
+  # Add sanitizer flags to CGO for Go binaries
+  cgo_flags = '-fsanitize=address -g'
+  yanet_go_env = {
+      'CGO_CFLAGS': cgo_flags,
+      'CGO_LDFLAGS': cgo_flags,
+  }
+  yanet_cgo_cflags += cgo_flags
+  yanet_cgo_ldflags += cgo_flags
 endif
+
 yanet_rootdir = include_directories('.')
-yanet_builddir = include_directories('./build')
+
+# Initialize fuzzing targets dictionary
+# Modules will populate this with their fuzzing targets
+fuzzing_targets = {}
 
 libdpdk = subproject(
   'dpdk',

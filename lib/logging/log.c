@@ -87,7 +87,7 @@ log_reset(void) {
 }
 
 inline void
-log_enable_name(char *log_name) {
+log_enable_name(const char *log_name) {
 	enum log_id lid = LOG_ID_MAX;
 	for (uint64_t idx = 0; idx < sizeof(loggers) / sizeof(struct logger);
 	     idx++) {
