@@ -335,6 +335,27 @@ func (s *ModuleConfigState) RegisterVsWithReals(
 				i,
 			)
 		}
+
+		// Validate that allowed source IP version matches VS IP version
+		if vsAddr.Is4() != addr.Is4() {
+			return nil, fmt.Errorf(
+				"allowed source at index %d has mismatched IP version: VS is %s but allowed source is %s",
+				i,
+				func() string {
+					if vsAddr.Is4() {
+						return "IPv4"
+					}
+					return "IPv6"
+				}(),
+				func() string {
+					if addr.Is4() {
+						return "IPv4"
+					}
+					return "IPv6"
+				}(),
+			)
+		}
+
 		prefix, err := addr.Prefix(int(subnet.Size))
 		if err != nil {
 			return nil, fmt.Errorf(
@@ -374,6 +395,8 @@ func (s *ModuleConfigState) RegisterVsWithReals(
 		// Register real in state registry
 		realRegistryIdx, err := s.cHandle.RegisterReal(&realIdentifier)
 		if err != nil {
+			fmt.Printf("BALANCER_DEBUG [Go]: Failed to register real %d for VS %s:%d. Error: %v\n",
+				i, vsIdentifier.Ip.String(), vsIdentifier.Port, err)
 			return nil, fmt.Errorf(
 				"failed to register real at index %d: %w",
 				i,

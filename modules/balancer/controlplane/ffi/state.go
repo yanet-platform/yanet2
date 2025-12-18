@@ -25,6 +25,7 @@ import "C"
 import (
 	"fmt"
 	"net/netip"
+	"os"
 	"time"
 	"unsafe"
 
@@ -144,6 +145,7 @@ func (state *ModuleConfigStatePtr) RegisterReal(
 	vsIp := sliceToPtr(id.Vs.Ip.AsSlice())
 	realIp := sliceToPtr(id.Ip.AsSlice())
 	port := C.uint16_t(id.Vs.Port)
+
 	idx, err := C.balancer_state_register_real(
 		state.inner,
 		transportProto,
@@ -154,9 +156,11 @@ func (state *ModuleConfigStatePtr) RegisterReal(
 		realIp,
 	)
 	if err != nil {
+		fmt.Fprintf(os.Stdout, "BALANCER_DEBUG: C.balancer_state_register_real returned CGO error: %v\n", err)
 		return 0, fmt.Errorf("failed to register real: %w", err)
 	}
 	if int(idx) == -1 {
+		fmt.Fprintf(os.Stdout, "BALANCER_DEBUG: C.balancer_state_register_real returned -1 (allocation failure)\n")
 		return 0, fmt.Errorf("failed to register real")
 	}
 	return uint(idx), nil

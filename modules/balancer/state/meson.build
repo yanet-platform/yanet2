@@ -10,6 +10,9 @@ sources = files(
   'session_table.c',
   'state.c',
   'registry.c',
+  'index.c',
+  'array.c',
+  'service.c',
 )
 
 lib_balancer_state = static_library(

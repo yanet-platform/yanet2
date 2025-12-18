@@ -12,7 +12,7 @@ balancer_fill_virtual_services_info(
 	struct balancer_state *state,
 	struct balancer_virtual_services_info *info
 ) {
-	size_t count = state->vs_registry.service_count;
+	size_t count = state->vs_registry.array.size;
 	struct balancer_virtual_service_info *vs_info = memory_balloc(
 		state->mctx,
 		count * sizeof(struct balancer_virtual_service_info)
@@ -20,16 +20,14 @@ balancer_fill_virtual_services_info(
 	if (vs_info == NULL) {
 		return -1;
 	}
+
 	for (size_t i = 0; i < count; ++i) {
-		memset(&vs_info[i], 0, sizeof(vs_info[i]));
-		service_info_accumulate_into_vs_info(
-			&state->vs_registry.services[i],
-			&vs_info[i],
-			state->workers
-		);
+		balancer_fill_virtual_service_info(state, i, &vs_info[i]);
 	}
+
 	info->info = vs_info;
 	info->count = count;
+
 	return 0;
 }
 
@@ -41,15 +39,16 @@ balancer_fill_virtual_service_info(
 	size_t virtual_service_idx,
 	struct balancer_virtual_service_info *info
 ) {
-	if (virtual_service_idx >= state->vs_registry.service_count) {
+	if (virtual_service_idx >= state->vs_registry.array.size) {
 		return -1;
 	}
-	memset(info, 0, sizeof(*info));
+	memset(info, 0, sizeof(struct balancer_virtual_service_info));
 	service_info_accumulate_into_vs_info(
-		&state->vs_registry.services[virtual_service_idx],
+		service_registry_lookup(&state->vs_registry, virtual_service_idx),
 		info,
 		state->workers
 	);
+
 	return 0;
 }
 
@@ -71,7 +70,7 @@ int
 balancer_fill_reals_info(
 	struct balancer_state *state, struct balancer_reals_info *info
 ) {
-	size_t count = state->real_registry.service_count;
+	size_t count = state->real_registry.array.size;
 	struct balancer_real_info *real_info = memory_balloc(
 		state->mctx, count * sizeof(struct balancer_real_info)
 	);
@@ -79,11 +78,7 @@ balancer_fill_reals_info(
 		return -1;
 	}
 	for (size_t i = 0; i < count; ++i) {
-		service_info_accumulate_into_real_info(
-			&state->real_registry.services[i],
-			&real_info[i],
-			state->workers
-		);
+		balancer_fill_real_info(state, i, &real_info[i]);
 	}
 	info->info = real_info;
 	info->count = count;
@@ -109,11 +104,11 @@ balancer_fill_real_info(
 	size_t real_idx,
 	struct balancer_real_info *info
 ) {
-	if (real_idx >= state->real_registry.service_count) {
+	if (real_idx >= state->real_registry.array.size) {
 		return -1;
 	}
 	service_info_accumulate_into_real_info(
-		&state->real_registry.services[real_idx], info, state->workers
+		service_registry_lookup(&state->real_registry, real_idx), info, state->workers
 	);
 	return 0;
 }

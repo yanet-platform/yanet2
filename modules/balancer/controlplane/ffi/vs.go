@@ -148,11 +148,16 @@ func NewVsConfig(
 	for idx, prefix := range virtualService.AllowedSources {
 		startAddr := prefix.Addr()
 		endAddr := xnetip.LastAddr(prefix)
+
+		// Pin the slices to prevent GC from moving them during the C call
+		startSlice := startAddr.AsSlice()
+		endSlice := endAddr.AsSlice()
+
 		_, err := C.balancer_vs_config_set_allowed_src_range(
 			cVsConfig,
 			(C.size_t)(idx),
-			sliceToPtr(startAddr.AsSlice()),
-			sliceToPtr(endAddr.AsSlice()),
+			sliceToPtr(startSlice),
+			sliceToPtr(endSlice),
 		)
 		if err != nil {
 			C.balancer_vs_config_free(cVsConfig)

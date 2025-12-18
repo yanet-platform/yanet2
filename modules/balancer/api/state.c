@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 #include <stdalign.h>
+#include <stdio.h>
 
 #include "common/memory_address.h"
 #include "lib/controlplane/agent/agent.h"
@@ -86,7 +87,7 @@ balancer_state_register_real(
 	uint8_t *ip_address
 ) {
 	struct service_info *res = NULL;
-	return balancer_state_find_or_insert_real(
+	ssize_t result = balancer_state_find_or_insert_real(
 		state,
 		vip_address,
 		vip_network_proto,
@@ -96,6 +97,7 @@ balancer_state_register_real(
 		real_network_proto,
 		&res
 	);
+	return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

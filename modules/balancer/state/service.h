@@ -1,0 +1,84 @@
+#pragma once
+
+#include "modules/balancer/api/stats.h"
+#include "worker.h"
+#include <stdint.h>
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Persistent state of the service (virtual or real).
+// Sharded between workers.
+struct service_state {
+	// last packet timestamp
+	uint32_t last_packet_timestamp;
+
+	union {
+		struct balancer_real_stats real;
+		struct balancer_vs_stats vs;
+	} stats;
+};
+
+void
+service_state_copy(struct service_state *dst, struct service_state *src);
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Info about virtual or real service.
+struct service_info {
+	// address of the virtual service
+	uint8_t vip_address[16];
+
+	// type of vip address
+	int vip_proto;
+
+	// destination ip address (equals to vip in case of virtual service)
+	uint8_t ip_address[16];
+
+	// type of ip address
+	int ip_proto; // IPPROTO_IPV4 or IPPROTO_IPV6
+
+	// zero in case of pure l3 scheduling
+	uint16_t port;
+
+	// tcp or udp
+	int transport_proto; // IPPROTO_TCP or IPPROTO_UDP
+
+	// per worker service state
+	struct service_state state[MAX_WORKERS_NUM];
+};
+
+void
+service_info_init(
+    struct service_info *service_info,
+    uint8_t *vip_address,
+	int vip_proto,
+	uint8_t *ip_address,
+	int ip_proto,
+	uint16_t port,
+	int transport_proto
+);
+
+struct balancer_real_info;
+struct balancer_virtual_service_info;
+
+void
+service_info_accumulate_into_real_info(
+	struct service_info *service_info,
+	struct balancer_real_info *real_info,
+	size_t workers
+);
+
+void
+service_info_accumulate_into_vs_info(
+	struct service_info *service_info,
+	struct balancer_virtual_service_info *vs_info,
+	size_t workers
+);
+
+////////////////////////////////////////////////////////////////////////////////
+
+static inline void
+service_state_register_packet(struct service_state *state, uint32_t timestamp) {
+	state->last_packet_timestamp = timestamp;
+}

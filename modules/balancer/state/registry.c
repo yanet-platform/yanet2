@@ -1,119 +1,69 @@
 #include "registry.h"
 
-#include "../api/info.h"
-
-#include "common/network.h"
+#include "array.h"
+#include "index.h"
 
 #include <netinet/in.h>
-#include <stdio.h>
-#include <string.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
-service_state_copy(struct service_state *dst, struct service_state *src) {
-	dst->last_packet_timestamp = src->last_packet_timestamp;
-	memcpy(&dst->stats, &src->stats, sizeof(dst->stats));
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-void
-balancer_real_stats_add(
-	struct balancer_real_stats *to, struct balancer_real_stats *stats
-) {
-	to->bytes += stats->bytes;
-	to->created_sessions += stats->created_sessions;
-	to->packets_real_disabled += stats->packets_real_disabled;
-	to->ops_packets += stats->ops_packets;
-	to->packets += stats->packets;
-}
-
-void
-service_info_accumulate_into_real_info(
-	struct service_info *service_info,
-	struct balancer_real_info *real_info,
-	size_t workers
-) {
-	memset(real_info, 0, sizeof(struct balancer_real_info));
-
-	// set virtual ip
-	memcpy(real_info->vip,
-	       service_info->vip_address,
-	       service_info->vip_proto == IPPROTO_IPV6 ? NET6_LEN : NET4_LEN);
-	real_info->virtual_ip_proto = service_info->vip_proto;
-
-	// set port
-	real_info->virtual_port = service_info->port;
-
-	// set transport proto
-	real_info->transport_proto = service_info->transport_proto;
-
-	// set real ip
-	memcpy(real_info->ip,
-	       service_info->ip_address,
-	       service_info->ip_proto == IPPROTO_IPV6 ? NET6_LEN : NET4_LEN);
-	real_info->real_ip_proto = service_info->ip_proto;
-
-	// set stats
-	for (size_t i = 0; i < workers; ++i) {
-		struct service_state *state = &service_info->state[i];
-		if (state->last_packet_timestamp >
-		    real_info->last_packet_timestamp) {
-			real_info->last_packet_timestamp =
-				state->last_packet_timestamp;
-		}
-		balancer_real_stats_add(&real_info->stats, &state->stats.real);
+int
+service_registry_init(struct service_registry *registry, struct memory_context *mctx) {
+	// initialize array
+	service_array_init(&registry->array, mctx);
+	
+	// initialize the hash table index
+	int res = service_index_init(&registry->index, mctx);
+	if (res != 0) {
+		return -1;
 	}
+
+	registry->mctx = mctx;
+	
+	return 0;
+}
+
+void
+service_registry_free(
+	struct service_registry *registry
+) {
+	// free the services array
+	service_array_free(&registry->array);
+
+	// free the hash table index
+	service_index_free(&registry->index);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
-balancer_vs_stats_add(
-	struct balancer_vs_stats *to, struct balancer_vs_stats *stats
+ssize_t
+service_registry_find_or_insert_service(
+	struct service_registry *registry,
+	uint8_t *vip_address,
+	int vip_proto,
+	uint8_t *ip_address,
+	int ip_proto,
+	uint16_t port,
+	int transport_proto,
+	struct service_info **result
 ) {
-	to->incoming_packets += stats->incoming_packets;
-	to->incoming_bytes += stats->incoming_bytes;
-	to->packet_src_not_allowed += stats->packet_src_not_allowed;
-	to->no_reals += stats->no_reals;
-	to->ops_packets += stats->ops_packets;
-	to->session_table_overflow += stats->session_table_overflow;
-	to->real_is_disabled += stats->real_is_disabled;
-	to->not_rescheduled_packets += stats->not_rescheduled_packets;
-	to->created_sessions += stats->created_sessions;
-	to->outgoing_packets += stats->outgoing_packets;
-	to->outgoing_bytes += stats->outgoing_bytes;
+	struct service_index *index = &registry->index;
+	struct service_array *array = &registry->array;
+	ssize_t idx = service_index_lookup(index, array, vip_address, vip_proto, ip_address, ip_proto, port, transport_proto);
+	if (idx == -1) {
+		int res = service_array_push_back(array, vip_address, vip_proto, ip_address, ip_proto, port, transport_proto);
+		if (res != 0) {
+			return -1;
+		}
+		idx = array->size - 1;
+	}
+
+	*result = service_array_lookup(array, idx);
+
+	return idx;
 }
 
-void
-service_info_accumulate_into_vs_info(
-	struct service_info *service_info,
-	struct balancer_virtual_service_info *vs_info,
-	size_t workers
-) {
-	memset(vs_info, 0, sizeof(struct balancer_virtual_service_info));
-
-	// set ip
-	memcpy(vs_info->ip,
-	       service_info->vip_address,
-	       service_info->vip_proto == IPPROTO_IPV6 ? NET6_LEN : NET4_LEN);
-	vs_info->ip_proto = service_info->vip_proto;
-
-	// set port
-	vs_info->virtual_port = service_info->port;
-
-	// set proto
-	vs_info->transport_proto = service_info->transport_proto;
-
-	// set stats
-	for (size_t i = 0; i < workers; ++i) {
-		struct service_state *state = &service_info->state[i];
-		if (state->last_packet_timestamp >
-		    vs_info->last_packet_timestamp) {
-			vs_info->last_packet_timestamp =
-				state->last_packet_timestamp;
-		}
-		balancer_vs_stats_add(&vs_info->stats, &state->stats.vs);
-	}
+struct service_info *
+service_registry_lookup(struct service_registry *registry, size_t idx) {
+	return service_array_lookup(&registry->array, idx);
 }

@@ -3,6 +3,7 @@
 #include "common/memory_address.h"
 #include "common/ttlmap/detail/bucket.h"
 #include "common/ttlmap/ttlmap.h"
+#include "modules/balancer/api/info.h"
 #include "modules/balancer/api/state.h"
 #include <assert.h>
 #include <netinet/in.h>
