@@ -2,6 +2,7 @@ use clap::{Parser, ValueEnum};
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    List,
     Show(ShowConfigCmd),
     Set(SetConfigCmd),
     Read(ReadCmd),
@@ -11,7 +12,7 @@ pub enum ModeCmd {
 pub struct ShowConfigCmd {
     /// Pdump config name to operate on.
     #[arg(long = "cfg", short)]
-    pub config_name: Option<String>,
+    pub config_name: String,
     /// Output format.
     #[clap(long, value_enum, default_value_t = ConfigOutputFormat::Tree)]
     pub format: ConfigOutputFormat,

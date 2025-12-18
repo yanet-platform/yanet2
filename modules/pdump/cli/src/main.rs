@@ -58,6 +58,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = PdumpService::new(cmd.endpoint).await?;
 
     match cmd.mode {
+        ModeCmd::List => service.list_configs().await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Set(cmd) => service.set_config(cmd).await,
         ModeCmd::Read(cmd) => service.read_dump(cmd).await,
@@ -76,9 +77,7 @@ impl PdumpService {
 
     async fn get_config(&mut self, name: &str) -> Result<ShowConfigResponse, Box<dyn Error>> {
         let request = ShowConfigRequest {
-            target: Some(TargetModule {
-                config_name: name.to_owned(),
-            }),
+            target: Some(TargetModule { config_name: name.to_owned() }),
         };
         log::trace!("show config request: {request:?}");
         let response = self.client.show_config(request).await?.into_inner();
@@ -86,13 +85,23 @@ impl PdumpService {
         Ok(response)
     }
 
-    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
-        let Some(name) = cmd.config_name else {
-            self.print_config_list().await?;
-            return Ok(());
-        };
+    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
+        let request = ListConfigsRequest {};
+        log::trace!("list configs request: {request:?}");
+        let response = self.client.list_configs(request).await?.into_inner();
+        log::debug!("list configs response: {response:?}");
 
-        let config = self.get_config(&name).await?;
+        let mut tree = TreeBuilder::new("List Pdump Configs".to_string());
+        for config in response.configs {
+            tree.add_empty_child(config);
+        }
+        let tree = tree.build();
+        ptree::print_tree(&tree)?;
+        Ok(())
+    }
+
+    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
+        let config = self.get_config(&cmd.config_name).await?;
 
         match cmd.format {
             ConfigOutputFormat::Json => print_json(&config)?,
@@ -104,9 +113,7 @@ impl PdumpService {
 
     pub async fn set_config(&mut self, cmd: SetConfigCmd) -> Result<(), Box<dyn Error>> {
         let mut request = SetConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             ..Default::default()
         };
         let mut cfg = request.config.unwrap_or_default();
@@ -157,16 +164,11 @@ impl PdumpService {
         };
 
         let request = ReadDumpRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
         };
         log::trace!("read_data request: {request:?}");
         let stream = self.client.read_dump(request).await?.into_inner();
-        log::debug!(
-            "read_data successfully acquired data stream for {}",
-            cmd.config_name,
-        );
+        log::debug!("read_data successfully acquired data stream for {}", cmd.config_name,);
 
         reader_set.spawn(writer::pdump_stream_reader(stream, tx.clone(), done.clone()));
         drop(tx);
@@ -205,18 +207,6 @@ impl PdumpService {
             }
         }
 
-        Ok(())
-    }
-
-    async fn print_config_list(&mut self) -> Result<(), Box<dyn Error>> {
-        let request = ListConfigsRequest {};
-        let response = self.client.list_configs(request).await?.into_inner();
-        let mut tree = TreeBuilder::new("Pdump Configs".to_string());
-        for config in response.configs {
-            tree.add_empty_child(config);
-        }
-        let tree = tree.build();
-        ptree::print_tree(&tree)?;
         Ok(())
     }
 }

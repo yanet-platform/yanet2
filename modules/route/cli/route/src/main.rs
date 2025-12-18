@@ -42,6 +42,8 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// List all route configurations.
+    List,
     /// Show routes currently stored in RIB (route information base).
     Show(RouteShowCmd),
     /// Perform RIB route lookup.
@@ -62,7 +64,7 @@ pub struct RouteShowCmd {
     pub ipv6: bool,
     /// Route config name.
     #[arg(long = "cfg")]
-    pub config_name: Option<String>,
+    pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -113,6 +115,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = RouteService::new(cmd.endpoint).await?;
 
     match cmd.mode {
+        ModeCmd::List => service.list_configs().await,
         ModeCmd::Show(cmd) => service.show_routes(cmd).await,
         ModeCmd::Lookup(cmd) => service.lookup_route(cmd).await,
         ModeCmd::Insert(cmd) => service.insert_route(cmd).await,
@@ -132,10 +135,13 @@ impl RouteService {
         Ok(m)
     }
 
-    pub async fn print_config_list(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
         let request = ListConfigsRequest {};
+        log::trace!("list configs request: {request:?}");
         let response = self.client.list_configs(request).await?.into_inner();
-        let mut tree = TreeBuilder::new("Route Configs".to_string());
+        log::debug!("list configs response: {response:?}");
+
+        let mut tree = TreeBuilder::new("List Route Configs".to_string());
         for config in response.configs {
             tree.add_empty_child(config);
         }
@@ -145,15 +151,8 @@ impl RouteService {
     }
 
     pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Box<dyn Error>> {
-        let Some(name) = cmd.config_name else {
-            self.print_config_list().await?;
-            return Ok(());
-        };
-
         let request = ShowRoutesRequest {
-            target: Some(TargetModule {
-                config_name: name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             ipv4_only: cmd.ipv4,
             ipv6_only: cmd.ipv6,
         };
@@ -171,9 +170,7 @@ impl RouteService {
 
     pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Box<dyn Error>> {
         let request = LookupRouteRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             ip_addr: cmd.addr.to_string(),
         };
 
@@ -192,9 +189,7 @@ impl RouteService {
 
     pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Box<dyn Error>> {
         let request = InsertRouteRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             prefix: cmd.prefix.to_string(),
             nexthop_addr: cmd.nexthop_addr.to_string(),
             do_flush: true,
@@ -202,20 +197,14 @@ impl RouteService {
 
         self.client.insert_route(request).await?;
 
-        log::info!(
-            "Route inserted successfully: {} via {}",
-            cmd.prefix,
-            cmd.nexthop_addr
-        );
+        log::info!("Route inserted successfully: {} via {}", cmd.prefix, cmd.nexthop_addr);
 
         Ok(())
     }
 
     pub async fn flush_routes(&mut self, cmd: RouteFlushCmd) -> Result<(), Box<dyn Error>> {
         let request = FlushRoutesRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
         };
 
         self.client.flush_routes(request).await?;

@@ -4,7 +4,7 @@ use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use commonpb::TargetModule;
 use decappb::{
-    AddPrefixesRequest, RemovePrefixesRequest, ShowConfigRequest, ShowConfigResponse,
+    AddPrefixesRequest, ListConfigsRequest, RemovePrefixesRequest, ShowConfigRequest, ShowConfigResponse,
     decap_service_client::DecapServiceClient,
 };
 use ipnet::IpNet;
@@ -43,6 +43,7 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    List,
     Show(ShowConfigCmd),
     PrefixAdd(AddPrefixesCmd),
     PrefixRemove(RemovePrefixesCmd),
@@ -103,6 +104,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = DecapService::new(cmd.endpoint).await?;
 
     match cmd.mode {
+        ModeCmd::List => service.list_configs().await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::PrefixAdd(cmd) => service.add_prefixes(cmd).await,
         ModeCmd::PrefixRemove(cmd) => service.remove_prefixes(cmd).await,
@@ -119,13 +121,30 @@ impl DecapService {
         Ok(Self { client })
     }
 
+    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
+        let request = ListConfigsRequest {};
+        log::trace!("list configs request: {request:?}");
+        let response = self.client.list_configs(request).await?.into_inner();
+        log::debug!("list configs response: {response:?}");
+
+        let mut tree = TreeBuilder::new("List Decap Configs".to_string());
+        for config in response.configs {
+            tree.add_empty_child(config);
+        }
+        let tree = tree.build();
+        ptree::print_tree(&tree)?;
+        Ok(())
+    }
+
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
         let request = ShowConfigRequest {
             target: Some(TargetModule {
                 config_name: cmd.config_name.to_owned(),
             }),
         };
+        log::trace!("show config request: {request:?}");
         let response = self.client.show_config(request).await?.into_inner();
+        log::debug!("show config response: {response:?}");
 
         match cmd.format {
             OutputFormat::Json => print_json(&response)?,
@@ -137,9 +156,7 @@ impl DecapService {
 
     pub async fn add_prefixes(&mut self, cmd: AddPrefixesCmd) -> Result<(), Box<dyn Error>> {
         let request = AddPrefixesRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
         };
         log::trace!("AddPrefixesRequest: {request:?}");
@@ -150,9 +167,7 @@ impl DecapService {
 
     pub async fn remove_prefixes(&mut self, cmd: RemovePrefixesCmd) -> Result<(), Box<dyn Error>> {
         let request = RemovePrefixesRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
         };
         log::trace!("RemovePrefixesRequest: {request:?}");

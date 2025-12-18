@@ -46,6 +46,9 @@ func NewFWStateModuleConfig(agent *ffi.Agent, name string, oldConfig *FwStateCon
 }
 
 func (m *FwStateConfig) asCPModule() *C.struct_cp_module {
+	if m == nil {
+		return nil
+	}
 	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
@@ -78,7 +81,7 @@ func (m *FwStateConfig) CreateMaps(
 			return nil
 		}
 		// FIXME rotate layers
-		return nil
+		return fmt.Errorf("TODO: layers rotation is not connected to C code yet")
 	}
 
 	log.Infow("creating fwstate maps",

@@ -33,6 +33,25 @@ func NewDecapService(agent *ffi.Agent, log *zap.SugaredLogger) *DecapService {
 	}
 }
 
+func (m *DecapService) ListConfigs(
+	ctx context.Context, request *decappb.ListConfigsRequest,
+) (*decappb.ListConfigsResponse, error) {
+
+	response := &decappb.ListConfigsResponse{
+		Configs: make([]string, 0),
+	}
+
+	// Lock instances store and module updates
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for name := range m.configs {
+		response.Configs = append(response.Configs, name)
+	}
+
+	return response, nil
+}
+
 func (m *DecapService) ShowConfig(
 	ctx context.Context,
 	request *decappb.ShowConfigRequest,

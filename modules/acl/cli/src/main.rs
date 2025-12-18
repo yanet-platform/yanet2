@@ -13,8 +13,8 @@ use ync::logging;
 use serde::{Deserialize, Serialize};
 
 use aclpb::{
-    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
-    UpdateFwStateConfigRequest, acl_service_client::AclServiceClient,
+    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest, UpdateFwStateConfigRequest,
+    acl_service_client::AclServiceClient,
 };
 
 use args::{DeleteCmd, ModeCmd, SetFwstateConfigCmd, ShowCmd, UpdateCmd};
@@ -57,40 +57,54 @@ struct VlanRange {
     to: u32,
 }
 
-impl From<VlanRange> for aclpb::VlanRange {
-    fn from(r: VlanRange) -> Self {
-        Self { from: r.from, to: r.to }
+impl TryFrom<VlanRange> for aclpb::VlanRange {
+    type Error = Box<dyn Error>;
+
+    fn try_from(r: VlanRange) -> Result<Self, Self::Error> {
+        // VLAN ID is 12 bits, so valid range is 0-4095
+        if r.from > 4095 {
+            return Err(format!("VLAN 'from' value {} exceeds maximum 4095", r.from).into());
+        }
+        if r.to > 4095 {
+            return Err(format!("VLAN 'to' value {} exceeds maximum 4095", r.to).into());
+        }
+        if r.from > r.to {
+            return Err(format!("VLAN 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
+        }
+        Ok(Self { from: r.from, to: r.to })
     }
 }
 
-impl From<String> for aclpb::IpNet {
-    fn from(value: String) -> Self {
+impl TryFrom<String> for aclpb::IpNet {
+    type Error = Box<dyn Error>;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
         let parts: Vec<&str> = value.split('/').collect();
         if parts.len() == 1 {
-            let addr: IpAddr = value.parse().unwrap();
-            return match addr {
-                IpAddr::V4(v4) => Self {
+            let addr: IpAddr = value.parse()?;
+            return Ok(match addr {
+                IpAddr::V4(v4) => aclpb::IpNet {
                     addr: v4.octets().to_vec(),
                     mask: [0xff, 0xff, 0xff, 0xff].to_vec(),
                 },
-                IpAddr::V6(v6) => Self {
+                IpAddr::V6(v6) => aclpb::IpNet {
                     addr: v6.octets().to_vec(),
                     mask: [
                         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
                     ]
                     .to_vec(),
                 },
-            };
+            });
         }
 
         if parts.len() != 2 {
-            panic!("invalid format");
+            return Err("invalid format: expected IP/mask or IP/prefix".into());
         }
 
-        let chmo: Result<IpNetwork, _> = value.parse();
+        let network_result: Result<IpNetwork, _> = value.parse();
 
-        match chmo {
-            Ok(net) => Self {
+        match network_result {
+            Ok(net) => Ok(aclpb::IpNet {
                 addr: match net.ip() {
                     IpAddr::V4(v4) => v4.octets().to_vec(),
                     IpAddr::V6(v6) => v6.octets().to_vec(),
@@ -99,11 +113,11 @@ impl From<String> for aclpb::IpNet {
                     IpAddr::V4(v4) => v4.octets().to_vec(),
                     IpAddr::V6(v6) => v6.octets().to_vec(),
                 },
-            },
+            }),
             Err(_) => {
-                let addr: IpAddr = parts[0].parse().unwrap();
-                let mask: IpAddr = parts[1].parse().unwrap();
-                Self {
+                let addr: IpAddr = parts[0].parse()?;
+                let mask: IpAddr = parts[1].parse()?;
+                Ok(aclpb::IpNet {
                     addr: match addr {
                         IpAddr::V4(v4) => v4.octets().to_vec(),
                         IpAddr::V6(v6) => v6.octets().to_vec(),
@@ -112,7 +126,7 @@ impl From<String> for aclpb::IpNet {
                         IpAddr::V4(v4) => v4.octets().to_vec(),
                         IpAddr::V6(v6) => v6.octets().to_vec(),
                     },
-                }
+                })
             }
         }
     }
@@ -124,21 +138,55 @@ struct Range {
     to: u32,
 }
 
-impl From<Range> for aclpb::PortRange {
-    fn from(r: Range) -> Self {
-        Self { from: r.from, to: r.to }
+impl TryFrom<Range> for aclpb::PortRange {
+    type Error = Box<dyn Error>;
+
+    fn try_from(r: Range) -> Result<Self, Self::Error> {
+        if r.from > 65535 {
+            return Err(format!("Port 'from' value {} exceeds maximum 65535", r.from).into());
+        }
+        if r.to > 65535 {
+            return Err(format!("Port 'to' value {} exceeds maximum 65535", r.to).into());
+        }
+        if r.from > r.to {
+            return Err(format!("Port 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
+        }
+        Ok(Self { from: r.from, to: r.to })
     }
 }
 
-impl From<Range> for aclpb::ProtoRange {
-    fn from(r: Range) -> Self {
-        Self { from: r.from, to: r.to }
+impl TryFrom<Range> for aclpb::ProtoRange {
+    type Error = Box<dyn Error>;
+
+    fn try_from(r: Range) -> Result<Self, Self::Error> {
+        if r.from > 65535 {
+            return Err(format!("Protocol 'from' value {} exceeds maximum 65535", r.from).into());
+        }
+        if r.to > 65535 {
+            return Err(format!("Protocol 'to' value {} exceeds maximum 65535", r.to).into());
+        }
+        if r.from > r.to {
+            return Err(format!("Protocol 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
+        }
+        Ok(Self { from: r.from, to: r.to })
     }
 }
 
-impl From<Range> for aclpb::VlanRange {
-    fn from(r: Range) -> Self {
-        Self { from: r.from, to: r.to }
+impl TryFrom<Range> for aclpb::VlanRange {
+    type Error = Box<dyn Error>;
+
+    fn try_from(r: Range) -> Result<Self, Self::Error> {
+        // VLAN ID is 12 bits, so valid range is 0-4095
+        if r.from > 4095 {
+            return Err(format!("VLAN 'from' value {} exceeds maximum 4095", r.from).into());
+        }
+        if r.to > 4095 {
+            return Err(format!("VLAN 'to' value {} exceeds maximum 4095", r.to).into());
+        }
+        if r.from > r.to {
+            return Err(format!("VLAN 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
+        }
+        Ok(Self { from: r.from, to: r.to })
     }
 }
 
@@ -161,24 +209,92 @@ struct ACLRule {
     action: ActionKind,
 }
 
-impl From<ACLRule> for aclpb::Rule {
-    fn from(acl_rule: ACLRule) -> Self {
-        Self {
+impl TryFrom<ACLRule> for aclpb::Rule {
+    type Error = Box<dyn Error>;
+
+    fn try_from(acl_rule: ACLRule) -> Result<Self, Self::Error> {
+        let srcs: Result<Vec<_>, Box<dyn Error>> = acl_rule
+            .srcs
+            .into_iter()
+            .enumerate()
+            .map(|(i, m)| {
+                m.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
+                    format!("failed to parse src[{}]: {}", i, e).into()
+                })
+            })
+            .collect();
+
+        let dsts: Result<Vec<_>, Box<dyn Error>> = acl_rule
+            .dsts
+            .into_iter()
+            .enumerate()
+            .map(|(i, m)| {
+                m.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
+                    format!("failed to parse dst[{}]: {}", i, e).into()
+                })
+            })
+            .collect();
+
+        let vlan_ranges: Result<Vec<_>, Box<dyn Error>> = acl_rule
+            .vlan_ranges
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                r.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
+                    format!("failed to parse vlan_range[{}]: {}", i, e).into()
+                })
+            })
+            .collect();
+
+        let src_port_ranges: Result<Vec<_>, Box<dyn Error>> = acl_rule
+            .src_ports
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                r.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
+                    format!("failed to parse src_port_range[{}]: {}", i, e).into()
+                })
+            })
+            .collect();
+
+        let dst_port_ranges: Result<Vec<_>, Box<dyn Error>> = acl_rule
+            .dst_ports
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                r.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
+                    format!("failed to parse dst_port_range[{}]: {}", i, e).into()
+                })
+            })
+            .collect();
+
+        let proto_ranges: Result<Vec<_>, Box<dyn Error>> = acl_rule
+            .proto_ranges
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                r.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
+                    format!("failed to parse proto_range[{}]: {}", i, e).into()
+                })
+            })
+            .collect();
+
+        Ok(Self {
             counter: acl_rule.counter,
             devices: acl_rule.devices,
-            vlan_ranges: acl_rule.vlan_ranges.into_iter().map(|m| m.into()).collect(),
-            srcs: acl_rule.srcs.into_iter().map(|m| m.into()).collect(),
-            dsts: acl_rule.dsts.into_iter().map(|m| m.into()).collect(),
-            src_port_ranges: acl_rule.src_ports.into_iter().map(|m| m.into()).collect(),
-            dst_port_ranges: acl_rule.dst_ports.into_iter().map(|m| m.into()).collect(),
-            proto_ranges: acl_rule.proto_ranges.into_iter().map(|m| m.into()).collect(),
+            vlan_ranges: vlan_ranges?,
+            srcs: srcs?,
+            dsts: dsts?,
+            src_port_ranges: src_port_ranges?,
+            dst_port_ranges: dst_port_ranges?,
+            proto_ranges: proto_ranges?,
             keep_state: false,
             action: match acl_rule.action {
                 ActionKind::Allow => aclpb::ActionKind::Pass,
                 ActionKind::Deny => aclpb::ActionKind::Deny,
             }
             .into(),
-        }
+        })
     }
 }
 
@@ -189,9 +305,20 @@ pub struct ACLConfig {
     rules: Vec<ACLRule>,
 }
 
-impl From<ACLConfig> for Vec<aclpb::Rule> {
-    fn from(config: ACLConfig) -> Self {
-        config.rules.into_iter().map(From::from).collect()
+impl TryFrom<ACLConfig> for Vec<aclpb::Rule> {
+    type Error = Box<dyn Error>;
+
+    fn try_from(config: ACLConfig) -> Result<Self, Self::Error> {
+        config
+            .rules
+            .into_iter()
+            .enumerate()
+            .map(|(i, rule)| {
+                rule.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
+                    format!("failed to parse rule #{}: {}", i + 1, e).into()
+                })
+            })
+            .collect()
     }
 }
 
@@ -226,9 +353,7 @@ impl ACLService {
 
     pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
         let request = ShowConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
         };
         let response = self.client.show_config(request).await?.into_inner();
         println!("{}", serde_json::to_string(&response)?);
@@ -237,9 +362,7 @@ impl ACLService {
 
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
         let request = DeleteConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
         };
         self.client.delete_config(request).await?.into_inner();
         Ok(())
@@ -247,11 +370,9 @@ impl ACLService {
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         let config = ACLConfig::from_file(&cmd.rules)?;
-        let rules: Vec<aclpb::Rule> = config.into();
+        let rules: Vec<aclpb::Rule> = config.try_into()?;
         let request = UpdateConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             rules,
         };
         log::trace!("UpdateConfigRequest: {request:?}");
@@ -263,9 +384,7 @@ impl ACLService {
     pub async fn set_fwstate_config(&mut self, cmd: SetFwstateConfigCmd) -> Result<(), Box<dyn Error>> {
         // First, fetch the current config to merge with new values
         let current_request = ShowConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
         };
         let current_response = self.client.show_config(current_request).await?.into_inner();
 
@@ -333,9 +452,7 @@ impl ACLService {
         }
 
         let request = UpdateFwStateConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             map_config: Some(map_config),
             sync_config: Some(sync_config),
         };

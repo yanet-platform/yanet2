@@ -8,6 +8,10 @@ option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/decap
 
 // DecapService is a service for decapsulation module.
 service DecapService {
+	// ListConfigs returns all decap module configurations of all
+	// dataplane instances.
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
 	// ShowConfig returns the current configuration for the decap module.
 	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {
 	}
@@ -19,6 +23,14 @@ service DecapService {
 	rpc RemovePrefixes(RemovePrefixesRequest)
 		returns (RemovePrefixesResponse) {
 	}
+}
+
+message ListConfigsRequest {
+}
+
+// ListConfigsResponse contains existing configurations.
+message ListConfigsResponse {
+	repeated string configs = 1;
 }
 
 // ShowConfigResponse retrieves the runtime configuration for the decap module.

@@ -4,7 +4,9 @@ use std::net::IpAddr;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use code::{DeleteConfigRequest, UpdateConfigRequest, forward_service_client::ForwardServiceClient};
+use code::{
+    DeleteConfigRequest, ListConfigsRequest, UpdateConfigRequest, forward_service_client::ForwardServiceClient,
+};
 use commonpb::TargetModule;
 use tonic::transport::Channel;
 use ync::logging;
@@ -42,6 +44,7 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    List,
     Delete(DeleteCmd),
     Update(UpdateCmd),
 }
@@ -163,12 +166,19 @@ impl ForwardService {
         Ok(Self { client })
     }
 
+    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
+        let request = ListConfigsRequest {};
+        log::trace!("list configs request: {request:?}");
+        let response = self.client.list_configs(request).await?.into_inner();
+        log::debug!("list configs response: {response:?}");
+
+        println!("{}", serde_json::to_string_pretty(&response.configs)?);
+        Ok(())
+    }
+
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
         let request = DeleteConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-                
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
         };
         self.client.delete_config(request).await?;
 
@@ -179,10 +189,7 @@ impl ForwardService {
         let config = ForwardConfig::from_file(&cmd.rules)?;
         let rules: Vec<code::ForwardRule> = config.into();
         let request = UpdateConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-                
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             rules: rules,
         };
         log::trace!("UpdateConfigRequest: {request:?}");
@@ -197,6 +204,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = ForwardService::new(cmd.endpoint).await?;
 
     match cmd.mode {
+        ModeCmd::List => service.list_configs().await,
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
     }

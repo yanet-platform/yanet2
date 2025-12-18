@@ -46,6 +46,7 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    List,
     Show(ShowConfigCmd),
     PrefixAdd(AddPrefixesCmd),
     PrefixRemove(RemovePrefixesCmd),
@@ -56,7 +57,7 @@ pub enum ModeCmd {
 pub struct ShowConfigCmd {
     /// DSCP module name to operate on.
     #[arg(long = "cfg", short)]
-    pub config_name: Option<String>,
+    pub config_name: String,
     /// Output format.
     #[clap(long, value_enum, default_value_t = OutputFormat::Tree)]
     pub format: OutputFormat,
@@ -120,6 +121,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = DscpService::new(cmd.endpoint).await?;
 
     match cmd.mode {
+        ModeCmd::List => service.list_configs().await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::PrefixAdd(cmd) => service.add_prefixes(cmd).await,
         ModeCmd::PrefixRemove(cmd) => service.remove_prefixes(cmd).await,
@@ -137,15 +139,25 @@ impl DscpService {
         Ok(Self { client })
     }
 
-    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
-        let Some(name) = cmd.config_name else {
-            self.print_config_list().await?;
-            return Ok(());
-        };
+    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
+        let request = ListConfigsRequest {};
+        log::trace!("list configs request: {request:?}");
+        let response = self.client.list_configs(request).await?.into_inner();
+        log::debug!("list configs response: {response:?}");
 
+        let mut tree = TreeBuilder::new("List DSCP Configs".to_string());
+        for config in response.configs {
+            tree.add_empty_child(config);
+        }
+        let tree = tree.build();
+        ptree::print_tree(&tree)?;
+        Ok(())
+    }
+
+    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
         let request = ShowConfigRequest {
             target: Some(TargetModule {
-                config_name: name.to_owned(),
+                config_name: cmd.config_name.to_owned(),
             }),
         };
         log::trace!("show config request: {request:?}");
@@ -162,9 +174,7 @@ impl DscpService {
 
     pub async fn add_prefixes(&mut self, cmd: AddPrefixesCmd) -> Result<(), Box<dyn Error>> {
         let request = AddPrefixesRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
         };
         log::trace!("AddPrefixesRequest: {request:?}");
@@ -175,9 +185,7 @@ impl DscpService {
 
     pub async fn remove_prefixes(&mut self, cmd: RemovePrefixesCmd) -> Result<(), Box<dyn Error>> {
         let request = RemovePrefixesRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
         };
         log::trace!("RemovePrefixesRequest: {request:?}");
@@ -198,26 +206,12 @@ impl DscpService {
         }
 
         let request = SetDscpMarkingRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.clone(),
-            }),
+            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
             dscp_config: Some(DscpConfig { flag: cmd.flag, mark: cmd.mark }),
         };
         log::trace!("SetDscpMarkingRequest: {request:?}");
         let response = self.client.set_dscp_marking(request).await?.into_inner();
         log::debug!("SetDscpMarkingResponse: {response:?}");
-        Ok(())
-    }
-
-    async fn print_config_list(&mut self) -> Result<(), Box<dyn Error>> {
-        let request = ListConfigsRequest {};
-        let response = self.client.list_configs(request).await?.into_inner();
-        let mut tree = TreeBuilder::new("List DSCP Configs".to_string());
-        for config in response.configs {
-            tree.add_empty_child(config);
-        }
-        let tree = tree.build();
-        ptree::print_tree(&tree)?;
         Ok(())
     }
 }

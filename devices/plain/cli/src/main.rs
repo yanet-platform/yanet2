@@ -75,9 +75,7 @@ impl DevicePlainService {
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         let request = UpdateDevicePlainRequest {
-            target: Some(TargetDevice {
-                name: cmd.name,
-            }),
+            target: Some(TargetDevice { name: cmd.name }),
             device: Some(Device {
                 input: cmd
                     .input
