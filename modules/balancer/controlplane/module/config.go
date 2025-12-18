@@ -258,7 +258,22 @@ func (config *ModuleConfig) UpdateReals(
 			// Find real location using index (O(1) lookup)
 			location, found := config.realIndex[update.Real]
 			if !found {
-				return fmt.Errorf("failed to find real for update at index %d", updateIdx)
+				config.log.Warnw(
+					"failed to find real for update",
+					"update_index", updateIdx,
+					"vs_ip", update.Real.Vs.Ip.String(),
+					"vs_port", update.Real.Vs.Port,
+					"vs_proto", update.Real.Vs.Proto.String(),
+					"real_ip", update.Real.Ip.String(),
+				)
+				return fmt.Errorf(
+					"failed to find real for update at index %d: vs=%s:%d/%s, real=%s",
+					updateIdx,
+					update.Real.Vs.Ip.String(),
+					update.Real.Vs.Port,
+					update.Real.Vs.Proto.String(),
+					update.Real.Ip.String(),
+				)
 			}
 
 			// Update the real directly
@@ -277,8 +292,34 @@ func (config *ModuleConfig) UpdateReals(
 
 func (config *ModuleConfig) FlushRealUpdates() (int, error) {
 	updates := config.realUpdates.Clear()
+
+	// Log the updates being flushed
+	if len(updates) > 0 {
+		config.log.Debugw(
+			"flushing real updates",
+			"count", len(updates),
+		)
+		for i, update := range updates {
+			config.log.Debugw(
+				"flushing real update",
+				"index", i,
+				"vs_ip", update.Real.Vs.Ip.String(),
+				"vs_port", update.Real.Vs.Port,
+				"vs_proto", update.Real.Vs.Proto.String(),
+				"real_ip", update.Real.Ip.String(),
+				"weight", update.Weight,
+				"enable", update.Enable,
+			)
+		}
+	}
+
 	err := config.UpdateReals(updates, false)
 	if err != nil {
+		config.log.Warnw(
+			"failed to flush real updates",
+			"count", len(updates),
+			"error", err,
+		)
 		return 0, err
 	}
 	return len(updates), nil

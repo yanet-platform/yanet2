@@ -135,6 +135,36 @@ vs_v4_fw(
 	return true;
 }
 
+static inline bool
+vs_v4_announced(struct packet_ctx *ctx) {
+	struct balancer_module_config *config = ctx->config;
+	struct packet *packet = ctx->packet;
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
+	);
+	return lpm_lookup(
+		       &config->announce_ipv4,
+		       NET4_LEN,
+		       (uint8_t *)&ipv4_hdr->dst_addr
+	       ) != LPM_VALUE_INVALID;
+}
+
+static inline bool
+vs_v6_announced(struct packet_ctx *ctx) {
+	struct balancer_module_config *config = ctx->config;
+	struct packet *packet = ctx->packet;
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
+	);
+	return lpm_lookup(
+		       &config->announce_ipv6,
+		       NET6_LEN,
+		       (uint8_t *)&ipv6_hdr->dst_addr
+	       ) != LPM_VALUE_INVALID;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline struct virtual_service *

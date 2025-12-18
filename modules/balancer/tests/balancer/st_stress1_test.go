@@ -75,7 +75,7 @@ func executeTestCase(t *testing.T, config *config, test *testCase) {
 		assert.Equal(t, 0, len(sessionsInfo.Sessions))
 
 		// Get state info
-		stateInfo := config.balancer.GetStateInfo()
+		stateInfo := config.balancer.GetStateInfo(config.mock.CurrentTime())
 
 		// Verify module state
 		assert.Equal(t, uint(0), stateInfo.ActiveSessions.Value)
@@ -218,7 +218,7 @@ func executeTestCase(t *testing.T, config *config, test *testCase) {
 			}
 
 			// Get state info
-			state := config.balancer.GetStateInfo()
+			state := config.balancer.GetStateInfo(config.mock.CurrentTime())
 
 			// Verify active sessions for VS
 			require.Equal(t, 1, len(state.VsInfo), "should have exactly one VS")

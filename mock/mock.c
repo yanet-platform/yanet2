@@ -351,7 +351,8 @@ yanet_mock_shm(struct yanet_mock *mock) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-extern thread_local struct timespec current_time;
+extern void
+set_current_time(struct timespec *ts);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -374,15 +375,11 @@ yanet_mock_handle_packets(
 	struct yanet_worker_mock *worker = &mock->workers[worker_idx];
 
 	// Set global time to the current mock time.
-	struct timespec prev_time = current_time;
-	current_time = mock->current_time;
+	set_current_time(&mock->current_time);
 
 	// Handle packets.
 	struct packet_handle_result result =
 		yanet_worker_mock_handle_packets(worker, packets);
-
-	// Restore global time to the previous value.
-	current_time = prev_time;
 
 	return result;
 }

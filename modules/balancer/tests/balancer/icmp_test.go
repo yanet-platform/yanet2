@@ -439,6 +439,173 @@ func TestICMPEchoRequest(t *testing.T) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Test: ICMP Echo Request to non-virtual service IP should be dropped
+////////////////////////////////////////////////////////////////////////////////
+
+func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
+	vsIPv4 := IpAddr("10.1.1.1")
+	nonVsIPv4 := IpAddr("10.99.99.99") // Not configured as VS
+	clientIPv4 := IpAddr("10.0.1.1")
+
+	vsIPv6 := IpAddr("2001:db8::1")
+	nonVsIPv6 := IpAddr("2001:db8:99::99") // Not configured as VS
+	clientIPv6 := IpAddr("2001:db8:1::1")
+
+	config := &balancerpb.ModuleConfig{
+		SourceAddressV4: IpAddr("5.5.5.5").AsSlice(),
+		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
+		VirtualServices: []*balancerpb.VirtualService{
+			{
+				Addr:  vsIPv4.AsSlice(),
+				Port:  80,
+				Proto: balancerpb.TransportProto_TCP,
+				AllowedSrcs: []*balancerpb.Subnet{
+					{
+						Addr: IpAddr("10.0.0.0").AsSlice(),
+						Size: 8,
+					},
+				},
+				Scheduler: balancerpb.VsScheduler_PRR,
+				Flags: &balancerpb.VsFlags{
+					Gre:    false,
+					FixMss: false,
+					Ops:    false,
+					PureL3: false,
+				},
+				Reals: []*balancerpb.Real{
+					{
+						DstAddr: IpAddr("10.2.2.2").AsSlice(),
+						Weight:  1,
+						SrcAddr: IpAddr("10.2.2.2").AsSlice(),
+						SrcMask: IpAddr("255.255.255.255").AsSlice(),
+						Enabled: true,
+					},
+				},
+			},
+			{
+				Addr:  vsIPv6.AsSlice(),
+				Port:  80,
+				Proto: balancerpb.TransportProto_TCP,
+				AllowedSrcs: []*balancerpb.Subnet{
+					{
+						Addr: IpAddr("2001:db8::").AsSlice(),
+						Size: 32,
+					},
+				},
+				Scheduler: balancerpb.VsScheduler_PRR,
+				Flags: &balancerpb.VsFlags{
+					Gre:    false,
+					FixMss: false,
+					Ops:    false,
+					PureL3: false,
+				},
+				Reals: []*balancerpb.Real{
+					{
+						DstAddr: IpAddr("2001:db8:2::2").AsSlice(),
+						Weight:  1,
+						SrcAddr: IpAddr("2001:db8:2::2").AsSlice(),
+						SrcMask: IpAddr(
+							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+						).AsSlice(),
+						Enabled: true,
+					},
+				},
+			},
+		},
+		SessionsTimeouts: &balancerpb.SessionsTimeouts{
+			TcpSynAck: 60,
+			TcpSyn:    60,
+			TcpFin:    60,
+			Tcp:       60,
+			Udp:       60,
+			Default:   60,
+		},
+		Wlc: &balancerpb.WlcConfig{
+			WlcPower:      10,
+			MaxRealWeight: 1000,
+			UpdatePeriod:  durationpb.New(0),
+		},
+	}
+
+	setup, err := SetupTest(&TestConfig{
+		moduleConfig: config,
+		stateConfig: &balancerpb.ModuleStateConfig{
+			SessionTableCapacity:      100,
+			SessionTableScanPeriod:    durationpb.New(0),
+			SessionTableMaxLoadFactor: 0.5,
+		},
+	})
+	require.NoError(t, err)
+	defer setup.Free()
+
+	t.Run("IPv4_NonVS_ShouldDrop", func(t *testing.T) {
+		// Create ICMP Echo Request to non-VS IP
+		packetLayers := MakeICMPv4EchoRequest(clientIPv4, nonVsIPv4, 1234, 1)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+
+		// Send packet
+		result, err := setup.mock.HandlePackets(packet)
+		require.NoError(t, err)
+
+		// BUG: Currently this test will FAIL because the balancer responds
+		// to ANY ICMP echo request, even if the destination is not a VS.
+		// After the fix, this should pass.
+
+		// Packet should be dropped, not responded to
+		require.Empty(t, result.Output, "should not respond to non-VS IP")
+		require.Equal(t, 1, len(result.Drop), "should drop packet")
+	})
+
+	t.Run("IPv6_NonVS_ShouldDrop", func(t *testing.T) {
+		// Create ICMPv6 Echo Request to non-VS IP
+		packetLayers := MakeICMPv6EchoRequest(clientIPv6, nonVsIPv6, 5678, 2)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+
+		// Send packet
+		result, err := setup.mock.HandlePackets(packet)
+		require.NoError(t, err)
+
+		// BUG: Currently this test will FAIL because the balancer responds
+		// to ANY ICMPv6 echo request, even if the destination is not a VS.
+		// After the fix, this should pass.
+
+		// Packet should be dropped, not responded to
+		require.Empty(t, result.Output, "should not respond to non-VS IP")
+		require.Equal(t, 1, len(result.Drop), "should drop packet")
+	})
+
+	t.Run("IPv4_ValidVS_ShouldRespond", func(t *testing.T) {
+		// Create ICMP Echo Request to valid VS IP
+		packetLayers := MakeICMPv4EchoRequest(clientIPv4, vsIPv4, 1234, 1)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+
+		// Send packet
+		result, err := setup.mock.HandlePackets(packet)
+		require.NoError(t, err)
+
+		// Should respond to valid VS IP
+		require.Equal(t, 1, len(result.Output), "should respond to VS IP")
+		require.Empty(t, result.Drop, "should not drop packet")
+
+		// Verify it's an ICMP Echo Reply
+		responsePacket := gopacket.NewPacket(
+			result.Output[0].RawData,
+			layers.LayerTypeEthernet,
+			gopacket.Default,
+		)
+		icmpLayer := responsePacket.Layer(layers.LayerTypeICMPv4)
+		require.NotNil(t, icmpLayer, "response should have ICMPv4 layer")
+		icmp := icmpLayer.(*layers.ICMPv4)
+		assert.Equal(
+			t,
+			uint8(layers.ICMPv4TypeEchoReply),
+			uint8(icmp.TypeCode.Type()),
+			"should be Echo Reply",
+		)
+	})
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Test: ICMP Error packet forwarding when session exists
 ////////////////////////////////////////////////////////////////////////////////
 

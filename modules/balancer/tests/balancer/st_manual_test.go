@@ -114,7 +114,7 @@ func checkActiveSessions(
 	)
 
 	// Get state info to verify VS and Real active sessions
-	stateInfo := balancer.GetStateInfo()
+	stateInfo := balancer.GetStateInfo(currentTime)
 
 	// Verify module active sessions
 	assert.Equal(

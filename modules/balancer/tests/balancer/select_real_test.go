@@ -179,7 +179,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 		// check balancer state info
 
-		info := balancer.GetStateInfo()
+		info := balancer.GetStateInfo(mock.CurrentTime())
 		assert.NotNil(t, info)
 
 		// check vs
@@ -220,11 +220,11 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 	t.Run("Enable_Disabled_Reals", func(t *testing.T) {
 		// update CP config by enabling reals
-		config, _ := balancer.GetConfig()
+		config, stateConfig := balancer.GetConfig()
 		config.VirtualServices[0].Reals[1].Enabled = true
 		config.VirtualServices[0].Reals[2].Enabled = true
 
-		err := balancer.Update(config, nil)
+		err := balancer.Update(config, stateConfig)
 		require.Nil(t, err, "failed to update reals")
 	})
 
@@ -245,7 +245,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 		// check balancer state info
 
-		info := balancer.GetStateInfo()
+		info := balancer.GetStateInfo(mock.CurrentTime())
 		assert.NotNil(t, info)
 
 		// check vs
@@ -292,11 +292,11 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 	t.Run("Disable_First_and_Second_Reals", func(t *testing.T) {
 		// update CP config by disabling reals
-		config, _ := balancer.GetConfig()
+		config, stateConfig := balancer.GetConfig()
 		config.VirtualServices[0].Reals[0].Enabled = false
 		config.VirtualServices[0].Reals[1].Enabled = false
 
-		err := balancer.Update(config, nil)
+		err := balancer.Update(config, stateConfig)
 		require.Nil(t, err, "failed to update reals")
 	})
 
@@ -306,7 +306,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 	t.Run("Send_Some_Packets_After_Second_Update", func(t *testing.T) {
 		// set prev state info
-		infoBefore := balancer.GetStateInfo()
+		infoBefore := balancer.GetStateInfo(mock.CurrentTime())
 		require.NotNil(t, infoBefore)
 
 		// send random SYNs from unique sources
@@ -321,7 +321,7 @@ func TestSelectAfterUpdate(t *testing.T) {
 
 		// check balancer state info
 
-		info := balancer.GetStateInfo()
+		info := balancer.GetStateInfo(mock.CurrentTime())
 		require.NotNil(t, info)
 
 		// check vs
@@ -433,7 +433,8 @@ func TestNewConfig(t *testing.T) {
 	}
 
 	// update config
-	err := balancer.Update(config, nil)
+	_, stateConfig := balancer.GetConfig()
+	err := balancer.Update(config, stateConfig)
 	require.NoError(t, err)
 
 	// send packet, it is scheduled on the first real
@@ -501,7 +502,8 @@ func TestNewConfig(t *testing.T) {
 		},
 	}
 
-	err = balancer.Update(config, nil)
+	_, stateConfig = balancer.GetConfig()
+	err = balancer.Update(config, stateConfig)
 	require.NoError(t, err)
 
 	// send packet to the same virtual service (not SYN),
@@ -567,7 +569,8 @@ func TestNewConfig(t *testing.T) {
 		},
 	}
 
-	err = balancer.Update(config, nil)
+	_, stateConfig = balancer.GetConfig()
+	err = balancer.Update(config, stateConfig)
 	require.NoError(t, err)
 
 	//send packet when no virtual services are enabled

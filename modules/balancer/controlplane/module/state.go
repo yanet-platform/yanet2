@@ -121,6 +121,9 @@ func (s *ModuleConfigState) Update(
 		return fmt.Errorf("max load factor must be greater than 0.001")
 	}
 
+	// Track if resize failed
+	var resizeErr error
+
 	s.log.Infow(
 		"resizing session table",
 		zap.Uint("current_capacity", s.SessionTableCapacity()),
@@ -130,31 +133,39 @@ func (s *ModuleConfigState) Update(
 	if requestedCapacity != 0 {
 		err := s.cHandle.ResizeSessionTable(requestedCapacity, now)
 		if err != nil {
-			s.log.Errorf(
-				"failed to resize session table",
+			s.log.Warnw(
+				"failed to resize session table, continuing with config update",
 				zap.Uint("requested_capacity", requestedCapacity),
 				zap.Error(err),
 			)
-			return fmt.Errorf("failed to resize session table: %w", err)
+			resizeErr = fmt.Errorf("failed to resize session table: %w", err)
+		} else {
+			s.log.Infow(
+				"successfully resized session table",
+				zap.Uint("requested_capacity", requestedCapacity),
+				zap.Uint("new_capacity", s.SessionTableCapacity()),
+			)
 		}
-
-		s.log.Infow(
-			"successfully resized session table",
-			zap.Uint("requested_capacity", requestedCapacity),
-			zap.Uint("new_capacity", s.SessionTableCapacity()),
-		)
 	} else {
 		s.log.Info("did not resize session table as zero size is requested")
 	}
 
-	s.ScanSessionTablePeriodMs = scanSessionTablePeriodMs
+	// Always update scan period and restart background tasks,
+	// even if resize failed
+	s.log.Infow(
+		"updating scan period and restarting background tasks",
+		zap.Uint("old_period_ms", s.ScanSessionTablePeriodMs),
+		zap.Uint("new_period_ms", scanSessionTablePeriodMs),
+	)
 
+	s.ScanSessionTablePeriodMs = scanSessionTablePeriodMs
 	s.MaxLoadFactor = maxLoadFactor
 
 	s.cancelBackgroundTasks()
 	s.runBackgroundTasks()
 
-	return nil
+	// Return resize error if it occurred, but after updating everything else
+	return resizeErr
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -199,23 +210,33 @@ func (s *ModuleConfigState) GetAndUpdateSessionsInfo(
 	return sessions, nil
 }
 
-func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(
-	now time.Time,
-) error {
-	// Update active connections info
+// SyncActiveSessions scans the session table and updates active session counters.
+// Note: Caller must hold the lock.
+func (s *ModuleConfigState) SyncActiveSessions(now time.Time) error {
 	_, err := s.GetAndUpdateSessionsInfo(now)
 	if err != nil {
 		s.log.Errorw(
-			"failed to get sessions info during table scan",
+			"failed to sync active sessions",
 			zap.Error(err),
 		)
-		return fmt.Errorf("failed to scan sessions table: %w", err)
+		return fmt.Errorf("failed to sync active sessions: %w", err)
 	}
 
+	s.log.Debugw("active sessions synced",
+		zap.Uint("active_sessions", s.ActiveSessions),
+		zap.Uint("table_capacity", s.SessionTableCapacity()))
+
+	return nil
+}
+
+// ResizeTableOnDemand checks if session table needs resizing based on load factor
+// and resizes it if necessary.
+// Note: Caller must hold the lock.
+func (s *ModuleConfigState) ResizeTableOnDemand(now time.Time) error {
 	sessionTableCapacity := s.SessionTableCapacity()
 	loadFactor := float32(s.ActiveSessions) / float32(sessionTableCapacity)
 
-	s.log.Debugw("session table scan completed",
+	s.log.Debugw("checking session table load factor",
 		zap.Uint("active_sessions", s.ActiveSessions),
 		zap.Uint("table_capacity", sessionTableCapacity),
 		zap.Float32("load_factor", loadFactor),
@@ -231,22 +252,41 @@ func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(
 
 		err := s.cHandle.ResizeSessionTable(requestedCapacity, now)
 		if err != nil {
-			s.log.Warnw("failed to resize session table",
+			s.log.Warnw("failed to resize session table on demand",
 				zap.Uint("requested_capacity", requestedCapacity),
 				zap.Error(err))
 			return fmt.Errorf(
-				"failed to resize session table to capacity %d: %w",
+				"failed to resize session table on demand to capacity %d: %w",
 				requestedCapacity,
 				err,
 			)
 		}
 		newCapacity := s.SessionTableCapacity()
 		s.log.Infow(
-			"session table resized successfully",
+			"session table resized on demand successfully",
 			zap.Uint("old_capacity", sessionTableCapacity),
 			zap.Uint("requested_capacity", requestedCapacity),
 			zap.Uint("new_capacity", newCapacity),
 		)
+	}
+
+	return nil
+}
+
+// SyncActiveSessionsAndResizeTableOnDemand combines session syncing and table resizing.
+// It first syncs active sessions, then checks if table needs resizing.
+// Note: Caller must hold the lock.
+func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(
+	now time.Time,
+) error {
+	// First sync active sessions
+	if err := s.SyncActiveSessions(now); err != nil {
+		return err
+	}
+
+	// Then check if we need to resize
+	if err := s.ResizeTableOnDemand(now); err != nil {
+		return err
 	}
 
 	return nil
@@ -263,16 +303,32 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 		period := time.Duration(s.ScanSessionTablePeriodMs) * time.Millisecond
 		ctx := s.ctx
 
+		s.log.Infow(
+			"starting session table scan background task",
+			zap.Uint("period_ms", s.ScanSessionTablePeriodMs),
+			zap.Duration("period", period),
+		)
+
 		// run periodic task
 		go func() {
 			ticker := time.NewTicker(period)
 			defer ticker.Stop()
 
+			s.log.Debugw(
+				"session table scan goroutine started",
+				zap.Duration("ticker_period", period),
+			)
+
 			for {
 				select {
 				case <-ctx.Done():
+					s.log.Info("session table scan goroutine cancelled")
 					return
 				case <-ticker.C:
+					s.log.Debugw(
+						"session table scan tick",
+						zap.Duration("period", period),
+					)
 					s.lock.Lock()
 					err := s.SyncActiveSessionsAndResizeTableOnDemand(
 						time.Now(),
@@ -294,6 +350,7 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 
 func (s *ModuleConfigState) cancelBackgroundTasks() {
 	if s.cancel != nil {
+		s.log.Info("cancelling session table scan background task")
 		s.cancel()
 	}
 }

@@ -134,7 +134,7 @@ func TestBalancerBasics(t *testing.T) {
 	}
 
 	t.Run("Read_State_Info", func(t *testing.T) {
-		state := balancer.GetStateInfo()
+		state := balancer.GetStateInfo(mock.CurrentTime())
 
 		require.Equal(t, 1, len(state.RealInfo))
 		realInfo := &state.RealInfo[0]

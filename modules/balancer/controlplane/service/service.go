@@ -158,7 +158,7 @@ func (m *BalancerService) FlushRealUpdates(
 
 	if !exists {
 		m.log.Warnw("balancer not found", "name", name)
-		return nil, fmt.Errorf("balancer [name=%s] not found", name)
+		return nil, fmt.Errorf("balancer %s not found", name)
 	}
 
 	m.log.Debugw("flushing real updates", "name", name)
@@ -166,8 +166,14 @@ func (m *BalancerService) FlushRealUpdates(
 	// Flush updates (no service lock held)
 	count, err := balancerInstance.FlushRealUpdates()
 	if err != nil {
-		m.log.Errorw("failed to flush real updates", "name", name, "error", err)
-		return nil, fmt.Errorf("failed to flush real updates: %w", err)
+		m.log.Warnw(
+			"failed to flush real updates",
+			"name",
+			name,
+			"error",
+			err,
+		)
+		return nil, fmt.Errorf("failed to flush real updates for balancer %s: %w", name, err)
 	}
 
 	m.log.Infow("real updates flushed", "name", name, "count", count)
@@ -195,7 +201,7 @@ func (m *BalancerService) ShowConfig(
 
 	if !exists {
 		m.log.Warnw("balancer not found", "name", name)
-		return nil, fmt.Errorf("balancer [name=%s] not found", name)
+		return nil, fmt.Errorf("balancer %s not found", name)
 	}
 
 	m.log.Debugw("showing config", "name", name)
@@ -261,13 +267,13 @@ func (m *BalancerService) StateInfo(
 
 	if !exists {
 		m.log.Warnw("balancer not found", "name", name)
-		return nil, fmt.Errorf("balancer [name=%s] not found", name)
+		return nil, fmt.Errorf("balancer %s not found", name)
 	}
 
 	m.log.Debugw("getting state info", "name", name)
 
 	// Get state info (no service lock held)
-	info := balancerInstance.GetStateInfo()
+	info := balancerInstance.GetStateInfo(time.Now())
 
 	return &balancerpb.StateInfoResponse{
 		Target: req.Target,
@@ -294,7 +300,7 @@ func (m *BalancerService) ConfigStats(
 
 	if !exists {
 		m.log.Warnw("balancer not found", "name", name)
-		return nil, fmt.Errorf("balancer [name=%s] not found", name)
+		return nil, fmt.Errorf("balancer %s not found", name)
 	}
 
 	m.log.Debugw("getting config stats", "name", name)
@@ -336,7 +342,7 @@ func (m *BalancerService) SessionsInfo(
 
 	if !exists {
 		m.log.Warnw("balancer not found", "name", name)
-		return nil, fmt.Errorf("balancer [name=%s] not found", name)
+		return nil, fmt.Errorf("balancer %s not found", name)
 	}
 
 	m.log.Debugw("getting sessions info", "name", name)

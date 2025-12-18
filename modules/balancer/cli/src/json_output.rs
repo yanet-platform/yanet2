@@ -346,11 +346,15 @@ fn scheduler_to_string(sched: i32) -> String {
 }
 
 fn format_timestamp(ts: Option<&prost_types::Timestamp>) -> Option<String> {
-    ts.map(|t| {
+    ts.and_then(|t| {
+        // Return None for zero timestamps (will be serialized as null in JSON)
+        if t.seconds == 0 && t.nanos == 0 {
+            return None;
+        }
+        
         use chrono::{DateTime, Utc};
         DateTime::<Utc>::from_timestamp(t.seconds, t.nanos as u32)
             .map(|dt| dt.to_rfc3339())
-            .unwrap_or_else(|| "Invalid".to_string())
     })
 }
 

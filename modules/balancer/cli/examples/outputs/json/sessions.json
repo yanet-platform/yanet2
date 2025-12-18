@@ -1,7 +1,6 @@
 {
   "target": {
-    "config_name": "my-balancer",
-    "dataplane_instance": 0
+    "config_name": "my-balancer"
   },
   "sessions_info": [
     {

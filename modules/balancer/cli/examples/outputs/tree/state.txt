@@ -1,5 +1,5 @@
 Balancer State Info
-└─ Config: my-balancer (Instance: 0)
+└─ Config: my-balancer
    ├─ Active Sessions: 15,234 (updated: 2024-01-15 10:50:45)
    ├─ Module Stats
    │  ├─ Common
@@ -16,6 +16,7 @@ Balancer State Info
    │  │  └─ Invalid Packets: 350
    │  ├─ ICMPv4
    │  │  ├─ Incoming Packets: 34,567
+   │  │  ├─ Src Not Allowed: 1,215
    │  │  ├─ Echo Responses: 30,000
    │  │  ├─ Payload Too Short IP: 0
    │  │  ├─ Unmatching Src From Original: 0
@@ -29,6 +30,7 @@ Balancer State Info
    │  │  └─ Packet Clone Failures: 0
    │  └─ ICMPv6
    │     ├─ Incoming Packets: 1,234
+   │     ├─ Src Not Allowed: 1,215
    │     ├─ Echo Responses: 1,200
    │     ├─ Payload Too Short IP: 0
    │     ├─ Unmatching Src From Original: 0

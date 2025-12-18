@@ -14,5 +14,12 @@ lib_diag_dep = declare_dependency(
   dependencies: [lib_tls_stack_dep],
 )
 
-diag_test = executable('diag_test', ['test.c'], dependencies: [lib_diag_dep, lib_tls_stack_dep], include_directories: [yanet_rootdir])
+diag_test = executable(
+  'diag_test',
+  ['test.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [lib_diag_dep, lib_tls_stack_dep],
+  include_directories: [yanet_rootdir]
+)
 test('diag_test', diag_test, suite: ['diag'])

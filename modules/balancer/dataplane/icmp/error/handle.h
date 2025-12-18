@@ -24,6 +24,11 @@ handle_icmp_error_packet(struct packet_ctx *ctx) {
 	// Else, if packet is not clone, clone it and broadcast to other
 	// balancers.
 
+	// update stats
+	ICMP_STATS_INC(
+		incoming_packets, ctx->packet->transport_header.type, ctx
+	);
+
 	// First, validate and parse packet.
 	// On errors, update corresponding counters.
 	enum validate_packet_result validate_result =

@@ -1,8 +1,8 @@
-╔═════════════════════════════════════╗
-║       BALANCER CONFIGURATION        ║
-╟─────────────────────────────────────╢
-║  Config: my-balancer | Instance: 0  ║
-╚═════════════════════════════════════╝
+╔══════════════════════════╗
+║  BALANCER CONFIGURATION  ║
+╟──────────────────────────╢
+║   Config: my-balancer    ║
+╚══════════════════════════╝
 
 Source Addresses:
   IPv4: 192.0.2.1
@@ -14,6 +14,9 @@ Session Timeouts:
 
 WLC Config:
   Power: 10 | Max Weight: 1000 | Update Period: 5000ms
+
+Module State Config:
+  Session Table Capacity: 1,000,000 | Scan Period: 1000ms | Max Load Factor: 0.75
 
 Virtual Services:
 ╭────────────┬──────┬───────┬───────────┬─────────────┬───────────────────────╮

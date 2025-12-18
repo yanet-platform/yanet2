@@ -1,5 +1,5 @@
 Balancer Statistics
-└─ Config: my-balancer (Instance: 0)
+└─ Config: my-balancer
    ├─ Device: eth0
    ├─ Pipeline: main
    ├─ Function: balancer
@@ -20,12 +20,16 @@ Balancer Statistics
    │  │  └─ Invalid Packets: 350
    │  ├─ ICMPv4
    │  │  ├─ Incoming Packets: 34,567
+   │  │  ├─ Src Not Allowed: 1,215
    │  │  ├─ Echo Responses: 30,000
+   │  │  ├─ Unrecognized VS: 2
    │  │  ├─ Forwarded: 4,500
    │  │  └─ Broadcasted: 67
    │  └─ ICMPv6
    │     ├─ Incoming Packets: 1,234
+   │     ├─ Src Not Allowed: 1,215
    │     ├─ Echo Responses: 1,200
+   │     ├─ Unrecognized VS: 0
    │     ├─ Forwarded: 34
    │     └─ Broadcasted: 2
    ├─ VS Stats (2)

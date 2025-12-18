@@ -2,32 +2,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "yanet_build_config.h" // MBUF_MAX_SIZE
-#include <rte_build_config.h>	// RTE_PKTMBUF_HEADROOM
-
-#include "dataplane/module/module.h"
-#include "dataplane/packet/packet.h"
+#include "lib/fuzzing/fuzzing.h"
 #include "modules/decap/api/controlplane.h"
 #include "modules/decap/dataplane/config.h"
 #include "modules/decap/dataplane/dataplane.h"
 
-#include "lib/utils/packet.h"
-
-#define ARENA_SIZE (1 << 20)
-
-struct decap_fuzzing_params {
-	struct module *module;	     /**< Pointer to the module being tested */
-	struct cp_module *cp_module; /**< Module configuration */
-
-	void *arena;
-	void *payload_arena;
-	struct block_allocator ba;
-	struct memory_context mctx;
-};
-
-static struct decap_fuzzing_params fuzz_params = {
-	.cp_module = NULL,
-};
+static struct fuzzing_params fuzz_params = {0};
 
 static int
 decap_test_config(struct cp_module **cp_module) {
@@ -91,30 +71,14 @@ error_lpm_v4:
 }
 
 static int
-fuzz_setup() {
-	fuzz_params.arena = malloc(ARENA_SIZE);
-	if (fuzz_params.arena == NULL) {
-		return EXIT_FAILURE;
+fuzz_setup(void) {
+	// Initialize fuzzing parameters with module loader
+	if (fuzzing_params_init(&fuzz_params, "decap_fuzz", new_module_decap) !=
+	    0) {
+		return -1;
 	}
 
-	block_allocator_init(&fuzz_params.ba);
-	block_allocator_put_arena(
-		&fuzz_params.ba, fuzz_params.arena, ARENA_SIZE
-	);
-
-	memory_context_init(
-		&fuzz_params.mctx, "decap fuzzing", &fuzz_params.ba
-	);
-
-	fuzz_params.module = new_module_decap();
-	fuzz_params.payload_arena = memory_balloc(
-		&fuzz_params.mctx,
-		sizeof(struct packet_front) + MBUF_MAX_SIZE * 4
-	);
-	if (fuzz_params.payload_arena == NULL) {
-		return -ENOMEM;
-	}
-
+	// Initialize module configuration
 	return decap_test_config(&fuzz_params.cp_module);
 }
 
@@ -126,28 +90,8 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 		}
 	}
 
-	if (size > (MBUF_MAX_SIZE - RTE_PKTMBUF_HEADROOM)) {
-		return 0;
-	}
-
-	struct packet_front pf;
-	packet_front_init(&pf);
-	struct packet_data packet_data = {
-		.rx_device_id = 0, .tx_device_id = 0, .data = data, .size = size
-	};
-	fill_packet_list_arena(
-		&pf.input,
-		1,
-		&packet_data,
-		MBUF_MAX_SIZE,
-		fuzz_params.payload_arena,
-		MBUF_MAX_SIZE * 4
-	);
-	parse_packet(pf.input.first);
-	struct module_ectx module_ectx;
-	SET_OFFSET_OF(&module_ectx.cp_module, fuzz_params.cp_module);
-	// Process packet through decap module
-	fuzz_params.module->handler(NULL, &module_ectx, &pf);
+	// Process packet through fuzzing infrastructure
+	fuzzing_process_packet(&fuzz_params, data, size);
 
 	return 0;
 }

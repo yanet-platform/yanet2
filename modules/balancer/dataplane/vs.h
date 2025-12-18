@@ -3,6 +3,7 @@
 #include "common/network.h"
 #include "module.h"
 #include "ring.h"
+#include "worker.h"
 
 #include "../state/registry.h"
 
@@ -13,6 +14,17 @@ typedef uint8_t vs_flags_t;
 
 // If virtual service is present in the current module config.
 #define VS_PRESENT_IN_CONFIG_FLAG (1 << 7)
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Worker local info about
+// virtual service state.
+struct vs_worker_local {
+	// if virtual service schedule is PRR,
+	// use counter to select next real for packet
+	// scheduling.
+	uint64_t round_robin_counter;
+}; // todo: add alignment to avoid false sharing
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -44,10 +56,8 @@ struct virtual_service {
 	// allowed list for this virtual service
 	struct lpm src_filter;
 
-	// if virtual service schedule is PRR,
-	// use counter to select next real for packet
-	// scheduling.
-	uint64_t round_robin_counter;
+	// worker local state for the virtual service
+	struct vs_worker_local worker_local[MAX_WORKERS_NUM];
 
 	// id of the counter for virtual service,
 	// which is related to the placement of the config
@@ -82,4 +92,13 @@ vs_counter(
 	uint64_t *counter =
 		counter_get_address(vs->counter_id, worker, storage);
 	return (struct balancer_vs_stats *)counter;
+}
+
+static inline void
+vs_worker_local_init(struct virtual_service *vs) {
+	// todo: add workers count
+	uint64_t rng = 0x12312;
+	for (size_t i = 0; i < MAX_WORKERS_NUM; ++i) {
+		vs->worker_local[i].round_robin_counter = rng_next(&rng);
+	}
 }

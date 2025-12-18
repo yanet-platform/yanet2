@@ -5,106 +5,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "yanet_build_config.h" // MBUF_MAX_SIZE
-#include <rte_build_config.h>	// RTE_PKTMBUF_HEADROOM
 #include <rte_byteorder.h>
+#include <rte_cycles.h>
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_udp.h>
 
-#include "common/memory.h"
-#include "common/memory_address.h"
-#include "dataplane/module/module.h"
-#include "dataplane/packet/packet.h"
+#include "lib/dataplane/time/clock.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/fwmap.h"
 #include "lib/fwstate/types.h"
 #include "modules/fwstate/dataplane/config.h"
 #include "modules/fwstate/dataplane/dataplane.h"
 
-#include "lib/utils/packet.h"
+#include "lib/fuzzing/fuzzing.h"
 
-#define ARENA_SIZE (64 << 20)
-#define MAX_SYNC_PACKETS 16
+// Forward declaration of DPDK internal function
+extern void
+set_tsc_freq(void);
 
-struct sync_packet_slot {
-	struct rte_mbuf *mbuf;
-	atomic_bool in_use;
-};
-
-struct fwstate_fuzzing_params {
-	struct module *module;	     /**< Pointer to the module being tested */
-	struct cp_module *cp_module; /**< Module configuration */
-
-	void *arena;
-	void *payload_arena;
-	uint8_t *sync_arena;
-	struct block_allocator ba;
-	struct memory_context mctx;
-
-	struct sync_packet_slot sync_packets[MAX_SYNC_PACKETS];
-};
-
-static struct fwstate_fuzzing_params fuzz_params = {
-	.cp_module = NULL,
-};
-
-// Mock worker_packet_alloc
-struct packet *
-worker_packet_alloc(struct dp_worker *worker) {
-	(void)worker;
-
-	// Find first unused slot atomically
-	for (size_t i = 0; i < MAX_SYNC_PACKETS; i++) {
-		bool expected = false;
-		if (atomic_compare_exchange_strong(
-			    &fuzz_params.sync_packets[i].in_use, &expected, true
-		    )) {
-			struct rte_mbuf *m = fuzz_params.sync_packets[i].mbuf;
-			struct packet_data empty = {
-				.data = NULL,
-				.size = 0,
-				.rx_device_id = 0,
-				.tx_device_id = 0,
-			};
-			init_mbuf(m, &empty, MBUF_MAX_SIZE);
-
-			struct packet *p = mbuf_to_packet(m);
-			memset(p, 0, sizeof(struct packet));
-			p->mbuf = m;
-
-			return p;
-		}
-	}
-
-	return NULL;
-}
-
-// Mock worker_packet_free
-void
-worker_packet_free(struct packet *packet) {
-	if (!packet)
-		return;
-
-	struct rte_mbuf *m = packet_to_mbuf(packet);
-
-	for (size_t i = 0; i < MAX_SYNC_PACKETS; i++) {
-		if (fuzz_params.sync_packets[i].mbuf == m) {
-			atomic_store(
-				&fuzz_params.sync_packets[i].in_use, false
-			);
-			return;
-		}
-	}
-}
-
-// Reset all sync packet slots
-static void
-reset_sync_packets(void) {
-	for (size_t i = 0; i < MAX_SYNC_PACKETS; i++) {
-		atomic_store(&fuzz_params.sync_packets[i].in_use, false);
-	}
-}
+static struct fuzzing_params fuzz_params = {0};
 
 static int
 fwstate_test_config(struct cp_module **cp_module) {
@@ -194,43 +114,27 @@ fwstate_test_config(struct cp_module **cp_module) {
 
 static int
 fuzz_setup() {
-	fuzz_params.arena = malloc(ARENA_SIZE);
-	if (fuzz_params.arena == NULL) {
+	if (fuzzing_params_init(
+		    &fuzz_params, "fwstate fuzzing", new_module_fwstate
+	    ) != 0) {
 		return EXIT_FAILURE;
 	}
 
-	block_allocator_init(&fuzz_params.ba);
-	block_allocator_put_arena(
-		&fuzz_params.ba, fuzz_params.arena, ARENA_SIZE
-	);
-
-	memory_context_init(
-		&fuzz_params.mctx, "fwstate fuzzing", &fuzz_params.ba
-	);
-
-	fuzz_params.module = new_module_fwstate();
-	fuzz_params.payload_arena = memory_balloc(
-		&fuzz_params.mctx,
-		sizeof(struct packet_front) + MBUF_MAX_SIZE * 4
-	);
-	if (fuzz_params.payload_arena == NULL) {
+	// Create a minimal dp_worker structure for fwstate
+	fuzz_params.worker =
+		memory_balloc(&fuzz_params.mctx, sizeof(struct dp_worker));
+	if (fuzz_params.worker == NULL) {
 		return -ENOMEM;
 	}
+	memset(fuzz_params.worker, 0, sizeof(struct dp_worker));
+	fuzz_params.worker->idx = 0;
 
-	// Allocate arena for sync packets
-	fuzz_params.sync_arena = memory_balloc(
-		&fuzz_params.mctx, MBUF_MAX_SIZE * MAX_SYNC_PACKETS
-	);
-	if (fuzz_params.sync_arena == NULL) {
+	// Initialize TSC frequency (DPDK internal, needed for rte_get_tsc_hz())
+	set_tsc_freq();
+
+	// Initialize TSC clock for fwstate (needed for timeouts)
+	if (tsc_clock_init(&fuzz_params.worker->clock) != 0) {
 		return -ENOMEM;
-	}
-
-	// Initialize sync packet slots
-	for (size_t i = 0; i < MAX_SYNC_PACKETS; i++) {
-		fuzz_params.sync_packets[i].mbuf =
-			(struct rte_mbuf *)(fuzz_params.sync_arena +
-					    i * MBUF_MAX_SIZE);
-		fuzz_params.sync_packets[i].in_use = false;
 	}
 
 	return fwstate_test_config(&fuzz_params.cp_module);
@@ -302,12 +206,6 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 		return 0;
 	}
 
-	// Reset sync packets before processing
-	reset_sync_packets();
-
-	struct packet_data payload = {0};
-	uint8_t packet_buffer[MBUF_MAX_SIZE];
-
 	// If input size is a multiple of sync frame size (56 bytes),
 	// wrap it as a valid sync packet to test sync processing paths
 	if (size > 0 && size % sizeof(struct fw_state_sync_frame) == 0 &&
@@ -317,40 +215,14 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 					sizeof(struct rte_ipv6_hdr) +
 					sizeof(struct rte_udp_hdr);
 
+		uint8_t packet_buffer[MBUF_MAX_SIZE];
 		build_sync_packet(packet_buffer, data, size);
-		payload.data = packet_buffer;
-		payload.size = hdr_size + size;
+
+		return fuzzing_process_packet(
+			&fuzz_params, packet_buffer, hdr_size + size
+		);
 	} else {
 		// Use raw fuzzer input for other packet types
-		payload.data = data;
-		payload.size = size;
+		return fuzzing_process_packet(&fuzz_params, data, size);
 	}
-
-	struct packet_front pf;
-	packet_front_init(&pf);
-	fill_packet_list_arena(
-		&pf.input,
-		1,
-		&payload,
-		MBUF_MAX_SIZE,
-		fuzz_params.payload_arena,
-		MBUF_MAX_SIZE * 4
-	);
-	parse_packet(pf.input.first);
-	struct module_ectx module_ectx;
-	SET_OFFSET_OF(&module_ectx.cp_module, fuzz_params.cp_module);
-
-	// Create a minimal dp_worker structure for fuzzing
-	struct dp_worker worker = {.idx = 0};
-
-	// Process packet through fwstate module
-	fuzz_params.module->handler(&worker, &module_ectx, &pf);
-
-	// Free any sync packets that were added to output
-	struct packet *packet;
-	while ((packet = packet_list_pop(&pf.output)) != NULL) {
-		worker_packet_free(packet);
-	}
-
-	return 0;
 }

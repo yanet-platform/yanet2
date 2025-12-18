@@ -38,9 +38,12 @@ reschedule_real(struct packet_metadata *metadata) {
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline uint32_t
-next_rnd(struct virtual_service *vs, struct packet_metadata *meta) {
-	return vs->flags & BALANCER_VS_PRR_FLAG ? vs->round_robin_counter++
-						: meta->hash;
+next_rnd(
+	struct virtual_service *vs, struct packet_metadata *meta, size_t worker
+) {
+	return vs->flags & BALANCER_VS_PRR_FLAG
+		       ? vs->worker_local[worker].round_robin_counter++
+		       : meta->hash;
 }
 
 // Selects real and update real and virtual service stats.
@@ -59,8 +62,9 @@ select_real(
 	// if `One Packet Scheduling` flag is set,
 	// we do not account for sessions
 	if (vs->flags & BALANCER_VS_OPS_FLAG) {
-		uint32_t real_id =
-			ring_get(&vs->real_ring, next_rnd(vs, metadata));
+		uint32_t real_id = ring_get(
+			&vs->real_ring, next_rnd(vs, metadata, ctx->worker->idx)
+		);
 		if (real_id == RING_VALUE_INVALID) {
 			// discard packet because there are no enabled reals
 
@@ -176,7 +180,9 @@ select_real(
 
 	// select new real for the session and remember it in session state
 
-	uint32_t real_id = ring_get(&vs->real_ring, next_rnd(vs, metadata));
+	uint32_t real_id = ring_get(
+		&vs->real_ring, next_rnd(vs, metadata, ctx->worker->idx)
+	);
 	if (real_id == RING_VALUE_INVALID) {
 		VS_STATS_INC(no_reals, ctx);
 		session_remove(session_state); // free created state

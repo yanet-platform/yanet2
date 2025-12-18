@@ -324,7 +324,6 @@ balancer_vs_init(
 			&config_vs[vs_config->registry_idx];
 		SET_OFFSET_OF(&vs->state, (struct service_state *)info->state);
 		vs->registry_idx = vs_config->registry_idx;
-		vs->round_robin_counter = 0;
 		vs->flags = vs_config->flags | VS_PRESENT_IN_CONFIG_FLAG;
 		memcpy(vs->address, vs_config->address, NET6_LEN);
 		vs->port = vs_config->port;
@@ -339,6 +338,8 @@ balancer_vs_init(
 		if (res < 0) {
 			goto free_initalized_vs;
 		}
+		vs_worker_local_init(vs
+		); // todo: move this code in the separated function
 
 		// init counter
 		vs->counter_id = register_vs_counter(
@@ -455,6 +456,49 @@ balancer_vs_init(
 	if (res < 0) {
 		FILTER_FREE(&config->vs_v4_table, VS_V4_TABLE_TAG)
 		goto free_initalized_vs;
+	}
+
+	// setup list of IP addresses which are announced
+	// and served by balancer for now
+
+	// init set of IPv4 addresses
+	if (lpm_init(
+		    &config->announce_ipv4, &config->cp_module.memory_context
+	    )) {
+		goto free_initalized_vs;
+	}
+
+	// init set of IPv6 addresses
+	if (lpm_init(
+		    &config->announce_ipv6, &config->cp_module.memory_context
+	    )) {
+		goto free_initalized_vs;
+	}
+
+	// insert addresses of virtual services
+	for (size_t i = 0; i < vs_count; ++i) {
+		struct balancer_vs_config *vs = vs_configs[i];
+		if (vs->flags & BALANCER_VS_IPV6_FLAG) {
+			if (lpm_insert(
+				    &config->announce_ipv6,
+				    NET6_LEN,
+				    vs->address,
+				    vs->address,
+				    1
+			    )) {
+				goto free_initalized_vs;
+			}
+		} else {
+			if (lpm_insert(
+				    &config->announce_ipv4,
+				    NET4_LEN,
+				    vs->address,
+				    vs->address,
+				    1
+			    )) {
+				goto free_initalized_vs;
+			}
+		}
 	}
 
 	return 0;

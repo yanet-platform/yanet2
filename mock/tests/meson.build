@@ -35,5 +35,12 @@ devices_dep = [
 
 deps = modules_dep + devices_dep + lib_dependencies + [lib_yanet_mock_dep]
 
-basic_test = executable('basic_test', ['basic_test.c'], dependencies: deps, include_directories: includes)
+basic_test = executable(
+  'basic_test',
+  ['basic_test.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: deps,
+  include_directories: includes
+)
 test('basic_test', basic_test, suite: 'mock')

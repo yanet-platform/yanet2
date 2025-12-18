@@ -61,6 +61,7 @@ fn print_boxed_header(title: &str, subtitle: Option<&str>) {
     println!("{}", format!("╚{}╝", "═".repeat(box_width)).cyan().bold());
 }
 
+
 fn proto_to_string(proto: i32) -> String {
     match balancerpb::TransportProto::try_from(proto) {
         Ok(balancerpb::TransportProto::Tcp) => "TCP".to_string(),
@@ -80,6 +81,7 @@ fn scheduler_to_string(sched: i32) -> String {
 
 fn format_timestamp(ts: Option<&prost_types::Timestamp>) -> String {
     match ts {
+        Some(ts) if ts.seconds == 0 && ts.nanos == 0 => "N/A".to_string(),
         Some(ts) => {
             let dt = DateTime::<Utc>::from_timestamp(ts.seconds, ts.nanos as u32).unwrap_or_default();
             dt.format("%Y-%m-%d %H:%M:%S").to_string()
@@ -350,6 +352,20 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                 wlc.wlc_power.to_string().bright_green(),
                 wlc.max_real_weight.to_string().bright_green(),
                 period_ms.to_string().bright_green()
+            );
+            println!();
+        }
+
+        // Module State Config
+        if let Some(state_config) = &response.module_state_config {
+            println!("{}", "Module State Config:".bright_cyan().bold());
+            let scan_period_ms = state_config.session_table_scan_period.as_ref()
+                .map(|p| (p.seconds * 1000 + p.nanos as i64 / 1_000_000).to_string())
+                .unwrap_or_else(|| "N/A".to_string());
+            println!("  Session Table Capacity: {} | Scan Period: {}ms | Max Load Factor: {}",
+                format_number(state_config.session_table_capacity).bright_green(),
+                scan_period_ms.bright_green(),
+                format!("{:.2}", state_config.session_table_max_load_factor).bright_green()
             );
             println!();
         }
@@ -757,6 +773,7 @@ fn print_state_info_tree(response: &balancerpb::StateInfoResponse) -> Result<(),
             if let Some(icmpv4) = &module.icmpv4 {
                 tree.begin_child("ICMPv4".to_string());
                 tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv4.incoming_packets)));
+                tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv4.src_not_allowed)));
                 tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv4.echo_responses)));
                 tree.add_empty_child(format!(
                     "Payload Too Short IP: {}",
@@ -795,6 +812,7 @@ fn print_state_info_tree(response: &balancerpb::StateInfoResponse) -> Result<(),
             if let Some(icmpv6) = &module.icmpv6 {
                 tree.begin_child("ICMPv6".to_string());
                 tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv6.incoming_packets)));
+                tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv6.src_not_allowed)));
                 tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv6.echo_responses)));
                 tree.add_empty_child(format!(
                     "Payload Too Short IP: {}",
@@ -960,14 +978,12 @@ fn print_state_info_tree(response: &balancerpb::StateInfoResponse) -> Result<(),
 fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<(), Box<dyn Error>> {
     // Print header
     let subtitle = if let (Some(target), Some(info)) = (&response.target, &response.info) {
-        let active_sessions = info
-            .active_sessions
-            .as_ref()
-            .map(|a| (format_number(a.value), format_timestamp(a.updated_at.as_ref())))
-            .unwrap_or_else(|| ("0".to_string(), "N/A".to_string()));
-        Some(format!(
-            "Config: {} | Active Sessions: {} (updated: {})",
-            target.config_name, active_sessions.0, active_sessions.1
+        let active_sessions = info.active_sessions.as_ref()
+            .map(|a| format_number(a.value))
+            .unwrap_or_else(|| "0".to_string());
+        Some(format!("Config: {} | Active Sessions: {}",
+            target.config_name,
+            active_sessions
         ))
     } else {
         None
@@ -1108,11 +1124,9 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
 
             let mut vs_list = info.vs_info.clone();
             vs_list.sort_by_key(|vs| vs.vs_registry_idx);
-
+            
             #[derive(Tabled)]
             struct VsInfoRow {
-                #[tabled(rename = "Index")]
-                index: String,
                 #[tabled(rename = "VS IP")]
                 ip: String,
                 #[tabled(rename = "Port")]
@@ -1131,10 +1145,8 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
                 last_packet: String,
             }
 
-            let rows: Vec<VsInfoRow> = vs_list
-                .iter()
-                .map(|vs| VsInfoRow {
-                    index: vs.vs_registry_idx.to_string(),
+            let rows: Vec<VsInfoRow> = vs_list.iter().map(|vs| {
+                VsInfoRow {
                     ip: bytes_to_ip(&vs.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
                     port: vs.vs_port.to_string(),
                     proto: proto_to_string(vs.vs_proto),
@@ -1171,10 +1183,13 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
                         .map(|a| format_number(a.value))
                         .unwrap_or_else(|| "0".to_string()),
                     last_packet: format_timestamp(vs.last_packet_timestamp.as_ref()),
-                })
-                .collect();
+                }
+            }).collect();
 
-            let table = Table::new(rows).with(Style::rounded()).to_string();
+            let table = Table::new(rows)
+                .with(Style::rounded())
+                .to_string();
+            
             println!("{}", table);
             println!();
         }
@@ -1185,19 +1200,17 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
 
             let mut real_list = info.real_info.clone();
             real_list.sort_by_key(|r| r.real_registry_idx);
-
+            
             #[derive(Tabled)]
             struct RealInfoRow {
-                #[tabled(rename = "Index")]
-                index: String,
-                #[tabled(rename = "Real IP")]
-                real_ip: String,
-                #[tabled(rename = "Port")]
-                real_port: String,
                 #[tabled(rename = "VS IP")]
                 vs_ip: String,
-                #[tabled(rename = "Port")]
+                #[tabled(rename = "VS Port")]
                 vs_port: String,
+                #[tabled(rename = "Real IP")]
+                real_ip: String,
+                #[tabled(rename = "Real Port")]
+                real_port: String,
                 #[tabled(rename = "Proto")]
                 proto: String,
                 #[tabled(rename = "Traffic")]
@@ -1210,37 +1223,26 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
                 last_packet: String,
             }
 
-            let rows: Vec<RealInfoRow> = real_list
-                .iter()
-                .map(|real| {
-                    RealInfoRow {
-                        index: real.real_registry_idx.to_string(),
-                        real_ip: bytes_to_ip(&real.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                        real_port: real.vs_port.to_string(), // Real port equals VS port
-                        vs_ip: bytes_to_ip(&real.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                        vs_port: real.vs_port.to_string(),
-                        proto: proto_to_string(real.vs_proto),
-                        traffic: real
-                            .stats
-                            .as_ref()
-                            .map(|s| format!("{} pkts, {}", format_number(s.packets), format_bytes(s.bytes)))
-                            .unwrap_or_else(|| "0 pkts, 0 B".to_string()),
-                        created_sessions: real
-                            .stats
-                            .as_ref()
-                            .map(|s| format_number(s.created_sessions))
-                            .unwrap_or_else(|| "0".to_string()),
-                        sessions: real
-                            .active_sessions
-                            .as_ref()
-                            .map(|a| format_number(a.value))
-                            .unwrap_or_else(|| "0".to_string()),
-                        last_packet: format_timestamp(real.last_packet_timestamp.as_ref()),
-                    }
-                })
-                .collect();
+            let rows: Vec<RealInfoRow> = real_list.iter().map(|real| {
+                RealInfoRow {
+                    vs_ip: bytes_to_ip(&real.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                    vs_port: real.vs_port.to_string(),
+                    real_ip: bytes_to_ip(&real.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                    real_port: real.vs_port.to_string(), // Real port equals VS port
+                    proto: proto_to_string(real.vs_proto),
+                    traffic: real.stats.as_ref()
+                        .map(|s| format!("{} pkts, {}", format_number(s.packets), format_bytes(s.bytes)))
+                        .unwrap_or_else(|| "0 pkts, 0 B".to_string()),
+                    created_sessions: real.stats.as_ref().map(|s| format_number(s.created_sessions)).unwrap_or_else(|| "0".to_string()),
+                    sessions: real.active_sessions.as_ref().map(|a| format_number(a.value)).unwrap_or_else(|| "0".to_string()),
+                    last_packet: format_timestamp(real.last_packet_timestamp.as_ref()),
+                }
+            }).collect();
 
-            let table = Table::new(rows).with(Style::rounded()).to_string();
+            let table = Table::new(rows)
+                .with(Style::rounded())
+                .to_string();
+            
             println!("{}", table);
         }
     }
@@ -1306,7 +1308,9 @@ fn print_config_stats_tree(response: &balancerpb::ConfigStatsResponse) -> Result
             if let Some(icmpv4) = &module.icmpv4 {
                 tree.begin_child("ICMPv4".to_string());
                 tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv4.incoming_packets)));
+                tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv4.src_not_allowed)));
                 tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv4.echo_responses)));
+                tree.add_empty_child(format!("Unrecognized VS: {}", format_number(icmpv4.unrecognized_vs)));
                 tree.add_empty_child(format!("Forwarded: {}", format_number(icmpv4.forwarded_packets)));
                 tree.add_empty_child(format!("Broadcasted: {}", format_number(icmpv4.broadcasted_packets)));
                 tree.end_child();
@@ -1315,7 +1319,9 @@ fn print_config_stats_tree(response: &balancerpb::ConfigStatsResponse) -> Result
             if let Some(icmpv6) = &module.icmpv6 {
                 tree.begin_child("ICMPv6".to_string());
                 tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv6.incoming_packets)));
+                tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv6.src_not_allowed)));
                 tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv6.echo_responses)));
+                tree.add_empty_child(format!("Unrecognized VS: {}", format_number(icmpv6.unrecognized_vs)));
                 tree.add_empty_child(format!("Forwarded: {}", format_number(icmpv6.forwarded_packets)));
                 tree.add_empty_child(format!("Broadcasted: {}", format_number(icmpv6.broadcasted_packets)));
                 tree.end_child();
@@ -1517,8 +1523,18 @@ fn print_config_stats_table(response: &balancerpb::ConfigStatsResponse) -> Resul
                 });
                 rows.push(ModuleStatsRow {
                     category: "".to_string(),
+                    metric: "Src Not Allowed".to_string(),
+                    value: format_number(icmpv4.src_not_allowed),
+                });
+                rows.push(ModuleStatsRow {
+                    category: "".to_string(),
                     metric: "Echo Responses".to_string(),
                     value: format_number(icmpv4.echo_responses),
+                });
+                rows.push(ModuleStatsRow {
+                    category: "".to_string(),
+                    metric: "Unrecognized VS".to_string(),
+                    value: format_number(icmpv4.unrecognized_vs),
                 });
                 rows.push(ModuleStatsRow {
                     category: "".to_string(),
@@ -1540,8 +1556,18 @@ fn print_config_stats_table(response: &balancerpb::ConfigStatsResponse) -> Resul
                 });
                 rows.push(ModuleStatsRow {
                     category: "".to_string(),
+                    metric: "Src Not Allowed".to_string(),
+                    value: format_number(icmpv6.src_not_allowed),
+                });
+                rows.push(ModuleStatsRow {
+                    category: "".to_string(),
                     metric: "Echo Responses".to_string(),
                     value: format_number(icmpv6.echo_responses),
+                });
+                rows.push(ModuleStatsRow {
+                    category: "".to_string(),
+                    metric: "Unrecognized VS".to_string(),
+                    value: format_number(icmpv6.unrecognized_vs),
                 });
                 rows.push(ModuleStatsRow {
                     category: "".to_string(),
@@ -1566,9 +1592,9 @@ fn print_config_stats_table(response: &balancerpb::ConfigStatsResponse) -> Resul
 
             #[derive(Tabled)]
             struct VsStatsRow {
-                #[tabled(rename = "Virtual IP")]
+                #[tabled(rename = "VS IP")]
                 ip: String,
-                #[tabled(rename = "Port")]
+                #[tabled(rename = "VS Port")]
                 port: String,
                 #[tabled(rename = "Proto")]
                 proto: String,
@@ -1625,12 +1651,14 @@ fn print_config_stats_table(response: &balancerpb::ConfigStatsResponse) -> Resul
 
             #[derive(Tabled)]
             struct RealStatsRow {
-                #[tabled(rename = "Real IP")]
-                real_ip: String,
                 #[tabled(rename = "VS IP")]
                 vs_ip: String,
-                #[tabled(rename = "Port")]
-                port: String,
+                #[tabled(rename = "VS Port")]
+                vs_port: String,
+                #[tabled(rename = "Real IP")]
+                real_ip: String,
+                #[tabled(rename = "Real Port")]
+                real_port: String,
                 #[tabled(rename = "Proto")]
                 proto: String,
                 #[tabled(rename = "Traffic")]
@@ -1639,25 +1667,18 @@ fn print_config_stats_table(response: &balancerpb::ConfigStatsResponse) -> Resul
                 sessions: String,
             }
 
-            let rows: Vec<RealStatsRow> = stats
-                .reals
-                .iter()
-                .map(|real| {
-                    let s = real.stats.as_ref();
-                    RealStatsRow {
-                        real_ip: bytes_to_ip(&real.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                        vs_ip: bytes_to_ip(&real.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                        port: real.port.to_string(),
-                        proto: proto_to_string(real.proto),
-                        traffic: s
-                            .map(|s| format!("{} pkts, {}", format_number(s.packets), format_bytes(s.bytes)))
-                            .unwrap_or_else(|| "0 pkts, 0 B".to_string()),
-                        sessions: s
-                            .map(|s| format_number(s.created_sessions))
-                            .unwrap_or_else(|| "0".to_string()),
-                    }
-                })
-                .collect();
+            let rows: Vec<RealStatsRow> = stats.reals.iter().map(|real| {
+                let s = real.stats.as_ref();
+                RealStatsRow {
+                    vs_ip: bytes_to_ip(&real.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                    vs_port: real.port.to_string(),
+                    real_ip: bytes_to_ip(&real.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                    real_port: real.port.to_string(),
+                    proto: proto_to_string(real.proto),
+                    traffic: s.map(|s| format!("{} pkts, {}", format_number(s.packets), format_bytes(s.bytes))).unwrap_or_else(|| "0 pkts, 0 B".to_string()),
+                    sessions: s.map(|s| format_number(s.created_sessions)).unwrap_or_else(|| "0".to_string()),
+                }
+            }).collect();
 
             let table = Table::new(rows).with(Style::rounded()).to_string();
             println!("{}", table);
@@ -1753,41 +1774,34 @@ fn print_sessions_info_table(response: &balancerpb::SessionsInfoResponse) -> Res
             real: String,
             #[tabled(rename = "Proto")]
             proto: String,
-            #[tabled(rename = "Created (UTC)")]
-            created: String,
+            #[tabled(rename = "Created At (UTC)")]
+            created_at: String,
             #[tabled(rename = "Last Packet (UTC)")]
             last_packet: String,
             #[tabled(rename = "Timeout")]
             timeout: String,
         }
 
-        let rows: Vec<SessionRow> = response
-            .sessions_info
-            .iter()
-            .map(|session| {
-                let client_ip = bytes_to_ip(&session.client_addr)
-                    .map(|ip| ip.to_string())
-                    .unwrap_or_default();
-                let vs_ip = bytes_to_ip(&session.vs_addr)
-                    .map(|ip| ip.to_string())
-                    .unwrap_or_default();
-                let real_ip = bytes_to_ip(&session.real_addr)
-                    .map(|ip| ip.to_string())
-                    .unwrap_or_default();
+        let rows: Vec<SessionRow> = response.sessions_info.iter().map(|session| {
+            let client_ip = bytes_to_ip(&session.client_addr).map(|ip| ip.to_string()).unwrap_or_default();
+            let vs_ip = bytes_to_ip(&session.vs_addr).map(|ip| ip.to_string()).unwrap_or_default();
+            let real_ip = bytes_to_ip(&session.real_addr).map(|ip| ip.to_string()).unwrap_or_default();
+            
+            SessionRow {
+                client: format!("{}:{}", client_ip, session.client_port),
+                vs: format!("{}:{}", vs_ip, session.vs_port),
+                real: format!("{}:{}", real_ip, session.real_port),
+                proto: "TCP".to_string(), // Assuming TCP, not in proto
+                created_at: format_timestamp(session.create_timestamp.as_ref()),
+                last_packet: format_timestamp(session.last_packet_timestamp.as_ref()),
+                timeout: format_duration(session.timeout.as_ref()),
+            }
+        }).collect();
 
-                SessionRow {
-                    client: format!("{}:{}", client_ip, session.client_port),
-                    vs: format!("{}:{}", vs_ip, session.vs_port),
-                    real: format!("{}:{}", real_ip, session.real_port),
-                    proto: "TCP".to_string(), // Assuming TCP, not in proto
-                    created: format_timestamp(session.create_timestamp.as_ref()),
-                    last_packet: format_timestamp(session.last_packet_timestamp.as_ref()),
-                    timeout: format_duration(session.timeout.as_ref()),
-                }
-            })
-            .collect();
-
-        let table = Table::new(rows).with(Style::rounded()).to_string();
+        let table = Table::new(rows)
+            .with(Style::rounded())
+            .to_string();
+        
         println!("{}", table);
     }
 

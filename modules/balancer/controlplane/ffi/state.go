@@ -228,14 +228,13 @@ func (state *ModuleConfigStatePtr) VirtualServicesInfo() []lib.VsInfo {
 		}
 		stats := vsStatsFromC(&entry.stats)
 
+		lastPacketTime := time.Unix(int64(entry.last_packet_timestamp), 0)
+
 		out[i] = lib.VsInfo{
-			VsRegistryIdx: uint(i),
-			VsIdentifier:  id,
-			LastPacketTimestamp: time.Unix(
-				int64(entry.last_packet_timestamp),
-				0,
-			),
-			Stats: stats,
+			VsRegistryIdx:       uint(i),
+			VsIdentifier:        id,
+			LastPacketTimestamp: lastPacketTime,
+			Stats:               stats,
 		}
 	}
 	return out
@@ -271,14 +270,13 @@ func (state *ModuleConfigStatePtr) RealsInfo() []lib.RealInfo {
 		}
 		stats := realStatsFromC(&entry.stats)
 
+		lastPacketTime := time.Unix(int64(entry.last_packet_timestamp), 0)
+
 		out[i] = lib.RealInfo{
-			RealRegistryIdx: uint(i),
-			RealIdentifier:  realId,
-			LastPacketTimestamp: time.Unix(
-				int64(entry.last_packet_timestamp),
-				0,
-			),
-			Stats: stats,
+			RealRegistryIdx:     uint(i),
+			RealIdentifier:      realId,
+			LastPacketTimestamp: lastPacketTime,
+			Stats:               stats,
 		}
 	}
 	return out
@@ -396,16 +394,16 @@ func (state *ModuleConfigStatePtr) SessionsInfo(
 			realId = realInfo.RealIdentifier
 		}
 
+		createTime := time.Unix(int64(entry.create_timestamp), 0)
+		lastPacketTime := time.Unix(int64(entry.last_packet_timestamp), 0)
+
 		result.Sessions[i] = lib.SessionInfo{
-			ClientAddr:      clientIp,
-			ClientPort:      uint16(entry.client_port),
-			Real:            realId,
-			CreateTimestamp: time.Unix(int64(entry.create_timestamp), 0),
-			LastPacketTimestamp: time.Unix(
-				int64(entry.last_packet_timestamp),
-				0,
-			),
-			Timeout: time.Duration(entry.timeout) * time.Second,
+			ClientAddr:          clientIp,
+			ClientPort:          uint16(entry.client_port),
+			Real:                realId,
+			CreateTimestamp:     createTime,
+			LastPacketTimestamp: lastPacketTime,
+			Timeout:             time.Duration(entry.timeout) * time.Second,
 		}
 	}
 

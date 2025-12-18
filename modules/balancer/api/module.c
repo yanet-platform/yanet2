@@ -17,6 +17,7 @@
 #include "lib/controlplane/config/cp_module.h"
 
 #include "ring.h"
+#include "vs.h"
 #include <string.h>
 
 ////////////////////////////////////////////////////////////////////////////////
