@@ -56,6 +56,13 @@ service_registry_find_or_insert_service(
 			return -1;
 		}
 		idx = array->size - 1;
+
+		// Insert the new service into the index
+		res = service_index_insert(index, array, vip_address, vip_proto, 
+								ip_address, ip_proto, port, transport_proto, idx);
+		if (res != 0) {
+			return -1;
+		}
 	}
 
 	*result = service_array_lookup(array, idx);
