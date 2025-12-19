@@ -31,8 +31,7 @@ memory_context_init(
 	context->bfree_size = 0;
 
 	SET_OFFSET_OF(&context->block_allocator, block_allocator);
-	strtcpy(context->name, name, sizeof(context->name));
-	context->name[sizeof(context->name) - 1] = 0;
+	(void)strtcpy(context->name, name, sizeof(context->name));
 
 	return 0;
 }
@@ -51,8 +50,7 @@ memory_context_init_from(
 	SET_OFFSET_OF(
 		&context->block_allocator, ADDR_OF(&parent->block_allocator)
 	);
-	strtcpy(context->name, name, sizeof(context->name));
-	context->name[sizeof(context->name) - 1] = 0;
+	(void)strtcpy(context->name, name, sizeof(context->name));
 
 	return 0;
 }

@@ -142,20 +142,20 @@ agent_attach(
 
 	memset(arenas, 0, sizeof(void *) * arena_count);
 
+	uint64_t arena_size = memory_limit > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+				      ? MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+				      : memory_limit;
+
 	while (new_agent->arena_count < arena_count) {
-		void *arena = memory_balloc(
-			&cp_config->memory_context,
-			MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
-		);
+		void *arena =
+			memory_balloc(&cp_config->memory_context, arena_size);
 		if (arena == NULL) {
 			agent_cleanup(new_agent);
 			new_agent = NULL;
 			goto unlock;
 		}
 		block_allocator_put_arena(
-			&new_agent->block_allocator,
-			arena,
-			MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+			&new_agent->block_allocator, arena, arena_size
 		);
 		SET_OFFSET_OF(arenas + new_agent->arena_count, arena);
 		new_agent->arena_count++;
