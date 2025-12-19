@@ -386,17 +386,6 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 	return nil
 }
 
-func DeleteModule(m *ACLService, configName string) bool {
-	cTypeName := C.CString(agentName)
-	defer C.free(unsafe.Pointer(cTypeName))
-
-	cConfigName := C.CString(configName)
-	defer C.free(unsafe.Pointer(cConfigName))
-
-	result := C.agent_delete_module((*C.struct_agent)(m.agent.AsRawPtr()), cTypeName, cConfigName)
-	return result == 0
-}
-
 func (m *ModuleConfig) SetFwStateConfig(agent *ffi.Agent, fwstateConfig *FwStateConfig) {
 	C.acl_module_config_set_fwstate_config(m.asRawPtr(), fwstateConfig.asCPModule())
 }

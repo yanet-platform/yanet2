@@ -12,11 +12,9 @@ static void
 fwstate_config_transfer(
 	struct fwstate_config *new, struct fwstate_config *old
 ) {
-	*new = *old; // copy timeouts
+	*new = *old; // copy sync config
 	EQUATE_OFFSET(&new->fw4state, &old->fw4state);
 	EQUATE_OFFSET(&new->fw6state, &old->fw6state);
-	old->fw4state = NULL;
-	old->fw6state = NULL;
 }
 
 static void
@@ -59,7 +57,9 @@ fwstate_module_config_init(
 		return NULL;
 	}
 
-	if (cp_module_init(&config->cp_module, agent, "fwstate", name)) {
+	if (cp_module_init(
+		    &config->cp_module, agent, FWSTATE_MODULE_NAME, name
+	    )) {
 		int prev_errno = errno;
 		fwstate_module_config_free(&config->cp_module);
 		errno = prev_errno;
@@ -86,7 +86,6 @@ fwstate_module_config_free(struct cp_module *cp_module) {
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 
-	// Destroy fwstate maps using existing function
 	fwstate_config_destroy(&config->cfg, agent);
 
 	memory_bfree(
@@ -94,6 +93,16 @@ fwstate_module_config_free(struct cp_module *cp_module) {
 		config,
 		sizeof(struct fwstate_module_config)
 	);
+}
+
+void
+fwstate_module_config_detach_maps(struct cp_module *cp_module) {
+	struct fwstate_module_config *config = container_of(
+		cp_module, struct fwstate_module_config, cp_module
+	);
+
+	config->cfg.fw4state = NULL;
+	config->cfg.fw6state = NULL;
 }
 
 int
@@ -123,7 +132,8 @@ fwstate_config_create_maps(
 		extra_bucket_count = 1024; // Default: 1024 extra buckets
 	}
 	if (worker_count == 0) {
-		worker_count = 1; // Default: 1 worker
+		errno = EINVAL;
+		return -1;
 	}
 
 	// Configure IPv4 firewall state map

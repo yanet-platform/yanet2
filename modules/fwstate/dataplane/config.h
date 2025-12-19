@@ -1,5 +1,7 @@
 #pragma once
 
+#define FWSTATE_MODULE_NAME "fwstate"
+
 #include "controlplane/config/zone.h"
 
 #include "fwstate/config.h"

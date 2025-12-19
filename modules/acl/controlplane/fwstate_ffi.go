@@ -1,14 +1,20 @@
 package acl
 
-//#cgo CFLAGS: -I../../../
-//#cgo CFLAGS: -I../../../lib
-//#cgo LDFLAGS: -L../../../build/modules/acl/api -lacl_cp
-//
-//#include "api/agent.h"
-//#include "modules/acl/api/fwstate_cp.h"
-//#include "modules/fwstate/dataplane/config.h"
-//#include "fwstate/config.h"
-//#include "fwstate/fwmap.h"
+/*
+#cgo CFLAGS: -I../../../
+#cgo CFLAGS: -I../../../lib
+#cgo LDFLAGS: -L../../../build/modules/acl/api -lacl_cp
+
+#include "api/agent.h"
+#include "modules/acl/api/fwstate_cp.h"
+#include "modules/fwstate/dataplane/config.h"
+#include "fwstate/config.h"
+#include "fwstate/fwmap.h"
+
+char* module_type_name() {
+	return FWSTATE_MODULE_NAME;
+}
+*/
 import "C"
 
 import (
@@ -19,6 +25,8 @@ import (
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 	"go.uber.org/zap"
 )
+
+var fwstateModuleTypeName = C.GoString(C.module_type_name())
 
 // FwStateConfig wraps the C fwstate configuration within ACL module
 type FwStateConfig struct {
@@ -103,8 +111,68 @@ func (m *FwStateConfig) CreateMaps(
 }
 
 // SetSyncConfig sets the synchronization configuration
-func (m *FwStateConfig) SetSyncConfig(request *aclpb.SyncConfig) {
-	cSyncConfig := ConvertPbToCSyncConfig(request)
+func (m *FwStateConfig) SetSyncConfig(newConfig *aclpb.SyncConfig) {
+	oldConfig := m.GetSyncConfig()
+
+	// If oldConfig is nil, we can't copy values from it
+	// Copy zero-value fields from oldConfig to newConfig
+
+	// Check byte arrays (addresses)
+	if len(newConfig.SrcAddr) == 0 {
+		newConfig.SrcAddr = make([]byte, 16)
+		copy(newConfig.SrcAddr, oldConfig.SrcAddr)
+	}
+
+	if len(newConfig.DstEther) == 0 {
+		newConfig.DstEther = make([]byte, 6)
+		copy(newConfig.DstEther, oldConfig.DstEther)
+	}
+
+	if len(newConfig.DstAddrMulticast) == 0 {
+		newConfig.DstAddrMulticast = make([]byte, 16)
+		copy(newConfig.DstAddrMulticast, oldConfig.DstAddrMulticast)
+	}
+
+	if len(newConfig.DstAddrUnicast) == 0 {
+		newConfig.DstAddrUnicast = make([]byte, 16)
+		copy(newConfig.DstAddrUnicast, oldConfig.DstAddrUnicast)
+	}
+
+	// Check ports
+	if newConfig.PortMulticast == 0 {
+		newConfig.PortMulticast = oldConfig.PortMulticast
+	}
+
+	if newConfig.PortUnicast == 0 {
+		newConfig.PortUnicast = oldConfig.PortUnicast
+	}
+
+	// Check timeouts
+	if newConfig.TcpSynAck == 0 {
+		newConfig.TcpSynAck = oldConfig.TcpSynAck
+	}
+
+	if newConfig.TcpSyn == 0 {
+		newConfig.TcpSyn = oldConfig.TcpSyn
+	}
+
+	if newConfig.TcpFin == 0 {
+		newConfig.TcpFin = oldConfig.TcpFin
+	}
+
+	if newConfig.Tcp == 0 {
+		newConfig.Tcp = oldConfig.Tcp
+	}
+
+	if newConfig.Udp == 0 {
+		newConfig.Udp = oldConfig.Udp
+	}
+
+	if newConfig.Default == 0 {
+		newConfig.Default = oldConfig.Default
+	}
+
+	cSyncConfig := ConvertPbToCSyncConfig(newConfig)
 	C.fwstate_module_config_set_sync_config(m.asCPModule(), &cSyncConfig)
 }
 
@@ -147,6 +215,10 @@ func (m *FwStateConfig) GetMapConfig() *aclpb.MapConfig {
 		IndexSize:        indexSize,
 		ExtraBucketCount: extraBucketCount,
 	}
+}
+
+func (m *FwStateConfig) DetachMaps() {
+	C.fwstate_module_config_detach_maps(m.asCPModule())
 }
 
 // Free frees the fwstate configuration

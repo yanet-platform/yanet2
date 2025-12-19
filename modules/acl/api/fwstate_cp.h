@@ -18,6 +18,9 @@ fwstate_module_config_init(
 void
 fwstate_module_config_free(struct cp_module *cp_module);
 
+void
+fwstate_module_config_detach_maps(struct cp_module *cp_module);
+
 // Create firewall state maps for the configuration
 int
 fwstate_config_create_maps(

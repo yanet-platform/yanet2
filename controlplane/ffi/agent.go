@@ -54,11 +54,8 @@ func (m *ModuleConfig) AsRawPtr() unsafe.Pointer {
 }
 
 type Agent struct {
-	ptr *C.struct_agent
-}
-
-func NewAgent(ptr unsafe.Pointer) Agent {
-	return Agent{ptr: (*C.struct_agent)(ptr)}
+	name string
+	ptr  *C.struct_agent
 }
 
 func (m *Agent) Close() error {
@@ -316,5 +313,23 @@ func (m *Agent) DeletePipeline(name string) error {
 		return err
 	}
 
+	return nil
+}
+
+func (m *Agent) DeleteModuleConfig(configName string) error {
+	return m.DeleteModuleConfigType(m.name, configName)
+}
+
+func (m *Agent) DeleteModuleConfigType(moduleType, configName string) error {
+	cTypeName := C.CString(moduleType)
+	defer C.free(unsafe.Pointer(cTypeName))
+
+	cConfigName := C.CString(configName)
+	defer C.free(unsafe.Pointer(cConfigName))
+
+	result := C.agent_delete_module((*C.struct_agent)(m.AsRawPtr()), cTypeName, cConfigName)
+	if result != 0 {
+		return m.TakeError()
+	}
 	return nil
 }

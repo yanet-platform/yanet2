@@ -350,7 +350,7 @@ new_module_fwstate() {
 		module->module.name,
 		sizeof(module->module.name),
 		"%s",
-		"fwstate"
+		FWSTATE_MODULE_NAME
 	);
 	module->module.handler = fwstate_handle_packets;
 
