@@ -24,8 +24,8 @@
 
 #define FWMAP_BUCKET_ENTRIES 4
 #define FWMAP_BUCKET_SIZE 64
-#define FWMAP_CHUNK_INDEX_MAX_SIZE                                             \
-	(ALIGN_DOWN_POW2(MEMORY_BLOCK_ALLOCATOR_MAX_SIZE) / FWMAP_BUCKET_SIZE)
+#define FWMAP_CHUNK_MAX_SIZE ALIGN_DOWN_POW2(MEMORY_BLOCK_ALLOCATOR_MAX_SIZE)
+#define FWMAP_CHUNK_INDEX_MAX_SIZE (FWMAP_CHUNK_MAX_SIZE / FWMAP_BUCKET_SIZE)
 #define FWMAP_CHUNK_INDEX_MASK (FWMAP_CHUNK_INDEX_MAX_SIZE - 1)
 
 // Function registry for cross-process compatibility.
@@ -305,7 +305,7 @@ fwmap_balloc_aligned(
 	size_t alignment,
 	uint8_t *offset_ptr
 ) {
-	if (size + alignment >= MEMORY_BLOCK_ALLOCATOR_MAX_SIZE) {
+	if (size + alignment >= FWMAP_CHUNK_MAX_SIZE) {
 		*offset_ptr = 0;
 		return memory_balloc(ctx, size);
 	}
@@ -344,10 +344,9 @@ fwmap_bfree_aligned(
 	void *raw = (void *)((uintptr_t)aligned_ptr - offset);
 
 	// Calculate original allocation size
-	size_t alloc_size =
-		(size + alignment >= MEMORY_BLOCK_ALLOCATOR_MAX_SIZE)
-			? size
-			: size + alignment - 1;
+	size_t alloc_size = (size + alignment >= FWMAP_CHUNK_MAX_SIZE)
+				    ? size
+				    : size + alignment - 1;
 
 	memory_bfree(ctx, raw, alloc_size);
 }
@@ -716,15 +715,13 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 		extra_size = align_up_pow2(extra_size);
 	}
 
-	uint32_t keys_per_chunk =
-		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE / config.key_size;
+	uint32_t keys_per_chunk = FWMAP_CHUNK_MAX_SIZE / config.key_size;
 	// Ceiling division: (index_size + keys_per_chunk - 1) / keys_per_chunk.
 	// But ensure at least 1 chunk even if keys_per_chunk is 0.
 	uint32_t keys_chunk_cnt =
 		(index_size + keys_per_chunk - 1) / keys_per_chunk;
 
-	uint32_t values_per_chunk =
-		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE / config.value_size;
+	uint32_t values_per_chunk = FWMAP_CHUNK_MAX_SIZE / config.value_size;
 	// Ceiling division with minimum of 1.
 	uint32_t values_chunk_cnt =
 		(index_size + values_per_chunk - 1) / values_per_chunk;

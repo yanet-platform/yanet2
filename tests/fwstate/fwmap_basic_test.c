@@ -18,7 +18,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#define ARENA_SIZE_MB 512
+#define ARENA_SIZE_MB 1024
 #define ARENA_SIZE ((1 << 20) * ARENA_SIZE_MB)
 #define DEFAULT_TTL 50000
 #define WORKER_ID 0
