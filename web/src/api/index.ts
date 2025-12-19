@@ -6,6 +6,7 @@ export * from './functions';
 export * from './pipelines';
 export * from './devices';
 export * from './decap';
+export * from './acl';
 
 import { neighbours } from './neighbours';
 import { inspect } from './inspect';
@@ -14,6 +15,7 @@ import { functions } from './functions';
 import { pipelines } from './pipelines';
 import { devices } from './devices';
 import { decap } from './decap';
+import { acl } from './acl';
 
 export const API = {
     neighbours,
@@ -23,4 +25,5 @@ export const API = {
     pipelines,
     devices,
     decap,
+    acl,
 };
