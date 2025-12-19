@@ -376,16 +376,36 @@ func TestHashConsistency(t *testing.T) {
 
 			result, err := mock.HandlePackets(packet)
 			require.NoError(t, err, "packet %d failed", i)
-			require.Len(t, result.Output, 1, "packet %d: expected 1 output packet", i)
-			require.Empty(t, result.Drop, "packet %d: no packets should be dropped", i)
+			require.Len(
+				t,
+				result.Output,
+				1,
+				"packet %d: expected 1 output packet",
+				i,
+			)
+			require.Empty(
+				t,
+				result.Drop,
+				"packet %d: no packets should be dropped",
+				i,
+			)
 
 			// Extract the real server IP from the tunneled packet (outer header)
 			outputPacket := result.Output[0]
 
 			// Parse the raw packet data to get the outer IP header
-			parsed := gopacket.NewPacket(outputPacket.RawData, layers.LayerTypeEthernet, gopacket.Default)
+			parsed := gopacket.NewPacket(
+				outputPacket.RawData,
+				layers.LayerTypeEthernet,
+				gopacket.Default,
+			)
 			ipLayer := parsed.Layer(layers.LayerTypeIPv4)
-			require.NotNil(t, ipLayer, "packet %d: output should have IPv4 layer", i)
+			require.NotNil(
+				t,
+				ipLayer,
+				"packet %d: output should have IPv4 layer",
+				i,
+			)
 
 			ipv4, ok := ipLayer.(*layers.IPv4)
 			require.True(t, ok, "packet %d: failed to cast to IPv4", i)
@@ -404,8 +424,11 @@ func TestHashConsistency(t *testing.T) {
 			}
 		}
 
-		t.Logf("SUCCESS: All %d packets from same client consistently routed to %s (PureL3 mode)",
-			numPackets, firstRealIp)
+		t.Logf(
+			"SUCCESS: All %d packets from same client consistently routed to %s (PureL3 mode)",
+			numPackets,
+			firstRealIp,
+		)
 	})
 
 	t.Run("Expired_Sessions_Hash_Consistency", func(t *testing.T) {
@@ -428,15 +451,30 @@ func TestHashConsistency(t *testing.T) {
 
 			result, err := mock.HandlePackets(packet)
 			require.NoError(t, err, "round %d: packet failed", round)
-			require.Len(t, result.Output, 1, "round %d: expected 1 output packet", round)
+			require.Len(
+				t,
+				result.Output,
+				1,
+				"round %d: expected 1 output packet",
+				round,
+			)
 
 			// Extract real server IP from the tunneled packet (outer header)
 			outputPacket := result.Output[0]
 
 			// Parse the raw packet data to get the outer IP header
-			parsed := gopacket.NewPacket(outputPacket.RawData, layers.LayerTypeEthernet, gopacket.Default)
+			parsed := gopacket.NewPacket(
+				outputPacket.RawData,
+				layers.LayerTypeEthernet,
+				gopacket.Default,
+			)
 			ipLayer := parsed.Layer(layers.LayerTypeIPv4)
-			require.NotNil(t, ipLayer, "round %d: output should have IPv4 layer", round)
+			require.NotNil(
+				t,
+				ipLayer,
+				"round %d: output should have IPv4 layer",
+				round,
+			)
 
 			ipv4, ok := ipLayer.(*layers.IPv4)
 			require.True(t, ok, "round %d: failed to cast to IPv4", round)
@@ -446,7 +484,11 @@ func TestHashConsistency(t *testing.T) {
 
 			if round == 0 {
 				firstRealIp = realIp
-				t.Logf("Round %d: First packet routed to real: %s", round, firstRealIp)
+				t.Logf(
+					"Round %d: First packet routed to real: %s",
+					round,
+					firstRealIp,
+				)
 			} else {
 				assert.Equal(t, firstRealIp, realIp,
 					"Round %d: Packet went to different real (%s) than first packet (%s). "+
@@ -457,11 +499,16 @@ func TestHashConsistency(t *testing.T) {
 			mock.AdvanceTime(2 * time.Second)
 
 			// Clean up expired sessions
-			err = balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(mock.CurrentTime())
+			err = balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(
+				mock.CurrentTime(),
+			)
 			require.NoError(t, err, "round %d: failed to sync sessions", round)
 		}
 
-		t.Logf("SUCCESS: All %d packets from same client consistently routed to %s (with session expiry)",
-			numRounds, firstRealIp)
+		t.Logf(
+			"SUCCESS: All %d packets from same client consistently routed to %s (with session expiry)",
+			numRounds,
+			firstRealIp,
+		)
 	})
 }

@@ -1,6 +1,7 @@
 package balancer
 
 import (
+	"fmt"
 	"math/rand"
 	"net/netip"
 	"testing"
@@ -54,7 +55,11 @@ func generateRandomIP(rng *rand.Rand, forceIPv6 bool) netip.Addr {
 // of virtual services and reals per VS. Virtual services can have different
 // flags (GRE, FixMSS, OPS, PureL3), IPv4/IPv6 addresses, and TCP/UDP protocols.
 // FixMSS flag is only set for IPv6 virtual services.
-func createBigConfig(vsCount int, realsPerVs int, rng *rand.Rand) *balancerpb.ModuleConfig {
+func createBigConfig(
+	vsCount int,
+	realsPerVs int,
+	rng *rand.Rand,
+) *balancerpb.ModuleConfig {
 	virtualServices := make([]*balancerpb.VirtualService, 0, vsCount)
 
 	for range vsCount {
@@ -187,7 +192,14 @@ type vsKey struct {
 	proto balancerpb.TransportProto
 }
 
-func vsKeyFromPacket(t *testing.T, packet *framework.PacketInfo) (*vsKey, *netip.Addr) {
+func (key *vsKey) String() string {
+	return fmt.Sprintf("%s:%d/%s", key.ip, key.port, key.proto)
+}
+
+func vsKeyFromPacket(
+	t *testing.T,
+	packet *framework.PacketInfo,
+) (*vsKey, *netip.Addr) {
 	t.Helper()
 	if !packet.IsTunneled {
 		t.Errorf("Output packet is not tunneled")
@@ -295,7 +307,11 @@ func buildVSMaps(config *balancerpb.ModuleConfig) map[vsKey]*vsInfo {
 ////////////////////////////////////////////////////////////////////////////////
 
 // createRealUpdate creates a RealUpdate for enabling/disabling a real
-func createRealUpdate(vs *balancerpb.VirtualService, real *balancerpb.Real, enable bool) lib.RealUpdate {
+func createRealUpdate(
+	vs *balancerpb.VirtualService,
+	real *balancerpb.Real,
+	enable bool,
+) lib.RealUpdate {
 	vsIP, _ := netip.AddrFromSlice(vs.Addr)
 	realIP, _ := netip.AddrFromSlice(real.DstAddr)
 
@@ -361,7 +377,10 @@ func TestBigData(t *testing.T) {
 	require.NoError(t, err)
 	defer setup.Free()
 
-	t.Logf("Setup initial config with 10 VS and 50 reals per VS (total 500 reals), elapsed on balancer creation: %v", setup.stats.balancerCreationTime)
+	t.Logf(
+		"Setup initial config with 10 VS and 50 reals per VS (total 500 reals), elapsed on balancer creation: %v",
+		setup.stats.balancerCreationTime,
+	)
 
 	// Set initial time
 	setup.mock.SetCurrentTime(time.Unix(0, 0))
@@ -379,7 +398,10 @@ func TestBigData(t *testing.T) {
 		err := setup.balancer.Update(newConfig, stateConfig)
 		require.NoError(t, err)
 
-		t.Logf("Setup config to 20 VS and 20 reals per VS (total 400 reals), elapsed on config update: %v", time.Since(updateStart))
+		t.Logf(
+			"Setup config to 20 VS and 20 reals per VS (total 400 reals), elapsed on config update: %v",
+			time.Since(updateStart),
+		)
 
 		testPacketSending(t, setup, newConfig, rng, 10, 10000)
 	})
@@ -427,7 +449,10 @@ func testPacketSending(
 				}
 
 				if shouldDisable {
-					disableUpdates = append(disableUpdates, createRealUpdate(vs, real, false))
+					disableUpdates = append(
+						disableUpdates,
+						createRealUpdate(vs, real, false),
+					)
 					disabledCount++
 				} else {
 					enableUpdates = append(enableUpdates, createRealUpdate(vs, real, true))
@@ -444,7 +469,13 @@ func testPacketSending(
 		// Rebuild VS maps with updated enabled state
 		vsMap := buildVSMaps(config)
 
-		t.Logf("Batch %d/%d: Disabled %d reals in %v", batch+1, numBatches, disabledCount, disableDuration)
+		t.Logf(
+			"Batch %d/%d: Disabled %d reals in %v",
+			batch+1,
+			numBatches,
+			disabledCount,
+			disableDuration,
+		)
 
 		packets := make([]gopacket.Packet, 0, packetsPerBatch)
 
@@ -489,7 +520,10 @@ func testPacketSending(
 				)
 			}
 
-			packets = append(packets, xpacket.LayersToPacket(t, packetLayers...))
+			packets = append(
+				packets,
+				xpacket.LayersToPacket(t, packetLayers...),
+			)
 		}
 
 		// Generate packets to non-existent VS (10% of packets)
@@ -515,7 +549,10 @@ func testPacketSending(
 				nonExistentPort,
 			)
 
-			packets = append(packets, xpacket.LayersToPacket(t, packetLayers...))
+			packets = append(
+				packets,
+				xpacket.LayersToPacket(t, packetLayers...),
+			)
 		}
 
 		totalPackets += len(packets)
@@ -529,7 +566,12 @@ func testPacketSending(
 		totalOutput += len(result.Output)
 		totalDrop += len(result.Drop)
 
-		assert.Equal(t, existingVSPackets, len(result.Output), "all packets should be tunneled")
+		assert.Equal(
+			t,
+			existingVSPackets,
+			len(result.Output),
+			"all packets should be tunneled",
+		)
 
 		// Validate output packets
 		for _, outPkt := range result.Output {
@@ -542,14 +584,22 @@ func testPacketSending(
 			vsInfo, exists := vsMap[*key]
 			if !exists {
 				// all packets to non existent VS should be dropped
-				t.Errorf("Packet tunneled to non-existent VS %s:%d", key.ip, key.port)
+				t.Errorf(
+					"Packet tunneled to non-existent VS %s:%d",
+					key.ip,
+					key.port,
+				)
 				continue
 			}
 
 			// Check that the real IP is in the VS's real list
 			if !vsInfo.realAddrs[*realIP] {
-				t.Errorf("Packet tunneled to real %s which is not in VS %s:%d reals",
-					*realIP, key.ip, key.port)
+				t.Errorf(
+					"Packet tunneled to real %s which is not in VS %s:%d reals",
+					*realIP,
+					key.ip,
+					key.port,
+				)
 				continue
 			}
 
@@ -578,9 +628,18 @@ func testPacketSending(
 		rps := float64(len(packets)) / handleDuration.Seconds()
 
 		// Log progress
-		t.Logf("Batch %d/%d: Sent %d packets, Output=%d, Drop=%d, Correct packets: %d/%d, HandleTime=%v, RPS=%.0f",
-			batch+1, numBatches, len(packets), len(result.Output), len(result.Drop), correctPackets, totalPackets,
-			handleDuration, rps)
+		t.Logf(
+			"Batch %d/%d: Sent %d packets, Output=%d, Drop=%d, Correct packets: %d/%d, HandleTime=%v, RPS=%.0f",
+			batch+1,
+			numBatches,
+			len(packets),
+			len(result.Output),
+			len(result.Drop),
+			correctPackets,
+			totalPackets,
+			handleDuration,
+			rps,
+		)
 
 		// Re-enable all reals after batch and measure time
 		enableStartTime := time.Now()
@@ -588,7 +647,12 @@ func testPacketSending(
 		require.NoError(t, err)
 		enableDuration := time.Since(enableStartTime)
 
-		t.Logf("Batch %d/%d: Re-enabled all reals in %v", batch+1, numBatches, enableDuration)
+		t.Logf(
+			"Batch %d/%d: Re-enabled all reals in %v",
+			batch+1,
+			numBatches,
+			enableDuration,
+		)
 
 		// Advance time by 1 second
 		setup.mock.AdvanceTime(time.Second)
@@ -608,8 +672,16 @@ func testPacketSending(
 	dropRate := float64(totalDrop) / float64(totalPackets) * 100
 	correctRate := float64(correctPackets) / float64(totalPackets) * 100
 
-	t.Logf("Final statistics: Total=%d, Output=%d (%.2f%%), Drop=%d (%.2f%%), Correct=%d (%.2f%% of total)",
-		totalPackets, totalOutput, outputRate, totalDrop, dropRate, correctPackets, correctRate)
+	t.Logf(
+		"Final statistics: Total=%d, Output=%d (%.2f%%), Drop=%d (%.2f%%), Correct=%d (%.2f%% of total)",
+		totalPackets,
+		totalOutput,
+		outputRate,
+		totalDrop,
+		dropRate,
+		correctPackets,
+		correctRate,
+	)
 
 	// Get final state info
 	stateInfo := setup.balancer.GetStateInfo(setup.mock.CurrentTime())
@@ -618,5 +690,9 @@ func testPacketSending(
 		setup.balancer.GetModuleConfigState().SessionTableCapacity())
 
 	// Validate state info consistency
-	ValidateStateInfo(t, stateInfo, setup.balancer.GetModuleConfig().VirtualServices)
+	ValidateStateInfo(
+		t,
+		stateInfo,
+		setup.balancer.GetModuleConfig().VirtualServices,
+	)
 }

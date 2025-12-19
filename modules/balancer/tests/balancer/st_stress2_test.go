@@ -136,7 +136,11 @@ func TestSessionTableStress2(t *testing.T) {
 	}
 
 	// Build module config from virtual services configuration
-	virtualServices := make([]*balancerpb.VirtualService, 0, len(virtualServicesConfig))
+	virtualServices := make(
+		[]*balancerpb.VirtualService,
+		0,
+		len(virtualServicesConfig),
+	)
 	for _, vsConf := range virtualServicesConfig {
 		// Build allowed sources based on VS IP version
 		var allowedSrcs []*balancerpb.Subnet
@@ -327,7 +331,11 @@ func TestSessionTableStress2(t *testing.T) {
 		result, err := mock.HandlePackets(packets...)
 		require.NoError(t, err)
 
-		t.Logf("Sent 16 packets: Output=%d, Drop=%d", len(result.Output), len(result.Drop))
+		t.Logf(
+			"Sent 16 packets: Output=%d, Drop=%d",
+			len(result.Output),
+			len(result.Drop),
+		)
 
 		// Track which sessions were accepted and their selected reals
 		for i, outPacket := range result.Output {
@@ -339,12 +347,22 @@ func TestSessionTableStress2(t *testing.T) {
 			require.True(t, ok, "failed to parse real IP")
 			session.realIP = realIP
 
-			key := sessionKey(session.clientIP, session.clientPort, session.vsIP, session.vsPort)
+			key := sessionKey(
+				session.clientIP,
+				session.clientPort,
+				session.vsIP,
+				session.vsPort,
+			)
 			activeSessions[key] = session
 		}
 
 		t.Logf("Created %d initial sessions", len(activeSessions))
-		assert.GreaterOrEqual(t, len(activeSessions), 12, "at least 75%% of packets should be accepted")
+		assert.GreaterOrEqual(
+			t,
+			len(activeSessions),
+			12,
+			"at least 75%% of packets should be accepted",
+		)
 	})
 
 	// Phase 2: Perform 10 iterations of the stress test cycle
@@ -354,11 +372,18 @@ func TestSessionTableStress2(t *testing.T) {
 
 			// Step 1: Sync active sessions and resize table on demand
 			t.Run("Step1_Sync_And_Resize", func(t *testing.T) {
-				err := balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(currentTime)
+				err := balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(
+					currentTime,
+				)
 				require.NoError(t, err)
 
-				capacity := balancer.GetModuleConfigState().SessionTableCapacity()
-				t.Logf("Session table capacity: %d, Active sessions: %d", capacity, len(activeSessions))
+				capacity := balancer.GetModuleConfigState().
+					SessionTableCapacity()
+				t.Logf(
+					"Session table capacity: %d, Active sessions: %d",
+					capacity,
+					len(activeSessions),
+				)
 			})
 
 			// Step 2: Send packets to existing sessions (TCP non-SYN or UDP)
@@ -386,14 +411,22 @@ func TestSessionTableStress2(t *testing.T) {
 							session.vsPort,
 						)
 					}
-					packets = append(packets, xpacket.LayersToPacket(t, packetLayers...))
+					packets = append(
+						packets,
+						xpacket.LayersToPacket(t, packetLayers...),
+					)
 				}
 
 				result, err := mock.HandlePackets(packets...)
 				require.NoError(t, err)
 
 				// All packets should be accepted (no drops)
-				assert.Equal(t, len(packets), len(result.Output), "all packets to existing sessions should be accepted")
+				assert.Equal(
+					t,
+					len(packets),
+					len(result.Output),
+					"all packets to existing sessions should be accepted",
+				)
 				assert.Empty(t, result.Drop, "no packets should be dropped")
 
 				// Validate each packet and verify real consistency
@@ -401,17 +434,32 @@ func TestSessionTableStress2(t *testing.T) {
 					session := sessionList[i]
 
 					// Validate packet structure
-					ValidatePacket(t, balancer.GetModuleConfig(), packets[i], outPacket)
+					ValidatePacket(
+						t,
+						balancer.GetModuleConfig(),
+						packets[i],
+						outPacket,
+					)
 
 					// Verify the same real is selected
 					realIP, ok := netip.AddrFromSlice(outPacket.DstIP)
 					require.True(t, ok, "failed to parse real IP")
-					assert.Equal(t, session.realIP, realIP,
+					assert.Equal(
+						t,
+						session.realIP,
+						realIP,
 						"real server should remain consistent for session %s:%d->%s:%d",
-						session.clientIP, session.clientPort, session.vsIP, session.vsPort)
+						session.clientIP,
+						session.clientPort,
+						session.vsIP,
+						session.vsPort,
+					)
 				}
 
-				t.Logf("Sent %d packets to existing sessions, all accepted with consistent reals", len(packets))
+				t.Logf(
+					"Sent %d packets to existing sessions, all accepted with consistent reals",
+					len(packets),
+				)
 			})
 
 			// Step 3: Create N/2 new sessions
@@ -442,7 +490,12 @@ func TestSessionTableStress2(t *testing.T) {
 
 					var packet gopacket.Packet
 					if vs.proto == balancerpb.TransportProto_TCP {
-						packet = makeTcpSynPacket(clientIP, clientPort, vs.ip, vs.port)
+						packet = makeTcpSynPacket(
+							clientIP,
+							clientPort,
+							vs.ip,
+							vs.port,
+						)
 					} else {
 						packetLayers := MakeUDPPacket(
 							clientIP,
@@ -459,25 +512,45 @@ func TestSessionTableStress2(t *testing.T) {
 				require.NoError(t, err)
 
 				// All new sessions should be accepted
-				require.Equal(t, len(packets), len(result.Output), "all new session packets should be accepted")
+				require.Equal(
+					t,
+					len(packets),
+					len(result.Output),
+					"all new session packets should be accepted",
+				)
 				require.Empty(t, result.Drop, "no packets should be dropped")
 
 				// Track new sessions and their selected reals
 				for i, outPacket := range result.Output {
 					session := packetToSession[i]
-					ValidatePacket(t, balancer.GetModuleConfig(), packets[i], outPacket)
+					ValidatePacket(
+						t,
+						balancer.GetModuleConfig(),
+						packets[i],
+						outPacket,
+					)
 
 					// Extract the real IP from the output packet
 					realIP, ok := netip.AddrFromSlice(outPacket.DstIP)
 					require.True(t, ok, "failed to parse real IP")
 					session.realIP = realIP
 
-					key := sessionKey(session.clientIP, session.clientPort, session.vsIP, session.vsPort)
+					key := sessionKey(
+						session.clientIP,
+						session.clientPort,
+						session.vsIP,
+						session.vsPort,
+					)
 					activeSessions[key] = session
 				}
 
-				t.Logf("Created %d new sessions (N=%d, N/2=%d), total active: %d",
-					len(result.Output), N, newSessionCount, len(activeSessions))
+				t.Logf(
+					"Created %d new sessions (N=%d, N/2=%d), total active: %d",
+					len(result.Output),
+					N,
+					newSessionCount,
+					len(activeSessions),
+				)
 			})
 
 			// Note: Do NOT advance time as per requirements
@@ -489,15 +562,20 @@ func TestSessionTableStress2(t *testing.T) {
 		currentTime := mock.CurrentTime()
 
 		// Sync one more time
-		err := balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(currentTime)
+		err := balancer.SyncActiveSessionsAndWlcAndResizeTableOnDemand(
+			currentTime,
+		)
 		require.NoError(t, err)
 
 		// Get sessions info
 		sessionsInfo, err := balancer.GetSessionsInfo(currentTime)
 		require.NoError(t, err)
 
-		t.Logf("Final state: %d active sessions tracked, %d sessions in balancer",
-			len(activeSessions), sessionsInfo.SessionsCount)
+		t.Logf(
+			"Final state: %d active sessions tracked, %d sessions in balancer",
+			len(activeSessions),
+			sessionsInfo.SessionsCount,
+		)
 
 		// Verify session count matches
 		assert.Equal(t, uint(len(activeSessions)), sessionsInfo.SessionsCount,
@@ -506,7 +584,10 @@ func TestSessionTableStress2(t *testing.T) {
 		// Get state info
 		stateInfo := balancer.GetStateInfo(mock.CurrentTime())
 		t.Logf("Module active sessions: %d", stateInfo.ActiveSessions.Value)
-		t.Logf("Session table capacity: %d", balancer.GetModuleConfigState().SessionTableCapacity())
+		t.Logf(
+			"Session table capacity: %d",
+			balancer.GetModuleConfigState().SessionTableCapacity(),
+		)
 
 		// Verify VS and Real active sessions sum up correctly
 		totalVsSessions := uint(0)

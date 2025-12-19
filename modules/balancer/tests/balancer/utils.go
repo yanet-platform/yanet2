@@ -391,9 +391,16 @@ func ValidatePacket(
 	}
 
 	// Parse the full tunneled packet to read outer and inner ToS/TrafficClass
-	tunneled := gopacket.NewPacket(resultPacket.RawData, layers.LayerTypeEthernet, gopacket.Default)
+	tunneled := gopacket.NewPacket(
+		resultPacket.RawData,
+		layers.LayerTypeEthernet,
+		gopacket.Default,
+	)
 	if tunneled.ErrorLayer() != nil {
-		t.Errorf("failed to parse tunneled packet for ToS/TrafficClass check: %v", tunneled.ErrorLayer().Error())
+		t.Errorf(
+			"failed to parse tunneled packet for ToS/TrafficClass check: %v",
+			tunneled.ErrorLayer().Error(),
+		)
 		return
 	}
 
@@ -447,8 +454,18 @@ func ValidatePacket(
 	}
 
 	// Assertions: preserve ToS/TrafficClass through encapsulation
-	assert.Equal(t, originalToS, outerToS, "outer packet ToS/TrafficClass mismatch with original")
-	assert.Equal(t, originalToS, innerToS, "inner packet ToS/TrafficClass mismatch with original")
+	assert.Equal(
+		t,
+		originalToS,
+		outerToS,
+		"outer packet ToS/TrafficClass mismatch with original",
+	)
+	assert.Equal(
+		t,
+		originalToS,
+		innerToS,
+		"inner packet ToS/TrafficClass mismatch with original",
+	)
 
 	var originPacketProto layers.IPProtocol
 	if originalPacket.IsIPv4 {
@@ -518,7 +535,9 @@ func ValidatePacket(
 						resultMSS, err := xpacket.PacketMSS(packet)
 						hasMSS := err == nil
 						if !hasMSS {
-							t.Error("no mss in packet, but fix mss flag is present")
+							t.Error(
+								"no mss in packet, but fix mss flag is present",
+							)
 							return
 						}
 						expectedMSS := uint16(0)

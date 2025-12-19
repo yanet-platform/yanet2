@@ -295,16 +295,16 @@ func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(
 ////////////////////////////////////////////////////////////////////////////////
 
 func (s *ModuleConfigState) runBackgroundTasks() {
-	// Create a new context for background tasks
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-
 	// Start scanSessionTable task
 	if s.ScanSessionTablePeriodMs > 0 {
+		// Create a new context for background tasks
+		s.ctx, s.cancel = context.WithCancel(context.Background())
+
 		period := time.Duration(s.ScanSessionTablePeriodMs) * time.Millisecond
 		ctx := s.ctx
 
 		s.log.Infow(
-			"starting session table scan background task",
+			"starting sync active sessions and resize table goroutine",
 			zap.Uint("period_ms", s.ScanSessionTablePeriodMs),
 			zap.Duration("period", period),
 		)
@@ -314,20 +314,15 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 			ticker := time.NewTicker(period)
 			defer ticker.Stop()
 
-			s.log.Debugw(
-				"session table scan goroutine started",
-				zap.Duration("ticker_period", period),
-			)
-
 			for {
 				select {
 				case <-ctx.Done():
-					s.log.Info("session table scan goroutine cancelled")
+					s.log.Info("sync active sessions and resize table goroutine cancelled")
 					return
 				case <-ticker.C:
 					s.log.Debugw(
-						"session table scan tick",
-						zap.Duration("period", period),
+						"sync active sessions and resize table tick",
+						zap.Duration("ticker_period", period),
 					)
 					s.lock.Lock()
 					err := s.SyncActiveSessionsAndResizeTableOnDemand(
@@ -336,7 +331,7 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 					s.lock.Unlock()
 					if err != nil {
 						s.log.Errorw(
-							"background task failed",
+							"failed to sync active sessions and resize table",
 							zap.Error(err),
 						)
 					}
@@ -344,6 +339,8 @@ func (s *ModuleConfigState) runBackgroundTasks() {
 			}
 		}()
 	} else {
+		s.ctx = nil
+		s.cancel = nil
 		s.log.Warn("passed zero period for session table scan routine, scanning routine not started")
 	}
 }

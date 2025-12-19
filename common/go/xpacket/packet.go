@@ -1,6 +1,7 @@
 package xpacket
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/gopacket/gopacket"
@@ -32,7 +33,30 @@ func LayersToPacket(t *testing.T, lyrs ...gopacket.SerializableLayer) gopacket.P
 	)
 	require.Empty(t, pkt.ErrorLayer(), "%#+v", lyrs)
 	return pkt
+}
 
+func LayersToPacketChecked(lyrs ...gopacket.SerializableLayer) (gopacket.Packet, error) {
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
+
+	if err := gopacket.SerializeLayers(buf, opts, lyrs...); err != nil {
+		return nil, fmt.Errorf("failed to serialize layers: %v", err)
+	}
+
+	pkt := gopacket.NewPacket(
+		buf.Bytes(),
+		layers.LayerTypeEthernet,
+		gopacket.Default,
+	)
+
+	if pkt.ErrorLayer() != nil {
+		return nil, fmt.Errorf("failed to parse packet: %v", pkt.ErrorLayer())
+	}
+
+	return pkt, nil
 }
 
 func ParseEtherPacket(data []byte) gopacket.Packet {

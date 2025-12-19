@@ -299,6 +299,7 @@ yanet_mock_init(
 		mock->workers[i].dp_config = dp_config;
 		mock->workers[i].dp_worker.gen = 1000000000000000;
 		mock->workers[i].dp_worker.rx_mempool = mp;
+		mock->workers[i].dp_worker.idx = i;
 	}
 
 	dp_config->dp_topology.device_count = config->device_count;
