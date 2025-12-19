@@ -69,17 +69,6 @@ fill_packet_list(
 	uint16_t mbuf_size
 );
 
-/// Fills packet list and uses `arena` as storage for `rte_mbuf`.
-int
-fill_packet_list_arena(
-	struct packet_list *packet_list,
-	size_t packets_count,
-	struct packet_data *packets,
-	uint16_t mbuf_size,
-	void *arena,
-	size_t arena_size
-);
-
 /// Free packet list in case its `rte_mbuf`s were allocated with malloc.
 void
 free_packet_list(struct packet_list *packet_list);
