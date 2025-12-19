@@ -46,11 +46,10 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-
-impl TryFrom<String> for aclpb::IpNet {
+impl TryFrom<&String> for aclpb::IpNet {
     type Error = Box<dyn Error>;
 
-    fn try_from(value: String) -> Result<Self, Self::Error> {
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
         let parts: Vec<&str> = value.split('/').collect();
         if parts.len() == 1 {
             let addr: IpAddr = value.parse()?;
@@ -110,32 +109,32 @@ struct Range {
     to: u16,
 }
 
-impl TryFrom<Range> for aclpb::PortRange {
+impl TryFrom<&Range> for aclpb::PortRange {
     type Error = Box<dyn Error>;
 
-    fn try_from(r: Range) -> Result<Self, Self::Error> {
+    fn try_from(r: &Range) -> Result<Self, Self::Error> {
         if r.from > r.to {
-            return Err(format!("Port 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
+            return Err(format!("port 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
         }
         Ok(Self { from: r.from as u32, to: r.to as u32 })
     }
 }
 
-impl TryFrom<Range> for aclpb::ProtoRange {
+impl TryFrom<&Range> for aclpb::ProtoRange {
     type Error = Box<dyn Error>;
 
-    fn try_from(r: Range) -> Result<Self, Self::Error> {
+    fn try_from(r: &Range) -> Result<Self, Self::Error> {
         if r.from > r.to {
-            return Err(format!("Protocol 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
+            return Err(format!("protocol 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
         }
         Ok(Self { from: r.from as u32, to: r.to as u32 })
     }
 }
 
-impl TryFrom<Range> for aclpb::VlanRange {
+impl TryFrom<&Range> for aclpb::VlanRange {
     type Error = Box<dyn Error>;
 
-    fn try_from(r: Range) -> Result<Self, Self::Error> {
+    fn try_from(r: &Range) -> Result<Self, Self::Error> {
         // VLAN ID is 12 bits, so valid range is 0-4095
         if r.from > 4095 {
             return Err(format!("VLAN 'from' value {} exceeds maximum 4095", r.from).into());
@@ -154,6 +153,9 @@ impl TryFrom<Range> for aclpb::VlanRange {
 enum ActionKind {
     Allow,
     Deny,
+    Count,
+    CheckState,
+    CreateState,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -173,85 +175,46 @@ impl TryFrom<ACLRule> for aclpb::Rule {
     type Error = Box<dyn Error>;
 
     fn try_from(acl_rule: ACLRule) -> Result<Self, Self::Error> {
-        let srcs: Result<Vec<_>, Box<dyn Error>> = acl_rule
-            .srcs
-            .into_iter()
-            .enumerate()
-            .map(|(i, m)| {
-                m.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
-                    format!("failed to parse src[{}]: {}", i, e).into()
-                })
-            })
-            .collect();
-
-        let dsts: Result<Vec<_>, Box<dyn Error>> = acl_rule
-            .dsts
-            .into_iter()
-            .enumerate()
-            .map(|(i, m)| {
-                m.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
-                    format!("failed to parse dst[{}]: {}", i, e).into()
-                })
-            })
-            .collect();
-
-        let vlan_ranges: Result<Vec<_>, Box<dyn Error>> = acl_rule
-            .vlan_ranges
-            .into_iter()
-            .enumerate()
-            .map(|(i, r)| {
-                r.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
-                    format!("failed to parse vlan_range[{}]: {}", i, e).into()
-                })
-            })
-            .collect();
-
-        let src_port_ranges: Result<Vec<_>, Box<dyn Error>> = acl_rule
-            .src_ports
-            .into_iter()
-            .enumerate()
-            .map(|(i, r)| {
-                r.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
-                    format!("failed to parse src_port_range[{}]: {}", i, e).into()
-                })
-            })
-            .collect();
-
-        let dst_port_ranges: Result<Vec<_>, Box<dyn Error>> = acl_rule
-            .dst_ports
-            .into_iter()
-            .enumerate()
-            .map(|(i, r)| {
-                r.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
-                    format!("failed to parse dst_port_range[{}]: {}", i, e).into()
-                })
-            })
-            .collect();
-
-        let proto_ranges: Result<Vec<_>, Box<dyn Error>> = acl_rule
-            .proto_ranges
-            .into_iter()
-            .enumerate()
-            .map(|(i, r)| {
-                r.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
-                    format!("failed to parse proto_range[{}]: {}", i, e).into()
-                })
-            })
-            .collect();
-
         Ok(Self {
+            srcs: acl_rule
+                .srcs
+                .iter()
+                .map(aclpb::IpNet::try_from)
+                .collect::<Result<_, _>>()?,
+            dsts: acl_rule
+                .dsts
+                .iter()
+                .map(aclpb::IpNet::try_from)
+                .collect::<Result<_, _>>()?,
+            vlan_ranges: acl_rule
+                .vlan_ranges
+                .iter()
+                .map(aclpb::VlanRange::try_from)
+                .collect::<Result<_, _>>()?,
+            src_port_ranges: acl_rule
+                .src_ports
+                .iter()
+                .map(aclpb::PortRange::try_from)
+                .collect::<Result<_, _>>()?,
+            dst_port_ranges: acl_rule
+                .dst_ports
+                .iter()
+                .map(aclpb::PortRange::try_from)
+                .collect::<Result<_, _>>()?,
+            proto_ranges: acl_rule
+                .proto_ranges
+                .iter()
+                .map(aclpb::ProtoRange::try_from)
+                .collect::<Result<_, _>>()?,
             counter: acl_rule.counter,
             devices: acl_rule.devices,
-            vlan_ranges: vlan_ranges?,
-            srcs: srcs?,
-            dsts: dsts?,
-            src_port_ranges: src_port_ranges?,
-            dst_port_ranges: dst_port_ranges?,
-            proto_ranges: proto_ranges?,
             keep_state: false,
             action: match acl_rule.action {
                 ActionKind::Allow => aclpb::ActionKind::Pass,
                 ActionKind::Deny => aclpb::ActionKind::Deny,
+                ActionKind::Count => aclpb::ActionKind::Count,
+                ActionKind::CheckState => aclpb::ActionKind::CheckState,
+                ActionKind::CreateState => aclpb::ActionKind::CreateState,
             }
             .into(),
         })
