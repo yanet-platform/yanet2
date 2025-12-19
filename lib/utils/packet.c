@@ -270,36 +270,6 @@ init_packet_with_mbuf(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static int
-fill_packets(
-	size_t packets_count,
-	struct packet_data *packets,
-	size_t mbuf_size,
-	struct packet_list *packet_list,
-	void *arena,
-	size_t arena_size
-) {
-	(void)arena_size;
-	assert(arena_size >= packets_count * mbuf_size);
-	assert((uintptr_t)arena % alignof(struct rte_mbuf) == 0);
-
-	packet_list_init(packet_list);
-
-	for (size_t i = 0; i < packets_count; i++) {
-		struct packet_data *data = &packets[i];
-		struct rte_mbuf *m =
-			(struct rte_mbuf *)((uint8_t *)arena + mbuf_size * i);
-		init_mbuf(m, data, mbuf_size);
-		struct packet *p = mbuf_to_packet(m);
-		if (init_packet_with_mbuf(p, m, data) != 0) {
-			return -1;
-		}
-		packet_list_add(packet_list, p);
-	}
-
-	return 0;
-}
-
 int
 fill_packet_list(
 	struct packet_list *packet_list,
@@ -328,33 +298,6 @@ fill_packet_list(
 	}
 
 	return 0;
-}
-
-int
-fill_packet_list_arena(
-	struct packet_list *packet_list,
-	size_t packets_count,
-	struct packet_data *packets,
-	uint16_t mbuf_size,
-	void *arena,
-	size_t arena_size
-) {
-	(void)arena_size;
-	if ((uintptr_t)arena % alignof(struct rte_mbuf) != 0) {
-		size_t align = alignof(struct rte_mbuf);
-		size_t d = align - (uintptr_t)arena % align;
-		arena += d;
-		arena_size -= d;
-		assert((uintptr_t)arena % align == 0);
-	}
-	return fill_packets(
-		packets_count,
-		packets,
-		mbuf_size,
-		packet_list,
-		arena,
-		arena_size
-	);
 }
 
 void
