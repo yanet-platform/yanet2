@@ -46,29 +46,6 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct VlanRange {
-    from: u32,
-    to: u32,
-}
-
-impl TryFrom<VlanRange> for aclpb::VlanRange {
-    type Error = Box<dyn Error>;
-
-    fn try_from(r: VlanRange) -> Result<Self, Self::Error> {
-        // VLAN ID is 12 bits, so valid range is 0-4095
-        if r.from > 4095 {
-            return Err(format!("VLAN 'from' value {} exceeds maximum 4095", r.from).into());
-        }
-        if r.to > 4095 {
-            return Err(format!("VLAN 'to' value {} exceeds maximum 4095", r.to).into());
-        }
-        if r.from > r.to {
-            return Err(format!("VLAN 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
-        }
-        Ok(Self { from: r.from, to: r.to })
-    }
-}
 
 impl TryFrom<String> for aclpb::IpNet {
     type Error = Box<dyn Error>;
@@ -129,24 +106,18 @@ impl TryFrom<String> for aclpb::IpNet {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Range {
-    from: u32,
-    to: u32,
+    from: u16,
+    to: u16,
 }
 
 impl TryFrom<Range> for aclpb::PortRange {
     type Error = Box<dyn Error>;
 
     fn try_from(r: Range) -> Result<Self, Self::Error> {
-        if r.from > 65535 {
-            return Err(format!("Port 'from' value {} exceeds maximum 65535", r.from).into());
-        }
-        if r.to > 65535 {
-            return Err(format!("Port 'to' value {} exceeds maximum 65535", r.to).into());
-        }
         if r.from > r.to {
             return Err(format!("Port 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
         }
-        Ok(Self { from: r.from, to: r.to })
+        Ok(Self { from: r.from as u32, to: r.to as u32 })
     }
 }
 
@@ -154,16 +125,10 @@ impl TryFrom<Range> for aclpb::ProtoRange {
     type Error = Box<dyn Error>;
 
     fn try_from(r: Range) -> Result<Self, Self::Error> {
-        if r.from > 65535 {
-            return Err(format!("Protocol 'from' value {} exceeds maximum 65535", r.from).into());
-        }
-        if r.to > 65535 {
-            return Err(format!("Protocol 'to' value {} exceeds maximum 65535", r.to).into());
-        }
         if r.from > r.to {
             return Err(format!("Protocol 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
         }
-        Ok(Self { from: r.from, to: r.to })
+        Ok(Self { from: r.from as u32, to: r.to as u32 })
     }
 }
 
@@ -181,7 +146,7 @@ impl TryFrom<Range> for aclpb::VlanRange {
         if r.from > r.to {
             return Err(format!("VLAN 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
         }
-        Ok(Self { from: r.from, to: r.to })
+        Ok(Self { from: r.from as u32, to: r.to as u32 })
     }
 }
 
