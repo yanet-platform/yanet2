@@ -1,23 +1,18 @@
-use core::error::Error;
-
-use std::net::IpAddr;
-
-use ipnetwork::IpNetwork;
-
-use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
-use commonpb::TargetModule;
-use tonic::transport::Channel;
-use ync::logging;
-
-use serde::{Deserialize, Serialize};
+use core::{error::Error, net::IpAddr};
+use std::{fs::File, path::Path};
 
 use aclpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest, UpdateFwStateConfigRequest,
     acl_service_client::AclServiceClient,
 };
-
 use args::{DeleteCmd, ModeCmd, SetFwstateConfigCmd, ShowCmd, UpdateCmd};
+use clap::{ArgAction, CommandFactory, Parser};
+use clap_complete::CompleteEnv;
+use commonpb::TargetModule;
+use ipnetwork::IpNetwork;
+use serde::{Deserialize, Serialize};
+use tonic::transport::Channel;
+use ync::logging;
 
 mod args;
 mod format;
@@ -325,10 +320,14 @@ impl TryFrom<ACLConfig> for Vec<aclpb::Rule> {
 ////////////////////////////////////////////////////////////////////////////////
 
 impl ACLConfig {
-    pub fn from_file(path: &str) -> Result<Self, Box<dyn Error>> {
-        let file = std::fs::File::open(path)?;
-        let config = serde_yaml::from_reader(file)?;
-        Ok(config)
+    pub fn from_file<P>(path: P) -> Result<Self, Box<dyn Error>>
+    where
+        P: AsRef<Path>,
+    {
+        let rd = File::open(path)?;
+        let cfg = serde_yaml::from_reader(rd)?;
+
+        Ok(cfg)
     }
 }
 

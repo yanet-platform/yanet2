@@ -1,5 +1,6 @@
+use std::{path::PathBuf, time::Duration};
+
 use clap::Parser;
-use std::time::Duration;
 
 /// Parse duration from string (e.g., "60s", "5m", "1h")
 fn parse_duration(s: &str) -> Result<Duration, String> {
@@ -22,9 +23,6 @@ pub struct DeleteCmd {
     /// The name of the module to delete
     #[arg(long = "cfg", short)]
     pub config_name: String,
-    /// Dataplane instances from which to delete config
-    #[arg(long, short, required = true)]
-    pub instance: u32,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -32,12 +30,9 @@ pub struct UpdateCmd {
     /// The name of the module to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
-    /// Dataplane instances where the changes should be applied.
-    #[arg(long, short, required = true)]
-    pub instance: u32,
     /// Ruleset file name.
-    #[arg(required = true, long = "rules", value_name = "rules")]
-    pub rules: String,
+    #[arg(required = true, long = "rules", value_name = "PATH")]
+    pub rules: PathBuf,
 }
 
 #[derive(Debug, Clone, Parser)]
