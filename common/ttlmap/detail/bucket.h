@@ -205,13 +205,15 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 		__TTLMAP_BUCKET_DECLARE(key_type, value_type);                 \
 		__bucket_t *__bucket = (__bucket_t *)__addr;                   \
 		__ttlmap_lock(&__bucket->lock);                                \
-		__bucket_t __bucket_copy;                                      \
-		memcpy(&__bucket_copy, __bucket, sizeof(__bucket_copy));       \
+		__bucket_entry_t __entries_copy[__TTLMAP_BUCKET_ENTRIES];      \
+		memcpy(__entries_copy,                                         \
+		       __bucket->entries,                                      \
+		       sizeof(__entries_copy));                                \
 		__ttlmap_unlock(&__bucket->lock);                              \
 		for (size_t __i = 0; __i < __TTLMAP_BUCKET_ENTRIES; ++__i) {   \
-			if (__bucket_copy.entries[__i].deadline > (now)) {     \
-				if ((cb)(&__bucket_copy.entries[__i].key,      \
-					 &__bucket_copy.entries[__i].value,    \
+			if (__entries_copy[__i].deadline > (now)) {            \
+				if ((cb)(&__entries_copy[__i].key,             \
+					 &__entries_copy[__i].value,           \
 					 (data))) {                            \
 					__result = 1;                          \
 					break;                                 \
