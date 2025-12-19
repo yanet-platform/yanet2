@@ -304,6 +304,7 @@ func (m *ACLService) UpdateFWStateConfig(
 	dpConfig := m.agent.DPConfig()
 
 	if err = newFwstateConfig.CreateMaps(request.MapConfig, uint16(dpConfig.WorkerCount()), m.log); err != nil {
+		newFwstateConfig.DetachMaps() // in order not to pull them out from under the feet of another module
 		newFwstateConfig.Free()
 		m.log.Errorw("failed to create fwstate maps",
 			zap.String("config", name),
@@ -348,6 +349,7 @@ func (m *ACLService) UpdateFWStateConfig(
 			return nil
 		}()
 		if err != nil {
+			newFwstateConfig.DetachMaps() // in order not to pull them out from under the feet of another module
 			newFwstateConfig.Free()
 			return nil, err
 		}
