@@ -105,19 +105,19 @@ func convertRules(reqRules []*aclpb.Rule) ([]aclRule, error) {
 		}
 
 		for _, reqProtoRange := range reqRule.ProtoRanges {
-			// Protocol range is stored as uint16 in the code
-			if reqProtoRange.From > 65535 {
-				return nil, status.Errorf(codes.InvalidArgument, "Protocol 'from' value %d exceeds maximum 65535", reqProtoRange.From)
+			// Protocol is 8 bits, so valid range is 0-255
+			if reqProtoRange.From > 255 {
+				return nil, status.Errorf(codes.InvalidArgument, "Protocol 'from' value %d exceeds maximum 255", reqProtoRange.From)
 			}
-			if reqProtoRange.To > 65535 {
-				return nil, status.Errorf(codes.InvalidArgument, "Protocol 'to' value %d exceeds maximum 65535", reqProtoRange.To)
+			if reqProtoRange.To > 255 {
+				return nil, status.Errorf(codes.InvalidArgument, "Protocol 'to' value %d exceeds maximum 255", reqProtoRange.To)
 			}
 			if reqProtoRange.From > reqProtoRange.To {
 				return nil, status.Errorf(codes.InvalidArgument, "Protocol 'from' value %d is greater than 'to' value %d", reqProtoRange.From, reqProtoRange.To)
 			}
 			rule.protoRanges = append(rule.protoRanges, protoRange{
-				from: uint16(reqProtoRange.From),
-				to:   uint16(reqProtoRange.To),
+				from: uint8(reqProtoRange.From),
+				to:   uint8(reqProtoRange.To),
 			})
 		}
 

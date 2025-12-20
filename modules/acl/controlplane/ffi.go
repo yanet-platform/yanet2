@@ -73,8 +73,8 @@ type portRange struct {
 }
 
 type protoRange struct {
-	from uint16
-	to   uint16
+	from uint8
+	to   uint8
 }
 
 type vlanRange struct {
