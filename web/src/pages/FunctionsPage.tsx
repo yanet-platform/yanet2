@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Box, Alert } from '@gravity-ui/uikit';
+import { Box } from '@gravity-ui/uikit';
 import { PageLayout, PageLoader, EmptyState } from '../components';
 import {
     FunctionPageHeader,
@@ -13,7 +13,6 @@ const FunctionsPage: React.FC = () => {
     const {
         functionIds,
         loading,
-        error,
         functions,
         loadFunction,
         createFunction,
@@ -57,11 +56,6 @@ const FunctionsPage: React.FC = () => {
                 flexDirection: 'column',
                 overflow: 'hidden',
             }}>
-                {error && (
-                    <Box style={{ marginBottom: '12px' }}>
-                        <Alert theme="danger" message={error} />
-                    </Box>
-                )}
                 <Box style={{
                     display: 'flex',
                     flexDirection: 'column',

@@ -10,30 +10,34 @@ export const ConfigTabs: React.FC<ConfigTabsProps> = ({
     getRoutesData,
     onSelectionChange,
     getRouteId,
-}) => (
-    <TabProvider value={activeConfig} onUpdate={onConfigChange}>
-        <TabList style={{ marginBottom: '16px' }}>
-            {configs.map((configName) => (
-                <Tab key={configName} value={configName}>
-                    {configName}
-                </Tab>
-            ))}
-        </TabList>
-        <Box style={{ flex: 1, minHeight: 0 }}>
-            {configs.map((configName) => {
-                const { routes, selectedIds } = getRoutesData(configName);
+}) => {
+    const validActiveConfig = configs.includes(activeConfig) ? activeConfig : configs[0] || '';
 
-                return (
-                    <TabPanel key={configName} value={configName}>
-                        <VirtualizedRouteTable
-                            routes={routes}
-                            selectedIds={new Set(selectedIds)}
-                            onSelectionChange={(ids) => onSelectionChange(configName, ids)}
-                            getRouteId={getRouteId}
-                        />
-                    </TabPanel>
-                );
-            })}
-        </Box>
-    </TabProvider>
-);
+    return (
+        <TabProvider value={validActiveConfig} onUpdate={onConfigChange}>
+            <TabList style={{ marginBottom: '16px' }}>
+                {configs.map((configName) => (
+                    <Tab key={configName} value={configName}>
+                        {configName}
+                    </Tab>
+                ))}
+            </TabList>
+            <Box style={{ flex: 1, minHeight: 0 }}>
+                {configs.map((configName) => {
+                    const { routes, selectedIds } = getRoutesData(configName);
+
+                    return (
+                        <TabPanel key={configName} value={configName}>
+                            <VirtualizedRouteTable
+                                routes={routes}
+                                selectedIds={new Set(selectedIds)}
+                                onSelectionChange={(ids) => onSelectionChange(configName, ids)}
+                                getRouteId={getRouteId}
+                            />
+                        </TabPanel>
+                    );
+                })}
+            </Box>
+        </TabProvider>
+    );
+};

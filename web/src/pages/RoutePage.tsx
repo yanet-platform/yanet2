@@ -30,6 +30,7 @@ const RoutePage: React.FC = () => {
         setConfigs,
         setConfigRoutes,
         setSelectedRoutes,
+        setActiveConfigTab,
         handleSelectionChange,
         handleConfigTabChange,
         reloadRoutes,
@@ -154,12 +155,14 @@ const RoutePage: React.FC = () => {
 
             setAddDialogOpen(false);
 
-            const updatedConfigsList = configs.includes(configName)
-                ? configs
-                : [...configs, configName];
+            const isNewConfig = !configs.includes(configName);
+            const updatedConfigsList = isNewConfig
+                ? [...configs, configName]
+                : configs;
 
-            if (!configs.includes(configName)) {
+            if (isNewConfig) {
                 setConfigs(updatedConfigsList);
+                setActiveConfigTab(configName);
             }
 
             const reloadedRoutes = await reloadRoutes(updatedConfigsList);
@@ -169,7 +172,7 @@ const RoutePage: React.FC = () => {
         } catch (err) {
             toaster.error('add-route-error', 'Failed to add route', err);
         }
-    }, [addRouteForm, configs, reloadRoutes, setConfigs, setConfigRoutes]);
+    }, [addRouteForm, configs, reloadRoutes, setConfigs, setConfigRoutes, setActiveConfigTab]);
 
     const handleDeleteConfirm = useCallback(async (): Promise<void> => {
         const selected = currentSelected;
