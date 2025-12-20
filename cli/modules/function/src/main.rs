@@ -4,15 +4,12 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-
-use commonpb::{FunctionId, ModuleId};
-
 use code::{
     function_service_client::FunctionServiceClient, Chain, DeleteFunctionRequest, Function, FunctionChain,
     UpdateFunctionRequest,
 };
-
-use tonic::transport::Channel;
+use commonpb::{FunctionId, ModuleId};
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
 #[allow(non_snake_case)]
@@ -94,7 +91,9 @@ pub struct FunctionService {
 impl FunctionService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let channel = Channel::from_shared(endpoint)?.connect().await?;
-        let client = FunctionServiceClient::new(channel);
+        let client = FunctionServiceClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

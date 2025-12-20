@@ -27,3 +27,8 @@ modules:
     memory_requirements: 16MB
     endpoint: "[::1]:0"
     gateway_endpoint: *gateway_endpoint
+  acl:
+    memory_path_prefix: /dev/hugepages/yanet
+    memory_requirements: 8GB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint

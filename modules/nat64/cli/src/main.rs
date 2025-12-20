@@ -10,7 +10,7 @@ use code::{
 use commonpb::TargetModule;
 use ipnet::Ipv6Net;
 use ptree::TreeBuilder;
-use tonic::transport::Channel;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use yanet_cli::logging;
 
 #[allow(non_snake_case)]
@@ -182,6 +182,9 @@ pub struct NAT64Service {
 impl NAT64Service {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let client = Nat64ServiceClient::connect(endpoint).await?;
+        let client = client
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

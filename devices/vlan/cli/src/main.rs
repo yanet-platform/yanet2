@@ -4,7 +4,7 @@ use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use code::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
 use commonpb::{Device, DevicePipeline, TargetDevice};
-use tonic::transport::Channel;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
 #[allow(non_snake_case)]
@@ -73,6 +73,9 @@ pub struct DeviceVlanService {
 impl DeviceVlanService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let client = DeviceVlanServiceClient::connect(endpoint).await?;
+        let client = client
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

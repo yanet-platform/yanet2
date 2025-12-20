@@ -8,7 +8,7 @@ use code::{
     counters_service_client::CountersServiceClient, ChainCountersRequest, DeviceCountersRequest,
     FunctionCountersRequest, ModuleCountersRequest, PipelineCountersRequest,
 };
-use tonic::transport::Channel;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
 #[allow(non_snake_case)]
@@ -118,11 +118,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
     match cmd.mode {
         ModeCmd::Device(cmd) => service.show_device(cmd.device_name).await?,
-        ModeCmd::Pipeline(cmd) => {
-            service
-                .show_pipeline(cmd.device_name, cmd.pipeline_name)
-                .await?
-        }
+        ModeCmd::Pipeline(cmd) => service.show_pipeline(cmd.device_name, cmd.pipeline_name).await?,
         ModeCmd::Function(cmd) => {
             service
                 .show_function(cmd.device_name, cmd.pipeline_name, cmd.function_name)
@@ -130,12 +126,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         }
         ModeCmd::Chain(cmd) => {
             service
-                .show_chain(
-                    cmd.device_name,
-                    cmd.pipeline_name,
-                    cmd.function_name,
-                    cmd.chain_name,
-                )
+                .show_chain(cmd.device_name, cmd.pipeline_name, cmd.function_name, cmd.chain_name)
                 .await?
         }
         ModeCmd::Module(cmd) => {
@@ -161,24 +152,21 @@ pub struct CountersService {
 
 impl CountersService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = CountersServiceClient::connect(endpoint).await?;
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+        let client = CountersServiceClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 
     pub async fn show_device(&mut self, device_name: String) -> Result<(), Box<dyn Error>> {
-        let request = DeviceCountersRequest {
-            device: device_name,
-        };
+        let request = DeviceCountersRequest { device: device_name };
         let response = self.client.device(request).await?;
         println!("{}", serde_json::to_string(response.get_ref())?);
         Ok(())
     }
 
-    pub async fn show_pipeline(
-        &mut self,
-        device_name: String,
-        pipeline_name: String,
-    ) -> Result<(), Box<dyn Error>> {
+    pub async fn show_pipeline(&mut self, device_name: String, pipeline_name: String) -> Result<(), Box<dyn Error>> {
         let request = PipelineCountersRequest {
             device: device_name,
             pipeline: pipeline_name,

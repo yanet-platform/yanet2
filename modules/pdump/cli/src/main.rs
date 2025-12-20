@@ -1,22 +1,22 @@
-use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
 use core::error::Error;
-use ptree::TreeBuilder;
 use std::io::ErrorKind;
 
-use tokio::signal::{unix, unix::SignalKind};
-use tokio::task::JoinSet;
-use tokio_util::sync::CancellationToken;
-use tonic::transport::Channel;
-
+use args::{ConfigOutputFormat, ModeCmd, ReadCmd, SetConfigCmd, ShowConfigCmd};
+use clap::{ArgAction, CommandFactory, Parser};
+use clap_complete::CompleteEnv;
 use commonpb::TargetModule;
 use pdumppb::{
     ListConfigsRequest, ReadDumpRequest, ShowConfigRequest, ShowConfigResponse,
     pdump_service_client::PdumpServiceClient,
 };
+use ptree::TreeBuilder;
+use tokio::{
+    signal::{unix, unix::SignalKind},
+    task::JoinSet,
+};
+use tokio_util::sync::CancellationToken;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
-
-use args::{ConfigOutputFormat, ModeCmd, ReadCmd, SetConfigCmd, ShowConfigCmd};
 
 use crate::pdumppb::SetConfigRequest;
 
@@ -72,6 +72,9 @@ pub struct PdumpService {
 impl PdumpService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let client = PdumpServiceClient::connect(endpoint).await?;
+        let client = client
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

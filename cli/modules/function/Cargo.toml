@@ -13,7 +13,7 @@ clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 prost = "0.13"
 prost-types = "0.13"
-tonic = { version = "0.13" }
+tonic = { version = "0.13", features = ["gzip"] }
 
 [build-dependencies]
 tonic-build = "0.13"

@@ -6,7 +6,7 @@ use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use code::{inspect_service_client::InspectServiceClient, InspectRequest};
 use ptree::TreeBuilder;
-use tonic::transport::Channel;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
 #[allow(non_snake_case)]
@@ -71,7 +71,10 @@ pub struct InspectService {
 
 impl InspectService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = InspectServiceClient::connect(endpoint).await?;
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+        let client = InspectServiceClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

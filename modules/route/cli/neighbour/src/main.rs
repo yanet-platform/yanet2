@@ -15,7 +15,7 @@ use tabled::{
     },
     Table,
 };
-use tonic::transport::Channel;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use yanet_cli_neighbour::{Age, NeighbourEntry, State};
 use ync::logging;
 
@@ -83,6 +83,9 @@ impl NeighbourService {
     /// Creates a new NeighbourService connected to the specified endpoint.
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let client = NeighbourClient::connect(endpoint).await?;
+        let client = client
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

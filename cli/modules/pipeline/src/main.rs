@@ -4,12 +4,9 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-
-use commonpb::{FunctionId, PipelineId};
-
 use code::{pipeline_service_client::PipelineServiceClient, DeletePipelineRequest, Pipeline, UpdatePipelineRequest};
-
-use tonic::transport::Channel;
+use commonpb::{FunctionId, PipelineId};
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
 #[allow(non_snake_case)]
@@ -91,7 +88,9 @@ pub struct PipelineService {
 impl PipelineService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let channel = Channel::from_shared(endpoint)?.connect().await?;
-        let client = PipelineServiceClient::new(channel);
+        let client = PipelineServiceClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

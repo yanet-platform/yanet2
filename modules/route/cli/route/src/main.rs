@@ -14,7 +14,7 @@ use tabled::{
     },
     Table, Tabled,
 };
-use tonic::transport::Channel;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use yanet_cli_route::{
     commonpb::TargetModule,
     routepb::{
@@ -130,9 +130,10 @@ pub struct RouteService {
 impl RouteService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let client = RouteServiceClient::connect(endpoint).await?;
-        let m = Self { client };
-
-        Ok(m)
+        let client = client
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
+        Ok(Self { client })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {

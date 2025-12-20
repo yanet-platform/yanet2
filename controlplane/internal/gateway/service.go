@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
@@ -50,6 +51,7 @@ func (m *GatewayService) Register(
 		}),
 		grpc.WithDefaultCallOptions(
 			grpc.ForceCodecV2(proxy.Codec()),
+			grpc.UseCompressor(gzip.Name),
 			grpc.MaxCallRecvMsgSize(1024*1024*256),
 			grpc.MaxCallSendMsgSize(1024*1024*256),
 		),

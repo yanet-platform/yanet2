@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/encoding/gzip"
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/logging"

@@ -1,7 +1,7 @@
 //! gRPC service client implementation
 
 use std::error::Error;
-use tonic::transport::Channel;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 
 use crate::{
     cmd::*,
@@ -22,6 +22,9 @@ impl BalancerService {
     /// Connect to the gRPC endpoint
     pub async fn connect(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let client = BalancerServiceClient::connect(endpoint).await?;
+        let client = client
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

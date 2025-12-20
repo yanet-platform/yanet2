@@ -1,4 +1,4 @@
-import { createService } from './client';
+import { createService, type CallOptions } from './client';
 import type { TargetModule } from './common';
 
 // ACL types based on aclpb/acl.proto
@@ -109,19 +109,22 @@ export interface AclUpdateFWStateConfigResponse { }
 const aclService = createService('aclpb.ACLService');
 
 export const acl = {
-    listConfigs: (signal?: AbortSignal): Promise<AclListConfigsResponse> => {
-        return aclService.call<AclListConfigsResponse>('ListConfigs', signal);
+    listConfigs: (options?: CallOptions): Promise<AclListConfigsResponse> => {
+        return aclService.call<AclListConfigsResponse>('ListConfigs', options);
     },
-    showConfig: (request: AclShowConfigRequest, signal?: AbortSignal): Promise<AclShowConfigResponse> => {
-        return aclService.callWithBody<AclShowConfigResponse>('ShowConfig', request, signal);
+    showConfig: (request: AclShowConfigRequest, options?: CallOptions): Promise<AclShowConfigResponse> => {
+        return aclService.callWithBody<AclShowConfigResponse>('ShowConfig', request, options);
     },
-    updateConfig: (request: AclUpdateConfigRequest, signal?: AbortSignal): Promise<AclUpdateConfigResponse> => {
-        return aclService.callWithBody<AclUpdateConfigResponse>('UpdateConfig', request, signal);
+    updateConfig: (request: AclUpdateConfigRequest, options?: CallOptions): Promise<AclUpdateConfigResponse> => {
+        return aclService.callWithBody<AclUpdateConfigResponse>('UpdateConfig', request, {
+            compress: true,
+            ...options,
+        });
     },
-    deleteConfig: (request: AclDeleteConfigRequest, signal?: AbortSignal): Promise<AclDeleteConfigResponse> => {
-        return aclService.callWithBody<AclDeleteConfigResponse>('DeleteConfig', request, signal);
+    deleteConfig: (request: AclDeleteConfigRequest, options?: CallOptions): Promise<AclDeleteConfigResponse> => {
+        return aclService.callWithBody<AclDeleteConfigResponse>('DeleteConfig', request, options);
     },
-    updateFWStateConfig: (request: AclUpdateFWStateConfigRequest, signal?: AbortSignal): Promise<AclUpdateFWStateConfigResponse> => {
-        return aclService.callWithBody<AclUpdateFWStateConfigResponse>('UpdateFWStateConfig', request, signal);
+    updateFWStateConfig: (request: AclUpdateFWStateConfigRequest, options?: CallOptions): Promise<AclUpdateFWStateConfigResponse> => {
+        return aclService.callWithBody<AclUpdateFWStateConfigResponse>('UpdateFWStateConfig', request, options);
     },
 };

@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding/gzip"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
@@ -118,6 +119,7 @@ func (m *BuiltInModuleRunner) register(ctx context.Context, addr net.Addr) error
 	gatewayConn, err := grpc.NewClient(
 		m.gatewayEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to initialize gateway gRPC client: %w", err)

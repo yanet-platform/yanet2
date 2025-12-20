@@ -1,15 +1,37 @@
+export interface CallOptions {
+    signal?: AbortSignal;
+    compress?: boolean;
+}
+
+const compressGzip = async (data: string): Promise<Blob> => {
+    const stream = new Blob([data]).stream();
+    const compressedStream = stream.pipeThrough(new CompressionStream('gzip'));
+    return new Response(compressedStream).blob();
+};
+
 const callGRPCServiceWithBody = async <T>(
     servicePath: string,
     body: any,
-    signal?: AbortSignal
+    options?: CallOptions
 ): Promise<T> => {
+    const jsonBody = JSON.stringify(body);
+
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+    };
+
+    let requestBody: string | Blob = jsonBody;
+
+    if (options?.compress) {
+        requestBody = await compressGzip(jsonBody);
+        headers['Content-Encoding'] = 'gzip';
+    }
+
     const response = await fetch(`/api/${servicePath}`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal,
+        headers,
+        body: requestBody,
+        signal: options?.signal,
     });
 
     if (!response.ok) {
@@ -21,18 +43,18 @@ const callGRPCServiceWithBody = async <T>(
 
 const callGRPCService = async <T>(
     servicePath: string,
-    signal?: AbortSignal
+    options?: CallOptions
 ): Promise<T> => {
-    return callGRPCServiceWithBody<T>(servicePath, {}, signal);
+    return callGRPCServiceWithBody<T>(servicePath, {}, options);
 };
 
 export const createService = (serviceName: string) => {
     return {
-        call: <T>(method: string, signal?: AbortSignal): Promise<T> => {
-            return callGRPCService<T>(`${serviceName}/${method}`, signal);
+        call: <T>(method: string, options?: CallOptions): Promise<T> => {
+            return callGRPCService<T>(`${serviceName}/${method}`, options);
         },
-        callWithBody: <T>(method: string, body: any, signal?: AbortSignal): Promise<T> => {
-            return callGRPCServiceWithBody<T>(`${serviceName}/${method}`, body, signal);
+        callWithBody: <T>(method: string, body: any, options?: CallOptions): Promise<T> => {
+            return callGRPCServiceWithBody<T>(`${serviceName}/${method}`, body, options);
         },
     };
 };

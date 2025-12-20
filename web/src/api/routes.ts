@@ -1,4 +1,4 @@
-import { createService } from './client';
+import { createService, type CallOptions } from './client';
 import type { TargetModule } from './common';
 
 // Route types
@@ -68,19 +68,19 @@ export interface FlushRoutesResponse {
 const routeService = createService('routepb.RouteService');
 
 export const route = {
-    listConfigs: (signal?: AbortSignal): Promise<ListConfigsResponse> => {
-        return routeService.call<ListConfigsResponse>('ListConfigs', signal);
+    listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> => {
+        return routeService.call<ListConfigsResponse>('ListConfigs', options);
     },
-    showRoutes: (request: ShowRoutesRequest, signal?: AbortSignal): Promise<ShowRoutesResponse> => {
-        return routeService.callWithBody<ShowRoutesResponse>('ShowRoutes', request, signal);
+    showRoutes: (request: ShowRoutesRequest, options?: CallOptions): Promise<ShowRoutesResponse> => {
+        return routeService.callWithBody<ShowRoutesResponse>('ShowRoutes', request, options);
     },
-    insertRoute: (request: InsertRouteRequest, signal?: AbortSignal): Promise<InsertRouteResponse> => {
-        return routeService.callWithBody<InsertRouteResponse>('InsertRoute', request, signal);
+    insertRoute: (request: InsertRouteRequest, options?: CallOptions): Promise<InsertRouteResponse> => {
+        return routeService.callWithBody<InsertRouteResponse>('InsertRoute', request, options);
     },
-    deleteRoute: (request: DeleteRouteRequest, signal?: AbortSignal): Promise<DeleteRouteResponse> => {
-        return routeService.callWithBody<DeleteRouteResponse>('DeleteRoute', request, signal);
+    deleteRoute: (request: DeleteRouteRequest, options?: CallOptions): Promise<DeleteRouteResponse> => {
+        return routeService.callWithBody<DeleteRouteResponse>('DeleteRoute', request, options);
     },
-    flushRoutes: (request: FlushRoutesRequest, signal?: AbortSignal): Promise<FlushRoutesResponse> => {
-        return routeService.callWithBody<FlushRoutesResponse>('FlushRoutes', request, signal);
+    flushRoutes: (request: FlushRoutesRequest, options?: CallOptions): Promise<FlushRoutesResponse> => {
+        return routeService.callWithBody<FlushRoutesResponse>('FlushRoutes', request, options);
     },
 };

@@ -9,7 +9,7 @@ use decappb::{
 };
 use ipnet::IpNet;
 use ptree::TreeBuilder;
-use tonic::transport::Channel;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
 #[allow(non_snake_case)]
@@ -118,6 +118,9 @@ pub struct DecapService {
 impl DecapService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let client = DecapServiceClient::connect(endpoint).await?;
+        let client = client
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

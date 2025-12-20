@@ -1,4 +1,4 @@
-import { createService } from './client';
+import { createService, type CallOptions } from './client';
 
 // Inspect types
 export interface DPModuleInfo {
@@ -75,7 +75,7 @@ export interface InspectResponse {
 const inspectService = createService('ynpb.InspectService');
 
 export const inspect = {
-    inspect: (signal?: AbortSignal): Promise<InspectResponse> => {
-        return inspectService.call<InspectResponse>('Inspect', signal);
+    inspect: (options?: CallOptions): Promise<InspectResponse> => {
+        return inspectService.call<InspectResponse>('Inspect', options);
     },
 };

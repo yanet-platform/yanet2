@@ -1,4 +1,4 @@
-import { createService } from './client';
+import { createService, type CallOptions } from './client';
 
 // Neighbour types
 export interface MACAddress {
@@ -20,7 +20,7 @@ export interface ListNeighboursResponse {
 const neighbourService = createService('routepb.Neighbour');
 
 export const neighbours = {
-    list: (signal?: AbortSignal): Promise<ListNeighboursResponse> => {
-        return neighbourService.call<ListNeighboursResponse>('List', signal);
+    list: (options?: CallOptions): Promise<ListNeighboursResponse> => {
+        return neighbourService.call<ListNeighboursResponse>('List', options);
     },
 };

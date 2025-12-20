@@ -1,4 +1,4 @@
-import { createService } from './client';
+import { createService, type CallOptions } from './client';
 
 // Device types based on device.proto and target.proto
 
@@ -58,13 +58,13 @@ const plainService = createService('plainpb.DevicePlainService');
 const vlanService = createService('vlanpb.DeviceVlanService');
 
 export const devices = {
-    list: (request: ListDevicesRequest, signal?: AbortSignal): Promise<ListDevicesResponse> => {
-        return deviceService.callWithBody<ListDevicesResponse>('List', request, signal);
+    list: (request: ListDevicesRequest, options?: CallOptions): Promise<ListDevicesResponse> => {
+        return deviceService.callWithBody<ListDevicesResponse>('List', request, options);
     },
-    updatePlain: (request: UpdateDevicePlainRequest, signal?: AbortSignal): Promise<UpdateDevicePlainResponse> => {
-        return plainService.callWithBody<UpdateDevicePlainResponse>('UpdateDevice', request, signal);
+    updatePlain: (request: UpdateDevicePlainRequest, options?: CallOptions): Promise<UpdateDevicePlainResponse> => {
+        return plainService.callWithBody<UpdateDevicePlainResponse>('UpdateDevice', request, options);
     },
-    updateVlan: (request: UpdateDeviceVlanRequest, signal?: AbortSignal): Promise<UpdateDeviceVlanResponse> => {
-        return vlanService.callWithBody<UpdateDeviceVlanResponse>('UpdateDevice', request, signal);
+    updateVlan: (request: UpdateDeviceVlanRequest, options?: CallOptions): Promise<UpdateDeviceVlanResponse> => {
+        return vlanService.callWithBody<UpdateDeviceVlanResponse>('UpdateDevice', request, options);
     },
 };

@@ -1,4 +1,4 @@
-import { createService } from './client';
+import { createService, type CallOptions } from './client';
 import type { FunctionId } from './common';
 
 // Function types based on function.proto
@@ -52,16 +52,16 @@ export interface DeleteFunctionResponse { }
 const functionService = createService('ynpb.FunctionService');
 
 export const functions = {
-    list: (request: ListFunctionsRequest, signal?: AbortSignal): Promise<ListFunctionsResponse> => {
-        return functionService.callWithBody<ListFunctionsResponse>('List', request, signal);
+    list: (request: ListFunctionsRequest, options?: CallOptions): Promise<ListFunctionsResponse> => {
+        return functionService.callWithBody<ListFunctionsResponse>('List', request, options);
     },
-    get: (request: GetFunctionRequest, signal?: AbortSignal): Promise<GetFunctionResponse> => {
-        return functionService.callWithBody<GetFunctionResponse>('Get', request, signal);
+    get: (request: GetFunctionRequest, options?: CallOptions): Promise<GetFunctionResponse> => {
+        return functionService.callWithBody<GetFunctionResponse>('Get', request, options);
     },
-    update: (request: UpdateFunctionRequest, signal?: AbortSignal): Promise<UpdateFunctionResponse> => {
-        return functionService.callWithBody<UpdateFunctionResponse>('Update', request, signal);
+    update: (request: UpdateFunctionRequest, options?: CallOptions): Promise<UpdateFunctionResponse> => {
+        return functionService.callWithBody<UpdateFunctionResponse>('Update', request, options);
     },
-    delete: (request: DeleteFunctionRequest, signal?: AbortSignal): Promise<DeleteFunctionResponse> => {
-        return functionService.callWithBody<DeleteFunctionResponse>('Delete', request, signal);
+    delete: (request: DeleteFunctionRequest, options?: CallOptions): Promise<DeleteFunctionResponse> => {
+        return functionService.callWithBody<DeleteFunctionResponse>('Delete', request, options);
     },
 };

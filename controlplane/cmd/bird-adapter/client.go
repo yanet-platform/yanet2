@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding/gzip"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	adapterpb "github.com/yanet-platform/yanet2/modules/route/bird-adapter/proto"
@@ -63,6 +64,7 @@ func runClient() error {
 	conn, err := grpc.NewClient(
 		serverCfg.ListenAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to connect to adapter server: %w", err)

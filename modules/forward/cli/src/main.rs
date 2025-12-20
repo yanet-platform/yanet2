@@ -8,7 +8,7 @@ use code::{
     DeleteConfigRequest, ListConfigsRequest, UpdateConfigRequest, forward_service_client::ForwardServiceClient,
 };
 use commonpb::TargetModule;
-use tonic::transport::Channel;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
 use serde::{Deserialize, Serialize};
@@ -163,6 +163,9 @@ pub struct ForwardService {
 impl ForwardService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let client = ForwardServiceClient::connect(endpoint).await?;
+        let client = client
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

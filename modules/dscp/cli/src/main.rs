@@ -4,7 +4,7 @@ use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use ipnet::IpNet;
 use ptree::TreeBuilder;
-use tonic::transport::Channel;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 
 use code::{
     AddPrefixesRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest, ShowConfigRequest,
@@ -136,6 +136,9 @@ pub struct DscpService {
 impl DscpService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let client = DscpServiceClient::connect(endpoint).await?;
+        let client = client
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

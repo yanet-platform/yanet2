@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
@@ -224,7 +225,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 func (m *Gateway) runHTTPServer(ctx context.Context) error {
 	server := &http.Server{
 		Addr:    m.cfg.Server.HTTPEndpoint,
-		Handler: NewHTTPHandler(m.registry, m.log),
+		Handler: GzipMiddleware(NewHTTPHandler(m.registry, m.log)),
 	}
 
 	// Set up graceful shutdown.
@@ -256,7 +257,10 @@ func registerBuiltInServices(registry *BackendRegistry, endpoint string, log *za
 			dialer := net.Dialer{}
 			return dialer.DialContext(ctx, "tcp", endpoint)
 		}),
-		grpc.WithDefaultCallOptions(grpc.ForceCodecV2(proxy.Codec())),
+		grpc.WithDefaultCallOptions(
+			grpc.ForceCodecV2(proxy.Codec()),
+			grpc.UseCompressor(gzip.Name),
+		),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {

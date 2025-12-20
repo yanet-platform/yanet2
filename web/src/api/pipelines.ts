@@ -1,4 +1,4 @@
-import { createService } from './client';
+import { createService, type CallOptions } from './client';
 import type { FunctionId } from './common';
 
 // Pipeline types based on pipeline.proto
@@ -43,16 +43,16 @@ export interface DeletePipelineResponse { }
 const pipelineService = createService('ynpb.PipelineService');
 
 export const pipelines = {
-    list: (request: ListPipelinesRequest, signal?: AbortSignal): Promise<ListPipelinesResponse> => {
-        return pipelineService.callWithBody<ListPipelinesResponse>('List', request, signal);
+    list: (request: ListPipelinesRequest, options?: CallOptions): Promise<ListPipelinesResponse> => {
+        return pipelineService.callWithBody<ListPipelinesResponse>('List', request, options);
     },
-    get: (request: GetPipelineRequest, signal?: AbortSignal): Promise<GetPipelineResponse> => {
-        return pipelineService.callWithBody<GetPipelineResponse>('Get', request, signal);
+    get: (request: GetPipelineRequest, options?: CallOptions): Promise<GetPipelineResponse> => {
+        return pipelineService.callWithBody<GetPipelineResponse>('Get', request, options);
     },
-    update: (request: UpdatePipelineRequest, signal?: AbortSignal): Promise<UpdatePipelineResponse> => {
-        return pipelineService.callWithBody<UpdatePipelineResponse>('Update', request, signal);
+    update: (request: UpdatePipelineRequest, options?: CallOptions): Promise<UpdatePipelineResponse> => {
+        return pipelineService.callWithBody<UpdatePipelineResponse>('Update', request, options);
     },
-    delete: (request: DeletePipelineRequest, signal?: AbortSignal): Promise<DeletePipelineResponse> => {
-        return pipelineService.callWithBody<DeletePipelineResponse>('Delete', request, signal);
+    delete: (request: DeletePipelineRequest, options?: CallOptions): Promise<DeletePipelineResponse> => {
+        return pipelineService.callWithBody<DeletePipelineResponse>('Delete', request, options);
     },
 };

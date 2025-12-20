@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -511,4 +512,45 @@ func grpcCodeToHTTPStatus(code codes.Code) int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+// gzipResponseWriter wraps http.ResponseWriter to provide gzip compression.
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	Writer io.Writer
+}
+
+func (m *gzipResponseWriter) Write(b []byte) (int, error) {
+	return m.Writer.Write(b)
+}
+
+// GzipMiddleware compresses HTTP responses and decompresses requests.
+// It handles both request decompression (Content-Encoding: gzip) and
+// response compression (Accept-Encoding: gzip).
+// Requests without compression are handled normally for backward compatibility.
+func GzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Decompress request body if gzip encoded.
+		if r.Header.Get("Content-Encoding") == "gzip" {
+			gr, err := gzip.NewReader(r.Body)
+			if err != nil {
+				http.Error(w, "failed to decompress request", http.StatusBadRequest)
+				return
+			}
+			defer gr.Close()
+			r.Body = io.NopCloser(gr)
+			r.Header.Del("Content-Encoding")
+		}
+
+		// Compress response if client accepts gzip.
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			gz := gzip.NewWriter(w)
+			defer gz.Close()
+			next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

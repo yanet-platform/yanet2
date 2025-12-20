@@ -11,7 +11,7 @@ use clap_complete::CompleteEnv;
 use commonpb::TargetModule;
 use ipnetwork::IpNetwork;
 use serde::{Deserialize, Serialize};
-use tonic::transport::Channel;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
 mod args;
@@ -266,8 +266,11 @@ pub struct ACLService {
 impl ACLService {
     pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
         let client = AclServiceClient::connect(endpoint).await?;
-        let client = client.max_decoding_message_size(256 * 1024 * 1024);
-        let client = client.max_encoding_message_size(256 * 1024 * 1024);
+        let client = client
+            .max_decoding_message_size(256 * 1024 * 1024)
+            .max_encoding_message_size(256 * 1024 * 1024)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 

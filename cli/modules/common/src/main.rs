@@ -4,6 +4,7 @@ use core::error::Error;
 
 use clap::{builder::PossibleValue, ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 use ynpb::{logging_client::LoggingClient, UpdateLevelRequest};
 
@@ -85,7 +86,10 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 async fn run_logging(cmd: LoggingCmd, endpoint: String) -> Result<(), Box<dyn Error>> {
-    let mut client = LoggingClient::connect(endpoint).await?;
+    let channel = Channel::from_shared(endpoint)?.connect().await?;
+    let mut client = LoggingClient::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip);
 
     match cmd {
         LoggingCmd::SetLevel(cmd) => {

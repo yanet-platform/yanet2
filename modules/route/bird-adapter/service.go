@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding/gzip"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	adapterpb "github.com/yanet-platform/yanet2/modules/route/bird-adapter/proto"
@@ -64,6 +65,7 @@ func (m *AdapterService) SetupConfig(
 	conn, err := grpc.NewClient(
 		m.gatewayEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to the gateway: %w", err)
