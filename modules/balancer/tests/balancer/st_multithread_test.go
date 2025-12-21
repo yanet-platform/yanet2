@@ -590,7 +590,6 @@ func extendSessionTableRoutine(
 	mock *mock.YanetMock,
 	balancer *module.Balancer,
 	done chan struct{},
-	errors chan error,
 	wg *sync.WaitGroup,
 	config *multithreadTestConfig,
 ) {
@@ -608,8 +607,7 @@ func extendSessionTableRoutine(
 				mock.CurrentTime(),
 			)
 			if err != nil {
-				errors <- fmt.Errorf("extend session table routine: %w", err)
-				continue
+				return
 			}
 		}
 	}
@@ -964,7 +962,7 @@ func runMultithreadedTest(t *testing.T, config *multithreadTestConfig) {
 		moduleConfig: moduleConfig,
 		stateConfig:  stateConfig,
 		mock: &mock.YanetMockConfig{
-			CpMemory: datasize.GB * 2,
+			CpMemory: datasize.GB * 4,
 			DpMemory: datasize.MB * 256,
 			Workers:  uint64(config.numWorkers),
 			Devices: []mock.YanetMockDeviceConfig{
@@ -1003,7 +1001,7 @@ func runMultithreadedTest(t *testing.T, config *multithreadTestConfig) {
 
 	// Launch sync goroutine
 	syncWg.Add(1)
-	go extendSessionTableRoutine(mock, balancer, done, errors, &syncWg, config)
+	go extendSessionTableRoutine(mock, balancer, done, &syncWg, config)
 
 	// Launch worker goroutines
 	workersWg.Add(config.numWorkers)
