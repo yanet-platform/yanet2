@@ -6,7 +6,6 @@
 #include "dataplane/pipeline/pipeline.h"
 #include "dataplane/time/clock.h"
 #include "packet.h"
-#include <stdlib.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -57,9 +56,11 @@ worker_clone_packet(struct dp_worker *dp_worker, struct packet *packet) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct packet_handle_result
+void
 yanet_worker_mock_handle_packets(
-	struct yanet_worker_mock *worker, struct packet_list *input_packets
+	struct yanet_worker_mock *worker,
+	struct packet_list *input_packets,
+	struct packet_handle_result *out_result
 ) {
 	// initialize worker time
 	{
@@ -77,12 +78,11 @@ yanet_worker_mock_handle_packets(
 
 	// do not update worker gen as it set to very big number previously
 
-	struct packet_handle_result result;
-	packet_list_init(&result.output_packets);
-	packet_list_init(&result.drop_packets);
+	packet_list_init(&out_result->output_packets);
+	packet_list_init(&out_result->drop_packets);
 
 	if (config_gen_ectx == NULL) {
-		packet_list_concat(&result.drop_packets, input_packets);
+		packet_list_concat(&out_result->drop_packets, input_packets);
 		packet_list_init(input_packets);
 	}
 
@@ -138,13 +138,13 @@ yanet_worker_mock_handle_packets(
 			&packet_front
 		);
 
-		packet_list_concat(&result.drop_packets, &packet_front.drop);
+		packet_list_concat(
+			&out_result->drop_packets, &packet_front.drop
+		);
 		packet_list_init(&packet_front.drop);
 		packet_list_concat(
-			&result.output_packets, &packet_front.output
+			&out_result->output_packets, &packet_front.output
 		);
 		packet_list_init(&packet_front.output);
 	}
-
-	return result;
 }

@@ -369,9 +369,12 @@ yanet_mock_current_time(struct yanet_mock *mock) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct packet_handle_result
+void
 yanet_mock_handle_packets(
-	struct yanet_mock *mock, struct packet_list *packets, size_t worker_idx
+	struct yanet_mock *mock,
+	struct packet_list *packets,
+	size_t worker_idx,
+	struct packet_handle_result *out_result
 ) {
 	struct yanet_worker_mock *worker = &mock->workers[worker_idx];
 
@@ -379,8 +382,5 @@ yanet_mock_handle_packets(
 	set_current_time(&mock->current_time);
 
 	// Handle packets.
-	struct packet_handle_result result =
-		yanet_worker_mock_handle_packets(worker, packets);
-
-	return result;
+	yanet_worker_mock_handle_packets(worker, packets, out_result);
 }

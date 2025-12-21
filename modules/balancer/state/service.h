@@ -10,16 +10,13 @@
 // Sharded between workers.
 struct service_state {
 	// last packet timestamp
-	uint32_t last_packet_timestamp;
+	_Atomic uint32_t last_packet_timestamp;
 
 	union {
 		struct balancer_real_stats real;
 		struct balancer_vs_stats vs;
 	} stats;
 };
-
-void
-service_state_copy(struct service_state *dst, struct service_state *src);
 
 ////////////////////////////////////////////////////////////////////////////////
 

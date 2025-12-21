@@ -148,8 +148,8 @@ send_packet(struct yanet_mock *mock) {
 	packet.tx_device_id = 0;
 	packet.rx_device_id = 0;
 	packet_list_add(&packets, &packet);
-	struct packet_handle_result result =
-		yanet_mock_handle_packets(mock, &packets, 0);
+	struct packet_handle_result result;
+	yanet_mock_handle_packets(mock, &packets, 0, &result);
 	TEST_ASSERT_EQUAL(
 		result.output_packets.count, 1, "no packets in output"
 	);

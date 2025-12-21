@@ -1,13 +1,16 @@
 #include "session_table.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
+#include "common/rcu.h"
 #include "common/ttlmap/detail/bucket.h"
 #include "common/ttlmap/ttlmap.h"
+#include "logging/log.h"
 #include "modules/balancer/api/info.h"
 #include "modules/balancer/api/state.h"
 #include <assert.h>
 #include <netinet/in.h>
 #include <stdalign.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -17,59 +20,10 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static int
-worker_in_use(uint32_t mark) {
-	return mark & 1;
-}
-
-static int
-worker_gen(uint32_t mark) {
-	return mark >> 1;
-}
-
-static void
-wait_for_workers(struct session_table *table) {
-	uint32_t current_gen = atomic_load(&table->current_gen);
-	while (1) {
-		bool need_wait = false;
-		for (size_t w = 0; w < table->workers; ++w) {
-			struct worker_info *info = &table->worker_info[w];
-			uint32_t mark = worker_mark(info);
-			uint32_t gen = worker_gen(mark);
-			int in_use = worker_in_use(mark);
-			assert(gen <= current_gen);
-			if (gen < current_gen && in_use) {
-				need_wait = true;
-				break;
-			}
-		}
-		if (!need_wait) {
-			break;
-		} else {
-			// sleep for 1 ms
-			struct timespec ms = {0, 1000000}; // 1 ms
-			nanosleep(&ms, NULL);
-		}
-	}
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 int
 session_table_init(
-	struct session_table *table,
-	struct memory_context *mctx,
-	size_t size,
-	size_t workers
+	struct session_table *table, struct memory_context *mctx, size_t size
 ) {
-	const size_t align = alignof(struct session_table);
-	uint8_t *memory =
-		memory_balloc(mctx, sizeof(struct session_table) + align);
-	if (memory == NULL) {
-		return -1;
-	}
-	table->current_gen = 0;
-	table->workers = workers;
 	SET_OFFSET_OF(&table->mctx, mctx);
 
 	int res = TTLMAP_INIT(
@@ -85,10 +39,10 @@ session_table_init(
 
 	ttlmap_init_empty(&table->maps[1]);
 
-	for (size_t i = 0; i < table->workers; ++i) {
-		struct worker_info *info = &table->worker_info[i];
-		memset(info, 0, sizeof(*info));
-	}
+	// Init generation count
+	// (guarded with rcu)
+	rcu_init(&table->rcu);
+	table->current_gen = 0;
 
 	return 0;
 }
@@ -228,20 +182,57 @@ move_sessions_callback(
 		state->last_packet_timestamp,
 		state->timeout
 	);
-	if (TTLMAP_STATUS(res) != TTLMAP_FAILED) {
-		// Copy the entire state to preserve all fields including
-		// timestamps
+	int status = TTLMAP_STATUS(res);
+	if (status == TTLMAP_INSERTED || status == TTLMAP_REPLACED) {
 		memcpy(found, state, sizeof(struct balancer_session_state));
 		ttlmap_release_lock(lock);
+	} else if (status == TTLMAP_FOUND) {
+		ttlmap_release_lock(lock);
+	} else { // status == TTLMAP_FAILED
+		// critical: misses some session, session table grows too fast
+		char client_ip_buf[100];
+		sprintf(client_ip_buf,
+			"%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x",
+			id->client_ip[0],
+			id->client_ip[1],
+			id->client_ip[2],
+			id->client_ip[3],
+			id->client_ip[4],
+			id->client_ip[5],
+			id->client_ip[6],
+			id->client_ip[7],
+			id->client_ip[8],
+			id->client_ip[9],
+			id->client_ip[10],
+			id->client_ip[11],
+			id->client_ip[12],
+			id->client_ip[13],
+			id->client_ip[14],
+			id->client_ip[15]);
+		LOG(WARN,
+		    "missed session on table resize [vs_id=%d, client=%s:%d]",
+		    id->vs_id,
+		    client_ip_buf,
+		    id->client_port);
 	}
 	return 0;
+}
+
+static inline void
+set_gen(struct session_table *table, uint32_t gen) {
+	rcu_update(&table->rcu, &table->current_gen, gen);
+}
+
+static inline uint64_t
+get_gen(struct session_table *table) {
+	return rcu_load(&table->rcu, &table->current_gen);
 }
 
 int
 session_table_resize(
 	struct session_table *table, size_t new_size, uint32_t now
 ) {
-	uint32_t current_gen = session_table_current_gen(table);
+	uint32_t current_gen = get_gen(table);
 
 	struct ttlmap *next_map = session_table_prev_map(table, current_gen);
 	struct memory_context *mctx = ADDR_OF(&table->mctx);
@@ -262,10 +253,7 @@ session_table_resize(
 	// and fallbacks to the `current_map`
 	struct ttlmap *current_map = session_table_map(table, current_gen);
 	++current_gen;
-	atomic_store(&table->current_gen, current_gen);
-
-	// Wait while all workers consume update
-	wait_for_workers(table);
+	set_gen(table, current_gen);
 
 	// Now, workers can not update `current_map`.
 	// They insert only into the `next_map`.
@@ -288,10 +276,7 @@ session_table_resize(
 
 	// Sessions are moved, so workers dont need to use previous map
 	++current_gen;
-	atomic_store(&table->current_gen, current_gen);
-
-	// Wait until all workers consume update
-	wait_for_workers(table);
+	set_gen(table, current_gen);
 
 	// After that, workers will not use previous map
 

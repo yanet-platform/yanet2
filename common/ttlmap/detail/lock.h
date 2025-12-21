@@ -1,26 +1,23 @@
 #pragma once
 
+#include "common/spinlock.h"
 #include <stdatomic.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
-typedef struct ttlmap_lock {
-	atomic_flag flag;
-} ttlmap_lock_t;
+typedef struct spinlock ttlmap_lock_t;
 
 static inline void
 __ttlmap_lock_init(ttlmap_lock_t *lock) { // NOLINT
-	atomic_flag_clear(&lock->flag);
+	spinlock_init(lock);
 }
 
 static inline void
 __ttlmap_lock(ttlmap_lock_t *lock) { // NOLINT
-	while (atomic_flag_test_and_set(&lock->flag)) {
-		;
-	}
+	spinlock_lock(lock);
 }
 
 static inline void
 __ttlmap_unlock(ttlmap_lock_t *lock) { // NOLINT
-	atomic_flag_clear(&lock->flag);
+	spinlock_unlock(lock);
 }

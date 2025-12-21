@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/netip"
 	"sync"
 	"time"
@@ -35,6 +36,9 @@ type ModuleConfigState struct {
 
 	// Total number of active sessions.
 	ActiveSessions uint
+
+	// Previous total number of active sessions.
+	PrevActiveSessions uint
 
 	// Virtual services active sessions information
 	VsActiveSessions map[lib.VsIdentifier]uint
@@ -204,6 +208,7 @@ func (s *ModuleConfigState) GetAndUpdateSessionsInfo(
 		s.VsActiveSessions[session.Real.Vs]++
 	}
 
+	s.PrevActiveSessions = s.ActiveSessions
 	s.ActiveSessions = sessions.SessionsCount
 	s.ActiveSessionsUpdateTimestamp = now
 
@@ -229,6 +234,14 @@ func (s *ModuleConfigState) SyncActiveSessions(now time.Time) error {
 	return nil
 }
 
+func (s *ModuleConfigState) calcNextTableCapacity() uint {
+	sessionTableCapacity := s.SessionTableCapacity()
+	activeSessions := s.ActiveSessions
+	prevActiveSessions := s.PrevActiveSessions
+	newSize := float64(2*activeSessions-prevActiveSessions) / float64(s.MaxLoadFactor)
+	return max(uint(math.Ceil(newSize)), sessionTableCapacity*2)
+}
+
 // ResizeTableOnDemand checks if session table needs resizing based on load factor
 // and resizes it if necessary.
 // Note: Caller must hold the lock.
@@ -243,7 +256,7 @@ func (s *ModuleConfigState) ResizeTableOnDemand(now time.Time) error {
 		zap.Float32("max_load_factor", s.MaxLoadFactor))
 
 	if loadFactor > s.MaxLoadFactor {
-		requestedCapacity := sessionTableCapacity * 2
+		requestedCapacity := s.calcNextTableCapacity()
 		s.log.Infow("session table load factor exceeded, resizing",
 			zap.Float32("load_factor", loadFactor),
 			zap.Float32("max_load_factor", s.MaxLoadFactor),
@@ -281,12 +294,12 @@ func (s *ModuleConfigState) SyncActiveSessionsAndResizeTableOnDemand(
 ) error {
 	// First sync active sessions
 	if err := s.SyncActiveSessions(now); err != nil {
-		return err
+		return fmt.Errorf("failed to sync active sessions: %w", err)
 	}
 
 	// Then check if we need to resize
 	if err := s.ResizeTableOnDemand(now); err != nil {
-		return err
+		return fmt.Errorf("failed to resize table: %w", err)
 	}
 
 	return nil

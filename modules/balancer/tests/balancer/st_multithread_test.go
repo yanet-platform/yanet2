@@ -839,10 +839,10 @@ func validateCounters(
 		expectedSessions := vsSessionCount[vs]
 
 		assert.Equal(t, uint(expectedSessions), vsState.ActiveSessions.Value,
-			"[VS %s]: active session count mismatch between state and workers", vs)
+			"[VS %s]: active session count mismatch between state and workers", vs.String())
 
 		assert.Equal(t, vsState.Stats, vsConfig.Stats,
-			"[VS %s]: stats mismatch between state and config", vs)
+			"[VS %s]: stats mismatch between state and config", vs.String())
 
 		summaryOverflowCnt += vsState.Stats.SessionTableOverflow
 
@@ -956,7 +956,7 @@ func runMultithreadedTest(t *testing.T, config *multithreadTestConfig) {
 	stateConfig := &balancerpb.ModuleStateConfig{
 		SessionTableCapacity:      4096, // 4K
 		SessionTableScanPeriod:    durationpb.New(0),
-		SessionTableMaxLoadFactor: 0.5,
+		SessionTableMaxLoadFactor: 0.05,
 	}
 
 	// Setup test
@@ -1051,7 +1051,7 @@ func runMultithreadedTest(t *testing.T, config *multithreadTestConfig) {
 				stats.droppedPackets,
 				dropRate,
 			)
-			assert.Less(t, dropRate, 50.0, "worker %d: too big drop rate", worker)
+			assert.Less(t, dropRate, 20.0, "worker %d: too big drop rate", worker)
 		}
 	})
 
@@ -1100,7 +1100,7 @@ func TestMultithreadedSessionTable(t *testing.T) {
 				numWorkers:       tc.numWorkers,
 				batchesPerWorker: 100,
 				packetsPerBatch:  1024 / tc.numWorkers,
-				syncPeriod:       50 * time.Millisecond,
+				syncPeriod:       5 * time.Millisecond,
 			}
 
 			runMultithreadedTest(t, config)

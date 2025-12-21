@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/memory.h"
+#include "common/rcu.h"
 #include "common/ttlmap/detail/ttlmap.h"
 #include "common/ttlmap/ttlmap.h"
 
@@ -8,8 +9,6 @@
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdio.h>
-
-#include "worker.h"
 
 #include "../api/info.h"
 
@@ -21,40 +20,11 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct worker_info {
-	// updated on the start of handle modules
-	atomic_uint mark; // (gen << 1 | in_use)
-} __rte_cache_aligned;
-
-static inline int
-worker_mark(struct worker_info *info) {
-	return atomic_load(&info->mark);
-}
-
-static inline int
-worker_use_prev_map(uint32_t gen) {
-	return gen & 1;
-}
-
-static inline void
-worker_start_query(struct worker_info *info, uint32_t table_gen) {
-	atomic_store(&info->mark, table_gen << 1 | 1);
-}
-
-static inline void
-worker_finish_query(struct worker_info *info) {
-	atomic_store(&info->mark, worker_mark(info) ^ 1);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 struct session_table {
 	struct ttlmap maps[2];
 
-	atomic_int current_gen; // workers read, cp modify
-
-	size_t workers;
-	struct worker_info worker_info[MAX_WORKERS_NUM];
+	rcu_t rcu;
+	atomic_ulong current_gen; // workers read, cp modify (guarded by rcu)
 
 	// relative pointer to the memory context of the
 	// agent who created session table
@@ -78,17 +48,14 @@ session_table_prev_map(struct session_table *table, uint32_t gen) {
 
 static inline uint32_t
 session_table_current_gen(struct session_table *table) {
-	return atomic_load(&table->current_gen);
+	return atomic_load_explicit(&table->current_gen, memory_order_acquire);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 int
 session_table_init(
-	struct session_table *table,
-	struct memory_context *mctx,
-	size_t size,
-	size_t workers
+	struct session_table *table, struct memory_context *mctx, size_t size
 );
 
 void
@@ -116,27 +83,38 @@ session_table_free_sessions_info(
 
 ////////////////////////////////////////////////////////////////////////////////
 
+static inline uint64_t
+session_table_begin_cs(struct session_table *session_table, uint32_t worker) {
+	return RCU_READ_BEGIN(
+		&session_table->rcu, worker, &session_table->current_gen
+	);
+}
+
+static inline void
+session_table_end_cs(struct session_table *table, uint32_t worker) {
+	RCU_READ_END(&table->rcu, worker);
+}
+
+static inline int
+worker_use_prev_map(uint32_t table_gen) {
+	return table_gen & 1;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 static inline int
 get_or_create_session(
 	struct session_table *session_table,
-	uint32_t worker_idx,
+	uint64_t current_table_gen,
 	uint32_t now,
 	uint32_t timeout,
 	struct balancer_session_id *session_id,
 	struct balancer_session_state **session_state,
 	session_lock_t **lock
 ) {
-	// Start worker query with current gen
-
-	// Get current gen
-	uint32_t current_gen = session_table_current_gen(session_table);
-
-	// Setup worker status
-	struct worker_info *worker = &session_table->worker_info[worker_idx];
-	worker_start_query(worker, current_gen);
-
 	// Get ttlmap
-	struct ttlmap *map = session_table_map(session_table, current_gen);
+	struct ttlmap *map =
+		session_table_map(session_table, current_table_gen);
 
 	int res =
 		TTLMAP_GET(map, session_id, session_state, lock, now, timeout);
@@ -146,10 +124,10 @@ get_or_create_session(
 	if (status == TTLMAP_FOUND) {
 		result_status = SESSION_FOUND;
 	} else if (status == TTLMAP_INSERTED || status == TTLMAP_REPLACED) {
-		if (worker_use_prev_map(current_gen
+		if (worker_use_prev_map(current_table_gen
 		    )) { // if worker in this gen should use prev map
 			struct ttlmap *prev_map = session_table_prev_map(
-				session_table, current_gen
+				session_table, current_table_gen
 			);
 			int lookup_res = TTLMAP_LOOKUP(
 				prev_map, session_id, *session_state, now
@@ -166,28 +144,19 @@ get_or_create_session(
 		result_status = SESSION_TABLE_OVERFLOW;
 	}
 
-	// Finish query
-	worker_finish_query(worker);
-
 	return result_status;
 }
 
 static inline uint32_t
 get_session_real(
 	struct session_table *session_table,
+	uint32_t current_table_gen,
 	struct balancer_session_id *session_id,
-	uint32_t now,
-	uint32_t worker_idx
+	uint32_t now
 ) {
-	// Get current gen
-	uint32_t current_gen = session_table_current_gen(session_table);
-
-	// Setup worker status
-	struct worker_info *worker = &session_table->worker_info[worker_idx];
-	worker_start_query(worker, current_gen);
-
 	// Get ttlmap
-	struct ttlmap *map = session_table_map(session_table, current_gen);
+	struct ttlmap *map =
+		session_table_map(session_table, current_table_gen);
 
 	struct balancer_session_state session_state;
 	int res = TTLMAP_LOOKUP(map, session_id, &session_state, now);
@@ -198,10 +167,10 @@ get_session_real(
 		real_id = session_state.real_id;
 	} else {
 		assert(status == TTLMAP_FAILED);
-		if (worker_use_prev_map(current_gen
+		if (worker_use_prev_map(current_table_gen
 		    )) { // if worker in this gen should use prev map
 			struct ttlmap *prev = session_table_prev_map(
-				session_table, current_gen
+				session_table, current_table_gen
 			);
 			int res = TTLMAP_LOOKUP(
 				prev, session_id, &session_state, now
@@ -212,9 +181,6 @@ get_session_real(
 			}
 		};
 	}
-
-	// Finish query for worker
-	worker_finish_query(worker);
 
 	return real_id;
 }

@@ -128,10 +128,8 @@ validate_packet_ipv4(
 	// bytes
 	info.network.offset = packet->transport_header.offset + 8;
 
-	struct balancer_icmp_module_stats *counter = ctx->counter.icmp_v4;
-
 	if (fill_icmp_packet_info_ipv4(mbuf, &info) != 0) {
-		counter->payload_too_short_ip += 1;
+		ICMP_V4_STATS_INC(payload_too_short_ip, ctx);
 		return -1;
 	}
 
@@ -141,12 +139,12 @@ validate_packet_ipv4(
 		packet->transport_header.offset + sizeof(struct rte_icmp_hdr)
 	);
 	if (inner_ip_hdr->src_addr != outer_ip_hdr->dst_addr) {
-		counter->unmatching_src_from_original += 1;
+		ICMP_V4_STATS_INC(unmatching_src_from_original, ctx);
 		return -1;
 	}
 
 	if (mbuf->pkt_len < info.transport.offset + 2 * sizeof(rte_be16_t)) {
-		counter->payload_too_short_port += 1;
+		ICMP_V4_STATS_INC(payload_too_short_port, ctx);
 		return -1;
 	}
 
@@ -159,7 +157,7 @@ validate_packet_ipv4(
 
 	// fill packet metadata
 	if (fill_packet_metadata(packet, meta)) {
-		counter->unexpected_transport += 1;
+		ICMP_V4_STATS_INC(unexpected_transport, ctx);
 		packet_swap_src_dst(ctx->packet);
 		packet_swap_headers(
 			ctx->packet, &info.network, &info.transport
@@ -170,7 +168,7 @@ validate_packet_ipv4(
 	// lookup virtual service
 	*vs = vs_v4_lookup(ctx);
 	if (*vs == NULL) {
-		counter->unrecognized_vs += 1;
+		ICMP_V4_STATS_INC(unrecognized_vs, ctx);
 	}
 
 	// swap headers and src dst back
@@ -202,10 +200,8 @@ validate_packet_ipv6(
 	// messages
 	info.network.offset = packet->transport_header.offset + 8;
 
-	struct balancer_icmp_module_stats *counter = ctx->counter.icmp_v6;
-
 	if (fill_icmp_packet_info_ipv6(mbuf, &info) != 0) {
-		counter->payload_too_short_ip += 1;
+		ICMP_V6_STATS_INC(payload_too_short_ip, ctx);
 		return -1;
 	}
 
@@ -214,12 +210,12 @@ validate_packet_ipv6(
 	);
 
 	if (memcmp(inner_ip_hdr->src_addr, outer_ip_hdr->dst_addr, 16)) {
-		counter->unmatching_src_from_original += 1;
+		ICMP_V6_STATS_INC(unmatching_src_from_original, ctx);
 		return -1;
 	}
 
 	if (mbuf->pkt_len < info.transport.offset + 2 * sizeof(rte_be16_t)) {
-		counter->payload_too_short_port += 1;
+		ICMP_V6_STATS_INC(payload_too_short_port, ctx);
 		return -1;
 	}
 
@@ -232,7 +228,7 @@ validate_packet_ipv6(
 
 	// fill packet metadata
 	if (fill_packet_metadata(packet, meta)) {
-		counter->unexpected_transport += 1;
+		ICMP_V6_STATS_INC(unexpected_transport, ctx);
 		packet_swap_src_dst(ctx->packet);
 		packet_swap_headers(
 			ctx->packet, &info.network, &info.transport
@@ -243,7 +239,7 @@ validate_packet_ipv6(
 	// lookup virtual service
 	*vs = vs_v6_lookup(ctx);
 	if (*vs == NULL) {
-		counter->unrecognized_vs += 1;
+		ICMP_V6_STATS_INC(unrecognized_vs, ctx);
 	}
 
 	// swap headers and src dst back
@@ -296,7 +292,7 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 	// so, we return corresponding status.
 	if (vs == NULL) {
 		return validate_packet_vs_not_found;
-	} else { // todo: vs already selected here
+	} else {
 		packet_ctx_set_vs(ctx, vs);
 	}
 
@@ -306,15 +302,24 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 	struct balancer_session_id session_id;
 	fill_session_id(&session_id, &meta, vs);
 
+	// begin critical section
+	uint64_t current_gen = session_table_begin_cs(
+		&ctx->state.ptr->session_table, ctx->worker->idx
+	);
+
 	// get real for the session
 	uint32_t real_id = get_session_real(
 		&ctx->state.ptr->session_table,
+		current_gen,
 		&session_id,
-		ctx->now,
-		ctx->worker->idx
+		ctx->now
 	);
 
+	// end critical section
+	session_table_end_cs(&ctx->state.ptr->session_table, ctx->worker->idx);
+
 	if (real_id == (uint32_t)-1) { // real not found
+		// end critical section
 		return validate_packet_session_not_found;
 	} else { // real found
 		struct real *reals = ADDR_OF(&ctx->config->reals);

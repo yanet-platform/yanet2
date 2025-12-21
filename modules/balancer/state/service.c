@@ -2,19 +2,25 @@
 
 #include "../api/info.h"
 #include "index.h"
-#include "worker.h"
 #include <netinet/in.h>
+#include <stdatomic.h>
 #include <string.h>
 
 void
 balancer_real_stats_add(
 	struct balancer_real_stats *to, struct balancer_real_stats *stats
 ) {
-	to->bytes += stats->bytes;
-	to->created_sessions += stats->created_sessions;
-	to->packets_real_disabled += stats->packets_real_disabled;
-	to->ops_packets += stats->ops_packets;
-	to->packets += stats->packets;
+	to->bytes += atomic_load_explicit(&stats->bytes, memory_order_relaxed);
+	to->created_sessions += atomic_load_explicit(
+		&stats->created_sessions, memory_order_relaxed
+	);
+	to->packets_real_disabled += atomic_load_explicit(
+		&stats->packets_real_disabled, memory_order_relaxed
+	);
+	to->ops_packets +=
+		atomic_load_explicit(&stats->ops_packets, memory_order_relaxed);
+	to->packets +=
+		atomic_load_explicit(&stats->packets, memory_order_relaxed);
 }
 
 void
@@ -46,10 +52,12 @@ service_info_accumulate_into_real_info(
 	// set stats
 	for (size_t i = 0; i < workers; ++i) {
 		struct service_state *state = &service_info->state[i];
-		if (state->last_packet_timestamp >
-		    real_info->last_packet_timestamp) {
+		uint32_t last_packet_timestamp = atomic_load_explicit(
+			&state->last_packet_timestamp, memory_order_relaxed
+		);
+		if (state->last_packet_timestamp > last_packet_timestamp) {
 			real_info->last_packet_timestamp =
-				state->last_packet_timestamp;
+				last_packet_timestamp;
 		}
 		balancer_real_stats_add(&real_info->stats, &state->stats.real);
 	}
@@ -61,17 +69,38 @@ void
 balancer_vs_stats_add(
 	struct balancer_vs_stats *to, struct balancer_vs_stats *stats
 ) {
-	to->incoming_packets += stats->incoming_packets;
-	to->incoming_bytes += stats->incoming_bytes;
-	to->packet_src_not_allowed += stats->packet_src_not_allowed;
-	to->no_reals += stats->no_reals;
-	to->ops_packets += stats->ops_packets;
-	to->session_table_overflow += stats->session_table_overflow;
-	to->real_is_disabled += stats->real_is_disabled;
-	to->not_rescheduled_packets += stats->not_rescheduled_packets;
-	to->created_sessions += stats->created_sessions;
-	to->outgoing_packets += stats->outgoing_packets;
-	to->outgoing_bytes += stats->outgoing_bytes;
+	to->incoming_packets += atomic_load_explicit(
+		&stats->incoming_packets, memory_order_relaxed
+	);
+	to->incoming_bytes += atomic_load_explicit(
+		&stats->incoming_bytes, memory_order_relaxed
+	);
+
+	to->packet_src_not_allowed += atomic_load_explicit(
+		&stats->packet_src_not_allowed, memory_order_relaxed
+	);
+	to->no_reals +=
+		atomic_load_explicit(&stats->no_reals, memory_order_relaxed);
+	to->ops_packets +=
+		atomic_load_explicit(&stats->ops_packets, memory_order_relaxed);
+	to->session_table_overflow += atomic_load_explicit(
+		&stats->session_table_overflow, memory_order_relaxed
+	);
+	to->real_is_disabled += atomic_load_explicit(
+		&stats->real_is_disabled, memory_order_relaxed
+	);
+	to->not_rescheduled_packets += atomic_load_explicit(
+		&stats->not_rescheduled_packets, memory_order_relaxed
+	);
+	to->created_sessions += atomic_load_explicit(
+		&stats->created_sessions, memory_order_relaxed
+	);
+	to->outgoing_packets += atomic_load_explicit(
+		&stats->outgoing_packets, memory_order_relaxed
+	);
+	to->outgoing_bytes += atomic_load_explicit(
+		&stats->outgoing_bytes, memory_order_relaxed
+	);
 }
 
 void
@@ -97,10 +126,11 @@ service_info_accumulate_into_vs_info(
 	// set stats
 	for (size_t i = 0; i < workers; ++i) {
 		struct service_state *state = &service_info->state[i];
-		if (state->last_packet_timestamp >
-		    vs_info->last_packet_timestamp) {
-			vs_info->last_packet_timestamp =
-				state->last_packet_timestamp;
+		uint32_t last_packet_timestamp = atomic_load_explicit(
+			&state->last_packet_timestamp, memory_order_relaxed
+		);
+		if (last_packet_timestamp > vs_info->last_packet_timestamp) {
+			vs_info->last_packet_timestamp = last_packet_timestamp;
 		}
 		balancer_vs_stats_add(&vs_info->stats, &state->stats.vs);
 	}

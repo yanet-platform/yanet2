@@ -26,9 +26,7 @@ balancer_state_init(
 	state->workers = workers;
 
 	// init session table
-	int res = session_table_init(
-		&state->session_table, mctx, table_size, workers
-	);
+	int res = session_table_init(&state->session_table, mctx, table_size);
 	if (res != 0) {
 		return -1;
 	}

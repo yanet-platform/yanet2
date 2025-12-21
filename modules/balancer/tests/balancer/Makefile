@@ -19,3 +19,6 @@ test-debug:
 
 test:
 	go test -v -run=$(Test) .
+
+build-tsan:
+	CC=clang CGO_CFLAGS="-fsanitize=thread -fno-omit-frame-pointer" CGO_LDFLAGS="-fsanitize=thread" go test -count=1 -ldflags='-linkmode=external -extld=clang' -c -v .

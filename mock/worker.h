@@ -14,7 +14,9 @@ struct yanet_worker_mock {
 	struct cp_config *cp_config;
 };
 
-struct packet_handle_result
+void
 yanet_worker_mock_handle_packets(
-	struct yanet_worker_mock *worker, struct packet_list *input
+	struct yanet_worker_mock *worker,
+	struct packet_list *input,
+	struct packet_handle_result *out_result
 );

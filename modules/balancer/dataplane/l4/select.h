@@ -99,12 +99,16 @@ select_real(
 	struct balancer_session_id session_id;
 	fill_session_id(&session_id, metadata, vs);
 
+	// begin critical section
+	struct session_table *table = &balancer_state->session_table;
+	uint64_t current_table_gen = session_table_begin_cs(table, worker_idx);
+
 	// get state for the session
 	struct balancer_session_state *session_state = NULL;
 	session_lock_t *session_lock;
 	int get_session_result = get_or_create_session(
-		&balancer_state->session_table,
-		worker_idx,
+		table,
+		current_table_gen,
 		now,
 		timeout,
 		&session_id,
@@ -118,6 +122,10 @@ select_real(
 				      // table to create new state, so error
 		// update virtual service stats
 		VS_STATS_INC(session_table_overflow, ctx);
+
+		// end critical section
+		session_table_end_cs(table, worker_idx);
+
 		return NULL;
 	}
 
@@ -158,6 +166,9 @@ select_real(
 			packet_ctx_update_real_stats_on_packet(ctx);
 			packet_ctx_update_vs_stats_on_outgoing_packet(ctx);
 
+			// end critical section
+			session_table_end_cs(table, worker_idx);
+
 			// real is selected, just return it.
 			return real;
 		}
@@ -175,6 +186,9 @@ select_real(
 		VS_STATS_INC(not_rescheduled_packets, ctx);
 		session_remove(session_state); // free created state
 		session_unlock(session_lock);  // unlock state
+
+		// end critical section
+		session_table_end_cs(table, worker_idx);
 		return NULL;
 	}
 
@@ -187,6 +201,7 @@ select_real(
 		VS_STATS_INC(no_reals, ctx);
 		session_remove(session_state); // free created state
 		session_unlock(session_lock);  // nlock state
+		session_table_end_cs(table, worker_idx);
 		return NULL;
 	}
 
@@ -202,6 +217,9 @@ select_real(
 	session_state->timeout = timeout;
 
 	session_unlock(session_lock);
+
+	// end critical section
+	session_table_end_cs(table, worker_idx);
 
 	// update stats
 	packet_ctx_update_vs_stats_on_outgoing_packet(ctx);

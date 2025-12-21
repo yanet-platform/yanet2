@@ -1,7 +1,6 @@
 #pragma once
 
 #include "common/memory.h"
-#include "modules/balancer/state/worker.h"
 #include "registry.h"
 #include "session_table.h"
 

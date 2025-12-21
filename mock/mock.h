@@ -62,9 +62,12 @@ yanet_mock_shm(struct yanet_mock *mock);
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Handle packets using worker number `worker_idx`.
-struct packet_handle_result
+void
 yanet_mock_handle_packets(
-	struct yanet_mock *mock, struct packet_list *packets, size_t worker_idx
+	struct yanet_mock *mock,
+	struct packet_list *packets,
+	size_t worker_idx,
+	struct packet_handle_result *out_result
 );
 
 ////////////////////////////////////////////////////////////////////////////////
