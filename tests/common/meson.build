@@ -54,3 +54,11 @@ rcu_test = executable(
   dependencies: dependencies
 )
 test('rcu', rcu_test, suite: ['common'])
+
+rcu_bench = executable(
+  'rcu_bench',
+  ['rcu_bench.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies
+)
