@@ -1,0 +1,60 @@
+/* ============================================
+   PipelinesPage Styles
+   ============================================ */
+
+.pipelines-page__content {
+    width: 100%;
+    flex: 1;
+    min-width: 0;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.pipelines-page__list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+/* ============================================
+   PipelineCard Styles
+   ============================================ */
+
+.pipeline-card {
+    margin-bottom: 16px;
+}
+
+.pipeline-card__content {
+    display: flex;
+    flex-direction: column;
+    height: 350px;
+}
+
+.pipeline-card__loading {
+    padding: 16px;
+}
+
+.pipeline-card__validation-errors {
+    padding: 8px 16px;
+}
+
+.pipeline-card__graph {
+    flex: 1;
+    min-height: 0;
+}
+
+/* ============================================
+   FunctionRefEditorDialog Styles
+   ============================================ */
+
+.function-ref-editor-dialog__body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+

@@ -7,6 +7,7 @@ import { ROW_HEIGHT, OVERSCAN, TOTAL_WIDTH, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FO
 import { PrefixRow } from './PrefixRow';
 import { PrefixSearchBar } from './PrefixSearchBar';
 import { PrefixTableHeader } from './PrefixTableHeader';
+import './decap.css';
 
 export interface PrefixTableProps {
     prefixes: PrefixItem[];
@@ -124,7 +125,7 @@ export const PrefixTable: React.FC<PrefixTableProps> = ({
 
     // Don't render until height is measured
     if (containerHeight === 0) {
-        return <div ref={containerRef} style={{ height: '100%' }} />;
+        return <div ref={containerRef} className="prefix-table__container" />;
     }
 
     const tableBodyHeight = containerHeight - SEARCH_BAR_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT - 2;
@@ -136,7 +137,7 @@ export const PrefixTable: React.FC<PrefixTableProps> = ({
         : '';
 
     return (
-        <div ref={containerRef} style={{ height: containerHeight, display: 'flex', flexDirection: 'column' }}>
+        <div ref={containerRef} className="prefix-table" style={{ height: containerHeight }}>
             <PrefixSearchBar
                 searchQuery={searchQuery}
                 onSearchChange={handleSearchChange}
@@ -148,16 +149,7 @@ export const PrefixTable: React.FC<PrefixTableProps> = ({
             />
 
             {/* Table container */}
-            <Box
-                style={{
-                    flex: 1,
-                    border: '1px solid var(--g-color-line-generic)',
-                    borderRadius: 8,
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column',
-                }}
-            >
+            <Box className="prefix-table__wrapper">
                 <PrefixTableHeader
                     sortDirection={sortDirection}
                     onSort={handleSort}
@@ -170,22 +162,19 @@ export const PrefixTable: React.FC<PrefixTableProps> = ({
                 {/* Virtualized body */}
                 <div
                     ref={parentRef}
-                    style={{
-                        height: tableBodyHeight,
-                        overflow: 'auto',
-                        contain: 'strict',
-                    }}
+                    className="prefix-table__body"
+                    style={{ height: tableBodyHeight }}
                 >
                     {processedData.length === 0 ? (
-                        <Box style={{ padding: '40px 20px', textAlign: 'center' }}>
+                        <Box className="prefix-table__empty">
                             <EmptyState message="No prefixes found" />
                         </Box>
                     ) : (
                         <div
+                            className="prefix-table__virtual-container"
                             style={{
                                 height: rowVirtualizer.getTotalSize(),
                                 minWidth: TOTAL_WIDTH,
-                                position: 'relative',
                             }}
                         >
                             {virtualRows.map(virtualRow => {
@@ -211,7 +200,7 @@ export const PrefixTable: React.FC<PrefixTableProps> = ({
             </Box>
 
             {/* Footer */}
-            <Box style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: FOOTER_HEIGHT, flexShrink: 0 }}>
+            <Box className="prefix-table__footer" style={{ height: FOOTER_HEIGHT }}>
                 <Text variant="body-2" color="secondary">{footerText}</Text>
                 <Text variant="body-2" color="secondary">Scroll to navigate</Text>
             </Box>

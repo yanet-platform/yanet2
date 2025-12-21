@@ -3,6 +3,7 @@ import { Box, Text } from '@gravity-ui/uikit';
 import { SortableHeader } from './SortableHeader';
 import { cellStyles, TOTAL_WIDTH, HEADER_HEIGHT } from './constants';
 import type { PacketSortState, PacketSortColumn } from './types';
+import './pdump.css';
 
 export interface PacketTableHeaderProps {
     sortState: PacketSortState;
@@ -15,18 +16,10 @@ export const PacketTableHeader: React.FC<PacketTableHeaderProps> = ({
 }) => {
     return (
         <Box
-            style={{
-                display: 'flex',
-                alignItems: 'center',
-                height: HEADER_HEIGHT,
-                minWidth: TOTAL_WIDTH,
-                borderBottom: '1px solid var(--g-color-line-generic)',
-                backgroundColor: 'var(--g-color-base-generic)',
-                padding: '0 8px',
-                flexShrink: 0,
-            }}
+            className="packet-table-header"
+            style={{ height: HEADER_HEIGHT, minWidth: TOTAL_WIDTH }}
         >
-            <Box style={{ ...cellStyles.index, color: undefined }}>
+            <Box style={cellStyles.index}>
                 <Text variant="subheader-1">#</Text>
             </Box>
             <SortableHeader
@@ -60,11 +53,11 @@ export const PacketTableHeader: React.FC<PacketTableHeaderProps> = ({
             <SortableHeader
                 column="length"
                 label="Length"
-                style={{ ...cellStyles.length, textAlign: undefined }}
+                style={cellStyles.length}
                 sortState={sortState}
                 onSort={onSort}
             />
-            <Box style={{ ...cellStyles.info }}>
+            <Box style={cellStyles.info}>
                 <Text variant="subheader-1">Info</Text>
             </Box>
         </Box>

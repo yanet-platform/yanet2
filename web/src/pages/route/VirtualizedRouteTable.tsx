@@ -9,6 +9,7 @@ import { ROW_HEIGHT, OVERSCAN, TOTAL_WIDTH, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FO
 import { VirtualRow } from './VirtualRow';
 import { TableSearchBar } from './TableSearchBar';
 import { TableHeader } from './TableHeader';
+import './route.css';
 
 // Data source can be either a generator (for massive datasets) or a direct array
 type DataSource =
@@ -189,7 +190,7 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
 
     // Don't render until height is measured
     if (containerHeight === 0) {
-        return <div ref={containerRef} style={{ height: '100%' }} />;
+        return <div ref={containerRef} className="route-table__container" />;
     }
 
     const tableBodyHeight = containerHeight - SEARCH_BAR_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT - 2;
@@ -204,7 +205,7 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
     const helperText = dataSource.type === 'generator' && !canSort ? 'Search to enable sorting' : undefined;
 
     return (
-        <div ref={containerRef} style={{ height: containerHeight, display: 'flex', flexDirection: 'column' }}>
+        <div ref={containerRef} className="route-table" style={{ height: containerHeight }}>
             <TableSearchBar
                 searchQuery={searchQuery}
                 onSearchChange={handleSearchChange}
@@ -216,16 +217,7 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
             />
 
             {/* Table container */}
-            <Box
-                style={{
-                    flex: 1,
-                    border: '1px solid var(--g-color-line-generic)',
-                    borderRadius: 8,
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column',
-                }}
-            >
+            <Box className="route-table__wrapper">
                 <TableHeader
                     sortState={sortState}
                     onSort={handleSort}
@@ -235,22 +227,19 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
                 {/* Virtualized body */}
                 <div
                     ref={parentRef}
-                    style={{
-                        height: tableBodyHeight,
-                        overflow: 'auto',
-                        contain: 'strict',
-                    }}
+                    className="route-table__body"
+                    style={{ height: tableBodyHeight }}
                 >
                     {displayCount === 0 && !isSearching ? (
-                        <Box style={{ padding: '40px 20px', textAlign: 'center' }}>
+                        <Box className="route-table__empty">
                             <EmptyState message="No routes found" />
                         </Box>
                     ) : (
                         <div
+                            className="route-table__virtual-container"
                             style={{
                                 height: rowVirtualizer.getTotalSize(),
                                 minWidth: TOTAL_WIDTH,
-                                position: 'relative',
                             }}
                         >
                             {virtualRows.map(virtualRow => {
@@ -292,7 +281,7 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
             </Box>
 
             {/* Footer */}
-            <Box style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: FOOTER_HEIGHT, flexShrink: 0 }}>
+            <Box className="route-table__footer" style={{ height: FOOTER_HEIGHT }}>
                 <Text variant="body-2" color="secondary">{footerText}</Text>
                 <Text variant="body-2" color="secondary">Scroll to navigate</Text>
             </Box>

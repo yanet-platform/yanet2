@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Dialog, TextInput, Box, Text } from '@gravity-ui/uikit';
 import type { FunctionEdge } from '../types';
+import '../../FunctionsPage.css';
 
 export interface WeightEditorDialogProps {
     open: boolean;
@@ -57,48 +58,16 @@ export const WeightEditorDialog: React.FC<WeightEditorDialogProps> = ({
         <Dialog open={open} onClose={onClose}>
             <Dialog.Header caption="Edit Chain Weights" />
             <Dialog.Body>
-                <Box style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    gap: '12px', 
-                    width: '400px', 
-                    maxWidth: '90vw',
-                    maxHeight: '400px',
-                    overflowY: 'auto',
-                }}>
+                <Box className="weight-editor-dialog__body">
                     {edges.length === 0 ? (
                         <Text color="secondary">No chains connected to input</Text>
                     ) : (
                         edges.map((edge, index) => (
-                            <Box 
-                                key={edge.id} 
-                                style={{ 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    gap: '8px',
-                                }}
-                            >
-                                <Text 
-                                    variant="body-1" 
-                                    style={{ 
-                                        flexShrink: 0,
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap',
-                                        maxWidth: '200px',
-                                    }}
-                                >
+                            <Box key={edge.id} className="weight-editor-dialog__row">
+                                <Text variant="body-1" className="weight-editor-dialog__chain-name">
                                     {edge.data?.chainName || `Chain ${index + 1}`}
                                 </Text>
-                                <Box 
-                                    style={{ 
-                                        flex: 1, 
-                                        borderBottom: '1px dotted var(--g-color-line-generic)',
-                                        minWidth: '20px',
-                                        height: '1px',
-                                        alignSelf: 'center',
-                                    }} 
-                                />
+                                <Box className="weight-editor-dialog__separator" />
                                 <TextInput
                                     value={weights.get(edge.id) || '1'}
                                     onUpdate={(value) => handleWeightChange(edge.id, value)}

@@ -11,6 +11,7 @@ import {
     prefixesToItems,
     ConfigTabs,
 } from './decap';
+import './decap/decap.css';
 
 const DecapPage: React.FC = () => {
     const {
@@ -87,7 +88,7 @@ const DecapPage: React.FC = () => {
     if (configs.length === 0) {
         return (
             <PageLayout header={headerContent}>
-                <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px' }}>
+                <Box className="decap-page__empty">
                     <EmptyState message="No decap configurations found. Click 'Add Config' to create one." />
                 </Box>
 
@@ -103,7 +104,7 @@ const DecapPage: React.FC = () => {
 
     return (
         <PageLayout header={headerContent}>
-            <Box style={{ width: '100%', height: '100%', flex: 1, minWidth: 0, padding: '20px', display: 'flex', flexDirection: 'column' }}>
+            <Box className="decap-page__content">
                 <ConfigTabs
                     configs={configs}
                     activeConfig={currentActiveConfig}

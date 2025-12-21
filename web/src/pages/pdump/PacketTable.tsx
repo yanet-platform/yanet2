@@ -7,6 +7,7 @@ import { PacketTableRow } from './PacketTableRow';
 import { PacketTableHeader } from './PacketTableHeader';
 import { PacketSearchBar } from './PacketSearchBar';
 import type { CapturedPacket, PacketSortState, PacketSortColumn } from './types';
+import './pdump.css';
 
 // Helper to extract sortable values from packet
 const getPacketSortValues = (packet: CapturedPacket) => {
@@ -232,7 +233,7 @@ export const PacketTable: React.FC<PacketTableProps> = ({
 
     // Don't render until height is measured
     if (containerHeight === 0) {
-        return <div ref={containerRef} style={{ height: '100%' }} />;
+        return <div ref={containerRef} className="packet-table__container" />;
     }
 
     const tableBodyHeight = containerHeight - SEARCH_BAR_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT - 2;
@@ -244,7 +245,7 @@ export const PacketTable: React.FC<PacketTableProps> = ({
         : '';
 
     return (
-        <div ref={containerRef} style={{ height: containerHeight, display: 'flex', flexDirection: 'column' }}>
+        <div ref={containerRef} className="packet-table" style={{ height: containerHeight }}>
             <PacketSearchBar
                 searchQuery={searchQuery}
                 onSearchChange={handleSearchChange}
@@ -257,16 +258,7 @@ export const PacketTable: React.FC<PacketTableProps> = ({
             />
 
             {/* Table container */}
-            <Box
-                style={{
-                    flex: 1,
-                    border: '1px solid var(--g-color-line-generic)',
-                    borderRadius: 8,
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column',
-                }}
-            >
+            <Box className="packet-table__wrapper">
                 <PacketTableHeader
                     sortState={sortState}
                     onSort={handleSort}
@@ -276,22 +268,19 @@ export const PacketTable: React.FC<PacketTableProps> = ({
                 <div
                     ref={parentRef}
                     onScroll={handleScroll}
-                    style={{
-                        height: tableBodyHeight,
-                        overflow: 'auto',
-                        contain: 'strict',
-                    }}
+                    className="packet-table__body"
+                    style={{ height: tableBodyHeight }}
                 >
                     {sortedPackets.length === 0 ? (
-                        <Box style={{ padding: '40px 20px', textAlign: 'center' }}>
+                        <Box className="packet-table__empty">
                             <EmptyState message={packets.length === 0 ? 'No packets captured yet' : 'No packets match the filter'} />
                         </Box>
                     ) : (
                         <div
+                            className="packet-table__virtual-container"
                             style={{
                                 height: rowVirtualizer.getTotalSize(),
                                 minWidth: TOTAL_WIDTH,
-                                position: 'relative',
                             }}
                         >
                             {virtualRows.map(virtualRow => {
@@ -317,7 +306,7 @@ export const PacketTable: React.FC<PacketTableProps> = ({
             </Box>
 
             {/* Footer */}
-            <Box style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: FOOTER_HEIGHT, flexShrink: 0 }}>
+            <Box className="packet-table__footer" style={{ height: FOOTER_HEIGHT }}>
                 <Text variant="body-2" color="secondary">{footerText}</Text>
                 <Text variant="body-2" color="secondary">
                     {autoScroll && isCapturing && !sortState.column ? 'Auto-scrolling • ' : ''}

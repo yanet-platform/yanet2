@@ -105,7 +105,7 @@ export const FunctionsSection: React.FC<FunctionsSectionProps> = ({ instance }) 
                     ))}
                 </Box>
             ) : (
-                <Text variant="body-1" color="secondary" style={{ display: 'block' }}>
+                <Text variant="body-1" color="secondary" className="inspect-text--block">
                     No functions
                 </Text>
             )}

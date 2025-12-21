@@ -19,6 +19,7 @@ import {
     useMockMode,
     useRouteData,
 } from './route';
+import './route/route.css';
 
 const RoutePage: React.FC = () => {
     const {
@@ -262,7 +263,7 @@ const RoutePage: React.FC = () => {
     if (mockEnabled && mockGenerator) {
         return (
             <PageLayout header={headerContent}>
-                <Box style={{ width: '100%', flex: 1, minWidth: 0, minHeight: 0, padding: '20px', display: 'flex', flexDirection: 'column' }}>
+                <Box className="route-page__content route-page__content--with-generator">
                     <VirtualizedRouteTable
                         generator={mockGenerator}
                         selectedIds={mockSelectedIds}
@@ -277,7 +278,7 @@ const RoutePage: React.FC = () => {
     if (configs.length === 0) {
         return (
             <PageLayout header={headerContent}>
-                <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px' }}>
+                <Box className="route-page__empty">
                     <EmptyState message="No configs found. Use 'Add Route' to create a new configuration." />
                 </Box>
 
@@ -305,7 +306,7 @@ const RoutePage: React.FC = () => {
 
     return (
         <PageLayout header={headerContent}>
-            <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px', display: 'flex', flexDirection: 'column' }}>
+            <Box className="route-page__content">
                 <RouteConfigContent
                     configs={configs}
                     activeConfig={activeConfigTab}

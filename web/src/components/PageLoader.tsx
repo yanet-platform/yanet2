@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Flex, Loader, LoaderProps } from '@gravity-ui/uikit';
+import './common.css';
 
 export interface PageLoaderProps extends LoaderProps {
     /** Whether the loader should be shown */
@@ -49,7 +50,7 @@ export const PageLoader = ({ loading, size = 'l', delay = 200 }: PageLoaderProps
             alignItems="center"
             justifyContent="center"
             spacing={{ p: 5 }}
-            style={{ flex: 1 }}
+            className="page-loader"
         >
             <Loader size={size} />
         </Flex>

@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text, Dialog, TextInput, Switch } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
 import type { AddRouteDialogProps } from './types';
+import './route.css';
 
 export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
     open,
@@ -36,7 +37,7 @@ export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
         <Dialog open={open} onClose={onClose}>
             <Dialog.Header caption="Add Route" />
             <Dialog.Body>
-                <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '600px', maxWidth: '90vw' }}>
+                <Box className="add-route-dialog__body">
                     <FormField
                         label="Config Name"
                         required
@@ -46,7 +47,6 @@ export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
                             value={form.configName}
                             onUpdate={handleConfigNameChange}
                             placeholder="Enter config name"
-                            style={{ width: '100%' }}
                             validationState={configNameError ? 'invalid' : undefined}
                             errorMessage={configNameError}
                         />
@@ -61,7 +61,6 @@ export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
                             value={form.prefix}
                             onUpdate={handlePrefixChange}
                             placeholder="192.168.1.0/24 or 2001:db8::/32"
-                            style={{ width: '100%' }}
                             validationState={prefixError ? 'invalid' : undefined}
                             errorMessage={prefixError}
                         />
@@ -76,14 +75,13 @@ export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
                             value={form.nexthopAddr}
                             onUpdate={handleNexthopChange}
                             placeholder="192.168.1.1 or 2001:db8::1"
-                            style={{ width: '100%' }}
                             validationState={nexthopError ? 'invalid' : undefined}
                             errorMessage={nexthopError}
                         />
                     </FormField>
 
                     <Box>
-                        <Box style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        <Box className="add-route-dialog__switch-row">
                             <Switch
                                 checked={form.doFlush}
                                 onUpdate={handleDoFlushChange}

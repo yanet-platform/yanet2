@@ -7,6 +7,7 @@ import {
     CreatePipelineDialog,
     usePipelineData,
 } from './pipelines';
+import './pipelines/pipelines.css';
 
 const PipelinesPage: React.FC = () => {
     const {
@@ -46,23 +47,8 @@ const PipelinesPage: React.FC = () => {
 
     return (
         <PageLayout header={headerContent}>
-            <Box style={{
-                width: '100%',
-                flex: 1,
-                minWidth: 0,
-                padding: '20px',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-            }}>
-                <Box style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '16px',
-                    overflowY: 'auto',
-                    flex: 1,
-                    minHeight: 0,
-                }}>
+            <Box className="pipelines-page__content">
+                <Box className="pipelines-page__list">
                     {pipelineIds.length === 0 ? (
                         <EmptyState message="No pipelines found. Click 'Create pipeline' to add one." />
                     ) : (

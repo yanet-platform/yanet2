@@ -4,6 +4,7 @@ import { FormDialog } from '../../components/FormDialog';
 import { FormField } from '../../components/FormField';
 import { pdumpApi, parseModeFlags, modeFlagsToNumber, type PdumpConfig } from '../../api/pdump';
 import { toaster } from '../../utils';
+import './pdump.css';
 
 interface ConfigDialogProps {
     open: boolean;
@@ -161,8 +162,8 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                     </Flex>
                 </FormField>
 
-                <Box style={{ display: 'flex', gap: '16px' }}>
-                    <Box style={{ flex: 1 }}>
+                <Box className="config-dialog__row">
+                    <Box className="config-dialog__col">
                         <FormField
                             label="Snaplen"
                             hint="Maximum bytes to capture per packet"
@@ -176,7 +177,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                             />
                         </FormField>
                     </Box>
-                    <Box style={{ flex: 1 }}>
+                    <Box className="config-dialog__col">
                         <FormField
                             label="Ring Size"
                             hint="Per-worker ring buffer size"
@@ -195,4 +196,3 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
         </FormDialog>
     );
 };
-

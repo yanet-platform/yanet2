@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, TextInput, Loader, Label, Text } from '@gravity-ui/uikit';
 import { SEARCH_BAR_HEIGHT } from './constants';
+import './route.css';
 
 export interface TableSearchBarProps {
     searchQuery: string;
@@ -24,8 +25,8 @@ export const TableSearchBar: React.FC<TableSearchBarProps> = ({
     placeholder = 'Search by prefix, nexthop, or peer...',
 }) => {
     return (
-        <Box style={{ display: 'flex', alignItems: 'center', gap: 16, height: SEARCH_BAR_HEIGHT, flexShrink: 0 }}>
-            <Box style={{ width: 350 }}>
+        <Box className="route-search-bar" style={{ height: SEARCH_BAR_HEIGHT }}>
+            <Box className="route-search-bar__input">
                 <TextInput
                     placeholder={placeholder}
                     value={searchQuery}
@@ -34,7 +35,7 @@ export const TableSearchBar: React.FC<TableSearchBarProps> = ({
                     hasClear
                 />
             </Box>
-            <Box style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Box className="route-search-bar__stats">
                 {isSearching && <Loader size="s" />}
                 <Label theme="info" size="m">{statsText}</Label>
                 {selectedText && (
@@ -44,7 +45,7 @@ export const TableSearchBar: React.FC<TableSearchBarProps> = ({
                             <Text
                                 variant="body-1"
                                 color="link"
-                                style={{ cursor: 'pointer' }}
+                                className="route-search-bar__clear"
                                 onClick={onClearSelection}
                             >
                                 Clear

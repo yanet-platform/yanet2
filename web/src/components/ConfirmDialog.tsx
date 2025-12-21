@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text, Dialog } from '@gravity-ui/uikit';
+import './common.css';
 
 export interface ConfirmDialogProps {
     /** Whether the dialog is open */
@@ -46,7 +47,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         <Dialog open={open} onClose={onClose}>
             <Dialog.Header caption={title} />
             <Dialog.Body>
-                <Box style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '320px' }}>
+                <Box className="confirm-dialog__body">
                     <Text variant="body-1">{message}</Text>
                     {secondaryMessage && (
                         <Text variant="body-2" color="secondary">
@@ -67,4 +68,3 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         </Dialog>
     );
 };
-

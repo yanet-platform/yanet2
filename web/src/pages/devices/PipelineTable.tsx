@@ -72,36 +72,17 @@ export const PipelineTable: React.FC<PipelineTableProps> = ({
     }, [pipelines, availablePipelines, onChange]);
 
     return (
-        <Box
-            className="pipelineTable"
-        >
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <Box className="pipelineTable">
+            <table className="pipelineTable__table">
                 <thead>
-                    <tr style={{ backgroundColor: 'var(--g-color-base-generic-hover)' }}>
-                        <th style={{
-                            padding: '8px 12px',
-                            textAlign: 'left',
-                            fontWeight: 500,
-                            fontSize: '13px',
-                            color: 'var(--g-color-text-secondary)',
-                        }}>
+                    <tr className="pipelineTable__header-row">
+                        <th className="pipelineTable__header-cell">
                             {pipelineLabel}
                         </th>
-                        <th style={{
-                            padding: '8px 12px',
-                            textAlign: 'left',
-                            fontWeight: 500,
-                            fontSize: '13px',
-                            color: 'var(--g-color-text-secondary)',
-                            width: '120px',
-                        }}>
+                        <th className="pipelineTable__header-cell pipelineTable__header-cell--weight">
                             Weight
                         </th>
-                        <th style={{
-                            padding: '8px 12px',
-                            textAlign: 'right',
-                            width: '100px',
-                        }}>
+                        <th className="pipelineTable__header-cell pipelineTable__header-cell--actions">
                             <Button
                                 view="flat"
                                 size="s"
@@ -119,26 +100,14 @@ export const PipelineTable: React.FC<PipelineTableProps> = ({
                 <tbody>
                     {pipelines.length === 0 ? (
                         <tr>
-                            <td
-                                colSpan={3}
-                                style={{
-                                    padding: '12px',
-                                    textAlign: 'center',
-                                    color: 'var(--g-color-text-secondary)',
-                                }}
-                            >
+                            <td colSpan={3} className="pipelineTable__empty-cell">
                                 No pipelines configured
                             </td>
                         </tr>
                     ) : (
                         pipelines.map((pipeline, index) => (
-                            <tr
-                                key={index}
-                                style={{
-                                    borderTop: '1px solid var(--g-color-line-generic)',
-                                }}
-                            >
-                                <td style={{ padding: '6px 12px' }}>
+                            <tr key={index} className="pipelineTable__body-row">
+                                <td className="pipelineTable__body-cell">
                                     <Select
                                         value={pipeline.name ? [pipeline.name] : []}
                                         options={pipelineOptions}
@@ -148,7 +117,7 @@ export const PipelineTable: React.FC<PipelineTableProps> = ({
                                         disabled={loadingPipelines}
                                     />
                                 </td>
-                                <td style={{ padding: '6px 12px' }}>
+                                <td className="pipelineTable__body-cell">
                                     <TextInput
                                         value={String(parseWeight(pipeline.weight))}
                                         onChange={(e) => handleWeightChange(index, e.target.value)}
@@ -156,7 +125,7 @@ export const PipelineTable: React.FC<PipelineTableProps> = ({
                                         type="number"
                                     />
                                 </td>
-                                <td style={{ padding: '6px 12px', textAlign: 'center' }}>
+                                <td className="pipelineTable__body-cell pipelineTable__body-cell--actions">
                                     <Button
                                         view="flat-danger"
                                         size="s"
@@ -175,4 +144,3 @@ export const PipelineTable: React.FC<PipelineTableProps> = ({
         </Box>
     );
 };
-

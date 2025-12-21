@@ -1,0 +1,80 @@
+/* ============================================
+   UploadYamlDialog Styles
+   ============================================ */
+
+.upload-yaml-dialog__body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 480px;
+}
+
+.upload-yaml-dialog__label {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.upload-yaml-dialog__warning {
+    display: block;
+    margin-top: 4px;
+}
+
+.upload-yaml-dialog__dropzone {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed var(--g-color-line-generic);
+    border-radius: 8px;
+    cursor: pointer;
+    background-color: var(--g-color-base-generic);
+}
+
+.upload-yaml-dialog__dropzone-icon {
+    opacity: 0.5;
+    margin-bottom: 8px;
+}
+
+.upload-yaml-dialog__error {
+    padding: 12px;
+    background-color: var(--g-color-base-danger-light);
+    border-radius: 8px;
+}
+
+/* Rules Preview */
+.rules-preview {
+    margin-top: 16px;
+}
+
+.rules-preview__title {
+    display: block;
+    margin-bottom: 8px;
+}
+
+.rules-preview__container {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--g-color-line-generic);
+    border-radius: 8px;
+    padding: 12px;
+    background-color: var(--g-color-base-generic);
+}
+
+.rules-preview__item {
+    padding: 6px 0;
+}
+
+.rules-preview__item--with-border {
+    border-bottom: 1px solid var(--g-color-line-generic);
+}
+
+.rules-preview__rule-text {
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.rules-preview__more {
+    margin-top: 8px;
+}
+

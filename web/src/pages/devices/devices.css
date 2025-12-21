@@ -1,0 +1,77 @@
+/* ============================================
+   DevicesPage Styles
+   ============================================ */
+
+.devices-page__content {
+    width: 100%;
+    flex: 1;
+    min-width: 0;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.devices-page__list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+/* ============================================
+   DeviceCard Styles
+   ============================================ */
+
+.device-card {
+    margin-bottom: 16px;
+}
+
+.device-card__content {
+    display: flex;
+    flex-direction: column;
+}
+
+.device-card__body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+}
+
+.device-card__vlan-row {
+    align-items: center;
+    gap: 8px;
+}
+
+.device-card__vlan-input {
+    width: 100px;
+}
+
+.device-card__pipelines-row {
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.device-card__pipeline-table-wrapper {
+    flex: 1;
+    min-width: 300px;
+}
+
+/* ============================================
+   CreateDeviceDialog Styles
+   ============================================ */
+
+.create-device-dialog__body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.create-device-dialog__label {
+    margin-bottom: 4px;
+    display: block;
+}
+

@@ -4,6 +4,7 @@ import type { SelectOption } from '@gravity-ui/uikit';
 import { FormDialog, FormField } from '../../../components';
 import type { FunctionRefNodeData } from '../types';
 import type { FunctionId } from '../../../api/common';
+import '../pipelines.css';
 
 export interface FunctionRefEditorDialogProps {
     open: boolean;
@@ -97,7 +98,7 @@ export const FunctionRefEditorDialog: React.FC<FunctionRefEditorDialogProps> = (
             confirmText="Save"
             showCancel={false}
         >
-            <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <Box className="function-ref-editor-dialog__body">
                 <FormField
                     label="Function Name"
                     hint="Select from available functions or type a custom name."

@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, TextInput, Label, Text, Button } from '@gravity-ui/uikit';
 import { Stop, TrashBin } from '@gravity-ui/icons';
 import { SEARCH_BAR_HEIGHT } from './constants';
+import './pdump.css';
 
 export interface PacketSearchBarProps {
     searchQuery: string;
@@ -25,8 +26,8 @@ export const PacketSearchBar: React.FC<PacketSearchBarProps> = ({
     canClear,
 }) => {
     return (
-        <Box style={{ display: 'flex', alignItems: 'center', gap: 16, height: SEARCH_BAR_HEIGHT, flexShrink: 0 }}>
-            <Box style={{ width: 350 }}>
+        <Box className="packet-search-bar" style={{ height: SEARCH_BAR_HEIGHT }}>
+            <Box className="packet-search-bar__input">
                 <TextInput
                     placeholder="Filter by IP, port, protocol..."
                     value={searchQuery}
@@ -35,7 +36,7 @@ export const PacketSearchBar: React.FC<PacketSearchBarProps> = ({
                     hasClear
                 />
             </Box>
-            <Box style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+            <Box className="packet-search-bar__info">
                 <Label theme="info" size="m">{statsText}</Label>
                 {configName && (
                     <Text variant="body-1" color="secondary">
@@ -46,7 +47,7 @@ export const PacketSearchBar: React.FC<PacketSearchBarProps> = ({
                     <Label theme="success" size="s">LIVE</Label>
                 )}
             </Box>
-            <Box style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Box className="packet-search-bar__actions">
                 <Button
                     view="flat"
                     size="s"
@@ -74,4 +75,3 @@ export const PacketSearchBar: React.FC<PacketSearchBarProps> = ({
         </Box>
     );
 };
-

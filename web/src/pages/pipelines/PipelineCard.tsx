@@ -9,6 +9,7 @@ import { usePipelineGraph } from './hooks';
 import type { PipelineNode, PipelineEdge, FunctionRefNodeData } from './types';
 import { NODE_TYPE_FUNCTION_REF } from './types';
 import { toaster } from '../../utils';
+import './pipelines.css';
 
 export interface PipelineCardProps {
     pipelineId: PipelineId;
@@ -162,8 +163,8 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
 
     if (loading) {
         return (
-            <Card style={{ marginBottom: '16px' }}>
-                <Box style={{ padding: '16px' }}>
+            <Card className="pipeline-card">
+                <Box className="pipeline-card__loading">
                     <Text>Loading pipeline {pipelineId.name}...</Text>
                 </Box>
             </Card>
@@ -171,8 +172,8 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     }
 
     return (
-        <Card style={{ marginBottom: '16px' }}>
-            <Box style={{ display: 'flex', flexDirection: 'column', height: '350px' }}>
+        <Card className="pipeline-card">
+            <Box className="pipeline-card__content">
                 <CardHeader
                     title={pipelineId.name || ''}
                     isDirty={isDirty}
@@ -184,13 +185,13 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
 
                 {/* Validation errors */}
                 {validationErrors.length > 0 && (
-                    <Box style={{ padding: '8px 16px' }}>
+                    <Box className="pipeline-card__validation-errors">
                         <Alert theme="danger" message={validationErrors[0]} />
                     </Box>
                 )}
 
                 {/* Graph */}
-                <Box style={{ flex: 1, minHeight: 0 }}>
+                <Box className="pipeline-card__graph">
                     <PipelineGraph
                         initialNodes={nodes}
                         initialEdges={edges}

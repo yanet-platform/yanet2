@@ -8,6 +8,7 @@ import {
     CreateDeviceDialog,
     useDeviceData,
 } from './devices';
+import './devices/PipelineTable.css';
 
 const DevicesPage: React.FC = () => {
     const {
@@ -46,23 +47,8 @@ const DevicesPage: React.FC = () => {
 
     return (
         <PageLayout header={headerContent}>
-            <Box style={{
-                width: '100%',
-                flex: 1,
-                minWidth: 0,
-                padding: '20px',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-            }}>
-                <Box style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '16px',
-                    overflowY: 'auto',
-                    flex: 1,
-                    minHeight: 0,
-                }}>
+            <Box className="devices-page__content">
+                <Box className="devices-page__list">
                     {devices.length === 0 ? (
                         <EmptyState message="No devices found. Click 'Create Device' to add one." />
                     ) : (

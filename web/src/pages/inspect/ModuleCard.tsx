@@ -20,7 +20,7 @@ export const ModuleCard: React.FC<ModuleCardProps> = ({
         <Box className="module-card">
             <Box className="module-card__content">
                 <Box className="module-card__header">
-                    <Text variant="subheader-1" style={{ fontWeight: '500' }}>
+                    <Text variant="subheader-1" className="module-card__name">
                         {formatModuleName(module.name)}
                     </Text>
                     {module.name && MODULE_DESCRIPTIONS[module.name.toLowerCase()] && (
@@ -32,12 +32,12 @@ export const ModuleCard: React.FC<ModuleCardProps> = ({
                 <Box className="module-card__row">
                     <Text variant="body-1" color="secondary">Configs</Text>
                     <Box className="module-card__separator" />
-                    <Text variant="body-1" style={{ fontWeight: 'bold' }}>{configCount}</Text>
+                    <Text variant="body-1" className="module-card__value">{configCount}</Text>
                 </Box>
                 <Box className="module-card__row">
                     <Text variant="body-1" color="secondary">Pipelines</Text>
                     <Box className="module-card__separator" />
-                    <Text variant="body-1" style={{ fontWeight: 'bold' }}>{pipelineUsage}</Text>
+                    <Text variant="body-1" className="module-card__value">{pipelineUsage}</Text>
                 </Box>
             </Box>
         </Box>

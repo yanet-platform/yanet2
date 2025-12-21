@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { TextInput } from '@gravity-ui/uikit';
 import { FormDialog } from './FormDialog';
 import { FormField } from './FormField';
+import './common.css';
 
 export interface CreateEntityDialogProps {
     /** Whether the dialog is open */
@@ -81,7 +82,7 @@ export const CreateEntityDialog: React.FC<CreateEntityDialogProps> = ({
                     value={name}
                     onUpdate={setName}
                     placeholder={defaultPlaceholder}
-                    style={{ width: '100%' }}
+                    className="create-entity-dialog__input"
                     validationState={error ? 'invalid' : undefined}
                     errorMessage={error}
                     autoFocus

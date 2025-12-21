@@ -1,0 +1,37 @@
+/* ============================================
+   FWStateForm Styles
+   ============================================ */
+
+.fwstate-form {
+    padding: 16px 0;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.fwstate-form__card {
+    margin-bottom: 24px;
+    padding: 20px;
+}
+
+.fwstate-form__section-title {
+    display: block;
+    margin-bottom: 16px;
+}
+
+.fwstate-form__grid--2cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.fwstate-form__grid--3cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+}
+
+.fwstate-form__actions {
+    display: flex;
+    justify-content: flex-end;
+}
+

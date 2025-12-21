@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { TextInput, Box } from '@gravity-ui/uikit';
 import { FormDialog, FormField } from '../../../components';
 import type { ModuleNodeData } from '../types';
+import '../../FunctionsPage.css';
 
 export interface ModuleEditorDialogProps {
     open: boolean;
@@ -42,7 +43,7 @@ export const ModuleEditorDialog: React.FC<ModuleEditorDialogProps> = ({
             confirmText="Save"
             showCancel={false}
         >
-            <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <Box className="module-editor-dialog__body">
                 <FormField
                     label="Module Type"
                     hint="Type of the module (e.g., filter, nat, route)"
@@ -51,7 +52,7 @@ export const ModuleEditorDialog: React.FC<ModuleEditorDialogProps> = ({
                         value={type}
                         onUpdate={setType}
                         placeholder="Enter module type"
-                        style={{ width: '100%' }}
+                        className="module-editor-dialog__input"
                         autoFocus
                     />
                 </FormField>
@@ -64,7 +65,7 @@ export const ModuleEditorDialog: React.FC<ModuleEditorDialogProps> = ({
                         value={name}
                         onUpdate={setName}
                         placeholder="Enter module name"
-                        style={{ width: '100%' }}
+                        className="module-editor-dialog__input"
                     />
                 </FormField>
             </Box>

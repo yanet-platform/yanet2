@@ -38,7 +38,7 @@ export enum CIDRParseError {
  * IPv4 Address class with validation
  */
 export class IPv4Address {
-    private constructor(public readonly octets: [number, number, number, number]) {}
+    private constructor(public readonly octets: [number, number, number, number]) { }
 
     /**
      * Parse IPv4 address string into IPv4Address object
@@ -109,7 +109,7 @@ export function isValidIPv4Address(ip: string): boolean {
  * IPv6 Address class with validation
  */
 export class IPv6Address {
-    private constructor(public readonly groups: number[]) {}
+    private constructor(public readonly groups: number[]) { }
 
     /**
      * Parse IPv6 address string into IPv6Address object
@@ -240,7 +240,7 @@ export function isValidIPv6Address(ip: string): boolean {
  * IPv4 CIDR Prefix class
  */
 export class IPv4Prefix {
-    constructor(public readonly address: IPv4Address, public readonly prefixLength: number) {}
+    constructor(public readonly address: IPv4Address, public readonly prefixLength: number) { }
 
     /**
      * Parse IPv4 CIDR prefix string into IPv4Prefix object
@@ -283,7 +283,7 @@ export class IPv4Prefix {
  * IPv6 CIDR Prefix class
  */
 export class IPv6Prefix {
-    constructor(public readonly address: IPv6Address, public readonly prefixLength: number) {}
+    constructor(public readonly address: IPv6Address, public readonly prefixLength: number) { }
 
     /**
      * Parse IPv6 CIDR prefix string into IPv6Prefix object
@@ -423,3 +423,261 @@ export function getPrefixLength(prefix: string): number | null {
     }
     return null;
 }
+
+// ============================================================================
+// Bytes-based IP address utilities
+// ============================================================================
+
+/**
+ * Format IPv4 address from bytes array to string
+ * @param bytes - Array of 4 bytes representing IPv4 address
+ * @returns IPv4 address string (e.g., "192.168.1.1")
+ */
+export const formatIPv4FromBytes = (bytes: number[]): string => {
+    if (bytes.length !== 4) return '';
+    return bytes.join('.');
+};
+
+/**
+ * Format IPv6 address from bytes array to string with :: compression
+ * @param bytes - Array of 16 bytes representing IPv6 address
+ * @returns IPv6 address string with :: compression
+ */
+export const formatIPv6FromBytes = (bytes: number[]): string => {
+    if (bytes.length !== 16) return '';
+
+    // Build array of 16-bit parts
+    const parts: number[] = [];
+    for (let i = 0; i < 16; i += 2) {
+        parts.push((bytes[i] << 8) | bytes[i + 1]);
+    }
+
+    // Find longest run of zeros for :: compression
+    let longestStart = -1;
+    let longestLen = 0;
+    let currentStart = -1;
+    let currentLen = 0;
+
+    for (let i = 0; i < 8; i++) {
+        if (parts[i] === 0) {
+            if (currentStart === -1) {
+                currentStart = i;
+                currentLen = 1;
+            } else {
+                currentLen++;
+            }
+        } else {
+            if (currentLen > longestLen && currentLen > 1) {
+                longestStart = currentStart;
+                longestLen = currentLen;
+            }
+            currentStart = -1;
+            currentLen = 0;
+        }
+    }
+    // Check at end
+    if (currentLen > longestLen && currentLen > 1) {
+        longestStart = currentStart;
+        longestLen = currentLen;
+    }
+
+    // Build string
+    if (longestStart === -1) {
+        // No compression
+        return parts.map((p) => p.toString(16)).join(':');
+    }
+
+    const left = parts
+        .slice(0, longestStart)
+        .map((p) => p.toString(16))
+        .join(':');
+    const right = parts
+        .slice(longestStart + longestLen)
+        .map((p) => p.toString(16))
+        .join(':');
+
+    if (longestStart === 0 && longestLen === 8) {
+        return '::';
+    } else if (longestStart === 0) {
+        return '::' + right;
+    } else if (longestStart + longestLen === 8) {
+        return left + '::';
+    } else {
+        return left + '::' + right;
+    }
+};
+
+/**
+ * Format IP address from bytes array (auto-detects IPv4 or IPv6)
+ * @param bytes - Array of 4 or 16 bytes
+ * @returns IP address string
+ */
+export const formatIPFromBytes = (bytes: number[]): string => {
+    if (bytes.length === 4) {
+        return formatIPv4FromBytes(bytes);
+    }
+    if (bytes.length === 16) {
+        return formatIPv6FromBytes(bytes);
+    }
+    return '';
+};
+
+/**
+ * Parse IPv4 string to bytes array
+ * @param ipStr - IPv4 address string
+ * @returns Array of 4 bytes or undefined if invalid
+ */
+export const parseIPv4ToBytes = (ipStr: string): number[] | undefined => {
+    const parts = ipStr.split('.');
+    if (parts.length !== 4) {
+        return undefined;
+    }
+    const bytes: number[] = [];
+    for (const part of parts) {
+        const num = parseInt(part, 10);
+        if (isNaN(num) || num < 0 || num > 255) {
+            return undefined;
+        }
+        bytes.push(num);
+    }
+    return bytes;
+};
+
+/**
+ * Parse IPv6 string to bytes array
+ * @param ipStr - IPv6 address string
+ * @returns Array of 16 bytes or undefined if invalid
+ */
+export const parseIPv6ToBytes = (ipStr: string): number[] | undefined => {
+    const trimmed = ipStr.trim();
+    if (!trimmed) return undefined;
+
+    // Handle :: expansion
+    let fullAddr = trimmed;
+    if (trimmed.includes('::')) {
+        const parts = trimmed.split('::');
+        const left = parts[0] ? parts[0].split(':') : [];
+        const right = parts[1] ? parts[1].split(':') : [];
+        const missing = 8 - left.length - right.length;
+        if (missing < 0) return undefined;
+        const middle = Array(missing).fill('0');
+        fullAddr = [...left, ...middle, ...right].join(':');
+    }
+
+    const parts = fullAddr.split(':');
+    if (parts.length !== 8) return undefined;
+
+    const bytes: number[] = [];
+    for (const part of parts) {
+        const num = parseInt(part || '0', 16);
+        if (isNaN(num) || num < 0 || num > 0xffff) return undefined;
+        bytes.push((num >> 8) & 0xff);
+        bytes.push(num & 0xff);
+    }
+    return bytes;
+};
+
+/**
+ * Parse IP address string to bytes array (auto-detects IPv4 or IPv6)
+ * @param ipStr - IP address string
+ * @returns Array of bytes or undefined if invalid
+ */
+export const parseIPToBytes = (ipStr: string): number[] | undefined => {
+    if (ipStr.includes(':')) {
+        return parseIPv6ToBytes(ipStr);
+    }
+    return parseIPv4ToBytes(ipStr);
+};
+
+// ============================================================================
+// Network mask utilities
+// ============================================================================
+
+/**
+ * Check if mask is contiguous (all 1s followed by all 0s)
+ * @param maskBytes - Array of bytes representing the mask
+ * @returns true if mask is contiguous
+ */
+export const isContiguousMask = (maskBytes: number[]): boolean => {
+    let foundZero = false;
+    for (const byte of maskBytes) {
+        for (let bit = 7; bit >= 0; bit--) {
+            const isSet = (byte & (1 << bit)) !== 0;
+            if (foundZero && isSet) {
+                return false; // Found 1 after 0 - non-contiguous
+            }
+            if (!isSet) {
+                foundZero = true;
+            }
+        }
+    }
+    return true;
+};
+
+/**
+ * Count prefix length from contiguous mask bytes
+ * @param maskBytes - Array of bytes representing the mask
+ * @returns Number of leading 1 bits
+ */
+export const countPrefixLength = (maskBytes: number[]): number => {
+    let prefixLen = 0;
+    for (const byte of maskBytes) {
+        for (let bit = 7; bit >= 0; bit--) {
+            if (byte & (1 << bit)) {
+                prefixLen++;
+            } else {
+                return prefixLen;
+            }
+        }
+    }
+    return prefixLen;
+};
+
+/**
+ * Create mask bytes from prefix length
+ * @param prefixLen - Number of leading 1 bits
+ * @param totalBytes - Total number of bytes (4 for IPv4, 16 for IPv6)
+ * @returns Array of mask bytes
+ */
+export const prefixLengthToMaskBytes = (prefixLen: number, totalBytes: number): number[] => {
+    const mask: number[] = [];
+    let remaining = prefixLen;
+    for (let i = 0; i < totalBytes; i++) {
+        if (remaining >= 8) {
+            mask.push(255);
+            remaining -= 8;
+        } else if (remaining > 0) {
+            mask.push((0xff << (8 - remaining)) & 0xff);
+            remaining = 0;
+        } else {
+            mask.push(0);
+        }
+    }
+    return mask;
+};
+
+/**
+ * Format IP network (address + mask) to human-readable string
+ * Supports both contiguous (CIDR) and non-contiguous masks
+ * @param addrBytes - Array of bytes for address
+ * @param maskBytes - Array of bytes for mask (optional)
+ * @returns Formatted network string (e.g., "192.168.1.0/24" or "192.168.1.0/255.255.255.0")
+ */
+export const formatIPNet = (
+    addrBytes: number[],
+    maskBytes?: number[]
+): string => {
+    if (addrBytes.length === 0) return '';
+
+    const ipStr = formatIPFromBytes(addrBytes);
+    if (!maskBytes || maskBytes.length === 0) return ipStr;
+
+    if (isContiguousMask(maskBytes)) {
+        const prefixLen = countPrefixLength(maskBytes);
+        return `${ipStr}/${prefixLen}`;
+    } else {
+        // Non-contiguous mask - show as IP/mask
+        const maskStr = formatIPFromBytes(maskBytes);
+        return `${ipStr}/${maskStr}`;
+    }
+};

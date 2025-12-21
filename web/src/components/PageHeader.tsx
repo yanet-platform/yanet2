@@ -1,5 +1,6 @@
 import React from 'react';
 import { Flex, Text } from '@gravity-ui/uikit';
+import './common.css';
 
 export interface PageHeaderProps {
     /** Page title displayed in header */
@@ -16,7 +17,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({ title, actions }) => {
         <Flex
             alignItems="center"
             justifyContent="space-between"
-            style={{ width: '100%' }}
+            className="page-header"
         >
             <Text variant="header-1">{title}</Text>
             {actions && (

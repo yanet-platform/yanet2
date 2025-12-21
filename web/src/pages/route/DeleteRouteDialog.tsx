@@ -3,6 +3,7 @@ import { Box, Text, Dialog } from '@gravity-ui/uikit';
 import { RouteListItem } from './RouteListItem';
 import { formatRouteCount } from './utils';
 import type { DeleteRouteDialogProps } from './types';
+import './route.css';
 
 export const DeleteRouteDialog: React.FC<DeleteRouteDialogProps> = ({
     open,
@@ -16,17 +17,17 @@ export const DeleteRouteDialog: React.FC<DeleteRouteDialogProps> = ({
         <Dialog open={open} onClose={onClose}>
             <Dialog.Header caption="Delete Routes" />
             <Dialog.Body>
-                <Box style={{ marginBottom: '16px' }}>
+                <Box className="delete-route-dialog__message">
                     <Text variant="body-1">
                         Are you sure you want to delete {count} {formatRouteCount(count)}?
                     </Text>
                 </Box>
                 {selectedRoutes.length > 0 && (
-                    <Box style={{ maxHeight: '300px', overflowY: 'auto', marginTop: '16px' }}>
-                        <Text variant="subheader-2" style={{ marginBottom: '8px' }}>
+                    <Box className="delete-route-dialog__list">
+                        <Text variant="subheader-2" className="delete-route-dialog__list-header">
                             Selected routes:
                         </Text>
-                        <Box style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <Box className="delete-route-dialog__list-items">
                             {selectedRoutes.map((route, idx) => (
                                 <RouteListItem key={idx} route={route} />
                             ))}

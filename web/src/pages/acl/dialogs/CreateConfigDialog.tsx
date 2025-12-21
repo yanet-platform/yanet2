@@ -63,7 +63,6 @@ export const CreateConfigDialog: React.FC<CreateConfigDialogProps> = ({
                     value={name}
                     onUpdate={handleNameChange}
                     placeholder="Enter config name"
-                    style={{ width: '100%' }}
                     validationState={error ? 'invalid' : undefined}
                     errorMessage={error}
                     autoFocus

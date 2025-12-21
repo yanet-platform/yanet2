@@ -16,6 +16,7 @@ import {
     ACTION_LABELS,
 } from './constants';
 import { formatIPNet, formatPortRange, formatProtoRange, formatVlanRange } from './yamlParser';
+import './VirtualizedAclTable.css';
 
 // Format multiple IPNets for display
 const formatIPNets = (nets: Rule['srcs']): string => {
@@ -89,22 +90,11 @@ const TableRow: React.FC<TableRowProps> = React.memo(({ rule, index, start }) =>
 
     return (
         <div
+            className={`acl-table__row ${index % 2 === 0 ? 'acl-table__row--even' : 'acl-table__row--odd'}`}
             style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
                 minWidth: TOTAL_WIDTH,
                 height: ROW_HEIGHT,
                 transform: `translateY(${start}px)`,
-                display: 'flex',
-                alignItems: 'center',
-                padding: '0 8px',
-                borderBottom: '1px solid var(--g-color-line-generic)',
-                backgroundColor: index % 2 === 0
-                    ? 'transparent'
-                    : 'var(--g-color-base-generic-ultralight)',
-                boxSizing: 'border-box',
             }}
         >
             <div style={cellStyles.index}>{index + 1}</div>
@@ -136,7 +126,7 @@ const TableRow: React.FC<TableRowProps> = React.memo(({ rule, index, start }) =>
                 <Text
                     variant="body-2"
                     color={isPassAction ? 'positive' : 'danger'}
-                    style={{ fontWeight: 500 }}
+                    className="acl-table__action-text"
                 >
                     {actionLabel}
                 </Text>
@@ -149,17 +139,8 @@ TableRow.displayName = 'TableRow';
 
 const TableHeader: React.FC = () => (
     <div
-        style={{
-            display: 'flex',
-            alignItems: 'center',
-            height: HEADER_HEIGHT,
-            padding: '0 8px',
-            borderBottom: '1px solid var(--g-color-line-generic)',
-            backgroundColor: 'var(--g-color-base-generic)',
-            fontWeight: 500,
-            minWidth: TOTAL_WIDTH,
-            boxSizing: 'border-box',
-        }}
+        className="acl-table__header"
+        style={{ height: HEADER_HEIGHT, minWidth: TOTAL_WIDTH }}
     >
         <div style={cellStyles.index}>#</div>
         <div style={cellStyles.srcs}>Sources</div>
@@ -197,7 +178,7 @@ export const VirtualizedAclTable: React.FC<AclTableProps> = ({
 
     // Don't render until height is measured
     if (containerHeight === 0) {
-        return <div ref={containerRef} style={{ height: '100%' }} />;
+        return <div ref={containerRef} className="acl-table__container" />;
     }
 
     const tableBodyHeight = containerHeight - SEARCH_BAR_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT - 2;
@@ -212,10 +193,10 @@ export const VirtualizedAclTable: React.FC<AclTableProps> = ({
         : '';
 
     return (
-        <div ref={containerRef} style={{ height: containerHeight, display: 'flex', flexDirection: 'column' }}>
+        <div ref={containerRef} className="acl-table" style={{ height: containerHeight }}>
             {/* Search bar */}
-            <Box style={{ display: 'flex', alignItems: 'center', gap: 16, height: SEARCH_BAR_HEIGHT, flexShrink: 0 }}>
-                <Box style={{ width: 350 }}>
+            <Box className="acl-table__search-bar" style={{ height: SEARCH_BAR_HEIGHT }}>
+                <Box className="acl-table__search-input">
                     <TextInput
                         placeholder="Search by source, destination, device..."
                         value={searchQuery}
@@ -224,40 +205,16 @@ export const VirtualizedAclTable: React.FC<AclTableProps> = ({
                         hasClear
                     />
                 </Box>
-                <Box style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Box className="acl-table__stats">
                     <Label theme="info" size="m">{statsText}</Label>
                 </Box>
             </Box>
 
             {/* Table container */}
-            <Box
-                style={{
-                    flex: 1,
-                    border: '1px solid var(--g-color-line-generic)',
-                    borderRadius: 8,
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    position: 'relative',
-                }}
-            >
+            <Box className="acl-table__wrapper">
                 {/* Loading overlay */}
                 {isLoading && (
-                    <Box
-                        style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            backgroundColor: 'var(--g-color-base-background)',
-                            opacity: 0.7,
-                            zIndex: 10,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                        }}
-                    >
+                    <Box className="acl-table__loading-overlay">
                         <Loader size="l" />
                     </Box>
                 )}
@@ -266,23 +223,19 @@ export const VirtualizedAclTable: React.FC<AclTableProps> = ({
                 {/* Virtualized body */}
                 <div
                     ref={parentRef}
-                    style={{
-                        height: tableBodyHeight,
-                        overflow: 'auto',
-                        contain: 'strict',
-                    }}
+                    className="acl-table__body"
+                    style={{ height: tableBodyHeight }}
                 >
                     {filteredRules.length === 0 ? (
-                        <Box style={{ padding: '40px 20px', textAlign: 'center' }}>
+                        <Box className="acl-table__empty">
                             <EmptyState message={searchQuery.trim() ? 'No rules match your search' : 'No rules defined'} />
                         </Box>
                     ) : (
                         <div
+                            className="acl-table__virtual-container"
                             style={{
                                 height: rowVirtualizer.getTotalSize(),
-                                width: '100%',
                                 minWidth: TOTAL_WIDTH,
-                                position: 'relative',
                             }}
                         >
                             {virtualRows.map((virtualRow) => {
@@ -304,7 +257,7 @@ export const VirtualizedAclTable: React.FC<AclTableProps> = ({
             </Box>
 
             {/* Footer */}
-            <Box style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: FOOTER_HEIGHT, flexShrink: 0 }}>
+            <Box className="acl-table__footer" style={{ height: FOOTER_HEIGHT }}>
                 <Text variant="body-2" color="secondary">{footerText}</Text>
                 <Text variant="body-2" color="secondary">Scroll to navigate</Text>
             </Box>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text, Dialog, Button } from '@gravity-ui/uikit';
 import type { UnsavedChangesDialogProps } from '../types';
+import '../acl.css';
 
 export const UnsavedChangesDialog: React.FC<UnsavedChangesDialogProps> = ({
     open,
@@ -13,7 +14,7 @@ export const UnsavedChangesDialog: React.FC<UnsavedChangesDialogProps> = ({
         <Dialog open={open} onClose={onClose}>
             <Dialog.Header caption="Unsaved Changes" />
             <Dialog.Body>
-                <Box style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 400 }}>
+                <Box className="unsaved-dialog__body">
                     <Text variant="body-1">
                         You have unsaved changes in config "{configName}".
                     </Text>
@@ -23,7 +24,7 @@ export const UnsavedChangesDialog: React.FC<UnsavedChangesDialogProps> = ({
                 </Box>
             </Dialog.Body>
             <Dialog.Footer>
-                <Box style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
+                <Box className="unsaved-dialog__footer">
                     <Button view="flat" onClick={onClose}>
                         Cancel
                     </Button>

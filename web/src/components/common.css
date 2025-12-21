@@ -1,0 +1,85 @@
+/* ============================================
+   Common Component Styles
+   ============================================ */
+
+/* FormField */
+.form-field__label {
+    margin-bottom: 8px;
+    display: block;
+}
+
+.form-field__hint {
+    margin-top: 4px;
+    display: block;
+}
+
+/* ConfirmDialog */
+.confirm-dialog__body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 320px;
+}
+
+/* EmptyState */
+.empty-state {
+    display: block;
+}
+
+/* PageLayout */
+.page-layout {
+    flex: 1;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+}
+
+.page-layout__header {
+    width: 100%;
+    min-height: 56px;
+    display: flex;
+    align-items: center;
+}
+
+.page-layout__content {
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* ============================================
+   Page Header Styles
+   ============================================ */
+.page-header {
+    width: 100%;
+}
+
+/* ============================================
+   Page Loader Styles
+   ============================================ */
+.page-loader {
+    flex: 1;
+}
+
+/* ============================================
+   Form Dialog Styles
+   ============================================ */
+.form-dialog__body {
+    max-width: 90vw;
+}
+
+/* ============================================
+   Input Form Field Styles
+   ============================================ */
+.input-form-field__input {
+    width: 100%;
+}
+
+/* ============================================
+   Create Entity Dialog Styles
+   ============================================ */
+.create-entity-dialog__input {
+    width: 100%;
+}
+

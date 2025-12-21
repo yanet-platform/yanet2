@@ -76,3 +76,34 @@ export function formatMACAddress(addr: string | number | bigint): string {
     }
     return bytes.join(':');
 }
+
+/**
+ * Format MAC address from bytes array to string
+ * @param bytes - Array of 6 bytes representing MAC address
+ * @returns MAC address string in format "xx:xx:xx:xx:xx:xx"
+ */
+export const formatMACFromBytes = (bytes: number[]): string => {
+    if (bytes.length !== 6) return '';
+    return bytes.map((b) => b.toString(16).padStart(2, '0')).join(':');
+};
+
+/**
+ * Parse MAC address string to bytes array
+ * @param mac - MAC address string (supports : or - as separator)
+ * @returns Array of 6 bytes or undefined if invalid
+ */
+export const parseMACToBytes = (mac: string): number[] | undefined => {
+    const trimmed = mac.trim();
+    if (!trimmed) return undefined;
+
+    const parts = trimmed.split(/[:-]/);
+    if (parts.length !== 6) return undefined;
+
+    const bytes: number[] = [];
+    for (const part of parts) {
+        const num = parseInt(part, 16);
+        if (isNaN(num) || num < 0 || num > 255) return undefined;
+        bytes.push(num);
+    }
+    return bytes;
+};

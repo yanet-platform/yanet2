@@ -2,6 +2,7 @@ import React from 'react';
 import { Flex, Text, Box, Button } from '@gravity-ui/uikit';
 import { Plus, FloppyDisk, TrashBin } from '@gravity-ui/icons';
 import type { AclPageHeaderProps } from './types';
+import './acl.css';
 
 export const AclPageHeader: React.FC<AclPageHeaderProps> = ({
     onUploadYaml,
@@ -12,22 +13,13 @@ export const AclPageHeader: React.FC<AclPageHeaderProps> = ({
     hasUnsavedChanges,
     isSaving,
 }) => (
-    <Flex style={{ width: '100%', alignItems: 'center' }}>
+    <Flex className="acl-header">
         <Flex alignItems="center" gap={2}>
             <Text variant="header-1">ACL</Text>
-            {hasUnsavedChanges && (
-                <Box
-                    style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        backgroundColor: 'var(--g-color-text-warning)',
-                    }}
-                />
-            )}
+            {hasUnsavedChanges && <Box className="acl-header__unsaved-indicator" />}
         </Flex>
-        <Box style={{ flex: 1 }} />
-        <Box style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <Box className="acl-header__spacer" />
+        <Box className="acl-header__actions">
             <Button view="action" onClick={onUploadYaml} disabled={isSaving}>
                 <Button.Icon>
                     <Plus />

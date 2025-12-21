@@ -5,6 +5,7 @@ import type { DevicePipeline } from '../../api/devices';
 import { CardHeader } from '../../components';
 import { PipelineTable } from './PipelineTable';
 import type { LocalDevice } from './types';
+import './PipelineTable.css';
 
 export interface DeviceCardProps {
     device: LocalDevice;
@@ -60,8 +61,8 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({
     );
 
     return (
-        <Card style={{ marginBottom: '16px' }}>
-            <Box style={{ display: 'flex', flexDirection: 'column' }}>
+        <Card className="device-card">
+            <Box className="device-card__content">
                 <CardHeader
                     title={device.id.name || ''}
                     isDirty={device.isDirty}
@@ -72,7 +73,7 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({
                 />
 
                 {/* Content */}
-                <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <Box className="device-card__body">
                     {/* VLAN ID field for vlan devices */}
                     {device.type === 'vlan' && (
                         <Flex alignItems="center" gap={2}>
@@ -87,8 +88,8 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({
                     )}
 
                     {/* Pipeline tables */}
-                    <Flex gap={4} className="pipelineTables" style={{ flexWrap: 'wrap' }}>
-                        <Box style={{ flex: 1, minWidth: '300px' }}>
+                    <Flex gap={4} className="pipelineTables device-card__pipelines">
+                        <Box className="device-card__pipeline-col">
                             <PipelineTable
                                 pipelineLabel="RX Pipeline"
                                 pipelines={device.inputPipelines}
@@ -97,7 +98,7 @@ export const DeviceCard: React.FC<DeviceCardProps> = ({
                                 onChange={handleInputPipelinesChange}
                             />
                         </Box>
-                        <Box style={{ flex: 1, minWidth: '300px' }}>
+                        <Box className="device-card__pipeline-col">
                             <PipelineTable
                                 pipelineLabel="TX Pipeline"
                                 pipelines={device.outputPipelines}

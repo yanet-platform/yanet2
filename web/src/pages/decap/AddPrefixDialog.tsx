@@ -3,6 +3,7 @@ import { Box, Dialog, TextInput } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
 import type { AddPrefixDialogProps } from './types';
 import { parseCIDRPrefix, CIDRParseError } from '../../utils';
+import './decap.css';
 
 export const AddPrefixDialog: React.FC<AddPrefixDialogProps> = ({
     open,
@@ -75,7 +76,7 @@ export const AddPrefixDialog: React.FC<AddPrefixDialogProps> = ({
         <Dialog open={open} onClose={handleClose}>
             <Dialog.Header caption="Add Prefix" />
             <Dialog.Body>
-                <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '400px', maxWidth: '90vw' }}>
+                <Box className="decap-dialog__body">
                     <FormField
                         label="Prefix (CIDR)"
                         required
@@ -85,7 +86,7 @@ export const AddPrefixDialog: React.FC<AddPrefixDialogProps> = ({
                             value={prefixInput}
                             onUpdate={setPrefixInput}
                             placeholder="192.168.1.0/24 or 2001:db8::/32"
-                            style={{ width: '100%' }}
+                            className="decap-dialog__text-input"
                             validationState={error ? 'invalid' : undefined}
                             errorMessage={error}
                             autoFocus

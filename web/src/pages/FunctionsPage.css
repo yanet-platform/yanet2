@@ -1,3 +1,122 @@
 .react-flow__panel.react-flow__attribution.bottom.right {
     display: none;
 }
+
+/* ============================================
+   FunctionsPage Styles
+   ============================================ */
+
+.functions-page__content {
+    width: 100%;
+    flex: 1;
+    min-width: 0;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.functions-page__list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+/* ============================================
+   FunctionCard Styles
+   ============================================ */
+
+.function-card {
+    margin-bottom: 16px;
+}
+
+.function-card__content {
+    display: flex;
+    flex-direction: column;
+    height: 450px;
+}
+
+.function-card__loading {
+    padding: 16px;
+}
+
+.function-card__validation-errors {
+    padding: 8px 16px;
+}
+
+.function-card__graph {
+    flex: 1;
+    min-height: 0;
+}
+
+/* ============================================
+   WeightEditorDialog Styles
+   ============================================ */
+
+.weight-editor-dialog__body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 400px;
+    max-width: 90vw;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.weight-editor-dialog__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.weight-editor-dialog__chain-name {
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+}
+
+.weight-editor-dialog__separator {
+    flex: 1;
+    border-bottom: 1px dotted var(--g-color-line-generic);
+    min-width: 20px;
+    height: 1px;
+    align-self: center;
+}
+
+.weight-editor-dialog__weight-input {
+    width: 80px;
+    flex-shrink: 0;
+}
+
+/* ============================================
+   SingleWeightEditorDialog Styles
+   ============================================ */
+
+.single-weight-editor-dialog__body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.single-weight-editor-dialog__input {
+    width: 100%;
+}
+
+/* ============================================
+   ModuleEditorDialog Styles
+   ============================================ */
+
+.module-editor-dialog__body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.module-editor-dialog__input {
+    width: 100%;
+}

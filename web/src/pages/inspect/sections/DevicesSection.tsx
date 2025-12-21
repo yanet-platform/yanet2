@@ -102,7 +102,7 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
                     ))}
                 </Box>
             ) : (
-                <Text variant="body-1" color="secondary" style={{ display: 'block' }}>
+                <Text variant="body-1" color="secondary" className="inspect-text--block">
                     No devices
                 </Text>
             )}

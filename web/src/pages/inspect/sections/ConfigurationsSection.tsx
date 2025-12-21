@@ -53,7 +53,7 @@ export const ConfigurationsSection: React.FC<ConfigurationsSectionProps> = ({ in
                     />
                 </Box>
             ) : (
-                <Text variant="body-1" color="secondary" style={{ display: 'block' }}>No configurations</Text>
+                <Text variant="body-1" color="secondary" className="inspect-text--block">No configurations</Text>
             )}
         </Box>
     );

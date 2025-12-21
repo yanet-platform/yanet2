@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text, Icon, Checkbox } from '@gravity-ui/uikit';
 import { ChevronUp, ChevronDown } from '@gravity-ui/icons';
 import { HEADER_HEIGHT, TOTAL_WIDTH, cellStyles } from './constants';
+import './decap.css';
 
 export interface PrefixTableHeaderProps {
     sortDirection: 'asc' | 'desc';
@@ -22,16 +23,8 @@ export const PrefixTableHeader: React.FC<PrefixTableHeaderProps> = ({
 }) => {
     return (
         <Box
-            style={{
-                display: 'flex',
-                alignItems: 'center',
-                height: HEADER_HEIGHT,
-                minWidth: TOTAL_WIDTH,
-                borderBottom: '1px solid var(--g-color-line-generic)',
-                backgroundColor: 'var(--g-color-base-generic)',
-                padding: '0 8px',
-                flexShrink: 0,
-            }}
+            className="prefix-table-header-box"
+            style={{ height: HEADER_HEIGHT, minWidth: TOTAL_WIDTH }}
         >
             {/* Checkbox column header */}
             <Box style={cellStyles.checkbox}>
@@ -51,13 +44,8 @@ export const PrefixTableHeader: React.FC<PrefixTableHeaderProps> = ({
 
             {/* Prefix column header - sortable */}
             <Box
-                style={{
-                    ...cellStyles.prefix,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                }}
+                className="prefix-table-header__sortable-cell"
+                style={cellStyles.prefix}
                 onClick={onSort}
             >
                 <Text variant="subheader-1">Prefix</Text>

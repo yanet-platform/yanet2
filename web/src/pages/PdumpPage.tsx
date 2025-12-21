@@ -11,6 +11,7 @@ import {
     PdumpPageHeader,
     type PdumpConfigInfo,
 } from './pdump';
+import './pdump/pdump.css';
 
 const PdumpPage: React.FC = () => {
     const { configs, loading, refetch } = usePdumpConfigs();
@@ -77,7 +78,7 @@ const PdumpPage: React.FC = () => {
     if (configs.length === 0) {
         return (
             <PageLayout header={headerContent}>
-                <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px' }}>
+                <Box className="pdump-page__empty">
                     <EmptyState message="No pdump configurations found. Click 'New Configuration' to create one." />
                 </Box>
 
@@ -93,24 +94,10 @@ const PdumpPage: React.FC = () => {
 
     return (
         <PageLayout header={headerContent}>
-            <Box style={{
-                width: '100%',
-                flex: 1,
-                minWidth: 0,
-                padding: '20px',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-            }}>
+            <Box className="pdump-page__content">
                 {/* Configs section */}
-                <Box
-                    style={{
-                        paddingBottom: '12px',
-                        borderBottom: '1px solid var(--g-color-line-generic)',
-                        flexShrink: 0,
-                    }}
-                >
-                    <Flex gap={3} style={{ flexWrap: 'wrap' }}>
+                <Box className="pdump-page__configs-section">
+                    <Flex gap={3} className="pdump-page__configs-list">
                         {configs.map((config) => (
                             <ConfigCard
                                 key={config.name}
@@ -128,7 +115,7 @@ const PdumpPage: React.FC = () => {
                 </Box>
 
                 {/* Packet table - full width */}
-                <Box style={{ flex: 1, minHeight: 0, marginTop: '16px' }}>
+                <Box className="pdump-page__table-section">
                     <PacketTable
                         packets={capture.packets}
                         isCapturing={capture.isCapturing}

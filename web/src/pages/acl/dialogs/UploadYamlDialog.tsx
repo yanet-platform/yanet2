@@ -5,6 +5,7 @@ import type { UploadYamlDialogProps } from '../types';
 import type { Rule } from '../../../api/acl';
 import { parseYamlConfig, formatIPNet } from '../yamlParser';
 import { ACTION_LABELS } from '../constants';
+import './UploadYamlDialog.css';
 
 // Preview component for parsed rules
 interface RulesPreviewProps {
@@ -17,20 +18,11 @@ const RulesPreview: React.FC<RulesPreviewProps> = ({ rules, maxDisplay = 5 }) =>
     const remaining = rules.length - maxDisplay;
 
     return (
-        <Box style={{ marginTop: 16 }}>
-            <Text variant="body-2" style={{ display: 'block', marginBottom: 8 }}>
+        <Box className="rules-preview">
+            <Text variant="body-2" className="rules-preview__title">
                 Preview ({rules.length} rule{rules.length !== 1 ? 's' : ''}):
             </Text>
-            <Box
-                style={{
-                    maxHeight: 200,
-                    overflowY: 'auto',
-                    border: '1px solid var(--g-color-line-generic)',
-                    borderRadius: 8,
-                    padding: 12,
-                    backgroundColor: 'var(--g-color-base-generic)',
-                }}
-            >
+            <Box className="rules-preview__container">
                 {displayRules.map((rule, index) => {
                     const srcs = rule.srcs?.map(formatIPNet).join(', ') || '*';
                     const dsts = rule.dsts?.map(formatIPNet).join(', ') || '*';
@@ -39,12 +31,9 @@ const RulesPreview: React.FC<RulesPreviewProps> = ({ rules, maxDisplay = 5 }) =>
                     return (
                         <Box
                             key={index}
-                            style={{
-                                padding: '6px 0',
-                                borderBottom: index < displayRules.length - 1 ? '1px solid var(--g-color-line-generic)' : 'none',
-                            }}
+                            className={`rules-preview__item ${index < displayRules.length - 1 ? 'rules-preview__item--with-border' : ''}`}
                         >
-                            <Text variant="body-2" style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                            <Text variant="body-2" className="rules-preview__rule-text">
                                 #{index + 1}: {srcs} → {dsts}{' '}
                                 <Label theme={action === 'PASS' ? 'success' : 'danger'} size="xs">
                                     {action}
@@ -54,7 +43,7 @@ const RulesPreview: React.FC<RulesPreviewProps> = ({ rules, maxDisplay = 5 }) =>
                     );
                 })}
                 {remaining > 0 && (
-                    <Text variant="body-2" color="secondary" style={{ marginTop: 8 }}>
+                    <Text variant="body-2" color="secondary" className="rules-preview__more">
                         ... and {remaining} more rule{remaining !== 1 ? 's' : ''}
                     </Text>
                 )}
@@ -153,10 +142,10 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
         <Dialog open={open} onClose={onClose}>
             <Dialog.Header caption="Create ACL Configuration" />
             <Dialog.Body>
-                <Box style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 480 }}>
+                <Box className="upload-yaml-dialog__body">
                     {/* Config name input */}
                     <Box>
-                        <Text variant="body-2" style={{ display: 'block', marginBottom: 4 }}>
+                        <Text variant="body-2" className="upload-yaml-dialog__label">
                             Config Name <Text color="danger">*</Text>
                         </Text>
                         <TextInput
@@ -168,7 +157,7 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
                             autoFocus
                         />
                         {isExistingConfig && !configNameError && (
-                            <Text variant="caption-2" color="warning" style={{ display: 'block', marginTop: 4 }}>
+                            <Text variant="caption-2" color="warning" className="upload-yaml-dialog__warning">
                                 This config already exists. Uploading will replace its rules.
                             </Text>
                         )}
@@ -176,7 +165,7 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
 
                     {/* File upload */}
                     <Box>
-                        <Text variant="body-2" style={{ display: 'block', marginBottom: 4 }}>
+                        <Text variant="body-2" className="upload-yaml-dialog__label">
                             YAML File <Text color="danger">*</Text>
                         </Text>
                         <input
@@ -187,17 +176,7 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
                             style={{ display: 'none' }}
                         />
                         <div
-                            style={{
-                                padding: 20,
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                border: '2px dashed var(--g-color-line-generic)',
-                                borderRadius: 8,
-                                cursor: 'pointer',
-                                backgroundColor: 'var(--g-color-base-generic)',
-                            }}
+                            className="upload-yaml-dialog__dropzone"
                             onClick={handleBrowseClick}
                             role="button"
                             tabIndex={0}
@@ -207,7 +186,7 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
                                 }
                             }}
                         >
-                            <FileArrowUp width={32} height={32} style={{ opacity: 0.5, marginBottom: 8 }} />
+                            <FileArrowUp width={32} height={32} className="upload-yaml-dialog__dropzone-icon" />
                             {file ? (
                                 <Text variant="body-2">{file.name}</Text>
                             ) : (
@@ -220,13 +199,7 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
 
                     {/* Parse error */}
                     {parseError && (
-                        <Box
-                            style={{
-                                padding: 12,
-                                backgroundColor: 'var(--g-color-base-danger-light)',
-                                borderRadius: 8,
-                            }}
-                        >
+                        <Box className="upload-yaml-dialog__error">
                             <Text variant="body-2" color="danger">
                                 {parseError}
                             </Text>

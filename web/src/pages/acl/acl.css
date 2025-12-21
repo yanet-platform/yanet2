@@ -1,0 +1,97 @@
+/* ============================================
+   ACL Common Styles
+   ============================================ */
+
+/* Config Tabs */
+.acl-config-tabs {
+    margin-bottom: 8px;
+}
+
+.acl-config-tabs__tab-content {
+    display: flex;
+    align-items: center;
+}
+
+.acl-config-tabs__state-new {
+    margin-left: 4px;
+}
+
+.acl-config-tabs__state-modified {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--g-color-text-warning);
+    margin-left: 6px;
+}
+
+/* ACL Page Header */
+.acl-header {
+    width: 100%;
+    align-items: center;
+}
+
+.acl-header__unsaved-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--g-color-text-warning);
+}
+
+.acl-header__spacer {
+    flex: 1;
+}
+
+.acl-header__actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+/* Inner Tabs */
+.acl-inner-tabs {
+    margin-bottom: 16px;
+}
+
+/* Unsaved Changes Dialog */
+.unsaved-dialog__body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 400px;
+}
+
+.unsaved-dialog__footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    width: 100%;
+}
+
+/* ACL Page */
+.acl-page__empty-content {
+    width: 100%;
+    flex: 1;
+    min-width: 0;
+    padding: 20px;
+}
+
+.acl-page__content {
+    width: 100%;
+    height: 100%;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.acl-page__table-container {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+

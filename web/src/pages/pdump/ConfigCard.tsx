@@ -3,6 +3,7 @@ import { Card, Box, Text, Button, Label, Flex } from '@gravity-ui/uikit';
 import { Play, Stop, Pencil } from '@gravity-ui/icons';
 import { parseModeFlags } from '../../api/pdump';
 import type { PdumpConfigInfo } from './types';
+import './pdump.css';
 
 interface ConfigCardProps {
     config: PdumpConfigInfo;
@@ -38,9 +39,9 @@ export const ConfigCard: React.FC<ConfigCardProps> = ({
     const filter = config.config?.filter || '(no filter)';
 
     return (
-        <Card theme="normal" style={{ padding: '12px 16px', width: '280px' }}>
+        <Card theme="normal" className="config-card">
             {/* Header: name + edit button */}
-            <Flex justifyContent="space-between" alignItems="center" style={{ marginBottom: '8px' }}>
+            <Flex justifyContent="space-between" alignItems="center" className="config-card__header">
                 <Text variant="subheader-2">{config.name}</Text>
                 <Button
                     view="flat"
@@ -55,20 +56,13 @@ export const ConfigCard: React.FC<ConfigCardProps> = ({
             </Flex>
 
             {/* Filter */}
-            <Box style={{ marginBottom: '6px' }}>
-                <Text variant="body-1" color="secondary" style={{ fontSize: '12px' }}>
+            <Box className="config-card__filter">
+                <Text variant="body-1" color="secondary" className="config-card__filter-label">
                     Filter:
                 </Text>
                 <Text
                     variant="code-1"
-                    style={{
-                        display: 'block',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        fontSize: '12px',
-                        marginTop: '2px',
-                    }}
+                    className="config-card__filter-value"
                     title={filter}
                 >
                     {filter}
@@ -76,8 +70,8 @@ export const ConfigCard: React.FC<ConfigCardProps> = ({
             </Box>
 
             {/* Mode */}
-            <Box style={{ marginBottom: '12px' }}>
-                <Text variant="body-1" color="secondary" style={{ fontSize: '12px', marginBottom: '4px', display: 'block' }}>
+            <Box className="config-card__mode">
+                <Text variant="body-1" color="secondary" className="config-card__mode-label">
                     Mode:
                 </Text>
                 <Flex gap={1}>

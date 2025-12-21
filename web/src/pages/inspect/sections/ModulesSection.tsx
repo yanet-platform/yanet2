@@ -44,7 +44,7 @@ export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
                     })}
                 </Box>
             ) : (
-                <Text variant="body-1" color="secondary" style={{ display: 'block' }}>No modules</Text>
+                <Text variant="body-1" color="secondary" className="inspect-text--block">No modules</Text>
             )}
         </Box>
     );

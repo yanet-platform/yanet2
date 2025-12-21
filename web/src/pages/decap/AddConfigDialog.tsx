@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Dialog, TextInput } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
+import './decap.css';
 
 export interface AddConfigDialogProps {
     open: boolean;
@@ -56,7 +57,7 @@ export const AddConfigDialog: React.FC<AddConfigDialogProps> = ({
         <Dialog open={open} onClose={handleClose}>
             <Dialog.Header caption="Add Config" />
             <Dialog.Body>
-                <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '400px', maxWidth: '90vw' }}>
+                <Box className="decap-dialog__body">
                     <FormField
                         label="Config Name"
                         required
@@ -66,7 +67,7 @@ export const AddConfigDialog: React.FC<AddConfigDialogProps> = ({
                             value={configName}
                             onUpdate={setConfigName}
                             placeholder="Enter config name"
-                            style={{ width: '100%' }}
+                            className="decap-dialog__text-input"
                             validationState={hasError ? 'invalid' : undefined}
                             errorMessage={errorMessage}
                             autoFocus

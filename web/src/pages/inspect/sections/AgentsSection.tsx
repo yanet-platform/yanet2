@@ -73,7 +73,7 @@ export const AgentsSection: React.FC<AgentsSectionProps> = ({ instance }) => {
             </Text>
             {instance.agents && instance.agents.length > 0 ? (
                 <TabProvider value={activeAgentTab} onUpdate={setActiveAgentTab}>
-                    <TabList style={{ marginBottom: '16px' }}>
+                    <TabList className="agents-section__tabs">
                         {instance.agents.map((agent: AgentInfo, agentIdx: number) => (
                             <Tab key={agentIdx} value={String(agentIdx)}>
                                 {agent.name ? formatAgentName(agent.name) : `Agent ${agentIdx}`}
@@ -90,7 +90,7 @@ export const AgentsSection: React.FC<AgentsSectionProps> = ({ instance }) => {
                                         width="max"
                                     />
                                 ) : (
-                                    <Text variant="body-1" color="secondary" style={{ display: 'block' }}>
+                                    <Text variant="body-1" color="secondary" className="inspect-text--block">
                                         No instances
                                     </Text>
                                 )}
@@ -99,7 +99,7 @@ export const AgentsSection: React.FC<AgentsSectionProps> = ({ instance }) => {
                     </Box>
                 </TabProvider>
             ) : (
-                <Text variant="body-1" color="secondary" style={{ display: 'block' }}>No agents</Text>
+                <Text variant="body-1" color="secondary" className="inspect-text--block">No agents</Text>
             )}
         </Box>
     );

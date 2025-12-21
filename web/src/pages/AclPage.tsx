@@ -14,6 +14,7 @@ import {
     DeleteConfigDialog,
     UnsavedChangesDialog,
 } from './acl';
+import './acl/acl.css';
 
 const AclPage: React.FC = () => {
     const {
@@ -203,7 +204,7 @@ const AclPage: React.FC = () => {
     if (configs.length === 0) {
         return (
             <PageLayout header={headerContent}>
-                <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px' }}>
+                <Box className="acl-page__empty-content">
                     <EmptyState message="No ACL configurations found. Click 'Upload YAML' to create one." />
                 </Box>
 
@@ -219,7 +220,7 @@ const AclPage: React.FC = () => {
 
     return (
         <PageLayout header={headerContent}>
-            <Box style={{ width: '100%', height: '100%', flex: 1, minWidth: 0, minHeight: 0, padding: '20px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <Box className="acl-page__content">
                 <ConfigTabs
                     configs={configs}
                     activeConfig={activeConfigTab}
@@ -233,7 +234,7 @@ const AclPage: React.FC = () => {
                     onTabChange={handleInnerTabChange}
                 />
 
-                <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <Box className="acl-page__table-container">
                     {activeInnerTab === 'rules' ? (
                         <VirtualizedAclTable
                             rules={currentRules}
@@ -287,4 +288,3 @@ const AclPage: React.FC = () => {
 };
 
 export default AclPage;
-

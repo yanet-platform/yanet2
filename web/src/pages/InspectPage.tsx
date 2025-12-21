@@ -5,6 +5,7 @@ import { API } from '../api';
 import type { InstanceInfo } from '../api/inspect';
 import { PageLayout, PageLoader } from '../components';
 import { InstanceCard } from './inspect';
+import './inspect/inspect.css';
 
 const InspectPage = (): React.JSX.Element => {
     const [instanceInfo, setInstanceInfo] = useState<InstanceInfo | null>(null);
@@ -48,8 +49,8 @@ const InspectPage = (): React.JSX.Element => {
     if (!instanceInfo) {
         return (
             <PageLayout title="Inspect">
-                <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px' }}>
-                    <Text variant="body-1" color="secondary" style={{ display: 'block' }}>
+                <Box className="inspect-page__content">
+                    <Text variant="body-1" color="secondary" className="inspect-page__no-data">
                         No instance data found
                     </Text>
                 </Box>
@@ -59,7 +60,7 @@ const InspectPage = (): React.JSX.Element => {
 
     return (
         <PageLayout title="Inspect">
-            <Box style={{ width: '100%', flex: 1, minWidth: 0, padding: '20px' }}>
+            <Box className="inspect-page__content">
                 <InstanceCard instance={instanceInfo} />
             </Box>
         </PageLayout>

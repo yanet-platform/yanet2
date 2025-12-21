@@ -1,3 +1,4 @@
+export * from './bytes';
 export * from './mac';
 export * from './date';
 export * from './nud';

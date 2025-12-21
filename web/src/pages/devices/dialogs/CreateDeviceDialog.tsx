@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Box, TextInput, Select, Text } from '@gravity-ui/uikit';
 import { FormDialog } from '../../../components';
 import { DEVICE_TYPES, type DeviceType } from '../../../api/devices';
+import '../devices.css';
 
 export interface CreateDeviceDialogProps {
     open: boolean;
@@ -73,9 +74,9 @@ export const CreateDeviceDialog: React.FC<CreateDeviceDialogProps> = ({
             title="Create Device"
             confirmText="Create"
         >
-            <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <Box className="create-device-dialog__body">
                 <Box>
-                    <Text variant="body-1" style={{ marginBottom: '4px', display: 'block' }}>
+                    <Text variant="body-1" className="create-device-dialog__label">
                         Name
                     </Text>
                     <TextInput
@@ -88,7 +89,7 @@ export const CreateDeviceDialog: React.FC<CreateDeviceDialogProps> = ({
                     />
                 </Box>
                 <Box>
-                    <Text variant="body-1" style={{ marginBottom: '4px', display: 'block' }}>
+                    <Text variant="body-1" className="create-device-dialog__label">
                         Type
                     </Text>
                     <Select

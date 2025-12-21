@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { TextInput, Box } from '@gravity-ui/uikit';
 import { FormDialog, FormField } from '../../../components';
+import '../../FunctionsPage.css';
 
 export interface ChainEditorResult {
     chainName: string;
@@ -107,7 +108,7 @@ export const SingleWeightEditorDialog: React.FC<SingleWeightEditorDialogProps> =
             showCancel={false}
             width="350px"
         >
-            <Box style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <Box className="single-weight-editor-dialog__body">
                 <FormField
                     label="Chain Name"
                     required
@@ -118,7 +119,7 @@ export const SingleWeightEditorDialog: React.FC<SingleWeightEditorDialogProps> =
                         value={chainName}
                         onUpdate={handleChainNameChange}
                         placeholder="Enter chain name"
-                        style={{ width: '100%' }}
+                        className="single-weight-editor-dialog__input"
                         validationState={nameError ? 'invalid' : undefined}
                         errorMessage={nameError}
                     />
@@ -133,7 +134,7 @@ export const SingleWeightEditorDialog: React.FC<SingleWeightEditorDialogProps> =
                         onUpdate={handleWeightChange}
                         placeholder="Weight"
                         type="number"
-                        style={{ width: '100%' }}
+                        className="single-weight-editor-dialog__input"
                         validationState={weightError ? 'invalid' : undefined}
                         errorMessage={weightError}
                     />

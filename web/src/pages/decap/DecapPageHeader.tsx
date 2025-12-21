@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text, Flex, Button } from '@gravity-ui/uikit';
+import './decap.css';
 
 export interface DecapPageHeaderProps {
     onAddConfig: () => void;
@@ -12,10 +13,10 @@ export const DecapPageHeader: React.FC<DecapPageHeaderProps> = ({
     onDeletePrefixes,
     isDeleteDisabled,
 }) => (
-    <Flex style={{ width: '100%', alignItems: 'center' }}>
+    <Flex className="decap-page-header">
         <Text variant="header-1">Decap</Text>
-        <Box style={{ flex: 1 }} />
-        <Box style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+        <Box className="decap-page-header__spacer" />
+        <Box className="decap-page-header__actions">
             <Button view="action" onClick={onAddConfig}>
                 Add Config
             </Button>

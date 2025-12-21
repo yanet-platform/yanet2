@@ -9,6 +9,7 @@ import type { ChainEditorResult } from './dialogs/SingleWeightEditorDialog';
 import { useFunctionGraph } from './hooks';
 import type { FunctionNode, FunctionEdge, ModuleNodeData } from './types';
 import { NODE_TYPE_MODULE, INPUT_NODE_ID } from './types';
+import '../FunctionsPage.css';
 
 export interface FunctionCardProps {
     functionId: FunctionId;
@@ -201,8 +202,8 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
 
     if (loading) {
         return (
-            <Card style={{ marginBottom: '16px' }}>
-                <Box style={{ padding: '16px' }}>
+            <Card className="function-card">
+                <Box className="function-card__loading">
                     <Text>Loading function {functionId.name}...</Text>
                 </Box>
             </Card>
@@ -210,8 +211,8 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     }
 
     return (
-        <Card style={{ marginBottom: '16px' }}>
-            <Box style={{ display: 'flex', flexDirection: 'column', height: '450px' }}>
+        <Card className="function-card">
+            <Box className="function-card__content">
                 <CardHeader
                     title={functionId.name || ''}
                     isDirty={isDirty}
@@ -223,13 +224,13 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
 
                 {/* Validation errors */}
                 {validationErrors.length > 0 && (
-                    <Box style={{ padding: '8px 16px' }}>
+                    <Box className="function-card__validation-errors">
                         <Alert theme="danger" message={validationErrors.join('. ')} />
                     </Box>
                 )}
 
                 {/* Graph */}
-                <Box style={{ flex: 1, minHeight: 0 }}>
+                <Box className="function-card__graph">
                     <FunctionGraph
                         initialNodes={nodes}
                         initialEdges={edges}

@@ -4,6 +4,7 @@ export * from './PageHeader';
 export * from './CardHeader';
 export * from './EmptyState';
 export * from './FormField';
+export * from './InputFormField';
 export * from './FormDialog';
 export * from './ConfirmDialog';
 export * from './CreateEntityDialog';

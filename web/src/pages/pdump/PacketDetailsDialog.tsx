@@ -2,6 +2,7 @@ import React from 'react';
 import { Dialog, Box, Text, Flex } from '@gravity-ui/uikit';
 import { formatHexDump, formatTCPFlags } from '../../utils/packetParser';
 import type { CapturedPacket } from './types';
+import './pdump.css';
 
 interface PacketDetailsDialogProps {
     packet: CapturedPacket | null;
@@ -10,16 +11,8 @@ interface PacketDetailsDialogProps {
 }
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
-    <Box
-        style={{
-            marginBottom: '12px',
-            padding: '12px',
-            backgroundColor: 'var(--g-color-base-generic-ultralight)',
-            borderRadius: '6px',
-            border: '1px solid var(--g-color-line-generic)',
-        }}
-    >
-        <Text variant="subheader-1" style={{ marginBottom: '8px', display: 'block' }}>
+    <Box className="packet-dialog-section">
+        <Text variant="subheader-1" className="packet-dialog-section__title">
             {title}
         </Text>
         {children}
@@ -27,11 +20,11 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 );
 
 const Field: React.FC<{ label: string; value: string | number | boolean }> = ({ label, value }) => (
-    <Flex gap={2} style={{ marginBottom: '2px' }}>
-        <Text variant="body-1" color="secondary" style={{ minWidth: '100px', fontSize: '13px' }}>
+    <Flex gap={2} className="packet-field--compact">
+        <Text variant="body-1" color="secondary" className="packet-field__label--compact">
             {label}:
         </Text>
-        <Text variant="code-1" style={{ fontSize: '13px' }}>
+        <Text variant="code-1" className="packet-field__value--compact">
             {typeof value === 'boolean' ? (value ? 'true' : 'false') : value}
         </Text>
     </Flex>
@@ -64,10 +57,10 @@ export const PacketDetailsDialog: React.FC<PacketDetailsDialogProps> = ({
         >
             <Dialog.Header caption={`Packet #${packet.id} - ${formatTime(timestamp)}`} />
             <Dialog.Body>
-                <Box style={{ maxHeight: '70vh', overflow: 'auto' }}>
+                <Box className="packet-dialog__content">
                     {/* Capture Info */}
                     <Section title="Capture Info">
-                        <Flex gap={4} style={{ flexWrap: 'wrap' }}>
+                        <Flex gap={4} className="packet-dialog__flex-wrap">
                             <Field label="Worker" value={record.meta?.workerIdx ?? 'N/A'} />
                             <Field label="Pipeline" value={record.meta?.pipelineIdx ?? 'N/A'} />
                             <Field label="RX Device" value={record.meta?.rxDeviceId ?? 'N/A'} />
@@ -113,7 +106,7 @@ export const PacketDetailsDialog: React.FC<PacketDetailsDialogProps> = ({
                         <Section title="IPv6">
                             <Field label="Source IP" value={parsed.ipv6.srcAddr} />
                             <Field label="Dest IP" value={parsed.ipv6.dstAddr} />
-                            <Flex gap={6} style={{ marginTop: '4px' }}>
+                            <Flex gap={6} className="packet-dialog__margin-top">
                                 <Box>
                                     <Field label="Next Header" value={`${parsed.ipv6.nextHeaderName} (${parsed.ipv6.nextHeader})`} />
                                     <Field label="Hop Limit" value={parsed.ipv6.hopLimit} />
@@ -174,24 +167,8 @@ export const PacketDetailsDialog: React.FC<PacketDetailsDialogProps> = ({
 
                     {/* Hex Dump */}
                     <Section title="Hex Dump">
-                        <Box
-                            style={{
-                                backgroundColor: 'var(--g-color-base-generic)',
-                                padding: '10px',
-                                borderRadius: '4px',
-                                overflow: 'auto',
-                                maxHeight: '200px',
-                            }}
-                        >
-                            <pre
-                                style={{
-                                    margin: 0,
-                                    fontFamily: 'var(--g-font-family-monospace)',
-                                    fontSize: '11px',
-                                    lineHeight: '1.4',
-                                    whiteSpace: 'pre',
-                                }}
-                            >
+                        <Box className="packet-hexdump--compact">
+                            <pre className="packet-hexdump__pre">
                                 {formatHexDump(parsed.raw)}
                             </pre>
                         </Box>

@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text, Flex, Button, Select, Switch, Label } from '@gravity-ui/uikit';
 import type { RoutePageHeaderProps } from './types';
 import { MOCK_CONFIGS } from './mockData';
+import './route.css';
 
 const mockOptions = Object.entries(MOCK_CONFIGS).map(([key, value]) => ({
     value: key,
@@ -19,12 +20,12 @@ export const RoutePageHeader: React.FC<RoutePageHeaderProps> = ({
     mockSize,
     onMockSizeChange,
 }) => (
-    <Flex style={{ width: '100%', alignItems: 'center' }}>
+    <Flex className="route-page-header">
         <Text variant="header-1">Route</Text>
-        <Box style={{ flex: 1 }} />
-        <Box style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+        <Box className="route-page-header__spacer" />
+        <Box className="route-page-header__actions">
             {/* Mock mode controls */}
-            <Box style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '0 16px', borderRight: '1px solid var(--g-color-line-generic)' }}>
+            <Box className="route-page-header__mock-controls">
                 <Switch
                     checked={mockEnabled}
                     onUpdate={onMockToggle}

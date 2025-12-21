@@ -2,14 +2,15 @@ import React from 'react';
 import { Box, Text, Card, Flex } from '@gravity-ui/uikit';
 import { formatHexDump, formatTCPFlags } from '../../utils/packetParser';
 import type { CapturedPacket } from './types';
+import './pdump.css';
 
 interface PacketDetailsProps {
     packet: CapturedPacket;
 }
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
-    <Box style={{ marginBottom: '16px' }}>
-        <Text variant="subheader-1" style={{ marginBottom: '8px', display: 'block' }}>
+    <Box className="packet-section">
+        <Text variant="subheader-1" className="packet-section__title">
             {title}
         </Text>
         {children}
@@ -17,8 +18,8 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 );
 
 const Field: React.FC<{ label: string; value: string | number | boolean }> = ({ label, value }) => (
-    <Flex gap={2} style={{ marginBottom: '4px' }}>
-        <Text variant="body-1" color="secondary" style={{ minWidth: '120px' }}>
+    <Flex gap={2} className="packet-field">
+        <Text variant="body-1" color="secondary" className="packet-field__label">
             {label}:
         </Text>
         <Text variant="code-1">
@@ -31,15 +32,8 @@ export const PacketDetails: React.FC<PacketDetailsProps> = ({ packet }) => {
     const { parsed, record } = packet;
 
     return (
-        <Card
-            theme="normal"
-            style={{
-                padding: '16px',
-                height: '100%',
-                overflow: 'auto',
-            }}
-        >
-            <Text variant="header-1" style={{ marginBottom: '16px', display: 'block' }}>
+        <Card theme="normal" className="packet-details-card">
+            <Text variant="header-1" className="packet-details-card__title">
                 Packet Details
             </Text>
 
@@ -126,28 +120,12 @@ export const PacketDetails: React.FC<PacketDetailsProps> = ({ packet }) => {
                 </Section>
             )}
 
-            <Box style={{ height: '16px' }} />
+            <Box className="packet-details-card__spacer" />
 
             {/* Hex Dump */}
             <Section title="Hex Dump">
-                <Box
-                    style={{
-                        backgroundColor: 'var(--g-color-base-generic)',
-                        padding: '12px',
-                        borderRadius: '4px',
-                        overflow: 'auto',
-                        maxHeight: '300px',
-                    }}
-                >
-                    <pre
-                        style={{
-                            margin: 0,
-                            fontFamily: 'var(--g-font-family-monospace)',
-                            fontSize: '11px',
-                            lineHeight: '1.4',
-                            whiteSpace: 'pre',
-                        }}
-                    >
+                <Box className="packet-hexdump">
+                    <pre className="packet-hexdump__pre">
                         {formatHexDump(parsed.raw)}
                     </pre>
                 </Box>
@@ -155,4 +133,3 @@ export const PacketDetails: React.FC<PacketDetailsProps> = ({ packet }) => {
         </Card>
     );
 };
-

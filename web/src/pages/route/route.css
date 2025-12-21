@@ -1,0 +1,208 @@
+/* ============================================
+   Route Common Styles
+   ============================================ */
+
+/* Route Table */
+.route-table {
+    display: flex;
+    flex-direction: column;
+}
+
+.route-table__container {
+    height: 100%;
+}
+
+.route-table__wrapper {
+    flex: 1;
+    border: 1px solid var(--g-color-line-generic);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.route-table__body {
+    overflow: auto;
+    contain: strict;
+}
+
+.route-table__virtual-container {
+    position: relative;
+}
+
+.route-table__empty {
+    padding: 40px 20px;
+    text-align: center;
+}
+
+.route-table__footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* Search Bar */
+.route-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.route-search-bar__input {
+    width: 350px;
+}
+
+.route-search-bar__stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.route-search-bar__clear {
+    cursor: pointer;
+}
+
+/* Config Tabs */
+.route-config-tabs {
+    margin-bottom: 16px;
+}
+
+.route-config-tabs__content {
+    flex: 1;
+    min-height: 0;
+}
+
+/* Add Route Dialog */
+.add-route-dialog__body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 600px;
+    max-width: 90vw;
+}
+
+.add-route-dialog__switch-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+/* RoutePage */
+.route-page__content {
+    width: 100%;
+    flex: 1;
+    min-width: 0;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+}
+
+.route-page__content--with-generator {
+    min-height: 0;
+}
+
+.route-page__empty {
+    width: 100%;
+    flex: 1;
+    min-width: 0;
+    padding: 20px;
+}
+
+/* ============================================
+   Route Page Header Styles
+   ============================================ */
+.route-page-header {
+    width: 100%;
+    align-items: center;
+}
+
+.route-page-header__spacer {
+    flex: 1;
+}
+
+.route-page-header__actions {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
+.route-page-header__mock-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 0 16px;
+    border-right: 1px solid var(--g-color-line-generic);
+}
+
+/* ============================================
+   Route Table Header Styles
+   ============================================ */
+.route-table-header {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--g-color-line-generic);
+    background-color: var(--g-color-base-generic);
+    padding: 0 8px;
+    flex-shrink: 0;
+}
+
+/* ============================================
+   Route Sortable Header Styles
+   ============================================ */
+.route-sortable-header {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.route-sortable-header--disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+/* ============================================
+   Delete Route Dialog Styles
+   ============================================ */
+.delete-route-dialog__message {
+    margin-bottom: 16px;
+}
+
+.delete-route-dialog__list {
+    max-height: 300px;
+    overflow-y: auto;
+    margin-top: 16px;
+}
+
+.delete-route-dialog__list-header {
+    margin-bottom: 8px;
+}
+
+.delete-route-dialog__list-items {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* ============================================
+   Route List Item Styles
+   ============================================ */
+.route-list-item {
+    padding: 4px 0;
+}
+
+/* ============================================
+   Table Header Base Styles
+   ============================================ */
+.route-table-header-box {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--g-color-line-generic);
+    background-color: var(--g-color-base-generic);
+    padding: 0 8px;
+    flex-shrink: 0;
+}
+

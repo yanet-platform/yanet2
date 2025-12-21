@@ -155,3 +155,42 @@
     gap: 12px;
     align-items: stretch;
 }
+
+/* ============================================
+   InspectPage Styles
+   ============================================ */
+.inspect-page__content {
+    width: 100%;
+    flex: 1;
+    min-width: 0;
+    padding: 20px;
+}
+
+.inspect-page__no-data {
+    display: block;
+}
+
+/* ============================================
+   Module Card Value Styles
+   ============================================ */
+.module-card__value {
+    font-weight: bold;
+}
+
+.module-card__name {
+    font-weight: 500;
+}
+
+/* ============================================
+   Agents Section Styles
+   ============================================ */
+.agents-section__tabs {
+    margin-bottom: 16px;
+}
+
+/* ============================================
+   Text Display Styles
+   ============================================ */
+.inspect-text--block {
+    display: block;
+}

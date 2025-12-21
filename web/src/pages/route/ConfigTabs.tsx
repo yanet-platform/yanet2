@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, TabProvider, TabList, Tab, TabPanel } from '@gravity-ui/uikit';
 import { VirtualizedRouteTable } from './VirtualizedRouteTable';
 import type { ConfigTabsProps } from './types';
+import './route.css';
 
 export const ConfigTabs: React.FC<ConfigTabsProps> = ({
     configs,
@@ -15,14 +16,14 @@ export const ConfigTabs: React.FC<ConfigTabsProps> = ({
 
     return (
         <TabProvider value={validActiveConfig} onUpdate={onConfigChange}>
-            <TabList style={{ marginBottom: '16px' }}>
+            <TabList className="route-config-tabs">
                 {configs.map((configName) => (
                     <Tab key={configName} value={configName}>
                         {configName}
                     </Tab>
                 ))}
             </TabList>
-            <Box style={{ flex: 1, minHeight: 0 }}>
+            <Box className="route-config-tabs__content">
                 {configs.map((configName) => {
                     const { routes, selectedIds } = getRoutesData(configName);
 

@@ -47,23 +47,8 @@ const FunctionsPage: React.FC = () => {
 
     return (
         <PageLayout header={headerContent}>
-            <Box style={{
-                width: '100%',
-                flex: 1,
-                minWidth: 0,
-                padding: '20px',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-            }}>
-                <Box style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '16px',
-                    overflowY: 'auto',
-                    flex: 1,
-                    minHeight: 0,
-                }}>
+            <Box className="functions-page__content">
+                <Box className="functions-page__list">
                     {functionIds.length === 0 ? (
                         <EmptyState message="No functions found. Click 'Create function' to add one." />
                     ) : (
