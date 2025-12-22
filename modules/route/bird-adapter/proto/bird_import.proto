@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package adapterpb;
 
-import "common/commonpb/target.proto";
-
 option go_package = "github.com/yanet-platform/yanet2/modules/route/bird-adapter/proto;adapterpb";
 
 // AdapterService provides configuration for the BIRD import adapter.
@@ -15,7 +13,7 @@ service AdapterService {
 
 // SetupConfigRequest configures BIRD import for a module instance.
 message SetupConfigRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	ImportConfig config = 2;
 }
 

@@ -2,7 +2,6 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
-use commonpb::TargetModule;
 use decappb::{
     AddPrefixesRequest, ListConfigsRequest, RemovePrefixesRequest, ShowConfigRequest, ShowConfigResponse,
     decap_service_client::DecapServiceClient,
@@ -17,13 +16,6 @@ pub mod decappb {
     use serde::Serialize;
 
     tonic::include_proto!("decappb");
-}
-
-#[allow(non_snake_case)]
-pub mod commonpb {
-    use serde::Serialize;
-
-    tonic::include_proto!("commonpb");
 }
 
 /// Decap module.
@@ -140,11 +132,7 @@ impl DecapService {
     }
 
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.to_owned(),
-            }),
-        };
+        let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
         log::trace!("show config request: {request:?}");
         let response = self.client.show_config(request).await?.into_inner();
         log::debug!("show config response: {response:?}");
@@ -159,7 +147,7 @@ impl DecapService {
 
     pub async fn add_prefixes(&mut self, cmd: AddPrefixesCmd) -> Result<(), Box<dyn Error>> {
         let request = AddPrefixesRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
         };
         log::trace!("AddPrefixesRequest: {request:?}");
@@ -170,7 +158,7 @@ impl DecapService {
 
     pub async fn remove_prefixes(&mut self, cmd: RemovePrefixesCmd) -> Result<(), Box<dyn Error>> {
         let request = RemovePrefixesRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
         };
         log::trace!("RemovePrefixesRequest: {request:?}");

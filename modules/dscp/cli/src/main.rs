@@ -10,7 +10,6 @@ use code::{
     AddPrefixesRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest, ShowConfigRequest,
     ShowConfigResponse, dscp_service_client::DscpServiceClient,
 };
-use commonpb::TargetModule;
 use ync::logging;
 
 use crate::code::ListConfigsRequest;
@@ -20,13 +19,6 @@ pub mod code {
     use serde::Serialize;
 
     tonic::include_proto!("dscppb");
-}
-
-#[allow(non_snake_case)]
-pub mod commonpb {
-    use serde::Serialize;
-
-    tonic::include_proto!("commonpb");
 }
 
 /// DSCP module for packet marking.
@@ -158,11 +150,7 @@ impl DscpService {
     }
 
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.to_owned(),
-            }),
-        };
+        let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
         log::trace!("show config request: {request:?}");
         let response = self.client.show_config(request).await?.into_inner();
         log::debug!("show config response: {response:?}");
@@ -177,7 +165,7 @@ impl DscpService {
 
     pub async fn add_prefixes(&mut self, cmd: AddPrefixesCmd) -> Result<(), Box<dyn Error>> {
         let request = AddPrefixesRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
         };
         log::trace!("AddPrefixesRequest: {request:?}");
@@ -188,7 +176,7 @@ impl DscpService {
 
     pub async fn remove_prefixes(&mut self, cmd: RemovePrefixesCmd) -> Result<(), Box<dyn Error>> {
         let request = RemovePrefixesRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
         };
         log::trace!("RemovePrefixesRequest: {request:?}");
@@ -209,7 +197,7 @@ impl DscpService {
         }
 
         let request = SetDscpMarkingRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             dscp_config: Some(DscpConfig { flag: cmd.flag, mark: cmd.mark }),
         };
         log::trace!("SetDscpMarkingRequest: {request:?}");

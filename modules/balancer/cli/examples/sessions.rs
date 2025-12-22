@@ -10,10 +10,10 @@ use yanet_cli_balancer::output::{self, OutputFormat};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let response = common::create_sessions_info_example();
-    
+
     let args: Vec<String> = env::args().collect();
     let format = args.get(1).map(|s| s.as_str());
-    
+
     match format {
         Some("table") => {
             output::print_sessions_info(&response, OutputFormat::Table)?;
@@ -31,14 +31,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         None => {
             println!("=== sessions: Table format ===\n");
             output::print_sessions_info(&response, OutputFormat::Table)?;
-            
+
             println!("\n\n=== sessions: Tree format ===\n");
             output::print_sessions_info(&response, OutputFormat::Tree)?;
-            
+
             println!("\n\n=== sessions: JSON format ===\n");
             output::print_sessions_info(&response, OutputFormat::Json)?;
         }
     }
-    
+
     Ok(())
 }

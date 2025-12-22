@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package routepb;
 
-import "common/commonpb/target.proto";
-
 option go_package = "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb;routepb";
 
 // RouteService is a service for routing table management.
@@ -39,7 +37,7 @@ message ListConfigsResponse {
 
 // ShowRoutesRequest contains filters for route listing.
 message ShowRoutesRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	// Filter to show only IPv4 routes.
 	bool ipv4_only = 2;
 	// Filter to show only IPv6 routes.
@@ -54,7 +52,7 @@ message ShowRoutesResponse {
 
 // LookupRouteRequest contains the IP address to lookup.
 message LookupRouteRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	// IP address to lookup.
 	string ip_addr = 2;
 }
@@ -69,7 +67,7 @@ message LookupRouteResponse {
 
 // InsertRouteRequest is the request to insert a route.
 message InsertRouteRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	// The destination prefix of the route.
 	//
 	// The prefix must be an IPv4 or IPv6 address followed by "/" and the
@@ -94,17 +92,17 @@ message InsertRouteResponse {
 // FlushRoutesRequest specifies which module should perform the RIB to FIB
 // flush.
 message FlushRoutesRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 }
 
 message FlushRoutesResponse {
 }
 
 // Update represents a message in the stream for inserting one route
-// into the target's module RIB.
+// into the module's RIB.
 message Update {
-	// The target module where the RIB should be updated.
-	commonpb.TargetModule target = 1;
+	// The module config name where the RIB should be updated.
+	string name = 1;
 	// Indicates whether this is a route deletion event.
 	bool is_delete = 2;
 	// The route to add to the RIB.

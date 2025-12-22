@@ -1,2 +1,2 @@
-pub mod logging;
 pub mod dispatcher;
+pub mod logging;

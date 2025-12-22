@@ -6,6 +6,9 @@ import (
 	"net/netip"
 	"sync"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
@@ -45,9 +48,9 @@ func (m *ForwardService) ListConfigs(
 }
 
 func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConfigRequest) (*forwardpb.ShowConfigResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	response := &forwardpb.ShowConfigResponse{}
@@ -61,9 +64,9 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 }
 
 func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.UpdateConfigRequest) (*forwardpb.UpdateConfigResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	reqRules := req.Rules
@@ -133,9 +136,9 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 }
 
 func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.DeleteConfigRequest) (*forwardpb.DeleteConfigResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 	// Remove module configuration from the control plane.
 	// TODO

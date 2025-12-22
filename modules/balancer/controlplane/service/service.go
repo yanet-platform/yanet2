@@ -6,7 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yanet-platform/yanet2/common/commonpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
@@ -49,9 +51,9 @@ func (m *BalancerService) UpdateConfig(
 	ctx context.Context,
 	req *balancerpb.UpdateConfigRequest,
 ) (*balancerpb.UpdateConfigResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	// Check if balancer exists (hold lock only for map access)
@@ -101,9 +103,9 @@ func (m *BalancerService) UpdateReals(
 	ctx context.Context,
 	req *balancerpb.UpdateRealsRequest,
 ) (*balancerpb.UpdateRealsResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	// Get balancer instance (hold lock only for map access)
@@ -146,9 +148,9 @@ func (m *BalancerService) FlushRealUpdates(
 	ctx context.Context,
 	req *balancerpb.FlushRealUpdatesRequest,
 ) (*balancerpb.FlushRealUpdatesResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	// Get balancer instance (hold lock only for map access)
@@ -189,9 +191,9 @@ func (m *BalancerService) ShowConfig(
 	ctx context.Context,
 	req *balancerpb.ShowConfigRequest,
 ) (*balancerpb.ShowConfigResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	// Get balancer instance (hold lock only for map access)
@@ -210,7 +212,7 @@ func (m *BalancerService) ShowConfig(
 	moduleConfigProto, moduleStateConfigProto := balancerInstance.GetConfig()
 
 	return &balancerpb.ShowConfigResponse{
-		Target:            req.Target,
+		Name:              name,
 		ModuleConfig:      moduleConfigProto,
 		ModuleStateConfig: moduleStateConfigProto,
 	}, nil
@@ -234,9 +236,7 @@ func (m *BalancerService) ListConfigs(
 		moduleConfigProto, moduleStateConfigProto := balancerInstance.GetConfig()
 
 		config := &balancerpb.ShowConfigResponse{
-			Target: &commonpb.TargetModule{
-				ConfigName: name,
-			},
+			Name:              name,
 			ModuleConfig:      moduleConfigProto,
 			ModuleStateConfig: moduleStateConfigProto,
 		}
@@ -255,9 +255,9 @@ func (m *BalancerService) StateInfo(
 	ctx context.Context,
 	req *balancerpb.StateInfoRequest,
 ) (*balancerpb.StateInfoResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	// Get balancer instance (hold lock only for map access)
@@ -276,8 +276,8 @@ func (m *BalancerService) StateInfo(
 	info := balancerInstance.GetStateInfo(time.Now())
 
 	return &balancerpb.StateInfoResponse{
-		Target: req.Target,
-		Info:   info.IntoProto(),
+		Name: name,
+		Info: info.IntoProto(),
 	}, nil
 }
 
@@ -288,9 +288,9 @@ func (m *BalancerService) ConfigStats(
 	ctx context.Context,
 	req *balancerpb.ConfigStatsRequest,
 ) (*balancerpb.ConfigStatsResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	// Get balancer instance (hold lock only for map access)
@@ -314,7 +314,7 @@ func (m *BalancerService) ConfigStats(
 	)
 
 	return &balancerpb.ConfigStatsResponse{
-		Target:   req.Target,
+		Name:     name,
 		Device:   req.Device,
 		Pipeline: req.Pipeline,
 		Function: req.Function,
@@ -330,9 +330,9 @@ func (m *BalancerService) SessionsInfo(
 	ctx context.Context,
 	req *balancerpb.SessionsInfoRequest,
 ) (*balancerpb.SessionsInfoResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	// Get balancer instance (hold lock only for map access)
@@ -363,7 +363,7 @@ func (m *BalancerService) SessionsInfo(
 	m.log.Infow("sessions info retrieved", "name", name, "count", sessionsInfo.SessionsCount)
 
 	return &balancerpb.SessionsInfoResponse{
-		Target:       req.Target,
+		Name:         name,
 		SessionsInfo: sessionsPb,
 	}, nil
 }

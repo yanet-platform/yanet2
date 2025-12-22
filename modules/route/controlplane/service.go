@@ -74,9 +74,9 @@ func (m *RouteService) ShowRoutes(
 	request *routepb.ShowRoutesRequest,
 ) (*routepb.ShowRoutesResponse, error) {
 
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	holder, ok := m.getRib(name)
@@ -116,9 +116,9 @@ func (m *RouteService) LookupRoute(
 	request *routepb.LookupRouteRequest,
 ) (*routepb.LookupRouteResponse, error) {
 
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	addr, err := netip.ParseAddr(request.GetIpAddr())
@@ -154,9 +154,9 @@ func (m *RouteService) FlushRoutes(
 	ctx context.Context,
 	request *routepb.FlushRoutesRequest,
 ) (*routepb.FlushRoutesResponse, error) {
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 	ribRef, ok := m.getRib(name)
 	if !ok {
@@ -173,13 +173,12 @@ func (m *RouteService) InsertRoute(
 ) (*routepb.InsertRouteResponse, error) {
 	startTime := time.Now()
 
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		m.log.Errorw("InsertRoute: target validation failed",
-			"error", err,
-			"config_name", request.GetTarget().GetConfigName(),
+	name := request.GetName()
+	if name == "" {
+		m.log.Errorw("InsertRoute: name validation failed",
+			"config_name", name,
 		)
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	prefix, err := netip.ParsePrefix(request.GetPrefix())
@@ -266,9 +265,9 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 
 		// On the first update, identify the target RIB and start a new session.
 		if ribRef == nil {
-			name, err = update.GetTarget().Validate()
-			if err != nil {
-				err = status.Error(codes.InvalidArgument, err.Error())
+			name = update.GetName()
+			if name == "" {
+				err = status.Error(codes.InvalidArgument, "module config name is required")
 				break // Invalid target, cannot proceed.
 			}
 			ribRef = m.getOrCreateRib(name)

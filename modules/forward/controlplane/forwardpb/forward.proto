@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package forwardpb;
 
-import "common/commonpb/target.proto";
-
 option go_package = "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb;forwardpb";
 
 // ForwardService is a controlplane service for forwarding module.
@@ -37,7 +35,7 @@ message ListConfigsResponse {
 // ShowConfigResponse retrieves the runtime configuration for the forward
 // module.
 message ShowConfigRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 }
 
 // ShowConfigResponse contains the configuration details of the forward module.
@@ -73,7 +71,7 @@ message ForwardRule {
 }
 
 message UpdateConfigRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	repeated ForwardRule rules = 2;
 }
 
@@ -85,7 +83,7 @@ message UpdateConfigResponse {
 message DeleteConfigRequest {
 	// Specifies module name and
 	// dataplane instance of forward agent to delete.
-	commonpb.TargetModule target = 1;
+	string name = 1;
 }
 
 message DeleteConfigResponse {

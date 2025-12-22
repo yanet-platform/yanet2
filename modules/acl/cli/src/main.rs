@@ -8,7 +8,6 @@ use aclpb::{
 use args::{DeleteCmd, ModeCmd, SetFwstateConfigCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use commonpb::TargetModule;
 use ipnetwork::IpNetwork;
 use serde::{Deserialize, Serialize};
 use tonic::{codec::CompressionEncoding, transport::Channel};
@@ -22,13 +21,6 @@ pub mod aclpb {
     use serde::Serialize;
 
     tonic::include_proto!("aclpb");
-}
-
-#[allow(non_snake_case)]
-pub mod commonpb {
-    use serde::Serialize;
-
-    tonic::include_proto!("commonpb");
 }
 
 /// ACL module.
@@ -282,18 +274,14 @@ impl ACLService {
     }
 
     pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowConfigRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
-        };
+        let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self.client.show_config(request).await?.into_inner();
         println!("{}", serde_json::to_string(&response)?);
         Ok(())
     }
 
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
-        let request = DeleteConfigRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
-        };
+        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         self.client.delete_config(request).await?.into_inner();
         Ok(())
     }
@@ -301,10 +289,7 @@ impl ACLService {
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         let config = ACLConfig::from_file(&cmd.rules)?;
         let rules: Vec<aclpb::Rule> = config.try_into()?;
-        let request = UpdateConfigRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
-            rules,
-        };
+        let request = UpdateConfigRequest { name: cmd.config_name.clone(), rules };
         log::trace!("UpdateConfigRequest: {request:?}");
         let response = self.client.update_config(request).await?.into_inner();
         log::debug!("UpdateConfigResponse: {response:?}");
@@ -313,9 +298,7 @@ impl ACLService {
 
     pub async fn set_fwstate_config(&mut self, cmd: SetFwstateConfigCmd) -> Result<(), Box<dyn Error>> {
         // First, fetch the current config to merge with new values
-        let current_request = ShowConfigRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
-        };
+        let current_request = ShowConfigRequest { name: cmd.config_name.clone() };
         let current_response = self.client.show_config(current_request).await?.into_inner();
 
         // Start with existing config or create a new one
@@ -382,7 +365,7 @@ impl ACLService {
         }
 
         let request = UpdateFwStateConfigRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             map_config: Some(map_config),
             sync_config: Some(sync_config),
         };

@@ -15,7 +15,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 
-	"github.com/yanet-platform/yanet2/common/commonpb"
 	adapterpb "github.com/yanet-platform/yanet2/modules/route/bird-adapter/proto"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/bird"
@@ -49,10 +48,10 @@ func (m *AdapterService) SetupConfig(
 	ctx context.Context,
 	req *adapterpb.SetupConfigRequest,
 ) (*adapterpb.SetupConfigResponse, error) {
-	target := req.GetTarget()
+	name := req.GetName()
 
 	m.log.Infow("setting up the configuration",
-		zap.String("name", target.ConfigName),
+		zap.String("name", name),
 	)
 
 	cfg := bird.DefaultConfig()
@@ -72,7 +71,7 @@ func (m *AdapterService) SetupConfig(
 	}
 
 	// And then add dynamic routes, if any.
-	if err := m.processBirdImport(conn, cfg, target); err != nil {
+	if err := m.processBirdImport(conn, cfg, name); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("failed to setup bird import reader: %w ", err)
 	}
@@ -96,7 +95,7 @@ type importHolder struct {
 // Handles automatic reconnection and graceful cleanup of existing imports.
 // It establishes the initial gRPC stream to the RouteService (gateway), sets up
 // callbacks for the bird.Export reader, and manages replacement of existing imports.
-func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Config, target *commonpb.TargetModule) error {
+func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Config, name string) error {
 	// streamCtx governs this specific import's gRPC stream and BIRD reader.
 	// Cancelled via holder.cancel on replacement or service stop.
 	streamCtx, cancel := context.WithCancel(context.Background())
@@ -109,7 +108,7 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 
 	holder := new(importHolder)
 	holder.currentStream = &stream
-	log := m.log.With("config", target.ConfigName)
+	log := m.log.With("config", name)
 
 	// onUpdate sends route batches over the gRPC stream. Called by bird.Export.
 	onUpdate := func(ctx context.Context, routes []rib.Route) error {
@@ -124,7 +123,7 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 			}
 
 			err := (*holder.currentStream).Send(&routepb.Update{
-				Target:   target,
+				Name:     name,
 				IsDelete: routes[idx].ToRemove,
 				Route:    routepb.FromRIBRoute(&routes[idx], false /* isBest unknown */),
 			})
@@ -139,7 +138,7 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 	// onFlush commits updates to dataplane. Called by bird.Export.
 	onFlush := func() error {
 		// update without route indicates flush event
-		err := (*holder.currentStream).Send(&routepb.Update{Target: target})
+		err := (*holder.currentStream).Send(&routepb.Update{Name: name})
 		if err != nil {
 			return fmt.Errorf("flush BIRD routes failed: %w", err)
 		}
@@ -152,7 +151,7 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 	m.importsMu.Lock()
 	defer m.importsMu.Unlock()
 	// Ensure only one active import per target: stop and replace if one exists.
-	if oldHolder, ok := m.imports[target.ConfigName]; ok {
+	if oldHolder, ok := m.imports[name]; ok {
 		log.Info("replacing existing BIRD import")
 		if oldHolder.cancel != nil { // Defensive check
 			oldHolder.cancel()
@@ -165,7 +164,7 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 	holder.export = export
 	holder.cancel = cancel
 	holder.conn = conn
-	m.imports[target.ConfigName] = holder
+	m.imports[name] = holder
 
 	// Launch goroutine for BIRD reading and stream lifecycle management.
 	go m.runBirdImportLoop(streamCtx, holder, client, log)

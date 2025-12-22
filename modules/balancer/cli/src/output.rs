@@ -61,7 +61,6 @@ fn print_boxed_header(title: &str, subtitle: Option<&str>) {
     println!("{}", format!("╚{}╝", "═".repeat(box_width)).cyan().bold());
 }
 
-
 fn proto_to_string(proto: i32) -> String {
     match balancerpb::TransportProto::try_from(proto) {
         Ok(balancerpb::TransportProto::Tcp) => "TCP".to_string(),
@@ -147,9 +146,7 @@ fn print_show_config_json(response: &balancerpb::ShowConfigResponse) -> Result<(
 fn print_show_config_tree(response: &balancerpb::ShowConfigResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("Balancer Configuration".to_string());
 
-    if let Some(target) = &response.target {
-        tree.begin_child(format!("Config: {}", target.config_name));
-    }
+    tree.begin_child(format!("Config: {}", response.name));
 
     if let Some(config) = &response.module_config {
         tree.begin_child("Module Config".to_string());
@@ -289,9 +286,7 @@ fn print_show_config_tree(response: &balancerpb::ShowConfigResponse) -> Result<(
         tree.end_child();
     }
 
-    if let Some(_target) = &response.target {
-        tree.end_child();
-    }
+    tree.end_child();
 
     let tree = tree.build();
     ptree::print_tree(&tree)?;
@@ -300,7 +295,7 @@ fn print_show_config_tree(response: &balancerpb::ShowConfigResponse) -> Result<(
 
 fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<(), Box<dyn Error>> {
     // Print header
-    let subtitle = response.target.as_ref().map(|t| format!("Config: {}", t.config_name));
+    let subtitle = Some(format!("Config: {}", response.name));
     print_boxed_header("BALANCER CONFIGURATION", subtitle.as_deref());
     println!();
 
@@ -359,10 +354,13 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
         // Module State Config
         if let Some(state_config) = &response.module_state_config {
             println!("{}", "Module State Config:".bright_cyan().bold());
-            let scan_period_ms = state_config.session_table_scan_period.as_ref()
+            let scan_period_ms = state_config
+                .session_table_scan_period
+                .as_ref()
                 .map(|p| (p.seconds * 1000 + p.nanos as i64 / 1_000_000).to_string())
                 .unwrap_or_else(|| "N/A".to_string());
-            println!("  Session Table Capacity: {} | Scan Period: {}ms | Max Load Factor: {}",
+            println!(
+                "  Session Table Capacity: {} | Scan Period: {}ms | Max Load Factor: {}",
                 format_number(state_config.session_table_capacity).bright_green(),
                 scan_period_ms.bright_green(),
                 format!("{:.2}", state_config.session_table_max_load_factor).bright_green()
@@ -502,9 +500,7 @@ pub fn print_list_configs(
 
             for config in &response.configs {
                 // Use the same detailed tree structure as ShowConfig
-                if let Some(target) = &config.target {
-                    tree.begin_child(format!("Config: {}", target.config_name));
-                }
+                tree.begin_child(format!("Config: {}", config.name));
 
                 if let Some(module_config) = &config.module_config {
                     tree.begin_child("Module Config".to_string());
@@ -644,9 +640,7 @@ pub fn print_list_configs(
                     tree.end_child();
                 }
 
-                if config.target.is_some() {
-                    tree.end_child();
-                }
+                tree.end_child();
             }
 
             let tree = tree.build();
@@ -667,11 +661,7 @@ pub fn print_list_configs(
                 .configs
                 .iter()
                 .map(|config| {
-                    let name = config
-                        .target
-                        .as_ref()
-                        .map(|t| t.config_name.clone())
-                        .unwrap_or_default();
+                    let name = config.name.clone();
                     let vs_count = config
                         .module_config
                         .as_ref()
@@ -722,9 +712,7 @@ pub fn print_state_info(response: &balancerpb::StateInfoResponse, format: Output
 fn print_state_info_tree(response: &balancerpb::StateInfoResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("Balancer State Info".to_string());
 
-    if let Some(target) = &response.target {
-        tree.begin_child(format!("Config: {}", target.config_name));
-    }
+    tree.begin_child(format!("Config: {}", response.name));
 
     if let Some(info) = &response.info {
         if let Some(active) = &info.active_sessions {
@@ -966,9 +954,7 @@ fn print_state_info_tree(response: &balancerpb::StateInfoResponse) -> Result<(),
         }
     }
 
-    if let Some(_target) = &response.target {
-        tree.end_child();
-    }
+    tree.end_child();
 
     let tree = tree.build();
     ptree::print_tree(&tree)?;
@@ -977,16 +963,18 @@ fn print_state_info_tree(response: &balancerpb::StateInfoResponse) -> Result<(),
 
 fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<(), Box<dyn Error>> {
     // Print header
-    let subtitle = if let (Some(target), Some(info)) = (&response.target, &response.info) {
-        let active_sessions = info.active_sessions.as_ref()
+    let subtitle = if let Some(info) = &response.info {
+        let active_sessions = info
+            .active_sessions
+            .as_ref()
             .map(|a| format_number(a.value))
             .unwrap_or_else(|| "0".to_string());
-        Some(format!("Config: {} | Active Sessions: {}",
-            target.config_name,
-            active_sessions
+        Some(format!(
+            "Config: {} | Active Sessions: {}",
+            response.name, active_sessions
         ))
     } else {
-        None
+        Some(format!("Config: {}", response.name))
     };
     print_boxed_header("BALANCER STATE INFO", subtitle.as_deref());
     println!();
@@ -1124,7 +1112,7 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
 
             let mut vs_list = info.vs_info.clone();
             vs_list.sort_by_key(|vs| vs.vs_registry_idx);
-            
+
             #[derive(Tabled)]
             struct VsInfoRow {
                 #[tabled(rename = "VS IP")]
@@ -1145,8 +1133,9 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
                 last_packet: String,
             }
 
-            let rows: Vec<VsInfoRow> = vs_list.iter().map(|vs| {
-                VsInfoRow {
+            let rows: Vec<VsInfoRow> = vs_list
+                .iter()
+                .map(|vs| VsInfoRow {
                     ip: bytes_to_ip(&vs.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
                     port: vs.vs_port.to_string(),
                     proto: proto_to_string(vs.vs_proto),
@@ -1183,13 +1172,11 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
                         .map(|a| format_number(a.value))
                         .unwrap_or_else(|| "0".to_string()),
                     last_packet: format_timestamp(vs.last_packet_timestamp.as_ref()),
-                }
-            }).collect();
+                })
+                .collect();
 
-            let table = Table::new(rows)
-                .with(Style::rounded())
-                .to_string();
-            
+            let table = Table::new(rows).with(Style::rounded()).to_string();
+
             println!("{}", table);
             println!();
         }
@@ -1200,7 +1187,7 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
 
             let mut real_list = info.real_info.clone();
             real_list.sort_by_key(|r| r.real_registry_idx);
-            
+
             #[derive(Tabled)]
             struct RealInfoRow {
                 #[tabled(rename = "VS IP")]
@@ -1223,26 +1210,37 @@ fn print_state_info_table(response: &balancerpb::StateInfoResponse) -> Result<()
                 last_packet: String,
             }
 
-            let rows: Vec<RealInfoRow> = real_list.iter().map(|real| {
-                RealInfoRow {
-                    vs_ip: bytes_to_ip(&real.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                    vs_port: real.vs_port.to_string(),
-                    real_ip: bytes_to_ip(&real.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                    real_port: real.vs_port.to_string(), // Real port equals VS port
-                    proto: proto_to_string(real.vs_proto),
-                    traffic: real.stats.as_ref()
-                        .map(|s| format!("{} pkts, {}", format_number(s.packets), format_bytes(s.bytes)))
-                        .unwrap_or_else(|| "0 pkts, 0 B".to_string()),
-                    created_sessions: real.stats.as_ref().map(|s| format_number(s.created_sessions)).unwrap_or_else(|| "0".to_string()),
-                    sessions: real.active_sessions.as_ref().map(|a| format_number(a.value)).unwrap_or_else(|| "0".to_string()),
-                    last_packet: format_timestamp(real.last_packet_timestamp.as_ref()),
-                }
-            }).collect();
+            let rows: Vec<RealInfoRow> = real_list
+                .iter()
+                .map(|real| {
+                    RealInfoRow {
+                        vs_ip: bytes_to_ip(&real.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                        vs_port: real.vs_port.to_string(),
+                        real_ip: bytes_to_ip(&real.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                        real_port: real.vs_port.to_string(), // Real port equals VS port
+                        proto: proto_to_string(real.vs_proto),
+                        traffic: real
+                            .stats
+                            .as_ref()
+                            .map(|s| format!("{} pkts, {}", format_number(s.packets), format_bytes(s.bytes)))
+                            .unwrap_or_else(|| "0 pkts, 0 B".to_string()),
+                        created_sessions: real
+                            .stats
+                            .as_ref()
+                            .map(|s| format_number(s.created_sessions))
+                            .unwrap_or_else(|| "0".to_string()),
+                        sessions: real
+                            .active_sessions
+                            .as_ref()
+                            .map(|a| format_number(a.value))
+                            .unwrap_or_else(|| "0".to_string()),
+                        last_packet: format_timestamp(real.last_packet_timestamp.as_ref()),
+                    }
+                })
+                .collect();
 
-            let table = Table::new(rows)
-                .with(Style::rounded())
-                .to_string();
-            
+            let table = Table::new(rows).with(Style::rounded()).to_string();
+
             println!("{}", table);
         }
     }
@@ -1272,13 +1270,11 @@ pub fn print_config_stats(
 fn print_config_stats_tree(response: &balancerpb::ConfigStatsResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("Balancer Statistics".to_string());
 
-    if let Some(target) = &response.target {
-        tree.begin_child(format!("Config: {}", target.config_name));
-        tree.add_empty_child(format!("Device: {}", response.device));
-        tree.add_empty_child(format!("Pipeline: {}", response.pipeline));
-        tree.add_empty_child(format!("Function: {}", response.function));
-        tree.add_empty_child(format!("Chain: {}", response.chain));
-    }
+    tree.begin_child(format!("Config: {}", response.name));
+    tree.add_empty_child(format!("Device: {}", response.device));
+    tree.add_empty_child(format!("Pipeline: {}", response.pipeline));
+    tree.add_empty_child(format!("Function: {}", response.function));
+    tree.add_empty_child(format!("Chain: {}", response.chain));
 
     if let Some(stats) = &response.stats {
         if let Some(module) = &stats.module {
@@ -1418,9 +1414,7 @@ fn print_config_stats_tree(response: &balancerpb::ConfigStatsResponse) -> Result
         }
     }
 
-    if let Some(_target) = &response.target {
-        tree.end_child();
-    }
+    tree.end_child();
 
     let tree = tree.build();
     ptree::print_tree(&tree)?;
@@ -1429,12 +1423,10 @@ fn print_config_stats_tree(response: &balancerpb::ConfigStatsResponse) -> Result
 
 fn print_config_stats_table(response: &balancerpb::ConfigStatsResponse) -> Result<(), Box<dyn Error>> {
     // Print header
-    let subtitle = response.target.as_ref().map(|t| {
-        format!(
-            "Config: {} | Device: {} | Pipeline: {} | Function: {} | Chain: {}",
-            t.config_name, response.device, response.pipeline, response.function, response.chain
-        )
-    });
+    let subtitle = Some(format!(
+        "Config: {} | Device: {} | Pipeline: {} | Function: {} | Chain: {}",
+        response.name, response.device, response.pipeline, response.function, response.chain
+    ));
     print_boxed_header("BALANCER STATISTICS", subtitle.as_deref());
     println!();
 
@@ -1667,18 +1659,26 @@ fn print_config_stats_table(response: &balancerpb::ConfigStatsResponse) -> Resul
                 sessions: String,
             }
 
-            let rows: Vec<RealStatsRow> = stats.reals.iter().map(|real| {
-                let s = real.stats.as_ref();
-                RealStatsRow {
-                    vs_ip: bytes_to_ip(&real.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                    vs_port: real.port.to_string(),
-                    real_ip: bytes_to_ip(&real.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                    real_port: real.port.to_string(),
-                    proto: proto_to_string(real.proto),
-                    traffic: s.map(|s| format!("{} pkts, {}", format_number(s.packets), format_bytes(s.bytes))).unwrap_or_else(|| "0 pkts, 0 B".to_string()),
-                    sessions: s.map(|s| format_number(s.created_sessions)).unwrap_or_else(|| "0".to_string()),
-                }
-            }).collect();
+            let rows: Vec<RealStatsRow> = stats
+                .reals
+                .iter()
+                .map(|real| {
+                    let s = real.stats.as_ref();
+                    RealStatsRow {
+                        vs_ip: bytes_to_ip(&real.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                        vs_port: real.port.to_string(),
+                        real_ip: bytes_to_ip(&real.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                        real_port: real.port.to_string(),
+                        proto: proto_to_string(real.proto),
+                        traffic: s
+                            .map(|s| format!("{} pkts, {}", format_number(s.packets), format_bytes(s.bytes)))
+                            .unwrap_or_else(|| "0 pkts, 0 B".to_string()),
+                        sessions: s
+                            .map(|s| format_number(s.created_sessions))
+                            .unwrap_or_else(|| "0".to_string()),
+                    }
+                })
+                .collect();
 
             let table = Table::new(rows).with(Style::rounded()).to_string();
             println!("{}", table);
@@ -1710,9 +1710,7 @@ pub fn print_sessions_info(
 fn print_sessions_info_tree(response: &balancerpb::SessionsInfoResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("Active Sessions".to_string());
 
-    if let Some(target) = &response.target {
-        tree.begin_child(format!("Config: {}", target.config_name));
-    }
+    tree.begin_child(format!("Config: {}", response.name));
 
     tree.add_empty_child(format!(
         "Total Sessions: {}",
@@ -1742,9 +1740,7 @@ fn print_sessions_info_tree(response: &balancerpb::SessionsInfoResponse) -> Resu
         }
     }
 
-    if let Some(_target) = &response.target {
-        tree.end_child();
-    }
+    tree.end_child();
 
     let tree = tree.build();
     ptree::print_tree(&tree)?;
@@ -1753,13 +1749,11 @@ fn print_sessions_info_tree(response: &balancerpb::SessionsInfoResponse) -> Resu
 
 fn print_sessions_info_table(response: &balancerpb::SessionsInfoResponse) -> Result<(), Box<dyn Error>> {
     // Print header
-    let subtitle = response.target.as_ref().map(|t| {
-        format!(
-            "Config: {} | Total Sessions: {}",
-            t.config_name,
-            format_number(response.sessions_info.len() as u64)
-        )
-    });
+    let subtitle = Some(format!(
+        "Config: {} | Total Sessions: {}",
+        response.name,
+        format_number(response.sessions_info.len() as u64)
+    ));
     print_boxed_header("ACTIVE SESSIONS", subtitle.as_deref());
     println!();
 
@@ -1782,26 +1776,34 @@ fn print_sessions_info_table(response: &balancerpb::SessionsInfoResponse) -> Res
             timeout: String,
         }
 
-        let rows: Vec<SessionRow> = response.sessions_info.iter().map(|session| {
-            let client_ip = bytes_to_ip(&session.client_addr).map(|ip| ip.to_string()).unwrap_or_default();
-            let vs_ip = bytes_to_ip(&session.vs_addr).map(|ip| ip.to_string()).unwrap_or_default();
-            let real_ip = bytes_to_ip(&session.real_addr).map(|ip| ip.to_string()).unwrap_or_default();
-            
-            SessionRow {
-                client: format!("{}:{}", client_ip, session.client_port),
-                vs: format!("{}:{}", vs_ip, session.vs_port),
-                real: format!("{}:{}", real_ip, session.real_port),
-                proto: "TCP".to_string(), // Assuming TCP, not in proto
-                created_at: format_timestamp(session.create_timestamp.as_ref()),
-                last_packet: format_timestamp(session.last_packet_timestamp.as_ref()),
-                timeout: format_duration(session.timeout.as_ref()),
-            }
-        }).collect();
+        let rows: Vec<SessionRow> = response
+            .sessions_info
+            .iter()
+            .map(|session| {
+                let client_ip = bytes_to_ip(&session.client_addr)
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_default();
+                let vs_ip = bytes_to_ip(&session.vs_addr)
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_default();
+                let real_ip = bytes_to_ip(&session.real_addr)
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_default();
 
-        let table = Table::new(rows)
-            .with(Style::rounded())
-            .to_string();
-        
+                SessionRow {
+                    client: format!("{}:{}", client_ip, session.client_port),
+                    vs: format!("{}:{}", vs_ip, session.vs_port),
+                    real: format!("{}:{}", real_ip, session.real_port),
+                    proto: "TCP".to_string(), // Assuming TCP, not in proto
+                    created_at: format_timestamp(session.create_timestamp.as_ref()),
+                    last_packet: format_timestamp(session.last_packet_timestamp.as_ref()),
+                    timeout: format_duration(session.timeout.as_ref()),
+                }
+            })
+            .collect();
+
+        let table = Table::new(rows).with(Style::rounded()).to_string();
+
         println!("{}", table);
     }
 

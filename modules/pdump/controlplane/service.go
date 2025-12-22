@@ -13,6 +13,8 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -86,9 +88,9 @@ func (m *PdumpService) ShowConfig(
 	ctx context.Context,
 	request *pdumppb.ShowConfigRequest,
 ) (*pdumppb.ShowConfigResponse, error) {
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	response := &pdumppb.ShowConfigResponse{}
@@ -115,9 +117,9 @@ func (m *PdumpService) SetConfig(
 	ctx context.Context,
 	request *pdumppb.SetConfigRequest,
 ) (*pdumppb.SetConfigResponse, error) {
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	if request.Config == nil {
@@ -288,9 +290,9 @@ func (m *PdumpService) updateModuleConfig(
 func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.ServerStreamingServer[pdumppb.Record]) error {
 	ctx := stream.Context()
 
-	name, err := req.Target.Validate()
-	if err != nil {
-		return fmt.Errorf("validate ReadDump target: %w", err)
+	name := req.GetName()
+	if name == "" {
+		return status.Error(codes.InvalidArgument, "module config name is required")
 	}
 	m.mu.Lock()
 	config, ok := m.configs[name]

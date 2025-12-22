@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package aclpb;
 
-import "common/commonpb/target.proto";
-
 option go_package = "github.com/yanet-platform/yanet2/modules/"
 		    "acl/controlplane/aclpb;aclpb";
 
@@ -25,7 +23,7 @@ service ACLService {
 }
 
 message UpdateConfigRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	repeated Rule rules = 2;
 }
 
@@ -33,11 +31,11 @@ message UpdateConfigResponse {
 }
 
 message ShowConfigRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 }
 
 message ShowConfigResponse {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	repeated Rule rules = 2;
 	MapConfig fwstate_map = 3;
 	SyncConfig fwstate_sync = 4;
@@ -101,7 +99,7 @@ enum ActionKind {
 message DeleteConfigRequest {
 	// Specifies module name and
 	// dataplane instance of acl agent to delete.
-	commonpb.TargetModule target = 1;
+	string name = 1;
 }
 
 message DeleteConfigResponse {
@@ -119,7 +117,7 @@ message ListConfigsResponse {
 // fwstate proto definitions
 
 message UpdateFWStateConfigRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	MapConfig map_config = 2;
 	SyncConfig sync_config = 3;
 }

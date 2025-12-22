@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package pdumppb;
 
-import "common/commonpb/target.proto";
-
 option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/pdump/pdumppb;pdumppb";
 
 // PdumpService is a service for Differentiated Services Code Point module.
@@ -27,7 +25,7 @@ service PdumpService {
 // ReadDumpRequest contains the target config for initializing pdump record
 // streaming.
 message ReadDumpRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 }
 
 message RecordMeta {
@@ -65,7 +63,7 @@ message ListConfigsResponse {
 
 // ShowConfigResponse retrieves the runtime configuration for the pdump module.
 message ShowConfigRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 }
 
 // Config contains the pdump module configuration.
@@ -88,7 +86,7 @@ message ShowConfigResponse {
 
 // SetConfigRequest contains new configuration for the pdump module instance
 message SetConfigRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	Config config = 2;
 	FieldMask update_mask = 3;
 }

@@ -11,7 +11,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 
-	"github.com/yanet-platform/yanet2/common/commonpb"
 	adapterpb "github.com/yanet-platform/yanet2/modules/route/bird-adapter/proto"
 )
 
@@ -76,9 +75,7 @@ func runClient() error {
 	fmt.Printf("Configuring with config '%s'...\n", clientCmdArgs.ConfigName)
 
 	req := &adapterpb.SetupConfigRequest{
-		Target: &commonpb.TargetModule{
-			ConfigName: clientCmdArgs.ConfigName,
-		},
+		Name: clientCmdArgs.ConfigName,
 		Config: &adapterpb.ImportConfig{
 			Sockets: clientCmdArgs.Sockets,
 		},

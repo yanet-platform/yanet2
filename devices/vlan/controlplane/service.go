@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb"
 )
@@ -25,9 +28,9 @@ func (m *DeviceVlanService) UpdateDevice(
 	ctx context.Context,
 	request *vlanpb.UpdateDeviceVlanRequest,
 ) (*vlanpb.UpdateDeviceVlanResponse, error) {
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	deviceConfig, err := NewDeviceConfig(m.agent, name, request.GetDevice(), uint16(request.GetVlan()))

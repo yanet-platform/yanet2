@@ -31,7 +31,7 @@ impl BalancerService {
     /// Handle the command
     pub async fn handle_cmd(&mut self, mode: Mode) -> Result<(), Box<dyn Error>> {
         log::trace!("Handling command: {:?}", mode);
-        
+
         match mode {
             Mode::Update(cmd) => self.update_config(cmd).await,
             Mode::Reals(cmd) => self.handle_reals(cmd).await,
@@ -46,22 +46,19 @@ impl BalancerService {
     /// Update balancer configuration
     async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         log::info!("Loading configuration from: {}", cmd.config);
-        
+
         let config = BalancerConfig::from_yaml_file(&cmd.config)?;
         let (module_config, module_state_config) = config.try_into()?;
 
         let request = balancerpb::UpdateConfigRequest {
-            target: Some(crate::rpc::commonpb::TargetModule {
-                config_name: cmd.name.clone(),
-                
-            }),
+            name: cmd.name.clone(),
             module_config: Some(module_config),
             module_state_config: Some(module_state_config),
         };
 
         log::debug!("Sending UpdateConfig request");
         self.client.update_config(request).await?;
-        
+
         log::info!("Successfully updated configuration for '{}'", cmd.name);
         Ok(())
     }
@@ -77,28 +74,38 @@ impl BalancerService {
 
     /// Enable a real server
     async fn enable_real(&mut self, cmd: EnableRealCmd) -> Result<(), Box<dyn Error>> {
-        log::info!("Buffering enable request for real {} in VS {}:{}/{}",
-            cmd.real_ip, cmd.virtual_ip, cmd.virtual_port, cmd.proto);
+        log::info!(
+            "Buffering enable request for real {} in VS {}:{}/{}",
+            cmd.real_ip,
+            cmd.virtual_ip,
+            cmd.virtual_port,
+            cmd.proto
+        );
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
-        
+
         log::debug!("Sending UpdateReals request");
         self.client.update_reals(request).await?;
-        
+
         log::info!("Successfully buffered real enable");
         Ok(())
     }
 
     /// Disable a real server
     async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Box<dyn Error>> {
-        log::info!("Buffering disable request for real {} in VS {}:{}/{}",
-            cmd.real_ip, cmd.virtual_ip, cmd.virtual_port, cmd.proto);
+        log::info!(
+            "Buffering disable request for real {} in VS {}:{}/{}",
+            cmd.real_ip,
+            cmd.virtual_ip,
+            cmd.virtual_port,
+            cmd.proto
+        );
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
-        
+
         log::debug!("Sending UpdateReals request");
         self.client.update_reals(request).await?;
-        
+
         log::info!("Successfully buffered real disable");
         Ok(())
     }
@@ -108,10 +115,10 @@ impl BalancerService {
         log::info!("Flushing buffered real updates for '{}'", cmd.name);
 
         let request: balancerpb::FlushRealUpdatesRequest = cmd.into();
-        
+
         log::debug!("Sending FlushRealUpdates request");
         let response = self.client.flush_real_updates(request).await?.into_inner();
-        
+
         log::info!("Successfully flushed {} update(s)", response.updates_flushed);
         Ok(())
     }
@@ -122,7 +129,7 @@ impl BalancerService {
 
         let request: balancerpb::ShowConfigRequest = (&cmd).into();
         let response = self.client.show_config(request).await?.into_inner();
-        
+
         output::print_show_config(&response, cmd.format.into())?;
         Ok(())
     }
@@ -133,7 +140,7 @@ impl BalancerService {
 
         let request = balancerpb::ListConfigsRequest {};
         let response = self.client.list_configs(request).await?.into_inner();
-        
+
         output::print_list_configs(&response, cmd.format.into())?;
         Ok(())
     }
@@ -144,7 +151,7 @@ impl BalancerService {
 
         let request: balancerpb::ConfigStatsRequest = (&cmd).into();
         let response = self.client.config_stats(request).await?.into_inner();
-        
+
         output::print_config_stats(&response, cmd.format.into())?;
         Ok(())
     }
@@ -155,7 +162,7 @@ impl BalancerService {
 
         let request: balancerpb::StateInfoRequest = (&cmd).into();
         let response = self.client.state_info(request).await?.into_inner();
-        
+
         output::print_state_info(&response, cmd.format.into())?;
         Ok(())
     }
@@ -166,7 +173,7 @@ impl BalancerService {
 
         let request: balancerpb::SessionsInfoRequest = (&cmd).into();
         let response = self.client.sessions_info(request).await?.into_inner();
-        
+
         output::print_sessions_info(&response, cmd.format.into())?;
         Ok(())
     }

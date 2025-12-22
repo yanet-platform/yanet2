@@ -7,7 +7,6 @@ use code::{
     nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, ListConfigsRequest,
     SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest, ShowConfigResponse,
 };
-use commonpb::TargetModule;
 use ipnet::Ipv6Net;
 use ptree::TreeBuilder;
 use tonic::{codec::CompressionEncoding, transport::Channel};
@@ -17,12 +16,6 @@ use yanet_cli::logging;
 pub mod code {
     use serde::Serialize;
     tonic::include_proto!("nat64pb");
-}
-
-#[allow(non_snake_case)]
-pub mod commonpb {
-    use serde::Serialize;
-    tonic::include_proto!("commonpb");
 }
 
 /// NAT64 module CLI.
@@ -204,11 +197,7 @@ impl NAT64Service {
     }
 
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowConfigRequest {
-            target: Some(TargetModule {
-                config_name: cmd.config_name.to_owned(),
-            }),
-        };
+        let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
         log::trace!("show config request: {request:?}");
         let response = self.client.show_config(request).await?.into_inner();
         log::debug!("show config response: {response:?}");
@@ -222,7 +211,7 @@ impl NAT64Service {
 
     pub async fn add_prefix(&mut self, cmd: AddPrefixCmd) -> Result<(), Box<dyn Error>> {
         let request = AddPrefixRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             prefix: cmd.prefix.addr().octets()[..12].to_vec(),
         };
         log::debug!("AddPrefixRequest: {request:?}");
@@ -233,7 +222,7 @@ impl NAT64Service {
 
     pub async fn add_mapping(&mut self, cmd: AddMappingCmd) -> Result<(), Box<dyn Error>> {
         let request = AddMappingRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             ipv4: cmd.ipv4.octets().to_vec(),
             ipv6: cmd.ipv6.octets().to_vec(),
             prefix_index: cmd.prefix_index,
@@ -246,7 +235,7 @@ impl NAT64Service {
 
     pub async fn set_mtu(&mut self, cmd: MtuCmd) -> Result<(), Box<dyn Error>> {
         let request = SetMtuRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             mtu: Some(code::MtuConfig {
                 ipv4_mtu: cmd.ipv4_mtu,
                 ipv6_mtu: cmd.ipv6_mtu,
@@ -260,7 +249,7 @@ impl NAT64Service {
 
     pub async fn set_drop_unknown(&mut self, cmd: DropCmd) -> Result<(), Box<dyn Error>> {
         let request = SetDropUnknownRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             drop_unknown_prefix: cmd.drop_unknown_prefix,
             drop_unknown_mapping: cmd.drop_unknown_mapping,
         };

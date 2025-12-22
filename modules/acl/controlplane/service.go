@@ -167,9 +167,9 @@ func (m *ACLService) UpdateConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	reqRules := req.Rules
@@ -225,9 +225,9 @@ func (m *ACLService) ShowConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	config, ok := m.configs[name]
@@ -236,8 +236,8 @@ func (m *ACLService) ShowConfig(
 	}
 
 	response := &aclpb.ShowConfigResponse{
-		Target: req.Target,
-		Rules:  config.rules,
+		Name:  name,
+		Rules: config.rules,
 	}
 
 	// Get fwstate configuration if available
@@ -268,18 +268,18 @@ func (m *ACLService) ListConfigs(
 }
 
 func (m *ACLService) UpdateFWStateConfig(
-	ctx context.Context, request *aclpb.UpdateFWStateConfigRequest,
+	ctx context.Context, req *aclpb.UpdateFWStateConfigRequest,
 ) (*aclpb.UpdateFWStateConfigResponse, error) {
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	// Get fwstate configuration from request
-	if request.SyncConfig == nil {
+	// Get fwstate configuration from req
+	if req.SyncConfig == nil {
 		return nil, status.Error(codes.InvalidArgument, "sync_config is required")
 	}
-	if request.MapConfig == nil {
+	if req.MapConfig == nil {
 		return nil, status.Error(codes.InvalidArgument, "map_config is required")
 	}
 
@@ -303,7 +303,7 @@ func (m *ACLService) UpdateFWStateConfig(
 
 	dpConfig := m.agent.DPConfig()
 
-	if err = newFwstateConfig.CreateMaps(request.MapConfig, uint16(dpConfig.WorkerCount()), m.log); err != nil {
+	if err = newFwstateConfig.CreateMaps(req.MapConfig, uint16(dpConfig.WorkerCount()), m.log); err != nil {
 		newFwstateConfig.DetachMaps() // in order not to pull them out from under the feet of another module
 		newFwstateConfig.Free()
 		m.log.Errorw("failed to create fwstate maps",
@@ -315,7 +315,7 @@ func (m *ACLService) UpdateFWStateConfig(
 
 	// FIXME: validate new config
 	// Set sync config
-	newFwstateConfig.SetSyncConfig(request.SyncConfig)
+	newFwstateConfig.SetSyncConfig(req.SyncConfig)
 	m.log.Debugw("update fwstate module config",
 		zap.String("config", name),
 	)
@@ -385,9 +385,9 @@ func (m *ACLService) DeleteConfig(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	config, ok := m.configs[name]

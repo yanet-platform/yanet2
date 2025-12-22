@@ -1,8 +1,8 @@
 //! JSON output with proper IP address formatting
 
-use serde::Serialize;
-use crate::rpc::balancerpb;
 use crate::entities::bytes_to_ip;
+use crate::rpc::balancerpb;
+use serde::Serialize;
 
 ////////////////////////////////////////////////////////////////////////////////
 // ShowConfig JSON structures
@@ -10,15 +10,10 @@ use crate::entities::bytes_to_ip;
 
 #[derive(Serialize)]
 pub struct ShowConfigJson {
-    pub target: Option<TargetJson>,
+    pub name: String,
     pub module_config: Option<ModuleConfigJson>,
     pub module_state_config: Option<ModuleStateConfigJson>,
     pub buffered_real_updates: Vec<RealUpdateJson>,
-}
-
-#[derive(Serialize)]
-pub struct TargetJson {
-    pub config_name: String,
 }
 
 #[derive(Serialize)]
@@ -107,7 +102,7 @@ pub struct RealUpdateJson {
 
 #[derive(Serialize)]
 pub struct StateInfoJson {
-    pub target: Option<TargetJson>,
+    pub name: String,
     pub info: Option<BalancerInfoJson>,
 }
 
@@ -184,7 +179,7 @@ pub struct RealInfoStatsJson {
 
 #[derive(Serialize)]
 pub struct ConfigStatsJson {
-    pub target: Option<TargetJson>,
+    pub name: String,
     pub device: String,
     pub pipeline: String,
     pub function: String,
@@ -298,7 +293,7 @@ pub struct RealStatsJson {
 
 #[derive(Serialize)]
 pub struct SessionsInfoJson {
-    pub target: Option<TargetJson>,
+    pub name: String,
     pub sessions_info: Vec<SessionInfoJson>,
 }
 
@@ -351,47 +346,68 @@ fn format_timestamp(ts: Option<&prost_types::Timestamp>) -> Option<String> {
         if t.seconds == 0 && t.nanos == 0 {
             return None;
         }
-        
+
         use chrono::{DateTime, Utc};
-        DateTime::<Utc>::from_timestamp(t.seconds, t.nanos as u32)
-            .map(|dt| dt.to_rfc3339())
+        DateTime::<Utc>::from_timestamp(t.seconds, t.nanos as u32).map(|dt| dt.to_rfc3339())
     })
 }
 
 pub fn convert_show_config(response: &balancerpb::ShowConfigResponse) -> ShowConfigJson {
     ShowConfigJson {
-        target: response.target.as_ref().map(|t| TargetJson {
-            config_name: t.config_name.clone(),
-        }),
+        name: response.name.clone(),
         module_config: response.module_config.as_ref().map(|c| ModuleConfigJson {
-            virtual_services: c.virtual_services.iter().map(|vs| VirtualServiceJson {
-                addr: bytes_to_ip(&vs.addr).map(|ip| ip.to_string()).unwrap_or_default(),
-                port: vs.port,
-                proto: proto_to_string(vs.proto),
-                scheduler: scheduler_to_string(vs.scheduler),
-                allowed_srcs: vs.allowed_srcs.iter().map(|s| SubnetJson {
-                    addr: bytes_to_ip(&s.addr).map(|ip| ip.to_string()).unwrap_or_default(),
-                    size: s.size,
-                }).collect(),
-                reals: vs.reals.iter().map(|r| RealJson {
-                    weight: r.weight,
-                    dst_addr: bytes_to_ip(&r.dst_addr).map(|ip| ip.to_string()).unwrap_or_default(),
-                    src_addr: bytes_to_ip(&r.src_addr).map(|ip| ip.to_string()).unwrap_or_default(),
-                    src_mask: bytes_to_ip(&r.src_mask).map(|ip| ip.to_string()).unwrap_or_default(),
-                    enabled: r.enabled,
-                    port: r.port,
-                }).collect(),
-                flags: vs.flags.as_ref().map(|f| VsFlagsJson {
-                    gre: f.gre,
-                    fix_mss: f.fix_mss,
-                    ops: f.ops,
-                    pure_l3: f.pure_l3,
-                }),
-                peers: vs.peers.iter().filter_map(|p| bytes_to_ip(p).ok().map(|ip| ip.to_string())).collect(),
-            }).collect(),
-            source_address_v4: bytes_to_ip(&c.source_address_v4).map(|ip| ip.to_string()).unwrap_or_default(),
-            source_address_v6: bytes_to_ip(&c.source_address_v6).map(|ip| ip.to_string()).unwrap_or_default(),
-            decap_addresses: c.decap_addresses.iter().filter_map(|a| bytes_to_ip(a).ok().map(|ip| ip.to_string())).collect(),
+            virtual_services: c
+                .virtual_services
+                .iter()
+                .map(|vs| VirtualServiceJson {
+                    addr: bytes_to_ip(&vs.addr).map(|ip| ip.to_string()).unwrap_or_default(),
+                    port: vs.port,
+                    proto: proto_to_string(vs.proto),
+                    scheduler: scheduler_to_string(vs.scheduler),
+                    allowed_srcs: vs
+                        .allowed_srcs
+                        .iter()
+                        .map(|s| SubnetJson {
+                            addr: bytes_to_ip(&s.addr).map(|ip| ip.to_string()).unwrap_or_default(),
+                            size: s.size,
+                        })
+                        .collect(),
+                    reals: vs
+                        .reals
+                        .iter()
+                        .map(|r| RealJson {
+                            weight: r.weight,
+                            dst_addr: bytes_to_ip(&r.dst_addr).map(|ip| ip.to_string()).unwrap_or_default(),
+                            src_addr: bytes_to_ip(&r.src_addr).map(|ip| ip.to_string()).unwrap_or_default(),
+                            src_mask: bytes_to_ip(&r.src_mask).map(|ip| ip.to_string()).unwrap_or_default(),
+                            enabled: r.enabled,
+                            port: r.port,
+                        })
+                        .collect(),
+                    flags: vs.flags.as_ref().map(|f| VsFlagsJson {
+                        gre: f.gre,
+                        fix_mss: f.fix_mss,
+                        ops: f.ops,
+                        pure_l3: f.pure_l3,
+                    }),
+                    peers: vs
+                        .peers
+                        .iter()
+                        .filter_map(|p| bytes_to_ip(p).ok().map(|ip| ip.to_string()))
+                        .collect(),
+                })
+                .collect(),
+            source_address_v4: bytes_to_ip(&c.source_address_v4)
+                .map(|ip| ip.to_string())
+                .unwrap_or_default(),
+            source_address_v6: bytes_to_ip(&c.source_address_v6)
+                .map(|ip| ip.to_string())
+                .unwrap_or_default(),
+            decap_addresses: c
+                .decap_addresses
+                .iter()
+                .filter_map(|a| bytes_to_ip(a).ok().map(|ip| ip.to_string()))
+                .collect(),
             sessions_timeouts: c.sessions_timeouts.as_ref().map(|t| SessionsTimeoutsJson {
                 tcp_syn_ack: t.tcp_syn_ack,
                 tcp_syn: t.tcp_syn,
@@ -403,22 +419,32 @@ pub fn convert_show_config(response: &balancerpb::ShowConfigResponse) -> ShowCon
             wlc: c.wlc.as_ref().map(|w| WlcConfigJson {
                 wlc_power: w.wlc_power,
                 max_real_weight: w.max_real_weight as u64,
-                update_period_ms: w.update_period.as_ref().map(|p| p.seconds * 1000 + p.nanos as i64 / 1_000_000),
+                update_period_ms: w
+                    .update_period
+                    .as_ref()
+                    .map(|p| p.seconds * 1000 + p.nanos as i64 / 1_000_000),
             }),
         }),
         module_state_config: response.module_state_config.as_ref().map(|s| ModuleStateConfigJson {
             session_table_capacity: s.session_table_capacity,
-            session_table_scan_period_ms: s.session_table_scan_period.as_ref().map(|p| p.seconds * 1000 + p.nanos as i64 / 1_000_000),
+            session_table_scan_period_ms: s
+                .session_table_scan_period
+                .as_ref()
+                .map(|p| p.seconds * 1000 + p.nanos as i64 / 1_000_000),
             session_table_max_load_factor: s.session_table_max_load_factor,
         }),
-        buffered_real_updates: response.buffered_real_updates.iter().map(|u| RealUpdateJson {
-            virtual_ip: bytes_to_ip(&u.virtual_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-            port: u.port,
-            proto: proto_to_string(u.proto),
-            real_ip: bytes_to_ip(&u.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-            enable: u.enable,
-            weight: if u.weight > 0 { Some(u.weight) } else { None },
-        }).collect(),
+        buffered_real_updates: response
+            .buffered_real_updates
+            .iter()
+            .map(|u| RealUpdateJson {
+                virtual_ip: bytes_to_ip(&u.virtual_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                port: u.port,
+                proto: proto_to_string(u.proto),
+                real_ip: bytes_to_ip(&u.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                enable: u.enable,
+                weight: if u.weight > 0 { Some(u.weight) } else { None },
+            })
+            .collect(),
     }
 }
 
@@ -430,9 +456,7 @@ pub fn convert_list_configs(response: &balancerpb::ListConfigsResponse) -> ListC
 
 pub fn convert_state_info(response: &balancerpb::StateInfoResponse) -> StateInfoJson {
     StateInfoJson {
-        target: response.target.as_ref().map(|t| TargetJson {
-            config_name: t.config_name.clone(),
-        }),
+        name: response.name.clone(),
         info: response.info.as_ref().map(|i| BalancerInfoJson {
             active_sessions: i.active_sessions.as_ref().map(|a| AsyncInfoJson {
                 value: a.value,
@@ -484,64 +508,70 @@ pub fn convert_state_info(response: &balancerpb::StateInfoResponse) -> StateInfo
                     outgoing_bytes: c.outgoing_bytes,
                 }),
             }),
-            vs_info: i.vs_info.iter().map(|vs| VsInfoJson {
-                vs_registry_idx: vs.vs_registry_idx,
-                vs_ip: bytes_to_ip(&vs.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                vs_port: vs.vs_port,
-                vs_proto: proto_to_string(vs.vs_proto),
-                active_sessions: vs.active_sessions.as_ref().map(|a| AsyncInfoJson {
-                    value: a.value,
-                    updated_at: format_timestamp(a.updated_at.as_ref()),
-                }),
-                last_packet_timestamp: format_timestamp(vs.last_packet_timestamp.as_ref()),
-                stats: vs.stats.as_ref().map(|s| VsInfoStatsJson {
-                    incoming_packets: s.incoming_packets,
-                    incoming_bytes: s.incoming_bytes,
-                    packet_src_not_allowed: s.packet_src_not_allowed,
-                    no_reals: s.no_reals,
-                    ops_packets: s.ops_packets,
-                    session_table_overflow: s.session_table_overflow,
-                    echo_icmp_packets: s.echo_icmp_packets,
-                    error_icmp_packets: s.error_icmp_packets,
-                    real_is_disabled: s.real_is_disabled,
-                    real_is_removed: s.real_is_removed,
-                    not_rescheduled_packets: s.not_rescheduled_packets,
-                    broadcasted_icmp_packets: s.broadcasted_icmp_packets,
-                    created_sessions: s.created_sessions,
-                    outgoing_packets: s.outgoing_packets,
-                    outgoing_bytes: s.outgoing_bytes,
-                }),
-            }).collect(),
-            real_info: i.real_info.iter().map(|r| RealInfoJson {
-                real_registry_idx: r.real_registry_idx,
-                vs_ip: bytes_to_ip(&r.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                vs_port: r.vs_port,
-                vs_proto: proto_to_string(r.vs_proto),
-                real_ip: bytes_to_ip(&r.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                active_sessions: r.active_sessions.as_ref().map(|a| AsyncInfoJson {
-                    value: a.value,
-                    updated_at: format_timestamp(a.updated_at.as_ref()),
-                }),
-                last_packet_timestamp: format_timestamp(r.last_packet_timestamp.as_ref()),
-                stats: r.stats.as_ref().map(|s| RealInfoStatsJson {
-                    packets_real_disabled: s.packets_real_disabled,
-                    packets_real_not_present: s.packets_real_not_present,
-                    ops_packets: s.ops_packets,
-                    error_icmp_packets: s.error_icmp_packets,
-                    created_sessions: s.created_sessions,
-                    packets: s.packets,
-                    bytes: s.bytes,
-                }),
-            }).collect(),
+            vs_info: i
+                .vs_info
+                .iter()
+                .map(|vs| VsInfoJson {
+                    vs_registry_idx: vs.vs_registry_idx,
+                    vs_ip: bytes_to_ip(&vs.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                    vs_port: vs.vs_port,
+                    vs_proto: proto_to_string(vs.vs_proto),
+                    active_sessions: vs.active_sessions.as_ref().map(|a| AsyncInfoJson {
+                        value: a.value,
+                        updated_at: format_timestamp(a.updated_at.as_ref()),
+                    }),
+                    last_packet_timestamp: format_timestamp(vs.last_packet_timestamp.as_ref()),
+                    stats: vs.stats.as_ref().map(|s| VsInfoStatsJson {
+                        incoming_packets: s.incoming_packets,
+                        incoming_bytes: s.incoming_bytes,
+                        packet_src_not_allowed: s.packet_src_not_allowed,
+                        no_reals: s.no_reals,
+                        ops_packets: s.ops_packets,
+                        session_table_overflow: s.session_table_overflow,
+                        echo_icmp_packets: s.echo_icmp_packets,
+                        error_icmp_packets: s.error_icmp_packets,
+                        real_is_disabled: s.real_is_disabled,
+                        real_is_removed: s.real_is_removed,
+                        not_rescheduled_packets: s.not_rescheduled_packets,
+                        broadcasted_icmp_packets: s.broadcasted_icmp_packets,
+                        created_sessions: s.created_sessions,
+                        outgoing_packets: s.outgoing_packets,
+                        outgoing_bytes: s.outgoing_bytes,
+                    }),
+                })
+                .collect(),
+            real_info: i
+                .real_info
+                .iter()
+                .map(|r| RealInfoJson {
+                    real_registry_idx: r.real_registry_idx,
+                    vs_ip: bytes_to_ip(&r.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                    vs_port: r.vs_port,
+                    vs_proto: proto_to_string(r.vs_proto),
+                    real_ip: bytes_to_ip(&r.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                    active_sessions: r.active_sessions.as_ref().map(|a| AsyncInfoJson {
+                        value: a.value,
+                        updated_at: format_timestamp(a.updated_at.as_ref()),
+                    }),
+                    last_packet_timestamp: format_timestamp(r.last_packet_timestamp.as_ref()),
+                    stats: r.stats.as_ref().map(|s| RealInfoStatsJson {
+                        packets_real_disabled: s.packets_real_disabled,
+                        packets_real_not_present: s.packets_real_not_present,
+                        ops_packets: s.ops_packets,
+                        error_icmp_packets: s.error_icmp_packets,
+                        created_sessions: s.created_sessions,
+                        packets: s.packets,
+                        bytes: s.bytes,
+                    }),
+                })
+                .collect(),
         }),
     }
 }
 
 pub fn convert_config_stats(response: &balancerpb::ConfigStatsResponse) -> ConfigStatsJson {
     ConfigStatsJson {
-        target: response.target.as_ref().map(|t| TargetJson {
-            config_name: t.config_name.clone(),
-        }),
+        name: response.name.clone(),
         device: response.device.clone(),
         pipeline: response.pipeline.clone(),
         function: response.function.clone(),
@@ -593,64 +623,74 @@ pub fn convert_config_stats(response: &balancerpb::ConfigStatsResponse) -> Confi
                     outgoing_bytes: c.outgoing_bytes,
                 }),
             }),
-            vs: s.vs.iter().map(|vs| VsStatsInfoJson {
-                vs_registry_idx: vs.vs_registry_idx,
-                ip: bytes_to_ip(&vs.ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                port: vs.port,
-                proto: proto_to_string(vs.proto),
-                stats: vs.stats.as_ref().map(|st| VsStatsJson {
-                    incoming_packets: st.incoming_packets,
-                    incoming_bytes: st.incoming_bytes,
-                    packet_src_not_allowed: st.packet_src_not_allowed,
-                    no_reals: st.no_reals,
-                    ops_packets: st.ops_packets,
-                    session_table_overflow: st.session_table_overflow,
-                    echo_icmp_packets: st.echo_icmp_packets,
-                    error_icmp_packets: st.error_icmp_packets,
-                    real_is_disabled: st.real_is_disabled,
-                    real_is_removed: st.real_is_removed,
-                    not_rescheduled_packets: st.not_rescheduled_packets,
-                    broadcasted_icmp_packets: st.broadcasted_icmp_packets,
-                    created_sessions: st.created_sessions,
-                    outgoing_packets: st.outgoing_packets,
-                    outgoing_bytes: st.outgoing_bytes,
-                }),
-            }).collect(),
-            reals: s.reals.iter().map(|r| RealStatsInfoJson {
-                real_registry_idx: r.real_registry_idx,
-                vs_ip: bytes_to_ip(&r.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                port: r.port,
-                proto: proto_to_string(r.proto),
-                real_ip: bytes_to_ip(&r.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
-                stats: r.stats.as_ref().map(|st| RealStatsJson {
-                    packets_real_disabled: st.packets_real_disabled,
-                    packets_real_not_present: st.packets_real_not_present,
-                    ops_packets: st.ops_packets,
-                    error_icmp_packets: st.error_icmp_packets,
-                    created_sessions: st.created_sessions,
-                    packets: st.packets,
-                    bytes: st.bytes,
-                }),
-            }).collect(),
+            vs: s
+                .vs
+                .iter()
+                .map(|vs| VsStatsInfoJson {
+                    vs_registry_idx: vs.vs_registry_idx,
+                    ip: bytes_to_ip(&vs.ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                    port: vs.port,
+                    proto: proto_to_string(vs.proto),
+                    stats: vs.stats.as_ref().map(|st| VsStatsJson {
+                        incoming_packets: st.incoming_packets,
+                        incoming_bytes: st.incoming_bytes,
+                        packet_src_not_allowed: st.packet_src_not_allowed,
+                        no_reals: st.no_reals,
+                        ops_packets: st.ops_packets,
+                        session_table_overflow: st.session_table_overflow,
+                        echo_icmp_packets: st.echo_icmp_packets,
+                        error_icmp_packets: st.error_icmp_packets,
+                        real_is_disabled: st.real_is_disabled,
+                        real_is_removed: st.real_is_removed,
+                        not_rescheduled_packets: st.not_rescheduled_packets,
+                        broadcasted_icmp_packets: st.broadcasted_icmp_packets,
+                        created_sessions: st.created_sessions,
+                        outgoing_packets: st.outgoing_packets,
+                        outgoing_bytes: st.outgoing_bytes,
+                    }),
+                })
+                .collect(),
+            reals: s
+                .reals
+                .iter()
+                .map(|r| RealStatsInfoJson {
+                    real_registry_idx: r.real_registry_idx,
+                    vs_ip: bytes_to_ip(&r.vs_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                    port: r.port,
+                    proto: proto_to_string(r.proto),
+                    real_ip: bytes_to_ip(&r.real_ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                    stats: r.stats.as_ref().map(|st| RealStatsJson {
+                        packets_real_disabled: st.packets_real_disabled,
+                        packets_real_not_present: st.packets_real_not_present,
+                        ops_packets: st.ops_packets,
+                        error_icmp_packets: st.error_icmp_packets,
+                        created_sessions: st.created_sessions,
+                        packets: st.packets,
+                        bytes: st.bytes,
+                    }),
+                })
+                .collect(),
         }),
     }
 }
 
 pub fn convert_sessions_info(response: &balancerpb::SessionsInfoResponse) -> SessionsInfoJson {
     SessionsInfoJson {
-        target: response.target.as_ref().map(|t| TargetJson {
-            config_name: t.config_name.clone(),
-        }),
-        sessions_info: response.sessions_info.iter().map(|s| SessionInfoJson {
-            client_addr: bytes_to_ip(&s.client_addr).map(|ip| ip.to_string()).unwrap_or_default(),
-            client_port: s.client_port,
-            vs_addr: bytes_to_ip(&s.vs_addr).map(|ip| ip.to_string()).unwrap_or_default(),
-            vs_port: s.vs_port,
-            real_addr: bytes_to_ip(&s.real_addr).map(|ip| ip.to_string()).unwrap_or_default(),
-            real_port: s.real_port,
-            create_timestamp: format_timestamp(s.create_timestamp.as_ref()),
-            last_packet_timestamp: format_timestamp(s.last_packet_timestamp.as_ref()),
-            timeout_seconds: s.timeout.as_ref().map(|t| t.seconds),
-        }).collect(),
+        name: response.name.clone(),
+        sessions_info: response
+            .sessions_info
+            .iter()
+            .map(|s| SessionInfoJson {
+                client_addr: bytes_to_ip(&s.client_addr).map(|ip| ip.to_string()).unwrap_or_default(),
+                client_port: s.client_port,
+                vs_addr: bytes_to_ip(&s.vs_addr).map(|ip| ip.to_string()).unwrap_or_default(),
+                vs_port: s.vs_port,
+                real_addr: bytes_to_ip(&s.real_addr).map(|ip| ip.to_string()).unwrap_or_default(),
+                real_port: s.real_port,
+                create_timestamp: format_timestamp(s.create_timestamp.as_ref()),
+                last_packet_timestamp: format_timestamp(s.last_packet_timestamp.as_ref()),
+                timeout_seconds: s.timeout.as_ref().map(|t| t.seconds),
+            })
+            .collect(),
     }
 }

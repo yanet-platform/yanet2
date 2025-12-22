@@ -3,7 +3,7 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use code::{UpdateDevicePlainRequest, device_plain_service_client::DevicePlainServiceClient};
-use commonpb::{Device, DevicePipeline, TargetDevice};
+use commonpb::{Device, DevicePipeline};
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
@@ -78,7 +78,7 @@ impl DevicePlainService {
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         let request = UpdateDevicePlainRequest {
-            target: Some(TargetDevice { name: cmd.name }),
+            name: cmd.name,
             device: Some(Device {
                 input: cmd
                     .input

@@ -10,10 +10,10 @@ use yanet_cli_balancer::output::{self, OutputFormat};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let response = common::create_list_configs_example();
-    
+
     let args: Vec<String> = env::args().collect();
     let format = args.get(1).map(|s| s.as_str());
-    
+
     match format {
         Some("table") => {
             output::print_list_configs(&response, OutputFormat::Table)?;
@@ -31,14 +31,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         None => {
             println!("=== list: Table format ===\n");
             output::print_list_configs(&response, OutputFormat::Table)?;
-            
+
             println!("\n\n=== list: Tree format ===\n");
             output::print_list_configs(&response, OutputFormat::Tree)?;
-            
+
             println!("\n\n=== list: JSON format ===\n");
             output::print_list_configs(&response, OutputFormat::Json)?;
         }
     }
-    
+
     Ok(())
 }

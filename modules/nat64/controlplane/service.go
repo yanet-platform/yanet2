@@ -70,9 +70,9 @@ func (m *NAT64Service) ListConfigs(ctx context.Context, req *nat64pb.ListConfigs
 }
 
 func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRequest) (*nat64pb.ShowConfigResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	response := &nat64pb.ShowConfigResponse{}
@@ -115,9 +115,9 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 		return nil, status.Errorf(codes.InvalidArgument, "invalid prefix length: got %d, want 12", len(req.Prefix))
 	}
 
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	m.mu.Lock()
@@ -153,9 +153,9 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 		return nil, status.Errorf(codes.InvalidArgument, "invalid IPv6 address length: got %d, want 16", len(req.Ipv6))
 	}
 
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	m.mu.Lock()
@@ -194,9 +194,9 @@ func (m *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 		return nil, status.Error(codes.InvalidArgument, "mtu config is required")
 	}
 
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	m.mu.Lock()
@@ -229,9 +229,9 @@ func (m *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 }
 
 func (m *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropUnknownRequest) (*nat64pb.SetDropUnknownResponse, error) {
-	name, err := req.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	m.mu.Lock()

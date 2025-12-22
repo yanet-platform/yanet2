@@ -13,7 +13,7 @@ service DeviceVlanService {
 }
 
 message UpdateDeviceVlanRequest {
-	commonpb.TargetDevice target = 1;
+	string name = 1;
 	commonpb.Device device = 2;
 	uint32 vlan = 3;
 }

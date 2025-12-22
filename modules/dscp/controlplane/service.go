@@ -66,9 +66,9 @@ func (m *DscpService) ShowConfig(
 	ctx context.Context,
 	request *dscppb.ShowConfigRequest,
 ) (*dscppb.ShowConfigResponse, error) {
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	response := &dscppb.ShowConfigResponse{}
@@ -99,9 +99,9 @@ func (m *DscpService) AddPrefixes(
 	request *dscppb.AddPrefixesRequest,
 ) (*dscppb.AddPrefixesResponse, error) {
 
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	toAdd := make([]netip.Prefix, 0, len(request.GetPrefixes()))
@@ -139,9 +139,9 @@ func (m *DscpService) RemovePrefixes(
 	ctx context.Context,
 	request *dscppb.RemovePrefixesRequest,
 ) (*dscppb.RemovePrefixesResponse, error) {
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	toRemove := make([]netip.Prefix, 0, len(request.GetPrefixes()))
@@ -171,9 +171,9 @@ func (m *DscpService) SetDscpMarking(
 	ctx context.Context,
 	request *dscppb.SetDscpMarkingRequest,
 ) (*dscppb.SetDscpMarkingResponse, error) {
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, err
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	dscpCfg := request.GetDscpConfig()

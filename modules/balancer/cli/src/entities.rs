@@ -1,8 +1,8 @@
 //! Data structures and helper functions for balancer entities
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use serde::{Deserialize, Serialize};
 use crate::rpc::balancerpb;
+use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helper Functions
@@ -38,17 +38,10 @@ pub fn parse_subnet(s: &str) -> Result<balancerpb::Subnet, String> {
         return Err(format!("invalid subnet format: {}", s));
     }
 
-    let addr: IpAddr = parts[0]
-        .parse()
-        .map_err(|e| format!("invalid subnet address: {}", e))?;
-    let size: u32 = parts[1]
-        .parse()
-        .map_err(|e| format!("invalid subnet size: {}", e))?;
+    let addr: IpAddr = parts[0].parse().map_err(|e| format!("invalid subnet address: {}", e))?;
+    let size: u32 = parts[1].parse().map_err(|e| format!("invalid subnet size: {}", e))?;
 
-    Ok(balancerpb::Subnet {
-        addr: ip_to_bytes(addr),
-        size,
-    })
+    Ok(balancerpb::Subnet { addr: ip_to_bytes(addr), size })
 }
 
 /// Format bytes as human-readable size
@@ -187,10 +180,18 @@ pub struct SessionsTimeouts {
     pub default: u32,
 }
 
-fn default_timeout() -> u32 { 10 }
-fn default_tcp_timeout() -> u32 { 60 }
-fn default_udp_timeout() -> u32 { 30 }
-fn default_default_timeout() -> u32 { 60 }
+fn default_timeout() -> u32 {
+    10
+}
+fn default_tcp_timeout() -> u32 {
+    60
+}
+fn default_udp_timeout() -> u32 {
+    30
+}
+fn default_default_timeout() -> u32 {
+    60
+}
 
 impl Default for SessionsTimeouts {
     fn default() -> Self {
@@ -216,9 +217,15 @@ pub struct WlcConfig {
     pub update_period_ms: u64,
 }
 
-fn default_wlc_power() -> u64 { 10 }
-fn default_max_real_weight() -> u32 { 1000 }
-fn default_update_period_ms() -> u64 { 5000 }
+fn default_wlc_power() -> u64 {
+    10
+}
+fn default_max_real_weight() -> u32 {
+    1000
+}
+fn default_update_period_ms() -> u64 {
+    5000
+}
 
 impl Default for WlcConfig {
     fn default() -> Self {
@@ -248,16 +255,15 @@ impl TryFrom<ModuleConfig> for balancerpb::ModuleConfig {
     type Error = String;
 
     fn try_from(config: ModuleConfig) -> Result<Self, Self::Error> {
-        let virtual_services: Result<Vec<_>, String> = config
-            .virtual_services
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect();
+        let virtual_services: Result<Vec<_>, String> =
+            config.virtual_services.into_iter().map(TryInto::try_into).collect();
 
-        let source_v4: Ipv4Addr = config.source_address_v4
+        let source_v4: Ipv4Addr = config
+            .source_address_v4
             .parse()
             .map_err(|e| format!("invalid IPv4: {}", e))?;
-        let source_v6: Ipv6Addr = config.source_address_v6
+        let source_v6: Ipv6Addr = config
+            .source_address_v6
             .parse()
             .map_err(|e| format!("invalid IPv6: {}", e))?;
 
@@ -299,7 +305,7 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
 
     fn try_from(vs: VirtualService) -> Result<Self, Self::Error> {
         let addr: IpAddr = vs.ip.parse().map_err(|e| format!("invalid IP: {}", e))?;
-        
+
         let proto = match vs.proto.to_lowercase().as_str() {
             "tcp" => balancerpb::TransportProto::Tcp,
             "udp" => balancerpb::TransportProto::Udp,
@@ -313,11 +319,7 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
             _ => return Err(format!("invalid scheduler: {}", vs.scheduler)),
         };
 
-        let allowed_srcs: Result<Vec<_>, String> = vs
-            .allowed_srcs
-            .into_iter()
-            .map(|s| parse_subnet(&s))
-            .collect();
+        let allowed_srcs: Result<Vec<_>, String> = vs.allowed_srcs.into_iter().map(|s| parse_subnet(&s)).collect();
 
         let peers: Result<Vec<_>, String> = vs
             .peers
@@ -535,9 +537,8 @@ module_state_config:
 
     #[test]
     fn test_parse_balancer_config() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         // Verify module_config exists
         assert!(!config.module_config.virtual_services.is_empty());
         assert_eq!(config.module_config.virtual_services.len(), 3);
@@ -545,18 +546,16 @@ module_state_config:
 
     #[test]
     fn test_module_config_source_addresses() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         assert_eq!(config.module_config.source_address_v4, "192.0.2.1");
         assert_eq!(config.module_config.source_address_v6, "2001:db8::1");
     }
 
     #[test]
     fn test_module_config_decap_addresses() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         assert_eq!(config.module_config.decap_addresses.len(), 2);
         assert_eq!(config.module_config.decap_addresses[0], "192.0.2.1");
         assert_eq!(config.module_config.decap_addresses[1], "2001:db8::1");
@@ -564,26 +563,25 @@ module_state_config:
 
     #[test]
     fn test_virtual_service_http() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         let vs = &config.module_config.virtual_services[0];
         assert_eq!(vs.ip, "192.0.2.1");
         assert_eq!(vs.port, 80);
         assert_eq!(vs.proto, "tcp");
         assert_eq!(vs.scheduler, "wrr");
-        
+
         // Check flags
         assert!(!vs.flags.gre);
         assert!(vs.flags.fix_mss);
         assert!(!vs.flags.ops);
         assert!(!vs.flags.pure_l3);
-        
+
         // Check allowed sources
         assert_eq!(vs.allowed_srcs.len(), 2);
         assert_eq!(vs.allowed_srcs[0], "10.0.0.0/8");
         assert_eq!(vs.allowed_srcs[1], "172.16.0.0/12");
-        
+
         // Check peers
         assert_eq!(vs.peers.len(), 2);
         assert_eq!(vs.peers[0], "192.0.2.10");
@@ -592,19 +590,18 @@ module_state_config:
 
     #[test]
     fn test_virtual_service_https() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         let vs = &config.module_config.virtual_services[1];
         assert_eq!(vs.ip, "192.0.2.2");
         assert_eq!(vs.port, 443);
         assert_eq!(vs.proto, "tcp");
         assert_eq!(vs.scheduler, "wlc");
-        
+
         // Check allowed sources
         assert_eq!(vs.allowed_srcs.len(), 1);
         assert_eq!(vs.allowed_srcs[0], "0.0.0.0/0");
-        
+
         // Check peers
         assert_eq!(vs.peers.len(), 1);
         assert_eq!(vs.peers[0], "192.0.2.10");
@@ -612,33 +609,31 @@ module_state_config:
 
     #[test]
     fn test_virtual_service_udp() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         let vs = &config.module_config.virtual_services[2];
         assert_eq!(vs.ip, "192.0.2.3");
         assert_eq!(vs.port, 53);
         assert_eq!(vs.proto, "udp");
         assert_eq!(vs.scheduler, "prr");
-        
+
         // Check flags
         assert!(!vs.flags.gre);
         assert!(!vs.flags.fix_mss);
         assert!(vs.flags.ops);
         assert!(!vs.flags.pure_l3);
-        
+
         // Check peers (empty)
         assert_eq!(vs.peers.len(), 0);
     }
 
     #[test]
     fn test_real_servers_http() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         let vs = &config.module_config.virtual_services[0];
         assert_eq!(vs.reals.len(), 2);
-        
+
         // First real
         let real1 = &vs.reals[0];
         assert_eq!(real1.weight, 100);
@@ -646,7 +641,7 @@ module_state_config:
         assert_eq!(real1.src, "192.0.2.1");
         assert_eq!(real1.src_mask, "255.255.255.255");
         assert!(real1.enabled);
-        
+
         // Second real
         let real2 = &vs.reals[1];
         assert_eq!(real2.weight, 50);
@@ -658,21 +653,20 @@ module_state_config:
 
     #[test]
     fn test_real_servers_https_with_disabled() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         let vs = &config.module_config.virtual_services[1];
         assert_eq!(vs.reals.len(), 3);
-        
+
         // First two reals are enabled
         assert!(vs.reals[0].enabled);
         assert_eq!(vs.reals[0].weight, 100);
         assert_eq!(vs.reals[0].dst, "10.2.1.1");
-        
+
         assert!(vs.reals[1].enabled);
         assert_eq!(vs.reals[1].weight, 100);
         assert_eq!(vs.reals[1].dst, "10.2.1.2");
-        
+
         // Third real is disabled
         assert!(!vs.reals[2].enabled);
         assert_eq!(vs.reals[2].weight, 50);
@@ -681,17 +675,16 @@ module_state_config:
 
     #[test]
     fn test_real_servers_udp() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         let vs = &config.module_config.virtual_services[2];
         assert_eq!(vs.reals.len(), 2);
-        
+
         // Both reals have weight 1
         assert_eq!(vs.reals[0].weight, 1);
         assert_eq!(vs.reals[0].dst, "10.3.1.1");
         assert!(vs.reals[0].enabled);
-        
+
         assert_eq!(vs.reals[1].weight, 1);
         assert_eq!(vs.reals[1].dst, "10.3.1.2");
         assert!(vs.reals[1].enabled);
@@ -699,9 +692,8 @@ module_state_config:
 
     #[test]
     fn test_sessions_timeouts() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         let timeouts = &config.module_config.sessions_timeouts;
         assert_eq!(timeouts.tcp_syn_ack, 10);
         assert_eq!(timeouts.tcp_syn, 10);
@@ -713,9 +705,8 @@ module_state_config:
 
     #[test]
     fn test_wlc_config() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         let wlc = &config.module_config.wlc;
         assert_eq!(wlc.power, 10);
         assert_eq!(wlc.max_real_weight, 1000);
@@ -724,9 +715,8 @@ module_state_config:
 
     #[test]
     fn test_module_state_config() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
         let state_config = &config.module_state_config;
         assert_eq!(state_config.session_table_capacity, 1000);
         assert_eq!(state_config.session_table_scan_period_ms, 1000);
@@ -735,15 +725,13 @@ module_state_config:
 
     #[test]
     fn test_config_conversion_to_protobuf() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
-        let result: Result<(balancerpb::ModuleConfig, balancerpb::ModuleStateConfig), _> = 
-            config.try_into();
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
+        let result: Result<(balancerpb::ModuleConfig, balancerpb::ModuleStateConfig), _> = config.try_into();
         assert!(result.is_ok(), "Failed to convert config to protobuf");
-        
+
         let (module_config, module_state_config) = result.unwrap();
-        
+
         // Verify module_config
         assert_eq!(module_config.virtual_services.len(), 3);
         assert_eq!(module_config.source_address_v4.len(), 4); // IPv4 is 4 bytes
@@ -751,7 +739,7 @@ module_state_config:
         assert_eq!(module_config.decap_addresses.len(), 2);
         assert!(module_config.sessions_timeouts.is_some());
         assert!(module_config.wlc.is_some());
-        
+
         // Verify module_state_config
         assert_eq!(module_state_config.session_table_capacity, 1000);
         assert!(module_state_config.session_table_scan_period.is_some());
@@ -760,12 +748,10 @@ module_state_config:
 
     #[test]
     fn test_protobuf_virtual_services() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
-        let (module_config, _) = config.try_into()
-            .expect("Failed to convert to protobuf");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
+        let (module_config, _) = config.try_into().expect("Failed to convert to protobuf");
+
         // Check first VS (HTTP)
         let vs1 = &module_config.virtual_services[0];
         assert_eq!(vs1.port, 80);
@@ -774,14 +760,14 @@ module_state_config:
         assert_eq!(vs1.reals.len(), 2);
         assert_eq!(vs1.allowed_srcs.len(), 2);
         assert_eq!(vs1.peers.len(), 2);
-        
+
         // Check second VS (HTTPS)
         let vs2 = &module_config.virtual_services[1];
         assert_eq!(vs2.port, 443);
         assert_eq!(vs2.proto, balancerpb::TransportProto::Tcp as i32);
         assert_eq!(vs2.scheduler, balancerpb::VsScheduler::Wlc as i32);
         assert_eq!(vs2.reals.len(), 3);
-        
+
         // Check third VS (UDP)
         let vs3 = &module_config.virtual_services[2];
         assert_eq!(vs3.port, 53);
@@ -792,12 +778,10 @@ module_state_config:
 
     #[test]
     fn test_protobuf_real_enabled_disabled() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
-        let (module_config, _) = config.try_into()
-            .expect("Failed to convert to protobuf");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
+        let (module_config, _) = config.try_into().expect("Failed to convert to protobuf");
+
         // Check HTTPS service with disabled real
         let vs = &module_config.virtual_services[1];
         assert!(vs.reals[0].enabled); // First real is enabled
@@ -807,19 +791,17 @@ module_state_config:
 
     #[test]
     fn test_protobuf_vs_flags() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML)
-            .expect("Failed to parse YAML");
-        
-        let (module_config, _) = config.try_into()
-            .expect("Failed to convert to protobuf");
-        
+        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
+
+        let (module_config, _) = config.try_into().expect("Failed to convert to protobuf");
+
         // Check HTTP service flags
         let vs1_flags = module_config.virtual_services[0].flags.as_ref().unwrap();
         assert!(!vs1_flags.gre);
         assert!(vs1_flags.fix_mss);
         assert!(!vs1_flags.ops);
         assert!(!vs1_flags.pure_l3);
-        
+
         // Check UDP service flags
         let vs3_flags = module_config.virtual_services[2].flags.as_ref().unwrap();
         assert!(!vs3_flags.gre);

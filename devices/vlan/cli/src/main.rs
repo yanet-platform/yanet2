@@ -3,7 +3,7 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use code::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
-use commonpb::{Device, DevicePipeline, TargetDevice};
+use commonpb::{Device, DevicePipeline};
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
@@ -81,7 +81,7 @@ impl DeviceVlanService {
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         let request = UpdateDeviceVlanRequest {
-            target: Some(TargetDevice { name: cmd.name }),
+            name: cmd.name,
             device: Some(Device {
                 input: cmd
                     .input

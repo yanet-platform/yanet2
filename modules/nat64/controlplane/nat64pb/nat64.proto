@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package nat64pb;
 
-import "common/commonpb/target.proto";
-
 option go_package = "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb;nat64pb";
 
 // NAT64Service is a control-plane service for managing NAT64 module
@@ -53,7 +51,7 @@ message ListConfigsResponse {
 
 // ShowConfigRequest requests the current configuration
 message ShowConfigRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 }
 
 // MTUConfig contains MTU configuration values
@@ -90,7 +88,7 @@ message ShowConfigResponse {
 
 // AddPrefixRequest specifies a prefix to add
 message AddPrefixRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	bytes prefix = 2; // 12-byte IPv6 prefix
 }
 
@@ -99,7 +97,7 @@ message AddPrefixResponse {
 
 // RemovePrefixRequest specifies a prefix to remove
 message RemovePrefixRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	bytes prefix = 2; // 12-byte IPv6 prefix
 }
 
@@ -108,7 +106,7 @@ message RemovePrefixResponse {
 
 // AddMappingRequest specifies an IPv4-IPv6 mapping to add
 message AddMappingRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	bytes ipv4 = 2;		 // IPv4 address in network byte order
 	bytes ipv6 = 3;		 // IPv6 address (16 bytes)
 	uint32 prefix_index = 4; // Index of the used prefix
@@ -119,7 +117,7 @@ message AddMappingResponse {
 
 // RemoveMappingRequest specifies an IPv4-IPv6 mapping to remove
 message RemoveMappingRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	bytes ipv4 = 2; // IPv4 address to remove mapping for
 }
 
@@ -128,7 +126,7 @@ message RemoveMappingResponse {
 
 // SetMTURequest specifies MTU values to set
 message SetMTURequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	MTUConfig mtu = 2;
 }
 
@@ -137,7 +135,7 @@ message SetMTUResponse {
 
 // SetDropUnknownRequest specifies drop_unknown flags to set
 message SetDropUnknownRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	bool drop_unknown_prefix = 2;  // Drop packets with unknown prefix
 	bool drop_unknown_mapping = 3; // Drop packets with unknown mapping
 }

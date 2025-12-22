@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package dscppb;
 
-import "common/commonpb/target.proto";
-
 option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/dscp/dscppb;dscppb";
 
 // DscpService is a service for Differentiated Services Code Point module.
@@ -40,7 +38,7 @@ message ListConfigsResponse {
 
 // ShowConfigResponse retrieves the runtime configuration for the dscp module.
 message ShowConfigRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 }
 
 // DscpConfig contains the DSCP marking configuration.
@@ -59,7 +57,7 @@ message ShowConfigResponse {
 
 // AddPrefixesRequest adds prefixes to the input filter of the dscp module.
 message AddPrefixesRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	repeated string prefixes = 2;
 }
 message AddPrefixesResponse {
@@ -68,7 +66,7 @@ message AddPrefixesResponse {
 // RemovePrefixesRequest removes prefixes from the input filter of the dscp
 // module.
 message RemovePrefixesRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	repeated string prefixes = 2;
 }
 message RemovePrefixesResponse {
@@ -76,7 +74,7 @@ message RemovePrefixesResponse {
 
 // SetDscpMarkingRequest sets the DSCP marking configuration.
 message SetDscpMarkingRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	DscpConfig dscp_config = 2;
 }
 message SetDscpMarkingResponse {

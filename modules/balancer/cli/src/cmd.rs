@@ -1,7 +1,7 @@
 //! CLI command definitions
 
+use crate::rpc::balancerpb;
 use clap::{ArgAction, Parser, ValueEnum};
-use crate::rpc::{balancerpb, commonpb};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Main Command
@@ -144,10 +144,7 @@ impl TryFrom<EnableRealCmd> for balancerpb::UpdateRealsRequest {
         };
 
         Ok(Self {
-            target: Some(commonpb::TargetModule {
-                config_name: cmd.name,
-                
-            }),
+            name: cmd.name,
             updates: vec![balancerpb::RealUpdate {
                 virtual_ip: cmd.virtual_ip.into_bytes(),
                 proto: proto as i32,
@@ -195,10 +192,7 @@ impl TryFrom<DisableRealCmd> for balancerpb::UpdateRealsRequest {
         };
 
         Ok(Self {
-            target: Some(commonpb::TargetModule {
-                config_name: cmd.name,
-                
-            }),
+            name: cmd.name,
             updates: vec![balancerpb::RealUpdate {
                 virtual_ip: cmd.virtual_ip.into_bytes(),
                 proto: proto as i32,
@@ -221,12 +215,7 @@ pub struct FlushRealUpdatesCmd {
 
 impl From<FlushRealUpdatesCmd> for balancerpb::FlushRealUpdatesRequest {
     fn from(cmd: FlushRealUpdatesCmd) -> Self {
-        Self {
-            target: Some(commonpb::TargetModule {
-                config_name: cmd.name,
-                
-            }),
-        }
+        Self { name: cmd.name }
     }
 }
 
@@ -247,12 +236,7 @@ pub struct ConfigCmd {
 
 impl From<&ConfigCmd> for balancerpb::ShowConfigRequest {
     fn from(cmd: &ConfigCmd) -> Self {
-        Self {
-            target: Some(commonpb::TargetModule {
-                config_name: cmd.name.clone(),
-                
-            }),
-        }
+        Self { name: cmd.name.clone() }
     }
 }
 
@@ -301,11 +285,7 @@ pub struct StatsCmd {
 impl From<&StatsCmd> for balancerpb::ConfigStatsRequest {
     fn from(cmd: &StatsCmd) -> Self {
         Self {
-            target: Some(commonpb::TargetModule {
-                config_name: cmd.name.clone(),
-                
-            }),
-            
+            name: cmd.name.clone(),
             device: cmd.device.clone(),
             pipeline: cmd.pipeline.clone(),
             function: cmd.function.clone(),
@@ -331,12 +311,7 @@ pub struct StateCmd {
 
 impl From<&StateCmd> for balancerpb::StateInfoRequest {
     fn from(cmd: &StateCmd) -> Self {
-        Self {
-            target: Some(commonpb::TargetModule {
-                config_name: cmd.name.clone(),
-                
-            }),
-        }
+        Self { name: cmd.name.clone() }
     }
 }
 
@@ -357,10 +332,6 @@ pub struct SessionsCmd {
 
 impl From<&SessionsCmd> for balancerpb::SessionsInfoRequest {
     fn from(cmd: &SessionsCmd) -> Self {
-        Self {
-            target: Some(commonpb::TargetModule {
-                config_name: cmd.name.clone(),
-            }),
-        }
+        Self { name: cmd.name.clone() }
     }
 }

@@ -56,9 +56,9 @@ func (m *DecapService) ShowConfig(
 	ctx context.Context,
 	request *decappb.ShowConfigRequest,
 ) (*decappb.ShowConfigResponse, error) {
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	m.mu.Lock()
@@ -85,9 +85,9 @@ func (m *DecapService) AddPrefixes(
 	request *decappb.AddPrefixesRequest,
 ) (*decappb.AddPrefixesResponse, error) {
 
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	toAdd := make([]netip.Prefix, 0, len(request.GetPrefixes()))
@@ -122,9 +122,9 @@ func (m *DecapService) RemovePrefixes(
 	ctx context.Context,
 	request *decappb.RemovePrefixesRequest,
 ) (*decappb.RemovePrefixesResponse, error) {
-	name, err := request.GetTarget().Validate()
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	toRemove := make([]netip.Prefix, 0, len(request.GetPrefixes()))

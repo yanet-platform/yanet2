@@ -7,7 +7,6 @@ use clap_complete::CompleteEnv;
 use code::{
     DeleteConfigRequest, ListConfigsRequest, UpdateConfigRequest, forward_service_client::ForwardServiceClient,
 };
-use commonpb::TargetModule;
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
@@ -18,13 +17,6 @@ pub mod code {
     use serde::Serialize;
 
     tonic::include_proto!("forwardpb");
-}
-
-#[allow(non_snake_case)]
-pub mod commonpb {
-    use serde::Serialize;
-
-    tonic::include_proto!("commonpb");
 }
 
 /// Forward module.
@@ -180,9 +172,7 @@ impl ForwardService {
     }
 
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
-        let request = DeleteConfigRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
-        };
+        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         self.client.delete_config(request).await?;
 
         Ok(())
@@ -192,7 +182,7 @@ impl ForwardService {
         let config = ForwardConfig::from_file(&cmd.rules)?;
         let rules: Vec<code::ForwardRule> = config.into();
         let request = UpdateConfigRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             rules: rules,
         };
         log::trace!("UpdateConfigRequest: {request:?}");

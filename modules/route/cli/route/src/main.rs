@@ -16,7 +16,6 @@ use tabled::{
 };
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use yanet_cli_route::{
-    commonpb::TargetModule,
     routepb::{
         route_service_client::RouteServiceClient, FlushRoutesRequest, InsertRouteRequest, ListConfigsRequest,
         LookupRouteRequest, ShowRoutesRequest,
@@ -153,7 +152,7 @@ impl RouteService {
 
     pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Box<dyn Error>> {
         let request = ShowRoutesRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             ipv4_only: cmd.ipv4,
             ipv6_only: cmd.ipv6,
         };
@@ -171,7 +170,7 @@ impl RouteService {
 
     pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Box<dyn Error>> {
         let request = LookupRouteRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             ip_addr: cmd.addr.to_string(),
         };
 
@@ -190,7 +189,7 @@ impl RouteService {
 
     pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Box<dyn Error>> {
         let request = InsertRouteRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             prefix: cmd.prefix.to_string(),
             nexthop_addr: cmd.nexthop_addr.to_string(),
             do_flush: true,
@@ -204,9 +203,7 @@ impl RouteService {
     }
 
     pub async fn flush_routes(&mut self, cmd: RouteFlushCmd) -> Result<(), Box<dyn Error>> {
-        let request = FlushRoutesRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
-        };
+        let request = FlushRoutesRequest { name: cmd.config_name.clone() };
 
         self.client.flush_routes(request).await?;
 

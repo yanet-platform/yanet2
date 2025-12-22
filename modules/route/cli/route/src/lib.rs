@@ -8,11 +8,6 @@ use ipnet::IpNet;
 use tabled::Tabled;
 
 #[allow(non_snake_case)]
-pub mod commonpb {
-    tonic::include_proto!("commonpb");
-}
-
-#[allow(non_snake_case)]
 pub mod routepb {
     tonic::include_proto!("routepb");
 }

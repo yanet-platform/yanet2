@@ -4,7 +4,6 @@ use std::io::ErrorKind;
 use args::{ConfigOutputFormat, ModeCmd, ReadCmd, SetConfigCmd, ShowConfigCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use commonpb::TargetModule;
 use pdumppb::{
     ListConfigsRequest, ReadDumpRequest, ShowConfigRequest, ShowConfigResponse,
     pdump_service_client::PdumpServiceClient,
@@ -30,13 +29,6 @@ pub mod pdumppb {
     use serde::Serialize;
 
     tonic::include_proto!("pdumppb");
-}
-
-#[allow(non_snake_case)]
-pub mod commonpb {
-    use serde::Serialize;
-
-    tonic::include_proto!("commonpb");
 }
 
 /// Pdump - packet dump module
@@ -79,9 +71,7 @@ impl PdumpService {
     }
 
     async fn get_config(&mut self, name: &str) -> Result<ShowConfigResponse, Box<dyn Error>> {
-        let request = ShowConfigRequest {
-            target: Some(TargetModule { config_name: name.to_owned() }),
-        };
+        let request = ShowConfigRequest { name: name.to_owned() };
         log::trace!("show config request: {request:?}");
         let response = self.client.show_config(request).await?.into_inner();
         log::debug!("show config response: {response:?}");
@@ -116,7 +106,7 @@ impl PdumpService {
 
     pub async fn set_config(&mut self, cmd: SetConfigCmd) -> Result<(), Box<dyn Error>> {
         let mut request = SetConfigRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
+            name: cmd.config_name.clone(),
             ..Default::default()
         };
         let mut cfg = request.config.unwrap_or_default();
@@ -166,9 +156,7 @@ impl PdumpService {
             )));
         };
 
-        let request = ReadDumpRequest {
-            target: Some(TargetModule { config_name: cmd.config_name.clone() }),
-        };
+        let request = ReadDumpRequest { name: cmd.config_name.clone() };
         log::trace!("read_data request: {request:?}");
         let stream = self.client.read_dump(request).await?.into_inner();
         log::debug!("read_data successfully acquired data stream for {}", cmd.config_name,);

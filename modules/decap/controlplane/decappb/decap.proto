@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package decappb;
 
-import "common/commonpb/target.proto";
-
 option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/decap/decappb;decappb";
 
 // DecapService is a service for decapsulation module.
@@ -35,7 +33,7 @@ message ListConfigsResponse {
 
 // ShowConfigResponse retrieves the runtime configuration for the decap module.
 message ShowConfigRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 }
 
 // ShowConfigResponse contains the configuration details of the decap module.
@@ -45,7 +43,7 @@ message ShowConfigResponse {
 
 // AddPrefixesRequest adds prefixes to the input filter of the decap module.
 message AddPrefixesRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	repeated string prefixes = 2;
 }
 message AddPrefixesResponse {
@@ -54,7 +52,7 @@ message AddPrefixesResponse {
 // RemovePrefixesRequest removes prefixes from the input filter of the decap
 // module.
 message RemovePrefixesRequest {
-	commonpb.TargetModule target = 1;
+	string name = 1;
 	repeated string prefixes = 2;
 }
 message RemovePrefixesResponse {
