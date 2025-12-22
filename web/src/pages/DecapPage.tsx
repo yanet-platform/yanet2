@@ -6,7 +6,6 @@ import {
     PrefixTable,
     AddPrefixDialog,
     DeletePrefixDialog,
-    AddConfigDialog,
     useDecapData,
     prefixesToItems,
     ConfigTabs,
@@ -26,7 +25,6 @@ const DecapPage: React.FC = () => {
 
     const [addPrefixDialogOpen, setAddPrefixDialogOpen] = useState(false);
     const [deletePrefixDialogOpen, setDeletePrefixDialogOpen] = useState(false);
-    const [addConfigDialogOpen, setAddConfigDialogOpen] = useState(false);
     const [activeConfigTab, setActiveConfigTab] = useState<string>('');
 
     const configs = data.configs;
@@ -38,16 +36,6 @@ const DecapPage: React.FC = () => {
         setActiveConfigTab(config);
     }, []);
 
-    const handleAddConfig = useCallback(() => {
-        setAddConfigDialogOpen(true);
-    }, []);
-
-    const handleAddConfigConfirm = useCallback((configName: string) => {
-        addConfig(configName);
-        // Switch to the new config tab
-        setActiveConfigTab(configName);
-    }, [addConfig]);
-
     const handleAddPrefix = useCallback(() => {
         setAddPrefixDialogOpen(true);
     }, []);
@@ -56,9 +44,15 @@ const DecapPage: React.FC = () => {
         setDeletePrefixDialogOpen(true);
     }, []);
 
-    const handleAddPrefixConfirm = useCallback(async (prefixes: string[]) => {
-        await addPrefixes(currentActiveConfig, prefixes);
-    }, [addPrefixes, currentActiveConfig]);
+    const handleAddPrefixConfirm = useCallback(async (configName: string, prefixes: string[]) => {
+        // Create config if it doesn't exist
+        if (!configs.includes(configName)) {
+            addConfig(configName);
+        }
+        await addPrefixes(configName, prefixes);
+        // Switch to the config tab where prefix was added
+        setActiveConfigTab(configName);
+    }, [configs, addConfig, addPrefixes]);
 
     const handleDeletePrefixConfirm = useCallback(async () => {
         const prefixesToDelete = Array.from(currentSelected);
@@ -71,7 +65,7 @@ const DecapPage: React.FC = () => {
 
     const headerContent = (
         <DecapPageHeader
-            onAddConfig={handleAddConfig}
+            onAddPrefix={handleAddPrefix}
             onDeletePrefixes={handleDeletePrefixes}
             isDeleteDisabled={isDeleteDisabled}
         />
@@ -89,13 +83,13 @@ const DecapPage: React.FC = () => {
         return (
             <PageLayout header={headerContent}>
                 <Box className="decap-page__empty">
-                    <EmptyState message="No decap configurations found. Click 'Add Config' to create one." />
+                    <EmptyState message="No decap configurations found. Click 'Add Prefix' to create one." />
                 </Box>
 
-                <AddConfigDialog
-                    open={addConfigDialogOpen}
-                    onClose={() => setAddConfigDialogOpen(false)}
-                    onConfirm={handleAddConfigConfirm}
+                <AddPrefixDialog
+                    open={addPrefixDialogOpen}
+                    onClose={() => setAddPrefixDialogOpen(false)}
+                    onConfirm={handleAddPrefixConfirm}
                     existingConfigs={configs}
                 />
             </PageLayout>
@@ -119,24 +113,17 @@ const DecapPage: React.FC = () => {
                                 prefixes={prefixItems}
                                 selectedIds={configSelected}
                                 onSelectionChange={(ids) => handleSelectionChange(configName, ids)}
-                                onAddPrefix={handleAddPrefix}
                             />
                         );
                     }}
                 />
             </Box>
 
-            <AddConfigDialog
-                open={addConfigDialogOpen}
-                onClose={() => setAddConfigDialogOpen(false)}
-                onConfirm={handleAddConfigConfirm}
-                existingConfigs={configs}
-            />
-
             <AddPrefixDialog
                 open={addPrefixDialogOpen}
                 onClose={() => setAddPrefixDialogOpen(false)}
                 onConfirm={handleAddPrefixConfirm}
+                existingConfigs={configs}
             />
 
             <DeletePrefixDialog

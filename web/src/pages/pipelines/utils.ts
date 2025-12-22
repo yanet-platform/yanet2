@@ -306,7 +306,7 @@ export const createEmptyGraph = (): PipelineGraphState => {
             {
                 id: OUTPUT_NODE_ID,
                 type: NODE_TYPE_OUTPUT,
-                position: { x: 400, y: 200 },
+                position: { x: 700, y: 200 },
                 data: { label: 'Output' },
             },
         ],
@@ -339,7 +339,7 @@ export const layoutLinkedList = (
     
     // Calculate positions by traversing from INPUT
     const positions = new Map<string, { x: number; y: number }>();
-    const horizontalSpacing = 200;
+    const horizontalSpacing = 300;
     const centerY = 200;
     const startX = 100;
     

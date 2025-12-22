@@ -4,19 +4,12 @@ export interface PrefixItem {
     prefix: string;
 }
 
-// Props for PrefixTable
-export interface PrefixTableProps {
-    prefixes: PrefixItem[];
-    selectedIds: Set<string>;
-    onSelectionChange: (ids: Set<string>) => void;
-    onAddPrefix: () => void;
-}
-
 // Props for AddPrefixDialog
 export interface AddPrefixDialogProps {
     open: boolean;
     onClose: () => void;
-    onConfirm: (prefixes: string[]) => Promise<void>;
+    onConfirm: (configName: string, prefixes: string[]) => Promise<void>;
+    existingConfigs: string[];
 }
 
 // Props for DeletePrefixDialog

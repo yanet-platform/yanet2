@@ -428,7 +428,7 @@ export const createEmptyGraph = (): FunctionGraphState => {
             {
                 id: OUTPUT_NODE_ID,
                 type: NODE_TYPE_OUTPUT,
-                position: { x: 600, y: 200 },
+                position: { x: 1000, y: 200 },
                 data: { label: 'Output' },
             },
         ],
@@ -625,8 +625,8 @@ export const layoutGraphTopologically = (
     }
 
     // Layout constants
-    const horizontalSpacing = 200;
-    const verticalSpacing = 100;
+    const horizontalSpacing = 300;
+    const verticalSpacing = 150;
     const startX = 100;
     const centerY = 200;
 

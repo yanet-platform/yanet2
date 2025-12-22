@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Box, Dialog, TextInput } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
 import type { AddPrefixDialogProps } from './types';
@@ -9,14 +9,34 @@ export const AddPrefixDialog: React.FC<AddPrefixDialogProps> = ({
     open,
     onClose,
     onConfirm,
+    existingConfigs,
 }) => {
+    const [configName, setConfigName] = useState<string>('');
     const [prefixInput, setPrefixInput] = useState<string>('');
     const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
+    // Reset form when dialog opens
+    useEffect(() => {
+        if (open) {
+            setConfigName('');
+            setPrefixInput('');
+            setIsSubmitting(false);
+        }
+    }, [open]);
+
     const handleClose = useCallback(() => {
+        setConfigName('');
         setPrefixInput('');
         onClose();
     }, [onClose]);
+
+    const validateConfigName = useCallback((): string | undefined => {
+        const trimmed = configName.trim();
+        if (!trimmed) {
+            return 'Config name is required';
+        }
+        return undefined;
+    }, [configName]);
 
     const validatePrefix = useCallback((): string | undefined => {
         const trimmed = prefixInput.trim();
@@ -38,24 +58,32 @@ export const AddPrefixDialog: React.FC<AddPrefixDialogProps> = ({
     }, [prefixInput]);
 
     const handleConfirm = useCallback(async () => {
-        const trimmed = prefixInput.trim();
-        if (!trimmed) return;
+        const trimmedConfig = configName.trim();
+        const trimmedPrefix = prefixInput.trim();
+        if (!trimmedConfig || !trimmedPrefix) return;
 
-        const error = validatePrefix();
-        if (error) return;
+        const configError = validateConfigName();
+        const prefixError = validatePrefix();
+        if (configError || prefixError) return;
 
         setIsSubmitting(true);
         try {
-            await onConfirm([trimmed]);
+            await onConfirm(trimmedConfig, [trimmedPrefix]);
             handleClose();
         } finally {
             setIsSubmitting(false);
         }
-    }, [prefixInput, validatePrefix, onConfirm, handleClose]);
+    }, [configName, prefixInput, validateConfigName, validatePrefix, onConfirm, handleClose]);
 
-    const error = validatePrefix();
-    const isEmpty = prefixInput.trim().length === 0;
-    const canSubmit = !error && !isEmpty && !isSubmitting;
+    const configNameError = validateConfigName();
+    const prefixError = validatePrefix();
+    const isConfigNameEmpty = configName.trim().length === 0;
+    const isPrefixEmpty = prefixInput.trim().length === 0;
+    const canSubmit = !configNameError && !prefixError && !isConfigNameEmpty && !isPrefixEmpty && !isSubmitting;
+
+    const isExistingConfig = useMemo(() => {
+        return existingConfigs.includes(configName.trim());
+    }, [existingConfigs, configName]);
 
     // Handle Ctrl+Enter / Cmd+Enter
     useEffect(() => {
@@ -78,17 +106,31 @@ export const AddPrefixDialog: React.FC<AddPrefixDialogProps> = ({
             <Dialog.Body>
                 <Box className="decap-dialog__body">
                     <FormField
+                        label="Config Name"
+                        required
+                        hint={isExistingConfig ? 'Config exists - prefix will be added to it' : 'New config will be created'}
+                    >
+                        <TextInput
+                            value={configName}
+                            onUpdate={setConfigName}
+                            placeholder="Enter config name"
+                            className="decap-dialog__text-input"
+                            validationState={!isConfigNameEmpty && configNameError ? 'invalid' : undefined}
+                            errorMessage={!isConfigNameEmpty ? configNameError : undefined}
+                        />
+                    </FormField>
+                    <FormField
                         label="Prefix (CIDR)"
                         required
-                        hint="Enter prefix in CIDR notation. Press Ctrl+Enter to save."
+                        hint="Press Ctrl+Enter to save."
                     >
                         <TextInput
                             value={prefixInput}
                             onUpdate={setPrefixInput}
                             placeholder="192.168.1.0/24 or 2001:db8::/32"
                             className="decap-dialog__text-input"
-                            validationState={error ? 'invalid' : undefined}
-                            errorMessage={error}
+                            validationState={prefixError ? 'invalid' : undefined}
+                            errorMessage={prefixError}
                             autoFocus
                         />
                     </FormField>

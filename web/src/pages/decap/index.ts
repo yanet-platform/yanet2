@@ -16,5 +16,4 @@ export * from './PrefixTableHeader';
 export * from './PrefixSearchBar';
 export * from './AddPrefixDialog';
 export * from './DeletePrefixDialog';
-export * from './AddConfigDialog';
 export * from './ConfigTabs';

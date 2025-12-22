@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Box } from '@gravity-ui/uikit';
 import { PageLayout, PageLoader, EmptyState } from '../components';
 import type { Rule } from '../api/acl';
+import { useSidebarContext } from '../types';
 import {
     useAclData,
     AclPageHeader,
@@ -17,6 +18,7 @@ import {
 import './acl/acl.css';
 
 const AclPage: React.FC = () => {
+    const { setSidebarDisabled } = useSidebarContext();
     const {
         configs,
         configData,
@@ -59,6 +61,11 @@ const AclPage: React.FC = () => {
         window.addEventListener('beforeunload', handleBeforeUnload);
         return () => window.removeEventListener('beforeunload', handleBeforeUnload);
     }, [anyUnsavedChanges]);
+
+    // Disable sidebar during save operation
+    useEffect(() => {
+        setSidebarDisabled(saving);
+    }, [saving, setSidebarDisabled]);
 
     // Search state for rules table
     const [searchQuery, setSearchQuery] = useState('');

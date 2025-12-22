@@ -1,56 +1,10 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Dialog, Box, Text, TextInput, Label } from '@gravity-ui/uikit';
+import { Dialog, Box, Text, TextInput, Loader } from '@gravity-ui/uikit';
 import { FileArrowUp } from '@gravity-ui/icons';
 import type { UploadYamlDialogProps } from '../types';
 import type { Rule } from '../../../api/acl';
-import { parseYamlConfig, formatIPNet } from '../yamlParser';
-import { ACTION_LABELS } from '../constants';
+import { parseYamlConfig } from '../yamlParser';
 import './UploadYamlDialog.css';
-
-// Preview component for parsed rules
-interface RulesPreviewProps {
-    rules: Rule[];
-    maxDisplay?: number;
-}
-
-const RulesPreview: React.FC<RulesPreviewProps> = ({ rules, maxDisplay = 5 }) => {
-    const displayRules = rules.slice(0, maxDisplay);
-    const remaining = rules.length - maxDisplay;
-
-    return (
-        <Box className="rules-preview">
-            <Text variant="body-2" className="rules-preview__title">
-                Preview ({rules.length} rule{rules.length !== 1 ? 's' : ''}):
-            </Text>
-            <Box className="rules-preview__container">
-                {displayRules.map((rule, index) => {
-                    const srcs = rule.srcs?.map(formatIPNet).join(', ') || '*';
-                    const dsts = rule.dsts?.map(formatIPNet).join(', ') || '*';
-                    const action = ACTION_LABELS[rule.action ?? 0];
-
-                    return (
-                        <Box
-                            key={index}
-                            className={`rules-preview__item ${index < displayRules.length - 1 ? 'rules-preview__item--with-border' : ''}`}
-                        >
-                            <Text variant="body-2" className="rules-preview__rule-text">
-                                #{index + 1}: {srcs} → {dsts}{' '}
-                                <Label theme={action === 'PASS' ? 'success' : 'danger'} size="xs">
-                                    {action}
-                                </Label>
-                            </Text>
-                        </Box>
-                    );
-                })}
-                {remaining > 0 && (
-                    <Text variant="body-2" color="secondary" className="rules-preview__more">
-                        ... and {remaining} more rule{remaining !== 1 ? 's' : ''}
-                    </Text>
-                )}
-            </Box>
-        </Box>
-    );
-};
 
 export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
     open,
@@ -63,6 +17,7 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
     const [parsedRules, setParsedRules] = useState<Rule[] | null>(null);
     const [parseError, setParseError] = useState<string | null>(null);
     const [configNameError, setConfigNameError] = useState<string | undefined>();
+    const [isReading, setIsReading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Reset form when dialog opens/closes
@@ -73,6 +28,7 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
             setParsedRules(null);
             setParseError(null);
             setConfigNameError(undefined);
+            setIsReading(false);
         }
     }, [open]);
 
@@ -83,6 +39,7 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
         setFile(selectedFile);
         setParsedRules(null);
         setParseError(null);
+        setIsReading(true);
 
         // Read and parse file
         const reader = new FileReader();
@@ -95,11 +52,14 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
             } catch (err) {
                 setParseError(err instanceof Error ? err.message : 'Failed to parse YAML file');
                 setParsedRules(null);
+            } finally {
+                setIsReading(false);
             }
         };
         reader.onerror = () => {
             setParseError('Failed to read file');
             setParsedRules(null);
+            setIsReading(false);
         };
         reader.readAsText(selectedFile);
     }, []);
@@ -136,7 +96,7 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
     }, [configName, parsedRules, validateConfigName, onConfirm]);
 
     const isExistingConfig = existingConfigs.includes(configName.trim());
-    const canConfirm = configName.trim() && parsedRules && !configNameError;
+    const canConfirm = configName.trim() && parsedRules && !configNameError && !isReading;
 
     return (
         <Dialog open={open} onClose={onClose}>
@@ -186,13 +146,24 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
                                 }
                             }}
                         >
-                            <FileArrowUp width={32} height={32} className="upload-yaml-dialog__dropzone-icon" />
-                            {file ? (
-                                <Text variant="body-2">{file.name}</Text>
+                            {isReading ? (
+                                <>
+                                    <Loader size="m" />
+                                    <Text variant="body-2" color="secondary">
+                                        Reading file...
+                                    </Text>
+                                </>
                             ) : (
-                                <Text variant="body-2" color="secondary">
-                                    Click to select YAML file
-                                </Text>
+                                <>
+                                    <FileArrowUp width={32} height={32} className="upload-yaml-dialog__dropzone-icon" />
+                                    {file ? (
+                                        <Text variant="body-2">{file.name}</Text>
+                                    ) : (
+                                        <Text variant="body-2" color="secondary">
+                                            Click to select YAML file
+                                        </Text>
+                                    )}
+                                </>
                             )}
                         </div>
                     </Box>
@@ -206,8 +177,14 @@ export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
                         </Box>
                     )}
 
-                    {/* Rules preview */}
-                    {parsedRules && <RulesPreview rules={parsedRules} />}
+                    {/* Success message */}
+                    {parsedRules && !isReading && (
+                        <Box className="upload-yaml-dialog__success">
+                            <Text variant="body-2" color="positive">
+                                Successfully parsed {parsedRules.length} rule{parsedRules.length !== 1 ? 's' : ''}
+                            </Text>
+                        </Box>
+                    )}
                 </Box>
             </Dialog.Body>
             <Dialog.Footer

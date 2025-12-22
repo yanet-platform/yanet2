@@ -3,13 +3,13 @@ import { Box, Text, Flex, Button } from '@gravity-ui/uikit';
 import './decap.css';
 
 export interface DecapPageHeaderProps {
-    onAddConfig: () => void;
+    onAddPrefix: () => void;
     onDeletePrefixes: () => void;
     isDeleteDisabled: boolean;
 }
 
 export const DecapPageHeader: React.FC<DecapPageHeaderProps> = ({
-    onAddConfig,
+    onAddPrefix,
     onDeletePrefixes,
     isDeleteDisabled,
 }) => (
@@ -17,8 +17,8 @@ export const DecapPageHeader: React.FC<DecapPageHeaderProps> = ({
         <Text variant="header-1">Decap</Text>
         <Box className="decap-page-header__spacer" />
         <Box className="decap-page-header__actions">
-            <Button view="action" onClick={onAddConfig}>
-                Add Config
+            <Button view="action" onClick={onAddPrefix}>
+                Add Prefix
             </Button>
             <Button
                 view="outlined-danger"

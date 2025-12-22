@@ -13,14 +13,12 @@ export interface PrefixTableProps {
     prefixes: PrefixItem[];
     selectedIds: Set<string>;
     onSelectionChange: (ids: Set<string>) => void;
-    onAddPrefix: () => void;
 }
 
 export const PrefixTable: React.FC<PrefixTableProps> = ({
     prefixes,
     selectedIds,
     onSelectionChange,
-    onAddPrefix,
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const parentRef = useRef<HTMLDivElement>(null);
@@ -145,7 +143,6 @@ export const PrefixTable: React.FC<PrefixTableProps> = ({
                 statsText={statsText}
                 selectedText={selectedText}
                 onClearSelection={handleClearSelection}
-                onAddPrefix={onAddPrefix}
             />
 
             {/* Table container */}

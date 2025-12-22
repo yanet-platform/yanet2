@@ -9,6 +9,7 @@ interface MainMenuProps {
     currentPage: PageId;
     onPageChange: (pageId: PageId) => void;
     renderContent: () => React.JSX.Element;
+    disabled?: boolean;
 }
 
 type MenuItem = AsideHeaderMenuItem & {
@@ -16,98 +17,37 @@ type MenuItem = AsideHeaderMenuItem & {
     current: boolean;
 }
 
-const MainMenu = ({ currentPage, onPageChange, renderContent }: MainMenuProps): React.JSX.Element => {
+const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }: MainMenuProps): React.JSX.Element => {
     const [compact, setCompact] = useState<boolean>(false);
 
+    const createMenuItem = (id: PageId, title: string, icon: MenuItem['icon']): MenuItem => ({
+        id,
+        title,
+        icon,
+        current: currentPage === id,
+        onItemClick: disabled ? undefined : () => {
+            onPageChange(id);
+        },
+        className: disabled ? 'main-menu__item--disabled' : undefined,
+    });
+
     const menuItems: MenuItem[] = [
-        {
-            id: 'inspect',
-            title: 'Inspect',
-            icon: Eye,
-            current: currentPage === 'inspect',
-            onItemClick: () => {
-                onPageChange('inspect');
-            },
-        },
-        {
-            id: 'functions',
-            title: 'Functions',
-            icon: CurlyBracketsFunction,
-            current: currentPage === 'functions',
-            onItemClick: () => {
-                onPageChange('functions');
-            },
-        },
-        {
-            id: 'pipelines',
-            title: 'Pipelines',
-            icon: ListUl,
-            current: currentPage === 'pipelines',
-            onItemClick: () => {
-                onPageChange('pipelines');
-            },
-        },
-        {
-            id: 'devices',
-            title: 'Devices',
-            icon: HardDrive,
-            current: currentPage === 'devices',
-            onItemClick: () => {
-                onPageChange('devices');
-            },
-        },
-        {
-            id: 'neighbours',
-            title: 'Neighbours',
-            icon: Link,
-            current: currentPage === 'neighbours',
-            onItemClick: () => {
-                onPageChange('neighbours');
-            },
-        },
-        {
-            id: 'route',
-            title: 'Route',
-            icon: Route,
-            current: currentPage === 'route',
-            onItemClick: () => {
-                onPageChange('route');
-            },
-        },
-        {
-            id: 'decap',
-            title: 'Decap',
-            icon: LayoutCellsLarge,
-            current: currentPage === 'decap',
-            onItemClick: () => {
-                onPageChange('decap');
-            },
-        },
-        {
-            id: 'acl',
-            title: 'ACL',
-            icon: Shield,
-            current: currentPage === 'acl',
-            onItemClick: () => {
-                onPageChange('acl');
-            },
-        },
-        {
-            id: 'pdump',
-            title: 'Pdump',
-            icon: CirclePlay,
-            current: currentPage === 'pdump',
-            onItemClick: () => {
-                onPageChange('pdump');
-            },
-        },
+        createMenuItem('inspect', 'Inspect', Eye),
+        createMenuItem('functions', 'Functions', CurlyBracketsFunction),
+        createMenuItem('pipelines', 'Pipelines', ListUl),
+        createMenuItem('devices', 'Devices', HardDrive),
+        createMenuItem('neighbours', 'Neighbours', Link),
+        createMenuItem('route', 'Route', Route),
+        createMenuItem('decap', 'Decap', LayoutCellsLarge),
+        createMenuItem('acl', 'ACL', Shield),
+        createMenuItem('pdump', 'Pdump', CirclePlay),
     ];
 
     return (
         <AsideHeader
             headerDecoration
             compact={compact}
-            onChangeCompact={setCompact}
+            onChangeCompact={disabled ? undefined : setCompact}
             menuItems={menuItems}
             logo={{
                 icon: () => <Logo size={24} />,

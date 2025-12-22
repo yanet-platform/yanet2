@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, TextInput, Loader, Label, Text, Button } from '@gravity-ui/uikit';
+import { Box, TextInput, Loader, Label, Text } from '@gravity-ui/uikit';
 import { SEARCH_BAR_HEIGHT } from './constants';
 import './decap.css';
 
@@ -10,7 +10,6 @@ export interface PrefixSearchBarProps {
     statsText: string;
     selectedText: string | null;
     onClearSelection?: () => void;
-    onAddPrefix: () => void;
 }
 
 export const PrefixSearchBar: React.FC<PrefixSearchBarProps> = ({
@@ -20,7 +19,6 @@ export const PrefixSearchBar: React.FC<PrefixSearchBarProps> = ({
     statsText,
     selectedText,
     onClearSelection,
-    onAddPrefix,
 }) => {
     return (
         <Box className="prefix-search-bar" style={{ height: SEARCH_BAR_HEIGHT }}>
@@ -53,9 +51,6 @@ export const PrefixSearchBar: React.FC<PrefixSearchBarProps> = ({
                 )}
             </Box>
             <Box className="prefix-search-bar__spacer" />
-            <Button view="action" onClick={onAddPrefix}>
-                Add Prefix
-            </Button>
         </Box>
     );
 };
