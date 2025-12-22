@@ -52,9 +52,7 @@ export const useDecapData = (): UseDecapDataResult => {
 
                     try {
                         const response = await API.decap.showConfig({
-                            target: {
-                                configName,
-                            },
+                            name: configName,
                         });
 
                         const prefixes = response.prefixes || [];
@@ -119,9 +117,7 @@ export const useDecapData = (): UseDecapDataResult => {
     const reloadConfig = useCallback(async (configName: string): Promise<void> => {
         try {
             const response = await API.decap.showConfig({
-                target: {
-                    configName,
-                },
+                name: configName,
             });
 
             const prefixes = response.prefixes || [];
@@ -141,9 +137,7 @@ export const useDecapData = (): UseDecapDataResult => {
     const addPrefixes = useCallback(async (configName: string, prefixes: string[]): Promise<boolean> => {
         try {
             await API.decap.addPrefixes({
-                target: {
-                    configName,
-                },
+                name: configName,
                 prefixes,
             });
 
@@ -159,9 +153,7 @@ export const useDecapData = (): UseDecapDataResult => {
     const removePrefixes = useCallback(async (configName: string, prefixes: string[]): Promise<boolean> => {
         try {
             await API.decap.removePrefixes({
-                target: {
-                    configName,
-                },
+                name: configName,
                 prefixes,
             });
 

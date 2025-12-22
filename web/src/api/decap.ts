@@ -1,10 +1,9 @@
 import { createService, type CallOptions } from './client';
-import type { TargetModule } from './common';
 
 // Decap types based on decap.proto
 
 export interface ShowConfigRequest {
-    target?: TargetModule;
+    name?: string;
 }
 
 export interface ShowConfigResponse {
@@ -12,14 +11,14 @@ export interface ShowConfigResponse {
 }
 
 export interface AddPrefixesRequest {
-    target?: TargetModule;
+    name?: string;
     prefixes?: string[];
 }
 
 export interface AddPrefixesResponse { }
 
 export interface RemovePrefixesRequest {
-    target?: TargetModule;
+    name?: string;
     prefixes?: string[];
 }
 

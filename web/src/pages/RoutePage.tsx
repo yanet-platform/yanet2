@@ -87,9 +87,7 @@ const RoutePage: React.FC = () => {
 
         try {
             await API.route.flushRoutes({
-                target: {
-                    configName: activeConfigTab,
-                },
+                name: activeConfigTab,
             });
             toaster.success('flush-route-success', `Flushed routes for ${activeConfigTab}`);
         } catch (err) {
@@ -146,9 +144,7 @@ const RoutePage: React.FC = () => {
 
         try {
             await API.route.insertRoute({
-                target: {
-                    configName,
-                },
+                name: configName,
                 prefix: addRouteForm.prefix,
                 nexthopAddr: addRouteForm.nexthopAddr,
                 doFlush: addRouteForm.doFlush,
@@ -201,9 +197,7 @@ const RoutePage: React.FC = () => {
                 }
 
                 await API.route.deleteRoute({
-                    target: {
-                        configName: activeConfigTab,
-                    },
+                    name: activeConfigTab,
                     prefix: route.prefix,
                     nexthopAddr: route.nextHop,
                     doFlush: true,

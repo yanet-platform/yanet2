@@ -17,10 +17,6 @@ export interface Device {
     output?: DevicePipeline[];
 }
 
-export interface TargetDevice {
-    name?: string;
-}
-
 // List devices request/response
 export interface ListDevicesRequest { }
 
@@ -30,7 +26,7 @@ export interface ListDevicesResponse {
 
 // Plain device update request/response
 export interface UpdateDevicePlainRequest {
-    target?: TargetDevice;
+    name?: string;
     device?: Device;
 }
 
@@ -40,7 +36,7 @@ export interface UpdateDevicePlainResponse {
 
 // VLAN device update request/response
 export interface UpdateDeviceVlanRequest {
-    target?: TargetDevice;
+    name?: string;
     device?: Device;
     vlan?: number;
 }

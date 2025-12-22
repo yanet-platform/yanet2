@@ -42,9 +42,7 @@ export const useRouteData = (): UseRouteDataResult => {
                     configsList.map(async (configName) => {
                         try {
                             const routesResponse = await API.route.showRoutes({
-                                target: {
-                                    configName,
-                                },
+                                name: configName,
                             });
                             const routes = routesResponse.routes || [];
                             routesMap.set(configName, routes);
@@ -97,9 +95,7 @@ export const useRouteData = (): UseRouteDataResult => {
         for (const configName of configsList) {
             try {
                 const routesResponse = await API.route.showRoutes({
-                    target: {
-                        configName,
-                    },
+                    name: configName,
                 });
                 routesMap.set(configName, routesResponse.routes || []);
             } catch (err) {

@@ -1,5 +1,4 @@
 import { createService, createStreamingService, type CallOptions, type StreamCallbacks } from './client';
-import type { TargetModule } from './common';
 
 // Pdump configuration modes (bitmap) - matches dataplane/mode.h
 export const PDUMP_MODE = {
@@ -46,29 +45,29 @@ export const pdumpApi = {
         return pdumpService.call<ListConfigsResponse>('ListConfigs', options);
     },
 
-    showConfig: (target: TargetModule, options?: CallOptions): Promise<ShowConfigResponse> => {
-        return pdumpService.callWithBody<ShowConfigResponse>('ShowConfig', { target }, options);
+    showConfig: (name: string, options?: CallOptions): Promise<ShowConfigResponse> => {
+        return pdumpService.callWithBody<ShowConfigResponse>('ShowConfig', { name }, options);
     },
 
     setConfig: (
-        target: TargetModule,
+        name: string,
         config: PdumpConfig,
         updateMask?: { paths?: string[] },
         options?: CallOptions
     ): Promise<void> => {
         return pdumpService.callWithBody<void>(
             'SetConfig',
-            { target, config, updateMask },
+            { name, config, updateMask },
             options
         );
     },
 
     readDump: (
-        target: TargetModule,
+        name: string,
         callbacks: StreamCallbacks<PdumpRecord>,
         signal?: AbortSignal
     ): void => {
-        pdumpStreamService.stream<PdumpRecord>('ReadDump', { target }, callbacks, signal);
+        pdumpStreamService.stream<PdumpRecord>('ReadDump', { name }, callbacks, signal);
     },
 };
 

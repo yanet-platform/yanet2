@@ -1,5 +1,4 @@
 import { createService, type CallOptions } from './client';
-import type { TargetModule } from './common';
 
 // ACL types based on aclpb/acl.proto
 
@@ -67,25 +66,25 @@ export interface SyncConfig {
 // Request/Response types
 
 export interface AclUpdateConfigRequest {
-    target?: TargetModule;
+    name?: string;
     rules?: Rule[];
 }
 
 export interface AclUpdateConfigResponse { }
 
 export interface AclShowConfigRequest {
-    target?: TargetModule;
+    name?: string;
 }
 
 export interface AclShowConfigResponse {
-    target?: TargetModule;
+    name?: string;
     rules?: Rule[];
     fwstateMap?: MapConfig;
     fwstateSync?: SyncConfig;
 }
 
 export interface AclDeleteConfigRequest {
-    target?: TargetModule;
+    name?: string;
 }
 
 export interface AclDeleteConfigResponse {
@@ -99,7 +98,7 @@ export interface AclListConfigsResponse {
 }
 
 export interface AclUpdateFWStateConfigRequest {
-    target?: TargetModule;
+    name?: string;
     mapConfig?: MapConfig;
     syncConfig?: SyncConfig;
 }

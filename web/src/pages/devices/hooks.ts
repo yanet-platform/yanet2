@@ -118,20 +118,16 @@ export const useDeviceData = (): UseDeviceDataResult => {
                 })),
             };
 
-            const target = {
-                name: device.id.name,
-            };
-
             let response;
             if (device.type === 'vlan') {
                 response = await API.devices.updateVlan({
-                    target,
+                    name: device.id.name,
                     device: devicePayload,
                     vlan: device.vlanId ?? 0,
                 });
             } else {
                 response = await API.devices.updatePlain({
-                    target,
+                    name: device.id.name,
                     device: devicePayload,
                 });
             }

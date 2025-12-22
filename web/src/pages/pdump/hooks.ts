@@ -15,7 +15,7 @@ export const usePdumpConfigs = () => {
         const configInfos = await Promise.all(
             configs.map(async (name) => {
                 try {
-                    const configResponse = await pdumpApi.showConfig({ configName: name });
+                    const configResponse = await pdumpApi.showConfig(name);
                     return {
                         name,
                         config: configResponse.config,
@@ -46,7 +46,7 @@ export const usePdumpConfigs = () => {
 export const usePdumpConfig = (configName: string) => {
     const updateConfig = useCallback(
         async (config: PdumpConfig) => {
-            await pdumpApi.setConfig({ configName }, config);
+            await pdumpApi.setConfig(configName, config);
         },
         [configName]
     );
@@ -83,7 +83,7 @@ export const usePdumpCapture = () => {
         });
 
         pdumpApi.readDump(
-            { configName },
+            configName,
             {
                 onMessage: (record: PdumpRecord) => {
                     const packetData = record.data

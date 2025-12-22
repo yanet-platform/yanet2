@@ -1,5 +1,4 @@
 import { createService, type CallOptions } from './client';
-import type { TargetModule } from './common';
 
 // Route types
 
@@ -29,7 +28,7 @@ export interface ListConfigsResponse {
 }
 
 export interface ShowRoutesRequest {
-    target?: TargetModule;
+    name?: string;
     ipv4Only?: boolean; // ipv4_only
     ipv6Only?: boolean; // ipv6_only
 }
@@ -39,7 +38,7 @@ export interface ShowRoutesResponse {
 }
 
 export interface InsertRouteRequest {
-    target?: TargetModule;
+    name?: string;
     prefix?: string;
     nexthopAddr?: string; // nexthop_addr
     doFlush?: boolean; // do_flush
@@ -49,7 +48,7 @@ export interface InsertRouteResponse {
 }
 
 export interface DeleteRouteRequest {
-    target?: TargetModule;
+    name?: string;
     prefix?: string;
     nexthopAddr?: string; // nexthop_addr
     doFlush?: boolean; // do_flush
@@ -59,7 +58,7 @@ export interface DeleteRouteResponse {
 }
 
 export interface FlushRoutesRequest {
-    target?: TargetModule;
+    name?: string;
 }
 
 export interface FlushRoutesResponse {

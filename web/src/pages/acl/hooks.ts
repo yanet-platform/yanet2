@@ -74,7 +74,7 @@ export const useAclData = (): UseAclDataResult => {
                     configsList.map(async (configName) => {
                         try {
                             const response = await API.acl.showConfig({
-                                target: { configName },
+                                name: configName,
                             });
                             const rules = response.rules || [];
                             dataMap.set(configName, {
@@ -126,7 +126,7 @@ export const useAclData = (): UseAclDataResult => {
                 configsList.map(async (configName) => {
                     try {
                         const response = await API.acl.showConfig({
-                            target: { configName },
+                            name: configName,
                         });
                         const rules = response.rules || [];
                         dataMap.set(configName, {
@@ -267,7 +267,7 @@ export const useAclData = (): UseAclDataResult => {
         setSaving(true);
         try {
             await API.acl.updateConfig({
-                target: { configName },
+                name: configName,
                 rules: data.rules,
             });
             markConfigSaved(configName);
@@ -291,7 +291,7 @@ export const useAclData = (): UseAclDataResult => {
         setSaving(true);
         try {
             await API.acl.updateFWStateConfig({
-                target: { configName },
+                name: configName,
                 mapConfig: data.fwstateMap,
                 syncConfig: data.fwstateSync,
             });
@@ -309,7 +309,7 @@ export const useAclData = (): UseAclDataResult => {
     const deleteConfig = useCallback(async (configName: string): Promise<boolean> => {
         try {
             await API.acl.deleteConfig({
-                target: { configName },
+                name: configName,
             });
 
             setConfigData((prev) => {

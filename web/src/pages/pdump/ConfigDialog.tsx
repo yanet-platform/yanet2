@@ -87,7 +87,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                 paths.push('ring_size');
             }
 
-            await pdumpApi.setConfig({ configName: targetConfigName }, config, { paths });
+            await pdumpApi.setConfig(targetConfigName, config, { paths });
             toaster.success('pdump-config-saved', isCreate ? 'Configuration created' : 'Configuration saved');
             onSaved();
             onClose();
