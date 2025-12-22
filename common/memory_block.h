@@ -164,64 +164,7 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 		return NULL;
 	}
 	size_t parent_pool_index = pool_index + __builtin_ctz(mask);
-
-	// if (pool->free == 0) {
-	//               /*
-	//                * Look for the first parent pool with free memory
-	//                block
-	//                * available and then recursively borrow memory block.
-	//                */
-	//              size_t parent_pool_index = pool_index + 1;
-	//              while (parent_pool_index < MEMORY_BLOCK_ALLOCATOR_EXP
-	// &&
-	//                       /*                      ADDR_OF(
-	//                                              allocator,
-	//  allocator->pools[parent_pool_index].free_list
-	//                                      ) == NULL) {
-	//                                      */
-	//                       allocator->pools[parent_pool_index].free == 0)
-	// {
-	//                        ++parent_pool_index;
-	//                }
-	//
-	//                if (parent_pool_index == MEMORY_BLOCK_ALLOCATOR_EXP)
-	// {
-	//                        return NULL;
-	//                        /*
-	//                                        FIXME: not sure should a
-	// block
-	//                   allocator try to seize new memory regions or not.
-	//                                        */
-	//                        /*
-	//                                        size_t alloc_size =
-	//                   block_allocator_pool_size( allocator,
-	//                   parent_pool_index - 1
-	//                                        );
-	//
-	//                                        void *data =
-	//                   allocator->alloc_func( alloc_size,
-	//                   allocator->alloc_func_data
-	//                                        );
-	//                                        if (data == NULL)
-	//                                                return NULL;
-	//
-	//                                        struct block_allocator_pool
-	//                   *root = allocator->pools +
-	// MEMORY_BLOCK_ALLOCATOR_EXP
-	//                   - 1;
-	//                                        ++root->free;
-	//                                        root->free_list = data;
-	//                                        *(void **)data = NULL;
-	//                                        --parent_pool_index;
-	//                */
-	//                }
-	//
-	//                while (parent_pool_index-- > pool_index) {
-	//                        block_allocator_pool_borrow(
-	//                                allocator, parent_pool_index
-	//                        );
-	//                }
-
+	
 	while (parent_pool_index-- > pool_index) {
 		block_allocator_pool_borrow(allocator, parent_pool_index);
 	}
