@@ -5,11 +5,14 @@
 #include <stdint.h>
 
 #include "asan.h"
+#include "likely.h"
 
 #include "memory_address.h"
 
+#define MEMORY_BLOCK_MAX_ALIGN 64
+
 #ifdef HAVE_ASAN
-#define ASAN_RED_ZONE 32
+#define ASAN_RED_ZONE MEMORY_BLOCK_MAX_ALIGN
 #else
 #define ASAN_RED_ZONE 0
 #endif
@@ -45,6 +48,9 @@ typedef void *(*block_allocator_alloc_func)(size_t size, void *data);
 
 struct block_allocator {
 	struct block_allocator_pool pools[MEMORY_BLOCK_ALLOCATOR_EXP];
+
+	// bitwise mask of not empty pools
+	uint32_t not_empty_mask;
 };
 
 // FIXME: the routine must accept block sizes
@@ -57,6 +63,8 @@ block_allocator_init(struct block_allocator *allocator) {
 		allocator->pools[pool_idx].borrow = 0;
 		allocator->pools[pool_idx].free_list = NULL;
 	}
+
+	allocator->not_empty_mask = 0;
 
 	return 0;
 }
@@ -100,7 +108,10 @@ block_allocator_pool_get(
 	asan_poison_memory_region(result, sizeof(void *));
 
 	++pool->allocate;
-	--pool->free;
+	if (--pool->free == 0) { // should be compiled to cmov, no branch
+		size_t index = (size_t)(pool - allocator->pools);
+		allocator->not_empty_mask &= ~(1u << index);
+	}
 
 	return result;
 }
@@ -129,6 +140,7 @@ block_allocator_pool_borrow(
 
 	++parent_pool->borrow;
 	pool->free += 2;
+	allocator->not_empty_mask |= 1 << pool_index;
 
 	asan_poison_memory_region(next_data, sizeof(void *));
 	asan_poison_memory_region(data, sizeof(void *));
@@ -147,57 +159,72 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 	size_t pool_index = block_allocator_pool_index(allocator, size);
 
 	struct block_allocator_pool *pool = allocator->pools + pool_index;
+	uint32_t mask = allocator->not_empty_mask >> pool_index;
+	if (unlikely(mask == 0)) {
+		return NULL;
+	}
+	size_t parent_pool_index = pool_index + __builtin_ctz(mask);
 
-	if (pool->free == 0) {
-		/*
-		 * Look for the first parent pool with free memory block
-		 * available and then recursively borrow memory block.
-		 */
-		size_t parent_pool_index = pool_index + 1;
-		while (parent_pool_index < MEMORY_BLOCK_ALLOCATOR_EXP &&
-		       /*		       ADDR_OF(
-					      allocator,
-					      allocator->pools[parent_pool_index].free_list
-				      ) == NULL) {
-				      */
-		       allocator->pools[parent_pool_index].free == 0) {
-			++parent_pool_index;
-		}
+	// -       if (pool->free == 0) {
+	// -               /*
+	// -                * Look for the first parent pool with free memory
+	// block
+	// -                * available and then recursively borrow memory
+	// block.
+	// -                */
+	// -               size_t parent_pool_index = pool_index + 1;
+	// -               while (parent_pool_index < MEMORY_BLOCK_ALLOCATOR_EXP
+	// &&
+	// -                      /*                      ADDR_OF(
+	// -                                             allocator,
+	// - allocator->pools[parent_pool_index].free_list
+	// -                                     ) == NULL) {
+	// -                                     */
+	// -                      allocator->pools[parent_pool_index].free == 0)
+	// {
+	// -                       ++parent_pool_index;
+	// -               }
+	// -
+	// -               if (parent_pool_index == MEMORY_BLOCK_ALLOCATOR_EXP)
+	// {
+	// -                       return NULL;
+	// -                       /*
+	// -                                       FIXME: not sure should a
+	// block
+	// -                  allocator try to seize new memory regions or not.
+	// -                                       */
+	// -                       /*
+	// -                                       size_t alloc_size =
+	// -                  block_allocator_pool_size( allocator,
+	// -                  parent_pool_index - 1
+	// -                                       );
+	// -
+	// -                                       void *data =
+	// -                  allocator->alloc_func( alloc_size,
+	// -                  allocator->alloc_func_data
+	// -                                       );
+	// -                                       if (data == NULL)
+	// -                                               return NULL;
+	// -
+	// -                                       struct block_allocator_pool
+	// -                  *root = allocator->pools +
+	// MEMORY_BLOCK_ALLOCATOR_EXP
+	// -                  - 1;
+	// -                                       ++root->free;
+	// -                                       root->free_list = data;
+	// -                                       *(void **)data = NULL;
+	// -                                       --parent_pool_index;
+	// -               */
+	// -               }
+	// -
+	// -               while (parent_pool_index-- > pool_index) {
+	// -                       block_allocator_pool_borrow(
+	// -                               allocator, parent_pool_index
+	// -                       );
+	// -               }
 
-		if (parent_pool_index == MEMORY_BLOCK_ALLOCATOR_EXP) {
-			return NULL;
-			/*
-					FIXME: not sure should a block
-		   allocator try to seize new memory regions or not.
-					*/
-			/*
-					size_t alloc_size =
-		   block_allocator_pool_size( allocator,
-		   parent_pool_index - 1
-					);
-
-					void *data =
-		   allocator->alloc_func( alloc_size,
-		   allocator->alloc_func_data
-					);
-					if (data == NULL)
-						return NULL;
-
-					struct block_allocator_pool
-		   *root = allocator->pools + MEMORY_BLOCK_ALLOCATOR_EXP
-		   - 1;
-					++root->free;
-					root->free_list = data;
-					*(void **)data = NULL;
-					--parent_pool_index;
-		*/
-		}
-
-		while (parent_pool_index-- > pool_index) {
-			block_allocator_pool_borrow(
-				allocator, parent_pool_index
-			);
-		}
+	while (parent_pool_index-- > pool_index) {
+		block_allocator_pool_borrow(allocator, parent_pool_index);
 	}
 
 	void *memory = block_allocator_pool_get(allocator, pool);
@@ -222,6 +249,7 @@ block_allocator_bfree_internal(
 	SET_OFFSET_OF((void **)block, ADDR_OF(&pool->free_list));
 	SET_OFFSET_OF(&pool->free_list, block);
 	++pool->free;
+	allocator->not_empty_mask |= 1 << pool_index;
 
 	asan_poison_memory_region(block, size);
 }

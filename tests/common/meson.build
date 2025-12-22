@@ -48,7 +48,7 @@ test('interval_counter', interval_counter_test, suite: ['common'])
 
 rcu_test = executable(
   'rcu_test',
-  ['rcu.c'],
+  ['rcu_test.c'],
   c_args: yanet_test_c_args,
   link_args: yanet_link_args,
   dependencies: dependencies
@@ -62,3 +62,12 @@ rcu_bench = executable(
   link_args: yanet_link_args,
   dependencies: dependencies
 )
+
+balloc_test = executable(
+  'balloc_test',
+  ['balloc_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies
+)
+test('balloc', balloc_test, suite: ['common'])
