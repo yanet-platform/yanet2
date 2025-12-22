@@ -11,10 +11,10 @@ import "C"
 
 import (
 	"fmt"
-	"net/netip"
 	"runtime"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/common/go/filter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -43,17 +43,16 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	}, nil
 }
 
+func FreeModuleConfig(module *ModuleConfig) {
+	C.forward_module_config_free(module.asRawPtr())
+}
+
 func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
 	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
 func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
-}
-
-type vlanRange struct {
-	from uint16
-	to   uint16
 }
 
 type forwardMode int
@@ -68,246 +67,134 @@ type forwardRule struct {
 	target     string
 	mode       forwardMode
 	counter    string
-	devices    []string
-	vlanRanges []vlanRange
-	srcs       []netip.Prefix
-	dsts       []netip.Prefix
+	devices    []filter.Device
+	vlanRanges []filter.VlanRange
+	src4s      []filter.IPNet4
+	dst4s      []filter.IPNet4
+	src6s      []filter.IPNet6
+	dst6s      []filter.IPNet6
 }
 
 // L2ForwardEnable configures a device for L2 forwarding
 func (m *ModuleConfig) Update(rules []forwardRule) error {
-	deviceCount := 0
-	vlanRangeCount := 0
+	cRules := make([]C.struct_forward_rule, len(rules))
 
-	srcNet4Count := 0
-	dstNet4Count := 0
+	for idx, rule := range rules {
+		cTarget := C.CString(rule.target)
+		C.strncpy(&cRules[idx].target[0], cTarget, C.CP_DEVICE_NAME_LEN)
+		C.free(unsafe.Pointer(cTarget))
 
-	srcNet6Count := 0
-	dstNet6Count := 0
-
-	for _, rule := range rules {
-		for _, src := range rule.srcs {
-			if src.Addr().Is4() {
-				srcNet4Count++
-			} else {
-				srcNet6Count++
-			}
+		if rule.mode == modeIn {
+			cRules[idx].mode = C.FORWARD_MODE_IN
+		} else if rule.mode == modeOut {
+			cRules[idx].mode = C.FORWARD_MODE_OUT
+		} else {
+			cRules[idx].mode = C.FORWARD_MODE_NONE
 		}
 
-		for _, dst := range rule.dsts {
-			if dst.Addr().Is4() {
-				dstNet4Count++
-			} else {
-				dstNet6Count++
-			}
-		}
-
-		deviceCount = deviceCount + len(rule.devices)
-		vlanRangeCount = vlanRangeCount + len(rule.vlanRanges)
+		cCounter := C.CString(rule.counter)
+		C.strncpy(&cRules[idx].counter[0], cCounter, C.COUNTER_NAME_LEN)
+		C.free(unsafe.Pointer(cCounter))
 	}
-
-	cRules := make([]C.struct_forward_rule, 0, len(rules))
-	cSrc4Nets := make([]C.struct_net4, 0, srcNet4Count)
-	cDst4Nets := make([]C.struct_net4, 0, dstNet4Count)
-	cSrc6Nets := make([]C.struct_net6, 0, srcNet6Count)
-	cDst6Nets := make([]C.struct_net6, 0, dstNet6Count)
-	cDevices := make([]C.struct_filter_device, 0, deviceCount)
-	cVlanRanges := make([]C.struct_filter_vlan_range, 0, vlanRangeCount)
-
-	for _, rule := range rules {
-		for _, src := range rule.srcs {
-			addr := src.Addr().AsSlice()
-			if src.Addr().Is4() {
-				net := C.struct_net4{}
-				for idx := range addr {
-					net.addr[idx] = C.uint8_t(addr[idx])
-					if (idx+1)*8 <= src.Bits() {
-						net.mask[idx] = 0xff
-					} else if idx*8 >= src.Bits() {
-						net.mask[idx] = 0
-					} else {
-						net.mask[idx] = 0xff << (src.Bits() - idx*8)
-					}
-				}
-
-				cSrc4Nets = append(cSrc4Nets, net)
-			} else {
-				net := C.struct_net6{}
-				for idx := range addr {
-					net.addr[idx] = C.uint8_t(addr[idx])
-					if (idx+1)*8 <= src.Bits() {
-						net.mask[idx] = 0xff
-					} else if idx*8 >= src.Bits() {
-						net.mask[idx] = 0
-					} else {
-						net.mask[idx] = 0xff << (src.Bits() - idx*8)
-					}
-				}
-
-				cSrc6Nets = append(cSrc6Nets, net)
-			}
-		}
-
-		for _, dst := range rule.dsts {
-			addr := dst.Addr().AsSlice()
-			if dst.Addr().Is4() {
-				net := C.struct_net4{}
-				for idx := range addr {
-					net.addr[idx] = C.uint8_t(addr[idx])
-					if (idx+1)*8 <= dst.Bits() {
-						net.mask[idx] = 0xff
-					} else if idx*8 >= dst.Bits() {
-						net.mask[idx] = 0
-					} else {
-						net.mask[idx] = 0xff << (dst.Bits() - idx*8)
-					}
-				}
-
-				cDst4Nets = append(cDst4Nets, net)
-			} else {
-				net := C.struct_net6{}
-				for idx := range addr {
-					net.addr[idx] = C.uint8_t(addr[idx])
-					if (idx+1)*8 <= dst.Bits() {
-						net.mask[idx] = 0xff
-					} else if idx*8 >= dst.Bits() {
-						net.mask[idx] = 0
-					} else {
-						net.mask[idx] = 0xff << (dst.Bits() - idx*8)
-					}
-				}
-
-				cDst6Nets = append(cDst6Nets, net)
-			}
-		}
-
-		for _, device := range rule.devices {
-			cDevice := C.struct_filter_device{
-				id: 0,
-			}
-			cStr := C.CString(device)
-			C.strncpy(&cDevice.name[0], cStr, C.ACL_DEVICE_NAME_LEN)
-			C.free(unsafe.Pointer(cStr))
-			cDevices = append(
-				cDevices,
-				cDevice,
-			)
-		}
-
-		for _, vlanRange := range rule.vlanRanges {
-			cVlanRanges = append(
-				cVlanRanges,
-				C.struct_filter_vlan_range{
-					from: C.uint16_t(vlanRange.from),
-					to:   C.uint16_t(vlanRange.to),
-				},
-			)
-		}
-	}
-
-	src4Idx := 0
-	dst4Idx := 0
-	src6Idx := 0
-	dst6Idx := 0
-	deviceIdx := 0
-	vlanRangeIdx := 0
 
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()
 
-	for _, rule := range rules {
-		cRule := C.struct_forward_rule{
-			net4: C.struct_filter_net4{
-				src_count: 0,
-				srcs:      nil,
-				dst_count: 0,
-				dsts:      nil,
-			},
-
-			net6: C.struct_filter_net6{
-				src_count: 0,
-				srcs:      nil,
-				dst_count: 0,
-				dsts:      nil,
-			},
-
-			device_count: C.uint16_t(len(rule.devices)),
-			devices:      nil,
-
-			vlan_range_count: C.uint16_t(len(rule.vlanRanges)),
-			vlan_ranges:      nil,
-		}
-
-		for _, src := range rule.srcs {
-			if src.Addr().Is4() {
-				cRule.net4.src_count = cRule.net4.src_count + 1
-			} else {
-				cRule.net6.src_count = cRule.net6.src_count + 1
+	filter.SetupFilterAttr(
+		len(rules),
+		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CDevice] {
+			rule := rules[attrIdx]
+			if itemIdx >= len(rule.devices) {
+				return nil
 			}
-		}
 
-		for _, dst := range rule.dsts {
-			if dst.Addr().Is4() {
-				cRule.net4.dst_count = cRule.net4.dst_count + 1
-			} else {
-				cRule.net6.dst_count = cRule.net6.dst_count + 1
+			return &rule.devices[itemIdx]
+		},
+		func(attrIdx int) filter.ICAttr[filter.CDevice] {
+			return (*filter.CDevices)(unsafe.Pointer(&cRules[attrIdx].devices))
+		},
+		&pinner,
+	)
+
+	filter.SetupFilterAttr(
+		len(rules),
+		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CVlanRange] {
+			rule := rules[attrIdx]
+			if itemIdx >= len(rule.vlanRanges) {
+				return nil
 			}
-		}
 
-		cTarget := C.CString(rule.target)
-		C.strncpy(&cRule.target[0], cTarget, C.CP_DEVICE_NAME_LEN)
-		C.free(unsafe.Pointer(cTarget))
+			return &rule.vlanRanges[itemIdx]
+		},
+		func(attrIdx int) filter.ICAttr[filter.CVlanRange] {
+			return (*filter.CVlanRanges)(unsafe.Pointer(&cRules[attrIdx].vlan_ranges))
+		},
+		&pinner,
+	)
 
-		if rule.mode == modeIn {
-			cRule.mode = C.FORWARD_MODE_IN
-		} else if rule.mode == modeOut {
-			cRule.mode = C.FORWARD_MODE_OUT
-		} else {
-			cRule.mode = C.FORWARD_MODE_NONE
-		}
+	filter.SetupFilterAttr(
+		len(rules),
+		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet4] {
+			rule := rules[attrIdx]
+			if itemIdx >= len(rule.src4s) {
+				return nil
+			}
 
-		cCounter := C.CString(rule.counter)
-		C.strncpy(&cRule.counter[0], cCounter, C.COUNTER_NAME_LEN)
-		C.free(unsafe.Pointer(cCounter))
+			return &rule.src4s[itemIdx]
+		},
+		func(attrIdx int) filter.ICAttr[filter.CNet4] {
+			return (*filter.CNet4s)(unsafe.Pointer(&cRules[attrIdx].src_net4s))
+		},
+		&pinner,
+	)
 
-		if cRule.net4.src_count > 0 {
-			pinner.Pin(&cSrc4Nets[src4Idx])
-			cRule.net4.srcs = &cSrc4Nets[src4Idx]
-		}
-		src4Idx = src4Idx + int(cRule.net4.src_count)
+	filter.SetupFilterAttr(
+		len(rules),
+		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet4] {
+			rule := rules[attrIdx]
+			if itemIdx >= len(rule.dst4s) {
+				return nil
+			}
 
-		if cRule.net4.dst_count > 0 {
-			pinner.Pin(&cDst4Nets[dst4Idx])
-			cRule.net4.dsts = &cDst4Nets[dst4Idx]
-		}
-		dst4Idx = dst4Idx + int(cRule.net4.dst_count)
+			return &rule.dst4s[itemIdx]
+		},
+		func(attrIdx int) filter.ICAttr[filter.CNet4] {
+			return (*filter.CNet4s)(unsafe.Pointer(&cRules[attrIdx].dst_net4s))
+		},
+		&pinner,
+	)
 
-		if cRule.net6.src_count > 0 {
-			pinner.Pin(&cSrc6Nets[src6Idx])
-			cRule.net6.srcs = &cSrc6Nets[src6Idx]
-		}
-		src6Idx = src6Idx + int(cRule.net6.src_count)
+	filter.SetupFilterAttr(
+		len(rules),
+		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet6] {
+			rule := rules[attrIdx]
+			if itemIdx >= len(rule.src6s) {
+				return nil
+			}
 
-		if cRule.net6.dst_count > 0 {
-			pinner.Pin(&cDst6Nets[dst6Idx])
-			cRule.net6.dsts = &cDst6Nets[dst6Idx]
-		}
-		dst6Idx = dst6Idx + int(cRule.net6.dst_count)
+			return &rule.src6s[itemIdx]
+		},
+		func(attrIdx int) filter.ICAttr[filter.CNet6] {
+			return (*filter.CNet6s)(unsafe.Pointer(&cRules[attrIdx].src_net6s))
+		},
+		&pinner,
+	)
 
-		if cRule.device_count > 0 {
-			pinner.Pin(&cDevices[deviceIdx])
-			cRule.devices = &cDevices[deviceIdx]
-		}
-		deviceIdx = deviceIdx + len(rule.devices)
+	filter.SetupFilterAttr(
+		len(rules),
+		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet6] {
+			rule := rules[attrIdx]
+			if itemIdx >= len(rule.dst6s) {
+				return nil
+			}
 
-		if cRule.vlan_range_count > 0 {
-			pinner.Pin(&cVlanRanges[vlanRangeIdx])
-			cRule.vlan_ranges = &cVlanRanges[vlanRangeIdx]
-		}
-		vlanRangeIdx = vlanRangeIdx + len(rule.vlanRanges)
-
-		cRules = append(cRules, cRule)
-	}
+			return &rule.dst6s[itemIdx]
+		},
+		func(attrIdx int) filter.ICAttr[filter.CNet6] {
+			return (*filter.CNet6s)(unsafe.Pointer(&cRules[attrIdx].dst_net6s))
+		},
+		&pinner,
+	)
 
 	rc, err := C.forward_module_config_update(
 		m.asRawPtr(),

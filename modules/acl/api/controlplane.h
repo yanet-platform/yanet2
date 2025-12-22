@@ -23,26 +23,21 @@ acl_module_config_free(struct cp_module *cp_module);
 
 struct acl_rule {
 	uint64_t action;
-
-	struct filter_net6 net6;
-	struct filter_net4 net4;
-
-	uint16_t device_count;
-	struct filter_device *devices;
-
-	uint16_t vlan_range_count;
-	struct filter_vlan_range *vlan_ranges;
-
-	uint16_t proto_range_count;
-	struct filter_proto_range *proto_ranges;
-
-	uint16_t src_port_range_count;
-	struct filter_port_range *src_port_ranges;
-
-	uint16_t dst_port_range_count;
-	struct filter_port_range *dst_port_ranges;
-
 	char counter[COUNTER_NAME_LEN];
+
+	struct filter_devices devices;
+	struct filter_vlan_ranges vlan_ranges;
+
+	struct filter_net4s src_net4s;
+	struct filter_net4s dst_net4s;
+
+	struct filter_net6s src_net6s;
+	struct filter_net6s dst_net6s;
+
+	struct filter_proto_ranges proto_ranges;
+
+	struct filter_port_ranges src_port_ranges;
+	struct filter_port_ranges dst_port_ranges;
 };
 
 int

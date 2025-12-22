@@ -17,6 +17,13 @@ mod args;
 mod format;
 
 #[allow(non_snake_case)]
+pub mod filterpb {
+    use serde::Serialize;
+
+    tonic::include_proto!("filterpb");
+}
+
+#[allow(non_snake_case)]
 pub mod aclpb {
     use serde::Serialize;
 
@@ -38,7 +45,7 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-impl TryFrom<&String> for aclpb::IpNet {
+impl TryFrom<&String> for filterpb::IpNet {
     type Error = Box<dyn Error>;
 
     fn try_from(value: &String) -> Result<Self, Self::Error> {
@@ -46,11 +53,11 @@ impl TryFrom<&String> for aclpb::IpNet {
         if parts.len() == 1 {
             let addr: IpAddr = value.parse()?;
             return Ok(match addr {
-                IpAddr::V4(v4) => aclpb::IpNet {
+                IpAddr::V4(v4) => filterpb::IpNet {
                     addr: v4.octets().to_vec(),
                     mask: [0xff, 0xff, 0xff, 0xff].to_vec(),
                 },
-                IpAddr::V6(v6) => aclpb::IpNet {
+                IpAddr::V6(v6) => filterpb::IpNet {
                     addr: v6.octets().to_vec(),
                     mask: [
                         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -67,7 +74,7 @@ impl TryFrom<&String> for aclpb::IpNet {
         let network_result: Result<IpNetwork, _> = value.parse();
 
         match network_result {
-            Ok(net) => Ok(aclpb::IpNet {
+            Ok(net) => Ok(filterpb::IpNet {
                 addr: match net.ip() {
                     IpAddr::V4(v4) => v4.octets().to_vec(),
                     IpAddr::V6(v6) => v6.octets().to_vec(),
@@ -80,7 +87,7 @@ impl TryFrom<&String> for aclpb::IpNet {
             Err(_) => {
                 let addr: IpAddr = parts[0].parse()?;
                 let mask: IpAddr = parts[1].parse()?;
-                Ok(aclpb::IpNet {
+                Ok(filterpb::IpNet {
                     addr: match addr {
                         IpAddr::V4(v4) => v4.octets().to_vec(),
                         IpAddr::V6(v6) => v6.octets().to_vec(),
@@ -101,7 +108,7 @@ struct Range {
     to: u16,
 }
 
-impl TryFrom<&Range> for aclpb::PortRange {
+impl TryFrom<&Range> for filterpb::PortRange {
     type Error = Box<dyn Error>;
 
     fn try_from(r: &Range) -> Result<Self, Self::Error> {
@@ -112,7 +119,7 @@ impl TryFrom<&Range> for aclpb::PortRange {
     }
 }
 
-impl TryFrom<&Range> for aclpb::ProtoRange {
+impl TryFrom<&Range> for filterpb::ProtoRange {
     type Error = Box<dyn Error>;
 
     fn try_from(r: &Range) -> Result<Self, Self::Error> {
@@ -130,7 +137,7 @@ impl TryFrom<&Range> for aclpb::ProtoRange {
     }
 }
 
-impl TryFrom<&Range> for aclpb::VlanRange {
+impl TryFrom<&Range> for filterpb::VlanRange {
     type Error = Box<dyn Error>;
 
     fn try_from(r: &Range) -> Result<Self, Self::Error> {
@@ -147,6 +154,15 @@ impl TryFrom<&Range> for aclpb::VlanRange {
         Ok(Self { from: r.from as u32, to: r.to as u32 })
     }
 }
+
+impl TryFrom<&String> for filterpb::Device {
+    type Error = Box<dyn Error>;
+
+    fn try_from(n: &String) -> Result<Self, Self::Error> {
+        Ok(Self { name: n.to_string() })
+    }
+}
+
 
 #[derive(Debug, Serialize, Deserialize)]
 enum ActionKind {
@@ -178,44 +194,49 @@ impl TryFrom<ACLRule> for aclpb::Rule {
             srcs: acl_rule
                 .srcs
                 .iter()
-                .map(aclpb::IpNet::try_from)
+                .map(filterpb::IpNet::try_from)
                 .collect::<Result<_, _>>()?,
             dsts: acl_rule
                 .dsts
                 .iter()
-                .map(aclpb::IpNet::try_from)
+                .map(filterpb::IpNet::try_from)
                 .collect::<Result<_, _>>()?,
             vlan_ranges: acl_rule
                 .vlan_ranges
                 .iter()
-                .map(aclpb::VlanRange::try_from)
+                .map(filterpb::VlanRange::try_from)
                 .collect::<Result<_, _>>()?,
             src_port_ranges: acl_rule
                 .src_ports
                 .iter()
-                .map(aclpb::PortRange::try_from)
+                .map(filterpb::PortRange::try_from)
                 .collect::<Result<_, _>>()?,
             dst_port_ranges: acl_rule
                 .dst_ports
                 .iter()
-                .map(aclpb::PortRange::try_from)
+                .map(filterpb::PortRange::try_from)
                 .collect::<Result<_, _>>()?,
             proto_ranges: acl_rule
                 .proto_ranges
                 .iter()
-                .map(aclpb::ProtoRange::try_from)
+                .map(filterpb::ProtoRange::try_from)
                 .collect::<Result<_, _>>()?,
-            counter: acl_rule.counter,
-            devices: acl_rule.devices,
-            keep_state: false,
-            action: match acl_rule.action {
-                ActionKind::Allow => aclpb::ActionKind::Pass,
-                ActionKind::Deny => aclpb::ActionKind::Deny,
-                ActionKind::Count => aclpb::ActionKind::Count,
-                ActionKind::CheckState => aclpb::ActionKind::CheckState,
-                ActionKind::CreateState => aclpb::ActionKind::CreateState,
-            }
-            .into(),
+            devices: acl_rule
+                .devices
+                .iter()
+                .map(filterpb::Device::try_from)
+                .collect::<Result<_, _>>()?,
+            action: Some(aclpb::Action {
+                counter: acl_rule.counter,
+                keep_state: false,
+                kind: match acl_rule.action {
+                    ActionKind::Allow => aclpb::ActionKind::Pass,
+                    ActionKind::Deny => aclpb::ActionKind::Deny,
+                    ActionKind::Count => aclpb::ActionKind::Count,
+                    ActionKind::CheckState => aclpb::ActionKind::CheckState,
+                    ActionKind::CreateState => aclpb::ActionKind::CreateState,
+                }.into(),
+            }),
         })
     }
 }

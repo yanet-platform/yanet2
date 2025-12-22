@@ -4,19 +4,28 @@ use std::net::IpAddr;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use code::{
-    DeleteConfigRequest, ListConfigsRequest, UpdateConfigRequest, forward_service_client::ForwardServiceClient,
+use forwardpb::{
+    DeleteConfigRequest, ListConfigsRequest, UpdateConfigRequest,
+    ShowConfigRequest, ShowConfigResponse, forward_service_client::ForwardServiceClient,
 };
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
+use ipnetwork::IpNetwork;
 
 use serde::{Deserialize, Serialize};
 
 #[allow(non_snake_case)]
-pub mod code {
+pub mod forwardpb {
     use serde::Serialize;
 
     tonic::include_proto!("forwardpb");
+}
+
+#[allow(non_snake_case)]
+pub mod filterpb {
+    use serde::Serialize;
+
+    tonic::include_proto!("filterpb");
 }
 
 /// Forward module.
@@ -36,10 +45,21 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
-    List,
     Delete(DeleteCmd),
     Update(UpdateCmd),
+    Show(ShowCmd),
+    List(ListCmd),
 }
+
+#[derive(Debug, Clone, Parser)]
+pub struct ShowCmd {
+    /// The name of the module to delete
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct ListCmd {}
 
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
@@ -58,33 +78,75 @@ pub struct UpdateCmd {
     pub rules: String,
 }
 
+impl From<String> for filterpb::Device {
+    fn from(n: String) -> Self {
+        Self { name: n }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct VlanRange {
     from: u32,
     to: u32,
 }
 
-impl From<VlanRange> for code::VlanRange {
+impl From<VlanRange> for filterpb::VlanRange {
     fn from(r: VlanRange) -> Self {
         Self { from: r.from, to: r.to }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Net {
-    addr: String,
-    prefix: u32,
-}
+impl From<String> for filterpb::IpNet {
+    fn from(value: String) -> Self {
+        let parts: Vec<&str> = value.split('/').collect();
+        if parts.len() == 1 {
+            let addr: IpAddr = value.parse().unwrap();
+            return match addr {
+                IpAddr::V4(v4) => Self {
+                    addr: v4.octets().to_vec(),
+                    mask: [0xff, 0xff, 0xff, 0xff].to_vec(),
+                },
+                IpAddr::V6(v6) => Self {
+                    addr: v6.octets().to_vec(),
+                    mask: [
+                        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                    ]
+                    .to_vec(),
+                },
+            };
+        }
 
-impl From<Net> for code::IpNet {
-    fn from(value: Net) -> Self {
-        let net: IpAddr = value.addr.parse().unwrap();
-        Self {
-            ip: match net {
-                IpAddr::V4(ipv4) => ipv4.octets().into(),
-                IpAddr::V6(ipv6) => ipv6.octets().into(),
+        if parts.len() != 2 {
+            panic!("invalid format");
+        }
+
+        let parsed: Result<IpNetwork, _> = value.parse();
+
+        match parsed {
+            Ok(net) => Self {
+                addr: match net.ip() {
+                    IpAddr::V4(v4) => v4.octets().to_vec(),
+                    IpAddr::V6(v6) => v6.octets().to_vec(),
+                },
+                mask: match net.mask() {
+                    IpAddr::V4(v4) => v4.octets().to_vec(),
+                    IpAddr::V6(v6) => v6.octets().to_vec(),
+                },
             },
-            prefix_len: value.prefix,
+            Err(_) => {
+                let addr: IpAddr = parts[0].parse().unwrap();
+                let mask: IpAddr = parts[1].parse().unwrap();
+                Self {
+                    addr: match addr {
+                        IpAddr::V4(v4) => v4.octets().to_vec(),
+                        IpAddr::V6(v6) => v6.octets().to_vec(),
+                    },
+                    mask: match mask {
+                        IpAddr::V4(v4) => v4.octets().to_vec(),
+                        IpAddr::V6(v6) => v6.octets().to_vec(),
+                    },
+                }
+            }
         }
     }
 }
@@ -103,21 +165,23 @@ struct ForwardRule {
     counter: String,
     devices: Vec<String>,
     vlan_ranges: Vec<VlanRange>,
-    srcs: Vec<Net>,
-    dsts: Vec<Net>,
+    srcs: Vec<String>,
+    dsts: Vec<String>,
 }
 
-impl From<ForwardRule> for code::ForwardRule {
+impl From<ForwardRule> for forwardpb::Rule {
     fn from(forward_rule: ForwardRule) -> Self {
         Self {
-            target: forward_rule.target,
-            mode: match forward_rule.mode {
-                ModeKind::None => code::ForwardMode::None.into(),
-                ModeKind::In => code::ForwardMode::In.into(),
-                ModeKind::Out => code::ForwardMode::Out.into(),
-            },
-            counter: forward_rule.counter,
-            devices: forward_rule.devices,
+            action: Some(forwardpb::Action {
+                target: forward_rule.target,
+                mode: match forward_rule.mode {
+                    ModeKind::None => forwardpb::ForwardMode::None.into(),
+                    ModeKind::In => forwardpb::ForwardMode::In.into(),
+                    ModeKind::Out => forwardpb::ForwardMode::Out.into(),
+                },
+                counter: forward_rule.counter,
+            }),
+            devices: forward_rule.devices.into_iter().map(|m| m.into()).collect(),
             vlan_ranges: forward_rule.vlan_ranges.into_iter().map(|m| m.into()).collect(),
             srcs: forward_rule.srcs.into_iter().map(|m| m.into()).collect(),
             dsts: forward_rule.dsts.into_iter().map(|m| m.into()).collect(),
@@ -132,7 +196,7 @@ pub struct ForwardConfig {
     rules: Vec<ForwardRule>,
 }
 
-impl From<ForwardConfig> for Vec<code::ForwardRule> {
+impl From<ForwardConfig> for Vec<forwardpb::Rule> {
     fn from(config: ForwardConfig) -> Self {
         config.rules.into_iter().map(From::from).collect()
     }
@@ -148,6 +212,12 @@ impl ForwardConfig {
     }
 }
 
+pub fn print_config_json(response: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
+    println!("{:}", serde_json::to_string(&response)?);
+    Ok(())
+}
+
+
 pub struct ForwardService {
     client: ForwardServiceClient<Channel>,
 }
@@ -161,7 +231,18 @@ impl ForwardService {
         Ok(Self { client })
     }
 
-    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
+        let request = ShowConfigRequest {
+            name: cmd.config_name.clone(),
+        };
+        let response = self.client.show_config(request).await?.into_inner();
+
+        print_config_json(&response)?;
+
+        Ok(())
+    }
+
+    pub async fn list_configs(&mut self, _cmd: ListCmd) -> Result<(), Box<dyn Error>> {
         let request = ListConfigsRequest {};
         log::trace!("list configs request: {request:?}");
         let response = self.client.list_configs(request).await?.into_inner();
@@ -180,7 +261,7 @@ impl ForwardService {
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         let config = ForwardConfig::from_file(&cmd.rules)?;
-        let rules: Vec<code::ForwardRule> = config.into();
+        let rules: Vec<forwardpb::Rule> = config.into();
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             rules: rules,
@@ -197,9 +278,10 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = ForwardService::new(cmd.endpoint).await?;
 
     match cmd.mode {
-        ModeCmd::List => service.list_configs().await,
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
+        ModeCmd::Show(cmd) => service.show_config(cmd).await,
+        ModeCmd::List(cmd) => service.list_configs(cmd).await,
     }
 }
 

@@ -12,10 +12,10 @@
 
 #include "controlplane/agent/agent.h"
 
-FILTER_DECLARE(FWD_FILTER_VLAN_TAG, &attribute_device, &attribute_vlan);
+FILTER_DECLARE(ACL_FILTER_VLAN_TAG, &attribute_device, &attribute_vlan);
 
 FILTER_DECLARE(
-	FWD_FILTER_IP4_PROTO_TAG,
+	ACL_FILTER_IP4_PROTO_TAG,
 	&attribute_device,
 	&attribute_vlan,
 	&attribute_net4_src,
@@ -24,7 +24,7 @@ FILTER_DECLARE(
 );
 
 FILTER_DECLARE(
-	FWD_FILTER_IP4_PROTO_PORT_TAG,
+	ACL_FILTER_IP4_PROTO_PORT_TAG,
 	&attribute_device,
 	&attribute_vlan,
 	&attribute_net4_src,
@@ -35,7 +35,7 @@ FILTER_DECLARE(
 );
 
 FILTER_DECLARE(
-	FWD_FILTER_IP6_PROTO_TAG,
+	ACL_FILTER_IP6_PROTO_TAG,
 	&attribute_device,
 	&attribute_vlan,
 	&attribute_net6_src,
@@ -44,7 +44,7 @@ FILTER_DECLARE(
 );
 
 FILTER_DECLARE(
-	FWD_FILTER_IP6_PROTO_PORT_TAG,
+	ACL_FILTER_IP6_PROTO_PORT_TAG,
 	&attribute_device,
 	&attribute_vlan,
 	&attribute_net6_src,
@@ -96,11 +96,17 @@ acl_module_config_free(struct cp_module *cp_module) {
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 
-	FILTER_FREE(&config->filter_vlan, FWD_FILTER_VLAN_TAG);
-	FILTER_FREE(&config->filter_ip4, FWD_FILTER_IP4_PROTO_TAG);
-	FILTER_FREE(&config->filter_ip4_port, FWD_FILTER_IP4_PROTO_PORT_TAG);
-	FILTER_FREE(&config->filter_ip6, FWD_FILTER_IP6_PROTO_TAG);
-	FILTER_FREE(&config->filter_ip6_port, FWD_FILTER_IP6_PROTO_PORT_TAG);
+	memory_bfree(
+		&cp_module->memory_context,
+		ADDR_OF(&config->targets),
+		sizeof(struct acl_target *) * config->target_count
+	);
+
+	FILTER_FREE(&config->filter_vlan, ACL_FILTER_VLAN_TAG);
+	FILTER_FREE(&config->filter_ip4, ACL_FILTER_IP4_PROTO_TAG);
+	FILTER_FREE(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
+	FILTER_FREE(&config->filter_ip6, ACL_FILTER_IP6_PROTO_TAG);
+	FILTER_FREE(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
 
 	// Note: We don't destroy fwstate_cfg maps here because they're owned by
 	// the fwstate module. We only stored offsets to them.
@@ -130,26 +136,33 @@ filter_acl_rules(
 
 		struct filter_rule *filter_rule =
 			filter_rules + filter_rule_idx++;
-		filter_rule->device_count = acl_rule->device_count;
-		filter_rule->devices = acl_rule->devices;
+		filter_rule->device_count = acl_rule->devices.count;
+		filter_rule->devices = acl_rule->devices.items;
 
-		filter_rule->vlan_range_count = acl_rule->vlan_range_count;
-		filter_rule->vlan_ranges = acl_rule->vlan_ranges;
+		filter_rule->vlan_range_count = acl_rule->vlan_ranges.count;
+		filter_rule->vlan_ranges = acl_rule->vlan_ranges.items;
 
-		filter_rule->net4 = acl_rule->net4;
-		filter_rule->net6 = acl_rule->net6;
+		filter_rule->net4.src_count = acl_rule->src_net4s.count;
+		filter_rule->net4.srcs = acl_rule->src_net4s.items;
+		filter_rule->net4.dst_count = acl_rule->dst_net4s.count;
+		filter_rule->net4.dsts = acl_rule->dst_net4s.items;
+
+		filter_rule->net6.src_count = acl_rule->src_net6s.count;
+		filter_rule->net6.srcs = acl_rule->src_net6s.items;
+		filter_rule->net6.dst_count = acl_rule->dst_net6s.count;
+		filter_rule->net6.dsts = acl_rule->dst_net6s.items;
 
 		filter_rule->transport.proto_count =
-			acl_rule->proto_range_count;
-		filter_rule->transport.protos = acl_rule->proto_ranges;
+			acl_rule->proto_ranges.count;
+		filter_rule->transport.protos = acl_rule->proto_ranges.items;
 
 		filter_rule->transport.src_count =
-			acl_rule->src_port_range_count;
-		filter_rule->transport.srcs = acl_rule->src_port_ranges;
+			acl_rule->src_port_ranges.count;
+		filter_rule->transport.srcs = acl_rule->src_port_ranges.items;
 
 		filter_rule->transport.dst_count =
-			acl_rule->dst_port_range_count;
-		filter_rule->transport.dsts = acl_rule->dst_port_ranges;
+			acl_rule->dst_port_ranges.count;
+		filter_rule->transport.dsts = acl_rule->dst_port_ranges.items;
 
 		filter_rule->action = acl_rule_idx;
 	}
@@ -159,32 +172,32 @@ filter_acl_rules(
 
 static int
 check_acl_rule_l2(const struct acl_rule *acl_rule) {
-	return !acl_rule->net6.src_count && !acl_rule->net6.dst_count &&
-	       !acl_rule->net4.src_count && !acl_rule->net4.dst_count;
+	return !acl_rule->src_net6s.count && !acl_rule->dst_net6s.count &&
+	       !acl_rule->src_net4s.count && !acl_rule->dst_net4s.count;
 }
 
 static int
 check_has_ip4(const struct acl_rule *acl_rule) {
-	return acl_rule->net4.src_count && acl_rule->net4.dst_count;
+	return acl_rule->src_net4s.count && acl_rule->dst_net4s.count;
 }
 
 static int
 check_has_ip6(const struct acl_rule *acl_rule) {
-	return acl_rule->net6.src_count && acl_rule->net6.dst_count;
+	return acl_rule->src_net6s.count && acl_rule->dst_net6s.count;
 }
 
 static int
 check_has_full_src_port_range(const struct acl_rule *acl_rule) {
-	return acl_rule->src_port_range_count == 0 ||
-	       (acl_rule->src_port_ranges[0].from == 0 &&
-		acl_rule->src_port_ranges[0].to == 65535);
+	return acl_rule->src_port_ranges.count == 0 ||
+	       (acl_rule->src_port_ranges.items[0].from == 0 &&
+		acl_rule->src_port_ranges.items[0].to == 65535);
 }
 
 static int
 check_has_full_dst_port_range(const struct acl_rule *acl_rule) {
-	return acl_rule->dst_port_range_count == 0 ||
-	       (acl_rule->dst_port_ranges[0].from == 0 &&
-		acl_rule->dst_port_ranges[0].to == 65535);
+	return acl_rule->dst_port_ranges.count == 0 ||
+	       (acl_rule->dst_port_ranges.items[0].from == 0 &&
+		acl_rule->dst_port_ranges.items[0].to == 65535);
 }
 
 static int
@@ -229,7 +242,7 @@ acl_module_init_l2(
 
 	return FILTER_INIT(
 		&config->filter_vlan,
-		FWD_FILTER_VLAN_TAG,
+		ACL_FILTER_VLAN_TAG,
 		filter_rules,
 		filter_rule_count,
 		&cp_module->memory_context
@@ -252,7 +265,7 @@ acl_module_init_ip4(
 
 	return FILTER_INIT(
 		&config->filter_ip4,
-		FWD_FILTER_IP4_PROTO_TAG,
+		ACL_FILTER_IP4_PROTO_TAG,
 		filter_rules,
 		filter_rule_count,
 		&cp_module->memory_context
@@ -275,7 +288,7 @@ acl_module_init_ip4_port(
 
 	return FILTER_INIT(
 		&config->filter_ip4_port,
-		FWD_FILTER_IP4_PROTO_PORT_TAG,
+		ACL_FILTER_IP4_PROTO_PORT_TAG,
 		filter_rules,
 		filter_rule_count,
 		&cp_module->memory_context
@@ -298,7 +311,7 @@ acl_module_init_ip6(
 
 	return FILTER_INIT(
 		&config->filter_ip6,
-		FWD_FILTER_IP6_PROTO_TAG,
+		ACL_FILTER_IP6_PROTO_TAG,
 		filter_rules,
 		filter_rule_count,
 		&cp_module->memory_context
@@ -321,7 +334,7 @@ acl_module_init_ip6_port(
 
 	return FILTER_INIT(
 		&config->filter_ip6_port,
-		FWD_FILTER_IP6_PROTO_PORT_TAG,
+		ACL_FILTER_IP6_PROTO_PORT_TAG,
 		filter_rules,
 		filter_rule_count,
 		&cp_module->memory_context
@@ -339,11 +352,11 @@ acl_module_config_update(
 
 	for (uint64_t idx = 0; idx < rule_count; ++idx) {
 		struct acl_rule *rule = acl_rules + idx;
-		for (uint64_t idx = 0; idx < rule->device_count; ++idx) {
+		for (uint64_t idx = 0; idx < rule->devices.count; ++idx) {
 			if (cp_module_link_device(
 				    cp_module,
-				    rule->devices[idx].name,
-				    &rule->devices[idx].id
+				    rule->devices.items[idx].name,
+				    &rule->devices.items[idx].id
 			    )) {
 				goto error;
 			}

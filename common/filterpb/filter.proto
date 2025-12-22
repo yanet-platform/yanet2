@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package filterpb;
+
+option go_package = "github.com/yanet-platform/yanet2/common/filterpb;filterpb";
+
+message Device {
+	string name = 1;
+}
+
+message VlanRange {
+	uint32 from = 1;
+	uint32 to = 2;
+}
+
+message IPNet {
+	bytes addr = 1;
+	bytes mask = 2;
+}
+
+// Represents a protocol number range [from; to]
+// For transport protocols, upper byte may contain flag bits
+message ProtoRange {
+	uint32 from = 1;
+	uint32 to = 2;
+}
+
+// Represents a TCP/UDP port range [from; to]
+message PortRange {
+	uint32 from = 1;
+	uint32 to = 2;
+}

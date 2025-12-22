@@ -8,6 +8,24 @@
 
 #include "controlplane/agent/agent.h"
 
+FILTER_DECLARE(FWD_FILTER_VLAN_TAG, &attribute_device, &attribute_vlan);
+
+FILTER_DECLARE(
+	FWD_FILTER_IP4_TAG,
+	&attribute_device,
+	&attribute_vlan,
+	&attribute_net4_src,
+	&attribute_net4_dst
+);
+
+FILTER_DECLARE(
+	FWD_FILTER_IP6_TAG,
+	&attribute_device,
+	&attribute_vlan,
+	&attribute_net6_src,
+	&attribute_net6_dst
+);
+
 struct cp_module *
 forward_module_config_init(struct agent *agent, const char *name) {
 	struct forward_module_config *config =
@@ -55,6 +73,10 @@ forward_module_config_free(struct cp_module *cp_module) {
 		sizeof(struct forward_target *) * config->target_count
 	);
 
+	FILTER_FREE(&config->filter_vlan, FWD_FILTER_VLAN_TAG);
+	FILTER_FREE(&config->filter_ip4, FWD_FILTER_IP4_TAG);
+	FILTER_FREE(&config->filter_ip6, FWD_FILTER_IP6_TAG);
+
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 	// FIXME: remove the check as agent should be assigned
 	if (agent != NULL) {
@@ -66,23 +88,157 @@ forward_module_config_free(struct cp_module *cp_module) {
 	}
 }
 
-FILTER_DECLARE(FWD_FILTER_VLAN_TAG, &attribute_device, &attribute_vlan);
+typedef int (*forward_rule_check_func)(const struct forward_rule *forward_rule);
 
-FILTER_DECLARE(
-	FWD_FILTER_IP4_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net4_src,
-	&attribute_net4_dst
-);
+static uint32_t
+filter_forward_rules(
+	struct forward_rule *forward_rules,
+	uint32_t forward_rule_count,
+	struct filter_rule *filter_rules,
+	forward_rule_check_func check
+	// TODO: should be there an instantiation callback??
+) {
+	uint32_t filter_rule_idx = 0;
+	for (uint32_t forward_rule_idx = 0;
+	     forward_rule_idx < forward_rule_count;
+	     ++forward_rule_idx) {
+		struct forward_rule *forward_rule =
+			forward_rules + forward_rule_idx;
+		if (!check(forward_rule))
+			continue;
 
-FILTER_DECLARE(
-	FWD_FILTER_IP6_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net6_src,
-	&attribute_net6_dst
-);
+		struct filter_rule *filter_rule =
+			filter_rules + filter_rule_idx++;
+		filter_rule->device_count = forward_rule->devices.count;
+		filter_rule->devices = forward_rule->devices.items;
+
+		filter_rule->vlan_range_count = forward_rule->vlan_ranges.count;
+		filter_rule->vlan_ranges = forward_rule->vlan_ranges.items;
+
+		filter_rule->net4.src_count = forward_rule->src_net4s.count;
+		filter_rule->net4.srcs = forward_rule->src_net4s.items;
+		filter_rule->net4.dst_count = forward_rule->dst_net4s.count;
+		filter_rule->net4.dsts = forward_rule->dst_net4s.items;
+
+		filter_rule->net6.src_count = forward_rule->src_net6s.count;
+		filter_rule->net6.srcs = forward_rule->src_net6s.items;
+		filter_rule->net6.dst_count = forward_rule->dst_net6s.count;
+		filter_rule->net6.dsts = forward_rule->dst_net6s.items;
+
+		filter_rule->action = forward_rule_idx;
+	}
+
+	return filter_rule_idx;
+}
+
+static int
+check_forward_rule_l2(const struct forward_rule *forward_rule) {
+	return !forward_rule->src_net6s.count &&
+	       !forward_rule->dst_net6s.count &&
+	       !forward_rule->src_net4s.count && !forward_rule->dst_net4s.count;
+}
+
+static int
+check_has_ip4(const struct forward_rule *forward_rule) {
+	return forward_rule->src_net4s.count && forward_rule->dst_net4s.count;
+}
+
+static int
+check_has_ip6(const struct forward_rule *forward_rule) {
+	return forward_rule->src_net6s.count && forward_rule->dst_net6s.count;
+}
+
+static int
+check_forward_rule_ip4(const struct forward_rule *forward_rule) {
+	return check_has_ip4(forward_rule);
+	;
+}
+
+static int
+check_forward_rule_ip6(const struct forward_rule *forward_rule) {
+	return check_has_ip6(forward_rule);
+}
+
+static int
+forward_module_init_l2(
+	struct cp_module *cp_module,
+	struct forward_rule *forward_rules,
+	uint32_t forward_rule_count,
+	struct filter_rule *filter_rules
+) {
+	struct forward_module_config *config = container_of(
+		cp_module, struct forward_module_config, cp_module
+	);
+
+	uint32_t filter_rule_count = filter_forward_rules(
+		forward_rules,
+		forward_rule_count,
+		filter_rules,
+		check_forward_rule_l2
+	);
+
+	return FILTER_INIT(
+		&config->filter_vlan,
+		FWD_FILTER_VLAN_TAG,
+		filter_rules,
+		filter_rule_count,
+		&cp_module->memory_context
+	);
+}
+
+static int
+forward_module_init_ip4(
+	struct cp_module *cp_module,
+	struct forward_rule *forward_rules,
+	uint32_t forward_rule_count,
+	struct filter_rule *filter_rules
+) {
+	struct forward_module_config *config = container_of(
+		cp_module, struct forward_module_config, cp_module
+	);
+
+	uint32_t filter_rule_count = filter_forward_rules(
+		forward_rules,
+		forward_rule_count,
+		filter_rules,
+		check_forward_rule_ip4
+	);
+
+	return FILTER_INIT(
+		&config->filter_ip4,
+		FWD_FILTER_IP4_TAG,
+		filter_rules,
+		filter_rule_count,
+		&cp_module->memory_context
+	);
+}
+
+static int
+forward_module_init_ip6(
+	struct cp_module *cp_module,
+	struct forward_rule *forward_rules,
+	uint32_t forward_rule_count,
+	struct filter_rule *filter_rules
+) {
+	struct forward_module_config *config = container_of(
+		cp_module, struct forward_module_config, cp_module
+	);
+
+	uint32_t filter_rule_count = filter_forward_rules(
+		forward_rules,
+		forward_rule_count,
+		filter_rules,
+		check_forward_rule_ip6
+	);
+
+	return FILTER_INIT(
+		&config->filter_ip6,
+		FWD_FILTER_IP6_TAG,
+		filter_rules,
+		filter_rule_count,
+		&cp_module->memory_context
+	);
+}
 
 int
 forward_module_config_update(
@@ -123,11 +279,11 @@ forward_module_config_update(
 			goto error_target;
 		}
 
-		for (uint32_t idx = 0; idx < rule->device_count; ++idx) {
+		for (uint32_t idx = 0; idx < rule->devices.count; ++idx) {
 			if (cp_module_link_device(
 				    cp_module,
-				    rule->devices[idx].name,
-				    &rule->devices[idx].id
+				    rule->devices.items[idx].name,
+				    &rule->devices.items[idx].id
 			    )) {
 				goto error_target;
 			}
@@ -141,100 +297,21 @@ forward_module_config_update(
 	if (filter_rules == NULL) {
 		goto error_target;
 	}
-	uint64_t filter_rule_idx;
 
-	// Build vlan rules
-	filter_rule_idx = 0;
-	for (uint32_t idx = 0; idx < rule_count; ++idx) {
-		struct forward_rule *forward_rule = forward_rules + idx;
-		if (forward_rule->net6.src_count ||
-		    forward_rule->net6.dst_count ||
-		    forward_rule->net4.src_count ||
-		    forward_rule->net4.dst_count) {
-			continue;
-		}
+	if (forward_module_init_l2(
+		    cp_module, forward_rules, rule_count, filter_rules
+	    ))
+		goto error_target;
 
-		struct filter_rule *filter_rule =
-			filter_rules + filter_rule_idx++;
-		filter_rule->device_count = forward_rule->device_count;
-		filter_rule->devices = forward_rule->devices;
+	if (forward_module_init_ip4(
+		    cp_module, forward_rules, rule_count, filter_rules
+	    ))
+		goto error_target;
 
-		filter_rule->vlan_range_count = forward_rule->vlan_range_count;
-		filter_rule->vlan_ranges = forward_rule->vlan_ranges;
-
-		filter_rule->action = idx;
-	}
-
-	if (FILTER_INIT(
-		    &config->filter_vlan,
-		    FWD_FILTER_VLAN_TAG,
-		    filter_rules,
-		    filter_rule_idx,
-		    &cp_module->memory_context
-	    )) {
-	}
-
-	// Build ip4 rules
-	filter_rule_idx = 0;
-	for (uint32_t idx = 0; idx < rule_count; ++idx) {
-		struct forward_rule *forward_rule = forward_rules + idx;
-		if (!forward_rule->net4.src_count ||
-		    !forward_rule->net4.dst_count) {
-			continue;
-		}
-
-		struct filter_rule *filter_rule =
-			filter_rules + filter_rule_idx++;
-		filter_rule->device_count = forward_rule->device_count;
-		filter_rule->devices = forward_rule->devices;
-
-		filter_rule->vlan_range_count = forward_rule->vlan_range_count;
-		filter_rule->vlan_ranges = forward_rule->vlan_ranges;
-
-		filter_rule->net4 = forward_rule->net4;
-
-		filter_rule->action = idx;
-	}
-
-	if (FILTER_INIT(
-		    &config->filter_ip4,
-		    FWD_FILTER_IP4_TAG,
-		    filter_rules,
-		    filter_rule_idx,
-		    &cp_module->memory_context
-	    )) {
-	}
-
-	// Build ip6 rules
-	filter_rule_idx = 0;
-	for (uint32_t idx = 0; idx < rule_count; ++idx) {
-		struct forward_rule *forward_rule = forward_rules + idx;
-		if (!forward_rule->net6.src_count ||
-		    !forward_rule->net6.dst_count) {
-			continue;
-		}
-
-		struct filter_rule *filter_rule =
-			filter_rules + filter_rule_idx++;
-		filter_rule->device_count = forward_rule->device_count;
-		filter_rule->devices = forward_rule->devices;
-
-		filter_rule->vlan_range_count = forward_rule->vlan_range_count;
-		filter_rule->vlan_ranges = forward_rule->vlan_ranges;
-
-		filter_rule->net6 = forward_rule->net6;
-
-		filter_rule->action = idx;
-	}
-
-	if (FILTER_INIT(
-		    &config->filter_ip6,
-		    FWD_FILTER_IP6_TAG,
-		    filter_rules,
-		    filter_rule_idx,
-		    &cp_module->memory_context
-	    )) {
-	}
+	if (forward_module_init_ip6(
+		    cp_module, forward_rules, rule_count, filter_rules
+	    ))
+		goto error_target;
 
 	free(filter_rules);
 

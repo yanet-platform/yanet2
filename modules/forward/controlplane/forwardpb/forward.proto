@@ -2,7 +2,10 @@ syntax = "proto3";
 
 package forwardpb;
 
-option go_package = "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb;forwardpb";
+import "common/filterpb/filter.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules"
+		    "/forward/controlplane/forwardpb;forwardpb";
 
 // ForwardService is a controlplane service for forwarding module.
 service ForwardService {
@@ -40,17 +43,8 @@ message ShowConfigRequest {
 
 // ShowConfigResponse contains the configuration details of the forward module.
 message ShowConfigResponse {
-	Config config = 1;
-}
-
-message VlanRange {
-	uint32 from = 1;
-	uint32 to = 2;
-}
-
-message IPNet {
-	bytes ip = 1;
-	uint32 prefix_len = 2;
+	string name = 1;
+	repeated Rule rules = 2;
 }
 
 enum ForwardMode {
@@ -59,20 +53,24 @@ enum ForwardMode {
 	OUT = 2;
 }
 
-message ForwardRule {
+message Rule {
+	Action action = 1;
+
+	repeated filterpb.Device devices = 2;
+	repeated filterpb.VlanRange vlan_ranges = 3;
+	repeated filterpb.IPNet srcs = 4;
+	repeated filterpb.IPNet dsts = 5;
+}
+
+message Action {
 	string target = 1;
 	ForwardMode mode = 2;
 	string counter = 3;
-
-	repeated string devices = 4;
-	repeated VlanRange vlan_ranges = 5;
-	repeated IPNet srcs = 6;
-	repeated IPNet dsts = 7;
 }
 
 message UpdateConfigRequest {
 	string name = 1;
-	repeated ForwardRule rules = 2;
+	repeated Rule rules = 2;
 }
 
 message UpdateConfigResponse {

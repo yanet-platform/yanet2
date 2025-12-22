@@ -1,4 +1,4 @@
-package aclpb
+package filterpb
 
 import (
 	"encoding/binary"

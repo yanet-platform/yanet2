@@ -1,8 +1,6 @@
 package forward
 
 import (
-	"net/netip"
-
 	"github.com/c2h5oh/datasize"
 )
 
@@ -18,13 +16,6 @@ type Config struct {
 
 	Endpoint        string `yaml:"endpoint"`
 	GatewayEndpoint string `yaml:"gateway_endpoint"`
-}
-
-type DeviceID string
-
-type ForwardDeviceConfig struct {
-	DstDevId DeviceID                  `yaml:"dst_dev_id"`
-	Forwards map[netip.Prefix]DeviceID `yaml:"forwards"`
 }
 
 func DefaultConfig() *Config {

@@ -2,13 +2,13 @@ package acl
 
 import (
 	"context"
-	"net/netip"
 	"sync"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/common/go/filter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 )
@@ -44,115 +44,60 @@ func NewACLService(agent *ffi.Agent, log *zap.SugaredLogger) *ACLService {
 func convertRules(reqRules []*aclpb.Rule) ([]aclRule, error) {
 	rules := make([]aclRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
-		rule := aclRule{
-			counter:       reqRule.Counter,
-			devices:       reqRule.Devices,
-			vlanRanges:    make([]vlanRange, 0, len(reqRule.VlanRanges)),
-			srcs:          make([]network, 0, len(reqRule.Srcs)),
-			dsts:          make([]network, 0, len(reqRule.Dsts)),
-			protoRanges:   make([]protoRange, 0, len(reqRule.ProtoRanges)),
-			srcPortRanges: make([]portRange, 0, len(reqRule.SrcPortRanges)),
-			dstPortRanges: make([]portRange, 0, len(reqRule.DstPortRanges)),
+		devices, err := filter.MakeDevices(reqRule.Devices)
+		if err != nil {
+			return nil, err
+		}
+		vlanRanges, err := filter.MakeVlanRanges(reqRule.VlanRanges)
+		if err != nil {
+			return nil, err
+		}
+		src4s, err := filter.MakeIPNet4s(reqRule.Srcs)
+		if err != nil {
+			return nil, err
+		}
+		dst4s, err := filter.MakeIPNet4s(reqRule.Dsts)
+		if err != nil {
+			return nil, err
+		}
+		src6s, err := filter.MakeIPNet6s(reqRule.Srcs)
+		if err != nil {
+			return nil, err
+		}
+		dst6s, err := filter.MakeIPNet6s(reqRule.Dsts)
+		if err != nil {
+			return nil, err
+		}
+		protoRanges, err := filter.MakeProtoRanges(reqRule.ProtoRanges)
+		if err != nil {
+			return nil, err
+		}
+		srcPortRanges, err := filter.MakePortRanges(reqRule.SrcPortRanges)
+		if err != nil {
+			return nil, err
+		}
+		dstPortRanges, err := filter.MakePortRanges(reqRule.DstPortRanges)
+		if err != nil {
+			return nil, err
 		}
 
-		if reqRule.Action == aclpb.ActionKind_ACTION_KIND_PASS {
+		rule := aclRule{
+			counter:       reqRule.Action.Counter,
+			devices:       devices,
+			vlanRanges:    vlanRanges,
+			src4s:         src4s,
+			dst4s:         dst4s,
+			src6s:         src6s,
+			dst6s:         dst6s,
+			protoRanges:   protoRanges,
+			srcPortRanges: srcPortRanges,
+			dstPortRanges: dstPortRanges,
+		}
+
+		if reqRule.Action.Kind == aclpb.ActionKind_ACTION_KIND_PASS {
 			rule.action = 0
 		} else {
 			rule.action = 1
-		}
-
-		for _, reqVlanRange := range reqRule.VlanRanges {
-			// VLAN ID is 12 bits, so valid range is 0-4095
-			if reqVlanRange.From > 4095 {
-				return nil, status.Errorf(codes.InvalidArgument, "VLAN 'from' value %d exceeds maximum 4095", reqVlanRange.From)
-			}
-			if reqVlanRange.To > 4095 {
-				return nil, status.Errorf(codes.InvalidArgument, "VLAN 'to' value %d exceeds maximum 4095", reqVlanRange.To)
-			}
-			if reqVlanRange.From > reqVlanRange.To {
-				return nil, status.Errorf(codes.InvalidArgument, "VLAN 'from' value %d is greater than 'to' value %d", reqVlanRange.From, reqVlanRange.To)
-			}
-			rule.vlanRanges = append(rule.vlanRanges, vlanRange{
-				from: uint16(reqVlanRange.From),
-				to:   uint16(reqVlanRange.To),
-			})
-		}
-
-		for _, reqSrc := range reqRule.Srcs {
-			if (len(reqSrc.Addr) != 4 && len(reqSrc.Addr) != 16) || len(reqSrc.Addr) != len(reqSrc.Mask) {
-				return nil, status.Error(codes.InvalidArgument, "invalid network address length")
-			}
-
-			addr, _ := netip.AddrFromSlice(reqSrc.Addr)
-			mask, _ := netip.AddrFromSlice(reqSrc.Mask)
-			rule.srcs = append(rule.srcs, network{
-				addr: addr,
-				mask: mask,
-			})
-		}
-
-		for _, reqDst := range reqRule.Dsts {
-			if (len(reqDst.Addr) != 4 && len(reqDst.Addr) != 16) || len(reqDst.Addr) != len(reqDst.Mask) {
-				return nil, status.Error(codes.InvalidArgument, "invalid network address length")
-			}
-
-			addr, _ := netip.AddrFromSlice(reqDst.Addr)
-			mask, _ := netip.AddrFromSlice(reqDst.Mask)
-			rule.dsts = append(rule.dsts, network{
-				addr: addr,
-				mask: mask,
-			})
-		}
-
-		for _, reqProtoRange := range reqRule.ProtoRanges {
-			// Protocol is 8 bits, so valid range is 0-255
-			if reqProtoRange.From > 255 {
-				return nil, status.Errorf(codes.InvalidArgument, "Protocol 'from' value %d exceeds maximum 255", reqProtoRange.From)
-			}
-			if reqProtoRange.To > 255 {
-				return nil, status.Errorf(codes.InvalidArgument, "Protocol 'to' value %d exceeds maximum 255", reqProtoRange.To)
-			}
-			if reqProtoRange.From > reqProtoRange.To {
-				return nil, status.Errorf(codes.InvalidArgument, "Protocol 'from' value %d is greater than 'to' value %d", reqProtoRange.From, reqProtoRange.To)
-			}
-			rule.protoRanges = append(rule.protoRanges, protoRange{
-				from: uint8(reqProtoRange.From),
-				to:   uint8(reqProtoRange.To),
-			})
-		}
-
-		for _, reqSrcPortRange := range reqRule.SrcPortRanges {
-			// Port is 16 bits, so valid range is 0-65535
-			if reqSrcPortRange.From > 65535 {
-				return nil, status.Errorf(codes.InvalidArgument, "Source port 'from' value %d exceeds maximum 65535", reqSrcPortRange.From)
-			}
-			if reqSrcPortRange.To > 65535 {
-				return nil, status.Errorf(codes.InvalidArgument, "Source port 'to' value %d exceeds maximum 65535", reqSrcPortRange.To)
-			}
-			if reqSrcPortRange.From > reqSrcPortRange.To {
-				return nil, status.Errorf(codes.InvalidArgument, "Source port 'from' value %d is greater than 'to' value %d", reqSrcPortRange.From, reqSrcPortRange.To)
-			}
-			rule.srcPortRanges = append(rule.srcPortRanges, portRange{
-				from: uint16(reqSrcPortRange.From),
-				to:   uint16(reqSrcPortRange.To),
-			})
-		}
-
-		for _, reqDstPortRange := range reqRule.DstPortRanges {
-			// Port is 16 bits, so valid range is 0-65535
-			if reqDstPortRange.From > 65535 {
-				return nil, status.Errorf(codes.InvalidArgument, "Destination port 'from' value %d exceeds maximum 65535", reqDstPortRange.From)
-			}
-			if reqDstPortRange.To > 65535 {
-				return nil, status.Errorf(codes.InvalidArgument, "Destination port 'to' value %d exceeds maximum 65535", reqDstPortRange.To)
-			}
-			if reqDstPortRange.From > reqDstPortRange.To {
-				return nil, status.Errorf(codes.InvalidArgument, "Destination port 'from' value %d is greater than 'to' value %d", reqDstPortRange.From, reqDstPortRange.To)
-			}
-			rule.dstPortRanges = append(rule.dstPortRanges, portRange{
-				from: uint16(reqDstPortRange.From),
-				to:   uint16(reqDstPortRange.To),
-			})
 		}
 
 		rules = append(rules, rule)

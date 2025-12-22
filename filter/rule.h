@@ -33,6 +33,16 @@ struct filter_net4 {
 	struct net4 *dsts;
 };
 
+struct filter_net6s {
+	struct net6 *items;
+	uint32_t count;
+};
+
+struct filter_net4s {
+	struct net4 *items;
+	uint32_t count;
+};
+
 struct filter_port_range {
 	uint16_t from;
 	uint16_t to;
@@ -70,9 +80,29 @@ struct filter_device {
 	uint64_t id;
 };
 
+struct filter_devices {
+	struct filter_device *items;
+	uint32_t count;
+};
+
 struct filter_vlan_range {
 	uint16_t from;
 	uint16_t to;
+};
+
+struct filter_vlan_ranges {
+	struct filter_vlan_range *items;
+	uint32_t count;
+};
+
+struct filter_proto_ranges {
+	struct filter_proto_range *items;
+	uint32_t count;
+};
+
+struct filter_port_ranges {
+	struct filter_port_range *items;
+	uint32_t count;
 };
 
 #define VLAN_UNSPEC ((uint16_t)-1)
