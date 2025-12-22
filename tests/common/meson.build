@@ -71,3 +71,11 @@ balloc_test = executable(
   dependencies: dependencies
 )
 test('balloc', balloc_test, suite: ['common'])
+
+balloc_bench = executable(
+  'balloc_bench',
+  ['balloc_bench.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies
+)
