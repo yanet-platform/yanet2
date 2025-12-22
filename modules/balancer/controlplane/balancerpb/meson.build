@@ -11,6 +11,9 @@ protoc_gen = custom_target(
     output: [
         'balancer.pb.go',
         'balancer_grpc.pb.go',
+        'stats.pb.go',
+        'info.pb.go',
+        'module.pb.go',
     ],
     input: proto_files,
     command: [

@@ -9,7 +9,15 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
-        .compile_protos(&["balancerpb/balancer.proto"], &["../controlplane"])?;
+        .compile_protos(
+            &[
+                "modules/balancer/controlplane/balancerpb/balancer.proto",
+                "modules/balancer/controlplane/balancerpb/info.proto",
+                "modules/balancer/controlplane/balancerpb/module.proto",
+                "modules/balancer/controlplane/balancerpb/stats.proto",
+            ],
+            &["../../.."],
+        )?;
 
     Ok(())
 }
