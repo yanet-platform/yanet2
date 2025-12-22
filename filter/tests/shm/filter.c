@@ -3,6 +3,7 @@
 #include <sys/mman.h>
 
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -99,8 +100,29 @@ main(int argc, char **argv) {
 	LOG(INFO, "attaching to shared memory (size=%lu)...", size);
 
 	// Open shared memory file descriptor
-	const char *shm_name = argv[1];
+	const char *shm_name_arg = argv[1];
+	char shm_name_buf[NAME_MAX + 2];
+	const char *shm_name;
+	if (shm_name_arg[0] == '/') {
+		shm_name = shm_name_arg;
+	} else {
+		int n = snprintf(
+			shm_name_buf, sizeof(shm_name_buf), "/%s", shm_name_arg
+		);
+		if (n < 0 || (size_t)n >= sizeof(shm_name_buf)) {
+			LOG(ERROR, "shared memory name too long");
+			return 1;
+		}
+		shm_name = shm_name_buf;
+	}
 	int shm_fd = shm_open(shm_name, O_RDWR, 0);
+	if (shm_fd == -1) {
+		LOG(ERROR,
+		    "shm_open('%s') failed: %s",
+		    shm_name,
+		    strerror(errno));
+		return 1;
+	}
 
 	// MMap to the shared memory
 	void *memory =
@@ -118,7 +140,7 @@ main(int argc, char **argv) {
 
 	// Wait for compiler to finish (with timeout)
 	LOG(INFO, "waiting for compiler to finish...");
-	int timeout_ms = 5000;
+	int timeout_ms = 15000;
 	int wait_interval_ms = 10;
 	int elapsed_ms = 0;
 	while (atomic_load(&common->ready) == 0) {

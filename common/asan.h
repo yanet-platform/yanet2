@@ -13,7 +13,7 @@
 #endif
 #endif
 
-#ifdef HAVE_ASAN
+#if defined(HAVE_ASAN)
 
 #include <sanitizer/asan_interface.h>
 
