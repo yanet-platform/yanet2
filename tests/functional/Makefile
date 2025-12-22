@@ -46,12 +46,12 @@ endif
 # Run all functional tests
 test: prepare-vm
 	@echo "Running all functional tests..."
-	go test -v ./...
+	go test -count=1 -v ./...
 
 # Run specific test
 test-run:
 ifdef TEST
-	go test -v -run "$(TEST)" ./...
+	go test -count=1 -v -run "$(TEST)" ./...
 endif
 
 # Clean test artifacts
@@ -95,9 +95,9 @@ test-converted: prepare-vm
 		exit 1; \
 	fi
 ifdef TEST
-	go test -v -run "$(TEST)" ./converted/
+	go test -count=1 -v -run "$(TEST)" ./converted/
 else
-	go test -v -run "^Test.*" ./converted/
+	go test -count=1 -v -run "^Test.*" ./converted/
 endif
 
 # Create QEMU image
