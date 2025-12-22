@@ -40,22 +40,18 @@ func setAndWaitForNAT64DropFlags(fw *framework.TestFramework, dropUnknownPrefix,
 			return fmt.Errorf("failed to check NAT64 status: %w", err)
 		}
 
-		statuses := []struct {
+		status := struct {
 			Config struct {
 				DropUnknownPrefix  bool `json:"drop_unknown_prefix"`
 				DropUnknownMapping bool `json:"drop_unknown_mapping"`
 			}
 		}{}
-		err = json.Unmarshal([]byte(output), &statuses)
+		err = json.Unmarshal([]byte(output), &status)
 		if err != nil {
 			return fmt.Errorf("failed to parse NAT64 status ===%s===: %w", output, err)
 		}
-		if len(statuses) == 0 {
-			return fmt.Errorf("failed to parse NAT64 status ===%s===: no configurations found", output)
-		}
-		status := statuses[0].Config
 		// Check if flags match expected state
-		if (dropUnknownPrefix == status.DropUnknownPrefix) && (dropUnknownMapping == status.DropUnknownMapping) {
+		if (dropUnknownPrefix == status.Config.DropUnknownPrefix) && (dropUnknownMapping == status.Config.DropUnknownMapping) {
 			return nil
 		}
 
