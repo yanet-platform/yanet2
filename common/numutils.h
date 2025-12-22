@@ -30,4 +30,15 @@ align_up_pow2(uint64_t x) {
 	return x + 1;
 }
 
+/**
+ * @brief Finds the next number divisible by the provided power of 2
+ * @param n Input number
+ * @param pow2 Divisor, must be power of 2 (pow2 = 2^k) for some k.
+ * @return The smallest `x` such that `x` >= `n` and `x` % `pow2` == 0
+ */
+static inline uint64_t
+next_divisible_pow2(uint64_t n, uint64_t pow2) {
+	return (n + (pow2 - 1)) & ~(pow2 - 1);
+}
+
 #define ALIGN_DOWN_POW2(x) (1UL << (63 - __builtin_clzl(x)))

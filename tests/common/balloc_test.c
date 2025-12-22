@@ -1,5 +1,6 @@
 #include "common/memory.h"
 #include "common/memory_block.h"
+#include "common/numutils.h"
 #include "common/test_assert.h"
 #include "lib/logging/log.h"
 
@@ -16,7 +17,7 @@
 
 static inline uintptr_t
 align_up_uint(uintptr_t p, size_t align) {
-	return (p + (align - 1)) & ~(uintptr_t)(align - 1);
+	return next_divisible_pow2(p, align);
 }
 
 // Dump allocator pools and mask for diagnostics
