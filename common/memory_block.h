@@ -164,7 +164,7 @@ block_allocator_balloc(struct block_allocator *allocator, size_t size) {
 		return NULL;
 	}
 	size_t parent_pool_index = pool_index + __builtin_ctz(mask);
-	
+
 	while (parent_pool_index-- > pool_index) {
 		block_allocator_pool_borrow(allocator, parent_pool_index);
 	}
