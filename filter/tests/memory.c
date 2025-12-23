@@ -1,57 +1,85 @@
-#include "common/memory.h"
-#include "utils.h"
+#include "filter/compiler.h"
+#include "filter/filter.h"
+#include "filter/query.h"
 
-#include "attribute.h"
-#include "common/memory_block.h"
-#include "filter.h"
+#include "filter/tests/helpers.h"
+#include "lib/utils/packet.h"
 
-#include <rte_ip.h>
-
+#include "logging/log.h"
 #include <assert.h>
+#include <netinet/in.h>
 #include <stdio.h>
+#include <string.h>
+
+FILTER_COMPILER_DECLARE(sign_ports, port_src, port_dst);
+FILTER_QUERY_DECLARE(sign_ports, port_src, port_dst);
+
+FILTER_COMPILER_DECLARE(sign_port_src, port_src);
+FILTER_QUERY_DECLARE(sign_port_src, port_src);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 query_and_expect_action(
 	struct filter *filter,
 	uint16_t src_port,
 	uint16_t dst_port,
-	uint32_t expected
+	uint32_t expected,
+	const char *sign
 ) {
-	struct packet packet = make_packet4(
-		ip(0, 0, 0, 0),
-		ip(0, 0, 0, 0),
-		src_port,
-		dst_port,
-		IPPROTO_UDP,
-		0,
-		0
-	);
-	query_filter_and_expect_action(filter, &packet, expected);
+	struct packet packet = {0};
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
+	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
+	int res = fill_packet_net4(&packet, sip, dip, src_port, dst_port, IPPROTO_UDP, 0);
+	assert(res == 0);
+	
+	uint32_t *actions;
+	uint32_t actions_count;
+	
+	if (strcmp(sign, "ports") == 0) {
+		FILTER_QUERY(filter, sign_ports, &packet, &actions, &actions_count);
+	} else if (strcmp(sign, "port_src") == 0) {
+		FILTER_QUERY(filter, sign_port_src, &packet, &actions, &actions_count);
+	} else {
+		assert(0 && "Invalid sign");
+	}
+	
+	assert(actions_count >= 1);
+	assert(actions[0] == expected);
 	free_packet(&packet);
 }
 
-void
+static void
 query_and_expect_no_action(
-	struct filter *filter, uint16_t src_port, uint16_t dst_port
+	struct filter *filter,
+	uint16_t src_port,
+	uint16_t dst_port,
+	const char *sign
 ) {
-	struct packet packet = make_packet4(
-		ip(0, 0, 0, 0),
-		ip(0, 0, 0, 0),
-		src_port,
-		dst_port,
-		IPPROTO_UDP,
-		0,
-		0
-	);
-	query_filter_and_expect_no_actions(filter, &packet);
+	struct packet packet = {0};
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
+	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
+	int res = fill_packet_net4(&packet, sip, dip, src_port, dst_port, IPPROTO_UDP, 0);
+	assert(res == 0);
+	
+	uint32_t *actions;
+	uint32_t actions_count;
+	
+	if (strcmp(sign, "ports") == 0) {
+		FILTER_QUERY(filter, sign_ports, &packet, &actions, &actions_count);
+	} else if (strcmp(sign, "port_src") == 0) {
+		FILTER_QUERY(filter, sign_port_src, &packet, &actions, &actions_count);
+	} else {
+		assert(0 && "Invalid sign");
+	}
+	
+	assert(actions_count == 0);
 	free_packet(&packet);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 test_src_dst_ports(void *memory) {
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
@@ -60,11 +88,6 @@ test_src_dst_ports(void *memory) {
 	struct memory_context memory_context;
 	int res = memory_context_init(&memory_context, "test", &allocator);
 	assert(res == 0);
-
-	// filter attributes
-	const struct filter_attribute *attributes[2] = {
-		&attribute_port_src, &attribute_port_dst
-	};
 
 	// action 1:
 	//	src_port: [5..7]
@@ -88,20 +111,20 @@ test_src_dst_ports(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = filter_init(&filter, attributes, 2, actions, 2, &memory_context);
+	res = FILTER_INIT(&filter, sign_ports, actions, 2, &memory_context);
 	assert(res == 0);
 
-	query_and_expect_action(&filter, 6, 3, 1);
-	query_and_expect_action(&filter, 8, 3, 2);
+	query_and_expect_action(&filter, 6, 3, 1, "ports");
+	query_and_expect_action(&filter, 8, 3, 2, "ports");
 
-	filter_free(&filter);
+	FILTER_FREE(&filter, sign_ports);
 
 	memory_bfree(&memory_context, memory, 1 << 24);
 	void *mem = memory_balloc(&memory_context, 1 << 24);
 	assert(mem == memory);
 }
 
-void
+static void
 test_src_port_only(void *memory) {
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
@@ -127,23 +150,21 @@ test_src_port_only(void *memory) {
 
 	struct filter_rule actions[2] = {action1, action2};
 
-	const struct filter_attribute *attrs[1] = {&attribute_port_src};
-
 	// init filter
 	struct filter filter;
-	res = filter_init(&filter, attrs, 1, actions, 2, &memory_context);
+	res = FILTER_INIT(&filter, sign_port_src, actions, 2, &memory_context);
 	assert(res == 0);
 
-	query_and_expect_action(&filter, 500, 0, 1);
-	query_and_expect_action(&filter, 600, 0, 1);
-	query_and_expect_action(&filter, 700, 0, 1);
-	query_and_expect_action(&filter, 701, 0, 2);
-	query_and_expect_action(&filter, 800, 0, 2);
+	query_and_expect_action(&filter, 500, 0, 1, "port_src");
+	query_and_expect_action(&filter, 600, 0, 1, "port_src");
+	query_and_expect_action(&filter, 700, 0, 1, "port_src");
+	query_and_expect_action(&filter, 701, 0, 2, "port_src");
+	query_and_expect_action(&filter, 800, 0, 2, "port_src");
 
-	query_and_expect_no_action(&filter, 499, 0);
-	query_and_expect_no_action(&filter, 801, 0);
+	query_and_expect_no_action(&filter, 499, 0, "port_src");
+	query_and_expect_no_action(&filter, 801, 0, "port_src");
 
-	filter_free(&filter);
+	FILTER_FREE(&filter, sign_port_src);
 
 	memory_bfree(&memory_context, memory, 1 << 24);
 	void *mem = memory_balloc(&memory_context, 1 << 24);
@@ -152,25 +173,30 @@ test_src_port_only(void *memory) {
 
 int
 main() {
+	log_enable_name("debug");
 	void *memory = malloc(1 << 24);
 
+	LOG(INFO, "Running test_src_port_only 10 times...");
 	for (size_t i = 0; i < 10; ++i) {
 		test_src_port_only(memory);
 		if (i >= 5) {
 			memset(memory, (int)i, 1 << 24);
 		}
 	}
+	LOG(INFO, "test_src_port_only passed");
 
+	LOG(INFO, "Running test_src_dst_ports 10 times...");
 	for (size_t i = 0; i < 10; ++i) {
 		test_src_dst_ports(memory);
 		if (i >= 5) {
 			memset(memory, (int)i, 1 << 24);
 		}
 	}
+	LOG(INFO, "test_src_dst_ports passed");
 
 	free(memory);
 
-	puts("OK!");
+	LOG(INFO, "All tests passed");
 
 	return 0;
 }

@@ -1,31 +1,75 @@
-#include "attribute.h"
-#include "common/network.h"
-#include "filter.h"
-#include "utils.h"
+#include "filter/compiler.h"
+#include "filter/filter.h"
+#include "filter/query.h"
+
+#include "filter/tests/helpers.h"
+#include "lib/utils/packet.h"
+
+#include "logging/log.h"
 #include <assert.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <string.h>
+
+FILTER_COMPILER_DECLARE(sign_net6_dst, net6_dst);
+FILTER_QUERY_DECLARE(sign_net6_dst, net6_dst);
+
+FILTER_COMPILER_DECLARE(sign_net6, net6_src, net6_dst);
+FILTER_QUERY_DECLARE(sign_net6, net6_src, net6_dst);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 query_packet_and_expect_action(
 	struct filter *filter,
 	uint8_t src_ip[NET6_LEN],
 	uint8_t dst_ip[NET6_LEN],
-	uint32_t action
+	uint32_t action,
+	const char *sign
 ) {
-	struct packet packet = make_packet6(src_ip, dst_ip, 100, 200);
-	query_filter_and_expect_action(filter, &packet, action);
+	struct packet packet = {0};
+	int res = fill_packet_net6(&packet, src_ip, dst_ip, 100, 200, IPPROTO_UDP, 0);
+	assert(res == 0);
+	
+	uint32_t *actions = NULL;
+	uint32_t actions_count = 0;
+	
+	if (strcmp(sign, "dst") == 0) {
+		FILTER_QUERY(filter, sign_net6_dst, &packet, &actions, &actions_count);
+	} else if (strcmp(sign, "both") == 0) {
+		FILTER_QUERY(filter, sign_net6, &packet, &actions, &actions_count);
+	} else {
+		assert(0 && "Invalid sign");
+	}
+	
+	assert(actions_count >= 1);
+	assert(actions[0] == action);
 	free_packet(&packet);
 }
 
-void
+static void
 query_packet_and_expect_no_actions(
 	struct filter *filter,
 	uint8_t src_ip[NET6_LEN],
-	uint8_t dst_ip[NET6_LEN]
+	uint8_t dst_ip[NET6_LEN],
+	const char *sign
 ) {
-	struct packet packet = make_packet6(src_ip, dst_ip, 100, 200);
-	query_filter_and_expect_no_actions(filter, &packet);
+	struct packet packet = {0};
+	int res = fill_packet_net6(&packet, src_ip, dst_ip, 100, 200, IPPROTO_UDP, 0);
+	assert(res == 0);
+	
+	uint32_t *actions = NULL;
+	uint32_t actions_count = 0;
+	
+	if (strcmp(sign, "dst") == 0) {
+		FILTER_QUERY(filter, sign_net6_dst, &packet, &actions, &actions_count);
+	} else if (strcmp(sign, "both") == 0) {
+		FILTER_QUERY(filter, sign_net6, &packet, &actions, &actions_count);
+	} else {
+		assert(0 && "Invalid sign");
+	}
+	
+	assert(actions_count == 0);
 	free_packet(&packet);
 }
 
@@ -35,7 +79,7 @@ query_packet_and_expect_no_actions(
 // This function makes IPv6 address like
 // 0xBB 0xBB .. 0xB0 00 .. 00 0xAA .. 0xA0 00 .. 00,
 // here c1 Bs and c2 Ls, B means big and L means low.
-void
+static void
 make_addr(
 	uint8_t ip[NET6_LEN], uint8_t big, uint8_t c1, uint8_t low, uint8_t c2
 ) {
@@ -58,7 +102,7 @@ make_addr(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 test1(void *memory) {
 	// init memory
 	struct block_allocator allocator;
@@ -100,9 +144,8 @@ test1(void *memory) {
 	const struct filter_rule rules[1] = {rule};
 
 	// init filter
-	const struct filter_attribute *attrs[1] = {&attribute_net6_dst};
 	struct filter filter;
-	res = filter_init(&filter, attrs, 1, rules, 1, &mctx);
+	res = FILTER_INIT(&filter, sign_net6_dst, rules, 1, &mctx);
 	assert(res == 0);
 
 	// query packet 1
@@ -110,7 +153,7 @@ test1(void *memory) {
 		uint8_t src[NET6_LEN] = {};
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
-		query_packet_and_expect_action(&filter, src, dst, 1);
+		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
 	}
 
 	// query packet 2
@@ -118,10 +161,10 @@ test1(void *memory) {
 		uint8_t src[NET6_LEN] = {};
 		uint8_t dst[NET6_LEN];
 		memset(dst, 0xBB, NET6_LEN);
-		query_packet_and_expect_no_actions(&filter, src, dst);
+		query_packet_and_expect_no_actions(&filter, src, dst, "dst");
 
 		memset(dst, 0xAA, NET6_LEN);
-		query_packet_and_expect_no_actions(&filter, src, dst);
+		query_packet_and_expect_no_actions(&filter, src, dst, "dst");
 	}
 
 	// query packet 3
@@ -131,7 +174,7 @@ test1(void *memory) {
 		memset(dst, 0, NET6_LEN);
 		dst[0] = dst[1] = dst[2] = dst[3] = dst[4] = 0xBB;
 		dst[8] = dst[9] = dst[10] = 0xAA;
-		query_packet_and_expect_action(&filter, src, dst, 1);
+		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
 	}
 
 	// query packet 4
@@ -140,7 +183,7 @@ test1(void *memory) {
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
 		dst[4] = 0xB0;
-		query_packet_and_expect_no_actions(&filter, src, dst);
+		query_packet_and_expect_no_actions(&filter, src, dst, "dst");
 	}
 
 	// query packet 5
@@ -149,7 +192,7 @@ test1(void *memory) {
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
 		dst[5] = 0xB0;
-		query_packet_and_expect_action(&filter, src, dst, 1);
+		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
 	}
 
 	// query packet 6
@@ -158,7 +201,7 @@ test1(void *memory) {
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
 		dst[10] = 0xA0;
-		query_packet_and_expect_no_actions(&filter, src, dst);
+		query_packet_and_expect_no_actions(&filter, src, dst, "dst");
 	}
 
 	// query packet 7
@@ -167,7 +210,7 @@ test1(void *memory) {
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
 		dst[9] = 0xA0;
-		query_packet_and_expect_no_actions(&filter, src, dst);
+		query_packet_and_expect_no_actions(&filter, src, dst, "dst");
 	}
 
 	// query packet 8
@@ -176,7 +219,7 @@ test1(void *memory) {
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
 		dst[11] = 0xA0;
-		query_packet_and_expect_action(&filter, src, dst, 1);
+		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
 	}
 
 	// query packet 9
@@ -200,15 +243,15 @@ test1(void *memory) {
 			0x00,
 			0x00,
 		};
-		query_packet_and_expect_action(&filter, src, dst, 1);
+		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
 	}
 
-	filter_free(&filter);
+	FILTER_FREE(&filter, sign_net6_dst);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 test2(void *memory) {
 	// init memory
 	struct block_allocator allocator;
@@ -251,9 +294,8 @@ test2(void *memory) {
 	const struct filter_rule rules[1] = {rule};
 
 	// init filter
-	const struct filter_attribute *attrs[1] = {&attribute_net6_dst};
 	struct filter filter;
-	res = filter_init(&filter, attrs, 1, rules, 1, &mctx);
+	res = FILTER_INIT(&filter, sign_net6_dst, rules, 1, &mctx);
 	assert(res == 0);
 
 	// query packet 1
@@ -277,7 +319,7 @@ test2(void *memory) {
 			0x00,
 			0x00,
 		};
-		query_packet_and_expect_action(&filter, src, dst, 1);
+		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
 	}
 
 	// query packet 2
@@ -301,7 +343,7 @@ test2(void *memory) {
 			0x00,
 			0x00,
 		};
-		query_packet_and_expect_no_actions(&filter, src, dst);
+		query_packet_and_expect_no_actions(&filter, src, dst, "dst");
 	}
 
 	// query packet 3
@@ -325,15 +367,15 @@ test2(void *memory) {
 			0x00,
 			0x00,
 		};
-		query_packet_and_expect_no_actions(&filter, src, dst);
+		query_packet_and_expect_no_actions(&filter, src, dst, "dst");
 	}
 
-	filter_free(&filter);
+	FILTER_FREE(&filter, sign_net6_dst);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 test3(void *memory) {
 	// init memory
 	struct block_allocator allocator;
@@ -470,11 +512,8 @@ test3(void *memory) {
 	const struct filter_rule rules[2] = {rule1, rule2};
 
 	// init filter
-	const struct filter_attribute *attrs[2] = {
-		&attribute_net6_src, &attribute_net6_dst
-	};
 	struct filter filter;
-	res = filter_init(&filter, attrs, 2, rules, 2, &mctx);
+	res = FILTER_INIT(&filter, sign_net6, rules, 2, &mctx);
 	assert(res == 0);
 
 	// query packet 1
@@ -485,7 +524,7 @@ test3(void *memory) {
 		uint8_t dst[16];
 		make_addr(dst, 0xB, 10, 0xA, 6);
 
-		query_packet_and_expect_action(&filter, src, dst, 1);
+		query_packet_and_expect_action(&filter, src, dst, 1, "both");
 	}
 
 	// query packet 2
@@ -496,7 +535,7 @@ test3(void *memory) {
 		uint8_t dst[16];
 		make_addr(dst, 0xB, 9, 0xA, 5);
 
-		query_packet_and_expect_action(&filter, src, dst, 2);
+		query_packet_and_expect_action(&filter, src, dst, 2, "both");
 	}
 
 	// query packet 3
@@ -507,7 +546,7 @@ test3(void *memory) {
 		uint8_t dst[16];
 		make_addr(dst, 0xB, 10, 0xA, 6);
 
-		query_packet_and_expect_action(&filter, src, dst, 1);
+		query_packet_and_expect_action(&filter, src, dst, 1, "both");
 	}
 
 	// query packet 4
@@ -518,28 +557,32 @@ test3(void *memory) {
 		uint8_t dst[16];
 		make_addr(dst, 0xB, 9, 0xA, 5);
 
-		query_packet_and_expect_no_actions(&filter, src, dst);
+		query_packet_and_expect_no_actions(&filter, src, dst, "both");
 	}
 
-	filter_free(&filter);
+	FILTER_FREE(&filter, sign_net6);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {
+	log_enable_name("debug");
 	void *memory = malloc(1 << 24); // 16MB
 
-	puts("test1...");
+	LOG(INFO, "Running test1...");
 	test1(memory);
+	LOG(INFO, "test1 passed");
 
-	puts("test2...");
+	LOG(INFO, "Running test2...");
 	test2(memory);
+	LOG(INFO, "test2 passed");
 
-	puts("test3...");
+	LOG(INFO, "Running test3...");
 	test3(memory);
+	LOG(INFO, "test3 passed");
 
-	puts("OK");
+	LOG(INFO, "All tests passed");
 
 	free(memory);
 

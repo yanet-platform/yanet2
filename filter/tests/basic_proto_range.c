@@ -1,38 +1,50 @@
-#include "rule.h"
-#include "utils.h"
+#include "filter/compiler.h"
+#include "filter/filter.h"
+#include "filter/query.h"
 
-#include "attribute.h"
-#include "common/memory_block.h"
-#include "filter.h"
+#include "filter/tests/helpers.h"
+#include "lib/utils/packet.h"
 
-#include <netinet/in.h>
-#include <rte_ip.h>
-
+#include "logging/log.h"
 #include <assert.h>
+#include <netinet/in.h>
 
-#include <lib/logging/log.h>
+FILTER_COMPILER_DECLARE(sign_proto_range, proto_range);
+FILTER_QUERY_DECLARE(sign_proto_range, proto_range);
 
-void
+static void
 query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
-	struct packet packet = make_packet4(
-		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 0, 0, IPPROTO_TCP, flags, 0
-	);
-	query_filter_and_expect_action(filter, &packet, expected);
+	struct packet packet = {0};
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
+	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
+	int res = fill_packet_net4(&packet, sip, dip, 0, 0, IPPROTO_TCP, flags);
+	assert(res == 0);
+	uint32_t *actions;
+	uint32_t actions_count;
+	FILTER_QUERY(filter, sign_proto_range, &packet, &actions, &actions_count);
+	assert(actions_count >= 1);
+	assert(actions[0] == expected);
 	free_packet(&packet);
 }
 
-void
+static void
 query_udp_packet(struct filter *filter, uint32_t expected) {
-	struct packet packet = make_packet4(
-		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 0, 0, IPPROTO_UDP, 0, 0
-	);
-	query_filter_and_expect_action(filter, &packet, expected);
+	struct packet packet = {0};
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
+	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
+	int res = fill_packet_net4(&packet, sip, dip, 0, 0, IPPROTO_UDP, 0);
+	assert(res == 0);
+	uint32_t *actions;
+	uint32_t actions_count;
+	FILTER_QUERY(filter, sign_proto_range, &packet, &actions, &actions_count);
+	assert(actions_count >= 1);
+	assert(actions[0] == expected);
 	free_packet(&packet);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 test_proto_1(void *memory) {
 	// init memory
 	struct block_allocator allocator;
@@ -59,12 +71,10 @@ test_proto_1(void *memory) {
 
 	struct filter_rule rules[2] = {r1, r2};
 
-	const struct filter_attribute *attrs[1] = {&attribute_proto_range};
-
 	struct filter filter;
 
 	LOG(INFO, "filter init...");
-	res = filter_init(&filter, attrs, 1, rules, 2, &memory_context);
+	res = FILTER_INIT(&filter, sign_proto_range, rules, 2, &memory_context);
 	assert(res == 0);
 
 	LOG(INFO, "query tcp packet...");
@@ -73,7 +83,7 @@ test_proto_1(void *memory) {
 	LOG(INFO, "query udp packet...");
 	query_udp_packet(&filter, 2);
 
-	filter_free(&filter);
+	FILTER_FREE(&filter, sign_proto_range);
 }
 
 int

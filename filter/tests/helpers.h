@@ -23,6 +23,12 @@ struct filter_rule_builder {
 	struct net4 net4_dst[filter_TEST_MAX_RANGES];
 	size_t net4_dst_count;
 
+	struct net6 net6_src[filter_TEST_MAX_RANGES];
+	size_t net6_src_count;
+
+	struct net6 net6_dst[filter_TEST_MAX_RANGES];
+	size_t net6_dst_count;
+
 	struct filter_vlan_range vlan_ranges[filter_TEST_MAX_RANGES];
 	size_t vlan_range_count;
 
@@ -38,6 +44,8 @@ builder_init(struct filter_rule_builder *b) {
 	b->dst_port_ranges_count = 0;
 	b->net4_src_count = 0;
 	b->net4_dst_count = 0;
+	b->net6_src_count = 0;
+	b->net6_dst_count = 0;
 	b->vlan_range_count = 0;
 	b->proto_ranges_count = 0;
 	b->proto = (struct filter_proto
@@ -87,6 +95,18 @@ builder_add_net4_dst(
 }
 
 static inline void
+builder_add_net6_src(struct filter_rule_builder *b, struct net6 net) {
+	size_t i = b->net6_src_count++;
+	b->net6_src[i] = net;
+}
+
+static inline void
+builder_add_net6_dst(struct filter_rule_builder *b, struct net6 net) {
+	size_t i = b->net6_dst_count++;
+	b->net6_dst[i] = net;
+}
+
+static inline void
 builder_add_proto_range(
 	struct filter_rule_builder *b, uint16_t from, uint16_t to
 ) {
@@ -121,10 +141,10 @@ build_rule(struct filter_rule_builder *b, uint32_t action) {
 	r.net4.dst_count = (uint32_t)b->net4_dst_count;
 	r.net4.dsts = b->net4_dst;
 
-	r.net6.src_count = 0;
-	r.net6.srcs = NULL;
-	r.net6.dst_count = 0;
-	r.net6.dsts = NULL;
+	r.net6.src_count = (uint32_t)b->net6_src_count;
+	r.net6.srcs = b->net6_src;
+	r.net6.dst_count = (uint32_t)b->net6_dst_count;
+	r.net6.dsts = b->net6_dst;
 
 	r.transport.proto = b->proto;
 	r.transport.src_count = (uint16_t)b->src_port_ranges_count;

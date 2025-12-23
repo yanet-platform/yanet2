@@ -1,34 +1,38 @@
-#include "filter.h"
-#include "rule.h"
-#include "utils.h"
+#include "filter/compiler.h"
+#include "filter/filter.h"
+#include "filter/query.h"
 
+#include "filter/tests/helpers.h"
+#include "lib/utils/packet.h"
+
+#include "logging/log.h"
 #include <assert.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+FILTER_COMPILER_DECLARE(sign_port_src, port_src);
+FILTER_QUERY_DECLARE(sign_port_src, port_src);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 query_and_check_actions(
 	struct filter *filter,
 	uint16_t src_port,
 	uint32_t ref_actions_count,
 	const uint32_t *ref_actions
 ) {
-	struct packet packet = make_packet4(
-		ip(0, 0, 0, 123),
-		ip(0, 0, 1, 65),
-		src_port,
-		222,
-		IPPROTO_UDP,
-		0,
-		0
-	);
-	const uint32_t *actions;
-	uint32_t actions_count;
-	int res = filter_query(filter, &packet, &actions, &actions_count);
+	struct packet packet = {0};
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 123};
+	uint8_t dip[NET4_LEN] = {0, 0, 1, 65};
+	int res = fill_packet_net4(&packet, sip, dip, src_port, 222, IPPROTO_UDP, 0);
 	assert(res == 0);
+	
+	uint32_t *actions;
+	uint32_t actions_count;
+	FILTER_QUERY(filter, sign_port_src, &packet, &actions, &actions_count);
 	assert(actions_count == ref_actions_count);
 	for (uint32_t i = 0; i < actions_count; ++i) {
 		assert(actions[i] == ref_actions[i]);
@@ -38,7 +42,7 @@ query_and_check_actions(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 test1(void *memory) {
 	// init memory
 	struct block_allocator allocator;
@@ -127,9 +131,8 @@ test1(void *memory) {
 	}
 
 	// init filter
-	const struct filter_attribute *attrs[1] = {&attribute_port_src};
 	struct filter filter;
-	res = filter_init(&filter, attrs, 1, rules, 8, &mctx);
+	res = FILTER_INIT(&filter, sign_port_src, rules, 8, &mctx);
 	assert(res == 0);
 
 	// query packet 1
@@ -220,12 +223,12 @@ test1(void *memory) {
 	}
 
 	// free filter
-	filter_free(&filter);
+	FILTER_FREE(&filter, sign_port_src);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 test2() {
 	{
 		uint32_t actions[3] = {
@@ -289,15 +292,18 @@ test2() {
 
 int
 main() {
+	log_enable_name("debug");
 	void *memory = malloc(1 << 24); // 16MB
 
-	puts("test1...");
+	LOG(INFO, "Running test1...");
 	test1(memory);
+	LOG(INFO, "test1 passed");
 
-	puts("test2...");
+	LOG(INFO, "Running test2...");
 	test2();
+	LOG(INFO, "test2 passed");
 
-	puts("OK");
+	LOG(INFO, "All tests passed");
 
 	free(memory);
 

@@ -59,6 +59,6 @@ int
 main() {
 	log_enable_name("debug");
 	run_case();
-	puts("OK");
+	LOG(INFO, "OK");
 	return 0;
 }

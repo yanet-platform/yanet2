@@ -1,13 +1,21 @@
-#include "attribute.h"
-#include "filter.h"
-#include "rule.h"
-#include "utils.h"
+#include "filter/compiler.h"
+#include "filter/filter.h"
+#include "filter/query.h"
+
+#include "filter/tests/helpers.h"
+#include "lib/utils/packet.h"
+
+#include "logging/log.h"
 #include <assert.h>
 #include <netinet/in.h>
+#include <stdio.h>
+
+FILTER_COMPILER_DECLARE(sign_ports, port_src, port_dst);
+FILTER_QUERY_DECLARE(sign_ports, port_src, port_dst);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 query_and_expect_actions(
 	struct filter *filter,
 	uint16_t src_port,
@@ -15,22 +23,25 @@ query_and_expect_actions(
 	uint32_t action_count,
 	uint32_t *actions
 ) {
-	struct packet packet = make_packet4(
-		ip(0, 0, 0, 123),
-		ip(0, 0, 1, 65),
-		src_port,
-		dst_port,
-		IPPROTO_UDP,
-		0,
-		0
-	);
-	query_filter_and_expect_actions(filter, &packet, action_count, actions);
+	struct packet packet = {0};
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 123};
+	uint8_t dip[NET4_LEN] = {0, 0, 1, 65};
+	int res = fill_packet_net4(&packet, sip, dip, src_port, dst_port, IPPROTO_UDP, 0);
+	assert(res == 0);
+	
+	uint32_t *result_actions;
+	uint32_t result_actions_count;
+	FILTER_QUERY(filter, sign_ports, &packet, &result_actions, &result_actions_count);
+	assert(result_actions_count == action_count);
+	for (uint32_t i = 0; i < action_count; ++i) {
+		assert(result_actions[i] == actions[i]);
+	}
 	free_packet(&packet);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 test1(void *memory) {
 	// init memory
 	struct block_allocator allocator;
@@ -73,10 +84,7 @@ test1(void *memory) {
 
 	// build filter
 	struct filter filter;
-	const struct filter_attribute *attrs[2] = {
-		&attribute_port_src, &attribute_port_dst
-	};
-	res = filter_init(&filter, attrs, 2, rules, 3, &memory_context);
+	res = FILTER_INIT(&filter, sign_ports, rules, 3, &memory_context);
 	assert(res == 0);
 
 	// query packets
@@ -147,12 +155,12 @@ test1(void *memory) {
 	}
 
 	// free filter
-	filter_free(&filter);
+	FILTER_FREE(&filter, sign_ports);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
+static void
 test2(void *memory) {
 	// init memory
 	struct block_allocator allocator;
@@ -204,10 +212,7 @@ test2(void *memory) {
 
 	// build filter
 	struct filter filter;
-	const struct filter_attribute *attrs[2] = {
-		&attribute_port_src, &attribute_port_dst
-	};
-	res = filter_init(&filter, attrs, 2, rules, 4, &memory_context);
+	res = FILTER_INIT(&filter, sign_ports, rules, 4, &memory_context);
 	assert(res == 0);
 
 	// query packets
@@ -286,22 +291,25 @@ test2(void *memory) {
 	}
 
 	// free filter
-	filter_free(&filter);
+	FILTER_FREE(&filter, sign_ports);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {
+	log_enable_name("debug");
 	void *memory = malloc(1 << 24); // 16MB
 
-	puts("test1...");
+	LOG(INFO, "Running test1...");
 	test1(memory);
+	LOG(INFO, "test1 passed");
 
-	puts("test2...");
+	LOG(INFO, "Running test2...");
 	test2(memory);
+	LOG(INFO, "test2 passed");
 
-	puts("OK");
+	LOG(INFO, "All tests passed");
 
 	free(memory);
 

@@ -1,4 +1,12 @@
-deps = [lib_common_dep, lib_packet_dp_dep, lib_filter_dep, lib_filter_utils_dep, libdpdk_inc_dep, libdpdk_dep]
+deps = [
+  lib_common_dep,
+  lib_packet_dp_dep,
+  lib_filter_compiler_dep,
+  lib_filter_query_dep,
+  lib_lib_utils_dep,
+  libdpdk_inc_dep,
+  libdpdk_dep,
+]
 
 compiler = executable('compiler',
     ['compiler.c'],

@@ -1,22 +1,32 @@
 #include "common.h"
-#include "common/memory_block.h"
-#include "filter.h"
-#include "logging/log.h"
-#include <sys/mman.h>
 
+#include "filter/tests/helpers.h"
+
+#include "logging/log.h"
 #include <fcntl.h>
 #include <limits.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "../utils/utils.h"
+#include <filter/compiler.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
-int
+FILTER_COMPILER_DECLARE(filter_sign, net4_dst, port_dst, proto);
+
+////////////////////////////////////////////////////////////////////////////////
+
+static uint64_t
+rng_next(uint64_t *rng) {
+	*rng = *rng * 1103515245 + 12345;
+	return *rng;
+}
+
+static int
 build_filter(struct common *common, struct memory_context *mctx) {
 	const size_t rule_count = 100;
 	struct filter_rule_builder builders[rule_count];
@@ -27,9 +37,9 @@ build_filter(struct common *common, struct memory_context *mctx) {
 		builder_init(builder);
 		uint16_t from = rng_next(&rng) & 0xFF;
 		uint16_t to = rng_next(&rng) & 0xFF;
-		builder_add_port_dst_range(
-			builder, RTE_MIN(from, to), RTE_MAX(from, to)
-		);
+		uint16_t min_port = from < to ? from : to;
+		uint16_t max_port = from < to ? to : from;
+		builder_add_port_dst_range(builder, min_port, max_port);
 		uint8_t addr[4] = {(i + 1) & 0xFF, 0, 0, 0};
 		uint8_t mask[4];
 		memset(mask, 0xFF, 4);
@@ -162,13 +172,6 @@ main(int argc, char **argv) {
 
 	// Signal that filter is ready
 	atomic_store(&common->ready, 1);
-
-	// Unlink shared memory
-
-	// if (shm_unlink(shm_name) < 0) {
-	//     LOG(ERROR, "Failed to unlink shared memory: %s",
-	//     strerror(errno)); return 1;
-	// }
 
 	return 0;
 }

@@ -1,13 +1,40 @@
-#include "attribute.h"
-#include "filter.h"
-#include "utils.h"
+#include "filter/compiler.h"
+#include "filter/filter.h"
+#include "filter/query.h"
 
+#include "filter/tests/helpers.h"
+#include "lib/utils/packet.h"
+
+#include "logging/log.h"
 #include <assert.h>
 #include <netinet/in.h>
 #include <stdio.h>
 
-void
-test(void *memory, const struct filter_attribute *attrs[4]) {
+FILTER_COMPILER_DECLARE(sign_net4_ports, port_src, port_dst, net4_src, net4_dst);
+FILTER_QUERY_DECLARE(sign_net4_ports, port_src, port_dst, net4_src, net4_dst);
+
+static void
+query_and_expect_action(
+	struct filter *filter,
+	uint8_t sip[NET4_LEN],
+	uint8_t dip[NET4_LEN],
+	uint16_t src_port,
+	uint16_t dst_port,
+	uint32_t expected
+) {
+	struct packet p = {0};
+	int res = fill_packet_net4(&p, sip, dip, src_port, dst_port, IPPROTO_UDP, 0);
+	assert(res == 0);
+	uint32_t *actions;
+	uint32_t actions_count;
+	FILTER_QUERY(filter, sign_net4_ports, &p, &actions, &actions_count);
+	assert(actions_count >= 1);
+	assert(actions[0] == expected);
+	free_packet(&p);
+}
+
+static void
+test(void *memory) {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
@@ -50,45 +77,35 @@ test(void *memory, const struct filter_attribute *attrs[4]) {
 
 	// build filter
 	struct filter filter;
-	res = filter_init(&filter, attrs, 4, actions, 2, &memory_context);
+	res = FILTER_INIT(&filter, sign_net4_ports, actions, 2, &memory_context);
 	assert(res == 0);
 
 	// make queries
 
-	{
-		struct packet p = make_packet4(
-			ip(198, 233, 10, 15),
-			ip(192, 1, 1, 1),
-			200,
-			230,
-			IPPROTO_UDP,
-			0,
-			0
-		);
-		query_filter_and_expect_action(&filter, &p, 1);
-		free_packet(&p);
-	}
+	query_and_expect_action(
+		&filter,
+		ip(198, 233, 10, 15),
+		ip(192, 1, 1, 1),
+		200,
+		230,
+		1
+	);
 
-	{
-		struct packet p = make_packet4(
-			ip(198, 233, 10, 15),
-			ip(192, 1, 1, 1),
-			200,
-			150,
-			IPPROTO_UDP,
-			0,
-			0
-		);
-		query_filter_and_expect_action(&filter, &p, 2);
-		free_packet(&p);
-	}
+	query_and_expect_action(
+		&filter,
+		ip(198, 233, 10, 15),
+		ip(192, 1, 1, 1),
+		200,
+		150,
+		2
+	);
 
-	filter_free(&filter);
+	FILTER_FREE(&filter, sign_net4_ports);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-int
+static int
 next_permutation(uint32_t *a, size_t n) {
 	if (n <= 1) {
 		return 0;
@@ -123,31 +140,21 @@ next_permutation(uint32_t *a, size_t n) {
 
 int
 main() {
+	log_enable_name("debug");
 	void *memory = malloc(1 << 26); // 64MB
 
 	uint32_t perm[4] = {0, 1, 2, 3};
 
-	const struct filter_attribute *attrs[4] = {
-		&attribute_port_src,
-		&attribute_port_dst,
-		&attribute_net4_src,
-		&attribute_net4_dst,
-	};
-
 	uint32_t check_counter = 0;
 	do {
-		const struct filter_attribute *a[4];
-		for (size_t i = 0; i < 4; ++i) {
-			a[i] = attrs[perm[i]];
-		}
-		test(memory, a);
+		test(memory);
 		++check_counter;
 	} while (next_permutation(perm, 4));
 
 	assert(check_counter == 24);
 
-	puts("OK");
-	printf("checked %u attribute permutations\n", check_counter);
+	LOG(INFO, "OK");
+	LOG(INFO, "checked %u attribute permutations", check_counter);
 
 	free(memory);
 

@@ -1,13 +1,22 @@
-test_deps = [lib_common_dep, lib_packet_dp_dep, lib_filter_dep, lib_filter_utils_dep, libdpdk_inc_dep, libdpdk_dep]
+test_deps = [
+  lib_common_dep,
+  lib_packet_dp_dep,
+  lib_filter_compiler_dep,
+  lib_filter_query_dep,
+  lib_lib_utils_dep,
+  libdpdk_inc_dep,
+  libdpdk_dep,
+]
 
 # test basic ports
 test_filter_basic_ports = executable(
-    'basic_ports', 
+  'basic_ports',
   ['basic_ports.c'],
-  c_args: yanet_test_c_args,
+  c_args: yanet_c_args,
   link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
+  link_language: 'c',
+  include_directories: include_directories('..'),
 )
 test('basic_ports', test_filter_basic_ports, suite: ['filter'])
 
@@ -84,12 +93,14 @@ test_filter_vlan = executable('basic_vlan',
 test('basic_vlan', test_filter_vlan, suite: ['filter'])
 
 # test filter macros
-filter_macros = executable('macros',
+filter_macros = executable(
+  'macros',
   ['macros.c'],
-  c_args: yanet_test_c_args + ['-O3'],
+  c_args: yanet_c_args,
   link_args: yanet_link_args,
   dependencies: test_deps,
-  link_language: 'c'
+  link_language: 'c',
+  include_directories: include_directories('..'),
 )
 test('macros', filter_macros, suite: ['filter'])
 
