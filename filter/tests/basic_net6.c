@@ -8,7 +8,6 @@
 #include "logging/log.h"
 #include <assert.h>
 #include <netinet/in.h>
-#include <stdio.h>
 #include <string.h>
 
 FILTER_COMPILER_DECLARE(sign_net6_dst, net6_dst);

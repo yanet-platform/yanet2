@@ -12,19 +12,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <common/rng.h>
+
 #include <filter/compiler.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 FILTER_COMPILER_DECLARE(filter_sign, net4_dst, port_dst, proto);
-
-////////////////////////////////////////////////////////////////////////////////
-
-static uint64_t
-rng_next(uint64_t *rng) {
-	*rng = *rng * 1103515245 + 12345;
-	return *rng;
-}
 
 static int
 build_filter(struct common *common, struct memory_context *mctx) {

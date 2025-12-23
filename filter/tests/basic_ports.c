@@ -8,7 +8,6 @@
 #include "logging/log.h"
 #include <assert.h>
 #include <netinet/in.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 FILTER_COMPILER_DECLARE(sign_ports, port_src, port_dst);

@@ -8,7 +8,6 @@
 #include "logging/log.h"
 #include <assert.h>
 #include <netinet/in.h>
-#include <stdio.h>
 
 FILTER_COMPILER_DECLARE(sign_vlan, vlan);
 FILTER_QUERY_DECLARE(sign_vlan, vlan);

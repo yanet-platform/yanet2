@@ -1,3 +1,18 @@
+/**
+ * @file rule.h
+ * @brief Data structures describing filter rules and action encoding.
+ *
+ * A filter is built from an array of struct filter_rule. Each rule may specify:
+ *  - L3 nets (IPv4 / IPv6) for source/destination
+ *  - L4 transport constraints (proto ranges, TCP flags, port ranges)
+ *  - Optional device and VLAN constraints
+ *  - A 32-bit action: lower 15 bits are user action, bit 15 is terminate flag,
+ *    high 16 bits form category mask (0 = applies to all categories).
+ *
+ * See also:
+ *  - filter/compiler.h (FILTER_INIT/FILTER_FREE)
+ *  - filter/query.h (FILTER_QUERY and post-processing helpers)
+ */
 #pragma once
 
 #include <stdbool.h>
@@ -107,6 +122,18 @@ struct filter_port_ranges {
 
 #define VLAN_UNSPEC ((uint16_t)-1)
 
+/**
+ * @brief A single classification rule.
+ *
+ * Fields used by different subsystems:
+ *  - net6/net4: lists of source/destination networks (match if any applies)
+ *  - transport: protocol/flag windows and port ranges
+ *  - devices/VLAN: optional device and VLAN constraints
+ *  - action (32 bits, layout):
+ *      [31..16] category mask (0 => all categories)
+ *      [15]     terminate bit (0 => terminal, 1 => non-terminate)
+ *      [14..0]  user action (application-defined)
+ */
 struct filter_rule {
 	struct filter_net6 net6;
 	struct filter_net4 net4;
@@ -134,6 +161,13 @@ struct filter_rule {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+/**
+ * @brief Compose 32-bit action value from parts.
+ * @param category_mask High 16 bits (0 => applies to all categories).
+ * @param non_terminate_flag Set true to allow following rules to also apply.
+ * @param user_action Lower 15-bit user-defined action value.
+ * @return Encoded 32-bit action.
+ */
 static inline uint32_t
 filter_action_create(
 	uint16_t category_mask, bool non_terminate_flag, uint16_t user_action

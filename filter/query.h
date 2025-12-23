@@ -1,10 +1,32 @@
+/**
+ * @file query.h
+ * @brief Query helpers and macro interface for classifying packets.
+ *
+ * Provides:
+ *  - filter_actions_with_category(): post-process action list by category
+ *  - FILTER_QUERY: run classification for a declared attribute signature
+ *
+ * Notes:
+ *  - FILTER_QUERY returns a pointer to an actions array stored inside filter
+ *    memory; it must not be freed by the caller.
+ *  - Action iteration preserves order and stops at the first terminal action
+ *    (i.e. without ACTION_NON_TERMINATE).
+ */
 #pragma once
 
-#include "filter/query/attribute.h"
-#include "filter/rule.h"
+#include "filter.h"
+#include "query/attribute.h"
+#include "rule.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
+/**
+ * @brief Filter actions in-place by category, preserving order until terminal.
+ * @param actions Action list (modified in-place).
+ * @param count Number of actions in the list.
+ * @param category 0-based category index to keep (others are removed).
+ * @return Number of actions remaining after filtering.
+ */
 static inline uint32_t
 filter_actions_with_category(
 	uint32_t *actions, uint32_t count, uint16_t category
@@ -31,49 +53,61 @@ filter_actions_with_category(
 
 ////////////////////////////////////////////////////////////////////////////////
 
+/* Query uses local pair array instead of filter_slots to avoid introducing
+ * extra public helper structures in this header. */
+
+/**
+ * @def FILTER_QUERY(filter_ptr, tag, packet_ptr, actions_out_ptr,
+ * count_out_ptr)
+ * @brief Classify a packet using a filter built for signature tag.
+ * @param filter_ptr struct filter* built with FILTER_INIT for the same tag.
+ * @param tag Name used in FILTER_QUERY_DECLARE(...).
+ * @param packet_ptr struct packet* input packet to classify.
+ * @param actions_out_ptr uint32_t** receives pointer to action array (owned by
+ * filter).
+ * @param count_out_ptr uint32_t* receives number of actions.
+ */
 #define FILTER_QUERY(                                                          \
 	filter_ptr, tag, packet_ptr, actions_out_ptr, count_out_ptr            \
 )                                                                              \
 	__extension__({                                                        \
-		struct filter *_flt_ = (filter_ptr);                           \
-		struct packet *_pkt_ = (packet_ptr);                           \
-		const size_t _n_ = sizeof(__filter_attrs_query_##tag) /        \
+		struct filter *__flt = (filter_ptr);                           \
+		struct packet *__pkt = (packet_ptr);                           \
+		const size_t __n = sizeof(__filter_attrs_query_##tag) /        \
 				   sizeof(__filter_attrs_query_##tag[0]);      \
-		struct filter_slots _slots_;                                   \
-		/* compute classifiers for leaf attributes */                  \
-		for (size_t _ai_ = 0; _ai_ < _n_; ++_ai_) {                    \
-			size_t _vtx_ = _n_ + _ai_;                             \
-			struct filter_vertex *_v_ = &(_flt_)->v[_vtx_];        \
-			filter_slots_put_value(                                \
-				&_slots_,                                      \
-				_vtx_,                                         \
-				__filter_attrs_query_##tag[_ai_].query(        \
-					_pkt_, ADDR_OF(&_v_->data)             \
-				)                                              \
-			);                                                     \
+		/* Local slots storage */                                      \
+		uint32_t __slots[2 * MAX_ATTRIBUTES];                          \
+		/* compute classifiers for leaf attributes into parent slots   \
+		 */                                                            \
+		for (size_t __ai = 0; __ai < __n; ++__ai) {                    \
+			size_t __vtx = __n + __ai;                             \
+			struct filter_vertex *__v = &(__flt)->v[__vtx];        \
+			uint32_t __val =                                       \
+				__filter_attrs_query_##tag[__ai].query(        \
+					__pkt, ADDR_OF(&__v->data)             \
+				);                                             \
+			__slots[__vtx] = __val;                                \
 		}                                                              \
-		/* compute inner vertices except root */                       \
-		for (size_t _vtx_ = _n_ - 1; _vtx_ >= 2; --_vtx_) {            \
-			struct filter_vertex *_v_ = &(_flt_)->v[_vtx_];        \
-			uint32_t _c_ = value_table_get(                        \
-				&_v_->table,                                   \
-				filter_vertex_left_slot(&_slots_, _vtx_),      \
-				filter_vertex_right_slot(&_slots_, _vtx_)      \
+		/* compute inner vertices except root, pushing up to parent */ \
+		for (size_t __vtx = __n - 1; __vtx >= 2; --__vtx) {            \
+			struct filter_vertex *__v = &(__flt)->v[__vtx];        \
+			uint32_t __c = value_table_get(                        \
+				&__v->table,                                   \
+				__slots[__vtx << 1],                           \
+				__slots[__vtx << 1 | 1]                        \
 			);                                                     \
-			filter_slots_put_value(&_slots_, _vtx_, _c_);          \
+			__slots[__vtx] = __c;                                  \
 		}                                                              \
 		/* root (1 when n>1, else 0) */                                \
-		const size_t _root_ = _n_ > 1;                                 \
-		struct filter_vertex *_r_ = &(_flt_)->v[_root_];               \
-		uint32_t _res_ = value_table_get(                              \
-			&_r_->table,                                           \
-			_root_ == 0                                            \
-				? 0                                            \
-				: filter_vertex_left_slot(&_slots_, _root_),   \
-			filter_vertex_right_slot(&_slots_, _root_)             \
+		const size_t __root = __n > 1;                                 \
+		struct filter_vertex *__r = &(__flt)->v[__root];               \
+		uint32_t __res = value_table_get(                              \
+			&__r->table,                                           \
+			__root == 0 ? 0 : __slots[__root << 1],                \
+			__slots[__root << 1 | 1]                               \
 		);                                                             \
-		struct value_range *_range_ =                                  \
-			ADDR_OF(&_r_->registry.ranges) + _res_;                \
-		*(actions_out_ptr) = ADDR_OF(&_range_->values);                \
-		*(count_out_ptr) = _range_->count;                             \
+		struct value_range *__range =                                  \
+			ADDR_OF(&__r->registry.ranges) + __res;                \
+		*(actions_out_ptr) = ADDR_OF(&__range->values);                \
+		*(count_out_ptr) = __range->count;                             \
 	})
