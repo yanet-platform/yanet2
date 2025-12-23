@@ -23,7 +23,7 @@ query_packet(struct filter *filter, uint16_t vlan, uint32_t expected) {
 	int res = fill_packet_net4(&packet, sip, dip, 0, 0, IPPROTO_UDP, 0);
 	assert(res == 0);
 	packet.vlan = vlan;
-	
+
 	uint32_t *actions;
 	uint32_t actions_count;
 	FILTER_QUERY(filter, sign_vlan, &packet, &actions, &actions_count);

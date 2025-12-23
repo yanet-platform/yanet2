@@ -21,7 +21,9 @@ query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
 	assert(res == 0);
 	uint32_t *actions;
 	uint32_t actions_count;
-	FILTER_QUERY(filter, sign_proto_range, &packet, &actions, &actions_count);
+	FILTER_QUERY(
+		filter, sign_proto_range, &packet, &actions, &actions_count
+	);
 	assert(actions_count >= 1);
 	assert(actions[0] == expected);
 	free_packet(&packet);
@@ -36,7 +38,9 @@ query_udp_packet(struct filter *filter, uint32_t expected) {
 	assert(res == 0);
 	uint32_t *actions;
 	uint32_t actions_count;
-	FILTER_QUERY(filter, sign_proto_range, &packet, &actions, &actions_count);
+	FILTER_QUERY(
+		filter, sign_proto_range, &packet, &actions, &actions_count
+	);
 	assert(actions_count >= 1);
 	assert(actions[0] == expected);
 	free_packet(&packet);

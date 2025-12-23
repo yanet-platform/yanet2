@@ -10,7 +10,9 @@
 #include <netinet/in.h>
 #include <stdio.h>
 
-FILTER_COMPILER_DECLARE(sign_net4_ports, port_src, port_dst, net4_src, net4_dst);
+FILTER_COMPILER_DECLARE(
+	sign_net4_ports, port_src, port_dst, net4_src, net4_dst
+);
 FILTER_QUERY_DECLARE(sign_net4_ports, port_src, port_dst, net4_src, net4_dst);
 
 static void
@@ -23,7 +25,9 @@ query_and_expect_action(
 	uint32_t expected
 ) {
 	struct packet p = {0};
-	int res = fill_packet_net4(&p, sip, dip, src_port, dst_port, IPPROTO_UDP, 0);
+	int res = fill_packet_net4(
+		&p, sip, dip, src_port, dst_port, IPPROTO_UDP, 0
+	);
 	assert(res == 0);
 	uint32_t *actions;
 	uint32_t actions_count;
@@ -77,27 +81,19 @@ test(void *memory) {
 
 	// build filter
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_net4_ports, actions, 2, &memory_context);
+	res = FILTER_INIT(
+		&filter, sign_net4_ports, actions, 2, &memory_context
+	);
 	assert(res == 0);
 
 	// make queries
 
 	query_and_expect_action(
-		&filter,
-		ip(198, 233, 10, 15),
-		ip(192, 1, 1, 1),
-		200,
-		230,
-		1
+		&filter, ip(198, 233, 10, 15), ip(192, 1, 1, 1), 200, 230, 1
 	);
 
 	query_and_expect_action(
-		&filter,
-		ip(198, 233, 10, 15),
-		ip(192, 1, 1, 1),
-		200,
-		150,
-		2
+		&filter, ip(198, 233, 10, 15), ip(192, 1, 1, 1), 200, 150, 2
 	);
 
 	FILTER_FREE(&filter, sign_net4_ports);

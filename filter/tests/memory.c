@@ -30,20 +30,26 @@ query_and_expect_action(
 	struct packet packet = {0};
 	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
 	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
-	int res = fill_packet_net4(&packet, sip, dip, src_port, dst_port, IPPROTO_UDP, 0);
+	int res = fill_packet_net4(
+		&packet, sip, dip, src_port, dst_port, IPPROTO_UDP, 0
+	);
 	assert(res == 0);
-	
+
 	uint32_t *actions;
 	uint32_t actions_count;
-	
+
 	if (strcmp(sign, "ports") == 0) {
-		FILTER_QUERY(filter, sign_ports, &packet, &actions, &actions_count);
+		FILTER_QUERY(
+			filter, sign_ports, &packet, &actions, &actions_count
+		);
 	} else if (strcmp(sign, "port_src") == 0) {
-		FILTER_QUERY(filter, sign_port_src, &packet, &actions, &actions_count);
+		FILTER_QUERY(
+			filter, sign_port_src, &packet, &actions, &actions_count
+		);
 	} else {
 		assert(0 && "Invalid sign");
 	}
-	
+
 	assert(actions_count >= 1);
 	assert(actions[0] == expected);
 	free_packet(&packet);
@@ -59,20 +65,26 @@ query_and_expect_no_action(
 	struct packet packet = {0};
 	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
 	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
-	int res = fill_packet_net4(&packet, sip, dip, src_port, dst_port, IPPROTO_UDP, 0);
+	int res = fill_packet_net4(
+		&packet, sip, dip, src_port, dst_port, IPPROTO_UDP, 0
+	);
 	assert(res == 0);
-	
+
 	uint32_t *actions;
 	uint32_t actions_count;
-	
+
 	if (strcmp(sign, "ports") == 0) {
-		FILTER_QUERY(filter, sign_ports, &packet, &actions, &actions_count);
+		FILTER_QUERY(
+			filter, sign_ports, &packet, &actions, &actions_count
+		);
 	} else if (strcmp(sign, "port_src") == 0) {
-		FILTER_QUERY(filter, sign_port_src, &packet, &actions, &actions_count);
+		FILTER_QUERY(
+			filter, sign_port_src, &packet, &actions, &actions_count
+		);
 	} else {
 		assert(0 && "Invalid sign");
 	}
-	
+
 	assert(actions_count == 0);
 	free_packet(&packet);
 }

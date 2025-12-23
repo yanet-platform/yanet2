@@ -14,11 +14,15 @@ FILTER_COMPILER_DECLARE(sign_port_src, port_src);
 FILTER_QUERY_DECLARE(sign_port_src, port_src);
 
 static void
-query_and_expect_action(struct filter *filter, uint16_t src_port, uint32_t expected) {
+query_and_expect_action(
+	struct filter *filter, uint16_t src_port, uint32_t expected
+) {
 	struct packet packet = {0};
 	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
 	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
-	int res = fill_packet_net4(&packet, sip, dip, src_port, 0, IPPROTO_UDP, 0);
+	int res = fill_packet_net4(
+		&packet, sip, dip, src_port, 0, IPPROTO_UDP, 0
+	);
 	assert(res == 0);
 	uint32_t *actions;
 	uint32_t actions_count;
@@ -33,7 +37,9 @@ query_and_expect_no_action(struct filter *filter, uint16_t src_port) {
 	struct packet packet = {0};
 	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
 	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
-	int res = fill_packet_net4(&packet, sip, dip, src_port, 0, IPPROTO_UDP, 0);
+	int res = fill_packet_net4(
+		&packet, sip, dip, src_port, 0, IPPROTO_UDP, 0
+	);
 	assert(res == 0);
 	uint32_t *actions;
 	uint32_t actions_count;
@@ -82,7 +88,8 @@ check_single_attribute(void *memory) {
 
 	// setup filter
 	struct filter filter;
-	int init_result = FILTER_INIT(&filter, sign_port_src, rules, 3, &memory_context);
+	int init_result =
+		FILTER_INIT(&filter, sign_port_src, rules, 3, &memory_context);
 	assert(init_result == 0);
 
 	// make few queries and expect hit
@@ -115,7 +122,9 @@ check_single_attribute(void *memory) {
 		};
 
 		for (size_t i = 0; i < queries; ++i) {
-			query_and_expect_action(&filter, query_ports[i], expected_actions[i]);
+			query_and_expect_action(
+				&filter, query_ports[i], expected_actions[i]
+			);
 		}
 
 #undef queries

@@ -37,7 +37,7 @@ filter_packets(struct common *common) {
 		uint8_t dst_ip[4] = {(i + 1) & 0xFF, 0, 0, 0};
 		uint16_t src_port = rng_next(&rng) & 0xFF;
 		uint16_t dst_port = rng_next(&rng) & 0xFF;
-		
+
 		struct packet packet = {0};
 		int res = fill_packet_net4(
 			&packet,
@@ -53,7 +53,7 @@ filter_packets(struct common *common) {
 			++errors;
 			continue;
 		}
-		
+
 		uint32_t *actions;
 		uint32_t actions_count;
 		FILTER_QUERY(

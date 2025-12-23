@@ -1,6 +1,6 @@
 #include "filter/compiler.h"
-#include "filter/query.h"
 #include "filter/filter.h"
+#include "filter/query.h"
 
 #include "filter/tests/helpers.h"
 #include "lib/utils/packet.h"

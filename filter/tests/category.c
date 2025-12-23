@@ -27,9 +27,11 @@ query_and_check_actions(
 	struct packet packet = {0};
 	uint8_t sip[NET4_LEN] = {0, 0, 0, 123};
 	uint8_t dip[NET4_LEN] = {0, 0, 1, 65};
-	int res = fill_packet_net4(&packet, sip, dip, src_port, 222, IPPROTO_UDP, 0);
+	int res = fill_packet_net4(
+		&packet, sip, dip, src_port, 222, IPPROTO_UDP, 0
+	);
 	assert(res == 0);
-	
+
 	uint32_t *actions;
 	uint32_t actions_count;
 	FILTER_QUERY(filter, sign_port_src, &packet, &actions, &actions_count);

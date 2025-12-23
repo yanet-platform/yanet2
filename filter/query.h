@@ -37,8 +37,8 @@ filter_actions_with_category(
 	__extension__({                                                        \
 		struct filter *_flt_ = (filter_ptr);                           \
 		struct packet *_pkt_ = (packet_ptr);                           \
-		const size_t _n_ = sizeof(__filter_attrs_query_##tag) /     \
-				   sizeof(__filter_attrs_query_##tag[0]);   \
+		const size_t _n_ = sizeof(__filter_attrs_query_##tag) /        \
+				   sizeof(__filter_attrs_query_##tag[0]);      \
 		struct filter_slots _slots_;                                   \
 		/* compute classifiers for leaf attributes */                  \
 		for (size_t _ai_ = 0; _ai_ < _n_; ++_ai_) {                    \

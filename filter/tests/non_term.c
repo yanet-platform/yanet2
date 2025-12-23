@@ -26,12 +26,20 @@ query_and_expect_actions(
 	struct packet packet = {0};
 	uint8_t sip[NET4_LEN] = {0, 0, 0, 123};
 	uint8_t dip[NET4_LEN] = {0, 0, 1, 65};
-	int res = fill_packet_net4(&packet, sip, dip, src_port, dst_port, IPPROTO_UDP, 0);
+	int res = fill_packet_net4(
+		&packet, sip, dip, src_port, dst_port, IPPROTO_UDP, 0
+	);
 	assert(res == 0);
-	
+
 	uint32_t *result_actions;
 	uint32_t result_actions_count;
-	FILTER_QUERY(filter, sign_ports, &packet, &result_actions, &result_actions_count);
+	FILTER_QUERY(
+		filter,
+		sign_ports,
+		&packet,
+		&result_actions,
+		&result_actions_count
+	);
 	assert(result_actions_count == action_count);
 	for (uint32_t i = 0; i < action_count; ++i) {
 		assert(result_actions[i] == actions[i]);

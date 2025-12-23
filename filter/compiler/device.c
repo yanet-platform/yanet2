@@ -74,7 +74,9 @@ error_init:
 }
 
 void
-FILTER_ATTR_COMPILER_FREE_FUNC(device)(void *data, struct memory_context *memory_context) {
+FILTER_ATTR_COMPILER_FREE_FUNC(device)(
+	void *data, struct memory_context *memory_context
+) {
 	struct value_table *t = (struct value_table *)data;
 	if (t == NULL)
 		return;

@@ -103,7 +103,7 @@
 				   sizeof(__filter_attrs_compiler_##tag[0]);   \
 		for (size_t _i_ = 0; _i_ < _n_; ++_i_) {                       \
 			struct filter_vertex *_v_ = &((filter)->v[_n_ + _i_]); \
-			__filter_attrs_compiler_##tag[_i_].free(          \
+			__filter_attrs_compiler_##tag[_i_].free(               \
 				ADDR_OF(&_v_->data),                           \
 				&((filter)->memory_context)                    \
 			);                                                     \

@@ -33,9 +33,7 @@ query_and_expect_action(
 
 static void
 query_and_expect_no_action(
-	struct filter *filter,
-	uint8_t sip[NET4_LEN],
-	uint8_t dip[NET4_LEN]
+	struct filter *filter, uint8_t sip[NET4_LEN], uint8_t dip[NET4_LEN]
 ) {
 	struct packet p = {0};
 	int res = fill_packet_net4(&p, sip, dip, 0, 0, IPPROTO_UDP, 0);
