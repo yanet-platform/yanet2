@@ -5,17 +5,8 @@
 
 #include "common/container_of.h"
 #include "controlplane/agent/agent.h"
-#include "fwstate/config.h"
+#include "lib/fwstate/config.h"
 #include "modules/fwstate/dataplane/config.h"
-
-static void
-fwstate_config_transfer(
-	struct fwstate_config *new, struct fwstate_config *old
-) {
-	*new = *old; // copy sync config
-	EQUATE_OFFSET(&new->fw4state, &old->fw4state);
-	EQUATE_OFFSET(&new->fw6state, &old->fw6state);
-}
 
 static void
 fwstate_config_destroy(struct fwstate_config *config, struct agent *agent) {
@@ -44,9 +35,7 @@ fwstate_config_set_defaults(struct fwstate_config *config) {
 }
 
 struct cp_module *
-fwstate_module_config_init(
-	struct agent *agent, const char *name, struct cp_module *old_cp_module
-) {
+fwstate_module_config_init(struct agent *agent, const char *name) {
 	struct fwstate_module_config *config =
 		(struct fwstate_module_config *)memory_balloc(
 			&agent->memory_context,
@@ -65,17 +54,24 @@ fwstate_module_config_init(
 		errno = prev_errno;
 		return NULL;
 	}
-
-	if (old_cp_module) {
-		struct fwstate_module_config *old = container_of(
-			old_cp_module, struct fwstate_module_config, cp_module
-		);
-		fwstate_config_transfer(&config->cfg, &old->cfg);
-	} else {
-		fwstate_config_set_defaults(&config->cfg);
-	}
-
+	fwstate_config_set_defaults(&config->cfg);
 	return &config->cp_module;
+}
+
+void
+fwstate_module_config_transfer(
+	struct cp_module *new_cp_module, struct cp_module *old_cp_module
+) {
+	struct fwstate_module_config *new =
+		container_of(new_cp_module, struct fwstate_module_config, cp_module);
+
+	struct fwstate_module_config *old =
+		container_of(old_cp_module, struct fwstate_module_config, cp_module);
+
+
+	new->cfg = old->cfg; // copy sync config
+	EQUATE_OFFSET(&new->cfg.fw4state, &old->cfg.fw4state);
+	EQUATE_OFFSET(&new->cfg.fw6state, &old->cfg.fw6state);
 }
 
 void

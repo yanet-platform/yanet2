@@ -2,10 +2,10 @@ use core::{error::Error, net::IpAddr};
 use std::{fs::File, path::Path};
 
 use aclpb::{
-    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest, UpdateFwStateConfigRequest,
+    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     acl_service_client::AclServiceClient,
 };
-use args::{DeleteCmd, ModeCmd, SetFwstateConfigCmd, ShowCmd, UpdateCmd};
+use args::{DeleteCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use ipnetwork::IpNetwork;
@@ -14,7 +14,6 @@ use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
 mod args;
-mod format;
 
 #[allow(non_snake_case)]
 pub mod filterpb {
@@ -323,85 +322,6 @@ impl ACLService {
         log::debug!("UpdateConfigResponse: {response:?}");
         Ok(())
     }
-
-    pub async fn set_fwstate_config(&mut self, cmd: SetFwstateConfigCmd) -> Result<(), Box<dyn Error>> {
-        // First, fetch the current config to merge with new values
-        let current_request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let current_response = self.client.show_config(current_request).await?.into_inner();
-
-        // Start with existing config or create a new one
-        let mut map_config = current_response.fwstate_map.unwrap_or_default();
-        let mut sync_config = current_response.fwstate_sync.unwrap_or_default();
-
-        // Update map config fields if provided
-        if let Some(index_size) = cmd.index_size {
-            map_config.index_size = index_size;
-        }
-
-        if let Some(extra_bucket_count) = cmd.extra_bucket_count {
-            map_config.extra_bucket_count = extra_bucket_count;
-        }
-
-        // Update only the fields that were provided
-        if let Some(ref src_addr) = cmd.src_addr {
-            sync_config.src_addr = format::parse_ipv6(src_addr)?;
-        }
-
-        if let Some(ref dst_ether) = cmd.dst_ether {
-            sync_config.dst_ether = format::parse_mac(dst_ether)?;
-        }
-
-        if let Some(ref dst_addr_multicast) = cmd.dst_addr_multicast {
-            sync_config.dst_addr_multicast = format::parse_ipv6(dst_addr_multicast)?;
-        }
-
-        if let Some(port_multicast) = cmd.port_multicast {
-            sync_config.port_multicast = port_multicast;
-        }
-
-        if let Some(ref dst_addr_unicast) = cmd.dst_addr_unicast {
-            sync_config.dst_addr_unicast = format::parse_ipv6(dst_addr_unicast)?;
-        }
-
-        if let Some(port_unicast) = cmd.port_unicast {
-            sync_config.port_unicast = port_unicast;
-        }
-
-        // Convert timeouts from Duration to nanoseconds if provided
-        if let Some(tcp_syn_ack) = cmd.tcp_syn_ack {
-            sync_config.tcp_syn_ack = tcp_syn_ack.as_nanos() as u64;
-        }
-
-        if let Some(tcp_syn) = cmd.tcp_syn {
-            sync_config.tcp_syn = tcp_syn.as_nanos() as u64;
-        }
-
-        if let Some(tcp_fin) = cmd.tcp_fin {
-            sync_config.tcp_fin = tcp_fin.as_nanos() as u64;
-        }
-
-        if let Some(tcp) = cmd.tcp {
-            sync_config.tcp = tcp.as_nanos() as u64;
-        }
-
-        if let Some(udp) = cmd.udp {
-            sync_config.udp = udp.as_nanos() as u64;
-        }
-
-        if let Some(default) = cmd.default {
-            sync_config.default = default.as_nanos() as u64;
-        }
-
-        let request = UpdateFwStateConfigRequest {
-            name: cmd.config_name.clone(),
-            map_config: Some(map_config),
-            sync_config: Some(sync_config),
-        };
-        log::trace!("UpdateFWStateConfigRequest: {request:?}");
-        let response = self.client.update_fw_state_config(request).await?.into_inner();
-        log::debug!("UpdateFWStateConfigResponse: {response:?}");
-        Ok(())
-    }
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
@@ -412,7 +332,6 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::SetFwstateConfig(cmd) => service.set_fwstate_config(cmd).await,
     }
 }
 

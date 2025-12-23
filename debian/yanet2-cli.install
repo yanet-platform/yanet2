@@ -1,5 +1,6 @@
 usr/bin/yanet-cli
 usr/bin/yanet-cli-acl
+usr/bin/yanet-cli-fwstate
 usr/bin/yanet-cli-common
 usr/bin/yanet-cli-inspect
 usr/bin/yanet-cli-function

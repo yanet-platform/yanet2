@@ -40,6 +40,7 @@ custom_target(
         lib_dscp_dp,
         lib_forward_cp,
         lib_forward_dp,
+        lib_fwstate_cp,
         lib_fwstate_dp,
         lib_nat64_cp,
         lib_nat64_dp,

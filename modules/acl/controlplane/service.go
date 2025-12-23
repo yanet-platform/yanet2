@@ -25,9 +25,9 @@ type ACLService struct {
 }
 
 type aclConfig struct {
-	rules   []*aclpb.Rule
-	acl     *ModuleConfig
-	fwstate *FwStateConfig
+	rules       []*aclpb.Rule
+	acl         *ModuleConfig
+	fwstateName string
 }
 
 // NewACLService creates a new ACL service
@@ -135,13 +135,9 @@ func (m *ACLService) UpdateConfig(
 	}
 
 	oldConfigs, ok := m.configs[name]
-	if ok && oldConfigs.fwstate != nil {
-		// We set fwstate config only if it's already present,
-		// effectively enabling firewall state tracking functionality
-		m.log.Infow("set fwstate config for ACL module config",
-			zap.String("config", name),
-		)
-		config.SetFwStateConfig(m.agent, oldConfigs.fwstate)
+	if ok && oldConfigs.fwstateName != "" {
+		m.log.Infow("transfer fwstate config for ACL module", zap.String("config", name))
+		config.TransferFwStateConfig(oldConfigs.acl)
 	}
 
 	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
@@ -155,9 +151,9 @@ func (m *ACLService) UpdateConfig(
 	}
 
 	m.configs[name] = aclConfig{
-		rules:   reqRules,
-		acl:     config,
-		fwstate: oldConfigs.fwstate,
+		rules:       reqRules,
+		acl:         config,
+		fwstateName: oldConfigs.fwstateName,
 	}
 
 	return &aclpb.UpdateConfigResponse{}, nil
@@ -181,14 +177,9 @@ func (m *ACLService) ShowConfig(
 	}
 
 	response := &aclpb.ShowConfigResponse{
-		Name:  name,
-		Rules: config.rules,
-	}
-
-	// Get fwstate configuration if available
-	if config.fwstate != nil {
-		response.FwstateMap = config.fwstate.GetMapConfig()
-		response.FwstateSync = config.fwstate.GetSyncConfig()
+		Name:        name,
+		Rules:       config.rules,
+		FwstateName: config.fwstateName,
 	}
 
 	return response, nil
@@ -210,117 +201,6 @@ func (m *ACLService) ListConfigs(
 	}
 
 	return response, nil
-}
-
-func (m *ACLService) UpdateFWStateConfig(
-	ctx context.Context, req *aclpb.UpdateFWStateConfigRequest,
-) (*aclpb.UpdateFWStateConfigResponse, error) {
-	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
-	// Get fwstate configuration from req
-	if req.SyncConfig == nil {
-		return nil, status.Error(codes.InvalidArgument, "sync_config is required")
-	}
-	if req.MapConfig == nil {
-		return nil, status.Error(codes.InvalidArgument, "map_config is required")
-	}
-
-	m.log.Debugw("update fwstate config",
-		zap.String("config", name),
-	)
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	config := m.configs[name]
-
-	newFwstateConfig, err := NewFWStateModuleConfig(m.agent, name, config.fwstate)
-	if err != nil {
-		m.log.Errorw("failed to create fwstate config",
-			zap.String("config", name),
-			zap.Error(err),
-		)
-		return nil, status.Errorf(codes.Internal, "failed to create fwstate config: %v", err)
-	}
-
-	dpConfig := m.agent.DPConfig()
-
-	if err = newFwstateConfig.CreateMaps(req.MapConfig, uint16(dpConfig.WorkerCount()), m.log); err != nil {
-		newFwstateConfig.DetachMaps() // in order not to pull them out from under the feet of another module
-		newFwstateConfig.Free()
-		m.log.Errorw("failed to create fwstate maps",
-			zap.String("config", name),
-			zap.Error(err),
-		)
-		return nil, status.Errorf(codes.Internal, "failed to create fwstate maps: %v", err)
-	}
-
-	// FIXME: validate new config
-	// Set sync config
-	newFwstateConfig.SetSyncConfig(req.SyncConfig)
-	m.log.Debugw("update fwstate module config",
-		zap.String("config", name),
-	)
-
-	if config.acl != nil {
-		err := func() error {
-			newACLConfig, err := NewModuleConfig(m.agent, name)
-			if err != nil {
-				return status.Errorf(codes.Internal, "failed to create module config: %v", err)
-			}
-
-			rules, err := convertRules(config.rules)
-			if err != nil {
-				newACLConfig.Free()
-				return status.Errorf(codes.Internal, "failed to convertRules: %v", err)
-			}
-
-			if err := newACLConfig.Update(rules); err != nil {
-				newACLConfig.Free()
-				return status.Errorf(codes.Internal, "failed to update module config: %v", err)
-			}
-
-			newACLConfig.SetFwStateConfig(m.agent, newFwstateConfig)
-
-			if err := m.agent.UpdateModules([]ffi.ModuleConfig{newACLConfig.AsFFIModule(), newFwstateConfig.asFFIModule()}); err != nil {
-				newACLConfig.Free()
-				return status.Errorf(codes.Internal, "failed to update module: %v", err)
-			}
-			config.acl.Free()
-			config.acl = newACLConfig
-			return nil
-		}()
-		if err != nil {
-			newFwstateConfig.DetachMaps() // in order not to pull them out from under the feet of another module
-			newFwstateConfig.Free()
-			return nil, err
-		}
-	} else {
-		if err := m.agent.UpdateModules([]ffi.ModuleConfig{newFwstateConfig.asFFIModule()}); err != nil {
-			m.log.Errorw("failed to update fwstate module",
-				zap.String("config", name),
-				zap.Error(err),
-			)
-			return nil, status.Errorf(codes.Internal, "failed to update fwstate module: %v", err)
-		}
-	}
-
-	if config.fwstate != nil {
-		config.fwstate.DetachMaps()
-		config.fwstate.Free()
-	}
-
-	config.fwstate = newFwstateConfig
-	m.configs[name] = config
-
-	m.log.Infow("successfully updated FWState module",
-		zap.String("config", name),
-	)
-
-	return &aclpb.UpdateFWStateConfigResponse{}, nil
 }
 
 func (m *ACLService) DeleteConfig(
@@ -346,13 +226,6 @@ func (m *ACLService) DeleteConfig(
 		}
 		m.log.Infow("successfully deleted ACL module config", zap.String("name", name))
 		config.acl.Free()
-	}
-	if config.fwstate != nil {
-		if err := m.agent.DeleteModuleConfigType(fwstateModuleTypeName, name); err != nil {
-			return nil, status.Errorf(codes.Internal, "could not delete fwstate module config '%s': %v", name, err)
-		}
-		m.log.Infow("successfully deleted FWState module config", zap.String("name", name))
-		config.fwstate.Free()
 	}
 
 	delete(m.configs, name)

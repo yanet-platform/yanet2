@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package fwstatepb;
+
+option go_package = "github.com/yanet-platform/yanet2/modules/"
+		    "fwstate/controlplane/fwstatepb;fwstatepb";
+
+service FWStateService {
+	// Updates the complete FWState configuration
+	rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+	// Allows to delete fwstate config if it is not referenced
+	// by any pipeline.
+	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+	// Show specific FWState configuration
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+	// List all FWState configurations across instances
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+	// Link FWState configuration to ACL configurations
+	rpc LinkFWState(LinkFWStateRequest) returns (LinkFWStateResponse);
+}
+
+message UpdateConfigRequest {
+	string name = 1;
+	MapConfig map_config = 2;
+	SyncConfig sync_config = 3;
+}
+
+message UpdateConfigResponse {
+}
+
+message ShowConfigRequest {
+	string name = 1;
+}
+
+message ShowConfigResponse {
+	string name = 1;
+	repeated string linked_acls = 2;
+	MapConfig map_config = 3;
+	SyncConfig sync_config = 4;
+}
+
+message DeleteConfigRequest {
+	string name = 1;
+}
+
+message DeleteConfigResponse {
+}
+
+message ListConfigsRequest {
+}
+
+message ListConfigsResponse {
+	repeated string configs = 1;
+}
+
+message LinkFWStateRequest {
+	string fwstate_name = 1;
+	repeated string acl_config_names = 2;
+}
+
+message LinkFWStateResponse {
+}
+
+// Map configuration for fwstate
+message MapConfig {
+	uint32 index_size = 1;
+	uint32 extra_bucket_count = 2;
+}
+
+// Firewall state synchronization configuration
+message SyncConfig {
+	bytes src_addr = 1;	      // IPv6 source address (16 bytes);
+	bytes dst_ether = 2;	      // Destination MAC address (6 bytes);
+	bytes dst_addr_multicast = 3; // Multicast IPv6 address (16 bytes);
+	uint32 port_multicast = 4;    // Multicast port;
+	bytes dst_addr_unicast = 5;   // Unicast IPv6 address (16 bytes);
+	uint32 port_unicast = 6;      // Unicast port;
+
+	// Connection timeouts
+	uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;
+	uint64 tcp_syn = 8;	// TCP SYN timeout in nanoseconds;
+	uint64 tcp_fin = 9;	// TCP FIN timeout in nanoseconds;
+	uint64 tcp = 10;	// TCP established timeout in nanoseconds;
+	uint64 udp = 11;	// UDP timeout in nanoseconds;
+	uint64 default = 12;	// Default timeout in nanoseconds;
+}

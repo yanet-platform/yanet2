@@ -317,11 +317,7 @@ func (m *Agent) DeletePipeline(name string) error {
 }
 
 func (m *Agent) DeleteModuleConfig(configName string) error {
-	return m.DeleteModuleConfigType(m.name, configName)
-}
-
-func (m *Agent) DeleteModuleConfigType(moduleType, configName string) error {
-	cTypeName := C.CString(moduleType)
+	cTypeName := C.CString(m.name)
 	defer C.free(unsafe.Pointer(cTypeName))
 
 	cConfigName := C.CString(configName)

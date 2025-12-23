@@ -1,6 +1,5 @@
 #pragma once
 
-#include "fwstate/config.h"
 #include <stdint.h>
 
 #include "filter/rule.h"
@@ -48,4 +47,9 @@ acl_module_config_update(
 void
 acl_module_config_set_fwstate_config(
 	struct cp_module *cp_module, struct cp_module *fwstate_cp_module
+);
+
+void
+acl_module_config_transfer_fwstate_config(
+	struct cp_module *old_cp_module, struct cp_module *new_cp_module
 );

@@ -8,7 +8,6 @@ package acl
 //
 //#include "api/agent.h"
 //#include "modules/acl/api/controlplane.h"
-//#include "modules/acl/api/fwstate_cp.h"
 import "C"
 
 import (
@@ -19,6 +18,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/filter"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 )
 
 // ModuleConfig wraps the C ACL module configuration
@@ -126,6 +126,13 @@ func (m *ModuleConfig) Update(rules []aclRule) error {
 	return nil
 }
 
-func (m *ModuleConfig) SetFwStateConfig(agent *ffi.Agent, fwstateConfig *FwStateConfig) {
-	C.acl_module_config_set_fwstate_config(m.asRawPtr(), fwstateConfig.asCPModule())
+// TransferFwStateConfig transfers fwstate configuration from old ACL config to new ACL config
+func (m *ModuleConfig) TransferFwStateConfig(oldACLConfig *ModuleConfig) {
+	C.acl_module_config_transfer_fwstate_config(m.asRawPtr(), oldACLConfig.asRawPtr())
+}
+
+// SetFwStateConfig links fwstate configuration to this ACL config
+func (m *ModuleConfig) SetFwStateConfig(fwstateConfig *fwstate.FwStateConfig) {
+	ffiModule := fwstateConfig.AsFFIModule()
+	C.acl_module_config_set_fwstate_config(m.asRawPtr(), (*C.struct_cp_module)(ffiModule.AsRawPtr()))
 }

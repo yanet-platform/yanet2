@@ -29,6 +29,7 @@ const (
 	CLIBalancer    = CLIBasePath + "/yanet-cli-balancer"
 	CLINAT64       = CLIBasePath + "/yanet-cli-nat64"
 	CLIACL         = CLIBasePath + "/yanet-cli-acl"
+	CLIFWState     = CLIBasePath + "/yanet-cli-fwstate"
 	CLIPipeline    = CLIBasePath + "/yanet-cli-pipeline"
 	CLIFunction    = CLIBasePath + "/yanet-cli-function"
 	CLIDevicePlain = CLIBasePath + "/yanet-cli-device-plain"

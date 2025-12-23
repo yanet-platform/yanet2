@@ -321,6 +321,7 @@ func TestFramework(t *testing.T) {
 			{"route_cli", "/mnt/target/release/yanet-cli-route"},
 			{"pipeline_cli", "/mnt/target/release/yanet-cli-pipeline"},
 			{"acl_cli", "/mnt/target/release/yanet-cli-acl"},
+			{"fwstate_cli", "/mnt/target/release/yanet-cli-fwstate"},
 		}
 
 		for _, binary := range cliBinaries {

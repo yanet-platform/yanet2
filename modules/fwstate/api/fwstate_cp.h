@@ -4,15 +4,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "fwstate/fwmap.h"
+#include "lib/fwstate/fwmap.h"
 
 struct agent;
 struct cp_module;
 struct fwstate_sync_config;
 
 struct cp_module *
-fwstate_module_config_init(
-	struct agent *agent, const char *name, struct cp_module *old_cp_module
+fwstate_module_config_init(struct agent *agent, const char *name);
+
+void
+fwstate_module_config_transfer(
+	struct cp_module *new_cp_module, struct cp_module *old_cp_module
 );
 
 void

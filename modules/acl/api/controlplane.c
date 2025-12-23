@@ -2,11 +2,11 @@
 #include <stdint.h>
 
 #include "controlplane.h"
-#include "fwstate_cp.h"
 
 #include "common/memory_address.h"
 #include "config.h"
 #include "modules/fwstate/dataplane/config.h"
+#include "modules/fwstate/api/fwstate_cp.h"
 
 #include "common/container_of.h"
 
@@ -450,5 +450,24 @@ acl_module_config_set_fwstate_config(
 	);
 	EQUATE_OFFSET(
 		&config->fwstate_cfg.fw6state, &fwstate_config->cfg.fw6state
+	);
+}
+
+void
+acl_module_config_transfer_fwstate_config(
+	struct cp_module *new_cp_module, struct cp_module *old_cp_module
+) {
+	struct acl_module_config *new_config =
+		container_of(new_cp_module, struct acl_module_config, cp_module);
+
+	struct acl_module_config *old_config =
+		container_of(old_cp_module, struct acl_module_config, cp_module);
+
+	new_config->fwstate_cfg.sync_config = old_config->fwstate_cfg.sync_config;
+	EQUATE_OFFSET(
+		&new_config->fwstate_cfg.fw4state, &old_config->fwstate_cfg.fw4state
+	);
+	EQUATE_OFFSET(
+		&new_config->fwstate_cfg.fw6state, &old_config->fwstate_cfg.fw6state
 	);
 }

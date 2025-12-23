@@ -8,19 +8,23 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
+	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
+	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
 )
 
 const agentName = "acl"
 const serviceName = "aclpb.ACLService"
+const fwstateServiceName = "fwstatepb.FWStateService"
 
 // ACLModule is a control-plane component for ACL (Access Control List) module
 // with integrated firewall state management
 type ACLModule struct {
-	cfg     *Config
-	shm     *ffi.SharedMemory
-	agent   *ffi.Agent
-	service *ACLService
-	log     *zap.SugaredLogger
+	cfg            *Config
+	shm            *ffi.SharedMemory
+	agent          *ffi.Agent
+	aclService     *ACLService
+	fwstateService *fwstate.FWStateService
+	log            *zap.SugaredLogger
 }
 
 // NewACLModule creates a new ACL module instance
@@ -42,14 +46,17 @@ func NewACLModule(cfg *Config, log *zap.SugaredLogger) (*ACLModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	service := NewACLService(agent, log)
+	aclService := NewACLService(agent, log)
+	aclAdapter := NewACLAdapter(aclService)
+	fwstateService := fwstate.NewFWStateService(agent, aclAdapter, log)
 
 	return &ACLModule{
-		cfg:     cfg,
-		shm:     shm,
-		agent:   agent,
-		service: service,
-		log:     log,
+		cfg:            cfg,
+		shm:            shm,
+		agent:          agent,
+		aclService:     aclService,
+		fwstateService: fwstateService,
+		log:            log,
 	}, nil
 }
 
@@ -62,11 +69,17 @@ func (m *ACLModule) Endpoint() string {
 }
 
 func (m *ACLModule) ServicesNames() []string {
-	return []string{serviceName}
+	return []string{serviceName, fwstateServiceName}
 }
 
 func (m *ACLModule) RegisterService(server *grpc.Server) {
-	aclpb.RegisterACLServiceServer(server, m.service)
+	aclpb.RegisterACLServiceServer(server, m.aclService)
+	fwstatepb.RegisterFWStateServiceServer(server, m.fwstateService)
+}
+
+// ACLAdapter returns an adapter for fwstate module integration
+func (m *ACLModule) ACLAdapter() *ACLAdapter {
+	return NewACLAdapter(m.aclService)
 }
 
 func (m *ACLModule) Close() error {

@@ -1,4 +1,4 @@
-package acl
+package fwstate
 
 //#include "lib/fwstate/config.h"
 import "C"
@@ -6,11 +6,11 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
+	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
 )
 
 // ConvertPbToCSyncConfig converts protobuf SyncConfig directly to C struct
-func ConvertPbToCSyncConfig(pb *aclpb.SyncConfig) C.struct_fwstate_sync_config {
+func ConvertPbToCSyncConfig(pb *fwstatepb.SyncConfig) C.struct_fwstate_sync_config {
 	var cSyncConfig C.struct_fwstate_sync_config
 
 	copy(unsafe.Slice((*byte)(&cSyncConfig.src_addr[0]), 16), pb.SrcAddr)
@@ -34,8 +34,8 @@ func ConvertPbToCSyncConfig(pb *aclpb.SyncConfig) C.struct_fwstate_sync_config {
 }
 
 // ConvertCSyncConfigToPb converts C struct to protobuf SyncConfig
-func ConvertCSyncConfigToPb(cCfg *C.struct_fwstate_sync_config) *aclpb.SyncConfig {
-	pb := &aclpb.SyncConfig{
+func ConvertCSyncConfigToPb(cCfg *C.struct_fwstate_sync_config) *fwstatepb.SyncConfig {
+	pb := &fwstatepb.SyncConfig{
 		SrcAddr:          make([]byte, 16),
 		DstEther:         make([]byte, 6),
 		DstAddrMulticast: make([]byte, 16),
