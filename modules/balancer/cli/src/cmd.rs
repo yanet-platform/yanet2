@@ -1,7 +1,8 @@
 //! CLI command definitions
 
-use crate::rpc::balancerpb;
 use clap::{ArgAction, Parser, ValueEnum};
+
+use crate::rpc::balancerpb;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Main Command

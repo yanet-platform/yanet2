@@ -1,10 +1,11 @@
 //! Packet dump mode configuration and utilities.
 //!
-//! This module provides types and functions for configuring packet capture modes,
-//! including input packets and dropped packets
+//! This module provides types and functions for configuring packet capture
+//! modes, including input packets and dropped packets
+
+use std::ops::BitOrAssign;
 
 use clap::Args;
-use std::ops::BitOrAssign;
 
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]

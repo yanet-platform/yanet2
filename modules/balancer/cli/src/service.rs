@@ -1,6 +1,7 @@
 //! gRPC service client implementation
 
 use std::error::Error;
+
 use tonic::{codec::CompressionEncoding, transport::Channel};
 
 use crate::{

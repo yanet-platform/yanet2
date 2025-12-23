@@ -82,7 +82,8 @@ fn ring_buffer_size_range(s: &str) -> Result<u64, String> {
 pub enum DumpOutputFormat {
     /// Simple one-line human-readable output of the packet metadata and content
     Text,
-    /// Pretty multi-line human-readable output of the packet metadata and content
+    /// Pretty multi-line human-readable output of the packet metadata and
+    /// content
     Pretty,
     /// PCAP Capture File Format
     Pcap,

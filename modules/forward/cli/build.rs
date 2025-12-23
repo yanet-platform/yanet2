@@ -8,19 +8,13 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .emit_rerun_if_changed(false)
         .build_server(false)
         .message_attribute(".", "#[derive(Serialize)]")
-        .compile_protos(
-            &["forwardpb/forward.proto"],
-            &["../../..", "../controlplane"])?;
+        .compile_protos(&["forwardpb/forward.proto"], &["../../..", "../controlplane"])?;
 
     tonic_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
         .message_attribute(".", "#[derive(Serialize)]")
-        .compile_protos(
-            &["common/filterpb/filter.proto"],
-            &["../../..",],
-        )?;
-
+        .compile_protos(&["common/filterpb/filter.proto"], &["../../.."])?;
 
     Ok(())
 }

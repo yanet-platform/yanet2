@@ -1,24 +1,27 @@
-use pcap_file::pcap::{PcapHeader, PcapPacket};
-use pcap_file::pcapng::blocks::Block;
-use pcap_file::pcapng::blocks::enhanced_packet::EnhancedPacketBlock;
-use pcap_file::pcapng::blocks::interface_description::{
-    InterfaceDescriptionBlock, InterfaceDescriptionOption, TsResolution,
-};
-use pcap_file::{DataLink, Endianness};
-use pcap_file::{pcap::PcapWriter, pcapng::PcapNgWriter};
-use std::error::Error;
-use std::time::Duration;
 use std::{
+    error::Error,
     fs,
     io::{self, Write},
+    time::Duration,
+};
+
+use pcap_file::{
+    DataLink, Endianness,
+    pcap::{PcapHeader, PcapPacket, PcapWriter},
+    pcapng::{
+        PcapNgWriter,
+        blocks::{
+            Block,
+            enhanced_packet::EnhancedPacketBlock,
+            interface_description::{InterfaceDescriptionBlock, InterfaceDescriptionOption, TsResolution},
+        },
+    },
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tonic::codec::Streaming;
 
-use crate::args::DumpOutputFormat;
-use crate::pdumppb;
-use crate::printer;
+use crate::{args::DumpOutputFormat, pdumppb, printer};
 
 enum PdumpOutput {
     Stdout(io::Stdout),
@@ -139,7 +142,8 @@ impl PdumpWriter {
 
         let ts = match &writer.base_ts {
             None => {
-                // Store the timestamp of the first packet in the writer to establish a baseline.
+                // Store the timestamp of the first packet in the writer to establish a
+                // baseline.
                 writer.base_ts = Some(meta.timestamp);
                 0
             }

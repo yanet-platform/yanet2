@@ -1,18 +1,16 @@
 use core::error::Error;
-
 use std::net::IpAddr;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use forwardpb::{
-    DeleteConfigRequest, ListConfigsRequest, UpdateConfigRequest,
-    ShowConfigRequest, ShowConfigResponse, forward_service_client::ForwardServiceClient,
+    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
+    forward_service_client::ForwardServiceClient,
 };
+use ipnetwork::IpNetwork;
+use serde::{Deserialize, Serialize};
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
-use ipnetwork::IpNetwork;
-
-use serde::{Deserialize, Serialize};
 
 #[allow(non_snake_case)]
 pub mod forwardpb {
@@ -217,7 +215,6 @@ pub fn print_config_json(response: &ShowConfigResponse) -> Result<(), Box<dyn Er
     Ok(())
 }
 
-
 pub struct ForwardService {
     client: ForwardServiceClient<Channel>,
 }
@@ -232,9 +229,7 @@ impl ForwardService {
     }
 
     pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowConfigRequest {
-            name: cmd.config_name.clone(),
-        };
+        let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self.client.show_config(request).await?.into_inner();
 
         print_config_json(&response)?;

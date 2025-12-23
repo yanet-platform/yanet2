@@ -4,8 +4,8 @@
 
 mod common;
 
-use std::env;
-use std::error::Error;
+use std::{env, error::Error};
+
 use yanet_cli_balancer::output::{self, OutputFormat};
 
 fn main() -> Result<(), Box<dyn Error>> {

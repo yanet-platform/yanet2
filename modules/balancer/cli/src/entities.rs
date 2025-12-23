@@ -1,8 +1,10 @@
 //! Data structures and helper functions for balancer entities
 
-use crate::rpc::balancerpb;
-use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+use serde::{Deserialize, Serialize};
+
+use crate::rpc::balancerpb;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helper Functions

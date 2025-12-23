@@ -5,9 +5,10 @@ mod output;
 mod rpc;
 mod service;
 
+use std::error::Error;
+
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use std::error::Error;
 use ync::logging;
 
 use crate::{cmd::Cmd, service::BalancerService};

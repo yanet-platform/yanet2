@@ -1,8 +1,8 @@
 //! JSON output with proper IP address formatting
 
-use crate::entities::bytes_to_ip;
-use crate::rpc::balancerpb;
 use serde::Serialize;
+
+use crate::{entities::bytes_to_ip, rpc::balancerpb};
 
 ////////////////////////////////////////////////////////////////////////////////
 // ShowConfig JSON structures

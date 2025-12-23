@@ -1,18 +1,25 @@
-use crate::{dump_mode, pdumppb};
-use pnet_packet::Packet;
-use pnet_packet::ethernet::{EtherTypes, EthernetPacket};
-use pnet_packet::icmp::{IcmpCode, IcmpPacket, IcmpTypes};
-use pnet_packet::icmpv6::{Icmpv6Code, Icmpv6Packet, Icmpv6Types};
-use pnet_packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
-use pnet_packet::ipv4::Ipv4Packet;
-use pnet_packet::ipv6::Ipv6Packet;
-use pnet_packet::tcp::TcpPacket;
-use pnet_packet::udp::UdpPacket;
-use pnet_packet::vlan::VlanPacket;
-use std::io::{self, Write};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::{
+    io::{self, Write},
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
-/// Pretty prints a pdumppb::Record metadata field in a concise, single-line format.
+use pnet_packet::{
+    Packet,
+    ethernet::{EtherTypes, EthernetPacket},
+    icmp::{IcmpCode, IcmpPacket, IcmpTypes},
+    icmpv6::{Icmpv6Code, Icmpv6Packet, Icmpv6Types},
+    ip::{IpNextHeaderProtocol, IpNextHeaderProtocols},
+    ipv4::Ipv4Packet,
+    ipv6::Ipv6Packet,
+    tcp::TcpPacket,
+    udp::UdpPacket,
+    vlan::VlanPacket,
+};
+
+use crate::{dump_mode, pdumppb};
+
+/// Pretty prints a pdumppb::Record metadata field in a concise, single-line
+/// format.
 ///
 /// # Arguments
 ///
@@ -876,8 +883,9 @@ fn format_duration_ns(ts: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Cursor;
+
+    use super::*;
 
     /// Helper function to create a basic Ethernet frame with IPv4 TCP packet
     fn create_ipv4_tcp_frame() -> Vec<u8> {

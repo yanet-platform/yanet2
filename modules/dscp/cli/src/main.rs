@@ -2,14 +2,13 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
-use ipnet::IpNet;
-use ptree::TreeBuilder;
-use tonic::{codec::CompressionEncoding, transport::Channel};
-
 use code::{
     AddPrefixesRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest, ShowConfigRequest,
     ShowConfigResponse, dscp_service_client::DscpServiceClient,
 };
+use ipnet::IpNet;
+use ptree::TreeBuilder;
+use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
 use crate::code::ListConfigsRequest;
@@ -80,7 +79,8 @@ pub struct SetDscpMarkingCmd {
     /// DSCP module name to operate on.
     #[arg(long = "cfg", short)]
     pub config_name: String,
-    /// DSCP marking flag: 0 - Never, 1 - Default (only if original DSCP is 0), 2 - Always
+    /// DSCP marking flag: 0 - Never, 1 - Default (only if original DSCP is 0),
+    /// 2 - Always
     #[arg(long)]
     pub flag: u32,
     /// DSCP mark value (0-63)
