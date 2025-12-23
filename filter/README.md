@@ -13,12 +13,12 @@ See the detailed layout and helpers in [rule.h](rule.h).
 ## Libraries
 
 - Query
-  - Interface: filter/query.h + filter/filter.h + filter/rule.h (rule types)
+  - Interface: filter/query.h
   - Macros: FILTER_QUERY_DECLARE, FILTER_QUERY
   - Functions: filter_actions_with_category
 
 - Compiler
-  - Interface: filter/compiler.h (+ implementation under filter/compiler/*.c), consumes rules from filter/rule.h
+  - Interface: filter/compiler.h (+ implementation under filter/compiler/*.c)
   - Macros: FILTER_COMPILER_DECLARE, FILTER_INIT, FILTER_FREE
 
 ## Files
