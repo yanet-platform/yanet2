@@ -47,17 +47,33 @@ func (m *VlanRange) Build() C.struct_filter_vlan_range {
 }
 
 func (m *IPNet4) Build() C.struct_net4 {
-	return C.struct_net4{
-		addr: [4]C.uint8_t{0, 0, 0, 0},
-		mask: [4]C.uint8_t{0, 0, 0, 0},
+	res := C.struct_net4{
+		addr: [4]C.uint8_t{},
+		mask: [4]C.uint8_t{},
 	}
+	addr := m.Addr.AsSlice()
+	mask := m.Addr.AsSlice()
+	for idx := 0; idx < 3; idx++ {
+		res.addr[idx] = C.uint8_t(addr[idx])
+		res.mask[idx] = C.uint8_t(mask[idx])
+	}
+
+	return res
 }
 
 func (m *IPNet6) Build() C.struct_net6 {
-	return C.struct_net6{
-		addr: [16]C.uint8_t{0, 0, 0, 0},
-		mask: [16]C.uint8_t{0, 0, 0, 0},
+	res := C.struct_net6{
+		addr: [16]C.uint8_t{0},
+		mask: [16]C.uint8_t{0},
 	}
+	addr := m.Addr.AsSlice()
+	mask := m.Addr.AsSlice()
+	for idx := 0; idx < 15; idx++ {
+		res.addr[idx] = C.uint8_t(addr[idx])
+		res.mask[idx] = C.uint8_t(mask[idx])
+	}
+
+	return res
 }
 
 func (m *ProtoRange) Build() C.struct_filter_proto_range {
@@ -75,6 +91,13 @@ func (m *PortRange) Build() C.struct_filter_port_range {
 }
 
 func (m Devices) CBuild(pinner *runtime.Pinner) *C.struct_filter_devices {
+	if len(m) == 0 {
+		return &C.struct_filter_devices{
+			items: nil,
+			count: 0,
+		}
+	}
+
 	cDevices := make([]C.struct_filter_device, len(m))
 	for idx, item := range m {
 		cDevices[idx] = item.Build()
@@ -88,6 +111,13 @@ func (m Devices) CBuild(pinner *runtime.Pinner) *C.struct_filter_devices {
 }
 
 func (m VlanRanges) CBuild(pinner *runtime.Pinner) *C.struct_filter_vlan_ranges {
+	if len(m) == 0 {
+		return &C.struct_filter_vlan_ranges{
+			items: nil,
+			count: 0,
+		}
+	}
+
 	cVlanRanges := make([]C.struct_filter_vlan_range, len(m))
 	for idx, item := range m {
 		cVlanRanges[idx] = item.Build()
@@ -101,6 +131,13 @@ func (m VlanRanges) CBuild(pinner *runtime.Pinner) *C.struct_filter_vlan_ranges 
 }
 
 func (m IPNet4s) CBuild(pinner *runtime.Pinner) *C.struct_filter_net4s {
+	if len(m) == 0 {
+		return &C.struct_filter_net4s{
+			items: nil,
+			count: 0,
+		}
+	}
+
 	cNet4s := make([]C.struct_net4, len(m))
 	for idx, item := range m {
 		cNet4s[idx] = item.Build()
@@ -114,6 +151,13 @@ func (m IPNet4s) CBuild(pinner *runtime.Pinner) *C.struct_filter_net4s {
 }
 
 func (m IPNet6s) CBuild(pinner *runtime.Pinner) *C.struct_filter_net6s {
+	if len(m) == 0 {
+		return &C.struct_filter_net6s{
+			items: nil,
+			count: 0,
+		}
+	}
+
 	cNet6s := make([]C.struct_net6, len(m))
 	for idx, item := range m {
 		cNet6s[idx] = item.Build()
@@ -127,6 +171,13 @@ func (m IPNet6s) CBuild(pinner *runtime.Pinner) *C.struct_filter_net6s {
 }
 
 func (m ProtoRanges) CBuild(pinner *runtime.Pinner) *C.struct_filter_proto_ranges {
+	if len(m) == 0 {
+		return &C.struct_filter_proto_ranges{
+			items: nil,
+			count: 0,
+		}
+	}
+
 	cProtoRanges := make([]C.struct_filter_proto_range, len(m))
 	for idx, item := range m {
 		cProtoRanges[idx] = item.Build()
@@ -140,6 +191,13 @@ func (m ProtoRanges) CBuild(pinner *runtime.Pinner) *C.struct_filter_proto_range
 }
 
 func (m PortRanges) CBuild(pinner *runtime.Pinner) *C.struct_filter_port_ranges {
+	if len(m) == 0 {
+		return &C.struct_filter_port_ranges{
+			items: nil,
+			count: 0,
+		}
+	}
+
 	cPortRanges := make([]C.struct_filter_port_range, len(m))
 	for idx, item := range m {
 		cPortRanges[idx] = item.Build()

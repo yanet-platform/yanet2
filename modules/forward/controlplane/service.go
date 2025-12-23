@@ -23,14 +23,14 @@ type forwardConfig struct {
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
 
-	mu          sync.Mutex
-	agent       *ffi.Agent
+	mu      sync.Mutex
+	agent   *ffi.Agent
 	configs map[string]forwardConfig
 }
 
 func NewForwardService(agent *ffi.Agent) *ForwardService {
 	return &ForwardService{
-		agent: agent,
+		agent:   agent,
 		configs: make(map[string]forwardConfig),
 	}
 }
@@ -70,7 +70,7 @@ func (m *ForwardService) ShowConfig(ctx context.Context, req *forwardpb.ShowConf
 	}
 
 	response := &forwardpb.ShowConfigResponse{
-		Name:        req.Name,
+		Name:  req.Name,
 		Rules: config.rules,
 	}
 
