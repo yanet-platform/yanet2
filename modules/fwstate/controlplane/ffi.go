@@ -5,6 +5,7 @@ package fwstate
 #cgo LDFLAGS: -L../../../build/modules/fwstate/api -lfwstate_cp
 
 #include "api/agent.h"
+#include "common/numutils.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/fwmap.h"
 #include "modules/fwstate/api/fwstate_cp.h"
@@ -79,16 +80,19 @@ func (m *FwStateConfig) CreateMaps(
 	mapConfigChanged := false
 	mapsStats := m.GetMapsStats()
 	// TODO: support separate map size for v4 and v6
-	indexSize := max(mapsStats.v4.index_size, mapsStats.v6.index_size)
-	mapsExist := indexSize != 0
-	extraBucketCount := max(mapsStats.v4.extra_bucket_count, mapsStats.v6.extra_bucket_count)
-	if mapConfig.IndexSize != 0 && mapConfig.IndexSize != uint32(indexSize) {
+	currentIndexSize := uint32(max(mapsStats.v4.index_size, mapsStats.v6.index_size))
+	currentExtraBucketCount := uint32(max(mapsStats.v4.extra_bucket_count, mapsStats.v6.extra_bucket_count))
+	mapsExist := currentIndexSize != 0
+	requestedIndexSize := uint32(C.align_up_pow2(C.uint64_t(mapConfig.IndexSize)))
+	requestedExtraBucketCount := uint32(C.align_up_pow2(C.uint64_t(mapConfig.ExtraBucketCount)))
+
+	if requestedIndexSize != 0 && requestedIndexSize != currentIndexSize {
 		mapConfigChanged = true
-		indexSize = C.uint32_t(mapConfig.IndexSize)
+		currentIndexSize = mapConfig.IndexSize
 	}
-	if mapConfig.ExtraBucketCount != 0 && mapConfig.ExtraBucketCount != uint32(extraBucketCount) {
+	if requestedExtraBucketCount != 0 && requestedExtraBucketCount != currentExtraBucketCount {
 		mapConfigChanged = true
-		extraBucketCount = C.uint32_t(mapConfig.ExtraBucketCount)
+		currentExtraBucketCount = mapConfig.ExtraBucketCount
 	}
 	if mapsExist {
 		if !mapConfigChanged {
@@ -110,8 +114,8 @@ func (m *FwStateConfig) CreateMaps(
 
 	if rc, cErr := C.fwstate_config_create_maps(
 		m.asCPModule(),
-		C.uint32_t(indexSize),
-		C.uint32_t(extraBucketCount),
+		C.uint32_t(currentIndexSize),
+		C.uint32_t(currentExtraBucketCount),
 		C.uint16_t(workerCount),
 	); rc != 0 {
 		return fmt.Errorf("failed to create maps: error code=%d, cErr=%v", rc, cErr)

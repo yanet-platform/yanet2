@@ -46,11 +46,11 @@ cli-install/%:
 cli-clean/%:
 	$(MAKE) -C modules/$*/cli clean
 
-test: dataplane
+test: go-cache-clean dataplane
 	go test -count=1 $$(go list ./... | grep -v 'tests/functional')
 	meson test -C build
 
-test-asan:
+test-asan: go-cache-clean
 	@if [ ! -d "build" ]; then \
 		$(MAKE) setup-asan; \
 	else \

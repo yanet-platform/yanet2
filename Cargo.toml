@@ -10,6 +10,7 @@ members = [
     "cli/modules/function",
     "cli/modules/counters",
     "modules/acl/cli",
+    "modules/fwstate/cli",
     "modules/decap/cli",
     "modules/dscp/cli",
     "modules/forward/cli",

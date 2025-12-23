@@ -105,10 +105,10 @@ func MakeIPNet4s(ipNets []*filterpb.IPNet) ([]IPNet4, error) {
 		}
 		addr, _ := netip.AddrFromSlice(ipNets[idx].Addr)
 		mask, _ := netip.AddrFromSlice(ipNets[idx].Mask)
-		result[idx] = IPNet4{
+		result = append(result, IPNet4{
 			Addr: addr,
 			Mask: mask,
-		}
+		})
 	}
 
 	return result, nil
@@ -130,10 +130,10 @@ func MakeIPNet6s(ipNets []*filterpb.IPNet) ([]IPNet6, error) {
 		}
 		addr, _ := netip.AddrFromSlice(ipNets[idx].Addr)
 		mask, _ := netip.AddrFromSlice(ipNets[idx].Mask)
-		result[idx] = IPNet6{
+		result = append(result, IPNet6{
 			Addr: addr,
 			Mask: mask,
-		}
+		})
 	}
 
 	return result, nil

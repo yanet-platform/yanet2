@@ -62,12 +62,13 @@ void
 fwstate_module_config_transfer(
 	struct cp_module *new_cp_module, struct cp_module *old_cp_module
 ) {
-	struct fwstate_module_config *new =
-		container_of(new_cp_module, struct fwstate_module_config, cp_module);
+	struct fwstate_module_config *new = container_of(
+		new_cp_module, struct fwstate_module_config, cp_module
+	);
 
-	struct fwstate_module_config *old =
-		container_of(old_cp_module, struct fwstate_module_config, cp_module);
-
+	struct fwstate_module_config *old = container_of(
+		old_cp_module, struct fwstate_module_config, cp_module
+	);
 
 	new->cfg = old->cfg; // copy sync config
 	EQUATE_OFFSET(&new->cfg.fw4state, &old->cfg.fw4state);

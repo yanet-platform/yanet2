@@ -85,6 +85,15 @@ func (m *FWStateService) UpdateConfig(
 	// Set sync config
 	newConfig.SetSyncConfig(req.SyncConfig)
 
+	// Validate sync config after setting
+	syncConfig := newConfig.GetSyncConfig()
+	if err := validateSyncConfig(syncConfig); err != nil {
+		newConfig.DetachMaps()
+		newConfig.Free()
+		m.log.Errorw("invalid sync config", zap.String("config", name), zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
+	}
+
 	dpConfig := m.agent.DPConfig()
 
 	if err = newConfig.CreateMaps(req.MapConfig, uint16(dpConfig.WorkerCount()), m.log); err != nil {
@@ -285,4 +294,44 @@ func (m *FWStateService) DeleteConfig(
 	delete(m.configs, name)
 
 	return &fwstatepb.DeleteConfigResponse{}, nil
+}
+
+
+// validateSyncConfig validates that required sync config fields are set
+func validateSyncConfig(cfg *fwstatepb.SyncConfig) error {
+	var missing []string
+
+	// Check src_addr (16 bytes for IPv6)
+	if len(cfg.SrcAddr) != 16 || isAllZeroBytes(cfg.SrcAddr) {
+		missing = append(missing, "src_addr")
+	}
+
+	// Check dst_ether (6 bytes for MAC)
+	if len(cfg.DstEther) != 6 || isAllZeroBytes(cfg.DstEther) {
+		missing = append(missing, "dst_ether")
+	}
+
+	// Check that at least one destination pair is configured
+	hasMulticast := len(cfg.DstAddrMulticast) == 16 && !isAllZeroBytes(cfg.DstAddrMulticast) && cfg.PortMulticast != 0
+	hasUnicast := len(cfg.DstAddrUnicast) == 16 && !isAllZeroBytes(cfg.DstAddrUnicast) && cfg.PortUnicast != 0
+
+	if !hasMulticast && !hasUnicast {
+		missing = append(missing, "dst_addr_multicast+port_multicast or dst_addr_unicast+port_unicast")
+	}
+
+	if len(missing) > 0 {
+		return status.Errorf(codes.InvalidArgument, "missing required sync config fields: %v", missing)
+	}
+
+	return nil
+}
+
+// isAllZeroBytes checks if all bytes in the slice are zero
+func isAllZeroBytes(b []byte) bool {
+	for _, v := range b {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
 }

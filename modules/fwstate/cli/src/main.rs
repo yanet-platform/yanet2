@@ -5,10 +5,9 @@ use args::{DeleteCmd, LinkCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use fwstatepb::{
-    DeleteConfigRequest, LinkFwStateRequest, ListConfigsRequest, ShowConfigRequest,
-    UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
+    DeleteConfigRequest, LinkFwStateRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
+    fw_state_service_client::FwStateServiceClient,
 };
-use serde::{Deserialize, Serialize};
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
 
@@ -51,8 +50,7 @@ fn parse_mac(s: &str) -> Result<Vec<u8>, Box<dyn Error>> {
 
     let mut bytes = Vec::with_capacity(6);
     for part in parts {
-        let byte = u8::from_str_radix(part, 16)
-            .map_err(|_| format!("invalid MAC address byte: {}", part))?;
+        let byte = u8::from_str_radix(part, 16).map_err(|_| format!("invalid MAC address byte: {}", part))?;
         bytes.push(byte);
     }
 
@@ -80,32 +78,29 @@ impl FWStateService {
     }
 
     pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowConfigRequest {
-            name: cmd.config_name.clone(),
-        };
+        let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self.client.show_config(request).await?.into_inner();
         println!("{}", serde_json::to_string(&response)?);
         Ok(())
     }
 
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
-        let request = DeleteConfigRequest {
-            name: cmd.config_name.clone(),
-        };
+        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         self.client.delete_config(request).await?.into_inner();
         Ok(())
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         // First, fetch the current config to merge with new values
-        let current_request = ShowConfigRequest {
-            name: cmd.config_name.clone(),
+        let current_request = ShowConfigRequest { name: cmd.config_name.clone() };
+        let current_response = self.client.show_config(current_request).await;
+        let (mut map_config, mut sync_config) = match current_response {
+            Ok(resp) => {
+                let msg = resp.into_inner();
+                (msg.map_config.unwrap_or_default(), msg.sync_config.unwrap_or_default())
+            }
+            _ => (Default::default(), Default::default()),
         };
-        let current_response = self.client.show_config(current_request).await?.into_inner();
-
-        // Start with existing config or create a new one
-        let mut map_config = current_response.map_config.unwrap_or_default();
-        let mut sync_config = current_response.sync_config.unwrap_or_default();
 
         // Update map config fields if provided
         if let Some(index_size) = cmd.index_size {

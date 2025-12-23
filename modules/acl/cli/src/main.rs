@@ -162,7 +162,6 @@ impl TryFrom<&String> for filterpb::Device {
     }
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 enum ActionKind {
     Allow,
@@ -234,7 +233,8 @@ impl TryFrom<ACLRule> for aclpb::Rule {
                     ActionKind::Count => aclpb::ActionKind::Count,
                     ActionKind::CheckState => aclpb::ActionKind::CheckState,
                     ActionKind::CreateState => aclpb::ActionKind::CreateState,
-                }.into(),
+                }
+                .into(),
             }),
         })
     }
