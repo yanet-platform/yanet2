@@ -75,130 +75,54 @@ type forwardRule struct {
 	dst6s      []filter.IPNet6
 }
 
-// L2ForwardEnable configures a device for L2 forwarding
-func (m *ModuleConfig) Update(rules []forwardRule) error {
-	cRules := make([]C.struct_forward_rule, len(rules))
+func (m *forwardRule) CBuild(pinner *runtime.Pinner) C.struct_forward_rule {
+	cRule := C.struct_forward_rule{}
 
-	for idx, rule := range rules {
-		cTarget := C.CString(rule.target)
-		C.strncpy(&cRules[idx].target[0], cTarget, C.CP_DEVICE_NAME_LEN)
-		C.free(unsafe.Pointer(cTarget))
+	cTarget := C.CString(m.target)
+	C.strncpy(&cRule.target[0], cTarget, C.CP_DEVICE_NAME_LEN)
+	C.free(unsafe.Pointer(cTarget))
 
-		if rule.mode == modeIn {
-			cRules[idx].mode = C.FORWARD_MODE_IN
-		} else if rule.mode == modeOut {
-			cRules[idx].mode = C.FORWARD_MODE_OUT
-		} else {
-			cRules[idx].mode = C.FORWARD_MODE_NONE
-		}
-
-		cCounter := C.CString(rule.counter)
-		C.strncpy(&cRules[idx].counter[0], cCounter, C.COUNTER_NAME_LEN)
-		C.free(unsafe.Pointer(cCounter))
+	switch m.mode {
+	case modeIn:
+		cRule.mode = C.FORWARD_MODE_IN
+	case modeOut:
+		cRule.mode = C.FORWARD_MODE_OUT
+	default:
+		cRule.mode = C.FORWARD_MODE_NONE
 	}
 
-	pinner := runtime.Pinner{}
+	cCounter := C.CString(m.counter)
+	C.strncpy(&cRule.counter[0], cCounter, C.COUNTER_NAME_LEN)
+	C.free(unsafe.Pointer(cCounter))
+
+	cRule.devices = *(*C.struct_filter_devices)(unsafe.Pointer(filter.Devices(m.devices).CBuild(pinner)))
+	cRule.vlan_ranges = *(*C.struct_filter_vlan_ranges)(unsafe.Pointer(filter.VlanRanges(m.vlanRanges).CBuild(pinner)))
+	cRule.src_net4s = *(*C.struct_filter_net4s)(unsafe.Pointer(filter.IPNet4s(m.src4s).CBuild(pinner)))
+	cRule.dst_net4s = *(*C.struct_filter_net4s)(unsafe.Pointer(filter.IPNet4s(m.dst4s).CBuild(pinner)))
+	cRule.src_net6s = *(*C.struct_filter_net6s)(unsafe.Pointer(filter.IPNet6s(m.src6s).CBuild(pinner)))
+	cRule.dst_net6s = *(*C.struct_filter_net6s)(unsafe.Pointer(filter.IPNet6s(m.dst6s).CBuild(pinner)))
+
+	return cRule
+}
+
+// L2ForwardEnable configures a device for L2 forwarding
+func (m *ModuleConfig) Update(rules []forwardRule) error {
+	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
 
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CDevice] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.devices) {
-				return nil
-			}
+	cRules := make([]C.struct_forward_rule, len(rules))
+	for idx, rule := range rules {
+		cRules[idx] = rule.CBuild(pinner)
+	}
 
-			return &rule.devices[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CDevice] {
-			return (*filter.CDevices)(unsafe.Pointer(&cRules[attrIdx].devices))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CVlanRange] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.vlanRanges) {
-				return nil
-			}
-
-			return &rule.vlanRanges[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CVlanRange] {
-			return (*filter.CVlanRanges)(unsafe.Pointer(&cRules[attrIdx].vlan_ranges))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet4] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.src4s) {
-				return nil
-			}
-
-			return &rule.src4s[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CNet4] {
-			return (*filter.CNet4s)(unsafe.Pointer(&cRules[attrIdx].src_net4s))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet4] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.dst4s) {
-				return nil
-			}
-
-			return &rule.dst4s[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CNet4] {
-			return (*filter.CNet4s)(unsafe.Pointer(&cRules[attrIdx].dst_net4s))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet6] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.src6s) {
-				return nil
-			}
-
-			return &rule.src6s[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CNet6] {
-			return (*filter.CNet6s)(unsafe.Pointer(&cRules[attrIdx].src_net6s))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet6] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.dst6s) {
-				return nil
-			}
-
-			return &rule.dst6s[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CNet6] {
-			return (*filter.CNet6s)(unsafe.Pointer(&cRules[attrIdx].dst_net6s))
-		},
-		&pinner,
-	)
+	var cRulesPtr *C.struct_forward_rule
+	if len(cRules) > 0 {
+		cRulesPtr = &cRules[0]
+	}
 
 	rc, err := C.forward_module_config_update(
 		m.asRawPtr(),
-		&cRules[0],
+		cRulesPtr,
 		C.uint32_t(len(cRules)),
 	)
 	if err != nil {

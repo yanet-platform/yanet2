@@ -13,30 +13,42 @@ type Device struct {
 	Name string
 }
 
+type Devices []Device
+
 type VlanRange struct {
 	From uint16
 	To   uint16
 }
+
+type VlanRanges []VlanRange
 
 type IPNet4 struct {
 	Addr netip.Addr
 	Mask netip.Addr
 }
 
+type IPNet4s []IPNet4
+
 type IPNet6 struct {
 	Addr netip.Addr
 	Mask netip.Addr
 }
+
+type IPNet6s []IPNet6
 
 type ProtoRange struct {
 	From uint16
 	To   uint16
 }
 
+type ProtoRanges []ProtoRange
+
 type PortRange struct {
 	From uint16
 	To   uint16
 }
+
+type PortRanges []PortRange
 
 func MakeDevices(devices []*filterpb.Device) ([]Device, error) {
 	result := make([]Device, len(devices))

@@ -77,165 +77,37 @@ type aclRule struct {
 	dstPortRanges []filter.PortRange
 }
 
+func (m *aclRule) CBuild(pinner *runtime.Pinner) C.struct_acl_rule {
+	cRule := C.struct_acl_rule{}
+
+	cRule.action = C.uint64_t(m.action)
+	cCounter := C.CString(m.counter)
+	C.strncpy(&cRule.counter[0], cCounter, C.COUNTER_NAME_LEN)
+	C.free(unsafe.Pointer(cCounter))
+
+	cRule.devices = *(*C.struct_filter_devices)(unsafe.Pointer(filter.Devices(m.devices).CBuild(pinner)))
+	cRule.vlan_ranges = *(*C.struct_filter_vlan_ranges)(unsafe.Pointer(filter.VlanRanges(m.vlanRanges).CBuild(pinner)))
+	cRule.src_net4s = *(*C.struct_filter_net4s)(unsafe.Pointer(filter.IPNet4s(m.src4s).CBuild(pinner)))
+	cRule.dst_net4s = *(*C.struct_filter_net4s)(unsafe.Pointer(filter.IPNet4s(m.dst4s).CBuild(pinner)))
+	cRule.src_net6s = *(*C.struct_filter_net6s)(unsafe.Pointer(filter.IPNet6s(m.src6s).CBuild(pinner)))
+	cRule.dst_net6s = *(*C.struct_filter_net6s)(unsafe.Pointer(filter.IPNet6s(m.dst6s).CBuild(pinner)))
+	cRule.proto_ranges = *(*C.struct_filter_proto_ranges)(unsafe.Pointer(filter.ProtoRanges(m.protoRanges).CBuild(pinner)))
+	cRule.src_port_ranges = *(*C.struct_filter_port_ranges)(unsafe.Pointer(filter.PortRanges(m.srcPortRanges).CBuild(pinner)))
+	cRule.dst_port_ranges = *(*C.struct_filter_port_ranges)(unsafe.Pointer(filter.PortRanges(m.dstPortRanges).CBuild(pinner)))
+
+	return cRule
+}
+
 func (m *ModuleConfig) Update(rules []aclRule) error {
-	cRules := make([]C.struct_acl_rule, len(rules))
-
-	for idx, rule := range rules {
-		// Use defined constant
-		cRules[idx].action = C.uint64_t(rule.action)
-		cCounter := C.CString(rule.counter)
-		C.strncpy(&cRules[idx].counter[0], cCounter, C.COUNTER_NAME_LEN)
-		C.free(unsafe.Pointer(cCounter))
-	}
-
-	pinner := runtime.Pinner{}
+	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
 
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CDevice] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.devices) {
-				return nil
-			}
+	cRules := make([]C.struct_acl_rule, len(rules))
+	for idx, rule := range rules {
+		cRules[idx] = rule.CBuild(pinner)
+	}
 
-			return &rule.devices[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CDevice] {
-			return (*filter.CDevices)(unsafe.Pointer(&cRules[attrIdx].devices))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CVlanRange] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.vlanRanges) {
-				return nil
-			}
-
-			return &rule.vlanRanges[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CVlanRange] {
-			return (*filter.CVlanRanges)(unsafe.Pointer(&cRules[attrIdx].vlan_ranges))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet4] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.src4s) {
-				return nil
-			}
-
-			return &rule.src4s[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CNet4] {
-			return (*filter.CNet4s)(unsafe.Pointer(&cRules[attrIdx].src_net4s))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet4] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.dst4s) {
-				return nil
-			}
-
-			return &rule.dst4s[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CNet4] {
-			return (*filter.CNet4s)(unsafe.Pointer(&cRules[attrIdx].dst_net4s))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet6] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.src6s) {
-				return nil
-			}
-
-			return &rule.src6s[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CNet6] {
-			return (*filter.CNet6s)(unsafe.Pointer(&cRules[attrIdx].src_net6s))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CNet6] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.dst6s) {
-				return nil
-			}
-
-			return &rule.dst6s[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CNet6] {
-			return (*filter.CNet6s)(unsafe.Pointer(&cRules[attrIdx].dst_net6s))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CProtoRange] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.protoRanges) {
-				return nil
-			}
-
-			return &rule.protoRanges[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CProtoRange] {
-			return (*filter.CProtoRanges)(unsafe.Pointer(&cRules[attrIdx].proto_ranges))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CPortRange] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.srcPortRanges) {
-				return nil
-			}
-
-			return &rule.srcPortRanges[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CPortRange] {
-			return (*filter.CPortRanges)(unsafe.Pointer(&cRules[attrIdx].src_port_ranges))
-		},
-		&pinner,
-	)
-
-	filter.SetupFilterAttr(
-		len(rules),
-		func(attrIdx int, itemIdx int) filter.IAttrItem[filter.CPortRange] {
-			rule := rules[attrIdx]
-			if itemIdx >= len(rule.dstPortRanges) {
-				return nil
-			}
-
-			return &rule.dstPortRanges[itemIdx]
-		},
-		func(attrIdx int) filter.ICAttr[filter.CPortRange] {
-			return (*filter.CPortRanges)(unsafe.Pointer(&cRules[attrIdx].dst_port_ranges))
-		},
-		&pinner,
-	)
-
-	cRulesPtr := (*C.struct_acl_rule)(nil)
+	var cRulesPtr *C.struct_acl_rule
 	if len(cRules) > 0 {
 		cRulesPtr = &cRules[0]
 	}

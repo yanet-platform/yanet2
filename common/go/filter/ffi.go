@@ -15,14 +15,6 @@ import (
 	"unsafe"
 )
 
-func getSlicePtr[T any](slice []T, idx int, count int, pinner runtime.Pinner) *T {
-	if count == 0 {
-		return nil
-	}
-	pinner.Pin(&slice[idx])
-	return &slice[idx]
-}
-
 func deviceToChar(str string) [C.ACL_DEVICE_NAME_LEN]C.char {
 	var result [C.ACL_DEVICE_NAME_LEN]C.char
 
@@ -40,184 +32,122 @@ func deviceToChar(str string) [C.ACL_DEVICE_NAME_LEN]C.char {
 	return result
 }
 
-// C filter attribute item types
-type CDevice C.struct_filter_device
-type CVlanRange C.struct_filter_vlan_range
-type CNet4 C.struct_net4
-type CNet6 C.struct_net6
-type CProtoRange C.struct_filter_proto_range
-type CPortRange C.struct_filter_port_range
-
-// C filter attribute types
-type CDevices C.struct_filter_devices
-type CVlanRanges C.struct_filter_vlan_ranges
-type CNet4s C.struct_filter_net4s
-type CNet6s C.struct_filter_net6s
-type CProtoRanges C.struct_filter_proto_ranges
-type CPortRanges C.struct_filter_port_ranges
-
-/*
-The interface is used to set filter attribute inside output result set.
-`set` function accepts a slice of attribute items and sets corresponding
-pointer and count fields inside C-representation of filter attribute.
-Item values should not be relocated until attribute processing is done.
-
-Pinner is provided in order to pin memory address and allow GO pointers
-deep inside CGO calls.
-*/
-type ICAttr[T any] interface {
-	set([]T, *runtime.Pinner)
-}
-
-// Supported filter attribute `set` handlers
-func (m *CDevices) set(values []CDevice, pinner *runtime.Pinner) {
-	if len(values) > 0 {
-		pinner.Pin(&values[0])
-		m.items = (*C.struct_filter_device)(&values[0])
-		m.count = C.uint32_t(len(values))
-	} else {
-		m.items = nil
-		m.count = 0
-	}
-}
-
-func (m *CVlanRanges) set(values []CVlanRange, pinner *runtime.Pinner) {
-	if len(values) > 0 {
-		pinner.Pin(&values[0])
-		m.items = (*C.struct_filter_vlan_range)(&values[0])
-		m.count = C.uint32_t(len(values))
-	} else {
-		m.items = nil
-		m.count = 0
-	}
-}
-
-func (m *CNet4s) set(values []CNet4, pinner *runtime.Pinner) {
-	if len(values) > 0 {
-		pinner.Pin(&values[0])
-		m.items = (*C.struct_net4)(&values[0])
-		m.count = C.uint32_t(len(values))
-	} else {
-		m.items = nil
-		m.count = 0
-	}
-}
-
-func (m *CNet6s) set(values []CNet6, pinner *runtime.Pinner) {
-	if len(values) > 0 {
-		pinner.Pin(&values[0])
-		m.items = (*C.struct_net6)(&values[0])
-		m.count = C.uint32_t(len(values))
-	} else {
-		m.items = nil
-		m.count = 0
-	}
-}
-
-func (m *CProtoRanges) set(values []CProtoRange, pinner *runtime.Pinner) {
-	if len(values) > 0 {
-		pinner.Pin(&values[0])
-		m.items = (*C.struct_filter_proto_range)(&values[0])
-		m.count = C.uint32_t(len(values))
-	} else {
-		m.items = nil
-		m.count = 0
-	}
-}
-
-func (m *CPortRanges) set(values []CPortRange, pinner *runtime.Pinner) {
-	if len(values) > 0 {
-		pinner.Pin(&values[0])
-		m.items = (*C.struct_filter_port_range)(&values[0])
-		m.count = C.uint32_t(len(values))
-	} else {
-		m.items = nil
-		m.count = 0
-	}
-}
-
-/*
-Each rule contains set of attributes, an attribute is a list of enabled
-values.  The interface requires a filter attribute item to  build its
-C representation.
-*/
-type IAttrItem[T any] interface {
-	build() T
-}
-
-func (m *Device) build() CDevice {
-	return CDevice{
+func (m *Device) Build() C.struct_filter_device {
+	return C.struct_filter_device{
 		id:   0,
 		name: deviceToChar(string(m.Name)),
 	}
 }
 
-func (m *VlanRange) build() CVlanRange {
-	return CVlanRange{
+func (m *VlanRange) Build() C.struct_filter_vlan_range {
+	return C.struct_filter_vlan_range{
 		from: C.uint16_t(m.From),
 		to:   C.uint16_t(m.To),
 	}
 }
 
-func (m *IPNet4) build() CNet4 {
-	return CNet4{
+func (m *IPNet4) Build() C.struct_net4 {
+	return C.struct_net4{
 		addr: [4]C.uint8_t{0, 0, 0, 0},
 		mask: [4]C.uint8_t{0, 0, 0, 0},
 	}
 }
 
-func (m *IPNet6) build() CNet6 {
-	return CNet6{
+func (m *IPNet6) Build() C.struct_net6 {
+	return C.struct_net6{
 		addr: [16]C.uint8_t{0, 0, 0, 0},
 		mask: [16]C.uint8_t{0, 0, 0, 0},
 	}
 }
 
-func (m *ProtoRange) build() CProtoRange {
-	return CProtoRange{
+func (m *ProtoRange) Build() C.struct_filter_proto_range {
+	return C.struct_filter_proto_range{
 		from: C.uint16_t(m.From),
 		to:   C.uint16_t(m.To),
 	}
 }
 
-func (m *PortRange) build() CPortRange {
-	return CPortRange{
+func (m *PortRange) Build() C.struct_filter_port_range {
+	return C.struct_filter_port_range{
 		from: C.uint16_t(m.From),
 		to:   C.uint16_t(m.To),
 	}
 }
 
-func SetupFilterAttr[T any](
-	count int,
-	getItem func(ruleIdx int, itemIdx int) IAttrItem[T],
-	setAttr func(ruleIdx int) ICAttr[T],
-	pinner *runtime.Pinner,
-) {
-	itemCount := 0
-	for attrIdx := 0; attrIdx < count; attrIdx++ {
-		itemIdx := 0
-		for getItem(attrIdx, itemIdx) != nil {
-			itemIdx++
-		}
-
-		itemCount = itemCount + itemIdx
+func (m Devices) CBuild(pinner *runtime.Pinner) *C.struct_filter_devices {
+	cDevices := make([]C.struct_filter_device, len(m))
+	for idx, item := range m {
+		cDevices[idx] = item.Build()
 	}
 
-	cAttrItems := make([]T, itemCount)
-	cAttrItemIdx := 0
+	pinner.Pin(&cDevices[0])
+	return &C.struct_filter_devices{
+		items: (*C.struct_filter_device)(&cDevices[0]),
+		count: C.uint32_t(len(cDevices)),
+	}
+}
 
-	for attrIdx := 0; attrIdx < count; attrIdx++ {
-		itemIdx := 0
-		item := getItem(attrIdx, itemIdx)
-		for item != nil {
-			cAttrItems[cAttrItemIdx+itemIdx] = item.build()
-			itemIdx++
-			item = getItem(attrIdx, itemIdx)
-		}
+func (m VlanRanges) CBuild(pinner *runtime.Pinner) *C.struct_filter_vlan_ranges {
+	cVlanRanges := make([]C.struct_filter_vlan_range, len(m))
+	for idx, item := range m {
+		cVlanRanges[idx] = item.Build()
+	}
 
-		setAttr(attrIdx).set(cAttrItems[cAttrItemIdx:cAttrItemIdx+itemIdx], pinner)
+	pinner.Pin(&cVlanRanges[0])
+	return &C.struct_filter_vlan_ranges{
+		items: (*C.struct_filter_vlan_range)(&cVlanRanges[0]),
+		count: C.uint32_t(len(cVlanRanges)),
+	}
+}
 
-		cAttrItemIdx = cAttrItemIdx + itemIdx
+func (m IPNet4s) CBuild(pinner *runtime.Pinner) *C.struct_filter_net4s {
+	cNet4s := make([]C.struct_net4, len(m))
+	for idx, item := range m {
+		cNet4s[idx] = item.Build()
+	}
 
+	pinner.Pin(&cNet4s[0])
+	return &C.struct_filter_net4s{
+		items: (*C.struct_net4)(&cNet4s[0]),
+		count: C.uint32_t(len(cNet4s)),
+	}
+}
+
+func (m IPNet6s) CBuild(pinner *runtime.Pinner) *C.struct_filter_net6s {
+	cNet6s := make([]C.struct_net6, len(m))
+	for idx, item := range m {
+		cNet6s[idx] = item.Build()
+	}
+
+	pinner.Pin(&cNet6s[0])
+	return &C.struct_filter_net6s{
+		items: (*C.struct_net6)(&cNet6s[0]),
+		count: C.uint32_t(len(cNet6s)),
+	}
+}
+
+func (m ProtoRanges) CBuild(pinner *runtime.Pinner) *C.struct_filter_proto_ranges {
+	cProtoRanges := make([]C.struct_filter_proto_range, len(m))
+	for idx, item := range m {
+		cProtoRanges[idx] = item.Build()
+	}
+
+	pinner.Pin(&cProtoRanges[0])
+	return &C.struct_filter_proto_ranges{
+		items: (*C.struct_filter_proto_range)(&cProtoRanges[0]),
+		count: C.uint32_t(len(cProtoRanges)),
+	}
+}
+
+func (m PortRanges) CBuild(pinner *runtime.Pinner) *C.struct_filter_port_ranges {
+	cPortRanges := make([]C.struct_filter_port_range, len(m))
+	for idx, item := range m {
+		cPortRanges[idx] = item.Build()
+	}
+
+	pinner.Pin(&cPortRanges[0])
+	return &C.struct_filter_port_ranges{
+		items: (*C.struct_filter_port_range)(&cPortRanges[0]),
+		count: C.uint32_t(len(cPortRanges)),
 	}
 }
