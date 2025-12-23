@@ -4,12 +4,21 @@
 #include "common/memory.h"
 #include "controlplane/agent/agent.h"
 
-#include "../dataplane/filter.h"
 #include "../dataplane/module.h"
-#include "filter.h"
 #include "module.h"
 
+#include <common/container_of.h>
+
+#include <filter/compiler.h>
+#include <filter/filter.h>
+
 ////////////////////////////////////////////////////////////////////////////////
+
+#define ACL_FILTER_NET4_TAG __ACL_FILTER_NET4_TAG
+
+FILTER_COMPILER_DECLARE(
+	ACL_FILTER_NET4_TAG, proto_range, port_src, port_dst, net4_src, net4_dst
+);
 
 static int
 filter_net4_compile(
@@ -23,6 +32,14 @@ filter_net4_compile(
 	);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+#define ACL_FILTER_NET6_TAG __ACL_FILTER_NET6_TAG
+
+FILTER_COMPILER_DECLARE(
+	ACL_FILTER_NET6_TAG, proto_range, port_src, port_dst, net6_src, net6_dst
+);
+
 static int
 filter_net6_compile(
 	struct filter *filter,
@@ -33,6 +50,13 @@ filter_net6_compile(
 	return FILTER_INIT(
 		filter, ACL_FILTER_NET6_TAG, rules, rule_count, mctx
 	);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+static inline struct filter_rule *
+acl_rules_into_filter_rules(acl_rule_t *rule) {
+	return (struct filter_rule *)rule;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -53,13 +77,7 @@ acl_module_config_create(
 		return NULL;
 	}
 
-	if (cp_module_init(
-		    &config->cp_module,
-		    agent,
-		    "acl",
-		    name,
-		    acl_module_config_free
-	    )) {
+	if (cp_module_init(&config->cp_module, agent, "acl", name)) {
 		goto fail;
 	}
 

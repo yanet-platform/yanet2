@@ -5,6 +5,7 @@
 
 #include "lib/counters/counters.h"
 
+#include "common/lpm.h"
 #include "filter/filter.h"
 
 #include "../api/module.h"

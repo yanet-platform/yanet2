@@ -12,46 +12,38 @@
 
 #include "controlplane/agent/agent.h"
 
-FILTER_DECLARE(ACL_FILTER_VLAN_TAG, &attribute_device, &attribute_vlan);
+#include <filter/compiler.h>
 
-FILTER_DECLARE(
-	ACL_FILTER_IP4_PROTO_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net4_src,
-	&attribute_net4_dst,
-	&attribute_proto_range
+FILTER_COMPILER_DECLARE(ACL_FILTER_VLAN_TAG, device, vlan);
+
+FILTER_COMPILER_DECLARE(
+	ACL_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst, proto_range
 );
 
-FILTER_DECLARE(
+FILTER_COMPILER_DECLARE(
 	ACL_FILTER_IP4_PROTO_PORT_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net4_src,
-	&attribute_net4_dst,
-	&attribute_proto_range,
-	&attribute_port_src,
-	&attribute_port_dst
+	device,
+	vlan,
+	net4_src,
+	net4_dst,
+	proto_range,
+	port_src,
+	port_dst
 );
 
-FILTER_DECLARE(
-	ACL_FILTER_IP6_PROTO_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net6_src,
-	&attribute_net6_dst,
-	&attribute_proto_range
+FILTER_COMPILER_DECLARE(
+	ACL_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst, proto_range
 );
 
-FILTER_DECLARE(
+FILTER_COMPILER_DECLARE(
 	ACL_FILTER_IP6_PROTO_PORT_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net6_src,
-	&attribute_net6_dst,
-	&attribute_proto_range,
-	&attribute_port_src,
-	&attribute_port_dst
+	device,
+	vlan,
+	net6_src,
+	net6_dst,
+	proto_range,
+	port_src,
+	port_dst
 );
 
 struct cp_module *
@@ -103,9 +95,9 @@ acl_module_config_free(struct cp_module *cp_module) {
 	);
 
 	FILTER_FREE(&config->filter_vlan, ACL_FILTER_VLAN_TAG);
-	FILTER_FREE(&config->filter_ip4, ACL_FILTER_IP4_PROTO_TAG);
+	FILTER_FREE(&config->filter_ip4, ACL_FILTER_IP4_TAG);
 	FILTER_FREE(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
-	FILTER_FREE(&config->filter_ip6, ACL_FILTER_IP6_PROTO_TAG);
+	FILTER_FREE(&config->filter_ip6, ACL_FILTER_IP6_TAG);
 	FILTER_FREE(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
 
 	// Note: We don't destroy fwstate_cfg maps here because they're owned by
@@ -265,7 +257,7 @@ acl_module_init_ip4(
 
 	return FILTER_INIT(
 		&config->filter_ip4,
-		ACL_FILTER_IP4_PROTO_TAG,
+		ACL_FILTER_IP4_TAG,
 		filter_rules,
 		filter_rule_count,
 		&cp_module->memory_context
@@ -311,7 +303,7 @@ acl_module_init_ip6(
 
 	return FILTER_INIT(
 		&config->filter_ip6,
-		ACL_FILTER_IP6_PROTO_TAG,
+		ACL_FILTER_IP6_TAG,
 		filter_rules,
 		filter_rule_count,
 		&cp_module->memory_context

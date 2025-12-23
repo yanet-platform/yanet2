@@ -6,8 +6,6 @@
 
 #include "counters/counters.h"
 
-#include "controlplane/config/defines.h"
-
 #define ACL_ACTION_ALLOW 0
 #define ACL_ACTION_DENY 1
 

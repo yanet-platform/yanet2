@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "filter/rule.h"
+#include <filter/rule.h>
 
 #include "counters/counters.h"
 

@@ -5,59 +5,52 @@
 
 #include <stdint.h>
 
+#include "controlplane/config/econtext.h"
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
+#include "dataplane/time/clock.h"
 #include "dataplane/worker.h"
 #include "dataplane/worker/worker.h"
 #include "fwstate/lookup.h"
 #include "fwstate/sync.h"
-#include "lib/dataplane/time/clock.h"
 #include "logging/log.h"
+
+#include <filter/query.h>
 
 struct acl_module {
 	struct module module;
 };
 
-FILTER_DECLARE(FWD_FILTER_VLAN_TAG, &attribute_device, &attribute_vlan);
+FILTER_QUERY_DECLARE(ACL_FILTER_VLAN_TAG, device, vlan);
 
-FILTER_DECLARE(
-	FWD_FILTER_IP4_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net4_src,
-	&attribute_net4_dst,
-	&attribute_proto_range,
+FILTER_QUERY_DECLARE(
+	ACL_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst, proto_range
 );
 
-FILTER_DECLARE(
-	FWD_FILTER_IP4_PROTO_PORT_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net4_src,
-	&attribute_net4_dst,
-	&attribute_proto_range,
-	&attribute_port_src,
-	&attribute_port_dst
+FILTER_QUERY_DECLARE(
+	ACL_FILTER_IP4_PROTO_PORT_TAG,
+	device,
+	vlan,
+	net4_src,
+	net4_dst,
+	proto_range,
+	port_src,
+	port_dst
 );
 
-FILTER_DECLARE(
-	FWD_FILTER_IP6_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net6_src,
-	&attribute_net6_dst,
-	&attribute_proto_range
+FILTER_QUERY_DECLARE(
+	ACL_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst, proto_range
 );
 
-FILTER_DECLARE(
-	FWD_FILTER_IP6_PROTO_PORT_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net6_src,
-	&attribute_net6_dst,
-	&attribute_proto_range,
-	&attribute_port_src,
-	&attribute_port_dst
+FILTER_QUERY_DECLARE(
+	ACL_FILTER_IP6_PROTO_PORT_TAG,
+	device,
+	vlan,
+	net6_src,
+	net6_dst,
+	proto_range,
+	port_src,
+	port_dst
 );
 
 static void
@@ -98,7 +91,7 @@ acl_handle_packets(
 		uint32_t vlan_action_count;
 		FILTER_QUERY(
 			&acl_config->filter_vlan,
-			FWD_FILTER_VLAN_TAG,
+			ACL_FILTER_VLAN_TAG,
 			packet,
 			&vlan_actions,
 			&vlan_action_count
@@ -116,7 +109,7 @@ acl_handle_packets(
 			uint32_t ip4_action_count;
 			FILTER_QUERY(
 				&acl_config->filter_ip4,
-				FWD_FILTER_IP4_TAG,
+				ACL_FILTER_IP4_TAG,
 				packet,
 				&ip4_actions,
 				&ip4_action_count
@@ -134,7 +127,7 @@ acl_handle_packets(
 				uint32_t ip4_port_action_count;
 				FILTER_QUERY(
 					&acl_config->filter_ip4_port,
-					FWD_FILTER_IP4_PROTO_PORT_TAG,
+					ACL_FILTER_IP4_PROTO_PORT_TAG,
 					packet,
 					&ip4_port_actions,
 					&ip4_port_action_count
@@ -155,7 +148,7 @@ acl_handle_packets(
 			uint32_t ip6_action_count;
 			FILTER_QUERY(
 				&acl_config->filter_ip6,
-				FWD_FILTER_IP6_TAG,
+				ACL_FILTER_IP6_TAG,
 				packet,
 				&ip6_actions,
 				&ip6_action_count
@@ -173,7 +166,7 @@ acl_handle_packets(
 				uint32_t ip6_port_action_count;
 				FILTER_QUERY(
 					&acl_config->filter_ip6_port,
-					FWD_FILTER_IP6_PROTO_PORT_TAG,
+					ACL_FILTER_IP6_PROTO_PORT_TAG,
 					packet,
 					&ip6_port_actions,
 					&ip6_port_action_count

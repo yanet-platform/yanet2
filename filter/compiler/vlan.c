@@ -1,21 +1,13 @@
-#pragma once
-
-#include "../rule.h"
 #include "common/memory.h"
 #include "common/registry.h"
 #include "common/value.h"
-#include "dataplane/packet/packet.h"
+#include "declare.h"
+#include "filter/rule.h"
 
 #include <stdint.h>
 
-#include <netinet/in.h>
-#include <rte_ether.h>
-#include <rte_ip.h>
-#include <rte_mbuf.h>
-#include <rte_tcp.h>
-
-static inline int
-init_vlan(
+int
+FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *rules,
@@ -68,15 +60,10 @@ init_vlan(
 	return 0;
 }
 
-static inline uint32_t
-lookup_vlan(struct packet *packet, void *data) {
-	struct value_table *t = (struct value_table *)data;
-	uint16_t vlan = packet->vlan;
-	return value_table_get(t, 0, vlan);
-}
-
-static inline void
-free_vlan(void *data, struct memory_context *memory_context) {
+void
+FILTER_ATTR_COMPILER_FREE_FUNC(vlan)(
+	void *data, struct memory_context *memory_context
+) {
 	struct value_table *t = (struct value_table *)data;
 	if (t == NULL)
 		return;

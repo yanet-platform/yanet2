@@ -1,24 +1,17 @@
-#pragma once
-
+#include "filter/classifiers/proto_range.h"
 #include "common/memory.h"
-#include <common/registry.h>
-#include <common/value.h>
+#include "common/registry.h"
+#include "common/value.h"
+#include "declare.h"
+#include "filter/rule.h"
 
-#include <filter/rule.h>
-
-#include <lib/dataplane/packet/packet.h>
+#include <stdint.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
 #define PROTO_RANGE_CLASSIFIER_MAX_VALUE ((1 << 16))
 
-////////////////////////////////////////////////////////////////////////////////
-
-struct proto_range_classifier {
-	struct value_table table;
-};
-
-static inline int
+static int
 collect_proto_values(
 	struct memory_context *memory_context,
 	const struct filter_rule *rules,
@@ -78,8 +71,10 @@ collect_proto_values(
 	return 0;
 }
 
-static inline int
-proto_range_classifier_init(
+////////////////////////////////////////////////////////////////////////////////
+
+int
+FILTER_ATTR_COMPILER_INIT_FUNC(proto_range)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *rules,
@@ -97,17 +92,10 @@ proto_range_classifier_init(
 	);
 }
 
-static inline uint32_t
-proto_range_classifier_lookup(struct packet *packet, void *data) {
-	(void)packet;
-	struct proto_range_classifier *c =
-		(struct proto_range_classifier *)data;
-	uint16_t proto = packet->transport_header.type * 256;
-	return value_table_get(&c->table, 0, proto);
-}
-
-static inline void
-proto_range_classifier_free(void *data, struct memory_context *memory_context) {
+void
+FILTER_ATTR_COMPILER_FREE_FUNC(proto_range)(
+	void *data, struct memory_context *memory_context
+) {
 	if (data == NULL)
 		return;
 	struct proto_range_classifier *c =

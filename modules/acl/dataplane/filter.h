@@ -1,13 +1,7 @@
 #pragma once
 
-#include <filter/attribute.h>
-#include <filter/attribute/net4.h>
-#include <filter/attribute/net6.h>
-#include <filter/attribute/port.h>
-#include <filter/attribute/proto.h>
 #include <filter/filter.h>
-
-#include "../api/rule.h"
+#include <filter/query.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -15,13 +9,8 @@
 
 #define ACL_FILTER_NET4_TAG __ACL_FILTER_NET4_TAG
 
-FILTER_DECLARE(
-	ACL_FILTER_NET4_TAG,
-	&attribute_proto_range,
-	&attribute_port_src,
-	&attribute_port_dst,
-	&attribute_net4_src,
-	&attribute_net4_dst
+FILTER_QUERY_DECLARE(
+	ACL_FILTER_NET4_TAG, proto_range, port_src, port_dst, net4_src, net4_dst
 );
 
 static inline int
@@ -42,13 +31,8 @@ net4_filter_query(
 
 #define ACL_FILTER_NET6_TAG __ACL_FILTER_NET6_TAG
 
-FILTER_DECLARE(
-	ACL_FILTER_NET6_TAG,
-	&attribute_proto_range,
-	&attribute_port_src,
-	&attribute_port_dst,
-	&attribute_net6_src,
-	&attribute_net6_dst
+FILTER_QUERY_DECLARE(
+	ACL_FILTER_NET6_TAG, proto_range, port_src, port_dst, net6_src, net6_dst
 );
 
 static inline int
@@ -61,11 +45,4 @@ net6_filter_query(
 	return FILTER_QUERY(
 		filter, ACL_FILTER_NET6_TAG, packet, actions, actions_count
 	);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-static inline struct filter_rule *
-acl_rules_into_filter_rules(acl_rule_t *rule) {
-	return (struct filter_rule *)rule;
 }

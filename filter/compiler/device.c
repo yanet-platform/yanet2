@@ -1,14 +1,14 @@
-#include "../helper.h"
-#include "../rule.h"
 #include "common/memory.h"
 #include "common/registry.h"
 #include "common/value.h"
-#include "dataplane/packet/packet.h"
+
+#include "declare.h"
+#include "filter/rule.h"
 
 #include <stdint.h>
 
-static inline int
-init_device(
+int
+FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *rules,
@@ -73,15 +73,8 @@ error_init:
 	return -1;
 }
 
-static inline uint32_t
-lookup_device(struct packet *packet, void *data) {
-	struct value_table *t = (struct value_table *)data;
-	uint64_t device_id = packet->module_device_id;
-	return value_table_get(t, 0, device_id);
-}
-
-static inline void
-free_device(void *data, struct memory_context *memory_context) {
+void
+FILTER_ATTR_COMPILER_FREE_FUNC(device)(void *data, struct memory_context *memory_context) {
 	struct value_table *t = (struct value_table *)data;
 	if (t == NULL)
 		return;

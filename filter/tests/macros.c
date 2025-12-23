@@ -1,57 +1,64 @@
-#include "../filter.h"
+#include "filter/compiler.h"
+#include "filter/query.h"
+#include "filter/filter.h"
+
+#include "filter/tests/helpers.h"
+#include "lib/utils/packet.h"
+
 #include "logging/log.h"
-#include "utils.h"
 #include <assert.h>
 #include <netinet/in.h>
 #include <stdio.h>
 
-////////////////////////////////////////////////////////////////////////////////
+FILTER_COMPILER_DECLARE(sign, port_src);
+FILTER_QUERY_DECLARE(sign, port_src);
 
-void
-src_port(void *memory) {
+static void
+run_case(void) {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
+	void *memory = malloc(1 << 24); // 16MB
 	block_allocator_put_arena(&allocator, memory, 1 << 24);
 
 	struct memory_context memory_context;
 	int res = memory_context_init(&memory_context, "test", &allocator);
 	assert(res == 0);
 
-	// rule 1
-	//	src: 1024-5016
-	struct filter_rule_builder builder1;
-	builder_init(&builder1);
-	builder_add_port_src_range(&builder1, 1024, 5016);
-	struct filter_rule rule1 = build_rule(&builder1, 1);
+	// one rule: src port 1024-5016 -> action 1
+	struct filter_rule_builder b;
+	builder_init(&b);
+	builder_add_port_src_range(&b, 1024, 5016);
+	struct filter_rule r = build_rule(&b, 1);
 
-	FILTER_DECLARE(sign, &attribute_port_src);
-
-	struct filter filter;
-	res = FILTER_INIT(&filter, sign, &rule1, 1, &memory_context);
+	// init filter
+	struct filter f;
+	res = FILTER_INIT(&f, sign, &r, 1, &memory_context);
 	assert(res == 0);
 
-	struct packet packet = make_packet4(
-		ip(0, 0, 0, 0), ip(0, 0, 0, 0), 4000, 0, IPPROTO_UDP, 0, 0
-	);
+	// craft packet: UDP 4000
+	struct packet p = {0};
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
+	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
+	res = fill_packet_net4(&p, sip, dip, 4000, 0, IPPROTO_UDP, 0);
+	assert(res == 0);
+
+	// query via header-only API
 	uint32_t *actions;
 	uint32_t actions_count;
-	FILTER_QUERY(&filter, sign, &packet, &actions, &actions_count);
+	FILTER_QUERY(&f, sign, &p, &actions, &actions_count);
 	assert(actions_count == 1);
 	assert(actions[0] == 1);
 
-	free_packet(&packet);
-	FILTER_FREE(&filter, sign);
+	free_packet(&p);
+	FILTER_FREE(&f, sign);
+	free(memory);
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 int
 main() {
 	log_enable_name("debug");
-	void *memory = malloc(1 << 24);
-	src_port(memory);
-	free(memory);
+	run_case();
 	puts("OK");
 	return 0;
 }

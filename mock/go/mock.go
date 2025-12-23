@@ -25,7 +25,7 @@ package mock
 #cgo LDFLAGS: -L../../build/lib/logging  -llogging
 #cgo LDFLAGS: -L../../build/lib/controlplane/agent  -lagent
 #cgo LDFLAGS: -L../../build/lib/counters  -lcounters
-#cgo LDFLAGS: -L../../build/filter -lfilter
+#cgo LDFLAGS: -L../../build/filter -lfilter_compiler
 #cgo LDFLAGS: -L../../build/lib/fwstate  -lfwstate
 #cgo LDFLAGS: -L../../build/lib/dataplane/worker  -lworker_dp
 

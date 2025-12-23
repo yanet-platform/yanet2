@@ -4,27 +4,17 @@
 
 #include "config.h"
 
+#include <filter/compiler.h>
+
 #include "common/container_of.h"
 
 #include "controlplane/agent/agent.h"
 
-FILTER_DECLARE(FWD_FILTER_VLAN_TAG, &attribute_device, &attribute_vlan);
+FILTER_COMPILER_DECLARE(FWD_FILTER_VLAN_TAG, device, vlan);
 
-FILTER_DECLARE(
-	FWD_FILTER_IP4_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net4_src,
-	&attribute_net4_dst
-);
+FILTER_COMPILER_DECLARE(FWD_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst);
 
-FILTER_DECLARE(
-	FWD_FILTER_IP6_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net6_src,
-	&attribute_net6_dst
-);
+FILTER_COMPILER_DECLARE(FWD_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst);
 
 struct cp_module *
 forward_module_config_init(struct agent *agent, const char *name) {

@@ -1,7 +1,6 @@
 dependencies = [
   lib_common_dep,
   lib_agent_cp_dep,
-  libdpdk_inc_dep,
 ]
 
 includes = include_directories('.')

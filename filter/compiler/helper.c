@@ -1,6 +1,6 @@
-#include "helper.h"
+#include "filter/compiler/helper.h"
+#include "filter/rule.h"
 #include "common/registry.h"
-#include "rule.h"
 
 int
 init_dummy_registry(
@@ -43,37 +43,6 @@ action_list_is_term(struct value_registry *registry, uint32_t range_idx) {
 
 	uint32_t action = ADDR_OF(&range->values)[range->count - 1];
 	return FILTER_ACTION_TERMINATE(action);
-}
-
-uint32_t
-filter_actions_with_category(
-	uint32_t *actions, uint32_t count, uint16_t category
-) {
-	uint32_t count_category = 0;
-
-	for (uint32_t i = 0; i < count; ++i) {
-		uint32_t action = actions[i];
-		uint16_t cat = FILTER_ACTION_CATEGORY_MASK(action);
-
-		// check if action corresponds to category
-		if (cat == 0 || (cat & (1 << category))) {
-			actions[count_category++] = action;
-		} else {
-			// if no, we skip this action
-			// even if it is terminal, it does not matter
-			continue;
-		}
-
-		// here, action corresponds to category
-
-		// if non-terminate flag is off,
-		// we need terminate.
-		if (!(action & ACTION_NON_TERMINATE)) {
-			break;
-		}
-	}
-
-	return count_category;
 }
 
 static int

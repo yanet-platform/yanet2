@@ -8,19 +8,17 @@
 #include "common/lpm.h"
 #include "common/memory.h"
 
+#include <filter/compiler.h>
 #include <filter/filter.h>
 
-#include "../dataplane/lookup.h"
 #include "../dataplane/module.h"
 #include "../dataplane/real.h"
 #include "../dataplane/vs.h"
 
-#include "../state/registry.h"
 #include "../state/state.h"
 
 #include "lib/controlplane/agent/agent.h"
 
-#include "filter/filter.h"
 #include "filter/rule.h"
 
 #include <arpa/inet.h>
@@ -28,6 +26,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+
+////////////////////////////////////////////////////////////////////////////////
+
+#define VS_V4_TABLE_TAG __VS_V4_TABLE_TAG
+
+FILTER_COMPILER_DECLARE(VS_V4_TABLE_TAG, net4_dst, port_dst, proto);
+
+////////////////////////////////////////////////////////////////////////////////
+
+#define VS_V6_TABLE_TAG __VS_V6_TABLE_TAG
+
+FILTER_COMPILER_DECLARE(VS_V6_TABLE_TAG, net6_dst, port_dst, proto);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -79,9 +89,6 @@ vs_v4_table_init(
 	struct balancer_vs_config **vs_configs,
 	size_t count
 ) {
-	// to supress stupid clang warning.
-	(void)vs_v4_lookup;
-
 	size_t ipv4_count = 0;
 	for (size_t i = 0; i < count; ++i) {
 		struct balancer_vs_config *vs_config = vs_configs[i];
@@ -454,7 +461,7 @@ balancer_vs_init(
 
 	res = vs_v6_table_init(config, vs_configs, vs_count);
 	if (res < 0) {
-		FILTER_FREE(&config->vs_v4_table, VS_V4_TABLE_TAG)
+		FILTER_FREE(&config->vs_v4_table, VS_V4_TABLE_TAG);
 		goto free_initalized_vs;
 	}
 
@@ -716,4 +723,30 @@ balancer_vs_config_set_peer_v6(
 ) {
 	struct net6_addr *peer = &vs_config->peers_v6_addr[index];
 	memcpy(peer->bytes, addr, NET6_LEN);
+}
+
+void
+free_vs(struct balancer_module_config *config) {
+	for (size_t i = 0; i < config->vs_count; ++i) {
+		struct virtual_service *vs = ADDR_OF(&config->vs) + i;
+		if (!(vs->flags & VS_PRESENT_IN_CONFIG_FLAG)) {
+			continue;
+		}
+		lpm_free(&vs->src_filter);
+		ring_free(&vs->real_ring);
+	}
+
+	memory_bfree(
+		&config->cp_module.memory_context,
+		ADDR_OF(&config->vs),
+		sizeof(struct virtual_service) * config->vs_count
+	);
+	memory_bfree(
+		&config->cp_module.memory_context,
+		ADDR_OF(&config->reals),
+		sizeof(struct real) * config->real_count
+	);
+
+	FILTER_FREE(&config->vs_v4_table, VS_V4_TABLE_TAG);
+	FILTER_FREE(&config->vs_v6_table, VS_V6_TABLE_TAG);
 }

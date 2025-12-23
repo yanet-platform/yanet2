@@ -1,14 +1,11 @@
-#pragma once
-
 #include "../rule.h"
 #include "common/lpm.h"
 #include "common/range_collector.h"
-#include "lib/dataplane/packet/packet.h"
+#include "common/registry.h"
+#include "common/value.h"
 
-#include "util.h"
-
-#include <rte_ip.h>
-#include <rte_mbuf.h>
+#include "declare.h"
+#include "helper.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -192,8 +189,8 @@ error:
 ////////////////////////////////////////////////////////////////////////////////
 
 // Allows to initialize attribute for IPv4 source address.
-static inline int
-init_net4_src(
+int
+FILTER_ATTR_COMPILER_INIT_FUNC(net4_src)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *actions,
@@ -212,20 +209,9 @@ init_net4_src(
 	);
 }
 
-// Allows to lookup classifier for packet IPv4 source address.
-static inline uint32_t
-lookup_net4_src(struct packet *packet, void *data) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
-	);
-	struct lpm *lpm = (struct lpm *)data;
-	return lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->src_addr);
-}
-
 // Allows to initialize attribute for IPv4 destination address.
-static inline int
-init_net4_dst(
+int
+FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *actions,
@@ -244,25 +230,26 @@ init_net4_dst(
 	);
 }
 
-// Allows to lookup classifier for packet IPv4 destination address.
-static inline uint32_t
-lookup_net4_dst(struct packet *packet, void *data) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
-	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
-	);
-
-	struct lpm *lpm = (struct lpm *)data;
-	return lpm4_lookup(lpm, (uint8_t *)&ipv4_hdr->dst_addr);
-}
-
 // Allows to free data for IPv4 classification.
-static inline void
+static void
 free_net4(void *data, struct memory_context *memory_context) {
 	struct lpm *lpm = (struct lpm *)data;
 	if (lpm == NULL)
 		return;
 	lpm_free(lpm);
 	memory_bfree(memory_context, lpm, sizeof(struct lpm));
+}
+
+void
+FILTER_ATTR_COMPILER_FREE_FUNC(net4_src)(
+	void *data, struct memory_context *memory_context
+) {
+	free_net4(data, memory_context);
+}
+
+void
+FILTER_ATTR_COMPILER_FREE_FUNC(net4_dst)(
+	void *data, struct memory_context *memory_context
+) {
+	free_net4(data, memory_context);
 }

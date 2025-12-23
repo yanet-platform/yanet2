@@ -1,67 +1,10 @@
-#pragma once
-
-#include "../rule.h"
 #include "common/memory.h"
 #include "common/registry.h"
-#include "dataplane/packet/packet.h"
+#include "common/value.h"
+#include "declare.h"
+#include "filter/rule.h"
 
-#include <rte_ip.h>
-#include <rte_tcp.h>
-#include <rte_udp.h>
-
-static inline uint16_t
-packet_src_port(const struct packet *packet) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	if (packet->transport_header.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_tcp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(tcp_hdr->src_port);
-	} else if (packet->transport_header.type == IPPROTO_UDP) {
-		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_udp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(udp_hdr->src_port);
-	} else {
-		// FIXME: assert - the code should not be called for non tcp/udp
-		return 0;
-	}
-}
-
-static inline uint16_t
-packet_dst_port(const struct packet *packet) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	if (packet->transport_header.type == IPPROTO_TCP) {
-		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_tcp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(tcp_hdr->dst_port);
-	} else if (packet->transport_header.type == IPPROTO_UDP) {
-		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_udp_hdr *,
-			packet->transport_header.offset
-		);
-		return rte_be_to_cpu_16(udp_hdr->dst_port);
-	} else {
-		// FIXME: assert - the code should not be called for non tcp/udp
-		return 0;
-	}
-}
-
-// src port
-static inline uint32_t
-lookup_port_src(struct packet *packet, void *data) {
-	(void)packet;
-	struct value_table *table = data;
-	return value_table_get(table, 0, packet_src_port(packet));
-}
+#include <stdint.h>
 
 typedef void (*action_get_port_range_func)(
 	const struct filter_rule *action,
@@ -69,7 +12,7 @@ typedef void (*action_get_port_range_func)(
 	uint32_t *count
 );
 
-static inline int
+static int
 collect_port_values(
 	struct memory_context *memory_context,
 	const struct filter_rule *actions,
@@ -138,7 +81,7 @@ collect_port_values(
 	return 0;
 }
 
-static inline void
+static void
 get_port_range_src(
 	const struct filter_rule *action,
 	struct filter_port_range **ranges,
@@ -148,7 +91,7 @@ get_port_range_src(
 	*count = action->transport.src_count;
 }
 
-static inline void
+static void
 get_port_range_dst(
 	const struct filter_rule *action,
 	struct filter_port_range **ranges,
@@ -158,14 +101,10 @@ get_port_range_dst(
 	*count = action->transport.dst_count;
 }
 
-static inline uint32_t
-lookup_port_dst(struct packet *packet, void *data) {
-	struct value_table *table = data;
-	return value_table_get(table, 0, packet_dst_port(packet));
-}
+////////////////////////////////////////////////////////////////////////////////
 
-static inline int
-init_port_dst(
+int
+FILTER_ATTR_COMPILER_INIT_FUNC(port_dst)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *actions,
@@ -188,8 +127,8 @@ init_port_dst(
 	);
 }
 
-static inline int
-init_port_src(
+int
+FILTER_ATTR_COMPILER_INIT_FUNC(port_src)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *actions,
@@ -212,8 +151,22 @@ init_port_src(
 	);
 }
 
-static inline void
-free_port(void *data, struct memory_context *memory_context) {
+void
+FILTER_ATTR_COMPILER_FREE_FUNC(port_src)(
+	void *data, struct memory_context *memory_context
+) {
+	struct value_table *table = (struct value_table *)data;
+	if (table == NULL)
+		return;
+
+	value_table_free(table);
+	memory_bfree(memory_context, table, sizeof(struct value_table));
+}
+
+void
+FILTER_ATTR_COMPILER_FREE_FUNC(port_dst)(
+	void *data, struct memory_context *memory_context
+) {
 	struct value_table *table = (struct value_table *)data;
 	if (table == NULL)
 		return;

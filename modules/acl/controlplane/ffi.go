@@ -3,7 +3,7 @@ package acl
 //#cgo CFLAGS: -I../../../build
 //#cgo CFLAGS: -I.. -I../../.. -I../../../lib -I../../../common
 //#cgo LDFLAGS: -L../../../build/modules/acl/api -lacl_cp
-//#cgo LDFLAGS: -L../../../build/filter -lfilter
+//#cgo LDFLAGS: -L../../../build/filter -lfilter_compiler
 //#cgo LDFLAGS: -L../../../build/lib/logging -llogging
 //
 //#include "api/agent.h"

@@ -1,13 +1,16 @@
 #pragma once
 
+#include "common/lpm.h"
 #include "common/memory_address.h"
 #include "common/network.h"
 
 #include "lib/dataplane/packet/packet.h"
 
-#include "filter/filter.h"
+#include <filter/query.h>
 
 #include <assert.h>
+
+#include <rte_ether.h>
 #include <rte_ip.h>
 
 #include "module.h"
@@ -21,12 +24,7 @@
 
 #define VS_V4_TABLE_TAG __VS_V4_TABLE_TAG
 
-FILTER_DECLARE(
-	VS_V4_TABLE_TAG,
-	&attribute_net4_dst,
-	&attribute_port_dst,
-	&attribute_proto
-);
+FILTER_QUERY_DECLARE(VS_V4_TABLE_TAG, net4_dst, port_dst, proto);
 
 static inline uint32_t
 vs_v4_table_lookup(
@@ -53,12 +51,7 @@ vs_v4_table_lookup(
 
 #define VS_V6_TABLE_TAG __VS_V6_TABLE_TAG
 
-FILTER_DECLARE(
-	VS_V6_TABLE_TAG,
-	&attribute_net6_dst,
-	&attribute_port_dst,
-	&attribute_proto
-);
+FILTER_QUERY_DECLARE(VS_V6_TABLE_TAG, net6_dst, port_dst, proto);
 
 static inline uint32_t
 vs_v6_table_lookup(

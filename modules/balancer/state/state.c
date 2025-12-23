@@ -1,10 +1,10 @@
 #include "state.h"
 #include "common/memory.h"
-#include "modules/balancer/state/registry.h"
-#include "modules/balancer/state/session_table.h"
+#include "registry.h"
 #include "session_table.h"
 #include <assert.h>
 #include <netinet/in.h>
+#include <stdalign.h>
 #include <stdio.h>
 #include <string.h>
 

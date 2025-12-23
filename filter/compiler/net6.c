@@ -1,15 +1,13 @@
-#pragma once
-
 #include "../rule.h"
+
 #include "common/lpm.h"
 #include "common/range_collector.h"
 
 #include "common/registry.h"
-#include "dataplane/packet/packet.h"
 
-#include <endian.h>
-#include <rte_ip.h>
-#include <rte_mbuf.h>
+#include "../classifiers/net6.h"
+
+#include "declare.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -336,14 +334,6 @@ merge_net6_range(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-struct net6_classifier {
-	struct lpm hi;
-	struct lpm lo;
-	struct value_table comb;
-};
-
-////////////////////////////////////////////////////////////////////////////////
 // Initialization
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -421,8 +411,8 @@ error_hi:
 }
 
 // Allows to initialize attribute for IPv6 destination address.
-static inline int
-init_net6_src(
+int
+FILTER_ATTR_COMPILER_INIT_FUNC(net6_src)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *rules,
@@ -440,8 +430,8 @@ init_net6_src(
 }
 
 // Allows to initialize attribute for IPv6 source address.
-static inline int
-init_net6_dst(
+int
+FILTER_ATTR_COMPILER_INIT_FUNC(net6_dst)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *rules,
@@ -456,44 +446,6 @@ init_net6_dst(
 		actions_count,
 		memory_context
 	);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Lookup
-////////////////////////////////////////////////////////////////////////////////
-
-// Allows to lookup classifier for packet IPv6 destination address.
-static inline uint32_t
-lookup_net6_dst(struct packet *packet, void *data) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
-	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
-	);
-
-	struct net6_classifier *c = (struct net6_classifier *)data;
-	uint32_t hi = lpm8_lookup(&c->hi, (const uint8_t *)ipv6_hdr->dst_addr);
-	uint32_t lo =
-		lpm8_lookup(&c->lo, (const uint8_t *)ipv6_hdr->dst_addr + 8);
-
-	return value_table_get(&c->comb, hi, lo);
-}
-
-// Allows to lookup classifier for packet IPv6 destination address.
-static inline uint32_t
-lookup_net6_src(struct packet *packet, void *data) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
-	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
-	);
-
-	struct net6_classifier *c = (struct net6_classifier *)data;
-	uint32_t hi = lpm8_lookup(&c->hi, (const uint8_t *)ipv6_hdr->src_addr);
-	uint32_t lo =
-		lpm8_lookup(&c->lo, (const uint8_t *)ipv6_hdr->src_addr + 8);
-
-	return value_table_get(&c->comb, hi, lo);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -512,4 +464,18 @@ free_net6(void *data, struct memory_context *memory_context) {
 	lpm_free(&c->hi);
 	value_table_free(&c->comb);
 	memory_bfree(memory_context, c, sizeof(struct net6_classifier));
+}
+
+void
+FILTER_ATTR_COMPILER_FREE_FUNC(net6_src)(
+	void *data, struct memory_context *memory_context
+) {
+	free_net6(data, memory_context);
+}
+
+void
+FILTER_ATTR_COMPILER_FREE_FUNC(net6_dst)(
+	void *data, struct memory_context *memory_context
+) {
+	free_net6(data, memory_context);
 }

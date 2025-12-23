@@ -8,7 +8,7 @@ package ffi
 // #cgo LDFLAGS: -L../../../../build/lib/logging -llogging
 // #cgo LDFLAGS: -L../../../../build/modules/balancer/api -lbalancer_cp
 // #cgo LDFLAGS: -L../../../../build/modules/balancer/state -lbalancer_state
-// #cgo LDFLAGS: -L../../../../build/filter -lfilter
+// #cgo LDFLAGS: -L../../../../build/filter -lfilter_compiler
 //
 // #include "modules/balancer/api/stats.h"
 // #include "lib/controlplane/agent/agent.h"

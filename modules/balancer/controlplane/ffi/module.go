@@ -6,7 +6,7 @@ package ffi
 //#cgo CFLAGS: -I../../../../ -I../../../../lib -I../../../../common
 //#cgo LDFLAGS: -L../../../../build/modules/balancer/api -lbalancer_cp
 //#cgo LDFLAGS: -L../../../../build/modules/balancer/state -lbalancer_state
-//#cgo LDFLAGS: -L../../../../build/filter -lfilter
+//#cgo LDFLAGS: -L../../../../build/filter -lfilter_compiler
 //#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
 //
 //#include <stdlib.h>

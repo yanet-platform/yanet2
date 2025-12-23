@@ -2,7 +2,6 @@
 #include "common/memory.h"
 #include "common/memory_address.h"
 #include "common/rcu.h"
-#include "common/ttlmap/detail/bucket.h"
 #include "common/ttlmap/ttlmap.h"
 #include "logging/log.h"
 #include "modules/balancer/api/info.h"

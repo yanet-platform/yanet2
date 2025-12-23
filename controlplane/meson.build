@@ -48,7 +48,7 @@ custom_target(
         lib_pdump_dp,
         lib_route_cp,
         lib_route_dp,
-        lib_filter,
+        lib_filter_compiler,
     ],
     install: true,
     install_dir: get_option('bindir'),

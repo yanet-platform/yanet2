@@ -1,8 +1,6 @@
 #include "../dataplane/module.h"
-#include "../dataplane/lookup.h"
-#include "../dataplane/real.h"
-#include "../dataplane/vs.h"
 
+#include "common/container_of.h"
 #include "common/lpm.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
@@ -11,12 +9,12 @@
 #include "counters/counters.h"
 #include "module.h"
 
-#include "filter.h"
+#include <filter/compiler.h>
+#include <filter/filter.h>
 
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 
-#include "ring.h"
 #include "vs.h"
 #include <string.h>
 
@@ -112,10 +110,10 @@ balancer_module_config_create(
 	balancer_config->counter.icmp_v4 = register_icmp_v4_counter(registry);
 	balancer_config->counter.icmp_v6 = register_icmp_v6_counter(registry);
 	balancer_config->counter.l4 = register_l4_counter(registry);
-	if (balancer_config->counter.common == (uint64)-1 ||
-	    balancer_config->counter.icmp_v4 == (uint64)-1 ||
-	    balancer_config->counter.icmp_v6 == (uint64)-1 ||
-	    balancer_config->counter.l4 == (uint64)-1) {
+	if (balancer_config->counter.common == (uint64_t)-1 ||
+	    balancer_config->counter.icmp_v4 == (uint64_t)-1 ||
+	    balancer_config->counter.icmp_v6 == (uint64_t)-1 ||
+	    balancer_config->counter.l4 == (uint64_t)-1) {
 		goto free_config;
 	}
 
@@ -165,32 +163,14 @@ free_config_no_lpm:
 }
 
 void
+free_vs(struct balancer_module_config *config);
+
+void
 balancer_module_config_free(struct cp_module *config) {
 	struct balancer_module_config *balancer_config =
 		container_of(config, struct balancer_module_config, cp_module);
 
-	for (size_t i = 0; i < balancer_config->vs_count; ++i) {
-		struct virtual_service *vs = ADDR_OF(&balancer_config->vs) + i;
-		if (!(vs->flags & VS_PRESENT_IN_CONFIG_FLAG)) {
-			continue;
-		}
-		lpm_free(&vs->src_filter);
-		ring_free(&vs->real_ring);
-	}
-
-	memory_bfree(
-		&config->memory_context,
-		ADDR_OF(&balancer_config->vs),
-		sizeof(struct virtual_service) * balancer_config->vs_count
-	);
-	memory_bfree(
-		&config->memory_context,
-		ADDR_OF(&balancer_config->reals),
-		sizeof(struct real) * balancer_config->real_count
-	);
-
-	FILTER_FREE(&balancer_config->vs_v4_table, VS_V4_TABLE_TAG);
-	FILTER_FREE(&balancer_config->vs_v6_table, VS_V6_TABLE_TAG);
+	free_vs(balancer_config);
 
 	memory_bfree(
 		&ADDR_OF(&config->agent)->memory_context,

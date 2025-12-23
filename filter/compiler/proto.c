@@ -1,19 +1,12 @@
-#pragma once
-
-#include "../rule.h"
+#include "filter/classifiers/proto.h"
 #include "common/memory.h"
 #include "common/registry.h"
 #include "common/value.h"
-
-#include "dataplane/packet/packet.h"
-
-#include <netinet/in.h>
-#include <rte_ether.h>
-#include <rte_ip.h>
-#include <rte_mbuf.h>
-#include <rte_tcp.h>
+#include "declare.h"
+#include "filter/rule.h"
 
 #include <assert.h>
+#include <netinet/in.h>
 #include <stdint.h>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -22,15 +15,8 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct proto_classifier {
-	struct value_table tcp_flags;
-	uint32_t max_tcp_class;
-};
-
-////////////////////////////////////////////////////////////////////////////////
-
-static inline int
-proto_classifier_init(
+static int
+proto_classifier_init_internal(
 	struct value_registry *registry,
 	struct proto_classifier *c,
 	const struct filter_rule *rules,
@@ -116,8 +102,8 @@ proto_classifier_init(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline int
-init_proto(
+int
+FILTER_ATTR_COMPILER_INIT_FUNC(proto)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule *rules,
@@ -127,33 +113,17 @@ init_proto(
 	struct proto_classifier *c =
 		memory_balloc(memory_context, sizeof(struct proto_classifier));
 	SET_OFFSET_OF(data, c);
-	return proto_classifier_init(
+	return proto_classifier_init_internal(
 		registry, c, rules, rule_count, memory_context
 	);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline uint32_t
-lookup_proto(struct packet *packet, void *data) {
-	struct proto_classifier *c = (struct proto_classifier *)data;
-
-	if (packet->transport_header.type == IPPROTO_UDP) {
-		return c->max_tcp_class + 1;
-	} else if (packet->transport_header.type == IPPROTO_ICMP) {
-		return c->max_tcp_class + 2;
-	} else { // TCP
-		struct rte_tcp_hdr *tcp_header = rte_pktmbuf_mtod_offset(
-			packet_to_mbuf(packet),
-			struct rte_tcp_hdr *,
-			packet->transport_header.offset
-		);
-		return value_table_get(&c->tcp_flags, 0, tcp_header->tcp_flags);
-	}
-}
-
-static inline void
-free_proto(void *data, struct memory_context *memory_context) {
+void
+FILTER_ATTR_COMPILER_FREE_FUNC(proto)(
+	void *data, struct memory_context *memory_context
+) {
 	struct proto_classifier *c = (struct proto_classifier *)data;
 	value_table_free(&c->tcp_flags);
 	memory_bfree(memory_context, c, sizeof(*c));

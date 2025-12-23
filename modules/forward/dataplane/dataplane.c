@@ -3,30 +3,20 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include "common/container_of.h"
-#include "common/lpm.h"
+#include <filter/query.h>
 
+#include "controlplane/config/econtext.h"
+
+#include "dataplane/config/zone.h"
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
 #include "dataplane/pipeline/pipeline.h"
 
-FILTER_DECLARE(FWD_FILTER_VLAN_TAG, &attribute_device, &attribute_vlan);
+FILTER_QUERY_DECLARE(FWD_FILTER_VLAN_TAG, device, vlan);
 
-FILTER_DECLARE(
-	FWD_FILTER_IP4_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net4_src,
-	&attribute_net4_dst
-);
+FILTER_QUERY_DECLARE(FWD_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst);
 
-FILTER_DECLARE(
-	FWD_FILTER_IP6_TAG,
-	&attribute_device,
-	&attribute_vlan,
-	&attribute_net6_src,
-	&attribute_net6_dst
-);
+FILTER_QUERY_DECLARE(FWD_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst);
 
 static void
 forward_handle_packets(

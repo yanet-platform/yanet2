@@ -2,7 +2,6 @@
 
 #include "common/memory.h"
 #include "common/rcu.h"
-#include "common/ttlmap/detail/ttlmap.h"
 #include "common/ttlmap/ttlmap.h"
 
 #include "session.h"
@@ -11,6 +10,7 @@
 #include <stdio.h>
 
 #include "../api/info.h"
+#include "../api/state.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
