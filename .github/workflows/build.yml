@@ -403,8 +403,12 @@ jobs:
     - name: Run functional tests
       working-directory: tests/functional
       run: |
+        set +e
         export YANET_TEST_DEBUG=1
-        make test || tail -n 100 test.log
+        make test
+        ret=$?
+        tail -n 100 test.log
+        exit $ret
       timeout-minutes: 35
 
     - name: Upload functional test logs
