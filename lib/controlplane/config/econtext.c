@@ -548,6 +548,14 @@ pipeline_ectx_create(
 		struct cp_function *cp_function = cp_config_gen_lookup_function(
 			cp_config_gen, cp_pipeline->functions[idx].name
 		);
+		if (cp_function == NULL) {
+			NEW_ERROR(
+				"function '%s' not found for pipeline '%s'",
+				cp_pipeline->functions[idx].name,
+				cp_pipeline->name
+			);
+			goto error;
+		}
 
 		struct function_ectx *function_ectx = function_ectx_create(
 			cp_config_gen,
