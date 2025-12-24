@@ -108,6 +108,8 @@ cp_device_init(
 ) {
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 
+	memset(cp_device, 0, sizeof(struct cp_device));
+
 	if (dp_config_lookup_device(
 		    dp_config, cp_device_config->type, &cp_device->dp_device_idx
 	    )) {
@@ -118,8 +120,6 @@ cp_device_init(
 		errno = ENXIO;
 		return -1;
 	}
-
-	memset(cp_device, 0, sizeof(struct cp_device));
 	strtcpy(cp_device->type, cp_device_config->type, sizeof(cp_device->type)
 	);
 	strtcpy(cp_device->name, cp_device_config->name, sizeof(cp_device->name)
