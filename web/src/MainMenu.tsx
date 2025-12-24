@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AsideHeader } from '@gravity-ui/navigation';
 import type { MenuItem as AsideHeaderMenuItem } from '@gravity-ui/navigation';
-import { Link, Eye, Route, CurlyBracketsFunction, ListUl, HardDrive, LayoutCellsLarge, CirclePlay, Shield } from '@gravity-ui/icons';
+import { Link, Eye, Route, CurlyBracketsFunction, ListUl, HardDrive, LayoutCellsLarge, CirclePlay, Shield, ArrowRight } from '@gravity-ui/icons';
 import Logo from './icons/Logo';
 import type { PageId } from './types';
 
@@ -38,6 +38,7 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
         createMenuItem('devices', 'Devices', HardDrive),
         createMenuItem('neighbours', 'Neighbours', Link),
         createMenuItem('route', 'Route', Route),
+        createMenuItem('forward', 'Forward', ArrowRight),
         createMenuItem('decap', 'Decap', LayoutCellsLarge),
         createMenuItem('acl', 'ACL', Shield),
         createMenuItem('pdump', 'Pdump', CirclePlay),

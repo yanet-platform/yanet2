@@ -8,6 +8,7 @@ import FunctionsPage from './pages/FunctionsPage';
 import PipelinesPage from './pages/PipelinesPage';
 import DevicesPage from './pages/DevicesPage';
 import DecapPage from './pages/DecapPage';
+import ForwardPage from './pages/ForwardPage';
 import PdumpPage from './pages/PdumpPage';
 import AclPage from './pages/AclPage';
 import type { PageId, SidebarContextValue } from './types';
@@ -58,6 +59,7 @@ const AppContent = (): React.JSX.Element => {
                         <Route path="/pipelines" element={<PipelinesPage />} />
                         <Route path="/devices" element={<DevicesPage />} />
                         <Route path="/decap" element={<DecapPage />} />
+                        <Route path="/forward" element={<ForwardPage />} />
                         <Route path="/pdump" element={<PdumpPage />} />
                         <Route path="/acl" element={<AclPage />} />
                     </Routes>
