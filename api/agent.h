@@ -82,6 +82,20 @@ agent_attach(
 	size_t memory_limit
 );
 
+// Extend agent size.
+int
+agent_resize(struct agent *agent, size_t new_size);
+
+// Attach a module agent to shared memory,
+// use previous agents memory.
+struct agent *
+agent_attach_restore_prev(
+	struct yanet_shm *shm,
+	uint32_t instance_idx,
+	const char *agent_name,
+	size_t memory_limit
+);
+
 // Returns number of dataplane instances in the specified shared memory segment.
 //
 // @param shm Handle to the shared memory segment.

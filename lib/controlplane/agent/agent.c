@@ -10,6 +10,8 @@
 #include <errno.h>
 
 #include "common/memory.h"
+#include "common/memory_address.h"
+#include "common/memory_block.h"
 #include "common/strutils.h"
 
 #include "controlplane/config/zone.h"
@@ -239,6 +241,118 @@ unlock:
 	cp_config_unlock(cp_config);
 
 	return new_agent;
+}
+
+int
+agent_resize(struct agent *agent, size_t new_size) {
+	int ret = 0;
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	cp_config_lock(cp_config);
+	size_t need_arena_count =
+		(new_size + MEMORY_BLOCK_ALLOCATOR_MAX_SIZE - 1) /
+		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
+	if (need_arena_count > agent->arena_count) {
+		void **arenas = memory_balloc(
+			&cp_config->memory_context,
+			need_arena_count * sizeof(void *)
+		);
+		if (arenas == NULL) {
+			NEW_ERROR("no memory");
+			ret = -1;
+			goto unlock;
+		}
+		size_t need_alloc = need_arena_count - agent->arena_count;
+		size_t alloc;
+		for (alloc = 0; alloc < need_alloc; ++alloc) {
+			void *arena = memory_balloc(
+				&cp_config->memory_context,
+				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+			);
+			if (arena == NULL) {
+				NEW_ERROR("no memory");
+				for (size_t i = 0; i < alloc; ++i) {
+					memory_bfree(
+						&cp_config->memory_context,
+						ADDR_OF(&arenas[i]),
+						MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+					);
+				}
+				memory_bfree(
+					&cp_config->memory_context,
+					arenas,
+					need_arena_count * sizeof(void *)
+				);
+				ret = -1;
+				goto unlock;
+			}
+			SET_OFFSET_OF(
+				&arenas[agent->arena_count + alloc], arena
+			);
+		}
+		for (size_t i = 0; i < need_alloc; ++i) {
+			void *arena = ADDR_OF(&arenas[agent->arena_count + i]);
+			block_allocator_put_arena(
+				&agent->block_allocator,
+				arena,
+				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+			);
+		}
+		void **agent_arenas = ADDR_OF(&agent->arenas);
+		for (size_t i = 0; i < agent->arena_count; ++i) {
+			SET_OFFSET_OF(&arenas[i], ADDR_OF(&agent_arenas[i]));
+		}
+		SET_OFFSET_OF(&agent->arenas, arenas);
+		agent->arena_count = need_arena_count;
+		memory_bfree(
+			&cp_config->memory_context,
+			agent_arenas,
+			agent->arena_count * sizeof(void *)
+		);
+	}
+
+unlock:
+	if (ret != -1) {
+		diag_fill(&agent->diag);
+	} else {
+		diag_reset(&agent->diag);
+	}
+
+	cp_config_unlock(cp_config);
+
+	return ret;
+}
+
+// Attach a module agent to shared memory,
+// use previous agents memory.
+struct agent *
+agent_attach_restore_prev(
+	struct yanet_shm *shm,
+	uint32_t instance_idx,
+	const char *agent_name,
+	size_t memory_limit
+) {
+	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
+
+	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
+
+	cp_config_lock(cp_config);
+
+	struct cp_agent_registry *registry =
+		ADDR_OF(&cp_config->agent_registry);
+
+	for (uint64_t agent_idx = 0; agent_idx < registry->count; ++agent_idx) {
+		struct agent *agent = ADDR_OF(&registry->agents[agent_idx]);
+		if (!strncmp(agent->name, agent_name, 80)) {
+			int resize_result = agent_resize(agent, memory_limit);
+			if (resize_result != 0) {
+				return NULL;
+			}
+			return agent;
+		}
+	}
+
+	// new agent
+	return agent_attach(shm, instance_idx, agent_name, memory_limit);
 }
 
 void

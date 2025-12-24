@@ -87,7 +87,7 @@ balancer_state_register_real(
 	uint8_t *ip_address
 ) {
 	struct service_info *res = NULL;
-	ssize_t result = balancer_state_find_or_insert_real(
+	return balancer_state_find_or_insert_real(
 		state,
 		vip_address,
 		vip_network_proto,
@@ -97,7 +97,6 @@ balancer_state_register_real(
 		real_network_proto,
 		&res
 	);
-	return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

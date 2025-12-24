@@ -25,6 +25,7 @@ static_assert(
 #define MEMORY_BLOCK_ALLOCATOR_MIN_BITS 3
 #define MEMORY_BLOCK_ALLOCATOR_MAX_BITS                                        \
 	(MEMORY_BLOCK_ALLOCATOR_MIN_BITS + MEMORY_BLOCK_ALLOCATOR_EXP - 1)
+
 // Based on the hugepage size (currently 2MB), we depend on this size when
 // mapping shared memory. There could be tricky solutions to mmap with max block
 // alignment, but those solutions seem brittle and cumbersome, so we decided to

@@ -42,6 +42,10 @@ struct service_info {
 
 	// per worker service state
 	struct service_state state[MAX_WORKERS_NUM];
+
+	// if service is enabled.
+	// always true for virtual services.
+	int enabled;
 };
 
 void

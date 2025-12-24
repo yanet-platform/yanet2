@@ -35,7 +35,7 @@ struct config_gen_ectx;
  * is instantiated and modified. After all updates are done the new generation
  * replaces an old one. However the previous could be still in use by
  * dataplane workers so the updater should wait until new generation reaches
- * all workers before resorce freeing.
+ * all workers before resource freeing.
  */
 struct cp_config_gen {
 	uint64_t gen;
