@@ -17,6 +17,8 @@ service FWStateService {
 	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 	// Link FWState configuration to ACL configurations
 	rpc LinkFWState(LinkFWStateRequest) returns (LinkFWStateResponse);
+	// Get statistics for FWState maps
+	rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
 }
 
 message UpdateConfigRequest {
@@ -30,6 +32,7 @@ message UpdateConfigResponse {
 
 message ShowConfigRequest {
 	string name = 1;
+	bool ok_if_not_found = 2;
 }
 
 message ShowConfigResponse {
@@ -59,6 +62,26 @@ message LinkFWStateRequest {
 }
 
 message LinkFWStateResponse {
+}
+
+message GetStatsRequest {
+	string name = 1;
+}
+
+message GetStatsResponse {
+	MapStats ipv4_stats = 1;
+	MapStats ipv6_stats = 2;
+}
+
+message MapStats {
+	uint32 index_size = 1;
+	uint32 extra_bucket_count = 2;
+	uint32 max_chain_length = 3;
+	uint32 layer_count = 4;
+	uint64 total_elements = 5;
+	uint64 max_deadline = 6;
+	uint64 memory_used = 7;
+	string note = 8;
 }
 
 // Map configuration for fwstate

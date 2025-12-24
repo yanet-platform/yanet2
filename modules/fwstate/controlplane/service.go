@@ -231,6 +231,9 @@ func (m *FWStateService) ShowConfig(
 
 	config, ok := m.configs[name]
 	if !ok {
+		if req.OkIfNotFound {
+			return nil, nil
+		}
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
@@ -296,6 +299,51 @@ func (m *FWStateService) DeleteConfig(
 	return &fwstatepb.DeleteConfigResponse{}, nil
 }
 
+func (m *FWStateService) GetStats(
+	ctx context.Context,
+	req *fwstatepb.GetStatsRequest,
+) (*fwstatepb.GetStatsResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+	}
+
+	config, ok := m.configs[name]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+	}
+
+	// Get stats for both IPv4 and IPv6 maps
+	mapsStats := config.GetMapsStats()
+
+	response := &fwstatepb.GetStatsResponse{
+		Ipv4Stats: &fwstatepb.MapStats{
+			IndexSize:        uint32(mapsStats.v4.index_size),
+			ExtraBucketCount: uint32(mapsStats.v4.extra_bucket_count),
+			MaxChainLength:   uint32(mapsStats.v4.max_chain_length),
+			LayerCount:       uint32(mapsStats.v4.layer_count),
+			TotalElements:    uint64(mapsStats.v4.total_elements),
+			MaxDeadline:      uint64(mapsStats.v4.max_deadline),
+			MemoryUsed:       uint64(mapsStats.v4.memory_used),
+			Note:             "Statistics are currently shown for the first layer only",
+		},
+		Ipv6Stats: &fwstatepb.MapStats{
+			IndexSize:        uint32(mapsStats.v6.index_size),
+			ExtraBucketCount: uint32(mapsStats.v6.extra_bucket_count),
+			MaxChainLength:   uint32(mapsStats.v6.max_chain_length),
+			LayerCount:       uint32(mapsStats.v6.layer_count),
+			TotalElements:    uint64(mapsStats.v6.total_elements),
+			MaxDeadline:      uint64(mapsStats.v6.max_deadline),
+			MemoryUsed:       uint64(mapsStats.v6.memory_used),
+			Note:             "Statistics are currently shown for the first layer only",
+		},
+	}
+
+	return response, nil
+}
 
 // validateSyncConfig validates that required sync config fields are set
 func validateSyncConfig(cfg *fwstatepb.SyncConfig) error {

@@ -449,7 +449,7 @@ test_capacity_limits(void *arena) {
 	assert(*(uint64_t *)updated == 999999);
 
 	fwmap_stats_t stats = fwmap_get_stats(map);
-	printf("    Stats: %u entries, %u max chain, %zu bytes\n",
+	printf("    Stats: %lu entries, %u max chain, %zu bytes\n",
 	       stats.total_elements,
 	       stats.max_chain_length,
 	       stats.memory_used);

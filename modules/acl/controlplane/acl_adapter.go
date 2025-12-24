@@ -166,5 +166,7 @@ func (m *ACLService) createACLConfigs(aclConfigNames []string, fwstateConfig *fw
 		ffiConfigs = append(ffiConfigs, newConfigs[name].AsFFIModule())
 	}
 
+	m.log.Infow("successfully created ACL configs", "acl_configs", aclConfigNames, "fwstate", fwstateConfig.Name())
+
 	return ffiConfigs, transaction, nil
 }

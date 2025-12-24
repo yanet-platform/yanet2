@@ -101,7 +101,7 @@ typedef struct fwmap_bucket {
 typedef struct fwmap_counter {
 	uint32_t sealed;
 	uint32_t max_chain;
-	uint32_t total_elements;
+	uint64_t total_elements;
 	uint64_t max_deadline;
 	uint64_t padding[5];
 } __attribute__((__aligned__(64))) fwmap_counter_t;
@@ -147,17 +147,18 @@ typedef struct fwmap {
 	uint32_t sealed_count;
 
 	uint64_t max_deadline;
-	volatile struct fwmap *next;
+	struct fwmap *next;
 	uint8_t *buckets_offsets;
 	uint64_t padding[2];
 	fwmap_counter_t counters[];
 } __attribute__((__aligned__(64))) fwmap_t;
 
 typedef struct fwmap_stats {
-	uint32_t total_elements;
 	uint32_t index_size;
 	uint32_t extra_bucket_count;
 	uint32_t max_chain_length;
+	uint32_t layer_count;
+	uint64_t total_elements;
 	uint64_t max_deadline;
 	size_t memory_used;
 } fwmap_stats_t;
@@ -387,6 +388,16 @@ fwmap_get_value(fwmap_t *map, uint32_t idx) {
 	return value_slot;
 }
 
+static inline uint32_t
+fwmap_layer_count(const fwmap_t *map) {
+	uint32_t layer_count = 0;
+	while (map != NULL) {
+		layer_count += 1;
+		map = (const fwmap_t *)ADDR_OF(&map->next);
+	}
+	return layer_count;
+}
+
 static inline size_t
 fwmap_size(const fwmap_t *map) {
 	size_t total = 0;
@@ -437,10 +448,11 @@ fwmap_max_deadline(const fwmap_t *map) {
 static inline fwmap_stats_t
 fwmap_get_stats(const fwmap_t *map) {
 	fwmap_stats_t stats = {
-		.total_elements = fwmap_size(map),
 		.index_size = map->index_mask + 1,
 		.extra_bucket_count = map->extra_size,
 		.max_chain_length = fwmap_max_chain_length(map),
+		.layer_count = fwmap_layer_count(map),
+		.total_elements = fwmap_size(map),
 		.max_deadline = fwmap_max_deadline(map),
 	};
 

@@ -20,6 +20,8 @@ pub enum ModeCmd {
     Show(ShowCmd),
     /// Link fwstate configuration to ACL configurations
     Link(LinkCmd),
+    /// Get statistics for fwstate maps
+    Stats(StatsCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -45,6 +47,13 @@ pub struct LinkCmd {
     /// ACL config names to link (can be specified multiple times)
     #[arg(long = "acl", required = true, num_args = 1..)]
     pub acl_configs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct StatsCmd {
+    /// FWState config name to get statistics for
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]

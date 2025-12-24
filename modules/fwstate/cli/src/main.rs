@@ -1,12 +1,12 @@
 use core::error::Error;
 use std::net::Ipv6Addr;
 
-use args::{DeleteCmd, LinkCmd, ModeCmd, ShowCmd, UpdateCmd};
+use args::{DeleteCmd, LinkCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use fwstatepb::{
-    DeleteConfigRequest, LinkFwStateRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
-    fw_state_service_client::FwStateServiceClient,
+    DeleteConfigRequest, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ShowConfigRequest,
+    UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
 };
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
@@ -78,7 +78,10 @@ impl FWStateService {
     }
 
     pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowConfigRequest { name: cmd.config_name.clone() };
+        let request = ShowConfigRequest {
+            name: cmd.config_name.clone(),
+            ok_if_not_found: false,
+        };
         let response = self.client.show_config(request).await?.into_inner();
         println!("{}", serde_json::to_string(&response)?);
         Ok(())
@@ -92,7 +95,10 @@ impl FWStateService {
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
         // First, fetch the current config to merge with new values
-        let current_request = ShowConfigRequest { name: cmd.config_name.clone() };
+        let current_request = ShowConfigRequest {
+            name: cmd.config_name.clone(),
+            ok_if_not_found: true,
+        };
         let current_response = self.client.show_config(current_request).await;
         let (mut map_config, mut sync_config) = match current_response {
             Ok(resp) => {
@@ -182,6 +188,14 @@ impl FWStateService {
         log::debug!("LinkFwStateResponse: {response:?}");
         Ok(())
     }
+
+    pub async fn get_stats(&mut self, cmd: StatsCmd) -> Result<(), Box<dyn Error>> {
+        let request = GetStatsRequest { name: cmd.config_name.clone() };
+        log::trace!("GetStatsRequest: {request:?}");
+        let response = self.client.get_stats(request).await?.into_inner();
+        println!("{}", serde_json::to_string_pretty(&response)?);
+        Ok(())
+    }
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
@@ -193,6 +207,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Link(cmd) => service.link_fwstate(cmd).await,
+        ModeCmd::Stats(cmd) => service.get_stats(cmd).await,
     }
 }
 
