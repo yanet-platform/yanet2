@@ -87,6 +87,7 @@ func TestNAT64(t *testing.T) {
 	})
 
 	t.Run("Test_IPv4_to_IPv6_Translation", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		// From outer_ip4 (192.0.2.34) to mapped address (198.51.100.2)
 		packet := createNAT64Packet(
 			net.ParseIP("192.0.2.34"),   // outer_ip4 from unit tests -> embedded as 2001:db8::c000:222
@@ -112,6 +113,7 @@ func TestNAT64(t *testing.T) {
 	})
 
 	t.Run("Test_IPv6_to_IPv4_Translation", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		// From mapped IPv6 (2001:db8::3) to embedded IPv6 (2001:db8::c000:222)
 		packet := createNAT64Packet(
 			net.ParseIP("2001:db8::3"),        // mapped IPv6 -> 198.51.100.2
@@ -135,6 +137,7 @@ func TestNAT64(t *testing.T) {
 	})
 
 	t.Run("Test_IPv4_to_IPv6_Translation_UDP", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		// Test IPv4 to IPv6 translation using UDP packets
 		packet := createNAT64Packet(
 			net.ParseIP("192.0.2.34"),
@@ -158,6 +161,7 @@ func TestNAT64(t *testing.T) {
 	})
 
 	t.Run("Test_IPv6_to_IPv4_Translation_UDP", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		// Test IPv6 to IPv4 translation - reverse direction with UDP packets
 		packet := createNAT64Packet(
 			net.ParseIP("2001:db8::3"),        // mapped IPv6 -> 198.51.100.2
@@ -182,6 +186,7 @@ func TestNAT64(t *testing.T) {
 	})
 
 	t.Run("Test_IPv4_to_IPv6_Translation_ICMP", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		packet := createNAT64Packet(
 			net.ParseIP("192.0.2.34"),
 			net.ParseIP("198.51.100.2"),
@@ -203,6 +208,7 @@ func TestNAT64(t *testing.T) {
 	})
 
 	t.Run("Test_IPv6_to_IPv4_Translation_ICMP", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		packet := createNAT64Packet(
 			net.ParseIP("2001:db8::3"),        // mapped IPv6 -> 198.51.100.2
 			net.ParseIP("2001:db8::c000:222"), // embedded IPv6 -> 192.0.2.34
@@ -224,8 +230,9 @@ func TestNAT64(t *testing.T) {
 	})
 
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixTrue_MappingTrue", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		// Set drop-unknown-prefix=true, drop-unknown-mapping=true
-		err := setAndWaitForNAT64DropFlags(fw, true, true, 10*time.Second)
+		err := setAndWaitForNAT64DropFlags(globalFramework, true, true, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
 		// Test IPv6 packet with known prefix and mapping - should be translated
@@ -292,8 +299,9 @@ func TestNAT64(t *testing.T) {
 	})
 
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixTrue_MappingFalse", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		// Set drop-unknown-prefix=true, drop-unknown-mapping=false
-		err := setAndWaitForNAT64DropFlags(fw, true, false, 10*time.Second)
+		err := setAndWaitForNAT64DropFlags(globalFramework, true, false, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
 		// Test IPv6 packet with unknown prefix - should be dropped
@@ -329,8 +337,9 @@ func TestNAT64(t *testing.T) {
 	})
 
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixFalse_MappingTrue", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		// Set drop-unknown-prefix=false, drop-unknown-mapping=true
-		err := setAndWaitForNAT64DropFlags(fw, false, true, 10*time.Second)
+		err := setAndWaitForNAT64DropFlags(globalFramework, false, true, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
 		ipv6Packet := createNAT64Packet(
@@ -362,8 +371,9 @@ func TestNAT64(t *testing.T) {
 	})
 
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixFalse_MappingFalse", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		// Set both drop flags to false
-		err := setAndWaitForNAT64DropFlags(fw, false, false, 10*time.Second)
+		err := setAndWaitForNAT64DropFlags(globalFramework, false, false, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
 		// Test IPv6 packet with unknown prefix - should be passed through

@@ -81,6 +81,7 @@ func TestBalancer(t *testing.T) {
 	})
 
 	t.Run("Test_IPv4_Packet", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		packet := createTcpPacket(
 			net.ParseIP("192.0.2.2"),
 			net.ParseIP("192.0.2.1"),

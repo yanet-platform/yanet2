@@ -220,6 +220,36 @@ ls -la /tmp/yanetvm_sockdev_*.sock
 lsof /tmp/yanetvm_sockdev_*.sock
 ```
 
+### Packet Dump Files
+
+When `YANET_TEST_DEBUG=1` is enabled, the framework automatically records all socket traffic to dump files for each test:
+
+```bash
+# Enable debug mode to record packet dumps
+export YANET_TEST_DEBUG=1
+go test -v ./...
+
+# Dump files are created in the VM working directory:
+# /tmp/yanet-vm-<name>-<pid>-<timestamp>/<Test/SubTestName>.in.dump   # Input packets
+# /tmp/yanet-vm-<name>-<pid>-<timestamp>/<Test/SubTestName>.out.dump  # Output packets
+```
+
+Each dump file contains raw socket data in the QEMU socket protocol format:
+- 4-byte length prefix (big-endian)
+- Packet data
+
+#### Replaying Packets from Dump Files
+
+To manually replay packets from a dump file to a socket:
+
+```bash
+# Find the socket path (usually in /tmp/)
+ls -la /tmp/yanetvm_*_sockdev_*.sock
+
+# Replay packets from dump file to socket
+socat -u FILE:/tmp/yanet-vm-main-123-456/TestDecap.in.dump UNIX-CONNECT:/tmp/yanetvm_main_123_456_sockdev_0.sock > response.dump
+```
+
 ## Limitations
 
 1. Each test runs in a separate VM for isolation

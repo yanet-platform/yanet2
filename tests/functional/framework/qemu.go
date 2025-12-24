@@ -145,6 +145,12 @@ func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*
 //	    log.Fatalf("VM startup failed: %v", err)
 //	}
 func (q *QEMUManager) Start() error {
+	// Check if there's already a running QEMU process with the same VM name
+	vmName := "yanet-test-vm-" + q.Name
+	if err := q.checkForExistingVM(vmName); err != nil {
+		return err
+	}
+
 	// Check if QEMU is available
 	if _, err := exec.LookPath("qemu-system-x86_64"); err != nil {
 		return fmt.Errorf("qemu-system-x86_64 not found in PATH: %w", err)
@@ -182,7 +188,7 @@ func (q *QEMUManager) Start() error {
 
 	// Base arguments
 	args := []string{
-		"-name", "yanet-test-vm-" + q.Name,
+		"-name", vmName,
 		"-smp", "2",
 		"-m", "5G",
 		"-machine", "q35,kernel-irqchip=split",
@@ -389,15 +395,20 @@ func (q *QEMUManager) Stop() error {
 	// Cleanup working directory and socket files (unless artifacts should be preserved)
 	if ShouldPreserveArtifacts() {
 		q.log.Infof("Preserving QEMU artifacts in: %s", q.WorkDir)
+		q.log.Infof("Socket files preserved:")
+		for i, path := range q.SocketPaths {
+			q.log.Infof("  Interface %d: %s", i, path)
+		}
 	} else {
 		if err := os.RemoveAll(q.WorkDir); err != nil {
 			errs = append(errs, fmt.Errorf("failed to cleanup working directory: %w", err))
 		}
-	}
 
-	for _, path := range q.SocketPaths {
-		if err := os.Remove(path); err != nil {
-			errs = append(errs, fmt.Errorf("failed to remove socket file: %w", err))
+		// Only remove socket files if not preserving artifacts
+		for _, path := range q.SocketPaths {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("failed to remove socket file %s: %w", path, err))
+			}
 		}
 	}
 
@@ -626,4 +637,33 @@ func getFreePort() (int, error) {
 	}
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
+// checkForExistingVM checks if there's already a running QEMU process with the given VM name.
+// This prevents conflicts when running tests in parallel or when a previous test didn't clean up properly.
+func (q *QEMUManager) checkForExistingVM(vmName string) error {
+	// Use pgrep to find processes matching the VM name
+	cmd := exec.Command("pgrep", "-af", vmName)
+	output, err := cmd.Output()
+
+	// pgrep returns exit code 1 if no processes found, which is what we want
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			// No matching processes found - this is good
+			return nil
+		}
+		// Some other error occurred
+		q.log.Warnf("Failed to check for existing VM processes: %v", err)
+		return nil // Don't fail the test if pgrep itself fails
+	}
+
+	// If we got output, there are matching processes
+	if len(output) > 0 {
+		processes := strings.TrimSpace(string(output))
+		q.log.Errorf("Found existing QEMU process(es) with VM name '%s':", vmName)
+		q.log.Errorf("%s", processes)
+		return fmt.Errorf("cannot start VM '%s': a QEMU process with this name is already running. Please stop the existing VM or use a different name. Process details:\n%s", vmName, processes)
+	}
+
+	return nil
 }

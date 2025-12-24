@@ -48,6 +48,11 @@ test: prepare-vm
 	@echo "Running all functional tests..."
 	go test -count=1 -v ./...
 
+# Run main functional tests
+test-main: prepare-vm
+	@echo "Running main functional tests..."
+	go test -count=1 -v ./...
+
 # Run specific test
 test-run:
 ifdef TEST
@@ -245,6 +250,7 @@ help:
 	@echo "Available targets:"
 	@echo "  all              - Run all tests (default)"
 	@echo "  test             - Run all functional tests"
+	@echo "  test-main        - Run main functional tests (without converted)"
 	@echo "  test-run TEST=X  - Run specific test by name"
 	@echo ""
 	@echo "  prepare-vm       - Prepare VM environment with autologin"

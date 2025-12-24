@@ -4,10 +4,22 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 )
+
+// socketClientInner holds the shared connection state that should not be copied
+// between SocketClient instances. This allows multiple SocketClient wrappers
+// with different loggers to share the same underlying connection.
+type socketClientInner struct {
+	conn       net.Conn      // Active network connection to QEMU socket
+	connMutex  sync.Mutex    // Protects conn field during Connect/Close operations
+	port       int           // TCP port number for TCP socket connections
+	socketPath string        // Unix socket path for Unix socket connections
+	timeout    time.Duration // Default timeout for read/write operations
+}
 
 // SocketClient handles bidirectional communication with QEMU virtual machine
 // network interfaces through socket connections. It supports both TCP and Unix
@@ -23,11 +35,8 @@ import (
 // All network operations include proper error handling and timeout management
 // to ensure robust testing in various network conditions.
 type SocketClient struct {
-	conn       net.Conn           // Active network connection to QEMU socket
-	port       int                // TCP port number for TCP socket connections
-	socketPath string             // Unix socket path for Unix socket connections
-	timeout    time.Duration      // Default timeout for read/write operations
-	log        *zap.SugaredLogger // Logger for debugging and monitoring
+	inner *socketClientInner // Shared connection state (not copied)
+	log   *zap.SugaredLogger // Logger for debugging and monitoring (can be different per instance)
 }
 
 // SocketClientOption defines functional options for configuring SocketClient
@@ -54,23 +63,7 @@ func WithTimeout(timeout time.Duration) SocketClientOption {
 		if timeout <= 0 {
 			return fmt.Errorf("timeout must be positive, got: %v", timeout)
 		}
-		sc.timeout = timeout
-		return nil
-	}
-}
-
-// SocketClientWithLog configures the SocketClient to use the specified logger
-// for debugging and monitoring network operations. This enables detailed logging
-// of packet flows, connection events, and error conditions.
-//
-// Parameters:
-//   - log: A zap.SugaredLogger instance for structured logging
-//
-// Returns:
-//   - SocketClientOption: Functional option that sets the logger
-func SocketClientWithLog(log *zap.SugaredLogger) SocketClientOption {
-	return func(sc *SocketClient) error {
-		sc.log = log
+		sc.inner.timeout = timeout
 		return nil
 	}
 }
@@ -102,9 +95,11 @@ func NewSocketClientTCP(port int, opts ...SocketClientOption) (*SocketClient, er
 	}
 
 	sc := &SocketClient{
-		port:    port,
-		timeout: 1 * time.Second,      // default 1s timeout
-		log:     zap.NewNop().Sugar(), // default noop logger
+		inner: &socketClientInner{
+			port:    port,
+			timeout: 1 * time.Second, // default 1s timeout
+		},
+		log: zap.NewNop().Sugar(), // default noop logger
 	}
 
 	// Apply functional options
@@ -144,9 +139,11 @@ func NewSocketClient(socketPath string, opts ...SocketClientOption) (*SocketClie
 	}
 
 	sc := &SocketClient{
-		socketPath: socketPath,
-		timeout:    100 * time.Millisecond,
-		log:        zap.NewNop().Sugar(), // default noop logger
+		inner: &socketClientInner{
+			socketPath: socketPath,
+			timeout:    100 * time.Millisecond,
+		},
+		log: zap.NewNop().Sugar(), // default noop logger (will be replaced via WithLog)
 	}
 
 	// Apply functional options
@@ -181,27 +178,31 @@ func NewSocketClient(socketPath string, opts ...SocketClientOption) (*SocketClie
 //	    log.Fatalf("Failed to connect to QEMU socket: %v", err)
 //	}
 func (sc *SocketClient) Connect() error {
-	var err error
+	// Lock to prevent concurrent connection attempts
+	sc.inner.connMutex.Lock()
+	defer sc.inner.connMutex.Unlock()
 
-	if sc.conn != nil {
+	// Check if already connected
+	if sc.inner.conn != nil {
 		return nil
 	}
 
+	var err error
 	// Try to connect with retries
 	for i := range 10 {
-		if sc.socketPath != "" {
-			// Unix socket connection (legacy)
-			sc.conn, err = net.Dial("unix", sc.socketPath)
+		if sc.inner.socketPath != "" {
+			// Unix socket connection
+			sc.inner.conn, err = net.Dial("unix", sc.inner.socketPath)
 			if err == nil {
-				sc.log.Debugf("Connected to Unix socket at %s", sc.socketPath)
+				sc.log.Debugf("Connected to Unix socket at %s", sc.inner.socketPath)
 				return nil
 			}
 			sc.log.Warnf("Unix socket connection attempt %d failed: %v, retrying...", i+1, err)
 		} else {
 			// TCP socket connection to QEMU
-			sc.conn, err = net.Dial("tcp", fmt.Sprintf("localhost:%d", sc.port))
+			sc.inner.conn, err = net.Dial("tcp", fmt.Sprintf("localhost:%d", sc.inner.port))
 			if err == nil {
-				sc.log.Debugf("Connected to TCP socket on port %d", sc.port)
+				sc.log.Debugf("Connected to TCP socket on port %d", sc.inner.port)
 				return nil
 			}
 			sc.log.Warnf("TCP connection attempt %d failed: %v, retrying...", i+1, err)
@@ -210,10 +211,10 @@ func (sc *SocketClient) Connect() error {
 		time.Sleep(2 * time.Second)
 	}
 
-	if sc.socketPath != "" {
-		return fmt.Errorf("failed to connect to Unix socket %s after 10 attempts: %w", sc.socketPath, err)
+	if sc.inner.socketPath != "" {
+		return fmt.Errorf("failed to connect to Unix socket %s after 10 attempts: %w", sc.inner.socketPath, err)
 	} else {
-		return fmt.Errorf("failed to connect to TCP socket on port %d after 10 attempts: %w", sc.port, err)
+		return fmt.Errorf("failed to connect to TCP socket on port %d after 10 attempts: %w", sc.inner.port, err)
 	}
 }
 
@@ -227,6 +228,7 @@ func (sc *SocketClient) Connect() error {
 //   - Length prefix encoding in big-endian format
 //   - Complete packet data transmission
 //   - Comprehensive error handling and logging
+//   - Optional dumping to file if dumpFilePaths is provided
 //
 // The packet format follows QEMU socket networking protocol:
 //
@@ -234,6 +236,7 @@ func (sc *SocketClient) Connect() error {
 //
 // Parameters:
 //   - packet: Raw packet bytes to transmit through the socket
+//   - dumpPath: Path to dump file for recording socket data (empty string to skip dumping)
 //
 // Returns:
 //   - error: An error if the connection is not established, timeout occurs, or transmission fails
@@ -241,15 +244,15 @@ func (sc *SocketClient) Connect() error {
 // Example:
 //
 //	packetData := []byte{0x52, 0x54, 0x00, 0x6b, 0xff, 0xa1, ...} // Ethernet frame
-//	if err := client.SendPacket(packetData); err != nil {
+//	if err := client.SendPacket(packetData, "/path/to/dump.file"); err != nil {
 //	    log.Fatalf("Packet transmission failed: %v", err)
 //	}
-func (sc *SocketClient) SendPacket(packet []byte) error {
-	if sc.conn == nil {
+func (sc *SocketClient) SendPacket(packet []byte, dumpPath string) error {
+	if sc.inner.conn == nil {
 		return fmt.Errorf("not connected to socket")
 	}
 
-	err := sc.conn.SetWriteDeadline(time.Now().Add(sc.timeout))
+	err := sc.inner.conn.SetWriteDeadline(time.Now().Add(sc.inner.timeout))
 	if err != nil {
 		return fmt.Errorf("failed to set write deadline: %w", err)
 	}
@@ -261,7 +264,12 @@ func (sc *SocketClient) SendPacket(packet []byte) error {
 
 	sc.log.Debugf("Sending packet with length prefix: % x", packetWithLength)
 
-	_, err = sc.conn.Write(packetWithLength)
+	// Write raw socket data to dump file if path is provided
+	if err := writeToDumpFile(dumpPath, packetWithLength); err != nil {
+		sc.log.Warnf("Failed to write to dump file: %v", err)
+	}
+
+	_, err = sc.inner.conn.Write(packetWithLength)
 	if err != nil {
 		return fmt.Errorf("failed to send packet: %w", err)
 	}
@@ -281,6 +289,7 @@ func (sc *SocketClient) SendPacket(packet []byte) error {
 //   - Complete packet data reception
 //   - MAC address-based filtering for test packet isolation
 //   - Automatic packet parsing and validation
+//   - Optional dumping to file if dumpFilePaths is provided
 //
 // The method continuously reads packets until it finds one with the correct
 // destination MAC address matching the test framework's source MAC, ensuring
@@ -288,6 +297,7 @@ func (sc *SocketClient) SendPacket(packet []byte) error {
 //
 // Parameters:
 //   - timeout: Maximum time to wait for packet reception
+//   - dumpPath: Path to dump file for recording socket data (empty string to skip dumping)
 //
 // Returns:
 //   - []byte: Raw packet data with correct destination MAC address
@@ -295,13 +305,13 @@ func (sc *SocketClient) SendPacket(packet []byte) error {
 //
 // Example:
 //
-//	packet, err := client.ReceivePacket(5 * time.Second)
+//	packet, err := client.ReceivePacket(5 * time.Second, "/path/to/dump.file")
 //	if err != nil {
 //	    log.Fatalf("Packet reception failed: %v", err)
 //	}
 //	fmt.Printf("Received packet: %x", packet)
-func (sc *SocketClient) ReceivePacket(timeout time.Duration) ([]byte, error) {
-	if sc.conn == nil {
+func (sc *SocketClient) ReceivePacket(timeout time.Duration, dumpPath string) ([]byte, error) {
+	if sc.inner.conn == nil {
 		return nil, fmt.Errorf("not connected to socket")
 	}
 
@@ -311,14 +321,14 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration) ([]byte, error) {
 
 	// Keep reading packets until we find one with the correct SrcMAC
 	for {
-		err := sc.conn.SetReadDeadline(time.Now().Add(timeout))
+		err := sc.inner.conn.SetReadDeadline(time.Now().Add(timeout))
 		if err != nil {
 			return nil, fmt.Errorf("failed to set read deadline: %w", err)
 		}
 
 		// Read the packet length prefix (4 bytes)
 		lengthPrefix := make([]byte, 4)
-		_, err = sc.conn.Read(lengthPrefix)
+		_, err = sc.inner.conn.Read(lengthPrefix)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read packet length prefix: %w", err)
 		}
@@ -331,11 +341,19 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration) ([]byte, error) {
 
 		// Read the packet data
 		packetData := make([]byte, packetLength)
-		_, err = sc.conn.Read(packetData)
+		_, err = sc.inner.conn.Read(packetData)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read packet data: %w", err)
 		}
 		sc.log.Debugf("Received packet data: % x", packetData)
+
+		// Write raw socket data to dump file if path is provided (with length prefix)
+		packetWithLength := make([]byte, 4+len(packetData))
+		binary.BigEndian.PutUint32(packetWithLength, uint32(len(packetData)))
+		copy(packetWithLength[4:], packetData)
+		if err := writeToDumpFile(dumpPath, packetWithLength); err != nil {
+			sc.log.Warnf("Failed to write to dump file: %v", err)
+		}
 
 		// Parse the packet to check SrcMAC
 		packetInfo, err := parser.ParsePacket(packetData)
@@ -373,9 +391,12 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration) ([]byte, error) {
 //	    }
 //	}()
 func (sc *SocketClient) Close() error {
-	if sc.conn != nil {
-		err := sc.conn.Close()
-		sc.conn = nil // Make Close() idempotent - safe to call multiple times
+	sc.inner.connMutex.Lock()
+	defer sc.inner.connMutex.Unlock()
+
+	if sc.inner.conn != nil {
+		err := sc.inner.conn.Close()
+		sc.inner.conn = nil // Make Close() idempotent - safe to call multiple times
 		return err
 	}
 	return nil
@@ -397,5 +418,26 @@ func (sc *SocketClient) Close() error {
 //	    log.Info("Client configured for Unix socket")
 //	}
 func (sc *SocketClient) GetSocketPort() int {
-	return sc.port
+	return sc.inner.port
+}
+
+// WithLog creates a new SocketClient instance with a different logger
+// while sharing the same underlying connection (inner state).
+// This allows each test to have its own logging context while sharing
+// the socket connection.
+//
+// Parameters:
+//   - log: Logger to use for this client instance
+//
+// Returns:
+//   - *SocketClient: A new socket client instance with the specified logger
+//
+// Example:
+//
+//	namedClient := client.WithLog(logger.Named("test1"))
+func (sc *SocketClient) WithLog(log *zap.SugaredLogger) *SocketClient {
+	return &SocketClient{
+		inner: sc.inner, // Share the same inner state (connection)
+		log:   log,
+	}
 }

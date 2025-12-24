@@ -2,6 +2,7 @@ package framework
 
 import (
 	"fmt"
+	"hash/fnv"
 	"net"
 	"os"
 	"path/filepath"
@@ -93,6 +94,23 @@ func MustParseMAC(mac string) net.HardwareAddr {
 	return hwAddr
 }
 
+// generateLogID generates a short 8-character log ID from a test name using FNV-1a hash.
+// This provides a unique, compact identifier for logging purposes.
+//
+// Parameters:
+//   - testName: Full test name (e.g., "TestBalancer/TestCase1")
+//
+// Returns:
+//   - string: 8-character hexadecimal log ID
+func generateLogID(testName string) string {
+	if testName == "" {
+		return "global"
+	}
+	h := fnv.New32a()
+	h.Write([]byte(testName))
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
 // TestFramework represents the main test framework structure for YANET functional testing.
 // It orchestrates QEMU virtual machine management, CLI command execution, packet processing,
 // and network socket communication to provide a comprehensive testing environment.
@@ -105,6 +123,12 @@ func MustParseMAC(mac string) net.HardwareAddr {
 //   - Working directory for test artifacts and temporary files
 //
 // All operations are thread-safe through internal synchronization mechanisms.
+// socketClientsCache holds socket clients with thread-safe access
+type socketClientsCache struct {
+	clients map[int]*SocketClient
+	mutex   sync.Mutex
+}
+
 type TestFramework struct {
 	QEMU         *QEMUManager       // Virtual machine manager for test environment
 	CLI          *CLIManager        // Command-line interface manager for VM operations
@@ -112,8 +136,33 @@ type TestFramework struct {
 	log          *zap.SugaredLogger // Logger for debugging and monitoring
 
 	// Socket client cache for network interface communication
-	socketClients map[int]*SocketClient // Cached socket clients indexed by interface number
-	clientsMutex  sync.Mutex            // Protects concurrent access to socketClients map
+	socketClients *socketClientsCache // Cached socket clients with mutex
+
+	// Test name for current test context
+	testName string // Name of the current test (empty for global framework)
+}
+
+// writeToDumpFile appends data to a dump file if debug is enabled and path is not empty.
+// If debug is disabled or path is empty, this function does nothing.
+//
+// Parameters:
+//   - path: Path to the dump file (if empty, nothing is written)
+//   - data: Data to append to the file
+//
+// Returns:
+//   - error: An error if file operations fail, or nil if successful or skipped
+func writeToDumpFile(path string, data []byte) error {
+	if path == "" {
+		return nil
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0755)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	return err
 }
 
 // WithLog configures the TestFramework to use the specified logger for debugging
@@ -180,8 +229,10 @@ func New(config *Config, opts ...FrameworkOption) (*TestFramework, error) {
 
 	// Create framework instance with default values
 	fw := &TestFramework{
-		log:           zap.NewNop().Sugar(), // default noop logger
-		socketClients: make(map[int]*SocketClient),
+		log: zap.NewNop().Sugar(), // default noop logger
+		socketClients: &socketClientsCache{
+			clients: make(map[int]*SocketClient),
+		},
 	}
 
 	for _, opt := range opts {
@@ -250,7 +301,53 @@ func (f *TestFramework) Start() error {
 //   - Terminating CLI manager connections
 //   - Stopping and cleaning up the QEMU virtual machine
 //   - Removing the working directory and all test artifacts
+
+// WithTestName creates a shallow copy of the framework with the specified test name.
+// This allows each test to have its own context while sharing the underlying resources
+// (QEMU, CLI, socket clients, etc.). The copy shares the same caches and mutexes for
+// thread-safe access to shared resources.
 //
+// A unique 8-character log ID is generated from the test name for compact logging.
+//
+// Parameters:
+//   - testName: Name of the test (typically from t.Name())
+//
+// Returns:
+//   - *TestFramework: A new framework instance with the test name set
+//
+// Example:
+//
+//	func TestMyFeature(t *testing.T) {
+//	    fw := globalFramework.WithTestName(t.Name())
+//	    input, output, err := fw.SendPacketAndParse(0, 0, packet, timeout)
+//	    ...
+//	}
+func (f *TestFramework) WithTestName(testName string) *TestFramework {
+	logID := generateLogID(testName)
+	namedLog := f.log.Named(logID)
+	namedLog.Infof("Test '%s' will use log ID: %s", testName, logID)
+
+	fWithName := &TestFramework{
+		QEMU:          f.QEMU,
+		CLI:           f.CLI,
+		PacketParser:  f.PacketParser,
+		log:           namedLog,
+		socketClients: f.socketClients, // shared cache with mutex
+		testName:      testName,
+	}
+
+	// Log dump file paths once if they are configured
+	inputDumpPath, outputDumpPath := fWithName.getDumpFilePaths()
+	if inputDumpPath != "" {
+		namedLog.Infof("Recording input socket data to: %s", inputDumpPath)
+	}
+	if outputDumpPath != "" {
+		namedLog.Infof("Recording output socket data to: %s", outputDumpPath)
+	}
+
+	return fWithName
+}
+
 // Multiple cleanup errors are collected and returned as a combined error for
 // comprehensive error reporting.
 //
@@ -268,16 +365,16 @@ func (f *TestFramework) Stop() error {
 	var errs []error
 
 	// Lock the mutex to safely access the socketClients map
-	f.clientsMutex.Lock()
+	f.socketClients.mutex.Lock()
 	// Close all socket clients
-	for _, client := range f.socketClients {
+	for _, client := range f.socketClients.clients {
 		if err := client.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("failed to close socket client: %w", err))
 		}
 	}
 	// Clear the map
-	f.socketClients = make(map[int]*SocketClient)
-	f.clientsMutex.Unlock()
+	f.socketClients.clients = make(map[int]*SocketClient)
+	f.socketClients.mutex.Unlock()
 
 	// Close CLI connections
 	if f.CLI != nil {
@@ -306,6 +403,7 @@ func (f *TestFramework) Stop() error {
 //   - Packet transmission through the input interface
 //   - Response capture from the output interface with timeout
 //   - Automatic socket connection establishment
+//   - Optional socket data dumping when debug mode is enabled
 //
 // Parameters:
 //   - inputIfaceIndex: Index of the network interface to send the packet through
@@ -319,6 +417,7 @@ func (f *TestFramework) Stop() error {
 //
 // Example:
 //
+//	fw := globalFramework.WithTestName(t.Name())
 //	response, err := fw.SendPacketAndCapture(0, 1, packetData, 5*time.Second)
 //	if err != nil {
 //	    log.Fatalf("Packet transmission failed: %v", err)
@@ -337,6 +436,9 @@ func (f *TestFramework) SendPacketAndCapture(inputIfaceIndex int, outputIfaceInd
 		return nil, fmt.Errorf("failed to get output socket client: %w", err)
 	}
 
+	// Get dump file paths for this test
+	inputDumpPath, outputDumpPath := f.getDumpFilePaths()
+
 	// Connect to sockets
 	if err := inputClient.Connect(); err != nil {
 		return nil, fmt.Errorf("failed to connect to input socket: %w", err)
@@ -347,11 +449,11 @@ func (f *TestFramework) SendPacketAndCapture(inputIfaceIndex int, outputIfaceInd
 	}
 
 	// Send packet on input interface
-	if err := inputClient.SendPacket(packet); err != nil {
+	if err := inputClient.SendPacket(packet, inputDumpPath); err != nil {
 		return nil, fmt.Errorf("failed to send packet: %w", err)
 	}
 
-	return outputClient.ReceivePacket(timeout)
+	return outputClient.ReceivePacket(timeout, outputDumpPath)
 }
 
 // SendPacketAndParse sends a network packet, captures the response, and parses both
@@ -364,6 +466,7 @@ func (f *TestFramework) SendPacketAndCapture(inputIfaceIndex int, outputIfaceInd
 //   - Response capture with timeout handling
 //   - Output packet parsing and analysis
 //   - Detailed logging of packet flow for debugging
+//   - Optional socket data dumping when debug mode is enabled
 //
 // Parameters:
 //   - inputIfaceIndex: Index of the network interface to send the packet through
@@ -378,6 +481,7 @@ func (f *TestFramework) SendPacketAndCapture(inputIfaceIndex int, outputIfaceInd
 //
 // Example:
 //
+//	fw := globalFramework.WithTestName(t.Name())
 //	input, output, err := fw.SendPacketAndParse(0, 1, packetData, 5*time.Second)
 //	if err != nil {
 //	    log.Fatalf("Packet processing failed: %v", err)
@@ -413,11 +517,15 @@ func (f *TestFramework) SendPacketAndParse(inputIfaceIndex int, outputIfaceIndex
 // interface. The method implements caching to reuse existing connections and
 // ensures thread-safe access to the socket client pool.
 //
+// For test-specific frameworks (created via WithTestName), the socket client
+// is returned with a named logger using the test's log ID.
+//
 // The method handles:
 //   - Interface index validation against available QEMU socket paths
 //   - Thread-safe access to the socket client cache
 //   - Automatic socket client creation for new interfaces
 //   - Client caching for performance optimization
+//   - Logger customization for test-specific contexts
 //
 // Parameters:
 //   - ifaceIndex: Zero-based index of the network interface (must be < len(SocketPaths))
@@ -440,24 +548,46 @@ func (f *TestFramework) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
 	}
 
 	// Lock the mutex to safely access the socketClients map
-	f.clientsMutex.Lock()
-	defer f.clientsMutex.Unlock()
+	f.socketClients.mutex.Lock()
+	defer f.socketClients.mutex.Unlock()
 
 	// Check if we already have a client for this interface
-	if client, exists := f.socketClients[ifaceIndex]; exists {
-		return client, nil
+	client, exists := f.socketClients.clients[ifaceIndex]
+	if !exists {
+		// Create a new client without logger (will be set via WithLog)
+		socketPath := f.QEMU.SocketPaths[ifaceIndex]
+		var err error
+		client, err = NewSocketClient(socketPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Unix socket client for interface %d (path %s): %w", ifaceIndex, socketPath, err)
+		}
+		// Store the client in the map
+		f.socketClients.clients[ifaceIndex] = client
 	}
 
-	// Create a new client
-	socketPath := f.QEMU.SocketPaths[ifaceIndex]
-	client, err := NewSocketClient(socketPath, SocketClientWithLog(f.log.With("interface", ifaceIndex)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Unix socket client for interface %d (path %s): %w", ifaceIndex, socketPath, err)
+	// Return a new client instance with the current framework's logger
+	// This shares the underlying connection (inner) but has its own logger
+	return client.WithLog(f.log.With("interface", ifaceIndex)), nil
+}
+
+// getDumpFilePaths returns dump file paths for a test.
+// If debug is disabled or testName is empty, returns empty strings.
+//
+// Parameters:
+//   - testName: Name of the test
+//
+// Returns:
+//   - string: Input dump file path (empty if debug disabled)
+//   - string: Output dump file path (empty if debug disabled)
+func (f *TestFramework) getDumpFilePaths() (string, string) {
+	if !IsDebugEnabled() || f.testName == "" {
+		return "", ""
 	}
 
-	// Store the client in the map
-	f.socketClients[ifaceIndex] = client
-	return client, nil
+	inputDumpPath := filepath.Join(f.QEMU.WorkDir, fmt.Sprintf("%s.in.dump", f.testName))
+	outputDumpPath := filepath.Join(f.QEMU.WorkDir, fmt.Sprintf("%s.out.dump", f.testName))
+
+	return inputDumpPath, outputDumpPath
 }
 
 // StartYANET initializes and launches the complete YANET network processing stack

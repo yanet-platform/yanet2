@@ -407,7 +407,14 @@ jobs:
         export YANET_TEST_DEBUG=1
         make test
         ret=$?
-        tail -n 100 test.log
+        
+        echo "=== main/test.log (last 100 lines) ==="
+        tail -n 100 main/test.log 2>/dev/null || echo "main/test.log not found"
+        
+        echo ""
+        echo "=== converted/converted_test.log (last 100 lines) ==="
+        tail -n 100 converted/converted_test.log 2>/dev/null || echo "converted/converted_test.log not found"
+        
         exit $ret
       timeout-minutes: 35
 

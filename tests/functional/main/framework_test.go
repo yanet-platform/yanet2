@@ -57,10 +57,15 @@ func testMainWrapper(m *testing.M) (code int) {
 	defer logger.Sync()
 	sugar := logger.Sugar()
 
+	// Get QEMU image path (relative to parent functional directory)
+	qemuImage := os.Getenv("YANET_QEMU_IMAGE")
+	if qemuImage == "" {
+		qemuImage = "../yanet-test.qcow2"
+	}
 	// Initialize framework once for all tests
 	fw, err := framework.New(&framework.Config{
 		Name:      "main",
-		QEMUImage: "yanet-test.qcow2",
+		QEMUImage: qemuImage,
 	}, framework.WithLog(sugar))
 	if err != nil {
 		sugar.Errorf("Failed to create framework: %v", err)

@@ -146,6 +146,7 @@ func TestForward(t *testing.T) {
 	})
 
 	t.Run("Test_Forwarding", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		packet := createForwardPacket(
 			net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
 			net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
@@ -164,6 +165,7 @@ func TestForward(t *testing.T) {
 	})
 
 	t.Run("Test_ICMP4_Echo", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		packet := createICMPPacket(
 			net.ParseIP(framework.VMIPv4Gateway),
 			net.ParseIP(framework.VMIPv4Host),
@@ -182,6 +184,7 @@ func TestForward(t *testing.T) {
 	})
 
 	t.Run("Test_ICMP6_Echo", func(t *testing.T) {
+		fw := globalFramework.WithTestName(t.Name())
 		// Test ICMPv6 echo request to VMIPv6Host
 		packet := createICMPv6Packet(
 			net.ParseIP(framework.VMIPv6Gateway), // src IP
