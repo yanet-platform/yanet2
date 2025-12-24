@@ -145,17 +145,12 @@ rules:
       - from: 0
         to: 4095
     srcs:
-      - addr: 0.0.0.0
-        prefix: 0
-      - addr: 0::0
-        prefix: 0
+      - "0.0.0.0/0"
+      - "::/0"
     dsts:
-      - addr: ` + framework.VMIPv4Host + `
-        prefix: 32
-      - addr: ` + framework.VMIPv6Host + `
-        prefix: 64
-      - addr: ff02::0
-        prefix: 16
+      - ` + framework.VMIPv4Host + `/32
+      - ` + framework.VMIPv6Host + `/64
+      - "ff02::0/16"
     mode: Out
     devices:
       - 01:00.0
@@ -165,15 +160,11 @@ rules:
       - from: 0
         to: 4095
     srcs:
-      - addr: 0.0.0.0
-        prefix: 0
-      - addr: 0::0
-        prefix: 0
+      - "0.0.0.0/0"
+      - "::/0"
     dsts:
-      - addr: 0.0.0.0
-        prefix: 0
-      - addr: 0::0
-        prefix: 0
+      - "0.0.0.0/0"
+      - "::/0"
     mode: None
     devices:
       - 01:00.0
