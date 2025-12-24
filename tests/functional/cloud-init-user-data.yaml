@@ -46,6 +46,7 @@ packages:
   - clang-tidy-19
   - git
   - just
+  - jq
   - make
   - python3-pyelftools
   - libnuma-dev
@@ -54,6 +55,7 @@ packages:
   - protobuf-compiler
   - rustup
   - gdb
+  - gdbserver
   - lldb
   - lcov
   - golang-go

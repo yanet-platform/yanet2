@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"go.uber.org/zap"
+
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
 // Global framework instance shared across all converted tests
@@ -24,7 +25,7 @@ func TestMain(m *testing.M) {
 func testMainWrapper(m *testing.M) (code int) {
 	// Create logger
 	lg := zap.NewDevelopmentConfig()
-	if _, ok := os.LookupEnv("YANET_TEST_DEBUG"); !ok {
+	if !framework.IsDebugEnabled() {
 		lg.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
 	} else {
 		lg.OutputPaths = []string{"converted_test.log"}
@@ -46,6 +47,7 @@ func testMainWrapper(m *testing.M) (code int) {
 
 	// Create framework
 	fw, err := framework.New(&framework.Config{
+		Name:      "converted",
 		QEMUImage: qemuImage,
 	}, framework.WithLog(sugar))
 	if err != nil {
@@ -133,17 +135,12 @@ rules:
       - from: 0
         to: 4095
     srcs:
-      - addr: 0.0.0.0
-        prefix: 0
-      - addr: 0::0
-        prefix: 0
+      - "0.0.0.0/0"
+      - "::/0"
     dsts:
-      - addr: ` + framework.VMIPv4Host + `
-        prefix: 32
-      - addr: ` + framework.VMIPv6Host + `
-        prefix: 64
-      - addr: ff02::0
-        prefix: 16
+      - ` + framework.VMIPv4Host + `/32
+      - ` + framework.VMIPv6Host + `/64
+      - "ff02::0/16"
     mode: Out
     devices:
       - 01:00.0
@@ -153,15 +150,11 @@ rules:
       - from: 0
         to: 4095
     srcs:
-      - addr: 0.0.0.0
-        prefix: 0
-      - addr: 0::0
-        prefix: 0
+      - "0.0.0.0/0"
+      - "::/0"
     dsts:
-      - addr: 0.0.0.0
-        prefix: 0
-      - addr: 0::0
-        prefix: 0
+      - "0.0.0.0/0"
+      - "::/0"
     mode: None
     devices:
       - 01:00.0
@@ -209,12 +202,12 @@ rules:
 	// Run tests
 	code = m.Run()
 
-	if _, ok := os.LookupEnv("YANET_TEST_DEBUG"); ok {
+	if framework.IsDebugEnabled() {
 		// Copy logs from VM for debugging
 		sugar.Info("Copying logs from VM...")
 		debugCommands := []string{
-			"cp /var/log/yanet-controlplane.log /mnt/build/yanet-controlplane-converted.log 2>/dev/null || echo 'No controlplane log found'",
-			"cp /var/log/yanet-dataplane.log /mnt/build/yanet-dataplane-converted.log 2>/dev/null || echo 'No dataplane log found'",
+			"cp -v /var/log/yanet-controlplane.log /mnt/build/yanet-controlplane-converted.log 2>&1 || echo 'No controlplane log found (converted tests)'",
+			"cp -v /var/log/yanet-dataplane.log /mnt/build/yanet-dataplane-converted.log 2>&1 || echo 'No dataplane log found (converted tests)'",
 		}
 		fw.CLI.ExecuteCommands(debugCommands...)
 	}

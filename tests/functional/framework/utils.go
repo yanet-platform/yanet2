@@ -61,3 +61,47 @@ func findProjectRoot() (string, error) {
 
 	return "", fmt.Errorf("project root not found (no meson.build with build directory)")
 }
+
+// ShouldPreserveArtifacts checks if test artifacts should be preserved for debugging.
+// Returns true if the YANET_PRESERVE_ARTIFACTS environment variable is set.
+//
+// Example:
+//
+//	if ShouldPreserveArtifacts() {
+//	    log.Info("Preserving test artifacts for debugging")
+//	    // Skip cleanup
+//	}
+func ShouldPreserveArtifacts() bool {
+	_, ok := os.LookupEnv("YANET_PRESERVE_ARTIFACTS")
+	return ShouldKeepVMAlive() || ok
+}
+
+// IsDebugEnabled checks if debug mode is enabled for tests.
+// Returns true if the YANET_TEST_DEBUG environment variable is set.
+//
+// Example:
+//
+//	if IsDebugEnabled() {
+//	    log.Info("Debug mode enabled")
+//	    // Enable verbose logging
+//	}
+func IsDebugEnabled() bool {
+	_, ok := os.LookupEnv("YANET_TEST_DEBUG")
+	return ShouldKeepVMAlive() || ok
+}
+
+// ShouldKeepVMAlive checks if the VM should be kept running after tests.
+// Returns true if the YANET_KEEP_VM_ALIVE environment variable is set.
+// When enabled, the QEMU process will not be killed, allowing manual
+// connection to the serial console for debugging.
+//
+// Example:
+//
+//	if ShouldKeepVMAlive() {
+//	    log.Info("VM will remain running for manual debugging")
+//	    // Skip QEMU process termination
+//	}
+func ShouldKeepVMAlive() bool {
+	_, ok := os.LookupEnv("YANET_KEEP_VM_ALIVE")
+	return ok
+}

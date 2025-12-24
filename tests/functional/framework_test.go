@@ -42,7 +42,7 @@ func TestMain(m *testing.M) {
 func testMainWrapper(m *testing.M) (code int) {
 	// Create logger for detailed logging
 	lg := zap.NewDevelopmentConfig()
-	if _, ok := os.LookupEnv("YANET_TEST_DEBUG"); !ok {
+	if !framework.IsDebugEnabled() {
 		// no env - set error level
 		lg.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
 	} else {
@@ -59,6 +59,7 @@ func testMainWrapper(m *testing.M) (code int) {
 
 	// Initialize framework once for all tests
 	fw, err := framework.New(&framework.Config{
+		Name:      "main",
 		QEMUImage: "yanet-test.qcow2",
 	}, framework.WithLog(sugar))
 	if err != nil {
@@ -208,11 +209,11 @@ rules:
 	// Run tests
 	code = m.Run()
 
-	if _, ok := os.LookupEnv("YANET_TEST_DEBUG"); ok {
+	if framework.IsDebugEnabled() {
 		sugar.Info("Copying logs from VM...")
 		debugCommands := []string{
-			"cp /var/log/yanet-controlplane.log /mnt/build/yanet-controlplane-0.log 2>/dev/null || echo 'No controlplane log found'",
-			"cp /var/log/yanet-dataplane.log /mnt/build/yanet-dataplane-0.log 2>/dev/null || echo 'No dataplane log found'",
+			"cp -v /var/log/yanet-controlplane.log /mnt/build/yanet-controlplane-main.log 2>&1 || echo 'No controlplane log found'",
+			"cp -v /var/log/yanet-dataplane.log /mnt/build/yanet-dataplane-main.log 2>&1 || echo 'No dataplane log found'",
 		}
 		_, err := fw.CLI.ExecuteCommands(debugCommands...)
 		if err != nil {

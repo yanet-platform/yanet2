@@ -62,7 +62,7 @@ pub struct RouteShowCmd {
     #[arg(long)]
     pub ipv6: bool,
     /// Route config name.
-    #[arg(long = "cfg")]
+    #[arg(long = "cfg", short)]
     pub config_name: String,
 }
 
@@ -71,7 +71,7 @@ pub struct RouteLookupCmd {
     /// The IP address to lookup in the routing table.
     pub addr: IpAddr,
     /// Route config name.
-    #[arg(long = "cfg")]
+    #[arg(long = "cfg", short)]
     pub config_name: String,
 }
 
@@ -83,7 +83,7 @@ pub struct RouteInsertCmd {
     /// length of the prefix.
     pub prefix: IpNet,
     /// Route config name.
-    #[arg(long = "cfg")]
+    #[arg(long = "cfg", short)]
     pub config_name: String,
     /// The IP address of the nexthop router.
     #[arg(long = "via")]
@@ -93,7 +93,7 @@ pub struct RouteInsertCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RouteFlushCmd {
     /// Route config name.
-    #[arg(long = "cfg")]
+    #[arg(long = "cfg", short)]
     pub config_name: String,
 }
 

@@ -109,7 +109,6 @@ type TestFramework struct {
 	QEMU         *QEMUManager       // Virtual machine manager for test environment
 	CLI          *CLIManager        // Command-line interface manager for VM operations
 	PacketParser *PacketParser      // Network packet parsing and analysis engine
-	WorkDir      string             // Working directory for test files and artifacts
 	log          *zap.SugaredLogger // Logger for debugging and monitoring
 
 	// Socket client cache for network interface communication
@@ -141,8 +140,8 @@ type FrameworkOption func(*TestFramework) error
 // Config contains essential configuration parameters for initializing the test framework.
 // It specifies the QEMU virtual machine image and working directory for test execution.
 type Config struct {
+	Name      string
 	QEMUImage string // Path to the QEMU virtual machine image file
-	WorkDir   string // Working directory for test artifacts (auto-created if empty)
 }
 
 // New creates and initializes a new TestFramework instance with the specified configuration
@@ -167,8 +166,8 @@ type Config struct {
 // Example:
 //
 //	config := &Config{
+//	    Name: "main",
 //	    QEMUImage: "/path/to/vm-image.qcow2",
-//	    WorkDir:   "/tmp/yanet-tests",
 //	}
 //	fw, err := New(config, WithLog(logger))
 //	if err != nil {
@@ -179,16 +178,8 @@ func New(config *Config, opts ...FrameworkOption) (*TestFramework, error) {
 		return nil, fmt.Errorf("config is required")
 	}
 
-	if config.WorkDir == "" {
-		config.WorkDir = filepath.Join(os.TempDir(), "yanet-test")
-	}
-	if err := os.MkdirAll(config.WorkDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create work directory: %w", err)
-	}
-
 	// Create framework instance with default values
 	fw := &TestFramework{
-		WorkDir:       config.WorkDir,
 		log:           zap.NewNop().Sugar(), // default noop logger
 		socketClients: make(map[int]*SocketClient),
 	}
@@ -201,7 +192,7 @@ func New(config *Config, opts ...FrameworkOption) (*TestFramework, error) {
 
 	if fw.QEMU == nil {
 		// Initialize QEMU manager
-		qemu, err := NewQEMUManager(config.QEMUImage, fw.log)
+		qemu, err := NewQEMUManager(config.Name, config.QEMUImage, fw.log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create QEMU manager: %w", err)
 		}
@@ -298,11 +289,6 @@ func (f *TestFramework) Stop() error {
 	// Stop QEMU VM
 	if err := f.QEMU.Stop(); err != nil {
 		errs = append(errs, fmt.Errorf("failed to stop QEMU: %w", err))
-	}
-
-	// Cleanup work directory
-	if err := os.RemoveAll(f.WorkDir); err != nil {
-		errs = append(errs, fmt.Errorf("failed to cleanup work directory: %w", err))
 	}
 
 	if len(errs) > 0 {

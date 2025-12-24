@@ -125,7 +125,7 @@ func (c *CLIManager) ExecuteCommand(command string) (string, error) {
 		return "", fmt.Errorf("failed to connect to QEMU serial console")
 	}
 
-	c.log.Debugf("DEBUG: Executing command in VM via serial console: %s", command)
+	c.log.Debugf("DEBUG: Executing command in VM %s: %s", c.qemu.Name, command)
 
 	// Initialize reader if not already done
 	if c.reader == nil {

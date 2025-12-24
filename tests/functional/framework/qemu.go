@@ -32,6 +32,7 @@ import (
 // All operations are thread-safe and support concurrent access patterns
 // required for comprehensive network testing scenarios.
 type QEMUManager struct {
+	Name        string
 	ImagePath   string             // Path to the QEMU disk image file
 	WorkDir     string             // Temporary working directory for VM instance
 	Command     *exec.Cmd          // QEMU process command handle
@@ -63,6 +64,7 @@ type QEMUManager struct {
 //   - Socket path configuration for VM networking and console access
 //
 // Parameters:
+//   - name: Name of this manager
 //   - imagePath: Path to the QEMU disk image file (must exist and be accessible)
 //   - logger: Structured logger for debugging and monitoring VM operations
 //
@@ -72,13 +74,13 @@ type QEMUManager struct {
 //
 // Example:
 //
-//	manager, err := NewQEMUManager("/path/to/vm-image.qcow2", logger)
+//	manager, err := NewQEMUManager("main", "/path/to/vm-image.qcow2", logger)
 //	if err != nil {
 //	    log.Fatalf("Failed to create QEMU manager: %v", err)
 //	}
-func NewQEMUManager(imagePath string, logger *zap.SugaredLogger) (*QEMUManager, error) {
+func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*QEMUManager, error) {
 	// Generate unique instance ID for parallel execution
-	instanceID := fmt.Sprintf("yanet-vm-%d-%d", os.Getpid(), time.Now().UnixNano())
+	instanceID := fmt.Sprintf("yanet-vm-%s-%d-%d", name, os.Getpid(), time.Now().UnixNano())
 	workDir := filepath.Join(os.TempDir(), instanceID)
 
 	// Determine project root directory
@@ -90,6 +92,7 @@ func NewQEMUManager(imagePath string, logger *zap.SugaredLogger) (*QEMUManager, 
 	targetDir := filepath.Join(projectRoot, "target")
 
 	return &QEMUManager{
+		Name:        name,
 		ImagePath:   imagePath,
 		WorkDir:     workDir,
 		BinariesDir: filepath.Join(workDir, "bin"),
@@ -179,7 +182,7 @@ func (q *QEMUManager) Start() error {
 
 	// Base arguments
 	args := []string{
-		"-name", "yanet-test-vm",
+		"-name", "yanet-test-vm-" + q.Name,
 		"-smp", "2",
 		"-m", "5G",
 		"-machine", "q35,kernel-irqchip=split",
@@ -201,9 +204,21 @@ func (q *QEMUManager) Start() error {
 	args = append(args,
 		"-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2", q.ImagePath),
 	)
+
 	// Network interface configuration
+	if ShouldKeepVMAlive() {
+		// Get a random free port for SSH forwarding to support multiple VMs
+		sshPort, err := getFreePort()
+		if err != nil {
+			return fmt.Errorf("failed to get free port for SSH forwarding: %w", err)
+		}
+		q.log.Infof("Keep VM alive mode enabled: SSH port forwarding 127.0.0.1:%d -> VM:22", sshPort)
+		args = append(args, "-netdev", fmt.Sprintf("user,id=net0,hostfwd=tcp:127.0.0.1:%d-:22", sshPort))
+	} else {
+		args = append(args, "-netdev", "user,id=net0")
+	}
+
 	args = append(args,
-		"-netdev", "user,id=net0",
 		"-device", "virtio-net-pci,netdev=net0,mac=AA:BB:CC:DD:CA:B0",
 		"-netdev", "stream,id=net1,server=on,addr.type=unix,addr.path="+q.SocketPaths[0],
 		"-device", "virtio-net-pci,bus=pcie.1,netdev=net1,mac=52:54:00:6b:ff:a5,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10",
@@ -357,16 +372,27 @@ func (q *QEMUManager) Stop() error {
 		q.serialConn = nil
 	}
 
-	// Kill QEMU process if running
-	if q.Command != nil && q.Command.Process != nil {
-		if err := q.Command.Process.Kill(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to kill QEMU process: %w", err))
+	// Kill QEMU process if running (unless VM should be kept alive for debugging)
+	if ShouldKeepVMAlive() {
+		q.log.Infof("Keeping VM alive (PID: %d) for manual debugging", q.Command.Process.Pid)
+		q.log.Infof("Serial console socket: %s", q.SerialPath)
+		q.log.Infof("To connect: socat - UNIX-CONNECT:%s", q.SerialPath)
+		q.log.Infof("Note: SSH port was logged during VM startup")
+	} else {
+		if q.Command != nil && q.Command.Process != nil {
+			if err := q.Command.Process.Kill(); err != nil {
+				errs = append(errs, fmt.Errorf("failed to kill QEMU process: %w", err))
+			}
 		}
 	}
 
-	// Cleanup working directory
-	if err := os.RemoveAll(q.WorkDir); err != nil {
-		errs = append(errs, fmt.Errorf("failed to cleanup working directory: %w", err))
+	// Cleanup working directory and socket files (unless artifacts should be preserved)
+	if ShouldPreserveArtifacts() {
+		q.log.Infof("Preserving QEMU artifacts in: %s", q.WorkDir)
+	} else {
+		if err := os.RemoveAll(q.WorkDir); err != nil {
+			errs = append(errs, fmt.Errorf("failed to cleanup working directory: %w", err))
+		}
 	}
 
 	for _, path := range q.SocketPaths {
@@ -585,4 +611,19 @@ func isKVMEnabled() bool {
 		return true
 	}
 	return false
+}
+
+// getFreePort asks the kernel for a free open port that is ready to use.
+func getFreePort() (int, error) {
+	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+
+	l, err := net.ListenTCP("tcp", addr)
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
 }

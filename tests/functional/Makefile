@@ -117,7 +117,7 @@ define run_qemu
 	$(eval TARGET_DIR := $(PROJECT_ROOT)/target)
 
 	# Create target directory if it doesn't exist
-	mkdir -p $(TARGET_DIR)
+	mkdir -p $(TARGET_DIR) /tmp/yanet-test-vm
 
 	# Start QEMU with configuration
 	qemu-system-x86_64 \
@@ -136,9 +136,9 @@ define run_qemu
 		-device virtio-net-pci,bus=pcie.1,netdev=net1,mac=52:54:00:6b:ff:a5,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10 \
 		-netdev stream,id=net2,server=on,addr.type=unix,addr.path=/tmp/yanetvm_sockdev_1.sock \
 		-device virtio-net-pci,bus=pcie.2,netdev=net2,mac=52:54:00:11:00:03,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10 \
-		-fsdev local,id=fsdev0,path=/tmp,security_model=none \
+		-fsdev local,id=fsdev0,path=/tmp/yanet-test-vm,security_model=none \
 		-device virtio-9p-pci,fsdev=fsdev0,mount_tag=binaries \
-		-fsdev local,id=fsdev1,path=/tmp,security_model=none \
+		-fsdev local,id=fsdev1,path=/tmp/yanet-test-vm,security_model=none \
 		-device virtio-9p-pci,fsdev=fsdev1,mount_tag=config \
 		-fsdev local,id=fsdev2,path=$(BUILD_DIR),security_model=none \
 		-device virtio-9p-pci,fsdev=fsdev2,mount_tag=build \
@@ -158,7 +158,7 @@ define run_qemu_ssh
 	$(eval TARGET_DIR := $(PROJECT_ROOT)/target)
 
 	# Create target directory if it doesn't exist
-	mkdir -p $(TARGET_DIR)
+	mkdir -p $(TARGET_DIR) /tmp/yanet-test-vm
 
 	# Start QEMU with configuration
 	qemu-system-x86_64 \
@@ -177,9 +177,9 @@ define run_qemu_ssh
 		-device virtio-net-pci,bus=pcie.1,netdev=net1,mac=52:54:00:6b:ff:a5,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10 \
 		-netdev stream,id=net2,server=on,addr.type=unix,addr.path=/tmp/yanetvm_sockdev_1.sock \
 		-device virtio-net-pci,bus=pcie.2,netdev=net2,mac=52:54:00:11:00:03,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10 \
-		-fsdev local,id=fsdev0,path=/tmp,security_model=none \
+		-fsdev local,id=fsdev0,path=/tmp/yanet-test-vm,security_model=none \
 		-device virtio-9p-pci,fsdev=fsdev0,mount_tag=binaries \
-		-fsdev local,id=fsdev1,path=/tmp,security_model=none \
+		-fsdev local,id=fsdev1,path=/tmp/yanet-test-vm,security_model=none \
 		-device virtio-9p-pci,fsdev=fsdev1,mount_tag=config \
 		-fsdev local,id=fsdev2,path=$(BUILD_DIR),security_model=none \
 		-device virtio-9p-pci,fsdev=fsdev2,mount_tag=build \
@@ -226,6 +226,12 @@ debug-vm-ssh: $(QEMU_IMAGE)
 	@echo "Starting VM in debug mode with passwordless login..."
 	@echo "VM will start with serial console output and automatic login"
 	@echo "Listens to SSH connections on port 2222"
+	@echo ""
+	@echo "NOTE: You need to manually start SSH server and configure authorized_keys:"
+	@echo "  1. Start SSH server: systemctl start ssh"
+	@echo "  2. Add your public key to /root/.ssh/authorized_keys"
+	@echo "  3. Connect via SSH: ssh -p 2222 root@127.0.0.1"
+	@echo ""
 	@echo "Use Ctrl+A, X to exit QEMU"
 	@echo ""
 
@@ -248,6 +254,7 @@ help:
 	@echo "  clean-all        - Clean everything including downloaded images"
 	@echo ""
 	@echo "  debug-vm         - Start VM in debug mode with serial console"
+	@echo "  debug-vm-ssh     - Start VM in debug mode with serial console and SSH forwarding on port 2222"
 	@echo "  help             - Show this help"
 	@echo ""
 	@echo "Configuration:"
