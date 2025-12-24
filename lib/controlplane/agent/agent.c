@@ -131,8 +131,9 @@ agent_attach(
 	uint64_t arena_count =
 		(memory_limit + MEMORY_BLOCK_ALLOCATOR_MAX_SIZE - 1) /
 		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
-	void **arenas = (void **)memory_balloc(
-		&cp_config->memory_context, sizeof(void *) * arena_count
+	struct agent_arena *arenas = (struct agent_arena *)memory_balloc(
+		&cp_config->memory_context,
+		sizeof(struct agent_arena) * arena_count
 	);
 	if (arenas == NULL) {
 		agent_cleanup(new_agent);
@@ -140,7 +141,8 @@ agent_attach(
 		goto unlock;
 	}
 
-	memset(arenas, 0, sizeof(void *) * arena_count);
+	memset(arenas, 0, sizeof(struct agent_arena) * arena_count);
+	SET_OFFSET_OF(&new_agent->arenas, arenas);
 
 	uint64_t arena_size = memory_limit > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
 				      ? MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
@@ -157,10 +159,10 @@ agent_attach(
 		block_allocator_put_arena(
 			&new_agent->block_allocator, arena, arena_size
 		);
-		SET_OFFSET_OF(arenas + new_agent->arena_count, arena);
+		SET_OFFSET_OF(&arenas[new_agent->arena_count].data, arena);
+		arenas[new_agent->arena_count].size = arena_size;
 		new_agent->arena_count++;
 	}
-	SET_OFFSET_OF(&new_agent->arenas, arenas);
 
 	struct cp_agent_registry *old_registry =
 		ADDR_OF(&cp_config->agent_registry);
@@ -240,20 +242,20 @@ void
 agent_cleanup(struct agent *agent) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
-	void **arenas = ADDR_OF(&agent->arenas);
+	struct agent_arena *arenas = ADDR_OF(&agent->arenas);
 	if (arenas) {
 		for (uint64_t arena_idx = 0; arena_idx < agent->arena_count;
 		     ++arena_idx) {
 			memory_bfree(
 				&cp_config->memory_context,
-				ADDR_OF(arenas + arena_idx),
-				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+				ADDR_OF(&arenas[arena_idx].data),
+				arenas[arena_idx].size
 			);
 		}
 		memory_bfree(
 			&cp_config->memory_context,
 			arenas,
-			sizeof(void *) * agent->arena_count
+			sizeof(struct agent_arena) * agent->arena_count
 		);
 	}
 	memory_bfree(&cp_config->memory_context, agent, sizeof(struct agent));

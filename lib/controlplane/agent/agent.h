@@ -15,6 +15,11 @@ struct cp_module;
 
 struct agent;
 
+struct agent_arena {
+	void *data;
+	uint64_t size;
+};
+
 struct agent {
 	struct block_allocator block_allocator;
 	struct memory_context memory_context;
@@ -29,7 +34,7 @@ struct agent {
 	char name[80];
 
 	uint64_t arena_count;
-	void **arenas;
+	struct agent_arena *arenas;
 
 	struct cp_module *unused_module;
 
