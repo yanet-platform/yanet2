@@ -1,5 +1,6 @@
 #include "info.h"
 #include "common/memory.h"
+#include "common/memory_address.h"
 #include "state.h"
 
 #include "../state/registry.h"
@@ -14,7 +15,7 @@ balancer_fill_virtual_services_info(
 ) {
 	size_t count = state->vs_registry.array.size;
 	struct balancer_virtual_service_info *vs_info = memory_balloc(
-		state->mctx,
+		ADDR_OF(&state->mctx),
 		count * sizeof(struct balancer_virtual_service_info)
 	);
 	if (vs_info == NULL) {
@@ -60,7 +61,7 @@ balancer_free_virtual_services_info(
 	struct balancer_virtual_services_info *info
 ) {
 	memory_bfree(
-		state->mctx,
+		ADDR_OF(&state->mctx),
 		info->info,
 		info->count * sizeof(struct balancer_virtual_service_info)
 	);
@@ -74,7 +75,7 @@ balancer_fill_reals_info(
 ) {
 	size_t count = state->real_registry.array.size;
 	struct balancer_real_info *real_info = memory_balloc(
-		state->mctx, count * sizeof(struct balancer_real_info)
+		ADDR_OF(&state->mctx), count * sizeof(struct balancer_real_info)
 	);
 	if (real_info == NULL) {
 		return -1;
@@ -92,7 +93,7 @@ balancer_free_reals_info(
 	struct balancer_state *state, struct balancer_reals_info *info
 ) {
 	memory_bfree(
-		state->mctx,
+		ADDR_OF(&state->mctx),
 		info->info,
 		info->count * sizeof(struct balancer_real_info)
 	);
@@ -175,7 +176,11 @@ balancer_fill_sessions_info(
 	bool count_only
 ) {
 	return session_table_fill_sessions_info(
-		&state->session_table, info, state->mctx, now, count_only
+		&state->session_table,
+		info,
+		ADDR_OF(&state->mctx),
+		now,
+		count_only
 	);
 }
 
@@ -183,5 +188,5 @@ void
 balancer_free_sessions_info(
 	struct balancer_state *state, struct balancer_sessions_info *info
 ) {
-	session_table_free_sessions_info(info, state->mctx);
+	session_table_free_sessions_info(info, ADDR_OF(&state->mctx));
 }

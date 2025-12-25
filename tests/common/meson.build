@@ -55,7 +55,7 @@ rcu_test = executable(
 )
 test('rcu', rcu_test, suite: ['common'])
 
-rcu_bench = executable(
+executable(
   'rcu_bench',
   ['rcu_bench.c'],
   c_args: yanet_c_args,
@@ -72,7 +72,7 @@ balloc_test = executable(
 )
 test('balloc', balloc_test, suite: ['common'])
 
-balloc_bench = executable(
+executable(
   'balloc_bench',
   ['balloc_bench.c'],
   c_args: yanet_c_args,

@@ -146,7 +146,8 @@ service_info_init(
 	uint8_t *ip_address,
 	int ip_proto,
 	uint16_t port,
-	int transport_proto
+	int transport_proto,
+	int enabled
 ) {
 	service->vip_proto = vip_proto;
 	memcpy(&service->vip_address,
@@ -155,6 +156,7 @@ service_info_init(
 	service->ip_proto = ip_proto;
 	service->port = port;
 	service->transport_proto = transport_proto;
+	service->enabled = enabled;
 	memcpy(&service->ip_address,
 	       ip_address,
 	       (ip_proto == IPPROTO_IPV6 ? NET6_LEN : NET4_LEN));

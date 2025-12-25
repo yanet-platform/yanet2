@@ -35,7 +35,6 @@
 /// If real serves on the IPv6 address.
 #define BALANCER_REAL_IPV6_FLAG ((uint64_t)(1ull << 0))
 
-/// If real is enabled.
 #define BALANCER_REAL_DISABLED_FLAG ((uint64_t)(1ull << 1))
 
 ////////////////////////////////////////////////////////////////////////////////

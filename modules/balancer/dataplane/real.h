@@ -7,6 +7,7 @@
 
 typedef uint8_t real_flags_t;
 
+#define REAL_ENABLED_FLAG (1 << 6)
 #define REAL_PRESENT_IN_CONFIG_FLAG (1 << 7)
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -18,6 +19,7 @@ struct real {
 
 	real_flags_t flags;
 	uint16_t weight;
+
 	uint8_t dst_addr[16];
 	uint8_t src_addr[16];
 	uint8_t src_mask[16];

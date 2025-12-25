@@ -37,6 +37,7 @@ service_registry_find_or_insert_service(
 	int ip_proto,
 	uint16_t port,
 	int transport_proto,
+	int enabled,
 	struct service_info **result
 );
 

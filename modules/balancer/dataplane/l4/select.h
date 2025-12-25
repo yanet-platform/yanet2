@@ -5,6 +5,7 @@
 #include "../meta.h"
 
 #include "modules/balancer/state/state.h"
+#include "ring.h"
 #include "rte_tcp.h"
 #include <assert.h>
 #include <filter/filter.h>
@@ -62,8 +63,8 @@ select_real(
 	// if `One Packet Scheduling` flag is set,
 	// we do not account for sessions
 	if (vs->flags & BALANCER_VS_OPS_FLAG) {
-		uint32_t real_id = ring_get(
-			&vs->real_ring, next_rnd(vs, metadata, ctx->worker->idx)
+		uint32_t real_id = real_selector_select(
+			&vs->real_selector, worker_idx, metadata->hash
 		);
 		if (real_id == RING_VALUE_INVALID) {
 			// discard packet because there are no enabled reals
@@ -194,13 +195,13 @@ select_real(
 
 	// select new real for the session and remember it in session state
 
-	uint32_t real_id = ring_get(
-		&vs->real_ring, next_rnd(vs, metadata, ctx->worker->idx)
+	uint32_t real_id = real_selector_select(
+		&vs->real_selector, worker_idx, metadata->hash
 	);
 	if (real_id == RING_VALUE_INVALID) {
 		VS_STATS_INC(no_reals, ctx);
 		session_remove(session_state); // free created state
-		session_unlock(session_lock);  // nlock state
+		session_unlock(session_lock);  // unlock state
 		session_table_end_cs(table, worker_idx);
 		return NULL;
 	}

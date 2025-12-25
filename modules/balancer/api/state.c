@@ -54,7 +54,7 @@ balancer_state_destroy(struct balancer_state *state) {
 	uintptr_t mem = (uintptr_t)state;
 	mem -= state->memory_shift;
 	memory_bfree(
-		state->mctx,
+		ADDR_OF(&state->mctx),
 		(void *)mem,
 		sizeof(struct balancer_state) + alignof(struct balancer_state)
 	);

@@ -48,7 +48,8 @@ service_array_push_back(
 	uint8_t *ip_address,
 	int ip_proto,
 	uint16_t port,
-	int transport_proto
+	int transport_proto,
+	int enabled
 ) {
 	if (array->size % SERVICE_REGISTRY_BLOCK_SIZE == 0) {
 		// need allocate new block
@@ -108,7 +109,8 @@ service_array_push_back(
 		ip_address,
 		ip_proto,
 		port,
-		transport_proto
+		transport_proto,
+		enabled
 	);
 	return 0;
 }

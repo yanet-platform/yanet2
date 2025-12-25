@@ -5,8 +5,6 @@
 #include "ring.h"
 #include "worker.h"
 
-#include "../state/registry.h"
-
 ////////////////////////////////////////////////////////////////////////////////
 
 // Virtual service flags.
@@ -14,17 +12,6 @@ typedef uint8_t vs_flags_t;
 
 // If virtual service is present in the current module config.
 #define VS_PRESENT_IN_CONFIG_FLAG (1 << 7)
-
-////////////////////////////////////////////////////////////////////////////////
-
-// Worker local info about
-// virtual service state.
-struct vs_worker_local {
-	// if virtual service schedule is PRR,
-	// use counter to select next real for packet
-	// scheduling.
-	uint64_t round_robin_counter;
-}; // todo: add alignment to avoid false sharing
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -47,17 +34,14 @@ struct virtual_service {
 	uint8_t proto;
 
 	// number of reals
-	size_t real_count;
-
-	// ring of reals which serves this virtual service
-	struct ring real_ring;
+	struct real_selector real_selector;
 
 	// packet source address should be from
 	// allowed list for this virtual service
 	struct lpm src_filter;
 
 	// worker local state for the virtual service
-	struct vs_worker_local worker_local[MAX_WORKERS_NUM];
+	struct real_selector_worker worker_local[MAX_WORKERS_NUM];
 
 	// id of the counter for virtual service,
 	// which is related to the placement of the config

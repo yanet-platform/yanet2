@@ -76,6 +76,7 @@ balancer_state_find_or_insert_real(
 	int transport_proto,
 	uint8_t *ip_address,
 	int ip_proto,
+	int enabled,
 	struct service_info **service_info
 );
 

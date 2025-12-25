@@ -83,6 +83,7 @@ target/
 # clangd
 .cache
 compile_commands.json
+.clangd
 
 buildclang/
 build/

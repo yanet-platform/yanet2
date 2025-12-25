@@ -1,5 +1,6 @@
 #include "state.h"
 #include "common/memory.h"
+#include "common/memory_address.h"
 #include "registry.h"
 #include "session_table.h"
 #include <assert.h>
@@ -20,7 +21,7 @@ balancer_state_init(
 	assert((uintptr_t)state % alignof(struct balancer_state) == 0);
 
 	// memory context
-	state->mctx = mctx;
+	SET_OFFSET_OF(&state->mctx, mctx);
 
 	// workers
 	state->workers = workers;
@@ -75,6 +76,7 @@ balancer_state_find_or_insert_vs(
 		ip_proto,
 		port,
 		transport_proto,
+		1,
 		service_info
 	);
 }
@@ -96,6 +98,7 @@ balancer_state_find_or_insert_real(
 	int transport_proto,
 	uint8_t *ip_address,
 	int ip_proto,
+	int enabled,
 	struct service_info **service_info
 ) {
 	return service_registry_find_or_insert_service(
@@ -106,6 +109,7 @@ balancer_state_find_or_insert_real(
 		ip_proto,
 		port,
 		transport_proto,
+		enabled,
 		service_info
 	);
 }

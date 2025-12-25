@@ -71,9 +71,6 @@ message Real {
 	bytes src_addr = 3;
 	bytes src_mask = 4;
 
-	// False by default.
-	bool enabled = 5;
-
 	// Unused for now,
 	// not present in the rest codebase.
 	uint32 port = 6;

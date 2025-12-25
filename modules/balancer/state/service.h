@@ -56,7 +56,8 @@ service_info_init(
 	uint8_t *ip_address,
 	int ip_proto,
 	uint16_t port,
-	int transport_proto
+	int transport_proto,
+	int enabled
 );
 
 struct balancer_real_info;
