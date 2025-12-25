@@ -67,10 +67,10 @@ const filterRules = (rules: Rule[], query: string): Rule[] => {
         if (devicesStr.includes(lowerQuery)) return true;
 
         // Search in counter
-        if (rule.counter?.toLowerCase().includes(lowerQuery)) return true;
+        if (rule.action?.counter?.toLowerCase().includes(lowerQuery)) return true;
 
         // Search in action
-        const actionStr = ACTION_LABELS[rule.action ?? 0].toLowerCase();
+        const actionStr = ACTION_LABELS[rule.action?.kind ?? 0].toLowerCase();
         if (actionStr.includes(lowerQuery)) return true;
 
         return false;
@@ -84,9 +84,9 @@ interface TableRowProps {
 }
 
 const TableRow: React.FC<TableRowProps> = React.memo(({ rule, index, start }) => {
-    const action = rule.action ?? 0;
-    const actionLabel = ACTION_LABELS[action];
-    const isPassAction = action === 0;
+    const actionKind = rule.action?.kind ?? 0;
+    const actionLabel = ACTION_LABELS[actionKind];
+    const isPassAction = actionKind === 0;
 
     return (
         <div
@@ -119,8 +119,8 @@ const TableRow: React.FC<TableRowProps> = React.memo(({ rule, index, start }) =>
             <div style={cellStyles.devices} title={formatDevices(rule.devices)}>
                 {formatDevices(rule.devices)}
             </div>
-            <div style={cellStyles.counter} title={rule.counter || ''}>
-                {rule.counter || '-'}
+            <div style={cellStyles.counter} title={rule.action?.counter || ''}>
+                {rule.action?.counter || '-'}
             </div>
             <div style={cellStyles.action}>
                 <Text

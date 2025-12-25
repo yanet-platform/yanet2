@@ -30,7 +30,14 @@ export enum ActionKind {
     CREATE_STATE = 4,
 }
 
+export interface Action {
+    kind?: ActionKind;
+    counter?: string;
+    keepState?: boolean;
+}
+
 export interface Rule {
+    action?: Action;
     srcs?: IPNet[];
     dsts?: IPNet[];
     srcPortRanges?: PortRange[];
@@ -38,9 +45,6 @@ export interface Rule {
     devices?: string[];
     vlanRanges?: VlanRange[];
     protoRanges?: ProtoRange[];
-    keepState?: boolean;
-    counter?: string;
-    action?: ActionKind;
 }
 
 export interface MapConfig {

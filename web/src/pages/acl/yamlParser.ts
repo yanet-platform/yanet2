@@ -1,5 +1,5 @@
 import yaml from 'js-yaml';
-import type { Rule, IPNet, PortRange, ProtoRange, VlanRange, ActionKind } from '../../api/acl';
+import type { Rule, IPNet, PortRange, ProtoRange, VlanRange, ActionKind, Action } from '../../api/acl';
 import type { YamlAclConfig, YamlAclRule } from './types';
 import { bytesToBase64, getBytes } from '../../utils/bytes';
 import {
@@ -92,9 +92,16 @@ const convertYamlRule = (yamlRule: YamlAclRule): Rule => {
         to: r.to,
     }));
 
-    const action: ActionKind = yamlRule.action === 'Allow' ? 0 : 1;
+    const actionKind: ActionKind = yamlRule.action === 'Allow' ? 0 : 1;
+
+    const action: Action = {
+        kind: actionKind,
+        counter: yamlRule.counter || '',
+        keepState: false,
+    };
 
     return {
+        action,
         srcs,
         dsts,
         srcPortRanges,
@@ -102,9 +109,6 @@ const convertYamlRule = (yamlRule: YamlAclRule): Rule => {
         protoRanges,
         vlanRanges,
         devices: yamlRule.devices || [],
-        counter: yamlRule.counter || '',
-        action,
-        keepState: false,
     };
 };
 
