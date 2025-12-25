@@ -18,6 +18,10 @@ struct cp_config_gen;
 struct module_ectx {
 	module_handler handler;
 	struct cp_module *cp_module;
+
+	uint64_t rx_counter_id;
+	uint64_t tx_counter_id;
+
 	struct counter_storage *counter_storage;
 	struct config_gen_ectx *config_gen_ectx;
 

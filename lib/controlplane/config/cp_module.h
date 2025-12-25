@@ -46,6 +46,11 @@ struct cp_module {
 	// Counters declared inside module data
 	struct counter_registry counter_registry;
 
+	// Rx packet counter
+	uint64_t rx_counter_id;
+	// Tx packet counter
+	uint64_t tx_counter_id;
+
 	// Link to the previous instance of the module configuration
 	struct cp_module *prev;
 	// Controlplane agent the configuration belongs to

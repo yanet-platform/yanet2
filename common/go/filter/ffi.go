@@ -52,8 +52,8 @@ func (m *IPNet4) Build() C.struct_net4 {
 		mask: [4]C.uint8_t{},
 	}
 	addr := m.Addr.AsSlice()
-	mask := m.Addr.AsSlice()
-	for idx := 0; idx < 3; idx++ {
+	mask := m.Mask.AsSlice()
+	for idx := 0; idx < 4; idx++ {
 		res.addr[idx] = C.uint8_t(addr[idx])
 		res.mask[idx] = C.uint8_t(mask[idx])
 	}
@@ -67,8 +67,8 @@ func (m *IPNet6) Build() C.struct_net6 {
 		mask: [16]C.uint8_t{0},
 	}
 	addr := m.Addr.AsSlice()
-	mask := m.Addr.AsSlice()
-	for idx := 0; idx < 15; idx++ {
+	mask := m.Mask.AsSlice()
+	for idx := 0; idx < 16; idx++ {
 		res.addr[idx] = C.uint8_t(addr[idx])
 		res.mask[idx] = C.uint8_t(mask[idx])
 	}

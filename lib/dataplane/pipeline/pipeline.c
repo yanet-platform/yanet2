@@ -27,7 +27,19 @@ module_ectx_process(
 		);
 	}
 
+	uint64_t *rx = counter_get_address(
+		module_ectx->rx_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+	rx[0] += packet_front->input.count;
 	module_ectx->handler(dp_worker, module_ectx, packet_front);
+	uint64_t *tx = counter_get_address(
+		module_ectx->tx_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+	tx[0] += packet_front->output.count;
 
 	LOG_TRACEX(int in = packet_list_counter(&packet_front->input);
 		   int out = packet_list_counter(&packet_front->output);

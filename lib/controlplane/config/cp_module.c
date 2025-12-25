@@ -53,6 +53,13 @@ cp_module_init(
 		return -1;
 	}
 
+	cp_module->rx_counter_id = counter_registry_register(
+		&cp_module->counter_registry, "rx", 1
+	);
+	cp_module->tx_counter_id = counter_registry_register(
+		&cp_module->counter_registry, "tx", 1
+	);
+
 	uint64_t any_idx;
 	if (cp_module_link_device(cp_module, "", &any_idx)) {
 		PUSH_ERROR(

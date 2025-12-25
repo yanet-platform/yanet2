@@ -174,7 +174,7 @@ rules:
     mode: None
     devices:
       - 01:00.0
-  - target:
+  - target: virtio_user_kni0
     counter: to_virtio_user_kni0
     vlan_ranges:
       - from: 0

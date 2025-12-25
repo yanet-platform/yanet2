@@ -67,6 +67,9 @@ module_ectx_create(
 	memset(module_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&module_ectx->cp_module, cp_module);
 
+	module_ectx->rx_counter_id = cp_module->rx_counter_id;
+	module_ectx->tx_counter_id = cp_module->tx_counter_id;
+
 	SET_OFFSET_OF(&module_ectx->config_gen_ectx, config_gen_ectx);
 
 	struct dp_module *dp_module =

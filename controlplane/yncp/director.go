@@ -160,9 +160,6 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		gateway.WithBuiltInModule(
 			balancerModule,
 		),
-		gateway.WithBuiltInModule(
-			aclModule,
-		),
 		gateway.WithBuiltInDevice(
 			plainDevice,
 		),
