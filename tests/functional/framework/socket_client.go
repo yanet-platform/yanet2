@@ -348,9 +348,8 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration, dumpPath string) ([
 		sc.log.Debugf("Received packet data: % x", packetData)
 
 		// Write raw socket data to dump file if path is provided (with length prefix)
-		packetWithLength := make([]byte, 4+len(packetData))
-		binary.BigEndian.PutUint32(packetWithLength, uint32(len(packetData)))
-		copy(packetWithLength[4:], packetData)
+		packetWithLength := make([]byte, 0, 4+len(packetData))
+		packetWithLength = append(append(packetWithLength, lengthPrefix...), packetData...)
 		if err := writeToDumpFile(dumpPath, packetWithLength); err != nil {
 			sc.log.Warnf("Failed to write to dump file: %v", err)
 		}

@@ -232,7 +232,7 @@ func TestNAT64(t *testing.T) {
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixTrue_MappingTrue", func(t *testing.T) {
 		fw := globalFramework.WithTestName(t.Name())
 		// Set drop-unknown-prefix=true, drop-unknown-mapping=true
-		err := setAndWaitForNAT64DropFlags(globalFramework, true, true, 10*time.Second)
+		err := setAndWaitForNAT64DropFlags(fw, true, true, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
 		// Test IPv6 packet with known prefix and mapping - should be translated
@@ -301,7 +301,7 @@ func TestNAT64(t *testing.T) {
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixTrue_MappingFalse", func(t *testing.T) {
 		fw := globalFramework.WithTestName(t.Name())
 		// Set drop-unknown-prefix=true, drop-unknown-mapping=false
-		err := setAndWaitForNAT64DropFlags(globalFramework, true, false, 10*time.Second)
+		err := setAndWaitForNAT64DropFlags(fw, true, false, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
 		// Test IPv6 packet with unknown prefix - should be dropped
@@ -339,7 +339,7 @@ func TestNAT64(t *testing.T) {
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixFalse_MappingTrue", func(t *testing.T) {
 		fw := globalFramework.WithTestName(t.Name())
 		// Set drop-unknown-prefix=false, drop-unknown-mapping=true
-		err := setAndWaitForNAT64DropFlags(globalFramework, false, true, 10*time.Second)
+		err := setAndWaitForNAT64DropFlags(fw, false, true, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
 		ipv6Packet := createNAT64Packet(
@@ -373,7 +373,7 @@ func TestNAT64(t *testing.T) {
 	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixFalse_MappingFalse", func(t *testing.T) {
 		fw := globalFramework.WithTestName(t.Name())
 		// Set both drop flags to false
-		err := setAndWaitForNAT64DropFlags(globalFramework, false, false, 10*time.Second)
+		err := setAndWaitForNAT64DropFlags(fw, false, false, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
 
 		// Test IPv6 packet with unknown prefix - should be passed through
