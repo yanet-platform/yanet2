@@ -1523,7 +1523,6 @@ agent_dp_config(struct agent *agent) {
 	return ADDR_OF(&agent->dp_config);
 }
 
-
 const char *
 agent_take_error(struct agent *agent) {
 	return diag_take_msg(&agent->diag);

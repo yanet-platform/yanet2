@@ -6,8 +6,8 @@
 
 #include <stdint.h>
 
-#include <rte_tcp.h>
 #include <rte_icmp.h>
+#include <rte_tcp.h>
 
 static inline uint32_t
 FILTER_ATTR_QUERY_FUNC(proto_range)(struct packet *packet, void *data) {
@@ -38,7 +38,6 @@ FILTER_ATTR_QUERY_FUNC(proto_range)(struct packet *packet, void *data) {
 		);
 		proto += icmp_header->icmp_type;
 	}
-
 
 	return value_table_get(&c->table, 0, proto);
 }
