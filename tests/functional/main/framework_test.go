@@ -103,7 +103,7 @@ dataplane:
   loglevel: trace
   instances:
     - dp_memory: 1073741824
-      cp_memory: 1342177280
+      cp_memory: 1610612736
       numa_id: 0
   devices:
     - port_name: 01:00.0
