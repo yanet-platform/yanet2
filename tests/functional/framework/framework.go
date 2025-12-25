@@ -64,10 +64,6 @@ var (
 		CLIDevicePlain + " update --name=01:00.0 --input test:1 --output dummy:1",
 		CLIDevicePlain + " update --name=virtio_user_kni0 --input bootstrap:1 --output dummy:1",
 	}
-	DebugCommands = []string{
-		"cp /var/log/yanet-controlplane.log /mnt/build/ 2>/dev/null || echo 'No controlplane log found'",
-		"cp /var/log/yanet-dataplane.log /mnt/build/ 2>/dev/null || echo 'No dataplane log found'",
-	}
 )
 
 // MustParseMAC parses a MAC address string and panics if parsing fails.
@@ -631,6 +627,12 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	if !f.QEMU.IsVMReady() {
 		return fmt.Errorf("vm is not ready")
 	}
+	if ShouldKeepVMAlive() {
+		_, err := f.CLI.ExecuteCommand("service ssh start")
+		if err != nil {
+			f.log.Warnf("Failed to start debug ssh server: %v", err)
+		}
+	}
 
 	// Validate configurations
 	if dataplaneConfig == "" {
@@ -718,7 +720,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 
 	// Start dataplane in background using config from mounted directory
 	f.log.Debug("Starting YANET dataplane...")
-	dataplaneCmd := "bash -c 'nohup /mnt/build/dataplane/yanet-dataplane /mnt/config/dataplane.yaml > /var/log/yanet-dataplane.log 2>&1 &'"
+	dataplaneCmd := "bash -c 'nohup /mnt/build/dataplane/yanet-dataplane /mnt/config/dataplane.yaml > /mnt/logs/yanet-dataplane.log 2>&1 &'"
 	output, err = f.CLI.ExecuteCommand(dataplaneCmd)
 	if err != nil {
 		return fmt.Errorf("failed to start dataplane: %w", err)
@@ -734,7 +736,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 
 	// Start controlplane in background using config from mounted directory
 	f.log.Debug("Starting YANET controlplane...")
-	controlplaneCmd := "bash -c 'nohup /mnt/build/controlplane/yanet-controlplane -c /mnt/config/controlplane.yaml > /var/log/yanet-controlplane.log 2>&1 &'"
+	controlplaneCmd := "bash -c 'nohup /mnt/build/controlplane/yanet-controlplane -c /mnt/config/controlplane.yaml > /mnt/logs/yanet-controlplane.log 2>&1 &'"
 	output, err = f.CLI.ExecuteCommand(controlplaneCmd)
 	if err != nil {
 		return fmt.Errorf("failed to start controlplane: %w", err)
@@ -744,7 +746,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	// Verify services are running
 	f.log.Debug("Verifying YANET services are running...")
 
-	err = f.waitOutputPresent("cat /var/log/yanet-controlplane.log", func(output string) bool {
+	err = f.waitOutputPresent("cat /mnt/logs/yanet-controlplane.log", func(output string) bool {
 		return strings.Contains(output, "updated nexthop cache")
 	}, 10*time.Second)
 	if err != nil {
@@ -752,10 +754,10 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	}
 
 	checkCmds := []string{
-		"ps aux | grep yanet-dataplane | grep -v grep",
-		"ps aux | grep yanet-controlplane | grep -v grep",
-		"cat /var/log/yanet-dataplane.log",
-		"cat /var/log/yanet-controlplane.log",
+		"ps awux | grep [y]anet-dataplane",
+		"ps awux | grep [y]anet-controlplane",
+		"cat /mnt/logs/yanet-dataplane.log",
+		"cat /mnt/logs/yanet-controlplane.log",
 	}
 
 	_, err = f.CLI.ExecuteCommands(checkCmds...)

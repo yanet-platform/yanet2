@@ -213,19 +213,6 @@ rules:
 
 	// Run tests
 	code = m.Run()
-
-	if framework.IsDebugEnabled() {
-		sugar.Info("Copying logs from VM...")
-		debugCommands := []string{
-			"cp -v /var/log/yanet-controlplane.log /mnt/build/yanet-controlplane-main.log 2>&1 || echo 'No controlplane log found'",
-			"cp -v /var/log/yanet-dataplane.log /mnt/build/yanet-dataplane-main.log 2>&1 || echo 'No dataplane log found'",
-		}
-		_, err := fw.CLI.ExecuteCommands(debugCommands...)
-		if err != nil {
-			sugar.Errorf("Failed to copy logs from VM: %v", err)
-		}
-	}
-
 	return code
 }
 
@@ -283,7 +270,7 @@ func TestFramework(t *testing.T) {
 	t.Run("Filesystem_Check", func(t *testing.T) {
 		// Check main directories
 		directories := []string{
-			"/mnt/binaries",
+			"/mnt/logs",
 			"/mnt/config",
 			"/mnt/build",
 			"/mnt/target",

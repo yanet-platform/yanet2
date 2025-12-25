@@ -202,15 +202,5 @@ rules:
 	// Run tests
 	code = m.Run()
 
-	if framework.IsDebugEnabled() {
-		// Copy logs from VM for debugging
-		sugar.Info("Copying logs from VM...")
-		debugCommands := []string{
-			"cp -v /var/log/yanet-controlplane.log /mnt/build/yanet-controlplane-converted.log 2>&1 || echo 'No controlplane log found (converted tests)'",
-			"cp -v /var/log/yanet-dataplane.log /mnt/build/yanet-dataplane-converted.log 2>&1 || echo 'No dataplane log found (converted tests)'",
-		}
-		fw.CLI.ExecuteCommands(debugCommands...)
-	}
-
 	return code
 }

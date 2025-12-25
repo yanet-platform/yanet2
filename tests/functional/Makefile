@@ -142,7 +142,7 @@ define run_qemu
 		-netdev stream,id=net2,server=on,addr.type=unix,addr.path=/tmp/yanetvm_sockdev_1.sock \
 		-device virtio-net-pci,bus=pcie.2,netdev=net2,mac=52:54:00:11:00:03,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10 \
 		-fsdev local,id=fsdev0,path=/tmp/yanet-test-vm,security_model=none \
-		-device virtio-9p-pci,fsdev=fsdev0,mount_tag=binaries \
+		-device virtio-9p-pci,fsdev=fsdev0,mount_tag=logs \
 		-fsdev local,id=fsdev1,path=/tmp/yanet-test-vm,security_model=none \
 		-device virtio-9p-pci,fsdev=fsdev1,mount_tag=config \
 		-fsdev local,id=fsdev2,path=$(BUILD_DIR),security_model=none \
@@ -183,7 +183,7 @@ define run_qemu_ssh
 		-netdev stream,id=net2,server=on,addr.type=unix,addr.path=/tmp/yanetvm_sockdev_1.sock \
 		-device virtio-net-pci,bus=pcie.2,netdev=net2,mac=52:54:00:11:00:03,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10 \
 		-fsdev local,id=fsdev0,path=/tmp/yanet-test-vm,security_model=none \
-		-device virtio-9p-pci,fsdev=fsdev0,mount_tag=binaries \
+		-device virtio-9p-pci,fsdev=fsdev0,mount_tag=logs \
 		-fsdev local,id=fsdev1,path=/tmp/yanet-test-vm,security_model=none \
 		-device virtio-9p-pci,fsdev=fsdev1,mount_tag=config \
 		-fsdev local,id=fsdev2,path=$(BUILD_DIR),security_model=none \

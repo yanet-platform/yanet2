@@ -62,20 +62,6 @@ func findProjectRoot() (string, error) {
 	return "", fmt.Errorf("project root not found (no meson.build with build directory)")
 }
 
-// ShouldPreserveArtifacts checks if test artifacts should be preserved for debugging.
-// Returns true if the YANET_PRESERVE_ARTIFACTS environment variable is set.
-//
-// Example:
-//
-//	if ShouldPreserveArtifacts() {
-//	    log.Info("Preserving test artifacts for debugging")
-//	    // Skip cleanup
-//	}
-func ShouldPreserveArtifacts() bool {
-	_, ok := os.LookupEnv("YANET_PRESERVE_ARTIFACTS")
-	return ShouldKeepVMAlive() || ok
-}
-
 // IsDebugEnabled checks if debug mode is enabled for tests.
 // Returns true if the YANET_TEST_DEBUG environment variable is set.
 //

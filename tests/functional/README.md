@@ -92,10 +92,8 @@ make help
 make debug-vm
 # Use Ctrl+A, X to exit QEMU
 
-# Enable debug logging for tests
+# Enable debug logging for tests and preserve test artifacts
 export YANET_TEST_DEBUG=1
-# Preserve test artifacts for debugging (don't delete after test)
-export YANET_PRESERVE_ARTIFACTS=1
 # Keep VM running after test for manual debugging (also enables debug logging and preserves artifacts)
 export YANET_KEEP_VM_ALIVE=1
 go test -v ./...
@@ -125,8 +123,6 @@ YANET_TEST_DEBUG=1 go test -v ./...
 
 When `YANET_TEST_DEBUG` is set, the framework will use zap's Development
 configuration with detailed output of all framework operations.
-
-When `YANET_PRESERVE_ARTIFACTS` is set, the framework will:
 - Keep the VM working directory with all configuration files
 - Preserve QEMU logs and output files
 - Log the location of preserved artifacts
@@ -173,7 +169,7 @@ func TestExample(t *testing.T) {
 
 QEMU VM logs are available in the `yanet-test-vm.log` file in the test working directory.
 To access logs after test run, preserve artifacts with settings env
-`export YANET_PRESERVE_ARTIFACTS=1` - logs are then available in
+`export YANET_TEST_DEBUG=1` - logs are then available in
 `/tmp/yanet-vm-<name>-<pid>-<timestamp>/` directory.
 
 ### VM Access
@@ -191,8 +187,7 @@ make debug-vm
 ```
 
 When `YANET_KEEP_VM_ALIVE` is set, the framework will:
-- Enable debug logging (same as `YANET_TEST_DEBUG`)
-- Preserve test artifacts (same as `YANET_PRESERVE_ARTIFACTS`)
+- Enable debug logging and preserve test artifacts(same as `YANET_TEST_DEBUG`)
 - Keep the VM process running after test completion
 - Enable SSH port forwarding on a random free port for manual debugging
 - Log SSH connection details and serial console socket path

@@ -104,6 +104,13 @@ runcmd:
     passwd -d root
     # Allow empty passwords in PAM
     sed -i 's/nullok_secure/nullok/' /etc/pam.d/common-auth
+    # Allow empty passwords in SSH
+    cat <<EOF > /etc/ssh/sshd_config.d/99-z-passwordless.conf
+    PermitRootLogin yes
+    PubkeyAuthentication yes
+    PasswordAuthentication yes
+    PermitEmptyPasswords yes
+    EOF
   - |
     # Configure systemd-networkd-wait-online to not wait for optional interfaces
     mkdir -p /etc/systemd/system/systemd-networkd-wait-online.service.d
@@ -179,18 +186,20 @@ runcmd:
   - modprobe vfio-pci
   - echo 'vfio-pci' >> /etc/modules
   # Configure 9P mounts
-  - mkdir -p /mnt/binaries
+  - mkdir -p /mnt/logs
   - mkdir -p /mnt/config
   - mkdir -p /mnt/build
   - mkdir -p /mnt/target
   - mkdir -p /mnt/yanet2
-  - echo "binaries /mnt/binaries 9p trans=virtio,version=9p2000.L,rw,_netdev 0 0" >> /etc/fstab
+  - echo "logs /mnt/logs 9p trans=virtio,version=9p2000.L,rw,_netdev 0 0" >> /etc/fstab
   - echo "config /mnt/config 9p trans=virtio,version=9p2000.L,rw,_netdev 0 0" >> /etc/fstab
   - echo "build /mnt/build 9p trans=virtio,version=9p2000.L,rw,_netdev 0 0" >> /etc/fstab
   - echo "target /mnt/target 9p trans=virtio,version=9p2000.L,rw,_netdev 0 0" >> /etc/fstab
   - echo "yanet2 /mnt/yanet2 9p trans=virtio,version=9p2000.L,rw,_netdev 0 0" >> /etc/fstab
   # Configure automatic sudo for ubuntu user
   - echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+  # force term type inside VM
+  - echo 'export TERM=xterm' >> /root/.bashrc
   # Add ubuntu user to necessary groups
   - usermod -aG sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev ubuntu
   # Signal VM is fully ready

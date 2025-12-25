@@ -36,7 +36,7 @@ type QEMUManager struct {
 	ImagePath   string             // Path to the QEMU disk image file
 	WorkDir     string             // Temporary working directory for VM instance
 	Command     *exec.Cmd          // QEMU process command handle
-	BinariesDir string             // Directory for shared binary files
+	LogsDir     string             // Directory for logs
 	ConfigDir   string             // Directory for configuration files
 	BuildDir    string             // Project build directory (shared with VM)
 	TargetDir   string             // Project target directory (shared with VM)
@@ -50,6 +50,7 @@ type QEMUManager struct {
 	log         *zap.SugaredLogger // Logger for debugging and monitoring
 	readyMutex  sync.RWMutex       // Protects concurrent access to isReady field
 	instanceID  string             // Unique identifier for this VM instance
+	sshPort     int                // SSH port - used when debug mode
 }
 
 // NewQEMUManager creates and initializes a new QEMU manager instance for virtual
@@ -95,7 +96,7 @@ func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*
 		Name:        name,
 		ImagePath:   imagePath,
 		WorkDir:     workDir,
-		BinariesDir: filepath.Join(workDir, "bin"),
+		LogsDir:     filepath.Join(workDir, "logs"),
 		ConfigDir:   filepath.Join(workDir, "config"),
 		BuildDir:    buildDir,
 		TargetDir:   targetDir,
@@ -129,7 +130,7 @@ func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*
 //   - IOMMU and modern virtio features enabled for performance
 //
 // Filesystem Sharing:
-//   - Binaries directory for executable sharing
+//   - Logs directory for logs sharing
 //   - Configuration directory for runtime config files
 //   - Build directory for YANET binaries access
 //   - Target directory for build artifacts
@@ -162,11 +163,11 @@ func (q *QEMUManager) Start() error {
 	}
 
 	// Create working directories
-	q.log.Debug("Creating binaries directory...")
-	if err := os.MkdirAll(q.BinariesDir, 0755); err != nil {
-		return fmt.Errorf("failed to create binaries directory: %w", err)
+	q.log.Debug("Creating logs directory...")
+	if err := os.MkdirAll(q.LogsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create logs directory: %w", err)
 	}
-	q.log.Debug("Binaries directory created.")
+	q.log.Debug("Logs directory created.")
 
 	q.log.Debug("Creating config directory...")
 	if err := os.MkdirAll(q.ConfigDir, 0755); err != nil {
@@ -214,12 +215,13 @@ func (q *QEMUManager) Start() error {
 	// Network interface configuration
 	if ShouldKeepVMAlive() {
 		// Get a random free port for SSH forwarding to support multiple VMs
-		sshPort, err := getFreePort()
+		var err error
+		q.sshPort, err = getFreePort()
 		if err != nil {
 			return fmt.Errorf("failed to get free port for SSH forwarding: %w", err)
 		}
-		q.log.Infof("Keep VM alive mode enabled: SSH port forwarding 127.0.0.1:%d -> VM:22", sshPort)
-		args = append(args, "-netdev", fmt.Sprintf("user,id=net0,hostfwd=tcp:127.0.0.1:%d-:22", sshPort))
+		q.log.Infof("Keep VM alive mode enabled: SSH port forwarding 127.0.0.1:%d -> VM:22", q.sshPort)
+		args = append(args, "-netdev", fmt.Sprintf("user,id=net0,hostfwd=tcp:127.0.0.1:%d-:22", q.sshPort))
 	} else {
 		args = append(args, "-netdev", "user,id=net0")
 	}
@@ -232,13 +234,13 @@ func (q *QEMUManager) Start() error {
 		"-device", "virtio-net-pci,bus=pcie.2,netdev=net2,mac=52:54:00:11:00:03,disable-legacy=on,disable-modern=off,iommu_platform=on,ats=on,vectors=10",
 	)
 
-	// Add 9P filesystem sharing for YANET binaries and configuration
+	// Add 9P filesystem sharing for YANET logs and configuration
 	// This allows the VM to access host files for testing
 	// Match the mount configuration used in Makefile
 	args = append(args,
-		// Share temporary directory for binaries
-		"-fsdev", "local,id=fsdev0,path="+q.BinariesDir+",security_model=none",
-		"-device", "virtio-9p-pci,fsdev=fsdev0,mount_tag=binaries",
+		// Share temporary directory for logs
+		"-fsdev", "local,id=fsdev0,path="+q.LogsDir+",security_model=none",
+		"-device", "virtio-9p-pci,fsdev=fsdev0,mount_tag=logs",
 		// Share temporary directory for configuration
 		"-fsdev", "local,id=fsdev1,path="+q.ConfigDir+",security_model=none",
 		"-device", "virtio-9p-pci,fsdev=fsdev1,mount_tag=config",
@@ -383,7 +385,7 @@ func (q *QEMUManager) Stop() error {
 		q.log.Infof("Keeping VM alive (PID: %d) for manual debugging", q.Command.Process.Pid)
 		q.log.Infof("Serial console socket: %s", q.SerialPath)
 		q.log.Infof("To connect: socat - UNIX-CONNECT:%s", q.SerialPath)
-		q.log.Infof("Note: SSH port was logged during VM startup")
+		q.log.Infof("SSH: ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p %d", q.sshPort)
 	} else {
 		if q.Command != nil && q.Command.Process != nil {
 			if err := q.Command.Process.Kill(); err != nil {
@@ -393,7 +395,7 @@ func (q *QEMUManager) Stop() error {
 	}
 
 	// Cleanup working directory and socket files (unless artifacts should be preserved)
-	if ShouldPreserveArtifacts() {
+	if IsDebugEnabled() {
 		q.log.Infof("Preserving QEMU artifacts in: %s", q.WorkDir)
 		q.log.Infof("Socket files preserved:")
 		for i, path := range q.SocketPaths {
