@@ -67,6 +67,46 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	return nil
 }
 
+func (m *RIB) RemoveUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	found := false
+	m.routes.UpdateOrDelete(
+		prefix,
+		func(routesList RoutesList) (RoutesList, bool) {
+			// Filter out only static routes with matching nexthop
+			newRoutes := make([]Route, 0, len(routesList.Routes))
+			for _, r := range routesList.Routes {
+				// Keep the route if it's not static or has different nexthop
+				if r.SourceID != RouteSourceStatic || r.NextHop != nexthopAddr {
+					newRoutes = append(newRoutes, r)
+				} else {
+					found = true
+				}
+			}
+			routesList.Routes = newRoutes
+			// Delete the prefix entry if no routes remain
+			return routesList, len(routesList.Routes) == 0
+		},
+	)
+
+	if found {
+		m.changedAt.Store(time.Now().UnixNano())
+		m.log.Infow("RIB: removed static unicast route",
+			"prefix", prefix,
+			"nexthop", nexthopAddr,
+		)
+	} else {
+		m.log.Warnw("RIB: static route not found for removal",
+			"prefix", prefix,
+			"nexthop", nexthopAddr,
+		)
+	}
+
+	return nil
+}
+
 func (m *RIB) DumpRoutes() MapTrie[netip.Prefix, netip.Addr, RoutesList] {
 	m.mu.Lock()
 	defer m.mu.Unlock()

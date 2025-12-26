@@ -16,7 +16,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	routepb "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
@@ -233,6 +233,64 @@ func (m *RouteService) InsertRoute(
 		"duration", time.Since(startTime),
 	)
 	return &routepb.InsertRouteResponse{}, nil
+}
+
+func (m *RouteService) DeleteRoute(
+	ctx context.Context,
+	request *routepb.DeleteRouteRequest,
+) (*routepb.DeleteRouteResponse, error) {
+	startTime := time.Now()
+
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+	}
+
+	prefix, err := netip.ParsePrefix(request.GetPrefix())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
+	}
+
+	nexthopAddr, err := netip.ParseAddr(request.GetNexthopAddr())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop address: %v", err)
+	}
+
+	holder, ok := m.getRib(name)
+	if !ok {
+		m.log.Warnw("DeleteRoute: no RIB found for module", "name", name)
+		return &routepb.DeleteRouteResponse{}, nil
+	}
+
+	if err := holder.RemoveUnicastRoute(prefix, nexthopAddr); err != nil {
+		m.log.Errorw("DeleteRoute: failed to remove unicast route from RIB",
+			"error", err,
+			"prefix", prefix,
+			"nexthop", nexthopAddr,
+			"name", name,
+		)
+		return nil, fmt.Errorf("failed to remove unicast route: %w", err)
+	}
+
+	if request.GetDoFlush() {
+		if err := m.syncRouteUpdates(holder, name); err != nil {
+			m.log.Errorw("DeleteRoute: failed to sync route deletions",
+				"error", err,
+				"prefix", prefix,
+				"nexthop", nexthopAddr,
+				"name", name,
+			)
+			return nil, status.Errorf(codes.Internal, "failed to sync route deletions: %v", err)
+		}
+	}
+
+	m.log.Infow("DeleteRoute completed successfully",
+		"prefix", prefix,
+		"nexthop", nexthopAddr,
+		"name", name,
+		"duration", time.Since(startTime),
+	)
+	return &routepb.DeleteRouteResponse{}, nil
 }
 
 // FeedRIB receives a stream of route updates (typically from BIRD) and applies them to the

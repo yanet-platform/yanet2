@@ -727,7 +727,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	}
 	f.log.Infof("Dataplane started: %s", output)
 	f.log.Infof("Wait for the kni0 device to appear")
-	err = f.waitOutputPresent("ip link", func(output string) bool {
+	err = f.WaitOutputPresent("ip link", func(output string) bool {
 		return strings.Contains(output, "kni0")
 	}, 10*time.Second)
 	if err != nil {
@@ -746,7 +746,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	// Verify services are running
 	f.log.Debug("Verifying YANET services are running...")
 
-	err = f.waitOutputPresent("cat /mnt/logs/yanet-controlplane.log", func(output string) bool {
+	err = f.WaitOutputPresent("cat /mnt/logs/yanet-controlplane.log", func(output string) bool {
 		return strings.Contains(output, "updated nexthop cache")
 	}, 10*time.Second)
 	if err != nil {
@@ -769,7 +769,7 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 	return nil
 }
 
-// waitOutputPresent repeatedly executes a command until the output satisfies the
+// WaitOutputPresent repeatedly executes a command until the output satisfies the
 // provided checker function or the timeout expires. This utility method is used
 // for waiting on asynchronous operations and service readiness verification.
 //
@@ -788,10 +788,10 @@ func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig st
 //
 // Example:
 //
-//	err := fw.waitOutputPresent("ps aux | grep yanet", func(output string) bool {
+//	err := fw.WaitOutputPresent("ps aux | grep yanet", func(output string) bool {
 //	    return strings.Contains(output, "yanet-dataplane")
 //	}, 30*time.Second)
-func (f *TestFramework) waitOutputPresent(cmd string, checker func(string) bool, timeout time.Duration) error {
+func (f *TestFramework) WaitOutputPresent(cmd string, checker func(string) bool, timeout time.Duration) error {
 	// Wait for flags to be applied
 	deadline := time.Now().Add(timeout)
 

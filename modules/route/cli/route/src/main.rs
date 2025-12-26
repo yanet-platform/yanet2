@@ -17,8 +17,8 @@ use tabled::{
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use yanet_cli_route::{
     routepb::{
-        route_service_client::RouteServiceClient, FlushRoutesRequest, InsertRouteRequest, ListConfigsRequest,
-        LookupRouteRequest, ShowRoutesRequest,
+        route_service_client::RouteServiceClient, DeleteRouteRequest, FlushRoutesRequest, InsertRouteRequest,
+        ListConfigsRequest, LookupRouteRequest, ShowRoutesRequest,
     },
     RouteEntry,
 };
@@ -49,6 +49,8 @@ pub enum ModeCmd {
     Lookup(RouteLookupCmd),
     /// Inserts a unicast static route.
     Insert(RouteInsertCmd),
+    /// Deletes a unicast static route.
+    Delete(RouteDeleteCmd),
     /// Flush RIB to FIB for a configuration.
     Flush(RouteFlushCmd),
 }
@@ -91,6 +93,21 @@ pub struct RouteInsertCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
+pub struct RouteDeleteCmd {
+    /// The destination prefix of the route to delete.
+    ///
+    /// The prefix must be an IPv4 or IPv6 address followed by "/" and the
+    /// length of the prefix.
+    pub prefix: IpNet,
+    /// Route config name.
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
+    /// The IP address of the nexthop router.
+    #[arg(long = "via")]
+    pub nexthop_addr: IpAddr,
+}
+
+#[derive(Debug, Clone, Parser)]
 pub struct RouteFlushCmd {
     /// Route config name.
     #[arg(long = "cfg", short)]
@@ -118,6 +135,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Show(cmd) => service.show_routes(cmd).await,
         ModeCmd::Lookup(cmd) => service.lookup_route(cmd).await,
         ModeCmd::Insert(cmd) => service.insert_route(cmd).await,
+        ModeCmd::Delete(cmd) => service.delete_route(cmd).await,
         ModeCmd::Flush(cmd) => service.flush_routes(cmd).await,
     }
 }
@@ -198,6 +216,21 @@ impl RouteService {
         self.client.insert_route(request).await?;
 
         log::info!("Route inserted successfully: {} via {}", cmd.prefix, cmd.nexthop_addr);
+
+        Ok(())
+    }
+
+    pub async fn delete_route(&mut self, cmd: RouteDeleteCmd) -> Result<(), Box<dyn Error>> {
+        let request = DeleteRouteRequest {
+            name: cmd.config_name.clone(),
+            prefix: cmd.prefix.to_string(),
+            nexthop_addr: cmd.nexthop_addr.to_string(),
+            do_flush: true,
+        };
+
+        self.client.delete_route(request).await?;
+
+        log::info!("Route deleted successfully: {} via {}", cmd.prefix, cmd.nexthop_addr);
 
         Ok(())
     }

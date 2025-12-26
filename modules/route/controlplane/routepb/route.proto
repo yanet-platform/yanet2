@@ -19,6 +19,9 @@ service RouteService {
 	// InsertRoute inserts a route into the routing table.
 	rpc InsertRoute(InsertRouteRequest) returns (InsertRouteResponse);
 
+	// DeleteRoute deletes a route from the routing table.
+	rpc DeleteRoute(DeleteRouteRequest) returns (DeleteRouteResponse);
+
 	// FlushRoutes triggers the operation of flushing routes from
 	// the Routing Information Base (RIB) to the Forwarding Information Base
 	// (FIB).
@@ -87,6 +90,30 @@ message InsertRouteRequest {
 
 // InsertRouteResponse is the response of "InsertRoute" request.
 message InsertRouteResponse {
+}
+
+// DeleteRouteRequest is the request to delete a route.
+message DeleteRouteRequest {
+	string name = 1;
+	// The destination prefix of the route to delete.
+	//
+	// The prefix must be an IPv4 or IPv6 address followed by "/" and the
+	// length of the prefix.
+	string prefix = 2;
+	// The IP address of the nexthop router.
+	//
+	// The address must be either an IPv4 or IPv6 address.
+	//
+	// Example: "fe80::1", "192.168.1.1"
+	string nexthop_addr = 3;
+
+	// Indicates whether the RIB should be flushed to the FIB after this
+	// request.
+	bool do_flush = 4;
+}
+
+// DeleteRouteResponse is the response of "DeleteRoute" request.
+message DeleteRouteResponse {
 }
 
 // FlushRoutesRequest specifies which module should perform the RIB to FIB
