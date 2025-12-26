@@ -962,9 +962,8 @@ func runMultithreadedTest(t *testing.T, config *multithreadTestConfig) {
 		moduleConfig: moduleConfig,
 		stateConfig:  stateConfig,
 		mock: &mock.YanetMockConfig{
-			CpMemory: datasize.GB * 4,
-			DpMemory: datasize.MB * 256,
-			Workers:  uint64(config.numWorkers),
+			AgentsMemory: datasize.MB * 64,
+			Workers:      uint64(config.numWorkers),
 			Devices: []mock.YanetMockDeviceConfig{
 				{
 					Id:   0,

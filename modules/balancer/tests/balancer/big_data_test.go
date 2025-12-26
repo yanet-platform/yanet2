@@ -12,6 +12,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/common/go/testutils"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
@@ -358,14 +359,12 @@ func TestBigData(t *testing.T) {
 	// Create initial config: 10 VS with 50 reals each
 	initialConfig := createBigConfig(10, 50, rng)
 
-	// Common setup for both phases
-	setup, err := SetupTest(&TestConfig{
+	config := &TestConfig{
 		moduleConfig: initialConfig,
 		stateConfig:  stateConfig,
 		mock: &mock.YanetMockConfig{
-			CpMemory: datasize.GB * 2,
-			DpMemory: datasize.MB * 512,
-			Workers:  1,
+			AgentsMemory: datasize.MB * 256,
+			Workers:      1,
 			Devices: []mock.YanetMockDeviceConfig{
 				{
 					Id:   0,
@@ -373,7 +372,12 @@ func TestBigData(t *testing.T) {
 				},
 			},
 		},
-	})
+	}
+	if testutils.AsanEnabled() {
+		config.mock.AgentsMemory += datasize.MB * 128 // for asan overhead
+	}
+	// Common setup for both phases
+	setup, err := SetupTest(config)
 	require.NoError(t, err)
 	defer setup.Free()
 

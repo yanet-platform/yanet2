@@ -6,6 +6,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -13,9 +14,8 @@ import (
 
 func TestBasic(t *testing.T) {
 	config := YanetMockConfig{
-		CpMemory: datasize.MB * 128,
-		DpMemory: datasize.MB,
-		Workers:  1,
+		AgentsMemory: datasize.MB * 4,
+		Workers:      1,
 		Devices: []YanetMockDeviceConfig{
 			{
 				Id:   0,
@@ -29,7 +29,7 @@ func TestBasic(t *testing.T) {
 	defer mock.Free()
 
 	shm := mock.SharedMemory()
-	agent, err := shm.AgentAttach("config", 0, 1<<20)
+	agent, err := shm.AgentAttach("config", 0, uint(config.GetAgentsMemory()))
 	require.NoError(t, err)
 	require.NotNil(t, agent)
 

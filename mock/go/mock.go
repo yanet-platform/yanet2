@@ -84,6 +84,7 @@ import (
 	"unsafe"
 
 	"github.com/gopacket/gopacket"
+
 	"github.com/yanet-platform/yanet2/common/go/dataplane"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -92,8 +93,9 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Never move this object in memory after
-// construction!
+// YanetMock ...
+//
+// Never move this object in memory after construction!
 type YanetMock struct {
 	inner C.struct_yanet_mock
 }
@@ -101,8 +103,8 @@ type YanetMock struct {
 func NewYanetMock(config *YanetMockConfig) (*YanetMock, error) {
 	cConfig := C.struct_yanet_mock_config{}
 	C.memset(unsafe.Pointer(&cConfig), 0, C.size_t(unsafe.Sizeof(cConfig)))
-	cConfig.cp_memory = C.size_t(config.CpMemory)
-	cConfig.dp_memory = C.size_t(config.DpMemory)
+	cConfig.cp_memory = C.size_t(config.GetCpMemory())
+	cConfig.dp_memory = C.size_t(config.GetDpMemory())
 	cConfig.device_count = C.size_t(len(config.Devices))
 	cConfig.worker_count = C.size_t(config.Workers)
 	for idx := range config.Devices {

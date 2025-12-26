@@ -144,11 +144,12 @@ agent_attach(
 	memset(arenas, 0, sizeof(struct agent_arena) * arena_count);
 	SET_OFFSET_OF(&new_agent->arenas, arenas);
 
-	uint64_t arena_size = memory_limit > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
-				      ? MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
-				      : memory_limit;
-
 	while (new_agent->arena_count < arena_count) {
+		uint64_t arena_size =
+			memory_limit > MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+				? MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+				: memory_limit;
+
 		void *arena =
 			memory_balloc(&cp_config->memory_context, arena_size);
 		if (arena == NULL) {
@@ -162,6 +163,8 @@ agent_attach(
 		SET_OFFSET_OF(&arenas[new_agent->arena_count].data, arena);
 		arenas[new_agent->arena_count].size = arena_size;
 		new_agent->arena_count++;
+
+		memory_limit -= arena_size;
 	}
 
 	struct cp_agent_registry *old_registry =

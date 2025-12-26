@@ -3,6 +3,8 @@ package test
 import (
 	"fmt"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
@@ -32,9 +34,8 @@ type TestSetup struct {
 func SetupTest(config *TestConfig) (*TestSetup, error) {
 	if config.mock == nil {
 		config.mock = &mock.YanetMockConfig{
-			CpMemory: 1 << 28,
-			DpMemory: 1 << 26,
-			Workers:  1,
+			AgentsMemory: datasize.MB * 64,
+			Workers:      1,
 			Devices: []mock.YanetMockDeviceConfig{
 				{
 					Id:   0,
@@ -43,19 +44,13 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 			},
 		}
 	}
-	if config.mock.CpMemory < (1 << 27) {
-		return nil, fmt.Errorf("need at least 128MB for the controlplane")
-	}
-
-	// create mock
-
 	mock, err := mock.NewYanetMock(config.mock)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new yanet mock: %w", err)
 	}
 
 	agent, err := mock.SharedMemory().
-		AgentAttach("acl", 0, (1<<26))
+		AgentAttach("acl", 0, uint(config.mock.GetAgentsMemory()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent: %w", err)
 	}

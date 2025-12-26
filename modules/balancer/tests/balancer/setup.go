@@ -46,9 +46,8 @@ type TestSetup struct {
 func SetupTest(config *TestConfig) (*TestSetup, error) {
 	if config.mock == nil {
 		config.mock = &mock.YanetMockConfig{
-			CpMemory: datasize.MB * 512,
-			DpMemory: datasize.MB * 128,
-			Workers:  1,
+			AgentsMemory: datasize.MB * 64,
+			Workers:      1,
 			Devices: []mock.YanetMockDeviceConfig{
 				{
 					Id:   0,
@@ -56,9 +55,6 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 				},
 			},
 		}
-	}
-	if config.mock.CpMemory < datasize.MB*128 {
-		return nil, fmt.Errorf("need at least 128MB for the controlplane")
 	}
 
 	if config.moduleConfig == nil {
@@ -73,15 +69,13 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		}
 	}
 
-	// create mock
-
 	mockInstance, err := mock.NewYanetMock(config.mock)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new yanet mock: %w", err)
 	}
 
 	agent, err := mockInstance.SharedMemory().
-		AgentAttach("balancer", 0, uint(config.mock.CpMemory-datasize.MB*128))
+		AgentAttach("balancer", 0, uint(config.mock.GetAgentsMemory()))
 	if err != nil {
 		return nil, err
 	}
