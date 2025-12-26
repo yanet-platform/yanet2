@@ -13,12 +13,12 @@ import (
 )
 
 func TestACL(t *testing.T) {
-	fw := globalFramework
+	fw := globalFramework.ForTest(t)
 	require.NotNil(t, fw, "Test framework must be initialized")
 	pg := NewPacketGenerator()
 
 	// 1. ACL Configuration Tests
-	t.Run("Configure_ACL_module", func(t *testing.T) {
+	fw.Run("Configure_ACL_module", func(fw *framework.F, t *testing.T) {
 		commands := []string{
 			// Configure module
 			"/mnt/target/release/yanet-cli-acl update --cfg acl0 --rules /mnt/yanet2/acl.yaml",
@@ -30,12 +30,12 @@ func TestACL(t *testing.T) {
 			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",
 		}
 
-		_, err := fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "ACL module configuration failed")
 	})
 
 	// 2. Basic Allow/Deny Tests
-	t.Run("Test_allow_UDP", func(t *testing.T) {
+	fw.Run("Test_allow_UDP", func(fw *framework.F, t *testing.T) {
 		// allows traffic from whitelisted IP range
 		pkt := pg.UDP(
 			net.ParseIP("192.0.2.2"),
@@ -52,7 +52,7 @@ func TestACL(t *testing.T) {
 	})
 
 	// FAIL
-	t.Run("Test_deny_UDP", func(t *testing.T) {
+	fw.Run("Test_deny_UDP", func(fw *framework.F, t *testing.T) {
 		// blocks traffic from blacklisted IP range
 		pkt := pg.UDP(
 			net.ParseIP("192.0.2.99"),
@@ -68,7 +68,7 @@ func TestACL(t *testing.T) {
 	})
 
 	// 3. Protocol-Specific Tests
-	t.Run("Test_allow_TCP_SYN", func(t *testing.T) {
+	fw.Run("Test_allow_TCP_SYN", func(fw *framework.F, t *testing.T) {
 		// permits TCP connection establishment
 		pkt := pg.TCP(
 			net.ParseIP("192.0.2.2"),
@@ -85,7 +85,7 @@ func TestACL(t *testing.T) {
 		require.NotNil(t, out, "allow SYN packet")
 	})
 
-	t.Run("Test_deny_TCP_RST", func(t *testing.T) {
+	fw.Run("Test_deny_TCP_RST", func(fw *framework.F, t *testing.T) {
 		// protects against TCP reset attacks
 		pkt := pg.TCP(
 			net.ParseIP("192.0.2.2"),
@@ -101,7 +101,7 @@ func TestACL(t *testing.T) {
 		require.Error(t, err, "Packet should be dropped")
 	})
 
-	t.Run("Test_allow_ICMP_Echo", func(t *testing.T) {
+	fw.Run("Test_allow_ICMP_Echo", func(fw *framework.F, t *testing.T) {
 		pkt := pg.ICMP(
 			net.ParseIP("192.0.2.2"),
 			net.ParseIP("192.0.3.1"),
@@ -117,7 +117,7 @@ func TestACL(t *testing.T) {
 	})
 
 	// 4. Complex Rule Validation
-	t.Run("Test_port_range_rules_UDP", func(t *testing.T) {
+	fw.Run("Test_port_range_rules_UDP", func(fw *framework.F, t *testing.T) {
 		tests := []struct {
 			name     string
 			srcPort  uint16
@@ -146,7 +146,7 @@ func TestACL(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
+			fw.Run(tt.name, func(fw *framework.F, t *testing.T) {
 				t.Log(tt.desc)
 				pkt := pg.UDP(
 					net.ParseIP("192.0.2.2"),
@@ -168,7 +168,7 @@ func TestACL(t *testing.T) {
 		}
 	})
 
-	t.Run("Test_subnet_rules_UDP", func(t *testing.T) {
+	fw.Run("Test_subnet_rules_UDP", func(fw *framework.F, t *testing.T) {
 		tests := []struct {
 			name     string
 			ip       string
@@ -191,7 +191,7 @@ func TestACL(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
+			fw.Run(tt.name, func(fw *framework.F, t *testing.T) {
 				t.Log(tt.desc)
 				pkt := pg.UDP(
 					net.ParseIP(tt.ip),
@@ -214,7 +214,7 @@ func TestACL(t *testing.T) {
 	})
 
 	// 5. IPv6 Support
-	t.Run("Test_allow_TCPv6", func(t *testing.T) {
+	fw.Run("Test_allow_TCPv6", func(fw *framework.F, t *testing.T) {
 		pkt := pg.TCPv6(
 			net.ParseIP("2001:db8::1"),
 			net.ParseIP("2001:db8::2"),
@@ -230,7 +230,7 @@ func TestACL(t *testing.T) {
 		require.NotNil(t, out, "TCPv6 SYN")
 	})
 
-	t.Run("Test_allow_ICMPv6", func(t *testing.T) {
+	fw.Run("Test_allow_ICMPv6", func(fw *framework.F, t *testing.T) {
 		pkt := pg.ICMPv6(
 			net.ParseIP("2001:db8::1"),
 			net.ParseIP("2001:db8::2"),
@@ -245,7 +245,7 @@ func TestACL(t *testing.T) {
 		require.NotNil(t, out, "ICMPv6 Echo Request")
 	})
 
-	t.Run("Test_deny_UDPv6", func(t *testing.T) {
+	fw.Run("Test_deny_UDPv6", func(fw *framework.F, t *testing.T) {
 		pkt := pg.UDPv6(
 			net.ParseIP("2001:db8::99"), // Blocked source
 			net.ParseIP("2001:db8::2"),
@@ -260,7 +260,7 @@ func TestACL(t *testing.T) {
 	})
 
 	// 6. Overlapping Rules
-	t.Run("Test_overlapping_pyramid_rules_UDP", func(t *testing.T) {
+	fw.Run("Test_overlapping_pyramid_rules_UDP", func(fw *framework.F, t *testing.T) {
 		// Define test cases for the rule pyramid: allow /31 → deny /28 → allow /24 → deny /16
 		tests := []struct {
 			name     string
@@ -292,7 +292,7 @@ func TestACL(t *testing.T) {
 		}
 
 		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
+			fw.Run(tt.name, func(fw *framework.F, t *testing.T) {
 				pkt := pg.UDP(
 					net.ParseIP(tt.ip),
 					net.ParseIP("192.0.33.1"),

@@ -15,7 +15,7 @@ import (
 )
 
 // setAndWaitForNAT64DropFlags sets NAT64 drop flags and waits for them to be applied
-func setAndWaitForNAT64DropFlags(fw *framework.TestFramework, dropUnknownPrefix, dropUnknownMapping bool, timeout time.Duration) error {
+func setAndWaitForNAT64DropFlags(fw *framework.F, dropUnknownPrefix, dropUnknownMapping bool, timeout time.Duration) error {
 	// Build the drop command
 	cmd := "/mnt/target/release/yanet-cli-nat64 drop --cfg nat64_0"
 	if dropUnknownPrefix {
@@ -26,7 +26,7 @@ func setAndWaitForNAT64DropFlags(fw *framework.TestFramework, dropUnknownPrefix,
 	}
 
 	// Execute the drop command
-	_, err := fw.CLI.ExecuteCommand(cmd)
+	_, err := fw.ExecuteCommand(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to set NAT64 drop flags: %w", err)
 	}
@@ -35,7 +35,7 @@ func setAndWaitForNAT64DropFlags(fw *framework.TestFramework, dropUnknownPrefix,
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		output, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-nat64 show --cfg nat64_0 --format json")
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-nat64 show --cfg nat64_0 --format json")
 		if err != nil {
 			return fmt.Errorf("failed to check NAT64 status: %w", err)
 		}
@@ -65,10 +65,10 @@ func setAndWaitForNAT64DropFlags(fw *framework.TestFramework, dropUnknownPrefix,
 // TestNAT64_BasicFunctionality tests basic NAT64 module functionality
 func TestNAT64(t *testing.T) {
 	// Use global framework instance like in TestYANETStartup
-	fw := globalFramework
+	fw := globalFramework.ForTest(t)
 	require.NotNil(t, fw, "Global framework should be initialized")
 
-	t.Run("Configure_NAT64_Module", func(t *testing.T) {
+	fw.Run("Configure_NAT64_Module", func(fw *framework.F, t *testing.T) {
 
 		// NAT64-specific configuration
 		commands := []string{
@@ -82,12 +82,11 @@ func TestNAT64(t *testing.T) {
 			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",
 		}
 
-		_, err := fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure forward module")
 	})
 
-	t.Run("Test_IPv4_to_IPv6_Translation", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_IPv4_to_IPv6_Translation", func(fw *framework.F, t *testing.T) {
 		// From outer_ip4 (192.0.2.34) to mapped address (198.51.100.2)
 		packet := createNAT64Packet(
 			net.ParseIP("192.0.2.34"),   // outer_ip4 from unit tests -> embedded as 2001:db8::c000:222
@@ -112,8 +111,7 @@ func TestNAT64(t *testing.T) {
 		assert.Equal(t, uint16(80), outputPacket.DstPort, "Destination port should be preserved")
 	})
 
-	t.Run("Test_IPv6_to_IPv4_Translation", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_IPv6_to_IPv4_Translation", func(fw *framework.F, t *testing.T) {
 		// From mapped IPv6 (2001:db8::3) to embedded IPv6 (2001:db8::c000:222)
 		packet := createNAT64Packet(
 			net.ParseIP("2001:db8::3"),        // mapped IPv6 -> 198.51.100.2
@@ -136,8 +134,7 @@ func TestNAT64(t *testing.T) {
 		assert.Equal(t, uint16(80), outputPacket.DstPort, "Destination port should be preserved")
 	})
 
-	t.Run("Test_IPv4_to_IPv6_Translation_UDP", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_IPv4_to_IPv6_Translation_UDP", func(fw *framework.F, t *testing.T) {
 		// Test IPv4 to IPv6 translation using UDP packets
 		packet := createNAT64Packet(
 			net.ParseIP("192.0.2.34"),
@@ -160,8 +157,7 @@ func TestNAT64(t *testing.T) {
 		assert.Equal(t, uint16(53), outputPacket.DstPort, "Destination port should be preserved")
 	})
 
-	t.Run("Test_IPv6_to_IPv4_Translation_UDP", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_IPv6_to_IPv4_Translation_UDP", func(fw *framework.F, t *testing.T) {
 		// Test IPv6 to IPv4 translation - reverse direction with UDP packets
 		packet := createNAT64Packet(
 			net.ParseIP("2001:db8::3"),        // mapped IPv6 -> 198.51.100.2
@@ -185,8 +181,7 @@ func TestNAT64(t *testing.T) {
 		assert.Equal(t, uint16(53), outputPacket.DstPort, "Destination port should be preserved")
 	})
 
-	t.Run("Test_IPv4_to_IPv6_Translation_ICMP", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_IPv4_to_IPv6_Translation_ICMP", func(fw *framework.F, t *testing.T) {
 		packet := createNAT64Packet(
 			net.ParseIP("192.0.2.34"),
 			net.ParseIP("198.51.100.2"),
@@ -207,8 +202,7 @@ func TestNAT64(t *testing.T) {
 		require.Equal(t, layers.IPProtocolICMPv6, outputPacket.NextHeader, "Protocol should be translated to ICMPv6")
 	})
 
-	t.Run("Test_IPv6_to_IPv4_Translation_ICMP", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_IPv6_to_IPv4_Translation_ICMP", func(fw *framework.F, t *testing.T) {
 		packet := createNAT64Packet(
 			net.ParseIP("2001:db8::3"),        // mapped IPv6 -> 198.51.100.2
 			net.ParseIP("2001:db8::c000:222"), // embedded IPv6 -> 192.0.2.34
@@ -229,8 +223,7 @@ func TestNAT64(t *testing.T) {
 		require.Equal(t, layers.IPProtocolICMPv4, outputPacket.Protocol, "Protocol should be translated to ICMPv4")
 	})
 
-	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixTrue_MappingTrue", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixTrue_MappingTrue", func(fw *framework.F, t *testing.T) {
 		// Set drop-unknown-prefix=true, drop-unknown-mapping=true
 		err := setAndWaitForNAT64DropFlags(fw, true, true, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
@@ -298,8 +291,7 @@ func TestNAT64(t *testing.T) {
 		assert.Nil(t, outputPacket, "Output packet should be nil (dropped)")
 	})
 
-	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixTrue_MappingFalse", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixTrue_MappingFalse", func(fw *framework.F, t *testing.T) {
 		// Set drop-unknown-prefix=true, drop-unknown-mapping=false
 		err := setAndWaitForNAT64DropFlags(fw, true, false, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
@@ -336,8 +328,7 @@ func TestNAT64(t *testing.T) {
 		assert.Equal(t, "192.0.2.101", outputPacket.DstIP.String(), "Destination should remain unchanged")
 	})
 
-	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixFalse_MappingTrue", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixFalse_MappingTrue", func(fw *framework.F, t *testing.T) {
 		// Set drop-unknown-prefix=false, drop-unknown-mapping=true
 		err := setAndWaitForNAT64DropFlags(fw, false, true, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")
@@ -370,8 +361,7 @@ func TestNAT64(t *testing.T) {
 		assert.Nil(t, outputPacket, "Output packet should be nil (dropped)")
 	})
 
-	t.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixFalse_MappingFalse", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_Unknown_Prefix_and_Mapping_Handling_PrefixFalse_MappingFalse", func(fw *framework.F, t *testing.T) {
 		// Set both drop flags to false
 		err := setAndWaitForNAT64DropFlags(fw, false, false, 10*time.Second)
 		require.NoError(t, err, "Failed to set and wait for NAT64 drop flags")

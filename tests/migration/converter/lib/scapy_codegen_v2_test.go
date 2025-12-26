@@ -704,7 +704,7 @@ EXPECT_REGEX: packets:\\s+\\d+`,
 				}
 			} else {
 				require.NotContains(t, result.GoCode, "t.Skipf")
-				require.Contains(t, result.GoCode, "fw.CLI.ExecuteCommand")
+				require.Contains(t, result.GoCode, "fw.ExecuteCommand")
 			}
 		})
 	}

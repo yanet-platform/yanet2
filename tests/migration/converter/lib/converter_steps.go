@@ -403,7 +403,7 @@ func (c *Converter) convertRouteUpdate(content interface{}, stepType string, isI
 	goCode := fmt.Sprintf(`%scommands := []string{
 		%s,
 	}
-	_, err := fw.CLI.ExecuteCommands(commands...)
+	_, err := fw.ExecuteCommands(commands...)
 	require.NoError(t, err, "Failed to configure %s routes")`, yamlComment, strings.Join(commands, ",\n\t\t"), protocol)
 
 	return ConvertedStep{
@@ -452,7 +452,7 @@ func (c *Converter) convertIPv4LabelledUpdate(content interface{}, stepType stri
 	goCode := fmt.Sprintf(`%scommands := []string{
 		%s,
 	}
-	_, err := fw.CLI.ExecuteCommands(commands...)
+	_, err := fw.ExecuteCommands(commands...)
 	require.NoError(t, err, "Failed to configure IPv4 labelled routes")`, yamlComment, strings.Join(commands, ",\n\t\t"))
 
 	return ConvertedStep{
@@ -544,7 +544,7 @@ func (c *Converter) convertRouteRemove(content interface{}, stepType string, isL
 	goCode := fmt.Sprintf(`%scommands := []string{
 		%s,
 	}
-	_, err := fw.CLI.ExecuteCommands(commands...)
+	_, err := fw.ExecuteCommands(commands...)
 	require.NoError(t, err, "Failed to remove %s routes")`, yamlComment, strings.Join(commands, ",\n\t\t"), strings.ToLower(protocol))
 
 	return ConvertedStep{
@@ -985,7 +985,7 @@ func (c *Converter) convertCLI(content interface{}) ConvertedStep {
 	goCode := fmt.Sprintf(`%scommands := []string{
 		%s,
 	}
-	_, err := fw.CLI.ExecuteCommands(commands...)
+	_, err := fw.ExecuteCommands(commands...)
 	require.NoError(t, err, "Failed to execute CLI commands")`, yamlComment, strings.Join(cliCommands, ",\n\t\t"))
 
 	return ConvertedStep{
@@ -1050,7 +1050,7 @@ func buildCLICommandBlock(stepType, yamlComment string, commands, expectedLines,
 	code.WriteString(`	}
 
 	for _, cmd := range commands {
-		output, err := fw.CLI.ExecuteCommand(cmd)
+		output, err := fw.ExecuteCommand(cmd)
 		if err != nil {
 			t.Fatalf("CLI command failed: %v", err)
 		}

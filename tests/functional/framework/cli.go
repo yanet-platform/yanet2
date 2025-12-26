@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -17,6 +18,23 @@ var (
 	retCodeRegex = regexp.MustCompile(`=(\d+)=`)
 )
 
+// cliManagerInner holds the shared connection state that should not be copied
+// between CLIManager instances. This allows multiple CLIManager wrappers
+// with different loggers to share the same underlying connection.
+type cliManagerInner struct {
+	qemu         *QEMUManager    // QEMU virtual machine manager instance
+	outputBuffer strings.Builder // Buffer for collecting command output
+	mutex        sync.Mutex      // Protects access to outputBuffer
+	reader       *bufio.Scanner  // Scanner for reading VM stdout
+	cmdMutex     sync.Mutex      // Ensures sequential command execution
+	log          atomic.Value    // Shared logger (*zap.SugaredLogger), updated atomically
+}
+
+// getLog returns the current logger from atomic storage
+func (inner *cliManagerInner) getLog() *zap.SugaredLogger {
+	return inner.log.Load().(*zap.SugaredLogger)
+}
+
 // CLIManager handles YANET CLI operations within a QEMU virtual machine environment.
 // It provides thread-safe command execution capabilities through the VM's serial console,
 // with support for output buffering, command synchronization, and proper cleanup of
@@ -25,12 +43,8 @@ var (
 // The manager uses markers to reliably detect command completion and extract return codes,
 // ensuring accurate command execution status reporting even in concurrent scenarios.
 type CLIManager struct {
-	qemu         *QEMUManager       // QEMU virtual machine manager instance
-	outputBuffer strings.Builder    // Buffer for collecting command output
-	mutex        sync.Mutex         // Protects access to outputBuffer
-	reader       *bufio.Scanner     // Scanner for reading VM stdout
-	log          *zap.SugaredLogger // Logger for debugging and monitoring
-	cmdMutex     sync.Mutex         // Ensures sequential command execution
+	inner *cliManagerInner   // Shared connection state (not copied)
+	log   *zap.SugaredLogger // Logger for debugging and monitoring (can be different per instance)
 }
 
 // CLIOption defines functional options for configuring CLIManager instances.
@@ -65,9 +79,15 @@ func CLIWithLog(log *zap.SugaredLogger) CLIOption {
 //   - *CLIManager: A configured CLI manager instance
 //   - error: An error if initialization fails or options cannot be applied
 func NewCLIManager(qemu *QEMUManager, opts ...CLIOption) (*CLIManager, error) {
-	cm := &CLIManager{
+	defaultLog := zap.NewNop().Sugar()
+	inner := &cliManagerInner{
 		qemu: qemu,
-		log:  zap.NewNop().Sugar(), // default noop logger
+	}
+	inner.log.Store(defaultLog)
+
+	cm := &CLIManager{
+		inner: inner,
+		log:   defaultLog,
 	}
 
 	// Apply functional options
@@ -106,38 +126,38 @@ func NewCLIManager(qemu *QEMUManager, opts ...CLIOption) (*CLIManager, error) {
 //	}
 //	fmt.Println("Directory listing:", output)
 func (c *CLIManager) ExecuteCommand(command string) (string, error) {
-	c.cmdMutex.Lock()
-	defer c.cmdMutex.Unlock()
-	if c.qemu == nil || c.qemu.Command == nil || c.qemu.Command.Process == nil {
+	c.inner.cmdMutex.Lock()
+	defer c.inner.cmdMutex.Unlock()
+	if c.inner.qemu == nil || c.inner.qemu.Command == nil || c.inner.qemu.Command.Process == nil {
 		return "", fmt.Errorf("QEMU VM is not running")
 	}
 
 	// Wait for VM to be ready first
-	if !c.qemu.IsVMReady() {
+	if !c.inner.qemu.IsVMReady() {
 		return "", fmt.Errorf("VM not ready")
 	}
 
 	// Check if we have stdin/stdout pipes
-	stdin := c.qemu.GetStdin()
-	stdout := c.qemu.GetStdout()
+	stdin := c.inner.qemu.GetStdin()
+	stdout := c.inner.qemu.GetStdout()
 
 	if stdin == nil || stdout == nil {
 		return "", fmt.Errorf("failed to connect to QEMU serial console")
 	}
 
-	c.log.Debugf("DEBUG: Executing command in VM %s: %s", c.qemu.Name, command)
+	c.log.Debugf("DEBUG: Executing command in VM %s: %s", c.inner.qemu.Name, command)
 
 	// Initialize reader if not already done
-	if c.reader == nil {
-		c.reader = bufio.NewScanner(stdout)
+	if c.inner.reader == nil {
+		c.inner.reader = bufio.NewScanner(stdout)
 		// Start background reader to capture output
 		go c.readOutput()
 	}
 
 	// Clear output buffer
-	c.mutex.Lock()
-	c.outputBuffer.Reset()
-	c.mutex.Unlock()
+	c.inner.mutex.Lock()
+	c.inner.outputBuffer.Reset()
+	c.inner.mutex.Unlock()
 
 	// Send command to VM with a unique marker for better parsing
 	tm := time.Now().UnixNano()
@@ -201,18 +221,19 @@ func (c *CLIManager) ExecuteCommands(commands ...string) ([]string, error) {
 //
 // This is an internal method that should not be called directly by users.
 func (c *CLIManager) readOutput() {
-	for c.reader.Scan() {
-		line := c.reader.Text()
+	for c.inner.reader.Scan() {
+		line := c.inner.reader.Text()
 
-		c.mutex.Lock()
-		c.outputBuffer.WriteString(line + "\n")
-		c.mutex.Unlock()
+		c.inner.mutex.Lock()
+		c.inner.outputBuffer.WriteString(line + "\n")
+		c.inner.mutex.Unlock()
 
-		c.log.Debugf("DEBUG: VM output: %s", line)
+		// Use shared logger from inner (updated atomically via WithLog)
+		c.inner.getLog().Debugf("DEBUG: VM output: %s", line)
 	}
 
-	if err := c.reader.Err(); err != nil {
-		c.log.Debugf("DEBUG: Error reading VM output: %v", err)
+	if err := c.inner.reader.Err(); err != nil {
+		c.inner.getLog().Debugf("DEBUG: Error reading VM output: %v", err)
 	}
 }
 
@@ -240,9 +261,9 @@ func (c *CLIManager) waitForCommandCompletionWithMarkers(command, fullCommand, s
 	foundStart := false
 
 	for time.Now().Before(deadline) {
-		c.mutex.Lock()
-		output := c.outputBuffer.String()
-		c.mutex.Unlock()
+		c.inner.mutex.Lock()
+		output := c.inner.outputBuffer.String()
+		c.inner.mutex.Unlock()
 		output = strings.ReplaceAll(output, fullCommand, "")
 
 		// Look for start marker
@@ -261,9 +282,9 @@ func (c *CLIManager) waitForCommandCompletionWithMarkers(command, fullCommand, s
 	}
 
 	// Return whatever output we have, even if incomplete
-	c.mutex.Lock()
-	output := c.outputBuffer.String()
-	c.mutex.Unlock()
+	c.inner.mutex.Lock()
+	output := c.inner.outputBuffer.String()
+	c.inner.mutex.Unlock()
 
 	return output, fmt.Errorf("command timeout after %v (start found: %v)", timeout, foundStart)
 }
@@ -407,8 +428,32 @@ func (c *CLIManager) cleanControlCharacters(line string) string {
 //     with the io.Closer interface pattern
 func (c *CLIManager) Close() error {
 	// Stop the background reader
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+	c.inner.mutex.Lock()
+	defer c.inner.mutex.Unlock()
 
 	return nil
+}
+
+// WithLog creates a new CLIManager instance with a different logger
+// while sharing the same underlying connection (inner state).
+// This allows each test to have its own logging context while sharing
+// the CLI manager connection.
+//
+// Parameters:
+//   - log: Logger to use for this CLI manager instance
+//
+// Returns:
+//   - *CLIManager: A new CLI manager instance with the specified logger
+//
+// Example:
+//
+//	namedCLI := cli.WithLog(logger.Named("test1"))
+func (c *CLIManager) WithLog(log *zap.SugaredLogger) *CLIManager {
+	// Update shared logger atomically so background goroutine uses it
+	c.inner.log.Store(log)
+
+	return &CLIManager{
+		inner: c.inner, // Share the same inner state (connection)
+		log:   log,
+	}
 }

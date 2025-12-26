@@ -101,7 +101,7 @@ func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*
 		BuildDir:    buildDir,
 		TargetDir:   targetDir,
 		readySignal: make(chan bool, 1),
-		log:         logger,
+		log:         logger.Named("QEMU"),
 		instanceID:  instanceID,
 		SerialPath:  filepath.Join(workDir, "serial.sock"),
 		MonitorPath: filepath.Join(workDir, "monitor.sock"),
@@ -446,23 +446,21 @@ func (q *QEMUManager) GetStdout() io.ReadCloser {
 
 // captureStderr captures QEMU stderr for logging
 func (q *QEMUManager) captureStderr(stderr io.ReadCloser, logWriter *os.File) {
-	go func() {
-		defer func() {
-			if err := stderr.Close(); err != nil {
-				q.log.Errorf("Failed to close stderr pipe: %v", err)
-			}
-		}()
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if _, err := logWriter.WriteString("STDERR: " + line + "\n"); err != nil {
-				q.log.Errorf("Failed to write stderr to log file: %v", err)
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			q.log.Errorf("Error reading stderr: %v", err)
+	defer func() {
+		if err := stderr.Close(); err != nil {
+			q.log.Errorf("Failed to close stderr pipe: %v", err)
 		}
 	}()
+	scanner := bufio.NewScanner(stderr)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if _, err := logWriter.WriteString("STDERR: " + line + "\n"); err != nil {
+			q.log.Errorf("Failed to write stderr to log file: %v", err)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		q.log.Errorf("Error reading stderr: %v", err)
+	}
 }
 
 // connectToMonitor connects to QEMU monitor interface via unix socket

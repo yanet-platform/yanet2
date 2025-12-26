@@ -51,10 +51,10 @@ func createTcpPacket(srcIP, dstIP net.IP, srcPort, dstPort int, payload []byte, 
 }
 
 func TestBalancer(t *testing.T) {
-	fw := globalFramework
+	fw := globalFramework.ForTest(t)
 	require.NotNil(t, fw, "Global framework should be initialized")
 
-	t.Run("Configure_Balancer_Module", func(t *testing.T) {
+	fw.Run("Configure_Balancer_Module", func(fw *framework.F, t *testing.T) {
 		// Forward-specific configuration
 		commands := []string{
 			// Configure module
@@ -76,12 +76,11 @@ func TestBalancer(t *testing.T) {
 			"/mnt/target/release/yanet-cli-balancer stats --name=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",
 		}
 
-		_, err := fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure balancer module")
 	})
 
-	t.Run("Test_IPv4_Packet", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_IPv4_Packet", func(fw *framework.F, t *testing.T) {
 		packet := createTcpPacket(
 			net.ParseIP("192.0.2.2"),
 			net.ParseIP("192.0.2.1"),

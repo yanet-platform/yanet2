@@ -12,7 +12,7 @@ import (
 )
 
 // Global framework instance shared across all tests
-var globalFramework *framework.TestFramework
+var globalFramework *framework.GlobalFramework
 
 // TestMain is the entry point for running tests in this package.
 // It wraps the standard testing.M.Run() with additional setup/teardown logic
@@ -74,15 +74,18 @@ func testMainWrapper(m *testing.M) (code int) {
 
 	globalFramework = fw
 
+	// Get global framework instance for TestMain operations
+	gfw := fw.Global()
+
 	// Start test environment
-	if err := fw.Start(); err != nil {
+	if err := gfw.Start(); err != nil {
 		sugar.Errorf("Failed to start framework: %v", err)
 		return 1
 	}
 
 	defer func() {
 		if fw != nil {
-			if err := fw.Stop(); err != nil {
+			if err := gfw.Stop(); err != nil {
 				sugar.Errorf("Failed to stop framework: %v", err)
 				code = 12
 			}
@@ -90,7 +93,7 @@ func testMainWrapper(m *testing.M) (code int) {
 	}()
 
 	// Wait for VM to be ready
-	if err := fw.QEMU.WaitForReady(60 * time.Second); err != nil {
+	if err := gfw.WaitForReady(60 * time.Second); err != nil {
 		sugar.Errorf("Failed to wait for VM readiness: %v", err)
 		return 1
 	}
@@ -196,17 +199,17 @@ rules:
       - virtio_user_kni0
 `
 
-	if err := fw.StartYANET(dataplaneConfig, controlplaneConfig); err != nil {
+	if err := gfw.StartYANET(dataplaneConfig, controlplaneConfig); err != nil {
 		sugar.Errorf("Failed to start YANET: %v", err)
 		return 1
 	}
 
-	if err := fw.CreateConfigFile("forward.yaml", forwardConfig); err != nil {
+	if err := gfw.CreateConfigFile("forward.yaml", forwardConfig); err != nil {
 		sugar.Errorf("Failed to create forward config: %v", err)
 		return 1
 	}
 
-	if _, err := fw.CLI.ExecuteCommands(framework.CommonConfigCommands...); err != nil {
+	if _, err := gfw.ExecuteCommands(framework.CommonConfigCommands...); err != nil {
 		sugar.Errorf("Failed to execute common configuration commands: %v", err)
 		return 1
 	}
@@ -219,11 +222,11 @@ rules:
 // TestFramework - comprehensive test for checking all yanet functionality
 func TestFramework(t *testing.T) {
 	// Use global framework instance
-	fw := globalFramework
+	fw := globalFramework.ForTest(t)
 	require.NotNil(t, fw, "Global framework should be initialized")
 
 	// Test 1: Check basic command execution
-	t.Run("Basic_Commands", func(t *testing.T) {
+	fw.Run("Basic_Commands", func(fw *framework.F, t *testing.T) {
 		// Check basic system commands
 		basicCommands := []struct {
 			name    string
@@ -258,8 +261,8 @@ func TestFramework(t *testing.T) {
 		}
 
 		for _, cmd := range basicCommands {
-			t.Run(cmd.name, func(t *testing.T) {
-				output, err := fw.CLI.ExecuteCommand(cmd.command)
+			fw.Run(cmd.name, func(fw *framework.F, t *testing.T) {
+				output, err := fw.ExecuteCommand(cmd.command)
 				require.NoError(t, err, "Command %s failed", cmd.command)
 				require.True(t, cmd.check(output), "Command %s output validation failed: %s", cmd.command, output)
 			})
@@ -267,7 +270,7 @@ func TestFramework(t *testing.T) {
 	})
 
 	// Test 3: Check filesystem and mounting
-	t.Run("Filesystem_Check", func(t *testing.T) {
+	fw.Run("Filesystem_Check", func(fw *framework.F, t *testing.T) {
 		// Check main directories
 		directories := []string{
 			"/mnt/logs",
@@ -277,12 +280,12 @@ func TestFramework(t *testing.T) {
 		}
 
 		for _, dir := range directories {
-			t.Run("check_"+strings.ReplaceAll(dir, "/", "_"), func(t *testing.T) {
-				output, err := fw.CLI.ExecuteCommand("ls -la " + dir)
+			fw.Run("check_"+strings.ReplaceAll(dir, "/", "_"), func(fw *framework.F, t *testing.T) {
+				output, err := fw.ExecuteCommand("ls -la " + dir)
 				require.NoError(t, err, "Failed to list directory %s", dir)
 				require.NotEmpty(t, output, "Directory %s appears to be empty", dir)
 				require.NotContains(t, output, "such")
-				output, err = fw.CLI.ExecuteCommand("mount | grep " + dir)
+				output, err = fw.ExecuteCommand("mount | grep " + dir)
 				require.NoError(t, err, "Failed to check mount point %s", dir)
 				require.NotEmpty(t, output, "Mount point %s not found", dir)
 			})
@@ -290,7 +293,7 @@ func TestFramework(t *testing.T) {
 	})
 
 	// Test 4: Check YANET binaries availability
-	t.Run("YANET_Binaries", func(t *testing.T) {
+	fw.Run("YANET_Binaries", func(fw *framework.F, t *testing.T) {
 		// Check CLI binaries
 		cliBinaries := []struct {
 			name string
@@ -309,29 +312,29 @@ func TestFramework(t *testing.T) {
 		}
 
 		for _, binary := range cliBinaries {
-			t.Run(binary.name, func(t *testing.T) {
+			fw.Run(binary.name, func(fw *framework.F, t *testing.T) {
 				// Check file existence
-				output, err := fw.CLI.ExecuteCommand("ls -la " + binary.path)
+				output, err := fw.ExecuteCommand("ls -la " + binary.path)
 				require.NoError(t, err, "⚠️  Binary %s check failed: %v", binary.name, err)
 				require.NotContainsf(t, output, "such", "⚠️  Binary %s not found: %v", binary.name)
 				require.Contains(t, output, binary.path, "Binary file not found in listing")
 
 				// Check binary help
-				helpOutput, helpErr := fw.CLI.ExecuteCommand(binary.path + " --help")
+				helpOutput, helpErr := fw.ExecuteCommand(binary.path + " --help")
 				require.NoError(t, helpErr, "Binary %s help check failed: %v", binary.name, helpErr)
 				require.NotEmpty(t, helpOutput, "Binary %s help check failed: %v", binary.name, helpErr)
 			})
 		}
 
 		// Check main YANET components
-		t.Run("yanet_components", func(t *testing.T) {
+		fw.Run("yanet_components", func(fw *framework.F, t *testing.T) {
 			components := []string{
 				"/mnt/build/dataplane/yanet-dataplane",
 				"/mnt/build/controlplane/yanet-controlplane",
 			}
 
 			for _, component := range components {
-				output, err := fw.CLI.ExecuteCommand("ls -la " + component)
+				output, err := fw.ExecuteCommand("ls -la " + component)
 				require.NoError(t, err, "Component %s not found", component)
 				require.NotContains(t, output, "such")
 			}
@@ -339,17 +342,18 @@ func TestFramework(t *testing.T) {
 	})
 
 	// Test 5: Check network interfaces and socket devices
-	t.Run("Network_Interfaces", func(t *testing.T) {
+	fw.Run("Network_Interfaces", func(fw *framework.F, t *testing.T) {
 		// Check network interfaces
-		output, err := fw.CLI.ExecuteCommand("ip link show")
+		output, err := fw.ExecuteCommand("ip link show")
 		require.NoError(t, err)
 		require.Contains(t, output, "lo", "Loopback interface should be present")
 
 		// Check framework socket clients
-		t.Run("socket_clients", func(t *testing.T) {
+		fw.Run("socket_clients", func(fw *framework.F, t *testing.T) {
+			socketPaths := fw.GetSocketPaths()
 			for i := range 2 {
 				// Check if socket path exists
-				socketPath := fw.QEMU.SocketPaths[i]
+				socketPath := socketPaths[i]
 
 				// Check if socket file exists
 				_, err := os.Stat(socketPath)
@@ -364,7 +368,7 @@ func TestFramework(t *testing.T) {
 	})
 
 	// Test 6: Check PacketParser
-	t.Run("PacketParser", func(t *testing.T) {
+	fw.Run("PacketParser", func(fw *framework.F, t *testing.T) {
 		require.NotNil(t, fw.PacketParser, "PacketParser should be initialized")
 
 		// Create simple test packet
@@ -396,24 +400,24 @@ func TestFramework(t *testing.T) {
 	})
 
 	// Test 7: Check system resources
-	t.Run("System_Resources", func(t *testing.T) {
+	fw.Run("System_Resources", func(fw *framework.F, t *testing.T) {
 		// Check memory
-		t.Run("memory", func(t *testing.T) {
-			output, err := fw.CLI.ExecuteCommand("free -h")
+		fw.Run("memory", func(fw *framework.F, t *testing.T) {
+			output, err := fw.ExecuteCommand("free -h")
 			require.NoError(t, err)
 			require.Contains(t, output, "Mem:", "Memory information should be available")
 		})
 
 		// Check CPU
-		t.Run("cpu", func(t *testing.T) {
-			output, err := fw.CLI.ExecuteCommand("nproc")
+		fw.Run("cpu", func(fw *framework.F, t *testing.T) {
+			output, err := fw.ExecuteCommand("nproc")
 			require.NoError(t, err)
 			require.NotEmpty(t, strings.TrimSpace(output), "CPU count should be available")
 		})
 
 		// Check hugepages (important for DPDK)
-		t.Run("hugepages", func(t *testing.T) {
-			output, err := fw.CLI.ExecuteCommand("cat /proc/meminfo | grep -i huge")
+		fw.Run("hugepages", func(fw *framework.F, t *testing.T) {
+			output, err := fw.ExecuteCommand("cat /proc/meminfo | grep -i huge")
 			require.NoErrorf(t, err, "Failed to get hugepages info: %s", output)
 		})
 	})

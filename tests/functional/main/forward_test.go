@@ -130,10 +130,10 @@ func createICMPv6Packet(srcIP, dstIP net.IP, payload []byte) []byte {
 
 // TestForward_BasicFunctionality tests basic forward module functionality
 func TestForward(t *testing.T) {
-	fw := globalFramework
+	fw := globalFramework.ForTest(t)
 	require.NotNil(t, fw, "Global framework should be initialized")
 
-	t.Run("Configure_Forward_Module", func(t *testing.T) {
+	fw.Run("Configure_Forward_Module", func(fw *framework.F, t *testing.T) {
 		// Forward-specific configuration
 		commands := []string{
 			framework.CLIFunction + " update --name=test --chains ch0:4=forward:forward0,route:route0",
@@ -141,12 +141,11 @@ func TestForward(t *testing.T) {
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
 
-		_, err := fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure forward module")
 	})
 
-	t.Run("Test_Forwarding", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_Forwarding", func(fw *framework.F, t *testing.T) {
 		packet := createForwardPacket(
 			net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
 			net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
@@ -164,8 +163,7 @@ func TestForward(t *testing.T) {
 		assert.Equal(t, "192.0.2.2", outputPacket.DstIP.String(), "Destination IP should be preserved")
 	})
 
-	t.Run("Test_ICMP4_Echo", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_ICMP4_Echo", func(fw *framework.F, t *testing.T) {
 		packet := createICMPPacket(
 			net.ParseIP(framework.VMIPv4Gateway),
 			net.ParseIP(framework.VMIPv4Host),
@@ -183,8 +181,7 @@ func TestForward(t *testing.T) {
 		assert.Equal(t, framework.VMIPv4Gateway, outputPacket.DstIP.String(), "Destination IP should be the source of the request")
 	})
 
-	t.Run("Test_ICMP6_Echo", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_ICMP6_Echo", func(fw *framework.F, t *testing.T) {
 		// Test ICMPv6 echo request to VMIPv6Host
 		packet := createICMPv6Packet(
 			net.ParseIP(framework.VMIPv6Gateway), // src IP

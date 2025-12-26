@@ -59,12 +59,12 @@ func createRouteTestPacket(srcIP, dstIP net.IP, payload []byte) []byte {
 
 // TestRoute tests route module functionality including static route insertion and deletion
 func TestRoute(t *testing.T) {
-	fw := globalFramework
+	fw := globalFramework.ForTest(t)
 	require.NotNil(t, fw, "Global framework should be initialized")
 
-	t.Run("Insert_Static_Route", func(t *testing.T) {
+	fw.Run("Insert_Static_Route", func(fw *framework.F, t *testing.T) {
 		// Add neighbour for the nexthop
-		_, err := fw.CLI.ExecuteCommand("ip nei add 192.0.2.1 lladdr " + framework.SrcMAC + " dev kni0")
+		_, err := fw.ExecuteCommand("ip nei add 192.0.2.1 lladdr " + framework.SrcMAC + " dev kni0")
 		require.NoError(t, err, "Failed to add neighbour")
 
 		// Wait for neighbour to appear in yanet
@@ -74,37 +74,37 @@ func TestRoute(t *testing.T) {
 		require.NoError(t, err, "Neighbour 192.0.2.1 did not appear in yanet")
 
 		// Insert route with the nexthop (do_flush is automatic in insert command)
-		output, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-tfn0 10.0.0.0/24 --via 192.0.2.1")
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-tfn0 10.0.0.0/24 --via 192.0.2.1")
 		require.NoError(t, err, "Failed to insert route")
 		t.Logf("Insert route output: %s", output)
 		t.Logf("Successfully inserted route 10.0.0.0/24 via 192.0.2.1")
 	})
 
-	t.Run("Configure_Route_Module", func(t *testing.T) {
+	fw.Run("Configure_Route_Module", func(fw *framework.F, t *testing.T) {
 		// Configure route module
 		commands := []string{
 			framework.CLIFunction + " update --name=test --chains ch0:4=route:route-tfn0",
 			framework.CLIPipeline + " update --name=test --functions test",
 		}
 
-		_, err := fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure route module")
 	})
 
-	t.Run("List_Configs", func(t *testing.T) {
-		output, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route list")
+	fw.Run("List_Configs", func(fw *framework.F, t *testing.T) {
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route list")
 		require.NoError(t, err, "Failed to list configs")
 		t.Logf("Available configs: %s", output)
 	})
 
-	t.Run("Show_Routes_After_Insert", func(t *testing.T) {
+	fw.Run("Show_Routes_After_Insert", func(fw *framework.F, t *testing.T) {
 		// First, show all routes without filter
-		outputAll, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0")
+		outputAll, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0")
 		require.NoError(t, err, "Failed to show all routes")
 		t.Logf("Show all routes output:\n%s", outputAll)
 
 		// Then, show only IPv4 routes with filter
-		outputIPv4, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
+		outputIPv4, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
 		require.NoError(t, err, "Failed to show IPv4 routes")
 
 		// Verify our route is present in filtered output
@@ -114,8 +114,8 @@ func TestRoute(t *testing.T) {
 		t.Logf("Show IPv4 routes (filtered) output:\n%s", outputIPv4)
 	})
 
-	t.Run("Lookup_Route", func(t *testing.T) {
-		output, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route lookup --cfg route-tfn0 10.0.0.10")
+	fw.Run("Lookup_Route", func(fw *framework.F, t *testing.T) {
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route lookup --cfg route-tfn0 10.0.0.10")
 		require.NoError(t, err, "Failed to lookup route")
 
 		// Verify lookup result contains our prefix
@@ -123,8 +123,7 @@ func TestRoute(t *testing.T) {
 		t.Logf("Lookup output:\n%s", output)
 	})
 
-	t.Run("Test_Packet_Routing_With_Route", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_Packet_Routing_With_Route", func(fw *framework.F, t *testing.T) {
 
 		// Create packet destined to our routed network
 		packet := createRouteTestPacket(
@@ -143,19 +142,19 @@ func TestRoute(t *testing.T) {
 		}
 	})
 
-	t.Run("Delete_Static_Route", func(t *testing.T) {
-		output, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route delete --cfg route-tfn0 10.0.0.0/24 --via 192.0.2.1")
+	fw.Run("Delete_Static_Route", func(fw *framework.F, t *testing.T) {
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route delete --cfg route-tfn0 10.0.0.0/24 --via 192.0.2.1")
 		require.NoError(t, err, "Failed to delete route")
 		t.Logf("Delete route output: %s", output)
 		t.Logf("Successfully deleted route 10.0.0.0/24 via 192.0.2.1")
 
 		// Clean up neighbour
-		_, err = fw.CLI.ExecuteCommand("ip nei del 192.0.2.1 dev kni0")
+		_, err = fw.ExecuteCommand("ip nei del 192.0.2.1 dev kni0")
 		require.NoError(t, err, "Failed to delete neighbour")
 	})
 
-	t.Run("Show_Routes_After_Delete", func(t *testing.T) {
-		output, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
+	fw.Run("Show_Routes_After_Delete", func(fw *framework.F, t *testing.T) {
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
 		require.NoError(t, err, "Failed to show routes")
 
 		// Verify our static route is deleted
@@ -172,8 +171,7 @@ func TestRoute(t *testing.T) {
 		t.Logf("Verified route deletion. Show routes output:\n%s", output)
 	})
 
-	t.Run("Test_Packet_Without_Route", func(t *testing.T) {
-		fw := globalFramework.WithTestName(t.Name())
+	fw.Run("Test_Packet_Without_Route", func(fw *framework.F, t *testing.T) {
 
 		// Create packet destined to a network without any route
 		// Without default route, this packet should be dropped
@@ -203,15 +201,13 @@ func TestRoute(t *testing.T) {
 		t.Logf("Packet correctly dropped (no matching route)")
 	})
 
-	t.Run("Test_Packet_With_Default_Route", func(t *testing.T) {
+	fw.Run("Test_Packet_With_Default_Route", func(fw *framework.F, t *testing.T) {
 		// Neighbour for gateway already added in CommonConfigCommands (framework.VMIPv4Gateway)
 
 		// Insert default route using the gateway from framework into route-tfn0 config
-		output, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-tfn0 0.0.0.0/0 --via " + framework.VMIPv4Gateway)
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-tfn0 0.0.0.0/0 --via " + framework.VMIPv4Gateway)
 		require.NoError(t, err, "Failed to insert default route")
 		t.Logf("Inserted default route: %s", output)
-
-		fw := globalFramework.WithTestName(t.Name())
 
 		// Create packet destined to a network without specific route
 		// This should now match the default route
@@ -232,12 +228,12 @@ func TestRoute(t *testing.T) {
 		t.Logf("Packet correctly routed via default route: src=%s dst=%s", outputPacket.SrcIP, outputPacket.DstIP)
 
 		// Clean up: delete default route
-		output, err = fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route delete --cfg route-tfn0 0.0.0.0/0 --via " + framework.VMIPv4Gateway)
+		output, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route delete --cfg route-tfn0 0.0.0.0/0 --via " + framework.VMIPv4Gateway)
 		require.NoError(t, err, "Failed to delete default route")
 		t.Logf("Deleted default route: %s", output)
 	})
 
-	t.Run("Insert_Multiple_Routes", func(t *testing.T) {
+	fw.Run("Insert_Multiple_Routes", func(fw *framework.F, t *testing.T) {
 		routes := []struct {
 			prefix  string
 			nexthop string
@@ -249,7 +245,7 @@ func TestRoute(t *testing.T) {
 
 		// Add neighbours for all nexthops
 		for _, route := range routes {
-			_, err := fw.CLI.ExecuteCommand("ip nei add " + route.nexthop + " lladdr " + framework.SrcMAC + " dev kni0")
+			_, err := fw.ExecuteCommand("ip nei add " + route.nexthop + " lladdr " + framework.SrcMAC + " dev kni0")
 			require.NoError(t, err, "Failed to add neighbour for %s", route.nexthop)
 		}
 
@@ -263,16 +259,16 @@ func TestRoute(t *testing.T) {
 
 		// Insert routes
 		for _, route := range routes {
-			_, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-tfn0 " + route.prefix + " --via " + route.nexthop)
+			_, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-tfn0 " + route.prefix + " --via " + route.nexthop)
 			require.NoError(t, err, "Failed to insert route %s", route.prefix)
 		}
 
 		// Flush routes
-		_, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route flush --cfg route-tfn0")
+		_, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route flush --cfg route-tfn0")
 		require.NoError(t, err, "Failed to flush routes")
 
 		// Verify all routes are present
-		output, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
 		require.NoError(t, err, "Failed to show routes")
 
 		for _, route := range routes {
@@ -283,7 +279,7 @@ func TestRoute(t *testing.T) {
 		t.Logf("Successfully inserted and verified %d routes", len(routes))
 	})
 
-	t.Run("Delete_Multiple_Routes", func(t *testing.T) {
+	fw.Run("Delete_Multiple_Routes", func(fw *framework.F, t *testing.T) {
 		routes := []struct {
 			prefix  string
 			nexthop string
@@ -295,22 +291,22 @@ func TestRoute(t *testing.T) {
 
 		// Delete routes
 		for _, route := range routes {
-			_, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route delete --cfg route-tfn0 " + route.prefix + " --via " + route.nexthop)
+			_, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route delete --cfg route-tfn0 " + route.prefix + " --via " + route.nexthop)
 			require.NoError(t, err, "Failed to delete route %s", route.prefix)
 		}
 
 		// Clean up neighbours
 		for _, route := range routes {
-			_, err := fw.CLI.ExecuteCommand("ip nei del " + route.nexthop + " dev kni0")
+			_, err := fw.ExecuteCommand("ip nei del " + route.nexthop + " dev kni0")
 			require.NoError(t, err, "Failed to delete neighbour for %s", route.nexthop)
 		}
 
 		// Flush routes
-		_, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route flush --cfg route-tfn0")
+		_, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route flush --cfg route-tfn0")
 		require.NoError(t, err, "Failed to flush routes")
 
 		// Verify all static routes are deleted
-		output, err := fw.CLI.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
 		require.NoError(t, err, "Failed to show routes")
 
 		for _, route := range routes {

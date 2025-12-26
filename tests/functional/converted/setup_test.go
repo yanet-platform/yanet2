@@ -11,7 +11,7 @@ import (
 )
 
 // Global framework instance shared across all converted tests
-var globalFramework *framework.TestFramework
+var globalFramework *framework.GlobalFramework
 
 // TestMain initializes the test framework for converted tests
 func TestMain(m *testing.M) {
@@ -57,10 +57,13 @@ func testMainWrapper(m *testing.M) (code int) {
 
 	globalFramework = fw
 
+	// Get global framework instance for TestMain operations
+	gfw := fw.Global()
+
 	// Ensure cleanup
 	defer func() {
 		if fw != nil {
-			if err := fw.Stop(); err != nil {
+			if err := gfw.Stop(); err != nil {
 				sugar.Errorf("Failed to stop framework: %v", err)
 				code = 12
 			}
@@ -68,13 +71,13 @@ func testMainWrapper(m *testing.M) (code int) {
 	}()
 
 	// Start framework
-	if err := fw.Start(); err != nil {
+	if err := gfw.Start(); err != nil {
 		sugar.Errorf("Failed to start framework: %v", err)
 		return 1
 	}
 
 	// Wait for VM to be ready (60 seconds timeout)
-	if err := fw.QEMU.WaitForReady(60 * time.Second); err != nil {
+	if err := gfw.WaitForReady(60 * time.Second); err != nil {
 		sugar.Errorf("Failed to wait for VM readiness: %v", err)
 		return 1
 	}
@@ -181,18 +184,18 @@ rules:
 `
 
 	sugar.Info("Starting YANET (dataplane + controlplane)...")
-	if err := fw.StartYANET(dataplaneConfig, controlplaneConfig); err != nil {
+	if err := gfw.StartYANET(dataplaneConfig, controlplaneConfig); err != nil {
 		sugar.Errorf("Failed to start YANET: %v", err)
 		return 1
 	}
 
-	if err := fw.CreateConfigFile("forward.yaml", forwardConfig); err != nil {
+	if err := gfw.CreateConfigFile("forward.yaml", forwardConfig); err != nil {
 		sugar.Errorf("Failed to create forward config: %v", err)
 		return 1
 	}
 
 	sugar.Info("Executing common configuration commands...")
-	if _, err := fw.CLI.ExecuteCommands(framework.CommonConfigCommands...); err != nil {
+	if _, err := gfw.ExecuteCommands(framework.CommonConfigCommands...); err != nil {
 		sugar.Errorf("Failed to execute common configuration commands: %v", err)
 		return 1
 	}

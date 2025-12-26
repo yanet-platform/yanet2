@@ -138,7 +138,7 @@ func (c *Converter) generateTestStepsInOrder(steps []ConvertedStep) string {
 		if step.Type == "ipv4Update" || step.Type == "ipv6Update" || step.Type == "ipv4LabelledUpdate" || step.Type == "ipv4Remove" || step.Type == "ipv4LabelledRemove" {
 			routeCounter++
 			result.WriteString(fmt.Sprintf(`
-	t.Run("Step_%03d_Configure_Routes", func(t *testing.T) {
+	fw.Run("Step_%03d_Configure_Routes", func(fw *framework.F, t *testing.T) {
 		// %s
 		%s
 	})`, routeCounter, step.Description, step.GoCode))
@@ -161,7 +161,7 @@ func (c *Converter) generateTestStepsInOrder(steps []ConvertedStep) string {
 				// Note: Error handling removed - new socket-based code handles drops gracefully
 
 				result.WriteString(fmt.Sprintf(`
-	t.Run("Step_%03d_Test_Packet", func(t *testing.T) {
+	fw.Run("Step_%03d_Test_Packet", func(fw *framework.F, t *testing.T) {
 		// Test case: %s -> %s
 		sendPackets := %s
 		require.NotNil(t, sendPackets)
@@ -214,7 +214,7 @@ func (c *Converter) generateTestStepsInOrder(steps []ConvertedStep) string {
 		} else {
 			// Handle other step types (cli, checkCounters, etc.)
 			result.WriteString(fmt.Sprintf(`
-	t.Run("Step_%s", func(t *testing.T) {
+	fw.Run("Step_%s", func(fw *framework.F, t *testing.T) {
 		// %s
 		%s
 	})`, step.Type, step.Description, step.GoCode))
@@ -270,7 +270,7 @@ func (c *Converter) generateTestHeader(testName, originalTestName, testType stri
 // Original test: %s
 // Test type: %s
 func Test%s(t *testing.T) {
-	fw := globalFramework
+	fw := globalFramework.ForTest(t)
 	require.NotNil(t, fw, "Global framework should be initialized")%s
 `, imports, testName, originalTestName, testType, testName, silenceCode)
 }
@@ -337,13 +337,13 @@ func (c *Converter) generateNAT64TestTemplate(testData *GoTestData, functions []
 	}
 
 	return fmt.Sprintf(`%s
-	t.Run("Step_000_Configure_NAT64_Environment", func(t *testing.T) {
+	fw.Run("Step_000_Configure_NAT64_Environment", func(fw *framework.F, t *testing.T) {
 		// Configure NAT64 module
 		commands := []string{%s%s
 			"%s update --name=test --chains chain2:1=forward:forward0,nat64:%s,route:route0 --instance=0",
 			"%s update --name=test --functions test --instance=0",
 		}
-		_, err := fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure NAT64 module")
 
 	})
@@ -380,14 +380,14 @@ func (c *Converter) generateForwardModuleConfig(config *ControlplaneConfig) stri
 func (c *Converter) generateBalancerTestTemplate(testData *GoTestData, functions []string) string {
 	header := c.generateTestHeader(testData.TestName, testData.OriginalTestName, testData.TestType)
 	return fmt.Sprintf(`%s
-	t.Run("Step_000_Configure_Balancer_Environment", func(t *testing.T) {
+	fw.Run("Step_000_Configure_Balancer_Environment", func(fw *framework.F, t *testing.T) {
 		// Configure balancer module
 		commands := []string{
 			"%s service add --cfg balancer0 --instances 0 --virtual-ip 10.0.0.16 --proto tcp --virtual-port any",
 			"%s update --name=test --chains chain2:1=balancer:balancer0,route:route0 --instance=0",
 			"%s update --name=test --functions test --instance=0",
 		}
-		_, err := fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure balancer module")
 
 	})
@@ -421,13 +421,13 @@ func (c *Converter) generateRouteTestTemplate(testData *GoTestData, functions []
 func (c *Converter) generateACLTestTemplate(testData *GoTestData, functions []string) string {
 	header := c.generateTestHeader(testData.TestName, testData.OriginalTestName, testData.TestType)
 	return fmt.Sprintf(`%s
-	t.Run("Step_000_Configure_ACL_Environment", func(t *testing.T) {
+	fw.Run("Step_000_Configure_ACL_Environment", func(fw *framework.F, t *testing.T) {
 		// Configure ACL module
 		commands := []string{
 			"%s update --name=test --chains chain2:1=acl:acl0,route:route0 --instance=0",
 			"%s update --name=test --functions test --instance=0",
 		}
-		_, err := fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure ACL module")
 
 	})
@@ -472,13 +472,13 @@ func (c *Converter) generateDecapTestTemplate(testData *GoTestData, functions []
 	}
 
 	return fmt.Sprintf(`%s
-	t.Run("Step_000_Configure_Decap_Environment", func(t *testing.T) {
+	fw.Run("Step_000_Configure_Decap_Environment", func(fw *framework.F, t *testing.T) {
 		// Configure Decap module
 		commands := []string{%s
 			"%s update --name=test --chains chain2:1=forward:forward0,decap:decap0,route:route0 --instance=0",
 			"%s update --name=test --functions test --instance=0",
 		}
-		_, err := fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure Decap module")
 	})
 
@@ -498,13 +498,13 @@ func (c *Converter) generateDecapTestTemplate(testData *GoTestData, functions []
 func (c *Converter) generateGenericTestTemplate(testData *GoTestData, functions []string) string {
 	header := c.generateTestHeader(testData.TestName, testData.OriginalTestName, testData.TestType)
 	return fmt.Sprintf(`%s
-	t.Run("Step_000_Configure_Test_Environment", func(t *testing.T) {
+	fw.Run("Step_000_Configure_Test_Environment", func(fw *framework.F, t *testing.T) {
 		// Configure test environment with forward (required for packet processing)
 		commands := []string{
 			"%s update --name=test --chains chain2:1=forward:forward0,route:route0 --instance=0",
 			"%s update --name=test --functions test --instance=0",
 		}
-		_, err := fw.CLI.ExecuteCommands(commands...)
+		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure test environment")
 	})
 
