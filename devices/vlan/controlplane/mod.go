@@ -33,7 +33,7 @@ func NewDeviceVlanDevice(cfg *Config, log *zap.SugaredLogger) (*DeviceVlanDevice
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentAttach("vlan", cfg.InstanceID, uint(cfg.MemoryRequirements))
+	agent, err := shm.AgentAttach("vlan", cfg.InstanceID, cfg.MemoryRequirements)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}

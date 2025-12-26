@@ -10,6 +10,8 @@ import "C"
 import (
 	"fmt"
 	"unsafe"
+
+	"github.com/c2h5oh/datasize"
 )
 
 // SharedMemory represents a handle to YANET shared memory segment.
@@ -55,7 +57,7 @@ func (m *SharedMemory) DPConfig(instanceIdx uint32) *DPConfig {
 }
 
 // AgentAttach attaches a module agent to shared memory on the dataplane instance.
-func (m *SharedMemory) AgentAttach(name string, instanceIdx uint32, size uint) (*Agent, error) {
+func (m *SharedMemory) AgentAttach(name string, instanceIdx uint32, size datasize.ByteSize) (*Agent, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -68,10 +70,10 @@ func (m *SharedMemory) AgentAttach(name string, instanceIdx uint32, size uint) (
 }
 
 // AgentsAttach attaches agents to shared memory on the specified list of instances.
-func (m *SharedMemory) AgentsAttach(name string, instanceIndices []uint32, size uint) ([]*Agent, error) {
+func (m *SharedMemory) AgentsAttach(name string, instanceIndices []uint32, size datasize.ByteSize) ([]*Agent, error) {
 	agents := make([]*Agent, 0, len(instanceIndices))
 	for _, instanceIdx := range instanceIndices {
-		agent, err := m.AgentAttach(name, instanceIdx, uint(size))
+		agent, err := m.AgentAttach(name, instanceIdx, size)
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to shared memory on instance %d: %w", instanceIdx, err)
 		}

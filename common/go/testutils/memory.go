@@ -29,7 +29,7 @@ type MemoryContext struct {
 	ptr unsafe.Pointer
 }
 
-func NewMemoryContext(name string, size uint64) MemoryContext {
+func NewMemoryContext(name string, size datasize.ByteSize) MemoryContext {
 	sizeOfArena := C.size_t(size)
 
 	arena := C.malloc(sizeOfArena + C.sizeof_struct_memory_context + C.sizeof_struct_block_allocator)

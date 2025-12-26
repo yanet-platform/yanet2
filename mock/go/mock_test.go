@@ -29,7 +29,7 @@ func TestBasic(t *testing.T) {
 	defer mock.Free()
 
 	shm := mock.SharedMemory()
-	agent, err := shm.AgentAttach("config", 0, uint(config.GetAgentsMemory()))
+	agent, err := shm.AgentAttach("config", 0, config.GetAgentsMemory())
 	require.NoError(t, err)
 	require.NotNil(t, agent)
 

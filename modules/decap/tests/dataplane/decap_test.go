@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/gopacket/gopacket"
@@ -71,7 +72,7 @@ func TestDecap_IPIP6(t *testing.T) {
 		xerror.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
 	}
 
-	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	memCtx := testutils.NewMemoryContext("decap_test", datasize.MB)
 	defer memCtx.Free()
 
 	m := decapModuleConfig(prefixes, memCtx)
@@ -106,7 +107,7 @@ func TestDecap_IPIP(t *testing.T) {
 		xerror.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
 	}
 
-	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	memCtx := testutils.NewMemoryContext("decap_test", datasize.MB)
 	defer memCtx.Free()
 
 	m := decapModuleConfig(prefixes, memCtx)
@@ -135,7 +136,7 @@ func TestDecap_IP6IP(t *testing.T) {
 		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
 
-	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	memCtx := testutils.NewMemoryContext("decap_test", datasize.MB)
 	defer memCtx.Free()
 
 	m := decapModuleConfig(prefixes, memCtx)
@@ -175,7 +176,7 @@ func TestDecap_IP6IP6(t *testing.T) {
 		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
 
-	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	memCtx := testutils.NewMemoryContext("decap_test", datasize.MB)
 	defer memCtx.Free()
 
 	m := decapModuleConfig(prefixes, memCtx)
@@ -206,7 +207,7 @@ func TestDecap_IP6IP_noVlan(t *testing.T) {
 		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
 
-	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	memCtx := testutils.NewMemoryContext("decap_test", datasize.MB)
 	defer memCtx.Free()
 
 	m := decapModuleConfig(prefixes, memCtx)
@@ -373,7 +374,7 @@ func TestDecap_GRE(t *testing.T) {
 		xerror.Unwrap(netip.ParsePrefix("1.2.3.4/24")),
 	}
 
-	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	memCtx := testutils.NewMemoryContext("decap_test", datasize.MB)
 	defer memCtx.Free()
 
 	m := decapModuleConfig(prefixes, memCtx)
@@ -448,7 +449,7 @@ func TestDecap_Fragment_ipv4(t *testing.T) {
 		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
 
-	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	memCtx := testutils.NewMemoryContext("decap_test", datasize.MB)
 	defer memCtx.Free()
 
 	m := decapModuleConfig(prefixes, memCtx)
@@ -512,7 +513,7 @@ func TestDecap_Fragment_ipv6(t *testing.T) {
 		xerror.Unwrap(netip.ParsePrefix("1:2:3:4::abcd/128")),
 	}
 
-	memCtx := testutils.NewMemoryContext("decap_test", 1<<20)
+	memCtx := testutils.NewMemoryContext("decap_test", datasize.MB)
 	defer memCtx.Free()
 
 	m := decapModuleConfig(prefixes, memCtx)

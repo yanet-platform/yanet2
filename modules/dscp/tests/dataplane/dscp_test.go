@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/gopacket/gopacket"
@@ -130,7 +131,7 @@ func TestDSCP(t *testing.T) {
 				pkt := mark(t, p.pkt, c.from)
 				t.Log("Origin packet", pkt)
 
-				memCtx := testutils.NewMemoryContext("dscp_test", 1<<20)
+				memCtx := testutils.NewMemoryContext("dscp_test", datasize.MB)
 				defer memCtx.Free()
 
 				m := dscpModuleConfig(prefixes, c.flag, c.mark, memCtx)

@@ -4,6 +4,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
@@ -64,7 +65,7 @@ func TestFWStateInternalPacket(t *testing.T) {
 	pkt := createSyncPacket(t, false, 6) // TCP
 	t.Log("Internal sync packet:", pkt)
 
-	memCtx := testutils.NewMemoryContext("fwstate_test", 64<<20)
+	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
 	m := fwstateModuleConfig(memCtx)
 	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))
@@ -79,7 +80,7 @@ func TestFWStateExternalPacket(t *testing.T) {
 	pkt := createSyncPacket(t, true, 17) // UDP
 	t.Log("External sync packet:", pkt)
 
-	memCtx := testutils.NewMemoryContext("fwstate_test", 64<<20)
+	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
 	m := fwstateModuleConfig(memCtx)
 	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))
@@ -115,7 +116,7 @@ func TestFWStateNonSyncPacket(t *testing.T) {
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp, &payload)
 	t.Log("Non-sync packet:", pkt)
 
-	memCtx := testutils.NewMemoryContext("fwstate_test", 64<<20)
+	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
 	m := fwstateModuleConfig(memCtx)
 	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))
@@ -131,7 +132,7 @@ func TestFWStateStateCreation(t *testing.T) {
 	pkt := createSyncPacket(t, false, 6) // TCP
 	t.Log("Internal sync packet:", pkt)
 
-	memCtx := testutils.NewMemoryContext("fwstate_test", 64<<20)
+	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
 	m := fwstateModuleConfig(memCtx)
 	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))

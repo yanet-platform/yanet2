@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
@@ -19,7 +20,7 @@ const agentName = "pipeline"
 // corresponding call is done. So, on every call we need to allocate
 // memory for temporary operations only. For now, 1MB is
 // sufficient.
-const defaultAgentMemory = uint(1 << 20)
+const defaultAgentMemory = datasize.MB
 
 // PipelineService is a gRPC service for managing pipelines.
 type PipelineService struct {

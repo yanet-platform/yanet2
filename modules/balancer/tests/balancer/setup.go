@@ -75,7 +75,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 	}
 
 	agent, err := mockInstance.SharedMemory().
-		AgentAttach("balancer", 0, uint(config.mock.GetAgentsMemory()))
+		AgentAttach("balancer", 0, config.mock.GetAgentsMemory())
 	if err != nil {
 		return nil, err
 	}
