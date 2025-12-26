@@ -412,8 +412,8 @@ jobs:
         tail -n 100 main/test.log 2>/dev/null || echo "main/test.log not found"
         
         echo ""
-        echo "=== converted/converted_test.log (last 100 lines) ==="
-        tail -n 100 converted/converted_test.log 2>/dev/null || echo "converted/converted_test.log not found"
+        echo "=== converted/test.log (last 100 lines) ==="
+        tail -n 100 converted/test.log 2>/dev/null || echo "converted/test.log not found"
         
         exit $ret
       timeout-minutes: 35
@@ -424,4 +424,5 @@ jobs:
       with:
         name: functional-test-logs
         path: |
-          tests/functional/test.log
+          tests/functional/main/test.log
+          tests/functional/converted/test.log

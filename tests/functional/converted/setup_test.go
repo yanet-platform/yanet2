@@ -28,8 +28,8 @@ func testMainWrapper(m *testing.M) (code int) {
 	if !framework.IsDebugEnabled() {
 		lg.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
 	} else {
-		lg.OutputPaths = []string{"converted_test.log"}
-		lg.ErrorOutputPaths = []string{"stderr", "converted_test.log"}
+		lg.OutputPaths = []string{"test.log"}
+		lg.ErrorOutputPaths = []string{"stderr", "test.log"}
 	}
 
 	logger, err := lg.Build()
