@@ -53,7 +53,8 @@
     background: var(--g-color-base-float);
     border: 2px solid var(--g-color-line-generic);
     min-width: 140px;
-    height: 70px;
+    /* Fixed height to prevent layout shifts when counters update */
+    height: 110px;
     box-sizing: border-box;
     transition: border-color 0.15s ease, background-color 0.15s ease;
     cursor: pointer;
@@ -85,6 +86,15 @@
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+
+/* ============================================
+   Counter Display Wrapper (uses shared CounterDisplay component)
+   ============================================ */
+.function-ref-node__counters {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--g-color-line-generic);
 }
 
 /* ============================================

@@ -2,10 +2,15 @@ import { useState, useCallback, useEffect } from 'react';
 import { API } from '../../api';
 import type { Pipeline, PipelineId } from '../../api/pipelines';
 import type { FunctionId } from '../../api/common';
+import type { CounterInfo, DeviceInfo } from '../../api';
 import { toaster } from '../../utils';
-import { useGraphEditor } from '../../hooks';
+import { useGraphEditor, useInterpolatedCounters } from '../../hooks';
+import type { InterpolatedCounterData } from '../../hooks';
 import type { PipelineNode, PipelineEdge } from './types';
 import { apiToGraph, graphToApi, createEmptyGraph, validateLinkedList } from './utils';
+
+// Re-export formatPps and formatBps from utils for backwards compatibility
+export { formatPps, formatBps } from '../../utils';
 
 export interface UsePipelineDataResult {
     pipelineIds: PipelineId[];
@@ -207,4 +212,113 @@ export const usePipelineGraph = (initialPipeline?: Pipeline): UsePipelineGraphRe
         reset,
         markClean,
     };
+};
+
+// Helper to sum counter values across all instances and all values within each instance
+const sumCounterValues = (counter: CounterInfo | undefined): bigint => {
+    if (!counter?.instances) return BigInt(0);
+    return counter.instances.reduce((sum, inst) => {
+        // Sum all values in the instance (e.g., values from different workers/cores)
+        const instSum = (inst.values ?? []).reduce((s, val) => s + BigInt(val ?? 0), BigInt(0));
+        return sum + instSum;
+    }, BigInt(0));
+};
+
+// Helper to find counter by name
+const findCounter = (counters: CounterInfo[] | undefined, name: string): CounterInfo | undefined => {
+    return counters?.find(c => c.name === name);
+};
+
+export interface UseFunctionCountersResult {
+    counters: Map<string, InterpolatedCounterData>;
+}
+
+/**
+ * Hook for fetching and interpolating function counters.
+ * 
+ * Uses the generic useInterpolatedCounters hook with pipeline-specific fetch logic.
+ * - Polls counters every 1 second from backend
+ * - Aggregates counters across all devices using the pipeline
+ * - Updates visual every 30ms using linear interpolation
+ */
+export const useFunctionCounters = (
+    pipelineName: string,
+    functionNames: string[]
+): UseFunctionCountersResult => {
+    // Store devices that use this pipeline
+    const [devices, setDevices] = useState<DeviceInfo[]>([]);
+
+    // Fetch devices on mount
+    useEffect(() => {
+        const fetchDevices = async () => {
+            try {
+                const response = await API.inspect.inspect();
+                const allDevices = response.instanceInfo?.devices ?? [];
+                
+                // Find devices that use this pipeline
+                const matchingDevices = allDevices.filter(device => {
+                    const inputPipelines = device.inputPipelines ?? [];
+                    const outputPipelines = device.outputPipelines ?? [];
+                    return inputPipelines.some(p => p.name === pipelineName) ||
+                           outputPipelines.some(p => p.name === pipelineName);
+                });
+                
+                setDevices(matchingDevices);
+            } catch (error) {
+                console.error('Failed to fetch devices for counters:', error);
+            }
+        };
+        
+        fetchDevices();
+    }, [pipelineName]);
+
+    // Create stable fetch function
+    const fetchCounters = useCallback(async (): Promise<Map<string, { packets: bigint; bytes: bigint }>> => {
+        const newValues = new Map<string, { packets: bigint; bytes: bigint }>();
+        
+        // Initialize with zeros
+        for (const funcName of functionNames) {
+            newValues.set(funcName, { packets: BigInt(0), bytes: BigInt(0) });
+        }
+        
+        // Fetch and aggregate counters across all devices
+        for (const device of devices) {
+            const deviceName = device.name || '';
+            
+            for (const funcName of functionNames) {
+                try {
+                    const response = await API.counters.function({
+                        device: deviceName,
+                        pipeline: pipelineName,
+                        function: funcName,
+                    });
+                    
+                    // Function counters are named 'input' and 'input_bytes'
+                    const rxPackets = sumCounterValues(findCounter(response.counters, 'input'));
+                    const rxBytes = sumCounterValues(findCounter(response.counters, 'input_bytes'));
+                    
+                    const current = newValues.get(funcName)!;
+                    newValues.set(funcName, {
+                        packets: current.packets + rxPackets,
+                        bytes: current.bytes + rxBytes,
+                    });
+                } catch {
+                    // Ignore errors for individual function counters
+                }
+            }
+        }
+        
+        return newValues;
+    }, [devices, functionNames, pipelineName]);
+
+    // Use the generic interpolated counters hook
+    const { counters } = useInterpolatedCounters({
+        keys: functionNames,
+        fetchCounters,
+        enabled: devices.length > 0 && functionNames.length > 0,
+        pollingInterval: 1000,
+        interpolationInterval: 30,
+    });
+
+    return { counters };
 };

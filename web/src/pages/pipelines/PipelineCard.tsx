@@ -1,11 +1,12 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Box, Text, Card, Alert } from '@gravity-ui/uikit';
 import type { PipelineId, Pipeline } from '../../api/pipelines';
 import type { FunctionId } from '../../api/common';
 import { CardHeader } from '../../components';
 import { PipelineGraph } from './PipelineGraph';
 import { DeletePipelineDialog, FunctionRefEditorDialog } from './dialogs';
-import { usePipelineGraph } from './hooks';
+import { usePipelineGraph, useFunctionCounters } from './hooks';
+import { CountersProvider } from './CountersContext';
 import type { PipelineNode, PipelineEdge, FunctionRefNodeData } from './types';
 import { NODE_TYPE_FUNCTION_REF } from './types';
 import { toaster } from '../../utils';
@@ -50,6 +51,20 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
         toApi,
         markClean,
     } = usePipelineGraph();
+
+    // Extract function names from nodes for counter fetching
+    const functionNames = useMemo(() => {
+        return nodes
+            .filter(n => n.type === NODE_TYPE_FUNCTION_REF)
+            .map(n => (n.data as FunctionRefNodeData).functionName)
+            .filter(name => name && name.length > 0);
+    }, [nodes]);
+
+    // Fetch and interpolate counters for all functions
+    const { counters: functionCounters } = useFunctionCounters(
+        pipelineId.name || '',
+        functionNames
+    );
 
     // Load pipeline data on mount
     useEffect(() => {
@@ -192,13 +207,15 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
 
                 {/* Graph */}
                 <Box className="pipeline-card__graph">
-                    <PipelineGraph
-                        initialNodes={nodes}
-                        initialEdges={edges}
-                        onNodesChange={handleNodesChange}
-                        onEdgesChange={handleEdgesChange}
-                        onNodeDoubleClick={handleNodeDoubleClick}
-                    />
+                    <CountersProvider counters={functionCounters}>
+                        <PipelineGraph
+                            initialNodes={nodes}
+                            initialEdges={edges}
+                            onNodesChange={handleNodesChange}
+                            onEdgesChange={handleEdgesChange}
+                            onNodeDoubleClick={handleNodeDoubleClick}
+                        />
+                    </CountersProvider>
                 </Box>
             </Box>
 

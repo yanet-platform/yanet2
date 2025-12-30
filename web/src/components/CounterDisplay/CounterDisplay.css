@@ -1,0 +1,25 @@
+.counter-display {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.counter-display__item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.counter-display__icon {
+    font-size: 10px;
+    color: var(--g-color-text-info);
+    width: 12px;
+    text-align: center;
+}
+
+.counter-display__value {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--g-color-text-primary);
+    font-variant-numeric: tabular-nums;
+}

@@ -10,3 +10,4 @@ export * from './ConfirmDialog';
 export * from './CreateEntityDialog';
 export * from './SortableDataTable';
 export * from './GraphEditor';
+export * from './CounterDisplay';

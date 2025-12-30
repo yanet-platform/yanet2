@@ -1,6 +1,7 @@
 export * from './types';
 export * from './utils';
 export * from './hooks';
+export * from './CountersContext';
 export { PipelineGraph } from './PipelineGraph';
 export { PipelineCard } from './PipelineCard';
 export { PipelinePageHeader } from './PipelinePageHeader';
