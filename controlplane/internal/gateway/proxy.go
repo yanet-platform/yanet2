@@ -524,6 +524,18 @@ func (m *gzipResponseWriter) Write(b []byte) (int, error) {
 	return m.Writer.Write(b)
 }
 
+// Flush flushes buffered data to the client for SSE streaming support.
+func (m *gzipResponseWriter) Flush() {
+	// Flush gzip writer first to ensure compressed data is written.
+	if gz, ok := m.Writer.(*gzip.Writer); ok {
+		gz.Flush()
+	}
+	// Then flush the underlying ResponseWriter.
+	if f, ok := m.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // GzipMiddleware compresses HTTP responses and decompresses requests.
 // It handles both request decompression (Content-Encoding: gzip) and
 // response compression (Accept-Encoding: gzip).
