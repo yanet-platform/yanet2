@@ -6,8 +6,6 @@
 
 #include "controlplane/config/defines.h"
 
-#include "controlplane/config/registry.h"
-
 struct cp_chain_module {
 	char type[80];
 	char name[CP_MODULE_NAME_LEN];

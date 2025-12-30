@@ -19,3 +19,22 @@ export const formatUint64 = (value: string | number | bigint | undefined): strin
     return parsed === null ? '-' : parsed.toString();
 };
 
+export const formatBytes = (bytes: bigint): string => {
+    if (bytes < BigInt(1024)) {
+        return `${bytes} B`;
+    }
+    if (bytes < BigInt(1024 * 1024)) {
+        const kb = Number(bytes) / 1024;
+        return `${kb.toFixed(1)} KB`;
+    }
+    if (bytes < BigInt(1024 * 1024 * 1024)) {
+        const mb = Number(bytes) / (1024 * 1024);
+        return `${mb.toFixed(1)} MB`;
+    }
+    if (bytes < BigInt(1024 * 1024 * 1024 * 1024)) {
+        const gb = Number(bytes) / (1024 * 1024 * 1024);
+        return `${gb.toFixed(2)} GB`;
+    }
+    const tb = Number(bytes) / (1024 * 1024 * 1024 * 1024);
+    return `${tb.toFixed(2)} TB`;
+};

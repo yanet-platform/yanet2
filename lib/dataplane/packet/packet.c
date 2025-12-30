@@ -529,6 +529,15 @@ packet_list_counter(struct packet_list *list) {
 	return count;
 }
 
+uint64_t
+packet_list_bytes_sum(struct packet_list *list) {
+	uint64_t bytes = 0;
+	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
+		bytes += packet_data_len(pkt);
+	}
+	return bytes;
+}
+
 void
 packet_list_print(struct packet_list *list) {
 	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {

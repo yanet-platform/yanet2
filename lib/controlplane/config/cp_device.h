@@ -38,6 +38,8 @@ struct cp_device {
 
 	uint64_t counter_packet_rx_count;
 	uint64_t counter_packet_tx_count;
+	uint64_t counter_packet_rx_bytes;
+	uint64_t counter_packet_tx_bytes;
 };
 
 struct dp_config;

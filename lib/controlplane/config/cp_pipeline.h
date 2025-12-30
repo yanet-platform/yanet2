@@ -27,6 +27,9 @@ struct cp_pipeline {
 	uint64_t counter_packet_in_count;
 	uint64_t counter_packet_out_count;
 	uint64_t counter_packet_drop_count;
+	uint64_t counter_packet_in_bytes;
+	uint64_t counter_packet_out_bytes;
+	uint64_t counter_packet_drop_bytes;
 	uint64_t counter_packet_in_hist;
 
 	char name[CP_PIPELINE_NAME_LEN];

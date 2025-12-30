@@ -50,6 +50,10 @@ struct cp_module {
 	uint64_t rx_counter_id;
 	// Tx packet counter
 	uint64_t tx_counter_id;
+	// Rx bytes counter
+	uint64_t rx_bytes_counter_id;
+	// Tx bytes counter
+	uint64_t tx_bytes_counter_id;
 
 	// Link to the previous instance of the module configuration
 	struct cp_module *prev;

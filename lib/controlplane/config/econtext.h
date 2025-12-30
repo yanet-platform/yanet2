@@ -21,6 +21,8 @@ struct module_ectx {
 
 	uint64_t rx_counter_id;
 	uint64_t tx_counter_id;
+	uint64_t rx_bytes_counter_id;
+	uint64_t tx_bytes_counter_id;
 
 	struct counter_storage *counter_storage;
 	struct config_gen_ectx *config_gen_ectx;

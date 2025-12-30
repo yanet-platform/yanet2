@@ -69,6 +69,8 @@ module_ectx_create(
 
 	module_ectx->rx_counter_id = cp_module->rx_counter_id;
 	module_ectx->tx_counter_id = cp_module->tx_counter_id;
+	module_ectx->rx_bytes_counter_id = cp_module->rx_bytes_counter_id;
+	module_ectx->tx_bytes_counter_id = cp_module->tx_bytes_counter_id;
 
 	SET_OFFSET_OF(&module_ectx->config_gen_ectx, config_gen_ectx);
 

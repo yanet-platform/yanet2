@@ -131,6 +131,18 @@
     &__no-pipelines {
         color: var(--g-color-text-secondary);
     }
+
+    &__counters {
+        @include flex-column($spacing-xs);
+        margin-bottom: $spacing-md;
+        padding-bottom: $spacing-md;
+        border-bottom: 1px solid var(--g-color-line-generic);
+    }
+
+    &__counter-row {
+        @include flex-row($spacing-sm);
+        align-items: center;
+    }
 }
 
 .inspect-section-box {

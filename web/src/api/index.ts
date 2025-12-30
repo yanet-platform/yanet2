@@ -9,6 +9,7 @@ export * from './devices';
 export * from './decap';
 export * from './acl';
 export * from './forward';
+export * from './counters';
 
 import { neighbours } from './neighbours';
 import { inspect } from './inspect';
@@ -19,6 +20,7 @@ import { devices } from './devices';
 import { decap } from './decap';
 import { acl } from './acl';
 import { forward } from './forward';
+import { counters } from './counters';
 
 export const API = {
     neighbours,
@@ -30,4 +32,5 @@ export const API = {
     decap,
     acl,
     forward,
+    counters,
 };

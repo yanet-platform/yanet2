@@ -147,6 +147,18 @@ int
 packet_list_counter(struct packet_list *list);
 
 /**
+ * @brief Calculate total bytes in a packet list
+ *
+ * Traverses the linked list of packets and sums up the data length of each
+ * packet.
+ *
+ * @param list Pointer to packet list structure to sum bytes for
+ * @return Total bytes of all packets in the list
+ */
+uint64_t
+packet_list_bytes_sum(struct packet_list *list);
+
+/**
  * @brief Print contents of an rte_mbuf packet in a detailed format if
  * ENABLE_TRACE_LOG is defined
  *

@@ -176,6 +176,14 @@ cp_device_init(
 		&cp_device->counter_registry, "tx", 1
 	);
 
+	cp_device->counter_packet_rx_bytes = counter_registry_register(
+		&cp_device->counter_registry, "rx_bytes", 1
+	);
+
+	cp_device->counter_packet_tx_bytes = counter_registry_register(
+		&cp_device->counter_registry, "tx_bytes", 1
+	);
+
 	return 0;
 }
 

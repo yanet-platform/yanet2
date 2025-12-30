@@ -4,6 +4,7 @@
 
 #include "controlplane/config/zone.h"
 #include "dataplane/config/zone.h"
+#include "dataplane/packet/packet.h"
 #include "lib/logging/log.h"
 
 #include <rte_cycles.h>
@@ -33,6 +34,12 @@ module_ectx_process(
 		ADDR_OF(&module_ectx->counter_storage)
 	);
 	rx[0] += packet_front->input.count;
+	uint64_t *rx_bytes = counter_get_address(
+		module_ectx->rx_bytes_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+	rx_bytes[0] += packet_list_bytes_sum(&packet_front->input);
 	module_ectx->handler(dp_worker, module_ectx, packet_front);
 	uint64_t *tx = counter_get_address(
 		module_ectx->tx_counter_id,
@@ -40,6 +47,12 @@ module_ectx_process(
 		ADDR_OF(&module_ectx->counter_storage)
 	);
 	tx[0] += packet_front->output.count;
+	uint64_t *tx_bytes = counter_get_address(
+		module_ectx->tx_bytes_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+	tx_bytes[0] += packet_list_bytes_sum(&packet_front->output);
 
 	LOG_TRACEX(int in = packet_list_counter(&packet_front->input);
 		   int out = packet_list_counter(&packet_front->output);
@@ -173,12 +186,18 @@ device_ectx_process_input(
 	struct packet *packet
 ) {
 	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
-	uint64_t *counters = counter_get_address(
+	uint64_t *rx_count = counter_get_address(
 		cp_device->counter_packet_rx_count,
 		dp_worker->idx,
 		ADDR_OF(&device_ectx->counter_storage)
 	);
-	counters[0] += 1;
+	rx_count[0] += 1;
+	uint64_t *rx_bytes = counter_get_address(
+		cp_device->counter_packet_rx_bytes,
+		dp_worker->idx,
+		ADDR_OF(&device_ectx->counter_storage)
+	);
+	rx_bytes[0] += packet_data_len(packet);
 
 	struct device_entry_ectx *entry_ectx =
 		ADDR_OF(&device_ectx->input_pipelines);
@@ -195,12 +214,18 @@ device_ectx_process_output(
 	struct packet *packet
 ) {
 	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
-	uint64_t *counters = counter_get_address(
+	uint64_t *tx_count = counter_get_address(
 		cp_device->counter_packet_tx_count,
 		dp_worker->idx,
 		ADDR_OF(&device_ectx->counter_storage)
 	);
-	counters[0] += 1;
+	tx_count[0] += 1;
+	uint64_t *tx_bytes = counter_get_address(
+		cp_device->counter_packet_tx_bytes,
+		dp_worker->idx,
+		ADDR_OF(&device_ectx->counter_storage)
+	);
+	tx_bytes[0] += packet_data_len(packet);
 
 	struct device_entry_ectx *entry_ectx =
 		ADDR_OF(&device_ectx->output_pipelines);

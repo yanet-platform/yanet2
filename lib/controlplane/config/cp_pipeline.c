@@ -88,6 +88,43 @@ cp_pipeline_create(
 		goto error;
 	}
 
+	new_pipeline->counter_packet_in_bytes = counter_registry_register(
+		&new_pipeline->counter_registry, "input_bytes", 1
+	);
+	if (new_pipeline->counter_packet_in_bytes == COUNTER_INVALID) {
+		NEW_ERROR(
+			"failed to register 'input_bytes' counter for pipeline "
+			"'%s'",
+			cp_pipeline_config->name
+		);
+		goto error;
+	}
+
+	new_pipeline->counter_packet_out_bytes = counter_registry_register(
+		&new_pipeline->counter_registry, "output_bytes", 1
+	);
+	if (new_pipeline->counter_packet_out_bytes == COUNTER_INVALID) {
+		NEW_ERROR(
+			"failed to register 'output_bytes' counter for "
+			"pipeline "
+			"'%s'",
+			cp_pipeline_config->name
+		);
+		goto error;
+	}
+
+	new_pipeline->counter_packet_drop_bytes = counter_registry_register(
+		&new_pipeline->counter_registry, "drop_bytes", 1
+	);
+	if (new_pipeline->counter_packet_drop_bytes == COUNTER_INVALID) {
+		NEW_ERROR(
+			"failed to register 'drop_bytes' counter for pipeline "
+			"'%s'",
+			cp_pipeline_config->name
+		);
+		goto error;
+	}
+
 	new_pipeline->counter_packet_in_hist = counter_registry_register(
 		&new_pipeline->counter_registry, "input histogram", 8
 	);
