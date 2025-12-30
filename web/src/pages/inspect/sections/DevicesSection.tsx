@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
 import type { InstanceInfo, DeviceInfo, DevicePipelineInfo } from '../../../api/inspect';
 import { formatUint64 } from '../utils';
-import '../inspect.css';
+import '../inspect.scss';
 
 export interface DevicesSectionProps {
     instance: InstanceInfo;

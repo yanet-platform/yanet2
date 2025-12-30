@@ -5,7 +5,7 @@ import type { InstanceInfo, CPConfigInfo } from '../../../api/inspect';
 import { SortableDataTable } from '../../../components';
 import { compareBigIntValues, compareNullableStrings } from '../../../utils/sorting';
 import { formatUint64 } from '../utils';
-import '../inspect.css';
+import '../inspect.scss';
 
 export interface ConfigurationsSectionProps {
     instance: InstanceInfo;

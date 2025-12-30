@@ -3,7 +3,7 @@ import { Box, Text, Icon } from '@gravity-ui/uikit';
 import { ArrowRight } from '@gravity-ui/icons';
 import type { InstanceInfo, FunctionInfo, FunctionChainInfo } from '../../../api/inspect';
 import { formatUint64 } from '../utils';
-import './FunctionsSection.css';
+import './FunctionsSection.scss';
 
 export interface FunctionsSectionProps {
     instance: InstanceInfo;

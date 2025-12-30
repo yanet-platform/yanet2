@@ -5,7 +5,7 @@ import type { InstanceInfo, AgentInfo, AgentInstanceInfo } from '../../../api/in
 import { SortableDataTable } from '../../../components';
 import { compareBigIntValues, compareNullableNumbers } from '../../../utils/sorting';
 import { formatAgentName, formatUint64 } from '../utils';
-import '../inspect.css';
+import '../inspect.scss';
 
 export interface AgentsSectionProps {
     instance: InstanceInfo;

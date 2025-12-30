@@ -9,7 +9,7 @@ import {
     AgentsSection,
     DevicesSection,
 } from './sections';
-import './inspect.css';
+import './inspect.scss';
 
 export interface InstanceCardProps {
     instance: InstanceInfo;

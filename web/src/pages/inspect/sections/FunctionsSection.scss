@@ -1,32 +1,30 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
 .functions-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    @include flex-column($spacing-md);
 }
 
 .function-card {
     border: 1px solid var(--g-color-line-generic);
-    border-radius: 8px;
-    padding: 12px 16px;
-}
+    border-radius: $radius-lg;
+    padding: $spacing-md $spacing-lg;
 
-.function-card__name {
-    font-weight: 600;
-    margin-bottom: 8px;
-    display: block;
+    &__name {
+        font-weight: $font-weight-semibold;
+        margin-bottom: $spacing-sm;
+        display: block;
+    }
 }
 
 .function-chains-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding-left: 12px;
+    @include flex-column(6px);
+    padding-left: $spacing-md;
 }
 
 .function-chain-row {
-    display: flex;
+    @include flex-row($spacing-sm);
     align-items: flex-end;
-    gap: 8px;
 }
 
 .function-chain__name {
@@ -39,13 +37,13 @@
     flex-shrink: 0;
     border-bottom: 1px dotted var(--g-color-line-generic);
     height: 1px;
-    margin-bottom: 4px;
+    margin-bottom: $spacing-xs;
 }
 
 .function-chain__weight {
     min-width: 60px;
     flex-shrink: 0;
-    font-weight: 500;
+    font-weight: $font-weight-medium;
 }
 
 .function-chain__modules {
@@ -54,26 +52,23 @@
 }
 
 .function-modules-flow {
-    display: flex;
-    align-items: center;
-    gap: 4px;
+    @include flex-row($spacing-xs);
     flex-wrap: wrap;
 }
 
 .function-module {
     border: 1px solid var(--g-color-line-generic);
-    border-radius: 4px;
+    border-radius: $radius-sm;
     padding: 2px 6px;
     background-color: var(--g-color-base-background);
 }
 
 .function-arrow {
+    @include flex-center;
     color: var(--g-color-text-secondary);
-    display: flex;
-    align-items: center;
     flex-shrink: 0;
 }
 
 .function-no-chains {
-    padding-left: 12px;
+    padding-left: $spacing-md;
 }

@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
 import { MODULE_DESCRIPTIONS } from './constants';
 import { formatModuleName } from './utils';
-import './inspect.css';
+import './inspect.scss';
 import { DPModuleInfo } from '../../api';
 
 export interface ModuleCardProps {

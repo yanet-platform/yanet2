@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
 import type { InstanceInfo } from '../../../api/inspect';
 import { ModuleCard } from '../ModuleCard';
-import '../inspect.css';
+import '../inspect.scss';
 
 export interface ModulesSectionProps {
     instance: InstanceInfo;

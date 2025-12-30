@@ -5,7 +5,7 @@ import { API } from '../api';
 import type { InstanceInfo } from '../api/inspect';
 import { PageLayout, PageLoader } from '../components';
 import { InstanceCard } from './inspect';
-import './inspect/inspect.css';
+import './inspect/inspect.scss';
 
 const InspectPage = (): React.JSX.Element => {
     const [instanceInfo, setInstanceInfo] = useState<InstanceInfo | null>(null);

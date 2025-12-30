@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text, Icon } from '@gravity-ui/uikit';
 import { ArrowRight } from '@gravity-ui/icons';
 import type { InstanceInfo, PipelineInfo } from '../../../api/inspect';
-import './PipelinesSection.css';
+import './PipelinesSection.scss';
 
 export interface PipelinesSectionProps {
     instance: InstanceInfo;
