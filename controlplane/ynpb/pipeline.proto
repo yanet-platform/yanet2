@@ -6,51 +6,91 @@ option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
 import "common/commonpb/target.proto";
 
-// TODO: docs.
+// PipelineService provides CRUD operations for packet processing pipelines.
+//
+// Each pipeline specifies an ordered sequence of functions that process
+// packets.
+// Pipelines are associated with devices to define how packets received on a
+// device are processed and where they are transmitted.
 service PipelineService {
-	// Lists all configured pipelines
+	// List returns identifiers for all configured pipelines.
 	rpc List(ListPipelinesRequest) returns (ListPipelinesResponse);
-
-	// Returns pipeline definition
+	// Get retrieves the complete definition of a specific pipeline,
+	// including the ordered list of functions.
 	rpc Get(GetPipelineRequest) returns (GetPipelineResponse);
-
-	// Update or insert pipeline
+	// Update creates a new pipeline or updates an existing one.
+	//
+	// The operation is atomic - the pipeline is fully replaced on update.
+	//
+	// If the pipeline is currently associated with devices, the update
+	// takes effect immediately for new packets.
 	rpc Update(UpdatePipelineRequest) returns (UpdatePipelineResponse);
-
-	// Allows to delete pipeline with specified name
+	// Delete removes a pipeline by name.
+	//
+	// Fails if the pipeline is currently associated with any device.
 	rpc Delete(DeletePipelineRequest) returns (DeletePipelineResponse);
 }
 
+// ListPipelinesRequest is the request message for listing pipelines.
 message ListPipelinesRequest {
 }
 
+// ListPipelinesResponse contains the list of pipeline identifiers.
 message ListPipelinesResponse {
+	// List of pipeline identifiers currently configured in the dataplane.
 	repeated commonpb.PipelineId ids = 1;
 }
 
+// GetPipelineRequest specifies which pipeline to retrieve.
 message GetPipelineRequest {
+	// Identifier of the pipeline to retrieve.
 	commonpb.PipelineId id = 1;
 }
 
+// GetPipelineResponse contains the requested pipeline definition.
 message GetPipelineResponse {
+	// Complete pipeline definition including all functions.
 	Pipeline pipeline = 1;
 }
 
+// UpdatePipelineRequest creates or updates a pipeline.
 message UpdatePipelineRequest {
+	// Complete pipeline definition to create or update.
+	//
+	// If a pipeline with the same name exists, it is replaced.
 	Pipeline pipeline = 1;
 }
 
+// UpdatePipelineResponse is returned after a successful update.
 message UpdatePipelineResponse {
 }
 
+// Pipeline defines a packet processing path through a sequence of functions.
+//
+// Pipelines are the primary mechanism for connecting devices to packet
+// processing logic.
+//
+// When a packet arrives on a device, the associated pipeline determines which
+// functions process it and in what order.
 message Pipeline {
+	// Unique identifier for this pipeline.
 	commonpb.PipelineId id = 1;
+	// Ordered list of functions that process packets in this pipeline.
+	//
+	// Functions are executed in order. Each function can forward, drop, or
+	// modify packets before passing to the next function.
 	repeated commonpb.FunctionId functions = 2;
 }
 
+// DeletePipelineRequest specifies which pipeline to delete.
 message DeletePipelineRequest {
+	// Identifier of the pipeline to delete.
+	//
+	// The delete fails if the pipeline is currently associated with any
+	// device.
 	commonpb.PipelineId id = 1;
 }
 
+// DeletePipelineResponse is returned after successful deletion.
 message DeletePipelineResponse {
 }

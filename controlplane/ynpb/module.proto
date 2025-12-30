@@ -6,15 +6,29 @@ option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
 import "common/commonpb/target.proto";
 
-// TODO: docs
+// ModuleService provides methods to query control plane module configurations.
+//
+// Modules are the building blocks of packet processing in YANET. Each module
+// type provides specific functionality (e.g., routing, ACL, NAT).
+// Module configurations are named instances of a module type with specific
+// settings (e.g., multiple route tables or ACL rulesets).
+//
+// This service provides read-only access to module configurations.
+//
+// Module management is handled through type-specific services (e.g.,
+// RouteService, ACLService) that understand the module's configuration schema.
 service ModuleService {
-	// Lists all configured devices
+	// List returns identifiers for all module configurations currently
+	// active in the dataplane.
 	rpc List(ListModulesRequest) returns (ListModulesResponse);
 }
 
+// ListModulesRequest is the request message for listing module configurations.
 message ListModulesRequest {
 }
 
+// ListModulesResponse contains the list of module configuration identifiers.
 message ListModulesResponse {
+	// List of module identifiers.
 	repeated commonpb.ModuleId ids = 1;
 }

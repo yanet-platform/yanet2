@@ -16,14 +16,14 @@ export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
             </Text>
             {instance.dpModules && instance.dpModules.length > 0 ? (
                 <Box className="inspect-section__modules-grid">
-                    {instance.dpModules.map((module, idx) => {
+                    {instance.dpModules.map((module) => {
                         const configCount = instance.cpConfigs?.filter(
                             (cfg) => cfg.type?.toLowerCase() === module.name?.toLowerCase()
                         ).length || 0;
 
                         const pipelineUsage = instance.pipelines?.reduce((count, pipeline) => {
                             const usesModule = pipeline.functions?.some((funcName) => {
-                                const func = instance.functions?.find(f => f.Name === funcName);
+                                const func = instance.functions?.find(f => f.name === funcName);
                                 return func?.chains?.some(chain =>
                                     chain.modules?.some(mod =>
                                         mod.type?.toLowerCase() === module.name?.toLowerCase()

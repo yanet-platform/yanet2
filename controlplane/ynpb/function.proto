@@ -6,61 +6,125 @@ option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
 import "common/commonpb/target.proto";
 
-// TODO: docs.
+// FunctionService provides CRUD operations for packet processing functions.
+//
+// Functions are the primary abstraction for defining packet processing
+// behavior. Each function contains one or more weighted chains that define how
+// packets traverse through module configurations. Functions are referenced by
+// pipelines to build complete packet processing paths.
+//
+// Functions support weighted load balancing across multiple chains, enabling
+// traffic splitting, A/B testing, and graceful configuration migrations.
 service FunctionService {
-	// Lists all configured functions
+	// List returns identifiers for all configured functions.
 	rpc List(ListFunctionsRequest) returns (ListFunctionsResponse);
-
-	// Returns function definition
+	// Get retrieves the complete definition of a specific function,
+	// including all chains and their module configurations.
 	rpc Get(GetFunctionRequest) returns (GetFunctionResponse);
-
-	// Updates or inserts function
+	// Update creates a new function or updates an existing one.
+	//
+	// The operation is atomic - the function is fully replaced on update.
+	//
+	// If the function is currently in use by pipelines, the update takes
+	// effect immediately for new packets.
 	rpc Update(UpdateFunctionRequest) returns (UpdateFunctionResponse);
-
-	// Deletes function with specified name
+	// Delete removes a function by name.
+	//
+	// Fails if the function is currently referenced by any active pipeline.
 	rpc Delete(DeleteFunctionRequest) returns (DeleteFunctionResponse);
 }
 
+// ListFunctionsRequest is the request message for listing functions.
 message ListFunctionsRequest {
 }
 
+// ListFunctionsResponse contains the list of function identifiers.
 message ListFunctionsResponse {
+	// List of function identifiers currently configured in the dataplane.
 	repeated commonpb.FunctionId ids = 1;
 }
 
+// GetFunctionRequest specifies which function to retrieve.
 message GetFunctionRequest {
+	// Identifier of the function to retrieve.
 	commonpb.FunctionId id = 1;
 }
 
+// GetFunctionResponse contains the requested function definition.
 message GetFunctionResponse {
+	// Complete function definition including all chains.
 	Function function = 1;
 }
 
+// UpdateFunctionRequest creates or updates a function.
 message UpdateFunctionRequest {
+	// Complete function definition to create or update.
+	//
+	// If a function with the same name exists, it is replaced.
 	Function function = 1;
 }
 
+// UpdateFunctionResponse is returned after a successful update.
 message UpdateFunctionResponse {
 }
 
+// Function defines a packet processing function with weighted chains.
+//
+// A function groups one or more processing chains, each with an associated
+// weight for load balancing.
+//
+// When packets enter a function, they are distributed across chains based on
+// the relative weights (e.g., a chain with weight 3 receives x3 more traffic
+// than a chain with weight 1).
 message Function {
+	// Unique identifier for this function.
 	commonpb.FunctionId id = 1;
+	// Weighted processing chains.
+	//
+	// At least one chain is required.
+	// Traffic is distributed across chains based on their weights.
 	repeated FunctionChain chains = 2;
-};
+}
 
+// FunctionChain associates a processing chain with a weight for load balancing
+// within a function.
 message FunctionChain {
+	// The processing chain defining the module sequence.
 	Chain chain = 1;
+	// Weight for load balancing.
+	//
+	// Higher weight means more traffic is directed to this chain. A weight
+	// of 0 effectively disables the chain without removing it from the
+	// configuration.
 	uint64 weight = 2;
 }
 
+// Chain defines an ordered sequence of module configurations that packets
+// traverse during processing.
+//
+// Chains are the atomic unit of packet processing. Once a packet enters a
+// chain, it passes through each module in order. Modules can forward, drop,
+// modify, or redirect packets.
 message Chain {
+	// Unique name identifying this chain within its function.
+	//
+	// Used for monitoring, debugging, and configuration management.
 	string name = 1;
+	// Ordered list of module configurations to apply.
+	//
+	// Packets are processed by each module in sequence from first to last.
 	repeated commonpb.ModuleId modules = 2;
 }
 
+// DeleteFunctionRequest specifies which function to delete.
 message DeleteFunctionRequest {
+	// Identifier of the function to delete.
+	//
+	// The delete fails if the function is currently referenced by any
+	// active pipeline.
 	commonpb.FunctionId id = 1;
 }
 
+// DeleteFunctionResponse is returned after successful deletion.
 message DeleteFunctionResponse {
 }

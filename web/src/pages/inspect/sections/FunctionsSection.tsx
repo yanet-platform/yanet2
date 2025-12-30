@@ -29,7 +29,7 @@ const ModulesFlow: React.FC<ModulesFlowProps> = ({ chain }) => {
     return (
         <Box className="function-modules-flow">
             {modules.map((mod, idx) => (
-                <React.Fragment key={`${chain.Name}-mod-${idx}`}>
+                <React.Fragment key={`${chain.name}-mod-${idx}`}>
                     <Box className="function-module">
                         <Text variant="caption-2">{mod.name || mod.type || 'module'}</Text>
                     </Box>
@@ -45,12 +45,12 @@ interface ChainRowProps {
 }
 
 const ChainRow: React.FC<ChainRowProps> = ({ chain }) => {
-    const weight = formatUint64(chain.Weight);
+    const weight = formatUint64(chain.weight);
 
     return (
         <Box className="function-chain-row">
             <Text variant="body-2" className="function-chain__name">
-                {chain.Name || 'unnamed'}
+                {chain.name || 'unnamed'}
             </Text>
             <span className="function-chain__separator" />
             <Text variant="body-2" className="function-chain__weight">
@@ -73,12 +73,12 @@ const FunctionCard: React.FC<FunctionCardProps> = ({ func }) => {
     return (
         <Box className="function-card">
             <Text variant="body-1" className="function-card__name">
-                {func.Name || 'unnamed'}
+                {func.name || 'unnamed'}
             </Text>
             {chains.length > 0 ? (
                 <Box className="function-chains-list">
                     {chains.map((chain, idx) => (
-                        <ChainRow key={chain.Name ?? idx} chain={chain} />
+                        <ChainRow key={chain.name ?? idx} chain={chain} />
                     ))}
                 </Box>
             ) : (
@@ -101,7 +101,7 @@ export const FunctionsSection: React.FC<FunctionsSectionProps> = ({ instance }) 
             {functions.length > 0 ? (
                 <Box className="functions-list">
                     {functions.map((func, idx) => (
-                        <FunctionCard key={func.Name ?? idx} func={func} />
+                        <FunctionCard key={func.name ?? idx} func={func} />
                     ))}
                 </Box>
             ) : (

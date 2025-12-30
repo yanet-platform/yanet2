@@ -17,13 +17,13 @@ export interface ChainModuleInfo {
 }
 
 export interface FunctionChainInfo {
-    Name?: string;
-    Weight?: string | number; // uint64 - serialized as string in JSON
+    name?: string;
+    weight?: string | number; // uint64 - serialized as string in JSON
     modules?: ChainModuleInfo[];
 }
 
 export interface FunctionInfo {
-    Name?: string;
+    name?: string;
     chains?: FunctionChainInfo[];
 }
 
