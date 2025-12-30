@@ -1,7 +1,6 @@
 import React, { createContext, useContext } from 'react';
 import type { InterpolatedCounterData } from '../../hooks';
 
-// Context for passing counters to nodes without going through node.data
 interface CountersContextValue {
     counters: Map<string, InterpolatedCounterData>;
 }
@@ -27,7 +26,7 @@ export const useCounters = (): CountersContextValue => {
     return useContext(CountersContext);
 };
 
-export const useNodeCounters = (functionName: string): InterpolatedCounterData | undefined => {
+export const useNodeCounters = (key: string): InterpolatedCounterData | undefined => {
     const { counters } = useContext(CountersContext);
-    return counters.get(functionName);
+    return counters.get(key);
 };

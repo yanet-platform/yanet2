@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Box, Text, Card, Alert } from '@gravity-ui/uikit';
 import type { FunctionId } from '../../api/common';
 import type { Function as APIFunction } from '../../api/functions';
@@ -6,9 +6,10 @@ import { CardHeader } from '../../components';
 import { FunctionGraph } from './FunctionGraph';
 import { DeleteFunctionDialog, ModuleEditorDialog, SingleWeightEditorDialog } from './dialogs';
 import type { ChainEditorResult } from './dialogs/SingleWeightEditorDialog';
-import { useFunctionGraph } from './hooks';
+import { CountersProvider } from '../../components';
+import { useFunctionGraph, useModuleCounters } from './hooks';
 import type { FunctionNode, FunctionEdge, ModuleNodeData } from './types';
-import { NODE_TYPE_MODULE, INPUT_NODE_ID } from './types';
+import { NODE_TYPE_MODULE, INPUT_NODE_ID, OUTPUT_NODE_ID } from './types';
 import '../FunctionsPage.css';
 
 export interface FunctionCardProps {
@@ -50,6 +51,69 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
         toApi,
         markClean,
     } = useFunctionGraph(initialFunction || undefined);
+
+    // Build module info with chain names for counter fetching
+    // Each module needs: nodeId, chainName, moduleType, moduleName
+    const moduleInfoList = useMemo(() => {
+        // Build a map of nodeId -> chainName by tracing paths from input edges
+        const nodeToChain = new Map<string, string>();
+        const adjacency = new Map<string, string[]>();
+        
+        for (const node of nodes) {
+            adjacency.set(node.id, []);
+        }
+        for (const edge of edges) {
+            const neighbors = adjacency.get(edge.source);
+            if (neighbors) {
+                neighbors.push(edge.target);
+            }
+        }
+        
+        // DFS from each input edge to assign chain names to nodes
+        const inputEdges = edges.filter(e => e.source === INPUT_NODE_ID);
+        for (const edge of inputEdges) {
+            const chainName = edge.data?.chainName || '';
+            const visited = new Set<string>();
+            
+            const assignChain = (nodeId: string) => {
+                if (visited.has(nodeId) || nodeId === OUTPUT_NODE_ID) return;
+                visited.add(nodeId);
+                
+                // Only assign if not already assigned (first chain wins)
+                if (!nodeToChain.has(nodeId)) {
+                    nodeToChain.set(nodeId, chainName);
+                }
+                
+                const neighbors = adjacency.get(nodeId) || [];
+                for (const neighbor of neighbors) {
+                    assignChain(neighbor);
+                }
+            };
+            
+            assignChain(edge.target);
+        }
+        
+        // Build module info list
+        return nodes
+            .filter(n => n.type === NODE_TYPE_MODULE)
+            .map(n => {
+                const data = n.data as ModuleNodeData;
+                const chainName = nodeToChain.get(n.id) || '';
+                return {
+                    nodeId: n.id,
+                    chainName,
+                    moduleType: data.type || '',
+                    moduleName: data.name || '',
+                };
+            })
+            .filter(info => info.moduleType && info.moduleName && info.chainName);
+    }, [nodes, edges]);
+
+    // Fetch and interpolate counters for all modules
+    const { counters: moduleCounters } = useModuleCounters(
+        functionId.name || '',
+        moduleInfoList
+    );
 
     // Load function data on mount or when function changes
     useEffect(() => {
@@ -231,14 +295,16 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
 
                 {/* Graph */}
                 <Box className="function-card__graph">
-                    <FunctionGraph
-                        initialNodes={nodes}
-                        initialEdges={edges}
-                        onNodesChange={handleNodesChange}
-                        onEdgesChange={handleEdgesChange}
-                        onNodeDoubleClick={handleNodeDoubleClick}
-                        onEdgeDoubleClick={handleEdgeDoubleClick}
-                    />
+                    <CountersProvider counters={moduleCounters}>
+                        <FunctionGraph
+                            initialNodes={nodes}
+                            initialEdges={edges}
+                            onNodesChange={handleNodesChange}
+                            onEdgesChange={handleEdgesChange}
+                            onNodeDoubleClick={handleNodeDoubleClick}
+                            onEdgeDoubleClick={handleEdgeDoubleClick}
+                        />
+                    </CountersProvider>
                 </Box>
             </Box>
 

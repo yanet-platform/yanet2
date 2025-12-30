@@ -53,7 +53,7 @@
     background: var(--g-color-base-float);
     border: 2px solid var(--g-color-line-generic);
     min-width: 140px;
-    height: 70px;
+    height: 120px;
     box-sizing: border-box;
     transition: border-color 0.15s ease, background-color 0.15s ease;
     cursor: pointer;
@@ -94,9 +94,12 @@
     height: 1px;
 }
 
-/* ============================================
-   Handle Styles
-   ============================================ */
+.module-node__counters {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--g-color-line-generic);
+}
+
 .node-handle {
     width: 10px !important;
     height: 10px !important;

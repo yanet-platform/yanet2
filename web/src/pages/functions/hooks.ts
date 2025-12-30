@@ -2,10 +2,15 @@ import { useState, useCallback, useEffect } from 'react';
 import { API } from '../../api';
 import type { Function as APIFunction } from '../../api/functions';
 import type { FunctionId } from '../../api/common';
+import type { CounterInfo, DeviceInfo } from '../../api';
 import { toaster } from '../../utils';
-import { useGraphEditor } from '../../hooks';
+import { useGraphEditor, useInterpolatedCounters } from '../../hooks';
+import type { InterpolatedCounterData } from '../../hooks';
 import type { FunctionNode, FunctionEdge } from './types';
 import { apiToGraph, graphToApi, createEmptyGraph, validateGraph } from './utils';
+
+// Re-export formatPps and formatBps from utils for convenience
+export { formatPps, formatBps } from '../../utils';
 
 export type FunctionMap = Record<string, APIFunction>;
 
@@ -259,4 +264,155 @@ export const useFunctionGraph = (initialFunction?: APIFunction): UseFunctionGrap
         reset,
         markClean,
     };
+};
+
+// Helper to sum counter values across all instances and all values within each instance
+const sumCounterValues = (counter: CounterInfo | undefined): bigint => {
+    if (!counter?.instances) return BigInt(0);
+    return counter.instances.reduce((sum, inst) => {
+        // Sum all values in the instance (e.g., values from different workers/cores)
+        const instSum = (inst.values ?? []).reduce((s, val) => s + BigInt(val ?? 0), BigInt(0));
+        return sum + instSum;
+    }, BigInt(0));
+};
+
+// Helper to find counter by name
+const findCounter = (counters: CounterInfo[] | undefined, name: string): CounterInfo | undefined => {
+    return counters?.find(c => c.name === name);
+};
+
+// Module info for counter fetching
+export interface ModuleInfo {
+    nodeId: string;
+    chainName: string;
+    moduleType: string;
+    moduleName: string;
+}
+
+export interface UseModuleCountersResult {
+    // Map from nodeId to counter data
+    counters: Map<string, InterpolatedCounterData>;
+}
+
+/**
+ * Hook for fetching and interpolating module counters.
+ * 
+ * Uses the generic useInterpolatedCounters hook with module-specific fetch logic.
+ * - Polls module counters every 1 second from backend using the Module API
+ * - Aggregates counters across all devices and pipelines using the function
+ * - Updates visual every 30ms using linear interpolation
+ * 
+ * @param functionName - The function name
+ * @param moduleInfoList - Array of module info objects with chain, type, and name
+ */
+export const useModuleCounters = (
+    functionName: string,
+    moduleInfoList: ModuleInfo[]
+): UseModuleCountersResult => {
+    // Store devices that use this function (via pipelines)
+    const [devices, setDevices] = useState<DeviceInfo[]>([]);
+    
+    // Store pipeline names that use this function
+    const [pipelineNames, setPipelineNames] = useState<string[]>([]);
+
+    // Fetch devices and pipelines on mount
+    useEffect(() => {
+        const fetchDevicesAndPipelines = async () => {
+            try {
+                const response = await API.inspect.inspect();
+                const instanceInfo = response.instanceInfo;
+                const allDevices = instanceInfo?.devices ?? [];
+                const allPipelines = instanceInfo?.pipelines ?? [];
+                
+                // Find pipelines that use this function
+                const matchingPipelines = allPipelines.filter(p => {
+                    const funcs = p.functions ?? [];
+                    return funcs.includes(functionName);
+                });
+                
+                const pipelineNamesSet = new Set(matchingPipelines.map(p => p.name).filter((n): n is string => !!n));
+                
+                // Find devices that use these pipelines
+                const matchingDevices: DeviceInfo[] = [];
+                for (const device of allDevices) {
+                    const inputPipelines = device.inputPipelines ?? [];
+                    const outputPipelines = device.outputPipelines ?? [];
+                    const allDevicePipelines = [...inputPipelines, ...outputPipelines];
+                    
+                    for (const pipeline of allDevicePipelines) {
+                        if (pipeline.name && pipelineNamesSet.has(pipeline.name)) {
+                            if (!matchingDevices.includes(device)) {
+                                matchingDevices.push(device);
+                            }
+                        }
+                    }
+                }
+                
+                setDevices(matchingDevices);
+                setPipelineNames(Array.from(pipelineNamesSet));
+            } catch (error) {
+                console.error('Failed to fetch devices for counters:', error);
+            }
+        };
+        
+        fetchDevicesAndPipelines();
+    }, [functionName]);
+
+    // Extract nodeIds for the interpolation hook keys
+    const nodeIds = moduleInfoList.map(m => m.nodeId);
+
+    // Create stable fetch function
+    const fetchCounters = useCallback(async (): Promise<Map<string, { packets: bigint; bytes: bigint }>> => {
+        const newValues = new Map<string, { packets: bigint; bytes: bigint }>();
+        
+        // Initialize with zeros
+        for (const moduleInfo of moduleInfoList) {
+            newValues.set(moduleInfo.nodeId, { packets: BigInt(0), bytes: BigInt(0) });
+        }
+        
+        // Fetch module counters for each module
+        for (const device of devices) {
+            const deviceName = device.name || '';
+            
+            for (const pipelineName of pipelineNames) {
+                for (const moduleInfo of moduleInfoList) {
+                    try {
+                        const response = await API.counters.module({
+                            device: deviceName,
+                            pipeline: pipelineName,
+                            function: functionName,
+                            chain: moduleInfo.chainName,
+                            moduleType: moduleInfo.moduleType,
+                            moduleName: moduleInfo.moduleName,
+                        });
+                        
+                        // Module counters are named 'rx' and 'rx_bytes'
+                        const rxPackets = sumCounterValues(findCounter(response.counters, 'rx'));
+                        const rxBytes = sumCounterValues(findCounter(response.counters, 'rx_bytes'));
+                        
+                        const current = newValues.get(moduleInfo.nodeId)!;
+                        newValues.set(moduleInfo.nodeId, {
+                            packets: current.packets + rxPackets,
+                            bytes: current.bytes + rxBytes,
+                        });
+                    } catch {
+                        // Ignore errors for individual module counters
+                    }
+                }
+            }
+        }
+        
+        return newValues;
+    }, [devices, pipelineNames, functionName, moduleInfoList]);
+
+    // Use the generic interpolated counters hook
+    const { counters } = useInterpolatedCounters({
+        keys: nodeIds,
+        fetchCounters,
+        enabled: devices.length > 0 && pipelineNames.length > 0 && moduleInfoList.length > 0,
+        pollingInterval: 1000,
+        interpolationInterval: 30,
+    });
+
+    return { counters };
 };

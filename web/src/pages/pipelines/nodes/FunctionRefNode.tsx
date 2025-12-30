@@ -2,9 +2,8 @@ import React, { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { NodeProps, Node } from '@xyflow/react';
 import { Text } from '@gravity-ui/uikit';
-import { CounterDisplay } from '../../../components';
+import { CounterDisplay, useCounters } from '../../../components';
 import type { FunctionRefNodeData } from '../types';
-import { useCounters } from '../CountersContext';
 
 type FunctionRefNodeProps = NodeProps<Node<FunctionRefNodeData>>;
 
