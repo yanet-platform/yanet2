@@ -118,6 +118,24 @@ function_ectx_process(
 	struct function_ectx *function_ectx,
 	struct packet_front *packet_front
 ) {
+	struct cp_function *cp_function = ADDR_OF(&function_ectx->cp_function);
+	struct counter_storage *counter_storage =
+		ADDR_OF(&function_ectx->counter_storage);
+
+	// Packets arrive in output list, count them before processing
+	uint64_t *in_count = counter_get_address(
+		cp_function->counter_packet_in_count,
+		dp_worker->idx,
+		counter_storage
+	);
+	in_count[0] += packet_front->output.count;
+	uint64_t *in_bytes = counter_get_address(
+		cp_function->counter_packet_in_bytes,
+		dp_worker->idx,
+		counter_storage
+	);
+	in_bytes[0] += packet_list_bytes_sum(&packet_front->output);
+
 	// FIXME route through chains
 	uint64_t chain_idx = 0;
 	struct chain_ectx *chain_ectx =
@@ -125,6 +143,34 @@ function_ectx_process(
 	chain_ectx_process(
 		dp_config, dp_worker, cp_config_gen, chain_ectx, packet_front
 	);
+
+	// Count output packets and bytes
+	uint64_t *out_count = counter_get_address(
+		cp_function->counter_packet_out_count,
+		dp_worker->idx,
+		counter_storage
+	);
+	out_count[0] += packet_front->output.count;
+	uint64_t *out_bytes = counter_get_address(
+		cp_function->counter_packet_out_bytes,
+		dp_worker->idx,
+		counter_storage
+	);
+	out_bytes[0] += packet_list_bytes_sum(&packet_front->output);
+
+	// Count dropped packets and bytes
+	uint64_t *drop_count = counter_get_address(
+		cp_function->counter_packet_drop_count,
+		dp_worker->idx,
+		counter_storage
+	);
+	drop_count[0] += packet_front->drop.count;
+	uint64_t *drop_bytes = counter_get_address(
+		cp_function->counter_packet_drop_bytes,
+		dp_worker->idx,
+		counter_storage
+	);
+	drop_bytes[0] += packet_list_bytes_sum(&packet_front->drop);
 }
 
 void
@@ -135,6 +181,24 @@ pipeline_ectx_process(
 	struct pipeline_ectx *pipeline_ectx,
 	struct packet_front *packet_front
 ) {
+	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);
+	struct counter_storage *counter_storage =
+		ADDR_OF(&pipeline_ectx->counter_storage);
+
+	// Packets arrive in output list, count them before processing
+	uint64_t *in_count = counter_get_address(
+		cp_pipeline->counter_packet_in_count,
+		dp_worker->idx,
+		counter_storage
+	);
+	in_count[0] += packet_front->output.count;
+	uint64_t *in_bytes = counter_get_address(
+		cp_pipeline->counter_packet_in_bytes,
+		dp_worker->idx,
+		counter_storage
+	);
+	in_bytes[0] += packet_list_bytes_sum(&packet_front->output);
+
 	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
 		struct function_ectx *function_ectx =
 			ADDR_OF(pipeline_ectx->functions + idx);
@@ -147,6 +211,34 @@ pipeline_ectx_process(
 			packet_front
 		);
 	}
+
+	// Count output packets and bytes
+	uint64_t *out_count = counter_get_address(
+		cp_pipeline->counter_packet_out_count,
+		dp_worker->idx,
+		counter_storage
+	);
+	out_count[0] += packet_front->output.count;
+	uint64_t *out_bytes = counter_get_address(
+		cp_pipeline->counter_packet_out_bytes,
+		dp_worker->idx,
+		counter_storage
+	);
+	out_bytes[0] += packet_list_bytes_sum(&packet_front->output);
+
+	// Count dropped packets and bytes
+	uint64_t *drop_count = counter_get_address(
+		cp_pipeline->counter_packet_drop_count,
+		dp_worker->idx,
+		counter_storage
+	);
+	drop_count[0] += packet_front->drop.count;
+	uint64_t *drop_bytes = counter_get_address(
+		cp_pipeline->counter_packet_drop_bytes,
+		dp_worker->idx,
+		counter_storage
+	);
+	drop_bytes[0] += packet_list_bytes_sum(&packet_front->drop);
 }
 
 static void
