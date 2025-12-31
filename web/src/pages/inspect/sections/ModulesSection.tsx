@@ -18,6 +18,7 @@ export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
             title="Dataplane Modules"
             icon={LayoutCellsLarge}
             count={modules.length}
+            variant="modules"
             collapsible
             defaultExpanded
         >

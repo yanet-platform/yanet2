@@ -82,6 +82,7 @@ export const PipelinesSection: React.FC<PipelinesSectionProps> = ({ instance }) 
             title="Pipelines"
             icon={ListUl}
             count={pipelines.length}
+            variant="pipelines"
             collapsible
             defaultExpanded
         >

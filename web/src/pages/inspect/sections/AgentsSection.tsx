@@ -78,6 +78,7 @@ export const AgentsSection: React.FC<AgentsSectionProps> = ({ instance }) => {
             title="Agents"
             icon={Cpu}
             count={totalInstances}
+            variant="agents"
             collapsible
             defaultExpanded
         >

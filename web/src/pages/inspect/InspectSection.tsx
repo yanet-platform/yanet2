@@ -4,10 +4,13 @@ import { ChevronDown, ChevronUp } from '@gravity-ui/icons';
 import type { IconData } from '@gravity-ui/uikit';
 import './inspect.scss';
 
+export type InspectSectionVariant = 'modules' | 'devices' | 'pipelines' | 'functions' | 'configs' | 'agents';
+
 export interface InspectSectionProps {
     title: string;
     icon?: IconData;
     count?: number;
+    variant?: InspectSectionVariant;
     collapsible?: boolean;
     defaultExpanded?: boolean;
     children: React.ReactNode;
@@ -17,6 +20,7 @@ export const InspectSection: React.FC<InspectSectionProps> = ({
     title,
     icon,
     count,
+    variant,
     collapsible = false,
     defaultExpanded = true,
     children,
@@ -29,8 +33,12 @@ export const InspectSection: React.FC<InspectSectionProps> = ({
         }
     };
 
+    const sectionClass = variant 
+        ? `inspect-section inspect-section--${variant}` 
+        : 'inspect-section';
+
     return (
-        <Box className="inspect-section">
+        <Box className={sectionClass}>
             <Box
                 className={`inspect-section__header ${collapsible ? 'inspect-section__header--clickable' : ''}`}
                 onClick={collapsible ? handleToggle : undefined}

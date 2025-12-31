@@ -102,6 +102,7 @@ export const FunctionsSection: React.FC<FunctionsSectionProps> = ({ instance }) 
             title="Functions"
             icon={CurlyBracketsFunction}
             count={functions.length}
+            variant="functions"
             collapsible
             defaultExpanded
         >

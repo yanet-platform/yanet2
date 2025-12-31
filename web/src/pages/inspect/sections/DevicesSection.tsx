@@ -185,6 +185,7 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
             title="Devices"
             icon={HardDrive}
             count={devices.length}
+            variant="devices"
             collapsible
             defaultExpanded
         >

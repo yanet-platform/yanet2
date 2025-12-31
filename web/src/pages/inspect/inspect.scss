@@ -65,17 +65,20 @@
 }
 
 .inspect-section {
+    --section-accent: #6c7a89;
+
     @include flex-column;
     border: 1px solid var(--g-color-line-generic);
+    border-left: 4px solid var(--section-accent);
     border-radius: $radius-lg;
-    background-color: var(--g-color-base-float);
+    background-color: var(--g-color-base-background);
     overflow: hidden;
 
     &__header {
         @include flex-row($spacing-sm);
         justify-content: space-between;
         padding: $spacing-md $spacing-lg;
-        background-color: var(--g-color-base-generic);
+        background: linear-gradient(to right, rgba(0, 0, 0, 0.05), transparent);
         border-bottom: 1px solid var(--g-color-line-generic);
 
         &--clickable {
@@ -83,7 +86,7 @@
             transition: $transition-fast;
 
             &:hover {
-                background-color: var(--g-color-base-simple-hover);
+                background: linear-gradient(to right, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.02));
             }
         }
     }
@@ -94,7 +97,7 @@
 
     &__icon {
         @include flex-center;
-        color: var(--g-color-text-secondary);
+        color: var(--section-accent);
     }
 
     &__title {
@@ -111,6 +114,30 @@
 
     &__content {
         padding: $spacing-lg;
+    }
+
+    &--modules {
+        --section-accent: #3b82f6;
+    }
+
+    &--devices {
+        --section-accent: #f59e0b;
+    }
+
+    &--pipelines {
+        --section-accent: #10b981;
+    }
+
+    &--functions {
+        --section-accent: #8b5cf6;
+    }
+
+    &--configs {
+        --section-accent: #ec4899;
+    }
+
+    &--agents {
+        --section-accent: #06b6d4;
     }
 }
 

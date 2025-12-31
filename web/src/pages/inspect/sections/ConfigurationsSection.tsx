@@ -48,6 +48,7 @@ export const ConfigurationsSection: React.FC<ConfigurationsSectionProps> = ({ in
             title="Controlplane Configurations"
             icon={Gear}
             count={configs.length}
+            variant="configs"
             collapsible
             defaultExpanded
         >
