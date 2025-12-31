@@ -479,6 +479,11 @@ export const updateEdgeWeight = (
 // Graph Layout
 // ============================================================================
 
+// Node height constants for vertical centering
+const NODE_HEIGHT_INPUT = 70;
+const NODE_HEIGHT_OUTPUT = 70;
+const NODE_HEIGHT_MODULE = 120;
+
 /**
  * Find all complete chains (paths from input to output) and assign chain indices to nodes.
  * Each node is assigned to the chain it belongs to. Nodes that belong to multiple chains
@@ -640,16 +645,16 @@ export const layoutGraphTopologically = (
     // Calculate positions
     const positions = new Map<string, { x: number; y: number }>();
 
-    // Position INPUT at level 0, centered Y
+    // Position INPUT at level 0, centered vertically
     positions.set(INPUT_NODE_ID, {
         x: startX,
-        y: centerY,
+        y: centerY - NODE_HEIGHT_INPUT / 2,
     });
 
-    // Position OUTPUT at max level, centered Y
+    // Position OUTPUT at max level, centered vertically
     positions.set(OUTPUT_NODE_ID, {
         x: startX + maxLevel * horizontalSpacing,
-        y: centerY,
+        y: centerY - NODE_HEIGHT_OUTPUT / 2,
     });
 
     // Position module nodes based on their chain and level
@@ -661,11 +666,11 @@ export const layoutGraphTopologically = (
         // For unconnected nodes, place them at level 1 (middle)
         const level = levels.get(node.id) ?? 1;
         const chain = nodeToChain.get(node.id) ?? 0;
-        const y = chainYPositions.get(chain) ?? centerY;
+        const chainY = chainYPositions.get(chain) ?? centerY;
 
         positions.set(node.id, {
             x: startX + level * horizontalSpacing,
-            y,
+            y: chainY - NODE_HEIGHT_MODULE / 2,
         });
     }
 

@@ -324,6 +324,20 @@ export const createEmptyGraph = (): PipelineGraphState => {
 // Graph Layout
 // ============================================================================
 
+// Node height constants for vertical centering
+const NODE_HEIGHT_INPUT = 70;
+const NODE_HEIGHT_OUTPUT = 70;
+const NODE_HEIGHT_FUNCTION_REF = 110;
+
+/**
+ * Get node height based on node type
+ */
+const getNodeHeight = (nodeId: string): number => {
+    if (nodeId === INPUT_NODE_ID) return NODE_HEIGHT_INPUT;
+    if (nodeId === OUTPUT_NODE_ID) return NODE_HEIGHT_OUTPUT;
+    return NODE_HEIGHT_FUNCTION_REF;
+};
+
 /**
  * Layout nodes in a horizontal linked-list fashion
  */
@@ -347,9 +361,10 @@ export const layoutLinkedList = (
     let level = 0;
     
     while (currentId) {
+        const nodeHeight = getNodeHeight(currentId);
         positions.set(currentId, {
             x: startX + level * horizontalSpacing,
-            y: centerY,
+            y: centerY - nodeHeight / 2,
         });
         
         const nextId = adjacency.get(currentId);
@@ -365,9 +380,10 @@ export const layoutLinkedList = (
     let disconnectedLevel = level + 1;
     for (const node of nodes) {
         if (!positions.has(node.id)) {
+            const nodeHeight = getNodeHeight(node.id);
             positions.set(node.id, {
                 x: startX + disconnectedLevel * horizontalSpacing,
-                y: centerY + 100,
+                y: centerY + 100 - nodeHeight / 2,
             });
             disconnectedLevel++;
         }
