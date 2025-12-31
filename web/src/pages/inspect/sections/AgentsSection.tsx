@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text, TabProvider, TabList, Tab, TabPanel } from '@gravity-ui/uikit';
 import type { TableColumnConfig } from '@gravity-ui/uikit';
+import { Cpu } from '@gravity-ui/icons';
 import type { InstanceInfo, AgentInfo, AgentInstanceInfo } from '../../../api/inspect';
 import { SortableDataTable } from '../../../components';
 import { compareBigIntValues, compareNullableNumbers } from '../../../utils/sorting';
+import { InspectSection } from '../InspectSection';
 import { formatAgentName, formatUint64 } from '../utils';
 import '../inspect.scss';
 
@@ -12,7 +14,12 @@ export interface AgentsSectionProps {
 }
 
 export const AgentsSection: React.FC<AgentsSectionProps> = ({ instance }) => {
+    const agents = instance.agents ?? [];
     const [activeAgentTab, setActiveAgentTab] = useState<string>('0');
+
+    const totalInstances = useMemo(() => {
+        return agents.reduce((sum, agent) => sum + (agent.instances?.length ?? 0), 0);
+    }, [agents]);
 
     const agentColumns: TableColumnConfig<AgentInstanceInfo>[] = useMemo(() => [
         {
@@ -58,30 +65,33 @@ export const AgentsSection: React.FC<AgentsSectionProps> = ({ instance }) => {
     ], []);
 
     useEffect(() => {
-        if (instance.agents && instance.agents.length > 0) {
-            const tabExists = instance.agents.some((_, idx) => String(idx) === activeAgentTab);
+        if (agents.length > 0) {
+            const tabExists = agents.some((_, idx) => String(idx) === activeAgentTab);
             if (!tabExists) {
                 setActiveAgentTab('0');
             }
         }
-    }, [instance.agents, activeAgentTab]);
+    }, [agents, activeAgentTab]);
 
     return (
-        <Box className="inspect-section-box">
-            <Text variant="header-1">
-                Agents
-            </Text>
-            {instance.agents && instance.agents.length > 0 ? (
+        <InspectSection
+            title="Agents"
+            icon={Cpu}
+            count={totalInstances}
+            collapsible
+            defaultExpanded
+        >
+            {agents.length > 0 ? (
                 <TabProvider value={activeAgentTab} onUpdate={setActiveAgentTab}>
                     <TabList className="agents-section__tabs">
-                        {instance.agents.map((agent: AgentInfo, agentIdx: number) => (
+                        {agents.map((agent: AgentInfo, agentIdx: number) => (
                             <Tab key={agentIdx} value={String(agentIdx)}>
                                 {agent.name ? formatAgentName(agent.name) : `Agent ${agentIdx}`}
                             </Tab>
                         ))}
                     </TabList>
                     <Box>
-                        {instance.agents.map((agent: AgentInfo, agentIdx: number) => (
+                        {agents.map((agent: AgentInfo, agentIdx: number) => (
                             <TabPanel key={agentIdx} value={String(agentIdx)}>
                                 {agent.instances && agent.instances.length > 0 ? (
                                     <SortableDataTable
@@ -99,9 +109,10 @@ export const AgentsSection: React.FC<AgentsSectionProps> = ({ instance }) => {
                     </Box>
                 </TabProvider>
             ) : (
-                <Text variant="body-1" color="secondary" className="inspect-text--block">No agents</Text>
+                <Text variant="body-1" color="secondary" className="inspect-text--block">
+                    No agents
+                </Text>
             )}
-        </Box>
+        </InspectSection>
     );
 };
-

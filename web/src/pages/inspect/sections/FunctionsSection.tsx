@@ -1,90 +1,94 @@
-import React from 'react';
-import { Box, Text, Icon } from '@gravity-ui/uikit';
-import { ArrowRight } from '@gravity-ui/icons';
-import type { InstanceInfo, FunctionInfo, FunctionChainInfo } from '../../../api/inspect';
+import React, { useState } from 'react';
+import { Box, Text, Icon, Label } from '@gravity-ui/uikit';
+import { ChevronDown, ChevronRight, CurlyBracketsFunction } from '@gravity-ui/icons';
+import type { InstanceInfo, FunctionInfo, FunctionChainInfo, ChainModuleInfo } from '../../../api/inspect';
+import { InspectSection } from '../InspectSection';
 import { formatUint64 } from '../utils';
-import './FunctionsSection.scss';
+import '../inspect.scss';
 
 export interface FunctionsSectionProps {
     instance: InstanceInfo;
 }
 
-const Arrow: React.FC = () => (
-    <span className="function-arrow">
-        <Icon data={ArrowRight} size={14} />
-    </span>
-);
-
-interface ModulesFlowProps {
-    chain: FunctionChainInfo;
+interface ModuleTagProps {
+    module: ChainModuleInfo;
 }
 
-const ModulesFlow: React.FC<ModulesFlowProps> = ({ chain }) => {
-    const modules = chain.modules ?? [];
-
-    if (modules.length === 0) {
-        return <Text variant="body-2" color="secondary">-</Text>;
-    }
-
+const ModuleTag: React.FC<ModuleTagProps> = ({ module }) => {
+    const displayName = module.name || module.type || 'module';
     return (
-        <Box className="function-modules-flow">
-            {modules.map((mod, idx) => (
-                <React.Fragment key={`${chain.name}-mod-${idx}`}>
-                    <Box className="function-module">
-                        <Text variant="caption-2">{mod.name || mod.type || 'module'}</Text>
-                    </Box>
-                    {idx < modules.length - 1 && <Arrow />}
-                </React.Fragment>
-            ))}
-        </Box>
+        <Label theme="normal" size="s" className="functions-tree__module-tag">
+            {displayName}
+        </Label>
     );
 };
 
-interface ChainRowProps {
+interface ChainItemProps {
     chain: FunctionChainInfo;
 }
 
-const ChainRow: React.FC<ChainRowProps> = ({ chain }) => {
+const ChainItem: React.FC<ChainItemProps> = ({ chain }) => {
+    const modules = chain.modules ?? [];
     const weight = formatUint64(chain.weight);
 
     return (
-        <Box className="function-chain-row">
-            <Text variant="body-2" className="function-chain__name">
-                {chain.name || 'unnamed'}
-            </Text>
-            <span className="function-chain__separator" />
-            <Text variant="body-2" className="function-chain__weight">
-                {weight}
-            </Text>
-            <Box className="function-chain__modules">
-                <ModulesFlow chain={chain} />
+        <Box className="functions-tree__chain">
+            <Box className="functions-tree__chain-header">
+                <Text variant="body-2" className="functions-tree__chain-name">
+                    {chain.name || 'unnamed'}
+                </Text>
+                <Label theme="info" size="xs">weight: {weight}</Label>
             </Box>
+            {modules.length > 0 && (
+                <Box className="functions-tree__modules">
+                    {modules.map((mod, idx) => (
+                        <React.Fragment key={`mod-${idx}`}>
+                            <ModuleTag module={mod} />
+                            {idx < modules.length - 1 && (
+                                <Text variant="caption-2" color="secondary" className="functions-tree__arrow">→</Text>
+                            )}
+                        </React.Fragment>
+                    ))}
+                </Box>
+            )}
         </Box>
     );
 };
 
-interface FunctionCardProps {
+interface FunctionItemProps {
     func: FunctionInfo;
+    defaultExpanded?: boolean;
 }
 
-const FunctionCard: React.FC<FunctionCardProps> = ({ func }) => {
+const FunctionItem: React.FC<FunctionItemProps> = ({ func, defaultExpanded = false }) => {
+    const [expanded, setExpanded] = useState(defaultExpanded);
     const chains = func.chains ?? [];
+    const hasChains = chains.length > 0;
 
     return (
-        <Box className="function-card">
-            <Text variant="body-1" className="function-card__name">
-                {func.name || 'unnamed'}
-            </Text>
-            {chains.length > 0 ? (
-                <Box className="function-chains-list">
+        <Box className="functions-tree__function">
+            <Box
+                className={`functions-tree__function-header ${hasChains ? 'functions-tree__function-header--clickable' : ''}`}
+                onClick={hasChains ? () => setExpanded(!expanded) : undefined}
+            >
+                {hasChains && (
+                    <Icon
+                        data={expanded ? ChevronDown : ChevronRight}
+                        size={16}
+                        className="functions-tree__chevron"
+                    />
+                )}
+                <Text variant="body-1" className="functions-tree__function-name">
+                    {func.name || 'unnamed'}
+                </Text>
+                <Label theme="clear" size="xs">{chains.length} chains</Label>
+            </Box>
+            {expanded && hasChains && (
+                <Box className="functions-tree__chains">
                     {chains.map((chain, idx) => (
-                        <ChainRow key={chain.name ?? idx} chain={chain} />
+                        <ChainItem key={chain.name ?? idx} chain={chain} />
                     ))}
                 </Box>
-            ) : (
-                <Text variant="body-2" color="secondary" className="function-no-chains">
-                    No chains
-                </Text>
             )}
         </Box>
     );
@@ -94,14 +98,21 @@ export const FunctionsSection: React.FC<FunctionsSectionProps> = ({ instance }) 
     const functions = instance.functions ?? [];
 
     return (
-        <Box className="inspect-section-box">
-            <Text variant="header-1">
-                Functions
-            </Text>
+        <InspectSection
+            title="Functions"
+            icon={CurlyBracketsFunction}
+            count={functions.length}
+            collapsible
+            defaultExpanded
+        >
             {functions.length > 0 ? (
-                <Box className="functions-list">
+                <Box className="functions-tree">
                     {functions.map((func, idx) => (
-                        <FunctionCard key={func.name ?? idx} func={func} />
+                        <FunctionItem
+                            key={func.name ?? idx}
+                            func={func}
+                            defaultExpanded={idx === 0}
+                        />
                     ))}
                 </Box>
             ) : (
@@ -109,6 +120,6 @@ export const FunctionsSection: React.FC<FunctionsSectionProps> = ({ instance }) 
                     No functions
                 </Text>
             )}
-        </Box>
+        </InspectSection>
     );
 };

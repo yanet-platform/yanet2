@@ -1,9 +1,11 @@
 import React, { useMemo } from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
 import type { TableColumnConfig } from '@gravity-ui/uikit';
+import { Gear } from '@gravity-ui/icons';
 import type { InstanceInfo, CPConfigInfo } from '../../../api/inspect';
 import { SortableDataTable } from '../../../components';
 import { compareBigIntValues, compareNullableStrings } from '../../../utils/sorting';
+import { InspectSection } from '../InspectSection';
 import { formatUint64 } from '../utils';
 import '../inspect.scss';
 
@@ -12,6 +14,8 @@ export interface ConfigurationsSectionProps {
 }
 
 export const ConfigurationsSection: React.FC<ConfigurationsSectionProps> = ({ instance }) => {
+    const configs = instance.cpConfigs ?? [];
+
     const cpConfigColumns: TableColumnConfig<CPConfigInfo>[] = useMemo(() => [
         {
             id: 'type',
@@ -40,22 +44,26 @@ export const ConfigurationsSection: React.FC<ConfigurationsSectionProps> = ({ in
     ], []);
 
     return (
-        <Box className="inspect-section-box">
-            <Text variant="header-1">
-                Controlplane Configurations
-            </Text>
-            {instance.cpConfigs && instance.cpConfigs.length > 0 ? (
-                <Box>
+        <InspectSection
+            title="Controlplane Configurations"
+            icon={Gear}
+            count={configs.length}
+            collapsible
+            defaultExpanded
+        >
+            {configs.length > 0 ? (
+                <Box className="configs-table-wrapper">
                     <SortableDataTable
-                        data={instance.cpConfigs}
+                        data={configs}
                         columns={cpConfigColumns}
                         width="max"
                     />
                 </Box>
             ) : (
-                <Text variant="body-1" color="secondary" className="inspect-text--block">No configurations</Text>
+                <Text variant="body-1" color="secondary" className="inspect-text--block">
+                    No configurations
+                </Text>
             )}
-        </Box>
+        </InspectSection>
     );
 };
-

@@ -1,6 +1,8 @@
 import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
+import { LayoutCellsLarge } from '@gravity-ui/icons';
 import type { InstanceInfo } from '../../../api/inspect';
+import { InspectSection } from '../InspectSection';
 import { ModuleCard } from '../ModuleCard';
 import '../inspect.scss';
 
@@ -9,14 +11,19 @@ export interface ModulesSectionProps {
 }
 
 export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
+    const modules = instance.dpModules ?? [];
+
     return (
-        <Box className="inspect-section-box">
-            <Text variant="header-1" className="inspect-section__header">
-                Dataplane Modules
-            </Text>
-            {instance.dpModules && instance.dpModules.length > 0 ? (
-                <Box className="inspect-section__modules-grid">
-                    {instance.dpModules.map((module) => {
+        <InspectSection
+            title="Dataplane Modules"
+            icon={LayoutCellsLarge}
+            count={modules.length}
+            collapsible
+            defaultExpanded
+        >
+            {modules.length > 0 ? (
+                <Box className="modules-grid">
+                    {modules.map((module) => {
                         const configCount = instance.cpConfigs?.filter(
                             (cfg) => cfg.type?.toLowerCase() === module.name?.toLowerCase()
                         ).length || 0;
@@ -44,8 +51,10 @@ export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
                     })}
                 </Box>
             ) : (
-                <Text variant="body-1" color="secondary" className="inspect-text--block">No modules</Text>
+                <Text variant="body-1" color="secondary" className="inspect-text--block">
+                    No modules
+                </Text>
             )}
-        </Box>
+        </InspectSection>
     );
 };
