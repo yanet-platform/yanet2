@@ -59,6 +59,18 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
             .filter(name => name && name.length > 0);
     }, [nodes]);
 
+    // Calculate minimum width for the graph container based on actual node positions
+    const graphMinWidth = useMemo(() => {
+        const functionCount = nodes.filter(n => n.type === NODE_TYPE_FUNCTION_REF).length;
+        if (functionCount < 3) return undefined;
+
+        // Find the rightmost node position and add node width + padding
+        const NODE_WIDTH = 140;
+        const PADDING = 50;
+        const maxX = Math.max(...nodes.map(n => n.position.x));
+        return maxX + NODE_WIDTH + PADDING;
+    }, [nodes]);
+
     // Fetch and interpolate counters for all functions
     const { counters: functionCounters } = useFunctionCounters(
         pipelineId.name || '',
@@ -213,6 +225,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
                             onNodesChange={handleNodesChange}
                             onEdgesChange={handleEdgesChange}
                             onNodeDoubleClick={handleNodeDoubleClick}
+                            minWidth={graphMinWidth}
                         />
                     </CountersProvider>
                 </Box>

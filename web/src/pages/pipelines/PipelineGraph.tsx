@@ -89,6 +89,8 @@ export interface PipelineGraphProps {
     onNodesChange: (nodes: PipelineNode[]) => void;
     onEdgesChange: (edges: PipelineEdge[]) => void;
     onNodeDoubleClick?: (nodeId: string, nodeType: string) => void;
+    /** When set, disables fitView and fixes zoom to 1 for horizontal scroll mode */
+    minWidth?: number;
 }
 
 const PipelineGraphInner: React.FC<PipelineGraphProps> = ({
@@ -97,6 +99,7 @@ const PipelineGraphInner: React.FC<PipelineGraphProps> = ({
     onNodesChange,
     onEdgesChange,
     onNodeDoubleClick,
+    minWidth,
 }) => {
     const reactFlowWrapper = useRef<HTMLDivElement>(null);
     const connectingNodeId = useRef<string | null>(null);
@@ -475,13 +478,16 @@ const PipelineGraphInner: React.FC<PipelineGraphProps> = ({
                 edgeTypes={edgeTypes}
                 isValidConnection={isValidConnection}
                 defaultEdgeOptions={defaultEdgeOptions}
-                fitView
-                fitViewOptions={{ padding: 0.4, maxZoom: 1.2 }}
+                fitView={!minWidth}
+                fitViewOptions={minWidth ? undefined : { padding: 0.4, maxZoom: 1.2 }}
+                defaultViewport={minWidth ? { x: 0, y: 0, zoom: 1 } : undefined}
+                minZoom={minWidth ? 1 : undefined}
+                maxZoom={minWidth ? 1 : 1.2}
                 deleteKeyCode={null}
                 nodesDraggable
                 nodesConnectable
                 elementsSelectable
-                panOnDrag={[1, 2]}
+                panOnDrag={minWidth ? true : [1, 2]}
                 panOnScroll={false}
                 zoomOnScroll={false}
                 zoomOnPinch={false}
