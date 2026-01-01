@@ -12,8 +12,11 @@ import { apiToGraph, graphToApi, createEmptyGraph, validateLinkedList } from './
 // Re-export formatPps and formatBps from utils for backwards compatibility
 export { formatPps, formatBps } from '../../utils';
 
+export type PipelineMap = Record<string, Pipeline>;
+
 export interface UsePipelineDataResult {
     pipelineIds: PipelineId[];
+    pipelines: PipelineMap;
     loading: boolean;
     error: string | null;
     reloadPipelines: () => Promise<void>;
@@ -29,6 +32,7 @@ export interface UsePipelineDataResult {
  */
 export const usePipelineData = (): UsePipelineDataResult => {
     const [pipelineIds, setPipelineIds] = useState<PipelineId[]>([]);
+    const [pipelines, setPipelines] = useState<PipelineMap>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -37,8 +41,28 @@ export const usePipelineData = (): UsePipelineDataResult => {
         setError(null);
 
         try {
+            // Load pipeline list
             const response = await API.pipelines.list({});
-            setPipelineIds(response.ids || []);
+            const ids = response.ids || [];
+            setPipelineIds(ids);
+
+            // Preload all pipelines to avoid per-card loading flashes
+            const loadedPipelines: PipelineMap = {};
+
+            await Promise.all(ids.map(async (pipelineId) => {
+                try {
+                    const pipelineResponse = await API.pipelines.get({ id: pipelineId });
+                    const pipeline = pipelineResponse.pipeline;
+                    const key = pipeline?.id?.name || pipelineId.name;
+                    if (pipeline && key) {
+                        loadedPipelines[key] = pipeline;
+                    }
+                } catch (err) {
+                    toaster.error('pipeline-get-error', `Failed to load pipeline ${pipelineId.name}`, err);
+                }
+            }));
+
+            setPipelines(loadedPipelines);
         } catch (err) {
             const message = err instanceof Error ? err.message : 'Failed to load pipelines';
             setError(message);
@@ -55,14 +79,31 @@ export const usePipelineData = (): UsePipelineDataResult => {
     const loadPipeline = useCallback(async (
         pipelineId: PipelineId
     ): Promise<Pipeline | null> => {
+        // Check cache first
+        const cached = pipelines[pipelineId.name || ''];
+        if (cached) {
+            return cached;
+        }
+
         try {
             const response = await API.pipelines.get({ id: pipelineId });
-            return response.pipeline || null;
+            const pipeline = response.pipeline || null;
+
+            // Update cache
+            const pipelineName = pipeline?.id?.name;
+            if (pipeline && pipelineName) {
+                setPipelines(prev => ({
+                    ...prev,
+                    [pipelineName]: pipeline,
+                }));
+            }
+
+            return pipeline;
         } catch (err) {
             toaster.error('pipeline-get-error', `Failed to load pipeline ${pipelineId.name}`, err);
             return null;
         }
-    }, []);
+    }, [pipelines]);
 
     const createPipeline = useCallback(async (
         name: string
@@ -128,6 +169,7 @@ export const usePipelineData = (): UsePipelineDataResult => {
 
     return {
         pipelineIds,
+        pipelines,
         loading,
         error,
         reloadPipelines: loadPipelines,

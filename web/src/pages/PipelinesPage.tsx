@@ -12,6 +12,7 @@ import './pipelines/pipelines.css';
 const PipelinesPage: React.FC = () => {
     const {
         pipelineIds,
+        pipelines,
         loading,
         loadPipeline,
         createPipeline,
@@ -56,6 +57,7 @@ const PipelinesPage: React.FC = () => {
                             <PipelineCard
                                 key={pipelineId.name}
                                 pipelineId={pipelineId}
+                                initialPipeline={pipelines[pipelineId.name || '']}
                                 loadPipeline={loadPipeline}
                                 updatePipeline={updatePipeline}
                                 deletePipeline={deletePipeline}

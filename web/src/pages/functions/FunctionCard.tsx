@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Box, Text, Card, Alert } from '@gravity-ui/uikit';
+import { Box, Card, Alert } from '@gravity-ui/uikit';
 import type { FunctionId } from '../../api/common';
 import type { Function as APIFunction } from '../../api/functions';
-import { CardHeader } from '../../components';
+import { CardHeader, PageLoader } from '../../components';
 import { FunctionGraph } from './FunctionGraph';
 import { DeleteFunctionDialog, ModuleEditorDialog, SingleWeightEditorDialog } from './dialogs';
 import type { ChainEditorResult } from './dialogs/SingleWeightEditorDialog';
@@ -115,17 +115,16 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
         moduleInfoList
     );
 
-    // Load function data on mount or when function changes
+    // Load function data on mount (only if no initialFunction)
     useEffect(() => {
+        // If we have initial data, no need to load
+        if (initialFunction) {
+            return;
+        }
+
         let cancelled = false;
 
         const load = async (): Promise<void> => {
-            if (initialFunction) {
-                loadFromApi(initialFunction);
-                setLoading(false);
-                return;
-            }
-
             setLoading(true);
             const func = await loadFunction(functionId);
             if (!cancelled && func) {
@@ -139,7 +138,8 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [functionId, loadFunction, loadFromApi, initialFunction]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [functionId, initialFunction]);
 
     const handleSave = useCallback(async () => {
         if (!isValid) {
@@ -267,8 +267,8 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     if (loading) {
         return (
             <Card className="function-card">
-                <Box className="function-card__loading">
-                    <Text>Loading function {functionId.name}...</Text>
+                <Box className="function-card__content">
+                    <PageLoader loading={loading} size="m" />
                 </Box>
             </Card>
         );

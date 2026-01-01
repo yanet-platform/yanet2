@@ -136,6 +136,7 @@ const FunctionGraphInner: React.FC<FunctionGraphProps> = ({
     const connectionSuccessful = useRef(false);
     const { screenToFlowPosition, fitView } = useReactFlow();
     const graphId = useId();
+    const [isReady, setIsReady] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
     const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
     const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
@@ -490,11 +491,15 @@ const FunctionGraphInner: React.FC<FunctionGraphProps> = ({
         style: { strokeWidth: 2, stroke: 'var(--g-color-line-generic)' },
         type: 'default',
     }), []);
+
+    const handleInit = useCallback(() => {
+        setIsReady(true);
+    }, []);
     
     return (
         <div 
             ref={reactFlowWrapper} 
-            style={{ width: '100%', height: '100%' }}
+            style={{ width: '100%', height: '100%', opacity: isReady ? 1 : 0, transition: 'opacity 0.1s ease-in' }}
             tabIndex={0}
             data-graph-id={graphId}
         >
@@ -509,6 +514,7 @@ const FunctionGraphInner: React.FC<FunctionGraphProps> = ({
                 onConnectEnd={onConnectEnd}
                 onNodeDoubleClick={handleNodeDoubleClick}
                 onEdgeDoubleClick={handleEdgeDoubleClick}
+                onInit={handleInit}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 isValidConnection={isValidConnection}

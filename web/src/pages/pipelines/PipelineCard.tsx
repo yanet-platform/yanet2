@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Box, Text, Card, Alert } from '@gravity-ui/uikit';
+import { Box, Card, Alert } from '@gravity-ui/uikit';
 import type { PipelineId, Pipeline } from '../../api/pipelines';
 import type { FunctionId } from '../../api/common';
-import { CardHeader, CountersProvider } from '../../components';
+import { CardHeader, CountersProvider, PageLoader } from '../../components';
 import { PipelineGraph } from './PipelineGraph';
 import { DeletePipelineDialog, FunctionRefEditorDialog } from './dialogs';
 import { usePipelineGraph, useFunctionCounters } from './hooks';
@@ -13,6 +13,7 @@ import './pipelines.css';
 
 export interface PipelineCardProps {
     pipelineId: PipelineId;
+    initialPipeline?: Pipeline | null;
     loadPipeline: (pipelineId: PipelineId) => Promise<Pipeline | null>;
     updatePipeline: (pipeline: Pipeline) => Promise<boolean>;
     deletePipeline: (pipelineId: PipelineId) => Promise<boolean>;
@@ -21,12 +22,13 @@ export interface PipelineCardProps {
 
 export const PipelineCard: React.FC<PipelineCardProps> = ({
     pipelineId,
+    initialPipeline,
     loadPipeline,
     updatePipeline,
     deletePipeline,
     loadFunctionList,
 }) => {
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(() => !initialPipeline);
     const [saving, setSaving] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -49,7 +51,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
         loadFromApi,
         toApi,
         markClean,
-    } = usePipelineGraph();
+    } = usePipelineGraph(initialPipeline || undefined);
 
     // Extract function names from nodes for counter fetching
     const functionNames = useMemo(() => {
@@ -77,8 +79,13 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
         functionNames
     );
 
-    // Load pipeline data on mount
+    // Load pipeline data on mount (only if no initialPipeline)
     useEffect(() => {
+        // If we have initial data, no need to load
+        if (initialPipeline) {
+            return;
+        }
+
         const load = async (): Promise<void> => {
             setLoading(true);
             const pipeline = await loadPipeline(pipelineId);
@@ -88,7 +95,8 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
             setLoading(false);
         };
         load();
-    }, [pipelineId, loadPipeline, loadFromApi]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pipelineId, initialPipeline]);
 
     // Load available functions when dialog opens
     useEffect(() => {
@@ -190,8 +198,8 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     if (loading) {
         return (
             <Card className="pipeline-card">
-                <Box className="pipeline-card__loading">
-                    <Text>Loading pipeline {pipelineId.name}...</Text>
+                <Box className="pipeline-card__content">
+                    <PageLoader loading={loading} size="m" />
                 </Box>
             </Card>
         );
