@@ -1,5 +1,3 @@
-#include "../dataplane/module.h"
-
 #include "common/container_of.h"
 #include "common/lpm.h"
 #include "common/memory.h"
@@ -14,6 +12,8 @@
 
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
+
+#include "modules/balancer/dataplane/module.h"
 
 #include "vs.h"
 #include <string.h>

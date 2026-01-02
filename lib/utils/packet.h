@@ -7,6 +7,7 @@
 
 #include <lib/dataplane/module/module.h>
 #include <lib/dataplane/packet/packet.h>
+#include <lib/dataplane/packet/packet_list.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 

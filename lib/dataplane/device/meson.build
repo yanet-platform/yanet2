@@ -5,11 +5,11 @@ dependencies += lib_packet_dp_dep
 dependencies += libdpdk_inc_dep
 
 sources = files(
-  'module.c',
+  'device.c',
 )
 
-lib_module_dp = static_library(
-  'module',
+lib_device_dp = static_library(
+  'device',
   sources,
   c_args: yanet_c_args,
   link_args: yanet_link_args,
@@ -17,8 +17,8 @@ lib_module_dp = static_library(
   install: false,
 )
 
-lib_module_dp_dep = declare_dependency(
-  link_with: lib_module_dp,
+lib_device_dp_dep = declare_dependency(
+  link_with: lib_device_dp,
   dependencies: dependencies,
   include_directories: [
     yanet_libdir,

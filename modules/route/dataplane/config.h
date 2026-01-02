@@ -16,8 +16,8 @@ struct route {
 };
 
 struct route_list {
-	uint64_t start;
-	uint64_t count;
+	uint32_t start;
+	uint32_t count;
 };
 
 /*

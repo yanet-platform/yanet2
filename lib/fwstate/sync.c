@@ -204,7 +204,7 @@ fwstate_craft_state_sync_packet(
 
 	// Initialize the sync packet metadata
 	sync_pkt->rx_device_id = packet->rx_device_id;
-	sync_pkt->tx_device_id = packet->tx_device_id;
+	sync_pkt->device_id = packet->device_id;
 
 	// Set packet header offsets directly (we know the structure)
 	sync_pkt->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);

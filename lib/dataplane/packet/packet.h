@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <rte_mbuf.h>
+
 #define PACKET_HEADER_TYPE_UNKNOWN 0
 
 struct rte_mbuf;
@@ -24,24 +26,20 @@ struct transport_header {
 	uint16_t offset;
 };
 
-struct pipeline_ectx;
-
 struct packet {
 	struct packet *next;
 
 	struct rte_mbuf *mbuf;
 
-	struct pipeline_ectx *pipeline_ectx;
-
 	uint32_t hash;
 
 	uint16_t rx_device_id;
-	uint16_t tx_device_id;
+	uint16_t device_id;
+
 	uint16_t module_device_id;
 
 	uint16_t tx_result;
 
-	uint16_t flags;
 	uint16_t vlan;
 
 	uint32_t flow_label; // 12 unused bits + 20 bits of the label
@@ -50,66 +48,19 @@ struct packet {
 	struct transport_header transport_header;
 };
 
-struct packet_list {
-	struct packet *first;
-	struct packet **last;
-	uint64_t count;
-};
-
-static inline void
-packet_list_init(struct packet_list *list) {
-	list->first = NULL;
-	list->last = &list->first;
-	list->count = 0;
-}
-
-static inline void
-packet_list_add(struct packet_list *list, struct packet *packet) {
-	*list->last = packet;
-	packet->next = NULL;
-	list->last = &packet->next;
-	list->count += 1;
+static inline struct rte_mbuf *
+packet_to_mbuf(const struct packet *packet) {
+	return packet->mbuf;
 }
 
 static inline struct packet *
-packet_list_first(struct packet_list *list) {
-	return list->first;
+mbuf_to_packet(struct rte_mbuf *mbuf) {
+	return (struct packet *)((void *)mbuf->buf_addr);
 }
 
-static inline void
-packet_list_concat(struct packet_list *dst, struct packet_list *src) {
-	// Nothing to do if src is empty
-	if (src->first == NULL)
-		return;
-
-	// Replace dst with src if dst is empty
-	if (dst->first == NULL) {
-		*dst = *src;
-		return;
-	}
-
-	*dst->last = packet_list_first(src);
-	dst->last = src->last;
-	dst->count += src->count;
-}
-
-static inline struct packet *
-packet_list_pop(struct packet_list *packets) {
-	struct packet *res = packets->first;
-	if (res == NULL)
-		return res;
-
-	packets->first = res->next;
-	if (packets->first == NULL)
-		packets->last = &packets->first;
-	packets->count -= 1;
-
-	return res;
-}
-
-static inline uint64_t
-packet_list_count(struct packet_list *packets) {
-	return packets->count;
+static inline uint16_t
+packet_data_len(struct packet *packet) {
+	return rte_pktmbuf_data_len(packet_to_mbuf(packet));
 }
 
 int
@@ -120,43 +71,6 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset);
 
 int
 parse_packet(struct packet *packet);
-
-static inline struct rte_mbuf *
-packet_to_mbuf(const struct packet *packet) {
-	return packet->mbuf;
-}
-
-struct packet *
-mbuf_to_packet(struct rte_mbuf *mbuf);
-
-uint16_t
-packet_data_len(struct packet *packet);
-
-void
-packet_list_print(struct packet_list *list);
-
-/**
- * @brief Count number of packets in a packet list
- *
- * Traverses the linked list of packets and counts total number.
- *
- * @param list Pointer to packet list structure to count
- * @return Total number of packets in the list
- */
-int
-packet_list_counter(struct packet_list *list);
-
-/**
- * @brief Calculate total bytes in a packet list
- *
- * Traverses the linked list of packets and sums up the data length of each
- * packet.
- *
- * @param list Pointer to packet list structure to sum bytes for
- * @return Total bytes of all packets in the list
- */
-uint64_t
-packet_list_bytes_sum(struct packet_list *list);
 
 /**
  * @brief Print contents of an rte_mbuf packet in a detailed format if

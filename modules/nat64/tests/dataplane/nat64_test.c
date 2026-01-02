@@ -31,10 +31,19 @@
 #include "common.h"
 #include "common/memory.h"
 #include "dataplane/dpdk.h"
-#include "dataplane/module/module.h"
 #include "dataplane/nat64dp.h"
 #include "logging/log.h"
 #include "test.h"
+
+#include "lib/dataplane/worker/worker.h"
+
+#include "lib/dataplane/packet/packet.h"
+
+#include "lib/dataplane/module/module.h"
+#include "lib/dataplane/module/packet_front.h"
+
+#include "lib/dataplane/pipeline/econtext.h"
+#include "lib/dataplane/pipeline/pipeline.h"
 
 #ifdef DEBUG_NAT64
 RTE_LOG_REGISTER_DEFAULT(nat64test_logtype, DEBUG);
@@ -2148,7 +2157,7 @@ push_packet(struct upkt *pkt) {
 	memset(packet, 0, sizeof(struct packet));
 	packet->mbuf = mbuf;
 	packet->rx_device_id = 0;
-	packet->tx_device_id = 0;
+	packet->device_id = 0;
 
 	if (parse_packet(packet)) {
 		RTE_LOG(ERR,
@@ -3825,7 +3834,7 @@ append_test_cases_from_mappings_icmp(struct test_case **test_case) {
  * @return Total number of packets in the list
  */
 // static inline int
-// packet_list_counter(struct packet_list *list) {
+// packet_list_count(struct packet_list *list) {
 // 	int count = 0;
 // 	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
 // 		count++;
@@ -3972,7 +3981,7 @@ test_nat64_udp_checksum() {
 	);
 
 	// Verify output
-	int count = packet_list_counter(&test_params.packet_front.output);
+	int count = packet_list_count(&test_params.packet_front.output);
 	TEST_ASSERT_EQUAL(
 		count, 1, "Expected 1 packet output, got %d\n", count
 	);
@@ -4051,18 +4060,18 @@ process_test_case(struct test_case *tc) {
 	);
 
 	if (tc->pkt_expected.eth.dst_addr.addr_bytes[0] == 0) {
-		int count = packet_list_counter(&test_params.packet_front.drop);
+		int count = packet_list_count(&test_params.packet_front.drop);
 		TEST_ASSERT_EQUAL(
 			count, 1, "Expected 1 packet droped, got %d\n", count
 		);
-		count = packet_list_counter(&test_params.packet_front.output);
+		count = packet_list_count(&test_params.packet_front.output);
 		TEST_ASSERT_EQUAL(
 			count, 0, "Expected 0 packet output, got %d\n", count
 		);
 		return TEST_SUCCESS;
 	}
 
-	int count = packet_list_counter(&test_params.packet_front.output);
+	int count = packet_list_count(&test_params.packet_front.output);
 	TEST_ASSERT_EQUAL(
 		count,
 		1,
@@ -4070,7 +4079,7 @@ process_test_case(struct test_case *tc) {
 		tc->name,
 		count
 	);
-	count = packet_list_counter(&test_params.packet_front.drop);
+	count = packet_list_count(&test_params.packet_front.drop);
 	TEST_ASSERT_EQUAL(
 		count,
 		0,

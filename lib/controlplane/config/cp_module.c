@@ -54,7 +54,7 @@ cp_module_init(
 	}
 
 	cp_module->rx_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "rx", 1
+		&cp_module->counter_registry, "rx", 2
 	);
 	if (cp_module->rx_counter_id == COUNTER_INVALID) {
 		NEW_ERROR(
@@ -65,35 +65,11 @@ cp_module_init(
 		return -1;
 	}
 	cp_module->tx_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "tx", 1
+		&cp_module->counter_registry, "tx", 2
 	);
 	if (cp_module->tx_counter_id == COUNTER_INVALID) {
 		NEW_ERROR(
 			"failed to register 'tx' counter for module '%s:%s'",
-			module_type,
-			module_name
-		);
-		return -1;
-	}
-	cp_module->rx_bytes_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "rx_bytes", 1
-	);
-	if (cp_module->rx_bytes_counter_id == COUNTER_INVALID) {
-		NEW_ERROR(
-			"failed to register 'rx_bytes' counter for module "
-			"'%s:%s'",
-			module_type,
-			module_name
-		);
-		return -1;
-	}
-	cp_module->tx_bytes_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "tx_bytes", 1
-	);
-	if (cp_module->tx_bytes_counter_id == COUNTER_INVALID) {
-		NEW_ERROR(
-			"failed to register 'tx_bytes' counter for module "
-			"'%s:%s'",
 			module_type,
 			module_name
 		);

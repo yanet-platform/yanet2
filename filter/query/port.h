@@ -60,14 +60,28 @@ packet_dst_port(const struct packet *packet) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline uint32_t
-FILTER_ATTR_QUERY_FUNC(port_src)(struct packet *packet, void *data) {
+static inline void
+FILTER_ATTR_QUERY_FUNC(port_src)(
+	void *data, struct packet **packets, uint32_t *result, uint32_t count
+) {
 	struct value_table *table = (struct value_table *)data;
-	return value_table_get(table, 0, packet_src_port(packet));
+
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		result[idx] = value_table_get(
+			table, 0, packet_src_port(packets[idx])
+		);
+	}
 }
 
-static inline uint32_t
-FILTER_ATTR_QUERY_FUNC(port_dst)(struct packet *packet, void *data) {
+static inline void
+FILTER_ATTR_QUERY_FUNC(port_dst)(
+	void *data, struct packet **packets, uint32_t *result, uint32_t count
+) {
 	struct value_table *table = (struct value_table *)data;
-	return value_table_get(table, 0, packet_dst_port(packet));
+
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		result[idx] = value_table_get(
+			table, 0, packet_dst_port(packets[idx])
+		);
+	}
 }

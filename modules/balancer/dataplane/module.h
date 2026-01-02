@@ -1,7 +1,7 @@
 #pragma once
 
 #include "lib/controlplane/config/cp_module.h"
-#include "lib/controlplane/config/econtext.h"
+// #include "lib/dataplane/pipeline/econtext.h"
 
 #include "lib/counters/counters.h"
 

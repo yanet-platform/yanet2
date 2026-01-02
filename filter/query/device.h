@@ -6,9 +6,13 @@
 
 #include <stdint.h>
 
-static inline uint32_t
-FILTER_ATTR_QUERY_FUNC(device)(struct packet *packet, void *data) {
+static inline void
+FILTER_ATTR_QUERY_FUNC(device)(
+	void *data, struct packet **packets, uint32_t *result, uint32_t count
+) {
 	struct value_table *t = (struct value_table *)data;
-	uint64_t device_id = packet->module_device_id;
-	return value_table_get(t, 0, device_id);
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		uint64_t device_id = packets[idx]->module_device_id;
+		result[idx] = value_table_get(t, 0, device_id);
+	}
 }

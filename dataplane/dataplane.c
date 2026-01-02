@@ -21,6 +21,8 @@
 #include "logging/log.h"
 
 #include "controlplane/config/zone.h"
+#include "lib/controlplane/agent/agent.h"
+
 #include "dataplane/config/zone.h"
 
 #include "dataplane/device.h"

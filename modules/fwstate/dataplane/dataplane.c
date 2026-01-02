@@ -8,13 +8,22 @@
 #include <rte_udp.h>
 
 #include "common/memory_address.h"
-#include "dataplane/module/module.h"
 #include "fwstate/layermap.h"
 #include "fwstate/types.h"
 #include "lib/dataplane/time/clock.h"
 #include "logging/log.h"
 
 #include "config.h"
+
+#include "lib/dataplane/worker/worker.h"
+
+#include "lib/dataplane/module/module.h"
+#include "lib/dataplane/module/packet_front.h"
+
+#include "lib/dataplane/packet/decap.h"
+#include "lib/dataplane/packet/packet_list.h"
+
+#include "lib/dataplane/pipeline/econtext.h"
 
 struct fwstate {
 	uint64_t ttl;

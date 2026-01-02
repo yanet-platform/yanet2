@@ -46,14 +46,12 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 
 		uint8_t src[NET6_LEN];
 		memcpy(src, real->src_addr, NET6_LEN);
-		uint8_t len = (ipv4_header_inner != NULL ? NET4_LEN : NET6_LEN);
 		uint8_t *src_user =
 			(ipv4_header_inner != NULL
 				 ? (uint8_t *)&ipv4_header_inner->src_addr
-				 : ipv6_header_inner->src_addr);
-		for (uint8_t i = 0; i < len; i++) {
-			src[i] |= src_user[i] & (~real->src_mask[i]);
-		}
+				 : ipv6_header_inner->src_addr + 12);
+
+		*(uint32_t *)(src + 12) |= *(uint32_t *)src_user;
 
 		packet_ip6_encap(packet, real->dst_addr, src);
 	} else { // IPv4

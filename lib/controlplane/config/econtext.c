@@ -2,7 +2,9 @@
 
 #include <string.h>
 
-// cp_config and cp_config_gen
+#include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/pipeline/econtext.h"
+
 #include "lib/controlplane/config/zone.h"
 #include "lib/controlplane/diag/diag.h"
 
@@ -67,11 +69,6 @@ module_ectx_create(
 	memset(module_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&module_ectx->cp_module, cp_module);
 
-	module_ectx->rx_counter_id = cp_module->rx_counter_id;
-	module_ectx->tx_counter_id = cp_module->tx_counter_id;
-	module_ectx->rx_bytes_counter_id = cp_module->rx_bytes_counter_id;
-	module_ectx->tx_bytes_counter_id = cp_module->tx_bytes_counter_id;
-
 	SET_OFFSET_OF(&module_ectx->config_gen_ectx, config_gen_ectx);
 
 	struct dp_module *dp_module =
@@ -108,6 +105,19 @@ module_ectx_create(
 		);
 		goto error;
 	}
+
+	SET_OFFSET_OF(
+		&module_ectx->rx_counter,
+		counter_get_value_handle(
+			cp_module->rx_counter_id, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&module_ectx->tx_counter,
+		counter_get_value_handle(
+			cp_module->tx_counter_id, counter_storage
+		)
+	);
 
 	if (cp_config_counter_storage_registry_insert_module(
 		    &cp_config_gen->counter_storage_registry,
@@ -281,8 +291,13 @@ chain_ectx_create(
 		SET_OFFSET_OF(
 			&chain_ectx->modules[idx].module_ectx, module_ectx
 		);
-		chain_ectx->modules[idx].tsc_counter_id =
-			cp_chain->modules[idx].tsc_counter_id;
+		SET_OFFSET_OF(
+			&chain_ectx->modules[idx].tsc_counter,
+			counter_get_value_handle(
+				cp_chain->modules[idx].tsc_counter_id,
+				counter_storage
+			)
+		);
 	}
 
 	return chain_ectx;
@@ -401,6 +416,25 @@ function_ectx_create(
 		goto error;
 	}
 
+	SET_OFFSET_OF(
+		&function_ectx->rx_counter,
+		counter_get_value_handle(
+			cp_function->counter_packet_in, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&function_ectx->tx_counter,
+		counter_get_value_handle(
+			cp_function->counter_packet_out, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&function_ectx->drop_counter,
+		counter_get_value_handle(
+			cp_function->counter_packet_drop, counter_storage
+		)
+	);
+
 	if (cp_config_counter_storage_registry_insert_function(
 		    &cp_config_gen->counter_storage_registry,
 		    cp_device->name,
@@ -444,9 +478,7 @@ function_ectx_create(
 		for (uint64_t weight_idx = 0;
 		     weight_idx < cp_function->chains[idx].weight;
 		     ++weight_idx) {
-			SET_OFFSET_OF(
-				function_ectx->chain_map + pos, chain_ectx
-			);
+			function_ectx->chain_map[pos] = idx;
 			++pos;
 		}
 	}
@@ -533,6 +565,31 @@ pipeline_ectx_create(
 		);
 		goto error;
 	}
+
+	SET_OFFSET_OF(
+		&pipeline_ectx->rx_counter,
+		counter_get_value_handle(
+			cp_pipeline->counter_packet_in, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&pipeline_ectx->tx_counter,
+		counter_get_value_handle(
+			cp_pipeline->counter_packet_out, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&pipeline_ectx->drop_counter,
+		counter_get_value_handle(
+			cp_pipeline->counter_packet_drop, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&pipeline_ectx->counter_batch_size,
+		counter_get_value_handle(
+			cp_pipeline->counter_packet_batch_size, counter_storage
+		)
+	);
 
 	if (cp_config_counter_storage_registry_insert_pipeline(
 		    &cp_config_gen->counter_storage_registry,
@@ -713,10 +770,7 @@ device_entry_ectx_create(
 		for (uint64_t weight_idx = 0;
 		     weight_idx < cp_device_entry->pipelines[idx].weight;
 		     ++weight_idx) {
-			SET_OFFSET_OF(
-				device_entry_ectx->pipeline_map + pos,
-				pipeline_ectx
-			);
+			device_entry_ectx->pipeline_map[pos] = idx;
 			++pos;
 		}
 	}
@@ -777,6 +831,7 @@ device_ectx_create(
 
 	memset(device_ectx, 0, ectx_size);
 	SET_OFFSET_OF(&device_ectx->cp_device, cp_device);
+	device_ectx->device_id = cp_device->config_item.index;
 
 	struct counter_storage *old_counter_storage =
 		cp_config_counter_storage_registry_lookup_device(
@@ -797,6 +852,19 @@ device_ectx_create(
 		);
 		goto error;
 	}
+
+	SET_OFFSET_OF(
+		&device_ectx->counter_rx,
+		counter_get_value_handle(
+			cp_device->counter_packet_rx, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&device_ectx->counter_tx,
+		counter_get_value_handle(
+			cp_device->counter_packet_tx, counter_storage
+		)
+	);
 
 	if (cp_config_counter_storage_registry_insert_device(
 		    &cp_config_gen->counter_storage_registry,

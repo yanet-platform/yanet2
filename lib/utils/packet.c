@@ -263,7 +263,7 @@ init_packet_with_mbuf(
 	// here mbuf is initialized
 	memset(packet, 0, sizeof(struct packet));
 	packet->mbuf = mbuf;
-	packet->tx_device_id = data->tx_device_id;
+	packet->device_id = data->tx_device_id;
 	packet->rx_device_id = data->rx_device_id;
 	return parse_packet(packet);
 }
@@ -293,7 +293,7 @@ fill_packet_list(
 		memset(p, 0, sizeof(struct packet));
 		p->mbuf = m;
 		p->rx_device_id = data->rx_device_id;
-		p->tx_device_id = data->tx_device_id;
+		p->device_id = data->tx_device_id;
 		packet_list_add(packet_list, p);
 	}
 
@@ -317,8 +317,7 @@ packet_data(const struct packet *p) {
 	// TODO: multisegment packets
 	size_t size = m->data_len;
 	uint8_t *data = rte_pktmbuf_mtod(m, uint8_t *);
-	return (struct packet_data){data, size, p->tx_device_id, p->rx_device_id
-	};
+	return (struct packet_data){data, size, p->device_id, p->rx_device_id};
 }
 
 ////////////////////////////////////////////////////////////////////////////////

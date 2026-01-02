@@ -69,7 +69,7 @@ yanet_worker_mock_handle_packets(
 			tsc_clock_get_time_ns(&dp_worker->clock);
 	}
 
-	struct dp_config *dp_config = worker->dp_config;
+	//	struct dp_config *dp_config = worker->dp_config;
 	struct cp_config *cp_config = worker->cp_config;
 	struct cp_config_gen *cp_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
@@ -90,54 +90,62 @@ yanet_worker_mock_handle_packets(
 	packet_front_init(&packet_front);
 
 	while (packet_list_first(input_packets)) {
-		struct packet *packet = packet_list_pop(input_packets);
-		packet->pipeline_ectx = NULL;
+		//		struct packet *packet =
+		// packet_list_pop(input_packets); packet->pipeline_ectx = NULL;
 
-		struct device_ectx *device_ectx =
-			ADDR_OF(config_gen_ectx->devices + packet->rx_device_id
-			);
-		if (device_ectx == NULL) {
-			packet_front_drop(&packet_front, packet);
-			continue;
-		}
-
-		device_ectx_process_input(
-			&worker->dp_worker, device_ectx, &packet_front, packet
-		);
+		/*		struct device_ectx *device_ectx =
+					ADDR_OF(config_gen_ectx->devices +
+		   packet->rx_device_id
+					);
+				if (device_ectx == NULL) {
+					packet_front_drop(&packet_front,
+		   packet); continue;
+				}
+		*/
+		/*
+				device_ectx_process_input(
+					&worker->dp_worker, device_ectx,
+		   &packet_front, packet
+				);
+		*/
 	}
 
 	// Now group packets by pipeline and build packet_front
-	while (packet_list_first(&packet_front.pending)) {
-		struct packet *packet =
-			packet_list_first(&packet_front.pending);
-		struct pipeline_ectx *pipeline_ectx = packet->pipeline_ectx;
+	while (packet_list_first(&packet_front.pending_input)) {
+		//		struct packet *packet =
+		//			packet_list_first(&packet_front.pending_input);
+		//		struct pipeline_ectx *pipeline_ectx =
+		// packet->pipeline_ectx;
 
 		struct packet_list pending_packets;
 		packet_list_init(&pending_packets);
-
-		while ((packet = packet_list_pop(&packet_front.pending))) {
-			if (packet->pipeline_ectx == pipeline_ectx) {
-				packet_front_output(&packet_front, packet);
-			} else {
-				packet_list_add(&pending_packets, packet);
-			}
-		}
-
+		/*
+				while ((packet =
+		   packet_list_pop(&packet_front.pending_input))) { if
+		   (packet->pipeline_ectx == pipeline_ectx) {
+						packet_front_output(&packet_front,
+		   packet); } else { packet_list_add(&pending_packets, packet);
+					}
+				}
+		*/
 		/*
 		 * All the packets with the same pipeline_ectx are ready to
 		 * process, so return postponned packet into pending
 		 * queue.
 		 */
-		packet_list_concat(&packet_front.pending, &pending_packets);
-
-		pipeline_ectx_process(
-			dp_config,
-			&worker->dp_worker,
-			cp_config_gen,
-			pipeline_ectx,
-			&packet_front
+		packet_list_concat(
+			&packet_front.pending_input, &pending_packets
 		);
 
+		/*
+				pipeline_ectx_process(
+					dp_config,
+					&worker->dp_worker,
+					cp_config_gen,
+					pipeline_ectx,
+					&packet_front
+				);
+		*/
 		packet_list_concat(
 			&out_result->drop_packets, &packet_front.drop
 		);

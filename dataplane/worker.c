@@ -42,8 +42,12 @@
 #include "dataplane/device.h"
 
 #include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/packet_list.h"
+#include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/pipeline/pipeline.h"
 #include "lib/dataplane/time/clock.h"
+#include "lib/dataplane/worker/worker.h"
 
 #include "lib/controlplane/config/zone.h"
 
@@ -63,6 +67,9 @@ worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
 	*(worker->dp_worker->rx_count) += read;
 
 	for (uint32_t idx = 0; idx < read; ++idx) {
+		__builtin_prefetch(
+			rte_pktmbuf_mtod_offset(mbufs[idx], void *, 0)
+		);
 		struct packet *packet = mbuf_to_packet(mbufs[idx]);
 		memset(packet, 0, sizeof(struct packet));
 		// FIXME update packet fields
@@ -70,7 +77,7 @@ worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
 
 		packet->rx_device_id = worker->device_id;
 		// Preserve device by default
-		packet->tx_device_id = worker->device_id;
+		packet->device_id = worker->device_id;
 
 		parse_packet(packet);
 		packet_list_add(packets, packet);
@@ -136,7 +143,7 @@ worker_connection_free_cb(void **item, size_t count, void *data) {
 static int
 worker_send_to_port(struct worker_write_ctx *ctx, struct packet *packet) {
 	struct worker_tx_connection *tx_conn =
-		ctx->tx_connections + packet->tx_device_id;
+		ctx->tx_connections + packet->device_id;
 
 	if (!tx_conn->count) {
 		LOG(ERROR, "no available data pipe for the port");
@@ -211,13 +218,12 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 			to_write = 0;
 		}
 
-		if (packet->tx_device_id >=
-		    dp_config->dp_topology.device_count) {
+		if (packet->device_id >= dp_config->dp_topology.device_count) {
 			packet_list_add(&failed, packet);
 			continue;
 		}
 
-		if (packet->tx_device_id == worker->device_id) {
+		if (packet->device_id == worker->device_id) {
 			mbufs[to_write] = packet_to_mbuf(packet);
 			++to_write;
 		} else {
@@ -274,7 +280,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 			tsc_clock_get_time_ns(&dp_worker->clock);
 	}
 
-	struct dp_config *dp_config = worker->instance->dp_config;
+	//	struct dp_config *dp_config = worker->instance->dp_config;
 	struct cp_config *cp_config = worker->instance->cp_config;
 	struct cp_config_gen *cp_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
@@ -284,89 +290,107 @@ worker_loop_round(struct dataplane_worker *worker) {
 	worker->dp_worker->gen = cp_config_gen->gen;
 	*worker->dp_worker->iterations += 1;
 
-	struct packet_list input_packets;
-	packet_list_init(&input_packets);
-	struct packet_list output_packets;
-	packet_list_init(&output_packets);
-	struct packet_list drop_packets;
-	packet_list_init(&drop_packets);
-
-	worker_read(worker, &input_packets);
-
-	if (config_gen_ectx == NULL) {
-		packet_list_concat(&drop_packets, &input_packets);
-		packet_list_init(&input_packets);
-	}
-
 	struct packet_front packet_front;
 	packet_front_init(&packet_front);
 
-	while (packet_list_first(&input_packets)) {
-		struct packet *packet = packet_list_pop(&input_packets);
-		packet->pipeline_ectx = NULL;
+	worker_read(worker, &packet_front.pending_input);
 
-		struct device_ectx *device_ectx =
-			ADDR_OF(config_gen_ectx->devices + packet->rx_device_id
+	if (config_gen_ectx == NULL) {
+		worker_write(worker, &packet_front.drop);
+
+		packet_list_concat(
+			&packet_front.drop, &packet_front.pending_input
+		);
+
+		dataplane_drop_packets(worker->dataplane, &packet_front.drop);
+
+		return;
+	}
+
+	uint64_t device_count =
+		cp_config_gen->device_registry.registry.capacity;
+
+	while (1) {
+
+		struct packet_front schedule_input[device_count];
+		for (uint64_t idx = 0; idx < device_count; ++idx)
+			packet_front_init(schedule_input + idx);
+
+		struct packet_front schedule_output[device_count];
+		for (uint64_t idx = 0; idx < device_count; ++idx)
+			packet_front_init(schedule_output + idx);
+
+		struct packet *packet;
+
+		int empty = 1;
+
+		while ((packet = packet_list_pop(&packet_front.pending_input)
+		       ) != NULL) {
+			empty = 0;
+			packet_front_output(
+				schedule_input + packet->device_id, packet
 			);
-		if (device_ectx == NULL) {
-			packet_list_add(&drop_packets, packet);
-			continue;
 		}
 
-		device_ectx_process_input(
-			worker->dp_worker, device_ectx, &packet_front, packet
-		);
-	}
-
-	packet_list_concat(&drop_packets, &packet_front.drop);
-
-	// Now group packets by pipeline and build packet_front
-	while (packet_list_first(&packet_front.pending)) {
-		struct packet *packet =
-			packet_list_first(&packet_front.pending);
-		struct pipeline_ectx *pipeline_ectx = packet->pipeline_ectx;
-
-		struct packet_list pending_packets;
-		packet_list_init(&pending_packets);
-
-		while ((packet = packet_list_pop(&packet_front.pending))) {
-			if (packet->pipeline_ectx == pipeline_ectx) {
-				packet_front_output(&packet_front, packet);
-			} else {
-				packet_list_add(&pending_packets, packet);
-			}
+		while ((packet = packet_list_pop(&packet_front.pending_output)
+		       ) != NULL) {
+			empty = 0;
+			packet_front_output(
+				schedule_output + packet->device_id, packet
+			);
 		}
 
-		/*
-		 * All the packets with the same pipeline_ectx are ready to
-		 * process, so return postponned packet into pending
-		 * queue.
-		 */
-		packet_list_concat(&packet_front.pending, &pending_packets);
+		if (empty)
+			break;
 
-		pipeline_ectx_process(
-			dp_config,
-			worker->dp_worker,
-			cp_config_gen,
-			pipeline_ectx,
-			&packet_front
-		);
+		struct device_ectx **devices = config_gen_ectx->devices;
 
-		packet_list_concat(&drop_packets, &packet_front.drop);
-		packet_list_init(&packet_front.drop);
-		packet_list_concat(&output_packets, &packet_front.output);
-		packet_list_init(&packet_front.output);
+		for (uint64_t idx = 0; idx < device_count; ++idx) {
+			if (packet_list_first(&schedule_input[idx].output) ==
+			    NULL)
+				continue;
+
+			struct device_ectx *device_ectx =
+				ADDR_OF(devices + idx);
+
+			device_ectx_process_input(
+				worker->dp_worker,
+				device_ectx,
+				schedule_input + idx
+			);
+
+			packet_front_merge(&packet_front, schedule_input + idx);
+		}
+
+		for (uint64_t idx = 0; idx < device_count; ++idx) {
+			if (packet_list_first(&schedule_output[idx].output) ==
+			    NULL)
+				continue;
+
+			struct device_ectx *device_ectx =
+				ADDR_OF(devices + idx);
+
+			device_ectx_process_output(
+				worker->dp_worker,
+				device_ectx,
+				schedule_output + idx
+			);
+
+			packet_front_merge(
+				&packet_front, schedule_output + idx
+			);
+		}
 	}
 
-	worker_write(worker, &output_packets);
+	worker_write(worker, &packet_front.output);
 
 	/*
 	 * `output_packets` now contains failed-to-transmit packets which
 	 * should be freed.
 	 */
-	packet_list_concat(&drop_packets, &output_packets);
+	packet_list_concat(&packet_front.drop, &packet_front.output);
 
-	dataplane_drop_packets(worker->dataplane, &drop_packets);
+	dataplane_drop_packets(worker->dataplane, &packet_front.drop);
 }
 
 static void *

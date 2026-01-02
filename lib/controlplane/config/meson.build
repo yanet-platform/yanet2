@@ -12,8 +12,8 @@ sources = files(
   'cp_pipeline.c',
   'cp_device.c',
   'cp_counter.c',
-  'econtext.c',
   'zone.c',
+  'econtext.c',
 )
 
 lib_config_cp = static_library(

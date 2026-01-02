@@ -1,10 +1,16 @@
 #include "cp_device.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 #include "common/container_of.h"
 
 #include "dataplane/config/zone.h"
 
+#include "lib/controlplane/agent/agent.h"
+
 #include "controlplane/config/zone.h"
+
 #include "lib/controlplane/diag/diag.h"
 
 int
@@ -168,20 +174,12 @@ cp_device_init(
 	counter_registry_init(&cp_device->counter_registry, memory_context, 0);
 
 	// FIXME return error on counter failure
-	cp_device->counter_packet_rx_count = counter_registry_register(
-		&cp_device->counter_registry, "rx", 1
+	cp_device->counter_packet_rx = counter_registry_register(
+		&cp_device->counter_registry, "rx", 2
 	);
 
-	cp_device->counter_packet_tx_count = counter_registry_register(
-		&cp_device->counter_registry, "tx", 1
-	);
-
-	cp_device->counter_packet_rx_bytes = counter_registry_register(
-		&cp_device->counter_registry, "rx_bytes", 1
-	);
-
-	cp_device->counter_packet_tx_bytes = counter_registry_register(
-		&cp_device->counter_registry, "tx_bytes", 1
+	cp_device->counter_packet_tx = counter_registry_register(
+		&cp_device->counter_registry, "tx", 2
 	);
 
 	return 0;

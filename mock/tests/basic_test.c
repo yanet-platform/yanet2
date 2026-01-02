@@ -145,7 +145,7 @@ send_packet(struct yanet_mock *mock) {
 	uint8_t init_chsum = packet_data_chsum(&init_packet_data);
 
 	TEST_ASSERT_EQUAL(res, 0, "failed to fill packet");
-	packet.tx_device_id = 0;
+	packet.device_id = 0;
 	packet.rx_device_id = 0;
 	packet_list_add(&packets, &packet);
 	struct packet_handle_result result;

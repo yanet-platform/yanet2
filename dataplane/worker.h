@@ -8,6 +8,8 @@
 
 #include "dataplane/pipeline/pipeline.h"
 
+#include "lib/dataplane/packet/packet_list.h"
+
 struct dataplane;
 struct dataplane_instance;
 

@@ -55,10 +55,10 @@ cp_pipeline_create(
 		goto error;
 	}
 
-	new_pipeline->counter_packet_in_count = counter_registry_register(
-		&new_pipeline->counter_registry, "input", 1
+	new_pipeline->counter_packet_in = counter_registry_register(
+		&new_pipeline->counter_registry, "input", 2
 	);
-	if (new_pipeline->counter_packet_in_count == COUNTER_INVALID) {
+	if (new_pipeline->counter_packet_in == COUNTER_INVALID) {
 		NEW_ERROR(
 			"failed to register 'input' counter for pipeline '%s'",
 			cp_pipeline_config->name
@@ -66,10 +66,10 @@ cp_pipeline_create(
 		goto error;
 	}
 
-	new_pipeline->counter_packet_out_count = counter_registry_register(
-		&new_pipeline->counter_registry, "output", 1
+	new_pipeline->counter_packet_out = counter_registry_register(
+		&new_pipeline->counter_registry, "output", 2
 	);
-	if (new_pipeline->counter_packet_out_count == COUNTER_INVALID) {
+	if (new_pipeline->counter_packet_out == COUNTER_INVALID) {
 		NEW_ERROR(
 			"failed to register 'output' counter for pipeline '%s'",
 			cp_pipeline_config->name
@@ -77,10 +77,10 @@ cp_pipeline_create(
 		goto error;
 	}
 
-	new_pipeline->counter_packet_drop_count = counter_registry_register(
-		&new_pipeline->counter_registry, "drop", 1
+	new_pipeline->counter_packet_drop = counter_registry_register(
+		&new_pipeline->counter_registry, "drop", 2
 	);
-	if (new_pipeline->counter_packet_drop_count == COUNTER_INVALID) {
+	if (new_pipeline->counter_packet_drop == COUNTER_INVALID) {
 		NEW_ERROR(
 			"failed to register 'drop' counter for pipeline '%s'",
 			cp_pipeline_config->name
@@ -88,47 +88,10 @@ cp_pipeline_create(
 		goto error;
 	}
 
-	new_pipeline->counter_packet_in_bytes = counter_registry_register(
-		&new_pipeline->counter_registry, "input_bytes", 1
+	new_pipeline->counter_packet_batch_size = counter_registry_register(
+		&new_pipeline->counter_registry, "input histogram", 64
 	);
-	if (new_pipeline->counter_packet_in_bytes == COUNTER_INVALID) {
-		NEW_ERROR(
-			"failed to register 'input_bytes' counter for pipeline "
-			"'%s'",
-			cp_pipeline_config->name
-		);
-		goto error;
-	}
-
-	new_pipeline->counter_packet_out_bytes = counter_registry_register(
-		&new_pipeline->counter_registry, "output_bytes", 1
-	);
-	if (new_pipeline->counter_packet_out_bytes == COUNTER_INVALID) {
-		NEW_ERROR(
-			"failed to register 'output_bytes' counter for "
-			"pipeline "
-			"'%s'",
-			cp_pipeline_config->name
-		);
-		goto error;
-	}
-
-	new_pipeline->counter_packet_drop_bytes = counter_registry_register(
-		&new_pipeline->counter_registry, "drop_bytes", 1
-	);
-	if (new_pipeline->counter_packet_drop_bytes == COUNTER_INVALID) {
-		NEW_ERROR(
-			"failed to register 'drop_bytes' counter for pipeline "
-			"'%s'",
-			cp_pipeline_config->name
-		);
-		goto error;
-	}
-
-	new_pipeline->counter_packet_in_hist = counter_registry_register(
-		&new_pipeline->counter_registry, "input histogram", 8
-	);
-	if (new_pipeline->counter_packet_in_hist == COUNTER_INVALID) {
+	if (new_pipeline->counter_packet_batch_size == COUNTER_INVALID) {
 		NEW_ERROR(
 			"failed to register 'input histogram' counter for "
 			"pipeline '%s'",

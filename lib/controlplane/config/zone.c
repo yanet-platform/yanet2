@@ -6,6 +6,7 @@
 #include "cp_module.h"
 #include "cp_pipeline.h"
 
+#include "lib/controlplane/config/econtext.h"
 #include "lib/dataplane/config/zone.h"
 
 #include "lib/controlplane/agent/agent.h"
@@ -468,12 +469,6 @@ cp_config_delete_pipeline(
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 
-	uint64_t index;
-	if (cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
-		NEW_ERROR("pipeline '%s' not found", name);
-		goto error_unlock;
-	}
-
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
@@ -538,15 +533,6 @@ cp_config_gen_lookup_function_index(
 ) {
 	return cp_function_registry_lookup_index(
 		&config_gen->function_registry, name, index
-	);
-}
-
-int
-cp_config_gen_lookup_pipeline_index(
-	struct cp_config_gen *config_gen, const char *name, uint64_t *index
-) {
-	return cp_pipeline_registry_lookup_index(
-		&config_gen->pipeline_registry, name, index
 	);
 }
 

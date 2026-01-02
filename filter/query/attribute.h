@@ -9,15 +9,20 @@
 #include "proto_range.h"
 #include "vlan.h"
 
-typedef uint32_t (*filter_attr_query_func)(struct packet *packet, void *data);
+typedef void (*filter_attr_query_func)(
+	void *data, struct packet **packets, uint32_t *result, uint32_t idx
+);
 
 struct filter_attr_query {
 	filter_attr_query_func query;
 };
 
 #define REGISTER_ATTRIBUTE(name)                                               \
-	static inline uint32_t FILTER_ATTR_QUERY_FUNC(name)(                   \
-		struct packet * packet, void *data                             \
+	static inline void FILTER_ATTR_QUERY_FUNC(name)(                       \
+		void *data,                                                    \
+		struct packet **packets,                                       \
+		uint32_t *result,                                              \
+		uint32_t count                                                 \
 	);                                                                     \
 	static const struct filter_attr_query FILTER_ATTR_QUERY(name           \
 	) = {FILTER_ATTR_QUERY_FUNC(name)}

@@ -9,6 +9,13 @@
 #include "dataplane/packet/dscp.h"
 #include "dataplane/packet/packet.h"
 
+#include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/packet/packet_list.h"
+
+#include "lib/dataplane/module/packet_front.h"
+
+#include "lib/dataplane/pipeline/econtext.h"
+
 static int
 dscp_handle_v4(struct dscp_module_config *config, struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);

@@ -16,13 +16,6 @@
  */
 struct cp_module;
 
-/*
- * Callback used to free module configuration data.
- * Agent creating a module configuration should provide the callback
- * to free replaced module data after configuration update.
- */
-typedef void (*cp_module_free_handler)(struct cp_module *cp_module);
-
 struct cp_module_device {
 	char name[CP_DEVICE_NAME_LEN];
 };
@@ -46,14 +39,10 @@ struct cp_module {
 	// Counters declared inside module data
 	struct counter_registry counter_registry;
 
-	// Rx packet counter
+	// Rx packet/bytes counter
 	uint64_t rx_counter_id;
-	// Tx packet counter
+	// Tx packet/bytes counter
 	uint64_t tx_counter_id;
-	// Rx bytes counter
-	uint64_t rx_bytes_counter_id;
-	// Tx bytes counter
-	uint64_t tx_bytes_counter_id;
 
 	// Link to the previous instance of the module configuration
 	struct cp_module *prev;

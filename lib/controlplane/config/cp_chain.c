@@ -65,7 +65,7 @@ cp_chain_create(
 			counter_registry_register(
 				&new_chain->counter_registry,
 				tsc_counter_name,
-				8
+				64
 			);
 	}
 

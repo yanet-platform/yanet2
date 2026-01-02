@@ -1,5 +1,7 @@
 #include "packet.h"
 
+#include "common/crc32.h"
+
 #include "yanet_build_config.h"
 
 #include <stdint.h>
@@ -66,7 +68,6 @@ parse_ipv4_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 
 	if (rte_pktmbuf_pkt_len(mbuf) <
 	    (uint32_t)*offset + sizeof(struct rte_ipv4_hdr)) {
-		*type = PACKET_HEADER_TYPE_UNKNOWN;
 		return -1;
 	}
 
@@ -75,20 +76,20 @@ parse_ipv4_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 
 	if (rte_pktmbuf_pkt_len(mbuf) <
 	    (uint32_t)*offset + rte_be_to_cpu_16(ipv4_hdr->total_length)) {
-		*type = PACKET_HEADER_TYPE_UNKNOWN;
 		return -1;
 	}
 
 	if ((ipv4_hdr->version_ihl & 0x0F) < 0x05) {
-		*type = PACKET_HEADER_TYPE_UNKNOWN;
 		return -1;
 	}
 
 	if (rte_be_to_cpu_16(ipv4_hdr->total_length) <
 	    4 * (ipv4_hdr->version_ihl & 0x0F)) {
-		*type = PACKET_HEADER_TYPE_UNKNOWN;
 		return -1;
 	}
+
+	packet->hash = crc32(&ipv4_hdr->src_addr, 4, packet->hash);
+	packet->hash = crc32(&ipv4_hdr->dst_addr, 4, packet->hash);
 
 	// FIXME: check if fragmented
 	// FIXME: process extensions
@@ -105,7 +106,6 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 
 	if (rte_pktmbuf_pkt_len(mbuf) <
 	    (uint32_t)*offset + sizeof(struct rte_ipv6_hdr)) {
-		*type = PACKET_HEADER_TYPE_UNKNOWN;
 		return -1;
 	}
 
@@ -115,7 +115,6 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 	if (rte_pktmbuf_pkt_len(mbuf) <
 	    *offset + sizeof(struct rte_ipv6_hdr) +
 		    rte_be_to_cpu_16(ipv6_hdr->payload_len)) {
-		*type = PACKET_HEADER_TYPE_UNKNOWN;
 		return -1;
 	}
 
@@ -189,6 +188,9 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 		return -1;
 	}
 
+	packet->hash = crc32(ipv6_hdr->src_addr, 16, packet->hash);
+	packet->hash = crc32(ipv6_hdr->dst_addr, 16, packet->hash);
+
 	*type = ext_type;
 
 	return 0;
@@ -198,6 +200,8 @@ int
 parse_packet(struct packet *packet) {
 	uint16_t type = 0;
 	uint16_t offset = 0;
+
+	packet->hash = 0;
 
 	if (parse_ether_header(packet, &type, &offset)) {
 		return -1;
@@ -228,17 +232,36 @@ parse_packet(struct packet *packet) {
 	packet->transport_header.type = type;
 	packet->transport_header.offset = offset;
 
+	// TODO: should tcp/udp data be added to packet hash?
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+
+	if (type == IPPROTO_TCP) {
+		if (rte_pktmbuf_pkt_len(mbuf) <
+		    (uint32_t)offset + sizeof(struct rte_tcp_hdr)) {
+			return -1;
+		}
+
+		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
+			mbuf, struct rte_tcp_hdr *, offset
+		);
+
+		packet->hash = crc32(&tcp_hdr->src_port, 2, packet->hash);
+		packet->hash = crc32(&tcp_hdr->dst_port, 2, packet->hash);
+	} else if (type == IPPROTO_UDP) {
+		if (rte_pktmbuf_pkt_len(mbuf) <
+		    (uint32_t)offset + sizeof(struct rte_udp_hdr)) {
+			return -1;
+		}
+
+		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+			mbuf, struct rte_udp_hdr *, offset
+		);
+
+		packet->hash = crc32(&udp_hdr->src_port, 2, packet->hash);
+		packet->hash = crc32(&udp_hdr->dst_port, 2, packet->hash);
+	}
+
 	return 0;
-}
-
-struct packet *
-mbuf_to_packet(struct rte_mbuf *mbuf) {
-	return (struct packet *)((void *)mbuf->buf_addr);
-}
-
-uint16_t
-packet_data_len(struct packet *packet) {
-	return rte_pktmbuf_data_len(packet_to_mbuf(packet));
 }
 
 void
@@ -518,29 +541,4 @@ logtrace_rte_mbuf(struct rte_mbuf *mbuf) {
 #else
 	(void)mbuf;
 #endif // ENABLE_TRACE_LOG
-}
-
-int
-packet_list_counter(struct packet_list *list) {
-	int count = 0;
-	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
-		count++;
-	}
-	return count;
-}
-
-uint64_t
-packet_list_bytes_sum(struct packet_list *list) {
-	uint64_t bytes = 0;
-	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
-		bytes += packet_data_len(pkt);
-	}
-	return bytes;
-}
-
-void
-packet_list_print(struct packet_list *list) {
-	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
-		logtrace_rte_mbuf(packet_to_mbuf(pkt));
-	}
 }

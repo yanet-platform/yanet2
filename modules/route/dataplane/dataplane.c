@@ -9,9 +9,13 @@
 
 #include "dataplane/config/zone.h"
 
-#include "dataplane/module/module.h"
-#include "dataplane/packet/packet.h"
-#include "dataplane/pipeline/pipeline.h"
+#include "lib/dataplane/module/module.h"
+#include "lib/dataplane/module/packet_front.h"
+
+#include "lib/dataplane/packet/decap.h"
+#include "lib/dataplane/packet/packet_list.h"
+
+#include "lib/dataplane/pipeline/econtext.h"
 
 struct route_module {
 	struct module module;
@@ -152,24 +156,14 @@ route_handle_packets(
 		struct route *route =
 			ADDR_OF(&route_config->routes) + route_index;
 
-		struct config_gen_ectx *config_gen_ectx =
-			ADDR_OF(&module_ectx->config_gen_ectx);
-
 		uint64_t device_id = module_ectx_encode_device(
 			module_ectx, route->device_id
 		);
 
-		struct device_ectx *device_ectx =
-			config_gen_ectx_get_device(config_gen_ectx, device_id);
-		if (device_ectx == NULL) {
-			packet_front_drop(packet_front, packet);
-			continue;
-		}
-
 		route_set_packet_destination(packet, route);
-		device_ectx_process_output(
-			dp_worker, device_ectx, packet_front, packet
-		);
+
+		packet->device_id = device_id;
+		packet_list_add(&packet_front->pending_output, packet);
 	}
 }
 

@@ -17,6 +17,9 @@
 #include "lib/logging/log.h"
 #include "mock/worker_mempool.h"
 
+#include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/pipeline/econtext.h"
+
 #define FUZZING_ARENA_SIZE (1 << 20)
 
 /**
@@ -197,7 +200,13 @@ fuzzing_process_packet(
 	}
 
 	// Clean up pending packets
-	while ((cleanup_packet = packet_list_pop(&pf.pending)) != NULL) {
+	while ((cleanup_packet = packet_list_pop(&pf.pending_input)) != NULL) {
+		struct rte_mbuf *cleanup_mbuf = packet_to_mbuf(cleanup_packet);
+		rte_pktmbuf_free(cleanup_mbuf);
+	}
+
+	// Clean up pending packets
+	while ((cleanup_packet = packet_list_pop(&pf.pending_output)) != NULL) {
 		struct rte_mbuf *cleanup_mbuf = packet_to_mbuf(cleanup_packet);
 		rte_pktmbuf_free(cleanup_mbuf);
 	}

@@ -8,6 +8,7 @@
 
 static inline void
 packet_ctx_update_common_stats_on_outgoing_packet(struct packet_ctx *ctx) {
+	return;
 	uint64_t pkt_len = ctx->packet->mbuf->pkt_len;
 
 	atomic_fetch_add_explicit(
@@ -33,6 +34,7 @@ packet_ctx_update_common_stats_on_outgoing_packet(struct packet_ctx *ctx) {
 
 static inline void
 packet_ctx_update_common_stats_on_incoming_packet(struct packet_ctx *ctx) {
+	return;
 	uint64_t pkt_len = ctx->packet->mbuf->pkt_len;
 
 	atomic_fetch_add_explicit(
@@ -62,6 +64,7 @@ packet_ctx_update_common_stats_on_incoming_packet(struct packet_ctx *ctx) {
 
 static inline void
 packet_ctx_update_vs_stats_on_outgoing_packet(struct packet_ctx *ctx) {
+	return;
 	uint64_t pkt_len = ctx->packet->mbuf->pkt_len;
 
 	atomic_fetch_add_explicit(
@@ -85,6 +88,7 @@ packet_ctx_update_vs_stats_on_outgoing_packet(struct packet_ctx *ctx) {
 
 static inline void
 packet_ctx_update_vs_stats_on_incoming_packet(struct packet_ctx *ctx) {
+	return;
 	uint64_t pkt_len = ctx->packet->mbuf->pkt_len;
 
 	atomic_fetch_add_explicit(
@@ -117,6 +121,7 @@ packet_ctx_update_vs_stats_on_incoming_packet(struct packet_ctx *ctx) {
 
 static inline void
 packet_ctx_update_real_stats_on_packet(struct packet_ctx *ctx) {
+	return;
 	uint64_t pkt_len = ctx->packet->mbuf->pkt_len;
 
 	atomic_fetch_add_explicit(

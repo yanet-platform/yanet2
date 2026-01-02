@@ -9,17 +9,12 @@
 
 #include "counters/counters.h"
 
-#include "dataplane/config/zone.h"
-
 #include "controlplane/config/cp_chain.h"
+#include "controlplane/config/cp_counter.h"
 #include "controlplane/config/cp_device.h"
 #include "controlplane/config/cp_function.h"
 #include "controlplane/config/cp_module.h"
 #include "controlplane/config/cp_pipeline.h"
-
-#include "controlplane/config/cp_counter.h"
-
-#include "controlplane/config/econtext.h"
 
 struct dp_config;
 struct cp_config;
@@ -292,11 +287,6 @@ cp_config_gen_lookup_function(
 struct cp_pipeline *
 cp_config_gen_lookup_pipeline(
 	struct cp_config_gen *config_gen, const char *name
-);
-
-int
-cp_config_gen_lookup_pipeline_index(
-	struct cp_config_gen *config_gen, const char *name, uint64_t *index
 );
 
 /*

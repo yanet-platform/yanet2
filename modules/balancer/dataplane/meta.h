@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/crc32.h"
 #include "common/network.h"
 #include "dataplane/packet/packet.h"
 #include "rte_byteorder.h"
@@ -7,7 +8,6 @@
 #include <netinet/in.h>
 #include <stdint.h>
 
-#include <rte_hash_crc.h>
 #include <rte_ip.h>
 #include <rte_tcp.h>
 #include <rte_udp.h>
@@ -24,9 +24,9 @@ struct packet_metadata {
 	uint8_t transport_proto;
 
 	uint8_t src_addr[16];
-	uint8_t dst_addr[16];
+	//	uint8_t dst_addr[16];
 	uint16_t src_port;
-	uint16_t dst_port;
+	//	uint16_t dst_port;
 
 	uint8_t tcp_flags;
 
@@ -39,7 +39,11 @@ static inline void
 fill_packet_metadata_ipv4(
 	struct rte_ipv4_hdr *ip_hdr, struct packet_metadata *metadata
 ) {
-	memcpy(metadata->dst_addr, (uint8_t *)&ip_hdr->dst_addr, NET4_LEN);
+	metadata->hash = crc32(&ip_hdr->dst_addr, NET4_LEN, metadata->hash);
+	metadata->hash = crc32(&ip_hdr->src_addr, NET4_LEN, metadata->hash);
+
+	//	memcpy(metadata->dst_addr, (uint8_t *)&ip_hdr->dst_addr,
+	// NET4_LEN);
 	memcpy(metadata->src_addr, (uint8_t *)&ip_hdr->src_addr, NET4_LEN);
 }
 
@@ -47,8 +51,11 @@ static inline void
 fill_packet_metadata_ipv6(
 	struct rte_ipv6_hdr *ip_hdr, struct packet_metadata *metadata
 ) {
+	metadata->hash = crc32(ip_hdr->dst_addr, NET6_LEN, metadata->hash);
+	metadata->hash = crc32(ip_hdr->src_addr, NET6_LEN, metadata->hash);
+
 	metadata->network_proto = IPPROTO_IPV6;
-	memcpy(metadata->dst_addr, ip_hdr->dst_addr, NET6_LEN);
+	//	memcpy(metadata->dst_addr, ip_hdr->dst_addr, NET6_LEN);
 	memcpy(metadata->src_addr, ip_hdr->src_addr, NET6_LEN);
 }
 
@@ -58,8 +65,11 @@ static inline void
 fill_packet_metadata_tcp(
 	struct rte_tcp_hdr *tcp_header, struct packet_metadata *metadata
 ) {
+	metadata->hash = crc32(&tcp_header->dst_port, 2, metadata->hash);
+	metadata->hash = crc32(&tcp_header->src_port, 2, metadata->hash);
+
 	metadata->transport_proto = IPPROTO_TCP;
-	metadata->dst_port = tcp_header->dst_port;
+	//	metadata->dst_port = tcp_header->dst_port;
 	metadata->src_port = tcp_header->src_port;
 	metadata->tcp_flags = tcp_header->tcp_flags;
 }
@@ -68,8 +78,11 @@ static inline void
 fill_packet_metadata_udp(
 	struct rte_udp_hdr *udp_header, struct packet_metadata *metadata
 ) {
+	metadata->hash = crc32(&udp_header->dst_port, 2, metadata->hash);
+	metadata->hash = crc32(&udp_header->src_port, 2, metadata->hash);
+
 	metadata->transport_proto = IPPROTO_UDP;
-	metadata->dst_port = udp_header->dst_port;
+	//	metadata->dst_port = udp_header->dst_port;
 	metadata->src_port = udp_header->src_port;
 	metadata->tcp_flags = 0;
 }
@@ -85,6 +98,7 @@ fill_packet_metadata_udp(
  * @return
  *   Calculated hash value
  */
+/*
 static inline uint64_t
 calculate_metadata_hash(const struct packet_metadata *metadata) {
 	// Use byte array to avoid alignment issues
@@ -120,9 +134,9 @@ calculate_metadata_hash(const struct packet_metadata *metadata) {
 	hash_input[hash_len++] = metadata->transport_proto;
 
 	// Calculate CRC32 hash (hardware-accelerated on x86/ARM)
-	return rte_hash_crc(hash_input, hash_len, 0);
+	return crc32(hash_input, hash_len, 0);
 }
-
+*/
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline int
@@ -170,7 +184,7 @@ fill_packet_metadata(struct packet *packet, struct packet_metadata *metadata) {
 	}
 
 	// Calculate hash from metadata using the helper function
-	metadata->hash = calculate_metadata_hash(metadata);
+	//	metadata->hash = calculate_metadata_hash(metadata);
 
 	return 0;
 }

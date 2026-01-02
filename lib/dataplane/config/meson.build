@@ -2,9 +2,11 @@ dependencies = []
 
 dependencies += lib_module_dp_dep
 dependencies += lib_pipeline_dp_dep
+dependencies += libdpdk_inc_dep
 
 sources = files(
   'zone.c',
+#  'econtext.c',
 )
 
 lib_config_dp = static_library(

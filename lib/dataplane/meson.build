@@ -1,6 +1,7 @@
 subdir('time')
 subdir('packet')
 subdir('module')
+subdir('device')
 subdir('pipeline')
 subdir('config')
 subdir('worker')

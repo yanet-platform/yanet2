@@ -97,6 +97,9 @@ static inline void
 remap_table_free(struct remap_table *table) {
 	struct remap_item **keys = ADDR_OF(&table->keys);
 
+	if (keys == NULL)
+		return;
+
 	uint32_t chunk_count = (table->count + REMAP_TABLE_CHUNK_SIZE - 1) /
 			       REMAP_TABLE_CHUNK_SIZE;
 

@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include <x86intrin.h>
+
 ////////////////////////////////////////////////////////////////////////////////
 
 // Represents clock, which can be used to get
@@ -20,6 +22,7 @@
 // clock drift on TSC with 1ppm drift
 // (modern CPUs have drift of 0.1-1 ppm).
 struct tsc_clock {
+	uint64_t tsc_to_ns;
 	// Real time when clock was init in nanoseconds.
 	uint64_t real_time_ns;
 
@@ -36,5 +39,11 @@ int
 tsc_clock_adjust(struct tsc_clock *clock);
 
 // Get current real time in nanoseconds.
-uint64_t
-tsc_clock_get_time_ns(struct tsc_clock *clock);
+static inline uint64_t
+tsc_clock_get_time_ns(struct tsc_clock *clock) {
+	uint64_t tsc = _rdtsc();
+
+	uint64_t tsc_delta = tsc - clock->timestamp_counter;
+
+	return clock->real_time_ns + ((tsc_delta * clock->tsc_to_ns) >> 8);
+}

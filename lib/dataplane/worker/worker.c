@@ -1,5 +1,7 @@
 #include "worker.h"
 
+#include "lib/dataplane/packet/packet.h"
+
 #include "../../utils/mbuf.h"
 
 struct packet *

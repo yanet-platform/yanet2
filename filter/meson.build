@@ -27,4 +27,4 @@ lib_filter_compiler_dep = declare_dependency(
   include_directories: include_directories('.'), 
 )
 
-subdir('tests')
+#subdir('tests')

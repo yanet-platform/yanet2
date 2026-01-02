@@ -30,20 +30,18 @@ static inline uint32_t
 vs_v4_table_lookup(
 	struct balancer_module_config *config, struct packet *packet
 ) {
-	uint32_t *actions;
-	uint32_t actions_count;
+	struct value_range *result;
 	FILTER_QUERY(
-		&config->vs_v4_table,
-		VS_V4_TABLE_TAG,
-		packet,
-		&actions,
-		&actions_count
+		&config->vs_v4_table, VS_V4_TABLE_TAG, &packet, &result, 1
 	);
-	if (actions_count == 0) {
+	if (result->count == 0) {
+		return -1;
+	}
+	if (result->count == 0) {
 		return -1;
 	}
 	/// @todo: actions_count > 1 ?
-	uint32_t service_id = actions[0];
+	uint32_t service_id = ADDR_OF(&result->values)[0];
 	return service_id;
 }
 
@@ -57,20 +55,15 @@ static inline uint32_t
 vs_v6_table_lookup(
 	struct balancer_module_config *config, struct packet *packet
 ) {
-	uint32_t *actions;
-	uint32_t actions_count;
+	struct value_range *result;
 	FILTER_QUERY(
-		&config->vs_v6_table,
-		VS_V6_TABLE_TAG,
-		packet,
-		&actions,
-		&actions_count
+		&config->vs_v6_table, VS_V6_TABLE_TAG, &packet, &result, 1
 	);
-	if (actions_count == 0) {
+	if (result->count == 0) {
 		return -1;
 	}
 	/// @todo: actions_count > 1 ?
-	uint32_t service_id = actions[0];
+	uint32_t service_id = ADDR_OF(&result->values)[0];
 	return service_id;
 }
 

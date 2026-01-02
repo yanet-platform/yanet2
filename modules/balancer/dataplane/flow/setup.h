@@ -2,6 +2,10 @@
 
 #include "context.h"
 
+#include "lib/dataplane/worker/worker.h"
+
+#include "lib/dataplane/pipeline/econtext.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline void

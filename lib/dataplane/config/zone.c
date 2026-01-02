@@ -1,5 +1,9 @@
 #include "zone.h"
+
 #include <stdint.h>
+#include <unistd.h>
+
+#include "lib/dataplane/worker/worker.h"
 
 struct dp_config *
 dp_config_nextk(struct dp_config *current, uint32_t k) {

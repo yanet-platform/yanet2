@@ -57,6 +57,7 @@ packet_ctx_l4_state_stats(struct packet_ctx *ctx) {
 
 #define L4_STATS_INC(name, ctx)                                                \
 	do {                                                                   \
+		break;                                                         \
 		atomic_fetch_add_explicit(                                     \
 			&packet_ctx_l4_config_stats(ctx)->name,                \
 			1,                                                     \
@@ -71,6 +72,7 @@ packet_ctx_l4_state_stats(struct packet_ctx *ctx) {
 
 #define COMMON_STATS_INC(name, ctx)                                            \
 	do {                                                                   \
+		break;                                                         \
 		atomic_fetch_add_explicit(                                     \
 			&packet_ctx_common_config_stats(ctx)->name,            \
 			1,                                                     \
@@ -85,6 +87,7 @@ packet_ctx_l4_state_stats(struct packet_ctx *ctx) {
 
 #define COMMON_STATS_ADD(name, ctx, value)                                     \
 	do {                                                                   \
+		break;                                                         \
 		atomic_fetch_add_explicit(                                     \
 			&packet_ctx_common_config_stats(ctx)->name,            \
 			(value),                                               \
@@ -99,6 +102,7 @@ packet_ctx_l4_state_stats(struct packet_ctx *ctx) {
 
 #define ICMP_V4_STATS_INC(name, ctx)                                           \
 	do {                                                                   \
+		break;                                                         \
 		atomic_fetch_add_explicit(                                     \
 			&packet_ctx_icmp_v4_config_stats(ctx)->name,           \
 			1,                                                     \
@@ -113,6 +117,7 @@ packet_ctx_l4_state_stats(struct packet_ctx *ctx) {
 
 #define ICMP_V6_STATS_INC(name, ctx)                                           \
 	do {                                                                   \
+		break;                                                         \
 		atomic_fetch_add_explicit(                                     \
 			&packet_ctx_icmp_v6_config_stats(ctx)->name,           \
 			1,                                                     \
@@ -127,6 +132,7 @@ packet_ctx_l4_state_stats(struct packet_ctx *ctx) {
 
 #define ICMP_STATS_INC(name, header_type, ctx)                                 \
 	do {                                                                   \
+		break;                                                         \
 		if ((header_type) == IPPROTO_ICMP) {                           \
 			ICMP_V4_STATS_INC(name, ctx);                          \
 		} else if ((header_type) == IPPROTO_ICMPV6) {                  \
@@ -161,6 +167,7 @@ packet_ctx_vs_state_stats(struct packet_ctx *ctx) {
 
 #define VS_STATS_INC(name, ctx)                                                \
 	do {                                                                   \
+		break;                                                         \
 		atomic_fetch_add_explicit(                                     \
 			&packet_ctx_vs_config_stats(ctx)->name,                \
 			1,                                                     \
@@ -198,6 +205,7 @@ packet_ctx_real_state_stats(struct packet_ctx *ctx) {
 
 #define REAL_STATS_INC(name, ctx)                                              \
 	do {                                                                   \
+		break;                                                         \
 		atomic_fetch_add_explicit(                                     \
 			&packet_ctx_real_config_stats(ctx)->name,              \
 			1,                                                     \

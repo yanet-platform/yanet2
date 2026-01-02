@@ -18,6 +18,8 @@
 #include "modules/fwstate/dataplane/config.h"
 #include "modules/fwstate/dataplane/dataplane.h"
 
+#include "lib/dataplane/worker/worker.h"
+
 #include "lib/fuzzing/fuzzing.h"
 
 // Forward declaration of DPDK internal function

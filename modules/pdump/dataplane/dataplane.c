@@ -7,6 +7,10 @@
 #include "dataplane/config/zone.h"
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
+#include "lib/dataplane/module/packet_front.h"
+
+#include "lib/dataplane/pipeline/econtext.h"
+#include "lib/dataplane/worker/worker.h"
 
 #include "controlplane/config/econtext.h"
 
@@ -90,7 +94,7 @@ process_queue(
 				// FIXME
 				// .pipeline_idx = pkt->pipeline_idx,
 				.rx_device_id = pkt->rx_device_id,
-				.tx_device_id = pkt->tx_device_id,
+				.tx_device_id = pkt->device_id,
 				.queue = (uint8_t)queue
 			};
 
