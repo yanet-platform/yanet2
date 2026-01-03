@@ -1,6 +1,9 @@
 #pragma once
 
+#include "api/stats.h"
 #include "context.h"
+#include "rte_mbuf_core.h"
+#include <stdatomic.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 // Common module stats
@@ -65,19 +68,17 @@ packet_ctx_update_vs_stats_on_outgoing_packet(struct packet_ctx *ctx) {
 	uint64_t pkt_len = ctx->packet->mbuf->pkt_len;
 
 	atomic_fetch_add_explicit(
-		&ctx->vs.counter->outgoing_packets, 1, memory_order_relaxed
+		&ctx->vs.ph_stats->outgoing_packets, 1, memory_order_relaxed
 	);
 	atomic_fetch_add_explicit(
-		&ctx->vs.counter->outgoing_bytes, pkt_len, memory_order_relaxed
+		&ctx->vs.ph_stats->outgoing_bytes, pkt_len, memory_order_relaxed
 	);
 
 	atomic_fetch_add_explicit(
-		&ctx->vs.state->stats.vs.outgoing_packets,
-		1,
-		memory_order_relaxed
+		&ctx->vs.state_stats->outgoing_packets, 1, memory_order_relaxed
 	);
 	atomic_fetch_add_explicit(
-		&ctx->vs.state->stats.vs.outgoing_bytes,
+		&ctx->vs.state_stats->outgoing_bytes,
 		pkt_len,
 		memory_order_relaxed
 	);
@@ -88,24 +89,22 @@ packet_ctx_update_vs_stats_on_incoming_packet(struct packet_ctx *ctx) {
 	uint64_t pkt_len = ctx->packet->mbuf->pkt_len;
 
 	atomic_fetch_add_explicit(
-		&ctx->vs.counter->incoming_packets, 1, memory_order_relaxed
+		&ctx->vs.ph_stats->incoming_packets, 1, memory_order_relaxed
 	);
 	atomic_fetch_add_explicit(
-		&ctx->vs.counter->incoming_bytes, pkt_len, memory_order_relaxed
+		&ctx->vs.ph_stats->incoming_bytes, pkt_len, memory_order_relaxed
 	);
 
 	atomic_fetch_add_explicit(
-		&ctx->vs.state->stats.vs.incoming_packets,
-		1,
-		memory_order_relaxed
+		&ctx->vs.state_stats->incoming_packets, 1, memory_order_relaxed
 	);
 	atomic_fetch_add_explicit(
-		&ctx->vs.state->stats.vs.incoming_bytes,
+		&ctx->vs.state_stats->incoming_bytes,
 		pkt_len,
 		memory_order_relaxed
 	);
 	atomic_store_explicit(
-		&ctx->vs.state->last_packet_timestamp,
+		&ctx->vs.info->last_packet_timestamp,
 		ctx->now,
 		memory_order_relaxed
 	);
@@ -120,22 +119,20 @@ packet_ctx_update_real_stats_on_packet(struct packet_ctx *ctx) {
 	uint64_t pkt_len = ctx->packet->mbuf->pkt_len;
 
 	atomic_fetch_add_explicit(
-		&ctx->real.counter->packets, 1, memory_order_relaxed
+		&ctx->real.ph_stats->packets, 1, memory_order_relaxed
 	);
 	atomic_fetch_add_explicit(
-		&ctx->real.counter->bytes, pkt_len, memory_order_relaxed
+		&ctx->real.ph_stats->bytes, pkt_len, memory_order_relaxed
 	);
 
 	atomic_fetch_add_explicit(
-		&ctx->real.state->stats.real.packets, 1, memory_order_relaxed
+		&ctx->real.state_stats->packets, 1, memory_order_relaxed
 	);
 	atomic_fetch_add_explicit(
-		&ctx->real.state->stats.real.bytes,
-		pkt_len,
-		memory_order_relaxed
+		&ctx->real.state_stats->bytes, pkt_len, memory_order_relaxed
 	);
 	atomic_store_explicit(
-		&ctx->real.state->last_packet_timestamp,
+		&ctx->real.info->last_packet_timestamp,
 		ctx->now,
 		memory_order_relaxed
 	);

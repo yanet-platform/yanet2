@@ -1,28 +1,28 @@
 #pragma once
 
+#include "api/stats.h"
 #include "context.h"
-#include "modules/balancer/api/stats.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // Config stats
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline struct balancer_icmp_module_stats *
+static inline struct balancer_icmp_stats *
 packet_ctx_icmp_v4_config_stats(struct packet_ctx *ctx) {
 	return ctx->counter.icmp_v4;
 }
 
-static inline struct balancer_icmp_module_stats *
+static inline struct balancer_icmp_stats *
 packet_ctx_icmp_v6_config_stats(struct packet_ctx *ctx) {
 	return ctx->counter.icmp_v6;
 }
 
-static inline struct balancer_common_module_stats *
+static inline struct balancer_common_stats *
 packet_ctx_common_config_stats(struct packet_ctx *ctx) {
 	return ctx->counter.common;
 }
 
-static inline struct balancer_l4_module_stats *
+static inline struct balancer_l4_stats *
 packet_ctx_l4_config_stats(struct packet_ctx *ctx) {
 	return ctx->counter.l4;
 }
@@ -31,22 +31,22 @@ packet_ctx_l4_config_stats(struct packet_ctx *ctx) {
 // State stats
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline struct balancer_icmp_module_stats *
+static inline struct balancer_icmp_stats *
 packet_ctx_icmp_v4_state_stats(struct packet_ctx *ctx) {
 	return &ctx->state.stats->icmp_ipv4;
 }
 
-static inline struct balancer_icmp_module_stats *
+static inline struct balancer_icmp_stats *
 packet_ctx_icmp_v6_state_stats(struct packet_ctx *ctx) {
 	return &ctx->state.stats->icmp_ipv6;
 }
 
-static inline struct balancer_common_module_stats *
+static inline struct balancer_common_stats *
 packet_ctx_common_state_stats(struct packet_ctx *ctx) {
 	return &ctx->state.stats->common;
 }
 
-static inline struct balancer_l4_module_stats *
+static inline struct balancer_l4_stats *
 packet_ctx_l4_state_stats(struct packet_ctx *ctx) {
 	return &ctx->state.stats->l4;
 }
@@ -140,19 +140,14 @@ packet_ctx_l4_state_stats(struct packet_ctx *ctx) {
 // Vs Stats and Info
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline struct balancer_vs_stats *
-packet_ctx_vs_config_stats(struct packet_ctx *ctx) {
-	return ctx->vs.counter;
+static inline struct vs_stats *
+packet_ctx_vs_counters(struct packet_ctx *ctx) {
+	return ctx->vs.ph_stats;
 }
 
-static inline struct service_state *
-packet_ctx_vs_state_info(struct packet_ctx *ctx) {
-	return ctx->vs.state;
-}
-
-static inline struct balancer_vs_stats *
+static inline struct vs_stats *
 packet_ctx_vs_state_stats(struct packet_ctx *ctx) {
-	return &ctx->vs.state->stats.vs;
+	return ctx->vs.state_stats;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -162,7 +157,7 @@ packet_ctx_vs_state_stats(struct packet_ctx *ctx) {
 #define VS_STATS_INC(name, ctx)                                                \
 	do {                                                                   \
 		atomic_fetch_add_explicit(                                     \
-			&packet_ctx_vs_config_stats(ctx)->name,                \
+			&packet_ctx_vs_counters(ctx)->name,                    \
 			1,                                                     \
 			memory_order_relaxed                                   \
 		);                                                             \
@@ -177,19 +172,14 @@ packet_ctx_vs_state_stats(struct packet_ctx *ctx) {
 // Real Stats and Info
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline struct balancer_real_stats *
-packet_ctx_real_config_stats(struct packet_ctx *ctx) {
-	return ctx->real.counter;
+static inline struct real_stats *
+packet_ctx_real_counters(struct packet_ctx *ctx) {
+	return ctx->real.ph_stats;
 }
 
-static inline struct service_state *
-packet_ctx_real_state_info(struct packet_ctx *ctx) {
-	return ctx->real.state;
-}
-
-static inline struct balancer_real_stats *
+static inline struct real_stats *
 packet_ctx_real_state_stats(struct packet_ctx *ctx) {
-	return &ctx->real.state->stats.real;
+	return ctx->real.state_stats;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -199,7 +189,7 @@ packet_ctx_real_state_stats(struct packet_ctx *ctx) {
 #define REAL_STATS_INC(name, ctx)                                              \
 	do {                                                                   \
 		atomic_fetch_add_explicit(                                     \
-			&packet_ctx_real_config_stats(ctx)->name,              \
+			&packet_ctx_real_counters(ctx)->name,                  \
 			1,                                                     \
 			memory_order_relaxed                                   \
 		);                                                             \

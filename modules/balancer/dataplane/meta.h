@@ -13,9 +13,10 @@
 #include <rte_udp.h>
 #include <string.h>
 
-#include "../api/module.h"
-#include "../api/state.h"
-#include "vs.h"
+#include "handler/handler.h"
+#include "handler/vs.h"
+#include "state/session.h"
+#include "state/vs.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -179,8 +180,7 @@ fill_packet_metadata(struct packet *packet, struct packet_metadata *metadata) {
 
 static inline uint32_t
 session_timeout(
-	struct balancer_sessions_timeouts *timeouts,
-	struct packet_metadata *metadata
+	struct sessions_timeouts *timeouts, struct packet_metadata *metadata
 ) {
 	if (metadata->transport_proto == IPPROTO_UDP) {
 		return timeouts->udp;
@@ -206,12 +206,10 @@ session_timeout(
 
 static inline void
 fill_session_id(
-	struct balancer_session_id *id,
-	struct packet_metadata *data,
-	struct virtual_service *vs
+	struct session_id *id, struct packet_metadata *data, struct vs *vs
 ) {
 	memset(id, 0, sizeof(*id));
-	memcpy(id->client_ip, data->src_addr, 16);
+	memcpy(&id->client_ip, data->src_addr, sizeof(id->client_ip));
 	id->client_port = data->src_port;
-	id->vs_id = vs->registry_idx;
+	id->vs_id = ADDR_OF(&vs->state)->registry_idx;
 }

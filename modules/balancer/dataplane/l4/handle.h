@@ -26,7 +26,7 @@ handle_l4_packet(struct packet_ctx *ctx) {
 	// 2. Lookup virtual service for which packet is
 	// directed to
 
-	struct virtual_service *vs = vs_lookup_and_fw(ctx);
+	struct vs *vs = vs_lookup_and_fw(ctx);
 	if (vs == NULL) { // not found virtual service
 		L4_STATS_INC(select_vs_failed, ctx);
 		packet_ctx_drop_packet(ctx);
@@ -38,10 +38,8 @@ handle_l4_packet(struct packet_ctx *ctx) {
 
 	// 3. Select real for which packet will be forwarded
 
-	struct real *rs = select_real(
-		ctx, ctx->config, ctx->now, ctx->worker->idx, vs, &meta
-	);
-	if (rs == NULL) { // failed to select real
+	struct real *real = select_real(ctx, vs, &meta);
+	if (real == NULL) { // failed to select real
 		// update stats
 		L4_STATS_INC(select_real_failed, ctx);
 		packet_ctx_drop_packet(ctx);
@@ -50,7 +48,7 @@ handle_l4_packet(struct packet_ctx *ctx) {
 
 	// 4. Add tunnel to the selected real for the packet
 
-	tunnel_packet(vs->flags, rs, ctx->packet);
+	tunnel_packet(vs, real, ctx->packet);
 
 	// 5. Pass packet to the next module
 

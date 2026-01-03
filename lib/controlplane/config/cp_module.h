@@ -126,3 +126,6 @@ cp_module_registry_delete(
 	const char *type,
 	const char *name
 );
+
+size_t
+cp_module_registry_size(struct cp_module_registry *module_registry);

@@ -1,30 +1,32 @@
-package balancer
+package balancer_test
 
 import (
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/tests/balancer"
 	"testing"
+	"time"
 
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
+	balancerffi "github.com/yanet-platform/yanet2/modules/balancer/controlplane/agent/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestBalancerBasics(t *testing.T) {
-	vsIp := IpAddr("1.1.1.1")
+	vsIp := balancer.IpAddr("1.1.1.1")
 	vsPort := uint16(80)
-	realAddr := IpAddr("2.2.2.2")
-	clientIp := IpAddr("3.3.3.3")
+	realAddr := balancer.IpAddr("2.2.2.2")
+	clientIp := balancer.IpAddr("3.3.3.3")
 
 	// make balancer config using protobuf
 
 	config := &balancerpb.ModuleConfig{
-		SourceAddressV4: IpAddr("5.5.5.5").AsSlice(),
-		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
+		SourceAddressV4: balancer.IpAddr("5.5.5.5").AsSlice(),
+		SourceAddressV6: balancer.IpAddr("fe80::5").AsSlice(),
 		VirtualServices: []*balancerpb.VirtualService{
 			{
 				Addr:  vsIp.AsSlice(),
@@ -32,7 +34,7 @@ func TestBalancerBasics(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("3.3.3.0").AsSlice(),
+						Addr: balancer.IpAddr("3.3.3.0").AsSlice(),
 						Size: 24,
 					},
 				},
@@ -47,9 +49,8 @@ func TestBalancerBasics(t *testing.T) {
 					{
 						DstAddr: realAddr.AsSlice(),
 						Weight:  1,
-						SrcAddr: IpAddr("4.4.4.4").AsSlice(),
-						SrcMask: IpAddr("4.4.4.4").AsSlice(),
-						Enabled: true,
+						SrcAddr: balancer.IpAddr("4.4.4.4").AsSlice(),
+						SrcMask: balancer.IpAddr("4.4.4.4").AsSlice(),
 					},
 				},
 			},
@@ -77,19 +78,19 @@ func TestBalancerBasics(t *testing.T) {
 
 	// setup test
 
-	setup, err := SetupTest(&TestConfig{
-		moduleConfig: config,
-		stateConfig:  stateConfig,
+	setup, err := balancer.SetupTest(&balancer.TestConfig{
+		ModuleConfig: config,
+		StateConfig:  stateConfig,
 	})
 	require.NoError(t, err)
 	defer setup.Free()
 
-	mock := setup.mock
-	balancer := setup.balancer
+	mock := setup.Mock
+	bal := setup.Balancer
 
 	// send packet and expect response
 
-	packetLayers := MakeTCPPacket(
+	packetLayers := balancer.MakeTCPPacket(
 		clientIp,
 		1000,
 		vsIp,
@@ -104,11 +105,12 @@ func TestBalancerBasics(t *testing.T) {
 
 	// validate response packet
 	response := result.Output[0]
-	ValidatePacket(t, balancer.GetModuleConfig(), packet, response)
+	moduleConfig, _ := bal.GetConfig()
+	balancer.ValidatePacket(t, moduleConfig, packet, response)
 
 	// check info and counters
 
-	expectedVsStats := lib.VsStats{
+	expectedVsStats := balancerffi.VsStats{
 		IncomingPackets: 1,
 		OutgoingPackets: 1,
 
@@ -123,7 +125,7 @@ func TestBalancerBasics(t *testing.T) {
 		OutgoingBytes: uint64(len(packet.Data())),
 	}
 
-	expectedRealStats := lib.RealStats{
+	expectedRealStats := balancerffi.RealStats{
 		PacketsRealDisabled:   0,
 		PacketsRealNotPresent: 0,
 		OpsPackets:            0,
@@ -134,7 +136,7 @@ func TestBalancerBasics(t *testing.T) {
 	}
 
 	t.Run("Read_State_Info", func(t *testing.T) {
-		state := balancer.GetStateInfo(mock.CurrentTime())
+		state := bal.GetStateInfo(time.Now())
 
 		require.Equal(t, 1, len(state.RealInfo))
 		realInfo := &state.RealInfo[0]
@@ -145,18 +147,18 @@ func TestBalancerBasics(t *testing.T) {
 		assert.Equal(t, expectedVsStats, vsInfo.Stats)
 	})
 
-	t.Run("Read_Config_Info", func(t *testing.T) {
-		configStats := balancer.GetConfigStats(
-			defaultDeviceName,
-			defaultPipelineName,
-			defaultFunctionName,
-			defaultChainName,
+	t.Run("Read_Config_Stats", func(t *testing.T) {
+		configStats := bal.GetConfigStats(
+			balancer.DefaultDeviceName,
+			balancer.DefaultPipelineName,
+			balancer.DefaultFunctionName,
+			balancer.DefaultChainName,
 		)
-		require.Equal(t, 1, len(configStats.Vs))
-		vsInfo := configStats.Vs[0]
+		require.Equal(t, 1, len(configStats.VsInfo))
+		vsInfo := &configStats.VsInfo[0]
 
-		require.Equal(t, 1, len(configStats.Reals))
-		realInfo := &configStats.Reals[0]
+		require.Equal(t, 1, len(configStats.RealInfo))
+		realInfo := &configStats.RealInfo[0]
 
 		assert.Equal(t, expectedVsStats, vsInfo.Stats)
 		assert.Equal(t, expectedRealStats, realInfo.Stats)

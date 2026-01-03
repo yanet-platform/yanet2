@@ -1,10 +1,12 @@
-package balancer
+package balancer_test
 
 import (
 	"encoding/binary"
 	"net"
 	"net/netip"
 	"testing"
+
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/tests/balancer"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -313,19 +315,19 @@ func VerifyBroadcastedICMPPacket(
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestICMPBroadcastLogic(t *testing.T) {
-	vsIPv4 := IpAddr("10.1.1.1")
-	realIPv4 := IpAddr("10.2.2.2")
-	clientIPv4 := IpAddr("10.0.1.1")
-	balancerIPv4 := IpAddr("5.5.5.5")
-	peer1IPv4 := IpAddr("5.5.5.6")
-	peer2IPv4 := IpAddr("5.5.5.7")
+	vsIPv4 := balancer.IpAddr("10.1.1.1")
+	realIPv4 := balancer.IpAddr("10.2.2.2")
+	clientIPv4 := balancer.IpAddr("10.0.1.1")
+	balancerIPv4 := balancer.IpAddr("5.5.5.5")
+	peer1IPv4 := balancer.IpAddr("5.5.5.6")
+	peer2IPv4 := balancer.IpAddr("5.5.5.7")
 
-	vsIPv6 := IpAddr("2001:db8::1")
-	realIPv6 := IpAddr("2001:db8:2::2")
-	clientIPv6 := IpAddr("2001:db8:1::1")
-	balancerIPv6 := IpAddr("fe80::5")
-	peer1IPv6 := IpAddr("fe80::6")
-	peer2IPv6 := IpAddr("fe80::7")
+	vsIPv6 := balancer.IpAddr("2001:db8::1")
+	realIPv6 := balancer.IpAddr("2001:db8:2::2")
+	clientIPv6 := balancer.IpAddr("2001:db8:1::1")
+	balancerIPv6 := balancer.IpAddr("fe80::5")
+	peer1IPv6 := balancer.IpAddr("fe80::6")
+	peer2IPv6 := balancer.IpAddr("fe80::7")
 
 	clientPort := uint16(12345)
 	vsPort := uint16(80)
@@ -345,7 +347,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("10.0.0.0").AsSlice(),
+						Addr: balancer.IpAddr("10.0.0.0").AsSlice(),
 						Size: 8,
 					},
 				},
@@ -361,8 +363,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 						DstAddr: realIPv4.AsSlice(),
 						Weight:  1,
 						SrcAddr: realIPv4.AsSlice(),
-						SrcMask: IpAddr("255.255.255.255").AsSlice(),
-						Enabled: true,
+						SrcMask: balancer.IpAddr("255.255.255.255").AsSlice(),
 					},
 				},
 				// Configure peers for broadcasting
@@ -377,7 +378,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("2001:db8::").AsSlice(),
+						Addr: balancer.IpAddr("2001:db8::").AsSlice(),
 						Size: 32,
 					},
 				},
@@ -393,10 +394,9 @@ func TestICMPBroadcastLogic(t *testing.T) {
 						DstAddr: realIPv6.AsSlice(),
 						Weight:  1,
 						SrcAddr: realIPv6.AsSlice(),
-						SrcMask: IpAddr(
+						SrcMask: balancer.IpAddr(
 							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
 						).AsSlice(),
-						Enabled: true,
 					},
 				},
 				// Configure peers for broadcasting
@@ -421,9 +421,9 @@ func TestICMPBroadcastLogic(t *testing.T) {
 		},
 	}
 
-	setup, err := SetupTest(&TestConfig{
-		moduleConfig: config,
-		stateConfig: &balancerpb.ModuleStateConfig{
+	setup, err := balancer.SetupTest(&balancer.TestConfig{
+		ModuleConfig: config,
+		StateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
 			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.8,
@@ -433,7 +433,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 	defer setup.Free()
 
 	// Create an original TCP packet that will be embedded in ICMP errors
-	originalTCPLayers := MakeTCPPacket(
+	originalTCPLayers := balancer.MakeTCPPacket(
 		vsIPv4,
 		vsPort,
 		clientIPv4,
@@ -442,7 +442,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 	)
 	originalTCPPacket := xpacket.LayersToPacket(t, originalTCPLayers...)
 
-	originalTCPv6Layers := MakeTCPPacket(
+	originalTCPv6Layers := balancer.MakeTCPPacket(
 		vsIPv6,
 		vsPort,
 		clientIPv6,
@@ -464,7 +464,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err := setup.mock.HandlePackets(icmpPacket)
+		result, err := setup.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		// Expected: packet should be broadcasted to 2 peers, original dropped
@@ -509,7 +509,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 			)
 			icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-			result, err := setup.mock.HandlePackets(icmpPacket)
+			result, err := setup.Mock.HandlePackets(icmpPacket)
 			require.NoError(t, err)
 
 			// Expected: packet should NOT be broadcasted (already was by another balancer)
@@ -541,7 +541,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 			)
 			icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-			result, err := setup.mock.HandlePackets(icmpPacket)
+			result, err := setup.Mock.HandlePackets(icmpPacket)
 			require.NoError(t, err)
 
 			// Expected: packet should be broadcasted (no decap, so ident is ignored)
@@ -582,7 +582,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err := setup.mock.HandlePackets(icmpPacket)
+		result, err := setup.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		// Expected: packet should be broadcasted (normal case)
@@ -624,7 +624,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err := setup.mock.HandlePackets(icmpPacket)
+		result, err := setup.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		require.Equal(
@@ -666,7 +666,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 			)
 			icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-			result, err := setup.mock.HandlePackets(icmpPacket)
+			result, err := setup.Mock.HandlePackets(icmpPacket)
 			require.NoError(t, err)
 
 			require.Equal(
@@ -695,7 +695,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 			)
 			icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-			result, err := setup.mock.HandlePackets(icmpPacket)
+			result, err := setup.Mock.HandlePackets(icmpPacket)
 			require.NoError(t, err)
 
 			require.Equal(
@@ -722,7 +722,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err := setup.mock.HandlePackets(icmpPacket)
+		result, err := setup.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		require.Equal(
@@ -763,17 +763,17 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 	// Balancer2 also has Balancer1 as peer, but should NOT re-broadcast
 	// because the packet has ICMP_BROADCAST_IDENT marker
 
-	vsIPv4 := IpAddr("10.1.1.1")
-	realIPv4 := IpAddr("10.2.2.2")
-	clientIPv4 := IpAddr("10.0.1.1")
-	balancer1IPv4 := IpAddr("5.5.5.5")
-	balancer2IPv4 := IpAddr("5.5.5.6")
+	vsIPv4 := balancer.IpAddr("10.1.1.1")
+	realIPv4 := balancer.IpAddr("10.2.2.2")
+	clientIPv4 := balancer.IpAddr("10.0.1.1")
+	balancer1IPv4 := balancer.IpAddr("5.5.5.5")
+	balancer2IPv4 := balancer.IpAddr("5.5.5.6")
 
-	vsIPv6 := IpAddr("2001:db8::1")
-	realIPv6 := IpAddr("2001:db8:2::2")
-	clientIPv6 := IpAddr("2001:db8:1::1")
-	balancer1IPv6 := IpAddr("fe80::5")
-	balancer2IPv6 := IpAddr("fe80::6")
+	vsIPv6 := balancer.IpAddr("2001:db8::1")
+	realIPv6 := balancer.IpAddr("2001:db8:2::2")
+	clientIPv6 := balancer.IpAddr("2001:db8:1::1")
+	balancer1IPv6 := balancer.IpAddr("fe80::5")
+	balancer2IPv6 := balancer.IpAddr("fe80::6")
 
 	clientPort := uint16(12345)
 	vsPort := uint16(80)
@@ -793,7 +793,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("10.0.0.0").AsSlice(),
+						Addr: balancer.IpAddr("10.0.0.0").AsSlice(),
 						Size: 8,
 					},
 				},
@@ -809,8 +809,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						DstAddr: realIPv4.AsSlice(),
 						Weight:  1,
 						SrcAddr: realIPv4.AsSlice(),
-						SrcMask: IpAddr("255.255.255.255").AsSlice(),
-						Enabled: true,
+						SrcMask: balancer.IpAddr("255.255.255.255").AsSlice(),
 					},
 				},
 				// Balancer1 has Balancer2 as peer
@@ -824,7 +823,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("2001:db8::").AsSlice(),
+						Addr: balancer.IpAddr("2001:db8::").AsSlice(),
 						Size: 32,
 					},
 				},
@@ -840,10 +839,9 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						DstAddr: realIPv6.AsSlice(),
 						Weight:  1,
 						SrcAddr: realIPv6.AsSlice(),
-						SrcMask: IpAddr(
+						SrcMask: balancer.IpAddr(
 							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
 						).AsSlice(),
-						Enabled: true,
 					},
 				},
 				// Balancer1 has Balancer2 as IPv6 peer
@@ -883,7 +881,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("10.0.0.0").AsSlice(),
+						Addr: balancer.IpAddr("10.0.0.0").AsSlice(),
 						Size: 8,
 					},
 				},
@@ -899,8 +897,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						DstAddr: realIPv4.AsSlice(),
 						Weight:  1,
 						SrcAddr: realIPv4.AsSlice(),
-						SrcMask: IpAddr("255.255.255.255").AsSlice(),
-						Enabled: true,
+						SrcMask: balancer.IpAddr("255.255.255.255").AsSlice(),
 					},
 				},
 				// Balancer2 has Balancer1 as peer
@@ -916,7 +913,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("2001:db8::").AsSlice(),
+						Addr: balancer.IpAddr("2001:db8::").AsSlice(),
 						Size: 32,
 					},
 				},
@@ -932,10 +929,9 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						DstAddr: realIPv6.AsSlice(),
 						Weight:  1,
 						SrcAddr: realIPv6.AsSlice(),
-						SrcMask: IpAddr(
+						SrcMask: balancer.IpAddr(
 							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
 						).AsSlice(),
-						Enabled: true,
 					},
 				},
 				// Balancer2 has Balancer1 as IPv6 peer
@@ -962,9 +958,9 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 	}
 
 	// Setup Balancer1
-	setup1, err := SetupTest(&TestConfig{
-		moduleConfig: config1,
-		stateConfig: &balancerpb.ModuleStateConfig{
+	setup1, err := balancer.SetupTest(&balancer.TestConfig{
+		ModuleConfig: config1,
+		StateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
 			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.8,
@@ -974,9 +970,9 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 	defer setup1.Free()
 
 	// Setup Balancer2
-	setup2, err := SetupTest(&TestConfig{
-		moduleConfig: config2,
-		stateConfig: &balancerpb.ModuleStateConfig{
+	setup2, err := balancer.SetupTest(&balancer.TestConfig{
+		ModuleConfig: config2,
+		StateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
 			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.5,
@@ -987,7 +983,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 
 	t.Run("IPv4", func(t *testing.T) {
 		// Step 1: Create a session on Balancer2 by sending a TCP SYN packet
-		tcpLayers := MakeTCPPacket(
+		tcpLayers := balancer.MakeTCPPacket(
 			clientIPv4,
 			clientPort,
 			vsIPv4,
@@ -996,7 +992,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 		)
 		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
 
-		result, err := setup2.mock.HandlePackets(tcpPacket)
+		result, err := setup2.Mock.HandlePackets(tcpPacket)
 		require.NoError(t, err)
 		require.Equal(
 			t,
@@ -1007,7 +1003,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 
 		// Step 2: Create an ICMP error packet for the response
 		// The response would come from VS IP to client IP
-		responsePacket := MakeTCPPacket(
+		responsePacket := balancer.MakeTCPPacket(
 			vsIPv4,
 			vsPort,
 			clientIPv4,
@@ -1024,7 +1020,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err = setup1.mock.HandlePackets(icmpPacket)
+		result, err = setup1.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		// Balancer1 should broadcast to Balancer2 (1 output packet)
@@ -1064,7 +1060,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 		broadcastedGoPacket := xpacket.ParseEtherPacket(
 			broadcastedPacket.RawData,
 		)
-		result, err = setup2.mock.HandlePackets(broadcastedGoPacket)
+		result, err = setup2.Mock.HandlePackets(broadcastedGoPacket)
 		require.NoError(t, err)
 
 		// Balancer2 should forward the ICMP error to the real server
@@ -1094,7 +1090,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 
 	t.Run("IPv6", func(t *testing.T) {
 		// Step 1: Create a session on Balancer2 by sending a TCP SYN packet
-		tcpLayers := MakeTCPPacket(
+		tcpLayers := balancer.MakeTCPPacket(
 			clientIPv6,
 			clientPort,
 			vsIPv6,
@@ -1103,7 +1099,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 		)
 		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
 
-		result, err := setup2.mock.HandlePackets(tcpPacket)
+		result, err := setup2.Mock.HandlePackets(tcpPacket)
 		require.NoError(t, err)
 		require.Equal(
 			t,
@@ -1114,7 +1110,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 
 		// Step 2: Create an ICMPv6 error packet for the response
 		// The response would come from VS IP to client IP
-		responsePacket := MakeTCPPacket(
+		responsePacket := balancer.MakeTCPPacket(
 			vsIPv6,
 			vsPort,
 			clientIPv6,
@@ -1132,7 +1128,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err = setup1.mock.HandlePackets(icmpPacket)
+		result, err = setup1.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		// Balancer1 should broadcast to Balancer2 (1 output packet)
@@ -1172,7 +1168,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 		broadcastedGoPacket := xpacket.ParseEtherPacket(
 			broadcastedPacket.RawData,
 		)
-		result, err = setup2.mock.HandlePackets(broadcastedGoPacket)
+		result, err = setup2.Mock.HandlePackets(broadcastedGoPacket)
 		require.NoError(t, err)
 
 		// Balancer2 should forward the ICMPv6 error to the real server

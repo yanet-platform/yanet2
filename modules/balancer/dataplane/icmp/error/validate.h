@@ -2,21 +2,19 @@
 
 #include "common/network.h"
 #include "flow/common.h"
+#include "handler/real.h"
 #include "icmp/error/info.h"
 #include "lib/dataplane/packet/packet.h"
 
+#include "api/stats.h"
 #include "lookup.h"
 #include "meta.h"
-#include "modules/balancer/api/stats.h"
-#include "modules/balancer/state/session_table.h"
 #include "rte_byteorder.h"
 #include "rte_icmp.h"
+#include "session_table.h"
+#include "state/state.h"
 
 #include <netinet/in.h>
-
-#include "../../../state/session.h"
-#include "../../flow/context.h"
-#include "../../vs.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -111,7 +109,7 @@ static inline int
 validate_packet_ipv4(
 	struct packet_ctx *ctx,
 	struct packet_metadata *meta,
-	struct virtual_service **vs
+	struct vs **vs
 ) {
 	struct packet *packet = ctx->packet;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -182,7 +180,7 @@ static inline int
 validate_packet_ipv6(
 	struct packet_ctx *ctx,
 	struct packet_metadata *meta,
-	struct virtual_service **vs
+	struct vs **vs
 ) {
 	struct packet *packet = ctx->packet;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -260,7 +258,7 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 	// in the current balancer state.
 
 	struct packet_metadata meta;
-	struct virtual_service *vs;
+	struct vs *vs;
 
 	// validate packet, set metadata and packet icmp info
 	// (in the packet context).
@@ -299,7 +297,7 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 	// try to find session by id
 
 	// fill session id
-	struct balancer_session_id session_id;
+	struct session_id session_id;
 	fill_session_id(&session_id, &meta, vs);
 
 	// begin critical section
@@ -322,7 +320,7 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 		// end critical section
 		return validate_packet_session_not_found;
 	} else { // real found
-		struct real *reals = ADDR_OF(&ctx->config->reals);
+		struct real *reals = ADDR_OF(&ctx->handler->reals);
 		struct real *real = &reals[real_id];
 		packet_ctx_set_vs(ctx, vs);
 		packet_ctx_set_real(ctx, real);

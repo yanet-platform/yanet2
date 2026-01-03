@@ -251,13 +251,18 @@ agent_resize(struct agent *agent, size_t new_size) {
 	size_t need_arena_count =
 		(new_size + MEMORY_BLOCK_ALLOCATOR_MAX_SIZE - 1) /
 		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
+
+	// TODO: handle case
+	// when need_arena_count == agent->arena_count == 1
+	// we need add one more arena in this case.
+
 	if (need_arena_count > agent->arena_count) {
-		void **arenas = memory_balloc(
+		struct agent_arena *arenas = memory_balloc(
 			&cp_config->memory_context,
-			need_arena_count * sizeof(void *)
+			need_arena_count * sizeof(struct agent_arena)
 		);
 		if (arenas == NULL) {
-			NEW_ERROR("no memory");
+			NEW_ERROR("failed to allocate arenas array");
 			ret = -1;
 			goto unlock;
 		}
@@ -269,11 +274,15 @@ agent_resize(struct agent *agent, size_t new_size) {
 				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
 			);
 			if (arena == NULL) {
-				NEW_ERROR("no memory");
+				NEW_ERROR(
+					"failed to allocate arena of size %u "
+					"bytes",
+					MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
+				);
 				for (size_t i = 0; i < alloc; ++i) {
 					memory_bfree(
 						&cp_config->memory_context,
-						ADDR_OF(&arenas[i]),
+						ADDR_OF(&arenas[i].data),
 						MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
 					);
 				}
@@ -286,27 +295,36 @@ agent_resize(struct agent *agent, size_t new_size) {
 				goto unlock;
 			}
 			SET_OFFSET_OF(
-				&arenas[agent->arena_count + alloc], arena
+				&arenas[agent->arena_count + alloc].data, arena
 			);
+			arenas[agent->arena_count + alloc].size =
+				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE;
 		}
+
+		// put arenas in allocator
 		for (size_t i = 0; i < need_alloc; ++i) {
-			void *arena = ADDR_OF(&arenas[agent->arena_count + i]);
+			void *arena =
+				ADDR_OF(&arenas[agent->arena_count + i].data);
 			block_allocator_put_arena(
 				&agent->block_allocator,
 				arena,
 				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
 			);
 		}
-		void **agent_arenas = ADDR_OF(&agent->arenas);
+
+		struct agent_arena *prev_arenas = ADDR_OF(&agent->arenas);
 		for (size_t i = 0; i < agent->arena_count; ++i) {
-			SET_OFFSET_OF(&arenas[i], ADDR_OF(&agent_arenas[i]));
+			SET_OFFSET_OF(
+				&arenas[i].data, ADDR_OF(&prev_arenas[i].data)
+			);
+			arenas[i].size = prev_arenas[i].size;
 		}
 		SET_OFFSET_OF(&agent->arenas, arenas);
 		agent->arena_count = need_arena_count;
 		memory_bfree(
 			&cp_config->memory_context,
-			agent_arenas,
-			agent->arena_count * sizeof(void *)
+			prev_arenas,
+			agent->arena_count * sizeof(struct agent_arena)
 		);
 	}
 
@@ -325,7 +343,7 @@ unlock:
 // Attach a module agent to shared memory,
 // use previous agents memory.
 struct agent *
-agent_attach_restore_prev(
+agent_reattach(
 	struct yanet_shm *shm,
 	uint32_t instance_idx,
 	const char *agent_name,

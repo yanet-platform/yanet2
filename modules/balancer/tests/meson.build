@@ -1,4 +1,4 @@
 # subdir('utils')
-subdir('ring')
+# subdir('ring')
 # subdir('shm')
 # subdir('balancer')

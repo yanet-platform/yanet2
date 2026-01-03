@@ -59,5 +59,3 @@ ttlmap_capacity(ttlmap_t *map) {
 	}
 	return (1ull << map->buckets_exp) * __TTLMAP_BUCKET_ENTRIES;
 }
-
-////////////////////////////////////////////////////////////////////////////////

@@ -8,13 +8,14 @@
 #include "flow/stats.h"
 
 #include "common/memory_address.h"
-#include "controlplane/config/econtext.h"
-#include "dataplane.h"
-#include "dataplane/config/zone.h"
-#include "decap.h"
-#include "flow/stats.h"
-#include "modules/balancer/dataplane/module.h"
 
+#include "lib/controlplane/config/econtext.h"
+#include "lib/dataplane/config/zone.h"
+
+#include "dataplane.h"
+#include "decap.h"
+
+#include "handler/handler.h"
 #include "icmp/handle.h"
 #include "l4/handle.h"
 
@@ -50,9 +51,9 @@ balancer_handle_packets(
 	struct packet_front *packet_front
 ) {
 	// Get balancer module config as container of provided cp_module.
-	struct balancer_module_config *config = container_of(
+	struct packet_handler *handler = container_of(
 		ADDR_OF(&module_ectx->cp_module),
-		struct balancer_module_config,
+		struct packet_handler,
 		cp_module
 	);
 
@@ -62,7 +63,7 @@ balancer_handle_packets(
 	// Setup packet context.
 	struct packet_ctx ctx;
 	packet_ctx_setup(
-		&ctx, now, dp_worker, module_ectx, config, packet_front
+		&ctx, now, dp_worker, module_ectx, handler, packet_front
 	);
 
 	struct packet *packet;

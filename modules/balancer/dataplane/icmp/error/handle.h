@@ -1,18 +1,16 @@
 #pragma once
 
 #include "broadcast.h"
+#include "validate.h"
 
 #include <netinet/icmp6.h>
 #include <netinet/in.h>
 #include <netinet/ip_icmp.h>
 
-#include "../../flow/helpers.h"
-#include "../../module.h"
-#include "../../tunnel.h"
-#include "../../vs.h"
-
+#include "flow/helpers.h"
 #include "flow/stats.h"
-#include "validate.h"
+
+#include "../../tunnel.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -61,8 +59,8 @@ handle_icmp_error_packet(struct packet_ctx *ctx) {
 	case validate_packet_session_found:
 		// send packet to real
 		tunnel_packet(
-			ctx->vs.ptr->flags,
-			ctx->real.ptr,
+			ctx->vs.view,
+			ctx->real.view,
 			ctx->packet
 		); // added tunneling for packet
 

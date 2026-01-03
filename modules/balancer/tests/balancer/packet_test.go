@@ -1,4 +1,4 @@
-package balancer
+package balancer_test
 
 import (
 	"encoding/json"
@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mock "github.com/yanet-platform/yanet2/mock/go"
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane/agent"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/lib"
-	module "github.com/yanet-platform/yanet2/modules/balancer/controlplane/module"
+	test_utils "github.com/yanet-platform/yanet2/modules/balancer/tests/balancer"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -30,15 +30,15 @@ func allCombinationsConfig() (*balancerpb.ModuleConfig, *balancerpb.SessionsTime
 		for _, proto := range []balancerpb.TransportProto{balancerpb.TransportProto_TCP, balancerpb.TransportProto_UDP} {
 			for _, greEnabled := range []bool{false, true} {
 				for _, fixMssEnabled := range []bool{false, true} {
-					for _, realAddr := range []netip.Addr{IpAddr("10.1.1.1"), IpAddr("fe80::1")} {
+					for _, realAddr := range []netip.Addr{test_utils.IpAddr("10.1.1.1"), test_utils.IpAddr("fe80::1")} {
 						counter := len(serviceConfigs) + 1
-						vsAddr := IpAddr(fmt.Sprintf("10.12.1.%d", counter))
-						allowed := IpPrefix("10.0.1.0/24")
+						vsAddr := test_utils.IpAddr(fmt.Sprintf("10.12.1.%d", counter))
+						allowed := test_utils.IpPrefix("10.0.1.0/24")
 						if vsAddrVersion == 6 {
-							vsAddr = IpAddr(
+							vsAddr = test_utils.IpAddr(
 								fmt.Sprintf("2001:db8::%d", counter),
 							)
-							allowed = IpPrefix("ffff::0/16")
+							allowed = test_utils.IpPrefix("ffff::0/16")
 						}
 						serviceConfig := &balancerpb.VirtualService{
 							Addr:  vsAddr.AsSlice(),
@@ -63,7 +63,6 @@ func allCombinationsConfig() (*balancerpb.ModuleConfig, *balancerpb.SessionsTime
 									DstAddr: realAddr.AsSlice(),
 									SrcAddr: realAddr.AsSlice(),
 									SrcMask: realAddr.AsSlice(),
-									Enabled: true,
 								},
 							},
 						}
@@ -74,8 +73,8 @@ func allCombinationsConfig() (*balancerpb.ModuleConfig, *balancerpb.SessionsTime
 		}
 	}
 	return &balancerpb.ModuleConfig{
-			SourceAddressV4: IpAddr("5.5.5.5").AsSlice(),
-			SourceAddressV6: IpAddr("fe80::5").AsSlice(),
+			SourceAddressV4: test_utils.IpAddr("5.5.5.5").AsSlice(),
+			SourceAddressV6: test_utils.IpAddr("fe80::5").AsSlice(),
 			VirtualServices: serviceConfigs,
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 10,
@@ -102,11 +101,11 @@ func allCombinationsConfig() (*balancerpb.ModuleConfig, *balancerpb.SessionsTime
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func allCombinationsTestConfig() *TestConfig {
+func allCombinationsTestConfig() *test_utils.TestConfig {
 	moduleConfig, _ := allCombinationsConfig()
-	return &TestConfig{
-		moduleConfig: moduleConfig,
-		stateConfig: &balancerpb.ModuleStateConfig{
+	return &test_utils.TestConfig{
+		ModuleConfig: moduleConfig,
+		StateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
 			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.5,
@@ -114,9 +113,9 @@ func allCombinationsTestConfig() *TestConfig {
 	}
 }
 
-func allCombinationsSetup(t *testing.T) *TestSetup {
+func allCombinationsSetup(t *testing.T) *test_utils.TestSetup {
 	config := allCombinationsTestConfig()
-	setup, err := SetupTest(config)
+	setup, err := test_utils.SetupTest(config)
 	require.NoError(t, err)
 	return setup
 }
@@ -124,11 +123,11 @@ func allCombinationsSetup(t *testing.T) *TestSetup {
 ////////////////////////////////////////////////////////////////////////////////
 
 func clientIpv4() netip.Addr {
-	return IpAddr("10.0.1.1")
+	return test_utils.IpAddr("10.0.1.1")
 }
 
 func clientIpv6() netip.Addr {
-	return IpAddr("ffff::1")
+	return test_utils.IpAddr("ffff::1")
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -152,34 +151,37 @@ func (vs *VsSelector) Json() string {
 func SendAndValidatePacket(
 	t *testing.T,
 	mock *mock.YanetMock,
-	b *module.Balancer,
+	b *balancer.Balancer,
 	options *PacketOptions,
 	selector VsSelector,
 ) (*framework.PacketInfo, *balancerpb.VirtualService) {
-	virtualServices := b.GetModuleConfig().VirtualServices
+	moduleConfig, _ := b.GetConfig()
+	virtualServices := moduleConfig.VirtualServices
+
 	for vsIdx := range virtualServices {
-		vs := &virtualServices[vsIdx]
-		vsAddr := vs.Identifier.Ip
+		vs := virtualServices[vsIdx]
+		vsAddr, _ := netip.AddrFromSlice(vs.Addr)
 		if (vsAddr.Is4() && selector.VsIp == 4) ||
 			(vsAddr.Is6() && selector.VsIp == 6) {
-			if vs.Identifier.Proto == lib.Proto(selector.Proto) {
+			if vs.Proto == selector.Proto {
 				flags := vs.Flags
-				if flags.FixMSS == selector.FixMSS &&
-					flags.GRE == selector.Gre {
-					real := &vs.Reals[0]
-					realAddr := real.Identifier.Ip
-					if (realAddr.Is4() && selector.RealIp == 4) ||
-						(realAddr.Is6() && selector.RealIp == 6) {
-						// found - convert to proto
-						protoVs := vsToProto(vs)
-						resultPacket := SendPacketToVsAndValidate(
-							t,
-							mock,
-							b,
-							options,
-							protoVs,
-						)
-						return resultPacket, protoVs
+				if flags.FixMss == selector.FixMSS &&
+					flags.Gre == selector.Gre {
+					if len(vs.Reals) > 0 {
+						real := vs.Reals[0]
+						realAddr, _ := netip.AddrFromSlice(real.DstAddr)
+						if (realAddr.Is4() && selector.RealIp == 4) ||
+							(realAddr.Is6() && selector.RealIp == 6) {
+							// found
+							resultPacket := SendPacketToVsAndValidate(
+								t,
+								mock,
+								b,
+								options,
+								vs,
+							)
+							return resultPacket, vs
+						}
 					}
 				}
 			}
@@ -189,39 +191,6 @@ func SendAndValidatePacket(
 	return nil, nil
 }
 
-func vsToProto(vs *lib.VirtualService) *balancerpb.VirtualService {
-	reals := make([]*balancerpb.Real, 0, len(vs.Reals))
-	for i := range vs.Reals {
-		real := &vs.Reals[i]
-		reals = append(reals, &balancerpb.Real{
-			Weight:  uint32(real.Weight),
-			DstAddr: real.Identifier.Ip.AsSlice(),
-			SrcAddr: real.SrcAddr.AsSlice(),
-			SrcMask: real.SrcMask.AsSlice(),
-			Enabled: real.Enabled,
-		})
-	}
-
-	allowedSrcs := make([]*balancerpb.Subnet, 0, len(vs.AllowedSources))
-	for i := range vs.AllowedSources {
-		prefix := vs.AllowedSources[i]
-		allowedSrcs = append(allowedSrcs, &balancerpb.Subnet{
-			Addr: prefix.Addr().AsSlice(),
-			Size: uint32(prefix.Bits()),
-		})
-	}
-
-	return &balancerpb.VirtualService{
-		Addr:        vs.Identifier.Ip.AsSlice(),
-		Port:        uint32(vs.Identifier.Port),
-		Proto:       vs.Identifier.Proto.IntoProto(),
-		Scheduler:   vs.Scheduler.IntoProto(),
-		AllowedSrcs: allowedSrcs,
-		Reals:       reals,
-		Flags:       vs.Flags.IntoProto(),
-	}
-}
-
 type PacketOptions struct {
 	MSS uint16
 }
@@ -229,7 +198,7 @@ type PacketOptions struct {
 func SendPacketToVsAndValidate(
 	t *testing.T,
 	mock *mock.YanetMock,
-	balancer *module.Balancer,
+	b *balancer.Balancer,
 	options *PacketOptions,
 	vs *balancerpb.VirtualService,
 ) *framework.PacketInfo {
@@ -246,7 +215,7 @@ func SendPacketToVsAndValidate(
 	if vs.Proto == balancerpb.TransportProto_UDP {
 		tcp = nil
 	}
-	packetLayers := MakePacketLayers(
+	packetLayers := test_utils.MakePacketLayers(
 		clientAddr,
 		clientPort,
 		vsAddr,
@@ -255,7 +224,7 @@ func SendPacketToVsAndValidate(
 	)
 	packet := xpacket.LayersToPacket(t, packetLayers...)
 	if tcp != nil && options != nil {
-		p, err := InsertOrUpdateMSS(packet, options.MSS)
+		p, err := test_utils.InsertOrUpdateMSS(packet, options.MSS)
 		require.Nil(t, err, "failed to insert mss")
 		packet = *p
 	}
@@ -266,7 +235,8 @@ func SendPacketToVsAndValidate(
 
 	if len(result.Output) > 0 {
 		resultPacket := result.Output[0]
-		ValidatePacket(t, balancer.GetModuleConfig(), packet, resultPacket)
+		moduleConfig, _ := b.GetConfig()
+		test_utils.ValidatePacket(t, moduleConfig, packet, resultPacket)
 		return resultPacket
 	} else {
 		return nil
@@ -279,8 +249,8 @@ func TestPacketEncapGreMSS(t *testing.T) {
 	setup := allCombinationsSetup(t)
 	defer setup.Free()
 
-	mock := setup.mock
-	balancer := setup.balancer
+	mock := setup.Mock
+	bal := setup.Balancer
 
 	// test packet encapsulation without GRE and MSS
 
@@ -305,7 +275,7 @@ func TestPacketEncapGreMSS(t *testing.T) {
 					result, vs := SendAndValidatePacket(
 						t,
 						mock,
-						balancer,
+						bal,
 						nil,
 						selector,
 					)
@@ -341,7 +311,7 @@ func TestPacketEncapGreMSS(t *testing.T) {
 					result, vs := SendAndValidatePacket(
 						t,
 						mock,
-						balancer,
+						bal,
 						nil,
 						selector,
 					)
@@ -391,7 +361,7 @@ func TestPacketEncapGreMSS(t *testing.T) {
 				result, vs := SendAndValidatePacket(
 					t,
 					mock,
-					balancer,
+					bal,
 					options,
 					selector,
 				)
@@ -432,7 +402,7 @@ func TestPacketEncapGreMSS(t *testing.T) {
 				result, vs := SendAndValidatePacket(
 					t,
 					mock,
-					balancer,
+					bal,
 					options,
 					selector,
 				)

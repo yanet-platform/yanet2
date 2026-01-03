@@ -89,7 +89,7 @@ agent_resize(struct agent *agent, size_t new_size);
 // Attach a module agent to shared memory,
 // use previous agents memory.
 struct agent *
-agent_attach_restore_prev(
+agent_reattach(
 	struct yanet_shm *shm,
 	uint32_t instance_idx,
 	const char *agent_name,

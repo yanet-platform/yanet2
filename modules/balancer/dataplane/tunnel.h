@@ -1,23 +1,31 @@
 #pragma once
 
+#include "common/memory_address.h"
+#include "state/real.h"
+
+#include "handler/vs.h"
+#include "state/vs.h"
+
 #include "dataplane/packet/packet.h"
 #include "lib/dataplane/packet/encap.h"
 #include "mss.h"
 #include "real.h"
 #include "rte_gre.h"
 #include "rte_ip.h"
-#include "vs.h"
 
-#include "../api/vs.h"
 #include <assert.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline void
-tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
+tunnel_packet(
+	struct vs *vs, struct real *real, struct packet *packet
+) {
+	int vs_ip_proto = ADDR_OF(&vs->state)->identifier.ip_proto;
+	uint8_t vs_flags = vs->flags;
+
 	// fix packet MSS if flag is specified and vs is IPv6
-	if ((vs_flags & BALANCER_VS_FIX_MSS_FLAG) &&
-	    (vs_flags & BALANCER_VS_IPV6_FLAG)) {
+	if ((vs_flags & VS_FIX_MSS_FLAG) && (vs_ip_proto == IPPROTO_IPV6)) {
 		fix_mss_ipv6(packet);
 	}
 
@@ -27,7 +35,7 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 
 	struct rte_ipv6_hdr *ipv6_header_inner = NULL;
 	struct rte_ipv4_hdr *ipv4_header_inner = NULL;
-	if (vs_flags & BALANCER_VS_IPV6_FLAG) {
+	if (vs_ip_proto == IPPROTO_IPV6) {
 		ipv6_header_inner = rte_pktmbuf_mtod_offset(
 			mbuf,
 			struct rte_ipv6_hdr *,
@@ -41,38 +49,46 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 		);
 	}
 
-	if (real->flags & BALANCER_REAL_IPV6_FLAG) { // IPv6
+	struct real_state *rs = real_state(real);
+
+	const int real_ipv6 = rs->identifier.ip_proto == IPPROTO_IPV6 ? 1 : 0;
+
+	if (real_ipv6) { // IPv6
 		// rs->src_addr is already masked.
 
+		struct net6 *n6 = &real->src.v6;
+
 		uint8_t src[NET6_LEN];
-		memcpy(src, real->src_addr, NET6_LEN);
+		memcpy(src, n6->addr, NET6_LEN);
 		uint8_t len = (ipv4_header_inner != NULL ? NET4_LEN : NET6_LEN);
 		uint8_t *src_user =
 			(ipv4_header_inner != NULL
 				 ? (uint8_t *)&ipv4_header_inner->src_addr
 				 : ipv6_header_inner->src_addr);
 		for (uint8_t i = 0; i < len; i++) {
-			src[i] |= src_user[i] & (~real->src_mask[i]);
+			src[i] |= src_user[i] & (~n6->mask[i]);
 		}
 
-		packet_ip6_encap(packet, real->dst_addr, src);
+		packet_ip6_encap(packet, rs->identifier.addr.v6.bytes, src);
 	} else { // IPv4
 		// rs->src_addr is already masked.
+		struct net4 *n4 = &real->src.v4;
 		uint8_t src[4];
 		uint8_t *src_user =
 			(ipv4_header_inner != NULL)
 				? (uint8_t *)&ipv4_header_inner->src_addr
 				: ipv6_header_inner->src_addr;
 		for (size_t i = 0; i < 4; ++i) {
-			src[i] = (src_user[i] & ~real->src_mask[i]) |
-				 real->src_addr[i];
+			src[i] = (src_user[i] & ~n4->mask[i]) | n4->addr[i];
 		}
 
-		packet_ip4_encap(packet, real->dst_addr, (uint8_t *)(&src));
+		packet_ip4_encap(
+			packet, rs->identifier.addr.v4.bytes, (uint8_t *)(&src)
+		);
 	}
 
 	// use GRE for encap
-	if (vs_flags & BALANCER_VS_GRE_FLAG) {
+	if (vs_flags & VS_GRE_FLAG) {
 		const uint16_t gre_hdr_size = sizeof(struct rte_gre_hdr);
 
 		if (rte_pktmbuf_prepend(mbuf, gre_hdr_size) == NULL) {
@@ -82,9 +98,8 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 
 		const uint16_t len_before_gre =
 			packet->network_header.offset +
-			((real->flags & BALANCER_REAL_IPV6_FLAG)
-				 ? sizeof(struct rte_ipv6_hdr)
-				 : sizeof(struct rte_ipv4_hdr));
+			(real_ipv6 ? sizeof(struct rte_ipv6_hdr)
+				   : sizeof(struct rte_ipv4_hdr));
 
 		// move L2 + outer L3 back to head to open a gap right after
 		// outer L3
@@ -92,7 +107,7 @@ tunnel_packet(vs_flags_t vs_flags, struct real *real, struct packet *packet) {
 			rte_pktmbuf_mtod_offset(mbuf, char *, gre_hdr_size),
 			len_before_gre);
 
-		if (real->flags & BALANCER_REAL_IPV6_FLAG) {
+		if (real_ipv6) {
 			struct rte_ipv6_hdr *ipv6_header =
 				rte_pktmbuf_mtod_offset(
 					mbuf,

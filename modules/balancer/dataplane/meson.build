@@ -6,6 +6,8 @@ dp_dependencies = [
   lib_filter_query_dep,
 ]
 
+includes = include_directories('.', '../controlplane')
+
 dp_sources = files(
   'dataplane.c',
 )
@@ -16,6 +18,7 @@ lib_balancer_dp = static_library(
   c_args: yanet_c_args,
   link_args: yanet_link_args,
   dependencies: dp_dependencies,
+  include_directories: includes,
   install: false,
 )
 

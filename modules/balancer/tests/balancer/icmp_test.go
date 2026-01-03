@@ -1,6 +1,7 @@
-package balancer
+package balancer_test
 
 import (
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/tests/balancer"
 	"net"
 	"net/netip"
 	"testing"
@@ -226,14 +227,14 @@ func MakeICMPv6DestUnreachable(
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestICMPEchoRequest(t *testing.T) {
-	vsIPv4 := IpAddr("10.1.1.1")
-	clientIPv4 := IpAddr("10.0.1.1")
-	vsIPv6 := IpAddr("2001:db8::1")
-	clientIPv6 := IpAddr("2001:db8:1::1")
+	vsIPv4 := balancer.IpAddr("10.1.1.1")
+	clientIPv4 := balancer.IpAddr("10.0.1.1")
+	vsIPv6 := balancer.IpAddr("2001:db8::1")
+	clientIPv6 := balancer.IpAddr("2001:db8:1::1")
 
 	config := &balancerpb.ModuleConfig{
-		SourceAddressV4: IpAddr("5.5.5.5").AsSlice(),
-		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
+		SourceAddressV4: balancer.IpAddr("5.5.5.5").AsSlice(),
+		SourceAddressV6: balancer.IpAddr("fe80::5").AsSlice(),
 		VirtualServices: []*balancerpb.VirtualService{
 			{
 				Addr:  vsIPv4.AsSlice(),
@@ -241,7 +242,7 @@ func TestICMPEchoRequest(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("10.0.0.0").AsSlice(),
+						Addr: balancer.IpAddr("10.0.0.0").AsSlice(),
 						Size: 8,
 					},
 				},
@@ -254,11 +255,10 @@ func TestICMPEchoRequest(t *testing.T) {
 				},
 				Reals: []*balancerpb.Real{
 					{
-						DstAddr: IpAddr("10.2.2.2").AsSlice(),
+						DstAddr: balancer.IpAddr("10.2.2.2").AsSlice(),
 						Weight:  1,
-						SrcAddr: IpAddr("10.2.2.2").AsSlice(),
-						SrcMask: IpAddr("255.255.255.255").AsSlice(),
-						Enabled: true,
+						SrcAddr: balancer.IpAddr("10.2.2.2").AsSlice(),
+						SrcMask: balancer.IpAddr("255.255.255.255").AsSlice(),
 					},
 				},
 			},
@@ -268,7 +268,7 @@ func TestICMPEchoRequest(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("2001:db8::").AsSlice(),
+						Addr: balancer.IpAddr("2001:db8::").AsSlice(),
 						Size: 32,
 					},
 				},
@@ -281,13 +281,12 @@ func TestICMPEchoRequest(t *testing.T) {
 				},
 				Reals: []*balancerpb.Real{
 					{
-						DstAddr: IpAddr("2001:db8:2::2").AsSlice(),
+						DstAddr: balancer.IpAddr("2001:db8:2::2").AsSlice(),
 						Weight:  1,
-						SrcAddr: IpAddr("2001:db8:2::2").AsSlice(),
-						SrcMask: IpAddr(
+						SrcAddr: balancer.IpAddr("2001:db8:2::2").AsSlice(),
+						SrcMask: balancer.IpAddr(
 							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
 						).AsSlice(),
-						Enabled: true,
 					},
 				},
 			},
@@ -307,9 +306,9 @@ func TestICMPEchoRequest(t *testing.T) {
 		},
 	}
 
-	setup, err := SetupTest(&TestConfig{
-		moduleConfig: config,
-		stateConfig: &balancerpb.ModuleStateConfig{
+	setup, err := balancer.SetupTest(&balancer.TestConfig{
+		ModuleConfig: config,
+		StateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
 			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.5,
@@ -324,7 +323,7 @@ func TestICMPEchoRequest(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 
 		// Send packet
-		result, err := setup.mock.HandlePackets(packet)
+		result, err := setup.Mock.HandlePackets(packet)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(result.Output), "should have one output packet")
 		require.Empty(t, result.Drop, "should not drop packet")
@@ -382,7 +381,7 @@ func TestICMPEchoRequest(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 
 		// Send packet
-		result, err := setup.mock.HandlePackets(packet)
+		result, err := setup.Mock.HandlePackets(packet)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(result.Output), "should have one output packet")
 		require.Empty(t, result.Drop, "should not drop packet")
@@ -443,17 +442,17 @@ func TestICMPEchoRequest(t *testing.T) {
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
-	vsIPv4 := IpAddr("10.1.1.1")
-	nonVsIPv4 := IpAddr("10.99.99.99") // Not configured as VS
-	clientIPv4 := IpAddr("10.0.1.1")
+	vsIPv4 := balancer.IpAddr("10.1.1.1")
+	nonVsIPv4 := balancer.IpAddr("10.99.99.99") // Not configured as VS
+	clientIPv4 := balancer.IpAddr("10.0.1.1")
 
-	vsIPv6 := IpAddr("2001:db8::1")
-	nonVsIPv6 := IpAddr("2001:db8:99::99") // Not configured as VS
-	clientIPv6 := IpAddr("2001:db8:1::1")
+	vsIPv6 := balancer.IpAddr("2001:db8::1")
+	nonVsIPv6 := balancer.IpAddr("2001:db8:99::99") // Not configured as VS
+	clientIPv6 := balancer.IpAddr("2001:db8:1::1")
 
 	config := &balancerpb.ModuleConfig{
-		SourceAddressV4: IpAddr("5.5.5.5").AsSlice(),
-		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
+		SourceAddressV4: balancer.IpAddr("5.5.5.5").AsSlice(),
+		SourceAddressV6: balancer.IpAddr("fe80::5").AsSlice(),
 		VirtualServices: []*balancerpb.VirtualService{
 			{
 				Addr:  vsIPv4.AsSlice(),
@@ -461,7 +460,7 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("10.0.0.0").AsSlice(),
+						Addr: balancer.IpAddr("10.0.0.0").AsSlice(),
 						Size: 8,
 					},
 				},
@@ -474,11 +473,10 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 				},
 				Reals: []*balancerpb.Real{
 					{
-						DstAddr: IpAddr("10.2.2.2").AsSlice(),
+						DstAddr: balancer.IpAddr("10.2.2.2").AsSlice(),
 						Weight:  1,
-						SrcAddr: IpAddr("10.2.2.2").AsSlice(),
-						SrcMask: IpAddr("255.255.255.255").AsSlice(),
-						Enabled: true,
+						SrcAddr: balancer.IpAddr("10.2.2.2").AsSlice(),
+						SrcMask: balancer.IpAddr("255.255.255.255").AsSlice(),
 					},
 				},
 			},
@@ -488,7 +486,7 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("2001:db8::").AsSlice(),
+						Addr: balancer.IpAddr("2001:db8::").AsSlice(),
 						Size: 32,
 					},
 				},
@@ -501,13 +499,12 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 				},
 				Reals: []*balancerpb.Real{
 					{
-						DstAddr: IpAddr("2001:db8:2::2").AsSlice(),
+						DstAddr: balancer.IpAddr("2001:db8:2::2").AsSlice(),
 						Weight:  1,
-						SrcAddr: IpAddr("2001:db8:2::2").AsSlice(),
-						SrcMask: IpAddr(
+						SrcAddr: balancer.IpAddr("2001:db8:2::2").AsSlice(),
+						SrcMask: balancer.IpAddr(
 							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
 						).AsSlice(),
-						Enabled: true,
 					},
 				},
 			},
@@ -527,9 +524,9 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 		},
 	}
 
-	setup, err := SetupTest(&TestConfig{
-		moduleConfig: config,
-		stateConfig: &balancerpb.ModuleStateConfig{
+	setup, err := balancer.SetupTest(&balancer.TestConfig{
+		ModuleConfig: config,
+		StateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
 			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.5,
@@ -544,7 +541,7 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 
 		// Send packet
-		result, err := setup.mock.HandlePackets(packet)
+		result, err := setup.Mock.HandlePackets(packet)
 		require.NoError(t, err)
 
 		// BUG: Currently this test will FAIL because the balancer responds
@@ -562,7 +559,7 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 
 		// Send packet
-		result, err := setup.mock.HandlePackets(packet)
+		result, err := setup.Mock.HandlePackets(packet)
 		require.NoError(t, err)
 
 		// BUG: Currently this test will FAIL because the balancer responds
@@ -580,7 +577,7 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 
 		// Send packet
-		result, err := setup.mock.HandlePackets(packet)
+		result, err := setup.Mock.HandlePackets(packet)
 		require.NoError(t, err)
 
 		// Should respond to valid VS IP
@@ -610,20 +607,20 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestICMPErrorWithExistingSession(t *testing.T) {
-	vsIPv4 := IpAddr("10.1.1.1")
-	realIPv4 := IpAddr("10.2.2.2")
-	clientIPv4 := IpAddr("10.0.1.1")
+	vsIPv4 := balancer.IpAddr("10.1.1.1")
+	realIPv4 := balancer.IpAddr("10.2.2.2")
+	clientIPv4 := balancer.IpAddr("10.0.1.1")
 
-	vsIPv6 := IpAddr("2001:db8::1")
-	realIPv6 := IpAddr("2001:db8:2::2")
-	clientIPv6 := IpAddr("2001:db8:1::1")
+	vsIPv6 := balancer.IpAddr("2001:db8::1")
+	realIPv6 := balancer.IpAddr("2001:db8:2::2")
+	clientIPv6 := balancer.IpAddr("2001:db8:1::1")
 
 	clientPort := uint16(12345)
 	vsPort := uint16(80)
 
 	config := &balancerpb.ModuleConfig{
-		SourceAddressV4: IpAddr("5.5.5.5").AsSlice(),
-		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
+		SourceAddressV4: balancer.IpAddr("5.5.5.5").AsSlice(),
+		SourceAddressV6: balancer.IpAddr("fe80::5").AsSlice(),
 		VirtualServices: []*balancerpb.VirtualService{
 			{
 				Addr:  vsIPv4.AsSlice(),
@@ -631,7 +628,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("10.0.0.0").AsSlice(),
+						Addr: balancer.IpAddr("10.0.0.0").AsSlice(),
 						Size: 8,
 					},
 				},
@@ -647,8 +644,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 						DstAddr: realIPv4.AsSlice(),
 						Weight:  1,
 						SrcAddr: realIPv4.AsSlice(),
-						SrcMask: IpAddr("255.255.255.255").AsSlice(),
-						Enabled: true,
+						SrcMask: balancer.IpAddr("255.255.255.255").AsSlice(),
 					},
 				},
 			},
@@ -658,7 +654,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("2001:db8::").AsSlice(),
+						Addr: balancer.IpAddr("2001:db8::").AsSlice(),
 						Size: 32,
 					},
 				},
@@ -674,10 +670,9 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 						DstAddr: realIPv6.AsSlice(),
 						Weight:  1,
 						SrcAddr: realIPv6.AsSlice(),
-						SrcMask: IpAddr(
+						SrcMask: balancer.IpAddr(
 							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
 						).AsSlice(),
-						Enabled: true,
 					},
 				},
 			},
@@ -697,9 +692,9 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 		},
 	}
 
-	setup, err := SetupTest(&TestConfig{
-		moduleConfig: config,
-		stateConfig: &balancerpb.ModuleStateConfig{
+	setup, err := balancer.SetupTest(&balancer.TestConfig{
+		ModuleConfig: config,
+		StateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
 			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.5,
@@ -710,7 +705,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 
 	t.Run("IPv4", func(t *testing.T) {
 		// First, create a session by sending a TCP SYN packet
-		tcpLayers := MakeTCPPacket(
+		tcpLayers := balancer.MakeTCPPacket(
 			clientIPv4,
 			clientPort,
 			vsIPv4,
@@ -719,7 +714,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 		)
 		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
 
-		result, err := setup.mock.HandlePackets(tcpPacket)
+		result, err := setup.Mock.HandlePackets(tcpPacket)
 		require.NoError(t, err)
 		require.Equal(
 			t,
@@ -730,7 +725,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 
 		// Now simulate the real server's response packet (which would trigger an ICMP error)
 		// The real server responds with src=vsIP (as configured), dst=clientIP
-		responsePacket := MakeTCPPacket(
+		responsePacket := balancer.MakeTCPPacket(
 			vsIPv4,
 			vsPort,
 			clientIPv4,
@@ -749,7 +744,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err = setup.mock.HandlePackets(icmpPacket)
+		result, err = setup.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		// The ICMP error should be forwarded to the real server (tunneled)
@@ -778,7 +773,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 
 	t.Run("IPv6", func(t *testing.T) {
 		// First, create a session by sending a TCP SYN packet
-		tcpLayers := MakeTCPPacket(
+		tcpLayers := balancer.MakeTCPPacket(
 			clientIPv6,
 			clientPort,
 			vsIPv6,
@@ -787,7 +782,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 		)
 		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
 
-		result, err := setup.mock.HandlePackets(tcpPacket)
+		result, err := setup.Mock.HandlePackets(tcpPacket)
 		require.NoError(t, err)
 		require.Equal(
 			t,
@@ -798,7 +793,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 
 		// Now simulate the real server's response packet (which would trigger an ICMPv6 error)
 		// The real server responds with src=vsIP (as configured), dst=clientIP
-		responsePacket := MakeTCPPacket(
+		responsePacket := balancer.MakeTCPPacket(
 			vsIPv6,
 			vsPort,
 			clientIPv6,
@@ -817,7 +812,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err = setup.mock.HandlePackets(icmpPacket)
+		result, err = setup.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		// The ICMPv6 error should be forwarded to the real server (tunneled)
@@ -850,20 +845,20 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 ////////////////////////////////////////////////////////////////////////////////
 
 func TestICMPErrorWithUnknownVS(t *testing.T) {
-	vsIPv4 := IpAddr("10.1.1.1")
-	unknownVsIPv4 := IpAddr("10.99.99.99") // Not configured
-	clientIPv4 := IpAddr("10.0.1.1")
+	vsIPv4 := balancer.IpAddr("10.1.1.1")
+	unknownVsIPv4 := balancer.IpAddr("10.99.99.99") // Not configured
+	clientIPv4 := balancer.IpAddr("10.0.1.1")
 
-	vsIPv6 := IpAddr("2001:db8::1")
-	unknownVsIPv6 := IpAddr("2001:db8:99::99") // Not configured
-	clientIPv6 := IpAddr("2001:db8:1::1")
+	vsIPv6 := balancer.IpAddr("2001:db8::1")
+	unknownVsIPv6 := balancer.IpAddr("2001:db8:99::99") // Not configured
+	clientIPv6 := balancer.IpAddr("2001:db8:1::1")
 
 	clientPort := uint16(12345)
 	vsPort := uint16(80)
 
 	config := &balancerpb.ModuleConfig{
-		SourceAddressV4: IpAddr("5.5.5.5").AsSlice(),
-		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
+		SourceAddressV4: balancer.IpAddr("5.5.5.5").AsSlice(),
+		SourceAddressV6: balancer.IpAddr("fe80::5").AsSlice(),
 		VirtualServices: []*balancerpb.VirtualService{
 			{
 				Addr:  vsIPv4.AsSlice(),
@@ -871,7 +866,7 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("10.0.0.0").AsSlice(),
+						Addr: balancer.IpAddr("10.0.0.0").AsSlice(),
 						Size: 8,
 					},
 				},
@@ -884,11 +879,10 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 				},
 				Reals: []*balancerpb.Real{
 					{
-						DstAddr: IpAddr("10.2.2.2").AsSlice(),
+						DstAddr: balancer.IpAddr("10.2.2.2").AsSlice(),
 						Weight:  1,
-						SrcAddr: IpAddr("10.2.2.2").AsSlice(),
-						SrcMask: IpAddr("255.255.255.255").AsSlice(),
-						Enabled: true,
+						SrcAddr: balancer.IpAddr("10.2.2.2").AsSlice(),
+						SrcMask: balancer.IpAddr("255.255.255.255").AsSlice(),
 					},
 				},
 			},
@@ -898,7 +892,7 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("2001:db8::").AsSlice(),
+						Addr: balancer.IpAddr("2001:db8::").AsSlice(),
 						Size: 32,
 					},
 				},
@@ -911,13 +905,12 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 				},
 				Reals: []*balancerpb.Real{
 					{
-						DstAddr: IpAddr("2001:db8:2::2").AsSlice(),
+						DstAddr: balancer.IpAddr("2001:db8:2::2").AsSlice(),
 						Weight:  1,
-						SrcAddr: IpAddr("2001:db8:2::2").AsSlice(),
-						SrcMask: IpAddr(
+						SrcAddr: balancer.IpAddr("2001:db8:2::2").AsSlice(),
+						SrcMask: balancer.IpAddr(
 							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
 						).AsSlice(),
-						Enabled: true,
 					},
 				},
 			},
@@ -937,9 +930,9 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 		},
 	}
 
-	setup, err := SetupTest(&TestConfig{
-		moduleConfig: config,
-		stateConfig: &balancerpb.ModuleStateConfig{
+	setup, err := balancer.SetupTest(&balancer.TestConfig{
+		ModuleConfig: config,
+		StateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
 			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.5,
@@ -950,7 +943,7 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 
 	t.Run("IPv4", func(t *testing.T) {
 		// Create a TCP packet to an unknown VS
-		tcpLayers := MakeTCPPacket(
+		tcpLayers := balancer.MakeTCPPacket(
 			unknownVsIPv4,
 			vsPort,
 			clientIPv4,
@@ -967,7 +960,7 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err := setup.mock.HandlePackets(icmpPacket)
+		result, err := setup.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		// The ICMP error should be dropped because VS is not found
@@ -977,7 +970,7 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 
 	t.Run("IPv6", func(t *testing.T) {
 		// Create a TCP packet to an unknown VS
-		tcpLayers := MakeTCPPacket(
+		tcpLayers := balancer.MakeTCPPacket(
 			unknownVsIPv6,
 			vsPort,
 			clientIPv6,
@@ -994,7 +987,7 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err := setup.mock.HandlePackets(icmpPacket)
+		result, err := setup.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		// The ICMPv6 error should be dropped because VS is not found
@@ -1009,21 +1002,21 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 
 func TestICMPErrorWithNoSession(t *testing.T) {
 	// In this test packet must be broadcasted to peers
-	vsIPv4 := IpAddr("10.1.1.1")
-	clientIPv4 := IpAddr("10.0.1.1")
+	vsIPv4 := balancer.IpAddr("10.1.1.1")
+	clientIPv4 := balancer.IpAddr("10.0.1.1")
 
-	vsIPv6 := IpAddr("2001:db8::1")
-	clientIPv6 := IpAddr("2001:db8:1::1")
+	vsIPv6 := balancer.IpAddr("2001:db8::1")
+	clientIPv6 := balancer.IpAddr("2001:db8:1::1")
 
 	clientPort := uint16(12345)
 	vsPort := uint16(80)
 
-	peer1 := IpAddr("10.12.11.13")
-	peer2 := IpAddr("fe80::11")
+	peer1 := balancer.IpAddr("10.12.11.13")
+	peer2 := balancer.IpAddr("fe80::11")
 
 	config := &balancerpb.ModuleConfig{
-		SourceAddressV4: IpAddr("5.5.5.5").AsSlice(),
-		SourceAddressV6: IpAddr("fe80::5").AsSlice(),
+		SourceAddressV4: balancer.IpAddr("5.5.5.5").AsSlice(),
+		SourceAddressV6: balancer.IpAddr("fe80::5").AsSlice(),
 		VirtualServices: []*balancerpb.VirtualService{
 			{
 				Addr:  vsIPv4.AsSlice(),
@@ -1031,7 +1024,7 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("10.0.0.0").AsSlice(),
+						Addr: balancer.IpAddr("10.0.0.0").AsSlice(),
 						Size: 8,
 					},
 				},
@@ -1044,11 +1037,10 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 				},
 				Reals: []*balancerpb.Real{
 					{
-						DstAddr: IpAddr("10.2.2.2").AsSlice(),
+						DstAddr: balancer.IpAddr("10.2.2.2").AsSlice(),
 						Weight:  1,
-						SrcAddr: IpAddr("10.2.2.2").AsSlice(),
-						SrcMask: IpAddr("255.255.255.255").AsSlice(),
-						Enabled: true,
+						SrcAddr: balancer.IpAddr("10.2.2.2").AsSlice(),
+						SrcMask: balancer.IpAddr("255.255.255.255").AsSlice(),
 					},
 				},
 				Peers: [][]byte{
@@ -1061,7 +1053,7 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 				Proto: balancerpb.TransportProto_TCP,
 				AllowedSrcs: []*balancerpb.Subnet{
 					{
-						Addr: IpAddr("2001:db8::").AsSlice(),
+						Addr: balancer.IpAddr("2001:db8::").AsSlice(),
 						Size: 32,
 					},
 				},
@@ -1074,13 +1066,12 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 				},
 				Reals: []*balancerpb.Real{
 					{
-						DstAddr: IpAddr("2001:db8:2::2").AsSlice(),
+						DstAddr: balancer.IpAddr("2001:db8:2::2").AsSlice(),
 						Weight:  1,
-						SrcAddr: IpAddr("2001:db8:2::2").AsSlice(),
-						SrcMask: IpAddr(
+						SrcAddr: balancer.IpAddr("2001:db8:2::2").AsSlice(),
+						SrcMask: balancer.IpAddr(
 							"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
 						).AsSlice(),
-						Enabled: true,
 					},
 				},
 				Peers: [][]byte{
@@ -1103,9 +1094,9 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 		},
 	}
 
-	setup, err := SetupTest(&TestConfig{
-		moduleConfig: config,
-		stateConfig: &balancerpb.ModuleStateConfig{
+	setup, err := balancer.SetupTest(&balancer.TestConfig{
+		ModuleConfig: config,
+		StateConfig: &balancerpb.ModuleStateConfig{
 			SessionTableCapacity:      100,
 			SessionTableScanPeriod:    durationpb.New(0),
 			SessionTableMaxLoadFactor: 0.5,
@@ -1116,7 +1107,7 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 
 	t.Run("IPv4", func(t *testing.T) {
 		// Create a TCP packet (but don't send it to create a session)
-		tcpLayers := MakeTCPPacket(
+		tcpLayers := balancer.MakeTCPPacket(
 			vsIPv4,
 			vsPort,
 			clientIPv4,
@@ -1129,7 +1120,7 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 		icmpLayers := MakeICMPv4DestUnreachable(clientIPv4, vsIPv4, tcpPacket)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err := setup.mock.HandlePackets(icmpPacket)
+		result, err := setup.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		// Since there's no session, the packet should be broadcasted to peers
@@ -1149,7 +1140,7 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 
 	t.Run("IPv6", func(t *testing.T) {
 		// Create a TCP packet (but don't send it to create a session)
-		tcpLayers := MakeTCPPacket(
+		tcpLayers := balancer.MakeTCPPacket(
 			vsIPv6,
 			vsPort,
 			clientIPv6,
@@ -1162,7 +1153,7 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 		icmpLayers := MakeICMPv6DestUnreachable(clientIPv6, vsIPv6, tcpPacket)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err := setup.mock.HandlePackets(icmpPacket)
+		result, err := setup.Mock.HandlePackets(icmpPacket)
 		require.NoError(t, err)
 
 		// Since there's no session, the packet should be broadcasted to peers

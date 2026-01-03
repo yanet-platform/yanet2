@@ -5,23 +5,27 @@
 
 #include <netinet/in.h>
 #include <rte_ip.h>
+#include <stdatomic.h>
 
 #include "flow/context.h"
 
 #include "flow/helpers.h"
 #include "lib/dataplane/packet/decap.h"
 
+#include "handler/handler.h"
+#include "rte_ether.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline int
-decap_ipv4(struct packet *packet, struct balancer_module_config *config) {
+decap_ipv4(struct packet *packet, struct packet_handler *handler) {
 	struct rte_ipv4_hdr *ipv4 = rte_pktmbuf_mtod_offset(
 		packet->mbuf,
 		struct rte_ipv4_hdr *,
 		packet->network_header.offset
 	);
 	if (lpm_lookup(
-		    &config->decap_filter_v4,
+		    &handler->decap_ipv4,
 		    NET4_LEN,
 		    (const uint8_t *)&ipv4->dst_addr
 	    ) != LPM_VALUE_INVALID) {
@@ -32,13 +36,13 @@ decap_ipv4(struct packet *packet, struct balancer_module_config *config) {
 }
 
 static inline int
-decap_ipv6(struct packet *packet, struct balancer_module_config *config) {
+decap_ipv6(struct packet *packet, struct packet_handler *handler) {
 	struct rte_ipv6_hdr *ipv6 = rte_pktmbuf_mtod_offset(
 		packet->mbuf,
 		struct rte_ipv6_hdr *,
 		packet->network_header.offset
 	);
-	if (lpm_lookup(&config->decap_filter_v6, NET6_LEN, ipv6->dst_addr) !=
+	if (lpm_lookup(&handler->decap_ipv6, NET6_LEN, ipv6->dst_addr) !=
 	    LPM_VALUE_INVALID) {
 		return 1;
 	} else {
@@ -56,7 +60,7 @@ try_decap(struct packet_ctx *ctx) {
 	ctx->decap = false;
 
 	struct packet *packet = ctx->packet;
-	struct balancer_module_config *config = ctx->config;
+	struct packet_handler *handler = ctx->handler;
 
 	uint16_t network_protocol = packet->network_header.type;
 
@@ -65,9 +69,9 @@ try_decap(struct packet_ctx *ctx) {
 	// of the packet is in the decap list of the balancer.
 	int decap_is_allowed;
 	if (network_protocol == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		decap_is_allowed = decap_ipv4(packet, config);
+		decap_is_allowed = decap_ipv4(packet, handler);
 	} else if (network_protocol == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		decap_is_allowed = decap_ipv6(packet, config);
+		decap_is_allowed = decap_ipv6(packet, handler);
 	} else {
 		COMMON_STATS_INC(unexpected_network_proto, ctx);
 		return -1;

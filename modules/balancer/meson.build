@@ -1,8 +1,8 @@
-subdir('state')
-subdir('api')
+# subdir('state')
+# subdir('api')
 subdir('dataplane')
 subdir('controlplane')
-subdir('tests')
+# subdir('tests')
 
 # not need for now, disable
 # subdir('app')

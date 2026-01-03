@@ -13,8 +13,7 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include "module.h"
-#include "vs.h"
+#include "handler/handler.h"
 
 #include "flow/common.h"
 #include "flow/context.h"
@@ -28,15 +27,12 @@ FILTER_QUERY_DECLARE(VS_V4_TABLE_TAG, net4_dst, port_dst, proto);
 
 static inline uint32_t
 vs_v4_table_lookup(
-	struct balancer_module_config *config, struct packet *packet
+	struct packet_handler *handler, struct packet *packet
 ) {
 	struct value_range *result;
 	FILTER_QUERY(
-		&config->vs_v4_table, VS_V4_TABLE_TAG, &packet, &result, 1
+		&handler->vs_v4, VS_V4_TABLE_TAG, &packet, &result, 1
 	);
-	if (result->count == 0) {
-		return -1;
-	}
 	if (result->count == 0) {
 		return -1;
 	}
@@ -53,11 +49,11 @@ FILTER_QUERY_DECLARE(VS_V6_TABLE_TAG, net6_dst, port_dst, proto);
 
 static inline uint32_t
 vs_v6_table_lookup(
-	struct balancer_module_config *config, struct packet *packet
+	struct packet_handler *handler, struct packet *packet
 ) {
 	struct value_range *result;
 	FILTER_QUERY(
-		&config->vs_v6_table, VS_V6_TABLE_TAG, &packet, &result, 1
+		&handler->vs_v6, VS_V6_TABLE_TAG, &packet, &result, 1
 	);
 	if (result->count == 0) {
 		return -1;
@@ -69,27 +65,15 @@ vs_v6_table_lookup(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline struct virtual_service *
+static inline struct vs *
 vs_v4_lookup(struct packet_ctx *ctx) {
-	struct balancer_module_config *config = ctx->config;
+	struct packet_handler *handler = ctx->handler;
 	// get id of the virtual service
-	uint32_t service_id = vs_v4_table_lookup(config, ctx->packet);
+	uint32_t service_id = vs_v4_table_lookup(handler, ctx->packet);
 	if (service_id == (uint32_t)-1) {
 		return NULL;
 	}
-
-	if (config->vs_count <= service_id) {
-		// if the service_id is out of range of available
-		// services
-		// todo: remove it, impossible case.
-		return NULL;
-	}
-
-	struct virtual_service *vs = ADDR_OF(&config->vs) + service_id;
-	if (!(vs->flags & VS_PRESENT_IN_CONFIG_FLAG)) {
-		// todo: maybe add counter here?
-		return NULL;
-	}
+	struct vs *vs = ADDR_OF(&handler->vs) + service_id;
 
 	// set virtual service
 	packet_ctx_set_vs(ctx, vs);
@@ -98,17 +82,12 @@ vs_v4_lookup(struct packet_ctx *ctx) {
 }
 
 static inline bool
-vs_v4_fw(
-	struct packet_ctx *ctx,
-	struct virtual_service *vs,
-	struct packet *packet
-) {
+vs_v4_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
-	// check if packet source is allowed for the service
-	/// @todo: use lpm4_lookup
+
 	if (lpm_lookup(
 		    &vs->src_filter, NET4_LEN, (uint8_t *)&ipv4_hdr->src_addr
 	    ) == LPM_VALUE_INVALID) {
@@ -118,19 +97,20 @@ vs_v4_fw(
 
 		return false;
 	}
+
 	return true;
 }
 
 static inline bool
 vs_v4_announced(struct packet_ctx *ctx) {
-	struct balancer_module_config *config = ctx->config;
+	struct packet_handler *handler = ctx->handler;
 	struct packet *packet = ctx->packet;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 	return lpm_lookup(
-		       &config->announce_ipv4,
+		       &handler->announce_ipv4,
 		       NET4_LEN,
 		       (uint8_t *)&ipv4_hdr->dst_addr
 	       ) != LPM_VALUE_INVALID;
@@ -138,14 +118,14 @@ vs_v4_announced(struct packet_ctx *ctx) {
 
 static inline bool
 vs_v6_announced(struct packet_ctx *ctx) {
-	struct balancer_module_config *config = ctx->config;
+	struct packet_handler *handler = ctx->handler;
 	struct packet *packet = ctx->packet;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 	return lpm_lookup(
-		       &config->announce_ipv6,
+		       &handler->announce_ipv6,
 		       NET6_LEN,
 		       (uint8_t *)&ipv6_hdr->dst_addr
 	       ) != LPM_VALUE_INVALID;
@@ -153,25 +133,14 @@ vs_v6_announced(struct packet_ctx *ctx) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline struct virtual_service *
+static inline struct vs *
 vs_v6_lookup(struct packet_ctx *ctx) {
-	struct balancer_module_config *config = ctx->config;
-	uint32_t service_id = vs_v6_table_lookup(config, ctx->packet);
+	struct packet_handler *handler = ctx->handler;
+	uint32_t service_id = vs_v6_table_lookup(handler, ctx->packet);
 	if (service_id == (uint32_t)-1) {
 		return NULL;
 	}
-
-	if (ctx->config->vs_count <= service_id) {
-		// If the service_id is out of range of available
-		// services
-		return NULL;
-	}
-
-	struct virtual_service *vs = ADDR_OF(&config->vs) + service_id;
-	if (!(vs->flags & VS_PRESENT_IN_CONFIG_FLAG)) {
-		// todo: may add counter here?
-		return NULL;
-	}
+	struct vs *vs = ADDR_OF(&handler->vs) + service_id;
 
 	// set virtual service
 	packet_ctx_set_vs(ctx, vs);
@@ -180,19 +149,13 @@ vs_v6_lookup(struct packet_ctx *ctx) {
 }
 
 static inline bool
-vs_v6_fw(
-	struct packet_ctx *ctx,
-	struct virtual_service *vs,
-	struct packet *packet
-) {
+vs_v6_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	// check if packet source is allowed for the service
-	/// @todo: use lpm4_lookup
 	if (lpm_lookup(
 		    &vs->src_filter, NET6_LEN, (uint8_t *)&ipv6_hdr->src_addr
 	    ) == LPM_VALUE_INVALID) {
@@ -208,26 +171,21 @@ vs_v6_fw(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline struct virtual_service *
+static inline struct vs *
 vs_lookup_and_fw(struct packet_ctx *ctx) {
 	struct packet *packet = ctx->packet;
 	if (packet->network_header.type ==
 	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		struct virtual_service *vs = vs_v4_lookup(ctx);
+		struct vs *vs = vs_v4_lookup(ctx);
 		if (vs == NULL || !vs_v4_fw(ctx, vs, packet)) {
 			return NULL;
 		}
 		return vs;
-	} else if (packet->network_header.type ==
-		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		struct virtual_service *vs = vs_v6_lookup(ctx);
+	} else { // ipv6
+		struct vs *vs = vs_v6_lookup(ctx);
 		if (vs == NULL || !vs_v6_fw(ctx, vs, packet)) {
 			return NULL;
 		}
 		return vs;
-	} else {
-		// packet was previously validated,
-		// impossible scenario
-		assert(false);
 	}
 }

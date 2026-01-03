@@ -6,6 +6,7 @@
 #include <assert.h>
 
 #include "api/counter.h"
+#include "lib/controlplane/diag/diag.h"
 
 int
 counter_registry_init(
@@ -50,8 +51,15 @@ counter_registry_expand(
 	struct counter_registry *registry, uint64_t new_capacity
 ) {
 	uint64_t old_capacity = registry->capacity;
-	if (new_capacity < registry->capacity)
+	if (new_capacity < registry->capacity) {
+		NEW_ERROR(
+			"requested capacity (%lu) is smaller than current "
+			"capacity (%lu)",
+			new_capacity,
+			registry->capacity
+		);
 		return -1;
+	}
 	if (new_capacity == registry->capacity)
 		return 0;
 
@@ -61,8 +69,10 @@ counter_registry_expand(
 	struct counter_name *new_names = (struct counter_name *)memory_balloc(
 		memory_context, sizeof(struct counter_name) * new_capacity
 	);
-	if (new_names == NULL)
+	if (new_names == NULL) {
+		NEW_ERROR("failed to allocate counter names");
 		return -1;
+	}
 
 	struct counter_link *new_links = (struct counter_link *)memory_balloc(
 		memory_context, sizeof(struct counter_link) * new_capacity
@@ -125,6 +135,7 @@ counter_registry_insert(
 		if (new_capacity == 0)
 			new_capacity = 8;
 		if (counter_registry_expand(registry, new_capacity)) {
+			PUSH_ERROR("failed to expand counter registry");
 			return -1;
 		}
 	}

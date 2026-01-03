@@ -1,18 +1,19 @@
 #pragma once
 
-#include "../../flow/context.h"
+#include "flow/common.h"
+#include "flow/context.h"
+#include "flow/helpers.h"
 
 #include "common/network.h"
-#include "dataplane/module/module.h"
-#include "dataplane/packet/packet.h"
-#include "flow/common.h"
-#include "flow/helpers.h"
+
+#include "lib/dataplane/module/module.h"
+#include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/worker/worker.h"
-#include "vs.h"
+
+#include "handler/vs.h"
 
 #include "tunnel.h"
 #include <assert.h>
-#include <linux/magic.h>
 #include <netinet/in.h>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -106,7 +107,7 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 		return;
 	}
 
-	struct virtual_service *vs = ctx->vs.ptr;
+	struct vs *vs = ctx->vs.view;
 	assert(vs != NULL);
 
 	// here virtual service can not be null
@@ -127,7 +128,7 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 	}
 
 	// Broadcast packet to v4 peers.
-	uint8_t *balancer_src_v4 = ctx->config->source_ip;
+	uint8_t *balancer_src_v4 = ctx->handler->source_ipv4.bytes;
 	for (size_t i = 0; i < vs->peers_v4_count; ++i) {
 		struct packet *clone = clone_packet(ctx->worker, ctx->packet);
 		if (clone == NULL) {
@@ -147,7 +148,7 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 	}
 
 	// Broadcast packet to v6 peers.
-	uint8_t *balancer_src_v6 = ctx->config->source_ip_v6;
+	uint8_t *balancer_src_v6 = ctx->handler->source_ipv6.bytes;
 	for (size_t i = 0; i < vs->peers_v6_count; ++i) {
 		struct packet *clone = clone_packet(ctx->worker, ctx->packet);
 		if (clone == NULL) {

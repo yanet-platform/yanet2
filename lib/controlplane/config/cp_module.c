@@ -326,3 +326,8 @@ cp_module_registry_delete(
 		ADDR_OF(&module_registry->memory_context)
 	);
 }
+
+size_t
+cp_module_registry_size(struct cp_module_registry *module_registry) {
+	return module_registry->registry.capacity;
+}

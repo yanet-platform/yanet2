@@ -14,8 +14,6 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// @todo: move this logic
-
 #define TCP_OPTION_MSS_LEN (4)
 #define TCP_OPTION_KIND_MSS (2)
 #define TCP_OPTION_KIND_EOL (0)

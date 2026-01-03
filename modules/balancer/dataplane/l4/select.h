@@ -4,26 +4,24 @@
 
 #include "../meta.h"
 
-#include "modules/balancer/state/state.h"
-#include "ring.h"
 #include "rte_tcp.h"
+#include "selector.h"
+#include "session_table.h"
+#include "state/state.h"
 #include <assert.h>
 #include <filter/filter.h>
 #include <netinet/in.h>
 #include <stdint.h>
-
-#include "../real.h"
-#include "../vs.h"
 
 #include "../flow/common.h"
 #include "../flow/context.h"
 #include "../flow/helpers.h"
 #include "../flow/stats.h"
 
-#include "../../state/session.h"
-#include "../../state/session_table.h"
+#include "state/session.h"
+#include "state/session_table.h"
 
-#include "../../api/vs.h"
+#include "api/vs.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -36,37 +34,29 @@ reschedule_real(struct packet_metadata *metadata) {
 		 ) == RTE_TCP_SYN_FLAG));
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-static inline uint32_t
-next_rnd(
-	struct virtual_service *vs, struct packet_metadata *meta, size_t worker
-) {
-	return vs->flags & BALANCER_VS_PRR_FLAG
-		       ? vs->worker_local[worker].round_robin_counter++
-		       : meta->hash;
-}
-
 // Selects real and update real and virtual service stats.
 static inline struct real *
 select_real(
 	struct packet_ctx *ctx,
-	struct balancer_module_config *config,
-	uint32_t now,
-	uint32_t worker_idx,
-	struct virtual_service *vs,
+	struct vs *vs,
 	struct packet_metadata *metadata
 ) {
-	struct balancer_state *balancer_state = ADDR_OF(&config->state);
-	struct real *reals = ADDR_OF(&config->reals);
+	struct packet_handler *handler = ctx->handler;
+	struct balancer_state *balancer_state = ADDR_OF(&handler->state);
+	struct real *reals = ADDR_OF(&handler->reals);
+
+	uint32_t *reals_index = ADDR_OF(&handler->reals_index);
+
+	const size_t worker_idx = ctx->worker->idx;
+	const uint32_t now = ctx->now;
 
 	// if `One Packet Scheduling` flag is set,
 	// we do not account for sessions
-	if (vs->flags & BALANCER_VS_OPS_FLAG) {
-		uint32_t real_id = real_selector_select(
-			&vs->real_selector, worker_idx, metadata->hash
+	if (vs->flags & VS_OPS_FLAG) {
+		uint32_t real_id = selector_select(
+			&vs->selector, worker_idx, metadata->hash
 		);
-		if (real_id == RING_VALUE_INVALID) {
+		if (real_id == SELECTOR_VALUE_INVALID) {
 			// discard packet because there are no enabled reals
 
 			// update counter
@@ -94,10 +84,10 @@ select_real(
 
 	// get timeout for the session based on transport protocol flags
 	uint32_t timeout =
-		session_timeout(&config->sessions_timeouts, metadata);
+		session_timeout(&handler->sessions_timeouts, metadata);
 
 	// setup id for the session between client and virtual service
-	struct balancer_session_id session_id;
+	struct session_id session_id;
 	fill_session_id(&session_id, metadata, vs);
 
 	// begin critical section
@@ -105,7 +95,7 @@ select_real(
 	uint64_t current_table_gen = session_table_begin_cs(table, worker_idx);
 
 	// get state for the session
-	struct balancer_session_state *session_state = NULL;
+	struct session_state *session_state = NULL;
 	session_lock_t *session_lock;
 	int get_session_result = get_or_create_session(
 		table,
@@ -131,22 +121,23 @@ select_real(
 	}
 
 	if (get_session_result == SESSION_FOUND) { // session with such id found
-		struct real *real = &reals[session_state->real_id];
+		struct real_state *real_state = balancer_state_get_real_by_idx(balancer_state, session_state->real_id);
+		uint32_t real_ph_idx = reals_index[real_state->registry_idx];
+		if (real_ph_idx == (uint32_t)-1) {
+			// session is for real which is not
+			// configured for the current packet handler.
 
-		// first, check real flags
-		// to determine case when real disabled or not in the
-		// current config. in that case, we just skip current real
-		// and try to reschedule packet on the other one.
-		if (!(real->flags & REAL_PRESENT_IN_CONFIG_FLAG)) {
-			// real is not present in current config
-			// deselect real
-			packet_ctx_unset_real(ctx);
-		} else if (real->flags & BALANCER_REAL_DISABLED_FLAG) {
+			// increase stats, then try reschedule packet to the other real
+			real_state->info.shard[worker_idx].stats.packets_real_not_present += 1;
+		} else if (!real_state->enabled) { // first, check if real is disabled
 			// real is disabled
+
+			struct real *real = &reals[real_ph_idx];
 
 			// select real to update its counters
 			packet_ctx_set_real(ctx, real);
 
+			// increment stats
 			REAL_STATS_INC(packets_real_disabled, ctx);
 
 			// deselect real
@@ -154,6 +145,8 @@ select_real(
 		} else {
 			// real enabled and present in config, so we select it.
 			// calculate until session was encountered
+
+			struct real *real = &reals[real_ph_idx];
 
 			// set real in packet context
 			packet_ctx_set_real(ctx, real);
@@ -195,10 +188,9 @@ select_real(
 
 	// select new real for the session and remember it in session state
 
-	uint32_t real_id = real_selector_select(
-		&vs->real_selector, worker_idx, metadata->hash
-	);
-	if (real_id == RING_VALUE_INVALID) {
+	uint32_t real_id =
+		selector_select(&vs->selector, worker_idx, metadata->hash);
+	if (real_id == SELECTOR_VALUE_INVALID) {
 		VS_STATS_INC(no_reals, ctx);
 		session_remove(session_state); // free created state
 		session_unlock(session_lock);  // unlock state
