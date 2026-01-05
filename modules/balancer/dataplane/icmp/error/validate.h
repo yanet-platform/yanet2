@@ -107,9 +107,7 @@ packet_swap_src_dst(struct packet *packet) {
 
 static inline int
 validate_packet_ipv4(
-	struct packet_ctx *ctx,
-	struct packet_metadata *meta,
-	struct vs **vs
+	struct packet_ctx *ctx, struct packet_metadata *meta, struct vs **vs
 ) {
 	struct packet *packet = ctx->packet;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -178,9 +176,7 @@ validate_packet_ipv4(
 
 static inline int
 validate_packet_ipv6(
-	struct packet_ctx *ctx,
-	struct packet_metadata *meta,
-	struct vs **vs
+	struct packet_ctx *ctx, struct packet_metadata *meta, struct vs **vs
 ) {
 	struct packet *packet = ctx->packet;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -302,19 +298,21 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 
 	// begin critical section
 	uint64_t current_gen = session_table_begin_cs(
-		&ctx->state.ptr->session_table, ctx->worker->idx
+		&ctx->balancer_state->session_table, ctx->worker->idx
 	);
 
 	// get real for the session
 	uint32_t real_id = get_session_real(
-		&ctx->state.ptr->session_table,
+		&ctx->balancer_state->session_table,
 		current_gen,
 		&session_id,
 		ctx->now
 	);
 
 	// end critical section
-	session_table_end_cs(&ctx->state.ptr->session_table, ctx->worker->idx);
+	session_table_end_cs(
+		&ctx->balancer_state->session_table, ctx->worker->idx
+	);
 
 	if (real_id == (uint32_t)-1) { // real not found
 		// end critical section

@@ -4,6 +4,7 @@
 
 #include "../meta.h"
 
+#include "handler/vs.h"
 #include "rte_tcp.h"
 #include "selector.h"
 #include "session_table.h"
@@ -37,9 +38,7 @@ reschedule_real(struct packet_metadata *metadata) {
 // Selects real and update real and virtual service stats.
 static inline struct real *
 select_real(
-	struct packet_ctx *ctx,
-	struct vs *vs,
-	struct packet_metadata *metadata
+	struct packet_ctx *ctx, struct vs *vs, struct packet_metadata *metadata
 ) {
 	struct packet_handler *handler = ctx->handler;
 	struct balancer_state *balancer_state = ADDR_OF(&handler->state);
@@ -121,15 +120,18 @@ select_real(
 	}
 
 	if (get_session_result == SESSION_FOUND) { // session with such id found
-		struct real_state *real_state = balancer_state_get_real_by_idx(balancer_state, session_state->real_id);
-		uint32_t real_ph_idx = reals_index[real_state->registry_idx];
+		uint32_t real_ph_idx = reals_index[session_state->real_id];
 		if (real_ph_idx == (uint32_t)-1) {
 			// session is for real which is not
 			// configured for the current packet handler.
 
-			// increase stats, then try reschedule packet to the other real
-			real_state->info.shard[worker_idx].stats.packets_real_not_present += 1;
-		} else if (!real_state->enabled) { // first, check if real is disabled
+			// increase stats, then try reschedule packet to the
+			// other real
+			VS_STATS_INC(real_is_removed, ctx);
+		} else if (!vs_real_enabled(
+				   ctx->vs.ptr, real_ph_idx
+			   )) { // check if real is
+				// disabled
 			// real is disabled
 
 			struct real *real = &reals[real_ph_idx];
@@ -139,12 +141,12 @@ select_real(
 
 			// increment stats
 			REAL_STATS_INC(packets_real_disabled, ctx);
+			VS_STATS_INC(real_is_disabled, ctx);
 
 			// deselect real
 			packet_ctx_unset_real(ctx);
 		} else {
 			// real enabled and present in config, so we select it.
-			// calculate until session was encountered
 
 			struct real *real = &reals[real_ph_idx];
 

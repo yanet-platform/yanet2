@@ -14,6 +14,8 @@
 struct balancer_state;
 struct packet_handler_config;
 
+#define INDEX_INVALID ((uint32_t)-1)
+
 /**
  * Packet handler instance.
  *
@@ -50,7 +52,7 @@ struct packet_handler {
 	uint32_t *vs_index;
 
 	// reals
-	size_t real_count;
+	size_t reals_count;
 	struct real *reals;
 
 	// map: real_registry_idx -> ph_real_idx
@@ -58,7 +60,7 @@ struct packet_handler {
 	size_t reals_index_count;
 	uint32_t *reals_index;
 
-	// statistics
+	// counter indices
 	struct {
 		// common counter
 		uint64_t common;

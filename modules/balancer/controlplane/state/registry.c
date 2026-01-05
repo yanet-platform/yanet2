@@ -36,7 +36,7 @@ service_registry_free(struct service_registry *registry) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-union service *
+union service_state *
 service_registry_find_or_insert_service(
 	struct service_registry *registry,
 	union service_identifier *id,
@@ -46,7 +46,7 @@ service_registry_find_or_insert_service(
 	struct service_array *array = &registry->array;
 	ssize_t idx = service_index_lookup(index, array, id);
 	if (idx == -1) {
-		union service state;
+		union service_state state;
 		memset(&state, 0, sizeof(state));
 		memcpy(&state, id, sizeof(union service_identifier));
 		int res = service_array_push_back(array, &state);
@@ -74,7 +74,7 @@ service_registry_lookup_by_id(
 	return service_index_lookup(&registry->index, &registry->array, id);
 }
 
-union service *
+union service_state *
 service_registry_lookup(struct service_registry *registry, size_t idx) {
 	return service_array_lookup(&registry->array, idx);
 }

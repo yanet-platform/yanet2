@@ -4,7 +4,7 @@
 #include "common/rcu.h"
 #include "common/ttlmap/detail/ttlmap.h"
 
-#include "api/session.h"
+#include "state/session.h"
 
 #include <assert.h>
 #include <stdatomic.h>
@@ -70,25 +70,31 @@ size_t
 session_table_capacity(struct session_table *table);
 
 /**
- * Snapshot active sessions into a heap-allocated array.
- *
- * If only_count is true, counts sessions without allocating the list.
- *
- * Returns number of sessions on success, or (size_t)-1 on error.
- */
-size_t
-session_table_sessions_info(
-	struct session_table *table,
-	struct named_session_info **info,
-	uint32_t now,
-	bool only_count
-);
-
-/**
  * Try to resize session table.
  * Returns 0 on success, -1 on error (e.g., out of memory).
  */
 int
 session_table_resize(
 	struct session_table *table, size_t new_size, uint32_t now
+);
+
+////////////////////////////////////////////////////////////////////////////////
+
+struct balancer_info;
+
+void
+session_table_fill_balancer_info(
+	struct session_table *table, struct balancer_info *info, uint32_t now
+);
+
+typedef int (*session_table_iter_callback)(
+	struct session_id *id, struct session_state *state, void *userdata
+);
+
+int
+session_table_iter(
+	struct session_table *table,
+	uint32_t now,
+	session_table_iter_callback cb,
+	void *userdata
 );

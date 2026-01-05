@@ -16,7 +16,6 @@
 #include "handler/handler.h"
 #include "handler/vs.h"
 #include "state/session.h"
-#include "state/vs.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -211,5 +210,5 @@ fill_session_id(
 	memset(id, 0, sizeof(*id));
 	memcpy(&id->client_ip, data->src_addr, sizeof(id->client_ip));
 	id->client_port = data->src_port;
-	id->vs_id = ADDR_OF(&vs->state)->registry_idx;
+	id->vs_id = vs->registry_idx;
 }

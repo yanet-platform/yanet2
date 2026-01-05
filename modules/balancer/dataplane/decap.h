@@ -57,7 +57,7 @@ decap_ipv6(struct packet *packet, struct packet_handler *handler) {
 // network proto is invalid.
 static inline int
 try_decap(struct packet_ctx *ctx) {
-	ctx->decap = false;
+	ctx->decap_flag = false;
 
 	struct packet *packet = ctx->packet;
 	struct packet_handler *handler = ctx->handler;
@@ -88,7 +88,7 @@ try_decap(struct packet_ctx *ctx) {
 		} else {
 			// successfully made decap
 			COMMON_STATS_INC(decap_successful, ctx);
-			ctx->decap = true;
+			ctx->decap_flag = true;
 		}
 	}
 

@@ -1,6 +1,5 @@
 #include "handler.h"
 #include "api/balancer.h"
-#include "api/counter.h"
 #include "api/vs.h"
 #include "common/lpm.h"
 #include "common/memory.h"
@@ -13,6 +12,7 @@
 #include "lib/controlplane/diag/diag.h"
 
 #include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,76 +25,17 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static const char *common_module_counter_name = "cmn";
-static const char *icmp_v4_module_counter_name = "iv4";
-static const char *icmp_v6_module_counter_name = "iv6";
-static const char *l4_module_counter_name = "l4";
+extern uint64_t
+register_common_counter(struct counter_registry *registry);
 
-uint64_t
-register_common_counter(struct counter_registry *registry) {
-	uint64_t res = counter_registry_register(
-		registry,
-		common_module_counter_name,
-		sizeof(struct balancer_common_stats) / sizeof(uint64_t)
-	);
+extern uint64_t
+register_icmp_v4_counter(struct counter_registry *registry);
 
-	if (res == (uint64_t)-1) {
-		PUSH_ERROR("failed to register counter in registry");
-		return -1;
-	}
+extern uint64_t
+register_icmp_v6_counter(struct counter_registry *registry);
 
-	return res;
-}
-
-uint64_t
-register_icmp_v4_counter(struct counter_registry *registry) {
-	uint64_t res = counter_registry_register(
-		registry,
-		icmp_v4_module_counter_name,
-		sizeof(struct balancer_icmp_stats) / sizeof(uint64_t)
-	);
-
-	if (res == (uint64_t)-1) {
-		PUSH_ERROR("failed to register counter in registry");
-		return -1;
-	}
-
-	return res;
-}
-
-uint64_t
-register_icmp_v6_counter(struct counter_registry *registry) {
-	uint64_t res = counter_registry_register(
-		registry,
-		icmp_v6_module_counter_name,
-		sizeof(struct balancer_icmp_stats) / sizeof(uint64_t)
-	);
-
-	if (res == (uint64_t)-1) {
-		PUSH_ERROR("failed to register counter in registry");
-		return -1;
-	}
-
-	return res;
-}
-
-uint64_t
-register_l4_counter(struct counter_registry *registry) {
-	uint64_t res = counter_registry_register(
-		registry,
-		l4_module_counter_name,
-		sizeof(struct balancer_l4_stats) / sizeof(uint64_t)
-	);
-
-	if (res == (uint64_t)-1) {
-		PUSH_ERROR("failed to register counter in registry");
-		return -1;
-	}
-
-	return res;
-}
-
-////////////////////////////////////////////////////////////////////////////////
+extern uint64_t
+register_l4_counter(struct counter_registry *registry);
 
 static int
 init_counters(
@@ -198,13 +139,16 @@ static int
 setup_reals_index(struct packet_handler *handler, struct memory_context *mctx) {
 	struct balancer_state *state = ADDR_OF(&handler->state);
 	size_t registry_reals_count = balancer_state_reals_count(state);
-	uint32_t *reals_index = memory_balloc(mctx, sizeof(uint32_t) * registry_reals_count);
+	uint32_t *reals_index =
+		memory_balloc(mctx, sizeof(uint32_t) * registry_reals_count);
 	if (reals_index == NULL) {
 		NEW_ERROR("failed to allocate memory for reals index");
 		return -1;
 	}
 
-	memset(reals_index, (uint32_t)-1, sizeof(uint32_t) * registry_reals_count);
+	memset(reals_index,
+	       INDEX_INVALID,
+	       sizeof(uint32_t) * registry_reals_count);
 	SET_OFFSET_OF(&handler->reals_index, reals_index);
 	handler->reals_index_count = registry_reals_count;
 
@@ -223,7 +167,7 @@ init_reals(
 	for (size_t i = 0; i < config->vs_count; ++i) {
 		real_count += config->vs[i].config.real_count;
 	}
-	handler->real_count = real_count;
+	handler->reals_count = real_count;
 	struct real *reals =
 		memory_balloc(mctx, sizeof(struct real) * real_count);
 	if (reals == NULL) {
@@ -252,6 +196,7 @@ init_reals(
 			if (real_init(
 				    real,
 				    state,
+				    &vs_config->identifier,
 				    real_config,
 				    registry
 			    ) != 0) {
@@ -269,9 +214,7 @@ init_reals(
 				);
 				return -1;
 			}
-			struct real_state *real_state = ADDR_OF(&real->state);
-			reals_index[real_state->registry_idx] = real_ph_idx;
-			++real_ph_idx;
+			reals_index[real->registry_idx] = real_ph_idx++;
 		}
 	}
 
@@ -284,50 +227,50 @@ init_vs(struct packet_handler *handler,
 	struct memory_context *mctx,
 	struct packet_handler_config *config,
 	struct counter_registry *registry) {
+	// create virtual services
 	handler->vs_count = config->vs_count;
-	struct vs *virtual_services =
+	struct vs *vs =
 		memory_balloc(mctx, sizeof(struct vs) * config->vs_count);
-	if (virtual_services == NULL) {
+	if (vs == NULL) {
 		NEW_ERROR("failed to allocate virtual services");
 		return -1;
 	}
-	SET_OFFSET_OF(&handler->vs, virtual_services);
+	SET_OFFSET_OF(&handler->vs, vs);
 
 	// allocate virtual services index
 	handler->vs_index_count = balancer_state_vs_count(state);
-	uint32_t *vs_index = memory_balloc(mctx, sizeof(uint32_t) * handler->vs_index_count);
+	uint32_t *vs_index =
+		memory_balloc(mctx, sizeof(uint32_t) * handler->vs_index_count);
 	if (vs_index == NULL) {
-		memory_bfree(mctx, virtual_services, sizeof(struct vs) * config->vs_count);
+		memory_bfree(mctx, vs, sizeof(struct vs) * config->vs_count);
 		NEW_ERROR("failed to allocate virtual services index");
 		return -1;
 	}
 	SET_OFFSET_OF(&handler->vs_index, vs_index);
 
-	memset(vs_index, (uint32_t)-1, sizeof(uint32_t) * config->vs_count);
+	memset(vs_index, INDEX_INVALID, sizeof(uint32_t) * config->vs_count);
 
 	size_t reals_idx = 0;
 	struct real *reals = ADDR_OF(&handler->reals);
 	for (size_t i = 0; i < config->vs_count; ++i) {
-		if (vs_view_init(
-			    &virtual_services[i],
+		if (vs_init(&vs[i],
+			    reals_idx,
 			    reals + reals_idx,
 			    state,
 			    &config->vs[i],
 			    registry,
-			    mctx
-		    ) != 0) {
+			    mctx) != 0) {
 			PUSH_ERROR(
 				"failed to setup virtual service at index %zu",
 				i
 			);
 			for (size_t j = 0; j < i; ++j) {
-				vs_view_free(&virtual_services[j], mctx);
+				vs_free(&vs[j], mctx);
 			}
 			return -1;
 		}
 		reals_idx += config->vs[i].config.real_count;
-		struct vs_state *vs_state = ADDR_OF(&virtual_services[i].state);
-		vs_index[vs_state->registry_idx] = i;
+		vs_index[vs->registry_idx] = i;
 	}
 	return 0;
 }
@@ -400,15 +343,23 @@ free_vs:
 		ADDR_OF(&handler->vs),
 		sizeof(struct vs) * handler->vs_count
 	);
-	memory_bfree(mctx, ADDR_OF(&handler->vs_index), sizeof(uint32_t) * handler->vs_index_count);
+	memory_bfree(
+		mctx,
+		ADDR_OF(&handler->vs_index),
+		sizeof(uint32_t) * handler->vs_index_count
+	);
 
 free_reals:
 	memory_bfree(
 		mctx,
 		ADDR_OF(&handler->reals),
-		sizeof(struct real) * handler->real_count
+		sizeof(struct real) * handler->reals_count
 	);
-	memory_bfree(mctx, ADDR_OF(&handler->reals_index), sizeof(uint32_t) * handler->reals_index_count);
+	memory_bfree(
+		mctx,
+		ADDR_OF(&handler->reals_index),
+		sizeof(uint32_t) * handler->reals_index_count
+	);
 
 free_decap:
 	lpm_free(&handler->decap_ipv4);
@@ -418,164 +369,4 @@ free_handler:
 	memory_bfree(mctx, handler, sizeof(struct packet_handler));
 
 	return NULL;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-static void
-fill_real_stats(
-	size_t real_registry_idx,
-	struct balancer_state *state,
-	struct named_real_stats *real_stats,
-	struct counter_handle *counter
-) {
-	struct real_state *real =
-		balancer_state_get_real_by_idx(state, real_registry_idx);
-	real_stats->identifier = real->identifier;
-	counter_handle_accum(
-		(uint64_t *)&real_stats->stats,
-		state->workers,
-		counter->size,
-		counter->value_handle
-	);
-}
-
-static void
-fill_vs_stats(
-	size_t vs_registry_idx,
-	struct balancer_state *state,
-	struct named_vs_stats *vs_stats,
-	struct counter_handle *counter
-) {
-	struct vs_state *vs = balancer_state_get_vs_by_idx(state, vs_registry_idx);
-	vs_stats->identifier = vs->identifier;
-	counter_handle_accum(
-		(uint64_t *)&vs_stats->stats,
-		state->workers,
-		counter->size,
-		counter->value_handle
-	);
-}
-
-static void
-fill_balancer_stats(
-	struct balancer_stats *stats,
-	const size_t workers,
-	struct counter_handle *counter,
-	size_t *vs_count,
-	size_t *real_count
-) {
-	if (strcmp(counter->name, common_module_counter_name) ==
-	    0) { // common module counter
-		counter_handle_accum(
-			(uint64_t *)&stats->common,
-			workers,
-			counter->size,
-			counter->value_handle
-		);
-	} else if (strcmp(counter->name, icmp_v4_module_counter_name) ==
-		   0) { // icmp module counter
-		counter_handle_accum(
-			(uint64_t *)&stats->icmp_ipv4,
-			workers,
-			counter->size,
-			counter->value_handle
-		);
-	} else if (strcmp(counter->name, icmp_v6_module_counter_name) == 0) {
-		counter_handle_accum(
-			(uint64_t *)&stats->icmp_ipv6,
-			workers,
-			counter->size,
-			counter->value_handle
-		);
-	} else if (strcmp(counter->name, l4_module_counter_name) ==
-		   0) { // l4 module counter
-		counter_handle_accum(
-			(uint64_t *)&stats->l4,
-			workers,
-			counter->size,
-			counter->value_handle
-		);
-	} else if (counter_to_vs_registry_idx(counter) != -1) { // vs counter
-		++*vs_count;
-	} else if (counter_to_real_registry_idx(counter) !=
-		   -1) { // real counter
-		++*real_count;
-	} else { // impossible
-		assert(false);
-	}
-}
-
-void
-packet_handler_fill_stats(
-	struct packet_handler *handler,
-	struct balancer_stats *stats,
-	struct packet_handler_ref *ref
-) {
-	struct agent *agent = ADDR_OF(&handler->cp_module.agent);
-	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
-
-	const char *module = handler->cp_module.name;
-
-	struct counter_handle_list *counter_handles = yanet_get_module_counters(
-		dp_config,
-		ref->device,
-		ref->pipeline,
-		ref->function,
-		ref->chain,
-		"balancer",
-		module
-	);
-	assert(counter_handles != NULL);
-
-	const size_t instances = counter_handles->instance_count;
-
-	// find common, icmp and l4 module counters
-	// also, calculate number of vs and real counters.
-
-	stats->vs_count = 0;
-	stats->real_count = 0;
-
-	for (size_t i = 0; i < counter_handles->count; ++i) {
-		struct counter_handle *counter = &counter_handles->counters[i];
-		fill_balancer_stats(
-			stats,
-			instances,
-			counter,
-			&stats->vs_count,
-			&stats->real_count
-		);
-	}
-
-	struct balancer_state *state = ADDR_OF(&handler->state);
-
-	struct named_vs_stats *vs_stats =
-		malloc(sizeof(struct named_vs_stats) * stats->vs_count);
-	struct named_real_stats *real_stats =
-		malloc(sizeof(struct named_real_stats) * stats->real_count);
-
-	for (size_t i = 0; i < counter_handles->count; ++i) {
-		struct counter_handle *counter = &counter_handles->counters[i];
-		ssize_t vs_registry_idx = counter_to_vs_registry_idx(counter);
-		if (vs_registry_idx != -1) {
-			fill_vs_stats(
-				vs_registry_idx,
-				state,
-				&vs_stats[vs_registry_idx],
-				counter
-			);
-			continue;
-		}
-		ssize_t real_registry_idx =
-			counter_to_real_registry_idx(counter);
-		if (real_registry_idx != -1) {
-			fill_real_stats(
-				real_registry_idx,
-				state,
-				&real_stats[real_registry_idx],
-				counter
-			);
-			continue;
-		}
-	}
 }

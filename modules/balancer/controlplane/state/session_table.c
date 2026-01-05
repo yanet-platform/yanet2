@@ -134,17 +134,15 @@ fill_sessions_callback(
 }
 
 size_t
-session_table_sessions_info(
+session_table_fill_sessions_info(
 	struct session_table *table,
 	struct named_session_info **info,
-	uint32_t now,
-	bool only_count
+	uint32_t now
 ) {
 	memset(info, 0, sizeof(*info));
 	struct named_session_info *infos = NULL;
 	struct fill_sessions_context ctx = {
 		.info = infos,
-		.only_count = only_count,
 		.count = 0,
 		.size = 0,
 		.now = now,
@@ -277,4 +275,21 @@ session_table_resize(
 	TTLMAP_FREE(current_map);
 
 	return 0;
+}
+
+int
+session_table_iter(
+	struct session_table *table,
+	uint32_t now,
+	session_table_iter_callback cb,
+	void *userdata
+) {
+	return TTLMAP_ITER(
+		session_table_map(table, session_table_current_gen(table)),
+		struct session_id,
+		struct session_state,
+		now,
+		cb,
+		userdata
+	);
 }

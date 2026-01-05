@@ -84,7 +84,7 @@ handle_icmp_echo_ipv4(struct packet_ctx *ctx) {
 	icmp->icmp_cksum = ~icmp_checksum;
 
 	// update counters and pass packet
-	ctx->counter.icmp_v4->echo_responses += 1;
+	ctx->stats.icmp_v4->echo_responses += 1;
 	send_packet(ctx); // updates common counters under the hood.
 }
 
@@ -124,6 +124,6 @@ handle_icmp_echo_ipv6(struct packet_ctx *ctx) {
 	icmp->icmp_cksum = ~checksum;
 
 	// update counter and pass packet
-	ctx->counter.icmp_v6->echo_responses += 1;
+	ctx->stats.icmp_v6->echo_responses += 1;
 	send_packet(ctx); // updates common counters under the hood.
 }

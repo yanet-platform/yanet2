@@ -1,15 +1,10 @@
 #pragma once
 
-#include "common/memory_address.h"
-#include "state/real.h"
-
 #include "handler/vs.h"
-#include "state/vs.h"
 
 #include "dataplane/packet/packet.h"
 #include "lib/dataplane/packet/encap.h"
 #include "mss.h"
-#include "real.h"
 #include "rte_gre.h"
 #include "rte_ip.h"
 
@@ -18,10 +13,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline void
-tunnel_packet(
-	struct vs *vs, struct real *real, struct packet *packet
-) {
-	int vs_ip_proto = ADDR_OF(&vs->state)->identifier.ip_proto;
+tunnel_packet(struct vs *vs, struct real *real, struct packet *packet) {
+	int vs_ip_proto = vs->identifier.ip_proto;
 	uint8_t vs_flags = vs->flags;
 
 	// fix packet MSS if flag is specified and vs is IPv6
@@ -49,14 +42,12 @@ tunnel_packet(
 		);
 	}
 
-	struct real_state *rs = real_state(real);
-
-	const int real_ipv6 = rs->identifier.ip_proto == IPPROTO_IPV6 ? 1 : 0;
+	const int real_ipv6 = real->identifier.ip_proto == IPPROTO_IPV6 ? 1 : 0;
 
 	if (real_ipv6) { // IPv6
 		// rs->src_addr is already masked.
 
-		struct net6 *n6 = &real->src.v6;
+		const struct net6 *n6 = &real->src.v6;
 
 		uint8_t src[NET6_LEN];
 		memcpy(src, n6->addr, NET6_LEN);
@@ -69,10 +60,10 @@ tunnel_packet(
 			src[i] |= src_user[i] & (~n6->mask[i]);
 		}
 
-		packet_ip6_encap(packet, rs->identifier.addr.v6.bytes, src);
+		packet_ip6_encap(packet, real->identifier.addr.v6.bytes, src);
 	} else { // IPv4
 		// rs->src_addr is already masked.
-		struct net4 *n4 = &real->src.v4;
+		const struct net4 *n4 = &real->src.v4;
 		uint8_t src[4];
 		uint8_t *src_user =
 			(ipv4_header_inner != NULL)
@@ -83,7 +74,9 @@ tunnel_packet(
 		}
 
 		packet_ip4_encap(
-			packet, rs->identifier.addr.v4.bytes, (uint8_t *)(&src)
+			packet,
+			real->identifier.addr.v4.bytes,
+			(uint8_t *)(&src)
 		);
 	}
 

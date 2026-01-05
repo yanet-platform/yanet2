@@ -1,4 +1,5 @@
 #include "balancer.h"
+#include "handler/info.h"
 #include "state.h"
 
 #include "api/counter.h"
@@ -14,7 +15,6 @@
 
 #include "handler/handler.h"
 #include "state/state.h"
-#include "state/vs.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -242,87 +242,19 @@ balancer_update_reals(
 ////////////////////////////////////////////////////////////////////////////////
 
 int
-balancer_virtual_service_info(
-	struct balancer_handle *handle,
-	struct named_vs_info *info,
-	struct vs_identifier *identifier
+balancer_info(
+	struct balancer_handle *handle, struct balancer_info *info, uint32_t now
 ) {
 	struct balancer *balancer = balancer_handle_deref(handle);
-	struct balancer_state *state = &balancer->state;
-	struct vs_state *vs = balancer_state_find_vs(state, identifier);
-	if (vs == NULL) {
-		NEW_ERROR("virtual service not found");
-		diag_fill(&balancer->diag);
-		return -1;
-	} else {
-		diag_reset(&balancer->diag);
-	}
-	vs_get_info(vs, info);
+	struct packet_handler *handler = ADDR_OF(&balancer->handler);
+	packet_handler_balancer_info(handler, info, now);
 	return 0;
-}
-
-ssize_t
-balancer_virtual_services_info(
-	struct balancer_handle *handle, struct named_vs_info **services
-) {
-	struct balancer *balancer = balancer_handle_deref(handle);
-	struct balancer_state *state = &balancer->state;
-	size_t count = balancer_state_vs_count(state);
-	struct named_vs_info *infos =
-		malloc(count * sizeof(struct named_vs_info));
-	for (size_t i = 0; i < count; ++i) {
-		struct vs_state *vs = balancer_state_get_vs_by_idx(state, i);
-		vs_get_info(vs, &infos[i]);
-	}
-	*services = infos;
-	return count;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 int
-balancer_real_info(
-	struct balancer_handle *handle,
-	struct named_real_info *info,
-	struct real_identifier *identifier
-) {
-	struct balancer *balancer = balancer_handle_deref(handle);
-	struct balancer_state *state = &balancer->state;
-	struct real_state *real = balancer_state_find_real(state, identifier);
-	if (real == NULL) {
-		NEW_ERROR("real not found");
-		diag_fill(&balancer->diag);
-		return -1;
-	} else {
-		diag_reset(&balancer->diag);
-	}
-	real_get_info(real, info);
-	return 0;
-}
-
-// Returns -1 on error
-// and number of real infos on success
-ssize_t
-balancer_reals_info(
-	struct balancer_handle *handle, struct named_real_info **reals
-) {
-	struct balancer *balancer = balancer_handle_deref(handle);
-	struct balancer_state *state = &balancer->state;
-	size_t count = balancer_state_reals_count(state);
-	struct named_real_info *infos =
-		malloc(count * sizeof(struct named_real_info));
-	for (size_t i = 0; i < count; ++i) {
-		struct real_state *real = balancer_state_get_real_by_idx(state, i);
-		real_get_info(real, &infos[i]);
-	}
-	*reals = infos;
-	return count;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-int
-balancer_packet_handler_stats(
+balancer_stats(
 	struct balancer_handle *handle,
 	struct balancer_stats *stats,
 	struct packet_handler_ref *ref
@@ -330,6 +262,7 @@ balancer_packet_handler_stats(
 	struct balancer *balancer = balancer_handle_deref(handle);
 	struct packet_handler *handler = ADDR_OF(&balancer->handler);
 
+	// no error
 	packet_handler_fill_stats(handler, stats, ref);
 
 	return 0;
@@ -337,20 +270,40 @@ balancer_packet_handler_stats(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void
-balancer_info_free(struct balancer_info *info) {
-	free(info->reals);
-	free(info->vs);
-}
-
-ssize_t
+size_t
 balancer_sessions_info(
 	struct balancer_handle *handle,
 	struct named_session_info **sessions,
-	uint32_t now,
-	bool only_count
+	uint32_t now
 ) {
 	struct balancer *balancer = balancer_handle_deref(handle);
-	struct balancer_state *state = &balancer->state;
-	return balancer_state_sessions_info(state, sessions, now, only_count);
+	struct packet_handler *handler = ADDR_OF(&balancer->handler);
+	return packet_handler_sessions_info(handler, sessions, now);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+balancer_stats_free(struct balancer_stats *stats) {
+	if (stats->vs_count > 0) {
+		struct named_vs_stats *first_vs = &stats->vs[0];
+		struct named_real_stats *reals = first_vs->reals;
+		free(reals);
+	}
+	free(stats->vs);
+}
+
+void
+balancer_sessions_info_free(struct named_session_info *sessions) {
+	free(sessions);
+}
+
+void
+balancer_info_free(struct balancer_info *info) {
+	if (info->vs_count > 0) {
+		struct named_vs_info *first_vs = &info->vs[0];
+		struct named_real_info *reals = first_vs->reals;
+		free(reals);
+	}
+	free(info->vs);
 }

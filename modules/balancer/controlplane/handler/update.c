@@ -7,25 +7,30 @@
 
 #include "handler.h"
 
-#define VS_COUNT 1024 * 64
+#define VS_COUNT 1024 * 1024
 static uint64_t updated_vs[VS_COUNT / 64] = {0};
 
 static inline void
-mark_vs_updated(size_t idx) {
-	idx %= VS_COUNT;
-	updated_vs[idx / 64] |= 1ULL << (idx % 64);
+mark_vs_updated(size_t ph_idx) {
+	if (ph_idx < VS_COUNT) {
+		updated_vs[ph_idx / 64] |= 1ULL << (ph_idx % 64);
+	}
 }
 
 static inline int
-is_vs_updated(size_t idx) {
-	idx %= VS_COUNT;
-	return updated_vs[idx / 64] & (1ULL << (idx % 64));
+is_vs_updated(size_t ph_idx) {
+	if (ph_idx < VS_COUNT) {
+		return updated_vs[ph_idx / 64] & (1ULL << (ph_idx % 64));
+	} else {
+		return 1;
+	}
 }
 
 static inline void
-unmark_vs_updated(size_t idx) {
-	idx %= VS_COUNT;
-	updated_vs[idx / 64] &= ~(1ULL << (idx % 64));
+unmark_vs_updated(size_t ph_idx) {
+	if (ph_idx < VS_COUNT) {
+		updated_vs[ph_idx / 64] &= ~(1ULL << (ph_idx % 64));
+	}
 }
 
 static int
@@ -39,7 +44,8 @@ validate_update(struct packet_handler *handler, struct real_update *update) {
 		NEW_ERROR("real not found");
 		return -1;
 	}
-	if (ADDR_OF(&handler->reals_index)[real->registry_idx] == (uint32_t)-1) {
+	if (ADDR_OF(&handler->reals_index)[real->registry_idx] ==
+	    (uint32_t)-1) {
 		NEW_ERROR("real is not registered in handler");
 		return -1;
 	}
@@ -52,6 +58,7 @@ validate_update(struct packet_handler *handler, struct real_update *update) {
 		NEW_ERROR("virtual service not found");
 		return -1;
 	}
+
 	if (ADDR_OF(&handler->vs_index)[vs->registry_idx] == (uint32_t)-1) {
 		NEW_ERROR("virtual service is not registered in handler");
 		return -1;
@@ -68,11 +75,13 @@ validate_update(struct packet_handler *handler, struct real_update *update) {
 			return -1;
 		}
 	}
+
 	if (update->weight == DONT_UPDATE_REAL_WEIGHT &&
 	    update->enabled == DONT_UPDATE_REAL_ENABLED) {
-		NEW_ERROR("update changes nothing");
-		return -1;
+		// update changes nothing, and it is ok
+		return 0;
 	}
+
 	if (update->weight != DONT_UPDATE_REAL_WEIGHT &&
 	    update->weight > MAX_REAL_WEIGHT) {
 		NEW_ERROR(
@@ -82,36 +91,40 @@ validate_update(struct packet_handler *handler, struct real_update *update) {
 		);
 		return -1;
 	}
-	
+
 	return 0;
 }
 
 static void
 update_real(struct packet_handler *handler, struct real_update *update) {
-	struct balancer_state *state = ADDR_OF(&handler->state);
-	uint32_t *real_index = ADDR_OF(&handler->reals_index);
 	uint32_t *vs_index = ADDR_OF(&handler->vs_index);
-	struct real_state *real =
+
+	struct balancer_state *state = ADDR_OF(&handler->state);
+
+	struct real_state *real_state =
 		balancer_state_find_real(state, &update->identifier);
+
 	struct vs_state *vs = balancer_state_find_vs(
 		state, &update->identifier.vs_identifier
 	);
-	assert(real != NULL && vs != NULL);
+
+	assert(real_state != NULL && vs != NULL);
+
 	size_t vs_ph_idx = vs_index[vs->registry_idx];
-	size_t real_ph_idx = real_index[real->registry_idx];
+
 	int updated = 0;
 	if (update->enabled != DONT_UPDATE_REAL_ENABLED &&
-	    real->enabled != update->enabled) {
-		real->enabled = update->enabled;
+	    real_state->enabled != update->enabled) {
+		real_state->enabled = update->enabled;
 		updated = 1;
 	}
-	struct real *views = ADDR_OF(&handler->reals);
-	struct real *view = &views[real_ph_idx];
+
 	if (update->weight != DONT_UPDATE_REAL_WEIGHT &&
-	    view->weight != update->weight) {
-		view->weight = update->weight;
+	    real_state->weight != update->weight) {
+		real_state->weight = update->weight;
 		updated = 1;
 	}
+
 	if (updated) {
 		mark_vs_updated(vs_ph_idx);
 	}
@@ -120,24 +133,27 @@ update_real(struct packet_handler *handler, struct real_update *update) {
 static int
 update_vs(struct packet_handler *handler, struct real_update *update) {
 	struct balancer_state *state = ADDR_OF(&handler->state);
-	struct vs_state *vs = balancer_state_find_vs(
+
+	struct vs_state *vss_state = balancer_state_find_vs(
 		state, &update->identifier.vs_identifier
 	);
-	assert(vs != NULL);
+	assert(vss_state != NULL);
+
 	uint32_t *vs_index = ADDR_OF(&handler->vs_index);
-	size_t vs_ph_idx = vs_index[vs->registry_idx];
+	size_t vs_ph_idx = vs_index[vss_state->registry_idx];
+
 	if (!is_vs_updated(vs_ph_idx)) {
 		return 0;
 	}
 
-	unmark_vs_updated(vs_ph_idx);
-
-	struct vs *vs_views = ADDR_OF(&handler->vs);
-	struct vs *vs_view = &vs_views[vs_ph_idx];
-	if (vs_view_update_reals(vs_view) != 0) {
+	struct vs *vss = ADDR_OF(&handler->vs);
+	struct vs *vs = &vss[vs_ph_idx];
+	if (vs_update_reals(vs) != 0) {
 		PUSH_ERROR("failed to update reals");
 		return -1;
 	}
+
+	unmark_vs_updated(vs_ph_idx);
 
 	return 0;
 }

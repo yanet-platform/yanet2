@@ -9,128 +9,287 @@ import "modules/balancer/controlplane/balancerpb/stats.proto";
 option go_package = "github.com/yanet-platform/yanet2/modules/"
 		    "balancer/controlplane/balancerpb;balancerpb";
 
+// Balancer control plane service.
+//
+// Provides management operations for load balancer instances including
+// configuration, real server updates, statistics, and runtime information.
 service BalancerService {
-	// Update or enable balancer config
+	// Create or update a balancer configuration.
+	//
+	// This RPC operates in two distinct modes:
+	//
+	// CREATE MODE (balancer doesn't exist):
+	// - Creates a new balancer instance with the specified name
+	// - ALL fields in BalancerConfig must be provided (including optional)
+	// - refresh_period in StateConfig is REQUIRED
+	// - Initializes session table and starts background tasks
+	// - Returns error if any required field is missing
+	//
+	// UPDATE MODE (balancer exists):
+	// - Updates existing balancer configuration
+	// - Non-optional fields in PacketHandlerConfig MUST be provided:
+	//   * vs (virtual services list)
+	//   * source_address_v4
+	//   * source_address_v6
+	//   * decap_addresses
+	//   * sessions_timeouts
+	// - Optional fields in StateConfig (only updated if specified):
+	//   * session_table_capacity
+	//   * session_table_max_load_factor
+	//   * adjust_weights_config
+	//   * refresh_period (if set to 0, disables periodic refresh)
+	// - Session table may be resized if capacity changes
+	// - Background tasks are restarted with new configuration
+	//
+	// Validation:
+	// - Virtual service identifiers must be unique
+	// - Pure L3 services (pure_l3=true) must have port=0
+	// - No conflicting virtual services allowed
+	//
+	// Returns error if validation fails or operation cannot be completed.
 	rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
 
-	// Update reals with optional buffering updates
+	// Update real server properties.
+	//
+	// Allows modifying real server weights and enabled/disabled state
+	// without recreating the entire virtual service configuration.
+	//
+	// Supports two modes:
+	// - Immediate: Updates are applied immediately (buffer=false)
+	// - Buffered: Updates queued and applied atomically on flush
+	//             (buffer=true)
+	//
+	// Buffered mode is useful for applying multiple updates atomically
+	// to avoid intermediate inconsistent states.
 	rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
 
-	// Flush buffered reals updates
+	// Flush buffered real server updates.
+	//
+	// Applies all previously buffered real server updates atomically.
+	// This ensures that all updates take effect simultaneously, avoiding
+	// intermediate states where only some updates are applied.
+	//
+	// Returns the number of updates that were flushed.
 	rpc FlushRealUpdates(FlushRealUpdatesRequest)
 		returns (FlushRealUpdatesResponse);
 
-	// Show balancer config
+	// Show balancer configuration.
+	//
+	// Returns the current configuration for the specified balancer,
+	// including any buffered real server updates that haven't been
+	// flushed yet.
 	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-	// List balancer configs
+	// List all balancer configurations.
+	//
+	// Returns a list of all balancer instances currently managed
+	// by the control plane, along with their configurations.
 	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 
-	// Stats of the balancer config
-	rpc ConfigStats(ConfigStatsRequest) returns (ConfigStatsResponse);
+	// Show balancer statistics.
+	//
+	// Returns packet processing statistics for the balancer.
+	// Statistics depend on the packet handler's topological position
+	// in the processing pipeline.
+	//
+	// Optional filtering by device, pipeline, function, and chain
+	// allows retrieving statistics for specific processing contexts.
+	rpc ShowStats(ShowStatsRequest) returns (ShowStatsResponse);
 
-	// Info about the balancer state
-	rpc StateInfo(StateInfoRequest) returns (StateInfoResponse);
+	// Show balancer runtime information.
+	//
+	// Returns runtime information including active session counts,
+	// last packet timestamps, and per-virtual-service/per-real statistics.
+	//
+	// Session counts are updated asynchronously during periodic refresh,
+	// so they may not reflect the exact current state.
+	rpc ShowInfo(ShowInfoRequest) returns (ShowInfoResponse);
 
-	// Info about active balancer sessions
-	rpc SessionsInfo(SessionsInfoRequest) returns (SessionsInfoResponse);
+	// Show active sessions.
+	//
+	// Returns detailed information about all active sessions tracked
+	// by the balancer, including client addresses, virtual service
+	// mappings, real server assignments, and timeout information.
+	rpc ShowSessions(ShowSessionsRequest) returns (ShowSessionsResponse);
 }
 
-////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 
+// Request to create or update a balancer configuration.
 message UpdateConfigRequest {
+	// Balancer instance name (required).
+	//
+	// Unique identifier for this balancer instance.
+	// Used to reference the balancer in subsequent operations.
 	string name = 1;
-	ModuleConfig module_config = 2;
-	ModuleStateConfig module_state_config = 3;
+	
+	// Balancer configuration.
+	//
+	// CREATE mode: All fields must be fully specified
+	// UPDATE mode: See UpdateConfig RPC documentation for field requirements
+	BalancerConfig config = 2;
 }
 
+// Response to UpdateConfig request.
+//
+// Empty response indicates success. Errors are returned via gRPC status.
 message UpdateConfigResponse {
 }
 
-////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 
+// Request to update real server properties.
 message UpdateRealsRequest {
+	// Balancer instance name (required)
 	string name = 1;
+	
+	// List of real server updates to apply.
+	//
+	// Each update can modify the weight and/or enabled state
+	// of a specific real server within a virtual service.
 	repeated RealUpdate updates = 2;
 
-	// Allows to delay request applying
-	// until `flush` will be called
+	// Buffer updates instead of applying immediately (optional).
+	//
+	// When true: Updates are queued and applied atomically on flush
+	// When false: Updates are applied immediately
+	//
+	// Buffering is useful for applying multiple updates atomically
+	// to avoid intermediate inconsistent states.
 	bool buffer = 3;
 }
 
+// Response to UpdateReals request.
 message UpdateRealsResponse {
+	// Number of updates that were buffered (not yet applied)
+	uint32 updates_buffered = 1;
+	
+	// Number of updates that were applied immediately
+	uint32 updates_applied = 2;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 
+// Request to flush buffered real server updates.
 message FlushRealUpdatesRequest {
+	// Balancer instance name (required)
 	string name = 1;
 }
 
+// Response to FlushRealUpdates request.
 message FlushRealUpdatesResponse {
-	// Number of updates applied
+	// Number of buffered updates that were flushed and applied
 	uint32 updates_flushed = 1;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 
+// Request to show balancer configuration.
 message ShowConfigRequest {
+	// Balancer instance name (required)
 	string name = 1;
 }
 
+// Response containing balancer configuration.
 message ShowConfigResponse {
-	string name = 1;
-	ModuleConfig module_config = 2;
-	ModuleStateConfig module_state_config = 3;
-	repeated RealUpdate buffered_real_updates = 4;
+	// Current balancer configuration
+	BalancerConfig config = 1;
+	
+	// Real server updates that are buffered but not yet applied.
+	//
+	// These updates will be applied when FlushRealUpdates is called.
+	// Empty if no updates are buffered.
+	repeated RealUpdate buffered_real_updates = 2;
 }
 
+// Request to list all balancer configurations.
 message ListConfigsRequest {
 }
 
+// Response containing list of balancer names.
 message ListConfigsResponse {
-	repeated ShowConfigResponse configs = 1;
+	// Names of all balancer instances
+	repeated string configs = 1;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 
-message StateInfoRequest {
+// Request to show balancer runtime information.
+message ShowInfoRequest {
+	// Balancer instance name (required)
 	string name = 1;
 }
 
-message StateInfoResponse {
+// Response containing balancer runtime information.
+message ShowInfoResponse {
+	// Balancer instance name
 	string name = 1;
+	
+	// Runtime information including session counts and timestamps.
+	//
+	// Session counts are updated asynchronously during periodic refresh,
+	// so they may lag behind the actual current state.
 	BalancerInfo info = 2;
 }
 
-message ConfigStatsRequest {
-	string name = 1;
+// Request to show balancer statistics.
+message ShowStatsRequest {
+	// Balancer instance name (optional).
+	//
+	// If not specified, statistics for all balancers may be returned
+	// (implementation-dependent).
+	optional string name = 1;
 
-	// required for now – will be optional later
-	string device = 2;
-	string pipeline = 3;
-	string function = 4;
-	string chain = 5;
+	// Filter by device name (optional)
+	optional string device = 2;
+	
+	// Filter by pipeline name (optional)
+	optional string pipeline = 3;
+	
+	// Filter by function name (optional)
+	optional string function = 4;
+	
+	// Filter by chain name (optional)
+	optional string chain = 5;
 }
 
-message ConfigStatsResponse {
+// Response containing balancer statistics.
+message ShowStatsResponse {
+	// Balancer instance name
 	string name = 1;
 
+	// Device name (from request or actual)
 	string device = 2;
+	
+	// Pipeline name (from request or actual)
 	string pipeline = 3;
+	
+	// Function name (from request or actual)
 	string function = 4;
+	
+	// Chain name (from request or actual)
 	string chain = 5;
 
+	// Packet processing statistics.
+	//
+	// Includes counters for L4 processing, ICMP handling,
+	// per-virtual-service statistics, and per-real-server statistics.
 	BalancerStats stats = 6;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 
-message SessionsInfoRequest {
+// Request to show active sessions.
+message ShowSessionsRequest {
+	// Balancer instance name (required)
 	string name = 1;
 }
 
-message SessionsInfoResponse {
-	string name = 1;
-	repeated SessionInfo sessions_info = 2;
+// Response containing active session information.
+message ShowSessionsResponse {
+	// List of all active sessions.
+	//
+	// Each session includes client information, virtual service mapping,
+	// real server assignment, creation time, last packet time, and timeout.
+	repeated SessionInfo sessions = 1;
 }

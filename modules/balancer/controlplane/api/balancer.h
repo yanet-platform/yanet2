@@ -37,8 +37,11 @@ struct agent;
 /**
  * Opaque handle to a balancer instance.
  *
- * The handle is returned by balancer_create() and is used with all other
- * API calls. Its internals are private to the implementation.
+ * The handle is returned by balancer_create() and balancers() and is used with
+ * all other API calls. Its internals are private to the implementation.
+ *
+ * Thread-Safety: Does not allow multithreading access.
+ * Safe to work concurrently with the controlplane and dataplane.
  */
 struct balancer_handle;
 
@@ -59,8 +62,7 @@ struct balancer_handle;
 struct balancer_handle **
 balancers(struct agent *agent, size_t *count);
 
-// Create/destroy
-
+// TODO: docs
 struct diag;
 
 /**
@@ -103,7 +105,8 @@ balancer_take_error_msg(struct balancer_handle *handle);
  * Get the name of the balancer instance.
  *
  * @param handle Balancer handle.
- * @return Pointer to the balancer name string (owned by the balancer, do not free).
+ * @return Pointer to the balancer name string (owned by the balancer, do not
+ * free).
  */
 const char *
 balancer_name(struct balancer_handle *handle);
@@ -191,13 +194,14 @@ struct packet_handler_ref {
  * @return 0 on success, -1 on error.
  */
 int
-balancer_packet_handler_stats(
+balancer_stats(
 	struct balancer_handle *balancer,
 	struct balancer_stats *stats,
 	struct packet_handler_ref *ref
 );
 
-// Info
+void
+balancer_stats_free(struct balancer_stats *stats);
 
 /**
  * Aggregated information about a balancer instance.
@@ -209,16 +213,11 @@ balancer_packet_handler_stats(
  * - Release all allocations inside this struct with balancer_info_free().
  */
 struct balancer_info {
-	struct balancer_stats stats; // Aggregated balancer counters snapshot
-
 	size_t active_sessions; // Total number of active sessions
+	uint32_t last_packet_timestamp;
 
 	size_t vs_count;	  // Number of entries in 'vs'
 	struct named_vs_info *vs; // Array of VS info (length: vs_count)
-
-	size_t real_count; // Number of entries in 'reals'
-	struct named_real_info
-		*reals; // Array of real info (length: real_count)
 };
 
 /**
@@ -235,7 +234,11 @@ struct balancer_info {
  * @return 0 on success, -1 on error.
  */
 int
-balancer_info(struct balancer_handle *balancer, struct balancer_info *info);
+balancer_info(
+	struct balancer_handle *balancer,
+	struct balancer_info *info,
+	uint32_t now
+);
 
 /**
  * Free all allocations inside a balancer_info previously filled by
@@ -249,95 +252,24 @@ void
 balancer_info_free(struct balancer_info *info);
 
 /**
- * Lookup information about a single virtual service by identifier.
- *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_take_error_msg(balancer).
- *
- * @param balancer   Balancer handle.
- * @param info       Output structure to be filled.
- * @param identifier Virtual service key.
- * @return 0 on success, -1 if not found or on error.
- */
-int
-balancer_virtual_service_info(
-	struct balancer_handle *balancer,
-	struct named_vs_info *info,
-	struct vs_identifier *identifier
-);
-
-/**
- * Enumerate virtual services managed by the balancer.
- *
- * Returns a heap-allocated array of named_vs_info entries. The caller
- * owns the array and must free() it.
- *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_take_error_msg(balancer).
- *
- * @param balancer Balancer handle.
- * @param vs       Output pointer to array of infos.
- * @return Number of entries on success, -1 on error.
- */
-ssize_t
-balancer_virtual_services_info(
-	struct balancer_handle *balancer, struct named_vs_info **vs
-);
-
-/**
- * Lookup information about a single real by identifier.
- *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_take_error_msg(balancer).
- *
- * @param balancer   Balancer handle.
- * @param info       Output structure to be filled.
- * @param identifier Real key.
- * @return 0 on success, -1 if not found or on error.
- */
-int
-balancer_real_info(
-	struct balancer_handle *balancer,
-	struct named_real_info *info,
-	struct real_identifier *identifier
-);
-
-/**
- * Enumerate real servers managed by the balancer.
- *
- * Returns a heap-allocated array of named_real_info entries. The caller
- * owns the array and must free() it.
- *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_take_error_msg(balancer).
- *
- * @param balancer Balancer handle.
- * @param reals    Output pointer to array of infos.
- * @return Number of entries on success, -1 on error.
- */
-ssize_t
-balancer_reals_info(
-	struct balancer_handle *balancer, struct named_real_info **reals
-);
-
-/**
  * Enumerate active sessions tracked by the balancer.
  *
  * Returns a heap-allocated array of named_session_info entries representing
  * a point-in-time snapshot. The caller owns the array and must free() it.
- * On error, -1 is returned and *sessions is set to NULL.
  *
  * Diagnostics: On error, a message is recorded and retrievable via
  * balancer_take_error_msg(balancer).
  *
  * @param balancer Balancer handle.
  * @param sessions Output pointer to a heap-allocated array of session infos.
- * @return Number of entries on success, -1 on error.
+ * @return Number of entries on success
  */
-ssize_t
+size_t
 balancer_sessions_info(
 	struct balancer_handle *balancer,
 	struct named_session_info **sessions,
-	uint32_t now,
-	bool only_count
+	uint32_t now
 );
+
+void
+balancer_sessions_info_free(struct named_session_info *sessions);

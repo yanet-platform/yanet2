@@ -17,9 +17,13 @@
 
 static int
 setup_reals(
-	struct vs *vs, struct vs_config *config, struct real *reals
+	struct vs *vs,
+	struct vs_config *config,
+	size_t first_real_idx,
+	struct real *reals
 ) {
-	vs->real_count = config->real_count;
+	vs->reals_count = config->real_count;
+	vs->first_real_idx = first_real_idx;
 	SET_OFFSET_OF(&vs->reals, reals);
 	return 0;
 }
@@ -27,15 +31,16 @@ setup_reals(
 static int
 setup_selector(
 	struct vs *vs,
+	struct balancer_state *state,
 	struct memory_context *mctx,
 	struct vs_config *config
 ) {
-	struct real *reals = ADDR_OF(&vs->reals);
-	if (selector_init(&vs->selector, mctx, config->scheduler) != 0) {
+	const struct real *reals = ADDR_OF(&vs->reals);
+	if (selector_init(&vs->selector, state, mctx, config->scheduler) != 0) {
 		PUSH_ERROR("failed to setup selector");
 		return -1;
 	}
-	if (selector_update(&vs->selector, vs->real_count, reals) != 0) {
+	if (selector_update(&vs->selector, vs->reals_count, reals) != 0) {
 		selector_free(&vs->selector);
 		PUSH_ERROR("failed to setup selector reals");
 		return -1;
@@ -45,9 +50,7 @@ setup_selector(
 
 static int
 setup_src_filter(
-	struct vs *vs,
-	struct memory_context *mctx,
-	struct vs_config *config
+	struct vs *vs, struct memory_context *mctx, struct vs_config *config
 ) {
 	if (lpm_init(&vs->src_filter, mctx) != 0) {
 		NEW_ERROR("failed to initialize container for source addresses"
@@ -92,9 +95,7 @@ register_counter(struct vs *vs, struct counter_registry *registry) {
 
 static int
 setup_peers(
-	struct vs *vs,
-	struct memory_context *mctx,
-	struct vs_config *config
+	struct vs *vs, struct memory_context *mctx, struct vs_config *config
 ) {
 	vs->peers_v4_count = config->peers_v4_count;
 	vs->peers_v6_count = config->peers_v6_count;
@@ -136,7 +137,7 @@ setup_state(
 		return -1;
 	}
 	vs->registry_idx = vs_state->registry_idx;
-	vs->identifier = vs_state->identifier;
+	vs->identifier = config->identifier;
 	return 0;
 }
 
@@ -147,14 +148,13 @@ setup_flags(struct vs *vs, struct vs_config *config) {
 }
 
 int
-vs_view_init(
-	struct vs *vs,
+vs_init(struct vs *vs,
+	size_t first_real_idx,
 	struct real *reals,
 	struct balancer_state *balancer_state,
 	struct named_vs_config *config,
 	struct counter_registry *registry,
-	struct memory_context *mctx
-) {
+	struct memory_context *mctx) {
 	if (setup_state(vs, balancer_state, config) != 0) {
 		PUSH_ERROR("failed to setup state");
 		return -1;
@@ -175,12 +175,12 @@ vs_view_init(
 		goto free_peers;
 	}
 
-	if (setup_reals(vs, &config->config, reals) != 0) {
+	if (setup_reals(vs, &config->config, first_real_idx, reals) != 0) {
 		PUSH_ERROR("failed to setup reals");
 		goto free_src_filter;
 	}
 
-	if (setup_selector(vs, mctx, &config->config) != 0) {
+	if (setup_selector(vs, balancer_state, mctx, &config->config) != 0) {
 		PUSH_ERROR("failed to setup selector");
 		goto free_src_filter;
 	}
@@ -214,7 +214,7 @@ free_peers:
 }
 
 void
-vs_view_free(struct vs *vs, struct memory_context *mctx) {
+vs_free(struct vs *vs, struct memory_context *mctx) {
 	memory_bfree(
 		mctx,
 		ADDR_OF(&vs->peers_v4),
@@ -230,9 +230,9 @@ vs_view_free(struct vs *vs, struct memory_context *mctx) {
 }
 
 int
-vs_view_update_reals(struct vs *vs) {
+vs_update_reals(struct vs *vs) {
 	if (selector_update(
-		    &vs->selector, vs->real_count, ADDR_OF(&vs->reals)
+		    &vs->selector, vs->reals_count, ADDR_OF(&vs->reals)
 	    ) != 0) {
 		PUSH_ERROR("failed to update real selector");
 		return -1;

@@ -10,7 +10,7 @@
 #define SERVICE_REGISTRY_BLOCK_SIZE (4096)
 
 static_assert(
-	sizeof(union service) * SERVICE_REGISTRY_BLOCK_SIZE <=
+	sizeof(union service_state) * SERVICE_REGISTRY_BLOCK_SIZE <=
 		MEMORY_BLOCK_ALLOCATOR_MAX_SIZE,
 	"too big block"
 );
@@ -18,7 +18,7 @@ static_assert(
 ////////////////////////////////////////////////////////////////////////////////
 
 struct service_array_block {
-	union service services[SERVICE_REGISTRY_BLOCK_SIZE];
+	union service_state services[SERVICE_REGISTRY_BLOCK_SIZE];
 };
 
 struct service_array {
@@ -27,7 +27,7 @@ struct service_array {
 	struct memory_context mctx;
 };
 
-union service *
+union service_state *
 service_array_lookup(struct service_array *array, size_t idx);
 
 void
@@ -37,4 +37,6 @@ void
 service_array_free(struct service_array *array);
 
 int
-service_array_push_back(struct service_array *array, union service *state);
+service_array_push_back(
+	struct service_array *array, union service_state *state
+);

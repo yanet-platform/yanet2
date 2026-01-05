@@ -59,8 +59,8 @@ handle_icmp_error_packet(struct packet_ctx *ctx) {
 	case validate_packet_session_found:
 		// send packet to real
 		tunnel_packet(
-			ctx->vs.view,
-			ctx->real.view,
+			ctx->vs.ptr,
+			ctx->real.ptr,
 			ctx->packet
 		); // added tunneling for packet
 

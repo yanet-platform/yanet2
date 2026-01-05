@@ -4,7 +4,6 @@
 #include "handler.h"
 
 #include "handler/handler.h"
-#include "state/state.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -21,22 +20,22 @@ packet_ctx_setup(
 	ctx->packet = NULL;
 	ctx->handler = handler;
 	ctx->now = now;
-	ctx->counter.storage = ADDR_OF(&ectx->counter_storage);
+	ctx->stats.storage = ADDR_OF(&ectx->counter_storage);
 	ctx->worker = worker;
-	ctx->counter.common = common_handler_counter(
-		handler, worker->idx, ctx->counter.storage
+	ctx->worker_idx = worker->idx;
+	ctx->stats.common = common_handler_counter(
+		handler, worker->idx, ctx->stats.storage
 	);
-	ctx->counter.icmp_v4 = icmp_v4_handler_counter(
-		handler, worker->idx, ctx->counter.storage
+	ctx->stats.icmp_v4 = icmp_v4_handler_counter(
+		handler, worker->idx, ctx->stats.storage
 	);
-	ctx->counter.icmp_v6 = icmp_v4_handler_counter(
-		handler, worker->idx, ctx->counter.storage
+	ctx->stats.icmp_v6 = icmp_v4_handler_counter(
+		handler, worker->idx, ctx->stats.storage
 	);
-	ctx->counter.l4 =
-		l4_handler_counter(handler, worker->idx, ctx->counter.storage);
+	ctx->stats.l4 =
+		l4_handler_counter(handler, worker->idx, ctx->stats.storage);
 	ctx->packet_front = packet_front;
-	ctx->state.ptr = ADDR_OF(&handler->state);
-	ctx->state.stats = &ctx->state.ptr->stats[worker->idx];
+	ctx->balancer_state = ADDR_OF(&handler->state);
 }
 
 static inline void

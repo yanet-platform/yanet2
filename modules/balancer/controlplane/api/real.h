@@ -31,18 +31,9 @@ struct real_identifier {
  * - weight: Relative load distribution weight in range [0..MAX_REAL_WEIGHT].
  */
 struct real_config {
-	struct net src; // Source network/addresses used to reach this real
+	struct net src;
 
 	uint16_t weight; // Scheduler weight [0..MAX_REAL_WEIGHT]
-};
-
-/**
- * Real configuration paired with its identifier.
- */
-struct named_real_config {
-	struct real_identifier
-		identifier;	   // Real key (VS + addr + proto + port)
-	struct real_config config; // Static configuration for the real
 };
 
 /**
@@ -65,66 +56,48 @@ struct real_update {
 
 	uint16_t weight; // New weight (ignored if DONT_UPDATE_REAL_WEIGHT)
 
-	uint8_t enabled; // 0 = disabled, non-zero = enabled (ignored if
-			 // DONT_UPDATE_REAL_ENABLED)
+	uint8_t enabled; // 0 = disabled, non-zero = enabled
+			 // (ignored if DONT_UPDATE_REAL_ENABLED)
 };
 
-/**
- * Per-real runtime counters.
- *
- * Counts traffic and control-plane related events for a specific real.
- * Aligned to cacheline as stats are sharded between workers.
- */
 struct real_stats {
-	_Atomic uint64_t
-		packets_real_disabled; // Number of packets that arrived while
-				       // the real was disabled
+	// Number of packets that arrived while the real was disabled
+	uint64_t packets_real_disabled;
 
-	_Atomic uint64_t
-		packets_real_not_present; // Packets for which the real is
-					  // absent in current config
+	// One-Packet Scheduling packets sent without creating a session
+	uint64_t ops_packets;
 
-	_Atomic uint64_t ops_packets; // One-Packet Scheduling packets sent
-				      // without creating a session
+	// ICMP error packets associated with this real
+	uint64_t error_icmp_packets;
 
-	_Atomic uint64_t error_icmp_packets; // ICMP error packets associated
-					     // with this real
+	// Sessions created with this real as backend
+	uint64_t created_sessions;
 
-	_Atomic uint64_t
-		created_sessions; // Sessions created with this real as backend
+	// Total packets sent to the real (including OPS and ICMP)
+	uint64_t packets;
 
-	_Atomic uint64_t packets; // Total packets sent to the real (including
-				  // OPS and ICMP)
-
-	_Atomic uint64_t
-		bytes; // Total bytes sent to the real (including OPS and ICMP)
-} __attribute__((aligned(64)));
-
-/**
- * Real statistics paired with its identifier.
- */
-struct named_real_stats {
-	struct real_identifier identifier; // Real key
-	struct real_stats stats;	   // Stats snapshot for the real
+	// Total bytes sent to the real (including OPS and ICMP)
+	uint64_t bytes;
 };
 
-/**
- * Runtime information for a real endpoint.
- *
- * Includes last packet timestamp, active session count and per-real stats.
- * Aligned to cacheline as stats are sharded between workers.
- */
-struct real_info {
-	_Atomic uint32_t last_packet_timestamp; // Last packet time observed
-	size_t active_sessions;			// Active sessions to this real
-	struct real_stats stats;		// Per-real statistics
-} __attribute__((aligned(64)));
+// Stats of the real relative
+// to the virtual service
+struct named_real_stats {
+	struct net_addr dst;
+	struct real_stats stats;
+};
 
-/**
- * Real info paired with its identifier and enabled state.
- */
 struct named_real_info {
-	struct real_identifier identifier; // Real key
-	struct real_info info;		   // Runtime info snapshot
-	bool enabled; // Whether this real is accepting traffic
+	struct net_addr dst;
+	uint32_t last_packet_timestamp; // Last packet time observed
+	size_t active_sessions;		// Active sessions to this real
+};
+
+// Config of the real relative
+// to the virtual service
+struct named_real_config {
+	struct net_addr dst;
+	int ip_proto;
+	int port; // dont use for now
+	struct real_config config;
 };

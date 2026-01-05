@@ -21,8 +21,6 @@
 /// Packets with the same source will be scheduled independently.
 #define VS_OPS_FLAG ((uint8_t)(1ull << 3))
 
-struct named_real_config;
-
 /**
  * Identifier of a virtual service.
  *
@@ -46,6 +44,8 @@ enum vs_scheduler {
 	source_hash = 0,
 	round_robin = 1,
 };
+
+struct named_real_config;
 
 /**
  * Static configuration of a virtual service.
@@ -84,65 +84,51 @@ struct named_vs_config {
  * Per-virtual-service runtime counters.
  */
 struct vs_stats {
-	_Atomic uint64_t incoming_packets; // Packets received for this VS
-	_Atomic uint64_t incoming_bytes;   // Total bytes received for this VS
+	uint64_t incoming_packets; // Packets received for this VS
+	uint64_t incoming_bytes;   // Total bytes received for this VS
 
-	_Atomic uint64_t packet_src_not_allowed; // Dropped due to disallowed
-						 // client source
-	_Atomic uint64_t no_reals; // Failed real selection (all reals disabled)
+	uint64_t packet_src_not_allowed; // Dropped due to disallowed
+					 // client source
+	uint64_t no_reals; // Failed real selection (all reals disabled)
 
-	_Atomic uint64_t
-		ops_packets; // OPS: sent to real without creating session
-	_Atomic uint64_t session_table_overflow; // Failed to create session due
-						 // to table allocation
+	uint64_t ops_packets; // OPS: sent to real without creating session
+	uint64_t session_table_overflow; // Failed to create session due
+					 // to table allocation
 
-	_Atomic uint64_t echo_icmp_packets;  // ICMP echo packets processed
-	_Atomic uint64_t error_icmp_packets; // ICMP error packets forwarded
+	uint64_t echo_icmp_packets;  // ICMP echo packets processed
+	uint64_t error_icmp_packets; // ICMP error packets forwarded
 
-	_Atomic uint64_t real_is_disabled; // Session exists but selected real
-					   // is disabled
-	_Atomic uint64_t real_is_removed;  // Session exists but selected real
-					   // removed from config
+	uint64_t real_is_disabled; // Session exists but selected real
+				   // is disabled
+	uint64_t real_is_removed;  // Session exists but selected real
+				   // not in the packet handler config
 
-	_Atomic uint64_t not_rescheduled_packets; // No established session and
-						  // packet does not start one
+	uint64_t not_rescheduled_packets; // No established session and
+					  // packet does not start one
 
-	_Atomic uint64_t broadcasted_icmp_packets; // ICMP with VS src
-						   // broadcasted to peers
+	uint64_t broadcasted_icmp_packets; // ICMP with VS src
+					   // broadcasted to peers
 
-	_Atomic uint64_t created_sessions; // Sessions created for this VS
+	uint64_t created_sessions; // Sessions created for this VS
 
-	_Atomic uint64_t
-		outgoing_packets; // Packets successfully sent to selected real
-	_Atomic uint64_t
-		outgoing_bytes; // Bytes successfully sent to selected real
-} __attribute__((aligned(64)));
-
-/**
- * Runtime information for a virtual service.
- *
- * Includes activity timestamp, active session counter and per-VS stats.
- * Aligned to cacheline as stats may be sharded between workers.
- */
-struct vs_info {
-	_Atomic uint32_t
-		last_packet_timestamp; // Last packet time observed for this VS
-	size_t active_sessions;	       // Number of currently active sessions
-	struct vs_stats stats;	       // Per-VS statistics
-} __attribute__((aligned(64)));
-
-/**
- * Virtual service info paired with its identifier.
- */
-struct named_vs_info {
-	struct vs_identifier identifier; // Virtual service key
-	struct vs_info info;		 // Runtime info snapshot
+	uint64_t outgoing_packets; // Packets successfully sent to selected real
+	uint64_t outgoing_bytes;   // Bytes successfully sent to selected real
 };
 
-/**
- * Virtual service statistics paired with its identifier.
- */
 struct named_vs_stats {
-	struct vs_identifier identifier; // Virtual service key
-	struct vs_stats stats;		 // Statistics snapshot
+	struct vs_identifier identifier;
+	struct vs_stats stats;
+
+	size_t reals_count;
+	struct named_real_stats *reals;
+};
+
+struct named_vs_info {
+	struct vs_identifier identifier;
+
+	uint32_t last_packet_timestamp;
+	size_t active_sessions;
+
+	size_t reals_count;
+	struct named_real_info *reals;
 };

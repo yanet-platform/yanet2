@@ -41,7 +41,7 @@ service_registry_free(struct service_registry *registry);
  * On success returns a pointer to the service and writes its index to
  * idx_output. Returns NULL on error.
  */
-union service *
+union service_state *
 service_registry_find_or_insert_service(
 	struct service_registry *registry,
 	union service_identifier *id,
@@ -61,7 +61,7 @@ service_registry_lookup_by_id(
  * Lookup service by registry index.
  * Returns pointer to service; behavior is undefined if idx is out of bounds.
  */
-union service *
+union service_state *
 service_registry_lookup(struct service_registry *registry, size_t idx);
 
 /**

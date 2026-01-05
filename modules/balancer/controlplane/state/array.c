@@ -36,7 +36,7 @@ service_array_free(struct service_array *array) {
 	);
 }
 
-union service *
+union service_state *
 service_array_lookup(struct service_array *array, size_t idx) {
 	if (idx >= array->size) {
 		return NULL;
@@ -46,7 +46,9 @@ service_array_lookup(struct service_array *array, size_t idx) {
 }
 
 int
-service_array_push_back(struct service_array *array, union service *state) {
+service_array_push_back(
+	struct service_array *array, union service_state *state
+) {
 	if (array->size % SERVICE_REGISTRY_BLOCK_SIZE == 0) {
 		// need allocate new block
 		// for this, we reallocate the whole blocks array
@@ -96,7 +98,8 @@ service_array_push_back(struct service_array *array, union service *state) {
 	// initialize service
 	array->size++;
 
-	union service *service = service_array_lookup(array, array->size - 1);
-	memcpy(service, state, sizeof(union service));
+	union service_state *service =
+		service_array_lookup(array, array->size - 1);
+	memcpy(service, state, sizeof(union service_state));
 	return 0;
 }

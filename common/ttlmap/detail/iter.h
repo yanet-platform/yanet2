@@ -7,6 +7,7 @@
 
 #define __TTLMAP_ITER_INTERNAL(map_ptr, key_type, value_type, now, cb, data)   \
 	__extension__({                                                        \
+		int __ret = 0;                                                 \
 		size_t __buckets;                                              \
 		if ((map_ptr)->buckets_exp == (uint64_t)-1) {                  \
 			__buckets = 0;                                         \
@@ -24,7 +25,9 @@
 				    cb,                                        \
 				    data                                       \
 			    ) == 1) {                                          \
+				__ret = 1;                                     \
 				break;                                         \
 			}                                                      \
 		}                                                              \
+		__ret;                                                         \
 	})

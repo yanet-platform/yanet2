@@ -7,149 +7,476 @@ import "google/protobuf/duration.proto";
 option go_package = "github.com/yanet-platform/yanet2/modules/"
 		    "balancer/controlplane/balancerpb;balancerpb";
 
-message WlcConfig {
-	uint64 wlc_power = 1;
-	uint32 max_real_weight = 2;
-	google.protobuf.Duration update_period = 3;
+// IP address representation supporting both IPv4 and IPv6.
+//
+// The bytes field contains the raw IP address bytes:
+// - IPv4: 4 bytes
+// - IPv6: 16 bytes
+message Addr {
+	bytes bytes = 1;
 }
 
-// Represents network subnet.
-message Subnet {
-	bytes addr = 1;
+// Network prefix representation.
+//
+// Represents a network address with a prefix length (CIDR notation).
+// For example: 192.168.1.0/24 or 2001:db8::/32
+message Net {
+	// Network address (IPv4 or IPv6)
+	Addr addr = 1;
+	
+	// Prefix length in bits (0-32 for IPv4, 0-128 for IPv6)
 	uint32 size = 2;
 }
 
-// Transport protocol (TCP or UDP).
+// Transport layer protocol.
+//
+// Specifies whether the virtual service operates over TCP or UDP.
+// This affects session tracking, timeout behavior, and packet handling.
 enum TransportProto {
+	// Transmission Control Protocol - connection-oriented, reliable
 	TCP = 0;
+	
+	// User Datagram Protocol - connectionless, best-effort
 	UDP = 1;
 }
 
-// Virtual service scheduler
+// Virtual service scheduling algorithm.
+//
+// Determines how incoming connections are distributed across real servers.
+// The scheduler works in conjunction with real server weights to control
+// traffic distribution.
 enum VsScheduler {
-	// Round robin based on hash
-	WRR = 0;
+	// Source Hash Scheduler.
+	//
+	// Selects real servers based on a hash of the client's source IP address
+	// and port. This provides session affinity - the same client will always
+	// be directed to the same real server (as long as the real remains enabled).
+	//
+	// Weight behavior:
+	// - Real server weights affect the hash space distribution
+	// - Higher weight reals receive proportionally more hash buckets
+	// - A real with weight 2 gets approximately twice the traffic
+	//   of weight 1
+	//
+	// Use cases:
+	// - Stateful applications requiring client stickiness
+	// - Applications with client-side caching
+	// - When consistent routing is more important than perfect load distribution
+	SOURCE_HASH = 0;
 
-	// Round robin with counter
-	PRR = 1;
+	// Weighted Round Robin Scheduler.
+	//
+	// Maintains a monotonic counter and selects real servers consecutively
+	// in proportion to their weights. Each real receives a number of consecutive
+	// connections equal to its weight before moving to the next real.
+	//
+	// Weight behavior:
+	// - A real with weight 3 receives 3 consecutive connections
+	// - Then the scheduler moves to the next real in the list
+	// - Provides more even distribution across all reals
+	//
+	// Use cases:
+	// - Stateless applications
+	// - When even load distribution is critical
+	// - Applications that don't require session affinity
+	ROUND_ROBIN = 1;
+}
 
-	// Weighted Least Connections
-	WLC = 2;
+// Virtual service unique identifier.
+//
+// Each virtual service is uniquely identified by the combination of
+// IP address, port, and transport protocol. No two virtual services
+// can have the same identifier.
+//
+// Special case for pure L3 mode:
+// When VsFlags.pure_l3 is enabled, the port MUST be 0. In this mode,
+// the virtual service matches ALL traffic with the specified IP address
+// and transport protocol, regardless of destination port.
+message VsIdentifier {
+	// Virtual service IP address (IPv4 or IPv6)
+	Addr addr = 1;
+	
+	// Virtual service port number.
+	//
+	// Standard mode (pure_l3 = false):
+	// - Can be any valid port (1-65535)
+	// - Virtual service matches traffic to this specific port
+	//
+	// Pure L3 mode (pure_l3 = true):
+	// - MUST be 0 (configuration is rejected otherwise)
+	// - Port is ignored for traffic matching
+	// - Virtual service matches all ports for the specified IP and protocol
+	uint32 port = 2;
+	
+	// Transport protocol (TCP or UDP)
+	TransportProto proto = 3;
 }
 
 // Virtual service configuration.
+//
+// Defines a load-balanced service that distributes traffic across multiple
+// real servers. Traffic matching the virtual service identifier is intercepted
+// and forwarded to one of the configured real servers based on the scheduling
+// algorithm.
 message VirtualService {
-	// Virtual IP address.
-	bytes addr = 1;
+	// Unique identifier for this virtual service
+	VsIdentifier id = 1;
 
+	// Scheduling algorithm for selecting real servers
+	VsScheduler scheduler = 2;
+
+	// Source IP address filters (optional).
+	//
+	// If specified, only traffic from these source networks is accepted.
+	// If empty, traffic from any source is accepted.
+	// Useful for restricting access to specific client networks.
+	repeated Net allowed_srcs = 3;
+	
+	// List of real servers backing this virtual service.
+	//
+	// Must contain at least one real server. Traffic is distributed across
+	// these reals according to the scheduler and their weights.
+	repeated Real reals = 4;
+
+	// Feature flags controlling virtual service behavior
+	VsFlags flags = 5;
+
+	// Peer balancer addresses for multi-balancer setups (optional).
+	//
+	// Lists the IP addresses of other balancer instances serving the same
+	// virtual service. Used for ICMP error message broadcasting and
+	// coordinated load balancing. Does not include this balancer's address.
+	repeated Addr peers = 6;
+}
+
+// Real server identifier within a virtual service.
+//
+// Identifies a specific real server by its IP address and port.
+// Note: The port field is currently reserved for future use.
+message RealIdentifier {
+	// Real server IP address (IPv4 or IPv6)
+	Addr ip = 1;
+	
+	// Real server port (RESERVED FOR FUTURE USE).
+	//
+	// Currently unused. The actual destination port is determined by:
+	// - Standard mode (pure_l3 = false): Uses the virtual service port
+	// - Pure L3 mode (pure_l3 = true): Uses the client's source port
+	//
+	// This field is reserved for future functionality where real servers
+	// might listen on different ports than the virtual service.
 	uint32 port = 2;
-
-	TransportProto proto = 3;
-
-	VsScheduler scheduler = 4;
-
-	repeated Subnet allowed_srcs = 5;
-	repeated Real reals = 6;
-
-	VsFlags flags = 7;
-
-	// Addresses of the balancer which serves this vs
-	// (except of this balancer address)
-	repeated bytes peers = 8;
 }
 
-// Represents a real server in the configuration.
+// Complete real server identifier including virtual service reference.
+//
+// Used in operations that need to identify a real server in the context
+// of a specific virtual service, such as real server updates.
+message FullRealIdentifier {
+	// Virtual service this real belongs to
+	VsIdentifier vs = 1;
+	
+	// Real server identifier
+	RealIdentifier real = 2;
+}
+
+// Real server configuration.
+//
+// Defines a backend server that handles traffic forwarded by the balancer.
+// Each real server has a weight that influences how much traffic it receives
+// according to the virtual service's scheduling algorithm.
 message Real {
-	// Weight assigned to the real server.
-	uint32 weight = 1;
+	// Real server identifier (IP address)
+	RealIdentifier id = 1;
 
-	// Destination address of the real server.
-	bytes dst_addr = 2;
+	// Scheduling weight (1-65535).
+	//
+	// Determines the proportion of traffic this real receives:
+	// - SOURCE_HASH: Higher weight = more hash buckets = more traffic
+	// - ROUND_ROBIN: Weight determines consecutive connection count
+	//
+	// When adjust_weights is enabled, this weight may be dynamically
+	// adjusted based on active session counts.
+	uint32 weight = 2;
 
-	// When encapsulation is enabled, the source address is calculated as:
-	// src = (src_addr & src_mask) | (original_src & (~ src_mask)).
-	bytes src_addr = 3;
-	bytes src_mask = 4;
-
-	// Unused for now,
-	// not present in the rest codebase.
-	uint32 port = 6;
+	// Source address for encapsulated packets.
+	//
+	// When packets are tunneled to the real server (via IPIP or GRE),
+	// the source address is calculated as:
+	//   src = (src_addr & src_mask) | (original_src & (~src_mask))
+	//
+	// This allows preserving parts of the original source address while
+	// setting specific bits for routing or identification purposes.
+	Addr src_addr = 3;
+	
+	// Source address mask for encapsulation
+	Addr src_mask = 4;
 }
 
-// Flags of the virtual service
+// Virtual service feature flags.
+//
+// Controls various aspects of virtual service behavior including
+// encapsulation method, packet modifications, and routing mode.
 message VsFlags {
-	// If GRE flag is set, GRE is used for tunneling packets to
-	// every balancer real. Else, TUN is used. False by default.
-	bool gre = 6;
+	// Use GRE encapsulation instead of IPIP.
+	//
+	// When true: Packets are tunneled to real servers using GRE
+	//            (Generic Routing Encapsulation)
+	// When false: Packets are tunneled using IPIP (IP-in-IP)
+	//
+	// GRE provides more flexibility and can carry additional metadata,
+	// while IPIP is simpler and has lower overhead.
+	bool gre = 1;
 
-	// fix_mss flag specifies if TCP MSS option must be fixed. False by
-	// default.
-	bool fix_mss = 7;
+	// Fix TCP MSS (Maximum Segment Size) option.
+	//
+	// When true: The balancer adjusts the TCP MSS option in SYN packets
+	// to account for encapsulation overhead, preventing fragmentation.
+	//
+	// Recommended when using tunneling (IPIP or GRE) to ensure optimal
+	// TCP performance and avoid packet fragmentation issues.
+	bool fix_mss = 2;
 
-	// OPS flag specifies if one packet scheduler should be used for
-	// selecting reals of service. False by default.
-	bool ops = 8;
+	// One Packet Scheduler (OPS) mode.
+	//
+	// When true: Each packet is independently scheduled to a real server
+	// without creating a session. Useful for stateless protocols or
+	// when session tracking is not needed.
+	//
+	// When false: Sessions are created and tracked, ensuring all packets
+	// of a connection go to the same real server.
+	bool ops = 3;
 
-	// PureL3 flag specifies if we need to schedule based on L3 address
-	// only. False by default.
-	bool pure_l3 = 9;
+	// Pure Layer 3 routing mode.
+	//
+	// When true:
+	// - Virtual service port MUST be 0 (configuration rejected otherwise)
+	// - Matches ALL traffic with the specified IP and transport protocol
+	// - Port number is ignored for both matching and forwarding
+	// - Packets are forwarded to reals using the client's source port
+	// - No two pure L3 services can have the same (IP, protocol) combination
+	//
+	// When false:
+	// - Virtual service port can be any valid value (1-65535)
+	// - Matches traffic to the specific (IP, port, protocol) combination
+	// - Packets are forwarded to reals using the virtual service port
+	//
+	// Use cases for pure L3 mode:
+	// - Load balancing all traffic to an IP regardless of port
+	// - Transparent proxying scenarios
+	// - When port-based routing is not needed
+	bool pure_l3 = 4;
+
+	// Enable dynamic weight adjustment.
+	//
+	// When true and refresh_period is set:
+	// - The balancer periodically scans the session table
+	// - Collects active session counts for each real server
+	// - Adjusts real weights dynamically to balance load based on
+	//   current session distribution
+	// - Helps prevent overloading when session durations vary
+	//
+	// Works with both SOURCE_HASH and ROUND_ROBIN schedulers.
+	// The adjustment is independent of the scheduling algorithm.
+	bool adjust_weights = 5;
 }
 
-// Message for update real.
+// Real server update operation.
+//
+// Used to modify properties of an existing real server without
+// recreating the entire virtual service configuration. Updates
+// can be buffered and applied atomically.
 message RealUpdate {
-	// IP of the virtual service real belongs to
-	bytes virtual_ip = 1;
+	// Identifies the real server to update
+	FullRealIdentifier real_id = 1;
 
-	// Virtual service proto
-	TransportProto proto = 2;
+	// Enable or disable the real server (optional).
+	//
+	// When true: Real server is enabled and receives traffic
+	// When false: Real server is disabled and receives no new sessions
+	//             (existing sessions may continue)
+	// When not specified: Enabled state is not changed
+	optional bool enable = 2;
 
-	// Virtual service port
-	uint32 port = 3;
-
-	// Ip of the real
-	bytes real_ip = 4;
-
-	// Enable or disable real
-	bool enable = 5;
-
-	// Optional new weight
-	// Zero weight means no update weight
-	uint32 weight = 6;
+	// New weight for the real server (optional).
+	//
+	// Valid range: 1-65535
+	// When not specified: Weight is not changed
+	//
+	// The weight affects traffic distribution according to the
+	// virtual service's scheduling algorithm.
+	optional uint32 weight = 3;
 }
 
+// Session timeout configuration.
+//
+// Defines how long sessions remain active in different TCP states
+// and for UDP connections. Timeouts are specified in seconds.
+// Sessions exceeding their timeout are removed from the session table.
 message SessionsTimeouts {
+	// Timeout for TCP sessions in SYN-ACK state (seconds)
+	// Applies to connections waiting for the final ACK
 	uint32 tcp_syn_ack = 1;
+	
+	// Timeout for TCP sessions in SYN state (seconds)
+	// Applies to connections waiting for SYN-ACK
 	uint32 tcp_syn = 2;
+	
+	// Timeout for TCP sessions in FIN state (seconds)
+	// Applies to connections in graceful shutdown
 	uint32 tcp_fin = 3;
+	
+	// Timeout for established TCP sessions (seconds)
+	// Applies to normal data transfer state
 	uint32 tcp = 4;
+	
+	// Timeout for UDP sessions (seconds)
+	// UDP is connectionless, so this defines inactivity timeout
 	uint32 udp = 5;
+	
+	// Default timeout for other cases (seconds)
 	uint32 default = 6;
 }
 
-message ModuleConfig {
-	repeated VirtualService virtual_services = 1;
-	bytes source_address_v4 = 2;
-	bytes source_address_v6 = 3;
-
-	// if balancer receives packet with destination address
-	// from this list, it tries to make decap
-	repeated bytes decap_addresses = 4;
-
-	// timeouts of the sessions created by balancer
-	SessionsTimeouts sessions_timeouts = 5;
-
-	// Config of the weighted least connections scheme
-	WlcConfig wlc = 6;
+// Top-level balancer configuration.
+//
+// Contains both packet processing configuration and state management
+// configuration. Both components are required for a functioning balancer.
+message BalancerConfig {
+	// Packet processing configuration (optional in proto, required in practice).
+	//
+	// CREATE scenario: REQUIRED - must be fully specified
+	// UPDATE scenario: If provided, all sub-fields must be specified
+	optional PacketHandlerConfig packet_handler = 1;
+	
+	// State management configuration (optional in proto, required in practice).
+	//
+	// CREATE scenario: REQUIRED - must be fully specified
+	// UPDATE scenario: Optional fields may be omitted to retain existing values
+	optional StateConfig state = 2;
 }
 
-message ModuleStateConfig {
-	// Size of the session table
-	uint64 session_table_capacity = 1;
+// Packet processing configuration.
+//
+// Defines how the balancer processes incoming packets, including
+// virtual services, source addresses for encapsulation, and
+// decapsulation settings.
+message PacketHandlerConfig {
+	// List of virtual services.
+	//
+	// CREATE scenario: REQUIRED
+	// UPDATE scenario: REQUIRED (non-optional)
+	//
+	// Defines all virtual services this balancer handles. Each virtual
+	// service must have a unique (IP, port, protocol) combination.
+	repeated VirtualService vs = 1;
 
-	// Period to scan the state of the session table
-	// to update active connections and WLC.
-	google.protobuf.Duration session_table_scan_period = 2;
+	// Source IPv4 address for encapsulated packets.
+	//
+	// CREATE scenario: REQUIRED
+	// UPDATE scenario: REQUIRED (non-optional)
+	//
+	// Used as the outer source address when tunneling packets to
+	// real servers via IPIP or GRE (for IPv4 destinations).
+	Addr source_address_v4 = 2;
+	
+	// Source IPv6 address for encapsulated packets.
+	//
+	// CREATE scenario: REQUIRED
+	// UPDATE scenario: REQUIRED (non-optional)
+	//
+	// Used as the outer source address when tunneling packets to
+	// real servers via IPIP or GRE (for IPv6 destinations).
+	Addr source_address_v6 = 3;
 
-	// Max load factor of the session table.
-	float session_table_max_load_factor = 3;
+	// Decapsulation addresses.
+	//
+	// CREATE scenario: REQUIRED (can be empty list)
+	// UPDATE scenario: REQUIRED (non-optional)
+	//
+	// If the balancer receives a packet with a destination address
+	// from this list, it attempts to decapsulate it (remove the
+	// outer IP header). Used for return traffic in DSR setups or
+	// multi-tier load balancing.
+	repeated Addr decap_addresses = 4;
+
+	// Session timeout configuration.
+	//
+	// CREATE scenario: REQUIRED
+	// UPDATE scenario: REQUIRED (non-optional)
+	//
+	// Defines how long sessions remain active in various states.
+	SessionsTimeouts sessions_timeouts = 5;
+}
+
+// Dynamic weight adjustment configuration.
+//
+// Parameters controlling how real server weights are adjusted
+// based on active session counts when adjust_weights flag is enabled.
+message AdjustWeightsConfig {
+	// Adjustment power factor (optional).
+	//
+	// Controls the aggressiveness of weight adjustment.
+	// Higher values cause more dramatic weight changes.
+	optional uint64 power = 1;
+	
+	// Maximum weight limit (optional).
+	//
+	// Caps the maximum weight a real server can have after adjustment.
+	// Prevents any single real from dominating traffic distribution.
+	optional uint32 max_weight = 2;
+}
+
+// State management configuration.
+//
+// Controls session table sizing, automatic resizing, weight adjustment,
+// and periodic refresh behavior.
+message StateConfig {
+	// Session table capacity (optional in UPDATE).
+	//
+	// CREATE scenario: REQUIRED
+	// UPDATE scenario: OPTIONAL - if not specified, capacity is not changed
+	//
+	// Defines the maximum number of concurrent sessions the balancer
+	// can track. Larger values consume more memory but support more
+	// concurrent connections.
+	optional uint64 session_table_capacity = 1;
+
+	// Maximum load factor for automatic resizing (optional in UPDATE).
+	//
+	// CREATE scenario: REQUIRED
+	// UPDATE scenario: OPTIONAL - if not specified, threshold is not changed
+	//
+	// When (active_sessions / capacity) exceeds this threshold during
+	// periodic refresh, the session table is automatically resized.
+	// Typical values: 0.7 - 0.9
+	optional float session_table_max_load_factor = 2;
+
+	// Weight adjustment configuration (optional in UPDATE).
+	//
+	// CREATE scenario: REQUIRED (can be empty/default)
+	// UPDATE scenario: OPTIONAL - if not specified, config is not changed
+	//
+	// Parameters for dynamic weight adjustment algorithm.
+	// Only used when VsFlags.adjust_weights is enabled.
+	optional AdjustWeightsConfig adjust_weights_config = 3;
+
+	// Periodic refresh interval (optional in UPDATE, special behavior).
+	//
+	// CREATE scenario: REQUIRED - must be specified
+	// UPDATE scenario: OPTIONAL - if not specified, period is not changed
+	//
+	// When set to non-zero duration:
+	// - Balancer periodically scans the session table
+	// - Collects active session statistics
+	// - Automatically resizes table if load factor exceeds threshold
+	// - Adjusts weights for VSs with adjust_weights flag enabled
+	//
+	// When set to zero duration:
+	// - Disables all periodic refresh operations
+	// - No automatic resizing or weight adjustment
+	// - Session statistics are not updated
+	//
+	// Typical values: 1s - 60s depending on requirements
+	optional google.protobuf.Duration refresh_period = 4;
 }

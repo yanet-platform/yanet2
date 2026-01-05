@@ -21,14 +21,13 @@ struct packet_ctx {
 
 	// worker which process current packet
 	struct dp_worker *worker;
+	uint32_t worker_idx;
 
+	// packet handler
 	struct packet_handler *handler;
 
 	// state of the balancer
-	struct {
-		struct balancer_state *ptr;
-		struct balancer_stats *stats;
-	} state;
+	struct balancer_state *balancer_state;
 
 	// current time in seconds
 	uint32_t now;
@@ -42,24 +41,20 @@ struct packet_ctx {
 
 		// counters storage
 		struct counter_storage *storage;
-	} counter;
+	} stats;
 
 	// selected virtual service
 	struct {
-		struct vs_stats *ph_stats;
-		struct vs_stats *state_stats;
-		struct vs_info *info;
-		struct vs *view;
+		struct vs_stats *stats;
+		struct vs *ptr;
 	} vs;
 
 	// selected real
 	struct {
-		struct real_stats *ph_stats;
-		struct real_stats *state_stats;
-		struct real_info *info;
-		struct real *view;
+		struct real_stats *stats;
+		struct real *ptr;
 	} real;
 
 	// if packet was decapsulated
-	bool decap;
+	bool decap_flag;
 };

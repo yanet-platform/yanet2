@@ -1,13 +1,17 @@
 #include "state.h"
+#include "api/real.h"
 #include "common/memory.h"
 #include "controlplane/diag/diag.h"
 #include "registry.h"
 #include "service.h"
 #include "session_table.h"
 #include <assert.h>
+#include <linux/if_link.h>
+#include <netinet/icmp6.h>
 #include <netinet/in.h>
 #include <stdalign.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 
@@ -46,9 +50,6 @@ balancer_state_init(
 		return -1;
 	}
 
-	// setup stats
-	memset(state->stats, 0, sizeof(state->stats));
-
 	return 0;
 }
 
@@ -74,11 +75,13 @@ balancer_state_find_or_insert_vs(
 	union service_identifier service;
 	service_id_from_vs(&service, id);
 	size_t idx_output;
-	struct vs_state *vs = (struct vs_state *)service_registry_find_or_insert_service(
-		&state->vs_registry, &service, &idx_output
-	);
+	struct vs_state *vs =
+		(struct vs_state *)service_registry_find_or_insert_service(
+			&state->vs_registry, &service, &idx_output
+		);
 	if (vs != NULL) {
 		vs->registry_idx = idx_output;
+		vs->identifier = *id;
 	}
 	return vs;
 }
@@ -92,15 +95,14 @@ balancer_state_find_vs(struct balancer_state *state, struct vs_identifier *id) {
 	if (idx == -1) {
 		return NULL;
 	}
-
-	struct vs_state *vs =
-		(struct vs_state *)service_registry_lookup(&state->vs_registry, idx);
-	return vs;
+	return balancer_state_get_vs_by_idx(state, idx);
 }
 
 struct vs_state *
 balancer_state_get_vs_by_idx(struct balancer_state *state, size_t idx) {
-	return (struct vs_state *)service_registry_lookup(&state->vs_registry, idx);
+	return (struct vs_state *)service_registry_lookup(
+		&state->vs_registry, idx
+	);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -126,6 +128,7 @@ balancer_state_find_or_insert_real(
 		);
 	if (real != NULL) {
 		real->registry_idx = idx_output;
+		real->identifier = *id;
 	}
 	return real;
 }
@@ -141,11 +144,7 @@ balancer_state_find_real(
 	if (idx == -1) {
 		return NULL;
 	}
-
-	struct real_state *real = (struct real_state *)service_registry_lookup(
-		&state->real_registry, idx
-	);
-	return real;
+	return balancer_state_get_real_by_idx(state, idx);
 }
 
 struct real_state *
@@ -181,14 +180,14 @@ balancer_state_session_table_capacity(struct balancer_state *state) {
 	return session_table_capacity(&state->session_table);
 }
 
-ssize_t
-balancer_state_sessions_info(
+////////////////////////////////////////////////////////////////////////////////
+
+int
+balancer_state_iter_session_table(
 	struct balancer_state *state,
-	struct named_session_info **info,
 	uint32_t now,
-	bool only_count
+	session_table_iter_callback cb,
+	void *userdata
 ) {
-	return session_table_sessions_info(
-		&state->session_table, info, now, only_count
-	);
+	return session_table_iter(&state->session_table, now, cb, userdata);
 }

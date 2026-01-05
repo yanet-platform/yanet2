@@ -5,10 +5,6 @@
 #include "registry.h"
 #include "session_table.h"
 
-#include "worker.h"
-
-#include "api/stats.h"
-
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
@@ -27,9 +23,6 @@ struct balancer_state {
 
 	// registry of reals
 	struct service_registry real_registry;
-
-	// per-worker stats
-	struct balancer_stats stats[MAX_WORKERS_NUM];
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -124,15 +117,10 @@ balancer_state_resize_session_table(
 	struct balancer_state *state, size_t new_size, uint32_t now
 );
 
-/**
- * Snapshot active sessions into a heap-allocated array.
- * Returns number of sessions, or -1 on error.
- * If only_count is true, counts without allocating the list.
- */
-ssize_t
-balancer_state_sessions_info(
+int
+balancer_state_iter_session_table(
 	struct balancer_state *state,
-	struct named_session_info **info,
 	uint32_t now,
-	bool only_count
+	session_table_iter_callback cb,
+	void *userdata
 );
