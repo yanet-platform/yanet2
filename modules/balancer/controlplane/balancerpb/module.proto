@@ -50,7 +50,8 @@ enum VsScheduler {
 	//
 	// Selects real servers based on a hash of the client's source IP address
 	// and port. This provides session affinity - the same client will always
-	// be directed to the same real server (as long as the real remains enabled).
+	// be directed to the same real server (as long as the real remains 
+	// enabled).
 	//
 	// Weight behavior:
 	// - Real server weights affect the hash space distribution
@@ -61,14 +62,16 @@ enum VsScheduler {
 	// Use cases:
 	// - Stateful applications requiring client stickiness
 	// - Applications with client-side caching
-	// - When consistent routing is more important than perfect load distribution
+	// - When consistent routing is more important than perfect load 
+	// distribution
 	SOURCE_HASH = 0;
 
 	// Weighted Round Robin Scheduler.
 	//
 	// Maintains a monotonic counter and selects real servers consecutively
-	// in proportion to their weights. Each real receives a number of consecutive
-	// connections equal to its weight before moving to the next real.
+	// in proportion to their weights. Each real receives a number of 
+	// consecutive connections equal to its weight before moving to the next
+	// real.
 	//
 	// Weight behavior:
 	// - A real with weight 3 receives 3 consecutive connections
@@ -153,7 +156,7 @@ message VirtualService {
 //
 // Identifies a specific real server by its IP address and port.
 // Note: The port field is currently reserved for future use.
-message RealIdentifier {
+message RelativeRealIdentifier {
 	// Real server IP address (IPv4 or IPv6)
 	Addr ip = 1;
 	
@@ -172,12 +175,12 @@ message RealIdentifier {
 //
 // Used in operations that need to identify a real server in the context
 // of a specific virtual service, such as real server updates.
-message FullRealIdentifier {
+message RealIdentifier {
 	// Virtual service this real belongs to
 	VsIdentifier vs = 1;
 	
 	// Real server identifier
-	RealIdentifier real = 2;
+	RelativeRealIdentifier real = 2;
 }
 
 // Real server configuration.
@@ -186,8 +189,8 @@ message FullRealIdentifier {
 // Each real server has a weight that influences how much traffic it receives
 // according to the virtual service's scheduling algorithm.
 message Real {
-	// Real server identifier (IP address)
-	RealIdentifier id = 1;
+	// Real server identifier relative to its virtual service.
+	RelativeRealIdentifier id = 1;
 
 	// Scheduling weight (1-65535).
 	//
@@ -288,7 +291,7 @@ message VsFlags {
 // can be buffered and applied atomically.
 message RealUpdate {
 	// Identifies the real server to update
-	FullRealIdentifier real_id = 1;
+	RealIdentifier real_id = 1;
 
 	// Enable or disable the real server (optional).
 	//
@@ -343,7 +346,8 @@ message SessionsTimeouts {
 // Contains both packet processing configuration and state management
 // configuration. Both components are required for a functioning balancer.
 message BalancerConfig {
-	// Packet processing configuration (optional in proto, required in practice).
+	// Packet processing configuration (optional in proto, 
+	// required in practice).
 	//
 	// CREATE scenario: REQUIRED - must be fully specified
 	// UPDATE scenario: If provided, all sub-fields must be specified

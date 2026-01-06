@@ -23,9 +23,10 @@ real_init(
 ) {
 	struct real_identifier identifier = {
 		.vs_identifier = *vs,
-		.addr = named_config->dst,
-		.ip_proto = named_config->ip_proto,
-		.port = named_config->port
+		.relative = (struct relative_real_identifier
+		){.addr = named_config->dst,
+		  .ip_proto = named_config->ip_proto,
+		  .port = named_config->port}
 	};
 	struct real_state *real_state =
 		balancer_state_find_or_insert_real(balancer_state, &identifier);
@@ -55,7 +56,7 @@ real_init(
 	}
 
 	struct real r = {
-		.identifier = identifier,
+		.identifier = identifier.relative,
 		.registry_idx = real_state->registry_idx,
 		.counter_id = counter_id,
 		.src = src

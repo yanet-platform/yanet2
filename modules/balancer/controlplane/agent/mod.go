@@ -39,7 +39,10 @@ func NewBalancerModule(
 
 	agent, err := shm.AgentAttach(agentName, cfg.InstanceID, cfg.MemoryRequirements)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
+		return nil, fmt.Errorf(
+			"failed to attach agent to shared memory: %w",
+			err,
+		)
 	}
 
 	svc := NewBalancerService(agent, log)
@@ -75,7 +78,10 @@ func (m *BalancerModule) Close() error {
 	}
 
 	if err := m.shm.Detach(); err != nil {
-		m.log.Warnw("failed to detach from shared memory mapping", zap.Error(err))
+		m.log.Warnw(
+			"failed to detach from shared memory mapping",
+			zap.Error(err),
+		)
 	}
 
 	return nil

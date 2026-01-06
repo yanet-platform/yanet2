@@ -49,3 +49,8 @@ struct named_session_info {
 	struct session_identifier identifier;
 	struct session_info info;
 };
+
+struct sessions {
+	size_t sessions_count;
+	struct named_session_info *sessions;
+};

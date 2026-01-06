@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
-	balancerffi "github.com/yanet-platform/yanet2/modules/balancer/controlplane/agent/ffi"
+	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/agent/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"go.uber.org/zap"
 )
@@ -23,15 +23,15 @@ type BalancerService struct {
 
 	mu sync.Mutex
 
-	instances map[string]*Balancer
-	agent     *cpffi.Agent
+	balancers map[string]*Balancer
+	agent     *yanet.Agent
 	log       *zap.SugaredLogger
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 func NewBalancerService(
-	agent *cpffi.Agent,
+	agent *yanet.Agent,
 	log *zap.SugaredLogger,
 ) *BalancerService {
 	log.Info("initializing balancer service")
@@ -39,33 +39,16 @@ func NewBalancerService(
 	instances := make(map[string]*Balancer)
 
 	// Get existing balancers from the agent
-	existingBalancers, err := balancerffi.List(agent)
+	existingBalancers, err := ListBalancers(agent, log)
 	if err != nil {
 		log.Errorw("failed to list existing balancers", "error", err)
 	} else if len(existingBalancers) > 0 {
 		log.Infow("found existing balancers", "count", len(existingBalancers))
 
-		// Wrap each existing balancer and store in instances map
-		for _, ffiBalancer := range existingBalancers {
-			name := ffiBalancer.Name()
-			if name == "" {
-				log.Warn("skipping balancer with empty name")
-				continue
-			}
-
+		// Store each existing balancer in instances map
+		for _, balancer := range existingBalancers {
+			name := balancer.balancer.Name()
 			log.Infow("registering existing balancer", "name", name)
-
-			// Create a Balancer wrapper for the existing FFI balancer
-			// Note: We don't have the original config, so we'll need to handle this
-			// For now, we create a minimal wrapper
-			balancer := &Balancer{
-				balancer:    ffiBalancer,
-				agent:       agent,
-				config:      nil, // Config unknown for existing balancers
-				stateConfig: nil, // State config unknown for existing balancers
-				log:         log.With("balancer", name),
-			}
-
 			instances[name] = balancer
 		}
 	}
@@ -73,7 +56,7 @@ func NewBalancerService(
 	return &BalancerService{
 		mu:        sync.Mutex{},
 		agent:     agent,
-		instances: instances,
+		balancers: instances,
 		log:       log,
 	}
 }
@@ -87,19 +70,28 @@ func (m *BalancerService) UpdateConfig(
 ) (*balancerpb.UpdateConfigResponse, error) {
 	name := req.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"module config name is required",
+		)
 	}
 
 	// Check if balancer exists (hold lock only for map access)
 	m.mu.Lock()
-	existingBalancer, exists := m.instances[name]
+	existingBalancer, exists := m.balancers[name]
 	m.mu.Unlock()
 
 	if exists {
 		// Update existing balancer (no service lock held)
 		m.log.Infow("updating existing balancer", "name", name)
-		if err := existingBalancer.Update(req.ModuleConfig, req.ModuleStateConfig); err != nil {
-			m.log.Errorw("failed to update balancer", "name", name, "error", err)
+		if err := existingBalancer.Update(req.Config); err != nil {
+			m.log.Errorw(
+				"failed to update balancer",
+				"name",
+				name,
+				"error",
+				err,
+			)
 			return nil, fmt.Errorf("failed to update balancer: %w", err)
 		}
 		m.log.Infow("balancer updated successfully", "name", name)
@@ -112,8 +104,7 @@ func (m *BalancerService) UpdateConfig(
 	newBalancer, err := NewBalancerFromProto(
 		*m.agent,
 		name,
-		req.ModuleConfig,
-		req.ModuleStateConfig,
+		req.Config,
 		balancerLog,
 	)
 	if err != nil {
@@ -123,7 +114,7 @@ func (m *BalancerService) UpdateConfig(
 
 	// Add to map (hold lock only for map modification)
 	m.mu.Lock()
-	m.instances[name] = newBalancer
+	m.balancers[name] = newBalancer
 	m.mu.Unlock()
 
 	m.log.Infow("balancer created successfully", "name", name)
@@ -139,12 +130,15 @@ func (m *BalancerService) UpdateReals(
 ) (*balancerpb.UpdateRealsResponse, error) {
 	name := req.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"module config name is required",
+		)
 	}
 
 	// Get balancer instance (hold lock only for map access)
 	m.mu.Lock()
-	balancerInstance, exists := m.instances[name]
+	balancerInstance, exists := m.balancers[name]
 	m.mu.Unlock()
 
 	if !exists {
@@ -152,15 +146,35 @@ func (m *BalancerService) UpdateReals(
 		return nil, fmt.Errorf("balancer [name=%s] not found", name)
 	}
 
-	m.log.Debugw("updating reals", "name", name, "count", len(req.Updates), "buffer", req.Buffer)
+	m.log.Debugw(
+		"updating reals",
+		"name",
+		name,
+		"count",
+		len(req.Updates),
+		"buffer",
+		req.Buffer,
+	)
 
 	// Parse real updates
-	updates := make([]balancerffi.RealUpdate, 0, len(req.Updates))
+	updates := make([]ffi.RealUpdate, 0, len(req.Updates))
 	for i, protoUpdate := range req.Updates {
 		update, err := NewRealUpdateFromProto(protoUpdate)
 		if err != nil {
-			m.log.Errorw("failed to parse real update", "name", name, "index", i, "error", err)
-			return nil, fmt.Errorf("failed to parse update at index %d: %w", i, err)
+			m.log.Errorw(
+				"failed to parse real update",
+				"name",
+				name,
+				"index",
+				i,
+				"error",
+				err,
+			)
+			return nil, fmt.Errorf(
+				"failed to parse update at index %d: %w",
+				i,
+				err,
+			)
 		}
 		updates = append(updates, *update)
 	}
@@ -171,7 +185,15 @@ func (m *BalancerService) UpdateReals(
 		return nil, fmt.Errorf("failed to update reals: %w", err)
 	}
 
-	m.log.Infow("reals updated successfully", "name", name, "count", len(updates), "buffered", req.Buffer)
+	m.log.Infow(
+		"reals updated successfully",
+		"name",
+		name,
+		"count",
+		len(updates),
+		"buffered",
+		req.Buffer,
+	)
 	return &balancerpb.UpdateRealsResponse{}, nil
 }
 
@@ -184,12 +206,15 @@ func (m *BalancerService) FlushRealUpdates(
 ) (*balancerpb.FlushRealUpdatesResponse, error) {
 	name := req.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"module config name is required",
+		)
 	}
 
 	// Get balancer instance (hold lock only for map access)
 	m.mu.Lock()
-	balancerInstance, exists := m.instances[name]
+	balancerInstance, exists := m.balancers[name]
 	m.mu.Unlock()
 
 	if !exists {
@@ -209,7 +234,11 @@ func (m *BalancerService) FlushRealUpdates(
 			"error",
 			err,
 		)
-		return nil, fmt.Errorf("failed to flush real updates for balancer %s: %w", name, err)
+		return nil, fmt.Errorf(
+			"failed to flush real updates for balancer %s: %w",
+			name,
+			err,
+		)
 	}
 
 	m.log.Infow("real updates flushed", "name", name, "count", count)
@@ -227,12 +256,15 @@ func (m *BalancerService) ShowConfig(
 ) (*balancerpb.ShowConfigResponse, error) {
 	name := req.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"module config name is required",
+		)
 	}
 
 	// Get balancer instance (hold lock only for map access)
 	m.mu.Lock()
-	balancerInstance, exists := m.instances[name]
+	balancerInstance, exists := m.balancers[name]
 	m.mu.Unlock()
 
 	if !exists {
@@ -243,13 +275,11 @@ func (m *BalancerService) ShowConfig(
 	m.log.Debugw("showing config", "name", name)
 
 	// Get config (no service lock held)
-	moduleConfigProto, moduleStateConfigProto := balancerInstance.GetConfig()
+	_ = balancerInstance.GetConfig()
 
-	return &balancerpb.ShowConfigResponse{
-		Name:              name,
-		ModuleConfig:      moduleConfigProto,
-		ModuleStateConfig: moduleStateConfigProto,
-	}, nil
+	// Note: config is *ffi.BalancerConfig, not *balancerpb.BalancerConfig
+	// Conversion would be needed here, but for now return error
+	return nil, fmt.Errorf("ShowConfig not fully implemented - config conversion needed")
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -262,41 +292,36 @@ func (m *BalancerService) ListConfigs(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.log.Debugw("listing configs", "count", len(m.instances))
+	m.log.Debugw("listing configs", "count", len(m.balancers))
 
-	configs := make([]*balancerpb.ShowConfigResponse, 0, len(m.instances))
-
-	for name, balancerInstance := range m.instances {
-		moduleConfigProto, moduleStateConfigProto := balancerInstance.GetConfig()
-
-		config := &balancerpb.ShowConfigResponse{
-			Name:              name,
-			ModuleConfig:      moduleConfigProto,
-			ModuleStateConfig: moduleStateConfigProto,
-		}
-		configs = append(configs, config)
+	names := make([]string, 0, len(m.balancers))
+	for name := range m.balancers {
+		names = append(names, name)
 	}
 
 	return &balancerpb.ListConfigsResponse{
-		Configs: configs,
+		Configs: names,
 	}, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// StateInfo returns info of the balancer state
-func (m *BalancerService) StateInfo(
+// ShowInfo returns info of the balancer state
+func (m *BalancerService) ShowInfo(
 	ctx context.Context,
-	req *balancerpb.StateInfoRequest,
-) (*balancerpb.StateInfoResponse, error) {
+	req *balancerpb.ShowInfoRequest,
+) (*balancerpb.ShowInfoResponse, error) {
 	name := req.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"module config name is required",
+		)
 	}
 
 	// Get balancer instance (hold lock only for map access)
 	m.mu.Lock()
-	balancerInstance, exists := m.instances[name]
+	balancerInstance, exists := m.balancers[name]
 	m.mu.Unlock()
 
 	if !exists {
@@ -309,7 +334,7 @@ func (m *BalancerService) StateInfo(
 	// Get state info (no service lock held)
 	info := balancerInstance.GetStateInfo(time.Now())
 
-	return &balancerpb.StateInfoResponse{
+	return &balancerpb.ShowInfoResponse{
 		Name: name,
 		Info: ConvertBalancerInfoToProto(info),
 	}, nil
@@ -317,19 +342,22 @@ func (m *BalancerService) StateInfo(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// ConfigStats returns stats of the balancer config
-func (m *BalancerService) ConfigStats(
+// ShowStats returns stats of the balancer config
+func (m *BalancerService) ShowStats(
 	ctx context.Context,
-	req *balancerpb.ConfigStatsRequest,
-) (*balancerpb.ConfigStatsResponse, error) {
+	req *balancerpb.ShowStatsRequest,
+) (*balancerpb.ShowStatsResponse, error) {
 	name := req.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"module config name is required",
+		)
 	}
 
 	// Get balancer instance (hold lock only for map access)
 	m.mu.Lock()
-	balancerInstance, exists := m.instances[name]
+	balancerInstance, exists := m.balancers[name]
 	m.mu.Unlock()
 
 	if !exists {
@@ -340,38 +368,53 @@ func (m *BalancerService) ConfigStats(
 	m.log.Debugw("getting config stats", "name", name)
 
 	// Get config stats (no service lock held)
-	info := balancerInstance.GetConfigStats(
-		req.Device,
-		req.Pipeline,
-		req.Function,
-		req.Chain,
-	)
+	device := ""
+	if req.Device != nil {
+		device = *req.Device
+	}
+	pipeline := ""
+	if req.Pipeline != nil {
+		pipeline = *req.Pipeline
+	}
+	function := ""
+	if req.Function != nil {
+		function = *req.Function
+	}
+	chain := ""
+	if req.Chain != nil {
+		chain = *req.Chain
+	}
 
-	return &balancerpb.ConfigStatsResponse{
+	info := balancerInstance.GetConfigStats(device, pipeline, function, chain)
+
+	return &balancerpb.ShowStatsResponse{
 		Name:     name,
-		Device:   req.Device,
-		Pipeline: req.Pipeline,
-		Function: req.Function,
-		Chain:    req.Chain,
+		Device:   device,
+		Pipeline: pipeline,
+		Function: function,
+		Chain:    chain,
 		Stats:    ConvertBalancerStatsToProto(info),
 	}, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// SessionsInfo returns info about active balancer sessions
-func (m *BalancerService) SessionsInfo(
+// ShowSessions returns info about active balancer sessions
+func (m *BalancerService) ShowSessions(
 	ctx context.Context,
-	req *balancerpb.SessionsInfoRequest,
-) (*balancerpb.SessionsInfoResponse, error) {
+	req *balancerpb.ShowSessionsRequest,
+) (*balancerpb.ShowSessionsResponse, error) {
 	name := req.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"module config name is required",
+		)
 	}
 
 	// Get balancer instance (hold lock only for map access)
 	m.mu.Lock()
-	balancerInstance, exists := m.instances[name]
+	balancerInstance, exists := m.balancers[name]
 	m.mu.Unlock()
 
 	if !exists {
@@ -382,22 +425,24 @@ func (m *BalancerService) SessionsInfo(
 	m.log.Debugw("getting sessions info", "name", name)
 
 	// Get sessions info (no service lock held)
-	sessionsInfo, err := balancerInstance.GetSessionsInfo(time.Now())
+	sessions, err := balancerInstance.GetSessionsInfo(time.Now())
 	if err != nil {
 		m.log.Errorw("failed to get sessions info", "name", name, "error", err)
 		return nil, fmt.Errorf("failed to get sessions info: %w", err)
 	}
 
 	// Convert to protobuf
-	sessionsPb := make([]*balancerpb.SessionInfo, 0, len(sessionsInfo.Sessions))
-	for idx := range sessionsInfo.Sessions {
-		sessionsPb = append(sessionsPb, ConvertSessionInfoToProto(&sessionsInfo.Sessions[idx]))
+	sessionsPb := make([]*balancerpb.SessionInfo, 0, len(sessions))
+	for idx := range sessions {
+		sessionsPb = append(
+			sessionsPb,
+			ConvertSessionInfoToProto(&sessions[idx]),
+		)
 	}
 
-	m.log.Infow("sessions info retrieved", "name", name, "count", sessionsInfo.SessionsCount)
+	m.log.Infow("sessions info retrieved", "name", name, "count", len(sessions))
 
-	return &balancerpb.SessionsInfoResponse{
-		Name:         name,
-		SessionsInfo: sessionsPb,
+	return &balancerpb.ShowSessionsResponse{
+		Sessions: sessionsPb,
 	}, nil
 }

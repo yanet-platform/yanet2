@@ -53,10 +53,15 @@ type VsIdentifier struct {
 	Proto VsProto
 }
 
+type RelativeRealIdentifier struct {
+	Ip   netip.Addr
+	Port uint16
+}
+
 // RealIdentifier uniquely identifies a real endpoint within a VS.
 type RealIdentifier struct {
-	Vs VsIdentifier
-	Ip netip.Addr
+	Vs       VsIdentifier
+	Relative RelativeRealIdentifier
 }
 
 // Real describes a real backend for a virtual service.
@@ -127,13 +132,12 @@ type VsStats struct {
 
 // RealStats mirrors per-real counters.
 type RealStats struct {
-	PacketsRealDisabled   uint64
-	PacketsRealNotPresent uint64
-	OpsPackets            uint64
-	ErrorIcmpPackets      uint64
-	CreatedSessions       uint64
-	Packets               uint64
-	Bytes                 uint64
+	PacketsRealDisabled uint64
+	OpsPackets          uint64
+	ErrorIcmpPackets    uint64
+	CreatedSessions     uint64
+	Packets             uint64
+	Bytes               uint64
 }
 
 // ModuleStats aggregates module-level stats.
@@ -144,16 +148,10 @@ type ModuleStats struct {
 	Common CommonStats
 }
 
-// AsyncInfo represents asynchronously updated numeric value.
-type AsyncInfo struct {
-	Value     uint
-	UpdatedAt time.Time
-}
-
 // VsInfo represents runtime info for a virtual service (no registry indices).
 type VsInfo struct {
 	VsIdentifier        VsIdentifier
-	ActiveSessions      AsyncInfo
+	ActiveSessions      uint64
 	LastPacketTimestamp time.Time
 	Stats               VsStats
 }
@@ -161,7 +159,7 @@ type VsInfo struct {
 // RealInfo represents runtime info for a real (no registry indices).
 type RealInfo struct {
 	RealIdentifier      RealIdentifier
-	ActiveSessions      AsyncInfo
+	ActiveSessions      uint64
 	LastPacketTimestamp time.Time
 	Stats               RealStats
 	Enabled             bool
@@ -175,12 +173,6 @@ type SessionInfo struct {
 	CreateTimestamp     time.Time
 	LastPacketTimestamp time.Time
 	Timeout             time.Duration
-}
-
-// SessionsInfo is a container for sessions enumeration results.
-type SessionsInfo struct {
-	SessionsCount uint
-	Sessions      []SessionInfo
 }
 
 // SessionsTimeouts configures timeouts per TCP/UDP state.
@@ -202,7 +194,7 @@ type BalancerAddresses struct {
 
 // BalancerInfo is aggregated module info (no registry indices).
 type BalancerInfo struct {
-	ActiveSessions AsyncInfo
+	ActiveSessions uint64
 	Module         ModuleStats
 	VsInfo         []VsInfo
 	RealInfo       []RealInfo
@@ -230,6 +222,8 @@ type VsConfig struct {
 	// PeersV4 and PeersV6 are peer balancer addresses for ICMP broadcasts/responses.
 	PeersV4 []netip.Addr
 	PeersV6 []netip.Addr
+
+	User uint64
 }
 
 // PacketHandlerConfig configures packet handling and virtual services.
@@ -241,10 +235,14 @@ type PacketHandlerConfig struct {
 	DecapAddresses   []netip.Addr
 }
 
+type StateConfig struct {
+	SessionTableCapacity uint
+}
+
 // BalancerConfig is the complete configuration for creating a balancer.
 type BalancerConfig struct {
-	TableSize uint // Session table size
-	Handler   PacketHandlerConfig
+	State   StateConfig
+	Handler PacketHandlerConfig
 }
 
 // RealUpdate describes a selective update to a real's weight and/or enabled state.
@@ -252,4 +250,31 @@ type RealUpdate struct {
 	Identifier RealIdentifier
 	Weight     *uint16 // nil means don't update
 	Enabled    *bool   // nil means don't update
+}
+
+// PacketHandlerRef is an optional reference to narrow statistics to a particular
+// packet handler attachment point. Any field may be empty to indicate no filtering.
+type PacketHandlerRef struct {
+	Device   string // Optional device name
+	Pipeline string // Optional pipeline name
+	Function string // Optional function name
+	Chain    string // Optional chain name
+}
+
+// GraphReal represents a real server in the balancer graph with its current state.
+type GraphReal struct {
+	Identifier netip.Addr // Real server IP address
+	Weight     uint16     // Current weight
+	Enabled    bool       // Current enabled state
+}
+
+// GraphVs represents a virtual service in the balancer graph with its reals.
+type GraphVs struct {
+	Identifier VsIdentifier // Virtual service identifier
+	Reals      []GraphReal  // List of real servers for this VS
+}
+
+// BalancerGraph represents the complete topology of a balancer instance.
+type BalancerGraph struct {
+	VirtualServices []GraphVs // List of virtual services with their reals
 }

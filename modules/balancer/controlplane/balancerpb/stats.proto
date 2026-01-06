@@ -72,7 +72,8 @@ message IcmpStats {
 	uint64 forwarded_packets = 9;
 	
 	// ICMP error messages broadcasted to peer balancers.
-	// Used in multi-balancer setups to ensure all balancers are aware of errors.
+	// Used in multi-balancer setups to ensure all balancers are aware 
+	// of errors.
 	uint64 broadcasted_packets = 10;
 	
 	// Number of ICMP packet clones sent to peer balancers.

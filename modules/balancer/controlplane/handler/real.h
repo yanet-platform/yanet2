@@ -12,9 +12,10 @@
 
 struct real {
 	const struct net src; // Source network used for encapsulation/routing
-	const struct real_identifier identifier; // Identifier of the real (dst
-						 // address + vs identifier)
-	const size_t registry_idx;		 // Index in the registry
+	const struct relative_real_identifier
+		identifier;	   // Identifier of the real (dst
+				   // address + vs identifier)
+	const size_t registry_idx; // Index in the registry
 	const uint64_t counter_id;
 };
 

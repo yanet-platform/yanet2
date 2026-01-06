@@ -1,5 +1,8 @@
 #include "state.h"
+
 #include "api/real.h"
+#include "api/vs.h"
+
 #include "common/memory.h"
 #include "controlplane/diag/diag.h"
 #include "registry.h"
@@ -14,8 +17,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-
-#include "api/vs.h"
 
 int
 balancer_state_init(

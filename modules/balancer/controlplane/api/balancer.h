@@ -89,6 +89,14 @@ balancer_create(
 	struct diag *diag
 );
 
+void
+balancer_config(
+	struct balancer_handle *balancer, struct balancer_config *config
+);
+
+void
+balancer_free_config(struct balancer_config *config);
+
 /**
  * Retrieve the last diagnostic error message for this balancer.
  *
@@ -255,7 +263,8 @@ balancer_info_free(struct balancer_info *info);
  * Enumerate active sessions tracked by the balancer.
  *
  * Returns a heap-allocated array of named_session_info entries representing
- * a point-in-time snapshot. The caller owns the array and must free() it.
+ * a point-in-time snapshot. The caller owns the array and must
+ * balancer_sessions_free() it.
  *
  * Diagnostics: On error, a message is recorded and retrievable via
  * balancer_take_error_msg(balancer).
@@ -264,12 +273,20 @@ balancer_info_free(struct balancer_info *info);
  * @param sessions Output pointer to a heap-allocated array of session infos.
  * @return Number of entries on success
  */
-size_t
-balancer_sessions_info(
+void
+balancer_sessions(
 	struct balancer_handle *balancer,
-	struct named_session_info **sessions,
+	struct sessions *sessions,
 	uint32_t now
 );
 
 void
-balancer_sessions_info_free(struct named_session_info *sessions);
+balancer_sessions_free(struct sessions *sessions);
+
+struct balancer_graph;
+
+void
+balancer_graph(struct balancer_handle *handle, struct balancer_graph *graph);
+
+void
+balancer_graph_free(struct balancer_graph *graph);

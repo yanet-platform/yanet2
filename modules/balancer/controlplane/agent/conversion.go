@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"fmt"
-	"math"
 	"net/netip"
 
 	balancerffi "github.com/yanet-platform/yanet2/modules/balancer/controlplane/agent/ffi"
@@ -11,96 +10,186 @@ import (
 
 // Protobuf to FFI conversions
 
-func NewRealUpdateFromProto(update *balancerpb.RealUpdate) (*balancerffi.RealUpdate, error) {
-	if update.Weight > math.MaxUint16 {
-		return nil, fmt.Errorf(
-			"incorrect real weight: real weight cannot exceed %d",
-			math.MaxUint16,
-		)
+func NewRealUpdateFromProto(
+	update *balancerpb.RealUpdate,
+) (*balancerffi.RealUpdate, error) {
+	if update.RealId == nil || update.RealId.Vs == nil ||
+		update.RealId.Real == nil {
+		return nil, fmt.Errorf("incomplete real identifier in update")
 	}
-	vip, ok := netip.AddrFromSlice(update.VirtualIp)
+
+	if update.Weight != nil {
+		if *update.Weight > uint32(balancerffi.MaxRealWeight) {
+			return nil, fmt.Errorf(
+				"incorrect real weight: real weight cannot exceed %d",
+				balancerffi.MaxRealWeight,
+			)
+		}
+	}
+
+	vip, ok := netip.AddrFromSlice(update.RealId.Vs.Addr.Bytes)
 	if !ok {
 		return nil, fmt.Errorf("incorrect virtual service IP")
 	}
-	realIp, ok := netip.AddrFromSlice(update.RealIp)
+	realIp, ok := netip.AddrFromSlice(update.RealId.Real.Ip.Bytes)
 	if !ok {
 		return nil, fmt.Errorf("incorrect real ip")
 	}
 
 	proto := balancerffi.ProtoUdp
-	if update.Proto == balancerpb.TransportProto_TCP {
+	if update.RealId.Vs.Proto == balancerpb.TransportProto_TCP {
 		proto = balancerffi.ProtoTcp
 	}
 
-	weight := uint16(update.Weight)
-	enabled := update.Enable
+	var weight *uint16
+	if update.Weight != nil {
+		w := uint16(*update.Weight)
+		weight = &w
+	}
+
+	var enabled *bool
+	if update.Enable != nil {
+		enabled = update.Enable
+	}
+
+	realPort := uint16(update.RealId.Vs.Port) // Default to VS port
+	if update.RealId.Real.Port != 0 {
+		realPort = uint16(update.RealId.Real.Port)
+	}
 
 	return &balancerffi.RealUpdate{
 		Identifier: balancerffi.RealIdentifier{
 			Vs: balancerffi.VsIdentifier{
 				Ip:    vip,
-				Port:  uint16(update.Port),
+				Port:  uint16(update.RealId.Vs.Port),
 				Proto: proto,
 			},
-			Ip: realIp,
+			Relative: balancerffi.RelativeRealIdentifier{
+				Ip:   realIp,
+				Port: realPort,
+			},
 		},
-		Weight:  &weight,
-		Enabled: &enabled,
+		Weight:  weight,
+		Enabled: enabled,
 	}, nil
 }
 
 func ProtoToFFIConfig(
-	moduleConfig *balancerpb.ModuleConfig,
-	moduleStateConfig *balancerpb.ModuleStateConfig,
+	config *balancerpb.BalancerConfig,
 ) (balancerffi.BalancerConfig, error) {
-	handlerConfig, err := ProtoToHandlerConfig(moduleConfig)
+	if config.PacketHandler == nil {
+		return balancerffi.BalancerConfig{}, fmt.Errorf(
+			"packet_handler is required in CREATE mode",
+		)
+	}
+	if config.State == nil {
+		return balancerffi.BalancerConfig{}, fmt.Errorf(
+			"state config is required in CREATE mode",
+		)
+	}
+	if config.State.SessionTableCapacity == nil {
+		return balancerffi.BalancerConfig{}, fmt.Errorf(
+			"session_table_capacity is required in CREATE mode",
+		)
+	}
+	if config.State.SessionTableMaxLoadFactor == nil {
+		return balancerffi.BalancerConfig{}, fmt.Errorf(
+			"session_table_max_load_factor is required in CREATE mode",
+		)
+	}
+	if config.State.RefreshPeriod == nil {
+		return balancerffi.BalancerConfig{}, fmt.Errorf(
+			"refresh_period is required in CREATE mode",
+		)
+	}
+
+	handlerConfig, err := ProtoToHandlerConfig(config.PacketHandler)
 	if err != nil {
 		return balancerffi.BalancerConfig{}, err
 	}
 
 	return balancerffi.BalancerConfig{
-		TableSize: uint(moduleStateConfig.SessionTableCapacity),
-		Handler:   handlerConfig,
+		State:   balancerffi.StateConfig{SessionTableCapacity: uint(*config.State.SessionTableCapacity)},
+		Handler: handlerConfig,
 	}, nil
 }
 
-func ProtoToHandlerConfig(moduleConfig *balancerpb.ModuleConfig) (balancerffi.PacketHandlerConfig, error) {
+func ProtoToHandlerConfig(
+	config *balancerpb.PacketHandlerConfig,
+) (balancerffi.PacketHandlerConfig, error) {
+	// Validate required fields (non-optional in UPDATE mode)
+	if config.SessionsTimeouts == nil {
+		return balancerffi.PacketHandlerConfig{}, fmt.Errorf(
+			"sessions_timeouts is required",
+		)
+	}
+	if config.SourceAddressV4 == nil {
+		return balancerffi.PacketHandlerConfig{}, fmt.Errorf(
+			"source_address_v4 is required",
+		)
+	}
+	if config.SourceAddressV6 == nil {
+		return balancerffi.PacketHandlerConfig{}, fmt.Errorf(
+			"source_address_v6 is required",
+		)
+	}
+	if config.DecapAddresses == nil {
+		return balancerffi.PacketHandlerConfig{}, fmt.Errorf(
+			"decap_addresses is required (can be empty list)",
+		)
+	}
+	if config.Vs == nil {
+		return balancerffi.PacketHandlerConfig{}, fmt.Errorf(
+			"vs (virtual services) is required",
+		)
+	}
+
 	// Convert session timeouts
-	timeouts := balancerffi.SessionsTimeouts{}
-	if moduleConfig.SessionsTimeouts != nil {
-		timeouts = balancerffi.SessionsTimeouts{
-			TcpSynAck: moduleConfig.SessionsTimeouts.TcpSynAck,
-			TcpSyn:    moduleConfig.SessionsTimeouts.TcpSyn,
-			TcpFin:    moduleConfig.SessionsTimeouts.TcpFin,
-			Tcp:       moduleConfig.SessionsTimeouts.Tcp,
-			Udp:       moduleConfig.SessionsTimeouts.Udp,
-			Default:   moduleConfig.SessionsTimeouts.Default,
-		}
+	timeouts := balancerffi.SessionsTimeouts{
+		TcpSynAck: config.SessionsTimeouts.TcpSynAck,
+		TcpSyn:    config.SessionsTimeouts.TcpSyn,
+		TcpFin:    config.SessionsTimeouts.TcpFin,
+		Tcp:       config.SessionsTimeouts.Tcp,
+		Udp:       config.SessionsTimeouts.Udp,
+		Default:   config.SessionsTimeouts.Default,
 	}
 
 	// Convert source addresses
 	var sourceV4, sourceV6 netip.Addr
-	if len(moduleConfig.SourceAddressV4) == 4 {
-		sourceV4 = netip.AddrFrom4([4]byte(moduleConfig.SourceAddressV4))
+	if len(config.SourceAddressV4.Bytes) == 4 {
+		sourceV4 = netip.AddrFrom4([4]byte(config.SourceAddressV4.Bytes))
+	} else {
+		return balancerffi.PacketHandlerConfig{}, fmt.Errorf(
+			"source_address_v4 must be a valid IPv4 address",
+		)
 	}
-	if len(moduleConfig.SourceAddressV6) == 16 {
-		sourceV6 = netip.AddrFrom16([16]byte(moduleConfig.SourceAddressV6))
+	if len(config.SourceAddressV6.Bytes) == 16 {
+		sourceV6 = netip.AddrFrom16([16]byte(config.SourceAddressV6.Bytes))
+	} else {
+		return balancerffi.PacketHandlerConfig{}, fmt.Errorf(
+			"source_address_v6 must be a valid IPv6 address",
+		)
 	}
 
 	// Convert decap addresses
-	decapAddrs := make([]netip.Addr, 0, len(moduleConfig.DecapAddresses))
-	for _, addrBytes := range moduleConfig.DecapAddresses {
-		if addr, ok := netip.AddrFromSlice(addrBytes); ok {
-			decapAddrs = append(decapAddrs, addr)
+	decapAddrs := make([]netip.Addr, 0, len(config.DecapAddresses))
+	for _, addrMsg := range config.DecapAddresses {
+		if addrMsg != nil {
+			if addr, ok := netip.AddrFromSlice(addrMsg.Bytes); ok {
+				decapAddrs = append(decapAddrs, addr)
+			}
 		}
 	}
 
 	// Convert virtual services
-	virtualServices := make([]balancerffi.VsConfig, 0, len(moduleConfig.VirtualServices))
-	for _, protoVs := range moduleConfig.VirtualServices {
+	virtualServices := make([]balancerffi.VsConfig, 0, len(config.Vs))
+	for _, protoVs := range config.Vs {
 		vsConfig, err := protoToVsConfig(protoVs)
 		if err != nil {
-			return balancerffi.PacketHandlerConfig{}, fmt.Errorf("failed to convert VS: %w", err)
+			return balancerffi.PacketHandlerConfig{}, fmt.Errorf(
+				"failed to convert VS: %w",
+				err,
+			)
 		}
 		virtualServices = append(virtualServices, vsConfig)
 	}
@@ -114,33 +203,44 @@ func ProtoToHandlerConfig(moduleConfig *balancerpb.ModuleConfig) (balancerffi.Pa
 	}, nil
 }
 
-func protoToVsConfig(protoVs *balancerpb.VirtualService) (balancerffi.VsConfig, error) {
+func protoToVsConfig(
+	protoVs *balancerpb.VirtualService,
+) (balancerffi.VsConfig, error) {
+	if protoVs.Id == nil || protoVs.Id.Addr == nil {
+		return balancerffi.VsConfig{}, fmt.Errorf("invalid VS identifier")
+	}
+
 	// Convert VS address
-	vsAddr, ok := netip.AddrFromSlice(protoVs.Addr)
+	vsAddr, ok := netip.AddrFromSlice(protoVs.Id.Addr.Bytes)
 	if !ok {
 		return balancerffi.VsConfig{}, fmt.Errorf("invalid VS address")
 	}
 
 	// Convert proto
 	var proto balancerffi.VsProto
-	if protoVs.Proto == balancerpb.TransportProto_TCP {
+	if protoVs.Id.Proto == balancerpb.TransportProto_TCP {
 		proto = balancerffi.ProtoTcp
 	} else {
 		proto = balancerffi.ProtoUdp
 	}
 
-	// Convert flags
+	meta := uint64(0)
+
+	// Convert flags and setup meta
 	flags := balancerffi.VsFlags{}
 	if protoVs.Flags != nil {
 		flags.GRE = protoVs.Flags.Gre
 		flags.OPS = protoVs.Flags.Ops
 		flags.PureL3 = protoVs.Flags.PureL3
 		flags.FixMSS = protoVs.Flags.FixMss
+		if protoVs.Flags.AdjustWeights {
+			meta = 1
+		}
 	}
 
 	// Convert scheduler
 	var scheduler balancerffi.VsScheduler
-	if protoVs.Scheduler == balancerpb.VsScheduler_PRR {
+	if protoVs.Scheduler == balancerpb.VsScheduler_ROUND_ROBIN {
 		scheduler = balancerffi.VsSchedulerRoundRobin
 	} else {
 		scheduler = balancerffi.VsSchedulerSourceHash
@@ -149,9 +249,17 @@ func protoToVsConfig(protoVs *balancerpb.VirtualService) (balancerffi.VsConfig, 
 	// Convert reals
 	reals := make([]balancerffi.RealConfig, 0, len(protoVs.Reals))
 	for _, protoReal := range protoVs.Reals {
-		realConfig, err := protoToRealConfig(protoReal, vsAddr, uint16(protoVs.Port), proto)
+		realConfig, err := protoToRealConfig(
+			protoReal,
+			vsAddr,
+			uint16(protoVs.Id.Port),
+			proto,
+		)
 		if err != nil {
-			return balancerffi.VsConfig{}, fmt.Errorf("failed to convert real: %w", err)
+			return balancerffi.VsConfig{}, fmt.Errorf(
+				"failed to convert real: %w",
+				err,
+			)
 		}
 		reals = append(reals, realConfig)
 	}
@@ -159,23 +267,27 @@ func protoToVsConfig(protoVs *balancerpb.VirtualService) (balancerffi.VsConfig, 
 	// Convert allowed sources
 	allowedSrc := make([]netip.Prefix, 0, len(protoVs.AllowedSrcs))
 	for _, subnet := range protoVs.AllowedSrcs {
-		addr, ok := netip.AddrFromSlice(subnet.Addr)
-		if !ok {
-			continue
-		}
-		if prefix, err := addr.Prefix(int(subnet.Size)); err == nil {
-			allowedSrc = append(allowedSrc, prefix)
+		if subnet != nil && subnet.Addr != nil {
+			addr, ok := netip.AddrFromSlice(subnet.Addr.Bytes)
+			if !ok {
+				continue
+			}
+			if prefix, err := addr.Prefix(int(subnet.Size)); err == nil {
+				allowedSrc = append(allowedSrc, prefix)
+			}
 		}
 	}
 
 	// Convert peers
 	var peersV4, peersV6 []netip.Addr
-	for _, peerBytes := range protoVs.Peers {
-		if peer, ok := netip.AddrFromSlice(peerBytes); ok {
-			if peer.Is4() {
-				peersV4 = append(peersV4, peer)
-			} else {
-				peersV6 = append(peersV6, peer)
+	for _, peerMsg := range protoVs.Peers {
+		if peerMsg != nil {
+			if peer, ok := netip.AddrFromSlice(peerMsg.Bytes); ok {
+				if peer.Is4() {
+					peersV4 = append(peersV4, peer)
+				} else {
+					peersV6 = append(peersV6, peer)
+				}
 			}
 		}
 	}
@@ -183,7 +295,7 @@ func protoToVsConfig(protoVs *balancerpb.VirtualService) (balancerffi.VsConfig, 
 	return balancerffi.VsConfig{
 		Identifier: balancerffi.VsIdentifier{
 			Ip:    vsAddr,
-			Port:  uint16(protoVs.Port),
+			Port:  uint16(protoVs.Id.Port),
 			Proto: proto,
 		},
 		Flags:      flags,
@@ -192,6 +304,7 @@ func protoToVsConfig(protoVs *balancerpb.VirtualService) (balancerffi.VsConfig, 
 		AllowedSrc: allowedSrc,
 		PeersV4:    peersV4,
 		PeersV6:    peersV6,
+		User:       meta,
 	}, nil
 }
 
@@ -201,19 +314,43 @@ func protoToRealConfig(
 	vsPort uint16,
 	vsProto balancerffi.VsProto,
 ) (balancerffi.RealConfig, error) {
-	realAddr, ok := netip.AddrFromSlice(protoReal.DstAddr)
+	if protoReal.Id == nil || protoReal.Id.Ip == nil {
+		return balancerffi.RealConfig{}, fmt.Errorf("invalid real identifier")
+	}
+
+	realAddr, ok := netip.AddrFromSlice(protoReal.Id.Ip.Bytes)
 	if !ok {
 		return balancerffi.RealConfig{}, fmt.Errorf("invalid real address")
 	}
 
-	srcAddr, ok := netip.AddrFromSlice(protoReal.SrcAddr)
-	if !ok {
-		return balancerffi.RealConfig{}, fmt.Errorf("invalid source address")
+	// Validate weight
+	if protoReal.Weight == 0 {
+		return balancerffi.RealConfig{}, fmt.Errorf(
+			"invalid real weight: weight must be at least 1",
+		)
+	}
+	if protoReal.Weight > uint32(balancerffi.MaxRealWeight) {
+		return balancerffi.RealConfig{}, fmt.Errorf(
+			"invalid real weight: weight cannot exceed %d",
+			balancerffi.MaxRealWeight,
+		)
 	}
 
-	srcMask, ok := netip.AddrFromSlice(protoReal.SrcMask)
-	if !ok {
-		return balancerffi.RealConfig{}, fmt.Errorf("invalid source mask")
+	var srcAddr, srcMask netip.Addr
+	if protoReal.SrcAddr != nil {
+		srcAddr, ok = netip.AddrFromSlice(protoReal.SrcAddr.Bytes)
+		if !ok {
+			return balancerffi.RealConfig{}, fmt.Errorf(
+				"invalid source address",
+			)
+		}
+	}
+
+	if protoReal.SrcMask != nil {
+		srcMask, ok = netip.AddrFromSlice(protoReal.SrcMask.Bytes)
+		if !ok {
+			return balancerffi.RealConfig{}, fmt.Errorf("invalid source mask")
+		}
 	}
 
 	return balancerffi.RealConfig{
@@ -223,7 +360,10 @@ func protoToRealConfig(
 				Port:  vsPort,
 				Proto: vsProto,
 			},
-			Ip: realAddr,
+			Relative: balancerffi.RelativeRealIdentifier{
+				Ip:   realAddr,
+				Port: uint16(protoReal.Id.Port),
+			},
 		},
 		Weight:  uint16(protoReal.Weight),
 		SrcAddr: srcAddr,
@@ -233,133 +373,140 @@ func protoToRealConfig(
 
 // FFI to Protobuf conversions
 
-func ConvertFFIProtoToProto(proto balancerffi.VsProto) balancerpb.TransportProto {
+func ConvertFFIProtoToProto(
+	proto balancerffi.VsProto,
+) balancerpb.TransportProto {
 	if proto == balancerffi.ProtoTcp {
 		return balancerpb.TransportProto_TCP
 	}
 	return balancerpb.TransportProto_UDP
 }
 
-func ConvertBalancerInfoToProto(info *balancerffi.BalancerInfo) *balancerpb.BalancerInfo {
+func ConvertBalancerInfoToProto(
+	info *balancerffi.BalancerInfo,
+) *balancerpb.BalancerInfo {
 	vsInfo := make([]*balancerpb.VsInfo, 0, len(info.VsInfo))
 	for i := range info.VsInfo {
 		vsInfo = append(vsInfo, ConvertVsInfoToProto(&info.VsInfo[i]))
 	}
 
-	realInfo := make([]*balancerpb.RealInfo, 0, len(info.RealInfo))
-	for i := range info.RealInfo {
-		realInfo = append(realInfo, ConvertRealInfoToProto(&info.RealInfo[i]))
-	}
-
 	return &balancerpb.BalancerInfo{
-		ActiveSessions: &balancerpb.AsyncInfo{
-			Value:     uint64(info.ActiveSessions.Value),
-			UpdatedAt: nil, // timestamp not available in FFI
-		},
-		Module:   ConvertModuleStatsToProto(&info.Module),
-		VsInfo:   vsInfo,
-		RealInfo: realInfo,
+		ActiveSessions: info.ActiveSessions,
+		Vs:             vsInfo,
 	}
 }
 
 func ConvertVsInfoToProto(info *balancerffi.VsInfo) *balancerpb.VsInfo {
+	reals := make([]*balancerpb.RealInfo, 0)
+
 	return &balancerpb.VsInfo{
-		VsRegistryIdx: 0, // not available in FFI
-		VsIp:          info.VsIdentifier.Ip.AsSlice(),
-		VsPort:        uint32(info.VsIdentifier.Port),
-		VsProto:       ConvertFFIProtoToProto(info.VsIdentifier.Proto),
-		ActiveSessions: &balancerpb.AsyncInfo{
-			Value: uint64(info.ActiveSessions.Value),
+		Id: &balancerpb.VsIdentifier{
+			Addr: &balancerpb.Addr{
+				Bytes: info.VsIdentifier.Ip.AsSlice(),
+			},
+			Port:  uint32(info.VsIdentifier.Port),
+			Proto: ConvertFFIProtoToProto(info.VsIdentifier.Proto),
 		},
-		LastPacketTimestamp: nil, // convert if needed
-		Stats:               ConvertVsStatsToProto(&info.Stats),
+		ActiveSessions: info.ActiveSessions,
+		Reals:          reals,
 	}
 }
 
 func ConvertRealInfoToProto(info *balancerffi.RealInfo) *balancerpb.RealInfo {
 	return &balancerpb.RealInfo{
-		RealRegistryIdx: 0, // not available in FFI
-		VsIp:            info.RealIdentifier.Vs.Ip.AsSlice(),
-		VsPort:          uint32(info.RealIdentifier.Vs.Port),
-		VsProto:         ConvertFFIProtoToProto(info.RealIdentifier.Vs.Proto),
-		RealIp:          info.RealIdentifier.Ip.AsSlice(),
-		ActiveSessions: &balancerpb.AsyncInfo{
-			Value: uint64(info.ActiveSessions.Value),
+		Id: &balancerpb.RealIdentifier{
+			Vs: &balancerpb.VsIdentifier{
+				Addr: &balancerpb.Addr{
+					Bytes: info.RealIdentifier.Vs.Ip.AsSlice(),
+				},
+				Port:  uint32(info.RealIdentifier.Vs.Port),
+				Proto: ConvertFFIProtoToProto(info.RealIdentifier.Vs.Proto),
+			},
+			Real: &balancerpb.RelativeRealIdentifier{
+				Ip: &balancerpb.Addr{
+					Bytes: info.RealIdentifier.Relative.Ip.AsSlice(),
+				},
+				Port: uint32(info.RealIdentifier.Relative.Port),
+			},
 		},
-		LastPacketTimestamp: nil,
-		Stats:               ConvertRealStatsToProto(&info.Stats),
+		ActiveSessions: info.ActiveSessions,
 	}
 }
 
-func ConvertSessionInfoToProto(info *balancerffi.SessionInfo) *balancerpb.SessionInfo {
+func ConvertSessionInfoToProto(
+	info *balancerffi.SessionInfo,
+) *balancerpb.SessionInfo {
 	return &balancerpb.SessionInfo{
-		ClientAddr:          info.ClientAddr.AsSlice(),
-		ClientPort:          uint32(info.ClientPort),
-		VsAddr:              info.Real.Vs.Ip.AsSlice(),
-		VsPort:              uint32(info.Real.Vs.Port),
-		RealAddr:            info.Real.Ip.AsSlice(),
-		RealPort:            uint32(info.Real.Vs.Port),
-		CreateTimestamp:     nil,
-		LastPacketTimestamp: nil,
-		Timeout:             nil,
+		ClientAddr: &balancerpb.Addr{
+			Bytes: info.ClientAddr.AsSlice(),
+		},
+		ClientPort: uint32(info.ClientPort),
+		VsId: &balancerpb.VsIdentifier{
+			Addr: &balancerpb.Addr{
+				Bytes: info.Real.Vs.Ip.AsSlice(),
+			},
+			Port:  uint32(info.Real.Vs.Port),
+			Proto: ConvertFFIProtoToProto(info.Real.Vs.Proto),
+		},
+		RealId: &balancerpb.RealIdentifier{
+			Vs: &balancerpb.VsIdentifier{
+				Addr: &balancerpb.Addr{
+					Bytes: info.Real.Vs.Ip.AsSlice(),
+				},
+				Port:  uint32(info.Real.Vs.Port),
+				Proto: ConvertFFIProtoToProto(info.Real.Vs.Proto),
+			},
+			Real: &balancerpb.RelativeRealIdentifier{
+				Ip: &balancerpb.Addr{
+					Bytes: info.Real.Relative.Ip.AsSlice(),
+				},
+				Port: uint32(info.Real.Relative.Port),
+			},
+		},
 	}
 }
 
-func ConvertBalancerStatsToProto(info *balancerffi.BalancerInfo) *balancerpb.BalancerStats {
-	vsStats := make([]*balancerpb.VsStatsInfo, 0, len(info.VsInfo))
+func ConvertBalancerStatsToProto(
+	info *balancerffi.BalancerInfo,
+) *balancerpb.BalancerStats {
+	vsStats := make([]*balancerpb.NamedVsStats, 0, len(info.VsInfo))
 	for i := range info.VsInfo {
-		vsStats = append(vsStats, &balancerpb.VsStatsInfo{
-			VsRegistryIdx: 0,
-			Ip:            info.VsInfo[i].VsIdentifier.Ip.AsSlice(),
-			Port:          uint32(info.VsInfo[i].VsIdentifier.Port),
-			Proto:         ConvertFFIProtoToProto(info.VsInfo[i].VsIdentifier.Proto),
-			Stats:         ConvertVsStatsToProto(&info.VsInfo[i].Stats),
-		})
-	}
-
-	realStats := make([]*balancerpb.RealStatsInfo, 0, len(info.RealInfo))
-	for i := range info.RealInfo {
-		realStats = append(realStats, &balancerpb.RealStatsInfo{
-			RealRegistryIdx: 0,
-			VsIp:            info.RealInfo[i].RealIdentifier.Vs.Ip.AsSlice(),
-			Port:            uint32(info.RealInfo[i].RealIdentifier.Vs.Port),
-			Proto:           ConvertFFIProtoToProto(info.RealInfo[i].RealIdentifier.Vs.Proto),
-			RealIp:          info.RealInfo[i].RealIdentifier.Ip.AsSlice(),
-			Stats:           ConvertRealStatsToProto(&info.RealInfo[i].Stats),
+		vsStats = append(vsStats, &balancerpb.NamedVsStats{
+			Vs: &balancerpb.VsIdentifier{
+				Addr: &balancerpb.Addr{
+					Bytes: info.VsInfo[i].VsIdentifier.Ip.AsSlice(),
+				},
+				Port: uint32(info.VsInfo[i].VsIdentifier.Port),
+				Proto: ConvertFFIProtoToProto(
+					info.VsInfo[i].VsIdentifier.Proto,
+				),
+			},
+			Stats: ConvertVsStatsToProto(&info.VsInfo[i].Stats),
 		})
 	}
 
 	return &balancerpb.BalancerStats{
-		Module: ConvertModuleStatsToProto(&info.Module),
+		L4:     ConvertL4StatsToProto(&info.Module.L4),
+		Icmpv4: ConvertIcmpStatsToProto(&info.Module.ICMPv4),
+		Icmpv6: ConvertIcmpStatsToProto(&info.Module.ICMPv6),
+		Common: ConvertCommonStatsToProto(&info.Module.Common),
 		Vs:     vsStats,
-		Reals:  realStats,
 	}
 }
 
-func ConvertModuleStatsToProto(stats *balancerffi.ModuleStats) *balancerpb.ModuleStats {
-	return &balancerpb.ModuleStats{
-		L4: &balancerpb.L4Stats{
-			IncomingPackets:  stats.L4.IncomingPackets,
-			SelectVsFailed:   stats.L4.SelectVSFailed,
-			InvalidPackets:   stats.L4.InvalidPackets,
-			SelectRealFailed: stats.L4.SelectRealFailed,
-			OutgoingPackets:  stats.L4.OutgoingPackets,
-		},
-		Icmpv4: ConvertIcmpStatsToProto(&stats.ICMPv4),
-		Icmpv6: ConvertIcmpStatsToProto(&stats.ICMPv6),
-		Common: &balancerpb.CommonStats{
-			IncomingPackets:        stats.Common.IncomingPackets,
-			IncomingBytes:          stats.Common.IncomingBytes,
-			UnexpectedNetworkProto: stats.Common.UnexpectedNetworkProto,
-			DecapSuccessful:        stats.Common.DecapSuccessful,
-			DecapFailed:            stats.Common.DecapFailed,
-			OutgoingPackets:        stats.Common.OutgoingPackets,
-			OutgoingBytes:          stats.Common.OutgoingBytes,
-		},
+func ConvertL4StatsToProto(stats *balancerffi.L4Stats) *balancerpb.L4Stats {
+	return &balancerpb.L4Stats{
+		IncomingPackets:  stats.IncomingPackets,
+		SelectVsFailed:   stats.SelectVSFailed,
+		InvalidPackets:   stats.InvalidPackets,
+		SelectRealFailed: stats.SelectRealFailed,
+		OutgoingPackets:  stats.OutgoingPackets,
 	}
 }
 
-func ConvertIcmpStatsToProto(stats *balancerffi.ICMPStats) *balancerpb.IcmpStats {
+func ConvertIcmpStatsToProto(
+	stats *balancerffi.ICMPStats,
+) *balancerpb.IcmpStats {
 	return &balancerpb.IcmpStats{
 		IncomingPackets:           stats.IncomingPackets,
 		SrcNotAllowed:             stats.SrcNotAllowed,
@@ -374,6 +521,20 @@ func ConvertIcmpStatsToProto(stats *balancerffi.ICMPStats) *balancerpb.IcmpStats
 		PacketClonesSent:          stats.PacketClonesSent,
 		PacketClonesReceived:      stats.PacketClonesReceived,
 		PacketCloneFailures:       stats.PacketCloneFailures,
+	}
+}
+
+func ConvertCommonStatsToProto(
+	stats *balancerffi.CommonStats,
+) *balancerpb.CommonStats {
+	return &balancerpb.CommonStats{
+		IncomingPackets:        stats.IncomingPackets,
+		IncomingBytes:          stats.IncomingBytes,
+		UnexpectedNetworkProto: stats.UnexpectedNetworkProto,
+		DecapSuccessful:        stats.DecapSuccessful,
+		DecapFailed:            stats.DecapFailed,
+		OutgoingPackets:        stats.OutgoingPackets,
+		OutgoingBytes:          stats.OutgoingBytes,
 	}
 }
 
@@ -397,14 +558,15 @@ func ConvertVsStatsToProto(stats *balancerffi.VsStats) *balancerpb.VsStats {
 	}
 }
 
-func ConvertRealStatsToProto(stats *balancerffi.RealStats) *balancerpb.RealStats {
+func ConvertRealStatsToProto(
+	stats *balancerffi.RealStats,
+) *balancerpb.RealStats {
 	return &balancerpb.RealStats{
-		PacketsRealDisabled:   stats.PacketsRealDisabled,
-		PacketsRealNotPresent: stats.PacketsRealNotPresent,
-		OpsPackets:            stats.OpsPackets,
-		ErrorIcmpPackets:      stats.ErrorIcmpPackets,
-		CreatedSessions:       stats.CreatedSessions,
-		Packets:               stats.Packets,
-		Bytes:                 stats.Bytes,
+		PacketsRealDisabled: stats.PacketsRealDisabled,
+		OpsPackets:          stats.OpsPackets,
+		ErrorIcmpPackets:    stats.ErrorIcmpPackets,
+		CreatedSessions:     stats.CreatedSessions,
+		Packets:             stats.Packets,
+		Bytes:               stats.Bytes,
 	}
 }

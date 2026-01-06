@@ -8,7 +8,8 @@ dependencies = [
 includes = include_directories('.', '../')
 
 sources = files(
-    'balancer.c'
+    'balancer.c',
+    'config.c'
 )
 
 lib_balancer_cp = static_library(

@@ -12,6 +12,12 @@
  */
 #define MAX_REAL_WEIGHT ((uint16_t)1024)
 
+struct relative_real_identifier {
+	struct net_addr addr; // Real endpoint address (IPv4/IPv6)
+	uint8_t ip_proto;     // IPPROTO_IPV4 or IPPROTO_IPV6
+	uint16_t port;	      // Destination port on the real
+};
+
 /**
  * Identifier of a real endpoint within a virtual service.
  *
@@ -19,9 +25,7 @@
  */
 struct real_identifier {
 	struct vs_identifier vs_identifier; // Parent virtual service identifier
-	struct net_addr addr;		    // Real endpoint address (IPv4/IPv6)
-	uint8_t ip_proto;		    // IPPROTO_IPV4 or IPPROTO_IPV6
-	uint16_t port;			    // Destination port on the real
+	struct relative_real_identifier relative;
 };
 
 /**
