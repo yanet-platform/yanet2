@@ -7,7 +7,7 @@ import (
 	"time"
 
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/agent/ffi"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/agent/go/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"go.uber.org/zap"
 )

@@ -3,7 +3,7 @@ package balancer
 import (
 	"fmt"
 
-	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
+	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -15,8 +15,8 @@ const agentName = "balancer"
 // for balancing traffic.
 type BalancerModule struct {
 	cfg     *Config
-	shm     *cpffi.SharedMemory
-	agent   *cpffi.Agent
+	shm     *yanet.SharedMemory
+	agent   *yanet.Agent
 	service *BalancerService
 	log     *zap.SugaredLogger
 }
@@ -27,7 +27,7 @@ func NewBalancerModule(
 ) (*BalancerModule, error) {
 	log = log.With(zap.String("module", "balancerpb.BalancerService"))
 
-	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath)
+	shm, err := yanet.AttachSharedMemory(cfg.MemoryPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to shared memory: %w", err)
 	}

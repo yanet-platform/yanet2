@@ -3,17 +3,17 @@
 package ffi
 
 /*
-#cgo CFLAGS: -I../../../../../ -I../../../../../lib -I../../../../../common
-#cgo LDFLAGS: -L../../../../../build/lib/controlplane/agent -lagent
-#cgo LDFLAGS: -L../../../../../build/lib/controlplane/config -lconfig_cp
-#cgo LDFLAGS: -L../../../../../build/lib/dataplane/config -lconfig_dp
-#cgo LDFLAGS: -L../../../../../build/lib/controlplane/diag -ldiag
-#cgo LDFLAGS: -L../../../../../build/common/tls_stack -ltls_stack
-#cgo LDFLAGS: -L../../../../../build/lib/counters -lcounters
-#cgo LDFLAGS: -L../../../../../build/lib/logging -llogging
-#cgo LDFLAGS: -L../../../../../build/modules/balancer/controlplane/state -lbalancer_state
-#cgo LDFLAGS: -L../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler
-#cgo LDFLAGS: -L../../../../../build/modules/balancer/controlplane/api -lbalancer_cp
+#cgo CFLAGS: -I../../../../../../ -I../../../../../../lib -I../../../../../../common
+#cgo LDFLAGS: -L../../../../../../build/lib/controlplane/agent -lagent
+#cgo LDFLAGS: -L../../../../../../build/lib/controlplane/config -lconfig_cp
+#cgo LDFLAGS: -L../../../../../../build/lib/dataplane/config -lconfig_dp
+#cgo LDFLAGS: -L../../../../../../build/lib/controlplane/diag -ldiag
+#cgo LDFLAGS: -L../../../../../../build/common/tls_stack -ltls_stack
+#cgo LDFLAGS: -L../../../../../../build/lib/counters -lcounters
+#cgo LDFLAGS: -L../../../../../../build/lib/logging -llogging
+#cgo LDFLAGS: -L../../../../../../build/modules/balancer/controlplane/state -lbalancer_state
+#cgo LDFLAGS: -L../../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler
+#cgo LDFLAGS: -L../../../../../../build/modules/balancer/controlplane/api -lbalancer_cp
 
 #include <stdlib.h>
 #include <stddef.h>
@@ -39,7 +39,6 @@ import (
 	"unsafe"
 
 	xnetip "github.com/yanet-platform/yanet2/common/go/xnetip"
-	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
 // MaxRealWeight is the maximum allowed scheduler weight for a real server.
@@ -58,69 +57,6 @@ func (b Balancer) Name() string {
 		return ""
 	}
 	return C.GoString(cName)
-}
-
-// ListBalancers returns all balancers registered in the given agent.
-func ListBalancers(agent *yanet.Agent) []Balancer {
-	var count C.size_t
-	arr := C.balancers((*C.struct_agent)(agent.AsRawPtr()), &count)
-	defer func() {
-		if arr != nil {
-			C.free(unsafe.Pointer(arr))
-		}
-	}()
-
-	n := int(count)
-	if n == 0 || arr == nil {
-		return nil
-	}
-
-	cArr := unsafe.Slice((**C.struct_balancer_handle)(unsafe.Pointer(arr)), n)
-	out := make([]Balancer, 0, n)
-	for i := range n {
-		if cArr[i] != nil {
-			out = append(out, Balancer{h: cArr[i]})
-		}
-	}
-	return out
-}
-
-// Create creates and registers a new balancer instance.
-func Create(
-	agent *yanet.Agent,
-	name string,
-	cfg BalancerConfig,
-) (Balancer, error) {
-	cName := C.CString(name)
-	defer C.free(unsafe.Pointer(cName))
-
-	cCfg, cleanup, err := buildCBalancerConfig(cfg)
-	if err != nil {
-		return Balancer{}, fmt.Errorf("build balancer config: %w", err)
-	}
-	// Free config (and any nested allocations) after use
-	defer cleanup()
-
-	var diag C.struct_diag
-	C.memset(unsafe.Pointer(&diag), 0, C.sizeof_struct_diag)
-
-	h := C.balancer_create(
-		(*C.struct_agent)(agent.AsRawPtr()),
-		cName,
-		cCfg,
-		&diag,
-	)
-	if h == nil {
-		if msg := C.diag_take_msg(&diag); msg != nil {
-			defer C.free(unsafe.Pointer(msg))
-			return Balancer{}, fmt.Errorf(
-				"balancer_create: %s",
-				C.GoString(msg),
-			)
-		}
-		return Balancer{}, fmt.Errorf("balancer_create failed")
-	}
-	return Balancer{h: h}, nil
 }
 
 // UpdateHandler updates packet handler configuration of an existing balancer.
@@ -248,9 +184,8 @@ func buildVsInto(cVs *C.struct_named_vs_config, vs VsConfig) error {
 	if vs.Flags.OPS {
 		flags |= C.VS_OPS_FLAG
 	}
-	cVs.config.flags = flags
 
-	cVs.config.user = C.uint64_t(vs.User)
+	cVs.config.flags = flags
 
 	// scheduler
 	switch vs.Scheduler {
@@ -633,15 +568,6 @@ func (b Balancer) ResizeSessionTable(newSize int, now uint32) error {
 		return readBalancerError(b)
 	}
 	return nil
-}
-
-// Config returns the current configuration of the balancer.
-// Note: This function requires the balancer_config C function to be properly linked.
-// If you get a linking error, ensure the balancer API library is built and linked correctly.
-func (b Balancer) Config() *BalancerConfig {
-	cConfig := C.struct_balancer_config{}
-	C.balancer_config(b.h, &cConfig)
-	return goFromCBalancerConfig(&cConfig)
 }
 
 // UpdateReals applies a batch of real server updates.

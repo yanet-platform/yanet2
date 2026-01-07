@@ -45,23 +45,6 @@ struct agent;
  */
 struct balancer_handle;
 
-/**
- * Enumerate balancers registered in the given agent.
- *
- * Returns a heap-allocated array of pointers to balancer handles.
- * The handles are owned by the agent; only the array itself must be freed
- * by the caller using free().
- *
- * Diagnostics: This function does not associate with a specific balancer
- * handle, so no per-handle diagnostic is recorded. On error, NULL is returned.
- *
- * @param agent  Agent instance to query.
- * @param count  Output parameter set to the number of returned handles.
- * @return Pointer to an array of balancer_handle* on success, or NULL on error.
- */
-struct balancer_handle **
-balancers(struct agent *agent, size_t *count);
-
 // TODO: docs
 struct diag;
 
@@ -85,17 +68,8 @@ struct balancer_handle *
 balancer_create(
 	struct agent *agent,
 	const char *name,
-	struct balancer_config *config,
-	struct diag *diag
+	struct balancer_config *config
 );
-
-void
-balancer_config(
-	struct balancer_handle *balancer, struct balancer_config *config
-);
-
-void
-balancer_free_config(struct balancer_config *config);
 
 /**
  * Retrieve the last diagnostic error message for this balancer.

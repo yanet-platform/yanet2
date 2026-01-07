@@ -9,8 +9,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/agent/ffi"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/agent/go/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"go.uber.org/zap"
 )
@@ -24,41 +25,115 @@ type BalancerService struct {
 	mu sync.Mutex
 
 	balancers map[string]*Balancer
-	agent     *yanet.Agent
+	agent     ffi.BalancerAgent
 	log       *zap.SugaredLogger
+
+	// Background task management
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 func NewBalancerService(
-	agent *yanet.Agent,
+	shm *yanet.SharedMemory,
+	memory uint,
 	log *zap.SugaredLogger,
 ) *BalancerService {
 	log.Info("initializing balancer service")
 
-	instances := make(map[string]*Balancer)
-
-	// Get existing balancers from the agent
-	existingBalancers, err := ListBalancers(agent, log)
+	// Create balancer agent
+	balancerAgent, err := ffi.NewBalancerAgent(shm, memory)
 	if err != nil {
-		log.Errorw("failed to list existing balancers", "error", err)
-	} else if len(existingBalancers) > 0 {
-		log.Infow("found existing balancers", "count", len(existingBalancers))
-
-		// Store each existing balancer in instances map
-		for _, balancer := range existingBalancers {
-			name := balancer.balancer.Name()
-			log.Infow("registering existing balancer", "name", name)
-			instances[name] = balancer
+		log.Errorw("failed to create balancer agent", "error", err)
+		// Fall back to empty service
+		return &BalancerService{
+			mu:        sync.Mutex{},
+			agent:     balancerAgent,
+			balancers: make(map[string]*Balancer),
+			log:       log,
 		}
 	}
 
-	return &BalancerService{
-		mu:        sync.Mutex{},
-		agent:     agent,
-		balancers: instances,
-		log:       log,
+	instances := make(map[string]*Balancer)
+
+	// Get existing balancers from the agent using balancer_agent_balancers
+	existingBalancers, err := balancerAgent.ListBalancers()
+	if err != nil {
+		log.Errorw("failed to list existing balancers", "error", err)
+	} else if len(existingBalancers.Balancers) > 0 {
+		log.Infow("found existing balancers", "count", len(existingBalancers.Balancers))
+
+		// Store each existing balancer in instances map and start background tasks
+		for _, agentBalancer := range existingBalancers.Balancers {
+			name := agentBalancer.Config.BalancerName
+			log.Infow("registering existing balancer", "name", name)
+
+			// Create Balancer wrapper
+			balancerLog := log.With("balancer", name)
+			b := &Balancer{
+				agent:            agent,
+				balancer:         *agentBalancer.Handle,
+				config:           &agentBalancer.Config.BalancerConfig,
+				realUpdateBuffer: make([]ffi.RealUpdate, 0),
+				reals:            make(map[ffi.RealIdentifier]RealState),
+				log:              balancerLog,
+			}
+
+			// Populate reals map from config
+			graph := agentBalancer.Handle.Graph()
+			for _, vs := range graph.VirtualServices {
+				for _, graphReal := range vs.Reals {
+					realId := ffi.RealIdentifier{
+						Vs: vs.Identifier,
+						Relative: ffi.RelativeRealIdentifier{
+							Ip:   graphReal.Identifier,
+							Port: vs.Identifier.Port,
+						},
+					}
+					b.reals[realId] = RealState{
+						enabled:         graphReal.Enabled,
+						activeSessions:  0,
+						effectiveWeight: uint64(graphReal.Weight),
+					}
+				}
+			}
+
+			instances[name] = b
+		}
 	}
+
+	// Create service with context for background tasks
+	ctx, cancel := context.WithCancel(context.Background())
+	service := &BalancerService{
+		mu:            sync.Mutex{},
+		agent:         agent,
+		balancerAgent: balancerAgent,
+		balancers:     instances,
+		log:           log,
+		ctx:           ctx,
+		cancel:        cancel,
+	}
+
+	// Start background tasks for existing balancers with weight adjustment
+	for name, balancer := range instances {
+		// Get the agent config to check for weight adjustment settings
+		agentBalancers, err := balancerAgent.ListBalancers()
+		if err == nil {
+			for _, agentBal := range agentBalancers.Balancers {
+				if agentBal.Config.BalancerName == name && len(agentBal.Config.AdjustWeightsVs) > 0 {
+					log.Infow("starting weight adjustment for balancer",
+						"name", name,
+						"vs_count", len(agentBal.Config.AdjustWeightsVs),
+						"refresh_period_ms", agentBal.Config.RefreshPeriod)
+					service.startWeightAdjustmentTask(balancer, agentBal.Config)
+				}
+			}
+		}
+	}
+
+	return service
 }
 
 ////////////////////////////////////////////////////////////////////////////////

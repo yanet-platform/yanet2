@@ -1,4 +1,5 @@
 #include "balancer.h"
+#include "api/agent.h"
 #include "graph.h"
 #include "handler/info.h"
 #include "session.h"
@@ -40,54 +41,6 @@ balancer_handle_deref(struct balancer_handle *handle) {
 	return container_of(handle, struct balancer, handle);
 }
 
-struct balancer_handle **
-balancers(struct agent *agent, size_t *handle_count) {
-	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-	cp_config_lock(cp_config);
-
-	size_t count = 0;
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
-	struct cp_module_registry *module_registry =
-		&cp_config_gen->module_registry;
-	size_t registry_size = cp_module_registry_size(module_registry);
-	for (size_t i = 0; i < registry_size; ++i) {
-		struct cp_module *cp_module =
-			cp_module_registry_get(module_registry, i);
-		if (cp_module != NULL &&
-		    strcmp(cp_module->type, "balancer") == 0) {
-			++count;
-		}
-	}
-	*handle_count = count;
-
-	struct balancer_handle **balancers =
-		malloc(count * sizeof(struct balancer_handle *));
-
-	size_t idx = 0;
-	for (size_t i = 0; i < registry_size; ++i) {
-		struct cp_module *cp_module =
-			cp_module_registry_get(module_registry, i);
-		if (cp_module != NULL &&
-		    strcmp(cp_module->type, "balancer") == 0) {
-			struct packet_handler *packet_handler = container_of(
-				cp_module, struct packet_handler, cp_module
-			);
-			struct balancer_state *state =
-				ADDR_OF(&packet_handler->state);
-			struct balancer *balancer =
-				container_of(state, struct balancer, state);
-			assert(&balancer->state == state);
-			assert(balancer->handler == packet_handler);
-			balancers[idx++] = &balancer->handle;
-		}
-	}
-
-	cp_config_unlock(cp_config);
-
-	return balancers;
-}
-
 const char *
 balancer_take_error_msg(struct balancer_handle *handle) {
 	struct balancer *balancer = balancer_handle_deref(handle);
@@ -114,27 +67,6 @@ balancer_resize_session_table(
 	);
 }
 
-static bool
-balancer_exists(struct cp_config *cp_config, const char *name) {
-	bool exists = false;
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
-	struct cp_module_registry *module_registry =
-		&cp_config_gen->module_registry;
-	size_t registry_size = cp_module_registry_size(module_registry);
-	for (size_t i = 0; i < registry_size; ++i) {
-		struct cp_module *cp_module =
-			cp_module_registry_get(module_registry, i);
-		if (cp_module != NULL &&
-		    strcmp(cp_module->type, "balancer") == 0 &&
-		    strcmp(cp_module->name, name) == 0) {
-			exists = true;
-			break;
-		}
-	}
-	return exists;
-}
-
 extern int
 balancer_setup_config(
 	struct balancer_config *dst,
@@ -151,17 +83,16 @@ struct balancer_handle *
 balancer_create(
 	struct agent *agent,
 	const char *name,
-	struct balancer_config *config,
-	struct diag *diag
+	struct balancer_config *config
 ) {
+	agent_clean_error(agent);
+
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	cp_config_lock(cp_config);
+	
 	struct memory_context *mctx = &agent->memory_context;
-	if (balancer_exists(cp_config, name)) {
-		NEW_ERROR("balancer with name '%s' already exists", name);
-		goto error;
-	}
+
 	struct balancer *balancer =
 		memory_balloc(mctx, sizeof(struct balancer));
 	if (balancer == NULL) {
@@ -207,7 +138,7 @@ balancer_create(
 	return &balancer->handle;
 
 error:
-	diag_fill(diag);
+	diag_fill(&agent->diag);
 
 	cp_config_unlock(cp_config);
 
@@ -333,17 +264,6 @@ balancer_info_free(struct balancer_info *info) {
 		free(reals);
 	}
 	free(info->vs);
-}
-
-extern void
-balancer_read_config(struct balancer_config *dst, struct balancer_config *src);
-
-void
-balancer_config(
-	struct balancer_handle *handle, struct balancer_config *config
-) {
-	struct balancer *balancer = balancer_handle_deref(handle);
-	balancer_read_config(config, &balancer->config);
 }
 
 void

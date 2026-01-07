@@ -274,7 +274,34 @@ type GraphVs struct {
 	Reals      []GraphReal  // List of real servers for this VS
 }
 
+// BalancerAgentBalancerItem represents a balancer instance with its configuration.
+type BalancerAgentBalancerItem struct {
+	Handle *Balancer
+	Config BalancerAgentConfig
+}
+
+// BalancerAgentBalancersList represents a list of balancer instances.
+type BalancerAgentBalancersList struct {
+	Balancers []BalancerAgentBalancerItem
+}
+
 // BalancerGraph represents the complete topology of a balancer instance.
 type BalancerGraph struct {
 	VirtualServices []GraphVs // List of virtual services with their reals
+}
+
+// AdjustWeightsConfig configures weight adjustment parameters.
+type AdjustWeightsConfig struct {
+	AdjustPower   uint // Power factor for weight adjustment calculations
+	MaxRealWeight uint // Maximum weight value for a real server
+}
+
+// BalancerAgentConfig is the complete configuration for a balancer agent instance.
+// This includes the balancer configuration plus weight adjustment settings.
+type BalancerAgentConfig struct {
+	BalancerName        string              // Name of the balancer instance
+	BalancerConfig      BalancerConfig      // Core balancer configuration
+	AdjustWeightsConfig AdjustWeightsConfig // Weight adjustment parameters
+	RefreshPeriod       uint32              // Refresh period in milliseconds
+	AdjustWeightsVs     []uint32            // List of VS indices to adjust weights for
 }

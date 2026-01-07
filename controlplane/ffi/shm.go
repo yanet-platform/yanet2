@@ -49,6 +49,10 @@ func (m *SharedMemory) Detach() error {
 	return nil
 }
 
+func (m *SharedMemory) AsRawPtr() unsafe.Pointer {
+	return unsafe.Pointer(m.ptr)
+}
+
 // DPConfig gets configuration of the dataplane instance from shared memory.
 func (m *SharedMemory) DPConfig(instanceIdx uint32) *DPConfig {
 	ptr := C.yanet_shm_dp_config(m.ptr, C.uint32_t(instanceIdx))

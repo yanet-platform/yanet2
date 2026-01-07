@@ -204,3 +204,11 @@ agent_take_error(struct agent *agent);
 //       Use agent_take_error() if you need to retrieve the error message.
 void
 agent_clean_error(struct agent *agent);
+
+void *
+agent_storage_read(struct agent *agent, const char *name);
+
+int
+agent_storage_put(
+	struct agent *agent, const char *name, void *data, size_t size
+);

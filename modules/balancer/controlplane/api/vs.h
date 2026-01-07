@@ -70,9 +70,6 @@ struct vs_config {
 	size_t peers_v6_count; // Number of IPv6 peers in 'peers_v6'
 	struct net6_addr
 		*peers_v6; // IPv6 peer balancers for ICMP broadcast/responses
-
-	// Opaque user info
-	uint64_t user;
 };
 
 /**
