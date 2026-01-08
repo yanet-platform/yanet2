@@ -94,10 +94,38 @@ pub fn add_subcommands(mut command: Command, modules: &HashSet<String>) -> Comma
     list.sort();
     for module in list {
         let name: &'static str = Box::leak(module.into_boxed_str());
-        command = command.subcommand(Command::new(name).allow_external_subcommands(true));
+        command = command.subcommand(external_subcommand(name));
     }
 
     command
+}
+
+/// Creates a subcommand that forwards all arguments to an external binary.
+///
+/// By default, clap adds `-h/--help` flags to every subcommand and handles
+/// them internally, showing an empty help message instead of forwarding to
+/// the actual module binary. To fix this:
+///
+/// 1. We disable clap's built-in help handling so `-h`/`--help` are not
+///    intercepted.
+/// 2. We add a catch-all `args` argument with `allow_hyphen_values(true)` to
+///    accept flags like `-h`, `--help`, `-v`, etc.
+/// 3. We use `trailing_var_arg(true)` to capture all remaining arguments.
+///
+/// This ensures that, for example, `yanet-cli inspect -h` behaves the same as
+/// calling `yanet-cli-inspect -h` directly.
+fn external_subcommand(name: &'static str) -> Command {
+    use clap::Arg;
+
+    Command::new(name)
+        .disable_help_flag(true)
+        .disable_help_subcommand(true)
+        .arg(
+            Arg::new("args")
+                .num_args(..)
+                .allow_hyphen_values(true)
+                .trailing_var_arg(true),
+        )
 }
 
 pub fn try_complete(name: &str, prefix: &str, behavior: &impl Dispatch) {
@@ -188,6 +216,12 @@ fn collect_args(matches: &ArgMatches) -> Vec<std::ffi::OsString> {
         args.push(std::ffi::OsString::from(sub));
         args.extend(collect_args(sub_matches));
         return args;
+    }
+
+    // Try named "args" first (from external_subcommand), then fallback to
+    // external subcommand args.
+    if let Some(raw) = matches.get_raw("args") {
+        return raw.map(|s| s.to_os_string()).collect();
     }
 
     matches
