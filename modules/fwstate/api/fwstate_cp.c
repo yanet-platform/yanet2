@@ -83,8 +83,9 @@ fwstate_module_config_free(struct cp_module *cp_module) {
 	);
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
-
-	fwstate_config_destroy(&config->cfg, agent);
+	if (agent) {
+		fwstate_config_destroy(&config->cfg, agent);
+	}
 
 	memory_bfree(
 		&agent->memory_context,
@@ -103,68 +104,40 @@ fwstate_module_config_detach_maps(struct cp_module *cp_module) {
 	config->cfg.fw6state = NULL;
 }
 
-// Apply defaults to map parameters
-static inline int
-fwstate_apply_map_defaults(
-	uint32_t *index_size,
-	uint32_t *extra_bucket_count,
-	uint16_t worker_count
-) {
-	if (*index_size == 0) {
-		*index_size = 1024 * 1024; // Default: 1M entries
-	}
-	if (*extra_bucket_count == 0) {
-		*extra_bucket_count = 1024; // Default: 1024 extra buckets
-	}
-	if (worker_count == 0) {
-		errno = EINVAL;
-		return -1;
-	}
-	return 0;
-}
-
-// Helper function to initialize fwmap config for IPv4
+// Helper function to initialize fwmap config
 static inline void
-fwstate_init_fw4_config(
+fwstate_init_config(
 	fwmap_config_t *config,
+	uint16_t key_size,
+	fwmap_func_id_t key_equal_fn_id,
+	fwmap_func_id_t copy_key_fn_id,
 	uint32_t index_size,
 	uint32_t extra_bucket_count,
 	uint16_t worker_count
-) {
-	config->key_size = sizeof(struct fw4_state_key);
-	config->value_size = sizeof(struct fw_state_value);
-	config->hash_seed = 0;
-	config->worker_count = worker_count;
-	config->index_size = index_size;
-	config->extra_bucket_count = extra_bucket_count;
-	config->hash_fn_id = FWMAP_HASH_FNV1A;
-	config->key_equal_fn_id = FWMAP_KEY_EQUAL_FW4;
-	config->rand_fn_id = FWMAP_RAND_DEFAULT;
-	config->copy_key_fn_id = FWMAP_COPY_KEY_FW4;
-	config->copy_value_fn_id = FWMAP_COPY_VALUE_FWSTATE;
-	config->merge_value_fn_id = FWMAP_MERGE_VALUE_FWSTATE;
-}
 
-// Helper function to initialize fwmap config for IPv6
-static inline void
-fwstate_init_fw6_config(
-	fwmap_config_t *config,
-	uint32_t index_size,
-	uint32_t extra_bucket_count,
-	uint16_t worker_count
 ) {
-	config->key_size = sizeof(struct fw6_state_key);
+	if (index_size == 0) {
+		index_size = 1024 * 1024; // Default: 1M entries
+	}
+	if (extra_bucket_count == 0) {
+		extra_bucket_count = 1024; // Default: 1024 extra buckets
+	}
+
+	config->key_size = key_size;
+	config->key_equal_fn_id = key_equal_fn_id;
+	config->copy_key_fn_id = copy_key_fn_id;
+
 	config->value_size = sizeof(struct fw_state_value);
+	config->copy_value_fn_id = FWMAP_COPY_VALUE_FWSTATE;
+	config->merge_value_fn_id = FWMAP_MERGE_VALUE_FWSTATE;
+
 	config->hash_seed = 0;
+	config->hash_fn_id = FWMAP_HASH_FNV1A;
+
 	config->worker_count = worker_count;
 	config->index_size = index_size;
 	config->extra_bucket_count = extra_bucket_count;
-	config->hash_fn_id = FWMAP_HASH_FNV1A;
-	config->key_equal_fn_id = FWMAP_KEY_EQUAL_FW6;
 	config->rand_fn_id = FWMAP_RAND_DEFAULT;
-	config->copy_key_fn_id = FWMAP_COPY_KEY_FW6;
-	config->copy_value_fn_id = FWMAP_COPY_VALUE_FWSTATE;
-	config->merge_value_fn_id = FWMAP_MERGE_VALUE_FWSTATE;
 }
 
 int
@@ -184,18 +157,21 @@ fwstate_config_create_maps(
 		errno = EEXIST;
 		return -1;
 	}
-
-	// Apply defaults
-	if (fwstate_apply_map_defaults(
-		    &index_size, &extra_bucket_count, worker_count
-	    )) {
+	if (worker_count == 0) {
+		errno = EINVAL;
 		return -1;
 	}
 
 	// Configure and create IPv4 firewall state map
 	fwmap_config_t fw4_config;
-	fwstate_init_fw4_config(
-		&fw4_config, index_size, extra_bucket_count, worker_count
+	fwstate_init_config(
+		&fw4_config,
+		sizeof(struct fw4_state_key),
+		FWMAP_KEY_EQUAL_FW4,
+		FWMAP_COPY_KEY_FW4,
+		index_size,
+		extra_bucket_count,
+		worker_count
 	);
 
 	fwmap_t *fw4state = fwmap_new(&fw4_config, &agent->memory_context);
@@ -206,8 +182,14 @@ fwstate_config_create_maps(
 
 	// Configure and create IPv6 firewall state map
 	fwmap_config_t fw6_config;
-	fwstate_init_fw6_config(
-		&fw6_config, index_size, extra_bucket_count, worker_count
+	fwstate_init_config(
+		&fw6_config,
+		sizeof(struct fw6_state_key),
+		FWMAP_KEY_EQUAL_FW6,
+		FWMAP_COPY_KEY_FW6,
+		index_size,
+		extra_bucket_count,
+		worker_count
 	);
 
 	fwmap_t *fw6state = fwmap_new(&fw6_config, &agent->memory_context);
@@ -239,18 +221,21 @@ fwstate_config_insert_new_layer(
 		errno = EINVAL;
 		return -1;
 	}
-
-	// Apply defaults
-	if (fwstate_apply_map_defaults(
-		    &index_size, &extra_bucket_count, worker_count
-	    )) {
+	if (worker_count == 0) {
+		errno = EINVAL;
 		return -1;
 	}
 
 	// Configure and insert new layer for IPv4
 	fwmap_config_t fw4_config;
-	fwstate_init_fw4_config(
-		&fw4_config, index_size, extra_bucket_count, worker_count
+	fwstate_init_config(
+		&fw4_config,
+		sizeof(struct fw4_state_key),
+		FWMAP_KEY_EQUAL_FW4,
+		FWMAP_COPY_KEY_FW4,
+		index_size,
+		extra_bucket_count,
+		worker_count
 	);
 
 	if (layermap_insert_new_layer_cp(
@@ -261,8 +246,14 @@ fwstate_config_insert_new_layer(
 
 	// Configure and insert new layer for IPv6
 	fwmap_config_t fw6_config;
-	fwstate_init_fw6_config(
-		&fw6_config, index_size, extra_bucket_count, worker_count
+	fwstate_init_config(
+		&fw6_config,
+		sizeof(struct fw6_state_key),
+		FWMAP_KEY_EQUAL_FW6,
+		FWMAP_COPY_KEY_FW6,
+		index_size,
+		extra_bucket_count,
+		worker_count
 	);
 
 	if (layermap_insert_new_layer_cp(

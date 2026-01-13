@@ -14,9 +14,57 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 )
 
+// SyncPacketOption is a functional option for createSyncPacket
+type SyncPacketOption func(*syncPacketConfig)
+
+type syncPacketConfig struct {
+	srcPort    uint16
+	dstPort    uint16
+	srcAddr    string
+	dstAddr    string
+	isExternal bool
+}
+
+// WithPorts sets custom source and destination ports
+func WithPorts(srcPort, dstPort uint16) SyncPacketOption {
+	return func(c *syncPacketConfig) {
+		c.srcPort = srcPort
+		c.dstPort = dstPort
+	}
+}
+
+// WithAddrs sets custom source and destination addresses
+func WithAddrs(srcAddr, dstAddr string) SyncPacketOption {
+	return func(c *syncPacketConfig) {
+		c.srcAddr = srcAddr
+		c.dstAddr = dstAddr
+	}
+}
+
+// WithExternal marks the packet as external (from outside source)
+func WithExternal() SyncPacketOption {
+	return func(c *syncPacketConfig) {
+		c.isExternal = true
+	}
+}
+
 // createSyncPacket creates a firewall state sync packet
 // with VLAN + IPv6 + UDP + sync frame structure
-func createSyncPacket(t *testing.T, isExternal bool, proto uint8) gopacket.Packet {
+func createSyncPacket(t *testing.T, proto layers.IPProtocol, opts ...SyncPacketOption) gopacket.Packet {
+	// Apply defaults
+	cfg := syncPacketConfig{
+		srcPort:    12345,
+		dstPort:    9999,
+		srcAddr:    "2001:db8::1",
+		dstAddr:    "2001:db8::2",
+		isExternal: false,
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	eth := layers.Ethernet{
 		SrcMAC:       xerror.Unwrap(net.ParseMAC("02:00:00:00:00:00")),
 		DstMAC:       xerror.Unwrap(net.ParseMAC("33:33:00:00:00:01")), // Multicast
@@ -29,7 +77,7 @@ func createSyncPacket(t *testing.T, isExternal bool, proto uint8) gopacket.Packe
 	}
 
 	var srcIP net.IP
-	if isExternal {
+	if cfg.isExternal {
 		srcIP = net.ParseIP("2001:db8::1") // External source
 	} else {
 		srcIP = net.IPv6zero // Internal source (all zeros)
@@ -50,10 +98,9 @@ func createSyncPacket(t *testing.T, isExternal bool, proto uint8) gopacket.Packe
 	udp.SetNetworkLayerForChecksum(&ip6)
 
 	// Create sync frame using the helper function
-	// Use unicast addresses for the flow being synced
-	dstIP6 := net.ParseIP("2001:db8::2").To16()
-	srcIP6 := net.ParseIP("2001:db8::1").To16()
-	syncFrame := createSyncFrame(proto, 6, 12345, 9999, dstIP6, srcIP6)
+	dstIP6 := net.ParseIP(cfg.dstAddr)
+	srcIP6 := net.ParseIP(cfg.srcAddr)
+	syncFrame := createSyncFrame(proto, 6, cfg.srcPort, cfg.dstPort, dstIP6, srcIP6)
 
 	payload := gopacket.Payload(syncFrame)
 
@@ -62,13 +109,13 @@ func createSyncPacket(t *testing.T, isExternal bool, proto uint8) gopacket.Packe
 
 func TestFWStateInternalPacket(t *testing.T) {
 	// Create internal sync packet (should be forwarded)
-	pkt := createSyncPacket(t, false, 6) // TCP
+	pkt := createSyncPacket(t, layers.IPProtocolTCP)
 	t.Log("Internal sync packet:", pkt)
 
 	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
-	m := fwstateModuleConfig(memCtx)
-	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))
+	cpModule := fwstateModuleConfig(memCtx)
+	result := xerror.Unwrap(fwstateHandlePackets(cpModule, pkt))
 
 	// Internal packets should be in output
 	require.NotEmpty(t, result.Output, "Internal packet should be forwarded")
@@ -77,13 +124,13 @@ func TestFWStateInternalPacket(t *testing.T) {
 
 func TestFWStateExternalPacket(t *testing.T) {
 	// Create external sync packet (should be dropped)
-	pkt := createSyncPacket(t, true, 17) // UDP
+	pkt := createSyncPacket(t, layers.IPProtocolUDP, WithExternal())
 	t.Log("External sync packet:", pkt)
 
 	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
-	m := fwstateModuleConfig(memCtx)
-	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))
+	cpModule := fwstateModuleConfig(memCtx)
+	result := xerror.Unwrap(fwstateHandlePackets(cpModule, pkt))
 
 	// External packets should be dropped
 	require.Empty(t, result.Output, "External packet should not be forwarded")
@@ -118,8 +165,8 @@ func TestFWStateNonSyncPacket(t *testing.T) {
 
 	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
-	m := fwstateModuleConfig(memCtx)
-	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))
+	cpModule := fwstateModuleConfig(memCtx)
+	result := xerror.Unwrap(fwstateHandlePackets(cpModule, pkt))
 
 	// Non-sync packets should pass through
 	require.NotEmpty(t, result.Output, "Non-sync packet should pass through")
@@ -129,19 +176,112 @@ func TestFWStateNonSyncPacket(t *testing.T) {
 // Test that sync packets actually create state entries
 func TestFWStateStateCreation(t *testing.T) {
 	// Create internal sync packet
-	pkt := createSyncPacket(t, false, 6) // TCP
+	pkt := createSyncPacket(t, layers.IPProtocolTCP)
 	t.Log("Internal sync packet:", pkt)
 
 	memCtx := testutils.NewMemoryContext("fwstate_test", datasize.MB*64)
 	defer memCtx.Free()
-	m := fwstateModuleConfig(memCtx)
-	result := xerror.Unwrap(fwstateHandlePackets(m, pkt))
+	cpModule := fwstateModuleConfig(memCtx)
+	result := xerror.Unwrap(fwstateHandlePackets(cpModule, pkt))
 
 	// Verify packet was processed
 	require.NotEmpty(t, result.Output, "Internal packet should be forwarded")
 
 	// Check that state was created
 	// For IPv6: src=2001:db8::1, dst=2001:db8::2, proto=TCP, src_port=12345, dst_port=9999
-	stateExists := CheckStateExists(&m.cfg, true, 6, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	stateExists := CheckStateExists(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
 	require.True(t, stateExists, "State should exist after processing sync packet")
+}
+
+// Test layer insertion: old state should be visible after adding new layer
+func TestFWStateLayerInsertionOldStateVisible(t *testing.T) {
+	memCtx := testutils.NewMemoryContext("fwstate_layer_test", datasize.MB*64)
+	defer memCtx.Free()
+	cpModule := fwstateModuleConfig(memCtx)
+
+	// Create initial state in the first layer
+	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
+	result1 := xerror.Unwrap(fwstateHandlePackets(cpModule, pkt1))
+	require.NotEmpty(t, result1.Output, "First packet should be forwarded")
+
+	// Verify initial state exists
+	stateExists := CheckStateExists(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.True(t, stateExists, "Initial state should exist")
+
+	// Insert new layer
+	InsertNewLayer(cpModule)
+
+	// Old state should still be visible through the new layer
+	stateStillExists := CheckStateExists(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.True(t, stateStillExists, "Old state should be visible after layer insertion")
+}
+
+// Test layer insertion: new states override old states
+func TestFWStateLayerInsertionNewStateOverridesOld(t *testing.T) {
+	memCtx := testutils.NewMemoryContext("fwstate_layer_test", datasize.MB*64)
+	defer memCtx.Free()
+	cpModule := fwstateModuleConfig(memCtx)
+
+	// Create initial state with specific deadline
+	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
+	result1 := xerror.Unwrap(fwstateHandlePackets(cpModule, pkt1))
+	require.NotEmpty(t, result1.Output, "First packet should be forwarded")
+
+	// Get initial deadline
+	oldDeadline := GetStateDeadline(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.Greater(t, oldDeadline, uint64(0), "Initial state should have deadline")
+
+	// Insert new layer
+	InsertNewLayer(cpModule)
+
+	// Add same state to new layer (should override old one)
+	pkt2 := createSyncPacket(t, layers.IPProtocolTCP)
+	result2 := xerror.Unwrap(fwstateHandlePackets(cpModule, pkt2))
+	require.NotEmpty(t, result2.Output, "Second packet should be forwarded")
+
+	// New deadline should be different (newer)
+	newDeadline := GetStateDeadline(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.Greater(t, newDeadline, oldDeadline, "New state should have newer deadline")
+}
+
+// Test trim functionality: stale layers should be removed
+func TestFWStateTrimStaleLayers(t *testing.T) {
+	memCtx := testutils.NewMemoryContext("fwstate_trim_test", datasize.MB*64)
+	defer memCtx.Free()
+	cpModule := fwstateModuleConfig(memCtx)
+
+	// Create state in first layer with short TTL
+	pkt1 := createSyncPacket(t, layers.IPProtocolTCP)
+	result1 := xerror.Unwrap(fwstateHandlePackets(cpModule, pkt1))
+	require.NotEmpty(t, result1.Output)
+
+	// Insert new layer
+	InsertNewLayer(cpModule)
+
+	// Add different state to new layer
+	pkt2 := createSyncPacket(t, layers.IPProtocolUDP, WithPorts(54321, 8888), WithAddrs("2001:db8::3", "2001:db8::4"))
+	result2 := xerror.Unwrap(fwstateHandlePackets(cpModule, pkt2))
+	require.NotEmpty(t, result2.Output)
+
+	// Check layer count before trim
+	_, layerCountBefore := GetLayerCount(cpModule)
+	require.Equal(t, uint32(2), layerCountBefore, "Should have 2 layers before trim")
+
+	// Simulate time passing (beyond TTL of old layer)
+	futureTime := GetCurrentTime() + 200e9 // 200 seconds in the future
+
+	// Trim stale layers
+	TrimStaleLayers(cpModule, futureTime)
+
+	// Check layer count after trim
+	_, layerCountAfter := GetLayerCount(cpModule)
+	require.Equal(t, uint32(1), layerCountAfter, "Should have 1 layer after trim")
+
+	// New state should still exist
+	newStateExists := CheckStateExists(cpModule, layers.IPProtocolUDP, 54321, 8888, "2001:db8::3", "2001:db8::4")
+	require.True(t, newStateExists, "New state should still exist after trim")
+
+	// Old state should not exist (layer was trimmed)
+	oldStateExists := CheckStateExists(cpModule, layers.IPProtocolTCP, 12345, 9999, "2001:db8::1", "2001:db8::2")
+	require.False(t, oldStateExists, "Old state should not exist after trim")
 }
