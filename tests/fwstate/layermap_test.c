@@ -51,7 +51,6 @@ test_layermap_basic_operations(void *arena) {
 	bool value_from_stale = false;
 	ret = layermap_get(
 		active_layer,
-		worker_idx,
 		now_time,
 		&key1,
 		(void **)&found_value,
@@ -77,7 +76,6 @@ test_layermap_basic_operations(void *arena) {
 
 	ret = layermap_get(
 		active_layer,
-		worker_idx,
 		now_time,
 		&key1,
 		(void **)&found_value,
@@ -98,7 +96,6 @@ test_layermap_basic_operations(void *arena) {
 	// The key should still be retrievable.
 	ret = layermap_get(
 		active_layer,
-		worker_idx,
 		now_time,
 		&key1,
 		(void **)&found_value,
@@ -125,7 +122,6 @@ test_layermap_basic_operations(void *arena) {
 	// Both keys should be retrievable
 	ret = layermap_get(
 		active_layer,
-		worker_idx,
 		now_time,
 		&key1,
 		(void **)&found_value,
@@ -137,7 +133,6 @@ test_layermap_basic_operations(void *arena) {
 
 	ret = layermap_get(
 		active_layer,
-		worker_idx,
 		now_time,
 		&key2,
 		(void **)&found_value,
@@ -150,7 +145,6 @@ test_layermap_basic_operations(void *arena) {
 	// Both keys should be outdated
 	ret = layermap_get(
 		active_layer,
-		worker_idx,
 		now_time + 61,
 		&key1,
 		(void **)&found_value,
@@ -161,7 +155,6 @@ test_layermap_basic_operations(void *arena) {
 
 	ret = layermap_get(
 		active_layer,
-		worker_idx,
 		now_time + 61,
 		&key2,
 		(void **)&found_value,
@@ -264,7 +257,6 @@ put_get_worker(void *arg) {
 			int *found_value = NULL;
 			layermap_get(
 				active_layer,
-				args->id,
 				now_time,
 				&key,
 				(void **)&found_value,

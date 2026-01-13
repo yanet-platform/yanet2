@@ -99,8 +99,7 @@ typedef struct fwmap_bucket {
 } __attribute__((__aligned__(64))) fwmap_bucket_t;
 
 typedef struct fwmap_counter {
-	uint32_t sealed;
-	uint32_t max_chain;
+	uint64_t max_chain;
 	uint64_t total_elements;
 	uint64_t max_deadline;
 	uint64_t padding[5];
@@ -143,8 +142,7 @@ typedef struct fwmap {
 	uint32_t keys_chunk_cnt;
 	uint32_t values_chunk_cnt;
 
-	// Number of workers that have seen this map as sealed
-	uint32_t sealed_count;
+	uint32_t _;
 
 	uint64_t max_deadline;
 	struct fwmap *next;

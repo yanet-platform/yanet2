@@ -56,8 +56,8 @@ func (m *FwStateConfig) Name() string {
 	return m.name
 }
 
-func (m *FwStateConfig) TransferConfig(old *FwStateConfig) {
-	C.fwstate_module_config_transfer(m.asCPModule(), old.asCPModule())
+func (m *FwStateConfig) PropogateConfig(old *FwStateConfig) {
+	C.fwstate_module_config_propogate(m.asCPModule(), old.asCPModule())
 }
 
 func (m *FwStateConfig) asCPModule() *C.struct_cp_module {
@@ -98,12 +98,23 @@ func (m *FwStateConfig) CreateMaps(
 		if !mapConfigChanged {
 			return nil
 		}
-		// TODO: implement layer rotation
-		// Layer rotation is safe without additional synchronization primitives because:
-		// - Config updates create a new generation via update_modules
-		// - Rotation happens under dataplane lock
-		// - All modules atomically see the new map links
-		return fmt.Errorf("layer rotation not yet implemented")
+
+		log.Infow("inserting new fwstate layer",
+			zap.Uint32("index_size", currentIndexSize),
+			zap.Uint32("extra_bucket_count", currentExtraBucketCount),
+			zap.Uint16("worker_count", workerCount),
+		)
+
+		if rc, cErr := C.fwstate_config_insert_new_layer(
+			m.asCPModule(),
+			C.uint32_t(currentIndexSize),
+			C.uint32_t(currentExtraBucketCount),
+			C.uint16_t(workerCount),
+		); rc != 0 {
+			return fmt.Errorf("failed to insert new layer: error code=%d, cErr=%v", rc, cErr)
+		}
+
+		return nil
 	}
 
 	log.Infow("creating fwstate maps",
@@ -235,4 +246,35 @@ func (m *FwStateConfig) DetachMaps() {
 // Free frees the fwstate configuration
 func (m *FwStateConfig) Free() {
 	C.fwstate_module_config_free(m.asCPModule())
+}
+
+// OutdatedLayers represents a handle to outdated layers that need to be freed
+type OutdatedLayers struct {
+	ptr unsafe.Pointer
+}
+
+// TrimStaleLayers trims stale layers from both IPv4 and IPv6 maps
+// Returns handle to outdated layers that should be freed after UpdateModules
+// Returns nil on error
+func (m *FwStateConfig) TrimStaleLayers(now uint64) *OutdatedLayers {
+	ptr, err := C.fwstate_config_trim_stale_layers(m.asCPModule(), C.uint64_t(now))
+	if ptr == nil {
+		if err != nil {
+			return nil
+		}
+		return nil
+	}
+	return &OutdatedLayers{ptr: unsafe.Pointer(ptr)}
+}
+
+// FreeOutdatedLayers frees outdated layers after successful UpdateModules
+func (m *FwStateConfig) FreeOutdatedLayers(outdated *OutdatedLayers) {
+	if outdated == nil || outdated.ptr == nil {
+		return
+	}
+	C.fwstate_outdated_layers_free(
+		(*C.fwstate_outdated_layers_t)(outdated.ptr),
+		m.asCPModule(),
+	)
+	outdated.ptr = nil
 }

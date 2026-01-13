@@ -6,6 +6,7 @@
 #include "common/container_of.h"
 #include "controlplane/agent/agent.h"
 #include "lib/fwstate/config.h"
+#include "lib/fwstate/layermap.h"
 #include "modules/fwstate/dataplane/config.h"
 
 static void
@@ -59,7 +60,7 @@ fwstate_module_config_init(struct agent *agent, const char *name) {
 }
 
 void
-fwstate_module_config_transfer(
+fwstate_module_config_propogate(
 	struct cp_module *new_cp_module, struct cp_module *old_cp_module
 ) {
 	struct fwstate_module_config *new = container_of(
@@ -102,6 +103,70 @@ fwstate_module_config_detach_maps(struct cp_module *cp_module) {
 	config->cfg.fw6state = NULL;
 }
 
+// Apply defaults to map parameters
+static inline int
+fwstate_apply_map_defaults(
+	uint32_t *index_size,
+	uint32_t *extra_bucket_count,
+	uint16_t worker_count
+) {
+	if (*index_size == 0) {
+		*index_size = 1024 * 1024; // Default: 1M entries
+	}
+	if (*extra_bucket_count == 0) {
+		*extra_bucket_count = 1024; // Default: 1024 extra buckets
+	}
+	if (worker_count == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	return 0;
+}
+
+// Helper function to initialize fwmap config for IPv4
+static inline void
+fwstate_init_fw4_config(
+	fwmap_config_t *config,
+	uint32_t index_size,
+	uint32_t extra_bucket_count,
+	uint16_t worker_count
+) {
+	config->key_size = sizeof(struct fw4_state_key);
+	config->value_size = sizeof(struct fw_state_value);
+	config->hash_seed = 0;
+	config->worker_count = worker_count;
+	config->index_size = index_size;
+	config->extra_bucket_count = extra_bucket_count;
+	config->hash_fn_id = FWMAP_HASH_FNV1A;
+	config->key_equal_fn_id = FWMAP_KEY_EQUAL_FW4;
+	config->rand_fn_id = FWMAP_RAND_DEFAULT;
+	config->copy_key_fn_id = FWMAP_COPY_KEY_FW4;
+	config->copy_value_fn_id = FWMAP_COPY_VALUE_FWSTATE;
+	config->merge_value_fn_id = FWMAP_MERGE_VALUE_FWSTATE;
+}
+
+// Helper function to initialize fwmap config for IPv6
+static inline void
+fwstate_init_fw6_config(
+	fwmap_config_t *config,
+	uint32_t index_size,
+	uint32_t extra_bucket_count,
+	uint16_t worker_count
+) {
+	config->key_size = sizeof(struct fw6_state_key);
+	config->value_size = sizeof(struct fw_state_value);
+	config->hash_seed = 0;
+	config->worker_count = worker_count;
+	config->index_size = index_size;
+	config->extra_bucket_count = extra_bucket_count;
+	config->hash_fn_id = FWMAP_HASH_FNV1A;
+	config->key_equal_fn_id = FWMAP_KEY_EQUAL_FW6;
+	config->rand_fn_id = FWMAP_RAND_DEFAULT;
+	config->copy_key_fn_id = FWMAP_COPY_KEY_FW6;
+	config->copy_value_fn_id = FWMAP_COPY_VALUE_FWSTATE;
+	config->merge_value_fn_id = FWMAP_MERGE_VALUE_FWSTATE;
+}
+
 int
 fwstate_config_create_maps(
 	struct cp_module *cp_module,
@@ -109,7 +174,6 @@ fwstate_config_create_maps(
 	uint32_t extra_bucket_count,
 	uint16_t worker_count
 ) {
-
 	struct fwstate_module_config *config = container_of(
 		cp_module, struct fwstate_module_config, cp_module
 	);
@@ -121,33 +185,18 @@ fwstate_config_create_maps(
 		return -1;
 	}
 
-	// Apply defaults if parameters are not provided
-	if (index_size == 0) {
-		index_size = 1024 * 1024; // Default: 1M entries
-	}
-	if (extra_bucket_count == 0) {
-		extra_bucket_count = 1024; // Default: 1024 extra buckets
-	}
-	if (worker_count == 0) {
-		errno = EINVAL;
+	// Apply defaults
+	if (fwstate_apply_map_defaults(
+		    &index_size, &extra_bucket_count, worker_count
+	    )) {
 		return -1;
 	}
 
-	// Configure IPv4 firewall state map
-	fwmap_config_t fw4_config = {
-		.key_size = sizeof(struct fw4_state_key),
-		.value_size = sizeof(struct fw_state_value),
-		.hash_seed = 0,
-		.worker_count = worker_count,
-		.index_size = index_size,
-		.extra_bucket_count = extra_bucket_count,
-		.hash_fn_id = FWMAP_HASH_FNV1A,
-		.key_equal_fn_id = FWMAP_KEY_EQUAL_FW4,
-		.rand_fn_id = FWMAP_RAND_DEFAULT,
-		.copy_key_fn_id = FWMAP_COPY_KEY_FW4,
-		.copy_value_fn_id = FWMAP_COPY_VALUE_FWSTATE,
-		.merge_value_fn_id = FWMAP_MERGE_VALUE_FWSTATE,
-	};
+	// Configure and create IPv4 firewall state map
+	fwmap_config_t fw4_config;
+	fwstate_init_fw4_config(
+		&fw4_config, index_size, extra_bucket_count, worker_count
+	);
 
 	fwmap_t *fw4state = fwmap_new(&fw4_config, &agent->memory_context);
 	if (fw4state == NULL) {
@@ -155,21 +204,11 @@ fwstate_config_create_maps(
 	}
 	SET_OFFSET_OF(&config->cfg.fw4state, fw4state);
 
-	// Configure IPv6 firewall state map
-	fwmap_config_t fw6_config = {
-		.key_size = sizeof(struct fw6_state_key),
-		.value_size = sizeof(struct fw_state_value),
-		.hash_seed = 0,
-		.worker_count = worker_count,
-		.index_size = index_size,
-		.extra_bucket_count = extra_bucket_count,
-		.hash_fn_id = FWMAP_HASH_FNV1A,
-		.key_equal_fn_id = FWMAP_KEY_EQUAL_FW6,
-		.rand_fn_id = FWMAP_RAND_DEFAULT,
-		.copy_key_fn_id = FWMAP_COPY_KEY_FW6,
-		.copy_value_fn_id = FWMAP_COPY_VALUE_FWSTATE,
-		.merge_value_fn_id = FWMAP_MERGE_VALUE_FWSTATE,
-	};
+	// Configure and create IPv6 firewall state map
+	fwmap_config_t fw6_config;
+	fwstate_init_fw6_config(
+		&fw6_config, index_size, extra_bucket_count, worker_count
+	);
 
 	fwmap_t *fw6state = fwmap_new(&fw6_config, &agent->memory_context);
 	if (fw6state == NULL) {
@@ -179,6 +218,63 @@ fwstate_config_create_maps(
 		return -1;
 	}
 	SET_OFFSET_OF(&config->cfg.fw6state, fw6state);
+
+	return 0;
+}
+
+int
+fwstate_config_insert_new_layer(
+	struct cp_module *cp_module,
+	uint32_t index_size,
+	uint32_t extra_bucket_count,
+	uint16_t worker_count
+) {
+	struct fwstate_module_config *config = container_of(
+		cp_module, struct fwstate_module_config, cp_module
+	);
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	// Verify maps already exist
+	if (config->cfg.fw4state == NULL || config->cfg.fw6state == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	// Apply defaults
+	if (fwstate_apply_map_defaults(
+		    &index_size, &extra_bucket_count, worker_count
+	    )) {
+		return -1;
+	}
+
+	// Configure and insert new layer for IPv4
+	fwmap_config_t fw4_config;
+	fwstate_init_fw4_config(
+		&fw4_config, index_size, extra_bucket_count, worker_count
+	);
+
+	if (layermap_insert_new_layer_cp(
+		    &config->cfg.fw4state, &fw4_config, &agent->memory_context
+	    )) {
+		return -1;
+	}
+
+	// Configure and insert new layer for IPv6
+	fwmap_config_t fw6_config;
+	fwstate_init_fw6_config(
+		&fw6_config, index_size, extra_bucket_count, worker_count
+	);
+
+	if (layermap_insert_new_layer_cp(
+		    &config->cfg.fw6state, &fw6_config, &agent->memory_context
+	    )) {
+		// Rollback: remove the IPv4 layer we just added
+		fwmap_t *fw4_active = ADDR_OF(&config->cfg.fw4state);
+		fwmap_t *fw4_old = ADDR_OF(&fw4_active->next);
+		SET_OFFSET_OF(&config->cfg.fw4state, fw4_old);
+		fwmap_destroy(fw4_active, &agent->memory_context);
+		return -1;
+	}
 
 	return 0;
 }
@@ -222,4 +318,100 @@ fwstate_config_get_sync_config(const struct cp_module *cp_module) {
 	);
 
 	return config->cfg.sync_config;
+}
+
+// Structure to hold outdated layers from both IPv4 and IPv6 maps
+struct fwstate_outdated_layers {
+	layermap_list_t *v4_layers;
+	layermap_list_t *v6_layers;
+};
+
+fwstate_outdated_layers_t *
+fwstate_config_trim_stale_layers(struct cp_module *cp_module, uint64_t now) {
+	struct fwstate_module_config *config = container_of(
+		cp_module, struct fwstate_module_config, cp_module
+	);
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	// Allocate structure to hold outdated layers
+	fwstate_outdated_layers_t *outdated =
+		memory_balloc(&agent->memory_context, sizeof(*outdated));
+	if (!outdated) {
+		errno = ENOMEM;
+		return NULL;
+	}
+	outdated->v4_layers = NULL;
+	outdated->v6_layers = NULL;
+
+	// Trim IPv4 layers if map exists
+	// Always return the structure even if trim fails, to avoid leaking
+	// already collected layers
+	if (config->cfg.fw4state) {
+		layermap_trim_stale_layers_cp(
+			&config->cfg.fw4state,
+			&agent->memory_context,
+			now,
+			&outdated->v4_layers
+		);
+		// Ignore errors - we'll return what we collected
+	}
+
+	// Trim IPv6 layers if map exists
+	if (config->cfg.fw6state) {
+		layermap_trim_stale_layers_cp(
+			&config->cfg.fw6state,
+			&agent->memory_context,
+			now,
+			&outdated->v6_layers
+		);
+		// Ignore errors - we'll return what we collected
+	}
+
+	return outdated;
+}
+
+void
+fwstate_outdated_layers_free(
+	fwstate_outdated_layers_t *outdated, struct cp_module *cp_module
+) {
+	if (!outdated) {
+		return;
+	}
+
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	// Free IPv4 outdated layers
+	layermap_list_t *v4_node = outdated->v4_layers;
+	while (v4_node) {
+		fwmap_t *layer = ADDR_OF(&v4_node->layer);
+		layermap_list_t *next =
+			(layermap_list_t *)ADDR_OF(&v4_node->next);
+
+		// Free the layer
+		fwmap_destroy(layer, &agent->memory_context);
+
+		// Free the list node
+		memory_bfree(&agent->memory_context, v4_node, sizeof(*v4_node));
+
+		v4_node = next;
+	}
+
+	// Free IPv6 outdated layers
+	layermap_list_t *v6_node = outdated->v6_layers;
+	while (v6_node) {
+		fwmap_t *layer = ADDR_OF(&v6_node->layer);
+		layermap_list_t *next =
+			(layermap_list_t *)ADDR_OF(&v6_node->next);
+
+		// Free the layer
+		fwmap_destroy(layer, &agent->memory_context);
+
+		// Free the list node
+		memory_bfree(&agent->memory_context, v6_node, sizeof(*v6_node));
+
+		v6_node = next;
+	}
+
+	// Free the outdated structure itself
+	memory_bfree(&agent->memory_context, outdated, sizeof(*outdated));
 }

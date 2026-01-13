@@ -108,7 +108,6 @@ fwstate_lookup_state(
 
 	int64_t result = layermap_get_value_and_deadline(
 		fwstate,
-		0, // FIXME: use worker_idx to check sealed layer
 		now,
 		key,
 		(void **)&value,

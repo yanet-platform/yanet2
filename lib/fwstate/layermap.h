@@ -30,10 +30,7 @@ layermap_trim_stale_layers_cp(
 	fwmap_t *layer = ADDR_OF(prev_next);
 
 	while (layer) {
-		// Check if all workers have seen this layer as sealed
-		bool is_sealed = (layer->sealed_count >= layer->worker_count);
-
-		if (is_sealed && layermap_is_layer_outdated(layer, now)) {
+		if (layermap_is_layer_outdated(layer, now)) {
 			// Unlink the outdated layer
 			fwmap_t *next_layer = (fwmap_t *)ADDR_OF(&layer->next);
 			SET_OFFSET_OF(prev_next, next_layer);
@@ -88,7 +85,6 @@ layermap_insert_new_layer_cp(
 static inline int64_t
 layermap_get_internal(
 	fwmap_t *active_layer,
-	uint16_t worker_idx,
 	uint64_t now,
 	const void *key,
 	void **value,
@@ -96,8 +92,6 @@ layermap_get_internal(
 	uint64_t *deadline,
 	bool *value_from_stale_layer
 ) {
-	(void)worker_idx;
-
 	// Lock required for safe access to the active layer (which handles
 	// writes).
 	int64_t result = fwmap_get_value_and_deadline(
@@ -108,37 +102,35 @@ layermap_get_internal(
 		return result;
 	}
 	*value_from_stale_layer = true;
-
-	if (lock && *lock) {
-		// Tradeoff: holding the lock ensures the most recent value but
-		// slows down the map. Releasing it allows concurrent writes but
-		// may return stale values from read-only layers if another
-		// thread inserts into the active layer in parallel.
-		rwlock_read_unlock(*lock);
-		*lock = NULL;
-	}
 	if (!active_layer->next) {
 		return -1; // Key not found in any layer
 	}
 
-	// Iterate over read-only layers. These may still have in-progress
-	// writes from when they were active. Sealed layers can be accessed
-	// without locks; unsealed layers require locking and sealing marks.
 	fwmap_t *layer = (fwmap_t *)ADDR_OF(&active_layer->next);
 	result = fwmap_get_value_and_deadline(
-		layer, now, key, value, lock, deadline
+		layer,
+		now,
+		key,
+		value,
+		NULL, // NULL in place of the lock because get to the active
+		      // layer will already hold the lock if it is passed in
+		deadline
 	);
 
 	if (result >= 0) {
 		return result;
 	}
 
+	// Release lock because we are going to lookup in read-only layers.
+	// Read-only layers are the layers that follow the next layer after the
+	// read-write layer (ACTIVE->RW?->RO->RO->RO). The layer following
+	// ACTIVE may still be RW.
 	if (lock && *lock) {
-		// FIXME: check if sealed and use lock only if not
 		rwlock_read_unlock(*lock);
 		*lock = NULL;
 	}
 
+	// Iterate over read-only layers.
 	while (layer->next) {
 		// Once a layer's next pointer is set, subsequent layers cannot
 		// change their next pointers to invalid maps, so atomic access
@@ -159,7 +151,6 @@ layermap_get_internal(
 static inline int64_t
 layermap_get(
 	fwmap_t *active_layer,
-	uint16_t worker_idx,
 	uint64_t now,
 	const void *key,
 	void **value,
@@ -168,7 +159,6 @@ layermap_get(
 ) {
 	return layermap_get_internal(
 		active_layer,
-		worker_idx,
 		now,
 		key,
 		value,
@@ -182,7 +172,6 @@ layermap_get(
 static inline int64_t
 layermap_get_value_and_deadline(
 	fwmap_t *active_layer,
-	uint16_t worker_idx,
 	uint64_t now,
 	const void *key,
 	void **value,
@@ -192,7 +181,6 @@ layermap_get_value_and_deadline(
 ) {
 	return layermap_get_internal(
 		active_layer,
-		worker_idx,
 		now,
 		key,
 		value,
@@ -235,11 +223,8 @@ layermap_put(
 			bool value_from_stale;
 			fwmap_t *next_layer =
 				(fwmap_t *)ADDR_OF(&active_layer->next);
-			// FIXME: check if layer is sealed; if so, get without
-			// lock
 			int64_t result = layermap_get(
 				next_layer,
-				worker_idx,
 				now,
 				key,
 				&old_value,

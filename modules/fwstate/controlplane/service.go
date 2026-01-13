@@ -3,6 +3,7 @@ package fwstate
 import (
 	"context"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -32,6 +33,9 @@ type FWStateService struct {
 	agent       *ffi.Agent
 	configs     map[string]*FwStateConfig
 	aclProvider ACLServiceProvider
+
+	// Pending outdated layers to be freed after successful UpdateModules
+	pendingOutdatedLayers []*OutdatedLayers
 
 	log *zap.SugaredLogger
 }
@@ -79,7 +83,22 @@ func (m *FWStateService) UpdateConfig(
 		return nil, status.Errorf(codes.Internal, "failed to create fwstate config: %v", err)
 	}
 	if oldConfig != nil {
-		newConfig.TransferConfig(oldConfig)
+		newConfig.PropogateConfig(oldConfig)
+
+		// Trim stale layers from the transferred configuration
+		// Layers with expired deadlines will be collected and added to pending list
+		// They will be freed after successful UpdateModules
+		now := uint64(time.Now().UnixNano())
+		outdatedLayers := newConfig.TrimStaleLayers(now)
+		if outdatedLayers == nil {
+			// Only nil on memory allocation failure
+			newConfig.DetachMaps()
+			newConfig.Free()
+			m.log.Errorw("failed to allocate memory for outdated layers", zap.String("config", name))
+			return nil, status.Error(codes.Internal, "failed to allocate memory for outdated layer list")
+		}
+		// Always add to pending list - will be freed after successful UpdateModules
+		m.pendingOutdatedLayers = append(m.pendingOutdatedLayers, outdatedLayers)
 	}
 
 	// Set sync config
@@ -142,6 +161,13 @@ func (m *FWStateService) UpdateConfig(
 	if aclConfigsTx != nil {
 		aclConfigsTx.Commit()
 	}
+
+	// Drain pending outdated layers after successful UpdateModules
+	// This is safe because dataplane now uses the new configuration
+	for _, pending := range m.pendingOutdatedLayers {
+		newConfig.FreeOutdatedLayers(pending)
+	}
+	m.pendingOutdatedLayers = nil
 
 	if oldConfig != nil {
 		oldConfig.DetachMaps()
