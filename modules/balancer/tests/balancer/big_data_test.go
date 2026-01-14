@@ -363,7 +363,7 @@ func TestBigData(t *testing.T) {
 		moduleConfig: initialConfig,
 		stateConfig:  stateConfig,
 		mock: &mock.YanetMockConfig{
-			AgentsMemory: datasize.MB * 256,
+			AgentsMemory: datasize.MB * 512,
 			Workers:      1,
 			Devices: []mock.YanetMockDeviceConfig{
 				{
