@@ -87,7 +87,7 @@ packet_handler_sessions_info(
 
 static void
 init_real_info(struct named_real_info *info, struct real *real) {
-	info->dst = real->identifier.addr;
+	info->real = real->identifier;
 	info->active_sessions = 0;
 	info->last_packet_timestamp = 0;
 }

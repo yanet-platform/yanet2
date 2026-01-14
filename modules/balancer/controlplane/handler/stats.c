@@ -161,7 +161,7 @@ init_real_stats(
 	struct real *reals
 ) {
 	for (size_t i = 0; i < reals_count; ++i) {
-		real_stats[i].dst = reals[i].identifier.addr;
+		real_stats[i].real = reals[i].identifier;
 	}
 }
 

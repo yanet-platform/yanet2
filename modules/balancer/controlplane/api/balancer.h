@@ -66,9 +66,7 @@ struct diag;
  */
 struct balancer_handle *
 balancer_create(
-	struct agent *agent,
-	const char *name,
-	struct balancer_config *config
+	struct agent *agent, const char *name, struct balancer_config *config
 );
 
 /**
@@ -110,6 +108,9 @@ int
 balancer_resize_session_table(
 	struct balancer_handle *handle, size_t new_size, uint32_t now
 );
+
+size_t
+balancer_session_table_capacity(struct balancer_handle *handle);
 
 /**
  * Update packet handler configuration.

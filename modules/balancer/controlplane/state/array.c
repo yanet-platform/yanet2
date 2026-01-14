@@ -32,7 +32,7 @@ service_array_free(struct service_array *array) {
 	memory_bfree(
 		&array->mctx,
 		array->blocks,
-		sizeof(struct service_array_block *)
+		sizeof(struct service_array_block *) * blocks
 	);
 }
 

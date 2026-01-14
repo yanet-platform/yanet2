@@ -11,6 +11,7 @@ sources = files(
   'index.c',
   'array.c',
   'real.c',
+  'state.c',
 )
 
 lib_balancer_state = static_library(

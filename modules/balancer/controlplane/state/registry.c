@@ -1,6 +1,7 @@
 #include "registry.h"
 
 #include "array.h"
+#include "controlplane/diag/diag.h"
 #include "index.h"
 #include "service.h"
 
@@ -51,6 +52,7 @@ service_registry_find_or_insert_service(
 		memcpy(&state, id, sizeof(union service_identifier));
 		int res = service_array_push_back(array, &state);
 		if (res != 0) {
+			NEW_ERROR("failed to push service into array");
 			return NULL;
 		}
 		idx = array->size - 1;
@@ -58,6 +60,7 @@ service_registry_find_or_insert_service(
 		// Insert the new service into the index
 		res = service_index_insert(index, array, id, idx);
 		if (res != 0) {
+			NEW_ERROR("failed to insert service into index");
 			return NULL;
 		}
 	}

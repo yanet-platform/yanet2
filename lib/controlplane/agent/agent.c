@@ -362,6 +362,7 @@ agent_reattach(
 	for (uint64_t agent_idx = 0; agent_idx < registry->count; ++agent_idx) {
 		struct agent *agent = ADDR_OF(&registry->agents[agent_idx]);
 		if (!strncmp(agent->name, agent_name, 80)) {
+			cp_config_unlock(cp_config);
 			int resize_result = agent_resize(agent, memory_limit);
 			if (resize_result != 0) {
 				return NULL;
@@ -371,6 +372,7 @@ agent_reattach(
 	}
 
 	// new agent
+	cp_config_unlock(cp_config);
 	return agent_attach(shm, instance_idx, agent_name, memory_limit);
 }
 

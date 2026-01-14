@@ -87,12 +87,12 @@ struct real_stats {
 // Stats of the real relative
 // to the virtual service
 struct named_real_stats {
-	struct net_addr dst;
+	struct relative_real_identifier real;
 	struct real_stats stats;
 };
 
 struct named_real_info {
-	struct net_addr dst;
+	struct relative_real_identifier real;
 	uint32_t last_packet_timestamp; // Last packet time observed
 	size_t active_sessions;		// Active sessions to this real
 };
@@ -100,8 +100,6 @@ struct named_real_info {
 // Config of the real relative
 // to the virtual service
 struct named_real_config {
-	struct net_addr dst;
-	int ip_proto;
-	int port; // dont use for now
+	struct relative_real_identifier real;
 	struct real_config config;
 };

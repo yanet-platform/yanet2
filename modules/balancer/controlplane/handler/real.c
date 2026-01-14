@@ -22,11 +22,7 @@ real_init(
 	struct counter_registry *registry
 ) {
 	struct real_identifier identifier = {
-		.vs_identifier = *vs,
-		.relative = (struct relative_real_identifier
-		){.addr = named_config->dst,
-		  .ip_proto = named_config->ip_proto,
-		  .port = named_config->port}
+		.vs_identifier = *vs, .relative = named_config->real
 	};
 	struct real_state *real_state =
 		balancer_state_find_or_insert_real(balancer_state, &identifier);

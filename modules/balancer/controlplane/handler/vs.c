@@ -131,7 +131,7 @@ setup_state(
 		balancer_state, &config->identifier
 	);
 	if (!vs_state) {
-		NEW_ERROR(
+		PUSH_ERROR(
 			"failed to find or insert virtual service into registry"
 		);
 		return -1;

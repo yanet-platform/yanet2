@@ -19,6 +19,7 @@
 #include "handler/handler.h"
 #include "handler/vs.h"
 #include "state/real.h"
+#include "state/session_table.h"
 #include "state/state.h"
 #include "vs.h"
 
@@ -32,7 +33,6 @@ struct balancer {
 	struct balancer_handle handle;
 	struct balancer_state state;
 	struct packet_handler *handler;
-	struct balancer_config config;
 	struct diag diag;
 };
 
@@ -81,16 +81,12 @@ free_internal_balancer_config(
 
 struct balancer_handle *
 balancer_create(
-	struct agent *agent,
-	const char *name,
-	struct balancer_config *config
+	struct agent *agent, const char *name, struct balancer_config *config
 ) {
 	agent_clean_error(agent);
 
-	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
-	cp_config_lock(cp_config);
-	
+
 	struct memory_context *mctx = &agent->memory_context;
 
 	struct balancer *balancer =
@@ -102,11 +98,6 @@ balancer_create(
 	assert((uintptr_t)balancer % alignof(struct balancer) == 0);
 	memset(balancer, 0, sizeof(struct balancer));
 
-	if (balancer_setup_config(&balancer->config, config, mctx) != 0) {
-		PUSH_ERROR("failed to store config");
-		goto error;
-	}
-
 	int init_state_result = balancer_state_init(
 		&balancer->state,
 		mctx,
@@ -115,7 +106,6 @@ balancer_create(
 	);
 	if (init_state_result != 0) {
 		PUSH_ERROR("failed to initialize balancer state");
-		free_internal_balancer_config(&balancer->config, mctx);
 		memory_bfree(mctx, balancer, sizeof(struct balancer));
 		goto error;
 	}
@@ -125,7 +115,6 @@ balancer_create(
 	);
 	if (handler == NULL) {
 		PUSH_ERROR("failed to setup packet handler");
-		free_internal_balancer_config(&balancer->config, mctx);
 		balancer_state_free(&balancer->state);
 		memory_bfree(mctx, balancer, sizeof(struct balancer));
 		goto error;
@@ -133,14 +122,10 @@ balancer_create(
 
 	SET_OFFSET_OF(&balancer->handler, handler);
 
-	cp_config_unlock(cp_config);
-
 	return &balancer->handle;
 
 error:
 	diag_fill(&agent->diag);
-
-	cp_config_unlock(cp_config);
 
 	return NULL;
 }
@@ -150,16 +135,13 @@ balancer_update_packet_handler(
 	struct balancer_handle *handle, struct packet_handler_config *config
 ) {
 	int ret;
+
 	struct balancer *balancer = balancer_handle_deref(handle);
 	struct packet_handler *current_handler = ADDR_OF(&balancer->handler);
 
 	const char *name = current_handler->cp_module.name;
 
 	struct agent *agent = ADDR_OF(&current_handler->cp_module.agent);
-
-	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
-
-	cp_config_lock(cp_config);
 
 	struct packet_handler *handler =
 		packet_handler_setup(agent, name, config, &balancer->state);
@@ -177,8 +159,6 @@ balancer_update_packet_handler(
 		);
 		ret = 0;
 	}
-
-	cp_config_unlock(cp_config);
 
 	return ret;
 }
@@ -326,4 +306,11 @@ balancer_graph(struct balancer_handle *handle, struct balancer_graph *graph) {
 			graph_real->enabled = real_state->enabled;
 		}
 	}
+}
+
+size_t
+balancer_session_table_capacity(struct balancer_handle *handle) {
+	struct balancer *balancer = balancer_handle_deref(handle);
+	struct balancer_state *state = &balancer->state;
+	return session_table_capacity(&state->session_table);
 }

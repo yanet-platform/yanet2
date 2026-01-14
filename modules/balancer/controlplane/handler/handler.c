@@ -141,7 +141,7 @@ setup_reals_index(struct packet_handler *handler, struct memory_context *mctx) {
 	size_t registry_reals_count = balancer_state_reals_count(state);
 	uint32_t *reals_index =
 		memory_balloc(mctx, sizeof(uint32_t) * registry_reals_count);
-	if (reals_index == NULL) {
+	if (reals_index == NULL && registry_reals_count > 0) {
 		NEW_ERROR("failed to allocate memory for reals index");
 		return -1;
 	}
@@ -170,21 +170,12 @@ init_reals(
 	handler->reals_count = real_count;
 	struct real *reals =
 		memory_balloc(mctx, sizeof(struct real) * real_count);
-	if (reals == NULL) {
+	if (reals == NULL && real_count > 0) {
 		NEW_ERROR("failed to allocate memory for reals");
 		return -1;
 	}
 	memset(reals, 0, sizeof(struct real) * real_count);
 	SET_OFFSET_OF(&handler->reals, reals);
-
-	// setup reals index
-	if (setup_reals_index(handler, mctx) != 0) {
-		PUSH_ERROR("failed to setup reals index");
-		memory_bfree(mctx, reals, sizeof(struct real) * real_count);
-		return -1;
-	}
-
-	uint32_t *reals_index = ADDR_OF(&handler->reals_index);
 
 	size_t real_ph_idx = 0;
 	for (size_t i = 0; i < config->vs_count; ++i) {
@@ -214,7 +205,25 @@ init_reals(
 				);
 				return -1;
 			}
-			reals_index[real->registry_idx] = real_ph_idx++;
+		}
+	}
+
+	// setup reals index
+	if (setup_reals_index(handler, mctx) != 0) {
+		PUSH_ERROR("failed to setup reals index");
+		memory_bfree(mctx, reals, sizeof(struct real) * real_count);
+		return -1;
+	}
+
+	uint32_t *reals_index = ADDR_OF(&handler->reals_index);
+
+	real_ph_idx = 0;
+	for (size_t i = 0; i < config->vs_count; ++i) {
+		struct named_vs_config *vs_config = &config->vs[i];
+		for (size_t j = 0; j < vs_config->config.real_count; ++j) {
+			struct real *real = &reals[real_ph_idx];
+			reals_index[real->registry_idx] = real_ph_idx;
+			++real_ph_idx;
 		}
 	}
 
@@ -231,24 +240,11 @@ init_vs(struct packet_handler *handler,
 	handler->vs_count = config->vs_count;
 	struct vs *vs =
 		memory_balloc(mctx, sizeof(struct vs) * config->vs_count);
-	if (vs == NULL) {
+	if (vs == NULL && config->vs_count > 0) {
 		NEW_ERROR("failed to allocate virtual services");
 		return -1;
 	}
 	SET_OFFSET_OF(&handler->vs, vs);
-
-	// allocate virtual services index
-	handler->vs_index_count = balancer_state_vs_count(state);
-	uint32_t *vs_index =
-		memory_balloc(mctx, sizeof(uint32_t) * handler->vs_index_count);
-	if (vs_index == NULL) {
-		memory_bfree(mctx, vs, sizeof(struct vs) * config->vs_count);
-		NEW_ERROR("failed to allocate virtual services index");
-		return -1;
-	}
-	SET_OFFSET_OF(&handler->vs_index, vs_index);
-
-	memset(vs_index, INDEX_INVALID, sizeof(uint32_t) * config->vs_count);
 
 	size_t reals_idx = 0;
 	struct real *reals = ADDR_OF(&handler->reals);
@@ -270,8 +266,26 @@ init_vs(struct packet_handler *handler,
 			return -1;
 		}
 		reals_idx += config->vs[i].config.real_count;
-		vs_index[vs->registry_idx] = i;
 	}
+
+	// allocate virtual services index
+	handler->vs_index_count = balancer_state_vs_count(state);
+	uint32_t *vs_index =
+		memory_balloc(mctx, sizeof(uint32_t) * handler->vs_index_count);
+	if (vs_index == NULL && handler->vs_index_count > 0) {
+		memory_bfree(mctx, vs, sizeof(struct vs) * config->vs_count);
+		NEW_ERROR("failed to allocate virtual services index");
+		return -1;
+	}
+	SET_OFFSET_OF(&handler->vs_index, vs_index);
+
+	memset(vs_index, INDEX_INVALID, sizeof(uint32_t) * config->vs_count);
+
+	// init virtual service index
+	for (size_t i = 0; i < config->vs_count; ++i) {
+		vs_index[vs[i].registry_idx] = i;
+	}
+
 	return 0;
 }
 

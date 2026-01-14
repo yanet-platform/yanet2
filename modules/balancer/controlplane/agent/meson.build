@@ -6,7 +6,8 @@ dependencies = [
 
 sources = files(
     'agent.c',
-    'storage.c'
+    'config.c',
+    'manager.c'
 )
 
 static_library(

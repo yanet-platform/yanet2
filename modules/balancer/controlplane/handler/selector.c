@@ -21,11 +21,13 @@ ring_init(
 	memset(ring, 0, sizeof(struct ring));
 	ring->enabled_len = (reals_count + 7) / 8;
 	uint8_t *enabled = memory_balloc(mctx, ring->enabled_len);
-	if (enabled == NULL) {
+	if (enabled == NULL && ring->enabled_len > 0) {
 		NEW_ERROR("failed to allocate enabled bits");
 		return -1;
 	}
-	memset(enabled, 0, ring->enabled_len);
+	if (ring->enabled_len > 0) {
+		memset(enabled, 0, ring->enabled_len);
+	}
 	size_t len = 0;
 	for (size_t i = 0; i < reals_count; ++i) {
 		const struct real *real = &reals[i];
