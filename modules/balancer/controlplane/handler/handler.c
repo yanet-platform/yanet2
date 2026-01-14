@@ -205,6 +205,7 @@ init_reals(
 				);
 				return -1;
 			}
+			++real_ph_idx;
 		}
 	}
 

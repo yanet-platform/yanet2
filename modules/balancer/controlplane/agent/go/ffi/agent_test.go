@@ -185,8 +185,8 @@ func TestAgent(t *testing.T) {
 		},
 		Wlc: BalancerManagerWlcConfig{
 			Power:         15,
-			MaxRealWeight: 2048,
-			Vs:            []uint32{2, 3},
+			MaxRealWeight: 512,
+			Vs:            []uint32{},
 		},
 		RefreshPeriod: time.Millisecond * 20,
 		MaxLoadFactor: 0.85,
@@ -211,5 +211,19 @@ func TestAgent(t *testing.T) {
 	t.Run("Create_Existing_Manager", func(t *testing.T) {
 		_, err := agent.NewManager("balancer0", &firstManagerConfig)
 		require.Error(t, err, "created existent manager")
+	})
+
+	t.Run("Reattach", func(t *testing.T) {
+		agent1, err := NewBalancerAgent(m.SharedMemory(), 1<<22)
+		require.NoError(t, err, "failed to create agent")
+
+		managers := agent1.Managers()
+		assert.Len(t, managers, 2)
+
+		assert.Equal(t, managers[0].Name(), "balancer0")
+		assert.Equal(t, managers[0].Config(), &firstManagerConfig)
+
+		assert.Equal(t, managers[1].Name(), "balancer1")
+		assert.Equal(t, managers[1].Config(), &secondManagerConfig)
 	})
 }

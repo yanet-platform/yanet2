@@ -66,7 +66,7 @@ service_id_from_vs(
 	union service_identifier *service, struct vs_identifier *id
 ) {
 	memset(service, 0, sizeof(union service_identifier));
-	memcpy(service, id, sizeof(struct vs_identifier));
+	memcpy(&service->vs, id, sizeof(struct vs_identifier));
 }
 
 struct vs_state *
@@ -75,6 +75,7 @@ balancer_state_find_or_insert_vs(
 ) {
 	union service_identifier service;
 	service_id_from_vs(&service, id);
+
 	size_t idx_output;
 	struct vs_state *vs =
 		(struct vs_state *)service_registry_find_or_insert_service(
@@ -91,8 +92,10 @@ struct vs_state *
 balancer_state_find_vs(struct balancer_state *state, struct vs_identifier *id) {
 	union service_identifier service;
 	service_id_from_vs(&service, id);
+
 	ssize_t idx =
 		service_registry_lookup_by_id(&state->vs_registry, &service);
+
 	if (idx == -1) {
 		return NULL;
 	}
@@ -113,7 +116,15 @@ service_id_from_real(
 	union service_identifier *service, struct real_identifier *id
 ) {
 	memset(service, 0, sizeof(union service_identifier));
-	memcpy(service, id, sizeof(struct real_identifier));
+	// Copy field by field to avoid uninitialized padding bytes
+	service->real.vs_identifier.addr = id->vs_identifier.addr;
+	service->real.vs_identifier.ip_proto = id->vs_identifier.ip_proto;
+	service->real.vs_identifier.port = id->vs_identifier.port;
+	service->real.vs_identifier.transport_proto =
+		id->vs_identifier.transport_proto;
+	service->real.relative.addr = id->relative.addr;
+	service->real.relative.ip_proto = id->relative.ip_proto;
+	service->real.relative.port = id->relative.port;
 }
 
 struct real_state *

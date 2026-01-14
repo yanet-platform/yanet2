@@ -45,11 +45,13 @@ service_registry_find_or_insert_service(
 ) {
 	struct service_index *index = &registry->index;
 	struct service_array *array = &registry->array;
+
 	ssize_t idx = service_index_lookup(index, array, id);
 	if (idx == -1) {
 		union service_state state;
 		memset(&state, 0, sizeof(state));
 		memcpy(&state, id, sizeof(union service_identifier));
+
 		int res = service_array_push_back(array, &state);
 		if (res != 0) {
 			NEW_ERROR("failed to push service into array");

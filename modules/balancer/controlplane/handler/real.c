@@ -21,9 +21,10 @@ real_init(
 	struct named_real_config *named_config,
 	struct counter_registry *registry
 ) {
-	struct real_identifier identifier = {
-		.vs_identifier = *vs, .relative = named_config->real
-	};
+	struct real_identifier identifier;
+	memset(&identifier, 0, sizeof(identifier));
+	identifier.vs_identifier = *vs;
+	identifier.relative = named_config->real;
 	struct real_state *real_state =
 		balancer_state_find_or_insert_real(balancer_state, &identifier);
 	if (!real_state) {

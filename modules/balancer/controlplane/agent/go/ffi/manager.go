@@ -13,6 +13,9 @@ import (
 	"unsafe"
 )
 
+var DontUpdateRealWeight uint16 = uint16(C.DONT_UPDATE_REAL_WEIGHT)
+var DontUpdateRealEnabled uint8 = uint8(C.DONT_UPDATE_REAL_ENABLED)
+
 // BalancerManager wraps a C balancer_manager handle
 type BalancerManager struct {
 	handle *C.struct_balancer_manager
@@ -144,13 +147,15 @@ func (m *BalancerManager) Sessions(now time.Time) *Sessions {
 
 // Stats reads balancer statistics from the manager
 func (m *BalancerManager) Stats(ref *PacketHandlerRef) (*BalancerStats, error) {
+	if ref == nil {
+		return nil, fmt.Errorf("ref is nil")
+	}
+
 	var cStats C.struct_balancer_stats
 	var cRef *C.struct_packet_handler_ref
 
-	if ref != nil {
-		cRef = goToC_PacketHandlerRef(ref)
-		defer freeC_PacketHandlerRef(cRef)
-	}
+	cRef = goToC_PacketHandlerRef(ref)
+	defer freeC_PacketHandlerRef(cRef)
 
 	if C.balancer_manager_stats(m.handle, &cStats, cRef) != 0 {
 		cErr := C.balancer_manager_take_error(m.handle)

@@ -33,6 +33,7 @@ static inline int
 service_index_matches(
 	union service_identifier *a, union service_identifier *b
 ) {
+	// Only compare the identifier portion, not any additional state fields
 	return memcmp(a, b, sizeof(union service_identifier)) == 0;
 }
 
@@ -211,10 +212,10 @@ service_index_lookup(
 	// Search in the bucket's chain
 	struct service_index_entry *entry = ADDR_OF(&buckets[bucket_idx]);
 	while (entry != NULL) {
-		// Get the service and compare keys
-		union service_identifier *service = service_id(
-			service_array_lookup(services, entry->service_idx)
-		);
+		// Get the service and compare ONLY the identifier portion
+		union service_state *state =
+			service_array_lookup(services, entry->service_idx);
+		union service_identifier *service = service_id(state);
 
 		if (service_index_matches(service, identifier)) {
 			return entry->service_idx;

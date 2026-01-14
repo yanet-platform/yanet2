@@ -99,25 +99,30 @@ setup_peers(
 ) {
 	vs->peers_v4_count = config->peers_v4_count;
 	vs->peers_v6_count = config->peers_v6_count;
-	vs->peers_v4 = memory_balloc(
+
+	void *peers_v4_ptr = memory_balloc(
 		mctx, sizeof(struct net4_addr) * vs->peers_v4_count
 	);
-	if (vs->peers_v4 == NULL) {
+	if (peers_v4_ptr == NULL) {
 		NEW_ERROR("failed to allocate memory for IPv4 peers");
 		return -1;
 	}
-	vs->peers_v6 = memory_balloc(
+	SET_OFFSET_OF(&vs->peers_v4, peers_v4_ptr);
+
+	void *peers_v6_ptr = memory_balloc(
 		mctx, sizeof(struct net6_addr) * vs->peers_v6_count
 	);
-	if (vs->peers_v6 == NULL) {
+	if (peers_v6_ptr == NULL) {
 		NEW_ERROR("failed to allocate memory for IPv6 peers");
 		memory_bfree(
 			mctx,
-			vs->peers_v4,
+			peers_v4_ptr,
 			sizeof(struct net4_addr) * vs->peers_v4_count
 		);
 		return -1;
 	}
+	SET_OFFSET_OF(&vs->peers_v6, peers_v6_ptr);
+
 	return 0;
 }
 

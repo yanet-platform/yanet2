@@ -184,9 +184,6 @@ packet_handler_balancer_info(
 	struct packet_handler *handler, struct balancer_info *info, uint32_t now
 ) {
 	struct balancer_state *state = ADDR_OF(&handler->state);
-	struct fill_balancer_info_ctx ctx = {
-		.handler = handler, .state = state, .info = info
-	};
 
 	struct named_real_info *reals =
 		malloc(sizeof(struct named_real_info) * handler->reals_count);
@@ -195,6 +192,16 @@ packet_handler_balancer_info(
 	struct named_vs_info *vs =
 		malloc(sizeof(struct named_vs_info) * handler->vs_count);
 	init_vs_infos(vs, reals, handler);
+
+	// Initialize info structure
+	info->vs_count = handler->vs_count;
+	info->vs = vs;
+	info->active_sessions = 0;
+	info->last_packet_timestamp = 0;
+
+	struct fill_balancer_info_ctx ctx = {
+		.handler = handler, .state = state, .info = info, .reals = reals
+	};
 
 	int res = session_table_iter(
 		&state->session_table, now, fill_balancer_info_callback, &ctx

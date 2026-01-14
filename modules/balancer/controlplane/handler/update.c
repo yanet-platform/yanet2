@@ -179,32 +179,17 @@ packet_handler_update_reals(
 		update_real(handler, update);
 	}
 
-	// update virtual services
-	for (size_t i = 0; i < handler->vs_count; ++i) {
+	// update virtual services that were marked as updated
+	for (size_t i = 0; i < count; ++i) {
 		struct real_update *update = &updates[i];
 		if (update_vs(handler, update) != 0) {
-			if (i == 0) {
-				PUSH_ERROR(
-					"services %lu..%lu not updated: update "
-					"at index %lu: failed to update "
-					"virtual service",
-					i,
-					handler->vs_count,
-					i
-				);
-			} else {
-				PUSH_ERROR(
-					"services 0..%lu successfully updated, "
-					"services %lu..%lu not updated: "
-					"update at index %lu: failed to update "
-					"virtual service",
-					i - 1,
-					i,
-					handler->vs_count,
-					i
-				);
-			}
-			break;
+			PUSH_ERROR(
+				"failed to update virtual service for update "
+				"at "
+				"index %lu",
+				i
+			);
+			return -1;
 		}
 	}
 

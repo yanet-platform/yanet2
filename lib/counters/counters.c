@@ -448,7 +448,8 @@ counter_handle_accum(
 	size_t counter_size,
 	struct counter_value_handle *handle
 ) {
-	memset(accum, 0, counter_size);
+	// counter_size is the number of uint64_t elements, not bytes
+	memset(accum, 0, counter_size * sizeof(uint64_t));
 	for (size_t instance_idx = 0; instance_idx < instances;
 	     ++instance_idx) {
 		uint64_t *value =

@@ -92,6 +92,14 @@ func rangeToPrefixV6(from, to netip.Addr) netip.Prefix {
 
 func goToC_NetAddr(addr netip.Addr) C.struct_net_addr {
 	var cAddr C.struct_net_addr
+	// Zero-initialize the entire union to avoid padding issues
+	ptr := unsafe.Pointer(&cAddr)
+	size := unsafe.Sizeof(cAddr)
+	slice := unsafe.Slice((*byte)(ptr), size)
+	for i := range slice {
+		slice[i] = 0
+	}
+
 	if addr.Is4() {
 		v4 := addr.As4()
 		// Access union field through unsafe pointer cast
@@ -198,6 +206,14 @@ done2:
 
 func goToC_VsIdentifier(id VsIdentifier) C.struct_vs_identifier {
 	var cId C.struct_vs_identifier
+	// Zero-initialize the entire structure to avoid padding issues
+	ptr := unsafe.Pointer(&cId)
+	size := unsafe.Sizeof(cId)
+	slice := unsafe.Slice((*byte)(ptr), size)
+	for i := range slice {
+		slice[i] = 0
+	}
+
 	cId.addr = goToC_NetAddr(id.Addr)
 	// Derive ip_proto from the address type
 	if id.Addr.Is4() {
@@ -238,6 +254,14 @@ func goToC_RelativeRealIdentifier(
 	id RelativeRealIdentifier,
 ) C.struct_relative_real_identifier {
 	var cId C.struct_relative_real_identifier
+	// Zero-initialize the entire structure to avoid padding issues
+	ptr := unsafe.Pointer(&cId)
+	size := unsafe.Sizeof(cId)
+	slice := unsafe.Slice((*byte)(ptr), size)
+	for i := range slice {
+		slice[i] = 0
+	}
+
 	cId.addr = goToC_NetAddr(id.Addr)
 	// Derive ip_proto from the address type
 	if id.Addr.Is4() {
@@ -261,6 +285,14 @@ func cToGo_RelativeRealIdentifier(
 
 func goToC_RealIdentifier(id RealIdentifier) C.struct_real_identifier {
 	var cId C.struct_real_identifier
+	// Zero-initialize the entire structure to avoid padding issues
+	ptr := unsafe.Pointer(&cId)
+	size := unsafe.Sizeof(cId)
+	slice := unsafe.Slice((*byte)(ptr), size)
+	for i := range slice {
+		slice[i] = 0
+	}
+
 	cId.vs_identifier = goToC_VsIdentifier(id.VsIdentifier)
 	cId.relative = goToC_RelativeRealIdentifier(id.Relative)
 	return cId

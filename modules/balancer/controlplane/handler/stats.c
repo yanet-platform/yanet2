@@ -162,6 +162,7 @@ init_real_stats(
 ) {
 	for (size_t i = 0; i < reals_count; ++i) {
 		real_stats[i].real = reals[i].identifier;
+		memset(&real_stats[i].stats, 0, sizeof(struct real_stats));
 	}
 }
 
@@ -181,6 +182,7 @@ init_vs_stats(
 		struct named_vs_stats *vs_stats = &stats->vs[i];
 		struct vs *vs = &vss[i];
 		vs_stats->identifier = vs->identifier;
+		memset(&vs_stats->stats, 0, sizeof(struct vs_stats));
 		vs_stats->reals_count = vs->reals_count;
 		vs_stats->reals = real_stats + reals_counter;
 		reals_counter += vs->reals_count;
@@ -260,13 +262,19 @@ packet_handler_fill_stats(
 	);
 	assert(counter_handles != NULL);
 
+	// Initialize all stats to zero
+	memset(&stats->common, 0, sizeof(struct balancer_common_stats));
+	memset(&stats->icmp_ipv4, 0, sizeof(struct balancer_icmp_stats));
+	memset(&stats->icmp_ipv6, 0, sizeof(struct balancer_icmp_stats));
+	memset(&stats->l4, 0, sizeof(struct balancer_l4_stats));
+
 	// init real stats
 	struct real *reals = ADDR_OF(&handler->reals);
 
 	// layout of reals corresponds to the
 	// layout in packet handler
 	struct named_real_stats *real_stats =
-		malloc(sizeof(struct real_stats) * handler->reals_count);
+		malloc(sizeof(struct named_real_stats) * handler->reals_count);
 
 	init_real_stats(handler->reals_count, real_stats, reals);
 
