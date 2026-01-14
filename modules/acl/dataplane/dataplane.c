@@ -72,7 +72,7 @@ acl_handle_packets(
 	fwmap_t *state_table = NULL;
 
 	// Time in nanoseconds is sufficient for keeping state up to 500 years
-	uint64_t now = tsc_clock_get_time_ns(&dp_worker->clock);
+	uint64_t now = dp_worker->current_time;
 
 	/*
 	 * There are two major options:

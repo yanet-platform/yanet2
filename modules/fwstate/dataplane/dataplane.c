@@ -235,7 +235,7 @@ fwstate_handle_packets(
 	fwmap_t *fw4state = ADDR_OF(&fwstate_config->fw4state);
 	fwmap_t *fw6state = ADDR_OF(&fwstate_config->fw6state);
 
-	uint64_t now = tsc_clock_get_time_ns(&dp_worker->clock);
+	uint64_t now = dp_worker->current_time;
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {

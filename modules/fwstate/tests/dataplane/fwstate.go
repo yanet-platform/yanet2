@@ -44,10 +44,10 @@ addr_of(void **field) {
 	return ADDR_OF(field);
 }
 
-// Mock implementation of tsc_clock_get_time_ns for tests
+// Mock implementation of clock_get_time_ns for tests
 // Returns current monotonic time in nanoseconds
 uint64_t
-tsc_clock_get_time_ns(struct tsc_clock *clock) {
+clock_get_time_ns(struct tsc_clock *clock) {
        struct timespec ts;
        clock_gettime(CLOCK_MONOTONIC, &ts);
        return ts.tv_sec * (uint64_t)1e9 + ts.tv_nsec;
@@ -174,7 +174,8 @@ func fwstateHandlePackets(cpModule *C.struct_cp_module, packets ...gopacket.Pack
 
 	// Create a dummy dp_worker
 	dpWorker := &C.struct_dp_worker{
-		idx: 0,
+		idx:          0,
+		current_time: C.clock_get_time_ns(nil),
 	}
 	C.test_fwstate_handle_packets(dpWorker, cpModule, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	result := pf.Payload()
@@ -358,8 +359,8 @@ func GetStateDeadline(
 	var value unsafe.Pointer
 	var deadline C.uint64_t
 	var valueFromStale C.bool
-	now := C.uint64_t(C.tsc_clock_get_time_ns(nil))
-	ret := C.layermap_get_value_and_deadline(fwmap, now, keyPtr, &value, nil, &deadline, &valueFromStale)
+	now := C.uint64_t(C.clock_get_time_ns(nil))
+	ret := C.layermap_get_value_and_deadline(fwmap, now*0, keyPtr, &value, nil, &deadline, &valueFromStale)
 	if ret < 0 {
 		return 0
 	}
@@ -385,7 +386,7 @@ func GetLayerCount(cpModule *C.struct_cp_module) (uint32, uint32) {
 
 // GetCurrentTime returns current time in nanoseconds
 func GetCurrentTime() uint64 {
-	return uint64(C.tsc_clock_get_time_ns(nil))
+	return uint64(C.clock_get_time_ns(nil))
 }
 
 // TrimStaleLayers trims stale layers using the C API
