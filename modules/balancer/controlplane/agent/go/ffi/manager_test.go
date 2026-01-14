@@ -318,21 +318,43 @@ func TestManager(t *testing.T) {
 	t.Run("GetInitialGraph", func(t *testing.T) {
 		graph := manager.Graph()
 		require.NotNil(t, graph, "graph should not be nil")
-		require.Equal(t, 3, len(graph.VirtualServices), "graph should have 3 virtual services")
+		require.Equal(
+			t,
+			3,
+			len(graph.VirtualServices),
+			"graph should have 3 virtual services",
+		)
 
 		// Verify first VS has 3 reals
-		require.Equal(t, 3, len(graph.VirtualServices[0].Reals), "first VS should have 3 reals")
+		require.Equal(
+			t,
+			3,
+			len(graph.VirtualServices[0].Reals),
+			"first VS should have 3 reals",
+		)
 		// Verify second VS has 2 reals
-		require.Equal(t, 2, len(graph.VirtualServices[1].Reals), "second VS should have 2 reals")
+		require.Equal(
+			t,
+			2,
+			len(graph.VirtualServices[1].Reals),
+			"second VS should have 2 reals",
+		)
 		// Verify third VS has 5 reals
-		require.Equal(t, 5, len(graph.VirtualServices[2].Reals), "third VS should have 5 reals")
+		require.Equal(
+			t,
+			5,
+			len(graph.VirtualServices[2].Reals),
+			"third VS should have 5 reals",
+		)
 
 		// Verify reals match config - match by identifier since order may differ
 		for _, configVs := range managerConfig.Balancer.Handler.VirtualServices {
 			// Find matching VS in graph by identifier
 			var graphVs *GraphVs
 			for i := range graph.VirtualServices {
-				if graph.VirtualServices[i].Identifier.Addr.Compare(configVs.Identifier.Addr) == 0 &&
+				if graph.VirtualServices[i].Identifier.Addr.Compare(
+					configVs.Identifier.Addr,
+				) == 0 &&
 					graph.VirtualServices[i].Identifier.Port == configVs.Identifier.Port &&
 					graph.VirtualServices[i].Identifier.TransportProto == configVs.Identifier.TransportProto {
 					graphVs = &graph.VirtualServices[i]
@@ -342,15 +364,22 @@ func TestManager(t *testing.T) {
 			require.NotNil(t, graphVs, "VS %s:%d should exist in graph",
 				configVs.Identifier.Addr, configVs.Identifier.Port)
 
-			require.Equal(t, len(configVs.Reals), len(graphVs.Reals),
+			require.Equal(
+				t,
+				len(configVs.Reals),
+				len(graphVs.Reals),
 				"VS %s:%d should have same number of reals in graph as in config",
-				configVs.Identifier.Addr, configVs.Identifier.Port)
+				configVs.Identifier.Addr,
+				configVs.Identifier.Port,
+			)
 
 			for _, configReal := range configVs.Reals {
 				// Find matching real in graph by identifier
 				var graphReal *GraphReal
 				for i := range graphVs.Reals {
-					if graphVs.Reals[i].Identifier.Addr.Compare(configReal.Identifier.Addr) == 0 &&
+					if graphVs.Reals[i].Identifier.Addr.Compare(
+						configReal.Identifier.Addr,
+					) == 0 &&
 						graphVs.Reals[i].Identifier.Port == configReal.Identifier.Port {
 						graphReal = &graphVs.Reals[i]
 						break
@@ -385,13 +414,26 @@ func TestManager(t *testing.T) {
 		require.Equal(t, 3, len(info.Vs), "info should have 3 virtual services")
 
 		// Check info variables are zeroes initially
-		require.Equal(t, uint64(0), info.ActiveSessions, "active sessions should be zero initially")
-		require.True(t, info.LastPacketTimestamp.IsZero() || info.LastPacketTimestamp.Unix() == 0,
-			"last packet timestamp should be zero initially")
+		require.Equal(
+			t,
+			uint64(0),
+			info.ActiveSessions,
+			"active sessions should be zero initially",
+		)
+		require.True(
+			t,
+			info.LastPacketTimestamp.IsZero() ||
+				info.LastPacketTimestamp.Unix() == 0,
+			"last packet timestamp should be zero initially",
+		)
 
 		// Check info topology matches config topology
-		require.Equal(t, len(managerConfig.Balancer.Handler.VirtualServices), len(info.Vs),
-			"info should have same number of virtual services as config")
+		require.Equal(
+			t,
+			len(managerConfig.Balancer.Handler.VirtualServices),
+			len(info.Vs),
+			"info should have same number of virtual services as config",
+		)
 
 		for vsIdx, configVs := range managerConfig.Balancer.Handler.VirtualServices {
 			infoVs := info.Vs[vsIdx]
@@ -401,31 +443,64 @@ func TestManager(t *testing.T) {
 				"VS %d address should match in info", vsIdx)
 			require.Equal(t, configVs.Identifier.Port, infoVs.Identifier.Port,
 				"VS %d port should match in info", vsIdx)
-			require.Equal(t, configVs.Identifier.TransportProto, infoVs.Identifier.TransportProto,
-				"VS %d transport proto should match in info", vsIdx)
+			require.Equal(
+				t,
+				configVs.Identifier.TransportProto,
+				infoVs.Identifier.TransportProto,
+				"VS %d transport proto should match in info",
+				vsIdx,
+			)
 
 			// Check VS info variables are zeroes
 			require.Equal(t, uint64(0), infoVs.ActiveSessions,
 				"VS %d active sessions should be zero initially", vsIdx)
-			require.True(t, infoVs.LastPacketTimestamp.IsZero() || infoVs.LastPacketTimestamp.Unix() == 0,
-				"VS %d last packet timestamp should be zero initially", vsIdx)
+			require.True(
+				t,
+				infoVs.LastPacketTimestamp.IsZero() ||
+					infoVs.LastPacketTimestamp.Unix() == 0,
+				"VS %d last packet timestamp should be zero initially",
+				vsIdx,
+			)
 
 			// Check reals topology matches
-			require.Equal(t, len(configVs.Reals), len(infoVs.Reals),
-				"VS %d should have same number of reals in info as in config", vsIdx)
+			require.Equal(
+				t,
+				len(configVs.Reals),
+				len(infoVs.Reals),
+				"VS %d should have same number of reals in info as in config",
+				vsIdx,
+			)
 
 			for realIdx, configReal := range configVs.Reals {
 				infoReal := infoVs.Reals[realIdx]
 
 				// Check real identifier matches
-				require.Equal(t, configReal.Identifier.Addr, infoReal.Dst,
-					"VS %d Real %d address should match in info", vsIdx, realIdx)
+				require.Equal(
+					t,
+					configReal.Identifier.Addr,
+					infoReal.Dst,
+					"VS %d Real %d address should match in info",
+					vsIdx,
+					realIdx,
+				)
 
 				// Check real info variables are zeroes
-				require.Equal(t, uint64(0), infoReal.ActiveSessions,
-					"VS %d Real %d active sessions should be zero initially", vsIdx, realIdx)
-				require.True(t, infoReal.LastPacketTimestamp.IsZero() || infoReal.LastPacketTimestamp.Unix() == 0,
-					"VS %d Real %d last packet timestamp should be zero initially", vsIdx, realIdx)
+				require.Equal(
+					t,
+					uint64(0),
+					infoReal.ActiveSessions,
+					"VS %d Real %d active sessions should be zero initially",
+					vsIdx,
+					realIdx,
+				)
+				require.True(
+					t,
+					infoReal.LastPacketTimestamp.IsZero() ||
+						infoReal.LastPacketTimestamp.Unix() == 0,
+					"VS %d Real %d last packet timestamp should be zero initially",
+					vsIdx,
+					realIdx,
+				)
 			}
 		}
 	})
@@ -442,31 +517,110 @@ func TestManager(t *testing.T) {
 		stats, err := manager.Stats(&ref)
 		require.NoError(t, err, "failed to get stats")
 		require.NotNil(t, stats, "stats should not be nil")
-		require.Equal(t, 3, len(stats.Vs), "stats should have 3 virtual services")
+		require.Equal(
+			t,
+			3,
+			len(stats.Vs),
+			"stats should have 3 virtual services",
+		)
 
 		// Check common stats are zeroes
-		require.Equal(t, uint64(0), stats.Common.IncomingPackets, "incoming packets should be zero")
-		require.Equal(t, uint64(0), stats.Common.IncomingBytes, "incoming bytes should be zero")
-		require.Equal(t, uint64(0), stats.Common.OutgoingPackets, "outgoing packets should be zero")
-		require.Equal(t, uint64(0), stats.Common.OutgoingBytes, "outgoing bytes should be zero")
-		require.Equal(t, uint64(0), stats.Common.UnexpectedNetworkProto, "unexpected network proto should be zero")
-		require.Equal(t, uint64(0), stats.Common.DecapSuccessful, "decap successful should be zero")
-		require.Equal(t, uint64(0), stats.Common.DecapFailed, "decap failed should be zero")
+		require.Equal(
+			t,
+			uint64(0),
+			stats.Common.IncomingPackets,
+			"incoming packets should be zero",
+		)
+		require.Equal(
+			t,
+			uint64(0),
+			stats.Common.IncomingBytes,
+			"incoming bytes should be zero",
+		)
+		require.Equal(
+			t,
+			uint64(0),
+			stats.Common.OutgoingPackets,
+			"outgoing packets should be zero",
+		)
+		require.Equal(
+			t,
+			uint64(0),
+			stats.Common.OutgoingBytes,
+			"outgoing bytes should be zero",
+		)
+		require.Equal(
+			t,
+			uint64(0),
+			stats.Common.UnexpectedNetworkProto,
+			"unexpected network proto should be zero",
+		)
+		require.Equal(
+			t,
+			uint64(0),
+			stats.Common.DecapSuccessful,
+			"decap successful should be zero",
+		)
+		require.Equal(
+			t,
+			uint64(0),
+			stats.Common.DecapFailed,
+			"decap failed should be zero",
+		)
 
 		// Check L4 stats are zeroes
-		require.Equal(t, uint64(0), stats.L4.IncomingPackets, "L4 incoming packets should be zero")
-		require.Equal(t, uint64(0), stats.L4.SelectVsFailed, "L4 select VS failed should be zero")
-		require.Equal(t, uint64(0), stats.L4.InvalidPackets, "L4 invalid packets should be zero")
-		require.Equal(t, uint64(0), stats.L4.SelectRealFailed, "L4 select real failed should be zero")
-		require.Equal(t, uint64(0), stats.L4.OutgoingPackets, "L4 outgoing packets should be zero")
+		require.Equal(
+			t,
+			uint64(0),
+			stats.L4.IncomingPackets,
+			"L4 incoming packets should be zero",
+		)
+		require.Equal(
+			t,
+			uint64(0),
+			stats.L4.SelectVsFailed,
+			"L4 select VS failed should be zero",
+		)
+		require.Equal(
+			t,
+			uint64(0),
+			stats.L4.InvalidPackets,
+			"L4 invalid packets should be zero",
+		)
+		require.Equal(
+			t,
+			uint64(0),
+			stats.L4.SelectRealFailed,
+			"L4 select real failed should be zero",
+		)
+		require.Equal(
+			t,
+			uint64(0),
+			stats.L4.OutgoingPackets,
+			"L4 outgoing packets should be zero",
+		)
 
 		// Check ICMP stats are zeroes
-		require.Equal(t, uint64(0), stats.IcmpIpv4.IncomingPackets, "ICMP IPv4 incoming packets should be zero")
-		require.Equal(t, uint64(0), stats.IcmpIpv6.IncomingPackets, "ICMP IPv6 incoming packets should be zero")
+		require.Equal(
+			t,
+			uint64(0),
+			stats.IcmpIpv4.IncomingPackets,
+			"ICMP IPv4 incoming packets should be zero",
+		)
+		require.Equal(
+			t,
+			uint64(0),
+			stats.IcmpIpv6.IncomingPackets,
+			"ICMP IPv6 incoming packets should be zero",
+		)
 
 		// Check stats topology matches config topology
-		require.Equal(t, len(managerConfig.Balancer.Handler.VirtualServices), len(stats.Vs),
-			"stats should have same number of virtual services as config")
+		require.Equal(
+			t,
+			len(managerConfig.Balancer.Handler.VirtualServices),
+			len(stats.Vs),
+			"stats should have same number of virtual services as config",
+		)
 
 		for vsIdx, configVs := range managerConfig.Balancer.Handler.VirtualServices {
 			statsVs := stats.Vs[vsIdx]
@@ -476,8 +630,13 @@ func TestManager(t *testing.T) {
 				"VS %d address should match in stats", vsIdx)
 			require.Equal(t, configVs.Identifier.Port, statsVs.Identifier.Port,
 				"VS %d port should match in stats", vsIdx)
-			require.Equal(t, configVs.Identifier.TransportProto, statsVs.Identifier.TransportProto,
-				"VS %d transport proto should match in stats", vsIdx)
+			require.Equal(
+				t,
+				configVs.Identifier.TransportProto,
+				statsVs.Identifier.TransportProto,
+				"VS %d transport proto should match in stats",
+				vsIdx,
+			)
 
 			// Check VS stats are zeroes (skip bytes check as it may have uninitialized data)
 			require.Equal(t, uint64(0), statsVs.Stats.IncomingPackets,
@@ -491,23 +650,40 @@ func TestManager(t *testing.T) {
 				"VS %d created sessions should be zero", vsIdx)
 
 			// Check reals topology matches
-			require.Equal(t, len(configVs.Reals), len(statsVs.Reals),
-				"VS %d should have same number of reals in stats as in config", vsIdx)
+			require.Equal(
+				t,
+				len(configVs.Reals),
+				len(statsVs.Reals),
+				"VS %d should have same number of reals in stats as in config",
+				vsIdx,
+			)
 
 			for realIdx, configReal := range configVs.Reals {
 				statsReal := statsVs.Reals[realIdx]
 
 				// Check real identifier matches
-				require.Equal(t, configReal.Identifier.Addr, statsReal.Dst,
-					"VS %d Real %d address should match in stats", vsIdx, realIdx)
+				require.Equal(
+					t,
+					configReal.Identifier.Addr,
+					statsReal.Dst,
+					"VS %d Real %d address should match in stats",
+					vsIdx,
+					realIdx,
+				)
 
 				// Check real stats are zeroes
 				require.Equal(t, uint64(0), statsReal.Stats.Packets,
 					"VS %d Real %d packets should be zero", vsIdx, realIdx)
 				require.Equal(t, uint64(0), statsReal.Stats.Bytes,
 					"VS %d Real %d bytes should be zero", vsIdx, realIdx)
-				require.Equal(t, uint64(0), statsReal.Stats.CreatedSessions,
-					"VS %d Real %d created sessions should be zero", vsIdx, realIdx)
+				require.Equal(
+					t,
+					uint64(0),
+					statsReal.Stats.CreatedSessions,
+					"VS %d Real %d created sessions should be zero",
+					vsIdx,
+					realIdx,
+				)
 			}
 		}
 	})
@@ -517,7 +693,12 @@ func TestManager(t *testing.T) {
 		sessions := manager.Sessions(now)
 		require.NotNil(t, sessions, "sessions should not be nil")
 		// Initially should have no sessions
-		require.Equal(t, 0, len(sessions.Sessions), "should have no sessions initially")
+		require.Equal(
+			t,
+			0,
+			len(sessions.Sessions),
+			"should have no sessions initially",
+		)
 	})
 
 	// Test 7: Update individual reals using UpdateReals
@@ -546,8 +727,18 @@ func TestManager(t *testing.T) {
 
 		// Verify the updates
 		graph := manager.Graph()
-		require.Equal(t, uint16(250), graph.VirtualServices[0].Reals[0].Weight, "first real weight should be 250")
-		require.Equal(t, uint16(300), graph.VirtualServices[0].Reals[1].Weight, "second real weight should be 300")
+		require.Equal(
+			t,
+			uint16(250),
+			graph.VirtualServices[0].Reals[0].Weight,
+			"first real weight should be 250",
+		)
+		require.Equal(
+			t,
+			uint16(300),
+			graph.VirtualServices[0].Reals[1].Weight,
+			"second real weight should be 300",
+		)
 
 		// Test updating only weight (enabled unchanged)
 		t.Run("UpdateWeightOnly", func(t *testing.T) {
@@ -566,8 +757,12 @@ func TestManager(t *testing.T) {
 			require.NoError(t, err, "failed to update real weight only")
 
 			graph := manager.Graph()
-			require.Equal(t, uint16(350), graph.VirtualServices[0].Reals[0].Weight,
-				"weight should be updated to 350")
+			require.Equal(
+				t,
+				uint16(350),
+				graph.VirtualServices[0].Reals[0].Weight,
+				"weight should be updated to 350",
+			)
 			require.True(t, graph.VirtualServices[0].Reals[0].Enabled,
 				"enabled status should remain true")
 		})
@@ -589,8 +784,12 @@ func TestManager(t *testing.T) {
 			require.NoError(t, err, "failed to update real enabled only")
 
 			graph := manager.Graph()
-			require.Equal(t, uint16(300), graph.VirtualServices[0].Reals[1].Weight,
-				"weight should remain 300")
+			require.Equal(
+				t,
+				uint16(300),
+				graph.VirtualServices[0].Reals[1].Weight,
+				"weight should remain 300",
+			)
 			require.False(t, graph.VirtualServices[0].Reals[1].Enabled,
 				"enabled status should be false")
 		})
@@ -612,8 +811,12 @@ func TestManager(t *testing.T) {
 			require.NoError(t, err, "failed to update real weight and enabled")
 
 			graph := manager.Graph()
-			require.Equal(t, uint16(400), graph.VirtualServices[0].Reals[2].Weight,
-				"weight should be updated to 400")
+			require.Equal(
+				t,
+				uint16(400),
+				graph.VirtualServices[0].Reals[2].Weight,
+				"weight should be updated to 400",
+			)
 			require.True(t, graph.VirtualServices[0].Reals[2].Enabled,
 				"enabled status should be true")
 		})
@@ -636,11 +839,19 @@ func TestManager(t *testing.T) {
 			}
 
 			err := manager.UpdateReals(updates)
-			require.NoError(t, err, "failed to update with DontUpdateRealWeight")
+			require.NoError(
+				t,
+				err,
+				"failed to update with DontUpdateRealWeight",
+			)
 
 			graphAfter := manager.Graph()
-			require.Equal(t, weightBefore, graphAfter.VirtualServices[0].Reals[0].Weight,
-				"weight should not change when using DontUpdateRealWeight")
+			require.Equal(
+				t,
+				weightBefore,
+				graphAfter.VirtualServices[0].Reals[0].Weight,
+				"weight should not change when using DontUpdateRealWeight",
+			)
 			require.False(t, graphAfter.VirtualServices[0].Reals[0].Enabled,
 				"enabled status should be updated")
 		})
@@ -663,13 +874,25 @@ func TestManager(t *testing.T) {
 			}
 
 			err := manager.UpdateReals(updates)
-			require.NoError(t, err, "failed to update with DontUpdateRealEnabled")
+			require.NoError(
+				t,
+				err,
+				"failed to update with DontUpdateRealEnabled",
+			)
 
 			graphAfter := manager.Graph()
-			require.Equal(t, uint16(500), graphAfter.VirtualServices[0].Reals[0].Weight,
-				"weight should be updated")
-			require.Equal(t, enabledBefore, graphAfter.VirtualServices[0].Reals[0].Enabled,
-				"enabled status should not change when using DontUpdateRealEnabled")
+			require.Equal(
+				t,
+				uint16(500),
+				graphAfter.VirtualServices[0].Reals[0].Weight,
+				"weight should be updated",
+			)
+			require.Equal(
+				t,
+				enabledBefore,
+				graphAfter.VirtualServices[0].Reals[0].Enabled,
+				"enabled status should not change when using DontUpdateRealEnabled",
+			)
 		})
 	})
 
@@ -680,7 +903,12 @@ func TestManager(t *testing.T) {
 
 		// Verify the resize
 		config := manager.Config()
-		require.GreaterOrEqual(t, config.Balancer.State.TableCapacity, uint(1050), "table capacity should be at least 1050")
+		require.GreaterOrEqual(
+			t,
+			config.Balancer.State.TableCapacity,
+			uint(1050),
+			"table capacity should be at least 1050",
+		)
 	})
 
 	// Test updating manager with completely new config
@@ -700,7 +928,9 @@ func TestManager(t *testing.T) {
 					VirtualServices: []VsConfig{
 						{
 							Identifier: VsIdentifier{
-								Addr:           netip.MustParseAddr("192.168.1.100"),
+								Addr: netip.MustParseAddr(
+									"192.168.1.100",
+								),
 								Port:           8080,
 								TransportProto: VsTransportProtoTcp,
 							},
@@ -709,18 +939,26 @@ func TestManager(t *testing.T) {
 							Reals: []RealConfig{
 								{
 									Identifier: RelativeRealIdentifier{
-										Addr: netip.MustParseAddr("192.168.1.101"),
+										Addr: netip.MustParseAddr(
+											"192.168.1.101",
+										),
 										Port: 9090,
 									},
-									Src:    netip.MustParsePrefix("10.0.0.0/24"),
+									Src: netip.MustParsePrefix(
+										"10.0.0.0/24",
+									),
 									Weight: 100,
 								},
 								{
 									Identifier: RelativeRealIdentifier{
-										Addr: netip.MustParseAddr("192.168.1.102"),
+										Addr: netip.MustParseAddr(
+											"192.168.1.102",
+										),
 										Port: 9090,
 									},
-									Src:    netip.MustParsePrefix("10.0.1.0/24"),
+									Src: netip.MustParsePrefix(
+										"10.0.1.0/24",
+									),
 									Weight: 200,
 								},
 							},
@@ -765,22 +1003,37 @@ func TestManager(t *testing.T) {
 		require.NotNil(t, updatedConfig, "updated config should not be nil")
 		require.Equal(t, 1, len(updatedConfig.Balancer.Handler.VirtualServices),
 			"should have 1 virtual service after update")
-		require.Equal(t, newConfig.Balancer.Handler.VirtualServices[0].Identifier.Addr,
+		require.Equal(
+			t,
+			newConfig.Balancer.Handler.VirtualServices[0].Identifier.Addr,
 			updatedConfig.Balancer.Handler.VirtualServices[0].Identifier.Addr,
-			"VS address should match new config")
+			"VS address should match new config",
+		)
 
 		// Verify graph reflects new config
 		graph := manager.Graph()
 		require.NotNil(t, graph, "graph should not be nil")
-		require.Equal(t, 1, len(graph.VirtualServices), "graph should have 1 virtual service")
-		require.Equal(t, 2, len(graph.VirtualServices[0].Reals), "VS should have 2 reals")
+		require.Equal(
+			t,
+			1,
+			len(graph.VirtualServices),
+			"graph should have 1 virtual service",
+		)
+		require.Equal(
+			t,
+			2,
+			len(graph.VirtualServices[0].Reals),
+			"VS should have 2 reals",
+		)
 
 		// Verify all reals are initially disabled after config update
 		// Match by identifier since order may differ
 		for _, configReal := range newConfig.Balancer.Handler.VirtualServices[0].Reals {
 			var graphReal *GraphReal
 			for i := range graph.VirtualServices[0].Reals {
-				if graph.VirtualServices[0].Reals[i].Identifier.Addr.Compare(configReal.Identifier.Addr) == 0 &&
+				if graph.VirtualServices[0].Reals[i].Identifier.Addr.Compare(
+					configReal.Identifier.Addr,
+				) == 0 &&
 					graph.VirtualServices[0].Reals[i].Identifier.Port == configReal.Identifier.Port {
 					graphReal = &graph.VirtualServices[0].Reals[i]
 					break
@@ -788,8 +1041,13 @@ func TestManager(t *testing.T) {
 			}
 			require.NotNil(t, graphReal, "Real %s:%d should exist in graph",
 				configReal.Identifier.Addr, configReal.Identifier.Port)
-			require.False(t, graphReal.Enabled, "Real %s:%d should be disabled after config update",
-				configReal.Identifier.Addr, configReal.Identifier.Port)
+			require.False(
+				t,
+				graphReal.Enabled,
+				"Real %s:%d should be disabled after config update",
+				configReal.Identifier.Addr,
+				configReal.Identifier.Port,
+			)
 			require.Equal(t, configReal.Weight, graphReal.Weight,
 				"Real %s:%d weight should match new config",
 				configReal.Identifier.Addr, configReal.Identifier.Port)
@@ -800,14 +1058,29 @@ func TestManager(t *testing.T) {
 		require.NoError(t, err, "failed to get info after update")
 		require.NotNil(t, info, "info should not be nil")
 		require.Equal(t, 1, len(info.Vs), "info should have 1 virtual service")
-		require.Equal(t, 2, len(info.Vs[0].Reals), "info VS should have 2 reals")
+		require.Equal(
+			t,
+			2,
+			len(info.Vs[0].Reals),
+			"info VS should have 2 reals",
+		)
 
 		// Verify stats reflects new topology
 		stats, err := manager.Stats(&ref)
 		require.NoError(t, err, "failed to get stats after update")
 		require.NotNil(t, stats, "stats should not be nil")
-		require.Equal(t, 1, len(stats.Vs), "stats should have 1 virtual service")
-		require.Equal(t, 2, len(stats.Vs[0].Reals), "stats VS should have 2 reals")
+		require.Equal(
+			t,
+			1,
+			len(stats.Vs),
+			"stats should have 1 virtual service",
+		)
+		require.Equal(
+			t,
+			2,
+			len(stats.Vs[0].Reals),
+			"stats VS should have 2 reals",
+		)
 
 		// Verify sessions (should still be empty or reset)
 		sessions := manager.Sessions(now)
@@ -865,7 +1138,11 @@ func TestManager(t *testing.T) {
 		}
 
 		err = manager.Update(&reorderedConfig, now)
-		require.NoError(t, err, "failed to update manager with reordered config")
+		require.NoError(
+			t,
+			err,
+			"failed to update manager with reordered config",
+		)
 
 		// Verify the config was updated
 		updatedConfig := manager.Config()
@@ -881,26 +1158,42 @@ func TestManager(t *testing.T) {
 		foundEnabledReal1 := false
 		for _, vs := range graphAfter.VirtualServices {
 			for _, real := range vs.Reals {
-				if real.Identifier.Addr.String() == "10.20.30.41" && real.Identifier.Port == 8443 {
-					require.True(t, real.Enabled,
-						"previously enabled real 10.20.30.41:8443 should still be enabled after reordering")
+				if real.Identifier.Addr.String() == "10.20.30.41" &&
+					real.Identifier.Port == 8443 {
+					require.True(
+						t,
+						real.Enabled,
+						"previously enabled real 10.20.30.41:8443 should still be enabled after reordering",
+					)
 					foundEnabledReal1 = true
 				}
 			}
 		}
-		require.True(t, foundEnabledReal1, "should find the previously enabled real 10.20.30.41:8443")
+		require.True(
+			t,
+			foundEnabledReal1,
+			"should find the previously enabled real 10.20.30.41:8443",
+		)
 
 		// The real at 10.12.13.213:8080 (from original VS[0].Reals[0]) should still be enabled
 		foundEnabledReal2 := false
 		for _, vs := range graphAfter.VirtualServices {
 			for _, real := range vs.Reals {
-				if real.Identifier.Addr.String() == "10.12.13.213" && real.Identifier.Port == 8080 {
-					require.True(t, real.Enabled,
-						"previously enabled real 10.12.13.213:8080 should still be enabled after reordering")
+				if real.Identifier.Addr.String() == "10.12.13.213" &&
+					real.Identifier.Port == 8080 {
+					require.True(
+						t,
+						real.Enabled,
+						"previously enabled real 10.12.13.213:8080 should still be enabled after reordering",
+					)
 					foundEnabledReal2 = true
 				}
 			}
 		}
-		require.True(t, foundEnabledReal2, "should find the previously enabled real 10.12.13.213:8080")
+		require.True(
+			t,
+			foundEnabledReal2,
+			"should find the previously enabled real 10.12.13.213:8080",
+		)
 	})
 }
