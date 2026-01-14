@@ -32,23 +32,19 @@ query_packet_and_expect_action(
 	);
 	assert(res == 0);
 
-	uint32_t *actions = NULL;
-	uint32_t actions_count = 0;
+	struct packet *packet_ptr = &packet;
+	struct value_range *actions;
 
 	if (strcmp(sign, "dst") == 0) {
-		FILTER_QUERY(
-			filter, sign_net6_dst, &packet, &actions, &actions_count
-		);
+		FILTER_QUERY(filter, sign_net6_dst, &packet_ptr, &actions, 1);
 	} else if (strcmp(sign, "both") == 0) {
-		FILTER_QUERY(
-			filter, sign_net6, &packet, &actions, &actions_count
-		);
+		FILTER_QUERY(filter, sign_net6, &packet_ptr, &actions, 1);
 	} else {
 		assert(0 && "Invalid sign");
 	}
 
-	assert(actions_count >= 1);
-	assert(actions[0] == action);
+	assert(actions->count >= 1);
+	assert(ADDR_OF(&actions->values)[0] == action);
 	free_packet(&packet);
 }
 
@@ -65,22 +61,18 @@ query_packet_and_expect_no_actions(
 	);
 	assert(res == 0);
 
-	uint32_t *actions = NULL;
-	uint32_t actions_count = 0;
+	struct packet *packet_ptr = &packet;
+	struct value_range *actions;
 
 	if (strcmp(sign, "dst") == 0) {
-		FILTER_QUERY(
-			filter, sign_net6_dst, &packet, &actions, &actions_count
-		);
+		FILTER_QUERY(filter, sign_net6_dst, &packet_ptr, &actions, 1);
 	} else if (strcmp(sign, "both") == 0) {
-		FILTER_QUERY(
-			filter, sign_net6, &packet, &actions, &actions_count
-		);
+		FILTER_QUERY(filter, sign_net6, &packet_ptr, &actions, 1);
 	} else {
 		assert(0 && "Invalid sign");
 	}
 
-	assert(actions_count == 0);
+	assert(actions->count == 0);
 	free_packet(&packet);
 }
 

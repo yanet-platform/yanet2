@@ -27,11 +27,11 @@ query_and_expect_action(
 		&p, sip, dip, src_port, dst_port, IPPROTO_UDP, 0
 	);
 	assert(res == 0);
-	uint32_t *actions;
-	uint32_t actions_count;
-	FILTER_QUERY(filter, sign_ports, &p, &actions, &actions_count);
-	assert(actions_count >= 1);
-	assert(actions[0] == expected);
+	struct packet *packet_ptr = &p;
+	struct value_range *actions;
+	FILTER_QUERY(filter, sign_ports, &packet_ptr, &actions, 1);
+	assert(actions->count >= 1);
+	assert(ADDR_OF(&actions->values)[0] == expected);
 	free_packet(&p);
 }
 
@@ -46,10 +46,10 @@ query_and_expect_no_action(
 		&p, sip, dip, src_port, dst_port, IPPROTO_UDP, 0
 	);
 	assert(res == 0);
-	uint32_t *actions;
-	uint32_t actions_count;
-	FILTER_QUERY(filter, sign_ports, &p, &actions, &actions_count);
-	assert(actions_count == 0);
+	struct packet *packet_ptr = &p;
+	struct value_range *actions;
+	FILTER_QUERY(filter, sign_ports, &packet_ptr, &actions, 1);
+	assert(actions->count == 0);
 	free_packet(&p);
 }
 

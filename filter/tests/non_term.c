@@ -19,8 +19,8 @@ query_and_expect_actions(
 	struct filter *filter,
 	uint16_t src_port,
 	uint16_t dst_port,
-	uint32_t action_count,
-	uint32_t *actions
+	uint32_t expected_count,
+	uint32_t *expected
 ) {
 	struct packet packet = {0};
 	uint8_t sip[NET4_LEN] = {0, 0, 0, 123};
@@ -30,18 +30,12 @@ query_and_expect_actions(
 	);
 	assert(res == 0);
 
-	uint32_t *result_actions;
-	uint32_t result_actions_count;
-	FILTER_QUERY(
-		filter,
-		sign_ports,
-		&packet,
-		&result_actions,
-		&result_actions_count
-	);
-	assert(result_actions_count == action_count);
-	for (uint32_t i = 0; i < action_count; ++i) {
-		assert(result_actions[i] == actions[i]);
+	struct packet *packet_ptr = &packet;
+	struct value_range *actions;
+	FILTER_QUERY(filter, sign_ports, &packet_ptr, &actions, 1);
+	assert(actions->count == expected_count);
+	for (uint32_t i = 0; i < actions->count; ++i) {
+		assert(ADDR_OF(&actions->values)[i] == expected[i]);
 	}
 	free_packet(&packet);
 }

@@ -67,47 +67,53 @@ filter_actions_with_category(
  * filter).
  * @param count_out_ptr uint32_t* receives number of actions.
  */
-#define FILTER_QUERY(                                                          \
-	filter_ptr, tag, packet_ptr, actions_out_ptr, count_out_ptr            \
-)                                                                              \
+#define FILTER_QUERY(filter_ptr, tag, packet_ptrs, result, count)              \
 	__extension__({                                                        \
 		struct filter *__flt = (filter_ptr);                           \
-		struct packet *__pkt = (packet_ptr);                           \
+		struct packet **__pkts = (packet_ptrs);                        \
 		const size_t __n = sizeof(__filter_attrs_query_##tag) /        \
 				   sizeof(__filter_attrs_query_##tag[0]);      \
 		/* Local slots storage */                                      \
-		uint32_t __slots[2 * MAX_ATTRIBUTES];                          \
+		uint32_t __slots[2 * MAX_ATTRIBUTES * count];                  \
 		/* compute classifiers for leaf attributes into parent slots   \
 		 */                                                            \
 		for (size_t __ai = 0; __ai < __n; ++__ai) {                    \
 			size_t __vtx = __n + __ai;                             \
 			struct filter_vertex *__v = &(__flt)->v[__vtx];        \
-			uint32_t __val =                                       \
-				__filter_attrs_query_##tag[__ai].query(        \
-					__pkt, ADDR_OF(&__v->data)             \
-				);                                             \
-			__slots[__vtx] = __val;                                \
+                                                                               \
+			__filter_attrs_query_##tag[__ai].query(                \
+				ADDR_OF(&__v->data),                           \
+				__pkts,                                        \
+				__slots + __vtx * count,                       \
+				count                                          \
+			);                                                     \
 		}                                                              \
 		/* compute inner vertices except root, pushing up to parent */ \
 		for (size_t __vtx = __n - 1; __vtx >= 2; --__vtx) {            \
 			struct filter_vertex *__v = &(__flt)->v[__vtx];        \
-			uint32_t __c = value_table_get(                        \
-				&__v->table,                                   \
-				__slots[__vtx << 1],                           \
-				__slots[__vtx << 1 | 1]                        \
-			);                                                     \
-			__slots[__vtx] = __c;                                  \
+			for (uint32_t idx = 0; idx < count; ++idx) {           \
+				uint32_t __c = value_table_get(                \
+					&__v->table,                           \
+					__slots[(__vtx << 1) * count + idx],   \
+					__slots[(__vtx << 1 | 1) * count +     \
+						idx]                           \
+				);                                             \
+				__slots[__vtx * count + idx] = __c;            \
+			}                                                      \
 		}                                                              \
 		/* root (1 when n>1, else 0) */                                \
 		const size_t __root = __n > 1;                                 \
 		struct filter_vertex *__r = &(__flt)->v[__root];               \
-		uint32_t __res = value_table_get(                              \
-			&__r->table,                                           \
-			__root == 0 ? 0 : __slots[__root << 1],                \
-			__slots[__root << 1 | 1]                               \
-		);                                                             \
-		struct value_range *__range =                                  \
-			ADDR_OF(&__r->registry.ranges) + __res;                \
-		*(actions_out_ptr) = ADDR_OF(&__range->values);                \
-		*(count_out_ptr) = __range->count;                             \
+		for (uint32_t idx = 0; idx < count; ++idx) {                   \
+			uint32_t __res = value_table_get(                      \
+				&__r->table,                                   \
+				__root == 0 ? 0                                \
+					    : __slots[(__root << 1) * count +  \
+						      idx],                    \
+				__slots[(__root << 1 | 1) * count + idx]       \
+			);                                                     \
+			struct value_range *__range =                          \
+				ADDR_OF(&__r->registry.ranges) + __res;        \
+			(result)[idx] = __range;                               \
+		}                                                              \
 	})

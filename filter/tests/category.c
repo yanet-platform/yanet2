@@ -31,12 +31,12 @@ query_and_check_actions(
 	);
 	assert(res == 0);
 
-	uint32_t *actions;
-	uint32_t actions_count;
-	FILTER_QUERY(filter, sign_port_src, &packet, &actions, &actions_count);
-	assert(actions_count == ref_actions_count);
-	for (uint32_t i = 0; i < actions_count; ++i) {
-		assert(actions[i] == ref_actions[i]);
+	struct packet *packet_ptr = &packet;
+	struct value_range *actions;
+	FILTER_QUERY(filter, sign_port_src, &packet_ptr, &actions, 1);
+	assert(actions->count == ref_actions_count);
+	for (uint32_t i = 0; i < actions->count; ++i) {
+		assert(ADDR_OF(&actions->values)[i] == ref_actions[i]);
 	}
 	free_packet(&packet);
 }

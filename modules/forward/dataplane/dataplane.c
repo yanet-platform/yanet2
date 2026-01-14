@@ -30,6 +30,66 @@ forward_handle_packets(
 		cp_module
 	);
 
+	struct packet *vlan_packets[packet_list_count(&packet_front->input)];
+	const struct value_range
+		*vlan_result[packet_list_count(&packet_front->input)];
+	uint64_t vlan_idx = 0;
+
+	struct packet *ip4_packets[packet_list_count(&packet_front->input)];
+	const struct value_range
+		*ip4_result[packet_list_count(&packet_front->input)];
+	uint64_t ip4_idx = 0;
+
+	struct packet *ip6_packets[packet_list_count(&packet_front->input)];
+	const struct value_range
+		*ip6_result[packet_list_count(&packet_front->input)];
+	uint64_t ip6_idx = 0;
+
+	for (struct packet *packet = packet_list_first(&packet_front->input);
+	     packet != NULL;
+	     packet = packet->next) {
+
+		vlan_packets[vlan_idx++] = packet;
+
+		if (packet->network_header.type ==
+		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+			ip4_packets[ip4_idx++] = packet;
+		}
+
+		if (packet->network_header.type ==
+		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+			ip6_packets[ip6_idx++] = packet;
+		}
+	}
+
+	FILTER_QUERY(
+		&forward_config->filter_vlan,
+		FWD_FILTER_VLAN_TAG,
+		vlan_packets,
+		vlan_result,
+		vlan_idx
+	);
+
+	FILTER_QUERY(
+		&forward_config->filter_ip4,
+		FWD_FILTER_IP4_TAG,
+		ip4_packets,
+		ip4_result,
+		ip4_idx
+	);
+
+	FILTER_QUERY(
+		&forward_config->filter_ip6,
+		FWD_FILTER_IP6_TAG,
+		ip6_packets,
+		ip6_result,
+		ip6_idx
+	);
+
+	vlan_idx = 0;
+	ip4_idx = 0;
+	ip6_idx = 0;
+
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		struct forward_target *target = NULL;
@@ -37,31 +97,17 @@ forward_handle_packets(
 		const uint32_t *actions = NULL;
 		uint32_t action_count = 0;
 
-		const uint32_t *vlan_actions;
-		uint32_t vlan_action_count;
-		FILTER_QUERY(
-			&forward_config->filter_vlan,
-			FWD_FILTER_VLAN_TAG,
-			packet,
-			&vlan_actions,
-			&vlan_action_count
-		);
-
 		// Set vlan as default
-		actions = vlan_actions;
-		action_count = vlan_action_count;
+		actions = ADDR_OF(&vlan_result[vlan_idx]->values);
+		action_count = vlan_result[vlan_idx]->count;
+		++vlan_idx;
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			const uint32_t *ip4_actions;
-			uint32_t ip4_action_count;
-			FILTER_QUERY(
-				&forward_config->filter_ip4,
-				FWD_FILTER_IP4_TAG,
-				packet,
-				&ip4_actions,
-				&ip4_action_count
-			);
+			const uint32_t *ip4_actions =
+				ADDR_OF(&ip4_result[ip4_idx]->values);
+			uint32_t ip4_action_count = ip4_result[ip4_idx]->count;
+			++ip4_idx;
 
 			if (ip4_action_count && (action_count == 0 ||
 						 ip4_actions[0] < actions[0])) {
@@ -70,15 +116,10 @@ forward_handle_packets(
 			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			const uint32_t *ip6_actions;
-			uint32_t ip6_action_count;
-			FILTER_QUERY(
-				&forward_config->filter_ip6,
-				FWD_FILTER_IP6_TAG,
-				packet,
-				&ip6_actions,
-				&ip6_action_count
-			);
+			const uint32_t *ip6_actions =
+				ADDR_OF(&ip6_result[ip6_idx]->values);
+			uint32_t ip6_action_count = ip6_result[ip6_idx]->count;
+			++ip6_idx;
 
 			if (ip6_action_count && (action_count == 0 ||
 						 ip6_actions[0] < actions[0])) {

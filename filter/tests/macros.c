@@ -43,11 +43,11 @@ run_case(void) {
 	assert(res == 0);
 
 	// query via header-only API
-	uint32_t *actions;
-	uint32_t actions_count;
-	FILTER_QUERY(&f, sign, &p, &actions, &actions_count);
-	assert(actions_count == 1);
-	assert(actions[0] == 1);
+	struct packet *packet_ptr = &p;
+	struct value_range *actions;
+	FILTER_QUERY(&f, sign, &packet_ptr, &actions, 1);
+	assert(actions->count == 1);
+	assert(ADDR_OF(&actions->values)[0] == 1);
 
 	free_packet(&p);
 	FILTER_FREE(&f, sign);
