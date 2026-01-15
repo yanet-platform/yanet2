@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdlib.h>
+
 /**
  * @brief Convert a relative pointer to a virtual address
  *
