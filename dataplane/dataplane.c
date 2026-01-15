@@ -491,6 +491,12 @@ dataplane_init(
 				return -1;
 			}
 		}
+		rc = dataplane_load_module(
+			instance->dp_config, bin_hndl, "proxy"
+		);
+		if (rc == -1) {
+			return -1;
+		}
 
 		static const char *devices[] = {"plain", "vlan"};
 		for (size_t i = 0; i < sizeof(devices) / sizeof(devices[0]);

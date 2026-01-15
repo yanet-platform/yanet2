@@ -15,6 +15,7 @@ import (
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
+	proxy "github.com/yanet-platform/yanet2/modules/proxy/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
@@ -123,6 +124,11 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize balancer built-in module: %w", err)
 	}
 
+	proxyModule, err := proxy.NewProxyModule(cfg.Modules.Proxy, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize proxy built-in module: %w", err)
+	}
+
 	plainDevice, err := plain.NewDevicePlainDevice(cfg.Devices.Plain, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize plain built-in device: %w", err)
@@ -159,6 +165,9 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		),
 		gateway.WithBuiltInModule(
 			balancerModule,
+		),
+		gateway.WithBuiltInModule(
+			proxyModule,
 		),
 		gateway.WithBuiltInDevice(
 			plainDevice,

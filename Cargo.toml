@@ -17,6 +17,7 @@ members = [
     "modules/nat64/cli",
     "modules/pdump/cli",
     "modules/balancer/cli",
+    "modules/proxy/cli",
     "modules/route/cli/neighbour",
     "modules/route/cli/route",
     "devices/cli",

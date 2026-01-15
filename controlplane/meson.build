@@ -28,6 +28,7 @@ custom_target(
         acl_protoc_gen,
         plain_protoc_gen,
         vlan_protoc_gen,
+        proxy_protoc_gen,
 
         # cgo linker deps
         lib_acl_cp,

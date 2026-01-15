@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package proxypb;
+
+import "common/commonpb/target.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/proxy/controlplane/proxypb;proxypb";
+
+service ProxyService {
+    // ListConfigs returns all forward module configurations of all
+	// dataplane instances.
+	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
+	// ShowConfig returns the current configuration for the forward module.
+	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+
+	// Allows to delete forward config if it is not referenced
+	// by any pipeline.
+	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+
+	rpc SetAddr(SetAddrRequest) returns (SetAddrResponse);
+}
+
+message ProxyConfig {
+}
+
+message Config {
+	ProxyConfig proxy_config = 1;
+}
+
+// Represents config names of dataplane instances
+message InstanceConfigs {
+	// Dataplane instance
+	uint32 instance = 1;
+	repeated string configs = 2;
+}
+
+message ListConfigsRequest {
+}
+
+// ListConfigsResponse contains existing configurations per dataplane instance.
+message ListConfigsResponse {
+	repeated InstanceConfigs instance_configs = 1;
+}
+
+// ShowConfigResponse retrieves the runtime configuration for the forward
+// module.
+message ShowConfigRequest {
+	commonpb.TargetModule target = 1;
+}
+
+// ShowConfigResponse contains the configuration details of the forward module.
+message ShowConfigResponse {
+	uint32 instance = 1;
+	Config config = 2;
+}
+
+// Delete config with specified name.
+message DeleteConfigRequest {
+	// Specifies module name and
+	// dataplane instance of forward agent to delete.
+	commonpb.TargetModule target = 1;
+}
+
+message DeleteConfigResponse {
+	bool deleted = 1;
+}
+
+message SetAddrRequest {
+	commonpb.TargetModule target = 1;
+	uint32 addr = 2;
+}
+
+message SetAddrResponse {
+}

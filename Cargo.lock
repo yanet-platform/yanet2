@@ -2853,6 +2853,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-proxy"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored",
+ "log",
+ "prost",
+ "prost-types",
+ "ptree",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
+]
+
+[[package]]
 name = "yanet-cli-route"
 version = "0.1.0"
 dependencies = [

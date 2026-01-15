@@ -17,6 +17,7 @@ import (
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
+	proxy "github.com/yanet-platform/yanet2/modules/proxy/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
@@ -52,6 +53,7 @@ func DefaultConfig() *Config {
 			Forward:  forward.DefaultConfig(),
 			NAT64:    nat64.DefaultConfig(),
 			Pdump:    pdump.DefaultConfig(),
+			Proxy:    proxy.DefaultConfig(),
 			Balancer: balancer.DefaultConfig(),
 			ACL:      acl.DefaultConfig(),
 		},
@@ -96,6 +98,9 @@ type ModulesConfig struct {
 
 	// Pdump is the configuration for the packet dump module.
 	Pdump *pdump.Config `yaml:"pdump"`
+
+	// Proxy is the configuration for the proxy module
+	Proxy *proxy.Config `yaml:"proxy"`
 
 	// Balancer is the configuration for the balancer module.
 	Balancer *balancer.Config `yaml:"balancer"`
@@ -154,6 +159,9 @@ func (m *ModulesConfig) Validate() error {
 	}
 	if m.ACL == nil {
 		return fmt.Errorf("acl module is not configured")
+	}
+	if m.Proxy == nil {
+		return fmt.Errorf("proxy module is not configured")
 	}
 	return nil
 }
