@@ -3972,7 +3972,7 @@ test_nat64_udp_checksum() {
 	);
 
 	// Verify output
-	int count = packet_list_counter(&test_params.packet_front.output);
+	int count = packet_list_count(&test_params.packet_front.output);
 	TEST_ASSERT_EQUAL(
 		count, 1, "Expected 1 packet output, got %d\n", count
 	);
@@ -4051,18 +4051,18 @@ process_test_case(struct test_case *tc) {
 	);
 
 	if (tc->pkt_expected.eth.dst_addr.addr_bytes[0] == 0) {
-		int count = packet_list_counter(&test_params.packet_front.drop);
+		int count = packet_list_count(&test_params.packet_front.drop);
 		TEST_ASSERT_EQUAL(
 			count, 1, "Expected 1 packet droped, got %d\n", count
 		);
-		count = packet_list_counter(&test_params.packet_front.output);
+		count = packet_list_count(&test_params.packet_front.output);
 		TEST_ASSERT_EQUAL(
 			count, 0, "Expected 0 packet output, got %d\n", count
 		);
 		return TEST_SUCCESS;
 	}
 
-	int count = packet_list_counter(&test_params.packet_front.output);
+	int count = packet_list_count(&test_params.packet_front.output);
 	TEST_ASSERT_EQUAL(
 		count,
 		1,
@@ -4070,7 +4070,7 @@ process_test_case(struct test_case *tc) {
 		tc->name,
 		count
 	);
-	count = packet_list_counter(&test_params.packet_front.drop);
+	count = packet_list_count(&test_params.packet_front.drop);
 	TEST_ASSERT_EQUAL(
 		count,
 		0,
