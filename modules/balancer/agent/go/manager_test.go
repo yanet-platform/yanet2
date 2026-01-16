@@ -86,7 +86,8 @@ func TestManager(t *testing.T) {
 									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 100,
 						},
@@ -103,7 +104,8 @@ func TestManager(t *testing.T) {
 									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 150,
 						},
@@ -120,7 +122,8 @@ func TestManager(t *testing.T) {
 									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 200,
 						},
@@ -172,7 +175,8 @@ func TestManager(t *testing.T) {
 									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 100,
 						},
@@ -189,7 +193,8 @@ func TestManager(t *testing.T) {
 									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 100,
 						},
@@ -232,7 +237,8 @@ func TestManager(t *testing.T) {
 									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 50,
 						},
@@ -249,7 +255,8 @@ func TestManager(t *testing.T) {
 									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 75,
 						},
@@ -266,7 +273,8 @@ func TestManager(t *testing.T) {
 									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 100,
 						},
@@ -283,7 +291,8 @@ func TestManager(t *testing.T) {
 									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 125,
 						},
@@ -300,7 +309,8 @@ func TestManager(t *testing.T) {
 									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 150,
 						},
@@ -849,7 +859,8 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 				{
 					Id: &balancerpb.VsIdentifier{
 						Addr: &balancerpb.Addr{
-							Bytes: netip.MustParseAddr("10.12.13.213").AsSlice(),
+							Bytes: netip.MustParseAddr("10.12.13.213").
+								AsSlice(),
 						},
 						Port:  80,
 						Proto: balancerpb.TransportProto_TCP,
@@ -860,15 +871,18 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("10.12.13.213").AsSlice(),
+									Bytes: netip.MustParseAddr("10.12.13.213").
+										AsSlice(),
 								},
 								Port: 8080,
 							},
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("172.16.0.0").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 100,
 						},
@@ -928,8 +942,12 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 		// Verify source_v4 changed
 		config := manager.Config()
 		require.NotNil(t, config.PacketHandler)
-		require.Equal(t, newSourceV4.Bytes, config.PacketHandler.SourceAddressV4.Bytes,
-			"source_address_v4 should be updated")
+		require.Equal(
+			t,
+			newSourceV4.Bytes,
+			config.PacketHandler.SourceAddressV4.Bytes,
+			"source_address_v4 should be updated",
+		)
 
 		// Verify other fields preserved
 		require.NotNil(t, config.PacketHandler.SourceAddressV6,
@@ -940,8 +958,12 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 
 		require.NotNil(t, config.PacketHandler.SessionsTimeouts,
 			"sessions_timeouts should be preserved")
-		require.Equal(t, uint32(10), config.PacketHandler.SessionsTimeouts.TcpSynAck,
-			"tcp_syn_ack timeout should match original")
+		require.Equal(
+			t,
+			uint32(10),
+			config.PacketHandler.SessionsTimeouts.TcpSynAck,
+			"tcp_syn_ack timeout should match original",
+		)
 
 		require.NotNil(t, config.PacketHandler.Vs,
 			"virtual services should be preserved")
@@ -971,7 +993,8 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 					{
 						Id: &balancerpb.RelativeRealIdentifier{
 							Ip: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.20.30.41").AsSlice(),
+								Bytes: netip.MustParseAddr("10.20.30.41").
+									AsSlice(),
 							},
 							Port: 8443,
 						},
@@ -979,7 +1002,8 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 							Bytes: netip.MustParseAddr("172.17.0.0").AsSlice(),
 						},
 						SrcMask: &balancerpb.Addr{
-							Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+							Bytes: netip.MustParseAddr("255.255.255.0").
+								AsSlice(),
 						},
 						Weight: 100,
 					},
@@ -1012,8 +1036,12 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 			"source_address_v4 should be preserved from previous update")
 
 		require.NotNil(t, config.PacketHandler.SessionsTimeouts)
-		require.Equal(t, uint32(10), config.PacketHandler.SessionsTimeouts.TcpSynAck,
-			"tcp_syn_ack timeout should be preserved")
+		require.Equal(
+			t,
+			uint32(10),
+			config.PacketHandler.SessionsTimeouts.TcpSynAck,
+			"tcp_syn_ack timeout should be preserved",
+		)
 	})
 
 	// Test 3: Partial State update - only session_table_capacity
@@ -1168,7 +1196,8 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 					{
 						Id: &balancerpb.VsIdentifier{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.50.60.70").AsSlice(),
+								Bytes: netip.MustParseAddr("10.50.60.70").
+									AsSlice(),
 							},
 							Port:  53,
 							Proto: balancerpb.TransportProto_UDP,
@@ -1179,15 +1208,18 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 							{
 								Id: &balancerpb.RelativeRealIdentifier{
 									Ip: &balancerpb.Addr{
-										Bytes: netip.MustParseAddr("10.50.60.71").AsSlice(),
+										Bytes: netip.MustParseAddr("10.50.60.71").
+											AsSlice(),
 									},
 									Port: 5353,
 								},
 								SrcAddr: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("172.18.0.0").AsSlice(),
+									Bytes: netip.MustParseAddr("172.18.0.0").
+										AsSlice(),
 								},
 								SrcMask: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+									Bytes: netip.MustParseAddr("255.255.255.0").
+										AsSlice(),
 								},
 								Weight: 50,
 							},
@@ -1223,7 +1255,11 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 
 		// Check PacketHandler
 		require.NotNil(t, config.PacketHandler)
-		require.Equal(t, uint32(5), config.PacketHandler.SessionsTimeouts.TcpSynAck)
+		require.Equal(
+			t,
+			uint32(5),
+			config.PacketHandler.SessionsTimeouts.TcpSynAck,
+		)
 		require.Equal(t, netip.MustParseAddr("10.100.100.100").AsSlice(),
 			config.PacketHandler.SourceAddressV4.Bytes)
 		require.Equal(t, netip.MustParseAddr("2001:db8::100").AsSlice(),
@@ -1235,7 +1271,11 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 		// Check State
 		require.NotNil(t, config.State)
 		require.LessOrEqual(t, newCapacity, *config.State.SessionTableCapacity)
-		require.Equal(t, newMaxLoadFactor, *config.State.SessionTableMaxLoadFactor)
+		require.Equal(
+			t,
+			newMaxLoadFactor,
+			*config.State.SessionTableMaxLoadFactor,
+		)
 		require.NotNil(t, config.State.Wlc)
 		require.Equal(t, newPower, *config.State.Wlc.Power)
 		require.Equal(t, newMaxWeight, *config.State.Wlc.MaxWeight)

@@ -302,7 +302,8 @@ func TestProtoToFFIConfig_Valid(t *testing.T) {
 									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 						},
 					},
@@ -725,7 +726,9 @@ func TestProtoToRealConfig_ZeroWeight(t *testing.T) {
 		SrcAddr: &balancerpb.Addr{
 			Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
 		},
-		SrcMask: &balancerpb.Addr{Bytes: netip.MustParseAddr("255.255.255.0").AsSlice()},
+		SrcMask: &balancerpb.Addr{
+			Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+		},
 	}
 
 	_, err := protoToRealConfig(real)

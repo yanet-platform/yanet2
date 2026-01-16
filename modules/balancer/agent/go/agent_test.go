@@ -57,7 +57,8 @@ func TestBalancerAgent(t *testing.T) {
 				{
 					Id: &balancerpb.VsIdentifier{
 						Addr: &balancerpb.Addr{
-							Bytes: netip.MustParseAddr("10.12.13.213").AsSlice(),
+							Bytes: netip.MustParseAddr("10.12.13.213").
+								AsSlice(),
 						},
 						Port:  80,
 						Proto: balancerpb.TransportProto_TCP,
@@ -70,15 +71,18 @@ func TestBalancerAgent(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("10.12.13.213").AsSlice(),
+									Bytes: netip.MustParseAddr("10.12.13.213").
+										AsSlice(),
 								},
 								Port: 8080,
 							},
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("172.16.0.0").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 100,
 						},
@@ -86,7 +90,8 @@ func TestBalancerAgent(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("192.1.1.1").AsSlice(),
+								Bytes: netip.MustParseAddr("192.1.1.1").
+									AsSlice(),
 							},
 							Size: 24,
 						},
@@ -161,15 +166,18 @@ func TestBalancerAgent(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("20.20.30.40").AsSlice(),
+									Bytes: netip.MustParseAddr("20.20.30.40").
+										AsSlice(),
 								},
 								Port: 8443,
 							},
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("172.17.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("172.17.0.0").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 150,
 						},
@@ -177,7 +185,8 @@ func TestBalancerAgent(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("192.2.2.0").AsSlice(),
+								Bytes: netip.MustParseAddr("192.2.2.0").
+									AsSlice(),
 							},
 							Size: 24,
 						},
@@ -231,15 +240,33 @@ func TestBalancerAgent(t *testing.T) {
 	t.Run("NewBalancerManager_DuplicateName", func(t *testing.T) {
 		// Attempt to create manager with existing name
 		err := agent.NewBalancerManager("balancer0", firstManagerConfig)
-		require.Error(t, err, "expected error when creating manager with duplicate name")
-		assert.Contains(t, err.Error(), "already exists", "error should mention manager already exists")
+		require.Error(
+			t,
+			err,
+			"expected error when creating manager with duplicate name",
+		)
+		assert.Contains(
+			t,
+			err.Error(),
+			"already exists",
+			"error should mention manager already exists",
+		)
 	})
 
 	t.Run("BalancerManager_NonExistent", func(t *testing.T) {
 		// Attempt to retrieve non-existent manager
 		_, err := agent.BalancerManager("nonexistent")
-		require.Error(t, err, "expected error when retrieving non-existent manager")
-		assert.Contains(t, err.Error(), "not found", "error should mention manager not found")
+		require.Error(
+			t,
+			err,
+			"expected error when retrieving non-existent manager",
+		)
+		assert.Contains(
+			t,
+			err.Error(),
+			"not found",
+			"error should mention manager not found",
+		)
 	})
 
 	t.Run("UpdateManager_First", func(t *testing.T) {
@@ -275,16 +302,48 @@ func TestBalancerAgent(t *testing.T) {
 		newConfig := manager.Config()
 
 		// Verify only the session timeouts were updated
-		assert.Equal(t, newSessionTimeouts.TcpSynAck, newConfig.PacketHandler.SessionsTimeouts.TcpSynAck)
-		assert.Equal(t, newSessionTimeouts.TcpSyn, newConfig.PacketHandler.SessionsTimeouts.TcpSyn)
-		assert.Equal(t, newSessionTimeouts.TcpFin, newConfig.PacketHandler.SessionsTimeouts.TcpFin)
-		assert.Equal(t, newSessionTimeouts.Tcp, newConfig.PacketHandler.SessionsTimeouts.Tcp)
-		assert.Equal(t, newSessionTimeouts.Udp, newConfig.PacketHandler.SessionsTimeouts.Udp)
-		assert.Equal(t, newSessionTimeouts.Default, newConfig.PacketHandler.SessionsTimeouts.Default)
+		assert.Equal(
+			t,
+			newSessionTimeouts.TcpSynAck,
+			newConfig.PacketHandler.SessionsTimeouts.TcpSynAck,
+		)
+		assert.Equal(
+			t,
+			newSessionTimeouts.TcpSyn,
+			newConfig.PacketHandler.SessionsTimeouts.TcpSyn,
+		)
+		assert.Equal(
+			t,
+			newSessionTimeouts.TcpFin,
+			newConfig.PacketHandler.SessionsTimeouts.TcpFin,
+		)
+		assert.Equal(
+			t,
+			newSessionTimeouts.Tcp,
+			newConfig.PacketHandler.SessionsTimeouts.Tcp,
+		)
+		assert.Equal(
+			t,
+			newSessionTimeouts.Udp,
+			newConfig.PacketHandler.SessionsTimeouts.Udp,
+		)
+		assert.Equal(
+			t,
+			newSessionTimeouts.Default,
+			newConfig.PacketHandler.SessionsTimeouts.Default,
+		)
 
 		// Verify other fields remain unchanged (compare with config before update)
-		assert.Equal(t, configBeforeUpdate.PacketHandler.Vs[0].AllowedSrcs[0].Addr.Bytes, newConfig.PacketHandler.Vs[0].AllowedSrcs[0].Addr.Bytes)
-		assert.Equal(t, configBeforeUpdate.State.SessionTableMaxLoadFactor, newConfig.State.SessionTableMaxLoadFactor)
+		assert.Equal(
+			t,
+			configBeforeUpdate.PacketHandler.Vs[0].AllowedSrcs[0].Addr.Bytes,
+			newConfig.PacketHandler.Vs[0].AllowedSrcs[0].Addr.Bytes,
+		)
+		assert.Equal(
+			t,
+			configBeforeUpdate.State.SessionTableMaxLoadFactor,
+			newConfig.State.SessionTableMaxLoadFactor,
+		)
 	})
 
 	t.Run("UpdateManager_ConsecutiveCalls", func(t *testing.T) {
@@ -298,19 +357,35 @@ func TestBalancerAgent(t *testing.T) {
 		config2 := manager2.Config()
 
 		// Both calls should return the same updated values
-		assert.Equal(t, config1.PacketHandler.SessionsTimeouts.TcpSynAck, config2.PacketHandler.SessionsTimeouts.TcpSynAck)
-		assert.Equal(t, config1.PacketHandler.SessionsTimeouts.Tcp, config2.PacketHandler.SessionsTimeouts.Tcp)
-		assert.Equal(t, uint32(30), config2.PacketHandler.SessionsTimeouts.TcpSynAck)
+		assert.Equal(
+			t,
+			config1.PacketHandler.SessionsTimeouts.TcpSynAck,
+			config2.PacketHandler.SessionsTimeouts.TcpSynAck,
+		)
+		assert.Equal(
+			t,
+			config1.PacketHandler.SessionsTimeouts.Tcp,
+			config2.PacketHandler.SessionsTimeouts.Tcp,
+		)
+		assert.Equal(
+			t,
+			uint32(30),
+			config2.PacketHandler.SessionsTimeouts.TcpSynAck,
+		)
 		assert.Equal(t, uint32(200), config2.PacketHandler.SessionsTimeouts.Tcp)
 	})
 
 	t.Run("UpdateManager_Second", func(t *testing.T) {
 		// Update second manager configuration - update source addresses
 		newSourceV4 := &balancerpb.Addr{
-			Bytes: netip.MustParseAddr("30.30.40.50").AsSlice(), // Changed from 20, 20, 30, 40
+			Bytes: netip.MustParseAddr("30.30.40.50").
+				AsSlice(),
+			// Changed from 20, 20, 30, 40
 		}
 		newSourceV6 := &balancerpb.Addr{
-			Bytes: netip.MustParseAddr("2001:db8::14").AsSlice(), // Changed last byte from 10 to 20
+			Bytes: netip.MustParseAddr("2001:db8::14").
+				AsSlice(),
+			// Changed last byte from 10 to 20
 		}
 
 		update := &balancerpb.BalancerConfig{
@@ -336,15 +411,47 @@ func TestBalancerAgent(t *testing.T) {
 		newConfig := manager.Config()
 
 		// Verify only the source addresses were updated
-		assert.Equal(t, newSourceV4.Bytes, newConfig.PacketHandler.SourceAddressV4.Bytes)
-		assert.Equal(t, newSourceV6.Bytes, newConfig.PacketHandler.SourceAddressV6.Bytes)
+		assert.Equal(
+			t,
+			newSourceV4.Bytes,
+			newConfig.PacketHandler.SourceAddressV4.Bytes,
+		)
+		assert.Equal(
+			t,
+			newSourceV6.Bytes,
+			newConfig.PacketHandler.SourceAddressV6.Bytes,
+		)
 
 		// Verify other fields remain unchanged (compare with config before update)
-		assert.Equal(t, configBeforeUpdate.PacketHandler.SessionsTimeouts, newConfig.PacketHandler.SessionsTimeouts)
-		assert.Equal(t, configBeforeUpdate.PacketHandler.DecapAddresses, newConfig.PacketHandler.DecapAddresses)
-		assert.Equal(t, configBeforeUpdate.PacketHandler.Vs[0].AllowedSrcs[0].Addr.Bytes, newConfig.PacketHandler.Vs[0].AllowedSrcs[0].Addr.Bytes)
-		assert.Equal(t, configBeforeUpdate.PacketHandler.Vs[0].Id, newConfig.PacketHandler.Vs[0].Id)
-		assert.Equal(t, configBeforeUpdate.State.SessionTableMaxLoadFactor, newConfig.State.SessionTableMaxLoadFactor)
-		assert.Equal(t, configBeforeUpdate.State.SessionTableCapacity, newConfig.State.SessionTableCapacity)
+		assert.Equal(
+			t,
+			configBeforeUpdate.PacketHandler.SessionsTimeouts,
+			newConfig.PacketHandler.SessionsTimeouts,
+		)
+		assert.Equal(
+			t,
+			configBeforeUpdate.PacketHandler.DecapAddresses,
+			newConfig.PacketHandler.DecapAddresses,
+		)
+		assert.Equal(
+			t,
+			configBeforeUpdate.PacketHandler.Vs[0].AllowedSrcs[0].Addr.Bytes,
+			newConfig.PacketHandler.Vs[0].AllowedSrcs[0].Addr.Bytes,
+		)
+		assert.Equal(
+			t,
+			configBeforeUpdate.PacketHandler.Vs[0].Id,
+			newConfig.PacketHandler.Vs[0].Id,
+		)
+		assert.Equal(
+			t,
+			configBeforeUpdate.State.SessionTableMaxLoadFactor,
+			newConfig.State.SessionTableMaxLoadFactor,
+		)
+		assert.Equal(
+			t,
+			configBeforeUpdate.State.SessionTableCapacity,
+			newConfig.State.SessionTableCapacity,
+		)
 	})
 }

@@ -131,7 +131,8 @@ func ProtoToManagerConfig(
 
 	// Check if any of refresh_period, max_load_factor, or wlc is present
 	hasRefreshPeriod := config.State.RefreshPeriod != nil
-	isRefreshPeriodValued := hasRefreshPeriod && config.State.RefreshPeriod.AsDuration() != 0
+	isRefreshPeriodValued := hasRefreshPeriod &&
+		config.State.RefreshPeriod.AsDuration() != 0
 	hasMaxLoadFactor := config.State.SessionTableMaxLoadFactor != nil
 	hasWlc := config.State.Wlc != nil
 
@@ -625,8 +626,12 @@ func mergeStateConfig(
 		return &balancerpb.StateConfig{
 			SessionTableCapacity:      &capacity,
 			SessionTableMaxLoadFactor: &currentConfig.MaxLoadFactor,
-			RefreshPeriod:             durationpb.New(currentConfig.RefreshPeriod),
-			Wlc:                       convertWlcConfigToProto(&currentConfig.Wlc),
+			RefreshPeriod: durationpb.New(
+				currentConfig.RefreshPeriod,
+			),
+			Wlc: convertWlcConfigToProto(
+				&currentConfig.Wlc,
+			),
 		}
 	}
 
@@ -797,7 +802,11 @@ func ConvertBalancerStatsToProto(
 	vsStats := make([]*balancerpb.NamedVsStats, 0, len(stats.Vs))
 	for i := range stats.Vs {
 		// Convert real stats for this VS
-		realStats := make([]*balancerpb.NamedRealStats, 0, len(stats.Vs[i].Reals))
+		realStats := make(
+			[]*balancerpb.NamedRealStats,
+			0,
+			len(stats.Vs[i].Reals),
+		)
 		for j := range stats.Vs[i].Reals {
 			realStats = append(realStats, &balancerpb.NamedRealStats{
 				Real: &balancerpb.RealIdentifier{
