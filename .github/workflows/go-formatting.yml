@@ -2,13 +2,13 @@ name: Go Formatting Check
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
     paths:
-      - 'controlplane/**/*.go'
+      - "controlplane/**/*.go"
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
     paths:
-      - 'controlplane/**/*.go'
+      - "controlplane/**/*.go"
 
 jobs:
   gofmt:
@@ -20,7 +20,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: "1.24.x"
           cache: true
           cache-dependency-path: controlplane/go.sum
 
