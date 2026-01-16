@@ -230,7 +230,7 @@ rules:
         to: 65535
     dsts:
       - 0.0.0.0/0.0.0.0
-      - '::/::'
+      - "::/::"
     proto_ranges:
       - from: 1540
         to: 1543
@@ -301,7 +301,7 @@ rules:
         to: 65535
     srcs:
       - 0.0.0.0/0.0.0.0
-      - '::/::'
+      - "::/::"
     vlan_ranges: []
 
   # Allow ICMP Echo
@@ -361,7 +361,7 @@ rules:
         to: 65535
     dsts:
       - 0.0.0.0/0.0.0.0
-      - '::/::'
+      - "::/::"
     proto_ranges:
       - from: 4352
         to: 4607
@@ -454,7 +454,7 @@ rules:
         to: 65535
     dsts:
       - 0.0.0.0/0.0.0.0
-      - '::/::'
+      - "::/::"
     proto_ranges:
       - from: 4352
         to: 4607
@@ -476,7 +476,7 @@ rules:
         to: 65535
     dsts:
       - 0.0.0.0/0.0.0.0
-      - '::/::'
+      - "::/::"
     proto_ranges:
       - from: 4352
         to: 4607
@@ -498,7 +498,7 @@ rules:
         to: 65535
     dsts:
       - 0.0.0.0/0.0.0.0
-      - '::/::'
+      - "::/::"
     proto_ranges:
       - from: 4352
         to: 4607
@@ -520,7 +520,7 @@ rules:
         to: 65535
     dsts:
       - 0.0.0.0/0.0.0.0
-      - '::/::'
+      - "::/::"
     proto_ranges:
       - from: 4352
         to: 4607
@@ -530,11 +530,10 @@ rules:
     srcs:
       - 192.0.0.0/255.255.0.0
     vlan_ranges: []
-
 # # ===== DEFAULT DENY =====
 #   - action: Deny
 #     counter: ""
-#     devices: 
+#     devices:
 #       - ""
 #     dst_ports:
 #       - from: 0

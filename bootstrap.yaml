@@ -14,5 +14,3 @@ devices:
       - network: 0.0.0.0/0
         device_id: 0
     v6_forwards:
-
-

@@ -24,7 +24,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04    
+    runs-on: ubuntu-24.04
     env:
       cache_name: build-and-test
 
@@ -33,7 +33,7 @@ jobs:
         run: |
           echo "=== Initial disk space ==="
           df -h
-          
+
           echo "=== Removing unnecessary software ==="
           # Remove large packages that are not needed
           sudo rm -rf /usr/share/dotnet
@@ -42,20 +42,19 @@ jobs:
           sudo rm -rf /opt/hostedtoolcache/CodeQL
           sudo rm -rf /usr/local/share/boost
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          
+
           # Clean apt cache
           sudo apt-get clean
-          
+
           # Remove docker images
           docker rmi $(docker images -q) 2>/dev/null || true
-          
+
           echo "=== Disk space after cleanup ==="
           df -h
 
       - name: update apt (act hack)
         if: ${{ env.ACT }}
-        run: |
-          apt-get update
+        run: apt-get update
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -88,23 +87,21 @@ jobs:
         with:
           submodules: true
 
-
       - uses: hendrikmuhs/ccache-action@v1.2.18
         name: ccache
         with:
           key: ${{ runner.os }}-build-cache
 
-
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: "1.24.x"
           cache: false
           check-latest: true
       # https://github.com/actions/setup-go/issues/358
       - name: Get Go environment
         run: |
-          echo "cache=$(go env GOCACHE)" >> $GITHUB_ENV
-          echo "modcache=$(go env GOMODCACHE)" >> $GITHUB_ENV
+          echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
+          echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
       - name: Set up go cache
         uses: actions/cache@v3
         with:
@@ -132,8 +129,7 @@ jobs:
           make go-cache-clean
           make test-asan
       - name: Show meson test log
-        run:
-          grep -v 'Inherited environment' build/meson-logs/testlog.txt
+        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt
 
       - name: Clean debug build artifacts to free space
         run: |
@@ -141,14 +137,14 @@ jobs:
           df -h
           echo "=== Build directory size ==="
           du -sh build/ || true
-          
+
           echo "=== Cleaning debug build artifacts ==="
           # Completely remove build directory to free maximum space
           rm -rf build/
-          
+
           # Clean Docker build cache if exists
           docker system prune -af 2>/dev/null || true
-          
+
           echo "=== Disk space after cleanup ==="
           df -h
 
@@ -159,11 +155,10 @@ jobs:
           make dataplane cli
 
       - name: Build and run tests (release)
-        run: |
-          make test
+        run: make test
+
       - name: Show meson test log
-        run:
-          grep -v 'Inherited environment' build/meson-logs/testlog.txt
+        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt
 
       - name: Run clang-tidy
         env:
@@ -172,50 +167,57 @@ jobs:
         run: |
           set -euo pipefail
           # Ensure compilation database exists
-          test -f build/compile_commands.json || { echo "ERROR: build/compile_commands.json not found"; ls -la build || true; exit 1; }
-  
+          test -f build/compile_commands.json || {
+              echo "ERROR: build/compile_commands.json not found"
+              ls -la build || true
+              exit 1
+          }
+
           # Force using the freshly installed LLVM 19 to avoid ABI/lib conflicts with system packages
           if [ ! -x "$LLVM_DIR/bin/clang-tidy" ]; then
-            echo "ERROR: LLVM 19 clang-tidy not found at $LLVM_DIR/bin/clang-tidy"; ls -la "$LLVM_DIR/bin" || true; exit 1
+              echo "ERROR: LLVM 19 clang-tidy not found at $LLVM_DIR/bin/clang-tidy"
+              ls -la "$LLVM_DIR/bin" || true
+              exit 1
           fi
           export PATH="$LLVM_DIR/bin:$PATH"
           export LD_LIBRARY_PATH="$LLVM_DIR/lib:${LD_LIBRARY_PATH:-}"
-  
+
           CTIDY="$LLVM_DIR/bin/clang-tidy"
           # Locate run-clang-tidy.py shipped with LLVM
-          if   [ -f "$LLVM_DIR/share/clang/run-clang-tidy.py" ]; then
-            RTIDY="$LLVM_DIR/share/clang/run-clang-tidy.py"
+          if [ -f "$LLVM_DIR/share/clang/run-clang-tidy.py" ]; then
+              RTIDY="$LLVM_DIR/share/clang/run-clang-tidy.py"
           elif [ -f "$LLVM_DIR/lib/clang/run-clang-tidy.py" ]; then
-            RTIDY="$LLVM_DIR/lib/clang/run-clang-tidy.py"
+              RTIDY="$LLVM_DIR/lib/clang/run-clang-tidy.py"
           else
-            RTIDY=""
+              RTIDY=""
           fi
-  
+
           echo "Using clang-tidy binary: $CTIDY"
           [ -n "$RTIDY" ] && echo "Using run-clang-tidy helper: $RTIDY"
-  
+
           # Build file list from database (C files, exclude subprojects)
           FILES="$(jq -r '.[].file' build/compile_commands.json | sort -u | grep '\.c$' | grep -v '/subprojects/' || true)"
           if [ -z "$FILES" ]; then
-            echo "No source files to lint (after filtering)."; exit 0;
+              echo "No source files to lint (after filtering)."
+              exit 0
           fi
-  
+
           if [ -n "$RTIDY" ] && [ -f "$RTIDY" ]; then
-            # Use run-clang-tidy.py (handles DB well and parallelism)
-            python3 "$RTIDY" \
-              -p build \
-              -j "$(nproc)" \
-              -clang-tidy-binary "$CTIDY" \
-              -header-filter='^(?!.*\/subprojects\/).*' \
-              $FILES
-          else
-            # Fallback: invoke clang-tidy directly from DB directory
-            cd build
-            printf "%s\n" $FILES \
-              | xargs -P"$(nproc)" -I{} "$CTIDY" \
-                  -p . \
+              # Use run-clang-tidy.py (handles DB well and parallelism)
+              python3 "$RTIDY" \
+                  -p build \
+                  -j "$(nproc)" \
+                  -clang-tidy-binary "$CTIDY" \
                   -header-filter='^(?!.*\/subprojects\/).*' \
-                  {}
+                  $FILES
+          else
+              # Fallback: invoke clang-tidy directly from DB directory
+              cd build
+              printf "%s\n" $FILES |
+                  xargs -P"$(nproc)" -I{} "$CTIDY" \
+                      -p . \
+                      -header-filter='^(?!.*\/subprojects\/).*' \
+                      {}
           fi
 
       - name: Verify binaries before upload
@@ -224,36 +226,36 @@ jobs:
           echo "Current git commit: $(git rev-parse HEAD)"
           echo "Current git commit short: $(git rev-parse --short HEAD)"
           echo ""
-          
+
           echo "yanet-dataplane:"
           if [ -f "build/dataplane/yanet-dataplane" ]; then
-            stat build/dataplane/yanet-dataplane
-            md5sum build/dataplane/yanet-dataplane
-            strings build/dataplane/yanet-dataplane | grep -E "yanet|version" | head -20 || true
+              stat build/dataplane/yanet-dataplane
+              md5sum build/dataplane/yanet-dataplane
+              strings build/dataplane/yanet-dataplane | grep -E "yanet|version" | head -20 || true
           else
-            echo "ERROR: build/dataplane/yanet-dataplane not found!"
-            exit 1
+              echo "ERROR: build/dataplane/yanet-dataplane not found!"
+              exit 1
           fi
-          
+
           echo ""
           echo "yanet-controlplane:"
           if [ -f "build/controlplane/yanet-controlplane" ]; then
-            stat build/controlplane/yanet-controlplane
-            md5sum build/controlplane/yanet-controlplane
-            strings build/controlplane/yanet-controlplane | grep -E "yanet|version" | head -20 || true
+              stat build/controlplane/yanet-controlplane
+              md5sum build/controlplane/yanet-controlplane
+              strings build/controlplane/yanet-controlplane | grep -E "yanet|version" | head -20 || true
           else
-            echo "ERROR: build/controlplane/yanet-controlplane not found!"
-            exit 1
+              echo "ERROR: build/controlplane/yanet-controlplane not found!"
+              exit 1
           fi
-          
+
           echo ""
           echo "yanet-cli binaries:"
-          if ls target/release/yanet-cli* 1> /dev/null 2>&1; then
-            stat target/release/yanet-cli* || true
-            md5sum target/release/yanet-cli* || true
+          if ls target/release/yanet-cli* 1>/dev/null 2>&1; then
+              stat target/release/yanet-cli* || true
+              md5sum target/release/yanet-cli* || true
           else
-            echo "ERROR: No yanet-cli binaries found in target/release/!"
-            exit 1
+              echo "ERROR: No yanet-cli binaries found in target/release/!"
+              exit 1
           fi
 
       - name: Upload YANET binaries
@@ -272,157 +274,156 @@ jobs:
     needs: build
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
 
-    - name: Clean any pre-existing build artifacts
-      run: |
-        echo "=== Cleaning any cached build artifacts before downloading from build job ==="
-        rm -rf build/ target/ || true
-        echo "Cleaned build/ and target/ directories"
+      - name: Clean any pre-existing build artifacts
+        run: |
+          echo "=== Cleaning any cached build artifacts before downloading from build job ==="
+          rm -rf build/ target/ || true
+          echo "Cleaned build/ and target/ directories"
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.24.x'
-        cache: true
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
 
-    - name: update apt (act hack)
-      if: ${{ env.ACT }}
-      run: |
-        apt-get update
-    - uses: awalsh128/cache-apt-pkgs-action@latest
-      with:
-        packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq
-        version: 1.1
+      - name: update apt (act hack)
+        if: ${{ env.ACT }}
+        run: apt-get update
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq
+          version: 1.1
 
-    - name: Configure system for QEMU
-      run: |
-        # Enable KVM access if available
-        if [ -e /dev/kvm ]; then
-          echo "KVM is available, configuring KVM access"
-          sudo usermod -aG kvm $USER || true
-          sudo chmod 666 /dev/kvm || true
-        else
-          echo "KVM is not available, will use TCG emulation"
-        fi
-        
-        # Configure 9P filesystem support
-        sudo modprobe 9p || true
-        sudo modprobe 9pnet_virtio || true
-        
-        # Check QEMU capabilities
-        qemu-system-x86_64 --version
+      - name: Configure system for QEMU
+        run: |
+          # Enable KVM access if available
+          if [ -e /dev/kvm ]; then
+              echo "KVM is available, configuring KVM access"
+              sudo usermod -aG kvm $USER || true
+              sudo chmod 666 /dev/kvm || true
+          else
+              echo "KVM is not available, will use TCG emulation"
+          fi
 
-    - name: Cache Ubuntu cloud image
-      uses: actions/cache@v4
-      with:
-        path: tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
-        key: ${{ runner.os }}-ubuntu-image-${{ hashFiles('tests/functional/Makefile') }}
-        restore-keys: |
-          ${{ runner.os }}-ubuntu-image-
+          # Configure 9P filesystem support
+          sudo modprobe 9p || true
+          sudo modprobe 9pnet_virtio || true
 
-    - name: Cache QEMU image
-      uses: actions/cache@v4
-      with:
-        path: |
-          tests/functional/yanet-test.qcow2
-          tests/functional/*.iso
-        key: ${{ runner.os }}-qemu-image-${{ hashFiles('tests/functional/Makefile') }}-${{ hashFiles('tests/functional/cloud-init-user-data.yaml') }}
-        restore-keys: |
-          ${{ runner.os }}-qemu-image-
+          # Check QEMU capabilities
+          qemu-system-x86_64 --version
 
-    - name: Download YANET binaries from build job
-      uses: actions/download-artifact@v4
-      with:
-        name: yanet2-binaries
-        path: ./
+      - name: Cache Ubuntu cloud image
+        uses: actions/cache@v4
+        with:
+          path: tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
+          key: ${{ runner.os }}-ubuntu-image-${{ hashFiles('tests/functional/Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-ubuntu-image-
 
-    - name: Place downloaded binaries
-      run: |
-        mkdir -p build/dataplane build/controlplane target/release
-        [ -f "./yanet-dataplane" ] && mv -f ./yanet-dataplane build/dataplane/
-        [ -f "./yanet-controlplane" ] && mv -f ./yanet-controlplane build/controlplane/
-        if ls ./yanet-cli* 1> /dev/null 2>&1; then
-          mv -f ./yanet-cli-* target/release/
-        fi
-        chmod +x build/dataplane/yanet-dataplane 2>/dev/null || true
-        chmod +x build/controlplane/yanet-controlplane 2>/dev/null || true
-        chmod +x target/release/yanet-cli* 2>/dev/null || true
-        
-    - name: Prepare test environment
-      working-directory: tests/functional
-      run: |
-        make check-deps
-        
-        echo "=== Starting QEMU VM preparation ==="
-        
-        # Run with timeout and monitoring
-        timeout 7200 make prepare-vm &
-        QEMU_PID=$!
-        
-        # Monitor QEMU progress
-        for i in {1..120}; do
-          echo "=== QEMU status check $i/120 ==="
-          ps aux | grep qemu | grep -v grep || echo "QEMU process not found"
-          
+      - name: Cache QEMU image
+        uses: actions/cache@v4
+        with:
+          path: |
+            tests/functional/yanet-test.qcow2
+            tests/functional/*.iso
+          key: ${{ runner.os }}-qemu-image-${{ hashFiles('tests/functional/Makefile') }}-${{ hashFiles('tests/functional/cloud-init-user-data.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-qemu-image-
+
+      - name: Download YANET binaries from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: yanet2-binaries
+          path: ./
+
+      - name: Place downloaded binaries
+        run: |
+          mkdir -p build/dataplane build/controlplane target/release
+          [ -f "./yanet-dataplane" ] && mv -f ./yanet-dataplane build/dataplane/
+          [ -f "./yanet-controlplane" ] && mv -f ./yanet-controlplane build/controlplane/
+          if ls ./yanet-cli* 1>/dev/null 2>&1; then
+              mv -f ./yanet-cli-* target/release/
+          fi
+          chmod +x build/dataplane/yanet-dataplane 2>/dev/null || true
+          chmod +x build/controlplane/yanet-controlplane 2>/dev/null || true
+          chmod +x target/release/yanet-cli* 2>/dev/null || true
+
+      - name: Prepare test environment
+        working-directory: tests/functional
+        run: |
+          make check-deps
+
+          echo "=== Starting QEMU VM preparation ==="
+
+          # Run with timeout and monitoring
+          timeout 7200 make prepare-vm &
+          QEMU_PID=$!
+
+          # Monitor QEMU progress
+          for i in {1..120}; do
+              echo "=== QEMU status check $i/120 ==="
+              ps aux | grep qemu | grep -v grep || echo "QEMU process not found"
+
+              if [ -f qemu_debug.log ]; then
+                  echo "=== QEMU log size: $(wc -l <qemu_debug.log) lines ==="
+                  echo "=== Last 10 lines of QEMU log ==="
+                  tail -10 qemu_debug.log
+              fi
+
+              sleep 60
+
+              # Check if QEMU is still running
+              if ! kill -0 $QEMU_PID 2>/dev/null; then
+                  echo "QEMU process finished"
+                  break
+              fi
+          done
+
+          # Wait for QEMU to finish
+          wait $QEMU_PID
+          QEMU_EXIT_CODE=$?
+
+          echo "=== QEMU exit code: $QEMU_EXIT_CODE ==="
+
           if [ -f qemu_debug.log ]; then
-            echo "=== QEMU log size: $(wc -l < qemu_debug.log) lines ==="
-            echo "=== Last 10 lines of QEMU log ==="
-            tail -10 qemu_debug.log
+              echo "=== Final QEMU log (last 50 lines) ==="
+              tail -50 qemu_debug.log
           fi
-          
-          sleep 60
-          
-          # Check if QEMU is still running
-          if ! kill -0 $QEMU_PID 2>/dev/null; then
-            echo "QEMU process finished"
-            break
+
+          if [ $QEMU_EXIT_CODE -ne 0 ]; then
+              echo "QEMU preparation failed with exit code $QEMU_EXIT_CODE"
+              exit $QEMU_EXIT_CODE
           fi
-        done
-        
-        # Wait for QEMU to finish
-        wait $QEMU_PID
-        QEMU_EXIT_CODE=$?
-        
-        echo "=== QEMU exit code: $QEMU_EXIT_CODE ==="
-        
-        if [ -f qemu_debug.log ]; then
-          echo "=== Final QEMU log (last 50 lines) ==="
-          tail -50 qemu_debug.log
-        fi
-        
-        if [ $QEMU_EXIT_CODE -ne 0 ]; then
-          echo "QEMU preparation failed with exit code $QEMU_EXIT_CODE"
-          exit $QEMU_EXIT_CODE
-        fi
-        
-      timeout-minutes: 130
 
-    - name: Run functional tests
-      working-directory: tests/functional
-      run: |
-        set +e
-        export YANET_TEST_DEBUG=1
-        make test
-        ret=$?
-        
-        echo "=== main/test.log (last 100 lines) ==="
-        tail -n 100 main/test.log 2>/dev/null || echo "main/test.log not found"
-        
-        echo ""
-        echo "=== converted/test.log (last 100 lines) ==="
-        tail -n 100 converted/test.log 2>/dev/null || echo "converted/test.log not found"
-        
-        exit $ret
-      timeout-minutes: 35
+        timeout-minutes: 130
 
-    - name: Upload functional test logs
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: functional-test-logs
-        path: |
-          tests/functional/main/test.log
-          tests/functional/converted/test.log
+      - name: Run functional tests
+        working-directory: tests/functional
+        run: |
+          set +e
+          export YANET_TEST_DEBUG=1
+          make test
+          ret=$?
+
+          echo "=== main/test.log (last 100 lines) ==="
+          tail -n 100 main/test.log 2>/dev/null || echo "main/test.log not found"
+
+          echo ""
+          echo "=== converted/test.log (last 100 lines) ==="
+          tail -n 100 converted/test.log 2>/dev/null || echo "converted/test.log not found"
+
+          exit $ret
+        timeout-minutes: 35
+
+      - name: Upload functional test logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: functional-test-logs
+          path: |
+            tests/functional/main/test.log
+            tests/functional/converted/test.log

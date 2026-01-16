@@ -2,8 +2,8 @@ FROM ubuntu:24.04
 
 # Image metadata
 LABEL maintainer="YANET Team" \
-      description="Development environment for YANET2" \
-      version="1.0"
+    description="Development environment for YANET2" \
+    version="1.0"
 
 # Environment variables
 ENV DEBIAN_FRONTEND=noninteractive \

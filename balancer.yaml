@@ -8,7 +8,7 @@ module_config:
     - ip: "192.0.2.1"
       port: 80
       proto: tcp
-      scheduler: wrr  # Options: wrr, prr, wlc
+      scheduler: wrr # Options: wrr, prr, wlc
       flags:
         gre: false
         fix_mss: true
@@ -44,7 +44,7 @@ module_config:
         ops: false
         pure_l3: false
       allowed_srcs:
-        - "0.0.0.0/0"  # Allow all sources
+        - "0.0.0.0/0" # Allow all sources
       reals:
         - weight: 100
           dst: "10.2.1.1"
@@ -60,7 +60,7 @@ module_config:
           dst: "10.2.1.3"
           src: "192.0.2.2"
           src_mask: "255.255.255.255"
-          enabled: false  # Disabled real
+          enabled: false # Disabled real
       peers:
         - "192.0.2.10"
 

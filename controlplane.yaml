@@ -24,38 +24,38 @@ functions:
       chain0:
         weight: 5
         modules:
-        - module_name: forward
-          config_name: forward0
+          - module_name: forward
+            config_name: forward0
       chain1:
         weight: 5
         modules:
-        - module_name: forward
-          config_name: forward0
+          - module_name: forward
+            config_name: forward0
   func1:
     chains:
       chain0:
         weight: 5
         modules:
-        - module_name: forward
-          config_name: forward0
+          - module_name: forward
+            config_name: forward0
       chain1:
         weight: 5
         modules:
-        - module_name: forward
-          config_name: forward0
+          - module_name: forward
+            config_name: forward0
 pipelines:
   phy0:
     functions:
-    - func0
+      - func0
   phy1:
     functions:
-    - func1
+      - func1
   virt0:
     functions:
-    - func0
+      - func0
   virt1:
     functions:
-    - func1
+      - func1
 device_pipelines:
   07:00.0:
     phy0:
