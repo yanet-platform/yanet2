@@ -13,7 +13,7 @@ import (
 func TestAgent(t *testing.T) {
 	// Create mock
 	m, err := mock.NewYanetMock(&mock.YanetMockConfig{
-		CpMemory: 1 << 24,
+		CpMemory: 1 << 28,
 		DpMemory: 1 << 24,
 		Workers:  1,
 		Devices: []mock.YanetMockDeviceConfig{
@@ -29,7 +29,7 @@ func TestAgent(t *testing.T) {
 
 	// Create balancer agent
 
-	agent, err := NewBalancerAgent(m.SharedMemory(), 1<<22)
+	agent, err := NewBalancerAgent(m.SharedMemory(), 1<<27)
 	require.NoError(t, err, "failed to create balancer agent")
 	require.NotNil(t, agent, "balancer agent is nil")
 

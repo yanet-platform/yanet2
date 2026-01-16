@@ -1,12 +1,12 @@
 package ffi
 
 /*
-#cgo CFLAGS: -I../../ -I../../../../../../
-#cgo LDFLAGS: -L../../../../../../build/modules/balancer/controlplane/agent -lbalancer_agent -L../../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -lbalancer_state
+#cgo CFLAGS: -I../../ -I../../../../../
+#cgo LDFLAGS: -L../../../../../build/modules/balancer/agent -lbalancer_agent -L../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -lbalancer_state
 #include "manager.h"
-#include "../api/graph.h"
-#include "../api/vs.h"
-#include "../api/real.h"
+#include "modules/balancer/controlplane/api/graph.h"
+#include "modules/balancer/controlplane/api/vs.h"
+#include "modules/balancer/controlplane/api/real.h"
 #include <stdlib.h>
 #include <string.h>
 */
@@ -217,7 +217,7 @@ func goToC_VsIdentifier(id VsIdentifier) C.struct_vs_identifier {
 	cId.addr = goToC_NetAddr(id.Addr)
 	// Derive ip_proto from the address type
 	if id.Addr.Is4() {
-		cId.ip_proto = 4 // IPPROTO_IPV4
+		cId.ip_proto = 0 // IPPROTO_IP (IPv4)
 	} else {
 		cId.ip_proto = 41 // IPPROTO_IPV6
 	}
@@ -233,7 +233,7 @@ func goToC_VsIdentifier(id VsIdentifier) C.struct_vs_identifier {
 
 func cToGo_VsIdentifier(cId C.struct_vs_identifier) VsIdentifier {
 	// Determine if IPv4 or IPv6 based on ip_proto
-	isV4 := cId.ip_proto == 4 // IPPROTO_IPV4
+	isV4 := cId.ip_proto == 0 // IPPROTO_IP (IPv4)
 	return VsIdentifier{
 		Addr: cToGo_NetAddr(cId.addr, isV4),
 		Port: uint16(cId.port),
@@ -265,7 +265,7 @@ func goToC_RelativeRealIdentifier(
 	cId.addr = goToC_NetAddr(id.Addr)
 	// Derive ip_proto from the address type
 	if id.Addr.Is4() {
-		cId.ip_proto = 4 // IPPROTO_IPV4
+		cId.ip_proto = 0 // IPPROTO_IP (IPv4)
 	} else {
 		cId.ip_proto = 41 // IPPROTO_IPV6
 	}
@@ -276,7 +276,7 @@ func goToC_RelativeRealIdentifier(
 func cToGo_RelativeRealIdentifier(
 	cId C.struct_relative_real_identifier,
 ) RelativeRealIdentifier {
-	isV4 := cId.ip_proto == 4
+	isV4 := cId.ip_proto == 0 // IPPROTO_IP (IPv4)
 	return RelativeRealIdentifier{
 		Addr: cToGo_NetAddr(cId.addr, isV4),
 		Port: uint16(cId.port),
@@ -1244,7 +1244,7 @@ func cToGo_NamedVsStats(cStats *C.struct_named_vs_stats) *NamedVsStats {
 	}
 
 	// Convert reals stats array
-	if cStats.reals_count > 0 && cStats.reals != nil {
+	if cStats.reals_count > 0 {
 		cRealsSlice := unsafe.Slice(cStats.reals, cStats.reals_count)
 		stats.Reals = make([]struct {
 			Dst   netip.Addr

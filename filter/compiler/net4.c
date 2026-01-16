@@ -125,7 +125,7 @@ collect_net4_values(
 	}
 	struct range_index range_index;
 	if (range_index_init(&range_index, memory_context)) {
-		// FIXME error
+		lpm_free(lpm);
 		goto error_collector;
 	}
 

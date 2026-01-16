@@ -61,6 +61,9 @@ value_table_init(
 		return -1;
 	}
 
+	value_table->h_dim = h_dim;
+	value_table->v_dim = v_dim;
+
 	uint64_t value_count = h_dim;
 	value_count *= v_dim;
 
@@ -90,9 +93,6 @@ value_table_init(
 		memset(chunk, 0, VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t));
 		SET_OFFSET_OF(values + chunk_idx, chunk);
 	}
-
-	value_table->h_dim = h_dim;
-	value_table->v_dim = v_dim;
 
 	return 0;
 }

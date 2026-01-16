@@ -18,7 +18,7 @@ var balancerName string = "balancer0"
 
 func TestManager(t *testing.T) {
 	m, err := mock.NewYanetMock(&mock.YanetMockConfig{
-		CpMemory: 1 << 24,
+		CpMemory: 1 << 27,
 		DpMemory: 1 << 24,
 		Workers:  1,
 		Devices: []mock.YanetMockDeviceConfig{
@@ -31,7 +31,7 @@ func TestManager(t *testing.T) {
 	require.NoError(t, err, "failed to create mock")
 	require.NotNil(t, m, "mock is nil")
 
-	agent, err := NewBalancerAgent(m.SharedMemory(), 1<<22)
+	agent, err := NewBalancerAgent(m.SharedMemory(), 1<<25)
 	require.NoError(t, err, "failed to create balancer agent")
 	require.NotNil(t, agent, "balancer agent is nil")
 

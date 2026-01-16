@@ -172,40 +172,49 @@ balancer_manager_update(
 	       &manager->config,
 	       sizeof(struct balancer_manager_config));
 
+	// first, try to resize session table
+	size_t requested_session_table_capacity =
+		config->balancer.state.table_capacity;
+	if (requested_session_table_capacity !=
+	    manager->config.balancer.state.table_capacity) {
+		if (balancer_resize_session_table(
+			    balancer, requested_session_table_capacity, now
+		    ) != 0) {
+			NEW_ERROR("%s", balancer_take_error_msg(balancer));
+			PUSH_ERROR("failed to resize session table");
+			goto restore_config_on_error;
+		}
+
+		size_t new_session_table_capacity =
+			balancer_session_table_capacity(balancer);
+		config->balancer.state.table_capacity =
+			new_session_table_capacity;
+		old_config.balancer.state.table_capacity =
+			new_session_table_capacity;
+	}
+
 	// clone config
 	if (clone_manager_config_to_relative(
 		    &manager->config,
 		    config,
 		    balancer_manager_memory_context(manager)
 	    ) != 0) {
-		NEW_ERROR("failed to clone config");
+		NEW_ERROR("failed to clone config; session table successfully "
+			  "resized");
 		goto restore_config_on_error;
 	}
 
 	// update state (resize session table)
-
-	size_t session_table_capacity = config->balancer.state.table_capacity;
-	if (session_table_capacity !=
-	    manager->config.balancer.state.table_capacity) {
-		if (balancer_resize_session_table(
-			    balancer, session_table_capacity, now
-		    ) != 0) {
-			NEW_ERROR("%s", balancer_take_error_msg(balancer));
-			PUSH_ERROR("failed to resize session table");
-			goto restore_config_on_error;
-		}
-	}
 
 	// update packet handler
 	if (balancer_update_packet_handler(
 		    balancer, &config->balancer.handler
 	    ) != 0) {
 		NEW_ERROR("%s", balancer_take_error_msg(balancer));
-		PUSH_ERROR("failed to update packet handler");
+		PUSH_ERROR("failed to update packet handler; session table "
+			   "successfully resized");
 		goto restore_config_on_error;
 	}
-
-	setup_session_table_capacity(manager);
 
 	return 0;
 

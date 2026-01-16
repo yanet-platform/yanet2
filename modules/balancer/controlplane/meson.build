@@ -1,5 +1,3 @@
-subdir('balancerpb')
 subdir('state')
 subdir('handler')
 subdir('api')
-subdir('agent')

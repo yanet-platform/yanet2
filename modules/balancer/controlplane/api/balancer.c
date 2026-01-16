@@ -67,13 +67,6 @@ balancer_resize_session_table(
 	);
 }
 
-extern int
-balancer_setup_config(
-	struct balancer_config *dst,
-	struct balancer_config *src,
-	struct memory_context *mctx
-);
-
 extern void
 free_internal_balancer_config(
 	struct balancer_config *config, struct memory_context *mctx
@@ -171,7 +164,8 @@ balancer_update_reals(
 	struct packet_handler *handler = ADDR_OF(&balancer->handler);
 	return DIAG_TRY(
 		&balancer->diag,
-		packet_handler_update_reals(handler, count, update)
+		packet_handler_update_reals(handler, count, update),
+		"failed to update reals in packet handler"
 	);
 }
 

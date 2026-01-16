@@ -1711,7 +1711,7 @@ agent_storage_put(
 	}
 
 	memcpy(new_storage->data, data, size);
-	strncpy(new_storage->name, name, 80);
+	strcpy(new_storage->name, name);
 	new_storage->size = size;
 	new_storage->next = NULL;
 

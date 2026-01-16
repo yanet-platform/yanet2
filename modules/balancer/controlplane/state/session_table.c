@@ -4,7 +4,6 @@
 #include "common/ttlmap/ttlmap.h"
 
 #include "lib/controlplane/diag/diag.h"
-#include "lib/logging/log.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
@@ -198,11 +197,7 @@ move_sessions_callback(
 	} else if (status == TTLMAP_FOUND) {
 		ttlmap_release_lock(lock);
 	} else { // status == TTLMAP_FAILED
-		// critical: misses some session, session table grows too fast
-		LOG(WARN,
-		    "missed session on table resize: "
-		    "vs = [%d]",
-		    id->vs_id);
+		 // critical: misses some session, session table grows too fast
 	}
 
 	return 0;

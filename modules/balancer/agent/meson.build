@@ -1,3 +1,5 @@
+subdir('balancerpb')
+
 dependencies = [
   lib_common_dep,
   lib_agent_cp_dep,

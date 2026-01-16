@@ -2,14 +2,15 @@ syntax = "proto3";
 
 package balancerpb;
 
-import "modules/balancer/controlplane/balancerpb/info.proto";
-import "modules/balancer/controlplane/balancerpb/module.proto";
-import "modules/balancer/controlplane/balancerpb/stats.proto";
+import "modules/balancer/agent/balancerpb/graph.proto";
+import "modules/balancer/agent/balancerpb/info.proto";
+import "modules/balancer/agent/balancerpb/module.proto";
+import "modules/balancer/agent/balancerpb/stats.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/"
-		    "balancer/controlplane/balancerpb;balancerpb";
+		    "balancer/agent/balancerpb;balancerpb";
 
-// Balancer control plane service.
+// Balancer agent service.
 //
 // Provides management operations for load balancer instances including
 // configuration, real server updates, statistics, and runtime information.
@@ -104,6 +105,8 @@ service BalancerService {
 	// Session counts are updated asynchronously during periodic refresh,
 	// so they may not reflect the exact current state.
 	rpc ShowInfo(ShowInfoRequest) returns (ShowInfoResponse);
+
+	rpc ShowGraph(ShowGraphRequest) returns (ShowGraphResponse);
 
 	// Show active sessions.
 	//
@@ -234,47 +237,19 @@ message ShowInfoResponse {
 
 // Request to show balancer statistics.
 message ShowStatsRequest {
-	// Balancer instance name (optional).
-	//
-	// If not specified, statistics for all balancers may be returned
-	// (implementation-dependent).
-	optional string name = 1;
-
-	// Filter by device name (optional)
-	optional string device = 2;
-	
-	// Filter by pipeline name (optional)
-	optional string pipeline = 3;
-	
-	// Filter by function name (optional)
-	optional string function = 4;
-	
-	// Filter by chain name (optional)
-	optional string chain = 5;
+	string name = 1;
+	PacketHandlerRef ref = 2;
 }
 
 // Response containing balancer statistics.
 message ShowStatsResponse {
-	// Balancer instance name
-	string name = 1;
-
-	// Device name (from request or actual)
-	string device = 2;
-	
-	// Pipeline name (from request or actual)
-	string pipeline = 3;
-	
-	// Function name (from request or actual)
-	string function = 4;
-	
-	// Chain name (from request or actual)
-	string chain = 5;
+	PacketHandlerRef ref = 1;
 
 	// Packet processing statistics.
 	//
 	// Includes counters for L4 processing, ICMP handling,
 	// per-virtual-service statistics, and per-real-server statistics.
-	BalancerStats stats = 6;
+	BalancerStats stats = 2;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -292,4 +267,13 @@ message ShowSessionsResponse {
 	// Each session includes client information, virtual service mapping,
 	// real server assignment, creation time, last packet time, and timeout.
 	repeated SessionInfo sessions = 1;
+}
+
+message ShowGraphRequest {
+	// Balancer instance name (required)
+	string name = 1;
+}
+
+message ShowGraphResponse {
+	Graph graph = 1;
 }

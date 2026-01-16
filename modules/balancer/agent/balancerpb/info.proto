@@ -4,10 +4,10 @@ package balancerpb;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
-import "modules/balancer/controlplane/balancerpb/module.proto";
+import "modules/balancer/agent/balancerpb/module.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/"
-		    "balancer/controlplane/balancerpb;balancerpb";
+		    "balancer/agent/balancerpb;balancerpb";
 
 // Real server runtime information.
 //

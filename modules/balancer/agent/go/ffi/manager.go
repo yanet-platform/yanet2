@@ -1,8 +1,8 @@
 package ffi
 
 /*
-#cgo CFLAGS: -I../../ -I../../../../../../
-#cgo LDFLAGS: -L../../../../../../build/modules/balancer/controlplane/agent -lbalancer_agent -L../../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -lbalancer_state
+#cgo CFLAGS: -I../../ -I../../../../../
+#cgo LDFLAGS: -L../../../../../build/modules/balancer/agent -lbalancer_agent -L../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -L../../../../../build/filter -lfilter_compiler
 #include "manager.h"
 #include <stdlib.h>
 */
@@ -15,6 +15,7 @@ import (
 
 var DontUpdateRealWeight uint16 = uint16(C.DONT_UPDATE_REAL_WEIGHT)
 var DontUpdateRealEnabled uint8 = uint8(C.DONT_UPDATE_REAL_ENABLED)
+var MaxRealWeight uint16 = uint16(C.MAX_REAL_WEIGHT)
 
 // BalancerManager wraps a C balancer_manager handle
 type BalancerManager struct {

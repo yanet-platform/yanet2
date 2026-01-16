@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package balancerpb;
+
+import "modules/balancer/agent/balancerpb/module.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/"
+		    "balancer/agent/balancerpb;balancerpb";
+
+// Real server in graph topology.
+//
+// Represents a real server's current state within the balancer's
+// virtual service topology, including its weight and enabled status.
+message GraphReal {
+	// Real server identifier (relative to its virtual service)
+	RelativeRealIdentifier identifier = 1;
+	
+	// Current weight of the real server.
+	uint32 weight = 2;
+	
+	// Whether the real server is currently enabled.
+	//
+	// When false, the real receives no new sessions but existing
+	// sessions may continue to be forwarded to it.
+	bool enabled = 3;
+}
+
+// Virtual service in graph topology.
+//
+// Represents a virtual service and all its associated real servers
+// with their current states.
+message GraphVs {
+	// Virtual service identifier
+	VsIdentifier identifier = 1;
+	
+	// List of real servers backing this virtual service.
+	//
+	// Includes current weight and enabled status for each real.
+	repeated GraphReal reals = 2;
+}
+
+// Complete balancer topology graph.
+//
+// Provides a snapshot of the entire balancer configuration showing
+// the relationships between virtual services and their real servers,
+// along with current operational state (weights, enabled status).
+//
+// This is useful for:
+// - Visualizing the load balancer topology
+// - Monitoring real server states
+// - Debugging configuration issues
+// - Understanding traffic distribution
+message Graph {
+	// List of all virtual services with their real servers
+	repeated GraphVs virtual_services = 1;
+}

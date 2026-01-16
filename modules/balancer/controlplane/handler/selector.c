@@ -111,7 +111,8 @@ selector_init(
 	rcu_init(&selector->rcu);
 	selector->use_rr = scheduler == round_robin ? 1 : 0;
 	selector->ring_id = 0;
-	if (ring_init(&selector->rings[0], state, mctx, 0, NULL) != 0) {
+	if (ring_init(&selector->rings[0], state, &selector->mctx, 0, NULL) !=
+	    0) {
 		PUSH_ERROR("failed to init ring");
 		return -1;
 	}

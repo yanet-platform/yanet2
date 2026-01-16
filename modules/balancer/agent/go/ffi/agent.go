@@ -1,8 +1,8 @@
 package ffi
 
 /*
-#cgo CFLAGS: -I../../ -I../../../../../../
-#cgo LDFLAGS: -L../../../../../../build/modules/balancer/controlplane/agent -lbalancer_agent -L../../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -lbalancer_state
+#cgo CFLAGS: -I../../ -I../../../../../
+#cgo LDFLAGS: -L../../../../../build/modules/balancer/agent -lbalancer_agent -L../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -lbalancer_state
 #include "agent.h"
 #include <stdlib.h>
 */

@@ -5,7 +5,7 @@ package balancerpb;
 import "google/protobuf/duration.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/"
-		    "balancer/controlplane/balancerpb;balancerpb";
+		    "balancer/agent/balancerpb;balancerpb";
 
 // IP address representation supporting both IPv4 and IPv6.
 //
@@ -281,7 +281,7 @@ message VsFlags {
 	//
 	// Works with both SOURCE_HASH and ROUND_ROBIN schedulers.
 	// The adjustment is independent of the scheduling algorithm.
-	bool adjust_weights = 5;
+	bool wlc = 5;
 }
 
 // Real server update operation.
@@ -413,11 +413,25 @@ message PacketHandlerConfig {
 	SessionsTimeouts sessions_timeouts = 5;
 }
 
+message PacketHandlerRef {
+	// Filter by device name (optional)
+	optional string device = 1;
+	
+	// Filter by pipeline name (optional)
+	optional string pipeline = 2;
+	
+	// Filter by function name (optional)
+	optional string function = 3;
+	
+	// Filter by chain name (optional)
+	optional string chain = 4;
+}
+
 // Dynamic weight adjustment configuration.
 //
 // Parameters controlling how real server weights are adjusted
 // based on active session counts when adjust_weights flag is enabled.
-message AdjustWeightsConfig {
+message WlcConfig {
 	// Adjustment power factor (optional).
 	//
 	// Controls the aggressiveness of weight adjustment.
@@ -463,7 +477,7 @@ message StateConfig {
 	//
 	// Parameters for dynamic weight adjustment algorithm.
 	// Only used when VsFlags.adjust_weights is enabled.
-	optional AdjustWeightsConfig adjust_weights_config = 3;
+	optional WlcConfig wlc = 3;
 
 	// Periodic refresh interval (optional in UPDATE, special behavior).
 	//
