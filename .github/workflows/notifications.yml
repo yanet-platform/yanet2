@@ -1,0 +1,19 @@
+name: Send Telegram message on PR
+on:
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram topic message
+        uses: appleboy/telegram-action@master
+        with:
+          token: ${{ secrets.TELEGRAM_YANET_NOTIFICATIONS_BOT_TOKEN }}
+          to: ${{ vars.TELEGRAM_CHAT_ID }}
+          message_thread_id: ${{ vars.TOPIC_ID }}
+          message: |
+            🚀 PR created by ${{ github.actor }}:
+            ${{ github.event.pull_request.title }}
+            URL: ${{ github.event.pull_request.html_url }}
