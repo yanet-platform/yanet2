@@ -109,6 +109,15 @@ setup_peers(
 	}
 	SET_OFFSET_OF(&vs->peers_v4, peers_v4_ptr);
 
+	// Copy IPv4 peer addresses from config (config uses normal pointers)
+	if (vs->peers_v4_count > 0) {
+		memcpy(
+			peers_v4_ptr,
+			config->peers_v4,
+			sizeof(struct net4_addr) * vs->peers_v4_count
+		);
+	}
+
 	void *peers_v6_ptr = memory_balloc(
 		mctx, sizeof(struct net6_addr) * vs->peers_v6_count
 	);
@@ -122,6 +131,15 @@ setup_peers(
 		return -1;
 	}
 	SET_OFFSET_OF(&vs->peers_v6, peers_v6_ptr);
+
+	// Copy IPv6 peer addresses from config (config uses normal pointers)
+	if (vs->peers_v6_count > 0) {
+		memcpy(
+			peers_v6_ptr,
+			config->peers_v6,
+			sizeof(struct net6_addr) * vs->peers_v6_count
+		);
+	}
 
 	return 0;
 }

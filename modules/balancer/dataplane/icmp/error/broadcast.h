@@ -4,6 +4,7 @@
 #include "flow/context.h"
 #include "flow/helpers.h"
 
+#include "common/memory_address.h"
 #include "common/network.h"
 
 #include "lib/dataplane/module/module.h"
@@ -129,6 +130,7 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 
 	// Broadcast packet to v4 peers.
 	uint8_t *balancer_src_v4 = ctx->handler->source_ipv4.bytes;
+	struct net4_addr *peers_v4 = ADDR_OF(&vs->peers_v4);
 	for (size_t i = 0; i < vs->peers_v4_count; ++i) {
 		struct packet *clone = clone_packet(ctx->worker, ctx->packet);
 		if (clone == NULL) {
@@ -140,7 +142,7 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 		set_cloned_mark(clone);
 
 		// tunnel packet to peer
-		struct net4_addr *peer = &vs->peers_v4[i];
+		struct net4_addr *peer = &peers_v4[i];
 		tunnel_v4(clone, balancer_src_v4, peer->bytes);
 
 		// send packet
@@ -149,6 +151,7 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 
 	// Broadcast packet to v6 peers.
 	uint8_t *balancer_src_v6 = ctx->handler->source_ipv6.bytes;
+	struct net6_addr *peers_v6 = ADDR_OF(&vs->peers_v6);
 	for (size_t i = 0; i < vs->peers_v6_count; ++i) {
 		struct packet *clone = clone_packet(ctx->worker, ctx->packet);
 		if (clone == NULL) {
@@ -160,7 +163,7 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 		set_cloned_mark(clone);
 
 		// tunnel packet to peer
-		struct net6_addr *peer = &vs->peers_v6[i];
+		struct net6_addr *peer = &peers_v6[i];
 		tunnel_v6(clone, balancer_src_v6, peer->bytes);
 
 		// send packet
