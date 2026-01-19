@@ -1,5 +1,6 @@
 #pragma once
 
+#include "handler/real.h"
 #include "lib/controlplane/config/cp_module.h"
 
 #include "api/real.h"
@@ -130,4 +131,11 @@ packet_handler_fill_stats(
 	struct packet_handler *handler,
 	struct balancer_stats *stats,
 	struct packet_handler_ref *ref
+);
+
+int
+packet_handler_real_idx(
+	struct packet_handler *handler,
+	struct real_identifier *real,
+	struct real_ph_index *idx
 );

@@ -308,3 +308,14 @@ balancer_session_table_capacity(struct balancer_handle *handle) {
 	struct balancer_state *state = &balancer->state;
 	return session_table_capacity(&state->session_table);
 }
+
+int
+balancer_real_ph_idx(
+	struct balancer_handle *handle,
+	struct real_identifier *real,
+	struct real_ph_index *real_idx
+) {
+	struct balancer *balancer = balancer_handle_deref(handle);
+	struct packet_handler *handler = ADDR_OF(&balancer->handler);
+	return packet_handler_real_idx(handler, real, real_idx);
+}

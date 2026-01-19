@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	yanet2 "github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
-	balancerffi "github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
+	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -35,7 +35,7 @@ func TestManager(t *testing.T) {
 	require.NotNil(t, m, "mock is nil")
 
 	// Create balancer agent
-	agent, err := balancerffi.NewBalancerAgent(m.SharedMemory(), 1<<25)
+	agent, err := ffi.NewBalancerAgent(m.SharedMemory(), 1<<25)
 	require.NoError(t, err, "failed to create balancer agent")
 	require.NotNil(t, agent, "balancer agent is nil")
 
@@ -387,14 +387,14 @@ func TestManager(t *testing.T) {
 		cpAgent, err := m.SharedMemory().AgentAttach("bootstrap", 0, 1<<20)
 		require.NoError(t, err, "failed to attach bootstrap agent")
 		{
-			functionConfig := ffi.FunctionConfig{
+			functionConfig := yanet2.FunctionConfig{
 				Name: functionName,
-				Chains: []ffi.FunctionChainConfig{
+				Chains: []yanet2.FunctionChainConfig{
 					{
 						Weight: 1,
-						Chain: ffi.ChainConfig{
+						Chain: yanet2.ChainConfig{
 							Name: chainName,
-							Modules: []ffi.ChainModuleConfig{
+							Modules: []yanet2.ChainModuleConfig{
 								{
 									Type: "balancer",
 									Name: balancerName,
@@ -412,12 +412,12 @@ func TestManager(t *testing.T) {
 
 		// update pipelines
 		{
-			inputPipelineConfig := ffi.PipelineConfig{
+			inputPipelineConfig := yanet2.PipelineConfig{
 				Name:      pipelineName,
 				Functions: []string{functionName},
 			}
 
-			dummyPipelineConfig := ffi.PipelineConfig{
+			dummyPipelineConfig := yanet2.PipelineConfig{
 				Name:      "dummy",
 				Functions: []string{},
 			}
@@ -433,15 +433,15 @@ func TestManager(t *testing.T) {
 
 		// update devices
 		{
-			deviceConfig := ffi.DeviceConfig{
+			deviceConfig := yanet2.DeviceConfig{
 				Name: deviceName,
-				Input: []ffi.DevicePipelineConfig{
+				Input: []yanet2.DevicePipelineConfig{
 					{
 						Name:   pipelineName,
 						Weight: 1,
 					},
 				},
-				Output: []ffi.DevicePipelineConfig{
+				Output: []yanet2.DevicePipelineConfig{
 					{
 						Name:   "dummy",
 						Weight: 1,
@@ -449,7 +449,7 @@ func TestManager(t *testing.T) {
 				},
 			}
 
-			if err := cpAgent.UpdatePlainDevices([]ffi.DeviceConfig{deviceConfig}); err != nil {
+			if err := cpAgent.UpdatePlainDevices([]yanet2.DeviceConfig{deviceConfig}); err != nil {
 				t.Fatalf("failed to update pipelines: %v", err)
 			}
 		}
@@ -672,7 +672,13 @@ func TestManager(t *testing.T) {
 							t,
 							uint32(250),
 							real.Weight,
-							"first real weight should be 250",
+							"first real config weight should be 250",
+						)
+						require.Equal(
+							t,
+							uint32(250),
+							real.EffectiveWeight,
+							"first real effective weight should be 250",
 						)
 						foundFirst = true
 					}
@@ -687,7 +693,13 @@ func TestManager(t *testing.T) {
 							t,
 							uint32(300),
 							real.Weight,
-							"second real weight should be 300",
+							"second real config weight should be 300",
+						)
+						require.Equal(
+							t,
+							uint32(300),
+							real.EffectiveWeight,
+							"second real effective weight should be 300",
 						)
 						foundSecond = true
 					}
@@ -750,7 +762,13 @@ func TestManager(t *testing.T) {
 							t,
 							uint32(200),
 							real.Weight,
-							"real weight should be 200",
+							"real config weight should be 200",
+						)
+						require.Equal(
+							t,
+							uint32(200),
+							real.EffectiveWeight,
+							"real effective weight should be 200",
 						)
 						found = true
 					}
@@ -830,7 +848,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 	require.NotNil(t, m, "mock is nil")
 
 	// Create balancer agent
-	agent, err := balancerffi.NewBalancerAgent(m.SharedMemory(), 1<<25)
+	agent, err := ffi.NewBalancerAgent(m.SharedMemory(), 1<<25)
 	require.NoError(t, err, "failed to create balancer agent")
 	require.NotNil(t, agent, "balancer agent is nil")
 

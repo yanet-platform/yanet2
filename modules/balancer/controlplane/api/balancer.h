@@ -265,3 +265,12 @@ balancer_graph(struct balancer_handle *handle, struct balancer_graph *graph);
 
 void
 balancer_graph_free(struct balancer_graph *graph);
+
+////////////////////////////////////////////////////////////////////////////////
+
+int
+balancer_real_ph_idx(
+	struct balancer_handle *handle,
+	struct real_identifier *real,
+	struct real_ph_index *real_idx
+);

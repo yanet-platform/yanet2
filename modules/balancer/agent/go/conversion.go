@@ -930,25 +930,6 @@ func ConvertRealStatsToProto(
 	}
 }
 
-// ConvertGraphToProto converts FFI graph to protobuf
-func ConvertGraphToProto(graph *ffi.BalancerGraph) *balancerpb.Graph {
-	if graph == nil {
-		return &balancerpb.Graph{}
-	}
-
-	vsServices := make([]*balancerpb.GraphVs, 0, len(graph.VirtualServices))
-	for i := range graph.VirtualServices {
-		vsServices = append(
-			vsServices,
-			convertGraphVsToProto(&graph.VirtualServices[i]),
-		)
-	}
-
-	return &balancerpb.Graph{
-		VirtualServices: vsServices,
-	}
-}
-
 func convertGraphVsToProto(vs *ffi.GraphVs) *balancerpb.GraphVs {
 	reals := make([]*balancerpb.GraphReal, 0, len(vs.Reals))
 	for i := range vs.Reals {
@@ -959,8 +940,115 @@ func convertGraphVsToProto(vs *ffi.GraphVs) *balancerpb.GraphVs {
 				},
 				Port: uint32(vs.Reals[i].Identifier.Port),
 			},
-			Weight:  uint32(vs.Reals[i].Weight),
-			Enabled: vs.Reals[i].Enabled,
+			Weight:          uint32(vs.Reals[i].Weight),
+			EffectiveWeight: uint32(0),
+			Enabled:         vs.Reals[i].Enabled,
+		})
+	}
+
+	return &balancerpb.GraphVs{
+		Identifier: &balancerpb.VsIdentifier{
+			Addr: &balancerpb.Addr{
+				Bytes: vs.Identifier.Addr.AsSlice(),
+			},
+			Port:  uint32(vs.Identifier.Port),
+			Proto: ConvertFFIProtoToProto(vs.Identifier.TransportProto),
+		},
+		Reals: reals,
+	}
+}
+
+// ConvertGraphToProtoWithConfig converts FFI graph to protobuf with proper weight mapping.
+// Weight in the result comes from config (original configured weight).
+// EffectiveWeight in the result comes from graph (current effective weight after WLC adjustments).
+func ConvertGraphToProtoWithConfig(
+	graph *ffi.BalancerGraph,
+	config *ffi.BalancerManagerConfig,
+) *balancerpb.Graph {
+	if graph == nil {
+		return &balancerpb.Graph{}
+	}
+
+	// Build a lookup map for config weights: VS identifier -> Real identifier -> weight
+	configWeights := buildConfigWeightsMap(config)
+
+	vsServices := make([]*balancerpb.GraphVs, 0, len(graph.VirtualServices))
+	for i := range graph.VirtualServices {
+		vsServices = append(
+			vsServices,
+			convertGraphVsToProtoWithConfig(&graph.VirtualServices[i], configWeights),
+		)
+	}
+
+	return &balancerpb.Graph{
+		VirtualServices: vsServices,
+	}
+}
+
+// vsRealKey creates a unique key for a real within a VS context
+type vsRealKey struct {
+	vsAddr   string
+	vsPort   uint16
+	vsProto  ffi.VsTransportProto
+	realAddr string
+	realPort uint16
+}
+
+// buildConfigWeightsMap builds a map from VS+Real identifiers to config weights
+func buildConfigWeightsMap(config *ffi.BalancerManagerConfig) map[vsRealKey]uint16 {
+	weights := make(map[vsRealKey]uint16)
+	if config == nil {
+		return weights
+	}
+
+	for _, vs := range config.Balancer.Handler.VirtualServices {
+		for _, real := range vs.Reals {
+			key := vsRealKey{
+				vsAddr:   vs.Identifier.Addr.String(),
+				vsPort:   vs.Identifier.Port,
+				vsProto:  vs.Identifier.TransportProto,
+				realAddr: real.Identifier.Addr.String(),
+				realPort: real.Identifier.Port,
+			}
+			weights[key] = real.Weight
+		}
+	}
+
+	return weights
+}
+
+func convertGraphVsToProtoWithConfig(
+	vs *ffi.GraphVs,
+	configWeights map[vsRealKey]uint16,
+) *balancerpb.GraphVs {
+	reals := make([]*balancerpb.GraphReal, 0, len(vs.Reals))
+	for i := range vs.Reals {
+		// Look up config weight for this real
+		key := vsRealKey{
+			vsAddr:   vs.Identifier.Addr.String(),
+			vsPort:   vs.Identifier.Port,
+			vsProto:  vs.Identifier.TransportProto,
+			realAddr: vs.Reals[i].Identifier.Addr.String(),
+			realPort: vs.Reals[i].Identifier.Port,
+		}
+
+		configWeight := uint16(0)
+		if w, ok := configWeights[key]; ok {
+			configWeight = w
+		}
+
+		reals = append(reals, &balancerpb.GraphReal{
+			Identifier: &balancerpb.RelativeRealIdentifier{
+				Ip: &balancerpb.Addr{
+					Bytes: vs.Reals[i].Identifier.Addr.AsSlice(),
+				},
+				Port: uint32(vs.Reals[i].Identifier.Port),
+			},
+			// Weight = config weight (original configured weight)
+			Weight: uint32(configWeight),
+			// EffectiveWeight = graph weight (current effective weight after WLC)
+			EffectiveWeight: uint32(vs.Reals[i].Weight),
+			Enabled:         vs.Reals[i].Enabled,
 		})
 	}
 

@@ -17,12 +17,15 @@ message GraphReal {
 	
 	// Current weight of the real server.
 	uint32 weight = 2;
+
+	// Current weight of the real server with respect to WLC.
+	uint32 effective_weight = 3;
 	
 	// Whether the real server is currently enabled.
 	//
 	// When false, the real receives no new sessions but existing
 	// sessions may continue to be forwarded to it.
-	bool enabled = 3;
+	bool enabled = 4;
 }
 
 // Virtual service in graph topology.

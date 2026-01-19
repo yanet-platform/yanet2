@@ -103,3 +103,8 @@ struct named_real_config {
 	struct relative_real_identifier real;
 	struct real_config config;
 };
+
+struct real_ph_index {
+	size_t vs_idx;
+	size_t real_idx;
+};

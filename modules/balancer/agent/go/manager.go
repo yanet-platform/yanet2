@@ -11,18 +11,10 @@ import (
 	"go.uber.org/zap"
 )
 
-type RealState struct {
-	enabled         bool
-	activeSessions  uint64
-	effectiveWeight uint16
-}
-
 type BalancerManager struct {
 	handle *ffi.BalancerManager
 
 	realUpdateBuffer []ffi.RealUpdate
-
-	reals map[ffi.RealIdentifier]RealState
 
 	// Background task management
 	ctx    context.Context
@@ -39,8 +31,8 @@ func NewBalancerManager(
 ) *BalancerManager {
 	name := handle.Name()
 	manager := &BalancerManager{
-		handle:           handle,
-		reals:            make(map[ffi.RealIdentifier]RealState),
+		handle: handle,
+		// reals:            make(map[ffi.RealIdentifier]RealState),
 		realUpdateBuffer: []ffi.RealUpdate{},
 		log:              log.With("balancer", name),
 	}
@@ -193,9 +185,10 @@ func (b *BalancerManager) BufferedUpdates() []*balancerpb.RealUpdate {
 func (b *BalancerManager) Graph() *balancerpb.Graph {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	cfg := b.handle.Config()
+	graph := b.handle.Graph()
 
-	ffiGraph := b.handle.Graph()
-	return ConvertGraphToProto(ffiGraph)
+	return ConvertGraphToProtoWithConfig(graph, cfg)
 }
 
 func (b *BalancerManager) Info(
@@ -335,7 +328,6 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 
 		if err := b.handle.ResizeSessionTable(newCapacity, now); err != nil {
 			b.log.Errorw("failed to resize session table", "error", err)
-			// Continue with WLC adjustment even if resize fails
 		} else {
 			b.log.Infow("session table resized successfully", "new_capacity", newCapacity)
 		}

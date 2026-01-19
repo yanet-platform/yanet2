@@ -86,7 +86,7 @@ func TestNewRealUpdateFromProto_Valid(t *testing.T) {
 					},
 					Relative: ffi.RelativeRealIdentifier{
 						Addr: netip.MustParseAddr("172.16.0.1"),
-						Port: 443, // Should default to VS port
+						Port: 0,
 					},
 				},
 				Weight:  200,

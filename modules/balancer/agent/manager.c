@@ -5,6 +5,8 @@
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/diag/diag.h"
 #include "modules/balancer/controlplane/api/balancer.h"
+#include "modules/balancer/controlplane/api/handler.h"
+#include "modules/balancer/controlplane/api/real.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -145,16 +147,39 @@ balancer_manager_update_reals(
 	size_t count,
 	struct real_update *updates
 ) {
+	diag_reset(&manager->diag);
+
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
 	int res = balancer_update_reals(balancer, count, updates);
 	if (res != 0) {
 		NEW_ERROR("%s", balancer_take_error_msg(balancer));
 		diag_fill(&manager->diag);
 		return -1;
-	} else {
-		diag_reset(&manager->diag);
-		return 0;
 	}
+
+	struct balancer_config *config = &manager->config.balancer;
+	struct packet_handler_config *handler_config = &config->handler;
+
+	for (size_t i = 0; i < count; i++) {
+		struct real_update *update = &updates[i];
+		if (update->weight != DONT_UPDATE_REAL_WEIGHT) {
+			struct real_ph_index index;
+			int ec = balancer_real_ph_idx(
+				balancer, &update->identifier, &index
+			);
+			assert(ec == 0);
+
+			struct named_vs_config *vs_config =
+				ADDR_OF(&handler_config->vs) + index.vs_idx;
+			struct named_real_config *real_config =
+				ADDR_OF(&vs_config->config.reals) +
+				index.real_idx;
+
+			real_config->config.weight = update->weight;
+		}
+	}
+
+	return 0;
 }
 
 int

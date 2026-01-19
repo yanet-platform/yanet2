@@ -131,6 +131,11 @@ struct real_state *
 balancer_state_find_or_insert_real(
 	struct balancer_state *state, struct real_identifier *id
 ) {
+	struct vs_state *vs =
+		balancer_state_find_or_insert_vs(state, &id->vs_identifier);
+	if (vs == NULL) {
+		return NULL;
+	}
 	union service_identifier service;
 	service_id_from_real(&service, id);
 	size_t idx_output;
@@ -141,6 +146,7 @@ balancer_state_find_or_insert_real(
 	if (real != NULL) {
 		real->registry_idx = idx_output;
 		real->identifier = *id;
+		real->vs_registry_idx = vs->registry_idx;
 	}
 	return real;
 }

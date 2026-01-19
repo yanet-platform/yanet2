@@ -658,3 +658,29 @@ free_handler:
 
 	return NULL;
 }
+
+int
+packet_handler_real_idx(
+	struct packet_handler *handler,
+	struct real_identifier *real,
+	struct real_ph_index *real_ph_index
+) {
+	struct balancer_state *state = ADDR_OF(&handler->state);
+
+	struct real_state *real_state = balancer_state_find_real(state, real);
+	if (real_state == NULL) {
+		return -1;
+	}
+
+	uint32_t *vs_idx = ADDR_OF(&handler->vs_index);
+	real_ph_index->vs_idx = vs_idx[real_state->vs_registry_idx];
+
+	struct vs *vss = ADDR_OF(&handler->vs);
+	struct vs *vs = &vss[real_ph_index->vs_idx];
+
+	uint32_t *reals_idx = ADDR_OF(&handler->reals_index);
+	real_ph_index->real_idx =
+		reals_idx[real_state->registry_idx] - vs->first_real_idx;
+
+	return 0;
+}
