@@ -52,10 +52,10 @@ select_real(
 	// if `One Packet Scheduling` flag is set,
 	// we do not account for sessions
 	if (vs->flags & VS_OPS_FLAG) {
-		uint32_t real_id = selector_select(
+		uint32_t local_real_id = selector_select(
 			&vs->selector, worker_idx, metadata->hash
 		);
-		if (real_id == SELECTOR_VALUE_INVALID) {
+		if (local_real_id == SELECTOR_VALUE_INVALID) {
 			// discard packet because there are no enabled reals
 
 			// update counter
@@ -63,6 +63,8 @@ select_real(
 
 			return NULL;
 		}
+
+		uint32_t real_id = vs->first_real_idx + local_real_id;
 
 		// select real
 		struct real *real = &reals[real_id];
@@ -120,7 +122,10 @@ select_real(
 	}
 
 	if (get_session_result == SESSION_FOUND) { // session with such id found
-		uint32_t real_ph_idx = reals_index[session_state->real_id];
+		// session_state->real_id contains the global registry index
+		uint32_t real_registry_id = session_state->real_id;
+		uint32_t real_ph_idx = reals_index[real_registry_id];
+
 		if (real_ph_idx == (uint32_t)-1) {
 			// session is for real which is not
 			// configured for the current packet handler.
@@ -190,15 +195,17 @@ select_real(
 
 	// select new real for the session and remember it in session state
 
-	uint32_t real_id =
+	uint32_t local_real_id =
 		selector_select(&vs->selector, worker_idx, metadata->hash);
-	if (real_id == SELECTOR_VALUE_INVALID) {
+	if (local_real_id == SELECTOR_VALUE_INVALID) {
 		VS_STATS_INC(no_reals, ctx);
 		session_remove(session_state); // free created state
 		session_unlock(session_lock);  // unlock state
 		session_table_end_cs(table, worker_idx);
 		return NULL;
 	}
+
+	uint32_t real_id = vs->first_real_idx + local_real_id;
 
 	// real selected, new session is created
 
@@ -208,7 +215,7 @@ select_real(
 
 	session_state->create_timestamp = now;
 	session_state->last_packet_timestamp = now;
-	session_state->real_id = real_id;
+	session_state->real_id = real->registry_idx;
 	session_state->timeout = timeout;
 
 	session_unlock(session_lock);

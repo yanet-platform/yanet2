@@ -36,14 +36,18 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.1"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.1",
+									),
 									Port:           80,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.1",
+											),
 											Port: 8080,
 										},
 										Weight: 100,
@@ -72,21 +76,27 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.1"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.1",
+									),
 									Port:           80,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.1",
+											),
 											Port: 8080,
 										},
 										Weight: 100,
 									},
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.2"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.2",
+											),
 											Port: 8080,
 										},
 										Weight: 200,
@@ -95,14 +105,18 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 							},
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.2"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.2",
+									),
 									Port:           443,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.2.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.2.1",
+											),
 											Port: 8443,
 										},
 										Weight: 150,
@@ -145,14 +159,18 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("2001:db8::1"),
+									Addr: netip.MustParseAddr(
+										"2001:db8::1",
+									),
 									Port:           80,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("2001:db8::100"),
+											Addr: netip.MustParseAddr(
+												"2001:db8::100",
+											),
 											Port: 8080,
 										},
 										Weight: 250,
@@ -181,14 +199,18 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.1"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.1",
+									),
 									Port:           53,
 									TransportProto: ffi.VsTransportProtoUdp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.1",
+											),
 											Port: 5353,
 										},
 										Weight: 75,
@@ -275,14 +297,18 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.1"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.1",
+									),
 									Port:           80,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.1",
+											),
 											Port: 8080,
 										},
 										Weight: 100, // Config weight
@@ -300,9 +326,19 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 				real := vs.Reals[0]
 
 				// Weight should come from config
-				assert.Equal(t, uint32(100), real.Weight, "Weight should be from config")
+				assert.Equal(
+					t,
+					uint32(100),
+					real.Weight,
+					"Weight should be from config",
+				)
 				// EffectiveWeight should come from graph
-				assert.Equal(t, uint32(150), real.EffectiveWeight, "EffectiveWeight should be from graph")
+				assert.Equal(
+					t,
+					uint32(150),
+					real.EffectiveWeight,
+					"EffectiveWeight should be from graph",
+				)
 				assert.True(t, real.Enabled)
 			},
 		},
@@ -351,28 +387,36 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.1"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.1",
+									),
 									Port:           80,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.1",
+											),
 											Port: 8080,
 										},
 										Weight: 100, // Config weight
 									},
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.2"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.2",
+											),
 											Port: 8080,
 										},
 										Weight: 200, // Config weight
 									},
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.3"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.3",
+											),
 											Port: 8081,
 										},
 										Weight: 50, // Config weight
@@ -458,14 +502,18 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.1"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.1",
+									),
 									Port:           80,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.1",
+											),
 											Port: 8080,
 										},
 										Weight: 100,
@@ -474,21 +522,27 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 							},
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.2"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.2",
+									),
 									Port:           443,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.2.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.2.1",
+											),
 											Port: 8443,
 										},
 										Weight: 200,
 									},
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.2.2"),
+											Addr: netip.MustParseAddr(
+												"192.168.2.2",
+											),
 											Port: 8443,
 										},
 										Weight: 300,
@@ -538,7 +592,9 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 							},
 							{
 								Identifier: ffi.RelativeRealIdentifier{
-									Addr: netip.MustParseAddr("192.168.1.99"), // Not in config
+									Addr: netip.MustParseAddr(
+										"192.168.1.99",
+									), // Not in config
 									Port: 9999,
 								},
 								Weight:  200,
@@ -554,14 +610,18 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.1"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.1",
+									),
 									Port:           80,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.1",
+											),
 											Port: 8080,
 										},
 										Weight: 100,
@@ -583,8 +643,18 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 				assert.Equal(t, uint32(150), vs.Reals[0].EffectiveWeight)
 
 				// Real 2: NOT in config - Weight should be 0
-				assert.Equal(t, uint32(0), vs.Reals[1].Weight, "Weight should be 0 for real not in config")
-				assert.Equal(t, uint32(200), vs.Reals[1].EffectiveWeight, "EffectiveWeight should still come from graph")
+				assert.Equal(
+					t,
+					uint32(0),
+					vs.Reals[1].Weight,
+					"Weight should be 0 for real not in config",
+				)
+				assert.Equal(
+					t,
+					uint32(200),
+					vs.Reals[1].EffectiveWeight,
+					"EffectiveWeight should still come from graph",
+				)
 			},
 		},
 		{
@@ -616,14 +686,18 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("2001:db8::1"),
+									Addr: netip.MustParseAddr(
+										"2001:db8::1",
+									),
 									Port:           80,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("2001:db8::100"),
+											Addr: netip.MustParseAddr(
+												"2001:db8::100",
+											),
 											Port: 8080,
 										},
 										Weight: 150,
@@ -684,14 +758,18 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.1"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.1",
+									),
 									Port:           53,
 									TransportProto: ffi.VsTransportProtoUdp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.1",
+											),
 											Port: 5353,
 										},
 										Weight: 75,
@@ -706,7 +784,11 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 				require.Len(t, result.VirtualServices, 1)
 				vs := result.VirtualServices[0]
 
-				assert.Equal(t, balancerpb.TransportProto_UDP, vs.Identifier.Proto)
+				assert.Equal(
+					t,
+					balancerpb.TransportProto_UDP,
+					vs.Identifier.Proto,
+				)
 				require.Len(t, vs.Reals, 1)
 				assert.Equal(t, uint32(75), vs.Reals[0].Weight)
 				assert.Equal(t, uint32(90), vs.Reals[0].EffectiveWeight)
@@ -741,14 +823,18 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.1"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.1",
+									),
 									Port:           80,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.1",
+											),
 											Port: 8080,
 										},
 										Weight: 100, // Config weight is still set
@@ -766,9 +852,19 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 				real := vs.Reals[0]
 
 				// Config weight should still be present
-				assert.Equal(t, uint32(100), real.Weight, "Config weight should be preserved for disabled real")
+				assert.Equal(
+					t,
+					uint32(100),
+					real.Weight,
+					"Config weight should be preserved for disabled real",
+				)
 				// Effective weight is 0 because real is disabled
-				assert.Equal(t, uint32(0), real.EffectiveWeight, "EffectiveWeight should be 0 for disabled real")
+				assert.Equal(
+					t,
+					uint32(0),
+					real.EffectiveWeight,
+					"EffectiveWeight should be 0 for disabled real",
+				)
 				assert.False(t, real.Enabled)
 			},
 		},
@@ -809,21 +905,27 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						VirtualServices: []ffi.VsConfig{
 							{
 								Identifier: ffi.VsIdentifier{
-									Addr:           netip.MustParseAddr("10.0.0.1"),
+									Addr: netip.MustParseAddr(
+										"10.0.0.1",
+									),
 									Port:           80,
 									TransportProto: ffi.VsTransportProtoTcp,
 								},
 								Reals: []ffi.RealConfig{
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.1"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.1",
+											),
 											Port: 8080,
 										},
 										Weight: 100, // Both have same config weight
 									},
 									{
 										Identifier: ffi.RelativeRealIdentifier{
-											Addr: netip.MustParseAddr("192.168.1.2"),
+											Addr: netip.MustParseAddr(
+												"192.168.1.2",
+											),
 											Port: 8080,
 										},
 										Weight: 100, // Both have same config weight
@@ -840,11 +942,31 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 				require.Len(t, vs.Reals, 2)
 
 				// Both reals have same config weight but different effective weights
-				assert.Equal(t, uint32(100), vs.Reals[0].Weight, "Config weight should be same")
-				assert.Equal(t, uint32(250), vs.Reals[0].EffectiveWeight, "WLC increased weight for less loaded server")
+				assert.Equal(
+					t,
+					uint32(100),
+					vs.Reals[0].Weight,
+					"Config weight should be same",
+				)
+				assert.Equal(
+					t,
+					uint32(250),
+					vs.Reals[0].EffectiveWeight,
+					"WLC increased weight for less loaded server",
+				)
 
-				assert.Equal(t, uint32(100), vs.Reals[1].Weight, "Config weight should be same")
-				assert.Equal(t, uint32(50), vs.Reals[1].EffectiveWeight, "WLC decreased weight for more loaded server")
+				assert.Equal(
+					t,
+					uint32(100),
+					vs.Reals[1].Weight,
+					"Config weight should be same",
+				)
+				assert.Equal(
+					t,
+					uint32(50),
+					vs.Reals[1].EffectiveWeight,
+					"WLC decreased weight for more loaded server",
+				)
 			},
 		},
 	}

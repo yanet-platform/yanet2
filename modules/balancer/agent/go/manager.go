@@ -333,6 +333,17 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 		}
 	}
 
+	// Real updates
+	updates := WlcUpdates(b.handle.Config(), b.handle.Graph(), info)
+	b.log.Infow("real updates", "count", len(updates))
+	if len(updates) > 0 {
+		if err := b.handle.UpdateReals(updates); err != nil {
+			b.log.Errorw("failed to apply real updates", "error", err)
+		} else {
+			b.log.Infow("real updates applied successfully", "updates", updates)
+		}
+	}
+
 	return nil
 }
 

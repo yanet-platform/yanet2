@@ -68,7 +68,8 @@ func TestBasicOperations(t *testing.T) {
 								Bytes: netip.MustParseAddr("4.4.4.4").AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -155,7 +156,12 @@ func TestBasicOperations(t *testing.T) {
 		assert.NotNil(t, info, "balancer info should not be nil")
 
 		// Check that we have session information
-		assert.Equal(t, uint64(1), info.ActiveSessions, "should have exactly one active session")
+		assert.Equal(
+			t,
+			uint64(1),
+			info.ActiveSessions,
+			"should have exactly one active session",
+		)
 	})
 
 	t.Run("Read_Balancer_Stats", func(t *testing.T) {
@@ -176,17 +182,57 @@ func TestBasicOperations(t *testing.T) {
 
 		// Check VS stats
 		vsStats := stats.Vs[0]
-		assert.Equal(t, uint64(1), vsStats.Stats.IncomingPackets, "should have 1 incoming packet")
-		assert.Equal(t, uint64(1), vsStats.Stats.OutgoingPackets, "should have 1 outgoing packet")
-		assert.Equal(t, uint64(1), vsStats.Stats.CreatedSessions, "should have 1 created session")
-		assert.Equal(t, uint64(len(packet.Data())), vsStats.Stats.IncomingBytes, "incoming bytes should match packet size")
-		assert.Equal(t, uint64(len(packet.Data())), vsStats.Stats.OutgoingBytes, "outgoing bytes should match packet size")
+		assert.Equal(
+			t,
+			uint64(1),
+			vsStats.Stats.IncomingPackets,
+			"should have 1 incoming packet",
+		)
+		assert.Equal(
+			t,
+			uint64(1),
+			vsStats.Stats.OutgoingPackets,
+			"should have 1 outgoing packet",
+		)
+		assert.Equal(
+			t,
+			uint64(1),
+			vsStats.Stats.CreatedSessions,
+			"should have 1 created session",
+		)
+		assert.Equal(
+			t,
+			uint64(len(packet.Data())),
+			vsStats.Stats.IncomingBytes,
+			"incoming bytes should match packet size",
+		)
+		assert.Equal(
+			t,
+			uint64(len(packet.Data())),
+			vsStats.Stats.OutgoingBytes,
+			"outgoing bytes should match packet size",
+		)
 
 		// Check Real stats
 		require.NotEmpty(t, vsStats.Reals, "should have Real stats")
 		realStats := vsStats.Reals[0]
-		assert.Equal(t, uint64(1), realStats.Stats.CreatedSessions, "real should have 1 created session")
-		assert.Equal(t, uint64(1), realStats.Stats.Packets, "real should have 1 packet")
-		assert.Equal(t, uint64(len(packet.Data())), realStats.Stats.Bytes, "real bytes should match packet size")
+		assert.Equal(
+			t,
+			uint64(1),
+			realStats.Stats.CreatedSessions,
+			"real should have 1 created session",
+		)
+		assert.Equal(
+			t,
+			uint64(1),
+			realStats.Stats.Packets,
+			"real should have 1 packet",
+		)
+		assert.Equal(
+			t,
+			uint64(len(packet.Data())),
+			realStats.Stats.Bytes,
+			"real bytes should match packet size",
+		)
 	})
 }

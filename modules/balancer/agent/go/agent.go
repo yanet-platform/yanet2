@@ -25,6 +25,10 @@ func NewBalancerAgent(
 	memory datasize.ByteSize,
 	log *zap.SugaredLogger,
 ) (*BalancerAgent, error) {
+	if log == nil {
+		return nil, fmt.Errorf("logger cannot be nil")
+	}
+
 	handle, err := ffi.NewBalancerAgent(shm, uint(memory.Bytes()))
 	if err != nil {
 		return nil, err

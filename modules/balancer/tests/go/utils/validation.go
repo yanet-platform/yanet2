@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"fmt"
+	"math"
 	"net/netip"
 	"testing"
 
@@ -345,4 +347,128 @@ func findMatchingReal(
 	}
 
 	return false
+}
+
+// ExtractDestinationReal extracts the destination IP (real server) from a tunneled packet.
+// Returns the real server IP that the packet was forwarded to.
+func ExtractDestinationReal(packet *framework.PacketInfo) (netip.Addr, error) {
+	if !packet.IsTunneled {
+		return netip.Addr{}, fmt.Errorf("packet is not tunneled")
+	}
+
+	// The destination IP of the outer packet is the real server
+	dstIP, ok := netip.AddrFromSlice(packet.DstIP)
+	if !ok {
+		return netip.Addr{}, fmt.Errorf(
+			"failed to parse destination IP: %v",
+			packet.DstIP,
+		)
+	}
+
+	return dstIP, nil
+}
+
+// CountPacketsPerReal counts how many packets went to each real server.
+// Returns a map from real server IP to packet count.
+func CountPacketsPerReal(packets []*framework.PacketInfo) map[netip.Addr]int {
+	counts := make(map[netip.Addr]int)
+
+	for _, packet := range packets {
+		realIP, err := ExtractDestinationReal(packet)
+		if err != nil {
+			continue // Skip non-tunneled packets
+		}
+		counts[realIP]++
+	}
+
+	return counts
+}
+
+// ValidateWeightDistribution checks if packet distribution matches expected weights.
+// Uses tolerance-based validation (e.g., 0.15 for 15% tolerance).
+func ValidateWeightDistribution(
+	t *testing.T,
+	counts map[netip.Addr]int,
+	expectedWeights map[netip.Addr]uint32,
+	tolerance float64,
+) {
+	t.Helper()
+
+	// Calculate total packets and total weight
+	totalPackets := 0
+	for _, count := range counts {
+		totalPackets += count
+	}
+
+	totalWeight := uint32(0)
+	for _, weight := range expectedWeights {
+		totalWeight += weight
+	}
+
+	if totalPackets == 0 {
+		t.Error("no packets to validate")
+		return
+	}
+
+	if totalWeight == 0 {
+		t.Error("total weight is zero")
+		return
+	}
+
+	// Check each real's distribution
+	for realIP, expectedWeight := range expectedWeights {
+		actualCount := counts[realIP]
+		expectedRatio := float64(expectedWeight) / float64(totalWeight)
+		actualRatio := float64(actualCount) / float64(totalPackets)
+
+		diff := math.Abs(actualRatio - expectedRatio)
+		if diff > tolerance {
+			t.Errorf(
+				"weight distribution mismatch for real %s: expected ratio %.3f (weight %d/%d), got %.3f (%d/%d packets), diff %.3f > tolerance %.3f",
+				realIP,
+				expectedRatio,
+				expectedWeight,
+				totalWeight,
+				actualRatio,
+				actualCount,
+				totalPackets,
+				diff,
+				tolerance,
+			)
+		}
+	}
+}
+
+// AllPacketsToSameReal checks if all packets went to the same real server.
+// Returns the real server IP and true if all packets went to the same real, or empty addr and false otherwise.
+func AllPacketsToSameReal(packets []*framework.PacketInfo) (netip.Addr, bool) {
+	if len(packets) == 0 {
+		return netip.Addr{}, false
+	}
+
+	var firstReal netip.Addr
+	firstSet := false
+
+	for _, packet := range packets {
+		realIP, err := ExtractDestinationReal(packet)
+		if err != nil {
+			return netip.Addr{}, false
+		}
+
+		if !firstSet {
+			firstReal = realIP
+			firstSet = true
+		} else if firstReal != realIP {
+			return netip.Addr{}, false
+		}
+	}
+
+	return firstReal, true
+}
+
+// PacketsDistributedAcrossReals checks if packets are distributed across multiple reals.
+// Returns true if packets went to more than one real server.
+func PacketsDistributedAcrossReals(packets []*framework.PacketInfo) bool {
+	counts := CountPacketsPerReal(packets)
+	return len(counts) > 1
 }

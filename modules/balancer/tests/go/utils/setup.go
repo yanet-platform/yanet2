@@ -25,7 +25,10 @@ type TestConfig struct {
 	Balancer *balancerpb.BalancerConfig
 }
 
-func SingleWorkerMockConfig(cpMemory datasize.ByteSize, dpMemory datasize.ByteSize) *mock.YanetMockConfig {
+func SingleWorkerMockConfig(
+	cpMemory datasize.ByteSize,
+	dpMemory datasize.ByteSize,
+) *mock.YanetMockConfig {
 	return &mock.YanetMockConfig{
 		CpMemory: cpMemory,
 		DpMemory: dpMemory,
@@ -57,7 +60,11 @@ func Make(config *TestConfig) (*TestSetup, error) {
 	sugaredLogger, _, _ := logging.Init(&logging.Config{
 		Level: logLevel,
 	})
-	agent, err := balancer.NewBalancerAgent(mock.SharedMemory(), 4*datasize.MB, sugaredLogger)
+	agent, err := balancer.NewBalancerAgent(
+		mock.SharedMemory(),
+		4*datasize.MB,
+		sugaredLogger,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new balancer agent: %v", err)
 	}

@@ -976,7 +976,10 @@ func ConvertGraphToProtoWithConfig(
 	for i := range graph.VirtualServices {
 		vsServices = append(
 			vsServices,
-			convertGraphVsToProtoWithConfig(&graph.VirtualServices[i], configWeights),
+			convertGraphVsToProtoWithConfig(
+				&graph.VirtualServices[i],
+				configWeights,
+			),
 		)
 	}
 
@@ -995,7 +998,9 @@ type vsRealKey struct {
 }
 
 // buildConfigWeightsMap builds a map from VS+Real identifiers to config weights
-func buildConfigWeightsMap(config *ffi.BalancerManagerConfig) map[vsRealKey]uint16 {
+func buildConfigWeightsMap(
+	config *ffi.BalancerManagerConfig,
+) map[vsRealKey]uint16 {
 	weights := make(map[vsRealKey]uint16)
 	if config == nil {
 		return weights
