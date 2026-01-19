@@ -80,7 +80,8 @@ func TestICMPEchoRequest(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8,
 						},
@@ -96,16 +97,19 @@ func TestICMPEchoRequest(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("10.2.2.2").AsSlice(),
+									Bytes: netip.MustParseAddr("10.2.2.2").
+										AsSlice(),
 								},
 								Port: 0,
 							},
 							Weight: 1,
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.2.2.2").AsSlice(),
+								Bytes: netip.MustParseAddr("10.2.2.2").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -123,7 +127,8 @@ func TestICMPEchoRequest(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8::").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8::").
+									AsSlice(),
 							},
 							Size: 32,
 						},
@@ -139,16 +144,19 @@ func TestICMPEchoRequest(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("2001:db8:2::2").AsSlice(),
+									Bytes: netip.MustParseAddr("2001:db8:2::2").
+										AsSlice(),
 								},
 								Port: 0,
 							},
 							Weight: 1,
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8:2::2").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8:2::2").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").AsSlice(),
+								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").
+									AsSlice(),
 							},
 						},
 					},
@@ -342,7 +350,8 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8,
 						},
@@ -358,16 +367,19 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("10.2.2.2").AsSlice(),
+									Bytes: netip.MustParseAddr("10.2.2.2").
+										AsSlice(),
 								},
 								Port: 0,
 							},
 							Weight: 1,
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.2.2.2").AsSlice(),
+								Bytes: netip.MustParseAddr("10.2.2.2").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -385,7 +397,8 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8::").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8::").
+									AsSlice(),
 							},
 							Size: 32,
 						},
@@ -401,16 +414,19 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("2001:db8:2::2").AsSlice(),
+									Bytes: netip.MustParseAddr("2001:db8:2::2").
+										AsSlice(),
 								},
 								Port: 0,
 							},
 							Weight: 1,
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8:2::2").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8:2::2").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").AsSlice(),
+								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").
+									AsSlice(),
 							},
 						},
 					},
@@ -451,7 +467,12 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 
 	t.Run("IPv4_NonVS_ShouldDrop", func(t *testing.T) {
 		// Create ICMP Echo Request to non-VS IP
-		packetLayers := utils.MakeICMPv4EchoRequest(clientIPv4, nonVsIPv4, 1234, 1)
+		packetLayers := utils.MakeICMPv4EchoRequest(
+			clientIPv4,
+			nonVsIPv4,
+			1234,
+			1,
+		)
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 
 		// Send packet
@@ -465,7 +486,12 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 
 	t.Run("IPv6_NonVS_ShouldDrop", func(t *testing.T) {
 		// Create ICMPv6 Echo Request to non-VS IP
-		packetLayers := utils.MakeICMPv6EchoRequest(clientIPv6, nonVsIPv6, 5678, 2)
+		packetLayers := utils.MakeICMPv6EchoRequest(
+			clientIPv6,
+			nonVsIPv6,
+			5678,
+			2,
+		)
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 
 		// Send packet
@@ -545,7 +571,8 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8,
 						},
@@ -570,7 +597,8 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 								Bytes: realIPv4.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -588,7 +616,8 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8::").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8::").
+									AsSlice(),
 							},
 							Size: 32,
 						},
@@ -613,7 +642,8 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 								Bytes: realIPv6.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").AsSlice(),
+								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").
+									AsSlice(),
 							},
 						},
 					},
@@ -829,7 +859,8 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8,
 						},
@@ -845,16 +876,19 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("10.2.2.2").AsSlice(),
+									Bytes: netip.MustParseAddr("10.2.2.2").
+										AsSlice(),
 								},
 								Port: 0,
 							},
 							Weight: 1,
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.2.2.2").AsSlice(),
+								Bytes: netip.MustParseAddr("10.2.2.2").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -872,7 +906,8 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8::").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8::").
+									AsSlice(),
 							},
 							Size: 32,
 						},
@@ -888,16 +923,19 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("2001:db8:2::2").AsSlice(),
+									Bytes: netip.MustParseAddr("2001:db8:2::2").
+										AsSlice(),
 								},
 								Port: 0,
 							},
 							Weight: 1,
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8:2::2").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8:2::2").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").AsSlice(),
+								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").
+									AsSlice(),
 							},
 						},
 					},
@@ -1030,7 +1068,8 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8,
 						},
@@ -1046,16 +1085,19 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("10.2.2.2").AsSlice(),
+									Bytes: netip.MustParseAddr("10.2.2.2").
+										AsSlice(),
 								},
 								Port: 0,
 							},
 							Weight: 1,
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.2.2.2").AsSlice(),
+								Bytes: netip.MustParseAddr("10.2.2.2").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -1076,7 +1118,8 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8::").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8::").
+									AsSlice(),
 							},
 							Size: 32,
 						},
@@ -1092,16 +1135,19 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("2001:db8:2::2").AsSlice(),
+									Bytes: netip.MustParseAddr("2001:db8:2::2").
+										AsSlice(),
 								},
 								Port: 0,
 							},
 							Weight: 1,
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8:2::2").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8:2::2").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").AsSlice(),
+								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").
+									AsSlice(),
 							},
 						},
 					},
@@ -1155,7 +1201,11 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
 
 		// Create ICMP error for a non-existent session
-		icmpLayers := utils.MakeICMPv4DestUnreachable(clientIPv4, vsIPv4, tcpPacket)
+		icmpLayers := utils.MakeICMPv4DestUnreachable(
+			clientIPv4,
+			vsIPv4,
+			tcpPacket,
+		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
 		result, err := ts.Mock.HandlePackets(icmpPacket)
@@ -1188,7 +1238,11 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 		tcpPacket := xpacket.LayersToPacket(t, tcpLayers...)
 
 		// Create ICMPv6 error for a non-existent session
-		icmpLayers := utils.MakeICMPv6DestUnreachable(clientIPv6, vsIPv6, tcpPacket)
+		icmpLayers := utils.MakeICMPv6DestUnreachable(
+			clientIPv6,
+			vsIPv6,
+			tcpPacket,
+		)
 		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
 		result, err := ts.Mock.HandlePackets(icmpPacket)

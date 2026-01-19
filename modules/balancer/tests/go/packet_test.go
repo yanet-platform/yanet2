@@ -78,10 +78,13 @@ func createPacketTestConfig() *balancerpb.BalancerConfig {
 						var vsAddr netip.Addr
 						var allowedSrc *balancerpb.Net
 						if vsIPVersion == 4 {
-							vsAddr = netip.MustParseAddr(fmt.Sprintf("10.12.1.%d", counter))
+							vsAddr = netip.MustParseAddr(
+								fmt.Sprintf("10.12.1.%d", counter),
+							)
 							allowedSrc = &balancerpb.Net{
 								Addr: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("10.0.1.0").AsSlice(),
+									Bytes: netip.MustParseAddr("10.0.1.0").
+										AsSlice(),
 								},
 								Size: 24,
 							}
@@ -341,7 +344,12 @@ func testEncapsulation(t *testing.T, ts *utils.TestSetup) {
 				}
 
 				vs := findMatchingVS(config, selector)
-				require.NotNil(t, vs, "failed to find VS for selector: %+v", selector)
+				require.NotNil(
+					t,
+					vs,
+					"failed to find VS for selector: %+v",
+					selector,
+				)
 
 				t.Logf(
 					"Testing encapsulation: vsIP=v%d, realIP=v%d, proto=%s",
@@ -379,7 +387,12 @@ func testGRETunneling(t *testing.T, ts *utils.TestSetup) {
 				}
 
 				vs := findMatchingVS(config, selector)
-				require.NotNil(t, vs, "failed to find VS for selector: %+v", selector)
+				require.NotNil(
+					t,
+					vs,
+					"failed to find VS for selector: %+v",
+					selector,
+				)
 
 				t.Logf(
 					"Testing GRE: vsIP=v%d, realIP=v%d, proto=%s",
@@ -427,7 +440,12 @@ func testMSSFixing(t *testing.T, ts *utils.TestSetup) {
 			}
 
 			vs := findMatchingVS(config, selector)
-			require.NotNil(t, vs, "failed to find VS for selector: %+v", selector)
+			require.NotNil(
+				t,
+				vs,
+				"failed to find VS for selector: %+v",
+				selector,
+			)
 
 			t.Logf(
 				"Testing MSS fixing: vsIP=v%d, realIP=v%d, mss=%d",
@@ -482,7 +500,12 @@ func testGREMSSCombined(t *testing.T, ts *utils.TestSetup) {
 			}
 
 			vs := findMatchingVS(config, selector)
-			require.NotNil(t, vs, "failed to find VS for selector: %+v", selector)
+			require.NotNil(
+				t,
+				vs,
+				"failed to find VS for selector: %+v",
+				selector,
+			)
 
 			t.Logf(
 				"Testing GRE+MSS: vsIP=v%d, realIP=v%d, mss=%d",

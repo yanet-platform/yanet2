@@ -93,7 +93,8 @@ func TestICMPBroadcastLogic(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8,
 						},
@@ -118,7 +119,8 @@ func TestICMPBroadcastLogic(t *testing.T) {
 								Bytes: realIPv4.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -140,7 +142,8 @@ func TestICMPBroadcastLogic(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8::").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8::").
+									AsSlice(),
 							},
 							Size: 32,
 						},
@@ -165,7 +168,8 @@ func TestICMPBroadcastLogic(t *testing.T) {
 								Bytes: realIPv6.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").AsSlice(),
+								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").
+									AsSlice(),
 							},
 						},
 					},
@@ -579,7 +583,8 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8,
 						},
@@ -604,7 +609,8 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 								Bytes: realIPv4.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -625,7 +631,8 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8::").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8::").
+									AsSlice(),
 							},
 							Size: 32,
 						},
@@ -650,7 +657,8 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 								Bytes: realIPv6.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").AsSlice(),
+								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").
+									AsSlice(),
 							},
 						},
 					},
@@ -707,7 +715,8 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8,
 						},
@@ -732,7 +741,8 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 								Bytes: realIPv4.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -755,7 +765,8 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8::").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8::").
+									AsSlice(),
 							},
 							Size: 32,
 						},
@@ -780,7 +791,8 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 								Bytes: realIPv6.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").AsSlice(),
+								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").
+									AsSlice(),
 							},
 						},
 					},
