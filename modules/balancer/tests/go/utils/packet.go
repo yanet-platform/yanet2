@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -147,4 +148,135 @@ func MakePacketLayers(
 		return MakeUDPPacket(srcIP, srcPort, dstIP, dstPort)
 	}
 	return MakeTCPPacket(srcIP, srcPort, dstIP, dstPort, tcp)
+}
+
+// padTCPOptions pads TCP options to 4-byte boundary with NOPs
+func padTCPOptions(opts []layers.TCPOption) ([]layers.TCPOption, error) {
+	// Compute current options length (bytes)
+	length := 0
+	for _, o := range opts {
+		switch o.OptionType {
+		case layers.TCPOptionKindEndList, layers.TCPOptionKindNop:
+			length += 1
+		default:
+			if o.OptionLength == 0 {
+				return nil, errors.New("TCP option with zero length")
+			}
+			length += int(o.OptionLength)
+		}
+	}
+	if length > 40 {
+		return nil, fmt.Errorf("TCP options exceed 40 bytes (%d)", length)
+	}
+	// Pad with NOPs to 4-byte boundary
+	for (length % 4) != 0 {
+		opts = append(
+			opts,
+			layers.TCPOption{OptionType: layers.TCPOptionKindNop},
+		)
+		length++
+	}
+	return opts, nil
+}
+
+// InsertOrUpdateMSS inserts or updates the MSS option in a TCP packet
+func InsertOrUpdateMSS(
+	p gopacket.Packet,
+	newMSS uint16,
+) (*gopacket.Packet, error) {
+	tcpL := p.Layer(layers.LayerTypeTCP)
+	if tcpL == nil {
+		return nil, errors.New("no TCP layer")
+	}
+	ip4L := p.Layer(layers.LayerTypeIPv4)
+	ip6L := p.Layer(layers.LayerTypeIPv6)
+	if ip4L == nil && ip6L == nil {
+		return nil, errors.New("no IPv4/IPv6 layer")
+	}
+
+	tcp := *tcpL.(*layers.TCP)
+	if !tcp.SYN {
+		return nil, errors.New("MSS option is only valid on SYN/SYN-ACK")
+	}
+
+	// Update existing MSS or insert a new one
+	found := false
+	for i, o := range tcp.Options {
+		if o.OptionType == layers.TCPOptionKindMSS && o.OptionLength >= 4 {
+			tcp.Options[i].OptionData = []byte{byte(newMSS >> 8), byte(newMSS)}
+			found = true
+			break
+		}
+	}
+	if !found {
+		mssOpt := layers.TCPOption{
+			OptionType:   layers.TCPOptionKindMSS,
+			OptionLength: 4,
+			OptionData:   []byte{byte(newMSS >> 8), byte(newMSS)},
+		}
+		// Conventionally MSS is first
+		tcp.Options = append([]layers.TCPOption{mssOpt}, tcp.Options...)
+	}
+
+	// Pad options and check size
+	var err error
+	tcp.Options, err = padTCPOptions(tcp.Options)
+	if err != nil {
+		return nil, err
+	}
+
+	var serLayers []gopacket.SerializableLayer
+
+	var netBeforeTCP gopacket.NetworkLayer
+
+	for _, l := range p.Layers() {
+		if l.LayerType() == layers.LayerTypeTCP {
+			break
+		}
+		if nl, ok := l.(gopacket.NetworkLayer); ok {
+			netBeforeTCP = nl
+		}
+		if sl, ok := l.(gopacket.SerializableLayer); ok {
+			// Make a value-copy for common layers to avoid mutating the original packet
+			switch v := l.(type) {
+			case *layers.Ethernet:
+				c := *v
+				serLayers = append(serLayers, &c)
+			case *layers.Dot1Q:
+				c := *v
+				serLayers = append(serLayers, &c)
+			case *layers.IPv4:
+				c := *v
+				serLayers = append(serLayers, &c)
+			case *layers.IPv6:
+				c := *v
+				serLayers = append(serLayers, &c)
+			case *layers.IPv6HopByHop:
+				c := *v
+				serLayers = append(serLayers, &c)
+			case *layers.IPv6Fragment:
+				c := *v
+				serLayers = append(serLayers, &c)
+			case *layers.UDP:
+				c := *v
+				serLayers = append(serLayers, &c)
+			default:
+				// Fallback: use as-is (most gopacket layers are already SerializableLayer)
+				serLayers = append(serLayers, sl)
+			}
+		}
+	}
+
+	tcp.SetNetworkLayerForChecksum(netBeforeTCP)
+	serLayers = append(serLayers, &tcp)
+	serLayers = append(serLayers, gopacket.Payload(tcp.Payload))
+
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
+	if err := gopacket.SerializeLayers(buf, opts, serLayers...); err != nil {
+		return nil, err
+	}
+	out := buf.Bytes()
+	p2 := gopacket.NewPacket(out, layers.LayerTypeEthernet, gopacket.Default)
+	return &p2, nil
 }

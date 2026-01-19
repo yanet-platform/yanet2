@@ -283,30 +283,6 @@ func createSchedulingTestConfig() *balancerpb.BalancerConfig {
 	}
 }
 
-// enableAllReals enables all reals for all virtual services
-func enableAllReals(t *testing.T, ts *utils.TestSetup) {
-	t.Helper()
-
-	config := ts.Balancer.Config()
-	var updates []*balancerpb.RealUpdate
-	enableTrue := true
-
-	for _, vs := range config.PacketHandler.Vs {
-		for _, real := range vs.Reals {
-			updates = append(updates, &balancerpb.RealUpdate{
-				RealId: &balancerpb.RealIdentifier{
-					Vs:   vs.Id,
-					Real: real.Id,
-				},
-				Enable: &enableTrue,
-			})
-		}
-	}
-
-	_, err := ts.Balancer.UpdateReals(updates, false)
-	require.NoError(t, err, "failed to enable reals")
-}
-
 // generateClientIP generates a unique client IP based on index
 func generateClientIP(index int) netip.Addr {
 	// Start from 3.3.3.1 and increment
@@ -332,7 +308,7 @@ func TestScheduling(t *testing.T) {
 	defer ts.Free()
 
 	// Enable all reals
-	enableAllReals(t, ts)
+	utils.EnableAllReals(t, ts)
 
 	// Run all scheduling checks
 	t.Run("InitialChecks", func(t *testing.T) {
@@ -1159,7 +1135,7 @@ func testStateRestoration(t *testing.T, ts *utils.TestSetup) {
 	// Run all scheduling checks again to verify they work after state restoration
 	t.Run("AfterRestoreChecks", func(t *testing.T) {
 		// Re-enable all reals (in case any were disabled)
-		enableAllReals(t, ts)
+		utils.EnableAllReals(t, ts)
 
 		// Run a subset of checks to verify state restoration
 		t.Run("TCP_SessionEstablishment", func(t *testing.T) {

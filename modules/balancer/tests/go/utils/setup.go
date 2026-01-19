@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/go/logging"
@@ -21,8 +22,9 @@ var BalancerName string = "balancer0"
 ////////////////////////////////////////////////////////////////////////////////
 
 type TestConfig struct {
-	Mock     *mock.YanetMockConfig
-	Balancer *balancerpb.BalancerConfig
+	Mock        *mock.YanetMockConfig
+	Balancer    *balancerpb.BalancerConfig
+	AgentMemory *datasize.ByteSize
 }
 
 func SingleWorkerMockConfig(
@@ -60,9 +62,13 @@ func Make(config *TestConfig) (*TestSetup, error) {
 	sugaredLogger, _, _ := logging.Init(&logging.Config{
 		Level: logLevel,
 	})
+	agentMemory := 4 * datasize.MB
+	if config.AgentMemory != nil {
+		agentMemory = *config.AgentMemory
+	}
 	agent, err := balancer.NewBalancerAgent(
 		mock.SharedMemory(),
-		4*datasize.MB,
+		agentMemory,
 		sugaredLogger,
 	)
 	if err != nil {
@@ -167,4 +173,30 @@ func setupCp(agent *ffi.Agent) error {
 func (ts *TestSetup) Free() {
 	ts.Balancer.Free()
 	ts.Mock.Free()
+}
+
+// EnableAllReals enables all real servers in the balancer configuration
+func EnableAllReals(t *testing.T, ts *TestSetup) {
+	t.Helper()
+
+	config := ts.Balancer.Config()
+	var updates []*balancerpb.RealUpdate
+	enableTrue := true
+
+	for _, vs := range config.PacketHandler.Vs {
+		for _, real := range vs.Reals {
+			updates = append(updates, &balancerpb.RealUpdate{
+				RealId: &balancerpb.RealIdentifier{
+					Vs:   vs.Id,
+					Real: real.Id,
+				},
+				Enable: &enableTrue,
+			})
+		}
+	}
+
+	_, err := ts.Balancer.UpdateReals(updates, false)
+	if err != nil {
+		t.Fatalf("failed to enable reals: %v", err)
+	}
 }
