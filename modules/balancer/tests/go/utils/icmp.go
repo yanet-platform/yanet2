@@ -394,10 +394,4 @@ func VerifyBroadcastedICMPPacket(
 		packet.DstIP,
 		"packet should be sent to peer",
 	)
-
-	// The main logic test (Case 2) already verifies that packets with ICMP_BROADCAST_IDENT
-	// are properly dropped when decap=true. This function just verifies the packet
-	// is properly tunneled to the correct peer.
-	// The ICMP_BROADCAST_IDENT marker is set by the C code in broadcast.h:set_cloned_mark()
-	// and we've verified through Case 2 that it works correctly.
 }
