@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 )
 
@@ -62,7 +63,7 @@ func TestAgent(t *testing.T) {
 									Addr: netip.MustParseAddr("10.12.13.213"),
 									Port: 8080,
 								},
-								Src:    netip.MustParsePrefix("172.16.0.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
 								Weight: 100,
 							},
 						},
@@ -142,7 +143,7 @@ func TestAgent(t *testing.T) {
 									Addr: netip.MustParseAddr("10.20.30.40"),
 									Port: 8443,
 								},
-								Src:    netip.MustParsePrefix("172.17.0.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.17.0.0/24")),
 								Weight: 150,
 							},
 							{
@@ -150,7 +151,7 @@ func TestAgent(t *testing.T) {
 									Addr: netip.MustParseAddr("10.20.30.41"),
 									Port: 8443,
 								},
-								Src:    netip.MustParsePrefix("172.17.1.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.17.1.0/24")),
 								Weight: 200,
 							},
 						},

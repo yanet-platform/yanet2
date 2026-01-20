@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 )
@@ -61,7 +62,7 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.12.13.213"),
 									Port: 8080,
 								},
-								Src:    netip.MustParsePrefix("172.16.0.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
 								Weight: 100,
 							},
 							{
@@ -69,7 +70,7 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.12.13.214"),
 									Port: 8080,
 								},
-								Src:    netip.MustParsePrefix("172.16.1.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.1.0/24")),
 								Weight: 150,
 							},
 							{
@@ -77,7 +78,7 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.12.13.215"),
 									Port: 8081,
 								},
-								Src:    netip.MustParsePrefix("172.16.2.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.2.0/24")),
 								Weight: 200,
 							},
 						},
@@ -108,7 +109,7 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.20.30.41"),
 									Port: 8443,
 								},
-								Src:    netip.MustParsePrefix("172.17.0.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.17.0.0/24")),
 								Weight: 100,
 							},
 							{
@@ -116,7 +117,7 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.20.30.42"),
 									Port: 8443,
 								},
-								Src:    netip.MustParsePrefix("172.17.1.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.17.1.0/24")),
 								Weight: 100,
 							},
 						},
@@ -144,7 +145,7 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.50.60.71"),
 									Port: 5353,
 								},
-								Src:    netip.MustParsePrefix("172.18.0.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.18.0.0/24")),
 								Weight: 50,
 							},
 							{
@@ -152,7 +153,7 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.50.60.72"),
 									Port: 5353,
 								},
-								Src:    netip.MustParsePrefix("172.18.1.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.18.1.0/24")),
 								Weight: 75,
 							},
 							{
@@ -160,7 +161,7 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.50.60.73"),
 									Port: 5353,
 								},
-								Src:    netip.MustParsePrefix("172.18.2.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.18.2.0/24")),
 								Weight: 100,
 							},
 							{
@@ -168,7 +169,7 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.50.60.74"),
 									Port: 5353,
 								},
-								Src:    netip.MustParsePrefix("172.18.3.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.18.3.0/24")),
 								Weight: 125,
 							},
 							{
@@ -176,7 +177,7 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.50.60.75"),
 									Port: 5354,
 								},
-								Src:    netip.MustParsePrefix("172.18.4.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.18.4.0/24")),
 								Weight: 150,
 							},
 						},
@@ -944,9 +945,9 @@ func TestManager(t *testing.T) {
 										),
 										Port: 9090,
 									},
-									Src: netip.MustParsePrefix(
+									Src: xnetip.FromPrefix(netip.MustParsePrefix(
 										"10.0.0.0/24",
-									),
+									)),
 									Weight: 100,
 								},
 								{
@@ -956,9 +957,9 @@ func TestManager(t *testing.T) {
 										),
 										Port: 9090,
 									},
-									Src: netip.MustParsePrefix(
+									Src: xnetip.FromPrefix(netip.MustParsePrefix(
 										"10.0.1.0/24",
-									),
+									)),
 									Weight: 200,
 								},
 							},

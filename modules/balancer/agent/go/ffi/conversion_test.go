@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
 )
 
 // Test helper to compare netip.Addr
@@ -17,6 +18,22 @@ func compareAddr(a, b netip.Addr) bool {
 // Test helper to compare netip.Prefix
 func comparePrefix(a, b netip.Prefix) bool {
 	return a.Addr().Compare(b.Addr()) == 0 && a.Bits() == b.Bits()
+}
+
+// Test helper to compare xnetip.NetWithMask
+func compareNetWithMask(a, b xnetip.NetWithMask) bool {
+	if !compareAddr(a.Addr, b.Addr) {
+		return false
+	}
+	if len(a.Mask) != len(b.Mask) {
+		return false
+	}
+	for i := range a.Mask {
+		if a.Mask[i] != b.Mask[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestNetAddrConversion tests round-trip conversion of network addresses
@@ -93,96 +110,96 @@ func TestNetAddrConversion(t *testing.T) {
 // TestNetConversion tests round-trip conversion of network prefixes
 func TestNetConversion(t *testing.T) {
 	tests := []struct {
-		name   string
-		prefix netip.Prefix
-		isV4   bool
+		name string
+		net  xnetip.NetWithMask
+		isV4 bool
 	}{
 		{
-			name:   "IPv4 /32",
-			prefix: netip.MustParsePrefix("192.168.1.1/32"),
-			isV4:   true,
+			name: "IPv4 /32",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("192.168.1.1/32")),
+			isV4: true,
 		},
 		{
-			name:   "IPv4 /24",
-			prefix: netip.MustParsePrefix("192.168.1.0/24"),
-			isV4:   true,
+			name: "IPv4 /24",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("192.168.1.0/24")),
+			isV4: true,
 		},
 		{
-			name:   "IPv4 /17",
-			prefix: netip.MustParsePrefix("192.168.0.0/17"),
-			isV4:   true,
+			name: "IPv4 /17",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("192.168.0.0/17")),
+			isV4: true,
 		},
 		{
-			name:   "IPv4 /16",
-			prefix: netip.MustParsePrefix("192.168.0.0/16"),
-			isV4:   true,
+			name: "IPv4 /16",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("192.168.0.0/16")),
+			isV4: true,
 		},
 		{
-			name:   "IPv4 /11",
-			prefix: netip.MustParsePrefix("10.0.0.0/11"),
-			isV4:   true,
+			name: "IPv4 /11",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("10.0.0.0/11")),
+			isV4: true,
 		},
 		{
-			name:   "IPv4 /8",
-			prefix: netip.MustParsePrefix("10.0.0.0/8"),
-			isV4:   true,
+			name: "IPv4 /8",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("10.0.0.0/8")),
+			isV4: true,
 		},
 		{
-			name:   "IPv4 /0",
-			prefix: netip.MustParsePrefix("0.0.0.0/0"),
-			isV4:   true,
+			name: "IPv4 /0",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("0.0.0.0/0")),
+			isV4: true,
 		},
 		{
-			name:   "IPv6 /128",
-			prefix: netip.MustParsePrefix("2001:db8::1/128"),
-			isV4:   false,
+			name: "IPv6 /128",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("2001:db8::1/128")),
+			isV4: false,
 		},
 		{
-			name:   "IPv6 /73",
-			prefix: netip.MustParsePrefix("2001:db8::/73"),
-			isV4:   false,
+			name: "IPv6 /73",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("2001:db8::/73")),
+			isV4: false,
 		},
 		{
-			name:   "IPv6 /64",
-			prefix: netip.MustParsePrefix("2001:db8::/64"),
-			isV4:   false,
+			name: "IPv6 /64",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("2001:db8::/64")),
+			isV4: false,
 		},
 		{
-			name:   "IPv6 /49",
-			prefix: netip.MustParsePrefix("2001:db8::/49"),
-			isV4:   false,
+			name: "IPv6 /49",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("2001:db8::/49")),
+			isV4: false,
 		},
 		{
-			name:   "IPv6 /48",
-			prefix: netip.MustParsePrefix("2001:db8::/48"),
-			isV4:   false,
+			name: "IPv6 /48",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("2001:db8::/48")),
+			isV4: false,
 		},
 		{
-			name:   "IPv6 /37",
-			prefix: netip.MustParsePrefix("2001:db8::/37"),
-			isV4:   false,
+			name: "IPv6 /37",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("2001:db8::/37")),
+			isV4: false,
 		},
 		{
-			name:   "IPv6 /0",
-			prefix: netip.MustParsePrefix("::/0"),
-			isV4:   false,
+			name: "IPv6 /0",
+			net:  xnetip.FromPrefix(netip.MustParsePrefix("::/0")),
+			isV4: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Convert Go -> C
-			cNet := goToC_Net(tt.prefix)
+			cNet := goToC_Net(tt.net)
 
 			// Convert C -> Go
 			result := cToGo_Net(cNet, tt.isV4)
 
 			// Compare
-			if !comparePrefix(tt.prefix, result) {
+			if !compareNetWithMask(tt.net, result) {
 				t.Errorf(
 					"Round-trip conversion failed: got %v, want %v",
 					result,
-					tt.prefix,
+					tt.net,
 				)
 			}
 		})
@@ -439,7 +456,7 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("10.0.0.1"),
 							Port: 8080,
 						},
-						Src:    netip.MustParsePrefix("172.16.0.0/24"),
+						Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
 						Weight: 100,
 					},
 				},
@@ -475,7 +492,7 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("2001:db8::100"),
 							Port: 8443,
 						},
-						Src:    netip.MustParsePrefix("2001:db8:1::/64"),
+						Src:    xnetip.FromPrefix(netip.MustParsePrefix("2001:db8:1::/64")),
 						Weight: 50,
 					},
 					{
@@ -483,7 +500,7 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("2001:db8::101"),
 							Port: 8443,
 						},
-						Src:    netip.MustParsePrefix("2001:db8:2::/64"),
+						Src:    xnetip.FromPrefix(netip.MustParsePrefix("2001:db8:2::/64")),
 						Weight: 150,
 					},
 				},
@@ -518,7 +535,7 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("10.0.0.10"),
 							Port: 0,
 						},
-						Src:    netip.MustParsePrefix("172.16.0.0/24"),
+						Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
 						Weight: 100,
 					},
 					{
@@ -526,7 +543,7 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("10.0.0.11"),
 							Port: 0,
 						},
-						Src:    netip.MustParsePrefix("172.16.1.0/24"),
+						Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.1.0/24")),
 						Weight: 150,
 					},
 					{
@@ -534,7 +551,7 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("10.0.0.12"),
 							Port: 0,
 						},
-						Src:    netip.MustParsePrefix("172.16.2.0/24"),
+						Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.2.0/24")),
 						Weight: 200,
 					},
 				},
@@ -569,7 +586,7 @@ func TestVsConfigConversion(t *testing.T) {
 			result := cToGo_VsConfig(cConfig)
 
 			// Compare
-			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix)); diff != "" {
+			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix), cmp.Comparer(compareNetWithMask)); diff != "" {
 				t.Errorf(
 					"Round-trip conversion mismatch (-want +got):\n%s",
 					diff,
@@ -612,7 +629,7 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 									Addr: netip.MustParseAddr("10.0.1.1"),
 									Port: 8080,
 								},
-								Src:    netip.MustParsePrefix("172.16.0.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
 								Weight: 100,
 							},
 						},
@@ -665,7 +682,7 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 									Addr: netip.MustParseAddr("10.0.1.1"),
 									Port: 8080,
 								},
-								Src:    netip.MustParsePrefix("172.16.0.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
 								Weight: 100,
 							},
 							{
@@ -673,7 +690,7 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 									Addr: netip.MustParseAddr("10.0.1.2"),
 									Port: 8080,
 								},
-								Src:    netip.MustParsePrefix("172.16.1.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.1.0/24")),
 								Weight: 100,
 							},
 						},
@@ -704,9 +721,9 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 									Addr: netip.MustParseAddr("2001:db8::100"),
 									Port: 8443,
 								},
-								Src: netip.MustParsePrefix(
+								Src: xnetip.FromPrefix(netip.MustParsePrefix(
 									"2001:db8:1::/64",
-								),
+								)),
 								Weight: 50,
 							},
 						},
@@ -751,7 +768,7 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 			result := cToGo_PacketHandlerConfig(cConfig)
 
 			// Compare
-			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix)); diff != "" {
+			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix), cmp.Comparer(compareNetWithMask)); diff != "" {
 				t.Errorf(
 					"Round-trip conversion mismatch (-want +got):\n%s",
 					diff,
@@ -795,9 +812,9 @@ func TestBalancerConfigConversion(t *testing.T) {
 										Addr: netip.MustParseAddr("10.0.1.1"),
 										Port: 8080,
 									},
-									Src: netip.MustParsePrefix(
+									Src: xnetip.FromPrefix(netip.MustParsePrefix(
 										"172.16.0.0/24",
-									),
+									)),
 									Weight: 100,
 								},
 								{
@@ -805,9 +822,9 @@ func TestBalancerConfigConversion(t *testing.T) {
 										Addr: netip.MustParseAddr("10.0.1.2"),
 										Port: 8080,
 									},
-									Src: netip.MustParsePrefix(
+									Src: xnetip.FromPrefix(netip.MustParsePrefix(
 										"172.16.1.0/24",
-									),
+									)),
 									Weight: 150,
 								},
 							},
@@ -861,7 +878,7 @@ func TestBalancerConfigConversion(t *testing.T) {
 			result := cToGo_BalancerConfig(cConfig)
 
 			// Compare
-			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix)); diff != "" {
+			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix), cmp.Comparer(compareNetWithMask)); diff != "" {
 				t.Errorf(
 					"Round-trip conversion mismatch (-want +got):\n%s",
 					diff,
@@ -908,9 +925,9 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 											),
 											Port: 8080,
 										},
-										Src: netip.MustParsePrefix(
+										Src: xnetip.FromPrefix(netip.MustParsePrefix(
 											"172.16.0.0/24",
-										),
+										)),
 										Weight: 100,
 									},
 								},
@@ -989,9 +1006,9 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 											),
 											Port: 8080,
 										},
-										Src: netip.MustParsePrefix(
+										Src: xnetip.FromPrefix(netip.MustParsePrefix(
 											"172.16.0.0/24",
-										),
+										)),
 										Weight: 100,
 									},
 								},
@@ -1053,7 +1070,7 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 			result := cToGo_BalancerManagerConfig(cConfig)
 
 			// Compare
-			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix)); diff != "" {
+			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix), cmp.Comparer(compareNetWithMask)); diff != "" {
 				t.Errorf(
 					"Round-trip conversion mismatch (-want +got):\n%s",
 					diff,
@@ -1176,7 +1193,7 @@ func TestComplexScenario(t *testing.T) {
 									Addr: netip.MustParseAddr("10.0.0.1"),
 									Port: 8080,
 								},
-								Src:    netip.MustParsePrefix("172.16.0.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
 								Weight: 100,
 							},
 							{
@@ -1184,7 +1201,7 @@ func TestComplexScenario(t *testing.T) {
 									Addr: netip.MustParseAddr("10.0.0.2"),
 									Port: 8080,
 								},
-								Src:    netip.MustParsePrefix("172.16.1.0/24"),
+								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.1.0/24")),
 								Weight: 150,
 							},
 						},
@@ -1218,9 +1235,9 @@ func TestComplexScenario(t *testing.T) {
 									Addr: netip.MustParseAddr("2001:db8::100"),
 									Port: 8443,
 								},
-								Src: netip.MustParsePrefix(
+								Src: xnetip.FromPrefix(netip.MustParsePrefix(
 									"2001:db8:1::/64",
-								),
+								)),
 								Weight: 100,
 							},
 						},
@@ -1269,7 +1286,7 @@ func TestComplexScenario(t *testing.T) {
 	result := cToGo_BalancerManagerConfig(cConfig)
 
 	// Compare
-	if diff := cmp.Diff(&config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix)); diff != "" {
+	if diff := cmp.Diff(&config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix), cmp.Comparer(compareNetWithMask)); diff != "" {
 		t.Errorf("Round-trip conversion mismatch (-want +got):\n%s", diff)
 	}
 }
@@ -1335,8 +1352,8 @@ func TestLargeScaleConversion(t *testing.T) {
 					),
 					Port: uint16(9000 + realIdx),
 				},
-				Src: netip.MustParsePrefix(
-					fmt.Sprintf("172.16.%d.0/24", realIdx/256),
+				Src: xnetip.FromPrefix(netip.MustParsePrefix(
+					fmt.Sprintf("172.16.%d.0/24", realIdx/256)),
 				),
 				Weight: uint16(100 + realIdx%900),
 			}

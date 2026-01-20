@@ -3,6 +3,8 @@ package ffi
 import (
 	"net/netip"
 	"time"
+
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
 )
 
 // AddrRange represents a range of IP addresses
@@ -56,7 +58,7 @@ type RealIdentifier struct {
 // RealConfig contains static configuration for a real server
 type RealConfig struct {
 	Identifier RelativeRealIdentifier // Relative identifier (within VS context)
-	Src        netip.Prefix           // Source network/addresses for this real
+	Src        xnetip.NetWithMask     // Source network/addresses for this real (supports arbitrary masks)
 	Weight     uint16                 // Scheduler weight [0..MAX_REAL_WEIGHT]
 }
 

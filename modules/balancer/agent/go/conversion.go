@@ -404,31 +404,33 @@ func protoToRealConfig(
 		)
 	}
 
-	var srcPrefix netip.Prefix
+	var srcNet xnetip.NetWithMask
 	if protoReal.SrcAddr != nil && protoReal.SrcMask != nil {
 		srcAddr, ok := netip.AddrFromSlice(protoReal.SrcAddr.Bytes)
 		if !ok {
 			return ffi.RealConfig{}, fmt.Errorf("invalid source address")
 		}
 
-		// Convert mask to prefix length
+		// Accept arbitrary masks (no validation for contiguous bits)
 		maskBytes := protoReal.SrcMask.Bytes
-		bits := 0
-		for _, b := range maskBytes {
-			for i := 7; i >= 0; i-- {
-				if (b & (1 << i)) != 0 {
-					bits++
-				} else {
-					break
-				}
-			}
+
+		// Validate mask length matches address type
+		expectedLen := 4
+		if srcAddr.Is6() {
+			expectedLen = 16
+		}
+		if len(maskBytes) != expectedLen {
+			return ffi.RealConfig{}, fmt.Errorf(
+				"invalid source mask length: got %d, expected %d",
+				len(maskBytes), expectedLen,
+			)
 		}
 
 		var err error
-		srcPrefix, err = srcAddr.Prefix(bits)
+		srcNet, err = xnetip.NewNetWithMask(srcAddr, maskBytes)
 		if err != nil {
 			return ffi.RealConfig{}, fmt.Errorf(
-				"invalid source prefix: %w",
+				"invalid source network: %w",
 				err,
 			)
 		}
@@ -439,7 +441,7 @@ func protoToRealConfig(
 			Addr: realAddr,
 			Port: uint16(protoReal.Id.Port),
 		},
-		Src:    srcPrefix,
+		Src:    srcNet,
 		Weight: uint16(protoReal.Weight),
 	}, nil
 }
@@ -1185,8 +1187,8 @@ func convertVsConfigToProto(vs *ffi.VsConfig) *balancerpb.VirtualService {
 }
 
 func convertRealConfigToProto(real *ffi.RealConfig) *balancerpb.Real {
-	srcAddr := real.Src.Addr().AsSlice()
-	srcMask := xnetip.Mask(real.Src)
+	srcAddr := real.Src.Addr.AsSlice()
+	srcMask := real.Src.MaskBytes()
 
 	return &balancerpb.Real{
 		Id: &balancerpb.RelativeRealIdentifier{

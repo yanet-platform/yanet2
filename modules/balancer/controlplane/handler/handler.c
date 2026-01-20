@@ -355,6 +355,20 @@ init_vs_filters(
 	size_t v6_idx = 0;
 	for (size_t i = 0; i < config->vs_count; ++i) {
 		struct named_vs_config *vs_config = &config->vs[i];
+
+		// Validate PureL3 configuration: port must be 0 when PureL3
+		// flag is set
+		if ((vs_config->config.flags & VS_PURE_L3_FLAG) &&
+		    vs_config->identifier.port != 0) {
+			NEW_ERROR(
+				"virtual service at index %zu: PureL3 mode "
+				"requires port=0, but port=%u was specified",
+				i,
+				vs_config->identifier.port
+			);
+			goto cleanup_error;
+		}
+
 		struct filter_rule *rule;
 		size_t *idx;
 
@@ -398,8 +412,17 @@ init_vs_filters(
 		if (rule->transport.dsts == NULL) {
 			goto cleanup_error;
 		}
-		rule->transport.dsts[0].from = vs_config->identifier.port;
-		rule->transport.dsts[0].to = vs_config->identifier.port;
+
+		// For PureL3 mode, match all ports (0-65535)
+		// Otherwise, match only the specific port
+		if (vs_config->config.flags & VS_PURE_L3_FLAG) {
+			rule->transport.dsts[0].from = 0;
+			rule->transport.dsts[0].to = 65535;
+		} else {
+			rule->transport.dsts[0].from =
+				vs_config->identifier.port;
+			rule->transport.dsts[0].to = vs_config->identifier.port;
+		}
 
 		rule->transport.proto.proto =
 			vs_config->identifier.transport_proto;

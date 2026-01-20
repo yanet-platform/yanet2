@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"math"
+	"net"
 	"net/netip"
 	"testing"
 
@@ -40,6 +41,9 @@ func ValidatePacket(
 
 	// Find and validate matching service and real
 	validateServiceAndReal(t, config, originalPacket, resultPacket, packetProto)
+
+	// Validate tunnel source address
+	validateTunnelSourceAddress(t, config, originalPacket, resultPacket)
 }
 
 // validateTunnelStructure checks that the packet is properly tunneled with correct inner packet.
@@ -471,4 +475,212 @@ func AllPacketsToSameReal(packets []*framework.PacketInfo) (netip.Addr, bool) {
 func PacketsDistributedAcrossReals(packets []*framework.PacketInfo) bool {
 	counts := CountPacketsPerReal(packets)
 	return len(counts) > 1
+}
+
+// validateTunnelSourceAddress validates that the tunnel source address is correctly calculated
+// according to the formula: tunnel_src = client_ip & !real_mask | real_src & real_mask
+// This matches the implementation in modules/balancer/dataplane/tunnel.h
+func validateTunnelSourceAddress(
+	t *testing.T,
+	config *balancerpb.BalancerConfig,
+	originalPacket *framework.PacketInfo,
+	resultPacket *framework.PacketInfo,
+) {
+	t.Helper()
+
+	if !resultPacket.IsTunneled {
+		return // Not a tunneled packet, nothing to validate
+	}
+
+	// Get the client IP (source of original packet)
+	clientIP := originalPacket.SrcIP
+	if clientIP == nil {
+		t.Error("original packet has no source IP")
+		return
+	}
+
+	// Get the tunnel source IP (source of outer packet)
+	tunnelSrcIP := resultPacket.SrcIP
+	if tunnelSrcIP == nil {
+		t.Error("result packet has no source IP")
+		return
+	}
+
+	// Find the matching virtual service and real
+	originalDstIP := netip.MustParseAddr(originalPacket.DstIP.String())
+	resultDstIP := netip.MustParseAddr(resultPacket.DstIP.String())
+
+	var packetProto balancerpb.TransportProto
+	if originalPacket.IsIPv4 {
+		if originalPacket.Protocol.LayerType() == layers.LayerTypeTCP {
+			packetProto = balancerpb.TransportProto_TCP
+		} else if originalPacket.Protocol.LayerType() == layers.LayerTypeUDP {
+			packetProto = balancerpb.TransportProto_UDP
+		}
+	} else if originalPacket.IsIPv6 {
+		if originalPacket.NextHeader.LayerType() == layers.LayerTypeTCP {
+			packetProto = balancerpb.TransportProto_TCP
+		} else if originalPacket.NextHeader.LayerType() == layers.LayerTypeUDP {
+			packetProto = balancerpb.TransportProto_UDP
+		}
+	}
+
+	if config.PacketHandler == nil {
+		t.Error("packet handler config is nil")
+		return
+	}
+
+	// Find the matching virtual service
+	for _, service := range config.PacketHandler.Vs {
+		vsAddr, _ := netip.AddrFromSlice(service.Id.Addr.Bytes)
+
+		if vsAddr.Compare(originalDstIP) == 0 &&
+			(service.Id.Port == uint32(originalPacket.DstPort) || service.Flags.PureL3) &&
+			service.Id.Proto == packetProto {
+
+			// Find the matching real server
+			for _, real := range service.Reals {
+				realAddr, _ := netip.AddrFromSlice(real.Id.Ip.Bytes)
+
+				if realAddr.Compare(resultDstIP) == 0 {
+					// Found the matching real, now validate source address
+					validateSourceAddressCalculation(t, clientIP, tunnelSrcIP, real)
+					return
+				}
+			}
+		}
+	}
+}
+
+// validateSourceAddressCalculation validates the tunnel source address calculation
+// Formula: tunnel_src = client_ip & !real_mask | real_src & real_mask
+// The tunnel source IP protocol is determined by the real server's IP protocol, not the client's.
+func validateSourceAddressCalculation(
+	t *testing.T,
+	clientIP net.IP,
+	tunnelSrcIP net.IP,
+	real *balancerpb.Real,
+) {
+	t.Helper()
+
+	if real.SrcAddr == nil || real.SrcMask == nil {
+		t.Error("real server has no SrcAddr or SrcMask configured")
+		return
+	}
+
+	if real.Id == nil || real.Id.Ip == nil {
+		t.Error("real server has no Id or Ip configured")
+		return
+	}
+
+	realSrc := real.SrcAddr.Bytes
+	realMask := real.SrcMask.Bytes
+	realIP := real.Id.Ip.Bytes
+
+	// Determine real server's IP protocol from its address length
+	realIsIPv6 := len(realIP) == 16
+	realIsIPv4 := len(realIP) == 4
+
+	if !realIsIPv4 && !realIsIPv6 {
+		t.Errorf("unexpected real IP address length: %d", len(realIP))
+		return
+	}
+
+	// Normalize client IP
+	var clientIPBytes []byte
+	if len(clientIP) == 4 || (len(clientIP) == 16 && clientIP.To4() != nil) {
+		// Client is IPv4
+		clientIPv4 := clientIP.To4()
+		if clientIPv4 == nil {
+			t.Error("failed to convert client IP to IPv4")
+			return
+		}
+		clientIPBytes = []byte(clientIPv4)
+	} else if len(clientIP) == 16 {
+		// Client is IPv6
+		clientIPBytes = []byte(clientIP)
+	} else {
+		t.Errorf("unexpected client IP address length: %d", len(clientIP))
+		return
+	}
+
+	// Validate based on real server's IP protocol
+	if realIsIPv6 {
+		// Tunnel to IPv6 real: tunnel source MUST be IPv6
+		if len(tunnelSrcIP) != 16 || tunnelSrcIP.To4() != nil {
+			t.Errorf(
+				"tunnel source IP should be IPv6 when tunneling to IPv6 real, got %s",
+				tunnelSrcIP,
+			)
+			return
+		}
+
+		// Calculate expected source: client_ip & !real_mask | real_src & real_mask
+		expectedSrc := make([]byte, 16)
+
+		// Determine how many bytes to use from client IP
+		clientLen := len(clientIPBytes)
+		if clientLen > 16 {
+			clientLen = 16
+		}
+
+		for i := 0; i < 16; i++ {
+			var clientByte byte
+			if i < clientLen {
+				clientByte = clientIPBytes[i]
+			} else {
+				clientByte = 0
+			}
+			expectedSrc[i] = (clientByte & ^realMask[i]) | (realSrc[i] & realMask[i])
+		}
+
+		expectedSrcIP := net.IP(expectedSrc)
+		if !tunnelSrcIP.Equal(expectedSrcIP) {
+			t.Errorf(
+				"tunnel source address mismatch: expected %s, got %s (client=%s, real_src=%s, real_mask=%s, real_ip=%s)",
+				expectedSrcIP,
+				tunnelSrcIP,
+				clientIP,
+				net.IP(realSrc),
+				net.IP(realMask),
+				net.IP(realIP),
+			)
+		}
+	} else {
+		// Tunnel to IPv4 real: tunnel source MUST be IPv4
+		tunnelSrcIPv4 := tunnelSrcIP.To4()
+		if tunnelSrcIPv4 == nil {
+			t.Errorf(
+				"tunnel source IP should be IPv4 when tunneling to IPv4 real, got %s",
+				tunnelSrcIP,
+			)
+			return
+		}
+
+		// Calculate expected source: client_ip & !real_mask | real_src & real_mask
+		// Use only first 4 bytes of client IP (whether IPv4 or IPv6)
+		expectedSrc := make([]byte, 4)
+		for i := 0; i < 4; i++ {
+			var clientByte byte
+			if i < len(clientIPBytes) {
+				clientByte = clientIPBytes[i]
+			} else {
+				clientByte = 0
+			}
+			expectedSrc[i] = (clientByte & ^realMask[i]) | (realSrc[i] & realMask[i])
+		}
+
+		expectedSrcIP := net.IP(expectedSrc)
+		if !tunnelSrcIPv4.Equal(expectedSrcIP) {
+			t.Errorf(
+				"tunnel source address mismatch: expected %s, got %s (client=%s, real_src=%s, real_mask=%s, real_ip=%s)",
+				expectedSrcIP,
+				tunnelSrcIPv4,
+				clientIP,
+				net.IP(realSrc),
+				net.IP(realMask),
+				net.IP(realIP),
+			)
+		}
+	}
 }

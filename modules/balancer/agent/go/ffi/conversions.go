@@ -127,30 +127,50 @@ func cToGo_NetAddr(cAddr C.struct_net_addr, isV4 bool) netip.Addr {
 	return netip.AddrFrom16(v6)
 }
 
-func goToC_Net(prefix netip.Prefix) C.struct_net {
+func goToC_Net(net xnetip.NetWithMask) C.struct_net {
 	var cNet C.struct_net
-	addr := prefix.Addr()
-	mask := xnetip.Mask(prefix)
+	addr := net.Addr
+	mask := net.MaskBytes()
+
+	// Zero-initialize the entire union to avoid garbage data
+	ptr := unsafe.Pointer(&cNet)
+	size := unsafe.Sizeof(cNet)
+	slice := unsafe.Slice((*byte)(ptr), size)
+	for i := range slice {
+		slice[i] = 0
+	}
 
 	if addr.Is4() {
 		v4 := addr.As4()
-		// Copy directly to the union bytes (first 4+4 bytes for v4)
-		C.memcpy(unsafe.Pointer(&cNet), unsafe.Pointer(&v4[0]), 4)
-		C.memcpy(
-			unsafe.Pointer(uintptr(unsafe.Pointer(&cNet))+4),
-			unsafe.Pointer(&mask[0]),
-			4,
-		)
+		// For IPv4, the struct net4 layout is:
+		// - addr[4] at offset 0
+		// - mask[4] at offset 4
+		// Copy addr to bytes 0-3
+		for i := 0; i < 4; i++ {
+			slice[i] = v4[i]
+		}
+		// Copy mask to bytes 4-7
+		for i := 0; i < 4; i++ {
+			slice[4+i] = mask[i]
+		}
 	} else {
 		v6 := addr.As16()
-		// Copy directly to the union bytes (16+16 bytes for v6)
-		C.memcpy(unsafe.Pointer(&cNet), unsafe.Pointer(&v6[0]), 16)
-		C.memcpy(unsafe.Pointer(uintptr(unsafe.Pointer(&cNet))+16), unsafe.Pointer(&mask[0]), 16)
+		// For IPv6, the struct net6 layout is:
+		// - addr[16] at offset 0
+		// - mask[16] at offset 16
+		// Copy addr to bytes 0-15
+		for i := 0; i < 16; i++ {
+			slice[i] = v6[i]
+		}
+		// Copy mask to bytes 16-31
+		for i := 0; i < 16; i++ {
+			slice[16+i] = mask[i]
+		}
 	}
 	return cNet
 }
 
-func cToGo_Net(cNet C.struct_net, isV4 bool) netip.Prefix {
+func cToGo_Net(cNet C.struct_net, isV4 bool) xnetip.NetWithMask {
 	if isV4 {
 		var addr [4]byte
 		var mask [4]byte
@@ -162,19 +182,10 @@ func cToGo_Net(cNet C.struct_net, isV4 bool) netip.Prefix {
 			4,
 		)
 
-		// Calculate prefix length from mask
-		bits := 0
-		for _, b := range mask {
-			for i := 7; i >= 0; i-- {
-				if (b & (1 << i)) != 0 {
-					bits++
-				} else {
-					goto done
-				}
-			}
+		return xnetip.NetWithMask{
+			Addr: netip.AddrFrom4(addr),
+			Mask: mask[:],
 		}
-	done:
-		return netip.PrefixFrom(netip.AddrFrom4(addr), bits)
 	}
 
 	var addr [16]byte
@@ -187,19 +198,10 @@ func cToGo_Net(cNet C.struct_net, isV4 bool) netip.Prefix {
 		16,
 	)
 
-	// Calculate prefix length from mask
-	bits := 0
-	for _, b := range mask {
-		for i := 7; i >= 0; i-- {
-			if (b & (1 << i)) != 0 {
-				bits++
-			} else {
-				goto done2
-			}
-		}
+	return xnetip.NetWithMask{
+		Addr: netip.AddrFrom16(addr),
+		Mask: mask[:],
 	}
-done2:
-	return netip.PrefixFrom(netip.AddrFrom16(addr), bits)
 }
 
 // VS type conversions

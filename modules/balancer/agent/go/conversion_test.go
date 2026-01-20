@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -1311,25 +1312,25 @@ func TestProtoToRealConfig_SourcePrefix(t *testing.T) {
 		name     string
 		srcAddr  []byte
 		srcMask  []byte
-		expected netip.Prefix
+		expected xnetip.NetWithMask
 	}{
 		{
 			name:     "IPv4 /24",
 			srcAddr:  netip.MustParseAddr("172.16.0.0").AsSlice(),
 			srcMask:  []byte{255, 255, 255, 0},
-			expected: netip.MustParsePrefix("172.16.0.0/24"),
+			expected: xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
 		},
 		{
 			name:     "IPv4 /16",
 			srcAddr:  netip.MustParseAddr("10.0.0.0").AsSlice(),
 			srcMask:  []byte{255, 255, 0, 0},
-			expected: netip.MustParsePrefix("10.0.0.0/16"),
+			expected: xnetip.FromPrefix(netip.MustParsePrefix("10.0.0.0/16")),
 		},
 		{
 			name:     "IPv6 /64",
 			srcAddr:  netip.MustParseAddr("2001:db8::").AsSlice(),
 			srcMask:  netip.MustParseAddr("ffff:ffff:ffff:ffff::").AsSlice(),
-			expected: netip.MustParsePrefix("2001:db8::/64"),
+			expected: xnetip.FromPrefix(netip.MustParsePrefix("2001:db8::/64")),
 		},
 	}
 

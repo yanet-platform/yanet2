@@ -101,6 +101,22 @@ var (
 	vs8IP   = netip.MustParseAddr("10.0.8.1")
 	vs8Port = uint16(80)
 
+	// VS9: TCP + SOURCE_HASH + PureL3 (port must be 0 for PureL3)
+	vs9IP   = netip.MustParseAddr("10.0.9.1")
+	vs9Port = uint16(0)
+
+	// VS10: TCP + ROUND_ROBIN + PureL3 (port must be 0 for PureL3)
+	vs10IP   = netip.MustParseAddr("10.0.10.1")
+	vs10Port = uint16(0)
+
+	// VS11: UDP + SOURCE_HASH + PureL3 (port must be 0 for PureL3)
+	vs11IP   = netip.MustParseAddr("10.0.11.1")
+	vs11Port = uint16(0)
+
+	// VS12: UDP + ROUND_ROBIN + PureL3 (port must be 0 for PureL3)
+	vs12IP   = netip.MustParseAddr("10.0.12.1")
+	vs12Port = uint16(0)
+
 	// Real servers (3 per VS, same IPs for simplicity)
 	real1IP = netip.MustParseAddr("192.168.1.1")
 	real2IP = netip.MustParseAddr("192.168.1.2")
@@ -140,6 +156,19 @@ func createVirtualService(
 	ops bool,
 	reals []*balancerpb.Real,
 ) *balancerpb.VirtualService {
+	return createVirtualServiceWithFlags(ip, port, proto, scheduler, ops, false, reals)
+}
+
+// createVirtualServiceWithFlags creates a VirtualService configuration with custom flags
+func createVirtualServiceWithFlags(
+	ip netip.Addr,
+	port uint16,
+	proto balancerpb.TransportProto,
+	scheduler balancerpb.VsScheduler,
+	ops bool,
+	pureL3 bool,
+	reals []*balancerpb.Real,
+) *balancerpb.VirtualService {
 	return &balancerpb.VirtualService{
 		Id: &balancerpb.VsIdentifier{
 			Addr:  &balancerpb.Addr{Bytes: ip.AsSlice()},
@@ -159,7 +188,7 @@ func createVirtualService(
 			Gre:    false,
 			FixMss: false,
 			Ops:    ops,
-			PureL3: false,
+			PureL3: pureL3,
 			Wlc:    false,
 		},
 		Reals: reals,
@@ -259,6 +288,46 @@ func createSchedulingTestConfig() *balancerpb.BalancerConfig {
 					balancerpb.VsScheduler_ROUND_ROBIN,
 					true,
 					weightedReals,
+				),
+				// VS9: TCP + SOURCE_HASH + PureL3
+				createVirtualServiceWithFlags(
+					vs9IP,
+					vs9Port,
+					balancerpb.TransportProto_TCP,
+					balancerpb.VsScheduler_SOURCE_HASH,
+					false,
+					true,
+					equalReals,
+				),
+				// VS10: TCP + ROUND_ROBIN + PureL3
+				createVirtualServiceWithFlags(
+					vs10IP,
+					vs10Port,
+					balancerpb.TransportProto_TCP,
+					balancerpb.VsScheduler_ROUND_ROBIN,
+					false,
+					true,
+					equalReals,
+				),
+				// VS11: UDP + SOURCE_HASH + PureL3
+				createVirtualServiceWithFlags(
+					vs11IP,
+					vs11Port,
+					balancerpb.TransportProto_UDP,
+					balancerpb.VsScheduler_SOURCE_HASH,
+					false,
+					true,
+					equalReals,
+				),
+				// VS12: UDP + ROUND_ROBIN + PureL3
+				createVirtualServiceWithFlags(
+					vs12IP,
+					vs12Port,
+					balancerpb.TransportProto_UDP,
+					balancerpb.VsScheduler_ROUND_ROBIN,
+					false,
+					true,
+					equalReals,
 				),
 			},
 			DecapAddresses: []*balancerpb.Addr{},
@@ -390,6 +459,23 @@ func runSchedulingChecks(t *testing.T, ts *utils.TestSetup, phase string) {
 
 	t.Run("Graph_Output", func(t *testing.T) {
 		testGraphOutput(t, ts)
+	})
+
+	// PureL3 Tests
+	t.Run("PureL3_SourceHash_PortIndependence", func(t *testing.T) {
+		testPureL3SourceHashPortIndependence(t, ts)
+	})
+
+	t.Run("PureL3_RoundRobin_Distribution", func(t *testing.T) {
+		testPureL3RoundRobinDistribution(t, ts)
+	})
+
+	t.Run("PureL3_SessionCreation", func(t *testing.T) {
+		testPureL3SessionCreation(t, ts)
+	})
+
+	t.Run("PureL3_UDP_SourceHash", func(t *testing.T) {
+		testPureL3UDPSourceHash(t, ts)
 	})
 }
 
@@ -888,9 +974,9 @@ func testConfigOutput(t *testing.T, ts *utils.TestSetup) {
 	// Verify virtual services
 	assert.Equal(
 		t,
-		8,
+		12,
 		len(config.PacketHandler.Vs),
-		"should have 8 virtual services",
+		"should have 12 virtual services",
 	)
 
 	// Verify state config
@@ -1047,9 +1133,9 @@ func testGraphOutput(t *testing.T, ts *utils.TestSetup) {
 	// Verify number of virtual services
 	assert.Equal(
 		t,
-		8,
+		12,
 		len(graph.VirtualServices),
-		"should have 8 virtual services in graph",
+		"should have 12 virtual services in graph",
 	)
 
 	// Verify each virtual service
@@ -1245,4 +1331,206 @@ func testRoundRobinDistributionAfterRestore(t *testing.T, ts *utils.TestSetup) {
 		distributed,
 		"round_robin should distribute packets after restore",
 	)
+}
+
+// testPureL3SourceHashPortIndependence verifies that PureL3 mode accepts packets
+// on any destination port and schedules based on destination port
+func testPureL3SourceHashPortIndependence(t *testing.T, ts *utils.TestSetup) {
+	t.Helper()
+
+	clientIP := generateClientIP(1400)
+	clientPort := uint16(14000)
+
+	// Test 1: Packets to the same destination port should go to the same real
+	var sameDstPortPackets []*framework.PacketInfo
+	dstPort1 := uint16(8080)
+	for i := 0; i < 5; i++ {
+		packetLayers := utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			vs9IP,
+			dstPort1, // Same destination port
+			&layers.TCP{SYN: true},
+		)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+		result, err := ts.Mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Output), "expected 1 output packet")
+		sameDstPortPackets = append(sameDstPortPackets, result.Output[0])
+	}
+
+	// Verify all packets to same dst port went to the same real
+	realIP1, allSame := utils.AllPacketsToSameReal(sameDstPortPackets)
+	assert.True(
+		t,
+		allSame,
+		"PureL3 SOURCE_HASH should send all packets to same dst port to same real",
+	)
+	assert.True(t, realIP1.IsValid(), "real IP should be valid")
+
+	// Test 2: Packets to different destination ports can go to different reals
+	var differentDstPortPackets []*framework.PacketInfo
+	for i := 0; i < 10; i++ {
+		dstPort := uint16(9000 + i) // Different destination ports
+		packetLayers := utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			vs9IP,
+			dstPort,
+			&layers.TCP{SYN: true},
+		)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+		result, err := ts.Mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Output), "expected 1 output packet")
+		differentDstPortPackets = append(differentDstPortPackets, result.Output[0])
+	}
+
+	// Verify packets to different dst ports can be distributed
+	counts := utils.CountPacketsPerReal(differentDstPortPackets)
+	t.Logf("PureL3 distribution across different dst ports: %v", counts)
+	// We don't assert distribution here as it depends on hash function,
+	// but we verify that packets were accepted on different ports
+}
+
+// testPureL3RoundRobinDistribution verifies that PureL3 mode with ROUND_ROBIN
+// distributes packets across reals
+func testPureL3RoundRobinDistribution(t *testing.T, ts *utils.TestSetup) {
+	t.Helper()
+
+	var outputPackets []*framework.PacketInfo
+
+	// Send packets from different client IPs
+	for i := range 30 {
+		clientIP := generateClientIP(1500 + i)
+		clientPort := uint16(15000)
+
+		packetLayers := utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			vs10IP,
+			vs10Port,
+			&layers.TCP{SYN: true},
+		)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+		result, err := ts.Mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Output), "expected 1 output packet")
+		outputPackets = append(outputPackets, result.Output[0])
+	}
+
+	// Verify packets are distributed across multiple reals
+	distributed := utils.PacketsDistributedAcrossReals(outputPackets)
+	assert.True(
+		t,
+		distributed,
+		"PureL3 ROUND_ROBIN should distribute packets across multiple reals",
+	)
+
+	// Count packets per real
+	counts := utils.CountPacketsPerReal(outputPackets)
+	assert.GreaterOrEqual(
+		t,
+		len(counts),
+		2,
+		"packets should go to at least 2 different reals",
+	)
+}
+
+// testPureL3SessionCreation verifies that sessions are created correctly in PureL3 mode
+// Sessions should be based on client IP + client port + dst port combination
+func testPureL3SessionCreation(t *testing.T, ts *utils.TestSetup) {
+	t.Helper()
+
+	// Get initial session count
+	initialInfo, err := ts.Balancer.Info(ts.Mock.CurrentTime())
+	require.NoError(t, err)
+	initialSessions := initialInfo.ActiveSessions
+
+	clientIP := generateClientIP(1600)
+	clientPort := uint16(16000)
+	dstPort := uint16(8080)
+
+	// Send multiple packets with same client IP, client port, and dst port
+	for i := 0; i < 5; i++ {
+		packetLayers := utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			vs9IP,
+			dstPort, // Same dst port
+			&layers.TCP{SYN: i == 0, ACK: i > 0},
+		)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+		result, err := ts.Mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Output), "expected 1 output packet")
+	}
+
+	// Verify sessions were created
+	finalInfo, err := ts.Balancer.Info(ts.Mock.CurrentTime())
+	require.NoError(t, err)
+
+	// In PureL3 mode, sessions should be created based on the flow
+	assert.Greater(
+		t,
+		finalInfo.ActiveSessions,
+		initialSessions,
+		"PureL3 mode should create sessions",
+	)
+}
+
+// testPureL3UDPSourceHash verifies that PureL3 mode works with UDP and SOURCE_HASH
+// Packets to the same destination port should go to the same real
+func testPureL3UDPSourceHash(t *testing.T, ts *utils.TestSetup) {
+	t.Helper()
+
+	clientIP := generateClientIP(1700)
+	clientPort := uint16(17000)
+
+	// Test 1: Packets to the same destination port should go to the same real
+	var sameDstPortPackets []*framework.PacketInfo
+	dstPort1 := uint16(5353)
+	for i := 0; i < 5; i++ {
+		packetLayers := utils.MakeUDPPacket(
+			clientIP,
+			clientPort,
+			vs11IP,
+			dstPort1, // Same destination port
+		)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+		result, err := ts.Mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Output), "expected 1 output packet")
+		sameDstPortPackets = append(sameDstPortPackets, result.Output[0])
+	}
+
+	// Verify all packets to same dst port went to the same real
+	realIP, allSame := utils.AllPacketsToSameReal(sameDstPortPackets)
+	assert.True(
+		t,
+		allSame,
+		"PureL3 SOURCE_HASH with UDP should send all packets to same dst port to same real",
+	)
+	assert.True(t, realIP.IsValid(), "real IP should be valid")
+
+	// Test 2: Verify PureL3 accepts packets on different destination ports
+	var differentDstPortPackets []*framework.PacketInfo
+	for i := 0; i < 10; i++ {
+		dstPort := uint16(6000 + i) // Different destination ports
+		packetLayers := utils.MakeUDPPacket(
+			clientIP,
+			clientPort,
+			vs11IP,
+			dstPort,
+		)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+		result, err := ts.Mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Output), "expected 1 output packet")
+		differentDstPortPackets = append(differentDstPortPackets, result.Output[0])
+	}
+
+	// Verify packets were accepted on different ports
+	counts := utils.CountPacketsPerReal(differentDstPortPackets)
+	t.Logf("PureL3 UDP distribution across different dst ports: %v", counts)
 }

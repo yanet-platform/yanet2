@@ -11,6 +11,7 @@
 #include "state/real.h"
 #include "state/state.h"
 #include <assert.h>
+#include <netinet/in.h>
 #include <string.h>
 
 int
@@ -46,10 +47,20 @@ real_init(
 
 	// source net
 	struct net src = named_config->config.src;
-	uint8_t *src_addr = src.v6.addr;
-	const uint8_t *src_mask = src.v6.mask;
-	for (size_t i = 0; i < NET6_LEN; i++) {
-		src_addr[i] &= src_mask[i];
+
+	// Mask the source address based on IP protocol version
+	if (named_config->real.ip_proto == IPPROTO_IP) { // IPv4
+		uint8_t *src_addr = src.v4.addr;
+		const uint8_t *src_mask = src.v4.mask;
+		for (size_t i = 0; i < NET4_LEN; i++) {
+			src_addr[i] &= src_mask[i];
+		}
+	} else { // IPv6
+		uint8_t *src_addr = src.v6.addr;
+		const uint8_t *src_mask = src.v6.mask;
+		for (size_t i = 0; i < NET6_LEN; i++) {
+			src_addr[i] &= src_mask[i];
+		}
 	}
 
 	struct real r = {
