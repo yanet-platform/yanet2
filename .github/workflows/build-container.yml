@@ -1,0 +1,95 @@
+name: Build YANET (Container)
+
+# This workflow uses a prebuilt Docker container with all dependencies.
+# It's faster for initial builds but requires the base image to be up to date.
+# Use the regular build.yml for PRs, this one is for optional faster builds.
+
+on:
+  workflow_dispatch:
+    inputs:
+      buildtype:
+        description: 'Build type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - sanitize
+          - both
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container:
+      image: yanetplatform/yanet2-base:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        buildtype: ${{ fromJSON(github.event.inputs.buildtype == 'both' && '["sanitize", "release"]' || format('["{0}"]', github.event.inputs.buildtype)) }}
+    env:
+      BUILD_DIR: build-${{ matrix.buildtype }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Cache DPDK build
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BUILD_DIR }}/subprojects/dpdk
+          key: dpdk-container-${{ matrix.buildtype }}-${{ hashFiles('subprojects/dpdk/VERSION', 'subprojects/dpdk/meson.build', 'subprojects/dpdk/meson_options.txt', 'meson.build') }}
+          restore-keys: |
+            dpdk-container-${{ matrix.buildtype }}-
+
+      - name: Get Go environment
+        run: |
+          echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
+          echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
+
+      - name: Set up go cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.cache }}
+            ${{ env.modcache }}
+          key: container-go-${{ matrix.buildtype }}-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
+          restore-keys: |
+            container-go-${{ matrix.buildtype }}-
+
+      - name: Configure meson (${{ matrix.buildtype }})
+        run: |
+          if [ "${{ matrix.buildtype }}" = "sanitize" ]; then
+            meson setup ${{ env.BUILD_DIR }} -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
+          else
+            meson setup ${{ env.BUILD_DIR }} -Dbuildtype=release
+          fi
+
+      - name: Build YANET
+        run: |
+          meson compile -C ${{ env.BUILD_DIR }}
+          cargo build --release --workspace
+
+      - name: Run tests
+        run: |
+          if [ "${{ matrix.buildtype }}" = "sanitize" ]; then
+            CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test -count=1 $(go list ./... | grep -v 'tests/functional')
+          else
+            go test -count=1 $(go list ./... | grep -v 'tests/functional')
+          fi
+          meson test -C ${{ env.BUILD_DIR }}
+
+      - name: Show meson test log
+        if: always()
+        run: grep -v 'Inherited environment' ${{ env.BUILD_DIR }}/meson-logs/testlog.txt || true
+
+      - name: Upload YANET binaries
+        if: ${{ matrix.buildtype == 'release' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: yanet2-binaries-container
+          path: |
+            ${{ env.BUILD_DIR }}/dataplane/yanet-dataplane
+            ${{ env.BUILD_DIR }}/controlplane/yanet-controlplane
+            target/release/yanet-cli*
+

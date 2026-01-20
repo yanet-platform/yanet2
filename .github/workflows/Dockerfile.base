@@ -1,7 +1,50 @@
 FROM ubuntu:24.04
 
-ENV DEBIAN_FRONTEND noninteractive
+LABEL maintainer="YANET Team" \
+    description="Base build environment for YANET2" \
+    version="2.0"
 
-RUN apt update -y
-RUN apt install -y meson clang
-RUN apt install -y python3-pyelftools libnuma-dev libpcap-dev git
+ENV DEBIAN_FRONTEND=noninteractive \
+    GOCACHE=/tmp/gocache \
+    GOMODCACHE=/tmp/gomodcache \
+    PATH="/usr/local/go/bin:${PATH}"
+
+# Install all build dependencies in a single layer for caching
+RUN apt-get update -y && apt-get install -y --no-install-recommends \
+    # Build tools
+    meson \
+    clang \
+    clang-format-19 \
+    clang-tidy-19 \
+    git \
+    make \
+    # DPDK dependencies
+    python3-pyelftools \
+    python3-dev \
+    libnuma-dev \
+    libpcap-dev \
+    # Protobuf
+    protobuf-compiler \
+    # Utilities
+    jq \
+    curl \
+    ca-certificates \
+    # Rust
+    cargo \
+    rustc \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go (use a specific version for reproducibility)
+ARG GO_VERSION=1.24.0
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" | tar -C /usr/local -xzf -
+
+# Install Go protobuf plugins
+RUN GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+# Create cache directories
+RUN mkdir -p /tmp/gocache /tmp/gomodcache && \
+    chmod 777 /tmp/gocache /tmp/gomodcache
+
+WORKDIR /workspace

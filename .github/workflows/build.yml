@@ -11,6 +11,7 @@ on:
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - ".github/workflows/build.yml"
   pull_request:
     branches: ["main"]
     paths:
@@ -21,12 +22,26 @@ on:
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - ".github/workflows/build.yml"
 
 jobs:
   build:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - buildtype: sanitize
+            meson_args: "-Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined"
+            run_clang_tidy: false
+            upload_artifacts: false
+          - buildtype: release
+            meson_args: "-Dbuildtype=release"
+            run_clang_tidy: true
+            upload_artifacts: true
     env:
-      cache_name: build-and-test
+      cache_name: build-and-test-${{ matrix.buildtype }}
+      BUILD_DIR: build-${{ matrix.buildtype }}
 
     steps:
       - name: Free up disk space on GitHub runner
@@ -60,6 +75,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+
       - name: Cache rust
         uses: actions/cache@v4
         with:
@@ -71,12 +87,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
+
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq clang-tidy-19
           version: 1.1
 
       - name: Install LLVM 19 toolchain
+        if: ${{ matrix.run_clang_tidy }}
         id: llvm
         uses: KyleMayes/install-llvm-action@v2
         with:
@@ -87,23 +105,33 @@ jobs:
         with:
           submodules: true
 
+      - name: Cache DPDK build
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BUILD_DIR }}/subprojects/dpdk
+          key: dpdk-${{ runner.os }}-${{ matrix.buildtype }}-${{ hashFiles('subprojects/dpdk/VERSION', 'subprojects/dpdk/meson.build', 'subprojects/dpdk/meson_options.txt', 'meson.build') }}
+          restore-keys: |
+            dpdk-${{ runner.os }}-${{ matrix.buildtype }}-
+
       - uses: hendrikmuhs/ccache-action@v1.2.18
         name: ccache
         with:
-          key: ${{ runner.os }}-build-cache
+          key: ${{ runner.os }}-build-cache-${{ matrix.buildtype }}
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
           cache: false
           check-latest: true
+
       # https://github.com/actions/setup-go/issues/358
       - name: Get Go environment
         run: |
           echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
           echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
+
       - name: Set up go cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ${{ env.cache }}
@@ -118,58 +146,37 @@ jobs:
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
-      - name: Build YANET (sanitize)
+      - name: Build YANET (${{ matrix.buildtype }})
         run: |
           make go-cache-clean
-          meson setup build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
-          make dataplane cli
+          meson setup ${{ env.BUILD_DIR }} ${{ matrix.meson_args }}
+          meson compile -C ${{ env.BUILD_DIR }}
+          cargo build --release --workspace
 
-      - name: Build and run tests (sanitize)
+      - name: Build and run tests (${{ matrix.buildtype }})
         run: |
           make go-cache-clean
-          make test-asan
-      - name: Show meson test log
-        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt
-
-      - name: Clean debug build artifacts to free space
-        run: |
-          echo "=== Disk space before cleanup ==="
-          df -h
-          echo "=== Build directory size ==="
-          du -sh build/ || true
-
-          echo "=== Cleaning debug build artifacts ==="
-          # Completely remove build directory to free maximum space
-          rm -rf build/
-
-          # Clean Docker build cache if exists
-          docker system prune -af 2>/dev/null || true
-
-          echo "=== Disk space after cleanup ==="
-          df -h
-
-      - name: Build YANET (release)
-        run: |
-          make go-cache-clean
-          meson setup build -Dbuildtype=release
-          make dataplane cli
-
-      - name: Build and run tests (release)
-        run: make test
+          if [ "${{ matrix.buildtype }}" = "sanitize" ]; then
+            CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test -count=1 $(go list ./... | grep -v 'tests/functional')
+          else
+            go test -count=1 $(go list ./... | grep -v 'tests/functional')
+          fi
+          meson test -C ${{ env.BUILD_DIR }}
 
       - name: Show meson test log
-        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt
+        if: always()
+        run: grep -v 'Inherited environment' ${{ env.BUILD_DIR }}/meson-logs/testlog.txt || true
 
       - name: Run clang-tidy
+        if: ${{ matrix.run_clang_tidy }}
         env:
-          # Use the same directory we asked the install-llvm-action to install to
           LLVM_DIR: ${{ runner.temp }}/llvm
         run: |
           set -euo pipefail
           # Ensure compilation database exists
-          test -f build/compile_commands.json || {
-              echo "ERROR: build/compile_commands.json not found"
-              ls -la build || true
+          test -f ${{ env.BUILD_DIR }}/compile_commands.json || {
+              echo "ERROR: ${{ env.BUILD_DIR }}/compile_commands.json not found"
+              ls -la ${{ env.BUILD_DIR }} || true
               exit 1
           }
 
@@ -196,7 +203,7 @@ jobs:
           [ -n "$RTIDY" ] && echo "Using run-clang-tidy helper: $RTIDY"
 
           # Build file list from database (C files, exclude subprojects)
-          FILES="$(jq -r '.[].file' build/compile_commands.json | sort -u | grep '\.c$' | grep -v '/subprojects/' || true)"
+          FILES="$(jq -r '.[].file' ${{ env.BUILD_DIR }}/compile_commands.json | sort -u | grep '\.c$' | grep -v '/subprojects/' || true)"
           if [ -z "$FILES" ]; then
               echo "No source files to lint (after filtering)."
               exit 0
@@ -205,14 +212,14 @@ jobs:
           if [ -n "$RTIDY" ] && [ -f "$RTIDY" ]; then
               # Use run-clang-tidy.py (handles DB well and parallelism)
               python3 "$RTIDY" \
-                  -p build \
+                  -p ${{ env.BUILD_DIR }} \
                   -j "$(nproc)" \
                   -clang-tidy-binary "$CTIDY" \
                   -header-filter='^(?!.*\/subprojects\/).*' \
                   $FILES
           else
               # Fallback: invoke clang-tidy directly from DB directory
-              cd build
+              cd ${{ env.BUILD_DIR }}
               printf "%s\n" $FILES |
                   xargs -P"$(nproc)" -I{} "$CTIDY" \
                       -p . \
@@ -221,6 +228,7 @@ jobs:
           fi
 
       - name: Verify binaries before upload
+        if: ${{ matrix.upload_artifacts }}
         run: |
           echo "=== DIAGNOSTIC: Verifying binaries before artifact upload ==="
           echo "Current git commit: $(git rev-parse HEAD)"
@@ -228,23 +236,23 @@ jobs:
           echo ""
 
           echo "yanet-dataplane:"
-          if [ -f "build/dataplane/yanet-dataplane" ]; then
-              stat build/dataplane/yanet-dataplane
-              md5sum build/dataplane/yanet-dataplane
-              strings build/dataplane/yanet-dataplane | grep -E "yanet|version" | head -20 || true
+          if [ -f "${{ env.BUILD_DIR }}/dataplane/yanet-dataplane" ]; then
+              stat ${{ env.BUILD_DIR }}/dataplane/yanet-dataplane
+              md5sum ${{ env.BUILD_DIR }}/dataplane/yanet-dataplane
+              strings ${{ env.BUILD_DIR }}/dataplane/yanet-dataplane | grep -E "yanet|version" | head -20 || true
           else
-              echo "ERROR: build/dataplane/yanet-dataplane not found!"
+              echo "ERROR: ${{ env.BUILD_DIR }}/dataplane/yanet-dataplane not found!"
               exit 1
           fi
 
           echo ""
           echo "yanet-controlplane:"
-          if [ -f "build/controlplane/yanet-controlplane" ]; then
-              stat build/controlplane/yanet-controlplane
-              md5sum build/controlplane/yanet-controlplane
-              strings build/controlplane/yanet-controlplane | grep -E "yanet|version" | head -20 || true
+          if [ -f "${{ env.BUILD_DIR }}/controlplane/yanet-controlplane" ]; then
+              stat ${{ env.BUILD_DIR }}/controlplane/yanet-controlplane
+              md5sum ${{ env.BUILD_DIR }}/controlplane/yanet-controlplane
+              strings ${{ env.BUILD_DIR }}/controlplane/yanet-controlplane | grep -E "yanet|version" | head -20 || true
           else
-              echo "ERROR: build/controlplane/yanet-controlplane not found!"
+              echo "ERROR: ${{ env.BUILD_DIR }}/controlplane/yanet-controlplane not found!"
               exit 1
           fi
 
@@ -259,12 +267,13 @@ jobs:
           fi
 
       - name: Upload YANET binaries
+        if: ${{ matrix.upload_artifacts }}
         uses: actions/upload-artifact@v4
         with:
           name: yanet2-binaries
           path: |
-            build/dataplane/yanet-dataplane
-            build/controlplane/yanet-controlplane
+            ${{ env.BUILD_DIR }}/dataplane/yanet-dataplane
+            ${{ env.BUILD_DIR }}/controlplane/yanet-controlplane
             target/release/yanet-cli*
 
   functional-tests:
@@ -281,8 +290,8 @@ jobs:
       - name: Clean any pre-existing build artifacts
         run: |
           echo "=== Cleaning any cached build artifacts before downloading from build job ==="
-          rm -rf build/ target/ || true
-          echo "Cleaned build/ and target/ directories"
+          rm -rf build/ build-*/ target/ || true
+          echo "Cleaned build directories"
 
       - name: Set up Go
         uses: actions/setup-go@v5
