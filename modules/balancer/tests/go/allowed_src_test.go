@@ -87,13 +87,19 @@ var (
 func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 	return &balancerpb.BalancerConfig{
 		PacketHandler: &balancerpb.PacketHandlerConfig{
-			SourceAddressV4: &balancerpb.Addr{Bytes: allowedSrcBalancerSrcIPv4.AsSlice()},
-			SourceAddressV6: &balancerpb.Addr{Bytes: allowedSrcBalancerSrcIPv6.AsSlice()},
+			SourceAddressV4: &balancerpb.Addr{
+				Bytes: allowedSrcBalancerSrcIPv4.AsSlice(),
+			},
+			SourceAddressV6: &balancerpb.Addr{
+				Bytes: allowedSrcBalancerSrcIPv6.AsSlice(),
+			},
 			Vs: []*balancerpb.VirtualService{
 				// VS1: IPv4 TCP with allowed_src 10.0.1.0/24
 				{
 					Id: &balancerpb.VsIdentifier{
-						Addr:  &balancerpb.Addr{Bytes: allowedSrcVs1IP.AsSlice()},
+						Addr: &balancerpb.Addr{
+							Bytes: allowedSrcVs1IP.AsSlice(),
+						},
 						Port:  uint32(allowedSrcVs1Port),
 						Proto: balancerpb.TransportProto_TCP,
 					},
@@ -101,7 +107,8 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.1.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.1.0").
+									AsSlice(),
 							},
 							Size: 24,
 						},
@@ -116,7 +123,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 					Reals: []*balancerpb.Real{
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
-								Ip:   &balancerpb.Addr{Bytes: allowedSrcRealIPv4.AsSlice()},
+								Ip: &balancerpb.Addr{
+									Bytes: allowedSrcRealIPv4.AsSlice(),
+								},
 								Port: 0,
 							},
 							Weight: 1,
@@ -124,7 +133,8 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 								Bytes: netip.MustParseAddr("4.4.4.4").AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -133,7 +143,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 				// VS2: IPv4 UDP with allowed_src 10.0.2.0/24
 				{
 					Id: &balancerpb.VsIdentifier{
-						Addr:  &balancerpb.Addr{Bytes: allowedSrcVs2IP.AsSlice()},
+						Addr: &balancerpb.Addr{
+							Bytes: allowedSrcVs2IP.AsSlice(),
+						},
 						Port:  uint32(allowedSrcVs2Port),
 						Proto: balancerpb.TransportProto_UDP,
 					},
@@ -141,7 +153,8 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.2.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.2.0").
+									AsSlice(),
 							},
 							Size: 24,
 						},
@@ -156,7 +169,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 					Reals: []*balancerpb.Real{
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
-								Ip:   &balancerpb.Addr{Bytes: allowedSrcRealIPv4.AsSlice()},
+								Ip: &balancerpb.Addr{
+									Bytes: allowedSrcRealIPv4.AsSlice(),
+								},
 								Port: 0,
 							},
 							Weight: 1,
@@ -164,7 +179,8 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 								Bytes: netip.MustParseAddr("4.4.4.4").AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -173,7 +189,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 				// VS3: IPv6 TCP with allowed_src 2001:db8:1::/48
 				{
 					Id: &balancerpb.VsIdentifier{
-						Addr:  &balancerpb.Addr{Bytes: allowedSrcVs3IP.AsSlice()},
+						Addr: &balancerpb.Addr{
+							Bytes: allowedSrcVs3IP.AsSlice(),
+						},
 						Port:  uint32(allowedSrcVs3Port),
 						Proto: balancerpb.TransportProto_TCP,
 					},
@@ -181,7 +199,8 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8:1::").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8:1::").
+									AsSlice(),
 							},
 							Size: 48,
 						},
@@ -196,7 +215,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 					Reals: []*balancerpb.Real{
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
-								Ip:   &balancerpb.Addr{Bytes: allowedSrcRealIPv6.AsSlice()},
+								Ip: &balancerpb.Addr{
+									Bytes: allowedSrcRealIPv6.AsSlice(),
+								},
 								Port: 0,
 							},
 							Weight: 1,
@@ -204,7 +225,8 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 								Bytes: netip.MustParseAddr("fe80::4").AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").AsSlice(),
+								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").
+									AsSlice(),
 							},
 						},
 					},
@@ -213,7 +235,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 				// VS4: IPv6 UDP with allowed_src 2001:db8:2::/48
 				{
 					Id: &balancerpb.VsIdentifier{
-						Addr:  &balancerpb.Addr{Bytes: allowedSrcVs4IP.AsSlice()},
+						Addr: &balancerpb.Addr{
+							Bytes: allowedSrcVs4IP.AsSlice(),
+						},
 						Port:  uint32(allowedSrcVs4Port),
 						Proto: balancerpb.TransportProto_UDP,
 					},
@@ -221,7 +245,8 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8:2::").AsSlice(),
+								Bytes: netip.MustParseAddr("2001:db8:2::").
+									AsSlice(),
 							},
 							Size: 48,
 						},
@@ -236,7 +261,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 					Reals: []*balancerpb.Real{
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
-								Ip:   &balancerpb.Addr{Bytes: allowedSrcRealIPv6.AsSlice()},
+								Ip: &balancerpb.Addr{
+									Bytes: allowedSrcRealIPv6.AsSlice(),
+								},
 								Port: 0,
 							},
 							Weight: 1,
@@ -244,7 +271,8 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 								Bytes: netip.MustParseAddr("fe80::4").AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").AsSlice(),
+								Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff").
+									AsSlice(),
 							},
 						},
 					},
@@ -253,7 +281,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 				// VS5: IPv4 TCP with single large CIDR (effectively allow all IPv4)
 				{
 					Id: &balancerpb.VsIdentifier{
-						Addr:  &balancerpb.Addr{Bytes: allowedSrcVs5IP.AsSlice()},
+						Addr: &balancerpb.Addr{
+							Bytes: allowedSrcVs5IP.AsSlice(),
+						},
 						Port:  uint32(allowedSrcVs5Port),
 						Proto: balancerpb.TransportProto_TCP,
 					},
@@ -267,7 +297,8 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 						},
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("128.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("128.0.0.0").
+									AsSlice(),
 							},
 							Size: 1, // 128.0.0.0/1 covers 128.0.0.0-255.255.255.255
 						},
@@ -282,7 +313,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 					Reals: []*balancerpb.Real{
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
-								Ip:   &balancerpb.Addr{Bytes: allowedSrcRealIPv4.AsSlice()},
+								Ip: &balancerpb.Addr{
+									Bytes: allowedSrcRealIPv4.AsSlice(),
+								},
 								Port: 0,
 							},
 							Weight: 1,
@@ -290,7 +323,8 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 								Bytes: netip.MustParseAddr("4.4.4.4").AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -299,7 +333,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 				// VS6: IPv4 TCP with 0.0.0.0/0 allowed_src (allow all)
 				{
 					Id: &balancerpb.VsIdentifier{
-						Addr:  &balancerpb.Addr{Bytes: allowedSrcVs6IP.AsSlice()},
+						Addr: &balancerpb.Addr{
+							Bytes: allowedSrcVs6IP.AsSlice(),
+						},
 						Port:  uint32(allowedSrcVs6Port),
 						Proto: balancerpb.TransportProto_TCP,
 					},
@@ -322,7 +358,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 					Reals: []*balancerpb.Real{
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
-								Ip:   &balancerpb.Addr{Bytes: allowedSrcRealIPv4.AsSlice()},
+								Ip: &balancerpb.Addr{
+									Bytes: allowedSrcRealIPv4.AsSlice(),
+								},
 								Port: 0,
 							},
 							Weight: 1,
@@ -330,7 +368,8 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 								Bytes: netip.MustParseAddr("4.4.4.4").AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -468,7 +507,12 @@ func testIPv4TCPAllowed(
 	// Get initial stats
 	initialStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	initialVsStats := findVsStats(initialStats, allowedSrcVs1IP, allowedSrcVs1Port, balancerpb.TransportProto_TCP)
+	initialVsStats := findVsStats(
+		initialStats,
+		allowedSrcVs1IP,
+		allowedSrcVs1Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, initialVsStats, "VS1 stats should exist")
 
 	// Send packet from allowed source (10.0.1.50)
@@ -495,7 +539,12 @@ func testIPv4TCPAllowed(
 	// Get final stats
 	finalStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	finalVsStats := findVsStats(finalStats, allowedSrcVs1IP, allowedSrcVs1Port, balancerpb.TransportProto_TCP)
+	finalVsStats := findVsStats(
+		finalStats,
+		allowedSrcVs1IP,
+		allowedSrcVs1Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, finalVsStats, "VS1 stats should exist")
 
 	// Verify counters
@@ -532,7 +581,12 @@ func testIPv4TCPBlocked(
 	// Get initial stats
 	initialStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	initialVsStats := findVsStats(initialStats, allowedSrcVs1IP, allowedSrcVs1Port, balancerpb.TransportProto_TCP)
+	initialVsStats := findVsStats(
+		initialStats,
+		allowedSrcVs1IP,
+		allowedSrcVs1Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, initialVsStats, "VS1 stats should exist")
 
 	// Send packet from non-allowed source (10.0.99.50)
@@ -556,7 +610,12 @@ func testIPv4TCPBlocked(
 	// Get final stats
 	finalStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	finalVsStats := findVsStats(finalStats, allowedSrcVs1IP, allowedSrcVs1Port, balancerpb.TransportProto_TCP)
+	finalVsStats := findVsStats(
+		finalStats,
+		allowedSrcVs1IP,
+		allowedSrcVs1Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, finalVsStats, "VS1 stats should exist")
 
 	// Verify counters
@@ -588,7 +647,12 @@ func testIPv4UDPAllowed(
 	// Get initial stats
 	initialStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	initialVsStats := findVsStats(initialStats, allowedSrcVs2IP, allowedSrcVs2Port, balancerpb.TransportProto_UDP)
+	initialVsStats := findVsStats(
+		initialStats,
+		allowedSrcVs2IP,
+		allowedSrcVs2Port,
+		balancerpb.TransportProto_UDP,
+	)
 	require.NotNil(t, initialVsStats, "VS2 stats should exist")
 
 	// Send packet from allowed source (10.0.2.50)
@@ -614,7 +678,12 @@ func testIPv4UDPAllowed(
 	// Get final stats
 	finalStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	finalVsStats := findVsStats(finalStats, allowedSrcVs2IP, allowedSrcVs2Port, balancerpb.TransportProto_UDP)
+	finalVsStats := findVsStats(
+		finalStats,
+		allowedSrcVs2IP,
+		allowedSrcVs2Port,
+		balancerpb.TransportProto_UDP,
+	)
 	require.NotNil(t, finalVsStats, "VS2 stats should exist")
 
 	// Verify counters
@@ -646,7 +715,12 @@ func testIPv4UDPBlocked(
 	// Get initial stats
 	initialStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	initialVsStats := findVsStats(initialStats, allowedSrcVs2IP, allowedSrcVs2Port, balancerpb.TransportProto_UDP)
+	initialVsStats := findVsStats(
+		initialStats,
+		allowedSrcVs2IP,
+		allowedSrcVs2Port,
+		balancerpb.TransportProto_UDP,
+	)
 	require.NotNil(t, initialVsStats, "VS2 stats should exist")
 
 	// Send packet from non-allowed source (10.0.99.50)
@@ -669,7 +743,12 @@ func testIPv4UDPBlocked(
 	// Get stats after the blocked packet
 	stats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	vsStats := findVsStats(stats, allowedSrcVs2IP, allowedSrcVs2Port, balancerpb.TransportProto_UDP)
+	vsStats := findVsStats(
+		stats,
+		allowedSrcVs2IP,
+		allowedSrcVs2Port,
+		balancerpb.TransportProto_UDP,
+	)
 	require.NotNil(t, vsStats, "VS2 stats should exist")
 
 	// Verify that packet_src_not_allowed counter increased
@@ -691,7 +770,12 @@ func testIPv6TCPAllowed(
 	// Get initial stats
 	initialStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	initialVsStats := findVsStats(initialStats, allowedSrcVs3IP, allowedSrcVs3Port, balancerpb.TransportProto_TCP)
+	initialVsStats := findVsStats(
+		initialStats,
+		allowedSrcVs3IP,
+		allowedSrcVs3Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, initialVsStats, "VS3 stats should exist")
 
 	// Send packet from allowed source (2001:db8:1::50)
@@ -718,7 +802,12 @@ func testIPv6TCPAllowed(
 	// Get final stats
 	finalStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	finalVsStats := findVsStats(finalStats, allowedSrcVs3IP, allowedSrcVs3Port, balancerpb.TransportProto_TCP)
+	finalVsStats := findVsStats(
+		finalStats,
+		allowedSrcVs3IP,
+		allowedSrcVs3Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, finalVsStats, "VS3 stats should exist")
 
 	// Verify counters
@@ -750,7 +839,12 @@ func testIPv6TCPBlocked(
 	// Get initial stats
 	initialStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	initialVsStats := findVsStats(initialStats, allowedSrcVs3IP, allowedSrcVs3Port, balancerpb.TransportProto_TCP)
+	initialVsStats := findVsStats(
+		initialStats,
+		allowedSrcVs3IP,
+		allowedSrcVs3Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, initialVsStats, "VS3 stats should exist")
 
 	// Send packet from non-allowed source (2001:db8:99::50)
@@ -774,7 +868,12 @@ func testIPv6TCPBlocked(
 	// Get stats after the blocked packet
 	stats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	vsStats := findVsStats(stats, allowedSrcVs3IP, allowedSrcVs3Port, balancerpb.TransportProto_TCP)
+	vsStats := findVsStats(
+		stats,
+		allowedSrcVs3IP,
+		allowedSrcVs3Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, vsStats, "VS3 stats should exist")
 
 	// Verify that packet_src_not_allowed counter increased
@@ -796,7 +895,12 @@ func testIPv6UDPAllowed(
 	// Get initial stats
 	initialStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	initialVsStats := findVsStats(initialStats, allowedSrcVs4IP, allowedSrcVs4Port, balancerpb.TransportProto_UDP)
+	initialVsStats := findVsStats(
+		initialStats,
+		allowedSrcVs4IP,
+		allowedSrcVs4Port,
+		balancerpb.TransportProto_UDP,
+	)
 	require.NotNil(t, initialVsStats, "VS4 stats should exist")
 
 	// Send packet from allowed source (2001:db8:2::50)
@@ -822,7 +926,12 @@ func testIPv6UDPAllowed(
 	// Get final stats
 	finalStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	finalVsStats := findVsStats(finalStats, allowedSrcVs4IP, allowedSrcVs4Port, balancerpb.TransportProto_UDP)
+	finalVsStats := findVsStats(
+		finalStats,
+		allowedSrcVs4IP,
+		allowedSrcVs4Port,
+		balancerpb.TransportProto_UDP,
+	)
 	require.NotNil(t, finalVsStats, "VS4 stats should exist")
 
 	// Verify counters
@@ -854,7 +963,12 @@ func testIPv6UDPBlocked(
 	// Get initial stats
 	initialStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	initialVsStats := findVsStats(initialStats, allowedSrcVs4IP, allowedSrcVs4Port, balancerpb.TransportProto_UDP)
+	initialVsStats := findVsStats(
+		initialStats,
+		allowedSrcVs4IP,
+		allowedSrcVs4Port,
+		balancerpb.TransportProto_UDP,
+	)
 	require.NotNil(t, initialVsStats, "VS4 stats should exist")
 
 	// Send packet from non-allowed source (2001:db8:99::50)
@@ -877,7 +991,12 @@ func testIPv6UDPBlocked(
 	// Get stats after the blocked packet
 	stats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	vsStats := findVsStats(stats, allowedSrcVs4IP, allowedSrcVs4Port, balancerpb.TransportProto_UDP)
+	vsStats := findVsStats(
+		stats,
+		allowedSrcVs4IP,
+		allowedSrcVs4Port,
+		balancerpb.TransportProto_UDP,
+	)
 	require.NotNil(t, vsStats, "VS4 stats should exist")
 
 	// Verify that packet_src_not_allowed counter increased
@@ -899,7 +1018,12 @@ func testEmptyAllowedSrcAllowsAll(
 	// Get initial stats
 	initialStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	initialVsStats := findVsStats(initialStats, allowedSrcVs5IP, allowedSrcVs5Port, balancerpb.TransportProto_TCP)
+	initialVsStats := findVsStats(
+		initialStats,
+		allowedSrcVs5IP,
+		allowedSrcVs5Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, initialVsStats, "VS5 stats should exist")
 
 	// Send packets from various sources - all should be allowed
@@ -925,18 +1049,35 @@ func testEmptyAllowedSrcAllowsAll(
 
 		result, err := ts.Mock.HandlePackets(packet)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(result.Output), "expected 1 output packet for source %s", srcIP)
-		require.Empty(t, result.Drop, "expected no dropped packets for source %s", srcIP)
+		require.Equal(
+			t,
+			1,
+			len(result.Output),
+			"expected 1 output packet for source %s",
+			srcIP,
+		)
+		require.Empty(
+			t,
+			result.Drop,
+			"expected no dropped packets for source %s",
+			srcIP,
+		)
 	}
 
 	// Get final stats
 	finalStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	finalVsStats := findVsStats(finalStats, allowedSrcVs5IP, allowedSrcVs5Port, balancerpb.TransportProto_TCP)
+	finalVsStats := findVsStats(
+		finalStats,
+		allowedSrcVs5IP,
+		allowedSrcVs5Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, finalVsStats, "VS5 stats should exist")
 
 	// Verify counters - no packets should be blocked
-	assert.Equal(t,
+	assert.Equal(
+		t,
 		initialVsStats.PacketSrcNotAllowed,
 		finalVsStats.PacketSrcNotAllowed,
 		"packet_src_not_allowed should not increase when allowed_src covers all IPs",
@@ -964,7 +1105,12 @@ func testZeroCIDRAllowsAll(
 	// Get initial stats
 	initialStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	initialVsStats := findVsStats(initialStats, allowedSrcVs6IP, allowedSrcVs6Port, balancerpb.TransportProto_TCP)
+	initialVsStats := findVsStats(
+		initialStats,
+		allowedSrcVs6IP,
+		allowedSrcVs6Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, initialVsStats, "VS6 stats should exist")
 
 	// Send packets from various sources - all should be allowed
@@ -991,18 +1137,35 @@ func testZeroCIDRAllowsAll(
 
 		result, err := ts.Mock.HandlePackets(packet)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(result.Output), "expected 1 output packet for source %s", srcIP)
-		require.Empty(t, result.Drop, "expected no dropped packets for source %s", srcIP)
+		require.Equal(
+			t,
+			1,
+			len(result.Output),
+			"expected 1 output packet for source %s",
+			srcIP,
+		)
+		require.Empty(
+			t,
+			result.Drop,
+			"expected no dropped packets for source %s",
+			srcIP,
+		)
 	}
 
 	// Get final stats
 	finalStats, err := ts.Balancer.Stats(statsRef)
 	require.NoError(t, err)
-	finalVsStats := findVsStats(finalStats, allowedSrcVs6IP, allowedSrcVs6Port, balancerpb.TransportProto_TCP)
+	finalVsStats := findVsStats(
+		finalStats,
+		allowedSrcVs6IP,
+		allowedSrcVs6Port,
+		balancerpb.TransportProto_TCP,
+	)
 	require.NotNil(t, finalVsStats, "VS6 stats should exist")
 
 	// Verify counters - no packets should be blocked
-	assert.Equal(t,
+	assert.Equal(
+		t,
 		initialVsStats.PacketSrcNotAllowed,
 		finalVsStats.PacketSrcNotAllowed,
 		"packet_src_not_allowed should not increase when allowed_src is 0.0.0.0/0",

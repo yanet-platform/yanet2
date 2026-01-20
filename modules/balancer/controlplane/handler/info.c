@@ -33,12 +33,11 @@ fill_sessions_callback(
 		struct named_session_info *new_info =
 			realloc(ctx->sessions,
 				ctx->capacity *
-					sizeof(struct named_session_info *));
-		if (new_info != ctx->sessions) {
-			free(ctx->sessions);
-			ctx->sessions = new_info;
+					sizeof(struct named_session_info));
+		if (new_info == NULL) {
+			return -1;
 		}
-		return 0;
+		ctx->sessions = new_info;
 	}
 
 	// real not present in current packet handler config
@@ -73,7 +72,11 @@ packet_handler_sessions_info(
 ) {
 	struct balancer_state *state = ADDR_OF(&handler->state);
 	struct fill_sessions_info_ctx ctx = {
-		.state = state, .sessions = NULL, .size = 0, .capacity = 0
+		.state = state,
+		.sessions = NULL,
+		.size = 0,
+		.capacity = 0,
+		.handler = handler,
 	};
 	int res = session_table_iter(
 		&state->session_table, now, fill_sessions_callback, &ctx
