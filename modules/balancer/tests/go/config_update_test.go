@@ -30,6 +30,13 @@ package balancer_test
 // - Stats(): VS2 cumulative (not reset), VS3 new, NO VS1
 // - Info(): Only VS2 and VS3, NO VS1
 // - Sessions(): Only VS2 and VS3 sessions, NO VS1 or deleted reals
+//
+// # State Persistence with New Agent
+// - Creating new BalancerAgent attached to same shared memory
+// - Verifying existing BalancerManager is discovered and accessible
+// - Config(), Graph(), Stats(), Info(), Sessions() match previous outputs
+// - Sending new packets through new agent (10 to VS2, 10 to VS3)
+// - Verifying Stats, Info, Sessions update correctly with new traffic
 
 import (
 	"net/netip"
@@ -39,10 +46,13 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
 	"github.com/yanet-platform/yanet2/modules/balancer/tests/go/utils"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -364,6 +374,11 @@ func TestConfigUpdateAndStats(t *testing.T) {
 	// Phase 5: Verify APIs (After Update)
 	t.Run("Phase5_VerifyUpdatedAPIs", func(t *testing.T) {
 		testCfgPhase5VerifyUpdatedAPIs(t, ts)
+	})
+
+	// Phase 6: Verify State with New Agent
+	t.Run("Phase6_StateWithNewAgent", func(t *testing.T) {
+		testCfgPhase6StateWithNewAgent(t, ts)
 	})
 }
 
@@ -1260,5 +1275,416 @@ func testCfgPhase5VerifyUpdatedAPIs(t *testing.T, ts *utils.TestSetup) {
 		// VS2: 10 old (to Real6) + 15 new = 25
 		assert.Equal(t, 25, vs2Sessions, "VS2 sessions")
 		assert.Equal(t, 15, vs3Sessions, "VS3 sessions")
+	})
+}
+
+// testCfgPhase6StateWithNewAgent tests state persistence by creating a new balancer agent
+// that attaches to the same shared memory and verifies all API outputs match Phase 5
+func testCfgPhase6StateWithNewAgent(t *testing.T, ts *utils.TestSetup) {
+	t.Helper()
+
+	// Store Phase 5 outputs for comparison
+	t.Run("StorePhase5Outputs", func(t *testing.T) {
+		// These will be captured in the parent scope for comparison
+		t.Log("Phase 5 outputs will be compared with new agent outputs")
+	})
+
+	// Get Phase 5 API outputs before creating new agent
+	statsRef := &balancerpb.PacketHandlerRef{
+		Device:   &utils.DeviceName,
+		Pipeline: &utils.PipelineName,
+		Function: &utils.FunctionName,
+		Chain:    &utils.ChainName,
+	}
+
+	phase5Config := ts.Balancer.Config()
+	phase5Graph := ts.Balancer.Graph()
+	phase5Stats, err := ts.Balancer.Stats(statsRef)
+	require.NoError(t, err, "failed to get Phase 5 stats")
+	phase5Info, err := ts.Balancer.Info(ts.Mock.CurrentTime())
+	require.NoError(t, err, "failed to get Phase 5 info")
+	phase5Sessions, err := ts.Balancer.Sessions(ts.Mock.CurrentTime())
+	require.NoError(t, err, "failed to get Phase 5 sessions")
+
+	// Create new balancer agent and attach to existing manager
+	t.Run("CreateNewAgentAndAttach", func(t *testing.T) {
+		// Create new BalancerAgent using same shared memory
+		logLevel := zapcore.InfoLevel
+		sugaredLogger, _, _ := logging.Init(&logging.Config{
+			Level: logLevel,
+		})
+
+		agentMemory := 16 * datasize.MB
+		newAgent, err := balancer.NewBalancerAgent(
+			ts.Mock.SharedMemory(), // Same shared memory
+			agentMemory,
+			sugaredLogger,
+		)
+		require.NoError(t, err, "failed to create new balancer agent")
+
+		// Attach to existing BalancerManager
+		newBalancer, err := newAgent.BalancerManager(utils.BalancerName)
+		require.NoError(t, err, "failed to attach to existing balancer manager")
+		require.NotNil(t, newBalancer, "balancer manager should not be nil")
+
+		// Verify Config matches Phase 5
+		t.Run("VerifyConfigMatches", func(t *testing.T) {
+			newConfig := newBalancer.Config()
+			require.NotNil(t, newConfig)
+			require.NotNil(t, newConfig.PacketHandler)
+
+			// Verify same number of virtual services
+			assert.Equal(
+				t,
+				len(phase5Config.PacketHandler.Vs),
+				len(newConfig.PacketHandler.Vs),
+				"should have same number of virtual services",
+			)
+
+			// Verify VS2 and VS3 are present
+			assert.Equal(t, 2, len(newConfig.PacketHandler.Vs), "should have 2 virtual services")
+
+			// Verify each VS has 3 reals
+			for _, vs := range newConfig.PacketHandler.Vs {
+				assert.Equal(t, 3, len(vs.Reals), "each VS should have 3 reals")
+			}
+		})
+
+		// Verify Graph matches Phase 5
+		t.Run("VerifyGraphMatches", func(t *testing.T) {
+			newGraph := newBalancer.Graph()
+			require.NotNil(t, newGraph)
+
+			// Verify same number of virtual services
+			assert.Equal(
+				t,
+				len(phase5Graph.VirtualServices),
+				len(newGraph.VirtualServices),
+				"should have same number of virtual services",
+			)
+
+			// Verify all reals are enabled (as in Phase 5)
+			for _, vs := range newGraph.VirtualServices {
+				for _, real := range vs.Reals {
+					assert.True(t, real.Enabled, "all reals should be enabled")
+					assert.Equal(
+						t,
+						uint32(1),
+						real.Weight,
+						"all reals should have weight 1",
+					)
+				}
+			}
+		})
+
+		// Verify Stats match Phase 5
+		t.Run("VerifyStatsMatch", func(t *testing.T) {
+			newStats, err := newBalancer.Stats(statsRef)
+			require.NoError(t, err)
+			require.NotNil(t, newStats)
+
+			// Verify same number of VS stats
+			assert.Equal(
+				t,
+				len(phase5Stats.Vs),
+				len(newStats.Vs),
+				"should have same number of VS stats",
+			)
+
+			// Find VS2 stats
+			var vs2Stats *balancerpb.NamedVsStats
+			for _, vs := range newStats.Vs {
+				addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+				if addr == cfgVs2IP {
+					vs2Stats = vs
+					break
+				}
+			}
+			require.NotNil(t, vs2Stats, "VS2 stats not found")
+
+			// Verify VS2 stats: 35 packets (cumulative from Phase 5)
+			assert.Equal(
+				t,
+				uint64(35),
+				vs2Stats.Stats.IncomingPackets,
+				"VS2 incoming packets should match Phase 5",
+			)
+			assert.Equal(
+				t,
+				uint64(35),
+				vs2Stats.Stats.OutgoingPackets,
+				"VS2 outgoing packets should match Phase 5",
+			)
+
+			// Find VS3 stats
+			var vs3Stats *balancerpb.NamedVsStats
+			for _, vs := range newStats.Vs {
+				addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+				if addr == cfgVs3IP {
+					vs3Stats = vs
+					break
+				}
+			}
+			require.NotNil(t, vs3Stats, "VS3 stats not found")
+
+			// Verify VS3 stats: 15 packets
+			assert.Equal(
+				t,
+				uint64(15),
+				vs3Stats.Stats.IncomingPackets,
+				"VS3 incoming packets should match Phase 5",
+			)
+			assert.Equal(
+				t,
+				uint64(15),
+				vs3Stats.Stats.OutgoingPackets,
+				"VS3 outgoing packets should match Phase 5",
+			)
+		})
+
+		// Verify Info matches Phase 5
+		t.Run("VerifyInfoMatches", func(t *testing.T) {
+			newInfo, err := newBalancer.Info(ts.Mock.CurrentTime())
+			require.NoError(t, err)
+			require.NotNil(t, newInfo)
+
+			// Verify total active sessions: 40 (from Phase 5)
+			assert.Equal(
+				t,
+				phase5Info.ActiveSessions,
+				newInfo.ActiveSessions,
+				"total active sessions should match Phase 5",
+			)
+			assert.Equal(
+				t,
+				uint64(40),
+				newInfo.ActiveSessions,
+				"total active sessions should be 40",
+			)
+
+			// Find VS2 info
+			var vs2Info *balancerpb.VsInfo
+			for _, vs := range newInfo.Vs {
+				addr, _ := netip.AddrFromSlice(vs.Id.Addr.Bytes)
+				if addr == cfgVs2IP {
+					vs2Info = vs
+					break
+				}
+			}
+			require.NotNil(t, vs2Info, "VS2 info not found")
+			assert.Equal(
+				t,
+				uint64(25),
+				vs2Info.ActiveSessions,
+				"VS2 active sessions should match Phase 5",
+			)
+
+			// Find VS3 info
+			var vs3Info *balancerpb.VsInfo
+			for _, vs := range newInfo.Vs {
+				addr, _ := netip.AddrFromSlice(vs.Id.Addr.Bytes)
+				if addr == cfgVs3IP {
+					vs3Info = vs
+					break
+				}
+			}
+			require.NotNil(t, vs3Info, "VS3 info not found")
+			assert.Equal(
+				t,
+				uint64(15),
+				vs3Info.ActiveSessions,
+				"VS3 active sessions should match Phase 5",
+			)
+		})
+
+		// Verify Sessions match Phase 5
+		t.Run("VerifySessionsMatch", func(t *testing.T) {
+			newSessions, err := newBalancer.Sessions(ts.Mock.CurrentTime())
+			require.NoError(t, err, "failed to get sessions")
+			require.NotNil(t, newSessions)
+
+			// Verify same number of sessions
+			assert.Equal(
+				t,
+				len(phase5Sessions),
+				len(newSessions),
+				"should have same number of sessions as Phase 5",
+			)
+			assert.Equal(t, 40, len(newSessions), "should have 40 sessions")
+
+			// Count sessions per VS
+			vs2Sessions := 0
+			vs3Sessions := 0
+			for _, session := range newSessions {
+				vsAddr, _ := netip.AddrFromSlice(session.VsId.Addr.Bytes)
+				switch vsAddr {
+				case cfgVs2IP:
+					vs2Sessions++
+				case cfgVs3IP:
+					vs3Sessions++
+				}
+			}
+
+			assert.Equal(t, 25, vs2Sessions, "VS2 should have 25 sessions")
+			assert.Equal(t, 15, vs3Sessions, "VS3 should have 15 sessions")
+		})
+
+		// Send new packets through the new balancer
+		t.Run("SendNewPackets", func(t *testing.T) {
+			// Send 10 packets to VS2 (new client IPs starting at 600)
+			t.Log("Sending 10 packets to VS2 through new balancer")
+			vs2Packets := sendCfgPacketsToVS(t, ts, cfgVs2IP, cfgVs2Port, 10, 600)
+
+			// Send 10 packets to VS3 (new client IPs starting at 700)
+			t.Log("Sending 10 packets to VS3 through new balancer")
+			vs3Packets := sendCfgPacketsToVS(t, ts, cfgVs3IP, cfgVs3Port, 10, 700)
+
+			// Verify distribution (ROUND_ROBIN: ~3-4 packets per real)
+			t.Log("Verifying packet distribution for VS2")
+			verifyCfgPacketDistribution(t, vs2Packets, map[netip.Addr]int{
+				cfgReal6IP: 4,
+				cfgReal7IP: 3,
+				cfgReal8IP: 3,
+			})
+
+			t.Log("Verifying packet distribution for VS3")
+			verifyCfgPacketDistribution(t, vs3Packets, map[netip.Addr]int{
+				cfgReal9IP:  4,
+				cfgReal10IP: 3,
+				cfgReal11IP: 3,
+			})
+		})
+
+		// Verify Stats updated correctly
+		t.Run("VerifyStatsUpdated", func(t *testing.T) {
+			newStats, err := newBalancer.Stats(statsRef)
+			require.NoError(t, err)
+			require.NotNil(t, newStats)
+
+			// Find VS2 stats
+			var vs2Stats *balancerpb.NamedVsStats
+			for _, vs := range newStats.Vs {
+				addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+				if addr == cfgVs2IP {
+					vs2Stats = vs
+					break
+				}
+			}
+			require.NotNil(t, vs2Stats, "VS2 stats not found")
+
+			// Verify VS2 stats: 45 packets (35 from Phase 5 + 10 new)
+			assert.Equal(
+				t,
+				uint64(45),
+				vs2Stats.Stats.IncomingPackets,
+				"VS2 incoming packets should be 45 (35+10)",
+			)
+			assert.Equal(
+				t,
+				uint64(45),
+				vs2Stats.Stats.OutgoingPackets,
+				"VS2 outgoing packets should be 45 (35+10)",
+			)
+
+			// Find VS3 stats
+			var vs3Stats *balancerpb.NamedVsStats
+			for _, vs := range newStats.Vs {
+				addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+				if addr == cfgVs3IP {
+					vs3Stats = vs
+					break
+				}
+			}
+			require.NotNil(t, vs3Stats, "VS3 stats not found")
+
+			// Verify VS3 stats: 25 packets (15 from Phase 5 + 10 new)
+			assert.Equal(
+				t,
+				uint64(25),
+				vs3Stats.Stats.IncomingPackets,
+				"VS3 incoming packets should be 25 (15+10)",
+			)
+			assert.Equal(
+				t,
+				uint64(25),
+				vs3Stats.Stats.OutgoingPackets,
+				"VS3 outgoing packets should be 25 (15+10)",
+			)
+		})
+
+		// Verify Info updated correctly
+		t.Run("VerifyInfoUpdated", func(t *testing.T) {
+			newInfo, err := newBalancer.Info(ts.Mock.CurrentTime())
+			require.NoError(t, err)
+			require.NotNil(t, newInfo)
+
+			// Verify total active sessions: 60 (40 from Phase 5 + 20 new)
+			assert.Equal(
+				t,
+				uint64(60),
+				newInfo.ActiveSessions,
+				"total active sessions should be 60 (40+20)",
+			)
+
+			// Find VS2 info
+			var vs2Info *balancerpb.VsInfo
+			for _, vs := range newInfo.Vs {
+				addr, _ := netip.AddrFromSlice(vs.Id.Addr.Bytes)
+				if addr == cfgVs2IP {
+					vs2Info = vs
+					break
+				}
+			}
+			require.NotNil(t, vs2Info, "VS2 info not found")
+			assert.Equal(
+				t,
+				uint64(35),
+				vs2Info.ActiveSessions,
+				"VS2 active sessions should be 35 (25+10)",
+			)
+
+			// Find VS3 info
+			var vs3Info *balancerpb.VsInfo
+			for _, vs := range newInfo.Vs {
+				addr, _ := netip.AddrFromSlice(vs.Id.Addr.Bytes)
+				if addr == cfgVs3IP {
+					vs3Info = vs
+					break
+				}
+			}
+			require.NotNil(t, vs3Info, "VS3 info not found")
+			assert.Equal(
+				t,
+				uint64(25),
+				vs3Info.ActiveSessions,
+				"VS3 active sessions should be 25 (15+10)",
+			)
+		})
+
+		// Verify Sessions updated correctly
+		t.Run("VerifySessionsUpdated", func(t *testing.T) {
+			newSessions, err := newBalancer.Sessions(ts.Mock.CurrentTime())
+			require.NoError(t, err, "failed to get sessions")
+			require.NotNil(t, newSessions)
+
+			// Verify total sessions: 60 (40 from Phase 5 + 20 new)
+			assert.Equal(t, 60, len(newSessions), "should have 60 total sessions (40+20)")
+
+			// Count sessions per VS
+			vs2Sessions := 0
+			vs3Sessions := 0
+			for _, session := range newSessions {
+				vsAddr, _ := netip.AddrFromSlice(session.VsId.Addr.Bytes)
+				switch vsAddr {
+				case cfgVs2IP:
+					vs2Sessions++
+				case cfgVs3IP:
+					vs3Sessions++
+				}
+			}
+
+			assert.Equal(t, 35, vs2Sessions, "VS2 should have 35 sessions (25+10)")
+			assert.Equal(t, 25, vs3Sessions, "VS3 should have 25 sessions (15+10)")
+		})
 	})
 }
