@@ -10,7 +10,7 @@ typedef ttlmap_lock_t session_lock_t;
  */
 struct session_id {
 	struct net_addr client_ip; // Client source IP (IPv4/IPv6)
-	uint16_t client_port;	   // Client source port (host byte order)
+	uint16_t client_port;	   // Client source port (network byte order)
 	uint32_t vs_id;		   // Target virtual service
 };
 

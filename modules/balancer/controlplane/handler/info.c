@@ -10,6 +10,7 @@
 #include "vs.h"
 
 #include <assert.h>
+#include <netinet/in.h>
 #include <stdlib.h>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -53,7 +54,7 @@ fill_sessions_callback(
 		balancer_state_get_real_by_idx(ctx->state, state->real_id)
 			->identifier;
 	session_info->identifier.client_ip = id->client_ip;
-	session_info->identifier.client_port = id->client_port;
+	session_info->identifier.client_port = ntohs(id->client_port);
 
 	// fill info
 	session_info->info = (struct session_info

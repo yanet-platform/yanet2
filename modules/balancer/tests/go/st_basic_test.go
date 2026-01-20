@@ -1,0 +1,1029 @@
+package balancer_test
+
+import (
+	"math/rand"
+	"net/netip"
+	"testing"
+	"time"
+
+	"github.com/c2h5oh/datasize"
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/common/go/xpacket"
+	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
+	"github.com/yanet-platform/yanet2/modules/balancer/tests/go/utils"
+	"google.golang.org/protobuf/types/known/durationpb"
+)
+
+// sessionKey represents a unique session identifier
+type sessionKey struct {
+	ip   netip.Addr
+	port uint16
+}
+
+// checkActiveSessions verifies active sessions match expected sessions
+func checkActiveSessions(
+	t *testing.T,
+	ts *utils.TestSetup,
+	currentTime time.Time,
+	expectedSessions []sessionKey,
+	vsIp netip.Addr,
+	vsPort uint16,
+	realAddr netip.Addr,
+) {
+	t.Helper()
+
+	expectedCount := uint64(len(expectedSessions))
+
+	// Get sessions info
+	sessions, err := ts.Balancer.Sessions(currentTime)
+	require.NoError(t, err)
+	assert.Equal(
+		t,
+		int(expectedCount),
+		len(sessions),
+		"sessions list should have %d entries",
+		expectedCount,
+	)
+
+	// Create a map of expected sessions for validation
+	expectedSessionsMap := make(map[sessionKey]bool)
+	for _, session := range expectedSessions {
+		expectedSessionsMap[session] = true
+	}
+
+	// Verify each session has correct properties
+	for i, session := range sessions {
+		// Verify VS identifier
+		vsAddr, _ := netip.AddrFromSlice(session.RealId.Vs.Addr.Bytes)
+		assert.Equal(
+			t,
+			vsIp,
+			vsAddr,
+			"session %d: VS IP should match",
+			i,
+		)
+		assert.Equal(
+			t,
+			uint32(vsPort),
+			session.RealId.Vs.Port,
+			"session %d: VS port should match",
+			i,
+		)
+
+		// Verify Real identifier
+		realIP, _ := netip.AddrFromSlice(session.RealId.Real.Ip.Bytes)
+		assert.Equal(
+			t,
+			realAddr,
+			realIP,
+			"session %d: Real IP should match",
+			i,
+		)
+
+		// Verify client IP and port match one of our expected sessions
+		clientAddr, _ := netip.AddrFromSlice(session.ClientAddr.Bytes)
+		clientKey := sessionKey{
+			ip:   clientAddr,
+			port: uint16(session.ClientPort),
+		}
+		assert.True(
+			t,
+			expectedSessionsMap[clientKey],
+			"session %d: client %v:%d should be in expected sessions",
+			i,
+			clientAddr,
+			session.ClientPort,
+		)
+
+		// Delete session to not match same session twice.
+		// In this way, we check sessions are unique
+		delete(expectedSessionsMap, clientKey)
+	}
+
+	assert.Empty(
+		t,
+		expectedSessionsMap,
+		"%d expected sessions not found",
+		len(expectedSessionsMap),
+	)
+
+	// Get info to verify VS and Real active sessions
+	info, err := ts.Balancer.Info(currentTime)
+	require.NoError(t, err)
+
+	// Verify module active sessions
+	assert.Equal(
+		t,
+		expectedCount,
+		info.ActiveSessions,
+		"module should have %d active sessions",
+		expectedCount,
+	)
+
+	// Verify VS active sessions
+	require.Equal(t, 1, len(info.Vs), "should have exactly one VS")
+	assert.Equal(
+		t,
+		expectedCount,
+		info.Vs[0].ActiveSessions,
+		"VS should have %d active sessions",
+		expectedCount,
+	)
+
+	// Verify Real active sessions
+	require.Equal(t, 1, len(info.Vs[0].Reals), "should have exactly one Real")
+	assert.Equal(
+		t,
+		expectedCount,
+		info.Vs[0].Reals[0].ActiveSessions,
+		"Real should have %d active sessions",
+		expectedCount,
+	)
+}
+
+// TestSessionTableManual tests session table behavior with timeouts and resizing.
+// It creates sessions, verifies they stay active after resizing or when refreshed
+// within timeout, and tests that new sessions can be created alongside existing ones.
+func TestSessionTableManual(t *testing.T) {
+	vsIp := netip.MustParseAddr("1.1.1.1")
+	vsPort := uint16(80)
+	realAddr := netip.MustParseAddr("2.2.2.2")
+
+	sessionTimeout := 60 // in seconds
+	initialCapacity := 16
+	maxLoadFactor := 0.5
+
+	// Configure balancer with single VS and single real
+	moduleConfig := &balancerpb.BalancerConfig{
+		PacketHandler: &balancerpb.PacketHandlerConfig{
+			SourceAddressV4: &balancerpb.Addr{
+				Bytes: netip.MustParseAddr("5.5.5.5").AsSlice(),
+			},
+			SourceAddressV6: &balancerpb.Addr{
+				Bytes: netip.MustParseAddr("fe80::5").AsSlice(),
+			},
+			Vs: []*balancerpb.VirtualService{
+				{
+					Id: &balancerpb.VsIdentifier{
+						Addr: &balancerpb.Addr{
+							Bytes: vsIp.AsSlice(),
+						},
+						Port:  uint32(vsPort),
+						Proto: balancerpb.TransportProto_TCP,
+					},
+					AllowedSrcs: []*balancerpb.Net{
+						{
+							Addr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+							},
+							Size: 8, // Allow all 10.x.x.x addresses
+						},
+					},
+					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
+					Flags: &balancerpb.VsFlags{
+						Gre:    false,
+						FixMss: false,
+						Ops:    false,
+						PureL3: false,
+						Wlc:    false,
+					},
+					Reals: []*balancerpb.Real{
+						{
+							Id: &balancerpb.RelativeRealIdentifier{
+								Ip: &balancerpb.Addr{
+									Bytes: realAddr.AsSlice(),
+								},
+								Port: 0,
+							},
+							Weight: 1,
+							SrcAddr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("2.2.2.2").AsSlice(),
+							},
+							SrcMask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+							},
+						},
+					},
+					Peers: []*balancerpb.Addr{},
+				},
+			},
+			DecapAddresses: []*balancerpb.Addr{},
+			SessionsTimeouts: &balancerpb.SessionsTimeouts{
+				TcpSynAck: uint32(sessionTimeout),
+				TcpSyn:    uint32(sessionTimeout),
+				TcpFin:    uint32(sessionTimeout),
+				Tcp:       uint32(sessionTimeout),
+				Udp:       uint32(sessionTimeout),
+				Default:   uint32(sessionTimeout),
+			},
+		},
+		State: &balancerpb.StateConfig{
+			SessionTableCapacity:      func() *uint64 { v := uint64(initialCapacity); return &v }(),
+			SessionTableMaxLoadFactor: func() *float32 { v := float32(maxLoadFactor); return &v }(),
+			RefreshPeriod:             durationpb.New(0), // do not update in background
+			Wlc: &balancerpb.WlcConfig{
+				Power:     func() *uint64 { v := uint64(10); return &v }(),
+				MaxWeight: func() *uint32 { v := uint32(1000); return &v }(),
+			},
+		},
+	}
+
+	// Setup test
+	ts, err := utils.Make(&utils.TestConfig{
+		Mock:     utils.SingleWorkerMockConfig(64*datasize.MB, 4*datasize.MB),
+		Balancer: moduleConfig,
+		AgentMemory: func() *datasize.ByteSize {
+			memory := 16 * datasize.MB
+			return &memory
+		}(),
+	})
+	require.NoError(t, err)
+	defer ts.Free()
+
+	// Enable all reals
+	utils.EnableAllReals(t, ts)
+
+	mock := ts.Mock
+
+	// Set initial time
+	mock.SetCurrentTime(time.Unix(0, 0))
+
+	rng := rand.New(rand.NewSource(42))
+
+	// Helper to generate random client IP in 10.x.x.x range
+	randomClientIP := func() netip.Addr {
+		return netip.AddrFrom4([4]byte{
+			10,
+			byte(rng.Intn(256)),
+			byte(rng.Intn(256)),
+			byte(rng.Intn(256)),
+		})
+	}
+
+	// Helper to generate random port
+	randomPort := func() uint16 {
+		return uint16(1024 + rng.Intn(64511)) // 1024-65535
+	}
+
+	// Track session keys (srcIP, srcPort)
+	sessions := make([]sessionKey, 0, 10)
+
+	// Phase 1: Create 10 random sessions with TCP SYN packets
+	t.Run("Phase1_Create_10_Sessions", func(t *testing.T) {
+		packets := make([]gopacket.Packet, 0, 10)
+		for range 10 {
+			srcIP := randomClientIP()
+			srcPort := randomPort()
+			sessions = append(sessions, sessionKey{ip: srcIP, port: srcPort})
+
+			packetLayers := utils.MakeTCPPacket(
+				srcIP,
+				srcPort,
+				vsIp,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
+			packets = append(
+				packets,
+				xpacket.LayersToPacket(t, packetLayers...),
+			)
+		}
+
+		result, err := mock.HandlePackets(packets...)
+		require.NoError(t, err)
+
+		// Verify all packets are in output
+		assert.Equal(
+			t,
+			10,
+			len(result.Output),
+			"all 10 packets should be in output",
+		)
+		assert.Empty(t, result.Drop, "no packets should be dropped")
+
+		// Verify each output packet is properly encapsulated
+		for i, outPacket := range result.Output {
+			utils.ValidatePacket(t, ts.Balancer.Config(), packets[i], outPacket)
+		}
+
+		t.Logf(
+			"Created 10 sessions successfully, all packets properly encapsulated",
+		)
+	})
+
+	// Advance time by 30 seconds
+	t.Run("Advance_Time_30s", func(t *testing.T) {
+		newTime := mock.AdvanceTime(30 * time.Second)
+		t.Logf("Advanced time to %v (30s elapsed)", newTime)
+	})
+
+	// Phase 2: Send TCP non-SYN packets to the same sessions
+	t.Run("Phase2_Send_NonSYN_To_Same_Sessions", func(t *testing.T) {
+		packets := make([]gopacket.Packet, 0, 10)
+		for _, session := range sessions {
+			packetLayers := utils.MakeTCPPacket(
+				session.ip,
+				session.port,
+				vsIp,
+				vsPort,
+				&layers.TCP{}, // No SYN flag
+			)
+			packets = append(
+				packets,
+				xpacket.LayersToPacket(t, packetLayers...),
+			)
+		}
+
+		result, err := mock.HandlePackets(packets...)
+		require.NoError(t, err)
+
+		// Verify packets are not dropped (sessions still valid)
+		assert.Equal(
+			t,
+			10,
+			len(result.Output),
+			"all packets should be in output",
+		)
+		assert.Empty(t, result.Drop, "no packets should be dropped")
+
+		// Verify each output packet is properly encapsulated
+		for i, outPacket := range result.Output {
+			utils.ValidatePacket(t, ts.Balancer.Config(), packets[i], outPacket)
+		}
+
+		t.Logf(
+			"Sent non-SYN packets to 10 sessions, all accepted and properly encapsulated",
+		)
+	})
+
+	// Resize session table and get active sessions
+	t.Run("Resize_And_Verify_Active_Sessions", func(t *testing.T) {
+		currentTime := mock.CurrentTime()
+
+		// Sync active sessions and resize table on demand
+		err := ts.Balancer.Refresh(currentTime)
+		require.NoError(t, err)
+
+		// Check active sessions using helper function
+		checkActiveSessions(
+			t,
+			ts,
+			currentTime,
+			sessions,
+			vsIp,
+			vsPort,
+			realAddr,
+		)
+
+		t.Logf(
+			"Verified 10 active sessions for VS and Real with correct identifiers",
+		)
+	})
+
+	// Advance time by 40 seconds (total 70s from start, 40s from last packet)
+	t.Run("Advance_Time_40s", func(t *testing.T) {
+		newTime := mock.AdvanceTime(40 * time.Second)
+		t.Logf(
+			"Advanced time to %v (40s elapsed, sessions at 40s age)",
+			newTime,
+		)
+	})
+
+	// Phase 3: Send packets to the same sessions again
+	t.Run("Phase3_Send_Packets_Again", func(t *testing.T) {
+		packets := make([]gopacket.Packet, 0, 10)
+		for _, session := range sessions {
+			packetLayers := utils.MakeTCPPacket(
+				session.ip,
+				session.port,
+				vsIp,
+				vsPort,
+				&layers.TCP{}, // No SYN flag
+			)
+			packets = append(
+				packets,
+				xpacket.LayersToPacket(t, packetLayers...),
+			)
+		}
+
+		result, err := mock.HandlePackets(packets...)
+		require.NoError(t, err)
+
+		// Verify packets are not dropped (sessions still valid at 40s age)
+		assert.Equal(
+			t,
+			10,
+			len(result.Output),
+			"all packets should be in output",
+		)
+		assert.Empty(t, result.Drop, "no packets should be dropped")
+
+		// Verify each output packet is properly encapsulated
+		for i, outPacket := range result.Output {
+			utils.ValidatePacket(t, ts.Balancer.Config(), packets[i], outPacket)
+		}
+
+		// Verify sessions are still active
+		currentTime := mock.CurrentTime()
+		err = ts.Balancer.Refresh(currentTime)
+		require.NoError(t, err)
+
+		sessions, err := ts.Balancer.Sessions(currentTime)
+		require.NoError(t, err)
+		assert.Equal(
+			t,
+			10,
+			len(sessions),
+			"should still have 10 active sessions",
+		)
+
+		t.Logf(
+			"Sent packets to 10 sessions again, all accepted, properly encapsulated, and sessions refreshed",
+		)
+	})
+
+	// Advance time by 30 seconds
+	t.Run("Advance_Time_30s_Again", func(t *testing.T) {
+		newTime := mock.AdvanceTime(30 * time.Second)
+		t.Logf("Advanced time to %v (30s elapsed)", newTime)
+	})
+
+	// Phase 4: Create 10 new sessions and send packets to old sessions
+	t.Run("Phase4_Create_New_And_Refresh_Old_Sessions", func(t *testing.T) {
+		packets := make([]gopacket.Packet, 0, 20)
+
+		// Create 10 new sessions with TCP SYN packets
+		newSessions := make([]sessionKey, 0, 10)
+		for range 10 {
+			srcIP := randomClientIP()
+			srcPort := randomPort()
+			newSessions = append(
+				newSessions,
+				sessionKey{ip: srcIP, port: srcPort},
+			)
+
+			packetLayers := utils.MakeTCPPacket(
+				srcIP,
+				srcPort,
+				vsIp,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
+			packets = append(
+				packets,
+				xpacket.LayersToPacket(t, packetLayers...),
+			)
+		}
+
+		// Send packets to old sessions to refresh them
+		for _, session := range sessions {
+			packetLayers := utils.MakeTCPPacket(
+				session.ip,
+				session.port,
+				vsIp,
+				vsPort,
+				&layers.TCP{}, // No SYN flag
+			)
+			packets = append(
+				packets,
+				xpacket.LayersToPacket(t, packetLayers...),
+			)
+		}
+
+		result, err := mock.HandlePackets(packets...)
+		require.NoError(t, err)
+
+		// Verify all packets are in output
+		assert.Equal(
+			t,
+			20,
+			len(result.Output),
+			"all 20 packets should be in output",
+		)
+		assert.Empty(t, result.Drop, "no packets should be dropped")
+
+		// Verify each output packet is properly encapsulated
+		for i, outPacket := range result.Output {
+			utils.ValidatePacket(t, ts.Balancer.Config(), packets[i], outPacket)
+		}
+
+		// Append new sessions to the sessions list for final verification
+		sessions = append(sessions, newSessions...)
+
+		t.Logf(
+			"Created 10 new sessions and refreshed 10 old sessions, all packets properly encapsulated",
+		)
+	})
+
+	// Advance time and verify all sessions are active
+	t.Run("Verify_All_20_Sessions_Active", func(t *testing.T) {
+		currentTime := mock.CurrentTime()
+
+		// Sync active sessions
+		err := ts.Balancer.Refresh(currentTime)
+		require.NoError(t, err)
+
+		// Check active sessions using helper function
+		checkActiveSessions(
+			t,
+			ts,
+			currentTime,
+			sessions,
+			vsIp,
+			vsPort,
+			realAddr,
+		)
+
+		t.Logf(
+			"Verified all 20 sessions are active (10 new + 10 old refreshed) with correct client IPs and ports",
+		)
+	})
+
+	// Keep only new sessions for expiration testing
+	newSessions := sessions[10:] // Last 10 sessions are the new ones
+
+	// Phase 5: Test session expiration
+	t.Run("Phase5_Advance_30s_Send_To_New_Sessions_Only", func(t *testing.T) {
+		// Advance time by 30 seconds (old sessions at 60s age, should expire)
+		newTime := mock.AdvanceTime(30 * time.Second)
+		t.Logf(
+			"Advanced time to %v (30s elapsed, old sessions at 60s age)",
+			newTime,
+		)
+
+		// Send packets only to new sessions
+		packets := make([]gopacket.Packet, 0, 10)
+		for _, session := range newSessions {
+			packetLayers := utils.MakeTCPPacket(
+				session.ip,
+				session.port,
+				vsIp,
+				vsPort,
+				&layers.TCP{}, // No SYN flag
+			)
+			packets = append(
+				packets,
+				xpacket.LayersToPacket(t, packetLayers...),
+			)
+		}
+
+		result, err := mock.HandlePackets(packets...)
+		require.NoError(t, err)
+
+		// Verify all packets are in output
+		assert.Equal(
+			t,
+			10,
+			len(result.Output),
+			"all 10 packets should be in output",
+		)
+		assert.Empty(t, result.Drop, "no packets should be dropped")
+
+		// Verify each output packet is properly encapsulated
+		for i, outPacket := range result.Output {
+			utils.ValidatePacket(t, ts.Balancer.Config(), packets[i], outPacket)
+		}
+
+		// Check active sessions immediately after sending packets
+		currentTime := mock.CurrentTime()
+		checkActiveSessions(
+			t,
+			ts,
+			currentTime,
+			sessions,
+			vsIp,
+			vsPort,
+			realAddr,
+		)
+
+		t.Logf(
+			"Sent packets to 10 new sessions only, verified all sessions still active",
+		)
+	})
+
+	t.Run(
+		"Phase5_Advance_30s_Check_Only_New_Sessions_Active",
+		func(t *testing.T) {
+			// Advance time by 30 seconds (new sessions at 30s age)
+			newTime := mock.AdvanceTime(30 * time.Second)
+			t.Logf(
+				"Advanced time to %v (30s elapsed, new sessions at 30s age)",
+				newTime,
+			)
+
+			currentTime := mock.CurrentTime()
+
+			// Check active sessions WITHOUT resizing
+			checkActiveSessions(
+				t,
+				ts,
+				currentTime,
+				newSessions,
+				vsIp,
+				vsPort,
+				realAddr,
+			)
+
+			t.Logf("Verified only 10 new sessions are active at 30s age")
+		},
+	)
+
+	t.Run(
+		"Phase5_Resize_And_Verify_New_Sessions_Still_Active",
+		func(t *testing.T) {
+			currentTime := mock.CurrentTime()
+
+			// Resize and sync active sessions
+			err := ts.Balancer.Refresh(currentTime)
+			require.NoError(t, err)
+
+			// Check active sessions after resize
+			checkActiveSessions(
+				t,
+				ts,
+				currentTime,
+				newSessions,
+				vsIp,
+				vsPort,
+				realAddr,
+			)
+
+			t.Logf("Verified 10 new sessions still active after resize")
+		},
+	)
+
+	t.Run(
+		"Phase5_Advance_29s_Verify_Sessions_Still_Active",
+		func(t *testing.T) {
+			// Advance time by 29 seconds (new sessions at 59s age, still valid)
+			newTime := mock.AdvanceTime(29 * time.Second)
+			t.Logf(
+				"Advanced time to %v (29s elapsed, new sessions at 59s age)",
+				newTime,
+			)
+
+			currentTime := mock.CurrentTime()
+
+			// Check active sessions
+			checkActiveSessions(
+				t,
+				ts,
+				currentTime,
+				newSessions,
+				vsIp,
+				vsPort,
+				realAddr,
+			)
+
+			t.Logf(
+				"Verified 10 new sessions still active at 59s age (< 60s timeout)",
+			)
+		},
+	)
+
+	t.Run("Phase5_Advance_1s_Verify_Sessions_Expired", func(t *testing.T) {
+		// Advance time by 1 second (new sessions at 60s age, should expire)
+		newTime := mock.AdvanceTime(1 * time.Second)
+		t.Logf(
+			"Advanced time to %v (1s elapsed, new sessions at 60s age - expired)",
+			newTime,
+		)
+
+		currentTime := mock.CurrentTime()
+
+		// Check active sessions - should be 0
+		checkActiveSessions(
+			t,
+			ts,
+			currentTime,
+			[]sessionKey{},
+			vsIp,
+			vsPort,
+			realAddr,
+		)
+
+		t.Logf("Verified all sessions expired after 60s timeout")
+	})
+
+	// Phase 6: Comprehensive session table test with 256 sessions, load testing, and resizing
+	var phase6OldSessions []sessionKey
+	var phase6NewSessions []sessionKey
+
+	t.Run("Phase6_Manual_Resize_Session_Table", func(t *testing.T) {
+		now := mock.CurrentTime()
+		newCapacity := uint64(256)
+		newMaxLoadFactor := float32(0.5)
+
+		config := ts.Balancer.Config()
+		config.State.SessionTableCapacity = &newCapacity
+		config.State.SessionTableMaxLoadFactor = &newMaxLoadFactor
+
+		err := ts.Balancer.Update(config, now)
+		require.NoError(t, err, "failed to update config")
+
+		t.Logf("Resized session table to capacity 256")
+	})
+
+	t.Run("Phase6_Send_256_Sessions_Check_80_Percent", func(t *testing.T) {
+		// Generate 256 unique packets and store session keys
+		packets := make([]gopacket.Packet, 0, 256)
+		sessionToPacket := make(map[sessionKey]gopacket.Packet)
+
+		for range 256 {
+			srcIP := randomClientIP()
+			srcPort := randomPort()
+			session := sessionKey{ip: srcIP, port: srcPort}
+
+			packetLayers := utils.MakeTCPPacket(
+				srcIP,
+				srcPort,
+				vsIp,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
+			pkt := xpacket.LayersToPacket(t, packetLayers...)
+			packets = append(packets, pkt)
+			sessionToPacket[session] = pkt
+		}
+
+		result, err := mock.HandlePackets(packets...)
+		require.NoError(t, err)
+
+		// Verify at least 80% accepted (205 out of 256)
+		acceptedCount := len(result.Output)
+		require.GreaterOrEqual(
+			t,
+			acceptedCount,
+			205,
+			"at least 80%% of packets should be accepted",
+		)
+
+		t.Logf(
+			"Sent 256 packets, %d accepted (%.1f%%)",
+			acceptedCount,
+			float64(acceptedCount)*100/256,
+		)
+
+		// Extract accepted session keys from output packets
+		acceptedSessions := make([]sessionKey, 0, acceptedCount)
+		for _, outPacket := range result.Output {
+			// Get inner packet to extract session key
+			if outPacket.InnerPacket == nil {
+				t.Fatal("output packet has no inner packet")
+			}
+
+			innerIP, ok := netip.AddrFromSlice(outPacket.InnerPacket.SrcIP)
+			if !ok {
+				t.Fatalf(
+					"failed to parse inner packet source IP: %v",
+					outPacket.InnerPacket.SrcIP,
+				)
+			}
+
+			port := outPacket.SrcPort
+			session := sessionKey{ip: innerIP, port: port}
+
+			// Find the original packet for validation
+			originalPacket, ok := sessionToPacket[session]
+			if !ok {
+				t.Errorf(
+					"could not find original packet for session %v:%d",
+					innerIP,
+					port,
+				)
+			}
+
+			// Validate the packet
+			utils.ValidatePacket(
+				t,
+				ts.Balancer.Config(),
+				originalPacket,
+				outPacket,
+			)
+
+			acceptedSessions = append(acceptedSessions, session)
+		}
+
+		// Store for later phases
+		phase6OldSessions = acceptedSessions
+
+		t.Logf("Extracted %d accepted session keys", len(acceptedSessions))
+	})
+
+	t.Run("Phase6_Check_Accepted_Sessions_Active", func(t *testing.T) {
+		currentTime := mock.CurrentTime()
+
+		// Sync active sessions
+		err := ts.Balancer.Refresh(currentTime)
+		require.NoError(t, err)
+
+		// Check only accepted sessions are active
+		checkActiveSessions(
+			t,
+			ts,
+			currentTime,
+			phase6OldSessions,
+			vsIp,
+			vsPort,
+			realAddr,
+		)
+
+		t.Logf(
+			"Verified %d accepted sessions are active",
+			len(phase6OldSessions),
+		)
+	})
+
+	t.Run("Phase6_Advance_59s_Resize_To_512", func(t *testing.T) {
+		// Advance time by 59 seconds (old sessions at 59s age)
+		newTime := mock.AdvanceTime(59 * time.Second)
+		t.Logf(
+			"Advanced time to %v (59s elapsed, old sessions at 59s age)",
+			newTime,
+		)
+
+		// Resize table to 512
+		now := mock.CurrentTime()
+		newCapacity := uint64(512)
+		newMaxLoadFactor := float32(0.5)
+
+		config := ts.Balancer.Config()
+		config.State.SessionTableCapacity = &newCapacity
+		config.State.SessionTableMaxLoadFactor = &newMaxLoadFactor
+
+		err := ts.Balancer.Update(config, now)
+		require.NoError(t, err, "failed to resize session table to 512")
+
+		t.Logf("Resized session table to 512")
+	})
+
+	t.Run("Phase6_Send_256_More_Sessions", func(t *testing.T) {
+		// Generate 256 new unique packets and store session keys
+		packets := make([]gopacket.Packet, 0, 256)
+		sessionToPacket := make(map[sessionKey]gopacket.Packet)
+
+		for range 256 {
+			srcIP := randomClientIP()
+			srcPort := randomPort()
+			session := sessionKey{ip: srcIP, port: srcPort}
+
+			packetLayers := utils.MakeTCPPacket(
+				srcIP,
+				srcPort,
+				vsIp,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
+			pkt := xpacket.LayersToPacket(t, packetLayers...)
+			packets = append(packets, pkt)
+			sessionToPacket[session] = pkt
+		}
+
+		result, err := mock.HandlePackets(packets...)
+		require.NoError(t, err)
+
+		// Extract session keys from output packets
+		newSessions := make([]sessionKey, 0, 256)
+		for _, outPacket := range result.Output {
+			// Get inner packet to extract session key
+			if outPacket.InnerPacket == nil {
+				t.Fatal("output packet has no inner packet")
+			}
+
+			innerIP, ok := netip.AddrFromSlice(outPacket.InnerPacket.SrcIP)
+			if !ok {
+				t.Fatalf(
+					"failed to parse inner packet source IP: %v",
+					outPacket.InnerPacket.SrcIP,
+				)
+			}
+
+			port := outPacket.SrcPort
+			session := sessionKey{ip: innerIP, port: port}
+
+			// Find the original packet for validation
+			originalPacket, ok := sessionToPacket[session]
+			if !ok {
+				t.Errorf(
+					"could not find original packet for session %v:%d",
+					innerIP,
+					port,
+				)
+			}
+
+			// Validate the packet
+			utils.ValidatePacket(
+				t,
+				ts.Balancer.Config(),
+				originalPacket,
+				outPacket,
+			)
+
+			newSessions = append(newSessions, session)
+		}
+
+		// Store for later phases
+		phase6NewSessions = newSessions
+
+		t.Logf("Sent new sessions, all accepted")
+	})
+
+	t.Run("Phase6_Check_All_Sessions_Active", func(t *testing.T) {
+		currentTime := mock.CurrentTime()
+
+		// Sync active sessions
+		err := ts.Balancer.Refresh(currentTime)
+		require.NoError(t, err)
+
+		// Verify both old and new sessions are active
+		allSessions := append(
+			[]sessionKey{},
+			phase6OldSessions...,
+		)
+		allSessions = append(allSessions, phase6NewSessions...)
+
+		checkActiveSessions(
+			t,
+			ts,
+			currentTime,
+			allSessions,
+			vsIp,
+			vsPort,
+			realAddr,
+		)
+
+		t.Logf(
+			"Verified all %d sessions are active (%d old + %d new)",
+			len(allSessions),
+			len(phase6OldSessions),
+			len(phase6NewSessions),
+		)
+	})
+
+	t.Run("Phase6_Advance_1s_Check_Old_Expired", func(t *testing.T) {
+		// Advance time by 1 second (old sessions now at 60s age - expired)
+		newTime := mock.AdvanceTime(1 * time.Second)
+		t.Logf(
+			"Advanced time to %v (1s elapsed, old sessions at 60s age - expired)",
+			newTime,
+		)
+
+		currentTime := mock.CurrentTime()
+
+		// Only new sessions should be active
+		checkActiveSessions(
+			t,
+			ts,
+			currentTime,
+			phase6NewSessions,
+			vsIp,
+			vsPort,
+			realAddr,
+		)
+
+		t.Logf(
+			"Verified old sessions expired, %d new sessions still active",
+			len(phase6NewSessions),
+		)
+	})
+
+	t.Run("Phase6_Resize_To_300_Check_New_Active", func(t *testing.T) {
+		now := mock.CurrentTime()
+
+		// Resize table back to 300
+		newCapacity := uint64(300)
+		newMaxLoadFactor := float32(0.5)
+
+		config := ts.Balancer.Config()
+		config.State.SessionTableCapacity = &newCapacity
+		config.State.SessionTableMaxLoadFactor = &newMaxLoadFactor
+
+		err := ts.Balancer.Update(config, now)
+		require.NoError(t, err, "failed to resize session table to 300")
+
+		// Refresh to apply resize and sync sessions
+		err = ts.Balancer.Refresh(now)
+		require.NoError(t, err)
+
+		currentTime := mock.CurrentTime()
+
+		// Verify new sessions still active after resize
+		checkActiveSessions(
+			t,
+			ts,
+			currentTime,
+			phase6NewSessions,
+			vsIp,
+			vsPort,
+			realAddr,
+		)
+
+		t.Logf(
+			"Resized table to 300, verified %d new sessions still active and old sessions are expired",
+			len(phase6NewSessions),
+		)
+	})
+}
