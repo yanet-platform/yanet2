@@ -8,6 +8,8 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/proxy/controlplane/proxypb"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type ProxyService struct {
@@ -15,70 +17,67 @@ type ProxyService struct {
 
 	mu      sync.Mutex
 	log     *zap.SugaredLogger
-	agents  []*ffi.Agent
-	configs map[instanceKey]ProxyConfig
+	agent   *ffi.Agent
+	configs map[string]*ProxyConfig
 }
 
-func NewProxyService(agents []*ffi.Agent, log *zap.SugaredLogger) *ProxyService {
+func NewProxyService(agent *ffi.Agent, log *zap.SugaredLogger) *ProxyService {
 	return &ProxyService{
 		log:     log,
-		agents:  agents,
-		configs: make(map[instanceKey]ProxyConfig),
+		agent:   agent,
+		configs: make(map[string]*ProxyConfig),
 	}
 }
 
 func (s *ProxyService) ListConfigs(
 	ctx context.Context, request *proxypb.ListConfigsRequest,
 ) (*proxypb.ListConfigsResponse, error) {
-
 	response := &proxypb.ListConfigsResponse{
-		InstanceConfigs: make([]*proxypb.InstanceConfigs, len(s.agents)),
-	}
-	for inst := range s.agents {
-		response.InstanceConfigs[inst] = &proxypb.InstanceConfigs{
-			Instance: uint32(inst),
-		}
+		Configs: make([]string, 0),
 	}
 
 	// Lock instances store and module updates
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for key := range s.configs {
-		instConfig := response.InstanceConfigs[key.dataplaneInstance]
-		instConfig.Configs = append(instConfig.Configs, key.name)
+	for name := range s.configs {
+		response.Configs = append(response.Configs, name)
 	}
 
 	return response, nil
 }
 
 func (s *ProxyService) ShowConfig(ctx context.Context, req *proxypb.ShowConfigRequest) (*proxypb.ShowConfigResponse, error) {
-	_, inst, err := req.GetTarget().Validate(uint32(len(s.agents)))
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	// key := instanceKey{name: name, dataplaneInstance: inst}
-	response := &proxypb.ShowConfigResponse{Instance: inst}
+	response := &proxypb.ShowConfigResponse{}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// config := m.configs[key]
-	response.Config = &proxypb.Config{ProxyConfig: &proxypb.ProxyConfig{}}
+	config := s.configs[name]
+	if config != nil {
+		response.Config = &proxypb.Config{
+			Addr: config.Addr,
+		}
+	}
 
 	return response, nil
 }
 
 func (s *ProxyService) DeleteConfig(ctx context.Context, req *proxypb.DeleteConfigRequest) (*proxypb.DeleteConfigResponse, error) {
-	name, inst, err := req.GetTarget().Validate(uint32(len(s.agents)))
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 	// Remove module configuration from the control plane.
-	delete(s.configs, instanceKey{name, inst})
+	delete(s.configs, name)
 
-	deleted := DeleteConfig(s, name, inst)
+	deleted := DeleteConfig(s, name)
 
 	response := &proxypb.DeleteConfigResponse{
 		Deleted: deleted,
@@ -87,73 +86,56 @@ func (s *ProxyService) DeleteConfig(ctx context.Context, req *proxypb.DeleteConf
 }
 
 func (s *ProxyService) SetAddr(ctx context.Context, req *proxypb.SetAddrRequest) (*proxypb.SetAddrResponse, error) {
-	name, inst, err := req.GetTarget().Validate(uint32(len(s.agents)))
-	if err != nil {
-		return nil, err
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	key := instanceKey{name: name, dataplaneInstance: inst}
-	config, ok := s.configs[key]
+	config, ok := s.configs[name]
 	if !ok {
-		config = ProxyConfig{}
-		s.configs[key] = config
+		config = &ProxyConfig{}
+		s.configs[name] = config
 	}
 
 	config.Addr = req.Addr
 
-	if err = s.updateModuleConfig(name, inst); err != nil {
+	if err := s.updateModuleConfig(name); err != nil {
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
 	s.log.Infow("successfully set address",
 		zap.String("name", name),
 		zap.Uint32("addr", req.Addr),
-		zap.Uint32("instance", inst),
 	)
 
 	return &proxypb.SetAddrResponse{}, nil
 }
 
-func (s *ProxyService) updateModuleConfig(name string, instance uint32) error {
-	s.log.Debugw("updating configuration",
-		zap.String("module", name),
-		zap.Uint32("instance", instance),
-	)
-
-	if int(instance) >= len(s.agents) {
-		return fmt.Errorf("instance index %d is out of range (agents length: %d)", instance, len(s.agents))
-	}
-	agent := s.agents[instance]
-	if agent == nil {
-		return fmt.Errorf("agent for instance %d is nil", instance)
-	}
-
-	moduleConfig, err := NewModuleConfig(agent, name)
+func (s *ProxyService) updateModuleConfig(name string) error {
+	moduleConfig, err := NewModuleConfig(s.agent, name)
 	if err != nil {
-		return fmt.Errorf("failed to create module config for instance %d: %w", instance, err)
+		return fmt.Errorf("failed to create module config: %w", err)
 	}
 
-	key := instanceKey{name: name, dataplaneInstance: instance}
-	config, ok := s.configs[key]
+	config, ok := s.configs[name]
 	if !ok {
-		config = ProxyConfig{}
-		s.configs[key] = config
+		config = &ProxyConfig{}
+		s.configs[name] = config
 	}
 
 	if err := moduleConfig.SetAddr(config.Addr); err != nil {
-		return fmt.Errorf("failed to set addr on instance %d: %w", instance, err)
+		return fmt.Errorf("failed to set addr: %w", err)
 	}
 
-	if err := agent.UpdateModules([]ffi.ModuleConfig{moduleConfig.AsFFIModule()}); err != nil {
-		return fmt.Errorf("failed to update module on instance %d: %w", instance, err)
+	if err := s.agent.UpdateModules([]ffi.ModuleConfig{moduleConfig.AsFFIModule()}); err != nil {
+		return fmt.Errorf("failed to update module: %w", err)
 	}
 
 	s.log.Debugw("successfully updated module config",
 		zap.String("name", name),
-		zap.Uint32("instance", instance),
 	)
 
 	return nil

@@ -62,11 +62,11 @@ func TestProxy(t *testing.T) {
 	t.Run("Configure_Proxy_Module", func(t *testing.T) {
 		// Proxy-specific configuration
 		commands := []string{
-			"/mnt/target/release/yanet-cli-proxy addr set --cfg proxy0 --instances 0 --addr 1234",
+			"/mnt/target/release/yanet-cli-proxy addr set --cfg proxy0 --addr 1234",
 
-			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:5=proxy:proxy0,route:route0 --instance=0",
+			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:5=proxy:proxy0,route:route0",
 			// Configure pipelines
-			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
+			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",
 		}
 
 		_, err := fw.ExecuteCommands(commands...)

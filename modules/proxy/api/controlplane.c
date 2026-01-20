@@ -24,8 +24,7 @@ proxy_module_config_init(struct agent *agent, const char *name) {
 		    &config->cp_module,
 		    agent,
 		    "proxy",
-		    name,
-		    proxy_module_config_free
+		    name
 	    )) {
 		goto fail;
 	}
