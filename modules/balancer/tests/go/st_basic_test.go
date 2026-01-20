@@ -1,5 +1,45 @@
 package balancer_test
 
+// TestSessionTableManual validates session table behavior with comprehensive testing of:
+//
+// # Session Creation and Persistence
+// - Creating multiple sessions with random client IPs and ports
+// - Verifying sessions remain active when refreshed within timeout period
+// - Testing session table resizing with active sessions
+//
+// # Session Timeout Validation
+// - Sending packets to existing sessions to refresh their timeout
+// - Advancing time and verifying sessions expire after configured timeout
+// - Testing that new sessions can be created alongside existing ones
+//
+// # Load Testing and Capacity Management
+// - Creating 256 sessions and verifying at least 80% acceptance rate
+// - Testing dynamic session table resizing (256 → 1024 → 300 capacity)
+// - Verifying session persistence across table resize operations
+// - Validating expired sessions are properly removed while active ones persist
+//
+// TestSessionTimeouts validates different session timeout types work correctly:
+//
+// # Configuration
+// - Two virtual services: TCP (1.1.1.1:80) and UDP (2.2.2.2:53)
+// - Different timeout values: UDP=30s, TCP=60s, TCP_SYN=20s, TCP_SYN_ACK=25s, TCP_FIN=15s
+//
+// # Timeout Validation Tests
+// - UDP Session Timeout: Verifies UDP sessions expire at 30 seconds
+// - TCP SYN Timeout: Verifies TCP SYN sessions expire at 20 seconds
+// - TCP SYN-ACK Timeout: Verifies timeout switches to 25s after SYN-ACK packet
+// - TCP Basic Timeout: Verifies timeout switches from SYN (20s) to TCP (60s) after regular packet
+// - TCP FIN Timeout: Verifies timeout switches to 15s after FIN packet
+//
+// # Validation Pattern
+// Each test follows the pattern:
+// - Send packet(s) to create session
+// - Verify session exists
+// - Advance time by (timeout - 1) seconds
+// - Verify session still persists
+// - Advance time by 1 second (reaching exact timeout)
+// - Verify session has expired
+
 import (
 	"math/rand"
 	"net/netip"
@@ -837,7 +877,7 @@ func TestSessionTableManual(t *testing.T) {
 		)
 	})
 
-	t.Run("Phase6_Advance_59s_Resize_To_512", func(t *testing.T) {
+	t.Run("Phase6_Advance_59s_Resize_To_1024", func(t *testing.T) {
 		// Advance time by 59 seconds (old sessions at 59s age)
 		newTime := mock.AdvanceTime(59 * time.Second)
 		t.Logf(
@@ -845,9 +885,9 @@ func TestSessionTableManual(t *testing.T) {
 			newTime,
 		)
 
-		// Resize table to 512
+		// Resize table to 1024
 		now := mock.CurrentTime()
-		newCapacity := uint64(512)
+		newCapacity := uint64(1024)
 		newMaxLoadFactor := float32(0.5)
 
 		config := ts.Balancer.Config()
@@ -855,9 +895,9 @@ func TestSessionTableManual(t *testing.T) {
 		config.State.SessionTableMaxLoadFactor = &newMaxLoadFactor
 
 		err := ts.Balancer.Update(config, now)
-		require.NoError(t, err, "failed to resize session table to 512")
+		require.NoError(t, err, "failed to resize session table to 1024")
 
-		t.Logf("Resized session table to 512")
+		t.Logf("Resized session table to 1024")
 	})
 
 	t.Run("Phase6_Send_256_More_Sessions", func(t *testing.T) {
@@ -1004,9 +1044,8 @@ func TestSessionTableManual(t *testing.T) {
 		err := ts.Balancer.Update(config, now)
 		require.NoError(t, err, "failed to resize session table to 300")
 
-		// Refresh to apply resize and sync sessions
-		err = ts.Balancer.Refresh(now)
-		require.NoError(t, err)
+		require.LessOrEqual(t, uint64(300), *ts.Balancer.Config().State.SessionTableCapacity)
+		require.GreaterOrEqual(t, uint64(512), *ts.Balancer.Config().State.SessionTableCapacity)
 
 		currentTime := mock.CurrentTime()
 
@@ -1025,5 +1064,510 @@ func TestSessionTableManual(t *testing.T) {
 			"Resized table to 300, verified %d new sessions still active and old sessions are expired",
 			len(phase6NewSessions),
 		)
+	})
+}
+
+// checkSessionsForVS verifies active sessions for a specific virtual service
+func checkSessionsForVS(
+	t *testing.T,
+	ts *utils.TestSetup,
+	currentTime time.Time,
+	expectedCount int,
+	vsIp netip.Addr,
+	vsPort uint16,
+) {
+	t.Helper()
+
+	// Get sessions info
+	sessions, err := ts.Balancer.Sessions(currentTime)
+	require.NoError(t, err)
+
+	// Count sessions for this VS
+	vsSessionCount := 0
+	for _, session := range sessions {
+		sessionVsAddr, _ := netip.AddrFromSlice(session.RealId.Vs.Addr.Bytes)
+		sessionVsPort := uint16(session.RealId.Vs.Port)
+		if sessionVsAddr == vsIp && sessionVsPort == vsPort {
+			vsSessionCount++
+		}
+	}
+
+	assert.Equal(
+		t,
+		expectedCount,
+		vsSessionCount,
+		"VS %v:%d should have %d sessions",
+		vsIp,
+		vsPort,
+		expectedCount,
+	)
+
+	// Get info to verify VS active sessions
+	info, err := ts.Balancer.Info(currentTime)
+	require.NoError(t, err)
+
+	// Find the VS in info and verify its active sessions
+	for _, vsInfo := range info.Vs {
+		vsAddr, _ := netip.AddrFromSlice(vsInfo.Id.Addr.Bytes)
+		vsInfoPort := uint16(vsInfo.Id.Port)
+		if vsAddr == vsIp && vsInfoPort == vsPort {
+			assert.Equal(
+				t,
+				uint64(expectedCount),
+				vsInfo.ActiveSessions,
+				"VS %v:%d active sessions should match",
+				vsIp,
+				vsPort,
+			)
+			// Also verify Real active sessions sum
+			totalRealSessions := uint64(0)
+			for _, realInfo := range vsInfo.Reals {
+				totalRealSessions += realInfo.ActiveSessions
+			}
+			assert.Equal(
+				t,
+				uint64(expectedCount),
+				totalRealSessions,
+				"VS %v:%d total real sessions should match",
+				vsIp,
+				vsPort,
+			)
+			return
+		}
+	}
+
+	if expectedCount > 0 {
+		t.Errorf("VS %v:%d not found in info", vsIp, vsPort)
+	}
+}
+
+// TestSessionTimeouts verifies that different session timeout types work correctly.
+// It creates two virtual services (TCP and UDP) with different timeout configurations
+// and validates that sessions expire at the correct time based on their type:
+// - UDP sessions use UDP timeout (30s)
+// - TCP sessions use different timeouts based on packet flags:
+//   - TCP_SYN timeout (20s) for SYN packets
+//   - TCP_SYN_ACK timeout (25s) after SYN-ACK packets
+//   - TCP_FIN timeout (15s) after FIN packets
+//   - TCP timeout (60s) for established connections
+//
+// Each test verifies the session persists at timeout-1 and expires at timeout.
+func TestSessionTimeouts(t *testing.T) {
+	tcpVsIp := netip.MustParseAddr("1.1.1.1")
+	tcpVsPort := uint16(80)
+	tcpRealAddr := netip.MustParseAddr("10.2.2.2")
+
+	udpVsIp := netip.MustParseAddr("2.2.2.2")
+	udpVsPort := uint16(5353)
+	udpRealAddr := netip.MustParseAddr("10.3.3.3")
+
+	// Different timeout values to verify correct timeout is applied
+	udpTimeout := 30       // seconds
+	tcpTimeout := 60       // seconds
+	tcpSynTimeout := 20    // seconds
+	tcpSynAckTimeout := 25 // seconds
+	tcpFinTimeout := 15    // seconds
+
+	// Configure balancer with two virtual services (TCP and UDP)
+	moduleConfig := &balancerpb.BalancerConfig{
+		PacketHandler: &balancerpb.PacketHandlerConfig{
+			SourceAddressV4: &balancerpb.Addr{
+				Bytes: netip.MustParseAddr("5.5.5.5").AsSlice(),
+			},
+			SourceAddressV6: &balancerpb.Addr{
+				Bytes: netip.MustParseAddr("fe80::5").AsSlice(),
+			},
+			Vs: []*balancerpb.VirtualService{
+				// TCP Virtual Service
+				{
+					Id: &balancerpb.VsIdentifier{
+						Addr: &balancerpb.Addr{
+							Bytes: tcpVsIp.AsSlice(),
+						},
+						Port:  uint32(tcpVsPort),
+						Proto: balancerpb.TransportProto_TCP,
+					},
+					AllowedSrcs: []*balancerpb.Net{
+						{
+							Addr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+							},
+							Size: 8,
+						},
+					},
+					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
+					Flags: &balancerpb.VsFlags{
+						Gre:    false,
+						FixMss: false,
+						Ops:    false,
+						PureL3: false,
+						Wlc:    false,
+					},
+					Reals: []*balancerpb.Real{
+						{
+							Id: &balancerpb.RelativeRealIdentifier{
+								Ip: &balancerpb.Addr{
+									Bytes: tcpRealAddr.AsSlice(),
+								},
+								Port: 0,
+							},
+							Weight: 1,
+							SrcAddr: &balancerpb.Addr{
+								Bytes: tcpRealAddr.AsSlice(),
+							},
+							SrcMask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+							},
+						},
+					},
+					Peers: []*balancerpb.Addr{},
+				},
+				// UDP Virtual Service
+				{
+					Id: &balancerpb.VsIdentifier{
+						Addr: &balancerpb.Addr{
+							Bytes: udpVsIp.AsSlice(),
+						},
+						Port:  uint32(udpVsPort),
+						Proto: balancerpb.TransportProto_UDP,
+					},
+					AllowedSrcs: []*balancerpb.Net{
+						{
+							Addr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+							},
+							Size: 8,
+						},
+					},
+					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
+					Flags: &balancerpb.VsFlags{
+						Gre:    false,
+						FixMss: false,
+						Ops:    false,
+						PureL3: false,
+						Wlc:    false,
+					},
+					Reals: []*balancerpb.Real{
+						{
+							Id: &balancerpb.RelativeRealIdentifier{
+								Ip: &balancerpb.Addr{
+									Bytes: udpRealAddr.AsSlice(),
+								},
+								Port: 0,
+							},
+							Weight: 1,
+							SrcAddr: &balancerpb.Addr{
+								Bytes: udpRealAddr.AsSlice(),
+							},
+							SrcMask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+							},
+						},
+					},
+					Peers: []*balancerpb.Addr{},
+				},
+			},
+			DecapAddresses: []*balancerpb.Addr{},
+			SessionsTimeouts: &balancerpb.SessionsTimeouts{
+				TcpSynAck: uint32(tcpSynAckTimeout),
+				TcpSyn:    uint32(tcpSynTimeout),
+				TcpFin:    uint32(tcpFinTimeout),
+				Tcp:       uint32(tcpTimeout),
+				Udp:       uint32(udpTimeout),
+				Default:   uint32(tcpTimeout),
+			},
+		},
+		State: &balancerpb.StateConfig{
+			SessionTableCapacity:      func() *uint64 { v := uint64(64); return &v }(),
+			SessionTableMaxLoadFactor: func() *float32 { v := float32(0.5); return &v }(),
+			RefreshPeriod:             durationpb.New(0), // do not update in background
+			Wlc: &balancerpb.WlcConfig{
+				Power:     func() *uint64 { v := uint64(10); return &v }(),
+				MaxWeight: func() *uint32 { v := uint32(1000); return &v }(),
+			},
+		},
+	}
+
+	// Setup test
+	ts, err := utils.Make(&utils.TestConfig{
+		Mock:     utils.SingleWorkerMockConfig(64*datasize.MB, 4*datasize.MB),
+		Balancer: moduleConfig,
+		AgentMemory: func() *datasize.ByteSize {
+			memory := 16 * datasize.MB
+			return &memory
+		}(),
+	})
+	require.NoError(t, err)
+	defer ts.Free()
+
+	// Enable all reals
+	utils.EnableAllReals(t, ts)
+
+	mock := ts.Mock
+
+	// Set initial time
+	mock.SetCurrentTime(time.Unix(0, 0))
+
+	// Test 1: UDP Session Timeout
+	t.Run("UDP_Session_Timeout", func(t *testing.T) {
+		clientIP := netip.MustParseAddr("10.1.1.1")
+		clientPort := uint16(5000)
+
+		// Send first UDP packet
+		packetLayers := utils.MakeUDPPacket(clientIP, clientPort, udpVsIp, udpVsPort)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+		result, err := mock.HandlePackets(packet)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(result.Output), "first UDP packet should be accepted")
+
+		// Send second UDP packet to ensure session is created
+		result, err = mock.HandlePackets(packet)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(result.Output), "second UDP packet should be accepted")
+
+		// Sync sessions
+		currentTime := mock.CurrentTime()
+		err = ts.Balancer.Refresh(currentTime)
+		require.NoError(t, err)
+
+		// Verify session exists
+		checkSessionsForVS(t, ts, currentTime, 1, udpVsIp, udpVsPort)
+		t.Logf("UDP session created successfully")
+
+		// Advance time by timeout-1 (29 seconds)
+		mock.AdvanceTime(time.Duration(udpTimeout-1) * time.Second)
+		currentTime = mock.CurrentTime()
+
+		// Verify session still exists
+		checkSessionsForVS(t, ts, currentTime, 1, udpVsIp, udpVsPort)
+		t.Logf("UDP session persists at %d seconds", udpTimeout-1)
+
+		// Advance time by 1 second (total 30 seconds)
+		mock.AdvanceTime(1 * time.Second)
+		currentTime = mock.CurrentTime()
+
+		// Verify session is gone
+		checkSessionsForVS(t, ts, currentTime, 0, udpVsIp, udpVsPort)
+		t.Logf("UDP session expired at %d seconds", udpTimeout)
+	})
+
+	// Reset time for next test
+	mock.SetCurrentTime(time.Unix(1000, 0))
+
+	// Test 2: TCP SYN Session Timeout
+	t.Run("TCP_SYN_Session_Timeout", func(t *testing.T) {
+		clientIP := netip.MustParseAddr("10.1.2.1")
+		clientPort := uint16(6000)
+
+		// Send TCP SYN packet
+		packetLayers := utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			tcpVsIp,
+			tcpVsPort,
+			&layers.TCP{SYN: true},
+		)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+		result, err := mock.HandlePackets(packet)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(result.Output), "TCP SYN packet should be accepted")
+
+		currentTime := mock.CurrentTime()
+		err = ts.Balancer.Refresh(currentTime)
+		require.NoError(t, err)
+
+		// Verify session exists
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		t.Logf("TCP session created successfully")
+
+		mock.AdvanceTime(time.Duration(tcpSynTimeout-1) * time.Second)
+		currentTime = mock.CurrentTime()
+
+		// Verify session still exists
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		t.Logf("TCP session persists at %d seconds", tcpTimeout-1)
+
+		// Advance time by 1 second (total 60 seconds)
+		mock.AdvanceTime(1 * time.Second)
+		currentTime = mock.CurrentTime()
+
+		// Verify session is gone
+		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIp, tcpVsPort)
+		t.Logf("TCP session expired at %d seconds", tcpTimeout)
+	})
+
+	// Reset time for next test
+	mock.SetCurrentTime(time.Unix(2000, 0))
+
+	// Test 3: TCP SYN-ACK Timeout
+	t.Run("TCP_SYN_ACK_Timeout", func(t *testing.T) {
+		clientIP := netip.MustParseAddr("10.1.3.1")
+		clientPort := uint16(7000)
+
+		// Send TCP SYN packet
+		packetLayers := utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			tcpVsIp,
+			tcpVsPort,
+			&layers.TCP{SYN: true},
+		)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+		result, err := mock.HandlePackets(packet)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(result.Output), "TCP SYN packet should be accepted")
+
+		// Send TCP SYN-ACK packet from same client
+		packetLayers = utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			tcpVsIp,
+			tcpVsPort,
+			&layers.TCP{SYN: true, ACK: true},
+		)
+		packet = xpacket.LayersToPacket(t, packetLayers...)
+		result, err = mock.HandlePackets(packet)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(result.Output), "TCP SYN-ACK packet should be accepted")
+
+		// Sync sessions
+		currentTime := mock.CurrentTime()
+
+		// Verify session exists
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		t.Logf("TCP SYN-ACK session created successfully")
+
+		// Advance time by SYN-ACK timeout-1 (24 seconds)
+		mock.AdvanceTime(time.Duration(tcpSynAckTimeout-1) * time.Second)
+		currentTime = mock.CurrentTime()
+
+		// Verify session still exists
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		t.Logf("TCP SYN-ACK session persists at %d seconds", tcpSynAckTimeout-1)
+
+		// Advance time by 1 second (total 25 seconds)
+		mock.AdvanceTime(1 * time.Second)
+		currentTime = mock.CurrentTime()
+
+		// Verify session is gone
+		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIp, tcpVsPort)
+		t.Logf("TCP SYN-ACK session expired at %d seconds", tcpSynAckTimeout)
+	})
+
+	// Reset time for next test
+	mock.SetCurrentTime(time.Unix(3000, 0))
+
+	// Test 4: TCP SYN + Basic Packet Timeout
+	t.Run("TCP_SYN_Then_Basic_Packet_Timeout", func(t *testing.T) {
+		clientIP := netip.MustParseAddr("10.1.4.1")
+		clientPort := uint16(8000)
+
+		// Send TCP SYN packet
+		packetLayers := utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			tcpVsIp,
+			tcpVsPort,
+			&layers.TCP{SYN: true},
+		)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+		result, err := mock.HandlePackets(packet)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(result.Output), "TCP SYN packet should be accepted")
+
+		// Send regular TCP packet (no flags) - this should switch timeout to TCP timeout
+		packetLayers = utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			tcpVsIp,
+			tcpVsPort,
+			&layers.TCP{}, // No flags
+		)
+		packet = xpacket.LayersToPacket(t, packetLayers...)
+		result, err = mock.HandlePackets(packet)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(result.Output), "TCP basic packet should be accepted")
+
+		// Sync sessions
+		currentTime := mock.CurrentTime()
+
+		// Verify session exists
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		t.Logf("TCP session (SYN->basic) created successfully")
+
+		// Advance time by TCP timeout-1 (59 seconds)
+		// This verifies timeout switched from TCP_SYN (20s) to TCP (60s)
+		mock.AdvanceTime(time.Duration(tcpTimeout-1) * time.Second)
+		currentTime = mock.CurrentTime()
+
+		// Verify session still exists
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		t.Logf("TCP session (SYN->basic) persists at %d seconds", tcpTimeout-1)
+
+		// Advance time by 1 second (total 60 seconds)
+		mock.AdvanceTime(1 * time.Second)
+		currentTime = mock.CurrentTime()
+
+		// Verify session is gone
+		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIp, tcpVsPort)
+		t.Logf("TCP session (SYN->basic) expired at %d seconds", tcpTimeout)
+	})
+
+	// Reset time for next test
+	mock.SetCurrentTime(time.Unix(4000, 0))
+
+	// Test 5: TCP SYN + FIN Packet Timeout
+	t.Run("TCP_SYN_Then_FIN_Packet_Timeout", func(t *testing.T) {
+		clientIP := netip.MustParseAddr("10.1.5.1")
+		clientPort := uint16(9000)
+
+		// Send TCP SYN packet
+		packetLayers := utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			tcpVsIp,
+			tcpVsPort,
+			&layers.TCP{SYN: true},
+		)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+		result, err := mock.HandlePackets(packet)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(result.Output), "TCP SYN packet should be accepted")
+
+		// Send TCP FIN packet - this should switch timeout to TCP_FIN timeout
+		packetLayers = utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			tcpVsIp,
+			tcpVsPort,
+			&layers.TCP{FIN: true},
+		)
+		packet = xpacket.LayersToPacket(t, packetLayers...)
+		result, err = mock.HandlePackets(packet)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(result.Output), "TCP FIN packet should be accepted")
+
+		// Sync sessions
+		currentTime := mock.CurrentTime()
+
+		// Verify session exists
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		t.Logf("TCP session (SYN->FIN) created successfully")
+
+		// Advance time by FIN timeout-1 (14 seconds)
+		mock.AdvanceTime(time.Duration(tcpFinTimeout-1) * time.Second)
+		currentTime = mock.CurrentTime()
+
+		// Verify session still exists
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		t.Logf("TCP session (SYN->FIN) persists at %d seconds", tcpFinTimeout-1)
+
+		// Advance time by 1 second (total 15 seconds)
+		mock.AdvanceTime(1 * time.Second)
+		currentTime = mock.CurrentTime()
+
+		// Verify session is gone
+		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIp, tcpVsPort)
+		t.Logf("TCP session (SYN->FIN) expired at %d seconds", tcpFinTimeout)
 	})
 }

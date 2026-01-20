@@ -1,5 +1,45 @@
 package balancer_test
 
+// TestWlc validates the Weighted Least Connection (WLC) scheduling algorithm:
+//
+// # Initial Configuration
+// - Virtual service: 1.1.1.1:80 (TCP) with WLC enabled
+// - Three real servers with weights: Real1=1, Real2=1, Real3=2
+// - Initially only Real1 and Real2 are enabled
+//
+// # Stage 1: Two Reals with Equal Weights
+// - Sends 500 random TCP SYN packets
+// - Validates uniform distribution (250 packets each to Real1 and Real2)
+// - Verifies Stats, Info, and Sessions APIs show correct counts
+// - Enables Real3 (weight=2)
+//
+// # Stage 1 Continued: Three Reals with Weights 1:1:2
+// - Sends 2500 more random TCP SYN packets
+// - Validates distribution proportional to weights
+// - Verifies Real3 receives approximately 2× traffic of Real1/Real2
+//
+// # Stage 2: State Persistence with New Agent
+// - Creates new BalancerAgent attached to same shared memory
+// - Verifies all reals are enabled via Graph()
+// - Confirms original weights (1, 1, 2) via Config()
+// - Disables Real1 and sends 100 packets
+//   * Validates packets only go to Real2 and Real3
+//   * Expected distribution: Real2 ~33%, Real3 ~67% (weights 1:2)
+// - Re-enables Real1 and sends 300 more packets
+// - Validates session distribution proportional to weights (1:1:2)
+//   * Expected ratios: Real1=25%, Real2=25%, Real3=50%
+//   * Tolerance: ±15%
+//
+// # Stage 3: Multi-VS Configuration Update
+// - Updates config to 4 virtual services:
+//   * VS1: Original VS with WLC=true, weights 1:1:2
+//   * VS2: New VS with WLC=true, weights 1:2:1
+//   * VS3: New VS with WLC=false (ROUND_ROBIN), weights 1:1
+//   * VS4: New VS with WLC=true, weights 2:2:1
+// - Verifies Config() matches updated configuration
+// - Creates third BalancerAgent and verifies config persistence
+// - Confirms all 4 virtual services present with correct settings
+
 import (
 	"fmt"
 	"math"
