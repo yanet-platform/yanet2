@@ -1371,3 +1371,246 @@ func ptrFloat32(v float32) *float32 {
 func ptrBool(v bool) *bool {
 	return &v
 }
+
+// TestConvertPacketHandlerToProtoWithWlc tests WLC-aware packet handler conversion
+func TestConvertPacketHandlerToProtoWithWlc(t *testing.T) {
+	handler := &ffi.PacketHandlerConfig{
+		SessionsTimeouts: ffi.SessionsTimeouts{
+			TcpSynAck: 10,
+			TcpSyn:    20,
+			TcpFin:    15,
+			Tcp:       100,
+			Udp:       50,
+			Default:   30,
+		},
+		VirtualServices: []ffi.VsConfig{
+			{
+				Identifier: ffi.VsIdentifier{
+					Addr:           netip.MustParseAddr("192.168.1.100"),
+					Port:           80,
+					TransportProto: ffi.VsTransportProtoTcp,
+				},
+				Scheduler: ffi.VsSchedulerRoundRobin,
+				Reals:     []ffi.RealConfig{},
+			},
+			{
+				Identifier: ffi.VsIdentifier{
+					Addr:           netip.MustParseAddr("192.168.1.101"),
+					Port:           443,
+					TransportProto: ffi.VsTransportProtoTcp,
+				},
+				Scheduler: ffi.VsSchedulerRoundRobin,
+				Reals:     []ffi.RealConfig{},
+			},
+			{
+				Identifier: ffi.VsIdentifier{
+					Addr:           netip.MustParseAddr("192.168.1.102"),
+					Port:           8080,
+					TransportProto: ffi.VsTransportProtoTcp,
+				},
+				Scheduler: ffi.VsSchedulerRoundRobin,
+				Reals:     []ffi.RealConfig{},
+			},
+		},
+		SourceV4: netip.MustParseAddr("10.0.0.1"),
+		SourceV6: netip.MustParseAddr("2001:db8::1"),
+		DecapV4:  []netip.Addr{},
+		DecapV6:  []netip.Addr{},
+	}
+
+	tests := []struct {
+		name      string
+		wlcConfig *ffi.BalancerManagerWlcConfig
+		verify    func(t *testing.T, result *balancerpb.PacketHandlerConfig)
+	}{
+		{
+			name:      "No WLC config",
+			wlcConfig: nil,
+			verify: func(t *testing.T, result *balancerpb.PacketHandlerConfig) {
+				require.Len(t, result.Vs, 3)
+				assert.False(t, result.Vs[0].Flags.Wlc, "VS0 should have WLC=false")
+				assert.False(t, result.Vs[1].Flags.Wlc, "VS1 should have WLC=false")
+				assert.False(t, result.Vs[2].Flags.Wlc, "VS2 should have WLC=false")
+			},
+		},
+		{
+			name: "WLC enabled for VS 0 and 2",
+			wlcConfig: &ffi.BalancerManagerWlcConfig{
+				Power:         10,
+				MaxRealWeight: 1000,
+				Vs:            []uint32{0, 2},
+			},
+			verify: func(t *testing.T, result *balancerpb.PacketHandlerConfig) {
+				require.Len(t, result.Vs, 3)
+				assert.True(t, result.Vs[0].Flags.Wlc, "VS0 should have WLC=true")
+				assert.False(t, result.Vs[1].Flags.Wlc, "VS1 should have WLC=false")
+				assert.True(t, result.Vs[2].Flags.Wlc, "VS2 should have WLC=true")
+			},
+		},
+		{
+			name: "WLC enabled for all VSs",
+			wlcConfig: &ffi.BalancerManagerWlcConfig{
+				Power:         10,
+				MaxRealWeight: 1000,
+				Vs:            []uint32{0, 1, 2},
+			},
+			verify: func(t *testing.T, result *balancerpb.PacketHandlerConfig) {
+				require.Len(t, result.Vs, 3)
+				assert.True(t, result.Vs[0].Flags.Wlc, "VS0 should have WLC=true")
+				assert.True(t, result.Vs[1].Flags.Wlc, "VS1 should have WLC=true")
+				assert.True(t, result.Vs[2].Flags.Wlc, "VS2 should have WLC=true")
+			},
+		},
+		{
+			name: "Empty WLC VS list",
+			wlcConfig: &ffi.BalancerManagerWlcConfig{
+				Power:         10,
+				MaxRealWeight: 1000,
+				Vs:            []uint32{},
+			},
+			verify: func(t *testing.T, result *balancerpb.PacketHandlerConfig) {
+				require.Len(t, result.Vs, 3)
+				assert.False(t, result.Vs[0].Flags.Wlc, "VS0 should have WLC=false")
+				assert.False(t, result.Vs[1].Flags.Wlc, "VS1 should have WLC=false")
+				assert.False(t, result.Vs[2].Flags.Wlc, "VS2 should have WLC=false")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertPacketHandlerToProtoWithWlc(handler, tt.wlcConfig)
+			require.NotNil(t, result)
+			tt.verify(t, result)
+		})
+	}
+}
+
+// TestConvertVsConfigToProtoWithWlc tests WLC-aware VS config conversion
+func TestConvertVsConfigToProtoWithWlc(t *testing.T) {
+	vsConfig := &ffi.VsConfig{
+		Identifier: ffi.VsIdentifier{
+			Addr:           netip.MustParseAddr("192.168.1.100"),
+			Port:           80,
+			TransportProto: ffi.VsTransportProtoTcp,
+		},
+		Flags: ffi.VsFlags{
+			GRE:    true,
+			FixMSS: false,
+			OPS:    true,
+			PureL3: false,
+		},
+		Scheduler:  ffi.VsSchedulerRoundRobin,
+		Reals:      []ffi.RealConfig{},
+		AllowedSrc: []netip.Prefix{},
+		PeersV4:    []netip.Addr{},
+		PeersV6:    []netip.Addr{},
+	}
+
+	tests := []struct {
+		name       string
+		wlcEnabled bool
+		verify     func(t *testing.T, result *balancerpb.VirtualService)
+	}{
+		{
+			name:       "WLC disabled",
+			wlcEnabled: false,
+			verify: func(t *testing.T, result *balancerpb.VirtualService) {
+				require.NotNil(t, result.Flags)
+				assert.False(t, result.Flags.Wlc, "WLC should be false")
+				assert.True(t, result.Flags.Gre, "GRE should be preserved")
+				assert.True(t, result.Flags.Ops, "OPS should be preserved")
+			},
+		},
+		{
+			name:       "WLC enabled",
+			wlcEnabled: true,
+			verify: func(t *testing.T, result *balancerpb.VirtualService) {
+				require.NotNil(t, result.Flags)
+				assert.True(t, result.Flags.Wlc, "WLC should be true")
+				assert.True(t, result.Flags.Gre, "GRE should be preserved")
+				assert.True(t, result.Flags.Ops, "OPS should be preserved")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertVsConfigToProtoWithWlc(vsConfig, tt.wlcEnabled)
+			require.NotNil(t, result)
+			tt.verify(t, result)
+		})
+	}
+}
+
+// TestConvertBalancerConfigToProto_WithWlc tests full config conversion with WLC
+func TestConvertBalancerConfigToProto_WithWlc(t *testing.T) {
+	config := &ffi.BalancerManagerConfig{
+		Balancer: ffi.BalancerConfig{
+			Handler: ffi.PacketHandlerConfig{
+				SessionsTimeouts: ffi.SessionsTimeouts{
+					TcpSynAck: 10,
+					TcpSyn:    20,
+					TcpFin:    15,
+					Tcp:       100,
+					Udp:       50,
+					Default:   30,
+				},
+				VirtualServices: []ffi.VsConfig{
+					{
+						Identifier: ffi.VsIdentifier{
+							Addr:           netip.MustParseAddr("192.168.1.100"),
+							Port:           80,
+							TransportProto: ffi.VsTransportProtoTcp,
+						},
+						Scheduler: ffi.VsSchedulerRoundRobin,
+						Reals:     []ffi.RealConfig{},
+					},
+					{
+						Identifier: ffi.VsIdentifier{
+							Addr:           netip.MustParseAddr("192.168.1.101"),
+							Port:           443,
+							TransportProto: ffi.VsTransportProtoTcp,
+						},
+						Scheduler: ffi.VsSchedulerRoundRobin,
+						Reals:     []ffi.RealConfig{},
+					},
+				},
+				SourceV4: netip.MustParseAddr("10.0.0.1"),
+				SourceV6: netip.MustParseAddr("2001:db8::1"),
+				DecapV4:  []netip.Addr{},
+				DecapV6:  []netip.Addr{},
+			},
+			State: ffi.StateConfig{
+				TableCapacity: 1000,
+			},
+		},
+		RefreshPeriod: 5 * time.Second,
+		MaxLoadFactor: 0.75,
+		Wlc: ffi.BalancerManagerWlcConfig{
+			Power:         10,
+			MaxRealWeight: 1000,
+			Vs:            []uint32{0}, // Only first VS has WLC enabled
+		},
+	}
+
+	result := ConvertBalancerConfigToProto(config)
+	require.NotNil(t, result)
+	require.NotNil(t, result.PacketHandler)
+	require.Len(t, result.PacketHandler.Vs, 2)
+
+	// Verify WLC flags
+	assert.True(t, result.PacketHandler.Vs[0].Flags.Wlc, "VS0 should have WLC=true")
+	assert.False(t, result.PacketHandler.Vs[1].Flags.Wlc, "VS1 should have WLC=false")
+
+	// Verify state config
+	require.NotNil(t, result.State)
+	assert.Equal(t, uint64(1000), *result.State.SessionTableCapacity)
+	assert.Equal(t, float32(0.75), *result.State.SessionTableMaxLoadFactor)
+	assert.Equal(t, 5*time.Second, result.State.RefreshPeriod.AsDuration())
+
+	// Verify WLC config
+	require.NotNil(t, result.State.Wlc)
+	assert.Equal(t, uint64(10), *result.State.Wlc.Power)
+	assert.Equal(t, uint32(1000), *result.State.Wlc.MaxWeight)
+}

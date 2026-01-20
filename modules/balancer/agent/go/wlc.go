@@ -48,8 +48,8 @@ func vsWlcUpdates(
 	connectionsSum := uint64(0)
 	weightsSum := uint64(0)
 	for idx := range realsCnt {
-		connectionsSum += vsInfo.Reals[idx].ActiveSessions
 		if vsGraph.Reals[idx].Enabled {
+			connectionsSum += vsInfo.Reals[idx].ActiveSessions
 			weightsSum += uint64(vsConfig.Reals[idx].Weight)
 		}
 	}
@@ -61,17 +61,18 @@ func vsWlcUpdates(
 		realGraph := &vsGraph.Reals[idx]
 		realInfo := &vsInfo.Reals[idx]
 
-		newWeight := uint16(0)
-
-		if realGraph.Enabled {
-			newWeight = calcWlcWeight(
-				wlc,
-				realConfig.Weight,
-				realInfo.ActiveSessions,
-				weightsSum,
-				connectionsSum,
-			)
+		// Only generate weight updates for enabled reals
+		if !realGraph.Enabled {
+			continue
 		}
+
+		newWeight := calcWlcWeight(
+			wlc,
+			realConfig.Weight,
+			realInfo.ActiveSessions,
+			weightsSum,
+			connectionsSum,
+		)
 
 		if newWeight != realGraph.Weight {
 			updates = append(updates, ffi.RealUpdate{

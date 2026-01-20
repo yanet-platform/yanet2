@@ -521,30 +521,31 @@ func mergeBalancerConfig(
 ) (*balancerpb.BalancerConfig, error) {
 	merged := &balancerpb.BalancerConfig{}
 
-	// Recursively merge PacketHandler
-	merged.PacketHandler = mergePacketHandlerConfig(
-		newConfig.PacketHandler,
-		&currentConfig.Balancer.Handler,
-	)
-
-	// Recursively merge State
+	// Recursively merge State first to get WLC config
 	merged.State = mergeStateConfig(
 		newConfig.State,
 		currentConfig,
+	)
+
+	merged.PacketHandler = mergePacketHandlerConfig(
+		newConfig.PacketHandler,
+		&currentConfig.Balancer.Handler,
+		&currentConfig.Wlc,
 	)
 
 	return merged, nil
 }
 
 // mergePacketHandlerConfig recursively merges packet handler fields
-// If newHandler is nil, returns current handler converted to proto
+// If newHandler is nil, returns current handler converted to proto with WLC info
 // Otherwise, merges each field individually, using current values for nil fields
 func mergePacketHandlerConfig(
 	newHandler *balancerpb.PacketHandlerConfig,
 	currentHandler *ffi.PacketHandlerConfig,
+	wlcConfig *ffi.BalancerManagerWlcConfig,
 ) *balancerpb.PacketHandlerConfig {
 	if newHandler == nil {
-		return convertPacketHandlerToProto(currentHandler)
+		return convertPacketHandlerToProtoWithWlc(currentHandler, wlcConfig)
 	}
 
 	merged := &balancerpb.PacketHandlerConfig{}
@@ -604,10 +605,16 @@ func mergePacketHandlerConfig(
 	if newHandler.Vs != nil {
 		merged.Vs = newHandler.Vs
 	} else {
-		// Convert current virtual services
+		// Convert current virtual services with WLC info
+		wlcEnabledVs := make(map[uint32]bool)
+		for _, vsIdx := range wlcConfig.Vs {
+			wlcEnabledVs[vsIdx] = true
+		}
+
 		vs := make([]*balancerpb.VirtualService, 0, len(currentHandler.VirtualServices))
 		for i := range currentHandler.VirtualServices {
-			vs = append(vs, convertVsConfigToProto(&currentHandler.VirtualServices[i]))
+			wlcEnabled := wlcEnabledVs[uint32(i)]
+			vs = append(vs, convertVsConfigToProtoWithWlc(&currentHandler.VirtualServices[i], wlcEnabled))
 		}
 		merged.Vs = vs
 	}
@@ -1079,8 +1086,8 @@ func ConvertBalancerConfigToProto(
 		return &balancerpb.BalancerConfig{}
 	}
 
-	// Convert packet handler
-	handler := convertPacketHandlerToProto(&config.Balancer.Handler)
+	// Convert packet handler with WLC config
+	handler := convertPacketHandlerToProtoWithWlc(&config.Balancer.Handler, &config.Wlc)
 
 	// Convert state config
 	capacity := uint64(config.Balancer.State.TableCapacity)
@@ -1098,13 +1105,23 @@ func ConvertBalancerConfigToProto(
 	}
 }
 
-func convertPacketHandlerToProto(
+func convertPacketHandlerToProtoWithWlc(
 	handler *ffi.PacketHandlerConfig,
+	wlcConfig *ffi.BalancerManagerWlcConfig,
 ) *balancerpb.PacketHandlerConfig {
+	// Build a set of VS indices that have WLC enabled
+	wlcEnabledVs := make(map[uint32]bool)
+	if wlcConfig != nil {
+		for _, vsIdx := range wlcConfig.Vs {
+			wlcEnabledVs[vsIdx] = true
+		}
+	}
+
 	// Convert virtual services
 	vs := make([]*balancerpb.VirtualService, 0, len(handler.VirtualServices))
 	for i := range handler.VirtualServices {
-		vs = append(vs, convertVsConfigToProto(&handler.VirtualServices[i]))
+		wlcEnabled := wlcEnabledVs[uint32(i)]
+		vs = append(vs, convertVsConfigToProtoWithWlc(&handler.VirtualServices[i], wlcEnabled))
 	}
 
 	// Convert decap addresses
@@ -1136,7 +1153,7 @@ func convertPacketHandlerToProto(
 	}
 }
 
-func convertVsConfigToProto(vs *ffi.VsConfig) *balancerpb.VirtualService {
+func convertVsConfigToProtoWithWlc(vs *ffi.VsConfig, wlcEnabled bool) *balancerpb.VirtualService {
 	// Convert reals
 	reals := make([]*balancerpb.Real, 0, len(vs.Reals))
 	for i := range vs.Reals {
@@ -1180,7 +1197,7 @@ func convertVsConfigToProto(vs *ffi.VsConfig) *balancerpb.VirtualService {
 			FixMss: vs.Flags.FixMSS,
 			Ops:    vs.Flags.OPS,
 			PureL3: vs.Flags.PureL3,
-			Wlc:    false,
+			Wlc:    wlcEnabled,
 		},
 		Peers: peers,
 	}

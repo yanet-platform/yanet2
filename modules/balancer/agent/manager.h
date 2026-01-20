@@ -127,6 +127,33 @@ balancer_manager_update_reals(
 );
 
 /**
+ * Apply a batch of real server weight updates for WLC algorithm.
+ *
+ * Similar to balancer_manager_update_reals(), but specifically for WLC
+ * algorithm updates. This function:
+ * - Only updates the state/graph weights, NOT the config weights
+ * - Validates that updates only change weights (not enable state)
+ * - Preserves the original static config weights for WLC calculations
+ *
+ * The config weight remains the baseline for WLC calculations, while the
+ * state weight is dynamically adjusted based on load.
+ *
+ * Diagnostics: On error, a message is recorded and retrievable via
+ * balancer_manager_take_error().
+ *
+ * @param manager Manager handle.
+ * @param count   Number of updates in the array.
+ * @param updates Array of real server weight updates (must not change enable state).
+ * @return 0 on success, -1 on error.
+ */
+int
+balancer_manager_update_reals_wlc(
+	struct balancer_manager *manager,
+	size_t count,
+	struct real_update *updates
+);
+
+/**
  * Resize the session table used by the manager's balancer.
  *
  * Changes the capacity of the session table to accommodate more or fewer

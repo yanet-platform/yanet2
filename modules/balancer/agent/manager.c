@@ -183,6 +183,44 @@ balancer_manager_update_reals(
 }
 
 int
+balancer_manager_update_reals_wlc(
+	struct balancer_manager *manager,
+	size_t count,
+	struct real_update *updates
+) {
+	diag_reset(&manager->diag);
+
+	// Validate that WLC updates only change weights, not enable state
+	for (size_t i = 0; i < count; i++) {
+		struct real_update *update = &updates[i];
+		if (update->enabled != DONT_UPDATE_REAL_ENABLED) {
+			NEW_ERROR(
+				"WLC update at index %lu attempts to change "
+				"enable state (not allowed)",
+				i
+			);
+			diag_fill(&manager->diag);
+			return -1;
+		}
+	}
+
+	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
+	int res = balancer_update_reals(balancer, count, updates);
+	if (res != 0) {
+		NEW_ERROR("%s", balancer_take_error_msg(balancer));
+		diag_fill(&manager->diag);
+		return -1;
+	}
+
+	// Note: Unlike balancer_manager_update_reals(), this function does NOT
+	// update the config weights. The config weight should remain the original
+	// static weight. WLC calculations use the config weight as the baseline
+	// and adjust the state weight dynamically based on load.
+
+	return 0;
+}
+
+int
 balancer_manager_update(
 	struct balancer_manager *manager,
 	struct balancer_manager_config *config,

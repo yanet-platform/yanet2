@@ -88,6 +88,34 @@ func (m *BalancerManager) UpdateReals(updates []RealUpdate) error {
 	return nil
 }
 
+// UpdateRealsWlc applies a batch of real server weight updates for WLC algorithm
+// This method only updates state weights, not config weights, preserving the
+// original static weights for WLC calculations
+func (m *BalancerManager) UpdateRealsWlc(updates []RealUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	// Convert Go updates to C updates
+	cUpdates := make([]C.struct_real_update, len(updates))
+	for i, update := range updates {
+		cUpdates[i] = goToC_RealUpdate(update)
+	}
+
+	if C.balancer_manager_update_reals_wlc(
+		m.handle,
+		C.size_t(len(updates)),
+		&cUpdates[0],
+	) != 0 {
+		cErr := C.balancer_manager_take_error(m.handle)
+		errMsg := C.GoString(cErr)
+		C.free(unsafe.Pointer(cErr))
+		return fmt.Errorf("%s", errMsg)
+	}
+
+	return nil
+}
+
 // ResizeSessionTable resizes the session table used by the manager's balancer
 func (m *BalancerManager) ResizeSessionTable(
 	newSize uint,

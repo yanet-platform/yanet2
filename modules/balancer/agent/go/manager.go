@@ -31,8 +31,7 @@ func NewBalancerManager(
 ) *BalancerManager {
 	name := handle.Name()
 	manager := &BalancerManager{
-		handle: handle,
-		// reals:            make(map[ffi.RealIdentifier]RealState),
+		handle:           handle,
 		realUpdateBuffer: []ffi.RealUpdate{},
 		log:              log.With("balancer", name),
 	}
@@ -333,14 +332,14 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 		}
 	}
 
-	// Real updates
+	// WLC real updates - use UpdateRealsWlc to preserve config weights
 	updates := WlcUpdates(b.handle.Config(), b.handle.Graph(), info)
-	b.log.Infow("real updates", "count", len(updates))
+	b.log.Infow("wlc real updates", "count", len(updates))
 	if len(updates) > 0 {
-		if err := b.handle.UpdateReals(updates); err != nil {
+		if err := b.handle.UpdateRealsWlc(updates); err != nil {
 			b.log.Errorw("failed to apply real updates", "error", err)
 		} else {
-			b.log.Infow("real updates applied successfully", "updates", updates)
+			b.log.Infow("real updates applied successfully", "count", len(updates))
 		}
 	}
 

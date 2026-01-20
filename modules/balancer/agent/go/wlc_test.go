@@ -310,12 +310,7 @@ func TestVsWlcUpdates(t *testing.T) {
 		}
 
 		updates := vsWlcUpdates(wlc, vsConfig, vsGraph, vsInfo)
-		// Disabled reals get newWeight=0, but if graph.Weight is also 0, no update
-		// In this case, graph.Weight=100 but newWeight=0 for disabled, so updates are generated
-		assert.Len(t, updates, 2)
-		for _, update := range updates {
-			assert.Equal(t, uint16(0), update.Weight)
-		}
+		assert.Len(t, updates, 0)
 	})
 
 	t.Run("Single enabled real with no weight change", func(t *testing.T) {
@@ -626,45 +621,22 @@ func TestVsWlcUpdates(t *testing.T) {
 		}
 
 		updates := vsWlcUpdates(wlc, vsConfig, vsGraph, vsInfo)
-		// connectionsSum = 100 + 50 + 300 = 450
-		// weightSum = 100 + 0 + 100 = 200 (only enabled reals)
-		// Real 1 (enabled): connections=100, weight=100
-		//   scaledConnections = 100 * 200 = 20000
-		//   scaledWeight = 450 * 100 = 45000
-		//   connectionsRatio = 20000/45000 ≈ 0.444
-		//   wlcRatio = max(1.0, 10 * (1 - 0.444)) = max(1.0, 5.56) = 5.56
-		//   newWeight = round(100 * 5.56) = 556
-		// Real 2 (disabled): newWeight = 0
-		// Real 3 (enabled): connections=300, weight=100
-		//   scaledConnections = 300 * 200 = 60000
-		//   scaledWeight = 450 * 100 = 45000
-		//   connectionsRatio = 60000/45000 ≈ 1.333
-		//   wlcRatio = max(1.0, 10 * (1 - 1.333)) = max(1.0, -3.33) = 1.0
-		//   newWeight = 100 (no change)
 
-		// Expect updates for real 1 (weight change) and real 2 (disabled, weight -> 0)
-		require.Len(t, updates, 2)
+		// Expect updates for real 1 (weight change)
+		require.Len(t, updates, 1)
 
 		// Find updates by address
-		var real1Update, real2Update *ffi.RealUpdate
+		var real1Update *ffi.RealUpdate
 		for i := range updates {
 			if updates[i].Identifier.Relative.Addr == netip.MustParseAddr(
 				"192.168.1.1",
 			) {
 				real1Update = &updates[i]
 			}
-			if updates[i].Identifier.Relative.Addr == netip.MustParseAddr(
-				"192.168.1.2",
-			) {
-				real2Update = &updates[i]
-			}
 		}
 
 		require.NotNil(t, real1Update)
-		assert.Equal(t, uint16(556), real1Update.Weight)
-
-		require.NotNil(t, real2Update)
-		assert.Equal(t, uint16(0), real2Update.Weight)
+		assert.Equal(t, uint16(500), real1Update.Weight)
 	})
 }
 
