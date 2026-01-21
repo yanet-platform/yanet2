@@ -21,7 +21,7 @@ var balancerName string = "balancer0"
 
 func TestManager(t *testing.T) {
 	m, err := mock.NewYanetMock(&mock.YanetMockConfig{
-		AgentsMemory: 1 << 27,
+		AgentsMemory: 1 << 28,
 		DpMemory:     1 << 24,
 		Workers:      1,
 		Devices: []mock.YanetMockDeviceConfig{
@@ -834,7 +834,7 @@ func TestManager(t *testing.T) {
 // TestMergeBalancerConfigRecursive tests recursive merging of balancer configuration
 func TestMergeBalancerConfigRecursive(t *testing.T) {
 	m, err := mock.NewYanetMock(&mock.YanetMockConfig{
-		AgentsMemory: 1 << 27,
+		AgentsMemory: 1 << 28,
 		DpMemory:     1 << 24,
 		Workers:      1,
 		Devices: []mock.YanetMockDeviceConfig{
@@ -848,7 +848,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 	require.NotNil(t, m, "mock is nil")
 
 	// Create balancer agent
-	agent, err := ffi.NewBalancerAgent(m.SharedMemory(), 1<<25)
+	agent, err := ffi.NewBalancerAgent(m.SharedMemory(), 1<<26)
 	require.NoError(t, err, "failed to create balancer agent")
 	require.NotNil(t, agent, "balancer agent is nil")
 

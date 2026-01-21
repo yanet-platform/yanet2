@@ -99,8 +99,12 @@ func TestBasicOperations(t *testing.T) {
 
 	// Setup test
 	ts, err := utils.Make(&utils.TestConfig{
-		Mock:     utils.SingleWorkerMockConfig(16*datasize.MB, 4*datasize.MB),
+		Mock:     utils.SingleWorkerMockConfig(64*datasize.MB, 4*datasize.MB),
 		Balancer: config,
+		AgentMemory: func() *datasize.ByteSize {
+			memory := 16 * datasize.MB
+			return &memory
+		}(),
 	})
 	require.NoError(t, err)
 	defer ts.Free()

@@ -431,10 +431,10 @@ func TestSessionTableStress1(t *testing.T) {
 
 	// Setup test
 	ts, err := utils.Make(&utils.TestConfig{
-		Mock:     utils.SingleWorkerMockConfig(64*datasize.MB, 4*datasize.MB),
+		Mock:     utils.SingleWorkerMockConfig(128*datasize.MB, 4*datasize.MB),
 		Balancer: moduleConfig,
 		AgentMemory: func() *datasize.ByteSize {
-			memory := 16 * datasize.MB
+			memory := 32 * datasize.MB
 			return &memory
 		}(),
 	})

@@ -80,7 +80,6 @@ filter_actions_with_category(
 		for (size_t __ai = 0; __ai < __n; ++__ai) {                    \
 			size_t __vtx = __n + __ai;                             \
 			struct filter_vertex *__v = &(__flt)->v[__vtx];        \
-                                                                               \
 			__filter_attrs_query_##tag[__ai].query(                \
 				ADDR_OF(&__v->data),                           \
 				__pkts,                                        \

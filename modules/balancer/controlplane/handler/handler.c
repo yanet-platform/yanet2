@@ -437,16 +437,12 @@ init_vs_filters(
 
 	// Compile filters
 	int res = 0;
-	if (v4_count > 0) {
-		res = FILTER_INIT(
-			&handler->vs_v4, vs_v4_sig, v4_rules, v4_count, mctx
-		);
-		if (res != 0) {
-			NEW_ERROR("failed to compile IPv4 VS filter");
-		}
+	res = FILTER_INIT(&handler->vs_v4, vs_v4_sig, v4_rules, v4_count, mctx);
+	if (res != 0) {
+		NEW_ERROR("failed to compile IPv4 VS filter");
 	}
 
-	if (res == 0 && v6_count > 0) {
+	if (res == 0) {
 		res = FILTER_INIT(
 			&handler->vs_v6, vs_v6_sig, v6_rules, v6_count, mctx
 		);
