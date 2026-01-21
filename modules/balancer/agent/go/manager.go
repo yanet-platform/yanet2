@@ -300,6 +300,8 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	b.log.Debug("refreshing balancer")
+
 	// Get current config
 	config := b.handle.Config()
 
@@ -334,8 +336,8 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 
 	// WLC real updates - use UpdateRealsWlc to preserve config weights
 	updates := WlcUpdates(b.handle.Config(), b.handle.Graph(), info)
-	b.log.Infow("wlc real updates", "count", len(updates))
 	if len(updates) > 0 {
+		b.log.Infow("wlc real updates", "count", len(updates))
 		if err := b.handle.UpdateRealsWlc(updates); err != nil {
 			b.log.Errorw("failed to apply real updates", "error", err)
 		} else {
