@@ -1,4 +1,5 @@
 #include "api/counter.h"
+#include "api/vs.h"
 #include "common/lpm.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
@@ -161,8 +162,17 @@ setup_state(
 }
 
 static int
-setup_flags(struct vs *vs, struct vs_config *config) {
-	vs->flags = config->flags;
+setup_flags(struct vs *vs, struct named_vs_config *config) {
+	if ((config->config.flags & VS_PURE_L3_FLAG) &&
+		    config->identifier.port != 0) {
+			NEW_ERROR(
+				"PureL3 mode "
+				"requires port=0, but port=%u was specified",
+				config->identifier.port
+			);
+			return -1;
+		}
+	vs->flags = config->config.flags;
 	return 0;
 }
 
@@ -179,7 +189,7 @@ vs_init(struct vs *vs,
 		return -1;
 	}
 
-	if (setup_flags(vs, &config->config) != 0) {
+	if (setup_flags(vs, config) != 0) {
 		PUSH_ERROR("failed to setup flags");
 		return -1;
 	}

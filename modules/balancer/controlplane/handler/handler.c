@@ -356,19 +356,6 @@ init_vs_filters(
 	for (size_t i = 0; i < config->vs_count; ++i) {
 		struct named_vs_config *vs_config = &config->vs[i];
 
-		// Validate PureL3 configuration: port must be 0 when PureL3
-		// flag is set
-		if ((vs_config->config.flags & VS_PURE_L3_FLAG) &&
-		    vs_config->identifier.port != 0) {
-			NEW_ERROR(
-				"virtual service at index %zu: PureL3 mode "
-				"requires port=0, but port=%u was specified",
-				i,
-				vs_config->identifier.port
-			);
-			goto cleanup_error;
-		}
-
 		struct filter_rule *rule;
 		size_t *idx;
 
@@ -469,7 +456,7 @@ init_vs_filters(
 
 	return res;
 
-cleanup_error:
+cleanup_error:	
 	// Cleanup on error
 	for (size_t i = 0; i < v4_idx; ++i) {
 		free(v4_rules[i].net4.dsts);
@@ -481,7 +468,9 @@ cleanup_error:
 	}
 	free(v4_rules);
 	free(v6_rules);
+
 	NEW_ERROR("failed to allocate filter rule components");
+	
 	return -1;
 }
 
