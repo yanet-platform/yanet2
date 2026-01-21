@@ -1,6 +1,7 @@
 #include "array.h"
 
 #include "common/memory.h"
+#include "common/memory_address.h"
 
 #include <assert.h>
 #include <string.h>
@@ -22,17 +23,18 @@ service_array_init(struct service_array *array, struct memory_context *mctx) {
 
 void
 service_array_free(struct service_array *array) {
-	size_t blocks = service_array_block_count(array);
-	for (size_t i = 0; i < blocks; ++i) {
-		struct service_array_block *block = array->blocks[i];
+	size_t blocks_cnt = service_array_block_count(array);
+	struct service_array_block **blocks = ADDR_OF(&array->blocks);
+	for (size_t i = 0; i < blocks_cnt; ++i) {
+		struct service_array_block *block = ADDR_OF(blocks + i);
 		memory_bfree(
 			&array->mctx, block, sizeof(struct service_array_block)
 		);
 	}
 	memory_bfree(
 		&array->mctx,
-		array->blocks,
-		sizeof(struct service_array_block *) * blocks
+		blocks,
+		sizeof(struct service_array_block *) * blocks_cnt
 	);
 }
 
@@ -41,8 +43,10 @@ service_array_lookup(struct service_array *array, size_t idx) {
 	if (idx >= array->size) {
 		return NULL;
 	}
-	return &array->blocks[idx / SERVICE_REGISTRY_BLOCK_SIZE]
-			->services[idx % SERVICE_REGISTRY_BLOCK_SIZE];
+	struct service_array_block **block_rel =
+		ADDR_OF(&array->blocks) + idx / SERVICE_REGISTRY_BLOCK_SIZE;
+	struct service_array_block *block = ADDR_OF(block_rel);
+	return &block->services[idx % SERVICE_REGISTRY_BLOCK_SIZE];
 }
 
 int
@@ -63,10 +67,12 @@ service_array_push_back(
 
 		// copy the old blocks
 		if (blocks > 1) {
-			memcpy(new_blocks,
-			       array->blocks,
-			       sizeof(struct service_array_block *) *
-				       (blocks - 1));
+			for (size_t i = 0; i < blocks - 1; ++blocks) {
+				EQUATE_OFFSET(
+					new_blocks + i,
+					ADDR_OF(&array->blocks) + i
+				);
+			}
 		}
 
 		// create and initialize new block
@@ -84,15 +90,15 @@ service_array_push_back(
 
 		memset(new_block, 0, sizeof(struct service_array_block));
 
-		new_blocks[blocks - 1] = new_block;
+		SET_OFFSET_OF(&new_blocks[blocks - 1], new_block);
 
 		memory_bfree(
 			&array->mctx,
-			array->blocks,
+			ADDR_OF(&array->blocks),
 			sizeof(struct service_array_block *) * (blocks - 1)
 		);
 
-		array->blocks = new_blocks;
+		SET_OFFSET_OF(&array->blocks, new_blocks);
 	}
 
 	// initialize service
