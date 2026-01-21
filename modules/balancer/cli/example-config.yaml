@@ -9,13 +9,8 @@ packet_handler:
     # Demonstrates: flexible scheduler names, CIDR notation, multiple reals
     - addr: "192.0.2.1"
       port: 80
-<<<<<<< HEAD
-      proto: tcp
-      scheduler: wrr # Options: wrr, prr, wlc
-=======
       proto: TCP  # Accepts: TCP, tcp
       scheduler: SOURCE_HASH  # Accepts: SOURCE_HASH, source_hash, SH, sh
->>>>>>> d8c211fb (cli refactoring)
       flags:
         gre: false
         fix_mss: true
@@ -56,11 +51,7 @@ packet_handler:
         wlc: true  # Enable dynamic weight adjustment
       # Allow all IPv4 sources
       allowed_srcs:
-<<<<<<< HEAD
-        - "0.0.0.0/0" # Allow all sources
-=======
         - "0.0.0.0/0"
->>>>>>> d8c211fb (cli refactoring)
       reals:
         - ip: "10.2.1.1"
           port: 0
@@ -77,10 +68,6 @@ packet_handler:
           weight: 50
           src_addr: "192.0.2.2"
           src_mask: "255.255.255.255"
-<<<<<<< HEAD
-          enabled: false # Disabled real
-=======
->>>>>>> d8c211fb (cli refactoring)
       peers:
         - "192.0.2.10"
 
@@ -185,26 +172,9 @@ state:
   # WLC (Weighted Least Connections) configuration
   # Used when vs.flags.wlc = true
   wlc:
-<<<<<<< HEAD
-    power: 10
-    max_real_weight: 1000
-    update_period_ms: 5000
-
-# Module state configuration
-module_state_config:
-  # Maximum number of sessions in the session table
-  session_table_capacity: 1000000
-
-  # Period to scan the session table (in milliseconds)
-  session_table_scan_period_ms: 1000
-
-  # Maximum load factor for the session table (0.0 to 1.0)
-  session_table_max_load_factor: 0.75
-=======
     power: 10  # Adjustment aggressiveness
     max_weight: 1000  # Maximum weight after adjustment
   
   # Periodic refresh for session counting and weight adjustment
   # Set to 0 to disable
   refresh_period_ms: 5000  # 5 seconds
->>>>>>> d8c211fb (cli refactoring)
