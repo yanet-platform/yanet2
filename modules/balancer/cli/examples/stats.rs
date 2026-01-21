@@ -1,5 +1,5 @@
 //! Example: stats command output
-//! Run with: cargo run --example config_stats [format]
+//! Run with: cargo run --example stats [format]
 //! Where format is one of: table, tree, json (default: all formats)
 
 mod common;
@@ -16,13 +16,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match format {
         Some("table") => {
-            output::print_config_stats(&response, OutputFormat::Table)?;
+            output::print_show_stats(&response, OutputFormat::Table)?;
         }
         Some("tree") => {
-            output::print_config_stats(&response, OutputFormat::Tree)?;
+            output::print_show_stats(&response, OutputFormat::Tree)?;
         }
         Some("json") => {
-            output::print_config_stats(&response, OutputFormat::Json)?;
+            output::print_show_stats(&response, OutputFormat::Json)?;
         }
         Some(other) => {
             eprintln!("Unknown format: {}. Use: table, tree, or json", other);
@@ -30,13 +30,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         None => {
             println!("=== stats: Table format ===\n");
-            output::print_config_stats(&response, OutputFormat::Table)?;
+            output::print_show_stats(&response, OutputFormat::Table)?;
 
             println!("\n\n=== stats: Tree format ===\n");
-            output::print_config_stats(&response, OutputFormat::Tree)?;
+            output::print_show_stats(&response, OutputFormat::Tree)?;
 
             println!("\n\n=== stats: JSON format ===\n");
-            output::print_config_stats(&response, OutputFormat::Json)?;
+            output::print_show_stats(&response, OutputFormat::Json)?;
         }
     }
 

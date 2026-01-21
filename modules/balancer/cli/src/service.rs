@@ -39,8 +39,9 @@ impl BalancerService {
             Mode::Config(cmd) => self.config(cmd).await,
             Mode::List(cmd) => self.list(cmd).await,
             Mode::Stats(cmd) => self.stats(cmd).await,
-            Mode::State(cmd) => self.state(cmd).await,
+            Mode::Info(cmd) => self.info(cmd).await,
             Mode::Sessions(cmd) => self.sessions(cmd).await,
+            Mode::Graph(cmd) => self.graph(cmd).await,
         }
     }
 
@@ -49,12 +50,11 @@ impl BalancerService {
         log::info!("Loading configuration from: {}", cmd.config);
 
         let config = BalancerConfig::from_yaml_file(&cmd.config)?;
-        let (module_config, module_state_config) = config.try_into()?;
+        let balancer_config: balancerpb::BalancerConfig = config.try_into()?;
 
         let request = balancerpb::UpdateConfigRequest {
             name: cmd.name.clone(),
-            module_config: Some(module_config),
-            module_state_config: Some(module_state_config),
+            config: Some(balancer_config),
         };
 
         log::debug!("Sending UpdateConfig request");
@@ -150,21 +150,21 @@ impl BalancerService {
     async fn stats(&mut self, cmd: StatsCmd) -> Result<(), Box<dyn Error>> {
         log::debug!("Fetching statistics for '{}'", cmd.name);
 
-        let request: balancerpb::ConfigStatsRequest = (&cmd).into();
-        let response = self.client.config_stats(request).await?.into_inner();
+        let request: balancerpb::ShowStatsRequest = (&cmd).into();
+        let response = self.client.show_stats(request).await?.into_inner();
 
-        output::print_config_stats(&response, cmd.format.into())?;
+        output::print_show_stats(&response, cmd.format.into())?;
         Ok(())
     }
 
     /// Show state information
-    async fn state(&mut self, cmd: StateCmd) -> Result<(), Box<dyn Error>> {
+    async fn info(&mut self, cmd: InfoCmd) -> Result<(), Box<dyn Error>> {
         log::debug!("Fetching state info for '{}'", cmd.name);
 
-        let request: balancerpb::StateInfoRequest = (&cmd).into();
-        let response = self.client.state_info(request).await?.into_inner();
+        let request: balancerpb::ShowInfoRequest = (&cmd).into();
+        let response = self.client.show_info(request).await?.into_inner();
 
-        output::print_state_info(&response, cmd.format.into())?;
+        output::print_show_info(&response, cmd.format.into())?;
         Ok(())
     }
 
@@ -172,10 +172,20 @@ impl BalancerService {
     async fn sessions(&mut self, cmd: SessionsCmd) -> Result<(), Box<dyn Error>> {
         log::debug!("Fetching sessions info for '{}'", cmd.name);
 
-        let request: balancerpb::SessionsInfoRequest = (&cmd).into();
-        let response = self.client.sessions_info(request).await?.into_inner();
+        let request: balancerpb::ShowSessionsRequest = (&cmd).into();
+        let response = self.client.show_sessions(request).await?.into_inner();
 
-        output::print_sessions_info(&response, cmd.format.into())?;
+        output::print_show_sessions(&response, cmd.format.into())?;
+        Ok(())
+    }
+
+    async fn graph(&mut self, cmd: GraphCmd) -> Result<(), Box<dyn Error>> {
+        log::debug!("Fetching graph info for '{}'", cmd.name);
+
+        let request: balancerpb::ShowGraphRequest = (&cmd).into();
+        let response = self.client.show_graph(request).await?.into_inner();
+
+        output::print_show_graph(&response, cmd.format.into())?;
         Ok(())
     }
 }

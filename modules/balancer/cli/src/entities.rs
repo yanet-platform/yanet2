@@ -33,17 +33,47 @@ pub fn bytes_to_ip(bytes: &[u8]) -> Result<IpAddr, String> {
     }
 }
 
-/// Parse subnet string (e.g., "192.0.2.0/24")
-pub fn parse_subnet(s: &str) -> Result<balancerpb::Subnet, String> {
-    let parts: Vec<&str> = s.split('/').collect();
+/// Convert Addr protobuf message to IP address
+pub fn addr_to_ip(addr: &balancerpb::Addr) -> Result<IpAddr, String> {
+    bytes_to_ip(&addr.bytes)
+}
+
+/// Convert optional Addr protobuf message to IP address
+pub fn opt_addr_to_ip(addr: &Option<balancerpb::Addr>) -> Result<IpAddr, String> {
+    addr.as_ref()
+        .ok_or_else(|| "missing address".to_string())
+        .and_then(addr_to_ip)
+}
+
+/// Parse CIDR notation (e.g., "192.168.0.0/24")
+pub fn parse_cidr(cidr: &str) -> Result<(IpAddr, u32), String> {
+    let parts: Vec<&str> = cidr.split('/').collect();
     if parts.len() != 2 {
-        return Err(format!("invalid subnet format: {}", s));
+        return Err(format!(
+            "invalid CIDR format: '{}'. Expected format: '192.168.0.0/24'",
+            cidr
+        ));
     }
 
-    let addr: IpAddr = parts[0].parse().map_err(|e| format!("invalid subnet address: {}", e))?;
-    let size: u32 = parts[1].parse().map_err(|e| format!("invalid subnet size: {}", e))?;
+    let addr: IpAddr = parts[0]
+        .parse()
+        .map_err(|e| format!("invalid IP address in CIDR '{}': {}", cidr, e))?;
+    let size: u32 = parts[1]
+        .parse()
+        .map_err(|e| format!("invalid prefix length in CIDR '{}': {}", cidr, e))?;
 
-    Ok(balancerpb::Subnet { addr: ip_to_bytes(addr), size })
+    // Validate prefix length
+    match addr {
+        IpAddr::V4(_) if size > 32 => {
+            return Err(format!("invalid IPv4 prefix length: {} (max 32)", size));
+        }
+        IpAddr::V6(_) if size > 128 => {
+            return Err(format!("invalid IPv6 prefix length: {} (max 128)", size));
+        }
+        _ => {}
+    }
+
+    Ok((addr, size))
 }
 
 /// Format bytes as human-readable size
@@ -86,8 +116,13 @@ pub fn format_number(n: u64) -> String {
 /// Complete balancer configuration for YAML
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BalancerConfig {
-    pub module_config: ModuleConfig,
-    pub module_state_config: ModuleStateConfig,
+    /// Packet processing configuration (optional for UPDATE)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packet_handler: Option<PacketHandlerConfig>,
+
+    /// State management configuration (optional for UPDATE)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<StateConfig>,
 }
 
 impl BalancerConfig {
@@ -99,42 +134,97 @@ impl BalancerConfig {
     }
 }
 
-/// Module configuration
+/// Packet processing configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModuleConfig {
-    pub virtual_services: Vec<VirtualService>,
+pub struct PacketHandlerConfig {
+    pub vs: Vec<VirtualService>,
     pub source_address_v4: String,
     pub source_address_v6: String,
-    #[serde(default)]
     pub decap_addresses: Vec<String>,
-    #[serde(default)]
     pub sessions_timeouts: SessionsTimeouts,
-    #[serde(default)]
-    pub wlc: WlcConfig,
 }
 
-/// Module state configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModuleStateConfig {
-    pub session_table_capacity: u64,
-    pub session_table_scan_period_ms: u64,
-    pub session_table_max_load_factor: f32,
-}
-
-/// Virtual service configuration
+/// Virtual service configuration (flat structure in YAML)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VirtualService {
-    pub ip: String,
-    pub port: u16,
-    pub proto: String,
-    pub scheduler: String,
-    #[serde(default)]
+    // Flat fields (no nested 'id')
+    pub addr: String,
+    pub port: u32,
+    pub proto: Proto,
+
+    pub scheduler: Scheduler,
     pub flags: VsFlags,
+
+    /// Allowed source networks in CIDR notation
+    /// Empty list = allow NONE (reject all)
+    /// ["0.0.0.0/0"] = allow all IPv4
+    /// ["::/0"] = allow all IPv6
     #[serde(default)]
     pub allowed_srcs: Vec<String>,
+
     pub reals: Vec<Real>,
     #[serde(default)]
     pub peers: Vec<String>,
+}
+
+/// Real server configuration (flat structure in YAML)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Real {
+    // Flat fields (no nested 'id')
+    pub ip: String,
+    pub port: u32, // Reserved for future use
+
+    pub weight: u32,
+    pub src_addr: String,
+    pub src_mask: String,
+}
+
+/// Scheduler algorithm with flexible parsing
+#[derive(Debug, Clone, Serialize)]
+pub enum Scheduler {
+    SourceHash,
+    RoundRobin,
+}
+
+impl<'de> Deserialize<'de> for Scheduler {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.to_uppercase().as_str() {
+            "SOURCE_HASH" | "SH" => Ok(Scheduler::SourceHash),
+            "ROUND_ROBIN" | "RR" => Ok(Scheduler::RoundRobin),
+            _ => Err(serde::de::Error::custom(format!(
+                "invalid scheduler: '{}'. Expected: SOURCE_HASH, source_hash, SH, sh, ROUND_ROBIN, round_robin, RR, rr",
+                s
+            ))),
+        }
+    }
+}
+
+/// Protocol with flexible parsing
+#[derive(Debug, Clone, Serialize)]
+pub enum Proto {
+    Tcp,
+    Udp,
+}
+
+impl<'de> Deserialize<'de> for Proto {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.to_uppercase().as_str() {
+            "TCP" => Ok(Proto::Tcp),
+            "UDP" => Ok(Proto::Udp),
+            _ => Err(serde::de::Error::custom(format!(
+                "invalid protocol: '{}'. Expected: TCP, tcp, UDP, udp",
+                s
+            ))),
+        }
+    }
 }
 
 /// Virtual service flags
@@ -148,157 +238,100 @@ pub struct VsFlags {
     pub ops: bool,
     #[serde(default)]
     pub pure_l3: bool,
-}
-
-/// Real server configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Real {
-    pub weight: u32,
-    pub dst: String,
-    pub src: String,
-    pub src_mask: String,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-}
-
-fn default_true() -> bool {
-    true
+    #[serde(default)]
+    pub wlc: bool, // Dynamic weight adjustment flag
 }
 
 /// Session timeouts
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionsTimeouts {
-    #[serde(default = "default_timeout")]
     pub tcp_syn_ack: u32,
-    #[serde(default = "default_timeout")]
     pub tcp_syn: u32,
-    #[serde(default = "default_timeout")]
     pub tcp_fin: u32,
-    #[serde(default = "default_tcp_timeout")]
     pub tcp: u32,
-    #[serde(default = "default_udp_timeout")]
     pub udp: u32,
-    #[serde(default = "default_default_timeout")]
     pub default: u32,
 }
 
-fn default_timeout() -> u32 {
-    10
-}
-fn default_tcp_timeout() -> u32 {
-    60
-}
-fn default_udp_timeout() -> u32 {
-    30
-}
-fn default_default_timeout() -> u32 {
-    60
+/// State management configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateConfig {
+    /// Session table configuration (optional in UPDATE)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_table: Option<SessionTableConfig>,
+
+    /// WLC configuration (optional in UPDATE)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wlc: Option<WlcConfig>,
+
+    /// Refresh period in milliseconds (optional in UPDATE)
+    /// Set to 0 to disable periodic refresh
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_period_ms: Option<u64>,
 }
 
-impl Default for SessionsTimeouts {
-    fn default() -> Self {
-        Self {
-            tcp_syn_ack: default_timeout(),
-            tcp_syn: default_timeout(),
-            tcp_fin: default_timeout(),
-            tcp: default_tcp_timeout(),
-            udp: default_udp_timeout(),
-            default: default_default_timeout(),
-        }
-    }
+/// Session table configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionTableConfig {
+    pub capacity: u64,
+    pub max_load_factor: f32,
 }
 
 /// WLC configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WlcConfig {
-    #[serde(default = "default_wlc_power")]
-    pub power: u64,
-    #[serde(default = "default_max_real_weight")]
-    pub max_real_weight: u32,
-    #[serde(default = "default_update_period_ms")]
-    pub update_period_ms: u64,
-}
-
-fn default_wlc_power() -> u64 {
-    10
-}
-fn default_max_real_weight() -> u32 {
-    1000
-}
-fn default_update_period_ms() -> u64 {
-    5000
-}
-
-impl Default for WlcConfig {
-    fn default() -> Self {
-        Self {
-            power: default_wlc_power(),
-            max_real_weight: default_max_real_weight(),
-            update_period_ms: default_update_period_ms(),
-        }
-    }
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub power: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_weight: Option<u32>,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Conversion to protobuf
 ////////////////////////////////////////////////////////////////////////////////
 
-impl TryFrom<BalancerConfig> for (balancerpb::ModuleConfig, balancerpb::ModuleStateConfig) {
+impl TryFrom<BalancerConfig> for balancerpb::BalancerConfig {
     type Error = String;
 
     fn try_from(config: BalancerConfig) -> Result<Self, Self::Error> {
-        let module_config = config.module_config.try_into()?;
-        let module_state_config = config.module_state_config.into();
-        Ok((module_config, module_state_config))
+        Ok(Self {
+            packet_handler: config.packet_handler.map(TryInto::try_into).transpose()?,
+            state: config.state.map(Into::into),
+        })
     }
 }
 
-impl TryFrom<ModuleConfig> for balancerpb::ModuleConfig {
+impl TryFrom<PacketHandlerConfig> for balancerpb::PacketHandlerConfig {
     type Error = String;
 
-    fn try_from(config: ModuleConfig) -> Result<Self, Self::Error> {
-        let virtual_services: Result<Vec<_>, String> =
-            config.virtual_services.into_iter().map(TryInto::try_into).collect();
+    fn try_from(config: PacketHandlerConfig) -> Result<Self, Self::Error> {
+        let virtual_services: Result<Vec<_>, String> = config.vs.into_iter().map(TryInto::try_into).collect();
 
         let source_v4: Ipv4Addr = config
             .source_address_v4
             .parse()
-            .map_err(|e| format!("invalid IPv4: {}", e))?;
+            .map_err(|e| format!("invalid source IPv4 '{}': {}", config.source_address_v4, e))?;
         let source_v6: Ipv6Addr = config
             .source_address_v6
             .parse()
-            .map_err(|e| format!("invalid IPv6: {}", e))?;
+            .map_err(|e| format!("invalid source IPv6 '{}': {}", config.source_address_v6, e))?;
 
         let decap: Result<Vec<_>, String> = config
             .decap_addresses
             .into_iter()
             .map(|s| {
-                let addr: IpAddr = s.parse().map_err(|e| format!("invalid decap IP: {}", e))?;
-                Ok(ip_to_bytes(addr))
+                let addr: IpAddr = s.parse().map_err(|e| format!("invalid decap IP '{}': {}", s, e))?;
+                Ok(balancerpb::Addr { bytes: ip_to_bytes(addr) })
             })
             .collect();
 
         Ok(Self {
-            virtual_services: virtual_services?,
-            source_address_v4: source_v4.octets().to_vec(),
-            source_address_v6: source_v6.octets().to_vec(),
+            vs: virtual_services?,
+            source_address_v4: Some(balancerpb::Addr { bytes: source_v4.octets().to_vec() }),
+            source_address_v6: Some(balancerpb::Addr { bytes: source_v6.octets().to_vec() }),
             decap_addresses: decap?,
             sessions_timeouts: Some(config.sessions_timeouts.into()),
-            wlc: Some(config.wlc.into()),
         })
-    }
-}
-
-impl From<ModuleStateConfig> for balancerpb::ModuleStateConfig {
-    fn from(config: ModuleStateConfig) -> Self {
-        Self {
-            session_table_capacity: config.session_table_capacity,
-            session_table_scan_period: Some(prost_types::Duration {
-                seconds: (config.session_table_scan_period_ms / 1000) as i64,
-                nanos: ((config.session_table_scan_period_ms % 1000) * 1_000_000) as i32,
-            }),
-            session_table_max_load_factor: config.session_table_max_load_factor,
-        }
     }
 }
 
@@ -306,41 +339,57 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
     type Error = String;
 
     fn try_from(vs: VirtualService) -> Result<Self, Self::Error> {
-        let addr: IpAddr = vs.ip.parse().map_err(|e| format!("invalid IP: {}", e))?;
+        let addr: IpAddr = vs
+            .addr
+            .parse()
+            .map_err(|e| format!("invalid VS IP address '{}': {}", vs.addr, e))?;
 
-        let proto = match vs.proto.to_lowercase().as_str() {
-            "tcp" => balancerpb::TransportProto::Tcp,
-            "udp" => balancerpb::TransportProto::Udp,
-            _ => return Err(format!("invalid proto: {}", vs.proto)),
+        let proto = match vs.proto {
+            Proto::Tcp => balancerpb::TransportProto::Tcp,
+            Proto::Udp => balancerpb::TransportProto::Udp,
         };
 
-        let scheduler = match vs.scheduler.to_lowercase().as_str() {
-            "wrr" => balancerpb::VsScheduler::Wrr,
-            "prr" => balancerpb::VsScheduler::Prr,
-            "wlc" => balancerpb::VsScheduler::Wlc,
-            _ => return Err(format!("invalid scheduler: {}", vs.scheduler)),
+        let scheduler = match vs.scheduler {
+            Scheduler::SourceHash => balancerpb::VsScheduler::SourceHash,
+            Scheduler::RoundRobin => balancerpb::VsScheduler::RoundRobin,
         };
 
-        let allowed_srcs: Result<Vec<_>, String> = vs.allowed_srcs.into_iter().map(|s| parse_subnet(&s)).collect();
-
-        let peers: Result<Vec<_>, String> = vs
-            .peers
-            .into_iter()
-            .map(|p| {
-                let addr: IpAddr = p.parse().map_err(|e| format!("invalid peer IP: {}", e))?;
-                Ok(ip_to_bytes(addr))
+        // Parse CIDR notation for allowed sources
+        let allowed_srcs: Result<Vec<_>, String> = vs
+            .allowed_srcs
+            .iter()
+            .map(|cidr| {
+                let (addr, size) = parse_cidr(cidr)?;
+                Ok(balancerpb::Net {
+                    addr: Some(balancerpb::Addr { bytes: ip_to_bytes(addr) }),
+                    size,
+                })
             })
             .collect();
 
-        let reals: Vec<_> = vs.reals.into_iter().map(Into::into).collect();
+        let peers: Result<Vec<_>, String> = vs
+            .peers
+            .iter()
+            .map(|p| {
+                let ip: IpAddr = p.parse().map_err(|e| format!("invalid peer IP '{}': {}", p, e))?;
+                Ok(balancerpb::Addr { bytes: ip_to_bytes(ip) })
+            })
+            .collect();
+
+        let reals: Result<Vec<_>, String> = vs.reals.into_iter().map(TryInto::try_into).collect();
+
+        // Create VsIdentifier from flat fields
+        let id = Some(balancerpb::VsIdentifier {
+            addr: Some(balancerpb::Addr { bytes: ip_to_bytes(addr) }),
+            port: vs.port,
+            proto: proto as i32,
+        });
 
         Ok(Self {
-            addr: ip_to_bytes(addr),
-            port: vs.port as u32,
-            proto: proto as i32,
+            id,
             scheduler: scheduler as i32,
             allowed_srcs: allowed_srcs?,
-            reals,
+            reals: reals?,
             flags: Some(vs.flags.into()),
             peers: peers?,
         })
@@ -354,24 +403,40 @@ impl From<VsFlags> for balancerpb::VsFlags {
             fix_mss: flags.fix_mss,
             ops: flags.ops,
             pure_l3: flags.pure_l3,
+            wlc: flags.wlc,
         }
     }
 }
 
-impl From<Real> for balancerpb::Real {
-    fn from(real: Real) -> Self {
-        let dst_addr: IpAddr = real.dst.parse().expect("invalid dst address");
-        let src_addr: IpAddr = real.src.parse().expect("invalid src address");
-        let src_mask: IpAddr = real.src_mask.parse().expect("invalid src mask");
+impl TryFrom<Real> for balancerpb::Real {
+    type Error = String;
 
-        Self {
+    fn try_from(real: Real) -> Result<Self, Self::Error> {
+        let ip: IpAddr = real
+            .ip
+            .parse()
+            .map_err(|e| format!("invalid real IP '{}': {}", real.ip, e))?;
+        let src_addr: IpAddr = real
+            .src_addr
+            .parse()
+            .map_err(|e| format!("invalid src address '{}': {}", real.src_addr, e))?;
+        let src_mask: IpAddr = real
+            .src_mask
+            .parse()
+            .map_err(|e| format!("invalid src mask '{}': {}", real.src_mask, e))?;
+
+        // Create RelativeRealIdentifier from flat fields
+        let id = Some(balancerpb::RelativeRealIdentifier {
+            ip: Some(balancerpb::Addr { bytes: ip_to_bytes(ip) }),
+            port: real.port,
+        });
+
+        Ok(Self {
+            id,
             weight: real.weight,
-            dst_addr: ip_to_bytes(dst_addr),
-            src_addr: ip_to_bytes(src_addr),
-            src_mask: ip_to_bytes(src_mask),
-            enabled: real.enabled,
-            port: 0, // Not used
-        }
+            src_addr: Some(balancerpb::Addr { bytes: ip_to_bytes(src_addr) }),
+            src_mask: Some(balancerpb::Addr { bytes: ip_to_bytes(src_mask) }),
+        })
     }
 }
 
@@ -388,427 +453,25 @@ impl From<SessionsTimeouts> for balancerpb::SessionsTimeouts {
     }
 }
 
-impl From<WlcConfig> for balancerpb::WlcConfig {
-    fn from(config: WlcConfig) -> Self {
+impl From<StateConfig> for balancerpb::StateConfig {
+    fn from(config: StateConfig) -> Self {
         Self {
-            wlc_power: config.power,
-            max_real_weight: config.max_real_weight,
-            update_period: Some(prost_types::Duration {
-                seconds: (config.update_period_ms / 1000) as i64,
-                nanos: ((config.update_period_ms % 1000) * 1_000_000) as i32,
+            session_table_capacity: config.session_table.as_ref().map(|st| st.capacity),
+            session_table_max_load_factor: config.session_table.as_ref().map(|st| st.max_load_factor),
+            wlc: config.wlc.map(Into::into),
+            refresh_period: config.refresh_period_ms.map(|ms| prost_types::Duration {
+                seconds: (ms / 1000) as i64,
+                nanos: ((ms % 1000) * 1_000_000) as i32,
             }),
         }
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Tests
-////////////////////////////////////////////////////////////////////////////////
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const TEST_BALANCER_YAML: &str = r#"
-# Example Balancer Configuration
-
-# Module configuration
-module_config:
-  # Virtual services configuration
-  virtual_services:
-    # Example HTTP service
-    - ip: "192.0.2.1"
-      port: 80
-      proto: tcp
-      scheduler: wrr  # Options: wrr, prr, wlc
-      flags:
-        gre: false
-        fix_mss: true
-        ops: false
-        pure_l3: false
-      allowed_srcs:
-        - "10.0.0.0/8"
-        - "172.16.0.0/12"
-      reals:
-        - weight: 100
-          dst: "10.1.1.1"
-          src: "192.0.2.1"
-          src_mask: "255.255.255.255"
-          enabled: true
-        - weight: 50
-          dst: "10.1.1.2"
-          src: "192.0.2.1"
-          src_mask: "255.255.255.255"
-          enabled: true
-      peers:
-        - "192.0.2.10"
-        - "192.0.2.11"
-
-    # Example HTTPS service with WLC scheduler
-    - ip: "192.0.2.2"
-      port: 443
-      proto: tcp
-      scheduler: wlc
-      flags:
-        gre: false
-        fix_mss: true
-        ops: false
-        pure_l3: false
-      allowed_srcs:
-        - "0.0.0.0/0"  # Allow all sources
-      reals:
-        - weight: 100
-          dst: "10.2.1.1"
-          src: "192.0.2.2"
-          src_mask: "255.255.255.255"
-          enabled: true
-        - weight: 100
-          dst: "10.2.1.2"
-          src: "192.0.2.2"
-          src_mask: "255.255.255.255"
-          enabled: true
-        - weight: 50
-          dst: "10.2.1.3"
-          src: "192.0.2.2"
-          src_mask: "255.255.255.255"
-          enabled: false  # Disabled real
-      peers:
-        - "192.0.2.10"
-
-    # Example UDP service
-    - ip: "192.0.2.3"
-      port: 53
-      proto: udp
-      scheduler: prr
-      flags:
-        gre: false
-        fix_mss: false
-        ops: true
-        pure_l3: false
-      allowed_srcs:
-        - "10.0.0.0/8"
-      reals:
-        - weight: 1
-          dst: "10.3.1.1"
-          src: "192.0.2.3"
-          src_mask: "255.255.255.255"
-          enabled: true
-        - weight: 1
-          dst: "10.3.1.2"
-          src: "192.0.2.3"
-          src_mask: "255.255.255.255"
-          enabled: true
-      peers: []
-
-  # Source addresses for the balancer
-  source_address_v4: "192.0.2.1"
-  source_address_v6: "2001:db8::1"
-
-  # Addresses for decapsulation
-  decap_addresses:
-    - "192.0.2.1"
-    - "2001:db8::1"
-
-  # Session timeouts (in seconds)
-  sessions_timeouts:
-    tcp_syn_ack: 10
-    tcp_syn: 10
-    tcp_fin: 10
-    tcp: 60
-    udp: 30
-    default: 60
-
-  # Weighted Least Connections configuration
-  wlc:
-    power: 10
-    max_real_weight: 1000
-    update_period_ms: 5000
-
-# Module state configuration
-module_state_config:
-  # Maximum number of sessions in the session table
-  # (can be extended on demand automatically)
-  session_table_capacity: 1000
-
-  # Period to scan the session table (in milliseconds)
-  session_table_scan_period_ms: 1000
-
-  # Maximum load factor for the session table (0.0 to 1.0)
-  session_table_max_load_factor: 0.75
-"#;
-
-    #[test]
-    fn test_parse_balancer_config() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        // Verify module_config exists
-        assert!(!config.module_config.virtual_services.is_empty());
-        assert_eq!(config.module_config.virtual_services.len(), 3);
-    }
-
-    #[test]
-    fn test_module_config_source_addresses() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        assert_eq!(config.module_config.source_address_v4, "192.0.2.1");
-        assert_eq!(config.module_config.source_address_v6, "2001:db8::1");
-    }
-
-    #[test]
-    fn test_module_config_decap_addresses() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        assert_eq!(config.module_config.decap_addresses.len(), 2);
-        assert_eq!(config.module_config.decap_addresses[0], "192.0.2.1");
-        assert_eq!(config.module_config.decap_addresses[1], "2001:db8::1");
-    }
-
-    #[test]
-    fn test_virtual_service_http() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let vs = &config.module_config.virtual_services[0];
-        assert_eq!(vs.ip, "192.0.2.1");
-        assert_eq!(vs.port, 80);
-        assert_eq!(vs.proto, "tcp");
-        assert_eq!(vs.scheduler, "wrr");
-
-        // Check flags
-        assert!(!vs.flags.gre);
-        assert!(vs.flags.fix_mss);
-        assert!(!vs.flags.ops);
-        assert!(!vs.flags.pure_l3);
-
-        // Check allowed sources
-        assert_eq!(vs.allowed_srcs.len(), 2);
-        assert_eq!(vs.allowed_srcs[0], "10.0.0.0/8");
-        assert_eq!(vs.allowed_srcs[1], "172.16.0.0/12");
-
-        // Check peers
-        assert_eq!(vs.peers.len(), 2);
-        assert_eq!(vs.peers[0], "192.0.2.10");
-        assert_eq!(vs.peers[1], "192.0.2.11");
-    }
-
-    #[test]
-    fn test_virtual_service_https() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let vs = &config.module_config.virtual_services[1];
-        assert_eq!(vs.ip, "192.0.2.2");
-        assert_eq!(vs.port, 443);
-        assert_eq!(vs.proto, "tcp");
-        assert_eq!(vs.scheduler, "wlc");
-
-        // Check allowed sources
-        assert_eq!(vs.allowed_srcs.len(), 1);
-        assert_eq!(vs.allowed_srcs[0], "0.0.0.0/0");
-
-        // Check peers
-        assert_eq!(vs.peers.len(), 1);
-        assert_eq!(vs.peers[0], "192.0.2.10");
-    }
-
-    #[test]
-    fn test_virtual_service_udp() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let vs = &config.module_config.virtual_services[2];
-        assert_eq!(vs.ip, "192.0.2.3");
-        assert_eq!(vs.port, 53);
-        assert_eq!(vs.proto, "udp");
-        assert_eq!(vs.scheduler, "prr");
-
-        // Check flags
-        assert!(!vs.flags.gre);
-        assert!(!vs.flags.fix_mss);
-        assert!(vs.flags.ops);
-        assert!(!vs.flags.pure_l3);
-
-        // Check peers (empty)
-        assert_eq!(vs.peers.len(), 0);
-    }
-
-    #[test]
-    fn test_real_servers_http() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let vs = &config.module_config.virtual_services[0];
-        assert_eq!(vs.reals.len(), 2);
-
-        // First real
-        let real1 = &vs.reals[0];
-        assert_eq!(real1.weight, 100);
-        assert_eq!(real1.dst, "10.1.1.1");
-        assert_eq!(real1.src, "192.0.2.1");
-        assert_eq!(real1.src_mask, "255.255.255.255");
-        assert!(real1.enabled);
-
-        // Second real
-        let real2 = &vs.reals[1];
-        assert_eq!(real2.weight, 50);
-        assert_eq!(real2.dst, "10.1.1.2");
-        assert_eq!(real2.src, "192.0.2.1");
-        assert_eq!(real2.src_mask, "255.255.255.255");
-        assert!(real2.enabled);
-    }
-
-    #[test]
-    fn test_real_servers_https_with_disabled() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let vs = &config.module_config.virtual_services[1];
-        assert_eq!(vs.reals.len(), 3);
-
-        // First two reals are enabled
-        assert!(vs.reals[0].enabled);
-        assert_eq!(vs.reals[0].weight, 100);
-        assert_eq!(vs.reals[0].dst, "10.2.1.1");
-
-        assert!(vs.reals[1].enabled);
-        assert_eq!(vs.reals[1].weight, 100);
-        assert_eq!(vs.reals[1].dst, "10.2.1.2");
-
-        // Third real is disabled
-        assert!(!vs.reals[2].enabled);
-        assert_eq!(vs.reals[2].weight, 50);
-        assert_eq!(vs.reals[2].dst, "10.2.1.3");
-    }
-
-    #[test]
-    fn test_real_servers_udp() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let vs = &config.module_config.virtual_services[2];
-        assert_eq!(vs.reals.len(), 2);
-
-        // Both reals have weight 1
-        assert_eq!(vs.reals[0].weight, 1);
-        assert_eq!(vs.reals[0].dst, "10.3.1.1");
-        assert!(vs.reals[0].enabled);
-
-        assert_eq!(vs.reals[1].weight, 1);
-        assert_eq!(vs.reals[1].dst, "10.3.1.2");
-        assert!(vs.reals[1].enabled);
-    }
-
-    #[test]
-    fn test_sessions_timeouts() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let timeouts = &config.module_config.sessions_timeouts;
-        assert_eq!(timeouts.tcp_syn_ack, 10);
-        assert_eq!(timeouts.tcp_syn, 10);
-        assert_eq!(timeouts.tcp_fin, 10);
-        assert_eq!(timeouts.tcp, 60);
-        assert_eq!(timeouts.udp, 30);
-        assert_eq!(timeouts.default, 60);
-    }
-
-    #[test]
-    fn test_wlc_config() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let wlc = &config.module_config.wlc;
-        assert_eq!(wlc.power, 10);
-        assert_eq!(wlc.max_real_weight, 1000);
-        assert_eq!(wlc.update_period_ms, 5000);
-    }
-
-    #[test]
-    fn test_module_state_config() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let state_config = &config.module_state_config;
-        assert_eq!(state_config.session_table_capacity, 1000);
-        assert_eq!(state_config.session_table_scan_period_ms, 1000);
-        assert_eq!(state_config.session_table_max_load_factor, 0.75);
-    }
-
-    #[test]
-    fn test_config_conversion_to_protobuf() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let result: Result<(balancerpb::ModuleConfig, balancerpb::ModuleStateConfig), _> = config.try_into();
-        assert!(result.is_ok(), "Failed to convert config to protobuf");
-
-        let (module_config, module_state_config) = result.unwrap();
-
-        // Verify module_config
-        assert_eq!(module_config.virtual_services.len(), 3);
-        assert_eq!(module_config.source_address_v4.len(), 4); // IPv4 is 4 bytes
-        assert_eq!(module_config.source_address_v6.len(), 16); // IPv6 is 16 bytes
-        assert_eq!(module_config.decap_addresses.len(), 2);
-        assert!(module_config.sessions_timeouts.is_some());
-        assert!(module_config.wlc.is_some());
-
-        // Verify module_state_config
-        assert_eq!(module_state_config.session_table_capacity, 1000);
-        assert!(module_state_config.session_table_scan_period.is_some());
-        assert_eq!(module_state_config.session_table_max_load_factor, 0.75);
-    }
-
-    #[test]
-    fn test_protobuf_virtual_services() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let (module_config, _) = config.try_into().expect("Failed to convert to protobuf");
-
-        // Check first VS (HTTP)
-        let vs1 = &module_config.virtual_services[0];
-        assert_eq!(vs1.port, 80);
-        assert_eq!(vs1.proto, balancerpb::TransportProto::Tcp as i32);
-        assert_eq!(vs1.scheduler, balancerpb::VsScheduler::Wrr as i32);
-        assert_eq!(vs1.reals.len(), 2);
-        assert_eq!(vs1.allowed_srcs.len(), 2);
-        assert_eq!(vs1.peers.len(), 2);
-
-        // Check second VS (HTTPS)
-        let vs2 = &module_config.virtual_services[1];
-        assert_eq!(vs2.port, 443);
-        assert_eq!(vs2.proto, balancerpb::TransportProto::Tcp as i32);
-        assert_eq!(vs2.scheduler, balancerpb::VsScheduler::Wlc as i32);
-        assert_eq!(vs2.reals.len(), 3);
-
-        // Check third VS (UDP)
-        let vs3 = &module_config.virtual_services[2];
-        assert_eq!(vs3.port, 53);
-        assert_eq!(vs3.proto, balancerpb::TransportProto::Udp as i32);
-        assert_eq!(vs3.scheduler, balancerpb::VsScheduler::Prr as i32);
-        assert_eq!(vs3.reals.len(), 2);
-    }
-
-    #[test]
-    fn test_protobuf_real_enabled_disabled() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let (module_config, _) = config.try_into().expect("Failed to convert to protobuf");
-
-        // Check HTTPS service with disabled real
-        let vs = &module_config.virtual_services[1];
-        assert!(vs.reals[0].enabled); // First real is enabled
-        assert!(vs.reals[1].enabled); // Second real is enabled
-        assert!(!vs.reals[2].enabled); // Third real is disabled
-    }
-
-    #[test]
-    fn test_protobuf_vs_flags() {
-        let config: BalancerConfig = serde_yaml::from_str(TEST_BALANCER_YAML).expect("Failed to parse YAML");
-
-        let (module_config, _) = config.try_into().expect("Failed to convert to protobuf");
-
-        // Check HTTP service flags
-        let vs1_flags = module_config.virtual_services[0].flags.as_ref().unwrap();
-        assert!(!vs1_flags.gre);
-        assert!(vs1_flags.fix_mss);
-        assert!(!vs1_flags.ops);
-        assert!(!vs1_flags.pure_l3);
-
-        // Check UDP service flags
-        let vs3_flags = module_config.virtual_services[2].flags.as_ref().unwrap();
-        assert!(!vs3_flags.gre);
-        assert!(!vs3_flags.fix_mss);
-        assert!(vs3_flags.ops);
-        assert!(!vs3_flags.pure_l3);
+impl From<WlcConfig> for balancerpb::WlcConfig {
+    fn from(config: WlcConfig) -> Self {
+        Self {
+            power: config.power,
+            max_weight: config.max_weight,
+        }
     }
 }

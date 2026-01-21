@@ -1,5 +1,5 @@
 //! Example: sessions command output
-//! Run with: cargo run --example sessions_info [format]
+//! Run with: cargo run --example sessions [format]
 //! Where format is one of: table, tree, json (default: all formats)
 
 mod common;
@@ -16,13 +16,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match format {
         Some("table") => {
-            output::print_sessions_info(&response, OutputFormat::Table)?;
+            output::print_show_sessions(&response, OutputFormat::Table)?;
         }
         Some("tree") => {
-            output::print_sessions_info(&response, OutputFormat::Tree)?;
+            output::print_show_sessions(&response, OutputFormat::Tree)?;
         }
         Some("json") => {
-            output::print_sessions_info(&response, OutputFormat::Json)?;
+            output::print_show_sessions(&response, OutputFormat::Json)?;
         }
         Some(other) => {
             eprintln!("Unknown format: {}. Use: table, tree, or json", other);
@@ -30,13 +30,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         None => {
             println!("=== sessions: Table format ===\n");
-            output::print_sessions_info(&response, OutputFormat::Table)?;
+            output::print_show_sessions(&response, OutputFormat::Table)?;
 
             println!("\n\n=== sessions: Tree format ===\n");
-            output::print_sessions_info(&response, OutputFormat::Tree)?;
+            output::print_show_sessions(&response, OutputFormat::Tree)?;
 
             println!("\n\n=== sessions: JSON format ===\n");
-            output::print_sessions_info(&response, OutputFormat::Json)?;
+            output::print_show_sessions(&response, OutputFormat::Json)?;
         }
     }
 

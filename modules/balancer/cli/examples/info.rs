@@ -16,13 +16,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match format {
         Some("table") => {
-            output::print_state_info(&response, OutputFormat::Table)?;
+            output::print_show_info(&response, OutputFormat::Table)?;
         }
         Some("tree") => {
-            output::print_state_info(&response, OutputFormat::Tree)?;
+            output::print_show_info(&response, OutputFormat::Tree)?;
         }
         Some("json") => {
-            output::print_state_info(&response, OutputFormat::Json)?;
+            output::print_show_info(&response, OutputFormat::Json)?;
         }
         Some(other) => {
             eprintln!("Unknown format: {}. Use: table, tree, or json", other);
@@ -30,13 +30,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         None => {
             println!("=== state: Table format ===\n");
-            output::print_state_info(&response, OutputFormat::Table)?;
+            output::print_show_info(&response, OutputFormat::Table)?;
 
             println!("\n\n=== state: Tree format ===\n");
-            output::print_state_info(&response, OutputFormat::Tree)?;
+            output::print_show_info(&response, OutputFormat::Tree)?;
 
             println!("\n\n=== state: JSON format ===\n");
-            output::print_state_info(&response, OutputFormat::Json)?;
+            output::print_show_info(&response, OutputFormat::Json)?;
         }
     }
 
