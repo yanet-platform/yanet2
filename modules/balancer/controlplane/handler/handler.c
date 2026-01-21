@@ -456,7 +456,7 @@ init_vs_filters(
 
 	return res;
 
-cleanup_error:	
+cleanup_error:
 	// Cleanup on error
 	for (size_t i = 0; i < v4_idx; ++i) {
 		free(v4_rules[i].net4.dsts);
@@ -470,7 +470,7 @@ cleanup_error:
 	free(v6_rules);
 
 	NEW_ERROR("failed to allocate filter rule components");
-	
+
 	return -1;
 }
 
