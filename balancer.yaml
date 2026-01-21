@@ -148,7 +148,7 @@ packet_handler:
   source_address_v4: "192.0.2.1"
   source_address_v6: "2001:db8::1"
   
-  # Addresses for decapsulation (return traffic)
+  # Addresses for decapsulation
   decap_addresses:
     - "192.0.2.1"
     - "2001:db8::1"
