@@ -16,9 +16,9 @@ import (
 func TestBalancerAgent(t *testing.T) {
 	// Create mock Yanet instance
 	m, err := mock.NewYanetMock(&mock.YanetMockConfig{
-		CpMemory: 1 << 27,
-		DpMemory: 1 << 24,
-		Workers:  1,
+		AgentsMemory: 1 << 27,
+		DpMemory:     1 << 24,
+		Workers:      1,
 		Devices: []mock.YanetMockDeviceConfig{
 			{
 				Id:   0,

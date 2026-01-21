@@ -26,13 +26,9 @@
 FILTER_QUERY_DECLARE(VS_V4_TABLE_TAG, net4_dst, port_dst, proto);
 
 static inline uint32_t
-vs_v4_table_lookup(
-	struct packet_handler *handler, struct packet *packet
-) {
+vs_v4_table_lookup(struct packet_handler *handler, struct packet *packet) {
 	struct value_range *result;
-	FILTER_QUERY(
-		&handler->vs_v4, VS_V4_TABLE_TAG, &packet, &result, 1
-	);
+	FILTER_QUERY(&handler->vs_v4, VS_V4_TABLE_TAG, &packet, &result, 1);
 	if (result->count == 0) {
 		return -1;
 	}
@@ -48,13 +44,9 @@ vs_v4_table_lookup(
 FILTER_QUERY_DECLARE(VS_V6_TABLE_TAG, net6_dst, port_dst, proto);
 
 static inline uint32_t
-vs_v6_table_lookup(
-	struct packet_handler *handler, struct packet *packet
-) {
+vs_v6_table_lookup(struct packet_handler *handler, struct packet *packet) {
 	struct value_range *result;
-	FILTER_QUERY(
-		&handler->vs_v6, VS_V6_TABLE_TAG, &packet, &result, 1
-	);
+	FILTER_QUERY(&handler->vs_v6, VS_V6_TABLE_TAG, &packet, &result, 1);
 	if (result->count == 0) {
 		return -1;
 	}

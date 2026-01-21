@@ -21,9 +21,9 @@ var balancerName string = "balancer0"
 
 func TestManager(t *testing.T) {
 	m, err := mock.NewYanetMock(&mock.YanetMockConfig{
-		CpMemory: 1 << 27,
-		DpMemory: 1 << 24,
-		Workers:  1,
+		AgentsMemory: 1 << 27,
+		DpMemory:     1 << 24,
+		Workers:      1,
 		Devices: []mock.YanetMockDeviceConfig{
 			{
 				Id:   0,
@@ -834,9 +834,9 @@ func TestManager(t *testing.T) {
 // TestMergeBalancerConfigRecursive tests recursive merging of balancer configuration
 func TestMergeBalancerConfigRecursive(t *testing.T) {
 	m, err := mock.NewYanetMock(&mock.YanetMockConfig{
-		CpMemory: 1 << 27,
-		DpMemory: 1 << 24,
-		Workers:  1,
+		AgentsMemory: 1 << 27,
+		DpMemory:     1 << 24,
+		Workers:      1,
 		Devices: []mock.YanetMockDeviceConfig{
 			{
 				Id:   0,

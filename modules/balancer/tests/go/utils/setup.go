@@ -32,9 +32,9 @@ func SingleWorkerMockConfig(
 	dpMemory datasize.ByteSize,
 ) *mock.YanetMockConfig {
 	return &mock.YanetMockConfig{
-		CpMemory: cpMemory,
-		DpMemory: dpMemory,
-		Workers:  1,
+		AgentsMemory: cpMemory,
+		DpMemory:     dpMemory,
+		Workers:      1,
 		Devices: []mock.YanetMockDeviceConfig{
 			{
 				Id:   0,
@@ -51,7 +51,7 @@ type TestSetup struct {
 }
 
 func Make(config *TestConfig) (*TestSetup, error) {
-	if config.Mock.CpMemory < 8*datasize.MB {
+	if config.Mock.AgentsMemory < 8*datasize.MB {
 		return nil, fmt.Errorf("CP memory must be at least 8MB")
 	}
 	mock, err := mock.NewYanetMock(config.Mock)

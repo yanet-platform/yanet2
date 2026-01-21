@@ -14,9 +14,9 @@ import (
 func TestAgent(t *testing.T) {
 	// Create mock
 	m, err := mock.NewYanetMock(&mock.YanetMockConfig{
-		CpMemory: 1 << 28,
-		DpMemory: 1 << 24,
-		Workers:  1,
+		AgentsMemory: 1 << 28,
+		DpMemory:     1 << 24,
+		Workers:      1,
 		Devices: []mock.YanetMockDeviceConfig{
 			{
 				Id:   0,
