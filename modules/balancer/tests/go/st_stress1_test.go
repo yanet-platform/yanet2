@@ -125,7 +125,12 @@ func executeTestCase(t *testing.T, config *stressConfig, test *testCase) {
 		assert.Equal(t, uint64(0), info.Vs[0].ActiveSessions)
 
 		// Verify real services active sessions
-		require.Equal(t, 1, len(info.Vs[0].Reals), "should have exactly one Real")
+		require.Equal(
+			t,
+			1,
+			len(info.Vs[0].Reals),
+			"should have exactly one Real",
+		)
 		assert.Equal(t, uint64(0), info.Vs[0].Reals[0].ActiveSessions)
 	})
 
@@ -245,7 +250,8 @@ func executeTestCase(t *testing.T, config *stressConfig, test *testCase) {
 			if batch%logPeriod == 0 || batch+1 == test.numBatches {
 				currentConfig := config.ts.Balancer.Config()
 				currentCapacity := uint64(0)
-				if currentConfig.State != nil && currentConfig.State.SessionTableCapacity != nil {
+				if currentConfig.State != nil &&
+					currentConfig.State.SessionTableCapacity != nil {
 					currentCapacity = *currentConfig.State.SessionTableCapacity
 				}
 
@@ -375,7 +381,8 @@ func TestSessionTableStress1(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8, // Allow all 10.x.x.x addresses
 						},
@@ -401,7 +408,8 @@ func TestSessionTableStress1(t *testing.T) {
 								Bytes: netip.MustParseAddr("4.4.4.4").AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -421,7 +429,9 @@ func TestSessionTableStress1(t *testing.T) {
 		State: &balancerpb.StateConfig{
 			SessionTableCapacity:      func() *uint64 { v := uint64(defaultCapacity); return &v }(),
 			SessionTableMaxLoadFactor: func() *float32 { v := float32(maxLoadFactor); return &v }(),
-			RefreshPeriod:             durationpb.New(0), // do not update in background
+			RefreshPeriod: durationpb.New(
+				0,
+			), // do not update in background
 			Wlc: &balancerpb.WlcConfig{
 				Power:     func() *uint64 { v := uint64(10); return &v }(),
 				MaxWeight: func() *uint32 { v := uint32(1000); return &v }(),

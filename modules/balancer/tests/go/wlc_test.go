@@ -93,7 +93,8 @@ func TestWlc(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8,
 						},
@@ -118,7 +119,8 @@ func TestWlc(t *testing.T) {
 								Bytes: real1Ip.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 						{
@@ -133,7 +135,8 @@ func TestWlc(t *testing.T) {
 								Bytes: real2Ip.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 						{
@@ -148,7 +151,8 @@ func TestWlc(t *testing.T) {
 								Bytes: real3Ip.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -282,11 +286,36 @@ func TestWlc(t *testing.T) {
 
 		// NEW: Validate Stats
 		t.Run("Validate_Stats", func(t *testing.T) {
-			assert.Equal(t, uint64(packets), vsStats.Stats.IncomingPackets, "VS incoming packets")
-			assert.Equal(t, uint64(packets), vsStats.Stats.OutgoingPackets, "VS outgoing packets")
-			assert.Equal(t, uint64(packets/2), vsStats.Reals[0].Stats.Packets, "Real1 packets")
-			assert.Equal(t, uint64(packets/2), vsStats.Reals[1].Stats.Packets, "Real2 packets")
-			assert.Equal(t, uint64(0), vsStats.Reals[2].Stats.Packets, "Real3 packets")
+			assert.Equal(
+				t,
+				uint64(packets),
+				vsStats.Stats.IncomingPackets,
+				"VS incoming packets",
+			)
+			assert.Equal(
+				t,
+				uint64(packets),
+				vsStats.Stats.OutgoingPackets,
+				"VS outgoing packets",
+			)
+			assert.Equal(
+				t,
+				uint64(packets/2),
+				vsStats.Reals[0].Stats.Packets,
+				"Real1 packets",
+			)
+			assert.Equal(
+				t,
+				uint64(packets/2),
+				vsStats.Reals[1].Stats.Packets,
+				"Real2 packets",
+			)
+			assert.Equal(
+				t,
+				uint64(0),
+				vsStats.Reals[2].Stats.Packets,
+				"Real3 packets",
+			)
 		})
 
 		// NEW: Validate Info
@@ -299,11 +328,36 @@ func TestWlc(t *testing.T) {
 			vsInfo := info.Vs[0]
 			require.NotEmpty(t, vsInfo.Reals)
 
-			assert.Equal(t, uint64(packets), info.ActiveSessions, "total active sessions")
-			assert.Equal(t, uint64(packets), vsInfo.ActiveSessions, "VS active sessions")
-			assert.Equal(t, uint64(packets/2), vsInfo.Reals[0].ActiveSessions, "Real1 active sessions")
-			assert.Equal(t, uint64(packets/2), vsInfo.Reals[1].ActiveSessions, "Real2 active sessions")
-			assert.Equal(t, uint64(0), vsInfo.Reals[2].ActiveSessions, "Real3 active sessions")
+			assert.Equal(
+				t,
+				uint64(packets),
+				info.ActiveSessions,
+				"total active sessions",
+			)
+			assert.Equal(
+				t,
+				uint64(packets),
+				vsInfo.ActiveSessions,
+				"VS active sessions",
+			)
+			assert.Equal(
+				t,
+				uint64(packets/2),
+				vsInfo.Reals[0].ActiveSessions,
+				"Real1 active sessions",
+			)
+			assert.Equal(
+				t,
+				uint64(packets/2),
+				vsInfo.Reals[1].ActiveSessions,
+				"Real2 active sessions",
+			)
+			assert.Equal(
+				t,
+				uint64(0),
+				vsInfo.Reals[2].ActiveSessions,
+				"Real3 active sessions",
+			)
 		})
 
 		// NEW: Validate Sessions
@@ -516,10 +570,12 @@ func TestWlc(t *testing.T) {
 			vsStats := stats.Vs[0]
 			// Note: Stats are cumulative, so we can't easily verify just these 100 packets
 			// But we can verify Real1 didn't get any new sessions
-			t.Logf("After disabling Real1: Real1=%d, Real2=%d, Real3=%d sessions",
+			t.Logf(
+				"After disabling Real1: Real1=%d, Real2=%d, Real3=%d sessions",
 				vsStats.Reals[0].Stats.CreatedSessions,
 				vsStats.Reals[1].Stats.CreatedSessions,
-				vsStats.Reals[2].Stats.CreatedSessions)
+				vsStats.Reals[2].Stats.CreatedSessions,
+			)
 		})
 
 		// 2.4: Re-enable first real and send more packets
@@ -576,7 +632,12 @@ func TestWlc(t *testing.T) {
 			real3Sessions := vsInfo.Reals[2].ActiveSessions
 
 			totalSessions := real1Sessions + real2Sessions + real3Sessions
-			require.Greater(t, totalSessions, uint64(0), "should have active sessions")
+			require.Greater(
+				t,
+				totalSessions,
+				uint64(0),
+				"should have active sessions",
+			)
 
 			// Calculate ratios
 			real1Ratio := float64(real1Sessions) / float64(totalSessions)
@@ -591,12 +652,34 @@ func TestWlc(t *testing.T) {
 
 			tolerance := 0.15 // 15% tolerance
 
-			t.Logf("Session distribution: Real1=%.2f%% (expected 25%%), Real2=%.2f%% (expected 25%%), Real3=%.2f%% (expected 50%%)",
-				real1Ratio*100, real2Ratio*100, real3Ratio*100)
+			t.Logf(
+				"Session distribution: Real1=%.2f%% (expected 25%%), Real2=%.2f%% (expected 25%%), Real3=%.2f%% (expected 50%%)",
+				real1Ratio*100,
+				real2Ratio*100,
+				real3Ratio*100,
+			)
 
-			assert.InDelta(t, expectedReal1Ratio, real1Ratio, tolerance, "Real1 session ratio")
-			assert.InDelta(t, expectedReal2Ratio, real2Ratio, tolerance, "Real2 session ratio")
-			assert.InDelta(t, expectedReal3Ratio, real3Ratio, tolerance, "Real3 session ratio")
+			assert.InDelta(
+				t,
+				expectedReal1Ratio,
+				real1Ratio,
+				tolerance,
+				"Real1 session ratio",
+			)
+			assert.InDelta(
+				t,
+				expectedReal2Ratio,
+				real2Ratio,
+				tolerance,
+				"Real2 session ratio",
+			)
+			assert.InDelta(
+				t,
+				expectedReal3Ratio,
+				real3Ratio,
+				tolerance,
+				"Real3 session ratio",
+			)
 		})
 	})
 
@@ -724,7 +807,12 @@ func TestWlc(t *testing.T) {
 			require.NotNil(t, retrievedConfig.PacketHandler)
 
 			// Verify 4 virtual services
-			assert.Equal(t, 4, len(retrievedConfig.PacketHandler.Vs), "should have 4 virtual services")
+			assert.Equal(
+				t,
+				4,
+				len(retrievedConfig.PacketHandler.Vs),
+				"should have 4 virtual services",
+			)
 
 			// Verify each VS
 			vs1Found := false
@@ -740,32 +828,87 @@ func TestWlc(t *testing.T) {
 					require.NotNil(t, vs.Flags, "VS1 flags should not be nil")
 					assert.True(t, vs.Flags.Wlc, "VS1 should have WLC=true")
 					assert.Equal(t, 3, len(vs.Reals), "VS1 should have 3 reals")
-					assert.Equal(t, uint32(1), vs.Reals[0].Weight, "VS1 Real1 weight")
-					assert.Equal(t, uint32(1), vs.Reals[1].Weight, "VS1 Real2 weight")
-					assert.Equal(t, uint32(2), vs.Reals[2].Weight, "VS1 Real3 weight")
+					assert.Equal(
+						t,
+						uint32(1),
+						vs.Reals[0].Weight,
+						"VS1 Real1 weight",
+					)
+					assert.Equal(
+						t,
+						uint32(1),
+						vs.Reals[1].Weight,
+						"VS1 Real2 weight",
+					)
+					assert.Equal(
+						t,
+						uint32(2),
+						vs.Reals[2].Weight,
+						"VS1 Real3 weight",
+					)
 				case vs2Ip:
 					vs2Found = true
 					require.NotNil(t, vs.Flags, "VS2 flags should not be nil")
 					assert.True(t, vs.Flags.Wlc, "VS2 should have WLC=true")
 					assert.Equal(t, 3, len(vs.Reals), "VS2 should have 3 reals")
-					assert.Equal(t, uint32(1), vs.Reals[0].Weight, "VS2 Real1 weight")
-					assert.Equal(t, uint32(2), vs.Reals[1].Weight, "VS2 Real2 weight")
-					assert.Equal(t, uint32(1), vs.Reals[2].Weight, "VS2 Real3 weight")
+					assert.Equal(
+						t,
+						uint32(1),
+						vs.Reals[0].Weight,
+						"VS2 Real1 weight",
+					)
+					assert.Equal(
+						t,
+						uint32(2),
+						vs.Reals[1].Weight,
+						"VS2 Real2 weight",
+					)
+					assert.Equal(
+						t,
+						uint32(1),
+						vs.Reals[2].Weight,
+						"VS2 Real3 weight",
+					)
 				case vs3Ip:
 					vs3Found = true
 					require.NotNil(t, vs.Flags, "VS3 flags should not be nil")
 					assert.False(t, vs.Flags.Wlc, "VS3 should have WLC=false")
 					assert.Equal(t, 2, len(vs.Reals), "VS3 should have 2 reals")
-					assert.Equal(t, uint32(1), vs.Reals[0].Weight, "VS3 Real1 weight")
-					assert.Equal(t, uint32(1), vs.Reals[1].Weight, "VS3 Real2 weight")
+					assert.Equal(
+						t,
+						uint32(1),
+						vs.Reals[0].Weight,
+						"VS3 Real1 weight",
+					)
+					assert.Equal(
+						t,
+						uint32(1),
+						vs.Reals[1].Weight,
+						"VS3 Real2 weight",
+					)
 				case vs4Ip:
 					vs4Found = true
 					require.NotNil(t, vs.Flags, "VS4 flags should not be nil")
 					assert.True(t, vs.Flags.Wlc, "VS4 should have WLC=true")
 					assert.Equal(t, 3, len(vs.Reals), "VS4 should have 3 reals")
-					assert.Equal(t, uint32(2), vs.Reals[0].Weight, "VS4 Real1 weight")
-					assert.Equal(t, uint32(2), vs.Reals[1].Weight, "VS4 Real2 weight")
-					assert.Equal(t, uint32(1), vs.Reals[2].Weight, "VS4 Real3 weight")
+					assert.Equal(
+						t,
+						uint32(2),
+						vs.Reals[0].Weight,
+						"VS4 Real1 weight",
+					)
+					assert.Equal(
+						t,
+						uint32(2),
+						vs.Reals[1].Weight,
+						"VS4 Real2 weight",
+					)
+					assert.Equal(
+						t,
+						uint32(1),
+						vs.Reals[2].Weight,
+						"VS4 Real3 weight",
+					)
 				}
 			}
 
@@ -793,8 +936,16 @@ func TestWlc(t *testing.T) {
 
 			// Attach to existing BalancerManager
 			thirdBalancer, err := thirdAgent.BalancerManager(utils.BalancerName)
-			require.NoError(t, err, "failed to attach to existing balancer manager")
-			require.NotNil(t, thirdBalancer, "balancer manager should not be nil")
+			require.NoError(
+				t,
+				err,
+				"failed to attach to existing balancer manager",
+			)
+			require.NotNil(
+				t,
+				thirdBalancer,
+				"balancer manager should not be nil",
+			)
 
 			// Verify config matches the updated multi-VS config
 			thirdConfig := thirdBalancer.Config()
@@ -802,7 +953,12 @@ func TestWlc(t *testing.T) {
 			require.NotNil(t, thirdConfig.PacketHandler)
 
 			// Verify 4 virtual services
-			assert.Equal(t, 4, len(thirdConfig.PacketHandler.Vs), "should have 4 virtual services")
+			assert.Equal(
+				t,
+				4,
+				len(thirdConfig.PacketHandler.Vs),
+				"should have 4 virtual services",
+			)
 
 			// Verify each VS is present with correct configuration
 			vs1Found := false
@@ -836,12 +992,30 @@ func TestWlc(t *testing.T) {
 				}
 			}
 
-			assert.True(t, vs1Found, "VS1 should be present in third agent config")
-			assert.True(t, vs2Found, "VS2 should be present in third agent config")
-			assert.True(t, vs3Found, "VS3 should be present in third agent config")
-			assert.True(t, vs4Found, "VS4 should be present in third agent config")
+			assert.True(
+				t,
+				vs1Found,
+				"VS1 should be present in third agent config",
+			)
+			assert.True(
+				t,
+				vs2Found,
+				"VS2 should be present in third agent config",
+			)
+			assert.True(
+				t,
+				vs3Found,
+				"VS3 should be present in third agent config",
+			)
+			assert.True(
+				t,
+				vs4Found,
+				"VS4 should be present in third agent config",
+			)
 
-			t.Log("Successfully verified config persistence across agent instances")
+			t.Log(
+				"Successfully verified config persistence across agent instances",
+			)
 		})
 	})
 }

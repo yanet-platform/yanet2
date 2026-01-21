@@ -1342,7 +1342,12 @@ func testCfgPhase6StateWithNewAgent(t *testing.T, ts *utils.TestSetup) {
 			)
 
 			// Verify VS2 and VS3 are present
-			assert.Equal(t, 2, len(newConfig.PacketHandler.Vs), "should have 2 virtual services")
+			assert.Equal(
+				t,
+				2,
+				len(newConfig.PacketHandler.Vs),
+				"should have 2 virtual services",
+			)
 
 			// Verify each VS has 3 reals
 			for _, vs := range newConfig.PacketHandler.Vs {
@@ -1533,11 +1538,25 @@ func testCfgPhase6StateWithNewAgent(t *testing.T, ts *utils.TestSetup) {
 		t.Run("SendNewPackets", func(t *testing.T) {
 			// Send 10 packets to VS2 (new client IPs starting at 600)
 			t.Log("Sending 10 packets to VS2 through new balancer")
-			vs2Packets := sendCfgPacketsToVS(t, ts, cfgVs2IP, cfgVs2Port, 10, 600)
+			vs2Packets := sendCfgPacketsToVS(
+				t,
+				ts,
+				cfgVs2IP,
+				cfgVs2Port,
+				10,
+				600,
+			)
 
 			// Send 10 packets to VS3 (new client IPs starting at 700)
 			t.Log("Sending 10 packets to VS3 through new balancer")
-			vs3Packets := sendCfgPacketsToVS(t, ts, cfgVs3IP, cfgVs3Port, 10, 700)
+			vs3Packets := sendCfgPacketsToVS(
+				t,
+				ts,
+				cfgVs3IP,
+				cfgVs3Port,
+				10,
+				700,
+			)
 
 			// Verify distribution (ROUND_ROBIN: ~3-4 packets per real)
 			t.Log("Verifying packet distribution for VS2")
@@ -1668,7 +1687,12 @@ func testCfgPhase6StateWithNewAgent(t *testing.T, ts *utils.TestSetup) {
 			require.NotNil(t, newSessions)
 
 			// Verify total sessions: 60 (40 from Phase 5 + 20 new)
-			assert.Equal(t, 60, len(newSessions), "should have 60 total sessions (40+20)")
+			assert.Equal(
+				t,
+				60,
+				len(newSessions),
+				"should have 60 total sessions (40+20)",
+			)
 
 			// Count sessions per VS
 			vs2Sessions := 0
@@ -1683,8 +1707,18 @@ func testCfgPhase6StateWithNewAgent(t *testing.T, ts *utils.TestSetup) {
 				}
 			}
 
-			assert.Equal(t, 35, vs2Sessions, "VS2 should have 35 sessions (25+10)")
-			assert.Equal(t, 25, vs3Sessions, "VS3 should have 25 sessions (15+10)")
+			assert.Equal(
+				t,
+				35,
+				vs2Sessions,
+				"VS2 should have 35 sessions (25+10)",
+			)
+			assert.Equal(
+				t,
+				25,
+				vs3Sessions,
+				"VS3 should have 25 sessions (15+10)",
+			)
 		})
 	})
 }

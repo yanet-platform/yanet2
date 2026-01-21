@@ -156,7 +156,15 @@ func createVirtualService(
 	ops bool,
 	reals []*balancerpb.Real,
 ) *balancerpb.VirtualService {
-	return createVirtualServiceWithFlags(ip, port, proto, scheduler, ops, false, reals)
+	return createVirtualServiceWithFlags(
+		ip,
+		port,
+		proto,
+		scheduler,
+		ops,
+		false,
+		reals,
+	)
 }
 
 // createVirtualServiceWithFlags creates a VirtualService configuration with custom flags
@@ -1387,7 +1395,10 @@ func testPureL3SourceHashPortIndependence(t *testing.T, ts *utils.TestSetup) {
 		result, err := ts.Mock.HandlePackets(packet)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(result.Output), "expected 1 output packet")
-		differentDstPortPackets = append(differentDstPortPackets, result.Output[0])
+		differentDstPortPackets = append(
+			differentDstPortPackets,
+			result.Output[0],
+		)
 	}
 
 	// Verify packets to different dst ports can be distributed
@@ -1531,7 +1542,10 @@ func testPureL3UDPSourceHash(t *testing.T, ts *utils.TestSetup) {
 		result, err := ts.Mock.HandlePackets(packet)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(result.Output), "expected 1 output packet")
-		differentDstPortPackets = append(differentDstPortPackets, result.Output[0])
+		differentDstPortPackets = append(
+			differentDstPortPackets,
+			result.Output[0],
+		)
 	}
 
 	// Verify packets were accepted on different ports

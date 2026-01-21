@@ -217,7 +217,8 @@ func TestSessionTableManual(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8, // Allow all 10.x.x.x addresses
 						},
@@ -243,7 +244,8 @@ func TestSessionTableManual(t *testing.T) {
 								Bytes: netip.MustParseAddr("2.2.2.2").AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -263,7 +265,9 @@ func TestSessionTableManual(t *testing.T) {
 		State: &balancerpb.StateConfig{
 			SessionTableCapacity:      func() *uint64 { v := uint64(initialCapacity); return &v }(),
 			SessionTableMaxLoadFactor: func() *float32 { v := float32(maxLoadFactor); return &v }(),
-			RefreshPeriod:             durationpb.New(0), // do not update in background
+			RefreshPeriod: durationpb.New(
+				0,
+			), // do not update in background
 			Wlc: &balancerpb.WlcConfig{
 				Power:     func() *uint64 { v := uint64(10); return &v }(),
 				MaxWeight: func() *uint32 { v := uint32(1000); return &v }(),
@@ -1044,8 +1048,16 @@ func TestSessionTableManual(t *testing.T) {
 		err := ts.Balancer.Update(config, now)
 		require.NoError(t, err, "failed to resize session table to 300")
 
-		require.LessOrEqual(t, uint64(300), *ts.Balancer.Config().State.SessionTableCapacity)
-		require.GreaterOrEqual(t, uint64(512), *ts.Balancer.Config().State.SessionTableCapacity)
+		require.LessOrEqual(
+			t,
+			uint64(300),
+			*ts.Balancer.Config().State.SessionTableCapacity,
+		)
+		require.GreaterOrEqual(
+			t,
+			uint64(512),
+			*ts.Balancer.Config().State.SessionTableCapacity,
+		)
 
 		currentTime := mock.CurrentTime()
 
@@ -1190,7 +1202,8 @@ func TestSessionTimeouts(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8,
 						},
@@ -1216,7 +1229,8 @@ func TestSessionTimeouts(t *testing.T) {
 								Bytes: tcpRealAddr.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -1234,7 +1248,8 @@ func TestSessionTimeouts(t *testing.T) {
 					AllowedSrcs: []*balancerpb.Net{
 						{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Size: 8,
 						},
@@ -1260,7 +1275,8 @@ func TestSessionTimeouts(t *testing.T) {
 								Bytes: udpRealAddr.AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.255").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
 							},
 						},
 					},
@@ -1280,7 +1296,9 @@ func TestSessionTimeouts(t *testing.T) {
 		State: &balancerpb.StateConfig{
 			SessionTableCapacity:      func() *uint64 { v := uint64(64); return &v }(),
 			SessionTableMaxLoadFactor: func() *float32 { v := float32(0.5); return &v }(),
-			RefreshPeriod:             durationpb.New(0), // do not update in background
+			RefreshPeriod: durationpb.New(
+				0,
+			), // do not update in background
 			Wlc: &balancerpb.WlcConfig{
 				Power:     func() *uint64 { v := uint64(10); return &v }(),
 				MaxWeight: func() *uint32 { v := uint32(1000); return &v }(),
@@ -1314,16 +1332,31 @@ func TestSessionTimeouts(t *testing.T) {
 		clientPort := uint16(5000)
 
 		// Send first UDP packet
-		packetLayers := utils.MakeUDPPacket(clientIP, clientPort, udpVsIp, udpVsPort)
+		packetLayers := utils.MakeUDPPacket(
+			clientIP,
+			clientPort,
+			udpVsIp,
+			udpVsPort,
+		)
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 		result, err := mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "first UDP packet should be accepted")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"first UDP packet should be accepted",
+		)
 
 		// Send second UDP packet to ensure session is created
 		result, err = mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "second UDP packet should be accepted")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"second UDP packet should be accepted",
+		)
 
 		// Sync sessions
 		currentTime := mock.CurrentTime()
@@ -1370,7 +1403,12 @@ func TestSessionTimeouts(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 		result, err := mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "TCP SYN packet should be accepted")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"TCP SYN packet should be accepted",
+		)
 
 		currentTime := mock.CurrentTime()
 		err = ts.Balancer.Refresh(currentTime)
@@ -1415,7 +1453,12 @@ func TestSessionTimeouts(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 		result, err := mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "TCP SYN packet should be accepted")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"TCP SYN packet should be accepted",
+		)
 
 		// Send TCP SYN-ACK packet from same client
 		packetLayers = utils.MakeTCPPacket(
@@ -1428,7 +1471,12 @@ func TestSessionTimeouts(t *testing.T) {
 		packet = xpacket.LayersToPacket(t, packetLayers...)
 		result, err = mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "TCP SYN-ACK packet should be accepted")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"TCP SYN-ACK packet should be accepted",
+		)
 
 		// Sync sessions
 		currentTime := mock.CurrentTime()
@@ -1473,7 +1521,12 @@ func TestSessionTimeouts(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 		result, err := mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "TCP SYN packet should be accepted")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"TCP SYN packet should be accepted",
+		)
 
 		// Send regular TCP packet (no flags) - this should switch timeout to TCP timeout
 		packetLayers = utils.MakeTCPPacket(
@@ -1486,7 +1539,12 @@ func TestSessionTimeouts(t *testing.T) {
 		packet = xpacket.LayersToPacket(t, packetLayers...)
 		result, err = mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "TCP basic packet should be accepted")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"TCP basic packet should be accepted",
+		)
 
 		// Sync sessions
 		currentTime := mock.CurrentTime()
@@ -1532,7 +1590,12 @@ func TestSessionTimeouts(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 		result, err := mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "TCP SYN packet should be accepted")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"TCP SYN packet should be accepted",
+		)
 
 		// Send TCP FIN packet - this should switch timeout to TCP_FIN timeout
 		packetLayers = utils.MakeTCPPacket(
@@ -1545,7 +1608,12 @@ func TestSessionTimeouts(t *testing.T) {
 		packet = xpacket.LayersToPacket(t, packetLayers...)
 		result, err = mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "TCP FIN packet should be accepted")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"TCP FIN packet should be accepted",
+		)
 
 		// Sync sessions
 		currentTime := mock.CurrentTime()

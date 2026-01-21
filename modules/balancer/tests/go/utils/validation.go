@@ -544,7 +544,12 @@ func validateTunnelSourceAddress(
 
 				if realAddr.Compare(resultDstIP) == 0 {
 					// Found the matching real, now validate source address
-					validateSourceAddressCalculation(t, clientIP, tunnelSrcIP, real)
+					validateSourceAddressCalculation(
+						t,
+						clientIP,
+						tunnelSrcIP,
+						real,
+					)
 					return
 				}
 			}

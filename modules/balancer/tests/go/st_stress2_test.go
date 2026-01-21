@@ -441,7 +441,8 @@ func TestSessionTableStress2(t *testing.T) {
 
 				config := ts.Balancer.Config()
 				capacity := uint64(0)
-				if config.State != nil && config.State.SessionTableCapacity != nil {
+				if config.State != nil &&
+					config.State.SessionTableCapacity != nil {
 					capacity = *config.State.SessionTableCapacity
 				}
 				t.Logf(

@@ -384,7 +384,8 @@ func updateVSMapsWithRealStates(
 	updates []*balancerpb.RealUpdate,
 ) {
 	for _, update := range updates {
-		if update.RealId == nil || update.RealId.Vs == nil || update.RealId.Real == nil {
+		if update.RealId == nil || update.RealId.Vs == nil ||
+			update.RealId.Real == nil {
 			continue
 		}
 
@@ -430,7 +431,10 @@ func TestBigConfig(t *testing.T) {
 	agentMemory := 32 * datasize.MB
 
 	ts, err := utils.Make(&utils.TestConfig{
-		Mock:        utils.SingleWorkerMockConfig(datasize.MB*128, 4*datasize.MB),
+		Mock: utils.SingleWorkerMockConfig(
+			datasize.MB*128,
+			4*datasize.MB,
+		),
 		Balancer:    initialConfig,
 		AgentMemory: &agentMemory,
 	})
