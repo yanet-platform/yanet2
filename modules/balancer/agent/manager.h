@@ -143,7 +143,8 @@ balancer_manager_update_reals(
  *
  * @param manager Manager handle.
  * @param count   Number of updates in the array.
- * @param updates Array of real server weight updates (must not change enable state).
+ * @param updates Array of real server weight updates (must not change enable
+ * state).
  * @return 0 on success, -1 on error.
  */
 int

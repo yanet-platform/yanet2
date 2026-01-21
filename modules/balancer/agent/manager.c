@@ -213,9 +213,9 @@ balancer_manager_update_reals_wlc(
 	}
 
 	// Note: Unlike balancer_manager_update_reals(), this function does NOT
-	// update the config weights. The config weight should remain the original
-	// static weight. WLC calculations use the config weight as the baseline
-	// and adjust the state weight dynamically based on load.
+	// update the config weights. The config weight should remain the
+	// original static weight. WLC calculations use the config weight as the
+	// baseline and adjust the state weight dynamically based on load.
 
 	return 0;
 }
