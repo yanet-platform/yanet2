@@ -456,7 +456,9 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("10.0.0.1"),
 							Port: 8080,
 						},
-						Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
+						Src: xnetip.FromPrefix(
+							netip.MustParsePrefix("172.16.0.0/24"),
+						),
 						Weight: 100,
 					},
 				},
@@ -492,7 +494,9 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("2001:db8::100"),
 							Port: 8443,
 						},
-						Src:    xnetip.FromPrefix(netip.MustParsePrefix("2001:db8:1::/64")),
+						Src: xnetip.FromPrefix(
+							netip.MustParsePrefix("2001:db8:1::/64"),
+						),
 						Weight: 50,
 					},
 					{
@@ -500,7 +504,9 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("2001:db8::101"),
 							Port: 8443,
 						},
-						Src:    xnetip.FromPrefix(netip.MustParsePrefix("2001:db8:2::/64")),
+						Src: xnetip.FromPrefix(
+							netip.MustParsePrefix("2001:db8:2::/64"),
+						),
 						Weight: 150,
 					},
 				},
@@ -535,7 +541,9 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("10.0.0.10"),
 							Port: 0,
 						},
-						Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
+						Src: xnetip.FromPrefix(
+							netip.MustParsePrefix("172.16.0.0/24"),
+						),
 						Weight: 100,
 					},
 					{
@@ -543,7 +551,9 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("10.0.0.11"),
 							Port: 0,
 						},
-						Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.1.0/24")),
+						Src: xnetip.FromPrefix(
+							netip.MustParsePrefix("172.16.1.0/24"),
+						),
 						Weight: 150,
 					},
 					{
@@ -551,7 +561,9 @@ func TestVsConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("10.0.0.12"),
 							Port: 0,
 						},
-						Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.2.0/24")),
+						Src: xnetip.FromPrefix(
+							netip.MustParsePrefix("172.16.2.0/24"),
+						),
 						Weight: 200,
 					},
 				},
@@ -629,7 +641,9 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 									Addr: netip.MustParseAddr("10.0.1.1"),
 									Port: 8080,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.16.0.0/24"),
+								),
 								Weight: 100,
 							},
 						},
@@ -682,7 +696,9 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 									Addr: netip.MustParseAddr("10.0.1.1"),
 									Port: 8080,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.16.0.0/24"),
+								),
 								Weight: 100,
 							},
 							{
@@ -690,7 +706,9 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 									Addr: netip.MustParseAddr("10.0.1.2"),
 									Port: 8080,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.1.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.16.1.0/24"),
+								),
 								Weight: 100,
 							},
 						},
@@ -812,9 +830,11 @@ func TestBalancerConfigConversion(t *testing.T) {
 										Addr: netip.MustParseAddr("10.0.1.1"),
 										Port: 8080,
 									},
-									Src: xnetip.FromPrefix(netip.MustParsePrefix(
-										"172.16.0.0/24",
-									)),
+									Src: xnetip.FromPrefix(
+										netip.MustParsePrefix(
+											"172.16.0.0/24",
+										),
+									),
 									Weight: 100,
 								},
 								{
@@ -822,9 +842,11 @@ func TestBalancerConfigConversion(t *testing.T) {
 										Addr: netip.MustParseAddr("10.0.1.2"),
 										Port: 8080,
 									},
-									Src: xnetip.FromPrefix(netip.MustParsePrefix(
-										"172.16.1.0/24",
-									)),
+									Src: xnetip.FromPrefix(
+										netip.MustParsePrefix(
+											"172.16.1.0/24",
+										),
+									),
 									Weight: 150,
 								},
 							},
@@ -925,9 +947,11 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 											),
 											Port: 8080,
 										},
-										Src: xnetip.FromPrefix(netip.MustParsePrefix(
-											"172.16.0.0/24",
-										)),
+										Src: xnetip.FromPrefix(
+											netip.MustParsePrefix(
+												"172.16.0.0/24",
+											),
+										),
 										Weight: 100,
 									},
 								},
@@ -1006,9 +1030,11 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 											),
 											Port: 8080,
 										},
-										Src: xnetip.FromPrefix(netip.MustParsePrefix(
-											"172.16.0.0/24",
-										)),
+										Src: xnetip.FromPrefix(
+											netip.MustParsePrefix(
+												"172.16.0.0/24",
+											),
+										),
 										Weight: 100,
 									},
 								},
@@ -1193,7 +1219,9 @@ func TestComplexScenario(t *testing.T) {
 									Addr: netip.MustParseAddr("10.0.0.1"),
 									Port: 8080,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.16.0.0/24"),
+								),
 								Weight: 100,
 							},
 							{
@@ -1201,7 +1229,9 @@ func TestComplexScenario(t *testing.T) {
 									Addr: netip.MustParseAddr("10.0.0.2"),
 									Port: 8080,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.1.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.16.1.0/24"),
+								),
 								Weight: 150,
 							},
 						},

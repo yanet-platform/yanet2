@@ -62,7 +62,9 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.12.13.213"),
 									Port: 8080,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.16.0.0/24"),
+								),
 								Weight: 100,
 							},
 							{
@@ -70,7 +72,9 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.12.13.214"),
 									Port: 8080,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.1.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.16.1.0/24"),
+								),
 								Weight: 150,
 							},
 							{
@@ -78,7 +82,9 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.12.13.215"),
 									Port: 8081,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.16.2.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.16.2.0/24"),
+								),
 								Weight: 200,
 							},
 						},
@@ -109,7 +115,9 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.20.30.41"),
 									Port: 8443,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.17.0.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.17.0.0/24"),
+								),
 								Weight: 100,
 							},
 							{
@@ -117,7 +125,9 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.20.30.42"),
 									Port: 8443,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.17.1.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.17.1.0/24"),
+								),
 								Weight: 100,
 							},
 						},
@@ -145,7 +155,9 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.50.60.71"),
 									Port: 5353,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.18.0.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.18.0.0/24"),
+								),
 								Weight: 50,
 							},
 							{
@@ -153,7 +165,9 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.50.60.72"),
 									Port: 5353,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.18.1.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.18.1.0/24"),
+								),
 								Weight: 75,
 							},
 							{
@@ -161,7 +175,9 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.50.60.73"),
 									Port: 5353,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.18.2.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.18.2.0/24"),
+								),
 								Weight: 100,
 							},
 							{
@@ -169,7 +185,9 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.50.60.74"),
 									Port: 5353,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.18.3.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.18.3.0/24"),
+								),
 								Weight: 125,
 							},
 							{
@@ -177,7 +195,9 @@ func TestManager(t *testing.T) {
 									Addr: netip.MustParseAddr("10.50.60.75"),
 									Port: 5354,
 								},
-								Src:    xnetip.FromPrefix(netip.MustParsePrefix("172.18.4.0/24")),
+								Src: xnetip.FromPrefix(
+									netip.MustParsePrefix("172.18.4.0/24"),
+								),
 								Weight: 150,
 							},
 						},
@@ -945,9 +965,11 @@ func TestManager(t *testing.T) {
 										),
 										Port: 9090,
 									},
-									Src: xnetip.FromPrefix(netip.MustParsePrefix(
-										"10.0.0.0/24",
-									)),
+									Src: xnetip.FromPrefix(
+										netip.MustParsePrefix(
+											"10.0.0.0/24",
+										),
+									),
 									Weight: 100,
 								},
 								{
@@ -957,9 +979,11 @@ func TestManager(t *testing.T) {
 										),
 										Port: 9090,
 									},
-									Src: xnetip.FromPrefix(netip.MustParsePrefix(
-										"10.0.1.0/24",
-									)),
+									Src: xnetip.FromPrefix(
+										netip.MustParsePrefix(
+											"10.0.1.0/24",
+										),
+									),
 									Weight: 200,
 								},
 							},

@@ -1428,9 +1428,21 @@ func TestConvertPacketHandlerToProtoWithWlc(t *testing.T) {
 			wlcConfig: nil,
 			verify: func(t *testing.T, result *balancerpb.PacketHandlerConfig) {
 				require.Len(t, result.Vs, 3)
-				assert.False(t, result.Vs[0].Flags.Wlc, "VS0 should have WLC=false")
-				assert.False(t, result.Vs[1].Flags.Wlc, "VS1 should have WLC=false")
-				assert.False(t, result.Vs[2].Flags.Wlc, "VS2 should have WLC=false")
+				assert.False(
+					t,
+					result.Vs[0].Flags.Wlc,
+					"VS0 should have WLC=false",
+				)
+				assert.False(
+					t,
+					result.Vs[1].Flags.Wlc,
+					"VS1 should have WLC=false",
+				)
+				assert.False(
+					t,
+					result.Vs[2].Flags.Wlc,
+					"VS2 should have WLC=false",
+				)
 			},
 		},
 		{
@@ -1442,9 +1454,21 @@ func TestConvertPacketHandlerToProtoWithWlc(t *testing.T) {
 			},
 			verify: func(t *testing.T, result *balancerpb.PacketHandlerConfig) {
 				require.Len(t, result.Vs, 3)
-				assert.True(t, result.Vs[0].Flags.Wlc, "VS0 should have WLC=true")
-				assert.False(t, result.Vs[1].Flags.Wlc, "VS1 should have WLC=false")
-				assert.True(t, result.Vs[2].Flags.Wlc, "VS2 should have WLC=true")
+				assert.True(
+					t,
+					result.Vs[0].Flags.Wlc,
+					"VS0 should have WLC=true",
+				)
+				assert.False(
+					t,
+					result.Vs[1].Flags.Wlc,
+					"VS1 should have WLC=false",
+				)
+				assert.True(
+					t,
+					result.Vs[2].Flags.Wlc,
+					"VS2 should have WLC=true",
+				)
 			},
 		},
 		{
@@ -1456,9 +1480,21 @@ func TestConvertPacketHandlerToProtoWithWlc(t *testing.T) {
 			},
 			verify: func(t *testing.T, result *balancerpb.PacketHandlerConfig) {
 				require.Len(t, result.Vs, 3)
-				assert.True(t, result.Vs[0].Flags.Wlc, "VS0 should have WLC=true")
-				assert.True(t, result.Vs[1].Flags.Wlc, "VS1 should have WLC=true")
-				assert.True(t, result.Vs[2].Flags.Wlc, "VS2 should have WLC=true")
+				assert.True(
+					t,
+					result.Vs[0].Flags.Wlc,
+					"VS0 should have WLC=true",
+				)
+				assert.True(
+					t,
+					result.Vs[1].Flags.Wlc,
+					"VS1 should have WLC=true",
+				)
+				assert.True(
+					t,
+					result.Vs[2].Flags.Wlc,
+					"VS2 should have WLC=true",
+				)
 			},
 		},
 		{
@@ -1470,9 +1506,21 @@ func TestConvertPacketHandlerToProtoWithWlc(t *testing.T) {
 			},
 			verify: func(t *testing.T, result *balancerpb.PacketHandlerConfig) {
 				require.Len(t, result.Vs, 3)
-				assert.False(t, result.Vs[0].Flags.Wlc, "VS0 should have WLC=false")
-				assert.False(t, result.Vs[1].Flags.Wlc, "VS1 should have WLC=false")
-				assert.False(t, result.Vs[2].Flags.Wlc, "VS2 should have WLC=false")
+				assert.False(
+					t,
+					result.Vs[0].Flags.Wlc,
+					"VS0 should have WLC=false",
+				)
+				assert.False(
+					t,
+					result.Vs[1].Flags.Wlc,
+					"VS1 should have WLC=false",
+				)
+				assert.False(
+					t,
+					result.Vs[2].Flags.Wlc,
+					"VS2 should have WLC=false",
+				)
 			},
 		},
 	}
@@ -1559,7 +1607,9 @@ func TestConvertBalancerConfigToProto_WithWlc(t *testing.T) {
 				VirtualServices: []ffi.VsConfig{
 					{
 						Identifier: ffi.VsIdentifier{
-							Addr:           netip.MustParseAddr("192.168.1.100"),
+							Addr: netip.MustParseAddr(
+								"192.168.1.100",
+							),
 							Port:           80,
 							TransportProto: ffi.VsTransportProtoTcp,
 						},
@@ -1568,7 +1618,9 @@ func TestConvertBalancerConfigToProto_WithWlc(t *testing.T) {
 					},
 					{
 						Identifier: ffi.VsIdentifier{
-							Addr:           netip.MustParseAddr("192.168.1.101"),
+							Addr: netip.MustParseAddr(
+								"192.168.1.101",
+							),
 							Port:           443,
 							TransportProto: ffi.VsTransportProtoTcp,
 						},
@@ -1600,8 +1652,16 @@ func TestConvertBalancerConfigToProto_WithWlc(t *testing.T) {
 	require.Len(t, result.PacketHandler.Vs, 2)
 
 	// Verify WLC flags
-	assert.True(t, result.PacketHandler.Vs[0].Flags.Wlc, "VS0 should have WLC=true")
-	assert.False(t, result.PacketHandler.Vs[1].Flags.Wlc, "VS1 should have WLC=false")
+	assert.True(
+		t,
+		result.PacketHandler.Vs[0].Flags.Wlc,
+		"VS0 should have WLC=true",
+	)
+	assert.False(
+		t,
+		result.PacketHandler.Vs[1].Flags.Wlc,
+		"VS1 should have WLC=false",
+	)
 
 	// Verify state config
 	require.NotNil(t, result.State)

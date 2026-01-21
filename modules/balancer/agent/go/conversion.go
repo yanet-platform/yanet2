@@ -1087,7 +1087,10 @@ func ConvertBalancerConfigToProto(
 	}
 
 	// Convert packet handler with WLC config
-	handler := convertPacketHandlerToProtoWithWlc(&config.Balancer.Handler, &config.Wlc)
+	handler := convertPacketHandlerToProtoWithWlc(
+		&config.Balancer.Handler,
+		&config.Wlc,
+	)
 
 	// Convert state config
 	capacity := uint64(config.Balancer.State.TableCapacity)
@@ -1121,7 +1124,13 @@ func convertPacketHandlerToProtoWithWlc(
 	vs := make([]*balancerpb.VirtualService, 0, len(handler.VirtualServices))
 	for i := range handler.VirtualServices {
 		wlcEnabled := wlcEnabledVs[uint32(i)]
-		vs = append(vs, convertVsConfigToProtoWithWlc(&handler.VirtualServices[i], wlcEnabled))
+		vs = append(
+			vs,
+			convertVsConfigToProtoWithWlc(
+				&handler.VirtualServices[i],
+				wlcEnabled,
+			),
+		)
 	}
 
 	// Convert decap addresses
@@ -1153,7 +1162,10 @@ func convertPacketHandlerToProtoWithWlc(
 	}
 }
 
-func convertVsConfigToProtoWithWlc(vs *ffi.VsConfig, wlcEnabled bool) *balancerpb.VirtualService {
+func convertVsConfigToProtoWithWlc(
+	vs *ffi.VsConfig,
+	wlcEnabled bool,
+) *balancerpb.VirtualService {
 	// Convert reals
 	reals := make([]*balancerpb.Real, 0, len(vs.Reals))
 	for i := range vs.Reals {
