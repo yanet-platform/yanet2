@@ -100,7 +100,9 @@ func fullSessionKeyFromTunPacket(
 	return &key, nil
 }
 
-func fullSessionKeyFromInputPacket(packet *framework.PacketInfo) (*fullSessionKey, error) {
+func fullSessionKeyFromInputPacket(
+	packet *framework.PacketInfo,
+) (*fullSessionKey, error) {
 	proto, err := func() (balancerpb.TransportProto, error) {
 		proto, ok := packet.GetTransportProtocol()
 		if !ok {
@@ -700,7 +702,10 @@ func workerRoutine(
 		for _, dropPkt := range drop {
 			key, err := fullSessionKeyFromInputPacket(dropPkt)
 			if err != nil {
-				sendError("failed to get session key from dropped packet: %w", err)
+				sendError(
+					"failed to get session key from dropped packet: %w",
+					err,
+				)
 				continue
 			}
 			if _, ok := outputActiveSessions[*key]; ok {
@@ -836,8 +841,13 @@ func validateCounters(
 
 		expectedSessions := vsSessionCount[vs]
 
-		assert.Equal(t, uint64(expectedSessions), vsState.ActiveSessions,
-			"[VS %s]: active session count mismatch between state and workers", vs.String())
+		assert.Equal(
+			t,
+			uint64(expectedSessions),
+			vsState.ActiveSessions,
+			"[VS %s]: active session count mismatch between state and workers",
+			vs.String(),
+		)
 
 		summaryOverflowCnt += vsConfig.Stats.SessionTableOverflow
 
@@ -863,11 +873,31 @@ func validateCounters(
 	}
 
 	// Validate invariants
-	assert.Equal(t, configStats.Common.IncomingPackets, uint64(aggregate.stats.totalPackets))
-	assert.Equal(t, configStats.Common.OutgoingPackets, uint64(aggregate.stats.outputPackets))
-	assert.Equal(t, configStats.L4.IncomingPackets, uint64(aggregate.stats.totalPackets))
-	assert.Equal(t, configStats.L4.OutgoingPackets, uint64(aggregate.stats.outputPackets))
-	assert.Equal(t, configStats.L4.SelectRealFailed, uint64(aggregate.stats.droppedPackets))
+	assert.Equal(
+		t,
+		configStats.Common.IncomingPackets,
+		uint64(aggregate.stats.totalPackets),
+	)
+	assert.Equal(
+		t,
+		configStats.Common.OutgoingPackets,
+		uint64(aggregate.stats.outputPackets),
+	)
+	assert.Equal(
+		t,
+		configStats.L4.IncomingPackets,
+		uint64(aggregate.stats.totalPackets),
+	)
+	assert.Equal(
+		t,
+		configStats.L4.OutgoingPackets,
+		uint64(aggregate.stats.outputPackets),
+	)
+	assert.Equal(
+		t,
+		configStats.L4.SelectRealFailed,
+		uint64(aggregate.stats.droppedPackets),
+	)
 	assert.Equal(t, summaryOverflowCnt, uint64(aggregate.stats.droppedPackets))
 }
 
@@ -914,15 +944,23 @@ func validateFinalSessions(
 		// Check if this session was tracked
 		expectedReal, found := expectedSessions[sessionKey]
 		if !found {
-			t.Errorf("Session %d: balancer has session %s that was not tracked by workers",
-				i, sessionKey.String())
+			t.Errorf(
+				"Session %d: balancer has session %s that was not tracked by workers",
+				i,
+				sessionKey.String(),
+			)
 			continue
 		}
 
 		// Verify the real server matches
 		if expectedReal != realIP {
-			t.Errorf("Session %d: real server mismatch for %s: expected=%v, got=%v",
-				i, sessionKey.String(), expectedReal, realIP)
+			t.Errorf(
+				"Session %d: real server mismatch for %s: expected=%v, got=%v",
+				i,
+				sessionKey.String(),
+				expectedReal,
+				realIP,
+			)
 		}
 
 		// Remove from expected map (to detect sessions we tracked but balancer doesn't have)
@@ -931,7 +969,10 @@ func validateFinalSessions(
 
 	// Check for sessions we tracked but balancer doesn't have
 	if len(expectedSessions) > 0 {
-		t.Errorf("Workers tracked %d sessions that are not in balancer:", len(expectedSessions))
+		t.Errorf(
+			"Workers tracked %d sessions that are not in balancer:",
+			len(expectedSessions),
+		)
 		for sessionKey, realIP := range expectedSessions {
 			t.Errorf("  - %s -> real %v", sessionKey.String(), realIP)
 		}
@@ -985,7 +1026,12 @@ func runMultithreadedTest(t *testing.T, config *multithreadTestConfig) {
 	initialCapacity := 3 * expectedSessions / 2
 	maxLoadFactor := float32(0.5)
 
-	moduleConfig := buildModuleConfig(vsConfigs, sessionTimeout, initialCapacity, maxLoadFactor)
+	moduleConfig := buildModuleConfig(
+		vsConfigs,
+		sessionTimeout,
+		initialCapacity,
+		maxLoadFactor,
+	)
 
 	// Setup test
 	mockConfig := utils.SingleWorkerMockConfig(datasize.MB*512, datasize.MB*4)
@@ -1063,7 +1109,11 @@ func runMultithreadedTest(t *testing.T, config *multithreadTestConfig) {
 	t.Run("Validate_Workers_Stats", func(t *testing.T) {
 		for worker := range wStates {
 			stats := wStates[worker].stats
-			dropRate := float64(stats.droppedPackets) / float64(stats.totalPackets) * 100.0
+			dropRate := float64(
+				stats.droppedPackets,
+			) / float64(
+				stats.totalPackets,
+			) * 100.0
 			t.Logf(
 				"worker %d: sessions=%d, totalPackets=%d, output=%d, dropped=%d, dropRate=%.2f%%",
 				worker,
@@ -1073,7 +1123,13 @@ func runMultithreadedTest(t *testing.T, config *multithreadTestConfig) {
 				stats.droppedPackets,
 				dropRate,
 			)
-			assert.Less(t, dropRate, 20.0, "worker %d: too big drop rate", worker)
+			assert.Less(
+				t,
+				dropRate,
+				20.0,
+				"worker %d: too big drop rate",
+				worker,
+			)
 		}
 	})
 
