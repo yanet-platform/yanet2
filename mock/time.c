@@ -11,9 +11,7 @@ struct time {
 	struct timespec ts;
 };
 
-static struct time current_time = {
-	.lock = {.locked = false}, .ts = {0, 0}
-};
+static struct time current_time = {.lock = {.locked = false}, .ts = {0, 0}};
 
 void
 set_current_time(struct timespec *ts) {
