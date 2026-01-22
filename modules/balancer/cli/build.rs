@@ -10,6 +10,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
+        .protoc_arg("--experimental_allow_proto3_optional")
         .compile_protos(
             &[
                 "modules/balancer/agent/balancerpb/balancer.proto",
