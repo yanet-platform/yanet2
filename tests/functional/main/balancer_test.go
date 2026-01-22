@@ -74,6 +74,10 @@ func TestBalancer(t *testing.T) {
 
 			// Show config stats
 			"/mnt/target/release/yanet-cli-balancer stats --name=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",
+
+			// Enable single real
+			"/mnt/target/release/yanet-cli-balancer reals enable --name=balancer0 --real-ip 10.1.1.1 --virtual-ip 192.0.2.1 --virtual-port 80 --proto tcp",
+			"/mnt/target/release/yanet-cli-balancer reals flush",
 		}
 
 		_, err := fw.ExecuteCommands(commands...)
@@ -96,7 +100,7 @@ func TestBalancer(t *testing.T) {
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 		require.True(t, outputPacket.IsTunneled, "Output packet should be tunneled")
-		require.True(t, outputPacket.DstIP.String() == "10.1.1.1" || outputPacket.DstIP.String() == "10.1.1.2")
+		require.True(t, outputPacket.DstIP.String() == "10.1.1.1")
 		require.Equal(t, outputPacket.InnerPacket.SrcIP.String(), "192.168.2.2")
 		require.True(t, outputPacket.InnerPacket.IsIPv4)
 	})
