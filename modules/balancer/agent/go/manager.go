@@ -19,7 +19,8 @@ type BalancerManager struct {
 	// Background task management
 	ctx    context.Context
 	cancel context.CancelFunc
-	mu     sync.Mutex
+
+	mu sync.Mutex
 
 	// Logger
 	log *zap.SugaredLogger
@@ -300,7 +301,7 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.log.Debug("refreshing balancer")
+	b.log.Debug("refreshing")
 
 	// Get current config
 	config := b.handle.Config()
@@ -308,7 +309,7 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 	// Get balancer info
 	info, err := b.handle.Info(now)
 	if err != nil {
-		return fmt.Errorf("failed to get balancer info: %w", err)
+		return fmt.Errorf("failed to get info: %w", err)
 	}
 
 	// Check if session table needs resizing
@@ -317,6 +318,12 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 	maxLoadFactor := config.MaxLoadFactor
 
 	currentLoadFactor := float32(activeSessions) / float32(capacity)
+
+	b.log.Debugw("fetched balancer info",
+		"current_capacity", capacity,
+		"active_sessions", activeSessions,
+		"current_load_factor", currentLoadFactor,
+		"max_load_factor", maxLoadFactor)
 
 	if currentLoadFactor > maxLoadFactor {
 		newCapacity := capacity * 2
@@ -336,12 +343,15 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 
 	// WLC real updates - use UpdateRealsWlc to preserve config weights
 	updates := WlcUpdates(b.handle.Config(), b.handle.Graph(), info)
+
+	b.log.Debugw("calculated WLC updates", "count", len(updates))
+
 	if len(updates) > 0 {
-		b.log.Infow("wlc real updates", "count", len(updates))
+		b.log.Infow("applying WLC updates", "count", len(updates))
 		if err := b.handle.UpdateRealsWlc(updates); err != nil {
-			b.log.Errorw("failed to apply real updates", "error", err)
+			b.log.Errorw("failed to apply WLC updates", "error", err)
 		} else {
-			b.log.Infow("real updates applied successfully", "count", len(updates))
+			b.log.Infow("WLC updates applied successfully", "count", len(updates))
 		}
 	}
 

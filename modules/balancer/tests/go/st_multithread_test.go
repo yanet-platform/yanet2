@@ -35,13 +35,16 @@ type fullSessionKey struct {
 	proto      balancerpb.TransportProto
 }
 
-func (session *fullSessionKey) Vs() vsKey {
-	return vsKey{ip: session.vsIP, port: session.vsPort, proto: session.proto}
+func (session *fullSessionKey) String() string {
+	return fmt.Sprintf(
+		"%v:%v->%v:%v/%v",
+		session.clientIP, session.clientPort,
+		session.vsIP, session.vsPort, session.proto,
+	)
 }
 
-func (k fullSessionKey) String() string {
-	return fmt.Sprintf("[%s:%d -> %s:%d/%v]",
-		k.clientIP, k.clientPort, k.vsIP, k.vsPort, k.proto)
+func (session *fullSessionKey) Vs() vsKey {
+	return vsKey{ip: session.vsIP, port: session.vsPort, proto: session.proto}
 }
 
 func fullSessionKeyFromTunPacket(
@@ -152,18 +155,8 @@ type workerState struct {
 }
 
 func aggregateWorkerStates(states []workerState) workerState {
-	if len(states) == 0 {
-		return workerState{
-			id:           -1,
-			rng:          nil,
-			sessions:     []fullSessionKey{},
-			sessionReals: map[fullSessionKey]netip.Addr{},
-			stats:        workerStats{},
-		}
-	}
-
 	aggregate := workerState{
-		id:           -1, // Aggregate has no specific worker ID
+		id:           -1,
 		rng:          nil,
 		sessions:     []fullSessionKey{},
 		sessionReals: map[fullSessionKey]netip.Addr{},
@@ -177,9 +170,9 @@ func aggregateWorkerStates(states []workerState) workerState {
 
 		// Aggregate statistics
 		aggregate.stats.totalPackets += state.stats.totalPackets
-		aggregate.stats.sessions += state.stats.sessions
 		aggregate.stats.outputPackets += state.stats.outputPackets
 		aggregate.stats.droppedPackets += state.stats.droppedPackets
+		aggregate.stats.sessions += state.stats.sessions
 	}
 
 	return aggregate
@@ -188,17 +181,17 @@ func aggregateWorkerStates(states []workerState) workerState {
 // workerStats tracks statistics for a worker
 type workerStats struct {
 	totalPackets   int
-	sessions       int
 	outputPackets  int
 	droppedPackets int
+	sessions       int
 }
 
 // multithreadTestConfig holds test configuration
 type multithreadTestConfig struct {
-	numWorkers       int
-	batchesPerWorker int
-	packetsPerBatch  int
-	syncPeriod       time.Duration // How often to call sync (e.g., 50ms)
+	numWorkers               int
+	batchesPerWorker         int
+	packetsPerBatch          int
+	extendSessionTablePeriod time.Duration
 }
 
 // vsSimple holds simplified VS info for packet generation
@@ -255,7 +248,7 @@ func generateVSConfigs() []vsConfigWithWeights {
 	rng := rand.New(rand.NewSource(42))
 
 	configs := []vsConfigWithWeights{
-		// VS1: TCP IPv4, WRR scheduler, 10 IPv4 reals
+		// VS1: TCP IPv4, RR scheduler, 10 IPv4 reals
 		{
 			ip:        netip.MustParseAddr("10.1.1.1"),
 			port:      80,
@@ -265,7 +258,7 @@ func generateVSConfigs() []vsConfigWithWeights {
 			fixMss:    false,
 			reals:     make([]realConfigWithWeight, 10),
 		},
-		// VS2: UDP IPv4, PRR scheduler, 10 IPv4 reals
+		// VS2: UDP IPv4, RR scheduler, 10 IPv4 reals
 		{
 			ip:        netip.MustParseAddr("10.1.2.1"),
 			port:      5353,
@@ -275,7 +268,7 @@ func generateVSConfigs() []vsConfigWithWeights {
 			fixMss:    false,
 			reals:     make([]realConfigWithWeight, 10),
 		},
-		// VS3: TCP IPv6, WRR scheduler, 10 IPv6 reals
+		// VS3: TCP IPv6, RR scheduler, 10 IPv6 reals
 		{
 			ip:        netip.MustParseAddr("2001:db8::1"),
 			port:      443,
@@ -285,7 +278,7 @@ func generateVSConfigs() []vsConfigWithWeights {
 			fixMss:    false,
 			reals:     make([]realConfigWithWeight, 10),
 		},
-		// VS4: UDP IPv6, PRR scheduler, 10 IPv6 reals
+		// VS4: UDP IPv6, RR scheduler, 10 IPv6 reals
 		{
 			ip:        netip.MustParseAddr("2001:db8::2"),
 			port:      8080,
@@ -295,7 +288,7 @@ func generateVSConfigs() []vsConfigWithWeights {
 			fixMss:    false,
 			reals:     make([]realConfigWithWeight, 10),
 		},
-		// VS5: TCP IPv4, WRR scheduler, 10 mixed IPv4/IPv6 reals
+		// VS5: TCP IPv4, RR scheduler, 10 mixed IPv4/IPv6 reals
 		{
 			ip:        netip.MustParseAddr("10.1.3.1"),
 			port:      8443,
@@ -345,7 +338,6 @@ func buildModuleConfig(
 	sessionTimeout int,
 	capacity uint64,
 	maxLoadFactor float32,
-	refreshPeriod time.Duration,
 ) *balancerpb.BalancerConfig {
 	virtualServices := make([]*balancerpb.VirtualService, 0, len(vsConfigs))
 
@@ -443,7 +435,7 @@ func buildModuleConfig(
 		State: &balancerpb.StateConfig{
 			SessionTableCapacity:      &capacity,
 			SessionTableMaxLoadFactor: &maxLoadFactor,
-			RefreshPeriod:             durationpb.New(refreshPeriod),
+			RefreshPeriod:             durationpb.New(0),
 			Wlc: &balancerpb.WlcConfig{
 				Power:     func() *uint64 { v := uint64(10); return &v }(),
 				MaxWeight: func() *uint32 { v := uint32(1000); return &v }(),
@@ -678,7 +670,6 @@ func workerRoutine(
 		for _, outPkt := range output {
 			sessionKey, err := fullSessionKeyFromTunPacket(outPkt)
 			if err != nil {
-				fmt.Printf("%v", outPkt.RawData)
 				sendError("failed to get session key for out packet: %w", err)
 				continue
 			}
@@ -923,15 +914,15 @@ func validateFinalSessions(
 		// Check if this session was tracked
 		expectedReal, found := expectedSessions[sessionKey]
 		if !found {
-			t.Errorf("Session %d: balancer has session %v that was not tracked by workers",
-				i, sessionKey)
+			t.Errorf("Session %d: balancer has session %s that was not tracked by workers",
+				i, sessionKey.String())
 			continue
 		}
 
 		// Verify the real server matches
 		if expectedReal != realIP {
-			t.Errorf("Session %d: real server mismatch for %v: expected=%v, got=%v",
-				i, sessionKey, expectedReal, realIP)
+			t.Errorf("Session %d: real server mismatch for %s: expected=%v, got=%v",
+				i, sessionKey.String(), expectedReal, realIP)
 		}
 
 		// Remove from expected map (to detect sessions we tracked but balancer doesn't have)
@@ -942,11 +933,39 @@ func validateFinalSessions(
 	if len(expectedSessions) > 0 {
 		t.Errorf("Workers tracked %d sessions that are not in balancer:", len(expectedSessions))
 		for sessionKey, realIP := range expectedSessions {
-			t.Errorf("  - %v -> real %v", sessionKey, realIP)
+			t.Errorf("  - %s -> real %v", sessionKey.String(), realIP)
 		}
 	}
 
 	t.Logf("Session validation completed successfully")
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// extendSessionTableRoutine periodically calls sync to allow session table resizing
+func extendSessionTableRoutine(
+	mock *mock.YanetMock,
+	balancer *balancer.BalancerManager,
+	done chan struct{},
+	config *multithreadTestConfig,
+	errors chan error,
+) {
+	ticker := time.NewTicker(config.extendSessionTablePeriod)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			err := balancer.Refresh(
+				mock.CurrentTime(),
+			)
+			if err != nil {
+				errors <- err
+			}
+		}
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -966,17 +985,17 @@ func runMultithreadedTest(t *testing.T, config *multithreadTestConfig) {
 	initialCapacity := 3 * expectedSessions / 2
 	maxLoadFactor := float32(0.5)
 
-	moduleConfig := buildModuleConfig(vsConfigs, sessionTimeout, initialCapacity, maxLoadFactor, config.syncPeriod)
+	moduleConfig := buildModuleConfig(vsConfigs, sessionTimeout, initialCapacity, maxLoadFactor)
 
 	// Setup test
-	mockConfig := utils.SingleWorkerMockConfig(datasize.MB*256, datasize.MB*4)
+	mockConfig := utils.SingleWorkerMockConfig(datasize.MB*512, datasize.MB*4)
 	mockConfig.Workers = uint64(config.numWorkers)
 
 	setup, err := utils.Make(&utils.TestConfig{
 		Mock:     mockConfig,
 		Balancer: moduleConfig,
 		AgentMemory: func() *datasize.ByteSize {
-			memory := 64 * datasize.MB
+			memory := 256 * datasize.MB
 			return &memory
 		}(),
 	})
@@ -1005,25 +1024,32 @@ func runMultithreadedTest(t *testing.T, config *multithreadTestConfig) {
 	// Create channels and wait groups
 	errors := make(chan error, config.numWorkers+1)
 
-	var workersWg sync.WaitGroup
+	var wg sync.WaitGroup
 
 	// Launch worker goroutines
-	workersWg.Add(config.numWorkers)
+	wg.Add(config.numWorkers)
 	wStates := make([]workerState, config.numWorkers)
 	for i := 0; i < config.numWorkers; i++ {
 		go workerRoutine(
 			i, config, mock,
-			vsSimpleList, &workersWg, errors, &wStates[i],
+			vsSimpleList, &wg, errors, &wStates[i],
 		)
 	}
 
-	// Listen for errors
-	go func() {
-		// Wait for all workers to complete
-		workersWg.Wait()
+	done := make(chan struct{}, 1)
 
-		close(errors)
+	// Start extend session table routine
+	go func() {
+		extendSessionTableRoutine(mock, balancer, done, config, errors)
 	}()
+
+	// Listen for errors
+	wg.Wait()
+
+	// Stop extend session table routine
+	done <- struct{}{}
+
+	close(errors)
 
 	// List for errors
 	for err := range errors {
@@ -1085,18 +1111,18 @@ func TestMultithreadedSessionTable(t *testing.T) {
 		numWorkers int
 	}{
 		{"SingleWorker", 1},
-		// {"TwoWorkers", 2},
-		// {"FourWorkers", 4},
-		// {"EightWorkers", 8},
+		{"TwoWorkers", 2},
+		{"FourWorkers", 4},
+		{"EightWorkers", 8},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			config := &multithreadTestConfig{
-				numWorkers:       tc.numWorkers,
-				batchesPerWorker: 100,
-				packetsPerBatch:  1024 / tc.numWorkers,
-				syncPeriod:       5 * time.Millisecond,
+				numWorkers:               tc.numWorkers,
+				batchesPerWorker:         100,
+				packetsPerBatch:          1024 / tc.numWorkers,
+				extendSessionTablePeriod: 50 * time.Millisecond,
 			}
 
 			runMultithreadedTest(t, config)

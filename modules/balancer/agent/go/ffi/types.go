@@ -153,9 +153,9 @@ type SessionIdentifier struct {
 
 // SessionInfo contains runtime session metadata
 type SessionInfo struct {
-	CreateTimestamp     time.Time // Session creation time
-	LastPacketTimestamp time.Time // Last packet time observed
-	Timeout             uint32    // Current timeout applied (seconds)
+	CreateTimestamp     time.Time     // Session creation time
+	LastPacketTimestamp time.Time     // Last packet time observed
+	Timeout             time.Duration // Current timeout applied (seconds)
 }
 
 // Sessions contains a list of active sessions

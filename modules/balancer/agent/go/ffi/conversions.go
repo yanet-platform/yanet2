@@ -309,9 +309,6 @@ func cToGo_RealIdentifier(cId C.struct_real_identifier) RealIdentifier {
 
 // Time conversions (uint32 monotonic timestamp to time.Time)
 func cToGo_Timestamp(ts uint32) time.Time {
-	// Convert monotonic timestamp (seconds) to time.Time
-	// Note: Monotonic timestamps are converted directly to Unix time.
-	// The C code uses monotonic time for relative measurements.
 	return time.Unix(int64(ts), 0)
 }
 
@@ -1043,10 +1040,6 @@ func cToGo_VsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 // BalancerInfo conversions
 
 func cToGo_BalancerInfo(cInfo *C.struct_balancer_info) *BalancerInfo {
-	if cInfo == nil {
-		return nil
-	}
-
 	info := &BalancerInfo{
 		ActiveSessions:      uint64(cInfo.active_sessions),
 		LastPacketTimestamp: time.Unix(int64(cInfo.last_packet_timestamp), 0),
@@ -1065,10 +1058,6 @@ func cToGo_BalancerInfo(cInfo *C.struct_balancer_info) *BalancerInfo {
 }
 
 func cToGo_VsInfo(cInfo *C.struct_named_vs_info) *VsInfo {
-	if cInfo == nil {
-		return nil
-	}
-
 	info := &VsInfo{
 		Identifier:          cToGo_VsIdentifier(cInfo.identifier),
 		LastPacketTimestamp: time.Unix(int64(cInfo.last_packet_timestamp), 0),
@@ -1131,13 +1120,14 @@ func cToGo_Sessions(cSessions *C.struct_sessions) *Sessions {
 func cToGo_SessionIdentifier(
 	cId *C.struct_session_identifier,
 ) SessionIdentifier {
+	real := cToGo_RealIdentifier(cId.real)
 	return SessionIdentifier{
 		ClientIp: cToGo_NetAddr(
 			cId.client_ip,
-			true,
-		), // Determine IPv4/v6 from context
+			real.VsIdentifier.Addr.Is4(),
+		),
 		ClientPort: uint16(cId.client_port),
-		Real:       cToGo_RealIdentifier(cId.real),
+		Real:       real,
 	}
 }
 
@@ -1145,7 +1135,7 @@ func cToGo_SessionInfo(cInfo *C.struct_session_info) SessionInfo {
 	return SessionInfo{
 		CreateTimestamp:     time.Unix(int64(cInfo.create_timestamp), 0),
 		LastPacketTimestamp: time.Unix(int64(cInfo.last_packet_timestamp), 0),
-		Timeout:             uint32(cInfo.timeout),
+		Timeout:             time.Duration(cInfo.timeout) * time.Second,
 	}
 }
 
