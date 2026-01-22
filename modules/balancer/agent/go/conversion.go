@@ -8,6 +8,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Protobuf to FFI conversions
@@ -730,8 +731,9 @@ func ConvertBalancerInfoToProto(
 	}
 
 	return &balancerpb.BalancerInfo{
-		ActiveSessions: info.ActiveSessions,
-		Vs:             vsInfo,
+		ActiveSessions:      info.ActiveSessions,
+		LastPacketTimestamp: timestamppb.New(info.LastPacketTimestamp),
+		Vs:                  vsInfo,
 	}
 }
 
@@ -749,8 +751,9 @@ func ConvertVsInfoToProto(info *ffi.VsInfo) *balancerpb.VsInfo {
 			Port:  uint32(info.Identifier.Port),
 			Proto: ConvertFFIProtoToProto(info.Identifier.TransportProto),
 		},
-		ActiveSessions: info.ActiveSessions,
-		Reals:          reals,
+		ActiveSessions:      info.ActiveSessions,
+		LastPacketTimestamp: timestamppb.New(info.LastPacketTimestamp),
+		Reals:               reals,
 	}
 }
 
@@ -763,7 +766,8 @@ func ConvertRealInfoToProto(info *ffi.RealInfo) *balancerpb.RealInfo {
 				},
 			},
 		},
-		ActiveSessions: info.ActiveSessions,
+		ActiveSessions:      info.ActiveSessions,
+		LastPacketTimestamp: timestamppb.New(info.LastPacketTimestamp),
 	}
 }
 
@@ -772,6 +776,9 @@ func ConvertSessionInfoToProto(
 	info *ffi.SessionInfo,
 ) *balancerpb.SessionInfo {
 	return &balancerpb.SessionInfo{
+		LastPacketTimestamp: timestamppb.New(info.LastPacketTimestamp),
+		CreateTimestamp:     timestamppb.New(info.CreateTimestamp),
+		Timeout:             durationpb.New(info.Timeout),
 		ClientAddr: &balancerpb.Addr{
 			Bytes: identifier.ClientIp.AsSlice(),
 		},
@@ -936,34 +943,6 @@ func ConvertRealStatsToProto(
 		CreatedSessions:     stats.CreatedSessions,
 		Packets:             stats.Packets,
 		Bytes:               stats.Bytes,
-	}
-}
-
-func convertGraphVsToProto(vs *ffi.GraphVs) *balancerpb.GraphVs {
-	reals := make([]*balancerpb.GraphReal, 0, len(vs.Reals))
-	for i := range vs.Reals {
-		reals = append(reals, &balancerpb.GraphReal{
-			Identifier: &balancerpb.RelativeRealIdentifier{
-				Ip: &balancerpb.Addr{
-					Bytes: vs.Reals[i].Identifier.Addr.AsSlice(),
-				},
-				Port: uint32(vs.Reals[i].Identifier.Port),
-			},
-			Weight:          uint32(vs.Reals[i].Weight),
-			EffectiveWeight: uint32(0),
-			Enabled:         vs.Reals[i].Enabled,
-		})
-	}
-
-	return &balancerpb.GraphVs{
-		Identifier: &balancerpb.VsIdentifier{
-			Addr: &balancerpb.Addr{
-				Bytes: vs.Identifier.Addr.AsSlice(),
-			},
-			Port:  uint32(vs.Identifier.Port),
-			Proto: ConvertFFIProtoToProto(vs.Identifier.TransportProto),
-		},
-		Reals: reals,
 	}
 }
 

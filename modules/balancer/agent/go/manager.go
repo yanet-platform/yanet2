@@ -202,9 +202,7 @@ func (b *BalancerManager) Info(
 		return nil, err
 	}
 
-	info := ConvertBalancerInfoToProto(ffiInfo)
-	b.log.Infow("now", now, "info", info)
-	return info, nil
+	return ConvertBalancerInfoToProto(ffiInfo), nil
 }
 
 func (b *BalancerManager) Stats(

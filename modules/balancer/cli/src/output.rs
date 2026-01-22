@@ -78,7 +78,6 @@ fn scheduler_to_string(sched: i32) -> String {
 }
 
 fn format_timestamp(ts: Option<&prost_types::Timestamp>) -> String {
-    log::info!("ts: {:?}", ts);
     match ts {
         Some(ts) if ts.seconds == 0 && ts.nanos == 0 => "N/A".to_string(),
         Some(ts) => {
