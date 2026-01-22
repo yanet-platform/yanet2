@@ -18,7 +18,7 @@ func NewBalancerModule(
 	cfg *Config,
 	log *zap.SugaredLogger,
 ) (*BalancerModule, error) {
-	log = log.Named("balancer")
+	log = log.With(zap.String("module", "balancerpb.BalancerService"))
 
 	shm, err := yanet.AttachSharedMemory(cfg.MemoryPath)
 	if err != nil {

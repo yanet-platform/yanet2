@@ -192,6 +192,26 @@ balancer_stats(
 	struct balancer *balancer = balancer_handle_deref(handle);
 	struct packet_handler *handler = ADDR_OF(&balancer->handler);
 
+	if (ref->device == NULL) {
+		NEW_ERROR("device is required");
+		return -1;
+	}
+
+	if (ref->pipeline == NULL) {
+		NEW_ERROR("pipeline is required");
+		return -1;
+	}
+
+	if (ref->function == NULL) {
+		NEW_ERROR("function is required");
+		return -1;
+	}
+
+	if (ref->chain == NULL) {
+		NEW_ERROR("chain is required");
+		return -1;
+	}
+
 	// no error
 	packet_handler_fill_stats(handler, stats, ref);
 
