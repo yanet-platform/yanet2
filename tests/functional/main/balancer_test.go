@@ -82,7 +82,7 @@ func TestBalancer(t *testing.T) {
 
 	fw.Run("Test_IPv4_Packet", func(fw *framework.F, t *testing.T) {
 		packet := createTcpPacket(
-			net.ParseIP("192.0.2.2"),
+			net.ParseIP("192.168.2.2"),
 			net.ParseIP("192.0.2.1"),
 			12345,
 			80,
@@ -97,7 +97,7 @@ func TestBalancer(t *testing.T) {
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 		require.True(t, outputPacket.IsTunneled, "Output packet should be tunneled")
 		require.True(t, outputPacket.DstIP.String() == "10.1.1.1" || outputPacket.DstIP.String() == "10.1.1.2")
-		require.Equal(t, outputPacket.InnerPacket.SrcIP.String(), "192.0.2.2")
+		require.Equal(t, outputPacket.InnerPacket.SrcIP.String(), "192.168.2.2")
 		require.True(t, outputPacket.InnerPacket.IsIPv4)
 	})
 }
