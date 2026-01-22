@@ -23,7 +23,7 @@ message Addr {
 message Net {
 	// Network address (IPv4 or IPv6)
 	Addr addr = 1;
-	
+
 	// Prefix length in bits (0-32 for IPv4, 0-128 for IPv6)
 	uint32 size = 2;
 }
@@ -35,7 +35,7 @@ message Net {
 enum TransportProto {
 	// Transmission Control Protocol - connection-oriented, reliable
 	TCP = 0;
-	
+
 	// User Datagram Protocol - connectionless, best-effort
 	UDP = 1;
 }
@@ -48,10 +48,10 @@ enum TransportProto {
 enum VsScheduler {
 	// Source Hash Scheduler.
 	//
-	// Selects real servers based on a hash of the client's source IP address
-	// and port. This provides session affinity - the same client will always
-	// be directed to the same real server (as long as the real remains 
-	// enabled).
+	// Selects real servers based on a hash of the client's source IP
+	// address and port. This provides session affinity - the same client
+	// will always be directed to the same real server (as long as the real
+	// remains enabled).
 	//
 	// Weight behavior:
 	// - Real server weights affect the hash space distribution
@@ -62,14 +62,14 @@ enum VsScheduler {
 	// Use cases:
 	// - Stateful applications requiring client stickiness
 	// - Applications with client-side caching
-	// - When consistent routing is more important than perfect load 
+	// - When consistent routing is more important than perfect load
 	// distribution
 	SOURCE_HASH = 0;
 
 	// Weighted Round Robin Scheduler.
 	//
 	// Maintains a monotonic counter and selects real servers consecutively
-	// in proportion to their weights. Each real receives a number of 
+	// in proportion to their weights. Each real receives a number of
 	// consecutive connections equal to its weight before moving to the next
 	// real.
 	//
@@ -98,7 +98,7 @@ enum VsScheduler {
 message VsIdentifier {
 	// Virtual service IP address (IPv4 or IPv6)
 	Addr addr = 1;
-	
+
 	// Virtual service port number.
 	//
 	// Standard mode (pure_l3 = false):
@@ -110,7 +110,7 @@ message VsIdentifier {
 	// - Port is ignored for traffic matching
 	// - Virtual service matches all ports for the specified IP and protocol
 	uint32 port = 2;
-	
+
 	// Transport protocol (TCP or UDP)
 	TransportProto proto = 3;
 }
@@ -134,7 +134,7 @@ message VirtualService {
 	// If empty, traffic from any source is accepted.
 	// Useful for restricting access to specific client networks.
 	repeated Net allowed_srcs = 3;
-	
+
 	// List of real servers backing this virtual service.
 	//
 	// Must contain at least one real server. Traffic is distributed across
@@ -159,7 +159,7 @@ message VirtualService {
 message RelativeRealIdentifier {
 	// Real server IP address (IPv4 or IPv6)
 	Addr ip = 1;
-	
+
 	// Real server port (RESERVED FOR FUTURE USE).
 	//
 	// Currently unused. The actual destination port is determined by:
@@ -178,7 +178,7 @@ message RelativeRealIdentifier {
 message RealIdentifier {
 	// Virtual service this real belongs to
 	VsIdentifier vs = 1;
-	
+
 	// Real server identifier
 	RelativeRealIdentifier real = 2;
 }
@@ -211,7 +211,7 @@ message Real {
 	// This allows preserving parts of the original source address while
 	// setting specific bits for routing or identification purposes.
 	Addr src_addr = 3;
-	
+
 	// Source address mask for encapsulation
 	Addr src_mask = 4;
 }
@@ -257,7 +257,8 @@ message VsFlags {
 	// - Matches ALL traffic with the specified IP and transport protocol
 	// - Port number is ignored for both matching and forwarding
 	// - Packets are forwarded to reals using the client's source port
-	// - No two pure L3 services can have the same (IP, protocol) combination
+	// - No two pure L3 services can have the same (IP, protocol)
+	// combination
 	//
 	// When false:
 	// - Virtual service port can be any valid value (1-65535)
@@ -320,23 +321,23 @@ message SessionsTimeouts {
 	// Timeout for TCP sessions in SYN-ACK state (seconds)
 	// Applies to connections waiting for the final ACK
 	uint32 tcp_syn_ack = 1;
-	
+
 	// Timeout for TCP sessions in SYN state (seconds)
 	// Applies to connections waiting for SYN-ACK
 	uint32 tcp_syn = 2;
-	
+
 	// Timeout for TCP sessions in FIN state (seconds)
 	// Applies to connections in graceful shutdown
 	uint32 tcp_fin = 3;
-	
+
 	// Timeout for established TCP sessions (seconds)
 	// Applies to normal data transfer state
 	uint32 tcp = 4;
-	
+
 	// Timeout for UDP sessions (seconds)
 	// UDP is connectionless, so this defines inactivity timeout
 	uint32 udp = 5;
-	
+
 	// Default timeout for other cases (seconds)
 	uint32 default = 6;
 }
@@ -346,17 +347,19 @@ message SessionsTimeouts {
 // Contains both packet processing configuration and state management
 // configuration. Both components are required for a functioning balancer.
 message BalancerConfig {
-	// Packet processing configuration (optional in proto, 
+	// Packet processing configuration (optional in proto,
 	// required in practice).
 	//
 	// CREATE scenario: REQUIRED - must be fully specified
 	// UPDATE scenario: If provided, all sub-fields must be specified
 	optional PacketHandlerConfig packet_handler = 1;
-	
-	// State management configuration (optional in proto, required in practice).
+
+	// State management configuration (optional in proto, required in
+	// practice).
 	//
 	// CREATE scenario: REQUIRED - must be fully specified
-	// UPDATE scenario: Optional fields may be omitted to retain existing values
+	// UPDATE scenario: Optional fields may be omitted to retain existing
+	// values
 	optional StateConfig state = 2;
 }
 
@@ -383,7 +386,7 @@ message PacketHandlerConfig {
 	// Used as the outer source address when tunneling packets to
 	// real servers via IPIP or GRE (for IPv4 destinations).
 	Addr source_address_v4 = 2;
-	
+
 	// Source IPv6 address for encapsulated packets.
 	//
 	// CREATE scenario: REQUIRED
@@ -416,13 +419,13 @@ message PacketHandlerConfig {
 message PacketHandlerRef {
 	// Filter by device name (optional)
 	optional string device = 1;
-	
+
 	// Filter by pipeline name (optional)
 	optional string pipeline = 2;
-	
+
 	// Filter by function name (optional)
 	optional string function = 3;
-	
+
 	// Filter by chain name (optional)
 	optional string chain = 4;
 }
@@ -437,7 +440,7 @@ message WlcConfig {
 	// Controls the aggressiveness of weight adjustment.
 	// Higher values cause more dramatic weight changes.
 	optional uint64 power = 1;
-	
+
 	// Maximum weight limit (optional).
 	//
 	// Caps the maximum weight a real server can have after adjustment.
@@ -463,7 +466,8 @@ message StateConfig {
 	// Maximum load factor for automatic resizing (optional in UPDATE).
 	//
 	// CREATE scenario: REQUIRED
-	// UPDATE scenario: OPTIONAL - if not specified, threshold is not changed
+	// UPDATE scenario: OPTIONAL - if not specified, threshold is not
+	// changed
 	//
 	// When (active_sessions / capacity) exceeds this threshold during
 	// periodic refresh, the session table is automatically resized.

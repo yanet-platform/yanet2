@@ -125,11 +125,12 @@ message UpdateConfigRequest {
 	// Unique identifier for this balancer instance.
 	// Used to reference the balancer in subsequent operations.
 	string name = 1;
-	
+
 	// Balancer configuration.
 	//
 	// CREATE mode: All fields must be fully specified
-	// UPDATE mode: See UpdateConfig RPC documentation for field requirements
+	// UPDATE mode: See UpdateConfig RPC documentation for field
+	// requirements
 	BalancerConfig config = 2;
 }
 
@@ -145,7 +146,7 @@ message UpdateConfigResponse {
 message UpdateRealsRequest {
 	// Balancer instance name (required)
 	string name = 1;
-	
+
 	// List of real server updates to apply.
 	//
 	// Each update can modify the weight and/or enabled state
@@ -166,7 +167,7 @@ message UpdateRealsRequest {
 message UpdateRealsResponse {
 	// Number of updates that were buffered (not yet applied)
 	uint32 updates_buffered = 1;
-	
+
 	// Number of updates that were applied immediately
 	uint32 updates_applied = 2;
 }
@@ -197,7 +198,7 @@ message ShowConfigRequest {
 message ShowConfigResponse {
 	// Current balancer configuration
 	BalancerConfig config = 1;
-	
+
 	// Real server updates that are buffered but not yet applied.
 	//
 	// These updates will be applied when FlushRealUpdates is called.
@@ -227,7 +228,7 @@ message ShowInfoRequest {
 message ShowInfoResponse {
 	// Balancer instance name
 	string name = 1;
-	
+
 	// Runtime information including session counts and timestamps.
 	//
 	// Session counts are updated asynchronously during periodic refresh,

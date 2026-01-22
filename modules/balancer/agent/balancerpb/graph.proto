@@ -14,13 +14,13 @@ option go_package = "github.com/yanet-platform/yanet2/modules/"
 message GraphReal {
 	// Real server identifier (relative to its virtual service)
 	RelativeRealIdentifier identifier = 1;
-	
+
 	// Current weight of the real server.
 	uint32 weight = 2;
 
 	// Current weight of the real server with respect to WLC.
 	uint32 effective_weight = 3;
-	
+
 	// Whether the real server is currently enabled.
 	//
 	// When false, the real receives no new sessions but existing
@@ -35,7 +35,7 @@ message GraphReal {
 message GraphVs {
 	// Virtual service identifier
 	VsIdentifier identifier = 1;
-	
+
 	// List of real servers backing this virtual service.
 	//
 	// Includes current weight and enabled status for each real.

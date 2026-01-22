@@ -50,10 +50,12 @@ message VsInfo {
 	// Timestamp of the last packet processed for this virtual service.
 	//
 	// Updated when any packet matches this virtual service.
-	// Useful for detecting inactive services or monitoring traffic patterns.
+	// Useful for detecting inactive services or monitoring traffic
+	// patterns.
 	google.protobuf.Timestamp last_packet_timestamp = 3;
 
-	// Runtime information for each real server backing this virtual service.
+	// Runtime information for each real server backing this virtual
+	// service.
 	//
 	// Provides per-real session counts and activity timestamps.
 	// The list corresponds to the reals configured in VirtualService.
@@ -100,7 +102,7 @@ message BalancerInfo {
 message SessionInfo {
 	// Client source IP address (IPv4 or IPv6)
 	Addr client_addr = 1;
-	
+
 	// Client source port number
 	uint32 client_port = 2;
 
@@ -108,7 +110,7 @@ message SessionInfo {
 	//
 	// Identifies which virtual service the client connected to.
 	VsIdentifier vs_id = 3;
-	
+
 	// Real server this session is assigned to.
 	//
 	// Identifies which real server is handling this session.
@@ -121,13 +123,13 @@ message SessionInfo {
 	// When the first packet of this session was processed and
 	// the session was created in the session table.
 	google.protobuf.Timestamp create_timestamp = 5;
-	
+
 	// Last packet timestamp.
 	//
 	// When the most recent packet for this session was processed.
 	// Used to calculate session age and determine if timeout has expired.
 	google.protobuf.Timestamp last_packet_timestamp = 6;
-	
+
 	// Session timeout duration.
 	//
 	// How long the session remains active without receiving packets.
