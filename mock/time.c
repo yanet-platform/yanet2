@@ -11,7 +11,7 @@ struct time {
 	struct timespec ts;
 };
 
-static thread_local struct time current_time = {
+static struct time current_time = {
 	.lock = {.locked = false}, .ts = {0, 0}
 };
 
