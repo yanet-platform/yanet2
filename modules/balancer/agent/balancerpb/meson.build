@@ -21,6 +21,7 @@ protoc_gen = custom_target(
     command: [
         protoc,
         '-I', root_dir,
+        '--experimental_allow_proto3_optional',
         '--go_out=paths=source_relative:' + root_dir,
         '--go-grpc_out=paths=source_relative:' + root_dir,
         '@INPUT@',
