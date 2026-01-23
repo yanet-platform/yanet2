@@ -28,17 +28,17 @@ pub enum OutputFormat {
 // Helper Functions
 ////////////////////////////////////////////////////////////////////////////////
 
-fn format_vs(ip: String, port: u16, proto: i32) -> String {
-    if port == 0 {
-        format!("{}/{}", ip, proto_to_string(proto))
-    } else {
-        format!("{}:{}/{}", ip, port, proto_to_string(proto))
-    }
-}
+// fn format_vs(ip: String, port: u16, proto: i32) -> String {
+//     if port == 0 {
+//         format!("{}/{}", ip, proto_to_string(proto))
+//     } else {
+//         format!("{}:{}/{}", ip, port, proto_to_string(proto))
+//     }
+// }
 
 fn format_real(ip: IpAddr, port: u16) -> String {
     if port == 0 {
-        ip
+        format!("{}", ip)
     } else {
         format!("{}:{}", ip, port)
     }
