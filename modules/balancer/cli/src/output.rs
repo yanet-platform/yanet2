@@ -1,6 +1,6 @@
 //! Output formatting for different display formats (JSON, Tree, Table)
 
-use std::error::Error;
+use std::{error::Error, net::IpAddr};
 
 use chrono::{DateTime, Utc};
 use colored::Colorize;
@@ -27,6 +27,22 @@ pub enum OutputFormat {
 ////////////////////////////////////////////////////////////////////////////////
 // Helper Functions
 ////////////////////////////////////////////////////////////////////////////////
+
+fn format_vs(ip: String, port: u16, proto: i32) -> String {
+    if port == 0 {
+        format!("{}/{}", ip, proto_to_string(proto))
+    } else {
+        format!("{}:{}/{}", ip, port, proto_to_string(proto))
+    }
+}
+
+fn format_real(ip: IpAddr, port: u16) -> String {
+    if port == 0 {
+        ip
+    } else {
+        format!("{}:{}", ip, port)
+    }
+}
 
 /// Print a boxed header with title and optional subtitle
 fn print_boxed_header(title: &str, subtitle: Option<&str>) {
@@ -71,8 +87,8 @@ fn proto_to_string(proto: i32) -> String {
 
 fn scheduler_to_string(sched: i32) -> String {
     match balancerpb::VsScheduler::try_from(sched) {
-        Ok(balancerpb::VsScheduler::SourceHash) => "SOURCE_HASH".to_string(),
-        Ok(balancerpb::VsScheduler::RoundRobin) => "ROUND_ROBIN".to_string(),
+        Ok(balancerpb::VsScheduler::SourceHash) => "source_hash".to_string(),
+        Ok(balancerpb::VsScheduler::RoundRobin) => "round_robin".to_string(),
         _ => format!("Unknown({})", sched),
     }
 }
@@ -323,13 +339,16 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                 println!("  IPv6: {}", ipv6.to_string().bright_green());
             }
 
+            println!("{}", "Decap Addresses:".bright_cyan().bold());
             if !packet_handler.decap_addresses.is_empty() {
                 let decap_ips: Vec<String> = packet_handler
                     .decap_addresses
                     .iter()
                     .filter_map(|addr| addr_to_ip(addr).ok().map(|ip| ip.to_string()))
                     .collect();
-                println!("  Decap: {}", decap_ips.join(", ").bright_green());
+                println!("  {}", decap_ips.join(", ").bright_green());
+            } else {
+                println!("  {}", "None".bright_green());
             }
 
             println!();
@@ -378,7 +397,7 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
             if let Some(wlc) = &state_config.wlc {
                 if let (Some(power), Some(max_weight)) = (wlc.power, wlc.max_weight) {
                     println!(
-                        "  WLC: Power={} | Max Weight={}",
+                        "  WLC Power={} | Max Weight={}",
                         power.to_string().bright_green(),
                         max_weight.to_string().bright_green()
                     );
@@ -444,6 +463,8 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                             struct RealRow {
                                 #[tabled(rename = "Real IP")]
                                 ip: String,
+                                #[tabled(rename = "Real port")]
+                                port: u16,
                                 #[tabled(rename = "Weight")]
                                 weight: String,
                                 #[tabled(rename = "Source")]
@@ -458,6 +479,7 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                                 .filter_map(|real| {
                                     real.id.as_ref().map(|real_id| RealRow {
                                         ip: opt_addr_to_ip(&real_id.ip).map(|ip| ip.to_string()).unwrap_or_default(),
+                                        port: real_id.port as u16,
                                         weight: real.weight.to_string(),
                                         source: opt_addr_to_ip(&real.src_addr)
                                             .map(|ip| ip.to_string())
@@ -480,6 +502,8 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                                     .filter_map(|p| addr_to_ip(p).ok().map(|ip| ip.to_string()))
                                     .collect();
                                 println!("{}: {}", "Peers".bright_cyan(), peer_ips.join(", "));
+                            } else {
+                                println!("{}: {}", "Peers".bright_cyan(), "none");
                             }
 
                             // Allowed sources
@@ -490,6 +514,8 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                                     .filter_map(|s| opt_addr_to_ip(&s.addr).ok().map(|ip| format!("{}/{}", ip, s.size)))
                                     .collect();
                                 println!("{}: {}", "Allowed Sources".bright_cyan(), srcs.join(", "));
+                            } else {
+                                println!("{}: {}", "Allowed Sources".bright_cyan(), "none");
                             }
 
                             println!();
@@ -630,21 +656,19 @@ fn print_show_info_table(response: &balancerpb::ShowInfoResponse) -> Result<(), 
     // Print header
     let subtitle = if let Some(info) = &response.info {
         Some(format!(
-            "Config: {} | Active Sessions: {}",
-            response.name,
-            format_number(info.active_sessions)
+            "Active Sessions: {} | Last Packet: {}",
+            format_number(info.active_sessions),
+            format_timestamp(info.last_packet_timestamp.as_ref())
         ))
     } else {
         Some(format!("Config: {}", response.name))
     };
-    print_boxed_header("BALANCER STATE INFO", subtitle.as_deref());
+    print_boxed_header("BALANCER INFO", subtitle.as_deref());
     println!();
 
     if let Some(info) = &response.info {
         // VS table (hierarchical display - reals nested under VS)
         if !info.vs.is_empty() {
-            println!("{}", "Virtual Services:".bright_yellow().bold());
-
             for vs_info in &info.vs {
                 if let Some(vs_id) = &vs_info.id {
                     if let Ok(vs_ip) = opt_addr_to_ip(&vs_id.addr) {
@@ -663,8 +687,8 @@ fn print_show_info_table(response: &balancerpb::ShowInfoResponse) -> Result<(), 
                         if !vs_info.reals.is_empty() {
                             #[derive(Tabled)]
                             struct RealInfoRow {
-                                #[tabled(rename = "Real IP")]
-                                real_ip: String,
+                                #[tabled(rename = "Real")]
+                                real: String,
                                 #[tabled(rename = "Active Sessions")]
                                 sessions: String,
                                 #[tabled(rename = "Last Packet (UTC)")]
@@ -678,7 +702,7 @@ fn print_show_info_table(response: &balancerpb::ShowInfoResponse) -> Result<(), 
                                     real_info.id.as_ref().and_then(|real_id| {
                                         real_id.real.as_ref().and_then(|rel_real| {
                                             opt_addr_to_ip(&rel_real.ip).ok().map(|real_ip| RealInfoRow {
-                                                real_ip: real_ip.to_string(),
+                                                real: format_real(real_ip, rel_real.port as u16),
                                                 sessions: format_number(real_info.active_sessions),
                                                 last_packet: format_timestamp(real_info.last_packet_timestamp.as_ref()),
                                             })
@@ -1257,7 +1281,7 @@ fn print_show_sessions_table(response: &balancerpb::ShowSessionsResponse) -> Res
                             return Some(SessionRow {
                                 client: format!("{}:{}", client_ip, session.client_port),
                                 vs: format!("{}:{}", vs_ip, vs_id.port),
-                                real: format!("{}:{}", real_ip, rel_real.port),
+                                real: format_real(real_ip, rel_real.port as u16),
                                 proto: proto_to_string(vs_id.proto),
                                 created_at: format_timestamp(session.create_timestamp.as_ref()),
                                 last_packet: format_timestamp(session.last_packet_timestamp.as_ref()),
