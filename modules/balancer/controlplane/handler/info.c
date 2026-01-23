@@ -161,7 +161,8 @@ fill_balancer_info_callback(
 		return 0;
 	}
 
-	const int is_session_active = state->last_packet_timestamp + state->timeout > ctx->now;
+	const int is_session_active =
+		state->last_packet_timestamp + state->timeout > ctx->now;
 
 	uint32_t vs_idx = ADDR_OF(&ctx->handler->vs_index)[id->vs_id];
 	assert(vs_idx != INDEX_INVALID);
@@ -207,7 +208,11 @@ packet_handler_balancer_info(
 	info->last_packet_timestamp = 0;
 
 	struct fill_balancer_info_ctx ctx = {
-		.handler = handler, .state = state, .info = info, .reals = reals, .now = now
+		.handler = handler,
+		.state = state,
+		.info = info,
+		.reals = reals,
+		.now = now
 	};
 
 	int res = session_table_iter(

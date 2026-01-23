@@ -194,28 +194,34 @@ balancer_stats(
 
 	if (ref->device == NULL) {
 		NEW_ERROR("device is required");
-		return -1;
+		goto err;
 	}
 
 	if (ref->pipeline == NULL) {
 		NEW_ERROR("pipeline is required");
-		return -1;
+		goto err;
 	}
 
 	if (ref->function == NULL) {
 		NEW_ERROR("function is required");
-		return -1;
+		goto err;
 	}
 
 	if (ref->chain == NULL) {
 		NEW_ERROR("chain is required");
-		return -1;
+		goto err;
 	}
+
+	diag_reset(&balancer->diag);
 
 	// no error
 	packet_handler_fill_stats(handler, stats, ref);
 
 	return 0;
+
+err:
+	diag_fill(&balancer->diag);
+	return -1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
