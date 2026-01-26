@@ -52,11 +52,11 @@ bench_init(struct bench *bench, struct bench_config *config) {
 		goto error_unmap;
 	}
 
-    allocator_init(
-        &bench->alloc, 
-        shared_memory + DP_MEMORY + config->cp_memory,
-        config->total_memory - config->cp_memory - DP_MEMORY
-    );
+	allocator_init(
+		&bench->alloc,
+		shared_memory + DP_MEMORY + config->cp_memory,
+		config->total_memory - config->cp_memory - DP_MEMORY
+	);
 
 	return 0;
 
@@ -102,11 +102,11 @@ bench_handle_packets(
 
 uint8_t *
 bench_alloc(void *bench, size_t align, size_t size) {
-    struct bench *b = (struct bench *)bench;
-    return allocator_alloc(&b->alloc, align, size);
+	struct bench *b = (struct bench *)bench;
+	return allocator_alloc(&b->alloc, align, size);
 }
 
 void *
 bench_shared_memory(struct bench *bench) {
-    return bench->shared_memory;
+	return bench->shared_memory;
 }

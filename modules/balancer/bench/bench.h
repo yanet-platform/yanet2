@@ -11,7 +11,7 @@ struct bench {
 	struct diag diag;
 	void *shared_memory;
 	struct bench_config *config;
-    struct allocator alloc;
+	struct allocator alloc;
 };
 
 int
