@@ -273,6 +273,12 @@ init_packet_with_mbuf(
 
 ////////////////////////////////////////////////////////////////////////////////
 
+uint8_t *malloc_alloc(size_t align, size_t size) {
+	return aligned_alloc(align, size);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 int
 fill_packet_list(
 	struct packet_list *packet_list,
@@ -280,27 +286,7 @@ fill_packet_list(
 	struct packet_data *packets,
 	uint16_t mbuf_size
 ) {
-	packet_list_init(packet_list);
-
-	for (size_t i = 0; i < packets_count; i++) {
-		struct packet_data *data = &packets[i];
-		struct rte_mbuf *m =
-			aligned_alloc(alignof(struct rte_mbuf), mbuf_size);
-		init_mbuf(m, data, mbuf_size);
-		struct packet *p = mbuf_to_packet(m);
-		if (init_packet_with_mbuf(p, m, data) != 0) {
-			return -1;
-		}
-
-		// Initialize packet
-		memset(p, 0, sizeof(struct packet));
-		p->mbuf = m;
-		p->rx_device_id = data->rx_device_id;
-		p->tx_device_id = data->tx_device_id;
-		packet_list_add(packet_list, p);
-	}
-
-	return 0;
+	return fill_packet_list_custom(packet_list, packets_count, packets, mbuf_size, malloc_alloc);
 }
 
 void
@@ -339,4 +325,52 @@ fill_packet_from_data(struct packet *packet, struct packet_data *data) {
 	init_mbuf(mbuf, data, buf_len);
 	init_packet_with_mbuf(packet, mbuf, data);
 	return parse_packet(packet);
+}
+
+int
+fill_packet_list_custom(
+	struct packet_list *packet_list,
+	size_t packets_count,
+	struct packet_data *packets,
+	uint16_t mbuf_size,
+	alloc_memory alloc
+) {
+	packet_list_init(packet_list);
+
+	for (size_t i = 0; i < packets_count; i++) {
+		struct packet_data *data = &packets[i];
+		struct rte_mbuf *m = (struct rte_mbuf *)alloc(alignof(struct rte_mbuf), mbuf_size);
+		if (m == NULL) {
+			return -1;
+		}
+		init_mbuf(m, data, mbuf_size);
+		struct packet *p = mbuf_to_packet(m);
+		if (init_packet_with_mbuf(p, m, data) != 0) {
+			return -1;
+		}
+
+		// Initialize packet
+		memset(p, 0, sizeof(struct packet));
+		p->mbuf = m;
+		p->rx_device_id = data->rx_device_id;
+		p->tx_device_id = data->tx_device_id;
+		packet_list_add(packet_list, p);
+	}
+
+	return 0;
+}
+
+void
+free_packet_list_custom(
+	struct packet_list *packet_list,
+	size_t mbuf_size,
+	free_memory free_func
+) {
+	while (1) {
+		struct packet *packet = packet_list_pop(packet_list);
+		if (packet == NULL) {
+			break;
+		}
+		free_func(packet->mbuf, alignof(struct rte_mbuf), mbuf_size);
+	}
 }

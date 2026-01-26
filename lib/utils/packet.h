@@ -69,9 +69,29 @@ fill_packet_list(
 	uint16_t mbuf_size
 );
 
+typedef uint8_t *(*alloc_memory)(size_t align, size_t size);
+
+int
+fill_packet_list_custom(
+	struct packet_list *packet_list,
+	size_t packets_count,
+	struct packet_data *packets,
+	uint16_t mbuf_size,
+	alloc_memory alloc
+);
+
 /// Free packet list in case its `rte_mbuf`s were allocated with malloc.
 void
 free_packet_list(struct packet_list *packet_list);
+
+typedef uint8_t *(*free_memory)(void *ptr, size_t align, size_t size);
+
+void
+free_packet_list_custom(
+	struct packet_list *packet_list,
+	size_t mbuf_size,
+	free_memory free
+);
 
 ////////////////////////////////////////////////////////////////////////////////
 
