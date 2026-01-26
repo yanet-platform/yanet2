@@ -21,22 +21,29 @@ type PacketData struct {
 	rxDeviceId uint16
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-type Packet C.struct_packet
-
-func NewPacketFromData(data PacketData, pinner *runtime.Pinner) (*Packet, error) {
-	if pinner != nil {
-		pinner.Pin(data.data)
-	}
-
-	packet := C.struct_packet{}
-	packetData := C.struct_packet_data{
+func (data *PacketData) asRaw() C.struct_packet_data {
+	return C.struct_packet_data{
 		data:         (*C.uint8_t)(&data.data[0]),
 		size:         C.uint16_t(len(data.data)),
 		tx_device_id: C.uint16_t(data.txDeviceId),
 		rx_device_id: C.uint16_t(data.rxDeviceId),
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type Packet C.struct_packet
+
+func NewPacketFromData(
+	data PacketData,
+	pinner *runtime.Pinner,
+) (*Packet, error) {
+	if pinner != nil {
+		pinner.Pin(data.data)
+	}
+
+	packet := C.struct_packet{}
+	packetData := data.asRaw()
 
 	rc := C.fill_packet_from_data(&packet, &packetData)
 	if rc != 0 {
@@ -92,7 +99,10 @@ func (packetList *PacketList) Iter() *PacketListIter {
 }
 
 func (packetList *PacketList) Add(packet *Packet) {
-	C.packet_list_add((*C.struct_packet_list)(packetList), (*C.struct_packet)(packet))
+	C.packet_list_add(
+		(*C.struct_packet_list)(packetList),
+		(*C.struct_packet)(packet),
+	)
 }
 
 func NewPacketList(packets ...Packet) PacketList {
@@ -110,11 +120,38 @@ func NewPacketListFromData(data ...PacketData) (*PacketList, error) {
 	for idx := range data {
 		packet, err := NewPacketFromData(data[idx], nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create new packet from data at index %d: %v", idx, err)
+			return nil, fmt.Errorf(
+				"failed to create new packet from data at index %d: %v",
+				idx,
+				err,
+			)
 		}
 		packetList.Add(packet)
 	}
 	return &packetList, nil
+}
+
+func FillPacketListFromDataWithCustomAlloc(
+	packetList *PacketList,
+	alloc *Alloc,
+	data ...PacketData,
+) error {
+	datas := make([]C.struct_packet_data, len(data))
+	for idx := range data {
+		datas[idx] = data[idx].asRaw()
+	}
+	rc := C.fill_packet_list_custom_alloc(
+		(*C.struct_packet_list)(packetList),
+		C.size_t(len(data)),
+		&datas[0],
+		C.uint16_t(0),
+		alloc.alloc,
+		(*[0]byte)(alloc.allocFunc),
+	)
+	if rc != 0 {
+		return fmt.Errorf("failed to fill packet list: rc=%d", rc)
+	}
+	return nil
 }
 
 func (packetList *PacketList) Free() {

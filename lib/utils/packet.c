@@ -273,7 +273,8 @@ init_packet_with_mbuf(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-uint8_t *malloc_alloc(size_t align, size_t size) {
+uint8_t *malloc_alloc(void *alloc, size_t align, size_t size) {
+	(void)alloc;
 	return aligned_alloc(align, size);
 }
 
@@ -286,7 +287,7 @@ fill_packet_list(
 	struct packet_data *packets,
 	uint16_t mbuf_size
 ) {
-	return fill_packet_list_custom(packet_list, packets_count, packets, mbuf_size, malloc_alloc);
+	return fill_packet_list_custom_alloc(packet_list, packets_count, packets, mbuf_size, NULL, malloc_alloc);
 }
 
 void
@@ -328,22 +329,32 @@ fill_packet_from_data(struct packet *packet, struct packet_data *data) {
 }
 
 int
-fill_packet_list_custom(
+fill_packet_list_custom_alloc(
 	struct packet_list *packet_list,
 	size_t packets_count,
 	struct packet_data *packets,
 	uint16_t mbuf_size,
-	alloc_memory alloc
+	void *alloc,
+	alloc_func alloc_func
 ) {
 	packet_list_init(packet_list);
 
 	for (size_t i = 0; i < packets_count; i++) {
 		struct packet_data *data = &packets[i];
-		struct rte_mbuf *m = (struct rte_mbuf *)alloc(alignof(struct rte_mbuf), mbuf_size);
+		struct rte_mbuf *m = (struct rte_mbuf *)alloc_func(alloc, alignof(struct rte_mbuf), mbuf_size);
 		if (m == NULL) {
 			return -1;
 		}
-		init_mbuf(m, data, mbuf_size);
+		size_t cur_mbuf_size = mbuf_size;
+		if (cur_mbuf_size == 0) {
+			size_t buf_len = RTE_PKTMBUF_HEADROOM + data->size;
+			if (buf_len % alignof(struct rte_mbuf) != 0) {
+				size_t a = alignof(struct rte_mbuf);
+				buf_len += a - buf_len % a;
+			}
+			cur_mbuf_size = buf_len + sizeof(struct rte_mbuf);
+		}
+		init_mbuf(m, data, cur_mbuf_size);
 		struct packet *p = mbuf_to_packet(m);
 		if (init_packet_with_mbuf(p, m, data) != 0) {
 			return -1;
@@ -361,16 +372,17 @@ fill_packet_list_custom(
 }
 
 void
-free_packet_list_custom(
+free_packet_list_custom_alloc(
 	struct packet_list *packet_list,
 	size_t mbuf_size,
-	free_memory free_func
+	void *alloc,
+	free_func free_func
 ) {
 	while (1) {
 		struct packet *packet = packet_list_pop(packet_list);
 		if (packet == NULL) {
 			break;
 		}
-		free_func(packet->mbuf, alignof(struct rte_mbuf), mbuf_size);
+		free_func(alloc, packet->mbuf, alignof(struct rte_mbuf), mbuf_size);
 	}
 }

@@ -13,8 +13,8 @@ int
 bench_init(struct bench *bench, struct bench_config *config) {
     diag_reset(&bench->diag);
 
-    if (config->memory < DP_MEMORY) {
-        NEW_ERROR("memory is to small (required at least %d)", DP_MEMORY);
+    if (config->memory < DP_MEMORY + config->cp_memory) {
+        NEW_ERROR("memory is to small (required at least %lu)", DP_MEMORY + config->cp_memory);
         goto error;
     }
 
@@ -34,7 +34,7 @@ bench_init(struct bench *bench, struct bench_config *config) {
         .worker_count = config->workers,
         .device_count = 1,
         .dp_memory = DP_MEMORY,
-        .cp_memory = config->memory - DP_MEMORY,
+        .cp_memory = config->cp_memory,
         .devices = {
             (struct yanet_mock_device_config){
                 .id = 0,
