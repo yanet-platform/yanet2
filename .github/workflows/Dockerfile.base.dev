@@ -34,7 +34,7 @@ apt-get update -y
 echo "Installing build tools..."
 install_packages \
     meson \
-    clang \
+    clang-19 \
     clang-format-19 \
     clang-tidy-19 \
     curl \

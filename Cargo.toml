@@ -23,6 +23,8 @@ members = [
     "devices/cli",
     "devices/plain/cli",
     "devices/vlan/cli",
+
+    "modules/proxy/dataplane",
 ]
 
 [profile.release]

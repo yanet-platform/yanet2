@@ -1,0 +1,14 @@
+[package]
+name = "yanet-proxy-dp"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+bindgen = { version = "0.72", features = ["experimental"] }
+cc = "1.2"
