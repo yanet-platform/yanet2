@@ -2,12 +2,12 @@ package main
 
 /*
 #cgo CFLAGS: -I../ -I../../../../ -I../../../../lib
-#cgo LDFLAGS: -L../../../../build/modules/balancer/bench -lbalancer_bench -L../../../../build/lib/utils -llib_utils -L../../../../build/mock -lyanet_mock
+#cgo LDFLAGS: -L../../../../build/modules/balancer/bench -lbalancer_bench -L../../../../build/lib/utils -llib_utils -L../../../../build/mock -lyanet_mock -L../../../../build/lib/dataplane/pipeline -lpipeline -L../../../../build/lib/dataplane/worker -lworker_dp -lnuma
 #include <stdlib.h>
 #include "bench.h"
 #include <stdalign.h>
 enum { packet_list_align = _Alignof(struct packet_list) };
-static void *bench_alloc_func = bench_alloc;
+void *bench_alloc_func = bench_alloc;
 */
 import "C"
 import (
@@ -31,7 +31,10 @@ func NewBench(workers, totalMemory, cpMemory int) (*Bench, error) {
 	ec := C.bench_init(&b.bench, &config)
 	if ec != 0 {
 		str := C.bench_take_error(&b.bench)
-		return nil, fmt.Errorf("failed to initialize bench: %s", C.GoString(str))
+		return nil, fmt.Errorf(
+			"failed to initialize bench: %s",
+			C.GoString(str),
+		)
 	}
 	return b, nil
 }
@@ -56,12 +59,29 @@ func (b *Bench) MakePacketLists(count int) ([]dataplane.PacketList, error) {
 	return unsafe.Slice(p, count), nil
 }
 
-func (b *Bench) InitPacketList(packetList *dataplane.PacketList, packets ...dataplane.PacketData) error {
-	return dataplane.FillPacketListFromDataWithCustomAlloc(packetList, dataplane.NewAlloc(unsafe.Pointer(&b.bench), unsafe.Pointer(C.bench_alloc_func)))
+func (b *Bench) InitPacketList(
+	packetList *dataplane.PacketList,
+	packets ...dataplane.PacketData,
+) error {
+	return dataplane.FillPacketListFromDataWithCustomAlloc(
+		packetList,
+		dataplane.NewAlloc(
+			unsafe.Pointer(&b.bench),
+			unsafe.Pointer(C.bench_alloc_func),
+		),
+	)
 }
 
-func (b *Bench) HandlePackets(worker int, packets []dataplane.PacketList) error {
-	ec := C.bench_handle_packets(&b.bench, C.size_t(worker), (*C.struct_packet_list)(unsafe.Pointer(&packets[0])), C.size_t(len(packets)))
+func (b *Bench) HandlePackets(
+	worker int,
+	packets []dataplane.PacketList,
+) error {
+	ec := C.bench_handle_packets(
+		&b.bench,
+		C.size_t(worker),
+		(*C.struct_packet_list)(unsafe.Pointer(&packets[0])),
+		C.size_t(len(packets)),
+	)
 	if ec != 0 {
 		return fmt.Errorf("failed to run bench: %d", ec)
 	}
@@ -69,5 +89,7 @@ func (b *Bench) HandlePackets(worker int, packets []dataplane.PacketList) error 
 }
 
 func (b *Bench) SharedMemory() *yanet.SharedMemory {
-	return yanet.NewSharedMemoryFromRaw(unsafe.Pointer(C.bench_shared_memory(&b.bench)))
+	return yanet.NewSharedMemoryFromRaw(
+		unsafe.Pointer(C.bench_shared_memory(&b.bench)),
+	)
 }

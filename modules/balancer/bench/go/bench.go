@@ -30,7 +30,15 @@ type workerInfo struct {
 	isErr bool
 }
 
-func workerRoutine(bench *Bench, wg *sync.WaitGroup, readyWg *sync.WaitGroup, info chan workerInfo, start chan struct{}, idx int, packetList []dataplane.PacketList) {
+func workerRoutine(
+	bench *Bench,
+	wg *sync.WaitGroup,
+	readyWg *sync.WaitGroup,
+	info chan workerInfo,
+	start chan struct{},
+	idx int,
+	packetList []dataplane.PacketList,
+) {
 	defer wg.Done()
 
 	runtime.LockOSThread()
@@ -110,7 +118,11 @@ func Run(config *BenchConfig) error {
 	logger, _, _ := logging.Init(&logging.Config{
 		Level: logLevel,
 	})
-	agent, err := balancer.NewBalancerAgent(bench.SharedMemory(), datasize.ByteSize(AgentMemory), logger)
+	agent, err := balancer.NewBalancerAgent(
+		bench.SharedMemory(),
+		datasize.ByteSize(AgentMemory),
+		logger,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create new balancer agent: %s", err)
 	}
@@ -146,7 +158,11 @@ func Run(config *BenchConfig) error {
 		for idx := range packetLists {
 			packets := generator.generateWorkerPackets()
 			if err := bench.InitPacketList(&packetLists[idx], packets...); err != nil {
-				return fmt.Errorf("failed to init packet list at index %d: %s", idx, err)
+				return fmt.Errorf(
+					"failed to init packet list at index %d: %s",
+					idx,
+					err,
+				)
 			}
 		}
 
