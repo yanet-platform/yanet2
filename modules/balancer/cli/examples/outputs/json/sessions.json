@@ -1,62 +1,119 @@
 {
-  "target": {
-    "config_name": "my-balancer"
-  },
-  "sessions_info": [
+  "sessions": [
     {
       "client_addr": "10.0.1.100",
       "client_port": 45678,
-      "vs_addr": "192.0.2.1",
-      "vs_port": 80,
-      "real_addr": "10.1.1.1",
-      "real_port": 80,
+      "vs_id": {
+        "addr": "192.0.2.1",
+        "port": 80,
+        "proto": "tcp"
+      },
+      "real_id": {
+        "vs": {
+          "addr": "192.0.2.1",
+          "port": 80,
+          "proto": "tcp"
+        },
+        "real": {
+          "ip": "10.1.1.1",
+          "port": 80
+        }
+      },
       "create_timestamp": "2024-01-15T10:45:30+00:00",
       "last_packet_timestamp": "2024-01-15T10:50:44+00:00",
-      "timeout_seconds": 60
+      "timeout": "60s"
     },
     {
       "client_addr": "10.0.1.101",
       "client_port": 45679,
-      "vs_addr": "192.0.2.1",
-      "vs_port": 80,
-      "real_addr": "10.1.1.2",
-      "real_port": 80,
+      "vs_id": {
+        "addr": "192.0.2.1",
+        "port": 80,
+        "proto": "tcp"
+      },
+      "real_id": {
+        "vs": {
+          "addr": "192.0.2.1",
+          "port": 80,
+          "proto": "tcp"
+        },
+        "real": {
+          "ip": "10.1.1.2",
+          "port": 80
+        }
+      },
       "create_timestamp": "2024-01-15T10:45:31+00:00",
       "last_packet_timestamp": "2024-01-15T10:50:45+00:00",
-      "timeout_seconds": 60
+      "timeout": "60s"
     },
     {
       "client_addr": "10.0.2.50",
       "client_port": 52000,
-      "vs_addr": "192.0.2.2",
-      "vs_port": 443,
-      "real_addr": "10.2.1.1",
-      "real_port": 443,
+      "vs_id": {
+        "addr": "192.0.2.2",
+        "port": 443,
+        "proto": "tcp"
+      },
+      "real_id": {
+        "vs": {
+          "addr": "192.0.2.2",
+          "port": 443,
+          "proto": "tcp"
+        },
+        "real": {
+          "ip": "10.2.1.1",
+          "port": 443
+        }
+      },
       "create_timestamp": "2024-01-15T10:48:15+00:00",
       "last_packet_timestamp": "2024-01-15T10:50:40+00:00",
-      "timeout_seconds": 60
+      "timeout": "60s"
     },
     {
       "client_addr": "10.0.2.51",
       "client_port": 52001,
-      "vs_addr": "192.0.2.2",
-      "vs_port": 443,
-      "real_addr": "10.2.1.1",
-      "real_port": 443,
+      "vs_id": {
+        "addr": "192.0.2.2",
+        "port": 443,
+        "proto": "tcp"
+      },
+      "real_id": {
+        "vs": {
+          "addr": "192.0.2.2",
+          "port": 443,
+          "proto": "tcp"
+        },
+        "real": {
+          "ip": "10.2.1.1",
+          "port": 443
+        }
+      },
       "create_timestamp": "2024-01-15T10:48:16+00:00",
       "last_packet_timestamp": "2024-01-15T10:50:41+00:00",
-      "timeout_seconds": 60
+      "timeout": "60s"
     },
     {
       "client_addr": "10.0.2.52",
       "client_port": 52002,
-      "vs_addr": "192.0.2.2",
-      "vs_port": 443,
-      "real_addr": "10.2.1.2",
-      "real_port": 443,
+      "vs_id": {
+        "addr": "192.0.2.2",
+        "port": 443,
+        "proto": "tcp"
+      },
+      "real_id": {
+        "vs": {
+          "addr": "192.0.2.2",
+          "port": 443,
+          "proto": "tcp"
+        },
+        "real": {
+          "ip": "10.2.1.2",
+          "port": 443
+        }
+      },
       "create_timestamp": "2024-01-15T10:48:17+00:00",
       "last_packet_timestamp": "2024-01-15T10:50:42+00:00",
-      "timeout_seconds": 60
+      "timeout": "60s"
     }
   ]
 }

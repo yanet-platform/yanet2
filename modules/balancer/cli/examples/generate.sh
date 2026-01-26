@@ -22,7 +22,7 @@ echo -e "${GREEN}Building project...${NC}"
 cargo build --release 2>&1 | grep -v "Compiling\|Finished" || true
 
 # List of examples
-EXAMPLES=("config" "list" "state" "stats" "sessions")
+EXAMPLES=("config" "list" "stats" "sessions" "info" "graph")
 
 # Generate outputs for each example in each format
 for example in "${EXAMPLES[@]}"; do

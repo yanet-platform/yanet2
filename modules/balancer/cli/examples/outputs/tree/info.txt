@@ -1,0 +1,22 @@
+Balancer State Info
+└─ Config: my-balancer
+   ├─ Active Sessions: 15,234
+   ├─ Last Packet: 2024-01-15 10:50:45
+   └─ Virtual Services (2)
+      ├─ 192.0.2.1:80/TCP
+      │  ├─ Active Sessions: 10,234
+      │  ├─ Last Packet: 2024-01-15 10:50:44
+      │  └─ Reals (2)
+      │     ├─ 10.1.1.1
+      │     │  ├─ Active Sessions: 6,000
+      │     │  └─ Last Packet: 2024-01-15 10:50:44
+      │     └─ 10.1.1.2
+      │        ├─ Active Sessions: 4,234
+      │        └─ Last Packet: 2024-01-15 10:50:43
+      └─ 192.0.2.2:443/TCP
+         ├─ Active Sessions: 5,000
+         ├─ Last Packet: 2024-01-15 10:50:45
+         └─ Reals (1)
+            └─ 10.2.1.1
+               ├─ Active Sessions: 5,000
+               └─ Last Packet: 2024-01-15 10:50:45

@@ -1,0 +1,76 @@
+{
+  "name": "my-balancer",
+  "info": {
+    "active_sessions": 15234,
+    "last_packet_timestamp": "2024-01-15T10:50:45+00:00",
+    "vs": [
+      {
+        "id": {
+          "addr": "192.0.2.1",
+          "port": 80,
+          "proto": "tcp"
+        },
+        "active_sessions": 10234,
+        "last_packet_timestamp": "2024-01-15T10:50:44+00:00",
+        "reals": [
+          {
+            "id": {
+              "vs": {
+                "addr": "192.0.2.1",
+                "port": 80,
+                "proto": "tcp"
+              },
+              "real": {
+                "ip": "10.1.1.1",
+                "port": 80
+              }
+            },
+            "active_sessions": 6000,
+            "last_packet_timestamp": "2024-01-15T10:50:44+00:00"
+          },
+          {
+            "id": {
+              "vs": {
+                "addr": "192.0.2.1",
+                "port": 80,
+                "proto": "tcp"
+              },
+              "real": {
+                "ip": "10.1.1.2",
+                "port": 80
+              }
+            },
+            "active_sessions": 4234,
+            "last_packet_timestamp": "2024-01-15T10:50:43+00:00"
+          }
+        ]
+      },
+      {
+        "id": {
+          "addr": "192.0.2.2",
+          "port": 443,
+          "proto": "tcp"
+        },
+        "active_sessions": 5000,
+        "last_packet_timestamp": "2024-01-15T10:50:45+00:00",
+        "reals": [
+          {
+            "id": {
+              "vs": {
+                "addr": "192.0.2.2",
+                "port": 443,
+                "proto": "tcp"
+              },
+              "real": {
+                "ip": "10.2.1.1",
+                "port": 443
+              }
+            },
+            "active_sessions": 5000,
+            "last_packet_timestamp": "2024-01-15T10:50:45+00:00"
+          }
+        ]
+      }
+    ]
+  }
+}

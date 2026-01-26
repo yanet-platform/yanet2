@@ -1,0 +1,60 @@
+{
+  "graph": {
+    "virtual_services": [
+      {
+        "identifier": {
+          "addr": "192.0.2.1",
+          "port": 80,
+          "proto": "tcp"
+        },
+        "reals": [
+          {
+            "identifier": {
+              "ip": "10.1.1.1",
+              "port": 80
+            },
+            "weight": 100,
+            "effective_weight": 100,
+            "enabled": true
+          },
+          {
+            "identifier": {
+              "ip": "10.1.1.2",
+              "port": 80
+            },
+            "weight": 50,
+            "effective_weight": 50,
+            "enabled": true
+          }
+        ]
+      },
+      {
+        "identifier": {
+          "addr": "192.0.2.2",
+          "port": 443,
+          "proto": "tcp"
+        },
+        "reals": [
+          {
+            "identifier": {
+              "ip": "10.2.1.1",
+              "port": 443
+            },
+            "weight": 100,
+            "effective_weight": 90,
+            "enabled": true
+          },
+          {
+            "identifier": {
+              "ip": "10.2.1.2",
+              "port": 443
+            },
+            "weight": 100,
+            "effective_weight": 110,
+            "enabled": true
+          }
+        ]
+      }
+    ]
+  }
+}
