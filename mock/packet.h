@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../lib/dataplane/packet/packet.h"
+#include "lib/dataplane/packet/packet.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 

@@ -85,7 +85,9 @@ fill_packet_list_custom_alloc(
 void
 free_packet_list(struct packet_list *packet_list);
 
-typedef uint8_t *(*free_func)(void *alloc, void *ptr, size_t align, size_t size);
+typedef uint8_t *(*free_func)(
+	void *alloc, void *ptr, size_t align, size_t size
+);
 
 void
 free_packet_list_custom_alloc(

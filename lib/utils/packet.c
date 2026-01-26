@@ -273,7 +273,8 @@ init_packet_with_mbuf(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-uint8_t *malloc_alloc(void *alloc, size_t align, size_t size) {
+uint8_t *
+malloc_alloc(void *alloc, size_t align, size_t size) {
 	(void)alloc;
 	return aligned_alloc(align, size);
 }
@@ -287,7 +288,14 @@ fill_packet_list(
 	struct packet_data *packets,
 	uint16_t mbuf_size
 ) {
-	return fill_packet_list_custom_alloc(packet_list, packets_count, packets, mbuf_size, NULL, malloc_alloc);
+	return fill_packet_list_custom_alloc(
+		packet_list,
+		packets_count,
+		packets,
+		mbuf_size,
+		NULL,
+		malloc_alloc
+	);
 }
 
 void
@@ -341,7 +349,9 @@ fill_packet_list_custom_alloc(
 
 	for (size_t i = 0; i < packets_count; i++) {
 		struct packet_data *data = &packets[i];
-		struct rte_mbuf *m = (struct rte_mbuf *)alloc_func(alloc, alignof(struct rte_mbuf), mbuf_size);
+		struct rte_mbuf *m = (struct rte_mbuf *)alloc_func(
+			alloc, alignof(struct rte_mbuf), mbuf_size
+		);
 		if (m == NULL) {
 			return -1;
 		}
@@ -383,6 +393,8 @@ free_packet_list_custom_alloc(
 		if (packet == NULL) {
 			break;
 		}
-		free_func(alloc, packet->mbuf, alignof(struct rte_mbuf), mbuf_size);
+		free_func(
+			alloc, packet->mbuf, alignof(struct rte_mbuf), mbuf_size
+		);
 	}
 }
