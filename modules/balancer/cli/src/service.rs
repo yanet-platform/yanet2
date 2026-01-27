@@ -17,7 +17,7 @@ use crate::{
 
 macro_rules! info {
     ($($arg:tt)*) => {
-        log::info!(target: "balancer", $($arg)*)
+        log::info!(target: "yanet_cli_balancer", $($arg)*)
     };
 }
 
