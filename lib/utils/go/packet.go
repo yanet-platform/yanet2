@@ -136,8 +136,14 @@ func FillPacketListFromDataWithCustomAlloc(
 	alloc *Alloc,
 	data ...PacketData,
 ) error {
+	// Pin all Go slices to prevent them from being moved by GC
+	pinner := &runtime.Pinner{}
+	defer pinner.Unpin()
+
 	datas := make([]C.struct_packet_data, len(data))
 	for idx := range data {
+		// Pin the data slice before taking its pointer
+		pinner.Pin(&data[idx].Data[0])
 		datas[idx] = data[idx].asRaw()
 	}
 	var ptr *C.struct_packet_data = nil

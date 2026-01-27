@@ -83,6 +83,7 @@ func (b *Bench) InitPacketList(
 			unsafe.Pointer(&b.bench),
 			unsafe.Pointer(C.bench_alloc_func),
 		),
+		packets...,
 	)
 }
 

@@ -29,7 +29,10 @@ type Generator struct {
 	worker    int
 }
 
-func NewGenerator(bench *BenchConfig, balancer *balancerpb.BalancerConfig) *Generator {
+func NewGenerator(
+	bench *BenchConfig,
+	balancer *balancerpb.BalancerConfig,
+) *Generator {
 	return &Generator{
 		bench:     bench,
 		balancer:  balancer,
@@ -56,7 +59,10 @@ func (ctx *Generator) selectRandomVS() *balancerpb.VirtualService {
 }
 
 // generateRandomIPInNetwork generates a random IP address within the given network
-func (ctx *Generator) generateRandomIPInNetwork(netAddr netip.Addr, prefixLen uint32) netip.Addr {
+func (ctx *Generator) generateRandomIPInNetwork(
+	netAddr netip.Addr,
+	prefixLen uint32,
+) netip.Addr {
 	if netAddr.Is4() {
 		// IPv4
 		addrBytes := netAddr.As4()
@@ -93,7 +99,9 @@ func (ctx *Generator) generateRandomIPInNetwork(netAddr netip.Addr, prefixLen ui
 }
 
 // generateClientIP generates a client IP address for the given virtual service
-func (ctx *Generator) generateClientIP(vs *balancerpb.VirtualService) netip.Addr {
+func (ctx *Generator) generateClientIP(
+	vs *balancerpb.VirtualService,
+) netip.Addr {
 	vsAddr, ok := netip.AddrFromSlice(vs.Id.Addr.Bytes)
 	if !ok {
 		panic("invalid VS address")
@@ -196,11 +204,18 @@ func (ctx *Generator) createPacketForSession(s session) dataplane.PacketData {
 		panic(fmt.Sprintf("failed to serialize packet: %v", err))
 	}
 
-	packet := gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
+	packet := gopacket.NewPacket(
+		buf.Bytes(),
+		layers.LayerTypeEthernet,
+		gopacket.Default,
+	)
 
 	// Handle MSS for TCP packets
 	if s.proto == balancerpb.TransportProto_TCP && ctx.bench.mss > 0 {
-		modifiedPacket, err := utils.InsertOrUpdateMSS(packet, uint16(ctx.bench.mss))
+		modifiedPacket, err := utils.InsertOrUpdateMSS(
+			packet,
+			uint16(ctx.bench.mss),
+		)
 		if err != nil {
 			panic(fmt.Sprintf("failed to insert MSS: %v", err))
 		}
@@ -215,7 +230,10 @@ func (ctx *Generator) createPacketForSession(s session) dataplane.PacketData {
 }
 
 // generateWorkerPackets generates packets for a worker based on the bench config
-func (ctx *Generator) generateWorkerPackets(worker int, count int) []dataplane.PacketData {
+func (ctx *Generator) generateWorkerPackets(
+	worker int,
+	count int,
+) []dataplane.PacketData {
 	packets := make([]dataplane.PacketData, 0, ctx.bench.PacketsPerBatch)
 
 	if worker != ctx.worker {
@@ -228,7 +246,8 @@ func (ctx *Generator) generateWorkerPackets(worker int, count int) []dataplane.P
 		var s session
 
 		// Decide: new session or reuse?
-		if ctx.rand.Float32() < ctx.bench.NewSessionProb || len(ctx.sessions) == 0 {
+		if ctx.rand.Float32() < ctx.bench.NewSessionProb ||
+			len(ctx.sessions) == 0 {
 			// Create new session
 			s = ctx.createNewSession()
 			ctx.sessions = append(ctx.sessions, s)

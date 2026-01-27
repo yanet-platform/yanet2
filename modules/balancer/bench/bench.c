@@ -50,7 +50,7 @@ bench_init(struct bench *bench, struct bench_config *config) {
 		.cp_memory = config->cp_memory,
 		.devices = {(struct yanet_mock_device_config){
 			.id = 0,
-			.name = "device",
+			.name = "01:00.0",
 		}}
 	};
 

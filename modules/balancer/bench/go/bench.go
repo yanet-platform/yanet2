@@ -12,6 +12,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/go/logging"
+	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	dataplane "github.com/yanet-platform/yanet2/lib/utils/go"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
@@ -145,7 +146,9 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 			var realAddr netip.Addr
 			if i < config.Ipv4Reals {
 				// Generate IPv4 real address (10.0.0.0/8 range)
-				realAddr = netip.AddrFrom4([4]byte{10, 0, byte(i / 256), byte(i % 256)})
+				realAddr = netip.AddrFrom4(
+					[4]byte{10, 0, byte(i / 256), byte(i % 256)},
+				)
 			} else {
 				// Generate IPv6 real address (fd00::/8 range)
 				realAddr = netip.AddrFrom16([16]byte{0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, byte(i / 256), byte(i % 256)})
@@ -181,7 +184,9 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 		for i := 0; i < config.AllowedSrcPerVs; i++ {
 			if addr.Is4() {
 				net := balancerpb.Net{
-					Addr: &balancerpb.Addr{Bytes: []byte{byte(i / 256), byte(i % 256), 5, 5}},
+					Addr: &balancerpb.Addr{
+						Bytes: []byte{byte(i / 256), byte(i % 256), 5, 5},
+					},
 					Size: 32,
 				}
 				allowedSrc = append(allowedSrc, &net)
@@ -196,7 +201,12 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 
 		peers := make([]*balancerpb.Addr, 0, 2)
 		for i := range 2 {
-			peers = append(peers, &balancerpb.Addr{Bytes: []byte{byte(i / 256), byte(i % 256), 10, 11}})
+			peers = append(
+				peers,
+				&balancerpb.Addr{
+					Bytes: []byte{byte(i / 256), byte(i % 256), 10, 11},
+				},
+			)
 		}
 
 		return &balancerpb.VirtualService{
@@ -216,25 +226,75 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 	// Generate TCP IPv4 virtual services
 	for i := 0; i < config.TcpIpv4Vs; i++ {
 		addr := netip.AddrFrom4([4]byte{192, 168, byte(i / 256), byte(i % 256)})
-		virtualServices = append(virtualServices, createVS(addr, 80, balancerpb.TransportProto_TCP))
+		virtualServices = append(
+			virtualServices,
+			createVS(addr, 80, balancerpb.TransportProto_TCP),
+		)
 	}
 
 	// Generate TCP IPv6 virtual services
 	for i := 0; i < config.TcpIpv6Vs; i++ {
-		addr := netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, byte(i / 256), byte(i % 256)})
-		virtualServices = append(virtualServices, createVS(addr, 80, balancerpb.TransportProto_TCP))
+		addr := netip.AddrFrom16(
+			[16]byte{
+				0x20,
+				0x01,
+				0x0d,
+				0xb8,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				byte(i / 256),
+				byte(i % 256),
+			},
+		)
+		virtualServices = append(
+			virtualServices,
+			createVS(addr, 80, balancerpb.TransportProto_TCP),
+		)
 	}
 
 	// Generate UDP IPv4 virtual services
 	for i := 0; i < config.UdpIpv4Vs; i++ {
 		addr := netip.AddrFrom4([4]byte{172, 16, byte(i / 256), byte(i % 256)})
-		virtualServices = append(virtualServices, createVS(addr, 53, balancerpb.TransportProto_UDP))
+		virtualServices = append(
+			virtualServices,
+			createVS(addr, 53, balancerpb.TransportProto_UDP),
+		)
 	}
 
 	// Generate UDP IPv6 virtual services
 	for i := 0; i < config.UdpIpv6Vs; i++ {
-		addr := netip.AddrFrom16([16]byte{0xfc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, byte(i / 256), byte(i % 256)})
-		virtualServices = append(virtualServices, createVS(addr, 53, balancerpb.TransportProto_UDP))
+		addr := netip.AddrFrom16(
+			[16]byte{
+				0xfc,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				byte(i / 256),
+				byte(i % 256),
+			},
+		)
+		virtualServices = append(
+			virtualServices,
+			createVS(addr, 53, balancerpb.TransportProto_UDP),
+		)
 	}
 
 	// Session timeouts (in seconds)
@@ -249,20 +309,26 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 
 	// Source addresses for encapsulation
 	sourceV4 := netip.AddrFrom4([4]byte{10, 255, 255, 254})
-	sourceV6 := netip.AddrFrom16([16]byte{0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
+	sourceV6 := netip.AddrFrom16(
+		[16]byte{0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+	)
 
 	// Packet handler configuration
 	packetHandler := &balancerpb.PacketHandlerConfig{
 		Vs:               virtualServices,
 		SourceAddressV4:  &balancerpb.Addr{Bytes: sourceV4.AsSlice()},
 		SourceAddressV6:  &balancerpb.Addr{Bytes: sourceV6.AsSlice()},
-		DecapAddresses:   []*balancerpb.Addr{}, // No decap addresses for benchmarking
+		DecapAddresses:   []*balancerpb.Addr{},
 		SessionsTimeouts: sessionTimeouts,
 	}
 
 	// State configuration
-	capacity := uint64(config.BatchesPerWorker * config.PacketsPerBatch * config.Workers * 4)
-	refreshPeriod := durationpb.New(0) // Disable periodic refresh for benchmarking
+	capacity := uint64(
+		config.BatchesPerWorker * config.PacketsPerBatch * config.Workers * 4,
+	)
+	refreshPeriod := durationpb.New(
+		0,
+	) // Disable periodic refresh for benchmarking
 
 	stateConfig := &balancerpb.StateConfig{
 		SessionTableCapacity:      &capacity,
@@ -275,6 +341,92 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 		PacketHandler: packetHandler,
 		State:         stateConfig,
 	}
+}
+
+const (
+	DeviceName   = "01:00.0"
+	PipelineName = "pipeline0"
+	FunctionName = "function0"
+	ChainName    = "chain0"
+)
+
+func setupYanet(shm *yanet.SharedMemory) error {
+	// Attach bootstrap agent to configure the controlplane
+	bootstrap, err := shm.AgentAttach("bootstrap", 0, 1<<20)
+	if err != nil {
+		return fmt.Errorf("failed to attach to bootstrap agent: %w", err)
+	}
+
+	// Update function configuration
+	{
+		functionConfig := yanet.FunctionConfig{
+			Name: FunctionName,
+			Chains: []yanet.FunctionChainConfig{
+				{
+					Weight: 1,
+					Chain: yanet.ChainConfig{
+						Name: ChainName,
+						Modules: []yanet.ChainModuleConfig{
+							{
+								Type: "balancer",
+								Name: BalancerName,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		if err := bootstrap.UpdateFunction(functionConfig); err != nil {
+			return fmt.Errorf("failed to update function: %w", err)
+		}
+	}
+
+	// Update pipelines
+	{
+		inputPipelineConfig := yanet.PipelineConfig{
+			Name:      PipelineName,
+			Functions: []string{FunctionName},
+		}
+
+		dummyPipelineConfig := yanet.PipelineConfig{
+			Name:      "dummy",
+			Functions: []string{},
+		}
+
+		if err := bootstrap.UpdatePipeline(inputPipelineConfig); err != nil {
+			return fmt.Errorf("failed to update pipeline: %w", err)
+		}
+
+		if err := bootstrap.UpdatePipeline(dummyPipelineConfig); err != nil {
+			return fmt.Errorf("failed to update pipeline: %w", err)
+		}
+	}
+
+	// Update devices
+	{
+		deviceConfig := yanet.DeviceConfig{
+			Name: DeviceName,
+			Input: []yanet.DevicePipelineConfig{
+				{
+					Name:   PipelineName,
+					Weight: 1,
+				},
+			},
+			Output: []yanet.DevicePipelineConfig{
+				{
+					Name:   "dummy",
+					Weight: 1,
+				},
+			},
+		}
+
+		if err := bootstrap.UpdatePlainDevices([]yanet.DeviceConfig{deviceConfig}); err != nil {
+			return fmt.Errorf("failed to update devices: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func Run(config *BenchConfig) error {
@@ -302,11 +454,16 @@ func Run(config *BenchConfig) error {
 		return fmt.Errorf("failed to create new balancer manager: %s", err)
 	}
 
+	if err := setupYanet(bench.SharedMemory()); err != nil {
+		return fmt.Errorf("failed to setup yanet: %s", err)
+	}
+
 	// enable all reals
 	bal, err := agent.BalancerManager(BalancerName)
 	if err != nil {
 		panic("balancer manager is incorrect")
 	}
+
 	if err := enableAllReals(bal); err != nil {
 		return fmt.Errorf("failed to enable reals: %s", err)
 	}
@@ -326,7 +483,22 @@ func Run(config *BenchConfig) error {
 			return fmt.Errorf("failed to create packet lists: %s", err)
 		}
 		for idx := range packetLists {
-			packets := generator.generateWorkerPackets(worker, config.PacketsPerBatch)
+			if idx%100 == 0 {
+				logger.Infow(
+					"generating packets",
+					"worker",
+					worker,
+					"progress",
+					fmt.Sprintf(
+						"%.2f%%",
+						100.0*float32(idx)/float32(len(packetLists)),
+					),
+				)
+			}
+			packets := generator.generateWorkerPackets(
+				worker,
+				config.PacketsPerBatch,
+			)
 			if err := bench.InitPacketList(&packetLists[idx], packets...); err != nil {
 				return fmt.Errorf(
 					"failed to init packet list at index %d: %s",
@@ -335,8 +507,18 @@ func Run(config *BenchConfig) error {
 				)
 			}
 		}
+		logger.Infow("generated all packets", "worker", worker)
 
-		go workerRoutine(bench, &wg, &readyWg, info, start, worker, packetLists, config.PacketsPerBatch*config.BatchesPerWorker)
+		go workerRoutine(
+			bench,
+			&wg,
+			&readyWg,
+			info,
+			start,
+			worker,
+			packetLists,
+			config.PacketsPerBatch*config.BatchesPerWorker,
+		)
 	}
 
 	go func() {
@@ -354,7 +536,7 @@ func Run(config *BenchConfig) error {
 
 	for info := range info {
 		if info.isErr {
-			logger.Error(info.info, "worker", info.idx, "tid", info.tid)
+			logger.Errorw(info.info, "worker", info.idx, "tid", info.tid)
 			isErr = true
 		} else {
 			logger.Infow(info.info, "worker", info.idx, "tid", info.tid)
