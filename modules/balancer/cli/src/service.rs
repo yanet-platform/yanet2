@@ -88,7 +88,12 @@ impl BalancerService {
         let flush = cmd.flush;
         let name = cmd.name.clone();
 
-        info!("Enabling {} real(s) for VS {}", cmd.reals.len(), cmd.vs);
+        info!(
+            "Enabling {} real(s) of VS {} for '{}'",
+            cmd.reals.len(),
+            cmd.vs,
+            cmd.name
+        );
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
 

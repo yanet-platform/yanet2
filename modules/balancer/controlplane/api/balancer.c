@@ -212,6 +212,7 @@ balancer_stats(
 		goto err;
 	}
 
+	// Reset diagnostics only after all validation passes
 	diag_reset(&balancer->diag);
 
 	// no error
