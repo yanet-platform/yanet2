@@ -1,6 +1,6 @@
 //! CLI command definitions
 
-use clap::{ArgAction, Parser, ValueEnum};
+use clap::{ArgAction, Parser};
 
 use crate::{output, rpc::balancerpb};
 
@@ -29,23 +29,32 @@ pub struct Cmd {
 // Output Format
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Output format options
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum OutputFormat {
-    /// JSON format
-    Json,
-    /// Tree structure
-    Tree,
-    /// Table format (default)
-    Table,
+/// Helper struct for output format flags
+#[derive(Debug, Clone, Parser)]
+pub struct FormatFlags {
+    /// Output in JSON format
+    #[clap(long, short = 'j', conflicts_with_all = ["tree", "table"])]
+    pub json: bool,
+
+    /// Output in tree format
+    #[clap(long, short = 't', conflicts_with_all = ["json", "table"])]
+    pub tree: bool,
+
+    /// Output in table format (default)
+    #[clap(long, conflicts_with_all = ["json", "tree"])]
+    pub table: bool,
 }
 
-impl From<OutputFormat> for crate::output::OutputFormat {
-    fn from(format: OutputFormat) -> Self {
-        match format {
-            OutputFormat::Json => output::OutputFormat::Json,
-            OutputFormat::Tree => output::OutputFormat::Tree,
-            OutputFormat::Table => output::OutputFormat::Table,
+impl FormatFlags {
+    /// Convert flags to OutputFormat, defaulting to Table if none specified
+    pub fn to_format(&self) -> crate::output::OutputFormat {
+        if self.json {
+            output::OutputFormat::Json
+        } else if self.tree {
+            output::OutputFormat::Tree
+        } else {
+            // Default to table if no format specified or if --table is explicitly set
+            output::OutputFormat::Table
         }
     }
 }
@@ -358,9 +367,8 @@ pub struct ConfigCmd {
     #[arg(long, short = 'n')]
     pub name: String,
 
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 impl From<&ConfigCmd> for balancerpb::ShowConfigRequest {
@@ -375,9 +383,8 @@ impl From<&ConfigCmd> for balancerpb::ShowConfigRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct ListCmd {
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -406,9 +413,8 @@ pub struct StatsCmd {
     #[arg(long)]
     pub chain: Option<String>,
 
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 impl From<&StatsCmd> for balancerpb::ShowStatsRequest {
@@ -435,9 +441,8 @@ pub struct InfoCmd {
     #[arg(long, short = 'n')]
     pub name: String,
 
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 impl From<&InfoCmd> for balancerpb::ShowInfoRequest {
@@ -456,9 +461,8 @@ pub struct SessionsCmd {
     #[arg(long, short = 'n')]
     pub name: String,
 
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 impl From<&SessionsCmd> for balancerpb::ShowSessionsRequest {
@@ -473,9 +477,8 @@ pub struct GraphCmd {
     #[arg(long, short = 'n')]
     pub name: String,
 
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 impl From<&GraphCmd> for balancerpb::ShowGraphRequest {

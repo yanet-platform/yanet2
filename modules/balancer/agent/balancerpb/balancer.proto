@@ -138,6 +138,7 @@ message UpdateConfigRequest {
 //
 // Empty response indicates success. Errors are returned via gRPC status.
 message UpdateConfigResponse {
+	string name = 1;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -165,11 +166,13 @@ message UpdateRealsRequest {
 
 // Response to UpdateReals request.
 message UpdateRealsResponse {
+	string name = 1;
+
 	// Number of updates that were buffered (not yet applied)
-	uint32 updates_buffered = 1;
+	uint32 updates_buffered = 2;
 
 	// Number of updates that were applied immediately
-	uint32 updates_applied = 2;
+	uint32 updates_applied = 3;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -182,8 +185,9 @@ message FlushRealUpdatesRequest {
 
 // Response to FlushRealUpdates request.
 message FlushRealUpdatesResponse {
+	string name = 1;
 	// Number of buffered updates that were flushed and applied
-	uint32 updates_flushed = 1;
+	uint32 updates_flushed = 2;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -196,14 +200,17 @@ message ShowConfigRequest {
 
 // Response containing balancer configuration.
 message ShowConfigResponse {
+	// Balancer instance name
+	string name = 1;
+
 	// Current balancer configuration
-	BalancerConfig config = 1;
+	BalancerConfig config = 2;
 
 	// Real server updates that are buffered but not yet applied.
 	//
 	// These updates will be applied when FlushRealUpdates is called.
 	// Empty if no updates are buffered.
-	repeated RealUpdate buffered_real_updates = 2;
+	repeated RealUpdate buffered_real_updates = 3;
 }
 
 // Request to list all balancer configurations.
@@ -244,13 +251,16 @@ message ShowStatsRequest {
 
 // Response containing balancer statistics.
 message ShowStatsResponse {
-	PacketHandlerRef ref = 1;
+	// Balancer instance name
+	string name = 1;
+
+	PacketHandlerRef ref = 2;
 
 	// Packet processing statistics.
 	//
 	// Includes counters for L4 processing, ICMP handling,
 	// per-virtual-service statistics, and per-real-server statistics.
-	BalancerStats stats = 2;
+	BalancerStats stats = 3;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -263,11 +273,14 @@ message ShowSessionsRequest {
 
 // Response containing active session information.
 message ShowSessionsResponse {
+	// Balancer instance name
+	string name = 1;
+
 	// List of all active sessions.
 	//
 	// Each session includes client information, virtual service mapping,
 	// real server assignment, creation time, last packet time, and timeout.
-	repeated SessionInfo sessions = 1;
+	repeated SessionInfo sessions = 2;
 }
 
 message ShowGraphRequest {
@@ -276,5 +289,8 @@ message ShowGraphRequest {
 }
 
 message ShowGraphResponse {
-	Graph graph = 1;
+	// Balancer instance name
+	string name = 1;
+
+	Graph graph = 2;
 }

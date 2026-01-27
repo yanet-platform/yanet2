@@ -114,7 +114,10 @@ impl BalancerService {
         let name = cmd.name.clone();
         let reals_count = cmd.reals.len();
 
-        info!("Disabling {} real(s) of VS {} for '{}', ", reals_count, cmd.vs, cmd.name);
+        info!(
+            "Disabling {} real(s) of VS {} for '{}', ",
+            reals_count, cmd.vs, cmd.name
+        );
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
 
@@ -154,7 +157,7 @@ impl BalancerService {
         let request: balancerpb::ShowConfigRequest = (&cmd).into();
         let response = self.client.show_config(request).await?.into_inner();
 
-        output::print_show_config(&response, cmd.format.into())?;
+        output::print_show_config(&response, cmd.format.to_format())?;
         Ok(())
     }
 
@@ -165,7 +168,7 @@ impl BalancerService {
         let request = balancerpb::ListConfigsRequest {};
         let response = self.client.list_configs(request).await?.into_inner();
 
-        output::print_list_configs(&response, cmd.format.into())?;
+        output::print_list_configs(&response, cmd.format.to_format())?;
         Ok(())
     }
 
@@ -176,7 +179,7 @@ impl BalancerService {
         let request: balancerpb::ShowStatsRequest = (&cmd).into();
         let response = self.client.show_stats(request).await?.into_inner();
 
-        output::print_show_stats(&response, cmd.format.into())?;
+        output::print_show_stats(&response, cmd.format.to_format())?;
         Ok(())
     }
 
@@ -187,7 +190,7 @@ impl BalancerService {
         let request: balancerpb::ShowInfoRequest = (&cmd).into();
         let response = self.client.show_info(request).await?.into_inner();
 
-        output::print_show_info(&response, cmd.format.into())?;
+        output::print_show_info(&response, cmd.format.to_format())?;
         Ok(())
     }
 
@@ -198,7 +201,7 @@ impl BalancerService {
         let request: balancerpb::ShowSessionsRequest = (&cmd).into();
         let response = self.client.show_sessions(request).await?.into_inner();
 
-        output::print_show_sessions(&response, cmd.format.into())?;
+        output::print_show_sessions(&response, cmd.format.to_format())?;
         Ok(())
     }
 
@@ -208,7 +211,7 @@ impl BalancerService {
         let request: balancerpb::ShowGraphRequest = (&cmd).into();
         let response = self.client.show_graph(request).await?.into_inner();
 
-        output::print_show_graph(&response, cmd.format.into())?;
+        output::print_show_graph(&response, cmd.format.to_format())?;
         Ok(())
     }
 }

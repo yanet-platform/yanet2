@@ -77,7 +77,9 @@ func (m *BalancerService) UpdateConfig(
 			return nil, fmt.Errorf("failed to update balancer: %v", err)
 		}
 		m.log.Infow("balancer config updated", "name", name)
-		return &balancerpb.UpdateConfigResponse{}, nil
+		return &balancerpb.UpdateConfigResponse{
+			Name: req.Name,
+		}, nil
 	} else {
 		m.log.Infow("creating new balancer", "name", name)
 		if err := m.agent.NewBalancerManager(name, req.Config); err != nil {
@@ -85,7 +87,9 @@ func (m *BalancerService) UpdateConfig(
 			return nil, fmt.Errorf("failed to create balancer: %v", err)
 		}
 		m.log.Infow("balancer created", "name", name)
-		return &balancerpb.UpdateConfigResponse{}, nil
+		return &balancerpb.UpdateConfigResponse{
+			Name: req.Name,
+		}, nil
 	}
 }
 
@@ -125,6 +129,7 @@ func (m *BalancerService) UpdateReals(
 	}
 
 	return &balancerpb.UpdateRealsResponse{
+		Name:           req.Name,
 		UpdatesApplied: uint32(count),
 	}, nil
 }
@@ -190,6 +195,7 @@ func (m *BalancerService) ShowConfig(
 	bufferedUpdates := manager.BufferedUpdates()
 
 	return &balancerpb.ShowConfigResponse{
+		Name:                name,
 		Config:              config,
 		BufferedRealUpdates: bufferedUpdates,
 	}, nil
@@ -270,6 +276,7 @@ func (m *BalancerService) ShowStats(
 	}
 
 	return &balancerpb.ShowStatsResponse{
+		Name:  name,
 		Ref:   req.Ref,
 		Stats: stats,
 	}, nil
@@ -303,6 +310,7 @@ func (m *BalancerService) ShowSessions(
 	}
 
 	return &balancerpb.ShowSessionsResponse{
+		Name:     name,
 		Sessions: sessions,
 	}, nil
 }
@@ -331,6 +339,7 @@ func (m *BalancerService) ShowGraph(
 	graph := manager.Graph()
 
 	return &balancerpb.ShowGraphResponse{
+		Name:  name,
 		Graph: graph,
 	}, nil
 }

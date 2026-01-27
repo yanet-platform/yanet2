@@ -5,6 +5,7 @@ use yanet_cli_balancer::rpc::balancerpb;
 #[allow(dead_code)]
 pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
     balancerpb::ShowConfigResponse {
+        name: "my-balancer".to_string(),
         config: Some(balancerpb::BalancerConfig {
             packet_handler: Some(balancerpb::PacketHandlerConfig {
                 vs: vec![
@@ -242,6 +243,7 @@ pub fn create_state_info_example() -> balancerpb::ShowInfoResponse {
 #[allow(dead_code)]
 pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
     balancerpb::ShowStatsResponse {
+        name: "my-balancer".to_string(),
         r#ref: Some(balancerpb::PacketHandlerRef {
             device: Some("eth0".to_string()),
             pipeline: Some("main".to_string()),
@@ -417,6 +419,7 @@ pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
 #[allow(dead_code)]
 pub fn create_sessions_info_example() -> balancerpb::ShowSessionsResponse {
     balancerpb::ShowSessionsResponse {
+        name: "my-balancer".to_string(),
         sessions: vec![
             balancerpb::SessionInfo {
                 client_addr: Some(balancerpb::Addr { bytes: vec![10, 0, 1, 100] }),
