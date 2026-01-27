@@ -76,7 +76,7 @@ func TestBalancer(t *testing.T) {
 			"/mnt/target/release/yanet-cli-balancer stats --name=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",
 
 			// Enable single real
-			"/mnt/target/release/yanet-cli-balancer reals enable --name=balancer0 --real-ip 10.1.1.1 --virtual-ip 192.0.2.1 --virtual-port 80 --proto tcp",
+			"/mnt/target/release/yanet-cli-balancer reals enable --name=balancer0 --vs 192.0.2.1:80/tcp --reals 10.1.1.1",
 			"/mnt/target/release/yanet-cli-balancer reals flush --name=balancer0",
 		}
 

@@ -145,8 +145,8 @@ message UpdateConfigResponse {
 
 // Request to update real server properties.
 message UpdateRealsRequest {
-	// Balancer instance name (required)
-	string name = 1;
+	// Balancer instance name (optional, auto-selects if only one exists)
+	optional string name = 1;
 
 	// List of real server updates to apply.
 	//
@@ -179,8 +179,8 @@ message UpdateRealsResponse {
 
 // Request to flush buffered real server updates.
 message FlushRealUpdatesRequest {
-	// Balancer instance name (required)
-	string name = 1;
+	// Balancer instance name (optional, auto-selects if only one exists)
+	optional string name = 1;
 }
 
 // Response to FlushRealUpdates request.
@@ -194,8 +194,8 @@ message FlushRealUpdatesResponse {
 
 // Request to show balancer configuration.
 message ShowConfigRequest {
-	// Balancer instance name (required)
-	string name = 1;
+	// Balancer instance name (optional, auto-selects if only one exists)
+	optional string name = 1;
 }
 
 // Response containing balancer configuration.
@@ -227,8 +227,8 @@ message ListConfigsResponse {
 
 // Request to show balancer runtime information.
 message ShowInfoRequest {
-	// Balancer instance name (required)
-	string name = 1;
+	// Balancer instance name (optional, auto-selects if only one exists)
+	optional string name = 1;
 }
 
 // Response containing balancer runtime information.
@@ -245,7 +245,8 @@ message ShowInfoResponse {
 
 // Request to show balancer statistics.
 message ShowStatsRequest {
-	string name = 1;
+	// Balancer instance name (optional, auto-selects if only one exists)
+	optional string name = 1;
 	PacketHandlerRef ref = 2;
 }
 
@@ -267,8 +268,8 @@ message ShowStatsResponse {
 
 // Request to show active sessions.
 message ShowSessionsRequest {
-	// Balancer instance name (required)
-	string name = 1;
+	// Balancer instance name (optional, auto-selects if only one exists)
+	optional string name = 1;
 }
 
 // Response containing active session information.
@@ -284,8 +285,8 @@ message ShowSessionsResponse {
 }
 
 message ShowGraphRequest {
-	// Balancer instance name (required)
-	string name = 1;
+	// Balancer instance name (optional, auto-selects if only one exists)
+	optional string name = 1;
 }
 
 message ShowGraphResponse {

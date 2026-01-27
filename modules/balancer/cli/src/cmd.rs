@@ -120,9 +120,9 @@ pub enum RealsMode {
 
 #[derive(Debug, Clone, Parser)]
 pub struct EnableRealCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
     /// Virtual service in format "ip:port/proto" (e.g., "192.168.1.1:80/tcp")
     #[arg(long)]
@@ -235,9 +235,9 @@ impl TryFrom<EnableRealCmd> for balancerpb::UpdateRealsRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct DisableRealCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
     /// Virtual service in format "ip:port/proto" (e.g., "192.168.1.1:80/tcp")
     #[arg(long)]
@@ -346,9 +346,9 @@ impl TryFrom<DisableRealCmd> for balancerpb::UpdateRealsRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct FlushRealUpdatesCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 }
 
 impl From<FlushRealUpdatesCmd> for balancerpb::FlushRealUpdatesRequest {
@@ -363,9 +363,9 @@ impl From<FlushRealUpdatesCmd> for balancerpb::FlushRealUpdatesRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct ConfigCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
     #[clap(flatten)]
     pub format: FormatFlags,
@@ -393,9 +393,9 @@ pub struct ListCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct StatsCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
     /// Device name (optional)
     #[arg(long)]
@@ -437,9 +437,9 @@ impl From<&StatsCmd> for balancerpb::ShowStatsRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct InfoCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
     #[clap(flatten)]
     pub format: FormatFlags,
@@ -457,9 +457,9 @@ impl From<&InfoCmd> for balancerpb::ShowInfoRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct SessionsCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
     #[clap(flatten)]
     pub format: FormatFlags,
@@ -473,9 +473,9 @@ impl From<&SessionsCmd> for balancerpb::ShowSessionsRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct GraphCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
     #[clap(flatten)]
     pub format: FormatFlags,
