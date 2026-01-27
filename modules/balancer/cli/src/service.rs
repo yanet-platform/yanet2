@@ -112,8 +112,9 @@ impl BalancerService {
     async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Box<dyn Error>> {
         let flush = cmd.flush;
         let name = cmd.name.clone();
+        let reals_count = cmd.reals.len();
 
-        info!("Disabling real(s) {:?} for VS {} (flush: {})", cmd.reals, cmd.vs, flush);
+        info!("Disabling {} real(s) for VS {}", reals_count, cmd.vs);
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
 

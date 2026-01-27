@@ -120,7 +120,7 @@ pub struct EnableRealCmd {
     pub vs: String,
 
     /// List of real server IPs to enable
-    #[arg(long, required = true)]
+    #[arg(long, required = true, num_args = 1..)]
     pub reals: Vec<String>,
 
     /// Optional new weight for the real servers
@@ -235,7 +235,7 @@ pub struct DisableRealCmd {
     pub vs: String,
 
     /// List of real server IPs to disable
-    #[arg(long, required = true)]
+    #[arg(long, required = true, num_args = 1..)]
     pub reals: Vec<String>,
 
     /// Flush buffered updates immediately after disabling
