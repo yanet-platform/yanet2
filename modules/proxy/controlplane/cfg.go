@@ -28,5 +28,5 @@ func DefaultConfig() *Config {
 }
 
 type ProxyConfig struct {
-	Addr uint32
+	Addr string
 }

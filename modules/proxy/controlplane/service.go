@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"net"
 	"sync"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -108,10 +110,17 @@ func (s *ProxyService) SetAddr(ctx context.Context, req *proxypb.SetAddrRequest)
 
 	s.log.Infow("successfully set address",
 		zap.String("name", name),
-		zap.Uint32("addr", req.Addr),
+		zap.String("addr", req.Addr),
 	)
 
 	return &proxypb.SetAddrResponse{}, nil
+}
+
+func ipToUint32(ip net.IP) uint32 {
+	if len(ip) == 16 {
+		return binary.BigEndian.Uint32(ip[12:16])
+	}
+	return binary.BigEndian.Uint32(ip)
 }
 
 func (s *ProxyService) updateModuleConfig(name string) error {
@@ -126,7 +135,7 @@ func (s *ProxyService) updateModuleConfig(name string) error {
 		s.configs[name] = config
 	}
 
-	if err := moduleConfig.SetAddr(config.Addr); err != nil {
+	if err := moduleConfig.SetAddr(ipToUint32(net.ParseIP(config.Addr))); err != nil {
 		return fmt.Errorf("failed to set addr: %w", err)
 	}
 

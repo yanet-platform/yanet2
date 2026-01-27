@@ -14,7 +14,7 @@ rust_lib_name = 'libyanet_proxy_dp.a'
 rust_target_dir = meson.current_build_dir() / 'target'
 rust_lib_path = rust_target_dir / cargo_profile_dir / rust_lib_name
 
-proxy_dp_rust = custom_target(
+custom_target(
   'proxy_dp_rust',
   output: rust_lib_name,
   command: [

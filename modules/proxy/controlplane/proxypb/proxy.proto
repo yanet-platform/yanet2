@@ -20,7 +20,7 @@ service ProxyService {
 }
 
 message Config {
-	uint32 addr = 1;
+	string addr = 1;
 }
 
 message ListConfigsRequest {
@@ -55,7 +55,7 @@ message DeleteConfigResponse {
 
 message SetAddrRequest {
 	string name = 1;
-	uint32 addr = 2;
+	string addr = 2;
 }
 
 message SetAddrResponse {

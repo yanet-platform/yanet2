@@ -1,5 +1,5 @@
-use core::ffi::c_char;
-use core::ptr;
+use std::ffi::c_char;
+use std::ptr;
 
 use crate::config::ProxyModuleConfig;
 use crate::{
@@ -74,7 +74,7 @@ pub unsafe extern "C" fn proxy_handle_packets(
     
                     if !ipv4_header.is_null() {
                         (*ipv4_header).src_addr =
-                            ((*module_config).proxy_config.addr as u32).to_be();
+                            (*module_config).proxy_config.addr as u32;
                     }
                 }
             }
@@ -86,7 +86,7 @@ pub unsafe extern "C" fn proxy_handle_packets(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn new_module_proxy() -> *mut module {
-    let module_ptr = unsafe { libc::malloc(core::mem::size_of::<ProxyModule>()) as *mut ProxyModule };
+    let module_ptr = unsafe { libc::malloc(std::mem::size_of::<ProxyModule>()) as *mut ProxyModule };
 
     if module_ptr.is_null() {
         return ptr::null_mut();

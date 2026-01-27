@@ -81,7 +81,7 @@ pub struct SetAddrCmd {
     #[arg(long = "cfg", short)]
     pub config_name: String,
     #[arg(long)]
-    pub addr: u32,
+    pub addr: String,
 }
 
 pub struct ProxyService {

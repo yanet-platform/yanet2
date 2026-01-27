@@ -1,6 +1,7 @@
 package functional
 
 import (
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -59,10 +60,12 @@ func TestProxy(t *testing.T) {
 	fw := globalFramework.ForTest(t)
 	require.NotNil(t, fw, "Global framework should be initialized")
 
+	proxyAddr := "10.0.0.1"
+
 	t.Run("Configure_Proxy_Module", func(t *testing.T) {
 		// Proxy-specific configuration
 		commands := []string{
-			"/mnt/target/release/yanet-cli-proxy addr set --cfg proxy0 --addr 1234",
+			fmt.Sprintf("/mnt/target/release/yanet-cli-proxy addr set --cfg proxy0 --addr %s", proxyAddr),
 
 			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:5=proxy:proxy0,route:route0",
 			// Configure pipelines
@@ -87,7 +90,7 @@ func TestProxy(t *testing.T) {
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
 
 		// Verify packet was forwarded with preserved addresses
-		assert.Equal(t, "192.0.2.1", outputPacket.SrcIP.String(), "Source IP should be preserved")
+		assert.Equal(t, proxyAddr, outputPacket.SrcIP.String(), "Source IP should be modified")
 		assert.Equal(t, "192.0.2.2", outputPacket.DstIP.String(), "Destination IP should be preserved")
 	})
 }
