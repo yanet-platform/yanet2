@@ -33,13 +33,15 @@ message GraphReal {
 	// to balance load across real servers according to their active
 	// session counts.
 	//
-	// Formula: 
-	//	effective_weight = weight * max(1.0, power * (1.0 - connectionsRatio))
+	// Formula:
+	//	effective_weight = weight * max(1.0, power * (1.0 -
+	//connectionsRatio))
 	// where:
 	// - weight: Original configured weight (field above)
 	// - power: WLC power factor from StateConfig.wlc.power
-	// - connectionsRatio: 
-	//		(real_sessions * total_weight) / (total_sessions * real_weight)
+	// - connectionsRatio:
+	//		(real_sessions * total_weight) / (total_sessions *
+	//real_weight)
 	//
 	// When WLC is disabled, effective_weight equals weight.
 	//
