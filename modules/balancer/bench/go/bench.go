@@ -3,9 +3,12 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math/rand/v2"
+	"net/netip"
 	"os"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/go/logging"
@@ -14,10 +17,11 @@ import (
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/sys/unix"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-var TotalMemory int = 1 << 31
-var CpMemory int = 1 << 30
+var TotalMemory int = 1<<32 + 1<<28
+var CpMemory int = TotalMemory - 1<<28
 var AgentMemory int = CpMemory - 1<<27
 
 var BalancerName string = "balancer0"
@@ -38,6 +42,7 @@ func workerRoutine(
 	start chan struct{},
 	idx int,
 	packetList []dataplane.PacketList,
+	totalPackets int,
 ) {
 	defer wg.Done()
 
@@ -60,12 +65,14 @@ func workerRoutine(
 	set.Set(idx)
 	if err := unix.SchedSetaffinity(0, &set); err != nil {
 		sendError(fmt.Sprintf("failed to set affinity: %s", err))
+		readyWg.Done()
 		return
 	}
 
 	// set priority
 	if err := unix.Setpriority(unix.PRIO_PROCESS, tid, -20); err != nil {
 		sendError(fmt.Sprintf("failed to set priority: %s", err))
+		readyWg.Done()
 		return
 	}
 
@@ -74,11 +81,14 @@ func workerRoutine(
 
 	<-start
 
+	startTime := time.Now()
+
 	if err := bench.HandlePackets(idx, packetList); err != nil {
 		msg := fmt.Sprintf("failed to handle packets: %s", err)
 		sendError(msg)
 	} else {
-		sendMsg("successfully handled packets")
+		elapsed := time.Since(startTime)
+		sendMsg(fmt.Sprintf("successfully handled %d packets in %s (%.2f MPpS)", totalPackets, elapsed, float64(totalPackets)/elapsed.Seconds()/1e6))
 	}
 }
 
@@ -107,6 +117,166 @@ func enableAllReals(bal *balancer.BalancerManager) error {
 	return nil
 }
 
+func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
+	// Create virtual services based on config
+	var virtualServices []*balancerpb.VirtualService
+
+	rng := rand.New(rand.NewPCG(1, 2))
+
+	// Helper function to create a VS with reals
+	createVS := func(addr netip.Addr, port uint32, proto balancerpb.TransportProto) *balancerpb.VirtualService {
+		// Determine flags based on probabilities
+		flags := &balancerpb.VsFlags{
+			Gre:    rng.Float32() < config.GreProb,
+			FixMss: rng.Float32() < config.FixMSSProb,
+			PureL3: rng.Float32() < config.PureL3Prob,
+			Ops:    rng.Float32() < config.OpsProb,
+			Wlc:    false,
+		}
+
+		// If PureL3 is enabled, port must be 0
+		if flags.PureL3 {
+			port = 0
+		}
+
+		// Create reals for this VS
+		reals := make([]*balancerpb.Real, 0, config.Ipv4Reals+config.Ipv6Reals)
+		for i := 0; i < config.Ipv4Reals+config.Ipv6Reals; i++ {
+			var realAddr netip.Addr
+			if i < config.Ipv4Reals {
+				// Generate IPv4 real address (10.0.0.0/8 range)
+				realAddr = netip.AddrFrom4([4]byte{10, 0, byte(i / 256), byte(i % 256)})
+			} else {
+				// Generate IPv6 real address (fd00::/8 range)
+				realAddr = netip.AddrFrom16([16]byte{0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, byte(i / 256), byte(i % 256)})
+			}
+
+			// Create source address and mask (preserve original source)
+			var srcAddr, srcMask []byte
+			if addr.Is4() {
+				srcAddr = []byte{0, 0, 0, 0}
+				srcMask = []byte{0, 0, 0, 0}
+			} else {
+				srcAddr = make([]byte, 16)
+				srcMask = make([]byte, 16)
+			}
+
+			reals = append(reals, &balancerpb.Real{
+				Id: &balancerpb.RelativeRealIdentifier{
+					Ip:   &balancerpb.Addr{Bytes: realAddr.AsSlice()},
+					Port: 0,
+				},
+				Weight:  1,
+				SrcAddr: &balancerpb.Addr{Bytes: srcAddr},
+				SrcMask: &balancerpb.Addr{Bytes: srcMask},
+			})
+		}
+
+		scheduler := balancerpb.VsScheduler_SOURCE_HASH
+		if rng.Float32() < config.RoundRobinProb {
+			scheduler = balancerpb.VsScheduler_ROUND_ROBIN
+		}
+
+		allowedSrc := make([]*balancerpb.Net, 0, config.AllowedSrcPerVs)
+		for i := 0; i < config.AllowedSrcPerVs; i++ {
+			if addr.Is4() {
+				net := balancerpb.Net{
+					Addr: &balancerpb.Addr{Bytes: []byte{byte(i / 256), byte(i % 256), 5, 5}},
+					Size: 32,
+				}
+				allowedSrc = append(allowedSrc, &net)
+			} else {
+				net := balancerpb.Net{
+					Addr: &balancerpb.Addr{Bytes: []byte{byte(i / 256), byte(i % 256), 0, 2, 3, 0, 0, 29, 0, 43, 0, 16, 0, 0, 0, 0}},
+					Size: 128,
+				}
+				allowedSrc = append(allowedSrc, &net)
+			}
+		}
+
+		peers := make([]*balancerpb.Addr, 0, 2)
+		for i := range 2 {
+			peers = append(peers, &balancerpb.Addr{Bytes: []byte{byte(i / 256), byte(i % 256), 10, 11}})
+		}
+
+		return &balancerpb.VirtualService{
+			Id: &balancerpb.VsIdentifier{
+				Addr:  &balancerpb.Addr{Bytes: addr.AsSlice()},
+				Port:  port,
+				Proto: proto,
+			},
+			Scheduler:   scheduler,
+			AllowedSrcs: allowedSrc,
+			Reals:       reals,
+			Flags:       flags,
+			Peers:       peers,
+		}
+	}
+
+	// Generate TCP IPv4 virtual services
+	for i := 0; i < config.TcpIpv4Vs; i++ {
+		addr := netip.AddrFrom4([4]byte{192, 168, byte(i / 256), byte(i % 256)})
+		virtualServices = append(virtualServices, createVS(addr, 80, balancerpb.TransportProto_TCP))
+	}
+
+	// Generate TCP IPv6 virtual services
+	for i := 0; i < config.TcpIpv6Vs; i++ {
+		addr := netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, byte(i / 256), byte(i % 256)})
+		virtualServices = append(virtualServices, createVS(addr, 80, balancerpb.TransportProto_TCP))
+	}
+
+	// Generate UDP IPv4 virtual services
+	for i := 0; i < config.UdpIpv4Vs; i++ {
+		addr := netip.AddrFrom4([4]byte{172, 16, byte(i / 256), byte(i % 256)})
+		virtualServices = append(virtualServices, createVS(addr, 53, balancerpb.TransportProto_UDP))
+	}
+
+	// Generate UDP IPv6 virtual services
+	for i := 0; i < config.UdpIpv6Vs; i++ {
+		addr := netip.AddrFrom16([16]byte{0xfc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, byte(i / 256), byte(i % 256)})
+		virtualServices = append(virtualServices, createVS(addr, 53, balancerpb.TransportProto_UDP))
+	}
+
+	// Session timeouts (in seconds)
+	sessionTimeouts := &balancerpb.SessionsTimeouts{
+		TcpSynAck: 60,
+		TcpSyn:    120,
+		TcpFin:    120,
+		Tcp:       3600,
+		Udp:       300,
+		Default:   300,
+	}
+
+	// Source addresses for encapsulation
+	sourceV4 := netip.AddrFrom4([4]byte{10, 255, 255, 254})
+	sourceV6 := netip.AddrFrom16([16]byte{0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
+
+	// Packet handler configuration
+	packetHandler := &balancerpb.PacketHandlerConfig{
+		Vs:               virtualServices,
+		SourceAddressV4:  &balancerpb.Addr{Bytes: sourceV4.AsSlice()},
+		SourceAddressV6:  &balancerpb.Addr{Bytes: sourceV6.AsSlice()},
+		DecapAddresses:   []*balancerpb.Addr{}, // No decap addresses for benchmarking
+		SessionsTimeouts: sessionTimeouts,
+	}
+
+	// State configuration
+	capacity := uint64(config.BatchesPerWorker * config.PacketsPerBatch * config.Workers * 4)
+	refreshPeriod := durationpb.New(0) // Disable periodic refresh for benchmarking
+
+	stateConfig := &balancerpb.StateConfig{
+		SessionTableCapacity:      &capacity,
+		SessionTableMaxLoadFactor: nil,
+		RefreshPeriod:             refreshPeriod,
+		Wlc:                       nil,
+	}
+
+	return &balancerpb.BalancerConfig{
+		PacketHandler: packetHandler,
+		State:         stateConfig,
+	}
+}
+
 func Run(config *BenchConfig) error {
 	bench, err := NewBench(config.Workers, TotalMemory, CpMemory)
 	if err != nil {
@@ -127,8 +297,8 @@ func Run(config *BenchConfig) error {
 		return fmt.Errorf("failed to create new balancer agent: %s", err)
 	}
 
-	// todo: add config
-	if err := agent.NewBalancerManager(BalancerName, nil); err != nil {
+	balancerConfig := balancerConfig(config)
+	if err := agent.NewBalancerManager(BalancerName, balancerConfig); err != nil {
 		return fmt.Errorf("failed to create new balancer manager: %s", err)
 	}
 
@@ -142,13 +312,13 @@ func Run(config *BenchConfig) error {
 	}
 
 	start := make(chan struct{})
-	info := make(chan workerInfo, 10*config.Workers)
+	info := make(chan workerInfo)
 	var readyWg sync.WaitGroup
 	var wg sync.WaitGroup
 	wg.Add(config.Workers)
 	readyWg.Add(config.Workers)
 
-	generator := Generator{}
+	generator := NewGenerator(config, balancerConfig)
 
 	for worker := range config.Workers {
 		packetLists, err := bench.MakePacketLists(config.BatchesPerWorker)
@@ -156,7 +326,7 @@ func Run(config *BenchConfig) error {
 			return fmt.Errorf("failed to create packet lists: %s", err)
 		}
 		for idx := range packetLists {
-			packets := generator.generateWorkerPackets()
+			packets := generator.generateWorkerPackets(worker, config.PacketsPerBatch)
 			if err := bench.InitPacketList(&packetLists[idx], packets...); err != nil {
 				return fmt.Errorf(
 					"failed to init packet list at index %d: %s",
@@ -166,7 +336,7 @@ func Run(config *BenchConfig) error {
 			}
 		}
 
-		go workerRoutine(bench, &wg, &readyWg, info, start, worker, packetLists)
+		go workerRoutine(bench, &wg, &readyWg, info, start, worker, packetLists, config.PacketsPerBatch*config.BatchesPerWorker)
 	}
 
 	go func() {
@@ -174,15 +344,28 @@ func Run(config *BenchConfig) error {
 		fmt.Printf("All workers are ready\nPress any key to start...\n")
 		_, _ = bufio.NewReader(os.Stdin).ReadBytes('\n')
 		close(start)
+		wg.Wait()
+
+		fmt.Printf("All workers are finished\n")
+		close(info)
 	}()
 
-	go func() {
-		for info := range info {
-			logger.Infow("tid", info.tid, "worker", info.idx, "info", info.info)
+	isErr := false
+
+	for info := range info {
+		if info.isErr {
+			logger.Error(info.info, "worker", info.idx, "tid", info.tid)
+			isErr = true
+		} else {
+			logger.Infow(info.info, "worker", info.idx, "tid", info.tid)
 		}
-	}()
+	}
 
 	logger.Infow("done")
 
-	return nil
+	if isErr {
+		return fmt.Errorf("some workers failed")
+	} else {
+		return nil
+	}
 }

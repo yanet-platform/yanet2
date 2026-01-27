@@ -1,0 +1,25 @@
+gre_prob: 0.10
+fix_mss_prob: 0.05
+pure_l3_prob: 0.20
+ops_prob: 0.15
+
+tcp_ipv4_vs: 100
+tcp_ipv6_vs: 50
+udp_ipv4_vs: 80
+udp_ipv6_vs: 40
+
+reals_per_vs: 16
+
+new_session_prob: 0.30
+
+icmp_prob: 0.02
+icmp_redirect_prob: 0.01
+
+batches_per_worker: 128
+packets_per_batch: 64
+
+workers: 4
+
+allowed_src_per_vs: 10
+
+round_robin_prob: 0.5

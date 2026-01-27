@@ -11,6 +11,11 @@
 
 int
 bench_init(struct bench *bench, struct bench_config *config) {
+	// Initialize fields to safe defaults before any operation that might fail
+	memset(&bench->yanet, 0, sizeof(bench->yanet));
+	bench->shared_memory = NULL;
+	bench->total_memory = 0;
+	
 	diag_reset(&bench->diag);
 
 	if (config->total_memory < DP_MEMORY + config->cp_memory) {
@@ -35,6 +40,7 @@ bench_init(struct bench *bench, struct bench_config *config) {
 	}
 
 	bench->shared_memory = shared_memory;
+	bench->total_memory = config->total_memory;
 
 	struct yanet_mock_config yanet_config = {
 		.worker_count = config->workers,
@@ -77,8 +83,8 @@ bench_take_error(struct bench *bench) {
 
 void
 bench_free(struct bench *bench) {
-	munmap(bench->shared_memory, bench->config->total_memory);
 	yanet_mock_free(&bench->yanet);
+	munmap(bench->shared_memory, bench->total_memory);
 }
 
 int

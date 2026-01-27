@@ -10,7 +10,7 @@ struct bench {
 	struct yanet_mock yanet;
 	struct diag diag;
 	void *shared_memory;
-	struct bench_config *config;
+	size_t total_memory;
 	struct allocator alloc;
 };
 

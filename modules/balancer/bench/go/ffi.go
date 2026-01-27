@@ -3,6 +3,17 @@ package main
 /*
 #cgo CFLAGS: -I../ -I../../../../ -I../../../../lib
 #cgo LDFLAGS: -L../../../../build/modules/balancer/bench -lbalancer_bench -L../../../../build/lib/utils -llib_utils -L../../../../build/mock -lyanet_mock -L../../../../build/lib/dataplane/pipeline -lpipeline -L../../../../build/lib/dataplane/worker -lworker_dp -lnuma
+#cgo LDFLAGS: -L../../../../build/modules/balancer/dataplane -lbalancer_dp
+#cgo LDFLAGS: -L../../../../build/modules/decap/dataplane -ldecap_dp
+#cgo LDFLAGS: -L../../../../build/modules/dscp/dataplane -ldscp_dp
+#cgo LDFLAGS: -L../../../../build/modules/acl/dataplane -lacl_dp
+#cgo LDFLAGS: -L../../../../build/modules/fwstate/dataplane -lfwstate_dp
+#cgo LDFLAGS: -L../../../../build/modules/forward/dataplane -lforward_dp
+#cgo LDFLAGS: -L../../../../build/modules/route/dataplane -lroute_dp
+#cgo LDFLAGS: -L../../../../build/modules/nat64/dataplane -lnat64_dp
+#cgo LDFLAGS: -L../../../../build/modules/pdump/dataplane -lpdump_dp
+#cgo LDFLAGS: -L../../../../build/devices/plain/dataplane -lplain_dp
+#cgo LDFLAGS: -L../../../../build/devices/vlan/dataplane -lvlan_dp
 #include <stdlib.h>
 #include "bench.h"
 #include <stdalign.h>
@@ -16,6 +27,9 @@ import (
 
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	dataplane "github.com/yanet-platform/yanet2/lib/utils/go"
+
+	// Import mock to link with modules
+	_ "github.com/yanet-platform/yanet2/mock/go"
 )
 
 type Bench struct {

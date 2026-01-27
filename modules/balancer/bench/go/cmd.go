@@ -3,11 +3,14 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/stretchr/testify/assert/yaml"
 )
 
 func main() {
+	runtime.GOMAXPROCS(10)
+
 	var cfgPath string
 	if len(os.Args) == 2 {
 		cfgPath = os.Args[1]
@@ -29,9 +32,9 @@ func main() {
 	}
 
 	if err := Run(&cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "run failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
 		os.Exit(1)
 	} else {
-		fmt.Println("run is successful")
+		fmt.Println("OK!")
 	}
 }

@@ -259,6 +259,11 @@ int
 yanet_mock_init(
 	struct yanet_mock *mock, struct yanet_mock_config *config, void *arena
 ) {
+	// Initialize fields to safe defaults before any operation that might fail
+	mock->worker_count = 0;
+	mock->arena = NULL;
+	mock->storage = NULL;
+	
 	if (arena == NULL) {
 		arena = aligned_alloc(
 			64, config->cp_memory + config->dp_memory

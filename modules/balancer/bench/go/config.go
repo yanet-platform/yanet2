@@ -6,12 +6,17 @@ type BenchConfig struct {
 	PureL3Prob float32 `yaml:"pure_l3_prob"`
 	OpsProb    float32 `yaml:"ops_prob"`
 
+	RoundRobinProb float32 `yaml:"round_robin_prob"`
+
 	TcpIpv4Vs int `yaml:"tcp_ipv4_vs"`
 	TcpIpv6Vs int `yaml:"tcp_ipv6_vs"`
 	UdpIpv4Vs int `yaml:"udp_ipv4_vs"`
 	UdpIpv6Vs int `yaml:"udp_ipv6_vs"`
 
-	RealsPerVs int `yaml:"reals_per_vs"`
+	Ipv4Reals int `yaml:"ipv4_reals"`
+	Ipv6Reals int `yaml:"ipv6_reals"`
+
+	AllowedSrcPerVs int `yaml:"allowed_src_per_vs"`
 
 	NewSessionProb float32 `yaml:"new_session_prob"`
 
@@ -20,6 +25,8 @@ type BenchConfig struct {
 
 	BatchesPerWorker int `yaml:"batches_per_worker"`
 	PacketsPerBatch  int `yaml:"packets_per_batch"`
+
+	mss int `yaml:"mss"`
 
 	Workers int `yaml:"workers"`
 }
