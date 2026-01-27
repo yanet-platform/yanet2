@@ -40,6 +40,8 @@ bench_init(struct bench *bench, struct bench_config *config) {
 		goto error;
 	}
 
+	memset(shared_memory, 0, config->total_memory);
+
 	bench->shared_memory = shared_memory;
 	bench->total_memory = config->total_memory;
 
