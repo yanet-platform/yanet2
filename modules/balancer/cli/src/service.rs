@@ -12,6 +12,16 @@ use crate::{
 };
 
 ////////////////////////////////////////////////////////////////////////////////
+// Logging macros with custom target
+////////////////////////////////////////////////////////////////////////////////
+
+macro_rules! info {
+    ($($arg:tt)*) => {
+        log::info!(target: "balancer", $($arg)*)
+    };
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Service
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -47,7 +57,7 @@ impl BalancerService {
 
     /// Update balancer configuration
     async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        log::info!("Loading configuration from: {}", cmd.config);
+        info!("Loading configuration from: {}", cmd.config);
 
         let config = BalancerConfig::from_yaml_file(&cmd.config)?;
         let balancer_config: balancerpb::BalancerConfig = config.try_into()?;
@@ -60,7 +70,7 @@ impl BalancerService {
         log::debug!("Sending UpdateConfig request");
         self.client.update_config(request).await?;
 
-        log::info!("Successfully updated configuration for '{}'", cmd.name);
+        info!("Successfully updated configuration for '{}'", cmd.name);
         Ok(())
     }
 
@@ -75,52 +85,64 @@ impl BalancerService {
 
     /// Enable a real server
     async fn enable_real(&mut self, cmd: EnableRealCmd) -> Result<(), Box<dyn Error>> {
-        log::info!(
-            "Buffering enable request for real {} in VS {}:{}/{}",
-            cmd.real_ip,
-            cmd.virtual_ip,
-            cmd.virtual_port,
-            cmd.proto
-        );
+        let flush = cmd.flush;
+        let name = cmd.name.clone();
+
+        info!("Enabling real(s) {:?} for VS {} (flush: {})", cmd.reals, cmd.vs, flush);
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
 
         log::debug!("Sending UpdateReals request");
         self.client.update_reals(request).await?;
 
-        log::info!("Successfully buffered real enable");
+        info!("Successfully buffered real enable");
+
+        // If flush flag is set, immediately flush the updates
+        if flush {
+            info!("Flushing buffered real updates for '{}'", name);
+            let flush_request = balancerpb::FlushRealUpdatesRequest { name: name.clone() };
+            let response = self.client.flush_real_updates(flush_request).await?.into_inner();
+            info!("Successfully flushed {} update(s)", response.updates_flushed);
+        }
+
         Ok(())
     }
 
     /// Disable a real server
     async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Box<dyn Error>> {
-        log::info!(
-            "Buffering disable request for real {} in VS {}:{}/{}",
-            cmd.real_ip,
-            cmd.virtual_ip,
-            cmd.virtual_port,
-            cmd.proto
-        );
+        let flush = cmd.flush;
+        let name = cmd.name.clone();
+
+        info!("Disabling real(s) {:?} for VS {} (flush: {})", cmd.reals, cmd.vs, flush);
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
 
         log::debug!("Sending UpdateReals request");
         self.client.update_reals(request).await?;
 
-        log::info!("Successfully buffered real disable");
+        info!("Successfully buffered real disable");
+
+        // If flush flag is set, immediately flush the updates
+        if flush {
+            info!("Flushing buffered real updates for '{}'", name);
+            let flush_request = balancerpb::FlushRealUpdatesRequest { name: name.clone() };
+            let response = self.client.flush_real_updates(flush_request).await?.into_inner();
+            info!("Successfully flushed {} update(s)", response.updates_flushed);
+        }
+
         Ok(())
     }
 
     /// Flush buffered real updates
     async fn flush_real_updates(&mut self, cmd: FlushRealUpdatesCmd) -> Result<(), Box<dyn Error>> {
-        log::info!("Flushing buffered real updates for '{}'", cmd.name);
+        info!("Flushing buffered real updates for '{}'", cmd.name);
 
         let request: balancerpb::FlushRealUpdatesRequest = cmd.into();
 
         log::debug!("Sending FlushRealUpdates request");
         let response = self.client.flush_real_updates(request).await?.into_inner();
 
-        log::info!("Successfully flushed {} update(s)", response.updates_flushed);
+        info!("Successfully flushed {} update(s)", response.updates_flushed);
         Ok(())
     }
 

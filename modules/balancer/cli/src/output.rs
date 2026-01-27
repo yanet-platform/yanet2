@@ -503,7 +503,7 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                                     .collect();
                                 println!("{}: {}", "Peers".bright_cyan(), peer_ips.join(", "));
                             } else {
-                                println!("{}: {}", "Peers".bright_cyan(), "none");
+                                println!("{}: none", "Peers".bright_cyan());
                             }
 
                             // Allowed sources
@@ -515,7 +515,7 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                                     .collect();
                                 println!("{}: {}", "Allowed Sources".bright_cyan(), srcs.join(", "));
                             } else {
-                                println!("{}: {}", "Allowed Sources".bright_cyan(), "none");
+                                println!("{}: none", "Allowed Sources".bright_cyan());
                             }
 
                             println!();

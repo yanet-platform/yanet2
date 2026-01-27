@@ -115,72 +115,110 @@ pub struct EnableRealCmd {
     #[arg(long, short = 'n')]
     pub name: String,
 
-    /// IP of the virtual service
+    /// Virtual service in format "ip:port/proto" (e.g., "192.168.1.1:80/tcp")
     #[arg(long)]
-    pub virtual_ip: String,
+    pub vs: String,
 
-    /// Protocol of the virtual service (tcp/udp)
-    #[arg(long)]
-    pub proto: String,
+    /// List of real server IPs to enable
+    #[arg(long, required = true)]
+    pub reals: Vec<String>,
 
-    /// Port of the virtual service
-    #[arg(long)]
-    pub virtual_port: u16,
-
-    /// IP of the real server
-    #[arg(long, short)]
-    pub real_ip: String,
-
-    /// Optional new weight for the real server
+    /// Optional new weight for the real servers
     #[arg(long)]
     pub weight: Option<u32>,
+
+    /// Flush buffered updates immediately after enabling
+    #[arg(long, default_value_t = false)]
+    pub flush: bool,
 }
 
 impl TryFrom<EnableRealCmd> for balancerpb::UpdateRealsRequest {
     type Error = String;
 
     fn try_from(cmd: EnableRealCmd) -> Result<Self, Self::Error> {
-        let proto = match cmd.proto.to_uppercase().as_str() {
+        // Parse the --vs option in format "ip:port/proto"
+        let vs_parts: Vec<&str> = cmd.vs.split('/').collect();
+        if vs_parts.len() != 2 {
+            return Err(format!(
+                "invalid --vs format: '{}'. Expected format: 'ip:port/proto' (e.g., '192.168.1.1:80/tcp')",
+                cmd.vs
+            ));
+        }
+
+        let addr_port = vs_parts[0];
+        let proto_str = vs_parts[1];
+
+        // Parse protocol (case-insensitive)
+        let proto = match proto_str.to_uppercase().as_str() {
             "TCP" => balancerpb::TransportProto::Tcp,
             "UDP" => balancerpb::TransportProto::Udp,
-            _ => return Err(format!("invalid proto: {}", cmd.proto)),
+            _ => {
+                return Err(format!(
+                    "invalid proto: '{}'. Expected 'tcp' or 'udp' (case-insensitive)",
+                    proto_str
+                ));
+            }
         };
 
-        let virtual_ip: std::net::IpAddr = cmd
-            .virtual_ip
+        // Parse IP and port
+        let addr_port_parts: Vec<&str> = addr_port.rsplitn(2, ':').collect();
+        if addr_port_parts.len() != 2 {
+            return Err(format!(
+                "invalid address:port format: '{}'. Expected format: 'ip:port'",
+                addr_port
+            ));
+        }
+
+        let port_str = addr_port_parts[0];
+        let ip_str = addr_port_parts[1];
+
+        let virtual_port: u16 = port_str
             .parse()
-            .map_err(|e| format!("invalid virtual IP: {}", e))?;
-        let real_ip: std::net::IpAddr = cmd.real_ip.parse().map_err(|e| format!("invalid real IP: {}", e))?;
+            .map_err(|e| format!("invalid port '{}': {}", port_str, e))?;
 
-        let real_id = balancerpb::RealIdentifier {
-            vs: Some(balancerpb::VsIdentifier {
-                addr: Some(balancerpb::Addr {
-                    bytes: match virtual_ip {
-                        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
-                        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
-                    },
-                }),
-                port: cmd.virtual_port as u32,
-                proto: proto as i32,
-            }),
-            real: Some(balancerpb::RelativeRealIdentifier {
-                ip: Some(balancerpb::Addr {
-                    bytes: match real_ip {
-                        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
-                        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
-                    },
-                }),
-                port: 0,
-            }),
-        };
+        let virtual_ip: std::net::IpAddr = ip_str
+            .parse()
+            .map_err(|e| format!("invalid virtual IP '{}': {}", ip_str, e))?;
 
-        Ok(Self {
-            name: cmd.name,
-            updates: vec![balancerpb::RealUpdate {
+        // Create updates for all real IPs
+        let mut updates = Vec::new();
+        for real_ip_str in &cmd.reals {
+            let real_ip: std::net::IpAddr = real_ip_str
+                .parse()
+                .map_err(|e| format!("invalid real IP '{}': {}", real_ip_str, e))?;
+
+            let real_id = balancerpb::RealIdentifier {
+                vs: Some(balancerpb::VsIdentifier {
+                    addr: Some(balancerpb::Addr {
+                        bytes: match virtual_ip {
+                            std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
+                            std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
+                        },
+                    }),
+                    port: virtual_port as u32,
+                    proto: proto as i32,
+                }),
+                real: Some(balancerpb::RelativeRealIdentifier {
+                    ip: Some(balancerpb::Addr {
+                        bytes: match real_ip {
+                            std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
+                            std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
+                        },
+                    }),
+                    port: 0,
+                }),
+            };
+
+            updates.push(balancerpb::RealUpdate {
                 real_id: Some(real_id),
                 enable: Some(true),
                 weight: cmd.weight,
-            }],
+            });
+        }
+
+        Ok(Self {
+            name: cmd.name,
+            updates,
             buffer: true, // Always buffer
         })
     }
@@ -192,68 +230,106 @@ pub struct DisableRealCmd {
     #[arg(long, short = 'n')]
     pub name: String,
 
-    /// IP of the virtual service
+    /// Virtual service in format "ip:port/proto" (e.g., "192.168.1.1:80/tcp")
     #[arg(long)]
-    pub virtual_ip: String,
+    pub vs: String,
 
-    /// Protocol of the virtual service (tcp/udp)
-    #[arg(long)]
-    pub proto: String,
+    /// List of real server IPs to disable
+    #[arg(long, required = true)]
+    pub reals: Vec<String>,
 
-    /// Port of the virtual service
-    #[arg(long)]
-    pub virtual_port: u16,
-
-    /// IP of the real server
-    #[arg(long, short)]
-    pub real_ip: String,
+    /// Flush buffered updates immediately after disabling
+    #[arg(long, default_value_t = false)]
+    pub flush: bool,
 }
 
 impl TryFrom<DisableRealCmd> for balancerpb::UpdateRealsRequest {
     type Error = String;
 
     fn try_from(cmd: DisableRealCmd) -> Result<Self, Self::Error> {
-        let proto = match cmd.proto.to_uppercase().as_str() {
+        // Parse the --vs option in format "ip:port/proto"
+        let vs_parts: Vec<&str> = cmd.vs.split('/').collect();
+        if vs_parts.len() != 2 {
+            return Err(format!(
+                "invalid --vs format: '{}'. Expected format: 'ip:port/proto' (e.g., '192.168.1.1:80/tcp')",
+                cmd.vs
+            ));
+        }
+
+        let addr_port = vs_parts[0];
+        let proto_str = vs_parts[1];
+
+        // Parse protocol (case-insensitive)
+        let proto = match proto_str.to_uppercase().as_str() {
             "TCP" => balancerpb::TransportProto::Tcp,
             "UDP" => balancerpb::TransportProto::Udp,
-            _ => return Err(format!("invalid proto: {}", cmd.proto)),
+            _ => {
+                return Err(format!(
+                    "invalid proto: '{}'. Expected 'tcp' or 'udp' (case-insensitive)",
+                    proto_str
+                ));
+            }
         };
 
-        let virtual_ip: std::net::IpAddr = cmd
-            .virtual_ip
+        // Parse IP and port
+        let addr_port_parts: Vec<&str> = addr_port.rsplitn(2, ':').collect();
+        if addr_port_parts.len() != 2 {
+            return Err(format!(
+                "invalid address:port format: '{}'. Expected format: 'ip:port'",
+                addr_port
+            ));
+        }
+
+        let port_str = addr_port_parts[0];
+        let ip_str = addr_port_parts[1];
+
+        let virtual_port: u16 = port_str
             .parse()
-            .map_err(|e| format!("invalid virtual IP: {}", e))?;
-        let real_ip: std::net::IpAddr = cmd.real_ip.parse().map_err(|e| format!("invalid real IP: {}", e))?;
+            .map_err(|e| format!("invalid port '{}': {}", port_str, e))?;
 
-        let real_id = balancerpb::RealIdentifier {
-            vs: Some(balancerpb::VsIdentifier {
-                addr: Some(balancerpb::Addr {
-                    bytes: match virtual_ip {
-                        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
-                        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
-                    },
-                }),
-                port: cmd.virtual_port as u32,
-                proto: proto as i32,
-            }),
-            real: Some(balancerpb::RelativeRealIdentifier {
-                ip: Some(balancerpb::Addr {
-                    bytes: match real_ip {
-                        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
-                        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
-                    },
-                }),
-                port: 0,
-            }),
-        };
+        let virtual_ip: std::net::IpAddr = ip_str
+            .parse()
+            .map_err(|e| format!("invalid virtual IP '{}': {}", ip_str, e))?;
 
-        Ok(Self {
-            name: cmd.name,
-            updates: vec![balancerpb::RealUpdate {
+        // Create updates for all real IPs
+        let mut updates = Vec::new();
+        for real_ip_str in &cmd.reals {
+            let real_ip: std::net::IpAddr = real_ip_str
+                .parse()
+                .map_err(|e| format!("invalid real IP '{}': {}", real_ip_str, e))?;
+
+            let real_id = balancerpb::RealIdentifier {
+                vs: Some(balancerpb::VsIdentifier {
+                    addr: Some(balancerpb::Addr {
+                        bytes: match virtual_ip {
+                            std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
+                            std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
+                        },
+                    }),
+                    port: virtual_port as u32,
+                    proto: proto as i32,
+                }),
+                real: Some(balancerpb::RelativeRealIdentifier {
+                    ip: Some(balancerpb::Addr {
+                        bytes: match real_ip {
+                            std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
+                            std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
+                        },
+                    }),
+                    port: 0,
+                }),
+            };
+
+            updates.push(balancerpb::RealUpdate {
                 real_id: Some(real_id),
                 enable: Some(false),
                 weight: None,
-            }],
+            });
+        }
+
+        Ok(Self {
+            name: cmd.name,
+            updates,
             buffer: true, // Always buffer
         })
     }
