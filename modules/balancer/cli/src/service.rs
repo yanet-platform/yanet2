@@ -88,7 +88,7 @@ impl BalancerService {
         let flush = cmd.flush;
         let name = cmd.name.clone();
 
-        info!("Enabling real(s) {:?} for VS {} (flush: {})", cmd.reals, cmd.vs, flush);
+        info!("Enabling {} real(s) for VS {}", cmd.reals.len(), cmd.vs);
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
 
@@ -114,7 +114,7 @@ impl BalancerService {
         let name = cmd.name.clone();
         let reals_count = cmd.reals.len();
 
-        info!("Disabling {} real(s) for VS {}", reals_count, cmd.vs);
+        info!("Disabling {} real(s) of VS {} for '{}', ", reals_count, cmd.vs, cmd.name);
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
 
@@ -125,7 +125,7 @@ impl BalancerService {
 
         // If flush flag is set, immediately flush the updates
         if flush {
-            info!("Flushing buffered real updates for '{}'", name);
+            info!("Flushing buffered real updates");
             let flush_request = balancerpb::FlushRealUpdatesRequest { name: name.clone() };
             let response = self.client.flush_real_updates(flush_request).await?.into_inner();
             info!("Successfully flushed {} update(s)", response.updates_flushed);
