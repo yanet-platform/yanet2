@@ -9,32 +9,256 @@
 /**
  * Weighted Least Connection (WLC) algorithm configuration.
  *
- * Configures the WLC scheduling algorithm parameters used by the manager
- * to distribute load across real servers.
+ * Configures the WLC scheduling algorithm that dynamically adjusts real
+ * server weights based on active session counts to achieve better load
+ * distribution. The WLC algorithm is particularly useful when session
+ * durations vary significantly, preventing overloading of individual reals.
+ *
+ * ALGORITHM OVERVIEW:
+ * The WLC algorithm calculates effective weights using this formula:
+ *
+ *   effective_weight = min(
+ *       config_weight * max(1.0, power * (1.0 - connections_ratio)),
+ *       max_real_weight
+ *   )
+ *
+ * where:
+ *   connections_ratio = (real_sessions * total_weight) /
+ *                       (total_sessions * real_weight)
+ *
+ * BEHAVIOR:
+ * - If a real has fewer sessions than expected (ratio < 1.0):
+ *   Weight increases to attract more traffic
+ * - If a real has more sessions than expected (ratio > 1.0):
+ *   Weight stays at baseline (no decrease below config_weight)
+ * - The 'power' parameter controls adjustment aggressiveness
+ * - The 'max_real_weight' parameter caps maximum weight
+ *
+ * EXECUTION:
+ * - Runs every refresh_period (configured in BalancerManagerConfig)
+ * - Only affects virtual services listed in the 'vs' array
+ * - Uses update_reals_wlc() to preserve config weights
+ *
+ * CONFIGURATION REQUIREMENTS:
+ * - Must be fully specified if any VS has WLC flag enabled
+ * - Can be empty (power=0, max_real_weight=0, vs=[]) if no VS uses WLC
  */
 struct balancer_manager_wlc_config {
-	size_t power; // Power factor for weight calculations
+	/**
+	 * Power factor for weight adjustment aggressiveness.
+	 *
+	 * Controls how aggressively weights are adjusted based on session
+	 * distribution imbalance. Higher values cause more dramatic weight
+	 * changes in response to load imbalance.
+	 *
+	 * RECOMMENDED VALUES:
+	 * - Conservative (stable): 1-2
+	 * - Moderate (balanced): 2-4
+	 * - Aggressive (responsive): 4-8
+	 * - Very aggressive: 8-16
+	 *
+	 * EXAMPLE IMPACT:
+	 * If a real has 50% fewer sessions than expected (ratio=0.5):
+	 * - power=2: weight increases by 1.0x (doubles)
+	 * - power=4: weight increases by 2.0x (triples)
+	 * - power=1: weight increases by 0.5x (1.5x original)
+	 */
+	size_t power;
 
-	size_t max_real_weight; // Maximum weight value for any real server
+	/**
+	 * Maximum effective weight limit.
+	 *
+	 * Caps the maximum weight a real server can have after WLC
+	 * adjustment. Prevents any single real from dominating traffic
+	 * distribution even when severely underloaded.
+	 *
+	 * RECOMMENDED VALUES:
+	 * - Conservative: 2-3x maximum configured weight
+	 * - Moderate: 5-10x maximum configured weight
+	 * - Aggressive: 10-20x maximum configured weight
+	 *
+	 * EXAMPLE:
+	 * If configured weights range from 1-100 and max_real_weight=500:
+	 * - A real with weight=50 can reach effective_weight=500 (10x)
+	 * - A real with weight=100 can reach effective_weight=500 (5x)
+	 */
+	size_t max_real_weight;
 
-	size_t vs_count; // Number of virtual services in the array
-	uint32_t *vs;	 // Array of virtual service IDs
+	/**
+	 * Number of virtual service indices in the 'vs' array.
+	 *
+	 * Specifies how many virtual services have WLC enabled.
+	 * If 0, no virtual services use WLC (algorithm is disabled).
+	 */
+	size_t vs_count;
+
+	/**
+	 * Array of virtual service indices with WLC enabled.
+	 *
+	 * Contains indices into the PacketHandlerConfig.vs array,
+	 * identifying which virtual services should have WLC applied.
+	 * Only these VSs will have their weights dynamically adjusted.
+	 *
+	 * OWNERSHIP:
+	 * - Caller allocates and manages this array
+	 * - Must remain valid for the lifetime of the config
+	 * - Array length must match vs_count
+	 *
+	 * EXAMPLE:
+	 * If vs = [0, 2, 5], then virtual services at indices 0, 2, and 5
+	 * in the configuration will have WLC enabled, while others won't.
+	 */
+	uint32_t *vs;
 };
 
 /**
  * Complete configuration for a balancer manager.
  *
  * Combines balancer instance configuration with WLC algorithm parameters
- * and operational settings like refresh period and load thresholds.
+ * and operational settings for periodic refresh operations. The manager
+ * coordinates the balancer instance and applies scheduling algorithms
+ * like WLC.
+ *
+ * CONFIGURATION DEPENDENCIES:
+ * The fields have interdependencies that must be satisfied:
+ *
+ * 1. If refresh_period > 0, then:
+ *    - max_load_factor must be set (typically 0.7-0.9)
+ *    - wlc must be configured (even if no VS uses WLC)
+ *
+ * 2. If any VS has wlc flag enabled, then:
+ *    - refresh_period must be > 0
+ *    - max_load_factor must be set
+ *    - wlc.power and wlc.max_real_weight must be set
+ *    - wlc.vs must include the VS index
+ *
+ * 3. If refresh_period == 0:
+ *    - No periodic operations (no auto-resize, no WLC, no stats updates)
+ *    - WLC flag cannot be enabled on any VS
+ *    - max_load_factor is ignored
+ *
+ * REFRESH CYCLE OPERATIONS:
+ * When refresh_period > 0, the manager performs these operations every
+ * refresh_period milliseconds:
+ *
+ * 1. Session Statistics Collection:
+ *    - Scans session table to count active sessions
+ *    - Updates per-VS and per-real session counts
+ *    - Updates last_packet_timestamp fields
+ *    - Makes data available via balancer_manager_info()
+ *
+ * 2. Automatic Session Table Resizing:
+ *    - Calculates: load_factor = active_sessions / table_capacity
+ *    - If load_factor > max_load_factor:
+ *      * Doubles table capacity
+ *      * Migrates existing sessions
+ *      * Prevents session table overflow
+ *
+ * 3. WLC Weight Adjustment:
+ *    - For each VS in wlc.vs array:
+ *      * Calculates new effective weights based on session distribution
+ *      * Calls balancer_manager_update_reals_wlc() to update weights
+ *      * Preserves original config weights for future calculations
+ *
+ * TYPICAL CONFIGURATIONS:
+ *
+ * Static configuration (no WLC, no auto-resize):
+ * ```c
+ * config.refresh_period = 0;
+ * config.max_load_factor = 0.0;  // ignored
+ * config.wlc = {0, 0, 0, NULL};  // ignored
+ * ```
+ *
+ * Auto-resize only (no WLC):
+ * ```c
+ * config.refresh_period = 30000;  // 30 seconds
+ * config.max_load_factor = 0.8;
+ * config.wlc = {0, 0, 0, NULL};  // no VSs use WLC
+ * ```
+ *
+ * Full dynamic configuration (auto-resize + WLC):
+ * ```c
+ * config.refresh_period = 10000;  // 10 seconds
+ * config.max_load_factor = 0.75;
+ * config.wlc = {
+ *     .power = 4,
+ *     .max_real_weight = 1000,
+ *     .vs_count = 2,
+ *     .vs = (uint32_t[]){0, 1}  // VSs 0 and 1 use WLC
+ * };
+ * ```
  */
 struct balancer_manager_config {
-	struct balancer_config balancer; // Core balancer configuration
+	/**
+	 * Core balancer configuration.
+	 *
+	 * Contains packet handler config (virtual services, reals, timeouts)
+	 * and state config (session table capacity).
+	 */
+	struct balancer_config balancer;
 
-	struct balancer_manager_wlc_config wlc; // WLC algorithm settings
+	/**
+	 * WLC algorithm configuration.
+	 *
+	 * Specifies WLC parameters (power, max_weight) and which virtual
+	 * services have WLC enabled (vs array).
+	 *
+	 * REQUIREMENTS:
+	 * - Must be fully configured if any VS has wlc flag enabled
+	 * - Can be empty (all zeros) if no VS uses WLC
+	 * - Requires refresh_period > 0 to function
+	 */
+	struct balancer_manager_wlc_config wlc;
 
-	uint32_t refresh_period; // Refresh interval in milliseconds
+	/**
+	 * Periodic refresh interval in milliseconds.
+	 *
+	 * Controls how often the manager performs background operations:
+	 * - Session statistics collection
+	 * - Automatic session table resizing
+	 * - WLC weight adjustment
+	 *
+	 * SPECIAL VALUES:
+	 * - 0: Disables all periodic operations
+	 * - > 0: Enables periodic operations at specified interval
+	 *
+	 * RECOMMENDED VALUES:
+	 * - High-traffic dynamic: 5,000-10,000 ms (5-10 seconds)
+	 * - Moderate traffic: 15,000-30,000 ms (15-30 seconds)
+	 * - Stable traffic: 30,000-60,000 ms (30-60 seconds)
+	 * - Static config: 0 (disabled)
+	 *
+	 * PERFORMANCE IMPACT:
+	 * - Shorter periods: More responsive, higher CPU overhead
+	 * - Longer periods: Less overhead, slower response
+	 * - Cost scales with active_sessions and vs_count
+	 */
+	uint32_t refresh_period;
 
-	float max_load_factor; // Maximum load factor (0.0 to 1.0)
+	/**
+	 * Maximum session table load factor (0.0 to 1.0).
+	 *
+	 * Threshold for automatic session table resizing. When the load
+	 * factor (active_sessions / table_capacity) exceeds this value
+	 * during a refresh cycle, the table capacity is doubled.
+	 *
+	 * RECOMMENDED VALUES:
+	 * - Conservative (frequent resize): 0.6-0.7
+	 * - Balanced: 0.7-0.8
+	 * - Aggressive (rare resize): 0.8-0.9
+	 * - Very aggressive: 0.9-0.95
+	 *
+	 * TRADE-OFFS:
+	 * - Lower values: More frequent resizing, lower collision rate
+	 * - Higher values: Less frequent resizing, higher collision rate
+	 * - Typical hash table performance degrades above 0.9
+	 *
+	 * REQUIREMENTS:
+	 * - Must be set if refresh_period > 0
+	 * - Ignored if refresh_period == 0
+	 * - Valid range: 0.0 < max_load_factor < 1.0
+	 */
+	float max_load_factor;
 };
 
 struct balancer_handle;
@@ -129,23 +353,64 @@ balancer_manager_update_reals(
 /**
  * Apply a batch of real server weight updates for WLC algorithm.
  *
- * Similar to balancer_manager_update_reals(), but specifically for WLC
- * algorithm updates. This function:
- * - Only updates the state/graph weights, NOT the config weights
- * - Validates that updates only change weights (not enable state)
- * - Preserves the original static config weights for WLC calculations
+ * This function is specifically designed for WLC (Weighted Least Connection)
+ * algorithm to update effective weights without modifying the baseline
+ * configuration weights. It provides a way to dynamically adjust weights
+ * based on load while preserving the original configured values.
  *
- * The config weight remains the baseline for WLC calculations, while the
- * state weight is dynamically adjusted based on load.
+ * KEY DIFFERENCES FROM balancer_manager_update_reals():
+ *
+ * 1. WEIGHT UPDATE SCOPE:
+ *    - update_reals(): Updates BOTH config weight AND state/graph weight
+ *    - update_reals_wlc(): Updates ONLY state/graph weight, preserves config
+ *
+ * 2. CONFIG PRESERVATION:
+ *    - update_reals(): New weight becomes the baseline for future WLC
+ *    calculations
+ *    - update_reals_wlc(): Original config weight remains the WLC baseline
+ *
+ * 3. USE CASES:
+ *    - update_reals(): Manual weight changes by administrator
+ *    - update_reals_wlc(): Automatic weight adjustments by WLC algorithm
+ *
+ * 4. ENABLE STATE:
+ *    - update_reals(): Can change both weight and enabled state
+ *    - update_reals_wlc(): MUST NOT change enabled state (validation error)
+ *
+ * EXAMPLE SCENARIO:
+ * ```
+ * Initial config: real1.weight = 100
+ *
+ * // WLC adjusts weight based on load
+ * update_reals_wlc(real1, weight=150)
+ * Result: config.weight=100, state.weight=150
+ * Next WLC cycle uses config.weight=100 as baseline
+ *
+ * // Admin changes weight
+ * update_reals(real1, weight=200)
+ * Result: config.weight=200, state.weight=200
+ * Next WLC cycle uses config.weight=200 as baseline
+ * ```
+ *
+ * VALIDATION:
+ * - All updates must have weight != DONT_UPDATE_REAL_WEIGHT
+ * - All updates must have enabled == DONT_UPDATE_REAL_ENABLED
+ * - Returns error if any update attempts to change enabled state
+ *
+ * TYPICAL USAGE:
+ * This function is called automatically by the background refresh task
+ * when WLC is enabled. Manual calls are rare and should be done with
+ * caution to avoid interfering with the WLC algorithm.
  *
  * Diagnostics: On error, a message is recorded and retrievable via
  * balancer_manager_take_error().
  *
  * @param manager Manager handle.
  * @param count   Number of updates in the array.
- * @param updates Array of real server weight updates (must not change enable
- * state).
- * @return 0 on success, -1 on error.
+ * @param updates Array of real server weight updates. Each update MUST:
+ *                - Have weight != DONT_UPDATE_REAL_WEIGHT
+ *                - Have enabled == DONT_UPDATE_REAL_ENABLED
+ * @return 0 on success, -1 on error (including validation failures).
  */
 int
 balancer_manager_update_reals_wlc(

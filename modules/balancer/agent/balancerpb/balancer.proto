@@ -168,10 +168,24 @@ message UpdateRealsRequest {
 message UpdateRealsResponse {
 	string name = 1;
 
-	// Number of updates that were buffered (not yet applied)
+	// Number of updates that were buffered (not yet applied).
+	//
+	// This field is non-zero only when buffer=true in the request.
+	// These updates are queued and will be applied atomically when
+	// FlushRealUpdates is called.
+	//
+	// Buffered updates are stored in memory and can be inspected via
+	// ShowConfig (buffered_real_updates field).
 	uint32 updates_buffered = 2;
 
-	// Number of updates that were applied immediately
+	// Number of updates that were applied immediately.
+	//
+	// This field is non-zero only when buffer=false in the request.
+	// These updates were applied directly to the balancer configuration
+	// and dataplane state.
+	//
+	// Note: Either updates_buffered OR updates_applied will be non-zero,
+	// never both (determined by the buffer flag in the request).
 	uint32 updates_applied = 3;
 }
 
