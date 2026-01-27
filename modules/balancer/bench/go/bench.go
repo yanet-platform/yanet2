@@ -549,6 +549,7 @@ func Run(config *BenchConfig) error {
 		readyWg.Wait()
 		fmt.Printf("All workers are ready\nPress any key to start...\n")
 		_, _ = bufio.NewReader(os.Stdin).ReadBytes('\n')
+		fmt.Println("Benchmark started")
 		benchStart = time.Now()
 		close(start)
 		wg.Wait()

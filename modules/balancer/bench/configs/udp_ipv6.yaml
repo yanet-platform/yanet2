@@ -1,0 +1,43 @@
+# UDP-only benchmark configuration
+# This configuration generates only UDP virtual services and UDP packets
+
+# Virtual service flags probabilities (all set to 0 for basic UDP testing)
+gre_prob: 0.0
+fix_mss_prob: 0.0
+pure_l3_prob: 0.0
+ops_prob: 0.0
+
+# Scheduling algorithm probability
+round_robin_prob: 0.5
+
+# Virtual services configuration (only UDP, no TCP)
+tcp_ipv4_vs: 0
+tcp_ipv6_vs: 0
+udp_ipv4_vs: 0
+udp_ipv6_vs: 2
+
+# Real servers per virtual service
+ipv4_reals: 10
+ipv6_reals: 10
+
+# Number of allowed source networks per virtual service
+allowed_src_per_vs: 5
+
+# Session management
+# Probability of creating a new session (vs reusing existing)
+# 0.3 means 30% new sessions, 70% reuse existing sessions
+new_session_prob: 0.3
+
+# ICMP packet probabilities (set to 0 for UDP-only testing)
+icmp_prob: 0.0
+icmp_redirect_prob: 0.0
+
+# Packet generation configuration
+batches_per_worker: 131072
+packets_per_batch: 64
+
+# MSS option for TCP packets (not applicable for UDP, but must be specified)
+mss: 0
+
+# Number of worker threads
+workers: 1
