@@ -24,6 +24,16 @@ worker_use_prev_map(uint32_t table_gen) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+static inline void
+prefetch_session(
+	struct session_table *table,
+	uint64_t current_table_gen,
+	struct session_id *session_id
+) {
+	struct ttlmap *map = session_table_map(table, current_table_gen);
+	TTLMAP_PREFETCH(map, session_id, struct session_state, 1, 0);
+}
+
 static inline int
 get_or_create_session(
 	struct session_table *session_table,

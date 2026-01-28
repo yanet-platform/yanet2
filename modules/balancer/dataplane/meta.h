@@ -29,8 +29,6 @@ struct packet_metadata {
 	uint16_t dst_port;
 
 	uint8_t tcp_flags;
-
-	uint64_t hash;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -72,55 +70,6 @@ fill_packet_metadata_udp(
 	metadata->dst_port = udp_header->dst_port;
 	metadata->src_port = udp_header->src_port;
 	metadata->tcp_flags = 0;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-/**
- * Calculate hash from packet metadata for load balancing.
- * Uses CRC32 hash (hardware-accelerated) over 5-tuple or 3-tuple.
- *
- * @param metadata
- *   Pointer to packet metadata structure
- * @return
- *   Calculated hash value
- */
-static inline uint64_t
-calculate_metadata_hash(const struct packet_metadata *metadata) {
-	// Use byte array to avoid alignment issues
-	uint8_t hash_input[40]; // Max: 16 (IPv6 src) + 16 (IPv6 dst) + 4
-				// (ports) + 4 (proto)
-	int hash_len = 0;
-
-	if (metadata->network_proto == IPPROTO_IPV6) {
-		// IPv6: add source and destination addresses (16 bytes each)
-		memcpy(&hash_input[hash_len], metadata->src_addr, 16);
-		hash_len += 16;
-		memcpy(&hash_input[hash_len], metadata->dst_addr, 16);
-		hash_len += 16;
-	} else {
-		// IPv4: add source and destination addresses (4 bytes each)
-		memcpy(&hash_input[hash_len], metadata->src_addr, 4);
-		hash_len += 4;
-		memcpy(&hash_input[hash_len], metadata->dst_addr, 4);
-		hash_len += 4;
-	}
-
-	// Add ports for TCP/UDP (5-tuple hash)
-	if (metadata->transport_proto == IPPROTO_TCP ||
-	    metadata->transport_proto == IPPROTO_UDP) {
-		// Use memcpy to avoid alignment issues
-		memcpy(&hash_input[hash_len], &metadata->src_port, 2);
-		hash_len += 2;
-		memcpy(&hash_input[hash_len], &metadata->dst_port, 2);
-		hash_len += 2;
-	}
-
-	// Add protocol
-	hash_input[hash_len++] = metadata->transport_proto;
-
-	// Calculate CRC32 hash (hardware-accelerated on x86/ARM)
-	return rte_hash_crc(hash_input, hash_len, 0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -168,9 +117,6 @@ fill_packet_metadata(struct packet *packet, struct packet_metadata *metadata) {
 	} else { // unsupported
 		return -1;
 	}
-
-	// Calculate hash from metadata using the helper function
-	metadata->hash = calculate_metadata_hash(metadata);
 
 	return 0;
 }

@@ -36,6 +36,8 @@ packet_ctx_setup(
 		l4_handler_counter(handler, worker->idx, ctx->stats.storage);
 	ctx->packet_front = packet_front;
 	ctx->balancer_state = ADDR_OF(&handler->state);
+	ctx->decap_flag = false;
+	ctx->processed = false;
 }
 
 static inline void
