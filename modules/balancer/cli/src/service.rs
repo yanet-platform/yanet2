@@ -12,6 +12,16 @@ use crate::{
 };
 
 ////////////////////////////////////////////////////////////////////////////////
+// Logging macros with custom target
+////////////////////////////////////////////////////////////////////////////////
+
+macro_rules! info {
+    ($($arg:tt)*) => {
+        log::info!(target: "yanet_cli_balancer", $($arg)*)
+    };
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Service
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -47,7 +57,7 @@ impl BalancerService {
 
     /// Update balancer configuration
     async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        log::info!("Loading configuration from: {}", cmd.config);
+        info!("Loading configuration from: {}", cmd.config);
 
         let config = BalancerConfig::from_yaml_file(&cmd.config)?;
         let balancer_config: balancerpb::BalancerConfig = config.try_into()?;
@@ -60,7 +70,7 @@ impl BalancerService {
         log::debug!("Sending UpdateConfig request");
         self.client.update_config(request).await?;
 
-        log::info!("Successfully updated configuration for '{}'", cmd.name);
+        info!("Successfully updated configuration for '{}'", cmd.name);
         Ok(())
     }
 
@@ -75,12 +85,15 @@ impl BalancerService {
 
     /// Enable a real server
     async fn enable_real(&mut self, cmd: EnableRealCmd) -> Result<(), Box<dyn Error>> {
-        log::info!(
-            "Buffering enable request for real {} in VS {}:{}/{}",
-            cmd.real_ip,
-            cmd.virtual_ip,
-            cmd.virtual_port,
-            cmd.proto
+        let flush = cmd.flush;
+        let name = cmd.name.clone();
+
+        let name_display = name.as_deref().unwrap_or("<auto>");
+        info!(
+            "Enabling {} real(s) of VS {} for '{}'",
+            cmd.reals.len(),
+            cmd.vs,
+            name_display
         );
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
@@ -88,18 +101,30 @@ impl BalancerService {
         log::debug!("Sending UpdateReals request");
         self.client.update_reals(request).await?;
 
-        log::info!("Successfully buffered real enable");
+        info!("Successfully buffered real enable");
+
+        // If flush flag is set, immediately flush the updates
+        if flush {
+            let name_display = name.as_deref().unwrap_or("<auto>");
+            info!("Flushing buffered real updates for '{}'", name_display);
+            let flush_request = balancerpb::FlushRealUpdatesRequest { name };
+            let response = self.client.flush_real_updates(flush_request).await?.into_inner();
+            info!("Successfully flushed {} update(s)", response.updates_flushed);
+        }
+
         Ok(())
     }
 
     /// Disable a real server
     async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Box<dyn Error>> {
-        log::info!(
-            "Buffering disable request for real {} in VS {}:{}/{}",
-            cmd.real_ip,
-            cmd.virtual_ip,
-            cmd.virtual_port,
-            cmd.proto
+        let flush = cmd.flush;
+        let name = cmd.name.clone();
+        let reals_count = cmd.reals.len();
+
+        let name_display = name.as_deref().unwrap_or("<auto>");
+        info!(
+            "Disabling {} real(s) of VS {} for '{}'",
+            reals_count, cmd.vs, name_display
         );
 
         let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
@@ -107,31 +132,42 @@ impl BalancerService {
         log::debug!("Sending UpdateReals request");
         self.client.update_reals(request).await?;
 
-        log::info!("Successfully buffered real disable");
+        info!("Successfully buffered real disable");
+
+        // If flush flag is set, immediately flush the updates
+        if flush {
+            info!("Flushing buffered real updates");
+            let flush_request = balancerpb::FlushRealUpdatesRequest { name };
+            let response = self.client.flush_real_updates(flush_request).await?.into_inner();
+            info!("Successfully flushed {} update(s)", response.updates_flushed);
+        }
+
         Ok(())
     }
 
     /// Flush buffered real updates
     async fn flush_real_updates(&mut self, cmd: FlushRealUpdatesCmd) -> Result<(), Box<dyn Error>> {
-        log::info!("Flushing buffered real updates for '{}'", cmd.name);
+        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
+        info!("Flushing buffered real updates for '{}'", name_display);
 
         let request: balancerpb::FlushRealUpdatesRequest = cmd.into();
 
         log::debug!("Sending FlushRealUpdates request");
         let response = self.client.flush_real_updates(request).await?.into_inner();
 
-        log::info!("Successfully flushed {} update(s)", response.updates_flushed);
+        info!("Successfully flushed {} update(s)", response.updates_flushed);
         Ok(())
     }
 
     /// Show balancer configuration
     async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching configuration for '{}'", cmd.name);
+        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
+        log::debug!("Fetching configuration for '{}'", name_display);
 
         let request: balancerpb::ShowConfigRequest = (&cmd).into();
         let response = self.client.show_config(request).await?.into_inner();
 
-        output::print_show_config(&response, cmd.format.into())?;
+        output::print_show_config(&response, cmd.format.to_format())?;
         Ok(())
     }
 
@@ -142,50 +178,54 @@ impl BalancerService {
         let request = balancerpb::ListConfigsRequest {};
         let response = self.client.list_configs(request).await?.into_inner();
 
-        output::print_list_configs(&response, cmd.format.into())?;
+        output::print_list_configs(&response, cmd.format.to_format())?;
         Ok(())
     }
 
     /// Show configuration statistics
     async fn stats(&mut self, cmd: StatsCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching statistics for '{}'", cmd.name);
+        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
+        log::debug!("Fetching statistics for '{}'", name_display);
 
         let request: balancerpb::ShowStatsRequest = (&cmd).into();
         let response = self.client.show_stats(request).await?.into_inner();
 
-        output::print_show_stats(&response, cmd.format.into())?;
+        output::print_show_stats(&response, cmd.format.to_format())?;
         Ok(())
     }
 
     /// Show state information
     async fn info(&mut self, cmd: InfoCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching state info for '{}'", cmd.name);
+        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
+        log::debug!("Fetching state info for '{}'", name_display);
 
         let request: balancerpb::ShowInfoRequest = (&cmd).into();
         let response = self.client.show_info(request).await?.into_inner();
 
-        output::print_show_info(&response, cmd.format.into())?;
+        output::print_show_info(&response, cmd.format.to_format())?;
         Ok(())
     }
 
     /// Show sessions information
     async fn sessions(&mut self, cmd: SessionsCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching sessions info for '{}'", cmd.name);
+        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
+        log::debug!("Fetching sessions info for '{}'", name_display);
 
         let request: balancerpb::ShowSessionsRequest = (&cmd).into();
         let response = self.client.show_sessions(request).await?.into_inner();
 
-        output::print_show_sessions(&response, cmd.format.into())?;
+        output::print_show_sessions(&response, cmd.format.to_format())?;
         Ok(())
     }
 
     async fn graph(&mut self, cmd: GraphCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching graph info for '{}'", cmd.name);
+        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
+        log::debug!("Fetching graph info for '{}'", name_display);
 
         let request: balancerpb::ShowGraphRequest = (&cmd).into();
         let response = self.client.show_graph(request).await?.into_inner();
 
-        output::print_show_graph(&response, cmd.format.into())?;
+        output::print_show_graph(&response, cmd.format.to_format())?;
         Ok(())
     }
 }

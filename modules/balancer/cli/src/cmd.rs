@@ -1,6 +1,6 @@
 //! CLI command definitions
 
-use clap::{ArgAction, Parser, ValueEnum};
+use clap::{ArgAction, Parser};
 
 use crate::{output, rpc::balancerpb};
 
@@ -29,23 +29,32 @@ pub struct Cmd {
 // Output Format
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Output format options
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum OutputFormat {
-    /// JSON format
-    Json,
-    /// Tree structure
-    Tree,
-    /// Table format (default)
-    Table,
+/// Helper struct for output format flags
+#[derive(Debug, Clone, Parser)]
+pub struct FormatFlags {
+    /// Output in JSON format
+    #[clap(long, short = 'j', conflicts_with_all = ["tree", "table"])]
+    pub json: bool,
+
+    /// Output in tree format
+    #[clap(long, short = 't', conflicts_with_all = ["json", "table"])]
+    pub tree: bool,
+
+    /// Output in table format (default)
+    #[clap(long, conflicts_with_all = ["json", "tree"])]
+    pub table: bool,
 }
 
-impl From<OutputFormat> for crate::output::OutputFormat {
-    fn from(format: OutputFormat) -> Self {
-        match format {
-            OutputFormat::Json => output::OutputFormat::Json,
-            OutputFormat::Tree => output::OutputFormat::Tree,
-            OutputFormat::Table => output::OutputFormat::Table,
+impl FormatFlags {
+    /// Convert flags to OutputFormat, defaulting to Table if none specified
+    pub fn to_format(&self) -> crate::output::OutputFormat {
+        if self.json {
+            output::OutputFormat::Json
+        } else if self.tree {
+            output::OutputFormat::Tree
+        } else {
+            // Default to table if no format specified or if --table is explicitly set
+            output::OutputFormat::Table
         }
     }
 }
@@ -111,76 +120,114 @@ pub enum RealsMode {
 
 #[derive(Debug, Clone, Parser)]
 pub struct EnableRealCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
-    /// IP of the virtual service
+    /// Virtual service in format "ip:port/proto" (e.g., "192.168.1.1:80/tcp")
     #[arg(long)]
-    pub virtual_ip: String,
+    pub vs: String,
 
-    /// Protocol of the virtual service (tcp/udp)
-    #[arg(long)]
-    pub proto: String,
+    /// List of real server IPs to enable
+    #[arg(long, required = true, num_args = 1..)]
+    pub reals: Vec<String>,
 
-    /// Port of the virtual service
-    #[arg(long)]
-    pub virtual_port: u16,
-
-    /// IP of the real server
-    #[arg(long, short)]
-    pub real_ip: String,
-
-    /// Optional new weight for the real server
+    /// Optional new weight for the real servers
     #[arg(long)]
     pub weight: Option<u32>,
+
+    /// Flush buffered updates immediately after enabling
+    #[arg(long, default_value_t = false)]
+    pub flush: bool,
 }
 
 impl TryFrom<EnableRealCmd> for balancerpb::UpdateRealsRequest {
     type Error = String;
 
     fn try_from(cmd: EnableRealCmd) -> Result<Self, Self::Error> {
-        let proto = match cmd.proto.to_uppercase().as_str() {
+        // Parse the --vs option in format "ip:port/proto"
+        let vs_parts: Vec<&str> = cmd.vs.split('/').collect();
+        if vs_parts.len() != 2 {
+            return Err(format!(
+                "invalid --vs format: '{}'. Expected format: 'ip:port/proto' (e.g., '192.168.1.1:80/tcp')",
+                cmd.vs
+            ));
+        }
+
+        let addr_port = vs_parts[0];
+        let proto_str = vs_parts[1];
+
+        // Parse protocol (case-insensitive)
+        let proto = match proto_str.to_uppercase().as_str() {
             "TCP" => balancerpb::TransportProto::Tcp,
             "UDP" => balancerpb::TransportProto::Udp,
-            _ => return Err(format!("invalid proto: {}", cmd.proto)),
+            _ => {
+                return Err(format!(
+                    "invalid proto: '{}'. Expected 'tcp' or 'udp' (case-insensitive)",
+                    proto_str
+                ));
+            }
         };
 
-        let virtual_ip: std::net::IpAddr = cmd
-            .virtual_ip
+        // Parse IP and port
+        let addr_port_parts: Vec<&str> = addr_port.rsplitn(2, ':').collect();
+        if addr_port_parts.len() != 2 {
+            return Err(format!(
+                "invalid address:port format: '{}'. Expected format: 'ip:port'",
+                addr_port
+            ));
+        }
+
+        let port_str = addr_port_parts[0];
+        let ip_str = addr_port_parts[1];
+
+        let virtual_port: u16 = port_str
             .parse()
-            .map_err(|e| format!("invalid virtual IP: {}", e))?;
-        let real_ip: std::net::IpAddr = cmd.real_ip.parse().map_err(|e| format!("invalid real IP: {}", e))?;
+            .map_err(|e| format!("invalid port '{}': {}", port_str, e))?;
 
-        let real_id = balancerpb::RealIdentifier {
-            vs: Some(balancerpb::VsIdentifier {
-                addr: Some(balancerpb::Addr {
-                    bytes: match virtual_ip {
-                        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
-                        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
-                    },
-                }),
-                port: cmd.virtual_port as u32,
-                proto: proto as i32,
-            }),
-            real: Some(balancerpb::RelativeRealIdentifier {
-                ip: Some(balancerpb::Addr {
-                    bytes: match real_ip {
-                        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
-                        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
-                    },
-                }),
-                port: 0,
-            }),
-        };
+        let virtual_ip: std::net::IpAddr = ip_str
+            .parse()
+            .map_err(|e| format!("invalid virtual IP '{}': {}", ip_str, e))?;
 
-        Ok(Self {
-            name: cmd.name,
-            updates: vec![balancerpb::RealUpdate {
+        // Create updates for all real IPs
+        let mut updates = Vec::new();
+        for real_ip_str in &cmd.reals {
+            let real_ip: std::net::IpAddr = real_ip_str
+                .parse()
+                .map_err(|e| format!("invalid real IP '{}': {}", real_ip_str, e))?;
+
+            let real_id = balancerpb::RealIdentifier {
+                vs: Some(balancerpb::VsIdentifier {
+                    addr: Some(balancerpb::Addr {
+                        bytes: match virtual_ip {
+                            std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
+                            std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
+                        },
+                    }),
+                    port: virtual_port as u32,
+                    proto: proto as i32,
+                }),
+                real: Some(balancerpb::RelativeRealIdentifier {
+                    ip: Some(balancerpb::Addr {
+                        bytes: match real_ip {
+                            std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
+                            std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
+                        },
+                    }),
+                    port: 0,
+                }),
+            };
+
+            updates.push(balancerpb::RealUpdate {
                 real_id: Some(real_id),
                 enable: Some(true),
                 weight: cmd.weight,
-            }],
+            });
+        }
+
+        Ok(Self {
+            name: cmd.name,
+            updates,
             buffer: true, // Always buffer
         })
     }
@@ -188,72 +235,110 @@ impl TryFrom<EnableRealCmd> for balancerpb::UpdateRealsRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct DisableRealCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
-    /// IP of the virtual service
+    /// Virtual service in format "ip:port/proto" (e.g., "192.168.1.1:80/tcp")
     #[arg(long)]
-    pub virtual_ip: String,
+    pub vs: String,
 
-    /// Protocol of the virtual service (tcp/udp)
-    #[arg(long)]
-    pub proto: String,
+    /// List of real server IPs to disable
+    #[arg(long, required = true, num_args = 1..)]
+    pub reals: Vec<String>,
 
-    /// Port of the virtual service
-    #[arg(long)]
-    pub virtual_port: u16,
-
-    /// IP of the real server
-    #[arg(long, short)]
-    pub real_ip: String,
+    /// Flush buffered updates immediately after disabling
+    #[arg(long, default_value_t = false)]
+    pub flush: bool,
 }
 
 impl TryFrom<DisableRealCmd> for balancerpb::UpdateRealsRequest {
     type Error = String;
 
     fn try_from(cmd: DisableRealCmd) -> Result<Self, Self::Error> {
-        let proto = match cmd.proto.to_uppercase().as_str() {
+        // Parse the --vs option in format "ip:port/proto"
+        let vs_parts: Vec<&str> = cmd.vs.split('/').collect();
+        if vs_parts.len() != 2 {
+            return Err(format!(
+                "invalid --vs format: '{}'. Expected format: 'ip:port/proto' (e.g., '192.168.1.1:80/tcp')",
+                cmd.vs
+            ));
+        }
+
+        let addr_port = vs_parts[0];
+        let proto_str = vs_parts[1];
+
+        // Parse protocol (case-insensitive)
+        let proto = match proto_str.to_uppercase().as_str() {
             "TCP" => balancerpb::TransportProto::Tcp,
             "UDP" => balancerpb::TransportProto::Udp,
-            _ => return Err(format!("invalid proto: {}", cmd.proto)),
+            _ => {
+                return Err(format!(
+                    "invalid proto: '{}'. Expected 'tcp' or 'udp' (case-insensitive)",
+                    proto_str
+                ));
+            }
         };
 
-        let virtual_ip: std::net::IpAddr = cmd
-            .virtual_ip
+        // Parse IP and port
+        let addr_port_parts: Vec<&str> = addr_port.rsplitn(2, ':').collect();
+        if addr_port_parts.len() != 2 {
+            return Err(format!(
+                "invalid address:port format: '{}'. Expected format: 'ip:port'",
+                addr_port
+            ));
+        }
+
+        let port_str = addr_port_parts[0];
+        let ip_str = addr_port_parts[1];
+
+        let virtual_port: u16 = port_str
             .parse()
-            .map_err(|e| format!("invalid virtual IP: {}", e))?;
-        let real_ip: std::net::IpAddr = cmd.real_ip.parse().map_err(|e| format!("invalid real IP: {}", e))?;
+            .map_err(|e| format!("invalid port '{}': {}", port_str, e))?;
 
-        let real_id = balancerpb::RealIdentifier {
-            vs: Some(balancerpb::VsIdentifier {
-                addr: Some(balancerpb::Addr {
-                    bytes: match virtual_ip {
-                        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
-                        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
-                    },
-                }),
-                port: cmd.virtual_port as u32,
-                proto: proto as i32,
-            }),
-            real: Some(balancerpb::RelativeRealIdentifier {
-                ip: Some(balancerpb::Addr {
-                    bytes: match real_ip {
-                        std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
-                        std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
-                    },
-                }),
-                port: 0,
-            }),
-        };
+        let virtual_ip: std::net::IpAddr = ip_str
+            .parse()
+            .map_err(|e| format!("invalid virtual IP '{}': {}", ip_str, e))?;
 
-        Ok(Self {
-            name: cmd.name,
-            updates: vec![balancerpb::RealUpdate {
+        // Create updates for all real IPs
+        let mut updates = Vec::new();
+        for real_ip_str in &cmd.reals {
+            let real_ip: std::net::IpAddr = real_ip_str
+                .parse()
+                .map_err(|e| format!("invalid real IP '{}': {}", real_ip_str, e))?;
+
+            let real_id = balancerpb::RealIdentifier {
+                vs: Some(balancerpb::VsIdentifier {
+                    addr: Some(balancerpb::Addr {
+                        bytes: match virtual_ip {
+                            std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
+                            std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
+                        },
+                    }),
+                    port: virtual_port as u32,
+                    proto: proto as i32,
+                }),
+                real: Some(balancerpb::RelativeRealIdentifier {
+                    ip: Some(balancerpb::Addr {
+                        bytes: match real_ip {
+                            std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
+                            std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
+                        },
+                    }),
+                    port: 0,
+                }),
+            };
+
+            updates.push(balancerpb::RealUpdate {
                 real_id: Some(real_id),
                 enable: Some(false),
                 weight: None,
-            }],
+            });
+        }
+
+        Ok(Self {
+            name: cmd.name,
+            updates,
             buffer: true, // Always buffer
         })
     }
@@ -261,9 +346,9 @@ impl TryFrom<DisableRealCmd> for balancerpb::UpdateRealsRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct FlushRealUpdatesCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 }
 
 impl From<FlushRealUpdatesCmd> for balancerpb::FlushRealUpdatesRequest {
@@ -278,13 +363,12 @@ impl From<FlushRealUpdatesCmd> for balancerpb::FlushRealUpdatesRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct ConfigCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 impl From<&ConfigCmd> for balancerpb::ShowConfigRequest {
@@ -299,9 +383,8 @@ impl From<&ConfigCmd> for balancerpb::ShowConfigRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct ListCmd {
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -310,9 +393,9 @@ pub struct ListCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct StatsCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
     /// Device name (optional)
     #[arg(long)]
@@ -330,9 +413,8 @@ pub struct StatsCmd {
     #[arg(long)]
     pub chain: Option<String>,
 
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 impl From<&StatsCmd> for balancerpb::ShowStatsRequest {
@@ -355,13 +437,12 @@ impl From<&StatsCmd> for balancerpb::ShowStatsRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct InfoCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 impl From<&InfoCmd> for balancerpb::ShowInfoRequest {
@@ -376,13 +457,12 @@ impl From<&InfoCmd> for balancerpb::ShowInfoRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct SessionsCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 impl From<&SessionsCmd> for balancerpb::ShowSessionsRequest {
@@ -393,13 +473,12 @@ impl From<&SessionsCmd> for balancerpb::ShowSessionsRequest {
 
 #[derive(Debug, Clone, Parser)]
 pub struct GraphCmd {
-    /// Name of the module config
+    /// Name of the module config (optional, auto-selects if only one exists)
     #[arg(long, short = 'n')]
-    pub name: String,
+    pub name: Option<String>,
 
-    /// Output format
-    #[clap(long, value_enum, default_value_t = OutputFormat::Table)]
-    pub format: OutputFormat,
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 impl From<&GraphCmd> for balancerpb::ShowGraphRequest {

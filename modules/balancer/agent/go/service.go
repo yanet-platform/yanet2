@@ -50,6 +50,53 @@ func NewBalancerService(
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// getManagerWithAutoSelection retrieves a balancer manager by name.
+// If name is nil or empty, attempts to auto-select when exactly one manager exists.
+// Returns the manager, the actual name used, and any error.
+func (m *BalancerService) getManagerWithAutoSelection(name *string) (*BalancerManager, string, error) {
+	// If name is provided and not empty, use it directly
+	if name != nil && *name != "" {
+		manager, err := m.agent.BalancerManager(*name)
+		if err != nil {
+			return nil, "", err
+		}
+		return manager, *name, nil
+	}
+
+	// Name not provided - attempt auto-selection
+	managers := m.agent.Managers()
+
+	if len(managers) == 0 {
+		return nil, "", status.Error(
+			codes.NotFound,
+			"no balancer managers found",
+		)
+	}
+
+	if len(managers) > 1 {
+		return nil, "", status.Error(
+			codes.InvalidArgument,
+			fmt.Sprintf(
+				"multiple balancer managers found (%d), please specify name explicitly",
+				len(managers),
+			),
+		)
+	}
+
+	// Exactly one manager - auto-select it
+	selectedName := managers[0]
+	m.log.Infow("auto-selected balancer manager", "name", selectedName)
+
+	manager, err := m.agent.BalancerManager(selectedName)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return manager, selectedName, nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 // UpdateConfig updates or enables balancer config
 func (m *BalancerService) UpdateConfig(
 	ctx context.Context,
@@ -77,7 +124,9 @@ func (m *BalancerService) UpdateConfig(
 			return nil, fmt.Errorf("failed to update balancer: %v", err)
 		}
 		m.log.Infow("balancer config updated", "name", name)
-		return &balancerpb.UpdateConfigResponse{}, nil
+		return &balancerpb.UpdateConfigResponse{
+			Name: req.Name,
+		}, nil
 	} else {
 		m.log.Infow("creating new balancer", "name", name)
 		if err := m.agent.NewBalancerManager(name, req.Config); err != nil {
@@ -85,7 +134,9 @@ func (m *BalancerService) UpdateConfig(
 			return nil, fmt.Errorf("failed to create balancer: %v", err)
 		}
 		m.log.Infow("balancer created", "name", name)
-		return &balancerpb.UpdateConfigResponse{}, nil
+		return &balancerpb.UpdateConfigResponse{
+			Name: req.Name,
+		}, nil
 	}
 }
 
@@ -96,19 +147,9 @@ func (m *BalancerService) UpdateReals(
 	ctx context.Context,
 	req *balancerpb.UpdateRealsRequest,
 ) (*balancerpb.UpdateRealsResponse, error) {
-	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"module config name is required",
-		)
-	}
-
-	manager, err := m.agent.BalancerManager(name)
+	manager, name, err := m.getManagerWithAutoSelection(req.Name)
 	if err != nil {
-		m.log.Warnw("balancer not found", "name", name)
-		msg := fmt.Sprintf("balancer not found: %v", err)
-		return nil, status.Error(codes.NotFound, msg)
+		return nil, err
 	}
 
 	count, err := manager.UpdateReals(req.Updates, req.Buffer)
@@ -125,6 +166,7 @@ func (m *BalancerService) UpdateReals(
 	}
 
 	return &balancerpb.UpdateRealsResponse{
+		Name:           name,
 		UpdatesApplied: uint32(count),
 	}, nil
 }
@@ -136,19 +178,9 @@ func (m *BalancerService) FlushRealUpdates(
 	ctx context.Context,
 	req *balancerpb.FlushRealUpdatesRequest,
 ) (*balancerpb.FlushRealUpdatesResponse, error) {
-	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"module config name is required",
-		)
-	}
-
-	manager, err := m.agent.BalancerManager(name)
+	manager, name, err := m.getManagerWithAutoSelection(req.Name)
 	if err != nil {
-		m.log.Warnw("balancer not found", "name", name)
-		msg := fmt.Sprintf("balancer not found: %v", err)
-		return nil, status.Error(codes.NotFound, msg)
+		return nil, err
 	}
 
 	count, err := manager.FlushRealUpdates()
@@ -172,24 +204,16 @@ func (m *BalancerService) ShowConfig(
 	ctx context.Context,
 	req *balancerpb.ShowConfigRequest,
 ) (*balancerpb.ShowConfigResponse, error) {
-	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"module config name is required",
-		)
-	}
-
-	manager, err := m.agent.BalancerManager(name)
+	manager, name, err := m.getManagerWithAutoSelection(req.Name)
 	if err != nil {
-		msg := fmt.Sprintf("balancer not found: %v", err)
-		return nil, status.Error(codes.NotFound, msg)
+		return nil, err
 	}
 
 	config := manager.Config()
 	bufferedUpdates := manager.BufferedUpdates()
 
 	return &balancerpb.ShowConfigResponse{
+		Name:                name,
 		Config:              config,
 		BufferedRealUpdates: bufferedUpdates,
 	}, nil
@@ -216,18 +240,9 @@ func (m *BalancerService) ShowInfo(
 	ctx context.Context,
 	req *balancerpb.ShowInfoRequest,
 ) (*balancerpb.ShowInfoResponse, error) {
-	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"module config name is required",
-		)
-	}
-
-	manager, err := m.agent.BalancerManager(name)
+	manager, name, err := m.getManagerWithAutoSelection(req.Name)
 	if err != nil {
-		msg := fmt.Sprintf("balancer not found: %v", err)
-		return nil, status.Error(codes.NotFound, msg)
+		return nil, err
 	}
 
 	info, err := manager.Info(time.Now())
@@ -249,18 +264,9 @@ func (m *BalancerService) ShowStats(
 	ctx context.Context,
 	req *balancerpb.ShowStatsRequest,
 ) (*balancerpb.ShowStatsResponse, error) {
-	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"module config name is required",
-		)
-	}
-
-	manager, err := m.agent.BalancerManager(name)
+	manager, name, err := m.getManagerWithAutoSelection(req.Name)
 	if err != nil {
-		msg := fmt.Sprintf("balancer not found: %v", err)
-		return nil, status.Error(codes.NotFound, msg)
+		return nil, err
 	}
 
 	stats, err := manager.Stats(req.Ref)
@@ -270,6 +276,7 @@ func (m *BalancerService) ShowStats(
 	}
 
 	return &balancerpb.ShowStatsResponse{
+		Name:  name,
 		Ref:   req.Ref,
 		Stats: stats,
 	}, nil
@@ -282,18 +289,9 @@ func (m *BalancerService) ShowSessions(
 	ctx context.Context,
 	req *balancerpb.ShowSessionsRequest,
 ) (*balancerpb.ShowSessionsResponse, error) {
-	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"module config name is required",
-		)
-	}
-
-	manager, err := m.agent.BalancerManager(name)
+	manager, name, err := m.getManagerWithAutoSelection(req.Name)
 	if err != nil {
-		msg := fmt.Sprintf("balancer not found: %v", err)
-		return nil, status.Error(codes.NotFound, msg)
+		return nil, err
 	}
 
 	sessions, err := manager.Sessions(time.Now())
@@ -303,6 +301,7 @@ func (m *BalancerService) ShowSessions(
 	}
 
 	return &balancerpb.ShowSessionsResponse{
+		Name:     name,
 		Sessions: sessions,
 	}, nil
 }
@@ -314,23 +313,15 @@ func (m *BalancerService) ShowGraph(
 	ctx context.Context,
 	req *balancerpb.ShowGraphRequest,
 ) (*balancerpb.ShowGraphResponse, error) {
-	name := req.GetName()
-	if name == "" {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"module config name is required",
-		)
-	}
-
-	manager, err := m.agent.BalancerManager(name)
+	manager, name, err := m.getManagerWithAutoSelection(req.Name)
 	if err != nil {
-		msg := fmt.Sprintf("balancer not found: %v", err)
-		return nil, status.Error(codes.NotFound, msg)
+		return nil, err
 	}
 
 	graph := manager.Graph()
 
 	return &balancerpb.ShowGraphResponse{
+		Name:  name,
 		Graph: graph,
 	}, nil
 }

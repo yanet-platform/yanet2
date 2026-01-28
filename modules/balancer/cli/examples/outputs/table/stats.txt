@@ -1,10 +1,11 @@
-╔═════════════════════════════════════════════════════════════════════════════════════════════╗
-║                                     BALANCER STATISTICS                                     ║
-╟─────────────────────────────────────────────────────────────────────────────────────────────╢
-║  Config: my-balancer | Device: eth0 | Pipeline: main | Function: balancer | Chain: forward  ║
-╚═════════════════════════════════════════════════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════╗
+║                  BALANCER STATISTICS                   ║
+╟────────────────────────────────────────────────────────╢
+║           Config: my-balancer | Device: eth0           ║
+║  Pipeline: main | Function: balancer | Chain: forward  ║
+╚════════════════════════════════════════════════════════╝
 
-Module Stats:
+Module:
 ╭──────────┬──────────────────┬───────────╮
 │ Category │ Metric           │ Value     │
 ├──────────┼──────────────────┼───────────┤
@@ -14,17 +15,20 @@ Module Stats:
 │          │ Outgoing Bytes   │ 1.1 GB    │
 │          │ Decap Success    │ 50,000    │
 │          │ Decap Failed     │ 123       │
+│          │                  │           │
 │ L4       │ Incoming Pkts    │ 1,200,000 │
 │          │ Outgoing Pkts    │ 1,199,500 │
 │          │ Select VS Fail   │ 100       │
 │          │ Select Real Fail │ 50        │
 │          │ Invalid Pkts     │ 350       │
+│          │                  │           │
 │ ICMPv4   │ Incoming Pkts    │ 34,567    │
 │          │ Src Not Allowed  │ 1,215     │
 │          │ Echo Responses   │ 30,000    │
 │          │ Unrecognized VS  │ 2         │
 │          │ Forwarded        │ 4,500     │
 │          │ Broadcasted      │ 67        │
+│          │                  │           │
 │ ICMPv6   │ Incoming Pkts    │ 1,234     │
 │          │ Src Not Allowed  │ 1,215     │
 │          │ Echo Responses   │ 1,200     │
@@ -33,19 +37,48 @@ Module Stats:
 │          │ Broadcasted      │ 2         │
 ╰──────────┴──────────────────┴───────────╯
 
-VS Stats:
-╭───────────┬─────────┬───────┬────────────────────────┬────────────────────────┬──────────────────╮
-│ VS IP     │ VS Port │ Proto │ Incoming               │ Outgoing               │ Created Sessions │
-├───────────┼─────────┼───────┼────────────────────────┼────────────────────────┼──────────────────┤
-│ 192.0.2.1 │ 80      │ TCP   │ 800,000 pkts, 762.9 MB │ 799,500 pkts, 762.5 MB │ 50,000           │
-│ 192.0.2.2 │ 443     │ TCP   │ 400,000 pkts, 381.5 MB │ 400,000 pkts, 381.5 MB │ 25,000           │
-╰───────────┴─────────┴───────┴────────────────────────┴────────────────────────┴──────────────────╯
+VS 192.0.2.1:80/TCP:
+  Incoming Packets: 800,000
+  Incoming Bytes: 762.9 MB
+  Outgoing Packets: 799,500
+  Outgoing Bytes: 762.5 MB
+  Created Sessions: 50,000
+  OPS Packets: 0
+  Packet Src Not Allowed: 0
+  Session Table Overflow: 0
+  Not Rescheduled Packets: 0
+  Real Is Disabled: 0
+  Real Is Removed: 0
+  No Reals: 0
+  Echo ICMP Packets: 0
+  Error ICMP Packets: 0
+  Broadcasted ICMP Packets: 0
+╭─────────────┬─────────┬──────────┬──────────────────┬───────────────┬──────────┬───────────╮
+│ Real        │ Packets │ Bytes    │ Created Sessions │ Disabled Pkts │ OPS Pkts │ ICMP Pkts │
+├─────────────┼─────────┼──────────┼──────────────────┼───────────────┼──────────┼───────────┤
+│ 10.1.1.1:80 │ 500,000 │ 600.0 MB │ 30,000           │ 0             │ 0        │ 0         │
+│ 10.1.1.2:80 │ 300,000 │ 349.5 MB │ 20,000           │ 0             │ 0        │ 0         │
+╰─────────────┴─────────┴──────────┴──────────────────┴───────────────┴──────────┴───────────╯
 
-Real Stats:
-╭───────────┬─────────┬──────────┬───────────┬───────┬────────────────────────┬──────────────────╮
-│ VS IP     │ VS Port │ Real IP  │ Real Port │ Proto │ Traffic                │ Created Sessions │
-├───────────┼─────────┼──────────┼───────────┼───────┼────────────────────────┼──────────────────┤
-│ 192.0.2.1 │ 80      │ 10.1.1.1 │ 80        │ TCP   │ 500,000 pkts, 600.0 MB │ 30,000           │
-│ 192.0.2.1 │ 80      │ 10.1.1.2 │ 80        │ TCP   │ 300,000 pkts, 349.5 MB │ 20,000           │
-│ 192.0.2.2 │ 443     │ 10.2.1.1 │ 443       │ TCP   │ 400,000 pkts, 480.0 MB │ 25,000           │
-╰───────────┴─────────┴──────────┴───────────┴───────┴────────────────────────┴──────────────────╯
+VS 192.0.2.2:443/TCP:
+  Incoming Packets: 400,000
+  Incoming Bytes: 381.5 MB
+  Outgoing Packets: 400,000
+  Outgoing Bytes: 381.5 MB
+  Created Sessions: 25,000
+  OPS Packets: 0
+  Packet Src Not Allowed: 0
+  Session Table Overflow: 0
+  Not Rescheduled Packets: 0
+  Real Is Disabled: 0
+  Real Is Removed: 0
+  No Reals: 0
+  Echo ICMP Packets: 0
+  Error ICMP Packets: 0
+  Broadcasted ICMP Packets: 0
+╭──────────────┬─────────┬──────────┬──────────────────┬───────────────┬──────────┬───────────╮
+│ Real         │ Packets │ Bytes    │ Created Sessions │ Disabled Pkts │ OPS Pkts │ ICMP Pkts │
+├──────────────┼─────────┼──────────┼──────────────────┼───────────────┼──────────┼───────────┤
+│ 10.2.1.1:443 │ 400,000 │ 480.0 MB │ 25,000           │ 0             │ 0        │ 0         │
+╰──────────────┴─────────┴──────────┴──────────────────┴───────────────┴──────────┴───────────╯
+

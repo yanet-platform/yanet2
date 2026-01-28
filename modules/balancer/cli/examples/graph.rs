@@ -11,6 +11,7 @@ use yanet_cli_balancer::rpc::balancerpb;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let response = balancerpb::ShowGraphResponse {
+        name: "my-balancer".into(),
         graph: Some(balancerpb::Graph {
             virtual_services: vec![
                 balancerpb::GraphVs {

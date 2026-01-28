@@ -271,17 +271,42 @@ message VsFlags {
 	// - When port-based routing is not needed
 	bool pure_l3 = 4;
 
-	// Enable dynamic weight adjustment.
+	// Enable Weighted Least Connection (WLC) dynamic weight adjustment.
 	//
-	// When true and refresh_period is set:
-	// - The balancer periodically scans the session table
-	// - Collects active session counts for each real server
-	// - Adjusts real weights dynamically to balance load based on
-	//   current session distribution
-	// - Helps prevent overloading when session durations vary
+	// When true, the balancer dynamically adjusts real server weights
+	// based on active session counts to balance load more evenly.
 	//
-	// Works with both SOURCE_HASH and ROUND_ROBIN schedulers.
-	// The adjustment is independent of the scheduling algorithm.
+	// REQUIREMENTS:
+	// To enable WLC, ALL of the following must be configured:
+	// 1. Set this flag to true
+	// 2. Set StateConfig.refresh_period to a non-zero value (e.g., 1s-60s)
+	// 3. Set StateConfig.session_table_max_load_factor (e.g., 0.7-0.9)
+	// 4. Configure StateConfig.wlc with power and max_weight values
+	//
+	// If any of these requirements are missing, configuration will be
+	// rejected.
+	//
+	// BEHAVIOR:
+	// - During each refresh cycle (every refresh_period):
+	//   * Scans session table to count active sessions per real
+	//   * Calculates new effective weights using WLC algorithm
+	//   * Updates real weights in the dataplane (state only, not config)
+	// - Formula: effective_weight = weight * max(1.0, power * (1.0 -
+	//   ratio))
+	//   where ratio =
+	//   (real_sessions * total_weight) / (total_sessions *
+	//   real_weight)
+	// - Effective weights are capped at wlc.max_weight
+	// - Original config weights are preserved for future calculations
+	//
+	// COMPATIBILITY:
+	// - Works with both SOURCE_HASH and ROUND_ROBIN schedulers
+	// - The adjustment is independent of the scheduling algorithm
+	// - Helps prevent overloading when session durations vary significantly
+	//
+	// PERFORMANCE IMPACT:
+	// - Adds overhead during refresh cycle (scan sessions + weight updates)
+	// - Impact depends on session count and refresh_period
 	bool wlc = 5;
 }
 
@@ -430,21 +455,97 @@ message PacketHandlerRef {
 	optional string chain = 4;
 }
 
-// Dynamic weight adjustment configuration.
+// Weighted Least Connection (WLC) algorithm configuration.
 //
-// Parameters controlling how real server weights are adjusted
-// based on active session counts when adjust_weights flag is enabled.
+// Controls the dynamic weight adjustment algorithm that balances load
+// across real servers based on their active session counts. The WLC
+// algorithm adjusts weights to prevent overloading of individual reals
+// when session durations vary significantly.
+//
+// ALGORITHM OVERVIEW:
+// For each real server in a WLC-enabled virtual service:
+// 1. Calculate connections ratio:
+//   ratio = (real_sessions * total_weight) / (total_sessions * real_weight)
+//   where:
+//    - real_sessions: Active sessions on this real
+//    - total_sessions: Active sessions across all enabled reals in the VS
+//    - real_weight: Original configured weight of this real
+//    - total_weight: Sum of original weights of all enabled reals
+//
+// 2. Calculate WLC adjustment factor:
+//   wlc_factor = max(1.0, power * (1.0 - ratio))
+//    - If ratio < 1.0: Real has fewer sessions than expected → increase weight
+//    - If ratio > 1.0:
+//      Real has more sessions than expected → keep weight
+//      at 1.0x
+//    - power parameter controls adjustment aggressiveness
+//
+// 3. Calculate effective weight:
+//   effective_weight = min(real_weight * wlc_factor, max_weight)
+//
+// CONFIGURATION REQUIREMENTS:
+// Both power and max_weight must be specified if any VS has wlc flag enabled.
+// If no VS uses WLC, these can be omitted or set to 0.
 message WlcConfig {
-	// Adjustment power factor (optional).
+	// Power factor for weight adjustment aggressiveness (optional).
 	//
-	// Controls the aggressiveness of weight adjustment.
-	// Higher values cause more dramatic weight changes.
+	// Controls how aggressively weights are adjusted based on session
+	// distribution imbalance.
+	//
+	// BEHAVIOR:
+	// - Higher values: More aggressive adjustment, faster response to
+	// imbalance
+	// - Lower values: Gentler adjustment, more stable weights
+	// - Value of 0: Disables WLC (effective_weight = weight)
+	//
+	// FORMULA IMPACT:
+	//   effective_weight = weight * max(1.0, power * (1.0 -
+	//   connections_ratio))
+	//
+	// EXAMPLES:
+	// - power=2: If a real has 50% fewer sessions than expected
+	// (ratio=0.5),
+	//   its weight increases by 2 * (1.0 - 0.5) = 1.0x → doubles
+	// - power=4: Same scenario → weight increases by 2.0x → triples
+	// - power=1: Same scenario → weight increases by 0.5x → 1.5x original
+	//
+	// RECOMMENDED VALUES:
+	// - Conservative (stable): 1-2
+	// - Moderate (balanced): 2-4
+	// - Aggressive (responsive): 4-8
+	// - Very aggressive: 8-16
+	//
+	// REQUIRED: Must be specified if any VS has wlc flag enabled
 	optional uint64 power = 1;
 
-	// Maximum weight limit (optional).
+	// Maximum effective weight limit (optional).
 	//
-	// Caps the maximum weight a real server can have after adjustment.
-	// Prevents any single real from dominating traffic distribution.
+	// Caps the maximum weight a real server can have after WLC adjustment.
+	// Prevents any single real from dominating traffic distribution even
+	// when severely underloaded.
+	//
+	// BEHAVIOR:
+	// - Limits effective_weight: min(calculated_weight, max_weight)
+	// - Prevents extreme weight values that could cause instability
+	// - Ensures minimum traffic distribution across all enabled reals
+	//
+	// RELATIONSHIP TO CONFIGURED WEIGHTS:
+	// If your configured weights range from 1-100, consider:
+	// - max_weight=200: Allows up to 2x increase
+	// - max_weight=500: Allows up to 5x increase
+	// - max_weight=1000: Allows up to 10x increase
+	//
+	// RECOMMENDED VALUES:
+	// - Conservative: 2-3x maximum configured weight
+	// - Moderate: 5-10x maximum configured weight
+	// - Aggressive: 10-20x maximum configured weight
+	//
+	// EXAMPLE:
+	// If configured weights are 1-100 and max_weight=500:
+	// - A real with weight=50 can reach effective_weight=500 (10x increase)
+	// - A real with weight=100 can reach effective_weight=500 (5x increase)
+	//
+	// REQUIRED: Must be specified if any VS has wlc flag enabled
 	optional uint32 max_weight = 2;
 }
 
@@ -488,17 +589,57 @@ message StateConfig {
 	// CREATE scenario: REQUIRED - must be specified
 	// UPDATE scenario: OPTIONAL - if not specified, period is not changed
 	//
-	// When set to non-zero duration:
-	// - Balancer periodically scans the session table
-	// - Collects active session statistics
-	// - Automatically resizes table if load factor exceeds threshold
-	// - Adjusts weights for VSs with adjust_weights flag enabled
+	// CONFIGURATION DEPENDENCIES:
+	// If refresh_period is set to a non-zero value, then ALL of the
+	// following must also be configured:
+	// - session_table_max_load_factor: Required for auto-resizing
+	// - wlc: Required even if no VS uses WLC (can have power=0,
+	// max_weight=0)
 	//
-	// When set to zero duration:
+	// If any VS has the WLC flag enabled, then refresh_period MUST be
+	// non-zero.
+	//
+	// BEHAVIOR WHEN NON-ZERO:
+	// The balancer performs these operations every refresh_period:
+	// 1. Session Table Scan:
+	//    - Counts active sessions per virtual service and per real server
+	//    - Updates BalancerInfo statistics
+	//			(active_sessions, last_packet_timestamp)
+	//
+	// 2. Automatic Session Table Resizing:
+	//    - Calculates load factor: active_sessions / table_capacity
+	//    - If load_factor > session_table_max_load_factor:
+	//      * Doubles the session table capacity
+	//      * Migrates existing sessions to new table
+	//      * Prevents session table overflow
+	//
+	// 3. WLC Weight Adjustment (if any VS has wlc flag enabled):
+	//    - For each VS with wlc=true:
+	//      * Calculates new effective weights based on session distribution
+	//      * Updates real server weights in dataplane (state only)
+	//      * Preserves original config weights for future calculations
+	//    - Uses wlc.power and wlc.max_weight parameters
+	//
+	// BEHAVIOR WHEN ZERO:
 	// - Disables all periodic refresh operations
-	// - No automatic resizing or weight adjustment
-	// - Session statistics are not updated
+	// - No automatic resizing (manual resize via API still works)
+	// - No WLC weight adjustment (WLC flag cannot be used)
+	// - Session statistics are not updated (Info API returns stale data)
+	// - Suitable for static configurations with predictable load
 	//
-	// Typical values: 1s - 60s depending on requirements
+	// PERFORMANCE CONSIDERATIONS:
+	// - Shorter periods: More responsive to load changes, higher CPU
+	// overhead
+	// - Longer periods: Less overhead, slower response to load changes
+	// - Typical values: 1s-10s for dynamic workloads, 30s-60s for stable
+	// loads
+	// - Session table scan cost is O(active_sessions)
+	// - WLC calculation cost is O(virtual_services * reals_per_vs)
+	//
+	// RECOMMENDED VALUES:
+	// - High-traffic dynamic workloads: 5s-10s
+	// - Moderate traffic: 15s-30s
+	// - Stable/predictable traffic: 30s-60s
+	// - Static configuration (no WLC, no auto-resize): 0 (disabled)
 	optional google.protobuf.Duration refresh_period = 4;
 }

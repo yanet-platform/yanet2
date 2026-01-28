@@ -27,9 +27,11 @@
  * required to instantiate a balancer instance.
  */
 struct balancer_config {
-	struct packet_handler_config
-		handler;	   // Packet handling/session parameters
-	struct state_config state; // Session table sizing/config
+	/**  Packet handling/session parameters */
+	struct packet_handler_config handler;
+
+	/** Session table sizing/config */
+	struct state_config state;
 };
 
 struct agent;
@@ -45,7 +47,6 @@ struct agent;
  */
 struct balancer_handle;
 
-// TODO: docs
 struct diag;
 
 /**
@@ -109,6 +110,20 @@ balancer_resize_session_table(
 	struct balancer_handle *handle, size_t new_size, uint32_t now
 );
 
+/**
+ * Get the current session table capacity.
+ *
+ * Returns the current maximum number of concurrent sessions the session
+ * table can hold. This is the hash table size, not the number of active
+ * sessions.
+ *
+ * The capacity can change over time due to:
+ * - Manual resizing via balancer_resize_session_table()
+ * - Automatic resizing when load factor exceeds threshold
+ *
+ * @param handle Balancer handle.
+ * @return Current session table capacity (number of entries).
+ */
 size_t
 balancer_session_table_capacity(struct balancer_handle *handle);
 
@@ -183,24 +198,89 @@ balancer_stats(
 	struct packet_handler_ref *ref
 );
 
+/**
+ * Free all allocations inside a balancer_stats structure.
+ *
+ * Releases memory allocated by balancer_stats() for the VS and real
+ * statistics arrays. Safe to call with partially-initialized structures;
+ * ignores NULL pointers.
+ *
+ * NOTE: This function does NOT free the balancer_stats structure itself,
+ * only the dynamically allocated arrays inside it.
+ *
+ * @param stats Structure to release. The struct itself is not freed.
+ */
 void
 balancer_stats_free(struct balancer_stats *stats);
 
 /**
  * Aggregated information about a balancer instance.
  *
- * Includes statistics, active session count and snapshots of VS/real info.
+ * Provides a comprehensive snapshot of the balancer's operational state,
+ * including active session counts, last activity timestamp, and detailed
+ * information about all virtual services and their real servers.
  *
- * Memory management:
- * - On success balancer_info() allocates arrays referenced by vs and reals.
- * - Release all allocations inside this struct with balancer_info_free().
+ * DATA FRESHNESS:
+ * - active_sessions: Updated during periodic refresh (if enabled) or on-demand
+ * - last_packet_timestamp: Real-time from dataplane
+ * - vs array: Contains per-VS and per-real runtime information
+ *
+ * MEMORY MANAGEMENT:
+ * - balancer_info() allocates the 'vs' array and all nested structures
+ * - Caller must call balancer_info_free() to release all allocations
+ * - Safe to call balancer_info_free() on partially-initialized structures
+ *
+ * USAGE PATTERN:
+ * ```c
+ * struct balancer_info info;
+ * if (balancer_info(handle, &info, now) == 0) {
+ *     // Use info.active_sessions, info.vs, etc.
+ *     balancer_info_free(&info);
+ * }
+ * ```
  */
 struct balancer_info {
-	size_t active_sessions; // Total number of active sessions
+	/**
+	 * Total number of active sessions across all virtual services.
+	 *
+	 * This is the sum of active sessions for all VSs and represents
+	 * the current load on the balancer.
+	 */
+	size_t active_sessions;
+
+	/**
+	 * Timestamp of the most recent packet processed by any VS.
+	 *
+	 * Monotonic timestamp (seconds since boot) representing the last
+	 * activity across the entire balancer instance. This is the maximum
+	 * of all VS last_packet_timestamp values.
+	 *
+	 * Updated in real-time by the dataplane when packets are processed.
+	 */
 	uint32_t last_packet_timestamp;
 
-	size_t vs_count;	  // Number of entries in 'vs'
-	struct named_vs_info *vs; // Array of VS info (length: vs_count)
+	/**
+	 * Number of virtual services in the 'vs' array.
+	 *
+	 * This matches the number of virtual services configured in the
+	 * packet handler configuration.
+	 */
+	size_t vs_count;
+
+	/**
+	 * Array of virtual service runtime information.
+	 *
+	 * Contains detailed information for each VS including:
+	 * - Active session counts per VS
+	 * - Per-real server information (active sessions, last activity)
+	 * - Last packet timestamps
+	 *
+	 * OWNERSHIP:
+	 * - Allocated by balancer_info()
+	 * - Must be freed with balancer_info_free()
+	 * - Array length is vs_count
+	 */
+	struct named_vs_info *vs;
 };
 
 /**
@@ -255,19 +335,103 @@ balancer_sessions(
 	uint32_t now
 );
 
+/**
+ * Free all allocations inside a sessions structure.
+ *
+ * Releases memory allocated by balancer_sessions() for the session
+ * information array. Safe to call with partially-initialized structures;
+ * ignores NULL pointers.
+ *
+ * NOTE: This function does NOT free the sessions structure itself,
+ * only the dynamically allocated array inside it.
+ *
+ * @param sessions Structure to release. The struct itself is not freed.
+ */
 void
 balancer_sessions_free(struct sessions *sessions);
 
 struct balancer_graph;
 
+/**
+ * Retrieve the balancer topology graph.
+ *
+ * Returns a snapshot of the complete balancer topology showing all
+ * virtual services and their real servers with current operational
+ * states (effective weights, enabled status).
+ *
+ * The graph provides visibility into:
+ * - Current effective weights (may differ from config due to WLC)
+ * - Real server enabled/disabled states
+ * - Complete VS-to-real relationships
+ *
+ * MEMORY MANAGEMENT:
+ * - Allocates memory for the graph structure and all nested arrays
+ * - Caller must free with balancer_graph_free() when done
+ * - Safe to call balancer_graph_free() on partially-initialized graphs
+ *
+ * USAGE PATTERN:
+ * ```c
+ * struct balancer_graph graph;
+ * balancer_graph(handle, &graph);
+ * // Use graph data...
+ * balancer_graph_free(&graph);
+ * ```
+ *
+ * @param handle Balancer handle.
+ * @param graph  Output structure to be filled with graph data.
+ */
 void
 balancer_graph(struct balancer_handle *handle, struct balancer_graph *graph);
 
+/**
+ * Free all allocations inside a balancer_graph structure.
+ *
+ * Releases memory allocated by balancer_graph() for the virtual service
+ * and real server arrays. This includes:
+ * - The top-level VS array (graph->vs)
+ * - Each VS's real server array (vs->reals)
+ *
+ * Safe to call with partially-initialized structures; ignores NULL pointers.
+ *
+ * NOTE: This function does NOT free the balancer_graph structure itself,
+ * only the dynamically allocated arrays inside it.
+ *
+ * @param graph Structure to release. The struct itself is not freed.
+ */
 void
 balancer_graph_free(struct balancer_graph *graph);
 
 ////////////////////////////////////////////////////////////////////////////////
 
+/**
+ * Get packet handler indices for a real server.
+ *
+ * Translates a real server identifier (VS + real) into packet handler
+ * internal indices. This is useful for low-level operations that need
+ * to directly access packet handler data structures.
+ *
+ * The returned indices identify:
+ * - vs_idx: Index of the virtual service in the packet handler's VS array
+ * - real_idx: Index of the real within that virtual service's real array
+ *
+ * These indices can be used to:
+ * - Access real server configuration in packet handler structures
+ * - Perform direct updates to packet handler state
+ * - Map between high-level identifiers and internal indices
+ *
+ * USAGE:
+ * This is primarily an internal API used by the manager layer to
+ * coordinate between the high-level balancer API and the low-level
+ * packet handler implementation.
+ *
+ * Diagnostics: On error, a message is recorded and retrievable via
+ * balancer_take_error_msg(handle).
+ *
+ * @param handle   Balancer handle.
+ * @param real     Real server identifier (VS + real address/port).
+ * @param real_idx Output structure to be filled with indices.
+ * @return 0 on success, -1 on error (e.g., real not found).
+ */
 int
 balancer_real_ph_idx(
 	struct balancer_handle *handle,

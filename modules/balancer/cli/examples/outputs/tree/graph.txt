@@ -1,0 +1,29 @@
+Balancer Graph
+└─ Config: my-balancer
+   └─ Virtual Services (2)
+      ├─ [0]
+      │  ├─ VS: 192.0.2.1:80/TCP
+      │  └─ Reals (2)
+      │     ├─ [0]
+      │     │  ├─ Real: 10.1.1.1:80
+      │     │  ├─ Weight: 100
+      │     │  ├─ Effective Weight: 100
+      │     │  └─ Status: enabled
+      │     └─ [1]
+      │        ├─ Real: 10.1.1.2:80
+      │        ├─ Weight: 50
+      │        ├─ Effective Weight: 50
+      │        └─ Status: enabled
+      └─ [1]
+         ├─ VS: 192.0.2.2:443/TCP
+         └─ Reals (2)
+            ├─ [0]
+            │  ├─ Real: 10.2.1.1:443
+            │  ├─ Weight: 100
+            │  ├─ Effective Weight: 90
+            │  └─ Status: enabled
+            └─ [1]
+               ├─ Real: 10.2.1.2:443
+               ├─ Weight: 100
+               ├─ Effective Weight: 110
+               └─ Status: enabled

@@ -1,10 +1,11 @@
 Balancer Statistics
-└─ Config: my-balancer
+└─ [0]
+   ├─ Config: my-balancer
    ├─ Device: eth0
    ├─ Pipeline: main
    ├─ Function: balancer
    ├─ Chain: forward
-   ├─ Module Stats
+   ├─ Module
    │  ├─ Common
    │  │  ├─ Incoming Packets: 1,234,567
    │  │  ├─ Incoming Bytes: 1.2 GB
@@ -32,57 +33,60 @@ Balancer Statistics
    │     ├─ Unrecognized VS: 0
    │     ├─ Forwarded: 34
    │     └─ Broadcasted: 2
-   ├─ VS Stats (2)
-   │  ├─ [0] 192.0.2.1:80/TCP
-   │  │  ├─ Incoming: 800,000 pkts, 762.9 MB
-   │  │  ├─ Outgoing: 799,500 pkts, 762.5 MB
-   │  │  ├─ Created Sessions: 50,000
-   │  │  ├─ Packet Src Not Allowed: 0
-   │  │  ├─ No Reals: 0
-   │  │  ├─ OPS Packets: 0
-   │  │  ├─ Session Table Overflow: 0
-   │  │  ├─ Echo ICMP Packets: 0
-   │  │  ├─ Error ICMP Packets: 0
-   │  │  ├─ Real Is Disabled: 0
-   │  │  ├─ Real Is Removed: 0
-   │  │  ├─ Not Rescheduled Packets: 0
-   │  │  └─ Broadcasted ICMP Packets: 0
-   │  └─ [1] 192.0.2.2:443/TCP
-   │     ├─ Incoming: 400,000 pkts, 381.5 MB
-   │     ├─ Outgoing: 400,000 pkts, 381.5 MB
-   │     ├─ Created Sessions: 25,000
-   │     ├─ Packet Src Not Allowed: 0
-   │     ├─ No Reals: 0
-   │     ├─ OPS Packets: 0
-   │     ├─ Session Table Overflow: 0
-   │     ├─ Echo ICMP Packets: 0
-   │     ├─ Error ICMP Packets: 0
-   │     ├─ Real Is Disabled: 0
-   │     ├─ Real Is Removed: 0
-   │     ├─ Not Rescheduled Packets: 0
-   │     └─ Broadcasted ICMP Packets: 0
-   └─ Real Stats (3)
-      ├─ [0] 10.1.1.1 -> 192.0.2.1:80/TCP
-      │  ├─ Packets: 500,000
-      │  ├─ Bytes: 600.0 MB
-      │  ├─ Created Sessions: 30,000
-      │  ├─ Packets Real Disabled: 0
-      │  ├─ Packets Real Not Present: 0
+   └─ Virtual Services (2)
+      ├─ [0]
+      │  ├─ VS: 192.0.2.1:80/TCP
+      │  ├─ Incoming: 800,000 pkts, 762.9 MB
+      │  ├─ Outgoing: 799,500 pkts, 762.5 MB
+      │  ├─ Created Sessions: 50,000
+      │  ├─ Packet Src Not Allowed: 0
+      │  ├─ No Reals: 0
       │  ├─ OPS Packets: 0
-      │  └─ Error ICMP Packets: 0
-      ├─ [1] 10.1.1.2 -> 192.0.2.1:80/TCP
-      │  ├─ Packets: 300,000
-      │  ├─ Bytes: 349.5 MB
-      │  ├─ Created Sessions: 20,000
-      │  ├─ Packets Real Disabled: 0
-      │  ├─ Packets Real Not Present: 0
-      │  ├─ OPS Packets: 0
-      │  └─ Error ICMP Packets: 0
-      └─ [2] 10.2.1.1 -> 192.0.2.2:443/TCP
-         ├─ Packets: 400,000
-         ├─ Bytes: 480.0 MB
+      │  ├─ Session Table Overflow: 0
+      │  ├─ Echo ICMP Packets: 0
+      │  ├─ Error ICMP Packets: 0
+      │  ├─ Real Is Disabled: 0
+      │  ├─ Real Is Removed: 0
+      │  ├─ Not Rescheduled Packets: 0
+      │  ├─ Broadcasted ICMP Packets: 0
+      │  └─ Reals (2)
+      │     ├─ [0]
+      │     │  ├─ Real: 10.1.1.1:80
+      │     │  ├─ Packets: 500,000
+      │     │  ├─ Bytes: 600.0 MB
+      │     │  ├─ Created Sessions: 30,000
+      │     │  ├─ Packets Real Disabled: 0
+      │     │  ├─ OPS Packets: 0
+      │     │  └─ Error ICMP Packets: 0
+      │     └─ [1]
+      │        ├─ Real: 10.1.1.2:80
+      │        ├─ Packets: 300,000
+      │        ├─ Bytes: 349.5 MB
+      │        ├─ Created Sessions: 20,000
+      │        ├─ Packets Real Disabled: 0
+      │        ├─ OPS Packets: 0
+      │        └─ Error ICMP Packets: 0
+      └─ [1]
+         ├─ VS: 192.0.2.2:443/TCP
+         ├─ Incoming: 400,000 pkts, 381.5 MB
+         ├─ Outgoing: 400,000 pkts, 381.5 MB
          ├─ Created Sessions: 25,000
-         ├─ Packets Real Disabled: 0
-         ├─ Packets Real Not Present: 0
+         ├─ Packet Src Not Allowed: 0
+         ├─ No Reals: 0
          ├─ OPS Packets: 0
-         └─ Error ICMP Packets: 0
+         ├─ Session Table Overflow: 0
+         ├─ Echo ICMP Packets: 0
+         ├─ Error ICMP Packets: 0
+         ├─ Real Is Disabled: 0
+         ├─ Real Is Removed: 0
+         ├─ Not Rescheduled Packets: 0
+         ├─ Broadcasted ICMP Packets: 0
+         └─ Reals (1)
+            └─ [0]
+               ├─ Real: 10.2.1.1:443
+               ├─ Packets: 400,000
+               ├─ Bytes: 480.0 MB
+               ├─ Created Sessions: 25,000
+               ├─ Packets Real Disabled: 0
+               ├─ OPS Packets: 0
+               └─ Error ICMP Packets: 0

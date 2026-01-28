@@ -15,10 +15,37 @@ message GraphReal {
 	// Real server identifier (relative to its virtual service)
 	RelativeRealIdentifier identifier = 1;
 
-	// Current weight of the real server.
+	// Original configured weight of the real server.
+	//
+	// This is the static weight value from the configuration that was
+	// set via UpdateConfig or UpdateReals. It remains constant unless
+	// explicitly changed through configuration updates.
+	//
+	// This weight is used as the baseline for WLC calculations when
+	// the WLC flag is enabled for the virtual service.
 	uint32 weight = 2;
 
-	// Current weight of the real server with respect to WLC.
+	// Current effective weight after WLC adjustments.
+	//
+	// When WLC (Weighted Least Connection) is enabled for the virtual
+	// service, this field shows the dynamically adjusted weight based
+	// on current session distribution. The WLC algorithm adjusts weights
+	// to balance load across real servers according to their active
+	// session counts.
+	//
+	// Formula:
+	//   effective_weight = weight * max(1.0, power * (1.0 -
+	//   connectionsRatio))
+	//   where:
+	//   - weight: Original configured weight (field above)
+	//   - power: WLC power factor from StateConfig.wlc.power
+	//   - connectionsRatio:
+	//     (real_sessions * total_weight) / (total_sessions *
+	//     real_weight)
+	//
+	// When WLC is disabled, effective_weight equals weight.
+	//
+	// The effective_weight is capped at StateConfig.wlc.max_weight.
 	uint32 effective_weight = 3;
 
 	// Whether the real server is currently enabled.
