@@ -58,7 +58,7 @@ service BalancerService {
 	// Supports two modes:
 	// - Immediate: Updates are applied immediately (buffer=false)
 	// - Buffered: Updates queued and applied atomically on flush
-	//             (buffer=true)
+	//   (buffer=true)
 	//
 	// Buffered mode is useful for applying multiple updates atomically
 	// to avoid intermediate inconsistent states.

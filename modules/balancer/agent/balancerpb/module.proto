@@ -292,10 +292,10 @@ message VsFlags {
 	//   * Calculates new effective weights using WLC algorithm
 	//   * Updates real weights in the dataplane (state only, not config)
 	// - Formula: effective_weight = weight * max(1.0, power * (1.0 -
-	// ratio))
+	//   ratio))
 	//   where ratio =
-	//		(real_sessions * total_weight) / (total_sessions *
-	// real_weight)
+	//   (real_sessions * total_weight) / (total_sessions *
+	//   real_weight)
 	// - Effective weights are capped at wlc.max_weight
 	// - Original config weights are preserved for future calculations
 	//
@@ -465,23 +465,23 @@ message PacketHandlerRef {
 // ALGORITHM OVERVIEW:
 // For each real server in a WLC-enabled virtual service:
 // 1. Calculate connections ratio:
-//    ratio = (real_sessions * total_weight) / (total_sessions * real_weight)
-//    where:
+//   ratio = (real_sessions * total_weight) / (total_sessions * real_weight)
+//   where:
 //    - real_sessions: Active sessions on this real
 //    - total_sessions: Active sessions across all enabled reals in the VS
 //    - real_weight: Original configured weight of this real
 //    - total_weight: Sum of original weights of all enabled reals
 //
 // 2. Calculate WLC adjustment factor:
-//    wlc_factor = max(1.0, power * (1.0 - ratio))
+//   wlc_factor = max(1.0, power * (1.0 - ratio))
 //    - If ratio < 1.0: Real has fewer sessions than expected → increase weight
 //    - If ratio > 1.0:
-//			Real has more sessions than expected → keep weight
-// at 1.0x
+//      Real has more sessions than expected → keep weight
+//      at 1.0x
 //    - power parameter controls adjustment aggressiveness
 //
 // 3. Calculate effective weight:
-//    effective_weight = min(real_weight * wlc_factor, max_weight)
+//   effective_weight = min(real_weight * wlc_factor, max_weight)
 //
 // CONFIGURATION REQUIREMENTS:
 // Both power and max_weight must be specified if any VS has wlc flag enabled.
@@ -499,8 +499,8 @@ message WlcConfig {
 	// - Value of 0: Disables WLC (effective_weight = weight)
 	//
 	// FORMULA IMPACT:
-	// effective_weight = weight * max(1.0, power * (1.0 -
-	// connections_ratio))
+	//   effective_weight = weight * max(1.0, power * (1.0 -
+	//   connections_ratio))
 	//
 	// EXAMPLES:
 	// - power=2: If a real has 50% fewer sessions than expected

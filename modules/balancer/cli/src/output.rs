@@ -748,10 +748,14 @@ fn print_show_stats_tree(response: &balancerpb::ShowStatsResponse) -> Result<(),
             tree.begin_child("Common".to_string());
             tree.add_empty_child(format!("Incoming Packets: {}", format_number(common.incoming_packets)));
             tree.add_empty_child(format!("Incoming Bytes: {}", format_bytes(common.incoming_bytes)));
-            tree.add_empty_child(format!("Outgoing Packets: {}", format_number(common.outgoing_packets)));
-            tree.add_empty_child(format!("Outgoing Bytes: {}", format_bytes(common.outgoing_bytes)));
+            tree.add_empty_child(format!(
+                "Unexpected Network Proto: {}",
+                format_number(common.unexpected_network_proto)
+            ));
             tree.add_empty_child(format!("Decap Successful: {}", format_number(common.decap_successful)));
             tree.add_empty_child(format!("Decap Failed: {}", format_number(common.decap_failed)));
+            tree.add_empty_child(format!("Outgoing Packets: {}", format_number(common.outgoing_packets)));
+            tree.add_empty_child(format!("Outgoing Bytes: {}", format_bytes(common.outgoing_bytes)));
             tree.end_child();
         }
 
@@ -770,9 +774,43 @@ fn print_show_stats_tree(response: &balancerpb::ShowStatsResponse) -> Result<(),
             tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv4.incoming_packets)));
             tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv4.src_not_allowed)));
             tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv4.echo_responses)));
+            tree.add_empty_child(format!(
+                "Payload Too Short IP: {}",
+                format_number(icmpv4.payload_too_short_ip)
+            ));
+            tree.add_empty_child(format!(
+                "Unmatching Src From Original: {}",
+                format_number(icmpv4.unmatching_src_from_original)
+            ));
+            tree.add_empty_child(format!(
+                "Payload Too Short Port: {}",
+                format_number(icmpv4.payload_too_short_port)
+            ));
+            tree.add_empty_child(format!(
+                "Unexpected Transport: {}",
+                format_number(icmpv4.unexpected_transport)
+            ));
             tree.add_empty_child(format!("Unrecognized VS: {}", format_number(icmpv4.unrecognized_vs)));
-            tree.add_empty_child(format!("Forwarded: {}", format_number(icmpv4.forwarded_packets)));
-            tree.add_empty_child(format!("Broadcasted: {}", format_number(icmpv4.broadcasted_packets)));
+            tree.add_empty_child(format!(
+                "Forwarded Packets: {}",
+                format_number(icmpv4.forwarded_packets)
+            ));
+            tree.add_empty_child(format!(
+                "Broadcasted Packets: {}",
+                format_number(icmpv4.broadcasted_packets)
+            ));
+            tree.add_empty_child(format!(
+                "Packet Clones Sent: {}",
+                format_number(icmpv4.packet_clones_sent)
+            ));
+            tree.add_empty_child(format!(
+                "Packet Clones Received: {}",
+                format_number(icmpv4.packet_clones_received)
+            ));
+            tree.add_empty_child(format!(
+                "Packet Clone Failures: {}",
+                format_number(icmpv4.packet_clone_failures)
+            ));
             tree.end_child();
         }
 
@@ -781,9 +819,43 @@ fn print_show_stats_tree(response: &balancerpb::ShowStatsResponse) -> Result<(),
             tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv6.incoming_packets)));
             tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv6.src_not_allowed)));
             tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv6.echo_responses)));
+            tree.add_empty_child(format!(
+                "Payload Too Short IP: {}",
+                format_number(icmpv6.payload_too_short_ip)
+            ));
+            tree.add_empty_child(format!(
+                "Unmatching Src From Original: {}",
+                format_number(icmpv6.unmatching_src_from_original)
+            ));
+            tree.add_empty_child(format!(
+                "Payload Too Short Port: {}",
+                format_number(icmpv6.payload_too_short_port)
+            ));
+            tree.add_empty_child(format!(
+                "Unexpected Transport: {}",
+                format_number(icmpv6.unexpected_transport)
+            ));
             tree.add_empty_child(format!("Unrecognized VS: {}", format_number(icmpv6.unrecognized_vs)));
-            tree.add_empty_child(format!("Forwarded: {}", format_number(icmpv6.forwarded_packets)));
-            tree.add_empty_child(format!("Broadcasted: {}", format_number(icmpv6.broadcasted_packets)));
+            tree.add_empty_child(format!(
+                "Forwarded Packets: {}",
+                format_number(icmpv6.forwarded_packets)
+            ));
+            tree.add_empty_child(format!(
+                "Broadcasted Packets: {}",
+                format_number(icmpv6.broadcasted_packets)
+            ));
+            tree.add_empty_child(format!(
+                "Packet Clones Sent: {}",
+                format_number(icmpv6.packet_clones_sent)
+            ));
+            tree.add_empty_child(format!(
+                "Packet Clones Received: {}",
+                format_number(icmpv6.packet_clones_received)
+            ));
+            tree.add_empty_child(format!(
+                "Packet Clone Failures: {}",
+                format_number(icmpv6.packet_clone_failures)
+            ));
             tree.end_child();
         }
 
@@ -936,13 +1008,8 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
             });
             rows.push(ModuleStatsRow {
                 category: "".to_string(),
-                metric: "Outgoing Pkts".to_string(),
-                value: format_number(common.outgoing_packets),
-            });
-            rows.push(ModuleStatsRow {
-                category: "".to_string(),
-                metric: "Outgoing Bytes".to_string(),
-                value: format_bytes(common.outgoing_bytes),
+                metric: "Unexpected Proto".to_string(),
+                value: format_number(common.unexpected_network_proto),
             });
             rows.push(ModuleStatsRow {
                 category: "".to_string(),
@@ -953,6 +1020,16 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
                 category: "".to_string(),
                 metric: "Decap Failed".to_string(),
                 value: format_number(common.decap_failed),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Outgoing Pkts".to_string(),
+                value: format_number(common.outgoing_packets),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Outgoing Bytes".to_string(),
+                value: format_bytes(common.outgoing_bytes),
             });
         }
 
@@ -1020,18 +1097,53 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
             });
             rows.push(ModuleStatsRow {
                 category: "".to_string(),
+                metric: "Payload Short IP".to_string(),
+                value: format_number(icmpv4.payload_too_short_ip),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Unmatch Src Orig".to_string(),
+                value: format_number(icmpv4.unmatching_src_from_original),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Payload Short Port".to_string(),
+                value: format_number(icmpv4.payload_too_short_port),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Unexpected Trans".to_string(),
+                value: format_number(icmpv4.unexpected_transport),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
                 metric: "Unrecognized VS".to_string(),
                 value: format_number(icmpv4.unrecognized_vs),
             });
             rows.push(ModuleStatsRow {
                 category: "".to_string(),
-                metric: "Forwarded".to_string(),
+                metric: "Forwarded Pkts".to_string(),
                 value: format_number(icmpv4.forwarded_packets),
             });
             rows.push(ModuleStatsRow {
                 category: "".to_string(),
-                metric: "Broadcasted".to_string(),
+                metric: "Broadcasted Pkts".to_string(),
                 value: format_number(icmpv4.broadcasted_packets),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Clones Sent".to_string(),
+                value: format_number(icmpv4.packet_clones_sent),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Clones Received".to_string(),
+                value: format_number(icmpv4.packet_clones_received),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Clone Failures".to_string(),
+                value: format_number(icmpv4.packet_clone_failures),
             });
         }
 
@@ -1062,18 +1174,53 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
             });
             rows.push(ModuleStatsRow {
                 category: "".to_string(),
+                metric: "Payload Short IP".to_string(),
+                value: format_number(icmpv6.payload_too_short_ip),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Unmatch Src Orig".to_string(),
+                value: format_number(icmpv6.unmatching_src_from_original),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Payload Short Port".to_string(),
+                value: format_number(icmpv6.payload_too_short_port),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Unexpected Trans".to_string(),
+                value: format_number(icmpv6.unexpected_transport),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
                 metric: "Unrecognized VS".to_string(),
                 value: format_number(icmpv6.unrecognized_vs),
             });
             rows.push(ModuleStatsRow {
                 category: "".to_string(),
-                metric: "Forwarded".to_string(),
+                metric: "Forwarded Pkts".to_string(),
                 value: format_number(icmpv6.forwarded_packets),
             });
             rows.push(ModuleStatsRow {
                 category: "".to_string(),
-                metric: "Broadcasted".to_string(),
+                metric: "Broadcasted Pkts".to_string(),
                 value: format_number(icmpv6.broadcasted_packets),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Clones Sent".to_string(),
+                value: format_number(icmpv6.packet_clones_sent),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Clones Received".to_string(),
+                value: format_number(icmpv6.packet_clones_received),
+            });
+            rows.push(ModuleStatsRow {
+                category: "".to_string(),
+                metric: "Clone Failures".to_string(),
+                value: format_number(icmpv6.packet_clone_failures),
             });
         }
 
