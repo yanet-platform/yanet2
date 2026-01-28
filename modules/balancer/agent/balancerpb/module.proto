@@ -295,7 +295,7 @@ message VsFlags {
 	// ratio))
 	//   where ratio =
 	//		(real_sessions * total_weight) / (total_sessions *
-	//real_weight)
+	// real_weight)
 	// - Effective weights are capped at wlc.max_weight
 	// - Original config weights are preserved for future calculations
 	//
@@ -477,7 +477,7 @@ message PacketHandlerRef {
 //    - If ratio < 1.0: Real has fewer sessions than expected → increase weight
 //    - If ratio > 1.0:
 //			Real has more sessions than expected → keep weight
-//at 1.0x
+// at 1.0x
 //    - power parameter controls adjustment aggressiveness
 //
 // 3. Calculate effective weight:
