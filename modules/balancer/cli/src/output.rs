@@ -1109,36 +1109,36 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
                                 "  Created Sessions: {}",
                                 format_number(s.created_sessions).bright_green()
                             );
-                            println!("  OPS Packets: {}", format_number(s.ops_packets).bright_cyan());
+                            println!("  OPS Packets: {}", format_number(s.ops_packets).bright_green());
                             println!(
                                 "  Packet Src Not Allowed: {}",
-                                format_number(s.packet_src_not_allowed).bright_cyan()
+                                format_number(s.packet_src_not_allowed).bright_green()
                             );
                             println!(
                                 "  Session Table Overflow: {}",
-                                format_number(s.session_table_overflow).bright_cyan()
+                                format_number(s.session_table_overflow).bright_green()
                             );
                             println!(
                                 "  Not Rescheduled Packets: {}",
-                                format_number(s.not_rescheduled_packets).bright_cyan()
+                                format_number(s.not_rescheduled_packets).bright_green()
                             );
                             println!(
                                 "  Real Is Disabled: {}",
-                                format_number(s.real_is_disabled).bright_cyan()
+                                format_number(s.real_is_disabled).bright_green()
                             );
-                            println!("  Real Is Removed: {}", format_number(s.real_is_removed).bright_cyan());
-                            println!("  No Reals: {}", format_number(s.no_reals).bright_cyan());
+                            println!("  Real Is Removed: {}", format_number(s.real_is_removed).bright_green());
+                            println!("  No Reals: {}", format_number(s.no_reals).bright_green());
                             println!(
                                 "  Echo ICMP Packets: {}",
-                                format_number(s.echo_icmp_packets).bright_cyan()
+                                format_number(s.echo_icmp_packets).bright_green()
                             );
                             println!(
                                 "  Error ICMP Packets: {}",
-                                format_number(s.error_icmp_packets).bright_cyan()
+                                format_number(s.error_icmp_packets).bright_green()
                             );
                             println!(
                                 "  Broadcasted ICMP Packets: {}",
-                                format_number(s.broadcasted_icmp_packets).bright_cyan()
+                                format_number(s.broadcasted_icmp_packets).bright_green()
                             );
                         }
 
