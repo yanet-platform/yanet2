@@ -30,8 +30,8 @@ func TestParserNext(t *testing.T) {
 		40: 0x1, 0, 0, 0,
 		// peer addr
 		44: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		// attrsAreaSize including sizeof(attrsAreaSize) - 0x4 => no attributes
-		60: 0x4, 0, 0, 0x0,
+		// attrsAreaSize EXCLUDING sizeof(attrsAreaSize) - 0x0 => no attributes
+		60: 0x0, 0, 0, 0x0,
 	}
 
 	// BIRD protocol: chunk size EXCLUDES the 4-byte size field itself

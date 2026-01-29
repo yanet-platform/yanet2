@@ -44,8 +44,8 @@ var dataIPv6WithLargeCommunities = []byte{
 	40: 0x1, 0, 0, 0,
 	//  peer addr 16 bytes as 4 LE u32
 	44: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x1, 0, 0, 0,
-	// attrsAreaSize 4 bytes LE u32 - 0x7a == 122
-	60: 0x7a, 0, 0, 0,
+	// attrsAreaSize 4 bytes LE u32 - 0x76 == 118 (EXCLUDING the 4-byte size field itself)
+	60: 0x76, 0, 0, 0,
 
 	// attributes
 	// AttrOrigin 0x01 - first byte;  65: PROTOCOL_BGP = 0x4, 0, 0 - packed LE int
@@ -146,8 +146,8 @@ func TestDecodeUpdate(t *testing.T) {
 				40: 0x1, 0, 0, 0,
 				// peer addr
 				44: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-				// attrsAreaSize including sizeof(attrsAreaSize) - 0x4 => no attributes
-				60: 0x4, 0, 0, 0x0,
+				// attrsAreaSize EXCLUDING sizeof(attrsAreaSize) - 0x0 => no attributes
+				60: 0x0, 0, 0, 0x0,
 			},
 			expected: rib.Route{
 				Prefix: netip.MustParsePrefix("2307:db8:4::/48"),
@@ -172,8 +172,8 @@ func TestDecodeUpdate(t *testing.T) {
 				44: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x1, 0, 0, 0,
 
 				// attributes
-				// attrsAreaSize 0x72 == 114 bytes
-				60: 0x72, 0, 0, 0,
+				// attrsAreaSize 0x6e == 110 bytes (EXCLUDING the 4-byte size field itself)
+				60: 0x6e, 0, 0, 0,
 				// attributes data
 				// ORIGIN
 				64: 0x1, 0x4, 0, 0 /* origin value */, 0, 0, 0, 0,
@@ -224,7 +224,7 @@ func TestDecodeUpdate(t *testing.T) {
 			name: "OK ToRemove",
 			data: []byte{
 				1, 0x18, 8, 5: 7, 7: 1, 24: 0x10, 0x92, 0x53, 9, 0x1c, 0x5b, 32: 1,
-				0x11, 8, 0, 0, 0x80, 0, 1, 2, 56: 1, 60: 0x52, 0, 0, 0, 1, 4,
+				0x11, 8, 0, 0, 0x80, 0, 1, 2, 56: 1, 60: 0x4e, 0, 0, 0, 1, 4, // attrsAreaSize=0x4e=78
 				72: 2, 4, 0, 0, 0x12, 0, 0, 0, 2, 4, 0, 6, 0x14, 0x81, 0, 0, 5,
 				89: 0x13, 0, 0, 0x1d, 0x79, 0, 0, 0x97, 0x93, 3, 4, 0, 0, 0x10,
 				114: 0xff, 0xff, 0, 0, 0xb9, 0x68, 0x52, 0xce, 5, 4, 0, 0, 0x64,
@@ -258,7 +258,7 @@ func TestDecodeUpdate(t *testing.T) {
 				24: 0, 0, 0, 0, 0, 0, 0x1, 0,
 				40: 0x1, 0, 0, 0, // update type LE u32
 				44: 0,            // ... peer addr all zero
-				60: 0x4, 0, 0, 0, // no attrs
+				60: 0x0, 0, 0, 0, // attrsAreaSize=0 (no attrs)
 			},
 			errDecode: ErrBadPrefix,
 		},
@@ -268,7 +268,7 @@ func TestDecodeUpdate(t *testing.T) {
 				0: 0x4,     // NetAddr type NetVPN6
 				1: 0x8,     // prefix len
 				2: 0x40, 0, // ERROR: unknown NetAddrUinion struct size
-				attrAreaSizeOffset: 4, 0, 0, 0, // attrsAreaSize
+				attrAreaSizeOffset: 0, 0, 0, 0, // attrsAreaSize=0
 			},
 			errDecode: ErrUnknownAddrUnion,
 		},
@@ -278,7 +278,7 @@ func TestDecodeUpdate(t *testing.T) {
 				0: 0xa,     // ERROR: NetMAX unsupported prefix
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
-				60: 4, 0, 0, 0, // attrsAreaSize
+				60: 0, 0, 0, 0, // attrsAreaSize=0
 			},
 			errDecode: ErrUnsupportedPrefix,
 		},
@@ -291,7 +291,7 @@ func TestDecodeUpdate(t *testing.T) {
 				2: 0x14, 0, // NetAddr struct size
 				8: 0, 0, 0, 0, 0, 0, 0x1, 0, // RD LE u64
 				// attrsAreaSize expected at idx == 60
-				60: 6,    // ERROR attrsAreaSize < 4+sizeoftype(4)  unexpected end of data
+				60: 2,    // ERROR attrsAreaSize=2 but only 2 bytes available (need at least 4 for attr type)
 				64: 0, 0, // truncated attrs data
 			},
 			errDecode: ErrAttrsUnexpectedEOD,
@@ -304,7 +304,7 @@ func TestDecodeUpdate(t *testing.T) {
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
 				8: 0, 0, 0, 0, 0, 0, 0x1, 0, // RD LE u64
-				60: 4 + 4 + /* ERROR: not enought storage or U32 attribute */ 2,
+				60: 4 + /* ERROR: not enough storage for U32 attribute */ 2,
 				64: 0x1 /* < ORIGIN: PROTOCOL_BGP > */, 0x4, 0, 0,
 				68: 0, 0, // ... truncated
 			},
@@ -318,7 +318,7 @@ func TestDecodeUpdate(t *testing.T) {
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
 				8: 0, 0, 0, 0, 0, 0, 0x1, 0, // RD LE u64
-				60: 4 + 4 + 4 + 4,
+				60: 4 + 4 + 4,
 				64: 0x2 /* < AS_PATH: PROTOCOL_BGP > */, 0x4, 0, 0,
 				68: 100, 5, 0, 0, // ERROR: size of complex attribute too big
 				72: 0, 0, 0, 0,
@@ -332,10 +332,10 @@ func TestDecodeUpdate(t *testing.T) {
 				0: 0x3,     // NetVPN4
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
-				60: 4 + 4 + 4 + 4,
+				60: 4 + 4 + 4,
 				64: 0x2 /* < AS_PATH: PROTOCOL_BGP > */, 0x4, 0, 0,
 				68: 2, 0, 0, 0, // size of ASPath attribute
-				72: 2, 100, // ERROR: 100 segents but not enought data
+				72: 2, 100, // ERROR: 100 segments but not enough data
 			},
 			errNew: ErrAttributesTruncated,
 		},

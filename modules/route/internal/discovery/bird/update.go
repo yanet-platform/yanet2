@@ -187,12 +187,14 @@ func newUpdate(data []byte) (*update, error) {
 	}
 
 	u := (*update)(unsafe.Pointer(&data[0]))
-	if u.attrsAreaSize < uint32(sizeOfUint32) {
-		return nil, fmt.Errorf("%w: unexpected attrsAreaSize=%d", ErrUpdateDecode, u.attrsAreaSize)
-	}
-	actualAttrsAreaSize := len(data[attrAreaSizeOffset:]) // + size of u.attrsAreaSize
-	if int64(u.attrsAreaSize) > int64(actualAttrsAreaSize) {
-		return nil, fmt.Errorf("attributes area is too small want=%d, actual=%d: %w",
+	// BIRD writes attrsAreaSize EXCLUDING the 4-byte size field itself
+	// (see yabird/proto/export/export.c:133)
+	// So attrsAreaSize=0 means no attributes
+	actualAttrsAreaSize := len(data[attrAreaSizeOffset:]) // includes size of u.attrsAreaSize field (4 bytes)
+	// attrsAreaSize is the size of attributes data AFTER the attrsAreaSize field
+	// So we need: 4 (attrsAreaSize field) + attrsAreaSize (attributes) <= actualAttrsAreaSize
+	if int64(sizeOfUint32)+int64(u.attrsAreaSize) > int64(actualAttrsAreaSize) {
+		return nil, fmt.Errorf("attributes area is too small want=4+%d, actual=%d: %w",
 			u.attrsAreaSize, actualAttrsAreaSize, ErrAttributesTruncated)
 	}
 	return u, nil
@@ -259,16 +261,18 @@ func ExtendedAttributeID(attributeID uint32) AttributeType {
 }
 
 func (m *update) decodeAttributes(route *rib.Route) error {
-	if m.attrsAreaSize == uint32(sizeOfUint32) {
+	// BIRD writes attrsAreaSize EXCLUDING the 4-byte size field itself
+	// So attrsAreaSize=0 means no attributes
+	if m.attrsAreaSize == 0 {
 		return nil // no attributes
 	}
 
 	// SAFETY: newUpdate checks for data boundaries.
+	// Skip the attrsAreaSize field (4 bytes) and get slice of attribute data
 	data := unsafe.Slice((*byte)(
-		unsafe.Pointer(uintptr(unsafe.Pointer(&m.attrsAreaSize)))),
+		unsafe.Pointer(uintptr(unsafe.Pointer(&m.attrsAreaSize))+sizeOfUint32)),
 		m.attrsAreaSize,
 	)
-	data = data[sizeOfUint32:] // skip m.attrsAreaSize
 
 	for len(data) > int(sizeOfUint32) {
 
