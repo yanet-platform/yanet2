@@ -108,7 +108,7 @@ const convertYamlRule = (yamlRule: YamlAclRule): Rule => {
         dstPortRanges,
         protoRanges,
         vlanRanges,
-        devices: yamlRule.devices || [],
+        devices: (yamlRule.devices || []).map((name) => ({ name })),
     };
 };
 

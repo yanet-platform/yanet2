@@ -22,6 +22,10 @@ export interface VlanRange {
     to?: number;
 }
 
+export interface Device {
+    name?: string;
+}
+
 export enum ActionKind {
     PASS = 0,
     DENY = 1,
@@ -42,7 +46,7 @@ export interface Rule {
     dsts?: IPNet[];
     srcPortRanges?: PortRange[];
     dstPortRanges?: PortRange[];
-    devices?: string[];
+    devices?: Device[];
     vlanRanges?: VlanRange[];
     protoRanges?: ProtoRange[];
 }

@@ -43,9 +43,9 @@ const formatVlanRanges = (ranges: Rule['vlanRanges']): string => {
 };
 
 // Format devices for display
-const formatDevices = (devices: string[] | undefined): string => {
+const formatDevices = (devices: Rule['devices']): string => {
     if (!devices || devices.length === 0) return '*';
-    return devices.join(', ');
+    return devices.map((d) => d.name || '').filter(Boolean).join(', ') || '*';
 };
 
 // Filter rules by search query
