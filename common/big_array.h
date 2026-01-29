@@ -175,6 +175,13 @@ big_array_init(
 		63 - __builtin_clzll(MEMORY_BLOCK_ALLOCATOR_MAX_SIZE);
 	array->subarrays_count = (size + (1 << array->subarray_len_exp) - 1) >>
 				 array->subarray_len_exp;
+
+	// Handle zero size case - no subarrays needed
+	if (array->subarrays_count == 0) {
+		array->subarrays = NULL;
+		return 0;
+	}
+
 	void **subarrays = memory_balloc(
 		&array->mctx, sizeof(void *) * array->subarrays_count
 	);
@@ -245,8 +252,10 @@ free_on_error:
 static inline void *
 big_array_get(struct big_array *array, size_t index) {
 	size_t subarray_index = index >> array->subarray_len_exp;
+	size_t offset_in_subarray =
+		index & ((1 << array->subarray_len_exp) - 1);
 	void **subarrays = ADDR_OF(&array->subarrays);
-	return ADDR_OF(subarrays + subarray_index) + index;
+	return ADDR_OF(subarrays + subarray_index) + offset_in_subarray;
 }
 
 /**

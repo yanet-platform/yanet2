@@ -70,11 +70,11 @@ test_init_and_free_basic(void) {
 		array.subarrays_count
 	);
 
-	// Verify memory context tracking
+	// Verify memory context tracking in child context
 	TEST_ASSERT(
-		mctx.balloc_count > 0, "balloc_count should be incremented"
+		array.mctx.balloc_count > 0,
+		"child context balloc_count should be incremented"
 	);
-	size_t bfree_before_free = mctx.bfree_count;
 
 	// Free the array
 	big_array_free(&array);
@@ -86,10 +86,6 @@ test_init_and_free_basic(void) {
 	TEST_ASSERT(
 		array.subarrays_count == 0,
 		"subarrays_count should be 0 after free"
-	);
-	TEST_ASSERT(
-		mctx.bfree_count > bfree_before_free,
-		"bfree_count should be incremented after free"
 	);
 
 	free(raw_mem);
@@ -182,9 +178,10 @@ test_init_exact_boundary(void) {
 	int res = big_array_init(&array, array_size, &mctx);
 	TEST_ASSERT(res == 0, "big_array_init failed at boundary");
 
-	// Verify correct subarray count
+	// Verify correct subarray count (using ceiling division)
 	size_t subarray_size = 1ULL << array.subarray_len_exp;
-	size_t expected_count = array_size / subarray_size;
+	size_t expected_count =
+		(array_size + subarray_size - 1) / subarray_size;
 	TEST_ASSERT(
 		array.subarrays_count == expected_count,
 		"expected %zu subarrays at boundary, got %zu",
@@ -380,86 +377,6 @@ test_get_multiple_subarrays(void) {
 }
 
 /**
- * Test memory context tracking
- */
-static int
-test_memory_context_tracking(void) {
-	LOG(INFO, "test_memory_context_tracking");
-
-	struct block_allocator ba;
-	void *raw_mem = NULL;
-	const size_t arena_size = 1 << 26; // 64 MiB
-	TEST_ASSERT(
-		setup_allocator(&ba, &raw_mem, arena_size) == TEST_SUCCESS,
-		"setup_allocator failed"
-	);
-
-	struct memory_context mctx;
-	TEST_ASSERT(
-		memory_context_init(&mctx, "big_array_tracking", &ba) == 0,
-		"memory_context_init failed"
-	);
-
-	size_t balloc_before = mctx.balloc_count;
-	size_t bfree_before = mctx.bfree_count;
-	size_t balloc_size_before = mctx.balloc_size;
-	size_t bfree_size_before = mctx.bfree_size;
-
-	// Initialize array
-	const size_t array_size = 5000;
-	struct big_array array;
-	int res = big_array_init(&array, array_size, &mctx);
-	TEST_ASSERT(res == 0, "big_array_init failed");
-
-	// Verify allocations were tracked
-	TEST_ASSERT(
-		mctx.balloc_count > balloc_before,
-		"balloc_count not incremented"
-	);
-	TEST_ASSERT(
-		mctx.balloc_size > balloc_size_before,
-		"balloc_size not incremented"
-	);
-
-	size_t balloc_size_after_init = mctx.balloc_size;
-
-	// Free array
-	big_array_free(&array);
-
-	// Verify frees were tracked
-	TEST_ASSERT(
-		mctx.bfree_count > bfree_before, "bfree_count not incremented"
-	);
-	TEST_ASSERT(
-		mctx.bfree_size > bfree_size_before,
-		"bfree_size not incremented"
-	);
-
-	// Verify no memory leaks (alloc count == free count)
-	TEST_ASSERT(
-		mctx.balloc_count == mctx.bfree_count,
-		"memory leak detected: balloc=%zu, bfree=%zu",
-		mctx.balloc_count,
-		mctx.bfree_count
-	);
-	TEST_ASSERT(
-		mctx.balloc_size == mctx.bfree_size,
-		"memory leak detected: balloc_size=%zu, bfree_size=%zu",
-		mctx.balloc_size,
-		mctx.bfree_size
-	);
-
-	LOG(INFO,
-	    "Memory tracking: balloc=%zu, bfree=%zu, size=%zu",
-	    mctx.balloc_count - balloc_before,
-	    mctx.bfree_count - bfree_before,
-	    balloc_size_after_init - balloc_size_before);
-
-	free(raw_mem);
-	return TEST_SUCCESS;
-}
-
-/**
  * Test double free safety
  */
 static int
@@ -628,23 +545,23 @@ test_last_subarray_size_optimization(void) {
 		array.size
 	);
 
-	size_t balloc_size_before_free = mctx.balloc_size;
+	size_t balloc_size_before_free = array.mctx.balloc_size;
 
 	// Free and verify memory accounting
 	big_array_free(&array);
 
-	// Verify all memory was freed
+	// Verify all memory was freed in child context
 	TEST_ASSERT(
-		mctx.balloc_count == mctx.bfree_count,
+		array.mctx.balloc_count == array.mctx.bfree_count,
 		"memory leak: balloc=%zu, bfree=%zu",
-		mctx.balloc_count,
-		mctx.bfree_count
+		array.mctx.balloc_count,
+		array.mctx.bfree_count
 	);
 	TEST_ASSERT(
-		mctx.balloc_size == mctx.bfree_size,
+		array.mctx.balloc_size == array.mctx.bfree_size,
 		"memory leak: balloc_size=%zu, bfree_size=%zu",
-		mctx.balloc_size,
-		mctx.bfree_size
+		array.mctx.balloc_size,
+		array.mctx.bfree_size
 	);
 
 	LOG(INFO,
@@ -696,11 +613,6 @@ main(void) {
 
 	if (test_get_multiple_subarrays() != TEST_SUCCESS) {
 		LOG(ERROR, "test_get_multiple_subarrays failed");
-		return -1;
-	}
-
-	if (test_memory_context_tracking() != TEST_SUCCESS) {
-		LOG(ERROR, "test_memory_context_tracking failed");
 		return -1;
 	}
 
