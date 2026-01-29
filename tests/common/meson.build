@@ -79,3 +79,12 @@ executable(
   link_args: yanet_link_args,
   dependencies: dependencies
 )
+
+big_array_test = executable(
+  'big_array_test',
+  ['big_array_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies
+)
+test('big_array', big_array_test, suite: ['common'])
