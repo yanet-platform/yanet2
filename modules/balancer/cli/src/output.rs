@@ -36,6 +36,10 @@ fn format_real(ip: IpAddr, port: u16) -> String {
     }
 }
 
+fn format_vs(ip: IpAddr, port: u32, proto: i32) -> String {
+    format!("[{}]:{}/{}", ip, port, proto_to_string(proto))
+}
+
 /// Print a boxed header with title and optional subtitle (can be multi-line)
 fn print_boxed_header(title: &str, subtitle: Option<&str>) {
     let title_len = title.len();
@@ -207,7 +211,7 @@ fn print_show_config_tree(response: &balancerpb::ShowConfigResponse) -> Result<(
                 if let Some(vs_id) = &vs.id {
                     if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
                         tree.begin_child(format!("[{}]", idx).cyan().to_string());
-                        tree.add_empty_child(format!("VS: {}:{}/{}", ip, vs_id.port, proto_to_string(vs_id.proto)));
+                        tree.add_empty_child(format!("VS: {}", format_vs(ip, vs_id.port, vs_id.proto)));
                         tree.add_empty_child(format!("Scheduler: {}", scheduler_to_string(vs.scheduler)));
                         tree.add_empty_child(format!("Flags: {}", format_flags(vs.flags.as_ref())));
 
@@ -304,7 +308,11 @@ fn print_show_config_tree(response: &balancerpb::ShowConfigResponse) -> Result<(
                     };
                     tree.begin_child(format!("[{}]", idx).cyan().to_string());
                     tree.add_empty_child(format!("Action: {}", action));
-                    tree.add_empty_child(format!("VS: {}:{}/{}", vip, vs_id.port, proto_to_string(vs_id.proto)));
+                    tree.add_empty_child(format!("VS: {}", format_vs(
+                        vip.parse().unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
+                        vs_id.port,
+                        vs_id.proto
+                    )));
                     tree.add_empty_child(format!(
                         "Real: {}",
                         format_real(
@@ -413,7 +421,7 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                         if let Ok(vs_ip) = opt_addr_to_ip(&vs_id.addr) {
                             println!(
                                 "{}:",
-                                format!("VS {}:{}/{}", vs_ip, vs_id.port, proto_to_string(vs_id.proto))
+                                format!("VS {}", format_vs(vs_ip, vs_id.port, vs_id.proto))
                                     .bright_yellow()
                                     .bold()
                             );
@@ -572,7 +580,7 @@ fn print_show_info_tree(response: &balancerpb::ShowInfoResponse) -> Result<(), B
                 if let Some(vs_id) = &vs_info.id {
                     if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
                         tree.begin_child(format!("[{}]", vs_idx).cyan().to_string());
-                        tree.add_empty_child(format!("VS: {}:{}/{}", ip, vs_id.port, proto_to_string(vs_id.proto)));
+                        tree.add_empty_child(format!("VS: {}", format_vs(ip, vs_id.port, vs_id.proto)));
                         tree.add_empty_child(format!("Active Sessions: {}", format_number(vs_info.active_sessions)));
                         tree.add_empty_child(format!(
                             "Last Packet: {}",
@@ -650,7 +658,7 @@ fn print_show_info_table(response: &balancerpb::ShowInfoResponse) -> Result<(), 
                     if let Ok(vs_ip) = opt_addr_to_ip(&vs_id.addr) {
                         println!(
                             "{}:",
-                            format!("VS {}:{}/{}", vs_ip, vs_id.port, proto_to_string(vs_id.proto))
+                            format!("VS {}", format_vs(vs_ip, vs_id.port, vs_id.proto))
                                 .bright_yellow()
                                 .bold()
                         );
@@ -868,7 +876,7 @@ fn print_show_stats_tree(response: &balancerpb::ShowStatsResponse) -> Result<(),
                 if let Some(vs_id) = &vs.vs {
                     if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
                         tree.begin_child(format!("[{}]", vs_idx).cyan().to_string());
-                        tree.add_empty_child(format!("VS: {}:{}/{}", ip, vs_id.port, proto_to_string(vs_id.proto)));
+                        tree.add_empty_child(format!("VS: {}", format_vs(ip, vs_id.port, vs_id.proto)));
                         if let Some(s) = &vs.stats {
                             tree.add_empty_child(format!(
                                 "Incoming: {} pkts, {}",
@@ -1235,7 +1243,7 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
                     if let Ok(vs_ip) = opt_addr_to_ip(&vs_id.addr) {
                         println!(
                             "{}:",
-                            format!("VS {}:{}/{}", vs_ip, vs_id.port, proto_to_string(vs_id.proto))
+                            format!("VS {}", format_vs(vs_ip, vs_id.port, vs_id.proto))
                                 .bright_yellow()
                                 .bold()
                         );
@@ -1394,7 +1402,7 @@ fn print_show_sessions_tree(response: &balancerpb::ShowSessionsResponse) -> Resu
                 if let Ok(real_ip) = opt_addr_to_ip(&rel_real.ip) {
                     tree.begin_child(format!("[{}]", idx).cyan().to_string());
                     tree.add_empty_child(format!("Client: {}:{}", client, session.client_port));
-                    tree.add_empty_child(format!("VS: {}:{}/{}", vs_ip, vs_id.port, proto_to_string(vs_id.proto)));
+                    tree.add_empty_child(format!("VS: {}", format_vs(vs_ip, vs_id.port, vs_id.proto)));
                     tree.add_empty_child(format!("Real: {}", format_real(real_ip, rel_real.port as u16)));
                     tree.add_empty_child(format!(
                         "Created: {}",
@@ -1459,7 +1467,7 @@ fn print_show_sessions_table(response: &balancerpb::ShowSessionsResponse) -> Res
                         if let Ok(real_ip) = opt_addr_to_ip(&rel_real.ip) {
                             return Some(SessionRow {
                                 client: format!("{}:{}", client_ip, session.client_port),
-                                vs: format!("{}:{}", vs_ip, vs_id.port),
+                                vs: format!("[{}]:{}", vs_ip, vs_id.port),
                                 real: format_real(real_ip, rel_real.port as u16),
                                 proto: proto_to_string(vs_id.proto),
                                 created_at: format_timestamp(session.create_timestamp.as_ref()),
@@ -1510,7 +1518,7 @@ fn print_show_graph_tree(response: &balancerpb::ShowGraphResponse) -> Result<(),
                 if let Some(vs_id) = &vs.identifier {
                     if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
                         tree.begin_child(format!("[{}]", vs_idx).cyan().to_string());
-                        tree.add_empty_child(format!("VS: {}:{}/{}", ip, vs_id.port, proto_to_string(vs_id.proto)));
+                        tree.add_empty_child(format!("VS: {}", format_vs(ip, vs_id.port, vs_id.proto)));
 
                         if !vs.reals.is_empty() {
                             tree.begin_child(format!("Reals ({})", vs.reals.len()));
@@ -1562,7 +1570,7 @@ fn print_show_graph_table(response: &balancerpb::ShowGraphResponse) -> Result<()
                     if let Ok(vs_ip) = opt_addr_to_ip(&vs_id.addr) {
                         println!(
                             "{}:",
-                            format!("VS {}:{}/{}", vs_ip, vs_id.port, proto_to_string(vs_id.proto))
+                            format!("VS {}", format_vs(vs_ip, vs_id.port, vs_id.proto))
                                 .bright_yellow()
                                 .bold()
                         );
