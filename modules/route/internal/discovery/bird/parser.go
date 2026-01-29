@@ -51,10 +51,13 @@ func (m *Parser) Next() (*update, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parser.readChunkSize: %w", err)
 	}
-	if chunkSize <= uint32(sizeOfChunkSize) {
+	if chunkSize == 0 {
 		return nil, fmt.Errorf("too small chunk: %d", chunkSize)
 	}
-	readSize := chunkSize - uint32(sizeOfChunkSize)
+	// BIRD writes chunk size EXCLUDING the 4-byte size field itself
+	// (see https://github.com/yanet-platform/bird/blob/4f92c1235ac441706e9aa1e6fd00c1f97e406f66/proto/export/export.c#L241)
+	// So we read exactly chunkSize bytes, not chunkSize - 4
+	readSize := chunkSize
 
 	if err = m.readChunk(int(readSize)); err != nil {
 		return nil, fmt.Errorf("m.readChunk(%d): %w", readSize, err)
