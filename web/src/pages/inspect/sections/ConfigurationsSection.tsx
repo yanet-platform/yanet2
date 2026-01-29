@@ -14,7 +14,7 @@ export interface ConfigurationsSectionProps {
 }
 
 export const ConfigurationsSection: React.FC<ConfigurationsSectionProps> = ({ instance }) => {
-    const configs = instance.cpConfigs ?? [];
+    const configs = instance.cp_configs ?? [];
 
     const cpConfigColumns: TableColumnConfig<CPConfigInfo>[] = useMemo(() => [
         {

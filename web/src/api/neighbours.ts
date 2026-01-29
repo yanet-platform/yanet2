@@ -6,11 +6,11 @@ export interface MACAddress {
 }
 
 export interface Neighbour {
-    nextHop?: string; // next_hop
-    linkAddr?: MACAddress; // link_addr
-    hardwareAddr?: MACAddress; // hardware_addr
+    next_hop?: string;
+    link_addr?: MACAddress;
+    hardware_addr?: MACAddress;
     state?: number; // NeighbourState enum
-    updatedAt?: string | number; // updated_at (int64, UNIX timestamp in seconds) - serialized as string in JSON
+    updated_at?: string | number; // int64, UNIX timestamp in seconds - serialized as string in JSON
 }
 
 export interface ListNeighboursResponse {

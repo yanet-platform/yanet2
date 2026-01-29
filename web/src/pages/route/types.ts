@@ -5,8 +5,8 @@ import type { Route } from '../../api/routes';
 export interface AddRouteFormData {
     configName: string;
     prefix: string;
-    nexthopAddr: string;
-    doFlush: boolean;
+    nexthop_addr: string;
+    do_flush: boolean;
 }
 
 // Route table common props
@@ -78,7 +78,7 @@ export interface ConfigTabsProps extends RoutesByConfigProps { }
 export interface RouteConfigContentProps extends RoutesByConfigProps { }
 
 // Sorting types
-export type SortableColumn = 'prefix' | 'nextHop' | 'peer' | 'isBest' | 'pref' | 'asPathLen' | 'source';
+export type SortableColumn = 'prefix' | 'next_hop' | 'peer' | 'is_best' | 'pref' | 'as_path_len' | 'source';
 export type SortDirection = 'asc' | 'desc';
 
 export interface SortState {

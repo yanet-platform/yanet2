@@ -10,7 +10,7 @@ export interface PdumpConfig {
     filter?: string;
     mode?: number;
     snaplen?: number;
-    ringSize?: number;
+    ring_size?: number;
 }
 
 export interface ListConfigsResponse {
@@ -23,18 +23,22 @@ export interface ShowConfigResponse {
 
 export interface RecordMeta {
     timestamp?: string;
-    dataSize?: number;
-    packetLen?: number;
-    workerIdx?: number;
-    pipelineIdx?: number;
-    rxDeviceId?: number;
-    txDeviceId?: number;
+    data_size?: number;
+    packet_len?: number;
+    worker_idx?: number;
+    pipeline_idx?: number;
+    rx_device_id?: number;
+    tx_device_id?: number;
     queue?: number;
 }
 
 export interface PdumpRecord {
     meta?: RecordMeta;
     data?: string; // base64 encoded
+}
+
+export interface FieldMask {
+    paths?: string[];
 }
 
 const pdumpService = createService('pdumppb.PdumpService');
@@ -52,12 +56,12 @@ export const pdumpApi = {
     setConfig: (
         name: string,
         config: PdumpConfig,
-        updateMask?: { paths?: string[] },
+        update_mask?: FieldMask,
         options?: CallOptions
     ): Promise<void> => {
         return pdumpService.callWithBody<void>(
             'SetConfig',
-            { name, config, updateMask },
+            { name, config, update_mask },
             options
         );
     },

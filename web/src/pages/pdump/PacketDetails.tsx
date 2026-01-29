@@ -39,13 +39,13 @@ export const PacketDetails: React.FC<PacketDetailsProps> = ({ packet }) => {
 
             {/* Metadata */}
             <Section title="Capture Info">
-                <Field label="Worker" value={record.meta?.workerIdx ?? 'N/A'} />
-                <Field label="Pipeline" value={record.meta?.pipelineIdx ?? 'N/A'} />
-                <Field label="RX Device" value={record.meta?.rxDeviceId ?? 'N/A'} />
-                <Field label="TX Device" value={record.meta?.txDeviceId ?? 'N/A'} />
+                <Field label="Worker" value={record.meta?.worker_idx ?? 'N/A'} />
+                <Field label="Pipeline" value={record.meta?.pipeline_idx ?? 'N/A'} />
+                <Field label="RX Device" value={record.meta?.rx_device_id ?? 'N/A'} />
+                <Field label="TX Device" value={record.meta?.tx_device_id ?? 'N/A'} />
                 <Field label="Queue" value={record.meta?.queue ?? 'N/A'} />
-                <Field label="Packet Length" value={record.meta?.packetLen ?? parsed.raw.length} />
-                <Field label="Captured" value={record.meta?.dataSize ?? parsed.raw.length} />
+                <Field label="Packet Length" value={record.meta?.packet_len ?? parsed.raw.length} />
+                <Field label="Captured" value={record.meta?.data_size ?? parsed.raw.length} />
             </Section>
 
             {/* Ethernet */}

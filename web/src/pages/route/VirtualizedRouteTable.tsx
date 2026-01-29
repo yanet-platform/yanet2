@@ -63,7 +63,7 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
             const lowerQuery = searchQuery.toLowerCase();
             result = result.filter(route =>
                 route.prefix?.toLowerCase().includes(lowerQuery) ||
-                route.nextHop?.toLowerCase().includes(lowerQuery) ||
+                route.next_hop?.toLowerCase().includes(lowerQuery) ||
                 route.peer?.toLowerCase().includes(lowerQuery)
             );
         }

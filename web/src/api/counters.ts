@@ -41,8 +41,8 @@ export interface ModuleCountersRequest {
     pipeline: string;
     function: string;
     chain: string;
-    moduleType: string; // module_type
-    moduleName: string; // module_name
+    module_type: string;
+    module_name: string;
 }
 
 const countersService = createService('ynpb.CountersService');
@@ -61,13 +61,6 @@ export const counters = {
         return countersService.callWithBody<CountersResponse>('Chain', request, options);
     },
     module: (request: ModuleCountersRequest, options?: CallOptions): Promise<CountersResponse> => {
-        return countersService.callWithBody<CountersResponse>('Module', {
-            device: request.device,
-            pipeline: request.pipeline,
-            function: request.function,
-            chain: request.chain,
-            module_type: request.moduleType,
-            module_name: request.moduleName,
-        }, options);
+        return countersService.callWithBody<CountersResponse>('Module', request, options);
     },
 };

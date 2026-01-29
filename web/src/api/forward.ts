@@ -37,7 +37,7 @@ export interface Action {
 export interface Rule {
     action?: Action;
     devices?: Device[];
-    vlanRanges?: VlanRange[];
+    vlan_ranges?: VlanRange[];
     srcs?: IPNet[];
     dsts?: IPNet[];
 }

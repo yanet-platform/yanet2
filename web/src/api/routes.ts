@@ -3,24 +3,24 @@ import { createService, type CallOptions } from './client';
 // Route types
 
 export interface LargeCommunity {
-    globalAdministrator?: number; // global_administrator
-    localDataPart1?: number; // local_data_part1
-    localDataPart2?: number; // local_data_part2
+    global_administrator?: number;
+    local_data_part1?: number;
+    local_data_part2?: number;
 }
 
 export interface Route {
     prefix?: string;
-    nextHop?: string; // next_hop
+    next_hop?: string;
     peer?: string;
-    routeDistinguisher?: string | number; // route_distinguisher (uint64)
-    peerAs?: number; // peer_as
-    originAs?: number; // origin_as
+    route_distinguisher?: string | number; // uint64
+    peer_as?: number;
+    origin_as?: number;
     med?: number;
     pref?: number;
-    asPathLen?: number; // as_path_len
+    as_path_len?: number;
     source?: number; // RouteSourceID enum
-    largeCommunities?: LargeCommunity[]; // large_communities
-    isBest?: boolean; // is_best
+    large_communities?: LargeCommunity[];
+    is_best?: boolean;
 }
 
 export interface ListConfigsResponse {
@@ -29,8 +29,8 @@ export interface ListConfigsResponse {
 
 export interface ShowRoutesRequest {
     name?: string;
-    ipv4Only?: boolean; // ipv4_only
-    ipv6Only?: boolean; // ipv6_only
+    ipv4_only?: boolean;
+    ipv6_only?: boolean;
 }
 
 export interface ShowRoutesResponse {
@@ -40,8 +40,8 @@ export interface ShowRoutesResponse {
 export interface InsertRouteRequest {
     name?: string;
     prefix?: string;
-    nexthopAddr?: string; // nexthop_addr
-    doFlush?: boolean; // do_flush
+    nexthop_addr?: string;
+    do_flush?: boolean;
 }
 
 export interface InsertRouteResponse {
@@ -50,8 +50,8 @@ export interface InsertRouteResponse {
 export interface DeleteRouteRequest {
     name?: string;
     prefix?: string;
-    nexthopAddr?: string; // nexthop_addr
-    doFlush?: boolean; // do_flush
+    nexthop_addr?: string;
+    do_flush?: boolean;
 }
 
 export interface DeleteRouteResponse {

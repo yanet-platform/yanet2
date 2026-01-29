@@ -28,11 +28,11 @@ const deviceInfoToLocal = (info: DeviceInfo): LocalDevice => {
     return {
         id: { type: info.type, name: info.name },
         type,
-        inputPipelines: (info.inputPipelines || []).map(p => ({
+        inputPipelines: (info.input_pipelines || []).map(p => ({
             name: p.name,
             weight: parseWeight(p.weight),
         })),
-        outputPipelines: (info.outputPipelines || []).map(p => ({
+        outputPipelines: (info.output_pipelines || []).map(p => ({
             name: p.name,
             weight: parseWeight(p.weight),
         })),
@@ -56,7 +56,7 @@ export const useDeviceData = (): UseDeviceDataResult => {
         try {
             // Get devices from inspect
             const inspectResponse: InspectResponse = await API.inspect.inspect();
-            const instanceInfo = inspectResponse.instanceInfo;
+            const instanceInfo = inspectResponse.instance_info;
 
             const loadedDevices = instanceInfo?.devices?.map(deviceInfoToLocal) || [];
             setDevices(loadedDevices);

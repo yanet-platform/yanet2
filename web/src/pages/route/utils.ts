@@ -7,7 +7,7 @@ import {
 } from '../../utils';
 
 export const getRouteId = (route: Route): string => {
-    return `${route.prefix || ''}_${route.nextHop || ''}_${route.peer || ''}_${route.routeDistinguisher || ''}`;
+    return `${route.prefix || ''}_${route.next_hop || ''}_${route.peer || ''}_${route.route_distinguisher || ''}`;
 };
 
 export const validatePrefix = (prefix: string): string | undefined => {

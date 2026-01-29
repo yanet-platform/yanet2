@@ -25,19 +25,19 @@ const formatIPNets = (nets: Rule['srcs']): string => {
 };
 
 // Format port ranges for display
-const formatPortRanges = (ranges: Rule['srcPortRanges']): string => {
+const formatPortRanges = (ranges: Rule['src_port_ranges']): string => {
     if (!ranges || ranges.length === 0) return '*';
     return ranges.map((r) => formatPortRange({ from: r.from || 0, to: r.to || 0 })).join(', ');
 };
 
 // Format proto ranges for display
-const formatProtoRanges = (ranges: Rule['protoRanges']): string => {
+const formatProtoRanges = (ranges: Rule['proto_ranges']): string => {
     if (!ranges || ranges.length === 0) return '*';
     return ranges.map((r) => formatProtoRange({ from: r.from || 0, to: r.to || 0 })).join(', ');
 };
 
 // Format vlan ranges for display
-const formatVlanRanges = (ranges: Rule['vlanRanges']): string => {
+const formatVlanRanges = (ranges: Rule['vlan_ranges']): string => {
     if (!ranges || ranges.length === 0) return '*';
     return ranges.map((r) => formatVlanRange({ from: r.from || 0, to: r.to || 0 })).join(', ');
 };
@@ -104,17 +104,17 @@ const TableRow: React.FC<TableRowProps> = React.memo(({ rule, index, start }) =>
             <div style={cellStyles.dsts} title={formatIPNets(rule.dsts)}>
                 {formatIPNets(rule.dsts)}
             </div>
-            <div style={cellStyles.srcPorts} title={formatPortRanges(rule.srcPortRanges)}>
-                {formatPortRanges(rule.srcPortRanges)}
+            <div style={cellStyles.srcPorts} title={formatPortRanges(rule.src_port_ranges)}>
+                {formatPortRanges(rule.src_port_ranges)}
             </div>
-            <div style={cellStyles.dstPorts} title={formatPortRanges(rule.dstPortRanges)}>
-                {formatPortRanges(rule.dstPortRanges)}
+            <div style={cellStyles.dstPorts} title={formatPortRanges(rule.dst_port_ranges)}>
+                {formatPortRanges(rule.dst_port_ranges)}
             </div>
-            <div style={cellStyles.protocols} title={formatProtoRanges(rule.protoRanges)}>
-                {formatProtoRanges(rule.protoRanges)}
+            <div style={cellStyles.protocols} title={formatProtoRanges(rule.proto_ranges)}>
+                {formatProtoRanges(rule.proto_ranges)}
             </div>
-            <div style={cellStyles.vlans} title={formatVlanRanges(rule.vlanRanges)}>
-                {formatVlanRanges(rule.vlanRanges)}
+            <div style={cellStyles.vlans} title={formatVlanRanges(rule.vlan_ranges)}>
+                {formatVlanRanges(rule.vlan_ranges)}
             </div>
             <div style={cellStyles.devices} title={formatDevices(rule.devices)}>
                 {formatDevices(rule.devices)}

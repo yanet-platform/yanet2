@@ -40,10 +40,10 @@ export const useForwardData = (): UseForwardDataResult => {
 
                 if (!isMounted) return;
 
-                const info = inspectResponse.instanceInfo;
+                const info = inspectResponse.instance_info;
 
                 // Find forward configs
-                const forwardConfigs = (info?.cpConfigs || [])
+                const forwardConfigs = (info?.cp_configs || [])
                     .filter((cfg) => cfg.type === 'forward')
                     .map((cfg) => cfg.name || '');
 

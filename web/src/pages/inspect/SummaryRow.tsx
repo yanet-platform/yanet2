@@ -16,8 +16,8 @@ export interface SummaryRowProps {
 }
 
 export const SummaryRow: React.FC<SummaryRowProps> = ({ instance }) => {
-    const modulesCount = instance.dpModules?.length ?? 0;
-    const configsCount = instance.cpConfigs?.length ?? 0;
+    const modulesCount = instance.dp_modules?.length ?? 0;
+    const configsCount = instance.cp_configs?.length ?? 0;
     const pipelinesCount = instance.pipelines?.length ?? 0;
     const devicesCount = instance.devices?.length ?? 0;
     const functionsCount = instance.functions?.length ?? 0;

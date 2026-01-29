@@ -23,12 +23,12 @@ export const useRouteColumns = (): TableColumnConfig<Route>[] => {
             template: (item: Route) => item.prefix || '-',
         },
         {
-            id: 'nextHop',
+            id: 'next_hop',
             name: 'Next Hop',
             meta: {
-                sort: (a: Route, b: Route) => compareNullableStrings(a.nextHop, b.nextHop),
+                sort: (a: Route, b: Route) => compareNullableStrings(a.next_hop, b.next_hop),
             },
-            template: (item: Route) => item.nextHop || '-',
+            template: (item: Route) => item.next_hop || '-',
         },
         {
             id: 'peer',
@@ -39,12 +39,12 @@ export const useRouteColumns = (): TableColumnConfig<Route>[] => {
             template: (item: Route) => item.peer || '-',
         },
         {
-            id: 'isBest',
+            id: 'is_best',
             name: 'Best',
             meta: {
-                sort: (a: Route, b: Route) => compareBooleans(a.isBest, b.isBest),
+                sort: (a: Route, b: Route) => compareBooleans(a.is_best, b.is_best),
             },
-            template: (item: Route) => item.isBest ? 'Yes' : 'No',
+            template: (item: Route) => item.is_best ? 'Yes' : 'No',
         },
         {
             id: 'pref',
@@ -55,12 +55,12 @@ export const useRouteColumns = (): TableColumnConfig<Route>[] => {
             template: (item: Route) => item.pref?.toString() || '-',
         },
         {
-            id: 'asPathLen',
+            id: 'as_path_len',
             name: 'AS Path Len',
             meta: {
-                sort: (a: Route, b: Route) => compareNullableNumbers(a.asPathLen, b.asPathLen),
+                sort: (a: Route, b: Route) => compareNullableNumbers(a.as_path_len, b.as_path_len),
             },
-            template: (item: Route) => item.asPathLen?.toString() || '-',
+            template: (item: Route) => item.as_path_len?.toString() || '-',
         },
         {
             id: 'source',
@@ -98,11 +98,11 @@ export const useConfigRoutesData = (
  */
 export const sortComparators: Record<SortableColumn, (a: Route, b: Route) => number> = {
     prefix: (a, b) => (a.prefix || '').localeCompare(b.prefix || ''),
-    nextHop: (a, b) => (a.nextHop || '').localeCompare(b.nextHop || ''),
+    next_hop: (a, b) => (a.next_hop || '').localeCompare(b.next_hop || ''),
     peer: (a, b) => (a.peer || '').localeCompare(b.peer || ''),
-    isBest: (a, b) => (a.isBest ? 1 : 0) - (b.isBest ? 1 : 0),
+    is_best: (a, b) => (a.is_best ? 1 : 0) - (b.is_best ? 1 : 0),
     pref: (a, b) => (a.pref ?? 0) - (b.pref ?? 0),
-    asPathLen: (a, b) => (a.asPathLen ?? 0) - (b.asPathLen ?? 0),
+    as_path_len: (a, b) => (a.as_path_len ?? 0) - (b.as_path_len ?? 0),
     source: (a, b) => (a.source ?? 0) - (b.source ?? 0),
 };
 

@@ -320,7 +320,7 @@ export const useModuleCounters = (
         const fetchDevicesAndPipelines = async () => {
             try {
                 const response = await API.inspect.inspect();
-                const instanceInfo = response.instanceInfo;
+                const instanceInfo = response.instance_info;
                 const allDevices = instanceInfo?.devices ?? [];
                 const allPipelines = instanceInfo?.pipelines ?? [];
                 
@@ -335,8 +335,8 @@ export const useModuleCounters = (
                 // Find devices that use these pipelines
                 const matchingDevices: DeviceInfo[] = [];
                 for (const device of allDevices) {
-                    const inputPipelines = device.inputPipelines ?? [];
-                    const outputPipelines = device.outputPipelines ?? [];
+                    const inputPipelines = device.input_pipelines ?? [];
+                    const outputPipelines = device.output_pipelines ?? [];
                     const allDevicePipelines = [...inputPipelines, ...outputPipelines];
                     
                     for (const pipeline of allDevicePipelines) {
@@ -382,8 +382,8 @@ export const useModuleCounters = (
                             pipeline: pipelineName,
                             function: functionName,
                             chain: moduleInfo.chainName,
-                            moduleType: moduleInfo.moduleType,
-                            moduleName: moduleInfo.moduleName,
+                            module_type: moduleInfo.moduleType,
+                            module_name: moduleInfo.moduleName,
                         });
                         
                         // Module counters are named 'rx' and 'rx_bytes'
