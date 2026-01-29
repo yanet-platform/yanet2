@@ -6,12 +6,11 @@ option go_package = "github.com/yanet-platform/yanet2/modules/route/bird-adapter
 
 // AdapterService provides configuration for the BIRD import adapter.
 service AdapterService {
-	// SetupConfig configures the BIRD import settings for a specific module
-	// instance.
+	// SetupConfig configures the BIRD import settings for a specific module.
 	rpc SetupConfig(SetupConfigRequest) returns (SetupConfigResponse);
 }
 
-// SetupConfigRequest configures BIRD import for a module instance.
+// SetupConfigRequest configures BIRD import for a module.
 message SetupConfigRequest {
 	string name = 1;
 	ImportConfig config = 2;
