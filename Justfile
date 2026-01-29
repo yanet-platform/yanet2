@@ -15,7 +15,9 @@ default:
 # Build all targets
 build:
     @go clean -cache
-    @meson setup build
+    @meson setup -Donly_config=true build
+    @cargo build --release
+    @meson setup --reconfigure -Donly_config=false build
     @meson compile -C build
 
 # Build all targets in debug

@@ -132,6 +132,10 @@ libdpdk = subproject(
   ],
 )
 
+if get_option('only_config') == true
+  subdir_done()
+endif
+
 libdpdk_dep = libdpdk.get_variable('dpdk_dep')
 libdpdk_inc_dep = libdpdk_dep.partial_dependency(includes: true)
 

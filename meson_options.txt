@@ -33,3 +33,10 @@ option(
   value: 'haswell',
   description: 'Target CPU architecture for -march flag.',
 )
+
+option(
+  'only_config',
+  type: 'boolean',
+  value: false,
+  description: 'Only generate config files'
+)

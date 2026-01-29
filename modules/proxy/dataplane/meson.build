@@ -11,7 +11,7 @@ endif
 dpdk_root = meson.project_source_root() / 'subprojects' / 'dpdk'
 
 rust_lib_name = 'libyanet_proxy_dp.a'
-rust_target_dir = meson.current_build_dir() / 'target'
+rust_target_dir = meson.project_source_root() / 'target'
 rust_lib_path = rust_target_dir / cargo_profile_dir / rust_lib_name
 
 custom_target(

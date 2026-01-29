@@ -27,5 +27,9 @@ members = [
     "modules/proxy/dataplane",
 ]
 
+default-members = [
+    "modules/proxy/dataplane",
+]
+
 [profile.release]
 panic = "abort"

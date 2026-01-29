@@ -118,9 +118,9 @@ func (s *ProxyService) SetAddr(ctx context.Context, req *proxypb.SetAddrRequest)
 
 func ipToUint32(ip net.IP) uint32 {
 	if len(ip) == 16 {
-		return binary.BigEndian.Uint32(ip[12:16])
+		return binary.LittleEndian.Uint32(ip[12:16])
 	}
-	return binary.BigEndian.Uint32(ip)
+	return binary.LittleEndian.Uint32(ip)
 }
 
 func (s *ProxyService) updateModuleConfig(name string) error {
