@@ -343,18 +343,18 @@ func TestDecodeUpdate(t *testing.T) {
 
 	for idx, c := range cases {
 		t.Run(fmt.Sprintf("case #%d %s", idx, c.name), func(t *testing.T) {
-			update, err := newUpdate(c.data)
+			decoder, err := newUpdateDecoder(c.data, nil)
 			if c.errNew != nil {
 				require.Error(t, err)
-				require.ErrorIs(t, err, c.errNew, "err from newUpdate")
+				require.ErrorIs(t, err, c.errNew, "err from newUpdateDecoder")
 				return
 			}
 			require.NoError(t, err)
 			actual := &rib.Route{}
-			err = update.Decode(actual)
+			err = decoder.Decode(actual)
 			if c.errDecode != nil {
 				require.Error(t, err)
-				require.ErrorIs(t, err, c.errDecode, "err from update.Decode")
+				require.ErrorIs(t, err, c.errDecode, "err from decoder.Decode")
 				return
 			}
 			require.Equal(t, &c.expected, actual, "%s != %s", c.expected.Prefix, actual.Prefix)
@@ -371,7 +371,7 @@ func Benchmark_update_Decode(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		u, err := newUpdate(dataIPv6WithLargeCommunities)
+		decoder, err := newUpdateDecoder(dataIPv6WithLargeCommunities, nil)
 		if err != nil {
 			b.Logf("unexpected error: %v", err)
 			b.FailNow()
@@ -380,7 +380,7 @@ func Benchmark_update_Decode(b *testing.B) {
 		if route.Pref != 0 {
 			b.FailNow() // memset did not work?
 		}
-		u.Decode(route)
+		decoder.Decode(route)
 		// Expected NextHop "2a02:2891:9:200::13"
 		result += int(route.Pref) + int(route.NextHop.As16()[15] /*+ 0x13 == 19*/)
 	}
@@ -411,10 +411,10 @@ func Fuzz_update_Decode(f *testing.F) {
 	f.Add(([]byte)(nil))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		u, err := newUpdate(data)
-		if u != nil {
+		decoder, err := newUpdateDecoder(data, nil)
+		if decoder != nil {
 			route := &rib.Route{}
-			err = u.Decode(route)
+			err = decoder.Decode(route)
 		}
 		if err != nil && !errors.Is(err, ErrUpdateDecode) {
 			t.Errorf("unexpected error: %v", err)

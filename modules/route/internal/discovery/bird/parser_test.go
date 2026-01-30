@@ -45,13 +45,13 @@ func TestParserNext(t *testing.T) {
 	parser := NewParser(reader, 4096, zaptest.NewLogger(t).Sugar())
 
 	// With the fix, this should work correctly
-	update, err := parser.Next()
+	decoder, err := parser.Next()
 	require.NoError(t, err, "Parser should correctly handle BIRD's chunk size format")
-	require.NotNil(t, update)
+	require.NotNil(t, decoder)
 
-	// The update should be parseable
+	// The decoder should be able to decode the route
 	route := &rib.Route{}
-	err = update.Decode(route)
-	require.NoError(t, err, "Update should decode successfully")
+	err = decoder.Decode(route)
+	require.NoError(t, err, "Decoder should decode successfully")
 	require.Equal(t, "2307:db8:4::/48", route.Prefix.String())
 }

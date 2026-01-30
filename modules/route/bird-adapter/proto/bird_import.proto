@@ -34,4 +34,8 @@ message ImportConfig {
 	// DumpThreshold configures the threshold beyond which routes are
 	// forcibly dumped.
 	int32 dump_threshold = 4;
+	// LogLevel configures the log level for this client's logger.
+	// Valid values: "debug", "info", "warn", "error".
+	// If empty or invalid, no logging will be performed (nop logger).
+	string log_level = 5;
 }

@@ -46,7 +46,7 @@ func (m *Parser) readChunkSize() (uint32, error) {
 	return chunkSize, nil
 }
 
-func (m *Parser) Next() (*update, error) {
+func (m *Parser) Next() (*updateDecoder, error) {
 	chunkSize, err := m.readChunkSize()
 	if err != nil {
 		return nil, fmt.Errorf("parser.readChunkSize: %w", err)
@@ -63,5 +63,5 @@ func (m *Parser) Next() (*update, error) {
 		return nil, fmt.Errorf("m.readChunk(%d): %w", readSize, err)
 	}
 
-	return newUpdate(m.buf[:int(readSize)])
+	return newUpdateDecoder(m.buf[:int(readSize)], m.log)
 }

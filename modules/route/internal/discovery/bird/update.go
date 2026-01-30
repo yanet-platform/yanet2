@@ -9,6 +9,8 @@ import (
 	"slices"
 	"unsafe"
 
+	"go.uber.org/zap"
+
 	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
 
@@ -47,10 +49,11 @@ const (
 	AttrMPLSLabelStack AttributeType = 0xfe /* MPLS label stack transfer attribute */
 	AttrClusterList    AttributeType = 0x0a /* RFC 4456 */ /* ON */
 
+	AttrMPReachNLRI   AttributeType = 0x0e /* RFC 4760 */
+	AttrMPUnreachNLRI AttributeType = 0x0f /* RFC 4760 */
+
 	// AtomicAggr     AttributeType = 0x06 /* WD */
 	// Aggregator     AttributeType = 0x07 /* OT */
-	// MPReachNLRI    AttributeType = 0x0e /* RFC 4760 */
-	// MPUnreachNLRI  AttributeType = 0x0f /* RFC 4760 */
 	// AS4Path        AttributeType = 0x11 /* RFC 6793 */
 	// AS4Aggregator  AttributeType = 0x12 /* RFC 6793 */
 	// AIGP           AttributeType = 0x1a /* RFC 7311 */
@@ -103,6 +106,10 @@ func (m AttributeType) String() string {
 		return "MPLS_LABEL_STACK"
 	case AttrClusterList:
 		return "CLUSTER_LIST"
+	case AttrMPReachNLRI:
+		return "MP_REACH_NLRI"
+	case AttrMPUnreachNLRI:
+		return "MP_UNREACH_NLRI"
 	default:
 		return fmt.Sprintf("UNKNOWN: %x", uint8(m))
 	}
@@ -172,12 +179,23 @@ type netAddrVPN6 struct {
 	rd     uint64
 }
 
+// update represents a BIRD route update message.
+// WARNING: Do not add fields to this struct! It is cast directly from raw byte data
+// using unsafe.Pointer. The struct is followed by variable-length attribute data in memory
+// that is not represented by any field. Adding fields would shift the memory layout and
+// corrupt access to the trailing attribute data.
 type update struct {
 	base          baseType
 	baseTail      [sizeOfBaseTypeTail]byte // NetAddrUnion data
 	opType        Operation
 	peerAddr      IP6Addr
 	attrsAreaSize uint32
+}
+
+// updateDecoder wraps update with a logger for per-client logging.
+type updateDecoder struct {
+	update *update
+	log    *zap.SugaredLogger
 }
 
 func newUpdate(data []byte) (*update, error) {
@@ -200,13 +218,31 @@ func newUpdate(data []byte) (*update, error) {
 	return u, nil
 }
 
-func (m *update) Decode(route *rib.Route) error {
-	if m.base.length > sizeOfNetAddrUnion {
-		return fmt.Errorf("update type(%s) is too big: %d > max known size %d: %w",
-			m.base.String(), m.base.length, sizeOfNetAddrUnion, ErrUnknownAddrUnion)
+// newUpdateDecoder creates a new updateDecoder from raw data with the provided logger.
+// If logger is nil, a nop logger will be used.
+func newUpdateDecoder(data []byte, log *zap.SugaredLogger) (*updateDecoder, error) {
+	u, err := newUpdate(data)
+	if err != nil {
+		return nil, err
 	}
-	route.Peer = netipAddrFrom4U32(m.peerAddr)
-	route.ToRemove = m.opType.isRemove()
+
+	if log == nil {
+		log = zap.NewNop().Sugar()
+	}
+
+	return &updateDecoder{
+		update: u,
+		log:    log,
+	}, nil
+}
+
+func (m *updateDecoder) Decode(route *rib.Route) error {
+	if m.update.base.length > sizeOfNetAddrUnion {
+		return fmt.Errorf("update type(%s) is too big: %d > max known size %d: %w",
+			m.update.base.String(), m.update.base.length, sizeOfNetAddrUnion, ErrUnknownAddrUnion)
+	}
+	route.Peer = netipAddrFrom4U32(m.update.peerAddr)
+	route.ToRemove = m.update.opType.isRemove()
 
 	if err := m.decodePrefixAndRD(route); err != nil {
 		return fmt.Errorf("%w: update.decodePrefixAndRD: %w", ErrUpdateDecode, err)
@@ -222,35 +258,35 @@ func isSupportedRDType(rd uint64) bool {
 	return rd>>48 == 1
 }
 
-func (m *update) decodePrefixAndRD(route *rib.Route) error {
+func (m *updateDecoder) decodePrefixAndRD(route *rib.Route) error {
 	var addr netip.Addr
-	switch m.base.typ {
+	switch m.update.base.typ {
 	case NetIP4:
-		m4 := (*netAddrIP4)(unsafe.Pointer(m))
+		m4 := (*netAddrIP4)(unsafe.Pointer(m.update))
 		addr = netip.AddrFrom4([4]byte{m4.prefix[3], m4.prefix[2], m4.prefix[1], m4.prefix[0]})
 	case NetIP6:
-		m6 := (*netAddrIP6)(unsafe.Pointer(m))
+		m6 := (*netAddrIP6)(unsafe.Pointer(m.update))
 		addr = netipAddrFrom4U32(m6.prefix)
 	case NetVPN4:
-		m4 := (*netAddrVPN4)(unsafe.Pointer(m))
+		m4 := (*netAddrVPN4)(unsafe.Pointer(m.update))
 		addr = netip.AddrFrom4([4]byte{m4.prefix[3], m4.prefix[2], m4.prefix[1], m4.prefix[0]})
 		if ok := isSupportedRDType(m4.rd); !ok {
 			return ErrUnsupportedRDType
 		}
 		route.RD = m4.rd
 	case NetVPN6:
-		m6 := (*netAddrVPN6)(unsafe.Pointer(m))
+		m6 := (*netAddrVPN6)(unsafe.Pointer(m.update))
 		addr = netipAddrFrom4U32(m6.prefix)
 		if ok := isSupportedRDType(m6.rd); !ok {
 			return ErrUnsupportedRDType
 		}
 		route.RD = m6.rd
 	default:
-		return fmt.Errorf("%w: %s", ErrUnsupportedPrefix, m.base.String())
+		return fmt.Errorf("%w: %s", ErrUnsupportedPrefix, m.update.base.String())
 	}
-	prefix, err := addr.Prefix(int(m.base.prefixLen))
+	prefix, err := addr.Prefix(int(m.update.base.prefixLen))
 	if err != nil {
-		return fmt.Errorf("%w: addr(%s).Prefix(%d): %w", ErrBadPrefix, addr, m.base.prefixLen, err)
+		return fmt.Errorf("%w: addr(%s).Prefix(%d): %w", ErrBadPrefix, addr, m.update.base.prefixLen, err)
 	}
 	route.Prefix = prefix
 	return nil
@@ -260,18 +296,18 @@ func ExtendedAttributeID(attributeID uint32) AttributeType {
 	return AttributeType(attributeID & 0xff)
 }
 
-func (m *update) decodeAttributes(route *rib.Route) error {
+func (m *updateDecoder) decodeAttributes(route *rib.Route) error {
 	// BIRD writes attrsAreaSize EXCLUDING the 4-byte size field itself
 	// So attrsAreaSize=0 means no attributes
-	if m.attrsAreaSize == 0 {
+	if m.update.attrsAreaSize == 0 {
 		return nil // no attributes
 	}
 
 	// SAFETY: newUpdate checks for data boundaries.
 	// Skip the attrsAreaSize field (4 bytes) and get slice of attribute data
 	data := unsafe.Slice((*byte)(
-		unsafe.Pointer(uintptr(unsafe.Pointer(&m.attrsAreaSize))+sizeOfUint32)),
-		m.attrsAreaSize,
+		unsafe.Pointer(uintptr(unsafe.Pointer(&m.update.attrsAreaSize))+sizeOfUint32)),
+		m.update.attrsAreaSize,
 	)
 
 	for len(data) > int(sizeOfUint32) {
@@ -313,7 +349,7 @@ func (m *update) decodeAttributes(route *rib.Route) error {
 	return nil
 }
 
-func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ AttributeType) error {
+func (m *updateDecoder) decodeComplexAttribute(route *rib.Route, data []byte, typ AttributeType) error {
 	switch typ {
 	case AttrOrigin, AttrLocalPref, AttrMultiExitDisc, AttrOriginatorID:
 	case AttrASPath:
@@ -367,6 +403,8 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 				// If the second addr is zero, use the first addr.
 				route.NextHop = netipAddrFrom4U32([16]byte(data[:net.IPv6len]))
 			}
+		default:
+			m.log.Debugw("unexpected next_hop attribute length", zap.Int("data_len", len(data)))
 		}
 	case AttrCommunity:
 	case AttrExtCommunity:
@@ -389,6 +427,14 @@ func (m *update) decodeComplexAttribute(route *rib.Route, data []byte, typ Attri
 		route.LargeCommunities = slices.Clone(largeCommunities)
 	case AttrMPLSLabelStack:
 	case AttrClusterList:
+	case AttrMPReachNLRI:
+		m.log.Debugw("received MP_REACH_NLRI attribute",
+			zap.Int("data_len", len(data)),
+		)
+	case AttrMPUnreachNLRI:
+		m.log.Debugw("received MP_UNREACH_NLRI attribute",
+			zap.Int("data_len", len(data)),
+		)
 	default:
 		return fmt.Errorf("unexpected attribute: %s", typ.String())
 	}
