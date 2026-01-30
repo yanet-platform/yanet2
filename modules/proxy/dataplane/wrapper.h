@@ -2,6 +2,7 @@
 
 #include <rte_ether.h>
 #include <rte_ip.h>
+#include <rte_tcp.h>
 #include <rte_mbuf.h>
 
 #include "common/container_of.h"

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
+	"github.com/gopacket/gopacket/pcap"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
@@ -56,11 +57,47 @@ func createProxyPacket(srcIP, dstIP net.IP, payload []byte) []byte {
 	return buf.Bytes()
 }
 
+func handlePcap(t *testing.T, fw *framework.F, sendPath, expectPath string) {
+	sendHandle, err := pcap.OpenOffline(sendPath)
+	if err != nil {
+		panic(err)
+	}
+	defer sendHandle.Close()
+	expectHandle, err := pcap.OpenOffline(expectPath)
+	if err != nil {
+		panic(err)
+	}
+	defer expectHandle.Close()
+
+	sendPacketSource := gopacket.NewPacketSource(sendHandle, sendHandle.LinkType())
+	expectPacketSource := gopacket.NewPacketSource(expectHandle, expectHandle.LinkType())
+
+	buf := gopacket.NewSerializeBuffer()
+	for send := range sendPacketSource.Packets() {
+		expect, err := expectPacketSource.NextPacket()
+		require.NoError(t, err, "Failed to read expected packet")
+
+		err = gopacket.SerializePacket(buf, gopacket.SerializeOptions{}, send)
+		require.NoError(t, err, "Failed to serialize packet")
+
+		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, buf.Bytes(), 100*time.Millisecond)
+		require.NoError(t, err, "Failed to send packet")
+		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		require.NotNil(t, outputPacket, "Output packet should be parsed")
+
+		packet := gopacket.NewPacket(outputPacket.RawData, layers.LinkTypeEthernet, gopacket.Default)
+		if packet.ErrorLayer() != nil {
+			require.NoError(t, packet.ErrorLayer().Error())
+		}
+		assert.Equal(t, expect.Data(), packet.Data())
+	}
+}
+
 func TestProxy(t *testing.T) {
 	fw := globalFramework.ForTest(t)
 	require.NotNil(t, fw, "Global framework should be initialized")
 
-	proxyAddr := "10.0.0.1"
+	proxyAddr := "10.0.0.0"
 
 	t.Run("Configure_Proxy_Module", func(t *testing.T) {
 		// Proxy-specific configuration
@@ -77,20 +114,6 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("Test_Proxying", func(t *testing.T) {
-		packet := createProxyPacket(
-			net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
-			net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
-			[]byte("proxy test"),
-		)
-
-		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
-		require.NoError(t, err, "Failed to send packet")
-
-		require.NotNil(t, inputPacket, "Input packet should be parsed")
-		require.NotNil(t, outputPacket, "Output packet should be parsed")
-
-		// Verify packet was forwarded with preserved addresses
-		assert.Equal(t, proxyAddr, outputPacket.SrcIP.String(), "Source IP should be modified")
-		assert.Equal(t, "192.0.2.2", outputPacket.DstIP.String(), "Destination IP should be preserved")
+		handlePcap(t, fw, "proxy/001-send.pcap", "proxy/001-expect.pcap")
 	})
 }
