@@ -258,7 +258,9 @@ packet_handler_fill_stats(
 		ref->function,
 		ref->chain,
 		"balancer",
-		module
+		module,
+		NULL,
+		(size_t)-1
 	);
 	assert(counter_handles != NULL);
 

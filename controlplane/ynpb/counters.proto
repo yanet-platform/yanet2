@@ -47,6 +47,11 @@ message ModuleCountersRequest {
 	string chain = 4;
 	string module_type = 5;
 	string module_name = 6;
+	// CounterQuery filters counters by name. If empty, returns all
+	// counters.
+	//
+	// TODO: support wildcards or regex?
+	repeated string counter_query = 7;
 }
 
 message CounterInstanceInfo {

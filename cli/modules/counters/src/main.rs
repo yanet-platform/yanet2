@@ -226,6 +226,7 @@ impl CountersService {
             chain: chain_name,
             module_type,
             module_name,
+            counter_query: Vec::new(),
         };
         let response = self.client.module(request).await?;
         println!("{}", serde_json::to_string(response.get_ref())?);

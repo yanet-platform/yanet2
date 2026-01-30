@@ -384,6 +384,7 @@ export const useModuleCounters = (
                             chain: moduleInfo.chainName,
                             module_type: moduleInfo.moduleType,
                             module_name: moduleInfo.moduleName,
+                            counter_query: ['rx', 'rx_bytes'],
                         });
                         
                         // Module counters are named 'rx' and 'rx_bytes'

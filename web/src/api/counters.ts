@@ -43,6 +43,10 @@ export interface ModuleCountersRequest {
     chain: string;
     module_type: string;
     module_name: string;
+    // Filter counters by name.
+    // 
+    // If empty, returns all counters.
+    counter_query?: string[];
 }
 
 const countersService = createService('ynpb.CountersService');
