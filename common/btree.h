@@ -35,19 +35,17 @@ __get_gte_mask_avx2(__m256i target, const uint32_t *data) { // NOLINT
 }
 
 int
-__get_gte_mask_avx2_64(
-	__m256i target, __m256i sign_bit, const uint64_t *data
-) { // NOLINT
+__get_gte_mask_avx2_64( // NOLINT
+	__m256i target_signed,
+	__m256i sign_bit,
+	const uint64_t *data
+) {
 	__m256i vec = _mm256_load_si256((__m256i *)data);
-
-	// Flip sign bit for unsigned->signed comparison
 	__m256i vec_signed = _mm256_xor_si256(vec, sign_bit);
-	__m256i target_signed = _mm256_xor_si256(target, sign_bit);
 
 	__m256i lt_mask = _mm256_cmpgt_epi64(target_signed, vec_signed);
-	__m256i gte_mask = _mm256_xor_si256(lt_mask, _mm256_set1_epi32(-1));
 
-	return _mm256_movemask_pd(_mm256_castsi256_pd(gte_mask));
+	return _mm256_movemask_pd((__m256d)lt_mask) ^ 15;
 }
 
 static inline size_t
@@ -187,8 +185,10 @@ __btree_build( // NOLINT
 		size_t __k = 0;                                                \
 		size_t __steps = 0;                                            \
 		__m256i __simd_x = _mm256_set1_epi32(__x);                     \
-		__m256i __simd_x64 = _mm256_set1_epi64x(__x);                  \
-		__m256i sign_bit = _mm256_set1_epi64x(0x8000000000000000ULL);  \
+		__m256i __sign_bit =                                           \
+			_mm256_set1_epi64x(0x8000000000000000ULL);             \
+		__m256i __simd_x64 =                                           \
+			_mm256_xor_si256(_mm256_set1_epi64x(__x), __sign_bit); \
 		while (__k < __nblocks) {                                      \
 			++__steps;                                             \
 			size_t __i = __BTREE_BLOCK_SEACH(                      \
@@ -199,7 +199,7 @@ __btree_build( // NOLINT
 				__x,                                           \
 				__simd_x,                                      \
 				__simd_x64,                                    \
-				sign_bit                                       \
+				__sign_bit                                     \
 			);                                                     \
 			__res *= __b + 1;                                      \
 			__res += __i;                                          \
