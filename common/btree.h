@@ -3,6 +3,7 @@
 
 #include "big_array.h"
 #include <assert.h>
+#include <immintrin.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -18,8 +19,36 @@ struct btree {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-
 // Helper functions
+////////////////////////////////////////////////////////////////////////////////
+
+#define typeof_eq(x, type) _Generic((x), type: 1, default: 0)
+
+int
+__get_gte_mask_avx2(__m256i target, const uint32_t *data) { // NOLINT
+	__m256i vec = _mm256_load_si256((__m256i *)data);
+
+	__m256i max_val = _mm256_max_epu32(vec, target);
+	__m256i mask = _mm256_cmpeq_epi32(vec, max_val);
+
+	return _mm256_movemask_ps((__m256)mask);
+}
+
+int
+__get_gte_mask_avx2_64(
+	__m256i target, __m256i sign_bit, const uint64_t *data
+) { // NOLINT
+	__m256i vec = _mm256_load_si256((__m256i *)data);
+
+	// Flip sign bit for unsigned->signed comparison
+	__m256i vec_signed = _mm256_xor_si256(vec, sign_bit);
+	__m256i target_signed = _mm256_xor_si256(target, sign_bit);
+
+	__m256i lt_mask = _mm256_cmpgt_epi64(target_signed, vec_signed);
+	__m256i gte_mask = _mm256_xor_si256(lt_mask, _mm256_set1_epi32(-1));
+
+	return _mm256_movemask_pd(_mm256_castsi256_pd(gte_mask));
+}
 
 static inline size_t
 __btree_nblocks(struct btree *btree) { // NOLINT
@@ -108,16 +137,43 @@ __btree_build( // NOLINT
 
 #define BTREE_FREE(btree_ptr) big_array_free(&(btree_ptr)->array)
 
-#define __BTREE_BLOCK_SEACH(btree_block, y)                                    \
+#define __BTREE_BLOCK_SEACH(                                                   \
+	btree_block, y, simd_target, simd_target64, simd_signbit64             \
+)                                                                              \
 	__extension__({                                                        \
 		typeof((y)) __y = (y);                                         \
 		const typeof(&__y) __bytes =                                   \
 			(const typeof(&__y))((btree_block)->bytes);            \
 		size_t __b = __btree_b(sizeof(__y));                           \
 		unsigned long long __mask = (1ull << __b);                     \
-		for (size_t __i = 0; __i < __b; ++__i) {                       \
-			__mask |= ((unsigned long long)(__bytes[__i] >= __y))  \
-				  << __i;                                      \
+		if (typeof_eq(__y, uint32_t)) {                                \
+			__mask |=                                              \
+				__get_gte_mask_avx2(                           \
+					simd_target, (uint32_t *)__bytes       \
+				) |                                            \
+				(__get_gte_mask_avx2(                          \
+					 simd_target, (uint32_t *)__bytes + 8  \
+				 )                                             \
+				 << 8);                                        \
+		} else if (typeof_eq(__y, uint64_t)) {                         \
+			__mask |= __get_gte_mask_avx2_64(                      \
+					  simd_target64,                       \
+					  simd_signbit64,                      \
+					  (uint64_t *)__bytes                  \
+				  ) |                                          \
+				  (__get_gte_mask_avx2_64(                     \
+					   simd_target64,                      \
+					   simd_signbit64,                     \
+					   (uint64_t *)__bytes + 4             \
+				   )                                           \
+				   << 4);                                      \
+		} else {                                                       \
+			for (size_t __i = 0; __i < __b; ++__i) {               \
+				__mask |=                                      \
+					((unsigned long long)(__bytes[__i] >=  \
+							      __y))            \
+					<< __i;                                \
+			}                                                      \
 		}                                                              \
 		__builtin_ffsll(__mask) - 1;                                   \
 	})
@@ -130,6 +186,9 @@ __btree_build( // NOLINT
 		size_t __res = 0;                                              \
 		size_t __k = 0;                                                \
 		size_t __steps = 0;                                            \
+		__m256i __simd_x = _mm256_set1_epi32(__x);                     \
+		__m256i __simd_x64 = _mm256_set1_epi64x(__x);                  \
+		__m256i sign_bit = _mm256_set1_epi64x(0x8000000000000000ULL);  \
 		while (__k < __nblocks) {                                      \
 			++__steps;                                             \
 			size_t __i = __BTREE_BLOCK_SEACH(                      \
@@ -137,7 +196,10 @@ __btree_build( // NOLINT
 					&(btree_ptr)->array,                   \
 					__k * sizeof(struct btree_block)       \
 				),                                             \
-				__x                                            \
+				__x,                                           \
+				__simd_x,                                      \
+				__simd_x64,                                    \
+				sign_bit                                       \
 			);                                                     \
 			__res *= __b + 1;                                      \
 			__res += __i;                                          \
