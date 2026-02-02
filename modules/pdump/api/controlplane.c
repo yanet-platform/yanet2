@@ -303,8 +303,12 @@ pdump_module_config_set_snaplen(
 
 struct ring_buffer *
 pdump_module_config_set_per_worker_ring(
-	struct cp_module *module, uint32_t size, uint64_t *worker_count
+	struct cp_module *module,
+	uint32_t size,
+	uint64_t *worker_count,
+	uintptr_t cb
 ) {
+	callback_handle = cb;
 
 	if (__builtin_popcount(size) > 1) {
 		pdump_log(RTE_LOG_ERR, "ring size must be a power of two");
@@ -335,7 +339,7 @@ pdump_module_config_set_per_worker_ring(
 		memory_balloc(&agent->memory_context, rings_meta_size);
 	if (rings == NULL) {
 		pdump_log(
-			RTE_LOG_INFO,
+			RTE_LOG_ERR,
 			"failed to ballocate %lu bytes for rings metadata",
 			rings_meta_size
 		);

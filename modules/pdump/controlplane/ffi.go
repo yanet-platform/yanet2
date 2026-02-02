@@ -62,6 +62,39 @@ func goErrorCallback(h C.uintptr_t, msg *C.char) {
 	fn(msg)
 }
 
+// errorCallbackContext manages the lifecycle of a CGO error callback handle.
+// It captures error messages from C code and provides them as a string.
+type errorCallbackContext struct {
+	buf    bytes.Buffer
+	handle cgo.Handle
+}
+
+// newErrorCallbackContext creates a new error callback context.
+// The returned context must be closed with Close() to free the CGO handle.
+func newErrorCallbackContext() *errorCallbackContext {
+	ctx := &errorCallbackContext{}
+	ctx.handle = cgo.NewHandle(func(msg *C.char) {
+		goMsg := C.GoString(msg)
+		ctx.buf.WriteString(goMsg)
+	})
+	return ctx
+}
+
+// Handle returns the CGO handle that can be passed to C functions.
+func (e *errorCallbackContext) Handle() C.uintptr_t {
+	return C.uintptr_t(e.handle)
+}
+
+// Reason returns the accumulated error messages from C code.
+func (e *errorCallbackContext) Reason() string {
+	return e.buf.String()
+}
+
+// Close releases the CGO handle. Must be called to prevent handle leaks.
+func (e *errorCallbackContext) Close() {
+	e.handle.Delete()
+}
+
 type ModuleConfig struct {
 	ptr ffi.ModuleConfig
 }
@@ -72,11 +105,8 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 
 	// Create a new module config using the C API
 	ptr, err := C.pdump_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create module config: %w", err)
-	}
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to create module config: module %q not found", name)
+		return nil, errors.Join(fmt.Errorf("failed to create module config: module %q not found", name), err)
 	}
 
 	return &ModuleConfig{
@@ -96,21 +126,16 @@ func (m *ModuleConfig) SetFilter(filter string) error {
 	cFilter := C.CString(filter)
 	defer C.free(unsafe.Pointer(cFilter))
 
-	buf := bytes.Buffer{}
-	errCallback := cgo.NewHandle(func(msg *C.char) {
-		goMsg := C.GoString(msg)
-		buf.WriteString(goMsg)
-	})
-	defer errCallback.Delete()
+	errCtx := newErrorCallbackContext()
+	defer errCtx.Close()
 
 	rc, err := C.pdump_module_config_set_filter(
 		m.asRawPtr(),
 		cFilter,
-		C.uintptr_t(errCallback),
+		errCtx.Handle(),
 	)
 	if rc != 0 {
-		reason := buf.String()
-		if reason != "" {
+		if reason := errCtx.Reason(); reason != "" {
 			return errors.Join(err, fmt.Errorf("reason=%s", reason))
 		}
 		return errors.Join(err, fmt.Errorf("error code=%d", rc))
@@ -142,28 +167,23 @@ func (m *ModuleConfig) SetDumpMode(pbMode uint32) error {
 		m.asRawPtr(),
 		mode,
 	)
-	if rc != 0 || err != nil {
+	if rc != 0 {
 		return errors.Join(fmt.Errorf("error code=%d", rc), err)
 	}
 	return nil
 }
 
 func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
-	buf := bytes.Buffer{}
-	errCallback := cgo.NewHandle(func(msg *C.char) {
-		goMsg := C.GoString(msg)
-		buf.WriteString(goMsg)
-	})
-	defer errCallback.Delete()
+	errCtx := newErrorCallbackContext()
+	defer errCtx.Close()
 
 	rc, err := C.pdump_module_config_set_snaplen(
 		m.asRawPtr(),
 		C.uint32_t(snaplen),
-		C.uintptr_t(errCallback),
+		errCtx.Handle(),
 	)
 	if rc != 0 {
-		reason := buf.String()
-		if reason != "" {
+		if reason := errCtx.Reason(); reason != "" {
 			return errors.Join(err, fmt.Errorf("reason=%s", reason))
 		}
 		return errors.Join(fmt.Errorf("error code=%d", rc), err)
@@ -174,13 +194,21 @@ func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
 func (m *ModuleConfig) SetupRing(ring *ringBuffer, log *zap.SugaredLogger) error {
 	var workerCount C.uint64_t
 
+	errCtx := newErrorCallbackContext()
+	defer errCtx.Close()
+
 	addr, err := C.pdump_module_config_set_per_worker_ring(
 		m.asRawPtr(),
 		C.uint32_t(ring.perWorkerSize),
 		&workerCount,
+		errCtx.Handle(),
 	)
 	if addr == nil {
-		return errors.Join(fmt.Errorf("failed to allocate ring buffer"), err)
+		err = errors.Join(fmt.Errorf("failed to allocate ring buffer"), err)
+		if reason := errCtx.Reason(); reason != "" {
+			err = errors.Join(err, fmt.Errorf("reason=%s", reason))
+		}
+		return err
 	}
 	ring.workers = nil // forget about old rings...
 	rings := unsafe.Slice(addr, workerCount)
