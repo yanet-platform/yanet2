@@ -6,8 +6,7 @@ option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/pdump
 
 // PdumpService is a service for Differentiated Services Code Point module.
 service PdumpService {
-	// ListConfigs returns all pdump module configurations of all
-	// dataplane instances.
+	// ListConfigs returns all pdump module configurations
 	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 
 	// ShowConfig returns the current configuration for the pdump module.
@@ -84,7 +83,7 @@ message ShowConfigResponse {
 	Config config = 1;
 }
 
-// SetConfigRequest contains new configuration for the pdump module instance
+// SetConfigRequest contains new configuration for the pdump module
 message SetConfigRequest {
 	string name = 1;
 	Config config = 2;

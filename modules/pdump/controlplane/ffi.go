@@ -122,6 +122,11 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
+// Free frees the pdump module configuration
+func (m *ModuleConfig) Free() {
+	C.pdump_module_config_free(m.asRawPtr())
+}
+
 func (m *ModuleConfig) SetFilter(filter string) error {
 	cFilter := C.CString(filter)
 	defer C.free(unsafe.Pointer(cFilter))

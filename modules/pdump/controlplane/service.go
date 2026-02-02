@@ -1,6 +1,6 @@
 // Package pdump implements the control plane service for packet dumping.
 // This file defines PdumpService, which handles gRPC requests for configuring
-// and managing packet capture instances (identified by name).
+// and managing packet capture modules (identified by name).
 // It interacts with data plane agents via FFI (Foreign Function Interface)
 // to apply capture settings (filters, mode, snaplen, ring buffer size)
 // and to facilitate reading captured packets from shared ring buffers.
@@ -26,23 +26,24 @@ import (
 type PdumpService struct {
 	pdumppb.UnimplementedPdumpServiceServer
 
-	mu      sync.Mutex                 // Protects concurrent access to agent, configs, and ringReaders.
-	agent   *ffi.Agent                 // FFI agent used for data plane interaction.
-	configs map[string]*instanceConfig // Map storing the active configuration for each packet capture instance, keyed by name.
-	// Slice of active ringBuffer instances, each corresponding to an ongoing ReadDump stream.
+	mu      sync.Mutex              // Protects concurrent access to agent, configs, and ringReaders.
+	agent   *ffi.Agent              // FFI agent used for data plane interaction.
+	configs map[string]*pdumpConfig // Map storing the active configuration for each pdump module, keyed by name.
+	// Slice of active ring buffer readers, each corresponding to an ongoing ReadDump stream.
 	// Used to manage and terminate these readers during config updates or shutdown.
 	ringReaders []ringReader
 	quitCh      chan bool // Channel used to signal a graceful shutdown to all active ReadDump streams.
 	log         *zap.SugaredLogger
 }
 
-// instanceConfig stores the configuration for a packet capture instance,
+// pdumpConfig stores the configuration for a pdump module,
 // including packet filtering rules, capture mode, snapshot length, and ring buffer parameters.
-type instanceConfig struct {
-	filter   string      // libpcap expression string used to select packets for capture.
-	dumpMode uint32      // Bitmap that specifies the types of packets to capture (e.g., input, drops, ...).
-	snaplen  uint32      // Snapshot length, the maximum number of bytes to capture from each packet.
-	ring     *ringBuffer // Configuration for the shared ring buffer used by this instance, including per-worker size.
+type pdumpConfig struct {
+	filter    string        // libpcap expression string used to select packets for capture.
+	dumpMode  uint32        // Bitmap that specifies the types of packets to capture (e.g., input, drops, ...).
+	snaplen   uint32        // Snapshot length, the maximum number of bytes to capture from each packet.
+	ring      *ringBuffer   // Configuration for the shared ring buffer, including per-worker size.
+	ffiModule *ModuleConfig // FFI module configuration that needs to be freed when replaced
 }
 
 type ringReader struct {
@@ -56,13 +57,13 @@ type ringReader struct {
 func NewPdumpService(agent *ffi.Agent, log *zap.SugaredLogger) *PdumpService {
 	return &PdumpService{
 		agent:   agent,
-		configs: map[string]*instanceConfig{},
+		configs: map[string]*pdumpConfig{},
 		quitCh:  make(chan bool),
 		log:     log,
 	}
 }
 
-// ListConfigs retrieves all configured packet capture instances.
+// ListConfigs retrieves all configured packet capture modules.
 func (m *PdumpService) ListConfigs(
 	ctx context.Context,
 	request *pdumppb.ListConfigsRequest,
@@ -72,7 +73,7 @@ func (m *PdumpService) ListConfigs(
 		Configs: make([]string, 0),
 	}
 
-	// Lock instances store and module updates
+	// Lock configs store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -83,7 +84,7 @@ func (m *PdumpService) ListConfigs(
 	return response, nil
 }
 
-// ShowConfig retrieves the current configuration for a specific packet capture instance.
+// ShowConfig retrieves the current configuration for a specific packet capture module.
 func (m *PdumpService) ShowConfig(
 	ctx context.Context,
 	request *pdumppb.ShowConfigRequest,
@@ -95,7 +96,7 @@ func (m *PdumpService) ShowConfig(
 
 	response := &pdumppb.ShowConfigResponse{}
 
-	// Lock instances store and module updates
+	// Lock configs store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -112,7 +113,8 @@ func (m *PdumpService) ShowConfig(
 	return response, nil
 }
 
-// SetConfig TODO...
+// SetConfig updates or creates packet capture configuration.
+// Supports partial updates via UpdateMask.
 func (m *PdumpService) SetConfig(
 	ctx context.Context,
 	request *pdumppb.SetConfigRequest,
@@ -126,7 +128,7 @@ func (m *PdumpService) SetConfig(
 		return nil, fmt.Errorf("config is required")
 	}
 
-	// Lock instances store and module updates
+	// Lock configs store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -147,9 +149,8 @@ func (m *PdumpService) SetConfig(
 			case "filter":
 				newConfig.filter = request.Config.GetFilter()
 			case "mode":
-				// Sets the packet capture mode for a specific instance,
-				// determining whether to capture incoming, dropped,
-				// or both types of packets.
+				// Sets the packet capture mode, determining whether to capture
+				// incoming, dropped, or both types of packets.
 
 				mode := request.Config.GetMode()
 				if mode > maxMode {
@@ -193,16 +194,46 @@ func (m *PdumpService) SetConfig(
 	return &pdumppb.SetConfigResponse{}, m.updateModuleConfig(name)
 }
 
-// updateModuleConfig applies the current configuration to the specified module instance.
+// transferConfigParameters transfers configuration parameters from the old config to the new FFI config.
+// This includes dump mode, snaplen, filter, and ring buffer setup.
+func (m *PdumpService) transferConfigParameters(
+	name string,
+	oldConfig *pdumpConfig,
+	ffiConfig *ModuleConfig,
+) error {
+	m.log.Debugw("set dump mode", zap.String("module", name))
+	if err := ffiConfig.SetDumpMode(oldConfig.dumpMode); err != nil {
+		return fmt.Errorf("failed to set dump mode for %s: %w", name, err)
+	}
+
+	m.log.Debugw("set snaplen", zap.String("module", name))
+	if err := ffiConfig.SetSnapLen(oldConfig.snaplen); err != nil {
+		return fmt.Errorf("failed to set snaplen for %s: %w", name, err)
+	}
+
+	m.log.Debugw("set filter", zap.String("module", name))
+	if err := ffiConfig.SetFilter(oldConfig.filter); err != nil {
+		return fmt.Errorf("failed to set pdump filter for %s: %w", name, err)
+	}
+
+	m.log.Debugw("setup ring", zap.String("module", name))
+	if err := ffiConfig.SetupRing(oldConfig.ring, m.log); err != nil {
+		return fmt.Errorf("failed to setup ring buffers for %s: %w", name, err)
+	}
+
+	return nil
+}
+
+// updateModuleConfig applies the current configuration to the specified module.
 // This function assumes m.mu is already locked by the caller.
 // The process involves:
-//  1. Terminating all active ring readers for the instance to prevent memory access
-//     violations, as reconfiguring a module can deallocate shared ring buffers.
-//  2. Creating a new FFI module configuration object for the specified instance.
+//  1. Terminating all active ring readers to prevent memory access violations,
+//     as reconfiguring a module can deallocate shared ring buffers.
+//  2. Creating a new FFI module configuration object.
 //  3. Applying the stored settings (capture mode, snaplen, filter, ring buffer parameters)
-//     from m.configs to the FFI configuration. If no specific configuration exists,
-//     the module will be updated with default settings from the new FFI config.
+//     from m.configs to the FFI configuration.
 //  4. Updating the data plane module via the FFI interface with the new configuration.
+//  5. Freeing the old FFI module after successful update.
 func (m *PdumpService) updateModuleConfig(
 	name string,
 ) error {
@@ -239,41 +270,41 @@ func (m *PdumpService) updateModuleConfig(
 
 	m.log.Debugw("update config", zap.String("module", name))
 
+	modConfig := m.configs[name]
+
 	ffiConfig, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		return fmt.Errorf("failed to create %q module config: %w", name, err)
 	}
 
-	instanceConfig := m.configs[name]
-	if instanceConfig != nil {
-		m.log.Debugw("set dump mode", zap.String("module", name))
-		if err := ffiConfig.SetDumpMode(instanceConfig.dumpMode); err != nil {
-			return fmt.Errorf("failed to set dump mode for %s: %w", name, err)
-		}
-		m.log.Debugw("set snaplen", zap.String("module", name))
-		if err := ffiConfig.SetSnapLen(instanceConfig.snaplen); err != nil {
-			return fmt.Errorf("failed to set snaplen for %s: %w", name, err)
-		}
-		m.log.Debugw("set filter", zap.String("module", name))
-		if err := ffiConfig.SetFilter(instanceConfig.filter); err != nil {
-			return fmt.Errorf("failed to set pdump filter for %s: %w", name, err)
-		}
-		m.log.Debugw("setup ring", zap.String("module", name))
-		if err := ffiConfig.SetupRing(instanceConfig.ring, m.log); err != nil {
-			return fmt.Errorf("failed to setup ring buffers for %s: %w", name, err)
+	if modConfig != nil {
+		if err := m.transferConfigParameters(name, modConfig, ffiConfig); err != nil {
+			ffiConfig.Free()
+			return err
 		}
 	}
 
 	if err := m.agent.UpdateModules([]ffi.ModuleConfig{ffiConfig.AsFFIModule()}); err != nil {
+		ffiConfig.Free()
 		return fmt.Errorf("failed to update module %s: %w", name, err)
+	}
+
+	// Free old FFI module after successful update
+	if modConfig != nil && modConfig.ffiModule != nil {
+		modConfig.ffiModule.Free()
+	}
+
+	// Update the stored FFI module reference
+	if modConfig != nil {
+		modConfig.ffiModule = ffiConfig
 	}
 
 	return nil
 }
 
-// ReadDump streams captured packets from the specified packet capture instance.
+// ReadDump streams captured packets from the specified packet capture module.
 // This function establishes a continuous stream of packet data by:
-//  1. Validating the target instance (name)
+//  1. Validating the target module (name)
 //  2. Retrieving and cloning the ring buffer configuration for safe concurrent access
 //  3. Spawning ring buffer readers that continuously monitor shared memory
 //  4. Forwarding captured packet records to the gRPC stream
@@ -282,11 +313,10 @@ func (m *PdumpService) updateModuleConfig(
 //   - The client disconnects (context cancellation from the gRPC stream)
 //   - The service is shut down (signaled via m.quitCh)
 //   - An error occurs while sending a packet record on the stream
-//   - The configuration of this specific packet capture instance is updated
-//     (updateModuleConfig selectively terminates only matching readers)
+//   - The configuration of this module is updated (updateModuleConfig terminates matching readers)
 //
 // Note: Ring buffer readers operate on a cloned configuration to ensure thread safety
-// and prevent interference between concurrent ReadDump requests for the same instance.
+// and prevent interference between concurrent ReadDump requests.
 func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.ServerStreamingServer[pdumppb.Record]) error {
 	ctx := stream.Context()
 
@@ -305,7 +335,7 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 		return fmt.Errorf("config for %s is not initialized properly", name)
 	}
 	// Clone the ring buffer configuration to ensure thread safety.
-	// This allows multiple concurrent ReadDump requests for the same instance
+	// This allows multiple concurrent ReadDump requests for the same module
 	// without interfering with each other's read positions.
 	ringCopy := config.ring.Clone()
 
@@ -365,13 +395,13 @@ func (m *PdumpService) spawnRingReaders(ctx context.Context, name string, ring *
 	return cancel
 }
 
-// defaultModuleConfig creates a new instance configuration with default values:
+// defaultModuleConfig creates a new module configuration with default values:
 // - No packet filter (captures all packets)
 // - Input packet capture mode
 // - System default snapshot length
 // - Minimum ring buffer size
-func defaultModuleConfig() *instanceConfig {
-	return &instanceConfig{
+func defaultModuleConfig() *pdumpConfig {
+	return &pdumpConfig{
 		filter:   "",
 		dumpMode: defaultMode,
 		snaplen:  defaultSnaplen,

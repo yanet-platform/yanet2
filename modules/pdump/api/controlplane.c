@@ -265,6 +265,12 @@ pdump_module_config_set_filter(
 	ins = (struct ebpf_insn *)(buf + bsz + xsz);
 	SET_OFFSET_OF(&bpf->prm.ins, ins);
 
+	// Free old eBPF program before setting new one
+	struct rte_bpf *old_ebpf = ADDR_OF(&config->ebpf_program);
+	if (old_ebpf != NULL) {
+		memory_bfree(&agent->memory_context, old_ebpf, old_ebpf->sz);
+	}
+
 	SET_OFFSET_OF(&config->ebpf_program, bpf);
 
 	return 0;
@@ -328,6 +334,13 @@ pdump_module_config_set_per_worker_ring(
 
 	struct pdump_module_config *config =
 		container_of(module, struct pdump_module_config, cp_module);
+
+	if (config->rings != NULL) {
+		// The config should be new, so there should be no rings, or it
+		// is an error.
+		errno = EEXIST;
+		return NULL;
+	}
 
 	struct agent *agent = ADDR_OF(&config->cp_module.agent);
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
