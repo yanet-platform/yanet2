@@ -285,48 +285,6 @@ test_btree_upper_bound_uint32() {
 	return TEST_SUCCESS;
 }
 
-// ////////////////////////////////////////////////////////////////////////////////
-// // Test: Different data types - uint8_t
-// ////////////////////////////////////////////////////////////////////////////////
-
-// static int
-// test_btree_uint8() {
-// 	LOG(INFO, "Test: btree with uint8_t");
-
-// 	struct block_allocator ba;
-// 	struct memory_context mctx;
-// 	void *raw_mem = NULL;
-// 	const size_t arena_size = 1 << 26; // 64 MiB
-
-// 	TEST_ASSERT(
-// 		setup_allocator(&ba, &mctx, &raw_mem, arena_size) ==
-// TEST_SUCCESS, 		"setup_allocator failed"
-// 	);
-
-// 	uint8_t data[] = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
-// 	size_t n = sizeof(data) / sizeof(data[0]);
-
-// 	struct btree tree;
-// 	int ret = BTREE_INIT(&tree, data, n, &mctx);
-// 	TEST_ASSERT_EQUAL(ret, 0, "btree initialization failed");
-
-// 	size_t idx = BTREE_LOWER_BOUND(&tree, (uint8_t)45);
-// 	TEST_ASSERT_EQUAL(
-// 		idx, 4, "lower_bound(45) should return 4 (element 50)"
-// 	);
-
-// 	idx = BTREE_UPPER_BOUND(&tree, (uint8_t)60);
-// 	TEST_ASSERT_EQUAL(
-// 		idx, 6, "upper_bound(60) should return 6 (element 70)"
-// 	);
-
-// 	BTREE_FREE(&tree);
-
-// 	free(raw_mem);
-// 	LOG(INFO, "✓ uint8_t test passed");
-// 	return TEST_SUCCESS;
-// }
-
 ////////////////////////////////////////////////////////////////////////////////
 // Test: Different data types - uint16_t
 ////////////////////////////////////////////////////////////////////////////////
