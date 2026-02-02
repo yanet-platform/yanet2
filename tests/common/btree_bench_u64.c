@@ -37,10 +37,10 @@
 // Configuration
 ////////////////////////////////////////////////////////////////////////////////
 
-#define DEFAULT_BTREE_ELEMENTS 4000000  // Default: 4M elements
-#define SEARCHES_PER_ITER 1000000       // 1M searches per iteration
-#define NUM_ITERATIONS 10               // 10 iterations
-#define ARENA_SIZE (1ULL << 28)         // 256 MiB
+#define DEFAULT_BTREE_ELEMENTS 4000000 // Default: 4M elements
+#define SEARCHES_PER_ITER 1000000      // 1M searches per iteration
+#define NUM_ITERATIONS 10	       // 10 iterations
+#define ARENA_SIZE (1ULL << 28)	       // 256 MiB
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helper Functions
@@ -66,6 +66,30 @@ lcg_rand(uint64_t *state) {
 }
 
 /**
+ * Allocate memory using hugepages
+ */
+static void *
+allocate_hugepage_memory(size_t size) {
+	void *mem =
+		mmap(NULL,
+		     size,
+		     PROT_READ | PROT_WRITE,
+		     MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE,
+		     -1,
+		     0);
+
+	if (mem == MAP_FAILED) {
+		LOG(ERROR, "Failed to allocate %zu bytes from hugepages", size);
+		LOG(ERROR,
+		    "Make sure hugepages are configured: sudo sysctl -w "
+		    "vm.nr_hugepages=256");
+		return NULL;
+	}
+
+	return mem;
+}
+
+/**
  * Setup memory allocator with hugepage-backed arena
  */
 static int
@@ -82,14 +106,21 @@ setup_allocator(
 
 	// Allocate memory using hugepages
 	// MAP_HUGETLB requires hugepages to be configured in the system
-	*raw_mem = mmap(NULL, size,
-	                PROT_READ | PROT_WRITE,
-	                MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB,
-	                -1, 0);
-	
+	*raw_mem =
+		mmap(NULL,
+		     size,
+		     PROT_READ | PROT_WRITE,
+		     MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE,
+		     -1,
+		     0);
+
 	if (*raw_mem == MAP_FAILED) {
-		LOG(ERROR, "Failed to allocate hugepage arena of %zu bytes", size);
-		LOG(ERROR, "Make sure hugepages are configured: sudo sysctl -w vm.nr_hugepages=256");
+		LOG(ERROR,
+		    "Failed to allocate hugepage arena of %zu bytes",
+		    size);
+		LOG(ERROR,
+		    "Make sure hugepages are configured: sudo sysctl -w "
+		    "vm.nr_hugepages=256");
 		return -1;
 	}
 
@@ -128,14 +159,17 @@ benchmark_btree_uint64(size_t num_elements) {
 		return;
 	}
 
-	// Generate sorted data: 0, 2, 4, 6, ...
+	// Allocate and generate sorted data from hugepages: 0, 2, 4, 6, ...
 	LOG(INFO, "Generating %zu uint64_t elements...", num_elements);
-	uint64_t *data = malloc(num_elements * sizeof(uint64_t));
+	size_t data_size = num_elements * sizeof(uint64_t);
+	uint64_t *data = (uint64_t *)allocate_hugepage_memory(data_size);
 	if (data == NULL) {
-		LOG(ERROR, "Failed to allocate data array");
 		munmap(raw_mem, ARENA_SIZE);
 		return;
 	}
+	LOG(INFO,
+	    "Allocated %zu MB for data using hugepages",
+	    data_size / (1024 * 1024));
 
 	for (size_t i = 0; i < num_elements; i++) {
 		data[i] = (uint64_t)(i * 2);
@@ -150,7 +184,7 @@ benchmark_btree_uint64(size_t num_elements) {
 
 	if (ret != 0) {
 		LOG(ERROR, "Failed to initialize btree");
-		free(data);
+		munmap(data, data_size);
 		munmap(raw_mem, ARENA_SIZE);
 		return;
 	}
@@ -159,34 +193,58 @@ benchmark_btree_uint64(size_t num_elements) {
 	LOG(INFO, "Btree built in %.2f ms", build_time_ms);
 	LOG(INFO, "");
 
-	// Prepare random search values
+	// Allocate and prepare random search values from hugepages
 	uint64_t rng_state = 0x123456789ABCDEFULL;
-	uint64_t *search_values = malloc(SEARCHES_PER_ITER * sizeof(uint64_t));
+	size_t search_size = SEARCHES_PER_ITER * sizeof(uint64_t);
+	uint64_t *search_values =
+		(uint64_t *)allocate_hugepage_memory(search_size);
 	if (search_values == NULL) {
-		LOG(ERROR, "Failed to allocate search values");
 		BTREE_FREE(&tree);
-		free(data);
+		munmap(data, data_size);
 		munmap(raw_mem, ARENA_SIZE);
 		return;
 	}
+	LOG(INFO,
+	    "Allocated %zu MB for search values using hugepages",
+	    search_size / (1024 * 1024));
 
 	for (size_t i = 0; i < SEARCHES_PER_ITER; i++) {
-		// Generate random values in range [0, 2*num_elements) to test hits and misses
+		// Generate random values in range [0, 2*num_elements) to test
+		// hits and misses
 		search_values[i] = lcg_rand(&rng_state) % (num_elements * 2);
 	}
 
 	// Run benchmark iterations
-	LOG(INFO, "Running %d iterations of %d searches...", NUM_ITERATIONS, SEARCHES_PER_ITER);
+	LOG(INFO,
+	    "Running %d iterations of %d searches...",
+	    NUM_ITERATIONS,
+	    SEARCHES_PER_ITER);
 	uint64_t total_time_ns = 0;
 	uint64_t min_time_ns = UINT64_MAX;
 	uint64_t max_time_ns = 0;
 
 	for (int iter = 0; iter < NUM_ITERATIONS; iter++) {
+		// Warmup: perform same number of searches to warm up caches
+		uint64_t warmup_start = get_time_ns();
+
+		for (size_t i = 0; i < SEARCHES_PER_ITER; i++) {
+			volatile size_t idx =
+				BTREE_LOWER_BOUND(&tree, search_values[i]);
+			(void)idx; // Prevent optimization
+		}
+
+		uint64_t warmup_end = get_time_ns();
+		uint64_t warmup_time = warmup_end - warmup_start;
+		double warmup_time_ms = warmup_time / 1000000.0;
+		double warmup_searches_per_sec = (double)SEARCHES_PER_ITER /
+						 (warmup_time / 1000000000.0);
+
+		// Measurement: perform searches and measure time
 		uint64_t iter_start = get_time_ns();
 
-		// Perform searches
 		for (size_t i = 0; i < SEARCHES_PER_ITER; i++) {
-			volatile size_t idx = BTREE_LOWER_BOUND(&tree, search_values[i]);
+			volatile size_t idx =
+				BTREE_LOWER_BOUND(&tree, search_values[i]);
 			(void)idx; // Prevent optimization
 		}
 
@@ -194,13 +252,22 @@ benchmark_btree_uint64(size_t num_elements) {
 		uint64_t iter_time = iter_end - iter_start;
 
 		total_time_ns += iter_time;
-		if (iter_time < min_time_ns) min_time_ns = iter_time;
-		if (iter_time > max_time_ns) max_time_ns = iter_time;
+		if (iter_time < min_time_ns)
+			min_time_ns = iter_time;
+		if (iter_time > max_time_ns)
+			max_time_ns = iter_time;
 
 		double iter_time_ms = iter_time / 1000000.0;
-		double searches_per_sec = (double)SEARCHES_PER_ITER / (iter_time / 1000000000.0);
-		LOG(INFO, "  Iteration %2d: %.2f ms (%.2f M searches/sec)",
-		    iter + 1, iter_time_ms, searches_per_sec / 1000000.0);
+		double searches_per_sec =
+			(double)SEARCHES_PER_ITER / (iter_time / 1000000000.0);
+		LOG(INFO,
+		    "  Iteration %2d: warmup %.2f ms (%.2f M/s), measurement "
+		    "%.2f ms (%.2f M/s)",
+		    iter + 1,
+		    warmup_time_ms,
+		    warmup_searches_per_sec / 1000000.0,
+		    iter_time_ms,
+		    searches_per_sec / 1000000.0);
 	}
 
 	// Calculate statistics
@@ -219,14 +286,16 @@ benchmark_btree_uint64(size_t num_elements) {
 	LOG(INFO, "Average time per iteration: %.2f ms", avg_time_ms);
 	LOG(INFO, "Min iteration time: %.2f ms", min_time_ms);
 	LOG(INFO, "Max iteration time: %.2f ms", max_time_ms);
-	LOG(INFO, "Average throughput: %.2f M searches/sec", avg_throughput / 1000000.0);
+	LOG(INFO,
+	    "Average throughput: %.2f M searches/sec",
+	    avg_throughput / 1000000.0);
 	LOG(INFO, "Average latency: %.2f ns/search", avg_latency_ns);
 	LOG(INFO, "");
 
 	// Cleanup
-	free(search_values);
+	munmap(search_values, search_size);
 	BTREE_FREE(&tree);
-	free(data);
+	munmap(data, data_size);
 	munmap(raw_mem, ARENA_SIZE);
 }
 
@@ -244,7 +313,9 @@ main(int argc, char *argv[]) {
 		char *endptr;
 		long parsed = strtol(argv[1], &endptr, 10);
 		if (*endptr != '\0' || parsed <= 0) {
-			fprintf(stderr, "Error: Invalid number of elements: %s\n", argv[1]);
+			fprintf(stderr,
+				"Error: Invalid number of elements: %s\n",
+				argv[1]);
 			fprintf(stderr, "Usage: %s [num_elements]\n", argv[0]);
 			fprintf(stderr, "Example: %s 1000000\n", argv[0]);
 			return 1;
