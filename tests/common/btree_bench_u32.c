@@ -1,8 +1,8 @@
 /**
- * @file btree_bench_uint32.c
- * @brief Performance benchmark for btree with uint32_t
+ * @file btree_bench_u32.c
+ * @brief Performance benchmark for btree_u32
  *
- * This benchmark measures btree search performance with:
+ * This benchmark measures btree_u32 search performance with:
  * - Configurable number of elements (default: 4M)
  * - 1M random searches per iteration
  * - 10 iterations for statistical significance
@@ -12,15 +12,15 @@
  *   sudo sysctl -w vm.nr_hugepages=256
  *
  * Usage:
- *   ./btree_bench_uint32 [num_elements]
+ *   ./btree_bench_u32 [num_elements]
  *
  * Examples:
- *   ./btree_bench_uint32           # Use default 4M elements
- *   ./btree_bench_uint32 1000000   # Use 1M elements
- *   ./btree_bench_uint32 10000000  # Use 10M elements
+ *   ./btree_bench_u32           # Use default 4M elements
+ *   ./btree_bench_u32 1000000   # Use 1M elements
+ *   ./btree_bench_u32 10000000  # Use 10M elements
  */
 
-#include "common/btree.h"
+#include "common/btree/u32.h"
 #include "common/memory.h"
 #include "common/memory_block.h"
 #include "lib/logging/log.h"
@@ -114,7 +114,7 @@ setup_allocator(
 
 	block_allocator_put_arena(ba, *raw_mem, size);
 
-	if (memory_context_init(mctx, "btree_bench_uint32", ba) != 0) {
+	if (memory_context_init(mctx, "btree_bench_u32", ba) != 0) {
 		LOG(ERROR, "memory_context_init failed");
 		munmap(*raw_mem, size);
 		return -1;
@@ -124,12 +124,12 @@ setup_allocator(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Benchmark: uint32_t btree
+// Benchmark: btree_u32
 ////////////////////////////////////////////////////////////////////////////////
 
 static void
-benchmark_btree_uint32(size_t num_elements) {
-	LOG(INFO, "=== Benchmarking uint32_t btree ===");
+benchmark_btree_u32(size_t num_elements) {
+	LOG(INFO, "=== Benchmarking btree_u32 ===");
 	LOG(INFO, "Elements: %zu", num_elements);
 	LOG(INFO, "Searches per iteration: %d", SEARCHES_PER_ITER);
 	LOG(INFO, "Iterations: %d", NUM_ITERATIONS);
@@ -162,14 +162,14 @@ benchmark_btree_uint32(size_t num_elements) {
 	}
 
 	// Build btree
-	LOG(INFO, "Building btree...");
-	struct btree tree;
+	LOG(INFO, "Building btree_u32...");
+	struct btree_u32 tree;
 	uint64_t build_start = get_time_ns();
-	int ret = BTREE_INIT(&tree, data, num_elements, &mctx);
+	int ret = btree_u32_init(&tree, data, num_elements, &mctx);
 	uint64_t build_end = get_time_ns();
 
 	if (ret != 0) {
-		LOG(ERROR, "Failed to initialize btree");
+		LOG(ERROR, "Failed to initialize btree_u32");
 		munmap(data, data_size);
 		munmap(raw_mem, ARENA_SIZE);
 		return;
@@ -185,7 +185,7 @@ benchmark_btree_uint32(size_t num_elements) {
 	uint32_t *search_values =
 		(uint32_t *)allocate_hugepage_memory(search_size);
 	if (search_values == NULL) {
-		BTREE_FREE(&tree);
+		btree_u32_free(&tree);
 		munmap(data, data_size);
 		munmap(raw_mem, ARENA_SIZE);
 		return;
@@ -216,7 +216,7 @@ benchmark_btree_uint32(size_t num_elements) {
 
 		for (size_t i = 0; i < SEARCHES_PER_ITER; i++) {
 			volatile size_t idx =
-				BTREE_LOWER_BOUND(&tree, search_values[i]);
+				btree_u32_lower_bound(&tree, search_values[i]);
 			(void)idx; // Prevent optimization
 		}
 
@@ -231,7 +231,7 @@ benchmark_btree_uint32(size_t num_elements) {
 
 		for (size_t i = 0; i < SEARCHES_PER_ITER; i++) {
 			volatile size_t idx =
-				BTREE_LOWER_BOUND(&tree, search_values[i]);
+				btree_u32_lower_bound(&tree, search_values[i]);
 			(void)idx; // Prevent optimization
 		}
 
@@ -267,7 +267,7 @@ benchmark_btree_uint32(size_t num_elements) {
 	double avg_latency_ns = (double)total_time_ns / total_searches;
 
 	LOG(INFO, "");
-	LOG(INFO, "=== uint32_t Results ===");
+	LOG(INFO, "=== btree_u32 Results ===");
 	LOG(INFO, "Total searches: %.0f", total_searches);
 	LOG(INFO, "Total time: %.2f seconds", total_time_sec);
 	LOG(INFO, "Average time per iteration: %.2f ms", avg_time_ms);
@@ -281,7 +281,7 @@ benchmark_btree_uint32(size_t num_elements) {
 
 	// Cleanup
 	munmap(search_values, search_size);
-	BTREE_FREE(&tree);
+	btree_u32_free(&tree);
 	munmap(data, data_size);
 	munmap(raw_mem, ARENA_SIZE);
 }
@@ -310,7 +310,7 @@ main(int argc, char *argv[]) {
 		num_elements = (size_t)parsed;
 	}
 
-	LOG(INFO, "=== Btree uint32_t Performance Benchmark ===");
+	LOG(INFO, "=== Btree uint32_t Performance Benchmark (New API) ===");
 	LOG(INFO, "Configuration:");
 	LOG(INFO, "  Elements: %zu", num_elements);
 	LOG(INFO, "  Searches per iteration: %d (1M)", SEARCHES_PER_ITER);
@@ -318,8 +318,8 @@ main(int argc, char *argv[]) {
 	LOG(INFO, "  Arena size: %llu MB", ARENA_SIZE / (1024 * 1024));
 	LOG(INFO, "");
 
-	// Run uint32_t benchmark
-	benchmark_btree_uint32(num_elements);
+	// Run btree_u32 benchmark
+	benchmark_btree_u32(num_elements);
 
 	LOG(INFO, "=== Benchmark Complete ===");
 
