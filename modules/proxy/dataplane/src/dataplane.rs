@@ -51,14 +51,14 @@ struct ipv4_psd_header {
 
 unsafe fn ipv4_phdr_cksum(ip_header: *const rte_ipv4_hdr) -> u16 {
     unsafe {
-        let l3_len = ((*ip_header).total_length as u16).to_le();
+        let l3_len = (*ip_header).total_length.swap_bytes();
         
-        let mut psd_hdr = ipv4_psd_header{
+        let psd_hdr = ipv4_psd_header{
             src_addr: (*ip_header).src_addr,
             dst_addr: (*ip_header).dst_addr,
             zero: 0,
             proto: (*ip_header).next_proto_id,
-            len: (l3_len - rte_ipv4_hdr_len(ip_header) as u16).to_be(),
+            len: (l3_len - rte_ipv4_hdr_len(ip_header) as u16).swap_bytes(),
         };
     
         return rte_raw_cksum(ptr::from_ref(&psd_hdr) as *const c_void, size_of::<ipv4_psd_header>());
@@ -67,7 +67,7 @@ unsafe fn ipv4_phdr_cksum(ip_header: *const rte_ipv4_hdr) -> u16 {
 
 unsafe fn ipv4_udptcp_cksum(ip_header: *const rte_ipv4_hdr, tcp_header: *const rte_tcp_hdr) -> u16 {
 	let ip_hdr_len = rte_ipv4_hdr_len(ip_header) as u16;
-	let l3_len = unsafe { ((*ip_header).total_length).to_le() };
+	let l3_len = unsafe { (*ip_header).total_length.swap_bytes() };
 	if l3_len < ip_hdr_len {
         return 0;
     }
@@ -111,7 +111,7 @@ pub unsafe extern "C" fn proxy_handle_packets(
             break;
         }
 
-        let ipv4_type = (RTE_ETHER_TYPE_IPV4 as u16).to_be();
+        let ipv4_type = (RTE_ETHER_TYPE_IPV4 as u16).swap_bytes();
         unsafe {
             if (*packet).network_header.type_ == ipv4_type {
                 let mbuf = packet_to_mbuf(packet);
