@@ -107,11 +107,10 @@ btree_u32_next(size_t v, size_t i) {
  * which elements are greater than or equal to the target.
  */
 static inline int
-btree_u32_get_gte_mask_avx2(__m256i target, const uint32_t *data) {
-	__m256i vec = _mm256_load_si256((__m256i *)data);
-	__m256i max_val = _mm256_max_epu32(vec, target);
-	__m256i mask = _mm256_cmpeq_epi32(vec, max_val);
-	return _mm256_movemask_ps((__m256)mask);
+btree_u32_get_gte_mask_avx2(__m256i target_signed, const uint32_t *data) {
+	__m256i vec_signed = _mm256_load_si256((__m256i *)data);
+	__m256i lt_mask = _mm256_cmpgt_epi32(target_signed, vec_signed);
+	return _mm256_movemask_ps((__m256)lt_mask);
 }
 
 /**
@@ -129,15 +128,15 @@ static inline size_t
 btree_u32_block_search(const struct btree_u32_block *block, __m256i target) {
 	// Process first 8 elements
 	int mask1 = btree_u32_get_gte_mask_avx2(target, block->values);
+
 	// Process next 8 elements
 	int mask2 = btree_u32_get_gte_mask_avx2(target, block->values + 8);
 
 	// Combine masks: mask2 shifted left by 8 bits
-	unsigned long long combined =
-		mask1 | (mask2 << 8) | (1ULL << BTREE_U32_BLOCK_SIZE);
+	unsigned int combined = (mask1 | (mask2 << 8)) ^ 0x1FFFF;
 
 	// Find first set bit (1-indexed), subtract 1 for 0-indexed result
-	return __builtin_ffsll(combined) - 1;
+	return __builtin_ffs(combined) - 1;
 }
 
 /**
@@ -185,7 +184,7 @@ btree_u32_build(
 					&btree->array,
 					v * sizeof(struct btree_u32_block)
 				);
-			block->values[i] = data[*idx];
+			block->values[i] = data[*idx] ^ 0x80000000;
 
 			if (btree->h == h) {
 				++btree->max_h_cnt;
@@ -365,6 +364,8 @@ btree_u32_upper_bound(struct btree_u32 *btree, uint32_t value) {
 	return btree_u32_lower_bound(btree, value + 1);
 }
 
+#define PREFETCH 0
+
 static inline size_t
 btree_u32_lower_bounds(
 	struct btree_u32 *btree, uint32_t *values, size_t count, size_t *result
@@ -374,7 +375,6 @@ btree_u32_lower_bounds(
 	struct context {
 		size_t result;
 		size_t k;
-		size_t steps;
 		__m256i target;
 	} ctx[batch_size];
 
@@ -387,14 +387,26 @@ btree_u32_lower_bounds(
 		struct context *c = &ctx[i];
 		c->result = 0;
 		c->k = 0;
-		c->steps = 0;
-		c->target = _mm256_set1_epi32(values[i]);
+		c->target = _mm256_set1_epi32(values[i] ^ 0x80000000);
 	}
 
 	const size_t nblocks = btree_u32_nblocks(btree);
 
 	for (size_t step = 0; step < btree->h; ++step) {
 		for (size_t i = 0; i < count; ++i) {
+			if (PREFETCH > 0 && i + PREFETCH < count) {
+				__builtin_prefetch(
+					big_array_get(
+						&btree->array,
+						ctx[i + PREFETCH].k *
+							sizeof(struct
+							       btree_u32_block)
+					),
+					0,
+					3
+				);
+			}
+
 			struct context *c = &ctx[i];
 			const struct btree_u32_block *block =
 				(const struct btree_u32_block *)big_array_get(
@@ -415,6 +427,17 @@ btree_u32_lower_bounds(
 	}
 
 	for (size_t i = 0; i < count; ++i) {
+		if (PREFETCH > 0 && i + PREFETCH < count) {
+			__builtin_prefetch(
+				big_array_get(
+					&btree->array,
+					ctx[i + PREFETCH].k *
+						sizeof(struct btree_u32_block)
+				),
+				0,
+				3
+			);
+		}
 		struct context *c = &ctx[i];
 		if (c->k < nblocks) {
 			const struct btree_u32_block *block =
@@ -437,3 +460,5 @@ btree_u32_lower_bounds(
 
 	return count;
 }
+
+#undef PREFETCH

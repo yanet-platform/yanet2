@@ -110,17 +110,10 @@ btree_u64_next(size_t v, size_t i) {
  * values comparable using signed instructions.
  */
 static inline int
-btree_u64_get_gte_mask_avx2(
-	__m256i target_signed, __m256i sign_bit, const uint64_t *data
-) {
-	__m256i vec = _mm256_load_si256((__m256i *)data);
-	__m256i vec_signed = _mm256_xor_si256(vec, sign_bit);
-
-	// Compare: vec_signed < target_signed
+btree_u64_get_gte_mask_avx2(__m256i target_signed, const uint64_t *data) {
+	__m256i vec_signed = _mm256_load_si256((__m256i *)data);
 	__m256i lt_mask = _mm256_cmpgt_epi64(target_signed, vec_signed);
-
-	// Invert to get >= mask (XOR with all 1s = 15 for 4 elements)
-	return _mm256_movemask_pd((__m256d)lt_mask) ^ 15;
+	return _mm256_movemask_pd((__m256d)lt_mask);
 }
 
 /**
@@ -137,25 +130,20 @@ btree_u64_get_gte_mask_avx2(
  */
 static inline size_t
 btree_u64_block_search(
-	const struct btree_u64_block *block,
-	__m256i target_signed,
-	__m256i sign_bit
+	const struct btree_u64_block *block, __m256i target_signed
 ) {
 	// Process first 4 elements
-	int mask1 = btree_u64_get_gte_mask_avx2(
-		target_signed, sign_bit, block->values
-	);
+	int mask1 = btree_u64_get_gte_mask_avx2(target_signed, block->values);
+
 	// Process next 4 elements
-	int mask2 = btree_u64_get_gte_mask_avx2(
-		target_signed, sign_bit, block->values + 4
-	);
+	int mask2 =
+		btree_u64_get_gte_mask_avx2(target_signed, block->values + 4);
 
 	// Combine masks: mask2 shifted left by 4 bits
-	unsigned long long combined =
-		mask1 | (mask2 << 4) | (1ULL << BTREE_U64_BLOCK_SIZE);
+	unsigned combined = (mask1 | (mask2 << 4)) ^ 0x1FF;
 
 	// Find first set bit (1-indexed), subtract 1 for 0-indexed result
-	return __builtin_ffsll(combined) - 1;
+	return __builtin_ffs(combined) - 1;
 }
 
 /**
@@ -203,7 +191,7 @@ btree_u64_build(
 					&btree->array,
 					v * sizeof(struct btree_u64_block)
 				);
-			block->values[i] = data[*idx];
+			block->values[i] = data[*idx] ^ 0x8000000000000000ULL;
 
 			if (btree->h == h) {
 				++btree->max_h_cnt;
@@ -344,9 +332,8 @@ btree_u64_lower_bound(struct btree_u64 *btree, uint64_t value) {
 	size_t steps = 0;
 
 	// Prepare SIMD target value with sign bit trick
-	__m256i sign_bit = _mm256_set1_epi64x(0x8000000000000000ULL);
-	__m256i target = _mm256_set1_epi64x(value);
-	__m256i target_signed = _mm256_xor_si256(target, sign_bit);
+	__m256i target_signed =
+		_mm256_set1_epi64x(value ^ 0x8000000000000000ULL);
 
 	// Traverse tree from root to leaf
 	while (k < nblocks) {
@@ -360,8 +347,7 @@ btree_u64_lower_bound(struct btree_u64 *btree, uint64_t value) {
 			);
 
 		// Search within block using SIMD
-		size_t i =
-			btree_u64_block_search(block, target_signed, sign_bit);
+		size_t i = btree_u64_block_search(block, target_signed);
 
 		// Update result index
 		result *= (BTREE_U64_BLOCK_SIZE + 1);
