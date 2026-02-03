@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, TextInput, Label, Text, Button } from '@gravity-ui/uikit';
-import { Stop, TrashBin } from '@gravity-ui/icons';
+import { ChevronsDown, Stop, TrashBin } from '@gravity-ui/icons';
 import { SEARCH_BAR_HEIGHT } from './constants';
 import './pdump.css';
 
@@ -13,6 +13,8 @@ export interface PacketSearchBarProps {
     onStopCapture: () => void;
     onClearPackets: () => void;
     canClear: boolean;
+    autoScroll: boolean;
+    onToggleAutoScroll: () => void;
 }
 
 export const PacketSearchBar: React.FC<PacketSearchBarProps> = ({
@@ -24,6 +26,8 @@ export const PacketSearchBar: React.FC<PacketSearchBarProps> = ({
     onStopCapture,
     onClearPackets,
     canClear,
+    autoScroll,
+    onToggleAutoScroll,
 }) => {
     return (
         <Box className="packet-search-bar" style={{ height: SEARCH_BAR_HEIGHT }}>
@@ -48,6 +52,19 @@ export const PacketSearchBar: React.FC<PacketSearchBarProps> = ({
                 )}
             </Box>
             <Box className="packet-search-bar__actions">
+                {isCapturing && (
+                    <Button
+                        view={autoScroll ? 'flat-info' : 'flat'}
+                        size="s"
+                        onClick={onToggleAutoScroll}
+                        selected={autoScroll}
+                    >
+                        <Button.Icon>
+                            <ChevronsDown />
+                        </Button.Icon>
+                        Auto-scroll
+                    </Button>
+                )}
                 <Button
                     view="flat"
                     size="s"

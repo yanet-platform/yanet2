@@ -204,14 +204,22 @@ export const PacketTable: React.FC<PacketTableProps> = ({
         }
     }, [sortedPackets.length, autoScroll, isCapturing, rowVirtualizer, sortState.column]);
 
-    // Detect manual scroll to disable auto-scroll
-    const handleScroll = useCallback(() => {
-        if (!parentRef.current || !isCapturing || sortState.column) return;
+    // Detect mouse wheel scroll to disable auto-scroll
+    // Using wheel event instead of scroll event to avoid race conditions with programmatic scrolling
+    useEffect(() => {
+        const element = parentRef.current;
+        if (!element || !isCapturing) return;
 
-        const { scrollTop, scrollHeight, clientHeight } = parentRef.current;
-        const isAtBottom = scrollHeight - scrollTop - clientHeight < ROW_HEIGHT * 2;
-        setAutoScroll(isAtBottom);
-    }, [isCapturing, sortState.column]);
+        const handleWheel = (e: WheelEvent) => {
+            // Only disable auto-scroll when user scrolls up
+            if (autoScroll && e.deltaY < 0) {
+                setAutoScroll(false);
+            }
+        };
+
+        element.addEventListener('wheel', handleWheel, { passive: true });
+        return () => element.removeEventListener('wheel', handleWheel);
+    }, [isCapturing, autoScroll]);
 
     const handleSelectPacket = useCallback((id: number) => {
         onSelectPacket(id === selectedPacketId ? null : id);
@@ -219,6 +227,10 @@ export const PacketTable: React.FC<PacketTableProps> = ({
 
     const handleSearchChange = useCallback((value: string) => {
         setSearchQuery(value);
+    }, []);
+
+    const handleToggleAutoScroll = useCallback(() => {
+        setAutoScroll(prev => !prev);
     }, []);
 
     // Stats text
@@ -255,6 +267,8 @@ export const PacketTable: React.FC<PacketTableProps> = ({
                 onStopCapture={onStopCapture}
                 onClearPackets={onClearPackets}
                 canClear={packets.length > 0}
+                autoScroll={autoScroll}
+                onToggleAutoScroll={handleToggleAutoScroll}
             />
 
             {/* Table container */}
@@ -267,7 +281,6 @@ export const PacketTable: React.FC<PacketTableProps> = ({
                 {/* Virtualized body */}
                 <div
                     ref={parentRef}
-                    onScroll={handleScroll}
                     className="packet-table__body"
                     style={{ height: tableBodyHeight }}
                 >
@@ -309,7 +322,6 @@ export const PacketTable: React.FC<PacketTableProps> = ({
             <Box className="packet-table__footer" style={{ height: FOOTER_HEIGHT }}>
                 <Text variant="body-2" color="secondary">{footerText}</Text>
                 <Text variant="body-2" color="secondary">
-                    {autoScroll && isCapturing && !sortState.column ? 'Auto-scrolling • ' : ''}
                     {sortState.column ? `Sorted by ${sortState.column} • ` : ''}
                     Click to inspect
                 </Text>
