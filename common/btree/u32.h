@@ -291,6 +291,11 @@ btree_u32_free(struct btree_u32 *btree) {
 	big_array_free(&btree->array);
 }
 
+static inline size_t
+btree_u32_lower_bounds(
+	struct btree_u32 *btree, uint32_t *values, size_t count, size_t *result
+);
+
 /**
  * @brief Find first element >= value (lower bound)
  *
@@ -320,42 +325,9 @@ btree_u32_free(struct btree_u32 *btree) {
  */
 size_t
 btree_u32_lower_bound(struct btree_u32 *btree, uint32_t value) {
-	const size_t nblocks = btree_u32_nblocks(btree);
-	size_t result = 0;
-	size_t k = 0;
-	size_t steps = 0;
-
-	// Prepare SIMD target value
-	__m256i target = _mm256_set1_epi32(value);
-
-	// Traverse tree from root to leaf
-	while (k < nblocks) {
-		++steps;
-
-		// Get current block
-		const struct btree_u32_block *block =
-			(const struct btree_u32_block *)big_array_get(
-				&btree->array,
-				k * sizeof(struct btree_u32_block)
-			);
-
-		// Search within block using SIMD
-		size_t i = btree_u32_block_search(block, target);
-
-		// Update result index
-		result *= (BTREE_U32_BLOCK_SIZE + 1);
-		result += i;
-
-		// Move to next block
-		k = btree_u32_next(k, i);
-	}
-
-	// Adjust result based on tree height
-	// This accounts for the implicit tree structure
-	result += btree->max_h_cnt * (steps <= btree->h);
-
-	// Clamp to valid range
-	return (result < btree->n) ? result : btree->n;
+	size_t result;
+	btree_u32_lower_bounds(btree, &value, 1, &result);
+	return result;
 }
 
 /**
@@ -391,4 +363,77 @@ btree_u32_lower_bound(struct btree_u32 *btree, uint32_t value) {
 static inline size_t
 btree_u32_upper_bound(struct btree_u32 *btree, uint32_t value) {
 	return btree_u32_lower_bound(btree, value + 1);
+}
+
+static inline size_t
+btree_u32_lower_bounds(
+	struct btree_u32 *btree, uint32_t *values, size_t count, size_t *result
+) {
+	const size_t batch_size = 32;
+
+	struct context {
+		size_t result;
+		size_t k;
+		size_t steps;
+		__m256i target;
+	} ctx[batch_size];
+
+	if (count > batch_size) {
+		count = batch_size;
+	}
+
+	// initialize context
+	for (size_t i = 0; i < count; ++i) {
+		struct context *c = &ctx[i];
+		c->result = 0;
+		c->k = 0;
+		c->steps = 0;
+		c->target = _mm256_set1_epi32(values[i]);
+	}
+
+	const size_t nblocks = btree_u32_nblocks(btree);
+
+	for (size_t step = 0; step < btree->h; ++step) {
+		for (size_t i = 0; i < count; ++i) {
+			struct context *c = &ctx[i];
+			const struct btree_u32_block *block =
+				(const struct btree_u32_block *)big_array_get(
+					&btree->array,
+					c->k * sizeof(struct btree_u32_block)
+				);
+
+			// Search within block using SIMD
+			size_t idx = btree_u32_block_search(block, c->target);
+
+			// Update result index
+			c->result *= (BTREE_U32_BLOCK_SIZE + 1);
+			c->result += idx;
+
+			// Move to the next block
+			c->k = btree_u32_next(c->k, idx);
+		}
+	}
+
+	for (size_t i = 0; i < count; ++i) {
+		struct context *c = &ctx[i];
+		if (c->k < nblocks) {
+			const struct btree_u32_block *block =
+				(const struct btree_u32_block *)big_array_get(
+					&btree->array,
+					c->k * sizeof(struct btree_u32_block)
+				);
+
+			// Search within block using SIMD
+			size_t idx = btree_u32_block_search(block, c->target);
+
+			// Update result index
+			c->result *= (BTREE_U32_BLOCK_SIZE + 1);
+			c->result += idx;
+		} else {
+			c->result += btree->max_h_cnt;
+		}
+		result[i] = (c->result < btree->n) ? c->result : btree->n;
+	}
+
+	return count;
 }
