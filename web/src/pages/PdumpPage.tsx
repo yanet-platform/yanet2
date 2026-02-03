@@ -11,7 +11,7 @@ import {
     PdumpPageHeader,
     type PdumpConfigInfo,
 } from './pdump';
-import './pdump/pdump.css';
+import './pdump/pdump.scss';
 
 const PdumpPage: React.FC = () => {
     const { configs, loading, refetch } = usePdumpConfigs();

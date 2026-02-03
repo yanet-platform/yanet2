@@ -2,7 +2,7 @@ import React from 'react';
 import { Dialog, Box, Text, Flex } from '@gravity-ui/uikit';
 import { formatHexDump, formatTCPFlags } from '../../utils/packetParser';
 import type { CapturedPacket } from './types';
-import './pdump.css';
+import './pdump.scss';
 
 interface PacketDetailsDialogProps {
     packet: CapturedPacket | null;

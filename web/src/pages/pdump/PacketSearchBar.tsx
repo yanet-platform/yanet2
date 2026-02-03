@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, TextInput, Label, Text, Button } from '@gravity-ui/uikit';
 import { ChevronsDown, Stop, TrashBin } from '@gravity-ui/icons';
 import { SEARCH_BAR_HEIGHT } from './constants';
-import './pdump.css';
+import './pdump.scss';
 
 export interface PacketSearchBarProps {
     searchQuery: string;

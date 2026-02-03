@@ -7,7 +7,7 @@ import { PacketTableRow } from './PacketTableRow';
 import { PacketTableHeader } from './PacketTableHeader';
 import { PacketSearchBar } from './PacketSearchBar';
 import type { CapturedPacket, PacketSortState, PacketSortColumn } from './types';
-import './pdump.css';
+import './pdump.scss';
 
 // Helper to extract sortable values from packet
 const getPacketSortValues = (packet: CapturedPacket) => {

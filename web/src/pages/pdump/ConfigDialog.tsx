@@ -4,7 +4,7 @@ import { FormDialog } from '../../components/FormDialog';
 import { FormField } from '../../components/FormField';
 import { pdumpApi, parseModeFlags, modeFlagsToNumber, type PdumpConfig } from '../../api/pdump';
 import { toaster } from '../../utils';
-import './pdump.css';
+import './pdump.scss';
 
 interface ConfigDialogProps {
     open: boolean;

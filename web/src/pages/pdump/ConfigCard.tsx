@@ -3,7 +3,7 @@ import { Card, Box, Text, Button, Label, Flex } from '@gravity-ui/uikit';
 import { Play, Stop, Pencil } from '@gravity-ui/icons';
 import { parseModeFlags } from '../../api/pdump';
 import type { PdumpConfigInfo } from './types';
-import './pdump.css';
+import './pdump.scss';
 
 interface ConfigCardProps {
     config: PdumpConfigInfo;
