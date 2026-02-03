@@ -4,7 +4,7 @@ use clap::{ArgAction, CommandFactory, Parser, ValueEnum, Subcommand};
 use clap_complete::CompleteEnv;
 use code::{
     DeleteConfigRequest, ShowConfigRequest, ShowConfigResponse, proxy_service_client::ProxyServiceClient,
-    SetAddrRequest,
+    SetConnTableSizeRequest,
 };
 use ptree::TreeBuilder;
 use tonic::{codec::CompressionEncoding, transport::Channel};
@@ -48,15 +48,15 @@ pub enum ModeCmd {
     Show(ShowConfigCmd),
     Delete(DeleteCmd),
 
-    Addr {
+    ConnTableSize {
         #[clap(subcommand)]
-        cmd: AddrCmd,
+        cmd: ConnTableSizeCmd,
     }
 }
 
 #[derive(Debug, Clone, Subcommand)]
-pub enum AddrCmd {
-    Set(SetAddrCmd),
+pub enum ConnTableSizeCmd {
+    Set(SetConnTableSizeCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -77,11 +77,11 @@ pub struct DeleteCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct SetAddrCmd {
+pub struct SetConnTableSizeCmd {
     #[arg(long = "cfg", short)]
     pub config_name: String,
     #[arg(long)]
-    pub addr: String,
+    pub size: u32,
 }
 
 pub struct ProxyService {
@@ -132,14 +132,14 @@ impl ProxyService {
         Ok(())
     }
 
-    pub async fn set_addr(&mut self, cmd: SetAddrCmd) -> Result<(), Box<dyn Error>> {
-        let request = SetAddrRequest {
+    pub async fn set_conn_table_size(&mut self, cmd: SetConnTableSizeCmd) -> Result<(), Box<dyn Error>> {
+        let request = SetConnTableSizeRequest {
             name: cmd.config_name.to_owned(),
-            addr: cmd.addr,
+            conn_table_size: cmd.size,
         };
-        log::debug!("SetAddrRequest: {request:?}");
-        let response = self.client.set_addr(request).await?;
-        log::debug!("SetAddrResponse: {response:?}");
+        log::debug!("SetConnTableSizeRequest: {request:?}");
+        let response = self.client.set_conn_table_size(request).await?;
+        log::debug!("SetConnTableSizeResponze: {response:?}");
         Ok(())
     }
 }
@@ -151,8 +151,8 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::List => service.list_configs().await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
-        ModeCmd::Addr { cmd } => match cmd {
-            AddrCmd::Set(cmd) => service.set_addr(cmd).await,
+        ModeCmd::ConnTableSize { cmd } => match cmd {
+            ConnTableSizeCmd::Set(cmd) => service.set_conn_table_size(cmd).await,
         },
     }
 }
@@ -166,7 +166,7 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("Proxy config".to_string());
 
     if let Some(config) = &resp.config {
-        tree.add_empty_child(format!("Addr: {}", config.addr));
+        tree.add_empty_child(format!("ConnTableSize: {}", config.conn_table_size));
     }
 
     let tree = tree.build();

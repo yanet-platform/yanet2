@@ -28,5 +28,5 @@ func DefaultConfig() *Config {
 }
 
 type ProxyConfig struct {
-	Addr string
+	ConnTableSize uint32
 }

@@ -16,11 +16,11 @@ service ProxyService {
 	// by any pipeline.
 	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
 
-	rpc SetAddr(SetAddrRequest) returns (SetAddrResponse);
+	rpc SetConnTableSize(SetConnTableSizeRequest) returns (SetConnTableSizeResponse);
 }
 
 message Config {
-	string addr = 1;
+	uint32 conn_table_size = 1;
 }
 
 message ListConfigsRequest {
@@ -53,10 +53,10 @@ message DeleteConfigResponse {
 	bool deleted = 1;
 }
 
-message SetAddrRequest {
+message SetConnTableSizeRequest {
 	string name = 1;
-	string addr = 2;
+	uint32 conn_table_size = 2;
 }
 
-message SetAddrResponse {
+message SetConnTableSizeResponse {
 }

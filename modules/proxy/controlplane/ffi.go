@@ -47,16 +47,16 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
-func (m *ModuleConfig) SetAddr(addr uint32) error {
-	rc, err := C.proxy_module_config_set_addr(
+func (m *ModuleConfig) SetConnTableSize(size uint32) error {
+	rc, err := C.proxy_module_config_set_conn_table_size(
 		m.asRawPtr(),
-		C.uint32_t(addr),
+		C.uint32_t(size),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to set address: %w", err)
+		return fmt.Errorf("failed to set conn table size: %w", err)
 	}
 	if rc < 0 {
-		return fmt.Errorf("failed to set address: code=%d", rc)
+		return fmt.Errorf("failed to set conn table size: code=%d", rc)
 	}
 
 	return nil

@@ -1,7 +1,6 @@
 package functional
 
 import (
-	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ import (
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
-func createProxyPacket(srcIP, dstIP net.IP, payload []byte) []byte {
+func createProxyPacket(srcIP, dstIP net.IP, srcPort, dstPort layers.TCPPort, syn, ack bool, payload []byte) []byte {
 	eth := layers.Ethernet{
 		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
 		DstMAC:       framework.MustParseMAC(framework.DstMAC),
@@ -32,13 +31,14 @@ func createProxyPacket(srcIP, dstIP net.IP, payload []byte) []byte {
 	}
 
 	tcp := layers.TCP{
-		SrcPort: 12345,
-		DstPort: 80,
+		SrcPort: srcPort,
+		DstPort: dstPort,
 		Seq:     1,
 		Ack:     1,
 		Window:  1024,
 		PSH:     true,
-		ACK:     true,
+		ACK:     ack,
+		SYN:     syn,
 	}
 	err := tcp.SetNetworkLayerForChecksum(&ip4)
 	if err != nil {
@@ -97,12 +97,10 @@ func TestProxy(t *testing.T) {
 	fw := globalFramework.ForTest(t)
 	require.NotNil(t, fw, "Global framework should be initialized")
 
-	proxyAddr := "10.0.0.0"
-
 	t.Run("Configure_Proxy_Module", func(t *testing.T) {
 		// Proxy-specific configuration
 		commands := []string{
-			fmt.Sprintf("/mnt/target/release/yanet-cli-proxy addr set --cfg proxy0 --addr %s", proxyAddr),
+			"/mnt/target/release/yanet-cli-proxy conn-table-size set --cfg proxy0 --size 1024",
 
 			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:5=proxy:proxy0,route:route0",
 			// Configure pipelines
@@ -114,6 +112,85 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("Test_Proxying", func(t *testing.T) {
-		handlePcap(t, fw, "proxy/001-send.pcap", "proxy/001-expect.pcap")
+		// handlePcap(t, fw, "proxy/001-send.pcap", "proxy/001-expect.pcap")
+
+		client_ip := net.ParseIP("10.0.2.1")
+		client_port := 12345
+		server_ip := net.ParseIP("10.0.1.1")
+		server_port := 80
+		local_ip := net.ParseIP("10.0.0.0")
+		local_port := 32768
+
+		// Client SYN
+		packet := createProxyPacket(
+			client_ip,
+			server_ip,
+			layers.TCPPort(client_port),
+			layers.TCPPort(server_port),
+			true, false,
+			nil,
+		)
+		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
+		require.NoError(t, err, "Failed to send packet")
+		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		require.NotNil(t, outputPacket, "Output packet should be parsed")
+
+		assert.Equal(t, local_ip.String(), outputPacket.SrcIP.String(), "Source IP should be modified")
+		assert.Equal(t, local_port, int(outputPacket.SrcPort), "Source port should be modified")
+		assert.Equal(t, server_ip.String(), outputPacket.DstIP.String(), "Destination IP should be preserved")
+
+		// Server SYN-ACK
+		packet = createProxyPacket(
+			server_ip,
+			local_ip,
+			layers.TCPPort(server_port),
+			layers.TCPPort(local_port),
+			true, true,
+			nil,
+		)
+		inputPacket, outputPacket, err = fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
+		require.NoError(t, err, "Failed to send packet")
+		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		require.NotNil(t, outputPacket, "Output packet should be parsed")
+
+		assert.Equal(t, server_ip.String(), outputPacket.SrcIP.String(), "Source IP should be modified")
+		assert.Equal(t, 80, int(outputPacket.SrcPort), "Source port should be modified")
+		assert.Equal(t, client_ip.String(), outputPacket.DstIP.String(), "Destination IP should be preserved")
+
+		// Client ACK
+		packet = createProxyPacket(
+			client_ip,
+			server_ip,
+			layers.TCPPort(client_port),
+			layers.TCPPort(server_port),
+			false, true,
+			nil,
+		)
+		inputPacket, outputPacket, err = fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
+		require.NoError(t, err, "Failed to send packet")
+		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		require.NotNil(t, outputPacket, "Output packet should be parsed")
+
+		assert.Equal(t, local_ip.String(), outputPacket.SrcIP.String(), "Source IP should be modified")
+		assert.Equal(t, local_port, int(outputPacket.SrcPort), "Source port should be modified")
+		assert.Equal(t, server_ip.String(), outputPacket.DstIP.String(), "Destination IP should be preserved")
+
+		// Server ACK
+		packet = createProxyPacket(
+			server_ip,
+			local_ip,
+			layers.TCPPort(server_port),
+			layers.TCPPort(local_port),
+			false, true,
+			nil,
+		)
+		inputPacket, outputPacket, err = fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
+		require.NoError(t, err, "Failed to send packet")
+		require.NotNil(t, inputPacket, "Input packet should be parsed")
+		require.NotNil(t, outputPacket, "Output packet should be parsed")
+
+		assert.Equal(t, server_ip.String(), outputPacket.SrcIP.String(), "Source IP should be modified")
+		assert.Equal(t, server_port, int(outputPacket.SrcPort), "Source port should be modified")
+		assert.Equal(t, client_ip.String(), outputPacket.DstIP.String(), "Destination IP should be preserved")
 	})
 }

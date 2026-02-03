@@ -8,6 +8,6 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 pub mod config;
 pub mod dataplane;
+pub mod proxy;
+pub mod proxy_module;
 pub mod macros;
-
-pub use dataplane::{new_module_proxy, proxy_handle_packets, ProxyModule};

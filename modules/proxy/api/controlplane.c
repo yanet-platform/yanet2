@@ -29,7 +29,13 @@ proxy_module_config_init(struct agent *agent, const char *name) {
 		goto fail;
 	}
 
-	config->proxy_config.addr = 0;
+	config->proxy_config.size_connections_table = 0;
+	config->proxy_config.upstream_addr = 0;
+	config->proxy_config.upstream_port = 0;
+	config->proxy_config.proxy_addr = 0;
+	config->proxy_config.proxy_port = 0;
+	config->proxy_config.upstream_net.addr = 0;
+	config->proxy_config.upstream_net.mask = 0;
 
 	return &config->cp_module;
 
@@ -65,11 +71,12 @@ proxy_module_config_delete(struct cp_module *cp_module) {
 	);
 }
 
-int proxy_module_config_set_addr(struct cp_module *cp_module, uint32_t addr) {
+int proxy_module_config_set_conn_table_size(struct cp_module *cp_module, uint32_t size) {
+	printf("proxy_module_config_set_conn_table_size\n");
 	struct proxy_module_config *config =
 		container_of(cp_module, struct proxy_module_config, cp_module);
 
-	config->proxy_config.addr = addr;
+	config->proxy_config.size_connections_table = size;
 
 	return 0;
 }

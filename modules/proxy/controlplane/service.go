@@ -2,9 +2,7 @@ package proxy
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
-	"net"
 	"sync"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -64,7 +62,7 @@ func (s *ProxyService) ShowConfig(ctx context.Context, req *proxypb.ShowConfigRe
 	config := s.configs[name]
 	if config != nil {
 		response.Config = &proxypb.Config{
-			Addr: config.Addr,
+			ConnTableSize: config.ConnTableSize,
 		}
 	}
 
@@ -87,7 +85,7 @@ func (s *ProxyService) DeleteConfig(ctx context.Context, req *proxypb.DeleteConf
 	return response, nil
 }
 
-func (s *ProxyService) SetAddr(ctx context.Context, req *proxypb.SetAddrRequest) (*proxypb.SetAddrResponse, error) {
+func (s *ProxyService) SetConnTableSize(ctx context.Context, req *proxypb.SetConnTableSizeRequest) (*proxypb.SetConnTableSizeResponse, error) {
 	name := req.GetName()
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
@@ -102,7 +100,7 @@ func (s *ProxyService) SetAddr(ctx context.Context, req *proxypb.SetAddrRequest)
 		s.configs[name] = config
 	}
 
-	config.Addr = req.Addr
+	config.ConnTableSize = req.ConnTableSize
 
 	if err := s.updateModuleConfig(name); err != nil {
 		return nil, fmt.Errorf("failed to update module config: %w", err)
@@ -110,18 +108,18 @@ func (s *ProxyService) SetAddr(ctx context.Context, req *proxypb.SetAddrRequest)
 
 	s.log.Infow("successfully set address",
 		zap.String("name", name),
-		zap.String("addr", req.Addr),
+		zap.Uint32("conn_table_size", req.ConnTableSize),
 	)
 
-	return &proxypb.SetAddrResponse{}, nil
+	return &proxypb.SetConnTableSizeResponse{}, nil
 }
 
-func ipToUint32(ip net.IP) uint32 {
-	if len(ip) == 16 {
-		return binary.LittleEndian.Uint32(ip[12:16])
-	}
-	return binary.LittleEndian.Uint32(ip)
-}
+// func ipToUint32(ip net.IP) uint32 {
+// 	if len(ip) == 16 {
+// 		return binary.LittleEndian.Uint32(ip[12:16])
+// 	}
+// 	return binary.LittleEndian.Uint32(ip)
+// }
 
 func (s *ProxyService) updateModuleConfig(name string) error {
 	moduleConfig, err := NewModuleConfig(s.agent, name)
@@ -135,7 +133,7 @@ func (s *ProxyService) updateModuleConfig(name string) error {
 		s.configs[name] = config
 	}
 
-	if err := moduleConfig.SetAddr(ipToUint32(net.ParseIP(config.Addr))); err != nil {
+	if err := moduleConfig.SetConnTableSize(config.ConnTableSize); err != nil {
 		return fmt.Errorf("failed to set addr: %w", err)
 	}
 

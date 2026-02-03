@@ -14,4 +14,4 @@ proxy_module_config_free(struct cp_module *cp_module);
 int
 proxy_module_config_delete(struct cp_module *cp_module);
 
-int proxy_module_config_set_addr(struct cp_module *cp_module, uint32_t addr);
+int proxy_module_config_set_conn_table_size(struct cp_module *cp_module, uint32_t size);

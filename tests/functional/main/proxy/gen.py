@@ -26,43 +26,43 @@ options_server_syn = [("MSS", 1260), ("SAckOK", ''), ("Timestamp", (ts_server, t
 
 # 001 - type 1 - no proxy, no sec
 
-# test_001 = ProxyTest(ip_client=IP_CLIENT, ip_server=IP_SERVER1, ip_proxy=IP_SERVER1, start_seq_to_client=ProxyTest.START_SERVER_SEQ, port_proxy=PORT_CLIENT, cport=PORT_CLIENT)
-
-# data_type1 = [
-# 	(
-# 		test_001.FromClient((0, None), 'S', options=options_client_syn),
-# 		test_001.ToServer((0, None), 'S', options=options_client_syn)
-# 	),
-#     (
-# 		test_001.FromServer((0, 1), 'AS', options=options_server_syn),
-# 		test_001.ToClient((0, 1), 'AS', options=options_server_syn)
-# 	),
-#     (
-# 		test_001.FromClient((1, 1), 'A', raw=data_client1, options=options_client_ack),
-# 		test_001.ToServer((1, 1), 'A', raw=data_client1, options=options_client_ack)
-# 	),
-#     (
-# 		test_001.FromServer((1, 1 + len(data_client1)), 'A', raw=data_server1),
-# 		test_001.ToClient((1, 1 + len(data_client1)), 'A', raw=data_server1)
-# 	),
-#     (
-# 		test_001.FromClient((1 + len(data_client1), 1 + len(data_server1)), 'A', raw=data_client2),
-# 		test_001.ToServer((1 + len(data_client1), 1 + len(data_server1)), 'A', raw=data_client2)
-# 	),
-# ]
-
-def WithPadding(pkt):
-    if len(pkt) < 60:
-        pad_len = 60 - len(pkt)
-        pad = Padding()
-        pad.load = '\x00' * pad_len
-        return pkt/pad
+test_001 = ProxyTest(ip_client=IP_CLIENT, ip_server=IP_SERVER1, ip_proxy=IP_SERVER1, start_seq_to_client=ProxyTest.START_SERVER_SEQ, port_proxy=PORT_CLIENT, cport=PORT_CLIENT)
 
 data_type1 = [
+	(
+		test_001.FromClient((0, None), 'S'),
+		test_001.ToServer((0, None), 'S')
+	),
     (
-        Ether(src=ProxyTest.MAC_CLIENT, dst=ProxyTest.MAC_PROXY)/IP(src=IP_CLIENT, dst=IP_SERVER1, ttl=64)/TCP(sport=PORT_CLIENT, dport=ProxyTest.PORT_PROXY_EXT, flags='A', seq=0, ack=None)/Raw(),
-		WithPadding(Ether(src=ProxyTest.MAC_PROXY, dst=ProxyTest.MAC_CLIENT)/IP(src=ProxyTest.IP_PROXY_INT, dst=IP_SERVER1, ttl=63)/TCP(sport=PORT_CLIENT, dport=ProxyTest.PORT_PROXY_EXT, flags='A', seq=0, ack=None)/Raw())
-    )
+		test_001.FromServer((0, 1), 'AS'),
+		test_001.ToClient((0, 1), 'AS')
+	),
+    (
+		test_001.FromClient((1, 1), 'A', raw=data_client1),
+		test_001.ToServer((1, 1), 'A', raw=data_client1)
+	),
+    (
+		test_001.FromServer((1, 1 + len(data_client1)), 'A', raw=data_server1),
+		test_001.ToClient((1, 1 + len(data_client1)), 'A', raw=data_server1)
+	),
+    (
+		test_001.FromClient((1 + len(data_client1), 1 + len(data_server1)), 'A', raw=data_client2),
+		test_001.ToServer((1 + len(data_client1), 1 + len(data_server1)), 'A', raw=data_client2)
+	),
 ]
+
+# def WithPadding(pkt):
+#     if len(pkt) < 60:
+#         pad_len = 60 - len(pkt)
+#         pad = Padding()
+#         pad.load = '\x00' * pad_len
+#         return pkt/pad
+
+# data_type1 = [
+#     (
+#         Ether(src=ProxyTest.MAC_CLIENT, dst=ProxyTest.MAC_PROXY)/IP(src=IP_CLIENT, dst=IP_SERVER1, ttl=64)/TCP(sport=PORT_CLIENT, dport=ProxyTest.PORT_PROXY_EXT, flags='A', seq=0, ack=None)/Raw(),
+# 		WithPadding(Ether(src=ProxyTest.MAC_PROXY, dst=ProxyTest.MAC_CLIENT)/IP(src=ProxyTest.IP_PROXY_INT, dst=IP_SERVER1, ttl=63)/TCP(sport=PORT_CLIENT, dport=ProxyTest.PORT_PROXY_EXT, flags='A', seq=0, ack=None)/Raw())
+#     )
+# ]
 
 WriteTest("001", data_type1)
