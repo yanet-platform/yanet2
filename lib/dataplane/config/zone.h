@@ -6,6 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "dataplane/device/device.h"
 #include "dataplane/module/module.h"
 
 #include "dataplane/time/clock.h"
@@ -25,7 +26,7 @@ struct dp_module {
 };
 
 struct dp_device {
-	char name[DEVICE_NAME_LEN];
+	char name[DEVICE_TYPE_LEN];
 	device_handler input_handler;
 	device_handler output_handler;
 };
