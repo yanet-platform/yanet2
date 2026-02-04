@@ -15,7 +15,7 @@ project(
 )
 
 add_global_arguments(
-  ['-march=corei7', '-g', '-D_GNU_SOURCE',],
+  ['-march=' + get_option('cpu_arch'), '-g', '-D_GNU_SOURCE'],
   language: 'c',
 )
 
@@ -45,7 +45,7 @@ else
 endif
 
 # Build date
-build_date = run_command('date', '+%Y-%m-%d %H:%M:%S', check: true)
+build_date = run_command('date', '-u', '+%Y-%m-%d %H:%M:%S', check: true)
 yanet_conf.set_quoted('YANET_BUILD_DATE', build_date.stdout().strip())
 
 build_cfg = 'yanet_build_config.h'
@@ -115,7 +115,7 @@ libdpdk = subproject(
   'dpdk',
   default_options: [
     'platform=generic',
-    'cpu_instruction_set=corei7',
+    'cpu_instruction_set=' + get_option('cpu_arch'),
     'pkt_mbuf_headroom=@0@'.format(get_option('pkt_mbuf_headroom')),
     'disable_apps=dumpcap,graph,pdump,proc-info,test-acl,test-bbdev,test-cmdline,test-compress-perf,test-crypto-perf,test-dma-perf,test-eventdev,test-fib,test-flow-perf,test-gpudev,test-mldev,test-pipeline,test-regex,test-sad,test-security-perf',
     'enable_apps=',
@@ -135,7 +135,6 @@ libdpdk_inc_dep = libdpdk_dep.partial_dependency(includes: true)
 
 subdir('common')
 subdir('lib')
-# subdir('filter')
 subdir('filter')
 subdir('modules')
 subdir('devices')
