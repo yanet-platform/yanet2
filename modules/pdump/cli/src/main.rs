@@ -1,11 +1,11 @@
 use core::error::Error;
 use std::io::ErrorKind;
 
-use args::{ConfigOutputFormat, ModeCmd, ReadCmd, SetConfigCmd, ShowConfigCmd};
+use args::{ConfigOutputFormat, DeleteCmd, ModeCmd, ReadCmd, SetConfigCmd, ShowConfigCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use pdumppb::{
-    ListConfigsRequest, ReadDumpRequest, ShowConfigRequest, ShowConfigResponse,
+    DeleteConfigRequest, ListConfigsRequest, ReadDumpRequest, ShowConfigRequest, ShowConfigResponse,
     pdump_service_client::PdumpServiceClient,
 };
 use ptree::TreeBuilder;
@@ -53,6 +53,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::List => service.list_configs().await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Set(cmd) => service.set_config(cmd).await,
+        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Read(cmd) => service.read_dump(cmd).await,
     }
 }
@@ -137,6 +138,14 @@ impl PdumpService {
         log::trace!("set config request: {request:?}");
         let response = self.client.set_config(request).await?.into_inner();
         log::debug!("set config response: {response:?}");
+        Ok(())
+    }
+
+    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
+        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+        log::trace!("delete config request: {request:?}");
+        self.client.delete_config(request).await?.into_inner();
+        log::info!("config {} deleted", cmd.config_name);
         Ok(())
     }
 

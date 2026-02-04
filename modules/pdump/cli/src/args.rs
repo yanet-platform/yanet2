@@ -5,7 +5,15 @@ pub enum ModeCmd {
     List,
     Show(ShowConfigCmd),
     Set(SetConfigCmd),
+    Delete(DeleteCmd),
     Read(ReadCmd),
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct DeleteCmd {
+    /// Pdump config name to delete.
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]

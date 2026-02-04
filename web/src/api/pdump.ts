@@ -73,6 +73,10 @@ export const pdumpApi = {
     ): void => {
         pdumpStreamService.stream<PdumpRecord>('ReadDump', { name }, callbacks, signal);
     },
+
+    deleteConfig: (name: string, options?: CallOptions): Promise<void> => {
+        return pdumpService.callWithBody<void>('DeleteConfig', { name }, options);
+    },
 };
 
 // Helper to parse mode bitmap to array of mode names

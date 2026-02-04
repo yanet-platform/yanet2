@@ -15,6 +15,9 @@ service PdumpService {
 	// SetConfig sets a new config for the pdump module
 	rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
 
+	// DeleteConfig deletes a pdump module configuration.
+	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+
 	// ReadDump activates reading packet dumps from shared memory. Each
 	// packet is returned as an individual Record message containing
 	// metadata and packet content.
@@ -91,6 +94,14 @@ message SetConfigRequest {
 }
 
 message SetConfigResponse {
+}
+
+// DeleteConfigRequest specifies the pdump config to delete.
+message DeleteConfigRequest {
+	string name = 1;
+}
+
+message DeleteConfigResponse {
 }
 
 // Copy pasted from import "google/protobuf/field_mask.proto";

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card, Box, Text, Button, Label, Flex } from '@gravity-ui/uikit';
-import { Play, Stop, Pencil } from '@gravity-ui/icons';
+import { Play, Stop, Pencil, TrashBin } from '@gravity-ui/icons';
 import { parseModeFlags } from '../../api/pdump';
 import type { PdumpConfigInfo } from './types';
 import './pdump.scss';
@@ -12,6 +12,7 @@ interface ConfigCardProps {
     onStartCapture: () => void;
     onStopCapture: () => void;
     onEdit: () => void;
+    onDelete: () => void;
 }
 
 const ModeLabel: React.FC<{ mode: string }> = ({ mode }) => {
@@ -34,25 +35,38 @@ export const ConfigCard: React.FC<ConfigCardProps> = ({
     onStartCapture,
     onStopCapture,
     onEdit,
+    onDelete,
 }) => {
     const modes = config.config?.mode ? parseModeFlags(config.config.mode) : [];
     const filter = config.config?.filter || '(no filter)';
 
     return (
         <Card theme="normal" className="config-card">
-            {/* Header: name + edit button */}
             <Flex justifyContent="space-between" alignItems="center" className="config-card__header">
                 <Text variant="subheader-2">{config.name}</Text>
-                <Button
-                    view="flat"
-                    size="xs"
-                    onClick={onEdit}
-                    title="Edit configuration"
-                >
-                    <Button.Icon>
-                        <Pencil />
-                    </Button.Icon>
-                </Button>
+                <Flex gap={1}>
+                    <Button
+                        view="flat"
+                        size="xs"
+                        onClick={onEdit}
+                        title="Edit configuration"
+                    >
+                        <Button.Icon>
+                            <Pencil />
+                        </Button.Icon>
+                    </Button>
+                    <Button
+                        view="flat"
+                        size="xs"
+                        onClick={onDelete}
+                        title="Delete configuration"
+                        disabled={isCaptureActive}
+                    >
+                        <Button.Icon>
+                            <TrashBin />
+                        </Button.Icon>
+                    </Button>
+                </Flex>
             </Flex>
 
             {/* Filter */}

@@ -6,6 +6,7 @@ import {
     usePdumpCapture,
     ConfigCard,
     ConfigDialog,
+    DeleteConfigDialog,
     PacketTable,
     PacketDetailsDialog,
     PdumpPageHeader,
@@ -14,11 +15,13 @@ import {
 import './pdump/pdump.scss';
 
 const PdumpPage: React.FC = () => {
-    const { configs, loading, refetch } = usePdumpConfigs();
+    const { configs, loading, refetch, deleteConfig } = usePdumpConfigs();
     const capture = usePdumpCapture();
 
     const [editingConfig, setEditingConfig] = useState<PdumpConfigInfo | null>(null);
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+    const [deletingConfigName, setDeletingConfigName] = useState<string | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
     const [selectedPacketId, setSelectedPacketId] = useState<number | null>(null);
 
     const handleStartCapture = useCallback((configName: string) => {
@@ -58,6 +61,25 @@ const PdumpPage: React.FC = () => {
     const handleClosePacketDetails = useCallback(() => {
         setSelectedPacketId(null);
     }, []);
+
+    const handleOpenDeleteDialog = useCallback((configName: string) => {
+        setDeletingConfigName(configName);
+    }, []);
+
+    const handleCloseDeleteDialog = useCallback(() => {
+        setDeletingConfigName(null);
+    }, []);
+
+    const handleConfirmDelete = useCallback(async () => {
+        if (!deletingConfigName) return;
+        setIsDeleting(true);
+        try {
+            await deleteConfig(deletingConfigName);
+            setDeletingConfigName(null);
+        } finally {
+            setIsDeleting(false);
+        }
+    }, [deletingConfigName, deleteConfig]);
 
     const selectedPacket = selectedPacketId !== null
         ? capture.packets.find(p => p.id === selectedPacketId) ?? null
@@ -109,6 +131,7 @@ const PdumpPage: React.FC = () => {
                                 onStartCapture={() => handleStartCapture(config.name)}
                                 onStopCapture={handleStopCapture}
                                 onEdit={() => handleEditConfig(config)}
+                                onDelete={() => handleOpenDeleteDialog(config.name)}
                             />
                         ))}
                     </Flex>
@@ -153,6 +176,15 @@ const PdumpPage: React.FC = () => {
                     onSaved={handleConfigSaved}
                 />
             )}
+
+            {/* Delete config confirmation dialog */}
+            <DeleteConfigDialog
+                open={deletingConfigName !== null}
+                onClose={handleCloseDeleteDialog}
+                onConfirm={handleConfirmDelete}
+                configName={deletingConfigName ?? ''}
+                loading={isDeleting}
+            />
         </PageLayout>
     );
 };

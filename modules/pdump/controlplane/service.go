@@ -21,6 +21,8 @@ import (
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb"
 )
 
+const errMsgConfigNameRequired = "module config name is required"
+
 // PdumpService provides packet capture functionality through a gRPC interface.
 // It manages packet capture configurations and ring buffers.
 type PdumpService struct {
@@ -91,7 +93,7 @@ func (m *PdumpService) ShowConfig(
 ) (*pdumppb.ShowConfigResponse, error) {
 	name := request.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
 	}
 
 	response := &pdumppb.ShowConfigResponse{}
@@ -121,7 +123,7 @@ func (m *PdumpService) SetConfig(
 ) (*pdumppb.SetConfigResponse, error) {
 	name := request.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
 	}
 
 	if request.Config == nil {
@@ -192,6 +194,65 @@ func (m *PdumpService) SetConfig(
 	m.configs[name] = &newConfig
 
 	return &pdumppb.SetConfigResponse{}, m.updateModuleConfig(name)
+}
+
+// DeleteConfig removes a packet capture configuration.
+func (m *PdumpService) DeleteConfig(
+	ctx context.Context,
+	request *pdumppb.DeleteConfigRequest,
+) (*pdumppb.DeleteConfigResponse, error) {
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	config, ok := m.configs[name]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+	}
+
+	// Terminate all active ring readers for this config to prevent memory
+	// access violations, as deleting the module will deallocate shared ring
+	// buffers.
+	for _, rr := range m.ringReaders {
+		if rr.name == name {
+			rr.cancel(fmt.Errorf("terminated by config deletion"))
+			m.log.Infow("waiting for ring reader to complete",
+				zap.String("name", name),
+			)
+			<-rr.doneCh
+		}
+	}
+
+	// Remove terminated ring readers from the slice.
+	writeIdx := 0
+	for readIdx := range m.ringReaders {
+		if m.ringReaders[readIdx].name != name {
+			if writeIdx != readIdx {
+				m.ringReaders[writeIdx] = m.ringReaders[readIdx]
+			}
+			writeIdx++
+		}
+	}
+	m.ringReaders = m.ringReaders[:writeIdx]
+
+	// Delete the module config from the data plane if it exists.
+	if config.ffiModule != nil {
+		if err := m.agent.DeleteModuleConfig(name); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
+		}
+		config.ffiModule.Free()
+	}
+
+	delete(m.configs, name)
+	m.log.Infow("deleted pdump config",
+		zap.String("name", name),
+	)
+
+	return &pdumppb.DeleteConfigResponse{}, nil
 }
 
 // transferConfigParameters transfers configuration parameters from the old config to the new FFI config.
@@ -322,7 +383,7 @@ func (m *PdumpService) ReadDump(req *pdumppb.ReadDumpRequest, stream grpc.Server
 
 	name := req.GetName()
 	if name == "" {
-		return status.Error(codes.InvalidArgument, "module config name is required")
+		return status.Error(codes.InvalidArgument, errMsgConfigNameRequired)
 	}
 	m.mu.Lock()
 	config, ok := m.configs[name]

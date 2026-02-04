@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useAsyncData } from '../../hooks/useAsyncData';
 import { pdumpApi, type PdumpConfig, type PdumpRecord } from '../../api/pdump';
 import { parsePacket, base64ToUint8Array } from '../../utils/packetParser';
+import { toaster } from '../../utils';
 import type { PdumpConfigInfo, CapturedPacket, CaptureState } from './types';
 
 const MAX_PACKETS = 10000;
@@ -35,11 +36,24 @@ export const usePdumpConfigs = () => {
         errorMessage: 'Failed to load pdump configs',
     });
 
+    const deleteConfig = useCallback(async (configName: string): Promise<boolean> => {
+        try {
+            await pdumpApi.deleteConfig(configName);
+            toaster.success('pdump-delete-success', `Config ${configName} deleted successfully`);
+            refetch();
+            return true;
+        } catch (err) {
+            toaster.error('pdump-delete-error', `Failed to delete config ${configName}`, err);
+            return false;
+        }
+    }, [refetch]);
+
     return {
         configs: data ?? [],
         loading,
         error,
         refetch,
+        deleteConfig,
     };
 };
 
