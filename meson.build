@@ -24,6 +24,30 @@ yanet_conf.set('DEBUG_NAT64', get_option('buildtype') == 'debug')
 yanet_conf.set('ENABLE_TRACE_LOG', get_option('trace').enabled())
 yanet_conf.set('MBUF_MAX_SIZE', get_option('mbuf_max_size'))
 
+# Version and build info
+cc = meson.get_compiler('c')
+yanet_conf.set_quoted('YANET_VERSION', meson.project_version())
+yanet_conf.set_quoted('YANET_COMPILER_ID', cc.get_id())
+yanet_conf.set_quoted('YANET_COMPILER_VERSION', cc.version())
+yanet_conf.set_quoted('YANET_BUILD_TYPE', get_option('buildtype'))
+
+# Git commit (if available)
+git = find_program('git', required: false)
+if git.found()
+    git_commit = run_command(git, 'rev-parse', '--short', 'HEAD', check: false)
+    if git_commit.returncode() == 0
+        yanet_conf.set_quoted('YANET_GIT_COMMIT', git_commit.stdout().strip())
+    else
+        yanet_conf.set_quoted('YANET_GIT_COMMIT', 'unknown')
+    endif
+else
+    yanet_conf.set_quoted('YANET_GIT_COMMIT', 'unknown')
+endif
+
+# Build date
+build_date = run_command('date', '+%Y-%m-%d %H:%M:%S', check: true)
+yanet_conf.set_quoted('YANET_BUILD_DATE', build_date.stdout().strip())
+
 build_cfg = 'yanet_build_config.h'
 configure_file(output: build_cfg, configuration: yanet_conf)
 
