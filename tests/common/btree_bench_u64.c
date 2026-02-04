@@ -38,9 +38,10 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #define DEFAULT_BTREE_ELEMENTS 4000000 // Default: 4M elements
-#define SEARCHES_PER_ITER 1000000      // 1M searches per iteration
-#define NUM_ITERATIONS 10	       // 10 iterations
-#define ARENA_SIZE (1ULL << 28)	       // 256 MiB
+#define BATCH_SIZE 32
+#define SEARCHES_PER_ITER BATCH_SIZE * 100000 // 3.2M searches per iteration
+#define NUM_ITERATIONS 10		      // 10 iterations
+#define ARENA_SIZE (1ULL << 28)		      // 256 MiB
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helper Functions
@@ -213,9 +214,12 @@ benchmark_btree_u64(size_t num_elements) {
 		// Warmup: perform same number of searches to warm up caches
 		uint64_t warmup_start = get_time_ns();
 
-		for (size_t i = 0; i < SEARCHES_PER_ITER; i++) {
-			volatile size_t idx =
-				btree_u64_lower_bound(&tree, search_values[i]);
+		uint64_t result[BATCH_SIZE];
+
+		for (size_t i = 0; i < SEARCHES_PER_ITER; i += BATCH_SIZE) {
+			volatile size_t idx = btree_u64_lower_bounds(
+				&tree, search_values + i, BATCH_SIZE, result
+			);
 			(void)idx; // Prevent optimization
 		}
 
@@ -228,9 +232,10 @@ benchmark_btree_u64(size_t num_elements) {
 		// Measurement: perform searches and measure time
 		uint64_t iter_start = get_time_ns();
 
-		for (size_t i = 0; i < SEARCHES_PER_ITER; i++) {
-			volatile size_t idx =
-				btree_u64_lower_bound(&tree, search_values[i]);
+		for (size_t i = 0; i < SEARCHES_PER_ITER; i += BATCH_SIZE) {
+			volatile size_t idx = btree_u64_lower_bounds(
+				&tree, search_values + i, BATCH_SIZE, result
+			);
 			(void)idx; // Prevent optimization
 		}
 

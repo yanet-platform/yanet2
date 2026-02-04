@@ -18,6 +18,7 @@
 	do {                                                                   \
 		if ((value) != TEST_SUCCESS) {                                 \
 			LOG(ERROR, "ASSERT FAILED: " msg, ##__VA_ARGS__);      \
+			return TEST_FAILED;                                    \
 		}                                                              \
 	} while (0)
 

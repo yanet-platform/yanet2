@@ -3,6 +3,7 @@
 #include "declare.h"
 #include "device.h"
 #include "net4.h"
+#include "net4_fast.h"
 #include "net6.h"
 #include "port.h"
 #include "proto.h"
@@ -37,5 +38,7 @@ REGISTER_ATTRIBUTE(net6_src);
 REGISTER_ATTRIBUTE(net6_dst);
 REGISTER_ATTRIBUTE(vlan);
 REGISTER_ATTRIBUTE(device);
+REGISTER_ATTRIBUTE(net4_fast_dst);
+REGISTER_ATTRIBUTE(net4_fast_src);
 
 #undef REGISTER_ATTRIBUTE

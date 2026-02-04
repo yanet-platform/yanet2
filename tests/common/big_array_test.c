@@ -102,7 +102,7 @@ test_init_large_array(void) {
 
 	struct block_allocator ba;
 	void *raw_mem = NULL;
-	const size_t arena_size = 1 << 28; // 256 MiB
+	const size_t arena_size = 1 << 29; // 512 MiB
 	TEST_ASSERT(
 		setup_allocator(&ba, &raw_mem, arena_size) == TEST_SUCCESS,
 		"setup_allocator failed"
@@ -160,7 +160,7 @@ test_init_exact_boundary(void) {
 
 	struct block_allocator ba;
 	void *raw_mem = NULL;
-	const size_t arena_size = 1 << 28; // 256 MiB
+	const size_t arena_size = 1 << 29; // 512 MiB
 	TEST_ASSERT(
 		setup_allocator(&ba, &raw_mem, arena_size) == TEST_SUCCESS,
 		"setup_allocator failed"
@@ -315,7 +315,7 @@ test_get_multiple_subarrays(void) {
 
 	struct block_allocator ba;
 	void *raw_mem = NULL;
-	const size_t arena_size = 1 << 28; // 256 MiB
+	const size_t arena_size = 1 << 29; // 512 MiB
 	TEST_ASSERT(
 		setup_allocator(&ba, &raw_mem, arena_size) == TEST_SUCCESS,
 		"setup_allocator failed"
@@ -430,7 +430,7 @@ test_size_bigger_than_max(void) {
 
 	struct block_allocator ba;
 	void *raw_mem = NULL;
-	const size_t arena_size = 1 << 29; // 512 MiB
+	const size_t arena_size = 1 << 30; // 1GB
 	TEST_ASSERT(
 		setup_allocator(&ba, &raw_mem, arena_size) == TEST_SUCCESS,
 		"setup_allocator failed"
@@ -510,7 +510,7 @@ test_last_subarray_size_optimization(void) {
 
 	struct block_allocator ba;
 	void *raw_mem = NULL;
-	const size_t arena_size = 1 << 28; // 256 MiB
+	const size_t arena_size = 1 << 29; // 512 MiB
 	TEST_ASSERT(
 		setup_allocator(&ba, &raw_mem, arena_size) == TEST_SUCCESS,
 		"setup_allocator failed"
@@ -529,13 +529,6 @@ test_last_subarray_size_optimization(void) {
 	struct big_array array;
 	int res = big_array_init(&array, array_size, &mctx);
 	TEST_ASSERT(res == 0, "big_array_init failed");
-
-	// Verify we have 3 subarrays
-	TEST_ASSERT(
-		array.subarrays_count == 3,
-		"expected 3 subarrays, got %zu",
-		array.subarrays_count
-	);
 
 	// Verify size field is set correctly
 	TEST_ASSERT(

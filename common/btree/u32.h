@@ -152,7 +152,7 @@ btree_u32_block_search(const struct btree_u32_block *block, __m256i target) {
  * with values from the sorted input array. Updates tree height and
  * max height count during construction.
  */
-static void
+static inline void
 btree_u32_build(
 	struct btree_u32 *btree,
 	size_t v,
@@ -228,7 +228,7 @@ btree_u32_build(
  * }
  * @endcode
  */
-int
+static inline int
 btree_u32_init(
 	struct btree_u32 *btree,
 	const uint32_t *data,
@@ -285,14 +285,17 @@ btree_u32_init(
  * // tree is now safe to re-initialize or discard
  * @endcode
  */
-void
+static inline void
 btree_u32_free(struct btree_u32 *btree) {
 	big_array_free(&btree->array);
 }
 
 static inline size_t
 btree_u32_lower_bounds(
-	struct btree_u32 *btree, uint32_t *values, size_t count, size_t *result
+	struct btree_u32 *btree,
+	uint32_t *values,
+	size_t count,
+	uint32_t *result
 );
 
 /**
@@ -322,9 +325,9 @@ btree_u32_lower_bounds(
  * // Returns 5 (n, no element >= 25)
  * @endcode
  */
-size_t
+static inline uint32_t
 btree_u32_lower_bound(struct btree_u32 *btree, uint32_t value) {
-	size_t result;
+	uint32_t result;
 	btree_u32_lower_bounds(btree, &value, 1, &result);
 	return result;
 }
@@ -366,20 +369,23 @@ btree_u32_upper_bound(struct btree_u32 *btree, uint32_t value) {
 
 #define PREFETCH 0
 
+enum { btree_u32_max_batch_size = 32 };
+
 static inline size_t
 btree_u32_lower_bounds(
-	struct btree_u32 *btree, uint32_t *values, size_t count, size_t *result
+	struct btree_u32 *btree,
+	uint32_t *values,
+	size_t count,
+	uint32_t *result
 ) {
-	const size_t batch_size = 32;
-
 	struct context {
 		size_t result;
 		size_t k;
 		__m256i target;
-	} ctx[batch_size];
+	} ctx[btree_u32_max_batch_size];
 
-	if (count > batch_size) {
-		count = batch_size;
+	if (count > btree_u32_max_batch_size) {
+		count = btree_u32_max_batch_size;
 	}
 
 	// initialize context

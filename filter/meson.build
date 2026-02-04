@@ -11,6 +11,8 @@ compiler_sources = files(
   'compiler/proto_range.c',
   'compiler/proto.c',
   'compiler/vlan.c',
+  'compiler/net6_fast.c',
+  'compiler/net4_fast.c',
 )
 
 lib_filter_compiler = static_library(

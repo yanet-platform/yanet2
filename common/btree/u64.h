@@ -159,7 +159,7 @@ btree_u64_block_search(
  * with values from the sorted input array. Updates tree height and
  * max height count during construction.
  */
-static void
+static inline void
 btree_u64_build(
 	struct btree_u64 *btree,
 	size_t v,
@@ -235,7 +235,7 @@ btree_u64_build(
  * }
  * @endcode
  */
-int
+static inline int
 btree_u64_init(
 	struct btree_u64 *btree,
 	const uint64_t *data,
@@ -292,10 +292,15 @@ btree_u64_init(
  * // tree is now safe to re-initialize or discard
  * @endcode
  */
-void
+static inline void
 btree_u64_free(struct btree_u64 *btree) {
 	big_array_free(&btree->array);
 }
+
+static inline size_t
+btree_u64_lower_bounds(
+	struct btree_u64 *btree, uint64_t *values, size_t count, size_t *result
+);
 
 /**
  * @brief Find first element >= value (lower bound)
@@ -324,45 +329,11 @@ btree_u64_free(struct btree_u64 *btree) {
  * // Returns 5 (n, no element >= 2500)
  * @endcode
  */
-size_t
+static inline size_t
 btree_u64_lower_bound(struct btree_u64 *btree, uint64_t value) {
-	const size_t nblocks = btree_u64_nblocks(btree);
-	size_t result = 0;
-	size_t k = 0;
-	size_t steps = 0;
-
-	// Prepare SIMD target value with sign bit trick
-	__m256i target_signed =
-		_mm256_set1_epi64x(value ^ 0x8000000000000000ULL);
-
-	// Traverse tree from root to leaf
-	while (k < nblocks) {
-		++steps;
-
-		// Get current block
-		const struct btree_u64_block *block =
-			(const struct btree_u64_block *)big_array_get(
-				&btree->array,
-				k * sizeof(struct btree_u64_block)
-			);
-
-		// Search within block using SIMD
-		size_t i = btree_u64_block_search(block, target_signed);
-
-		// Update result index
-		result *= (BTREE_U64_BLOCK_SIZE + 1);
-		result += i;
-
-		// Move to next block
-		k = btree_u64_next(k, i);
-	}
-
-	// Adjust result based on tree height
-	// This accounts for the implicit tree structure
-	result += btree->max_h_cnt * (steps <= btree->h);
-
-	// Clamp to valid range
-	return (result < btree->n) ? result : btree->n;
+	size_t result;
+	btree_u64_lower_bounds(btree, &value, 1, &result);
+	return result;
 }
 
 /**
@@ -399,3 +370,104 @@ static inline size_t
 btree_u64_upper_bound(struct btree_u64 *btree, uint64_t value) {
 	return btree_u64_lower_bound(btree, value + 1);
 }
+
+#define PREFETCH 0
+
+enum { btree_u64_max_batch_size = 32 };
+
+static inline size_t
+btree_u64_lower_bounds(
+	struct btree_u64 *btree, uint64_t *values, size_t count, size_t *result
+) {
+	struct context {
+		size_t result;
+		size_t k;
+		__m256i target;
+	} ctx[btree_u64_max_batch_size];
+
+	if (count > btree_u64_max_batch_size) {
+		count = btree_u64_max_batch_size;
+	}
+
+	// initialize context
+	for (size_t i = 0; i < count; ++i) {
+		struct context *c = &ctx[i];
+		c->result = 0;
+		c->k = 0;
+		c->target =
+			_mm256_set1_epi64x(values[i] ^ 0x8000000000000000ULL);
+		;
+	}
+
+	const size_t nblocks = btree_u64_nblocks(btree);
+
+	for (size_t step = 0; step < btree->h; ++step) {
+		for (size_t i = 0; i < count; ++i) {
+			if (PREFETCH > 0 && i + PREFETCH < count) {
+				__builtin_prefetch(
+					big_array_get(
+						&btree->array,
+						ctx[i + PREFETCH].k *
+							sizeof(struct
+							       btree_u64_block)
+					),
+					0,
+					3
+				);
+			}
+
+			struct context *c = &ctx[i];
+			const struct btree_u64_block *block =
+				(const struct btree_u64_block *)big_array_get(
+					&btree->array,
+					c->k * sizeof(struct btree_u64_block)
+				);
+
+			// Search within block using SIMD
+			size_t idx = btree_u64_block_search(block, c->target);
+
+			// Update result index
+			c->result *= (BTREE_U64_BLOCK_SIZE + 1);
+			c->result += idx;
+
+			// Move to the next block
+			c->k = btree_u64_next(c->k, idx);
+		}
+	}
+
+	for (size_t i = 0; i < count; ++i) {
+		if (PREFETCH > 0 && i + PREFETCH < count) {
+			__builtin_prefetch(
+				big_array_get(
+					&btree->array,
+					ctx[i + PREFETCH].k *
+						sizeof(struct btree_u64_block)
+				),
+				0,
+				3
+			);
+		}
+		struct context *c = &ctx[i];
+		if (c->k < nblocks) {
+			const struct btree_u64_block *block =
+				(const struct btree_u64_block *)big_array_get(
+					&btree->array,
+					c->k * sizeof(struct btree_u64_block)
+				);
+
+			// Search within block using SIMD
+			size_t idx = btree_u64_block_search(block, c->target);
+
+			// Update result index
+			c->result *= (BTREE_U64_BLOCK_SIZE + 1);
+			c->result += idx;
+		} else {
+			c->result += btree->max_h_cnt;
+		}
+		result[i] = (c->result < btree->n) ? c->result : btree->n;
+	}
+
+	return count;
+}
+
+#undef PREFETCH

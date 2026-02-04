@@ -91,7 +91,7 @@ libdpdk = subproject(
   'dpdk',
   default_options: [
     'platform=generic',
-    'cpu_instruction_set=corei7',
+    'cpu_instruction_set=haswell',
     'pkt_mbuf_headroom=@0@'.format(get_option('pkt_mbuf_headroom')),
     'disable_apps=dumpcap,graph,pdump,proc-info,test-acl,test-bbdev,test-cmdline,test-compress-perf,test-crypto-perf,test-dma-perf,test-eventdev,test-fib,test-flow-perf,test-gpudev,test-mldev,test-pipeline,test-regex,test-sad,test-security-perf',
     'enable_apps=',
@@ -111,7 +111,6 @@ libdpdk_inc_dep = libdpdk_dep.partial_dependency(includes: true)
 
 subdir('common')
 subdir('lib')
-# subdir('filter')
 subdir('filter')
 subdir('modules')
 subdir('devices')

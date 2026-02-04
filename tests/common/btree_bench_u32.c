@@ -215,7 +215,7 @@ benchmark_btree_u32(size_t num_elements) {
 		// Warmup: perform same number of searches to warm up caches
 		uint64_t warmup_start = get_time_ns();
 
-		size_t result[BATCH_SIZE];
+		uint32_t result[BATCH_SIZE];
 
 		for (size_t i = 0; i < SEARCHES_PER_ITER; i += BATCH_SIZE) {
 			volatile size_t count = btree_u32_lower_bounds(
