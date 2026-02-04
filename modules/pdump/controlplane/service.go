@@ -9,6 +9,7 @@ package pdump
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 
 	"go.uber.org/zap"
@@ -228,16 +229,9 @@ func (m *PdumpService) DeleteConfig(
 	}
 
 	// Remove terminated ring readers from the slice.
-	writeIdx := 0
-	for readIdx := range m.ringReaders {
-		if m.ringReaders[readIdx].name != name {
-			if writeIdx != readIdx {
-				m.ringReaders[writeIdx] = m.ringReaders[readIdx]
-			}
-			writeIdx++
-		}
-	}
-	m.ringReaders = m.ringReaders[:writeIdx]
+	m.ringReaders = slices.DeleteFunc(m.ringReaders, func(rr ringReader) bool {
+		return rr.name == name
+	})
 
 	// Delete the module config from the data plane if it exists.
 	if config.ffiModule != nil {
@@ -313,21 +307,10 @@ func (m *PdumpService) updateModuleConfig(
 		}
 	}
 
-	// Second pass: remove terminated ring readers from the slice
-	// We use a write index to compact the slice in-place, avoiding allocations
-	writeIdx := 0
-	for readIdx := range m.ringReaders {
-		if m.ringReaders[readIdx].name != name {
-			if writeIdx != readIdx {
-				// Keep this ring reader - copy it to the write position
-				m.ringReaders[writeIdx] = m.ringReaders[readIdx]
-			}
-			writeIdx++
-		}
-		// Skip terminated ring readers (don't increment writeIdx)
-	}
-	// Truncate the slice to remove the terminated entries
-	m.ringReaders = m.ringReaders[:writeIdx]
+	// Remove terminated ring readers from the slice.
+	m.ringReaders = slices.DeleteFunc(m.ringReaders, func(rr ringReader) bool {
+		return rr.name == name
+	})
 
 	m.log.Debugw("update config", zap.String("module", name))
 
