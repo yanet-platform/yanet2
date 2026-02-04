@@ -142,7 +142,6 @@ subdir('devices')
 subdir('controlplane')
 subdir('dataplane')
 subdir('mock')
-subdir('sock-send')
 subdir('tests')
 
 # Define a default test setup that excludes large tests
