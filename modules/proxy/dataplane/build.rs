@@ -5,40 +5,37 @@ fn main() {
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-changed=config.h");
 
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let project_root = PathBuf::from(&manifest_dir)
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf();
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let project_root = manifest_dir.join("../../../");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     let dpdk_root = env::var("DPDK_ROOT")
-        .unwrap_or_else(|_| format!("{}/subprojects/dpdk", project_root.display()));
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| project_root.join("subprojects/dpdk"));
 
-    let build_dir = env::var("MESON_BUILD_ROOT")
-        .unwrap_or_else(|_| format!("{}/build", project_root.display()));
+    let build_root = env::var("MESON_BUILD_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| project_root.join("build"));
+    let dpdk_build_root = build_root.join("subprojects/dpdk");
 
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
         .clang_arg("-march=corei7")
         .clang_arg(format!("-I{}", project_root.display()))
         .clang_arg(format!("-I{}/lib", project_root.display()))
-        .clang_arg(format!("-I{}/subprojects/dpdk", build_dir))
-        .clang_arg(format!("-I{}/lib/eal/include", dpdk_root))
-        .clang_arg(format!("-I{}/lib/eal/x86/include", dpdk_root))
-        .clang_arg(format!("-I{}/lib/eal/linux/include", dpdk_root))
-        .clang_arg(format!("-I{}/lib/log", dpdk_root))
-        .clang_arg(format!("-I{}/lib/mbuf", dpdk_root))
-        .clang_arg(format!("-I{}/lib/mempool", dpdk_root))
-        .clang_arg(format!("-I{}/lib/ring", dpdk_root))
-        .clang_arg(format!("-I{}/lib/net", dpdk_root))
-        .clang_arg(format!("-I{}/lib/ethdev", dpdk_root))
-        .clang_arg(format!("-I{}/config", dpdk_root))
+        .clang_arg(format!("-I{}/subprojects/dpdk", build_root.display()))
+        .clang_arg(format!("-I{}/subprojects/dpdk/config", build_root.display()))
+        .clang_arg(format!("-I{}/lib/eal/include", dpdk_root.display()))
+        .clang_arg(format!("-I{}/lib/eal/x86/include", dpdk_root.display()))
+        .clang_arg(format!("-I{}/lib/eal/linux/include", dpdk_root.display()))
+        .clang_arg(format!("-I{}/lib/log", dpdk_root.display()))
+        .clang_arg(format!("-I{}/lib/mbuf", dpdk_root.display()))
+        .clang_arg(format!("-I{}/lib/mempool", dpdk_root.display()))
+        .clang_arg(format!("-I{}/lib/ring", dpdk_root.display()))
+        .clang_arg(format!("-I{}/lib/net", dpdk_root.display()))
+        .clang_arg(format!("-I{}/lib/ethdev", dpdk_root.display()))
+        .clang_arg(format!("-I{}/config", dpdk_root.display()))
         .wrap_static_fns(true)
         .wrap_static_fns_path(out_path.join("static_fns.c"))
         .allowlist_type("module")
@@ -76,24 +73,31 @@ fn main() {
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
 
+    let includes = [
+        &dpdk_root,
+        &dpdk_build_root,
+        &dpdk_root.join("config"),
+        &dpdk_root.join("lib/eal/include"),
+        &dpdk_root.join("lib/eal/linux/include"),
+        &dpdk_root.join("lib/eal/x86/include"),
+        &dpdk_root.join("lib/eal/common"),
+        &dpdk_root.join("lib/eal"),
+        &dpdk_root.join("lib/log"),
+        &dpdk_root.join("lib/mbuf"),
+        &dpdk_root.join("lib/mempool"),
+        &dpdk_root.join("lib/ring"),
+        &dpdk_root.join("lib/net"),
+        &dpdk_root.join("lib/ethdev"),
+        &manifest_dir,
+        &project_root,
+        &project_root.join("lib"),
+    ];
+
     cc::Build::new()
-        .file(out_path.join("static_fns.c"))
-        .include(&manifest_dir)
-        .include(&project_root)
-        .include(format!("{}/lib", project_root.display()))
-        .include(format!("{}/subprojects/dpdk", build_dir))
-        .include(format!("{}/lib/eal/include", dpdk_root))
-        .include(format!("{}/lib/eal/include/generic", dpdk_root))
-        .include(format!("{}/lib/eal/x86/include", dpdk_root))
-        .include(format!("{}/lib/eal/linux/include", dpdk_root))
-        .include(format!("{}/lib/log", dpdk_root))
-        .include(format!("{}/lib/mbuf", dpdk_root))
-        .include(format!("{}/lib/mempool", dpdk_root))
-        .include(format!("{}/lib/ring", dpdk_root))
-        .include(format!("{}/lib/net", dpdk_root))
-        .include(format!("{}/lib/ethdev", dpdk_root))
-        .include(format!("{}/config", dpdk_root))
+        .includes(includes)
+        // fixme
         .flag("-march=corei7")
+        .file(out_path.join("static_fns.c"))
         .compile("static_fns");
 
     println!("cargo::rustc-link-search={}", out_path.to_str().unwrap());
