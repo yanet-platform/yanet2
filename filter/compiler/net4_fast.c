@@ -58,29 +58,16 @@ validate_net4(struct net4 *net) {
 
 static void
 net4_from_to(struct net4 *n, uint32_t *from, uint32_t *to) {
-	*from = 0;
-	*to = 0;
-
-	// IP addresses are stored in network byte order (big-endian)
-	// We need to convert byte array to uint32_t in network byte order
-	for (size_t byte_idx = 0; byte_idx < 4; ++byte_idx) {
-		*from |= ((uint32_t)n->addr[byte_idx]) << (24 - byte_idx * 8);
-		uint32_t mask_byte = n->mask[byte_idx];
-		uint32_t addr_byte = n->addr[byte_idx];
-
-		// For each bit in the byte (MSB first)
-		for (int bit = 7; bit >= 0; --bit) {
-			if (!(mask_byte & (1 << bit))) {
-				// This bit is not masked, so set it in 'to'
-				*to |= 1u << (24 - byte_idx * 8 + bit);
-			} else {
-				// This bit is masked, copy from addr
-				if (addr_byte & (1 << bit)) {
-					*to |= 1u << (24 - byte_idx * 8 + bit);
-				}
-			}
-		}
+	uint32_t addr = 0;
+	uint32_t mask = 0;
+	
+	for (size_t i = 0; i < 4; ++i) {
+		addr |= ((uint32_t)n->addr[i]) << (24 - i * 8);
+		mask |= ((uint32_t)n->mask[i]) << (24 - i * 8);
 	}
+	
+	*from = addr & mask;
+	*to = addr | ~mask;
 }
 
 static int
@@ -141,6 +128,7 @@ fill_value_registry(
 	struct value_registry *registry,
 	struct segment *segments
 ) {
+	(void)segments;
 	for (size_t i = 0; i < rules_count; ++i) {
 		struct net4_count cur = getter(rules + i);
 		if (value_registry_start(registry) != 0) {
@@ -149,14 +137,15 @@ fill_value_registry(
 		for (size_t j = 0; j < cur.count; ++j) {
 			uint32_t from, to;
 			net4_from_to(cur.net4 + j, &from, &to);
-			size_t idx = btree_u32_upper_bound(
+			size_t idx = btree_u32_lower_bound(
 				&classifier->btree, from + 1
 			);
 			assert(idx > 0);
 			--idx;
-			assert(ADDR_OF(&classifier->to)[idx] >= to);
+			uint32_t *to_array = ADDR_OF(&classifier->to);
+			assert(to_array[idx] >= to);
 			if (value_registry_collect(
-				    registry, segments[idx].idx
+				    registry, idx
 			    ) != 0) {
 				return -1;
 			}
@@ -343,3 +332,4 @@ FILTER_ATTR_COMPILER_FREE_FUNC(net4_fast_dst)(
 		(struct net4_fast_classifier *)data;
 	net4_fast_classifier_free(classifier, memory_context);
 }
+

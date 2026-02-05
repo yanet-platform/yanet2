@@ -110,7 +110,7 @@ filter_actions_with_category(
 					    : __slots[(__root << 1) * count +  \
 						      idx],                    \
 				__slots[(__root << 1 | 1) * count + idx]       \
-			);                                                     \
+			); \
 			struct value_range *__range =                          \
 				ADDR_OF(&__r->registry.ranges) + __res;        \
 			(result)[idx] = __range;                               \
