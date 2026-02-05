@@ -19,6 +19,7 @@ lib_worker_dp = static_library(
 )
 
 lib_worker_dp_dep = declare_dependency(
-  link_with: lib_worker_dp,
+  link_with: [lib_worker_dp],
   include_directories: yanet_libdir,
+  dependencies: dependencies,
 )

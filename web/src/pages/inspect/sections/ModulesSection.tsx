@@ -11,7 +11,7 @@ export interface ModulesSectionProps {
 }
 
 export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
-    const modules = instance.dpModules ?? [];
+    const modules = instance.dp_modules ?? [];
 
     return (
         <InspectSection
@@ -25,7 +25,7 @@ export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
             {modules.length > 0 ? (
                 <Box className="modules-grid">
                     {modules.map((module) => {
-                        const configCount = instance.cpConfigs?.filter(
+                        const configCount = instance.cp_configs?.filter(
                             (cfg) => cfg.type?.toLowerCase() === module.name?.toLowerCase()
                         ).length || 0;
 

@@ -85,8 +85,8 @@ export const RuleRow: React.FC<RuleRowProps> = memo(({
             </Box>
 
             {/* VLANs */}
-            <Box style={cellStyles.vlans} title={formatVlanRanges(rule.vlanRanges)}>
-                <Text variant="body-1">{formatVlanRanges(rule.vlanRanges)}</Text>
+            <Box style={cellStyles.vlans} title={formatVlanRanges(rule.vlan_ranges)}>
+                <Text variant="body-1">{formatVlanRanges(rule.vlan_ranges)}</Text>
             </Box>
 
             {/* Sources */}

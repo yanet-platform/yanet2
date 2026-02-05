@@ -4,6 +4,7 @@ option(
   value: 'disabled',
   description: 'Enable libFuzzer integration.',
 )
+
 option(
   'trace',
   type: 'feature',
@@ -22,6 +23,13 @@ option(
   'pkt_mbuf_headroom',
   type: 'integer',
   value: 256,
-  description: 'Default data offset (in bytes) in a packet buffer'
-                + 'to leave room for additional headers.'
+  description: 'Default data offset (in bytes) in a packet buffer '
+                + 'to leave room for additional headers.',
+)
+
+option(
+  'cpu_arch',
+  type: 'string',
+  value: 'corei7',
+  description: 'Target CPU architecture for -march flag.',
 )

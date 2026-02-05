@@ -79,12 +79,12 @@ export const useAclData = (): UseAclDataResult => {
                             const rules = response.rules || [];
                             dataMap.set(configName, {
                                 rules,
-                                fwstateMap: response.fwstateMap,
-                                fwstateSync: response.fwstateSync,
+                                fwstateMap: response.fwstate_map,
+                                fwstateSync: response.fwstate_sync,
                                 state: 'saved',
                                 originalRules: rules,
-                                originalFwstateMap: response.fwstateMap,
-                                originalFwstateSync: response.fwstateSync,
+                                originalFwstateMap: response.fwstate_map,
+                                originalFwstateSync: response.fwstate_sync,
                             });
                         } catch (err) {
                             toaster.error(`acl-fetch-error-${configName}`, `Failed to load ACL config ${configName}`, err);
@@ -131,12 +131,12 @@ export const useAclData = (): UseAclDataResult => {
                         const rules = response.rules || [];
                         dataMap.set(configName, {
                             rules,
-                            fwstateMap: response.fwstateMap,
-                            fwstateSync: response.fwstateSync,
+                            fwstateMap: response.fwstate_map,
+                            fwstateSync: response.fwstate_sync,
                             state: 'saved',
                             originalRules: rules,
-                            originalFwstateMap: response.fwstateMap,
-                            originalFwstateSync: response.fwstateSync,
+                            originalFwstateMap: response.fwstate_map,
+                            originalFwstateSync: response.fwstate_sync,
                         });
                     } catch (err) {
                         toaster.error(`acl-reload-error-${configName}`, `Failed to reload ACL config ${configName}`, err);
@@ -292,8 +292,8 @@ export const useAclData = (): UseAclDataResult => {
         try {
             await API.acl.updateFWStateConfig({
                 name: configName,
-                mapConfig: data.fwstateMap,
-                syncConfig: data.fwstateSync,
+                map_config: data.fwstateMap,
+                sync_config: data.fwstateSync,
             });
             markConfigSaved(configName);
             toaster.success('acl-fwstate-save-success', `FW State config for ${configName} saved successfully`);

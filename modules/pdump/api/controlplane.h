@@ -65,7 +65,10 @@ pdump_module_config_set_snaplen(
 // Initialize worker ring buffers for packet dumping.
 struct ring_buffer *
 pdump_module_config_set_per_worker_ring(
-	struct cp_module *module, uint32_t size, uint64_t *worker_count
+	struct cp_module *module,
+	uint32_t size,
+	uint64_t *worker_count,
+	uintptr_t cb
 );
 
 // Converts a shared memory offset to a direct memory address.

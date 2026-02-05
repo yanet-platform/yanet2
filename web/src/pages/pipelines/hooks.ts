@@ -295,12 +295,12 @@ export const useFunctionCounters = (
         const fetchDevices = async () => {
             try {
                 const response = await API.inspect.inspect();
-                const allDevices = response.instanceInfo?.devices ?? [];
+                const allDevices = response.instance_info?.devices ?? [];
                 
                 // Find devices that use this pipeline
                 const matchingDevices = allDevices.filter(device => {
-                    const inputPipelines = device.inputPipelines ?? [];
-                    const outputPipelines = device.outputPipelines ?? [];
+                    const inputPipelines = device.input_pipelines ?? [];
+                    const outputPipelines = device.output_pipelines ?? [];
                     return inputPipelines.some(p => p.name === pipelineName) ||
                            outputPipelines.some(p => p.name === pipelineName);
                 });

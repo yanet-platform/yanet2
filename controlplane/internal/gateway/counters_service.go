@@ -111,15 +111,16 @@ func (m *CountersService) Module(
 	ctx context.Context,
 	request *ynpb.ModuleCountersRequest,
 ) (*ynpb.CountersResponse, error) {
-	device := request.GetDevice()
-	pipeline := request.GetPipeline()
-	function := request.GetFunction()
-	chain := request.GetChain()
-	moduleType := request.GetModuleType()
-	moduleName := request.GetModuleName()
-
 	dpConfig := m.shm.DPConfig(m.instanceID)
-	counterValues := dpConfig.ModuleCounters(device, pipeline, function, chain, moduleType, moduleName)
+	counterValues := dpConfig.ModuleCounters(
+		request.GetDevice(),
+		request.GetPipeline(),
+		request.GetFunction(),
+		request.GetChain(),
+		request.GetModuleType(),
+		request.GetModuleName(),
+		request.GetCounterQuery(),
+	)
 
 	response := &ynpb.CountersResponse{
 		Counters: m.encodeCounters(counterValues),

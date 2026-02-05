@@ -1,0 +1,248 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+// Packet Table
+.packet-table {
+    @include flex-column;
+
+    &__container {
+        height: 100%;
+    }
+
+    &__wrapper {
+        flex: 1;
+        border: 1px solid var(--g-color-line-generic);
+        border-radius: $radius-lg;
+        overflow: hidden;
+        @include flex-column;
+    }
+
+    &__body {
+        overflow: auto;
+        contain: strict;
+    }
+
+    &__virtual-container {
+        position: relative;
+    }
+
+    &__empty {
+        padding: 40px $spacing-xl;
+        text-align: center;
+    }
+
+    &__footer {
+        @include flex-row($spacing-lg);
+        justify-content: space-between;
+        flex-shrink: 0;
+    }
+}
+
+// Search Bar
+.packet-search-bar {
+    @include flex-row($spacing-lg);
+    flex-shrink: 0;
+
+    &__input {
+        width: 350px;
+    }
+
+    &__info {
+        @include flex-row($spacing-sm);
+        flex: 1;
+    }
+
+    &__actions {
+        @include flex-row($spacing-sm);
+    }
+}
+
+// Packet Details Section
+.packet-section {
+    margin-bottom: $spacing-lg;
+
+    &__title {
+        margin-bottom: $spacing-sm;
+        display: block;
+    }
+}
+
+// Packet Details Dialog Section
+.packet-dialog-section {
+    margin-bottom: $spacing-md;
+    padding: $spacing-md;
+    background-color: var(--g-color-base-generic-ultralight);
+    border-radius: $radius-md;
+    border: 1px solid var(--g-color-line-generic);
+
+    &__title {
+        margin-bottom: $spacing-sm;
+        display: block;
+    }
+}
+
+// Packet Field
+.packet-field {
+    margin-bottom: $spacing-xs;
+
+    &--compact {
+        margin-bottom: 2px;
+    }
+
+    &__label {
+        min-width: 120px;
+
+        &--compact {
+            min-width: 100px;
+            font-size: 13px;
+        }
+    }
+
+    &__value--compact {
+        font-size: 13px;
+    }
+}
+
+// Hex Dump
+.packet-hexdump {
+    background-color: var(--g-color-base-generic);
+    padding: $spacing-md;
+    border-radius: $radius-sm;
+    overflow: auto;
+
+    &--compact {
+        padding: 10px;
+    }
+
+    &__pre {
+        margin: 0;
+        font-family: var(--g-font-family-monospace);
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre;
+    }
+}
+
+// Packet Details Card
+.packet-details-card {
+    padding: $spacing-lg;
+    height: 100%;
+    overflow: auto;
+
+    &__title {
+        margin-bottom: $spacing-lg;
+        display: block;
+    }
+
+    &__spacer {
+        height: $spacing-lg;
+    }
+}
+
+// Dialog content
+.packet-dialog {
+    &__content {
+        max-height: 70vh;
+        overflow: auto;
+    }
+
+    &__flex-wrap {
+        flex-wrap: wrap;
+    }
+
+    &__margin-top {
+        margin-top: $spacing-xs;
+    }
+}
+
+// Config Card
+.config-card {
+    padding: $spacing-md $spacing-lg;
+    width: 280px;
+
+    &__header {
+        margin-bottom: $spacing-sm;
+    }
+
+    &__filter {
+        margin-bottom: 6px;
+
+        &-label {
+            font-size: 12px;
+        }
+
+        &-value {
+            @include text-truncate;
+            display: block;
+            font-size: 12px;
+            margin-top: 2px;
+        }
+    }
+
+    &__mode {
+        margin-bottom: $spacing-md;
+
+        &-label {
+            font-size: 12px;
+            margin-bottom: $spacing-xs;
+            display: block;
+        }
+    }
+}
+
+// Table Header
+.packet-table-header {
+    @include flex-row($spacing-sm);
+    padding: 0 $spacing-sm;
+    border-bottom: 1px solid var(--g-color-line-generic);
+    background-color: var(--g-color-base-generic);
+    font-weight: $font-weight-medium;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+// Config Dialog
+.config-dialog {
+    &__row {
+        @include flex-row($spacing-lg);
+    }
+
+    &__col {
+        flex: 1;
+    }
+}
+
+// PdumpPage
+.pdump-page {
+    &__empty {
+        width: 100%;
+        flex: 1;
+        min-width: 0;
+        padding: $spacing-xl;
+    }
+
+    &__content {
+        width: 100%;
+        flex: 1;
+        min-width: 0;
+        padding: $spacing-xl;
+        @include flex-column;
+        overflow: hidden;
+    }
+
+    &__configs-section {
+        padding-bottom: $spacing-md;
+        border-bottom: 1px solid var(--g-color-line-generic);
+        flex-shrink: 0;
+    }
+
+    &__configs-list {
+        flex-wrap: wrap;
+    }
+
+    &__table-section {
+        flex: 1;
+        min-height: 0;
+        margin-top: $spacing-lg;
+    }
+}

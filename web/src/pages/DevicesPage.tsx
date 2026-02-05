@@ -1,14 +1,15 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Box } from '@gravity-ui/uikit';
-import { PageLayout, PageLoader, EmptyState } from '../components';
+import { PageLayout, PageLoader } from '../components';
 import type { DeviceType } from '../api/devices';
 import {
     DevicePageHeader,
-    DeviceCard,
+    DevicesList,
+    DeviceDetails,
     CreateDeviceDialog,
     useDeviceData,
 } from './devices';
-import './devices/PipelineTable.css';
+import './devices/devices.scss';
 
 const DevicesPage: React.FC = () => {
     const {
@@ -21,6 +22,12 @@ const DevicesPage: React.FC = () => {
     } = useDeviceData();
 
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
+    const [selectedDeviceName, setSelectedDeviceName] = useState<string | null>(null);
+
+    const selectedDevice = useMemo(() => {
+        if (!selectedDeviceName) return null;
+        return devices.find(d => d.id.name === selectedDeviceName) || null;
+    }, [devices, selectedDeviceName]);
 
     const handleCreateDevice = useCallback(() => {
         setCreateDialogOpen(true);
@@ -29,7 +36,25 @@ const DevicesPage: React.FC = () => {
     const handleCreateConfirm = useCallback((name: string, type: DeviceType) => {
         createDevice(name, type);
         setCreateDialogOpen(false);
+        setSelectedDeviceName(name);
     }, [createDevice]);
+
+    const handleSelectDevice = useCallback((deviceName: string) => {
+        setSelectedDeviceName(deviceName);
+    }, []);
+
+    const handleUpdateDevice = useCallback((updates: Partial<typeof selectedDevice>) => {
+        if (selectedDeviceName) {
+            updateDevice(selectedDeviceName, updates);
+        }
+    }, [selectedDeviceName, updateDevice]);
+
+    const handleSaveDevice = useCallback(async () => {
+        if (selectedDevice) {
+            return saveDevice(selectedDevice);
+        }
+        return false;
+    }, [selectedDevice, saveDevice]);
 
     const existingDeviceNames = devices.map(d => d.id.name || '');
 
@@ -47,22 +72,18 @@ const DevicesPage: React.FC = () => {
 
     return (
         <PageLayout header={headerContent}>
-            <Box className="devices-page__content">
-                <Box className="devices-page__list">
-                    {devices.length === 0 ? (
-                        <EmptyState message="No devices found. Click 'Create Device' to add one." />
-                    ) : (
-                        devices.map((device) => (
-                            <DeviceCard
-                                key={device.id.name}
-                                device={device}
-                                loadPipelineList={loadPipelineList}
-                                onUpdate={(updates) => updateDevice(device.id.name || '', updates)}
-                                onSave={() => saveDevice(device)}
-                            />
-                        ))
-                    )}
-                </Box>
+            <Box className="devices-page__layout">
+                <DevicesList
+                    devices={devices}
+                    selectedDeviceName={selectedDeviceName}
+                    onSelectDevice={handleSelectDevice}
+                />
+                <DeviceDetails
+                    device={selectedDevice}
+                    loadPipelineList={loadPipelineList}
+                    onUpdate={handleUpdateDevice}
+                    onSave={handleSaveDevice}
+                />
             </Box>
 
             <CreateDeviceDialog

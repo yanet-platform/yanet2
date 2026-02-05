@@ -36,7 +36,7 @@ const devicesToString = (devices: Rule['devices']): string => {
 /**
  * Convert vlan ranges to comma-separated string for editing
  */
-const vlanRangesToString = (ranges: Rule['vlanRanges']): string => {
+const vlanRangesToString = (ranges: Rule['vlan_ranges']): string => {
     const formatted = formatVlanRanges(ranges);
     return formatted === '*' ? '' : formatted;
 };
@@ -72,7 +72,7 @@ export const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
             setMode([modeEnumToString(rule.action?.mode)]);
             setCounter(rule.action?.counter || '');
             setDevices(devicesToString(rule.devices));
-            setVlans(vlanRangesToString(rule.vlanRanges));
+            setVlans(vlanRangesToString(rule.vlan_ranges));
             setSrcs(ipNetsToString(rule.srcs));
             setDsts(ipNetsToString(rule.dsts));
             setIsSubmitting(false);
@@ -103,7 +103,7 @@ export const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                     counter: counter.trim() || undefined,
                 },
                 devices: parseDevices(devices),
-                vlanRanges: parseVlanRanges(vlans),
+                vlan_ranges: parseVlanRanges(vlans),
                 srcs: parsePrefixesToIPNets(srcs),
                 dsts: parsePrefixesToIPNets(dsts),
             };

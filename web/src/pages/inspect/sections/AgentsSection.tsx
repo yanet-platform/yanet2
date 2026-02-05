@@ -31,12 +31,12 @@ export const AgentsSection: React.FC<AgentsSectionProps> = ({ instance }) => {
             template: (item: AgentInstanceInfo) => item.pid?.toString() || '-',
         },
         {
-            id: 'memoryLimit',
+            id: 'memory_limit',
             name: 'Memory Limit',
             meta: {
-                sort: (a: AgentInstanceInfo, b: AgentInstanceInfo) => compareBigIntValues(a.memoryLimit, b.memoryLimit),
+                sort: (a: AgentInstanceInfo, b: AgentInstanceInfo) => compareBigIntValues(a.memory_limit, b.memory_limit),
             },
-            template: (item: AgentInstanceInfo) => formatUint64(item.memoryLimit),
+            template: (item: AgentInstanceInfo) => formatUint64(item.memory_limit),
         },
         {
             id: 'allocated',

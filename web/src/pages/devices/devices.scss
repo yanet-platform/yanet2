@@ -1,0 +1,180 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+// Master-Detail Layout
+.devices-page__layout {
+    display: flex;
+    height: 100%;
+    width: 100%;
+}
+
+// DevicesList (left panel)
+.devices-list {
+    width: 240px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--g-color-line-generic);
+    @include flex-column;
+    background-color: var(--g-color-base-background);
+
+    &__items {
+        flex: 1;
+        overflow-y: auto;
+    }
+
+    &__empty {
+        padding: $spacing-lg;
+        text-align: center;
+    }
+}
+
+// DeviceListItem
+.device-list-item {
+    padding: 10px $spacing-lg;
+    cursor: pointer;
+    @include flex-row($spacing-sm);
+    border-bottom: 1px solid var(--g-color-line-generic);
+    transition: $transition-fast;
+
+    &:hover:not(&--selected) {
+        background-color: var(--g-color-base-generic-hover);
+    }
+
+    &--selected {
+        background-color: var(--g-color-base-selection);
+    }
+
+    &__icon {
+        flex-shrink: 0;
+
+        &--port {
+            color: var(--g-color-text-positive);
+        }
+
+        &--vlan {
+            color: var(--g-color-text-info);
+        }
+    }
+
+    &__dirty-indicator {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background-color: var(--g-color-text-warning);
+        margin-left: auto;
+        flex-shrink: 0;
+    }
+}
+
+// DeviceDetails (right panel)
+.device-details {
+    flex: 1;
+    padding: $spacing-xl;
+    overflow-y: auto;
+    @include flex-column;
+
+    &__empty {
+        @include flex-center;
+    }
+
+    &__header {
+        @include flex-row;
+        justify-content: space-between;
+        padding-bottom: $spacing-lg;
+        border-bottom: 1px solid var(--g-color-line-generic);
+        margin-bottom: $spacing-xl;
+    }
+
+    &__type-icon {
+        &--port {
+            color: var(--g-color-text-positive);
+        }
+
+        &--vlan {
+            color: var(--g-color-text-info);
+        }
+    }
+
+    &__body {
+        @include flex-column($spacing-2xl);
+    }
+
+    &__vlan-row {
+        padding-bottom: $spacing-lg;
+        border-bottom: 1px solid var(--g-color-line-generic);
+    }
+
+    &__pipelines {
+        display: flex;
+        flex-wrap: wrap;
+        gap: $spacing-lg;
+    }
+
+    &__pipeline-col {
+        flex: 1;
+        min-width: 250px;
+    }
+}
+
+// PipelineTable
+.pipeline-table {
+    overflow: hidden;
+    border: 1px solid var(--g-color-line-generic);
+    border-radius: $radius-md;
+
+    &__table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    &__header-row {
+        background-color: transparent;
+        border-bottom: 1px solid var(--g-color-line-generic);
+    }
+
+    &__header-cell {
+        padding: $spacing-sm;
+        text-align: left;
+        font-weight: $font-weight-medium;
+        font-size: 13px;
+        color: var(--g-color-text-secondary);
+
+        &--weight {
+            width: 70px;
+        }
+
+        &--actions {
+            text-align: right;
+            width: 100px;
+        }
+    }
+
+    &__empty-cell {
+        padding: $spacing-md;
+        text-align: center;
+        color: var(--g-color-text-secondary);
+    }
+
+    &__body-row {
+        border-top: 1px solid var(--g-color-line-generic);
+    }
+
+    &__body-cell {
+        padding: 10px $spacing-sm;
+
+        &--actions {
+            text-align: center;
+        }
+    }
+}
+
+// CreateDeviceDialog
+.create-device-dialog {
+    &__body {
+        @include flex-column($spacing-lg);
+    }
+
+    &__label {
+        margin-bottom: $spacing-xs;
+        display: block;
+    }
+}

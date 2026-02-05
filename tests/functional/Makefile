@@ -51,7 +51,7 @@ test: prepare-vm
 # Run main functional tests
 test-main: prepare-vm
 	@echo "Running main functional tests..."
-	go test -count=1 -v ./...
+	go test -count=1 -v ./main/...
 
 # Run specific test
 test-run:

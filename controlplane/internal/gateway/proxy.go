@@ -14,7 +14,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -174,19 +173,10 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	options := protojson.MarshalOptions{
-		UseEnumNumbers: true,
-	}
-	responseBody, err := options.Marshal(responseMessage)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal JSON response: %v", err), http.StatusInternalServerError)
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write(responseBody); err != nil {
-		m.log.Errorw("failed to write HTTP response",
+	if err := json.NewEncoder(w).Encode(responseMessage); err != nil {
+		m.log.Errorw("failed to encode JSON response",
 			zap.String("service", service),
 			zap.String("method", method),
 			zap.Error(err),
@@ -202,7 +192,7 @@ func (m *TransparentWebGRPCProxy) jsonToProtobuf(fullMethodName string, jsonData
 	}
 
 	msg := ty.New().Interface()
-	if err := protojson.Unmarshal(jsonData, msg); err != nil {
+	if err := json.Unmarshal(jsonData, msg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
 	}
 
@@ -386,9 +376,6 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 	}
 
 	codec := proxy.Codec()
-	jsonOpts := protojson.MarshalOptions{
-		UseEnumNumbers: true,
-	}
 
 	// Read streaming responses.
 	for {
@@ -433,7 +420,7 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 			continue
 		}
 
-		jsonData, err := jsonOpts.Marshal(responseMessage)
+		jsonData, err := json.Marshal(responseMessage)
 		if err != nil {
 			m.log.Errorw("failed to marshal JSON response",
 				zap.String("service", service),

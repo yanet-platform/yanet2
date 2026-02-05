@@ -80,7 +80,7 @@ export const AddRuleDialog: React.FC<AddRuleDialogProps> = ({
                     counter: counter.trim() || undefined,
                 },
                 devices: parseDevices(devices),
-                vlanRanges: parseVlanRanges(vlans),
+                vlan_ranges: parseVlanRanges(vlans),
                 srcs: parsePrefixesToIPNets(srcs),
                 dsts: parsePrefixesToIPNets(dsts),
             };

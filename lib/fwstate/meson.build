@@ -13,6 +13,8 @@ sources = files(
 lib_fwstate = static_library(
   'fwstate',
   sources,
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
   dependencies: dependencies,
   install: false,
 )

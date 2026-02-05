@@ -85,6 +85,18 @@ type protoMarshaler struct {
 
 // MarshalLogObject implements zapcore.ObjectMarshaler.
 func (m *protoMarshaler) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	if v, ok := m.message.(ProtoLogValue); ok {
+		logValue := v.AsLogValue()
+		switch val := logValue.(type) {
+		case zapcore.ObjectMarshaler:
+			return val.MarshalLogObject(enc)
+		case zapcore.ArrayMarshaler:
+			return enc.AddArray("value", val)
+		default:
+			return enc.AddReflected("value", logValue)
+		}
+	}
+
 	m.message.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
 		name := string(fd.Name())
 

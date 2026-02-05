@@ -244,6 +244,7 @@ const AclPage: React.FC = () => {
                 <Box className="acl-page__table-container">
                     {activeInnerTab === 'rules' ? (
                         <VirtualizedAclTable
+                            key={activeConfigTab}
                             rules={currentRules}
                             searchQuery={searchQuery}
                             onSearchChange={setSearchQuery}

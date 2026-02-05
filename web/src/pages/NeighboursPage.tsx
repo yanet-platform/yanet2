@@ -49,7 +49,7 @@ const serializeSortToURL = (sortState: TableSortState, searchParams: URLSearchPa
 };
 
 
-const renderMacAddress = (addr?: Neighbour['linkAddr']): string => {
+const renderMacAddress = (addr?: Neighbour['link_addr']): string => {
     if (addr?.addr === undefined) {
         return '-';
     }
@@ -116,36 +116,36 @@ const NeighboursPage = (): React.JSX.Element => {
 
     const columns: TableColumnConfig<Neighbour>[] = useMemo(() => [
         {
-            id: 'nextHop',
+            id: 'next_hop',
             name: 'Next Hop',
             meta: {
-                sort: (a: Neighbour, b: Neighbour) => compareNullableStrings(a.nextHop, b.nextHop),
+                sort: (a: Neighbour, b: Neighbour) => compareNullableStrings(a.next_hop, b.next_hop),
             },
-            template: (item: Neighbour) => item.nextHop || '-',
+            template: (item: Neighbour) => item.next_hop || '-',
         },
         {
-            id: 'linkAddr',
+            id: 'link_addr',
             name: 'Neighbour MAC',
             meta: {
                 sort: (a: Neighbour, b: Neighbour) => {
-                    const valA = getMACAddressValue(a.linkAddr?.addr);
-                    const valB = getMACAddressValue(b.linkAddr?.addr);
+                    const valA = getMACAddressValue(a.link_addr?.addr);
+                    const valB = getMACAddressValue(b.link_addr?.addr);
                     return compareMACAddressValues(valA, valB);
                 },
             },
-            template: (item: Neighbour) => renderMacAddress(item.linkAddr),
+            template: (item: Neighbour) => renderMacAddress(item.link_addr),
         },
         {
-            id: 'hardwareAddr',
+            id: 'hardware_addr',
             name: 'Interface MAC',
             meta: {
                 sort: (a: Neighbour, b: Neighbour) => {
-                    const valA = getMACAddressValue(a.hardwareAddr?.addr);
-                    const valB = getMACAddressValue(b.hardwareAddr?.addr);
+                    const valA = getMACAddressValue(a.hardware_addr?.addr);
+                    const valB = getMACAddressValue(b.hardware_addr?.addr);
                     return compareMACAddressValues(valA, valB);
                 },
             },
-            template: (item: Neighbour) => renderMacAddress(item.hardwareAddr),
+            template: (item: Neighbour) => renderMacAddress(item.hardware_addr),
         },
         {
             id: 'state',
@@ -158,21 +158,21 @@ const NeighboursPage = (): React.JSX.Element => {
                         return stateA - stateB;
                     }
 
-                    return compareNullableStrings(a.nextHop, b.nextHop);
+                    return compareNullableStrings(a.next_hop, b.next_hop);
                 },
             },
             template: (item: Neighbour) => getNUDStateString(item.state),
         },
         {
-            id: 'updatedAt',
+            id: 'updated_at',
             name: `Updated At (UTC${utcOffsetString})`,
             meta: {
                 sort: (a: Neighbour, b: Neighbour) => compareNullableNumbers(
-                    getUnixSecondsValue(a.updatedAt),
-                    getUnixSecondsValue(b.updatedAt)
+                    getUnixSecondsValue(a.updated_at),
+                    getUnixSecondsValue(b.updated_at)
                 ),
             },
-            template: (item: Neighbour) => formatUnixSeconds(item.updatedAt),
+            template: (item: Neighbour) => formatUnixSeconds(item.updated_at),
         },
     ], [utcOffsetString]);
 

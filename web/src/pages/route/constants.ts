@@ -12,11 +12,11 @@ export const COLUMN_WIDTHS = {
     checkbox: 40,
     index: 90,
     prefix: 320,
-    nextHop: 320,
+    next_hop: 320,
     peer: 320,
-    isBest: 60,
+    is_best: 60,
     pref: 60,
-    asPathLen: 80,
+    as_path_len: 80,
     source: 80,
 } as const;
 
@@ -53,10 +53,10 @@ export const cellStyles: Record<keyof typeof COLUMN_WIDTHS, React.CSSProperties>
         whiteSpace: 'nowrap',
         userSelect: 'text',
     },
-    nextHop: {
-        width: COLUMN_WIDTHS.nextHop,
-        minWidth: COLUMN_WIDTHS.nextHop,
-        maxWidth: COLUMN_WIDTHS.nextHop,
+    next_hop: {
+        width: COLUMN_WIDTHS.next_hop,
+        minWidth: COLUMN_WIDTHS.next_hop,
+        maxWidth: COLUMN_WIDTHS.next_hop,
         paddingRight: 8,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -73,10 +73,10 @@ export const cellStyles: Record<keyof typeof COLUMN_WIDTHS, React.CSSProperties>
         whiteSpace: 'nowrap',
         userSelect: 'text',
     },
-    isBest: {
-        width: COLUMN_WIDTHS.isBest,
-        minWidth: COLUMN_WIDTHS.isBest,
-        maxWidth: COLUMN_WIDTHS.isBest,
+    is_best: {
+        width: COLUMN_WIDTHS.is_best,
+        minWidth: COLUMN_WIDTHS.is_best,
+        maxWidth: COLUMN_WIDTHS.is_best,
         paddingRight: 8,
         userSelect: 'text',
     },
@@ -87,10 +87,10 @@ export const cellStyles: Record<keyof typeof COLUMN_WIDTHS, React.CSSProperties>
         paddingRight: 8,
         userSelect: 'text',
     },
-    asPathLen: {
-        width: COLUMN_WIDTHS.asPathLen,
-        minWidth: COLUMN_WIDTHS.asPathLen,
-        maxWidth: COLUMN_WIDTHS.asPathLen,
+    as_path_len: {
+        width: COLUMN_WIDTHS.as_path_len,
+        minWidth: COLUMN_WIDTHS.as_path_len,
+        maxWidth: COLUMN_WIDTHS.as_path_len,
         paddingRight: 8,
         userSelect: 'text',
     },

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 struct dp_config;
@@ -46,6 +47,7 @@ yanet_get_chain_counters(
 	const char *chain_name
 );
 
+// Get module counters, optionally filtered by name.
 struct counter_handle_list *
 yanet_get_module_counters(
 	struct dp_config *dp_config,
@@ -54,7 +56,9 @@ yanet_get_module_counters(
 	const char *function_name,
 	const char *chain_name,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	const char *const *query,
+	size_t query_count
 );
 
 struct counter_handle_list *

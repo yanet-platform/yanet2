@@ -37,10 +37,10 @@ export const useDecapData = (): UseDecapDataResult => {
 
                 if (!isMounted) return;
 
-                const info = inspectResponse.instanceInfo;
+                const info = inspectResponse.instance_info;
 
                 // Find decap configs
-                const decapConfigs = (info?.cpConfigs || [])
+                const decapConfigs = (info?.cp_configs || [])
                     .filter((cfg) => cfg.type === 'decap')
                     .map((cfg) => cfg.name || '');
 

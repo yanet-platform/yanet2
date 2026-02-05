@@ -500,7 +500,9 @@ func (m *DPConfig) ChainCounters(
 	return m.encodeCounters(counters)
 }
 
-// ModuleCounters returns module counters
+// ModuleCounters returns module counters, optionally filtered by name.
+//
+// If counterQuery is nil or empty, returns all counters.
 func (m *DPConfig) ModuleCounters(
 	deviceName string,
 	pipelineName string,
@@ -508,6 +510,7 @@ func (m *DPConfig) ModuleCounters(
 	chainName string,
 	moduleType string,
 	moduleName string,
+	counterQuery []string,
 ) []CounterInfo {
 	cDeviceName := C.CString(deviceName)
 	defer C.free(unsafe.Pointer(cDeviceName))
@@ -521,6 +524,23 @@ func (m *DPConfig) ModuleCounters(
 	defer C.free(unsafe.Pointer(cModuleType))
 	cModuleName := C.CString(moduleName)
 	defer C.free(unsafe.Pointer(cModuleName))
+
+	var cQueryPtr **C.char
+	queryCount := C.size_t(^uintptr(0))
+	cQuery := make([]*C.char, len(counterQuery))
+	if len(counterQuery) > 0 {
+		for i, name := range counterQuery {
+			cQuery[i] = C.CString(name)
+		}
+		defer func() {
+			for _, ptr := range cQuery {
+				C.free(unsafe.Pointer(ptr))
+			}
+		}()
+		cQueryPtr = &cQuery[0]
+		queryCount = C.size_t(len(counterQuery))
+	}
+
 	counters := C.yanet_get_module_counters(
 		m.ptr,
 		cDeviceName,
@@ -529,6 +549,8 @@ func (m *DPConfig) ModuleCounters(
 		cChainName,
 		cModuleType,
 		cModuleName,
+		cQueryPtr,
+		queryCount,
 	)
 	defer C.yanet_counter_handle_list_free(counters)
 

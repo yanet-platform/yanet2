@@ -34,7 +34,7 @@ export interface PipelineInfo {
 
 export interface AgentInstanceInfo {
     pid?: number;
-    memoryLimit?: string | number; // uint64 - serialized as string in JSON
+    memory_limit?: string | number; // uint64 - serialized as string in JSON
     allocated?: string | number; // uint64 - serialized as string in JSON
     freed?: string | number; // uint64 - serialized as string in JSON
     generation?: string | number; // uint64 - serialized as string in JSON
@@ -53,15 +53,15 @@ export interface DevicePipelineInfo {
 export interface DeviceInfo {
     type?: string;
     name?: string;
-    inputPipelines?: DevicePipelineInfo[]; // input_pipelines
-    outputPipelines?: DevicePipelineInfo[]; // output_pipelines
+    input_pipelines?: DevicePipelineInfo[];
+    output_pipelines?: DevicePipelineInfo[];
 }
 
 export interface InstanceInfo {
-    instanceIdx?: number; // instance_idx
-    numaIdx?: number; // numa_idx
-    dpModules?: DPModuleInfo[]; // dp_modules
-    cpConfigs?: CPConfigInfo[]; // cp_configs
+    instance_idx?: number;
+    numa_idx?: number;
+    dp_modules?: DPModuleInfo[];
+    cp_configs?: CPConfigInfo[];
     functions?: FunctionInfo[];
     pipelines?: PipelineInfo[];
     agents?: AgentInfo[];
@@ -69,7 +69,7 @@ export interface InstanceInfo {
 }
 
 export interface InspectResponse {
-    instanceInfo?: InstanceInfo;
+    instance_info?: InstanceInfo;
 }
 
 const inspectService = createService('ynpb.InspectService');

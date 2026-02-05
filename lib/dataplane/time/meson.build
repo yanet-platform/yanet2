@@ -17,9 +17,10 @@ lib_time_dp = static_library(
 )
 
 lib_time_dp_dep = declare_dependency(
-  link_with: lib_time_dp,
+  link_with: [lib_time_dp],
   include_directories: [
     yanet_libdir,
     yanet_rootdir,
   ],
+  dependencies: dependencies,
 )

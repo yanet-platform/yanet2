@@ -14,7 +14,7 @@ export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
     validateNexthop: validateNexthopFn,
 }) => {
     const prefixError = validatePrefixFn(form.prefix);
-    const nexthopError = validateNexthopFn(form.nexthopAddr);
+    const nexthopError = validateNexthopFn(form.nexthop_addr);
     const configNameError = !form.configName.trim() ? 'Config name is required' : undefined;
 
     const handleConfigNameChange = (value: string): void => {
@@ -26,11 +26,11 @@ export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
     };
 
     const handleNexthopChange = (value: string): void => {
-        onFormChange({ ...form, nexthopAddr: value });
+        onFormChange({ ...form, nexthop_addr: value });
     };
 
     const handleDoFlushChange = (checked: boolean): void => {
-        onFormChange({ ...form, doFlush: checked });
+        onFormChange({ ...form, do_flush: checked });
     };
 
     return (
@@ -72,7 +72,7 @@ export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
                         hint="IP address of the next hop (IPv4 or IPv6)"
                     >
                         <TextInput
-                            value={form.nexthopAddr}
+                            value={form.nexthop_addr}
                             onUpdate={handleNexthopChange}
                             placeholder="192.168.1.1 or 2001:db8::1"
                             validationState={nexthopError ? 'invalid' : undefined}
@@ -83,7 +83,7 @@ export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
                     <Box>
                         <Box className="add-route-dialog__switch-row">
                             <Switch
-                                checked={form.doFlush}
+                                checked={form.do_flush}
                                 onUpdate={handleDoFlushChange}
                             />
                             <Text variant="body-1">Flush RIB to FIB</Text>

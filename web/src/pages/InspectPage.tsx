@@ -20,7 +20,7 @@ const InspectPage = (): React.JSX.Element => {
             try {
                 const data = await API.inspect.inspect();
                 if (!isMounted) return;
-                setInstanceInfo(data.instanceInfo || null);
+                setInstanceInfo(data.instance_info || null);
             } catch (err) {
                 if (!isMounted) return;
                 toaster.error('inspect-error', 'Failed to fetch inspect data', err);

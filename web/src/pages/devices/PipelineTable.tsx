@@ -3,7 +3,7 @@ import { Box, TextInput, Button, Select } from '@gravity-ui/uikit';
 import { Plus, TrashBin } from '@gravity-ui/icons';
 import type { DevicePipeline } from '../../api/devices';
 import type { PipelineId } from '../../api/pipelines';
-import './PipelineTable.css';
+import './devices.scss';
 
 export interface PipelineTableProps {
     pipelines: DevicePipeline[];
@@ -72,17 +72,17 @@ export const PipelineTable: React.FC<PipelineTableProps> = ({
     }, [pipelines, availablePipelines, onChange]);
 
     return (
-        <Box className="pipelineTable">
-            <table className="pipelineTable__table">
+        <Box className="pipeline-table">
+            <table className="pipeline-table__table">
                 <thead>
-                    <tr className="pipelineTable__header-row">
-                        <th className="pipelineTable__header-cell">
+                    <tr className="pipeline-table__header-row">
+                        <th className="pipeline-table__header-cell">
                             {pipelineLabel}
                         </th>
-                        <th className="pipelineTable__header-cell pipelineTable__header-cell--weight">
+                        <th className="pipeline-table__header-cell pipeline-table__header-cell--weight">
                             Weight
                         </th>
-                        <th className="pipelineTable__header-cell pipelineTable__header-cell--actions">
+                        <th className="pipeline-table__header-cell pipeline-table__header-cell--actions">
                             <Button
                                 view="flat"
                                 size="s"
@@ -100,14 +100,14 @@ export const PipelineTable: React.FC<PipelineTableProps> = ({
                 <tbody>
                     {pipelines.length === 0 ? (
                         <tr>
-                            <td colSpan={3} className="pipelineTable__empty-cell">
+                            <td colSpan={3} className="pipeline-table__empty-cell">
                                 No pipelines configured
                             </td>
                         </tr>
                     ) : (
                         pipelines.map((pipeline, index) => (
-                            <tr key={index} className="pipelineTable__body-row">
-                                <td className="pipelineTable__body-cell">
+                            <tr key={index} className="pipeline-table__body-row">
+                                <td className="pipeline-table__body-cell">
                                     <Select
                                         value={pipeline.name ? [pipeline.name] : []}
                                         options={pipelineOptions}
@@ -117,7 +117,7 @@ export const PipelineTable: React.FC<PipelineTableProps> = ({
                                         disabled={loadingPipelines}
                                     />
                                 </td>
-                                <td className="pipelineTable__body-cell">
+                                <td className="pipeline-table__body-cell">
                                     <TextInput
                                         value={String(parseWeight(pipeline.weight))}
                                         onChange={(e) => handleWeightChange(index, e.target.value)}
@@ -125,7 +125,7 @@ export const PipelineTable: React.FC<PipelineTableProps> = ({
                                         type="number"
                                     />
                                 </td>
-                                <td className="pipelineTable__body-cell pipelineTable__body-cell--actions">
+                                <td className="pipeline-table__body-cell pipeline-table__body-cell--actions">
                                     <Button
                                         view="flat-danger"
                                         size="s"

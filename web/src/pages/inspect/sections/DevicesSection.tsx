@@ -25,8 +25,8 @@ interface DeviceRowData {
     [key: string]: unknown;
     name: string;
     type: string;
-    inputPipelines: DevicePipelineInfo[];
-    outputPipelines: DevicePipelineInfo[];
+    input_pipelines: DevicePipelineInfo[];
+    output_pipelines: DevicePipelineInfo[];
     counters: DeviceCounters | null;
 }
 
@@ -104,8 +104,8 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
             return {
                 name: deviceName,
                 type: device.type || '-',
-                inputPipelines: device.inputPipelines ?? [],
-                outputPipelines: device.outputPipelines ?? [],
+                input_pipelines: device.input_pipelines ?? [],
+                output_pipelines: device.output_pipelines ?? [],
                 counters: countersMap.get(deviceName) ?? null,
             };
         });
@@ -161,20 +161,20 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
             },
         },
         {
-            id: 'inputPipelines',
+            id: 'input_pipelines',
             name: 'Input Pipelines',
             template: (item: DeviceRowData) => (
-                <Text variant="body-2" color={item.inputPipelines.length === 0 ? 'secondary' : undefined}>
-                    {formatPipelines(item.inputPipelines)}
+                <Text variant="body-2" color={item.input_pipelines.length === 0 ? 'secondary' : undefined}>
+                    {formatPipelines(item.input_pipelines)}
                 </Text>
             ),
         },
         {
-            id: 'outputPipelines',
+            id: 'output_pipelines',
             name: 'Output Pipelines',
             template: (item: DeviceRowData) => (
-                <Text variant="body-2" color={item.outputPipelines.length === 0 ? 'secondary' : undefined}>
-                    {formatPipelines(item.outputPipelines)}
+                <Text variant="body-2" color={item.output_pipelines.length === 0 ? 'secondary' : undefined}>
+                    {formatPipelines(item.output_pipelines)}
                 </Text>
             ),
         },
