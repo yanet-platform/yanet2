@@ -1,9 +1,11 @@
 use std::ptr;
 use std::net::Ipv4Addr;
 
+use memory::{container_of, addr_of};
+
 use crate::config::ProxyModuleConfig;
 use crate::{
-    container_of, cp_module, dp_worker, module_ectx, packet,
+    cp_module, dp_worker, module_ectx, packet,
     packet_front, packet_front_output, packet_list_pop, packet_to_mbuf,
     rte_ipv4_hdr, rte_tcp_hdr, rte_mbuf,
     RTE_ETHER_TYPE_IPV4, RTE_TCP_SYN_FLAG, RTE_TCP_ACK_FLAG,
@@ -47,6 +49,7 @@ pub unsafe extern "C" fn proxy_handle_packets(
         return;
     }
 
+    // FIXME: use addr_of and container_of macros
     let cp_module_ptr = unsafe { get_cp_module_from_ectx(module_ectx) };
     if cp_module_ptr.is_null() {
         return;

@@ -63,7 +63,7 @@ func (m *ModuleConfig) SetConnTableSize(size uint32) error {
 }
 
 func DeleteConfig(m *ProxyService, configName string) bool {
-	cTypeName := C.CString(agentName)
+	cTypeName := C.CString("proxy")
 	defer C.free(unsafe.Pointer(cTypeName))
 
 	cConfigName := C.CString(configName)

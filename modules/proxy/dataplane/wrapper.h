@@ -16,5 +16,3 @@
 #include "controlplane/config/cp_module.h"
 #include "controlplane/config/econtext.h"
 #include "controlplane/config/zone.h"
-
-#include "config.h"

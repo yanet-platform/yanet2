@@ -25,10 +25,12 @@ members = [
     "devices/vlan/cli",
 
     "modules/proxy/dataplane",
+    "modules/proxy/api",
 ]
 
 default-members = [
     "modules/proxy/dataplane",
+    "modules/proxy/api",
 ]
 
 [profile.release]

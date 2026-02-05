@@ -1,10 +1,43 @@
-use std::collections::HashMap;
 use std::sync::RwLock;
 
-use libc::__u16;
+struct localToClient {
+    keys: Vec<(u32, u16)>,
+    values: Vec<(u32, u16)>,
+}
+
+impl localToClient {
+    fn get(&self, key: &(u32, u16)) -> Option<&(u32, u16)> {
+        for (i, k) in self.keys.iter().enumerate() {
+            if k == key {
+                return Some(&self.values[i])
+            }
+        }
+        None
+    }
+
+    fn insert(&mut self, key: (u32, u16), value: (u32, u16)) {
+        for (i, k) in self.keys.iter().enumerate() {
+            if k == &(0, 0) {
+                self.keys[i] = key;
+                self.values[i] = value;
+                break;
+            }
+        };
+    }
+
+    fn remove(&mut self, key: &(u32, u16)) {
+        for (i, k) in self.keys.iter().enumerate() {
+            if k == key {
+                self.keys[i] = (0, 0);
+                self.values[i] = (0, 0);
+                break;
+            }
+        };
+    }
+}
 
 struct localPool {
-    local_to_client: HashMap<(u32, u16), (u32, u16)>,
+    local_to_client: localToClient,
     pool: Vec<(u32, u16)>,
 }
 pub struct LocalPool {
@@ -31,7 +64,10 @@ impl LocalPool {
 
         Self {
             lp: RwLock::new(localPool {
-                local_to_client: HashMap::new(),
+                local_to_client: localToClient{
+                    keys: vec![(0, 0); num_addrs as usize],
+                    values: vec![(0, 0); num_addrs as usize]
+                },
                 pool
             }),
         }
@@ -48,12 +84,10 @@ impl LocalPool {
         }
     }
 
-    pub fn free(&self, local: (u32, u16)) -> Option<(u32, u16)> {
+    pub fn free(&self, local: (u32, u16)) {
         let mut lp = self.lp.write().unwrap();
-        lp.local_to_client.remove(&local).map(|client| {
-            lp.pool.push(local);
-            client
-        })
+        lp.local_to_client.remove(&local);
+        lp.pool.push(local);
     }
 
     pub fn get_client(&self, local_addr: u32, local_port: u16) -> Option<(u32, u16)> {

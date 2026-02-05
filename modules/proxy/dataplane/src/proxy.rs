@@ -30,7 +30,7 @@ impl Service {
 
         Self {
             config,
-            connections: ConnectionsTable::new(config.size_connections_table),
+            connections: ConnectionsTable::new(config.size_connections_table as usize),
             local_pool: LocalPool::new(config.upstream_net.addr, config.upstream_net.mask),
         }
     }

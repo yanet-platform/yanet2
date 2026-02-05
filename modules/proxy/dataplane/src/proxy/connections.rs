@@ -1,23 +1,48 @@
-use std::collections::HashMap;
 use std::sync::Mutex;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Connection {
     pub local_addr: u32,
     pub local_port: u16,
 }
 
+struct connectionStorage {
+    keys: Vec<(u32, u16)>,
+    values: Vec<Connection>,
+}
+
+impl connectionStorage {
+    fn get(&self, key: &(u32, u16)) -> Option<&Connection> {
+        for (i, k) in self.keys.iter().enumerate() {
+            if k == key {
+                return Some(&self.values[i])
+            }
+        }
+        None
+    }
+
+    fn insert(&mut self, key: (u32, u16), value: Connection) {
+        for (i, k) in self.keys.iter().enumerate() {
+            if k == &(0, 0) {
+                self.keys[i] = key;
+                self.values[i] = value;
+                break;
+            }
+        };
+    }
+}
+
 pub struct ConnectionsTable {
-    connections: Mutex<HashMap<(u32, u16), Connection>>,
+    connections: Mutex<connectionStorage>,
 }
 
 impl ConnectionsTable {
-    pub fn new(num_connections: u32) -> Self {
-        let mut connections = HashMap::new();
-        connections.reserve(num_connections as usize);
-
+    pub fn new(num_connections: usize) -> Self {
         Self {
-            connections: Mutex::new(connections),
+            connections: Mutex::new(connectionStorage{
+                keys: vec![(0, 0); num_connections],
+                values: vec![Connection::default(); num_connections],
+            }),
         }
     }
 

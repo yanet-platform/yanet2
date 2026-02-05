@@ -5,9 +5,8 @@
 #![allow(clippy::missing_safety_doc)]
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+
 #[path="../../config/config.rs"]
 pub mod config;
 
-pub mod dataplane;
-pub mod proxy;
-pub mod proxy_module;
+pub mod controlplane;

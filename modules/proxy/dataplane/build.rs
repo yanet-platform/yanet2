@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.h");
-    println!("cargo:rerun-if-changed=config.h");
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let project_root = manifest_dir.join("../../../");
@@ -49,9 +48,6 @@ fn main() {
         .allowlist_type("transport_header")
         .allowlist_type("dp_worker")
         .allowlist_type("cp_module")
-        .allowlist_type("ipv4_prefix")
-        .allowlist_type("proxy_config")
-        .allowlist_type("proxy_module_config")
         .allowlist_function("packet_.*")
         .allowlist_var("MODULE_NAME_LEN")
         .allowlist_type("rte_mbuf")

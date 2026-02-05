@@ -1,5 +1,5 @@
 [package]
-name = "yanet-proxy-dp"
+name = "yanet-proxy-cp"
 version = "0.1.0"
 edition = "2024"
 
