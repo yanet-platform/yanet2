@@ -63,6 +63,45 @@ func NewAdapterService(
 	}
 }
 
+// ListSessions returns information about all active BIRD import sessions.
+func (m *AdapterService) ListSessions(
+	ctx context.Context,
+	req *adapterpb.ListSessionsRequest,
+) (*adapterpb.ListSessionsResponse, error) {
+	m.importsMu.Lock()
+	defer m.importsMu.Unlock()
+
+	sessions := make([]*adapterpb.SessionInfo, 0, len(m.imports))
+	for name, holder := range m.imports {
+		connState := adapterpb.ConnectionState_CONNECTION_STATE_UNKNOWN
+		if holder.conn != nil {
+			switch holder.conn.GetState() {
+			case connectivity.Idle:
+				connState = adapterpb.ConnectionState_CONNECTION_STATE_IDLE
+			case connectivity.Connecting:
+				connState = adapterpb.ConnectionState_CONNECTION_STATE_CONNECTING
+			case connectivity.Ready:
+				connState = adapterpb.ConnectionState_CONNECTION_STATE_READY
+			case connectivity.TransientFailure:
+				connState = adapterpb.ConnectionState_CONNECTION_STATE_TRANSIENT_FAILURE
+			case connectivity.Shutdown:
+				connState = adapterpb.ConnectionState_CONNECTION_STATE_SHUTDOWN
+			}
+		}
+
+		sessions = append(sessions, &adapterpb.SessionInfo{
+			Name:            name,
+			Sockets:         holder.sockets,
+			CreatedAt:       holder.createdAt.UnixNano(),
+			ConnectionState: connState,
+		})
+	}
+
+	return &adapterpb.ListSessionsResponse{
+		Sessions: sessions,
+	}, nil
+}
+
 func (m *AdapterService) SetupConfig(
 	ctx context.Context,
 	req *adapterpb.SetupConfigRequest,
@@ -139,6 +178,8 @@ type importHolder struct {
 	cancel        context.CancelFunc                                                 // Stops this import's goroutines (runBirdImportLoop, export.Run)
 	conn          *grpc.ClientConn                                                   // gRPC connection to RouteService (gateway)
 	currentStream *grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary] // Active gRPC stream for RIB updates; replaced on reconnect
+	sockets       []string                                                           // Unix socket paths being read from
+	createdAt     time.Time                                                          // Timestamp when the session was created
 }
 
 // processBirdImport streams BIRD route updates to the control plane RIB.
@@ -223,6 +264,8 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 	holder.export = export
 	holder.cancel = cancel
 	holder.conn = conn
+	holder.sockets = cfg.Sockets
+	holder.createdAt = time.Now()
 	m.imports[name] = holder
 
 	// Launch goroutine for BIRD reading and stream lifecycle management.
