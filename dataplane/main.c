@@ -63,8 +63,14 @@ main(int argc, char **argv) {
 
 	struct dataplane_config *config;
 	FILE *config_file = fopen(argv[optind], "r");
+	if (config_file == NULL) {
+		LOG(ERROR, "failed to open config file: %s", argv[optind]);
+		return -1;
+	}
 	LOG(INFO, "initialize the dataplane config");
-	if (dataplane_config_init(config_file, &config)) {
+	int rc = dataplane_config_init(config_file, &config);
+	fclose(config_file);
+	if (rc) {
 		LOG(ERROR, "invalid config file: %s", argv[optind]);
 		return -1;
 	}
@@ -75,7 +81,7 @@ main(int argc, char **argv) {
 
 	LOG(INFO, "initialize dataplane");
 	// FIXME: dataplane error handling
-	int rc = dataplane_init(&dataplane, argv[0], config);
+	rc = dataplane_init(&dataplane, argv[0], config);
 	if (rc != 0) {
 		LOG(ERROR, "failed to initialize dataplane");
 		return -1;
