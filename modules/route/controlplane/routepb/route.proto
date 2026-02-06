@@ -29,12 +29,16 @@ service RouteService {
 	// (FIB).
 	rpc FlushRoutes(FlushRoutesRequest) returns (FlushRoutesResponse);
 
-	// FeedRIB receives a stream of route updates (typically from BIRD) and applies them to the RIB.
-	// It implements session management to handle stale routes:
-	//  1. On first update, a new session is started in the RIB, invalidating any prior session.
+	// FeedRIB receives a stream of route updates (typically from BIRD) and
+	// applies them to the RIB. It implements session management to handle
+	// stale routes:
+	//  1. On first update, a new session is started in the RIB,
+	//  invalidating any prior session.
 	//  2. Routes received are tagged with the current session ID.
-	//  3. If this stream is superseded by another FeedRIB call for the same RIB, it will terminate.
-	//  4. When the stream ends, a cleanup task removes routes from this session after a TTL.
+	//  3. If this stream is superseded by another FeedRIB call for the same
+	//  RIB, it will terminate.
+	//  4. When the stream ends, a cleanup task removes routes from this
+	//  session after a TTL.
 	rpc FeedRIB(stream Update) returns (UpdateSummary);
 }
 

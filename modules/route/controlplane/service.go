@@ -322,8 +322,8 @@ func (m *RouteService) DeleteConfig(
 	}
 
 	// Delete the module config from the data plane if it exists
-	ffiModule, hasFfiModule := m.ffiModules[name]
-	if hasFfiModule {
+	ffiModule, hasFFIModule := m.ffiModules[name]
+	if hasFFIModule {
 		if err := m.agent.DeleteModuleConfig(name); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 		}
