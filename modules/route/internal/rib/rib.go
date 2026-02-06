@@ -192,15 +192,17 @@ func (m *RIB) CleanupTask(sessionID uint64, quit chan bool, ttl time.Duration) {
 	timeout := time.After(ttl)
 	select {
 	case <-quit:
+		m.log.Infow("RIB: cleanup task cancelled before timeout", "sessionID", sessionID)
 		return
 	case <-timeout:
+		m.log.Infow("RIB: cleanup task timeout reached, starting cleanup", "sessionID", sessionID)
 	}
 
-	changed := false
+	removedCount := 0
 	m.mu.Lock()
 	defer func() {
 		m.mu.Unlock()
-		if changed {
+		if removedCount > 0 {
 			m.changedAt.Store(time.Now().UnixNano())
 		}
 	}()
@@ -208,16 +210,23 @@ func (m *RIB) CleanupTask(sessionID uint64, quit chan bool, ttl time.Duration) {
 	for _, routeList := range m.routes.Dump() {
 		select {
 		case <-quit:
+			m.log.Infow("RIB: cleanup task interrupted during cleanup",
+				"sessionID", sessionID,
+				"removedCount", removedCount,
+			)
 			return
 		default:
 		}
 
-		for _, route := range routeList.Routes {
-			if route.SourceID == RouteSourceBird && route.SessionID <= sessionID {
-				changed = true
-				route.ToRemove = true
+		for idx := range routeList.Routes {
+			if routeList.Routes[idx].SourceID == RouteSourceBird &&
+				routeList.Routes[idx].SessionID <= sessionID {
+				removedCount++
+				routeList.Routes[idx].ToRemove = true
 			}
 		}
 		m.update(routeList.Routes...)
 	}
+
+	m.log.Infow("RIB: cleanup task completed", "sessionID", sessionID, "removedCount", removedCount)
 }

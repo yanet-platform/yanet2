@@ -362,7 +362,7 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 	// If a RIB was established for this stream, schedule cleanup for its session.
 	// This runs regardless of whether the stream ended cleanly or with an error.
 	if ribRef != nil {
-		m.log.Infof("FeedRIB session %d for %s ended. Scheduling cleanup.", sessionId, name)
+		m.log.Infof("FeedRIB session %d for %s ended. Scheduling cleanup after %s", sessionId, name, m.ribTTL)
 		// CleanupTask will remove routes from this sessionID (and older BIRD ones) after ribTTL.
 		go ribRef.CleanupTask(sessionId, m.quitCh, m.ribTTL)
 	}
