@@ -353,6 +353,14 @@ dataplane_init(
 ) {
 	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 
+	if (config->instance_count > DATAPLANE_MAX_INSTANCES) {
+		LOG(ERROR,
+		    "instance count %u exceeds maximum %u",
+		    config->instance_count,
+		    DATAPLANE_MAX_INSTANCES);
+		return -1;
+	}
+
 	dataplane->instance_count = config->instance_count;
 
 	LOG(INFO,
