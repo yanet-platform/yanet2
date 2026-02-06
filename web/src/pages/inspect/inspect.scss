@@ -227,6 +227,8 @@
 
 .devices-table__counter {
     @include flex-column(2px);
+    min-width: 120px;
+    font-variant-numeric: tabular-nums;
 
     &--loading {
         animation: counter-pulse 1.5s ease-in-out infinite;
