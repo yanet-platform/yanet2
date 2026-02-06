@@ -1,7 +1,7 @@
 use std::sync::{LazyLock, Mutex};
 use std::net::Ipv4Addr;
 
-use crate::config::ProxyConfig;
+use state::config::ProxyConfig;
 
 pub mod checksum;
 pub mod handle;

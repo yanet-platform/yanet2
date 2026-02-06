@@ -1,6 +1,6 @@
 use std::mem::MaybeUninit;
 
-use crate::cp_module;
+use bindings::cp_module;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

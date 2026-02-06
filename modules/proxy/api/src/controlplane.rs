@@ -3,9 +3,10 @@ use std::ptr;
 use libc::c_char;
 
 use memory::{addr_of, container_of};
-use crate::{
+use state::config::ProxyModuleConfig;
+use bindings::{
     agent, agent_delete_module,
-    config::ProxyModuleConfig, cp_module, cp_module_init,
+    cp_module, cp_module_init,
     memory_balloc, memory_bfree,
 };
 

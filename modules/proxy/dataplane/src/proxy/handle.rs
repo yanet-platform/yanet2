@@ -1,6 +1,5 @@
-use crate::{
-    proxy::{SERVICE, connections::Connection}, rte_ipv4_hdr, rte_tcp_hdr
-};
+use crate::proxy::{SERVICE, connections::Connection};
+use bindings::{rte_ipv4_hdr, rte_tcp_hdr};
 
 pub fn client_syn(ip_header: &mut rte_ipv4_hdr, tcp_header: &mut rte_tcp_hdr) {
     let mut service = SERVICE.lock().unwrap();

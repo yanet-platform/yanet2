@@ -1,7 +1,7 @@
 use std::ffi::c_char;
 use std::ptr;
 
-use crate::{module, MODULE_NAME_LEN};
+use bindings::{module, MODULE_NAME_LEN};
 use crate::dataplane::proxy_handle_packets;
 
 #[repr(C)]

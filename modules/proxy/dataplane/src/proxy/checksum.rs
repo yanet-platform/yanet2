@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::ptr;
 
-use crate::{
+use bindings::{
     rte_ipv4_hdr, rte_tcp_hdr,
     rte_ipv4_cksum, rte_ipv4_hdr_len, rte_raw_cksum,
     IPPROTO_UDP

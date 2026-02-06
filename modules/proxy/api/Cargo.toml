@@ -9,7 +9,5 @@ crate-type = ["staticlib"]
 [dependencies]
 libc = "0.2"
 memory = { version = "0.1", path = "../../../common/rust/memory" }
-
-[build-dependencies]
-bindgen = { version = "0.72", features = ["experimental"] }
-cc = "1.2"
+bindings = { version = "0.1", path = "../bindings" }
+state = { version = "0.1", path = "../state" }

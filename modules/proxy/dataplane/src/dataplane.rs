@@ -3,8 +3,8 @@ use std::net::Ipv4Addr;
 
 use memory::{container_of, addr_of};
 
-use crate::config::ProxyModuleConfig;
-use crate::{
+use state::config::ProxyModuleConfig;
+use bindings::{
     cp_module, dp_worker, module_ectx, packet,
     packet_front, packet_front_output, packet_list_pop, packet_to_mbuf,
     rte_ipv4_hdr, rte_tcp_hdr, rte_mbuf,

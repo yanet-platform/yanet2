@@ -241,6 +241,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bindings"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "cc",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1726,6 +1734,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "state"
+version = "0.1.0"
+dependencies = [
+ "bindings",
+]
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2909,20 +2924,20 @@ dependencies = [
 name = "yanet-proxy-cp"
 version = "0.1.0"
 dependencies = [
- "bindgen",
- "cc",
+ "bindings",
  "libc",
  "memory",
+ "state",
 ]
 
 [[package]]
 name = "yanet-proxy-dp"
 version = "0.1.0"
 dependencies = [
- "bindgen",
- "cc",
+ "bindings",
  "libc",
  "memory",
+ "state",
 ]
 
 [[package]]
