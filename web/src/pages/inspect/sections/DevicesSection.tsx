@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Box, Text, Label } from '@gravity-ui/uikit';
 import type { TableColumnConfig } from '@gravity-ui/uikit';
 import { HardDrive } from '@gravity-ui/icons';
 import type { InstanceInfo, DevicePipelineInfo } from '../../../api/inspect';
-import { API, type CountersResponse, type CounterInfo } from '../../../api';
+import { useDeviceCounters, type DeviceAbsoluteData } from '../../../hooks';
 import { SortableDataTable } from '../../../components';
 import { compareNullableStrings } from '../../../utils/sorting';
 import { InspectSection } from '../InspectSection';
@@ -14,43 +14,14 @@ export interface DevicesSectionProps {
     instance: InstanceInfo;
 }
 
-interface DeviceCounters {
-    rxPackets: bigint;
-    rxBytes: bigint;
-    txPackets: bigint;
-    txBytes: bigint;
-}
-
 interface DeviceRowData {
     [key: string]: unknown;
     name: string;
     type: string;
     input_pipelines: DevicePipelineInfo[];
     output_pipelines: DevicePipelineInfo[];
-    counters: DeviceCounters | null;
+    absoluteCounters: DeviceAbsoluteData | undefined;
 }
-
-// Helper to sum counter values across all instances
-const sumCounterValues = (counter: CounterInfo | undefined): bigint => {
-    if (!counter?.instances) return BigInt(0);
-    return counter.instances.reduce((sum, inst) => {
-        const val = inst.values?.[0];
-        return sum + BigInt(val ?? 0);
-    }, BigInt(0));
-};
-
-// Helper to find counter by name
-const findCounter = (counters: CounterInfo[] | undefined, name: string): CounterInfo | undefined => {
-    return counters?.find(c => c.name === name);
-};
-
-// Extract counters from response
-const extractCounters = (response: CountersResponse): DeviceCounters => ({
-    rxPackets: sumCounterValues(findCounter(response.counters, 'rx')),
-    rxBytes: sumCounterValues(findCounter(response.counters, 'rx_bytes')),
-    txPackets: sumCounterValues(findCounter(response.counters, 'tx')),
-    txBytes: sumCounterValues(findCounter(response.counters, 'tx_bytes')),
-});
 
 // Format pipeline names as comma-separated list
 const formatPipelines = (pipelines: DevicePipelineInfo[]): string => {
@@ -58,44 +29,26 @@ const formatPipelines = (pipelines: DevicePipelineInfo[]): string => {
     return pipelines.map(p => p.name || 'unnamed').join(', ');
 };
 
-// Format counter value for display
-const formatPackets = (value: bigint): string => {
-    return value.toLocaleString();
+// Format packet count for display
+const formatPackets = (value: number): string => {
+    return Math.floor(value).toLocaleString();
+};
+
+// Format bytes from number (interpolated value) for display
+const formatBytesFromNumber = (value: number): string => {
+    return formatBytes(BigInt(Math.floor(value)));
 };
 
 export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
     const devices = instance.devices ?? [];
-    const [countersMap, setCountersMap] = useState<Map<string, DeviceCounters>>(new Map());
-    const [loading, setLoading] = useState(true);
 
-    // Batch fetch all device counters
-    useEffect(() => {
-        if (devices.length === 0) {
-            setLoading(false);
-            return;
-        }
-
-        const fetchAllCounters = async () => {
-            const results = new Map<string, DeviceCounters>();
-
-            await Promise.all(
-                devices.map(async (device, idx) => {
-                    const deviceName = device.name || `Device ${idx}`;
-                    try {
-                        const response = await API.counters.device({ device: deviceName });
-                        results.set(deviceName, extractCounters(response));
-                    } catch (error) {
-                        console.error(`Failed to fetch counters for ${deviceName}:`, error);
-                    }
-                })
-            );
-
-            setCountersMap(results);
-            setLoading(false);
-        };
-
-        fetchAllCounters();
+    // Extract device names for the counter hook
+    const deviceNames = useMemo(() => {
+        return devices.map((device, idx) => device.name || `Device ${idx}`);
     }, [devices]);
+
+    // Use interpolated device counters
+    const { absoluteCounters: absoluteCountersMap } = useDeviceCounters(deviceNames, devices.length > 0);
 
     // Transform devices to row data
     const rowData: DeviceRowData[] = useMemo(() => {
@@ -106,10 +59,10 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
                 type: device.type || '-',
                 input_pipelines: device.input_pipelines ?? [],
                 output_pipelines: device.output_pipelines ?? [],
-                counters: countersMap.get(deviceName) ?? null,
+                absoluteCounters: absoluteCountersMap.get(deviceName),
             };
         });
-    }, [devices, countersMap]);
+    }, [devices, absoluteCountersMap]);
 
     const columns = useMemo((): TableColumnConfig<DeviceRowData>[] => [
         {
@@ -138,11 +91,19 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
             id: 'rx',
             name: 'RX',
             template: (item: DeviceRowData) => {
-                if (!item.counters) return <Text color="secondary">-</Text>;
+                const counters = item.absoluteCounters;
+                if (!counters) {
+                    return (
+                        <Box className="devices-table__counter devices-table__counter--loading">
+                            <Text variant="body-2" color="hint">-- pkts</Text>
+                            <Text variant="caption-2" color="hint">-- B</Text>
+                        </Box>
+                    );
+                }
                 return (
                     <Box className="devices-table__counter">
-                        <Text variant="body-2">{formatPackets(item.counters.rxPackets)} pkts</Text>
-                        <Text variant="caption-2" color="secondary">{formatBytes(item.counters.rxBytes)}</Text>
+                        <Text variant="body-2">{formatPackets(counters.rx.packets)} pkts</Text>
+                        <Text variant="caption-2" color="secondary">{formatBytesFromNumber(counters.rx.bytes)}</Text>
                     </Box>
                 );
             },
@@ -151,11 +112,19 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
             id: 'tx',
             name: 'TX',
             template: (item: DeviceRowData) => {
-                if (!item.counters) return <Text color="secondary">-</Text>;
+                const counters = item.absoluteCounters;
+                if (!counters) {
+                    return (
+                        <Box className="devices-table__counter devices-table__counter--loading">
+                            <Text variant="body-2" color="hint">-- pkts</Text>
+                            <Text variant="caption-2" color="hint">-- B</Text>
+                        </Box>
+                    );
+                }
                 return (
                     <Box className="devices-table__counter">
-                        <Text variant="body-2">{formatPackets(item.counters.txPackets)} pkts</Text>
-                        <Text variant="caption-2" color="secondary">{formatBytes(item.counters.txBytes)}</Text>
+                        <Text variant="body-2">{formatPackets(counters.tx.packets)} pkts</Text>
+                        <Text variant="caption-2" color="secondary">{formatBytesFromNumber(counters.tx.bytes)}</Text>
                     </Box>
                 );
             },
@@ -191,15 +160,11 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
         >
             {devices.length > 0 ? (
                 <Box className="devices-table-wrapper">
-                    {loading ? (
-                        <Text variant="body-1" color="secondary">Loading counters...</Text>
-                    ) : (
-                        <SortableDataTable
-                            data={rowData}
-                            columns={columns as any}
-                            width="max"
-                        />
-                    )}
+                    <SortableDataTable
+                        data={rowData}
+                        columns={columns as any}
+                        width="max"
+                    />
                 </Box>
             ) : (
                 <Text variant="body-1" color="secondary" className="inspect-text--block">

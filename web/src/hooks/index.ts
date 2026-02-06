@@ -7,6 +7,10 @@ export type { GraphState, UseGraphEditorOptions, UseGraphEditorResult } from './
 export { useInterpolatedCounters } from './useInterpolatedCounters';
 export type {
     InterpolatedCounterData,
+    InterpolatedAbsoluteData,
     UseInterpolatedCountersOptions,
     UseInterpolatedCountersResult,
 } from './useInterpolatedCounters';
+
+export { useDeviceCounters } from './useDeviceCounters';
+export type { DeviceCounterData, DeviceAbsoluteData, UseDeviceCountersResult } from './useDeviceCounters';

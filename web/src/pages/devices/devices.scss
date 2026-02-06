@@ -113,6 +113,21 @@
         flex: 1;
         min-width: 250px;
     }
+
+    &__counters-row {
+        padding: $spacing-md $spacing-lg;
+        background-color: var(--g-color-base-generic);
+        border-radius: $radius-md;
+        flex-wrap: wrap;
+    }
+
+    &__counter-group {
+        flex-shrink: 0;
+    }
+
+    &__counter-icon {
+        color: var(--g-color-text-secondary);
+    }
 }
 
 // PipelineTable

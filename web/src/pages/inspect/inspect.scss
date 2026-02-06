@@ -227,6 +227,19 @@
 
 .devices-table__counter {
     @include flex-column(2px);
+
+    &--loading {
+        animation: counter-pulse 1.5s ease-in-out infinite;
+    }
+}
+
+@keyframes counter-pulse {
+    0%, 100% {
+        opacity: 0.4;
+    }
+    50% {
+        opacity: 1;
+    }
 }
 
 .pipelines-table-wrapper {
