@@ -13,12 +13,13 @@ type ModuleNodeProps = NodeProps<Node<ModuleNodeData>>;
 const ModuleCounterDisplay: React.FC<{ moduleKey: string }> = ({ moduleKey }) => {
     const { counters } = useCounters();
     const counterData = counters.get(moduleKey);
+    const loading = counterData === undefined;
     const pps = counterData?.pps ?? 0;
     const bps = counterData?.bps ?? 0;
 
     return (
         <div className="module-node__counters">
-            <CounterDisplay pps={pps} bps={bps} />
+            <CounterDisplay pps={pps} bps={bps} loading={loading} />
         </div>
     );
 };

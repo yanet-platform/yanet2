@@ -31,6 +31,7 @@ export const CounterEdge: React.FC<EdgeProps> = ({
 
     const { counters } = useCounters();
     const counterData = counters.get(PIPELINE_COUNTER_KEY);
+    const loading = counterData === undefined;
     const pps = counterData?.pps ?? 0;
     const bps = counterData?.bps ?? 0;
 
@@ -55,7 +56,7 @@ export const CounterEdge: React.FC<EdgeProps> = ({
                         pointerEvents: 'none',
                     }}
                 >
-                    <CounterDisplay pps={pps} bps={bps} />
+                    <CounterDisplay pps={pps} bps={bps} loading={loading} />
                 </div>
             </EdgeLabelRenderer>
         </>

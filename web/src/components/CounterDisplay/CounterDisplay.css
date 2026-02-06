@@ -28,3 +28,17 @@
     color: var(--g-color-text-primary);
     font-variant-numeric: tabular-nums;
 }
+
+.counter-display__value--loading {
+    color: var(--g-color-text-hint);
+    animation: counter-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes counter-pulse {
+    0%, 100% {
+        opacity: 0.4;
+    }
+    50% {
+        opacity: 1;
+    }
+}

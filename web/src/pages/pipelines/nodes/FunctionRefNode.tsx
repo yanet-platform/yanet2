@@ -13,12 +13,13 @@ type FunctionRefNodeProps = NodeProps<Node<FunctionRefNodeData>>;
 const FunctionCounterDisplay: React.FC<{ functionName: string }> = ({ functionName }) => {
     const { counters } = useCounters();
     const counterData = counters.get(functionName);
+    const loading = counterData === undefined;
     const pps = counterData?.pps ?? 0;
     const bps = counterData?.bps ?? 0;
 
     return (
         <div className="function-ref-node__counters">
-            <CounterDisplay pps={pps} bps={bps} />
+            <CounterDisplay pps={pps} bps={bps} loading={loading} />
         </div>
     );
 };
