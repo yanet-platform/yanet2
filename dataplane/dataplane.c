@@ -571,9 +571,11 @@ dataplane_init(
 	}
 
 	LOG(INFO, "initialize dpdk");
-	if (dpdk_init(
-		    binary, config->dpdk_memory, pci_port_count, pci_port_names
-	    ) == -1) {
+	int rc = dpdk_init(
+		binary, config->dpdk_memory, pci_port_count, pci_port_names
+	);
+	free(pci_port_names);
+	if (rc == -1) {
 		LOG(ERROR, "failed to initialize dpdk");
 		errno = rte_errno;
 		return -1;
