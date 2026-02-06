@@ -168,11 +168,11 @@ export const apiToGraph = (pipeline: Pipeline): PipelineGraphState => {
     const functions = pipeline.functions || [];
 
     if (functions.length === 0) {
-        // Direct connection from input to output
         edges.push({
             id: 'edge-input-output',
             source: INPUT_NODE_ID,
             target: OUTPUT_NODE_ID,
+            type: 'counterEdge',
         });
     } else {
         // Create function ref nodes
@@ -321,6 +321,7 @@ export const createEmptyGraph = (): PipelineGraphState => {
                 id: 'edge-input-output-default',
                 source: INPUT_NODE_ID,
                 target: OUTPUT_NODE_ID,
+                type: 'counterEdge',
             },
         ],
     };

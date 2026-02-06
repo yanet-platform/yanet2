@@ -1,4 +1,6 @@
 import React from 'react';
+import { Icon } from '@gravity-ui/uikit';
+import { Layers, ArrowUpArrowDown } from '@gravity-ui/icons';
 import { formatPps, formatBps } from '../../utils';
 import './CounterDisplay.css';
 
@@ -16,16 +18,19 @@ export const CounterDisplay: React.FC<CounterDisplayProps> = ({
     bps,
     className = '',
 }) => {
+    const ppsIconClass = pps > 0 ? 'counter-display__icon--active' : 'counter-display__icon--inactive';
+    const bpsIconClass = bps > 0 ? 'counter-display__icon--active' : 'counter-display__icon--inactive';
+
     return (
         <div className={`counter-display ${className}`.trim()}>
             <div className="counter-display__item">
-                <span className="counter-display__icon">▲</span>
+                <Icon data={Layers} size={12} className={`counter-display__icon ${ppsIconClass}`} />
                 <span className="counter-display__value">
                     {formatPps(pps)}
                 </span>
             </div>
             <div className="counter-display__item">
-                <span className="counter-display__icon">↔</span>
+                <Icon data={ArrowUpArrowDown} size={12} className={`counter-display__icon ${bpsIconClass}`} />
                 <span className="counter-display__value">
                     {formatBps(bps)}
                 </span>

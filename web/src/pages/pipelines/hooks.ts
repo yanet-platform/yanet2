@@ -296,37 +296,37 @@ export const useFunctionCounters = (
             try {
                 const response = await API.inspect.inspect();
                 const allDevices = response.instance_info?.devices ?? [];
-                
+
                 // Find devices that use this pipeline
                 const matchingDevices = allDevices.filter(device => {
                     const inputPipelines = device.input_pipelines ?? [];
                     const outputPipelines = device.output_pipelines ?? [];
                     return inputPipelines.some(p => p.name === pipelineName) ||
-                           outputPipelines.some(p => p.name === pipelineName);
+                        outputPipelines.some(p => p.name === pipelineName);
                 });
-                
+
                 setDevices(matchingDevices);
             } catch (error) {
                 console.error('Failed to fetch devices for counters:', error);
             }
         };
-        
+
         fetchDevices();
     }, [pipelineName]);
 
     // Create stable fetch function
     const fetchCounters = useCallback(async (): Promise<Map<string, { packets: bigint; bytes: bigint }>> => {
         const newValues = new Map<string, { packets: bigint; bytes: bigint }>();
-        
+
         // Initialize with zeros
         for (const funcName of functionNames) {
             newValues.set(funcName, { packets: BigInt(0), bytes: BigInt(0) });
         }
-        
+
         // Fetch and aggregate counters across all devices
         for (const device of devices) {
             const deviceName = device.name || '';
-            
+
             for (const funcName of functionNames) {
                 try {
                     const response = await API.counters.function({
@@ -334,11 +334,11 @@ export const useFunctionCounters = (
                         pipeline: pipelineName,
                         function: funcName,
                     });
-                    
+
                     // Function counters are named 'input' and 'input_bytes'
                     const rxPackets = sumCounterValues(findCounter(response.counters, 'input'));
                     const rxBytes = sumCounterValues(findCounter(response.counters, 'input_bytes'));
-                    
+
                     const current = newValues.get(funcName)!;
                     newValues.set(funcName, {
                         packets: current.packets + rxPackets,
@@ -349,7 +349,7 @@ export const useFunctionCounters = (
                 }
             }
         }
-        
+
         return newValues;
     }, [devices, functionNames, pipelineName]);
 
@@ -358,6 +358,99 @@ export const useFunctionCounters = (
         keys: functionNames,
         fetchCounters,
         enabled: devices.length > 0 && functionNames.length > 0,
+        pollingInterval: 1000,
+        interpolationInterval: 30,
+    });
+
+    return { counters };
+};
+
+// Well-known key for pipeline-level counters
+export const PIPELINE_COUNTER_KEY = '__pipeline__';
+
+export interface UsePipelineCountersResult {
+    counters: Map<string, InterpolatedCounterData>;
+}
+
+/**
+ * Hook for fetching and interpolating pipeline-level counters.
+ * 
+ * Used for fallthrough pipelines (no functions) to show traffic counters
+ * on the Input-Output edge.
+ * 
+ * - Polls counters every 1 second from backend via API.counters.pipeline()
+ * - Aggregates counters across all devices using this pipeline
+ * - Updates visual every 30ms using linear interpolation
+ * - Returns counters under the well-known key PIPELINE_COUNTER_KEY
+ */
+export const usePipelineCounters = (
+    pipelineName: string,
+    enabled: boolean
+): UsePipelineCountersResult => {
+    const [devices, setDevices] = useState<DeviceInfo[]>([]);
+
+    useEffect(() => {
+        if (!enabled) return;
+
+        const fetchDevices = async () => {
+            try {
+                const response = await API.inspect.inspect();
+                const allDevices = response.instance_info?.devices ?? [];
+
+                // Find devices that use this pipeline
+                const matchingDevices = allDevices.filter(device => {
+                    const inputPipelines = device.input_pipelines ?? [];
+                    const outputPipelines = device.output_pipelines ?? [];
+                    return inputPipelines.some(p => p.name === pipelineName) ||
+                        outputPipelines.some(p => p.name === pipelineName);
+                });
+
+                setDevices(matchingDevices);
+            } catch (error) {
+                console.error('Failed to fetch devices for pipeline counters:', error);
+            }
+        };
+
+        fetchDevices();
+    }, [pipelineName, enabled]);
+
+    // Keys for the counters hook
+    const keys = enabled ? [PIPELINE_COUNTER_KEY] : [];
+
+    const fetchCounters = useCallback(async (): Promise<Map<string, { packets: bigint; bytes: bigint }>> => {
+        const newValues = new Map<string, { packets: bigint; bytes: bigint }>();
+
+        newValues.set(PIPELINE_COUNTER_KEY, { packets: BigInt(0), bytes: BigInt(0) });
+
+        for (const device of devices) {
+            const deviceName = device.name || '';
+
+            try {
+                const response = await API.counters.pipeline({
+                    device: deviceName,
+                    pipeline: pipelineName,
+                });
+
+                const rxPackets = sumCounterValues(findCounter(response.counters, 'input'));
+                const rxBytes = sumCounterValues(findCounter(response.counters, 'input_bytes'));
+
+                const current = newValues.get(PIPELINE_COUNTER_KEY)!;
+                newValues.set(PIPELINE_COUNTER_KEY, {
+                    packets: current.packets + rxPackets,
+                    bytes: current.bytes + rxBytes,
+                });
+            } catch {
+                // Ignore errors for individual device counters
+            }
+        }
+
+        return newValues;
+    }, [devices, pipelineName]);
+
+    const { counters } = useInterpolatedCounters({
+        keys,
+        fetchCounters,
+        enabled: enabled && devices.length > 0,
         pollingInterval: 1000,
         interpolationInterval: 30,
     });
