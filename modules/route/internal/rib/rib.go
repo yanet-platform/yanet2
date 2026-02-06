@@ -35,11 +35,12 @@ func NewRIB(log *zap.SugaredLogger) *RIB {
 	}
 }
 
-func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error {
+func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr, sourceID RouteSourceID) error {
 	route := Route{
 		Prefix:    prefix,
 		NextHop:   nexthopAddr,
-		SourceID:  RouteSourceStatic,
+		Peer:      netip.IPv6Unspecified(),
+		SourceID:  sourceID,
 		UpdatedAt: time.Now(),
 	}
 
@@ -67,23 +68,22 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error
 	return nil
 }
 
-func (m *RIB) RemoveUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) error {
+func (m *RIB) RemoveUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr, sourceID RouteSourceID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	found := false
+	found := 0
 	m.routes.UpdateOrDelete(
 		prefix,
 		func(routesList RoutesList) (RoutesList, bool) {
 			// Filter out only static routes with matching nexthop
 			newRoutes := make([]Route, 0, len(routesList.Routes))
 			for _, r := range routesList.Routes {
-				// Keep the route if it's not static or has different nexthop
-				if r.SourceID != RouteSourceStatic || r.NextHop != nexthopAddr {
-					newRoutes = append(newRoutes, r)
-				} else {
-					found = true
+				if r.NextHop == nexthopAddr && r.SourceID == sourceID {
+					found++
+					continue // skip means remove
 				}
+				newRoutes = append(newRoutes, r)
 			}
 			routesList.Routes = newRoutes
 			// Delete the prefix entry if no routes remain
@@ -91,16 +91,19 @@ func (m *RIB) RemoveUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr) er
 		},
 	)
 
-	if found {
+	if found > 0 {
 		m.changedAt.Store(time.Now().UnixNano())
-		m.log.Infow("RIB: removed static unicast route",
+		m.log.Infow("RIB: removed unicast route",
 			"prefix", prefix,
 			"nexthop", nexthopAddr,
+			"source", sourceID,
+			"count", found,
 		)
 	} else {
-		m.log.Warnw("RIB: static route not found for removal",
+		m.log.Warnw("RIB: route not found for removal",
 			"prefix", prefix,
 			"nexthop", nexthopAddr,
+			"source", sourceID,
 		)
 	}
 
@@ -146,9 +149,9 @@ func (m *RIB) update(routes ...Route) {
 		if route.ToRemove {
 			m.routes.UpdateOrDelete(
 				route.Prefix,
-				func(m RoutesList) (RoutesList, bool) {
-					m.Remove(route)
-					return m, len(m.Routes) == 0
+				func(rl RoutesList) (RoutesList, bool) {
+					rl.Remove(route)
+					return rl, len(rl.Routes) == 0
 				},
 			)
 		} else {
@@ -159,9 +162,9 @@ func (m *RIB) update(routes ...Route) {
 						Routes: []Route{route},
 					}
 				},
-				func(m RoutesList) RoutesList {
-					m.Insert(route)
-					return m
+				func(rl RoutesList) RoutesList {
+					rl.Insert(route)
+					return rl
 				},
 			)
 		}

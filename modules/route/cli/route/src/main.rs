@@ -17,8 +17,8 @@ use tabled::{
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use yanet_cli_route::{
     routepb::{
-        route_service_client::RouteServiceClient, DeleteRouteRequest, FlushRoutesRequest, InsertRouteRequest,
-        ListConfigsRequest, LookupRouteRequest, ShowRoutesRequest,
+        route_service_client::RouteServiceClient, DeleteConfigRequest, DeleteRouteRequest, FlushRoutesRequest,
+        InsertRouteRequest, ListConfigsRequest, LookupRouteRequest, RouteSourceId, ShowRoutesRequest,
     },
     RouteEntry,
 };
@@ -49,8 +49,10 @@ pub enum ModeCmd {
     Lookup(RouteLookupCmd),
     /// Inserts a unicast static route.
     Insert(RouteInsertCmd),
-    /// Deletes a unicast static route.
-    Delete(RouteDeleteCmd),
+    /// Removes a unicast static route.
+    Remove(RouteRemoveCmd),
+    /// Deletes a route configuration (RIB).
+    Delete(RouteDeleteConfigCmd),
     /// Flush RIB to FIB for a configuration.
     Flush(RouteFlushCmd),
 }
@@ -90,11 +92,14 @@ pub struct RouteInsertCmd {
     /// The IP address of the nexthop router.
     #[arg(long = "via")]
     pub nexthop_addr: IpAddr,
+    /// Route source type (static or bird). Defaults to static.
+    #[arg(long = "source", default_value = "static")]
+    pub source: RouteSource,
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct RouteDeleteCmd {
-    /// The destination prefix of the route to delete.
+pub struct RouteRemoveCmd {
+    /// The destination prefix of the route to remove.
     ///
     /// The prefix must be an IPv4 or IPv6 address followed by "/" and the
     /// length of the prefix.
@@ -105,6 +110,16 @@ pub struct RouteDeleteCmd {
     /// The IP address of the nexthop router.
     #[arg(long = "via")]
     pub nexthop_addr: IpAddr,
+    /// Route source type (static or bird). Defaults to static.
+    #[arg(long = "source", default_value = "static")]
+    pub source: RouteSource,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct RouteDeleteConfigCmd {
+    /// Route config name to delete.
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -112,6 +127,21 @@ pub struct RouteFlushCmd {
     /// Route config name.
     #[arg(long = "cfg", short)]
     pub config_name: String,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum RouteSource {
+    Static,
+    Bird,
+}
+
+impl RouteSource {
+    fn to_proto(&self) -> RouteSourceId {
+        match self {
+            RouteSource::Static => RouteSourceId::Static,
+            RouteSource::Bird => RouteSourceId::Bird,
+        }
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -135,7 +165,8 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Show(cmd) => service.show_routes(cmd).await,
         ModeCmd::Lookup(cmd) => service.lookup_route(cmd).await,
         ModeCmd::Insert(cmd) => service.insert_route(cmd).await,
-        ModeCmd::Delete(cmd) => service.delete_route(cmd).await,
+        ModeCmd::Remove(cmd) => service.remove_route(cmd).await,
+        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Flush(cmd) => service.flush_routes(cmd).await,
     }
 }
@@ -211,26 +242,38 @@ impl RouteService {
             prefix: cmd.prefix.to_string(),
             nexthop_addr: cmd.nexthop_addr.to_string(),
             do_flush: true,
+            source_id: cmd.source.to_proto().into(),
         };
 
         self.client.insert_route(request).await?;
 
-        log::info!("Route inserted successfully: {} via {}", cmd.prefix, cmd.nexthop_addr);
+        log::info!("Route inserted successfully: {} via {} (source: {:?})", cmd.prefix, cmd.nexthop_addr, cmd.source);
 
         Ok(())
     }
 
-    pub async fn delete_route(&mut self, cmd: RouteDeleteCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn remove_route(&mut self, cmd: RouteRemoveCmd) -> Result<(), Box<dyn Error>> {
         let request = DeleteRouteRequest {
             name: cmd.config_name.clone(),
             prefix: cmd.prefix.to_string(),
             nexthop_addr: cmd.nexthop_addr.to_string(),
             do_flush: true,
+            source_id: cmd.source.to_proto().into(),
         };
 
         self.client.delete_route(request).await?;
 
-        log::info!("Route deleted successfully: {} via {}", cmd.prefix, cmd.nexthop_addr);
+        log::info!("Route removed successfully: {} via {} (source: {:?})", cmd.prefix, cmd.nexthop_addr, cmd.source);
+
+        Ok(())
+    }
+
+    pub async fn delete_config(&mut self, cmd: RouteDeleteConfigCmd) -> Result<(), Box<dyn Error>> {
+        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+
+        self.client.delete_config(request).await?;
+
+        log::info!("Config deleted successfully: {}", cmd.config_name);
 
         Ok(())
     }

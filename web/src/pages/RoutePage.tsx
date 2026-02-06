@@ -3,6 +3,7 @@ import { Box } from '@gravity-ui/uikit';
 import { API } from '../api';
 import { toaster } from '../utils';
 import type { Route } from '../api/routes';
+import { RouteSourceID } from '../api/routes';
 import { PageLayout, PageLoader, EmptyState } from '../components';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '../utils';
 import {
@@ -148,6 +149,7 @@ const RoutePage: React.FC = () => {
                 prefix: addRouteForm.prefix,
                 nexthop_addr: addRouteForm.nexthop_addr,
                 do_flush: addRouteForm.do_flush,
+                source_id: RouteSourceID.STATIC,
             });
 
             setAddDialogOpen(false);
@@ -201,6 +203,7 @@ const RoutePage: React.FC = () => {
                     prefix: route.prefix,
                     nexthop_addr: route.next_hop,
                     do_flush: true,
+                    source_id: RouteSourceID.STATIC,
                 });
             }
 

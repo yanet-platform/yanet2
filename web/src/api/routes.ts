@@ -2,6 +2,12 @@ import { createService, type CallOptions } from './client';
 
 // Route types
 
+export enum RouteSourceID {
+    UNKNOWN = 0,
+    STATIC = 1,
+    BIRD = 2,
+}
+
 export interface LargeCommunity {
     global_administrator?: number;
     local_data_part1?: number;
@@ -42,6 +48,7 @@ export interface InsertRouteRequest {
     prefix?: string;
     nexthop_addr?: string;
     do_flush?: boolean;
+    source_id?: RouteSourceID;
 }
 
 export interface InsertRouteResponse {
@@ -52,6 +59,7 @@ export interface DeleteRouteRequest {
     prefix?: string;
     nexthop_addr?: string;
     do_flush?: boolean;
+    source_id?: RouteSourceID;
 }
 
 export interface DeleteRouteResponse {

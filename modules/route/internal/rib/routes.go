@@ -93,7 +93,7 @@ type RoutesList struct {
 func (m *RoutesList) Insert(route Route) bool {
 	insertedIdx := -1
 	for idx, r := range m.Routes {
-		if r.Peer == route.Peer {
+		if r.Peer == route.Peer && r.SourceID == route.SourceID {
 			m.Routes[idx] = route
 			insertedIdx = idx
 			break
@@ -112,7 +112,7 @@ func (m *RoutesList) Insert(route Route) bool {
 func (m *RoutesList) Remove(route Route) bool {
 	// Sorting is not need on removing
 	for idx, r := range m.Routes {
-		if r.Peer == route.Peer {
+		if r.Peer == route.Peer && r.SourceID == route.SourceID {
 			// Delete with preserving order
 			m.Routes = slices.Delete(m.Routes, idx, idx+1)
 
