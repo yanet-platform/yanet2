@@ -472,74 +472,34 @@ dataplane_init(
 		instance->dp_config->instance_idx = instance_idx;
 		instance->dp_config->instance_count = dataplane->instance_count;
 
-		// FIXME: load modules into dp memory
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "forward"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "route"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "decap"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "dscp"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "nat64"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "balancer"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "pdump"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "acl"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "fwstate"
-		);
-		if (rc == -1) {
-			return -1;
+		static const char *modules[] = {
+			"forward",
+			"route",
+			"decap",
+			"dscp",
+			"nat64",
+			"balancer",
+			"pdump",
+			"acl",
+			"fwstate",
+		};
+		for (size_t i = 0; i < sizeof(modules) / sizeof(modules[0]);
+		     ++i) {
+			if (dataplane_load_module(
+				    instance->dp_config, bin_hndl, modules[i]
+			    ) == -1) {
+				return -1;
+			}
 		}
 
-		rc = dataplane_load_device(
-			instance->dp_config, bin_hndl, "plain"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-
-		rc = dataplane_load_device(
-			instance->dp_config, bin_hndl, "vlan"
-		);
-		if (rc == -1) {
-			return -1;
+		static const char *devices[] = {"plain", "vlan"};
+		for (size_t i = 0; i < sizeof(devices) / sizeof(devices[0]);
+		     ++i) {
+			if (dataplane_load_device(
+				    instance->dp_config, bin_hndl, devices[i]
+			    ) == -1) {
+				return -1;
+			}
 		}
 
 		struct cp_config_gen *cp_config_gen =
