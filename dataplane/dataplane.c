@@ -599,8 +599,6 @@ stat_thread(void *arg) {
 
 	FILE *log = fopen("stat.log", "w");
 
-	(void)dataplane;
-
 	struct rte_eth_xstat_name names[4096];
 	struct rte_eth_xstat xstats0[dataplane->device_count][4096];
 
