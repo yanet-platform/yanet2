@@ -21,7 +21,7 @@ typedef struct net4_count(net_getter)(const struct filter_rule *rule);
 struct segment {
 	uint32_t from;
 	uint32_t to;
-	size_t idx;
+	size_t rule_idx;
 };
 
 static int
@@ -60,12 +60,12 @@ static void
 net4_from_to(struct net4 *n, uint32_t *from, uint32_t *to) {
 	uint32_t addr = 0;
 	uint32_t mask = 0;
-	
+
 	for (size_t i = 0; i < 4; ++i) {
 		addr |= ((uint32_t)n->addr[i]) << (24 - i * 8);
 		mask |= ((uint32_t)n->mask[i]) << (24 - i * 8);
 	}
-	
+
 	*from = addr & mask;
 	*to = addr | ~mask;
 }
@@ -101,7 +101,7 @@ fill_segments(
 			uint32_t from, to;
 			net4_from_to(cur.net4 + j, &from, &to);
 			segments[cnt++] = (struct segment
-			){.from = from, .to = to, .idx = i};
+			){.from = from, .to = to, .rule_idx = i};
 		}
 	}
 
@@ -144,9 +144,7 @@ fill_value_registry(
 			--idx;
 			uint32_t *to_array = ADDR_OF(&classifier->to);
 			assert(to_array[idx] >= to);
-			if (value_registry_collect(
-				    registry, idx
-			    ) != 0) {
+			if (value_registry_collect(registry, idx) != 0) {
 				return -1;
 			}
 		}
@@ -179,7 +177,6 @@ net4_fast_classifier_init(
 
 	size_t after_collapse_cnt =
 		fill_segments(segments, rules, rules_count, getter);
-	classifier->empty_classifier = after_collapse_cnt;
 
 	uint32_t *from = memory_balloc(
 		mctx, sizeof(struct segment) * after_collapse_cnt
@@ -308,7 +305,7 @@ net4_fast_classifier_free(
 	memory_bfree(
 		memory_context,
 		ADDR_OF(&classifier->to),
-		classifier->empty_classifier * sizeof(uint32_t)
+		classifier->btree.n * sizeof(uint32_t)
 	);
 	memory_bfree(
 		memory_context, classifier, sizeof(struct net4_fast_classifier)
@@ -332,4 +329,3 @@ FILTER_ATTR_COMPILER_FREE_FUNC(net4_fast_dst)(
 		(struct net4_fast_classifier *)data;
 	net4_fast_classifier_free(classifier, memory_context);
 }
-

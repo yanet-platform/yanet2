@@ -45,7 +45,7 @@ FILTER_ATTR_QUERY_FUNC(net4_fast_dst)(
 				    result[i] == 0 ||
 				    to[result[i] - 1] < values[i] - 1
 			    )) {
-				result[i] = classifier->empty_classifier;
+				result[i] = classifier->btree.n;
 			} else {
 				--result[i];
 			}
@@ -69,7 +69,7 @@ FILTER_ATTR_QUERY_FUNC(net4_fast_dst)(
 		if (unlikely(
 			    result[i] == 0 || to[result[i] - 1] < values[i] - 1
 		    )) {
-			result[i] = classifier->empty_classifier;
+			result[i] = classifier->btree.n;
 		} else {
 			--result[i];
 		}
@@ -105,7 +105,7 @@ FILTER_ATTR_QUERY_FUNC(net4_fast_src)(
 				    result[i] == 0 ||
 				    to[result[i] - 1] < values[i] - 1
 			    )) {
-				result[i] = classifier->empty_classifier;
+				result[i] = classifier->btree.n;
 			} else {
 				--result[i];
 			}
@@ -129,7 +129,7 @@ FILTER_ATTR_QUERY_FUNC(net4_fast_src)(
 		if (unlikely(
 			    result[i] == 0 || to[result[i] - 1] < values[i] - 1
 		    )) {
-			result[i] = classifier->empty_classifier;
+			result[i] = classifier->btree.n;
 		} else {
 			--result[i];
 		}

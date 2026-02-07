@@ -7,5 +7,4 @@
 struct net4_fast_classifier {
 	struct btree_u32 btree;
 	uint32_t *to;
-	size_t empty_classifier;
 };
