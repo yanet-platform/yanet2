@@ -140,7 +140,7 @@ dataplane_connect_devices(
 	for (uint64_t conn_idx = 0; conn_idx < connection_count; ++conn_idx) {
 		struct dataplane_connection_config *connection =
 			connections + conn_idx;
-		// FIXME device id should be ferivied
+		// FIXME device id should be verified
 		dataplane_connect_device(
 			dataplane,
 			dataplane->devices + connection->src_device_id,

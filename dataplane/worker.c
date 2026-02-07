@@ -1,6 +1,6 @@
 /*
  * The file is under construction.
- * The first tought was  about provinding device and queue identifiers into
+ * The first thought was  about providing device and queue identifiers into
  * worker. Worker processes infinite loop consisting of:
  *  - queue read
  *  - pipepline invocation
@@ -20,9 +20,9 @@
  *    be assigned to multiple logical devices whereas one logical device
  *    may have only one assigned pipeline. This will reduce pipeline
  *    configuration in case of virtual routers.
- *  - dataplane is reposnsible for L2 processing and routing packets between
+ *  - dataplane is responsible for L2 processing and routing packets between
  *    logical devices, merging and balancing laggs and so on
- *  - read and writ callbacks should return packages with information about
+ *  - read and write callbacks should return packages with information about
  *    pipeline assigned to each packet.
  *
  * The only question is how pipeline should be attached to packet/mbuf
@@ -130,7 +130,7 @@ worker_connection_free_cb(void **item, size_t count, void *data) {
 }
 
 /*
- * FIXME: the function bellow sends a packet to a different worker
+ * FIXME: the function below sends a packet to a different worker
  * using corresponding data pipe so the routine name might be confusing.
  */
 static int
@@ -339,7 +339,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 		/*
 		 * All the packets with the same pipeline_ectx are ready to
-		 * process, so return postponned packet into pending
+		 * process, so return postponed packet into pending
 		 * queue.
 		 */
 		packet_list_concat(&packet_front.pending, &pending_packets);
