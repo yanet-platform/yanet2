@@ -18,7 +18,6 @@
 #include "common/strutils.h"
 
 #include "common/hugepages.h"
-#include "logging/log.h"
 
 #include "controlplane/config/zone.h"
 #include "dataplane/config/zone.h"
