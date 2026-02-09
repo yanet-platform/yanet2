@@ -22,6 +22,7 @@
 #include "common/memory_block.h"
 #include "common/registry.h"
 #include "common/rng.h"
+#include "dataplane/packet/packet.h"
 #include "filter/compiler.h"
 #include "filter/filter.h"
 #include "filter/query.h"
@@ -138,7 +139,7 @@ allocate_hugepage_memory(size_t size) {
 			size);
 		fprintf(stderr,
 			"Make sure hugepages are configured: sudo sysctl -w "
-			"vm.nr_hugepages=4500\n");
+			"vm.nr_hugepages=5200\n");
 		return NULL;
 	}
 
@@ -384,6 +385,17 @@ run_benchmark(
 			);
 			break;
 		}
+		// if (batch_idx + 5 < num_batches) {
+		// 	for (size_t i = 0; i < batch_size; ++i) {
+		// 		struct packet *pkt = packets[(batch_idx + 5) * batch_size + i];
+		// 		struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
+		// 		uint8_t *mbuf_data = (uint8_t *)mbuf;
+		// 		size_t mbuf_size = mbuf->buf_len;
+		// 		for (size_t j = 0; j < mbuf_size; j += 64) {
+		// 			__builtin_prefetch(mbuf_data + j, 1, 3);
+		// 		}
+		// 	}
+		// }
 	}
 
 	clock_gettime(CLOCK_MONOTONIC, &end_time);
@@ -505,7 +517,7 @@ main(int argc, char **argv) {
 	log_enable_name("info");
 
 	// Allocate memory arena using hugepages
-	const size_t arena_size = 1ull << 31; // 2GB
+	const size_t arena_size = 1ull << 28; // 256MB
 	void *arena = allocate_hugepage_memory(arena_size);
 	if (arena == NULL) {
 		return 1;
@@ -542,7 +554,7 @@ main(int argc, char **argv) {
 		return 1;
 	}
 
-	uint64_t rng = time(NULL);
+	uint64_t rng = 332111;
 	generate_rules(
 		rules, builders, config.num_rules, config.sig_type, &rng
 	);

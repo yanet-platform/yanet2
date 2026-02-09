@@ -32,7 +32,8 @@ FILTER_ATTR_QUERY_FUNC(net4_fast_dst)(
 				struct rte_ipv4_hdr *,
 				packets[i]->network_header.offset
 			);
-			values[i] = rte_be_to_cpu_32(ipv4_hdr->dst_addr) + 1;
+			// values[i] = rte_be_to_cpu_32(ipv4_hdr->dst_addr) + 1;
+			values[i] = ipv4_hdr->dst_addr + 1;
 		}
 		btree_u32_lower_bounds(
 			&classifier->btree,
