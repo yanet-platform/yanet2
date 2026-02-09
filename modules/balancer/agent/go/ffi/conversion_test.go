@@ -660,13 +660,6 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 				},
 				SourceV4: netip.MustParseAddr("10.0.0.1"),
 				SourceV6: netip.MustParseAddr("2001:db8::1"),
-				DecapV4: []netip.Addr{
-					netip.MustParseAddr("192.168.1.1"),
-					netip.MustParseAddr("192.168.1.2"),
-				},
-				DecapV6: []netip.Addr{
-					netip.MustParseAddr("2001:db8::100"),
-				},
 			},
 		},
 		{
@@ -760,15 +753,6 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 				},
 				SourceV4: netip.MustParseAddr("10.0.0.1"),
 				SourceV6: netip.MustParseAddr("2001:db8::1"),
-				DecapV4: []netip.Addr{
-					netip.MustParseAddr("192.168.1.1"),
-					netip.MustParseAddr("192.168.1.2"),
-				},
-				DecapV6: []netip.Addr{
-					netip.MustParseAddr("2001:db8::100"),
-					netip.MustParseAddr("2001:db8::101"),
-					netip.MustParseAddr("2001:db8::102"),
-				},
 			},
 		},
 	}
@@ -866,19 +850,6 @@ func TestBalancerConfigConversion(t *testing.T) {
 					},
 					SourceV4: netip.MustParseAddr("10.0.0.1"),
 					SourceV6: netip.MustParseAddr("2001:db8::1"),
-					DecapV4: []netip.Addr{
-						netip.MustParseAddr("192.168.1.1"),
-						netip.MustParseAddr("192.168.1.2"),
-						netip.MustParseAddr("192.168.1.3"),
-						netip.MustParseAddr("192.168.1.4"),
-					},
-					DecapV6: []netip.Addr{
-						netip.MustParseAddr("2001:db8::100"),
-						netip.MustParseAddr("2001:db8::101"),
-						netip.MustParseAddr("2001:db8::102"),
-						netip.MustParseAddr("2001:db8::103"),
-						netip.MustParseAddr("2001:db8::104"),
-					},
 				},
 				State: StateConfig{
 					TableCapacity: 10000,
@@ -972,19 +943,6 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 						},
 						SourceV4: netip.MustParseAddr("10.0.0.1"),
 						SourceV6: netip.MustParseAddr("2001:db8::1"),
-						DecapV4: []netip.Addr{
-							netip.MustParseAddr("192.168.1.1"),
-							netip.MustParseAddr("192.168.1.2"),
-							netip.MustParseAddr("192.168.1.3"),
-							netip.MustParseAddr("192.168.1.4"),
-						},
-						DecapV6: []netip.Addr{
-							netip.MustParseAddr("2001:db8::100"),
-							netip.MustParseAddr("2001:db8::101"),
-							netip.MustParseAddr("2001:db8::102"),
-							netip.MustParseAddr("2001:db8::103"),
-							netip.MustParseAddr("2001:db8::104"),
-						},
 					},
 					State: StateConfig{
 						TableCapacity: 10000,
@@ -1055,18 +1013,6 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 						},
 						SourceV4: netip.MustParseAddr("10.0.0.1"),
 						SourceV6: netip.MustParseAddr("2001:db8::1"),
-						DecapV4: []netip.Addr{
-							netip.MustParseAddr("192.168.1.1"),
-							netip.MustParseAddr("192.168.1.2"),
-							netip.MustParseAddr("192.168.1.3"),
-							netip.MustParseAddr("192.168.1.4"),
-							netip.MustParseAddr("192.168.1.5"),
-						},
-						DecapV6: []netip.Addr{
-							netip.MustParseAddr("2001:db8::100"),
-							netip.MustParseAddr("2001:db8::101"),
-							netip.MustParseAddr("2001:db8::102"),
-						},
 					},
 					State: StateConfig{
 						TableCapacity: 5000,
@@ -1283,14 +1229,6 @@ func TestComplexScenario(t *testing.T) {
 				},
 				SourceV4: netip.MustParseAddr("10.0.0.1"),
 				SourceV6: netip.MustParseAddr("2001:db8::1"),
-				DecapV4: []netip.Addr{
-					netip.MustParseAddr("192.168.1.1"),
-					netip.MustParseAddr("192.168.1.2"),
-				},
-				DecapV6: []netip.Addr{
-					netip.MustParseAddr("2001:db8::100"),
-					netip.MustParseAddr("2001:db8::101"),
-				},
 			},
 			State: StateConfig{
 				TableCapacity: 100000,
@@ -1336,22 +1274,6 @@ func TestLargeScaleConversion(t *testing.T) {
 		VirtualServices: make([]VsConfig, 100),
 		SourceV4:        netip.MustParseAddr("10.0.0.1"),
 		SourceV6:        netip.MustParseAddr("2001:db8::1"),
-		DecapV4:         make([]netip.Addr, 100),
-		DecapV6:         make([]netip.Addr, 100),
-	}
-
-	// Generate 100 DecapV4 addresses
-	for i := 0; i < 100; i++ {
-		config.DecapV4[i] = netip.MustParseAddr(
-			fmt.Sprintf("192.168.%d.%d", i/256, i%256),
-		)
-	}
-
-	// Generate 100 DecapV6 addresses
-	for i := 0; i < 100; i++ {
-		config.DecapV6[i] = netip.MustParseAddr(
-			fmt.Sprintf("2001:db8::%x", i+1),
-		)
 	}
 
 	// Generate 100 virtual services
@@ -1451,12 +1373,6 @@ func TestLargeScaleConversion(t *testing.T) {
 			"Expected 100 virtual services, got %d",
 			len(result.VirtualServices),
 		)
-	}
-	if len(result.DecapV4) != 100 {
-		t.Errorf("Expected 100 DecapV4 addresses, got %d", len(result.DecapV4))
-	}
-	if len(result.DecapV6) != 100 {
-		t.Errorf("Expected 100 DecapV6 addresses, got %d", len(result.DecapV6))
 	}
 
 	// Validate first VS has 100 reals

@@ -338,7 +338,6 @@ func createSchedulingTestConfig() *balancerpb.BalancerConfig {
 					equalReals,
 				),
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 60,
 				TcpSyn:    60,

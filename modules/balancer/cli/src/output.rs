@@ -178,17 +178,6 @@ fn print_show_config_tree(response: &balancerpb::ShowConfigResponse) -> Result<(
             }
             tree.end_child();
 
-            // Decap addresses
-            if !packet_handler.decap_addresses.is_empty() {
-                tree.begin_child("Decap Addresses".to_string());
-                for addr in &packet_handler.decap_addresses {
-                    if let Ok(ip) = addr_to_ip(addr) {
-                        tree.add_empty_child(ip.to_string());
-                    }
-                }
-                tree.end_child();
-            }
-
             // Timeouts
             if let Some(timeouts) = &packet_handler.sessions_timeouts {
                 tree.begin_child("Session Timeouts".to_string());
@@ -335,19 +324,6 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
 
     if let Some(config) = &response.config {
         if let Some(packet_handler) = &config.packet_handler {
-            // Decap addresses (one per line, white color for list items)
-            println!("{}", "Decap Addresses:".bright_cyan().bold());
-            if !packet_handler.decap_addresses.is_empty() {
-                for addr in &packet_handler.decap_addresses {
-                    if let Ok(ip) = addr_to_ip(addr) {
-                        println!("  {}", ip);
-                    }
-                }
-            } else {
-                println!("  None");
-            }
-            println!();
-
             // Source addresses
             println!("{}", "Source Addresses:".bright_cyan().bold());
             if let Ok(ipv4) = opt_addr_to_ip(&packet_handler.source_address_v4) {
@@ -752,8 +728,6 @@ fn print_show_stats_tree(response: &balancerpb::ShowStatsResponse) -> Result<(),
                 "Unexpected Network Proto: {}",
                 format_number(common.unexpected_network_proto)
             ));
-            tree.add_empty_child(format!("Decap Successful: {}", format_number(common.decap_successful)));
-            tree.add_empty_child(format!("Decap Failed: {}", format_number(common.decap_failed)));
             tree.add_empty_child(format!("Outgoing Packets: {}", format_number(common.outgoing_packets)));
             tree.add_empty_child(format!("Outgoing Bytes: {}", format_bytes(common.outgoing_bytes)));
             tree.end_child();
@@ -1010,16 +984,6 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
                 category: "".to_string(),
                 metric: "Unexpected Proto".to_string(),
                 value: format_number(common.unexpected_network_proto),
-            });
-            rows.push(ModuleStatsRow {
-                category: "".to_string(),
-                metric: "Decap Success".to_string(),
-                value: format_number(common.decap_successful),
-            });
-            rows.push(ModuleStatsRow {
-                category: "".to_string(),
-                metric: "Decap Failed".to_string(),
-                value: format_number(common.decap_failed),
             });
             rows.push(ModuleStatsRow {
                 category: "".to_string(),

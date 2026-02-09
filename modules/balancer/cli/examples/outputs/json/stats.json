@@ -47,8 +47,6 @@
       "incoming_packets": 1234567,
       "incoming_bytes": 1288490188,
       "unexpected_network_proto": 0,
-      "decap_successful": 50000,
-      "decap_failed": 123,
       "outgoing_packets": 1234000,
       "outgoing_bytes": 1181116006
     },

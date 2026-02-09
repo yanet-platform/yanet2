@@ -99,8 +99,8 @@ broadcast_icmp_packet(struct packet_ctx *ctx) {
 	// to them.
 
 	// Check if packet is a cloned already
-	if (ctx->decap_flag && icmp_error_hdr(ctx->packet)->unused_marker ==
-				       rte_cpu_to_be_16(ICMP_BROADCAST_IDENT)) {
+	if (icmp_error_hdr(ctx->packet)->unused_marker ==
+	    rte_cpu_to_be_16(ICMP_BROADCAST_IDENT)) {
 		// Update module counters
 		uint16_t header_type = ctx->packet->transport_header.type;
 		ICMP_STATS_INC(packet_clones_received, header_type, ctx);

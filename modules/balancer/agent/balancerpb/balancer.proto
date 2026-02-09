@@ -32,7 +32,6 @@ service BalancerService {
 	//   * vs (virtual services list)
 	//   * source_address_v4
 	//   * source_address_v6
-	//   * decap_addresses
 	//   * sessions_timeouts
 	// - Optional fields in StateConfig (only updated if specified):
 	//   * session_table_capacity

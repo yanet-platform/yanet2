@@ -76,11 +76,6 @@ struct packet_handler {
 		uint64_t l4;
 	} counter;
 
-	// if packet destination id is from decap list,
-	// then we make decap
-	struct lpm decap_ipv4;
-	struct lpm decap_ipv6;
-
 	// source address of the balancer
 	struct net4_addr source_ipv4;
 	struct net6_addr source_ipv6;

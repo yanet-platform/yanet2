@@ -169,7 +169,6 @@ func createCfgInitialConfig() *balancerpb.BalancerConfig {
 				createCfgVirtualService(cfgVs1IP, cfgVs1Port, vs1Reals),
 				createCfgVirtualService(cfgVs2IP, cfgVs2Port, vs2Reals),
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 600,
 				TcpSyn:    600,
@@ -217,7 +216,6 @@ func createCfgUpdatedConfig() *balancerpb.BalancerConfig {
 				createCfgVirtualService(cfgVs2IP, cfgVs2Port, vs2Reals),
 				createCfgVirtualService(cfgVs3IP, cfgVs3Port, vs3Reals),
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 600,
 				TcpSyn:    600,

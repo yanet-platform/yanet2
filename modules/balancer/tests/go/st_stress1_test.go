@@ -416,7 +416,6 @@ func TestSessionTableStress1(t *testing.T) {
 					Peers: []*balancerpb.Addr{},
 				},
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: uint32(sessionsTimeout),
 				TcpSyn:    uint32(sessionsTimeout),

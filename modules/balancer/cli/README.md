@@ -239,7 +239,6 @@ The configuration file is in YAML format with two main sections:
 
 - `source_address_v4` - IPv4 source address
 - `source_address_v6` - IPv6 source address
-- `decap_addresses` - List of decapsulation addresses
 - `sessions_timeouts` - Session timeout configuration
 - `wlc` - WLC scheduler configuration
 

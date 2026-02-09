@@ -131,18 +131,6 @@ struct balancer_common_stats {
 	 */
 	uint64_t unexpected_network_proto;
 
-	/** Packets successfully decapsulated from tunnels */
-	uint64_t decap_successful;
-
-	/**
-	 * Packets that failed tunnel decapsulation.
-	 *
-	 * Incremented when:
-	 * - Tunnel header is malformed
-	 * - Inner packet is invalid
-	 */
-	uint64_t decap_failed;
-
 	/** Total packets exiting the balancer pipeline */
 	uint64_t outgoing_packets;
 

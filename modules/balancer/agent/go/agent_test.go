@@ -107,9 +107,6 @@ func TestBalancerAgent(t *testing.T) {
 			SourceAddressV6: &balancerpb.Addr{
 				Bytes: netip.MustParseAddr("2001:db8::1").AsSlice(),
 			},
-			DecapAddresses: []*balancerpb.Addr{
-				{Bytes: netip.MustParseAddr("10.13.11.215").AsSlice()},
-			},
 		},
 		State: &balancerpb.StateConfig{
 			SessionTableCapacity:      func() *uint64 { v := uint64(1000); return &v }(),
@@ -201,9 +198,6 @@ func TestBalancerAgent(t *testing.T) {
 			},
 			SourceAddressV6: &balancerpb.Addr{
 				Bytes: netip.MustParseAddr("2001:db8::a").AsSlice(),
-			},
-			DecapAddresses: []*balancerpb.Addr{
-				{Bytes: netip.MustParseAddr("10.15.12.216").AsSlice()},
 			},
 		},
 		State: &balancerpb.StateConfig{
@@ -427,11 +421,6 @@ func TestBalancerAgent(t *testing.T) {
 			t,
 			configBeforeUpdate.PacketHandler.SessionsTimeouts,
 			newConfig.PacketHandler.SessionsTimeouts,
-		)
-		assert.Equal(
-			t,
-			configBeforeUpdate.PacketHandler.DecapAddresses,
-			newConfig.PacketHandler.DecapAddresses,
 		)
 		assert.Equal(
 			t,
