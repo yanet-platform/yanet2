@@ -143,3 +143,19 @@ basic_proto_range = executable('basic_proto_range',
 test('basic_proto_range', basic_proto_range, suite: ['filter'])
 
 subdir('shm')
+
+executable('bench_net4',
+  ['bench_net4.c'], 
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+
+executable('bench_net4_fast',
+  ['bench_net4_fast.c'], 
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
