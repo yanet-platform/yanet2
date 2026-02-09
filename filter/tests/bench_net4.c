@@ -32,10 +32,12 @@
 #include <assert.h>
 #include <getopt.h>
 #include <netinet/in.h>
-#include <pthread.h>
 #include <rte_byteorder.h>
+#include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
+#include <rte_tcp.h>
+#include <rte_udp.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,14 +79,42 @@ struct bench_stats {
 	uint64_t total_time_ns;
 };
 
-struct benchmark_thread_args {
-	struct filter *filter;
-	enum signature_type sig_type;
-	struct packet **packets;
-	size_t batch_size;
-	size_t num_batches;
-	struct bench_stats *stats;
+////////////////////////////////////////////////////////////////////////////////
+// Hugepage allocator (similar to balancer bench)
+
+struct hugepage_allocator {
+	void *arena;
+	size_t size;
+	size_t allocated;
 };
+
+static void
+hugepage_allocator_init(
+	struct hugepage_allocator *alloc, void *arena, size_t size
+) {
+	alloc->arena = arena;
+	alloc->size = size;
+	alloc->allocated = 0;
+}
+
+static uint8_t *
+hugepage_alloc(void *alloc_ptr, size_t align, size_t size) {
+	struct hugepage_allocator *alloc =
+		(struct hugepage_allocator *)alloc_ptr;
+
+	size_t shift = 0;
+	uintptr_t start = (uintptr_t)alloc->arena + alloc->allocated;
+	if (start % align != 0) {
+		shift = align - start % align;
+	}
+	size += shift;
+	if (alloc->allocated + size > alloc->size) {
+		return NULL;
+	}
+	uint8_t *ptr = (uint8_t *)alloc->arena + alloc->allocated;
+	alloc->allocated += size;
+	return ptr + shift;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helper functions
@@ -108,7 +138,7 @@ allocate_hugepage_memory(size_t size) {
 			size);
 		fprintf(stderr,
 			"Make sure hugepages are configured: sudo sysctl -w "
-			"vm.nr_hugepages=256\n");
+			"vm.nr_hugepages=3500\n");
 		return NULL;
 	}
 
@@ -204,16 +234,22 @@ generate_rules(
 // Packet generation with high match probability
 
 static void
-generate_packets(
-	struct packet **packets,
+generate_packet_data(
+	struct packet_data *packets,
 	size_t num_packets,
 	enum signature_type sig_type __attribute__((unused)),
 	uint64_t *rng,
-	void *packet_memory
+	void *packet_buffers
 ) {
+	// Each packet needs space for ethernet + IP + TCP/UDP headers
+	const size_t packet_size = 128; // Enough for headers
+
 	for (size_t i = 0; i < num_packets; i++) {
-		packets[i] = (struct packet *)((char *)packet_memory +
-					       i * sizeof(struct packet));
+		uint8_t *buf = (uint8_t *)packet_buffers + i * packet_size;
+
+		// Build packet in buffer
+		struct rte_ether_hdr *eth = (struct rte_ether_hdr *)buf;
+		struct rte_ipv4_hdr *ip = (struct rte_ipv4_hdr *)(eth + 1);
 
 		// Generate IPs from 10.0.0.0/16 range to match rules
 		uint8_t src_ip[4] = {
@@ -235,84 +271,57 @@ generate_packets(
 		// Alternate between TCP and UDP
 		uint8_t proto = (i % 2 == 0) ? IPPROTO_TCP : IPPROTO_UDP;
 
-		int result = fill_packet_net4(
-			packets[i], src_ip, dst_ip, src_port, dst_port, proto, 0
+		// Fill ethernet header
+		eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+
+		// Fill IP header
+		ip->version_ihl = 0x45;
+		ip->type_of_service = 0;
+		ip->total_length = rte_cpu_to_be_16(
+			sizeof(*ip) + (proto == IPPROTO_UDP
+					       ? sizeof(struct rte_udp_hdr)
+					       : sizeof(struct rte_tcp_hdr))
 		);
-		assert(result == 0);
+		ip->packet_id = 0;
+		ip->fragment_offset = 0;
+		ip->time_to_live = 64;
+		ip->next_proto_id = proto;
+		memcpy(&ip->src_addr, src_ip, 4);
+		memcpy(&ip->dst_addr, dst_ip, 4);
+		ip->hdr_checksum = 0;
+
+		// Fill L4 header
+		if (proto == IPPROTO_UDP) {
+			struct rte_udp_hdr *udp =
+				(struct rte_udp_hdr *)(ip + 1);
+			udp->src_port = rte_cpu_to_be_16(src_port);
+			udp->dst_port = rte_cpu_to_be_16(dst_port);
+			udp->dgram_len = rte_cpu_to_be_16(sizeof(*udp));
+			udp->dgram_cksum = 0;
+		} else {
+			struct rte_tcp_hdr *tcp =
+				(struct rte_tcp_hdr *)(ip + 1);
+			tcp->src_port = rte_cpu_to_be_16(src_port);
+			tcp->dst_port = rte_cpu_to_be_16(dst_port);
+			tcp->tcp_flags = 0;
+		}
+
+		size_t total_size =
+			sizeof(*eth) + sizeof(*ip) +
+			(proto == IPPROTO_UDP ? sizeof(struct rte_udp_hdr)
+					      : sizeof(struct rte_tcp_hdr));
+
+		packets[i] = (struct packet_data){
+			.data = buf,
+			.size = total_size,
+			.tx_device_id = 0,
+			.rx_device_id = 0,
+		};
 	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Benchmark execution
-
-static void *
-benchmark_thread(void *arg) {
-	struct benchmark_thread_args *args =
-		(struct benchmark_thread_args *)arg;
-
-	args->stats->total_packets = args->batch_size * args->num_batches;
-
-	// Allocate ranges using hugepages
-	size_t ranges_size = sizeof(struct value_range *) * args->batch_size;
-	struct value_range **ranges =
-		(struct value_range **)allocate_hugepage_memory(ranges_size);
-	if (ranges == NULL) {
-		return NULL;
-	}
-
-	// Wait for user input before starting benchmark
-	printf("\nBenchmark thread ready (PID: %d, TID: %ld)\n",
-	       getpid(),
-	       (long)pthread_self());
-	printf("Press ENTER to start benchmark (you can attach perf now)...\n");
-	getchar();
-
-	printf("Starting benchmark...\n");
-
-	struct timespec start_time, end_time;
-	clock_gettime(CLOCK_MONOTONIC, &start_time);
-
-	for (size_t batch_idx = 0; batch_idx < args->num_batches; batch_idx++) {
-		// Query the filter
-		switch (args->sig_type) {
-		case sig_net4_dst:
-			FILTER_QUERY(
-				args->filter,
-				bench_dst,
-				args->packets + batch_idx * args->batch_size,
-				ranges,
-				args->batch_size
-			);
-			break;
-		case sig_net4_dst_port:
-			FILTER_QUERY(
-				args->filter,
-				bench_dst_port,
-				args->packets + batch_idx * args->batch_size,
-				ranges,
-				args->batch_size
-			);
-			break;
-		case sig_net4_dst_port_proto:
-			FILTER_QUERY(
-				args->filter,
-				bench_dst_port_proto,
-				args->packets + batch_idx * args->batch_size,
-				ranges,
-				args->batch_size
-			);
-			break;
-		}
-	}
-
-	clock_gettime(CLOCK_MONOTONIC, &end_time);
-	args->stats->total_time_ns =
-		(end_time.tv_sec - start_time.tv_sec) * 1000000000ULL +
-		(end_time.tv_nsec - start_time.tv_nsec);
-
-	munmap(ranges, ranges_size);
-	return NULL;
-}
 
 static int
 run_benchmark(
@@ -323,23 +332,66 @@ run_benchmark(
 	size_t num_batches,
 	struct bench_stats *stats
 ) {
-	pthread_t thread;
-	struct benchmark_thread_args args = {
-		.filter = filter,
-		.sig_type = sig_type,
-		.packets = packets,
-		.batch_size = batch_size,
-		.num_batches = num_batches,
-		.stats = stats
-	};
+	stats->total_packets = batch_size * num_batches;
 
-	int ret = pthread_create(&thread, NULL, benchmark_thread, &args);
-	if (ret != 0) {
-		fprintf(stderr, "Failed to create benchmark thread: %d\n", ret);
+	// Allocate ranges using hugepages
+	size_t ranges_size = sizeof(struct value_range *) * batch_size;
+	struct value_range **ranges =
+		(struct value_range **)allocate_hugepage_memory(ranges_size);
+	if (ranges == NULL) {
 		return -1;
 	}
 
-	pthread_join(thread, NULL);
+	// Wait for user input before starting benchmark
+	printf("\nReady to start benchmark (PID: %d)\n", getpid());
+	printf("Press ENTER to start (you can attach perf now)...\n");
+	printf("Example: sudo perf record -p %d -g\n", getpid());
+	getchar();
+
+	printf("Starting benchmark...\n");
+
+	struct timespec start_time, end_time;
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
+
+	for (size_t batch_idx = 0; batch_idx < num_batches; batch_idx++) {
+		// Query the filter
+		switch (sig_type) {
+		case sig_net4_dst:
+			FILTER_QUERY(
+				filter,
+				bench_dst,
+				packets + batch_idx * batch_size,
+				ranges,
+				batch_size
+			);
+			break;
+		case sig_net4_dst_port:
+			FILTER_QUERY(
+				filter,
+				bench_dst_port,
+				packets + batch_idx * batch_size,
+				ranges,
+				batch_size
+			);
+			break;
+		case sig_net4_dst_port_proto:
+			FILTER_QUERY(
+				filter,
+				bench_dst_port_proto,
+				packets + batch_idx * batch_size,
+				ranges,
+				batch_size
+			);
+			break;
+		}
+	}
+
+	clock_gettime(CLOCK_MONOTONIC, &end_time);
+	stats->total_time_ns =
+		(end_time.tv_sec - start_time.tv_sec) * 1000000000ULL +
+		(end_time.tv_nsec - start_time.tv_nsec);
+
+	munmap(ranges, ranges_size);
 	return 0;
 }
 
@@ -529,37 +581,105 @@ main(int argc, char **argv) {
 	}
 	assert(res == 0);
 
-	// Generate packets using hugepages
+	// Allocate hugepage memory for packets
 	size_t total_packets = config.batch_size * config.num_batches;
 	printf("Generating %zu packets... (%zu x %zu)\n",
 	       total_packets,
 	       config.batch_size,
 	       config.num_batches);
+
+	// Allocate memory for packet data structures
+	size_t packet_data_size = sizeof(struct packet_data) * total_packets;
+	struct packet_data *packet_data_array =
+		(struct packet_data *)allocate_hugepage_memory(packet_data_size
+		);
+	if (packet_data_array == NULL) {
+		munmap(builders, builders_size);
+		munmap(rules, rules_size);
+		munmap(arena, arena_size);
+		return 1;
+	}
+
+	// Allocate memory for packet buffers (128 bytes per packet)
+	size_t packet_buffers_size = 128 * total_packets;
+	void *packet_buffers = allocate_hugepage_memory(packet_buffers_size);
+	if (packet_buffers == NULL) {
+		munmap(packet_data_array, packet_data_size);
+		munmap(builders, builders_size);
+		munmap(rules, rules_size);
+		munmap(arena, arena_size);
+		return 1;
+	}
+
+	// Generate packet data
+	generate_packet_data(
+		packet_data_array,
+		total_packets,
+		config.sig_type,
+		&rng,
+		packet_buffers
+	);
+
+	// Allocate hugepage memory for packet allocator
+	size_t packet_alloc_size = 10 * 1024 * 1024 * (size_t)1024; // 10GB
+	void *packet_alloc_arena = allocate_hugepage_memory(packet_alloc_size);
+	if (packet_alloc_arena == NULL) {
+		munmap(packet_buffers, packet_buffers_size);
+		munmap(packet_data_array, packet_data_size);
+		munmap(builders, builders_size);
+		munmap(rules, rules_size);
+		munmap(arena, arena_size);
+		return 1;
+	}
+
+	struct hugepage_allocator packet_allocator;
+	hugepage_allocator_init(
+		&packet_allocator, packet_alloc_arena, packet_alloc_size
+	);
+
+	// Create packet list using custom allocator
+	struct packet_list packet_list;
+	res = fill_packet_list_custom_alloc(
+		&packet_list,
+		total_packets,
+		packet_data_array,
+		0, // auto-calculate mbuf size
+		&packet_allocator,
+		hugepage_alloc
+	);
+	if (res != 0) {
+		fprintf(stderr, "Failed to create packet list\n");
+		munmap(packet_alloc_arena, packet_alloc_size);
+		munmap(packet_buffers, packet_buffers_size);
+		munmap(packet_data_array, packet_data_size);
+		munmap(builders, builders_size);
+		munmap(rules, rules_size);
+		munmap(arena, arena_size);
+		return 1;
+	}
+
+	// Convert packet list to array
 	size_t packets_array_size = sizeof(struct packet *) * total_packets;
 	struct packet **packets =
 		(struct packet **)allocate_hugepage_memory(packets_array_size);
 	if (packets == NULL) {
+		munmap(packet_alloc_arena, packet_alloc_size);
+		munmap(packet_buffers, packet_buffers_size);
+		munmap(packet_data_array, packet_data_size);
 		munmap(builders, builders_size);
 		munmap(rules, rules_size);
 		munmap(arena, arena_size);
 		return 1;
 	}
 
-	size_t packet_memory_size = sizeof(struct packet) * total_packets;
-	void *packet_memory = allocate_hugepage_memory(packet_memory_size);
-	if (packet_memory == NULL) {
-		munmap(packets, packets_array_size);
-		munmap(builders, builders_size);
-		munmap(rules, rules_size);
-		munmap(arena, arena_size);
-		return 1;
+	size_t idx = 0;
+	struct packet *p;
+	while ((p = packet_list_pop(&packet_list)) != NULL) {
+		packets[idx++] = p;
 	}
+	assert(idx == total_packets);
 
-	generate_packets(
-		packets, total_packets, config.sig_type, &rng, packet_memory
-	);
-
-	// Run benchmark in separate thread
+	// Run benchmark
 	struct bench_stats stats;
 	res = run_benchmark(
 		&filter,
@@ -575,10 +695,12 @@ main(int argc, char **argv) {
 	print_results(&config, &stats);
 
 	// Cleanup
-	munmap(packet_memory, packet_memory_size);
 	munmap(packets, packets_array_size);
-	munmap(rules, rules_size);
+	munmap(packet_alloc_arena, packet_alloc_size);
+	munmap(packet_buffers, packet_buffers_size);
+	munmap(packet_data_array, packet_data_size);
 	munmap(builders, builders_size);
+	munmap(rules, rules_size);
 	munmap(arena, arena_size);
 
 	return 0;
