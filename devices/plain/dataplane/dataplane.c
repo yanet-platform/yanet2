@@ -2,30 +2,34 @@
 
 #include "common/container_of.h"
 
-#include "dataplane/module/module.h"
+#include "lib/dataplane/device/device.h"
+
 #include "dataplane/packet/packet.h"
+
 #include "dataplane/pipeline/pipeline.h"
 
 static void
 plain_input_handle(
 	struct dp_worker *dp_worker,
 	struct device_ectx *device_ectx,
-	struct packet *packet
+	struct packet_front *packet_front
 ) {
 	(void)dp_worker;
 	(void)device_ectx;
-	(void)packet;
+
+	packet_list_concat(&packet_front->output, &packet_front->input);
 }
 
 static void
 plain_output_handle(
 	struct dp_worker *dp_worker,
 	struct device_ectx *device_ectx,
-	struct packet *packet
+	struct packet_front *packet_front
 ) {
 	(void)dp_worker;
 	(void)device_ectx;
-	(void)packet;
+
+	packet_list_concat(&packet_front->output, &packet_front->input);
 }
 
 struct device_plain {

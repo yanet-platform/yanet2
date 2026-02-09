@@ -28,6 +28,7 @@ type RouteService struct {
 	agent      *ffi.Agent
 	ribsLock   sync.RWMutex
 	ribs       map[string]*rib.RIB
+	ffiModules map[string]*ModuleConfig // FFI module configurations that need to be freed
 	neighCache *neigh.NexthopCache
 
 	ribTTL time.Duration
@@ -45,6 +46,7 @@ func NewRouteService(
 	return &RouteService{
 		agent:      agent,
 		ribs:       map[string]*rib.RIB{},
+		ffiModules: map[string]*ModuleConfig{},
 		neighCache: neighCache,
 		ribTTL:     ribTTL,
 		quitCh:     make(chan bool),
@@ -202,13 +204,16 @@ func (m *RouteService) InsertRoute(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop address: %v", err)
 	}
 
+	sourceID := request.RouteSourceID()
+
 	holder := m.getOrCreateRib(name)
 
-	if err := holder.AddUnicastRoute(prefix, nexthopAddr); err != nil {
+	if err := holder.AddUnicastRoute(prefix, nexthopAddr, sourceID); err != nil {
 		m.log.Errorw("InsertRoute: failed to add unicast route to RIB",
 			"error", err,
 			"prefix", prefix,
 			"nexthop", nexthopAddr,
+			"source", sourceID,
 			"name", name,
 		)
 		return nil, fmt.Errorf("failed to add unicast route: %w", err)
@@ -256,17 +261,20 @@ func (m *RouteService) DeleteRoute(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop address: %v", err)
 	}
 
+	sourceID := request.RouteSourceID()
+
 	holder, ok := m.getRib(name)
 	if !ok {
 		m.log.Warnw("DeleteRoute: no RIB found for module", "name", name)
 		return &routepb.DeleteRouteResponse{}, nil
 	}
 
-	if err := holder.RemoveUnicastRoute(prefix, nexthopAddr); err != nil {
+	if err := holder.RemoveUnicastRoute(prefix, nexthopAddr, sourceID); err != nil {
 		m.log.Errorw("DeleteRoute: failed to remove unicast route from RIB",
 			"error", err,
 			"prefix", prefix,
 			"nexthop", nexthopAddr,
+			"source", sourceID,
 			"name", name,
 		)
 		return nil, fmt.Errorf("failed to remove unicast route: %w", err)
@@ -291,6 +299,47 @@ func (m *RouteService) DeleteRoute(
 		"duration", time.Since(startTime),
 	)
 	return &routepb.DeleteRouteResponse{}, nil
+}
+
+func (m *RouteService) DeleteConfig(
+	ctx context.Context,
+	request *routepb.DeleteConfigRequest,
+) (*routepb.DeleteConfigResponse, error) {
+	startTime := time.Now()
+
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+	}
+
+	m.ribsLock.Lock()
+	defer m.ribsLock.Unlock()
+
+	_, exists := m.ribs[name]
+	if !exists {
+		m.log.Warnw("DeleteConfig: RIB not found", "name", name)
+		return &routepb.DeleteConfigResponse{}, nil
+	}
+
+	// Delete the module config from the data plane if it exists
+	ffiModule, hasFFIModule := m.ffiModules[name]
+	if hasFFIModule {
+		if err := m.agent.DeleteModuleConfig(name); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
+		}
+		ffiModule.Free()
+		delete(m.ffiModules, name)
+	}
+
+	// Remove the RIB from the map
+	delete(m.ribs, name)
+
+	m.log.Infow("DeleteConfig completed successfully",
+		"name", name,
+		"duration", time.Since(startTime),
+	)
+
+	return &routepb.DeleteConfigResponse{}, nil
 }
 
 // FeedRIB receives a stream of route updates (typically from BIRD) and applies them to the
@@ -362,7 +411,7 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 	// If a RIB was established for this stream, schedule cleanup for its session.
 	// This runs regardless of whether the stream ended cleanly or with an error.
 	if ribRef != nil {
-		m.log.Infof("FeedRIB session %d for %s ended. Scheduling cleanup.", sessionId, name)
+		m.log.Infof("FeedRIB session %d for %s ended. Scheduling cleanup after %s", sessionId, name, m.ribTTL)
 		// CleanupTask will remove routes from this sessionID (and older BIRD ones) after ribTTL.
 		go ribRef.CleanupTask(sessionId, m.quitCh, m.ribTTL)
 	}
@@ -540,6 +589,14 @@ func (m *RouteService) updateModuleConfig(
 		)
 		return fmt.Errorf("failed to update module: %w", err)
 	}
+
+	// Free old FFI module after successful update and store the new one
+	m.ribsLock.Lock()
+	if oldModule, exists := m.ffiModules[name]; exists {
+		oldModule.Free()
+	}
+	m.ffiModules[name] = config
+	m.ribsLock.Unlock()
 
 	return nil
 }

@@ -18,7 +18,6 @@
 #include "common/strutils.h"
 
 #include "common/hugepages.h"
-#include "logging/log.h"
 
 #include "controlplane/config/zone.h"
 #include "dataplane/config/zone.h"
@@ -141,7 +140,7 @@ dataplane_connect_devices(
 	for (uint64_t conn_idx = 0; conn_idx < connection_count; ++conn_idx) {
 		struct dataplane_connection_config *connection =
 			connections + conn_idx;
-		// FIXME device id should be ferivied
+		// FIXME device id should be verified
 		dataplane_connect_device(
 			dataplane,
 			dataplane->devices + connection->src_device_id,
@@ -353,6 +352,14 @@ dataplane_init(
 ) {
 	void *bin_hndl = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
 
+	if (config->instance_count > DATAPLANE_MAX_INSTANCES) {
+		LOG(ERROR,
+		    "instance count %u exceeds maximum %u",
+		    config->instance_count,
+		    DATAPLANE_MAX_INSTANCES);
+		return -1;
+	}
+
 	dataplane->instance_count = config->instance_count;
 
 	LOG(INFO,
@@ -465,74 +472,34 @@ dataplane_init(
 		instance->dp_config->instance_idx = instance_idx;
 		instance->dp_config->instance_count = dataplane->instance_count;
 
-		// FIXME: load modules into dp memory
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "forward"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "route"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "decap"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "dscp"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "nat64"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "balancer"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "pdump"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "acl"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-		rc = dataplane_load_module(
-			instance->dp_config, bin_hndl, "fwstate"
-		);
-		if (rc == -1) {
-			return -1;
+		static const char *modules[] = {
+			"forward",
+			"route",
+			"decap",
+			"dscp",
+			"nat64",
+			"balancer",
+			"pdump",
+			"acl",
+			"fwstate",
+		};
+		for (size_t i = 0; i < sizeof(modules) / sizeof(modules[0]);
+		     ++i) {
+			if (dataplane_load_module(
+				    instance->dp_config, bin_hndl, modules[i]
+			    ) == -1) {
+				return -1;
+			}
 		}
 
-		rc = dataplane_load_device(
-			instance->dp_config, bin_hndl, "plain"
-		);
-		if (rc == -1) {
-			return -1;
-		}
-
-		rc = dataplane_load_device(
-			instance->dp_config, bin_hndl, "vlan"
-		);
-		if (rc == -1) {
-			return -1;
+		static const char *devices[] = {"plain", "vlan"};
+		for (size_t i = 0; i < sizeof(devices) / sizeof(devices[0]);
+		     ++i) {
+			if (dataplane_load_device(
+				    instance->dp_config, bin_hndl, devices[i]
+			    ) == -1) {
+				return -1;
+			}
 		}
 
 		struct cp_config_gen *cp_config_gen =
@@ -563,9 +530,11 @@ dataplane_init(
 	}
 
 	LOG(INFO, "initialize dpdk");
-	if (dpdk_init(
-		    binary, config->dpdk_memory, pci_port_count, pci_port_names
-	    ) == -1) {
+	int rc = dpdk_init(
+		binary, config->dpdk_memory, pci_port_count, pci_port_names
+	);
+	free(pci_port_names);
+	if (rc == -1) {
 		LOG(ERROR, "failed to initialize dpdk");
 		errno = rte_errno;
 		return -1;
@@ -629,8 +598,6 @@ stat_thread(void *arg) {
 	struct dataplane *dataplane = (struct dataplane *)arg;
 
 	FILE *log = fopen("stat.log", "w");
-
-	(void)dataplane;
 
 	struct rte_eth_xstat_name names[4096];
 	struct rte_eth_xstat xstats0[dataplane->device_count][4096];

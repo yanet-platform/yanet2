@@ -11,8 +11,10 @@ struct dataplane_instance {
 	struct cp_config *cp_config;
 };
 
+#define DATAPLANE_MAX_INSTANCES 8
+
 struct dataplane {
-	struct dataplane_instance instances[8];
+	struct dataplane_instance instances[DATAPLANE_MAX_INSTANCES];
 	uint32_t instance_count;
 
 	struct dataplane_device *devices;

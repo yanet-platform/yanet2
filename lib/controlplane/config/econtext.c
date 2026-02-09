@@ -713,10 +713,7 @@ device_entry_ectx_create(
 		for (uint64_t weight_idx = 0;
 		     weight_idx < cp_device_entry->pipelines[idx].weight;
 		     ++weight_idx) {
-			SET_OFFSET_OF(
-				device_entry_ectx->pipeline_map + pos,
-				pipeline_ectx
-			);
+			device_entry_ectx->pipeline_map[pos] = idx;
 			++pos;
 		}
 	}

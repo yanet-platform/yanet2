@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -111,4 +112,94 @@ func runClient() error {
 
 	fmt.Println("Successfully configured")
 	return nil
+}
+
+var listSessionsCmdArgs struct {
+	ServerConfigPath string
+}
+
+var listSessionsCmd = &cobra.Command{
+	Use:   "list-sessions",
+	Short: "List active BIRD import sessions",
+	Long:  `List all active BIRD import sessions on the adapter server.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := runListSessions(); err != nil {
+			fmt.Printf("ERROR: %v\n", err)
+			os.Exit(1)
+		}
+	},
+}
+
+func init() {
+	listSessionsCmd.Flags().StringVarP(&listSessionsCmdArgs.ServerConfigPath, "server-config", "s", "", "Path to the server configuration file (required)")
+	listSessionsCmd.MarkFlagRequired("server-config")
+}
+
+func runListSessions() error {
+	// Load server config to get the adapter address
+	serverCfg, err := LoadServerConfig(listSessionsCmdArgs.ServerConfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to load server config: %w", err)
+	}
+
+	// Create gRPC connection to the adapter server
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := grpc.NewClient(
+		serverCfg.ListenAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to connect to adapter server: %w", err)
+	}
+	defer conn.Close()
+
+	client := adapterpb.NewAdapterServiceClient(conn)
+
+	resp, err := client.ListSessions(ctx, &adapterpb.ListSessionsRequest{})
+	if err != nil {
+		return fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	if len(resp.Sessions) == 0 {
+		fmt.Println("No active sessions")
+		return nil
+	}
+
+	fmt.Printf("Active sessions (%d):\n", len(resp.Sessions))
+	fmt.Println(strings.Repeat("-", 80))
+
+	for _, session := range resp.Sessions {
+		createdAt := time.Unix(0, session.CreatedAt)
+		uptime := time.Since(createdAt).Round(time.Second)
+
+		connStateStr := connectionStateToString(session.ConnectionState)
+
+		fmt.Printf("Name:       %s\n", session.Name)
+		fmt.Printf("Sockets:    %s\n", strings.Join(session.Sockets, ", "))
+		fmt.Printf("Created:    %s (uptime: %s)\n", createdAt.Format(time.RFC3339), uptime)
+		fmt.Printf("Connection: %s\n", connStateStr)
+		fmt.Println(strings.Repeat("-", 80))
+	}
+
+	return nil
+}
+
+func connectionStateToString(state adapterpb.ConnectionState) string {
+	switch state {
+	case adapterpb.ConnectionState_CONNECTION_STATE_IDLE:
+		return "IDLE"
+	case adapterpb.ConnectionState_CONNECTION_STATE_CONNECTING:
+		return "CONNECTING"
+	case adapterpb.ConnectionState_CONNECTION_STATE_READY:
+		return "READY"
+	case adapterpb.ConnectionState_CONNECTION_STATE_TRANSIENT_FAILURE:
+		return "TRANSIENT_FAILURE"
+	case adapterpb.ConnectionState_CONNECTION_STATE_SHUTDOWN:
+		return "SHUTDOWN"
+	default:
+		return "UNKNOWN"
+	}
 }

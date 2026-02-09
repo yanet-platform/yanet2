@@ -21,11 +21,24 @@ service RouteService {
 	// DeleteRoute deletes a route from the routing table.
 	rpc DeleteRoute(DeleteRouteRequest) returns (DeleteRouteResponse);
 
+	// DeleteConfig deletes a route configuration (RIB).
+	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+
 	// FlushRoutes triggers the operation of flushing routes from
 	// the Routing Information Base (RIB) to the Forwarding Information Base
 	// (FIB).
 	rpc FlushRoutes(FlushRoutesRequest) returns (FlushRoutesResponse);
 
+	// FeedRIB receives a stream of route updates (typically from BIRD) and
+	// applies them to the RIB. It implements session management to handle
+	// stale routes:
+	//  1. On first update, a new session is started in the RIB,
+	//  invalidating any prior session.
+	//  2. Routes received are tagged with the current session ID.
+	//  3. If this stream is superseded by another FeedRIB call for the same
+	//  RIB, it will terminate.
+	//  4. When the stream ends, a cleanup task removes routes from this
+	//  session after a TTL.
 	rpc FeedRIB(stream Update) returns (UpdateSummary);
 }
 
@@ -85,6 +98,9 @@ message InsertRouteRequest {
 	// Indicates whether the RIB should be flushed to the FIB after this
 	// request.
 	bool do_flush = 4;
+
+	// Route source identifier (e.g., Static, BIRD).
+	RouteSourceID source_id = 5;
 }
 
 // InsertRouteResponse is the response of "InsertRoute" request.
@@ -109,10 +125,22 @@ message DeleteRouteRequest {
 	// Indicates whether the RIB should be flushed to the FIB after this
 	// request.
 	bool do_flush = 4;
+
+	// Route source identifier (e.g., Static, BIRD).
+	RouteSourceID source_id = 5;
 }
 
 // DeleteRouteResponse is the response of "DeleteRoute" request.
 message DeleteRouteResponse {
+}
+
+// DeleteConfigRequest is the request to delete a route configuration.
+message DeleteConfigRequest {
+	string name = 1;
+}
+
+// DeleteConfigResponse is the response of "DeleteConfig" request.
+message DeleteConfigResponse {
 }
 
 // FlushRoutesRequest specifies which module should perform the RIB to FIB

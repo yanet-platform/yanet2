@@ -1,8 +1,10 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Box, Text, Flex, TextInput, Label, Button, Icon } from '@gravity-ui/uikit';
-import { FloppyDisk, PlugConnection, Layers } from '@gravity-ui/icons';
+import { FloppyDisk, PlugConnection, Layers, ArrowDownToLine, ArrowUpFromLine } from '@gravity-ui/icons';
 import type { PipelineId } from '../../api/pipelines';
 import type { DevicePipeline } from '../../api/devices';
+import { useDeviceCounters } from '../../hooks';
+import { CounterDisplay } from '../../components';
 import { PipelineTable } from './PipelineTable';
 import type { LocalDevice } from './types';
 import './devices.scss';
@@ -23,6 +25,18 @@ export const DeviceDetails: React.FC<DeviceDetailsProps> = ({
     const [saving, setSaving] = useState(false);
     const [availablePipelines, setAvailablePipelines] = useState<PipelineId[]>([]);
     const [loadingPipelines, setLoadingPipelines] = useState(false);
+
+    const deviceNames = useMemo(() => {
+        return device?.id.name ? [device.id.name] : [];
+    }, [device?.id.name]);
+
+    const { counters: countersMap, isLoading } = useDeviceCounters(
+        deviceNames,
+        deviceNames.length > 0
+    );
+
+    const deviceCounters = device?.id.name ? countersMap.get(device.id.name) : undefined;
+    const countersLoading = device?.id.name ? isLoading(device.id.name) : true;
 
     useEffect(() => {
         const load = async () => {
@@ -94,6 +108,27 @@ export const DeviceDetails: React.FC<DeviceDetailsProps> = ({
             </Box>
 
             <Box className="device-details__body">
+                <Flex gap={6} className="device-details__counters-row">
+                    <Flex alignItems="center" gap={2} className="device-details__counter-group">
+                        <Icon data={ArrowDownToLine} size={14} className="device-details__counter-icon" />
+                        <Text variant="body-2" color="secondary">RX:</Text>
+                        <CounterDisplay
+                            pps={deviceCounters?.rx.pps ?? 0}
+                            bps={deviceCounters?.rx.bps ?? 0}
+                            loading={countersLoading}
+                        />
+                    </Flex>
+                    <Flex alignItems="center" gap={2} className="device-details__counter-group">
+                        <Icon data={ArrowUpFromLine} size={14} className="device-details__counter-icon" />
+                        <Text variant="body-2" color="secondary">TX:</Text>
+                        <CounterDisplay
+                            pps={deviceCounters?.tx.pps ?? 0}
+                            bps={deviceCounters?.tx.bps ?? 0}
+                            loading={countersLoading}
+                        />
+                    </Flex>
+                </Flex>
+
                 {device.type === 'vlan' && (
                     <Flex alignItems="center" gap={2} className="device-details__vlan-row">
                         <Text variant="body-1">VLAN ID:</Text>
@@ -130,4 +165,3 @@ export const DeviceDetails: React.FC<DeviceDetailsProps> = ({
         </Box>
     );
 };
-

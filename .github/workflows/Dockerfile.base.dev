@@ -37,6 +37,7 @@ install_packages \
     clang \
     clang-format-19 \
     clang-tidy-19 \
+    curl \
     git \
     just \
     make
@@ -70,8 +71,13 @@ install_packages \
     lldb \
     lcov
 
-echo "Installing Go and tools..."
-install_packages golang-go
+echo "Installing Go..."
+# Download and install Go from official source (Ubuntu package is outdated)
+GO_TARBALL="go1.24.13.linux-amd64.tar.gz"
+curl -fsSL "https://go.dev/dl/${GO_TARBALL}" -o "/tmp/${GO_TARBALL}"
+rm -rf /usr/local/go
+tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
+rm "/tmp/${GO_TARBALL}"
 
 echo "Installing Go modules..."
 GOBIN=/usr/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}

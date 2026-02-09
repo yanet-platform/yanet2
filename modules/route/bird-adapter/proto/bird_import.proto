@@ -9,6 +9,10 @@ service AdapterService {
 	// SetupConfig configures the BIRD import settings for a specific
 	// module.
 	rpc SetupConfig(SetupConfigRequest) returns (SetupConfigResponse);
+
+	// ListSessions returns information about all active BIRD import
+	// sessions.
+	rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
 }
 
 // SetupConfigRequest configures BIRD import for a module.
@@ -38,4 +42,36 @@ message ImportConfig {
 	// Valid values: "debug", "info", "warn", "error".
 	// If empty or invalid, no logging will be performed (nop logger).
 	string log_level = 5;
+}
+
+// ListSessionsRequest is the request for listing active BIRD import sessions.
+message ListSessionsRequest {
+}
+
+// ListSessionsResponse contains information about all active BIRD import
+// sessions.
+message ListSessionsResponse {
+	repeated SessionInfo sessions = 1;
+}
+
+// SessionInfo contains information about a single BIRD import session.
+message SessionInfo {
+	// Name of the configuration/module this session belongs to.
+	string name = 1;
+	// Unix socket paths being read from.
+	repeated string sockets = 2;
+	// Timestamp when the session was created (Unix nanoseconds).
+	int64 created_at = 3;
+	// Current state of the gRPC connection to the gateway.
+	ConnectionState connection_state = 4;
+}
+
+// ConnectionState represents the state of the gRPC connection.
+enum ConnectionState {
+	CONNECTION_STATE_UNKNOWN = 0;
+	CONNECTION_STATE_IDLE = 1;
+	CONNECTION_STATE_CONNECTING = 2;
+	CONNECTION_STATE_READY = 3;
+	CONNECTION_STATE_TRANSIENT_FAILURE = 4;
+	CONNECTION_STATE_SHUTDOWN = 5;
 }
