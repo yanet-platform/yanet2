@@ -24,8 +24,8 @@ message Net {
 	// Network address (IPv4 or IPv6)
 	Addr addr = 1;
 
-	// Prefix length in bits (0-32 for IPv4, 0-128 for IPv6)
-	uint32 size = 2;
+	// TODO: docs
+	Addr mask = 2;
 }
 
 // Transport layer protocol.
@@ -115,6 +115,24 @@ message VsIdentifier {
 	TransportProto proto = 3;
 }
 
+// TODO: docs
+message PortsRange {
+	// TODO: docs
+	uint32 from = 1;
+	
+	// TODO: docs
+	uint32 to = 2;
+}
+
+// TODO: docs
+message AllowedSrc {
+	// TODO: docs
+	Net net = 1;
+
+	// TODO: docs
+	repeated PortsRange ports = 2;
+}
+
 // Virtual service configuration.
 //
 // Defines a load-balanced service that distributes traffic across multiple
@@ -128,12 +146,8 @@ message VirtualService {
 	// Scheduling algorithm for selecting real servers
 	VsScheduler scheduler = 2;
 
-	// Source IP address filters (optional).
-	//
-	// If specified, only traffic from these source networks is accepted.
-	// If empty, traffic from any source is accepted.
-	// Useful for restricting access to specific client networks.
-	repeated Net allowed_srcs = 3;
+	// TODO: docs
+	repeated AllowedSrc allowed_srcs = 3;
 
 	// List of real servers backing this virtual service.
 	//

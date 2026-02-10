@@ -77,7 +77,7 @@ vs_v4_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	);
 
 	if (lpm_lookup(
-		    &vs->src_filter, NET4_LEN, (uint8_t *)&ipv4_hdr->src_addr
+		    &vs->src_ipv4_filter, NET4_LEN, (uint8_t *)&ipv4_hdr->src_addr
 	    ) == LPM_VALUE_INVALID) {
 
 		// update counter
@@ -145,7 +145,7 @@ vs_v6_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	);
 
 	if (lpm_lookup(
-		    &vs->src_filter, NET6_LEN, (uint8_t *)&ipv6_hdr->src_addr
+		    &vs->src_ipv4_filter, NET6_LEN, (uint8_t *)&ipv6_hdr->src_addr
 	    ) == LPM_VALUE_INVALID) {
 
 		// update counter

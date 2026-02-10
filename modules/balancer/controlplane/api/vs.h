@@ -219,6 +219,27 @@ enum vs_scheduler {
 	round_robin = 1,
 };
 
+// TODO: docs
+struct ports_range {
+	// TODO: docs
+	uint16_t from;
+
+	// TODO: docs
+	uint16_t to;
+};
+
+// TODO: docs
+struct allowed_src {
+	// TODO: docs
+	struct net net;
+
+	// TODO: docs
+	size_t port_ranges_count;
+
+	// TODO: docs
+	struct ports_range *port_ranges;
+};
+
 struct named_real_config;
 
 /**
@@ -273,29 +294,12 @@ struct vs_config {
 	 */
 	struct named_real_config *reals;
 
-	/** Number of allowed source ranges in 'allowed_src' array */
+
+	// TODO: docs
 	size_t allowed_src_count;
 
-	/**
-	 * Client source address allowlist (optional).
-	 *
-	 * When configured, only traffic from these source address ranges
-	 * will be accepted. Traffic from other sources is dropped and
-	 * counted in vs_stats.packet_src_not_allowed.
-	 *
-	 * BEHAVIOR:
-	 * - If NULL or count=0: All sources allowed (no filtering)
-	 * - If configured: Only listed CIDR ranges allowed
-	 * - Supports both IPv4 and IPv6 ranges
-	 *
-	 * USE CASES:
-	 * - Restricting access to trusted networks
-	 * - Implementing IP-based access control
-	 * - Security hardening
-	 *
-	 * Ownership: Caller allocates and manages this array
-	 */
-	struct net_addr_range *allowed_src;
+	// TODO: docs
+	struct allowed_src *allowed_src;
 
 	/** Number of IPv4 peer balancers in 'peers_v4' array */
 	size_t peers_v4_count;

@@ -29,8 +29,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 // Declare filter compiler signatures for VS lookup tables
-FILTER_COMPILER_DECLARE(vs_v4_sig, net4_dst, port_dst, proto);
-FILTER_COMPILER_DECLARE(vs_v6_sig, net6_dst, port_dst, proto);
+FILTER_COMPILER_DECLARE(vs_v4_sig, net4_src, net4_dst, port_src, port_dst, proto);
+FILTER_COMPILER_DECLARE(vs_v6_sig, net6_src, net6_dst, port_src, port_dst, proto);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -254,6 +254,137 @@ init_announce_lpms(
 		}
 	}
 
+	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+static void
+free_rule(struct filter_rule *rule) {
+	free(rule->net4.srcs);
+	free(rule->net6.srcs);
+	free(rule->net4.dsts);
+	free(rule->net6.dsts);
+	free(rule->transport.dsts);
+	free(rule->transport.srcs);
+	free(rule->transport.protos);
+}
+
+static void
+free_rules(struct filter_rule *rules, size_t count) {
+	for (size_t rule_idx = 0; rule_idx < count; ++rule_idx) {
+		free_rule(&rules[rule_idx]);
+	}
+	free(rules);
+}
+
+static int
+validate_net4(struct net4 *net4) {
+	int prev = 1;
+	for (int bit = 31; bit >= 0; --bit) {
+		int byte = (31 - bit) / 4;
+		int inner_bit = bit % 8;
+		int cur = net4->mask[byte] & (1 << inner_bit);
+		if (cur && !prev) {
+			NEW_ERROR("mask bits must be consecutive");
+			return -1;
+		}
+		prev = cur != 0;
+	}
+	return 0;
+}
+
+static int
+validate_net6_half(const uint8_t *mask) { // bytes are in big-endian
+	int prev = 1;
+	for (int bit = 63; bit >= 0; --bit) {
+		int byte = (63 - bit) / 8;
+		int inner_bit = bit % 8;
+		int cur = mask[byte] & (1 << inner_bit);
+		if (cur && !prev) {
+			NEW_ERROR("mask bits must be consecutive");
+			return -1;
+		}
+		prev = cur != 0;
+	}
+	return 0;
+}
+
+static int
+validate_net6(struct net6 *net6) {
+	if (!validate_net6_half(net6->mask)) {
+		PUSH_ERROR("high mask bits are invalid");
+		return -1;
+	}
+	if (!validate_net6_half(net6->mask + 8)) {
+		PUSH_ERROR("low mask bits are invalid");
+		return -1;
+	}
+	return 0;
+}
+
+static int
+fill_rule(struct vs *vs, struct filter_rule *rule, struct allowed_src *src) {
+	rule->action = 1;
+	if (vs->identifier.ip_proto == IPPROTO_IP) {
+		rule->net4.dst_count = 1;
+		rule->net4.dsts = NULL;
+
+		if (!validate_net4(&src->net.v4)) {
+			PUSH_ERROR("IPv4 network is invalid");
+			return -1;
+		}
+
+		rule->net4.src_count = 1;
+		rule->net4.srcs = malloc(sizeof(struct net4));
+		rule->net4.srcs[0] = src->net.v4;
+	} else if (vs->identifier.ip_proto == IPPROTO_IPV6) {
+		rule->net6.dst_count = 1;
+		rule->net6.dsts = NULL;
+
+		if (!validate_net6(&src->net.v6)) {
+			PUSH_ERROR("IPv6 network is invalid");
+			return -1;
+		}
+
+		rule->net6.src_count = 1;
+		rule->net6.srcs = malloc(sizeof(struct net6));
+	}
+	rule->transport.src_count = src->port_ranges_count;
+	rule->transport.srcs = malloc(sizeof(struct filter_port_range) * src->port_ranges_count);
+	for (size_t port_range_idx = 0; port_range_idx < src->port_ranges_count; ++port_range_idx) {
+		struct filter_port_range *filter_port_range = &rule->transport.srcs[port_range_idx];
+		struct ports_range *port_range = &src->port_ranges[port_range_idx];
+		filter_port_range->from = port_range->from;
+		filter_port_range->to = port_range->to;
+		if (filter_port_range->from > filter_port_range->to) {
+			PUSH_ERROR("port range is invalid");
+			return -1;
+		}
+	}
+	return 0;
+}
+
+static int
+src_filter_rules(struct vs *vs, struct vs_config *config, struct filter_rule **rules, size_t *rule_count) {
+	if (vs->identifier.ip_proto != IPPROTO_IP && vs->identifier.ip_proto != IPPROTO_IPV6) {
+		NEW_ERROR("virtual service IP protocol is incorrect: %u (expected IPv4 %u or IPv6 %u)", vs->identifier.ip_proto, IPPROTO_IP, IPPROTO_IPV6);
+		return -1;
+	}
+
+	size_t count = config->allowed_src_count;
+	struct filter_rule *r = malloc(sizeof(struct filter_rule) * count);
+	memset(r, 0, sizeof(struct filter_rule) * count);
+	for (size_t rule_idx = 0; rule_idx < config->allowed_src_count; ++rule_idx) {
+		if (fill_rule(vs, &r[rule_idx], &config->allowed_src[rule_idx]) != 0) {
+			PUSH_ERROR("rule at index %zu is invalid", rule_idx);
+			free_rules(r, count);
+			return -1;
+		}
+	}
+
+	*rule_count = count;
+	*rules = r;
 	return 0;
 }
 

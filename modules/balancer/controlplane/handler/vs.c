@@ -1,6 +1,5 @@
 #include "api/vs.h"
 #include "api/counter.h"
-#include "common/lpm.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
 #include "common/network.h"
@@ -13,6 +12,9 @@
 #include "state/state.h"
 #include "state/vs.h"
 
+#include <assert.h>
+#include <netinet/in.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 
@@ -46,36 +48,6 @@ setup_selector(
 		PUSH_ERROR("failed to setup selector reals");
 		return -1;
 	}
-	return 0;
-}
-
-static int
-setup_src_filter(
-	struct vs *vs, struct memory_context *mctx, struct vs_config *config
-) {
-	if (lpm_init(&vs->src_filter, mctx) != 0) {
-		NEW_ERROR("failed to initialize container for source addresses"
-		);
-		return -1;
-	}
-
-	const uint8_t key_size =
-		vs->identifier.ip_proto == IPPROTO_IP ? NET4_LEN : NET6_LEN;
-	for (size_t i = 0; i < config->allowed_src_count; ++i) {
-		struct net_addr_range *range = &config->allowed_src[i];
-		const uint8_t *from = (const uint8_t *)&range->from;
-		const uint8_t *to = (const uint8_t *)&range->to;
-		if (lpm_insert(&vs->src_filter, key_size, from, to, 1) != 0) {
-			NEW_ERROR(
-				"failed to insert allowed sources range at "
-				"index %zu",
-				i
-			);
-			lpm_free(&vs->src_filter);
-			return -1;
-		}
-	}
-
 	return 0;
 }
 
@@ -199,19 +171,14 @@ vs_init(struct vs *vs,
 		return -1;
 	}
 
-	if (setup_src_filter(vs, mctx, &config->config) != 0) {
-		PUSH_ERROR("failed to setup filter for source addresses");
-		goto free_peers;
-	}
-
 	if (setup_reals(vs, &config->config, first_real_idx, reals) != 0) {
 		PUSH_ERROR("failed to setup reals");
-		goto free_src_filter;
+		goto free_peers;
 	}
 
 	if (setup_selector(vs, balancer_state, mctx, &config->config) != 0) {
 		PUSH_ERROR("failed to setup selector");
-		goto free_src_filter;
+		goto free_peers;
 	}
 
 	if (register_counter(vs, registry) != 0) {
@@ -223,9 +190,6 @@ vs_init(struct vs *vs,
 
 free_selector:
 	selector_free(&vs->selector);
-
-free_src_filter:
-	lpm_free(&vs->src_filter);
 
 free_peers:
 	memory_bfree(
@@ -254,7 +218,6 @@ vs_free(struct vs *vs, struct memory_context *mctx) {
 		ADDR_OF(&vs->peers_v6),
 		sizeof(struct net6_addr) * vs->peers_v6_count
 	);
-	lpm_free(&vs->src_filter);
 	selector_free(&vs->selector);
 }
 
