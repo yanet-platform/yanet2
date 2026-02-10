@@ -1,9 +1,9 @@
-use std::ptr;
+use std::{os::raw::c_void, ptr};
 
 use libc::c_char;
 
-use memory::{addr_of, container_of};
-use state::config::ProxyModuleConfig;
+use memory::{addr_of, container_of, set_offset_of};
+use state::{Module, State};
 use bindings::{
     agent, agent_delete_module,
     cp_module, cp_module_init,
@@ -19,45 +19,36 @@ use bindings::{
 pub extern "C" fn proxy_module_config_init(
     agent: *mut agent,
     name: *const c_char,
+    state: *mut State
 ) -> *mut cp_module {
-    if agent.is_null() {
+    if agent.is_null() || state.is_null() {
         return ptr::null_mut();
     }
 
-    unsafe {
-        let agent_ref = &mut *agent;
-
-        let config = memory_balloc(
-            ptr::from_mut(&mut agent_ref.memory_context),
-            size_of::<ProxyModuleConfig>(),
-        ) as *mut ProxyModuleConfig;
-        if config.is_null() {
-            return ptr::null_mut();
-        }
-        let config_ref = &mut *config;
-
-        let module_type = c"proxy";
-        if cp_module_init(
-            config_ref.cp_module.as_mut_ptr(),
-            agent_ref,
-            module_type.as_ptr(),
-            name,
-        ) != 0
-        {
-            proxy_module_config_free(config_ref.cp_module.as_mut_ptr());
-            return ptr::null_mut();
-        }
-
-        config_ref.proxy_config.size_connections_table = 0;
-        config_ref.proxy_config.upstream_addr = 0;
-        config_ref.proxy_config.upstream_port = 0;
-        config_ref.proxy_config.proxy_addr = 0;
-        config_ref.proxy_config.proxy_port = 0;
-        config_ref.proxy_config.upstream_net.addr = 0;
-        config_ref.proxy_config.upstream_net.mask = 0;
-
-        config_ref.cp_module.as_mut_ptr()
+    let module = unsafe { memory_balloc(
+        std::ptr::addr_of_mut!((*agent).memory_context),
+        size_of::<Module>(),
+    ) as *mut Module };
+    if module.is_null() {
+        return ptr::null_mut();
     }
+    let module_ref = unsafe { &mut *module };
+
+    let module_type = c"proxy";
+    if unsafe { cp_module_init(
+        module_ref.cp_module.as_mut_ptr(),
+        agent,
+        module_type.as_ptr(),
+        name,
+    ) } != 0
+    {
+        proxy_module_config_free(module_ref.cp_module.as_mut_ptr());
+        return ptr::null_mut();
+    }
+
+    set_offset_of!(std::ptr::addr_of_mut!(module_ref.state), state);
+
+    module_ref.cp_module.as_mut_ptr()
 }
 
 /// Free a proxy module configuration.
@@ -70,7 +61,7 @@ pub extern "C" fn proxy_module_config_free(module: *mut cp_module) {
         return;
     }
 
-    let module_config = container_of!(module, ProxyModuleConfig, cp_module);
+    let module_config = container_of!(module, Module, cp_module);
     if module_config.is_null() {
         eprintln!("Null module config");
         return;
@@ -85,7 +76,7 @@ pub extern "C" fn proxy_module_config_free(module: *mut cp_module) {
             memory_bfree(
                 ptr::from_mut(&mut agent_ref.memory_context),
                 module_config as *mut libc::c_void,
-                size_of::<ProxyModuleConfig>(),
+                size_of::<Module>(),
             );
         }
     }
@@ -108,28 +99,54 @@ pub extern "C" fn proxy_module_config_delete(module: *mut cp_module) -> libc::c_
     }
 }
 
-/// Set the connection table size for a proxy module.
-///
-/// # Safety
-/// - `module` must be a valid pointer to a cp_module that was created by proxy_module_config_init
 #[unsafe(no_mangle)]
-pub extern "C" fn proxy_module_config_set_conn_table_size(
-    module: *mut cp_module,
-    size: u32,
-) -> libc::c_int {
-    if module.is_null() {
-        return -1;
+pub extern "C" fn proxy_state_create(
+    agent: *mut agent,
+    size_conn_table: u32
+) -> *mut State {
+    if agent.is_null() {
+        return ptr::null_mut()
     }
+    let agent = unsafe { &mut *agent };
 
-    let module_config = container_of!(module, ProxyModuleConfig, cp_module);
-    if module_config.is_null() {
-        return -1;
+    let mctx = &raw mut agent.memory_context;
+
+	let align = align_of::<State>();
+	let mut memory =
+		unsafe { memory_balloc(mctx, size_of::<State>() + align) as *mut u8 };
+	if memory.is_null() {
+        eprintln!("failed to allocate memory for state object");
+		return ptr::null_mut();
+	}
+	let shift = memory.align_offset(align);
+	memory = unsafe { memory.add(shift)};
+	assert!((memory as usize) % align == 0);
+	let state_ptr = memory as *mut State;
+
+    let res = State::new(mctx, shift, size_conn_table);
+    match res {
+        Ok(state) => {
+            unsafe { *state_ptr = state };
+            unsafe { (*state_ptr).adjust_pointers() };
+            state_ptr
+        },
+        Err(e) => {
+            eprintln!("failed to create new state: {}", e);
+            unsafe { memory_bfree(mctx, memory as *mut c_void, size_of::<State>() + align) };
+            ptr::null_mut()
+        }
     }
+}
 
+#[unsafe(no_mangle)]
+pub extern "C" fn proxy_state_destroy(state: *mut State) {
     unsafe {
-        let config_ref = &mut *module_config;
-        config_ref.proxy_config.size_connections_table = size;
+        let mut mem = state as usize;
+        mem -= (*state).memory_shift;
+        memory_bfree(
+            (*state).mctx,
+            mem as *mut c_void,
+            size_of::<State>() + align_of::<State>()
+        );
     }
-
-    0
 }

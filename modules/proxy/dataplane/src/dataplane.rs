@@ -3,7 +3,7 @@ use std::net::Ipv4Addr;
 
 use memory::{container_of, addr_of};
 
-use state::config::ProxyModuleConfig;
+use state::{Module, State};
 use bindings::{
     cp_module, dp_worker, module_ectx, packet,
     packet_front, packet_front_output, packet_list_pop, packet_to_mbuf,
@@ -11,21 +11,6 @@ use bindings::{
     RTE_ETHER_TYPE_IPV4, RTE_TCP_SYN_FLAG, RTE_TCP_ACK_FLAG,
 };
 use crate::proxy;
-
-unsafe fn get_cp_module_from_ectx(module_ectx: *mut module_ectx) -> *mut cp_module {
-    if module_ectx.is_null() {
-        return ptr::null_mut();
-    }
-    let cp_module_ptr = unsafe { &(*module_ectx).cp_module };
-    if cp_module_ptr.is_null() {
-        return ptr::null_mut();
-    }
-    let offset_val = *cp_module_ptr as usize;
-    if offset_val == 0 {
-        return ptr::null_mut();
-    }
-    (offset_val + cp_module_ptr as *const _ as usize) as *mut cp_module
-}
 
 #[inline]
 unsafe fn mbuf_offset(mbuf: *mut rte_mbuf, offset: u16) -> *mut u8 {
@@ -49,22 +34,26 @@ pub unsafe extern "C" fn proxy_handle_packets(
         return;
     }
 
-    // FIXME: use addr_of and container_of macros
-    let cp_module_ptr = unsafe { get_cp_module_from_ectx(module_ectx) };
+    let cp_module_ptr : *mut cp_module = unsafe { addr_of!(ptr::addr_of_mut!((*module_ectx).cp_module)) };
     if cp_module_ptr.is_null() {
+        eprintln!("Null cp module");
         return;
     }
     
-    let module_config = container_of!(cp_module_ptr, ProxyModuleConfig, cp_module);
-    if module_config.is_null() {
-        eprintln!("Null module config");
+    let module = container_of!(cp_module_ptr, Module, cp_module);
+    if module.is_null() {
+        eprintln!("Null module");
         return;
     }
+    let module = unsafe { &mut *module };
 
-    if proxy::SERVICE.lock().unwrap().is_none() {
-        unsafe { proxy::SERVICE.lock().unwrap().insert(proxy::Service::new(&(*module_config).proxy_config)) };
+    eprintln!("DP OFFSET: {}", module.state as usize);
+    let state : *mut State = addr_of!(std::ptr::addr_of_mut!(module.state));
+    if state.is_null() {
+        eprintln!("State uninitialized");
+        return;
     }
-    let config = proxy::SERVICE.lock().unwrap().as_ref().unwrap().config.clone();
+    let state = unsafe { &mut *state };
 
     loop {
         let packet = unsafe { packet_list_pop(&mut (*packet_front).input) as *mut packet };
@@ -104,22 +93,22 @@ pub unsafe extern "C" fn proxy_handle_packets(
             println!("SYN: {} ACK: {}", syn, ack);
             println!("DST: {:?} SRC: {:?}", Ipv4Addr::from_bits(ipv4_header.dst_addr.swap_bytes()), Ipv4Addr::from_bits(ipv4_header.src_addr.swap_bytes()));
 
-            if ipv4_header.dst_addr == config.proxy_addr
+            if ipv4_header.dst_addr == state.config.proxy_addr
                 && ack {
                 println!("CLIENT ACK");
-                proxy::handle::client_ack(ipv4_header, tcp_header);
-            } else if ipv4_header.src_addr == config.upstream_addr
+                proxy::handle::client_ack(state, ipv4_header, tcp_header);
+            } else if ipv4_header.src_addr == state.config.upstream_addr
                 && ack && !syn {
                 println!("SERVER ACK");
-                proxy::handle::server_ack(ipv4_header, tcp_header);
-            } else if ipv4_header.dst_addr == config.proxy_addr
+                proxy::handle::server_ack(state, ipv4_header, tcp_header);
+            } else if ipv4_header.dst_addr == state.config.proxy_addr
                 && syn {
                 println!("CLIENT SYN");
-                proxy::handle::client_syn(ipv4_header, tcp_header);
-            } else if ipv4_header.src_addr == config.upstream_addr
+                proxy::handle::client_syn(state, ipv4_header, tcp_header);
+            } else if ipv4_header.src_addr == state.config.upstream_addr
                 && syn && ack {
                 println!("SERVER SYN ACK");
-                proxy::handle::server_synack(ipv4_header, tcp_header);
+                proxy::handle::server_synack(state, ipv4_header, tcp_header);
             } else {
                 println!("SKIP");
                 continue;

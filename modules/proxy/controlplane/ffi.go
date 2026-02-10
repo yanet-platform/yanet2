@@ -18,15 +18,16 @@ type ModuleConfig struct {
 	ptr ffi.ModuleConfig
 }
 
-func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
+func NewModuleConfig(agent *ffi.Agent, name string, state *ProxyState) (*ModuleConfig, error) {
 	if agent == nil {
 		return nil, fmt.Errorf("agent cannot be nil")
 	}
 
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
+	cState := (*C.struct_proxy_state)(state.cHandle.AsRawPtr())
 
-	ptr, err := C.proxy_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName)
+	ptr, err := C.proxy_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName, cState)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize module config: %w", err)
 	}
@@ -47,21 +48,6 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
-func (m *ModuleConfig) SetConnTableSize(size uint32) error {
-	rc, err := C.proxy_module_config_set_conn_table_size(
-		m.asRawPtr(),
-		C.uint32_t(size),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to set conn table size: %w", err)
-	}
-	if rc < 0 {
-		return fmt.Errorf("failed to set conn table size: code=%d", rc)
-	}
-
-	return nil
-}
-
 func DeleteConfig(m *ProxyService, configName string) bool {
 	cTypeName := C.CString("proxy")
 	defer C.free(unsafe.Pointer(cTypeName))
@@ -71,4 +57,47 @@ func DeleteConfig(m *ProxyService, configName string) bool {
 
 	result := C.agent_delete_module((*C.struct_agent)(m.agent.AsRawPtr()), cTypeName, cConfigName)
 	return result == 0
+}
+
+type ModuleStatePtr struct {
+	inner *C.struct_proxy_state
+}
+
+func (moduleConfig ModuleStatePtr) AsRawPtr() unsafe.Pointer {
+	return unsafe.Pointer(moduleConfig.inner)
+}
+
+func (state *ModuleStatePtr) Free() {
+	C.proxy_state_destroy(state.inner)
+}
+
+func NewModuleState(
+	agent *ffi.Agent,
+	config *ProxyConfig,
+) (ModuleStatePtr, error) {
+	if config.ConnTableSize == 0 {
+		return ModuleStatePtr{
+			inner: nil,
+		}, fmt.Errorf("connections table size must be greater than 0")
+	}
+	state, err := C.proxy_state_create(
+		(*C.struct_agent)(agent.AsRawPtr()),
+		C.uint32_t(config.ConnTableSize),
+	)
+	if err != nil {
+		return ModuleStatePtr{
+				inner: nil,
+			}, fmt.Errorf(
+				"failed to create state: %w",
+				err,
+			)
+	}
+	if state == nil {
+		return ModuleStatePtr{
+				inner: nil,
+			}, fmt.Errorf(
+				"failed to create state",
+			)
+	}
+	return ModuleStatePtr{inner: state}, nil
 }

@@ -114,27 +114,22 @@ func (s *ProxyService) SetConnTableSize(ctx context.Context, req *proxypb.SetCon
 	return &proxypb.SetConnTableSizeResponse{}, nil
 }
 
-// func ipToUint32(ip net.IP) uint32 {
-// 	if len(ip) == 16 {
-// 		return binary.LittleEndian.Uint32(ip[12:16])
-// 	}
-// 	return binary.LittleEndian.Uint32(ip)
-// }
-
 func (s *ProxyService) updateModuleConfig(name string) error {
-	moduleConfig, err := NewModuleConfig(s.agent, name)
-	if err != nil {
-		return fmt.Errorf("failed to create module config: %w", err)
-	}
-
 	config, ok := s.configs[name]
 	if !ok {
 		config = &ProxyConfig{}
 		s.configs[name] = config
 	}
 
-	if err := moduleConfig.SetConnTableSize(config.ConnTableSize); err != nil {
-		return fmt.Errorf("failed to set addr: %w", err)
+	proxyState, err := NewProxyState(s.agent, config, s.log)
+	if err != nil {
+		return fmt.Errorf("failed to create module state: %w", err)
+	}
+
+	moduleConfig, err := NewModuleConfig(s.agent, name, proxyState)
+	if err != nil {
+		proxyState.Free()
+		return fmt.Errorf("failed to create module config: %w", err)
 	}
 
 	if err := s.agent.UpdateModules([]ffi.ModuleConfig{moduleConfig.AsFFIModule()}); err != nil {

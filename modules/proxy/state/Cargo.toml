@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 bindings = { version = "0.1", path = "../bindings" }
+memory = { version = "0.1", path = "../../../common/rust/memory" }

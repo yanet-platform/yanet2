@@ -7,7 +7,8 @@ use bindings::{
     IPPROTO_UDP
 };
 
-struct ipv4_psd_header {
+#[allow(dead_code)]
+struct Ipv4PsdHeader {
     src_addr : u32, /* IP address of source host. */
     dst_addr : u32, /* IP address of destination host. */
     zero     : u8,  /* zero. */
@@ -20,7 +21,7 @@ fn ipv4_phdr_cksum(ip_header: &rte_ipv4_hdr) -> u16 {
     unsafe {
         let l3_len = (*ip_header).total_length.swap_bytes();
         
-        let psd_hdr = ipv4_psd_header{
+        let psd_hdr = Ipv4PsdHeader{
             src_addr: ip_header.src_addr,
             dst_addr: ip_header.dst_addr,
             zero: 0,
@@ -28,7 +29,7 @@ fn ipv4_phdr_cksum(ip_header: &rte_ipv4_hdr) -> u16 {
             len: (l3_len - rte_ipv4_hdr_len(ptr::from_ref(ip_header)) as u16).swap_bytes(),
         };
     
-        return rte_raw_cksum(ptr::from_ref(&psd_hdr) as *const c_void, size_of::<ipv4_psd_header>());
+        return rte_raw_cksum(ptr::from_ref(&psd_hdr) as *const c_void, size_of::<Ipv4PsdHeader>());
     }
 }
 
