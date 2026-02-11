@@ -34,7 +34,7 @@
 	__TTLMAP_BUCKET_ENTRY_DECLARE(key_type, value_type);                   \
 	typedef struct __bucket {                                              \
 		__bucket_entry_t entries[__TTLMAP_BUCKET_ENTRIES];             \
-		ttlmap_lock_t lock;                                            \
+		alignas(64) ttlmap_lock_t lock;                                \
 	} __attribute__((__aligned__(64))) __bucket_t
 
 #define __TTLMAP_BUCKET_INIT(bucket_ptr, key_type, value_type)                 \
@@ -224,3 +224,12 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 		}                                                              \
 		__result;                                                      \
 	})
+
+#define __TTLMAP_BUCKET_PREFETCH(bucket, bucket_size, ...)                     \
+	do {                                                                   \
+		for (size_t i = 0; i < (bucket_size); i += 64) {               \
+			__builtin_prefetch(                                    \
+				(const char *)bucket + i, ##__VA_ARGS__        \
+			);                                                     \
+		}                                                              \
+	} while (0)

@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Box, TextInput, Select, Text } from '@gravity-ui/uikit';
 import { FormDialog } from '../../../components';
 import { DEVICE_TYPES, type DeviceType } from '../../../api/devices';
-import '../devices.css';
+import '../devices.scss';
 
 export interface CreateDeviceDialogProps {
     open: boolean;

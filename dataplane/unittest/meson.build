@@ -1,2 +1,1 @@
-# subdir('dpdk')
 subdir('config')

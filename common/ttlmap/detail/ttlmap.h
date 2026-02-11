@@ -43,9 +43,8 @@ typedef struct ttlmap {
 				ADDR_OF(&((map_ptr)->chunks[__chunk]));        \
 			&__buckets_array[__bucket_in_chunk];                   \
 		});                                                            \
-		uint32_t __idx =                                               \
-			(__hash >> ((map_ptr)->buckets_exp) &                  \
-			 (__TTLMAP_BUCKET_ENTRIES - 1));                       \
+		uint32_t __idx = (__hash >> ((map_ptr)->buckets_exp)) &        \
+				 (__TTLMAP_BUCKET_ENTRIES - 1);                \
 		__TTLMAP_BUCKET_LOOKUP(                                        \
 			__b, (key_ptr), (value_ptr), (now), __idx              \
 		);                                                             \
@@ -74,9 +73,8 @@ typedef struct ttlmap {
 				ADDR_OF(&((map_ptr)->chunks[__chunk]));        \
 			&__buckets_array[__bucket_in_chunk];                   \
 		});                                                            \
-		uint32_t __idx =                                               \
-			(__hash >> ((map_ptr)->buckets_exp) &                  \
-			 (__TTLMAP_BUCKET_ENTRIES - 1));                       \
+		uint32_t __idx = (__hash >> ((map_ptr)->buckets_exp)) &        \
+				 (__TTLMAP_BUCKET_ENTRIES - 1);                \
 		__TTLMAP_BUCKET_GET(                                           \
 			__b,                                                   \
 			(key_ptr),                                             \
@@ -205,6 +203,28 @@ __ttlmap_init_internal( // NOLINT
 	__done:                                                                \
 		__res;                                                         \
 	})
+
+#define __TTLMAP_PREFETCH(map_ptr, key_ptr, value_type, ...)                   \
+	do {                                                                   \
+		typedef typeof(*(key_ptr)) __key_type;                         \
+		uint32_t __hash = __TTLMAP_KEY_HASH((key_ptr));                \
+		uint32_t __buckets = 1 << ((map_ptr)->buckets_exp);            \
+		uint32_t __bucket_id = __hash & (__buckets - 1);               \
+		uint32_t __chunk =                                             \
+			__bucket_id >> ((map_ptr)->buckets_per_chunk_exp);     \
+		uint32_t __buckets_per_chunk =                                 \
+			1 << ((map_ptr)->buckets_per_chunk_exp);               \
+		uint32_t __bucket_in_chunk =                                   \
+			__bucket_id & (__buckets_per_chunk - 1);               \
+		__TTLMAP_BUCKET_DECLARE(__key_type, value_type);               \
+		__bucket_t *__buckets_array =                                  \
+			ADDR_OF(&((map_ptr)->chunks[__chunk]));                \
+		__TTLMAP_BUCKET_PREFETCH(                                      \
+			&__buckets_array[__bucket_in_chunk],                   \
+			sizeof(__bucket_t),                                    \
+			##__VA_ARGS__                                          \
+		);                                                             \
+	} while (0)
 
 ////////////////////////////////////////////////////////////////////////////////
 

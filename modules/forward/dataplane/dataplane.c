@@ -140,35 +140,24 @@ forward_handle_packets(
 			counters[0] += 1;
 			counters[1] += packet_data_len(packet);
 
-			struct config_gen_ectx *config_gen_ectx =
-				ADDR_OF(&module_ectx->config_gen_ectx);
-
-			uint64_t device_id = module_ectx_encode_device(
+			uint16_t device_id = module_ectx_encode_device(
 				module_ectx, target->device_id
 			);
 
-			struct device_ectx *device_ectx =
-				config_gen_ectx_get_device(
-					config_gen_ectx, device_id
-				);
-			if (device_ectx == NULL) {
+			if (device_id == (uint16_t)-1) {
 				packet_front_drop(packet_front, packet);
 				continue;
 			}
 
 			if (target->mode == FORWARD_MODE_IN) {
-				device_ectx_process_input(
-					dp_worker,
-					device_ectx,
-					packet_front,
-					packet
+				packet->tx_device_id = device_id;
+				packet_list_add(
+					&packet_front->pending_input, packet
 				);
 			} else if (target->mode == FORWARD_MODE_OUT) {
-				device_ectx_process_output(
-					dp_worker,
-					device_ectx,
-					packet_front,
-					packet
+				packet->tx_device_id = device_id;
+				packet_list_add(
+					&packet_front->pending_output, packet
 				);
 			} else {
 				packet_front_output(packet_front, packet);

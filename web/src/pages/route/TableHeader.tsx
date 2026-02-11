@@ -28,11 +28,11 @@ export const TableHeader: React.FC<TableHeaderProps> = ({
                 <Text variant="subheader-1">#</Text>
             </Box>
             <SortableHeader column="prefix" label="Prefix" style={cellStyles.prefix} sortState={sortState} onSort={onSort} disabled={!canSort} />
-            <SortableHeader column="nextHop" label="Next Hop" style={cellStyles.nextHop} sortState={sortState} onSort={onSort} disabled={!canSort} />
+            <SortableHeader column="next_hop" label="Next Hop" style={cellStyles.next_hop} sortState={sortState} onSort={onSort} disabled={!canSort} />
             <SortableHeader column="peer" label="Peer" style={cellStyles.peer} sortState={sortState} onSort={onSort} disabled={!canSort} />
-            <SortableHeader column="isBest" label="Best" style={cellStyles.isBest} sortState={sortState} onSort={onSort} disabled={!canSort} />
+            <SortableHeader column="is_best" label="Best" style={cellStyles.is_best} sortState={sortState} onSort={onSort} disabled={!canSort} />
             <SortableHeader column="pref" label="Pref" style={cellStyles.pref} sortState={sortState} onSort={onSort} disabled={!canSort} />
-            <SortableHeader column="asPathLen" label="AS Path" style={cellStyles.asPathLen} sortState={sortState} onSort={onSort} disabled={!canSort} />
+            <SortableHeader column="as_path_len" label="AS Path" style={cellStyles.as_path_len} sortState={sortState} onSort={onSort} disabled={!canSort} />
             <SortableHeader column="source" label="Source" style={cellStyles.source} sortState={sortState} onSort={onSort} disabled={!canSort} />
         </Box>
     );

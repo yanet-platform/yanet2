@@ -76,7 +76,7 @@ export const FWStateForm: React.FC<FWStateFormProps> = ({
         const num = parseInt(value, 10);
         onMapConfigChange({
             ...mapConfig,
-            indexSize: isNaN(num) ? undefined : num,
+            index_size: isNaN(num) ? undefined : num,
         });
     }, [mapConfig, onMapConfigChange]);
 
@@ -84,7 +84,7 @@ export const FWStateForm: React.FC<FWStateFormProps> = ({
         const num = parseInt(value, 10);
         onMapConfigChange({
             ...mapConfig,
-            extraBucketCount: isNaN(num) ? undefined : num,
+            extra_bucket_count: isNaN(num) ? undefined : num,
         });
     }, [mapConfig, onMapConfigChange]);
 
@@ -112,14 +112,14 @@ export const FWStateForm: React.FC<FWStateFormProps> = ({
                 <Box className="fwstate-form__grid--2cols">
                     <InputFormField
                         label="Index Size"
-                        value={mapConfig?.indexSize?.toString() || ''}
+                        value={mapConfig?.index_size?.toString() || ''}
                         onChange={handleIndexSizeChange}
                         placeholder="e.g., 65536"
                         hint="Size of the hash table index"
                     />
                     <InputFormField
                         label="Extra Bucket Count"
-                        value={mapConfig?.extraBucketCount?.toString() || ''}
+                        value={mapConfig?.extra_bucket_count?.toString() || ''}
                         onChange={handleExtraBucketCountChange}
                         placeholder="e.g., 1024"
                         hint="Number of extra buckets for collisions"
@@ -136,48 +136,48 @@ export const FWStateForm: React.FC<FWStateFormProps> = ({
                 <Box className="fwstate-form__grid--2cols">
                     <InputFormField
                         label="Source IPv6 Address"
-                        value={formatIPv6(syncConfig?.srcAddr)}
-                        onChange={createSyncConfigHandler('srcAddr', parseIPv6ToBytes)}
+                        value={formatIPv6(syncConfig?.src_addr)}
+                        onChange={createSyncConfigHandler('src_addr', parseIPv6ToBytes)}
                         placeholder="e.g., 2001:db8::1"
                     />
                     <InputFormField
                         label="Destination MAC Address"
-                        value={formatMAC(syncConfig?.dstEther)}
-                        onChange={createSyncConfigHandler('dstEther', parseMACToBytes)}
+                        value={formatMAC(syncConfig?.dst_ether)}
+                        onChange={createSyncConfigHandler('dst_ether', parseMACToBytes)}
                         placeholder="e.g., 00:11:22:33:44:55"
                     />
                     <InputFormField
                         label="Multicast IPv6 Address"
-                        value={formatIPv6(syncConfig?.dstAddrMulticast)}
-                        onChange={createSyncConfigHandler('dstAddrMulticast', parseIPv6ToBytes)}
+                        value={formatIPv6(syncConfig?.dst_addr_multicast)}
+                        onChange={createSyncConfigHandler('dst_addr_multicast', parseIPv6ToBytes)}
                         placeholder="e.g., ff02::1"
                     />
                     <InputFormField
                         label="Multicast Port"
-                        value={syncConfig?.portMulticast?.toString() || ''}
+                        value={syncConfig?.port_multicast?.toString() || ''}
                         onChange={(v) => {
                             const num = parseInt(v, 10);
                             onSyncConfigChange({
                                 ...syncConfig,
-                                portMulticast: isNaN(num) ? undefined : num,
+                                port_multicast: isNaN(num) ? undefined : num,
                             });
                         }}
                         placeholder="e.g., 5000"
                     />
                     <InputFormField
                         label="Unicast IPv6 Address"
-                        value={formatIPv6(syncConfig?.dstAddrUnicast)}
-                        onChange={createSyncConfigHandler('dstAddrUnicast', parseIPv6ToBytes)}
+                        value={formatIPv6(syncConfig?.dst_addr_unicast)}
+                        onChange={createSyncConfigHandler('dst_addr_unicast', parseIPv6ToBytes)}
                         placeholder="e.g., 2001:db8::2"
                     />
                     <InputFormField
                         label="Unicast Port"
-                        value={syncConfig?.portUnicast?.toString() || ''}
+                        value={syncConfig?.port_unicast?.toString() || ''}
                         onChange={(v) => {
                             const num = parseInt(v, 10);
                             onSyncConfigChange({
                                 ...syncConfig,
-                                portUnicast: isNaN(num) ? undefined : num,
+                                port_unicast: isNaN(num) ? undefined : num,
                             });
                         }}
                         placeholder="e.g., 5001"
@@ -194,11 +194,11 @@ export const FWStateForm: React.FC<FWStateFormProps> = ({
                 <Box className="fwstate-form__grid--3cols">
                     <InputFormField
                         label="TCP SYN-ACK"
-                        value={formatDuration(syncConfig?.tcpSynAck)}
+                        value={formatDuration(syncConfig?.tcp_syn_ack)}
                         onChange={(v) => {
                             onSyncConfigChange({
                                 ...syncConfig,
-                                tcpSynAck: parseDuration(v),
+                                tcp_syn_ack: parseDuration(v),
                             });
                         }}
                         placeholder="e.g., 60s"
@@ -206,11 +206,11 @@ export const FWStateForm: React.FC<FWStateFormProps> = ({
                     />
                     <InputFormField
                         label="TCP SYN"
-                        value={formatDuration(syncConfig?.tcpSyn)}
+                        value={formatDuration(syncConfig?.tcp_syn)}
                         onChange={(v) => {
                             onSyncConfigChange({
                                 ...syncConfig,
-                                tcpSyn: parseDuration(v),
+                                tcp_syn: parseDuration(v),
                             });
                         }}
                         placeholder="e.g., 30s"
@@ -218,11 +218,11 @@ export const FWStateForm: React.FC<FWStateFormProps> = ({
                     />
                     <InputFormField
                         label="TCP FIN"
-                        value={formatDuration(syncConfig?.tcpFin)}
+                        value={formatDuration(syncConfig?.tcp_fin)}
                         onChange={(v) => {
                             onSyncConfigChange({
                                 ...syncConfig,
-                                tcpFin: parseDuration(v),
+                                tcp_fin: parseDuration(v),
                             });
                         }}
                         placeholder="e.g., 30s"

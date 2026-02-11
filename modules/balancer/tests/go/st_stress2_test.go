@@ -262,8 +262,7 @@ func TestSessionTableStress2(t *testing.T) {
 			SourceAddressV6: &balancerpb.Addr{
 				Bytes: netip.MustParseAddr("fe80::5").AsSlice(),
 			},
-			Vs:             virtualServices,
-			DecapAddresses: []*balancerpb.Addr{},
+			Vs: virtualServices,
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: uint32(sessionTimeout),
 				TcpSyn:    uint32(sessionTimeout),

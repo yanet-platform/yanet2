@@ -46,6 +46,11 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
+// Free frees the route module configuration
+func (m *ModuleConfig) Free() {
+	C.route_module_config_free(m.asRawPtr())
+}
+
 func (m *ModuleConfig) RouteAdd(srcAddr net.HardwareAddr, dstAddr net.HardwareAddr, device string) (int, error) {
 	if len(srcAddr) != 6 {
 		return -1, fmt.Errorf("unsupported source MAC address: must be EUI-48")

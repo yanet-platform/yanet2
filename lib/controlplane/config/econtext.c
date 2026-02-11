@@ -444,9 +444,7 @@ function_ectx_create(
 		for (uint64_t weight_idx = 0;
 		     weight_idx < cp_function->chains[idx].weight;
 		     ++weight_idx) {
-			SET_OFFSET_OF(
-				function_ectx->chain_map + pos, chain_ectx
-			);
+			function_ectx->chain_map[pos] = idx;
 			++pos;
 		}
 	}
@@ -713,10 +711,7 @@ device_entry_ectx_create(
 		for (uint64_t weight_idx = 0;
 		     weight_idx < cp_device_entry->pipelines[idx].weight;
 		     ++weight_idx) {
-			SET_OFFSET_OF(
-				device_entry_ectx->pipeline_map + pos,
-				pipeline_ectx
-			);
+			device_entry_ectx->pipeline_map[pos] = idx;
 			++pos;
 		}
 	}

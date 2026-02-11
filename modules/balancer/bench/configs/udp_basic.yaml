@@ -34,7 +34,7 @@ icmp_redirect_prob: 0.0
 
 # Packet generation configuration
 batches_per_worker: 131072
-packets_per_batch: 64
+packets_per_batch: 32
 
 # MSS option for TCP packets (not applicable for UDP, but must be specified)
 mss: 0

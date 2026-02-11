@@ -3,6 +3,7 @@ import { Box } from '@gravity-ui/uikit';
 import { API } from '../api';
 import { toaster } from '../utils';
 import type { Route } from '../api/routes';
+import { RouteSourceID } from '../api/routes';
 import { PageLayout, PageLoader, EmptyState } from '../components';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '../utils';
 import {
@@ -52,8 +53,8 @@ const RoutePage: React.FC = () => {
     const [addRouteForm, setAddRouteForm] = useState<AddRouteFormData>({
         configName: '',
         prefix: '',
-        nexthopAddr: '',
-        doFlush: false,
+        nexthop_addr: '',
+        do_flush: false,
     });
 
     // Derived state
@@ -65,8 +66,8 @@ const RoutePage: React.FC = () => {
         setAddRouteForm({
             configName: activeConfigTab,
             prefix: '',
-            nexthopAddr: '',
-            doFlush: false,
+            nexthop_addr: '',
+            do_flush: false,
         });
         setAddDialogOpen(true);
     }, [activeConfigTab]);
@@ -103,7 +104,7 @@ const RoutePage: React.FC = () => {
             return;
         }
 
-        if (!addRouteForm.prefix || !addRouteForm.nexthopAddr) {
+        if (!addRouteForm.prefix || !addRouteForm.nexthop_addr) {
             toaster.error('add-route-validation-error', 'Please fill in all required fields');
             return;
         }
@@ -132,7 +133,7 @@ const RoutePage: React.FC = () => {
             return;
         }
 
-        const nexthopResult = parseIPAddress(addRouteForm.nexthopAddr);
+        const nexthopResult = parseIPAddress(addRouteForm.nexthop_addr);
         if (!nexthopResult.ok) {
             let errorMessage = 'Invalid nexthop address format';
             if (nexthopResult.error === IPParseError.InvalidFormat) {
@@ -146,8 +147,9 @@ const RoutePage: React.FC = () => {
             await API.route.insertRoute({
                 name: configName,
                 prefix: addRouteForm.prefix,
-                nexthopAddr: addRouteForm.nexthopAddr,
-                doFlush: addRouteForm.doFlush,
+                nexthop_addr: addRouteForm.nexthop_addr,
+                do_flush: addRouteForm.do_flush,
+                source_id: RouteSourceID.STATIC,
             });
 
             setAddDialogOpen(false);
@@ -191,7 +193,7 @@ const RoutePage: React.FC = () => {
             let skippedInvalidRoute = false;
 
             for (const route of selectedRoutesList) {
-                if (!route.prefix || !route.nextHop) {
+                if (!route.prefix || !route.next_hop) {
                     skippedInvalidRoute = true;
                     continue;
                 }
@@ -199,8 +201,9 @@ const RoutePage: React.FC = () => {
                 await API.route.deleteRoute({
                     name: activeConfigTab,
                     prefix: route.prefix,
-                    nexthopAddr: route.nextHop,
-                    doFlush: true,
+                    nexthop_addr: route.next_hop,
+                    do_flush: true,
+                    source_id: RouteSourceID.STATIC,
                 });
             }
 

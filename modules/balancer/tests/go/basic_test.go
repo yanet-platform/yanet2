@@ -76,7 +76,6 @@ func TestBasicOperations(t *testing.T) {
 					Peers: []*balancerpb.Addr{},
 				},
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 60,
 				TcpSyn:    60,

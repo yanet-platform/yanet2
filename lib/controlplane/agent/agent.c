@@ -1316,6 +1316,26 @@ cp_device_config_set_output_pipeline(
 	return 0;
 }
 
+// Check if counter name matches any query pattern.
+//
+// Returns true if query_count == -1 (return all) or name matches.
+static bool
+counter_name_matches_query(
+	const char *name, const char *const *query, size_t query_count
+) {
+	if (query_count == (size_t)-1) {
+		return true;
+	}
+
+	// TODO: use hash/sorted index/regex state machine.
+	for (size_t i = 0; i < query_count; i++) {
+		if (!strncmp(name, query[i], COUNTER_NAME_LEN)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 struct counter_handle_list *
 yanet_get_module_counters(
 	struct dp_config *dp_config,
@@ -1324,15 +1344,14 @@ yanet_get_module_counters(
 	const char *function_name,
 	const char *chain_name,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	const char *const *query,
+	size_t query_count
 ) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
 	struct cp_config_gen *cp_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
-
-	struct counter_registry *counter_registry;
-	struct counter_storage *counter_storage;
 
 	struct counter_storage *cs = cp_config_gen_get_module_counter_storage(
 		cp_config_gen,
@@ -1348,8 +1367,9 @@ yanet_get_module_counters(
 		cp_config_unlock(cp_config);
 		return NULL;
 	}
-	counter_storage = cs;
-	counter_registry = ADDR_OF(&counter_storage->registry);
+	struct counter_storage *counter_storage = cs;
+	struct counter_registry *counter_registry =
+		ADDR_OF(&counter_storage->registry);
 
 	uint64_t count = counter_registry->count;
 	struct counter_name *names = ADDR_OF(&counter_registry->names);
@@ -1357,24 +1377,52 @@ yanet_get_module_counters(
 	// FIXME: unlock is correct
 	cp_config_unlock(cp_config);
 
+	// Count matching counters (all if no filter).
+	bool should_return_all = (query_count == (size_t)-1);
+	uint64_t match_count = count;
+	if (!should_return_all) {
+		match_count = 0;
+		for (uint64_t idx = 0; idx < count; ++idx) {
+			if (counter_name_matches_query(
+				    names[idx].name, query, query_count
+			    )) {
+				match_count++;
+			}
+		}
+	}
+
+	if (match_count == 0) {
+		return NULL;
+	}
+
 	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
 		sizeof(struct counter_handle_list) +
-		sizeof(struct counter_handle) * count
+		sizeof(struct counter_handle) * match_count
 	);
-
-	if (list == NULL)
+	if (list == NULL) {
 		return NULL;
+	}
+
 	list->instance_count =
 		ADDR_OF(&counter_storage->allocator)->instance_count;
-	list->count = count;
+	list->count = match_count;
 	struct counter_handle *handlers = list->counters;
 
+	// Fill matching counters.
+	uint64_t out_idx = 0;
 	for (uint64_t idx = 0; idx < count; ++idx) {
-		strtcpy(handlers[idx].name, names[idx].name, 60);
-		handlers[idx].size = names[idx].size;
-		handlers[idx].gen = names[idx].gen;
-		handlers[idx].value_handle =
+		if (!should_return_all &&
+		    !counter_name_matches_query(
+			    names[idx].name, query, query_count
+		    )) {
+			continue;
+		}
+		strtcpy(handlers[out_idx].name, names[idx].name, 60);
+		handlers[out_idx].size = names[idx].size;
+		handlers[out_idx].gen = names[idx].gen;
+		handlers[out_idx].value_handle =
 			counter_get_value_handle(idx, counter_storage);
+		out_idx++;
 	}
 
 	return list;

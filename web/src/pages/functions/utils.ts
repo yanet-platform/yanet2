@@ -391,7 +391,7 @@ export const graphToApi = (
                 name: path.chainName,
                 modules,
             },
-            weight: path.weight,
+            weight: parseInt(String(path.weight), 10),
         };
     });
 

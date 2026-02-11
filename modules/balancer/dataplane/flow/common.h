@@ -31,10 +31,12 @@ packet_ctx_unset_real(struct packet_ctx *ctx) {
 
 static inline void
 packet_ctx_send_packet(struct packet_ctx *ctx) {
+	ctx->processed = true;
 	packet_front_output(ctx->packet_front, ctx->packet);
 }
 
 static inline void
 packet_ctx_drop_packet(struct packet_ctx *ctx) {
+	ctx->processed = true;
 	packet_front_drop(ctx->packet_front, ctx->packet);
 }

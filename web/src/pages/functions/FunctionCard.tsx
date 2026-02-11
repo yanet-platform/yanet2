@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Box, Card, Alert } from '@gravity-ui/uikit';
 import type { FunctionId } from '../../api/common';
 import type { Function as APIFunction } from '../../api/functions';
+import { API } from '../../api';
 import { CardHeader, PageLoader } from '../../components';
 import { FunctionGraph } from './FunctionGraph';
 import { DeleteFunctionDialog, ModuleEditorDialog, SingleWeightEditorDialog } from './dialogs';
@@ -35,6 +36,8 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     const [singleWeightDialogOpen, setSingleWeightDialogOpen] = useState(false);
     const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
     const [selectedEdge, setSelectedEdge] = useState<FunctionEdge | null>(null);
+    const [availableModuleTypes, setAvailableModuleTypes] = useState<string[]>([]);
+    const [loadingModuleTypes, setLoadingModuleTypes] = useState(false);
 
     const {
         nodes,
@@ -140,6 +143,27 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [functionId, initialFunction]);
+
+    // Load available module types when dialog opens
+    useEffect(() => {
+        if (moduleDialogOpen && availableModuleTypes.length === 0) {
+            const loadModuleTypes = async () => {
+                setLoadingModuleTypes(true);
+                try {
+                    const response = await API.inspect.inspect();
+                    const dpModules = response.instance_info?.dp_modules ?? [];
+                    const types = dpModules
+                        .map(m => m.name)
+                        .filter((name): name is string => !!name);
+                    setAvailableModuleTypes(types);
+                } catch {
+                    // Ignore errors, user can still type custom values
+                }
+                setLoadingModuleTypes(false);
+            };
+            loadModuleTypes();
+        }
+    }, [moduleDialogOpen, availableModuleTypes.length]);
 
     const handleSave = useCallback(async () => {
         if (!isValid) {
@@ -329,6 +353,8 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
                         ? (selectedModule.data as ModuleNodeData)
                         : { type: '', name: '' }
                 }
+                availableModuleTypes={availableModuleTypes}
+                loadingModuleTypes={loadingModuleTypes}
             />
 
             <SingleWeightEditorDialog

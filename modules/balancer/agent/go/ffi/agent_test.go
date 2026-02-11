@@ -85,14 +85,6 @@ func TestAgent(t *testing.T) {
 				},
 				SourceV4: netip.MustParseAddr("10.12.13.213"),
 				SourceV6: netip.MustParseAddr("2001:db8::1"),
-				DecapV4: []netip.Addr{
-					netip.MustParseAddr("10.13.11.215"),
-					netip.MustParseAddr("10.14.11.214"),
-				},
-				DecapV6: []netip.Addr{
-					netip.MustParseAddr("2001:db8::3"),
-					netip.MustParseAddr("2001:db8::2"),
-				},
 			},
 			State: StateConfig{
 				TableCapacity: 1000,
@@ -177,14 +169,6 @@ func TestAgent(t *testing.T) {
 				},
 				SourceV4: netip.MustParseAddr("10.20.30.40"),
 				SourceV6: netip.MustParseAddr("2001:db8::10"),
-				DecapV4: []netip.Addr{
-					netip.MustParseAddr("10.15.12.216"),
-					netip.MustParseAddr("10.16.12.215"),
-				},
-				DecapV6: []netip.Addr{
-					netip.MustParseAddr("2001:db8::5"),
-					netip.MustParseAddr("2001:db8::4"),
-				},
 			},
 			State: StateConfig{
 				TableCapacity: 2000,

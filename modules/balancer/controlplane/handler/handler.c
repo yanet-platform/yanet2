@@ -91,60 +91,6 @@ init_sources(
 }
 
 static int
-init_decaps(
-	struct packet_handler *handler,
-	struct memory_context *mctx,
-	struct packet_handler_config *config
-) {
-	// init ipv4 decap addresses
-	if (lpm_init(&handler->decap_ipv4, mctx) != 0) {
-		NEW_ERROR(
-			"failed to allocate container for decap IPv4 addresses"
-		);
-		return -1;
-	}
-	for (size_t i = 0; i < config->decap_v4_count; i++) {
-		struct net4_addr *addr = &config->decap_v4[i];
-		if (lpm4_insert(
-			    &handler->decap_ipv4, addr->bytes, addr->bytes, 1
-		    ) != 0) {
-			lpm_free(&handler->decap_ipv4);
-			NEW_ERROR(
-				"failed to insert decap IPv4 address at index "
-				"%zu",
-				i
-			);
-			return -1;
-		}
-	}
-
-	// init ipv6 decap addresses
-	if (lpm_init(&handler->decap_ipv6, mctx) != 0) {
-		NEW_ERROR(
-			"failed to allocate container for decap IPv6 addresses"
-		);
-		return -1;
-	}
-	for (size_t i = 0; i < config->decap_v6_count; i++) {
-		struct net6_addr *addr = &config->decap_v6[i];
-		if (lpm8_insert(
-			    &handler->decap_ipv6, addr->bytes, addr->bytes, 1
-		    ) != 0) {
-			lpm_free(&handler->decap_ipv4);
-			lpm_free(&handler->decap_ipv6);
-			NEW_ERROR(
-				"failed to insert decap IPv6 address at index "
-				"%zu",
-				i
-			);
-			return -1;
-		}
-	}
-
-	return 0;
-}
-
-static int
 setup_reals_index(struct packet_handler *handler, struct memory_context *mctx) {
 	struct balancer_state *state = ADDR_OF(&handler->state);
 	size_t registry_reals_count = balancer_state_reals_count(state);
@@ -610,14 +556,9 @@ packet_handler_setup(
 		goto free_handler;
 	}
 
-	if (init_decaps(handler, mctx, config) != 0) {
-		PUSH_ERROR("failed to setup decap addresses");
-		goto free_handler;
-	}
-
 	if (init_reals(handler, state, mctx, config, counter_registry) != 0) {
 		PUSH_ERROR("failed to setup reals");
-		goto free_decap;
+		goto free_handler;
 	}
 
 	if (init_vs(handler, state, mctx, config, counter_registry) != 0) {
@@ -656,10 +597,6 @@ free_reals:
 		ADDR_OF(&handler->reals_index),
 		sizeof(uint32_t) * handler->reals_index_count
 	);
-
-free_decap:
-	lpm_free(&handler->decap_ipv4);
-	lpm_free(&handler->decap_ipv6);
 
 free_handler:
 	memory_bfree(mctx, handler, sizeof(struct packet_handler));

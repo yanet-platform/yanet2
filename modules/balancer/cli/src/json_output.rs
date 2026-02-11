@@ -28,7 +28,6 @@ pub struct PacketHandlerConfigJson {
     pub virtual_services: Vec<VirtualServiceJson>,
     pub source_address_v4: String,
     pub source_address_v6: String,
-    pub decap_addresses: Vec<String>,
     pub sessions_timeouts: Option<SessionsTimeoutsJson>,
 }
 
@@ -205,8 +204,6 @@ pub struct CommonStatsJson {
     pub incoming_packets: u64,
     pub incoming_bytes: u64,
     pub unexpected_network_proto: u64,
-    pub decap_successful: u64,
-    pub decap_failed: u64,
     pub outgoing_packets: u64,
     pub outgoing_bytes: u64,
 }
@@ -417,11 +414,6 @@ pub fn convert_show_config(response: &balancerpb::ShowConfigResponse) -> ShowCon
                 source_address_v6: opt_addr_to_ip(&ph.source_address_v6)
                     .map(|ip| ip.to_string())
                     .unwrap_or_default(),
-                decap_addresses: ph
-                    .decap_addresses
-                    .iter()
-                    .filter_map(|a| addr_to_ip(a).ok().map(|ip| ip.to_string()))
-                    .collect(),
                 sessions_timeouts: ph.sessions_timeouts.as_ref().map(|t| SessionsTimeoutsJson {
                     tcp_syn_ack: t.tcp_syn_ack,
                     tcp_syn: t.tcp_syn,
@@ -538,8 +530,6 @@ pub fn convert_show_stats(response: &balancerpb::ShowStatsResponse) -> ShowStats
                 incoming_packets: c.incoming_packets,
                 incoming_bytes: c.incoming_bytes,
                 unexpected_network_proto: c.unexpected_network_proto,
-                decap_successful: c.decap_successful,
-                decap_failed: c.decap_failed,
                 outgoing_packets: c.outgoing_packets,
                 outgoing_bytes: c.outgoing_bytes,
             }),

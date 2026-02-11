@@ -588,44 +588,6 @@ func goToC_PacketHandlerConfigInPlace(
 		16,
 	)
 
-	// Convert decap addresses
-	cConfig.decap_v4_count = C.size_t(len(config.DecapV4))
-	cConfig.decap_v6_count = C.size_t(len(config.DecapV6))
-
-	if len(config.DecapV4) > 0 {
-		cConfig.decap_v4 = (*C.struct_net4_addr)(
-			C.malloc(C.size_t(len(config.DecapV4)) * C.sizeof_struct_net4_addr),
-		)
-		cDecapV4Slice := unsafe.Slice(cConfig.decap_v4, len(config.DecapV4))
-		for i, addr := range config.DecapV4 {
-			v4 := addr.As4()
-			C.memcpy(
-				unsafe.Pointer(&cDecapV4Slice[i].bytes[0]),
-				unsafe.Pointer(&v4[0]),
-				4,
-			)
-		}
-	} else {
-		cConfig.decap_v4 = nil
-	}
-
-	if len(config.DecapV6) > 0 {
-		cConfig.decap_v6 = (*C.struct_net6_addr)(
-			C.malloc(C.size_t(len(config.DecapV6)) * C.sizeof_struct_net6_addr),
-		)
-		cDecapV6Slice := unsafe.Slice(cConfig.decap_v6, len(config.DecapV6))
-		for i, addr := range config.DecapV6 {
-			v6 := addr.As16()
-			C.memcpy(
-				unsafe.Pointer(&cDecapV6Slice[i].bytes[0]),
-				unsafe.Pointer(&v6[0]),
-				16,
-			)
-		}
-	} else {
-		cConfig.decap_v6 = nil
-	}
-
 	// Convert virtual services
 	cConfig.vs_count = C.size_t(len(config.VirtualServices))
 	if len(config.VirtualServices) > 0 {
@@ -655,13 +617,6 @@ func goToC_PacketHandlerConfigInPlace(
 func freeC_PacketHandlerConfig(cConfig *C.struct_packet_handler_config) {
 	if cConfig == nil {
 		return
-	}
-
-	if cConfig.decap_v4 != nil {
-		C.free(unsafe.Pointer(cConfig.decap_v4))
-	}
-	if cConfig.decap_v6 != nil {
-		C.free(unsafe.Pointer(cConfig.decap_v6))
 	}
 
 	if cConfig.vs != nil {
@@ -720,39 +675,6 @@ func cToGo_PacketHandlerConfig(
 			)
 			return netip.AddrFrom16(v6)
 		}(),
-	}
-
-	// Convert decap addresses
-	if cConfig.decap_v4_count > 0 && cConfig.decap_v4 != nil {
-		cDecapV4Slice := unsafe.Slice(cConfig.decap_v4, cConfig.decap_v4_count)
-		config.DecapV4 = make([]netip.Addr, cConfig.decap_v4_count)
-		for i := range config.DecapV4 {
-			var v4 [4]byte
-			C.memcpy(
-				unsafe.Pointer(&v4[0]),
-				unsafe.Pointer(&cDecapV4Slice[i].bytes[0]),
-				4,
-			)
-			config.DecapV4[i] = netip.AddrFrom4(v4)
-		}
-	} else {
-		config.DecapV4 = []netip.Addr{}
-	}
-
-	if cConfig.decap_v6_count > 0 && cConfig.decap_v6 != nil {
-		cDecapV6Slice := unsafe.Slice(cConfig.decap_v6, cConfig.decap_v6_count)
-		config.DecapV6 = make([]netip.Addr, cConfig.decap_v6_count)
-		for i := range config.DecapV6 {
-			var v6 [16]byte
-			C.memcpy(
-				unsafe.Pointer(&v6[0]),
-				unsafe.Pointer(&cDecapV6Slice[i].bytes[0]),
-				16,
-			)
-			config.DecapV6[i] = netip.AddrFrom16(v6)
-		}
-	} else {
-		config.DecapV6 = []netip.Addr{}
 	}
 
 	// Convert virtual services
@@ -1198,8 +1120,6 @@ func cToGo_CommonStats(cStats *C.struct_balancer_common_stats) CommonStats {
 		IncomingPackets:        uint64(cStats.incoming_packets),
 		IncomingBytes:          uint64(cStats.incoming_bytes),
 		UnexpectedNetworkProto: uint64(cStats.unexpected_network_proto),
-		DecapSuccessful:        uint64(cStats.decap_successful),
-		DecapFailed:            uint64(cStats.decap_failed),
 		OutgoingPackets:        uint64(cStats.outgoing_packets),
 		OutgoingBytes:          uint64(cStats.outgoing_bytes),
 	}

@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "common/memory_address.h"
+#include "dataplane/device/device.h"
 #include "dataplane/module/module.h"
 
 struct counter_storage;
@@ -64,7 +65,7 @@ struct function_ectx {
 	uint64_t chain_count;
 	struct chain_ectx **chains;
 	uint64_t chain_map_size;
-	struct chain_ectx *chain_map[];
+	uint64_t chain_map[];
 };
 
 struct pipeline_ectx {
@@ -79,7 +80,7 @@ struct device_entry_ectx {
 	uint64_t pipeline_count;
 	struct pipeline_ectx **pipelines;
 	uint64_t pipeline_map_size;
-	struct pipeline_ectx *pipeline_map[];
+	uint64_t pipeline_map[];
 };
 
 struct device_ectx {

@@ -216,8 +216,7 @@ func createBigConfig(
 			SourceAddressV6: &balancerpb.Addr{
 				Bytes: netip.MustParseAddr("fe80::5").AsSlice(),
 			},
-			Vs:             virtualServices,
-			DecapAddresses: []*balancerpb.Addr{},
+			Vs: virtualServices,
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 60,
 				TcpSyn:    60,

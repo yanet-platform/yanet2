@@ -97,18 +97,18 @@ const convertYamlRule = (yamlRule: YamlAclRule): Rule => {
     const action: Action = {
         kind: actionKind,
         counter: yamlRule.counter || '',
-        keepState: false,
+        keep_state: false,
     };
 
     return {
         action,
         srcs,
         dsts,
-        srcPortRanges,
-        dstPortRanges,
-        protoRanges,
-        vlanRanges,
-        devices: yamlRule.devices || [],
+        src_port_ranges: srcPortRanges,
+        dst_port_ranges: dstPortRanges,
+        proto_ranges: protoRanges,
+        vlan_ranges: vlanRanges,
+        devices: (yamlRule.devices || []).map((name) => ({ name })),
     };
 };
 

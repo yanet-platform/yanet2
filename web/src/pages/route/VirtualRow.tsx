@@ -42,11 +42,11 @@ export const VirtualRow = ({ route, index, start, isSelected, onSelect }: Virtua
             </div>
             <div style={cellStyles.index}>{index + 1}</div>
             <div style={cellStyles.prefix}>{route.prefix || '-'}</div>
-            <div style={cellStyles.nextHop}>{route.nextHop || '-'}</div>
+            <div style={cellStyles.next_hop}>{route.next_hop || '-'}</div>
             <div style={cellStyles.peer}>{route.peer || '-'}</div>
-            <div style={cellStyles.isBest}>{route.isBest ? 'Yes' : 'No'}</div>
+            <div style={cellStyles.is_best}>{route.is_best ? 'Yes' : 'No'}</div>
             <div style={cellStyles.pref}>{route.pref ?? '-'}</div>
-            <div style={cellStyles.asPathLen}>{route.asPathLen ?? '-'}</div>
+            <div style={cellStyles.as_path_len}>{route.as_path_len ?? '-'}</div>
             <div style={cellStyles.source}>{ROUTE_SOURCES[route.source ?? 0] || 'Unknown'}</div>
         </div>
     );

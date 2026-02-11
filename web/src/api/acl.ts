@@ -22,6 +22,10 @@ export interface VlanRange {
     to?: number;
 }
 
+export interface Device {
+    name?: string;
+}
+
 export enum ActionKind {
     PASS = 0,
     DENY = 1,
@@ -33,35 +37,35 @@ export enum ActionKind {
 export interface Action {
     kind?: ActionKind;
     counter?: string;
-    keepState?: boolean;
+    keep_state?: boolean;
 }
 
 export interface Rule {
     action?: Action;
     srcs?: IPNet[];
     dsts?: IPNet[];
-    srcPortRanges?: PortRange[];
-    dstPortRanges?: PortRange[];
-    devices?: string[];
-    vlanRanges?: VlanRange[];
-    protoRanges?: ProtoRange[];
+    src_port_ranges?: PortRange[];
+    dst_port_ranges?: PortRange[];
+    devices?: Device[];
+    vlan_ranges?: VlanRange[];
+    proto_ranges?: ProtoRange[];
 }
 
 export interface MapConfig {
-    indexSize?: number;
-    extraBucketCount?: number;
+    index_size?: number;
+    extra_bucket_count?: number;
 }
 
 export interface SyncConfig {
-    srcAddr?: string | Uint8Array | number[];
-    dstEther?: string | Uint8Array | number[];
-    dstAddrMulticast?: string | Uint8Array | number[];
-    portMulticast?: number;
-    dstAddrUnicast?: string | Uint8Array | number[];
-    portUnicast?: number;
-    tcpSynAck?: number | string; // nanoseconds
-    tcpSyn?: number | string;
-    tcpFin?: number | string;
+    src_addr?: string | Uint8Array | number[];
+    dst_ether?: string | Uint8Array | number[];
+    dst_addr_multicast?: string | Uint8Array | number[];
+    port_multicast?: number;
+    dst_addr_unicast?: string | Uint8Array | number[];
+    port_unicast?: number;
+    tcp_syn_ack?: number | string; // nanoseconds
+    tcp_syn?: number | string;
+    tcp_fin?: number | string;
     tcp?: number | string;
     udp?: number | string;
     default?: number | string;
@@ -83,8 +87,8 @@ export interface AclShowConfigRequest {
 export interface AclShowConfigResponse {
     name?: string;
     rules?: Rule[];
-    fwstateMap?: MapConfig;
-    fwstateSync?: SyncConfig;
+    fwstate_map?: MapConfig;
+    fwstate_sync?: SyncConfig;
 }
 
 export interface AclDeleteConfigRequest {
@@ -103,8 +107,8 @@ export interface AclListConfigsResponse {
 
 export interface AclUpdateFWStateConfigRequest {
     name?: string;
-    mapConfig?: MapConfig;
-    syncConfig?: SyncConfig;
+    map_config?: MapConfig;
+    sync_config?: SyncConfig;
 }
 
 export interface AclUpdateFWStateConfigResponse { }

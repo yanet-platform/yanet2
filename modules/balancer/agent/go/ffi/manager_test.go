@@ -217,14 +217,6 @@ func TestManager(t *testing.T) {
 				},
 				SourceV4: netip.MustParseAddr("10.12.13.213"),
 				SourceV6: netip.MustParseAddr("2001:db8::1"),
-				DecapV4: []netip.Addr{
-					netip.MustParseAddr("10.13.11.215"),
-					netip.MustParseAddr("10.14.11.214"),
-				},
-				DecapV6: []netip.Addr{
-					netip.MustParseAddr("2001:db8::3"),
-					netip.MustParseAddr("2001:db8::2"),
-				},
 			},
 			State: StateConfig{
 				TableCapacity: 1000,
@@ -1000,12 +992,6 @@ func TestManager(t *testing.T) {
 					},
 					SourceV4: netip.MustParseAddr("192.168.1.1"),
 					SourceV6: netip.MustParseAddr("2001:db8::100"),
-					DecapV4: []netip.Addr{
-						netip.MustParseAddr("192.168.3.1"),
-					},
-					DecapV6: []netip.Addr{
-						netip.MustParseAddr("2001:db8::300"),
-					},
 				},
 				State: StateConfig{
 					TableCapacity: 2000,

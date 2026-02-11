@@ -9,6 +9,14 @@ export interface InterpolatedCounterData {
 }
 
 /**
+ * Counter data with interpolated absolute values.
+ */
+export interface InterpolatedAbsoluteData {
+    packets: number; // interpolated packet count
+    bytes: number; // interpolated byte count
+}
+
+/**
  * Raw counter values at a point in time (cumulative).
  */
 interface RawCounterSnapshot<K extends string = string> {
@@ -54,9 +62,15 @@ export interface UseInterpolatedCountersOptions<K extends string = string> {
 
 export interface UseInterpolatedCountersResult<K extends string = string> {
     /**
-     * Map of key -> interpolated counter data.
+     * Map of key -> interpolated rate data (pps/bps).
      */
     counters: Map<K, InterpolatedCounterData>;
+
+    /**
+     * Map of key -> interpolated absolute data (packets/bytes).
+     * Uses linear extrapolation based on current rate.
+     */
+    absoluteCounters: Map<K, InterpolatedAbsoluteData>;
 }
 
 /**
@@ -78,8 +92,11 @@ export const useInterpolatedCounters = <K extends string = string>(
         enabled = true,
     } = options;
 
-    // Interpolated counters for display
+    // Interpolated rate counters for display
     const [counters, setCounters] = useState<Map<K, InterpolatedCounterData>>(new Map());
+
+    // Interpolated absolute counters for display
+    const [absoluteCounters, setAbsoluteCounters] = useState<Map<K, InterpolatedAbsoluteData>>(new Map());
 
     // Store raw counter snapshots (cumulative values)
     const snapshotsRef = useRef<RawCounterSnapshot<K>[]>([]);
@@ -189,51 +206,71 @@ export const useInterpolatedCounters = <K extends string = string>(
             if (!isMountedRef.current) return;
 
             const rates = ratesRef.current;
+            const snapshots = snapshotsRef.current;
             const currentKeys = keysRef.current;
 
             // Need keys to display
             if (currentKeys.length === 0) return;
 
-            // Need at least 1 rate snapshot
-            if (rates.length === 0) return;
+            // Need at least 2 rate snapshots for interpolation
+            // This ensures counters stay in "loading" state until we can animate smoothly
+            if (rates.length < 2) return;
 
             const newCounters = new Map<K, InterpolatedCounterData>();
+            const newAbsoluteCounters = new Map<K, InterpolatedAbsoluteData>();
             const now = Date.now();
 
-            if (rates.length === 1) {
-                // Only one rate - just display it
-                const rate = rates[0];
-                for (const key of currentKeys) {
-                    const r = rate.rates.get(key);
-                    newCounters.set(key, { pps: r?.pps ?? 0, bps: r?.bps ?? 0 });
-                }
-            } else {
-                // Two rates - interpolate between them
-                const prevRate = rates[0];
-                const currRate = rates[1];
+            // Two rates - interpolate between them
+            const prevRate = rates[0];
+            const currRate = rates[1];
 
-                // Calculate progress: 0 at currRate.timestamp, 1 at currRate.timestamp + pollingInterval
-                const elapsed = now - currRate.timestamp;
-                const progress = Math.min(1, Math.max(0, elapsed / 1000));
+            // Get the latest raw snapshot for absolute value extrapolation
+            const latestSnapshot = snapshots[snapshots.length - 1];
 
-                for (const key of currentKeys) {
-                    const prev = prevRate.rates.get(key);
-                    const curr = currRate.rates.get(key);
+            // Calculate progress: 0 at currRate.timestamp, 1 at currRate.timestamp + pollingInterval
+            const elapsed = now - currRate.timestamp;
+            const progress = Math.min(1, Math.max(0, elapsed / 1000));
 
-                    if (prev && curr) {
-                        // Linear interpolation from prev rate to curr rate
-                        const pps = prev.pps + (curr.pps - prev.pps) * progress;
-                        const bps = prev.bps + (curr.bps - prev.bps) * progress;
-                        newCounters.set(key, { pps, bps });
-                    } else if (curr) {
-                        newCounters.set(key, { pps: curr.pps, bps: curr.bps });
+            // Time elapsed since the latest snapshot (in seconds)
+            const elapsedSinceSnapshot = (now - (latestSnapshot?.timestamp ?? now)) / 1000;
+
+            for (const key of currentKeys) {
+                const prev = prevRate.rates.get(key);
+                const curr = currRate.rates.get(key);
+                const latestValue = latestSnapshot?.values.get(key);
+
+                if (prev && curr) {
+                    // Linear interpolation from prev rate to curr rate
+                    const pps = prev.pps + (curr.pps - prev.pps) * progress;
+                    const bps = prev.bps + (curr.bps - prev.bps) * progress;
+                    newCounters.set(key, { pps, bps });
+
+                    // Extrapolate absolute values using current rate
+                    if (latestValue) {
+                        const packets = Number(latestValue.packets) + pps * elapsedSinceSnapshot;
+                        const bytes = Number(latestValue.bytes) + bps * elapsedSinceSnapshot;
+                        newAbsoluteCounters.set(key, { packets, bytes });
                     } else {
-                        newCounters.set(key, { pps: 0, bps: 0 });
+                        newAbsoluteCounters.set(key, { packets: 0, bytes: 0 });
                     }
+                } else if (curr) {
+                    newCounters.set(key, { pps: curr.pps, bps: curr.bps });
+
+                    if (latestValue) {
+                        const packets = Number(latestValue.packets) + curr.pps * elapsedSinceSnapshot;
+                        const bytes = Number(latestValue.bytes) + curr.bps * elapsedSinceSnapshot;
+                        newAbsoluteCounters.set(key, { packets, bytes });
+                    } else {
+                        newAbsoluteCounters.set(key, { packets: 0, bytes: 0 });
+                    }
+                } else {
+                    newCounters.set(key, { pps: 0, bps: 0 });
+                    newAbsoluteCounters.set(key, { packets: 0, bytes: 0 });
                 }
             }
 
             setCounters(newCounters);
+            setAbsoluteCounters(newAbsoluteCounters);
         };
 
         // Run interpolation at specified interval
@@ -252,5 +289,5 @@ export const useInterpolatedCounters = <K extends string = string>(
         };
     }, []);
 
-    return { counters };
+    return { counters, absoluteCounters };
 };

@@ -143,7 +143,7 @@ func TestRoute(t *testing.T) {
 	})
 
 	fw.Run("Delete_Static_Route", func(fw *framework.F, t *testing.T) {
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route delete --cfg route-tfn0 10.0.0.0/24 --via 192.0.2.1")
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route remove --cfg route-tfn0 10.0.0.0/24 --via 192.0.2.1")
 		require.NoError(t, err, "Failed to delete route")
 		t.Logf("Delete route output: %s", output)
 		t.Logf("Successfully deleted route 10.0.0.0/24 via 192.0.2.1")
@@ -228,7 +228,7 @@ func TestRoute(t *testing.T) {
 		t.Logf("Packet correctly routed via default route: src=%s dst=%s", outputPacket.SrcIP, outputPacket.DstIP)
 
 		// Clean up: delete default route
-		output, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route delete --cfg route-tfn0 0.0.0.0/0 --via " + framework.VMIPv4Gateway)
+		output, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route remove --cfg route-tfn0 0.0.0.0/0 --via " + framework.VMIPv4Gateway)
 		require.NoError(t, err, "Failed to delete default route")
 		t.Logf("Deleted default route: %s", output)
 	})
@@ -291,7 +291,7 @@ func TestRoute(t *testing.T) {
 
 		// Delete routes
 		for _, route := range routes {
-			_, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route delete --cfg route-tfn0 " + route.prefix + " --via " + route.nexthop)
+			_, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route remove --cfg route-tfn0 " + route.prefix + " --via " + route.nexthop)
 			require.NoError(t, err, "Failed to delete route %s", route.prefix)
 		}
 
@@ -322,5 +322,132 @@ func TestRoute(t *testing.T) {
 		}
 
 		t.Logf("Successfully deleted and verified %d routes", len(routes))
+	})
+
+	fw.Run("Test_Route_Source_Static", func(fw *framework.F, t *testing.T) {
+		// Add neighbour for the nexthop
+		_, err := fw.ExecuteCommand("ip nei add 192.0.2.10 lladdr " + framework.SrcMAC + " dev kni0")
+		require.NoError(t, err, "Failed to add neighbour")
+
+		// Wait for neighbour to appear in yanet
+		err = fw.WaitOutputPresent("/mnt/target/release/yanet-cli-neighbour show", func(output string) bool {
+			return strings.Contains(output, "192.0.2.10")
+		}, 10*time.Second)
+		require.NoError(t, err, "Neighbour 192.0.2.10 did not appear in yanet")
+
+		// Insert route with explicit --source static
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-tfn0 10.10.0.0/24 --via 192.0.2.10 --source static")
+		require.NoError(t, err, "Failed to insert route with --source static")
+		t.Logf("Insert route with --source static output: %s", output)
+
+		// Verify route is present and marked as static
+		output, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
+		require.NoError(t, err, "Failed to show routes")
+		require.Contains(t, output, "10.10.0.0/24", "Route prefix should be present")
+		require.Contains(t, output, "192.0.2.10", "Route nexthop should be present")
+		require.Contains(t, output, "static", "Route should be marked as 'static'")
+		t.Logf("Route with --source static verified:\n%s", output)
+
+		// Delete route with explicit --source static
+		output, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route remove --cfg route-tfn0 10.10.0.0/24 --via 192.0.2.10 --source static")
+		require.NoError(t, err, "Failed to delete route with --source static")
+		t.Logf("Delete route with --source static output: %s", output)
+
+		// Clean up neighbour
+		_, err = fw.ExecuteCommand("ip nei del 192.0.2.10 dev kni0")
+		require.NoError(t, err, "Failed to delete neighbour")
+	})
+
+	fw.Run("Test_Route_Source_Bird", func(fw *framework.F, t *testing.T) {
+		// Add neighbour for the nexthop
+		_, err := fw.ExecuteCommand("ip nei add 192.0.2.11 lladdr " + framework.SrcMAC + " dev kni0")
+		require.NoError(t, err, "Failed to add neighbour")
+
+		// Wait for neighbour to appear in yanet
+		err = fw.WaitOutputPresent("/mnt/target/release/yanet-cli-neighbour show", func(output string) bool {
+			return strings.Contains(output, "192.0.2.11")
+		}, 10*time.Second)
+		require.NoError(t, err, "Neighbour 192.0.2.11 did not appear in yanet")
+
+		// Insert route with --source bird
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-tfn0 10.11.0.0/24 --via 192.0.2.11 --source bird")
+		require.NoError(t, err, "Failed to insert route with --source bird")
+		t.Logf("Insert route with --source bird output: %s", output)
+
+		// Verify route is present and marked as bird
+		output, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
+		require.NoError(t, err, "Failed to show routes")
+		require.Contains(t, output, "10.11.0.0/24", "Route prefix should be present")
+		require.Contains(t, output, "192.0.2.11", "Route nexthop should be present")
+		require.Contains(t, output, "bird", "Route should be marked as 'bird'")
+		t.Logf("Route with --source bird verified:\n%s", output)
+
+		// Delete route with explicit --source bird
+		output, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route remove --cfg route-tfn0 10.11.0.0/24 --via 192.0.2.11 --source bird")
+		require.NoError(t, err, "Failed to delete route with --source bird")
+		t.Logf("Delete route with --source bird output: %s", output)
+
+		// Clean up neighbour
+		_, err = fw.ExecuteCommand("ip nei del 192.0.2.11 dev kni0")
+		require.NoError(t, err, "Failed to delete neighbour")
+	})
+
+	fw.Run("Test_Route_Source_Isolation", func(fw *framework.F, t *testing.T) {
+		// This test verifies that routes with different sources are isolated
+		// i.e., deleting a static route doesn't affect a bird route with the same prefix/nexthop
+
+		// Add neighbour for the nexthop
+		_, err := fw.ExecuteCommand("ip nei add 192.0.2.12 lladdr " + framework.SrcMAC + " dev kni0")
+		require.NoError(t, err, "Failed to add neighbour")
+
+		// Wait for neighbour to appear in yanet
+		err = fw.WaitOutputPresent("/mnt/target/release/yanet-cli-neighbour show", func(output string) bool {
+			return strings.Contains(output, "192.0.2.12")
+		}, 10*time.Second)
+		require.NoError(t, err, "Neighbour 192.0.2.12 did not appear in yanet")
+
+		// Insert route with --source static
+		_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-tfn0 10.12.0.0/24 --via 192.0.2.12 --source static")
+		require.NoError(t, err, "Failed to insert static route")
+
+		// Insert same route with --source bird
+		_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-tfn0 10.12.0.0/24 --via 192.0.2.12 --source bird")
+		require.NoError(t, err, "Failed to insert bird route")
+
+		// Verify both routes are present
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
+		require.NoError(t, err, "Failed to show routes")
+
+		// Count occurrences of the prefix - should appear twice (once for static, once for bird)
+		prefixCount := strings.Count(output, "10.12.0.0/24")
+		require.Equal(t, 2, prefixCount, "Should have 2 routes with same prefix (static and bird)")
+		t.Logf("Both static and bird routes present:\n%s", output)
+
+		// Delete only the static route
+		_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route remove --cfg route-tfn0 10.12.0.0/24 --via 192.0.2.12 --source static")
+		require.NoError(t, err, "Failed to delete static route")
+
+		// Verify bird route is still present
+		output, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route show --cfg route-tfn0 --ipv4")
+		require.NoError(t, err, "Failed to show routes")
+		require.Contains(t, output, "10.12.0.0/24", "Bird route should still be present")
+		require.Contains(t, output, "bird", "Route should be marked as 'bird'")
+
+		// Verify static route is gone
+		lines := strings.Split(output, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "10.12.0.0/24") {
+				require.NotContains(t, line, "static", "Static route should be deleted")
+			}
+		}
+		t.Logf("Static route deleted, bird route preserved:\n%s", output)
+
+		// Clean up: delete bird route
+		_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route remove --cfg route-tfn0 10.12.0.0/24 --via 192.0.2.12 --source bird")
+		require.NoError(t, err, "Failed to delete bird route")
+
+		// Clean up neighbour
+		_, err = fw.ExecuteCommand("ip nei del 192.0.2.12 dev kni0")
+		require.NoError(t, err, "Failed to delete neighbour")
 	})
 }

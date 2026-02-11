@@ -252,7 +252,6 @@ func TestSessionTableManual(t *testing.T) {
 					Peers: []*balancerpb.Addr{},
 				},
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: uint32(sessionTimeout),
 				TcpSyn:    uint32(sessionTimeout),
@@ -1283,7 +1282,6 @@ func TestSessionTimeouts(t *testing.T) {
 					Peers: []*balancerpb.Addr{},
 				},
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: uint32(tcpSynAckTimeout),
 				TcpSyn:    uint32(tcpSynTimeout),

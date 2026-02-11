@@ -104,19 +104,11 @@ message CommonStats {
 	// Expected IPv4 or IPv6, but found something else.
 	uint64 unexpected_network_proto = 3;
 
-	// Packets successfully decapsulated (IPIP or GRE removed).
-	// Used for return traffic in DSR setups or multi-tier load balancing.
-	uint64 decap_successful = 4;
-
-	// Failed decapsulation attempts.
-	// Packet had a decap address but couldn't be decapsulated properly.
-	uint64 decap_failed = 5;
-
 	// Total number of outgoing packets (all protocols)
-	uint64 outgoing_packets = 6;
+	uint64 outgoing_packets = 4;
 
 	// Total number of outgoing bytes (all protocols)
-	uint64 outgoing_bytes = 7;
+	uint64 outgoing_bytes = 5;
 }
 
 // Per-virtual-service statistics.

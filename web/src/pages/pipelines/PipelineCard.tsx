@@ -5,7 +5,7 @@ import type { FunctionId } from '../../api/common';
 import { CardHeader, CountersProvider, PageLoader } from '../../components';
 import { PipelineGraph } from './PipelineGraph';
 import { DeletePipelineDialog, FunctionRefEditorDialog } from './dialogs';
-import { usePipelineGraph, useFunctionCounters } from './hooks';
+import { usePipelineGraph, useFunctionCounters, usePipelineCounters } from './hooks';
 import type { PipelineNode, PipelineEdge, FunctionRefNodeData } from './types';
 import { NODE_TYPE_FUNCTION_REF } from './types';
 import { toaster } from '../../utils';
@@ -73,11 +73,26 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
         return maxX + NODE_WIDTH + PADDING;
     }, [nodes]);
 
+    const isFallthrough = functionNames.length === 0;
+
     // Fetch and interpolate counters for all functions
     const { counters: functionCounters } = useFunctionCounters(
         pipelineId.name || '',
         functionNames
     );
+
+    const { counters: pipelineCounters } = usePipelineCounters(
+        pipelineId.name || '',
+        isFallthrough
+    );
+
+    const allCounters = useMemo(() => {
+        const merged = new Map(functionCounters);
+        for (const [key, value] of pipelineCounters) {
+            merged.set(key, value);
+        }
+        return merged;
+    }, [functionCounters, pipelineCounters]);
 
     // Load pipeline data on mount (only if no initialPipeline)
     useEffect(() => {
@@ -226,7 +241,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
 
                 {/* Graph */}
                 <Box className="pipeline-card__graph">
-                    <CountersProvider counters={functionCounters}>
+                    <CountersProvider counters={allCounters}>
                         <PipelineGraph
                             initialNodes={nodes}
                             initialEdges={edges}

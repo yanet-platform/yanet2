@@ -30,7 +30,7 @@ import './nodes/nodes.css';
 import { Button } from '@gravity-ui/uikit';
 import { LayoutCells } from '@gravity-ui/icons';
 
-import { InputNode, OutputNode, FunctionRefNode } from './nodes';
+import { InputNode, OutputNode, FunctionRefNode, CounterEdge } from './nodes';
 import type { PipelineNode, PipelineEdge, FunctionRefNodeData } from './types';
 import {
     NODE_TYPE_INPUT,
@@ -81,6 +81,7 @@ const SelectableEdge: React.FC<EdgeProps> = ({
 
 const edgeTypes: EdgeTypes = {
     default: SelectableEdge,
+    counterEdge: CounterEdge,
 };
 
 export interface PipelineGraphProps {

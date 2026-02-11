@@ -1,7 +1,7 @@
-dependencies = []
-
-dependencies += lib_module_dp_dep
-dependencies += lib_pipeline_dp_dep
+dependencies = [
+  lib_module_dp_dep,
+  lib_pipeline_dp_dep,
+]
 
 sources = files(
   'zone.c',
@@ -17,6 +17,7 @@ lib_config_dp = static_library(
 )
 
 lib_config_dp_dep = declare_dependency(
-  link_with: lib_config_dp,
+  link_with: [lib_config_dp],
   include_directories: yanet_libdir,
+  dependencies: dependencies,
 )

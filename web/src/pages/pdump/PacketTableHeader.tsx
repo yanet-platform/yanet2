@@ -3,7 +3,7 @@ import { Box, Text } from '@gravity-ui/uikit';
 import { SortableHeader } from './SortableHeader';
 import { cellStyles, TOTAL_WIDTH, HEADER_HEIGHT } from './constants';
 import type { PacketSortState, PacketSortColumn } from './types';
-import './pdump.css';
+import './pdump.scss';
 
 export interface PacketTableHeaderProps {
     sortState: PacketSortState;

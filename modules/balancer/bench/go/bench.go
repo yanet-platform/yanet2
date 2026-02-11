@@ -336,7 +336,6 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 		Vs:               virtualServices,
 		SourceAddressV4:  &balancerpb.Addr{Bytes: sourceV4.AsSlice()},
 		SourceAddressV6:  &balancerpb.Addr{Bytes: sourceV6.AsSlice()},
-		DecapAddresses:   []*balancerpb.Addr{},
 		SessionsTimeouts: sessionTimeouts,
 	}
 
@@ -694,8 +693,6 @@ func printCommonStats(stats *balancerpb.CommonStats) {
 	fmt.Printf("Outgoing:             %s packets, %s\n",
 		formatNumber(stats.OutgoingPackets),
 		formatBytes(stats.OutgoingBytes))
-	fmt.Printf("Decap Success:        %s packets\n", formatNumber(stats.DecapSuccessful))
-	fmt.Printf("Decap Failed:         %s packets\n", formatNumber(stats.DecapFailed))
 	if stats.UnexpectedNetworkProto > 0 {
 		fmt.Printf("Unexpected Protocol:  %s packets\n", formatNumber(stats.UnexpectedNetworkProto))
 	}

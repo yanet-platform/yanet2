@@ -241,26 +241,10 @@ clone_handler_config_to_relative(
 	dst->vs_count = src->vs_count;
 	dst->source_v4 = src->source_v4;
 	dst->source_v6 = src->source_v6;
-	dst->decap_v4_count = src->decap_v4_count;
-	dst->decap_v6_count = src->decap_v6_count;
 
 	// Clone vs array
 	if (clone_vs_array_to_relative(
 		    &dst->vs, src->vs, src->vs_count, mctx
-	    ) != 0) {
-		return -1;
-	}
-
-	// Clone decap_v4 array
-	if (clone_net4_addrs_to_relative(
-		    &dst->decap_v4, src->decap_v4, src->decap_v4_count, mctx
-	    ) != 0) {
-		return -1;
-	}
-
-	// Clone decap_v6 array
-	if (clone_net6_addrs_to_relative(
-		    &dst->decap_v6, src->decap_v6, src->decap_v6_count, mctx
 	    ) != 0) {
 		return -1;
 	}
@@ -486,47 +470,10 @@ clone_handler_config_from_relative(
 	dst->vs_count = src->vs_count;
 	dst->source_v4 = src->source_v4;
 	dst->source_v6 = src->source_v6;
-	dst->decap_v4_count = src->decap_v4_count;
-	dst->decap_v6_count = src->decap_v6_count;
 
 	// Clone vs array
 	if (clone_vs_array_from_relative(&dst->vs, &src->vs, src->vs_count) !=
 	    0) {
-		return -1;
-	}
-
-	// Clone decap_v4 array
-	if (clone_net4_addrs_from_relative(
-		    &dst->decap_v4, &src->decap_v4, src->decap_v4_count
-	    ) != 0) {
-		// Cleanup vs array
-		if (dst->vs) {
-			for (size_t i = 0; i < dst->vs_count; i++) {
-				free(dst->vs[i].config.reals);
-				free(dst->vs[i].config.allowed_src);
-				free(dst->vs[i].config.peers_v4);
-				free(dst->vs[i].config.peers_v6);
-			}
-			free(dst->vs);
-		}
-		return -1;
-	}
-
-	// Clone decap_v6 array
-	if (clone_net6_addrs_from_relative(
-		    &dst->decap_v6, &src->decap_v6, src->decap_v6_count
-	    ) != 0) {
-		// Cleanup
-		if (dst->vs) {
-			for (size_t i = 0; i < dst->vs_count; i++) {
-				free(dst->vs[i].config.reals);
-				free(dst->vs[i].config.allowed_src);
-				free(dst->vs[i].config.peers_v4);
-				free(dst->vs[i].config.peers_v6);
-			}
-			free(dst->vs);
-		}
-		free(dst->decap_v4);
 		return -1;
 	}
 

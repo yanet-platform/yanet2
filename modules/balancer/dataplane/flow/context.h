@@ -7,11 +7,18 @@
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/dataplane/packet/packet.h"
+#include "state/session.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
 // Context of the packet flow.
 struct packet_ctx {
+	struct session_id session;
+	uint32_t session_timeout;
+
+	uint8_t transport_proto;
+	uint16_t tcp_flags;
+
 	// packet context belongs to
 	struct packet *packet;
 
@@ -55,6 +62,5 @@ struct packet_ctx {
 		struct real *ptr;
 	} real;
 
-	// if packet was decapsulated
-	bool decap_flag;
+	bool processed;
 };

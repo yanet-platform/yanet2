@@ -19,16 +19,18 @@ package balancer_test
 // - IPv4 Destination Unreachable handling
 // - IPv6 Destination Unreachable handling
 //
-// # ICMP Error Packet Dropping
+// # ICMP Error Packet Broadcasting
 // - Dropping ICMP errors for unknown virtual services
-// - Dropping ICMP errors when no session exists
 // - Broadcasting ICMP errors to peers when no session found
+// - Broadcast decision based ONLY on ICMP_BROADCAST_IDENT marker (0x0BDC)
+// - Packets without marker are broadcasted to peers
+// - Packets with marker are dropped (already broadcasted)
 //
 // The test validates:
 // - Correct ICMP packet type and code
 // - Proper IP address handling
 // - Session-based ICMP error forwarding
-// - Peer broadcasting for unknown sessions
+// - Peer broadcasting for unknown sessions based on ident marker
 // - Packet tunneling to real servers
 
 import (
@@ -163,7 +165,6 @@ func TestICMPEchoRequest(t *testing.T) {
 					Peers: []*balancerpb.Addr{},
 				},
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 60,
 				TcpSyn:    60,
@@ -433,7 +434,6 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 					Peers: []*balancerpb.Addr{},
 				},
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 60,
 				TcpSyn:    60,
@@ -650,7 +650,6 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 					Peers: []*balancerpb.Addr{},
 				},
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 60,
 				TcpSyn:    60,
@@ -942,7 +941,6 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 					Peers: []*balancerpb.Addr{},
 				},
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 60,
 				TcpSyn:    60,
@@ -1157,7 +1155,6 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 					},
 				},
 			},
-			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 60,
 				TcpSyn:    60,

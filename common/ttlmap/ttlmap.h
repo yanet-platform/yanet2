@@ -39,6 +39,9 @@ typedef struct ttlmap ttlmap_t;
 #define TTLMAP_ITER(map_ptr, key_type, value_type, now, cb, data)              \
 	__TTLMAP_ITER_INTERNAL(map_ptr, key_type, value_type, now, cb, data)
 
+#define TTLMAP_PREFETCH(map_ptr, key_ptr, value_type, ...)                     \
+	__TTLMAP_PREFETCH(map_ptr, key_ptr, value_type, ##__VA_ARGS__)
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline void

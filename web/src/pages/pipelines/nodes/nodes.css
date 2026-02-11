@@ -114,3 +114,7 @@
     background: var(--g-color-base-brand) !important;
     border-color: var(--g-color-line-brand) !important;
 }
+
+.counter-edge-label {
+    position: absolute;
+}

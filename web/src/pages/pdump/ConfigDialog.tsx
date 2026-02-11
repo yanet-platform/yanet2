@@ -4,7 +4,7 @@ import { FormDialog } from '../../components/FormDialog';
 import { FormField } from '../../components/FormField';
 import { pdumpApi, parseModeFlags, modeFlagsToNumber, type PdumpConfig } from '../../api/pdump';
 import { toaster } from '../../utils';
-import './pdump.css';
+import './pdump.scss';
 
 interface ConfigDialogProps {
     open: boolean;
@@ -43,7 +43,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                 setFilter(initialConfig.filter ?? '');
                 setModes(initialConfig.mode ? parseModeFlags(initialConfig.mode) : []);
                 setSnaplen(initialConfig.snaplen?.toString() ?? '');
-                setRingSize(initialConfig.ringSize?.toString() ?? '');
+                setRingSize(initialConfig.ring_size?.toString() ?? '');
             } else {
                 setConfigName(initialConfigName ?? '');
                 setFilter('');
@@ -75,7 +75,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                 filter: filter || '',
                 mode: modeFlagsToNumber(modes),
                 snaplen: snaplen ? parseInt(snaplen, 10) : undefined,
-                ringSize: ringSize ? parseInt(ringSize, 10) : undefined,
+                ring_size: ringSize ? parseInt(ringSize, 10) : undefined,
             };
 
             // Build update mask with all fields that should be updated
@@ -83,7 +83,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
             if (config.snaplen !== undefined) {
                 paths.push('snaplen');
             }
-            if (config.ringSize !== undefined) {
+            if (config.ring_size !== undefined) {
                 paths.push('ring_size');
             }
 

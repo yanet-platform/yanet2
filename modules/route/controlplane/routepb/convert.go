@@ -93,3 +93,25 @@ func ToRIBRoute(route *Route, toRemove bool) (*rib.Route, error) {
 	}, nil
 
 }
+
+// RouteSourceID returns the internal rib.RouteSourceID from InsertRouteRequest
+// Defaults to RouteSourceStatic if unknown or unspecified
+func (r *InsertRouteRequest) RouteSourceID() rib.RouteSourceID {
+	switch r.GetSourceId() {
+	case RouteSourceID_ROUTE_SOURCE_ID_BIRD:
+		return rib.RouteSourceBird
+	default:
+		return rib.RouteSourceStatic
+	}
+}
+
+// RouteSourceID returns the internal rib.RouteSourceID from DeleteRouteRequest
+// Defaults to RouteSourceStatic if unknown or unspecified
+func (r *DeleteRouteRequest) RouteSourceID() rib.RouteSourceID {
+	switch r.GetSourceId() {
+	case RouteSourceID_ROUTE_SOURCE_ID_BIRD:
+		return rib.RouteSourceBird
+	default:
+		return rib.RouteSourceStatic
+	}
+}

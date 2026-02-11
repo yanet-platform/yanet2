@@ -170,10 +170,8 @@ type Sessions struct {
 type PacketHandlerConfig struct {
 	SessionsTimeouts SessionsTimeouts
 	VirtualServices  []VsConfig
-	SourceV4         netip.Addr   // IPv4 source for generated packets
-	SourceV6         netip.Addr   // IPv6 source for generated packets
-	DecapV4          []netip.Addr // IPv4 addresses to decapsulate
-	DecapV6          []netip.Addr // IPv6 addresses to decapsulate
+	SourceV4         netip.Addr // IPv4 source for generated packets
+	SourceV6         netip.Addr // IPv6 source for generated packets
 }
 
 // PacketHandlerRef optionally narrows statistics to a specific handler

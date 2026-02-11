@@ -9,6 +9,7 @@ import (
 
 	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
@@ -20,6 +21,24 @@ import (
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/bird"
 	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
+
+// levelFilterCore wraps a zapcore.Core and filters log entries by level.
+// It replaces the base core's level check with its own.
+type levelFilterCore struct {
+	zapcore.Core
+	level zapcore.Level
+}
+
+func (c *levelFilterCore) Enabled(lvl zapcore.Level) bool {
+	return c.level.Enabled(lvl)
+}
+
+func (c *levelFilterCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+	if c.Enabled(ent.Level) {
+		return ce.AddCore(ent, c)
+	}
+	return ce
+}
 
 // AdapterService implements the Adapter gRPC service for the route module.
 type AdapterService struct {
@@ -44,14 +63,55 @@ func NewAdapterService(
 	}
 }
 
+// ListSessions returns information about all active BIRD import sessions.
+func (m *AdapterService) ListSessions(
+	ctx context.Context,
+	req *adapterpb.ListSessionsRequest,
+) (*adapterpb.ListSessionsResponse, error) {
+	m.importsMu.Lock()
+	defer m.importsMu.Unlock()
+
+	sessions := make([]*adapterpb.SessionInfo, 0, len(m.imports))
+	for name, holder := range m.imports {
+		connState := adapterpb.ConnectionState_CONNECTION_STATE_UNKNOWN
+		if holder.conn != nil {
+			switch holder.conn.GetState() {
+			case connectivity.Idle:
+				connState = adapterpb.ConnectionState_CONNECTION_STATE_IDLE
+			case connectivity.Connecting:
+				connState = adapterpb.ConnectionState_CONNECTION_STATE_CONNECTING
+			case connectivity.Ready:
+				connState = adapterpb.ConnectionState_CONNECTION_STATE_READY
+			case connectivity.TransientFailure:
+				connState = adapterpb.ConnectionState_CONNECTION_STATE_TRANSIENT_FAILURE
+			case connectivity.Shutdown:
+				connState = adapterpb.ConnectionState_CONNECTION_STATE_SHUTDOWN
+			}
+		}
+
+		sessions = append(sessions, &adapterpb.SessionInfo{
+			Name:            name,
+			Sockets:         holder.sockets,
+			CreatedAt:       holder.createdAt.UnixNano(),
+			ConnectionState: connState,
+		})
+	}
+
+	return &adapterpb.ListSessionsResponse{
+		Sessions: sessions,
+	}, nil
+}
+
 func (m *AdapterService) SetupConfig(
 	ctx context.Context,
 	req *adapterpb.SetupConfigRequest,
 ) (*adapterpb.SetupConfigResponse, error) {
 	name := req.GetName()
+	logLevelStr := req.GetConfig().GetLogLevel()
 
 	m.log.Infow("setting up the configuration",
 		zap.String("name", name),
+		zap.String("log_level", logLevelStr),
 	)
 
 	cfg := bird.DefaultConfig()
@@ -59,6 +119,35 @@ func (m *AdapterService) SetupConfig(
 	if len(cfg.Sockets) == 0 {
 		// We do not need this connection if there is no background stream for import
 		return nil, fmt.Errorf("no export sockets provided")
+	}
+
+	// Create per-client logger based on requested log level
+	var clientLog *zap.SugaredLogger
+	if logLevelStr != "" {
+		var level zapcore.Level
+		if err := level.UnmarshalText([]byte(logLevelStr)); err != nil {
+			m.log.Warnw("invalid log level, using nop logger",
+				zap.String("name", name),
+				zap.String("log_level", logLevelStr),
+				zap.Error(err),
+			)
+			clientLog = zap.NewNop().Sugar()
+		} else {
+			// Create a new logger that wraps the existing core with a level filter
+			baseLogger := m.log.Desugar()
+			baseCore := baseLogger.Core()
+
+			// Wrap the base core with our level filter
+			filteredCore := &levelFilterCore{
+				Core:  baseCore,
+				level: level,
+			}
+
+			clientLog = zap.New(filteredCore).Named(name).Sugar()
+		}
+	} else {
+		// No log level specified, use nop logger
+		clientLog = zap.NewNop().Sugar()
 	}
 
 	conn, err := grpc.NewClient(
@@ -71,7 +160,7 @@ func (m *AdapterService) SetupConfig(
 	}
 
 	// And then add dynamic routes, if any.
-	if err := m.processBirdImport(conn, cfg, name); err != nil {
+	if err := m.processBirdImport(conn, cfg, name, clientLog); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("failed to setup bird import reader: %w ", err)
 	}
@@ -89,13 +178,15 @@ type importHolder struct {
 	cancel        context.CancelFunc                                                 // Stops this import's goroutines (runBirdImportLoop, export.Run)
 	conn          *grpc.ClientConn                                                   // gRPC connection to RouteService (gateway)
 	currentStream *grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary] // Active gRPC stream for RIB updates; replaced on reconnect
+	sockets       []string                                                           // Unix socket paths being read from
+	createdAt     time.Time                                                          // Timestamp when the session was created
 }
 
 // processBirdImport streams BIRD route updates to the control plane RIB.
 // Handles automatic reconnection and graceful cleanup of existing imports.
 // It establishes the initial gRPC stream to the RouteService (gateway), sets up
 // callbacks for the bird.Export reader, and manages replacement of existing imports.
-func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Config, name string) error {
+func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Config, name string, clientLog *zap.SugaredLogger) error {
 	// streamCtx governs this specific import's gRPC stream and BIRD reader.
 	// Cancelled via holder.cancel on replacement or service stop.
 	streamCtx, cancel := context.WithCancel(context.Background())
@@ -122,6 +213,15 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 			default:
 			}
 
+			// Log if NextHop is invalid before converting to protobuf
+			if !routes[idx].NextHop.IsValid() {
+				clientLog.Debugw("route has invalid next_hop before protobuf conversion",
+					zap.String("prefix", routes[idx].Prefix.String()),
+					zap.String("next_hop", routes[idx].NextHop.String()),
+					zap.Binary("next_hop_bytes", routes[idx].NextHop.AsSlice()),
+				)
+			}
+
 			err := (*holder.currentStream).Send(&routepb.Update{
 				Name:     name,
 				IsDelete: routes[idx].ToRemove,
@@ -145,7 +245,7 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 		return nil
 	}
 
-	export := bird.NewExportReader(cfg, onUpdate, onFlush, log)
+	export := bird.NewExportReader(cfg, onUpdate, onFlush, clientLog)
 
 	// Lock to safely access and modify m.imports.
 	m.importsMu.Lock()
@@ -164,6 +264,8 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 	holder.export = export
 	holder.cancel = cancel
 	holder.conn = conn
+	holder.sockets = cfg.Sockets
+	holder.createdAt = time.Now()
 	m.imports[name] = holder
 
 	// Launch goroutine for BIRD reading and stream lifecycle management.

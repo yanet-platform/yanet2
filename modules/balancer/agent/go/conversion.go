@@ -216,11 +216,6 @@ func ProtoToHandlerConfig(
 			"source_address_v6 is required",
 		)
 	}
-	if config.DecapAddresses == nil {
-		return ffi.PacketHandlerConfig{}, fmt.Errorf(
-			"decap_addresses is required (can be empty list)",
-		)
-	}
 	if config.Vs == nil {
 		return ffi.PacketHandlerConfig{}, fmt.Errorf(
 			"vs (virtual services) is required",
@@ -254,21 +249,6 @@ func ProtoToHandlerConfig(
 		)
 	}
 
-	// Convert decap addresses
-	decapV4 := make([]netip.Addr, 0)
-	decapV6 := make([]netip.Addr, 0)
-	for _, addrMsg := range config.DecapAddresses {
-		if addrMsg != nil {
-			if addr, ok := netip.AddrFromSlice(addrMsg.Bytes); ok {
-				if addr.Is4() {
-					decapV4 = append(decapV4, addr)
-				} else {
-					decapV6 = append(decapV6, addr)
-				}
-			}
-		}
-	}
-
 	// Convert virtual services
 	virtualServices := make([]ffi.VsConfig, 0, len(config.Vs))
 	for _, protoVs := range config.Vs {
@@ -287,8 +267,6 @@ func ProtoToHandlerConfig(
 		VirtualServices:  virtualServices,
 		SourceV4:         sourceV4,
 		SourceV6:         sourceV6,
-		DecapV4:          decapV4,
-		DecapV6:          decapV6,
 	}, nil
 }
 
@@ -581,25 +559,6 @@ func mergePacketHandlerConfig(
 		merged.SourceAddressV6 = &balancerpb.Addr{
 			Bytes: currentHandler.SourceV6.AsSlice(),
 		}
-	}
-
-	// Merge decap_addresses (array replacement)
-	if newHandler.DecapAddresses != nil {
-		merged.DecapAddresses = newHandler.DecapAddresses
-	} else {
-		// Convert current decap addresses
-		decapAddrs := make(
-			[]*balancerpb.Addr,
-			0,
-			len(currentHandler.DecapV4)+len(currentHandler.DecapV6),
-		)
-		for _, addr := range currentHandler.DecapV4 {
-			decapAddrs = append(decapAddrs, &balancerpb.Addr{Bytes: addr.AsSlice()})
-		}
-		for _, addr := range currentHandler.DecapV6 {
-			decapAddrs = append(decapAddrs, &balancerpb.Addr{Bytes: addr.AsSlice()})
-		}
-		merged.DecapAddresses = decapAddrs
 	}
 
 	// Merge vs (virtual services - array replacement)
@@ -906,8 +865,6 @@ func ConvertCommonStatsToProto(
 		IncomingPackets:        stats.IncomingPackets,
 		IncomingBytes:          stats.IncomingBytes,
 		UnexpectedNetworkProto: stats.UnexpectedNetworkProto,
-		DecapSuccessful:        stats.DecapSuccessful,
-		DecapFailed:            stats.DecapFailed,
 		OutgoingPackets:        stats.OutgoingPackets,
 		OutgoingBytes:          stats.OutgoingBytes,
 	}
@@ -1112,24 +1069,10 @@ func convertPacketHandlerToProtoWithWlc(
 		)
 	}
 
-	// Convert decap addresses
-	decapAddrs := make(
-		[]*balancerpb.Addr,
-		0,
-		len(handler.DecapV4)+len(handler.DecapV6),
-	)
-	for _, addr := range handler.DecapV4 {
-		decapAddrs = append(decapAddrs, &balancerpb.Addr{Bytes: addr.AsSlice()})
-	}
-	for _, addr := range handler.DecapV6 {
-		decapAddrs = append(decapAddrs, &balancerpb.Addr{Bytes: addr.AsSlice()})
-	}
-
 	return &balancerpb.PacketHandlerConfig{
 		Vs:              vs,
 		SourceAddressV4: &balancerpb.Addr{Bytes: handler.SourceV4.AsSlice()},
 		SourceAddressV6: &balancerpb.Addr{Bytes: handler.SourceV6.AsSlice()},
-		DecapAddresses:  decapAddrs,
 		SessionsTimeouts: &balancerpb.SessionsTimeouts{
 			TcpSynAck: handler.SessionsTimeouts.TcpSynAck,
 			TcpSyn:    handler.SessionsTimeouts.TcpSyn,

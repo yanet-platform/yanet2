@@ -6,7 +6,7 @@ import './route.css';
 export const RouteListItem: React.FC<RouteListItemProps> = ({ route }) => (
     <Box className="route-list-item">
         <Text variant="body-1">
-            {route.prefix || '-'} → {route.nextHop || '-'}
+            {route.prefix || '-'} → {route.next_hop || '-'}
             {route.peer && ` (peer: ${route.peer})`}
         </Text>
     </Box>

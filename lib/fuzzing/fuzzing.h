@@ -197,7 +197,12 @@ fuzzing_process_packet(
 	}
 
 	// Clean up pending packets
-	while ((cleanup_packet = packet_list_pop(&pf.pending)) != NULL) {
+	while ((cleanup_packet = packet_list_pop(&pf.pending_input)) != NULL) {
+		struct rte_mbuf *cleanup_mbuf = packet_to_mbuf(cleanup_packet);
+		rte_pktmbuf_free(cleanup_mbuf);
+	}
+
+	while ((cleanup_packet = packet_list_pop(&pf.pending_output)) != NULL) {
 		struct rte_mbuf *cleanup_mbuf = packet_to_mbuf(cleanup_packet);
 		rte_pktmbuf_free(cleanup_mbuf);
 	}

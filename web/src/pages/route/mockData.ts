@@ -79,16 +79,16 @@ export const createMockRouteGenerator = (totalCount: number, seed: number = 42):
 
         return {
             prefix,
-            nextHop,
+            next_hop: nextHop,
             peer,
-            routeDistinguisher: rng.nextInt(1, 65535),
-            peerAs: rng.nextInt(1, 65535),
-            originAs: rng.nextInt(1, 65535),
+            route_distinguisher: rng.nextInt(1, 65535),
+            peer_as: rng.nextInt(1, 65535),
+            origin_as: rng.nextInt(1, 65535),
             med: rng.nextInt(0, 1000),
             pref: rng.nextInt(0, 200),
-            asPathLen: rng.nextInt(1, 10),
+            as_path_len: rng.nextInt(1, 10),
             source: rng.nextInt(0, 2),
-            isBest: rng.next() > 0.5,
+            is_best: rng.next() > 0.5,
         };
     };
 
@@ -146,7 +146,7 @@ export const createMockRouteGenerator = (totalCount: number, seed: number = 42):
             const route = getRoute(i);
             const matches =
                 route.prefix?.toLowerCase().includes(lowerQuery) ||
-                route.nextHop?.toLowerCase().includes(lowerQuery) ||
+                route.next_hop?.toLowerCase().includes(lowerQuery) ||
                 route.peer?.toLowerCase().includes(lowerQuery);
 
             if (matches) {
