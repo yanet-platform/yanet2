@@ -269,14 +269,14 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 
 	// Test packets with specific IPs
 	const uint8_t test_ips[][4] = {
-		{192, 168, 1, 10},  // Rule 1, Net A
-		{192, 168, 2, 20},  // Rule 1, Net B
-		{192, 168, 3, 30},  // Rule 1, Net C
-		{10, 0, 1, 10},     // Rule 2, Net D
-		{10, 1, 2, 20},     // Rule 2, Net E
-		{172, 16, 1, 10},   // Rule 3, Net F
-		{172, 17, 2, 20},   // Rule 3, Net G
-		{8, 8, 8, 8},       // No match
+		{192, 168, 1, 10}, // Rule 1, Net A
+		{192, 168, 2, 20}, // Rule 1, Net B
+		{192, 168, 3, 30}, // Rule 1, Net C
+		{10, 0, 1, 10},	   // Rule 2, Net D
+		{10, 1, 2, 20},	   // Rule 2, Net E
+		{172, 16, 1, 10},  // Rule 3, Net F
+		{172, 17, 2, 20},  // Rule 3, Net G
+		{8, 8, 8, 8},	   // No match
 	};
 	const size_t test_ips_count = sizeof(test_ips) / sizeof(test_ips[0]);
 
@@ -284,13 +284,16 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	for (size_t i = 0; i < test_ips_count; ++i) {
 		packets[i] = malloc(sizeof(struct packet));
 		int fill_result = fill_packet_net4(
-			packets[i], test_ips[i], test_ips[i], 0, 0, IPPROTO_UDP, 0
+			packets[i],
+			test_ips[i],
+			test_ips[i],
+			0,
+			0,
+			IPPROTO_UDP,
+			0
 		);
 		TEST_ASSERT_EQUAL(
-			fill_result,
-			0,
-			"failed to fill packet at index %zu",
-			i
+			fill_result, 0, "failed to fill packet at index %zu", i
 		);
 	}
 
@@ -301,24 +304,28 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 		{.addr = {192, 168, 2, 0}, .prefix = 24}, // Net B
 		{.addr = {192, 168, 3, 0}, .prefix = 24}, // Net C
 	};
-	const size_t rule1_nets_count = sizeof(rule1_nets) / sizeof(rule1_nets[0]);
+	const size_t rule1_nets_count =
+		sizeof(rule1_nets) / sizeof(rule1_nets[0]);
 
 	// Rule 2: 2 networks (10.0.0.0/16, 10.1.0.0/16)
 	struct test_net rule2_nets[] = {
 		{.addr = {10, 0, 0, 0}, .prefix = 16}, // Net D
 		{.addr = {10, 1, 0, 0}, .prefix = 16}, // Net E
 	};
-	const size_t rule2_nets_count = sizeof(rule2_nets) / sizeof(rule2_nets[0]);
+	const size_t rule2_nets_count =
+		sizeof(rule2_nets) / sizeof(rule2_nets[0]);
 
 	// Rule 3: 2 networks (172.16.0.0/20, 172.17.0.0/20)
 	struct test_net rule3_nets[] = {
 		{.addr = {172, 16, 0, 0}, .prefix = 20}, // Net F
 		{.addr = {172, 17, 0, 0}, .prefix = 20}, // Net G
 	};
-	const size_t rule3_nets_count = sizeof(rule3_nets) / sizeof(rule3_nets[0]);
+	const size_t rule3_nets_count =
+		sizeof(rule3_nets) / sizeof(rule3_nets[0]);
 
 	// Expected actions for each test packet
-	// Packets 0-2 match rule 1, packets 3-4 match rule 2, packets 5-6 match rule 3, packet 7 matches nothing
+	// Packets 0-2 match rule 1, packets 3-4 match rule 2, packets 5-6 match
+	// rule 3, packet 7 matches nothing
 	uint32_t expected_actions[][3] = {
 		{1 | ACTION_NON_TERMINATE, 0, 0}, // Packet 0: Rule 1
 		{1 | ACTION_NON_TERMINATE, 0, 0}, // Packet 1: Rule 1
@@ -327,7 +334,7 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 		{2 | ACTION_NON_TERMINATE, 0, 0}, // Packet 4: Rule 2
 		{3 | ACTION_NON_TERMINATE, 0, 0}, // Packet 5: Rule 3
 		{3 | ACTION_NON_TERMINATE, 0, 0}, // Packet 6: Rule 3
-		{0, 0, 0},                         // Packet 7: No match
+		{0, 0, 0},			  // Packet 7: No match
 	};
 	uint32_t expected_counts[] = {1, 1, 1, 1, 1, 1, 1, 0};
 
@@ -351,9 +358,17 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	for (size_t i = 0; i < rule1_nets_count; ++i) {
 		uint32_t mask = prefix_mask(rule1_nets[i].prefix);
 		if (sign == src) {
-			builder_add_net4_src(&builders[0], rule1_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net4_src(
+				&builders[0],
+				rule1_nets[i].addr,
+				(const uint8_t *)&mask
+			);
 		} else {
-			builder_add_net4_dst(&builders[0], rule1_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net4_dst(
+				&builders[0],
+				rule1_nets[i].addr,
+				(const uint8_t *)&mask
+			);
 		}
 	}
 	rules[0] = build_rule(&builders[0], 1 | ACTION_NON_TERMINATE);
@@ -363,9 +378,17 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	for (size_t i = 0; i < rule2_nets_count; ++i) {
 		uint32_t mask = prefix_mask(rule2_nets[i].prefix);
 		if (sign == src) {
-			builder_add_net4_src(&builders[1], rule2_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net4_src(
+				&builders[1],
+				rule2_nets[i].addr,
+				(const uint8_t *)&mask
+			);
 		} else {
-			builder_add_net4_dst(&builders[1], rule2_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net4_dst(
+				&builders[1],
+				rule2_nets[i].addr,
+				(const uint8_t *)&mask
+			);
 		}
 	}
 	rules[1] = build_rule(&builders[1], 2 | ACTION_NON_TERMINATE);
@@ -375,9 +398,17 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	for (size_t i = 0; i < rule3_nets_count; ++i) {
 		uint32_t mask = prefix_mask(rule3_nets[i].prefix);
 		if (sign == src) {
-			builder_add_net4_src(&builders[2], rule3_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net4_src(
+				&builders[2],
+				rule3_nets[i].addr,
+				(const uint8_t *)&mask
+			);
 		} else {
-			builder_add_net4_dst(&builders[2], rule3_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net4_dst(
+				&builders[2],
+				rule3_nets[i].addr,
+				(const uint8_t *)&mask
+			);
 		}
 	}
 	rules[2] = build_rule(&builders[2], 3 | ACTION_NON_TERMINATE);
@@ -393,9 +424,13 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 
 	struct filter filter;
 	if (sign == src) {
-		res = FILTER_INIT(&filter, sign_fast_src, rules, num_rules, &mctx);
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, num_rules, &mctx
+		);
 	} else {
-		res = FILTER_INIT(&filter, sign_fast_dst, rules, num_rules, &mctx);
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, num_rules, &mctx
+		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -413,7 +448,6 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 
 	return TEST_SUCCESS;
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////
 

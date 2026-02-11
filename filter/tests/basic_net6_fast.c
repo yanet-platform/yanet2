@@ -237,8 +237,7 @@ test_basic(void *arena, enum filter_sign sign) {
 			    checks[check_idx] <= to) {
 				expected_ranges[check_idx]->values
 					[expected_ranges[check_idx]->count++] =
-					(net_idx + 1
-					) | ACTION_NON_TERMINATE;
+					(net_idx + 1) | ACTION_NON_TERMINATE;
 			}
 		}
 	}
@@ -290,14 +289,22 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 
 	// Test packets with specific IPs
 	const uint8_t test_ips[][NET6_LEN] = {
-		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10}, // Rule 1, Net A
-		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20}, // Rule 1, Net B
-		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30}, // Rule 1, Net C
-		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 10}, // Rule 2, Net D
-		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 20}, // Rule 2, Net E
-		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 10}, // Rule 3, Net F
-		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 20}, // Rule 3, Net G
-		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 10}, // No match
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10
+		}, // Rule 1, Net A
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20
+		}, // Rule 1, Net B
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30
+		}, // Rule 1, Net C
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 10
+		}, // Rule 2, Net D
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 20
+		}, // Rule 2, Net E
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 10
+		}, // Rule 3, Net F
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 20
+		}, // Rule 3, Net G
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 10
+		}, // No match
 	};
 	const size_t test_ips_count = sizeof(test_ips) / sizeof(test_ips[0]);
 
@@ -305,41 +312,167 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	for (size_t i = 0; i < test_ips_count; ++i) {
 		packets[i] = malloc(sizeof(struct packet));
 		int fill_result = fill_packet_net6(
-			packets[i], test_ips[i], test_ips[i], 0, 0, IPPROTO_UDP, 0
+			packets[i],
+			test_ips[i],
+			test_ips[i],
+			0,
+			0,
+			IPPROTO_UDP,
+			0
 		);
 		TEST_ASSERT_EQUAL(
-			fill_result,
-			0,
-			"failed to fill packet at index %zu",
-			i
+			fill_result, 0, "failed to fill packet at index %zu", i
 		);
 	}
 
 	// Define networks for each rule
 	// Rule 1: 3 networks (A, B, C)
 	struct test_net rule1_nets[] = {
-		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10}, .prefix = 127}, // Net A
-		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20}, .prefix = 127}, // Net B
-		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30}, .prefix = 127}, // Net C
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  10},
+		 .prefix = 127}, // Net A
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  20},
+		 .prefix = 127}, // Net B
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  30},
+		 .prefix = 127}, // Net C
 	};
-	const size_t rule1_nets_count = sizeof(rule1_nets) / sizeof(rule1_nets[0]);
+	const size_t rule1_nets_count =
+		sizeof(rule1_nets) / sizeof(rule1_nets[0]);
 
 	// Rule 2: 2 networks (D, E)
 	struct test_net rule2_nets[] = {
-		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 10}, .prefix = 127}, // Net D
-		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 20}, .prefix = 127}, // Net E
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  1,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  10},
+		 .prefix = 127}, // Net D
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  1,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  20},
+		 .prefix = 127}, // Net E
 	};
-	const size_t rule2_nets_count = sizeof(rule2_nets) / sizeof(rule2_nets[0]);
+	const size_t rule2_nets_count =
+		sizeof(rule2_nets) / sizeof(rule2_nets[0]);
 
 	// Rule 3: 2 networks (F, G)
 	struct test_net rule3_nets[] = {
-		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 10}, .prefix = 127}, // Net F
-		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 20}, .prefix = 127}, // Net G
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  2,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  10},
+		 .prefix = 127}, // Net F
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  2,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  20},
+		 .prefix = 127}, // Net G
 	};
-	const size_t rule3_nets_count = sizeof(rule3_nets) / sizeof(rule3_nets[0]);
+	const size_t rule3_nets_count =
+		sizeof(rule3_nets) / sizeof(rule3_nets[0]);
 
 	// Expected actions for each test packet
-	// Packets 0-2 match rule 1, packets 3-4 match rule 2, packets 5-6 match rule 3, packet 7 matches nothing
+	// Packets 0-2 match rule 1, packets 3-4 match rule 2, packets 5-6 match
+	// rule 3, packet 7 matches nothing
 	uint32_t expected_actions[][3] = {
 		{1 | ACTION_NON_TERMINATE, 0, 0}, // Packet 0: Rule 1
 		{1 | ACTION_NON_TERMINATE, 0, 0}, // Packet 1: Rule 1
@@ -348,7 +481,7 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 		{2 | ACTION_NON_TERMINATE, 0, 0}, // Packet 4: Rule 2
 		{3 | ACTION_NON_TERMINATE, 0, 0}, // Packet 5: Rule 3
 		{3 | ACTION_NON_TERMINATE, 0, 0}, // Packet 6: Rule 3
-		{0, 0, 0},                         // Packet 7: No match
+		{0, 0, 0},			  // Packet 7: No match
 	};
 	uint32_t expected_counts[] = {1, 1, 1, 1, 1, 1, 1, 0};
 
@@ -426,9 +559,13 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 
 	struct filter filter;
 	if (sign == src) {
-		res = FILTER_INIT(&filter, sign_fast_src, rules, num_rules, &mctx);
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, num_rules, &mctx
+		);
 	} else {
-		res = FILTER_INIT(&filter, sign_fast_dst, rules, num_rules, &mctx);
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, num_rules, &mctx
+		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 

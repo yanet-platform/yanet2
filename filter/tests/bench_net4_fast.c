@@ -389,9 +389,9 @@ run_benchmark(
 		// 	for (size_t i = 0; i < batch_size; ++i) {
 		// 		struct packet *pkt = packets[(batch_idx + 5) *
 		// batch_size + i]; 		struct rte_mbuf *mbuf =
-		// packet_to_mbuf(pkt); 		uint8_t *mbuf_data = (uint8_t *)mbuf;
-		// 		size_t mbuf_size = mbuf->buf_len;
-		// 		for (size_t j = 0; j < mbuf_size; j += 64) {
+		// packet_to_mbuf(pkt); 		uint8_t *mbuf_data =
+		// (uint8_t *)mbuf; 		size_t mbuf_size = mbuf->buf_len; 		for
+		// (size_t j = 0; j < mbuf_size; j += 64) {
 		// 			__builtin_prefetch(mbuf_data + j, 1, 3);
 		// 		}
 		// 	}
