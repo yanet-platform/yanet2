@@ -30,6 +30,6 @@ option(
 option(
   'cpu_arch',
   type: 'string',
-  value: 'corei7',
+  value: 'haswell',
   description: 'Target CPU architecture for -march flag.',
 )
