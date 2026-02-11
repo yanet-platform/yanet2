@@ -184,12 +184,16 @@ func createVirtualServiceWithFlags(
 			Proto: proto,
 		},
 		Scheduler: scheduler,
-		AllowedSrcs: []*balancerpb.Net{
+		AllowedSrcs: []*balancerpb.AllowedSrc{
 			{
-				Addr: &balancerpb.Addr{
-					Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
+				Net: &balancerpb.Net{
+					Addr: &balancerpb.Addr{
+						Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
+					},
+					Mask: &balancerpb.Addr{
+						Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
+					},
 				},
-				Size: 0,
 			},
 		},
 		Flags: &balancerpb.VsFlags{
@@ -377,10 +381,10 @@ func TestScheduling(t *testing.T) {
 
 	// Setup test
 	ts, err := utils.Make(&utils.TestConfig{
-		Mock:     utils.SingleWorkerMockConfig(64*datasize.MB, 4*datasize.MB),
+		Mock:     utils.SingleWorkerMockConfig(128*datasize.MB, 4*datasize.MB),
 		Balancer: config,
 		AgentMemory: func() *datasize.ByteSize {
-			memory := 16 * datasize.MB
+			memory := 64 * datasize.MB
 			return &memory
 		}(),
 	})

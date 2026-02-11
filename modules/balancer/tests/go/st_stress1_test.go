@@ -378,13 +378,18 @@ func TestSessionTableStress1(t *testing.T) {
 						Port:  uint32(vsPort),
 						Proto: balancerpb.TransportProto_TCP,
 					},
-					AllowedSrcs: []*balancerpb.Net{
+					AllowedSrcs: []*balancerpb.AllowedSrc{
 						{
-							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").
-									AsSlice(),
+							Net: &balancerpb.Net{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("10.0.0.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.0.0.0").
+										AsSlice(),
+								},
 							},
-							Size: 8, // Allow all 10.x.x.x addresses
 						},
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,

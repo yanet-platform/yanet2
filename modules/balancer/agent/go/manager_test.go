@@ -128,20 +128,30 @@ func TestManager(t *testing.T) {
 							Weight: 200,
 						},
 					},
-					AllowedSrcs: []*balancerpb.Net{
+					AllowedSrcs: []*balancerpb.AllowedSrc{
 						{
-							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("192.1.1.1").
-									AsSlice(),
+							Net: &balancerpb.Net{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("192.1.1.1").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.255.255.0").
+										AsSlice(),
+								},
 							},
-							Size: 24,
 						},
 						{
-							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("192.12.0.0").
-									AsSlice(),
+							Net: &balancerpb.Net{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("192.12.0.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.255.0.0").
+										AsSlice(),
+								},
 							},
-							Size: 16,
 						},
 					},
 					Peers: []*balancerpb.Addr{
@@ -199,13 +209,18 @@ func TestManager(t *testing.T) {
 							Weight: 100,
 						},
 					},
-					AllowedSrcs: []*balancerpb.Net{
+					AllowedSrcs: []*balancerpb.AllowedSrc{
 						{
-							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("192.168.0.0").
-									AsSlice(),
+							Net: &balancerpb.Net{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("192.168.0.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.255.0.0").
+										AsSlice(),
+								},
 							},
-							Size: 16,
 						},
 					},
 					Peers: []*balancerpb.Addr{
@@ -315,12 +330,18 @@ func TestManager(t *testing.T) {
 							Weight: 150,
 						},
 					},
-					AllowedSrcs: []*balancerpb.Net{
+					AllowedSrcs: []*balancerpb.AllowedSrc{
 						{
-							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
+							Net: &balancerpb.Net{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("0.0.0.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("0.0.0.0").
+										AsSlice(),
+								},
 							},
-							Size: 0,
 						},
 					},
 					Peers: []*balancerpb.Addr{

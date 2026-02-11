@@ -86,7 +86,10 @@ func createPacketTestConfig() *balancerpb.BalancerConfig {
 									Bytes: netip.MustParseAddr("10.0.1.0").
 										AsSlice(),
 								},
-								Size: 24,
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.255.255.0").
+										AsSlice(),
+								},
 							}
 						} else {
 							vsAddr = netip.MustParseAddr(fmt.Sprintf("2001:db8::%d", counter))
@@ -94,7 +97,9 @@ func createPacketTestConfig() *balancerpb.BalancerConfig {
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("ffff::0").AsSlice(),
 								},
-								Size: 16,
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("ffff::").AsSlice(),
+								},
 							}
 						}
 
@@ -115,8 +120,8 @@ func createPacketTestConfig() *balancerpb.BalancerConfig {
 								Proto: proto,
 							},
 							Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-							AllowedSrcs: []*balancerpb.Net{
-								allowedSrc,
+							AllowedSrcs: []*balancerpb.AllowedSrc{
+								{Net: allowedSrc},
 							},
 							Flags: &balancerpb.VsFlags{
 								Gre:    greEnabled,
@@ -288,10 +293,10 @@ func TestPacketProcessing(t *testing.T) {
 	config := createPacketTestConfig()
 
 	ts, err := utils.Make(&utils.TestConfig{
-		Mock:     utils.SingleWorkerMockConfig(64*datasize.MB, 4*datasize.MB),
+		Mock:     utils.SingleWorkerMockConfig(256*datasize.MB, 4*datasize.MB),
 		Balancer: config,
 		AgentMemory: func() *datasize.ByteSize {
-			memory := datasize.MB * 16
+			memory := datasize.MB * 128
 			return &memory
 		}(),
 	})

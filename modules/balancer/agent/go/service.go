@@ -53,7 +53,9 @@ func NewBalancerService(
 // getManagerWithAutoSelection retrieves a balancer manager by name.
 // If name is nil or empty, attempts to auto-select when exactly one manager exists.
 // Returns the manager, the actual name used, and any error.
-func (m *BalancerService) getManagerWithAutoSelection(name *string) (*BalancerManager, string, error) {
+func (m *BalancerService) getManagerWithAutoSelection(
+	name *string,
+) (*BalancerManager, string, error) {
 	// If name is provided and not empty, use it directly
 	if name != nil && *name != "" {
 		manager, err := m.agent.BalancerManager(*name)

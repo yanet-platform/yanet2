@@ -13,6 +13,18 @@ type AddrRange struct {
 	To   netip.Addr
 }
 
+// PortRange represents a range of port numbers
+type PortRange struct {
+	From uint16
+	To   uint16
+}
+
+// AllowedSrc represents an allowed source with network and optional port ranges
+type AllowedSrc struct {
+	Net        xnetip.NetWithMask // Network with address and arbitrary mask
+	PortRanges []PortRange        // Optional port ranges
+}
+
 // VsScheduler represents the scheduling algorithm for a virtual service
 type VsScheduler uint32
 
@@ -92,9 +104,9 @@ type VsConfig struct {
 	Flags      VsFlags
 	Scheduler  VsScheduler
 	Reals      []RealConfig
-	AllowedSrc []netip.Prefix // Client source allowlist (CIDRs)
-	PeersV4    []netip.Addr   // IPv4 peer balancers for ICMP
-	PeersV6    []netip.Addr   // IPv6 peer balancers for ICMP
+	AllowedSrc []AllowedSrc // Client source allowlist with networks and optional port ranges
+	PeersV4    []netip.Addr // IPv4 peer balancers for ICMP
+	PeersV6    []netip.Addr // IPv6 peer balancers for ICMP
 }
 
 // VsStats contains per-virtual-service runtime counters

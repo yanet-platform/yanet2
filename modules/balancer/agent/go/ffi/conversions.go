@@ -628,6 +628,16 @@ func freeC_PacketHandlerConfig(cConfig *C.struct_packet_handler_config) {
 				C.free(unsafe.Pointer(cVsSlice[i].config.reals))
 			}
 			if cVsSlice[i].config.allowed_src != nil {
+				// Free port ranges within each allowed_src
+				cAllowedSlice := unsafe.Slice(
+					cVsSlice[i].config.allowed_src,
+					cVsSlice[i].config.allowed_src_count,
+				)
+				for j := range cAllowedSlice {
+					if cAllowedSlice[j].port_ranges != nil {
+						C.free(unsafe.Pointer(cAllowedSlice[j].port_ranges))
+					}
+				}
 				C.free(unsafe.Pointer(cVsSlice[i].config.allowed_src))
 			}
 			if cVsSlice[i].config.peers_v4 != nil {
@@ -765,12 +775,12 @@ func goToC_VsConfigInPlace(
 	// Convert allowed sources
 	cConfig.config.allowed_src_count = C.size_t(len(config.AllowedSrc))
 	if len(config.AllowedSrc) > 0 {
-		cConfig.config.allowed_src = (*C.struct_net_addr_range)(
+		cConfig.config.allowed_src = (*C.struct_allowed_src)(
 			C.malloc(
 				C.size_t(
 					len(config.AllowedSrc),
 				) * C.size_t(
-					unsafe.Sizeof(C.struct_net_addr_range{}),
+					unsafe.Sizeof(C.struct_allowed_src{}),
 				),
 			),
 		)
@@ -778,9 +788,35 @@ func goToC_VsConfigInPlace(
 			cConfig.config.allowed_src,
 			len(config.AllowedSrc),
 		)
-		for i, prefix := range config.AllowedSrc {
-			cAllowedSlice[i].from = goToC_NetAddr(prefix.Addr())
-			cAllowedSlice[i].to = goToC_NetAddr(xnetip.LastAddr(prefix))
+		for i, allowedSrc := range config.AllowedSrc {
+			// Convert network
+			cAllowedSlice[i].net = goToC_Net(allowedSrc.Net)
+
+			// Convert port ranges
+			cAllowedSlice[i].port_ranges_count = C.size_t(
+				len(allowedSrc.PortRanges),
+			)
+			if len(allowedSrc.PortRanges) > 0 {
+				cAllowedSlice[i].port_ranges = (*C.struct_ports_range)(
+					C.malloc(
+						C.size_t(
+							len(allowedSrc.PortRanges),
+						) * C.size_t(
+							unsafe.Sizeof(C.struct_ports_range{}),
+						),
+					),
+				)
+				cPortRangesSlice := unsafe.Slice(
+					cAllowedSlice[i].port_ranges,
+					len(allowedSrc.PortRanges),
+				)
+				for j, portRange := range allowedSrc.PortRanges {
+					cPortRangesSlice[j].from = C.uint16_t(portRange.From)
+					cPortRangesSlice[j].to = C.uint16_t(portRange.To)
+				}
+			} else {
+				cAllowedSlice[i].port_ranges = nil
+			}
 		}
 	} else {
 		cConfig.config.allowed_src = nil
@@ -842,6 +878,16 @@ func freeC_VsConfig(cConfig *C.struct_named_vs_config) {
 		C.free(unsafe.Pointer(cConfig.config.reals))
 	}
 	if cConfig.config.allowed_src != nil {
+		// Free port ranges within each allowed_src
+		cAllowedSlice := unsafe.Slice(
+			cConfig.config.allowed_src,
+			cConfig.config.allowed_src_count,
+		)
+		for i := range cAllowedSlice {
+			if cAllowedSlice[i].port_ranges != nil {
+				C.free(unsafe.Pointer(cAllowedSlice[i].port_ranges))
+			}
+		}
 		C.free(unsafe.Pointer(cConfig.config.allowed_src))
 	}
 	if cConfig.config.peers_v4 != nil {
@@ -896,24 +942,37 @@ func cToGo_VsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 			cConfig.config.allowed_src_count,
 		)
 		config.AllowedSrc = make(
-			[]netip.Prefix,
+			[]AllowedSrc,
 			cConfig.config.allowed_src_count,
 		)
 		for i := range config.AllowedSrc {
 			// Determine if IPv4 or IPv6 from the VS identifier address
 			isV4 := config.Identifier.Addr.Is4()
-			from := cToGo_NetAddr(cAllowedSlice[i].from, isV4)
-			to := cToGo_NetAddr(cAllowedSlice[i].to, isV4)
 
-			// Convert range to prefix
-			if isV4 {
-				config.AllowedSrc[i] = rangeToPrefixV4(from, to)
-			} else {
-				config.AllowedSrc[i] = rangeToPrefixV6(from, to)
+			// Convert network
+			config.AllowedSrc[i].Net = cToGo_Net(cAllowedSlice[i].net, isV4)
+
+			// Convert port ranges
+			if cAllowedSlice[i].port_ranges_count > 0 &&
+				cAllowedSlice[i].port_ranges != nil {
+				cPortRangesSlice := unsafe.Slice(
+					cAllowedSlice[i].port_ranges,
+					cAllowedSlice[i].port_ranges_count,
+				)
+				config.AllowedSrc[i].PortRanges = make(
+					[]PortRange,
+					cAllowedSlice[i].port_ranges_count,
+				)
+				for j := range config.AllowedSrc[i].PortRanges {
+					config.AllowedSrc[i].PortRanges[j] = PortRange{
+						From: uint16(cPortRangesSlice[j].from),
+						To:   uint16(cPortRangesSlice[j].to),
+					}
+				}
 			}
 		}
 	} else {
-		config.AllowedSrc = []netip.Prefix{}
+		config.AllowedSrc = []AllowedSrc{}
 	}
 
 	// Convert IPv4 peers

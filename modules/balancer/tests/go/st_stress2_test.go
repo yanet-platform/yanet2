@@ -184,23 +184,31 @@ func TestSessionTableStress2(t *testing.T) {
 	)
 	for _, vsConf := range virtualServicesConfig {
 		// Build allowed sources based on VS IP version
-		var allowedSrcs []*balancerpb.Net
+		var allowedSrcs []*balancerpb.AllowedSrc
 		if vsConf.ip.Is4() {
-			allowedSrcs = []*balancerpb.Net{
+			allowedSrcs = []*balancerpb.AllowedSrc{
 				{
-					Addr: &balancerpb.Addr{
-						Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+					Net: &balancerpb.Net{
+						Addr: &balancerpb.Addr{
+							Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+						},
+						Mask: &balancerpb.Addr{
+							Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+						},
 					},
-					Size: 8,
 				},
 			}
 		} else {
-			allowedSrcs = []*balancerpb.Net{
+			allowedSrcs = []*balancerpb.AllowedSrc{
 				{
-					Addr: &balancerpb.Addr{
-						Bytes: netip.MustParseAddr("2001:db8::").AsSlice(),
+					Net: &balancerpb.Net{
+						Addr: &balancerpb.Addr{
+							Bytes: netip.MustParseAddr("2001:db8::").AsSlice(),
+						},
+						Mask: &balancerpb.Addr{
+							Bytes: netip.MustParseAddr("ffff:ffff:ffff:ffff::").AsSlice(),
+						},
 					},
-					Size: 32,
 				},
 			}
 		}

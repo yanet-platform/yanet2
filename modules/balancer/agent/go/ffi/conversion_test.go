@@ -462,8 +462,12 @@ func TestVsConfigConversion(t *testing.T) {
 						Weight: 100,
 					},
 				},
-				AllowedSrc: []netip.Prefix{
-					netip.MustParsePrefix("192.168.0.0/16"),
+				AllowedSrc: []AllowedSrc{
+					{
+						Net: xnetip.FromPrefix(
+							netip.MustParsePrefix("192.168.0.0/16"),
+						),
+					},
 				},
 				PeersV4: []netip.Addr{
 					netip.MustParseAddr("192.168.1.1"),
@@ -510,8 +514,12 @@ func TestVsConfigConversion(t *testing.T) {
 						Weight: 150,
 					},
 				},
-				AllowedSrc: []netip.Prefix{
-					netip.MustParsePrefix("2001:db8::/32"),
+				AllowedSrc: []AllowedSrc{
+					{
+						Net: xnetip.FromPrefix(
+							netip.MustParsePrefix("2001:db8::/32"),
+						),
+					},
 				},
 				PeersV4: []netip.Addr{},
 				PeersV6: []netip.Addr{
@@ -567,10 +575,22 @@ func TestVsConfigConversion(t *testing.T) {
 						Weight: 200,
 					},
 				},
-				AllowedSrc: []netip.Prefix{
-					netip.MustParsePrefix("0.0.0.0/0"),
-					netip.MustParsePrefix("10.0.0.0/8"),
-					netip.MustParsePrefix("192.168.0.0/16"),
+				AllowedSrc: []AllowedSrc{
+					{
+						Net: xnetip.FromPrefix(
+							netip.MustParsePrefix("0.0.0.0/0"),
+						),
+					},
+					{
+						Net: xnetip.FromPrefix(
+							netip.MustParsePrefix("10.0.0.0/8"),
+						),
+					},
+					{
+						Net: xnetip.FromPrefix(
+							netip.MustParsePrefix("192.168.0.0/16"),
+						),
+					},
 				},
 				PeersV4: []netip.Addr{
 					netip.MustParseAddr("10.0.0.2"),
@@ -581,6 +601,60 @@ func TestVsConfigConversion(t *testing.T) {
 					netip.MustParseAddr("::1"),
 					netip.MustParseAddr("2001:db8::2"),
 				},
+			},
+		},
+		{
+			name: "VS with port ranges in AllowedSrc",
+			config: VsConfig{
+				Identifier: VsIdentifier{
+					Addr: netip.MustParseAddr("192.168.1.100"),
+
+					Port:           80,
+					TransportProto: VsTransportProtoTcp,
+				},
+				Flags: VsFlags{
+					PureL3: false,
+					FixMSS: true,
+					GRE:    false,
+					OPS:    false,
+				},
+				Scheduler: VsSchedulerSourceHash,
+				Reals: []RealConfig{
+					{
+						Identifier: RelativeRealIdentifier{
+							Addr: netip.MustParseAddr("10.0.0.1"),
+							Port: 8080,
+						},
+						Src: xnetip.FromPrefix(
+							netip.MustParsePrefix("172.16.0.0/24"),
+						),
+						Weight: 100,
+					},
+				},
+				AllowedSrc: []AllowedSrc{
+					{
+						Net: xnetip.FromPrefix(
+							netip.MustParsePrefix("192.168.0.0/16"),
+						),
+						PortRanges: []PortRange{
+							{From: 1024, To: 65535},
+						},
+					},
+					{
+						Net: xnetip.FromPrefix(
+							netip.MustParsePrefix("10.0.0.0/8"),
+						),
+						PortRanges: []PortRange{
+							{From: 80, To: 80},
+							{From: 443, To: 443},
+							{From: 8000, To: 9000},
+						},
+					},
+				},
+				PeersV4: []netip.Addr{
+					netip.MustParseAddr("192.168.1.1"),
+				},
+				PeersV6: []netip.Addr{},
 			},
 		},
 	}
@@ -647,8 +721,12 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 								Weight: 100,
 							},
 						},
-						AllowedSrc: []netip.Prefix{
-							netip.MustParsePrefix("192.168.0.0/16"),
+						AllowedSrc: []AllowedSrc{
+							{
+								Net: xnetip.FromPrefix(
+									netip.MustParsePrefix("192.168.0.0/16"),
+								),
+							},
 						},
 						PeersV4: []netip.Addr{
 							netip.MustParseAddr("192.168.1.1"),
@@ -705,9 +783,17 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 								Weight: 100,
 							},
 						},
-						AllowedSrc: []netip.Prefix{
-							netip.MustParsePrefix("192.168.0.0/16"),
-							netip.MustParsePrefix("10.0.0.0/8"),
+						AllowedSrc: []AllowedSrc{
+							{
+								Net: xnetip.FromPrefix(
+									netip.MustParsePrefix("192.168.0.0/16"),
+								),
+							},
+							{
+								Net: xnetip.FromPrefix(
+									netip.MustParsePrefix("10.0.0.0/8"),
+								),
+							},
 						},
 						PeersV4: []netip.Addr{
 							netip.MustParseAddr("192.168.1.1"),
@@ -738,8 +824,12 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 								Weight: 50,
 							},
 						},
-						AllowedSrc: []netip.Prefix{
-							netip.MustParsePrefix("2001:db8::/32"),
+						AllowedSrc: []AllowedSrc{
+							{
+								Net: xnetip.FromPrefix(
+									netip.MustParsePrefix("2001:db8::/32"),
+								),
+							},
 						},
 						PeersV4: []netip.Addr{
 							netip.MustParseAddr("192.168.1.1"),
@@ -834,9 +924,17 @@ func TestBalancerConfigConversion(t *testing.T) {
 									Weight: 150,
 								},
 							},
-							AllowedSrc: []netip.Prefix{
-								netip.MustParsePrefix("192.168.0.0/16"),
-								netip.MustParsePrefix("10.0.0.0/8"),
+							AllowedSrc: []AllowedSrc{
+								{
+									Net: xnetip.FromPrefix(
+										netip.MustParsePrefix("192.168.0.0/16"),
+									),
+								},
+								{
+									Net: xnetip.FromPrefix(
+										netip.MustParsePrefix("10.0.0.0/8"),
+									),
+								},
 							},
 							PeersV4: []netip.Addr{
 								netip.MustParseAddr("192.168.1.1"),
@@ -926,9 +1024,19 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 										Weight: 100,
 									},
 								},
-								AllowedSrc: []netip.Prefix{
-									netip.MustParsePrefix("192.168.0.0/16"),
-									netip.MustParsePrefix("10.0.0.0/8"),
+								AllowedSrc: []AllowedSrc{
+									{
+										Net: xnetip.FromPrefix(
+											netip.MustParsePrefix(
+												"192.168.0.0/16",
+											),
+										),
+									},
+									{
+										Net: xnetip.FromPrefix(
+											netip.MustParsePrefix("10.0.0.0/8"),
+										),
+									},
 								},
 								PeersV4: []netip.Addr{
 									netip.MustParseAddr("192.168.1.1"),
@@ -996,9 +1104,19 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 										Weight: 100,
 									},
 								},
-								AllowedSrc: []netip.Prefix{
-									netip.MustParsePrefix("192.168.0.0/16"),
-									netip.MustParsePrefix("10.0.0.0/8"),
+								AllowedSrc: []AllowedSrc{
+									{
+										Net: xnetip.FromPrefix(
+											netip.MustParsePrefix(
+												"192.168.0.0/16",
+											),
+										),
+									},
+									{
+										Net: xnetip.FromPrefix(
+											netip.MustParsePrefix("10.0.0.0/8"),
+										),
+									},
 								},
 								PeersV4: []netip.Addr{
 									netip.MustParseAddr("192.168.1.1"),
@@ -1065,7 +1183,7 @@ func TestEdgeCases(t *testing.T) {
 			Flags:      VsFlags{},
 			Scheduler:  VsSchedulerSourceHash,
 			Reals:      []RealConfig{},
-			AllowedSrc: []netip.Prefix{},
+			AllowedSrc: []AllowedSrc{},
 			PeersV4:    []netip.Addr{},
 			PeersV6:    []netip.Addr{},
 		}
@@ -1181,9 +1299,17 @@ func TestComplexScenario(t *testing.T) {
 								Weight: 150,
 							},
 						},
-						AllowedSrc: []netip.Prefix{
-							netip.MustParsePrefix("192.168.0.0/16"),
-							netip.MustParsePrefix("10.0.0.0/8"),
+						AllowedSrc: []AllowedSrc{
+							{
+								Net: xnetip.FromPrefix(
+									netip.MustParsePrefix("192.168.0.0/16"),
+								),
+							},
+							{
+								Net: xnetip.FromPrefix(
+									netip.MustParsePrefix("10.0.0.0/8"),
+								),
+							},
 						},
 						PeersV4: []netip.Addr{
 							netip.MustParseAddr("192.168.1.1"),
@@ -1217,8 +1343,12 @@ func TestComplexScenario(t *testing.T) {
 								Weight: 100,
 							},
 						},
-						AllowedSrc: []netip.Prefix{
-							netip.MustParsePrefix("2001:db8::/32"),
+						AllowedSrc: []AllowedSrc{
+							{
+								Net: xnetip.FromPrefix(
+									netip.MustParsePrefix("2001:db8::/32"),
+								),
+							},
 						},
 						PeersV4: []netip.Addr{},
 						PeersV6: []netip.Addr{
@@ -1313,11 +1443,13 @@ func TestLargeScaleConversion(t *testing.T) {
 
 		// Generate 10-100 allowed sources (varies per VS)
 		allowedCount := 10 + (vsIdx % 91)
-		vs.AllowedSrc = make([]netip.Prefix, allowedCount)
+		vs.AllowedSrc = make([]AllowedSrc, allowedCount)
 		for i := 0; i < allowedCount; i++ {
-			vs.AllowedSrc[i] = netip.MustParsePrefix(
-				fmt.Sprintf("10.%d.%d.0/24", i/256, i%256),
-			)
+			vs.AllowedSrc[i] = AllowedSrc{
+				Net: xnetip.FromPrefix(netip.MustParsePrefix(
+					fmt.Sprintf("10.%d.%d.0/24", i/256, i%256),
+				)),
+			}
 		}
 
 		// Generate 10-100 IPv4 peers (varies per VS)

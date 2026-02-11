@@ -85,13 +85,18 @@ func TestICMPBroadcastLogic(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.Net{
+					AllowedSrcs: []*balancerpb.AllowedSrc{
 						{
-							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").
-									AsSlice(),
+							Net: &balancerpb.Net{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("10.0.0.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.0.0.0").
+										AsSlice(),
+								},
 							},
-							Size: 8,
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -134,13 +139,18 @@ func TestICMPBroadcastLogic(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.Net{
+					AllowedSrcs: []*balancerpb.AllowedSrc{
 						{
-							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8::").
-									AsSlice(),
+							Net: &balancerpb.Net{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("2001:db8::").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("ffff:ffff::").
+										AsSlice(),
+								},
 							},
-							Size: 32,
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -412,13 +422,18 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.Net{
+					AllowedSrcs: []*balancerpb.AllowedSrc{
 						{
-							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").
-									AsSlice(),
+							Net: &balancerpb.Net{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("10.0.0.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.0.0.0").
+										AsSlice(),
+								},
 							},
-							Size: 8,
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -460,13 +475,18 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.Net{
+					AllowedSrcs: []*balancerpb.AllowedSrc{
 						{
-							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8::").
-									AsSlice(),
+							Net: &balancerpb.Net{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("2001:db8::").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("ffff:ffff::").
+										AsSlice(),
+								},
 							},
-							Size: 32,
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -540,13 +560,18 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.Net{
+					AllowedSrcs: []*balancerpb.AllowedSrc{
 						{
-							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").
-									AsSlice(),
+							Net: &balancerpb.Net{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("10.0.0.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.0.0.0").
+										AsSlice(),
+								},
 							},
-							Size: 8,
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -590,13 +615,18 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.Net{
+					AllowedSrcs: []*balancerpb.AllowedSrc{
 						{
-							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("2001:db8::").
-									AsSlice(),
+							Net: &balancerpb.Net{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("2001:db8::").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("ffff:ffff::").
+										AsSlice(),
+								},
 							},
-							Size: 32,
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -760,7 +790,11 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 		// Extract the inner packet from the tunnel
 		// The packet structure is: Ethernet | IPv4 (tunnel) | IPv4 (inner) | ICMP | ...
 		ipv4Layer := broadcastedGoPacket.Layer(layers.LayerTypeIPv4)
-		require.NotNil(t, ipv4Layer, "broadcasted packet should have IPv4 layer")
+		require.NotNil(
+			t,
+			ipv4Layer,
+			"broadcasted packet should have IPv4 layer",
+		)
 
 		// Get the payload which contains the inner IP packet
 		innerPacketData := ipv4Layer.(*layers.IPv4).Payload
@@ -771,7 +805,11 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 			DstMAC:       net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
 			EthernetType: layers.EthernetTypeIPv4,
 		}
-		decapsulatedPacket := xpacket.LayersToPacket(t, eth, gopacket.Payload(innerPacketData))
+		decapsulatedPacket := xpacket.LayersToPacket(
+			t,
+			eth,
+			gopacket.Payload(innerPacketData),
+		)
 
 		// Step 5: Send the decapsulated packet to Balancer2
 		// Balancer2 should:
@@ -888,7 +926,11 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 		// Extract the inner packet from the tunnel
 		// The packet structure is: Ethernet | IPv6 (tunnel) | IPv6 (inner) | ICMPv6 | ...
 		ipv6Layer := broadcastedGoPacket.Layer(layers.LayerTypeIPv6)
-		require.NotNil(t, ipv6Layer, "broadcasted packet should have IPv6 layer")
+		require.NotNil(
+			t,
+			ipv6Layer,
+			"broadcasted packet should have IPv6 layer",
+		)
 
 		// Get the payload which contains the inner IPv6 packet
 		innerPacketData := ipv6Layer.(*layers.IPv6).Payload
@@ -899,7 +941,11 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 			DstMAC:       net.HardwareAddr{0x00, 0x11, 0x22, 0x33, 0x44, 0x55},
 			EthernetType: layers.EthernetTypeIPv6,
 		}
-		decapsulatedPacket := xpacket.LayersToPacket(t, eth, gopacket.Payload(innerPacketData))
+		decapsulatedPacket := xpacket.LayersToPacket(
+			t,
+			eth,
+			gopacket.Payload(innerPacketData),
+		)
 
 		// Step 5: Send the decapsulated packet to Balancer2
 		// Balancer2 should:

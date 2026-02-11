@@ -69,9 +69,17 @@ func TestAgent(t *testing.T) {
 								Weight: 100,
 							},
 						},
-						AllowedSrc: []netip.Prefix{
-							netip.MustParsePrefix("192.1.1.1/24"),
-							netip.MustParsePrefix("192.12.0.0/16"),
+						AllowedSrc: []AllowedSrc{
+							{
+								Net: xnetip.FromPrefix(
+									netip.MustParsePrefix("192.1.1.1/24"),
+								),
+							},
+							{
+								Net: xnetip.FromPrefix(
+									netip.MustParsePrefix("192.12.0.0/16"),
+								),
+							},
 						},
 						PeersV4: []netip.Addr{
 							netip.MustParseAddr("12.1.1.3"),
@@ -153,9 +161,17 @@ func TestAgent(t *testing.T) {
 								Weight: 200,
 							},
 						},
-						AllowedSrc: []netip.Prefix{
-							netip.MustParsePrefix("192.2.2.0/24"),
-							netip.MustParsePrefix("192.13.0.0/16"),
+						AllowedSrc: []AllowedSrc{
+							{
+								Net: xnetip.FromPrefix(
+									netip.MustParsePrefix("192.2.2.0/24"),
+								),
+							},
+							{
+								Net: xnetip.FromPrefix(
+									netip.MustParsePrefix("192.13.0.0/16"),
+								),
+							},
 						},
 						PeersV4: []netip.Addr{
 							netip.MustParseAddr("12.2.2.3"),

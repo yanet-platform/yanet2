@@ -4,6 +4,7 @@
 #include "common/memory_address.h"
 #include "common/network.h"
 
+#include "flow/helpers.h"
 #include "lib/dataplane/packet/packet.h"
 
 #include <filter/query.h>
@@ -17,16 +18,16 @@
 
 #include "flow/common.h"
 #include "flow/context.h"
-#include "flow/helpers.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_QUERY_DECLARE(vs_v4_sig, net4_dst, port_dst, proto);
+FILTER_QUERY_DECLARE(vs_lookup_ipv4, net4_dst, port_dst, proto);
+FILTER_QUERY_DECLARE(vs_acl_ipv4, net4_src, port_src);
 
 static inline uint32_t
 vs_v4_table_lookup(struct packet_handler *handler, struct packet *packet) {
 	struct value_range *result;
-	FILTER_QUERY(&handler->vs_v4, vs_v4_sig, &packet, &result, 1);
+	FILTER_QUERY(&handler->vs_v4, vs_lookup_ipv4, &packet, &result, 1);
 	if (result->count == 0) {
 		return -1;
 	}
@@ -37,12 +38,13 @@ vs_v4_table_lookup(struct packet_handler *handler, struct packet *packet) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_QUERY_DECLARE(vs_v6_sig, net6_dst, port_dst, proto);
+FILTER_QUERY_DECLARE(vs_lookup_ipv6, net6_dst, port_dst, proto);
+FILTER_QUERY_DECLARE(vs_acl_ipv6, net6_src, port_src);
 
 static inline uint32_t
 vs_v6_table_lookup(struct packet_handler *handler, struct packet *packet) {
 	struct value_range *result;
-	FILTER_QUERY(&handler->vs_v6, vs_v6_sig, &packet, &result, 1);
+	FILTER_QUERY(&handler->vs_v6, vs_lookup_ipv6, &packet, &result, 1);
 	if (result->count == 0) {
 		return -1;
 	}
@@ -71,22 +73,10 @@ vs_v4_lookup(struct packet_ctx *ctx) {
 
 static inline bool
 vs_v4_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
-	);
-
-	if (lpm_lookup(
-		    &vs->src_ipv4_filter, NET4_LEN, (uint8_t *)&ipv4_hdr->src_addr
-	    ) == LPM_VALUE_INVALID) {
-
-		// update counter
-		VS_STATS_INC(packet_src_not_allowed, ctx);
-
-		return false;
-	}
-
-	return true;
+	(void)ctx;
+	struct value_range *result;
+	FILTER_QUERY(&vs->acl, vs_acl_ipv4, &packet, &result, 1);
+	return result->count != 0;
 }
 
 static inline bool
@@ -138,23 +128,10 @@ vs_v6_lookup(struct packet_ctx *ctx) {
 
 static inline bool
 vs_v6_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
-	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
-	);
-
-	if (lpm_lookup(
-		    &vs->src_ipv4_filter, NET6_LEN, (uint8_t *)&ipv6_hdr->src_addr
-	    ) == LPM_VALUE_INVALID) {
-
-		// update counter
-		VS_STATS_INC(packet_src_not_allowed, ctx);
-
-		return false;
-	}
-
-	return true;
+	(void)ctx;
+	struct value_range *result;
+	FILTER_QUERY(&vs->acl, vs_acl_ipv6, &packet, &result, 1);
+	return result->count != 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -165,13 +142,21 @@ vs_lookup_and_fw(struct packet_ctx *ctx) {
 	if (packet->network_header.type ==
 	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 		struct vs *vs = vs_v4_lookup(ctx);
-		if (vs == NULL || !vs_v4_fw(ctx, vs, packet)) {
+		if (vs == NULL) {
+			return NULL;
+		}
+		if (!vs_v4_fw(ctx, vs, packet)) {
+			packet_ctx_vs_stats(ctx)->packet_src_not_allowed += 1;
 			return NULL;
 		}
 		return vs;
 	} else { // ipv6
 		struct vs *vs = vs_v6_lookup(ctx);
-		if (vs == NULL || !vs_v6_fw(ctx, vs, packet)) {
+		if (vs == NULL) {
+			return NULL;
+		}
+		if (!vs_v6_fw(ctx, vs, packet)) {
+			packet_ctx_vs_stats(ctx)->packet_src_not_allowed += 1;
 			return NULL;
 		}
 		return vs;

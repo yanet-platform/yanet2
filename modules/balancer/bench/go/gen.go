@@ -110,12 +110,41 @@ func (ctx *Generator) generateClientIP(
 	// If VS has allowed sources, pick a random one and generate IP within that network
 	if len(vs.AllowedSrcs) > 0 {
 		idx := ctx.rand.IntN(len(vs.AllowedSrcs))
-		allowedNet := vs.AllowedSrcs[idx]
-		netAddr, ok := netip.AddrFromSlice(allowedNet.Addr.Bytes)
+		allowedSrc := vs.AllowedSrcs[idx]
+		netAddr, ok := netip.AddrFromSlice(allowedSrc.Net.Addr.Bytes)
 		if !ok {
 			panic("invalid allowed source address")
 		}
-		return ctx.generateRandomIPInNetwork(netAddr, allowedNet.Size)
+		maskAddr, ok := netip.AddrFromSlice(allowedSrc.Net.Mask.Bytes)
+		if !ok {
+			panic("invalid allowed source mask")
+		}
+		// Calculate prefix length from mask
+		prefixLen := uint32(0)
+		if netAddr.Is4() {
+			maskBytes := maskAddr.As4()
+			for _, b := range maskBytes {
+				for i := 7; i >= 0; i-- {
+					if (b & (1 << i)) != 0 {
+						prefixLen++
+					} else {
+						break
+					}
+				}
+			}
+		} else {
+			maskBytes := maskAddr.As16()
+			for _, b := range maskBytes {
+				for i := 7; i >= 0; i-- {
+					if (b & (1 << i)) != 0 {
+						prefixLen++
+					} else {
+						break
+					}
+				}
+			}
+		}
+		return ctx.generateRandomIPInNetwork(netAddr, prefixLen)
 	}
 
 	// Otherwise generate random IP in appropriate range

@@ -123,12 +123,16 @@ func createCfgVirtualService(
 			Proto: balancerpb.TransportProto_TCP,
 		},
 		Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-		AllowedSrcs: []*balancerpb.Net{
+		AllowedSrcs: []*balancerpb.AllowedSrc{
 			{
-				Addr: &balancerpb.Addr{
-					Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
+				Net: &balancerpb.Net{
+					Addr: &balancerpb.Addr{
+						Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
+					},
+					Mask: &balancerpb.Addr{
+						Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
+					},
 				},
-				Size: 0,
 			},
 		},
 		Flags: &balancerpb.VsFlags{

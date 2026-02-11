@@ -322,17 +322,88 @@ func protoToVsConfig(
 	}
 
 	// Convert allowed sources
-	allowedSrc := make([]netip.Prefix, 0, len(protoVs.AllowedSrcs))
-	for _, subnet := range protoVs.AllowedSrcs {
-		if subnet != nil && subnet.Addr != nil {
-			addr, ok := netip.AddrFromSlice(subnet.Addr.Bytes)
-			if !ok {
-				continue
-			}
-			if prefix, err := addr.Prefix(int(subnet.Size)); err == nil {
-				allowedSrc = append(allowedSrc, prefix)
-			}
+	allowedSrc := make([]ffi.AllowedSrc, 0, len(protoVs.AllowedSrcs))
+	for i, protoAllowedSrc := range protoVs.AllowedSrcs {
+		if protoAllowedSrc == nil {
+			return ffi.VsConfig{}, fmt.Errorf(
+				"allowed_src[%d] is nil",
+				i,
+			)
 		}
+		if protoAllowedSrc.Net == nil {
+			return ffi.VsConfig{}, fmt.Errorf(
+				"allowed_src[%d].net is nil",
+				i,
+			)
+		}
+		if protoAllowedSrc.Net.Addr == nil {
+			return ffi.VsConfig{}, fmt.Errorf(
+				"allowed_src[%d].net.addr is nil",
+				i,
+			)
+		}
+
+		// Convert network address
+		addr, ok := netip.AddrFromSlice(protoAllowedSrc.Net.Addr.Bytes)
+		if !ok {
+			return ffi.VsConfig{}, fmt.Errorf(
+				"allowed_src[%d]: invalid network address",
+				i,
+			)
+		}
+
+		// Convert mask bytes
+		var maskBytes []byte
+		if protoAllowedSrc.Net.Mask != nil {
+			maskBytes = protoAllowedSrc.Net.Mask.Bytes
+		}
+
+		// Validate mask length
+		expectedLen := 4
+		if addr.Is6() {
+			expectedLen = 16
+		}
+		if len(maskBytes) != expectedLen {
+			return ffi.VsConfig{}, fmt.Errorf(
+				"allowed_src[%d]: invalid mask length: got %d, expected %d",
+				i, len(maskBytes), expectedLen,
+			)
+		}
+
+		// Create NetWithMask
+		net, err := xnetip.NewNetWithMask(addr, maskBytes)
+		if err != nil {
+			return ffi.VsConfig{}, fmt.Errorf(
+				"allowed_src[%d]: failed to create network: %w",
+				i, err,
+			)
+		}
+
+		// Convert port ranges
+		portRanges := make([]ffi.PortRange, 0, len(protoAllowedSrc.Ports))
+		for j, protoPortRange := range protoAllowedSrc.Ports {
+			if protoPortRange == nil {
+				return ffi.VsConfig{}, fmt.Errorf(
+					"allowed_src[%d].ports[%d] is nil",
+					i, j,
+				)
+			}
+			if protoPortRange.From > protoPortRange.To {
+				return ffi.VsConfig{}, fmt.Errorf(
+					"allowed_src[%d].ports[%d]: invalid range: from=%d > to=%d",
+					i, j, protoPortRange.From, protoPortRange.To,
+				)
+			}
+			portRanges = append(portRanges, ffi.PortRange{
+				From: uint16(protoPortRange.From),
+				To:   uint16(protoPortRange.To),
+			})
+		}
+
+		allowedSrc = append(allowedSrc, ffi.AllowedSrc{
+			Net:        net,
+			PortRanges: portRanges,
+		})
 	}
 
 	// Convert peers
@@ -1095,11 +1166,27 @@ func convertVsConfigToProtoWithWlc(
 	}
 
 	// Convert allowed sources
-	allowedSrcs := make([]*balancerpb.Net, 0, len(vs.AllowedSrc))
-	for _, prefix := range vs.AllowedSrc {
-		allowedSrcs = append(allowedSrcs, &balancerpb.Net{
-			Addr: &balancerpb.Addr{Bytes: prefix.Addr().AsSlice()},
-			Size: uint32(prefix.Bits()),
+	allowedSrcs := make([]*balancerpb.AllowedSrc, 0, len(vs.AllowedSrc))
+	for _, allowedSrc := range vs.AllowedSrc {
+		// Convert port ranges
+		protoPortRanges := make(
+			[]*balancerpb.PortsRange,
+			0,
+			len(allowedSrc.PortRanges),
+		)
+		for _, portRange := range allowedSrc.PortRanges {
+			protoPortRanges = append(protoPortRanges, &balancerpb.PortsRange{
+				From: uint32(portRange.From),
+				To:   uint32(portRange.To),
+			})
+		}
+
+		allowedSrcs = append(allowedSrcs, &balancerpb.AllowedSrc{
+			Net: &balancerpb.Net{
+				Addr: &balancerpb.Addr{Bytes: allowedSrc.Net.Addr.AsSlice()},
+				Mask: &balancerpb.Addr{Bytes: allowedSrc.Net.MaskBytes()},
+			},
+			Ports: protoPortRanges,
 		})
 	}
 

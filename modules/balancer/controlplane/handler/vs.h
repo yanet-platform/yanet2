@@ -2,6 +2,7 @@
 
 #include "api/vs.h"
 #include "common/memory.h"
+#include "filter.h"
 #include "selector.h"
 #include <stddef.h>
 
@@ -30,6 +31,9 @@ struct vs {
 
 	// Index of the first real in the reals array
 	size_t first_real_idx;
+
+	// TODO: docs
+	struct filter acl;
 
 	size_t peers_v4_count;	    // Number of IPv4 peers in 'peers_v4'
 	struct net4_addr *peers_v4; // IPv4 peer balancers

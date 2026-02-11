@@ -1257,7 +1257,7 @@ func TestProtoToVsConfig_EmptyArrays(t *testing.T) {
 		},
 		Scheduler:   balancerpb.VsScheduler_SOURCE_HASH,
 		Reals:       []*balancerpb.Real{},
-		AllowedSrcs: []*balancerpb.Net{},
+		AllowedSrcs: []*balancerpb.AllowedSrc{},
 		Peers:       []*balancerpb.Addr{},
 	}
 
@@ -1511,7 +1511,7 @@ func TestConvertVsConfigToProtoWithWlc(t *testing.T) {
 		},
 		Scheduler:  ffi.VsSchedulerRoundRobin,
 		Reals:      []ffi.RealConfig{},
-		AllowedSrc: []netip.Prefix{},
+		AllowedSrc: []ffi.AllowedSrc{},
 		PeersV4:    []netip.Addr{},
 		PeersV6:    []netip.Addr{},
 	}

@@ -165,25 +165,33 @@ func createBigConfig(
 
 		// Create allowed sources (allow all traffic for simplicity)
 		// Only add allowed sources that match the VS IP version
-		var allowedSrcs []*balancerpb.Net
+		var allowedSrcs []*balancerpb.AllowedSrc
 		if isIPv6 {
 			// IPv6 VS - only allow IPv6 sources
-			allowedSrcs = []*balancerpb.Net{
+			allowedSrcs = []*balancerpb.AllowedSrc{
 				{
-					Addr: &balancerpb.Addr{
-						Bytes: netip.AddrFrom16([16]byte{}).AsSlice(),
+					Net: &balancerpb.Net{
+						Addr: &balancerpb.Addr{
+							Bytes: netip.AddrFrom16([16]byte{}).AsSlice(),
+						},
+						Mask: &balancerpb.Addr{
+							Bytes: netip.AddrFrom16([16]byte{}).AsSlice(),
+						},
 					},
-					Size: 0,
 				},
 			}
 		} else {
 			// IPv4 VS - only allow IPv4 sources
-			allowedSrcs = []*balancerpb.Net{
+			allowedSrcs = []*balancerpb.AllowedSrc{
 				{
-					Addr: &balancerpb.Addr{
-						Bytes: netip.AddrFrom4([4]byte{0, 0, 0, 0}).AsSlice(),
+					Net: &balancerpb.Net{
+						Addr: &balancerpb.Addr{
+							Bytes: netip.AddrFrom4([4]byte{0, 0, 0, 0}).AsSlice(),
+						},
+						Mask: &balancerpb.Addr{
+							Bytes: netip.AddrFrom4([4]byte{0, 0, 0, 0}).AsSlice(),
+						},
 					},
-					Size: 0,
 				},
 			}
 		}
@@ -427,12 +435,12 @@ func TestBigConfig(t *testing.T) {
 	initialConfig := createBigConfig(10, 50, rng)
 
 	// Setup test with appropriate memory
-	agentMemory := 32 * datasize.MB
+	agentMemory := 128 * datasize.MB
 
 	ts, err := utils.Make(&utils.TestConfig{
 		Mock: utils.SingleWorkerMockConfig(
-			datasize.MB*128,
-			4*datasize.MB,
+			256*datasize.MB,
+			16*datasize.MB,
 		),
 		Balancer:    initialConfig,
 		AgentMemory: &agentMemory,

@@ -294,7 +294,6 @@ struct vs_config {
 	 */
 	struct named_real_config *reals;
 
-
 	// TODO: docs
 	size_t allowed_src_count;
 
