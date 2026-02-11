@@ -80,7 +80,7 @@ impl LocalToClient {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct LocalPoolElem {
     pub addr: u32,
     pub port: u16,
@@ -119,6 +119,9 @@ impl _LocalPool {
     }
 
     fn push(&mut self, addr: u32, port: u16) {
+        if self.pool_idx == self.pool_len {
+            return
+        }
         let idx = self.pool_idx;
         let pool = self.pool_mut();
         pool[idx] = LocalPoolElem { addr, port };
@@ -155,12 +158,14 @@ impl LocalPool {
         }
         
         let pool_slice = unsafe { std::slice::from_raw_parts_mut(pool, num_conns) };
+        let mut idx = 0;
         for i in (0..num_addrs).rev() {
             for j in (0..Self::NUM_PORTS).rev() {
-                pool_slice[i * Self::NUM_PORTS as usize + j as usize] = LocalPoolElem{
+                pool_slice[idx] = LocalPoolElem{
                     addr: (subnet.addr + i as u32).swap_bytes(),
                     port: (Self::MIN_PORT + j).swap_bytes()
-                }
+                };
+                idx += 1;
             }
         }
 

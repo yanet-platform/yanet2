@@ -123,8 +123,7 @@ pub extern "C" fn proxy_state_create(
 	assert!((memory as usize) % align == 0);
 	let state_ptr = memory as *mut State;
 
-    let res = State::new(mctx, shift, size_conn_table);
-    match res {
+    match State::new(mctx, shift, size_conn_table) {
         Ok(state) => {
             unsafe { *state_ptr = state };
             unsafe { (*state_ptr).adjust_pointers() };
