@@ -169,3 +169,19 @@ executable('bench_net4_fast',
   dependencies: test_deps,
   link_language: 'c'
 )
+
+executable('bench_net6',
+  ['bench_net6.c'], 
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+
+executable('bench_net6_fast',
+  ['bench_net6_fast.c'], 
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)

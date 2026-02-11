@@ -1,6 +1,6 @@
 /**
- * @file bench_net4_fast.c
- * @brief Performance benchmark for net4_fast filter
+ * @file bench_net6_fast.c
+ * @brief Performance benchmark for net6_fast filter
  *
  * This benchmark uses hugepages for optimal memory performance.
  *
@@ -20,6 +20,7 @@
 
 #include "common/memory.h"
 #include "common/memory_block.h"
+#include "common/network.h"
 #include "common/registry.h"
 #include "common/rng.h"
 #include "dataplane/packet/packet.h"
@@ -50,22 +51,22 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Filter signature declarations
 
-FILTER_COMPILER_DECLARE(bench_dst, net4_fast_dst);
-FILTER_QUERY_DECLARE(bench_dst, net4_fast_dst);
+FILTER_COMPILER_DECLARE(bench_dst, net6_fast_dst);
+FILTER_QUERY_DECLARE(bench_dst, net6_fast_dst);
 
-FILTER_COMPILER_DECLARE(bench_dst_port, net4_fast_dst, port_dst);
-FILTER_QUERY_DECLARE(bench_dst_port, net4_fast_dst, port_dst);
+FILTER_COMPILER_DECLARE(bench_dst_port, net6_fast_dst, port_dst);
+FILTER_QUERY_DECLARE(bench_dst_port, net6_fast_dst, port_dst);
 
-FILTER_COMPILER_DECLARE(bench_dst_port_proto, net4_fast_dst, port_dst, proto);
-FILTER_QUERY_DECLARE(bench_dst_port_proto, net4_fast_dst, port_dst, proto);
+FILTER_COMPILER_DECLARE(bench_dst_port_proto, net6_fast_dst, port_dst, proto);
+FILTER_QUERY_DECLARE(bench_dst_port_proto, net6_fast_dst, port_dst, proto);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Configuration and types
 
 enum signature_type {
-	sig_net4_dst = 0,
-	sig_net4_dst_port = 1,
-	sig_net4_dst_port_proto = 2,
+	sig_net6_dst = 0,
+	sig_net6_dst_port = 1,
+	sig_net6_dst_port_proto = 2,
 };
 
 struct bench_config {
@@ -149,20 +150,28 @@ allocate_hugepage_memory(size_t size) {
 static const char *
 signature_type_to_string(enum signature_type type) {
 	switch (type) {
-	case sig_net4_dst:
-		return "net4_dst";
-	case sig_net4_dst_port:
-		return "net4_dst_port";
-	case sig_net4_dst_port_proto:
-		return "net4_dst_port_proto";
+	case sig_net6_dst:
+		return "net6_dst";
+	case sig_net6_dst_port:
+		return "net6_dst_port";
+	case sig_net6_dst_port_proto:
+		return "net6_dst_port_proto";
 	}
 	return "unknown";
 }
 
-static uint32_t
-prefix_mask(uint32_t prefix) {
-	uint32_t mask = (uint32_t)(-1) ^ ((1 << (32 - prefix)) - 1);
-	return rte_cpu_to_be_32(mask);
+/**
+ * Create IPv6 prefix mask from prefix length
+ */
+static void
+ipv6_prefix_mask(uint8_t prefix_len, uint8_t mask[16]) {
+	memset(mask, 0, 16);
+	for (uint8_t i = 0; i < prefix_len / 8; i++) {
+		mask[i] = 0xff;
+	}
+	if (prefix_len % 8) {
+		mask[prefix_len / 8] = (0xff << (8 - (prefix_len % 8))) & 0xff;
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -176,28 +185,40 @@ generate_rules(
 	enum signature_type sig_type,
 	uint64_t *rng
 ) {
-	// Use IP range 10.0.0.0/16 for high match probability
-	// Generate rules with /24 to /28 prefixes for good coverage
+	// Use IPv6 range 2001:db8::/32 for high match probability
+	// Generate rules with /48 to /64 prefixes for good coverage
 
 	for (size_t i = 0; i < num_rules; i++) {
 		builder_init(&builders[i]);
 
-		// Generate destination IP with prefix 24-28
-		uint8_t prefix_len = 24 + (rng_next(rng) % 5); // 24-28
-		uint8_t a = 10;
-		uint8_t b = (rng_next(rng) % 256);
-		uint8_t c = (rng_next(rng) % 256);
-		uint8_t d = (rng_next(rng) % 256);
-		uint32_t mask = prefix_mask(prefix_len);
-		uint8_t addr[4] = {a, b, c, d};
+		// Generate destination IPv6 with prefix 48-64
+		uint8_t prefix_len = 48 + (rng_next(rng) % 17); // 48-64
+		struct net6 net;
 
-		builder_add_net4_dst(
-			&builders[i], addr, (const uint8_t *)&mask
-		);
+		// 2001:db8:xxxx:xxxx::/48-64
+		net.addr[0] = 0x20;
+		net.addr[1] = 0x01;
+		net.addr[2] = 0x0d;
+		net.addr[3] = 0xb8;
+
+		// Random middle bytes
+		for (int j = 4; j < 16; j++) {
+			net.addr[j] = (uint8_t)(rng_next(rng) % 256);
+		}
+
+		// Create mask
+		ipv6_prefix_mask(prefix_len, net.mask);
+
+		// Apply mask to address
+		for (int j = 0; j < 16; j++) {
+			net.addr[j] &= net.mask[j];
+		}
+
+		builder_add_net6_dst(&builders[i], net);
 
 		// Add port range if needed
-		if (sig_type == sig_net4_dst_port ||
-		    sig_type == sig_net4_dst_port_proto) {
+		if (sig_type == sig_net6_dst_port ||
+		    sig_type == sig_net6_dst_port_proto) {
 			// Use common port ranges for high match probability
 			uint16_t port_ranges[][2] = {
 				{80, 80},
@@ -218,7 +239,7 @@ generate_rules(
 		}
 
 		// Add protocol if needed
-		if (sig_type == sig_net4_dst_port_proto) {
+		if (sig_type == sig_net6_dst_port_proto) {
 			// Alternate between TCP and UDP
 			uint8_t proto =
 				(i % 2 == 0) ? IPPROTO_TCP : IPPROTO_UDP;
@@ -242,7 +263,7 @@ generate_packet_data(
 	uint64_t *rng,
 	void *packet_buffers
 ) {
-	// Each packet needs space for ethernet + IP + TCP/UDP headers
+	// Each packet needs space for ethernet + IPv6 + TCP/UDP headers
 	const size_t packet_size = 128; // Enough for headers
 
 	for (size_t i = 0; i < num_packets; i++) {
@@ -250,14 +271,44 @@ generate_packet_data(
 
 		// Build packet in buffer
 		struct rte_ether_hdr *eth = (struct rte_ether_hdr *)buf;
-		struct rte_ipv4_hdr *ip = (struct rte_ipv4_hdr *)(eth + 1);
+		struct rte_ipv6_hdr *ip6 = (struct rte_ipv6_hdr *)(eth + 1);
 
-		// Generate IPs from 10.0.0.0/16 range to match rules
-		uint8_t src_ip[4] = {
-			192, 168, 1, (uint8_t)(rng_next(rng) % 256)
+		// Generate source IPv6 from fe80::/10 range (link-local)
+		uint8_t src_ip[16] = {
+			0xfe,
+			0x80,
+			0,
+			0,
+			0,
+			0,
+			0,
+			0,
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256)
 		};
-		uint8_t dst_ip[4] = {
-			10,
+
+		// Generate destination IPv6 from 2001:db8::/32 range to match
+		// rules
+		uint8_t dst_ip[16] = {
+			0x20,
+			0x01,
+			0x0d,
+			0xb8,
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
+			(uint8_t)(rng_next(rng) % 256),
 			(uint8_t)(rng_next(rng) % 256),
 			(uint8_t)(rng_next(rng) % 256),
 			(uint8_t)(rng_next(rng) % 256)
@@ -273,42 +324,37 @@ generate_packet_data(
 		uint8_t proto = (i % 2 == 0) ? IPPROTO_TCP : IPPROTO_UDP;
 
 		// Fill ethernet header
-		eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+		eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
 
-		// Fill IP header
-		ip->version_ihl = 0x45;
-		ip->type_of_service = 0;
-		ip->total_length = rte_cpu_to_be_16(
-			sizeof(*ip) + (proto == IPPROTO_UDP
-					       ? sizeof(struct rte_udp_hdr)
-					       : sizeof(struct rte_tcp_hdr))
+		// Fill IPv6 header
+		ip6->vtc_flow = rte_cpu_to_be_32(0x60000000); // Version 6
+		ip6->payload_len = rte_cpu_to_be_16(
+			proto == IPPROTO_UDP ? sizeof(struct rte_udp_hdr)
+					     : sizeof(struct rte_tcp_hdr)
 		);
-		ip->packet_id = 0;
-		ip->fragment_offset = 0;
-		ip->time_to_live = 64;
-		ip->next_proto_id = proto;
-		memcpy(&ip->src_addr, src_ip, 4);
-		memcpy(&ip->dst_addr, dst_ip, 4);
-		ip->hdr_checksum = 0;
+		ip6->proto = proto;
+		ip6->hop_limits = 64;
+		memcpy(ip6->src_addr, src_ip, 16);
+		memcpy(ip6->dst_addr, dst_ip, 16);
 
 		// Fill L4 header
 		if (proto == IPPROTO_UDP) {
 			struct rte_udp_hdr *udp =
-				(struct rte_udp_hdr *)(ip + 1);
+				(struct rte_udp_hdr *)(ip6 + 1);
 			udp->src_port = rte_cpu_to_be_16(src_port);
 			udp->dst_port = rte_cpu_to_be_16(dst_port);
 			udp->dgram_len = rte_cpu_to_be_16(sizeof(*udp));
 			udp->dgram_cksum = 0;
 		} else {
 			struct rte_tcp_hdr *tcp =
-				(struct rte_tcp_hdr *)(ip + 1);
+				(struct rte_tcp_hdr *)(ip6 + 1);
 			tcp->src_port = rte_cpu_to_be_16(src_port);
 			tcp->dst_port = rte_cpu_to_be_16(dst_port);
 			tcp->tcp_flags = 0;
 		}
 
 		size_t total_size =
-			sizeof(*eth) + sizeof(*ip) +
+			sizeof(*eth) + sizeof(*ip6) +
 			(proto == IPPROTO_UDP ? sizeof(struct rte_udp_hdr)
 					      : sizeof(struct rte_tcp_hdr));
 
@@ -357,7 +403,7 @@ run_benchmark(
 	for (size_t batch_idx = 0; batch_idx < num_batches; batch_idx++) {
 		// Query the filter
 		switch (sig_type) {
-		case sig_net4_dst:
+		case sig_net6_dst:
 			FILTER_QUERY(
 				filter,
 				bench_dst,
@@ -366,7 +412,7 @@ run_benchmark(
 				batch_size
 			);
 			break;
-		case sig_net4_dst_port:
+		case sig_net6_dst_port:
 			FILTER_QUERY(
 				filter,
 				bench_dst_port,
@@ -375,7 +421,7 @@ run_benchmark(
 				batch_size
 			);
 			break;
-		case sig_net4_dst_port_proto:
+		case sig_net6_dst_port_proto:
 			FILTER_QUERY(
 				filter,
 				bench_dst_port_proto,
@@ -385,18 +431,6 @@ run_benchmark(
 			);
 			break;
 		}
-		// if (batch_idx + 5 < num_batches) {
-		// 	for (size_t i = 0; i < batch_size; ++i) {
-		// 		struct packet *pkt = packets[(batch_idx + 5) *
-		// batch_size + i]; 		struct rte_mbuf *mbuf =
-		// packet_to_mbuf(pkt); 		uint8_t *mbuf_data =
-		// (uint8_t *)mbuf; 		size_t mbuf_size =
-		// mbuf->buf_len; 		for (size_t j = 0; j <
-		// mbuf_size; j += 64) {
-		// 			__builtin_prefetch(mbuf_data + j, 1, 3);
-		// 		}
-		// 	}
-		// }
 	}
 
 	clock_gettime(CLOCK_MONOTONIC, &end_time);
@@ -419,7 +453,7 @@ print_results(const struct bench_config *config, struct bench_stats *stats) {
 	double mpps = pps / 1e6;
 
 	printf("\n");
-	printf("=== Filter Benchmark: net4_fast ===\n");
+	printf("=== Filter Benchmark: net6_fast ===\n");
 	printf("Signature: %s\n", signature_type_to_string(config->sig_type));
 	printf("Rules: %zu\n", config->num_rules);
 	printf("Batch Size: %zu\n", config->batch_size);
@@ -441,8 +475,8 @@ print_usage(const char *prog_name) {
 	printf("Usage: %s [OPTIONS]\n", prog_name);
 	printf("\n");
 	printf("Options:\n");
-	printf("  -s, --signature TYPE    Signature type: net4_dst (default), "
-	       "net4_dst_port, net4_dst_port_proto\n");
+	printf("  -s, --signature TYPE    Signature type: net6_dst (default), "
+	       "net6_dst_port, net6_dst_port_proto\n");
 	printf("  -r, --rules NUM         Number of rules (default: 100)\n");
 	printf("  -b, --batch-size NUM    Batch size (default: 32)\n");
 	printf("  -n, --batches NUM       Number of batches (default: "
@@ -455,7 +489,7 @@ int
 main(int argc, char **argv) {
 	// Default configuration
 	struct bench_config config = {
-		.sig_type = sig_net4_dst,
+		.sig_type = sig_net6_dst,
 		.num_rules = 100,
 		.batch_size = 32,
 		.num_batches = 1000000,
@@ -476,12 +510,12 @@ main(int argc, char **argv) {
 	       ) != -1) {
 		switch (opt) {
 		case 's':
-			if (strcmp(optarg, "net4_dst") == 0) {
-				config.sig_type = sig_net4_dst;
-			} else if (strcmp(optarg, "net4_dst_port") == 0) {
-				config.sig_type = sig_net4_dst_port;
-			} else if (strcmp(optarg, "net4_dst_port_proto") == 0) {
-				config.sig_type = sig_net4_dst_port_proto;
+			if (strcmp(optarg, "net6_dst") == 0) {
+				config.sig_type = sig_net6_dst;
+			} else if (strcmp(optarg, "net6_dst_port") == 0) {
+				config.sig_type = sig_net6_dst_port;
+			} else if (strcmp(optarg, "net6_dst_port_proto") == 0) {
+				config.sig_type = sig_net6_dst_port_proto;
 			} else {
 				fprintf(stderr,
 					"Unknown signature type: %s\n",
@@ -564,7 +598,7 @@ main(int argc, char **argv) {
 	printf("Initializing filter...\n");
 	struct filter filter;
 	switch (config.sig_type) {
-	case sig_net4_dst:
+	case sig_net6_dst:
 		res = FILTER_INIT(
 			&filter,
 			bench_dst,
@@ -573,7 +607,7 @@ main(int argc, char **argv) {
 			&memory_context
 		);
 		break;
-	case sig_net4_dst_port:
+	case sig_net6_dst_port:
 		res = FILTER_INIT(
 			&filter,
 			bench_dst_port,
@@ -582,7 +616,7 @@ main(int argc, char **argv) {
 			&memory_context
 		);
 		break;
-	case sig_net4_dst_port_proto:
+	case sig_net6_dst_port_proto:
 		res = FILTER_INIT(
 			&filter,
 			bench_dst_port_proto,
