@@ -51,7 +51,15 @@ pub struct VsIdentifierJson {
 #[derive(Serialize)]
 pub struct SubnetJson {
     pub addr: String,
-    pub size: u32,
+    pub mask: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ports: Option<Vec<PortRangeJson>>,
+}
+
+#[derive(Serialize)]
+pub struct PortRangeJson {
+    pub from: u32,
+    pub to: u32,
 }
 
 #[derive(Serialize)]
@@ -379,9 +387,30 @@ pub fn convert_show_config(response: &balancerpb::ShowConfigResponse) -> ShowCon
                         allowed_srcs: vs
                             .allowed_srcs
                             .iter()
-                            .map(|s| SubnetJson {
-                                addr: opt_addr_to_ip(&s.addr).map(|ip| ip.to_string()).unwrap_or_default(),
-                                size: s.size,
+                            .filter_map(|s| {
+                                // Extract network info
+                                let net = s.net.as_ref()?;
+                                let addr = opt_addr_to_ip(&net.addr).ok()?;
+                                let mask_bytes = net.mask.as_ref()?.bytes.as_slice();
+                                let mask = crate::entities::bytes_to_ip(mask_bytes).ok()?;
+
+                                // Extract port ranges if present
+                                let ports = if s.ports.is_empty() {
+                                    None
+                                } else {
+                                    Some(
+                                        s.ports
+                                            .iter()
+                                            .map(|pr| PortRangeJson { from: pr.from, to: pr.to })
+                                            .collect(),
+                                    )
+                                };
+
+                                Some(SubnetJson {
+                                    addr: addr.to_string(),
+                                    mask: mask.to_string(),
+                                    ports,
+                                })
                             })
                             .collect(),
                         reals: vs

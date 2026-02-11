@@ -24,7 +24,14 @@ message Net {
 	// Network address (IPv4 or IPv6)
 	Addr addr = 1;
 
-	// TODO: docs
+	// Network mask (IPv4 or IPv6).
+	//
+	// Defines which bits of the address are significant for matching.
+	// For example:
+	// - 255.255.255.0 (IPv4 /24): Match first 24 bits
+	// - ffff:ffff:ffff:: (IPv6 /48): Match first 48 bits
+	// - 0.0.0.0 (IPv4 /0): Match all addresses (any)
+	// - :: (IPv6 /0): Match all addresses (any)
 	Addr mask = 2;
 }
 
@@ -115,21 +122,72 @@ message VsIdentifier {
 	TransportProto proto = 3;
 }
 
-// TODO: docs
+// Source port range for allowed_src filtering.
+//
+// Defines an inclusive range of source ports that are permitted for
+// traffic matching a specific network prefix. Used in conjunction with
+// AllowedSrc to provide fine-grained access control based on both
+// source IP address and source port.
 message PortsRange {
-	// TODO: docs
+	// Starting port of the range (inclusive).
+	//
+	// Valid range: 0-65535
+	// Must be less than or equal to 'to' field.
 	uint32 from = 1;
 	
-	// TODO: docs
+	// Ending port of the range (inclusive).
+	//
+	// Valid range: 0-65535
+	// Must be greater than or equal to 'from' field.
 	uint32 to = 2;
 }
 
-// TODO: docs
+// Allowed source address and port configuration.
+//
+// Defines a network prefix and optional port ranges that are permitted
+// to access a virtual service. When configured, only traffic from matching
+// source addresses and ports will be accepted; all other traffic is dropped
+// and counted in the packet_src_not_allowed counter.
+//
+// FILTERING BEHAVIOR:
+// - If allowed_srcs list is empty: All sources are permitted (no filtering)
+// - If allowed_srcs contains entries: Only matching sources are permitted
+// - Multiple AllowedSrc entries are evaluated with OR logic (any match allows)
+//
+// PORT FILTERING:
+// - If ports list is empty: All source ports are permitted for this network
+// - If ports contains ranges: Only source ports within ranges are permitted
+// - Multiple PortsRange entries are evaluated with OR logic (any match allows)
+//
+// EXAMPLES:
+// 1. Allow all traffic from 10.0.0.0/8:
+//    net = 10.0.0.0/255.0.0.0, ports = []
+//
+// 2. Allow only high ports from 192.168.0.0/16:
+//    net = 192.168.0.0/255.255.0.0, ports = [{from: 1024, to: 65535}]
+//
+// 3. Allow specific ports from 172.16.0.0/12:
+//    net = 172.16.0.0/255.240.0.0, ports = [{from: 80, to: 80}, {from: 443, to: 443}]
 message AllowedSrc {
-	// TODO: docs
+	// Network prefix (address and mask) for source filtering.
+	//
+	// Packets are matched against this network using:
+	//   (packet_src_ip & mask) == (net.addr & mask)
+	//
+	// Special cases:
+	// - 0.0.0.0/0.0.0.0 (IPv4) or ::/:: (IPv6): Matches all addresses
+	// - Single host: Use full mask (255.255.255.255 or ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff)
 	Net net = 1;
 
-	// TODO: docs
+	// Optional source port ranges for additional filtering.
+	//
+	// When empty: All source ports are permitted for this network
+	// When specified: Only source ports within these ranges are permitted
+	//
+	// Common use cases:
+	// - Restrict to high ports: [{from: 1024, to: 65535}]
+	// - Allow specific services: [{from: 80, to: 80}, {from: 443, to: 443}]
+	// - Custom application ranges: [{from: 8000, to: 9000}]
 	repeated PortsRange ports = 2;
 }
 
@@ -146,7 +204,32 @@ message VirtualService {
 	// Scheduling algorithm for selecting real servers
 	VsScheduler scheduler = 2;
 
-	// TODO: docs
+	// Source address filtering configuration (optional).
+	//
+	// When specified, only traffic from matching source addresses and ports
+	// will be accepted by this virtual service. Traffic from non-matching
+	// sources is dropped and counted in the packet_src_not_allowed counter.
+	//
+	// BEHAVIOR:
+	// - Empty list: All sources are permitted (no filtering applied)
+	// - Non-empty list: Only sources matching at least one AllowedSrc entry
+	//   are permitted
+	//
+	// MATCHING LOGIC:
+	// For each incoming packet:
+	// 1. If allowed_srcs is empty → ACCEPT
+	// 2. For each AllowedSrc entry:
+	//    a. Check if packet source IP matches the network prefix
+	//    b. If ports list is empty → ACCEPT (IP match is sufficient)
+	//    c. If ports list is non-empty, check if source port matches any range
+	//    d. If both IP and port match → ACCEPT
+	// 3. If no AllowedSrc entry matches → DROP (increment packet_src_not_allowed)
+	//
+	// USE CASES:
+	// - Restrict access to trusted networks
+	// - Implement IP-based access control lists
+	// - Prevent unauthorized access to services
+	// - Combine with port filtering for fine-grained control
 	repeated AllowedSrc allowed_srcs = 3;
 
 	// List of real servers backing this virtual service.

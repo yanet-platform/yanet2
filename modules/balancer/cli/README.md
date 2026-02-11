@@ -220,35 +220,195 @@ All display commands support three output formats:
 
 The configuration file is in YAML format with two main sections:
 
-### module_config
+### packet_handler
 
-- `virtual_services` - List of virtual services
-  - `ip` - Virtual IP address
-  - `port` - Port number
-  - `proto` - Protocol (tcp/udp)
-  - `scheduler` - Scheduler algorithm (wrr/prr/wlc)
-  - `flags` - Service flags (gre, fix_mss, ops, pure_l3)
-  - `allowed_srcs` - List of allowed source networks (CIDR)
-  - `reals` - List of real servers
-    - `weight` - Server weight
-    - `dst` - Destination IP
-    - `src` - Source IP for forwarding
+Packet processing configuration containing:
+
+- `vs` - List of virtual services
+  - `addr` - Virtual IP address (IPv4 or IPv6)
+  - `port` - Port number (0 for pure_l3 mode)
+  - `proto` - Protocol: `TCP`, `tcp`, `UDP`, or `udp`
+  - `scheduler` - Scheduler algorithm:
+    - `SOURCE_HASH`, `source_hash`, `SH`, `sh` - Source hash scheduling
+    - `ROUND_ROBIN`, `round_robin`, `RR`, `rr` - Round-robin scheduling
+  - `flags` - Service flags:
+    - `gre` - GRE encapsulation
+    - `fix_mss` - TCP MSS fixing
+    - `ops` - One Packet Scheduler (no session tracking)
+    - `pure_l3` - Match all ports (port must be 0)
+    - `wlc` - Enable dynamic weight adjustment
+  - `allowed_srcs` - Source access control (see [Source Port Filtering](#source-port-filtering))
+  - `reals` - List of real servers:
+    - `ip` - Real server IP address
+    - `port` - Port (reserved for future use, currently must be 0)
+    - `weight` - Server weight for scheduling
+    - `src_addr` - Source address for forwarding
     - `src_mask` - Source mask
-    - `enabled` - Enable/disable flag
-  - `peers` - List of peer balancer IPs
+  - `peers` - List of peer balancer IPs for session synchronization
 
-- `source_address_v4` - IPv4 source address
-- `source_address_v6` - IPv6 source address
-- `sessions_timeouts` - Session timeout configuration
-- `wlc` - WLC scheduler configuration
+- `source_address_v4` - IPv4 source address for encapsulation
+- `source_address_v6` - IPv6 source address for encapsulation
+- `sessions_timeouts` - Session timeout configuration (in seconds):
+  - `tcp_syn_ack` - TCP SYN-ACK timeout
+  - `tcp_syn` - TCP SYN timeout
+  - `tcp_fin` - TCP FIN timeout
+  - `tcp` - Established TCP connection timeout
+  - `udp` - UDP session timeout
+  - `default` - Default timeout for other protocols
 
-### module_state_config
+### state
 
-- `session_table_capacity` - Maximum sessions
-- `session_table_scan_period_ms` - Scan period in milliseconds
-- `session_table_max_load_factor` - Max load factor (0.0-1.0)
+State management configuration:
 
-See [`example-config.yaml`](example-config.yaml) for a complete example.
+- `session_table` - Session table configuration:
+  - `capacity` - Maximum concurrent sessions
+  - `max_load_factor` - Trigger resize at this load factor (0.0-1.0)
+- `wlc` - WLC (Weighted Least Connections) configuration:
+  - `power` - Adjustment aggressiveness
+  - `max_weight` - Maximum weight after adjustment
+- `refresh_period_ms` - Periodic refresh interval in milliseconds (0 to disable)
+
+### Source Port Filtering
+
+The `allowed_srcs` field provides fine-grained access control based on source IP addresses and optionally source ports. This feature is useful for:
+
+- Restricting access to specific client networks
+- Limiting connections to known source port ranges
+- Implementing security policies based on ephemeral port usage
+- Controlling access from specific applications or services
+
+#### Format Options
+
+**Simple Format (Backward Compatible)**
+
+A simple string specifying the network in CIDR or netmask notation. All source ports are allowed.
+
+```yaml
+allowed_srcs:
+  - "10.0.0.0/8"                    # CIDR notation
+  - "172.16.0.0/255.240.0.0"        # Netmask notation
+  - "192.168.1.0/24"                # Single /24 network
+  - "203.0.113.42/32"               # Single host
+  - "2001:db8::/32"                 # IPv6 network
+```
+
+**Structured Format with Port Filtering**
+
+An object with `network` and optional `ports` fields for fine-grained control:
+
+```yaml
+allowed_srcs:
+  # Network with single source port
+  - network: "10.0.0.0/8"
+    ports: "443"
+  
+  # Network with port range
+  - network: "172.16.0.0/12"
+    ports: "1024-65535"
+  
+  # Network with multiple ports and ranges
+  - network: "192.168.0.0/16"
+    ports: "80,443,8000-9000,3000-3010"
+  
+  # Netmask notation with ports
+  - network: "198.51.100.0/255.255.255.0"
+    ports: "22,3389,5900-5910"
+```
+
+**Mixed Format**
+
+You can mix simple and structured formats in the same `allowed_srcs` list:
+
+```yaml
+allowed_srcs:
+  # Simple format - all ports allowed
+  - "10.0.0.0/8"
+  
+  # Structured with ports
+  - network: "172.16.0.0/12"
+    ports: "443,8443"
+  
+  # Another simple entry
+  - "192.168.0.0/16"
+  
+  # Structured with port range
+  - network: "203.0.113.0/24"
+    ports: "1024-65535"
+```
+
+#### Port Specification Format
+
+The `ports` field accepts a comma-separated list of ports and port ranges:
+
+- **Single port**: `"80"`, `"443"`, `"8080"`
+- **Port range**: `"1024-65535"`, `"8000-9000"`
+- **Multiple entries**: `"80,443,8000-9000,3000-3010"`
+
+**Rules:**
+- Port numbers must be in range 1-65535
+- In ranges, the `from` port must be ≤ `to` port
+- Whitespace around commas and hyphens is ignored
+- Empty or missing `ports` field means all ports are allowed
+
+#### Access Control Semantics
+
+- **Empty list** (`allowed_srcs: []`) - **DENY ALL** traffic (useful for maintenance mode)
+- **Allow all IPv4**: `["0.0.0.0/0"]`
+- **Allow all IPv6**: `["::/0"]`
+- **Multiple entries** - Traffic is allowed if it matches ANY entry (OR logic)
+- **Port filtering** - When ports are specified, BOTH network AND port must match
+
+#### Examples
+
+**Example 1: Restrict to internal networks only**
+```yaml
+allowed_srcs:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+```
+
+**Example 2: Allow specific networks with ephemeral ports only**
+```yaml
+allowed_srcs:
+  - network: "10.0.0.0/8"
+    ports: "1024-65535"  # Only ephemeral ports
+  - network: "172.16.0.0/12"
+    ports: "32768-65535"  # Linux default ephemeral range
+```
+
+**Example 3: Mixed access - some networks unrestricted, others port-limited**
+```yaml
+allowed_srcs:
+  # Trusted network - all ports
+  - "10.0.0.0/8"
+  
+  # DMZ network - only HTTPS source ports
+  - network: "172.16.0.0/12"
+    ports: "443,8443"
+  
+  # External network - only high ports
+  - network: "203.0.113.0/24"
+    ports: "1024-65535"
+```
+
+**Example 4: Service-specific restrictions**
+```yaml
+allowed_srcs:
+  # Allow SSH clients (typically use high ports)
+  - network: "192.168.1.0/24"
+    ports: "1024-65535"
+  
+  # Allow RDP clients
+  - network: "192.168.2.0/24"
+    ports: "3389"
+  
+  # Allow VNC clients
+  - network: "192.168.3.0/24"
+    ports: "5900-5910"
+```
+
+See [`example-config.yaml`](example-config.yaml) for a complete example with all features.
 
 ## Workflow Example
 

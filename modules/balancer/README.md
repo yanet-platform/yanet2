@@ -56,12 +56,12 @@ A virtual service defines a load-balanced endpoint that distributes traffic acro
 
 ```protobuf
 message VirtualService {
-  VsIdentifier id = 1;              // IP, port, protocol
-  VsScheduler scheduler = 2;         // SOURCE_HASH or ROUND_ROBIN
-  repeated Net allowed_srcs = 3;     // Optional source filtering
-  repeated Real reals = 4;           // Backend servers
-  VsFlags flags = 5;                 // Feature flags
-  repeated Addr peers = 6;           // Peer balancer addresses
+  VsIdentifier id = 1;                  // IP, port, protocol
+  VsScheduler scheduler = 2;            // SOURCE_HASH or ROUND_ROBIN
+  repeated AllowedSrc allowed_srcs = 3; // Optional source filtering
+  repeated Real reals = 4;              // Backend servers
+  VsFlags flags = 5;                    // Feature flags
+  repeated Addr peers = 6;              // Peer balancer addresses
 }
 ```
 
@@ -171,12 +171,103 @@ Maintains monotonic counter and selects reals consecutively:
 - More even distribution across all reals
 - Best for stateless applications
 
+## Source Address Filtering
+
+The balancer supports optional source address filtering to restrict access to virtual services based on client IP addresses and source ports.
+
+### Configuration
+
+```protobuf
+message AllowedSrc {
+  Net net = 1;                    // Network prefix (address + mask)
+  repeated PortsRange ports = 2;  // Optional source port ranges
+}
+
+message PortsRange {
+  uint32 from = 1;  // Starting port (inclusive)
+  uint32 to = 2;    // Ending port (inclusive)
+}
+```
+
+### Behavior
+
+- **Empty `allowed_srcs` list**: All source addresses are permitted (no filtering)
+- **Non-empty `allowed_srcs` list**: Only traffic from matching sources is accepted
+- **Multiple entries**: Evaluated with OR logic (any match allows the packet)
+
+### Port Filtering
+
+Each `AllowedSrc` entry can optionally specify source port ranges:
+
+- **Empty `ports` list**: All source ports are permitted for this network
+- **Non-empty `ports` list**: Only source ports within specified ranges are permitted
+- **Multiple ranges**: Evaluated with OR logic (any match allows the packet)
+
+### Matching Logic
+
+For each incoming packet:
+1. If `allowed_srcs` is empty → **ACCEPT**
+2. For each `AllowedSrc` entry:
+   - Check if packet source IP matches the network prefix: `(src_ip & mask) == (net.addr & mask)`
+   - If `ports` list is empty → **ACCEPT** (IP match is sufficient)
+   - If `ports` list is non-empty, check if source port falls within any range
+   - If both IP and port match → **ACCEPT**
+3. If no entry matches → **DROP** (increment `packet_src_not_allowed` counter)
+
+### Use Cases
+
+**Restrict to trusted networks:**
+```protobuf
+allowed_srcs: [
+  { net: { addr: "10.0.0.0", mask: "255.0.0.0" } }
+]
+```
+
+**Allow only high ports from specific network:**
+```protobuf
+allowed_srcs: [
+  {
+    net: { addr: "192.168.0.0", mask: "255.255.0.0" }
+    ports: [ { from: 1024, to: 65535 } ]
+  }
+]
+```
+
+**Allow specific service ports from multiple networks:**
+```protobuf
+allowed_srcs: [
+  {
+    net: { addr: "172.16.0.0", mask: "255.240.0.0" }
+    ports: [
+      { from: 80, to: 80 },    // HTTP
+      { from: 443, to: 443 },  // HTTPS
+      { from: 8000, to: 9000 } // Custom range
+    ]
+  },
+  {
+    net: { addr: "10.0.0.0", mask: "255.0.0.0" }
+    ports: [ { from: 80, to: 80 }, { from: 443, to: 443 } ]
+  }
+]
+```
+
+**Allow all IPv4 addresses (no filtering):**
+```protobuf
+allowed_srcs: [
+  { net: { addr: "0.0.0.0", mask: "0.0.0.0" } }
+]
+```
+
+### Statistics
+
+Packets blocked by source filtering are counted in the `packet_src_not_allowed` counter for the virtual service. This counter helps monitor unauthorized access attempts and validate filtering rules.
+
 ## Packet Processing Flow
 
 1. **Ingress**: Packet arrives at balancer
 2. **Decapsulation**: If destination matches decap address, remove outer IP header
 3. **Virtual Service Selection**: Match packet to configured virtual service
-4. **Source Filtering**: Check if source address is allowed (if configured)
+4. **Source Filtering**: Check if source address and port are allowed (if `allowed_srcs` configured)
 5. **Session Lookup**: Check if session exists in session table
 6. **Real Selection**: If new session, select real using scheduler
 7. **Session Creation**: Create new session entry (unless OPS mode)

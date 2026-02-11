@@ -71,6 +71,48 @@ packet_handler:
       peers:
         - "192.0.2.10"
 
+    # API service with source port filtering
+    # Demonstrates: structured allowed_srcs with port restrictions
+    - addr: "192.0.2.3"
+      port: 8080
+      proto: TCP
+      scheduler: SOURCE_HASH
+      flags:
+        gre: false
+        fix_mss: true
+        ops: false
+        pure_l3: false
+        wlc: false
+      # Source port filtering - only allow specific source ports
+      # Useful for restricting access to known client port ranges
+      allowed_srcs:
+        # Simple format (backward compatible) - all ports allowed
+        - "10.0.0.0/8"
+        # Structured format with single port
+        - network: "172.16.0.0/12"
+          ports: "443"
+        # Structured format with port ranges
+        - network: "192.168.0.0/16"
+          ports: "1024-65535"
+        # Multiple ports and ranges
+        - network: "203.0.113.0/24"
+          ports: "80,443,8000-9000"
+        # Netmask notation also supported
+        - network: "198.51.100.0/255.255.255.0"
+          ports: "22,3389,5900-5910"
+      reals:
+        - ip: "10.3.1.1"
+          port: 0
+          weight: 100
+          src_addr: "192.0.2.3"
+          src_mask: "255.255.255.255"
+        - ip: "10.3.1.2"
+          port: 0
+          weight: 100
+          src_addr: "192.0.2.3"
+          src_mask: "255.255.255.255"
+      peers: []
+
     # UDP DNS service with OPS mode
     # Demonstrates: short scheduler name, empty allowed_srcs (allow none)
     - addr: "192.0.2.4"
@@ -101,7 +143,7 @@ packet_handler:
 
     # Pure L3 service (matches all ports)
     # Demonstrates: pure_l3 mode, port must be 0
-    - addr: "192.0.2.3"
+    - addr: "192.0.2.5"
       port: 0  # MUST be 0 for pure_l3 mode
       proto: tcp
       scheduler: sh  # Short form lowercase
@@ -117,7 +159,40 @@ packet_handler:
         - ip: "10.3.1.1"
           port: 0
           weight: 1
-          src_addr: "192.0.2.3"
+          src_addr: "192.0.2.5"
+          src_mask: "255.255.255.255"
+      peers: []
+
+    # Service with arbitrary netmask (non-contiguous)
+    # Demonstrates: netmask that doesn't correspond to a CIDR prefix
+    - addr: "192.0.2.6"
+      port: 3306
+      proto: TCP
+      scheduler: SOURCE_HASH
+      flags:
+        gre: false
+        fix_mss: true
+        ops: false
+        pure_l3: false
+        wlc: false
+      # Arbitrary netmasks (not representable as CIDR prefix)
+      # These will be stored and displayed as netmask notation
+      allowed_srcs:
+        # Non-contiguous mask: 255.0.255.0 (matches 10.x.y.0 where x can be anything)
+        - "10.0.0.0/255.0.255.0"
+        # Another non-contiguous mask with port filtering
+        - network: "172.16.0.0/255.240.15.0"
+          ports: "3306,33060"
+      reals:
+        - ip: "10.6.1.1"
+          port: 0
+          weight: 100
+          src_addr: "192.0.2.6"
+          src_mask: "255.255.255.255"
+        - ip: "10.6.1.2"
+          port: 0
+          weight: 100
+          src_addr: "192.0.2.6"
           src_mask: "255.255.255.255"
       peers: []
 

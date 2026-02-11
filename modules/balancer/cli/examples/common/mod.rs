@@ -17,13 +17,21 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                         }),
                         scheduler: balancerpb::VsScheduler::SourceHash as i32,
                         allowed_srcs: vec![
-                            balancerpb::Net {
-                                addr: Some(balancerpb::Addr { bytes: vec![10, 0, 0, 0] }),
-                                size: 8,
+                            // Simple network without port restrictions
+                            balancerpb::AllowedSrc {
+                                net: Some(balancerpb::Net {
+                                    addr: Some(balancerpb::Addr { bytes: vec![10, 0, 0, 0] }),
+                                    mask: Some(balancerpb::Addr { bytes: vec![255, 0, 0, 0] }),
+                                }),
+                                ports: vec![],
                             },
-                            balancerpb::Net {
-                                addr: Some(balancerpb::Addr { bytes: vec![172, 16, 0, 0] }),
-                                size: 12,
+                            // Network with port restrictions
+                            balancerpb::AllowedSrc {
+                                net: Some(balancerpb::Net {
+                                    addr: Some(balancerpb::Addr { bytes: vec![172, 16, 0, 0] }),
+                                    mask: Some(balancerpb::Addr { bytes: vec![255, 240, 0, 0] }),
+                                }),
+                                ports: vec![balancerpb::PortsRange { from: 1024, to: 65535 }],
                             },
                         ],
                         reals: vec![
@@ -65,10 +73,27 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                             proto: balancerpb::TransportProto::Tcp as i32,
                         }),
                         scheduler: balancerpb::VsScheduler::RoundRobin as i32,
-                        allowed_srcs: vec![balancerpb::Net {
-                            addr: Some(balancerpb::Addr { bytes: vec![0, 0, 0, 0] }),
-                            size: 0,
-                        }],
+                        allowed_srcs: vec![
+                            // Allow all IPv4 with specific ports
+                            balancerpb::AllowedSrc {
+                                net: Some(balancerpb::Net {
+                                    addr: Some(balancerpb::Addr { bytes: vec![0, 0, 0, 0] }),
+                                    mask: Some(balancerpb::Addr { bytes: vec![0, 0, 0, 0] }),
+                                }),
+                                ports: vec![
+                                    balancerpb::PortsRange { from: 443, to: 443 },
+                                    balancerpb::PortsRange { from: 8443, to: 8443 },
+                                ],
+                            },
+                            // Non-contiguous netmask example: 255.0.255.0
+                            balancerpb::AllowedSrc {
+                                net: Some(balancerpb::Net {
+                                    addr: Some(balancerpb::Addr { bytes: vec![10, 0, 0, 0] }),
+                                    mask: Some(balancerpb::Addr { bytes: vec![255, 0, 255, 0] }),
+                                }),
+                                ports: vec![balancerpb::PortsRange { from: 1024, to: 65535 }],
+                            },
+                        ],
                         reals: vec![
                             balancerpb::Real {
                                 id: Some(balancerpb::RelativeRealIdentifier {

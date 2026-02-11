@@ -203,8 +203,8 @@ fn print_show_config_tree(response: &balancerpb::ShowConfigResponse) -> Result<(
                         if !vs.allowed_srcs.is_empty() {
                             tree.begin_child("Allowed Sources".to_string());
                             for subnet in &vs.allowed_srcs {
-                                if let Ok(ip) = opt_addr_to_ip(&subnet.addr) {
-                                    tree.add_empty_child(format!("{}/{}", ip, subnet.size));
+                                if let Ok(formatted) = crate::entities::format_allowed_src(subnet) {
+                                    tree.add_empty_child(format!("- {}", formatted));
                                 }
                             }
                             tree.end_child();
@@ -398,26 +398,26 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                             println!("  Scheduler: {}", scheduler_to_string(vs.scheduler).bright_green());
                             println!("  Flags: {}", format_flags(vs.flags.as_ref()).bright_green());
 
-                            // Peers
+                            // Peers - one per line with dash prefix
                             if !vs.peers.is_empty() {
-                                let peer_ips: Vec<String> = vs
-                                    .peers
-                                    .iter()
-                                    .filter_map(|p| addr_to_ip(p).ok().map(|ip| ip.to_string()))
-                                    .collect();
-                                println!("  Peers: {}", peer_ips.join(", ").bright_green());
+                                println!("  Peers:");
+                                for peer in &vs.peers {
+                                    if let Ok(ip) = addr_to_ip(peer) {
+                                        println!("    - {}", ip.to_string().bright_green());
+                                    }
+                                }
                             } else {
                                 println!("  Peers: {}", "none".bright_green());
                             }
 
-                            // Allowed sources
+                            // Allowed sources - one per line with dash prefix
                             if !vs.allowed_srcs.is_empty() {
-                                let srcs: Vec<String> = vs
-                                    .allowed_srcs
-                                    .iter()
-                                    .filter_map(|s| opt_addr_to_ip(&s.addr).ok().map(|ip| format!("{}/{}", ip, s.size)))
-                                    .collect();
-                                println!("  Allowed Sources: {}", srcs.join(", ").bright_green());
+                                println!("  Allowed Sources:");
+                                for src in &vs.allowed_srcs {
+                                    if let Ok(formatted) = crate::entities::format_allowed_src(src) {
+                                        println!("    - {}", formatted.bright_green());
+                                    }
+                                }
                             } else {
                                 println!("  Allowed Sources: {}", "none".bright_green());
                             }
