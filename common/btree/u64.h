@@ -299,7 +299,10 @@ btree_u64_free(struct btree_u64 *btree) {
 
 static inline size_t
 btree_u64_lower_bounds(
-	struct btree_u64 *btree, uint64_t *values, size_t count, size_t *result
+	struct btree_u64 *btree,
+	uint64_t *values,
+	size_t count,
+	uint32_t *result
 );
 
 /**
@@ -331,7 +334,7 @@ btree_u64_lower_bounds(
  */
 static inline size_t
 btree_u64_lower_bound(struct btree_u64 *btree, uint64_t value) {
-	size_t result;
+	uint32_t result;
 	btree_u64_lower_bounds(btree, &value, 1, &result);
 	return result;
 }
@@ -377,7 +380,10 @@ enum { btree_u64_max_batch_size = 32 };
 
 static inline size_t
 btree_u64_lower_bounds(
-	struct btree_u64 *btree, uint64_t *values, size_t count, size_t *result
+	struct btree_u64 *btree,
+	uint64_t *values,
+	size_t count,
+	uint32_t *result
 ) {
 	struct context {
 		size_t result;

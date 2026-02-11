@@ -21,7 +21,6 @@ typedef struct net4_count(net_getter)(const struct filter_rule *rule);
 struct segment {
 	uint32_t from;
 	uint32_t to;
-	size_t rule_idx;
 };
 
 static int
@@ -100,8 +99,8 @@ fill_segments(
 		for (size_t j = 0; j < cur.count; ++j) {
 			uint32_t from, to;
 			net4_from_to(cur.net4 + j, &from, &to);
-			segments[cnt++] = (struct segment
-			){.from = from, .to = to, .rule_idx = i};
+			segments[cnt++] =
+				(struct segment){.from = from, .to = to};
 		}
 	}
 
@@ -169,18 +168,12 @@ net4_fast_classifier_init(
 	}
 
 	size_t cnt = validate_res;
-	struct segment *segments =
-		memory_balloc(mctx, sizeof(struct segment) * cnt);
-	if (segments == NULL && cnt > 0) {
-		return -1;
-	}
+	struct segment *segments = malloc(sizeof(struct segment) * cnt);
 
 	size_t after_collapse_cnt =
 		fill_segments(segments, rules, rules_count, getter);
 
-	uint32_t *from = memory_balloc(
-		mctx, sizeof(struct segment) * after_collapse_cnt
-	);
+	uint32_t *from = malloc(sizeof(uint32_t) * after_collapse_cnt);
 	if (from == NULL && after_collapse_cnt > 0) {
 		goto free_segments;
 	}
@@ -210,7 +203,8 @@ net4_fast_classifier_init(
 		goto free_to;
 	}
 
-	memory_bfree(mctx, from, sizeof(uint32_t) * after_collapse_cnt);
+	free(segments);
+	free(from);
 
 	return 0;
 
@@ -222,10 +216,10 @@ free_to:
 	);
 
 free_from:
-	memory_bfree(mctx, from, sizeof(uint32_t) * after_collapse_cnt);
+	free(from);
 
 free_segments:
-	memory_bfree(mctx, segments, sizeof(struct segment) * cnt);
+	free(segments);
 
 	return -1;
 }

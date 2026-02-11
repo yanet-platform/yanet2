@@ -1,14 +1,16 @@
 #pragma once
 
-#include "common/value.h"
+#include "common/big_array.h"
 #include "common/btree/u64.h"
 
+struct net6_fast_classifier_part {
+	struct btree_u64 btree;
+	uint64_t *to;
+};
+
 struct net6_fast_classifier {
-    struct btree_u64 high;
-    uint64_t *high_to;
-
-    struct btree_u64 low;
-    uint64_t *low_to;
-
-    struct value_table comb;
+	struct net6_fast_classifier_part high;
+	struct net6_fast_classifier_part low;
+	struct big_array comb;
+	uint32_t mismatch_classifier;
 };

@@ -13,7 +13,6 @@
 #include "lib/utils/packet.h"
 
 #include "logging/log.h"
-#include "rte_byteorder.h"
 #include "rule.h"
 #include <assert.h>
 #include <netinet/in.h>
@@ -21,18 +20,19 @@
 #include <rte_mbuf.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_COMPILER_DECLARE(sign_fast_src_dst, net4_fast_src, net4_fast_dst);
-FILTER_QUERY_DECLARE(sign_fast_src_dst, net4_fast_src, net4_fast_dst);
+FILTER_COMPILER_DECLARE(sign_fast_src_dst, net6_fast_src, net6_fast_dst);
+FILTER_QUERY_DECLARE(sign_fast_src_dst, net6_fast_src, net6_fast_dst);
 
-FILTER_COMPILER_DECLARE(sign_fast_src, net4_fast_src);
-FILTER_QUERY_DECLARE(sign_fast_src, net4_fast_src);
+FILTER_COMPILER_DECLARE(sign_fast_src, net6_fast_src);
+FILTER_QUERY_DECLARE(sign_fast_src, net6_fast_src);
 
-FILTER_COMPILER_DECLARE(sign_fast_dst, net4_fast_dst);
-FILTER_QUERY_DECLARE(sign_fast_dst, net4_fast_dst);
+FILTER_COMPILER_DECLARE(sign_fast_dst, net6_fast_dst);
+FILTER_QUERY_DECLARE(sign_fast_dst, net6_fast_dst);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -52,7 +52,7 @@ filter_sign_to_string(enum filter_sign sign) {
 	return "";
 }
 
-////////////////////////////////////////////////////////////////////////////////]
+////////////////////////////////////////////////////////////////////////////////
 
 static int
 query_and_expect_actions(
@@ -121,16 +121,21 @@ query_and_expect_actions(
 	return TEST_SUCCESS;
 }
 
-static uint32_t
-prefix_mask(uint32_t prefix) {
-	uint32_t mask = (uint32_t)(-1) ^ ((1 << (32 - prefix)) - 1);
-	return rte_cpu_to_be_32(mask);
+static void
+prefix_mask(uint8_t mask[NET6_LEN], uint32_t prefix) {
+	memset(mask, 0, NET6_LEN);
+	for (uint32_t i = 0; i < prefix / 8; ++i) {
+		mask[i] = 0xff;
+	}
+	if (prefix % 8 != 0) {
+		mask[prefix / 8] = (uint8_t)(0xff << (8 - (prefix % 8)));
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 struct test_net {
-	uint8_t addr[4];
+	uint8_t addr[NET6_LEN];
 	size_t prefix;
 };
 
@@ -150,36 +155,48 @@ test_basic(void *arena, enum filter_sign sign) {
 	struct packet *packets[checks_count];
 	for (size_t i = 0; i < checks_count; ++i) {
 		packets[i] = malloc(sizeof(struct packet));
-		uint8_t ip[4] = {0, 0, 0, checks[i]};
-		int fill_result = fill_packet_net4(
+		uint8_t ip[NET6_LEN] = {0};
+		ip[15] = checks[i];
+		int fill_result = fill_packet_net6(
 			packets[i], ip, ip, 0, 0, IPPROTO_UDP, 0
 		);
 		TEST_ASSERT_EQUAL(
 			fill_result,
 			0,
-			"failed to fill packet at index %zu (ip=0.0.0.%u)",
+			"failed to fill packet at index %zu (ip=::0.0.0.%u)",
 			i,
 			checks[i]
 		);
 	}
 
 	struct test_net nets[] = {
-		{.addr = {0, 0, 0, 96}, // [96, 103]
-		 .prefix = 29},
+		{.addr = {0}, // [96, 103]
+		 .prefix = 125},
 		{
-			.addr = {0, 0, 0, 104}, // [96, 111]
-			.prefix = 28,
+			.addr = {0}, // [96, 111]
+			.prefix = 124,
 		},
-		{.addr = {0, 0, 0, 90}, // [80, 95]
-		 .prefix = 28},
-		{.addr = {0, 0, 0, 90}, // [88, 91]
-		 .prefix = 30},
-		{.addr = {0, 0, 0, 117}, // [116, 119]
-		 .prefix = 30},
-		{.addr = {0, 0, 0, 128}, // [128, 143]
-		 .prefix = 28}
+		{.addr = {0}, // [80, 95]
+		 .prefix = 124},
+		{.addr = {0}, // [88, 91]
+		 .prefix = 126},
+		{.addr = {0}, // [116, 119]
+		 .prefix = 126},
+		{.addr = {0}, // [128, 143]
+		 .prefix = 124}
 	};
+	nets[0].addr[15] = 96;
+	nets[1].addr[15] = 104;
+	nets[2].addr[15] = 90;
+	nets[3].addr[15] = 90;
+	nets[4].addr[15] = 117;
+	nets[5].addr[15] = 128;
+
 	const size_t nets_count = sizeof(nets) / sizeof(nets[0]);
+	for (size_t i = 0; i < nets_count; ++i) {
+		uint8_t mask[NET6_LEN];
+		prefix_mask(mask, nets[i].prefix);
+	}
 
 	struct value_range *expected_ranges[checks_count];
 	for (size_t i = 0; i < checks_count; ++i) {
@@ -195,22 +212,24 @@ test_basic(void *arena, enum filter_sign sign) {
 		struct filter_rule_builder *builder = &builders[net_idx];
 		builder_init(builder);
 
-		builder->net4_dst_count = builder->net4_src_count = 1;
+		builder->net6_dst_count = builder->net6_src_count = 1;
 
-		uint32_t mask = prefix_mask(nets[net_idx].prefix);
+		uint8_t mask[NET6_LEN];
+		prefix_mask(mask, nets[net_idx].prefix);
 
-		memcpy(builder->net4_dst[0].addr, nets[net_idx].addr, 4);
-		memcpy(builder->net4_dst[0].mask, &mask, 4);
+		struct net6 net;
+		memcpy(net.addr, nets[net_idx].addr, NET6_LEN);
+		memcpy(net.mask, mask, NET6_LEN);
 
-		memcpy(builder->net4_src[0].addr, nets[net_idx].addr, 4);
-		memcpy(builder->net4_src[0].mask, &mask, 4);
+		builder->net6_dst[0] = net;
+		builder->net6_src[0] = net;
 
 		rules[net_idx] = build_rule(
 			builder, (net_idx + 1) | ACTION_NON_TERMINATE
 		);
-
-		uint8_t from = nets[net_idx].addr[3] & mask;
-		uint8_t to = nets[net_idx].addr[3] | ~mask;
+		// Calculate range for this network
+		uint8_t from = nets[net_idx].addr[15] & mask[15];
+		uint8_t to = nets[net_idx].addr[15] | ~mask[15];
 
 		for (size_t check_idx = 0; check_idx < checks_count;
 		     ++check_idx) {
@@ -218,7 +237,8 @@ test_basic(void *arena, enum filter_sign sign) {
 			    checks[check_idx] <= to) {
 				expected_ranges[check_idx]->values
 					[expected_ranges[check_idx]->count++] =
-					(net_idx + 1) | ACTION_NON_TERMINATE;
+					(net_idx + 1
+					) | ACTION_NON_TERMINATE;
 			}
 		}
 	}
@@ -258,6 +278,7 @@ test_basic(void *arena, enum filter_sign sign) {
 
 	return TEST_SUCCESS;
 }
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static int
@@ -268,22 +289,22 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	LOG(INFO, "=== Test Multiple Nets Per Rule: %s ===", sign_name);
 
 	// Test packets with specific IPs
-	const uint8_t test_ips[][4] = {
-		{192, 168, 1, 10},  // Rule 1, Net A
-		{192, 168, 2, 20},  // Rule 1, Net B
-		{192, 168, 3, 30},  // Rule 1, Net C
-		{10, 0, 1, 10},     // Rule 2, Net D
-		{10, 1, 2, 20},     // Rule 2, Net E
-		{172, 16, 1, 10},   // Rule 3, Net F
-		{172, 17, 2, 20},   // Rule 3, Net G
-		{8, 8, 8, 8},       // No match
+	const uint8_t test_ips[][NET6_LEN] = {
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10}, // Rule 1, Net A
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20}, // Rule 1, Net B
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30}, // Rule 1, Net C
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 10}, // Rule 2, Net D
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 20}, // Rule 2, Net E
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 10}, // Rule 3, Net F
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 20}, // Rule 3, Net G
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 10}, // No match
 	};
 	const size_t test_ips_count = sizeof(test_ips) / sizeof(test_ips[0]);
 
 	struct packet *packets[test_ips_count];
 	for (size_t i = 0; i < test_ips_count; ++i) {
 		packets[i] = malloc(sizeof(struct packet));
-		int fill_result = fill_packet_net4(
+		int fill_result = fill_packet_net6(
 			packets[i], test_ips[i], test_ips[i], 0, 0, IPPROTO_UDP, 0
 		);
 		TEST_ASSERT_EQUAL(
@@ -295,25 +316,25 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	}
 
 	// Define networks for each rule
-	// Rule 1: 3 networks (192.168.1.0/24, 192.168.2.0/24, 192.168.3.0/24)
+	// Rule 1: 3 networks (A, B, C)
 	struct test_net rule1_nets[] = {
-		{.addr = {192, 168, 1, 0}, .prefix = 24}, // Net A
-		{.addr = {192, 168, 2, 0}, .prefix = 24}, // Net B
-		{.addr = {192, 168, 3, 0}, .prefix = 24}, // Net C
+		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10}, .prefix = 127}, // Net A
+		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20}, .prefix = 127}, // Net B
+		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30}, .prefix = 127}, // Net C
 	};
 	const size_t rule1_nets_count = sizeof(rule1_nets) / sizeof(rule1_nets[0]);
 
-	// Rule 2: 2 networks (10.0.0.0/16, 10.1.0.0/16)
+	// Rule 2: 2 networks (D, E)
 	struct test_net rule2_nets[] = {
-		{.addr = {10, 0, 0, 0}, .prefix = 16}, // Net D
-		{.addr = {10, 1, 0, 0}, .prefix = 16}, // Net E
+		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 10}, .prefix = 127}, // Net D
+		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 20}, .prefix = 127}, // Net E
 	};
 	const size_t rule2_nets_count = sizeof(rule2_nets) / sizeof(rule2_nets[0]);
 
-	// Rule 3: 2 networks (172.16.0.0/20, 172.17.0.0/20)
+	// Rule 3: 2 networks (F, G)
 	struct test_net rule3_nets[] = {
-		{.addr = {172, 16, 0, 0}, .prefix = 20}, // Net F
-		{.addr = {172, 17, 0, 0}, .prefix = 20}, // Net G
+		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 10}, .prefix = 127}, // Net F
+		{.addr = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 20}, .prefix = 127}, // Net G
 	};
 	const size_t rule3_nets_count = sizeof(rule3_nets) / sizeof(rule3_nets[0]);
 
@@ -349,11 +370,15 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	// Rule 1: Add 3 networks
 	builder_init(&builders[0]);
 	for (size_t i = 0; i < rule1_nets_count; ++i) {
-		uint32_t mask = prefix_mask(rule1_nets[i].prefix);
+		uint8_t mask[NET6_LEN];
+		prefix_mask(mask, rule1_nets[i].prefix);
+		struct net6 net;
+		memcpy(net.addr, rule1_nets[i].addr, NET6_LEN);
+		memcpy(net.mask, mask, NET6_LEN);
 		if (sign == src) {
-			builder_add_net4_src(&builders[0], rule1_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net6_src(&builders[0], net);
 		} else {
-			builder_add_net4_dst(&builders[0], rule1_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net6_dst(&builders[0], net);
 		}
 	}
 	rules[0] = build_rule(&builders[0], 1 | ACTION_NON_TERMINATE);
@@ -361,11 +386,15 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	// Rule 2: Add 2 networks
 	builder_init(&builders[1]);
 	for (size_t i = 0; i < rule2_nets_count; ++i) {
-		uint32_t mask = prefix_mask(rule2_nets[i].prefix);
+		uint8_t mask[NET6_LEN];
+		prefix_mask(mask, rule2_nets[i].prefix);
+		struct net6 net;
+		memcpy(net.addr, rule2_nets[i].addr, NET6_LEN);
+		memcpy(net.mask, mask, NET6_LEN);
 		if (sign == src) {
-			builder_add_net4_src(&builders[1], rule2_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net6_src(&builders[1], net);
 		} else {
-			builder_add_net4_dst(&builders[1], rule2_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net6_dst(&builders[1], net);
 		}
 	}
 	rules[1] = build_rule(&builders[1], 2 | ACTION_NON_TERMINATE);
@@ -373,11 +402,15 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	// Rule 3: Add 2 networks
 	builder_init(&builders[2]);
 	for (size_t i = 0; i < rule3_nets_count; ++i) {
-		uint32_t mask = prefix_mask(rule3_nets[i].prefix);
+		uint8_t mask[NET6_LEN];
+		prefix_mask(mask, rule3_nets[i].prefix);
+		struct net6 net;
+		memcpy(net.addr, rule3_nets[i].addr, NET6_LEN);
+		memcpy(net.mask, mask, NET6_LEN);
 		if (sign == src) {
-			builder_add_net4_src(&builders[2], rule3_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net6_src(&builders[2], net);
 		} else {
-			builder_add_net4_dst(&builders[2], rule3_nets[i].addr, (const uint8_t *)&mask);
+			builder_add_net6_dst(&builders[2], net);
 		}
 	}
 	rules[2] = build_rule(&builders[2], 3 | ACTION_NON_TERMINATE);
@@ -414,12 +447,11 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	return TEST_SUCCESS;
 }
 
-
 ////////////////////////////////////////////////////////////////////////////////
 
 static int
-is_ip_from_net(struct net4 *net, uint8_t *ip) {
-	for (size_t i = 0; i < 4; i++) {
+is_ip_from_net(struct net6 *net, uint8_t *ip) {
+	for (size_t i = 0; i < NET6_LEN; i++) {
 		if ((ip[i] & net->mask[i]) != (net->addr[i] & net->mask[i])) {
 			return 0;
 		}
@@ -467,22 +499,32 @@ stress(void *arena,
 		builder_init(builder);
 
 		for (size_t i = 0; i < 2; ++i) {
-			uint8_t prefix_len = 16 + rng_next(&rng) % 17;
+			uint8_t prefix_len = 64 + rng_next(&rng) % 65;
 
-			uint8_t a = 1 + rng_next(&rng) % 10;
-			uint8_t b = 1 + rng_next(&rng) % 10;
-			uint8_t c = 128 + rng_next(&rng) % 10;
-			uint8_t d = 128 + rng_next(&rng) % 10;
-			uint32_t mask = prefix_mask(prefix_len);
-			uint8_t addr[4] = {a, b, c, d};
+			uint8_t addr[NET6_LEN] = {0};
+			// Generate random IPv6 address
+			addr[0] = 0x20;
+			addr[1] = 0x01;
+			addr[2] = 0x0d;
+			addr[3] = 0xb8;
+			for (size_t j = 4; j < 8; ++j) {
+				addr[j] = (uint8_t)(rng_next(&rng) % 256);
+			}
+			for (size_t j = 8; j < NET6_LEN; ++j) {
+				addr[j] = (uint8_t)(rng_next(&rng) % 256);
+			}
+
+			uint8_t mask[NET6_LEN];
+			prefix_mask(mask, prefix_len);
+
+			struct net6 net;
+			memcpy(net.addr, addr, NET6_LEN);
+			memcpy(net.mask, mask, NET6_LEN);
+
 			if (i == 0) {
-				builder_add_net4_src(
-					builder, addr, (const uint8_t *)&mask
-				);
+				builder_add_net6_src(builder, net);
 			} else {
-				builder_add_net4_dst(
-					builder, addr, (const uint8_t *)&mask
-				);
+				builder_add_net6_dst(builder, net);
 			}
 		}
 
@@ -501,7 +543,7 @@ stress(void *arena,
 			malloc(sizeof(uint32_t) * num_rules); // reserve
 	}
 
-	// Initialize both filters
+	// Initialize filter
 	struct filter filter;
 	switch (sign) {
 	case src:
@@ -538,25 +580,23 @@ stress(void *arena,
 	struct packet **packets = malloc(sizeof(struct packet *) * num_packets);
 	for (size_t packet_idx = 0; packet_idx < num_packets; ++packet_idx) {
 		packets[packet_idx] = malloc(sizeof(struct packet));
-		uint8_t src_ip[4], dst_ip[4];
+		uint8_t src_ip[NET6_LEN], dst_ip[NET6_LEN];
+
 		for (size_t i = 0; i < 2; ++i) {
-			uint8_t a = 1 + rng_next(&rng) % 12;
-			uint8_t b = 1 + rng_next(&rng) % 10;
-			uint8_t c = 128 + rng_next(&rng) % 12;
-			uint8_t d = 128 + rng_next(&rng) % 10;
-			if (i == 0) {
-				src_ip[0] = a;
-				src_ip[1] = b;
-				src_ip[2] = c;
-				src_ip[3] = d;
-			} else {
-				dst_ip[0] = a;
-				dst_ip[1] = b;
-				dst_ip[2] = c;
-				dst_ip[3] = d;
+			uint8_t *ip = (i == 0) ? src_ip : dst_ip;
+			ip[0] = 0x20;
+			ip[1] = 0x01;
+			ip[2] = 0x0d;
+			ip[3] = 0xb8;
+			for (size_t j = 4; j < 8; ++j) {
+				ip[j] = (uint8_t)(rng_next(&rng) % 256);
+			}
+			for (size_t j = 8; j < NET6_LEN; ++j) {
+				ip[j] = (uint8_t)(rng_next(&rng) % 256);
 			}
 		}
-		int fill_result = fill_packet_net4(
+
+		int fill_result = fill_packet_net6(
 			packets[packet_idx],
 			src_ip,
 			dst_ip,
@@ -566,17 +606,18 @@ stress(void *arena,
 			0
 		);
 		assert(fill_result == 0);
+
 		const int check_src = sign == src || sign == src_dst;
 		const int check_dst = sign == dst || sign == src_dst;
 		for (size_t rule_idx = 0; rule_idx < num_rules; ++rule_idx) {
 			struct filter_rule *rule = &rules[rule_idx];
 			int ok = 1;
 			if (check_src &&
-			    !is_ip_from_net(&rule->net4.srcs[0], src_ip)) {
+			    !is_ip_from_net(&rule->net6.srcs[0], src_ip)) {
 				ok = 0;
 			}
 			if (check_dst &&
-			    !is_ip_from_net(&rule->net4.dsts[0], dst_ip)) {
+			    !is_ip_from_net(&rule->net6.dsts[0], dst_ip)) {
 				ok = 0;
 			}
 			if (ok) {
@@ -692,6 +733,8 @@ main() {
 			    stress_case->seed);
 		}
 	}
+
+	(void)stress;
 
 	free(arena);
 

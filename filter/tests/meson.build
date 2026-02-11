@@ -40,6 +40,16 @@ test_filter_basic_net4_fast = executable('basic_net4_fast',
 )
 test('basic_net4_fast', test_filter_basic_net4_fast, suite: ['filter'])
 
+# test basic net6 fast
+test_filter_basic_net6_fast = executable('basic_net6_fast',
+['basic_net6_fast.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('basic_net6_fast', test_filter_basic_net6_fast, suite: ['filter'])
+
 # test basic net6
 test_filter_basic_net6 = executable('basic_net6',
 ['basic_net6.c'],
