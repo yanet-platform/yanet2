@@ -150,7 +150,7 @@ message PortsRange {
 // and counted in the packet_src_not_allowed counter.
 //
 // FILTERING BEHAVIOR:
-// - If allowed_srcs list is empty: All sources are permitted (no filtering)
+// - If allowed_srcs list is empty: All sources are denied (no traffic allowed)
 // - If allowed_srcs contains entries: Only matching sources are permitted
 // - Multiple AllowedSrc entries are evaluated with OR logic (any match allows)
 //
@@ -213,13 +213,13 @@ message VirtualService {
 	// sources is dropped and counted in the packet_src_not_allowed counter.
 	//
 	// BEHAVIOR:
-	// - Empty list: All sources are permitted (no filtering applied)
+	// - Empty list: All sources are denied (no traffic allowed)
 	// - Non-empty list: Only sources matching at least one AllowedSrc entry
 	//   are permitted
 	//
 	// MATCHING LOGIC:
 	// For each incoming packet:
-	// 1. If allowed_srcs is empty → ACCEPT
+	// 1. If allowed_srcs is empty → DROP
 	// 2. For each AllowedSrc entry:
 	//    a. Check if packet source IP matches the network prefix
 	//    b. If ports list is empty → ACCEPT (IP match is sufficient)

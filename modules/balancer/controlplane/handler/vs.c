@@ -311,8 +311,8 @@ src_filter_rules(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_COMPILER_DECLARE(vs_acl_ipv4, net4_src, port_src);
-FILTER_COMPILER_DECLARE(vs_acl_ipv6, net6_src, port_src);
+FILTER_COMPILER_DECLARE(vs_acl_ipv4, net4_fast_src, port_src);
+FILTER_COMPILER_DECLARE(vs_acl_ipv6, net6_fast_src, port_src);
 
 ////////////////////////////////////////////////////////////////////////////////
 

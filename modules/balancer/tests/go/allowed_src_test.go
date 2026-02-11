@@ -8,7 +8,7 @@ package balancer_test
 // # Source Filtering Behavior
 // - Packets from allowed source ranges are accepted and forwarded
 // - Packets from non-allowed source ranges are dropped
-// - Empty allowed_srcs list allows all sources
+// - Empty allowed_srcs list denies all sources
 // - 0.0.0.0/0 (IPv4) or ::/0 (IPv6) allows all sources
 //
 // # Protocol Coverage
@@ -25,13 +25,14 @@ package balancer_test
 // - outgoing_packets counter increases only for allowed packets
 // - created_sessions counter increases only for allowed packets
 //
-// The test uses 6 virtual services with different configurations:
+// The test uses 7 virtual services with different configurations:
 // - VS1: IPv4 TCP port 80 with allowed_src 10.0.1.0/24
 // - VS2: IPv4 UDP port 5353 with allowed_src 10.0.2.0/24
 // - VS3: IPv6 TCP port 8080 with allowed_src 2001:db8:1::/48
 // - VS4: IPv6 UDP port 5353 with allowed_src 2001:db8:2::/48
 // - VS5: IPv4 TCP port 443 with allowed_src 0.0.0.0/1 + 128.0.0.0/1 (allow all IPv4)
 // - VS6: IPv4 TCP port 8443 with allowed_src 0.0.0.0/0 (allow all)
+// - VS7: IPv4 TCP port 9443 with empty allowed_src (deny all)
 
 import (
 	"net/netip"
@@ -65,13 +66,17 @@ var (
 	allowedSrcVs4IP   = netip.MustParseAddr("2001:db8:200::1")
 	allowedSrcVs4Port = uint16(5353)
 
-	// VS5: IPv4 TCP with empty allowed_src (allow all)
+	// VS5: IPv4 TCP with large CIDR ranges (allow all)
 	allowedSrcVs5IP   = netip.MustParseAddr("10.10.5.1")
 	allowedSrcVs5Port = uint16(443)
 
 	// VS6: IPv4 TCP with 0.0.0.0/0 allowed_src (allow all)
 	allowedSrcVs6IP   = netip.MustParseAddr("10.10.6.1")
 	allowedSrcVs6Port = uint16(8443)
+
+	// VS7: IPv4 TCP with empty allowed_src (deny all)
+	allowedSrcVs7IP   = netip.MustParseAddr("10.10.7.1")
+	allowedSrcVs7Port = uint16(9443)
 
 	// Real servers for allowed_src tests
 	allowedSrcRealIPv4 = netip.MustParseAddr("192.168.100.1")
@@ -82,7 +87,7 @@ var (
 	allowedSrcBalancerSrcIPv6 = netip.MustParseAddr("fe80::5")
 )
 
-// createAllowedSrcTestConfig creates a balancer configuration with 6 virtual services
+// createAllowedSrcTestConfig creates a balancer configuration with 7 virtual services
 // covering different allowed_src scenarios
 func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 	return &balancerpb.BalancerConfig{
@@ -412,6 +417,44 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 					},
 					Peers: []*balancerpb.Addr{},
 				},
+				// VS7: IPv4 TCP with empty allowed_src (deny all)
+				{
+					Id: &balancerpb.VsIdentifier{
+						Addr: &balancerpb.Addr{
+							Bytes: allowedSrcVs7IP.AsSlice(),
+						},
+						Port:  uint32(allowedSrcVs7Port),
+						Proto: balancerpb.TransportProto_TCP,
+					},
+					Scheduler:   balancerpb.VsScheduler_ROUND_ROBIN,
+					AllowedSrcs: []*balancerpb.AllowedSrc{},
+					Flags: &balancerpb.VsFlags{
+						Gre:    false,
+						FixMss: false,
+						Ops:    false,
+						PureL3: false,
+						Wlc:    false,
+					},
+					Reals: []*balancerpb.Real{
+						{
+							Id: &balancerpb.RelativeRealIdentifier{
+								Ip: &balancerpb.Addr{
+									Bytes: allowedSrcRealIPv4.AsSlice(),
+								},
+								Port: 0,
+							},
+							Weight: 1,
+							SrcAddr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("4.4.4.4").AsSlice(),
+							},
+							SrcMask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
+							},
+						},
+					},
+					Peers: []*balancerpb.Addr{},
+				},
 			},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 60,
@@ -530,6 +573,99 @@ func TestAllowedSrc(t *testing.T) {
 	t.Run("Zero_CIDR_AllowsAll", func(t *testing.T) {
 		testZeroCIDRAllowsAll(t, ts, statsRef)
 	})
+
+	// Test empty allowed_src (deny all)
+	t.Run("Empty_AllowedSrc_DeniesAll", func(t *testing.T) {
+		testEmptyAllowedSrcDeniesAll(t, ts, statsRef)
+	})
+}
+
+// testEmptyAllowedSrcDeniesAll tests that empty allowed_src denies all sources
+func testEmptyAllowedSrcDeniesAll(
+	t *testing.T,
+	ts *utils.TestSetup,
+	statsRef *balancerpb.PacketHandlerRef,
+) {
+	t.Helper()
+
+	// Get initial stats
+	initialStats, err := ts.Balancer.Stats(statsRef)
+	require.NoError(t, err)
+	initialVsStats := findVsStats(
+		initialStats,
+		allowedSrcVs7IP,
+		allowedSrcVs7Port,
+		balancerpb.TransportProto_TCP,
+	)
+	require.NotNil(t, initialVsStats, "VS7 stats should exist")
+
+	// Send packets from various sources - all should be denied
+	testSources := []string{
+		"10.0.1.1",
+		"10.0.99.99",
+		"192.168.1.1",
+		"1.2.3.4",
+		"172.16.0.1",
+	}
+
+	for _, srcIP := range testSources {
+		clientIP := netip.MustParseAddr(srcIP)
+		clientPort := uint16(60000)
+
+		packetLayers := utils.MakeTCPPacket(
+			clientIP,
+			clientPort,
+			allowedSrcVs7IP,
+			allowedSrcVs7Port,
+			&layers.TCP{SYN: true},
+		)
+		packet := xpacket.LayersToPacket(t, packetLayers...)
+
+		result, err := ts.Mock.HandlePackets(packet)
+		require.NoError(t, err)
+		require.Empty(
+			t,
+			result.Output,
+			"expected no output packets for source %s when allowed_src is empty",
+			srcIP,
+		)
+		require.Equal(
+			t,
+			1,
+			len(result.Drop),
+			"expected 1 dropped packet for source %s when allowed_src is empty",
+			srcIP,
+		)
+	}
+
+	// Get final stats
+	finalStats, err := ts.Balancer.Stats(statsRef)
+	require.NoError(t, err)
+	finalVsStats := findVsStats(
+		finalStats,
+		allowedSrcVs7IP,
+		allowedSrcVs7Port,
+		balancerpb.TransportProto_TCP,
+	)
+	require.NotNil(t, finalVsStats, "VS7 stats should exist")
+
+	// Verify counters - all packets should be blocked
+	assert.Equal(
+		t,
+		initialVsStats.PacketSrcNotAllowed+uint64(len(testSources)),
+		finalVsStats.PacketSrcNotAllowed,
+		"packet_src_not_allowed should increase by number of test sources when allowed_src is empty",
+	)
+	assert.Equal(t,
+		initialVsStats.OutgoingPackets,
+		finalVsStats.OutgoingPackets,
+		"outgoing_packets should not increase when allowed_src is empty",
+	)
+	assert.Equal(t,
+		initialVsStats.CreatedSessions,
+		finalVsStats.CreatedSessions,
+		"created_sessions should not increase when allowed_src is empty",
+	)
 }
 
 // testIPv4TCPAllowed tests that packets from allowed IPv4 source are accepted

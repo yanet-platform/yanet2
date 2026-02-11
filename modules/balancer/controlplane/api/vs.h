@@ -254,7 +254,8 @@ struct ports_range {
  * and counted in the packet_src_not_allowed counter.
  *
  * FILTERING BEHAVIOR:
- * - If allowed_src array is empty (allowed_src_count = 0): All sources permitted
+ * - If allowed_src array is empty (allowed_src_count = 0): All sources
+ * denied
  * - If allowed_src contains entries: Only matching sources are permitted
  * - Multiple allowed_src entries are evaluated with OR logic (any match allows)
  *
@@ -271,7 +272,8 @@ struct ports_range {
  *    net = {192.168.0.0, 255.255.0.0}, port_ranges = [{1024, 65535}], count = 1
  *
  * 3. Allow specific ports from 172.16.0.0/12:
- *    net = {172.16.0.0, 255.240.0.0}, port_ranges = [{80, 80}, {443, 443}], count = 2
+ *    net = {172.16.0.0, 255.240.0.0}, port_ranges = [{80, 80}, {443, 443}],
+ * count = 2
  */
 struct allowed_src {
 	/**
@@ -370,17 +372,19 @@ struct vs_config {
 	 * sources is dropped and counted in the packet_src_not_allowed counter.
 	 *
 	 * BEHAVIOR:
-	 * - NULL or allowed_src_count = 0: All sources are permitted (no filtering)
-	 * - Non-NULL with allowed_src_count > 0: Only matching sources permitted
+	 * - NULL or allowed_src_count = 0: All sources are denied (no traffic
+	 * allowed)
+	 * - Non-NULL with allowed_src_count > 0: Only matching sources
+	 * permitted
 	 *
 	 * MATCHING LOGIC:
 	 * For each incoming packet:
-	 * 1. If allowed_src is NULL or count = 0 → ACCEPT
+	 * 1. If allowed_src is NULL or count = 0 → DROP
 	 * 2. For each allowed_src entry:
 	 *    a. Check if packet source IP matches the network prefix
-	 *    b. If port_ranges is NULL or count = 0 → ACCEPT (IP match sufficient)
-	 *    c. If port_ranges specified, check if source port matches any range
-	 *    d. If both IP and port match → ACCEPT
+	 *    b. If port_ranges is NULL or count = 0 → ACCEPT (IP match
+	 * sufficient) c. If port_ranges specified, check if source port matches
+	 * any range d. If both IP and port match → ACCEPT
 	 * 3. If no entry matches → DROP (increment packet_src_not_allowed)
 	 *
 	 * USE CASES:

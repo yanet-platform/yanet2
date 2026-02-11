@@ -29,8 +29,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 // Declare filter compiler signatures for VS lookup tables
-FILTER_COMPILER_DECLARE(vs_lookup_ipv4, net4_dst, port_dst, proto);
-FILTER_COMPILER_DECLARE(vs_lookup_ipv6, net6_dst, port_dst, proto);
+FILTER_COMPILER_DECLARE(vs_lookup_ipv4, net4_fast_dst, port_dst, proto);
+FILTER_COMPILER_DECLARE(vs_lookup_ipv6, net6_fast_dst, port_dst, proto);
 
 ////////////////////////////////////////////////////////////////////////////////
 

@@ -191,7 +191,7 @@ message PortsRange {
 
 ### Behavior
 
-- **Empty `allowed_srcs` list**: All source addresses are permitted (no filtering)
+- **Empty `allowed_srcs` list**: All source addresses are denied (no traffic allowed)
 - **Non-empty `allowed_srcs` list**: Only traffic from matching sources is accepted
 - **Multiple entries**: Evaluated with OR logic (any match allows the packet)
 
@@ -206,7 +206,7 @@ Each `AllowedSrc` entry can optionally specify source port ranges:
 ### Matching Logic
 
 For each incoming packet:
-1. If `allowed_srcs` is empty → **ACCEPT**
+1. If `allowed_srcs` is empty → **DROP**
 2. For each `AllowedSrc` entry:
    - Check if packet source IP matches the network prefix: `(src_ip & mask) == (net.addr & mask)`
    - If `ports` list is empty → **ACCEPT** (IP match is sufficient)
