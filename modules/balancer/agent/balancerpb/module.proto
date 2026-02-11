@@ -134,7 +134,7 @@ message PortsRange {
 	// Valid range: 0-65535
 	// Must be less than or equal to 'to' field.
 	uint32 from = 1;
-	
+
 	// Ending port of the range (inclusive).
 	//
 	// Valid range: 0-65535
@@ -167,7 +167,8 @@ message PortsRange {
 //    net = 192.168.0.0/255.255.0.0, ports = [{from: 1024, to: 65535}]
 //
 // 3. Allow specific ports from 172.16.0.0/12:
-//    net = 172.16.0.0/255.240.0.0, ports = [{from: 80, to: 80}, {from: 443, to: 443}]
+//    net = 172.16.0.0/255.240.0.0, ports = [{from: 80, to: 80}, {from: 443, to:
+//    443}]
 message AllowedSrc {
 	// Network prefix (address and mask) for source filtering.
 	//
@@ -176,7 +177,8 @@ message AllowedSrc {
 	//
 	// Special cases:
 	// - 0.0.0.0/0.0.0.0 (IPv4) or ::/:: (IPv6): Matches all addresses
-	// - Single host: Use full mask (255.255.255.255 or ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff)
+	// - Single host: Use full mask (255.255.255.255 or
+	// ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff)
 	Net net = 1;
 
 	// Optional source port ranges for additional filtering.
@@ -221,9 +223,10 @@ message VirtualService {
 	// 2. For each AllowedSrc entry:
 	//    a. Check if packet source IP matches the network prefix
 	//    b. If ports list is empty → ACCEPT (IP match is sufficient)
-	//    c. If ports list is non-empty, check if source port matches any range
-	//    d. If both IP and port match → ACCEPT
-	// 3. If no AllowedSrc entry matches → DROP (increment packet_src_not_allowed)
+	//    c. If ports list is non-empty, check if source port matches any
+	//    range d. If both IP and port match → ACCEPT
+	// 3. If no AllowedSrc entry matches → DROP (increment
+	// packet_src_not_allowed)
 	//
 	// USE CASES:
 	// - Restrict access to trusted networks
