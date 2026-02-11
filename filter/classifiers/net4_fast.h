@@ -1,0 +1,10 @@
+#pragma once
+
+#include "common/btree/u32.h"
+
+////////////////////////////////////////////////////////////////////////////////
+
+struct net4_fast_classifier {
+	struct btree_u32 btree;
+	uint32_t *to;
+};

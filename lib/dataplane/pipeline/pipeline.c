@@ -136,11 +136,28 @@ function_ectx_process(
 		packet_list_bytes_sum(&packet_front->output)
 	);
 
-	// FIXME route through chains
-	uint64_t chain_idx = 0;
-	struct chain_ectx *chain_ectx =
-		ADDR_OF(function_ectx->chain_map + chain_idx);
-	chain_ectx_process(dp_worker, chain_ectx, packet_front);
+	// FIXME: do not create schedule for each invocation
+	struct packet_front schedule[function_ectx->chain_count];
+	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx)
+		packet_front_init(schedule + idx);
+
+	struct packet *packet = packet_list_pop(&packet_front->output);
+	while (packet != NULL) {
+		uint64_t chain_idx =
+			function_ectx->chain_map
+				[packet->hash % function_ectx->chain_map_size];
+		packet_front_output(schedule + chain_idx, packet);
+		packet = packet_list_pop(&packet_front->output);
+	}
+
+	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
+	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
+		struct chain_ectx *chain_ectx = ADDR_OF(chains + idx);
+
+		chain_ectx_process(dp_worker, chain_ectx, schedule + idx);
+
+		packet_front_merge(packet_front, schedule + idx);
+	}
 
 	counter_add_packets_bytes(
 		cp_function->counter_packet_out_count,

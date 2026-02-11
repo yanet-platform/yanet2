@@ -65,7 +65,7 @@ struct function_ectx {
 	uint64_t chain_count;
 	struct chain_ectx **chains;
 	uint64_t chain_map_size;
-	struct chain_ectx *chain_map[];
+	uint64_t chain_map[];
 };
 
 struct pipeline_ectx {

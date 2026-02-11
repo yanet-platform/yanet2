@@ -1,6 +1,7 @@
 #include "filter/compiler/helper.h"
 #include "common/registry.h"
 #include "filter/rule.h"
+#include <stdio.h>
 
 int
 init_dummy_registry(

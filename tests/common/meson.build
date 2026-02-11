@@ -79,3 +79,37 @@ executable(
   link_args: yanet_link_args,
   dependencies: dependencies
 )
+
+big_array_test = executable(
+  'big_array_test',
+  ['big_array_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies
+)
+test('big_array', big_array_test, suite: ['common'])
+
+btree_test = executable(
+  'btree_test',
+  ['btree_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies
+)
+test('btree', btree_test, suite: ['common'])
+
+executable(
+  'btree_bench_u32',
+  ['btree_bench_u32.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies
+)
+
+executable(
+  'btree_bench_u64',
+  ['btree_bench_u64.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies
+)

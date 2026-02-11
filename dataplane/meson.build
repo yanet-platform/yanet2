@@ -9,6 +9,7 @@ lib_dependencies = [
   lib_time_dp_dep,
   lib_config_dp_dep,
   lib_config_cp_dep,
+  lib_filter_query_dep,
 ]
 
 lib_sources = files(
