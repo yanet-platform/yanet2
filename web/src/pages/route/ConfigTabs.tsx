@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, TabProvider, TabList, Tab, TabPanel } from '@gravity-ui/uikit';
 import { VirtualizedRouteTable } from './VirtualizedRouteTable';
 import type { ConfigTabsProps } from './types';
-import './route.css';
+import './route.scss';
 
 export const ConfigTabs: React.FC<ConfigTabsProps> = ({
     configs,
@@ -11,6 +11,7 @@ export const ConfigTabs: React.FC<ConfigTabsProps> = ({
     getRoutesData,
     onSelectionChange,
     getRouteId,
+    onEditRoute,
 }) => {
     const validActiveConfig = configs.includes(activeConfig) ? activeConfig : configs[0] || '';
 
@@ -34,6 +35,7 @@ export const ConfigTabs: React.FC<ConfigTabsProps> = ({
                                 selectedIds={new Set(selectedIds)}
                                 onSelectionChange={(ids) => onSelectionChange(configName, ids)}
                                 getRouteId={getRouteId}
+                                onEditRoute={onEditRoute}
                             />
                         </TabPanel>
                     );

@@ -3,7 +3,7 @@ import { Box, Text, Dialog } from '@gravity-ui/uikit';
 import { RouteListItem } from './RouteListItem';
 import { formatRouteCount } from './utils';
 import type { DeleteRouteDialogProps } from './types';
-import './route.css';
+import './route.scss';
 
 export const DeleteRouteDialog: React.FC<DeleteRouteDialogProps> = ({
     open,

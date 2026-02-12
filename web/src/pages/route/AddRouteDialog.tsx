@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text, Dialog, TextInput, Switch } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
 import type { AddRouteDialogProps } from './types';
-import './route.css';
+import './route.scss';
 
 export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
     open,

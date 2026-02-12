@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Box, Checkbox, Text, Button } from '@gravity-ui/uikit';
+import { Box, Checkbox, Text, Button, Icon } from '@gravity-ui/uikit';
 import { Pencil } from '@gravity-ui/icons';
 import { ROW_HEIGHT, TOTAL_WIDTH, cellStyles } from './constants';
 import { formatDevices, formatVlanRanges, formatIPNets, formatMode } from './hooks';
@@ -106,7 +106,7 @@ export const RuleRow: React.FC<RuleRowProps> = memo(({
                     size="s"
                     onClick={handleEditClick}
                 >
-                    <Pencil />
+                    <Icon data={Pencil} size={16} />
                 </Button>
             </Box>
         </Box>

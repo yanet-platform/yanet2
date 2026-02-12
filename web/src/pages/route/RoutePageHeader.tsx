@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text, Flex, Button, Select, Switch, Label } from '@gravity-ui/uikit';
 import type { RoutePageHeaderProps } from './types';
 import { MOCK_CONFIGS } from './mockData';
-import './route.css';
+import './route.scss';
 
 const mockOptions = Object.entries(MOCK_CONFIGS).map(([key, value]) => ({
     value: key,

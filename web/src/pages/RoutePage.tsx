@@ -15,12 +15,13 @@ import {
     RoutePageHeader,
     DeleteRouteDialog,
     AddRouteDialog,
+    EditRouteDialog,
     RouteConfigContent,
     VirtualizedRouteTable,
     useMockMode,
     useRouteData,
 } from './route';
-import './route/route.css';
+import './route/route.scss';
 
 const RoutePage: React.FC = () => {
     const {
@@ -50,6 +51,8 @@ const RoutePage: React.FC = () => {
 
     const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
     const [addDialogOpen, setAddDialogOpen] = useState<boolean>(false);
+    const [editDialogOpen, setEditDialogOpen] = useState<boolean>(false);
+    const [editingRoute, setEditingRoute] = useState<Route | null>(null);
     const [addRouteForm, setAddRouteForm] = useState<AddRouteFormData>({
         configName: '',
         prefix: '',
@@ -95,6 +98,30 @@ const RoutePage: React.FC = () => {
             toaster.error('flush-route-error', 'Failed to flush routes', err);
         }
     }, [activeConfigTab]);
+
+    const handleEditRouteClick = useCallback((route: Route): void => {
+        setEditingRoute(route);
+        setEditDialogOpen(true);
+    }, []);
+
+    const handleEditRouteConfirm = useCallback(async (prefix: string, nexthopAddr: string, doFlush: boolean): Promise<void> => {
+        try {
+            await API.route.insertRoute({
+                name: activeConfigTab,
+                prefix,
+                nexthop_addr: nexthopAddr,
+                do_flush: doFlush,
+                source_id: RouteSourceID.STATIC,
+            });
+
+            const reloadedRoutes = await reloadRoutes(configs);
+            setConfigRoutes(reloadedRoutes);
+
+            toaster.success('edit-route-success', 'Route updated successfully');
+        } catch (err) {
+            toaster.error('edit-route-error', 'Failed to update route', err);
+        }
+    }, [activeConfigTab, configs, reloadRoutes, setConfigRoutes]);
 
     const handleAddRouteConfirm = useCallback(async (): Promise<void> => {
         const configName = addRouteForm.configName.trim();
@@ -311,6 +338,7 @@ const RoutePage: React.FC = () => {
                     getRoutesData={getRoutesData}
                     onSelectionChange={handleSelectionChange}
                     getRouteId={getRouteId}
+                    onEditRoute={handleEditRouteClick}
                 />
             </Box>
 
@@ -327,6 +355,19 @@ const RoutePage: React.FC = () => {
                 onConfirm={handleAddRouteConfirm}
                 form={addRouteForm}
                 onFormChange={setAddRouteForm}
+                validatePrefix={validatePrefix}
+                validateNexthop={validateNexthop}
+            />
+
+            <EditRouteDialog
+                open={editDialogOpen}
+                onClose={() => {
+                    setEditDialogOpen(false);
+                    setEditingRoute(null);
+                }}
+                onConfirm={handleEditRouteConfirm}
+                route={editingRoute}
+                configName={activeConfigTab}
                 validatePrefix={validatePrefix}
                 validateNexthop={validateNexthop}
             />

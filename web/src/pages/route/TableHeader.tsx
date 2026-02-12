@@ -3,7 +3,7 @@ import { Box, Text, Checkbox } from '@gravity-ui/uikit';
 import { SortableHeader } from './SortableHeader';
 import type { SortState, SortableColumn } from './types';
 import { cellStyles, TOTAL_WIDTH, HEADER_HEIGHT } from './constants';
-import './route.css';
+import './route.scss';
 
 export interface TableHeaderProps {
     sortState: SortState;
@@ -34,6 +34,9 @@ export const TableHeader: React.FC<TableHeaderProps> = ({
             <SortableHeader column="pref" label="Pref" style={cellStyles.pref} sortState={sortState} onSort={onSort} disabled={!canSort} />
             <SortableHeader column="as_path_len" label="AS Path" style={cellStyles.as_path_len} sortState={sortState} onSort={onSort} disabled={!canSort} />
             <SortableHeader column="source" label="Source" style={cellStyles.source} sortState={sortState} onSort={onSort} disabled={!canSort} />
+            <Box style={cellStyles.actions}>
+                <Text variant="subheader-1">Edit</Text>
+            </Box>
         </Box>
     );
 };

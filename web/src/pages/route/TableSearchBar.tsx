@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, TextInput, Loader, Label, Text } from '@gravity-ui/uikit';
 import { SEARCH_BAR_HEIGHT } from './constants';
-import './route.css';
+import './route.scss';
 
 export interface TableSearchBarProps {
     searchQuery: string;

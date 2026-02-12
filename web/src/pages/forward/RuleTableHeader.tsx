@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text, Checkbox } from '@gravity-ui/uikit';
 import { HEADER_HEIGHT, TOTAL_WIDTH, cellStyles } from './constants';
-import './forward.css';
+import './forward.scss';
 
 export interface RuleTableHeaderProps {
     isAllSelected: boolean;

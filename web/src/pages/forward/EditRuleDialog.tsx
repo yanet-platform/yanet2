@@ -5,7 +5,7 @@ import type { EditRuleDialogProps } from './types';
 import type { Rule } from '../../api/forward';
 import { ForwardMode, FORWARD_MODE_LABELS } from '../../api/forward';
 import { parseDevices, parseVlanRanges, formatDevices, formatVlanRanges, formatIPNets, parsePrefixesToIPNets } from './hooks';
-import './forward.css';
+import './forward.scss';
 
 const MODE_OPTIONS = [
     { value: 'NONE', content: 'NONE' },

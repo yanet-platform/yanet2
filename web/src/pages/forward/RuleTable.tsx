@@ -8,7 +8,7 @@ import { RuleRow } from './RuleRow';
 import { RuleSearchBar } from './RuleSearchBar';
 import { RuleTableHeader } from './RuleTableHeader';
 import { formatDevices, formatIPNets, formatMode } from './hooks';
-import './forward.css';
+import './forward.scss';
 
 export const RuleTable: React.FC<RuleTableProps> = ({
     rules,

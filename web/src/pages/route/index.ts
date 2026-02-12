@@ -18,6 +18,7 @@ export * from './RoutePageHeader';
 export * from './RouteListItem';
 export * from './DeleteRouteDialog';
 export * from './AddRouteDialog';
+export * from './EditRouteDialog';
 export * from './ConfigTabs';
 export * from './RouteConfigContent';
 export * from './VirtualizedRouteTable';

@@ -1,0 +1,147 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+// Rule Table
+.forward-table {
+    @include flex-column;
+
+    &__container {
+        height: 100%;
+    }
+
+    &__wrapper {
+        flex: 1;
+        border: 1px solid var(--g-color-line-generic);
+        border-radius: $radius-lg;
+        overflow: hidden;
+        @include flex-column;
+    }
+
+    &__body {
+        overflow: auto;
+        contain: strict;
+    }
+
+    &__virtual-container {
+        position: relative;
+    }
+
+    &__empty {
+        padding: 40px $spacing-xl;
+        text-align: center;
+    }
+
+    &__footer {
+        @include flex-row;
+        justify-content: space-between;
+        flex-shrink: 0;
+    }
+}
+
+// Search Bar
+.forward-search-bar {
+    @include flex-row($spacing-lg);
+    flex-shrink: 0;
+
+    &__input {
+        width: 300px;
+    }
+
+    &__stats {
+        @include flex-row($spacing-sm);
+    }
+
+    &__clear {
+        cursor: pointer;
+    }
+
+    &__spacer {
+        flex: 1;
+    }
+}
+
+// ForwardPage
+.forward-page {
+    &__content {
+        width: 100%;
+        height: 100%;
+        flex: 1;
+        min-width: 0;
+        padding: $spacing-xl;
+        @include flex-column;
+    }
+
+    &__empty {
+        width: 100%;
+        flex: 1;
+        min-width: 0;
+        padding: $spacing-xl;
+    }
+}
+
+// Config Tabs
+.forward-config-tabs {
+    @include flex-column;
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+
+    &__list {
+        margin-bottom: $spacing-lg;
+        flex-shrink: 0;
+    }
+
+    &__content {
+        flex: 1;
+        min-height: 0;
+        @include flex-column;
+        height: 100%;
+    }
+
+    &__panel {
+        flex: 1;
+        @include flex-column;
+        min-height: 0;
+        height: 100%;
+    }
+}
+
+// Page Header
+.forward-page-header {
+    width: 100%;
+    align-items: center;
+
+    &__spacer {
+        flex: 1;
+    }
+
+    &__actions {
+        @include flex-row($spacing-lg);
+    }
+}
+
+// Table Header
+.forward-table-header {
+    @include flex-row;
+    border-bottom: 1px solid var(--g-color-line-generic);
+    background-color: var(--g-color-base-generic);
+    padding: 0 $spacing-sm;
+    flex-shrink: 0;
+}
+
+// Dialog
+.forward-dialog {
+    &__body {
+        @include flex-column($spacing-lg);
+        width: 450px;
+        max-width: 90vw;
+    }
+
+    &__text-input {
+        width: 100%;
+    }
+
+    &__select {
+        width: 100%;
+    }
+}

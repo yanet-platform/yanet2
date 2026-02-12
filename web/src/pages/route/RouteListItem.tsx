@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
 import type { RouteListItemProps } from './types';
-import './route.css';
+import './route.scss';
 
 export const RouteListItem: React.FC<RouteListItemProps> = ({ route }) => (
     <Box className="route-list-item">

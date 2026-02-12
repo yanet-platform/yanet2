@@ -13,7 +13,7 @@ import {
     useForwardData,
     rulesToItems,
 } from './forward';
-import './forward/forward.css';
+import './forward/forward.scss';
 
 const ForwardPage: React.FC = () => {
     const {

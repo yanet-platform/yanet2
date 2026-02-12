@@ -18,6 +18,7 @@ export const COLUMN_WIDTHS = {
     pref: 60,
     as_path_len: 80,
     source: 80,
+    actions: 80,
 } as const;
 
 export const TOTAL_WIDTH = Object.values(COLUMN_WIDTHS).reduce((a, b) => a + b, 0);
@@ -100,5 +101,14 @@ export const cellStyles: Record<keyof typeof COLUMN_WIDTHS, React.CSSProperties>
         maxWidth: COLUMN_WIDTHS.source,
         paddingRight: 8,
         userSelect: 'text',
+    },
+    actions: {
+        width: COLUMN_WIDTHS.actions,
+        minWidth: COLUMN_WIDTHS.actions,
+        maxWidth: COLUMN_WIDTHS.actions,
+        paddingRight: 8,
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
 };

@@ -1,4 +1,5 @@
-import { Checkbox } from '@gravity-ui/uikit';
+import { Checkbox, Button, Icon } from '@gravity-ui/uikit';
+import { Pencil } from '@gravity-ui/icons';
 import type { Route } from '../../api/routes';
 import { cellStyles, TOTAL_WIDTH, ROW_HEIGHT, ROUTE_SOURCES } from './constants';
 
@@ -8,11 +9,16 @@ export interface VirtualRowProps {
     start: number;
     isSelected: boolean;
     onSelect: (route: Route, checked: boolean) => void;
+    onEdit?: (route: Route) => void;
 }
 
-export const VirtualRow = ({ route, index, start, isSelected, onSelect }: VirtualRowProps) => {
+export const VirtualRow = ({ route, index, start, isSelected, onSelect, onEdit }: VirtualRowProps) => {
     const handleCheckboxChange = (checked: boolean) => {
         onSelect(route, checked);
+    };
+
+    const handleEditClick = () => {
+        onEdit?.(route);
     };
 
     return (
@@ -48,6 +54,15 @@ export const VirtualRow = ({ route, index, start, isSelected, onSelect }: Virtua
             <div style={cellStyles.pref}>{route.pref ?? '-'}</div>
             <div style={cellStyles.as_path_len}>{route.as_path_len ?? '-'}</div>
             <div style={cellStyles.source}>{ROUTE_SOURCES[route.source ?? 0] || 'Unknown'}</div>
+            <div style={cellStyles.actions}>
+                <Button
+                    view="flat"
+                    size="s"
+                    onClick={handleEditClick}
+                >
+                    <Icon data={Pencil} size={16} />
+                </Button>
+            </div>
         </div>
     );
 };

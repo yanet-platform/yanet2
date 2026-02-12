@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, TabProvider, TabList, Tab, TabPanel } from '@gravity-ui/uikit';
 import type { ConfigTabsProps } from './types';
-import './forward.css';
+import './forward.scss';
 
 export const ConfigTabs: React.FC<ConfigTabsProps> = ({
     configs,

@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Dialog, Text } from '@gravity-ui/uikit';
 import type { DeleteRuleDialogProps } from './types';
-import './forward.css';
+import './forward.scss';
 
 export const DeleteRuleDialog: React.FC<DeleteRuleDialogProps> = ({
     open,

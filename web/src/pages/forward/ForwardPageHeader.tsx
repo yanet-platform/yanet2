@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text, Flex, Button } from '@gravity-ui/uikit';
-import './forward.css';
+import './forward.scss';
 
 export interface ForwardPageHeaderProps {
     onAddRule: () => void;

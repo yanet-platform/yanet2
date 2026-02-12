@@ -9,7 +9,7 @@ import { ROW_HEIGHT, OVERSCAN, TOTAL_WIDTH, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FO
 import { VirtualRow } from './VirtualRow';
 import { TableSearchBar } from './TableSearchBar';
 import { TableHeader } from './TableHeader';
-import './route.css';
+import './route.scss';
 
 // Data source can be either a generator (for massive datasets) or a direct array
 type DataSource =
@@ -25,6 +25,7 @@ export interface VirtualizedRouteTableProps {
     selectedIds: Set<string>;
     onSelectionChange: (ids: string[]) => void;
     getRouteId: (route: Route) => string;
+    onEditRoute?: (route: Route) => void;
 }
 
 export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
@@ -33,6 +34,7 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
     selectedIds,
     onSelectionChange,
     getRouteId,
+    onEditRoute,
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const parentRef = useRef<HTMLDivElement>(null);
@@ -264,7 +266,7 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
                                 const routeId = getRouteId(route);
                                 const isSelected = selectedIds.has(routeId);
 
-                                return (
+                                    return (
                                     <VirtualRow
                                         key={virtualRow.index}
                                         route={route}
@@ -272,6 +274,7 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
                                         start={virtualRow.start}
                                         isSelected={isSelected}
                                         onSelect={handleRowSelect}
+                                        onEdit={onEditRoute}
                                     />
                                 );
                             })}

@@ -57,6 +57,16 @@ export interface AddRouteDialogProps {
     validateNexthop: (nexthop: string) => string | undefined;
 }
 
+export interface EditRouteDialogProps {
+    open: boolean;
+    onClose: () => void;
+    onConfirm: (prefix: string, nexthopAddr: string, doFlush: boolean) => Promise<void>;
+    route: Route | null;
+    configName: string;
+    validatePrefix: (prefix: string) => string | undefined;
+    validateNexthop: (nexthop: string) => string | undefined;
+}
+
 // Config routes data structure - shared across components
 export interface ConfigRoutesData {
     routes: Route[];
@@ -71,6 +81,7 @@ export interface RoutesByConfigProps {
     getRoutesData: (configName: string) => ConfigRoutesData;
     onSelectionChange: (configName: string, ids: string[]) => void;
     getRouteId: (route: Route) => string;
+    onEditRoute?: (route: Route) => void;
 }
 
 // Props for ConfigTabs and RouteConfigContent (without routeColumns since VirtualizedRouteTable doesn't need it)
