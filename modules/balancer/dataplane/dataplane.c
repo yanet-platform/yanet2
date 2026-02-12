@@ -14,6 +14,7 @@
 #include "lib/dataplane/config/zone.h"
 
 #include "dataplane.h"
+#include "decap.h"
 
 #include "handler/handler.h"
 #include "icmp/handle.h"
@@ -26,6 +27,11 @@
 struct balancer_module {
 	struct module module;
 };
+
+static inline int
+packet_ctx_try_decap(struct packet_ctx *ctx) {
+	return try_decap(ctx);
+}
 
 void
 handle_batch(size_t packets_count) {
@@ -80,6 +86,16 @@ balancer_handle_packets(
 
 		// Update module common stats
 		packet_ctx_update_common_stats_on_incoming_packet(ctx);
+
+		// Try decap packet if its destination
+		// is from the balancer decap list.
+		//
+		// If packet dst is from the destination list
+		// and decap failed, drop packet.
+		if (packet_ctx_try_decap(ctx) != 0) {
+			packet_ctx_drop_packet(ctx);
+			continue;
+		}
 
 		// batch is full
 		if (packets_count == batch_size) {

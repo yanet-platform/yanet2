@@ -359,6 +359,12 @@ func TestManager(t *testing.T) {
 			SourceAddressV6: &balancerpb.Addr{
 				Bytes: netip.MustParseAddr("2001:db8::1").AsSlice(),
 			},
+			DecapAddresses: []*balancerpb.Addr{
+				{Bytes: netip.MustParseAddr("10.13.11.215").AsSlice()},
+				{Bytes: netip.MustParseAddr("10.14.11.214").AsSlice()},
+				{Bytes: netip.MustParseAddr("2001:db8::3").AsSlice()},
+				{Bytes: netip.MustParseAddr("2001:db8::2").AsSlice()},
+			},
 		},
 		State: &balancerpb.StateConfig{
 			SessionTableCapacity:      &capacity,
@@ -928,6 +934,10 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 			SourceAddressV6: &balancerpb.Addr{
 				Bytes: netip.MustParseAddr("2001:db8::1").AsSlice(),
 			},
+			DecapAddresses: []*balancerpb.Addr{
+				{Bytes: netip.MustParseAddr("10.13.11.215").AsSlice()},
+				{Bytes: netip.MustParseAddr("2001:db8::3").AsSlice()},
+			},
 		},
 		State: &balancerpb.StateConfig{
 			SessionTableCapacity:      &capacity,
@@ -999,6 +1009,10 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 		require.Equal(t, 1, len(config.PacketHandler.Vs),
 			"should have 1 virtual service")
 
+		require.NotNil(t, config.PacketHandler.DecapAddresses,
+			"decap_addresses should be preserved")
+		require.Equal(t, 2, len(config.PacketHandler.DecapAddresses),
+			"should have 2 decap addresses")
 	})
 
 	// Test 2: Partial PacketHandler update - only virtual services
@@ -1193,6 +1207,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 		require.NotNil(t, config.PacketHandler.SourceAddressV6)
 		require.NotNil(t, config.PacketHandler.SessionsTimeouts)
 		require.NotNil(t, config.PacketHandler.Vs)
+		require.NotNil(t, config.PacketHandler.DecapAddresses)
 
 		// Verify values match previous state
 		require.Equal(t, 1, len(config.PacketHandler.Vs),
@@ -1256,6 +1271,9 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 				SourceAddressV6: &balancerpb.Addr{
 					Bytes: netip.MustParseAddr("2001:db8::100").AsSlice(),
 				},
+				DecapAddresses: []*balancerpb.Addr{
+					{Bytes: netip.MustParseAddr("10.200.200.200").AsSlice()},
+				},
 			},
 			State: &balancerpb.StateConfig{
 				SessionTableCapacity:      &newCapacity,
@@ -1287,6 +1305,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 			config.PacketHandler.SourceAddressV6.Bytes)
 		require.Equal(t, 1, len(config.PacketHandler.Vs))
 		require.Equal(t, uint32(53), config.PacketHandler.Vs[0].Id.Port)
+		require.Equal(t, 1, len(config.PacketHandler.DecapAddresses))
 
 		// Check State
 		require.NotNil(t, config.State)

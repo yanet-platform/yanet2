@@ -166,7 +166,8 @@ func createPacketTestConfig() *balancerpb.BalancerConfig {
 			SourceAddressV6: &balancerpb.Addr{
 				Bytes: balancerSrcIPv6.AsSlice(),
 			},
-			Vs: virtualServices,
+			Vs:             virtualServices,
+			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
 				TcpSynAck: 10,
 				TcpSyn:    10,

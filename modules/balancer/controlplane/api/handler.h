@@ -68,4 +68,32 @@ struct packet_handler_config {
 	 * - Other control plane traffic
 	 */
 	struct net6_addr source_v6;
+
+	/** Number of IPv4 decapsulation endpoints in 'decap_v4' array */
+	size_t decap_v4_count;
+
+	/**
+	 * Array of IPv4 addresses for tunnel decapsulation.
+	 *
+	 * Packets arriving with these destination addresses will be
+	 * decapsulated (tunnel unwrapped) before load balancing.
+	 * Useful for GRE, IPIP, or other tunnel protocols.
+	 *
+	 * Ownership: Caller allocates and manages this array
+	 */
+	struct net4_addr *decap_v4;
+
+	/** Number of IPv6 decapsulation endpoints in 'decap_v6' array */
+	size_t decap_v6_count;
+
+	/**
+	 * Array of IPv6 addresses for tunnel decapsulation.
+	 *
+	 * Packets arriving with these destination addresses will be
+	 * decapsulated (tunnel unwrapped) before load balancing.
+	 * Useful for GRE, IPIP, or other tunnel protocols.
+	 *
+	 * Ownership: Caller allocates and manages this array
+	 */
+	struct net6_addr *decap_v6;
 };

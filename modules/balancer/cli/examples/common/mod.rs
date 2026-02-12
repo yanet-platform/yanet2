@@ -137,6 +137,12 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                 source_address_v6: Some(balancerpb::Addr {
                     bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
                 }),
+                decap_addresses: vec![
+                    balancerpb::Addr { bytes: vec![192, 0, 2, 1] },
+                    balancerpb::Addr {
+                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                    },
+                ],
                 sessions_timeouts: Some(balancerpb::SessionsTimeouts {
                     tcp_syn_ack: 10,
                     tcp_syn: 10,
@@ -311,6 +317,8 @@ pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
                 incoming_packets: 1_234_567,
                 incoming_bytes: 1_288_490_188,
                 unexpected_network_proto: 0,
+                decap_successful: 50_000,
+                decap_failed: 123,
                 outgoing_packets: 1_234_000,
                 outgoing_bytes: 1_181_116_006,
             }),

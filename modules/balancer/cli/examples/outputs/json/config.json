@@ -107,6 +107,10 @@
       ],
       "source_address_v4": "192.0.2.1",
       "source_address_v6": "2001:db8::1",
+      "decap_addresses": [
+        "192.0.2.1",
+        "2001:db8::1"
+      ],
       "sessions_timeouts": {
         "tcp_syn_ack": 10,
         "tcp_syn": 10,

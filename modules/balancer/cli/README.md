@@ -248,6 +248,7 @@ Packet processing configuration containing:
 
 - `source_address_v4` - IPv4 source address for encapsulation
 - `source_address_v6` - IPv6 source address for encapsulation
+- `decap_addresses` - List of decapsulation addresses for tunnel unwrapping
 - `sessions_timeouts` - Session timeout configuration (in seconds):
   - `tcp_syn_ack` - TCP SYN-ACK timeout
   - `tcp_syn` - TCP SYN timeout
@@ -255,6 +256,7 @@ Packet processing configuration containing:
   - `tcp` - Established TCP connection timeout
   - `udp` - UDP session timeout
   - `default` - Default timeout for other protocols
+- `wlc` - WLC scheduler configuration
 
 ### state
 

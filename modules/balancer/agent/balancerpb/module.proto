@@ -521,13 +521,24 @@ message PacketHandlerConfig {
 	// real servers via IPIP or GRE (for IPv6 destinations).
 	Addr source_address_v6 = 3;
 
+	// Decapsulation addresses.
+	//
+	// CREATE scenario: REQUIRED (can be empty list)
+	// UPDATE scenario: REQUIRED (non-optional)
+	//
+	// If the balancer receives a packet with a destination address
+	// from this list, it attempts to decapsulate it (remove the
+	// outer IP header). Used for return traffic in DSR setups or
+	// multi-tier load balancing.
+	repeated Addr decap_addresses = 4;
+
 	// Session timeout configuration.
 	//
 	// CREATE scenario: REQUIRED
 	// UPDATE scenario: REQUIRED (non-optional)
 	//
 	// Defines how long sessions remain active in various states.
-	SessionsTimeouts sessions_timeouts = 4;
+	SessionsTimeouts sessions_timeouts = 5;
 }
 
 message PacketHandlerRef {

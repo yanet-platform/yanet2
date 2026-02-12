@@ -62,5 +62,7 @@ struct packet_ctx {
 		struct real *ptr;
 	} real;
 
+	// if packet was decapsulated
+	bool decap_flag;
 	bool processed;
 };

@@ -319,6 +319,9 @@ func TestProtoToFFIConfig_Valid(t *testing.T) {
 			SourceAddressV6: &balancerpb.Addr{
 				Bytes: netip.MustParseAddr("2001:db8::1").AsSlice(),
 			},
+			DecapAddresses: []*balancerpb.Addr{
+				{Bytes: netip.MustParseAddr("192.168.1.1").AsSlice()},
+			},
 		},
 		State: &balancerpb.StateConfig{
 			SessionTableCapacity:      ptrUint64(1000),
@@ -363,6 +366,7 @@ func TestProtoToFFIConfig_MissingRequiredFields(t *testing.T) {
 					SourceAddressV6: &balancerpb.Addr{
 						Bytes: netip.MustParseAddr("::1").AsSlice(),
 					},
+					DecapAddresses: []*balancerpb.Addr{},
 				},
 			},
 		},
@@ -378,6 +382,7 @@ func TestProtoToFFIConfig_MissingRequiredFields(t *testing.T) {
 					SourceAddressV6: &balancerpb.Addr{
 						Bytes: netip.MustParseAddr("::1").AsSlice(),
 					},
+					DecapAddresses: []*balancerpb.Addr{},
 				},
 				State: &balancerpb.StateConfig{
 					SessionTableMaxLoadFactor: ptrFloat32(0.75),
@@ -397,6 +402,7 @@ func TestProtoToFFIConfig_MissingRequiredFields(t *testing.T) {
 					SourceAddressV6: &balancerpb.Addr{
 						Bytes: netip.MustParseAddr("::1").AsSlice(),
 					},
+					DecapAddresses: []*balancerpb.Addr{},
 				},
 				State: &balancerpb.StateConfig{
 					SessionTableCapacity: ptrUint64(1000),
@@ -416,6 +422,7 @@ func TestProtoToFFIConfig_MissingRequiredFields(t *testing.T) {
 					SourceAddressV6: &balancerpb.Addr{
 						Bytes: netip.MustParseAddr("::1").AsSlice(),
 					},
+					DecapAddresses: []*balancerpb.Addr{},
 				},
 				State: &balancerpb.StateConfig{
 					SessionTableCapacity:      ptrUint64(1000),
@@ -453,6 +460,7 @@ func TestProtoToManagerConfig_WLCValidation(t *testing.T) {
 				SourceAddressV6: &balancerpb.Addr{
 					Bytes: netip.MustParseAddr("::1").AsSlice(),
 				},
+				DecapAddresses: []*balancerpb.Addr{},
 			},
 			State: &balancerpb.StateConfig{
 				SessionTableCapacity: ptrUint64(1000),
@@ -571,12 +579,18 @@ func TestProtoToHandlerConfig_Valid(t *testing.T) {
 		SourceAddressV6: &balancerpb.Addr{
 			Bytes: netip.MustParseAddr("2001:db8::1").AsSlice(),
 		},
+		DecapAddresses: []*balancerpb.Addr{
+			{Bytes: netip.MustParseAddr("192.168.1.1").AsSlice()},
+			{Bytes: netip.MustParseAddr("2001:db8::100").AsSlice()},
+		},
 	}
 
 	result, err := ProtoToHandlerConfig(config)
 	require.NoError(t, err)
 	assert.Equal(t, uint32(10), result.SessionsTimeouts.TcpSynAck)
 	assert.Len(t, result.VirtualServices, 1)
+	assert.Len(t, result.DecapV4, 1)
+	assert.Len(t, result.DecapV6, 1)
 }
 
 // TestProtoToHandlerConfig_MissingFields tests missing field validation
@@ -595,6 +609,7 @@ func TestProtoToHandlerConfig_MissingFields(t *testing.T) {
 				SourceAddressV6: &balancerpb.Addr{
 					Bytes: netip.MustParseAddr("::1").AsSlice(),
 				},
+				DecapAddresses: []*balancerpb.Addr{},
 			},
 		},
 		{
@@ -605,6 +620,7 @@ func TestProtoToHandlerConfig_MissingFields(t *testing.T) {
 				SourceAddressV6: &balancerpb.Addr{
 					Bytes: netip.MustParseAddr("::1").AsSlice(),
 				},
+				DecapAddresses: []*balancerpb.Addr{},
 			},
 		},
 		{
@@ -614,6 +630,20 @@ func TestProtoToHandlerConfig_MissingFields(t *testing.T) {
 				Vs:               []*balancerpb.VirtualService{},
 				SourceAddressV4: &balancerpb.Addr{
 					Bytes: netip.MustParseAddr("10.0.0.1").AsSlice(),
+				},
+				DecapAddresses: []*balancerpb.Addr{},
+			},
+		},
+		{
+			name: "Missing decap_addresses",
+			config: &balancerpb.PacketHandlerConfig{
+				SessionsTimeouts: &balancerpb.SessionsTimeouts{},
+				Vs:               []*balancerpb.VirtualService{},
+				SourceAddressV4: &balancerpb.Addr{
+					Bytes: netip.MustParseAddr("10.0.0.1").AsSlice(),
+				},
+				SourceAddressV6: &balancerpb.Addr{
+					Bytes: netip.MustParseAddr("::1").AsSlice(),
 				},
 			},
 		},
@@ -627,6 +657,7 @@ func TestProtoToHandlerConfig_MissingFields(t *testing.T) {
 				SourceAddressV6: &balancerpb.Addr{
 					Bytes: netip.MustParseAddr("::1").AsSlice(),
 				},
+				DecapAddresses: []*balancerpb.Addr{},
 			},
 		},
 	}
@@ -656,6 +687,7 @@ func TestProtoToHandlerConfig_InvalidSourceAddresses(t *testing.T) {
 				SourceAddressV6: &balancerpb.Addr{
 					Bytes: netip.MustParseAddr("::1").AsSlice(),
 				},
+				DecapAddresses: []*balancerpb.Addr{},
 			},
 		},
 		{
@@ -669,6 +701,7 @@ func TestProtoToHandlerConfig_InvalidSourceAddresses(t *testing.T) {
 				SourceAddressV6: &balancerpb.Addr{
 					Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
 				}, // Only 4 bytes
+				DecapAddresses: []*balancerpb.Addr{},
 			},
 		},
 	}
@@ -842,6 +875,8 @@ func TestMergeBalancerConfig(t *testing.T) {
 				VirtualServices: []ffi.VsConfig{},
 				SourceV4:        netip.MustParseAddr("10.0.0.1"),
 				SourceV6:        netip.MustParseAddr("::1"),
+				DecapV4:         []netip.Addr{},
+				DecapV6:         []netip.Addr{},
 			},
 			State: ffi.StateConfig{
 				TableCapacity: 1000,
@@ -880,6 +915,7 @@ func TestMergeBalancerConfig(t *testing.T) {
 					SourceAddressV6: &balancerpb.Addr{
 						Bytes: netip.MustParseAddr("2001:db8::1").AsSlice(),
 					},
+					DecapAddresses: []*balancerpb.Addr{},
 				},
 				State: &balancerpb.StateConfig{
 					SessionTableCapacity:      ptrUint64(2000),
@@ -961,6 +997,7 @@ func TestMergeBalancerConfig(t *testing.T) {
 					SourceAddressV6: &balancerpb.Addr{
 						Bytes: netip.MustParseAddr("fe80::1").AsSlice(),
 					},
+					DecapAddresses: []*balancerpb.Addr{},
 				},
 			},
 			verify: func(t *testing.T, result *balancerpb.BalancerConfig) {
@@ -1377,6 +1414,8 @@ func TestConvertPacketHandlerToProtoWithWlc(t *testing.T) {
 		},
 		SourceV4: netip.MustParseAddr("10.0.0.1"),
 		SourceV6: netip.MustParseAddr("2001:db8::1"),
+		DecapV4:  []netip.Addr{},
+		DecapV6:  []netip.Addr{},
 	}
 
 	tests := []struct {
@@ -1591,6 +1630,8 @@ func TestConvertBalancerConfigToProto_WithWlc(t *testing.T) {
 				},
 				SourceV4: netip.MustParseAddr("10.0.0.1"),
 				SourceV6: netip.MustParseAddr("2001:db8::1"),
+				DecapV4:  []netip.Addr{},
+				DecapV6:  []netip.Addr{},
 			},
 			State: ffi.StateConfig{
 				TableCapacity: 1000,

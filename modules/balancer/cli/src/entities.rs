@@ -375,6 +375,7 @@ pub struct PacketHandlerConfig {
     pub vs: Vec<VirtualService>,
     pub source_address_v4: String,
     pub source_address_v6: String,
+    pub decap_addresses: Vec<String>,
     pub sessions_timeouts: SessionsTimeouts,
 }
 
@@ -551,10 +552,20 @@ impl TryFrom<PacketHandlerConfig> for balancerpb::PacketHandlerConfig {
             .parse()
             .map_err(|e| format!("invalid source IPv6 '{}': {}", config.source_address_v6, e))?;
 
+        let decap: Result<Vec<_>, String> = config
+            .decap_addresses
+            .into_iter()
+            .map(|s| {
+                let addr: IpAddr = s.parse().map_err(|e| format!("invalid decap IP '{}': {}", s, e))?;
+                Ok(balancerpb::Addr { bytes: ip_to_bytes(addr) })
+            })
+            .collect();
+
         Ok(Self {
             vs: virtual_services?,
             source_address_v4: Some(balancerpb::Addr { bytes: source_v4.octets().to_vec() }),
             source_address_v6: Some(balancerpb::Addr { bytes: source_v6.octets().to_vec() }),
+            decap_addresses: decap?,
             sessions_timeouts: Some(config.sessions_timeouts.into()),
         })
     }

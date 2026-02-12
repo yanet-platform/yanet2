@@ -112,6 +112,9 @@ func TestBalancerAgent(t *testing.T) {
 			SourceAddressV6: &balancerpb.Addr{
 				Bytes: netip.MustParseAddr("2001:db8::1").AsSlice(),
 			},
+			DecapAddresses: []*balancerpb.Addr{
+				{Bytes: netip.MustParseAddr("10.13.11.215").AsSlice()},
+			},
 		},
 		State: &balancerpb.StateConfig{
 			SessionTableCapacity:      func() *uint64 { v := uint64(1000); return &v }(),
@@ -208,6 +211,9 @@ func TestBalancerAgent(t *testing.T) {
 			},
 			SourceAddressV6: &balancerpb.Addr{
 				Bytes: netip.MustParseAddr("2001:db8::a").AsSlice(),
+			},
+			DecapAddresses: []*balancerpb.Addr{
+				{Bytes: netip.MustParseAddr("10.15.12.216").AsSlice()},
 			},
 		},
 		State: &balancerpb.StateConfig{
@@ -432,6 +438,13 @@ func TestBalancerAgent(t *testing.T) {
 			configBeforeUpdate.PacketHandler.SessionsTimeouts,
 			newConfig.PacketHandler.SessionsTimeouts,
 		)
+		// Verify decap addresses remain unchanged
+		assert.Equal(
+			t,
+			configBeforeUpdate.PacketHandler.DecapAddresses,
+			newConfig.PacketHandler.DecapAddresses,
+		)
+		// Verify allowed sources remain unchanged (using new ACL structure)
 		assert.Equal(
 			t,
 			configBeforeUpdate.PacketHandler.Vs[0].AllowedSrcs[0].Net.Addr.Bytes,
