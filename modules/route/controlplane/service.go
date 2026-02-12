@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
@@ -24,11 +25,14 @@ import (
 type RouteService struct {
 	routepb.UnimplementedRouteServiceServer
 
-	mu         sync.Mutex
-	agent      *ffi.Agent
+	// shmLock serializes shared-memory mutations and protects the ffiModules
+	// map.
+	shmLock sync.RWMutex
+	agent   *ffi.Agent
+	// ribsLock protects the ribs map only.
 	ribsLock   sync.RWMutex
 	ribs       map[string]*rib.RIB
-	ffiModules map[string]*ModuleConfig // FFI module configurations that need to be freed
+	ffiModules map[string]*ModuleConfig
 	neighCache *neigh.NexthopCache
 
 	ribTTL time.Duration
@@ -150,6 +154,132 @@ func (m *RouteService) LookupRoute(
 	}
 
 	return response, nil
+}
+
+func (m *RouteService) ShowFIB(
+	ctx context.Context,
+	request *routepb.ShowFIBRequest,
+) (*routepb.ShowFIBResponse, error) {
+	name := request.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+	}
+
+	m.shmLock.RLock()
+	ffiModule, ok := m.ffiModules[name]
+	if !ok {
+		m.shmLock.RUnlock()
+		return &routepb.ShowFIBResponse{}, nil
+	}
+
+	// Hold RLock for the entire DumpFIB call so that a concurrent Free under
+	// shmMu.Lock cannot release the underlying shared memory.
+	entries, err := ffiModule.DumpFIB()
+	m.shmLock.RUnlock()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to dump FIB: %v", err)
+	}
+
+	response := &routepb.ShowFIBResponse{}
+
+	for _, e := range entries {
+		if request.GetIpv4Only() && e.AddressFamily != 4 {
+			continue
+		}
+		if request.GetIpv6Only() && e.AddressFamily != 6 {
+			continue
+		}
+
+		prefix := formatPrefixRange(e.AddressFamily, e.PrefixFrom, e.PrefixTo)
+
+		nexthops := make([]*routepb.FIBNexthop, len(e.Nexthops))
+		for i, nh := range e.Nexthops {
+			nexthops[i] = &routepb.FIBNexthop{
+				DstMac: nh.DstMAC.String(),
+				SrcMac: nh.SrcMAC.String(),
+				Device: nh.Device,
+			}
+		}
+
+		response.Entries = append(response.Entries, &routepb.FIBEntry{
+			Prefix:   prefix,
+			Nexthops: nexthops,
+		})
+	}
+
+	return response, nil
+}
+
+// formatPrefixRange converts an address range to a human-readable string.
+//
+// If the range corresponds to a single CIDR prefix, it returns CIDR notation;
+// otherwise "from-to" range notation.
+func formatPrefixRange(af uint8, from netip.Addr, to netip.Addr) string {
+	if prefix, ok := rangeToCIDR(af, from, to); ok {
+		return prefix.String()
+	}
+
+	return from.String() + "-" + to.String()
+}
+
+// rangeToCIDR attempts to convert an address range to a CIDR prefix.
+//
+// Returns false if the range does not correspond to a single prefix.
+func rangeToCIDR(af uint8, from netip.Addr, to netip.Addr) (netip.Prefix, bool) {
+	var bits int
+	if af == 4 {
+		bits = 32
+	} else {
+		bits = 128
+	}
+
+	fromBytes := from.As16()
+	toBytes := to.As16()
+
+	// For IPv4, the relevant bytes are at offset 12..15 in As16().
+	offset := 0
+	if af == 4 {
+		offset = 12
+	}
+	byteLen := bits / 8
+
+	// Find the prefix length by XORing from and to, then counting leading
+	// zeros in the XOR result.
+	prefixLen := 0
+	for i := range byteLen {
+		xor := fromBytes[offset+i] ^ toBytes[offset+i]
+		if xor == 0 {
+			prefixLen += 8
+			continue
+		}
+		// Count leading zeros in this byte.
+		for bit := 7; bit >= 0; bit-- {
+			if xor&(1<<bit) != 0 {
+				break
+			}
+			prefixLen++
+		}
+		break
+	}
+
+	// Verify: from must have all host bits zero, to must
+	// have all host bits one.
+	prefix, err := from.Prefix(prefixLen)
+	if err != nil {
+		return netip.Prefix{}, false
+	}
+	if prefix.Addr() != from {
+		return netip.Prefix{}, false
+	}
+
+	// Verify the "to" address matches the broadcast for
+	// this prefix.
+	expectedTo := xnetip.LastAddr(prefix)
+	if expectedTo != to {
+		return netip.Prefix{}, false
+	}
+
+	return prefix, true
 }
 
 func (m *RouteService) FlushRoutes(
@@ -312,16 +442,11 @@ func (m *RouteService) DeleteConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	m.ribsLock.Lock()
-	defer m.ribsLock.Unlock()
+	// Lock order: shmLock -> ribsLock.
+	m.shmLock.Lock()
+	defer m.shmLock.Unlock()
 
-	_, exists := m.ribs[name]
-	if !exists {
-		m.log.Warnw("DeleteConfig: RIB not found", "name", name)
-		return &routepb.DeleteConfigResponse{}, nil
-	}
-
-	// Delete the module config from the data plane if it exists
+	// Delete the module config from the data plane if it exists.
 	ffiModule, hasFFIModule := m.ffiModules[name]
 	if hasFFIModule {
 		if err := m.agent.DeleteModuleConfig(name); err != nil {
@@ -331,8 +456,16 @@ func (m *RouteService) DeleteConfig(
 		delete(m.ffiModules, name)
 	}
 
-	// Remove the RIB from the map
+	// Remove the RIB from the map.
+	m.ribsLock.Lock()
+	_, exists := m.ribs[name]
+	if !exists {
+		m.ribsLock.Unlock()
+		m.log.Warnw("DeleteConfig: RIB not found", "name", name)
+		return &routepb.DeleteConfigResponse{}, nil
+	}
 	delete(m.ribs, name)
+	m.ribsLock.Unlock()
 
 	m.log.Infow("DeleteConfig completed successfully",
 		"name", name,
@@ -444,8 +577,8 @@ func (m *RouteService) syncRouteUpdates(ribRef *rib.RIB, name string) error {
 	ribDump := ribRef.DumpRoutes()
 
 	// Huge mutex, but our shared memory must be protected from concurrent access.
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.shmLock.Lock()
+	defer m.shmLock.Unlock()
 
 	err := m.updateModuleConfig(name, ribDump)
 	if err != nil {
@@ -590,13 +723,14 @@ func (m *RouteService) updateModuleConfig(
 		return fmt.Errorf("failed to update module: %w", err)
 	}
 
-	// Free old FFI module after successful update and store the new one
-	m.ribsLock.Lock()
+	// Swap the FFI module and free the old one.
+	//
+	// The caller already holds shmLock, so both the ffiModules map and
+	// the Free call are protected.
 	if oldModule, exists := m.ffiModules[name]; exists {
 		oldModule.Free()
 	}
 	m.ffiModules[name] = config
-	m.ribsLock.Unlock()
 
 	return nil
 }

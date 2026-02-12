@@ -4,8 +4,16 @@
 
 #include "common/container_of.h"
 #include "common/exp_array.h"
+#include "common/lpm.h"
+#include "common/strutils.h"
 
 #include "controlplane/agent/agent.h"
+
+struct fib_iter {
+	struct route_module_config *config;
+	struct lpm_iter lpm_it;
+	uint8_t phase;
+};
 
 struct cp_module *
 route_module_config_create(struct agent *agent, const char *name) {
@@ -217,4 +225,137 @@ route_module_config_add_prefix_v6(
 	struct route_module_config *config =
 		container_of(cp_module, struct route_module_config, cp_module);
 	return lpm_insert(&config->lpm_v6, 16, from, to, route_list_index);
+}
+
+struct fib_iter *
+fib_iter_create(struct cp_module *cp_module) {
+	struct fib_iter *it = calloc(1, sizeof(*it));
+	if (it == NULL)
+		return NULL;
+	it->config =
+		container_of(cp_module, struct route_module_config, cp_module);
+	return it;
+}
+
+void
+fib_iter_destroy(struct fib_iter *it) {
+	free(it);
+}
+
+bool
+fib_iter_next(struct fib_iter *it) {
+	if (it->phase == 0xff)
+		return false;
+
+	// Start or continue IPv4 walk.
+	if (it->phase == 0) {
+		uint8_t from[4] = {0, 0, 0, 0};
+		uint8_t to[4] = {0xff, 0xff, 0xff, 0xff};
+		lpm_iter_init(&it->lpm_it, &it->config->lpm_v4, 4, from, to);
+		it->phase = 4;
+	}
+
+	if (it->phase == 4) {
+		if (lpm_iter_next(&it->lpm_it))
+			return true;
+
+		// IPv4 exhausted, start IPv6.
+		uint8_t from[16];
+		uint8_t to[16];
+		memset(from, 0x00, 16);
+		memset(to, 0xff, 16);
+		lpm_iter_init(&it->lpm_it, &it->config->lpm_v6, 16, from, to);
+		it->phase = 6;
+	}
+
+	if (it->phase == 6) {
+		if (lpm_iter_next(&it->lpm_it))
+			return true;
+
+		it->phase = 0xff;
+	}
+
+	return false;
+}
+
+uint8_t
+fib_iter_address_family(const struct fib_iter *it) {
+	return it->phase;
+}
+
+const uint8_t *
+fib_iter_prefix_from(const struct fib_iter *it) {
+	return it->lpm_it.cur_from;
+}
+
+const uint8_t *
+fib_iter_prefix_to(const struct fib_iter *it) {
+	return it->lpm_it.cur_to;
+}
+
+uint64_t
+fib_iter_nexthop_count(const struct fib_iter *it) {
+	uint32_t rli = it->lpm_it.cur_value;
+	struct route_module_config *config = it->config;
+	if (rli >= config->route_list_count)
+		return 0;
+	struct route_list *rls = ADDR_OF(&config->route_lists);
+	return rls[rli].count;
+}
+
+// Resolves the route for the i-th nexthop of the current entry.
+static const struct route *
+fib_iter_resolve_route(const struct fib_iter *it, uint64_t nexthop_idx) {
+	uint32_t rli = it->lpm_it.cur_value;
+	struct route_module_config *config = it->config;
+	if (rli >= config->route_list_count)
+		return NULL;
+
+	struct route_list *rls = ADDR_OF(&config->route_lists);
+	struct route_list *rl = &rls[rli];
+	if (nexthop_idx >= rl->count)
+		return NULL;
+
+	uint64_t *route_indexes = ADDR_OF(&config->route_indexes);
+	uint64_t route_idx = route_indexes[rl->start + nexthop_idx];
+	if (route_idx >= config->route_count)
+		return NULL;
+
+	struct route *routes = ADDR_OF(&config->routes);
+	return &routes[route_idx];
+}
+
+void
+fib_iter_nexthop_dst_mac(
+	const struct fib_iter *it, uint64_t nexthop_idx, struct ether_addr *dst
+) {
+	const struct route *r = fib_iter_resolve_route(it, nexthop_idx);
+	if (r != NULL)
+		*dst = r->dst_addr;
+	else
+		memset(dst, 0, sizeof(*dst));
+}
+
+void
+fib_iter_nexthop_src_mac(
+	const struct fib_iter *it, uint64_t nexthop_idx, struct ether_addr *dst
+) {
+	const struct route *r = fib_iter_resolve_route(it, nexthop_idx);
+	if (r != NULL)
+		*dst = r->src_addr;
+	else
+		memset(dst, 0, sizeof(*dst));
+}
+
+const char *
+fib_iter_nexthop_device_name(const struct fib_iter *it, uint64_t nexthop_idx) {
+	const struct route *r = fib_iter_resolve_route(it, nexthop_idx);
+	if (r == NULL)
+		return "";
+
+	struct route_module_config *config = it->config;
+	struct cp_module_device *devices = ADDR_OF(&config->cp_module.devices);
+	if (r->device_id < config->cp_module.device_count)
+		return devices[r->device_id].name;
+	return "";
 }

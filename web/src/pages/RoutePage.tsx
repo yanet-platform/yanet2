@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Box } from '@gravity-ui/uikit';
 import { API } from '../api';
 import { toaster } from '../utils';
-import type { Route } from '../api/routes';
+import type { Route, FIBEntry } from '../api/routes';
 import { RouteSourceID } from '../api/routes';
 import { PageLayout, PageLoader, EmptyState } from '../components';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '../utils';
@@ -27,16 +27,19 @@ const RoutePage: React.FC = () => {
     const {
         configs,
         configRoutes,
+        configFIB,
         selectedRoutes,
         loading,
         activeConfigTab,
         setConfigs,
         setConfigRoutes,
+        setConfigFIB,
         setSelectedRoutes,
         setActiveConfigTab,
         handleSelectionChange,
         handleConfigTabChange,
         reloadRoutes,
+        reloadFIB,
     } = useRouteData();
 
     const {
@@ -93,11 +96,16 @@ const RoutePage: React.FC = () => {
             await API.route.flushRoutes({
                 name: activeConfigTab,
             });
+
+            // Reload FIB data after flush.
+            const reloadedFIB = await reloadFIB(configs);
+            setConfigFIB(reloadedFIB);
+
             toaster.success('flush-route-success', `Flushed routes for ${activeConfigTab}`);
         } catch (err) {
             toaster.error('flush-route-error', 'Failed to flush routes', err);
         }
-    }, [activeConfigTab]);
+    }, [activeConfigTab, configs, reloadFIB, setConfigFIB]);
 
     const handleEditRouteClick = useCallback((route: Route): void => {
         setEditingRoute(route);
@@ -328,6 +336,10 @@ const RoutePage: React.FC = () => {
         };
     };
 
+    const getFIBEntries = (configName: string): FIBEntry[] => {
+        return configFIB.get(configName) || [];
+    };
+
     return (
         <PageLayout header={headerContent}>
             <Box className="route-page__content">
@@ -339,6 +351,7 @@ const RoutePage: React.FC = () => {
                     onSelectionChange={handleSelectionChange}
                     getRouteId={getRouteId}
                     onEditRoute={handleEditRouteClick}
+                    getFIBEntries={getFIBEntries}
                 />
             </Box>
 

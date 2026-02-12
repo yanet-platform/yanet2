@@ -1,5 +1,5 @@
 import type { TableColumnConfig } from '@gravity-ui/uikit';
-import type { Route } from '../../api/routes';
+import type { Route, FIBEntry } from '../../api/routes';
 
 // Form data types
 export interface AddRouteFormData {
@@ -82,6 +82,7 @@ export interface RoutesByConfigProps {
     onSelectionChange: (configName: string, ids: string[]) => void;
     getRouteId: (route: Route) => string;
     onEditRoute?: (route: Route) => void;
+    getFIBEntries?: (configName: string) => FIBEntry[];
 }
 
 // Props for ConfigTabs and RouteConfigContent (without routeColumns since VirtualizedRouteTable doesn't need it)
@@ -95,4 +96,21 @@ export type SortDirection = 'asc' | 'desc';
 export interface SortState {
     column: SortableColumn | null;
     direction: SortDirection;
+}
+
+// FIB sorting types
+export type FIBSortableColumn = 'prefix' | 'dst_mac' | 'src_mac' | 'device';
+
+export interface FIBSortState {
+    column: FIBSortableColumn | null;
+    direction: SortDirection;
+}
+
+// Flattened FIB row for display
+export interface FIBRow {
+    id: string;
+    prefix: string;
+    dst_mac: string;
+    src_mac: string;
+    device: string;
 }

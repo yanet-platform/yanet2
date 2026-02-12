@@ -18,9 +18,9 @@ use tonic::{codec::CompressionEncoding, transport::Channel};
 use yanet_cli_route::{
     routepb::{
         route_service_client::RouteServiceClient, DeleteConfigRequest, DeleteRouteRequest, FlushRoutesRequest,
-        InsertRouteRequest, ListConfigsRequest, LookupRouteRequest, RouteSourceId, ShowRoutesRequest,
+        InsertRouteRequest, ListConfigsRequest, LookupRouteRequest, RouteSourceId, ShowFibRequest, ShowRoutesRequest,
     },
-    RouteEntry,
+    FibDisplayEntry, RouteEntry,
 };
 use ync::logging;
 
@@ -55,6 +55,8 @@ pub enum ModeCmd {
     Delete(RouteDeleteConfigCmd),
     /// Flush RIB to FIB for a configuration.
     Flush(RouteFlushCmd),
+    /// FIB (Forwarding Information Base) operations.
+    Fib(FibCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -129,6 +131,31 @@ pub struct RouteFlushCmd {
     pub config_name: String,
 }
 
+#[derive(Debug, Clone, Parser)]
+pub struct FibCmd {
+    #[clap(subcommand)]
+    pub action: FibAction,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub enum FibAction {
+    /// Dump FIB entries.
+    Dump(FibDumpCmd),
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct FibDumpCmd {
+    /// Show only IPv4 FIB entries.
+    #[arg(long)]
+    pub ipv4: bool,
+    /// Show only IPv6 FIB entries.
+    #[arg(long)]
+    pub ipv6: bool,
+    /// Route config name.
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
+}
+
 #[derive(Debug, Clone, clap::ValueEnum)]
 pub enum RouteSource {
     Static,
@@ -168,6 +195,9 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Remove(cmd) => service.remove_route(cmd).await,
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Flush(cmd) => service.flush_routes(cmd).await,
+        ModeCmd::Fib(cmd) => match cmd.action {
+            FibAction::Dump(cmd) => service.show_fib(cmd).await,
+        },
     }
 }
 
@@ -247,7 +277,12 @@ impl RouteService {
 
         self.client.insert_route(request).await?;
 
-        log::info!("Route inserted successfully: {} via {} (source: {:?})", cmd.prefix, cmd.nexthop_addr, cmd.source);
+        log::info!(
+            "Route inserted successfully: {} via {} (source: {:?})",
+            cmd.prefix,
+            cmd.nexthop_addr,
+            cmd.source
+        );
 
         Ok(())
     }
@@ -263,7 +298,12 @@ impl RouteService {
 
         self.client.delete_route(request).await?;
 
-        log::info!("Route removed successfully: {} via {} (source: {:?})", cmd.prefix, cmd.nexthop_addr, cmd.source);
+        log::info!(
+            "Route removed successfully: {} via {} (source: {:?})",
+            cmd.prefix,
+            cmd.nexthop_addr,
+            cmd.source
+        );
 
         Ok(())
     }
@@ -284,6 +324,31 @@ impl RouteService {
         self.client.flush_routes(request).await?;
 
         log::info!("Routes flushed successfully");
+
+        Ok(())
+    }
+
+    pub async fn show_fib(&mut self, cmd: FibDumpCmd) -> Result<(), Box<dyn Error>> {
+        let request = ShowFibRequest {
+            name: cmd.config_name.clone(),
+            ipv4_only: cmd.ipv4,
+            ipv6_only: cmd.ipv6,
+        };
+
+        let response = self.client.show_fib(request).await?.into_inner();
+
+        let entries: Vec<FibDisplayEntry> = response
+            .entries
+            .into_iter()
+            .flat_map(FibDisplayEntry::from_fib_entry)
+            .collect();
+
+        if entries.is_empty() {
+            log::info!("No FIB entries found for {}", cmd.config_name);
+            return Ok(());
+        }
+
+        print_table(entries);
 
         Ok(())
     }

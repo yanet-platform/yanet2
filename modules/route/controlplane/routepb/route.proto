@@ -29,6 +29,13 @@ service RouteService {
 	// (FIB).
 	rpc FlushRoutes(FlushRoutesRequest) returns (FlushRoutesResponse);
 
+	// ShowFIB returns the current Forwarding Information Base entries.
+	//
+	// Unlike ShowRoutes which returns RIB data, ShowFIB returns the
+	// compiled hardware-level forwarding table that the dataplane uses for
+	// packet forwarding.
+	rpc ShowFIB(ShowFIBRequest) returns (ShowFIBResponse);
+
 	// FeedRIB receives a stream of route updates (typically from BIRD) and
 	// applies them to the RIB. It implements session management to handle
 	// stale routes:
@@ -202,6 +209,40 @@ message LargeCommunity {
 	uint32 local_data_part1 = 2;
 	// Second part of local data.
 	uint32 local_data_part2 = 3;
+}
+
+// ShowFIBRequest contains filters for FIB listing.
+message ShowFIBRequest {
+	// Route module config name.
+	string name = 1;
+	// Filter to show only IPv4 FIB entries.
+	bool ipv4_only = 2;
+	// Filter to show only IPv6 FIB entries.
+	bool ipv6_only = 3;
+}
+
+// ShowFIBResponse contains the list of FIB entries.
+message ShowFIBResponse {
+	// List of entries in the forwarding information base.
+	repeated FIBEntry entries = 1;
+}
+
+// FIBEntry represents a single prefix in the FIB with its nexthops.
+message FIBEntry {
+	// Network prefix in CIDR notation (e.g. "10.0.0.0/24").
+	string prefix = 1;
+	// Nexthops associated with this prefix (ECMP).
+	repeated FIBNexthop nexthops = 2;
+}
+
+// FIBNexthop represents a hardware-level nexthop in the FIB.
+message FIBNexthop {
+	// Destination MAC address (e.g. "aa:bb:cc:dd:ee:ff").
+	string dst_mac = 1;
+	// Source MAC address (e.g. "11:22:33:44:55:66").
+	string src_mac = 2;
+	// Egress device name.
+	string device = 3;
 }
 
 // NeighbourState represents the state of a neighbor entry.

@@ -72,6 +72,29 @@ export interface FlushRoutesRequest {
 export interface FlushRoutesResponse {
 }
 
+// FIB types
+
+export interface ShowFIBRequest {
+    name?: string;
+    ipv4_only?: boolean;
+    ipv6_only?: boolean;
+}
+
+export interface ShowFIBResponse {
+    entries?: FIBEntry[];
+}
+
+export interface FIBEntry {
+    prefix?: string;
+    nexthops?: FIBNexthop[];
+}
+
+export interface FIBNexthop {
+    dst_mac?: string;
+    src_mac?: string;
+    device?: string;
+}
+
 const routeService = createService('routepb.RouteService');
 
 export const route = {
@@ -89,5 +112,8 @@ export const route = {
     },
     flushRoutes: (request: FlushRoutesRequest, options?: CallOptions): Promise<FlushRoutesResponse> => {
         return routeService.callWithBody<FlushRoutesResponse>('FlushRoutes', request, options);
+    },
+    showFIB: (request: ShowFIBRequest, options?: CallOptions): Promise<ShowFIBResponse> => {
+        return routeService.callWithBody<ShowFIBResponse>('ShowFIB', request, options);
     },
 };

@@ -118,3 +118,34 @@ impl Display for Prefix {
         write!(f, "{prefix}")
     }
 }
+
+/// FIB entry for display in the CLI table.
+#[derive(Debug, Tabled)]
+pub struct FibDisplayEntry {
+    #[tabled(rename = "Prefix")]
+    pub prefix: String,
+    #[tabled(rename = "Dst MAC")]
+    pub dst_mac: String,
+    #[tabled(rename = "Src MAC")]
+    pub src_mac: String,
+    #[tabled(rename = "Device")]
+    pub device: String,
+}
+
+impl FibDisplayEntry {
+    /// Convert a FIBEntry proto message into one or more display
+    /// entries (one per nexthop for ECMP).
+    pub fn from_fib_entry(entry: routepb::FibEntry) -> Vec<Self> {
+        let prefix = entry.prefix;
+        entry
+            .nexthops
+            .into_iter()
+            .map(|nh| FibDisplayEntry {
+                prefix: prefix.clone(),
+                dst_mac: nh.dst_mac,
+                src_mac: nh.src_mac,
+                device: nh.device,
+            })
+            .collect()
+    }
+}

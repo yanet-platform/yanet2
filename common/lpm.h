@@ -25,6 +25,8 @@
 #define LPM_VALUE_SET(value) ((value << 1) | LPM_VALUE_FLAG)
 #define LPM_VALUE_GET(value) (value >> 1)
 #define LPM_CHUNK_SIZE 16
+// Max LPM key size in bytes (IPv6 address).
+#define LPM_KEY_SIZE_MAX 16
 
 struct lpm_page;
 
@@ -263,6 +265,156 @@ lpm_lookup(const struct lpm *lpm, uint8_t key_size, const uint8_t *key) {
 	}
 
 	return LPM_VALUE_GET(value->value);
+}
+
+// Pull-based LPM iterator.
+//
+// Walks the LPM tree one range at a time. Each call to lpm_iter_next()
+// advances to the next (from, to, value) triple.
+struct lpm_iter {
+	const struct lpm *lpm;
+	uint8_t key_size;
+
+	// Current entry.
+	//
+	// Valid after a successful lpm_iter_next().
+	uint8_t cur_from[LPM_KEY_SIZE_MAX];
+	uint8_t cur_to[LPM_KEY_SIZE_MAX];
+	uint32_t cur_value;
+
+	// Internal walk state.
+	uint8_t key[LPM_KEY_SIZE_MAX];
+	struct lpm_page *pages[LPM_KEY_SIZE_MAX];
+	uint8_t range_from[LPM_KEY_SIZE_MAX];
+	uint8_t range_to[LPM_KEY_SIZE_MAX];
+	uint8_t prev_from[LPM_KEY_SIZE_MAX];
+	uint8_t prev_to[LPM_KEY_SIZE_MAX];
+	uint32_t prev_value;
+	int8_t hop;
+	int8_t hi_limit;
+	int8_t max_hop;
+	bool done;
+};
+
+static inline void
+lpm_iter_init(
+	struct lpm_iter *it,
+	const struct lpm *lpm,
+	uint8_t key_size,
+	const uint8_t *from,
+	const uint8_t *to
+) {
+	memset(it, 0, sizeof(*it));
+	it->lpm = lpm;
+	it->key_size = key_size;
+	it->prev_value = LPM_VALUE_INVALID;
+
+	memcpy(it->range_from, from, key_size);
+	memcpy(it->range_to, to, key_size);
+	memcpy(it->prev_from, from, key_size);
+
+	it->key[0] = from[0];
+	it->pages[0] = lpm_page(lpm, 0);
+}
+
+// Advances the iterator to the next entry.
+//
+// Returns true if a new entry is available (read cur_from, cur_to,
+// cur_value), false when iteration is complete.
+static inline bool
+lpm_iter_next(struct lpm_iter *it) {
+	if (it->done) {
+		return false;
+	}
+
+	uint8_t ks = it->key_size;
+
+	while (1) {
+		union lpm_value *value =
+			it->pages[it->hop]->values + it->key[it->hop];
+
+		if (value->value & LPM_VALUE_FLAG) {
+			uint32_t new_val = LPM_VALUE_GET(value->value);
+
+			if (it->prev_value != new_val) {
+				bool has_yield =
+					it->prev_value != LPM_VALUE_INVALID;
+
+				if (has_yield) {
+					// Save the completed range into
+					// cur_* before overwriting prev_*.
+					memcpy(it->cur_from, it->prev_from, ks);
+					memcpy(it->cur_to, it->prev_to, ks);
+					it->cur_value = it->prev_value;
+				}
+
+				// Start tracking the new range.
+				it->prev_value = new_val;
+				memcpy(it->prev_from, it->key, ks);
+				memset(it->prev_from + it->hop + 1,
+				       0x00,
+				       ks - it->hop - 1);
+				memcpy(it->prev_to, it->key, ks);
+				memset(it->prev_to + it->hop + 1,
+				       0xff,
+				       ks - it->hop - 1);
+
+				if (has_yield) {
+					return true;
+				}
+			} else {
+				// Same value — extend the range end.
+				memcpy(it->prev_to, it->key, ks);
+				memset(it->prev_to + it->hop + 1,
+				       0xff,
+				       ks - it->hop - 1);
+			}
+		} else {
+			if (it->key[it->hop] == it->range_to[it->hop] &&
+			    it->hop == it->hi_limit) {
+				++it->hi_limit;
+			}
+
+			++it->hop;
+			if (it->hop > it->max_hop) {
+				it->key[it->hop] = it->range_from[it->hop];
+				it->max_hop = it->hop;
+			} else {
+				it->key[it->hop] = 0;
+			}
+			it->pages[it->hop] = ADDR_OF(&value->page);
+			continue;
+		}
+
+		// Advance key.
+		do {
+			it->key[it->hop]++;
+			uint8_t upper_bound = 0xff;
+			if (it->hop == it->hi_limit) {
+				upper_bound = it->range_to[it->hop];
+			}
+			if (it->key[it->hop] == (uint8_t)(upper_bound + 1)) {
+				if (it->hop == it->hi_limit) {
+					goto out;
+				}
+				--it->hop;
+			} else {
+				break;
+			}
+		} while (1);
+	}
+
+out:
+	it->done = true;
+
+	// Yield the last pending entry.
+	if (it->prev_value != LPM_VALUE_INVALID) {
+		memcpy(it->cur_from, it->prev_from, ks);
+		memcpy(it->cur_to, it->prev_to, ks);
+		it->cur_value = it->prev_value;
+		return true;
+	}
+	return false;
 }
 
 typedef int (*lpm_walk_func)(

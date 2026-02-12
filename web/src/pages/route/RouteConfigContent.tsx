@@ -11,6 +11,7 @@ export const RouteConfigContent: React.FC<RouteConfigContentProps> = ({
     onSelectionChange,
     getRouteId,
     onEditRoute,
+    getFIBEntries,
 }) => {
 
     if (configs.length === 0) {
@@ -29,6 +30,7 @@ export const RouteConfigContent: React.FC<RouteConfigContentProps> = ({
             onSelectionChange={onSelectionChange}
             getRouteId={getRouteId}
             onEditRoute={onEditRoute}
+            getFIBEntries={getFIBEntries}
         />
     );
 };

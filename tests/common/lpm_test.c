@@ -125,6 +125,49 @@ main(int argc, char **argv) {
 		return -1;
 	}
 
+	// Verify the pull-based iterator produces the same results.
+	struct lpm_iter it;
+	memset(from, 0, 16);
+	memset(to, 0xff, 16);
+	lpm_iter_init(&it, &lpm, 16, from, to);
+	uint32_t iter_idx = 0;
+	while (lpm_iter_next(&it)) {
+		if (*(uint32_t *)(it.cur_from + 8) != htobe32(iter_idx * 256)) {
+			fprintf(stdout, "iter from mismatch at %u\n", iter_idx);
+			return -1;
+		}
+		if (it.cur_from[15] != 4) {
+			fprintf(stdout,
+				"iter from[15] mismatch at %u\n",
+				iter_idx);
+			return -1;
+		}
+		if (*(uint32_t *)(it.cur_to + 8) != htobe32(iter_idx * 256)) {
+			fprintf(stdout, "iter to mismatch at %u\n", iter_idx);
+			return -1;
+		}
+		if (it.cur_to[15] != 8) {
+			fprintf(stdout, "iter to[15] mismatch at %u\n", iter_idx
+			);
+			return -1;
+		}
+		if (it.cur_value != iter_idx) {
+			fprintf(stdout,
+				"iter value mismatch at %u: got %u\n",
+				iter_idx,
+				it.cur_value);
+			return -1;
+		}
+		++iter_idx;
+	}
+	if (iter_idx != fail_idx) {
+		fprintf(stdout,
+			"iter count mismatch: got %u, expected %u\n",
+			iter_idx,
+			fail_idx);
+		return -1;
+	}
+
 	lpm_free(&lpm);
 
 	if (mctx.balloc_size != mctx.bfree_size) {

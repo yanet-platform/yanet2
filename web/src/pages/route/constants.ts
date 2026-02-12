@@ -112,3 +112,42 @@ export const cellStyles: Record<keyof typeof COLUMN_WIDTHS, React.CSSProperties>
         alignItems: 'center',
     },
 };
+
+// Column widths for virtualized FIB table
+export const FIB_COLUMN_WIDTHS = {
+    index: 90,
+    prefix: 320,
+    dst_mac: 200,
+    src_mac: 200,
+    device: 200,
+} as const;
+
+export const FIB_TOTAL_WIDTH = Object.values(FIB_COLUMN_WIDTHS).reduce((a, b) => a + b, 0);
+
+const makeCellStyle = (width: number, extra?: React.CSSProperties): React.CSSProperties => ({
+    width,
+    minWidth: width,
+    maxWidth: width,
+    paddingRight: 8,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    userSelect: 'text',
+    ...extra,
+});
+
+// Pre-computed cell styles for FIB table
+export const fibCellStyles: Record<keyof typeof FIB_COLUMN_WIDTHS, React.CSSProperties> = {
+    index: {
+        width: FIB_COLUMN_WIDTHS.index,
+        minWidth: FIB_COLUMN_WIDTHS.index,
+        maxWidth: FIB_COLUMN_WIDTHS.index,
+        paddingRight: 8,
+        textAlign: 'right',
+        color: 'var(--g-color-text-secondary)',
+    },
+    prefix: makeCellStyle(FIB_COLUMN_WIDTHS.prefix),
+    dst_mac: makeCellStyle(FIB_COLUMN_WIDTHS.dst_mac),
+    src_mac: makeCellStyle(FIB_COLUMN_WIDTHS.src_mac),
+    device: makeCellStyle(FIB_COLUMN_WIDTHS.device),
+};

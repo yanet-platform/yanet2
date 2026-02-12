@@ -20,6 +20,7 @@ export * from './DeleteRouteDialog';
 export * from './AddRouteDialog';
 export * from './EditRouteDialog';
 export * from './ConfigTabs';
+export * from './FIBTable';
 export * from './RouteConfigContent';
 export * from './VirtualizedRouteTable';
 export * from './VirtualRow';
