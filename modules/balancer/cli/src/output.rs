@@ -335,16 +335,16 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
 
     if let Some(config) = &response.config {
         if let Some(packet_handler) = &config.packet_handler {
-            // Decap addresses (one per line, white color for list items)
+            // Decap addresses (one per line, green color for list items)
             println!("{}", "Decap Addresses:".bright_cyan().bold());
             if !packet_handler.decap_addresses.is_empty() {
                 for addr in &packet_handler.decap_addresses {
                     if let Ok(ip) = addr_to_ip(addr) {
-                        println!("  {}", ip);
+                        println!("  {}", ip.to_string().bright_green());
                     }
                 }
             } else {
-                println!("  None");
+                println!("  {}", "None".bright_green());
             }
             println!();
 

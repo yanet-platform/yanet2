@@ -286,8 +286,9 @@ The balancer processes two types of ICMP messages:
 ### ICMP Error Messages
 - Processes errors related to forwarded sessions
 - Validates error against known sessions
-- Forwards error to appropriate real server
-- Broadcasts to peer balancers in multi-balancer setups
+- Forwards error to appropriate real server if session exists
+- Broadcasts to peer balancers if no session found AND packet didn't come from a peer
+- Packets that were decapsulated (came from peer balancers) are not re-broadcasted to prevent loops
 
 ## Statistics
 

@@ -92,16 +92,17 @@ set_cloned_mark(struct packet *packet) {
 
 static inline void
 broadcast_icmp_packet(struct packet_ctx *ctx) {
-	// If packet is cloned already, do nothing.
+	// If packet was decapsulated (came from another balancer), drop it
+	// to prevent broadcast loops.
 	//
-	// Else, if virtual service for the packet was found,
+	// Otherwise, if virtual service for the packet was found,
 	// we iterate over virtual service peers and broadcast packet
 	// to them.
 
-	// Check if packet is a cloned already
-	if (ctx->decap_flag && icmp_error_hdr(ctx->packet)->unused_marker ==
-				       rte_cpu_to_be_16(ICMP_BROADCAST_IDENT)) {
-		// Update module counters
+	// Check if packet came from another balancer (was decapsulated)
+	if (ctx->decap_flag) {
+		// Packet was decapsulated, meaning it came from another
+		// balancer Don't broadcast to prevent loops
 		uint16_t header_type = ctx->packet->transport_header.type;
 		ICMP_STATS_INC(packet_clones_received, header_type, ctx);
 		packet_ctx_drop_packet(ctx);

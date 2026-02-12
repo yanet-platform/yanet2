@@ -19,8 +19,8 @@ handle_icmp_error_packet(struct packet_ctx *ctx) {
 	// If session with goal real is present on the balancer,
 	// forward packet to this real.
 	//
-	// Else, if packet is not clone, clone it and broadcast to other
-	// balancers.
+	// Else, if packet was not decapsulated (didn't come from another
+	// balancer), clone it and broadcast to other balancers.
 
 	// update stats
 	ICMP_STATS_INC(
