@@ -958,6 +958,9 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 		// 2. See it has ICMP_BROADCAST_IDENT marker and decap=true
 		// 3. Forward to real (because it has a session)
 		// 4. NOT re-broadcast to Balancer1 (because of the marker)
+		broadcastedGoPacket := xpacket.ParseEtherPacket(
+			broadcastedPacket.RawData,
+		)
 		result, err = setup2.Mock.HandlePackets(broadcastedGoPacket)
 		require.NoError(t, err)
 
@@ -1063,6 +1066,9 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 		// 2. See it has ICMP_BROADCAST_IDENT marker and decap=true
 		// 3. Forward to real (because it has a session)
 		// 4. NOT re-broadcast to Balancer1 (because of the marker)
+		broadcastedGoPacket := xpacket.ParseEtherPacket(
+			broadcastedPacket.RawData,
+		)
 		result, err = setup2.Mock.HandlePackets(broadcastedGoPacket)
 		require.NoError(t, err)
 
