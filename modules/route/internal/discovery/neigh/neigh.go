@@ -163,7 +163,9 @@ func (m *NeighMonitor) processNeighUpdate(update netlink.NeighUpdate) error {
 		//
 		// Instead, the entire neighbors table is overwritten on a timer event.
 	default:
-		m.log.Warnf("received unexpected neighbour update type: %d", update.Type)
+		m.log.Warnw("received unexpected neighbour update type",
+			zap.Uint16("type", update.Type),
+		)
 	}
 
 	return nil
@@ -205,24 +207,32 @@ func (m *NeighMonitor) updateNeighbours() error {
 	for _, neigh := range neighs {
 		nexthopAddr, ok := netip.AddrFromSlice(neigh.IP)
 		if !ok {
-			m.log.Warnf("failed to parse neighbour IP address: %q", neigh.IP)
+			m.log.Warnw("failed to parse neighbour IP address",
+				zap.String("ip", neigh.IP.String()),
+			)
 			continue
 		}
 
 		// Skip entries with invalid MAC.
 		if len(neigh.HardwareAddr) != 6 {
-			m.log.Warnf("skipping entry with unsupported MAC address %q: must be EUI-48", neigh.HardwareAddr)
+			m.log.Warnw("skipping entry with unsupported MAC address: must be EUI-48",
+				zap.Stringer("mac", neigh.HardwareAddr),
+			)
 			continue
 		}
 
 		// Get the hardware address of the interface.
 		hardwareAddr, ok := linkIndexToHardwareAddr[neigh.LinkIndex]
 		if !ok {
-			m.log.Warnf("no hardware address for link index: %d - %#+v", neigh.LinkIndex, neigh)
+			m.log.Warnw("no hardware address for link index",
+				zap.Int("link_index", neigh.LinkIndex),
+			)
 			continue
 		}
 		if len(hardwareAddr) != 6 {
-			m.log.Warnf("skipping entry with unsupported interface MAC address %q: must be EUI-48", hardwareAddr)
+			m.log.Warnw("skipping entry with unsupported interface MAC address: must be EUI-48",
+				zap.Stringer("mac", hardwareAddr),
+			)
 			continue
 		}
 
