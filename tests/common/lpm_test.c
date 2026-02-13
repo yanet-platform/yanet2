@@ -10,6 +10,18 @@
 
 #define ARENA_SIZE (1 << 20)
 
+static uint32_t
+read_u32(const uint8_t *p) {
+	uint32_t v;
+	memcpy(&v, p, sizeof(v));
+	return v;
+}
+
+static void
+write_u32(uint8_t *p, uint32_t v) {
+	memcpy(p, &v, sizeof(v));
+}
+
 static int
 walk_func(
 	uint8_t key_size,
@@ -20,13 +32,13 @@ walk_func(
 ) {
 	(void)key_size;
 
-	if (*(uint32_t *)(from + 8) != htobe32(value * 256)) {
+	if (read_u32(from + 8) != htobe32(value * 256)) {
 		return -1;
 	}
 	if (from[15] != 4)
 		return -1;
 
-	if (*(uint32_t *)(to + 8) != htobe32(value * 256)) {
+	if (read_u32(to + 8) != htobe32(value * 256)) {
 		return -1;
 	}
 	if (to[15] != 8)
@@ -71,9 +83,9 @@ main(int argc, char **argv) {
 	// Put each value into new page to get out of memory error
 	uint32_t idx = 0;
 	do {
-		*(uint32_t *)(from + 8) = htobe32(idx * 256);
+		write_u32(from + 8, htobe32(idx * 256));
 		from[15] = 4;
-		*(uint32_t *)(to + 8) = htobe32(idx * 256);
+		write_u32(to + 8, htobe32(idx * 256));
 		to[15] = 8;
 		if (lpm_insert(&lpm, 16, from, to, idx))
 			break;
@@ -97,9 +109,9 @@ main(int argc, char **argv) {
 
 	// Check the lpm can allocate new pages after allocator space expansion
 	do {
-		*(uint32_t *)(from + 8) = htobe32(idx * 256);
+		write_u32(from + 8, htobe32(idx * 256));
 		from[15] = 4;
-		*(uint32_t *)(to + 8) = htobe32(idx * 256);
+		write_u32(to + 8, htobe32(idx * 256));
 		to[15] = 8;
 		if (lpm_insert(&lpm, 16, from, to, idx))
 			break;
@@ -132,7 +144,7 @@ main(int argc, char **argv) {
 	lpm_iter_init(&it, &lpm, 16, from, to);
 	uint32_t iter_idx = 0;
 	while (lpm_iter_next(&it)) {
-		if (*(uint32_t *)(it.cur_from + 8) != htobe32(iter_idx * 256)) {
+		if (read_u32(it.cur_from + 8) != htobe32(iter_idx * 256)) {
 			fprintf(stdout, "iter from mismatch at %u\n", iter_idx);
 			return -1;
 		}
@@ -142,7 +154,7 @@ main(int argc, char **argv) {
 				iter_idx);
 			return -1;
 		}
-		if (*(uint32_t *)(it.cur_to + 8) != htobe32(iter_idx * 256)) {
+		if (read_u32(it.cur_to + 8) != htobe32(iter_idx * 256)) {
 			fprintf(stdout, "iter to mismatch at %u\n", iter_idx);
 			return -1;
 		}
