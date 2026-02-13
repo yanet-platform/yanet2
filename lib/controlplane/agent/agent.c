@@ -1372,7 +1372,7 @@ yanet_get_module_counters(
 		ADDR_OF(&counter_storage->registry);
 
 	uint64_t count = counter_registry->count;
-	struct counter_name *names = ADDR_OF(&counter_registry->names);
+	struct counter *names = ADDR_OF(&counter_registry->names);
 
 	// FIXME: unlock is correct
 	cp_config_unlock(cp_config);
@@ -1460,7 +1460,7 @@ yanet_get_chain_counters(
 	counter_registry = ADDR_OF(&counter_storage->registry);
 
 	uint64_t count = counter_registry->count;
-	struct counter_name *names = ADDR_OF(&counter_registry->names);
+	struct counter *names = ADDR_OF(&counter_registry->names);
 
 	// FIXME: unlock is correct
 	cp_config_unlock(cp_config);
@@ -1515,7 +1515,7 @@ yanet_get_function_counters(
 	counter_registry = ADDR_OF(&counter_storage->registry);
 
 	uint64_t count = counter_registry->count;
-	struct counter_name *names = ADDR_OF(&counter_registry->names);
+	struct counter *names = ADDR_OF(&counter_registry->names);
 
 	// FIXME: unlock is correct
 	cp_config_unlock(cp_config);
@@ -1569,7 +1569,7 @@ yanet_get_pipeline_counters(
 	counter_registry = ADDR_OF(&counter_storage->registry);
 
 	uint64_t count = counter_registry->count;
-	struct counter_name *names = ADDR_OF(&counter_registry->names);
+	struct counter *names = ADDR_OF(&counter_registry->names);
 
 	// FIXME: unlock is correct
 	cp_config_unlock(cp_config);
@@ -1621,7 +1621,7 @@ yanet_get_device_counters(
 	counter_registry = ADDR_OF(&counter_storage->registry);
 
 	uint64_t count = counter_registry->count;
-	struct counter_name *names = ADDR_OF(&counter_registry->names);
+	struct counter *names = ADDR_OF(&counter_registry->names);
 
 	// FIXME: unlock is correct
 	cp_config_unlock(cp_config);
@@ -1672,7 +1672,7 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 		ADDR_OF(&dp_config->worker_counter_storage);
 
 	uint64_t count = counter_registry->count;
-	struct counter_name *names = ADDR_OF(&counter_registry->names);
+	struct counter *names = ADDR_OF(&counter_registry->names);
 
 	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
 		sizeof(struct counter_handle_list) +

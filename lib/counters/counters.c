@@ -32,7 +32,7 @@ uint64_t
 counter_registry_lookup_index(
 	struct counter_registry *registry, const char *name, uint64_t size
 ) {
-	struct counter_name *names = ADDR_OF(&registry->names);
+	struct counter *names = ADDR_OF(&registry->names);
 
 	// FIXME: use hash index
 	for (uint64_t idx = 0; idx < registry->count; ++idx) {
@@ -65,33 +65,29 @@ counter_registry_expand(
 	struct memory_context *memory_context =
 		ADDR_OF(&registry->memory_context);
 
-	struct counter_name *new_names = (struct counter_name *)memory_balloc(
-		memory_context, sizeof(struct counter_name) * new_capacity
+	struct counter *new_names = (struct counter *)memory_balloc(
+		memory_context, sizeof(struct counter) * new_capacity
 	);
 	if (new_names == NULL) {
 		NEW_ERROR("failed to allocate counter names");
 		return -1;
 	}
 
-	struct counter_name *names = ADDR_OF(&registry->names);
+	struct counter *names = ADDR_OF(&registry->names);
 
 	/*
 	 * FIXME: copying is not efficient here so names and links should be
 	 * turned into chunked arrays.
 	 */
 	if (old_capacity > 0) {
-		memcpy(new_names,
-		       names,
-		       sizeof(struct counter_name) * old_capacity);
+		memcpy(new_names, names, sizeof(struct counter) * old_capacity);
 	}
 
 	SET_OFFSET_OF(&registry->names, new_names);
 	registry->capacity = new_capacity;
 
 	memory_bfree(
-		memory_context,
-		names,
-		sizeof(struct counter_name) * old_capacity
+		memory_context, names, sizeof(struct counter) * old_capacity
 	);
 
 	return 0;
@@ -117,9 +113,9 @@ counter_registry_insert(
 		}
 	}
 
-	struct counter_name *names = ADDR_OF(&registry->names);
+	struct counter *names = ADDR_OF(&registry->names);
 
-	struct counter_name *new_name = names + registry->count;
+	struct counter *new_name = names + registry->count;
 
 	strtcpy(new_name->name, name, COUNTER_NAME_LEN);
 	new_name->size = size;
@@ -141,7 +137,7 @@ counter_registry_register(
 	uint64_t idx = counter_registry_lookup_index(registry, name, size);
 
 	if (idx != (uint64_t)-1) {
-		struct counter_name *name = ADDR_OF(&registry->names) + idx;
+		struct counter *name = ADDR_OF(&registry->names) + idx;
 		name->gen = registry->gen;
 
 		return idx;
@@ -161,7 +157,7 @@ counter_registry_link(
 		}
 
 		for (uint64_t src_idx = 0; src_idx < src->count; ++src_idx) {
-			struct counter_name *src_name =
+			struct counter *src_name =
 				ADDR_OF(&src->names) + src_idx;
 
 			// Skip outdated counters
@@ -183,13 +179,13 @@ counter_registry_link(
 				return -1;
 			}
 
-			struct counter_name *dst_name =
+			struct counter *dst_name =
 				ADDR_OF(&dst->names) + dst_idx;
 			dst_name->offset = src_name->offset;
 		}
 	}
 	for (uint64_t dst_idx = 0; dst_idx < dst->count; ++dst_idx) {
-		struct counter_name *dst_name = ADDR_OF(&dst->names) + dst_idx;
+		struct counter *dst_name = ADDR_OF(&dst->names) + dst_idx;
 
 		if (dst_name->offset != (uint64_t)-1) {
 			continue;
@@ -302,8 +298,15 @@ counter_storage_spawn(
 			memory_context,
 			block_count * sizeof(struct counter_storage_block *)
 		);
-		if (new_blocks == NULL) {
-			// return FIXME;
+		if (new_blocks == NULL && block_count > 0) {
+			goto error;
+		}
+
+		if (block_count) {
+			memset(new_blocks,
+			       0,
+			       block_count *
+				       sizeof(struct counter_storage_block *));
 		}
 
 		SET_OFFSET_OF(&new_pool->blocks, new_blocks);
@@ -335,8 +338,7 @@ counter_storage_spawn(
 			struct counter_storage_page *pages =
 				counter_storage_allocator_new_pages(allocator);
 			if (pages == NULL) {
-				// FIXME
-				assert(false);
+				goto error;
 			}
 			SET_OFFSET_OF(&block->pages, pages);
 
@@ -353,12 +355,11 @@ counter_storage_spawn(
 				counter_registry->count
 		);
 	if (counter_value_handles == NULL && counter_registry->count > 0) {
-		assert(false);
+		goto error;
 	}
 
 	for (uint64_t idx = 0; idx < counter_registry->count; ++idx) {
-		struct counter_name *name =
-			ADDR_OF(&counter_registry->names) + idx;
+		struct counter *name = ADDR_OF(&counter_registry->names) + idx;
 
 		uint64_t pool_idx = uint64_log(name->size);
 
@@ -385,17 +386,27 @@ counter_storage_spawn(
 	);
 
 	return new_counter_storage;
+
+error:
+	counter_storage_free(new_counter_storage);
+	return NULL;
 }
 
 static void
 counter_storage_pool_destroy(
 	struct counter_storage *storage, struct counter_storage_pool *pool
 ) {
+	if (ADDR_OF(&pool->blocks) == NULL)
+		return;
+
 	struct memory_context *memory_context =
 		ADDR_OF(&storage->memory_context);
 	for (uint64_t idx = 0; idx < pool->block_count; ++idx) {
 		struct counter_storage_block *block =
 			ADDR_OF(ADDR_OF(&pool->blocks) + idx);
+		if (block == NULL)
+			continue;
+
 		if (--block->refcnt == 0) {
 			counter_storage_allocator_free_pages(
 				ADDR_OF(&storage->allocator),
@@ -408,6 +419,7 @@ counter_storage_pool_destroy(
 			);
 		}
 	}
+
 	memory_bfree(
 		memory_context,
 		ADDR_OF(&pool->blocks),
@@ -419,19 +431,22 @@ void
 counter_storage_free(struct counter_storage *storage) {
 	struct memory_context *memory_context =
 		ADDR_OF(&storage->memory_context);
+
+	if (ADDR_OF(&storage->counter_value_handles) != NULL) {
+		struct counter_registry *counter_registry =
+			ADDR_OF(&storage->registry);
+		memory_bfree(
+			memory_context,
+			ADDR_OF(&storage->counter_value_handles),
+			sizeof(struct counter_structure_handle *) *
+				counter_registry->count
+		);
+	}
+
 	for (uint64_t pool_idx = 0; pool_idx < COUNTER_POOL_SIZE; ++pool_idx) {
 		struct counter_storage_pool *pool = storage->pools + pool_idx;
 		counter_storage_pool_destroy(storage, pool);
 	}
-
-	struct counter_registry *counter_registry = ADDR_OF(&storage->registry);
-
-	memory_bfree(
-		memory_context,
-		ADDR_OF(&storage->counter_value_handles),
-		sizeof(struct counter_structure_handle *) *
-			counter_registry->count
-	);
 }
 
 void

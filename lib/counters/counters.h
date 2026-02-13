@@ -17,7 +17,7 @@
 #define COUNTER_NAME_LEN 64
 #define COUNTER_INVALID (uint64_t)-1
 
-struct counter_name {
+struct counter {
 	char name[COUNTER_NAME_LEN];
 	uint64_t size;
 	uint64_t gen;
@@ -31,7 +31,7 @@ struct counter_registry {
 	uint64_t count;
 	uint64_t counts[COUNTER_POOL_SIZE];
 
-	struct counter_name *names;
+	struct counter *names;
 };
 
 int
