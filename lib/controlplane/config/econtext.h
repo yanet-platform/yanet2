@@ -6,6 +6,8 @@
 #include "dataplane/device/device.h"
 #include "dataplane/module/module.h"
 
+#include "cp_module.h"
+
 struct counter_storage;
 
 struct cp_module;
@@ -24,6 +26,9 @@ struct module_ectx {
 	uint64_t tx_counter_id;
 	uint64_t rx_bytes_counter_id;
 	uint64_t tx_bytes_counter_id;
+
+	// TODO: docs
+	uint64_t hist_counter_ids[CP_MODULE_COUNTER_HISTS_COUNT];
 
 	struct counter_storage *counter_storage;
 	struct config_gen_ectx *config_gen_ectx;

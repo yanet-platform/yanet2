@@ -16,6 +16,8 @@ service CountersService {
 	}
 	rpc Module(ModuleCountersRequest) returns (CountersResponse) {
 	}
+	rpc NamedModule(ModuleCountersRequest) returns 
+		(NamedModuleCountersResponse) {}
 }
 
 message DeviceCountersRequest {
@@ -65,4 +67,33 @@ message CounterInfo {
 
 message CountersResponse {
 	repeated CounterInfo counters = 1;
+}
+
+// TODO: docs
+message AggregatePacketBatchLatency {
+	uint32 min_latency = 1;
+	uint32 max_latency = 2;
+	uint64 batches = 3;
+}
+
+// TODO: docs
+message AggregatePacketBatchCounters {
+	uint32 min_batch_size = 1;
+	uint32 max_batch_size = 2;
+	uint64 mean_latency = 3;
+	repeated AggregatePacketBatchLatency latencies = 4;
+}
+
+// TODO: docs
+message AggregateModuleCounters {
+	uint64 tx_count = 1;
+	uint64 tx_bytes = 2;
+	uint64 rx_count = 3;
+	uint64 rx_bytes = 4;
+	repeated AggregatePacketBatchCounters packet_batches = 5;
+}
+
+// TODO: docs
+message NamedModuleCountersResponse {
+	repeated AggregateModuleCounters counters = 1;
 }

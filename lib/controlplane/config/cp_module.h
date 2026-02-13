@@ -7,6 +7,7 @@
 #include "controlplane/config/defines.h"
 
 #include "controlplane/config/registry.h"
+#include "counters/histogram.h"
 
 /*
  * Structure cp_module reflects module configuration
@@ -25,6 +26,16 @@ typedef void (*cp_module_free_handler)(struct cp_module *cp_module);
 
 struct cp_module_device {
 	char name[CP_DEVICE_NAME_LEN];
+};
+
+#define CP_MODULE_COUNTER_HISTS_COUNT 6
+
+static const struct counters_hybrid_histogram
+cp_module_counter_hist = {
+	.min_value = 10 /* ns */,
+	.linear_hists = 20,
+	.linear_step = 50 /* ns */,
+	.exp_hists = 10
 };
 
 struct cp_module {
@@ -54,6 +65,9 @@ struct cp_module {
 	uint64_t rx_bytes_counter_id;
 	// Tx bytes counter
 	uint64_t tx_bytes_counter_id;
+
+	// TODO: docs
+	uint64_t hist_counters_idx[CP_MODULE_COUNTER_HISTS_COUNT];
 
 	// Link to the previous instance of the module configuration
 	struct cp_module *prev;
