@@ -83,6 +83,7 @@ export interface RoutesByConfigProps {
     getRouteId: (route: Route) => string;
     onEditRoute?: (route: Route) => void;
     getFIBEntries?: (configName: string) => FIBEntry[];
+    loadFIBEntries?: (configName: string) => Promise<FIBEntry[]>;
 }
 
 // Props for ConfigTabs and RouteConfigContent (without routeColumns since VirtualizedRouteTable doesn't need it)

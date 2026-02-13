@@ -40,6 +40,7 @@ const RoutePage: React.FC = () => {
         handleConfigTabChange,
         reloadRoutes,
         reloadFIB,
+        loadFIBForConfig,
     } = useRouteData();
 
     const {
@@ -352,6 +353,7 @@ const RoutePage: React.FC = () => {
                     getRouteId={getRouteId}
                     onEditRoute={handleEditRouteClick}
                     getFIBEntries={getFIBEntries}
+                    loadFIBEntries={loadFIBForConfig}
                 />
             </Box>
 

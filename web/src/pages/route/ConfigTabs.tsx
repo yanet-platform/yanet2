@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Box, TabProvider, TabList, Tab, TabPanel } from '@gravity-ui/uikit';
 import { VirtualizedRouteTable } from './VirtualizedRouteTable';
 import { FIBTable } from './FIBTable';
@@ -15,9 +15,33 @@ export const ConfigTabs: React.FC<ConfigTabsProps> = ({
     getRouteId,
     onEditRoute,
     getFIBEntries,
+    loadFIBEntries,
 }) => {
     const validActiveConfig = configs.includes(activeConfig) ? activeConfig : configs[0] || '';
     const [activeSubTab, setActiveSubTab] = useState<string>('rib');
+    const [fibLoading, setFibLoading] = useState(false);
+
+    useEffect(() => {
+        if (activeSubTab !== 'fib' || !validActiveConfig || !loadFIBEntries) {
+            return;
+        }
+
+        let cancelled = false;
+        setFibLoading(true);
+        loadFIBEntries(validActiveConfig).finally(() => {
+            if (!cancelled) {
+                setFibLoading(false);
+            }
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeSubTab, validActiveConfig, loadFIBEntries]);
+
+    const handleSubTabChange = useCallback((tab: string) => {
+        setActiveSubTab(tab);
+    }, []);
 
     return (
         <TabProvider value={validActiveConfig} onUpdate={onConfigChange}>
@@ -35,7 +59,7 @@ export const ConfigTabs: React.FC<ConfigTabsProps> = ({
 
                     return (
                         <TabPanel key={configName} value={configName}>
-                            <TabProvider value={activeSubTab} onUpdate={setActiveSubTab}>
+                            <TabProvider value={activeSubTab} onUpdate={handleSubTabChange}>
                                 <TabList size="m">
                                     <Tab value="rib">RIB</Tab>
                                     <Tab value="fib">FIB</Tab>
@@ -51,7 +75,11 @@ export const ConfigTabs: React.FC<ConfigTabsProps> = ({
                                         />
                                     </TabPanel>
                                     <TabPanel value="fib">
-                                        <FIBTable entries={fibEntries} />
+                                        {fibLoading ? (
+                                            <Box style={{ padding: '16px', textAlign: 'center' }}>Loading FIB...</Box>
+                                        ) : (
+                                            <FIBTable entries={fibEntries} />
+                                        )}
                                     </TabPanel>
                                 </Box>
                             </TabProvider>
