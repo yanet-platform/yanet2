@@ -268,7 +268,7 @@ impl CountersService {
             module_name,
         };
         let response = self.client.aggregate_module(request).await?;
-        println!("{}", serde_json::to_string(response.get_ref())?);
+        println!("{}", serde_json::to_string_pretty(response.get_ref())?);
         Ok(())
     }
 }

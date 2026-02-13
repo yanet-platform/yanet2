@@ -30,8 +30,7 @@ struct cp_module_device {
 
 #define CP_MODULE_COUNTER_HISTS_COUNT 6
 
-static const struct counters_hybrid_histogram
-cp_module_counter_hist = {
+static const struct counters_hybrid_histogram cp_module_counter_hist = {
 	.min_value = 10 /* ns */,
 	.linear_hists = 20,
 	.linear_step = 50 /* ns */,

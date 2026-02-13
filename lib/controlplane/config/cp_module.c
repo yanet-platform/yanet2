@@ -100,13 +100,23 @@ cp_module_init(
 		);
 		return -1;
 	}
-	for (size_t counter_idx = 0; counter_idx < CP_MODULE_COUNTER_HISTS_COUNT; ++counter_idx) {
+	for (size_t counter_idx = 0;
+	     counter_idx < CP_MODULE_COUNTER_HISTS_COUNT;
+	     ++counter_idx) {
 		char name[16];
 		sprintf(name, "hist_%zu", counter_idx);
-		cp_module->hist_counters_idx[counter_idx] = counter_registry_register(&cp_module->counter_registry, name, 1 + cp_module_counter_hist.linear_hists + cp_module_counter_hist.exp_hists);
-		if (cp_module->hist_counters_idx[counter_idx] == COUNTER_INVALID) {
+		cp_module->hist_counters_idx[counter_idx] =
+			counter_registry_register(
+				&cp_module->counter_registry,
+				name,
+				1 + cp_module_counter_hist.linear_hists +
+					cp_module_counter_hist.exp_hists
+			);
+		if (cp_module->hist_counters_idx[counter_idx] ==
+		    COUNTER_INVALID) {
 			NEW_ERROR(
-				"failed to register histogram counter at index %zu for module "
+				"failed to register histogram counter at index "
+				"%zu for module "
 				"'%s:%s'",
 				counter_idx,
 				module_type,
