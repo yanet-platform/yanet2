@@ -5,8 +5,9 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{
-    counters_service_client::CountersServiceClient, ChainCountersRequest, DeviceCountersRequest,
-    FunctionCountersRequest, ModuleCountersRequest, PipelineCountersRequest,
+    counters_service_client::CountersServiceClient, AggregateModuleCountersRequest,
+    ChainCountersRequest, DeviceCountersRequest, FunctionCountersRequest, ModuleCountersRequest,
+    PipelineCountersRequest,
 };
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;
@@ -98,6 +99,9 @@ pub struct ModuleCmd {
     pub module_type: String,
     #[arg(long)]
     pub module_name: String,
+    /// Show aggregated counters instead of raw counters.
+    #[arg(long)]
+    pub aggregate: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -130,16 +134,29 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
                 .await?
         }
         ModeCmd::Module(cmd) => {
-            service
-                .show_module(
-                    cmd.device_name,
-                    cmd.pipeline_name,
-                    cmd.function_name,
-                    cmd.chain_name,
-                    cmd.module_type,
-                    cmd.module_name,
-                )
-                .await?
+            if cmd.aggregate {
+                service
+                    .show_aggregate_module(
+                        cmd.device_name,
+                        cmd.pipeline_name,
+                        cmd.function_name,
+                        cmd.chain_name,
+                        cmd.module_type,
+                        cmd.module_name,
+                    )
+                    .await?
+            } else {
+                service
+                    .show_module(
+                        cmd.device_name,
+                        cmd.pipeline_name,
+                        cmd.function_name,
+                        cmd.chain_name,
+                        cmd.module_type,
+                        cmd.module_name,
+                    )
+                    .await?
+            }
         }
     }
 
@@ -229,6 +246,28 @@ impl CountersService {
             counter_query: Vec::new(),
         };
         let response = self.client.module(request).await?;
+        println!("{}", serde_json::to_string(response.get_ref())?);
+        Ok(())
+    }
+
+    pub async fn show_aggregate_module(
+        &mut self,
+        device_name: String,
+        pipeline_name: String,
+        function_name: String,
+        chain_name: String,
+        module_type: String,
+        module_name: String,
+    ) -> Result<(), Box<dyn Error>> {
+        let request = AggregateModuleCountersRequest {
+            device: device_name,
+            pipeline: pipeline_name,
+            function: function_name,
+            chain: chain_name,
+            module_type,
+            module_name,
+        };
+        let response = self.client.aggregate_module(request).await?;
         println!("{}", serde_json::to_string(response.get_ref())?);
         Ok(())
     }

@@ -16,8 +16,8 @@ service CountersService {
 	}
 	rpc Module(ModuleCountersRequest) returns (CountersResponse) {
 	}
-	rpc NamedModule(ModuleCountersRequest) returns 
-		(NamedModuleCountersResponse) {}
+	rpc AggregateModule(AggregateModuleCountersRequest) returns 
+		(AggregateModuleCountersResponse) {}
 }
 
 message DeviceCountersRequest {
@@ -69,6 +69,15 @@ message CountersResponse {
 	repeated CounterInfo counters = 1;
 }
 
+message AggregateModuleCountersRequest {
+	string device = 1;
+	string pipeline = 2;
+	string function = 3;
+	string chain = 4;
+	string module_type = 5;
+	string module_name = 6;
+}
+
 // TODO: docs
 message AggregatePacketBatchLatency {
 	uint32 min_latency = 1;
@@ -94,6 +103,6 @@ message AggregateModuleCounters {
 }
 
 // TODO: docs
-message NamedModuleCountersResponse {
+message AggregateModuleCountersResponse {
 	repeated AggregateModuleCounters counters = 1;
 }
