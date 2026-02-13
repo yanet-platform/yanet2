@@ -7,22 +7,35 @@ on:
       - "**.h"
       - "**.c"
       - "**.proto"
-      - "**/meson.build"
   pull_request:
     branches: ["main"]
     paths:
       - "**.h"
       - "**.c"
       - "**.proto"
-      - "**/meson.build"
 
 jobs:
-  fmt:
+  c-cpp-fmt:
+    name: C formatting
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Run clang-format
-        uses: jidicula/clang-format-action@v4.14.0
+        uses: ./.github/actions/clang-format
         with:
-          clang-format-version: 19
-          exclude-regex: subprojects/.*
+          include: |
+            *.h
+            *.c
+          exclude-regex: '^./subprojects/'
+
+  proto-fmt:
+    name: Protobuf formatting
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run clang-format
+        uses: ./.github/actions/clang-format
+        with:
+          include: |
+            *.proto
+          exclude-regex: '^./subprojects/'
