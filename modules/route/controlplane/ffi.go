@@ -17,6 +17,11 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
+const (
+	addressFamilyIPv4 = 4
+	addressFamilyIPv6 = 6
+)
+
 type ModuleConfig struct {
 	ptr ffi.ModuleConfig
 }
@@ -172,18 +177,15 @@ func (m *ModuleConfig) DumpFIB() ([]FIBEntry, error) {
 		to := C.fib_iter_prefix_to(it)
 
 		var prefixFrom, prefixTo netip.Addr
-		if af == 4 {
-			var f4, t4 [4]byte
-			copy(f4[:], C.GoBytes(unsafe.Pointer(from), 4))
-			copy(t4[:], C.GoBytes(unsafe.Pointer(to), 4))
-			prefixFrom = netip.AddrFrom4(f4)
-			prefixTo = netip.AddrFrom4(t4)
-		} else {
-			var f16, t16 [16]byte
-			copy(f16[:], C.GoBytes(unsafe.Pointer(from), 16))
-			copy(t16[:], C.GoBytes(unsafe.Pointer(to), 16))
-			prefixFrom = netip.AddrFrom16(f16)
-			prefixTo = netip.AddrFrom16(t16)
+		switch af {
+		case addressFamilyIPv4:
+			prefixFrom = netip.AddrFrom4(*(*[4]byte)(unsafe.Pointer(from)))
+			prefixTo = netip.AddrFrom4(*(*[4]byte)(unsafe.Pointer(to)))
+		case addressFamilyIPv6:
+			prefixFrom = netip.AddrFrom16(*(*[16]byte)(unsafe.Pointer(from)))
+			prefixTo = netip.AddrFrom16(*(*[16]byte)(unsafe.Pointer(to)))
+		default:
+			continue
 		}
 
 		nhCount := int(C.fib_iter_nexthop_count(it))
@@ -196,23 +198,13 @@ func (m *ModuleConfig) DumpFIB() ([]FIBEntry, error) {
 			C.fib_iter_nexthop_dst_mac(it, idx, &dstMAC)
 			C.fib_iter_nexthop_src_mac(it, idx, &srcMAC)
 
-			dst := make(net.HardwareAddr, 6)
-			src := make(net.HardwareAddr, 6)
-			copy(dst, C.GoBytes(
-				unsafe.Pointer(&dstMAC.addr[0]), 6,
-			))
-			copy(src, C.GoBytes(
-				unsafe.Pointer(&srcMAC.addr[0]), 6,
-			))
+			dst := net.HardwareAddr(C.GoBytes(unsafe.Pointer(&dstMAC.addr[0]), 6))
+			src := net.HardwareAddr(C.GoBytes(unsafe.Pointer(&srcMAC.addr[0]), 6))
 
 			nexthops[i] = FIBNexthop{
 				DstMAC: dst,
 				SrcMAC: src,
-				Device: C.GoString(
-					C.fib_iter_nexthop_device_name(
-						it, idx,
-					),
-				),
+				Device: C.GoString(C.fib_iter_nexthop_device_name(it, idx)),
 			}
 		}
 

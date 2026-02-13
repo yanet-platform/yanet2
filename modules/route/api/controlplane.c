@@ -5,14 +5,20 @@
 #include "common/container_of.h"
 #include "common/exp_array.h"
 #include "common/lpm.h"
-#include "common/strutils.h"
 
 #include "controlplane/agent/agent.h"
+
+enum fib_iter_phase {
+	fib_iter_phase_start = 0,
+	fib_iter_phase_ipv4 = 4,
+	fib_iter_phase_ipv6 = 6,
+	fib_iter_phase_done = 0xff,
+};
 
 struct fib_iter {
 	struct route_module_config *config;
 	struct lpm_iter lpm_it;
-	uint8_t phase;
+	enum fib_iter_phase phase;
 };
 
 struct cp_module *
@@ -244,20 +250,22 @@ fib_iter_destroy(struct fib_iter *it) {
 
 bool
 fib_iter_next(struct fib_iter *it) {
-	if (it->phase == 0xff)
+	if (it->phase == fib_iter_phase_done) {
 		return false;
+	}
 
 	// Start or continue IPv4 walk.
-	if (it->phase == 0) {
+	if (it->phase == fib_iter_phase_start) {
 		uint8_t from[4] = {0, 0, 0, 0};
 		uint8_t to[4] = {0xff, 0xff, 0xff, 0xff};
 		lpm_iter_init(&it->lpm_it, &it->config->lpm_v4, 4, from, to);
-		it->phase = 4;
+		it->phase = fib_iter_phase_ipv4;
 	}
 
-	if (it->phase == 4) {
-		if (lpm_iter_next(&it->lpm_it))
+	if (it->phase == fib_iter_phase_ipv4) {
+		if (lpm_iter_next(&it->lpm_it)) {
 			return true;
+		}
 
 		// IPv4 exhausted, start IPv6.
 		uint8_t from[16];
@@ -265,14 +273,15 @@ fib_iter_next(struct fib_iter *it) {
 		memset(from, 0x00, 16);
 		memset(to, 0xff, 16);
 		lpm_iter_init(&it->lpm_it, &it->config->lpm_v6, 16, from, to);
-		it->phase = 6;
+		it->phase = fib_iter_phase_ipv6;
 	}
 
-	if (it->phase == 6) {
-		if (lpm_iter_next(&it->lpm_it))
+	if (it->phase == fib_iter_phase_ipv6) {
+		if (lpm_iter_next(&it->lpm_it)) {
 			return true;
+		}
 
-		it->phase = 0xff;
+		it->phase = fib_iter_phase_done;
 	}
 
 	return false;
