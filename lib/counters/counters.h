@@ -21,11 +21,7 @@ struct counter_name {
 	char name[COUNTER_NAME_LEN];
 	uint64_t size;
 	uint64_t gen;
-};
-
-struct counter_link {
 	uint64_t offset;
-	uint64_t pool_idx;
 };
 
 struct counter_registry {
@@ -36,7 +32,6 @@ struct counter_registry {
 	uint64_t counts[COUNTER_POOL_SIZE];
 
 	struct counter_name *names;
-	struct counter_link *links;
 };
 
 int
@@ -44,11 +39,6 @@ counter_registry_init(
 	struct counter_registry *registry,
 	struct memory_context *memory_context,
 	uint64_t gen
-);
-
-int
-counter_registry_copy(
-	struct counter_registry *registry, struct counter_registry *src
 );
 
 uint64_t
@@ -87,8 +77,11 @@ counter_storage_allocator_init(
 	uint64_t instance_count
 );
 
+struct counter_value_handle;
+
 struct counter_storage {
 	struct memory_context *memory_context;
+	struct counter_value_handle **counter_value_handles;
 	struct counter_registry *registry;
 	struct counter_storage_allocator *allocator;
 	struct counter_storage_pool pools[COUNTER_POOL_SIZE];
@@ -105,41 +98,13 @@ counter_storage_spawn(
 void
 counter_storage_free(struct counter_storage *storage);
 
-struct counter_value_handle;
 static inline struct counter_value_handle *
 counter_get_value_handle(
 	uint64_t counter_id, struct counter_storage *counter_storage
 ) {
-	struct counter_registry *counter_regsitry =
-		ADDR_OF(&counter_storage->registry);
-
-	struct counter_link *link =
-		ADDR_OF(&counter_regsitry->links) + counter_id;
-
-#ifdef COUNTERS_CHECK
-	if (link->pool_idx >= COUNTER_POOL_SIZE)
-		return NULL;
-#endif
-
-	struct counter_storage_pool *pool =
-		counter_storage->pools + link->pool_idx;
-
-	// Diagnostics: compute indices and sizes
-	uint64_t block_idx = link->offset / COUNTER_STORAGE_PAGE_SIZE;
-	uint64_t offset = link->offset % COUNTER_STORAGE_PAGE_SIZE;
-
-#ifdef COUNTERS_CHECK
-	if (block_idx >= pool->block_count)
-		return NULL;
-	if (byte_offset + slot_size_bytes > COUNTER_STORAGE_PAGE_SIZE)
-		return NULL;
-#endif
-
-	struct counter_storage_block *block =
-		ADDR_OF(ADDR_OF(&pool->blocks) + block_idx);
-
-	uint8_t *base = (uint8_t *)ADDR_OF(&block->pages);
-	return (struct counter_value_handle *)(base + offset);
+	struct counter_value_handle **handles =
+		ADDR_OF(&counter_storage->counter_value_handles);
+	return ADDR_OF(handles + counter_id);
 }
 
 static inline uint64_t *
