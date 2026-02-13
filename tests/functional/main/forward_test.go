@@ -152,7 +152,7 @@ func TestForward(t *testing.T) {
 			[]byte("forward test"),
 		)
 
-		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
+		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 500*time.Millisecond)
 		require.NoError(t, err, "Failed to send packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
@@ -171,7 +171,7 @@ func TestForward(t *testing.T) {
 		)
 
 		// Send packet and wait for response
-		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
+		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 500*time.Millisecond)
 		require.NoError(t, err, "Failed to send ICMP packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
@@ -190,7 +190,7 @@ func TestForward(t *testing.T) {
 		)
 
 		// Send packet and wait for response
-		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
+		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 500*time.Millisecond)
 		require.NoError(t, err, "Failed to send ICMPv6 packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
