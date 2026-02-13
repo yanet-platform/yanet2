@@ -140,11 +140,11 @@ pub struct FibCmd {
 #[derive(Debug, Clone, Parser)]
 pub enum FibAction {
     /// Dump FIB entries.
-    Dump(FibDumpCmd),
+    Show(FibShowCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct FibDumpCmd {
+pub struct FibShowCmd {
     /// Show only IPv4 FIB entries.
     #[arg(long)]
     pub ipv4: bool,
@@ -196,7 +196,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Flush(cmd) => service.flush_routes(cmd).await,
         ModeCmd::Fib(cmd) => match cmd.action {
-            FibAction::Dump(cmd) => service.show_fib(cmd).await,
+            FibAction::Show(cmd) => service.show_fib(cmd).await,
         },
     }
 }
@@ -328,7 +328,7 @@ impl RouteService {
         Ok(())
     }
 
-    pub async fn show_fib(&mut self, cmd: FibDumpCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn show_fib(&mut self, cmd: FibShowCmd) -> Result<(), Box<dyn Error>> {
         let request = ShowFibRequest {
             name: cmd.config_name.clone(),
             ipv4_only: cmd.ipv4,
