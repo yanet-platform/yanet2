@@ -1,0 +1,71 @@
+name: C fuzz test (libFuzzer)
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build fuzz targets
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Free up disk space on GitHub runner
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo apt-get clean
+          docker rmi $(docker images -q) 2>/dev/null || true
+
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
+          version: 1.1
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: hendrikmuhs/ccache-action@v1.2.18
+        name: ccache
+        with:
+          key: ${{ runner.os }}-fuzz-build-cache
+
+      - name: Build fuzz targets
+        run: make fuzz
+
+      - name: Upload fuzz binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-binaries
+          path: build/tests/fuzzing/
+          retention-days: 1
+
+  fuzz-test:
+    name: Fuzz ${{ matrix.module }}
+    runs-on: ubuntu-24.04
+    needs: build
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [decap, forward, route, nat64w, dscp, fwstate]
+
+    steps:
+      - name: Download fuzz binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: fuzz-binaries
+          path: fuzz-binaries/
+
+      - name: Run fuzzer
+        run: |
+          chmod +x fuzz-binaries/${{ matrix.module }}
+          mkdir -p corpus
+          ./fuzz-binaries/${{ matrix.module }} corpus/ -max_total_time=600

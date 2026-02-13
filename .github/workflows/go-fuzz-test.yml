@@ -1,0 +1,20 @@
+name: Go fuzz test
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  fuzz-test:
+    name: Go fuzz test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jidicula/go-fuzz-action@v1.2.0
+        with:
+          packages: "./..."
+          fuzz-time: 10m
+          go-version: "1.24.x"
