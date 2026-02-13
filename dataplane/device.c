@@ -10,7 +10,7 @@
 int
 dataplane_device_start(
 	struct dataplane *dataplane, struct dataplane_device *device
-) {
+    ) {
 	(void)dataplane;
 
 	LOG(INFO,
