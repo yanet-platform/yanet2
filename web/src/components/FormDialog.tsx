@@ -52,7 +52,7 @@ export const FormDialog: React.FC<FormDialogProps> = ({
     }, [canSubmit, onConfirm]);
 
     // Add Ctrl+Enter keyboard shortcut
-    useDialogKeyboardShortcut({ open, canSubmit, onConfirm: handleConfirm });
+    useDialogKeyboardShortcut({ open, canSubmit, onConfirm });
     
     return (
         <Dialog open={open} onClose={onClose}>
