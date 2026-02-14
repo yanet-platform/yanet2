@@ -24,7 +24,6 @@ export * from './FIBTable';
 export * from './RouteConfigContent';
 export * from './VirtualizedRouteTable';
 export * from './VirtualRow';
-export * from './SortableHeader';
 export * from './TableSearchBar';
 export * from './TableHeader';
 

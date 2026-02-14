@@ -1,25 +1,33 @@
 import React from 'react';
 import { Box, Text, Icon } from '@gravity-ui/uikit';
 import { ChevronUp, ChevronDown } from '@gravity-ui/icons';
-import type { PacketSortState, PacketSortColumn } from './types';
 
-export interface SortableHeaderProps {
-    column: PacketSortColumn;
-    label: string;
-    style: React.CSSProperties;
-    sortState: PacketSortState;
-    onSort: (column: PacketSortColumn) => void;
+export interface SortState<TColumn = string> {
+    column: TColumn | null;
+    direction: 'asc' | 'desc';
 }
 
-export const SortableHeader: React.FC<SortableHeaderProps> = ({
+export interface SortableTableHeaderProps<TColumn = string> {
+    column: TColumn;
+    label: string;
+    style: React.CSSProperties;
+    sortState: SortState<TColumn>;
+    onSort: (column: TColumn) => void;
+    disabled?: boolean;
+}
+
+export const SortableTableHeader = <TColumn extends string = string>({
     column,
     label,
     style,
     sortState,
     onSort,
-}) => {
+    disabled = false,
+}: SortableTableHeaderProps<TColumn>) => {
     const handleClick = () => {
-        onSort(column);
+        if (!disabled) {
+            onSort(column);
+        }
     };
 
     const isActive = sortState.column === column;
@@ -28,10 +36,11 @@ export const SortableHeader: React.FC<SortableHeaderProps> = ({
         <Box
             style={{
                 ...style,
-                cursor: 'pointer',
+                cursor: disabled ? 'default' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 4,
+                opacity: disabled ? 0.6 : 1,
             }}
             onClick={handleClick}
         >
@@ -42,4 +51,3 @@ export const SortableHeader: React.FC<SortableHeaderProps> = ({
         </Box>
     );
 };
-
