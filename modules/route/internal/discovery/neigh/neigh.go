@@ -33,6 +33,7 @@ func WithUpdateInterval(interval time.Duration) Option {
 	}
 }
 
+// WithLinkMap configures the neighbour monitor with a link name mapping.
 func WithLinkMap(linkMap map[string]string) Option {
 	return func(o *options) {
 		o.LinkMap = linkMap
@@ -62,24 +63,28 @@ func newOptions() *options {
 
 // NeighMonitor is a monitor of neighbour events.
 //
-// It populates the nexthop cache with discovered neighbours both reactively
-// and periodically.
+// It populates the nexthop cache with discovered neighbours both
+// reactively and periodically. The results are written into the
+// kernel source of the NeighTable via SwapSource, which triggers
+// a re-merge of the merged cache.
 type NeighMonitor struct {
-	nexthopCache   *NexthopCache
+	neighTable     *NeighTable
+	source         *NeighSource
 	updateInterval time.Duration
 	linkMap        map[string]string
 	log            *zap.SugaredLogger
 }
 
 // NewNeighMonitor creates a new neighbour monitor.
-func NewNeighMonitor(neighbours *NexthopCache, options ...Option) *NeighMonitor {
+func NewNeighMonitor(neighTable *NeighTable, source *NeighSource, options ...Option) *NeighMonitor {
 	opts := newOptions()
 	for _, o := range options {
 		o(opts)
 	}
 
 	m := &NeighMonitor{
-		nexthopCache:   neighbours,
+		neighTable:     neighTable,
+		source:         source,
 		linkMap:        opts.LinkMap,
 		updateInterval: opts.UpdateInterval,
 		log:            opts.Log,
@@ -88,11 +93,6 @@ func NewNeighMonitor(neighbours *NexthopCache, options ...Option) *NeighMonitor 
 	// Bootstrap neighbours synchronously here.
 	m.updateNeighbours()
 	return m
-}
-
-// Cache returns the nexthop cache.
-func (m *NeighMonitor) Cache() *NexthopCache {
-	return m.nexthopCache
 }
 
 // Run runs the neighbour monitor until the specified context is canceled.
@@ -184,12 +184,12 @@ func (m *NeighMonitor) updateNeighbours() error {
 
 	linkIndexToName := map[int]string{}
 
-	// Create a map of link indexes to hardware addresses for quick lookup
+	// Create a map of link indexes to hardware addresses for quick lookup.
 	linkIndexToHardwareAddr := map[int]net.HardwareAddr{}
 	for _, link := range links {
 		attrs := link.Attrs()
 
-		// TODO: should be filter out loopback links?
+		// TODO: should we filter out loopback links?
 
 		hardwareAddr := attrs.HardwareAddr
 		if hardwareAddr == nil {
@@ -200,9 +200,9 @@ func (m *NeighMonitor) updateNeighbours() error {
 		linkIndexToName[attrs.Index] = attrs.Name
 	}
 
-	view := m.nexthopCache.View()
+	view := m.source.Cache.View()
 
-	// Create the new cache map with resolved hardware addresses
+	// Create the new cache map with resolved hardware addresses.
 	nexthopCache := map[netip.Addr]NeighbourEntry{}
 	for _, neigh := range neighs {
 		nexthopAddr, ok := netip.AddrFromSlice(neigh.IP)
@@ -241,7 +241,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 			device = linkIndexToName[neigh.LinkIndex]
 		}
 
-		// Create the entry with resolved hardware addresses
+		// Create the entry with resolved hardware addresses.
 		entry := NeighbourEntry{
 			NextHop: nexthopAddr,
 			HardwareRoute: HardwareRoute{
@@ -270,8 +270,10 @@ func (m *NeighMonitor) updateNeighbours() error {
 		nexthopCache[nexthopAddr] = entry
 	}
 
-	// Swap the entire table atomically.
-	m.nexthopCache.Swap(nexthopCache)
+	// Swap the source table and trigger a re-merge of the merged cache.
+	if err := m.neighTable.SwapSource(m.source.Name, nexthopCache); err != nil {
+		return fmt.Errorf("failed to swap source: %w", err)
+	}
 
 	m.log.Infow("updated nexthop cache", zap.Int("size", len(nexthopCache)))
 	return nil

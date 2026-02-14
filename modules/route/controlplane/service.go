@@ -33,7 +33,7 @@ type RouteService struct {
 	ribsLock   sync.RWMutex
 	ribs       map[string]*rib.RIB
 	ffiModules map[string]*ModuleConfig
-	neighCache *neigh.NexthopCache
+	neighTable *neigh.NeighTable
 
 	ribTTL time.Duration
 	quitCh chan bool
@@ -43,7 +43,7 @@ type RouteService struct {
 
 func NewRouteService(
 	agent *ffi.Agent,
-	neighCache *neigh.NexthopCache,
+	neighTable *neigh.NeighTable,
 	ribTTL time.Duration,
 	log *zap.SugaredLogger,
 ) *RouteService {
@@ -51,7 +51,7 @@ func NewRouteService(
 		agent:      agent,
 		ribs:       map[string]*rib.RIB{},
 		ffiModules: map[string]*ModuleConfig{},
-		neighCache: neighCache,
+		neighTable: neighTable,
 		ribTTL:     ribTTL,
 		quitCh:     make(chan bool),
 		log:        log,
@@ -611,7 +611,7 @@ func (m *RouteService) updateModuleConfig(
 	}
 
 	// Obtain neighbour entry with resolved hardware addresses
-	neighbours := m.neighCache.View()
+	neighbours := m.neighTable.View()
 
 	// Statistics for summary logging
 	var stats struct {

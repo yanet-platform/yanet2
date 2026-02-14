@@ -107,3 +107,24 @@ export const parseMACToBytes = (mac: string): number[] | undefined => {
     }
     return bytes;
 };
+
+/**
+ * Convert MAC address string to uint64 string for proto MACAddress.addr.
+ *
+ * The proto stores MAC as a big-endian uint64 where the 6 MAC bytes occupy
+ * the most significant positions and the lowest 2 bytes are zero.
+ * Example: "3a:ac:26:9b:5b:f9" -> "0x3aac269b5bf90000" as decimal string.
+ *
+ * @param mac - MAC address string in format "xx:xx:xx:xx:xx:xx"
+ * @returns uint64 value as a decimal string, or undefined if invalid
+ */
+export const macToUint64 = (mac: string): string | undefined => {
+    const bytes = parseMACToBytes(mac);
+    if (!bytes) return undefined;
+
+    let value = BigInt(0);
+    for (let i = 0; i < 6; i++) {
+        value |= BigInt(bytes[i]) << BigInt((7 - i) * 8);
+    }
+    return value.toString();
+};
