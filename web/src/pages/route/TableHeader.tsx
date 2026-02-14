@@ -9,12 +9,18 @@ export interface TableHeaderProps {
     sortState: SortState;
     onSort: (column: SortableColumn) => void;
     canSort: boolean;
+    allSelected: boolean;
+    someSelected: boolean;
+    onSelectAll: (checked: boolean) => void;
 }
 
 export const TableHeader: React.FC<TableHeaderProps> = ({
     sortState,
     onSort,
     canSort,
+    allSelected,
+    someSelected,
+    onSelectAll,
 }) => {
     return (
         <Box
@@ -22,7 +28,11 @@ export const TableHeader: React.FC<TableHeaderProps> = ({
             style={{ height: HEADER_HEIGHT, minWidth: TOTAL_WIDTH }}
         >
             <Box style={cellStyles.checkbox}>
-                <Checkbox checked={false} disabled />
+                <Checkbox
+                    checked={allSelected}
+                    indeterminate={!allSelected && someSelected}
+                    onUpdate={onSelectAll}
+                />
             </Box>
             <Box style={{ ...cellStyles.index, color: undefined }}>
                 <Text variant="subheader-1">#</Text>
