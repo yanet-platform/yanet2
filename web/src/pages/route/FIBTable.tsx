@@ -1,7 +1,7 @@
 import React, { useRef, useCallback, useMemo, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Box, Text } from '@gravity-ui/uikit';
-import { EmptyState, TableSearchBar } from '../../components';
+import { EmptyState, TableSearchBar, SortableTableHeader } from '../../components';
 import type { FIBEntry, FIBNexthop } from '../../api/routes';
 import type { FIBRow, FIBSortableColumn, FIBSortState } from './types';
 import { useContainerHeight } from './hooks';
@@ -47,36 +47,6 @@ const fibSortComparators: Record<FIBSortableColumn, (a: FIBRow, b: FIBRow) => nu
     device: (a, b) => a.device.localeCompare(b.device),
 };
 
-interface FIBHeaderColumnProps {
-    column: FIBSortableColumn;
-    label: string;
-    style: React.CSSProperties;
-    sortState: FIBSortState;
-    onSort: (column: FIBSortableColumn) => void;
-}
-
-const FIBHeaderColumn: React.FC<FIBHeaderColumnProps> = ({ column, label, style, sortState, onSort }) => {
-    const isActive = sortState.column === column;
-    return (
-        <Box
-            style={{
-                ...style,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-            }}
-            onClick={() => onSort(column)}
-        >
-            <Text variant="subheader-1">{label}</Text>
-            {isActive && (
-                <Text variant="body-2" color="secondary">
-                    {sortState.direction === 'asc' ? '▲' : '▼'}
-                </Text>
-            )}
-        </Box>
-    );
-};
 
 const FIBTableHeader: React.FC<{
     sortState: FIBSortState;
@@ -90,10 +60,10 @@ const FIBTableHeader: React.FC<{
             <Box style={{ ...fibCellStyles.index, color: undefined }}>
                 <Text variant="subheader-1">#</Text>
             </Box>
-            <FIBHeaderColumn column="prefix" label="Prefix" style={fibCellStyles.prefix} sortState={sortState} onSort={onSort} />
-            <FIBHeaderColumn column="dst_mac" label="Dst MAC" style={fibCellStyles.dst_mac} sortState={sortState} onSort={onSort} />
-            <FIBHeaderColumn column="src_mac" label="Src MAC" style={fibCellStyles.src_mac} sortState={sortState} onSort={onSort} />
-            <FIBHeaderColumn column="device" label="Device" style={fibCellStyles.device} sortState={sortState} onSort={onSort} />
+            <SortableTableHeader column="prefix" label="Prefix" style={fibCellStyles.prefix} sortState={sortState} onSort={onSort} />
+            <SortableTableHeader column="dst_mac" label="Dst MAC" style={fibCellStyles.dst_mac} sortState={sortState} onSort={onSort} />
+            <SortableTableHeader column="src_mac" label="Src MAC" style={fibCellStyles.src_mac} sortState={sortState} onSort={onSort} />
+            <SortableTableHeader column="device" label="Device" style={fibCellStyles.device} sortState={sortState} onSort={onSort} />
         </Box>
     );
 };
