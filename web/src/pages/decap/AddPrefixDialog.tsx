@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Box, Dialog, TextInput } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
+import { useDialogKeyboardShortcut } from '../../hooks';
 import type { AddPrefixDialogProps } from './types';
 import { parseCIDRPrefix, CIDRParseError } from '../../utils';
 import './decap.css';
@@ -86,19 +87,7 @@ export const AddPrefixDialog: React.FC<AddPrefixDialogProps> = ({
     }, [existingConfigs, configName]);
 
     // Handle Ctrl+Enter / Cmd+Enter
-    useEffect(() => {
-        if (!open) return;
-
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && canSubmit) {
-                e.preventDefault();
-                handleConfirm();
-            }
-        };
-
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [open, canSubmit, handleConfirm]);
+    useDialogKeyboardShortcut({ open, canSubmit, onConfirm: handleConfirm });
 
     return (
         <Dialog open={open} onClose={handleClose}>

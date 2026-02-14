@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Box, Dialog, Text } from '@gravity-ui/uikit';
+import { useDialogKeyboardShortcut } from '../../hooks';
 import type { RemoveNeighboursDialogProps } from './types';
 
 export const RemoveNeighboursDialog: React.FC<RemoveNeighboursDialogProps> = ({
@@ -22,19 +23,7 @@ export const RemoveNeighboursDialog: React.FC<RemoveNeighboursDialogProps> = ({
 
     const canSubmit = !isSubmitting && selectedCount > 0;
 
-    useEffect(() => {
-        if (!open) return;
-
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && canSubmit) {
-                e.preventDefault();
-                handleConfirm();
-            }
-        };
-
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [open, canSubmit, handleConfirm]);
+    useDialogKeyboardShortcut({ open, canSubmit, onConfirm: handleConfirm });
 
     return (
         <Dialog open={open} onClose={onClose}>

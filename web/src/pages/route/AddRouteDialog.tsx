@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text, Dialog, TextInput, Switch } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
+import { useDialogKeyboardShortcut } from '../../hooks';
 import type { AddRouteDialogProps } from './types';
 import './route.scss';
 
@@ -32,6 +33,10 @@ export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
     const handleDoFlushChange = (checked: boolean): void => {
         onFormChange({ ...form, do_flush: checked });
     };
+
+    const canSubmit = !configNameError && !prefixError && !nexthopError;
+
+    useDialogKeyboardShortcut({ open, canSubmit, onConfirm });
 
     return (
         <Dialog open={open} onClose={onClose}>
@@ -69,7 +74,7 @@ export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
                     <FormField
                         label="Next Hop"
                         required
-                        hint="IP address of the next hop (IPv4 or IPv6)"
+                        hint="IP address of the next hop (IPv4 or IPv6). Press Ctrl+Enter to save."
                     >
                         <TextInput
                             value={form.nexthop_addr}
@@ -96,7 +101,10 @@ export const AddRouteDialog: React.FC<AddRouteDialogProps> = ({
                 onClickButtonCancel={onClose}
                 textButtonApply="Add"
                 textButtonCancel="Cancel"
-                propsButtonApply={{ view: 'action' as const }}
+                propsButtonApply={{
+                    view: 'action' as const,
+                    disabled: !canSubmit,
+                }}
             />
         </Dialog>
     );

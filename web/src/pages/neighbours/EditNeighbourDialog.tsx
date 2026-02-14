@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Dialog, TextInput } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
+import { useDialogKeyboardShortcut } from '../../hooks';
 import { formatMACAddress, macToUint64 } from '../../utils/mac';
 import type { Neighbour } from '../../api/neighbours';
 import type { EditNeighbourDialogProps } from './types';
@@ -73,19 +74,7 @@ export const EditNeighbourDialog: React.FC<EditNeighbourDialogProps> = ({
         }
     }, [canSubmit, nextHop, linkAddr, hardwareAddr, device, priority, table, onConfirm, onClose]);
 
-    useEffect(() => {
-        if (!open) return;
-
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && canSubmit) {
-                e.preventDefault();
-                handleConfirm();
-            }
-        };
-
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [open, canSubmit, handleConfirm]);
+    useDialogKeyboardShortcut({ open, canSubmit, onConfirm: handleConfirm });
 
     return (
         <Dialog open={open} onClose={onClose}>

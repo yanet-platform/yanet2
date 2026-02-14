@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Dialog, TextInput, Box, Text } from '@gravity-ui/uikit';
+import { useDialogKeyboardShortcut } from '../../../hooks';
 import type { FunctionEdge } from '../types';
 import '../../FunctionsPage.css';
 
@@ -41,18 +42,7 @@ export const WeightEditorDialog: React.FC<WeightEditorDialogProps> = ({
         onConfirm(weights);
     }, [weights, onConfirm]);
     
-    useEffect(() => {
-        if (!open) return;
-        
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                handleConfirm();
-            }
-        };
-        
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [open, handleConfirm]);
+    useDialogKeyboardShortcut({ open, canSubmit: true, onConfirm: handleConfirm });
     
     return (
         <Dialog open={open} onClose={onClose}>

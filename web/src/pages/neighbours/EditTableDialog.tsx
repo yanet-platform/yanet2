@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Dialog, TextInput } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
+import { useDialogKeyboardShortcut } from '../../hooks';
 import type { EditTableDialogProps } from './types';
 
 export const EditTableDialog: React.FC<EditTableDialogProps> = ({
@@ -38,19 +39,7 @@ export const EditTableDialog: React.FC<EditTableDialogProps> = ({
         }
     }, [canSubmit, tableInfo, priorityNum, onConfirm, onClose]);
 
-    useEffect(() => {
-        if (!open) return;
-
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && canSubmit) {
-                e.preventDefault();
-                handleConfirm();
-            }
-        };
-
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [open, canSubmit, handleConfirm]);
+    useDialogKeyboardShortcut({ open, canSubmit, onConfirm: handleConfirm });
 
     return (
         <Dialog open={open} onClose={onClose}>

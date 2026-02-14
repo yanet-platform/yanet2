@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Dialog, TextInput, Select } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
+import { useDialogKeyboardShortcut } from '../../hooks';
 import type { AddRuleDialogProps } from './types';
 import type { Rule } from '../../api/forward';
 import { ForwardMode } from '../../api/forward';
@@ -98,19 +99,7 @@ export const AddRuleDialog: React.FC<AddRuleDialogProps> = ({
     const canSubmit = !formError && !isSubmitting;
 
     // Handle Ctrl+Enter / Cmd+Enter
-    useEffect(() => {
-        if (!open) return;
-
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && canSubmit) {
-                e.preventDefault();
-                handleConfirm();
-            }
-        };
-
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [open, canSubmit, handleConfirm]);
+    useDialogKeyboardShortcut({ open, canSubmit, onConfirm: handleConfirm });
 
     return (
         <Dialog open={open} onClose={handleClose}>
