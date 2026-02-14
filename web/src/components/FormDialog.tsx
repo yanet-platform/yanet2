@@ -1,5 +1,6 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useCallback } from 'react';
 import { Dialog, Box } from '@gravity-ui/uikit';
+import { useDialogKeyboardShortcut } from '../hooks';
 
 export interface FormDialogProps {
     /** Whether the dialog is open */
@@ -16,6 +17,8 @@ export interface FormDialogProps {
     cancelText?: string;
     /** Whether the confirm action is loading */
     loading?: boolean;
+    /** Whether to disable the confirm button */
+    disabled?: boolean;
     /** Whether to show cancel button */
     showCancel?: boolean;
     /** Dialog body content (form fields) */
@@ -35,30 +38,21 @@ export const FormDialog: React.FC<FormDialogProps> = ({
     confirmText = 'Confirm',
     cancelText = 'Cancel',
     loading = false,
+    disabled = false,
     showCancel = true,
     children,
     width = '400px',
 }) => {
+    const canSubmit = !loading && !disabled;
+
     const handleConfirm = useCallback(() => {
-        if (!loading) {
+        if (canSubmit) {
             onConfirm();
         }
-    }, [loading, onConfirm]);
+    }, [canSubmit, onConfirm]);
 
-    // Handle Ctrl+Enter / Cmd+Enter keyboard shortcut
-    useEffect(() => {
-        if (!open) return;
-        
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                e.preventDefault();
-                handleConfirm();
-            }
-        };
-        
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [open, handleConfirm]);
+    // Add Ctrl+Enter keyboard shortcut
+    useDialogKeyboardShortcut({ open, canSubmit, onConfirm: handleConfirm });
     
     return (
         <Dialog open={open} onClose={onClose}>
@@ -74,7 +68,10 @@ export const FormDialog: React.FC<FormDialogProps> = ({
                 textButtonApply={confirmText}
                 textButtonCancel={showCancel ? cancelText : undefined}
                 loading={loading}
-                propsButtonApply={{ view: 'action' as const }}
+                propsButtonApply={{
+                    view: 'action' as const,
+                    disabled: !canSubmit,
+                }}
             />
         </Dialog>
     );

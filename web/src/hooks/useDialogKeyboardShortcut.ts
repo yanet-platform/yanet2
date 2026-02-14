@@ -30,10 +30,11 @@ export const useDialogKeyboardShortcut = ({
     onConfirm,
 }: UseDialogKeyboardShortcutOptions) => {
     useEffect(() => {
-        if (!open || !canSubmit) return;
+        if (!open) return;
 
         const handleKeyDown = (e: KeyboardEvent) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                if (!canSubmit) return;
                 e.preventDefault();
                 onConfirm();
             }

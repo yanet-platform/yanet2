@@ -46,6 +46,8 @@ export const CreateConfigDialog: React.FC<CreateConfigDialogProps> = ({
         onConfirm(name.trim());
     }, [name, validate, onConfirm]);
 
+    const canSubmit = !error && name.trim().length > 0;
+
     return (
         <FormDialog
             open={open}
@@ -53,6 +55,7 @@ export const CreateConfigDialog: React.FC<CreateConfigDialogProps> = ({
             onConfirm={handleConfirm}
             title="Create ACL Config"
             confirmText="Create"
+            disabled={!canSubmit}
         >
             <FormField
                 label="Config Name"
