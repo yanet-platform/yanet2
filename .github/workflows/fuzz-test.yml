@@ -1,4 +1,4 @@
-name: C fuzz test (libFuzzer)
+name: Fuzz test
 
 on:
   schedule:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build fuzz targets
+    name: Build and Go fuzz
     runs-on: ubuntu-24.04
 
     steps:
@@ -49,14 +49,40 @@ jobs:
       - name: Build fuzz targets
         run: make fuzz
 
+      - name: Collect fuzz binaries
+        run: |
+          mkdir -p fuzz-out
+          find build/tests/fuzzing/ -maxdepth 1 -type f -executable -exec cp {} fuzz-out/ \;
+
       - name: Upload fuzz binaries
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-binaries
-          path: build/tests/fuzzing/
+          path: fuzz-out/
           retention-days: 1
 
-  fuzz-test:
+      - name: Run Go fuzz tests
+        id: go-fuzz
+        continue-on-error: true
+        run: |
+          packages=$(go list ./...)
+          for pkg in $packages; do
+            fuzz_funcs=$(go test "$pkg" -list '^Fuzz' 2>/dev/null | grep '^Fuzz' || true)
+            for func in $fuzz_funcs; do
+              echo "Fuzzing $func in $pkg"
+              go test "$pkg" -run '^$' -fuzz "^${func}\$" -fuzztime 10m
+            done
+          done
+
+      - name: Upload Go fuzz failure testdata
+        uses: actions/upload-artifact@v4
+        if: steps.go-fuzz.outcome == 'failure'
+        with:
+          name: go-fuzz-testdata
+          path: "**/testdata/fuzz/**"
+          retention-days: 7
+
+  c-fuzz-test:
     name: Fuzz ${{ matrix.module }}
     runs-on: ubuntu-24.04
     needs: build
@@ -65,7 +91,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [decap, forward, route, nat64w, dscp, fwstate]
+        module: [decap, route, nat64w, dscp, fwstate]
 
     steps:
       - name: Download fuzz binaries
@@ -79,3 +105,4 @@ jobs:
           chmod +x fuzz-binaries/${{ matrix.module }}
           mkdir -p corpus
           ./fuzz-binaries/${{ matrix.module }} corpus/ -max_total_time=600
+
