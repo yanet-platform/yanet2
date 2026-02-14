@@ -1,0 +1,21 @@
+.table-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.table-search-bar__stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.table-search-bar__clear {
+    cursor: pointer;
+    user-select: none;
+}
+
+.table-search-bar__clear:hover {
+    text-decoration: underline;
+}

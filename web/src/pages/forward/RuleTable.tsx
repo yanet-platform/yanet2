@@ -1,11 +1,10 @@
 import React, { useRef, useCallback, useMemo, useState, useLayoutEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Box, Text } from '@gravity-ui/uikit';
-import { EmptyState } from '../../components';
+import { EmptyState, TableSearchBar } from '../../components';
 import type { RuleItem, RuleTableProps } from './types';
 import { ROW_HEIGHT, OVERSCAN, TOTAL_WIDTH, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT } from './constants';
 import { RuleRow } from './RuleRow';
-import { RuleSearchBar } from './RuleSearchBar';
 import { RuleTableHeader } from './RuleTableHeader';
 import { formatDevices, formatIPNets, formatMode } from './hooks';
 import './forward.scss';
@@ -134,13 +133,15 @@ export const RuleTable: React.FC<RuleTableProps> = ({
 
     return (
         <div ref={containerRef} className="forward-table" style={{ height: containerHeight }}>
-            <RuleSearchBar
+            <TableSearchBar
                 searchQuery={searchQuery}
                 onSearchChange={handleSearchChange}
                 isSearching={false}
                 statsText={statsText}
                 selectedText={selectedText}
                 onClearSelection={handleClearSelection}
+                placeholder="Search by target, counter, devices..."
+                height={SEARCH_BAR_HEIGHT}
             />
 
             {/* Table container */}
