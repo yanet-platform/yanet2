@@ -1,7 +1,6 @@
 import { Checkbox, Button, Icon } from '@gravity-ui/uikit';
 import { Pencil } from '@gravity-ui/icons';
 import type { Neighbour } from '../../api/neighbours';
-import { formatMACAddress } from '../../utils/mac';
 import { getNUDStateString } from '../../utils/nud';
 import { formatUnixSeconds } from '../../utils/sorting';
 import { cellStyles, TOTAL_WIDTH, ROW_HEIGHT } from './constants';
@@ -15,9 +14,8 @@ export interface NeighbourVirtualRowProps {
     onEdit?: (neighbour: Neighbour) => void;
 }
 
-const renderMac = (addr?: { addr?: string | number }): string => {
-    if (addr?.addr === undefined) return '-';
-    return formatMACAddress(addr.addr);
+const renderMac = (addr?: { addr?: string }): string => {
+    return addr?.addr || '-';
 };
 
 export const NeighbourVirtualRow = ({

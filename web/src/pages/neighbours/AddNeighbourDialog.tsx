@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Dialog, TextInput, Select } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
 import { useDialogKeyboardShortcut } from '../../hooks';
-import { macToUint64 } from '../../utils/mac';
+import { isValidMAC } from '../../utils/mac';
 import type { Neighbour } from '../../api/neighbours';
 import type { AddNeighbourDialogProps } from './types';
 
@@ -12,8 +12,8 @@ const validateNextHop = (value: string): string | undefined => {
 };
 
 const validateMAC = (value: string): string | undefined => {
-    if (!value.trim()) return undefined; // optional
-    if (!macToUint64(value)) return 'Invalid MAC address (expected xx:xx:xx:xx:xx:xx)';
+    if (!value.trim()) return undefined;
+    if (!isValidMAC(value)) return 'Invalid MAC address (expected xx:xx:xx:xx:xx:xx)';
     return undefined;
 };
 
@@ -64,14 +64,12 @@ export const AddNeighbourDialog: React.FC<AddNeighbourDialogProps> = ({
                 priority: priority.trim() ? Number(priority.trim()) : undefined,
             };
 
-            const linkMac = macToUint64(linkAddr);
-            if (linkMac) {
-                entry.link_addr = { addr: linkMac };
+            if (linkAddr.trim()) {
+                entry.link_addr = { addr: linkAddr.trim() };
             }
 
-            const hwMac = macToUint64(hardwareAddr);
-            if (hwMac) {
-                entry.hardware_addr = { addr: hwMac };
+            if (hardwareAddr.trim()) {
+                entry.hardware_addr = { addr: hardwareAddr.trim() };
             }
 
             await onConfirm(table[0], entry);
