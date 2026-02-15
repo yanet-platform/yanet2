@@ -2,7 +2,7 @@ import { createService, type CallOptions } from './client';
 
 // Neighbour types
 export interface MACAddress {
-    addr: string | number; // uint64 - serialized as string in JSON
+    addr: string; // MAC address string in format "xx:xx:xx:xx:xx:xx"
 }
 
 export interface Neighbour {
