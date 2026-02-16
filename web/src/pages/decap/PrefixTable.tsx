@@ -1,11 +1,10 @@
 import React, { useRef, useCallback, useMemo, useState, useLayoutEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Box, Text } from '@gravity-ui/uikit';
-import { EmptyState } from '../../components';
+import { EmptyState, TableSearchBar } from '../../components';
 import type { PrefixItem } from './types';
 import { ROW_HEIGHT, OVERSCAN, TOTAL_WIDTH, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT } from './constants';
 import { PrefixRow } from './PrefixRow';
-import { PrefixSearchBar } from './PrefixSearchBar';
 import { PrefixTableHeader } from './PrefixTableHeader';
 import './decap.css';
 
@@ -136,13 +135,15 @@ export const PrefixTable: React.FC<PrefixTableProps> = ({
 
     return (
         <div ref={containerRef} className="prefix-table" style={{ height: containerHeight }}>
-            <PrefixSearchBar
+            <TableSearchBar
                 searchQuery={searchQuery}
                 onSearchChange={handleSearchChange}
                 isSearching={false}
                 statsText={statsText}
                 selectedText={selectedText}
                 onClearSelection={handleClearSelection}
+                placeholder="Search by prefix..."
+                height={SEARCH_BAR_HEIGHT}
             />
 
             {/* Table container */}

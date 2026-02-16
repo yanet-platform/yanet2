@@ -203,11 +203,15 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 
 	// onUpdate sends route batches over the gRPC stream. Called by bird.Export.
 	onUpdate := func(ctx context.Context, routes []rib.Route) error {
-		log.Debugf("processing %d BIRD routes", len(routes))
+		log.Debugw("processing BIRD routes",
+			zap.Int("count", len(routes)),
+		)
 		for idx := range routes {
 			select {
 			case <-ctx.Done():
-				log.Warnf("update stream send cancelled: %v", ctx.Err())
+				log.Warnw("update stream send cancelled",
+					zap.Error(ctx.Err()),
+				)
 				_, closeErr := (*holder.currentStream).CloseAndRecv()
 				return errors.Join(ctx.Err(), closeErr, errStreamClosed) // Signal runBirdImportLoop
 			default:

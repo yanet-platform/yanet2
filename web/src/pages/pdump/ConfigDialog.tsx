@@ -103,6 +103,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
     };
 
     const title = isCreate ? 'Create Pdump Configuration' : `Edit ${initialConfigName}`;
+    const canSubmit = isCreate ? configName.trim().length > 0 : true;
 
     return (
         <FormDialog
@@ -112,6 +113,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
             title={title}
             confirmText={isCreate ? 'Create' : 'Save'}
             loading={loading}
+            disabled={!canSubmit}
             width="500px"
         >
             <Flex direction="column" gap={4}>

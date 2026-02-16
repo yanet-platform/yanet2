@@ -3,7 +3,6 @@ package route
 import (
 	"context"
 	"fmt"
-	"net/netip"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -11,28 +10,40 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	routepb "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
-	"github.com/yanet-platform/yanet2/modules/route/internal/discovery"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
+)
+
+const (
+	// defaultStaticPriority is the default priority for statically
+	// configured neighbours.
+	defaultStaticPriority = 10
 )
 
 // RouteModule is a controlplane part of a module that is responsible for
 // routing configuration.
 type RouteModule struct {
-	cfg                *Config
-	shm                *ffi.SharedMemory
-	agent              *ffi.Agent
-	neighbourDiscovery *neigh.NeighMonitor
-	routeService       *RouteService
-	neighbourService   *NeighbourService
-	log                *zap.SugaredLogger
+	cfg              *Config
+	shm              *ffi.SharedMemory
+	agent            *ffi.Agent
+	neighbourMonitor *neigh.NeighMonitor
+	routeService     *RouteService
+	neighbourService *NeighbourService
+	log              *zap.SugaredLogger
 }
 
 // NewRouteModule creates a new RouteModule.
 func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 	log = log.With(zap.String("module", "routepb.RouteService"))
 
-	neighbourCache := discovery.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
-	neighbourDiscovery := neigh.NewNeighMonitor(neighbourCache, neigh.WithLog(log), neigh.WithLinkMap(cfg.LinkMap))
+	neighbourTable := neigh.NewNeighTable()
+	if _, err := neighbourTable.CreateSource("static", defaultStaticPriority, true); err != nil {
+		return nil, fmt.Errorf("failed to create static neighbour source: %w", err)
+	}
+
+	neighbourMonitor, err := newNeighbourMonitor(cfg, neighbourTable, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create neighbour monitor: %w", err)
+	}
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
 	if err != nil {
@@ -49,18 +60,48 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	routeService := NewRouteService(agent, neighbourCache, cfg.RibTTL, log)
-	neighbourService := NewNeighbourService(neighbourCache, log)
+	routeService := NewRouteService(agent, neighbourTable, cfg.RibTTL, log)
+	neighbourService := NewNeighbourService(neighbourTable, log)
 
 	return &RouteModule{
-		cfg:                cfg,
-		shm:                shm,
-		agent:              agent,
-		neighbourDiscovery: neighbourDiscovery,
-		routeService:       routeService,
-		neighbourService:   neighbourService,
-		log:                log,
+		cfg:              cfg,
+		shm:              shm,
+		agent:            agent,
+		neighbourMonitor: neighbourMonitor,
+		routeService:     routeService,
+		neighbourService: neighbourService,
+		log:              log,
 	}, nil
+}
+
+// newNeighbourMonitor creates a new neighbour monitor if netlink discovery is
+// enabled.
+func newNeighbourMonitor(
+	cfg *Config,
+	neighTable *neigh.NeighTable,
+	log *zap.SugaredLogger,
+) (*neigh.NeighMonitor, error) {
+	if cfg.NetlinkMonitor.Disabled {
+		return nil, nil
+	}
+
+	source, err := neighTable.CreateSource(
+		cfg.NetlinkMonitor.TableName,
+		cfg.NetlinkMonitor.DefaultPriority,
+		true,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kernel neighbour source: %w", err)
+	}
+
+	neighbourMonitor := neigh.NewNeighMonitor(
+		neighTable,
+		source,
+		neigh.WithLog(log),
+		neigh.WithLinkMap(cfg.LinkMap),
+	)
+
+	return neighbourMonitor, nil
 }
 
 func (m *RouteModule) Name() string {
@@ -101,8 +142,9 @@ func (m *RouteModule) Close() error {
 // controlplane/internal/gateway/runner.go
 func (m *RouteModule) Run(ctx context.Context) error {
 	wg, ctx := errgroup.WithContext(ctx)
+
 	wg.Go(func() error {
-		return m.neighbourDiscovery.Run(ctx)
+		return m.runNeighbourMonitor(ctx)
 	})
 	wg.Go(func() error {
 		<-ctx.Done()
@@ -111,4 +153,12 @@ func (m *RouteModule) Run(ctx context.Context) error {
 	})
 
 	return wg.Wait()
+}
+
+func (m *RouteModule) runNeighbourMonitor(ctx context.Context) error {
+	if m.neighbourMonitor == nil {
+		return nil
+	}
+
+	return m.neighbourMonitor.Run(ctx)
 }

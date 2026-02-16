@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { Box, Text, Dialog } from '@gravity-ui/uikit';
+import { useDialogKeyboardShortcut } from '../hooks';
 import './common.css';
 
 export interface ConfirmDialogProps {
@@ -7,8 +8,8 @@ export interface ConfirmDialogProps {
     open: boolean;
     /** Handler for closing the dialog */
     onClose: () => void;
-    /** Handler for confirming the action */
-    onConfirm: () => void;
+    /** Handler for confirming the action (can be async) */
+    onConfirm: () => void | Promise<void>;
     /** Dialog title */
     title: string;
     /** Main message text */
@@ -19,16 +20,18 @@ export interface ConfirmDialogProps {
     confirmText?: string;
     /** Cancel button text */
     cancelText?: string;
-    /** Whether the confirm action is loading */
+    /** Whether the confirm action is loading (externally controlled) */
     loading?: boolean;
     /** Whether to use danger styling for confirm button */
     danger?: boolean;
+    /** Whether to disable the confirm button */
+    disabled?: boolean;
     /** Optional content to render below the messages */
     children?: React.ReactNode;
 }
 
 /**
- * Reusable confirmation dialog component
+ * Reusable confirmation dialog component with Ctrl+Enter support
  */
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     open,
@@ -39,10 +42,31 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     secondaryMessage,
     confirmText = 'Confirm',
     cancelText = 'Cancel',
-    loading = false,
+    loading: externalLoading = false,
     danger = false,
+    disabled = false,
     children,
 }) => {
+    const [internalLoading, setInternalLoading] = useState(false);
+
+    // Use external loading if provided, otherwise use internal
+    const isLoading = externalLoading || internalLoading;
+    const canSubmit = !disabled && !isLoading;
+
+    const handleConfirm = useCallback(async () => {
+        if (!canSubmit) return;
+
+        setInternalLoading(true);
+        try {
+            await onConfirm();
+        } finally {
+            setInternalLoading(false);
+        }
+    }, [onConfirm, canSubmit]);
+
+    // Add Ctrl+Enter keyboard shortcut
+    useDialogKeyboardShortcut({ open, canSubmit, onConfirm: handleConfirm });
+
     return (
         <Dialog open={open} onClose={onClose}>
             <Dialog.Header caption={title} />
@@ -59,11 +83,14 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             </Dialog.Body>
             <Dialog.Footer
                 onClickButtonCancel={onClose}
-                onClickButtonApply={onConfirm}
+                onClickButtonApply={handleConfirm}
                 textButtonApply={confirmText}
                 textButtonCancel={cancelText}
-                loading={loading}
-                propsButtonApply={danger ? { view: 'outlined-danger' as const } : undefined}
+                loading={isLoading}
+                propsButtonApply={{
+                    view: danger ? ('outlined-danger' as const) : undefined,
+                    disabled: !canSubmit,
+                }}
             />
         </Dialog>
     );

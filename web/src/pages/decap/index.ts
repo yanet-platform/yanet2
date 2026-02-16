@@ -13,7 +13,6 @@ export * from './DecapPageHeader';
 export * from './PrefixTable';
 export * from './PrefixRow';
 export * from './PrefixTableHeader';
-export * from './PrefixSearchBar';
 export * from './AddPrefixDialog';
 export * from './DeletePrefixDialog';
 export * from './ConfigTabs';

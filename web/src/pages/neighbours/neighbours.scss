@@ -1,0 +1,78 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+// Neighbour Table
+.neigh-table {
+    @include flex-column;
+
+    &__container {
+        height: 100%;
+    }
+
+    &__wrapper {
+        flex: 1;
+        border: 1px solid var(--g-color-line-generic);
+        border-radius: $radius-lg;
+        overflow: hidden;
+        @include flex-column;
+    }
+
+    &__body {
+        overflow: auto;
+        contain: strict;
+    }
+
+    &__virtual-container {
+        position: relative;
+    }
+
+    &__empty {
+        padding: 40px $spacing-xl;
+        text-align: center;
+    }
+
+    &__footer {
+        @include flex-row;
+        justify-content: space-between;
+        flex-shrink: 0;
+    }
+}
+
+// Search Bar
+.neigh-search-bar {
+    @include flex-row($spacing-lg);
+    flex-shrink: 0;
+
+    &__input {
+        width: 350px;
+    }
+
+    &__stats {
+        @include flex-row($spacing-sm);
+    }
+
+    &__clear {
+        cursor: pointer;
+    }
+}
+
+// Table Header
+.neigh-table-header {
+    @include flex-row;
+    border-bottom: 1px solid var(--g-color-line-generic);
+    background-color: var(--g-color-base-generic);
+    padding: 0 $spacing-sm;
+    flex-shrink: 0;
+}
+
+// Neighbours Page
+.neigh-page {
+    &__content {
+        width: 100%;
+        flex: 1;
+        min-width: 0;
+        padding: $spacing-xl;
+        @include flex-column;
+        min-height: 0;
+    }
+}

@@ -9,6 +9,9 @@ import (
 // Used to provide state's string representation.
 type NeighbourState int
 
+// NeighbourStatePermanent represents a permanent (static) neighbour.
+const NeighbourStatePermanent = NeighbourState(netlink.NUD_PERMANENT)
+
 // String returns string representation of this state.
 func (m NeighbourState) String() string {
 	switch m {

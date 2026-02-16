@@ -64,6 +64,7 @@ export const CreateEntityDialog: React.FC<CreateEntityDialogProps> = ({
 
     const defaultPlaceholder = placeholder ?? `Enter ${entityType.toLowerCase()} name`;
     const defaultHint = hint ?? `Unique identifier for the ${entityType.toLowerCase()}`;
+    const canSubmit = !error && name.trim().length > 0;
 
     return (
         <FormDialog
@@ -72,6 +73,7 @@ export const CreateEntityDialog: React.FC<CreateEntityDialogProps> = ({
             onConfirm={handleConfirm}
             title={`Create ${entityType}`}
             confirmText="Create"
+            disabled={!canSubmit}
         >
             <FormField
                 label={`${entityType} Name`}

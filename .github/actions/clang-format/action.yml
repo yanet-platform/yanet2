@@ -1,0 +1,19 @@
+name: 'clang-format check'
+description: 'Run clang-format on files matching given patterns'
+
+inputs:
+  include:
+    description: 'Newline-separated file name patterns for find -name (e.g., *.h)'
+    required: true
+  exclude-regex:
+    description: 'Extended regex to exclude file paths (grep -Ev)'
+    required: false
+    default: ''
+  style:
+    description: 'clang-format style'
+    required: false
+    default: 'file'
+
+runs:
+  using: 'docker'
+  image: 'docker://ghcr.io/yanet-platform/clang-format:19'

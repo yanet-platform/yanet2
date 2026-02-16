@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
-import { SortableHeader } from './SortableHeader';
+import { SortableTableHeader } from '../../components';
 import { cellStyles, TOTAL_WIDTH, HEADER_HEIGHT } from './constants';
 import type { PacketSortState, PacketSortColumn } from './types';
 import './pdump.scss';
@@ -22,35 +22,35 @@ export const PacketTableHeader: React.FC<PacketTableHeaderProps> = ({
             <Box style={cellStyles.index}>
                 <Text variant="subheader-1">#</Text>
             </Box>
-            <SortableHeader
+            <SortableTableHeader
                 column="time"
                 label="Time"
                 style={cellStyles.time}
                 sortState={sortState}
                 onSort={onSort}
             />
-            <SortableHeader
+            <SortableTableHeader
                 column="source"
                 label="Source"
                 style={cellStyles.source}
                 sortState={sortState}
                 onSort={onSort}
             />
-            <SortableHeader
+            <SortableTableHeader
                 column="destination"
                 label="Destination"
                 style={cellStyles.destination}
                 sortState={sortState}
                 onSort={onSort}
             />
-            <SortableHeader
+            <SortableTableHeader
                 column="protocol"
                 label="Protocol"
                 style={cellStyles.protocol}
                 sortState={sortState}
                 onSort={onSort}
             />
-            <SortableHeader
+            <SortableTableHeader
                 column="length"
                 label="Length"
                 style={cellStyles.length}

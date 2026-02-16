@@ -14,7 +14,6 @@ export * from './ConfigTabs';
 export * from './RuleTable';
 export * from './RuleRow';
 export * from './RuleTableHeader';
-export * from './RuleSearchBar';
 export * from './AddRuleDialog';
 export * from './EditRuleDialog';
 export * from './DeleteRuleDialog';

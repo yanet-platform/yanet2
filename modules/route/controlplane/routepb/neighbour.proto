@@ -8,16 +8,57 @@ import "macaddr.proto";
 
 // Neighbour is a service for viewing and managing neighbors.
 service Neighbour {
-	// List returns all current neighbors.
-	rpc List(ListNeighboursRequest) returns (ListNeighboursResponse) {
-	}
+	// List returns neighbors either merged view or from a specific table.
+	//
+	// If table name is empty, returns the merged view across all tables.
+	// If table name is specified, returns entries from that specific table
+	// only.
+	rpc List(ListNeighboursRequest) returns (ListNeighboursResponse);
+
+	// CreateTable creates a new user-defined neighbour table with the
+	// given default priority.
+	rpc CreateTable(CreateNeighbourTableRequest)
+		returns (CreateNeighbourTableResponse);
+	// UpdateTable changes the default priority of an existing neighbour
+	// table.
+	rpc UpdateTable(UpdateNeighbourTableRequest)
+		returns (UpdateNeighbourTableResponse);
+	// RemoveTable removes a user-defined neighbour table and all its
+	// entries.
+	//
+	// Built-in tables (e.g. "kernel", "static") cannot be removed.
+	rpc RemoveTable(RemoveNeighbourTableRequest)
+		returns (RemoveNeighbourTableResponse);
+	// ListTables returns metadata about all registered neighbour tables.
+	rpc ListTables(ListNeighbourTablesRequest)
+		returns (ListNeighbourTablesResponse);
+
+	// UpdateNeighbours inserts or updates one or more neighbour entries
+	// in the specified table.
+	//
+	// If the table name is empty, defaults to "static". Server-managed
+	// fields (state, updated_at, source) in NeighbourEntry are ignored
+	// on input.
+	rpc UpdateNeighbours(UpdateNeighboursRequest)
+		returns (UpdateNeighboursResponse);
+	// RemoveNeighbours deletes one or more neighbour entries from the
+	// specified table by their next-hop IP addresses.
+	//
+	// If the table name is empty, defaults to "static".
+	rpc RemoveNeighbours(RemoveNeighboursRequest)
+		returns (RemoveNeighboursResponse);
 }
 
-// ListNeighboursRequest is the request to list all neighbors.
+// ListNeighboursRequest is the request to list neighbors.
 message ListNeighboursRequest {
+	// Table is the name of the table to list entries from.
+	//
+	// If empty, returns the merged view.
+	// If specified, returns entries from that specific table only.
+	string table = 1;
 }
 
-// ListNeighboursResponse contains the list of all current neighbors.
+// ListNeighboursResponse contains the list of neighbors.
 message ListNeighboursResponse {
 	repeated NeighbourEntry neighbours = 1;
 }
@@ -40,17 +81,111 @@ enum NeighbourState {
 message NeighbourEntry {
 	// NextHop is the IP address of the next hop.
 	string next_hop = 1;
-
 	// LinkAddr is the MAC address of the next hop.
 	MACAddress link_addr = 2;
-
 	// HardwareAddr is the MAC address of the local interface.
 	MACAddress hardware_addr = 3;
-
 	// State is the state of the neighbor entry.
 	NeighbourState state = 4;
-
 	// UpdatedAt is the timestamp when this entry was last updated.
 	// This is a UNIX timestamp in seconds.
 	int64 updated_at = 5;
+	// Source is the name of the table this entry belongs to.
+	string source = 6;
+	// Priority determines which entry wins when the same IP exists in
+	// multiple tables. Lower value means higher priority.
+	uint32 priority = 7;
+	// Device is the network interface name.
+	string device = 8;
+}
+
+// CreateNeighbourTableRequest is the request to create a new neighbour table.
+message CreateNeighbourTableRequest {
+	// Name is the name of the table to create.
+	string name = 1;
+	// DefaultPriority is the default priority for entries in this table.
+	uint32 default_priority = 2;
+}
+
+// CreateNeighbourTableResponse is the response to creating a neighbour table.
+message CreateNeighbourTableResponse {
+}
+
+// UpdateNeighbourTableRequest is the request to update a neighbour table.
+message UpdateNeighbourTableRequest {
+	// Name is the name of the table to update.
+	string name = 1;
+	// DefaultPriority is the default priority for entries in this table.
+	uint32 default_priority = 2;
+}
+
+// UpdateNeighbourTableResponse is the response to updating a neighbour table.
+message UpdateNeighbourTableResponse {
+}
+
+// RemoveNeighbourTableRequest is the request to remove a neighbour table.
+message RemoveNeighbourTableRequest {
+	// Name is the name of the table to remove.
+	string name = 1;
+}
+
+// RemoveNeighbourTableResponse is the response to removing a neighbour
+// table.
+message RemoveNeighbourTableResponse {
+}
+
+// ListNeighbourTablesRequest is the request to list all neighbour tables.
+message ListNeighbourTablesRequest {
+}
+
+// ListNeighbourTablesResponse contains the list of all neighbour tables.
+message ListNeighbourTablesResponse {
+	repeated NeighbourTableInfo tables = 1;
+}
+
+// NeighbourTableInfo contains metadata about a neighbour table.
+message NeighbourTableInfo {
+	// Name is the unique name of the table.
+	string name = 1;
+	// DefaultPriority is the default priority assigned to new entries.
+	uint32 default_priority = 2;
+	// EntryCount is the number of entries currently in the table.
+	int64 entry_count = 3;
+	// BuiltIn indicates whether the table is built-in and cannot be
+	// removed.
+	bool built_in = 4;
+}
+
+// UpdateNeighboursRequest is the request to insert or update one or more
+// neighbour entries.
+message UpdateNeighboursRequest {
+	// Table is the target table name.
+	//
+	// Defaults to "static" if empty.
+	string table = 1;
+	// Entries is the list of neighbour entries to insert or update.
+	//
+	// Server-managed fields (state, updated_at, source) are ignored
+	// on input.
+	repeated NeighbourEntry entries = 2;
+}
+
+// UpdateNeighboursResponse is the response to updating neighbour
+// entries.
+message UpdateNeighboursResponse {
+}
+
+// RemoveNeighboursRequest is the request to remove one or more
+// neighbour entries.
+message RemoveNeighboursRequest {
+	// Table is the target table name.
+	//
+	// Defaults to "static" if empty.
+	string table = 1;
+	// NextHops is the list of next-hop IP addresses to remove.
+	repeated string next_hops = 2;
+}
+
+// RemoveNeighboursResponse is the response to removing neighbour entries.
+message RemoveNeighboursResponse {
 }

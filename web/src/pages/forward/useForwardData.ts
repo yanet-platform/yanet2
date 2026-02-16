@@ -183,10 +183,36 @@ export const useForwardData = (): UseForwardDataResult => {
         const indicesToRemove = new Set(ruleIndices);
         const newRules = currentRules.filter((_, idx) => !indicesToRemove.has(idx));
 
-        const success = await saveConfig(configName, newRules);
-        if (success) {
-            await reloadConfig(configName);
+        let success: boolean;
 
+        // If all rules are removed, delete the config instead of updating with empty rules
+        if (newRules.length === 0) {
+            try {
+                const response = await API.forward.deleteConfig({ name: configName });
+                success = !!response.deleted;
+                if (success) {
+                    setData((prev) => {
+                        const newConfigs = prev.configs.filter((c) => c !== configName);
+                        const newConfigRules = new Map(prev.configRules);
+                        newConfigRules.delete(configName);
+                        return {
+                            configs: newConfigs,
+                            configRules: newConfigRules,
+                        };
+                    });
+                }
+            } catch (err) {
+                toaster.error('forward-delete-error', 'Failed to delete forward configuration', err);
+                success = false;
+            }
+        } else {
+            success = await saveConfig(configName, newRules);
+            if (success) {
+                await reloadConfig(configName);
+            }
+        }
+
+        if (success) {
             // Clear selection for removed rules
             setSelectedRules((prev) => {
                 const newMap = new Map(prev);

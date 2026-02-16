@@ -45,6 +45,22 @@ func (m *Cache[K, V]) Swap(cache map[K]V) {
 	m.cache = cache
 }
 
+// Set inserts or updates a single entry in the cache.
+func (m *Cache[K, V]) Set(key K, value V) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.cache[key] = value
+}
+
+// Delete removes a single entry from the cache.
+func (m *Cache[K, V]) Delete(key K) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.cache, key)
+}
+
 // CacheView is a read-only view of the cache.
 type CacheView[K comparable, V any] struct {
 	cache map[K]V

@@ -54,6 +54,8 @@ configure_file(output: build_cfg, configuration: yanet_conf)
 # Define common programs once to avoid duplication
 go = find_program('go', required: true)
 protoc = find_program('protoc', required: true)
+protoc_gen_go = find_program('protoc-gen-go', required: true, version: '>=1.36.5')
+protoc_gen_go_grpc = find_program('protoc-gen-go-grpc', required: true, version: '>=1.5.1')
 
 # Build CGO flags based on b_sanitize option
 yanet_go_env = {}

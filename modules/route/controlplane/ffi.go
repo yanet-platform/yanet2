@@ -63,6 +63,9 @@ func (m *ModuleConfig) RouteAdd(srcAddr net.HardwareAddr, dstAddr net.HardwareAd
 	if len(dstAddr) != 6 {
 		return -1, fmt.Errorf("unsupported destination MAC address: must be EUI-48")
 	}
+	if device == "" {
+		return -1, fmt.Errorf("device name is required")
+	}
 
 	cName := C.CString(device)
 	defer C.free(unsafe.Pointer(cName))

@@ -19,6 +19,7 @@ export interface UseRouteDataResult {
     handleConfigTabChange: (config: string) => void;
     reloadRoutes: (configsList: string[]) => Promise<Map<string, Route[]>>;
     reloadFIB: (configsList: string[]) => Promise<Map<string, FIBEntry[]>>;
+    loadFIBForConfig: (configName: string) => Promise<FIBEntry[]>;
 }
 
 export const useRouteData = (): UseRouteDataResult => {
@@ -41,17 +42,12 @@ export const useRouteData = (): UseRouteDataResult => {
                 const configsList = configsResponse.configs || [];
 
                 const routesMap = new Map<string, Route[]>();
-                const fibMap = new Map<string, FIBEntry[]>();
 
                 await Promise.all(
                     configsList.map(async (configName) => {
                         try {
-                            const [routesResponse, fibResponse] = await Promise.all([
-                                API.route.showRoutes({ name: configName }),
-                                API.route.showFIB({ name: configName }),
-                            ]);
+                            const routesResponse = await API.route.showRoutes({ name: configName });
                             routesMap.set(configName, routesResponse.routes || []);
-                            fibMap.set(configName, fibResponse.entries || []);
                         } catch (err) {
                             if (!isMounted) return;
                             toaster.error(`route-fetch-error-${configName}`, `Failed to load data for ${configName}`, err);
@@ -63,7 +59,6 @@ export const useRouteData = (): UseRouteDataResult => {
 
                 setConfigs(configsList);
                 setConfigRoutes(routesMap);
-                setConfigFIB(fibMap);
                 if (configsList.length > 0) {
                     setActiveConfigTab(configsList[0]);
                 }
@@ -130,6 +125,27 @@ export const useRouteData = (): UseRouteDataResult => {
         return fibMap;
     }, []);
 
+    const loadFIBForConfig = useCallback(async (configName: string): Promise<FIBEntry[]> => {
+        const cached = configFIB.get(configName);
+        if (cached) {
+            return cached;
+        }
+
+        try {
+            const fibResponse = await API.route.showFIB({ name: configName });
+            const entries = fibResponse.entries || [];
+            setConfigFIB((prev) => {
+                const next = new Map(prev);
+                next.set(configName, entries);
+                return next;
+            });
+            return entries;
+        } catch (err) {
+            toaster.error(`load-fib-error-${configName}`, `Failed to load FIB for ${configName}`, err);
+            return [];
+        }
+    }, [configFIB]);
+
     return {
         configs,
         configRoutes,
@@ -146,5 +162,6 @@ export const useRouteData = (): UseRouteDataResult => {
         handleConfigTabChange,
         reloadRoutes,
         reloadFIB,
+        loadFIBForConfig,
     };
 };

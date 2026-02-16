@@ -1,13 +1,12 @@
 import React, { useRef, useCallback, useMemo, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Box, Text } from '@gravity-ui/uikit';
-import { EmptyState } from '../../components';
+import { EmptyState, TableSearchBar } from '../../components';
 import type { Route } from '../../api/routes';
 import type { MockRouteGenerator } from './mockData';
 import { useSortState, useContainerHeight, sortComparators } from './hooks';
 import { ROW_HEIGHT, OVERSCAN, TOTAL_WIDTH, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT } from './constants';
 import { VirtualRow } from './VirtualRow';
-import { TableSearchBar } from './TableSearchBar';
 import { TableHeader } from './TableHeader';
 import './route.scss';
 
@@ -175,6 +174,35 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
         onSelectionChange([]);
     }, [onSelectionChange]);
 
+    // Select all handler
+    const handleSelectAll = useCallback((checked: boolean) => {
+        if (!checked) {
+            onSelectionChange([]);
+            return;
+        }
+
+        // Select all visible routes
+        if (displayData) {
+            const allIds = displayData.map(getRouteId);
+            onSelectionChange(allIds);
+        }
+    }, [displayData, getRouteId, onSelectionChange]);
+
+    // Check if all/some routes are selected
+    const { allSelected, someSelected } = useMemo(() => {
+        if (!displayData || displayData.length === 0) {
+            return { allSelected: false, someSelected: false };
+        }
+
+        const allIds = new Set(displayData.map(getRouteId));
+        const selectedCount = Array.from(allIds).filter(id => selectedIds.has(id)).length;
+
+        return {
+            allSelected: selectedCount === allIds.size,
+            someSelected: selectedCount > 0 && selectedCount < allIds.size,
+        };
+    }, [displayData, getRouteId, selectedIds]);
+
     // Memoized stats text
     const statsText = useMemo(() => {
         if (isFiltered) {
@@ -216,6 +244,9 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
                 selectedText={selectedText}
                 onClearSelection={handleClearSelection}
                 helperText={helperText}
+                placeholder="Search by prefix, nexthop, or peer..."
+                height={SEARCH_BAR_HEIGHT}
+                inputWidth={350}
             />
 
             {/* Table container */}
@@ -224,6 +255,9 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
                     sortState={sortState}
                     onSort={handleSort}
                     canSort={canSort}
+                    allSelected={allSelected}
+                    someSelected={someSelected}
+                    onSelectAll={handleSelectAll}
                 />
 
                 {/* Virtualized body */}

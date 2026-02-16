@@ -1,37 +1,46 @@
 import React from 'react';
 import { Box, TextInput, Loader, Label, Text } from '@gravity-ui/uikit';
-import { SEARCH_BAR_HEIGHT } from './constants';
-import './forward.scss';
+import './TableSearchBar.css';
 
-export interface RuleSearchBarProps {
+export interface TableSearchBarProps {
     searchQuery: string;
     onSearchChange: (value: string) => void;
     isSearching: boolean;
     statsText: string;
-    selectedText: string | null;
+    selectedText?: string | null;
     onClearSelection?: () => void;
+    helperText?: string;
+    placeholder?: string;
+    height?: number;
+    inputWidth?: number;
+    className?: string;
 }
 
-export const RuleSearchBar: React.FC<RuleSearchBarProps> = ({
+export const TableSearchBar: React.FC<TableSearchBarProps> = ({
     searchQuery,
     onSearchChange,
     isSearching,
     statsText,
     selectedText,
     onClearSelection,
+    helperText,
+    placeholder = 'Search...',
+    height = 48,
+    inputWidth = 300,
+    className = '',
 }) => {
     return (
-        <Box className="forward-search-bar" style={{ height: SEARCH_BAR_HEIGHT }}>
-            <Box className="forward-search-bar__input">
+        <Box className={`table-search-bar ${className}`} style={{ height }}>
+            <Box className="table-search-bar__input" style={{ width: inputWidth }}>
                 <TextInput
-                    placeholder="Search by target, counter, devices..."
+                    placeholder={placeholder}
                     value={searchQuery}
                     onUpdate={onSearchChange}
                     size="m"
                     hasClear
                 />
             </Box>
-            <Box className="forward-search-bar__stats">
+            <Box className="table-search-bar__stats">
                 {isSearching && <Loader size="s" />}
                 <Label theme="info" size="m">{statsText}</Label>
                 {selectedText && (
@@ -41,7 +50,7 @@ export const RuleSearchBar: React.FC<RuleSearchBarProps> = ({
                             <Text
                                 variant="body-1"
                                 color="link"
-                                className="forward-search-bar__clear"
+                                className="table-search-bar__clear"
                                 onClick={onClearSelection}
                             >
                                 Clear
@@ -49,8 +58,12 @@ export const RuleSearchBar: React.FC<RuleSearchBarProps> = ({
                         )}
                     </>
                 )}
+                {helperText && (
+                    <Text variant="body-2" color="secondary">
+                        {helperText}
+                    </Text>
+                )}
             </Box>
-            <Box className="forward-search-bar__spacer" />
         </Box>
     );
 };

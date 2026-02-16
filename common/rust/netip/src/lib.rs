@@ -1,4 +1,7 @@
-use core::fmt::{self, Display, Formatter};
+use core::{
+    fmt::{self, Display, Formatter},
+    str::FromStr,
+};
 
 /// A MAC address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
@@ -37,3 +40,40 @@ impl Display for MacAddr {
         write!(fmt, "{a:02x}:{b:02x}:{c:02x}:{d:02x}:{e:02x}:{f:02x}")
     }
 }
+
+impl FromStr for MacAddr {
+    type Err = MacAddrParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut octets = [0u8; 6];
+        let mut idx = 0;
+
+        for part in s.split(':') {
+            if idx >= 6 {
+                return Err(MacAddrParseError);
+            }
+            octets[idx] = u8::from_str_radix(part, 16).map_err(|_| MacAddrParseError)?;
+            idx += 1;
+        }
+
+        if idx != 6 {
+            return Err(MacAddrParseError);
+        }
+
+        Ok(MacAddr::new(
+            octets[0], octets[1], octets[2], octets[3], octets[4], octets[5],
+        ))
+    }
+}
+
+/// Error returned when parsing a MAC address string fails.
+#[derive(Debug, Clone, Copy)]
+pub struct MacAddrParseError;
+
+impl Display for MacAddrParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        write!(f, "invalid MAC address format, expected EUI-48: xx:xx:xx:xx:xx:xx")
+    }
+}
+
+impl core::error::Error for MacAddrParseError {}
