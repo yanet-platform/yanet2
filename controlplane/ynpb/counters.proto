@@ -16,8 +16,8 @@ service CountersService {
 	}
 	rpc Module(ModuleCountersRequest) returns (CountersResponse) {
 	}
-	rpc ModuleAggregate(ModuleAggregateCountersRequest) returns
-		(ModuleAggregateCountersResponse) {}
+	rpc ModulePerf(ModulePerfCountersRequest) returns
+		(ModulePerfCountersResponse) {}
 }
 
 message DeviceCountersRequest {
@@ -69,7 +69,8 @@ message CountersResponse {
 	repeated CounterInfo counters = 1;
 }
 
-message ModuleAggregateCountersRequest {
+// TODO: docs
+message ModulePerfCountersRequest {
 	string device = 1;
 	string pipeline = 2;
 	string function = 3;
@@ -78,32 +79,20 @@ message ModuleAggregateCountersRequest {
 	string module_name = 6;
 }
 
-// ModulePerfLatency represents latency distribution for a specific batch size range.
-// Each entry tracks the number of packet batches that fell within a specific latency bucket.
+// TODO: docs
 message ModulePerfLatency {
 	uint32 min_latency = 1;
 	uint64 batches = 2;
 }
 
-// ModulePerfCounters aggregates performance metrics for packet batches of a specific size range.
-// Batch sizes follow powers of 2: hist_0 (1 packet), hist_1 (2-3 packets), hist_2 (4-7 packets), etc.
-message ModulePerfCounters {
+// TODO: docs
+message ModulePerfCounter {
 	uint32 min_batch_size = 1;
 	uint64 mean_latency = 2;
 	repeated ModulePerfLatency latencies = 3;
 }
 
-// ModuleAggregateCounters provides aggregated statistics for a module across all worker instances.
-// Includes packet/byte counts and detailed performance histograms for different batch sizes.
-message ModuleAggregateCounters {
-	uint64 tx_count = 1;
-	uint64 tx_bytes = 2;
-	uint64 rx_count = 3;
-	uint64 rx_bytes = 4;
-	repeated ModulePerfCounters packet_batches = 5;
-}
-
-// ModuleAggregateCountersResponse contains aggregated counter data for the requested module.
-message ModuleAggregateCountersResponse {
-	repeated ModuleAggregateCounters counters = 1;
+// TODO: docs
+message ModulePerfCountersResponse {
+	repeated ModulePerfCounter counters = 1;
 }

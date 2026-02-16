@@ -6,6 +6,7 @@ package ffi
 //#cgo LDFLAGS: -L../../build/lib/counters -lcounters
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
 //#include "api/agent.h"
+//#include "api/counter.h"
 import "C"
 import (
 	"fmt"
@@ -559,4 +560,88 @@ func (m *DPConfig) ModuleCounters(
 	}
 
 	return m.encodeCounters(counters)
+}
+
+// ModulePerformanceCounterLatencyRange represents a latency range in performance counters.
+type ModulePerformanceCounterLatencyRange struct {
+	MinLatency uint64
+	Batches    uint64
+}
+
+// ModulePerformanceCounter represents performance counter data for a module.
+type ModulePerformanceCounter struct {
+	MeanLatency   float32
+	MinBatchSize  uint64
+	LatencyRanges []ModulePerformanceCounterLatencyRange
+}
+
+// ModulePerformanceCounters retrieves performance counters for a specific module.
+//
+// Performance counters provide detailed timing and batch processing statistics
+// for module execution, including mean latency and latency distribution across
+// different batch sizes.
+func (m *DPConfig) ModulePerformanceCounters(
+	deviceName string,
+	pipelineName string,
+	functionName string,
+	chainName string,
+	moduleType string,
+	moduleName string,
+) ([]ModulePerformanceCounter, error) {
+	cDeviceName := C.CString(deviceName)
+	defer C.free(unsafe.Pointer(cDeviceName))
+	cPipelineName := C.CString(pipelineName)
+	defer C.free(unsafe.Pointer(cPipelineName))
+	cFunctionName := C.CString(functionName)
+	defer C.free(unsafe.Pointer(cFunctionName))
+	cChainName := C.CString(chainName)
+	defer C.free(unsafe.Pointer(cChainName))
+	cModuleType := C.CString(moduleType)
+	defer C.free(unsafe.Pointer(cModuleType))
+	cModuleName := C.CString(moduleName)
+	defer C.free(unsafe.Pointer(cModuleName))
+
+	var counters C.struct_module_performance_counters
+	rc := C.yanet_module_performance_counters(
+		&counters,
+		m.ptr,
+		cDeviceName,
+		cPipelineName,
+		cFunctionName,
+		cChainName,
+		cModuleType,
+		cModuleName,
+	)
+	defer C.yanet_module_performance_counters_free(&counters)
+
+	if rc != 0 {
+		return nil, fmt.Errorf("failed to get module performance counters")
+	}
+
+	result := make([]ModulePerformanceCounter, counters.counters_count)
+
+	// Convert C array to Go slice for iteration
+	cCounters := unsafe.Slice(counters.counters, counters.counters_count)
+
+	for i := range result {
+		cCounter := &cCounters[i]
+
+		latencyRanges := make([]ModulePerformanceCounterLatencyRange, cCounter.latency_ranges_count)
+		cLatencyRanges := unsafe.Slice(cCounter.latency_ranges, cCounter.latency_ranges_count)
+
+		for j := range latencyRanges {
+			latencyRanges[j] = ModulePerformanceCounterLatencyRange{
+				MinLatency: uint64(cLatencyRanges[j].min_latency),
+				Batches:    uint64(cLatencyRanges[j].batches),
+			}
+		}
+
+		result[i] = ModulePerformanceCounter{
+			MeanLatency:   float32(cCounter.mean_latency),
+			MinBatchSize:  uint64(cCounter.min_batch_size),
+			LatencyRanges: latencyRanges,
+		}
+	}
+
+	return result, nil
 }

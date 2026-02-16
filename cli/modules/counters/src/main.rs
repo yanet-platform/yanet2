@@ -5,7 +5,7 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{
-    counters_service_client::CountersServiceClient, ModuleAggregateCountersRequest,
+    counters_service_client::CountersServiceClient, ModulePerfCountersRequest,
     ChainCountersRequest, DeviceCountersRequest, FunctionCountersRequest, ModuleCountersRequest,
     PipelineCountersRequest,
 };
@@ -99,9 +99,9 @@ pub struct ModuleCmd {
     pub module_type: String,
     #[arg(long)]
     pub module_name: String,
-    /// Show aggregated counters instead of raw counters.
+    /// Show performance counters instead of raw counters.
     #[arg(long)]
-    pub aggregate: bool,
+    pub perf: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -134,9 +134,9 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
                 .await?
         }
         ModeCmd::Module(cmd) => {
-            if cmd.aggregate {
+            if cmd.perf {
                 service
-                    .show_aggregate_module(
+                    .show_perf_module(
                         cmd.device_name,
                         cmd.pipeline_name,
                         cmd.function_name,
@@ -250,7 +250,7 @@ impl CountersService {
         Ok(())
     }
 
-    pub async fn show_aggregate_module(
+    pub async fn show_perf_module(
         &mut self,
         device_name: String,
         pipeline_name: String,
@@ -259,7 +259,7 @@ impl CountersService {
         module_type: String,
         module_name: String,
     ) -> Result<(), Box<dyn Error>> {
-        let request = ModuleAggregateCountersRequest {
+        let request = ModulePerfCountersRequest {
             device: device_name,
             pipeline: pipeline_name,
             function: function_name,
@@ -267,7 +267,7 @@ impl CountersService {
             module_type,
             module_name,
         };
-        let response = self.client.module_aggregate(request).await?;
+        let response = self.client.module_perf(request).await?;
         println!("{}", serde_json::to_string_pretty(response.get_ref())?);
         Ok(())
     }

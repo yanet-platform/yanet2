@@ -417,6 +417,8 @@ cp_module_parse_performance_counter(
 	counter->min_batch_size = batch_sizes[counter_idx];
 	counter->latency_ranges_count = hist_buckets;
 
+	size_t total_batches = 0;
+
 	// Fill in latency ranges and accumulate counter values across all
 	// workers
 	for (size_t range_idx = 0; range_idx < hist_buckets; ++range_idx) {
@@ -433,10 +435,22 @@ cp_module_parse_performance_counter(
 			uint64_t *counter_values = counter_handle_get_value(
 				counter_handle->value_handle, worker_idx
 			);
-			total += counter_values[range_idx];
+			total += counter_values[1 + range_idx];
 		}
 		counter->latency_ranges[range_idx].batches = total;
+		total_batches += total;
 	}
+
+	// Calc mean latency
+	size_t total_ns = 0;
+	for (size_t worker_idx = 0; worker_idx < workers; ++worker_idx) {
+		uint64_t *counter_values = counter_handle_get_value(
+			counter_handle->value_handle, worker_idx
+		);
+		total_ns += counter_values[0];
+	}
+
+	counter->mean_latency = (float)(total_ns) / (float)total_batches;
 
 	// Set output index
 	*idx = counter_idx;

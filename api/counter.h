@@ -88,6 +88,8 @@ struct module_performance_counter_latency_range {
 /// TODO: docs
 struct module_performance_counter {
 
+	float mean_latency;
+
 	uint64_t min_batch_size;
 
 	size_t latency_ranges_count;
