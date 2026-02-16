@@ -36,8 +36,8 @@ struct packet_handler {
 	struct sessions_timeouts sessions_timeouts;
 
 	// mapping: (address, port, proto) -> vs_id
-	struct filter vs_v4;
-	struct filter vs_v6;
+	struct filter *vs_v4;
+	struct filter *vs_v6;
 
 	// set of IP addresses announced by balancer
 	// (virtual service IPs)
@@ -100,7 +100,9 @@ packet_handler_setup(
 	struct agent *agent,
 	const char *name,
 	struct packet_handler_config *config,
-	struct balancer_state *state
+	struct packet_handler_config *prev_config,
+	struct balancer_state *state,
+	struct packet_handler *prev_handler
 );
 
 /**

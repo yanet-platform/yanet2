@@ -320,6 +320,11 @@ static int
 setup_acl(
 	struct vs *vs, struct vs_config *config, struct memory_context *mctx
 ) {
+	vs->acl = memory_balloc(mctx, sizeof(struct filter));
+	if (vs->acl == NULL) {
+		PUSH_ERROR("failed to allocate filter");
+		return -1;
+	}
 	struct filter_rule *rules = NULL;
 	size_t rule_count = 0;
 	if (src_filter_rules(vs, config, &rules, &rule_count) != 0) {
@@ -329,11 +334,11 @@ setup_acl(
 	int res;
 	if (vs->identifier.ip_proto == IPPROTO_IP) {
 		res = FILTER_INIT(
-			&vs->acl, vs_acl_ipv4, rules, rule_count, mctx
+			vs->acl, vs_acl_ipv4, rules, rule_count, mctx
 		);
 	} else { // IPPROTO_IPV6
 		res = FILTER_INIT(
-			&vs->acl, vs_acl_ipv6, rules, rule_count, mctx
+			vs->acl, vs_acl_ipv6, rules, rule_count, mctx
 		);
 	}
 	if (res != 0) {

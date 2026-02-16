@@ -75,7 +75,7 @@ static inline bool
 vs_v4_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	(void)ctx;
 	struct value_range *result;
-	FILTER_QUERY(&vs->acl, vs_acl_ipv4, &packet, &result, 1);
+	FILTER_QUERY(vs->acl, vs_acl_ipv4, &packet, &result, 1);
 	return result->count != 0;
 }
 
@@ -130,7 +130,7 @@ static inline bool
 vs_v6_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	(void)ctx;
 	struct value_range *result;
-	FILTER_QUERY(&vs->acl, vs_acl_ipv6, &packet, &result, 1);
+	FILTER_QUERY(vs->acl, vs_acl_ipv6, &packet, &result, 1);
 	return result->count != 0;
 }
 
