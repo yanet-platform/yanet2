@@ -8,7 +8,6 @@
 #include "controlplane/config/cp_pipeline.h"
 #include "controlplane/config/econtext.h"
 #include "counters/histogram.h"
-#include "counters/utils.h"
 
 #include "dataplane/config/zone.h"
 #include "dataplane/packet/packet.h"
@@ -75,13 +74,14 @@ module_ectx_process(
 	// update counter for corresponding batch
 	uint64_t elapsed_ns = tsc_elapsed_ns(tsc_end - tsc_start);
 	if (packets_count > 0) {
-		size_t idx = uint64_log(packets_count);
-		size_t batch_idx = idx < CP_MODULE_COUNTER_HISTS_COUNT
+		size_t idx = uint64_log_up(packets_count);
+		size_t batch_idx = idx < CP_MODULE_PERF_COUNTERS
 					   ? idx
-					   : CP_MODULE_COUNTER_HISTS_COUNT - 1;
-		size_t counter_idx = module_ectx->hist_counter_ids[batch_idx];
+					   : CP_MODULE_PERF_COUNTERS - 1;
+		size_t counter_idx =
+			module_ectx->perf_counter_indices[batch_idx];
 		size_t hist_idx = counters_hybrid_histogram_batch(
-			&cp_module_counter_hist, elapsed_ns
+			&cp_module_perf_counter, elapsed_ns
 		);
 		uint64_t *counter = counter_get_address(
 			counter_idx, dp_worker->idx, storage

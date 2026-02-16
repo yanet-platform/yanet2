@@ -131,11 +131,11 @@ func (m *CountersService) Module(
 	return response, nil
 }
 
-// AggregateModule aggregates module counters into a structured response.
-func (m *CountersService) AggregateModule(
+// ModuleAggregate aggregates module counters into a structured response.
+func (m *CountersService) ModuleAggregate(
 	ctx context.Context,
-	request *ynpb.AggregateModuleCountersRequest,
-) (*ynpb.AggregateModuleCountersResponse, error) {
+	request *ynpb.ModuleAggregateCountersRequest,
+) (*ynpb.ModuleAggregateCountersResponse, error) {
 	dpConfig := m.shm.DPConfig(m.instanceID)
 	counterValues := dpConfig.ModuleCounters(
 		request.GetDevice(),
@@ -150,8 +150,8 @@ func (m *CountersService) AggregateModule(
 	// Aggregate counters across all instances
 	aggregated := m.aggregateModuleCounters(counterValues)
 
-	response := &ynpb.AggregateModuleCountersResponse{
-		Counters: []*ynpb.AggregateModuleCounters{aggregated},
+	response := &ynpb.ModuleAggregateCountersResponse{
+		Counters: []*ynpb.ModuleAggregateCounters{aggregated},
 	}
 
 	return response, nil
@@ -160,9 +160,9 @@ func (m *CountersService) AggregateModule(
 // aggregateModuleCounters processes raw counter data and produces aggregated statistics.
 func (m *CountersService) aggregateModuleCounters(
 	counterValues []ffi.CounterInfo,
-) *ynpb.AggregateModuleCounters {
-	result := &ynpb.AggregateModuleCounters{
-		PacketBatches: make([]*ynpb.AggregatePacketBatchCounters, 0, 6),
+) *ynpb.ModuleAggregateCounters {
+	result := &ynpb.ModuleAggregateCounters{
+		PacketBatches: make([]*ynpb.ModulePerfCounters, 0, 6),
 	}
 
 	// Maps to store histogram data by index (0-5)
@@ -225,18 +225,17 @@ func (m *CountersService) aggregateCounterValues(values [][]uint64) []uint64 {
 	return result
 }
 
-// processHistogram converts histogram counter values into AggregatePacketBatchCounters.
+// processHistogram converts histogram counter values into ModulePerfCounters.
 func (m *CountersService) processHistogram(
 	histIdx int,
 	values []uint64,
-) *ynpb.AggregatePacketBatchCounters {
+) *ynpb.ModulePerfCounters {
 	// Batch size is 2^histIdx
 	batchSize := uint32(1 << histIdx)
 
-	result := &ynpb.AggregatePacketBatchCounters{
+	result := &ynpb.ModulePerfCounters{
 		MinBatchSize: batchSize,
-		MaxBatchSize: 2*batchSize - 1,
-		Latencies:    make([]*ynpb.AggregatePacketBatchLatency, 0),
+		Latencies:    make([]*ynpb.ModulePerfLatency, 0),
 	}
 
 	// values[0] contains the sum of all latencies
@@ -268,10 +267,8 @@ func (m *CountersService) processHistogram(
 	// Process linear buckets (1-20)
 	for i := 1; i <= linearBuckets && i < len(values); i++ {
 		minLatency := uint32(minValue + (i-1)*linearStep)
-		maxLatency := uint32(minValue + i*linearStep - 1)
-		result.Latencies = append(result.Latencies, &ynpb.AggregatePacketBatchLatency{
+		result.Latencies = append(result.Latencies, &ynpb.ModulePerfLatency{
 			MinLatency: minLatency,
-			MaxLatency: maxLatency,
 			Batches:    values[i],
 		})
 	}
@@ -283,10 +280,8 @@ func (m *CountersService) processHistogram(
 		expIdx := i - linearBuckets - 1
 		// Each exponential bucket doubles the range
 		minLatency := uint32(maxLinearValue * (1 << expIdx))
-		maxLatency := uint32(maxLinearValue*(1<<(expIdx+1)) - 1)
-		result.Latencies = append(result.Latencies, &ynpb.AggregatePacketBatchLatency{
+		result.Latencies = append(result.Latencies, &ynpb.ModulePerfLatency{
 			MinLatency: minLatency,
-			MaxLatency: maxLatency,
 			Batches:    values[i],
 		})
 	}

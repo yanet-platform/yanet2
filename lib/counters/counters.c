@@ -150,7 +150,7 @@ counter_registry_insert(
 	new_name->size = size;
 	new_name->gen = gen;
 
-	uint64_t pool_idx = uint64_log(size);
+	uint64_t pool_idx = uint64_log_up(size);
 	// uint64_t link_size = 8 << pool_idx;
 
 	new_link->offset =

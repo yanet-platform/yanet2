@@ -5,7 +5,7 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{
-    counters_service_client::CountersServiceClient, AggregateModuleCountersRequest,
+    counters_service_client::CountersServiceClient, ModuleAggregateCountersRequest,
     ChainCountersRequest, DeviceCountersRequest, FunctionCountersRequest, ModuleCountersRequest,
     PipelineCountersRequest,
 };
@@ -259,7 +259,7 @@ impl CountersService {
         module_type: String,
         module_name: String,
     ) -> Result<(), Box<dyn Error>> {
-        let request = AggregateModuleCountersRequest {
+        let request = ModuleAggregateCountersRequest {
             device: device_name,
             pipeline: pipeline_name,
             function: function_name,
@@ -267,7 +267,7 @@ impl CountersService {
             module_type,
             module_name,
         };
-        let response = self.client.aggregate_module(request).await?;
+        let response = self.client.module_aggregate(request).await?;
         println!("{}", serde_json::to_string_pretty(response.get_ref())?);
         Ok(())
     }
