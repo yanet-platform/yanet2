@@ -117,9 +117,44 @@ counters_hybrid_histogram_batch(
 	return idx < total_hists ? idx : total_hists - 1;
 }
 
+/**
+ * Calculate the total number of buckets in a hybrid histogram.
+ *
+ * Returns the total count of histogram buckets, which includes:
+ * - 1 underflow bucket (for values below min_value)
+ * - linear_hists linear buckets (with fixed step size)
+ * - exp_hists exponential buckets (with logarithmic scaling)
+ * - 1 overflow bucket (for values exceeding the range)
+ *
+ * Total buckets = 2 + linear_hists + exp_hists
+ *
+ * This function is used to determine the size of counter arrays needed to
+ * store histogram data and to iterate over all buckets when processing
+ * performance metrics.
+ *
+ * @param hist Pointer to the hybrid histogram configuration
+ * @return Total number of histogram buckets
+ */
 size_t
 counters_hybrid_histogram_batches(const struct counters_hybrid_histogram *hist);
 
+/**
+ * Get the minimum value (lower bound) for a specific histogram bucket.
+ *
+ * Returns the minimum value in nanoseconds that would be placed into the
+ * specified bucket. This is used to label histogram buckets when reporting
+ * performance metrics.
+ *
+ * Bucket layout:
+ * - Bucket 0: Underflow (returns 0)
+ * - Buckets 1 to linear_hists: Linear buckets (min_value + step * index)
+ * - Remaining buckets: Exponential buckets (logarithmic scaling)
+ * - Last bucket: Overflow (returns maximum representable value)
+ *
+ * @param hist Pointer to the hybrid histogram configuration
+ * @param batch Bucket index (0 to counters_hybrid_histogram_batches() - 1)
+ * @return Minimum value in nanoseconds for the specified bucket
+ */
 uint64_t
 counters_hybrid_histogram_batch_first_elem(
 	const struct counters_hybrid_histogram *hist, uint64_t batch

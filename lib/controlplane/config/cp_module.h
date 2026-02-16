@@ -272,7 +272,35 @@ cp_module_registry_delete(
 size_t
 cp_module_registry_size(struct cp_module_registry *module_registry);
 
-/// TODO: docs
+/**
+ * Parse raw performance counter data into structured performance metrics.
+ *
+ * This function processes a raw histogram counter (named "hist_N" where N is
+ * 0-5) and converts it into a module_performance_counter structure. It:
+ * 1. Extracts the batch size index from the counter name
+ * 2. Aggregates counter values across all worker threads
+ * 3. Calculates mean latency from accumulated nanoseconds
+ * 4. Populates latency histogram buckets with batch counts
+ *
+ * The counter must be one of the 6 performance histogram counters (hist_0
+ * through hist_5) that track latency for different batch sizes:
+ * - hist_0: 1 packet
+ * - hist_1: 2-3 packets
+ * - hist_2: 4-7 packets
+ * - hist_3: 8-15 packets
+ * - hist_4: 16-31 packets
+ * - hist_5: 32+ packets
+ *
+ * The output counter structure will have its latency_ranges array allocated
+ * and populated with histogram data. The caller is responsible for freeing
+ * this memory.
+ *
+ * @param counter_handle Handle to the raw counter data from the registry
+ * @param workers Number of worker threads to aggregate data from
+ * @param idx Output parameter for the batch size index (0-5)
+ * @param counter Output parameter for the parsed performance counter structure
+ * @return 0 on success, -1 on failure (sets errno to EINVAL or ENOMEM)
+ */
 int
 cp_module_parse_performance_counter(
 	struct counter_handle *counter_handle,
