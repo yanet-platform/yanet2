@@ -76,3 +76,46 @@ yanet_get_counter_value(
 
 void
 yanet_counter_handle_list_free(struct counter_handle_list *counters);
+
+/// TODO: docs
+struct module_performance_counter_latency_range {
+
+	uint64_t min_latency;
+
+	size_t batches;
+};
+
+/// TODO: docs
+struct module_performance_counter {
+
+	uint64_t min_batch_size;
+
+	size_t latency_ranges_count;
+
+	struct module_performance_counter_latency_range *latency_ranges;
+};
+
+/// TODO: docs
+struct module_performance_counters {
+
+	size_t counters_count;
+
+	struct module_performance_counter *counters;
+};
+
+int
+yanet_module_performance_counters(
+	struct module_performance_counters *counters,
+	struct dp_config *dp_config,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name,
+	const char *module_type,
+	const char *module_name
+);
+
+void
+yanet_module_performance_counters_free(
+	struct module_performance_counters *counters
+);

@@ -2,7 +2,7 @@
 
 #include "common/likely.h"
 #include "common/numutils.h"
-#include "counters/counters.h"
+#include "counters.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -116,3 +116,11 @@ counters_hybrid_histogram_batch(
 
 	return idx < total_hists ? idx : total_hists - 1;
 }
+
+size_t
+counters_hybrid_histogram_batches(const struct counters_hybrid_histogram *hist);
+
+uint64_t
+counters_hybrid_histogram_batch_first_elem(
+	const struct counters_hybrid_histogram *hist, uint64_t batch
+);

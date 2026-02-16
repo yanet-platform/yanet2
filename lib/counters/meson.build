@@ -4,6 +4,7 @@ dependencies = [
 
 sources = files(
   'counters.c',
+  'histogram.c'
 )
 
 lib_counters = static_library(

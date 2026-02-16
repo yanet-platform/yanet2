@@ -1,5 +1,6 @@
 #pragma once
 
+#include "api/counter.h"
 #include "common/memory.h"
 
 #include "counters/counters.h"
@@ -270,3 +271,12 @@ cp_module_registry_delete(
  */
 size_t
 cp_module_registry_size(struct cp_module_registry *module_registry);
+
+/// TODO: docs
+int
+cp_module_parse_performance_counter(
+	struct counter_handle *counter_handle,
+	size_t workers,
+	size_t *idx,
+	struct module_performance_counter *counter
+);

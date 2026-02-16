@@ -52,6 +52,13 @@ test_basic() {
 			i
 		);
 	}
+
+	TEST_ASSERT_EQUAL(
+		counters_hybrid_histogram_batches(&hist),
+		hist.linear_hists + hist.exp_hists + 2,
+		"got invalid number of batches"
+	);
+
 	return TEST_SUCCESS;
 }
 
@@ -59,28 +66,30 @@ int
 stress_test(
 	struct counters_hybrid_histogram *hist, size_t queries, uint64_t rng
 ) {
+	const size_t num_batches = counters_hybrid_histogram_batches(hist);
+	TEST_ASSERT_EQUAL(
+		num_batches,
+		hist->linear_hists + hist->exp_hists + 2,
+		"got invalid number of batches"
+	);
+
 	struct segment {
 		uint64_t from;
 		uint64_t to; // non-inclusive
 	};
-	struct segment *segments =
-		malloc(sizeof(struct segment) *
-		       (2 + hist->linear_hists + hist->exp_hists));
+	struct segment *segments = malloc(sizeof(struct segment) * num_batches);
 	segments[0] = (struct segment){0, hist->min_value};
 	for (size_t i = 1; i <= hist->linear_hists; i++) {
 		segments[i] = (struct segment
 		){hist->min_value + (i - 1) * hist->linear_step,
 		  hist->min_value + i * hist->linear_step};
 	}
-	for (size_t i = hist->linear_hists + 1;
-	     i <= hist->linear_hists + hist->exp_hists + 1;
-	     i++) {
+	for (size_t i = hist->linear_hists + 1; i < num_batches; ++i) {
 		segments[i].from = segments[i - 1].to;
 		segments[i].to = segments[i].from * 2;
 	}
 
-	const uint64_t boundary =
-		segments[hist->linear_hists + hist->exp_hists + 1].to;
+	const uint64_t boundary = segments[num_batches - 1].to;
 
 	for (size_t query = 0; query < queries; ++query) {
 		rng = rng_next(&rng) % boundary;
@@ -104,6 +113,17 @@ stress_test(
 			"got invalid batch for query at index %zu (value=%lu)",
 			query,
 			value
+		);
+	}
+
+	for (size_t i = 0; i < num_batches; ++i) {
+		uint64_t first_elem =
+			counters_hybrid_histogram_batch_first_elem(hist, i);
+		TEST_ASSERT_EQUAL(
+			first_elem,
+			segments[i].from,
+			"got invalid first element for batch %zu",
+			i
 		);
 	}
 
