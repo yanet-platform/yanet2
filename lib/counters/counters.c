@@ -191,7 +191,7 @@ counter_registry_link(
 			continue;
 		}
 
-		uint64_t pool_idx = uint64_log(dst_name->size);
+		uint64_t pool_idx = uint64_log_up(dst_name->size);
 		// FIXME reuse old links (with clearance)
 		dst_name->offset = dst->counts[pool_idx]++ * (8 << pool_idx);
 	}
@@ -361,7 +361,7 @@ counter_storage_spawn(
 	for (uint64_t idx = 0; idx < counter_registry->count; ++idx) {
 		struct counter *name = ADDR_OF(&counter_registry->names) + idx;
 
-		uint64_t pool_idx = uint64_log(name->size);
+		uint64_t pool_idx = uint64_log_up(name->size);
 
 		struct counter_storage_pool *pool =
 			new_counter_storage->pools + pool_idx;
