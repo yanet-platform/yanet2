@@ -88,7 +88,7 @@ type Gateway struct {
 }
 
 // NewGateway creates a new Gateway API.
-func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *Gateway {
+func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*Gateway, error) {
 	opts := newGatewayOptions()
 	for _, o := range options {
 		o(opts)
@@ -96,8 +96,10 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *G
 	log := opts.Log
 	registry := NewBackendRegistry()
 
-	// Create Auth Manager.
-	authManager := auth.NewManager(&cfg.Auth, auth.WithLog(log.Desugar()))
+	authManager, err := auth.NewManager(&cfg.Auth, auth.WithLog(log.Desugar()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create auth manager: %w", err)
+	}
 
 	director := func(ctx context.Context, fullMethodName string) (proxy.Mode, []proxy.Backend, error) {
 		service, _, err := xgrpc.ParseFullMethod(fullMethodName)
@@ -174,7 +176,7 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *G
 		builtInModules: builtInModules,
 		registry:       registry,
 		log:            log,
-	}
+	}, nil
 }
 
 // Close closes the gateway API.

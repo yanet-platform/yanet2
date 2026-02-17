@@ -5,9 +5,6 @@ import (
 )
 
 var (
-	// ErrIdentityNotFound is returned when a requested identity does not exist.
-	ErrIdentityNotFound = errors.New("identity not found")
-
 	// ErrAccountDisabled is returned when attempting to authenticate with a disabled account.
 	ErrAccountDisabled = errors.New("account is disabled")
 

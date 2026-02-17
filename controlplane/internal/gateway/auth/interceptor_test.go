@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -15,10 +16,10 @@ func TestUnaryServerInterceptor(t *testing.T) {
 	log := zap.NewNop()
 
 	tests := []struct {
-		name          string
-		disabled      bool
-		withToken     bool
-		token         string
+		name           string
+		disabled       bool
+		withToken      bool
+		token          string
 		checkPrincipal func(*testing.T, *core.Principal)
 	}{
 		{
@@ -51,26 +52,14 @@ func TestUnaryServerInterceptor(t *testing.T) {
 				}
 			},
 		},
-		{
-			name:      "enabled mode (skeleton)",
-			disabled:  false,
-			withToken: false,
-			checkPrincipal: func(t *testing.T, p *core.Principal) {
-				if p == nil {
-					t.Fatal("Principal is nil")
-				}
-				if p.User != "anonymous" {
-					t.Errorf("User = %q, want %q", p.User, "anonymous")
-				}
-			},
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manager := NewManager(&Config{
+			manager, err := NewManager(&Config{
 				Disabled: tt.disabled,
-			}, WithLog(log))
+			})
+			require.NoError(t, err)
 
 			interceptor := UnaryServerInterceptor(manager, log)
 
@@ -92,7 +81,7 @@ func TestUnaryServerInterceptor(t *testing.T) {
 			info := &grpc.UnaryServerInfo{
 				FullMethod: "/test.Service/Method",
 			}
-			_, err := interceptor(ctx, "request", info, handler)
+			_, err = interceptor(ctx, "request", info, handler)
 			if err != nil {
 				t.Fatalf("interceptor() error = %v", err)
 			}
@@ -107,9 +96,10 @@ func TestUnaryServerInterceptor(t *testing.T) {
 
 func TestStreamServerInterceptor(t *testing.T) {
 	log := zap.NewNop()
-	manager := NewManager(&Config{
+	manager, err := NewManager(&Config{
 		Disabled: true,
-	}, WithLog(log))
+	})
+	require.NoError(t, err)
 
 	interceptor := StreamServerInterceptor(manager, log)
 
@@ -130,10 +120,8 @@ func TestStreamServerInterceptor(t *testing.T) {
 	info := &grpc.StreamServerInfo{
 		FullMethod: "/test.Service/StreamMethod",
 	}
-	err := interceptor(nil, mockStream, info, handler)
-	if err != nil {
-		t.Fatalf("interceptor() error = %v", err)
-	}
+	err = interceptor(nil, mockStream, info, handler)
+	require.NoError(t, err)
 
 	// Check the captured Principal.
 	if capturedPrincipal == nil {
@@ -146,9 +134,9 @@ func TestStreamServerInterceptor(t *testing.T) {
 
 func TestExtractToken(t *testing.T) {
 	tests := []struct {
-		name  string
-		md    metadata.MD
-		want  string
+		name string
+		md   metadata.MD
+		want string
 	}{
 		{
 			name: "with token",

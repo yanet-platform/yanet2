@@ -9,9 +9,12 @@ import (
 
 func TestManager_Authenticate(t *testing.T) {
 	cfg := &Config{
-		Disabled: false,
+		Disabled: true,
 	}
-	m := NewManager(cfg)
+	m, err := NewManager(cfg)
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
 
 	ctx := context.Background()
 
@@ -57,9 +60,12 @@ func TestManager_Authenticate(t *testing.T) {
 
 func TestManager_Authorize(t *testing.T) {
 	log := zap.NewNop()
-	m := NewManager(&Config{
-		Disabled: false,
+	m, err := NewManager(&Config{
+		Disabled: true,
 	}, WithLog(log))
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
 
 	ctx := context.Background()
 

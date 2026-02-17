@@ -6,8 +6,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/basic"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/identity"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/none"
+	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/permission"
+	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/rbac"
 )
 
 // Authenticator is the interface for authentication methods.
@@ -58,27 +62,82 @@ type Manager struct {
 }
 
 // NewManager creates a new auth Manager.
-func NewManager(cfg *Config, options ...ManagerOption) *Manager {
+func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	opts := newManagerOptions()
 	for _, o := range options {
 		o(opts)
 	}
 
+	log := opts.Log
+
 	m := &Manager{
 		authenticators: []Authenticator{},
 		disabled:       cfg.Disabled,
-		log:            opts.Log,
+		log:            log,
 	}
 
-	// Register NoneAuthenticator for skeleton implementation.
-	noneAuth := none.NewNoneAuthenticator()
-	m.authenticators = append(m.authenticators, noneAuth)
-
+	// If disabled, only use NoneAuthenticator.
 	if cfg.Disabled {
-		m.log.Warn("authentication is DISABLED - requests will be anonymous with FULL permissions")
+		log.Warn("authentication is DISABLED - requests will be anonymous with FULL permissions")
+		m.authenticators = append(m.authenticators, none.NewNoneAuthenticator())
+		return m, nil
 	}
 
-	return m
+	// Build CompositeIdentityProvider from config.
+	var identityProviders []identity.Provider
+	for _, providerCfg := range cfg.IdentityProviders {
+		switch providerCfg.Type {
+		case "file":
+			fileProvider, err := identity.NewFileIdentityProvider(providerCfg.Path)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create file identity provider: %w", err)
+			}
+			identityProviders = append(identityProviders, fileProvider)
+			log.Info("registered identity provider",
+				zap.String("type", "file"),
+				zap.String("path", providerCfg.Path),
+			)
+		default:
+			return nil, fmt.Errorf("unknown identity provider type: %q", providerCfg.Type)
+		}
+	}
+
+	if len(identityProviders) == 0 {
+		return nil, fmt.Errorf("no identity providers configured")
+	}
+
+	compositeIdentityProvider := identity.NewCompositeIdentityProvider(
+		identityProviders,
+		identity.WithLog(log),
+	)
+
+	// Create FilePermissionStore.
+	permissionStore, err := permission.NewFilePermissionStore(cfg.PermissionsPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create permission store: %w", err)
+	}
+	log.Info("loaded permissions", zap.String("path", cfg.PermissionsPath))
+
+	// Create RBACAuthorizer.
+	m.authorizer = rbac.NewRBACAuthorizer(permissionStore, rbac.WithLog(log))
+
+	// Create BasicAuthenticator if credentials path configured.
+	if cfg.BasicAuth.CredentialsPath != "" {
+		credentialStore, err := basic.NewFileCredentialStore(cfg.BasicAuth.CredentialsPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create credential store: %w", err)
+		}
+
+		basicAuth := basic.NewBasicAuthenticator(credentialStore, compositeIdentityProvider)
+		m.authenticators = append(m.authenticators, basicAuth)
+		log.Info("registered authenticator", zap.String("type", "basic"))
+	}
+
+	if len(m.authenticators) == 0 {
+		return nil, fmt.Errorf("no authenticators configured")
+	}
+
+	return m, nil
 }
 
 // Authenticate attempts to authenticate the given token using registered
@@ -111,6 +170,8 @@ func (m *Manager) Authorize(
 	principal *core.Principal,
 	fullMethod string,
 ) error {
-	// TODO: will be replaced with RBAC authorization in future phases.
-	return nil
+	if m.authorizer == nil {
+		return nil // No authorizer configured, allow all.
+	}
+	return m.authorizer.Authorize(ctx, principal, fullMethod)
 }
