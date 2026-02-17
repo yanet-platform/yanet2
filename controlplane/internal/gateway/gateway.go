@@ -161,7 +161,7 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 	ynpb.RegisterCountersServiceServer(server, countersService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", countersService)))
 
-	ynpb.RegisterAuthServer(server, authService)
+	ynpb.RegisterAuthServiceServer(server, authService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
 
 	// Register built-in services in the registry for HTTP gateway access

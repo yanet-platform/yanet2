@@ -12,7 +12,7 @@ import (
 
 // AuthService provides authentication introspection.
 type AuthService struct {
-	ynpb.UnimplementedAuthServer
+	ynpb.UnimplementedAuthServiceServer
 
 	manager *auth.Manager
 }
