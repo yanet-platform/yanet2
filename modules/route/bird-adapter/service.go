@@ -219,11 +219,12 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 
 			// Log if NextHop is invalid before converting to protobuf
 			if !routes[idx].NextHop.IsValid() {
-				clientLog.Debugw("route has invalid next_hop before protobuf conversion",
+				clientLog.Debugw("route has invalid next_hop, skip",
 					zap.String("prefix", routes[idx].Prefix.String()),
 					zap.String("next_hop", routes[idx].NextHop.String()),
 					zap.Binary("next_hop_bytes", routes[idx].NextHop.AsSlice()),
 				)
+				continue
 			}
 
 			err := (*holder.currentStream).Send(&routepb.Update{
