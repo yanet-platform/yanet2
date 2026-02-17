@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 // NoneAuthenticator implements authentication that always succeeds with

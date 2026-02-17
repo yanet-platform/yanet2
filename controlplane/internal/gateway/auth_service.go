@@ -6,7 +6,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 

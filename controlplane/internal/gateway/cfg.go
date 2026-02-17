@@ -1,7 +1,7 @@
 package gateway
 
 import (
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 )
 
 // Config is the configuration for the gateway.

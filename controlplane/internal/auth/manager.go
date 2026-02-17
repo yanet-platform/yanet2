@@ -6,12 +6,12 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/basic"
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/core"
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/identity"
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/none"
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/permission"
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/rbac"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/basic"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/identity"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/none"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/permission"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/rbac"
 )
 
 // Authenticator is the interface for authentication methods.

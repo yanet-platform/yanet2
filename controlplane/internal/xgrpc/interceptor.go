@@ -11,7 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 // ProtoLogValue is an interface for custom proto message serialization in logs.

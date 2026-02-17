@@ -8,7 +8,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 // CredentialStore provides access to credentials for authentication.

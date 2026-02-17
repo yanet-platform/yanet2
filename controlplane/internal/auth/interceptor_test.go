@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 func TestUnaryServerInterceptor(t *testing.T) {
