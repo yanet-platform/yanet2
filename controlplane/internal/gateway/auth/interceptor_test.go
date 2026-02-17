@@ -158,7 +158,7 @@ func TestExtractToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := metadata.NewIncomingContext(context.Background(), tt.md)
-			got := extractToken(ctx)
+			got := ExtractToken(ctx)
 			if got != tt.want {
 				t.Errorf("extractToken() = %q, want %q", got, tt.want)
 			}
@@ -168,7 +168,7 @@ func TestExtractToken(t *testing.T) {
 	// Test without metadata in context.
 	t.Run("no metadata", func(t *testing.T) {
 		ctx := context.Background()
-		got := extractToken(ctx)
+		got := ExtractToken(ctx)
 		if got != "" {
 			t.Errorf("extractToken() = %q, want empty", got)
 		}

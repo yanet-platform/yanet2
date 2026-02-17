@@ -101,6 +101,9 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 		return nil, fmt.Errorf("failed to create auth manager: %w", err)
 	}
 
+	// Create AuthService for authentication introspection.
+	authService := NewAuthService(authManager)
+
 	director := func(ctx context.Context, fullMethodName string) (proxy.Mode, []proxy.Backend, error) {
 		service, _, err := xgrpc.ParseFullMethod(fullMethodName)
 		if err != nil {
@@ -157,6 +160,9 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 
 	ynpb.RegisterCountersServiceServer(server, countersService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", countersService)))
+
+	ynpb.RegisterAuthServer(server, authService)
+	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
 
 	// Register built-in services in the registry for HTTP gateway access
 	registerBuiltInServices(registry, cfg.Server.Endpoint, log)
@@ -295,6 +301,7 @@ func registerBuiltInServices(registry *BackendRegistry, endpoint string, log *za
 		"ynpb.PipelineService",
 		"ynpb.FunctionService",
 		"ynpb.CountersService",
+		"ynpb.Auth",
 	}
 
 	for _, serviceName := range builtInServices {

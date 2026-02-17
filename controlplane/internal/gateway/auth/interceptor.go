@@ -6,15 +6,9 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway/auth/core"
-)
-
-const (
-	// authMetadataKey is the metadata header key for authentication tokens.
-	authMetadataKey = "x-yanet-authentication"
 )
 
 // UnaryServerInterceptor returns a gRPC unary server interceptor that performs
@@ -24,7 +18,7 @@ func UnaryServerInterceptor(
 	log *zap.Logger,
 ) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		token := extractToken(ctx)
+		token := ExtractToken(ctx)
 
 		// Authenticate the request.
 		principal, err := manager.Authenticate(ctx, token)
@@ -55,7 +49,7 @@ func StreamServerInterceptor(manager *Manager, log *zap.Logger) grpc.StreamServe
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		ctx := ss.Context()
 
-		token := extractToken(ctx)
+		token := ExtractToken(ctx)
 
 		// Authenticate the request.
 		principal, err := manager.Authenticate(ctx, token)
@@ -84,24 +78,6 @@ func StreamServerInterceptor(manager *Manager, log *zap.Logger) grpc.StreamServe
 
 		return handler(srv, wrapped)
 	}
-}
-
-// extractToken extracts the authentication token from gRPC metadata.
-//
-// Returns empty string if no token is present.
-func extractToken(ctx context.Context) string {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return ""
-	}
-
-	values := md.Get(authMetadataKey)
-	if len(values) == 0 {
-		return ""
-	}
-
-	// Return the first value (there should only be one).
-	return values[0]
 }
 
 // wrappedServerStream wraps grpc.ServerStream to override the Context()
