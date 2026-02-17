@@ -128,3 +128,43 @@ func (m *CountersService) Module(
 
 	return response, nil
 }
+
+func (m *CountersService) ModulePerf(
+	ctx context.Context,
+	request *ynpb.ModulePerfCountersRequest,
+) (*ynpb.ModulePerfCountersResponse, error) {
+	dpConfig := m.shm.DPConfig(m.instanceID)
+	perfCounters, err := dpConfig.ModulePerformanceCounters(
+		request.GetDevice(),
+		request.GetPipeline(),
+		request.GetFunction(),
+		request.GetChain(),
+		request.GetModuleType(),
+		request.GetModuleName(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ynpb.ModulePerfCountersResponse{
+		Counters: make([]*ynpb.ModulePerfCounter, 0, len(perfCounters)),
+	}
+
+	for _, counter := range perfCounters {
+		latencies := make([]*ynpb.ModulePerfLatency, 0, len(counter.LatencyRanges))
+		for _, latencyRange := range counter.LatencyRanges {
+			latencies = append(latencies, &ynpb.ModulePerfLatency{
+				MinLatency: uint32(latencyRange.MinLatency),
+				Batches:    latencyRange.Batches,
+			})
+		}
+
+		response.Counters = append(response.Counters, &ynpb.ModulePerfCounter{
+			MinBatchSize: uint32(counter.MinBatchSize),
+			MeanLatency:  uint64(counter.MeanLatency),
+			Latencies:    latencies,
+		})
+	}
+
+	return response, nil
+}

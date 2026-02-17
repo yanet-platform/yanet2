@@ -284,7 +284,7 @@ value_registry_free(struct value_registry *registry) {
 	}
 
 	if (registry->range_count) {
-		uint64_t capacity = 1 << uint64_log(registry->range_count);
+		uint64_t capacity = 1 << uint64_log_up(registry->range_count);
 
 		memory_bfree(
 			registry->memory_context,

@@ -6,6 +6,8 @@
 #include "dataplane/device/device.h"
 #include "dataplane/module/module.h"
 
+#include "cp_module.h"
+
 struct counter_storage;
 
 struct cp_module;
@@ -24,6 +26,13 @@ struct module_ectx {
 	uint64_t tx_counter_id;
 	uint64_t rx_bytes_counter_id;
 	uint64_t tx_bytes_counter_id;
+
+	// Runtime indices for the performance histogram counters.
+	// These indices map to the actual counter storage locations for
+	// the performance counters defined in cp_module->perf_counters_indices.
+	// Used during packet processing to efficiently access latency tracking
+	// histograms for different batch sizes.
+	uint64_t perf_counter_indices[CP_MODULE_PERF_COUNTERS];
 
 	struct counter_storage *counter_storage;
 	struct config_gen_ectx *config_gen_ectx;

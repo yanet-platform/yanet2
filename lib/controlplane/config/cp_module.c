@@ -2,6 +2,7 @@
 
 #include "common/container_of.h"
 
+#include "counters/counters.h"
 #include "dataplane/config/zone.h"
 
 #include "controlplane/agent/agent.h"
@@ -98,6 +99,30 @@ cp_module_init(
 			module_name
 		);
 		return -1;
+	}
+	for (size_t counter_idx = 0; counter_idx < CP_MODULE_PERF_COUNTERS;
+	     ++counter_idx) {
+		char name[16];
+		sprintf(name, "hist_%zu", counter_idx);
+		cp_module->perf_counters_indices[counter_idx] =
+			counter_registry_register(
+				&cp_module->counter_registry,
+				name,
+				1 + cp_module_perf_counter.linear_hists +
+					cp_module_perf_counter.exp_hists
+			);
+		if (cp_module->perf_counters_indices[counter_idx] ==
+		    COUNTER_INVALID) {
+			NEW_ERROR(
+				"failed to register histogram counter at index "
+				"%zu for module "
+				"'%s:%s'",
+				counter_idx,
+				module_type,
+				module_name
+			);
+			return -1;
+		}
 	}
 
 	uint64_t any_idx;
@@ -330,4 +355,105 @@ cp_module_registry_delete(
 size_t
 cp_module_registry_size(struct cp_module_registry *module_registry) {
 	return module_registry->registry.capacity;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+int
+cp_module_parse_performance_counter(
+	struct counter_handle *counter_handle,
+	size_t workers,
+	size_t *idx,
+	struct module_performance_counter *counter
+) {
+	// Validate inputs
+	if (counter_handle == NULL || idx == NULL || counter == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (workers == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	// Parse counter name to extract index (expecting "hist_N" format)
+	size_t counter_idx;
+	if (sscanf(counter_handle->name, "hist_%zu", &counter_idx) != 1) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	// Validate counter index is in valid range [0, 5]
+	if (counter_idx >= CP_MODULE_PERF_COUNTERS) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	// Calculate total number of histogram buckets
+	const size_t hist_buckets =
+		counters_hybrid_histogram_batches(&cp_module_perf_counter);
+
+	// Determine minimum batch size based on counter index
+	// Batch sizes: 1, 2-3, 4-7, 8-15, 16-31, 32+
+	const uint64_t batch_sizes[CP_MODULE_PERF_COUNTERS] = {
+		1, 2, 4, 8, 16, 32
+	};
+
+	// Allocate memory for latency ranges
+	counter->latency_ranges =
+		(struct module_performance_counter_latency_range *)malloc(
+			sizeof(struct module_performance_counter_latency_range
+			) *
+			hist_buckets
+		);
+
+	if (counter->latency_ranges == NULL) {
+		errno = ENOMEM;
+		return -1;
+	}
+
+	// Set counter metadata
+	counter->min_batch_size = batch_sizes[counter_idx];
+	counter->latency_ranges_count = hist_buckets;
+
+	size_t total_batches = 0;
+
+	// Fill in latency ranges and accumulate counter values across all
+	// workers
+	for (size_t range_idx = 0; range_idx < hist_buckets; ++range_idx) {
+		// Calculate minimum latency for this bucket
+		counter->latency_ranges[range_idx].min_latency =
+			counters_hybrid_histogram_batch_first_elem(
+				&cp_module_perf_counter, range_idx
+			);
+
+		// Accumulate counter values across all worker instances
+		uint64_t total = 0;
+		for (size_t worker_idx = 0; worker_idx < workers;
+		     ++worker_idx) {
+			uint64_t *counter_values = counter_handle_get_value(
+				counter_handle->value_handle, worker_idx
+			);
+			total += counter_values[1 + range_idx];
+		}
+		counter->latency_ranges[range_idx].batches = total;
+		total_batches += total;
+	}
+
+	// Calc mean latency
+	size_t total_ns = 0;
+	for (size_t worker_idx = 0; worker_idx < workers; ++worker_idx) {
+		uint64_t *counter_values = counter_handle_get_value(
+			counter_handle->value_handle, worker_idx
+		);
+		total_ns += counter_values[0];
+	}
+
+	counter->mean_latency = (float)(total_ns) / (float)total_batches;
+
+	// Set output index
+	*idx = counter_idx;
+
+	return 0;
 }

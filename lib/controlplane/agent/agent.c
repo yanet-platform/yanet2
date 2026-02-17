@@ -15,6 +15,7 @@
 #include "common/memory_block.h"
 #include "common/strutils.h"
 
+#include "controlplane/config/cp_module.h"
 #include "controlplane/config/zone.h"
 #include "controlplane/diag/diag.h"
 #include "dataplane/config/zone.h"
@@ -1786,4 +1787,98 @@ set_prev:
 	}
 
 	return 0;
+}
+
+int
+yanet_module_performance_counters(
+	struct module_performance_counters *counters,
+	struct dp_config *dp_config,
+	const char *device_name,
+	const char *pipeline_name,
+	const char *function_name,
+	const char *chain_name,
+	const char *module_type,
+	const char *module_name
+) {
+	if (counters == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	struct counter_handle_list *counter_list = yanet_get_module_counters(
+		dp_config,
+		device_name,
+		pipeline_name,
+		function_name,
+		chain_name,
+		module_type,
+		module_name,
+		NULL,
+		0
+	);
+
+	if (counter_list == NULL) {
+		errno = ENOENT;
+		return -1;
+	}
+
+	// Allocate memory for the performance counters structure
+	counters->counters_count = CP_MODULE_PERF_COUNTERS;
+	counters->counters = (struct module_performance_counter *)malloc(
+		sizeof(struct module_performance_counter) *
+		CP_MODULE_PERF_COUNTERS
+	);
+	if (counters->counters == NULL) {
+		yanet_counter_handle_list_free(counter_list);
+		errno = ENOMEM;
+		return -1;
+	}
+
+	// Parse each performance counter using the helper function
+	for (size_t i = 0; i < CP_MODULE_PERF_COUNTERS; ++i) {
+		struct counter_handle *counter_handle =
+			yanet_get_counter(counter_list, i);
+		if (counter_handle == NULL) {
+			// Clean up previously allocated memory
+			for (size_t j = 0; j < i; ++j) {
+				free(counters->counters[j].latency_ranges);
+			}
+			free(counters->counters);
+			yanet_counter_handle_list_free(counter_list);
+			errno = ENOENT;
+			return -1;
+		}
+
+		struct module_performance_counter counter;
+		size_t idx;
+		int result = cp_module_parse_performance_counter(
+			counter_handle,
+			counter_list->instance_count,
+			&idx,
+			&counter
+		);
+
+		if (result == 0) {
+			counters->counters[idx] = counter;
+		}
+	}
+
+	yanet_counter_handle_list_free(counter_list);
+	return 0;
+}
+
+void
+yanet_module_performance_counters_free(
+	struct module_performance_counters *counters
+) {
+	if (counters == NULL) {
+		return;
+	}
+
+	if (counters->counters != NULL) {
+		for (size_t i = 0; i < counters->counters_count; ++i) {
+			free(counters->counters[i].latency_ranges);
+		}
+		free(counters->counters);
+	}
 }

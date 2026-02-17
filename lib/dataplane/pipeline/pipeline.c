@@ -1,10 +1,17 @@
 #include "pipeline.h"
 
-#include "counters/utils.h"
+#include "common/numutils.h"
 
-#include "controlplane/config/zone.h"
+#include "controlplane/config/cp_device.h"
+#include "controlplane/config/cp_function.h"
+#include "controlplane/config/cp_module.h"
+#include "controlplane/config/cp_pipeline.h"
+#include "controlplane/config/econtext.h"
+#include "counters/histogram.h"
+
 #include "dataplane/config/zone.h"
 #include "dataplane/packet/packet.h"
+#include "dataplane/time/tsc.h"
 #include "lib/logging/log.h"
 
 #include <rte_cycles.h>
@@ -39,6 +46,8 @@ module_ectx_process(
 	struct packet_front *packet_front
 
 ) {
+	const size_t packets_count = packet_list_count(&packet_front->input);
+
 	for (struct packet *packet = packet_front->input.first; packet != NULL;
 	     packet = packet->next) {
 		packet->module_device_id = module_ectx_decode_device(
@@ -58,7 +67,28 @@ module_ectx_process(
 		packet_list_bytes_sum(&packet_front->input)
 	);
 
+	uint64_t tsc_start = rte_rdtsc();
 	module_ectx->handler(dp_worker, module_ectx, packet_front);
+	uint64_t tsc_end = rte_rdtsc();
+
+	// update counter for corresponding batch
+	uint64_t elapsed_ns = tsc_elapsed_ns(tsc_end - tsc_start);
+	if (packets_count > 0) {
+		size_t idx = uint64_log_up(packets_count);
+		size_t batch_idx = idx < CP_MODULE_PERF_COUNTERS
+					   ? idx
+					   : CP_MODULE_PERF_COUNTERS - 1;
+		size_t counter_idx =
+			module_ectx->perf_counter_indices[batch_idx];
+		size_t hist_idx = counters_hybrid_histogram_batch(
+			&cp_module_perf_counter, elapsed_ns
+		);
+		uint64_t *counter = counter_get_address(
+			counter_idx, dp_worker->idx, storage
+		);
+		counter[0] += elapsed_ns;
+		counter[1 + hist_idx] += 1;
+	}
 
 	counter_add_packets_bytes(
 		module_ectx->tx_counter_id,

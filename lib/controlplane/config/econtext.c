@@ -71,6 +71,9 @@ module_ectx_create(
 	module_ectx->tx_counter_id = cp_module->tx_counter_id;
 	module_ectx->rx_bytes_counter_id = cp_module->rx_bytes_counter_id;
 	module_ectx->tx_bytes_counter_id = cp_module->tx_bytes_counter_id;
+	memcpy(module_ectx->perf_counter_indices,
+	       cp_module->perf_counters_indices,
+	       sizeof(cp_module->perf_counters_indices));
 
 	SET_OFFSET_OF(&module_ectx->config_gen_ectx, config_gen_ectx);
 

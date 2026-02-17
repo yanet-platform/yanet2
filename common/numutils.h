@@ -1,18 +1,30 @@
 #pragma once
 
+#include "common/likely.h"
 #include <stdint.h>
 
+/// TODO: docs
 static inline uint64_t
-uint64_log(uint64_t value) {
-	if (value == 0)
+uint64_log_up(uint64_t value) {
+	if (unlikely(value == 0))
 		return 0;
 
 	return sizeof(long long) * 8 - __builtin_clzll(value) -
 	       !(value & (value - 1));
 }
 
+/// TODO: docs
+static inline uint64_t
+uint64_log_down(uint64_t value) {
+	if (unlikely(value == 0)) {
+		return 0;
+	}
+
+	return sizeof(long long) * 8 - 1 - __builtin_clzll(value);
+}
+
 /**
- * @brief Align number up to next power of 2
+ * @brief Align number up to next power of 2hhhhhhhhhhhdff
  * @param n Input number
  * @return Next power of 2, or 0 if overflow
  */
