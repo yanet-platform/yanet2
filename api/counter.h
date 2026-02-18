@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "lib/controlplane/diag/diag.h"
+
 struct dp_config;
 
 struct counter_value_handle;
@@ -175,7 +177,8 @@ yanet_module_performance_counters(
 	const char *function_name,
 	const char *chain_name,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	struct diag *diag
 );
 
 /**

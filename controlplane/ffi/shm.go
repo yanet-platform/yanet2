@@ -3,10 +3,12 @@ package ffi
 //#cgo CFLAGS: -I../../
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
+//#cgo LDFLAGS: -L../../build/lib/controlplane/diag -ldiag
 //#cgo LDFLAGS: -L../../build/lib/counters -lcounters
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
 //#include "api/agent.h"
 //#include "api/counter.h"
+//#include "lib/controlplane/diag/diag.h"
 import "C"
 import (
 	"fmt"
@@ -610,6 +612,10 @@ func (m *DPConfig) ModulePerformanceCounters(
 	cModuleName := C.CString(moduleName)
 	defer C.free(unsafe.Pointer(cModuleName))
 
+	// Create diag struct for error reporting
+	var diag C.struct_diag
+	C.diag_reset(&diag)
+
 	var counters C.struct_module_performance_counters
 	rc := C.yanet_module_performance_counters(
 		&counters,
@@ -620,10 +626,17 @@ func (m *DPConfig) ModulePerformanceCounters(
 		cChainName,
 		cModuleType,
 		cModuleName,
+		&diag,
 	)
 	defer C.yanet_module_performance_counters_free(&counters)
 
 	if rc != 0 {
+		// Extract error message from diag
+		errMsg := C.diag_msg(&diag)
+		if errMsg != nil {
+			defer C.free(unsafe.Pointer(errMsg))
+			return nil, fmt.Errorf("failed to get module performance counters: %s", C.GoString(errMsg))
+		}
 		return nil, fmt.Errorf("failed to get module performance counters")
 	}
 
