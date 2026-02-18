@@ -11,6 +11,7 @@ require (
 	github.com/siderolabs/grpc-proxy v0.5.1
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.11.1
+	github.com/stripe/krl v0.0.0-20250403164848-fcf8101b2f53
 	github.com/vishvananda/netlink v1.3.1
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.47.0

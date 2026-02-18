@@ -17,6 +17,9 @@ type Config struct {
 	BasicAuth BasicAuthConfig `yaml:"basic_auth"`
 	// SSHKey is the configuration for SSH Key Authentication.
 	SSHKey SSHKeyConfig `yaml:"ssh_key"`
+	// SSHCert is the configuration for SSH Certificate
+	// Authentication.
+	SSHCert SSHCertConfig `yaml:"ssh_cert"`
 	// PermissionsPath is the path to the permissions YAML file.
 	PermissionsPath string `yaml:"permissions_path"`
 }
@@ -44,6 +47,29 @@ type SSHKeyConfig struct {
 	//
 	// Default: 5s.
 	TimeWindow time.Duration `yaml:"time_window"`
+}
+
+// SSHCertConfig configures SSH Certificate Authentication.
+type SSHCertConfig struct {
+	// CASource is the path or URL to the CA public keys YAML file.
+	//
+	// Sources starting with "http://" or "https://" use HTTP, otherwise the
+	// source is treated as a file path.
+	CASource string `yaml:"ca_source"`
+	// KRLSource is the path or URL to the OpenSSH KRL file (optional).
+	//
+	// Sources starting with "http://" or "https://" use HTTP, otherwise the
+	// source is treated as a file path.
+	KRLSource string `yaml:"krl_source"`
+	// TimeWindow is the timestamp tolerance window for replay protection.
+	//
+	// Default: 5s.
+	TimeWindow time.Duration `yaml:"time_window"`
+	// RefreshInterval is the polling interval for reloading CA and KRL data
+	// from their sources.
+	//
+	// Default: 5m.
+	RefreshInterval time.Duration `yaml:"refresh_interval"`
 }
 
 // DefaultConfig returns the default authentication configuration.

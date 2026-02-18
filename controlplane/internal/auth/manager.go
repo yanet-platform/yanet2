@@ -12,6 +12,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/none"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/permission"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/rbac"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshcert"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshkey"
 )
 
@@ -142,6 +143,40 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 		sshKeyAuth := sshkey.NewAuthenticator(keyStore, compositeIdentityProvider, sshkeyOpts...)
 		m.authenticators = append(m.authenticators, sshKeyAuth)
 		log.Info("registered authenticator", zap.String("type", "sshkey"))
+	}
+
+	// Create SSHCertAuthenticator if CA source configured.
+	if cfg.SSHCert.CASource != "" {
+		caLoader := sshcert.NewLoader(cfg.SSHCert.CASource)
+		caStore, err := sshcert.NewCAStoreFromLoader(caLoader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SSH cert CA store: %w", err)
+		}
+
+		var revChecker sshcert.RevocationChecker = sshcert.NewNopRevocationChecker()
+		if cfg.SSHCert.KRLSource != "" {
+			krlLoader := sshcert.NewLoader(cfg.SSHCert.KRLSource)
+			revChecker, err = sshcert.NewKRLRevocationCheckerFromLoader(krlLoader)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create SSH cert revocation checker: %w", err)
+			}
+		}
+
+		sshcertOpts := []sshcert.Option{
+			sshcert.WithLog(log),
+		}
+		if cfg.SSHCert.TimeWindow > 0 {
+			sshcertOpts = append(sshcertOpts, sshcert.WithTimeWindow(cfg.SSHCert.TimeWindow))
+		}
+		if cfg.SSHCert.RefreshInterval > 0 {
+			sshcertOpts = append(sshcertOpts, sshcert.WithRefreshInterval(cfg.SSHCert.RefreshInterval))
+		}
+
+		sshCertAuth := sshcert.NewAuthenticator(
+			caStore, revChecker, compositeIdentityProvider, sshcertOpts...,
+		)
+		m.authenticators = append(m.authenticators, sshCertAuth)
+		log.Info("registered authenticator", zap.String("type", "sshcert"))
 	}
 
 	// Create BasicAuthenticator if credentials path configured.
