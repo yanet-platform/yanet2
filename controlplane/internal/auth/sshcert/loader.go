@@ -16,10 +16,19 @@ type Loader interface {
 //
 // Sources starting with "http://" or "https://" use HTTP, otherwise
 // the source is treated as a file path.
+//
+// Sources ending with ".zst" are automatically decompressed with zstd.
 func NewLoader(source string) Loader {
+	var loader Loader
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		return &httpLoader{url: source}
+		loader = &httpLoader{url: source}
+	} else {
+		loader = &fileLoader{path: source}
 	}
 
-	return &fileLoader{path: source}
+	if strings.HasSuffix(source, ".zst") {
+		loader = &zstdLoader{wrapped: loader}
+	}
+
+	return loader
 }
