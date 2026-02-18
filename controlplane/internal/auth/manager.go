@@ -3,8 +3,11 @@ package auth
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/basic"
@@ -17,11 +20,9 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshkey"
 )
 
-// AuthenticatorFactory creates an Authenticator from a raw YAML
-// config node and shared dependencies.
+// AuthenticatorFactory creates an Authenticator from a raw YAML config node.
 type AuthenticatorFactory func(
 	rawCfg *yaml.Node,
-	idp identity.Provider,
 	log *zap.Logger,
 ) (core.Authenticator, error)
 
@@ -65,10 +66,11 @@ func WithLog(log *zap.Logger) ManagerOption {
 
 // Manager orchestrates authentication and authorization.
 type Manager struct {
-	authenticators []core.Authenticator
-	authorizer     Authorizer
-	disabled       bool
-	log            *zap.Logger
+	authenticators   []core.Authenticator
+	identityProvider identity.Provider
+	authorizer       Authorizer
+	disabled         bool
+	log              *zap.Logger
 }
 
 // NewManager creates a new auth Manager.
@@ -124,7 +126,7 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 		return nil, fmt.Errorf("no identity providers configured")
 	}
 
-	compositeIdentityProvider := identity.NewCompositeIdentityProvider(
+	m.identityProvider = identity.NewCompositeIdentityProvider(
 		identityProviders,
 		identity.WithLog(log),
 	)
@@ -154,11 +156,7 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 			return nil, fmt.Errorf("unknown authenticator type: %q", entry.Type)
 		}
 
-		auth, err := factory(
-			&entry.Config,
-			compositeIdentityProvider,
-			log,
-		)
+		auth, err := factory(&entry.Config, log)
 		if err != nil {
 			return nil, fmt.Errorf("failed to init %q authenticator: %w", entry.Type, err)
 		}
@@ -188,17 +186,70 @@ func (m *Manager) Authenticate(
 ) (*core.Principal, error) {
 	// Iterate through authenticators, first match wins.
 	for _, auth := range m.authenticators {
-		if auth.IsTokenSupported(token) {
-			m.log.Debug("authenticating with authenticator",
-				zap.String("authenticator", auth.Name()),
-			)
-			return auth.Authenticate(ctx, token, reqInfo)
+		if !auth.IsTokenSupported(token) {
+			continue
 		}
+
+		m.log.Debug("authenticating with authenticator",
+			zap.String("authenticator", auth.Name()),
+		)
+
+		authInfo, err := auth.Authenticate(ctx, token, reqInfo)
+		if err != nil {
+			return nil, err
+		}
+
+		return m.buildPrincipal(ctx, authInfo)
 	}
 
 	// This shouldn't happen with NoneAuthenticator registered, because it
 	// accepts everything.
 	return nil, fmt.Errorf("no authenticator supports the given token")
+}
+
+// buildPrincipal resolves the identity and assembles a Principal from AuthInfo.
+func (m *Manager) buildPrincipal(
+	ctx context.Context,
+	authInfo *core.AuthInfo,
+) (*core.Principal, error) {
+	// Anonymous path: skip identity resolution.
+	if authInfo.AuthMethod == "none" {
+		return &core.Principal{
+			User:        authInfo.Username,
+			Groups:      []string{},
+			AuthMethod:  authInfo.AuthMethod,
+			AuthTime:    time.Now(),
+			IsAnonymous: true,
+		}, nil
+	}
+
+	if m.identityProvider == nil {
+		return nil, fmt.Errorf("no identity provider configured")
+	}
+
+	ident, err := m.identityProvider.GetIdentity(ctx, authInfo.Username)
+	if err != nil {
+		return nil, status.Errorf(
+			codes.Unauthenticated,
+			"identity lookup failed for user %q: %v",
+			authInfo.Username, err,
+		)
+	}
+
+	if ident.Disabled {
+		return nil, status.Errorf(
+			codes.Unauthenticated,
+			"account %q is disabled", authInfo.Username,
+		)
+	}
+
+	return &core.Principal{
+		User:        ident.Username,
+		Groups:      ident.Groups,
+		AuthMethod:  authInfo.AuthMethod,
+		AuthTime:    time.Now(),
+		IsAnonymous: false,
+	}, nil
 }
 
 // Authorize checks if the principal has permission to execute the given

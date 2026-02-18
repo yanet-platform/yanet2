@@ -57,33 +57,21 @@ func TestNoneAuthenticator_Authenticate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			requestInfo := &core.RequestInfo{FullMethod: "/test.Service/Method"}
-			principal, err := auth.Authenticate(ctx, tt.token, requestInfo)
+			authInfo, err := auth.Authenticate(ctx, tt.token, requestInfo)
 			if err != nil {
 				t.Fatalf("Authenticate() error = %v, want nil", err)
 			}
 
-			if principal == nil {
-				t.Fatal("Authenticate() returned nil principal")
+			if authInfo == nil {
+				t.Fatal("Authenticate() returned nil authInfo")
 			}
 
-			if principal.User != "anonymous" {
-				t.Errorf("principal.User = %q, want %q", principal.User, "anonymous")
+			if authInfo.Username != "anonymous" {
+				t.Errorf("authInfo.Username = %q, want %q", authInfo.Username, "anonymous")
 			}
 
-			if len(principal.Groups) != 0 {
-				t.Errorf("principal.Groups = %v, want empty", principal.Groups)
-			}
-
-			if principal.AuthMethod != "none" {
-				t.Errorf("principal.AuthMethod = %q, want %q", principal.AuthMethod, "none")
-			}
-
-			if !principal.IsAnonymous {
-				t.Error("principal.IsAnonymous = false, want true")
-			}
-
-			if principal.AuthTime.IsZero() {
-				t.Error("principal.AuthTime is zero, want non-zero")
+			if authInfo.AuthMethod != "none" {
+				t.Errorf("authInfo.AuthMethod = %q, want %q", authInfo.AuthMethod, "none")
 			}
 		})
 	}

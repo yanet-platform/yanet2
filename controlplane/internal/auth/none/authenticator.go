@@ -2,13 +2,12 @@ package none
 
 import (
 	"context"
-	"time"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 // NoneAuthenticator implements authentication that always succeeds with
-// anonymous principal.
+// anonymous identity.
 //
 // This is used for transitional/testing scenarios and when auth is disabled.
 type NoneAuthenticator struct{}
@@ -28,18 +27,14 @@ func (m *NoneAuthenticator) IsTokenSupported(token string) bool {
 	return true
 }
 
-// Authenticate always succeeds and returns an anonymous principal with full
-// permissions.
+// Authenticate always succeeds and returns anonymous authentication info.
 func (m *NoneAuthenticator) Authenticate(
 	ctx context.Context,
 	token string,
 	reqInfo *core.RequestInfo,
-) (*core.Principal, error) {
-	return &core.Principal{
-		User:        "anonymous",
-		Groups:      []string{},
-		AuthMethod:  "none",
-		AuthTime:    time.Now(),
-		IsAnonymous: true,
+) (*core.AuthInfo, error) {
+	return &core.AuthInfo{
+		Username:   "anonymous",
+		AuthMethod: "none",
 	}, nil
 }

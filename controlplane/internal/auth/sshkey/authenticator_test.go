@@ -12,11 +12,10 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/identity"
 )
 
-// setupAuthenticator creates an Authenticator with generated keys and
-// identities, returning the authenticator and per-user signers.
+// setupAuthenticator creates an Authenticator with generated keys,
+// returning the authenticator and per-user signers.
 func setupAuthenticator(t *testing.T) (*Authenticator, map[string]ssh.Signer) {
 	t.Helper()
 
@@ -45,14 +44,7 @@ func setupAuthenticator(t *testing.T) (*Authenticator, map[string]ssh.Signer) {
 		},
 	})
 
-	identityProvider := identity.NewIdentityProvider(map[string]identity.Identity{
-		"alice":         {Username: "alice", Groups: []string{"admins"}},
-		"bob":           {Username: "bob", Groups: []string{"operators"}},
-		"charlie":       {Username: "charlie", Groups: []string{"readers"}},
-		"disabled_user": {Username: "disabled_user", Disabled: true},
-	})
-
-	auth := NewAuthenticator(keyStore, identityProvider,
+	auth := NewAuthenticator(keyStore,
 		WithTimeWindow(5*time.Second),
 	)
 
@@ -96,12 +88,10 @@ func TestAuthenticate_Ed25519(t *testing.T) {
 
 	token := signToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
 
-	principal, err := auth.Authenticate(context.Background(), token, reqInfo)
+	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
 	require.NoError(t, err)
-	assert.Equal(t, "alice", principal.User)
-	assert.Equal(t, []string{"admins"}, principal.Groups)
-	assert.Equal(t, "sshkey", principal.AuthMethod)
-	assert.False(t, principal.IsAnonymous)
+	assert.Equal(t, "alice", authInfo.Username)
+	assert.Equal(t, "sshkey", authInfo.AuthMethod)
 }
 
 func TestAuthenticate_RSA(t *testing.T) {
@@ -113,10 +103,10 @@ func TestAuthenticate_RSA(t *testing.T) {
 
 	token := signToken(t, signers["bob"], "bob", method, now.UnixNano(), "nonce-1")
 
-	principal, err := auth.Authenticate(context.Background(), token, reqInfo)
+	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
 	require.NoError(t, err)
-	assert.Equal(t, "bob", principal.User)
-	assert.Equal(t, []string{"operators"}, principal.Groups)
+	assert.Equal(t, "bob", authInfo.Username)
+	assert.Equal(t, "sshkey", authInfo.AuthMethod)
 }
 
 func TestAuthenticate_ECDSA(t *testing.T) {
@@ -128,10 +118,10 @@ func TestAuthenticate_ECDSA(t *testing.T) {
 
 	token := signToken(t, signers["charlie"], "charlie", method, now.UnixNano(), "nonce-1")
 
-	principal, err := auth.Authenticate(context.Background(), token, reqInfo)
+	authInfo, err := auth.Authenticate(context.Background(), token, reqInfo)
 	require.NoError(t, err)
-	assert.Equal(t, "charlie", principal.User)
-	assert.Equal(t, []string{"readers"}, principal.Groups)
+	assert.Equal(t, "charlie", authInfo.Username)
+	assert.Equal(t, "sshkey", authInfo.AuthMethod)
 }
 
 func TestAuthenticate_ExpiredTimestamp(t *testing.T) {
@@ -198,50 +188,6 @@ func TestAuthenticate_WrongSignature(t *testing.T) {
 	)
 }
 
-func TestAuthenticate_DisabledIdentity(t *testing.T) {
-	signer := generateEd25519Signer(t)
-
-	keyStore := NewKeyStore(map[string][]KeyEntry{
-		"alice": {
-			{PublicKey: signer.PublicKey(), Comment: "key"},
-		},
-	})
-
-	identityProvider := identity.NewIdentityProvider(map[string]identity.Identity{
-		"alice": {Username: "alice", Disabled: true},
-	})
-
-	auth := NewAuthenticator(keyStore, identityProvider)
-
-	method := "/test.Service/Method"
-	reqInfo := &core.RequestInfo{FullMethod: method}
-	now := time.Now()
-
-	token := signToken(t, signer, "alice", method, now.UnixNano(), "nonce-1")
-
-	_, err := auth.Authenticate(context.Background(), token, reqInfo)
-	requireGRPCError(t, err, codes.Unauthenticated,
-		`account "alice" is disabled`,
-	)
-}
-
-func TestAuthenticate_DisabledIdentityNoKeys(t *testing.T) {
-	auth, signers := setupAuthenticator(t)
-
-	now := time.Now()
-	method := "/test.Service/TestMethod"
-	reqInfo := &core.RequestInfo{FullMethod: method}
-
-	// disabled_user exists in identities but has no keys in the
-	// key store, so it fails on key lookup.
-	token := signToken(t, signers["alice"], "disabled_user", method, now.UnixNano(), "nonce-1")
-
-	_, err := auth.Authenticate(context.Background(), token, reqInfo)
-	requireGRPCError(t, err, codes.Unauthenticated,
-		`no SSH keys found for user "disabled_user"`,
-	)
-}
-
 func TestAuthenticate_InvalidTokenFormat(t *testing.T) {
 	auth, _ := setupAuthenticator(t)
 	reqInfo := &core.RequestInfo{FullMethod: "/test.Service/TestMethod"}
@@ -260,9 +206,9 @@ func TestAuthenticate_NilRequestInfo(t *testing.T) {
 
 	token := signToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
 
-	principal, err := auth.Authenticate(context.Background(), token, nil)
+	authInfo, err := auth.Authenticate(context.Background(), token, nil)
 	require.NoError(t, err)
-	assert.Equal(t, "alice", principal.User)
+	assert.Equal(t, "alice", authInfo.Username)
 }
 
 func TestAuthenticate_EmptyFullMethod(t *testing.T) {
@@ -274,7 +220,7 @@ func TestAuthenticate_EmptyFullMethod(t *testing.T) {
 	token := signToken(t, signers["alice"], "alice", method, now.UnixNano(), "nonce-1")
 
 	emptyReqInfo := &core.RequestInfo{}
-	principal, err := auth.Authenticate(context.Background(), token, emptyReqInfo)
+	authInfo, err := auth.Authenticate(context.Background(), token, emptyReqInfo)
 	require.NoError(t, err)
-	assert.Equal(t, "alice", principal.User)
+	assert.Equal(t, "alice", authInfo.Username)
 }

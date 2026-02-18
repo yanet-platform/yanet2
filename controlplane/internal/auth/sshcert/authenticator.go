@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/identity"
 )
 
 const (
@@ -30,7 +29,6 @@ const (
 type Authenticator struct {
 	caStore           *CAStore
 	revocationChecker RevocationChecker
-	identityProvider  identity.Provider
 	timeWindow        time.Duration
 	refreshInterval   time.Duration
 	stopCh            chan struct{}
@@ -79,7 +77,6 @@ func WithLog(log *zap.Logger) Option {
 func NewAuthenticator(
 	caStore *CAStore,
 	revocationChecker RevocationChecker,
-	identityProvider identity.Provider,
 	opts ...Option,
 ) *Authenticator {
 	options := newAuthenticatorOptions()
@@ -90,7 +87,6 @@ func NewAuthenticator(
 	a := &Authenticator{
 		caStore:           caStore,
 		revocationChecker: revocationChecker,
-		identityProvider:  identityProvider,
 		timeWindow:        options.TimeWindow,
 		refreshInterval:   options.RefreshInterval,
 		log:               options.Log,
@@ -113,8 +109,8 @@ func (m *Authenticator) IsTokenSupported(token string) bool {
 	return strings.HasPrefix(strings.ToLower(token), tokenPrefix)
 }
 
-// Authenticate validates the SSH certificate token and returns the
-// authenticated Principal.
+// Authenticate validates the SSH certificate token and returns authentication
+// info.
 //
 // Verification steps:
 //  1. Parse and validate token fields.
@@ -128,13 +124,12 @@ func (m *Authenticator) IsTokenSupported(token string) bool {
 //  9. Check KRL.
 //  10. Extract username from principals.
 //  11. Verify token signature.
-//  12. Look up identity (groups, disabled status).
-//  13. Return Principal.
+//  12. Return AuthInfo with the username.
 func (m *Authenticator) Authenticate(
 	ctx context.Context,
 	rawToken string,
 	reqInfo *core.RequestInfo,
-) (*core.Principal, error) {
+) (*core.AuthInfo, error) {
 	token, err := parseToken(rawToken)
 	if err != nil {
 		return nil, status.Errorf(
@@ -219,34 +214,15 @@ func (m *Authenticator) Authenticate(
 		)
 	}
 
-	ident, err := m.identityProvider.GetIdentity(ctx, username)
-	if err != nil {
-		return nil, status.Errorf(
-			codes.Unauthenticated,
-			"identity lookup failed for user %q: %v",
-			username, err,
-		)
-	}
-
-	if ident.Disabled {
-		return nil, status.Errorf(
-			codes.Unauthenticated,
-			"account %q is disabled", username,
-		)
-	}
-
 	m.log.Debug("sshcert authentication successful",
 		zap.String("username", username),
 		zap.String("method", token.Method),
 		zap.Uint64("cert_serial", cert.Serial),
 	)
 
-	return &core.Principal{
-		User:        ident.Username,
-		Groups:      ident.Groups,
-		AuthMethod:  "sshcert",
-		AuthTime:    time.Now(),
-		IsAnonymous: false,
+	return &core.AuthInfo{
+		Username:   username,
+		AuthMethod: "sshcert",
 	}, nil
 }
 

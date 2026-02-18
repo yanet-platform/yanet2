@@ -7,14 +7,11 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/identity"
 )
 
-// NewFromConfig creates an SSH certificate Authenticator from a raw YAML
-// config node and shared dependencies.
+// NewFromConfig creates an SSH certificate Authenticator from a raw YAML.
 func NewFromConfig(
 	rawCfg *yaml.Node,
-	idp identity.Provider,
 	log *zap.Logger,
 ) (core.Authenticator, error) {
 	var cfg Config
@@ -53,7 +50,5 @@ func NewFromConfig(
 		opts = append(opts, WithRefreshInterval(cfg.RefreshInterval))
 	}
 
-	return NewAuthenticator(
-		caStore, revChecker, idp, opts...,
-	), nil
+	return NewAuthenticator(caStore, revChecker, opts...), nil
 }

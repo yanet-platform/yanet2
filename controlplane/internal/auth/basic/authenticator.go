@@ -4,29 +4,22 @@ import (
 	"context"
 	"encoding/base64"
 	"strings"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/identity"
 )
 
 // BasicAuthenticator implements Basic Auth (username:password in base64).
 type BasicAuthenticator struct {
-	credentialStore  CredentialStore
-	identityProvider identity.Provider
+	credentialStore CredentialStore
 }
 
 // NewBasicAuthenticator creates a new BasicAuthenticator.
-func NewBasicAuthenticator(
-	credentialStore CredentialStore,
-	identityProvider identity.Provider,
-) *BasicAuthenticator {
+func NewBasicAuthenticator(credentialStore CredentialStore) *BasicAuthenticator {
 	return &BasicAuthenticator{
-		credentialStore:  credentialStore,
-		identityProvider: identityProvider,
+		credentialStore: credentialStore,
 	}
 }
 
@@ -45,7 +38,7 @@ func (m *BasicAuthenticator) Authenticate(
 	ctx context.Context,
 	token string,
 	reqInfo *core.RequestInfo,
-) (*core.Principal, error) {
+) (*core.AuthInfo, error) {
 	// Extract base64 part.
 	parts := strings.SplitN(token, " ", 2)
 	if len(parts) != 2 {
@@ -72,23 +65,8 @@ func (m *BasicAuthenticator) Authenticate(
 		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
 	}
 
-	// Get identity (groups, disabled status).
-	identity, err := m.identityProvider.GetIdentity(ctx, username)
-	if err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "identity lookup failed: %v", err)
-	}
-
-	// Check if account is disabled.
-	if identity.Disabled {
-		return nil, status.Error(codes.Unauthenticated, "account is disabled")
-	}
-
-	// Create principal.
-	return &core.Principal{
-		User:        identity.Username,
-		Groups:      identity.Groups,
-		AuthMethod:  "basic",
-		AuthTime:    time.Now(),
-		IsAnonymous: false,
+	return &core.AuthInfo{
+		Username:   username,
+		AuthMethod: "basic",
 	}, nil
 }

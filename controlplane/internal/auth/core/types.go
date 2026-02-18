@@ -14,6 +14,17 @@ type RequestInfo struct {
 	FullMethod string
 }
 
+// AuthInfo contains the result of token validation by an authenticator.
+//
+// It carries only the information that the authenticator can extract from the
+// token itself.
+type AuthInfo struct {
+	// Username is the authenticated username extracted from the token.
+	Username string
+	// AuthMethod is the authentication method used.
+	AuthMethod string
+}
+
 // Principal represents an authenticated identity with their authorization
 // context.
 //

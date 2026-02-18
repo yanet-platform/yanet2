@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/identity"
 )
 
 const (
@@ -23,10 +22,9 @@ const (
 // It verifies tokens signed with SSH private keys against known public
 // keys, with method binding and timestamp-based replay protection.
 type Authenticator struct {
-	keyStore         *KeyStore
-	identityProvider identity.Provider
-	timeWindow       time.Duration
-	log              *zap.Logger
+	keyStore   *KeyStore
+	timeWindow time.Duration
+	log        *zap.Logger
 }
 
 type authenticatorOptions struct {
@@ -59,21 +57,16 @@ func WithTimeWindow(d time.Duration) Option {
 }
 
 // NewAuthenticator creates a new SSH key Authenticator.
-func NewAuthenticator(
-	keyStore *KeyStore,
-	identityProvider identity.Provider,
-	opts ...Option,
-) *Authenticator {
+func NewAuthenticator(keyStore *KeyStore, opts ...Option) *Authenticator {
 	options := newAuthenticatorOptions()
 	for _, o := range opts {
 		o(options)
 	}
 
 	return &Authenticator{
-		keyStore:         keyStore,
-		identityProvider: identityProvider,
-		timeWindow:       options.TimeWindow,
-		log:              options.Log,
+		keyStore:   keyStore,
+		timeWindow: options.TimeWindow,
+		log:        options.Log,
 	}
 }
 
@@ -87,8 +80,7 @@ func (m *Authenticator) IsTokenSupported(token string) bool {
 	return strings.HasPrefix(strings.ToLower(token), tokenPrefix)
 }
 
-// Authenticate validates the SSH key token and returns the authenticated
-// Principal.
+// Authenticate validates the SSH key token and returns authentication info.
 //
 // Verification steps:
 //  1. Parse and validate token fields.
@@ -96,13 +88,12 @@ func (m *Authenticator) IsTokenSupported(token string) bool {
 //  3. Check method binding (token.Method == reqInfo.FullMethod).
 //  4. Look up public keys for the username.
 //  5. Verify SSH signature against known keys.
-//  6. Look up identity (groups, disabled status).
-//  7. Return Principal.
+//  6. Return AuthInfo with the username.
 func (m *Authenticator) Authenticate(
 	ctx context.Context,
 	rawToken string,
 	reqInfo *core.RequestInfo,
-) (*core.Principal, error) {
+) (*core.AuthInfo, error) {
 	token, err := parseToken(rawToken)
 	if err != nil {
 		return nil, status.Errorf(
@@ -141,33 +132,14 @@ func (m *Authenticator) Authenticate(
 		)
 	}
 
-	ident, err := m.identityProvider.GetIdentity(ctx, token.Username)
-	if err != nil {
-		return nil, status.Errorf(
-			codes.Unauthenticated,
-			"identity lookup failed for user %q: %v",
-			token.Username, err,
-		)
-	}
-
-	if ident.Disabled {
-		return nil, status.Errorf(
-			codes.Unauthenticated,
-			"account %q is disabled", token.Username,
-		)
-	}
-
 	m.log.Debug("sshkey authentication successful",
 		zap.String("username", token.Username),
 		zap.String("method", token.Method),
 	)
 
-	return &core.Principal{
-		User:        ident.Username,
-		Groups:      ident.Groups,
-		AuthMethod:  "sshkey",
-		AuthTime:    time.Now(),
-		IsAnonymous: false,
+	return &core.AuthInfo{
+		Username:   token.Username,
+		AuthMethod: "sshkey",
 	}, nil
 }
 
