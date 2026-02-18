@@ -118,8 +118,23 @@ message ModulePerfCounter {
 // Returns performance metrics for all 6 batch size ranges tracked by the
 // module: 1, 2-3, 4-7, 8-15, 16-31, and 32+ packets. Each counter includes
 // mean latency and a detailed histogram of latency measurements.
+//
+// Additionally includes aggregated tx/rx packet and byte counters that track
+// the total traffic processed by the module across all worker threads.
 message ModulePerfCountersResponse {
 	// Performance counters for each batch size range, ordered by
 	// min_batch_size
 	repeated ModulePerfCounter counters = 1;
+
+	// Total number of packets transmitted by the module across all workers
+	uint64 tx = 2;
+
+	// Total number of packets received by the module across all workers
+	uint64 rx = 3;
+
+	// Total number of bytes transmitted by the module across all workers
+	uint64 tx_bytes = 4;
+
+	// Total number of bytes received by the module across all workers
+	uint64 rx_bytes = 5;
 }

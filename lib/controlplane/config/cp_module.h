@@ -308,3 +308,35 @@ cp_module_parse_performance_counter(
 	size_t *idx,
 	struct module_performance_counter *counter
 );
+
+/**
+ * Parse raw tx/rx counter data and aggregate across workers.
+ *
+ * This function checks if the provided counter handle corresponds to one of
+ * the module's tx/rx counters (tx, rx, tx_bytes, rx_bytes). If it matches,
+ * the function aggregates the counter values across all worker threads and
+ * stores the result in the appropriate output parameter.
+ *
+ * The function is designed to be called iteratively for each counter in a
+ * module's counter list, allowing selective processing of tx/rx counters
+ * while ignoring other counter types.
+ *
+ * @param counter_handle Handle to the raw counter data from the registry
+ * @param workers Number of worker threads to aggregate data from
+ * @param tx Output parameter for aggregated tx packet counter
+ * @param rx Output parameter for aggregated rx packet counter
+ * @param tx_bytes Output parameter for aggregated tx bytes counter
+ * @param rx_bytes Output parameter for aggregated rx bytes counter
+ * @return 0 on success (counter matched and aggregated),
+ *         1 if counter name doesn't match any tx/rx counter (not an error),
+ *         -1 on failure (sets errno to EINVAL for invalid parameters)
+ */
+int
+cp_module_parse_tx_rx(
+	struct counter_handle *counter_handle,
+	size_t workers,
+	uint64_t *tx,
+	uint64_t *rx,
+	uint64_t *tx_bytes,
+	uint64_t *rx_bytes
+);

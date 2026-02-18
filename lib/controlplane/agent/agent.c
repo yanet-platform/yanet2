@@ -1822,6 +1822,12 @@ yanet_module_performance_counters(
 		return -1;
 	}
 
+	// Initialize tx/rx fields to 0
+	counters->tx = 0;
+	counters->rx = 0;
+	counters->tx_bytes = 0;
+	counters->rx_bytes = 0;
+
 	// Allocate memory for the performance counters structure
 	counters->counters_count = CP_MODULE_PERF_COUNTERS;
 	counters->counters = (struct module_performance_counter *)malloc(
@@ -1834,21 +1840,21 @@ yanet_module_performance_counters(
 		return -1;
 	}
 
-	// Parse each performance counter using the helper function
-	for (size_t i = 0; i < CP_MODULE_PERF_COUNTERS; ++i) {
+	// Initialize counters array to avoid uninitialized memory
+	memset(counters->counters,
+	       0,
+	       sizeof(struct module_performance_counter) *
+		       CP_MODULE_PERF_COUNTERS);
+
+	// Parse all counters - both performance histograms and tx/rx counters
+	for (size_t i = 0; i < counter_list->count; ++i) {
 		struct counter_handle *counter_handle =
 			yanet_get_counter(counter_list, i);
 		if (counter_handle == NULL) {
-			// Clean up previously allocated memory
-			for (size_t j = 0; j < i; ++j) {
-				free(counters->counters[j].latency_ranges);
-			}
-			free(counters->counters);
-			yanet_counter_handle_list_free(counter_list);
-			errno = ENOENT;
-			return -1;
+			continue;
 		}
 
+		// Try parsing as performance counter (hist_0 through hist_5)
 		struct module_performance_counter counter;
 		size_t idx;
 		int result = cp_module_parse_performance_counter(
@@ -1859,7 +1865,23 @@ yanet_module_performance_counters(
 		);
 
 		if (result == 0) {
+			// Successfully parsed as performance counter
 			counters->counters[idx] = counter;
+		} else {
+			// Try parsing as tx/rx counter
+			result = cp_module_parse_tx_rx(
+				counter_handle,
+				counter_list->instance_count,
+				&counters->tx,
+				&counters->rx,
+				&counters->tx_bytes,
+				&counters->rx_bytes
+			);
+			// If result == 1, it's neither a performance counter
+			// nor tx/rx counter If result == 0, we successfully
+			// parsed and populated the tx/rx fields If result ==
+			// -1, there was an error (but we continue processing
+			// other counters)
 		}
 	}
 

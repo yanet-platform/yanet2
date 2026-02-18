@@ -575,11 +575,20 @@ type ModulePerformanceCounter struct {
 	LatencyRanges []ModulePerformanceCounterLatencyRange
 }
 
+// ModulePerformanceCounters represents all performance counters for a module.
+type ModulePerformanceCounters struct {
+	Counters []ModulePerformanceCounter
+	Tx       uint64
+	Rx       uint64
+	TxBytes  uint64
+	RxBytes  uint64
+}
+
 // ModulePerformanceCounters retrieves performance counters for a specific module.
 //
 // Performance counters provide detailed timing and batch processing statistics
 // for module execution, including mean latency and latency distribution across
-// different batch sizes.
+// different batch sizes, as well as tx/rx packet and byte counters.
 func (m *DPConfig) ModulePerformanceCounters(
 	deviceName string,
 	pipelineName string,
@@ -587,7 +596,7 @@ func (m *DPConfig) ModulePerformanceCounters(
 	chainName string,
 	moduleType string,
 	moduleName string,
-) ([]ModulePerformanceCounter, error) {
+) (*ModulePerformanceCounters, error) {
 	cDeviceName := C.CString(deviceName)
 	defer C.free(unsafe.Pointer(cDeviceName))
 	cPipelineName := C.CString(pipelineName)
@@ -618,12 +627,12 @@ func (m *DPConfig) ModulePerformanceCounters(
 		return nil, fmt.Errorf("failed to get module performance counters")
 	}
 
-	result := make([]ModulePerformanceCounter, counters.counters_count)
+	perfCounters := make([]ModulePerformanceCounter, counters.counters_count)
 
 	// Convert C array to Go slice for iteration
 	cCounters := unsafe.Slice(counters.counters, counters.counters_count)
 
-	for i := range result {
+	for i := range perfCounters {
 		cCounter := &cCounters[i]
 
 		latencyRanges := make([]ModulePerformanceCounterLatencyRange, cCounter.latency_ranges_count)
@@ -636,11 +645,22 @@ func (m *DPConfig) ModulePerformanceCounters(
 			}
 		}
 
-		result[i] = ModulePerformanceCounter{
+		perfCounters[i] = ModulePerformanceCounter{
 			MeanLatency:   float32(cCounter.mean_latency),
 			MinBatchSize:  uint64(cCounter.min_batch_size),
 			LatencyRanges: latencyRanges,
 		}
+	}
+
+	// Access C struct fields directly
+	cCountersPtr := &counters
+
+	result := &ModulePerformanceCounters{
+		Counters: perfCounters,
+		Tx:       uint64(cCountersPtr.tx),
+		Rx:       uint64(cCountersPtr.rx),
+		TxBytes:  uint64(cCountersPtr.tx_bytes),
+		RxBytes:  uint64(cCountersPtr.rx_bytes),
 	}
 
 	return result, nil
