@@ -1848,9 +1848,7 @@ yanet_module_performance_counters(
 	);
 	if (counters->counters == NULL) {
 		yanet_counter_handle_list_free(counter_list);
-		NEW_ERROR(
-			"failed to allocate memory for performance counters"
-		);
+		NEW_ERROR("failed to allocate memory for performance counters");
 		goto err;
 	}
 
@@ -1882,7 +1880,8 @@ yanet_module_performance_counters(
 			// Successfully parsed as performance counter
 			counters->counters[idx] = counter;
 		} else {
-			// Not a performance counter, try parsing as tx/rx counter
+			// Not a performance counter, try parsing as tx/rx
+			// counter
 			result = cp_module_parse_tx_rx(
 				counter_handle,
 				counter_list->instance_count,
@@ -1891,7 +1890,7 @@ yanet_module_performance_counters(
 				&counters->tx_bytes,
 				&counters->rx_bytes
 			);
-			
+
 			if (result < 0) {
 				// Error parsing tx/rx counter
 				NEW_ERROR(
@@ -1899,21 +1898,25 @@ yanet_module_performance_counters(
 					counter_handle->name
 				);
 				PUSH_ERROR(
-					"in yanet_module_performance_counters for "
+					"in yanet_module_performance_counters "
+					"for "
 					"module '%s:%s'",
 					module_type,
 					module_name
 				);
 				// Clean up and return error
-				for (size_t j = 0; j < CP_MODULE_PERF_COUNTERS; ++j) {
-					free(counters->counters[j].latency_ranges);
+				for (size_t j = 0; j < CP_MODULE_PERF_COUNTERS;
+				     ++j) {
+					free(counters->counters[j]
+						     .latency_ranges);
 				}
 				free(counters->counters);
 				yanet_counter_handle_list_free(counter_list);
 				goto err;
 			}
-			// If result == 1, it's neither a performance counter nor tx/rx counter (skip it)
-			// If result == 0, we successfully parsed and populated the tx/rx fields
+			// If result == 1, it's neither a performance counter
+			// nor tx/rx counter (skip it) If result == 0, we
+			// successfully parsed and populated the tx/rx fields
 		}
 	}
 
