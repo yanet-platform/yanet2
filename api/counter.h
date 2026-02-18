@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "lib/controlplane/diag/diag.h"
+
 struct dp_config;
 
 struct counter_value_handle;
@@ -150,13 +152,18 @@ struct module_performance_counters {
  * Retrieve module performance counters from the dataplane configuration.
  *
  * This function extracts and aggregates performance metrics for a specific
- * module across all worker threads. The metrics include latency histograms
- * for different packet batch sizes (1, 2-3, 4-7, 8-15, 16-31, 32+ packets).
+ * module across all worker threads. The metrics include:
+ * - Latency histograms for different packet batch sizes (1, 2-3, 4-7, 8-15,
+ *   16-31, 32+ packets)
+ * - TX/RX packet counters aggregated across all workers
+ * - TX/RX byte counters aggregated across all workers
  *
  * The returned structure must be freed using
  * yanet_module_performance_counters_free() when no longer needed.
  *
- * @param counters Output parameter for the performance counters structure
+ * @param counters Output parameter for the performance counters structure.
+ *                 On success, this will be populated with performance data
+ *                 including latency histograms and tx/rx statistics.
  * @param dp_config Pointer to the dataplane configuration
  * @param device_name Name of the device
  * @param pipeline_name Name of the pipeline
@@ -164,7 +171,11 @@ struct module_performance_counters {
  * @param chain_name Name of the chain
  * @param module_type Type identifier of the module
  * @param module_name Name identifier of the module
- * @return 0 on success, negative error code on failure
+ * @param diag Diagnostic structure for error reporting. On failure, this will
+ *             contain a detailed error message that can be retrieved using
+ *             diag_msg() or diag_take_msg(). The caller must call diag_reset()
+ *             to free the error message when done.
+ * @return 0 on success, -1 on failure (check diag for error details)
  */
 int
 yanet_module_performance_counters(
@@ -175,7 +186,8 @@ yanet_module_performance_counters(
 	const char *function_name,
 	const char *chain_name,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	struct diag *diag
 );
 
 /**

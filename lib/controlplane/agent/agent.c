@@ -1798,11 +1798,13 @@ yanet_module_performance_counters(
 	const char *function_name,
 	const char *chain_name,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	struct diag *diag
 ) {
+	diag_reset(diag);
 	if (counters == NULL) {
-		errno = EINVAL;
-		return -1;
+		NEW_ERROR("counters parameter is NULL");
+		goto err;
 	}
 
 	struct counter_handle_list *counter_list = yanet_get_module_counters(
@@ -1814,12 +1816,22 @@ yanet_module_performance_counters(
 		module_type,
 		module_name,
 		NULL,
-		0
+		(size_t)-1
 	);
 
 	if (counter_list == NULL) {
-		errno = ENOENT;
-		return -1;
+		NEW_ERROR(
+			"module counters not found for device='%s', "
+			"pipeline='%s', function='%s', chain='%s', "
+			"module_type='%s', module_name='%s'",
+			device_name,
+			pipeline_name,
+			function_name,
+			chain_name,
+			module_type,
+			module_name
+		);
+		goto err;
 	}
 
 	// Initialize tx/rx fields to 0
@@ -1836,8 +1848,8 @@ yanet_module_performance_counters(
 	);
 	if (counters->counters == NULL) {
 		yanet_counter_handle_list_free(counter_list);
-		errno = ENOMEM;
-		return -1;
+		NEW_ERROR("failed to allocate memory for performance counters");
+		goto err;
 	}
 
 	// Initialize counters array to avoid uninitialized memory
@@ -1868,7 +1880,8 @@ yanet_module_performance_counters(
 			// Successfully parsed as performance counter
 			counters->counters[idx] = counter;
 		} else {
-			// Try parsing as tx/rx counter
+			// Not a performance counter, try parsing as tx/rx
+			// counter
 			result = cp_module_parse_tx_rx(
 				counter_handle,
 				counter_list->instance_count,
@@ -1877,16 +1890,42 @@ yanet_module_performance_counters(
 				&counters->tx_bytes,
 				&counters->rx_bytes
 			);
+
+			if (result < 0) {
+				// Error parsing tx/rx counter
+				NEW_ERROR(
+					"failed to parse tx/rx counter '%s'",
+					counter_handle->name
+				);
+				PUSH_ERROR(
+					"in yanet_module_performance_counters "
+					"for "
+					"module '%s:%s'",
+					module_type,
+					module_name
+				);
+				// Clean up and return error
+				for (size_t j = 0; j < CP_MODULE_PERF_COUNTERS;
+				     ++j) {
+					free(counters->counters[j]
+						     .latency_ranges);
+				}
+				free(counters->counters);
+				yanet_counter_handle_list_free(counter_list);
+				goto err;
+			}
 			// If result == 1, it's neither a performance counter
-			// nor tx/rx counter If result == 0, we successfully
-			// parsed and populated the tx/rx fields If result ==
-			// -1, there was an error (but we continue processing
-			// other counters)
+			// nor tx/rx counter (skip it) If result == 0, we
+			// successfully parsed and populated the tx/rx fields
 		}
 	}
 
 	yanet_counter_handle_list_free(counter_list);
 	return 0;
+
+err:
+	diag_fill(diag);
+	return -1;
 }
 
 void

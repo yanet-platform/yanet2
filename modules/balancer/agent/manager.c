@@ -141,6 +141,13 @@ balancer_manager_config(
 
 ////////////////////////////////////////////////////////////////////////////////
 
+static void
+take_balancer_error(struct balancer_handle *balancer, struct diag *diag) {
+	const char *msg = balancer_take_error_msg(balancer);
+	NEW_ERROR("%s", msg);
+	diag_fill(diag);
+}
+
 int
 balancer_manager_update_reals(
 	struct balancer_manager *manager,
@@ -152,8 +159,7 @@ balancer_manager_update_reals(
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
 	int res = balancer_update_reals(balancer, count, updates);
 	if (res != 0) {
-		NEW_ERROR("%s", balancer_take_error_msg(balancer));
-		diag_fill(&manager->diag);
+		take_balancer_error(balancer, &manager->diag);
 		return -1;
 	}
 
@@ -207,8 +213,7 @@ balancer_manager_update_reals_wlc(
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
 	int res = balancer_update_reals(balancer, count, updates);
 	if (res != 0) {
-		NEW_ERROR("%s", balancer_take_error_msg(balancer));
-		diag_fill(&manager->diag);
+		take_balancer_error(balancer, &manager->diag);
 		return -1;
 	}
 
@@ -262,8 +267,7 @@ balancer_manager_update(
 		    config,
 		    balancer_manager_memory_context(manager)
 	    ) != 0) {
-		NEW_ERROR("failed to clone config; session table successfully "
-			  "resized");
+		NEW_ERROR("failed to clone config");
 		goto restore_config_on_error;
 	}
 
@@ -274,8 +278,7 @@ balancer_manager_update(
 		    balancer, &config->balancer.handler
 	    ) != 0) {
 		NEW_ERROR("%s", balancer_take_error_msg(balancer));
-		PUSH_ERROR("failed to update packet handler; session table "
-			   "successfully resized");
+		PUSH_ERROR("failed to update packet handler");
 		goto restore_config_on_error;
 	}
 
@@ -334,9 +337,10 @@ balancer_manager_stats(
 	struct balancer_stats *stats,
 	struct packet_handler_ref *ref
 ) {
+	diag_reset(&manager->diag);
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
 	if (balancer_stats(balancer, stats, ref) != 0) {
-		NEW_ERROR("%s", balancer_take_error_msg(balancer));
+		take_balancer_error(balancer, &manager->diag);
 		return -1;
 	}
 	return 0;
