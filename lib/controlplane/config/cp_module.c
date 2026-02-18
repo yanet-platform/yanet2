@@ -9,6 +9,7 @@
 
 #include "controlplane/config/zone.h"
 #include "lib/controlplane/diag/diag.h"
+#include <stdio.h>
 
 int
 cp_module_init(
@@ -455,5 +456,57 @@ cp_module_parse_performance_counter(
 	// Set output index
 	*idx = counter_idx;
 
+	return 0;
+}
+
+int
+cp_module_parse_tx_rx(
+	struct counter_handle *counter_handle,
+	size_t workers,
+	uint64_t *tx,
+	uint64_t *rx,
+	uint64_t *tx_bytes,
+	uint64_t *rx_bytes
+) {
+	// Validate inputs
+	if (counter_handle == NULL || workers == 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	// Determine which counter this is by checking the name
+	const char *name = counter_handle->name;
+	uint64_t *target = NULL;
+
+	if (strcmp(name, "tx") == 0) {
+		target = tx;
+	} else if (strcmp(name, "rx") == 0) {
+		target = rx;
+	} else if (strcmp(name, "tx_bytes") == 0) {
+		target = tx_bytes;
+	} else if (strcmp(name, "rx_bytes") == 0) {
+		target = rx_bytes;
+	} else {
+		// Not a tx/rx counter, return 1 to indicate no match
+		return 1;
+	}
+
+	// Validate target pointer
+	if (target == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	// Aggregate counter values across all workers
+	uint64_t total = 0;
+	for (size_t worker_idx = 0; worker_idx < workers; ++worker_idx) {
+		uint64_t *counter_values = counter_handle_get_value(
+			counter_handle->value_handle, worker_idx
+		);
+		// Simple counters have size=1, so we access index 0
+		total += counter_values[0];
+	}
+
+	*target = total;
 	return 0;
 }

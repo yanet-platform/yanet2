@@ -130,6 +130,20 @@ struct module_performance_counters {
 
 	/** Array of performance counters, ordered by min_batch_size */
 	struct module_performance_counter *counters;
+
+	/** Total number of packets transmitted by the module across all workers
+	 */
+	uint64_t tx;
+
+	/** Total number of packets received by the module across all workers */
+	uint64_t rx;
+
+	/** Total number of bytes transmitted by the module across all workers
+	 */
+	uint64_t tx_bytes;
+
+	/** Total number of bytes received by the module across all workers */
+	uint64_t rx_bytes;
 };
 
 /**

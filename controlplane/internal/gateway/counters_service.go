@@ -147,10 +147,14 @@ func (m *CountersService) ModulePerf(
 	}
 
 	response := &ynpb.ModulePerfCountersResponse{
-		Counters: make([]*ynpb.ModulePerfCounter, 0, len(perfCounters)),
+		Counters: make([]*ynpb.ModulePerfCounter, 0, len(perfCounters.Counters)),
+		Tx:       perfCounters.Tx,
+		Rx:       perfCounters.Rx,
+		TxBytes:  perfCounters.TxBytes,
+		RxBytes:  perfCounters.RxBytes,
 	}
 
-	for _, counter := range perfCounters {
+	for _, counter := range perfCounters.Counters {
 		latencies := make([]*ynpb.ModulePerfLatency, 0, len(counter.LatencyRanges))
 		for _, latencyRange := range counter.LatencyRanges {
 			latencies = append(latencies, &ynpb.ModulePerfLatency{
