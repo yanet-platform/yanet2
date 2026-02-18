@@ -85,9 +85,6 @@ struct packet_handler {
 	// source address of the balancer
 	struct net4_addr source_ipv4;
 	struct net6_addr source_ipv6;
-
-	// config of the packet handler with relative pointers
-	struct packet_handler_config config;
 };
 
 /**

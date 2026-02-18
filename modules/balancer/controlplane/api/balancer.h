@@ -438,10 +438,3 @@ balancer_real_ph_idx(
 	struct real_identifier *real,
 	struct real_ph_index *real_idx
 );
-
-// TODO: docs
-void
-balancer_config(
-	struct balancer_handle *handle,
-	struct balancer_config *config
-);

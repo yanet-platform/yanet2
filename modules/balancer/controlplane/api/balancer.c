@@ -1,7 +1,6 @@
 #include "balancer.h"
 #include "api/agent.h"
 #include "graph.h"
-#include "handler/config.h"
 #include "handler/info.h"
 #include "session.h"
 #include "state.h"
@@ -216,7 +215,7 @@ balancer_stats(
 	diag_reset(&balancer->diag);
 
 	int res = packet_handler_fill_stats(handler, stats, ref);
-	if (res == 0) {
+	if (res != 0) {
 		PUSH_ERROR("invalid balancer reference");
 		goto err;
 	}
@@ -348,15 +347,4 @@ balancer_real_ph_idx(
 	struct balancer *balancer = balancer_handle_deref(handle);
 	struct packet_handler *handler = ADDR_OF(&balancer->handler);
 	return packet_handler_real_idx(handler, real, real_idx);
-}
-
-void
-balancer_config(
-	struct balancer_handle *handle,
-	struct balancer_config *config
-) {
-	struct balancer *balancer = balancer_handle_deref(handle);
-	struct packet_handler *handler = ADDR_OF(&balancer->handler);
-	packet_handler_config_from_relative(&config->handler, &handler->config);
-	config->state.table_capacity = balancer_session_table_capacity(handle);
 }

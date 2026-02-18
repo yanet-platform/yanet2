@@ -15,12 +15,9 @@ struct balancer_agent;
 
 struct balancer_manager {
 	struct balancer_handle *balancer;
+	struct balancer_manager_config config;
 	struct balancer_agent *agent;
 	struct diag diag;
-
-	struct balancer_manager_wlc_config wlc;
-	uint32_t refresh_period;
-	float max_load_factor;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -30,6 +27,13 @@ balancer_manager_memory_context(struct balancer_manager *manager) {
 	struct balancer_agent *balancer_agent = ADDR_OF(&manager->agent);
 	struct agent *agent = (struct agent *)balancer_agent;
 	return &agent->memory_context;
+}
+
+static void
+setup_session_table_capacity(struct balancer_manager *manager) {
+	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
+	manager->config.balancer.state.table_capacity =
+		balancer_session_table_capacity(balancer);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -132,27 +136,7 @@ void
 balancer_manager_config(
 	struct balancer_manager *manager, struct balancer_manager_config *config
 ) {
-	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
-	balancer_config(balancer, &config->balancer);
-
-	// Copy WLC scalar fields
-	config->wlc.power = manager->wlc.power;
-	config->wlc.max_real_weight = manager->wlc.max_real_weight;
-	config->wlc.vs_count = manager->wlc.vs_count;
-
-	// Clone WLC vs array from relative pointers to normal pointers
-	if (manager->wlc.vs_count > 0) {
-		uint32_t *src_vs = ADDR_OF(&manager->wlc.vs);
-		config->wlc.vs = calloc(manager->wlc.vs_count, sizeof(uint32_t));
-		memcpy(config->wlc.vs, src_vs, sizeof(uint32_t) * config->wlc.vs_count
-		);
-	} else {
-		config->wlc.vs = NULL;
-	}
-
-	// Copy remaining scalar fields
-	config->refresh_period = manager->refresh_period;
-	config->max_load_factor = manager->max_load_factor;
+	clone_manager_config_from_relative(config, &manager->config);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -160,7 +144,12 @@ balancer_manager_config(
 static void
 take_balancer_error(struct balancer_handle *balancer, struct diag *diag) {
 	const char *msg = balancer_take_error_msg(balancer);
+	assert(msg != NULL);
+	// if (msg == NULL) {
+	// 	NEW_ERROR("unknown error");
+	// } else {
 	NEW_ERROR("%s", msg);
+	// }
 	diag_fill(diag);
 }
 
@@ -241,12 +230,6 @@ balancer_manager_update_reals_wlc(
 	return 0;
 }
 
-void 
-packet_handler_config_from_relative(
-	struct packet_handler_config *dst,
-	struct packet_handler_config *src
-);
-
 int
 balancer_manager_update(
 	struct balancer_manager *manager,
@@ -295,9 +278,6 @@ balancer_manager_update(
 
 	// update state (resize session table)
 
-	struct packet_handler_config old_handler_config;
-	packet_handler_config_from_relative(&old_handler_config, &old_config.balancer.handler);
-
 	// update packet handler
 	if (balancer_update_packet_handler(
 		    balancer, &config->balancer.handler
@@ -319,20 +299,13 @@ restore_config_on_error:
 	return -1;
 }
 
-static void
-put_error(struct balancer_handle *balancer) {
-	const char *error_msg = balancer_take_error_msg(balancer);
-	NEW_ERROR("%s", error_msg);
-	free((void *)error_msg);
-}
-
 int
 balancer_manager_resize_session_table(
 	struct balancer_manager *manager, size_t new_size, uint32_t now
 ) {
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
 	if (balancer_resize_session_table(balancer, new_size, now) != 0) {
-		put_error(balancer);
+		NEW_ERROR("%s", balancer_take_error_msg(balancer));
 		return -1;
 	}
 	setup_session_table_capacity(manager);
@@ -347,9 +320,7 @@ balancer_manager_info(
 ) {
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
 	if (balancer_info(balancer, info, now) != 0) {
-		const char *msg = balancer_take_error_msg(balancer);
-		NEW_ERROR("%s", msg);
-		free((void *)msg);
+		NEW_ERROR("%s", balancer_take_error_msg(balancer));
 		return -1;
 	}
 	return 0;
