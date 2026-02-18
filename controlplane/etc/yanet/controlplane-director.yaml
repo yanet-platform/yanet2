@@ -14,17 +14,7 @@ gateway:
     endpoint: &gateway_endpoint "[::1]:8080"
     http_endpoint: "[::1]:8081"
   auth:
-    disabled: false
-    identity_providers:
-      - type: file
-        path: /etc/yanet/auth/identities.yaml
-    authenticators:
-      - type: sshcert
-        config:
-          ca_source: https://cauth.yandex.net:4443/keylists/main/secure
-          krl_source: https://skotty.sec.yandex-team.ru/api/v1/ca/krl/all.zst
-          time_window: 5s
-          refresh_interval: 24h
+    disabled: true
     permissions_path: /etc/yanet/auth/permissions.yaml
 modules:
   route:

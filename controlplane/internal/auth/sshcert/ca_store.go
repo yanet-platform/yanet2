@@ -14,6 +14,17 @@ const (
 	supportedKeyType = "ecdsa-sha2-nistp256"
 )
 
+// CAVerifier verifies that a certificate was signed by a trusted CA
+// and supports periodic reload of CA data.
+type CAVerifier interface {
+	// VerifyCA checks the certificate against trusted CAs.
+	VerifyCA(cert *ssh.Certificate) error
+	// Reload refreshes CA data from the source.
+	//
+	// On error the old data is preserved.
+	Reload() error
+}
+
 // CAEntry represents a single trusted certificate authority.
 type CAEntry struct {
 	// PublicKey is the parsed CA public key.

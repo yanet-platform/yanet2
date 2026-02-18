@@ -19,19 +19,28 @@ func NewFromConfig(
 		return nil, fmt.Errorf("decode sshcert config: %w", err)
 	}
 
-	if cfg.CASource == "" {
-		return nil, fmt.Errorf("ca_source is required")
+	if len(cfg.CASources) == 0 {
+		return nil, fmt.Errorf("ca_sources is required")
 	}
 
-	caLoader := NewLoader(cfg.CASource)
-	caStore, err := NewCAStoreFromLoader(caLoader)
-	if err != nil {
-		return nil, fmt.Errorf("create SSH cert CA store: %w", err)
+	caStores := make([]*CAStore, len(cfg.CASources))
+	for idx, src := range cfg.CASources {
+		store, err := NewCAStoreFromLoader(NewLoader(src))
+		if err != nil {
+			return nil, fmt.Errorf(
+				"create CA store from %q: %w", src, err,
+			)
+		}
+
+		caStores[idx] = store
 	}
+
+	caStore := NewCompositeCAStore(caStores)
 
 	var revChecker RevocationChecker = NewNopRevocationChecker()
 	if cfg.KRLSource != "" {
 		krlLoader := NewLoader(cfg.KRLSource)
+		var err error
 		revChecker, err = NewKRLRevocationCheckerFromLoader(krlLoader)
 		if err != nil {
 			return nil, fmt.Errorf(

@@ -36,11 +36,12 @@ impl AuthLayer {
         }
     }
 
-    /// Create an auth layer from the SSH agent, finding a `:secure:`
+    /// Create an auth layer from the SSH agent, finding a `:insecure:`
     /// certificate.
     pub fn from_agent() -> Result<Self, AgentError> {
         let mut agent = SshAgent::from_env()?;
-        let (_cert, blob) = agent.find_certificate(":secure:")?;
+        // TODO: configurable certificate tag.
+        let (_cert, blob) = agent.find_certificate(":insecure:")?;
         Ok(Self::sshcert(agent, blob))
     }
 

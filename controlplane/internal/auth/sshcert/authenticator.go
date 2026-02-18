@@ -27,7 +27,7 @@ const (
 //
 // Only ecdsa-sha2-nistp256 certificates are supported.
 type Authenticator struct {
-	caStore           *CAStore
+	caVerifier        CAVerifier
 	revocationChecker RevocationChecker
 	timeWindow        time.Duration
 	refreshInterval   time.Duration
@@ -75,7 +75,7 @@ func WithLog(log *zap.Logger) Option {
 
 // NewAuthenticator creates a new SSH certificate Authenticator.
 func NewAuthenticator(
-	caStore *CAStore,
+	caVerifier CAVerifier,
 	revocationChecker RevocationChecker,
 	opts ...Option,
 ) *Authenticator {
@@ -85,7 +85,7 @@ func NewAuthenticator(
 	}
 
 	a := &Authenticator{
-		caStore:           caStore,
+		caVerifier:        caVerifier,
 		revocationChecker: revocationChecker,
 		timeWindow:        options.TimeWindow,
 		refreshInterval:   options.RefreshInterval,
@@ -184,7 +184,7 @@ func (m *Authenticator) Authenticate(
 		)
 	}
 
-	if err := m.caStore.VerifyCA(cert); err != nil {
+	if err := m.caVerifier.VerifyCA(cert); err != nil {
 		return nil, status.Errorf(
 			codes.Unauthenticated,
 			"CA verification failed: %v", err,
@@ -248,7 +248,7 @@ func (m *Authenticator) refreshLoop() {
 
 // doRefresh reloads CA and KRL data.
 func (m *Authenticator) doRefresh() {
-	if err := m.caStore.Reload(); err != nil {
+	if err := m.caVerifier.Reload(); err != nil {
 		m.log.Warn("failed to refresh CA store", zap.Error(err))
 	} else {
 		m.log.Info("refreshed CA store")

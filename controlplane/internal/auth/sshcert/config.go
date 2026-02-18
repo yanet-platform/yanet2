@@ -6,11 +6,13 @@ import (
 
 // Config configures SSH Certificate Authentication.
 type Config struct {
-	// CASource is the path or URL to the CA public keys YAML file.
+	// CASources is a list of paths or URLs to CA public keys files.
 	//
 	// Sources starting with "http://" or "https://" use HTTP, otherwise the
 	// source is treated as a file path.
-	CASource string `yaml:"ca_source"`
+	//
+	// Keys are merged.
+	CASources []string `yaml:"ca_sources"`
 	// KRLSource is the path or URL to the OpenSSH KRL file (optional).
 	//
 	// Sources starting with "http://" or "https://" use HTTP, otherwise the
