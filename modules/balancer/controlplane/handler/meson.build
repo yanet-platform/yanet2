@@ -14,7 +14,8 @@ sources = files(
     'update.c',
     'vs.c',
     'stats.c',
-    'info.c'
+    'info.c',
+    'config.c'
 )
 
 lib_balancer_packet_handler = static_library(

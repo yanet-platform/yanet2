@@ -1,5 +1,6 @@
 #pragma once
 
+#include "api/handler.h"
 #include "handler/real.h"
 #include "lib/controlplane/config/cp_module.h"
 
@@ -84,6 +85,9 @@ struct packet_handler {
 	// source address of the balancer
 	struct net4_addr source_ipv4;
 	struct net6_addr source_ipv6;
+
+	// config of the packet handler with relative pointers
+	struct packet_handler_config config;
 };
 
 /**
@@ -100,7 +104,6 @@ packet_handler_setup(
 	struct agent *agent,
 	const char *name,
 	struct packet_handler_config *config,
-	struct packet_handler_config *prev_config,
 	struct balancer_state *state,
 	struct packet_handler *prev_handler
 );

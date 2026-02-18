@@ -7,12 +7,14 @@
 #include "common/memory_address.h"
 #include "common/network.h"
 
+#include "config.h"
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/diag/diag.h"
 
 #include <assert.h>
 #include <netinet/in.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -505,180 +507,6 @@ init_vs_ipv6_filter(
 }
 
 static int
-init_vs_filters(
-	struct packet_handler *handler,
-	struct memory_context *mctx,
-	struct packet_handler_config *config
-) {
-	// Build filter rules for IPv6 virtual services
-	struct filter_rule *v6_rules = NULL;
-	size_t v4_count = 0;
-	size_t v6_count = 0;
-
-	// Count IPv4 and IPv6 virtual services
-	for (size_t i = 0; i < config->vs_count; ++i) {
-		if (config->vs[i].identifier.ip_proto == IPPROTO_IP) {
-			v4_count++;
-		} else {
-			v6_count++;
-		}
-	}
-
-	// Allocate rule arrays
-	if (v4_count > 0) {
-		v4_rules = calloc(v4_count, sizeof(struct filter_rule));
-		if (v4_rules == NULL) {
-			NEW_ERROR("failed to allocate IPv4 filter rules");
-			return -1;
-		}
-	}
-
-	if (v6_count > 0) {
-		v6_rules = calloc(v6_count, sizeof(struct filter_rule));
-		if (v6_rules == NULL) {
-			free(v4_rules);
-			NEW_ERROR("failed to allocate IPv6 filter rules");
-			return -1;
-		}
-	}
-
-	// Build filter rules
-	size_t v4_idx = 0;
-	size_t v6_idx = 0;
-	for (size_t i = 0; i < config->vs_count; ++i) {
-		struct named_vs_config *vs_config = &config->vs[i];
-
-		struct filter_rule *rule;
-		size_t *idx;
-
-		if (vs_config->identifier.ip_proto == IPPROTO_IP) {
-			rule = &v4_rules[v4_idx];
-			idx = &v4_idx;
-		} else {
-			rule = &v6_rules[v6_idx];
-			idx = &v6_idx;
-		}
-
-		memset(rule, 0, sizeof(struct filter_rule));
-
-		// Set net4 or net6 destination
-		if (vs_config->identifier.ip_proto == IPPROTO_IP) {
-			rule->net4.dst_count = 1;
-			rule->net4.dsts = calloc(1, sizeof(struct net4));
-			if (rule->net4.dsts == NULL) {
-				goto cleanup_error;
-			}
-			struct net4_addr *addr =
-				(struct net4_addr *)&vs_config->identifier.addr;
-			memcpy(rule->net4.dsts[0].addr, addr->bytes, NET4_LEN);
-			memset(rule->net4.dsts[0].mask, 0xFF, NET4_LEN);
-		} else {
-			rule->net6.dst_count = 1;
-			rule->net6.dsts = calloc(1, sizeof(struct net6));
-			if (rule->net6.dsts == NULL) {
-				goto cleanup_error;
-			}
-			struct net6_addr *addr =
-				(struct net6_addr *)&vs_config->identifier.addr;
-			memcpy(rule->net6.dsts[0].addr, addr->bytes, NET6_LEN);
-			memset(rule->net6.dsts[0].mask, 0xFF, NET6_LEN);
-		}
-
-		// Set transport (port_dst and proto)
-		rule->transport.dst_count = 1;
-		rule->transport.dsts =
-			calloc(1, sizeof(struct filter_port_range));
-		if (rule->transport.dsts == NULL) {
-			goto cleanup_error;
-		}
-
-		// For PureL3 mode, match all ports (0-65535)
-		// Otherwise, match only the specific port
-		if (vs_config->config.flags & VS_PURE_L3_FLAG) {
-			rule->transport.dsts[0].from = 0;
-			rule->transport.dsts[0].to = 65535;
-		} else {
-			rule->transport.dsts[0].from =
-				vs_config->identifier.port;
-			rule->transport.dsts[0].to = vs_config->identifier.port;
-		}
-
-		rule->transport.proto.proto =
-			vs_config->identifier.transport_proto;
-		rule->transport.proto.enable_bits = 0;
-		rule->transport.proto.disable_bits = 0;
-
-		// Action: VS index in handler
-		rule->action = i;
-
-		(*idx)++;
-	}
-
-	// Compile filters
-	int res = 0;
-	res = FILTER_INIT(
-		ADDR_OF(&handler->vs_v4),
-		vs_lookup_ipv4,
-		v4_rules,
-		v4_count,
-		mctx
-	);
-	if (res != 0) {
-		NEW_ERROR("failed to compile IPv4 VS filter");
-	}
-
-	if (res == 0) {
-		res = FILTER_INIT(
-			ADDR_OF(&handler->vs_v6),
-			vs_lookup_ipv6,
-			v6_rules,
-			v6_count,
-			mctx
-		);
-		if (res != 0) {
-			NEW_ERROR("failed to compile IPv6 VS filter");
-			if (v4_count > 0) {
-				FILTER_FREE(
-					ADDR_OF(&handler->vs_v4), vs_lookup_ipv4
-				);
-			}
-		}
-	}
-
-	// Cleanup rule arrays
-	for (size_t i = 0; i < v4_count; ++i) {
-		free(v4_rules[i].net4.dsts);
-		free(v4_rules[i].transport.dsts);
-	}
-	free(v4_rules);
-
-	for (size_t i = 0; i < v6_count; ++i) {
-		free(v6_rules[i].net6.dsts);
-		free(v6_rules[i].transport.dsts);
-	}
-	free(v6_rules);
-
-	return res;
-
-cleanup_error:
-	// Cleanup on error
-	for (size_t i = 0; i < v4_idx; ++i) {
-		free(v4_rules[i].net4.dsts);
-		free(v4_rules[i].transport.dsts);
-	}
-	for (size_t i = 0; i < v6_idx; ++i) {
-		free(v6_rules[i].net6.dsts);
-		free(v6_rules[i].transport.dsts);
-	}
-	free(v4_rules);
-	free(v6_rules);
-
-	NEW_ERROR("failed to allocate filter rule components");
-
-	return -1;
-}
-
-static int
 register_virtual_services(
 	struct packet_handler_config *config,
 	struct balancer_state *state,
@@ -716,10 +544,10 @@ register_virtual_services(
 }
 
 static int
-config_vs_count(struct packet_handler_config *config, int proto) {
+vs_count_proto(struct named_vs_config *vs, size_t vs_count, int proto) {
 	size_t count = 0;
-	for (size_t i = 0; i < config->vs_count; ++i) {
-		struct named_vs_config *vs_config = &config->vs[i];
+	for (size_t i = 0; i < vs_count; ++i) {
+		struct named_vs_config *vs_config = &vs[i];
 		if (vs_config->identifier.ip_proto == proto) {
 			++count;
 		}
@@ -737,8 +565,8 @@ need_recompile_filter(
 	if (prev_config == NULL) {
 		return 1;
 	}
-	size_t config_vs = config_vs_count(config, proto);
-	size_t prev_config_vs = config_vs_count(prev_config, proto);
+	size_t config_vs = vs_count_proto(config->vs, config->vs_count, proto);
+	size_t prev_config_vs = vs_count_proto(ADDR_OF(&prev_config->vs), prev_config->vs_count, proto);
 	return config_vs != prev_config_vs || matching_vs != config_vs;
 }
 
@@ -747,9 +575,10 @@ init_vs(struct packet_handler *handler,
 	struct balancer_state *state,
 	struct memory_context *mctx,
 	struct packet_handler_config *config,
-	struct packet_handler_config *prev_config,
 	struct counter_registry *registry,
 	struct packet_handler *prev_handler) {
+	struct packet_handler_config *prev_config = prev_handler != NULL ?
+		&prev_handler->config : NULL;
 	int match_prev_ipv4 = 0;
 	int match_prev_ipv6 = 0;
 	// register virtual services
@@ -886,12 +715,20 @@ free_filters:
 	return -1;
 }
 
+static int
+store_config(
+	struct packet_handler *handler,
+	struct packet_handler_config *config,
+	struct memory_context *mctx
+) {
+	return packet_handler_config_to_relative(&handler->config, config, mctx);
+}
+
 struct packet_handler *
 packet_handler_setup(
 	struct agent *agent,
 	const char *name,
 	struct packet_handler_config *config,
-	struct packet_handler_config *prev_config,
 	struct balancer_state *state,
 	struct packet_handler *prev_handler
 ) {
@@ -911,6 +748,11 @@ packet_handler_setup(
 
 	if (cp_module_init(&handler->cp_module, agent, "balancer", name) != 0) {
 		PUSH_ERROR("failed to initialize controlplane module");
+		goto free_handler;
+	}
+
+	if (store_config(handler, config, mctx) != 0) {
+		NEW_ERROR("failed to store config");
 		goto free_handler;
 	}
 
@@ -941,7 +783,6 @@ packet_handler_setup(
 		    state,
 		    mctx,
 		    config,
-		    prev_config,
 		    counter_registry,
 		    prev_handler) != 0) {
 		PUSH_ERROR("failed to setup virtual services");

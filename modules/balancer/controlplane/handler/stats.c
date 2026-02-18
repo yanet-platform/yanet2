@@ -288,4 +288,6 @@ packet_handler_fill_stats(
 
 	// calculate stats
 	calculate_stats(handler, stats, real_stats, counter_handles);
+
+	return 0;
 }

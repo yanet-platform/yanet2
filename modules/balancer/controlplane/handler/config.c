@@ -1,7 +1,6 @@
+#include "config.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
-#include "manager.h"
-#include "modules/balancer/controlplane/api/balancer.h"
 #include "modules/balancer/controlplane/api/vs.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -276,8 +275,8 @@ clone_vs_array_to_relative(
 /**
  * Clone packet_handler_config from normal pointers to relative pointers.
  */
-static int
-clone_handler_config_to_relative(
+int
+packet_handler_config_to_relative(
 	struct packet_handler_config *dst,
 	struct packet_handler_config *src,
 	struct memory_context *mctx
@@ -310,28 +309,6 @@ clone_handler_config_to_relative(
 	    ) != 0) {
 		return -1;
 	}
-
-	return 0;
-}
-
-/**
- * Clone balancer_config from normal pointers to relative pointers.
- */
-int
-clone_balancer_config_to_relative(
-	struct balancer_config *dst,
-	struct balancer_config *src,
-	struct memory_context *mctx
-) {
-	// Clone handler config
-	if (clone_handler_config_to_relative(
-		    &dst->handler, &src->handler, mctx
-	    ) != 0) {
-		return -1;
-	}
-
-	// Copy state config (no pointers)
-	dst->state = src->state;
 
 	return 0;
 }
@@ -603,25 +580,6 @@ packet_handler_config_from_relative(
 		free(dst->decap_v4);
 		return -1;
 	}
-
-	return 0;
-}
-
-/**
- * Clone balancer_config from relative pointers to normal pointers.
- */
-int
-clone_balancer_config_from_relative(
-	struct balancer_config *dst, struct balancer_config *src
-) {
-	// Clone handler config
-	if (packet_handler_config_from_relative(&dst->handler, &src->handler) !=
-	    0) {
-		return -1;
-	}
-
-	// Copy state config (no pointers)
-	dst->state = src->state;
 
 	return 0;
 }

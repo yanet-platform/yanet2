@@ -27,7 +27,7 @@ FILTER_QUERY_DECLARE(vs_acl_ipv4, net4_fast_src, port_src);
 static inline uint32_t
 vs_v4_table_lookup(struct packet_handler *handler, struct packet *packet) {
 	struct value_range *result;
-	FILTER_QUERY(&handler->vs_v4, vs_lookup_ipv4, &packet, &result, 1);
+	FILTER_QUERY(ADDR_OF(&handler->vs_v4), vs_lookup_ipv4, &packet, &result, 1);
 	if (result->count == 0) {
 		return -1;
 	}
@@ -44,7 +44,7 @@ FILTER_QUERY_DECLARE(vs_acl_ipv6, net6_fast_src, port_src);
 static inline uint32_t
 vs_v6_table_lookup(struct packet_handler *handler, struct packet *packet) {
 	struct value_range *result;
-	FILTER_QUERY(&handler->vs_v6, vs_lookup_ipv6, &packet, &result, 1);
+	FILTER_QUERY(ADDR_OF(&handler->vs_v6), vs_lookup_ipv6, &packet, &result, 1);
 	if (result->count == 0) {
 		return -1;
 	}
