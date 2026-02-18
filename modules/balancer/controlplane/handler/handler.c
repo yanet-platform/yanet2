@@ -441,7 +441,7 @@ init_vs_ipv6_filter(
 	}
 
 	// Build filter rules
-	size_t v4_idx = 0;
+	size_t v6_idx = 0;
 	for (size_t i = 0; i < config->vs_count; ++i) {
 		struct named_vs_config *vs_config = &config->vs[i];
 
@@ -449,7 +449,7 @@ init_vs_ipv6_filter(
 			continue;
 		}
 
-		struct filter_rule *rule = &v4_rules[v4_idx];
+		struct filter_rule *rule = &v6_rules[v6_idx];
 		memset(rule, 0, sizeof(struct filter_rule));
 
 		// Set net4 destination
@@ -466,7 +466,7 @@ init_vs_ipv6_filter(
 		// Action: VS index in handler
 		rule->action = i;
 
-		v4_idx += 1;
+		v6_idx += 1;
 	}
 
 	handler->vs_v4 = memory_balloc(mctx, sizeof(struct filter));
@@ -479,7 +479,7 @@ init_vs_ipv6_filter(
 	// Compile filters
 	int res = 0;
 	res = FILTER_INIT(
-		ADDR_OF(&handler->vs_v4), vs_lookup_ipv4, v4_rules, v4_count, mctx
+		ADDR_OF(&handler->vs_v4), vs_lookup_ipv4, v6_rules, v6_count, mctx
 	);
 	if (res != 0) {
 		memory_bfree(mctx, ADDR_OF(&handler->vs_v4), sizeof(struct filter));
@@ -487,11 +487,11 @@ init_vs_ipv6_filter(
 	}
 
 	// Cleanup rule arrays
-	for (size_t i = 0; i < v4_count; ++i) {
-		free(v4_rules[i].net4.dsts);
-		free(v4_rules[i].transport.dsts);
+	for (size_t i = 0; i < v6_count; ++i) {
+		free(v6_rules[i].net4.dsts);
+		free(v6_rules[i].transport.dsts);
 	}
-	free(v4_rules);
+	free(v6_rules);
 
 	return res;
 }
@@ -669,8 +669,8 @@ register_virtual_services(
 	struct packet_handler_config *config,
 	struct balancer_state *state,
 	struct packet_handler *prev_handler,
-	int *prev_vs_v4,
-	int *prev_vs_v6
+	int *match_prev_ipv4,
+	int *match_prev_ipv6
 ) {
 	uint32_t *vs_index = prev_handler != NULL ? ADDR_OF(&prev_handler->vs_index) : NULL;
 	size_t vs_count = prev_handler != NULL ? prev_handler->vs_count : 0;
@@ -678,19 +678,49 @@ register_virtual_services(
 		struct named_vs_config *vs_config = &config->vs[vs_idx];
 		struct vs_state *vs_state = balancer_state_find_or_insert_vs(state, &vs_config->identifier);
 		if (vs_state == NULL) {
-			NEW_ERROR("failed to register virtual services at index %zu", vs_idx);
+			NEW_ERROR("failed to register virtual service at index %zu", vs_idx);
 			return -1;
 		}
 		size_t vs_registry_idx = vs_state->registry_idx;
 		if (vs_registry_idx < vs_count && vs_index[vs_registry_idx] != (uint32_t)-1) {
 			if (vs_config->identifier.ip_proto == IPPROTO_IP) {
-				*prev_vs_v4 += 1;
+				*match_prev_ipv4 += 1;
 			} else {
-				*prev_vs_v6 += 1;
+				*match_prev_ipv6 += 1;
 			}
 		}
 	}
 	return 0;
+}
+
+static int
+config_vs_count(
+	struct packet_handler_config *config,
+	int proto
+) {
+	size_t count = 0;
+	for (size_t i = 0; i < config->vs_count; ++i) {
+		struct named_vs_config *vs_config = &config->vs[i];
+		if (vs_config->identifier.ip_proto == proto) {
+			++count;
+		}
+	}
+	return count;
+}
+
+static int
+need_recompile_filter(
+	struct packet_handler_config *config,
+	struct packet_handler_config *prev_config,
+	int proto,
+	size_t matching_vs
+) {
+	if (prev_config == NULL) {
+		return 1;
+	}
+	size_t config_vs = config_vs_count(config, proto);
+	size_t prev_config_vs = config_vs_count(prev_config, proto);
+	return config_vs != prev_config_vs || matching_vs != config_vs;
 }
 
 static int
@@ -703,25 +733,37 @@ init_vs(
 	struct counter_registry *registry,
 	struct packet_handler *prev_handler
 ) {
-	int prev_vs_v4 = 0;
-	int prev_vs_v6 = 0;
+	int match_prev_ipv4 = 0;
+	int match_prev_ipv6 = 0;
 	// register virtual services
-	if (register_virtual_services(config, state, prev_handler, &prev_vs_v4, &prev_vs_v6) != 0) {
+	if (register_virtual_services(config, state, prev_handler, &match_prev_ipv4, &match_prev_ipv6) != 0) {
 		PUSH_ERROR("failed to register virtual services");
 		return -1;
 	}
 
-	// Initialize announce LPMs
-	if (init_announce_lpms(handler, mctx, config) != 0) {
-		PUSH_ERROR("failed to initialize announce LPMs");
-		return -1;
+	// setup IPv4 VS filter
+	if (need_recompile_filter(config, prev_config, IPPROTO_IP, match_prev_ipv4)) {
+		if (init_vs_ipv4_filter(handler, mctx, config) != 0) {
+			PUSH_ERROR("failed to initialize IPv4 filter");
+			return -1;
+		}
+	} else {
+		EQUATE_OFFSET(&handler->vs_v4, &prev_handler->vs_v4);
 	}
 
-	// Initialize VS filters
-	if (init_vs_filters(handler, mctx, config) != 0) {
-		PUSH_ERROR("failed to initialize VS filters");
-		lpm_free(&handler->announce_ipv4);
-		lpm_free(&handler->announce_ipv6);
+	// setup IPv6 VS filter
+	if (need_recompile_filter(config, prev_config, IPPROTO_IPV6, match_prev_ipv6)) {
+		if (init_vs_ipv6_filter(handler, mctx, config) != 0) {
+			PUSH_ERROR("failed to initialize IPv6 filter");
+			return -1;
+		}
+	} else {
+		EQUATE_OFFSET(&handler->vs_v6, &prev_handler->vs_v6);
+	}
+
+	// initialize announce LPMs
+	if (init_announce_lpms(handler, mctx, config) != 0) {
+		PUSH_ERROR("failed to initialize announce LPMs");
 		return -1;
 	}
 
