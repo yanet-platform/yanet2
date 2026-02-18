@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"time"
+	"gopkg.in/yaml.v3"
 )
 
 // Config is the configuration for authentication and authorization.
@@ -13,13 +13,10 @@ type Config struct {
 	// IdentityProviders is a list of identity providers (chain of responsibility).
 	// First match wins.
 	IdentityProviders []IdentityProviderConfig `yaml:"identity_providers"`
-	// BasicAuth is the configuration for Basic Authentication.
-	BasicAuth BasicAuthConfig `yaml:"basic_auth"`
-	// SSHKey is the configuration for SSH Key Authentication.
-	SSHKey SSHKeyConfig `yaml:"ssh_key"`
-	// SSHCert is the configuration for SSH Certificate
-	// Authentication.
-	SSHCert SSHCertConfig `yaml:"ssh_cert"`
+	// Authenticators is a list of authenticator configurations.
+	//
+	// Each entry specifies a type and its type-specific config.
+	Authenticators []AuthenticatorConfig `yaml:"authenticators"`
 	// PermissionsPath is the path to the permissions YAML file.
 	PermissionsPath string `yaml:"permissions_path"`
 }
@@ -32,44 +29,15 @@ type IdentityProviderConfig struct {
 	Path string `yaml:"path"`
 }
 
-// BasicAuthConfig configures Basic Authentication.
-type BasicAuthConfig struct {
-	// CredentialsPath is the path to the basic_auth.yaml file.
-	CredentialsPath string `yaml:"credentials_path"`
-}
-
-// SSHKeyConfig configures SSH Key Authentication.
-type SSHKeyConfig struct {
-	// KeysPath is the path to the ssh_keys.yaml file.
-	KeysPath string `yaml:"keys_path"`
-	// TimeWindow is the timestamp tolerance window for replay protection.
-	// Tokens with timestamps outside this window are rejected.
-	//
-	// Default: 5s.
-	TimeWindow time.Duration `yaml:"time_window"`
-}
-
-// SSHCertConfig configures SSH Certificate Authentication.
-type SSHCertConfig struct {
-	// CASource is the path or URL to the CA public keys YAML file.
-	//
-	// Sources starting with "http://" or "https://" use HTTP, otherwise the
-	// source is treated as a file path.
-	CASource string `yaml:"ca_source"`
-	// KRLSource is the path or URL to the OpenSSH KRL file (optional).
-	//
-	// Sources starting with "http://" or "https://" use HTTP, otherwise the
-	// source is treated as a file path.
-	KRLSource string `yaml:"krl_source"`
-	// TimeWindow is the timestamp tolerance window for replay protection.
-	//
-	// Default: 5s.
-	TimeWindow time.Duration `yaml:"time_window"`
-	// RefreshInterval is the polling interval for reloading CA and KRL data
-	// from their sources.
-	//
-	// Default: 5m.
-	RefreshInterval time.Duration `yaml:"refresh_interval"`
+// AuthenticatorConfig is a generic authenticator configuration entry.
+//
+// The Type field selects the authenticator factory, and Config holds the
+// type-specific YAML configuration decoded by the factory.
+type AuthenticatorConfig struct {
+	// Type is the authenticator type name.
+	Type string `yaml:"type"`
+	// Config is the raw YAML node for type-specific configuration.
+	Config yaml.Node `yaml:"config"`
 }
 
 // DefaultConfig returns the default authentication configuration.

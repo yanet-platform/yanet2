@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/basic"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
@@ -16,26 +17,30 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshkey"
 )
 
-// Authenticator is the interface for authentication methods.
-type Authenticator interface {
-	// Name returns the authenticator name for logging.
-	Name() string
-	// IsTokenSupported checks if this authenticator can handle the given
-	// token format.
-	IsTokenSupported(token string) bool
-	// Authenticate validates the token and returns the authenticated
-	// Principal.
-	//
-	// The requestInfo provides request context such as the gRPC method being
-	// called.
-	Authenticate(ctx context.Context, token string, requestInfo *core.RequestInfo) (*core.Principal, error)
+// AuthenticatorFactory creates an Authenticator from a raw YAML
+// config node and shared dependencies.
+type AuthenticatorFactory func(
+	rawCfg *yaml.Node,
+	idp identity.Provider,
+	log *zap.Logger,
+) (core.Authenticator, error)
+
+// factories maps authenticator type names to their factory functions.
+var factories = map[string]AuthenticatorFactory{
+	"basic":   basic.NewFromConfig,
+	"sshkey":  sshkey.NewFromConfig,
+	"sshcert": sshcert.NewFromConfig,
 }
 
 // Authorizer is the interface for authorization decisions.
 type Authorizer interface {
 	// Authorize checks if the principal has permission to execute the given
 	// method.
-	Authorize(ctx context.Context, principal *core.Principal, fullMethod string) error
+	Authorize(
+		ctx context.Context,
+		principal *core.Principal,
+		fullMethod string,
+	) error
 }
 
 type managerOptions struct {
@@ -60,7 +65,7 @@ func WithLog(log *zap.Logger) ManagerOption {
 
 // Manager orchestrates authentication and authorization.
 type Manager struct {
-	authenticators []Authenticator
+	authenticators []core.Authenticator
 	authorizer     Authorizer
 	disabled       bool
 	log            *zap.Logger
@@ -76,7 +81,7 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	log := opts.Log
 
 	m := &Manager{
-		authenticators: []Authenticator{},
+		authenticators: []core.Authenticator{},
 		disabled:       cfg.Disabled,
 		log:            log,
 	}
@@ -84,7 +89,9 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	// If disabled, only use NoneAuthenticator.
 	if cfg.Disabled {
 		log.Warn("authentication is DISABLED - requests will be anonymous with FULL permissions")
-		m.authenticators = append(m.authenticators, none.NewNoneAuthenticator())
+		m.authenticators = append(
+			m.authenticators, none.NewNoneAuthenticator(),
+		)
 		return m, nil
 	}
 
@@ -93,9 +100,13 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	for _, providerCfg := range cfg.IdentityProviders {
 		switch providerCfg.Type {
 		case "file":
-			fileProvider, err := identity.NewIdentityProviderFromFile(providerCfg.Path)
+			fileProvider, err := identity.NewIdentityProviderFromFile(
+				providerCfg.Path,
+			)
 			if err != nil {
-				return nil, fmt.Errorf("failed to create file identity provider: %w", err)
+				return nil, fmt.Errorf(
+					"failed to create file identity provider: %w", err,
+				)
 			}
 			identityProviders = append(identityProviders, fileProvider)
 			log.Info("registered identity provider",
@@ -103,7 +114,9 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 				zap.String("path", providerCfg.Path),
 			)
 		default:
-			return nil, fmt.Errorf("unknown identity provider type: %q", providerCfg.Type)
+			return nil, fmt.Errorf(
+				"unknown identity provider type: %q", providerCfg.Type,
+			)
 		}
 	}
 
@@ -117,81 +130,49 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	)
 
 	// Create FilePermissionStore.
-	permissionStore, err := permission.NewFilePermissionStore(cfg.PermissionsPath)
+	permissionStore, err := permission.NewFilePermissionStore(
+		cfg.PermissionsPath,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create permission store: %w", err)
+		return nil, fmt.Errorf(
+			"failed to create permission store: %w", err,
+		)
 	}
-	log.Info("loaded permissions", zap.String("path", cfg.PermissionsPath))
+	log.Info("loaded permissions",
+		zap.String("path", cfg.PermissionsPath),
+	)
 
 	// Create RBACAuthorizer.
-	m.authorizer = rbac.NewRBACAuthorizer(permissionStore, rbac.WithLog(log))
+	m.authorizer = rbac.NewRBACAuthorizer(
+		permissionStore, rbac.WithLog(log),
+	)
 
-	// Create SSHKeyAuthenticator if keys path configured.
-	if cfg.SSHKey.KeysPath != "" {
-		keyStore, err := sshkey.NewKeyStoreFromFile(cfg.SSHKey.KeysPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create SSH key store: %w", err)
-		}
-
-		sshkeyOpts := []sshkey.Option{
-			sshkey.WithLog(log),
-		}
-		if cfg.SSHKey.TimeWindow > 0 {
-			sshkeyOpts = append(sshkeyOpts, sshkey.WithTimeWindow(cfg.SSHKey.TimeWindow))
+	// Create authenticators from config entries.
+	for _, entry := range cfg.Authenticators {
+		factory, ok := factories[entry.Type]
+		if !ok {
+			return nil, fmt.Errorf("unknown authenticator type: %q", entry.Type)
 		}
 
-		sshKeyAuth := sshkey.NewAuthenticator(keyStore, compositeIdentityProvider, sshkeyOpts...)
-		m.authenticators = append(m.authenticators, sshKeyAuth)
-		log.Info("registered authenticator", zap.String("type", "sshkey"))
-	}
-
-	// Create SSHCertAuthenticator if CA source configured.
-	if cfg.SSHCert.CASource != "" {
-		caLoader := sshcert.NewLoader(cfg.SSHCert.CASource)
-		caStore, err := sshcert.NewCAStoreFromLoader(caLoader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create SSH cert CA store: %w", err)
-		}
-
-		var revChecker sshcert.RevocationChecker = sshcert.NewNopRevocationChecker()
-		if cfg.SSHCert.KRLSource != "" {
-			krlLoader := sshcert.NewLoader(cfg.SSHCert.KRLSource)
-			revChecker, err = sshcert.NewKRLRevocationCheckerFromLoader(krlLoader)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create SSH cert revocation checker: %w", err)
-			}
-		}
-
-		sshcertOpts := []sshcert.Option{
-			sshcert.WithLog(log),
-		}
-		if cfg.SSHCert.TimeWindow > 0 {
-			sshcertOpts = append(sshcertOpts, sshcert.WithTimeWindow(cfg.SSHCert.TimeWindow))
-		}
-		if cfg.SSHCert.RefreshInterval > 0 {
-			sshcertOpts = append(sshcertOpts, sshcert.WithRefreshInterval(cfg.SSHCert.RefreshInterval))
-		}
-
-		sshCertAuth := sshcert.NewAuthenticator(
-			caStore, revChecker, compositeIdentityProvider, sshcertOpts...,
+		auth, err := factory(
+			&entry.Config,
+			compositeIdentityProvider,
+			log,
 		)
-		m.authenticators = append(m.authenticators, sshCertAuth)
-		log.Info("registered authenticator", zap.String("type", "sshcert"))
-	}
-
-	// Create BasicAuthenticator if credentials path configured.
-	if cfg.BasicAuth.CredentialsPath != "" {
-		credentialStore, err := basic.NewFileCredentialStore(cfg.BasicAuth.CredentialsPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create credential store: %w", err)
+			return nil, fmt.Errorf("failed to init %q authenticator: %w", entry.Type, err)
 		}
 
-		basicAuth := basic.NewBasicAuthenticator(credentialStore, compositeIdentityProvider)
-		m.authenticators = append(m.authenticators, basicAuth)
-		log.Info("registered authenticator", zap.String("type", "basic"))
+		m.authenticators = append(m.authenticators, auth)
+		log.Info("registered authenticator",
+			zap.String("type", entry.Type),
+		)
 	}
 
-	m.authenticators = append(m.authenticators, none.NewNoneAuthenticator())
+	// NoneAuthenticator is always the last fallback.
+	m.authenticators = append(
+		m.authenticators, none.NewNoneAuthenticator(),
+	)
 
 	return m, nil
 }
