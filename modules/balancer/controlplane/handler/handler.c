@@ -316,12 +316,10 @@ init_announce_lpms(
 
 static void
 init_transport_rule(
-	struct filter_rule *rule,
-	struct named_vs_config *vs_config
+	struct filter_rule *rule, struct named_vs_config *vs_config
 ) {
 	rule->transport.dst_count = 1;
-		rule->transport.dsts =
-			calloc(1, sizeof(struct filter_port_range));
+	rule->transport.dsts = calloc(1, sizeof(struct filter_port_range));
 
 	// For PureL3 mode, match all ports (0-65535)
 	// Otherwise, match only the specific port
@@ -329,13 +327,11 @@ init_transport_rule(
 		rule->transport.dsts[0].from = 0;
 		rule->transport.dsts[0].to = 65535;
 	} else {
-		rule->transport.dsts[0].from =
-			vs_config->identifier.port;
+		rule->transport.dsts[0].from = vs_config->identifier.port;
 		rule->transport.dsts[0].to = vs_config->identifier.port;
 	}
 
-	rule->transport.proto.proto =
-		vs_config->identifier.transport_proto;
+	rule->transport.proto.proto = vs_config->identifier.transport_proto;
 	rule->transport.proto.enable_bits = 0;
 	rule->transport.proto.disable_bits = 0;
 }
@@ -401,10 +397,16 @@ init_vs_ipv4_filter(
 	// Compile filters
 	int res = 0;
 	res = FILTER_INIT(
-		ADDR_OF(&handler->vs_v4), vs_lookup_ipv4, v4_rules, v4_count, mctx
+		ADDR_OF(&handler->vs_v4),
+		vs_lookup_ipv4,
+		v4_rules,
+		v4_count,
+		mctx
 	);
 	if (res != 0) {
-		memory_bfree(mctx, ADDR_OF(&handler->vs_v4), sizeof(struct filter));
+		memory_bfree(
+			mctx, ADDR_OF(&handler->vs_v4), sizeof(struct filter)
+		);
 		NEW_ERROR("failed to compile IPv4 VS filter");
 	}
 
@@ -479,10 +481,16 @@ init_vs_ipv6_filter(
 	// Compile filters
 	int res = 0;
 	res = FILTER_INIT(
-		ADDR_OF(&handler->vs_v4), vs_lookup_ipv4, v6_rules, v6_count, mctx
+		ADDR_OF(&handler->vs_v4),
+		vs_lookup_ipv4,
+		v6_rules,
+		v6_count,
+		mctx
 	);
 	if (res != 0) {
-		memory_bfree(mctx, ADDR_OF(&handler->vs_v4), sizeof(struct filter));
+		memory_bfree(
+			mctx, ADDR_OF(&handler->vs_v4), sizeof(struct filter)
+		);
 		NEW_ERROR("failed to compile IPv4 VS filter");
 	}
 
@@ -609,7 +617,11 @@ init_vs_filters(
 	// Compile filters
 	int res = 0;
 	res = FILTER_INIT(
-		ADDR_OF(&handler->vs_v4), vs_lookup_ipv4, v4_rules, v4_count, mctx
+		ADDR_OF(&handler->vs_v4),
+		vs_lookup_ipv4,
+		v4_rules,
+		v4_count,
+		mctx
 	);
 	if (res != 0) {
 		NEW_ERROR("failed to compile IPv4 VS filter");
@@ -626,7 +638,9 @@ init_vs_filters(
 		if (res != 0) {
 			NEW_ERROR("failed to compile IPv6 VS filter");
 			if (v4_count > 0) {
-				FILTER_FREE(ADDR_OF(&handler->vs_v4), vs_lookup_ipv4);
+				FILTER_FREE(
+					ADDR_OF(&handler->vs_v4), vs_lookup_ipv4
+				);
 			}
 		}
 	}
@@ -672,17 +686,25 @@ register_virtual_services(
 	int *match_prev_ipv4,
 	int *match_prev_ipv6
 ) {
-	uint32_t *vs_index = prev_handler != NULL ? ADDR_OF(&prev_handler->vs_index) : NULL;
+	uint32_t *vs_index =
+		prev_handler != NULL ? ADDR_OF(&prev_handler->vs_index) : NULL;
 	size_t vs_count = prev_handler != NULL ? prev_handler->vs_count : 0;
 	for (size_t vs_idx = 0; vs_idx < config->vs_count; ++vs_idx) {
 		struct named_vs_config *vs_config = &config->vs[vs_idx];
-		struct vs_state *vs_state = balancer_state_find_or_insert_vs(state, &vs_config->identifier);
+		struct vs_state *vs_state = balancer_state_find_or_insert_vs(
+			state, &vs_config->identifier
+		);
 		if (vs_state == NULL) {
-			NEW_ERROR("failed to register virtual service at index %zu", vs_idx);
+			NEW_ERROR(
+				"failed to register virtual service at index "
+				"%zu",
+				vs_idx
+			);
 			return -1;
 		}
 		size_t vs_registry_idx = vs_state->registry_idx;
-		if (vs_registry_idx < vs_count && vs_index[vs_registry_idx] != (uint32_t)-1) {
+		if (vs_registry_idx < vs_count &&
+		    vs_index[vs_registry_idx] != (uint32_t)-1) {
 			if (vs_config->identifier.ip_proto == IPPROTO_IP) {
 				*match_prev_ipv4 += 1;
 			} else {
@@ -694,10 +716,7 @@ register_virtual_services(
 }
 
 static int
-config_vs_count(
-	struct packet_handler_config *config,
-	int proto
-) {
+config_vs_count(struct packet_handler_config *config, int proto) {
 	size_t count = 0;
 	for (size_t i = 0; i < config->vs_count; ++i) {
 		struct named_vs_config *vs_config = &config->vs[i];
@@ -724,25 +743,31 @@ need_recompile_filter(
 }
 
 static int
-init_vs(
-	struct packet_handler *handler,
+init_vs(struct packet_handler *handler,
 	struct balancer_state *state,
 	struct memory_context *mctx,
 	struct packet_handler_config *config,
 	struct packet_handler_config *prev_config,
 	struct counter_registry *registry,
-	struct packet_handler *prev_handler
-) {
+	struct packet_handler *prev_handler) {
 	int match_prev_ipv4 = 0;
 	int match_prev_ipv6 = 0;
 	// register virtual services
-	if (register_virtual_services(config, state, prev_handler, &match_prev_ipv4, &match_prev_ipv6) != 0) {
+	if (register_virtual_services(
+		    config,
+		    state,
+		    prev_handler,
+		    &match_prev_ipv4,
+		    &match_prev_ipv6
+	    ) != 0) {
 		PUSH_ERROR("failed to register virtual services");
 		return -1;
 	}
 
 	// setup IPv4 VS filter
-	if (need_recompile_filter(config, prev_config, IPPROTO_IP, match_prev_ipv4)) {
+	if (need_recompile_filter(
+		    config, prev_config, IPPROTO_IP, match_prev_ipv4
+	    )) {
 		if (init_vs_ipv4_filter(handler, mctx, config) != 0) {
 			PUSH_ERROR("failed to initialize IPv4 filter");
 			return -1;
@@ -752,7 +777,9 @@ init_vs(
 	}
 
 	// setup IPv6 VS filter
-	if (need_recompile_filter(config, prev_config, IPPROTO_IPV6, match_prev_ipv6)) {
+	if (need_recompile_filter(
+		    config, prev_config, IPPROTO_IPV6, match_prev_ipv6
+	    )) {
 		if (init_vs_ipv6_filter(handler, mctx, config) != 0) {
 			PUSH_ERROR("failed to initialize IPv6 filter");
 			return -1;
@@ -813,10 +840,25 @@ init_vs(
 
 	// init virtual service index
 	for (size_t i = 0; i < config->vs_count; ++i) {
+		if (vs_index[vs[i].registry_idx] != (uint32_t)-1) {
+			NEW_ERROR(
+				"virtual service at index %zu matches with "
+				"virtual service at index %zu",
+				i,
+				(size_t)vs_index[vs[i].registry_idx]
+			);
+			goto free_index;
+		}
 		vs_index[vs[i].registry_idx] = i;
 	}
 
 	return 0;
+
+free_index:
+	memory_bfree(
+		mctx, vs_index, sizeof(uint32_t) * handler->vs_index_count
+	);
+	handler->vs_index = NULL;
 
 free_vs_array:
 	memory_bfree(mctx, vs, sizeof(struct vs) * config->vs_count);
@@ -895,7 +937,13 @@ packet_handler_setup(
 		goto free_decap;
 	}
 
-	if (init_vs(handler, state, mctx, config, prev_config, counter_registry, prev_handler) != 0) {
+	if (init_vs(handler,
+		    state,
+		    mctx,
+		    config,
+		    prev_config,
+		    counter_registry,
+		    prev_handler) != 0) {
 		PUSH_ERROR("failed to setup virtual services");
 		goto free_reals;
 	}
