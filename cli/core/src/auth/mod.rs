@@ -1,29 +1,13 @@
 //! Authentication support for yanet CLI modules.
 //!
-//! Provides a pluggable authentication framework. Currently supports:
+//! Provides a pluggable authentication framework.
+//!
+//! Currently supports:
+//! - `none` — No authentication.
 //! - `sshcert` — SSH certificate authentication via `ssh-agent`.
 //!
-//! # Usage
-//!
-//! 1. Embed [`AuthArgs`] in your CLI `Cmd` struct.
-//! 2. Call [`create_layer`] to get a tower layer.
-//! 3. Use `channel.with(layer)` or `ServiceBuilder` when creating the gRPC
-//!    client.
-//!
-//! ```ignore
-//! use ync::auth::{AuthArgs, create_layer};
-//!
-//! #[derive(clap::Parser)]
-//! struct Cmd {
-//!     #[command(flatten)]
-//!     auth: AuthArgs,
-//!     // ...
-//! }
-//!
-//! let channel = Channel::from_shared(endpoint)?.connect().await?;
-//! let layer = create_layer(&cmd.auth)?;
-//! let client = MyServiceClient::new(layer.layer(channel));
-//! ```
+//! Prefer using [`crate::client::connect`] which wires auth automatically.
+//! See the [`crate::client`] module for details.
 
 pub mod agent;
 pub mod interceptor;

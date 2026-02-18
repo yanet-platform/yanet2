@@ -16,7 +16,7 @@ use crate::{cmd::Cmd, service::BalancerService};
 ////////////////////////////////////////////////////////////////////////////////
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = BalancerService::connect(cmd.endpoint).await?;
+    let mut service = BalancerService::connect(&cmd.connection).await?;
     service.handle_cmd(cmd.mode).await
 }
 

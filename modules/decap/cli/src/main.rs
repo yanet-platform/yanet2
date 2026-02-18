@@ -8,8 +8,11 @@ use decappb::{
 };
 use ipnet::IpNet;
 use ptree::TreeBuilder;
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use ync::logging;
+use tonic::codec::CompressionEncoding;
+use ync::{
+    client::{ConnectionArgs, LayeredChannel},
+    logging,
+};
 
 #[allow(non_snake_case)]
 pub mod decappb {
@@ -25,9 +28,8 @@ pub mod decappb {
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -93,7 +95,7 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = DecapService::new(cmd.endpoint).await?;
+    let mut service = DecapService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -104,13 +106,13 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct DecapService {
-    client: DecapServiceClient<Channel>,
+    client: DecapServiceClient<LayeredChannel>,
 }
 
 impl DecapService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = DecapServiceClient::connect(endpoint).await?;
-        let client = client
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = ync::client::connect(connection).await?;
+        let client = DecapServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })

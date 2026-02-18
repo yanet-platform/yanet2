@@ -9,8 +9,11 @@ use code::{
 };
 use ipnet::Ipv6Net;
 use ptree::TreeBuilder;
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use yanet_cli::logging;
+use tonic::codec::CompressionEncoding;
+use yanet_cli::{
+    client::{ConnectionArgs, LayeredChannel},
+    logging,
+};
 
 #[allow(non_snake_case)]
 pub mod code {
@@ -25,9 +28,8 @@ pub mod code {
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -152,7 +154,7 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = NAT64Service::new(cmd.endpoint).await?;
+    let mut service = NAT64Service::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -169,13 +171,13 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct NAT64Service {
-    client: Nat64ServiceClient<Channel>,
+    client: Nat64ServiceClient<LayeredChannel>,
 }
 
 impl NAT64Service {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = Nat64ServiceClient::connect(endpoint).await?;
-        let client = client
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = yanet_cli::client::connect(connection).await?;
+        let client = Nat64ServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })

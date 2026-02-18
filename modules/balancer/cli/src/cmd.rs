@@ -1,6 +1,7 @@
 //! CLI command definitions
 
 use clap::{ArgAction, Parser};
+use ync::client::ConnectionArgs;
 
 use crate::{output, rpc::balancerpb};
 
@@ -16,9 +17,8 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: Mode,
 
-    /// gRPC endpoint to send request
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
 
     /// Log verbosity level
     #[clap(short, action = ArgAction::Count, global = true)]

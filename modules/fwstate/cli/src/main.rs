@@ -8,8 +8,11 @@ use fwstatepb::{
     DeleteConfigRequest, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ShowConfigRequest,
     UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
 };
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use ync::logging;
+use tonic::codec::CompressionEncoding;
+use ync::{
+    client::{ConnectionArgs, LayeredChannel},
+    logging,
+};
 
 mod args;
 
@@ -27,9 +30,8 @@ pub mod fwstatepb {
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -58,13 +60,13 @@ fn parse_mac(s: &str) -> Result<Vec<u8>, Box<dyn Error>> {
 }
 
 pub struct FWStateService {
-    client: FwStateServiceClient<Channel>,
+    client: FwStateServiceClient<LayeredChannel>,
 }
 
 impl FWStateService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = FwStateServiceClient::connect(endpoint).await?;
-        let client = client
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = ync::client::connect(connection).await?;
+        let client = FwStateServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
@@ -199,7 +201,7 @@ impl FWStateService {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = FWStateService::new(cmd.endpoint).await?;
+    let mut service = FWStateService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,

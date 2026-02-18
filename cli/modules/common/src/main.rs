@@ -4,8 +4,8 @@ use core::error::Error;
 
 use clap::{builder::PossibleValue, ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use ync::logging;
+use tonic::codec::CompressionEncoding;
+use ync::{client::ConnectionArgs, logging};
 use ynpb::{logging_client::LoggingClient, UpdateLevelRequest};
 
 #[allow(non_snake_case)]
@@ -20,9 +20,8 @@ pub mod ynpb {
 struct Cmd {
     #[command(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
-    #[arg(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Be verbose in terms of logging.
     #[arg(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -78,15 +77,15 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let endpoint = cmd.endpoint;
+    let connection = cmd.connection;
 
     match cmd.mode {
-        ModeCmd::Logging(cmd) => run_logging(cmd, endpoint).await,
+        ModeCmd::Logging(cmd) => run_logging(cmd, &connection).await,
     }
 }
 
-async fn run_logging(cmd: LoggingCmd, endpoint: String) -> Result<(), Box<dyn Error>> {
-    let channel = Channel::from_shared(endpoint)?.connect().await?;
+async fn run_logging(cmd: LoggingCmd, connection: &ConnectionArgs) -> Result<(), Box<dyn Error>> {
+    let channel = ync::client::connect(connection).await?;
     let mut client = LoggingClient::new(channel)
         .send_compressed(CompressionEncoding::Gzip)
         .accept_compressed(CompressionEncoding::Gzip);

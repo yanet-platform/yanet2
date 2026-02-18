@@ -6,8 +6,11 @@ use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use code::{inspect_service_client::InspectServiceClient, InspectRequest};
 use ptree::TreeBuilder;
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use ync::logging;
+use tonic::codec::CompressionEncoding;
+use ync::{
+    client::{ConnectionArgs, LayeredChannel},
+    logging,
+};
 
 #[allow(non_snake_case)]
 pub mod code {
@@ -21,9 +24,8 @@ pub mod code {
 #[command(version, about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
-    /// Gateway endpoint.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Output format.
     #[clap(long, value_enum, default_value_t = OutputFormat::Tree)]
     pub format: OutputFormat,
@@ -55,7 +57,7 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = InspectService::new(cmd.endpoint).await?;
+    let mut service = InspectService::new(&cmd.connection).await?;
 
     match cmd.format {
         OutputFormat::Json => service.show_json().await?,
@@ -66,12 +68,12 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct InspectService {
-    client: InspectServiceClient<Channel>,
+    client: InspectServiceClient<LayeredChannel>,
 }
 
 impl InspectService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let channel = Channel::from_shared(endpoint)?.connect().await?;
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = ync::client::connect(connection).await?;
         let client = InspectServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
