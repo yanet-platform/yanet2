@@ -191,6 +191,8 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 		log.Info("registered authenticator", zap.String("type", "basic"))
 	}
 
+	m.authenticators = append(m.authenticators, none.NewNoneAuthenticator())
+
 	if len(m.authenticators) == 0 {
 		return nil, fmt.Errorf("no authenticators configured")
 	}

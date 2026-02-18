@@ -75,16 +75,6 @@ type SSHCertConfig struct {
 // DefaultConfig returns the default authentication configuration.
 func DefaultConfig() Config {
 	return Config{
-		Disabled: false, // Security by default.
-		IdentityProviders: []IdentityProviderConfig{
-			{
-				Type: "file",
-				Path: "/etc/yanet/identities.yaml",
-			},
-		},
-		BasicAuth: BasicAuthConfig{
-			CredentialsPath: "/etc/yanet/basic_auth.yaml",
-		},
-		PermissionsPath: "/etc/yanet/permissions.yaml",
+		Disabled: true, // TODO: Security by default. For now transition phase.
 	}
 }

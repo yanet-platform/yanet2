@@ -15,6 +15,7 @@ tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 prost = "0.13"
 prost-types = "0.13"
 tonic = { version = "0.13", features = ["gzip"] }
+tower = "0.5"
 ipnet = "2"
 tabled = { version = "0.18", features = ["ansi"] }
 ptree = "0.5"

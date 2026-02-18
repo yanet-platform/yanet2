@@ -15,6 +15,7 @@ use tabled::{
     Table, Tabled,
 };
 use tonic::{codec::CompressionEncoding, transport::Channel};
+use tower::Layer;
 use yanet_cli_route::{
     routepb::{
         route_service_client::RouteServiceClient, DeleteConfigRequest, DeleteRouteRequest, FlushRoutesRequest,
@@ -22,7 +23,10 @@ use yanet_cli_route::{
     },
     FibDisplayEntry, RouteEntry,
 };
-use ync::logging;
+use ync::{
+    auth::{self, interceptor::AuthService, AuthArgs, AuthLayer},
+    logging,
+};
 
 /// Route module.
 #[derive(Debug, Clone, Parser)]
@@ -37,6 +41,8 @@ pub struct Cmd {
     /// Be verbose in terms of logging.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
+    #[command(flatten)]
+    pub auth: AuthArgs,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -185,7 +191,8 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = RouteService::new(cmd.endpoint).await?;
+    let layer = auth::create_layer(&cmd.auth)?;
+    let mut service = RouteService::new(cmd.endpoint, layer).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -202,13 +209,13 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct RouteService {
-    client: RouteServiceClient<Channel>,
+    client: RouteServiceClient<AuthService<Channel>>,
 }
 
 impl RouteService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = RouteServiceClient::connect(endpoint).await?;
-        let client = client
+    pub async fn new(endpoint: String, layer: AuthLayer) -> Result<Self, Box<dyn Error>> {
+        let channel = Channel::from_shared(endpoint)?.connect().await?;
+        let client = RouteServiceClient::new(layer.layer(channel))
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
