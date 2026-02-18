@@ -123,12 +123,8 @@ packet_handler_update_reals(
 struct packet_handler_ref;
 struct balancer_stats;
 
-/**
- * Fill balancer statistics from this handler.
- *
- * Optionally filters by packet handler reference.
- */
-void
+/// TODO: docs
+int
 packet_handler_fill_stats(
 	struct packet_handler *handler,
 	struct balancer_stats *stats,

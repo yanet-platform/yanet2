@@ -294,13 +294,20 @@ restore_config_on_error:
 	return -1;
 }
 
+static void
+put_error(struct balancer_handle *balancer) {
+	const char *error_msg = balancer_take_error_msg(balancer);
+	NEW_ERROR("%s", error_msg);
+	free((void *)error_msg);
+}
+
 int
 balancer_manager_resize_session_table(
 	struct balancer_manager *manager, size_t new_size, uint32_t now
 ) {
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
 	if (balancer_resize_session_table(balancer, new_size, now) != 0) {
-		NEW_ERROR("%s", balancer_take_error_msg(balancer));
+		put_error(balancer);
 		return -1;
 	}
 	setup_session_table_capacity(manager);
@@ -315,7 +322,9 @@ balancer_manager_info(
 ) {
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
 	if (balancer_info(balancer, info, now) != 0) {
-		NEW_ERROR("%s", balancer_take_error_msg(balancer));
+		const char *msg = balancer_take_error_msg(balancer);
+		NEW_ERROR("%s", msg);
+		free((void *)msg);
 		return -1;
 	}
 	return 0;

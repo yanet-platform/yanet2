@@ -215,8 +215,11 @@ balancer_stats(
 	// Reset diagnostics only after all validation passes
 	diag_reset(&balancer->diag);
 
-	// no error
-	packet_handler_fill_stats(handler, stats, ref);
+	int res = packet_handler_fill_stats(handler, stats, ref);
+	if (res == 0) {
+		PUSH_ERROR("invalid balancer reference");
+		goto err;
+	}
 
 	return 0;
 
