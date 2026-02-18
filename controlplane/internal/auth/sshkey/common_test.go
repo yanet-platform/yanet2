@@ -113,4 +113,3 @@ func requireGRPCError(
 	assert.Equal(t, code, st.Code())
 	assert.Equal(t, msg, st.Message())
 }
-
