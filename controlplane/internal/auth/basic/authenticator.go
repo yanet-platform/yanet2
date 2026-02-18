@@ -41,7 +41,11 @@ func (m *BasicAuthenticator) IsTokenSupported(token string) bool {
 }
 
 // Authenticate validates the Basic Auth token.
-func (m *BasicAuthenticator) Authenticate(ctx context.Context, token string) (*core.Principal, error) {
+func (m *BasicAuthenticator) Authenticate(
+	ctx context.Context,
+	token string,
+	reqInfo *core.RequestInfo,
+) (*core.Principal, error) {
 	// Extract base64 part.
 	parts := strings.SplitN(token, " ", 2)
 	if len(parts) != 2 {

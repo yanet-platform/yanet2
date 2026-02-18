@@ -12,6 +12,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/none"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/permission"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/rbac"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/sshkey"
 )
 
 // Authenticator is the interface for authentication methods.
@@ -23,7 +24,10 @@ type Authenticator interface {
 	IsTokenSupported(token string) bool
 	// Authenticate validates the token and returns the authenticated
 	// Principal.
-	Authenticate(ctx context.Context, token string) (*core.Principal, error)
+	//
+	// The requestInfo provides request context such as the gRPC method being
+	// called.
+	Authenticate(ctx context.Context, token string, requestInfo *core.RequestInfo) (*core.Principal, error)
 }
 
 // Authorizer is the interface for authorization decisions.
@@ -88,7 +92,7 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	for _, providerCfg := range cfg.IdentityProviders {
 		switch providerCfg.Type {
 		case "file":
-			fileProvider, err := identity.NewFileIdentityProvider(providerCfg.Path)
+			fileProvider, err := identity.NewIdentityProviderFromFile(providerCfg.Path)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create file identity provider: %w", err)
 			}
@@ -121,6 +125,25 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 	// Create RBACAuthorizer.
 	m.authorizer = rbac.NewRBACAuthorizer(permissionStore, rbac.WithLog(log))
 
+	// Create SSHKeyAuthenticator if keys path configured.
+	if cfg.SSHKey.KeysPath != "" {
+		keyStore, err := sshkey.NewKeyStoreFromFile(cfg.SSHKey.KeysPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SSH key store: %w", err)
+		}
+
+		sshkeyOpts := []sshkey.Option{
+			sshkey.WithLog(log),
+		}
+		if cfg.SSHKey.TimeWindow > 0 {
+			sshkeyOpts = append(sshkeyOpts, sshkey.WithTimeWindow(cfg.SSHKey.TimeWindow))
+		}
+
+		sshKeyAuth := sshkey.NewAuthenticator(keyStore, compositeIdentityProvider, sshkeyOpts...)
+		m.authenticators = append(m.authenticators, sshKeyAuth)
+		log.Info("registered authenticator", zap.String("type", "sshkey"))
+	}
+
 	// Create BasicAuthenticator if credentials path configured.
 	if cfg.BasicAuth.CredentialsPath != "" {
 		credentialStore, err := basic.NewFileCredentialStore(cfg.BasicAuth.CredentialsPath)
@@ -147,6 +170,7 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 func (m *Manager) Authenticate(
 	ctx context.Context,
 	token string,
+	reqInfo *core.RequestInfo,
 ) (*core.Principal, error) {
 	// Iterate through authenticators, first match wins.
 	for _, auth := range m.authenticators {
@@ -154,7 +178,7 @@ func (m *Manager) Authenticate(
 			m.log.Debug("authenticating with authenticator",
 				zap.String("authenticator", auth.Name()),
 			)
-			return auth.Authenticate(ctx, token)
+			return auth.Authenticate(ctx, token, reqInfo)
 		}
 	}
 

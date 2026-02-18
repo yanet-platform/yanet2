@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 func TestManager_Authenticate(t *testing.T) {
@@ -34,7 +36,8 @@ func TestManager_Authenticate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			principal, err := m.Authenticate(ctx, tt.token)
+			requestInfo := &core.RequestInfo{FullMethod: "/test.Service/Method"}
+			principal, err := m.Authenticate(ctx, tt.token, requestInfo)
 			if err != nil {
 				t.Fatalf("Authenticate() error = %v, want nil", err)
 			}
@@ -70,7 +73,8 @@ func TestManager_Authorize(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a test principal.
-	principal, err := m.Authenticate(ctx, "")
+	requestInfo := &core.RequestInfo{FullMethod: "/test.Service/Method"}
+	principal, err := m.Authenticate(ctx, "", requestInfo)
 	if err != nil {
 		t.Fatalf("Authenticate() error = %v", err)
 	}

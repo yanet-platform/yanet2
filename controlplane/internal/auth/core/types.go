@@ -4,6 +4,16 @@ import (
 	"time"
 )
 
+// RequestInfo contains request metadata needed for authentication.
+//
+// Some authenticators (e.g. SSH key) need to verify method binding,
+// so the actual gRPC method is passed here.
+type RequestInfo struct {
+	// FullMethod is the full gRPC method name, e.g.
+	// "/routepb.RouteService/InsertRoute".
+	FullMethod string
+}
+
 // Principal represents an authenticated identity with their authorization
 // context.
 //

@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
@@ -30,7 +31,11 @@ func (m *AuthService) IntrospectToken(
 	request *ynpb.IntrospectTokenRequest,
 ) (*ynpb.IntrospectTokenResponse, error) {
 	token := request.GetToken()
-	principal, err := m.manager.Authenticate(ctx, token)
+
+	// IntrospectToken is not bound to a specific method, so we pass
+	// an empty RequestInfo.
+	requestInfo := &core.RequestInfo{}
+	principal, err := m.manager.Authenticate(ctx, token, requestInfo)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "authentication failed: %v", err)
 	}

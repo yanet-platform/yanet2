@@ -3,6 +3,8 @@ package none
 import (
 	"context"
 	"testing"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 func TestNoneAuthenticator_IsTokenSupported(t *testing.T) {
@@ -54,7 +56,8 @@ func TestNoneAuthenticator_Authenticate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			principal, err := auth.Authenticate(ctx, tt.token)
+			requestInfo := &core.RequestInfo{FullMethod: "/test.Service/Method"}
+			principal, err := auth.Authenticate(ctx, tt.token, requestInfo)
 			if err != nil {
 				t.Fatalf("Authenticate() error = %v, want nil", err)
 			}

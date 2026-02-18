@@ -1,19 +1,22 @@
 package auth
 
+import (
+	"time"
+)
+
 // Config is the configuration for authentication and authorization.
 type Config struct {
 	// Disabled indicates if authentication is disabled.
 	//
 	// When true, all requests are treated as anonymous with full permissions.
 	Disabled bool `yaml:"disabled"`
-
 	// IdentityProviders is a list of identity providers (chain of responsibility).
 	// First match wins.
 	IdentityProviders []IdentityProviderConfig `yaml:"identity_providers"`
-
 	// BasicAuth is the configuration for Basic Authentication.
 	BasicAuth BasicAuthConfig `yaml:"basic_auth"`
-
+	// SSHKey is the configuration for SSH Key Authentication.
+	SSHKey SSHKeyConfig `yaml:"ssh_key"`
 	// PermissionsPath is the path to the permissions YAML file.
 	PermissionsPath string `yaml:"permissions_path"`
 }
@@ -22,7 +25,6 @@ type Config struct {
 type IdentityProviderConfig struct {
 	// Type is the provider type: "file", "pam" (future), etc.
 	Type string `yaml:"type"`
-
 	// Path is the file path (for file-based providers).
 	Path string `yaml:"path"`
 }
@@ -31,6 +33,17 @@ type IdentityProviderConfig struct {
 type BasicAuthConfig struct {
 	// CredentialsPath is the path to the basic_auth.yaml file.
 	CredentialsPath string `yaml:"credentials_path"`
+}
+
+// SSHKeyConfig configures SSH Key Authentication.
+type SSHKeyConfig struct {
+	// KeysPath is the path to the ssh_keys.yaml file.
+	KeysPath string `yaml:"keys_path"`
+	// TimeWindow is the timestamp tolerance window for replay protection.
+	// Tokens with timestamps outside this window are rejected.
+	//
+	// Default: 5s.
+	TimeWindow time.Duration `yaml:"time_window"`
 }
 
 // DefaultConfig returns the default authentication configuration.

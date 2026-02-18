@@ -10,34 +10,42 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/rcucache"
 )
 
-type UserName = string
+type userName = string
 
-// FileIdentityProvider loads identities from a YAML file.
-type FileIdentityProvider struct {
-	path string
-
-	identities *rcucache.Cache[UserName, Identity]
+// IdentityProvider keeps identities indexed by username.
+type IdentityProvider struct {
+	identities *rcucache.Cache[userName, Identity]
 }
 
-// NewFileIdentityProvider creates a new FileIdentityProvider.
-func NewFileIdentityProvider(path string) (*FileIdentityProvider, error) {
-	m := &FileIdentityProvider{
-		path:       path,
-		identities: rcucache.NewEmptyCache[UserName, Identity](),
+// NewIdentityProvider creates a IdentityProvider from an in-memory map of
+// identities.
+func NewIdentityProvider(identities map[userName]Identity) *IdentityProvider {
+	return &IdentityProvider{
+		identities: rcucache.NewCache(identities),
 	}
-	if err := m.load(); err != nil {
+}
+
+// NewIdentityProviderFromFile creates a IdentityProvider by loading identities
+// from a YAML file.
+func NewIdentityProviderFromFile(path string) (*IdentityProvider, error) {
+	identities, err := loadIdentitiesFile(path)
+	if err != nil {
 		return nil, fmt.Errorf("failed to load identities: %w", err)
 	}
-	return m, nil
+
+	return NewIdentityProvider(identities), nil
 }
 
 // Name returns the provider name for logging.
-func (m *FileIdentityProvider) Name() string {
+func (m *IdentityProvider) Name() string {
 	return "file"
 }
 
 // GetIdentity retrieves an identity by username.
-func (m *FileIdentityProvider) GetIdentity(ctx context.Context, username string) (Identity, error) {
+func (m *IdentityProvider) GetIdentity(
+	ctx context.Context,
+	username string,
+) (Identity, error) {
 	view := m.identities.View()
 	identity, ok := view.Lookup(username)
 	if !ok {
@@ -47,11 +55,11 @@ func (m *FileIdentityProvider) GetIdentity(ctx context.Context, username string)
 	return identity.Clone(), nil
 }
 
-// load reads and parses the identities file.
-func (m *FileIdentityProvider) load() error {
-	buf, err := os.ReadFile(m.path)
+// loadIdentitiesFile reads and parses the identities YAML file into a map.
+func loadIdentitiesFile(path string) (map[string]Identity, error) {
+	buf, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
+		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	var file struct {
@@ -59,20 +67,18 @@ func (m *FileIdentityProvider) load() error {
 	}
 
 	if err := yaml.Unmarshal(buf, &file); err != nil {
-		return fmt.Errorf("failed to parse YAML: %w", err)
+		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
 	// Build username index.
 	identities := map[string]Identity{}
 	for _, identity := range file.Identities {
 		if identity.Username == "" {
-			return fmt.Errorf("identity with empty username")
+			return nil, fmt.Errorf("identity with empty username")
 		}
 
 		identities[identity.Username] = identity
 	}
 
-	m.identities.Swap(identities)
-
-	return nil
+	return identities, nil
 }

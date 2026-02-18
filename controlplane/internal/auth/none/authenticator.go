@@ -30,7 +30,11 @@ func (m *NoneAuthenticator) IsTokenSupported(token string) bool {
 
 // Authenticate always succeeds and returns an anonymous principal with full
 // permissions.
-func (m *NoneAuthenticator) Authenticate(ctx context.Context, token string) (*core.Principal, error) {
+func (m *NoneAuthenticator) Authenticate(
+	ctx context.Context,
+	token string,
+	reqInfo *core.RequestInfo,
+) (*core.Principal, error) {
 	return &core.Principal{
 		User:        "anonymous",
 		Groups:      []string{},
