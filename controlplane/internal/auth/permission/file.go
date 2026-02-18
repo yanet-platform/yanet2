@@ -3,28 +3,29 @@ package permission
 import (
 	"fmt"
 	"os"
-	"sync"
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+	"github.com/yanet-platform/yanet2/common/go/rcucache"
 )
+
+type GroupName = string
+type UserName = string
 
 // FilePermissionStore loads permissions from a YAML file.
 type FilePermissionStore struct {
 	path string
 
-	mu               sync.RWMutex
-	groupPermissions map[string][]*core.Permission
-	userPermissions  map[string][]*core.Permission
+	groupPermissions *rcucache.Cache[GroupName, []Permission]
+	userPermissions  *rcucache.Cache[UserName, []Permission]
 }
 
 // NewFilePermissionStore creates a new FilePermissionStore.
 func NewFilePermissionStore(path string) (*FilePermissionStore, error) {
 	m := &FilePermissionStore{
 		path:             path,
-		groupPermissions: map[string][]*core.Permission{},
-		userPermissions:  map[string][]*core.Permission{},
+		groupPermissions: rcucache.NewEmptyCache[GroupName, []Permission](),
+		userPermissions:  rcucache.NewEmptyCache[UserName, []Permission](),
 	}
 	if err := m.load(); err != nil {
 		return nil, fmt.Errorf("failed to load permissions: %w", err)
@@ -33,13 +34,12 @@ func NewFilePermissionStore(path string) (*FilePermissionStore, error) {
 }
 
 // GetGroupPermissions returns permissions for the given groups.
-func (m *FilePermissionStore) GetGroupPermissions(groups []string) []*core.Permission {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (m *FilePermissionStore) GetGroupPermissions(groups []string) []Permission {
+	view := m.groupPermissions.View()
 
-	var result []*core.Permission
+	var result []Permission
 	for _, group := range groups {
-		if perms, ok := m.groupPermissions[group]; ok {
+		if perms, ok := view.Lookup(group); ok {
 			result = append(result, perms...)
 		}
 	}
@@ -47,11 +47,10 @@ func (m *FilePermissionStore) GetGroupPermissions(groups []string) []*core.Permi
 }
 
 // GetUserPermissions returns direct user permissions.
-func (m *FilePermissionStore) GetUserPermissions(username string) []*core.Permission {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (m *FilePermissionStore) GetUserPermissions(username string) []Permission {
+	view := m.userPermissions.View()
 
-	if perms, ok := m.userPermissions[username]; ok {
+	if perms, ok := view.Lookup(username); ok {
 		return perms
 	}
 	return nil
@@ -82,42 +81,44 @@ func (m *FilePermissionStore) load() error {
 	}
 
 	// Parse group permissions.
-	newGroupPerms := map[string][]*core.Permission{}
+	groupPermissions := map[string][]Permission{}
 	for _, gp := range file.Permissions.Groups {
 		perms, err := compilePermissions(gp.Permissions)
 		if err != nil {
 			return fmt.Errorf("group %q: %w", gp.Name, err)
 		}
-		newGroupPerms[gp.Name] = perms
+		groupPermissions[gp.Name] = perms
 	}
 
 	// Parse user permissions.
-	newUserPerms := map[string][]*core.Permission{}
+	userPermissions := map[string][]Permission{}
 	for _, up := range file.Permissions.Users {
 		perms, err := compilePermissions(up.Permissions)
 		if err != nil {
 			return fmt.Errorf("user %q: %w", up.Username, err)
 		}
-		newUserPerms[up.Username] = perms
+		userPermissions[up.Username] = perms
 	}
 
-	m.mu.Lock()
-	m.groupPermissions = newGroupPerms
-	m.userPermissions = newUserPerms
-	m.mu.Unlock()
+	// Tiny out-of-sync is possible, but since users and groups permissions are
+	// independent, it's not a problem.
+	m.groupPermissions.Swap(groupPermissions)
+	m.userPermissions.Swap(userPermissions)
 
 	return nil
 }
 
 // compilePermissions compiles a list of permission patterns.
-func compilePermissions(patterns []string) ([]*core.Permission, error) {
-	result := make([]*core.Permission, 0, len(patterns))
+func compilePermissions(patterns []string) ([]Permission, error) {
+	out := make([]Permission, 0, len(patterns))
 	for _, pattern := range patterns {
-		perm, err := core.NewPermission(pattern)
+		perm, err := NewPermission(pattern)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, perm)
+
+		out = append(out, perm)
 	}
-	return result, nil
+
+	return out, nil
 }

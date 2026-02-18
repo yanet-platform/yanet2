@@ -12,15 +12,15 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sys/unix"
 
-	"github.com/yanet-platform/yanet2/modules/route/internal/discovery"
+	"github.com/yanet-platform/yanet2/common/go/rcucache"
 )
 
 // NexthopCache is a cache of nexthops that is populated via neighbour
 // discovery.
-type NexthopCache = discovery.Cache[netip.Addr, NeighbourEntry]
+type NexthopCache = rcucache.Cache[netip.Addr, NeighbourEntry]
 
 // NexthopCacheView is a read-only view of the nexthop cache.
-type NexthopCacheView = discovery.CacheView[netip.Addr, NeighbourEntry]
+type NexthopCacheView = rcucache.CacheView[netip.Addr, NeighbourEntry]
 
 // Option is a function that configures the neighbour monitor.
 type Option func(*options)

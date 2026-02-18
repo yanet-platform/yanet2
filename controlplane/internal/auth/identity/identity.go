@@ -1,6 +1,13 @@
 package identity
 
-import "errors"
+import (
+	"errors"
+)
+
+var (
+	// ErrIdentityNotFound is returned when a requested identity does not exist.
+	ErrIdentityNotFound = errors.New("identity not found")
+)
 
 // Identity represents a user account with authentication and authorization
 // details.
@@ -13,7 +20,10 @@ type Identity struct {
 	Disabled bool
 }
 
-var (
-	// ErrIdentityNotFound is returned when a requested identity does not exist.
-	ErrIdentityNotFound = errors.New("identity not found")
-)
+func (m Identity) Clone() Identity {
+	return Identity{
+		Username: m.Username,
+		Groups:   append([]string{}, m.Groups...),
+		Disabled: m.Disabled,
+	}
+}

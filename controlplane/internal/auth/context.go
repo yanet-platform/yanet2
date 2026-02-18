@@ -24,6 +24,6 @@ func ExtractToken(ctx context.Context) string {
 		return ""
 	}
 
-	// Return the first value (there should only be one).
+	// TODO: should we allow passing multiple tokens at once?
 	return values[0]
 }

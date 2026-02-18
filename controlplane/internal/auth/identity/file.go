@@ -4,24 +4,26 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/yanet-platform/yanet2/common/go/rcucache"
 )
+
+type UserName = string
 
 // FileIdentityProvider loads identities from a YAML file.
 type FileIdentityProvider struct {
 	path string
 
-	mu         sync.RWMutex
-	identities map[string]*Identity // username -> Identity
+	identities *rcucache.Cache[UserName, Identity]
 }
 
 // NewFileIdentityProvider creates a new FileIdentityProvider.
 func NewFileIdentityProvider(path string) (*FileIdentityProvider, error) {
 	m := &FileIdentityProvider{
 		path:       path,
-		identities: map[string]*Identity{},
+		identities: rcucache.NewEmptyCache[UserName, Identity](),
 	}
 	if err := m.load(); err != nil {
 		return nil, fmt.Errorf("failed to load identities: %w", err)
@@ -36,19 +38,13 @@ func (m *FileIdentityProvider) Name() string {
 
 // GetIdentity retrieves an identity by username.
 func (m *FileIdentityProvider) GetIdentity(ctx context.Context, username string) (Identity, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	identity, ok := m.identities[username]
+	view := m.identities.View()
+	identity, ok := view.Lookup(username)
 	if !ok {
 		return Identity{}, ErrIdentityNotFound
 	}
 
-	return Identity{
-		Username: identity.Username,
-		Groups:   append([]string{}, identity.Groups...),
-		Disabled: identity.Disabled,
-	}, nil
+	return identity.Clone(), nil
 }
 
 // load reads and parses the identities file.
@@ -67,18 +63,16 @@ func (m *FileIdentityProvider) load() error {
 	}
 
 	// Build username index.
-	newIdentities := map[string]*Identity{}
-	for i := range file.Identities {
-		identity := &file.Identities[i]
+	identities := map[string]Identity{}
+	for _, identity := range file.Identities {
 		if identity.Username == "" {
 			return fmt.Errorf("identity with empty username")
 		}
-		newIdentities[identity.Username] = identity
+
+		identities[identity.Username] = identity
 	}
 
-	m.mu.Lock()
-	m.identities = newIdentities
-	m.mu.Unlock()
+	m.identities.Swap(identities)
 
 	return nil
 }

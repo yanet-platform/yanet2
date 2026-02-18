@@ -1,4 +1,4 @@
-package discovery
+package rcucache
 
 import (
 	"iter"
@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-// Cache is a generic netlink key-value cache.
+// Cache is a generic key-value cache.
 type Cache[K comparable, V any] struct {
 	mu    sync.RWMutex
 	cache map[K]V

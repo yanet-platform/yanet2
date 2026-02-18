@@ -8,12 +8,13 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/permission"
 )
 
 // PermissionStore provides access to permissions.
 type PermissionStore interface {
-	GetGroupPermissions(groups []string) []*core.Permission
-	GetUserPermissions(username string) []*core.Permission
+	GetGroupPermissions(groups []string) []permission.Permission
+	GetUserPermissions(username string) []permission.Permission
 }
 
 // RBACAuthorizer implements role-based access control.
@@ -66,7 +67,7 @@ func (m *RBACAuthorizer) Authorize(
 	fullMethod string,
 ) error {
 	// Collect all permissions (group + user).
-	var allPermissions []*core.Permission
+	var allPermissions []permission.Permission
 
 	// Get group permissions.
 	if len(principal.Groups) > 0 {

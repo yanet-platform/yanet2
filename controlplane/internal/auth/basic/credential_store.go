@@ -3,13 +3,16 @@ package basic
 import (
 	"fmt"
 	"os"
-	"sync"
 
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 
+	"github.com/yanet-platform/yanet2/common/go/rcucache"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
+
+type UserName = string
+type PasswordHash = string
 
 // CredentialStore provides access to credentials for authentication.
 type CredentialStore interface {
@@ -20,15 +23,14 @@ type CredentialStore interface {
 type FileCredentialStore struct {
 	path string
 
-	mu          sync.RWMutex
-	credentials map[string]string // username -> bcrypt hash
+	credentials *rcucache.Cache[UserName, PasswordHash] // username -> bcrypt hash
 }
 
 // NewFileCredentialStore creates a new FileCredentialStore.
 func NewFileCredentialStore(path string) (*FileCredentialStore, error) {
 	m := &FileCredentialStore{
 		path:        path,
-		credentials: map[string]string{},
+		credentials: rcucache.NewEmptyCache[UserName, PasswordHash](),
 	}
 	if err := m.load(); err != nil {
 		return nil, fmt.Errorf("failed to load credentials: %w", err)
@@ -38,10 +40,8 @@ func NewFileCredentialStore(path string) (*FileCredentialStore, error) {
 
 // VerifyCredentials checks if the password matches the stored hash.
 func (m *FileCredentialStore) VerifyCredentials(username, password string) error {
-	m.mu.RLock()
-	hash, ok := m.credentials[username]
-	m.mu.RUnlock()
-
+	view := m.credentials.View()
+	hash, ok := view.Lookup(username)
 	if !ok {
 		return core.ErrInvalidCredentials
 	}
@@ -85,9 +85,7 @@ func (m *FileCredentialStore) load() error {
 		newCreds[entry.Username] = entry.PasswordHash
 	}
 
-	m.mu.Lock()
-	m.credentials = newCreds
-	m.mu.Unlock()
+	m.credentials.Swap(newCreds)
 
 	return nil
 }
