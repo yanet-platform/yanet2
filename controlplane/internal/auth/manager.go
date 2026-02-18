@@ -193,10 +193,6 @@ func NewManager(cfg *Config, options ...ManagerOption) (*Manager, error) {
 
 	m.authenticators = append(m.authenticators, none.NewNoneAuthenticator())
 
-	if len(m.authenticators) == 0 {
-		return nil, fmt.Errorf("no authenticators configured")
-	}
-
 	return m, nil
 }
 
