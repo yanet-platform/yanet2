@@ -292,3 +292,10 @@ type BalancerManagerConfig struct {
 	RefreshPeriod time.Duration // Refresh interval
 	MaxLoadFactor float32       // Maximum load factor (0.0 to 1.0)
 }
+
+// UpdateInfo contains metadata about what was reused during a balancer update
+type UpdateInfo struct {
+	VsIpv4MatcherReused bool           // Whether IPv4 VS matcher was reused
+	VsIpv6MatcherReused bool           // Whether IPv6 VS matcher was reused
+	AclReusedVs         []VsIdentifier // VS identifiers for which ACL was reused
+}

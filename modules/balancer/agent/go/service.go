@@ -115,7 +115,8 @@ func (m *BalancerService) UpdateConfig(
 	manager, _ := m.agent.BalancerManager(name)
 	if manager != nil {
 		m.log.Infow("updating balancer config", "name", name)
-		if err := manager.Update(req.Config, time.Now()); err != nil {
+		updateInfo, err := manager.Update(req.Config, time.Now())
+		if err != nil {
 			m.log.Errorw(
 				"failed to update balancer",
 				"name",
@@ -127,7 +128,8 @@ func (m *BalancerService) UpdateConfig(
 		}
 		m.log.Infow("balancer config updated", "name", name)
 		return &balancerpb.UpdateConfigResponse{
-			Name: req.Name,
+			Name:       req.Name,
+			UpdateInfo: ConvertUpdateInfoToProto(updateInfo),
 		}, nil
 	} else {
 		m.log.Infow("creating new balancer", "name", name)
@@ -138,6 +140,8 @@ func (m *BalancerService) UpdateConfig(
 		m.log.Infow("balancer created", "name", name)
 		return &balancerpb.UpdateConfigResponse{
 			Name: req.Name,
+			// No update info for new balancer creation
+			UpdateInfo: nil,
 		}, nil
 	}
 }

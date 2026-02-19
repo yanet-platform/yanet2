@@ -770,7 +770,7 @@ func TestSessionTableManual(t *testing.T) {
 		config.State.SessionTableCapacity = &newCapacity
 		config.State.SessionTableMaxLoadFactor = &newMaxLoadFactor
 
-		err := ts.Balancer.Update(config, now)
+		_, err := ts.Balancer.Update(config, now)
 		require.NoError(t, err, "failed to update config")
 
 		t.Logf("Resized session table to capacity 256")
@@ -903,7 +903,7 @@ func TestSessionTableManual(t *testing.T) {
 		config.State.SessionTableCapacity = &newCapacity
 		config.State.SessionTableMaxLoadFactor = &newMaxLoadFactor
 
-		err := ts.Balancer.Update(config, now)
+		_, err := ts.Balancer.Update(config, now)
 		require.NoError(t, err, "failed to resize session table to 1024")
 
 		t.Logf("Resized session table to 1024")
@@ -1050,7 +1050,7 @@ func TestSessionTableManual(t *testing.T) {
 		config.State.SessionTableCapacity = &newCapacity
 		config.State.SessionTableMaxLoadFactor = &newMaxLoadFactor
 
-		err := ts.Balancer.Update(config, now)
+		_, err := ts.Balancer.Update(config, now)
 		require.NoError(t, err, "failed to resize session table to 300")
 
 		require.LessOrEqual(

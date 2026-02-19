@@ -806,7 +806,7 @@ func TestWlc(t *testing.T) {
 			},
 		}
 
-		err := balancerMgr.Update(updatedConfig, now)
+		_, err := balancerMgr.Update(updatedConfig, now)
 		require.NoError(t, err, "failed to update configuration")
 
 		// 3.2: Verify Config() matches updated configuration

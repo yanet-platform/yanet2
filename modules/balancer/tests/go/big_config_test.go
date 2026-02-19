@@ -469,7 +469,7 @@ func TestBigConfig(t *testing.T) {
 		newConfig := createBigConfig(20, 20, rng)
 
 		updateStart := time.Now()
-		err := ts.Balancer.Update(newConfig, ts.Mock.CurrentTime())
+		_, err := ts.Balancer.Update(newConfig, ts.Mock.CurrentTime())
 		require.NoError(t, err)
 
 		t.Logf(

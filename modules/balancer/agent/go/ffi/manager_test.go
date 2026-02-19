@@ -1040,7 +1040,7 @@ func TestManager(t *testing.T) {
 			MaxLoadFactor: 0.8,
 		}
 
-		err := manager.Update(&newConfig, now)
+		_, err := manager.Update(&newConfig, now)
 		require.NoError(t, err, "failed to update manager with new config")
 
 		// Verify the new config is applied
@@ -1135,7 +1135,7 @@ func TestManager(t *testing.T) {
 	// Test updating manager with same reals/VS but in different order
 	t.Run("UpdateWithReorderedConfig", func(t *testing.T) {
 		// First, restore the original config since previous test changed it
-		err = manager.Update(&managerConfig, now)
+		_, err = manager.Update(&managerConfig, now)
 		require.NoError(t, err, "failed to restore original config")
 
 		// Now enable some reals
@@ -1182,7 +1182,7 @@ func TestManager(t *testing.T) {
 			managerConfig.Balancer.Handler.VirtualServices[1].Reals[0],
 		}
 
-		err = manager.Update(&reorderedConfig, now)
+		_, err = manager.Update(&reorderedConfig, now)
 		require.NoError(
 			t,
 			err,

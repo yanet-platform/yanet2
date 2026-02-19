@@ -383,22 +383,22 @@ init_vs_ipv4_filter(
 		init_transport_rule(rule, vs_config);
 
 		// Action: VS index in handler
-		rule->action = i;
+		rule->action = v4_idx;
 
 		v4_idx += 1;
 	}
 
-	handler->vs_v4 = memory_balloc(mctx, sizeof(struct filter));
-	if (handler->vs_v4 == NULL) {
+	struct filter *filter = memory_balloc(mctx, sizeof(struct filter));;
+	if (filter == NULL) {
 		NEW_ERROR("failed to allocate IPv4 VS filter");
 		return -1;
 	}
-	SET_OFFSET_OF(&handler->vs_v4, handler->vs_v4);
+	SET_OFFSET_OF(&handler->vs_ipv4.filter, filter);
 
 	// Compile filters
 	int res = 0;
 	res = FILTER_INIT(
-		ADDR_OF(&handler->vs_v4),
+		filter,
 		vs_lookup_ipv4,
 		v4_rules,
 		v4_count,
@@ -406,7 +406,7 @@ init_vs_ipv4_filter(
 	);
 	if (res != 0) {
 		memory_bfree(
-			mctx, ADDR_OF(&handler->vs_v4), sizeof(struct filter)
+			mctx, filter, sizeof(struct filter)
 		);
 		NEW_ERROR("failed to compile IPv4 VS filter");
 	}
@@ -510,13 +510,20 @@ register_virtual_services(
 	struct packet_handler_config *config,
 	struct balancer_state *state,
 	struct packet_handler *prev_handler,
-	int *match_prev_ipv4,
-	int *match_prev_ipv6
+	size_t *match_prev_ipv4,
+	size_t *match_prev_ipv6
 ) {
-	uint32_t *vs_index =
+	uint32_t *prev_vs_index =
 		prev_handler != NULL ? ADDR_OF(&prev_handler->vs_index) : NULL;
-	size_t vs_count = prev_handler != NULL ? prev_handler->vs_index_count : 0;
+	size_t prev_vs_index_count = prev_handler != NULL ? prev_handler->vs_index_count : 0;
+
 	for (size_t vs_idx = 0; vs_idx < config->vs_count; ++vs_idx) {
+		int proto = vs_config->identifier.ip_proto;
+		if (proto != IPPROTO_IP && proto != IPPROTO_IPV6){
+			NEW_ERROR("proto of virtual service at index %zu is invalid: got %d, but only IPv4 (%d) and IPv6 (%d) are supported", vs_idx, proto, IPPROTO_IP, IPPROTO_IPV6);
+			return -1;
+		}
+
 		struct named_vs_config *vs_config = &config->vs[vs_idx];
 		struct vs_state *vs_state = balancer_state_find_or_insert_vs(
 			state, &vs_config->identifier
@@ -529,41 +536,19 @@ register_virtual_services(
 			);
 			return -1;
 		}
+
 		size_t vs_registry_idx = vs_state->registry_idx;
-		if (vs_registry_idx < vs_count &&
-		    vs_index[vs_registry_idx] != (uint32_t)-1) {
-			if (vs_config->identifier.ip_proto == IPPROTO_IP) {
-				*match_prev_ipv4 += 1;
-			} else {
+		if (vs_registry_idx < prev_vs_index_count &&
+		    prev_vs_index[vs_registry_idx] != INDEX_INVALID) {
+			if (proto == IPPROTO_IPV6) {
 				*match_prev_ipv6 += 1;
+			} else {
+				*match_prev_ipv4 += 1;
 			}
 		}
 	}
+
 	return 0;
-}
-
-static size_t
-config_vs_count(struct named_vs_config *vs, size_t vs_count, int proto) {
-	size_t count = 0;
-	for (size_t i = 0; i < vs_count; ++i) {
-		struct named_vs_config *vs_config = &vs[i];
-		if (vs_config->identifier.ip_proto == proto) {
-			++count;
-		}
-	}
-	return count;
-}
-
-static size_t
-vs_count(struct vs *vs, size_t vs_count, int proto) {
-	size_t count = 0;
-	for (size_t i = 0; i < vs_count; ++i) {
-		struct vs *current_vs = &vs[i];
-		if (current_vs->identifier.ip_proto == proto) {
-			++count;
-		}
-	}
-	return count;
 }
 
 static int
@@ -581,32 +566,175 @@ need_recompile_filter(
 	return config_vs != prev_config_vs || matching_vs != config_vs;
 }
 
+static inline struct vs *
+find_vs_in_prev_handler(
+	struct packet_handler *prev_handler,
+	struct vs *vs
+) {
+	if (prev_handler == NULL) {
+		return NULL;
+	}
+	
+	uint32_t *prev_vs_index = ADDR_OF(&prev_handler->vs_index);
+	size_t prev_vs_count = prev_handler->vs_index_count;
+	
+	struct vs *prev_handler_virtual_services = ADDR_OF(&prev_handler->vs);
+	if (vs->registry_idx >= prev_vs_count) {
+		return NULL;
+	}
+
+	uint32_t prev_vs_ph_idx = prev_vs_index[vs->registry_idx];
+	if (prev_vs_ph_idx == (uint32_t)-1) {
+		return NULL;
+	}
+
+	return &prev_handler_virtual_services[prev_vs_ph_idx];
+}
+
+static void
+swap_vs_configs(
+	struct named_vs_config *left,
+	struct named_vs_config *right
+) {
+	struct named_vs_config tmp = *left;
+	*left = *right;
+	*right = tmp;
+}
+
+// move ipv4 services first, and ipv6 then.
+static void
+reorder_vs_configs(
+	struct named_vs_config *configs,
+	size_t count,
+	size_t *ipv4_count,
+	size_t *ipv6_count
+) {
+	ssize_t last_ipv6 = -1;
+	for (size_t idx = 0; idx < count; ++idx) {
+		struct named_vs_config *current = &configs[idx];
+		if (current->identifier.ip_proto == IPPROTO_IPV6) {
+			// IPv6 service
+			*ipv6_count += 1;
+			if (last_ipv6 == -1) {
+				last_ipv6 = idx;
+			}
+			continue;
+		}
+
+		// IPv4 service
+		*ipv4_count += 1;
+		if (last_ipv6 == -1) {
+			continue;
+		}
+
+		struct named_vs_config *ipv6 = &configs[last_ipv6];
+		swap_vs_configs(ipv6, current);
+
+		last_ipv6 += 1;
+	}
+}
+
+static int
+init_packet_handler_vs(
+	struct packet_handler_vs *packet_handler_vs,
+	int proto,
+	struct balancer_state *state,
+	struct memory_context *mctx,
+	struct packet_handler_config *config,
+	struct packet_handler_vs *prev_packet_handler_vs,
+	struct balancer_update_info *update_info
+) {
+
+}
+
+static int
+init_vs_proto(
+	struct packet_handler *handler,
+	struct packet_handler *prev_handler,
+	int proto,
+	size_t vs_count,
+	struct named_vs_config *vs_configs,
+	struct vs *vs,
+	struct balancer_state *state,
+	struct memory_context *mctx,
+	struct counter_registry *registry,
+	struct balancer_update_info *update_info
+) {
+
+}
+
 static int
 init_vs(struct packet_handler *handler,
 	struct balancer_state *state,
 	struct memory_context *mctx,
 	struct packet_handler_config *config,
 	struct counter_registry *registry,
-	struct packet_handler *prev_handler) {
-	int match_prev_ipv4 = 0;
-	int match_prev_ipv6 = 0;
+	struct packet_handler *prev_handler,
+	struct balancer_update_info *update_info) {
+	
+	// list of VS configs have ipv4 prefix and and ipv6 prefix
+	size_t ipv4_count = 0;
+	size_t ipv6_count = 0;
+	reorder_vs_configs(&config->vs, config->vs_count, &ipv4_count, &ipv6_count);
+
+	// allocate virtual services
+	struct vs *virtual_services = memory_balloc(mctx, sizeof(struct vs) * config->vs_count);
+	if (virtual_services == NULL) {
+		NEW_ERROR("no memory ");
+		return -1;
+	}
+
+	// first `ipv4` virtual services are for IPv4
+	// and the rest `ipv6` are for IPv6
+
+	if (init_vs_proto(handler, prev_handler, IPPROTO_IP, ipv4_count, &config->vs, vs, state, mctx, registry, update_info) != 0) {
+		PUSH_ERROR("failed to initialize IPv4 virtual services");
+		return -1;
+	}
+
+	if (init_vs_proto(handler, prev_handler, IPPROTO_IPV6, ipv6_count, &config->vs + ipv4_count, vs + ipv4_count, state, mctx, registry, update_info) != 0) {
+		PUSH_ERROR("failed to initialize IPv6 virtual services");
+		return -1;
+	}
+
+	// find virtual services and matching count
+	// for both protocols
+	size_t match_prev_ipv4 = 0;
+	size_t match_prev_ipv6 = 0;
 	
 	// register virtual services
 	if (register_virtual_services(
 		    config,
 		    state,
 		    prev_handler,
+			&ipv4,
+			&ipv6,
 		    &match_prev_ipv4,
 		    &match_prev_ipv6
 	    ) != 0) {
-	 PUSH_ERROR("failed to register virtual services");
 	 return -1;
 	}
 
+	assert(ipv4 + ipv6 == config->vs_count);
+
+	// first `ipv4` virtual services are for IPv4
+	// and the rest `ipv6` are for IPv6
+
+	// setup ipv4 vs proxy
+	handler->vs_ipv4.vs_count = ipv4;
+	SET_OFFSET_OF(&handler->vs_ipv4, virtual_services);
+
+	// setup ipv6 vs proxy
+	handler->vs_ipv6.vs_count = ipv6;
+	SET_OFFSET_OF(&handler->vs_ipv6, virtual_services + ipv4);
+
 	// setup IPv4 VS filter
 	int need_ipv4_recompile = need_recompile_filter(
-		    config, prev_handler, IPPROTO_IP, match_prev_ipv4
-	    );
+		config, prev_handler, IPPROTO_IP, match_prev_ipv4
+	);
+	if (update_info != NULL) {
+		update_info->vs_ipv4_matcher_reused = !need_ipv4_recompile;
+	}
 	
 	if (need_ipv4_recompile) {
 		if (init_vs_ipv4_filter(handler, mctx, config) != 0) {
@@ -619,8 +747,11 @@ init_vs(struct packet_handler *handler,
 
 	// setup IPv6 VS filter
 	int need_ipv6_recompile = need_recompile_filter(
-		    config, prev_handler, IPPROTO_IPV6, match_prev_ipv6
-	    );
+		config, prev_handler, IPPROTO_IPV6, match_prev_ipv6
+	);
+	if (update_info != NULL) {
+		update_info->vs_ipv6_matcher_reused = !need_ipv6_recompile;
+	}
 	
 	if (need_ipv6_recompile) {
 		if (init_vs_ipv6_filter(handler, mctx, config) != 0) {
@@ -629,6 +760,18 @@ init_vs(struct packet_handler *handler,
 		}
 	} else {
 		EQUATE_OFFSET(&handler->vs_v6, &prev_handler->vs_v6);
+	}
+	
+	// Allocate array for ACL reuse tracking
+	if (update_info != NULL) {
+		update_info->vs_acl_reused = malloc(
+			sizeof(struct vs_identifier) * config->vs_count
+		);
+		if (update_info->vs_acl_reused == NULL && config->vs_count > 0) {
+			NEW_ERROR("failed to allocate vs_acl_reused array");
+			return -1;
+		}
+		update_info->vs_acl_reused_count = 0;
 	}
 
 	// initialize announce LPMs
@@ -650,13 +793,28 @@ init_vs(struct packet_handler *handler,
 	size_t reals_idx = 0;
 	struct real *reals = ADDR_OF(&handler->reals);
 	for (size_t i = 0; i < config->vs_count; ++i) {
-		if (vs_init(&vs[i],
+		struct vs *cur_vs = &vs[i];
+
+		// setup state for virtual service
+		if (vs_state_setup(cur_vs, state, &config->vs[i]) != 0) {
+			PUSH_ERROR(
+				"failed to setup state for virtual service state at index %zu",
+				i
+			);
+		}
+
+		// find previous virtual service
+		struct vs *prev_vs = find_vs_in_prev_handler(prev_handler, cur_vs);
+
+		// initialize virtual service
+		if (vs_init(cur_vs, prev_vs,
 			    reals_idx,
 			    reals + reals_idx,
 			    state,
 			    &config->vs[i],
 			    registry,
-			    mctx) != 0) {
+			    mctx,
+			    update_info) != 0) {
 			PUSH_ERROR(
 				"failed to setup virtual service at index %zu",
 				i
@@ -735,8 +893,14 @@ packet_handler_setup(
 	const char *name,
 	struct packet_handler_config *config,
 	struct balancer_state *state,
-	struct packet_handler *prev_handler
+	struct packet_handler *prev_handler,
+	struct balancer_update_info *update_info
 ) {
+	// Initialize update_info if provided
+	if (update_info != NULL) {
+		memset(update_info, 0, sizeof(*update_info));
+	}
+
 	struct memory_context *mctx = &agent->memory_context;
 	struct packet_handler *handler =
 		memory_balloc(mctx, sizeof(struct packet_handler));
@@ -784,7 +948,8 @@ packet_handler_setup(
 		    mctx,
 		    config,
 		    counter_registry,
-		    prev_handler) != 0) {
+		    prev_handler,
+		    update_info) != 0) {
 		PUSH_ERROR("failed to setup virtual services");
 		goto free_reals;
 	}
@@ -856,3 +1021,4 @@ packet_handler_real_idx(
 
 	return 0;
 }
+

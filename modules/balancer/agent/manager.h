@@ -317,15 +317,18 @@ balancer_manager_config(
  * Diagnostics: On error, a message is recorded and retrievable via
  * balancer_manager_take_error().
  *
- * @param manager Manager handle.
- * @param config  New configuration to apply.
- * @param now     Current monotonic timestamp for bookkeeping.
+ * @param manager     Manager handle.
+ * @param config      New configuration to apply.
+ * @param update_info Optional output structure to receive update metadata.
+ *                    Pass NULL if metadata is not needed.
+ * @param now         Current monotonic timestamp for bookkeeping.
  * @return 0 on success, -1 on error.
  */
 int
 balancer_manager_update(
 	struct balancer_manager *manager,
 	struct balancer_manager_config *config,
+	struct balancer_update_info *update_info,
 	uint32_t now
 );
 

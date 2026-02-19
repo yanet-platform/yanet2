@@ -234,6 +234,7 @@ int
 balancer_manager_update(
 	struct balancer_manager *manager,
 	struct balancer_manager_config *config,
+	struct balancer_update_info *update_info,
 	uint32_t now
 ) {
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
@@ -280,7 +281,7 @@ balancer_manager_update(
 
 	// update packet handler
 	if (balancer_update_packet_handler(
-		    balancer, &config->balancer.handler
+		    balancer, &config->balancer.handler, update_info
 	    ) != 0) {
 		NEW_ERROR("%s", balancer_take_error_msg(balancer));
 		PUSH_ERROR("failed to update packet handler");

@@ -10,6 +10,7 @@
 #include <filter/query.h>
 
 #include <assert.h>
+#include <stdio.h>
 
 #include <rte_ether.h>
 #include <rte_ip.h>
@@ -18,6 +19,17 @@
 
 #include "flow/common.h"
 #include "flow/context.h"
+
+// Debug logging for VS lookup
+#ifndef BALANCER_DEBUG_LOG
+#define BALANCER_DEBUG_LOG 1
+#endif
+
+#if BALANCER_DEBUG_LOG
+#define DBG_LOG_LOOKUP(fmt, ...) fprintf(stderr, "[BALANCER_LOOKUP] " fmt "\n", ##__VA_ARGS__)
+#else
+#define DBG_LOG_LOOKUP(fmt, ...) do {} while(0)
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -75,7 +87,7 @@ static inline bool
 vs_v4_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	(void)ctx;
 	struct value_range *result;
-	FILTER_QUERY(vs->acl, vs_acl_ipv4, &packet, &result, 1);
+	FILTER_QUERY(ADDR_OF(&vs->acl), vs_acl_ipv4, &packet, &result, 1);
 	return result->count != 0;
 }
 
@@ -130,7 +142,7 @@ static inline bool
 vs_v6_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	(void)ctx;
 	struct value_range *result;
-	FILTER_QUERY(vs->acl, vs_acl_ipv6, &packet, &result, 1);
+	FILTER_QUERY(ADDR_OF(&vs->acl), vs_acl_ipv6, &packet, &result, 1);
 	return result->count != 0;
 }
 
@@ -141,24 +153,34 @@ vs_lookup_and_fw(struct packet_ctx *ctx) {
 	struct packet *packet = ctx->packet;
 	if (packet->network_header.type ==
 	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+		DBG_LOG_LOOKUP("IPv4 packet, looking up VS");
 		struct vs *vs = vs_v4_lookup(ctx);
 		if (vs == NULL) {
+			DBG_LOG_LOOKUP("IPv4 VS lookup failed - no matching VS found");
 			return NULL;
 		}
+		DBG_LOG_LOOKUP("IPv4 VS found, checking ACL");
 		if (!vs_v4_fw(ctx, vs, packet)) {
+			DBG_LOG_LOOKUP("IPv4 ACL check failed - source not allowed");
 			packet_ctx_vs_stats(ctx)->packet_src_not_allowed += 1;
 			return NULL;
 		}
+		DBG_LOG_LOOKUP("IPv4 ACL check passed");
 		return vs;
 	} else { // ipv6
+		DBG_LOG_LOOKUP("IPv6 packet, looking up VS");
 		struct vs *vs = vs_v6_lookup(ctx);
 		if (vs == NULL) {
+			DBG_LOG_LOOKUP("IPv6 VS lookup failed - no matching VS found");
 			return NULL;
 		}
+		DBG_LOG_LOOKUP("IPv6 VS found, checking ACL");
 		if (!vs_v6_fw(ctx, vs, packet)) {
+			DBG_LOG_LOOKUP("IPv6 ACL check failed - source not allowed");
 			packet_ctx_vs_stats(ctx)->packet_src_not_allowed += 1;
 			return NULL;
 		}
+		DBG_LOG_LOOKUP("IPv6 ACL check passed");
 		return vs;
 	}
 }

@@ -491,7 +491,7 @@ func TestSessionTableStress1(t *testing.T) {
 
 		currentConfig := ts.Balancer.Config()
 		currentConfig.State.SessionTableCapacity = &newCapacity
-		err = ts.Balancer.Update(currentConfig, ts.Mock.CurrentTime())
+		_, err = ts.Balancer.Update(currentConfig, ts.Mock.CurrentTime())
 		require.NoError(t, err, "failed to shrink session table capacity")
 
 		// Run current test case

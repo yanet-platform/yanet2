@@ -34,6 +34,51 @@ struct balancer_config {
 	struct state_config state;
 };
 
+/**
+ * Information about balancer configuration update operation.
+ *
+ * Provides visibility into filter reuse decisions made during
+ * packet handler update. Helps understand configuration change
+ * impact and optimization opportunities.
+ */
+struct balancer_update_info {
+	/**
+	 * IPv4 virtual service matcher was reused from previous handler.
+	 *
+	 * When true (non-zero): VS lookup filter for IPv4 was not recompiled
+	 * When false (zero): VS lookup filter for IPv4 was recompiled
+	 */
+	int vs_ipv4_matcher_reused;
+	
+	/**
+	 * IPv6 virtual service matcher was reused from previous handler.
+	 *
+	 * When true (non-zero): VS lookup filter for IPv6 was not recompiled
+	 * When false (zero): VS lookup filter for IPv6 was recompiled
+	 */
+	int vs_ipv6_matcher_reused;
+	
+	/**
+	 * Number of virtual services that reused ACL from previous handler.
+	 *
+	 * These VS did not need ACL recompilation because their
+	 * allowed_src rules matched the previous configuration.
+	 */
+	size_t vs_acl_reused_count;
+	
+	/**
+	 * Array of VS identifiers that reused ACL filters.
+	 *
+	 * Contains identifiers for virtual services where ACL was
+	 * reused (not recompiled) from the previous handler.
+	 *
+	 * Array length is vs_acl_reused_count.
+	 * Allocated by balancer_update_packet_handler().
+	 * Caller must free with free().
+	 */
+	struct vs_identifier *vs_acl_reused;
+};
+
 struct agent;
 
 /**
@@ -131,18 +176,38 @@ balancer_session_table_capacity(struct balancer_handle *handle);
  * Update packet handler configuration.
  *
  * This call applies changes such as timeouts, VS list or source addresses.
+ * Returns information about filter reuse decisions in the update_info parameter.
  *
  * Diagnostics: On error, a message is recorded and retrievable via
  * balancer_take_error_msg(balancer).
  *
- * @param balancer Balancer handle.
- * @param config   New packet handler configuration.
+ * @param balancer    Balancer handle.
+ * @param config      New packet handler configuration.
+ * @param update_info Output structure filled with update information.
+ *                    May be NULL if caller doesn't need this information.
  * @return 0 on success, -1 on error.
  */
 int
 balancer_update_packet_handler(
-	struct balancer_handle *balancer, struct packet_handler_config *config
+	struct balancer_handle *balancer,
+	struct packet_handler_config *config,
+	struct balancer_update_info *update_info
 );
+
+/**
+ * Free all allocations inside a balancer_update_info structure.
+ *
+ * Releases memory allocated by balancer_update_packet_handler() for the
+ * vs_acl_reused array. Safe to call with partially-initialized structures;
+ * ignores NULL pointers.
+ *
+ * NOTE: This function does NOT free the balancer_update_info structure itself,
+ * only the dynamically allocated array inside it.
+ *
+ * @param update_info Structure to release. The struct itself is not freed.
+ */
+void
+balancer_update_info_free(struct balancer_update_info *update_info);
 
 /**
  * Apply a batch of real server updates.

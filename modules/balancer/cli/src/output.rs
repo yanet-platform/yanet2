@@ -139,6 +139,70 @@ fn format_flags(flags: Option<&balancerpb::VsFlags>) -> String {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// UpdateInfo Output
+////////////////////////////////////////////////////////////////////////////////
+
+/// Print update information after configuration update
+pub fn print_update_info(update_info: &balancerpb::UpdateInfo) -> Result<(), Box<dyn Error>> {
+    println!();
+    println!("{}", "═".repeat(60).cyan().bold());
+    println!("{}", "  Configuration Update Summary".white().bold());
+    println!("{}", "═".repeat(60).cyan().bold());
+    println!();
+
+    // Filter reuse status
+    println!("{}", "Filter Reuse Status:".bright_cyan().bold());
+    
+    let ipv4_status = if update_info.vs_ipv4_matcher_reused {
+        "✓ Reused (not recompiled)".bright_green()
+    } else {
+        "✗ Recompiled".bright_yellow()
+    };
+    println!("  IPv4 VS Matcher: {}", ipv4_status);
+    
+    let ipv6_status = if update_info.vs_ipv6_matcher_reused {
+        "✓ Reused (not recompiled)".bright_green()
+    } else {
+        "✗ Recompiled".bright_yellow()
+    };
+    println!("  IPv6 VS Matcher: {}", ipv6_status);
+    
+    println!();
+    
+    // ACL reuse information
+    if !update_info.vs_acl_reused.is_empty() {
+        println!(
+            "{} {}",
+            "ACL Filters Reused:".bright_cyan().bold(),
+            format!("({} virtual services)", update_info.vs_acl_reused.len()).bright_white()
+        );
+        
+        for vs_id in &update_info.vs_acl_reused {
+            if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
+                println!(
+                    "  • {}:{}/{}",
+                    ip.to_string().bright_green(),
+                    vs_id.port,
+                    proto_to_string(vs_id.proto).bright_green()
+                );
+            }
+        }
+    } else {
+        println!(
+            "{} {}",
+            "ACL Filters Reused:".bright_cyan().bold(),
+            "None (all ACLs recompiled)".bright_yellow()
+        );
+    }
+    
+    println!();
+    println!("{}", "═".repeat(60).cyan().bold());
+    println!();
+    
+    Ok(())
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // ShowConfig Output
 ////////////////////////////////////////////////////////////////////////////////
 

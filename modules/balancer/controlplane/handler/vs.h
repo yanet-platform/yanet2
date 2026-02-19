@@ -9,6 +9,7 @@
 struct vs_state;
 struct real;
 struct named_vs_config;
+struct balancer_update_info;
 
 /**
  * Handler-side view of a virtual service.
@@ -35,14 +36,28 @@ struct vs {
 	// TODO: docs
 	struct filter *acl;
 
+	// TODO: docs
+	size_t rules_count;
+	struct filter_rule *rules;
+
+	// TODO: more docs
 	size_t peers_v4_count;	    // Number of IPv4 peers in 'peers_v4'
 	struct net4_addr *peers_v4; // IPv4 peer balancers
 
+	// TODO: more docs
 	size_t peers_v6_count;	    // Number of IPv6 peers in 'peers_v6'
 	struct net6_addr *peers_v6; // IPv6 peer balancers
 
 	uint64_t counter_id; // Per-VS counter id
 };
+
+// TODO: docs
+int
+vs_state_setup(
+	struct vs *vs,
+	struct balancer_state *balancer_state,
+	struct named_vs_config *config
+);
 
 /**
  * Initialize handler-side VS view.
@@ -50,12 +65,14 @@ struct vs {
  */
 int
 vs_init(struct vs *vs,
+	struct vs *prev_vs,
 	size_t first_real_idx,
 	struct real *reals,
 	struct balancer_state *state,
 	struct named_vs_config *config,
 	struct counter_registry *registry,
-	struct memory_context *mctx);
+	struct memory_context *mctx,
+	struct balancer_update_info *update_info);
 
 /**
  * Free resources bound to the VS view.

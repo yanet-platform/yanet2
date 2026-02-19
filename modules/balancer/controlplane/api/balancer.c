@@ -102,7 +102,7 @@ balancer_create(
 	}
 
 	struct packet_handler *handler = packet_handler_setup(
-		agent, name, &config->handler, &balancer->state, NULL
+		agent, name, &config->handler, &balancer->state, NULL, NULL
 	);
 	if (handler == NULL) {
 		PUSH_ERROR("failed to setup packet handler");
@@ -123,7 +123,9 @@ error:
 
 int
 balancer_update_packet_handler(
-	struct balancer_handle *handle, struct packet_handler_config *config
+	struct balancer_handle *handle,
+	struct packet_handler_config *config,
+	struct balancer_update_info *update_info
 ) {
 	int ret;
 
@@ -134,9 +136,14 @@ balancer_update_packet_handler(
 
 	struct agent *agent = ADDR_OF(&prev_handler->cp_module.agent);
 
+	// Initialize update_info if provided
+	if (update_info != NULL) {
+		memset(update_info, 0, sizeof(*update_info));
+	}
+
 	// TODO: pass prev config here
 	struct packet_handler *handler =
-		packet_handler_setup(agent, name, config, &balancer->state, prev_handler);
+		packet_handler_setup(agent, name, config, &balancer->state, prev_handler, update_info);
 	if (handler == NULL) {
 		PUSH_ERROR("failed to setup packet handler");
 		diag_fill(&balancer->diag);
@@ -144,11 +151,7 @@ balancer_update_packet_handler(
 	} else {
 		diag_reset(&balancer->diag);
 		SET_OFFSET_OF(&balancer->handler, handler);
-		memory_bfree(
-			&agent->memory_context,
-			prev_handler,
-			sizeof(struct packet_handler)
-		);
+		// TODO: free handler
 		ret = 0;
 	}
 
@@ -267,6 +270,16 @@ balancer_info_free(struct balancer_info *info) {
 		free(reals);
 	}
 	free(info->vs);
+}
+
+void
+balancer_update_info_free(struct balancer_update_info *update_info) {
+	if (update_info == NULL) {
+		return;
+	}
+	free(update_info->vs_acl_reused);
+	update_info->vs_acl_reused = NULL;
+	update_info->vs_acl_reused_count = 0;
 }
 
 void

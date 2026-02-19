@@ -15,8 +15,19 @@
 
 struct balancer_state;
 struct packet_handler_config;
+struct balancer_update_info;
 
+// TODO: docs
 #define INDEX_INVALID ((uint32_t)-1)
+
+// TODO: docs
+struct packet_handler_vs {
+	struct filter *filter;
+	struct lpm announce;
+
+	size_t vs_count;
+	struct vs *vs;
+};
 
 /**
  * Packet handler instance.
@@ -36,22 +47,17 @@ struct packet_handler {
 	// timeouts of sessions with different types
 	struct sessions_timeouts sessions_timeouts;
 
-	// mapping: (address, port, proto) -> vs_id
-	struct filter *vs_v4;
-	struct filter *vs_v6;
-
-	// set of IP addresses announced by balancer
-	// (virtual service IPs)
-	struct lpm announce_ipv4;
-	struct lpm announce_ipv6;
-
-	// virtual services
+	// TODO: docs
 	size_t vs_count;
 	struct vs *vs;
 
-	// map: vs_registry_idx -> ph_vs_idx
+	// TODO: docs
 	size_t vs_index_count;
 	uint32_t *vs_index;
+
+	// TODO: docs
+	struct packet_handler_vs vs_ipv4;
+	struct packet_handler_vs vs_ipv6;
 
 	// reals
 	size_t reals_count;
@@ -95,6 +101,15 @@ struct packet_handler {
  *
  * Diagnostics: errors are recorded and retrievable via
  * balancer_take_error_msg() on the balancer associated with this handler.
+ *
+ * @param agent        Agent that will own the handler.
+ * @param name         Handler name.
+ * @param config       Packet handler configuration.
+ * @param state        Balancer state to bind to.
+ * @param prev_handler Previous handler for filter reuse (may be NULL).
+ * @param update_info  Output structure filled with update information.
+ *                     May be NULL if caller doesn't need this information.
+ * @return Pointer to new handler on success, NULL on error.
  */
 struct packet_handler *
 packet_handler_setup(
@@ -102,7 +117,8 @@ packet_handler_setup(
 	const char *name,
 	struct packet_handler_config *config,
 	struct balancer_state *state,
-	struct packet_handler *prev_handler
+	struct packet_handler *prev_handler,
+	struct balancer_update_info *update_info
 );
 
 /**
@@ -131,6 +147,7 @@ packet_handler_fill_stats(
 	struct packet_handler_ref *ref
 );
 
+/// TODO: docs
 int
 packet_handler_real_idx(
 	struct packet_handler *handler,

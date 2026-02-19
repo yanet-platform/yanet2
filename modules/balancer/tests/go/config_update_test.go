@@ -813,7 +813,7 @@ func testCfgPhase4UpdateConfig(t *testing.T, ts *utils.TestSetup) {
 
 	// Update configuration
 	newConfig := createCfgUpdatedConfig()
-	err := ts.Balancer.Update(newConfig, ts.Mock.CurrentTime())
+	_, err := ts.Balancer.Update(newConfig, ts.Mock.CurrentTime())
 	require.NoError(t, err, "failed to update configuration")
 
 	// Verify graph immediately after update (before enabling new reals)

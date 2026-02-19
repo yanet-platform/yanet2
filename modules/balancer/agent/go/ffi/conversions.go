@@ -1370,3 +1370,29 @@ func cToGo_GraphReal(cReal *C.struct_graph_real) GraphReal {
 		Enabled:    bool(cReal.enabled),
 	}
 }
+
+// UpdateInfo conversions
+
+func cToGo_UpdateInfo(cInfo *C.struct_balancer_update_info) *UpdateInfo {
+	if cInfo == nil {
+		return nil
+	}
+
+	info := &UpdateInfo{
+		VsIpv4MatcherReused: cInfo.vs_ipv4_matcher_reused != 0,
+		VsIpv6MatcherReused: cInfo.vs_ipv6_matcher_reused != 0,
+	}
+
+	// Convert ACL reused VS identifiers array
+	if cInfo.vs_acl_reused_count > 0 && cInfo.vs_acl_reused != nil {
+		cVsSlice := unsafe.Slice(cInfo.vs_acl_reused, cInfo.vs_acl_reused_count)
+		info.AclReusedVs = make([]VsIdentifier, cInfo.vs_acl_reused_count)
+		for i := range info.AclReusedVs {
+			info.AclReusedVs[i] = cToGo_VsIdentifier(cVsSlice[i])
+		}
+	} else {
+		info.AclReusedVs = []VsIdentifier{}
+	}
+
+	return info
+}

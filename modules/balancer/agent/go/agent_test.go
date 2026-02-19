@@ -302,7 +302,7 @@ func TestBalancerAgent(t *testing.T) {
 		// Get config before update for comparison
 		configBeforeUpdate := manager.Config()
 
-		err = manager.Update(update, m.CurrentTime())
+		_, err = manager.Update(update, m.CurrentTime())
 		require.NoError(t, err, "failed to update manager")
 
 		// Verify update by retrieving manager again
@@ -411,7 +411,7 @@ func TestBalancerAgent(t *testing.T) {
 		// Get config before update for comparison
 		configBeforeUpdate := manager.Config()
 
-		err = manager.Update(update, m.CurrentTime())
+		_, err = manager.Update(update, m.CurrentTime())
 		require.NoError(t, err, "failed to update manager")
 
 		// Verify update by retrieving manager again

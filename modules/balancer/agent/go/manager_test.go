@@ -813,7 +813,7 @@ func TestManager(t *testing.T) {
 			},
 		}
 
-		err := manager.Update(newConfig, now)
+		_, err := manager.Update(newConfig, now)
 		require.NoError(t, err, "failed to update manager config")
 
 		// Verify the new config is applied
@@ -975,7 +975,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 			},
 		}
 
-		err := manager.Update(updateConfig, now)
+		_, err := manager.Update(updateConfig, now)
 		require.NoError(t, err, "failed to update config")
 
 		// Verify source_v4 changed
@@ -1056,7 +1056,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 			},
 		}
 
-		err := manager.Update(updateConfig, now)
+		_, err := manager.Update(updateConfig, now)
 		require.NoError(t, err, "failed to update config")
 
 		// Verify VS changed
@@ -1093,7 +1093,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 			},
 		}
 
-		err := manager.Update(updateConfig, now)
+		_, err := manager.Update(updateConfig, now)
 		require.NoError(t, err, "failed to update config")
 
 		// Verify capacity changed
@@ -1126,7 +1126,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 			},
 		}
 
-		err := manager.Update(updateConfig, now)
+		_, err := manager.Update(updateConfig, now)
 		require.NoError(t, err, "failed to update config")
 
 		// Verify power changed
@@ -1162,7 +1162,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 			},
 		}
 
-		err := manager.Update(updateConfig, now)
+		_, err := manager.Update(updateConfig, now)
 		require.NoError(t, err, "failed to update config")
 
 		// Verify updated fields
@@ -1196,7 +1196,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 			},
 		}
 
-		err := manager.Update(updateConfig, now)
+		_, err := manager.Update(updateConfig, now)
 		require.NoError(t, err, "failed to update config")
 
 		// Verify all fields preserved
@@ -1286,7 +1286,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 			},
 		}
 
-		err := manager.Update(fullConfig, now)
+		_, err := manager.Update(fullConfig, now)
 		require.NoError(t, err, "failed to update config")
 
 		// Verify all fields updated

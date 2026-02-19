@@ -1338,6 +1338,33 @@ func ConvertProtoToFFIPacketHandlerRef(
 	return result
 }
 
+// ConvertUpdateInfoToProto converts FFI update info to protobuf
+func ConvertUpdateInfoToProto(
+	info *ffi.UpdateInfo,
+) *balancerpb.UpdateInfo {
+	if info == nil {
+		return nil
+	}
+
+	// Convert VS identifiers
+	vsIdentifiers := make([]*balancerpb.VsIdentifier, 0, len(info.AclReusedVs))
+	for i := range info.AclReusedVs {
+		vsIdentifiers = append(vsIdentifiers, &balancerpb.VsIdentifier{
+			Addr: &balancerpb.Addr{
+				Bytes: info.AclReusedVs[i].Addr.AsSlice(),
+			},
+			Port:  uint32(info.AclReusedVs[i].Port),
+			Proto: ConvertFFIProtoToProto(info.AclReusedVs[i].TransportProto),
+		})
+	}
+
+	return &balancerpb.UpdateInfo{
+		VsIpv4MatcherReused: info.VsIpv4MatcherReused,
+		VsIpv6MatcherReused: info.VsIpv6MatcherReused,
+		VsAclReused:         vsIdentifiers,
+	}
+}
+
 // ConvertFFIRealUpdateToProto converts FFI real update to protobuf
 func ConvertFFIRealUpdateToProto(
 	update *ffi.RealUpdate,

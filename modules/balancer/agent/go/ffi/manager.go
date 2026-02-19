@@ -4,6 +4,7 @@ package ffi
 #cgo CFLAGS: -I../../ -I../../../../../
 #cgo LDFLAGS: -L../../../../../build/modules/balancer/agent -lbalancer_agent -L../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -L../../../../../build/filter -lfilter_compiler
 #include "manager.h"
+#include "modules/balancer/controlplane/api/balancer.h"
 #include <stdlib.h>
 */
 import "C"
@@ -35,31 +36,40 @@ func (m *BalancerManager) Config() *BalancerManagerConfig {
 	return cToGo_BalancerManagerConfig(&cConfig)
 }
 
-// Update updates the manager's configuration
+// Update updates the manager's configuration and returns update metadata
 func (m *BalancerManager) Update(
 	config *BalancerManagerConfig,
 	now time.Time,
-) error {
+) (*UpdateInfo, error) {
 	if config == nil {
-		return fmt.Errorf("config is nil")
+		return nil, fmt.Errorf("config is nil")
 	}
 
 	cConfig, err := goToC_BalancerManagerConfig(config)
 	if err != nil {
-		return fmt.Errorf("failed to convert config: %w", err)
+		return nil, fmt.Errorf("failed to convert config: %w", err)
 	}
 	defer freeC_BalancerManagerConfig(cConfig)
 
+	// Allocate C update_info structure
+	var cUpdateInfo C.struct_balancer_update_info
+
 	cNow := C.uint32_t(now.Unix())
 
-	if C.balancer_manager_update(m.handle, cConfig, cNow) != 0 {
+	if C.balancer_manager_update(m.handle, cConfig, &cUpdateInfo, cNow) != 0 {
 		cErr := C.balancer_manager_take_error(m.handle)
 		errMsg := C.GoString(cErr)
 		C.free(unsafe.Pointer(cErr))
-		return fmt.Errorf("failed to perform update: %s", errMsg)
+		return nil, fmt.Errorf("failed to perform update: %s", errMsg)
 	}
 
-	return nil
+	// Convert C update_info to Go, copying all data
+	updateInfo := cToGo_UpdateInfo(&cUpdateInfo)
+
+	// Free C allocations from update_info
+	C.balancer_update_info_free(&cUpdateInfo)
+
+	return updateInfo, nil
 }
 
 // UpdateReals applies a batch of real server updates

@@ -68,9 +68,15 @@ impl BalancerService {
         };
 
         log::debug!("Sending UpdateConfig request");
-        self.client.update_config(request).await?;
+        let response = self.client.update_config(request).await?.into_inner();
 
         info!("Successfully updated configuration for '{}'", cmd.name);
+        
+        // Display update information if available
+        if let Some(update_info) = &response.update_info {
+            output::print_update_info(update_info)?;
+        }
+        
         Ok(())
     }
 

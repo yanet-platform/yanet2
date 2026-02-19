@@ -1,4 +1,5 @@
 #include "api/vs.h"
+#include "api/balancer.h"
 #include "api/counter.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
@@ -15,6 +16,7 @@
 
 #include <assert.h>
 #include <netinet/in.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
@@ -116,8 +118,8 @@ setup_peers(
 	return 0;
 }
 
-static int
-setup_state(
+int
+vs_state_setup(
 	struct vs *vs,
 	struct balancer_state *balancer_state,
 	struct named_vs_config *config
@@ -151,21 +153,6 @@ setup_flags(struct vs *vs, struct named_vs_config *config) {
 	return 0;
 }
 
-static void
-free_rule(struct filter_rule *rule) {
-	free(rule->net4.dsts);
-	free(rule->net6.dsts);
-	free(rule->transport.dsts);
-	free(rule->transport.protos);
-}
-
-static void
-free_rules(struct filter_rule *rules, size_t count) {
-	for (size_t rule_idx = 0; rule_idx < count; ++rule_idx) {
-		free_rule(&rules[rule_idx]);
-	}
-	free(rules);
-}
 
 static int
 validate_net4(struct net4 *net4) {
@@ -213,11 +200,14 @@ validate_net6(struct net6 *net6) {
 	return 0;
 }
 
+// fill_rule creates a filter rule with ABSOLUTE pointers (not relative).
+// This allows safe sorting and comparison. Pointers are converted to relative
+// offsets later in setup_acl_rules after sorting and deduplication.
 static int
-fill_rule(struct vs *vs, struct filter_rule *rule, struct allowed_src *src) {
+fill_rule(struct vs *vs, struct filter_rule *rule, struct allowed_src *src, struct memory_context *mctx) {
 	rule->action = 1;
 	if (vs->identifier.ip_proto == IPPROTO_IP) {
-		rule->net4.dst_count = 1;
+		rule->net4.dst_count = 0;
 		rule->net4.dsts = NULL;
 
 		if (validate_net4(&src->net.v4) != 0) {
@@ -226,10 +216,15 @@ fill_rule(struct vs *vs, struct filter_rule *rule, struct allowed_src *src) {
 		}
 
 		rule->net4.src_count = 1;
-		rule->net4.srcs = malloc(sizeof(struct net4));
-		rule->net4.srcs[0] = src->net.v4;
+		struct net4 *net4_srcs = memory_balloc(mctx, sizeof(struct net4));
+		if (net4_srcs == NULL) {
+			NEW_ERROR("failed to allocate net4 srcs");
+			return -1;
+		}
+		net4_srcs[0] = src->net.v4;
+		rule->net4.srcs = net4_srcs;  // Store absolute pointer
 	} else if (vs->identifier.ip_proto == IPPROTO_IPV6) {
-		rule->net6.dst_count = 1;
+		rule->net6.dst_count = 0;
 		rule->net6.dsts = NULL;
 
 		if (validate_net6(&src->net.v6) != 0) {
@@ -238,26 +233,40 @@ fill_rule(struct vs *vs, struct filter_rule *rule, struct allowed_src *src) {
 		}
 
 		rule->net6.src_count = 1;
-		rule->net6.srcs = malloc(sizeof(struct net6));
-		rule->net6.srcs[0] = src->net.v6;
+		struct net6 *net6_srcs = memory_balloc(mctx, sizeof(struct net6));
+		if (net6_srcs == NULL) {
+			NEW_ERROR("failed to allocate net6 srcs");
+			return -1;
+		}
+		net6_srcs[0] = src->net.v6;
+		rule->net6.srcs = net6_srcs;  // Store absolute pointer
 	}
 
 	// Handle port ranges: if none specified, use default [0, 65535]
 	if (src->port_ranges_count == 0) {
 		rule->transport.src_count = 1;
-		rule->transport.srcs = malloc(sizeof(struct filter_port_range));
-		rule->transport.srcs[0].from = 0;
-		rule->transport.srcs[0].to = 65535;
+		struct filter_port_range *port_srcs = memory_balloc(mctx, sizeof(struct filter_port_range));
+		if (port_srcs == NULL) {
+			NEW_ERROR("failed to allocate port srcs");
+			return -1;
+		}
+		port_srcs[0].from = 0;
+		port_srcs[0].to = 65535;
+		rule->transport.srcs = port_srcs;  // Store absolute pointer
 	} else {
 		rule->transport.src_count = src->port_ranges_count;
-		rule->transport.srcs =
-			malloc(sizeof(struct filter_port_range) *
+		struct filter_port_range *port_srcs =
+			memory_balloc(mctx, sizeof(struct filter_port_range) *
 			       src->port_ranges_count);
+		if (port_srcs == NULL) {
+			NEW_ERROR("failed to allocate port srcs");
+			return -1;
+		}
 		for (size_t port_range_idx = 0;
 		     port_range_idx < src->port_ranges_count;
 		     ++port_range_idx) {
 			struct filter_port_range *filter_port_range =
-				&rule->transport.srcs[port_range_idx];
+				&port_srcs[port_range_idx];
 			struct ports_range *port_range =
 				&src->port_ranges[port_range_idx];
 			filter_port_range->from = port_range->from;
@@ -267,16 +276,21 @@ fill_rule(struct vs *vs, struct filter_rule *rule, struct allowed_src *src) {
 				return -1;
 			}
 		}
+		rule->transport.srcs = port_srcs;  // Store absolute pointer
 	}
 	return 0;
 }
 
+// src_filter_rules creates filter rules with ABSOLUTE pointers.
+// The rules can be safely sorted and compared. Conversion to relative
+// pointers happens later in setup_acl_rules.
 static int
 src_filter_rules(
 	struct vs *vs,
 	struct vs_config *config,
 	struct filter_rule **rules,
-	size_t *rule_count
+	size_t *rule_count,
+	struct memory_context *mctx
 ) {
 	if (vs->identifier.ip_proto != IPPROTO_IP &&
 	    vs->identifier.ip_proto != IPPROTO_IPV6) {
@@ -291,15 +305,41 @@ src_filter_rules(
 	}
 
 	size_t count = config->allowed_src_count;
-	struct filter_rule *r = malloc(sizeof(struct filter_rule) * count);
+	if (count == 0) {
+		*rule_count = 0;
+		*rules = NULL;
+		return 0;
+	}
+	
+	struct filter_rule *r = memory_balloc(mctx, sizeof(struct filter_rule) * count);
+	if (r == NULL) {
+		NEW_ERROR("failed to allocate rules");
+		return -1;
+	}
 	memset(r, 0, sizeof(struct filter_rule) * count);
 	for (size_t rule_idx = 0; rule_idx < config->allowed_src_count;
 	     ++rule_idx) {
 		if (fill_rule(
-			    vs, &r[rule_idx], &config->allowed_src[rule_idx]
+			    vs, &r[rule_idx], &config->allowed_src[rule_idx], mctx
 		    ) != 0) {
 			PUSH_ERROR("rule at index %zu is invalid", rule_idx);
-			free_rules(r, count);
+			// Free already allocated rules (using absolute pointers)
+			for (size_t j = 0; j < rule_idx; ++j) {
+				struct filter_rule *rule = &r[j];
+				if (rule->net4.src_count > 0) {
+					memory_bfree(mctx, rule->net4.srcs,
+						sizeof(struct net4) * rule->net4.src_count);
+				}
+				if (rule->net6.src_count > 0) {
+					memory_bfree(mctx, rule->net6.srcs,
+						sizeof(struct net6) * rule->net6.src_count);
+				}
+				if (rule->transport.src_count > 0) {
+					memory_bfree(mctx, rule->transport.srcs,
+						sizeof(struct filter_port_range) * rule->transport.src_count);
+				}
+			}
+			memory_bfree(mctx, r, sizeof(struct filter_rule) * count);
 			return -1;
 		}
 	}
@@ -315,22 +355,255 @@ FILTER_COMPILER_DECLARE(vs_acl_ipv4, net4_fast_src, port_src);
 FILTER_COMPILER_DECLARE(vs_acl_ipv6, net6_fast_src, port_src);
 
 ////////////////////////////////////////////////////////////////////////////////
+// Helper functions for rule comparison and sorting
+////////////////////////////////////////////////////////////////////////////////
+
+static int
+compare_net4(const void *va, const void *vb) {
+	const struct net4 *a = (const struct net4 *)va;
+	const struct net4 *b = (const struct net4 *)vb;
+	// Compare address first
+	int addr_cmp = memcmp(a->addr, b->addr, NET4_LEN);
+	if (addr_cmp != 0) {
+		return addr_cmp;
+	}
+	// Then compare mask
+	return memcmp(a->mask, b->mask, NET4_LEN);
+}
+
+static int
+compare_net6(const void *va, const void *vb) {
+	const struct net6 *a = (const struct net6 *)va;
+	const struct net6 *b = (const struct net6 *)vb;
+	// Compare address first
+	int addr_cmp = memcmp(a->addr, b->addr, NET6_LEN);
+	if (addr_cmp != 0) {
+		return addr_cmp;
+	}
+	// Then compare mask
+	return memcmp(a->mask, b->mask, NET6_LEN);
+}
+
+static int
+compare_port_range(const void *va, const void *vb) {
+	const struct filter_port_range *a = (const struct filter_port_range *)va;
+	const struct filter_port_range *b = (const struct filter_port_range *)vb;
+	if (a->from != b->from) {
+		return (a->from < b->from) ? -1 : 1;
+	}
+	if (a->to != b->to) {
+		return (a->to < b->to) ? -1 : 1;
+	}
+	return 0;
+}
+
+// Normalize a single rule by sorting its internal arrays.
+// This function expects ABSOLUTE pointers in the rule.
+static void
+normalize_rule(struct filter_rule *rule) {
+	// Sort net4 sources (already absolute pointer)
+	if (rule->net4.src_count > 1 && rule->net4.srcs != NULL) {
+		qsort(rule->net4.srcs,
+		      rule->net4.src_count,
+		      sizeof(struct net4),
+		      compare_net4);
+	}
+	
+	// Sort net6 sources (already absolute pointer)
+	if (rule->net6.src_count > 1 && rule->net6.srcs != NULL) {
+		qsort(rule->net6.srcs,
+		      rule->net6.src_count,
+		      sizeof(struct net6),
+		      compare_net6);
+	}
+
+	// Sort transport source ports (already absolute pointer)
+	if (rule->transport.src_count > 1 && rule->transport.srcs != NULL) {
+		qsort(rule->transport.srcs,
+		      rule->transport.src_count,
+		      sizeof(struct filter_port_range),
+		      compare_port_range);
+	}
+}
+
+// compare_filter_rules compares two filter rules with ABSOLUTE pointers.
+// Used for sorting rules during setup.
+static int
+compare_filter_rules(const void *va, const void *vb) {
+	const struct filter_rule *a = (const struct filter_rule *)va;
+	const struct filter_rule *b = (const struct filter_rule *)vb;
+
+	// Compare IPv4 source networks
+	if (a->net4.src_count != b->net4.src_count) {
+		return (a->net4.src_count < b->net4.src_count) ? -1 : 1;
+	}
+	if (a->net4.src_count > 0) {
+		// Use absolute pointers directly
+		for (size_t i = 0; i < a->net4.src_count; ++i) {
+			int cmp = compare_net4(&a->net4.srcs[i], &b->net4.srcs[i]);
+			if (cmp != 0) {
+				return cmp;
+			}
+		}
+	}
+
+	// Compare IPv6 source networks
+	if (a->net6.src_count != b->net6.src_count) {
+		return (a->net6.src_count < b->net6.src_count) ? -1 : 1;
+	}
+	if (a->net6.src_count > 0) {
+		// Use absolute pointers directly
+		for (size_t i = 0; i < a->net6.src_count; ++i) {
+			int cmp = compare_net6(&a->net6.srcs[i], &b->net6.srcs[i]);
+			if (cmp != 0) {
+				return cmp;
+			}
+		}
+	}
+
+	// Compare transport source port ranges
+	if (a->transport.src_count != b->transport.src_count) {
+		return (a->transport.src_count < b->transport.src_count) ? -1 : 1;
+	}
+	if (a->transport.src_count > 0) {
+		// Use absolute pointers directly
+		for (size_t i = 0; i < a->transport.src_count; ++i) {
+			int cmp = compare_port_range(&a->transport.srcs[i], &b->transport.srcs[i]);
+			if (cmp != 0) {
+				return cmp;
+			}
+		}
+	}
+	return 0;
+}
+
+// compare_filter_rules_relative compares two filter rules with RELATIVE pointers.
+// Used for comparing rules from previous VS (which are already stored with relative pointers).
+static int
+compare_filter_rules_relative(
+	const struct filter_rule *a,
+	const struct filter_rule *b
+) {
+	// Compare IPv4 source networks
+	if (a->net4.src_count != b->net4.src_count) {
+		return (a->net4.src_count < b->net4.src_count) ? -1 : 1;
+	}
+	if (a->net4.src_count > 0) {
+		// Convert relative pointers to absolute for comparison
+		const struct net4 *a_srcs = ADDR_OF(&a->net4.srcs);
+		const struct net4 *b_srcs = ADDR_OF(&b->net4.srcs);
+		for (size_t i = 0; i < a->net4.src_count; ++i) {
+			int cmp = compare_net4(&a_srcs[i], &b_srcs[i]);
+			if (cmp != 0) {
+				return cmp;
+			}
+		}
+	}
+
+	// Compare IPv6 source networks
+	if (a->net6.src_count != b->net6.src_count) {
+		return (a->net6.src_count < b->net6.src_count) ? -1 : 1;
+	}
+	if (a->net6.src_count > 0) {
+		// Convert relative pointers to absolute for comparison
+		const struct net6 *a_srcs = ADDR_OF(&a->net6.srcs);
+		const struct net6 *b_srcs = ADDR_OF(&b->net6.srcs);
+		for (size_t i = 0; i < a->net6.src_count; ++i) {
+			int cmp = compare_net6(&a_srcs[i], &b_srcs[i]);
+			if (cmp != 0) {
+				return cmp;
+			}
+		}
+	}
+
+	// Compare transport source port ranges
+	if (a->transport.src_count != b->transport.src_count) {
+		return (a->transport.src_count < b->transport.src_count) ? -1 : 1;
+	}
+	if (a->transport.src_count > 0) {
+		// Convert relative pointers to absolute for comparison
+		const struct filter_port_range *a_srcs = ADDR_OF(&a->transport.srcs);
+		const struct filter_port_range *b_srcs = ADDR_OF(&b->transport.srcs);
+		for (size_t i = 0; i < a->transport.src_count; ++i) {
+			int cmp = compare_port_range(&a_srcs[i], &b_srcs[i]);
+			if (cmp != 0) {
+				return cmp;
+			}
+		}
+	}
+	return 0;
+}
+
+// rules_equal_relative compares two rule arrays where both have RELATIVE pointers.
+// Used for comparing current VS rules with previous VS rules.
+static bool
+rules_equal_relative(
+	const struct filter_rule *rules1,
+	size_t count1,
+	const struct filter_rule *rules2,
+	size_t count2
+) {
+	if (count1 != count2) {
+		return false;
+	}
+
+	for (size_t i = 0; i < count1; ++i) {
+		if (compare_filter_rules_relative(&rules1[i], &rules2[i]) != 0) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 static int
 setup_acl(
-	struct vs *vs, struct vs_config *config, struct memory_context *mctx
+	struct vs *vs,
+	struct vs *prev_vs,
+	struct memory_context *mctx,
+	struct balancer_update_info *update_info
 ) {
+	// Check if we can reuse ACL from previous VS
+	// Both current and previous VS rules have relative pointers at this point
+	if (prev_vs != NULL) {
+		const struct filter_rule *prev_rules = ADDR_OF(&prev_vs->rules);
+		const struct filter_rule *curr_rules = ADDR_OF(&vs->rules);
+		
+		if (rules_equal_relative(curr_rules, vs->rules_count, prev_rules, prev_vs->rules_count)) {
+			// Reuse ACL
+			EQUATE_OFFSET(&vs->acl, &prev_vs->acl);
+			
+			// Track reuse in update_info
+			if (update_info != NULL) {
+				size_t idx = update_info->vs_acl_reused_count++;
+				update_info->vs_acl_reused[idx] = vs->identifier;
+			}
+			
+			return 0;
+		}
+	}
+
+	// Need to create new ACL
 	vs->acl = memory_balloc(mctx, sizeof(struct filter));
 	if (vs->acl == NULL) {
 		PUSH_ERROR("failed to allocate filter");
 		return -1;
 	}
-	struct filter_rule *rules = NULL;
-	size_t rule_count = 0;
-	if (src_filter_rules(vs, config, &rules, &rule_count) != 0) {
-		PUSH_ERROR("failed to setup src filter rules");
-		return -1;
+
+	// Get rules and convert relative pointers to absolute for FILTER_INIT
+	struct filter_rule *rules = ADDR_OF(&vs->rules);
+	size_t rule_count = vs->rules_count;
+
+	for (size_t i = 0; i < rule_count; ++i) {
+		struct filter_rule *rule = &rules[i];
+		rule->net4.srcs = ADDR_OF(&rule->net4.srcs);
+		rule->net6.srcs = ADDR_OF(&rule->net6.srcs);
+		rule->transport.srcs = ADDR_OF(&rule->transport.srcs);
 	}
+
+	// Initialize filter with absolute pointers
 	int res;
 	if (vs->identifier.ip_proto == IPPROTO_IP) {
 		res = FILTER_INIT(
@@ -341,27 +614,139 @@ setup_acl(
 			vs->acl, vs_acl_ipv6, rules, rule_count, mctx
 		);
 	}
+
+	// Restore relative pointers
+	for (size_t i = 0; i < rule_count; ++i) {
+		struct filter_rule *rule = &rules[i];
+		SET_OFFSET_OF(&rule->net4.srcs, rule->net4.srcs);
+		SET_OFFSET_OF(&rule->net6.srcs, rule->net6.srcs);
+		SET_OFFSET_OF(&rule->transport.srcs, rule->transport.srcs);
+	}
+
 	if (res != 0) {
 		NEW_ERROR("failed to initialize filter");
-		free_rules(rules, rule_count);
 		return -1;
 	}
+
+	SET_OFFSET_OF(&vs->acl, vs->acl);
+
+	return 0;
+}
+
+static void
+vs_free_acl_rules(struct vs *vs, struct memory_context *mctx) {
+	if (vs->rules_count == 0) {
+		return;
+	}
+
+	struct filter_rule *rules = ADDR_OF(&vs->rules);
+	if (rules == NULL) {
+		return;
+	}
+
+	// Free nested arrays in each rule (only sources matter)
+	for (size_t i = 0; i < vs->rules_count; ++i) {
+		struct filter_rule *rule = &rules[i];
+
+		// Free net4 source arrays
+		if (rule->net4.src_count > 0) {
+			memory_bfree(
+				mctx,
+				ADDR_OF(&rule->net4.srcs),
+				sizeof(struct net4) * rule->net4.src_count
+			);
+		}
+
+		// Free net6 source arrays
+		if (rule->net6.src_count > 0) {
+			memory_bfree(
+				mctx,
+				ADDR_OF(&rule->net6.srcs),
+				sizeof(struct net6) * rule->net6.src_count
+			);
+		}
+
+		// Free transport source port arrays
+		if (rule->transport.src_count > 0) {
+			memory_bfree(
+				mctx,
+				ADDR_OF(&rule->transport.srcs),
+				sizeof(struct filter_port_range) *
+					rule->transport.src_count
+			);
+		}
+	}
+
+	// Free the rules array itself
+	memory_bfree(mctx, rules, sizeof(struct filter_rule) * vs->rules_count);
+	vs->rules_count = 0;
+	SET_OFFSET_OF(&vs->rules, NULL);
+}
+
+static void
+rule_to_relative_addresses(struct filter_rule *rule) {
+	// net4 src
+	SET_OFFSET_OF(&rule->net4.srcs, rule->net4.srcs);
+	
+	// net6 src
+	SET_OFFSET_OF(&rule->net6.srcs, rule->net6.srcs);
+
+	// transport src
+	SET_OFFSET_OF(&rule->transport.srcs, rule->transport.srcs);
+}
+
+static int
+setup_acl_rules(struct vs *vs, struct vs_config *config, struct memory_context *mctx) {
+	// Create filter rules from config (already uses memory_balloc and relative pointers)
+	struct filter_rule *rules = NULL;
+	size_t rules_count = 0;
+	if (src_filter_rules(vs, config, &rules, &rules_count, mctx) != 0) {
+		PUSH_ERROR("failed to create filter rules");
+		return -1;
+	}
+
+	// Normalize each rule (sort internal arrays)
+	for (size_t i = 0; i < rules_count; ++i) {
+		normalize_rule(&rules[i]);
+	}
+
+	// Sort the rules array
+	if (rules_count > 1) {
+		qsort(rules, rules_count, sizeof(struct filter_rule), compare_filter_rules);
+	}
+
+	// Remove duplicates
+	int last_rule_idx = -1;
+	for (size_t rule_idx = 0; rule_idx < rules_count; ++rule_idx) {
+		if (last_rule_idx != -1 && compare_filter_rules(&rules[rule_idx], &rules[last_rule_idx]) == 0) {
+			continue;
+		}
+		rules[++last_rule_idx] = rules[rule_idx];
+	}
+
+	// Change to relative offsets
+	rules_count = last_rule_idx + 1;
+	for (size_t i = 0; i < rules_count; ++i) {
+		rule_to_relative_addresses(&rules[i]);
+	}
+
+	// Store using relative pointers
+	SET_OFFSET_OF(&vs->rules, rules);
+	vs->rules_count = rules_count;
+
 	return 0;
 }
 
 int
 vs_init(struct vs *vs,
+	struct vs *prev_vs,
 	size_t first_real_idx,
 	struct real *reals,
 	struct balancer_state *balancer_state,
 	struct named_vs_config *config,
 	struct counter_registry *registry,
-	struct memory_context *mctx) {
-	if (setup_state(vs, balancer_state, config) != 0) {
-		PUSH_ERROR("failed to setup state");
-		return -1;
-	}
-
+	struct memory_context *mctx,
+	struct balancer_update_info *update_info) {
 	if (setup_flags(vs, config) != 0) {
 		PUSH_ERROR("failed to setup flags");
 		return -1;
@@ -381,18 +766,26 @@ vs_init(struct vs *vs,
 		PUSH_ERROR("failed to setup selector");
 		goto free_peers;
 	}
-
+	 
 	if (register_counter(vs, registry) != 0) {
 		PUSH_ERROR("failed to register counter");
 		goto free_selector;
 	}
 
-	if (setup_acl(vs, &config->config, mctx) != 0) {
-		PUSH_ERROR("failed to setup acl");
+	if (setup_acl_rules(vs, &config->config, mctx) != 0) {
+		PUSH_ERROR("failed to store acl rules");
 		goto free_selector;
 	}
 
+	if (setup_acl(vs, prev_vs, mctx, update_info) != 0) {
+		PUSH_ERROR("failed to setup acl");
+		goto free_acl_rules;
+	}
+
 	return 0;
+
+free_acl_rules:
+	vs_free_acl_rules(vs, mctx);
 
 free_selector:
 	selector_free(&vs->selector);
