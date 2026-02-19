@@ -20,9 +20,12 @@
 #endif
 
 #if BALANCER_DEBUG_LOG
-#define DBG_LOG(fmt, ...) fprintf(stderr, "[BALANCER_DBG] " fmt "\n", ##__VA_ARGS__)
+#define DBG_LOG(fmt, ...)                                                      \
+	fprintf(stderr, "[BALANCER_DBG] " fmt "\n", ##__VA_ARGS__)
 #else
-#define DBG_LOG(fmt, ...) do {} while(0)
+#define DBG_LOG(fmt, ...)                                                      \
+	do {                                                                   \
+	} while (0)
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -88,28 +91,37 @@ handle_l4_packets(struct packet_ctx *ctxs, size_t count) {
 		struct packet_metadata meta;
 		int res = fill_packet_metadata(ctx->packet, &meta);
 		if (unlikely(res != 0)) { // unexpected packet type
-			DBG_LOG("Packet %zu: invalid packet metadata (res=%d)", i, res);
+			DBG_LOG("Packet %zu: invalid packet metadata (res=%d)",
+				i,
+				res);
 			L4_STATS_INC(invalid_packets, ctx);
 			packet_ctx_drop_packet(ctx);
 			continue;
 		}
 
-		DBG_LOG("Packet %zu: metadata OK, transport_proto=%u, dst_port=%u",
-			i, meta.transport_proto, meta.dst_port);
+		DBG_LOG("Packet %zu: metadata OK, transport_proto=%u, "
+			"dst_port=%u",
+			i,
+			meta.transport_proto,
+			meta.dst_port);
 
 		// 2. Lookup virtual service for which packet is
 		// directed to
 
 		struct vs *vs = vs_lookup_and_fw(ctx);
 		if (unlikely(vs == NULL)) { // not found virtual service
-			DBG_LOG("Packet %zu: VS lookup failed or ACL denied", i);
+			DBG_LOG("Packet %zu: VS lookup failed or ACL denied",
+				i);
 			L4_STATS_INC(select_vs_failed, ctx);
 			packet_ctx_drop_packet(ctx);
 			continue;
 		}
 
-		DBG_LOG("Packet %zu: VS found, registry_idx=%zu, reals_count=%zu",
-			i, vs->registry_idx, vs->reals_count);
+		DBG_LOG("Packet %zu: VS found, registry_idx=%zu, "
+			"reals_count=%zu",
+			i,
+			vs->registry_idx,
+			vs->reals_count);
 
 		// update VS incoming stats
 		packet_ctx_update_vs_stats_on_incoming_packet(ctx);
@@ -127,12 +139,13 @@ handle_l4_packets(struct packet_ctx *ctxs, size_t count) {
 	for (size_t i = 0; i < count; ++i) {
 		struct packet_ctx *ctx = &ctxs[i];
 		if (unlikely(ctx->processed)) {
-			DBG_LOG("Packet %zu: already processed before real selection", i);
+			DBG_LOG("Packet %zu: already processed before real "
+				"selection",
+				i);
 			continue;
 		}
-		struct real *selected_real = select_real(
-			ctx, ctx->vs.ptr, table, current_table_gen
-		);
+		struct real *selected_real =
+			select_real(ctx, ctx->vs.ptr, table, current_table_gen);
 		if (unlikely(selected_real == NULL)) { // failed to select real
 			DBG_LOG("Packet %zu: failed to select real", i);
 			// update stats
@@ -140,7 +153,9 @@ handle_l4_packets(struct packet_ctx *ctxs, size_t count) {
 			packet_ctx_drop_packet(ctx);
 			continue;
 		}
-		DBG_LOG("Packet %zu: real selected, registry_idx=%zu", i, selected_real->registry_idx);
+		DBG_LOG("Packet %zu: real selected, registry_idx=%zu",
+			i,
+			selected_real->registry_idx);
 	}
 
 	session_table_end_cs(table, ctxs[0].worker_idx);

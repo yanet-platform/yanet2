@@ -64,7 +64,8 @@ vs_state_setup(
  * Returns 0 on success, -1 on error.
  */
 int
-vs_init(struct vs *vs,
+vs_with_identifier_and_registry_idx_init(
+	struct vs *vs,
 	struct vs *prev_vs,
 	size_t first_real_idx,
 	struct real *reals,
@@ -72,7 +73,8 @@ vs_init(struct vs *vs,
 	struct named_vs_config *config,
 	struct counter_registry *registry,
 	struct memory_context *mctx,
-	struct balancer_update_info *update_info);
+	struct balancer_update_info *update_info
+);
 
 /**
  * Free resources bound to the VS view.

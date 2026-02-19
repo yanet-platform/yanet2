@@ -142,8 +142,9 @@ balancer_update_packet_handler(
 	}
 
 	// TODO: pass prev config here
-	struct packet_handler *handler =
-		packet_handler_setup(agent, name, config, &balancer->state, prev_handler, update_info);
+	struct packet_handler *handler = packet_handler_setup(
+		agent, name, config, &balancer->state, prev_handler, update_info
+	);
 	if (handler == NULL) {
 		PUSH_ERROR("failed to setup packet handler");
 		diag_fill(&balancer->diag);

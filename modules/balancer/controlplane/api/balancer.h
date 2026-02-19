@@ -49,7 +49,7 @@ struct balancer_update_info {
 	 * When false (zero): VS lookup filter for IPv4 was recompiled
 	 */
 	int vs_ipv4_matcher_reused;
-	
+
 	/**
 	 * IPv6 virtual service matcher was reused from previous handler.
 	 *
@@ -57,7 +57,7 @@ struct balancer_update_info {
 	 * When false (zero): VS lookup filter for IPv6 was recompiled
 	 */
 	int vs_ipv6_matcher_reused;
-	
+
 	/**
 	 * Number of virtual services that reused ACL from previous handler.
 	 *
@@ -65,7 +65,7 @@ struct balancer_update_info {
 	 * allowed_src rules matched the previous configuration.
 	 */
 	size_t vs_acl_reused_count;
-	
+
 	/**
 	 * Array of VS identifiers that reused ACL filters.
 	 *
@@ -176,7 +176,8 @@ balancer_session_table_capacity(struct balancer_handle *handle);
  * Update packet handler configuration.
  *
  * This call applies changes such as timeouts, VS list or source addresses.
- * Returns information about filter reuse decisions in the update_info parameter.
+ * Returns information about filter reuse decisions in the update_info
+ * parameter.
  *
  * Diagnostics: On error, a message is recorded and retrievable via
  * balancer_take_error_msg(balancer).

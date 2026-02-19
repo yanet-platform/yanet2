@@ -23,10 +23,18 @@ struct balancer_update_info;
 // TODO: docs
 struct packet_handler_vs {
 	struct filter *filter;
+
+	uint8_t __padding[56];
+
+	int filter_used;
+
 	struct lpm announce;
 
 	size_t vs_count;
 	struct vs *vs;
+
+	size_t vs_index_size;
+	uint32_t *vs_index;
 };
 
 /**
@@ -52,7 +60,7 @@ struct packet_handler {
 	struct vs *vs;
 
 	// TODO: docs
-	size_t vs_index_count;
+	size_t vs_index_size;
 	uint32_t *vs_index;
 
 	// TODO: docs

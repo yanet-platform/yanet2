@@ -56,11 +56,17 @@ diag_reset(struct diag *diag);
 #define NEW_ERROR(...)                                                         \
 	do {                                                                   \
 		char __buffer[1024];                                           \
-		int __written = snprintf(__buffer, sizeof(__buffer), ##__VA_ARGS__); \
+		int __written =                                                \
+			snprintf(__buffer, sizeof(__buffer), ##__VA_ARGS__);   \
 		if (__written >= (int)sizeof(__buffer)) {                      \
-			fprintf(stderr, "ERROR: NEW_ERROR buffer overflow! " \
-				"Needed %d bytes, have %zu. Location: %s:%d\n", \
-				__written, sizeof(__buffer), __FILE__, __LINE__); \
+			fprintf(stderr,                                        \
+				"ERROR: NEW_ERROR buffer overflow! "           \
+				"Needed %d bytes, have %zu. Location: "        \
+				"%s:%d\n",                                     \
+				__written,                                     \
+				sizeof(__buffer),                              \
+				__FILE__,                                      \
+				__LINE__);                                     \
 		}                                                              \
 		tls_stack_clear();                                             \
 		tls_stack_push(__buffer, strlen(__buffer) + 1);                \
@@ -79,11 +85,18 @@ diag_reset(struct diag *diag);
 #define PUSH_ERROR(fmt, ...)                                                   \
 	do {                                                                   \
 		char __buffer[1024];                                           \
-		int __written = snprintf(__buffer, sizeof(__buffer), fmt ": ", ##__VA_ARGS__); \
+		int __written = snprintf(                                      \
+			__buffer, sizeof(__buffer), fmt ": ", ##__VA_ARGS__    \
+		);                                                             \
 		if (__written >= (int)sizeof(__buffer)) {                      \
-			fprintf(stderr, "ERROR: PUSH_ERROR buffer overflow! " \
-				"Needed %d bytes, have %zu. Location: %s:%d\n", \
-				__written, sizeof(__buffer), __FILE__, __LINE__); \
+			fprintf(stderr,                                        \
+				"ERROR: PUSH_ERROR buffer overflow! "          \
+				"Needed %d bytes, have %zu. Location: "        \
+				"%s:%d\n",                                     \
+				__written,                                     \
+				sizeof(__buffer),                              \
+				__FILE__,                                      \
+				__LINE__);                                     \
 		}                                                              \
 		tls_stack_push(__buffer, strlen(__buffer));                    \
 	} while (0)

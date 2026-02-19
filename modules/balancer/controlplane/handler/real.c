@@ -29,7 +29,7 @@ real_init(
 	struct real_state *real_state =
 		balancer_state_find_or_insert_real(balancer_state, &identifier);
 	if (!real_state) {
-		NEW_ERROR("failed to find or insert real into registry");
+		NEW_ERROR("no memory");
 		return -1;
 	}
 	real_state->weight = named_config->config.weight;
@@ -41,7 +41,7 @@ real_init(
 		registry, name, sizeof(struct real_stats) / sizeof(uint64_t)
 	);
 	if (counter_id == (size_t)-1) {
-		NEW_ERROR("failed to register counter");
+		NEW_ERROR("no_memory");
 		return -1;
 	}
 
