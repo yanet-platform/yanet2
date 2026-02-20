@@ -46,7 +46,7 @@ module_ectx_process(
 	struct packet_front *packet_front
 
 ) {
-	const size_t packets_count = packet_list_count(&packet_front->input);
+	const size_t packets_count = packet_front->input.count;
 
 	for (struct packet *packet = packet_front->input.first; packet != NULL;
 	     packet = packet->next) {
@@ -63,7 +63,7 @@ module_ectx_process(
 		module_ectx->rx_bytes_counter_id,
 		dp_worker->idx,
 		storage,
-		packet_front->input.count,
+		packets_count,
 		packet_list_bytes_sum(&packet_front->input)
 	);
 
@@ -83,11 +83,14 @@ module_ectx_process(
 		size_t hist_idx = counters_hybrid_histogram_batch(
 			&cp_module_perf_counter, elapsed_ns
 		);
-		uint64_t *counter = counter_get_address(
-			counter_idx, dp_worker->idx, storage
-		);
-		counter[0] += elapsed_ns;
-		counter[1 + hist_idx] += 1;
+		struct cp_module_perf_counter_layout *counter =
+			(struct cp_module_perf_counter_layout *)
+				counter_get_address(
+					counter_idx, dp_worker->idx, storage
+				);
+		counter->summary_latency += elapsed_ns;
+		counter->packets += packets_count;
+		counter->batch_count[hist_idx] += 1;
 	}
 
 	counter_add_packets_bytes(

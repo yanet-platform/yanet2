@@ -9,6 +9,7 @@
 
 #include "controlplane/config/registry.h"
 #include "counters/histogram.h"
+#include <assert.h>
 
 /*
  * Structure cp_module reflects module configuration
@@ -43,6 +44,30 @@ struct cp_module_device {
  */
 #define CP_MODULE_PERF_COUNTERS 6
 
+// TODO: docs
+#define CP_MODULE_PERF_COUNTER_LINEAR_HISTS 19
+
+// TODO: docs
+#define CP_MODULE_PERF_COUNTER_EXP_HISTS 9
+
+// TODO: docs
+struct cp_module_perf_counter_layout {
+	uint64_t summary_latency;
+	uint64_t packets;
+	uint64_t batch_count
+		[CP_MODULE_PERF_COUNTER_LINEAR_HISTS +
+		 CP_MODULE_PERF_COUNTER_EXP_HISTS];
+};
+
+#define CP_MODULE_PERF_COUNTER_SIZE                                            \
+	(sizeof(struct cp_module_perf_counter_layout) / sizeof(uint64_t))
+
+// TODO: docs
+static_assert(
+	CP_MODULE_PERF_COUNTER_SIZE <= (1 << COUNTER_MAX_SIZE_EXP),
+	"cp_module_perf_counter is too large for single counter"
+);
+
 /**
  * Hybrid histogram configuration for module performance counters.
  *
@@ -56,9 +81,9 @@ struct cp_module_device {
  */
 static const struct counters_hybrid_histogram cp_module_perf_counter = {
 	.min_value = 10 /* ns */,
-	.linear_hists = 20,
+	.linear_hists = CP_MODULE_PERF_COUNTER_LINEAR_HISTS,
 	.linear_step = 50 /* ns */,
-	.exp_hists = 9
+	.exp_hists = CP_MODULE_PERF_COUNTER_EXP_HISTS
 };
 
 struct cp_module {

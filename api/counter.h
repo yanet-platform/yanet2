@@ -104,8 +104,12 @@ struct module_performance_counter_latency_range {
  * histogram with both linear and exponential buckets.
  */
 struct module_performance_counter {
-	/** Mean processing latency in nanoseconds across all batches */
-	float mean_latency;
+	/** Total (summary) processing latency in nanoseconds across all batches
+	 */
+	uint64_t summary_latency;
+
+	/** Total number of packets transmitted for this batch size range */
+	uint64_t packets;
 
 	/** Minimum batch size for this counter (e.g., 1, 2, 4, 8, 16, 32) */
 	uint64_t min_batch_size;
@@ -123,7 +127,7 @@ struct module_performance_counter {
  *
  * Contains performance metrics for all 6 batch size ranges tracked by the
  * module: 1, 2-3, 4-7, 8-15, 16-31, and 32+ packets. Each counter includes
- * mean latency and a detailed histogram of latency measurements.
+ * summary latency and a detailed histogram of latency measurements.
  */
 struct module_performance_counters {
 	/** Number of performance counters (typically 6, one per batch size

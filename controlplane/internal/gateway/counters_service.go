@@ -129,12 +129,12 @@ func (m *CountersService) Module(
 	return response, nil
 }
 
-func (m *CountersService) ModulePerf(
+func (m *CountersService) Perf(
 	ctx context.Context,
-	request *ynpb.ModulePerfCountersRequest,
-) (*ynpb.ModulePerfCountersResponse, error) {
+	request *ynpb.PerfCountersRequest,
+) (*ynpb.PerfCountersResponse, error) {
 	dpConfig := m.shm.DPConfig(m.instanceID)
-	perfCounters, err := dpConfig.ModulePerformanceCounters(
+	perfCounters, err := dpConfig.PerformanceCounters(
 		request.GetDevice(),
 		request.GetPipeline(),
 		request.GetFunction(),
@@ -146,8 +146,8 @@ func (m *CountersService) ModulePerf(
 		return nil, err
 	}
 
-	response := &ynpb.ModulePerfCountersResponse{
-		Counters: make([]*ynpb.ModulePerfCounter, 0, len(perfCounters.Counters)),
+	response := &ynpb.PerfCountersResponse{
+		Counters: make([]*ynpb.PerfCounter, 0, len(perfCounters.Counters)),
 		Tx:       perfCounters.Tx,
 		Rx:       perfCounters.Rx,
 		TxBytes:  perfCounters.TxBytes,
@@ -155,18 +155,19 @@ func (m *CountersService) ModulePerf(
 	}
 
 	for _, counter := range perfCounters.Counters {
-		latencies := make([]*ynpb.ModulePerfLatency, 0, len(counter.LatencyRanges))
+		latencies := make([]*ynpb.LatencyRangeCounter, 0, len(counter.LatencyRanges))
 		for _, latencyRange := range counter.LatencyRanges {
-			latencies = append(latencies, &ynpb.ModulePerfLatency{
+			latencies = append(latencies, &ynpb.LatencyRangeCounter{
 				MinLatency: uint32(latencyRange.MinLatency),
 				Batches:    latencyRange.Batches,
 			})
 		}
 
-		response.Counters = append(response.Counters, &ynpb.ModulePerfCounter{
-			MinBatchSize: uint32(counter.MinBatchSize),
-			MeanLatency:  uint64(counter.MeanLatency),
-			Latencies:    latencies,
+		response.Counters = append(response.Counters, &ynpb.PerfCounter{
+			MinBatchSize:   uint32(counter.MinBatchSize),
+			SummaryLatency: uint64(counter.SummaryLatency),
+			Packets:        uint64(counter.Packets),
+			Latencies:      latencies,
 		})
 	}
 

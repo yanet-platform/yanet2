@@ -109,8 +109,7 @@ cp_module_init(
 			counter_registry_register(
 				&cp_module->counter_registry,
 				name,
-				1 + cp_module_perf_counter.linear_hists +
-					cp_module_perf_counter.exp_hists
+				CP_MODULE_PERF_COUNTER_SIZE
 			);
 		if (cp_module->perf_counters_indices[counter_idx] ==
 		    COUNTER_INVALID) {
@@ -418,40 +417,45 @@ cp_module_parse_performance_counter(
 	counter->min_batch_size = batch_sizes[counter_idx];
 	counter->latency_ranges_count = hist_buckets;
 
-	size_t total_batches = 0;
+	// Salc summary tx and summary latency
+	counter->summary_latency = 0;
+	counter->packets = 0;
+	for (size_t instance_idx = 0; instance_idx < workers; ++instance_idx) {
+		struct cp_module_perf_counter_layout *perf_counter =
+			(struct cp_module_perf_counter_layout *)
+				counter_handle_get_value(
+					counter_handle->value_handle,
+					instance_idx
+				);
+		counter->summary_latency += perf_counter->summary_latency;
+		counter->packets += perf_counter->packets;
+	}
 
 	// Fill in latency ranges and accumulate counter values across all
 	// workers
 	for (size_t range_idx = 0; range_idx < hist_buckets; ++range_idx) {
+		struct module_performance_counter_latency_range *latency_range =
+			&counter->latency_ranges[range_idx];
 		// Calculate minimum latency for this bucket
-		counter->latency_ranges[range_idx].min_latency =
+		latency_range->min_latency =
 			counters_hybrid_histogram_batch_first_elem(
 				&cp_module_perf_counter, range_idx
 			);
 
 		// Accumulate counter values across all worker instances
-		uint64_t total = 0;
+		latency_range->batches = 0;
 		for (size_t worker_idx = 0; worker_idx < workers;
 		     ++worker_idx) {
-			uint64_t *counter_values = counter_handle_get_value(
-				counter_handle->value_handle, worker_idx
-			);
-			total += counter_values[1 + range_idx];
+			struct cp_module_perf_counter_layout *perf_counter =
+				(struct cp_module_perf_counter_layout *)
+					counter_handle_get_value(
+						counter_handle->value_handle,
+						worker_idx
+					);
+			latency_range->batches +=
+				perf_counter->batch_count[range_idx];
 		}
-		counter->latency_ranges[range_idx].batches = total;
-		total_batches += total;
 	}
-
-	// Calc mean latency
-	size_t total_ns = 0;
-	for (size_t worker_idx = 0; worker_idx < workers; ++worker_idx) {
-		uint64_t *counter_values = counter_handle_get_value(
-			counter_handle->value_handle, worker_idx
-		);
-		total_ns += counter_values[0];
-	}
-
-	counter->mean_latency = (float)(total_ns) / (float)total_batches;
 
 	// Set output index
 	*idx = counter_idx;
