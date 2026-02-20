@@ -1,5 +1,8 @@
 package balancer
 
+// BalancerModule provides the gRPC module interface for the balancer service,
+// integrating with YANET's module system for service registration and lifecycle management.
+
 import (
 	"fmt"
 

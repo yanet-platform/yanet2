@@ -1,5 +1,8 @@
 package utils
 
+// TCP and UDP packet creation utilities for balancer testing, supporting both IPv4 and IPv6
+// with MSS option manipulation for testing packet modification and encapsulation scenarios
+
 import (
 	"errors"
 	"fmt"
@@ -59,7 +62,7 @@ func MakeTCPPacket(
 
 	tcp.SrcPort = layers.TCPPort(srcPort)
 	tcp.DstPort = layers.TCPPort(dstPort)
-	tcp.SetNetworkLayerForChecksum(ip)
+	_ = tcp.SetNetworkLayerForChecksum(ip)
 
 	payload := []byte("BALANCER TEST PAYLOAD 12345678910")
 	packetLayers := []gopacket.SerializableLayer{
@@ -122,7 +125,7 @@ func MakeUDPPacket(
 		SrcPort: layers.UDPPort(srcPort),
 		DstPort: layers.UDPPort(dstPort),
 	}
-	udp.SetNetworkLayerForChecksum(ip)
+	_ = udp.SetNetworkLayerForChecksum(ip)
 
 	payload := []byte("PING TEST PAYLOAD 1234567890")
 	packetLayers := []gopacket.SerializableLayer{
@@ -267,7 +270,7 @@ func InsertOrUpdateMSS(
 		}
 	}
 
-	tcp.SetNetworkLayerForChecksum(netBeforeTCP)
+	_ = tcp.SetNetworkLayerForChecksum(netBeforeTCP)
 	serLayers = append(serLayers, &tcp)
 	serLayers = append(serLayers, gopacket.Payload(tcp.Payload))
 

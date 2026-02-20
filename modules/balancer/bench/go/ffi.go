@@ -1,5 +1,8 @@
 package main
 
+// FFI bindings to C benchmark infrastructure providing memory allocation,
+// packet list management, and dataplane packet handling for performance testing.
+
 /*
 #cgo CFLAGS: -I../ -I../../../../ -I../../../../lib
 #cgo LDFLAGS: -L../../../../build/modules/balancer/bench -lbalancer_bench -L../../../../build/lib/utils -llib_utils -L../../../../build/mock -lyanet_mock -L../../../../build/lib/dataplane/pipeline -lpipeline -L../../../../build/lib/dataplane/worker -lworker_dp -lnuma
@@ -21,6 +24,7 @@ enum { packet_list_align = _Alignof(struct packet_list) };
 void *bench_alloc_func = bench_alloc;
 */
 import "C"
+
 import (
 	"fmt"
 	"unsafe"

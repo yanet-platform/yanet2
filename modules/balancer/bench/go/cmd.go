@@ -1,5 +1,8 @@
 package main
 
+// Command-line entry point for the balancer benchmark tool.
+// Parses YAML configuration and executes the benchmark with specified parameters.
+
 import (
 	"fmt"
 	"os"

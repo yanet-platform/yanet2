@@ -244,36 +244,39 @@ func TestICMPBroadcastLogic(t *testing.T) {
 	)
 	originalTCPv6Packet := xpacket.LayersToPacket(t, originalTCPv6Layers...)
 
-	t.Run("Case1_IPv4_Decap_NoIcmpIdent_ShouldNotBroadcast", func(t *testing.T) {
-		// Create a tunneled ICMP packet with normal ident (not ICMP_BROADCAST_IDENT)
-		// The outer destination is the balancer address (will trigger decap)
-		icmpLayers := utils.MakeTunneledICMPv4DestUnreachable(
-			peer1IPv4,    // tunnel src (from another balancer)
-			balancerIPv4, // tunnel dst (this balancer - will trigger decap)
-			clientIPv4,   // inner ICMP src
-			vsIPv4,       // inner ICMP dst
-			originalTCPPacket,
-			0x1234, // normal ident (not ICMP_BROADCAST_IDENT)
-		)
-		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
+	t.Run(
+		"Case1_IPv4_Decap_NoIcmpIdent_ShouldNotBroadcast",
+		func(t *testing.T) {
+			// Create a tunneled ICMP packet with normal ident (not ICMP_BROADCAST_IDENT)
+			// The outer destination is the balancer address (will trigger decap)
+			icmpLayers := utils.MakeTunneledICMPv4DestUnreachable(
+				peer1IPv4,    // tunnel src (from another balancer)
+				balancerIPv4, // tunnel dst (this balancer - will trigger decap)
+				clientIPv4,   // inner ICMP src
+				vsIPv4,       // inner ICMP dst
+				originalTCPPacket,
+				0x1234, // normal ident (not ICMP_BROADCAST_IDENT)
+			)
+			icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err := ts.Mock.HandlePackets(icmpPacket)
-		require.NoError(t, err)
+			result, err := ts.Mock.HandlePackets(icmpPacket)
+			require.NoError(t, err)
 
-		// Expected: packet should NOT be broadcasted (came from another balancer)
-		require.Equal(
-			t,
-			0,
-			len(result.Output),
-			"Case 1: decap (from peer) should NOT broadcast",
-		)
-		require.Equal(
-			t,
-			1,
-			len(result.Drop),
-			"Case 1: packet should be dropped",
-		)
-	})
+			// Expected: packet should NOT be broadcasted (came from another balancer)
+			require.Equal(
+				t,
+				0,
+				len(result.Output),
+				"Case 1: decap (from peer) should NOT broadcast",
+			)
+			require.Equal(
+				t,
+				1,
+				len(result.Drop),
+				"Case 1: packet should be dropped",
+			)
+		},
+	)
 
 	t.Run(
 		"Case2_IPv4_Decap_WithIcmpIdent_ShouldNotBroadcast",
@@ -286,7 +289,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 				clientIPv4,   // inner ICMP src
 				vsIPv4,       // inner ICMP dst
 				originalTCPPacket,
-				utils.ICMP_BROADCAST_IDENT, // magic ident indicating already broadcasted
+				utils.ICMPBroadcastIdent, // magic ident indicating already broadcasted
 			)
 			icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
@@ -318,7 +321,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 				clientIPv4,
 				vsIPv4,
 				originalTCPPacket,
-				utils.ICMP_BROADCAST_IDENT, // has magic ident but no decap
+				utils.ICMPBroadcastIdent, // has magic ident but no decap
 			)
 			icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
@@ -394,33 +397,36 @@ func TestICMPBroadcastLogic(t *testing.T) {
 	})
 
 	// IPv6 test cases
-	t.Run("Case1_IPv6_Decap_NoIcmpIdent_ShouldNotBroadcast", func(t *testing.T) {
-		icmpLayers := utils.MakeTunneledICMPv6DestUnreachable(
-			peer1IPv6,
-			balancerIPv6,
-			clientIPv6,
-			vsIPv6,
-			originalTCPv6Packet,
-			0x1234,
-		)
-		icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
+	t.Run(
+		"Case1_IPv6_Decap_NoIcmpIdent_ShouldNotBroadcast",
+		func(t *testing.T) {
+			icmpLayers := utils.MakeTunneledICMPv6DestUnreachable(
+				peer1IPv6,
+				balancerIPv6,
+				clientIPv6,
+				vsIPv6,
+				originalTCPv6Packet,
+				0x1234,
+			)
+			icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
-		result, err := ts.Mock.HandlePackets(icmpPacket)
-		require.NoError(t, err)
+			result, err := ts.Mock.HandlePackets(icmpPacket)
+			require.NoError(t, err)
 
-		require.Equal(
-			t,
-			0,
-			len(result.Output),
-			"Case 1 IPv6: decap (from peer) should NOT broadcast",
-		)
-		require.Equal(
-			t,
-			1,
-			len(result.Drop),
-			"Case 1 IPv6: packet should be dropped",
-		)
-	})
+			require.Equal(
+				t,
+				0,
+				len(result.Output),
+				"Case 1 IPv6: decap (from peer) should NOT broadcast",
+			)
+			require.Equal(
+				t,
+				1,
+				len(result.Drop),
+				"Case 1 IPv6: packet should be dropped",
+			)
+		},
+	)
 
 	t.Run(
 		"Case2_IPv6_Decap_WithIcmpIdent_ShouldNotBroadcast",
@@ -431,7 +437,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 				clientIPv6,
 				vsIPv6,
 				originalTCPv6Packet,
-				utils.ICMP_BROADCAST_IDENT,
+				utils.ICMPBroadcastIdent,
 			)
 			icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 
@@ -460,7 +466,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 				clientIPv6,
 				vsIPv6,
 				originalTCPv6Packet,
-				utils.ICMP_BROADCAST_IDENT,
+				utils.ICMPBroadcastIdent,
 			)
 			icmpPacket := xpacket.LayersToPacket(t, icmpLayers...)
 

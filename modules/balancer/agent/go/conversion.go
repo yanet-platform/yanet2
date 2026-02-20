@@ -25,14 +25,14 @@ func NewRealUpdateFromProto(
 	if !ok {
 		return nil, fmt.Errorf("incorrect virtual service IP")
 	}
-	realIp, ok := netip.AddrFromSlice(update.RealId.Real.Ip.Bytes)
+	realIP, ok := netip.AddrFromSlice(update.RealId.Real.Ip.Bytes)
 	if !ok {
 		return nil, fmt.Errorf("incorrect real ip")
 	}
 
-	proto := ffi.VsTransportProtoUdp
+	proto := ffi.VsTransportProtoUDP
 	if update.RealId.Vs.Proto == balancerpb.TransportProto_TCP {
-		proto = ffi.VsTransportProtoTcp
+		proto = ffi.VsTransportProtoTCP
 	}
 
 	// Use the real port as specified (don't default to VS port)
@@ -46,7 +46,7 @@ func NewRealUpdateFromProto(
 				TransportProto: proto,
 			},
 			Relative: ffi.RelativeRealIdentifier{
-				Addr: realIp,
+				Addr: realIP,
 				Port: realPort,
 			},
 		},
@@ -229,11 +229,11 @@ func ProtoToHandlerConfig(
 
 	// Convert session timeouts
 	timeouts := ffi.SessionsTimeouts{
-		TcpSynAck: config.SessionsTimeouts.TcpSynAck,
-		TcpSyn:    config.SessionsTimeouts.TcpSyn,
-		TcpFin:    config.SessionsTimeouts.TcpFin,
-		Tcp:       config.SessionsTimeouts.Tcp,
-		Udp:       config.SessionsTimeouts.Udp,
+		TCPSynAck: config.SessionsTimeouts.TcpSynAck,
+		TCPSyn:    config.SessionsTimeouts.TcpSyn,
+		TCPFin:    config.SessionsTimeouts.TcpFin,
+		TCP:       config.SessionsTimeouts.Tcp,
+		UDP:       config.SessionsTimeouts.Udp,
 		Default:   config.SessionsTimeouts.Default,
 	}
 
@@ -308,9 +308,9 @@ func protoToVsConfig(
 	// Convert proto
 	var proto ffi.VsTransportProto
 	if protoVs.Id.Proto == balancerpb.TransportProto_TCP {
-		proto = ffi.VsTransportProtoTcp
+		proto = ffi.VsTransportProtoTCP
 	} else {
-		proto = ffi.VsTransportProtoUdp
+		proto = ffi.VsTransportProtoUDP
 	}
 
 	// Convert flags
@@ -627,11 +627,11 @@ func mergePacketHandlerConfig(
 		merged.SessionsTimeouts = newHandler.SessionsTimeouts
 	} else {
 		merged.SessionsTimeouts = &balancerpb.SessionsTimeouts{
-			TcpSynAck: currentHandler.SessionsTimeouts.TcpSynAck,
-			TcpSyn:    currentHandler.SessionsTimeouts.TcpSyn,
-			TcpFin:    currentHandler.SessionsTimeouts.TcpFin,
-			Tcp:       currentHandler.SessionsTimeouts.Tcp,
-			Udp:       currentHandler.SessionsTimeouts.Udp,
+			TcpSynAck: currentHandler.SessionsTimeouts.TCPSynAck,
+			TcpSyn:    currentHandler.SessionsTimeouts.TCPSyn,
+			TcpFin:    currentHandler.SessionsTimeouts.TCPFin,
+			Tcp:       currentHandler.SessionsTimeouts.TCP,
+			Udp:       currentHandler.SessionsTimeouts.UDP,
 			Default:   currentHandler.SessionsTimeouts.Default,
 		}
 	}
@@ -787,7 +787,7 @@ func mergeWlcConfig(
 func ConvertFFIProtoToProto(
 	proto ffi.VsTransportProto,
 ) balancerpb.TransportProto {
-	if proto == ffi.VsTransportProtoTcp {
+	if proto == ffi.VsTransportProtoTCP {
 		return balancerpb.TransportProto_TCP
 	}
 	return balancerpb.TransportProto_UDP
@@ -851,7 +851,7 @@ func ConvertSessionInfoToProto(
 		CreateTimestamp:     timestamppb.New(info.CreateTimestamp),
 		Timeout:             durationpb.New(info.Timeout),
 		ClientAddr: &balancerpb.Addr{
-			Bytes: identifier.ClientIp.AsSlice(),
+			Bytes: identifier.ClientIP.AsSlice(),
 		},
 		ClientPort: uint32(identifier.ClientPort),
 		VsId: &balancerpb.VsIdentifier{
@@ -957,7 +957,7 @@ func ConvertIcmpStatsToProto(
 		IncomingPackets:           stats.IncomingPackets,
 		SrcNotAllowed:             stats.SrcNotAllowed,
 		EchoResponses:             stats.EchoResponses,
-		PayloadTooShortIp:         stats.PayloadTooShortIp,
+		PayloadTooShortIp:         stats.PayloadTooShortIP,
 		UnmatchingSrcFromOriginal: stats.UnmatchingSrcFromOriginal,
 		PayloadTooShortPort:       stats.PayloadTooShortPort,
 		UnexpectedTransport:       stats.UnexpectedTransport,
@@ -1202,11 +1202,11 @@ func convertPacketHandlerToProtoWithWlc(
 		SourceAddressV6: &balancerpb.Addr{Bytes: handler.SourceV6.AsSlice()},
 		DecapAddresses:  decapAddrs,
 		SessionsTimeouts: &balancerpb.SessionsTimeouts{
-			TcpSynAck: handler.SessionsTimeouts.TcpSynAck,
-			TcpSyn:    handler.SessionsTimeouts.TcpSyn,
-			TcpFin:    handler.SessionsTimeouts.TcpFin,
-			Tcp:       handler.SessionsTimeouts.Tcp,
-			Udp:       handler.SessionsTimeouts.Udp,
+			TcpSynAck: handler.SessionsTimeouts.TCPSynAck,
+			TcpSyn:    handler.SessionsTimeouts.TCPSyn,
+			TcpFin:    handler.SessionsTimeouts.TCPFin,
+			Tcp:       handler.SessionsTimeouts.TCP,
+			Udp:       handler.SessionsTimeouts.UDP,
 			Default:   handler.SessionsTimeouts.Default,
 		},
 	}
@@ -1347,14 +1347,14 @@ func ConvertUpdateInfoToProto(
 	}
 
 	// Convert VS identifiers
-	vsIdentifiers := make([]*balancerpb.VsIdentifier, 0, len(info.AclReusedVs))
-	for i := range info.AclReusedVs {
+	vsIdentifiers := make([]*balancerpb.VsIdentifier, 0, len(info.ACLReusedVs))
+	for i := range info.ACLReusedVs {
 		vsIdentifiers = append(vsIdentifiers, &balancerpb.VsIdentifier{
 			Addr: &balancerpb.Addr{
-				Bytes: info.AclReusedVs[i].Addr.AsSlice(),
+				Bytes: info.ACLReusedVs[i].Addr.AsSlice(),
 			},
-			Port:  uint32(info.AclReusedVs[i].Port),
-			Proto: ConvertFFIProtoToProto(info.AclReusedVs[i].TransportProto),
+			Port:  uint32(info.ACLReusedVs[i].Port),
+			Proto: ConvertFFIProtoToProto(info.ACLReusedVs[i].TransportProto),
 		})
 	}
 

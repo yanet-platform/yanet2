@@ -1,5 +1,9 @@
 package utils
 
+// Test setup utilities for creating balancer test environments with mock dataplane,
+// configuring YANET infrastructure (devices, pipelines, functions), and managing
+// test lifecycle including balancer agent and manager initialization.
+
 import (
 	"fmt"
 	"testing"
@@ -13,11 +17,13 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-var DeviceName string = "01:00.0"
-var PipelineName string = "pipeline0"
-var FunctionName string = "function0"
-var ChainName string = "chain0"
-var BalancerName string = "balancer0"
+var (
+	DeviceName   string = "01:00.0"
+	PipelineName string = "pipeline0"
+	FunctionName string = "function0"
+	ChainName    string = "chain0"
+	BalancerName string = "balancer0"
+)
 
 ////////////////////////////////////////////////////////////////////////////////
 

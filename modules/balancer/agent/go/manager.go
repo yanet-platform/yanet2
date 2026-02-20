@@ -1,5 +1,9 @@
 package balancer
 
+// BalancerManager implementation providing lifecycle management, configuration updates,
+// real server management, and WLC (Weighted Least Connection) scheduling with automatic
+// session table resizing and periodic refresh tasks.
+
 import (
 	"context"
 	"fmt"
@@ -93,12 +97,12 @@ func (b *BalancerManager) Update(
 	b.log.Infow("balancer configuration updated successfully",
 		"vs_ipv4_matcher_reused", updateInfo.VsIpv4MatcherReused,
 		"vs_ipv6_matcher_reused", updateInfo.VsIpv6MatcherReused,
-		"acl_reused_vs_count", len(updateInfo.AclReusedVs))
+		"acl_reused_vs_count", len(updateInfo.ACLReusedVs))
 
-	if len(updateInfo.AclReusedVs) > 0 {
+	if len(updateInfo.ACLReusedVs) > 0 {
 		b.log.Debugw("ACL filters reused for virtual services",
-			"count", len(updateInfo.AclReusedVs),
-			"vs_identifiers", updateInfo.AclReusedVs)
+			"count", len(updateInfo.ACLReusedVs),
+			"vs_identifiers", updateInfo.ACLReusedVs)
 	}
 
 	return updateInfo, nil

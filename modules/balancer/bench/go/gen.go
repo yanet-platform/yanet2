@@ -1,5 +1,9 @@
 package main
 
+// Packet generator for benchmark traffic creation, producing realistic TCP/UDP packets
+// with configurable session reuse, client IP distribution, and MSS options for testing
+// various load balancing scenarios and performance characteristics.
+
 import (
 	"fmt"
 	"math/rand/v2"
@@ -13,9 +17,9 @@ import (
 )
 
 type session struct {
-	clientIp   netip.Addr
+	clientIP   netip.Addr
 	clientPort uint16
-	vsIp       netip.Addr
+	vsIP       netip.Addr
 	vsPort     uint16
 	proto      balancerpb.TransportProto
 }
@@ -191,9 +195,9 @@ func (ctx *Generator) createNewSession() session {
 	}
 
 	return session{
-		clientIp:   ctx.generateClientIP(vs),
+		clientIP:   ctx.generateClientIP(vs),
 		clientPort: ctx.generateClientPort(),
-		vsIp:       vsIp,
+		vsIP:       vsIp,
 		vsPort:     uint16(vs.Id.Port),
 		proto:      vs.Id.Proto,
 	}
@@ -207,18 +211,18 @@ func (ctx *Generator) createPacketForSession(s session) dataplane.PacketData {
 		// Use utility function from utils/packet.go
 		tcp := &layers.TCP{SYN: true}
 		packetLayers = utils.MakeTCPPacket(
-			s.clientIp,
+			s.clientIP,
 			s.clientPort,
-			s.vsIp,
+			s.vsIP,
 			s.vsPort,
 			tcp,
 		)
 	} else {
 		// UDP packet
 		packetLayers = utils.MakeUDPPacket(
-			s.clientIp,
+			s.clientIP,
 			s.clientPort,
-			s.vsIp,
+			s.vsIP,
 			s.vsPort,
 		)
 	}

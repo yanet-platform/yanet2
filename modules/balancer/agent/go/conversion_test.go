@@ -47,7 +47,7 @@ func TestNewRealUpdateFromProto_Valid(t *testing.T) {
 					VsIdentifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("192.168.1.100"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Relative: ffi.RelativeRealIdentifier{
 						Addr: netip.MustParseAddr("10.0.0.1"),
@@ -83,7 +83,7 @@ func TestNewRealUpdateFromProto_Valid(t *testing.T) {
 					VsIdentifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           443,
-						TransportProto: ffi.VsTransportProtoUdp,
+						TransportProto: ffi.VsTransportProtoUDP,
 					},
 					Relative: ffi.RelativeRealIdentifier{
 						Addr: netip.MustParseAddr("172.16.0.1"),
@@ -120,7 +120,7 @@ func TestNewRealUpdateFromProto_Valid(t *testing.T) {
 					VsIdentifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("2001:db8::1"),
 						Port:           53,
-						TransportProto: ffi.VsTransportProtoUdp,
+						TransportProto: ffi.VsTransportProtoUDP,
 					},
 					Relative: ffi.RelativeRealIdentifier{
 						Addr: netip.MustParseAddr("2001:db8::100"),
@@ -155,7 +155,7 @@ func TestNewRealUpdateFromProto_Valid(t *testing.T) {
 					VsIdentifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.10.10.10"),
 						Port:           8080,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Relative: ffi.RelativeRealIdentifier{
 						Addr: netip.MustParseAddr("10.10.10.11"),
@@ -587,7 +587,7 @@ func TestProtoToHandlerConfig_Valid(t *testing.T) {
 
 	result, err := ProtoToHandlerConfig(config)
 	require.NoError(t, err)
-	assert.Equal(t, uint32(10), result.SessionsTimeouts.TcpSynAck)
+	assert.Equal(t, uint32(10), result.SessionsTimeouts.TCPSynAck)
 	assert.Len(t, result.VirtualServices, 1)
 	assert.Len(t, result.DecapV4, 1)
 	assert.Len(t, result.DecapV6, 1)
@@ -865,11 +865,11 @@ func TestMergeBalancerConfig(t *testing.T) {
 		Balancer: ffi.BalancerConfig{
 			Handler: ffi.PacketHandlerConfig{
 				SessionsTimeouts: ffi.SessionsTimeouts{
-					TcpSynAck: 10,
-					TcpSyn:    20,
-					TcpFin:    15,
-					Tcp:       100,
-					Udp:       50,
+					TCPSynAck: 10,
+					TCPSyn:    20,
+					TCPFin:    15,
+					TCP:       100,
+					UDP:       50,
 					Default:   30,
 				},
 				VirtualServices: []ffi.VsConfig{},
@@ -1040,7 +1040,7 @@ func TestConvertFFIRealUpdateToProto(t *testing.T) {
 					VsIdentifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("192.168.1.100"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Relative: ffi.RelativeRealIdentifier{
 						Addr: netip.MustParseAddr("10.0.0.1"),
@@ -1078,7 +1078,7 @@ func TestConvertFFIRealUpdateToProto(t *testing.T) {
 					VsIdentifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           443,
-						TransportProto: ffi.VsTransportProtoUdp,
+						TransportProto: ffi.VsTransportProtoUDP,
 					},
 					Relative: ffi.RelativeRealIdentifier{
 						Addr: netip.MustParseAddr("172.16.0.1"),
@@ -1115,7 +1115,7 @@ func TestConvertFFIRealUpdateToProto(t *testing.T) {
 					VsIdentifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("2001:db8::1"),
 						Port:           53,
-						TransportProto: ffi.VsTransportProtoUdp,
+						TransportProto: ffi.VsTransportProtoUDP,
 					},
 					Relative: ffi.RelativeRealIdentifier{
 						Addr: netip.MustParseAddr("2001:db8::100"),
@@ -1376,11 +1376,11 @@ func ptrBool(v bool) *bool {
 func TestConvertPacketHandlerToProtoWithWlc(t *testing.T) {
 	handler := &ffi.PacketHandlerConfig{
 		SessionsTimeouts: ffi.SessionsTimeouts{
-			TcpSynAck: 10,
-			TcpSyn:    20,
-			TcpFin:    15,
-			Tcp:       100,
-			Udp:       50,
+			TCPSynAck: 10,
+			TCPSyn:    20,
+			TCPFin:    15,
+			TCP:       100,
+			UDP:       50,
 			Default:   30,
 		},
 		VirtualServices: []ffi.VsConfig{
@@ -1388,7 +1388,7 @@ func TestConvertPacketHandlerToProtoWithWlc(t *testing.T) {
 				Identifier: ffi.VsIdentifier{
 					Addr:           netip.MustParseAddr("192.168.1.100"),
 					Port:           80,
-					TransportProto: ffi.VsTransportProtoTcp,
+					TransportProto: ffi.VsTransportProtoTCP,
 				},
 				Scheduler: ffi.VsSchedulerRoundRobin,
 				Reals:     []ffi.RealConfig{},
@@ -1397,7 +1397,7 @@ func TestConvertPacketHandlerToProtoWithWlc(t *testing.T) {
 				Identifier: ffi.VsIdentifier{
 					Addr:           netip.MustParseAddr("192.168.1.101"),
 					Port:           443,
-					TransportProto: ffi.VsTransportProtoTcp,
+					TransportProto: ffi.VsTransportProtoTCP,
 				},
 				Scheduler: ffi.VsSchedulerRoundRobin,
 				Reals:     []ffi.RealConfig{},
@@ -1406,7 +1406,7 @@ func TestConvertPacketHandlerToProtoWithWlc(t *testing.T) {
 				Identifier: ffi.VsIdentifier{
 					Addr:           netip.MustParseAddr("192.168.1.102"),
 					Port:           8080,
-					TransportProto: ffi.VsTransportProtoTcp,
+					TransportProto: ffi.VsTransportProtoTCP,
 				},
 				Scheduler: ffi.VsSchedulerRoundRobin,
 				Reals:     []ffi.RealConfig{},
@@ -1540,7 +1540,7 @@ func TestConvertVsConfigToProtoWithWlc(t *testing.T) {
 		Identifier: ffi.VsIdentifier{
 			Addr:           netip.MustParseAddr("192.168.1.100"),
 			Port:           80,
-			TransportProto: ffi.VsTransportProtoTcp,
+			TransportProto: ffi.VsTransportProtoTCP,
 		},
 		Flags: ffi.VsFlags{
 			GRE:    true,
@@ -1597,11 +1597,11 @@ func TestConvertBalancerConfigToProto_WithWlc(t *testing.T) {
 		Balancer: ffi.BalancerConfig{
 			Handler: ffi.PacketHandlerConfig{
 				SessionsTimeouts: ffi.SessionsTimeouts{
-					TcpSynAck: 10,
-					TcpSyn:    20,
-					TcpFin:    15,
-					Tcp:       100,
-					Udp:       50,
+					TCPSynAck: 10,
+					TCPSyn:    20,
+					TCPFin:    15,
+					TCP:       100,
+					UDP:       50,
 					Default:   30,
 				},
 				VirtualServices: []ffi.VsConfig{
@@ -1611,7 +1611,7 @@ func TestConvertBalancerConfigToProto_WithWlc(t *testing.T) {
 								"192.168.1.100",
 							),
 							Port:           80,
-							TransportProto: ffi.VsTransportProtoTcp,
+							TransportProto: ffi.VsTransportProtoTCP,
 						},
 						Scheduler: ffi.VsSchedulerRoundRobin,
 						Reals:     []ffi.RealConfig{},
@@ -1622,7 +1622,7 @@ func TestConvertBalancerConfigToProto_WithWlc(t *testing.T) {
 								"192.168.1.101",
 							),
 							Port:           443,
-							TransportProto: ffi.VsTransportProtoTcp,
+							TransportProto: ffi.VsTransportProtoTCP,
 						},
 						Scheduler: ffi.VsSchedulerRoundRobin,
 						Reals:     []ffi.RealConfig{},

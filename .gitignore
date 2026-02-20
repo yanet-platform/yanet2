@@ -80,6 +80,7 @@ target/
 ### IDE ###
 .vscode
 .protolint.yaml
+.golangci.yml
 
 # clangd
 .cache

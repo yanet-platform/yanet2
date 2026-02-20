@@ -41,11 +41,11 @@ func TestAgent(t *testing.T) {
 		Balancer: BalancerConfig{
 			Handler: PacketHandlerConfig{
 				SessionsTimeouts: SessionsTimeouts{
-					TcpSynAck: 10,
-					TcpSyn:    20,
-					TcpFin:    15,
-					Tcp:       100,
-					Udp:       11,
+					TCPSynAck: 10,
+					TCPSyn:    20,
+					TCPFin:    15,
+					TCP:       100,
+					UDP:       11,
 					Default:   19,
 				},
 				VirtualServices: []VsConfig{
@@ -53,7 +53,7 @@ func TestAgent(t *testing.T) {
 						Identifier: VsIdentifier{
 							Addr:           netip.MustParseAddr("10.12.13.213"),
 							Port:           80,
-							TransportProto: VsTransportProtoTcp,
+							TransportProto: VsTransportProtoTCP,
 						},
 						Flags:     VsFlags{FixMSS: true},
 						Scheduler: VsSchedulerSourceHash,
@@ -131,11 +131,11 @@ func TestAgent(t *testing.T) {
 		Balancer: BalancerConfig{
 			Handler: PacketHandlerConfig{
 				SessionsTimeouts: SessionsTimeouts{
-					TcpSynAck: 15,
-					TcpSyn:    25,
-					TcpFin:    20,
-					Tcp:       120,
-					Udp:       15,
+					TCPSynAck: 15,
+					TCPSyn:    25,
+					TCPFin:    20,
+					TCP:       120,
+					UDP:       15,
 					Default:   25,
 				},
 				VirtualServices: []VsConfig{
@@ -143,7 +143,7 @@ func TestAgent(t *testing.T) {
 						Identifier: VsIdentifier{
 							Addr:           netip.MustParseAddr("10.20.30.40"),
 							Port:           443,
-							TransportProto: VsTransportProtoTcp,
+							TransportProto: VsTransportProtoTCP,
 						},
 						Flags:     VsFlags{OPS: true, GRE: true},
 						Scheduler: VsSchedulerRoundRobin,

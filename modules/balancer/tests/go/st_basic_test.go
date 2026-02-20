@@ -69,7 +69,7 @@ func checkActiveSessions(
 	ts *utils.TestSetup,
 	currentTime time.Time,
 	expectedSessions []sessionKey,
-	vsIp netip.Addr,
+	vsIP netip.Addr,
 	vsPort uint16,
 	realAddr netip.Addr,
 ) {
@@ -100,7 +100,7 @@ func checkActiveSessions(
 		vsAddr, _ := netip.AddrFromSlice(session.RealId.Vs.Addr.Bytes)
 		assert.Equal(
 			t,
-			vsIp,
+			vsIP,
 			vsAddr,
 			"session %d: VS IP should match",
 			i,
@@ -188,7 +188,7 @@ func checkActiveSessions(
 // It creates sessions, verifies they stay active after resizing or when refreshed
 // within timeout, and tests that new sessions can be created alongside existing ones.
 func TestSessionTableManual(t *testing.T) {
-	vsIp := netip.MustParseAddr("1.1.1.1")
+	vsIP := netip.MustParseAddr("1.1.1.1")
 	vsPort := uint16(80)
 	realAddr := netip.MustParseAddr("2.2.2.2")
 
@@ -209,7 +209,7 @@ func TestSessionTableManual(t *testing.T) {
 				{
 					Id: &balancerpb.VsIdentifier{
 						Addr: &balancerpb.Addr{
-							Bytes: vsIp.AsSlice(),
+							Bytes: vsIP.AsSlice(),
 						},
 						Port:  uint32(vsPort),
 						Proto: balancerpb.TransportProto_TCP,
@@ -331,7 +331,7 @@ func TestSessionTableManual(t *testing.T) {
 			packetLayers := utils.MakeTCPPacket(
 				srcIP,
 				srcPort,
-				vsIp,
+				vsIP,
 				vsPort,
 				&layers.TCP{SYN: true},
 			)
@@ -376,7 +376,7 @@ func TestSessionTableManual(t *testing.T) {
 			packetLayers := utils.MakeTCPPacket(
 				session.ip,
 				session.port,
-				vsIp,
+				vsIP,
 				vsPort,
 				&layers.TCP{}, // No SYN flag
 			)
@@ -422,7 +422,7 @@ func TestSessionTableManual(t *testing.T) {
 			ts,
 			currentTime,
 			sessions,
-			vsIp,
+			vsIP,
 			vsPort,
 			realAddr,
 		)
@@ -448,7 +448,7 @@ func TestSessionTableManual(t *testing.T) {
 			packetLayers := utils.MakeTCPPacket(
 				session.ip,
 				session.port,
-				vsIp,
+				vsIP,
 				vsPort,
 				&layers.TCP{}, // No SYN flag
 			)
@@ -517,7 +517,7 @@ func TestSessionTableManual(t *testing.T) {
 			packetLayers := utils.MakeTCPPacket(
 				srcIP,
 				srcPort,
-				vsIp,
+				vsIP,
 				vsPort,
 				&layers.TCP{SYN: true},
 			)
@@ -532,7 +532,7 @@ func TestSessionTableManual(t *testing.T) {
 			packetLayers := utils.MakeTCPPacket(
 				session.ip,
 				session.port,
-				vsIp,
+				vsIP,
 				vsPort,
 				&layers.TCP{}, // No SYN flag
 			)
@@ -581,7 +581,7 @@ func TestSessionTableManual(t *testing.T) {
 			ts,
 			currentTime,
 			sessions,
-			vsIp,
+			vsIP,
 			vsPort,
 			realAddr,
 		)
@@ -609,7 +609,7 @@ func TestSessionTableManual(t *testing.T) {
 			packetLayers := utils.MakeTCPPacket(
 				session.ip,
 				session.port,
-				vsIp,
+				vsIP,
 				vsPort,
 				&layers.TCP{}, // No SYN flag
 			)
@@ -643,7 +643,7 @@ func TestSessionTableManual(t *testing.T) {
 			ts,
 			currentTime,
 			sessions,
-			vsIp,
+			vsIP,
 			vsPort,
 			realAddr,
 		)
@@ -671,7 +671,7 @@ func TestSessionTableManual(t *testing.T) {
 				ts,
 				currentTime,
 				newSessions,
-				vsIp,
+				vsIP,
 				vsPort,
 				realAddr,
 			)
@@ -695,7 +695,7 @@ func TestSessionTableManual(t *testing.T) {
 				ts,
 				currentTime,
 				newSessions,
-				vsIp,
+				vsIP,
 				vsPort,
 				realAddr,
 			)
@@ -722,7 +722,7 @@ func TestSessionTableManual(t *testing.T) {
 				ts,
 				currentTime,
 				newSessions,
-				vsIp,
+				vsIP,
 				vsPort,
 				realAddr,
 			)
@@ -749,7 +749,7 @@ func TestSessionTableManual(t *testing.T) {
 			ts,
 			currentTime,
 			[]sessionKey{},
-			vsIp,
+			vsIP,
 			vsPort,
 			realAddr,
 		)
@@ -789,7 +789,7 @@ func TestSessionTableManual(t *testing.T) {
 			packetLayers := utils.MakeTCPPacket(
 				srcIP,
 				srcPort,
-				vsIp,
+				vsIP,
 				vsPort,
 				&layers.TCP{SYN: true},
 			)
@@ -875,7 +875,7 @@ func TestSessionTableManual(t *testing.T) {
 			ts,
 			currentTime,
 			phase6OldSessions,
-			vsIp,
+			vsIP,
 			vsPort,
 			realAddr,
 		)
@@ -922,7 +922,7 @@ func TestSessionTableManual(t *testing.T) {
 			packetLayers := utils.MakeTCPPacket(
 				srcIP,
 				srcPort,
-				vsIp,
+				vsIP,
 				vsPort,
 				&layers.TCP{SYN: true},
 			)
@@ -999,7 +999,7 @@ func TestSessionTableManual(t *testing.T) {
 			ts,
 			currentTime,
 			allSessions,
-			vsIp,
+			vsIP,
 			vsPort,
 			realAddr,
 		)
@@ -1028,7 +1028,7 @@ func TestSessionTableManual(t *testing.T) {
 			ts,
 			currentTime,
 			phase6NewSessions,
-			vsIp,
+			vsIP,
 			vsPort,
 			realAddr,
 		)
@@ -1072,7 +1072,7 @@ func TestSessionTableManual(t *testing.T) {
 			ts,
 			currentTime,
 			phase6NewSessions,
-			vsIp,
+			vsIP,
 			vsPort,
 			realAddr,
 		)
@@ -1090,7 +1090,7 @@ func checkSessionsForVS(
 	ts *utils.TestSetup,
 	currentTime time.Time,
 	expectedCount int,
-	vsIp netip.Addr,
+	vsIP netip.Addr,
 	vsPort uint16,
 ) {
 	t.Helper()
@@ -1104,7 +1104,7 @@ func checkSessionsForVS(
 	for _, session := range sessions {
 		sessionVsAddr, _ := netip.AddrFromSlice(session.RealId.Vs.Addr.Bytes)
 		sessionVsPort := uint16(session.RealId.Vs.Port)
-		if sessionVsAddr == vsIp && sessionVsPort == vsPort {
+		if sessionVsAddr == vsIP && sessionVsPort == vsPort {
 			vsSessionCount++
 		}
 	}
@@ -1114,7 +1114,7 @@ func checkSessionsForVS(
 		expectedCount,
 		vsSessionCount,
 		"VS %v:%d should have %d sessions",
-		vsIp,
+		vsIP,
 		vsPort,
 		expectedCount,
 	)
@@ -1127,13 +1127,13 @@ func checkSessionsForVS(
 	for _, vsInfo := range info.Vs {
 		vsAddr, _ := netip.AddrFromSlice(vsInfo.Id.Addr.Bytes)
 		vsInfoPort := uint16(vsInfo.Id.Port)
-		if vsAddr == vsIp && vsInfoPort == vsPort {
+		if vsAddr == vsIP && vsInfoPort == vsPort {
 			assert.Equal(
 				t,
 				uint64(expectedCount),
 				vsInfo.ActiveSessions,
 				"VS %v:%d active sessions should match",
-				vsIp,
+				vsIP,
 				vsPort,
 			)
 			// Also verify Real active sessions sum
@@ -1146,7 +1146,7 @@ func checkSessionsForVS(
 				uint64(expectedCount),
 				totalRealSessions,
 				"VS %v:%d total real sessions should match",
-				vsIp,
+				vsIP,
 				vsPort,
 			)
 			return
@@ -1154,7 +1154,7 @@ func checkSessionsForVS(
 	}
 
 	if expectedCount > 0 {
-		t.Errorf("VS %v:%d not found in info", vsIp, vsPort)
+		t.Errorf("VS %v:%d not found in info", vsIP, vsPort)
 	}
 }
 
@@ -1170,11 +1170,11 @@ func checkSessionsForVS(
 //
 // Each test verifies the session persists at timeout-1 and expires at timeout.
 func TestSessionTimeouts(t *testing.T) {
-	tcpVsIp := netip.MustParseAddr("1.1.1.1")
+	tcpVsIP := netip.MustParseAddr("1.1.1.1")
 	tcpVsPort := uint16(80)
 	tcpRealAddr := netip.MustParseAddr("10.2.2.2")
 
-	udpVsIp := netip.MustParseAddr("2.2.2.2")
+	udpVsIP := netip.MustParseAddr("2.2.2.2")
 	udpVsPort := uint16(5353)
 	udpRealAddr := netip.MustParseAddr("10.3.3.3")
 
@@ -1199,7 +1199,7 @@ func TestSessionTimeouts(t *testing.T) {
 				{
 					Id: &balancerpb.VsIdentifier{
 						Addr: &balancerpb.Addr{
-							Bytes: tcpVsIp.AsSlice(),
+							Bytes: tcpVsIP.AsSlice(),
 						},
 						Port:  uint32(tcpVsPort),
 						Proto: balancerpb.TransportProto_TCP,
@@ -1250,7 +1250,7 @@ func TestSessionTimeouts(t *testing.T) {
 				{
 					Id: &balancerpb.VsIdentifier{
 						Addr: &balancerpb.Addr{
-							Bytes: udpVsIp.AsSlice(),
+							Bytes: udpVsIP.AsSlice(),
 						},
 						Port:  uint32(udpVsPort),
 						Proto: balancerpb.TransportProto_UDP,
@@ -1350,7 +1350,7 @@ func TestSessionTimeouts(t *testing.T) {
 		packetLayers := utils.MakeUDPPacket(
 			clientIP,
 			clientPort,
-			udpVsIp,
+			udpVsIP,
 			udpVsPort,
 		)
 		packet := xpacket.LayersToPacket(t, packetLayers...)
@@ -1379,7 +1379,7 @@ func TestSessionTimeouts(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify session exists
-		checkSessionsForVS(t, ts, currentTime, 1, udpVsIp, udpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 1, udpVsIP, udpVsPort)
 		t.Logf("UDP session created successfully")
 
 		// Advance time by timeout-1 (29 seconds)
@@ -1387,7 +1387,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime = mock.CurrentTime()
 
 		// Verify session still exists
-		checkSessionsForVS(t, ts, currentTime, 1, udpVsIp, udpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 1, udpVsIP, udpVsPort)
 		t.Logf("UDP session persists at %d seconds", udpTimeout-1)
 
 		// Advance time by 1 second (total 30 seconds)
@@ -1395,7 +1395,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime = mock.CurrentTime()
 
 		// Verify session is gone
-		checkSessionsForVS(t, ts, currentTime, 0, udpVsIp, udpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 0, udpVsIP, udpVsPort)
 		t.Logf("UDP session expired at %d seconds", udpTimeout)
 	})
 
@@ -1411,7 +1411,7 @@ func TestSessionTimeouts(t *testing.T) {
 		packetLayers := utils.MakeTCPPacket(
 			clientIP,
 			clientPort,
-			tcpVsIp,
+			tcpVsIP,
 			tcpVsPort,
 			&layers.TCP{SYN: true},
 		)
@@ -1430,14 +1430,14 @@ func TestSessionTimeouts(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify session exists
-		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIP, tcpVsPort)
 		t.Logf("TCP session created successfully")
 
 		mock.AdvanceTime(time.Duration(tcpSynTimeout-1) * time.Second)
 		currentTime = mock.CurrentTime()
 
 		// Verify session still exists
-		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIP, tcpVsPort)
 		t.Logf("TCP session persists at %d seconds", tcpTimeout-1)
 
 		// Advance time by 1 second (total 60 seconds)
@@ -1445,7 +1445,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime = mock.CurrentTime()
 
 		// Verify session is gone
-		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIP, tcpVsPort)
 		t.Logf("TCP session expired at %d seconds", tcpTimeout)
 	})
 
@@ -1461,7 +1461,7 @@ func TestSessionTimeouts(t *testing.T) {
 		packetLayers := utils.MakeTCPPacket(
 			clientIP,
 			clientPort,
-			tcpVsIp,
+			tcpVsIP,
 			tcpVsPort,
 			&layers.TCP{SYN: true},
 		)
@@ -1479,7 +1479,7 @@ func TestSessionTimeouts(t *testing.T) {
 		packetLayers = utils.MakeTCPPacket(
 			clientIP,
 			clientPort,
-			tcpVsIp,
+			tcpVsIP,
 			tcpVsPort,
 			&layers.TCP{SYN: true, ACK: true},
 		)
@@ -1497,7 +1497,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime := mock.CurrentTime()
 
 		// Verify session exists
-		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIP, tcpVsPort)
 		t.Logf("TCP SYN-ACK session created successfully")
 
 		// Advance time by SYN-ACK timeout-1 (24 seconds)
@@ -1505,7 +1505,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime = mock.CurrentTime()
 
 		// Verify session still exists
-		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIP, tcpVsPort)
 		t.Logf("TCP SYN-ACK session persists at %d seconds", tcpSynAckTimeout-1)
 
 		// Advance time by 1 second (total 25 seconds)
@@ -1513,7 +1513,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime = mock.CurrentTime()
 
 		// Verify session is gone
-		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIP, tcpVsPort)
 		t.Logf("TCP SYN-ACK session expired at %d seconds", tcpSynAckTimeout)
 	})
 
@@ -1529,7 +1529,7 @@ func TestSessionTimeouts(t *testing.T) {
 		packetLayers := utils.MakeTCPPacket(
 			clientIP,
 			clientPort,
-			tcpVsIp,
+			tcpVsIP,
 			tcpVsPort,
 			&layers.TCP{SYN: true},
 		)
@@ -1547,7 +1547,7 @@ func TestSessionTimeouts(t *testing.T) {
 		packetLayers = utils.MakeTCPPacket(
 			clientIP,
 			clientPort,
-			tcpVsIp,
+			tcpVsIP,
 			tcpVsPort,
 			&layers.TCP{}, // No flags
 		)
@@ -1565,7 +1565,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime := mock.CurrentTime()
 
 		// Verify session exists
-		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIP, tcpVsPort)
 		t.Logf("TCP session (SYN->basic) created successfully")
 
 		// Advance time by TCP timeout-1 (59 seconds)
@@ -1574,7 +1574,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime = mock.CurrentTime()
 
 		// Verify session still exists
-		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIP, tcpVsPort)
 		t.Logf("TCP session (SYN->basic) persists at %d seconds", tcpTimeout-1)
 
 		// Advance time by 1 second (total 60 seconds)
@@ -1582,7 +1582,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime = mock.CurrentTime()
 
 		// Verify session is gone
-		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIP, tcpVsPort)
 		t.Logf("TCP session (SYN->basic) expired at %d seconds", tcpTimeout)
 	})
 
@@ -1598,7 +1598,7 @@ func TestSessionTimeouts(t *testing.T) {
 		packetLayers := utils.MakeTCPPacket(
 			clientIP,
 			clientPort,
-			tcpVsIp,
+			tcpVsIP,
 			tcpVsPort,
 			&layers.TCP{SYN: true},
 		)
@@ -1616,7 +1616,7 @@ func TestSessionTimeouts(t *testing.T) {
 		packetLayers = utils.MakeTCPPacket(
 			clientIP,
 			clientPort,
-			tcpVsIp,
+			tcpVsIP,
 			tcpVsPort,
 			&layers.TCP{FIN: true},
 		)
@@ -1634,7 +1634,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime := mock.CurrentTime()
 
 		// Verify session exists
-		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIP, tcpVsPort)
 		t.Logf("TCP session (SYN->FIN) created successfully")
 
 		// Advance time by FIN timeout-1 (14 seconds)
@@ -1642,7 +1642,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime = mock.CurrentTime()
 
 		// Verify session still exists
-		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 1, tcpVsIP, tcpVsPort)
 		t.Logf("TCP session (SYN->FIN) persists at %d seconds", tcpFinTimeout-1)
 
 		// Advance time by 1 second (total 15 seconds)
@@ -1650,7 +1650,7 @@ func TestSessionTimeouts(t *testing.T) {
 		currentTime = mock.CurrentTime()
 
 		// Verify session is gone
-		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIp, tcpVsPort)
+		checkSessionsForVS(t, ts, currentTime, 0, tcpVsIP, tcpVsPort)
 		t.Logf("TCP session (SYN->FIN) expired at %d seconds", tcpFinTimeout)
 	})
 }

@@ -90,10 +90,10 @@ func TestNetAddrConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Convert Go -> C
-			cAddr := goToC_NetAddr(tt.addr)
+			cAddr := goToCNetAddr(tt.addr)
 
 			// Convert C -> Go
-			result := cToGo_NetAddr(cAddr, tt.isV4)
+			result := cToGoNetAddr(cAddr, tt.isV4)
 
 			// Compare
 			if !compareAddr(tt.addr, result) {
@@ -189,10 +189,10 @@ func TestNetConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Convert Go -> C
-			cNet := goToC_Net(tt.net)
+			cNet := goToCNet(tt.net)
 
 			// Convert C -> Go
-			result := cToGo_Net(cNet, tt.isV4)
+			result := cToGoNet(cNet, tt.isV4)
 
 			// Compare
 			if !compareNetWithMask(tt.net, result) {
@@ -218,7 +218,7 @@ func TestVsIdentifierConversion(t *testing.T) {
 				Addr: netip.MustParseAddr("192.168.1.100"),
 
 				Port:           80,
-				TransportProto: VsTransportProtoTcp,
+				TransportProto: VsTransportProtoTCP,
 			},
 		},
 		{
@@ -227,7 +227,7 @@ func TestVsIdentifierConversion(t *testing.T) {
 				Addr: netip.MustParseAddr("192.168.1.100"),
 
 				Port:           53,
-				TransportProto: VsTransportProtoUdp,
+				TransportProto: VsTransportProtoUDP,
 			},
 		},
 		{
@@ -236,7 +236,7 @@ func TestVsIdentifierConversion(t *testing.T) {
 				Addr: netip.MustParseAddr("2001:db8::1"),
 
 				Port:           443,
-				TransportProto: VsTransportProtoTcp,
+				TransportProto: VsTransportProtoTCP,
 			},
 		},
 		{
@@ -245,7 +245,7 @@ func TestVsIdentifierConversion(t *testing.T) {
 				Addr: netip.MustParseAddr("2001:db8::1"),
 
 				Port:           53,
-				TransportProto: VsTransportProtoUdp,
+				TransportProto: VsTransportProtoUDP,
 			},
 		},
 		{
@@ -254,7 +254,7 @@ func TestVsIdentifierConversion(t *testing.T) {
 				Addr: netip.MustParseAddr("10.0.0.1"),
 
 				Port:           0,
-				TransportProto: VsTransportProtoTcp,
+				TransportProto: VsTransportProtoTCP,
 			},
 		},
 	}
@@ -262,10 +262,10 @@ func TestVsIdentifierConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Convert Go -> C
-			cId := goToC_VsIdentifier(tt.id)
+			cID := goToCVsIdentifier(tt.id)
 
 			// Convert C -> Go
-			result := cToGo_VsIdentifier(cId)
+			result := cToGoVsIdentifier(cID)
 
 			// Compare
 			if diff := cmp.Diff(tt.id, result, cmp.Comparer(compareAddr)); diff != "" {
@@ -313,10 +313,10 @@ func TestRelativeRealIdentifierConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Convert Go -> C
-			cId := goToC_RelativeRealIdentifier(tt.id)
+			cID := goToCRelativeRealIdentifier(tt.id)
 
 			// Convert C -> Go
-			result := cToGo_RelativeRealIdentifier(cId)
+			result := cToGoRelativeRealIdentifier(cID)
 
 			// Compare
 			if diff := cmp.Diff(tt.id, result, cmp.Comparer(compareAddr)); diff != "" {
@@ -342,7 +342,7 @@ func TestRealIdentifierConversion(t *testing.T) {
 					Addr: netip.MustParseAddr("192.168.1.100"),
 
 					Port:           80,
-					TransportProto: VsTransportProtoTcp,
+					TransportProto: VsTransportProtoTCP,
 				},
 				Relative: RelativeRealIdentifier{
 					Addr: netip.MustParseAddr("10.0.0.1"),
@@ -358,7 +358,7 @@ func TestRealIdentifierConversion(t *testing.T) {
 					Addr: netip.MustParseAddr("2001:db8::1"),
 
 					Port:           443,
-					TransportProto: VsTransportProtoUdp,
+					TransportProto: VsTransportProtoUDP,
 				},
 				Relative: RelativeRealIdentifier{
 					Addr: netip.MustParseAddr("2001:db8::100"),
@@ -372,10 +372,10 @@ func TestRealIdentifierConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Convert Go -> C
-			cId := goToC_RealIdentifier(tt.id)
+			cID := goToCRealIdentifier(tt.id)
 
 			// Convert C -> Go
-			result := cToGo_RealIdentifier(cId)
+			result := cToGoRealIdentifier(cID)
 
 			// Compare
 			if diff := cmp.Diff(tt.id, result, cmp.Comparer(compareAddr)); diff != "" {
@@ -411,10 +411,10 @@ func TestTimestampConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Convert Go -> C
-			cTs := goToC_Timestamp(tt.ts)
+			cTS := goToCTimestamp(tt.ts)
 
 			// Convert C -> Go
-			result := cToGo_Timestamp(cTs)
+			result := cToGoTimestamp(cTS)
 
 			// Compare (only seconds precision)
 			if result.Unix() != tt.ts.Unix() {
@@ -441,7 +441,7 @@ func TestVsConfigConversion(t *testing.T) {
 					Addr: netip.MustParseAddr("192.168.1.100"),
 
 					Port:           80,
-					TransportProto: VsTransportProtoTcp,
+					TransportProto: VsTransportProtoTCP,
 				},
 				Flags: VsFlags{
 					PureL3: false,
@@ -483,7 +483,7 @@ func TestVsConfigConversion(t *testing.T) {
 					Addr: netip.MustParseAddr("2001:db8::1"),
 
 					Port:           443,
-					TransportProto: VsTransportProtoTcp,
+					TransportProto: VsTransportProtoTCP,
 				},
 				Flags: VsFlags{
 					PureL3: false,
@@ -534,7 +534,7 @@ func TestVsConfigConversion(t *testing.T) {
 					Addr: netip.MustParseAddr("10.0.0.1"),
 
 					Port:           0,
-					TransportProto: VsTransportProtoTcp,
+					TransportProto: VsTransportProtoTCP,
 				},
 				Flags: VsFlags{
 					PureL3: true,
@@ -610,7 +610,7 @@ func TestVsConfigConversion(t *testing.T) {
 					Addr: netip.MustParseAddr("192.168.1.100"),
 
 					Port:           80,
-					TransportProto: VsTransportProtoTcp,
+					TransportProto: VsTransportProtoTCP,
 				},
 				Flags: VsFlags{
 					PureL3: false,
@@ -662,14 +662,14 @@ func TestVsConfigConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Convert Go -> C
-			cConfig, err := goToC_VsConfig(&tt.config)
+			cConfig, err := goToCVsConfig(&tt.config)
 			if err != nil {
 				t.Fatalf("Failed to convert to C: %v", err)
 			}
-			defer freeC_VsConfig(cConfig)
+			defer freeCVsConfig(cConfig)
 
 			// Convert C -> Go
-			result := cToGo_VsConfig(cConfig)
+			result := cToGoVsConfig(cConfig)
 
 			// Compare
 			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix), cmp.Comparer(compareNetWithMask)); diff != "" {
@@ -692,11 +692,11 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 			name: "Complete configuration",
 			config: PacketHandlerConfig{
 				SessionsTimeouts: SessionsTimeouts{
-					TcpSynAck: 60,
-					TcpSyn:    30,
-					TcpFin:    30,
-					Tcp:       300,
-					Udp:       120,
+					TCPSynAck: 60,
+					TCPSyn:    30,
+					TCPFin:    30,
+					TCP:       300,
+					UDP:       120,
 					Default:   60,
 				},
 				VirtualServices: []VsConfig{
@@ -705,7 +705,7 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("192.168.1.100"),
 
 							Port:           80,
-							TransportProto: VsTransportProtoTcp,
+							TransportProto: VsTransportProtoTCP,
 						},
 						Flags:     VsFlags{FixMSS: true},
 						Scheduler: VsSchedulerSourceHash,
@@ -751,11 +751,11 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 			name: "Configuration with multiple VS",
 			config: PacketHandlerConfig{
 				SessionsTimeouts: SessionsTimeouts{
-					TcpSynAck: 60,
-					TcpSyn:    30,
-					TcpFin:    30,
-					Tcp:       300,
-					Udp:       120,
+					TCPSynAck: 60,
+					TCPSyn:    30,
+					TCPFin:    30,
+					TCP:       300,
+					UDP:       120,
 					Default:   60,
 				},
 				VirtualServices: []VsConfig{
@@ -764,7 +764,7 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("192.168.1.100"),
 
 							Port:           80,
-							TransportProto: VsTransportProtoTcp,
+							TransportProto: VsTransportProtoTCP,
 						},
 						Flags:     VsFlags{FixMSS: true},
 						Scheduler: VsSchedulerSourceHash,
@@ -815,7 +815,7 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 							Addr: netip.MustParseAddr("2001:db8::1"),
 
 							Port:           443,
-							TransportProto: VsTransportProtoTcp,
+							TransportProto: VsTransportProtoTCP,
 						},
 						Flags:     VsFlags{GRE: true},
 						Scheduler: VsSchedulerRoundRobin,
@@ -866,14 +866,14 @@ func TestPacketHandlerConfigConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Convert Go -> C
-			cConfig, err := goToC_PacketHandlerConfig(&tt.config)
+			cConfig, err := goToCPacketHandlerConfig(&tt.config)
 			if err != nil {
 				t.Fatalf("Failed to convert to C: %v", err)
 			}
-			defer freeC_PacketHandlerConfig(cConfig)
+			defer freeCPacketHandlerConfig(cConfig)
 
 			// Convert C -> Go
-			result := cToGo_PacketHandlerConfig(cConfig)
+			result := cToGoPacketHandlerConfig(cConfig)
 
 			// Compare
 			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix), cmp.Comparer(compareNetWithMask)); diff != "" {
@@ -897,11 +897,11 @@ func TestBalancerConfigConversion(t *testing.T) {
 			config: BalancerConfig{
 				Handler: PacketHandlerConfig{
 					SessionsTimeouts: SessionsTimeouts{
-						TcpSynAck: 60,
-						TcpSyn:    30,
-						TcpFin:    30,
-						Tcp:       300,
-						Udp:       120,
+						TCPSynAck: 60,
+						TCPSyn:    30,
+						TCPFin:    30,
+						TCP:       300,
+						UDP:       120,
 						Default:   60,
 					},
 					VirtualServices: []VsConfig{
@@ -910,7 +910,7 @@ func TestBalancerConfigConversion(t *testing.T) {
 								Addr: netip.MustParseAddr("192.168.1.100"),
 
 								Port:           80,
-								TransportProto: VsTransportProtoTcp,
+								TransportProto: VsTransportProtoTCP,
 							},
 							Flags:     VsFlags{FixMSS: true},
 							Scheduler: VsSchedulerSourceHash,
@@ -988,14 +988,14 @@ func TestBalancerConfigConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Convert Go -> C
-			cConfig, err := goToC_BalancerConfig(&tt.config)
+			cConfig, err := goToCBalancerConfig(&tt.config)
 			if err != nil {
 				t.Fatalf("Failed to convert to C: %v", err)
 			}
-			defer freeC_BalancerConfig(cConfig)
+			defer freeCBalancerConfig(cConfig)
 
 			// Convert C -> Go
-			result := cToGo_BalancerConfig(cConfig)
+			result := cToGoBalancerConfig(cConfig)
 
 			// Compare
 			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix), cmp.Comparer(compareNetWithMask)); diff != "" {
@@ -1020,11 +1020,11 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 				Balancer: BalancerConfig{
 					Handler: PacketHandlerConfig{
 						SessionsTimeouts: SessionsTimeouts{
-							TcpSynAck: 60,
-							TcpSyn:    30,
-							TcpFin:    30,
-							Tcp:       300,
-							Udp:       120,
+							TCPSynAck: 60,
+							TCPSyn:    30,
+							TCPFin:    30,
+							TCP:       300,
+							UDP:       120,
 							Default:   60,
 						},
 						VirtualServices: []VsConfig{
@@ -1033,7 +1033,7 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 									Addr: netip.MustParseAddr("192.168.1.100"),
 
 									Port:           80,
-									TransportProto: VsTransportProtoTcp,
+									TransportProto: VsTransportProtoTCP,
 								},
 								Flags:     VsFlags{FixMSS: true},
 								Scheduler: VsSchedulerSourceHash,
@@ -1113,11 +1113,11 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 				Balancer: BalancerConfig{
 					Handler: PacketHandlerConfig{
 						SessionsTimeouts: SessionsTimeouts{
-							TcpSynAck: 60,
-							TcpSyn:    30,
-							TcpFin:    30,
-							Tcp:       300,
-							Udp:       120,
+							TCPSynAck: 60,
+							TCPSyn:    30,
+							TCPFin:    30,
+							TCP:       300,
+							UDP:       120,
 							Default:   60,
 						},
 						VirtualServices: []VsConfig{
@@ -1126,7 +1126,7 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 									Addr: netip.MustParseAddr("192.168.1.100"),
 
 									Port:           80,
-									TransportProto: VsTransportProtoTcp,
+									TransportProto: VsTransportProtoTCP,
 								},
 								Flags:     VsFlags{FixMSS: true},
 								Scheduler: VsSchedulerSourceHash,
@@ -1204,14 +1204,14 @@ func TestBalancerManagerConfigConversion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Convert Go -> C
-			cConfig, err := goToC_BalancerManagerConfig(&tt.config)
+			cConfig, err := goToCBalancerManagerConfig(&tt.config)
 			if err != nil {
 				t.Fatalf("Failed to convert to C: %v", err)
 			}
-			defer freeC_BalancerManagerConfig(cConfig)
+			defer freeCBalancerManagerConfig(cConfig)
 
 			// Convert C -> Go
-			result := cToGo_BalancerManagerConfig(cConfig)
+			result := cToGoBalancerManagerConfig(cConfig)
 
 			// Compare
 			if diff := cmp.Diff(&tt.config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix), cmp.Comparer(compareNetWithMask)); diff != "" {
@@ -1232,7 +1232,7 @@ func TestEdgeCases(t *testing.T) {
 				Addr: netip.MustParseAddr("192.168.1.100"),
 
 				Port:           80,
-				TransportProto: VsTransportProtoTcp,
+				TransportProto: VsTransportProtoTCP,
 			},
 			Flags:      VsFlags{},
 			Scheduler:  VsSchedulerSourceHash,
@@ -1242,13 +1242,13 @@ func TestEdgeCases(t *testing.T) {
 			PeersV6:    []netip.Addr{},
 		}
 
-		cConfig, err := goToC_VsConfig(&config)
+		cConfig, err := goToCVsConfig(&config)
 		if err != nil {
 			t.Fatalf("Failed to convert: %v", err)
 		}
-		defer freeC_VsConfig(cConfig)
+		defer freeCVsConfig(cConfig)
 
-		result := cToGo_VsConfig(cConfig)
+		result := cToGoVsConfig(cConfig)
 
 		if len(result.Reals) != 0 {
 			t.Errorf("Expected empty Reals, got %d items", len(result.Reals))
@@ -1269,8 +1269,8 @@ func TestEdgeCases(t *testing.T) {
 			TransportProto: 6,
 		}
 
-		cId := goToC_VsIdentifier(id)
-		result := cToGo_VsIdentifier(cId)
+		cID := goToCVsIdentifier(id)
+		result := cToGoVsIdentifier(cID)
 
 		if result.Port != 0 {
 			t.Errorf("Port should be 0, got %v", result.Port)
@@ -1281,11 +1281,11 @@ func TestEdgeCases(t *testing.T) {
 		v4Addr := netip.MustParseAddr("192.168.1.1")
 		v6Addr := netip.MustParseAddr("2001:db8::1")
 
-		cV4 := goToC_NetAddr(v4Addr)
-		cV6 := goToC_NetAddr(v6Addr)
+		cV4 := goToCNetAddr(v4Addr)
+		cV6 := goToCNetAddr(v6Addr)
 
-		resultV4 := cToGo_NetAddr(cV4, true)
-		resultV6 := cToGo_NetAddr(cV6, false)
+		resultV4 := cToGoNetAddr(cV4, true)
+		resultV6 := cToGoNetAddr(cV6, false)
 
 		if !resultV4.Is4() {
 			t.Errorf("Expected IPv4 address, got %v", resultV4)
@@ -1296,7 +1296,7 @@ func TestEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Nil config pointer", func(t *testing.T) {
-		result := cToGo_BalancerConfig(nil)
+		result := cToGoBalancerConfig(nil)
 		if result != nil {
 			t.Errorf("Expected nil result for nil input, got %v", result)
 		}
@@ -1309,11 +1309,11 @@ func TestComplexScenario(t *testing.T) {
 		Balancer: BalancerConfig{
 			Handler: PacketHandlerConfig{
 				SessionsTimeouts: SessionsTimeouts{
-					TcpSynAck: 60,
-					TcpSyn:    30,
-					TcpFin:    30,
-					Tcp:       300,
-					Udp:       120,
+					TCPSynAck: 60,
+					TCPSyn:    30,
+					TCPFin:    30,
+					TCP:       300,
+					UDP:       120,
 					Default:   60,
 				},
 				VirtualServices: []VsConfig{
@@ -1322,7 +1322,7 @@ func TestComplexScenario(t *testing.T) {
 							Addr: netip.MustParseAddr("192.168.1.100"),
 
 							Port:           80,
-							TransportProto: VsTransportProtoTcp,
+							TransportProto: VsTransportProtoTCP,
 						},
 						Flags: VsFlags{
 							PureL3: false,
@@ -1376,7 +1376,7 @@ func TestComplexScenario(t *testing.T) {
 							Addr: netip.MustParseAddr("2001:db8::1"),
 
 							Port:           443,
-							TransportProto: VsTransportProtoTcp,
+							TransportProto: VsTransportProtoTCP,
 						},
 						Flags: VsFlags{
 							PureL3: false,
@@ -1436,14 +1436,14 @@ func TestComplexScenario(t *testing.T) {
 	}
 
 	// Convert Go -> C
-	cConfig, err := goToC_BalancerManagerConfig(&config)
+	cConfig, err := goToCBalancerManagerConfig(&config)
 	if err != nil {
 		t.Fatalf("Failed to convert to C: %v", err)
 	}
-	defer freeC_BalancerManagerConfig(cConfig)
+	defer freeCBalancerManagerConfig(cConfig)
 
 	// Convert C -> Go
-	result := cToGo_BalancerManagerConfig(cConfig)
+	result := cToGoBalancerManagerConfig(cConfig)
 
 	// Compare
 	if diff := cmp.Diff(&config, result, cmp.Comparer(compareAddr), cmp.Comparer(comparePrefix), cmp.Comparer(compareNetWithMask)); diff != "" {
@@ -1456,11 +1456,11 @@ func TestLargeScaleConversion(t *testing.T) {
 	// Build a large configuration with 100 virtual services
 	config := PacketHandlerConfig{
 		SessionsTimeouts: SessionsTimeouts{
-			TcpSynAck: 60,
-			TcpSyn:    30,
-			TcpFin:    30,
-			Tcp:       300,
-			Udp:       120,
+			TCPSynAck: 60,
+			TCPSyn:    30,
+			TCPFin:    30,
+			TCP:       300,
+			UDP:       120,
 			Default:   60,
 		},
 		VirtualServices: make([]VsConfig, 100),
@@ -1493,7 +1493,7 @@ func TestLargeScaleConversion(t *testing.T) {
 				),
 
 				Port:           uint16(8000 + vsIdx),
-				TransportProto: VsTransportProtoTcp,
+				TransportProto: VsTransportProtoTCP,
 			},
 			Flags: VsFlags{
 				FixMSS: vsIdx%2 == 0,
@@ -1553,16 +1553,16 @@ func TestLargeScaleConversion(t *testing.T) {
 
 	// Measure Go -> C conversion time
 	startGoToC := time.Now()
-	cConfig, err := goToC_PacketHandlerConfig(&config)
+	cConfig, err := goToCPacketHandlerConfig(&config)
 	goToCDuration := time.Since(startGoToC)
 	if err != nil {
 		t.Fatalf("Failed to convert Go -> C: %v", err)
 	}
-	defer freeC_PacketHandlerConfig(cConfig)
+	defer freeCPacketHandlerConfig(cConfig)
 
 	// Measure C -> Go conversion time
 	startCToGo := time.Now()
-	result := cToGo_PacketHandlerConfig(cConfig)
+	result := cToGoPacketHandlerConfig(cConfig)
 	cToGoDuration := time.Since(startCToGo)
 
 	// Measure round-trip time

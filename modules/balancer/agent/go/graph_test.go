@@ -40,7 +40,7 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 										"10.0.0.1",
 									),
 									Port:           80,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -62,7 +62,7 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 				{
 					vsAddr:   "10.0.0.1",
 					vsPort:   80,
-					vsProto:  ffi.VsTransportProtoTcp,
+					vsProto:  ffi.VsTransportProtoTCP,
 					realAddr: "192.168.1.1",
 					realPort: 8080,
 				}: 100,
@@ -80,7 +80,7 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 										"10.0.0.1",
 									),
 									Port:           80,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -109,7 +109,7 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 										"10.0.0.2",
 									),
 									Port:           443,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -131,21 +131,21 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 				{
 					vsAddr:   "10.0.0.1",
 					vsPort:   80,
-					vsProto:  ffi.VsTransportProtoTcp,
+					vsProto:  ffi.VsTransportProtoTCP,
 					realAddr: "192.168.1.1",
 					realPort: 8080,
 				}: 100,
 				{
 					vsAddr:   "10.0.0.1",
 					vsPort:   80,
-					vsProto:  ffi.VsTransportProtoTcp,
+					vsProto:  ffi.VsTransportProtoTCP,
 					realAddr: "192.168.1.2",
 					realPort: 8080,
 				}: 200,
 				{
 					vsAddr:   "10.0.0.2",
 					vsPort:   443,
-					vsProto:  ffi.VsTransportProtoTcp,
+					vsProto:  ffi.VsTransportProtoTCP,
 					realAddr: "192.168.2.1",
 					realPort: 8443,
 				}: 150,
@@ -163,7 +163,7 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 										"2001:db8::1",
 									),
 									Port:           80,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -185,7 +185,7 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 				{
 					vsAddr:   "2001:db8::1",
 					vsPort:   80,
-					vsProto:  ffi.VsTransportProtoTcp,
+					vsProto:  ffi.VsTransportProtoTCP,
 					realAddr: "2001:db8::100",
 					realPort: 8080,
 				}: 250,
@@ -203,7 +203,7 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 										"10.0.0.1",
 									),
 									Port:           53,
-									TransportProto: ffi.VsTransportProtoUdp,
+									TransportProto: ffi.VsTransportProtoUDP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -225,7 +225,7 @@ func TestBuildConfigWeightsMap(t *testing.T) {
 				{
 					vsAddr:   "10.0.0.1",
 					vsPort:   53,
-					vsProto:  ffi.VsTransportProtoUdp,
+					vsProto:  ffi.VsTransportProtoUDP,
 					realAddr: "192.168.1.1",
 					realPort: 5353,
 				}: 75,
@@ -276,7 +276,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						Identifier: ffi.VsIdentifier{
 							Addr:           netip.MustParseAddr("10.0.0.1"),
 							Port:           80,
-							TransportProto: ffi.VsTransportProtoTcp,
+							TransportProto: ffi.VsTransportProtoTCP,
 						},
 						Reals: []ffi.GraphReal{
 							{
@@ -301,7 +301,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 										"10.0.0.1",
 									),
 									Port:           80,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -350,7 +350,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						Identifier: ffi.VsIdentifier{
 							Addr:           netip.MustParseAddr("10.0.0.1"),
 							Port:           80,
-							TransportProto: ffi.VsTransportProtoTcp,
+							TransportProto: ffi.VsTransportProtoTCP,
 						},
 						Reals: []ffi.GraphReal{
 							{
@@ -391,7 +391,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 										"10.0.0.1",
 									),
 									Port:           80,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -456,7 +456,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						Identifier: ffi.VsIdentifier{
 							Addr:           netip.MustParseAddr("10.0.0.1"),
 							Port:           80,
-							TransportProto: ffi.VsTransportProtoTcp,
+							TransportProto: ffi.VsTransportProtoTCP,
 						},
 						Reals: []ffi.GraphReal{
 							{
@@ -473,7 +473,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						Identifier: ffi.VsIdentifier{
 							Addr:           netip.MustParseAddr("10.0.0.2"),
 							Port:           443,
-							TransportProto: ffi.VsTransportProtoTcp,
+							TransportProto: ffi.VsTransportProtoTCP,
 						},
 						Reals: []ffi.GraphReal{
 							{
@@ -506,7 +506,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 										"10.0.0.1",
 									),
 									Port:           80,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -526,7 +526,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 										"10.0.0.2",
 									),
 									Port:           443,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -579,7 +579,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						Identifier: ffi.VsIdentifier{
 							Addr:           netip.MustParseAddr("10.0.0.1"),
 							Port:           80,
-							TransportProto: ffi.VsTransportProtoTcp,
+							TransportProto: ffi.VsTransportProtoTCP,
 						},
 						Reals: []ffi.GraphReal{
 							{
@@ -614,7 +614,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 										"10.0.0.1",
 									),
 									Port:           80,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -665,7 +665,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						Identifier: ffi.VsIdentifier{
 							Addr:           netip.MustParseAddr("2001:db8::1"),
 							Port:           80,
-							TransportProto: ffi.VsTransportProtoTcp,
+							TransportProto: ffi.VsTransportProtoTCP,
 						},
 						Reals: []ffi.GraphReal{
 							{
@@ -690,7 +690,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 										"2001:db8::1",
 									),
 									Port:           80,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -737,7 +737,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						Identifier: ffi.VsIdentifier{
 							Addr:           netip.MustParseAddr("10.0.0.1"),
 							Port:           53,
-							TransportProto: ffi.VsTransportProtoUdp,
+							TransportProto: ffi.VsTransportProtoUDP,
 						},
 						Reals: []ffi.GraphReal{
 							{
@@ -762,7 +762,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 										"10.0.0.1",
 									),
 									Port:           53,
-									TransportProto: ffi.VsTransportProtoUdp,
+									TransportProto: ffi.VsTransportProtoUDP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -802,7 +802,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						Identifier: ffi.VsIdentifier{
 							Addr:           netip.MustParseAddr("10.0.0.1"),
 							Port:           80,
-							TransportProto: ffi.VsTransportProtoTcp,
+							TransportProto: ffi.VsTransportProtoTCP,
 						},
 						Reals: []ffi.GraphReal{
 							{
@@ -827,7 +827,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 										"10.0.0.1",
 									),
 									Port:           80,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{
@@ -876,7 +876,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 						Identifier: ffi.VsIdentifier{
 							Addr:           netip.MustParseAddr("10.0.0.1"),
 							Port:           80,
-							TransportProto: ffi.VsTransportProtoTcp,
+							TransportProto: ffi.VsTransportProtoTCP,
 						},
 						Reals: []ffi.GraphReal{
 							{
@@ -909,7 +909,7 @@ func TestConvertGraphToProtoWithConfig(t *testing.T) {
 										"10.0.0.1",
 									),
 									Port:           80,
-									TransportProto: ffi.VsTransportProtoTcp,
+									TransportProto: ffi.VsTransportProtoTCP,
 								},
 								Reals: []ffi.RealConfig{
 									{

@@ -1,3 +1,5 @@
+// Package ffi provides Foreign Function Interface (FFI) bindings to C code for balancer agent operations.
+// This file implements the BalancerAgent FFI wrapper for creating and managing balancer managers.
 package ffi
 
 /*
@@ -7,6 +9,7 @@ package ffi
 #include <stdlib.h>
 */
 import "C"
+
 import (
 	"fmt"
 	"unsafe"
@@ -72,11 +75,11 @@ func (a *BalancerAgent) NewManager(
 	defer C.free(unsafe.Pointer(cName))
 
 	// Convert Go config to C config
-	cConfig, err := goToC_BalancerManagerConfig(config)
+	cConfig, err := goToCBalancerManagerConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert config: %w", err)
 	}
-	defer freeC_BalancerManagerConfig(cConfig)
+	defer freeCBalancerManagerConfig(cConfig)
 
 	handle := C.balancer_agent_new_manager(a.handle, cName, cConfig)
 	if handle == nil {

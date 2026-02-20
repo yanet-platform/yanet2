@@ -1,5 +1,9 @@
 package ffi
 
+// Go type definitions for balancer FFI operations, defining structures for virtual services,
+// real servers, sessions, statistics, and configuration with support for IPv4/IPv6,
+// TCP/UDP protocols, and various load balancing algorithms.
+
 import (
 	"net/netip"
 	"time"
@@ -36,8 +40,8 @@ const (
 type VsTransportProto uint32
 
 const (
-	VsTransportProtoTcp VsTransportProto = 0 // IPPROTO_TCP
-	VsTransportProtoUdp VsTransportProto = 1 // IPPROTO_UDP
+	VsTransportProtoTCP VsTransportProto = 0 // IPPROTO_TCP
+	VsTransportProtoUDP VsTransportProto = 1 // IPPROTO_UDP
 )
 
 // VsFlags represents flags for virtual service configuration
@@ -148,17 +152,17 @@ type NamedVsStats struct {
 
 // SessionsTimeouts contains timeout configuration per transport/state
 type SessionsTimeouts struct {
-	TcpSynAck uint32 // Timeout for TCP SYN-ACK sessions (seconds)
-	TcpSyn    uint32 // Timeout for TCP SYN sessions (seconds)
-	TcpFin    uint32 // Timeout for TCP FIN sessions (seconds)
-	Tcp       uint32 // Default timeout for TCP packets (seconds)
-	Udp       uint32 // Default timeout for UDP packets (seconds)
+	TCPSynAck uint32 // Timeout for TCP SYN-ACK sessions (seconds)
+	TCPSyn    uint32 // Timeout for TCP SYN sessions (seconds)
+	TCPFin    uint32 // Timeout for TCP FIN sessions (seconds)
+	TCP       uint32 // Default timeout for TCP packets (seconds)
+	UDP       uint32 // Default timeout for UDP packets (seconds)
 	Default   uint32 // Fallback timeout for other packets (seconds)
 }
 
 // SessionIdentifier uniquely identifies a session
 type SessionIdentifier struct {
-	ClientIp   netip.Addr     // Client source IP
+	ClientIP   netip.Addr     // Client source IP
 	ClientPort uint16         // Client source port
 	Real       RealIdentifier // Selected real endpoint
 }
@@ -221,7 +225,7 @@ type IcmpStats struct {
 	IncomingPackets           uint64 // ICMP packets received
 	SrcNotAllowed             uint64 // Source not allowed by VS policy
 	EchoResponses             uint64 // Echo replies generated
-	PayloadTooShortIp         uint64 // Payload too short for IP header
+	PayloadTooShortIP         uint64 // Payload too short for IP header
 	UnmatchingSrcFromOriginal uint64 // Original src doesn't match dst
 	PayloadTooShortPort       uint64 // Payload too short for ports
 	UnexpectedTransport       uint64 // Original transport not TCP/UDP
@@ -297,5 +301,5 @@ type BalancerManagerConfig struct {
 type UpdateInfo struct {
 	VsIpv4MatcherReused bool           // Whether IPv4 VS matcher was reused
 	VsIpv6MatcherReused bool           // Whether IPv6 VS matcher was reused
-	AclReusedVs         []VsIdentifier // VS identifiers for which ACL was reused
+	ACLReusedVs         []VsIdentifier // VS identifiers for which ACL was reused
 }

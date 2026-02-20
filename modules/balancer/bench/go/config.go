@@ -1,5 +1,8 @@
 package main
 
+// Benchmark configuration structure defining test parameters including virtual service counts,
+// real server distribution, protocol probabilities, packet generation settings, and worker configuration.
+
 type BenchConfig struct {
 	GreProb    float32 `yaml:"gre_prob"`
 	FixMSSProb float32 `yaml:"fix_mss_prob"`
@@ -8,10 +11,10 @@ type BenchConfig struct {
 
 	RoundRobinProb float32 `yaml:"round_robin_prob"`
 
-	TcpIpv4Vs int `yaml:"tcp_ipv4_vs"`
-	TcpIpv6Vs int `yaml:"tcp_ipv6_vs"`
-	UdpIpv4Vs int `yaml:"udp_ipv4_vs"`
-	UdpIpv6Vs int `yaml:"udp_ipv6_vs"`
+	TCPIPv4VS int `yaml:"tcp_ipv4_vs"`
+	TCPIPv6VS int `yaml:"tcp_ipv6_vs"`
+	UDPIPv4VS int `yaml:"udp_ipv4_vs"`
+	UDPIPv6Vs int `yaml:"udp_ipv6_vs"`
 
 	Ipv4Reals int `yaml:"ipv4_reals"`
 	Ipv6Reals int `yaml:"ipv6_reals"`

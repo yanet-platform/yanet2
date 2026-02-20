@@ -355,7 +355,7 @@ func TestSessionTableStress2(t *testing.T) {
 		return fmt.Sprintf("%s:%d->%s:%d", clientIP, clientPort, vsIP, vsPort)
 	}
 
-	makeTcpSynPacket := func(clientIP netip.Addr, clientPort uint16, vsIP netip.Addr, vsPort uint16) gopacket.Packet {
+	makeTCPSynPacket := func(clientIP netip.Addr, clientPort uint16, vsIP netip.Addr, vsPort uint16) gopacket.Packet {
 		packetLayers := utils.MakeTCPPacket(
 			clientIP,
 			clientPort,
@@ -388,7 +388,7 @@ func TestSessionTableStress2(t *testing.T) {
 
 			var packet gopacket.Packet
 			if vs.proto == balancerpb.TransportProto_TCP {
-				packet = makeTcpSynPacket(clientIP, clientPort, vs.ip, vs.port)
+				packet = makeTCPSynPacket(clientIP, clientPort, vs.ip, vs.port)
 			} else {
 				packetLayers := utils.MakeUDPPacket(
 					clientIP,
@@ -556,7 +556,7 @@ func TestSessionTableStress2(t *testing.T) {
 
 					var packet gopacket.Packet
 					if vs.proto == balancerpb.TransportProto_TCP {
-						packet = makeTcpSynPacket(
+						packet = makeTCPSynPacket(
 							clientIP,
 							clientPort,
 							vs.ip,

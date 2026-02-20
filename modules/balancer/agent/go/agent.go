@@ -1,3 +1,9 @@
+// Package balancer provides the load balancer agent implementation for YANET.
+// This package manages balancer instances, virtual services, and real servers,
+// coordinating between the control plane and data plane for packet distribution.
+//
+// The BalancerAgent manages multiple BalancerManager instances, each representing
+// a separate load balancer configuration with its own virtual services and real servers.
 package balancer
 
 import (

@@ -1,5 +1,9 @@
 package ffi
 
+// Low-level conversion functions between Go and C types for balancer FFI operations.
+// Handles memory-safe transformations of network addresses, configurations, statistics,
+// and complex nested structures with proper memory management and cleanup.
+
 /*
 #cgo CFLAGS: -I../../ -I../../../../../
 #cgo LDFLAGS: -L../../../../../build/modules/balancer/agent -lbalancer_agent -L../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -lbalancer_state
@@ -11,6 +15,7 @@ package ffi
 #include <string.h>
 */
 import "C"
+
 import (
 	"fmt"
 	"net/netip"
@@ -20,77 +25,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 )
 
-// rangeToPrefixV4 converts an IPv4 address range to a CIDR prefix
-func rangeToPrefixV4(from, to netip.Addr) netip.Prefix {
-	fromBytes := from.As4()
-	toBytes := to.As4()
-
-	// Convert to uint32 for easier bit manipulation
-	fromInt := uint32(
-		fromBytes[0],
-	)<<24 | uint32(
-		fromBytes[1],
-	)<<16 | uint32(
-		fromBytes[2],
-	)<<8 | uint32(
-		fromBytes[3],
-	)
-	toInt := uint32(
-		toBytes[0],
-	)<<24 | uint32(
-		toBytes[1],
-	)<<16 | uint32(
-		toBytes[2],
-	)<<8 | uint32(
-		toBytes[3],
-	)
-
-	// XOR to find differing bits
-	diff := fromInt ^ toInt
-
-	// Count leading zeros to get prefix length
-	bits := 32
-	if diff != 0 {
-		// Find the position of the highest set bit
-		for i := 31; i >= 0; i-- {
-			if (diff & (1 << i)) != 0 {
-				bits = 31 - i
-				break
-			}
-		}
-	}
-
-	return netip.PrefixFrom(from, bits)
-}
-
-// rangeToPrefixV6 converts an IPv6 address range to a CIDR prefix
-func rangeToPrefixV6(from, to netip.Addr) netip.Prefix {
-	fromBytes := from.As16()
-	toBytes := to.As16()
-
-	// Find first differing byte
-	bits := 0
-	for i := 0; i < 16; i++ {
-		if fromBytes[i] != toBytes[i] {
-			// XOR to find differing bits in this byte
-			diff := fromBytes[i] ^ toBytes[i]
-			// Count leading zeros in this byte
-			for j := 7; j >= 0; j-- {
-				if (diff & (1 << j)) != 0 {
-					bits += 7 - j
-					return netip.PrefixFrom(from, bits)
-				}
-			}
-			bits += 8
-		} else {
-			bits += 8
-		}
-	}
-
-	return netip.PrefixFrom(from, bits)
-}
-
-func goToC_NetAddr(addr netip.Addr) C.struct_net_addr {
+func goToCNetAddr(addr netip.Addr) C.struct_net_addr {
 	var cAddr C.struct_net_addr
 	// Zero-initialize the entire union to avoid padding issues
 	ptr := unsafe.Pointer(&cAddr)
@@ -114,7 +49,7 @@ func goToC_NetAddr(addr netip.Addr) C.struct_net_addr {
 	return cAddr
 }
 
-func cToGo_NetAddr(cAddr C.struct_net_addr, isV4 bool) netip.Addr {
+func cToGoNetAddr(cAddr C.struct_net_addr, isV4 bool) netip.Addr {
 	if isV4 {
 		var v4 [4]byte
 		pv4 := (*C.struct_net4_addr)(unsafe.Pointer(&cAddr))
@@ -127,7 +62,7 @@ func cToGo_NetAddr(cAddr C.struct_net_addr, isV4 bool) netip.Addr {
 	return netip.AddrFrom16(v6)
 }
 
-func goToC_Net(net xnetip.NetWithMask) C.struct_net {
+func goToCNet(net xnetip.NetWithMask) C.struct_net {
 	var cNet C.struct_net
 	addr := net.Addr
 	mask := net.MaskBytes()
@@ -146,7 +81,7 @@ func goToC_Net(net xnetip.NetWithMask) C.struct_net {
 		// - addr[4] at offset 0
 		// - mask[4] at offset 4
 		// Copy addr to bytes 0-3
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			slice[i] = v4[i]
 		}
 		// Copy mask to bytes 4-7
@@ -170,7 +105,7 @@ func goToC_Net(net xnetip.NetWithMask) C.struct_net {
 	return cNet
 }
 
-func cToGo_Net(cNet C.struct_net, isV4 bool) xnetip.NetWithMask {
+func cToGoNet(cNet C.struct_net, isV4 bool) xnetip.NetWithMask {
 	if isV4 {
 		var addr [4]byte
 		var mask [4]byte
@@ -206,121 +141,120 @@ func cToGo_Net(cNet C.struct_net, isV4 bool) xnetip.NetWithMask {
 
 // VS type conversions
 
-func goToC_VsIdentifier(id VsIdentifier) C.struct_vs_identifier {
-	var cId C.struct_vs_identifier
+func goToCVsIdentifier(id VsIdentifier) C.struct_vs_identifier {
+	var cID C.struct_vs_identifier
 	// Zero-initialize the entire structure to avoid padding issues
-	ptr := unsafe.Pointer(&cId)
-	size := unsafe.Sizeof(cId)
+	ptr := unsafe.Pointer(&cID)
+	size := unsafe.Sizeof(cID)
 	slice := unsafe.Slice((*byte)(ptr), size)
 	for i := range slice {
 		slice[i] = 0
 	}
 
-	cId.addr = goToC_NetAddr(id.Addr)
+	cID.addr = goToCNetAddr(id.Addr)
 	// Derive ip_proto from the address type
 	if id.Addr.Is4() {
-		cId.ip_proto = 0 // IPPROTO_IP (IPv4)
+		cID.ip_proto = 0 // IPPROTO_IP (IPv4)
 	} else {
-		cId.ip_proto = 41 // IPPROTO_IPV6
+		cID.ip_proto = 41 // IPPROTO_IPV6
 	}
-	cId.port = C.uint16_t(id.Port)
+	cID.port = C.uint16_t(id.Port)
 	// Convert Go enum (0=TCP, 1=UDP) to C constants (6=IPPROTO_TCP, 17=IPPROTO_UDP)
-	if id.TransportProto == VsTransportProtoTcp {
-		cId.transport_proto = C.IPPROTO_TCP // 6
+	if id.TransportProto == VsTransportProtoTCP {
+		cID.transport_proto = C.IPPROTO_TCP // 6
 	} else {
-		cId.transport_proto = C.IPPROTO_UDP // 17
+		cID.transport_proto = C.IPPROTO_UDP // 17
 	}
-	return cId
+	return cID
 }
 
-func cToGo_VsIdentifier(cId C.struct_vs_identifier) VsIdentifier {
+func cToGoVsIdentifier(cID C.struct_vs_identifier) VsIdentifier {
 	// Determine if IPv4 or IPv6 based on ip_proto
-	isV4 := cId.ip_proto == 0 // IPPROTO_IP (IPv4)
+	isV4 := cID.ip_proto == 0 // IPPROTO_IP (IPv4)
 	return VsIdentifier{
-		Addr: cToGo_NetAddr(cId.addr, isV4),
-		Port: uint16(cId.port),
+		Addr: cToGoNetAddr(cID.addr, isV4),
+		Port: uint16(cID.port),
 		// Convert C constants (6=IPPROTO_TCP, 17=IPPROTO_UDP) to Go enum (0=TCP, 1=UDP)
 		TransportProto: func() VsTransportProto {
-			if cId.transport_proto == C.IPPROTO_TCP { // 6
-				return VsTransportProtoTcp // 0
-			} else {
-				return VsTransportProtoUdp // 1
+			if cID.transport_proto == C.IPPROTO_TCP { // 6
+				return VsTransportProtoTCP // 0
 			}
+			return VsTransportProtoUDP // 1
 		}(),
 	}
 }
 
 // Real type conversions
 
-func goToC_RelativeRealIdentifier(
+func goToCRelativeRealIdentifier(
 	id RelativeRealIdentifier,
 ) C.struct_relative_real_identifier {
-	var cId C.struct_relative_real_identifier
+	var cID C.struct_relative_real_identifier
 	// Zero-initialize the entire structure to avoid padding issues
-	ptr := unsafe.Pointer(&cId)
-	size := unsafe.Sizeof(cId)
+	ptr := unsafe.Pointer(&cID)
+	size := unsafe.Sizeof(cID)
 	slice := unsafe.Slice((*byte)(ptr), size)
 	for i := range slice {
 		slice[i] = 0
 	}
 
-	cId.addr = goToC_NetAddr(id.Addr)
+	cID.addr = goToCNetAddr(id.Addr)
 	// Derive ip_proto from the address type
 	if id.Addr.Is4() {
-		cId.ip_proto = 0 // IPPROTO_IP (IPv4)
+		cID.ip_proto = 0 // IPPROTO_IP (IPv4)
 	} else {
-		cId.ip_proto = 41 // IPPROTO_IPV6
+		cID.ip_proto = 41 // IPPROTO_IPV6
 	}
-	cId.port = C.uint16_t(id.Port)
-	return cId
+	cID.port = C.uint16_t(id.Port)
+	return cID
 }
 
-func cToGo_RelativeRealIdentifier(
-	cId C.struct_relative_real_identifier,
+func cToGoRelativeRealIdentifier(
+	cID C.struct_relative_real_identifier,
 ) RelativeRealIdentifier {
-	isV4 := cId.ip_proto == 0 // IPPROTO_IP (IPv4)
+	isV4 := cID.ip_proto == 0 // IPPROTO_IP (IPv4)
 	return RelativeRealIdentifier{
-		Addr: cToGo_NetAddr(cId.addr, isV4),
-		Port: uint16(cId.port),
+		Addr: cToGoNetAddr(cID.addr, isV4),
+		Port: uint16(cID.port),
 	}
 }
 
-func goToC_RealIdentifier(id RealIdentifier) C.struct_real_identifier {
-	var cId C.struct_real_identifier
+func goToCRealIdentifier(id RealIdentifier) C.struct_real_identifier {
+	var cID C.struct_real_identifier
 	// Zero-initialize the entire structure to avoid padding issues
-	ptr := unsafe.Pointer(&cId)
-	size := unsafe.Sizeof(cId)
+	ptr := unsafe.Pointer(&cID)
+	size := unsafe.Sizeof(cID)
 	slice := unsafe.Slice((*byte)(ptr), size)
 	for i := range slice {
 		slice[i] = 0
 	}
 
-	cId.vs_identifier = goToC_VsIdentifier(id.VsIdentifier)
-	cId.relative = goToC_RelativeRealIdentifier(id.Relative)
-	return cId
+	cID.vs_identifier = goToCVsIdentifier(id.VsIdentifier)
+	cID.relative = goToCRelativeRealIdentifier(id.Relative)
+	return cID
 }
 
-func cToGo_RealIdentifier(cId C.struct_real_identifier) RealIdentifier {
+func cToGoRealIdentifier(cID C.struct_real_identifier) RealIdentifier {
 	return RealIdentifier{
-		VsIdentifier: cToGo_VsIdentifier(cId.vs_identifier),
-		Relative:     cToGo_RelativeRealIdentifier(cId.relative),
+		VsIdentifier: cToGoVsIdentifier(cID.vs_identifier),
+		Relative:     cToGoRelativeRealIdentifier(cID.relative),
 	}
 }
 
 // Time conversions (uint32 monotonic timestamp to time.Time)
-func cToGo_Timestamp(ts uint32) time.Time {
+func cToGoTimestamp(ts uint32) time.Time {
 	return time.Unix(int64(ts), 0)
 }
 
-func goToC_Timestamp(t time.Time) uint32 {
+func goToCTimestamp(t time.Time) uint32 {
 	return uint32(t.Unix())
 }
 
 // RealUpdate conversions
 
-func goToC_RealUpdate(update RealUpdate) C.struct_real_update {
+func goToCRealUpdate(update RealUpdate) C.struct_real_update {
 	var cUpdate C.struct_real_update
-	cUpdate.identifier = goToC_RealIdentifier(update.Identifier)
+	cUpdate.identifier = goToCRealIdentifier(update.Identifier)
 	cUpdate.weight = C.uint16_t(update.Weight)
 	cUpdate.enabled = C.uint8_t(update.Enabled)
 	return cUpdate
@@ -328,7 +262,7 @@ func goToC_RealUpdate(update RealUpdate) C.struct_real_update {
 
 // PacketHandlerRef conversions
 
-func goToC_PacketHandlerRef(
+func goToCPacketHandlerRef(
 	ref *PacketHandlerRef,
 ) *C.struct_packet_handler_ref {
 	if ref == nil {
@@ -366,7 +300,7 @@ func goToC_PacketHandlerRef(
 	return cRef
 }
 
-func freeC_PacketHandlerRef(cRef *C.struct_packet_handler_ref) {
+func freeCPacketHandlerRef(cRef *C.struct_packet_handler_ref) {
 	if cRef == nil {
 		return
 	}
@@ -389,7 +323,7 @@ func freeC_PacketHandlerRef(cRef *C.struct_packet_handler_ref) {
 
 // BalancerManagerConfig conversions
 
-func goToC_BalancerManagerConfig(
+func goToCBalancerManagerConfig(
 	config *BalancerManagerConfig,
 ) (*C.struct_balancer_manager_config, error) {
 	if config == nil {
@@ -401,7 +335,7 @@ func goToC_BalancerManagerConfig(
 	)
 
 	// Convert balancer config directly into the embedded struct
-	err := goToC_BalancerConfigInPlace(&config.Balancer, &cConfig.balancer)
+	err := goToCBalancerConfigInPlace(&config.Balancer, &cConfig.balancer)
 	if err != nil {
 		C.free(unsafe.Pointer(cConfig))
 		return nil, err
@@ -430,13 +364,13 @@ func goToC_BalancerManagerConfig(
 	return cConfig, nil
 }
 
-func freeC_BalancerManagerConfig(cConfig *C.struct_balancer_manager_config) {
+func freeCBalancerManagerConfig(cConfig *C.struct_balancer_manager_config) {
 	if cConfig == nil {
 		return
 	}
 
 	// Free balancer config internals
-	freeC_BalancerConfig(&cConfig.balancer)
+	freeCBalancerConfig(&cConfig.balancer)
 
 	// Free WLC VS array
 	if cConfig.wlc.vs != nil {
@@ -446,7 +380,7 @@ func freeC_BalancerManagerConfig(cConfig *C.struct_balancer_manager_config) {
 	C.free(unsafe.Pointer(cConfig))
 }
 
-func cToGo_BalancerManagerConfig(
+func cToGoBalancerManagerConfig(
 	cConfig *C.struct_balancer_manager_config,
 ) *BalancerManagerConfig {
 	if cConfig == nil {
@@ -454,7 +388,7 @@ func cToGo_BalancerManagerConfig(
 	}
 
 	config := &BalancerManagerConfig{
-		Balancer:      *cToGo_BalancerConfig(&cConfig.balancer),
+		Balancer:      *cToGoBalancerConfig(&cConfig.balancer),
 		RefreshPeriod: time.Duration(cConfig.refresh_period) * time.Millisecond,
 		MaxLoadFactor: float32(cConfig.max_load_factor),
 	}
@@ -478,13 +412,13 @@ func cToGo_BalancerManagerConfig(
 
 // BalancerConfig conversions
 
-func goToC_BalancerConfig(
+func goToCBalancerConfig(
 	config *BalancerConfig,
 ) (*C.struct_balancer_config, error) {
 	cConfig := (*C.struct_balancer_config)(
 		C.malloc(C.sizeof_struct_balancer_config),
 	)
-	err := goToC_BalancerConfigInPlace(config, cConfig)
+	err := goToCBalancerConfigInPlace(config, cConfig)
 	if err != nil {
 		C.free(unsafe.Pointer(cConfig))
 		return nil, err
@@ -492,12 +426,12 @@ func goToC_BalancerConfig(
 	return cConfig, nil
 }
 
-func goToC_BalancerConfigInPlace(
+func goToCBalancerConfigInPlace(
 	config *BalancerConfig,
 	cConfig *C.struct_balancer_config,
 ) error {
 	// Convert handler config directly into the embedded struct
-	err := goToC_PacketHandlerConfigInPlace(&config.Handler, &cConfig.handler)
+	err := goToCPacketHandlerConfigInPlace(&config.Handler, &cConfig.handler)
 	if err != nil {
 		return err
 	}
@@ -508,21 +442,21 @@ func goToC_BalancerConfigInPlace(
 	return nil
 }
 
-func freeC_BalancerConfig(cConfig *C.struct_balancer_config) {
+func freeCBalancerConfig(cConfig *C.struct_balancer_config) {
 	if cConfig == nil {
 		return
 	}
 
-	freeC_PacketHandlerConfig(&cConfig.handler)
+	freeCPacketHandlerConfig(&cConfig.handler)
 }
 
-func cToGo_BalancerConfig(cConfig *C.struct_balancer_config) *BalancerConfig {
+func cToGoBalancerConfig(cConfig *C.struct_balancer_config) *BalancerConfig {
 	if cConfig == nil {
 		return nil
 	}
 
 	return &BalancerConfig{
-		Handler: *cToGo_PacketHandlerConfig(&cConfig.handler),
+		Handler: *cToGoPacketHandlerConfig(&cConfig.handler),
 		State: StateConfig{
 			TableCapacity: uint(cConfig.state.table_capacity),
 		},
@@ -531,13 +465,13 @@ func cToGo_BalancerConfig(cConfig *C.struct_balancer_config) *BalancerConfig {
 
 // PacketHandlerConfig conversions
 
-func goToC_PacketHandlerConfig(
+func goToCPacketHandlerConfig(
 	config *PacketHandlerConfig,
 ) (*C.struct_packet_handler_config, error) {
 	cConfig := (*C.struct_packet_handler_config)(
 		C.malloc(C.sizeof_struct_packet_handler_config),
 	)
-	err := goToC_PacketHandlerConfigInPlace(config, cConfig)
+	err := goToCPacketHandlerConfigInPlace(config, cConfig)
 	if err != nil {
 		C.free(unsafe.Pointer(cConfig))
 		return nil, err
@@ -545,7 +479,7 @@ func goToC_PacketHandlerConfig(
 	return cConfig, nil
 }
 
-func goToC_PacketHandlerConfigInPlace(
+func goToCPacketHandlerConfigInPlace(
 	config *PacketHandlerConfig,
 	cConfig *C.struct_packet_handler_config,
 ) error {
@@ -561,16 +495,16 @@ func goToC_PacketHandlerConfigInPlace(
 
 	// Convert sessions timeouts
 	cConfig.sessions_timeouts.tcp_syn_ack = C.uint32_t(
-		config.SessionsTimeouts.TcpSynAck,
+		config.SessionsTimeouts.TCPSynAck,
 	)
 	cConfig.sessions_timeouts.tcp_syn = C.uint32_t(
-		config.SessionsTimeouts.TcpSyn,
+		config.SessionsTimeouts.TCPSyn,
 	)
 	cConfig.sessions_timeouts.tcp_fin = C.uint32_t(
-		config.SessionsTimeouts.TcpFin,
+		config.SessionsTimeouts.TCPFin,
 	)
-	cConfig.sessions_timeouts.tcp = C.uint32_t(config.SessionsTimeouts.Tcp)
-	cConfig.sessions_timeouts.udp = C.uint32_t(config.SessionsTimeouts.Udp)
+	cConfig.sessions_timeouts.tcp = C.uint32_t(config.SessionsTimeouts.TCP)
+	cConfig.sessions_timeouts.udp = C.uint32_t(config.SessionsTimeouts.UDP)
 	cConfig.sessions_timeouts.def = C.uint32_t(config.SessionsTimeouts.Default)
 
 	// Convert source addresses (need to cast from net_addr to net4_addr/net6_addr)
@@ -638,10 +572,10 @@ func goToC_PacketHandlerConfigInPlace(
 		)
 		cVsSlice := unsafe.Slice(cConfig.vs, len(config.VirtualServices))
 		for i, vs := range config.VirtualServices {
-			err := goToC_VsConfigInPlace(&vs, &cVsSlice[i])
+			err := goToCVsConfigInPlace(&vs, &cVsSlice[i])
 			if err != nil {
 				// Cleanup on error
-				freeC_PacketHandlerConfig(cConfig)
+				freeCPacketHandlerConfig(cConfig)
 				return err
 			}
 		}
@@ -652,7 +586,7 @@ func goToC_PacketHandlerConfigInPlace(
 	return nil
 }
 
-func freeC_PacketHandlerConfig(cConfig *C.struct_packet_handler_config) {
+func freeCPacketHandlerConfig(cConfig *C.struct_packet_handler_config) {
 	if cConfig == nil {
 		return
 	}
@@ -696,7 +630,7 @@ func freeC_PacketHandlerConfig(cConfig *C.struct_packet_handler_config) {
 	}
 }
 
-func cToGo_PacketHandlerConfig(
+func cToGoPacketHandlerConfig(
 	cConfig *C.struct_packet_handler_config,
 ) *PacketHandlerConfig {
 	if cConfig == nil {
@@ -705,11 +639,11 @@ func cToGo_PacketHandlerConfig(
 
 	config := &PacketHandlerConfig{
 		SessionsTimeouts: SessionsTimeouts{
-			TcpSynAck: uint32(cConfig.sessions_timeouts.tcp_syn_ack),
-			TcpSyn:    uint32(cConfig.sessions_timeouts.tcp_syn),
-			TcpFin:    uint32(cConfig.sessions_timeouts.tcp_fin),
-			Tcp:       uint32(cConfig.sessions_timeouts.tcp),
-			Udp:       uint32(cConfig.sessions_timeouts.udp),
+			TCPSynAck: uint32(cConfig.sessions_timeouts.tcp_syn_ack),
+			TCPSyn:    uint32(cConfig.sessions_timeouts.tcp_syn),
+			TCPFin:    uint32(cConfig.sessions_timeouts.tcp_fin),
+			TCP:       uint32(cConfig.sessions_timeouts.tcp),
+			UDP:       uint32(cConfig.sessions_timeouts.udp),
 			Default:   uint32(cConfig.sessions_timeouts.def),
 		},
 		SourceV4: func() netip.Addr {
@@ -770,7 +704,7 @@ func cToGo_PacketHandlerConfig(
 		cVsSlice := unsafe.Slice(cConfig.vs, cConfig.vs_count)
 		config.VirtualServices = make([]VsConfig, cConfig.vs_count)
 		for i := range config.VirtualServices {
-			config.VirtualServices[i] = *cToGo_VsConfig(&cVsSlice[i])
+			config.VirtualServices[i] = *cToGoVsConfig(&cVsSlice[i])
 		}
 	} else {
 		config.VirtualServices = []VsConfig{}
@@ -781,7 +715,7 @@ func cToGo_PacketHandlerConfig(
 
 // VsConfig conversions
 
-func goToC_VsConfig(config *VsConfig) (*C.struct_named_vs_config, error) {
+func goToCVsConfig(config *VsConfig) (*C.struct_named_vs_config, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config is nil")
 	}
@@ -789,7 +723,7 @@ func goToC_VsConfig(config *VsConfig) (*C.struct_named_vs_config, error) {
 	cConfig := (*C.struct_named_vs_config)(
 		C.malloc(C.sizeof_struct_named_vs_config),
 	)
-	err := goToC_VsConfigInPlace(config, cConfig)
+	err := goToCVsConfigInPlace(config, cConfig)
 	if err != nil {
 		C.free(unsafe.Pointer(cConfig))
 		return nil, err
@@ -797,7 +731,7 @@ func goToC_VsConfig(config *VsConfig) (*C.struct_named_vs_config, error) {
 	return cConfig, nil
 }
 
-func goToC_VsConfigInPlace(
+func goToCVsConfigInPlace(
 	config *VsConfig,
 	cConfig *C.struct_named_vs_config,
 ) error {
@@ -806,7 +740,7 @@ func goToC_VsConfigInPlace(
 	}
 
 	// Convert identifier
-	cConfig.identifier = goToC_VsIdentifier(config.Identifier)
+	cConfig.identifier = goToCVsIdentifier(config.Identifier)
 
 	// Convert flags to C bitfield (using constants from vs.h)
 	var flags C.uint8_t
@@ -842,8 +776,8 @@ func goToC_VsConfigInPlace(
 		)
 		cRealsSlice := unsafe.Slice(cConfig.config.reals, len(config.Reals))
 		for i, real := range config.Reals {
-			cRealsSlice[i].real = goToC_RelativeRealIdentifier(real.Identifier)
-			cRealsSlice[i].config.src = goToC_Net(real.Src)
+			cRealsSlice[i].real = goToCRelativeRealIdentifier(real.Identifier)
+			cRealsSlice[i].config.src = goToCNet(real.Src)
 			cRealsSlice[i].config.weight = C.uint16_t(real.Weight)
 		}
 	} else {
@@ -868,7 +802,7 @@ func goToC_VsConfigInPlace(
 		)
 		for i, allowedSrc := range config.AllowedSrc {
 			// Convert network
-			cAllowedSlice[i].net = goToC_Net(allowedSrc.Net)
+			cAllowedSlice[i].net = goToCNet(allowedSrc.Net)
 
 			// Convert port ranges
 			cAllowedSlice[i].port_ranges_count = C.size_t(
@@ -947,7 +881,7 @@ func goToC_VsConfigInPlace(
 	return nil
 }
 
-func freeC_VsConfig(cConfig *C.struct_named_vs_config) {
+func freeCVsConfig(cConfig *C.struct_named_vs_config) {
 	if cConfig == nil {
 		return
 	}
@@ -976,13 +910,13 @@ func freeC_VsConfig(cConfig *C.struct_named_vs_config) {
 	}
 }
 
-func cToGo_VsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
+func cToGoVsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 	if cConfig == nil {
 		return nil
 	}
 
 	config := &VsConfig{
-		Identifier: cToGo_VsIdentifier(cConfig.identifier),
+		Identifier: cToGoVsIdentifier(cConfig.identifier),
 		Scheduler:  VsScheduler(cConfig.config.scheduler),
 	}
 
@@ -1000,11 +934,11 @@ func cToGo_VsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 		)
 		config.Reals = make([]RealConfig, cConfig.config.real_count)
 		for i := range config.Reals {
-			relative := cToGo_RelativeRealIdentifier(cRealsSlice[i].real)
+			relative := cToGoRelativeRealIdentifier(cRealsSlice[i].real)
 			isV4 := relative.Addr.Is4()
 			config.Reals[i] = RealConfig{
 				Identifier: relative,
-				Src:        cToGo_Net(cRealsSlice[i].config.src, isV4),
+				Src:        cToGoNet(cRealsSlice[i].config.src, isV4),
 				Weight:     uint16(cRealsSlice[i].config.weight),
 			}
 		}
@@ -1028,7 +962,7 @@ func cToGo_VsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 			isV4 := config.Identifier.Addr.Is4()
 
 			// Convert network
-			config.AllowedSrc[i].Net = cToGo_Net(cAllowedSlice[i].net, isV4)
+			config.AllowedSrc[i].Net = cToGoNet(cAllowedSlice[i].net, isV4)
 
 			// Convert port ranges
 			if cAllowedSlice[i].port_ranges_count > 0 &&
@@ -1098,7 +1032,7 @@ func cToGo_VsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 
 // BalancerInfo conversions
 
-func cToGo_BalancerInfo(cInfo *C.struct_balancer_info) *BalancerInfo {
+func cToGoBalancerInfo(cInfo *C.struct_balancer_info) *BalancerInfo {
 	info := &BalancerInfo{
 		ActiveSessions:      uint64(cInfo.active_sessions),
 		LastPacketTimestamp: time.Unix(int64(cInfo.last_packet_timestamp), 0),
@@ -1109,16 +1043,16 @@ func cToGo_BalancerInfo(cInfo *C.struct_balancer_info) *BalancerInfo {
 		cVsSlice := unsafe.Slice(cInfo.vs, cInfo.vs_count)
 		info.Vs = make([]VsInfo, cInfo.vs_count)
 		for i := range info.Vs {
-			info.Vs[i] = *cToGo_VsInfo(&cVsSlice[i])
+			info.Vs[i] = *cToGoVsInfo(&cVsSlice[i])
 		}
 	}
 
 	return info
 }
 
-func cToGo_VsInfo(cInfo *C.struct_named_vs_info) *VsInfo {
+func cToGoVsInfo(cInfo *C.struct_named_vs_info) *VsInfo {
 	info := &VsInfo{
-		Identifier:          cToGo_VsIdentifier(cInfo.identifier),
+		Identifier:          cToGoVsIdentifier(cInfo.identifier),
 		LastPacketTimestamp: time.Unix(int64(cInfo.last_packet_timestamp), 0),
 		ActiveSessions:      uint64(cInfo.active_sessions),
 	}
@@ -1128,7 +1062,7 @@ func cToGo_VsInfo(cInfo *C.struct_named_vs_info) *VsInfo {
 		cRealsSlice := unsafe.Slice(cInfo.reals, cInfo.reals_count)
 		info.Reals = make([]RealInfo, cInfo.reals_count)
 		for i := range info.Reals {
-			relative := cToGo_RelativeRealIdentifier(cRealsSlice[i].real)
+			relative := cToGoRelativeRealIdentifier(cRealsSlice[i].real)
 			info.Reals[i] = RealInfo{
 				Dst: relative.Addr,
 				LastPacketTimestamp: time.Unix(
@@ -1145,7 +1079,7 @@ func cToGo_VsInfo(cInfo *C.struct_named_vs_info) *VsInfo {
 
 // Sessions conversions
 
-func cToGo_Sessions(cSessions *C.struct_sessions) *Sessions {
+func cToGoSessions(cSessions *C.struct_sessions) *Sessions {
 	if cSessions == nil {
 		return nil
 	}
@@ -1164,10 +1098,10 @@ func cToGo_Sessions(cSessions *C.struct_sessions) *Sessions {
 		}, cSessions.sessions_count)
 
 		for i := range sessions.Sessions {
-			sessions.Sessions[i].Identifier = cToGo_SessionIdentifier(
+			sessions.Sessions[i].Identifier = cToGoSessionIdentifier(
 				&cSessionsSlice[i].identifier,
 			)
-			sessions.Sessions[i].Info = cToGo_SessionInfo(
+			sessions.Sessions[i].Info = cToGoSessionInfo(
 				&cSessionsSlice[i].info,
 			)
 		}
@@ -1176,21 +1110,21 @@ func cToGo_Sessions(cSessions *C.struct_sessions) *Sessions {
 	return sessions
 }
 
-func cToGo_SessionIdentifier(
-	cId *C.struct_session_identifier,
+func cToGoSessionIdentifier(
+	cID *C.struct_session_identifier,
 ) SessionIdentifier {
-	real := cToGo_RealIdentifier(cId.real)
+	realID := cToGoRealIdentifier(cID.real)
 	return SessionIdentifier{
-		ClientIp: cToGo_NetAddr(
-			cId.client_ip,
-			real.VsIdentifier.Addr.Is4(),
+		ClientIP: cToGoNetAddr(
+			cID.client_ip,
+			realID.VsIdentifier.Addr.Is4(),
 		),
-		ClientPort: uint16(cId.client_port),
-		Real:       real,
+		ClientPort: uint16(cID.client_port),
+		Real:       realID,
 	}
 }
 
-func cToGo_SessionInfo(cInfo *C.struct_session_info) SessionInfo {
+func cToGoSessionInfo(cInfo *C.struct_session_info) SessionInfo {
 	return SessionInfo{
 		CreateTimestamp:     time.Unix(int64(cInfo.create_timestamp), 0),
 		LastPacketTimestamp: time.Unix(int64(cInfo.last_packet_timestamp), 0),
@@ -1200,16 +1134,16 @@ func cToGo_SessionInfo(cInfo *C.struct_session_info) SessionInfo {
 
 // BalancerStats conversions
 
-func cToGo_BalancerStats(cStats *C.struct_balancer_stats) *BalancerStats {
+func cToGoBalancerStats(cStats *C.struct_balancer_stats) *BalancerStats {
 	if cStats == nil {
 		return nil
 	}
 
 	stats := &BalancerStats{
-		L4:       cToGo_L4Stats(&cStats.l4),
-		IcmpIpv4: cToGo_IcmpStats(&cStats.icmp_ipv4),
-		IcmpIpv6: cToGo_IcmpStats(&cStats.icmp_ipv6),
-		Common:   cToGo_CommonStats(&cStats.common),
+		L4:       cToGoL4Stats(&cStats.l4),
+		IcmpIpv4: cToGoIcmpStats(&cStats.icmp_ipv4),
+		IcmpIpv6: cToGoIcmpStats(&cStats.icmp_ipv6),
+		Common:   cToGoCommonStats(&cStats.common),
 	}
 
 	// Convert VS stats array
@@ -1217,14 +1151,14 @@ func cToGo_BalancerStats(cStats *C.struct_balancer_stats) *BalancerStats {
 		cVsSlice := unsafe.Slice(cStats.vs, cStats.vs_count)
 		stats.Vs = make([]NamedVsStats, cStats.vs_count)
 		for i := range stats.Vs {
-			stats.Vs[i] = *cToGo_NamedVsStats(&cVsSlice[i])
+			stats.Vs[i] = *cToGoNamedVsStats(&cVsSlice[i])
 		}
 	}
 
 	return stats
 }
 
-func cToGo_L4Stats(cStats *C.struct_balancer_l4_stats) L4Stats {
+func cToGoL4Stats(cStats *C.struct_balancer_l4_stats) L4Stats {
 	return L4Stats{
 		IncomingPackets:  uint64(cStats.incoming_packets),
 		SelectVsFailed:   uint64(cStats.select_vs_failed),
@@ -1234,12 +1168,12 @@ func cToGo_L4Stats(cStats *C.struct_balancer_l4_stats) L4Stats {
 	}
 }
 
-func cToGo_IcmpStats(cStats *C.struct_balancer_icmp_stats) IcmpStats {
+func cToGoIcmpStats(cStats *C.struct_balancer_icmp_stats) IcmpStats {
 	return IcmpStats{
 		IncomingPackets:           uint64(cStats.incoming_packets),
 		SrcNotAllowed:             uint64(cStats.src_not_allowed),
 		EchoResponses:             uint64(cStats.echo_responses),
-		PayloadTooShortIp:         uint64(cStats.payload_too_short_ip),
+		PayloadTooShortIP:         uint64(cStats.payload_too_short_ip),
 		UnmatchingSrcFromOriginal: uint64(cStats.unmatching_src_from_original),
 		PayloadTooShortPort:       uint64(cStats.payload_too_short_port),
 		UnexpectedTransport:       uint64(cStats.unexpected_transport),
@@ -1252,7 +1186,7 @@ func cToGo_IcmpStats(cStats *C.struct_balancer_icmp_stats) IcmpStats {
 	}
 }
 
-func cToGo_CommonStats(cStats *C.struct_balancer_common_stats) CommonStats {
+func cToGoCommonStats(cStats *C.struct_balancer_common_stats) CommonStats {
 	return CommonStats{
 		IncomingPackets:        uint64(cStats.incoming_packets),
 		IncomingBytes:          uint64(cStats.incoming_bytes),
@@ -1264,13 +1198,13 @@ func cToGo_CommonStats(cStats *C.struct_balancer_common_stats) CommonStats {
 	}
 }
 
-func cToGo_NamedVsStats(cStats *C.struct_named_vs_stats) *NamedVsStats {
+func cToGoNamedVsStats(cStats *C.struct_named_vs_stats) *NamedVsStats {
 	if cStats == nil {
 		return nil
 	}
 
 	stats := &NamedVsStats{
-		Identifier: cToGo_VsIdentifier(cStats.identifier),
+		Identifier: cToGoVsIdentifier(cStats.identifier),
 		Stats: VsStats{
 			IncomingPackets:      uint64(cStats.stats.incoming_packets),
 			IncomingBytes:        uint64(cStats.stats.incoming_bytes),
@@ -1303,7 +1237,7 @@ func cToGo_NamedVsStats(cStats *C.struct_named_vs_stats) *NamedVsStats {
 		}, cStats.reals_count)
 
 		for i := range stats.Reals {
-			relative := cToGo_RelativeRealIdentifier(cRealsSlice[i].real)
+			relative := cToGoRelativeRealIdentifier(cRealsSlice[i].real)
 			stats.Reals[i].Dst = relative.Addr
 			stats.Reals[i].Stats = RealStats{
 				PacketsRealDisabled: uint64(
@@ -1327,7 +1261,7 @@ func cToGo_NamedVsStats(cStats *C.struct_named_vs_stats) *NamedVsStats {
 
 // BalancerGraph conversions
 
-func cToGo_BalancerGraph(cGraph *C.struct_balancer_graph) *BalancerGraph {
+func cToGoBalancerGraph(cGraph *C.struct_balancer_graph) *BalancerGraph {
 	if cGraph == nil {
 		return nil
 	}
@@ -1339,16 +1273,16 @@ func cToGo_BalancerGraph(cGraph *C.struct_balancer_graph) *BalancerGraph {
 		cVsSlice := unsafe.Slice(cGraph.vs, cGraph.vs_count)
 		graph.VirtualServices = make([]GraphVs, cGraph.vs_count)
 		for i := range graph.VirtualServices {
-			graph.VirtualServices[i] = *cToGo_GraphVs(&cVsSlice[i])
+			graph.VirtualServices[i] = *cToGoGraphVs(&cVsSlice[i])
 		}
 	}
 
 	return graph
 }
 
-func cToGo_GraphVs(cVs *C.struct_graph_vs) *GraphVs {
+func cToGoGraphVs(cVs *C.struct_graph_vs) *GraphVs {
 	vs := &GraphVs{
-		Identifier: cToGo_VsIdentifier(cVs.identifier),
+		Identifier: cToGoVsIdentifier(cVs.identifier),
 	}
 
 	// Convert reals array
@@ -1356,16 +1290,16 @@ func cToGo_GraphVs(cVs *C.struct_graph_vs) *GraphVs {
 		cRealsSlice := unsafe.Slice(cVs.reals, cVs.real_count)
 		vs.Reals = make([]GraphReal, cVs.real_count)
 		for i := range vs.Reals {
-			vs.Reals[i] = cToGo_GraphReal(&cRealsSlice[i])
+			vs.Reals[i] = cToGoGraphReal(&cRealsSlice[i])
 		}
 	}
 
 	return vs
 }
 
-func cToGo_GraphReal(cReal *C.struct_graph_real) GraphReal {
+func cToGoGraphReal(cReal *C.struct_graph_real) GraphReal {
 	return GraphReal{
-		Identifier: cToGo_RelativeRealIdentifier(cReal.identifier),
+		Identifier: cToGoRelativeRealIdentifier(cReal.identifier),
 		Weight:     uint16(cReal.weight),
 		Enabled:    bool(cReal.enabled),
 	}
@@ -1373,7 +1307,7 @@ func cToGo_GraphReal(cReal *C.struct_graph_real) GraphReal {
 
 // UpdateInfo conversions
 
-func cToGo_UpdateInfo(cInfo *C.struct_balancer_update_info) *UpdateInfo {
+func cToGoUpdateInfo(cInfo *C.struct_balancer_update_info) *UpdateInfo {
 	if cInfo == nil {
 		return nil
 	}
@@ -1386,12 +1320,12 @@ func cToGo_UpdateInfo(cInfo *C.struct_balancer_update_info) *UpdateInfo {
 	// Convert ACL reused VS identifiers array
 	if cInfo.vs_acl_reused_count > 0 && cInfo.vs_acl_reused != nil {
 		cVsSlice := unsafe.Slice(cInfo.vs_acl_reused, cInfo.vs_acl_reused_count)
-		info.AclReusedVs = make([]VsIdentifier, cInfo.vs_acl_reused_count)
-		for i := range info.AclReusedVs {
-			info.AclReusedVs[i] = cToGo_VsIdentifier(cVsSlice[i])
+		info.ACLReusedVs = make([]VsIdentifier, cInfo.vs_acl_reused_count)
+		for i := range info.ACLReusedVs {
+			info.ACLReusedVs[i] = cToGoVsIdentifier(cVsSlice[i])
 		}
 	} else {
-		info.AclReusedVs = []VsIdentifier{}
+		info.ACLReusedVs = []VsIdentifier{}
 	}
 
 	return info

@@ -63,7 +63,7 @@ type testCase struct {
 type stressConfig struct {
 	ts       *utils.TestSetup
 	rng      *rand.Rand
-	vsIp     netip.Addr
+	vsIP     netip.Addr
 	vsPort   uint16
 	realAddr netip.Addr
 	timeouts int
@@ -170,7 +170,7 @@ func executeTestCase(t *testing.T, config *stressConfig, test *testCase) {
 				packetLayers := utils.MakeTCPPacket(
 					srcIP,
 					srcPort,
-					config.vsIp,
+					config.vsIP,
 					config.vsPort,
 					&layers.TCP{SYN: true},
 				)
@@ -186,7 +186,7 @@ func executeTestCase(t *testing.T, config *stressConfig, test *testCase) {
 					packetLayers := utils.MakeTCPPacket(
 						activeSession.ip,
 						activeSession.port,
-						config.vsIp,
+						config.vsIP,
 						config.vsPort,
 						&layers.TCP{},
 					)
@@ -352,7 +352,7 @@ func executeTestCase(t *testing.T, config *stressConfig, test *testCase) {
 // that active sessions count matches expectations considering session
 // expiration based on timeout.
 func TestSessionTableStress1(t *testing.T) {
-	vsIp := netip.MustParseAddr("1.1.1.1")
+	vsIP := netip.MustParseAddr("1.1.1.1")
 	vsPort := uint16(80)
 	realAddr := netip.MustParseAddr("2.2.2.2")
 
@@ -373,7 +373,7 @@ func TestSessionTableStress1(t *testing.T) {
 				{
 					Id: &balancerpb.VsIdentifier{
 						Addr: &balancerpb.Addr{
-							Bytes: vsIp.AsSlice(),
+							Bytes: vsIP.AsSlice(),
 						},
 						Port:  uint32(vsPort),
 						Proto: balancerpb.TransportProto_TCP,
@@ -467,7 +467,7 @@ func TestSessionTableStress1(t *testing.T) {
 	config := stressConfig{
 		ts:       ts,
 		rng:      rng,
-		vsIp:     vsIp,
+		vsIP:     vsIP,
 		vsPort:   vsPort,
 		realAddr: realAddr,
 		timeouts: sessionsTimeout,

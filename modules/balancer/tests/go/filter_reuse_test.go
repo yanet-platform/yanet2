@@ -67,7 +67,9 @@ func frGenerateIPv6Addr(index int) netip.Addr {
 // For complex ACL, we use 10.0.x.x range which matches the 10.0.0.0/8 rule
 func frGenerateClientIPv4Addr(index int) netip.Addr {
 	// Generate addresses in 10.0.x.x range to match complex ACL rule (10.0.0.0/8)
-	return netip.AddrFrom4([4]byte{10, 0, byte((index / 256) % 256), byte(index % 256)})
+	return netip.AddrFrom4(
+		[4]byte{10, 0, byte((index / 256) % 256), byte(index % 256)},
+	)
 }
 
 // frGenerateClientIPv6Addr generates a client IPv6 address that matches ACL rules
@@ -163,8 +165,14 @@ func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSrc {
 		// Rule 1: Allow from 2001:db8:1::/48
 		acl = append(acl, &balancerpb.AllowedSrc{
 			Net: &balancerpb.Net{
-				Addr: &balancerpb.Addr{Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).AsSlice()},
-				Mask: &balancerpb.Addr{Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).AsSlice()},
+				Addr: &balancerpb.Addr{
+					Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+						AsSlice(),
+				},
+				Mask: &balancerpb.Addr{
+					Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+						AsSlice(),
+				},
 			},
 			Ports: []*balancerpb.PortsRange{
 				{From: 1024, To: 65535},
@@ -174,8 +182,14 @@ func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSrc {
 		// Rule 2: Allow from 2001:db8:2::/48 with specific ports
 		acl = append(acl, &balancerpb.AllowedSrc{
 			Net: &balancerpb.Net{
-				Addr: &balancerpb.Addr{Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).AsSlice()},
-				Mask: &balancerpb.Addr{Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).AsSlice()},
+				Addr: &balancerpb.Addr{
+					Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+						AsSlice(),
+				},
+				Mask: &balancerpb.Addr{
+					Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+						AsSlice(),
+				},
 			},
 			Ports: []*balancerpb.PortsRange{
 				{From: 80, To: 80},
@@ -212,8 +226,14 @@ func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSrc {
 		if isIPv6 {
 			acl = append(acl, &balancerpb.AllowedSrc{
 				Net: &balancerpb.Net{
-					Addr: &balancerpb.Addr{Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).AsSlice()},
-					Mask: &balancerpb.Addr{Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).AsSlice()},
+					Addr: &balancerpb.Addr{
+						Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+							AsSlice(),
+					},
+					Mask: &balancerpb.Addr{
+						Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+							AsSlice(),
+					},
 				},
 			})
 		} else {
@@ -230,7 +250,10 @@ func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSrc {
 }
 
 // frShuffleACL returns a new ACL with rules in random order
-func frShuffleACL(acl []*balancerpb.AllowedSrc, rng *rand.Rand) []*balancerpb.AllowedSrc {
+func frShuffleACL(
+	acl []*balancerpb.AllowedSrc,
+	rng *rand.Rand,
+) []*balancerpb.AllowedSrc {
 	shuffled := make([]*balancerpb.AllowedSrc, len(acl))
 	copy(shuffled, acl)
 	rng.Shuffle(len(shuffled), func(i, j int) {
@@ -240,7 +263,9 @@ func frShuffleACL(acl []*balancerpb.AllowedSrc, rng *rand.Rand) []*balancerpb.Al
 }
 
 // frDuplicateACLRules returns a new ACL with some rules duplicated
-func frDuplicateACLRules(acl []*balancerpb.AllowedSrc) []*balancerpb.AllowedSrc {
+func frDuplicateACLRules(
+	acl []*balancerpb.AllowedSrc,
+) []*balancerpb.AllowedSrc {
 	if len(acl) == 0 {
 		return acl
 	}
@@ -286,7 +311,12 @@ func frCreateVirtualService(
 }
 
 // frCreateVSSet creates a set of virtual services (IPv4 or IPv6)
-func frCreateVSSet(count int, isIPv6 bool, baseIndex int, useComplexACL bool) []*balancerpb.VirtualService {
+func frCreateVSSet(
+	count int,
+	isIPv6 bool,
+	baseIndex int,
+	useComplexACL bool,
+) []*balancerpb.VirtualService {
 	vsList := make([]*balancerpb.VirtualService, 0, count)
 
 	for i := 0; i < count; i++ {
@@ -339,7 +369,9 @@ func frCreateVSSet(count int, isIPv6 bool, baseIndex int, useComplexACL bool) []
 }
 
 // frCreateConfig creates a balancer configuration with given VS sets
-func frCreateConfig(ipv4VS, ipv6VS []*balancerpb.VirtualService) *balancerpb.BalancerConfig {
+func frCreateConfig(
+	ipv4VS, ipv6VS []*balancerpb.VirtualService,
+) *balancerpb.BalancerConfig {
 	allVS := make([]*balancerpb.VirtualService, 0, len(ipv4VS)+len(ipv6VS))
 	allVS = append(allVS, ipv4VS...)
 	allVS = append(allVS, ipv6VS...)
@@ -389,8 +421,54 @@ func frVerifyUpdateInfo(
 		"IPv4 VS matcher reuse mismatch")
 	assert.Equal(t, expectedIPv6Reused, updateInfo.VsIpv6MatcherReused,
 		"IPv6 VS matcher reuse mismatch")
-	assert.Equal(t, expectedACLReusedCount, len(updateInfo.AclReusedVs),
+	assert.Equal(t, expectedACLReusedCount, len(updateInfo.ACLReusedVs),
 		"ACL reused count mismatch")
+}
+
+// frVerifyACLReusedVS verifies that specific VS indices have ACL reused
+// expectedIndices should be a map of VS index to expected reuse status
+func frVerifyACLReusedVS(
+	t *testing.T,
+	updateInfo *ffi.UpdateInfo,
+	vsList []*balancerpb.VirtualService,
+	expectedIndices map[int]bool,
+) {
+	t.Helper()
+
+	// Build a map of VS identifiers that have ACL reused
+	reusedVSMap := make(map[string]bool)
+	for _, vsID := range updateInfo.ACLReusedVs {
+		addr, _ := netip.AddrFromSlice(vsID.Addr.AsSlice())
+		key := fmt.Sprintf("%s:%d/%d", addr, vsID.Port, vsID.TransportProto)
+		reusedVSMap[key] = true
+	}
+
+	// Check each expected index
+	for idx, shouldBeReused := range expectedIndices {
+		if idx >= len(vsList) {
+			t.Errorf(
+				"Index %d out of range (VS list has %d elements)",
+				idx,
+				len(vsList),
+			)
+			continue
+		}
+
+		vs := vsList[idx]
+		addr, _ := netip.AddrFromSlice(vs.Id.Addr.Bytes)
+		key := fmt.Sprintf("%s:%d/%d", addr, vs.Id.Port, vs.Id.Proto)
+
+		isReused := reusedVSMap[key]
+		if shouldBeReused && !isReused {
+			t.Errorf(
+				"VS at index %d (%s) should have ACL reused but doesn't",
+				idx,
+				key,
+			)
+		} else if !shouldBeReused && isReused {
+			t.Errorf("VS at index %d (%s) should NOT have ACL reused but does", idx, key)
+		}
+	}
 }
 
 // frSendTestPackets sends test packets to a VS and verifies they are processed
@@ -405,7 +483,7 @@ func frSendTestPackets(
 ) {
 	t.Helper()
 
-	for i := 0; i < count; i++ {
+	for i := range count {
 		var clientIP netip.Addr
 		if vsIP.Is4() {
 			// Use client IPs that match ACL rules (10.0.0.0/8 for complex ACL)
@@ -437,35 +515,20 @@ func frSendTestPackets(
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 		result, err := ts.Mock.HandlePackets(packet)
 		require.NoError(t, err)
-		require.Equal(t, 1, len(result.Output), "expected 1 output packet for VS %s", vsIP)
-		require.Empty(t, result.Drop, "expected no dropped packets for VS %s", vsIP)
+		require.Equal(
+			t,
+			1,
+			len(result.Output),
+			"expected 1 output packet for VS %s",
+			vsIP,
+		)
+		require.Empty(
+			t,
+			result.Drop,
+			"expected no dropped packets for VS %s",
+			vsIP,
+		)
 	}
-}
-
-// frCountVSByIPVersion counts IPv4 and IPv6 VS in a list
-func frCountVSByIPVersion(vsList []*balancerpb.VirtualService) (ipv4Count, ipv6Count int) {
-	for _, vs := range vsList {
-		addr, ok := netip.AddrFromSlice(vs.Id.Addr.Bytes)
-		if !ok {
-			continue
-		}
-		if addr.Is4() {
-			ipv4Count++
-		} else {
-			ipv6Count++
-		}
-	}
-	return
-}
-
-// frGetVSIdentifiers returns a string representation of VS identifiers for logging
-func frGetVSIdentifiers(vsList []*balancerpb.VirtualService) []string {
-	ids := make([]string, 0, len(vsList))
-	for _, vs := range vsList {
-		addr, _ := netip.AddrFromSlice(vs.Id.Addr.Bytes)
-		ids = append(ids, fmt.Sprintf("%s:%d/%s", addr, vs.Id.Port, vs.Id.Proto))
-	}
-	return ids
 }
 
 // TestFilterReuse is the main test function
@@ -489,7 +552,11 @@ func TestFilterReuse(t *testing.T) {
 	require.NoError(t, err)
 	defer ts.Free()
 
-	t.Logf("Setup initial config with %d IPv4 and %d IPv6 virtual services", frIPv4VSCount, frIPv6VSCount)
+	t.Logf(
+		"Setup initial config with %d IPv4 and %d IPv6 virtual services",
+		frIPv4VSCount,
+		frIPv6VSCount,
+	)
 
 	// Enable all reals
 	utils.EnableAllReals(t, ts)
@@ -538,14 +605,34 @@ func TestFilterReuse(t *testing.T) {
 		// Verify: IPv4 matcher reused, IPv6 matcher NOT reused
 		frVerifyUpdateInfo(t, updateInfo, true, false, frIPv4VSCount)
 
-		t.Logf("IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
-			updateInfo.VsIpv4MatcherReused, updateInfo.VsIpv6MatcherReused, len(updateInfo.AclReusedVs))
+		t.Logf(
+			"IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
+			updateInfo.VsIpv4MatcherReused,
+			updateInfo.VsIpv6MatcherReused,
+			len(updateInfo.ACLReusedVs),
+		)
 
 		// Enable new reals and test
 		utils.EnableAllReals(t, ts)
 		// Use VS index 1 which has TCP protocol (index 0 has UDP because 0%4==0)
-		frSendTestPackets(t, ts, frGenerateIPv4Addr(1), 80, balancerpb.TransportProto_TCP, 2, 2000)
-		frSendTestPackets(t, ts, frGenerateIPv6Addr(1001), 80, balancerpb.TransportProto_TCP, 2, 2100)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv4Addr(1),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			2000,
+		)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv6Addr(1001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			2100,
+		)
 	})
 
 	// Phase 3: Different IPv4 VS set, Same IPv6 VS set
@@ -565,14 +652,34 @@ func TestFilterReuse(t *testing.T) {
 		// Verify: IPv4 matcher NOT reused, IPv6 matcher reused
 		frVerifyUpdateInfo(t, updateInfo, false, true, frIPv6VSCount)
 
-		t.Logf("IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
-			updateInfo.VsIpv4MatcherReused, updateInfo.VsIpv6MatcherReused, len(updateInfo.AclReusedVs))
+		t.Logf(
+			"IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
+			updateInfo.VsIpv4MatcherReused,
+			updateInfo.VsIpv6MatcherReused,
+			len(updateInfo.ACLReusedVs),
+		)
 
 		// Enable new reals and test
 		utils.EnableAllReals(t, ts)
 		// Use VS index 1 which has TCP protocol (index 0 has UDP because 0%4==0)
-		frSendTestPackets(t, ts, frGenerateIPv4Addr(2001), 80, balancerpb.TransportProto_TCP, 2, 3000)
-		frSendTestPackets(t, ts, frGenerateIPv6Addr(1001), 80, balancerpb.TransportProto_TCP, 2, 3100)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv4Addr(2001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			3000,
+		)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv6Addr(1001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			3100,
+		)
 	})
 
 	// Phase 4: Same VS sets, Different ACL for some VS
@@ -583,26 +690,118 @@ func TestFilterReuse(t *testing.T) {
 		newIPv4VS := frCreateVSSet(frIPv4VSCount, false, 2000, true)
 		newIPv6VS := frCreateVSSet(frIPv6VSCount, true, 1000, true)
 
-		// Change ACL for 5 IPv4 VS and 5 IPv6 VS
+		// Change ACL for 5 IPv4 VS and 5 IPv6 VS by adding a unique rule
+		// This ensures the ACL is truly different from the original
 		for i := 0; i < 5; i++ {
-			newIPv4VS[i].AllowedSrcs = frCreateComplexACL(i+100, false)
-			newIPv6VS[i].AllowedSrcs = frCreateComplexACL(i+100, true)
+			// Add a unique network rule that makes this ACL different
+			uniqueRule := &balancerpb.AllowedSrc{
+				Net: &balancerpb.Net{
+					Addr: &balancerpb.Addr{
+						Bytes: netip.AddrFrom4([4]byte{100, byte(i), 0, 0}).
+							AsSlice(),
+					},
+					Mask: &balancerpb.Addr{
+						Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).
+							AsSlice(),
+					},
+				},
+			}
+			newIPv4VS[i].AllowedSrcs = append(
+				newIPv4VS[i].AllowedSrcs,
+				uniqueRule,
+			)
+
+			uniqueRuleV6 := &balancerpb.AllowedSrc{
+				Net: &balancerpb.Net{
+					Addr: &balancerpb.Addr{
+						Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0x00, byte(i), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+							AsSlice(),
+					},
+					Mask: &balancerpb.Addr{
+						Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+							AsSlice(),
+					},
+				},
+			}
+			newIPv6VS[i].AllowedSrcs = append(
+				newIPv6VS[i].AllowedSrcs,
+				uniqueRuleV6,
+			)
 		}
 
 		newConfig := frCreateConfig(newIPv4VS, newIPv6VS)
 		updateInfo, err := ts.Balancer.Update(newConfig, ts.Mock.CurrentTime())
 		require.NoError(t, err)
 
-		// Verify: Both matchers reused, 30 VS have ACL reused (15 IPv4 + 15 IPv6)
-		frVerifyUpdateInfo(t, updateInfo, true, true, 30)
+		// Expected behavior:
+		// - Both matchers reused (VS identifiers unchanged)
+		// - 30 VS have ACL reused: 15 unchanged IPv4 + 15 unchanged IPv6
+		// - 10 VS have different ACL: 5 modified IPv4 + 5 modified IPv6
+		assert.True(
+			t,
+			updateInfo.VsIpv4MatcherReused,
+			"IPv4 matcher should be reused",
+		)
+		assert.True(
+			t,
+			updateInfo.VsIpv6MatcherReused,
+			"IPv6 matcher should be reused",
+		)
+		assert.Equal(
+			t,
+			30,
+			len(updateInfo.ACLReusedVs),
+			"30 VS should have ACL reused (15 unchanged IPv4 + 15 unchanged IPv6)",
+		)
 
-		t.Logf("IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
-			updateInfo.VsIpv4MatcherReused, updateInfo.VsIpv6MatcherReused, len(updateInfo.AclReusedVs))
+		// Verify specific VS indices have correct ACL reuse status
+		allVS := append(newIPv4VS, newIPv6VS...)
+		expectedReuse := make(map[int]bool)
+		// First 5 IPv4 VS (indices 0-4) have modified ACL - should NOT be reused
+		for i := range 5 {
+			expectedReuse[i] = false
+		}
+		// Remaining 15 IPv4 VS (indices 5-19) have unchanged ACL - should be reused
+		for i := 5; i < 20; i++ {
+			expectedReuse[i] = true
+		}
+		// First 5 IPv6 VS (indices 20-24) have modified ACL - should NOT be reused
+		for i := 20; i < 25; i++ {
+			expectedReuse[i] = false
+		}
+		// Remaining 15 IPv6 VS (indices 25-39) have unchanged ACL - should be reused
+		for i := 25; i < 40; i++ {
+			expectedReuse[i] = true
+		}
+		frVerifyACLReusedVS(t, updateInfo, allVS, expectedReuse)
+
+		t.Logf(
+			"IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
+			updateInfo.VsIpv4MatcherReused,
+			updateInfo.VsIpv6MatcherReused,
+			len(updateInfo.ACLReusedVs),
+		)
 
 		// Test packet processing still works
 		// Use VS index 1 which has TCP protocol (index 0 has UDP because 0%4==0)
-		frSendTestPackets(t, ts, frGenerateIPv4Addr(2001), 80, balancerpb.TransportProto_TCP, 2, 4000)
-		frSendTestPackets(t, ts, frGenerateIPv6Addr(1001), 80, balancerpb.TransportProto_TCP, 2, 4100)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv4Addr(2001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			4000,
+		)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv6Addr(1001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			4100,
+		)
 	})
 
 	// Phase 5: Same VS sets, Same ACL with different order
@@ -615,34 +814,108 @@ func TestFilterReuse(t *testing.T) {
 		newIPv4VS := frCreateVSSet(frIPv4VSCount, false, 2000, true)
 		newIPv6VS := frCreateVSSet(frIPv6VSCount, true, 1000, true)
 
-		// Apply the same ACL changes as Phase 4
-		for i := 0; i < 5; i++ {
-			newIPv4VS[i].AllowedSrcs = frCreateComplexACL(i+100, false)
-			newIPv6VS[i].AllowedSrcs = frCreateComplexACL(i+100, true)
+		// Apply the SAME ACL changes as Phase 4 (add unique rules to first 5 VS)
+		for i := range 5 {
+			uniqueRule := &balancerpb.AllowedSrc{
+				Net: &balancerpb.Net{
+					Addr: &balancerpb.Addr{
+						Bytes: netip.AddrFrom4([4]byte{100, byte(i), 0, 0}).
+							AsSlice(),
+					},
+					Mask: &balancerpb.Addr{
+						Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).
+							AsSlice(),
+					},
+				},
+			}
+			newIPv4VS[i].AllowedSrcs = append(
+				newIPv4VS[i].AllowedSrcs,
+				uniqueRule,
+			)
+
+			uniqueRuleV6 := &balancerpb.AllowedSrc{
+				Net: &balancerpb.Net{
+					Addr: &balancerpb.Addr{
+						Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0x00, byte(i), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+							AsSlice(),
+					},
+					Mask: &balancerpb.Addr{
+						Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+							AsSlice(),
+					},
+				},
+			}
+			newIPv6VS[i].AllowedSrcs = append(
+				newIPv6VS[i].AllowedSrcs,
+				uniqueRuleV6,
+			)
 		}
 
-		// Shuffle ACL order for all VS
+		// Shuffle ACL order for all VS - this should NOT affect ACL equality
 		for i := range newIPv4VS {
-			newIPv4VS[i].AllowedSrcs = frShuffleACL(newIPv4VS[i].AllowedSrcs, rng)
+			newIPv4VS[i].AllowedSrcs = frShuffleACL(
+				newIPv4VS[i].AllowedSrcs,
+				rng,
+			)
 		}
 		for i := range newIPv6VS {
-			newIPv6VS[i].AllowedSrcs = frShuffleACL(newIPv6VS[i].AllowedSrcs, rng)
+			newIPv6VS[i].AllowedSrcs = frShuffleACL(
+				newIPv6VS[i].AllowedSrcs,
+				rng,
+			)
 		}
 
 		newConfig := frCreateConfig(newIPv4VS, newIPv6VS)
 		updateInfo, err := ts.Balancer.Update(newConfig, ts.Mock.CurrentTime())
 		require.NoError(t, err)
 
-		// Verify: Both matchers reused, ALL VS have ACL reused (order doesn't matter)
-		frVerifyUpdateInfo(t, updateInfo, true, true, frIPv4VSCount+frIPv6VSCount)
+		// Expected behavior:
+		// - Both matchers reused (VS identifiers unchanged)
+		// - ALL VS have ACL reused because order doesn't matter for ACL comparison
+		assert.True(
+			t,
+			updateInfo.VsIpv4MatcherReused,
+			"IPv4 matcher should be reused",
+		)
+		assert.True(
+			t,
+			updateInfo.VsIpv6MatcherReused,
+			"IPv6 matcher should be reused",
+		)
+		assert.Equal(
+			t,
+			frIPv4VSCount+frIPv6VSCount,
+			len(updateInfo.ACLReusedVs),
+			"All 40 VS should have ACL reused (order doesn't matter)",
+		)
 
-		t.Logf("IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
-			updateInfo.VsIpv4MatcherReused, updateInfo.VsIpv6MatcherReused, len(updateInfo.AclReusedVs))
+		t.Logf(
+			"IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
+			updateInfo.VsIpv4MatcherReused,
+			updateInfo.VsIpv6MatcherReused,
+			len(updateInfo.ACLReusedVs),
+		)
 
 		// Test packet processing still works
 		// Use VS index 1 which has TCP protocol (index 0 has UDP because 0%4==0)
-		frSendTestPackets(t, ts, frGenerateIPv4Addr(2001), 80, balancerpb.TransportProto_TCP, 2, 5000)
-		frSendTestPackets(t, ts, frGenerateIPv6Addr(1001), 80, balancerpb.TransportProto_TCP, 2, 5100)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv4Addr(2001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			5000,
+		)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv6Addr(1001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			5100,
+		)
 	})
 
 	// Phase 6: Same VS sets, Same ACL with duplicates
@@ -655,42 +928,120 @@ func TestFilterReuse(t *testing.T) {
 		newIPv4VS := frCreateVSSet(frIPv4VSCount, false, 2000, true)
 		newIPv6VS := frCreateVSSet(frIPv6VSCount, true, 1000, true)
 
-		// Apply the same ACL changes as Phase 4/5
+		// Apply the SAME ACL changes as Phase 4/5 (add unique rules to first 5 VS)
 		for i := 0; i < 5; i++ {
-			newIPv4VS[i].AllowedSrcs = frCreateComplexACL(i+100, false)
-			newIPv6VS[i].AllowedSrcs = frCreateComplexACL(i+100, true)
+			uniqueRule := &balancerpb.AllowedSrc{
+				Net: &balancerpb.Net{
+					Addr: &balancerpb.Addr{
+						Bytes: netip.AddrFrom4([4]byte{100, byte(i), 0, 0}).
+							AsSlice(),
+					},
+					Mask: &balancerpb.Addr{
+						Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).
+							AsSlice(),
+					},
+				},
+			}
+			newIPv4VS[i].AllowedSrcs = append(
+				newIPv4VS[i].AllowedSrcs,
+				uniqueRule,
+			)
+
+			uniqueRuleV6 := &balancerpb.AllowedSrc{
+				Net: &balancerpb.Net{
+					Addr: &balancerpb.Addr{
+						Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0x00, byte(i), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+							AsSlice(),
+					},
+					Mask: &balancerpb.Addr{
+						Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
+							AsSlice(),
+					},
+				},
+			}
+			newIPv6VS[i].AllowedSrcs = append(
+				newIPv6VS[i].AllowedSrcs,
+				uniqueRuleV6,
+			)
 		}
 
 		// Shuffle ACL order (same as Phase 5)
 		for i := range newIPv4VS {
-			newIPv4VS[i].AllowedSrcs = frShuffleACL(newIPv4VS[i].AllowedSrcs, rng)
+			newIPv4VS[i].AllowedSrcs = frShuffleACL(
+				newIPv4VS[i].AllowedSrcs,
+				rng,
+			)
 		}
 		for i := range newIPv6VS {
-			newIPv6VS[i].AllowedSrcs = frShuffleACL(newIPv6VS[i].AllowedSrcs, rng)
+			newIPv6VS[i].AllowedSrcs = frShuffleACL(
+				newIPv6VS[i].AllowedSrcs,
+				rng,
+			)
 		}
 
-		// Add duplicates to ACL
+		// Add duplicates to ACL - this should NOT affect ACL equality
 		for i := range newIPv4VS {
-			newIPv4VS[i].AllowedSrcs = frDuplicateACLRules(newIPv4VS[i].AllowedSrcs)
+			newIPv4VS[i].AllowedSrcs = frDuplicateACLRules(
+				newIPv4VS[i].AllowedSrcs,
+			)
 		}
 		for i := range newIPv6VS {
-			newIPv6VS[i].AllowedSrcs = frDuplicateACLRules(newIPv6VS[i].AllowedSrcs)
+			newIPv6VS[i].AllowedSrcs = frDuplicateACLRules(
+				newIPv6VS[i].AllowedSrcs,
+			)
 		}
 
 		newConfig := frCreateConfig(newIPv4VS, newIPv6VS)
 		updateInfo, err := ts.Balancer.Update(newConfig, ts.Mock.CurrentTime())
 		require.NoError(t, err)
 
-		// Verify: Both matchers reused, ALL VS have ACL reused (duplicates don't matter)
-		frVerifyUpdateInfo(t, updateInfo, true, true, frIPv4VSCount+frIPv6VSCount)
+		// Expected behavior:
+		// - Both matchers reused (VS identifiers unchanged)
+		// - ALL VS have ACL reused because duplicates don't matter for ACL comparison
+		assert.True(
+			t,
+			updateInfo.VsIpv4MatcherReused,
+			"IPv4 matcher should be reused",
+		)
+		assert.True(
+			t,
+			updateInfo.VsIpv6MatcherReused,
+			"IPv6 matcher should be reused",
+		)
+		assert.Equal(
+			t,
+			frIPv4VSCount+frIPv6VSCount,
+			len(updateInfo.ACLReusedVs),
+			"All 40 VS should have ACL reused (duplicates don't matter)",
+		)
 
-		t.Logf("IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
-			updateInfo.VsIpv4MatcherReused, updateInfo.VsIpv6MatcherReused, len(updateInfo.AclReusedVs))
+		t.Logf(
+			"IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
+			updateInfo.VsIpv4MatcherReused,
+			updateInfo.VsIpv6MatcherReused,
+			len(updateInfo.ACLReusedVs),
+		)
 
 		// Test packet processing still works
 		// Use VS index 1 which has TCP protocol (index 0 has UDP because 0%4==0)
-		frSendTestPackets(t, ts, frGenerateIPv4Addr(2001), 80, balancerpb.TransportProto_TCP, 2, 6000)
-		frSendTestPackets(t, ts, frGenerateIPv6Addr(1001), 80, balancerpb.TransportProto_TCP, 2, 6100)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv4Addr(2001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			6000,
+		)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv6Addr(1001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			6100,
+		)
 	})
 
 	// Phase 7: Completely different configuration
@@ -708,14 +1059,34 @@ func TestFilterReuse(t *testing.T) {
 		// Verify: Nothing reused
 		frVerifyUpdateInfo(t, updateInfo, false, false, 0)
 
-		t.Logf("IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
-			updateInfo.VsIpv4MatcherReused, updateInfo.VsIpv6MatcherReused, len(updateInfo.AclReusedVs))
+		t.Logf(
+			"IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
+			updateInfo.VsIpv4MatcherReused,
+			updateInfo.VsIpv6MatcherReused,
+			len(updateInfo.ACLReusedVs),
+		)
 
 		// Enable new reals and test
 		utils.EnableAllReals(t, ts)
 		// Use VS index 1 which has TCP protocol (index 0 has UDP because 0%4==0)
-		frSendTestPackets(t, ts, frGenerateIPv4Addr(5001), 80, balancerpb.TransportProto_TCP, 2, 7000)
-		frSendTestPackets(t, ts, frGenerateIPv6Addr(5001), 80, balancerpb.TransportProto_TCP, 2, 7100)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv4Addr(5001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			7000,
+		)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv6Addr(5001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			7100,
+		)
 	})
 
 	// Phase 8: Identical configuration (everything reused)
@@ -731,60 +1102,124 @@ func TestFilterReuse(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify: Everything reused
-		frVerifyUpdateInfo(t, updateInfo, true, true, frIPv4VSCount+frIPv6VSCount)
+		frVerifyUpdateInfo(
+			t,
+			updateInfo,
+			true,
+			true,
+			frIPv4VSCount+frIPv6VSCount,
+		)
 
-		t.Logf("IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
-			updateInfo.VsIpv4MatcherReused, updateInfo.VsIpv6MatcherReused, len(updateInfo.AclReusedVs))
+		t.Logf(
+			"IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
+			updateInfo.VsIpv4MatcherReused,
+			updateInfo.VsIpv6MatcherReused,
+			len(updateInfo.ACLReusedVs),
+		)
 
 		// Test packet processing still works
 		// Use VS index 1 which has TCP protocol (index 0 has UDP because 0%4==0)
-		frSendTestPackets(t, ts, frGenerateIPv4Addr(5001), 80, balancerpb.TransportProto_TCP, 2, 8000)
-		frSendTestPackets(t, ts, frGenerateIPv6Addr(5001), 80, balancerpb.TransportProto_TCP, 2, 8100)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv4Addr(5001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			8000,
+		)
+		frSendTestPackets(
+			t,
+			ts,
+			frGenerateIPv6Addr(5001),
+			80,
+			balancerpb.TransportProto_TCP,
+			2,
+			8100,
+		)
 	})
 
 	// Phase 9: Edge cases
+	// Each subtest explicitly sets up a known state first, then makes a specific change
+	// to test the expected reuse behavior.
 	t.Run("Phase9_EdgeCases", func(t *testing.T) {
 		// Phase 9a: Partial VS set changes (add some VS, remove some VS)
 		t.Run("PartialVSChanges", func(t *testing.T) {
 			t.Log("Testing: Partial VS set changes")
 
-			// Keep first 15 IPv4 VS, add 5 new ones
+			// First, establish a known baseline state
+			baseIPv4VS := frCreateVSSet(frIPv4VSCount, false, 5000, true)
+			baseIPv6VS := frCreateVSSet(frIPv6VSCount, true, 5000, true)
+			baseConfig := frCreateConfig(baseIPv4VS, baseIPv6VS)
+			_, err := ts.Balancer.Update(baseConfig, ts.Mock.CurrentTime())
+			require.NoError(t, err)
+			utils.EnableAllReals(t, ts)
+			t.Log(
+				"Baseline established: 20 IPv4 VS (base 5000) + 20 IPv6 VS (base 5000)",
+			)
+
+			// Now make partial changes: keep first 15 VS, add 5 new ones
 			newIPv4VS := frCreateVSSet(15, false, 5000, true)
 			additionalIPv4VS := frCreateVSSet(5, false, 6000, true)
 			newIPv4VS = append(newIPv4VS, additionalIPv4VS...)
 
-			// Keep first 15 IPv6 VS, add 5 new ones
 			newIPv6VS := frCreateVSSet(15, true, 5000, true)
 			additionalIPv6VS := frCreateVSSet(5, true, 6000, true)
 			newIPv6VS = append(newIPv6VS, additionalIPv6VS...)
 
 			newConfig := frCreateConfig(newIPv4VS, newIPv6VS)
-			updateInfo, err := ts.Balancer.Update(newConfig, ts.Mock.CurrentTime())
+			updateInfo, err := ts.Balancer.Update(
+				newConfig,
+				ts.Mock.CurrentTime(),
+			)
 			require.NoError(t, err)
 
-			// Verify: Matchers NOT reused (VS set changed), but some ACLs reused
-			// The 15 unchanged VS should have ACL reused
-			assert.False(t, updateInfo.VsIpv4MatcherReused, "IPv4 matcher should NOT be reused when VS set changes")
-			assert.False(t, updateInfo.VsIpv6MatcherReused, "IPv6 matcher should NOT be reused when VS set changes")
-			assert.Equal(t, 30, len(updateInfo.AclReusedVs), "30 VS should have ACL reused (15 IPv4 + 15 IPv6)")
+			// Expected behavior:
+			// - VS matchers NOT reused because the VS set changed (removed 5, added 5 different)
+			// - ACL reused for the 15 unchanged VS in each family = 30 total
+			assert.False(
+				t,
+				updateInfo.VsIpv4MatcherReused,
+				"IPv4 matcher should NOT be reused when VS set changes (removed 5 VS, added 5 new)",
+			)
+			assert.False(
+				t,
+				updateInfo.VsIpv6MatcherReused,
+				"IPv6 matcher should NOT be reused when VS set changes (removed 5 VS, added 5 new)",
+			)
+			assert.Equal(
+				t,
+				30,
+				len(updateInfo.ACLReusedVs),
+				"30 VS should have ACL reused (15 unchanged IPv4 + 15 unchanged IPv6)",
+			)
 
-			t.Logf("IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
-				updateInfo.VsIpv4MatcherReused, updateInfo.VsIpv6MatcherReused, len(updateInfo.AclReusedVs))
+			t.Logf(
+				"IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
+				updateInfo.VsIpv4MatcherReused,
+				updateInfo.VsIpv6MatcherReused,
+				len(updateInfo.ACLReusedVs),
+			)
 
-			// Enable new reals and test
 			utils.EnableAllReals(t, ts)
 		})
 
-		// Phase 9b: Mixed protocol changes
+		// Phase 9b: Mixed protocol changes - change protocol for some IPv4 VS only
 		t.Run("MixedProtocolChanges", func(t *testing.T) {
 			t.Log("Testing: Mixed protocol changes")
 
-			// Get current config
-			currentConfig := ts.Balancer.Config()
-			ipv4Count, ipv6Count := frCountVSByIPVersion(currentConfig.PacketHandler.Vs)
-			t.Logf("Current config has %d IPv4 and %d IPv6 VS", ipv4Count, ipv6Count)
+			// First, establish a known baseline state
+			baseIPv4VS := frCreateVSSet(frIPv4VSCount, false, 5000, true)
+			baseIPv6VS := frCreateVSSet(frIPv6VSCount, true, 5000, true)
+			baseConfig := frCreateConfig(baseIPv4VS, baseIPv6VS)
+			_, err := ts.Balancer.Update(baseConfig, ts.Mock.CurrentTime())
+			require.NoError(t, err)
+			utils.EnableAllReals(t, ts)
+			t.Log(
+				"Baseline established: 20 IPv4 VS + 20 IPv6 VS with standard protocols",
+			)
 
-			// Create new config with same VS but different protocols for some
+			// Now change protocol for first 5 IPv4 VS
 			newIPv4VS := frCreateVSSet(frIPv4VSCount, false, 5000, true)
 			newIPv6VS := frCreateVSSet(frIPv6VSCount, true, 5000, true)
 
@@ -798,60 +1233,101 @@ func TestFilterReuse(t *testing.T) {
 			}
 
 			newConfig := frCreateConfig(newIPv4VS, newIPv6VS)
-			updateInfo, err := ts.Balancer.Update(newConfig, ts.Mock.CurrentTime())
+			updateInfo, err := ts.Balancer.Update(
+				newConfig,
+				ts.Mock.CurrentTime(),
+			)
 			require.NoError(t, err)
 
-			// Verify: IPv4 matcher NOT reused (protocol changed), IPv6 matcher reused
-			assert.False(t, updateInfo.VsIpv4MatcherReused, "IPv4 matcher should NOT be reused when protocol changes")
-			assert.True(t, updateInfo.VsIpv6MatcherReused, "IPv6 matcher should be reused")
+			// Expected behavior:
+			// - IPv4 matcher NOT reused because protocol changed for 5 VS (different VS identifiers)
+			// - IPv6 matcher REUSED because IPv6 VS set is identical
+			// - ACL reused for unchanged VS: 15 IPv4 (with same identifier) + 20 IPv6 = 35
+			assert.False(
+				t,
+				updateInfo.VsIpv4MatcherReused,
+				"IPv4 matcher should NOT be reused when protocol changes for some VS",
+			)
+			assert.True(t, updateInfo.VsIpv6MatcherReused,
+				"IPv6 matcher should be reused (IPv6 VS set unchanged)")
 
-			t.Logf("IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
-				updateInfo.VsIpv4MatcherReused, updateInfo.VsIpv6MatcherReused, len(updateInfo.AclReusedVs))
+			t.Logf(
+				"IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
+				updateInfo.VsIpv4MatcherReused,
+				updateInfo.VsIpv6MatcherReused,
+				len(updateInfo.ACLReusedVs),
+			)
 
-			// Enable new reals and test
 			utils.EnableAllReals(t, ts)
 		})
 
-		// Phase 9c: Port changes
+		// Phase 9c: Port changes - change port for some IPv4 VS only
 		t.Run("PortChanges", func(t *testing.T) {
 			t.Log("Testing: Port changes")
 
-			// Create new config with same VS but different ports for some
+			// First, establish a known baseline state
+			baseIPv4VS := frCreateVSSet(frIPv4VSCount, false, 5000, true)
+			baseIPv6VS := frCreateVSSet(frIPv6VSCount, true, 5000, true)
+			baseConfig := frCreateConfig(baseIPv4VS, baseIPv6VS)
+			_, err := ts.Balancer.Update(baseConfig, ts.Mock.CurrentTime())
+			require.NoError(t, err)
+			utils.EnableAllReals(t, ts)
+			t.Log("Baseline established: 20 IPv4 VS + 20 IPv6 VS with port 80")
+
+			// Now change port for first 5 IPv4 VS
 			newIPv4VS := frCreateVSSet(frIPv4VSCount, false, 5000, true)
 			newIPv6VS := frCreateVSSet(frIPv6VSCount, true, 5000, true)
 
-			// Change port for first 5 IPv4 VS
-			for i := 0; i < 5; i++ {
+			for i := range 5 {
 				newIPv4VS[i].Id.Port = 8080
 			}
 
 			newConfig := frCreateConfig(newIPv4VS, newIPv6VS)
-			updateInfo, err := ts.Balancer.Update(newConfig, ts.Mock.CurrentTime())
+			updateInfo, err := ts.Balancer.Update(
+				newConfig,
+				ts.Mock.CurrentTime(),
+			)
 			require.NoError(t, err)
 
-			// Verify: IPv4 matcher NOT reused (port changed), IPv6 matcher reused
-			assert.False(t, updateInfo.VsIpv4MatcherReused, "IPv4 matcher should NOT be reused when port changes")
-			assert.True(t, updateInfo.VsIpv6MatcherReused, "IPv6 matcher should be reused")
+			// Expected behavior:
+			// - IPv4 matcher NOT reused because port changed for 5 VS (different VS identifiers)
+			// - IPv6 matcher REUSED because IPv6 VS set is identical
+			assert.False(
+				t,
+				updateInfo.VsIpv4MatcherReused,
+				"IPv4 matcher should NOT be reused when port changes for some VS",
+			)
+			assert.True(t, updateInfo.VsIpv6MatcherReused,
+				"IPv6 matcher should be reused (IPv6 VS set unchanged)")
 
-			t.Logf("IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
-				updateInfo.VsIpv4MatcherReused, updateInfo.VsIpv6MatcherReused, len(updateInfo.AclReusedVs))
+			t.Logf(
+				"IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
+				updateInfo.VsIpv4MatcherReused,
+				updateInfo.VsIpv6MatcherReused,
+				len(updateInfo.ACLReusedVs),
+			)
 
-			// Enable new reals and test
 			utils.EnableAllReals(t, ts)
 		})
 
-		// Phase 9d: ACL with different port ranges (same networks)
+		// Phase 9d: ACL with different port ranges (same VS identifiers, different ACL)
 		t.Run("ACLPortRangeChanges", func(t *testing.T) {
 			t.Log("Testing: ACL with different port ranges")
 
-			// Create new config with same VS
+			// First, establish a known baseline state
+			baseIPv4VS := frCreateVSSet(frIPv4VSCount, false, 5000, true)
+			baseIPv6VS := frCreateVSSet(frIPv6VSCount, true, 5000, true)
+			baseConfig := frCreateConfig(baseIPv4VS, baseIPv6VS)
+			_, err := ts.Balancer.Update(baseConfig, ts.Mock.CurrentTime())
+			require.NoError(t, err)
+			utils.EnableAllReals(t, ts)
+			t.Log(
+				"Baseline established: 20 IPv4 VS + 20 IPv6 VS with standard ACLs",
+			)
+
+			// Now change ACL port ranges for first 5 IPv4 VS
 			newIPv4VS := frCreateVSSet(frIPv4VSCount, false, 5000, true)
 			newIPv6VS := frCreateVSSet(frIPv6VSCount, true, 5000, true)
-
-			// Restore ports to original
-			for i := 0; i < 5; i++ {
-				newIPv4VS[i].Id.Port = 80
-			}
 
 			// Change port ranges in ACL for first 5 IPv4 VS
 			for i := 0; i < 5; i++ {
@@ -865,17 +1341,32 @@ func TestFilterReuse(t *testing.T) {
 			}
 
 			newConfig := frCreateConfig(newIPv4VS, newIPv6VS)
-			updateInfo, err := ts.Balancer.Update(newConfig, ts.Mock.CurrentTime())
+			updateInfo, err := ts.Balancer.Update(
+				newConfig,
+				ts.Mock.CurrentTime(),
+			)
 			require.NoError(t, err)
 
-			// Verify: Both matchers reused, but 5 IPv4 VS have different ACL
-			assert.True(t, updateInfo.VsIpv4MatcherReused, "IPv4 matcher should be reused")
-			assert.True(t, updateInfo.VsIpv6MatcherReused, "IPv6 matcher should be reused")
-			// 15 IPv4 + 20 IPv6 = 35 VS should have ACL reused
-			assert.Equal(t, 35, len(updateInfo.AclReusedVs), "35 VS should have ACL reused")
+			// Expected behavior:
+			// - Both matchers REUSED because VS identifiers are identical
+			// - ACL reused for 15 IPv4 (unchanged ACL) + 20 IPv6 (unchanged) = 35
+			assert.True(t, updateInfo.VsIpv4MatcherReused,
+				"IPv4 matcher should be reused (VS identifiers unchanged)")
+			assert.True(t, updateInfo.VsIpv6MatcherReused,
+				"IPv6 matcher should be reused (VS identifiers unchanged)")
+			assert.Equal(
+				t,
+				35,
+				len(updateInfo.ACLReusedVs),
+				"35 VS should have ACL reused (15 unchanged IPv4 + 20 unchanged IPv6)",
+			)
 
-			t.Logf("IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
-				updateInfo.VsIpv4MatcherReused, updateInfo.VsIpv6MatcherReused, len(updateInfo.AclReusedVs))
+			t.Logf(
+				"IPv4 matcher reused: %v, IPv6 matcher reused: %v, ACL reused count: %d",
+				updateInfo.VsIpv4MatcherReused,
+				updateInfo.VsIpv6MatcherReused,
+				len(updateInfo.ACLReusedVs),
+			)
 		})
 	})
 }

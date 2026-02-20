@@ -1,3 +1,6 @@
+// Package main implements a high-performance benchmark tool for the YANET balancer module.
+// It generates synthetic traffic, measures packet processing throughput (MPpS), and provides
+// detailed statistics on balancer performance including per-worker metrics and load distribution.
 package main
 
 import (
@@ -21,10 +24,12 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-var PacketsMemory int = (1 << 32) + (1 << 30)
-var TotalMemory int = (1 << 32) + PacketsMemory
-var CpMemory int = TotalMemory - PacketsMemory
-var AgentMemory int = CpMemory - (1 << 27)
+var (
+	PacketsMemory int = (1 << 32) + (1 << 30)
+	TotalMemory   int = (1 << 32) + PacketsMemory
+	CpMemory      int = TotalMemory - PacketsMemory
+	AgentMemory   int = CpMemory - (1 << 27)
+)
 
 var BalancerName string = "balancer0"
 
@@ -250,7 +255,7 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 	}
 
 	// Generate TCP IPv4 virtual services
-	for i := 0; i < config.TcpIpv4Vs; i++ {
+	for i := 0; i < config.TCPIPv4VS; i++ {
 		addr := netip.AddrFrom4([4]byte{192, 168, byte(i / 256), byte(i % 256)})
 		virtualServices = append(
 			virtualServices,
@@ -259,7 +264,7 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 	}
 
 	// Generate TCP IPv6 virtual services
-	for i := 0; i < config.TcpIpv6Vs; i++ {
+	for i := 0; i < config.TCPIPv6VS; i++ {
 		addr := netip.AddrFrom16(
 			[16]byte{
 				0x20,
@@ -287,7 +292,7 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 	}
 
 	// Generate UDP IPv4 virtual services
-	for i := 0; i < config.UdpIpv4Vs; i++ {
+	for i := 0; i < config.UDPIPv4VS; i++ {
 		addr := netip.AddrFrom4([4]byte{172, 16, byte(i / 256), byte(i % 256)})
 		virtualServices = append(
 			virtualServices,
@@ -296,7 +301,7 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 	}
 
 	// Generate UDP IPv6 virtual services
-	for i := 0; i < config.UdpIpv6Vs; i++ {
+	for i := 0; i < config.UDPIPv6Vs; i++ {
 		addr := netip.AddrFrom16(
 			[16]byte{
 				0xfc,

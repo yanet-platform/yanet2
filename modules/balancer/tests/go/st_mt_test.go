@@ -529,14 +529,14 @@ func makeSimplePacketLayers(
 		tcp := tcpFlags
 		tcp.SrcPort = layers.TCPPort(srcPort)
 		tcp.DstPort = layers.TCPPort(dstPort)
-		tcp.SetNetworkLayerForChecksum(ip)
+		_ = tcp.SetNetworkLayerForChecksum(ip)
 		result = append(result, tcp)
 	} else {
 		udp := &layers.UDP{
 			SrcPort: layers.UDPPort(srcPort),
 			DstPort: layers.UDPPort(dstPort),
 		}
-		udp.SetNetworkLayerForChecksum(ip)
+		_ = udp.SetNetworkLayerForChecksum(ip)
 		result = append(result, udp)
 	}
 

@@ -239,7 +239,7 @@ func TestVsWlcUpdates(t *testing.T) {
 	vsIdentifier := ffi.VsIdentifier{
 		Addr:           netip.MustParseAddr("10.0.0.1"),
 		Port:           80,
-		TransportProto: ffi.VsTransportProtoTcp,
+		TransportProto: ffi.VsTransportProtoTCP,
 	}
 
 	t.Run("Empty reals returns no updates", func(t *testing.T) {
@@ -651,7 +651,7 @@ func TestWlcUpdates(t *testing.T) {
 							Identifier: ffi.VsIdentifier{
 								Addr:           netip.MustParseAddr("10.0.0.1"),
 								Port:           80,
-								TransportProto: ffi.VsTransportProtoTcp,
+								TransportProto: ffi.VsTransportProtoTCP,
 							},
 							Reals: []ffi.RealConfig{
 								{
@@ -680,7 +680,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.GraphReal{
 						{
@@ -701,7 +701,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.RealInfo{
 						{
@@ -726,7 +726,7 @@ func TestWlcUpdates(t *testing.T) {
 							Identifier: ffi.VsIdentifier{
 								Addr:           netip.MustParseAddr("10.0.0.1"),
 								Port:           80,
-								TransportProto: ffi.VsTransportProtoTcp,
+								TransportProto: ffi.VsTransportProtoTCP,
 							},
 							Reals: []ffi.RealConfig{
 								{
@@ -755,7 +755,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.GraphReal{
 						{
@@ -776,7 +776,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.RealInfo{
 						{
@@ -804,7 +804,7 @@ func TestWlcUpdates(t *testing.T) {
 							Identifier: ffi.VsIdentifier{
 								Addr:           netip.MustParseAddr("10.0.0.1"),
 								Port:           80,
-								TransportProto: ffi.VsTransportProtoTcp,
+								TransportProto: ffi.VsTransportProtoTCP,
 							},
 							Reals: []ffi.RealConfig{
 								{
@@ -822,7 +822,7 @@ func TestWlcUpdates(t *testing.T) {
 							Identifier: ffi.VsIdentifier{
 								Addr:           netip.MustParseAddr("10.0.0.2"),
 								Port:           443,
-								TransportProto: ffi.VsTransportProtoTcp,
+								TransportProto: ffi.VsTransportProtoTCP,
 							},
 							Reals: []ffi.RealConfig{
 								{
@@ -851,7 +851,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.GraphReal{
 						{
@@ -868,7 +868,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.2"),
 						Port:           443,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.GraphReal{
 						{
@@ -889,7 +889,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.RealInfo{
 						{
@@ -902,7 +902,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.2"),
 						Port:           443,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.RealInfo{
 						{
@@ -928,7 +928,7 @@ func TestWlcUpdates(t *testing.T) {
 							Identifier: ffi.VsIdentifier{
 								Addr:           netip.MustParseAddr("10.0.0.1"),
 								Port:           80,
-								TransportProto: ffi.VsTransportProtoTcp,
+								TransportProto: ffi.VsTransportProtoTCP,
 							},
 							Reals: []ffi.RealConfig{
 								{
@@ -946,7 +946,7 @@ func TestWlcUpdates(t *testing.T) {
 							Identifier: ffi.VsIdentifier{
 								Addr:           netip.MustParseAddr("10.0.0.2"),
 								Port:           443,
-								TransportProto: ffi.VsTransportProtoTcp,
+								TransportProto: ffi.VsTransportProtoTCP,
 							},
 							Reals: []ffi.RealConfig{
 								{
@@ -964,7 +964,7 @@ func TestWlcUpdates(t *testing.T) {
 							Identifier: ffi.VsIdentifier{
 								Addr:           netip.MustParseAddr("10.0.0.3"),
 								Port:           8080,
-								TransportProto: ffi.VsTransportProtoTcp,
+								TransportProto: ffi.VsTransportProtoTCP,
 							},
 							Reals: []ffi.RealConfig{
 								{
@@ -996,7 +996,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.GraphReal{
 						{
@@ -1013,7 +1013,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.2"),
 						Port:           443,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.GraphReal{
 						{
@@ -1030,7 +1030,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.3"),
 						Port:           8080,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.GraphReal{
 						{
@@ -1051,7 +1051,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.RealInfo{
 						{
@@ -1064,7 +1064,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.2"),
 						Port:           443,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.RealInfo{
 						{
@@ -1077,7 +1077,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.3"),
 						Port:           8080,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.RealInfo{
 						{
@@ -1142,7 +1142,7 @@ func TestWlcUpdates(t *testing.T) {
 									"2001:db8::1",
 								),
 								Port:           80,
-								TransportProto: ffi.VsTransportProtoTcp,
+								TransportProto: ffi.VsTransportProtoTCP,
 							},
 							Reals: []ffi.RealConfig{
 								{
@@ -1171,7 +1171,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("2001:db8::1"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.GraphReal{
 						{
@@ -1192,7 +1192,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("2001:db8::1"),
 						Port:           80,
-						TransportProto: ffi.VsTransportProtoTcp,
+						TransportProto: ffi.VsTransportProtoTCP,
 					},
 					Reals: []ffi.RealInfo{
 						{
@@ -1229,7 +1229,7 @@ func TestWlcUpdates(t *testing.T) {
 							Identifier: ffi.VsIdentifier{
 								Addr:           netip.MustParseAddr("10.0.0.1"),
 								Port:           53,
-								TransportProto: ffi.VsTransportProtoUdp,
+								TransportProto: ffi.VsTransportProtoUDP,
 							},
 							Reals: []ffi.RealConfig{
 								{
@@ -1258,7 +1258,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           53,
-						TransportProto: ffi.VsTransportProtoUdp,
+						TransportProto: ffi.VsTransportProtoUDP,
 					},
 					Reals: []ffi.GraphReal{
 						{
@@ -1279,7 +1279,7 @@ func TestWlcUpdates(t *testing.T) {
 					Identifier: ffi.VsIdentifier{
 						Addr:           netip.MustParseAddr("10.0.0.1"),
 						Port:           53,
-						TransportProto: ffi.VsTransportProtoUdp,
+						TransportProto: ffi.VsTransportProtoUDP,
 					},
 					Reals: []ffi.RealInfo{
 						{
@@ -1295,7 +1295,7 @@ func TestWlcUpdates(t *testing.T) {
 		require.Len(t, updates, 1)
 		assert.Equal(
 			t,
-			ffi.VsTransportProtoUdp,
+			ffi.VsTransportProtoUDP,
 			updates[0].Identifier.VsIdentifier.TransportProto,
 		)
 	})

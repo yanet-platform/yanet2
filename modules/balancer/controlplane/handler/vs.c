@@ -621,6 +621,7 @@ setup_acl(
 		    )) {
 			// Reuse ACL
 			EQUATE_OFFSET(&vs->acl, &prev_vs->acl);
+			prev_vs->acl_reused = 1;
 
 			// Track reuse in update_info
 			if (update_info != NULL) {
@@ -639,6 +640,7 @@ setup_acl(
 		PUSH_ERROR("failed to allocate filter");
 		return -1;
 	}
+	vs->acl_reused = 0;
 
 	// Get rules and convert relative pointers to absolute for FILTER_INIT
 	struct filter_rule *rules = ADDR_OF(&vs->rules);

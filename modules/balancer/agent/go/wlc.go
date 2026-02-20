@@ -1,5 +1,9 @@
 package balancer
 
+// WLC (Weighted Least Connection) algorithm implementation for dynamic weight adjustment
+// based on active connection counts, calculating effective weights to balance load across
+// real servers according to their capacity and current utilization.
+
 import (
 	"math"
 

@@ -60,7 +60,7 @@ import (
 )
 
 func TestWlc(t *testing.T) {
-	vsIp := netip.MustParseAddr("1.1.1.1")
+	vsIP := netip.MustParseAddr("1.1.1.1")
 	vsPort := uint16(80)
 	real1Ip := netip.MustParseAddr("2.2.2.2")
 	real2Ip := netip.MustParseAddr("3.3.3.3")
@@ -84,7 +84,7 @@ func TestWlc(t *testing.T) {
 				{
 					Id: &balancerpb.VsIdentifier{
 						Addr: &balancerpb.Addr{
-							Bytes: vsIp.AsSlice(),
+							Bytes: vsIP.AsSlice(),
 						},
 						Port:  uint32(vsPort),
 						Proto: balancerpb.TransportProto_TCP,
@@ -251,7 +251,7 @@ func TestWlc(t *testing.T) {
 			packetLayers := utils.MakeTCPPacket(
 				clientIP,
 				1000,
-				vsIp,
+				vsIP,
 				vsPort,
 				&layers.TCP{SYN: true},
 			)
@@ -440,7 +440,7 @@ func TestWlc(t *testing.T) {
 			packetLayers := utils.MakeTCPPacket(
 				clientIP,
 				1000,
-				vsIp,
+				vsIP,
 				vsPort,
 				&layers.TCP{SYN: true},
 			)
@@ -550,7 +550,7 @@ func TestWlc(t *testing.T) {
 				packetLayers := utils.MakeTCPPacket(
 					clientIP,
 					uint16(2000+i),
-					vsIp,
+					vsIP,
 					vsPort,
 					&layers.TCP{SYN: true},
 				)
@@ -613,7 +613,7 @@ func TestWlc(t *testing.T) {
 				packetLayers := utils.MakeTCPPacket(
 					clientIP,
 					uint16(3000+i),
-					vsIp,
+					vsIP,
 					vsPort,
 					&layers.TCP{SYN: true},
 				)
@@ -762,7 +762,7 @@ func TestWlc(t *testing.T) {
 				},
 				Vs: []*balancerpb.VirtualService{
 					// Keep original VS with WLC=true
-					createVS(vsIp, vsPort, true, []*balancerpb.Real{
+					createVS(vsIP, vsPort, true, []*balancerpb.Real{
 						createReal(real1Ip, 1),
 						createReal(real2Ip, 1),
 						createReal(real3Ip, 2),
@@ -832,7 +832,7 @@ func TestWlc(t *testing.T) {
 			for _, vs := range retrievedConfig.PacketHandler.Vs {
 				vsAddr, _ := netip.AddrFromSlice(vs.Id.Addr.Bytes)
 				switch vsAddr {
-				case vsIp:
+				case vsIP:
 					vs1Found = true
 					require.NotNil(t, vs.Flags, "VS1 flags should not be nil")
 					assert.True(t, vs.Flags.Wlc, "VS1 should have WLC=true")
@@ -978,7 +978,7 @@ func TestWlc(t *testing.T) {
 			for _, vs := range thirdConfig.PacketHandler.Vs {
 				vsAddr, _ := netip.AddrFromSlice(vs.Id.Addr.Bytes)
 				switch vsAddr {
-				case vsIp:
+				case vsIP:
 					vs1Found = true
 					require.NotNil(t, vs.Flags, "VS1 flags should not be nil")
 					assert.True(t, vs.Flags.Wlc, "VS1 should have WLC=true")

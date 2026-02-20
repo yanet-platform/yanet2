@@ -1,5 +1,9 @@
 package balancer
 
+// BalancerService implements the gRPC service interface for balancer management,
+// providing RPC methods for configuration updates, real server management, statistics
+// retrieval, and session inspection with automatic manager selection support.
+
 import (
 	"context"
 	"fmt"
@@ -16,7 +20,7 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// gRPC service for controlling balancer
+// BalancerService is agRPC service for controlling balancer
 type BalancerService struct {
 	balancerpb.UnimplementedBalancerServiceServer
 

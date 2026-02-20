@@ -22,7 +22,8 @@
  * Compact ring of backend identifiers for selection.
  */
 struct ring {
-	uint32_t len; // Number of entries in ids
+	// Number of entries in ids
+	uint32_t len;
 
 	// Relative pointer to per-backend identifiers (packet-handler indices)
 	uint32_t *ids;

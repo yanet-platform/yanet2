@@ -1,4 +1,8 @@
+// Package utils provides testing utilities for balancer tests.
 package utils
+
+// This file implements ICMP packet creation and validation functions for testing
+// ICMP echo requests, destination unreachable messages, and broadcast functionality.
 
 import (
 	"encoding/binary"
@@ -12,9 +16,9 @@ import (
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
-// ICMP_BROADCAST_IDENT is the magic value used to mark broadcasted packets
+// ICMPBroadcastIdent is the magic value used to mark broadcasted packets
 // This must match the value in modules/balancer/dataplane/icmp/error/broadcast.h
-const ICMP_BROADCAST_IDENT uint16 = 0x0BDC
+const ICMPBroadcastIdent uint16 = 0x0BDC
 
 // MakeICMPv4EchoRequest creates an ICMPv4 Echo Request packet
 func MakeICMPv4EchoRequest(
@@ -84,7 +88,7 @@ func MakeICMPv6EchoRequest(
 	icmp := &layers.ICMPv6{
 		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
 	}
-	icmp.SetNetworkLayerForChecksum(ip)
+	_ = icmp.SetNetworkLayerForChecksum(ip)
 
 	// ICMPv6 Echo uses the same ID/Seq format as ICMPv4
 	payload := make([]byte, 4+len("ICMP Echo Request Payload"))

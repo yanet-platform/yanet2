@@ -1,5 +1,9 @@
 package utils
 
+// Packet validation utilities for verifying balancer behavior including tunnel structure,
+// ToS/TrafficClass preservation, protocol consistency, service/real matching, weight distribution,
+// and tunnel source address calculation according to balancer specifications.
+
 import (
 	"fmt"
 	"math"
