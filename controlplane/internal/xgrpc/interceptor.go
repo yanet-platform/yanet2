@@ -10,6 +10,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
 )
 
 // ProtoLogValue is an interface for custom proto message serialization in logs.
@@ -33,7 +35,7 @@ type ProtoLogValue interface {
 // - Debug: method entry with sanitized request
 // - Info: successful completion with duration and status
 // - Error: failed calls with duration, status and error message
-func AccessLogInterceptor(log *zap.SugaredLogger) grpc.UnaryServerInterceptor {
+func AccessLogInterceptor(log *zap.Logger) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
 		req any,
@@ -43,14 +45,14 @@ func AccessLogInterceptor(log *zap.SugaredLogger) grpc.UnaryServerInterceptor {
 		now := time.Now()
 
 		if message, ok := req.(proto.Message); ok {
-			if log.Level().Enabled(zap.DebugLevel) {
-				log.Debugw("started gRPC execution",
+			if log.Core().Enabled(zap.DebugLevel) {
+				log.Debug("started gRPC execution",
 					zap.String("method", info.FullMethod),
 					zap.Object("request", &protoMarshaler{message: message}),
 				)
 			}
 		} else {
-			log.Debugw("started gRPC execution",
+			log.Debug("started gRPC execution",
 				zap.String("method", info.FullMethod),
 			)
 		}
@@ -59,19 +61,24 @@ func AccessLogInterceptor(log *zap.SugaredLogger) grpc.UnaryServerInterceptor {
 		duration := time.Since(now)
 		status, _ := status.FromError(err)
 
+		fields := []zap.Field{
+			zap.String("method", info.FullMethod),
+			zap.String("status", status.Code().String()),
+			zap.Duration("duration", duration),
+		}
+
+		if principal := core.FromContext(ctx); principal != nil {
+			fields = append(fields,
+				zap.String("user", principal.User),
+				zap.String("auth_method", principal.AuthMethod),
+			)
+		}
+
 		if err != nil {
-			log.Errorw("failed to execute gRPC",
-				zap.String("method", info.FullMethod),
-				zap.String("status", status.Code().String()),
-				zap.Duration("duration", duration),
-				zap.Error(err),
-			)
+			fields = append(fields, zap.Error(err))
+			log.Error("failed to execute gRPC", fields...)
 		} else {
-			log.Infow("completed gRPC execution",
-				zap.String("method", info.FullMethod),
-				zap.String("status", status.Code().String()),
-				zap.Duration("duration", duration),
-			)
+			log.Info("completed gRPC execution", fields...)
 		}
 
 		return resp, err

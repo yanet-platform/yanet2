@@ -133,7 +133,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize vlan built-in device: %w", err)
 	}
 
-	gateway := gateway.NewGateway(
+	gateway, err := gateway.NewGateway(
 		cfg.Gateway,
 		shm,
 		gateway.WithBuiltInModule(
@@ -169,6 +169,9 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		gateway.WithLog(log),
 		gateway.WithAtomicLogLevel(opts.LogLevel),
 	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gateway: %w", err)
+	}
 
 	return &Director{
 		cfg:     cfg,

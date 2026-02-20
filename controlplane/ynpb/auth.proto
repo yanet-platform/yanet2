@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package ynpb;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
+
+// Auth service provides authentication introspection.
+service AuthService {
+	// IntrospectToken validates an authentication token and returns
+	// information about the authenticated principal.
+	rpc IntrospectToken(IntrospectTokenRequest)
+		returns (IntrospectTokenResponse);
+}
+
+message IntrospectTokenRequest {
+	// Token to introspect. If empty, uses token from request metadata.
+	string token = 1;
+}
+
+message IntrospectTokenResponse {
+	// Principal is the authenticated identity.
+	Principal principal = 1;
+}
+
+message Principal {
+	string user = 1;
+	repeated string groups = 2;
+	string auth_method = 3;
+	int64 auth_time = 4; // Unix timestamp
+	bool is_anonymous = 5;
+}

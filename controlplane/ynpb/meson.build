@@ -10,6 +10,7 @@ ynpb_proto_files = [
     join_paths(ynpb_dir, 'pipeline.proto'),
     join_paths(ynpb_dir, 'device.proto'),
     join_paths(ynpb_dir, 'counters.proto'),
+    join_paths(ynpb_dir, 'auth.proto'),
 ]
 
 # Generate protobuf files
@@ -32,6 +33,8 @@ ynpb_gen = custom_target(
         'device_grpc.pb.go',
         'counters.pb.go',
         'counters_grpc.pb.go',
+        'auth.pb.go',
+        'auth_grpc.pb.go',
     ],
     input: ynpb_proto_files,
     command: [

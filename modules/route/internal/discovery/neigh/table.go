@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"sync"
 
-	"github.com/yanet-platform/yanet2/modules/route/internal/discovery"
+	"github.com/yanet-platform/yanet2/common/go/rcucache"
 )
 
 // NeighSource represents a single source of neighbour entries.
@@ -48,7 +48,7 @@ type NeighTable struct {
 func NewNeighTable() *NeighTable {
 	return &NeighTable{
 		sources: map[string]*NeighSource{},
-		merged:  discovery.NewEmptyCache[netip.Addr, NeighbourEntry](),
+		merged:  rcucache.NewEmptyCache[netip.Addr, NeighbourEntry](),
 	}
 }
 
@@ -85,7 +85,7 @@ func (m *NeighTable) CreateSource(name string, defaultPriority uint32, builtIn b
 	src := &NeighSource{
 		Name:            name,
 		DefaultPriority: defaultPriority,
-		Cache:           discovery.NewEmptyCache[netip.Addr, NeighbourEntry](),
+		Cache:           rcucache.NewEmptyCache[netip.Addr, NeighbourEntry](),
 		BuiltIn:         builtIn,
 	}
 

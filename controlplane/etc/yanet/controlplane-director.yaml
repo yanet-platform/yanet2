@@ -13,6 +13,9 @@ gateway:
   server:
     endpoint: &gateway_endpoint "[::1]:8080"
     http_endpoint: "[::1]:8081"
+  auth:
+    disabled: true
+    permissions_path: /etc/yanet/auth/permissions.yaml
 modules:
   route:
     # MemoryPathPrefix is the path to the shared-memory file that is used to

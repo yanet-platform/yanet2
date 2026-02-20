@@ -8,8 +8,6 @@ use code::{
     counters_service_client::CountersServiceClient, ChainCountersRequest, DeviceCountersRequest,
     FunctionCountersRequest, ModuleCountersRequest, ModulePerfCountersRequest, PipelineCountersRequest,
 };
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use ync::logging;
 
 #[allow(non_snake_case)]
 pub mod code {
@@ -25,10 +23,8 @@ pub mod code {
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
-    /// Output format.
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Be verbose in terms of logging.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -117,7 +113,7 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = CountersService::new(cmd.endpoint).await?;
+    let mut service = CountersService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::Device(cmd) => service.show_device(cmd.device_name).await?,
@@ -163,12 +159,12 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct CountersService {
-    client: CountersServiceClient<Channel>,
+    client: CountersServiceClient<LayeredChannel>,
 }
 
 impl CountersService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let channel = Channel::from_shared(endpoint)?.connect().await?;
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = ync::client::connect(connection).await?;
         let client = CountersServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);

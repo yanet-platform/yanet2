@@ -8,8 +8,11 @@ use code::{
 };
 use ipnet::IpNet;
 use ptree::TreeBuilder;
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use ync::logging;
+use tonic::codec::CompressionEncoding;
+use ync::{
+    client::{ConnectionArgs, LayeredChannel},
+    logging,
+};
 
 use crate::code::ListConfigsRequest;
 
@@ -27,9 +30,8 @@ pub mod code {
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -110,7 +112,7 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = DscpService::new(cmd.endpoint).await?;
+    let mut service = DscpService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -122,13 +124,13 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct DscpService {
-    client: DscpServiceClient<Channel>,
+    client: DscpServiceClient<LayeredChannel>,
 }
 
 impl DscpService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = DscpServiceClient::connect(endpoint).await?;
-        let client = client
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = ync::client::connect(connection).await?;
+        let client = DscpServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })

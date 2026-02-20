@@ -144,13 +144,12 @@ balancer_manager_config(
 static void
 take_balancer_error(struct balancer_handle *balancer, struct diag *diag) {
 	const char *msg = balancer_take_error_msg(balancer);
-	assert(msg != NULL);
-	// if (msg == NULL) {
-	// 	NEW_ERROR("unknown error");
-	// } else {
-	NEW_ERROR("%s", msg);
-	// }
-	diag_fill(diag);
+  if (msg == NULL) {
+    diag_reset(diag);
+  } else {
+  	NEW_ERROR("%s", msg);
+	  diag_fill(diag);
+  }
 }
 
 int

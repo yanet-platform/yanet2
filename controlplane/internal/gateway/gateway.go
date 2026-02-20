@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
@@ -87,13 +88,21 @@ type Gateway struct {
 }
 
 // NewGateway creates a new Gateway API.
-func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *Gateway {
+func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*Gateway, error) {
 	opts := newGatewayOptions()
 	for _, o := range options {
 		o(opts)
 	}
 	log := opts.Log
 	registry := NewBackendRegistry()
+
+	authManager, err := auth.NewManager(&cfg.Auth, auth.WithLog(log.Desugar()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create auth manager: %w", err)
+	}
+
+	// Create AuthService for authentication introspection.
+	authService := NewAuthService(authManager)
 
 	director := func(ctx context.Context, fullMethodName string) (proxy.Mode, []proxy.Backend, error) {
 		service, _, err := xgrpc.ParseFullMethod(fullMethodName)
@@ -112,7 +121,13 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *G
 	}
 
 	server := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(xgrpc.AccessLogInterceptor(log)),
+		grpc.ChainUnaryInterceptor(
+			auth.UnaryServerInterceptor(authManager, log.Desugar()),
+			xgrpc.AccessLogInterceptor(log.Desugar()),
+		),
+		grpc.ChainStreamInterceptor(
+			auth.StreamServerInterceptor(authManager, log.Desugar()),
+		),
 		grpc.MaxRecvMsgSize(1024*1024*256),
 		grpc.MaxSendMsgSize(1024*1024*256),
 		grpc.ForceServerCodecV2(proxy.Codec()),
@@ -146,6 +161,9 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *G
 	ynpb.RegisterCountersServiceServer(server, countersService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", countersService)))
 
+	ynpb.RegisterAuthServiceServer(server, authService)
+	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
+
 	// Register built-in services in the registry for HTTP gateway access
 	registerBuiltInServices(registry, cfg.Server.Endpoint, log)
 
@@ -164,7 +182,7 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) *G
 		builtInModules: builtInModules,
 		registry:       registry,
 		log:            log,
-	}
+	}, nil
 }
 
 // Close closes the gateway API.
@@ -283,6 +301,7 @@ func registerBuiltInServices(registry *BackendRegistry, endpoint string, log *za
 		"ynpb.PipelineService",
 		"ynpb.FunctionService",
 		"ynpb.CountersService",
+		"ynpb.Auth",
 	}
 
 	for _, serviceName := range builtInServices {

@@ -14,7 +14,7 @@ use tabled::{
     },
     Table, Tabled,
 };
-use tonic::{codec::CompressionEncoding, transport::Channel};
+use tonic::codec::CompressionEncoding;
 use yanet_cli_route::{
     routepb::{
         route_service_client::RouteServiceClient, DeleteConfigRequest, DeleteRouteRequest, FlushRoutesRequest,
@@ -22,7 +22,10 @@ use yanet_cli_route::{
     },
     FibDisplayEntry, RouteEntry,
 };
-use ync::logging;
+use ync::{
+    client::{ConnectionArgs, LayeredChannel},
+    logging,
+};
 
 /// Route module.
 #[derive(Debug, Clone, Parser)]
@@ -31,9 +34,8 @@ use ync::logging;
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Be verbose in terms of logging.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -185,7 +187,7 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = RouteService::new(cmd.endpoint).await?;
+    let mut service = RouteService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -202,13 +204,13 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct RouteService {
-    client: RouteServiceClient<Channel>,
+    client: RouteServiceClient<LayeredChannel>,
 }
 
 impl RouteService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = RouteServiceClient::connect(endpoint).await?;
-        let client = client
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = ync::client::connect(connection).await?;
+        let client = RouteServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })

@@ -1,0 +1,9 @@
+permissions:
+  groups:
+    - name: admins
+      permissions:
+        - "/*/*"
+  users:
+    - username: anonymous
+      permissions:
+        - "/ynpb.Gateway/Register"

@@ -10,8 +10,11 @@ use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use ipnetwork::IpNetwork;
 use serde::{Deserialize, Serialize};
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use ync::logging;
+use tonic::codec::CompressionEncoding;
+use ync::{
+    client::{ConnectionArgs, LayeredChannel},
+    logging,
+};
 
 mod args;
 
@@ -36,9 +39,8 @@ pub mod aclpb {
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -273,13 +275,13 @@ impl ACLConfig {
 }
 
 pub struct ACLService {
-    client: AclServiceClient<Channel>,
+    client: AclServiceClient<LayeredChannel>,
 }
 
 impl ACLService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = AclServiceClient::connect(endpoint).await?;
-        let client = client
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = ync::client::connect(connection).await?;
+        let client = AclServiceClient::new(channel)
             .max_decoding_message_size(256 * 1024 * 1024)
             .max_encoding_message_size(256 * 1024 * 1024)
             .send_compressed(CompressionEncoding::Gzip)
@@ -319,7 +321,7 @@ impl ACLService {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = ACLService::new(cmd.endpoint).await?;
+    let mut service = ACLService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,

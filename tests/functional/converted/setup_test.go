@@ -124,6 +124,10 @@ dataplane:
 logging:
   level: debug
 
+gateway:
+  auth:
+    disabled: true
+
 modules:
   route:
     link_map:

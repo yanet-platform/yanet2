@@ -2,7 +2,8 @@
 
 use std::error::Error;
 
-use tonic::{codec::CompressionEncoding, transport::Channel};
+use tonic::codec::CompressionEncoding;
+use ync::client::{ConnectionArgs, LayeredChannel};
 
 use crate::{
     cmd::*,
@@ -26,14 +27,14 @@ macro_rules! info {
 ////////////////////////////////////////////////////////////////////////////////
 
 pub struct BalancerService {
-    client: BalancerServiceClient<Channel>,
+    client: BalancerServiceClient<LayeredChannel>,
 }
 
 impl BalancerService {
     /// Connect to the gRPC endpoint
-    pub async fn connect(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = BalancerServiceClient::connect(endpoint).await?;
-        let client = client
+    pub async fn connect(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = ync::client::connect(connection).await?;
+        let client = BalancerServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })

@@ -9,8 +9,11 @@ use forwardpb::{
 };
 use ipnetwork::IpNetwork;
 use serde::{Deserialize, Serialize};
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use ync::logging;
+use tonic::codec::CompressionEncoding;
+use ync::{
+    client::{ConnectionArgs, LayeredChannel},
+    logging,
+};
 
 #[allow(non_snake_case)]
 pub mod forwardpb {
@@ -33,9 +36,8 @@ pub mod filterpb {
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -216,13 +218,13 @@ pub fn print_config_json(response: &ShowConfigResponse) -> Result<(), Box<dyn Er
 }
 
 pub struct ForwardService {
-    client: ForwardServiceClient<Channel>,
+    client: ForwardServiceClient<LayeredChannel>,
 }
 
 impl ForwardService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = ForwardServiceClient::connect(endpoint).await?;
-        let client = client
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = ync::client::connect(connection).await?;
+        let client = ForwardServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
@@ -270,7 +272,7 @@ impl ForwardService {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = ForwardService::new(cmd.endpoint).await?;
+    let mut service = ForwardService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,

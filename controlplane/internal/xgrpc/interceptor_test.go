@@ -69,7 +69,7 @@ func TestAccessLogInterceptor_ProtoLogValue(t *testing.T) {
 				}),
 				zapcore.AddSync(buf),
 				zap.DebugLevel,
-			)).Sugar()
+			))
 
 			interceptor := AccessLogInterceptor(logger)
 			info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Method"}

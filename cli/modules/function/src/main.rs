@@ -9,8 +9,11 @@ use code::{
     UpdateFunctionRequest,
 };
 use commonpb::{FunctionId, ModuleId};
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use ync::logging;
+use tonic::codec::CompressionEncoding;
+use ync::{
+    client::{ConnectionArgs, LayeredChannel},
+    logging,
+};
 
 #[allow(non_snake_case)]
 pub mod commonpb {
@@ -29,9 +32,8 @@ pub mod code {
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Be verbose in terms of logging.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -76,7 +78,7 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = FunctionService::new(cmd.endpoint).await?;
+    let mut service = FunctionService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::Update(cmd) => service.update_functions(cmd).await,
@@ -85,12 +87,12 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct FunctionService {
-    client: FunctionServiceClient<Channel>,
+    client: FunctionServiceClient<LayeredChannel>,
 }
 
 impl FunctionService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let channel = Channel::from_shared(endpoint)?.connect().await?;
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = ync::client::connect(connection).await?;
         let client = FunctionServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
