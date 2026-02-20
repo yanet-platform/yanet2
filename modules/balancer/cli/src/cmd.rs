@@ -96,6 +96,9 @@ pub struct UpdateCmd {
     /// Path to the YAML configuration file
     #[arg(long, short = 'c')]
     pub config: String,
+
+    #[clap(flatten)]
+    pub format: FormatFlags,
 }
 
 ////////////////////////////////////////////////////////////////////////////////

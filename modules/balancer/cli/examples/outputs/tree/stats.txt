@@ -9,10 +9,11 @@ Balancer Statistics
    │  ├─ Common
    │  │  ├─ Incoming Packets: 1,234,567
    │  │  ├─ Incoming Bytes: 1.2 GB
-   │  │  ├─ Outgoing Packets: 1,234,000
-   │  │  ├─ Outgoing Bytes: 1.1 GB
+   │  │  ├─ Unexpected Network Proto: 0
    │  │  ├─ Decap Successful: 50,000
-   │  │  └─ Decap Failed: 123
+   │  │  ├─ Decap Failed: 123
+   │  │  ├─ Outgoing Packets: 1,234,000
+   │  │  └─ Outgoing Bytes: 1.1 GB
    │  ├─ L4
    │  │  ├─ Incoming Packets: 1,200,000
    │  │  ├─ Outgoing Packets: 1,199,500
@@ -23,16 +24,30 @@ Balancer Statistics
    │  │  ├─ Incoming Packets: 34,567
    │  │  ├─ Src Not Allowed: 1,215
    │  │  ├─ Echo Responses: 30,000
+   │  │  ├─ Payload Too Short IP: 12
+   │  │  ├─ Unmatching Src From Original: 8
+   │  │  ├─ Payload Too Short Port: 5
+   │  │  ├─ Unexpected Transport: 3
    │  │  ├─ Unrecognized VS: 2
-   │  │  ├─ Forwarded: 4,500
-   │  │  └─ Broadcasted: 67
+   │  │  ├─ Forwarded Packets: 4,500
+   │  │  ├─ Broadcasted Packets: 67
+   │  │  ├─ Packet Clones Sent: 150
+   │  │  ├─ Packet Clones Received: 145
+   │  │  └─ Packet Clone Failures: 5
    │  └─ ICMPv6
    │     ├─ Incoming Packets: 1,234
    │     ├─ Src Not Allowed: 1,215
    │     ├─ Echo Responses: 1,200
+   │     ├─ Payload Too Short IP: 2
+   │     ├─ Unmatching Src From Original: 1
+   │     ├─ Payload Too Short Port: 1
+   │     ├─ Unexpected Transport: 0
    │     ├─ Unrecognized VS: 0
-   │     ├─ Forwarded: 34
-   │     └─ Broadcasted: 2
+   │     ├─ Forwarded Packets: 34
+   │     ├─ Broadcasted Packets: 2
+   │     ├─ Packet Clones Sent: 10
+   │     ├─ Packet Clones Received: 9
+   │     └─ Packet Clone Failures: 1
    └─ Virtual Services (2)
       ├─ [0]
       │  ├─ VS: 192.0.2.1:80/TCP

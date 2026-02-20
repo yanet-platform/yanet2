@@ -88,9 +88,9 @@ func (a *BalancerAgent) NewManager(
 		if cErr != nil {
 			errMsg := C.GoString(cErr)
 			C.free(unsafe.Pointer(cErr))
-			return nil, fmt.Errorf("failed to create manager: %s", errMsg)
+			return nil, fmt.Errorf("%s", errMsg)
 		}
-		return nil, fmt.Errorf("failed to create manager")
+		return nil, fmt.Errorf("unknown error")
 	}
 
 	return &BalancerManager{handle: handle}, nil

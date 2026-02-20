@@ -320,6 +320,18 @@ pub struct GraphRealJson {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// UpdateInfo JSON structures
+////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Serialize)]
+pub struct UpdateInfoJson {
+    pub created: bool,
+    pub vs_ipv4_matcher_reused: bool,
+    pub vs_ipv6_matcher_reused: bool,
+    pub vs_acl_reuses: Vec<VsIdentifierJson>,
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Conversion functions
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -657,5 +669,18 @@ pub fn convert_show_graph(response: &balancerpb::ShowGraphResponse) -> ShowGraph
                 })
                 .collect(),
         }),
+    }
+}
+
+pub fn convert_update_info(info: &balancerpb::UpdateInfo) -> UpdateInfoJson {
+    UpdateInfoJson {
+        created: info.created,
+        vs_ipv4_matcher_reused: info.vs_ipv4_matcher_reused,
+        vs_ipv6_matcher_reused: info.vs_ipv6_matcher_reused,
+        vs_acl_reuses: info
+            .vs_acl_reuses
+            .iter()
+            .filter_map(|vs_id| convert_vs_identifier(Some(vs_id)))
+            .collect(),
     }
 }

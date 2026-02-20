@@ -6,36 +6,51 @@
 ╚════════════════════════════════════════════════════════╝
 
 Module:
-╭──────────┬──────────────────┬───────────╮
-│ Category │ Metric           │ Value     │
-├──────────┼──────────────────┼───────────┤
-│ Common   │ Incoming Pkts    │ 1,234,567 │
-│          │ Incoming Bytes   │ 1.2 GB    │
-│          │ Outgoing Pkts    │ 1,234,000 │
-│          │ Outgoing Bytes   │ 1.1 GB    │
-│          │ Decap Success    │ 50,000    │
-│          │ Decap Failed     │ 123       │
-│          │                  │           │
-│ L4       │ Incoming Pkts    │ 1,200,000 │
-│          │ Outgoing Pkts    │ 1,199,500 │
-│          │ Select VS Fail   │ 100       │
-│          │ Select Real Fail │ 50        │
-│          │ Invalid Pkts     │ 350       │
-│          │                  │           │
-│ ICMPv4   │ Incoming Pkts    │ 34,567    │
-│          │ Src Not Allowed  │ 1,215     │
-│          │ Echo Responses   │ 30,000    │
-│          │ Unrecognized VS  │ 2         │
-│          │ Forwarded        │ 4,500     │
-│          │ Broadcasted      │ 67        │
-│          │                  │           │
-│ ICMPv6   │ Incoming Pkts    │ 1,234     │
-│          │ Src Not Allowed  │ 1,215     │
-│          │ Echo Responses   │ 1,200     │
-│          │ Unrecognized VS  │ 0         │
-│          │ Forwarded        │ 34        │
-│          │ Broadcasted      │ 2         │
-╰──────────┴──────────────────┴───────────╯
+╭──────────┬────────────────────┬───────────╮
+│ Category │ Metric             │ Value     │
+├──────────┼────────────────────┼───────────┤
+│ Common   │ Incoming Pkts      │ 1,234,567 │
+│          │ Incoming Bytes     │ 1.2 GB    │
+│          │ Unexpected Proto   │ 0         │
+│          │ Decap Success      │ 50,000    │
+│          │ Decap Failed       │ 123       │
+│          │ Outgoing Pkts      │ 1,234,000 │
+│          │ Outgoing Bytes     │ 1.1 GB    │
+│          │                    │           │
+│ L4       │ Incoming Pkts      │ 1,200,000 │
+│          │ Outgoing Pkts      │ 1,199,500 │
+│          │ Select VS Fail     │ 100       │
+│          │ Select Real Fail   │ 50        │
+│          │ Invalid Pkts       │ 350       │
+│          │                    │           │
+│ ICMPv4   │ Incoming Pkts      │ 34,567    │
+│          │ Src Not Allowed    │ 1,215     │
+│          │ Echo Responses     │ 30,000    │
+│          │ Payload Short IP   │ 12        │
+│          │ Unmatch Src Orig   │ 8         │
+│          │ Payload Short Port │ 5         │
+│          │ Unexpected Trans   │ 3         │
+│          │ Unrecognized VS    │ 2         │
+│          │ Forwarded Pkts     │ 4,500     │
+│          │ Broadcasted Pkts   │ 67        │
+│          │ Clones Sent        │ 150       │
+│          │ Clones Received    │ 145       │
+│          │ Clone Failures     │ 5         │
+│          │                    │           │
+│ ICMPv6   │ Incoming Pkts      │ 1,234     │
+│          │ Src Not Allowed    │ 1,215     │
+│          │ Echo Responses     │ 1,200     │
+│          │ Payload Short IP   │ 2         │
+│          │ Unmatch Src Orig   │ 1         │
+│          │ Payload Short Port │ 1         │
+│          │ Unexpected Trans   │ 0         │
+│          │ Unrecognized VS    │ 0         │
+│          │ Forwarded Pkts     │ 34        │
+│          │ Broadcasted Pkts   │ 2         │
+│          │ Clones Sent        │ 10        │
+│          │ Clones Received    │ 9         │
+│          │ Clone Failures     │ 1         │
+╰──────────┴────────────────────┴───────────╯
 
 VS 192.0.2.1:80/TCP:
   Incoming Packets: 800,000

@@ -15,6 +15,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
+	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
 	"go.uber.org/zap"
 )
 
@@ -132,8 +133,11 @@ func (m *BalancerService) UpdateConfig(
 		}
 		m.log.Infow("balancer config updated", "name", name)
 		return &balancerpb.UpdateConfigResponse{
-			Name:       req.Name,
-			UpdateInfo: ConvertUpdateInfoToProto(updateInfo),
+			Name: req.Name,
+			UpdateInfo: ConvertUpdateInfoToProto(
+				updateInfo,
+				false,
+			), // created=false for updates
 		}, nil
 	} else {
 		m.log.Infow("creating new balancer", "name", name)
@@ -144,8 +148,12 @@ func (m *BalancerService) UpdateConfig(
 		m.log.Infow("balancer created", "name", name)
 		return &balancerpb.UpdateConfigResponse{
 			Name: req.Name,
-			// No update info for new balancer creation
-			UpdateInfo: nil,
+			// Return update info with created=true for new balancer
+			UpdateInfo: ConvertUpdateInfoToProto(&ffi.UpdateInfo{
+				VsIpv4MatcherReused: false,
+				VsIpv6MatcherReused: false,
+				ACLReusedVs:         []ffi.VsIdentifier{},
+			}, true), // created=true for new balancer
 		}, nil
 	}
 }

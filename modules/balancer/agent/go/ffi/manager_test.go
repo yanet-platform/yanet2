@@ -26,7 +26,7 @@ func TestManager(t *testing.T) {
 		Workers:      1,
 		Devices: []mock.YanetMockDeviceConfig{
 			{
-				Id:   0,
+				ID:   0,
 				Name: deviceName,
 			},
 		},

@@ -1340,7 +1340,7 @@ func ConvertProtoToFFIPacketHandlerRef(
 
 // ConvertUpdateInfoToProto converts FFI update info to protobuf
 func ConvertUpdateInfoToProto(
-	info *ffi.UpdateInfo,
+	info *ffi.UpdateInfo, created bool,
 ) *balancerpb.UpdateInfo {
 	if info == nil {
 		return nil
@@ -1359,9 +1359,10 @@ func ConvertUpdateInfoToProto(
 	}
 
 	return &balancerpb.UpdateInfo{
+		Created:             created,
 		VsIpv4MatcherReused: info.VsIpv4MatcherReused,
 		VsIpv6MatcherReused: info.VsIpv6MatcherReused,
-		VsAclReused:         vsIdentifiers,
+		VsAclReuses:         vsIdentifiers,
 	}
 }
 

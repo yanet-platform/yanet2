@@ -637,7 +637,7 @@ setup_acl(
 	// Need to create new ACL
 	vs->acl = memory_balloc(mctx, sizeof(struct filter));
 	if (vs->acl == NULL) {
-		PUSH_ERROR("failed to allocate filter");
+		PUSH_ERROR("no memory");
 		return -1;
 	}
 	vs->acl_reused = 0;
@@ -674,7 +674,7 @@ setup_acl(
 	}
 
 	if (res != 0) {
-		NEW_ERROR("failed to initialize filter");
+		NEW_ERROR("no memory");
 		return -1;
 	}
 

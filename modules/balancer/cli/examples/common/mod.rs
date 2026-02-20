@@ -564,3 +564,34 @@ pub fn create_sessions_info_example() -> balancerpb::ShowSessionsResponse {
         ],
     }
 }
+
+#[allow(dead_code)]
+pub fn create_update_info_created_example() -> balancerpb::UpdateInfo {
+    balancerpb::UpdateInfo {
+        created: true,
+        vs_ipv4_matcher_reused: false,
+        vs_ipv6_matcher_reused: false,
+        vs_acl_reuses: vec![],
+    }
+}
+
+#[allow(dead_code)]
+pub fn create_update_info_updated_example() -> balancerpb::UpdateInfo {
+    balancerpb::UpdateInfo {
+        created: false,
+        vs_ipv4_matcher_reused: true,
+        vs_ipv6_matcher_reused: false,
+        vs_acl_reuses: vec![
+            balancerpb::VsIdentifier {
+                addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 1] }),
+                port: 80,
+                proto: balancerpb::TransportProto::Tcp as i32,
+            },
+            balancerpb::VsIdentifier {
+                addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 2] }),
+                port: 443,
+                proto: balancerpb::TransportProto::Tcp as i32,
+            },
+        ],
+    }
+}

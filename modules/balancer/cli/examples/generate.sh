@@ -41,6 +41,31 @@ for example in "${EXAMPLES[@]}"; do
     cargo run --example "$example" json 2>&1 | grep -v "Compiling\|Finished\|Running" > "outputs/json/${example}.json"
 done
 
+# Generate update examples (has two scenarios: created and updated)
+echo -e "${GREEN}Generating outputs for update...${NC}"
+
+# Update - created scenario
+echo "  - created scenario"
+for format in table tree json; do
+    ext="txt"
+    if [ "$format" = "json" ]; then
+        ext="json"
+    fi
+    echo "    - $format format"
+    cargo run --example update created "$format" 2>&1 | grep -v "Compiling\|Finished\|Running" > "outputs/$format/update_created.$ext"
+done
+
+# Update - updated scenario
+echo "  - updated scenario"
+for format in table tree json; do
+    ext="txt"
+    if [ "$format" = "json" ]; then
+        ext="json"
+    fi
+    echo "    - $format format"
+    cargo run --example update updated "$format" 2>&1 | grep -v "Compiling\|Finished\|Running" > "outputs/$format/update_updated.$ext"
+done
+
 echo -e "${BLUE}Done! Example outputs saved to:${NC}"
 echo "  - outputs/table/"
 echo "  - outputs/tree/"

@@ -38,7 +38,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 			Workers:      1,
 			Devices: []mock.YanetMockDeviceConfig{
 				{
-					Id:   0,
+					ID:   0,
 					Name: defaultDeviceName,
 				},
 			},

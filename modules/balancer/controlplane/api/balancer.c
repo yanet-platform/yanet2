@@ -105,7 +105,7 @@ balancer_create(
 		agent, name, &config->handler, &balancer->state, NULL, NULL
 	);
 	if (handler == NULL) {
-		PUSH_ERROR("failed to setup packet handler");
+		PUSH_ERROR("packet handler");
 		balancer_state_free(&balancer->state);
 		memory_bfree(mctx, balancer, sizeof(struct balancer));
 		goto error;

@@ -5,9 +5,8 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{
-    counters_service_client::CountersServiceClient, ModulePerfCountersRequest,
-    ChainCountersRequest, DeviceCountersRequest, FunctionCountersRequest, ModuleCountersRequest,
-    PipelineCountersRequest,
+    counters_service_client::CountersServiceClient, ChainCountersRequest, DeviceCountersRequest,
+    FunctionCountersRequest, ModuleCountersRequest, ModulePerfCountersRequest, PipelineCountersRequest,
 };
 use tonic::{codec::CompressionEncoding, transport::Channel};
 use ync::logging;

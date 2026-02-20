@@ -387,7 +387,7 @@ packet_handler_setup(
 		    prev_handler,
 		    update_info
 	    ) != 0) {
-		PUSH_ERROR("failed to setup virtual services");
+		PUSH_ERROR("virtual services");
 		goto free_decap;
 	}
 

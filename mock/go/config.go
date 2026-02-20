@@ -7,7 +7,7 @@ import (
 )
 
 type YanetMockDeviceConfig struct {
-	Id   uint64
+	ID   uint64
 	Name string
 }
 
