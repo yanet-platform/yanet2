@@ -139,7 +139,7 @@ message UpdateConfigRequest {
 // Contains the balancer name and metadata about filter reuse during the update.
 message UpdateConfigResponse {
 	string name = 1;
-	
+
 	// Metadata about filter reuse during configuration update.
 	//
 	// Provides visibility into which filters were reused (not recompiled)
@@ -155,9 +155,11 @@ message UpdateConfigResponse {
 // can be expensive, so reusing filters when possible improves update
 // performance.
 message UpdateInfo {
-	// Whether the configuration was newly created (true) or updated (false).
+	// Whether the configuration was newly created (true) or updated
+	// (false).
 	//
-	// When true: This is a new balancer configuration that was just created.
+	// When true: This is a new balancer configuration that was just
+	// created.
 	//            Filter reuse fields will be empty/false since there was no
 	//            previous configuration to reuse from.
 	// When false: This is an update to an existing configuration.
@@ -175,7 +177,7 @@ message UpdateInfo {
 	//
 	// Note: Always false when created=true (no previous config to reuse).
 	bool vs_ipv4_matcher_reused = 2;
-	
+
 	// Whether the IPv6 virtual service matcher was reused.
 	//
 	// true: IPv6 VS matcher was reused (not recompiled)
@@ -183,7 +185,7 @@ message UpdateInfo {
 	//
 	// Note: Always false when created=true (no previous config to reuse).
 	bool vs_ipv6_matcher_reused = 3;
-	
+
 	// List of virtual services that reused their ACL filters.
 	//
 	// ACL (Access Control List) filters enforce allowed_src rules
