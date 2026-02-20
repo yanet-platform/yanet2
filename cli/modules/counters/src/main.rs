@@ -10,7 +10,10 @@ use code::{
 };
 use colored::Colorize;
 use tonic::codec::CompressionEncoding;
-use ync::{client::{ConnectionArgs, LayeredChannel}, logging};
+use ync::{
+    client::{ConnectionArgs, LayeredChannel},
+    logging,
+};
 
 #[allow(non_snake_case)]
 pub mod code {
@@ -176,18 +179,17 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
             }
             let module_type = parts[0].to_string();
             let module_name = parts[1].to_string();
-            
-            service
-                .show_perf(
-                    cmd.device,
-                    cmd.pipeline,
-                    cmd.function,
-                    cmd.chain,
-                    module_type,
-                    module_name,
-                    cmd.json,
-                )
-                .await?
+
+            let request = PerfCountersRequest {
+                device: cmd.device,
+                pipeline: cmd.pipeline,
+                function: cmd.function,
+                chain: cmd.chain,
+                module_type,
+                module_name,
+            };
+
+            service.show_perf(request, cmd.json).await?
         }
     }
 
@@ -281,26 +283,9 @@ impl CountersService {
         Ok(())
     }
 
-    pub async fn show_perf(
-        &mut self,
-        device_name: String,
-        pipeline_name: String,
-        function_name: String,
-        chain_name: String,
-        module_type: String,
-        module_name: String,
-        json: bool,
-    ) -> Result<(), Box<dyn Error>> {
-        let request = PerfCountersRequest {
-            device: device_name,
-            pipeline: pipeline_name,
-            function: function_name,
-            chain: chain_name,
-            module_type,
-            module_name,
-        };
+    pub async fn show_perf(&mut self, request: PerfCountersRequest, json: bool) -> Result<(), Box<dyn Error>> {
         let response = self.client.perf(request).await?;
-        
+
         if json {
             println!("{}", serde_json::to_string(response.get_ref())?);
         } else {
@@ -313,50 +298,74 @@ impl CountersService {
 /// Format and display performance counters with beautiful histogram output
 fn format_perf_counters(response: &code::PerfCountersResponse) {
     // Header
-    println!("{}", "╔══════════════════════════════════════════════════════════════════╗".bright_cyan());
-    println!("{}", "║                    Performance Counters                          ║".bright_cyan());
-    println!("{}", "╠══════════════════════════════════════════════════════════════════╣".bright_cyan());
-    
-    // Summary stats
-    let tx_gb = response.tx_bytes as f64 / 1_073_741_824.0;
-    let rx_gb = response.rx_bytes as f64 / 1_073_741_824.0;
     println!(
-        "{}  TX: {} packets ({:.2} GB)  {}  RX: {} packets ({:.2} GB)",
+        "{}",
+        "╔══════════════════════════════════════════════════════════════════╗".bright_cyan()
+    );
+    println!(
+        "{}",
+        "║                    Performance Counters                          ║".bright_cyan()
+    );
+    println!(
+        "{}",
+        "╠══════════════════════════════════════════════════════════════════╣".bright_cyan()
+    );
+
+    // Summary stats
+    let tx_bytes_str = format_bytes(response.tx_bytes);
+    let rx_bytes_str = format_bytes(response.rx_bytes);
+    println!(
+        "{}  TX: {} packets ({})  {}  RX: {} packets ({})",
         "║".bright_cyan(),
         format_number(response.tx).bright_green(),
-        tx_gb,
+        tx_bytes_str,
         "│".bright_black(),
         format_number(response.rx).bright_green(),
-        rx_gb
+        rx_bytes_str
     );
-    println!("{}", "╚══════════════════════════════════════════════════════════════════╝".bright_cyan());
+    println!(
+        "{}",
+        "╚══════════════════════════════════════════════════════════════════╝".bright_cyan()
+    );
     println!();
-    
+
     // Process each batch size counter
-    for counter in &response.counters {
-        format_batch_counter(counter);
+    for (i, counter) in response.counters.iter().enumerate() {
+        let next_min_batch = response.counters.get(i + 1).map(|c| c.min_batch_size);
+        format_batch_counter(counter, next_min_batch);
         println!();
     }
 }
 
 /// Format a single batch size counter with histogram
-fn format_batch_counter(counter: &code::PerfCounter) {
-    let batch_range = match counter.min_batch_size {
-        1 => "1 packet".to_string(),
-        2 => "2-3 packets".to_string(),
-        4 => "4-7 packets".to_string(),
-        8 => "8-15 packets".to_string(),
-        16 => "16-31 packets".to_string(),
-        32 => "32+ packets".to_string(),
-        _ => format!("{}+ packets", counter.min_batch_size),
+fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>) {
+    // Calculate the batch range dynamically from next counter's min_batch_size
+    let batch_range = if let Some(next) = next_min_batch {
+        let max_batch_size = next - 1;
+        if counter.min_batch_size == max_batch_size {
+            if counter.min_batch_size == 1 {
+                "1 packet".to_string()
+            } else {
+                format!("{} packets", counter.min_batch_size)
+            }
+        } else {
+            format!("{}-{} packets", counter.min_batch_size, max_batch_size)
+        }
+    } else {
+        format!("{}+ packets", counter.min_batch_size)
     };
-    
-    println!("{} Batch Size: {} {}", "┌─".bright_black(), batch_range.bright_yellow(), "─".repeat(50).bright_black());
-    
+
+    println!(
+        "{} Batch Size: {} {}",
+        "┌─".bright_black(),
+        batch_range.bright_yellow(),
+        "─".repeat(50).bright_black()
+    );
+
     // Calculate statistics
     let total_batches: u64 = counter.latencies.iter().map(|l| l.batches).sum();
     let total_packets = counter.packets;
-    
+
     // Average latency per packet and per batch
     let avg_latency_per_packet = if total_packets > 0 {
         counter.summary_latency / total_packets
@@ -368,7 +377,7 @@ fn format_batch_counter(counter: &code::PerfCounter) {
     } else {
         0
     };
-    
+
     // Line 1: Total packets and batches
     println!(
         "{}  Total: {} packets ({} batches)",
@@ -376,23 +385,51 @@ fn format_batch_counter(counter: &code::PerfCounter) {
         format_number(total_packets).bright_white(),
         format_number(total_batches).bright_white()
     );
-    
+
     // Line 2: Avg latency per packet/batch and total latency
     println!(
-        "{}  Avg Latency: {}/pkt ({}/batch) {} Total: {}",
+        "{}  Avg Latency: {} / packet ({} / batch) {} Total: {}",
         "│".bright_black(),
         format_latency(avg_latency_per_packet).bright_cyan(),
         format_latency(avg_latency_per_batch).bright_cyan(),
         "│".bright_black(),
         format_latency(counter.summary_latency).bright_cyan()
     );
-    
+
     if !counter.latencies.is_empty() {
-        println!("{}", "├────────────────────────────────────────────────────────────────────┤".bright_black());
-        
-        // Find max batches for scaling
+        println!(
+            "{}",
+            "├────────────────────────────────────────────────────────────────────┤".bright_black()
+        );
+
+        // Find max batches for scaling and max range width for alignment
         let max_batches = counter.latencies.iter().map(|l| l.batches).max().unwrap_or(1);
-        
+        let max_range_width = counter
+            .latencies
+            .iter()
+            .enumerate()
+            .map(|(i, latency)| {
+                let next_latency = counter.latencies.get(i + 1).map(|l| l.min_latency);
+                format_latency_range(latency.min_latency, next_latency).len()
+            })
+            .max()
+            .unwrap_or(0);
+
+        // Find max count width for right column alignment
+        let max_count_width = counter
+            .latencies
+            .iter()
+            .map(|latency| {
+                let percentage = if total_batches > 0 {
+                    (latency.batches as f64 / total_batches as f64) * 100.0
+                } else {
+                    0.0
+                };
+                format!("{} ({:.1}%)", format_number(latency.batches), percentage).len()
+            })
+            .max()
+            .unwrap_or(0);
+
         // Display histogram
         for (i, latency) in counter.latencies.iter().enumerate() {
             let next_latency = counter.latencies.get(i + 1).map(|l| l.min_latency);
@@ -402,78 +439,116 @@ fn format_batch_counter(counter: &code::PerfCounter) {
             } else {
                 0.0
             };
-            
+
             // Calculate bar length (max 40 characters)
             let bar_length = ((latency.batches as f64 / max_batches as f64) * 40.0) as usize;
             let bar = "█".repeat(bar_length);
-            
+
+            let count_str = format!("{} ({:.1}%)", format_number(latency.batches), percentage);
+
             println!(
-                "{} {:>12} {} {:<40} {} {} ({:.1}%)",
+                "{} {:>range_width$} {} {:<40} {} {:<count_width$}",
                 "│".bright_black(),
                 range_str.bright_white(),
                 "│".bright_black(),
                 bar.bright_green(),
                 "│".bright_black(),
-                format_number(latency.batches).bright_white(),
-                percentage
+                count_str.bright_white(),
+                range_width = max_range_width,
+                count_width = max_count_width
             );
         }
-        
+
         // Calculate percentiles
         if total_batches > 0 {
             let (p50, p90, p99, max) = calculate_percentiles(&counter.latencies, total_batches);
-            println!("{}", "├────────────────────────────────────────────────────────────────────┤".bright_black());
+            println!(
+                "{}",
+                "├────────────────────────────────────────────────────────────────────┤".bright_black()
+            );
+
+            let p50_str = if p50 == 0 {
+                "∞".to_string()
+            } else {
+                format_latency(p50)
+            };
+            let p90_str = if p90 == 0 {
+                "∞".to_string()
+            } else {
+                format_latency(p90)
+            };
+            let p99_str = if p99 == 0 {
+                "∞".to_string()
+            } else {
+                format_latency(p99)
+            };
+            let max_str = if max == 0 {
+                "∞".to_string()
+            } else {
+                format_latency(max)
+            };
+
             println!(
                 "{} p50: {} {} p90: {} {} p99: {} {} max: {}",
                 "│".bright_black(),
-                format_latency(p50).bright_cyan(),
+                p50_str.bright_cyan(),
                 "│".bright_black(),
-                format_latency(p90).bright_yellow(),
+                p90_str.bright_yellow(),
                 "│".bright_black(),
-                format_latency(p99).bright_red(),
+                p99_str.bright_red(),
                 "│".bright_black(),
-                format_latency(max).bright_magenta()
+                max_str.bright_magenta()
             );
         }
     }
-    
-    println!("{}", "└────────────────────────────────────────────────────────────────────┘".bright_black());
+
+    println!(
+        "{}",
+        "└────────────────────────────────────────────────────────────────────┘".bright_black()
+    );
 }
 
 /// Calculate percentiles from histogram data
 fn calculate_percentiles(latencies: &[code::LatencyRangeCounter], total_batches: u64) -> (u64, u64, u64, u64) {
+    if latencies.is_empty() || total_batches == 0 {
+        return (0, 0, 0, 0);
+    }
+
     let p50_target = (total_batches as f64 * 0.50) as u64;
     let p90_target = (total_batches as f64 * 0.90) as u64;
     let p99_target = (total_batches as f64 * 0.99) as u64;
-    
+
     let mut cumulative = 0u64;
     let mut p50 = 0u64;
     let mut p90 = 0u64;
     let mut p99 = 0u64;
-    let mut max = 0u64;
-    
-    for latency in latencies {
-        cumulative += latency.batches;
-        max = latency.min_latency as u64;
-        
-        if p50 == 0 && cumulative >= p50_target {
-            p50 = latency.min_latency as u64;
+    let max = latencies
+        .iter()
+        .rev()
+        .find(|l| l.batches > 0)
+        .map(|l| l.min_latency as u64)
+        .unwrap_or(0);
+
+    for idx in 1..latencies.len() {
+        cumulative += latencies[idx - 1].batches;
+        if p50 == 0 && cumulative > p50_target {
+            p50 = latencies[idx].min_latency as u64;
         }
-        if p90 == 0 && cumulative >= p90_target {
-            p90 = latency.min_latency as u64;
+        if p90 == 0 && cumulative > p90_target {
+            p90 = latencies[idx].min_latency as u64;
         }
-        if p99 == 0 && cumulative >= p99_target {
-            p99 = latency.min_latency as u64;
+        if p99 == 0 && cumulative > p99_target {
+            p99 = latencies[idx].min_latency as u64;
         }
     }
-    
+
     (p50, p90, p99, max)
 }
 
-/// Format a latency range string
+/// Format a latency range string with spaces
 fn format_latency_range(min: u32, next: Option<u32>) -> String {
     if let Some(next_val) = next {
-        format!("{}-{}", format_latency(min as u64), format_latency(next_val as u64))
+        format!("{} - {}", format_latency(min as u64), format_latency(next_val as u64))
     } else {
         format!("{}+", format_latency(min as u64))
     }
@@ -496,15 +571,35 @@ fn format_latency(ns: u64) -> String {
 fn format_number(n: u64) -> String {
     let s = n.to_string();
     let mut result = String::new();
-    let mut count = 0;
-    
-    for c in s.chars().rev() {
+
+    for (count, c) in s.chars().rev().enumerate() {
         if count > 0 && count % 3 == 0 {
             result.push(',');
         }
         result.push(c);
-        count += 1;
     }
-    
+
     result.chars().rev().collect()
+}
+
+/// Format bytes in appropriate unit (B, KB, MB, GB, TB)
+fn format_bytes(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    const TB: f64 = GB * 1024.0;
+
+    let bytes_f = bytes as f64;
+
+    if bytes_f >= TB {
+        format!("{:.2} TB", bytes_f / TB)
+    } else if bytes_f >= GB {
+        format!("{:.2} GB", bytes_f / GB)
+    } else if bytes_f >= MB {
+        format!("{:.2} MB", bytes_f / MB)
+    } else if bytes_f >= KB {
+        format!("{:.2} KB", bytes_f / KB)
+    } else {
+        format!("{} B", bytes)
+    }
 }
