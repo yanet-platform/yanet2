@@ -514,8 +514,90 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
         // Fixed bar width (reduced to accommodate larger count values)
         const BAR_WIDTH: usize = 32;
 
-        // Display histogram
-        for (i, latency) in counter.latencies.iter().enumerate() {
+        // Display histogram with collapsing of consecutive zero-batch rows
+        let mut i = 0;
+        while i < counter.latencies.len() {
+            let latency = &counter.latencies[i];
+            
+            // Check if this is the start of a sequence of zero-batch rows
+            if latency.batches == 0 {
+                // Find the end of consecutive zero-batch rows
+                let mut j = i;
+                while j < counter.latencies.len() && counter.latencies[j].batches == 0 {
+                    j += 1;
+                }
+                
+                // Determine the right boundary for the collapsed range
+                let next_latency = if j < counter.latencies.len() {
+                    Some(counter.latencies[j].min_latency)
+                } else {
+                    None
+                };
+                
+                // Format left and right values of the collapsed range
+                let left_val = format_latency(latency.min_latency as u64);
+                let left_val_width = display_width(&left_val);
+                let left_padding = max_left_val_width.saturating_sub(left_val_width);
+
+                let range_str = if let Some(next) = next_latency {
+                    let right_val = format_latency(next as u64);
+                    let right_val_width = display_width(&right_val);
+                    let right_padding = max_right_val_width.saturating_sub(right_val_width);
+                    format!(
+                        "{}{} - {}{}",
+                        " ".repeat(left_padding),
+                        left_val,
+                        right_val,
+                        " ".repeat(right_padding)
+                    )
+                } else {
+                    // For the last row (e.g., "491.5µs+"), pad the right side to match width
+                    format!(
+                        "{}{}+{}",
+                        " ".repeat(left_padding),
+                        left_val,
+                        " ".repeat(max_right_val_width + 2)
+                    )
+                };
+
+                // Zero batches, so no bar
+                let bar_padding = BAR_WIDTH;
+
+                // Format count with right-alignment to max_count_width
+                let count_str = format!("{:>width$}", format_number(0), width = max_count_width);
+
+                // Format percentage
+                let pct_str = format!("{:>4.1}%", 0.0);
+
+                // Build the row content (without borders) to calculate display width
+                let row_content = format!(
+                    " {} │ {} │ {} ({})",
+                    range_str,
+                    " ".repeat(bar_padding),
+                    count_str,
+                    pct_str
+                );
+                let row_display_width = display_width(&row_content);
+                let extra_padding = TABLE_WIDTH.saturating_sub(row_display_width);
+
+                println!(
+                    "{} {} {} {} {} {} ({}){}{}",
+                    "│".bright_black(),
+                    range_str.bright_white(),
+                    "│".bright_black(),
+                    " ".repeat(bar_padding),
+                    "│".bright_black(),
+                    count_str.bright_white(),
+                    pct_str,
+                    " ".repeat(extra_padding),
+                    "│".bright_black()
+                );
+                
+                i = j;
+                continue;
+            }
+            
+            // Display normal row (non-zero batches)
             let next_latency = counter.latencies.get(i + 1).map(|l| l.min_latency);
             let percentage = if total_batches > 0 {
                 (latency.batches as f64 / total_batches as f64) * 100.0
@@ -590,6 +672,8 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
                 " ".repeat(extra_padding),
                 "│".bright_black()
             );
+            
+            i += 1;
         }
 
         // Calculate percentiles
