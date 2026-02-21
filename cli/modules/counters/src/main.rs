@@ -518,7 +518,7 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
         let mut i = 0;
         while i < counter.latencies.len() {
             let latency = &counter.latencies[i];
-            
+
             // Check if this is the start of a sequence of zero-batch rows
             if latency.batches == 0 {
                 // Find the end of consecutive zero-batch rows
@@ -526,14 +526,14 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
                 while j < counter.latencies.len() && counter.latencies[j].batches == 0 {
                     j += 1;
                 }
-                
+
                 // Determine the right boundary for the collapsed range
                 let next_latency = if j < counter.latencies.len() {
                     Some(counter.latencies[j].min_latency)
                 } else {
                     None
                 };
-                
+
                 // Format left and right values of the collapsed range
                 let left_val = format_latency(latency.min_latency as u64);
                 let left_val_width = display_width(&left_val);
@@ -592,11 +592,11 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
                     " ".repeat(extra_padding),
                     "│".bright_black()
                 );
-                
+
                 i = j;
                 continue;
             }
-            
+
             // Display normal row (non-zero batches)
             let next_latency = counter.latencies.get(i + 1).map(|l| l.min_latency);
             let percentage = if total_batches > 0 {
@@ -672,7 +672,7 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
                 " ".repeat(extra_padding),
                 "│".bright_black()
             );
-            
+
             i += 1;
         }
 
