@@ -6,8 +6,10 @@
 #include "common/network.h"
 
 #include "compiler/declare.h"
+#include "inspect.h"
 #include "lib/controlplane/diag/diag.h"
 
+#include "rules.h"
 #include "selector.h"
 #include "vs.h"
 
@@ -16,6 +18,7 @@
 
 #include <assert.h>
 #include <netinet/in.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -899,4 +902,33 @@ counter_to_vs_registry_idx(struct counter_handle *counter) {
 	} else {
 		return -1;
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+static void
+setup_reals_usage(
+	struct reals_usage *reals_usage,
+	size_t workers,
+	size_t reals_count
+) {
+	reals_usage->counters_usage = sizeof(struct real_stats) * workers * reals_count;
+	reals_usage->data_usage = sizeof(struct real) * reals_count;
+	reals_usage->total_usage = reals_usage->counters_usage + reals_usage->data_usage;
+}
+
+void
+vs_fill_inspect(
+	struct vs *vs,
+	struct vs_inspect *inspect,
+	size_t workers
+) {
+	inspect->acl_usage = filter_memory_usage(ADDR_OF(&vs->acl));
+	inspect->ring_usage = selector_memory_usage(&vs->selector);
+	inspect->counters_usage = sizeof(struct vs_stats) * workers;
+	setup_reals_usage(&inspect->reals_usage, workers, vs->reals_count);
+	inspect->other_usage = sizeof(struct vs) + rules_memory_usage(vs->rules_count, ADDR_OF(&vs->rules));
+	inspect->other_usage += vs->peers_v4_count * sizeof(struct net4_addr);
+	inspect->other_usage += vs->peers_v6_count * sizeof(struct net6_addr);
+	inspect->total_usage = inspect->acl_usage + inspect->ring_usage + inspect->counters_usage + inspect->reals_usage.total_usage + inspect->other_usage;
 }

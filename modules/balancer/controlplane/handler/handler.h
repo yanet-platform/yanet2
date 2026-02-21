@@ -82,10 +82,6 @@ struct packet_handler {
 	// Manages counter registry and module lifecycle
 	struct cp_module cp_module;
 
-	// Memory context for all allocations in this handler
-	// Used for relative pointer allocations (filters, VS, reals, etc.)
-	struct memory_context mctx;
-
 	// relative pointer to the balancer state,
 	// corresponding to this handler
 	struct balancer_state *state;

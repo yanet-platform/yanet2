@@ -94,3 +94,10 @@ selector_real_enabled(struct real_selector *selector, size_t local_real_idx) {
 	uint8_t *enabled = ADDR_OF(&current_ring->enabled);
 	return enabled[local_real_idx / 8] & (1 << (local_real_idx % 8));
 }
+
+static inline uint64_t
+selector_memory_usage(struct real_selector *selector) {
+	struct memory_context *mctx = &selector->mctx;
+	assert(mctx->balloc_size >= mctx->bfree_size);
+	return mctx->balloc_size - mctx->bfree_size;
+}

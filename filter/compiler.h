@@ -8,6 +8,7 @@
 #include "common/memory.h"
 #include "common/registry.h"
 #include "common/value.h"
+#include <assert.h>
 
 /**
  * @file compiler.h
@@ -145,3 +146,14 @@
 			value_table_free(&__v0->table);                        \
 		}                                                              \
 	})
+
+
+// TODO: docs
+static inline uint64_t
+filter_memory_usage(
+	struct filter *filter
+) {
+	struct memory_context *mctx = &filter->memory_context;
+	assert(mctx->balloc_size >= mctx->bfree_size);
+	return mctx->balloc_size - mctx->bfree_size;
+}
