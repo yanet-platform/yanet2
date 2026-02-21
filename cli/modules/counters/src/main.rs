@@ -307,25 +307,25 @@ fn calculate_global_widths(counters: &[code::PerfCounter]) -> HistogramWidths {
     let mut max_left_val_width = 0usize;
     let mut max_right_val_width = 0usize;
     let mut max_count_width = 0usize;
-    
+
     for counter in counters {
         for (i, latency) in counter.latencies.iter().enumerate() {
             // Left value width
             let left_width = display_width(&format_latency(latency.min_latency as u64));
             max_left_val_width = max_left_val_width.max(left_width);
-            
+
             // Right value width (next latency's min_latency)
             if let Some(next) = counter.latencies.get(i + 1) {
                 let right_width = display_width(&format_latency(next.min_latency as u64));
                 max_right_val_width = max_right_val_width.max(right_width);
             }
-            
-            // Count width
-            let count_width = format_number(latency.batches).len();
+
+            // Count width (use display_width for consistency with UTF-8)
+            let count_width = display_width(&format_number(latency.batches));
             max_count_width = max_count_width.max(count_width);
         }
     }
-    
+
     HistogramWidths {
         max_left_val_width,
         max_right_val_width,
@@ -350,34 +350,42 @@ fn format_perf_counters(response: &code::PerfCountersResponse) {
     );
 
     // Summary stats - RX first, then TX
-    let rx_str = format!("RX: {} packets ({})", format_number(response.rx), format_bytes(response.rx_bytes));
-    let tx_str = format!("TX: {} packets ({})", format_number(response.tx), format_bytes(response.tx_bytes));
-    
+    let rx_str = format!(
+        "RX: {} packets ({})",
+        format_number(response.rx),
+        format_bytes(response.rx_bytes)
+    );
+    let tx_str = format!(
+        "TX: {} packets ({})",
+        format_number(response.tx),
+        format_bytes(response.tx_bytes)
+    );
+
     // Build the content and pad to exactly 74 chars
     // Format: "  RX: ... packets (...)   │   TX: ... packets (...)  "
     let rx_width = display_width(&rx_str);
     let tx_width = display_width(&tx_str);
     let separator = " │ "; // 3 chars
     let separator_width = 3;
-    
+
     // Total content width without padding (used for reference)
     let _content_width = rx_width + separator_width + tx_width;
-    
+
     // Distribute padding: some before RX, some between RX and separator, some after TX
     // We want the separator centered, so left_half and right_half should be equal
     let left_half: usize = 37; // (74 - 0) / 2, but we want separator at position 37
     let right_half: usize = 37;
-    
+
     // Left side: padding + rx_str should fill left_half chars (before separator)
     let rx_total_space = left_half.saturating_sub(1); // -1 for the space before │
     let rx_left_pad = rx_total_space.saturating_sub(rx_width) / 2;
     let rx_right_pad = rx_total_space.saturating_sub(rx_width).saturating_sub(rx_left_pad);
-    
+
     // Right side: tx_str + padding should fill right_half chars (after separator)
     let tx_total_space = right_half.saturating_sub(2); // -2 for "│ " after separator
     let tx_left_pad = tx_total_space.saturating_sub(tx_width) / 2;
     let tx_right_pad = tx_total_space.saturating_sub(tx_width).saturating_sub(tx_left_pad);
-    
+
     println!(
         "{}{}{}{}{}{}{}{}{}",
         "║".bright_cyan(),
@@ -411,7 +419,7 @@ fn format_perf_counters(response: &code::PerfCountersResponse) {
 fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>, widths: &HistogramWidths) {
     // Table width: 76 chars total (74 inner + 2 for borders)
     const TABLE_WIDTH: usize = 74;
-    
+
     // Calculate the batch range dynamically from next counter's min_batch_size
     let batch_range = if let Some(next) = next_min_batch {
         let max_batch_size = next - 1;
@@ -456,8 +464,11 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
     };
 
     // Line 1: Total packets and batches
-    let total_content = format!("  Total: {} packets ({} batches)",
-        format_number(total_packets), format_number(total_batches));
+    let total_content = format!(
+        "  Total: {} packets ({} batches)",
+        format_number(total_packets),
+        format_number(total_batches)
+    );
     let padding1 = TABLE_WIDTH.saturating_sub(display_width(&total_content));
     println!(
         "{}  Total: {} packets ({} batches){}{}",
@@ -469,10 +480,12 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
     );
 
     // Line 2: Avg latency per packet/batch and total latency
-    let avg_content = format!("  Avg Latency: {} per packet ({} per batch) │ Total: {}",
+    let avg_content = format!(
+        "  Avg Latency: {} per packet ({} per batch) │ Total: {}",
         format_latency(avg_latency_per_packet),
         format_latency(avg_latency_per_batch),
-        format_latency(counter.summary_latency));
+        format_latency(counter.summary_latency)
+    );
     let padding2 = TABLE_WIDTH.saturating_sub(display_width(&avg_content));
     println!(
         "{}  Avg Latency: {} per packet ({} per batch) {} Total: {}{}{}",
@@ -497,9 +510,9 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
         let max_left_val_width = widths.max_left_val_width;
         let max_right_val_width = widths.max_right_val_width;
         let max_count_width = widths.max_count_width;
-        
-        // Fixed bar width
-        const BAR_WIDTH: usize = 36;
+
+        // Fixed bar width (reduced to accommodate larger count values)
+        const BAR_WIDTH: usize = 32;
 
         // Display histogram
         for (i, latency) in counter.latencies.iter().enumerate() {
@@ -514,20 +527,27 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
             let left_val = format_latency(latency.min_latency as u64);
             let left_val_width = display_width(&left_val);
             let left_padding = max_left_val_width.saturating_sub(left_val_width);
-            
+
             let range_str = if let Some(next) = next_latency {
                 let right_val = format_latency(next as u64);
                 let right_val_width = display_width(&right_val);
                 let right_padding = max_right_val_width.saturating_sub(right_val_width);
-                format!("{}{} - {}{}",
-                    " ".repeat(left_padding), left_val,
-                    right_val, " ".repeat(right_padding))
+                format!(
+                    "{}{} - {}{}",
+                    " ".repeat(left_padding),
+                    left_val,
+                    right_val,
+                    " ".repeat(right_padding)
+                )
             } else {
                 // For the last row (e.g., "491.5µs+"), pad the right side to match width
                 // " - " is 3 chars, so we need "+  " (1 + 2 spaces to match " - ")
-                format!("{}{}+{}",
-                    " ".repeat(left_padding), left_val,
-                    " ".repeat(max_right_val_width + 2))
+                format!(
+                    "{}{}+{}",
+                    " ".repeat(left_padding),
+                    left_val,
+                    " ".repeat(max_right_val_width + 2)
+                )
             };
 
             // Calculate bar length relative to total batches (summary value)
@@ -541,13 +561,19 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
 
             // Format count with right-alignment to max_count_width
             let count_str = format!("{:>width$}", format_number(latency.batches), width = max_count_width);
-            
+
             // Format percentage
             let pct_str = format!("{:>4.1}%", percentage);
 
             // Build the row content (without borders) to calculate display width
-            let row_content = format!(" {} │ {}{} │ {} ({})",
-                range_str, bar, " ".repeat(bar_padding), count_str, pct_str);
+            let row_content = format!(
+                " {} │ {}{} │ {} ({})",
+                range_str,
+                bar,
+                " ".repeat(bar_padding),
+                count_str,
+                pct_str
+            );
             let row_display_width = display_width(&row_content);
             let extra_padding = TABLE_WIDTH.saturating_sub(row_display_width);
 
@@ -576,17 +602,20 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
                 "┤".bright_black()
             );
 
-            let p50_str = if p50 == 0 { "∞".to_string() } else { format_latency(p50) };
-            let p90_str = if p90 == 0 { "∞".to_string() } else { format_latency(p90) };
-            let p99_str = if p99 == 0 { "∞".to_string() } else { format_latency(p99) };
-            let max_str = if max == 0 { "∞".to_string() } else { format_latency(max) };
+            let inf = "inf";
+            let p50_str = if p50 == 0 { inf.to_string() } else { format_latency(p50) };
+            let p90_str = if p90 == 0 { inf.to_string() } else { format_latency(p90) };
+            let p99_str = if p99 == 0 { inf.to_string() } else { format_latency(p99) };
+            let max_str = if max == 0 { inf.to_string() } else { format_latency(max) };
 
-            let percentile_content = format!(" p50: {} │ p90: {} │ p99: {} │ max: {}",
-                p50_str, p90_str, p99_str, max_str);
+            let percentile_content = format!(
+                "  p50: {} │ p90: {} │ p99: {} │ max: {}",
+                p50_str, p90_str, p99_str, max_str
+            );
             let padding = TABLE_WIDTH.saturating_sub(display_width(&percentile_content));
-            
+
             println!(
-                "{} p50: {} {} p90: {} {} p99: {} {} max: {}{}{}",
+                "{}  p50: {} {} p90: {} {} p99: {} {} max: {}{}{}",
                 "│".bright_black(),
                 p50_str.bright_cyan(),
                 "│".bright_black(),
@@ -618,18 +647,13 @@ fn calculate_percentiles(latencies: &[code::LatencyRangeCounter], total_batches:
     let p50_target = (total_batches as f64 * 0.50) as u64;
     let p90_target = (total_batches as f64 * 0.90) as u64;
     let p99_target = (total_batches as f64 * 0.99) as u64;
+    let max_target = total_batches;
 
     let mut cumulative = 0u64;
     let mut p50 = 0u64;
     let mut p90 = 0u64;
     let mut p99 = 0u64;
-    let max = latencies
-        .iter()
-        .rev()
-        .skip(1)
-        .find(|l| l.batches > 0)
-        .map(|l| l.min_latency as u64)
-        .unwrap_or(0);
+    let mut max = 0u64;
 
     for idx in 1..latencies.len() {
         cumulative += latencies[idx - 1].batches;
@@ -641,6 +665,9 @@ fn calculate_percentiles(latencies: &[code::LatencyRangeCounter], total_batches:
         }
         if p99 == 0 && cumulative >= p99_target {
             p99 = latencies[idx].min_latency as u64;
+        }
+        if max == 0 && cumulative >= max_target {
+            max = latencies[idx].min_latency as u64;
         }
     }
 
@@ -660,19 +687,38 @@ fn format_latency(ns: u64) -> String {
     }
 }
 
-/// Format large numbers with thousand separators
+/// Format large numbers with thousand separators or K/M/G/T suffixes for very large numbers
 fn format_number(n: u64) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
+    const THOUSAND: f64 = 1_000.0;
+    const MILLION: f64 = 1_000_000.0;
+    const BILLION: f64 = 1_000_000_000.0;
+    const TRILLION: f64 = 1_000_000_000_000.0;
 
-    for (count, c) in s.chars().rev().enumerate() {
-        if count > 0 && count % 3 == 0 {
-            result.push(',');
+    let n_f = n as f64;
+
+    // Use compact notation for numbers >= 100,000 to keep table width manageable
+    if n_f >= TRILLION {
+        format!("{:.2}T", n_f / TRILLION)
+    } else if n_f >= BILLION {
+        format!("{:.2}G", n_f / BILLION)
+    } else if n_f >= MILLION {
+        format!("{:.2}M", n_f / MILLION)
+    } else if n_f >= 100_000.0 {
+        format!("{:.2}K", n_f / THOUSAND)
+    } else {
+        // For smaller numbers, use thousand separators
+        let s = n.to_string();
+        let mut result = String::new();
+
+        for (count, c) in s.chars().rev().enumerate() {
+            if count > 0 && count % 3 == 0 {
+                result.push(',');
+            }
+            result.push(c);
         }
-        result.push(c);
-    }
 
-    result.chars().rev().collect()
+        result.chars().rev().collect()
+    }
 }
 
 /// Calculate display width of a string (accounting for multi-byte UTF-8 characters)
@@ -795,20 +841,18 @@ mod tests {
             rx: 100_000,
             tx_bytes: 100_000_000,
             rx_bytes: 100_000_000,
-            counters: vec![
-                code::PerfCounter {
-                    min_batch_size: 1,
-                    summary_latency: 500_000,
-                    packets: 500,
-                    latencies: vec![
-                        code::LatencyRangeCounter { min_latency: 100, batches: 100 },
-                        code::LatencyRangeCounter { min_latency: 200, batches: 100 },
-                        code::LatencyRangeCounter { min_latency: 300, batches: 100 },
-                        code::LatencyRangeCounter { min_latency: 400, batches: 100 },
-                        code::LatencyRangeCounter { min_latency: 500, batches: 100 },
-                    ],
-                },
-            ],
+            counters: vec![code::PerfCounter {
+                min_batch_size: 1,
+                summary_latency: 500_000,
+                packets: 500,
+                latencies: vec![
+                    code::LatencyRangeCounter { min_latency: 100, batches: 100 },
+                    code::LatencyRangeCounter { min_latency: 200, batches: 100 },
+                    code::LatencyRangeCounter { min_latency: 300, batches: 100 },
+                    code::LatencyRangeCounter { min_latency: 400, batches: 100 },
+                    code::LatencyRangeCounter { min_latency: 500, batches: 100 },
+                ],
+            }],
         };
 
         println!("\n=== Uniform Distribution Test ===\n");
@@ -823,20 +867,18 @@ mod tests {
             rx: 50_000,
             tx_bytes: 50_000_000,
             rx_bytes: 50_000_000,
-            counters: vec![
-                code::PerfCounter {
-                    min_batch_size: 1,
-                    summary_latency: 1_000_000,
-                    packets: 1000,
-                    latencies: vec![
-                        code::LatencyRangeCounter { min_latency: 100, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 500, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 1000, batches: 1000 },
-                        code::LatencyRangeCounter { min_latency: 2000, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 5000, batches: 0 },
-                    ],
-                },
-            ],
+            counters: vec![code::PerfCounter {
+                min_batch_size: 1,
+                summary_latency: 1_000_000,
+                packets: 1000,
+                latencies: vec![
+                    code::LatencyRangeCounter { min_latency: 100, batches: 0 },
+                    code::LatencyRangeCounter { min_latency: 500, batches: 0 },
+                    code::LatencyRangeCounter { min_latency: 1000, batches: 1000 },
+                    code::LatencyRangeCounter { min_latency: 2000, batches: 0 },
+                    code::LatencyRangeCounter { min_latency: 5000, batches: 0 },
+                ],
+            }],
         };
 
         println!("\n=== Single Bucket Test ===\n");
@@ -851,19 +893,29 @@ mod tests {
             rx: 888_888_888_888,
             tx_bytes: 1_234_567_890_123_456,
             rx_bytes: 9_876_543_210_987_654,
-            counters: vec![
-                code::PerfCounter {
-                    min_batch_size: 64,
-                    summary_latency: 999_999_999_999,
-                    packets: 999_999_999,
-                    latencies: vec![
-                        code::LatencyRangeCounter { min_latency: 1_000_000, batches: 100_000_000 },
-                        code::LatencyRangeCounter { min_latency: 10_000_000, batches: 50_000_000 },
-                        code::LatencyRangeCounter { min_latency: 100_000_000, batches: 10_000_000 },
-                        code::LatencyRangeCounter { min_latency: 1_000_000_000, batches: 1_000_000 },
-                    ],
-                },
-            ],
+            counters: vec![code::PerfCounter {
+                min_batch_size: 64,
+                summary_latency: 999_999_999_999,
+                packets: 999_999_999,
+                latencies: vec![
+                    code::LatencyRangeCounter {
+                        min_latency: 1_000_000,
+                        batches: 100_000_000,
+                    },
+                    code::LatencyRangeCounter {
+                        min_latency: 10_000_000,
+                        batches: 50_000_000,
+                    },
+                    code::LatencyRangeCounter {
+                        min_latency: 100_000_000,
+                        batches: 10_000_000,
+                    },
+                    code::LatencyRangeCounter {
+                        min_latency: 1_000_000_000,
+                        batches: 1_000_000,
+                    },
+                ],
+            }],
         };
 
         println!("\n=== Large Numbers Test ===\n");
@@ -878,19 +930,17 @@ mod tests {
             rx: 5,
             tx_bytes: 1000,
             rx_bytes: 500,
-            counters: vec![
-                code::PerfCounter {
-                    min_batch_size: 1,
-                    summary_latency: 100,
-                    packets: 10,
-                    latencies: vec![
-                        code::LatencyRangeCounter { min_latency: 1, batches: 3 },
-                        code::LatencyRangeCounter { min_latency: 5, batches: 4 },
-                        code::LatencyRangeCounter { min_latency: 10, batches: 2 },
-                        code::LatencyRangeCounter { min_latency: 20, batches: 1 },
-                    ],
-                },
-            ],
+            counters: vec![code::PerfCounter {
+                min_batch_size: 1,
+                summary_latency: 100,
+                packets: 10,
+                latencies: vec![
+                    code::LatencyRangeCounter { min_latency: 1, batches: 3 },
+                    code::LatencyRangeCounter { min_latency: 5, batches: 4 },
+                    code::LatencyRangeCounter { min_latency: 10, batches: 2 },
+                    code::LatencyRangeCounter { min_latency: 20, batches: 1 },
+                ],
+            }],
         };
 
         println!("\n=== Small Numbers Test ===\n");
@@ -905,18 +955,16 @@ mod tests {
             rx: 0,
             tx_bytes: 0,
             rx_bytes: 0,
-            counters: vec![
-                code::PerfCounter {
-                    min_batch_size: 1,
-                    summary_latency: 0,
-                    packets: 0,
-                    latencies: vec![
-                        code::LatencyRangeCounter { min_latency: 100, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 200, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 300, batches: 0 },
-                    ],
-                },
-            ],
+            counters: vec![code::PerfCounter {
+                min_batch_size: 1,
+                summary_latency: 0,
+                packets: 0,
+                latencies: vec![
+                    code::LatencyRangeCounter { min_latency: 100, batches: 0 },
+                    code::LatencyRangeCounter { min_latency: 200, batches: 0 },
+                    code::LatencyRangeCounter { min_latency: 300, batches: 0 },
+                ],
+            }],
         };
 
         println!("\n=== Empty Histogram Test ===\n");
@@ -931,21 +979,19 @@ mod tests {
             rx: 200_000,
             tx_bytes: 200_000_000,
             rx_bytes: 200_000_000,
-            counters: vec![
-                code::PerfCounter {
-                    min_batch_size: 8,
-                    summary_latency: 5_000_000,
-                    packets: 2000,
-                    latencies: vec![
-                        code::LatencyRangeCounter { min_latency: 100, batches: 500 },
-                        code::LatencyRangeCounter { min_latency: 200, batches: 50 },
-                        code::LatencyRangeCounter { min_latency: 300, batches: 10 },
-                        code::LatencyRangeCounter { min_latency: 400, batches: 50 },
-                        code::LatencyRangeCounter { min_latency: 500, batches: 500 },
-                        code::LatencyRangeCounter { min_latency: 1000, batches: 100 },
-                    ],
-                },
-            ],
+            counters: vec![code::PerfCounter {
+                min_batch_size: 8,
+                summary_latency: 5_000_000,
+                packets: 2000,
+                latencies: vec![
+                    code::LatencyRangeCounter { min_latency: 100, batches: 500 },
+                    code::LatencyRangeCounter { min_latency: 200, batches: 50 },
+                    code::LatencyRangeCounter { min_latency: 300, batches: 10 },
+                    code::LatencyRangeCounter { min_latency: 400, batches: 50 },
+                    code::LatencyRangeCounter { min_latency: 500, batches: 500 },
+                    code::LatencyRangeCounter { min_latency: 1000, batches: 100 },
+                ],
+            }],
         };
 
         println!("\n=== Bimodal Distribution Test ===\n");
@@ -960,16 +1006,12 @@ mod tests {
             rx: 999_999_999,
             tx_bytes: 64,
             rx_bytes: 999_999_999_999,
-            counters: vec![
-                code::PerfCounter {
-                    min_batch_size: 1,
-                    summary_latency: 1000,
-                    packets: 100,
-                    latencies: vec![
-                        code::LatencyRangeCounter { min_latency: 10, batches: 100 },
-                    ],
-                },
-            ],
+            counters: vec![code::PerfCounter {
+                min_batch_size: 1,
+                summary_latency: 1000,
+                packets: 100,
+                latencies: vec![code::LatencyRangeCounter { min_latency: 10, batches: 100 }],
+            }],
         };
 
         println!("\n=== Asymmetric RX/TX Test ===\n");
