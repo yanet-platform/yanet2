@@ -595,3 +595,142 @@ pub fn create_update_info_updated_example() -> balancerpb::UpdateInfo {
         ],
     }
 }
+
+#[allow(dead_code)]
+pub fn create_inspect_example() -> balancerpb::ShowInspectResponse {
+    balancerpb::ShowInspectResponse {
+        inspect: Some(balancerpb::AgentInspect {
+            memory_limit: 134217728, // 128 MiB
+            memory_usage: 45678912,  // ~43.56 MiB
+            balancers: vec![
+                balancerpb::BalancerInspect {
+                    name: "balancer0".to_string(),
+                    packet_handler_inspect: Some(balancerpb::PacketHandlerInspect {
+                        vs_ipv4_inspect: Some(balancerpb::PacketHandlerVsInspect {
+                            matcher_usage: 1048576,   // 1 MiB
+                            summary_vs_usage: 524288, // 512 KiB
+                            vs_inspects: vec![
+                                balancerpb::NamedVsInspect {
+                                    identifier: Some(balancerpb::VsIdentifier {
+                                        addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 1] }),
+                                        port: 80,
+                                        proto: balancerpb::TransportProto::Tcp as i32,
+                                    }),
+                                    inspect: Some(balancerpb::VsInspect {
+                                        acl_usage: 524288,      // 512 KiB
+                                        ring_usage: 262144,     // 256 KiB
+                                        counters_usage: 131072, // 128 KiB
+                                        reals_usage: Some(balancerpb::RealsUsage {
+                                            counters_usage: 262144, // 256 KiB
+                                            data_usage: 1310720,    // 1.25 MiB
+                                            total_usage: 1572864,   // 1.5 MiB
+                                        }),
+                                        other_usage: 65536,   // 64 KiB
+                                        total_usage: 2555904, // ~2.44 MiB
+                                    }),
+                                },
+                                balancerpb::NamedVsInspect {
+                                    identifier: Some(balancerpb::VsIdentifier {
+                                        addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 2] }),
+                                        port: 443,
+                                        proto: balancerpb::TransportProto::Tcp as i32,
+                                    }),
+                                    inspect: Some(balancerpb::VsInspect {
+                                        acl_usage: 262144,     // 256 KiB
+                                        ring_usage: 131072,    // 128 KiB
+                                        counters_usage: 65536, // 64 KiB
+                                        reals_usage: Some(balancerpb::RealsUsage {
+                                            counters_usage: 131072, // 128 KiB
+                                            data_usage: 655360,     // 640 KiB
+                                            total_usage: 786432,    // 768 KiB
+                                        }),
+                                        other_usage: 32768,   // 32 KiB
+                                        total_usage: 1277952, // ~1.22 MiB
+                                    }),
+                                },
+                            ],
+                            announce_usage: 262144, // 256 KiB
+                            index_usage: 131072,    // 128 KiB
+                            total_usage: 4456448,   // ~4.25 MiB
+                        }),
+                        vs_ipv6_inspect: Some(balancerpb::PacketHandlerVsInspect {
+                            matcher_usage: 524288,    // 512 KiB
+                            summary_vs_usage: 262144, // 256 KiB
+                            vs_inspects: vec![],
+                            announce_usage: 131072, // 128 KiB
+                            index_usage: 65536,     // 64 KiB
+                            total_usage: 983040,    // 960 KiB
+                        }),
+                        summary_vs_usage: 1048576, // 1 MiB
+                        vs_index_usage: 524288,    // 512 KiB
+                        reals_index_usage: 262144, // 256 KiB
+                        counters_usage: 131072,    // 128 KiB
+                        decap_usage: 65536,        // 64 KiB
+                        total_usage: 8912896,      // ~8.5 MiB
+                    }),
+                    state_inspect: Some(balancerpb::StateInspect {
+                        vs_registry_usage: 524288,    // 512 KiB
+                        reals_registry_usage: 262144, // 256 KiB
+                        session_table_usage: 3145728, // 3 MiB
+                        total_usage: 3932160,         // ~3.75 MiB
+                    }),
+                    other_usage: 73728,    // 72 KiB
+                    total_usage: 12918784, // ~12.32 MiB
+                },
+                balancerpb::BalancerInspect {
+                    name: "balancer1".to_string(),
+                    packet_handler_inspect: Some(balancerpb::PacketHandlerInspect {
+                        vs_ipv4_inspect: Some(balancerpb::PacketHandlerVsInspect {
+                            matcher_usage: 524288,    // 512 KiB
+                            summary_vs_usage: 262144, // 256 KiB
+                            vs_inspects: vec![balancerpb::NamedVsInspect {
+                                identifier: Some(balancerpb::VsIdentifier {
+                                    addr: Some(balancerpb::Addr { bytes: vec![10, 0, 0, 1] }),
+                                    port: 8080,
+                                    proto: balancerpb::TransportProto::Udp as i32,
+                                }),
+                                inspect: Some(balancerpb::VsInspect {
+                                    acl_usage: 131072,     // 128 KiB
+                                    ring_usage: 65536,     // 64 KiB
+                                    counters_usage: 32768, // 32 KiB
+                                    reals_usage: Some(balancerpb::RealsUsage {
+                                        counters_usage: 65536, // 64 KiB
+                                        data_usage: 327680,    // 320 KiB
+                                        total_usage: 393216,   // 384 KiB
+                                    }),
+                                    other_usage: 16384,  // 16 KiB
+                                    total_usage: 638976, // ~624 KiB
+                                }),
+                            }],
+                            announce_usage: 131072, // 128 KiB
+                            index_usage: 65536,     // 64 KiB
+                            total_usage: 1622016,   // ~1.55 MiB
+                        }),
+                        vs_ipv6_inspect: Some(balancerpb::PacketHandlerVsInspect {
+                            matcher_usage: 262144,    // 256 KiB
+                            summary_vs_usage: 131072, // 128 KiB
+                            vs_inspects: vec![],
+                            announce_usage: 65536, // 64 KiB
+                            index_usage: 32768,    // 32 KiB
+                            total_usage: 491520,   // 480 KiB
+                        }),
+                        summary_vs_usage: 524288,  // 512 KiB
+                        vs_index_usage: 262144,    // 256 KiB
+                        reals_index_usage: 131072, // 128 KiB
+                        counters_usage: 65536,     // 64 KiB
+                        decap_usage: 32768,        // 32 KiB
+                        total_usage: 3129344,      // ~2.98 MiB
+                    }),
+                    state_inspect: Some(balancerpb::StateInspect {
+                        vs_registry_usage: 262144,    // 256 KiB
+                        reals_registry_usage: 131072, // 128 KiB
+                        session_table_usage: 2097152, // 2 MiB
+                        total_usage: 2490368,         // ~2.37 MiB
+                    }),
+                    other_usage: 40960,   // 40 KiB
+                    total_usage: 5660672, // ~5.4 MiB
+                },
+            ],
+        }),
+    }
+}

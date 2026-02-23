@@ -24,6 +24,13 @@ pub enum OutputFormat {
     Table,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum InspectOutputFormat {
+    Json,
+    Normal,
+    Detail,
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Helper Functions
 ////////////////////////////////////////////////////////////////////////////////
@@ -171,26 +178,29 @@ fn print_update_info_tree(update_info: &balancerpb::UpdateInfo) -> Result<(), Bo
     // Filter reuse status (only relevant for updates)
     if !update_info.created {
         tree.begin_child("Filter Reuse Status".to_string());
-        
+
         let ipv4_status = if update_info.vs_ipv4_matcher_reused {
             "Reused (not recompiled)"
         } else {
             "Recompiled"
         };
         tree.add_empty_child(format!("IPv4 VS Matcher: {}", ipv4_status));
-        
+
         let ipv6_status = if update_info.vs_ipv6_matcher_reused {
             "Reused (not recompiled)"
         } else {
             "Recompiled"
         };
         tree.add_empty_child(format!("IPv6 VS Matcher: {}", ipv6_status));
-        
+
         tree.end_child();
-        
+
         // ACL reuse information
         if !update_info.vs_acl_reuses.is_empty() {
-            tree.begin_child(format!("ACL Filters Reused ({} virtual services)", update_info.vs_acl_reuses.len()));
+            tree.begin_child(format!(
+                "ACL Filters Reused ({} virtual services)",
+                update_info.vs_acl_reuses.len()
+            ));
             for vs_id in &update_info.vs_acl_reuses {
                 if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
                     tree.add_empty_child(format!("{}:{}/{}", ip, vs_id.port, proto_to_string(vs_id.proto)));
@@ -226,55 +236,53 @@ fn print_update_info_table(update_info: &balancerpb::UpdateInfo) -> Result<(), B
     // Filter reuse status (only relevant for updates)
     if !update_info.created {
         println!("{}", "Filter Reuse Status:".bright_cyan().bold());
-    
-    let ipv4_status = if update_info.vs_ipv4_matcher_reused {
-        "✓ Reused (not recompiled)".bright_green()
-    } else {
-        "✗ Recompiled".bright_yellow()
-    };
-    println!("  IPv4 VS Matcher: {}", ipv4_status);
-    
-    let ipv6_status = if update_info.vs_ipv6_matcher_reused {
-        "✓ Reused (not recompiled)".bright_green()
-    } else {
-        "✗ Recompiled".bright_yellow()
-    };
-    println!("  IPv6 VS Matcher: {}", ipv6_status);
-    
-    println!();
-    
-    // ACL reuse information
-    if !update_info.vs_acl_reuses.is_empty() {
-        println!(
-            "{} {}",
-            "ACL Filters Reused:".bright_cyan().bold(),
-            format!("({} virtual services)", update_info.vs_acl_reuses.len()).bright_white()
-        );
-        
-        for vs_id in &update_info.vs_acl_reuses {
-            if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
-                println!(
-                    "  • {}", format!("{}:{}/{}",
-                    ip.to_string(),
-                    vs_id.port,
-                    proto_to_string(vs_id.proto)).bright_yellow(),
-                );
+
+        let ipv4_status = if update_info.vs_ipv4_matcher_reused {
+            "✓ Reused (not recompiled)".bright_green()
+        } else {
+            "✗ Recompiled".bright_yellow()
+        };
+        println!("  IPv4 VS Matcher: {}", ipv4_status);
+
+        let ipv6_status = if update_info.vs_ipv6_matcher_reused {
+            "✓ Reused (not recompiled)".bright_green()
+        } else {
+            "✗ Recompiled".bright_yellow()
+        };
+        println!("  IPv6 VS Matcher: {}", ipv6_status);
+
+        println!();
+
+        // ACL reuse information
+        if !update_info.vs_acl_reuses.is_empty() {
+            println!(
+                "{} {}",
+                "ACL Filters Reused:".bright_cyan().bold(),
+                format!("({} virtual services)", update_info.vs_acl_reuses.len()).bright_white()
+            );
+
+            for vs_id in &update_info.vs_acl_reuses {
+                if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
+                    println!(
+                        "  • {}",
+                        format!("{}:{}/{}", ip.to_string(), vs_id.port, proto_to_string(vs_id.proto)).bright_yellow(),
+                    );
+                }
             }
+        } else {
+            println!(
+                "{} {}",
+                "ACL Filters Reused:".bright_cyan().bold(),
+                "None (all ACLs recompiled)".bright_yellow()
+            );
         }
-    } else {
-        println!(
-            "{} {}",
-            "ACL Filters Reused:".bright_cyan().bold(),
-            "None (all ACLs recompiled)".bright_yellow()
-        );
+
+        println!();
     }
-    
-    println!();
-    }
-    
+
     println!("{}", "═".repeat(60).cyan().bold());
     println!();
-    
+
     Ok(())
 }
 
@@ -1747,6 +1755,745 @@ fn print_show_graph_table(response: &balancerpb::ShowGraphResponse) -> Result<()
                 }
             }
         }
+    }
+
+    Ok(())
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// ShowInspect Output
+////////////////////////////////////////////////////////////////////////////////
+
+pub fn print_show_inspect(
+    response: &balancerpb::ShowInspectResponse,
+    format: InspectOutputFormat,
+) -> Result<(), Box<dyn Error>> {
+    match format {
+        InspectOutputFormat::Json => print_show_inspect_json(response),
+        InspectOutputFormat::Normal => print_show_inspect_normal(response),
+        InspectOutputFormat::Detail => print_show_inspect_detail(response),
+    }
+}
+
+fn print_show_inspect_json(response: &balancerpb::ShowInspectResponse) -> Result<(), Box<dyn Error>> {
+    let json = json_output::convert_show_inspect(response);
+    println!("{}", serde_json::to_string(&json)?); // Compact, not pretty
+    Ok(())
+}
+
+fn print_show_inspect_normal(response: &balancerpb::ShowInspectResponse) -> Result<(), Box<dyn Error>> {
+    let inspect = match &response.inspect {
+        Some(i) => i,
+        None => return Ok(()),
+    };
+
+    // Print header
+    print_boxed_header("BALANCER MEMORY INSPECTION", None);
+    println!();
+
+    // Agent-level memory
+    let usage_percent = if inspect.memory_limit > 0 {
+        (inspect.memory_usage as f64 / inspect.memory_limit as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    println!("{}", "Agent Memory:".bright_cyan().bold());
+    println!("  Limit: {}", format_bytes(inspect.memory_limit).bright_green());
+    println!(
+        "  Usage: {} ({:.1}%)",
+        format_bytes(inspect.memory_usage).bright_green(),
+        usage_percent
+    );
+    println!();
+
+    // Per-balancer information
+    for (balancer_idx, balancer) in inspect.balancers.iter().enumerate() {
+        if balancer_idx > 0 {
+            println!("{}", "─".repeat(80).bright_black());
+            println!();
+        }
+
+        println!(
+            "{} {}",
+            format!("Balancer \"{}\":", balancer.name).bright_yellow().bold(),
+            format_bytes(balancer.total_usage).bright_green()
+        );
+
+        // Packet handler breakdown
+        if let Some(ph) = &balancer.packet_handler_inspect {
+            let ph_percent = if balancer.total_usage > 0 {
+                (ph.total_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!();
+            println!(
+                "  {} {} ({:.1}%)",
+                "Packet Handler:".bright_cyan().bold(),
+                format_bytes(ph.total_usage).bright_green(),
+                ph_percent
+            );
+
+            // IPv4 section
+            if let Some(ipv4) = &ph.vs_ipv4_inspect {
+                let ipv4_percent = if balancer.total_usage > 0 {
+                    (ipv4.total_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!();
+                println!(
+                    "    {} {} ({:.1}%)",
+                    "IPv4 VS Section:".bright_white(),
+                    format_bytes(ipv4.total_usage).bright_green(),
+                    ipv4_percent
+                );
+                let matcher_pct = if balancer.total_usage > 0 {
+                    (ipv4.matcher_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Matcher: {} ({:.1}%)",
+                    format_bytes(ipv4.matcher_usage).bright_green(),
+                    matcher_pct
+                );
+                let announce_pct = if balancer.total_usage > 0 {
+                    (ipv4.announce_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Announce: {} ({:.1}%)",
+                    format_bytes(ipv4.announce_usage).bright_green(),
+                    announce_pct
+                );
+                let index_pct = if balancer.total_usage > 0 {
+                    (ipv4.index_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Index: {} ({:.1}%)",
+                    format_bytes(ipv4.index_usage).bright_green(),
+                    index_pct
+                );
+            }
+
+            // IPv6 section
+            if let Some(ipv6) = &ph.vs_ipv6_inspect {
+                let ipv6_percent = if balancer.total_usage > 0 {
+                    (ipv6.total_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!();
+                println!(
+                    "    {} {} ({:.1}%)",
+                    "IPv6 VS Section:".bright_white(),
+                    format_bytes(ipv6.total_usage).bright_green(),
+                    ipv6_percent
+                );
+                let matcher_pct = if balancer.total_usage > 0 {
+                    (ipv6.matcher_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Matcher: {} ({:.1}%)",
+                    format_bytes(ipv6.matcher_usage).bright_green(),
+                    matcher_pct
+                );
+                let announce_pct = if balancer.total_usage > 0 {
+                    (ipv6.announce_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Announce: {} ({:.1}%)",
+                    format_bytes(ipv6.announce_usage).bright_green(),
+                    announce_pct
+                );
+                let index_pct = if balancer.total_usage > 0 {
+                    (ipv6.index_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Index: {} ({:.1}%)",
+                    format_bytes(ipv6.index_usage).bright_green(),
+                    index_pct
+                );
+            }
+
+            // Other packet handler components
+            println!();
+            let vs_index_pct = if balancer.total_usage > 0 {
+                (ph.vs_index_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    VS Index: {} ({:.1}%)",
+                format_bytes(ph.vs_index_usage).bright_green(),
+                vs_index_pct
+            );
+            let reals_index_pct = if balancer.total_usage > 0 {
+                (ph.reals_index_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    Reals Index: {} ({:.1}%)",
+                format_bytes(ph.reals_index_usage).bright_green(),
+                reals_index_pct
+            );
+            let counters_pct = if balancer.total_usage > 0 {
+                (ph.counters_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    Counters: {} ({:.1}%)",
+                format_bytes(ph.counters_usage).bright_green(),
+                counters_pct
+            );
+            let decap_pct = if balancer.total_usage > 0 {
+                (ph.decap_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    Decap: {} ({:.1}%)",
+                format_bytes(ph.decap_usage).bright_green(),
+                decap_pct
+            );
+        }
+
+        // State breakdown
+        if let Some(state) = &balancer.state_inspect {
+            let state_percent = if balancer.total_usage > 0 {
+                (state.total_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!();
+            println!(
+                "  {} {} ({:.1}%)",
+                "State:".bright_cyan().bold(),
+                format_bytes(state.total_usage).bright_green(),
+                state_percent
+            );
+            let vs_reg_pct = if balancer.total_usage > 0 {
+                (state.vs_registry_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    VS Registry: {} ({:.1}%)",
+                format_bytes(state.vs_registry_usage).bright_green(),
+                vs_reg_pct
+            );
+            let reals_reg_pct = if balancer.total_usage > 0 {
+                (state.reals_registry_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    Reals Registry: {} ({:.1}%)",
+                format_bytes(state.reals_registry_usage).bright_green(),
+                reals_reg_pct
+            );
+            let session_pct = if balancer.total_usage > 0 {
+                (state.session_table_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    Session Table: {} ({:.1}%)",
+                format_bytes(state.session_table_usage).bright_green(),
+                session_pct
+            );
+        }
+
+        // Other usage
+        let other_percent = if balancer.total_usage > 0 {
+            (balancer.other_usage as f64 / balancer.total_usage as f64) * 100.0
+        } else {
+            0.0
+        };
+        println!();
+        println!(
+            "  {} {} ({:.1}%)",
+            "Other:".bright_cyan().bold(),
+            format_bytes(balancer.other_usage).cyan(),
+            other_percent
+        );
+        println!();
+    }
+
+    Ok(())
+}
+
+fn print_show_inspect_detail(response: &balancerpb::ShowInspectResponse) -> Result<(), Box<dyn Error>> {
+    let inspect = match &response.inspect {
+        Some(i) => i,
+        None => return Ok(()),
+    };
+
+    // Print header
+    print_boxed_header("BALANCER MEMORY INSPECTION (DETAILED)", None);
+    println!();
+
+    // Agent-level memory
+    let usage_percent = if inspect.memory_limit > 0 {
+        (inspect.memory_usage as f64 / inspect.memory_limit as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    println!("{}", "Agent Memory:".bright_cyan().bold());
+    println!("  Limit: {}", format_bytes(inspect.memory_limit).bright_green());
+    println!(
+        "  Usage: {} ({:.1}%)",
+        format_bytes(inspect.memory_usage).bright_green(),
+        usage_percent
+    );
+    println!();
+
+    // Per-balancer information
+    for (balancer_idx, balancer) in inspect.balancers.iter().enumerate() {
+        if balancer_idx > 0 {
+            println!("{}", "─".repeat(80).bright_black());
+            println!();
+        }
+
+        println!(
+            "{} {}",
+            format!("Balancer \"{}\":", balancer.name).bright_yellow().bold(),
+            format_bytes(balancer.total_usage).bright_green()
+        );
+
+        // Packet handler breakdown
+        if let Some(ph) = &balancer.packet_handler_inspect {
+            let ph_percent = if balancer.total_usage > 0 {
+                (ph.total_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!();
+            println!(
+                "  {} {} ({:.1}%)",
+                "Packet Handler:".bright_cyan().bold(),
+                format_bytes(ph.total_usage).bright_green(),
+                ph_percent
+            );
+
+            // IPv4 section with VS details
+            if let Some(ipv4) = &ph.vs_ipv4_inspect {
+                let ipv4_percent = if balancer.total_usage > 0 {
+                    (ipv4.total_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!();
+                println!(
+                    "    {} {} ({:.1}%)",
+                    "IPv4 VS Section:".bright_white(),
+                    format_bytes(ipv4.total_usage).bright_green(),
+                    ipv4_percent
+                );
+                let matcher_pct = if balancer.total_usage > 0 {
+                    (ipv4.matcher_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Matcher: {} ({:.1}%)",
+                    format_bytes(ipv4.matcher_usage).bright_green(),
+                    matcher_pct
+                );
+                let announce_pct = if balancer.total_usage > 0 {
+                    (ipv4.announce_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Announce: {} ({:.1}%)",
+                    format_bytes(ipv4.announce_usage).bright_green(),
+                    announce_pct
+                );
+                let index_pct = if balancer.total_usage > 0 {
+                    (ipv4.index_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Index: {} ({:.1}%)",
+                    format_bytes(ipv4.index_usage).bright_green(),
+                    index_pct
+                );
+
+                // Per-VS breakdown
+                if !ipv4.vs_inspects.is_empty() {
+                    println!();
+                    println!(
+                        "      {} ({}):",
+                        "Virtual Services".bright_white(),
+                        ipv4.vs_inspects.len()
+                    );
+                    for (idx, vs_inspect) in ipv4.vs_inspects.iter().enumerate() {
+                        if let Some(vs_id) = &vs_inspect.identifier {
+                            if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
+                                if let Some(inspect) = &vs_inspect.inspect {
+                                    let vs_percent = if balancer.total_usage > 0 {
+                                        (inspect.total_usage as f64 / balancer.total_usage as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    println!(
+                                        "        [{}] {}:{}/{} {} ({:.1}%)",
+                                        idx,
+                                        ip,
+                                        vs_id.port,
+                                        proto_to_string(vs_id.proto),
+                                        format_bytes(inspect.total_usage).bright_green(),
+                                        vs_percent
+                                    );
+                                    let acl_pct = if balancer.total_usage > 0 {
+                                        (inspect.acl_usage as f64 / balancer.total_usage as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    println!(
+                                        "          ACL: {} ({:.1}%)",
+                                        format_bytes(inspect.acl_usage).bright_green(),
+                                        acl_pct
+                                    );
+                                    let ring_pct = if balancer.total_usage > 0 {
+                                        (inspect.ring_usage as f64 / balancer.total_usage as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    println!(
+                                        "          Ring: {} ({:.1}%)",
+                                        format_bytes(inspect.ring_usage).bright_green(),
+                                        ring_pct
+                                    );
+                                    let counters_pct = if balancer.total_usage > 0 {
+                                        (inspect.counters_usage as f64 / balancer.total_usage as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    println!(
+                                        "          Counters: {} ({:.1}%)",
+                                        format_bytes(inspect.counters_usage).bright_green(),
+                                        counters_pct
+                                    );
+                                    if let Some(reals) = &inspect.reals_usage {
+                                        let reals_pct = if balancer.total_usage > 0 {
+                                            (reals.total_usage as f64 / balancer.total_usage as f64) * 100.0
+                                        } else {
+                                            0.0
+                                        };
+                                        println!(
+                                            "          Reals: {} ({:.1}%)",
+                                            format_bytes(reals.total_usage).bright_green(),
+                                            reals_pct
+                                        );
+                                        let reals_counters_pct = if balancer.total_usage > 0 {
+                                            (reals.counters_usage as f64 / balancer.total_usage as f64) * 100.0
+                                        } else {
+                                            0.0
+                                        };
+                                        println!(
+                                            "            Counters: {} ({:.1}%)",
+                                            format_bytes(reals.counters_usage).bright_green(),
+                                            reals_counters_pct
+                                        );
+                                        let reals_data_pct = if balancer.total_usage > 0 {
+                                            (reals.data_usage as f64 / balancer.total_usage as f64) * 100.0
+                                        } else {
+                                            0.0
+                                        };
+                                        println!(
+                                            "            Data: {} ({:.1}%)",
+                                            format_bytes(reals.data_usage).bright_green(),
+                                            reals_data_pct
+                                        );
+                                    }
+                                    let other_pct = if balancer.total_usage > 0 {
+                                        (inspect.other_usage as f64 / balancer.total_usage as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    println!(
+                                        "          Other: {} ({:.1}%)",
+                                        format_bytes(inspect.other_usage).bright_green(),
+                                        other_pct
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // IPv6 section with VS details
+            if let Some(ipv6) = &ph.vs_ipv6_inspect {
+                let ipv6_percent = if balancer.total_usage > 0 {
+                    (ipv6.total_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!();
+                println!(
+                    "    {} {} ({:.1}%)",
+                    "IPv6 VS Section:".bright_white(),
+                    format_bytes(ipv6.total_usage).bright_green(),
+                    ipv6_percent
+                );
+                let matcher_pct = if balancer.total_usage > 0 {
+                    (ipv6.matcher_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Matcher: {} ({:.1}%)",
+                    format_bytes(ipv6.matcher_usage).bright_green(),
+                    matcher_pct
+                );
+                let announce_pct = if balancer.total_usage > 0 {
+                    (ipv6.announce_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Announce: {} ({:.1}%)",
+                    format_bytes(ipv6.announce_usage).bright_green(),
+                    announce_pct
+                );
+                let index_pct = if balancer.total_usage > 0 {
+                    (ipv6.index_usage as f64 / balancer.total_usage as f64) * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "      Index: {} ({:.1}%)",
+                    format_bytes(ipv6.index_usage).bright_green(),
+                    index_pct
+                );
+
+                // Per-VS breakdown
+                if !ipv6.vs_inspects.is_empty() {
+                    println!();
+                    println!(
+                        "      {} ({}):",
+                        "Virtual Services".bright_white(),
+                        ipv6.vs_inspects.len()
+                    );
+                    for (idx, vs_inspect) in ipv6.vs_inspects.iter().enumerate() {
+                        if let Some(vs_id) = &vs_inspect.identifier {
+                            if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
+                                if let Some(inspect) = &vs_inspect.inspect {
+                                    let vs_percent = if balancer.total_usage > 0 {
+                                        (inspect.total_usage as f64 / balancer.total_usage as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    println!(
+                                        "        [{}] {}:{}/{} {} ({:.1}%)",
+                                        idx,
+                                        ip,
+                                        vs_id.port,
+                                        proto_to_string(vs_id.proto),
+                                        format_bytes(inspect.total_usage).bright_green(),
+                                        vs_percent
+                                    );
+                                    let acl_pct = if balancer.total_usage > 0 {
+                                        (inspect.acl_usage as f64 / balancer.total_usage as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    println!(
+                                        "          ACL: {} ({:.1}%)",
+                                        format_bytes(inspect.acl_usage).bright_green(),
+                                        acl_pct
+                                    );
+                                    let ring_pct = if balancer.total_usage > 0 {
+                                        (inspect.ring_usage as f64 / balancer.total_usage as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    println!(
+                                        "          Ring: {} ({:.1}%)",
+                                        format_bytes(inspect.ring_usage).bright_green(),
+                                        ring_pct
+                                    );
+                                    let counters_pct = if balancer.total_usage > 0 {
+                                        (inspect.counters_usage as f64 / balancer.total_usage as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    println!(
+                                        "          Counters: {} ({:.1}%)",
+                                        format_bytes(inspect.counters_usage).bright_green(),
+                                        counters_pct
+                                    );
+                                    if let Some(reals) = &inspect.reals_usage {
+                                        let reals_pct = if balancer.total_usage > 0 {
+                                            (reals.total_usage as f64 / balancer.total_usage as f64) * 100.0
+                                        } else {
+                                            0.0
+                                        };
+                                        println!(
+                                            "          Reals: {} ({:.1}%)",
+                                            format_bytes(reals.total_usage).bright_green(),
+                                            reals_pct
+                                        );
+                                        let reals_counters_pct = if balancer.total_usage > 0 {
+                                            (reals.counters_usage as f64 / balancer.total_usage as f64) * 100.0
+                                        } else {
+                                            0.0
+                                        };
+                                        println!(
+                                            "            Counters: {} ({:.1}%)",
+                                            format_bytes(reals.counters_usage).bright_green(),
+                                            reals_counters_pct
+                                        );
+                                        let reals_data_pct = if balancer.total_usage > 0 {
+                                            (reals.data_usage as f64 / balancer.total_usage as f64) * 100.0
+                                        } else {
+                                            0.0
+                                        };
+                                        println!(
+                                            "            Data: {} ({:.1}%)",
+                                            format_bytes(reals.data_usage).bright_green(),
+                                            reals_data_pct
+                                        );
+                                    }
+                                    let other_pct = if balancer.total_usage > 0 {
+                                        (inspect.other_usage as f64 / balancer.total_usage as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    println!(
+                                        "          Other: {} ({:.1}%)",
+                                        format_bytes(inspect.other_usage).bright_green(),
+                                        other_pct
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Other packet handler components
+            println!();
+            let vs_index_pct = if balancer.total_usage > 0 {
+                (ph.vs_index_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    VS Index: {} ({:.1}%)",
+                format_bytes(ph.vs_index_usage).bright_green(),
+                vs_index_pct
+            );
+            let reals_index_pct = if balancer.total_usage > 0 {
+                (ph.reals_index_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    Reals Index: {} ({:.1}%)",
+                format_bytes(ph.reals_index_usage).bright_green(),
+                reals_index_pct
+            );
+            let counters_pct = if balancer.total_usage > 0 {
+                (ph.counters_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    Counters: {} ({:.1}%)",
+                format_bytes(ph.counters_usage).bright_green(),
+                counters_pct
+            );
+            let decap_pct = if balancer.total_usage > 0 {
+                (ph.decap_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    Decap: {} ({:.1}%)",
+                format_bytes(ph.decap_usage).bright_green(),
+                decap_pct
+            );
+        }
+
+        // State breakdown
+        if let Some(state) = &balancer.state_inspect {
+            let state_percent = if balancer.total_usage > 0 {
+                (state.total_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!();
+            println!(
+                "  {} {} ({:.1}%)",
+                "State:".bright_cyan().bold(),
+                format_bytes(state.total_usage).bright_green(),
+                state_percent
+            );
+            let vs_reg_pct = if balancer.total_usage > 0 {
+                (state.vs_registry_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    VS Registry: {} ({:.1}%)",
+                format_bytes(state.vs_registry_usage).bright_green(),
+                vs_reg_pct
+            );
+            let reals_reg_pct = if balancer.total_usage > 0 {
+                (state.reals_registry_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    Reals Registry: {} ({:.1}%)",
+                format_bytes(state.reals_registry_usage).bright_green(),
+                reals_reg_pct
+            );
+            let session_pct = if balancer.total_usage > 0 {
+                (state.session_table_usage as f64 / balancer.total_usage as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "    Session Table: {} ({:.1}%)",
+                format_bytes(state.session_table_usage).bright_green(),
+                session_pct
+            );
+        }
+
+        // Other usage
+        let other_percent = if balancer.total_usage > 0 {
+            (balancer.other_usage as f64 / balancer.total_usage as f64) * 100.0
+        } else {
+            0.0
+        };
+        println!();
+        println!(
+            "  {} {} ({:.1}%)",
+            "Other:".bright_cyan().bold(),
+            format_bytes(balancer.other_usage).cyan(),
+            other_percent
+        );
+        println!();
     }
 
     Ok(())

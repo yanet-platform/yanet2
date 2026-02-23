@@ -104,13 +104,13 @@ struct named_balancer_inspect {
 struct agent_inspect {
 	/** Agent memory limit (configured maximum) */
 	uint64_t memory_limit;
-	
+
 	/** Current memory usage */
 	uint64_t memory_usage;
-	
+
 	/** Number of balancers in the array */
 	size_t balancer_count;
-	
+
 	/** Array of balancer inspections */
 	struct named_balancer_inspect *balancers;
 };

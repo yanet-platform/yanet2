@@ -684,3 +684,205 @@ pub fn convert_update_info(info: &balancerpb::UpdateInfo) -> UpdateInfoJson {
             .collect(),
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// ShowInspect JSON structures
+////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Serialize)]
+pub struct AgentInspectJson {
+    pub memory_limit: u64,
+    pub memory_usage: u64,
+    pub balancers: Vec<BalancerInspectJson>,
+}
+
+#[derive(Serialize)]
+pub struct BalancerInspectJson {
+    pub name: String,
+    pub packet_handler_inspect: PacketHandlerInspectJson,
+    pub state_inspect: StateInspectJson,
+    pub other_usage: u64,
+    pub total_usage: u64,
+}
+
+#[derive(Serialize)]
+pub struct PacketHandlerInspectJson {
+    pub vs_ipv4_inspect: PacketHandlerVsInspectJson,
+    pub vs_ipv6_inspect: PacketHandlerVsInspectJson,
+    pub summary_vs_usage: u64,
+    pub vs_index_usage: u64,
+    pub reals_index_usage: u64,
+    pub counters_usage: u64,
+    pub decap_usage: u64,
+    pub total_usage: u64,
+}
+
+#[derive(Serialize)]
+pub struct PacketHandlerVsInspectJson {
+    pub matcher_usage: u64,
+    pub summary_vs_usage: u64,
+    pub vs_inspects: Vec<NamedVsInspectJson>,
+    pub announce_usage: u64,
+    pub index_usage: u64,
+    pub total_usage: u64,
+}
+
+#[derive(Serialize)]
+pub struct NamedVsInspectJson {
+    pub identifier: Option<VsIdentifierJson>,
+    pub inspect: VsInspectJson,
+}
+
+#[derive(Serialize)]
+pub struct VsInspectJson {
+    pub acl_usage: u64,
+    pub ring_usage: u64,
+    pub counters_usage: u64,
+    pub reals_usage: RealsUsageJson,
+    pub other_usage: u64,
+    pub total_usage: u64,
+}
+
+#[derive(Serialize)]
+pub struct RealsUsageJson {
+    pub counters_usage: u64,
+    pub data_usage: u64,
+    pub total_usage: u64,
+}
+
+#[derive(Serialize)]
+pub struct StateInspectJson {
+    pub vs_registry_usage: u64,
+    pub reals_registry_usage: u64,
+    pub session_table_usage: u64,
+    pub total_usage: u64,
+}
+
+pub fn convert_show_inspect(response: &balancerpb::ShowInspectResponse) -> AgentInspectJson {
+    let inspect = response.inspect.as_ref();
+
+    AgentInspectJson {
+        memory_limit: inspect.map(|i| i.memory_limit).unwrap_or(0),
+        memory_usage: inspect.map(|i| i.memory_usage).unwrap_or(0),
+        balancers: inspect
+            .map(|i| {
+                i.balancers
+                    .iter()
+                    .map(|b| BalancerInspectJson {
+                        name: b.name.clone(),
+                        packet_handler_inspect: convert_packet_handler_inspect(b.packet_handler_inspect.as_ref()),
+                        state_inspect: convert_state_inspect(b.state_inspect.as_ref()),
+                        other_usage: b.other_usage,
+                        total_usage: b.total_usage,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
+fn convert_packet_handler_inspect(ph: Option<&balancerpb::PacketHandlerInspect>) -> PacketHandlerInspectJson {
+    match ph {
+        Some(ph) => PacketHandlerInspectJson {
+            vs_ipv4_inspect: convert_packet_handler_vs_inspect(ph.vs_ipv4_inspect.as_ref()),
+            vs_ipv6_inspect: convert_packet_handler_vs_inspect(ph.vs_ipv6_inspect.as_ref()),
+            summary_vs_usage: ph.summary_vs_usage,
+            vs_index_usage: ph.vs_index_usage,
+            reals_index_usage: ph.reals_index_usage,
+            counters_usage: ph.counters_usage,
+            decap_usage: ph.decap_usage,
+            total_usage: ph.total_usage,
+        },
+        None => PacketHandlerInspectJson {
+            vs_ipv4_inspect: convert_packet_handler_vs_inspect(None),
+            vs_ipv6_inspect: convert_packet_handler_vs_inspect(None),
+            summary_vs_usage: 0,
+            vs_index_usage: 0,
+            reals_index_usage: 0,
+            counters_usage: 0,
+            decap_usage: 0,
+            total_usage: 0,
+        },
+    }
+}
+
+fn convert_packet_handler_vs_inspect(vs: Option<&balancerpb::PacketHandlerVsInspect>) -> PacketHandlerVsInspectJson {
+    match vs {
+        Some(vs) => PacketHandlerVsInspectJson {
+            matcher_usage: vs.matcher_usage,
+            summary_vs_usage: vs.summary_vs_usage,
+            vs_inspects: vs
+                .vs_inspects
+                .iter()
+                .map(|nvi| NamedVsInspectJson {
+                    identifier: convert_vs_identifier(nvi.identifier.as_ref()),
+                    inspect: convert_vs_inspect(nvi.inspect.as_ref()),
+                })
+                .collect(),
+            announce_usage: vs.announce_usage,
+            index_usage: vs.index_usage,
+            total_usage: vs.total_usage,
+        },
+        None => PacketHandlerVsInspectJson {
+            matcher_usage: 0,
+            summary_vs_usage: 0,
+            vs_inspects: Vec::new(),
+            announce_usage: 0,
+            index_usage: 0,
+            total_usage: 0,
+        },
+    }
+}
+
+fn convert_vs_inspect(vs: Option<&balancerpb::VsInspect>) -> VsInspectJson {
+    match vs {
+        Some(vs) => VsInspectJson {
+            acl_usage: vs.acl_usage,
+            ring_usage: vs.ring_usage,
+            counters_usage: vs.counters_usage,
+            reals_usage: convert_reals_usage(vs.reals_usage.as_ref()),
+            other_usage: vs.other_usage,
+            total_usage: vs.total_usage,
+        },
+        None => VsInspectJson {
+            acl_usage: 0,
+            ring_usage: 0,
+            counters_usage: 0,
+            reals_usage: convert_reals_usage(None),
+            other_usage: 0,
+            total_usage: 0,
+        },
+    }
+}
+
+fn convert_reals_usage(reals: Option<&balancerpb::RealsUsage>) -> RealsUsageJson {
+    match reals {
+        Some(reals) => RealsUsageJson {
+            counters_usage: reals.counters_usage,
+            data_usage: reals.data_usage,
+            total_usage: reals.total_usage,
+        },
+        None => RealsUsageJson {
+            counters_usage: 0,
+            data_usage: 0,
+            total_usage: 0,
+        },
+    }
+}
+
+fn convert_state_inspect(state: Option<&balancerpb::StateInspect>) -> StateInspectJson {
+    match state {
+        Some(state) => StateInspectJson {
+            vs_registry_usage: state.vs_registry_usage,
+            reals_registry_usage: state.reals_registry_usage,
+            session_table_usage: state.session_table_usage,
+            total_usage: state.total_usage,
+        },
+        None => StateInspectJson {
+            vs_registry_usage: 0,
+            reals_registry_usage: 0,
+            session_table_usage: 0,
+            total_usage: 0,
+        },
+    }
+}

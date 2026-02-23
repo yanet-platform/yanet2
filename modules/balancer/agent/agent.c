@@ -1,8 +1,8 @@
 #include "agent.h"
-#include "manager.h"
 #include "api/agent.h"
 #include "controlplane/agent/agent.h"
 #include "controlplane/diag/diag.h"
+#include "manager.h"
 #include "modules/balancer/controlplane/api/balancer.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -50,28 +50,27 @@ balancer_agent_inspect(
 	struct balancer_agent *agent, struct agent_inspect *inspect
 ) {
 	struct agent *base_agent = (struct agent *)agent;
-	
+
 	// Get memory context statistics
 	inspect->memory_limit = base_agent->memory_limit;
 	inspect->memory_usage = base_agent->memory_context.balloc_size -
 				base_agent->memory_context.bfree_size;
-	
+
 	// Get all managers
 	struct balancer_managers managers;
 	balancer_agent_managers(agent, &managers);
-	
+
 	inspect->balancer_count = managers.count;
-	
+
 	if (managers.count == 0) {
 		inspect->balancers = NULL;
 		return;
 	}
-	
+
 	// Allocate array for balancer inspections
-	inspect->balancers = calloc(
-		managers.count, sizeof(struct named_balancer_inspect)
-	);
-	
+	inspect->balancers =
+		calloc(managers.count, sizeof(struct named_balancer_inspect));
+
 	// Fill in each balancer inspection
 	for (size_t i = 0; i < managers.count; ++i) {
 		struct balancer_manager *manager = managers.managers[i];
@@ -87,12 +86,12 @@ balancer_agent_inspect_free(struct agent_inspect *inspect) {
 	if (inspect == NULL || inspect->balancers == NULL) {
 		return;
 	}
-	
+
 	// Free each balancer inspection
 	for (size_t i = 0; i < inspect->balancer_count; ++i) {
 		balancer_manager_inspect_free(&inspect->balancers[i].inspect);
 	}
-	
+
 	// Free the balancers array
 	free(inspect->balancers);
 	inspect->balancers = NULL;

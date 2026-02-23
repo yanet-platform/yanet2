@@ -60,6 +60,40 @@ impl FormatFlags {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Inspect Format Flags
+////////////////////////////////////////////////////////////////////////////////
+
+/// Helper struct for inspect output format flags
+#[derive(Debug, Clone, Parser)]
+pub struct InspectFormatFlags {
+    /// Output in JSON format (compact, not pretty)
+    #[clap(long, short = 'j', conflicts_with_all = ["normal", "detail"])]
+    pub json: bool,
+
+    /// Output in normal format (default, excludes per-VS list)
+    #[clap(long, conflicts_with_all = ["json", "detail"])]
+    pub normal: bool,
+
+    /// Output in detailed format (includes per-VS breakdown)
+    #[clap(long, conflicts_with_all = ["json", "normal"])]
+    pub detail: bool,
+}
+
+impl InspectFormatFlags {
+    /// Convert flags to InspectOutputFormat, defaulting to Normal if none specified
+    pub fn to_format(&self) -> crate::output::InspectOutputFormat {
+        if self.json {
+            output::InspectOutputFormat::Json
+        } else if self.detail {
+            output::InspectOutputFormat::Detail
+        } else {
+            // Default to normal if no format specified or if --normal is explicitly set
+            output::InspectOutputFormat::Normal
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Commands
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -81,6 +115,8 @@ pub enum Mode {
     Sessions(SessionsCmd),
     /// Show balancing graph with state and weights of reals
     Graph(GraphCmd),
+    /// Show memory usage inspection
+    Inspect(InspectCmd),
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -487,5 +523,21 @@ pub struct GraphCmd {
 impl From<&GraphCmd> for balancerpb::ShowGraphRequest {
     fn from(cmd: &GraphCmd) -> Self {
         Self { name: cmd.name.clone() }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Inspect Command
+////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Debug, Clone, Parser)]
+pub struct InspectCmd {
+    #[clap(flatten)]
+    pub format: InspectFormatFlags,
+}
+
+impl From<&InspectCmd> for balancerpb::ShowInspectRequest {
+    fn from(_cmd: &InspectCmd) -> Self {
+        Self {}
     }
 }

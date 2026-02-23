@@ -53,6 +53,7 @@ impl BalancerService {
             Mode::Info(cmd) => self.info(cmd).await,
             Mode::Sessions(cmd) => self.sessions(cmd).await,
             Mode::Graph(cmd) => self.graph(cmd).await,
+            Mode::Inspect(cmd) => self.inspect(cmd).await,
         }
     }
 
@@ -233,6 +234,17 @@ impl BalancerService {
         let response = self.client.show_graph(request).await?.into_inner();
 
         output::print_show_graph(&response, cmd.format.to_format())?;
+        Ok(())
+    }
+
+    /// Show memory usage inspection
+    async fn inspect(&mut self, cmd: InspectCmd) -> Result<(), Box<dyn Error>> {
+        log::debug!("Fetching memory inspection");
+
+        let request: balancerpb::ShowInspectRequest = (&cmd).into();
+        let response = self.client.show_inspect(request).await?.into_inner();
+
+        output::print_show_inspect(&response, cmd.format.to_format())?;
         Ok(())
     }
 }
