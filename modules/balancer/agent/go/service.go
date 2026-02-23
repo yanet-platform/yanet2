@@ -343,3 +343,18 @@ func (m *BalancerService) ShowGraph(
 		Graph: graph,
 	}, nil
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+// ShowInspect returns memory inspection information for the balancer agent
+func (m *BalancerService) ShowInspect(
+	ctx context.Context,
+	req *balancerpb.ShowInspectRequest,
+) (*balancerpb.ShowInspectResponse, error) {
+	// Get inspect data from agent
+	inspect := m.agent.Inspect()
+
+	return &balancerpb.ShowInspectResponse{
+		Inspect: inspect,
+	}, nil
+}

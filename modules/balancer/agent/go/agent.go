@@ -119,3 +119,11 @@ func (a *BalancerAgent) Managers() []string {
 	}
 	return res
 }
+
+func (a *BalancerAgent) Inspect() *balancerpb.AgentInspect {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	ffiInspect := a.handle.Inspect()
+	return ConvertAgentInspectToProto(ffiInspect)
+}

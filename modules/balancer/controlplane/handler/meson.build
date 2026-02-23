@@ -17,7 +17,8 @@ sources = files(
     'info.c',
     'rules.c',
     'init.c',
-    'services.c'
+    'services.c',
+    'inspect.c'
 )
 
 lib_balancer_packet_handler = static_library(

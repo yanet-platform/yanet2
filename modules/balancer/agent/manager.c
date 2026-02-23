@@ -509,3 +509,31 @@ void
 balancer_manager_graph_free(struct balancer_graph *graph) {
 	balancer_graph_free(graph);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+void
+balancer_manager_inspect(
+	struct balancer_manager *manager, struct balancer_inspect *inspect
+) {
+	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
+	balancer_inspect(balancer, inspect);
+}
+
+void
+balancer_manager_inspect_free(struct balancer_inspect *inspect) {
+	if (inspect == NULL) {
+		return;
+	}
+	
+	// Free packet handler inspect nested structures
+	if (inspect->packet_handler_inspect.vs_ipv4_inspect.vs_inspects != NULL) {
+		free(inspect->packet_handler_inspect.vs_ipv4_inspect.vs_inspects);
+		inspect->packet_handler_inspect.vs_ipv4_inspect.vs_inspects = NULL;
+	}
+	
+	if (inspect->packet_handler_inspect.vs_ipv6_inspect.vs_inspects != NULL) {
+		free(inspect->packet_handler_inspect.vs_ipv6_inspect.vs_inspects);
+		inspect->packet_handler_inspect.vs_ipv6_inspect.vs_inspects = NULL;
+	}
+}

@@ -576,6 +576,34 @@ balancer_manager_graph_free(struct balancer_graph *graph);
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
+ * Retrieve memory inspection for this manager's balancer.
+ *
+ * Fills the provided balancer_inspect structure with detailed memory
+ * usage information for the balancer instance managed by this manager.
+ * The structure contains nested allocations that must be freed with
+ * balancer_manager_inspect_free().
+ *
+ * @param manager Manager handle.
+ * @param inspect Output structure to be filled with inspection data.
+ */
+void
+balancer_manager_inspect(
+	struct balancer_manager *manager, struct balancer_inspect *inspect
+);
+
+/**
+ * Free all allocations inside a balancer_inspect structure.
+ *
+ * Releases memory allocated by balancer_manager_inspect() for nested
+ * arrays and structures. Safe to call with partially-initialized
+ * structures; ignores NULL pointers.
+ *
+ * @param inspect Structure to release. The struct itself is not freed.
+ */
+void
+balancer_manager_inspect_free(struct balancer_inspect *inspect);
+
+/**
  * Retrieve the last diagnostic error message for this manager.
  *
  * Returns the most recent error message recorded by manager operations.

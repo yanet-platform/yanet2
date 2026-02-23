@@ -5,6 +5,7 @@ proto_files = [
     join_paths(root_dir, 'modules/balancer/agent/balancerpb/info.proto'),
     join_paths(root_dir, 'modules/balancer/agent/balancerpb/graph.proto'),
     join_paths(root_dir, 'modules/balancer/agent/balancerpb/module.proto'),
+    join_paths(root_dir, 'modules/balancer/agent/balancerpb/inspect.proto'),
 ]
 
 protoc_gen = custom_target(
@@ -16,6 +17,7 @@ protoc_gen = custom_target(
         'info.pb.go',
         'graph.pb.go',
         'module.pb.go',
+        'inspect.pb.go',
     ],
     input: proto_files,
     command: [

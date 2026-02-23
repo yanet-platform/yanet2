@@ -7,10 +7,12 @@ package ffi
 /*
 #cgo CFLAGS: -I../../ -I../../../../../
 #cgo LDFLAGS: -L../../../../../build/modules/balancer/agent -lbalancer_agent -L../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -lbalancer_state
+#include "agent.h"
 #include "manager.h"
 #include "modules/balancer/controlplane/api/graph.h"
 #include "modules/balancer/controlplane/api/vs.h"
 #include "modules/balancer/controlplane/api/real.h"
+#include "modules/balancer/controlplane/api/inspect.h"
 #include <stdlib.h>
 #include <string.h>
 */
@@ -1329,4 +1331,133 @@ func cToGoUpdateInfo(cInfo *C.struct_balancer_update_info) *UpdateInfo {
 	}
 
 	return info
+}
+
+// AgentInspect conversions
+
+func cToGoAgentInspect(cInspect *C.struct_agent_inspect) *AgentInspect {
+	if cInspect == nil {
+		return nil
+	}
+
+	inspect := &AgentInspect{
+		MemoryLimit: uint64(cInspect.memory_limit),
+		MemoryUsage: uint64(cInspect.memory_usage),
+	}
+
+	// Convert balancers array
+	if cInspect.balancer_count > 0 && cInspect.balancers != nil {
+		cBalancersSlice := unsafe.Slice(
+			cInspect.balancers,
+			cInspect.balancer_count,
+		)
+		inspect.Balancers = make(
+			[]NamedBalancerInspect,
+			cInspect.balancer_count,
+		)
+		for i := range inspect.Balancers {
+			inspect.Balancers[i] = *cToGoNamedBalancerInspect(
+				&cBalancersSlice[i],
+			)
+		}
+	}
+
+	return inspect
+}
+
+func cToGoNamedBalancerInspect(
+	cInspect *C.struct_named_balancer_inspect,
+) *NamedBalancerInspect {
+	return &NamedBalancerInspect{
+		Name:    C.GoString(cInspect.name),
+		Inspect: *cToGoBalancerInspect(&cInspect.inspect),
+	}
+}
+
+func cToGoBalancerInspect(cInspect *C.struct_balancer_inspect) *BalancerInspect {
+	return &BalancerInspect{
+		PacketHandler: *cToGoPacketHandlerInspect(
+			&cInspect.packet_handler_inspect,
+		),
+		State:      *cToGoStateInspect(&cInspect.state_inspect),
+		OtherUsage: uint64(cInspect.other_usage),
+		TotalUsage: uint64(cInspect.total_usage),
+	}
+}
+
+func cToGoPacketHandlerInspect(
+	cInspect *C.struct_packet_handler_inspect,
+) *PacketHandlerInspect {
+	return &PacketHandlerInspect{
+		VsIpv4Inspect: *cToGoPacketHandlerVsInspect(
+			&cInspect.vs_ipv4_inspect,
+		),
+		VsIpv6Inspect: *cToGoPacketHandlerVsInspect(
+			&cInspect.vs_ipv6_inspect,
+		),
+		SummaryVsUsage:  uint64(cInspect.summary_vs_usage),
+		VsIndexUsage:    uint64(cInspect.vs_index_usage),
+		RealsIndexUsage: uint64(cInspect.reals_index_usage),
+		CountersUsage:   uint64(cInspect.counters_usage),
+		DecapUsage:      uint64(cInspect.decap_usage),
+		TotalUsage:      uint64(cInspect.total_usage),
+	}
+}
+
+func cToGoPacketHandlerVsInspect(
+	cInspect *C.struct_packet_handler_vs_inspect,
+) *PacketHandlerVsInspect {
+	inspect := &PacketHandlerVsInspect{
+		MatcherUsage:   uint64(cInspect.matcher_usage),
+		SummaryVsUsage: uint64(cInspect.summary_vs_usage),
+		AnnounceUsage:  uint64(cInspect.announce_usage),
+		IndexUsage:     uint64(cInspect.index_usage),
+		TotalUsage:     uint64(cInspect.total_usage),
+	}
+
+	// Convert VS inspects array
+	if cInspect.vs_count > 0 && cInspect.vs_inspects != nil {
+		cVsSlice := unsafe.Slice(cInspect.vs_inspects, cInspect.vs_count)
+		inspect.VsInspects = make([]NamedVsInspect, cInspect.vs_count)
+		for i := range inspect.VsInspects {
+			inspect.VsInspects[i] = *cToGoNamedVsInspect(&cVsSlice[i])
+		}
+	}
+
+	return inspect
+}
+
+func cToGoNamedVsInspect(cInspect *C.struct_named_vs_inspect) *NamedVsInspect {
+	return &NamedVsInspect{
+		Identifier: cToGoVsIdentifier(cInspect.identifier),
+		Inspect:    *cToGoVsInspect(&cInspect.inspect),
+	}
+}
+
+func cToGoVsInspect(cInspect *C.struct_vs_inspect) *VsInspect {
+	return &VsInspect{
+		AclUsage:      uint64(cInspect.acl_usage),
+		RingUsage:     uint64(cInspect.ring_usage),
+		CountersUsage: uint64(cInspect.counters_usage),
+		RealsUsage:    *cToGoRealsUsage(&cInspect.reals_usage),
+		OtherUsage:    uint64(cInspect.other_usage),
+		TotalUsage:    uint64(cInspect.total_usage),
+	}
+}
+
+func cToGoRealsUsage(cUsage *C.struct_reals_usage) *RealsUsage {
+	return &RealsUsage{
+		CountersUsage: uint64(cUsage.counters_usage),
+		DataUsage:     uint64(cUsage.data_usage),
+		TotalUsage:    uint64(cUsage.total_usage),
+	}
+}
+
+func cToGoStateInspect(cInspect *C.struct_state_inspect) *StateInspect {
+	return &StateInspect{
+		VsRegistryUsage:    uint64(cInspect.vs_registry_usage),
+		RealsRegistryUsage: uint64(cInspect.reals_registry_usage),
+		SessionTableUsage:  uint64(cInspect.session_table_usage),
+		TotalUsage:         uint64(cInspect.total_usage),
+	}
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "modules/balancer/controlplane/api/inspect.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -84,6 +86,61 @@ balancer_agent_new_manager(
 	const char *name,
 	struct balancer_manager_config *config
 );
+
+/**
+ * Named balancer inspection with name and memory usage details.
+ */
+struct named_balancer_inspect {
+	const char *name;
+	struct balancer_inspect inspect;
+};
+
+/**
+ * Agent-level memory inspection.
+ *
+ * Provides agent memory usage information and detailed inspection
+ * for all balancer instances managed by this agent.
+ */
+struct agent_inspect {
+	/** Agent memory limit (configured maximum) */
+	uint64_t memory_limit;
+	
+	/** Current memory usage */
+	uint64_t memory_usage;
+	
+	/** Number of balancers in the array */
+	size_t balancer_count;
+	
+	/** Array of balancer inspections */
+	struct named_balancer_inspect *balancers;
+};
+
+/**
+ * Retrieve agent-level memory inspection.
+ *
+ * Fills the provided agent_inspect structure with agent memory usage
+ * and detailed inspection for all balancer instances. The balancers
+ * array is allocated and must be freed with balancer_agent_inspect_free().
+ *
+ * @param agent   Agent handle.
+ * @param inspect Output structure to be filled with inspection data.
+ */
+void
+balancer_agent_inspect(
+	struct balancer_agent *agent, struct agent_inspect *inspect
+);
+
+/**
+ * Free all allocations inside an agent_inspect structure.
+ *
+ * Releases memory allocated by balancer_agent_inspect() for the
+ * balancers array and nested structures. Safe to call with
+ * partially-initialized structures; ignores NULL pointers.
+ *
+ * @param inspect Structure to release. The struct itself is not freed.
+ */
+void
+balancer_agent_inspect_free(struct agent_inspect *inspect);
 
 /**
  * Retrieve the last diagnostic error message for this agent.

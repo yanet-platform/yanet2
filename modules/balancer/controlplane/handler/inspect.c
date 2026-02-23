@@ -1,4 +1,5 @@
 #include "inspect.h"
+#include "api/inspect.h"
 #include "api/stats.h"
 #include "common/lpm.h"
 #include "common/memory_address.h"
@@ -17,12 +18,12 @@ packet_handler_vs_inspect(
 	inspect->summary_vs_usage = 0;
 	inspect->vs_count = handler_vs->vs_count;
 	inspect->vs_inspects =
-		malloc(sizeof(struct vs_inspect) * handler_vs->vs_count);
+		malloc(sizeof(struct named_vs_inspect) * handler_vs->vs_count);
 	struct vs *vs = ADDR_OF(&handler_vs->vs);
 	for (size_t vs_idx = 0; vs_idx < handler_vs->vs_count; ++vs_idx) {
 		struct named_vs_inspect *vs_inspect =
 			inspect->vs_inspects + vs_idx;
-		vs_inspect->identifier = vs_inspect->identifier;
+		vs_inspect->identifier = vs[vs_idx].identifier;
 		vs_fill_inspect(vs + vs_idx, &vs_inspect->inspect, workers);
 		inspect->summary_vs_usage += vs_inspect->inspect.total_usage;
 	}

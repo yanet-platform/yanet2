@@ -6,6 +6,7 @@ package ffi
 #cgo CFLAGS: -I../../ -I../../../../../
 #cgo LDFLAGS: -L../../../../../build/modules/balancer/agent -lbalancer_agent -L../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -lbalancer_state
 #include "agent.h"
+#include "modules/balancer/controlplane/api/inspect.h"
 #include <stdlib.h>
 */
 import "C"
@@ -94,4 +95,13 @@ func (a *BalancerAgent) NewManager(
 	}
 
 	return &BalancerManager{handle: handle}, nil
+}
+
+// Inspect retrieves agent-level memory inspection
+func (a *BalancerAgent) Inspect() *AgentInspect {
+	var cInspect C.struct_agent_inspect
+	C.balancer_agent_inspect(a.handle, &cInspect)
+	inspect := cToGoAgentInspect(&cInspect)
+	C.balancer_agent_inspect_free(&cInspect)
+	return inspect
 }

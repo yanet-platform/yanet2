@@ -303,3 +303,77 @@ type UpdateInfo struct {
 	VsIpv6MatcherReused bool           // Whether IPv6 VS matcher was reused
 	ACLReusedVs         []VsIdentifier // VS identifiers for which ACL was reused
 }
+
+// RealsUsage contains memory usage for real servers within a VS
+type RealsUsage struct {
+	CountersUsage uint64
+	DataUsage     uint64
+	TotalUsage    uint64
+}
+
+// VsInspect contains memory usage for a single virtual service
+type VsInspect struct {
+	AclUsage      uint64
+	RingUsage     uint64
+	CountersUsage uint64
+	RealsUsage    RealsUsage
+	OtherUsage    uint64
+	TotalUsage    uint64
+}
+
+// NamedVsInspect pairs a VS identifier with its memory inspection
+type NamedVsInspect struct {
+	Identifier VsIdentifier
+	Inspect    VsInspect
+}
+
+// PacketHandlerVsInspect contains memory usage for IPv4 or IPv6 packet handler VS section
+type PacketHandlerVsInspect struct {
+	MatcherUsage   uint64
+	SummaryVsUsage uint64
+	VsInspects     []NamedVsInspect
+	AnnounceUsage  uint64
+	IndexUsage     uint64
+	TotalUsage     uint64
+}
+
+// PacketHandlerInspect contains complete packet handler memory usage
+type PacketHandlerInspect struct {
+	VsIpv4Inspect   PacketHandlerVsInspect
+	VsIpv6Inspect   PacketHandlerVsInspect
+	SummaryVsUsage  uint64
+	VsIndexUsage    uint64
+	RealsIndexUsage uint64
+	CountersUsage   uint64
+	DecapUsage      uint64
+	TotalUsage      uint64
+}
+
+// StateInspect contains state memory usage
+type StateInspect struct {
+	VsRegistryUsage    uint64
+	RealsRegistryUsage uint64
+	SessionTableUsage  uint64
+	TotalUsage         uint64
+}
+
+// BalancerInspect contains per-balancer memory inspection
+type BalancerInspect struct {
+	PacketHandler PacketHandlerInspect
+	State         StateInspect
+	OtherUsage    uint64
+	TotalUsage    uint64
+}
+
+// NamedBalancerInspect pairs a balancer name with its memory inspection
+type NamedBalancerInspect struct {
+	Name    string
+	Inspect BalancerInspect
+}
+
+// AgentInspect contains agent-level memory inspection
+type AgentInspect struct {
+	MemoryLimit uint64
+	MemoryUsage uint64
+	Balancers   []NamedBalancerInspect
+}

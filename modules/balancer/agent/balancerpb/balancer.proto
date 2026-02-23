@@ -4,6 +4,7 @@ package balancerpb;
 
 import "modules/balancer/agent/balancerpb/graph.proto";
 import "modules/balancer/agent/balancerpb/info.proto";
+import "modules/balancer/agent/balancerpb/inspect.proto";
 import "modules/balancer/agent/balancerpb/module.proto";
 import "modules/balancer/agent/balancerpb/stats.proto";
 
@@ -106,7 +107,18 @@ service BalancerService {
 	// so they may not reflect the exact current state.
 	rpc ShowInfo(ShowInfoRequest) returns (ShowInfoResponse);
 
+	// Show balancer topology graph.
+	//
+	// Returns a snapshot of the complete balancer topology showing all
+	// virtual services and their real servers with current operational
+	// states (effective weights, enabled status).
 	rpc ShowGraph(ShowGraphRequest) returns (ShowGraphResponse);
+
+	// Show memory usage inspection.
+	//
+	// Returns agent-level memory usage information including memory limit,
+	// current usage, and detailed memory inspection for all balancer instances.
+	rpc ShowInspect(ShowInspectRequest) returns (ShowInspectResponse);
 
 	// Show active sessions.
 	//
@@ -366,4 +378,17 @@ message ShowGraphResponse {
 	string name = 1;
 
 	Graph graph = 2;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+// Request to show memory usage inspection.
+message ShowInspectRequest {
+	// Empty - returns agent-level inspect with all balancers
+}
+
+// Response containing memory usage inspection.
+message ShowInspectResponse {
+	// Agent-level memory inspection including all balancers
+	AgentInspect inspect = 1;
 }

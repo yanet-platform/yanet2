@@ -1402,3 +1402,152 @@ func ConvertFFIRealUpdateToProto(
 
 	return result
 }
+
+// ConvertAgentInspectToProto converts FFI agent inspect to protobuf
+func ConvertAgentInspectToProto(
+	inspect *ffi.AgentInspect,
+) *balancerpb.AgentInspect {
+	if inspect == nil {
+		return &balancerpb.AgentInspect{}
+	}
+
+	balancers := make([]*balancerpb.BalancerInspect, 0, len(inspect.Balancers))
+	for i := range inspect.Balancers {
+		balancers = append(balancers, ConvertNamedBalancerInspectToProto(&inspect.Balancers[i]))
+	}
+
+	return &balancerpb.AgentInspect{
+		MemoryUsage: inspect.MemoryUsage,
+		MemoryLimit: inspect.MemoryLimit,
+		Balancers:   balancers,
+	}
+}
+
+// ConvertNamedBalancerInspectToProto converts FFI named balancer inspect to protobuf
+func ConvertNamedBalancerInspectToProto(
+	inspect *ffi.NamedBalancerInspect,
+) *balancerpb.BalancerInspect {
+	if inspect == nil {
+		return &balancerpb.BalancerInspect{}
+	}
+
+	return &balancerpb.BalancerInspect{
+		Name:                 inspect.Name,
+		PacketHandlerInspect: ConvertPacketHandlerInspectToProto(&inspect.Inspect.PacketHandler),
+		StateInspect:         ConvertStateInspectToProto(&inspect.Inspect.State),
+		OtherUsage:           inspect.Inspect.OtherUsage,
+		TotalUsage:           inspect.Inspect.TotalUsage,
+	}
+}
+
+// ConvertPacketHandlerInspectToProto converts FFI packet handler inspect to protobuf
+func ConvertPacketHandlerInspectToProto(
+	inspect *ffi.PacketHandlerInspect,
+) *balancerpb.PacketHandlerInspect {
+	if inspect == nil {
+		return &balancerpb.PacketHandlerInspect{}
+	}
+
+	return &balancerpb.PacketHandlerInspect{
+		VsIpv4Inspect:   ConvertPacketHandlerVsInspectToProto(&inspect.VsIpv4Inspect),
+		VsIpv6Inspect:   ConvertPacketHandlerVsInspectToProto(&inspect.VsIpv6Inspect),
+		SummaryVsUsage:  inspect.SummaryVsUsage,
+		VsIndexUsage:    inspect.VsIndexUsage,
+		RealsIndexUsage: inspect.RealsIndexUsage,
+		CountersUsage:   inspect.CountersUsage,
+		DecapUsage:      inspect.DecapUsage,
+		TotalUsage:      inspect.TotalUsage,
+	}
+}
+
+// ConvertPacketHandlerVsInspectToProto converts FFI packet handler VS inspect to protobuf
+func ConvertPacketHandlerVsInspectToProto(
+	inspect *ffi.PacketHandlerVsInspect,
+) *balancerpb.PacketHandlerVsInspect {
+	if inspect == nil {
+		return &balancerpb.PacketHandlerVsInspect{}
+	}
+
+	vsInspects := make([]*balancerpb.NamedVsInspect, 0, len(inspect.VsInspects))
+	for i := range inspect.VsInspects {
+		vsInspects = append(vsInspects, ConvertNamedVsInspectToProto(&inspect.VsInspects[i]))
+	}
+
+	return &balancerpb.PacketHandlerVsInspect{
+		MatcherUsage:   inspect.MatcherUsage,
+		SummaryVsUsage: inspect.SummaryVsUsage,
+		VsInspects:     vsInspects,
+		AnnounceUsage:  inspect.AnnounceUsage,
+		IndexUsage:     inspect.IndexUsage,
+		TotalUsage:     inspect.TotalUsage,
+	}
+}
+
+// ConvertNamedVsInspectToProto converts FFI named VS inspect to protobuf
+func ConvertNamedVsInspectToProto(
+	inspect *ffi.NamedVsInspect,
+) *balancerpb.NamedVsInspect {
+	if inspect == nil {
+		return &balancerpb.NamedVsInspect{}
+	}
+
+	return &balancerpb.NamedVsInspect{
+		Identifier: &balancerpb.VsIdentifier{
+			Addr: &balancerpb.Addr{
+				Bytes: inspect.Identifier.Addr.AsSlice(),
+			},
+			Port:  uint32(inspect.Identifier.Port),
+			Proto: ConvertFFIProtoToProto(inspect.Identifier.TransportProto),
+		},
+		Inspect: ConvertVsInspectToProto(&inspect.Inspect),
+	}
+}
+
+// ConvertVsInspectToProto converts FFI VS inspect to protobuf
+func ConvertVsInspectToProto(
+	inspect *ffi.VsInspect,
+) *balancerpb.VsInspect {
+	if inspect == nil {
+		return &balancerpb.VsInspect{}
+	}
+
+	return &balancerpb.VsInspect{
+		AclUsage:      inspect.AclUsage,
+		RingUsage:     inspect.RingUsage,
+		CountersUsage: inspect.CountersUsage,
+		RealsUsage:    ConvertRealsUsageToProto(&inspect.RealsUsage),
+		OtherUsage:    inspect.OtherUsage,
+		TotalUsage:    inspect.TotalUsage,
+	}
+}
+
+// ConvertStateInspectToProto converts FFI state inspect to protobuf
+func ConvertStateInspectToProto(
+	inspect *ffi.StateInspect,
+) *balancerpb.StateInspect {
+	if inspect == nil {
+		return &balancerpb.StateInspect{}
+	}
+
+	return &balancerpb.StateInspect{
+		VsRegistryUsage:    inspect.VsRegistryUsage,
+		RealsRegistryUsage: inspect.RealsRegistryUsage,
+		SessionTableUsage:  inspect.SessionTableUsage,
+		TotalUsage:         inspect.TotalUsage,
+	}
+}
+
+// ConvertRealsUsageToProto converts FFI reals usage to protobuf
+func ConvertRealsUsageToProto(
+	usage *ffi.RealsUsage,
+) *balancerpb.RealsUsage {
+	if usage == nil {
+		return &balancerpb.RealsUsage{}
+	}
+
+	return &balancerpb.RealsUsage{
+		CountersUsage: usage.CountersUsage,
+		DataUsage:     usage.DataUsage,
+		TotalUsage:    usage.TotalUsage,
+	}
+}
