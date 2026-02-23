@@ -209,3 +209,19 @@ balancer_state_iter_session_table(
 ) {
 	return session_table_iter(&state->session_table, now, cb, userdata);
 }
+
+// TODO: docs
+void
+balancer_state_inspect(
+	struct balancer_state *state, struct state_inspect *inspect
+) {
+	inspect->session_table_usage =
+		session_table_memory_usage(&state->session_table);
+	inspect->vs_registry_usage =
+		service_registry_usage(&state->vs_registry);
+	inspect->reals_registry_usage =
+		service_registry_usage(&state->real_registry);
+	inspect->total_usage = inspect->session_table_usage +
+			       inspect->vs_registry_usage +
+			       inspect->reals_registry_usage;
+}

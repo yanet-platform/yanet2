@@ -41,7 +41,7 @@ struct lpm_page {
 
 // TODO chunked storage
 struct lpm {
-	struct memory_context *memory_context;
+	struct memory_context memory_context;
 	struct lpm_page **pages;
 	size_t page_count;
 };
@@ -59,8 +59,7 @@ lpm_new_page(struct lpm *lpm, union lpm_value *value) {
 		uint32_t old_chunk_count = lpm->page_count / LPM_CHUNK_SIZE;
 		uint32_t new_chunk_count = old_chunk_count + 1;
 
-		struct memory_context *memory_context =
-			ADDR_OF(&lpm->memory_context);
+		struct memory_context *memory_context = &lpm->memory_context;
 
 		struct lpm_page **pages = (struct lpm_page **)memory_balloc(
 			memory_context,
@@ -112,7 +111,7 @@ lpm_new_page(struct lpm *lpm, union lpm_value *value) {
 
 static inline int
 lpm_init(struct lpm *lpm, struct memory_context *memory_context) {
-	SET_OFFSET_OF(&lpm->memory_context, memory_context);
+	memory_context_init_from(&lpm->memory_context, memory_context, "lpm");
 	lpm->pages = NULL;
 	lpm->page_count = 0;
 	return lpm_new_page(lpm, NULL);
@@ -120,7 +119,7 @@ lpm_init(struct lpm *lpm, struct memory_context *memory_context) {
 
 static inline void
 lpm_free(struct lpm *lpm) {
-	struct memory_context *memory_context = ADDR_OF(&lpm->memory_context);
+	struct memory_context *memory_context = &lpm->memory_context;
 	struct lpm_page **pages = ADDR_OF(&lpm->pages);
 	if (pages == NULL) {
 		return;
@@ -131,7 +130,7 @@ lpm_free(struct lpm *lpm) {
 
 	for (size_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
 		memory_bfree(
-			ADDR_OF(&lpm->memory_context),
+			&lpm->memory_context,
 			ADDR_OF(&pages[chunk_idx]),
 			sizeof(struct lpm_page) * LPM_CHUNK_SIZE
 		);
@@ -265,6 +264,11 @@ lpm_lookup(const struct lpm *lpm, uint8_t key_size, const uint8_t *key) {
 	}
 
 	return LPM_VALUE_GET(value->value);
+}
+
+static inline size_t
+lpm_memory_usage(struct lpm *lpm) {
+	return lpm->memory_context.balloc_size - lpm->memory_context.bfree_size;
 }
 
 // Pull-based LPM iterator.

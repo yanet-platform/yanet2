@@ -1,6 +1,7 @@
 #include "session_table.h"
 #include "common/memory.h"
 #include "common/rcu.h"
+#include "common/ttlmap/detail/ttlmap.h"
 #include "common/ttlmap/ttlmap.h"
 
 #include "lib/controlplane/diag/diag.h"
@@ -205,4 +206,11 @@ session_table_iter(
 		cb,
 		userdata
 	);
+}
+
+size_t
+session_table_memory_usage(struct session_table *table) {
+	return table->mctx.balloc_size - table->mctx.bfree_size +
+	       ttlmap_memory_usage(&table->maps[0]) +
+	       ttlmap_memory_usage(&table->maps[1]);
 }

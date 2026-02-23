@@ -5,6 +5,8 @@
 #include "registry.h"
 #include "session_table.h"
 
+#include "api/inspect.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
@@ -117,10 +119,17 @@ balancer_state_resize_session_table(
 	struct balancer_state *state, size_t new_size, uint32_t now
 );
 
+// TODO: docs
 int
 balancer_state_iter_session_table(
 	struct balancer_state *state,
 	uint32_t now,
 	session_table_iter_callback cb,
 	void *userdata
+);
+
+// TODO: docs
+void
+balancer_state_inspect(
+	struct balancer_state *state, struct state_inspect *inspect
 );

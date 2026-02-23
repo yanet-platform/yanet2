@@ -304,3 +304,8 @@ __ttlmap_init_internal( // NOLINT
 		}                                                              \
 		fflush(__file);                                                \
 	})
+
+static inline size_t
+ttlmap_memory_usage(struct ttlmap *map) {
+	return map->mctx.balloc_size - map->mctx.bfree_size;
+}

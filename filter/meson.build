@@ -13,7 +13,6 @@ compiler_sources = files(
   'compiler/vlan.c',
   'compiler/net6_fast.c',
   'compiler/net4_fast.c',
-  'compiler/usage.c'
 )
 
 lib_filter_compiler = static_library(

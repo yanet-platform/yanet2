@@ -147,12 +147,9 @@
 		}                                                              \
 	})
 
-
 // TODO: docs
 static inline uint64_t
-filter_memory_usage(
-	struct filter *filter
-) {
+filter_memory_usage(struct filter *filter) {
 	struct memory_context *mctx = &filter->memory_context;
 	assert(mctx->balloc_size >= mctx->bfree_size);
 	return mctx->balloc_size - mctx->bfree_size;

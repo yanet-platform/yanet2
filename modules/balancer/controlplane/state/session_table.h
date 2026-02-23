@@ -98,3 +98,6 @@ session_table_iter(
 	session_table_iter_callback cb,
 	void *userdata
 );
+
+size_t
+session_table_memory_usage(struct session_table *table);

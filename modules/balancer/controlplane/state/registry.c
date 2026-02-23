@@ -88,3 +88,11 @@ size_t
 service_registry_size(struct service_registry *registry) {
 	return registry->array.size;
 }
+
+size_t
+service_registry_usage(struct service_registry *registry) {
+	return registry->array.mctx.balloc_size -
+	       registry->array.mctx.bfree_size +
+	       registry->index.mctx.balloc_size -
+	       registry->index.mctx.bfree_size;
+}

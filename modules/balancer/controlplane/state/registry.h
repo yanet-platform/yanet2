@@ -69,3 +69,7 @@ service_registry_lookup(struct service_registry *registry, size_t idx);
  */
 size_t
 service_registry_size(struct service_registry *registry);
+
+// TODO: docs
+size_t
+service_registry_usage(struct service_registry *registry);

@@ -159,17 +159,19 @@ build_filter(
 }
 
 uint64_t
-rules_memory_usage(
-	size_t rules_count, struct filter_rule *rules
-) {
+rules_memory_usage(size_t rules_count, struct filter_rule *rules) {
 	uint64_t result = sizeof(struct filter_rule) * rules_count;
 	for (size_t rule_idx = 0; rule_idx < rules_count; ++rule_idx) {
 		struct filter_rule *rule = rules + rule_idx;
-		result += sizeof(struct net6) * (rule->net6.dst_count +rule->net6.src_count);
-		result += sizeof(struct net4) * (rule->net4.dst_count +rule->net4.src_count);
-		result += sizeof(struct filter_port_range) * (rule->transport.dst_count +rule->transport.src_count);
-		result += sizeof(struct filter_proto_range) * rule->transport.proto_count;
-		result += sizeof(struct filter_transport);
+		result += sizeof(struct net6) *
+			  (rule->net6.dst_count + rule->net6.src_count);
+		result += sizeof(struct net4) *
+			  (rule->net4.dst_count + rule->net4.src_count);
+		result +=
+			sizeof(struct filter_port_range) *
+			(rule->transport.dst_count + rule->transport.src_count);
+		result += sizeof(struct filter_proto_range) *
+			  rule->transport.proto_count;
 	}
 	return result;
 }

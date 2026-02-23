@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 
+#include "common/memory.h"
 #include "detail/bucket.h"
 #include "detail/iter.h"
 #include "detail/lock.h"

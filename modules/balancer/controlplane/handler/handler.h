@@ -116,7 +116,7 @@ struct packet_handler {
 
 	// map: real_registry_idx -> ph_real_idx
 	// -1 means no mapping
-	size_t reals_index_count;
+	size_t reals_index_size;
 	uint32_t *reals_index;
 
 	// counter indices

@@ -135,7 +135,7 @@ setup_reals_index(struct packet_handler *handler, struct memory_context *mctx) {
 	       INDEX_INVALID,
 	       sizeof(uint32_t) * registry_reals_count);
 	SET_OFFSET_OF(&handler->reals_index, reals_index);
-	handler->reals_index_count = registry_reals_count;
+	handler->reals_index_size = registry_reals_count;
 
 	return 0;
 }

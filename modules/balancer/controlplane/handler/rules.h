@@ -55,6 +55,4 @@ build_filter(
 
 // TODO: docs
 uint64_t
-rules_memory_usage(
-	size_t rules_count, struct filter_rule *rules
-);
+rules_memory_usage(size_t rules_count, struct filter_rule *rules);

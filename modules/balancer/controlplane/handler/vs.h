@@ -1,9 +1,10 @@
 #pragma once
 
+#include "api/inspect.h"
 #include "api/vs.h"
+
 #include "common/memory.h"
 #include "filter.h"
-#include "inspect.h"
 #include "selector.h"
 #include <stddef.h>
 
@@ -140,8 +141,4 @@ vs_real_enabled(struct vs *vs, uint32_t real_idx) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-vs_fill_inspect(
-	struct vs *vs,
-	struct vs_inspect *inspect,
-	size_t workers
-);
+vs_fill_inspect(struct vs *vs, struct vs_inspect *inspect, size_t workers);

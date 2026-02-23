@@ -2,6 +2,7 @@
 #include "api/agent.h"
 #include "graph.h"
 #include "handler/info.h"
+#include "inspect.h"
 #include "session.h"
 #include "state.h"
 
@@ -17,6 +18,7 @@
 #include "lib/controlplane/diag/diag.h"
 
 #include "handler/handler.h"
+#include "handler/inspect.h"
 #include "handler/vs.h"
 #include "state/real.h"
 #include "state/session_table.h"
@@ -34,9 +36,6 @@ struct balancer {
 	struct balancer_state state;
 	struct packet_handler *handler;
 	struct diag diag;
-
-	// tracks current config
-	struct balancer_config config;
 };
 
 struct balancer *
@@ -361,4 +360,23 @@ balancer_real_ph_idx(
 	struct balancer *balancer = balancer_handle_deref(handle);
 	struct packet_handler *handler = ADDR_OF(&balancer->handler);
 	return packet_handler_real_idx(handler, real, real_idx);
+}
+
+void
+balancer_inspect(
+	struct balancer_handle *handle, struct balancer_inspect *inspect
+) {
+	struct balancer *balancer = balancer_handle_deref(handle);
+	struct balancer_state *state = &balancer->state;
+	packet_handler_inspect(
+		ADDR_OF(&balancer->handler),
+		&inspect->packet_handler_inspect,
+		state->workers
+	);
+	balancer_state_inspect(state, &inspect->state_inspect);
+	inspect->other_usage =
+		sizeof(struct balancer) + sizeof(struct packet_handler);
+	inspect->total_usage = inspect->other_usage +
+			       inspect->packet_handler_inspect.total_usage +
+			       inspect->state_inspect.total_usage;
 }

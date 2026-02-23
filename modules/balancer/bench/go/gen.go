@@ -189,7 +189,7 @@ func (ctx *Generator) createNewSession() session {
 		panic("no virtual services configured")
 	}
 
-	vsIp, ok := netip.AddrFromSlice(vs.Id.Addr.Bytes)
+	vsIP, ok := netip.AddrFromSlice(vs.Id.Addr.Bytes)
 	if !ok {
 		panic("invalid VS address in session creation")
 	}
@@ -197,7 +197,7 @@ func (ctx *Generator) createNewSession() session {
 	return session{
 		clientIP:   ctx.generateClientIP(vs),
 		clientPort: ctx.generateClientPort(),
-		vsIP:       vsIp,
+		vsIP:       vsIP,
 		vsPort:     uint16(vs.Id.Port),
 		proto:      vs.Id.Proto,
 	}

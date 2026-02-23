@@ -16,10 +16,10 @@ import (
 
 func TestBasicOperations(t *testing.T) {
 	// Define test addresses
-	vsIp := netip.MustParseAddr("1.1.1.1")
+	vsIP := netip.MustParseAddr("1.1.1.1")
 	vsPort := uint16(80)
 	realAddr := netip.MustParseAddr("2.2.2.2")
-	clientIp := netip.MustParseAddr("3.3.3.3")
+	clientIP := netip.MustParseAddr("3.3.3.3")
 
 	// Create balancer configuration
 	config := &balancerpb.BalancerConfig{
@@ -34,7 +34,7 @@ func TestBasicOperations(t *testing.T) {
 				{
 					Id: &balancerpb.VsIdentifier{
 						Addr: &balancerpb.Addr{
-							Bytes: vsIp.AsSlice(),
+							Bytes: vsIP.AsSlice(),
 						},
 						Port:  uint32(vsPort),
 						Proto: balancerpb.TransportProto_TCP,
@@ -124,7 +124,7 @@ func TestBasicOperations(t *testing.T) {
 		{
 			RealId: &balancerpb.RealIdentifier{
 				Vs: &balancerpb.VsIdentifier{
-					Addr:  &balancerpb.Addr{Bytes: vsIp.AsSlice()},
+					Addr:  &balancerpb.Addr{Bytes: vsIP.AsSlice()},
 					Port:  uint32(vsPort),
 					Proto: balancerpb.TransportProto_TCP,
 				},
@@ -141,9 +141,9 @@ func TestBasicOperations(t *testing.T) {
 
 	// Create and send TCP SYN packet
 	packetLayers := utils.MakeTCPPacket(
-		clientIp,
+		clientIP,
 		1000,
-		vsIp,
+		vsIP,
 		vsPort,
 		&layers.TCP{SYN: true},
 	)
