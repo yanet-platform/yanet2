@@ -78,6 +78,8 @@ balancer_agent_inspect(
 		balancer_manager_inspect(
 			manager, &inspect->balancers[i].inspect
 		);
+		inspect->memory_usage +=
+			inspect->balancers[i].inspect.total_usage;
 	}
 }
 

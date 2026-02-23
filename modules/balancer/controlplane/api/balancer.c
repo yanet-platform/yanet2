@@ -380,3 +380,27 @@ balancer_inspect(
 			       inspect->packet_handler_inspect.total_usage +
 			       inspect->state_inspect.total_usage;
 }
+
+void
+balancer_inspect_free(struct balancer_inspect *inspect) {
+	if (inspect == NULL) {
+		return;
+	}
+
+	// Free packet handler inspect nested structures
+	if (inspect->packet_handler_inspect.vs_ipv4_inspect.vs_inspects !=
+	    NULL) {
+		free(inspect->packet_handler_inspect.vs_ipv4_inspect.vs_inspects
+		);
+		inspect->packet_handler_inspect.vs_ipv4_inspect.vs_inspects =
+			NULL;
+	}
+
+	if (inspect->packet_handler_inspect.vs_ipv6_inspect.vs_inspects !=
+	    NULL) {
+		free(inspect->packet_handler_inspect.vs_ipv6_inspect.vs_inspects
+		);
+		inspect->packet_handler_inspect.vs_ipv6_inspect.vs_inspects =
+			NULL;
+	}
+}

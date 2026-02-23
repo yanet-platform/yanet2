@@ -510,3 +510,6 @@ void
 balancer_inspect(
 	struct balancer_handle *handle, struct balancer_inspect *inspect
 );
+
+void
+balancer_inspect_free(struct balancer_inspect *inspect);
