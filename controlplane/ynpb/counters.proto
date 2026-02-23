@@ -16,8 +16,7 @@ service CountersService {
 	}
 	rpc Module(ModuleCountersRequest) returns (CountersResponse) {
 	}
-	rpc ModulePerf(ModulePerfCountersRequest)
-		returns (ModulePerfCountersResponse) {
+	rpc Perf(PerfCountersRequest) returns (PerfCountersResponse) {
 	}
 }
 
@@ -76,7 +75,7 @@ message CountersResponse {
 // sizes (1, 2-3, 4-7, 8-15, 16-31, 32+ packets). Each batch size range has
 // its own histogram of latency measurements using hybrid linear/exponential
 // buckets for efficient coverage of typical and outlier latencies.
-message ModulePerfCountersRequest {
+message PerfCountersRequest {
 	string device = 1;
 	string pipeline = 2;
 	string function = 3;
@@ -91,7 +90,7 @@ message ModulePerfCountersRequest {
 // greater than or equal to min_latency. The histogram uses a hybrid approach
 // with linear buckets for fine-grained resolution at typical latencies and
 // exponential buckets for efficient coverage of outliers.
-message ModulePerfLatency {
+message LatencyRangeCounter {
 	// Minimum latency in nanoseconds for this bucket
 	uint32 min_latency = 1;
 	// Number of packet batches that fell into this latency bucket
@@ -104,27 +103,29 @@ message ModulePerfLatency {
 // statistics for a particular batch size range (e.g., 1 packet, 2-3 packets,
 // 4-7 packets, etc.). The latency distribution is captured using a hybrid
 // histogram with both linear and exponential buckets.
-message ModulePerfCounter {
+message PerfCounter {
 	// Minimum batch size for this counter (e.g., 1, 2, 4, 8, 16, 32)
 	uint32 min_batch_size = 1;
-	// Mean processing latency in nanoseconds across all batches
-	uint64 mean_latency = 2;
+	// Total (summary) processing latency in nanoseconds across all batches
+	uint64 summary_latency = 2;
+	// Total number of packets transmitted for this batch size range
+	uint64 packets = 3;
 	// Histogram of latency measurements, sorted by increasing min_latency
-	repeated ModulePerfLatency latencies = 3;
+	repeated LatencyRangeCounter latencies = 4;
 }
 
 // Response containing all performance counters for a module.
 //
 // Returns performance metrics for all 6 batch size ranges tracked by the
 // module: 1, 2-3, 4-7, 8-15, 16-31, and 32+ packets. Each counter includes
-// mean latency and a detailed histogram of latency measurements.
+// summary latency and a detailed histogram of latency measurements.
 //
 // Additionally includes aggregated tx/rx packet and byte counters that track
 // the total traffic processed by the module across all worker threads.
-message ModulePerfCountersResponse {
+message PerfCountersResponse {
 	// Performance counters for each batch size range, ordered by
 	// min_batch_size
-	repeated ModulePerfCounter counters = 1;
+	repeated PerfCounter counters = 1;
 
 	// Total number of packets transmitted by the module across all workers
 	uint64 tx = 2;
