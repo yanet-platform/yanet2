@@ -117,7 +117,8 @@ service BalancerService {
 	// Show memory usage inspection.
 	//
 	// Returns agent-level memory usage information including memory limit,
-	// current usage, and detailed memory inspection for all balancer instances.
+	// current usage, and detailed memory inspection for all balancer
+	// instances.
 	rpc ShowInspect(ShowInspectRequest) returns (ShowInspectResponse);
 
 	// Show active sessions.
