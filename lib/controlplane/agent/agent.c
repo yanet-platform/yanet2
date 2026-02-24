@@ -1887,7 +1887,7 @@ yanet_module_performance_counters(
 				counter_list->instance_count,
 				&counters->tx,
 				&counters->rx,
-				&counters->tx,
+				&counters->tx_bytes,
 				&counters->rx_bytes
 			);
 
