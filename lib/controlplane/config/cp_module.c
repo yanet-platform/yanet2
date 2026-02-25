@@ -420,6 +420,7 @@ cp_module_parse_performance_counter(
 	// Salc summary tx and summary latency
 	counter->summary_latency = 0;
 	counter->packets = 0;
+	counter->bytes = 0;
 	for (size_t instance_idx = 0; instance_idx < workers; ++instance_idx) {
 		struct cp_module_perf_counter_layout *perf_counter =
 			(struct cp_module_perf_counter_layout *)
@@ -429,6 +430,7 @@ cp_module_parse_performance_counter(
 				);
 		counter->summary_latency += perf_counter->summary_latency;
 		counter->packets += perf_counter->packets;
+		counter->bytes += perf_counter->bytes;
 	}
 
 	// Fill in latency ranges and accumulate counter values across all

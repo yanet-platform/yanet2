@@ -167,6 +167,7 @@ func (m *CountersService) Perf(
 			MinBatchSize:   uint32(counter.MinBatchSize),
 			SummaryLatency: uint64(counter.SummaryLatency),
 			Packets:        uint64(counter.Packets),
+			Bytes:          uint64(counter.Bytes),
 			Latencies:      latencies,
 		})
 	}

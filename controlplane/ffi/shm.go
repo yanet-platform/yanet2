@@ -575,6 +575,7 @@ type PerformanceCounterLatencyRange struct {
 type PerformanceCounter struct {
 	SummaryLatency uint64
 	Packets        uint64
+	Bytes          uint64
 	MinBatchSize   uint64
 	LatencyRanges  []PerformanceCounterLatencyRange
 }
@@ -662,6 +663,7 @@ func (m *DPConfig) PerformanceCounters(
 
 		perfCounters[i] = PerformanceCounter{
 			Packets:        uint64(cCounter.packets),
+			Bytes:          uint64(cCounter.bytes),
 			SummaryLatency: uint64(cCounter.summary_latency),
 			MinBatchSize:   uint64(cCounter.min_batch_size),
 			LatencyRanges:  latencyRanges,

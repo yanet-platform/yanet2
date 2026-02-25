@@ -450,6 +450,7 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
     // Calculate statistics
     let total_batches: u64 = counter.latencies.iter().map(|l| l.batches).sum();
     let total_packets = counter.packets;
+    let total_bytes = counter.bytes;
 
     // Average latency per packet and per batch
     let avg_latency_per_packet = if total_packets > 0 {
@@ -463,18 +464,20 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
         0
     };
 
-    // Line 1: Total packets and batches
+    // Line 1: Total batches, packets, and bytes
     let total_content = format!(
-        "  Total: {} packets ({} batches)",
+        "  Total: {} batches ({} packets, {})",
+        format_number(total_batches),
         format_number(total_packets),
-        format_number(total_batches)
+        format_bytes(total_bytes)
     );
     let padding1 = TABLE_WIDTH.saturating_sub(display_width(&total_content));
     println!(
-        "{}  Total: {} packets ({} batches){}{}",
+        "{}  Total: {} batches ({} packets, {}){}{}",
         "│".bright_black(),
-        format_number(total_packets).bright_white(),
         format_number(total_batches).bright_white(),
+        format_number(total_packets).bright_white(),
+        format_bytes(total_bytes).bright_white(),
         " ".repeat(padding1),
         "│".bright_black()
     );
@@ -600,7 +603,13 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
             // Display normal row (non-zero batches)
             let next_latency = counter.latencies.get(i + 1).map(|l| l.min_latency);
             let percentage = if total_batches > 0 {
-                (latency.batches as f64 / total_batches as f64) * 100.0
+                let calculated = (latency.batches as f64 / total_batches as f64) * 100.0;
+                // Ensure non-zero batches show at least 0.01%
+                if calculated > 0.0 && calculated < 0.01 {
+                    0.01
+                } else {
+                    calculated
+                }
             } else {
                 0.0
             };
@@ -634,7 +643,13 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
 
             // Calculate bar length relative to total batches (summary value)
             let bar_length = if total_batches > 0 {
-                ((latency.batches as f64 / total_batches as f64) * BAR_WIDTH as f64) as usize
+                let calculated = ((latency.batches as f64 / total_batches as f64) * BAR_WIDTH as f64) as usize;
+                // Ensure non-zero batches show at least 1 character bar
+                if calculated == 0 && latency.batches > 0 {
+                    1
+                } else {
+                    calculated
+                }
             } else {
                 0
             };

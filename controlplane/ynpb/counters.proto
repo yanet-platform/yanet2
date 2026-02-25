@@ -86,9 +86,10 @@ message PerfCountersRequest {
 
 // Represents a single latency bucket in a performance histogram.
 //
-// Each bucket tracks how many packet batches were processed with latency
-// greater than or equal to min_latency. The histogram uses a hybrid approach
-// with linear buckets for fine-grained resolution at typical latencies and
+// Each bucket tracks how many packet batches were processed with
+// average packet latency greater than or equal to min_latency.
+// The histogram uses a hybrid approach with linear buckets for
+// fine-grained resolution at typical latencies and
 // exponential buckets for efficient coverage of outliers.
 message LatencyRangeCounter {
 	// Minimum latency in nanoseconds for this bucket
@@ -110,8 +111,10 @@ message PerfCounter {
 	uint64 summary_latency = 2;
 	// Total number of packets transmitted for this batch size range
 	uint64 packets = 3;
+	// Total number of bytes processed for this batch size range
+	uint64 bytes = 4;
 	// Histogram of latency measurements, sorted by increasing min_latency
-	repeated LatencyRangeCounter latencies = 4;
+	repeated LatencyRangeCounter latencies = 5;
 }
 
 // Response containing all performance counters for a module.

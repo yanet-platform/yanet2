@@ -44,16 +44,47 @@ struct cp_module_device {
  */
 #define CP_MODULE_PERF_COUNTERS 6
 
-// TODO: docs
-#define CP_MODULE_PERF_COUNTER_LINEAR_HISTS 23
+/**
+ * Number of linear histogram buckets for performance counter latency tracking.
+ *
+ * Linear buckets provide fine-grained resolution for typical packet processing
+ * latencies. With 24 buckets and a 100ns step size, this covers latencies from
+ * 100ns to 2400ns with precise granularity.
+ */
+#define CP_MODULE_PERF_COUNTER_LINEAR_HISTS 24
 
-// TODO: docs
+/**
+ * Number of exponential histogram buckets for performance counter latency
+ * tracking.
+ *
+ * Exponential buckets efficiently cover outlier latencies beyond the linear
+ * range. With 5 exponential buckets, this extends coverage to handle rare
+ * high-latency events without excessive memory overhead.
+ */
 #define CP_MODULE_PERF_COUNTER_EXP_HISTS 5
 
-// TODO: docs
+/**
+ * Memory layout for module performance counter data.
+ *
+ * This structure defines the layout of performance metrics stored in shared
+ * memory for each module instance. It tracks packet processing statistics
+ * including:
+ * - Total accumulated latency across all batches
+ * - Total packet and byte counts
+ * - Histogram of batch counts distributed across latency buckets
+ *
+ * The histogram uses a hybrid approach with linear buckets (fine-grained) and
+ * exponential buckets (outlier coverage) as defined by cp_module_perf_counter.
+ */
 struct cp_module_perf_counter_layout {
+	/** Total accumulated processing latency in nanoseconds */
 	uint64_t summary_latency;
+	/** Total number of packets processed */
 	uint64_t packets;
+	/** Total number of bytes processed */
+	uint64_t bytes;
+	/** Histogram of batch counts across latency buckets (linear +
+	 * exponential) */
 	uint64_t batch_count
 		[CP_MODULE_PERF_COUNTER_LINEAR_HISTS +
 		 CP_MODULE_PERF_COUNTER_EXP_HISTS];

@@ -58,13 +58,15 @@ module_ectx_process(
 	struct counter_storage *storage =
 		ADDR_OF(&module_ectx->counter_storage);
 
+	const uint64_t input_bytes =
+		packet_list_bytes_sum(&packet_front->input);
 	counter_add_packets_bytes(
 		module_ectx->rx_counter_id,
 		module_ectx->rx_bytes_counter_id,
 		dp_worker->idx,
 		storage,
 		packets_count,
-		packet_list_bytes_sum(&packet_front->input)
+		input_bytes
 	);
 
 	uint64_t tsc_start = rte_rdtsc();
@@ -81,7 +83,7 @@ module_ectx_process(
 		size_t counter_idx =
 			module_ectx->perf_counter_indices[batch_idx];
 		size_t hist_idx = counters_hybrid_histogram_batch(
-			&cp_module_perf_counter, elapsed_ns
+			&cp_module_perf_counter, elapsed_ns / packets_count
 		);
 		struct cp_module_perf_counter_layout *counter =
 			(struct cp_module_perf_counter_layout *)
@@ -90,6 +92,7 @@ module_ectx_process(
 				);
 		counter->summary_latency += elapsed_ns;
 		counter->packets += packets_count;
+		counter->bytes += input_bytes;
 		counter->batch_count[hist_idx] += 1;
 	}
 

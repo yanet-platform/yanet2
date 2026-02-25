@@ -111,6 +111,9 @@ struct module_performance_counter {
 	/** Total number of packets transmitted for this batch size range */
 	uint64_t packets;
 
+	/** Total number of bytes processed for this batch size range */
+	uint64_t bytes;
+
 	/** Minimum batch size for this counter (e.g., 1, 2, 4, 8, 16, 32) */
 	uint64_t min_batch_size;
 
