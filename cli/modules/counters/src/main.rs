@@ -865,6 +865,7 @@ mod tests {
                     min_batch_size: 1,
                     summary_latency: 401_500,
                     packets: 398,
+                    bytes: 25_472,
                     latencies: vec![
                         code::LatencyRangeCounter { min_latency: 0, batches: 0 },
                         code::LatencyRangeCounter { min_latency: 10, batches: 0 },
@@ -903,6 +904,7 @@ mod tests {
                     min_batch_size: 2,
                     summary_latency: 2_220_000,
                     packets: 45_678,
+                    bytes: 45_678_000,
                     latencies: vec![
                         code::LatencyRangeCounter { min_latency: 200, batches: 12_025 },
                         code::LatencyRangeCounter { min_latency: 400, batches: 4_625 },
@@ -916,6 +918,7 @@ mod tests {
                     min_batch_size: 32,
                     summary_latency: 15_400_000,
                     packets: 1_024_000,
+                    bytes: 1_024_000_000,
                     latencies: vec![
                         code::LatencyRangeCounter { min_latency: 200, batches: 20_800 },
                         code::LatencyRangeCounter { min_latency: 400, batches: 8_000 },
@@ -944,6 +947,7 @@ mod tests {
                 min_batch_size: 1,
                 summary_latency: 500_000,
                 packets: 500,
+                bytes: 1_024_000_000,
                 latencies: vec![
                     code::LatencyRangeCounter { min_latency: 100, batches: 100 },
                     code::LatencyRangeCounter { min_latency: 200, batches: 100 },
@@ -970,6 +974,7 @@ mod tests {
                 min_batch_size: 1,
                 summary_latency: 1_000_000,
                 packets: 1000,
+                bytes: 1_024_000_000,
                 latencies: vec![
                     code::LatencyRangeCounter { min_latency: 100, batches: 0 },
                     code::LatencyRangeCounter { min_latency: 500, batches: 0 },
@@ -996,6 +1001,7 @@ mod tests {
                 min_batch_size: 64,
                 summary_latency: 999_999_999_999,
                 packets: 999_999_999,
+                bytes: 63_999_999_936,
                 latencies: vec![
                     code::LatencyRangeCounter {
                         min_latency: 1_000_000,
@@ -1033,6 +1039,7 @@ mod tests {
                 min_batch_size: 1,
                 summary_latency: 100,
                 packets: 10,
+                bytes: 640,
                 latencies: vec![
                     code::LatencyRangeCounter { min_latency: 1, batches: 3 },
                     code::LatencyRangeCounter { min_latency: 5, batches: 4 },
@@ -1058,6 +1065,7 @@ mod tests {
                 min_batch_size: 1,
                 summary_latency: 0,
                 packets: 0,
+                bytes: 0,
                 latencies: vec![
                     code::LatencyRangeCounter { min_latency: 100, batches: 0 },
                     code::LatencyRangeCounter { min_latency: 200, batches: 0 },
@@ -1082,6 +1090,7 @@ mod tests {
                 min_batch_size: 8,
                 summary_latency: 5_000_000,
                 packets: 2000,
+                bytes: 128_000,
                 latencies: vec![
                     code::LatencyRangeCounter { min_latency: 100, batches: 500 },
                     code::LatencyRangeCounter { min_latency: 200, batches: 50 },
@@ -1109,6 +1118,7 @@ mod tests {
                 min_batch_size: 1,
                 summary_latency: 1000,
                 packets: 100,
+                bytes: 6_400,
                 latencies: vec![code::LatencyRangeCounter { min_latency: 10, batches: 100 }],
             }],
         };
