@@ -104,7 +104,9 @@ fwstate_build_value(
 		.value.type = sync_frame->proto,
 		.value.flags = sync_frame->flags,
 		.value.packets_since_last_sync = 0,
-		.value.last_sync = now,
+		.value.created_at =
+			now, // tentative; may be overwritten during map insert
+		.value.updated_at = now,
 		.value.packets_backward = 0,
 		.value.packets_forward = 0,
 	};

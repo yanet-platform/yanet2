@@ -83,8 +83,10 @@ struct fw_state_value {
 	union fw_state_flags_u flags;
 	// Number of packets since last sync
 	uint32_t packets_since_last_sync;
+	// Timestamp when the state was created
+	uint64_t created_at;
 	// Timestamp when the last sync packet was emitted
-	uint64_t last_sync;
+	uint64_t updated_at;
 	// Number of backward packets matching this state
 	uint64_t packets_backward;
 	// Number of forward packets matching this state

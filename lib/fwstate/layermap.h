@@ -249,6 +249,8 @@ layermap_put(
 		}
 	}
 
-	copy_value_fn(entry.value, value, active_layer->value_size);
+	copy_value_fn(
+		entry.value, value, entry.empty, active_layer->value_size
+	);
 	return (int64_t)entry.idx;
 }

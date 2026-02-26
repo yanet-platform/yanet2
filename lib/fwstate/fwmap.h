@@ -70,7 +70,9 @@ typedef uint64_t (*fwmap_rand_fn_t)(void);
 
 // Copy function types for custom key/value copying.
 typedef void (*fwmap_copy_key_fn_t)(void *dst, const void *src, size_t size);
-typedef void (*fwmap_copy_value_fn_t)(void *dst, const void *src, size_t size);
+typedef void (*fwmap_copy_value_fn_t)(
+	void *dst, const void *src, bool dst_empty, size_t size
+);
 typedef void (*fwmap_merge_value_fn_t)(
 	void *dst, const void *new_value, const void *old_value, size_t size
 );
@@ -255,7 +257,10 @@ fwmap_default_copy_key(void *dst, const void *src, size_t size) {
 }
 
 static inline void
-fwmap_default_copy_value(void *dst, const void *src, size_t size) {
+fwmap_default_copy_value(
+	void *dst, const void *src, bool dst_empty, size_t size
+) {
+	(void)dst_empty;
 	memcpy(dst, src, size);
 }
 
@@ -1184,7 +1189,7 @@ fwmap_put(
 	if (entry.empty) {
 		copy_key_fn(entry.key, key, map->key_size);
 	}
-	copy_value_fn(entry.value, value, map->value_size);
+	copy_value_fn(entry.value, value, entry.empty, map->value_size);
 
 	return (int64_t)entry.idx;
 }

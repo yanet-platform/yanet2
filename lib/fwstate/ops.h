@@ -27,12 +27,19 @@ fwmap_copy_key_fw6(void *dst, const void *src, size_t size) {
 }
 
 static inline void
-fwmap_copy_value_fwstate(void *dst, const void *src, size_t size) {
+fwmap_copy_value_fwstate(
+	void *dst, const void *src, bool dst_empty, size_t size
+) {
 	(void)size;
 	const struct fw_state_value *s = (const struct fw_state_value *)src;
 	struct fw_state_value *d = (struct fw_state_value *)dst;
 
+	uint64_t created_at = d->created_at;
 	*d = *s;
+	if (!dst_empty) {
+		// On update, preserve the original creation timestamp.
+		d->created_at = created_at;
+	}
 }
 
 static inline void
@@ -51,7 +58,9 @@ fwmap_merge_value_fwstate(
 	d->external = new_v->external;
 	d->type = new_v->type;
 	d->packets_since_last_sync = new_v->packets_since_last_sync;
-	d->last_sync = new_v->last_sync;
+	d->updated_at = new_v->updated_at;
+	// preserve oldest created_at
+	d->created_at = old_v->created_at;
 
 	// Merge
 	d->flags.raw = new_v->flags.raw | old_v->flags.raw;
