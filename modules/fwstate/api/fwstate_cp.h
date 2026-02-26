@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "lib/fwstate/fwmap.h"
+#include "lib/fwstate/fwstate_cursor.h"
 
 struct agent;
 struct cp_module;
@@ -67,4 +68,25 @@ fwstate_config_trim_stale_layers(struct cp_module *cp_module, uint64_t now);
 void
 fwstate_outdated_layers_free(
 	fwstate_outdated_layers_t *outdated, struct cp_module *cp_module
+);
+
+// Resolve a specific layer's map pointer from the config.
+// Returns NULL if maps don't exist or layer_index is out of range.
+fwmap_t *
+fwstate_config_resolve_map(
+	const struct cp_module *cp_module, bool is_ipv6, uint32_t layer_index
+);
+
+// Construct a cursor for a specific layer.
+// Copies timeouts from the current config into the cursor.
+// Sets key_pos from the provided `index` parameter.
+// Returns 0 on success, -1 if map/layer cannot be resolved.
+int
+fwstate_config_cursor_create(
+	struct cp_module *cp_module,
+	fwstate_cursor_t *cursor,
+	bool is_ipv6,
+	uint32_t layer_index,
+	uint32_t index,
+	bool include_expired
 );

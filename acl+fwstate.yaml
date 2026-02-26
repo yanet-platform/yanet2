@@ -1,0 +1,89 @@
+# ACL rules for fwstate functional testing.
+#
+# IPv4:
+#   Rule 1: CreateState for TCP from 192.0.2.0/24 -> 192.0.3.0/24 port 80.
+#   Rule 2: CheckState for return TCP traffic (192.0.3.0/24 -> 192.0.2.0/24).
+# IPv6:
+#   Rule 3: CreateState for TCP from 2001:db8:1::/48 -> 2001:db8:2::/48 port 80.
+#   Rule 4: CheckState for return TCP traffic (2001:db8:2::/48 -> 2001:db8:1::/48).
+
+rules:
+  # === IPv4 ===
+
+  # Create state for outgoing TCP to port 80
+  - action: CreateState
+    counter: ""
+    devices: []
+    dst_ports:
+      - from: 80
+        to: 80
+    dsts:
+      - 192.0.3.0/255.255.255.0
+    proto_ranges:
+      - from: 1536
+        to: 1791
+    src_ports:
+      - from: 0
+        to: 65535
+    srcs:
+      - 192.0.2.0/255.255.255.0
+    vlan_ranges: []
+
+  # Check state for return traffic
+  - action: CheckState
+    counter: ""
+    devices: []
+    dst_ports:
+      - from: 0
+        to: 65535
+    dsts:
+      - 192.0.2.0/255.255.255.0
+    proto_ranges:
+      - from: 1536
+        to: 1791
+    src_ports:
+      - from: 80
+        to: 80
+    srcs:
+      - 192.0.3.0/255.255.255.0
+    vlan_ranges: []
+
+  # === IPv6 ===
+
+  # Create state for outgoing TCPv6 to port 80
+  - action: CreateState
+    counter: ""
+    devices: []
+    dst_ports:
+      - from: 80
+        to: 80
+    dsts:
+      - "2001:db8:2::/ffff:ffff:ffff::"
+    proto_ranges:
+      - from: 1536
+        to: 1791
+    src_ports:
+      - from: 0
+        to: 65535
+    srcs:
+      - "2001:db8:1::/ffff:ffff:ffff::"
+    vlan_ranges: []
+
+  # Check state for return TCPv6 traffic
+  - action: CheckState
+    counter: ""
+    devices: []
+    dst_ports:
+      - from: 0
+        to: 65535
+    dsts:
+      - "2001:db8:1::/ffff:ffff:ffff::"
+    proto_ranges:
+      - from: 1536
+        to: 1791
+    src_ports:
+      - from: 80
+        to: 80
+    srcs:
+      - "2001:db8:2::/ffff:ffff:ffff::"
+    vlan_ranges: []

@@ -1,4 +1,4 @@
-package fwstate_test
+package fwstate
 
 //#cgo CFLAGS: -I../../../.. -I../../../../lib -I../../../../common
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/dataplane -lfwstate_dp

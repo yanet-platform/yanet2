@@ -22,6 +22,8 @@ pub enum ModeCmd {
     Link(LinkCmd),
     /// Get statistics for fwstate maps
     Stats(StatsCmd),
+    /// List entries from fwstate map
+    Entries(EntriesCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -117,4 +119,49 @@ pub struct UpdateCmd {
     /// Default timeout (e.g., "60s", "5m", "1h")
     #[arg(long, value_parser = parse_duration)]
     pub default: Option<Duration>,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum DirectionArg {
+    Forward,
+    Backward,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct EntriesCmd {
+    /// FWState config name
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
+
+    /// Use IPv6 map instead of IPv4
+    #[arg(long)]
+    pub ipv6: bool,
+
+    /// Layer index to iterate (0 = active layer)
+    #[arg(long, default_value = "0")]
+    pub layer: u32,
+
+    /// Include expired entries
+    #[arg(long)]
+    pub include_expired: bool,
+
+    /// Max entries per gRPC batch
+    #[arg(long, default_value = "128")]
+    pub batch: u32,
+
+    /// Total number of entries to return (0 = unlimited)
+    #[arg(long, default_value = "0")]
+    pub count: u32,
+
+    /// Iteration direction
+    #[arg(long, default_value = "forward")]
+    pub direction: DirectionArg,
+
+    /// Starting cursor position (0 = beginning)
+    #[arg(long, default_value = "0")]
+    pub index: u32,
+
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
 }

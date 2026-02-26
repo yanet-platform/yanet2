@@ -8,6 +8,7 @@ package fwstate
 #include "common/numutils.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/fwmap.h"
+#include "lib/fwstate/fwstate_cursor.h"
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "modules/fwstate/dataplane/config.h"
 */
@@ -25,8 +26,9 @@ import (
 
 // FwStateConfig wraps the C fwstate configuration
 type FwStateConfig struct {
-	name string
-	ptr  ffi.ModuleConfig
+	name       string
+	ptr        ffi.ModuleConfig
+	generation uint64
 }
 
 // NewFWStateModuleConfig creates a new FWState module configuration
@@ -69,6 +71,10 @@ func (m *FwStateConfig) asCPModule() *C.struct_cp_module {
 
 func (m *FwStateConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
+}
+
+func (m *FwStateConfig) Generation() uint64 {
+	return m.generation
 }
 
 // CreateMaps creates firewall state maps
@@ -114,6 +120,7 @@ func (m *FwStateConfig) CreateMaps(
 			return fmt.Errorf("failed to insert new layer: error code=%d, cErr=%v", rc, cErr)
 		}
 
+		m.generation++
 		return nil
 	}
 
@@ -132,6 +139,7 @@ func (m *FwStateConfig) CreateMaps(
 		return fmt.Errorf("failed to create maps: error code=%d, cErr=%v", rc, cErr)
 	}
 
+	m.generation++
 	return nil
 }
 
@@ -248,6 +256,143 @@ func (m *FwStateConfig) Free() {
 	C.fwstate_module_config_free(m.asCPModule())
 }
 
+// CursorEntry represents a single entry read from the cursor.
+// Key and value bytes are copied from C memory and safe to hold after unlock.
+type CursorEntry struct {
+	Key     *fwstatepb.FwStateKey
+	Value   *fwstatepb.FwStateValue
+	Idx     uint32
+	Expired bool
+}
+
+// ReadForward reads up to count entries in the forward direction starting at index.
+// The caller must hold FWStateService.mu.
+func (m *FwStateConfig) ReadForward(
+	isIPv6 bool, layerIndex uint32,
+	index uint32, includeExpired bool,
+	now uint64, count uint32,
+) (entries []CursorEntry, newIndex uint32, hasMore bool, err error) {
+	return m.readEntries(isIPv6, layerIndex, index, includeExpired, now, count, false)
+}
+
+// ReadBackward reads up to count entries in the backward direction starting at index.
+// The caller must hold FWStateService.mu.
+func (m *FwStateConfig) ReadBackward(
+	isIPv6 bool, layerIndex uint32,
+	index uint32, includeExpired bool,
+	now uint64, count uint32,
+) (entries []CursorEntry, newIndex uint32, hasMore bool, err error) {
+	return m.readEntries(isIPv6, layerIndex, index, includeExpired, now, count, true)
+}
+
+func (m *FwStateConfig) readEntries(
+	isIPv6 bool, layerIndex uint32,
+	index uint32, includeExpired bool,
+	now uint64, count uint32, backward bool,
+) ([]CursorEntry, uint32, bool, error) {
+	var cursor C.fwstate_cursor_t
+	rc := C.fwstate_config_cursor_create(
+		m.asCPModule(), &cursor,
+		C.bool(isIPv6), C.uint32_t(layerIndex),
+		C.uint32_t(index), C.bool(includeExpired),
+	)
+	if rc != 0 {
+		return nil, 0, false, fmt.Errorf("failed to create cursor: map or layer not found")
+	}
+
+	fwmap := C.fwstate_config_resolve_map(
+		m.asCPModule(), C.bool(isIPv6), C.uint32_t(layerIndex),
+	)
+	if fwmap == nil {
+		return nil, 0, false, fmt.Errorf("failed to resolve map")
+	}
+
+	buf := make([]C.fwstate_cursor_entry_t, count)
+
+	var n C.int32_t
+	if backward {
+		n = C.fwstate_cursor_read_backward(
+			fwmap, &cursor, C.uint64_t(now), &buf[0], C.uint32_t(count),
+		)
+	} else {
+		n = C.fwstate_cursor_read_forward(
+			fwmap, &cursor, C.uint64_t(now), &buf[0], C.uint32_t(count),
+		)
+	}
+
+	entries := make([]CursorEntry, 0, n)
+	for i := range n {
+		entry := buf[i]
+		val := (*C.struct_fw_state_value)(entry.value)
+
+		ttl := C.fwstate_entry_ttl(val, &cursor.timeouts)
+		expired := val.updated_at+ttl <= C.uint64_t(now)
+
+		pbKey := convertCKey(entry.key, isIPv6)
+		pbVal := &fwstatepb.FwStateValue{
+			External:             bool(val.external),
+			ProtocolType:         uint32(val._type),
+			Flags:                uint32(val.flags[0]),
+			PacketsSinceLastSync: uint32(val.packets_since_last_sync),
+			CreatedAt:            uint64(val.created_at),
+			UpdatedAt:            uint64(val.updated_at),
+			PacketsBackward:      uint64(val.packets_backward),
+			PacketsForward:       uint64(val.packets_forward),
+		}
+
+		entries = append(entries, CursorEntry{
+			Key:     pbKey,
+			Value:   pbVal,
+			Idx:     uint32(entry.idx),
+			Expired: bool(expired),
+		})
+	}
+
+	newIndex := uint32(cursor.key_pos)
+	// Safe to read key_cursor directly - we hold mu.
+	keyLimit := uint32(fwmap.key_cursor)
+
+	hasMore := false
+	if backward {
+		if n > 0 {
+			// We can't use newIndex > 0 because the entry with index 0 would be lost
+			hasMore = uint32(buf[n-1].idx) > 0
+		}
+	} else {
+		hasMore = newIndex < keyLimit
+	}
+
+	return entries, newIndex, hasMore, nil
+}
+
+func convertCKey(ptr unsafe.Pointer, isIPv6 bool) *fwstatepb.FwStateKey {
+	if isIPv6 {
+		k := (*C.struct_fw6_state_key)(ptr)
+		srcAddr := C.GoBytes(unsafe.Pointer(&k.src_addr[0]), 16)
+		dstAddr := C.GoBytes(unsafe.Pointer(&k.dst_addr[0]), 16)
+		return &fwstatepb.FwStateKey{
+			Proto:   uint32(k.proto),
+			SrcPort: uint32(k.src_port),
+			DstPort: uint32(k.dst_port),
+			SrcAddr: &fwstatepb.Addr{Bytes: srcAddr},
+			DstAddr: &fwstatepb.Addr{Bytes: dstAddr},
+		}
+	}
+
+	k := (*C.struct_fw4_state_key)(ptr)
+	srcAddr := make([]byte, 4)
+	dstAddr := make([]byte, 4)
+	*(*uint32)(unsafe.Pointer(&srcAddr[0])) = uint32(k.src_addr)
+	*(*uint32)(unsafe.Pointer(&dstAddr[0])) = uint32(k.dst_addr)
+	return &fwstatepb.FwStateKey{
+		Proto:   uint32(k.proto),
+		SrcPort: uint32(k.src_port),
+		DstPort: uint32(k.dst_port),
+		SrcAddr: &fwstatepb.Addr{Bytes: srcAddr},
+		DstAddr: &fwstatepb.Addr{Bytes: dstAddr},
+	}
+}
+
 // OutdatedLayers represents a handle to outdated layers that need to be freed
 type OutdatedLayers struct {
 	ptr unsafe.Pointer
@@ -264,6 +409,7 @@ func (m *FwStateConfig) TrimStaleLayers(now uint64) *OutdatedLayers {
 		}
 		return nil
 	}
+	m.generation++
 	return &OutdatedLayers{ptr: unsafe.Pointer(ptr)}
 }
 

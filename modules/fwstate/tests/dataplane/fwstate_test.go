@@ -1,4 +1,4 @@
-package fwstate_test
+package fwstate
 
 import (
 	"net"

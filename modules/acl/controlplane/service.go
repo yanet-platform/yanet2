@@ -94,10 +94,19 @@ func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
 			DstPortRanges: dstPortRanges,
 		}
 
-		if reqRule.Action.Kind == aclpb.ActionKind_ACTION_KIND_PASS {
-			rule.Action = 0
-		} else {
-			rule.Action = 1
+		switch reqRule.Action.Kind {
+		case aclpb.ActionKind_ACTION_KIND_PASS:
+			rule.Action = 0 // ACL_ACTION_ALLOW
+		case aclpb.ActionKind_ACTION_KIND_DENY:
+			rule.Action = 1 // ACL_ACTION_DENY
+		case aclpb.ActionKind_ACTION_KIND_COUNT:
+			rule.Action = 2 // ACL_ACTION_COUNT
+		case aclpb.ActionKind_ACTION_KIND_CHECK_STATE:
+			rule.Action = 3 // ACL_ACTION_CHECK_STATE
+		case aclpb.ActionKind_ACTION_KIND_CREATE_STATE:
+			rule.Action = 4 // ACL_ACTION_CREATE_STATE
+		default:
+			rule.Action = 1 // ACL_ACTION_DENY
 		}
 
 		rules = append(rules, rule)

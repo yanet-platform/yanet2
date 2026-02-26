@@ -2,10 +2,12 @@ package fwstate
 
 import (
 	"context"
+	"io"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -369,6 +371,85 @@ func (m *FWStateService) GetStats(
 	}
 
 	return response, nil
+}
+
+func (m *FWStateService) ListEntries(
+	stream grpc.BidiStreamingServer[fwstatepb.ListEntriesRequest, fwstatepb.ListEntriesResponse],
+) error {
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		configName := req.GetConfigName()
+		if configName == "" {
+			return status.Error(codes.InvalidArgument, "config_name is required")
+		}
+
+		count := req.GetCount()
+		if count == 0 {
+			count = 100
+		}
+
+		m.mu.Lock()
+		config, ok := m.configs[configName]
+		if !ok {
+			m.mu.Unlock()
+			return status.Errorf(codes.NotFound, "config %q not found", configName)
+		}
+
+		now := uint64(time.Now().UnixNano())
+		backward := req.GetDirection() == fwstatepb.Direction_BACKWARD
+
+		var entries []CursorEntry
+		var newIndex uint32
+		var hasMore bool
+
+		if backward {
+			entries, newIndex, hasMore, err = config.ReadBackward(
+				req.GetIsIpv6(), req.GetLayerIndex(),
+				req.GetIndex(), req.GetIncludeExpired(),
+				now, count,
+			)
+		} else {
+			entries, newIndex, hasMore, err = config.ReadForward(
+				req.GetIsIpv6(), req.GetLayerIndex(),
+				req.GetIndex(), req.GetIncludeExpired(),
+				now, count,
+			)
+		}
+		generation := config.Generation()
+		m.mu.Unlock()
+
+		if err != nil {
+			return status.Errorf(codes.Internal, "cursor read failed: %v", err)
+		}
+
+		pbEntries := make([]*fwstatepb.FwStateEntry, 0, len(entries))
+		for _, e := range entries {
+			pbEntries = append(pbEntries, &fwstatepb.FwStateEntry{
+				Key:     e.Key,
+				Value:   e.Value,
+				Idx:     e.Idx,
+				Expired: e.Expired,
+			})
+		}
+
+		resp := &fwstatepb.ListEntriesResponse{
+			Entries:    pbEntries,
+			HasMore:    hasMore,
+			Index:      newIndex,
+			Generation: generation,
+		}
+
+		if err := stream.Send(resp); err != nil {
+			return err
+		}
+	}
 }
 
 // validateSyncConfig validates that required sync config fields are set

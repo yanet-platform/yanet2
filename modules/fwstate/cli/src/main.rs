@@ -1,13 +1,15 @@
 use core::error::Error;
-use std::net::Ipv6Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
-use args::{DeleteCmd, LinkCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
+use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use fwstatepb::{
-    DeleteConfigRequest, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ShowConfigRequest,
-    UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
+    DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
+    ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
 };
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
@@ -198,6 +200,133 @@ impl FWStateService {
         println!("{}", serde_json::to_string_pretty(&response)?);
         Ok(())
     }
+
+    pub async fn list_entries(&mut self, cmd: EntriesCmd) -> Result<(), Box<dyn Error>> {
+        let direction = match cmd.direction {
+            DirectionArg::Forward => Direction::Forward,
+            DirectionArg::Backward => Direction::Backward,
+        };
+
+        let (tx, rx) = mpsc::channel(1);
+        let stream = ReceiverStream::new(rx);
+
+        let initial_req = ListEntriesRequest {
+            config_name: cmd.config_name.clone(),
+            is_ipv6: cmd.ipv6,
+            layer_index: cmd.layer,
+            include_expired: cmd.include_expired,
+            direction: direction as i32,
+            count: cmd.batch,
+            index: cmd.index,
+        };
+        tx.send(initial_req).await.map_err(|e| format!("send error: {e}"))?;
+
+        let mut response_stream = self.client.list_entries(stream).await?.into_inner();
+
+        let json_output = cmd.json;
+        let limit = cmd.count;
+        let mut total: u32 = 0;
+
+        if !json_output {
+            println!(
+                "{:<6} {:<45} {:<45} {:<8} {:<8} {:<7}",
+                "IDX", "SRC", "DST", "PROTO", "STATE", "EXPRD"
+            );
+        }
+
+        loop {
+            let resp = match response_stream.message().await? {
+                Some(r) => r,
+                None => break,
+            };
+
+            for entry in &resp.entries {
+                if limit > 0 && total >= limit {
+                    break;
+                }
+                if json_output {
+                    println!("{}", serde_json::to_string(&entry)?);
+                } else {
+                    print_entry(entry, cmd.ipv6);
+                }
+                total += 1;
+            }
+
+            if limit > 0 && total >= limit {
+                break;
+            }
+
+            if !resp.has_more {
+                break;
+            }
+
+            let next_req = ListEntriesRequest {
+                config_name: cmd.config_name.clone(),
+                is_ipv6: cmd.ipv6,
+                layer_index: cmd.layer,
+                include_expired: cmd.include_expired,
+                direction: direction as i32,
+                count: cmd.batch,
+                index: resp.index,
+            };
+            tx.send(next_req).await.map_err(|e| format!("send error: {e}"))?;
+        }
+
+        Ok(())
+    }
+}
+
+fn format_addr(addr: &Option<fwstatepb::Addr>, is_ipv6: bool) -> String {
+    match addr {
+        Some(a) if is_ipv6 && a.bytes.len() == 16 => {
+            let octets: [u8; 16] = a.bytes[..16].try_into().unwrap();
+            Ipv6Addr::from(octets).to_string()
+        }
+        Some(a) if !is_ipv6 && a.bytes.len() == 4 => {
+            let octets: [u8; 4] = a.bytes[..4].try_into().unwrap();
+            Ipv4Addr::from(octets).to_string()
+        }
+        _ => "?".to_string(),
+    }
+}
+
+fn proto_name(proto: u32) -> &'static str {
+    match proto {
+        6 => "TCP",
+        17 => "UDP",
+        1 => "ICMP",
+        58 => "ICMPv6",
+        _ => "OTHER",
+    }
+}
+
+fn print_entry(entry: &fwstatepb::FwStateEntry, is_ipv6: bool) {
+    let (src_addr, dst_addr, src_port, dst_port, proto) = match &entry.key {
+        Some(k) => (
+            format_addr(&k.src_addr, is_ipv6),
+            format_addr(&k.dst_addr, is_ipv6),
+            k.src_port,
+            k.dst_port,
+            k.proto,
+        ),
+        None => ("?".into(), "?".into(), 0, 0, 0),
+    };
+
+    let proto_type = entry.value.as_ref().map(|v| v.protocol_type).unwrap_or(proto);
+    let flags = entry.value.as_ref().map(|v| v.flags).unwrap_or(0);
+
+    let src = format!("{}:{}", src_addr, src_port);
+    let dst = format!("{}:{}", dst_addr, dst_port);
+
+    println!(
+        "{:<6} {:<45} {:<45} {:<8} {:<8} {:<7}",
+        entry.idx,
+        src,
+        dst,
+        proto_name(proto_type),
+        format!("0x{:02x}", flags),
+        if entry.expired { "yes" } else { "no" },
+    );
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
@@ -210,6 +339,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Link(cmd) => service.link_fwstate(cmd).await,
         ModeCmd::Stats(cmd) => service.get_stats(cmd).await,
+        ModeCmd::Entries(cmd) => service.list_entries(cmd).await,
     }
 }
 

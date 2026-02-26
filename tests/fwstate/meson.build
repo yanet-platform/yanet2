@@ -53,3 +53,16 @@ test('layermap_basic',
   timeout: 15,
   suite: ['fwstate'],
 )
+
+fwstate_cursor_test = executable(
+  'fwstate_cursor_test',
+  ['fwstate_cursor_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+)
+test('fwstate_cursor',
+  fwstate_cursor_test,
+  timeout: 15,
+  suite: ['fwstate'],
+)

@@ -406,3 +406,62 @@ fwstate_outdated_layers_free(
 	// Free the outdated structure itself
 	memory_bfree(&agent->memory_context, outdated, sizeof(*outdated));
 }
+
+fwmap_t *
+fwstate_config_resolve_map(
+	const struct cp_module *cp_module, bool is_ipv6, uint32_t layer_index
+) {
+	const struct fwstate_module_config *config = container_of(
+		cp_module, const struct fwstate_module_config, cp_module
+	);
+
+	fwmap_t **map_offset;
+	if (is_ipv6) {
+		map_offset = (fwmap_t **)&config->cfg.fw6state;
+	} else {
+		map_offset = (fwmap_t **)&config->cfg.fw4state;
+	}
+
+	if (*map_offset == NULL) {
+		return NULL;
+	}
+
+	fwmap_t *map = ADDR_OF(map_offset);
+
+	for (uint32_t i = 0; i < layer_index; i++) {
+		if (map->next == NULL) {
+			return NULL;
+		}
+		map = (fwmap_t *)ADDR_OF(&map->next);
+	}
+
+	return map;
+}
+
+int
+fwstate_config_cursor_create(
+	struct cp_module *cp_module,
+	fwstate_cursor_t *cursor,
+	bool is_ipv6,
+	uint32_t layer_index,
+	uint32_t index,
+	bool include_expired
+) {
+	struct fwstate_module_config *config = container_of(
+		cp_module, struct fwstate_module_config, cp_module
+	);
+
+	// Verify the map/layer exists
+	fwmap_t *map =
+		fwstate_config_resolve_map(cp_module, is_ipv6, layer_index);
+	if (map == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	cursor->key_pos = index;
+	cursor->include_expired = include_expired;
+	cursor->timeouts = config->cfg.sync_config.timeouts;
+
+	return 0;
+}
