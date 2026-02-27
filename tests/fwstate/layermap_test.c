@@ -10,7 +10,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define ARENA_SIZE (1 << 20) * 500 // 500MB arena
+#define ARENA_SIZE (1 << 20) * 64 // MB arena
 volatile uint64_t now_time = 0;
 
 void

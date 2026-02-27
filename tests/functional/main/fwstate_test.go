@@ -2,6 +2,7 @@ package functional
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -19,9 +20,9 @@ var expectedEntries = []struct {
 	proto string
 	flags string
 }{
-	{"192.0.2.10:10000", "192.0.3.1:80", "TCP", "0x02"},
-	{"192.0.2.11:10001", "192.0.3.1:80", "TCP", "0x02"},
-	{"192.0.2.12:10002", "192.0.3.1:80", "TCP", "0x02"},
+	{"192.0.2.10:10000", "192.0.3.1:80", "TCP", "-S--|----"},
+	{"192.0.2.11:10001", "192.0.3.1:80", "TCP", "-S--|----"},
+	{"192.0.2.12:10002", "192.0.3.1:80", "TCP", "-S--|----"},
 }
 
 func TestFWStateListEntries(t *testing.T) {
@@ -90,7 +91,7 @@ func TestFWStateListEntries(t *testing.T) {
 			require.Contains(t, output, e.dst, "should contain destination %s", e.dst)
 		}
 		require.Contains(t, output, "TCP")
-		require.Contains(t, output, "0x02")
+		require.Contains(t, output, "-S--|----")
 	})
 
 	// 5. Forward listing with JSON: parse and verify key fields.
@@ -101,26 +102,22 @@ func TestFWStateListEntries(t *testing.T) {
 		require.NoError(t, err, "list-entries forward json failed")
 		t.Log("JSON output:\n", output)
 
-		type jsonKey struct {
-			Proto   int `json:"proto"`
-			SrcPort int `json:"src_port"`
-			DstPort int `json:"dst_port"`
-			SrcAddr struct {
-				Bytes []int `json:"bytes"`
-			} `json:"src_addr"`
-			DstAddr struct {
-				Bytes []int `json:"bytes"`
-			} `json:"dst_addr"`
-		}
 		type jsonEntry struct {
-			Key   jsonKey `json:"key"`
-			Idx   int     `json:"idx"`
-			Value struct {
-				ProtocolType   int  `json:"protocol_type"`
-				Flags          int  `json:"flags"`
-				PacketsForward int  `json:"packets_forward"`
-				External       bool `json:"external"`
-			} `json:"value"`
+			Idx     int    `json:"idx"`
+			SrcPort int    `json:"src_port"`
+			DstPort int    `json:"dst_port"`
+			SrcAddr string `json:"src_addr"`
+			DstAddr string `json:"dst_addr"`
+			Proto   string `json:"proto"`
+			Origin  string `json:"origin"`
+			Flags   struct {
+				Src []string `json:"src"`
+				Dst []string `json:"dst"`
+			} `json:"flags"`
+			Packets struct {
+				Src int `json:"src"`
+				Dst int `json:"dst"`
+			} `json:"packets"`
 		}
 
 		var entries []jsonEntry
@@ -138,15 +135,16 @@ func TestFWStateListEntries(t *testing.T) {
 
 		for i, e := range entries {
 			require.Equal(t, i, e.Idx, "entry %d idx", i)
-			require.Equal(t, 6, e.Key.Proto, "entry %d proto should be TCP(6)", i)
-			require.Equal(t, 10000+i, e.Key.SrcPort, "entry %d src_port", i)
-			require.Equal(t, 80, e.Key.DstPort, "entry %d dst_port", i)
-			require.Equal(t, []int{192, 0, 2, 10 + i}, e.Key.SrcAddr.Bytes, "entry %d src_addr", i)
-			require.Equal(t, []int{192, 0, 3, 1}, e.Key.DstAddr.Bytes, "entry %d dst_addr", i)
-			require.Equal(t, 6, e.Value.ProtocolType, "entry %d protocol_type", i)
-			require.Equal(t, 2, e.Value.Flags, "entry %d flags should be SYN(0x02)", i)
-			require.Equal(t, 1, e.Value.PacketsForward, "entry %d packets_forward", i)
-			require.False(t, e.Value.External, "entry %d should not be external", i)
+			require.Equal(t, "TCP", e.Proto, "entry %d proto should be TCP", i)
+			require.Equal(t, 10000+i, e.SrcPort, "entry %d src_port", i)
+			require.Equal(t, 80, e.DstPort, "entry %d dst_port", i)
+			require.Equal(t, fmt.Sprintf("192.0.2.%d", 10+i), e.SrcAddr, "entry %d src_addr", i)
+			require.Equal(t, "192.0.3.1", e.DstAddr, "entry %d dst_addr", i)
+			require.Equal(t, "local", e.Origin, "entry %d origin should be local", i)
+			require.Equal(t, []string{"SYN"}, e.Flags.Src, "entry %d flags.src should be [SYN]", i)
+			require.Empty(t, e.Flags.Dst, "entry %d flags.dst should be empty", i)
+			require.Equal(t, 1, e.Packets.Src, "entry %d packets.src", i)
+			require.Equal(t, 0, e.Packets.Dst, "entry %d packets.dst", i)
 		}
 	})
 

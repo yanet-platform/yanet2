@@ -24,7 +24,6 @@ type CursorResult struct {
 	DstPort  uint16
 	SrcAddr  uint32
 	DstAddr  uint32
-	Type     uint8
 	Flags    uint8
 	External bool
 
@@ -40,7 +39,7 @@ func insertFw4Entry(
 	cpModule *C.struct_cp_module,
 	proto uint16, srcPort uint16, dstPort uint16,
 	srcAddr uint32, dstAddr uint32,
-	valueType uint8, srcFlags uint8, dstFlags uint8,
+	srcFlags uint8, dstFlags uint8,
 	createdAt uint64, updatedAt uint64,
 ) error {
 	// Resolve the active IPv4 map (layer 0)
@@ -50,14 +49,13 @@ func insertFw4Entry(
 	}
 
 	var key C.struct_fw4_state_key
-	key.proto = C.uint16_t(proto)
-	key.src_port = C.uint16_t(srcPort)
-	key.dst_port = C.uint16_t(dstPort)
+	key.hdr.proto = C.uint16_t(proto)
+	key.hdr.src_port = C.uint16_t(srcPort)
+	key.hdr.dst_port = C.uint16_t(dstPort)
 	key.src_addr = C.uint32_t(srcAddr)
 	key.dst_addr = C.uint32_t(dstAddr)
 
 	var val C.struct_fw_state_value
-	val._type = C.uint8_t(valueType)
 	val.flags[0] = byte(srcFlags | (dstFlags << 4))
 	val.external = C.bool(false)
 	val.created_at = C.uint64_t(createdAt)
@@ -109,12 +107,11 @@ func readCursorForward(
 
 		results = append(results, CursorResult{
 			Idx:         uint32(entry.idx),
-			Proto:       uint16(k.proto),
-			SrcPort:     uint16(k.src_port),
-			DstPort:     uint16(k.dst_port),
+			Proto:       uint16(k.hdr.proto),
+			SrcPort:     uint16(k.hdr.src_port),
+			DstPort:     uint16(k.hdr.dst_port),
 			SrcAddr:     uint32(k.src_addr),
 			DstAddr:     uint32(k.dst_addr),
-			Type:        uint8(v._type),
 			Flags:       uint8(v.flags[0]),
 			External:    bool(v.external),
 			CreatedAt:   uint64(v.created_at),
@@ -162,12 +159,11 @@ func readCursorBackward(
 
 		results = append(results, CursorResult{
 			Idx:         uint32(entry.idx),
-			Proto:       uint16(k.proto),
-			SrcPort:     uint16(k.src_port),
-			DstPort:     uint16(k.dst_port),
+			Proto:       uint16(k.hdr.proto),
+			SrcPort:     uint16(k.hdr.src_port),
+			DstPort:     uint16(k.hdr.dst_port),
 			SrcAddr:     uint32(k.src_addr),
 			DstAddr:     uint32(k.dst_addr),
-			Type:        uint8(v._type),
 			Flags:       uint8(v.flags[0]),
 			External:    bool(v.external),
 			CreatedAt:   uint64(v.created_at),

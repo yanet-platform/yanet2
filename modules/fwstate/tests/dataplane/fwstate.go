@@ -240,9 +240,9 @@ func CheckStateExists(
 		fwmap = (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfg.fw6state))))
 		key6 := C.struct_fw6_state_key{}
 
-		key6.proto = C.uint16_t(proto)
-		key6.src_port = C.uint16_t(srcPort)
-		key6.dst_port = C.uint16_t(dstPort)
+		key6.hdr.proto = C.uint16_t(proto)
+		key6.hdr.src_port = C.uint16_t(srcPort)
+		key6.hdr.dst_port = C.uint16_t(dstPort)
 
 		// Copy addresses using unsafe.Slice (addresses stay in network order)
 		srcBytes := srcIP.As16()
@@ -259,9 +259,9 @@ func CheckStateExists(
 		fwmap = (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfg.fw4state))))
 		key4 := C.struct_fw4_state_key{}
 
-		key4.proto = C.uint16_t(proto)
-		key4.src_port = C.uint16_t(srcPort)
-		key4.dst_port = C.uint16_t(dstPort)
+		key4.hdr.proto = C.uint16_t(proto)
+		key4.hdr.src_port = C.uint16_t(srcPort)
+		key4.hdr.dst_port = C.uint16_t(dstPort)
 
 		// Copy addresses using unsafe.Slice (addresses stay in network order)
 		srcBytes := srcIP.As4()
@@ -324,9 +324,9 @@ func GetStateDeadline(
 	if srcIP.Is6() && dstIP.Is6() {
 		fwmap = (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfg.fw6state))))
 		key6 := C.struct_fw6_state_key{}
-		key6.proto = C.uint16_t(proto)
-		key6.src_port = C.uint16_t(srcPort)
-		key6.dst_port = C.uint16_t(dstPort)
+		key6.hdr.proto = C.uint16_t(proto)
+		key6.hdr.src_port = C.uint16_t(srcPort)
+		key6.hdr.dst_port = C.uint16_t(dstPort)
 
 		srcBytes := srcIP.As16()
 		dstBytes := dstIP.As16()
@@ -341,9 +341,9 @@ func GetStateDeadline(
 		cfgReal := (*C.struct_fwstate_config)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(cfg))))
 		fwmap = (*C.fwmap_t)(C.addr_of((*unsafe.Pointer)(unsafe.Pointer(&cfgReal.fw4state))))
 		key4 := C.struct_fw4_state_key{}
-		key4.proto = C.uint16_t(proto)
-		key4.src_port = C.uint16_t(srcPort)
-		key4.dst_port = C.uint16_t(dstPort)
+		key4.hdr.proto = C.uint16_t(proto)
+		key4.hdr.src_port = C.uint16_t(srcPort)
+		key4.hdr.dst_port = C.uint16_t(dstPort)
 
 		srcBytes := srcIP.As4()
 		dstBytes := dstIP.As4()

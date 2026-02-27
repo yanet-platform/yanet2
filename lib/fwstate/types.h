@@ -10,21 +10,27 @@
 #define FW_STATE_SYNC_THRESHOLD (uint64_t)8e9 // nanoseconds
 #define FW_STATE_DEFAULT_TIMEOUT (uint64_t)120e9
 
-struct fw4_state_key {
+/**
+ * Common header shared by all fw_state key types.
+ * Must be the first member so that any key pointer can be safely cast
+ * to fw_state_key_hdr to access the 5-tuple transport fields.
+ */
+struct fw_state_key_hdr {
 	uint16_t proto;
 	uint16_t src_port;
 	uint16_t dst_port;
-	uint16_t _;
+	uint16_t _; // padding to align addresses on u64 boundary
+};
+
+struct fw4_state_key {
+	struct fw_state_key_hdr hdr;
 	uint32_t src_addr;
 	uint32_t dst_addr;
 };
 
 // FIXME: ensure that during map allocations keys are aligned on u64 boundary
 struct fw6_state_key {
-	uint16_t proto;
-	uint16_t src_port;
-	uint16_t dst_port;
-	uint16_t _; // Align stride addr and src/dst addrs on u64 boundary
+	struct fw_state_key_hdr hdr;
 	uint8_t src_addr[16];
 	uint8_t dst_addr[16];
 };
@@ -63,6 +69,16 @@ fwstate_flags_from_tcp(uint8_t tcp_flags) {
 	return (tcp_flags & 7) | ((tcp_flags >> 1) & FWSTATE_ACK);
 }
 
+/**
+ * Per-connection TCP flag pair stored as a single byte.
+ *
+ * Layout (LSB first):
+ *   bits [3:0] — src flags  (raw & 0x0F)
+ *   bits [7:4] — dst flags  ((raw >> 4) & 0x0F)
+ *
+ * Each 4-bit nibble uses the fw_state_tcp_flags encoding:
+ *   FIN = 0x01, SYN = 0x02, RST = 0x04, ACK = 0x08
+ */
 struct fw_state_flags {
 	uint8_t src : 4;
 	uint8_t dst : 4;
@@ -79,10 +95,8 @@ union fw_state_flags_u {
  */
 struct fw_state_value {
 	bool external; // State ownership (internal/external)
-	uint8_t type;  // Transport protocol type (TCP/UDP)
 	union fw_state_flags_u flags;
-	// Number of packets since last sync
-	uint32_t packets_since_last_sync;
+	uint8_t _pad[6];
 	// Timestamp when the state was created
 	uint64_t created_at;
 	// Timestamp when the last sync packet was emitted

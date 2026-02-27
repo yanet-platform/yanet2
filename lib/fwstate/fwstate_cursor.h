@@ -32,21 +32,22 @@ typedef struct fwstate_cursor_entry {
 /// protocol type and TCP flags.
 static inline uint64_t
 fwstate_entry_ttl(
-	const struct fw_state_value *v, const struct fwstate_timeouts *t
+	uint16_t proto, uint8_t raw_flags, const struct fwstate_timeouts *t
 ) {
-	if (v->type == IPPROTO_UDP) {
+	union fw_state_flags_u flags = {.raw = raw_flags};
+	if (proto == IPPROTO_UDP) {
 		return t->udp;
 	}
-	if (v->type == IPPROTO_TCP) {
-		if (v->flags.tcp.src & FWSTATE_FIN ||
-		    v->flags.tcp.dst & FWSTATE_FIN) {
+	if (proto == IPPROTO_TCP) {
+		if (flags.tcp.src & FWSTATE_FIN ||
+		    flags.tcp.dst & FWSTATE_FIN) {
 			return t->tcp_fin;
 		}
-		if ((v->flags.tcp.src & FWSTATE_SYN) &&
-		    (v->flags.tcp.dst & FWSTATE_ACK)) {
+		if ((flags.tcp.src & FWSTATE_SYN) &&
+		    (flags.tcp.dst & FWSTATE_ACK)) {
 			return t->tcp_syn_ack;
 		}
-		if (v->flags.tcp.src & FWSTATE_SYN) {
+		if (flags.tcp.src & FWSTATE_SYN) {
 			return t->tcp_syn;
 		}
 		return t->tcp;
@@ -88,17 +89,20 @@ fwstate_cursor_read_forward(
 			continue;
 		}
 
-		// Check expiration
-		uint64_t ttl = fwstate_entry_ttl(value, &cursor->timeouts);
-		bool expired = (value->updated_at + ttl <= now);
-
-		if (!cursor->include_expired && expired) {
+		void *key = fwmap_get_key(map, cursor->key_pos);
+		if (key == NULL) {
 			cursor->key_pos++;
 			continue;
 		}
 
-		void *key = fwmap_get_key(map, cursor->key_pos);
-		if (key == NULL) {
+		const struct fw_state_key_hdr *hdr =
+			(const struct fw_state_key_hdr *)key;
+		uint64_t ttl = fwstate_entry_ttl(
+			hdr->proto, value->flags.raw, &cursor->timeouts
+		);
+		bool expired = (value->updated_at + ttl <= now);
+
+		if (!cursor->include_expired && expired) {
 			cursor->key_pos++;
 			continue;
 		}
@@ -155,17 +159,20 @@ fwstate_cursor_read_backward(
 			continue;
 		}
 
-		// Check expiration
-		uint64_t ttl = fwstate_entry_ttl(value, &cursor->timeouts);
-		bool expired = (value->updated_at + ttl <= now);
-
-		if (!cursor->include_expired && expired) {
+		void *key = fwmap_get_key(map, (uint32_t)pos);
+		if (key == NULL) {
 			pos--;
 			continue;
 		}
 
-		void *key = fwmap_get_key(map, (uint32_t)pos);
-		if (key == NULL) {
+		const struct fw_state_key_hdr *hdr =
+			(const struct fw_state_key_hdr *)key;
+		uint64_t ttl = fwstate_entry_ttl(
+			hdr->proto, value->flags.raw, &cursor->timeouts
+		);
+		bool expired = (value->updated_at + ttl <= now);
+
+		if (!cursor->include_expired && expired) {
 			pos--;
 			continue;
 		}

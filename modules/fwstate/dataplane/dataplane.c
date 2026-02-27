@@ -101,9 +101,7 @@ fwstate_build_value(
 ) {
 	struct fwstate state = {
 		.value.external = is_external,
-		.value.type = sync_frame->proto,
 		.value.flags = sync_frame->flags,
-		.value.packets_since_last_sync = 0,
 		.value.created_at =
 			now, // tentative; may be overwritten during map insert
 		.value.updated_at = now,
@@ -153,10 +151,9 @@ fwstate_process_sync_v4(
 	struct fwstate_timeouts *timeouts
 ) {
 	struct fw4_state_key key = {
-		.proto = sync_frame->proto,
-		.src_port = sync_frame->src_port,
-		.dst_port = sync_frame->dst_port,
-		._ = 0,
+		.hdr.proto = sync_frame->proto,
+		.hdr.src_port = sync_frame->src_port,
+		.hdr.dst_port = sync_frame->dst_port,
 		.src_addr = sync_frame->src_ip,
 		.dst_addr = sync_frame->dst_ip,
 	};
@@ -193,9 +190,9 @@ fwstate_process_sync_v6(
 	struct fwstate_timeouts *timeouts
 ) {
 	struct fw6_state_key key = {
-		.proto = sync_frame->proto,
-		.src_port = sync_frame->src_port,
-		.dst_port = sync_frame->dst_port,
+		.hdr.proto = sync_frame->proto,
+		.hdr.src_port = sync_frame->src_port,
+		.hdr.dst_port = sync_frame->dst_port,
 	};
 	rte_memcpy(key.src_addr, sync_frame->src_ip6, 16);
 	rte_memcpy(key.dst_addr, sync_frame->dst_ip6, 16);

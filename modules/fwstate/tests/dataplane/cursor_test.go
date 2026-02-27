@@ -45,7 +45,7 @@ func TestCursorForwardRead(t *testing.T) {
 		err := insertFw4Entry(cpModule,
 			protoTCP, uint16(1000+i), 80,
 			ipToUint32("10.0.0.1"), ipToUint32("192.168.0.1"),
-			uint8(protoTCP), flagACK, flagACK,
+			flagACK, flagACK,
 			now, now,
 		)
 		require.NoError(t, err, "insert entry %d", i)
@@ -78,7 +78,7 @@ func TestCursorBackwardRead(t *testing.T) {
 		err := insertFw4Entry(cpModule,
 			protoTCP, uint16(2000+i), 443,
 			ipToUint32("10.0.0.1"), ipToUint32("192.168.0.2"),
-			uint8(protoTCP), flagACK, flagACK,
+			flagACK, flagACK,
 			now, now,
 		)
 		require.NoError(t, err)
@@ -108,7 +108,7 @@ func TestCursorExpiredFiltering(t *testing.T) {
 	err := insertFw4Entry(cpModule,
 		protoTCP, 3000, 80,
 		ipToUint32("10.0.0.1"), ipToUint32("192.168.0.1"),
-		uint8(protoTCP), flagACK, flagACK,
+		flagACK, flagACK,
 		now, now,
 	)
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestCursorExpiredFiltering(t *testing.T) {
 	err = insertFw4Entry(cpModule,
 		protoUDP, 3001, 53,
 		ipToUint32("10.0.0.2"), ipToUint32("192.168.0.1"),
-		uint8(protoUDP), 0, 0,
+		0, 0,
 		now, now,
 	)
 	require.NoError(t, err)
@@ -126,7 +126,7 @@ func TestCursorExpiredFiltering(t *testing.T) {
 	err = insertFw4Entry(cpModule,
 		protoTCP, 3002, 443,
 		ipToUint32("10.0.0.3"), ipToUint32("192.168.0.1"),
-		uint8(protoTCP), flagACK, flagACK,
+		flagACK, flagACK,
 		now, now,
 	)
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestCursorExpiredFiltering(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	for _, r := range results {
-		require.Equal(t, uint8(protoTCP), r.Type)
+		require.Equal(t, uint16(protoTCP), r.Proto)
 	}
 
 	// With include_expired=true, should return all 3.
@@ -165,7 +165,7 @@ func TestCursorKeyDataCorrectness(t *testing.T) {
 	err := insertFw4Entry(cpModule,
 		protoTCP, 12345, 8080,
 		srcAddr, dstAddr,
-		uint8(protoTCP), flagSYN, 0,
+		flagSYN, 0,
 		now, now,
 	)
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestCursorValueDataCorrectness(t *testing.T) {
 	err := insertFw4Entry(cpModule,
 		protoTCP, 9000, 80,
 		ipToUint32("10.0.0.1"), ipToUint32("192.168.0.1"),
-		uint8(protoTCP), flagACK, flagACK,
+		flagACK, flagACK,
 		now-1000, now,
 	)
 	require.NoError(t, err)
@@ -206,7 +206,6 @@ func TestCursorValueDataCorrectness(t *testing.T) {
 	require.Len(t, results, 1)
 
 	r := results[0]
-	require.Equal(t, uint8(protoTCP), r.Type)
 	require.Equal(t, uint64(now), r.UpdatedAt)
 	require.Equal(t, uint64(1), r.PktForward)
 	require.Equal(t, uint64(0), r.PktBackward)
@@ -238,7 +237,7 @@ func TestCursorPaging(t *testing.T) {
 		err := insertFw4Entry(cpModule,
 			protoTCP, uint16(6000+i), 80,
 			ipToUint32("10.0.0.1")+uint32(i), ipToUint32("192.168.0.1"),
-			uint8(protoTCP), flagACK, flagACK,
+			flagACK, flagACK,
 			now, now,
 		)
 		require.NoError(t, err)

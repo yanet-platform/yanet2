@@ -108,13 +108,11 @@ message FwStateKey {
 
 message FwStateValue {
 	bool external = 1;
-	uint32 protocol_type = 2; // IPPROTO_TCP, IPPROTO_UDP, etc.
-	uint32 flags = 3;	  // raw fw_state_flags_u byte
-	uint32 packets_since_last_sync = 4;
-	uint64 created_at = 5; // nanoseconds
-	uint64 updated_at = 6; // nanoseconds
-	uint64 packets_backward = 7;
-	uint64 packets_forward = 8;
+	uint32 flags = 2;      // raw fw_state_flags_u byte
+	uint64 created_at = 3; // nanoseconds
+	uint64 updated_at = 4; // nanoseconds
+	uint64 packets_backward = 5;
+	uint64 packets_forward = 6;
 }
 
 message FwStateEntry {
@@ -130,7 +128,7 @@ message ListEntriesRequest {
 	uint32 layer_index = 3;	  // Which layer to iterate (0 = active)
 	bool include_expired = 4; // Whether to include expired entries
 	Direction direction = 5;  // Direction for this read
-	uint32 count = 6;	  // Number of entries to return in this batch
+	uint32 batch_size = 6;	  // Number of entries to return in this batch
 	uint32 index = 7; // Cursor position from previous response (0 on first)
 }
 

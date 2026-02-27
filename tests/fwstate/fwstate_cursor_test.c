@@ -19,7 +19,7 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#define ARENA_SIZE_MB 1024
+#define ARENA_SIZE_MB 64
 #define ARENA_SIZE ((1 << 20) * ARENA_SIZE_MB)
 #define DEFAULT_TTL 50000
 #define WORKER_ID 0
@@ -72,9 +72,9 @@ make_fw4_key(
 ) {
 	struct fw4_state_key key;
 	memset(&key, 0, sizeof(key));
-	key.proto = proto;
-	key.src_port = src_port;
-	key.dst_port = dst_port;
+	key.hdr.proto = proto;
+	key.hdr.src_port = src_port;
+	key.hdr.dst_port = dst_port;
 	key.src_addr = src_addr;
 	key.dst_addr = dst_addr;
 	return key;
@@ -85,7 +85,6 @@ make_fw4_key(
  */
 static struct fw_state_value
 make_fw_value(
-	uint8_t type,
 	uint8_t src_flags,
 	uint8_t dst_flags,
 	uint64_t created_at,
@@ -93,7 +92,6 @@ make_fw_value(
 ) {
 	struct fw_state_value val;
 	memset(&val, 0, sizeof(val));
-	val.type = type;
 	val.flags.tcp.src = src_flags;
 	val.flags.tcp.dst = dst_flags;
 	val.created_at = created_at;
@@ -122,44 +120,47 @@ static void
 test_ttl_selection(void) {
 	printf("\n--- TTL Selection Test ---\n");
 
-	struct fw_state_value v;
-	memset(&v, 0, sizeof(v));
+	union fw_state_flags_u flags;
+	memset(&flags, 0, sizeof(flags));
 
 	/* TCP SYN only */
-	v.type = IPPROTO_TCP;
-	v.flags.tcp.src = FWSTATE_SYN;
-	v.flags.tcp.dst = 0;
-	assert(fwstate_entry_ttl(&v, &test_timeouts) == test_timeouts.tcp_syn);
+	flags.tcp.src = FWSTATE_SYN;
+	flags.tcp.dst = 0;
+	assert(fwstate_entry_ttl(IPPROTO_TCP, flags.raw, &test_timeouts) ==
+	       test_timeouts.tcp_syn);
 
 	/* TCP SYN-ACK */
-	v.flags.tcp.src = FWSTATE_SYN;
-	v.flags.tcp.dst = FWSTATE_ACK;
-	assert(fwstate_entry_ttl(&v, &test_timeouts) ==
+	flags.tcp.src = FWSTATE_SYN;
+	flags.tcp.dst = FWSTATE_ACK;
+	assert(fwstate_entry_ttl(IPPROTO_TCP, flags.raw, &test_timeouts) ==
 	       test_timeouts.tcp_syn_ack);
 
 	/* TCP FIN (src side) */
-	v.flags.tcp.src = FWSTATE_FIN;
-	v.flags.tcp.dst = 0;
-	assert(fwstate_entry_ttl(&v, &test_timeouts) == test_timeouts.tcp_fin);
+	flags.tcp.src = FWSTATE_FIN;
+	flags.tcp.dst = 0;
+	assert(fwstate_entry_ttl(IPPROTO_TCP, flags.raw, &test_timeouts) ==
+	       test_timeouts.tcp_fin);
 
 	/* TCP FIN (dst side) */
-	v.flags.tcp.src = 0;
-	v.flags.tcp.dst = FWSTATE_FIN;
-	assert(fwstate_entry_ttl(&v, &test_timeouts) == test_timeouts.tcp_fin);
+	flags.tcp.src = 0;
+	flags.tcp.dst = FWSTATE_FIN;
+	assert(fwstate_entry_ttl(IPPROTO_TCP, flags.raw, &test_timeouts) ==
+	       test_timeouts.tcp_fin);
 
 	/* TCP established (no special flags) */
-	v.flags.tcp.src = FWSTATE_ACK;
-	v.flags.tcp.dst = FWSTATE_ACK;
-	assert(fwstate_entry_ttl(&v, &test_timeouts) == test_timeouts.tcp);
+	flags.tcp.src = FWSTATE_ACK;
+	flags.tcp.dst = FWSTATE_ACK;
+	assert(fwstate_entry_ttl(IPPROTO_TCP, flags.raw, &test_timeouts) ==
+	       test_timeouts.tcp);
 
 	/* UDP */
-	v.type = IPPROTO_UDP;
-	v.flags.raw = 0;
-	assert(fwstate_entry_ttl(&v, &test_timeouts) == test_timeouts.udp);
+	flags.raw = 0;
+	assert(fwstate_entry_ttl(IPPROTO_UDP, flags.raw, &test_timeouts) ==
+	       test_timeouts.udp);
 
 	/* Default (ICMP) */
-	v.type = IPPROTO_ICMP;
-	assert(fwstate_entry_ttl(&v, &test_timeouts) == test_timeouts.default_);
+	assert(fwstate_entry_ttl(IPPROTO_ICMP, flags.raw, &test_timeouts) ==
+	       test_timeouts.default_);
 
 	printf("  TTL selection test passed\n");
 }
@@ -230,9 +231,7 @@ test_forward_iteration(void *arena) {
 			0x0A000001 + (uint32_t)i,
 			0xC0A80001
 		);
-		vals[i] = make_fw_value(
-			IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now
-		);
+		vals[i] = make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 		int64_t ret = insert_fw4_entry(map, &keys[i], &vals[i]);
 		assert(ret >= 0);
 	}
@@ -252,9 +251,9 @@ test_forward_iteration(void *arena) {
 	for (int i = 0; i < 5; i++) {
 		assert(out[i].idx == (uint32_t)i);
 		struct fw4_state_key *k = (struct fw4_state_key *)out[i].key;
-		assert(k->src_port == (uint16_t)(1000 + i));
-		assert(k->dst_port == 80);
-		assert(k->proto == IPPROTO_TCP);
+		assert(k->hdr.src_port == (uint16_t)(1000 + i));
+		assert(k->hdr.dst_port == 80);
+		assert(k->hdr.proto == IPPROTO_TCP);
 	}
 
 	/* Cursor should advance to 5 */
@@ -294,9 +293,7 @@ test_backward_iteration(void *arena) {
 			0x0A000001 + (uint32_t)i,
 			0xC0A80002
 		);
-		vals[i] = make_fw_value(
-			IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now
-		);
+		vals[i] = make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 		int64_t ret = insert_fw4_entry(map, &keys[i], &vals[i]);
 		assert(ret >= 0);
 	}
@@ -316,7 +313,7 @@ test_backward_iteration(void *arena) {
 	for (int i = 0; i < 5; i++) {
 		assert(out[i].idx == (uint32_t)(4 - i));
 		struct fw4_state_key *k = (struct fw4_state_key *)out[i].key;
-		assert(k->src_port == (uint16_t)(2000 + 4 - i));
+		assert(k->hdr.src_port == (uint16_t)(2000 + 4 - i));
 	}
 
 	fwmap_destroy(map, ctx);
@@ -346,18 +343,18 @@ test_expired_skipped(void *arena) {
 	struct fw4_state_key k0 =
 		make_fw4_key(IPPROTO_TCP, 3000, 80, 0x0A000001, 0xC0A80001);
 	struct fw_state_value v0 =
-		make_fw_value(IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now);
+		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 	assert(insert_fw4_entry(map, &k0, &v0) >= 0);
 
 	struct fw4_state_key k1 =
 		make_fw4_key(IPPROTO_UDP, 3001, 53, 0x0A000002, 0xC0A80001);
-	struct fw_state_value v1 = make_fw_value(IPPROTO_UDP, 0, 0, now, now);
+	struct fw_state_value v1 = make_fw_value(0, 0, now, now);
 	assert(insert_fw4_entry(map, &k1, &v1) >= 0);
 
 	struct fw4_state_key k2 =
 		make_fw4_key(IPPROTO_TCP, 3002, 443, 0x0A000003, 0xC0A80001);
 	struct fw_state_value v2 =
-		make_fw_value(IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now);
+		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 	assert(insert_fw4_entry(map, &k2, &v2) >= 0);
 
 	/*
@@ -378,11 +375,10 @@ test_expired_skipped(void *arena) {
 		fwstate_cursor_read_forward(map, &cursor, read_now, out, 10);
 	assert(n == 2);
 
-	/* Both returned entries should be TCP */
+	/* Both returned entries should have keys with TCP proto */
 	for (int i = 0; i < 2; i++) {
-		struct fw_state_value *val =
-			(struct fw_state_value *)out[i].value;
-		assert(val->type == IPPROTO_TCP);
+		struct fw4_state_key *key = (struct fw4_state_key *)out[i].key;
+		assert(key->hdr.proto == IPPROTO_TCP);
 	}
 
 	fwmap_destroy(map, ctx);
@@ -412,18 +408,18 @@ test_include_expired(void *arena) {
 	struct fw4_state_key k0 =
 		make_fw4_key(IPPROTO_TCP, 4000, 80, 0x0A000001, 0xC0A80001);
 	struct fw_state_value v0 =
-		make_fw_value(IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now);
+		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 	assert(insert_fw4_entry(map, &k0, &v0) >= 0);
 
 	struct fw4_state_key k1 =
 		make_fw4_key(IPPROTO_UDP, 4001, 53, 0x0A000002, 0xC0A80001);
-	struct fw_state_value v1 = make_fw_value(IPPROTO_UDP, 0, 0, now, now);
+	struct fw_state_value v1 = make_fw_value(0, 0, now, now);
 	assert(insert_fw4_entry(map, &k1, &v1) >= 0);
 
 	struct fw4_state_key k2 =
 		make_fw4_key(IPPROTO_TCP, 4002, 443, 0x0A000003, 0xC0A80001);
 	struct fw_state_value v2 =
-		make_fw_value(IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now);
+		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 	assert(insert_fw4_entry(map, &k2, &v2) >= 0);
 
 	/* Advance time so UDP is expired */
@@ -468,19 +464,19 @@ test_uninitialized_skipped(void *arena) {
 	struct fw4_state_key k0 =
 		make_fw4_key(IPPROTO_TCP, 5000, 80, 0x0A000001, 0xC0A80001);
 	struct fw_state_value v0 =
-		make_fw_value(IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now);
+		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 	assert(insert_fw4_entry(map, &k0, &v0) >= 0);
 
 	struct fw4_state_key k1 =
 		make_fw4_key(IPPROTO_TCP, 5001, 80, 0x0A000002, 0xC0A80001);
 	struct fw_state_value v1 =
-		make_fw_value(IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now);
+		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 	assert(insert_fw4_entry(map, &k1, &v1) >= 0);
 
 	struct fw4_state_key k2 =
 		make_fw4_key(IPPROTO_TCP, 5002, 80, 0x0A000003, 0xC0A80001);
 	struct fw_state_value v2 =
-		make_fw_value(IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now);
+		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 	assert(insert_fw4_entry(map, &k2, &v2) >= 0);
 
 	/* Zero out updated_at of middle entry to simulate uninitialized */
@@ -536,9 +532,8 @@ test_paging(void *arena) {
 			0x0A000001 + (uint32_t)i,
 			0xC0A80001
 		);
-		struct fw_state_value val = make_fw_value(
-			IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now
-		);
+		struct fw_state_value val =
+			make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 		assert(insert_fw4_entry(map, &key, &val) >= 0);
 	}
 
@@ -621,9 +616,8 @@ test_forward_bounds(void *arena) {
 			0x0A000001 + (uint32_t)i,
 			0xC0A80001
 		);
-		struct fw_state_value val = make_fw_value(
-			IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now
-		);
+		struct fw_state_value val =
+			make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 		assert(insert_fw4_entry(map, &key, &val) >= 0);
 	}
 
@@ -675,9 +669,8 @@ test_backward_clamping(void *arena) {
 			0x0A000001 + (uint32_t)i,
 			0xC0A80001
 		);
-		struct fw_state_value val = make_fw_value(
-			IPPROTO_TCP, FWSTATE_ACK, FWSTATE_ACK, now, now
-		);
+		struct fw_state_value val =
+			make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
 		assert(insert_fw4_entry(map, &key, &val) >= 0);
 	}
 
@@ -702,8 +695,8 @@ test_backward_clamping(void *arena) {
 	/* Verify port values match expected reverse order */
 	struct fw4_state_key *k0 = (struct fw4_state_key *)out[0].key;
 	struct fw4_state_key *k2 = (struct fw4_state_key *)out[2].key;
-	assert(k0->src_port == 8002);
-	assert(k2->src_port == 8000);
+	assert(k0->hdr.src_port == 8002);
+	assert(k2->hdr.src_port == 8000);
 
 	fwmap_destroy(map, ctx);
 	verify_memory_leaks(ctx, "bwd_clamp");

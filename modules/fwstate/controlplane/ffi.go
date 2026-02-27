@@ -324,20 +324,19 @@ func (m *FwStateConfig) readEntries(
 	for i := range n {
 		entry := buf[i]
 		val := (*C.struct_fw_state_value)(entry.value)
+		hdr := (*C.struct_fw_state_key_hdr)(entry.key)
 
-		ttl := C.fwstate_entry_ttl(val, &cursor.timeouts)
+		ttl := C.fwstate_entry_ttl(hdr.proto, C.uint8_t(val.flags[0]), &cursor.timeouts)
 		expired := val.updated_at+ttl <= C.uint64_t(now)
 
 		pbKey := convertCKey(entry.key, isIPv6)
 		pbVal := &fwstatepb.FwStateValue{
-			External:             bool(val.external),
-			ProtocolType:         uint32(val._type),
-			Flags:                uint32(val.flags[0]),
-			PacketsSinceLastSync: uint32(val.packets_since_last_sync),
-			CreatedAt:            uint64(val.created_at),
-			UpdatedAt:            uint64(val.updated_at),
-			PacketsBackward:      uint64(val.packets_backward),
-			PacketsForward:       uint64(val.packets_forward),
+			External:        bool(val.external),
+			Flags:           uint32(val.flags[0]),
+			CreatedAt:       uint64(val.created_at),
+			UpdatedAt:       uint64(val.updated_at),
+			PacketsBackward: uint64(val.packets_backward),
+			PacketsForward:  uint64(val.packets_forward),
 		}
 
 		entries = append(entries, CursorEntry{
@@ -371,9 +370,9 @@ func convertCKey(ptr unsafe.Pointer, isIPv6 bool) *fwstatepb.FwStateKey {
 		srcAddr := C.GoBytes(unsafe.Pointer(&k.src_addr[0]), 16)
 		dstAddr := C.GoBytes(unsafe.Pointer(&k.dst_addr[0]), 16)
 		return &fwstatepb.FwStateKey{
-			Proto:   uint32(k.proto),
-			SrcPort: uint32(k.src_port),
-			DstPort: uint32(k.dst_port),
+			Proto:   uint32(k.hdr.proto),
+			SrcPort: uint32(k.hdr.src_port),
+			DstPort: uint32(k.hdr.dst_port),
 			SrcAddr: &fwstatepb.Addr{Bytes: srcAddr},
 			DstAddr: &fwstatepb.Addr{Bytes: dstAddr},
 		}
@@ -385,9 +384,9 @@ func convertCKey(ptr unsafe.Pointer, isIPv6 bool) *fwstatepb.FwStateKey {
 	*(*uint32)(unsafe.Pointer(&srcAddr[0])) = uint32(k.src_addr)
 	*(*uint32)(unsafe.Pointer(&dstAddr[0])) = uint32(k.dst_addr)
 	return &fwstatepb.FwStateKey{
-		Proto:   uint32(k.proto),
-		SrcPort: uint32(k.src_port),
-		DstPort: uint32(k.dst_port),
+		Proto:   uint32(k.hdr.proto),
+		SrcPort: uint32(k.hdr.src_port),
+		DstPort: uint32(k.hdr.dst_port),
 		SrcAddr: &fwstatepb.Addr{Bytes: srcAddr},
 		DstAddr: &fwstatepb.Addr{Bytes: dstAddr},
 	}

@@ -55,17 +55,18 @@ fwstate_build_state_key_v4(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-	key->proto = ipv4_hdr->next_proto_id;
-	key->_ = 0;
+	key->hdr.proto = ipv4_hdr->next_proto_id;
 	// Swap src/dst addresses to match initial 5-tuple stored in state
 	key->src_addr = ipv4_hdr->dst_addr;
 	key->dst_addr = ipv4_hdr->src_addr;
 
 	// Extract and swap src/dst ports
 	uint16_t src_port, dst_port;
-	fwstate_extract_ports(mbuf, packet, key->proto, &src_port, &dst_port);
-	key->src_port = dst_port; // little-endian
-	key->dst_port = src_port; // little-endian
+	fwstate_extract_ports(
+		mbuf, packet, key->hdr.proto, &src_port, &dst_port
+	);
+	key->hdr.src_port = dst_port; // little-endian
+	key->hdr.dst_port = src_port; // little-endian
 }
 
 /**
@@ -80,16 +81,18 @@ fwstate_build_state_key_v6(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	key->proto = ipv6_hdr->proto;
+	key->hdr.proto = ipv6_hdr->proto;
 	// Swap src/dst addresses to match initial 5-tuple stored in state
 	rte_memcpy(key->src_addr, ipv6_hdr->dst_addr, 16);
 	rte_memcpy(key->dst_addr, ipv6_hdr->src_addr, 16);
 
 	// Extract and swap src/dst ports
 	uint16_t src_port, dst_port;
-	fwstate_extract_ports(mbuf, packet, key->proto, &src_port, &dst_port);
-	key->src_port = dst_port; // little-endian
-	key->dst_port = src_port; // little-endian
+	fwstate_extract_ports(
+		mbuf, packet, key->hdr.proto, &src_port, &dst_port
+	);
+	key->hdr.src_port = dst_port; // little-endian
+	key->hdr.dst_port = src_port; // little-endian
 }
 
 /**

@@ -390,7 +390,7 @@ func (m *FWStateService) ListEntries(
 			return status.Error(codes.InvalidArgument, "config_name is required")
 		}
 
-		count := req.GetCount()
+		count := req.GetBatchSize()
 		if count == 0 {
 			count = 100
 		}

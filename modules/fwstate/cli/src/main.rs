@@ -1,5 +1,9 @@
 use core::error::Error;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::{
+    fmt,
+    net::{Ipv4Addr, Ipv6Addr},
+    time::{Duration, UNIX_EPOCH},
+};
 
 use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
@@ -8,6 +12,7 @@ use fwstatepb::{
     DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
     ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
 };
+use serde::Serialize;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::codec::CompressionEncoding;
@@ -216,7 +221,7 @@ impl FWStateService {
             layer_index: cmd.layer,
             include_expired: cmd.include_expired,
             direction: direction as i32,
-            count: cmd.batch,
+            batch_size: cmd.batch,
             index: cmd.index,
         };
         tx.send(initial_req).await.map_err(|e| format!("send error: {e}"))?;
@@ -229,8 +234,8 @@ impl FWStateService {
 
         if !json_output {
             println!(
-                "{:<6} {:<45} {:<45} {:<8} {:<8} {:<7}",
-                "IDX", "SRC", "DST", "PROTO", "STATE", "EXPRD"
+                "{:<6} {:<45} {:<45} {:<8} {:<9} {:<7}",
+                "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "EXPRD"
             );
         }
 
@@ -245,7 +250,8 @@ impl FWStateService {
                     break;
                 }
                 if json_output {
-                    println!("{}", serde_json::to_string(&entry)?);
+                    let je = JsonEntry::from_entry(entry, cmd.ipv6);
+                    println!("{}", serde_json::to_string(&je)?);
                 } else {
                     print_entry(entry, cmd.ipv6);
                 }
@@ -266,7 +272,7 @@ impl FWStateService {
                 layer_index: cmd.layer,
                 include_expired: cmd.include_expired,
                 direction: direction as i32,
-                count: cmd.batch,
+                batch_size: cmd.batch,
                 index: resp.index,
             };
             tx.send(next_req).await.map_err(|e| format!("send error: {e}"))?;
@@ -276,7 +282,7 @@ impl FWStateService {
     }
 }
 
-fn format_addr(addr: &Option<fwstatepb::Addr>, is_ipv6: bool) -> String {
+fn format_addr(addr: Option<&fwstatepb::Addr>, is_ipv6: bool) -> String {
     match addr {
         Some(a) if is_ipv6 && a.bytes.len() == 16 => {
             let octets: [u8; 16] = a.bytes[..16].try_into().unwrap();
@@ -290,21 +296,155 @@ fn format_addr(addr: &Option<fwstatepb::Addr>, is_ipv6: bool) -> String {
     }
 }
 
-fn proto_name(proto: u32) -> &'static str {
+/// Format IANA protocol number as a human-readable name.
+/// See: https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+fn format_proto(proto: u32) -> String {
     match proto {
-        6 => "TCP",
-        17 => "UDP",
-        1 => "ICMP",
-        58 => "ICMPv6",
-        _ => "OTHER",
+        1 => "ICMP".into(),
+        4 => "IPv4".into(),
+        6 => "TCP".into(),
+        17 => "UDP".into(),
+        41 => "IPv6".into(),
+        47 => "GRE".into(),
+        58 => "ICMPv6".into(),
+        132 => "SCTP".into(),
+        _ => proto.to_string(),
+    }
+}
+
+/// Decoded TCP flags for a single direction (4-bit nibble).
+///
+/// Bit layout (from [`lib/fwstate/types.h`]):
+///   - 0x01 = FIN
+///   - 0x02 = SYN
+///   - 0x04 = RST
+///   - 0x08 = ACK
+struct TcpNibble(u8);
+
+const TCP_FLAG_TABLE: [(u8, char, &str); 4] = [
+    (0x08, 'A', "ACK"),
+    (0x02, 'S', "SYN"),
+    (0x04, 'R', "RST"),
+    (0x01, 'F', "FIN"),
+];
+
+impl TcpNibble {
+    fn names(&self) -> Vec<&'static str> {
+        TCP_FLAG_TABLE
+            .iter()
+            .filter(|(mask, _, _)| self.0 & mask != 0)
+            .map(|(_, _, name)| *name)
+            .collect()
+    }
+}
+
+impl fmt::Display for TcpNibble {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (mask, ch, _) in TCP_FLAG_TABLE {
+            if self.0 & mask != 0 {
+                write!(f, "{ch}")?;
+            } else {
+                f.write_str("-")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Firewall state flags byte containing src (lower nibble) and dst
+/// (upper nibble) TCP flag sets.
+///
+/// The raw byte is stored in `fw_state_value.flags` and transmitted
+/// via protobuf as `FwStateValue.flags`.
+/// See `struct fw_state_flags` (from `lib/fwstate/types.h`)
+struct FwStateFlags(u32);
+
+impl FwStateFlags {
+    fn src(&self) -> TcpNibble {
+        TcpNibble((self.0 & 0x0f) as u8)
+    }
+
+    fn dst(&self) -> TcpNibble {
+        TcpNibble(((self.0 >> 4) & 0x0f) as u8)
+    }
+}
+
+impl fmt::Display for FwStateFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}|{}", self.src(), self.dst())
+    }
+}
+
+/// Flat JSON representation of a firewall state entry.
+#[derive(Serialize)]
+struct JsonEntry {
+    idx: u32,
+    expired: bool,
+    src_port: u32,
+    dst_port: u32,
+    src_addr: String,
+    dst_addr: String,
+    proto: String,
+    origin: &'static str,
+    flags: SrcDstFlags,
+    packets: SrcDstPackets,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Serialize)]
+struct SrcDstFlags {
+    src: Vec<&'static str>,
+    dst: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+struct SrcDstPackets {
+    src: u64,
+    dst: u64,
+}
+
+impl JsonEntry {
+    fn from_entry(entry: &fwstatepb::FwStateEntry, is_ipv6: bool) -> Self {
+        let key = entry.key.as_ref();
+        let val = entry.value.as_ref();
+        let flags = FwStateFlags(val.map(|v| v.flags).unwrap_or(0));
+        let external = val.map(|v| v.external).unwrap_or(false);
+
+        Self {
+            idx: entry.idx,
+            expired: entry.expired,
+            src_port: key.map(|k| k.src_port).unwrap_or(0),
+            dst_port: key.map(|k| k.dst_port).unwrap_or(0),
+            src_addr: format_addr(key.and_then(|k| k.src_addr.as_ref()), is_ipv6),
+            dst_addr: format_addr(key.and_then(|k| k.dst_addr.as_ref()), is_ipv6),
+            proto: format_proto(key.map(|k| k.proto).unwrap_or(0)),
+            origin: if external { "external" } else { "local" },
+            flags: SrcDstFlags {
+                src: flags.src().names(),
+                dst: flags.dst().names(),
+            },
+            packets: SrcDstPackets {
+                src: val.map(|v| v.packets_forward).unwrap_or(0),
+                dst: val.map(|v| v.packets_backward).unwrap_or(0),
+            },
+            created_at: humantime::format_rfc3339(
+                UNIX_EPOCH + Duration::from_nanos(val.map(|v| v.created_at).unwrap_or(0)),
+            )
+            .to_string(),
+            updated_at: humantime::format_rfc3339(
+                UNIX_EPOCH + Duration::from_nanos(val.map(|v| v.updated_at).unwrap_or(0)),
+            )
+            .to_string(),
+        }
     }
 }
 
 fn print_entry(entry: &fwstatepb::FwStateEntry, is_ipv6: bool) {
     let (src_addr, dst_addr, src_port, dst_port, proto) = match &entry.key {
         Some(k) => (
-            format_addr(&k.src_addr, is_ipv6),
-            format_addr(&k.dst_addr, is_ipv6),
+            format_addr(k.src_addr.as_ref(), is_ipv6),
+            format_addr(k.dst_addr.as_ref(), is_ipv6),
             k.src_port,
             k.dst_port,
             k.proto,
@@ -312,19 +452,18 @@ fn print_entry(entry: &fwstatepb::FwStateEntry, is_ipv6: bool) {
         None => ("?".into(), "?".into(), 0, 0, 0),
     };
 
-    let proto_type = entry.value.as_ref().map(|v| v.protocol_type).unwrap_or(proto);
     let flags = entry.value.as_ref().map(|v| v.flags).unwrap_or(0);
 
     let src = format!("{}:{}", src_addr, src_port);
     let dst = format!("{}:{}", dst_addr, dst_port);
 
     println!(
-        "{:<6} {:<45} {:<45} {:<8} {:<8} {:<7}",
+        "{:<6} {:<45} {:<45} {:<8} {:<9} {:<7}",
         entry.idx,
         src,
         dst,
-        proto_name(proto_type),
-        format!("0x{:02x}", flags),
+        format_proto(proto),
+        FwStateFlags(flags),
         if entry.expired { "yes" } else { "no" },
     );
 }
