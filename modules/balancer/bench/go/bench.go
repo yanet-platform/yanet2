@@ -383,7 +383,7 @@ const (
 
 func setupYanet(shm *yanet.SharedMemory) error {
 	// Attach bootstrap agent to configure the controlplane
-	bootstrap, err := shm.AgentAttach("bootstrap", 0, 1<<20)
+	bootstrap, err := shm.AgentReattach("bootstrap", 0, 1<<20)
 	if err != nil {
 		return fmt.Errorf("failed to attach to bootstrap agent: %w", err)
 	}
