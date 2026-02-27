@@ -74,8 +74,6 @@ func TestFWStateListEntries(t *testing.T) {
 			_, _, err := fw.SendPacketAndParse(0, 0, pkt, 200*time.Millisecond)
 			_ = err // CreateState does not forward the original packet
 		}
-
-		time.Sleep(500 * time.Millisecond)
 	})
 
 	// 4. Forward listing: verify exact entries.
@@ -259,8 +257,6 @@ func TestFWStateListEntries(t *testing.T) {
 			_, _, err := fw.SendPacketAndParse(0, 0, pkt, 200*time.Millisecond)
 			_ = err
 		}
-
-		time.Sleep(500 * time.Millisecond)
 	})
 
 	// 13. IPv6 forward listing: verify entries were created.

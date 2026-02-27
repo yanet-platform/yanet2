@@ -406,7 +406,7 @@ func (m *FWStateService) ListEntries(
 		backward := req.GetDirection() == fwstatepb.Direction_BACKWARD
 
 		var entries []CursorEntry
-		var newIndex uint32
+		var newIndex int64
 		var hasMore bool
 
 		if backward {

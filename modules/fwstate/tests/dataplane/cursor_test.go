@@ -56,7 +56,7 @@ func TestCursorForwardRead(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Len(t, results, 5)
-	require.Equal(t, uint32(5), newIdx)
+	require.Equal(t, int64(5), newIdx)
 
 	// Verify ascending idx order.
 	for i, r := range results {
@@ -84,16 +84,19 @@ func TestCursorBackwardRead(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	results, _, err := readCursorBackward(cpModule,
+	results, newIdx, err := readCursorBackward(cpModule,
 		false, 0, math.MaxUint32, true, now, 10,
 	)
 	require.NoError(t, err)
 	require.Len(t, results, 5)
+	require.Equal(t, int64(-1), newIdx)
 
 	// Verify descending idx order (4..0).
 	for i, r := range results {
 		require.Equal(t, uint32(4-i), r.Idx)
 		require.Equal(t, uint16(2000+4-i), r.SrcPort)
+		require.Equal(t, uint16(443), r.DstPort)
+		require.Equal(t, protoTCP, r.Proto)
 	}
 }
 
@@ -245,8 +248,8 @@ func TestCursorPaging(t *testing.T) {
 
 	// Read in batches of 3.
 	var allResults []CursorResult
-	idx := uint32(0)
 
+	var idx int64
 	for {
 		results, newIdx, err := readCursorForward(cpModule,
 			false, 0, idx, true, now, 3,
@@ -260,6 +263,7 @@ func TestCursorPaging(t *testing.T) {
 	}
 
 	require.Len(t, allResults, 10)
+	require.Equal(t, int64(10), idx)
 
 	// Verify all entries covered.
 	for i, r := range allResults {

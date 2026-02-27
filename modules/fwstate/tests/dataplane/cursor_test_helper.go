@@ -76,14 +76,14 @@ func insertFw4Entry(
 func readCursorForward(
 	cpModule *C.struct_cp_module,
 	isIPv6 bool, layerIndex uint32,
-	index uint32, includeExpired bool,
+	index int64, includeExpired bool,
 	now uint64, count uint32,
-) ([]CursorResult, uint32, error) {
+) ([]CursorResult, int64, error) {
 	var cursor C.fwstate_cursor_t
 	rc := C.fwstate_config_cursor_create(
 		cpModule, &cursor,
 		C.bool(isIPv6), C.uint32_t(layerIndex),
-		C.uint32_t(index), C.bool(includeExpired),
+		C.int64_t(index), C.bool(includeExpired),
 	)
 	if rc != 0 {
 		return nil, 0, fmt.Errorf("fwstate_config_cursor_create failed: %d", rc)
@@ -121,21 +121,21 @@ func readCursorForward(
 		})
 	}
 
-	return results, uint32(cursor.key_pos), nil
+	return results, int64(cursor.key_pos), nil
 }
 
 // readCursorBackward reads entries in the backward direction using the cursor API.
 func readCursorBackward(
 	cpModule *C.struct_cp_module,
 	isIPv6 bool, layerIndex uint32,
-	index uint32, includeExpired bool,
+	index int64, includeExpired bool,
 	now uint64, count uint32,
-) ([]CursorResult, uint32, error) {
+) ([]CursorResult, int64, error) {
 	var cursor C.fwstate_cursor_t
 	rc := C.fwstate_config_cursor_create(
 		cpModule, &cursor,
 		C.bool(isIPv6), C.uint32_t(layerIndex),
-		C.uint32_t(index), C.bool(includeExpired),
+		C.int64_t(index), C.bool(includeExpired),
 	)
 	if rc != 0 {
 		return nil, 0, fmt.Errorf("fwstate_config_cursor_create failed: %d", rc)
@@ -173,5 +173,5 @@ func readCursorBackward(
 		})
 	}
 
-	return results, uint32(cursor.key_pos), nil
+	return results, int64(cursor.key_pos), nil
 }

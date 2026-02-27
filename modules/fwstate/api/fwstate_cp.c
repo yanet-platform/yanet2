@@ -444,7 +444,7 @@ fwstate_config_cursor_create(
 	fwstate_cursor_t *cursor,
 	bool is_ipv6,
 	uint32_t layer_index,
-	uint32_t index,
+	int64_t index,
 	bool include_expired
 ) {
 	struct fwstate_module_config *config = container_of(

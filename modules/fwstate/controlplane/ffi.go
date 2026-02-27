@@ -268,33 +268,39 @@ type CursorEntry struct {
 // ReadForward reads up to count entries in the forward direction starting at index.
 // The caller must hold FWStateService.mu.
 func (m *FwStateConfig) ReadForward(
-	isIPv6 bool, layerIndex uint32,
-	index uint32, includeExpired bool,
-	now uint64, count uint32,
-) (entries []CursorEntry, newIndex uint32, hasMore bool, err error) {
+	isIPv6 bool,
+	layerIndex uint32,
+	index int64,
+	includeExpired bool,
+	now uint64,
+	count uint32,
+) (entries []CursorEntry, newIndex int64, hasMore bool, err error) {
 	return m.readEntries(isIPv6, layerIndex, index, includeExpired, now, count, false)
 }
 
 // ReadBackward reads up to count entries in the backward direction starting at index.
 // The caller must hold FWStateService.mu.
 func (m *FwStateConfig) ReadBackward(
-	isIPv6 bool, layerIndex uint32,
-	index uint32, includeExpired bool,
-	now uint64, count uint32,
-) (entries []CursorEntry, newIndex uint32, hasMore bool, err error) {
+	isIPv6 bool,
+	layerIndex uint32,
+	index int64,
+	includeExpired bool,
+	now uint64,
+	count uint32,
+) (entries []CursorEntry, newIndex int64, hasMore bool, err error) {
 	return m.readEntries(isIPv6, layerIndex, index, includeExpired, now, count, true)
 }
 
 func (m *FwStateConfig) readEntries(
 	isIPv6 bool, layerIndex uint32,
-	index uint32, includeExpired bool,
+	index int64, includeExpired bool,
 	now uint64, count uint32, backward bool,
-) ([]CursorEntry, uint32, bool, error) {
+) ([]CursorEntry, int64, bool, error) {
 	var cursor C.fwstate_cursor_t
 	rc := C.fwstate_config_cursor_create(
 		m.asCPModule(), &cursor,
 		C.bool(isIPv6), C.uint32_t(layerIndex),
-		C.uint32_t(index), C.bool(includeExpired),
+		C.int64_t(index), C.bool(includeExpired),
 	)
 	if rc != 0 {
 		return nil, 0, false, fmt.Errorf("failed to create cursor: map or layer not found")
@@ -309,7 +315,7 @@ func (m *FwStateConfig) readEntries(
 
 	buf := make([]C.fwstate_cursor_entry_t, count)
 
-	var n C.int32_t
+	var n C.uint32_t
 	if backward {
 		n = C.fwstate_cursor_read_backward(
 			fwmap, &cursor, C.uint64_t(now), &buf[0], C.uint32_t(count),
@@ -324,10 +330,6 @@ func (m *FwStateConfig) readEntries(
 	for i := range n {
 		entry := buf[i]
 		val := (*C.struct_fw_state_value)(entry.value)
-		hdr := (*C.struct_fw_state_key_hdr)(entry.key)
-
-		ttl := C.fwstate_entry_ttl(hdr.proto, C.uint8_t(val.flags[0]), &cursor.timeouts)
-		expired := val.updated_at+ttl <= C.uint64_t(now)
 
 		pbKey := convertCKey(entry.key, isIPv6)
 		pbVal := &fwstatepb.FwStateValue{
@@ -343,50 +345,43 @@ func (m *FwStateConfig) readEntries(
 			Key:     pbKey,
 			Value:   pbVal,
 			Idx:     uint32(entry.idx),
-			Expired: bool(expired),
+			Expired: bool(entry.expired),
 		})
 	}
 
-	newIndex := uint32(cursor.key_pos)
+	newIndex := int64(cursor.key_pos)
 	// Safe to read key_cursor directly - we hold mu.
-	keyLimit := uint32(fwmap.key_cursor)
+	keyLimit := fwmap.key_cursor
 
 	hasMore := false
 	if backward {
-		if n > 0 {
-			// We can't use newIndex > 0 because the entry with index 0 would be lost
-			hasMore = uint32(buf[n-1].idx) > 0
-		}
+		hasMore = newIndex > -1
 	} else {
-		hasMore = newIndex < keyLimit
+		hasMore = newIndex < int64(keyLimit)
 	}
 
 	return entries, newIndex, hasMore, nil
 }
 
 func convertCKey(ptr unsafe.Pointer, isIPv6 bool) *fwstatepb.FwStateKey {
+	var srcAddr, dstAddr []byte
 	if isIPv6 {
 		k := (*C.struct_fw6_state_key)(ptr)
-		srcAddr := C.GoBytes(unsafe.Pointer(&k.src_addr[0]), 16)
-		dstAddr := C.GoBytes(unsafe.Pointer(&k.dst_addr[0]), 16)
-		return &fwstatepb.FwStateKey{
-			Proto:   uint32(k.hdr.proto),
-			SrcPort: uint32(k.hdr.src_port),
-			DstPort: uint32(k.hdr.dst_port),
-			SrcAddr: &fwstatepb.Addr{Bytes: srcAddr},
-			DstAddr: &fwstatepb.Addr{Bytes: dstAddr},
-		}
+		srcAddr = C.GoBytes(unsafe.Pointer(&k.src_addr[0]), 16)
+		dstAddr = C.GoBytes(unsafe.Pointer(&k.dst_addr[0]), 16)
+	} else {
+		k := (*C.struct_fw4_state_key)(ptr)
+		srcAddr = make([]byte, 4)
+		dstAddr = make([]byte, 4)
+		*(*uint32)(unsafe.Pointer(&srcAddr[0])) = uint32(k.src_addr)
+		*(*uint32)(unsafe.Pointer(&dstAddr[0])) = uint32(k.dst_addr)
 	}
 
-	k := (*C.struct_fw4_state_key)(ptr)
-	srcAddr := make([]byte, 4)
-	dstAddr := make([]byte, 4)
-	*(*uint32)(unsafe.Pointer(&srcAddr[0])) = uint32(k.src_addr)
-	*(*uint32)(unsafe.Pointer(&dstAddr[0])) = uint32(k.dst_addr)
+	hdr := (*C.struct_fw_state_key_hdr)(ptr)
 	return &fwstatepb.FwStateKey{
-		Proto:   uint32(k.hdr.proto),
-		SrcPort: uint32(k.hdr.src_port),
-		DstPort: uint32(k.hdr.dst_port),
+		Proto:   uint32(hdr.proto),
+		SrcPort: uint32(hdr.src_port),
+		DstPort: uint32(hdr.dst_port),
 		SrcAddr: &fwstatepb.Addr{Bytes: srcAddr},
 		DstAddr: &fwstatepb.Addr{Bytes: dstAddr},
 	}

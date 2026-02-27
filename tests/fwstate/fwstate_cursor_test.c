@@ -37,79 +37,123 @@ static struct fwstate_timeouts test_timeouts = {
 	.default_ = 16e9,     /* 16s */
 };
 
+/* ====================================================================== */
+/* Test environment: context + config + map lifecycle                       */
+/* ====================================================================== */
+
+typedef struct test_env {
+	struct memory_context *ctx;
+	fwmap_t *map;
+	const char *name;
+} test_env_t;
+
 /*
- * Initialize a fwstate map configuration using real fw4 key/value types.
+ * Create a test environment: memory context, fwstate config, and map.
+ * Sets the global `now` to 1000.
+ */
+static test_env_t
+test_env_create(void *arena, const char *name) {
+	struct memory_context *ctx =
+		init_context_from_arena(arena, ARENA_SIZE, name);
+
+	fwmap_config_t cfg;
+	memset(&cfg, 0, sizeof(cfg));
+	cfg.key_size = sizeof(struct fw4_state_key);
+	cfg.value_size = sizeof(struct fw_state_value);
+	cfg.hash_seed = 0;
+	cfg.worker_count = 1;
+	cfg.hash_fn_id = FWMAP_HASH_FNV1A;
+	cfg.key_equal_fn_id = FWMAP_KEY_EQUAL_FW4;
+	cfg.rand_fn_id = FWMAP_RAND_DEFAULT;
+	cfg.copy_key_fn_id = FWMAP_COPY_KEY_FW4;
+	cfg.copy_value_fn_id = FWMAP_COPY_VALUE_FWSTATE;
+	cfg.merge_value_fn_id = FWMAP_MERGE_VALUE_FWSTATE;
+	cfg.index_size = 128;
+	cfg.extra_bucket_count = 8;
+
+	fwmap_t *map = fwmap_new(&cfg, ctx);
+	assert(map != NULL);
+
+	now = 1000;
+
+	return (test_env_t){.ctx = ctx, .map = map, .name = name};
+}
+
+/*
+ * Destroy the map and verify no memory leaks.
  */
 static void
-setup_fwstate_config(
-	fwmap_config_t *cfg, uint32_t idx_size, uint32_t extra_buckets
-) {
-	memset(cfg, 0, sizeof(*cfg));
-	cfg->key_size = sizeof(struct fw4_state_key);
-	cfg->value_size = sizeof(struct fw_state_value);
-	cfg->hash_seed = 0;
-	cfg->worker_count = 1;
-	cfg->hash_fn_id = FWMAP_HASH_FNV1A;
-	cfg->key_equal_fn_id = FWMAP_KEY_EQUAL_FW4;
-	cfg->rand_fn_id = FWMAP_RAND_DEFAULT;
-	cfg->copy_key_fn_id = FWMAP_COPY_KEY_FW4;
-	cfg->copy_value_fn_id = FWMAP_COPY_VALUE_FWSTATE;
-	cfg->merge_value_fn_id = FWMAP_MERGE_VALUE_FWSTATE;
-	cfg->index_size = idx_size;
-	cfg->extra_bucket_count = extra_buckets;
+test_env_destroy(test_env_t *env) {
+	fwmap_destroy(env->map, env->ctx);
+	verify_memory_leaks(env->ctx, env->name);
 }
 
 /*
- * Helper: create a fw4 key with distinct fields.
+ * Insert `count` TCP entries with sequential source ports starting at
+ * `base_port`, all targeting `dst_port`. Source addresses increment from
+ * 10.0.0.1. TCP flags are set to ACK/ACK (established).
  */
-static struct fw4_state_key
-make_fw4_key(
-	uint16_t proto,
-	uint16_t src_port,
+static void
+test_env_insert_tcp(
+	test_env_t *env, uint32_t count, uint16_t base_port, uint16_t dst_port
+) {
+	for (uint32_t i = 0; i < count; i++) {
+		struct fw4_state_key key;
+		memset(&key, 0, sizeof(key));
+		key.hdr.proto = IPPROTO_TCP;
+		key.hdr.src_port = (uint16_t)(base_port + i);
+		key.hdr.dst_port = dst_port;
+		key.src_addr = 0x0A000001 + i;
+		key.dst_addr = 0xC0A80001;
+
+		struct fw_state_value val;
+		memset(&val, 0, sizeof(val));
+		val.flags.tcp.src = FWSTATE_ACK;
+		val.flags.tcp.dst = FWSTATE_ACK;
+		val.created_at = now;
+		val.updated_at = now;
+		val.packets_forward = 1;
+
+		int64_t ret = fwmap_put(
+			env->map, WORKER_ID, now, DEFAULT_TTL, &key, &val, NULL
+		);
+		assert(ret >= 0);
+	}
+}
+
+/*
+ * Insert `count` UDP entries with sequential source ports starting at
+ * `base_port`, all targeting `dst_port`. Source addresses increment from
+ * 10.0.0.1 + addr_offset.
+ */
+static void
+test_env_insert_udp(
+	test_env_t *env,
+	uint32_t count,
+	uint16_t base_port,
 	uint16_t dst_port,
-	uint32_t src_addr,
-	uint32_t dst_addr
+	uint32_t addr_offset
 ) {
-	struct fw4_state_key key;
-	memset(&key, 0, sizeof(key));
-	key.hdr.proto = proto;
-	key.hdr.src_port = src_port;
-	key.hdr.dst_port = dst_port;
-	key.src_addr = src_addr;
-	key.dst_addr = dst_addr;
-	return key;
-}
+	for (uint32_t i = 0; i < count; i++) {
+		struct fw4_state_key key;
+		memset(&key, 0, sizeof(key));
+		key.hdr.proto = IPPROTO_UDP;
+		key.hdr.src_port = (uint16_t)(base_port + i);
+		key.hdr.dst_port = dst_port;
+		key.src_addr = 0x0A000001 + addr_offset + i;
+		key.dst_addr = 0xC0A80001;
 
-/*
- * Helper: create a fw_state_value.
- */
-static struct fw_state_value
-make_fw_value(
-	uint8_t src_flags,
-	uint8_t dst_flags,
-	uint64_t created_at,
-	uint64_t updated_at
-) {
-	struct fw_state_value val;
-	memset(&val, 0, sizeof(val));
-	val.flags.tcp.src = src_flags;
-	val.flags.tcp.dst = dst_flags;
-	val.created_at = created_at;
-	val.updated_at = updated_at;
-	val.packets_forward = 1;
-	val.packets_backward = 0;
-	return val;
-}
+		struct fw_state_value val;
+		memset(&val, 0, sizeof(val));
+		val.created_at = now;
+		val.updated_at = now;
+		val.packets_forward = 1;
 
-/*
- * Helper: insert a fw4 entry into the map.
- * Returns the index assigned to the entry.
- */
-static int64_t
-insert_fw4_entry(
-	fwmap_t *map, struct fw4_state_key *key, struct fw_state_value *value
-) {
-	return fwmap_put(map, WORKER_ID, now, DEFAULT_TTL, key, value, NULL);
+		int64_t ret = fwmap_put(
+			env->map, WORKER_ID, now, DEFAULT_TTL, &key, &val, NULL
+		);
+		assert(ret >= 0);
+	}
 }
 
 /* ====================================================================== */
@@ -172,14 +216,7 @@ test_ttl_selection(void) {
 static void
 test_empty_map(void *arena) {
 	printf("\n--- Empty Map Test ---\n");
-	struct memory_context *ctx =
-		init_context_from_arena(arena, ARENA_SIZE, "empty_map");
-
-	fwmap_config_t cfg;
-	setup_fwstate_config(&cfg, 128, 8);
-
-	fwmap_t *map = fwmap_new(&cfg, ctx);
-	assert(map != NULL);
+	test_env_t env = test_env_create(arena, "empty_map");
 
 	fwstate_cursor_entry_t out[10];
 
@@ -189,16 +226,16 @@ test_empty_map(void *arena) {
 		.include_expired = true,
 		.timeouts = test_timeouts,
 	};
-	int32_t n = fwstate_cursor_read_forward(map, &cursor, now, out, 10);
+	uint32_t n =
+		fwstate_cursor_read_forward(env.map, &cursor, now, out, 10);
 	assert(n == 0);
 
 	/* Backward on empty map */
-	cursor.key_pos = UINT32_MAX;
-	n = fwstate_cursor_read_backward(map, &cursor, now, out, 10);
+	cursor.key_pos = INT64_MAX;
+	n = fwstate_cursor_read_backward(env.map, &cursor, now, out, 10);
 	assert(n == 0);
 
-	fwmap_destroy(map, ctx);
-	verify_memory_leaks(ctx, "empty_map");
+	test_env_destroy(&env);
 	printf("  Empty map test passed\n");
 }
 
@@ -209,32 +246,10 @@ test_empty_map(void *arena) {
 static void
 test_forward_iteration(void *arena) {
 	printf("\n--- Forward Iteration Test ---\n");
-	struct memory_context *ctx =
-		init_context_from_arena(arena, ARENA_SIZE, "forward_iter");
+	test_env_t env = test_env_create(arena, "forward_iter");
 
-	fwmap_config_t cfg;
-	setup_fwstate_config(&cfg, 128, 8);
-
-	fwmap_t *map = fwmap_new(&cfg, ctx);
-	assert(map != NULL);
-
-	now = 1000;
-
-	/* Insert 5 entries with distinct keys */
-	struct fw4_state_key keys[5];
-	struct fw_state_value vals[5];
-	for (int i = 0; i < 5; i++) {
-		keys[i] = make_fw4_key(
-			IPPROTO_TCP,
-			(uint16_t)(1000 + i),
-			80,
-			0x0A000001 + (uint32_t)i,
-			0xC0A80001
-		);
-		vals[i] = make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-		int64_t ret = insert_fw4_entry(map, &keys[i], &vals[i]);
-		assert(ret >= 0);
-	}
+	/* Insert 5 TCP entries: ports 1000..1004 -> 80 */
+	test_env_insert_tcp(&env, 5, 1000, 80);
 
 	/* Read all forward */
 	fwstate_cursor_entry_t out[10];
@@ -244,12 +259,13 @@ test_forward_iteration(void *arena) {
 		.timeouts = test_timeouts,
 	};
 
-	int32_t n = fwstate_cursor_read_forward(map, &cursor, now, out, 10);
+	uint32_t n =
+		fwstate_cursor_read_forward(env.map, &cursor, now, out, 10);
 	assert(n == 5);
 
 	/* Verify ascending idx order and key data */
-	for (int i = 0; i < 5; i++) {
-		assert(out[i].idx == (uint32_t)i);
+	for (uint32_t i = 0; i < 5; i++) {
+		assert(out[i].idx == i);
 		struct fw4_state_key *k = (struct fw4_state_key *)out[i].key;
 		assert(k->hdr.src_port == (uint16_t)(1000 + i));
 		assert(k->hdr.dst_port == 80);
@@ -259,8 +275,7 @@ test_forward_iteration(void *arena) {
 	/* Cursor should advance to 5 */
 	assert(cursor.key_pos == 5);
 
-	fwmap_destroy(map, ctx);
-	verify_memory_leaks(ctx, "forward_iter");
+	test_env_destroy(&env);
 	printf("  Forward iteration test passed\n");
 }
 
@@ -271,53 +286,38 @@ test_forward_iteration(void *arena) {
 static void
 test_backward_iteration(void *arena) {
 	printf("\n--- Backward Iteration Test ---\n");
-	struct memory_context *ctx =
-		init_context_from_arena(arena, ARENA_SIZE, "backward_iter");
+	test_env_t env = test_env_create(arena, "backward_iter");
 
-	fwmap_config_t cfg;
-	setup_fwstate_config(&cfg, 128, 8);
+	/* Insert 5 TCP entries: ports 2000..2004 -> 443 */
+	test_env_insert_tcp(&env, 5, 2000, 443);
 
-	fwmap_t *map = fwmap_new(&cfg, ctx);
-	assert(map != NULL);
-
-	now = 1000;
-
-	/* Insert 5 entries */
-	struct fw4_state_key keys[5];
-	struct fw_state_value vals[5];
-	for (int i = 0; i < 5; i++) {
-		keys[i] = make_fw4_key(
-			IPPROTO_TCP,
-			(uint16_t)(2000 + i),
-			443,
-			0x0A000001 + (uint32_t)i,
-			0xC0A80002
-		);
-		vals[i] = make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-		int64_t ret = insert_fw4_entry(map, &keys[i], &vals[i]);
-		assert(ret >= 0);
-	}
-
-	/* Read backward from UINT32_MAX (should clamp to last entry) */
+	/* Read backward from INT64_MAX (should clamp to last entry) */
 	fwstate_cursor_entry_t out[10];
 	fwstate_cursor_t cursor = {
-		.key_pos = UINT32_MAX,
+		.key_pos = INT64_MAX,
 		.include_expired = true,
 		.timeouts = test_timeouts,
 	};
 
-	int32_t n = fwstate_cursor_read_backward(map, &cursor, now, out, 10);
+	uint32_t n =
+		fwstate_cursor_read_backward(env.map, &cursor, now, out, 10);
 	assert(n == 5);
 
-	/* Verify descending idx order (4..0) */
-	for (int i = 0; i < 5; i++) {
-		assert(out[i].idx == (uint32_t)(4 - i));
+	/* Verify descending idx order (4..0), including entry at index 0 */
+	for (uint32_t i = 0; i < 5; i++) {
+		assert(out[i].idx == (4 - i));
 		struct fw4_state_key *k = (struct fw4_state_key *)out[i].key;
 		assert(k->hdr.src_port == (uint16_t)(2000 + 4 - i));
 	}
 
-	fwmap_destroy(map, ctx);
-	verify_memory_leaks(ctx, "backward_iter");
+	/* After exhaustion, key_pos should be -1 */
+	assert(cursor.key_pos == -1);
+
+	/* Subsequent call must return 0 (no infinite loop) */
+	n = fwstate_cursor_read_backward(env.map, &cursor, now, out, 10);
+	assert(n == 0);
+
+	test_env_destroy(&env);
 	printf("  Backward iteration test passed\n");
 }
 
@@ -328,34 +328,12 @@ test_backward_iteration(void *arena) {
 static void
 test_expired_skipped(void *arena) {
 	printf("\n--- Expired Entries Skipped Test ---\n");
-	struct memory_context *ctx =
-		init_context_from_arena(arena, ARENA_SIZE, "expired_skip");
+	test_env_t env = test_env_create(arena, "expired_skip");
 
-	fwmap_config_t cfg;
-	setup_fwstate_config(&cfg, 128, 8);
-
-	fwmap_t *map = fwmap_new(&cfg, ctx);
-	assert(map != NULL);
-
-	now = 1000;
-
-	/* Insert 3 entries: TCP, UDP, TCP */
-	struct fw4_state_key k0 =
-		make_fw4_key(IPPROTO_TCP, 3000, 80, 0x0A000001, 0xC0A80001);
-	struct fw_state_value v0 =
-		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-	assert(insert_fw4_entry(map, &k0, &v0) >= 0);
-
-	struct fw4_state_key k1 =
-		make_fw4_key(IPPROTO_UDP, 3001, 53, 0x0A000002, 0xC0A80001);
-	struct fw_state_value v1 = make_fw_value(0, 0, now, now);
-	assert(insert_fw4_entry(map, &k1, &v1) >= 0);
-
-	struct fw4_state_key k2 =
-		make_fw4_key(IPPROTO_TCP, 3002, 443, 0x0A000003, 0xC0A80001);
-	struct fw_state_value v2 =
-		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-	assert(insert_fw4_entry(map, &k2, &v2) >= 0);
+	/* Insert: TCP(3000->80), UDP(3001->53), TCP(3002->443) */
+	test_env_insert_tcp(&env, 1, 3000, 80);
+	test_env_insert_udp(&env, 1, 3001, 53, 1);
+	test_env_insert_tcp(&env, 1, 3002, 443);
 
 	/*
 	 * Advance time so UDP (30s TTL) is expired but TCP (120s TTL)
@@ -371,8 +349,9 @@ test_expired_skipped(void *arena) {
 		.timeouts = test_timeouts,
 	};
 
-	int32_t n =
-		fwstate_cursor_read_forward(map, &cursor, read_now, out, 10);
+	uint32_t n = fwstate_cursor_read_forward(
+		env.map, &cursor, read_now, out, 10
+	);
 	assert(n == 2);
 
 	/* Both returned entries should have keys with TCP proto */
@@ -381,8 +360,7 @@ test_expired_skipped(void *arena) {
 		assert(key->hdr.proto == IPPROTO_TCP);
 	}
 
-	fwmap_destroy(map, ctx);
-	verify_memory_leaks(ctx, "expired_skip");
+	test_env_destroy(&env);
 	printf("  Expired entries skipped test passed\n");
 }
 
@@ -393,34 +371,13 @@ test_expired_skipped(void *arena) {
 static void
 test_include_expired(void *arena) {
 	printf("\n--- Include Expired Test ---\n");
-	struct memory_context *ctx =
-		init_context_from_arena(arena, ARENA_SIZE, "include_exp");
+	test_env_t env = test_env_create(arena, "include_exp");
 
-	fwmap_config_t cfg;
-	setup_fwstate_config(&cfg, 128, 8);
-
-	fwmap_t *map = fwmap_new(&cfg, ctx);
-	assert(map != NULL);
-
-	now = 1000;
-
-	/* Same setup as expired test: TCP, UDP, TCP */
-	struct fw4_state_key k0 =
-		make_fw4_key(IPPROTO_TCP, 4000, 80, 0x0A000001, 0xC0A80001);
-	struct fw_state_value v0 =
-		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-	assert(insert_fw4_entry(map, &k0, &v0) >= 0);
-
-	struct fw4_state_key k1 =
-		make_fw4_key(IPPROTO_UDP, 4001, 53, 0x0A000002, 0xC0A80001);
-	struct fw_state_value v1 = make_fw_value(0, 0, now, now);
-	assert(insert_fw4_entry(map, &k1, &v1) >= 0);
-
-	struct fw4_state_key k2 =
-		make_fw4_key(IPPROTO_TCP, 4002, 443, 0x0A000003, 0xC0A80001);
-	struct fw_state_value v2 =
-		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-	assert(insert_fw4_entry(map, &k2, &v2) >= 0);
+	/* Same setup as expired test: TCP(4000->80), UDP(4001->53),
+	 * TCP(4002->443) */
+	test_env_insert_tcp(&env, 1, 4000, 80);
+	test_env_insert_udp(&env, 1, 4001, 53, 1);
+	test_env_insert_tcp(&env, 1, 4002, 443);
 
 	/* Advance time so UDP is expired */
 	uint64_t read_now = now + (uint64_t)31e9;
@@ -433,12 +390,12 @@ test_include_expired(void *arena) {
 		.timeouts = test_timeouts,
 	};
 
-	int32_t n =
-		fwstate_cursor_read_forward(map, &cursor, read_now, out, 10);
+	uint32_t n = fwstate_cursor_read_forward(
+		env.map, &cursor, read_now, out, 10
+	);
 	assert(n == 3);
 
-	fwmap_destroy(map, ctx);
-	verify_memory_leaks(ctx, "include_exp");
+	test_env_destroy(&env);
 	printf("  Include expired test passed\n");
 }
 
@@ -449,39 +406,14 @@ test_include_expired(void *arena) {
 static void
 test_uninitialized_skipped(void *arena) {
 	printf("\n--- Uninitialized Entries Skipped Test ---\n");
-	struct memory_context *ctx =
-		init_context_from_arena(arena, ARENA_SIZE, "uninit_skip");
+	test_env_t env = test_env_create(arena, "uninit_skip");
 
-	fwmap_config_t cfg;
-	setup_fwstate_config(&cfg, 128, 8);
-
-	fwmap_t *map = fwmap_new(&cfg, ctx);
-	assert(map != NULL);
-
-	now = 1000;
-
-	/* Insert 3 entries */
-	struct fw4_state_key k0 =
-		make_fw4_key(IPPROTO_TCP, 5000, 80, 0x0A000001, 0xC0A80001);
-	struct fw_state_value v0 =
-		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-	assert(insert_fw4_entry(map, &k0, &v0) >= 0);
-
-	struct fw4_state_key k1 =
-		make_fw4_key(IPPROTO_TCP, 5001, 80, 0x0A000002, 0xC0A80001);
-	struct fw_state_value v1 =
-		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-	assert(insert_fw4_entry(map, &k1, &v1) >= 0);
-
-	struct fw4_state_key k2 =
-		make_fw4_key(IPPROTO_TCP, 5002, 80, 0x0A000003, 0xC0A80001);
-	struct fw_state_value v2 =
-		make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-	assert(insert_fw4_entry(map, &k2, &v2) >= 0);
+	/* Insert 3 TCP entries: ports 5000..5002 -> 80 */
+	test_env_insert_tcp(&env, 3, 5000, 80);
 
 	/* Zero out updated_at of middle entry to simulate uninitialized */
 	struct fw_state_value *mid_val =
-		(struct fw_state_value *)fwmap_get_value(map, 1);
+		(struct fw_state_value *)fwmap_get_value(env.map, 1);
 	assert(mid_val != NULL);
 	mid_val->updated_at = 0;
 
@@ -493,15 +425,15 @@ test_uninitialized_skipped(void *arena) {
 		.timeouts = test_timeouts,
 	};
 
-	int32_t n = fwstate_cursor_read_forward(map, &cursor, now, out, 10);
+	uint32_t n =
+		fwstate_cursor_read_forward(env.map, &cursor, now, out, 10);
 	assert(n == 2);
 
 	/* Verify we got entries 0 and 2 (skipped 1) */
 	assert(out[0].idx == 0);
 	assert(out[1].idx == 2);
 
-	fwmap_destroy(map, ctx);
-	verify_memory_leaks(ctx, "uninit_skip");
+	test_env_destroy(&env);
 	printf("  Uninitialized entries skipped test passed\n");
 }
 
@@ -512,30 +444,10 @@ test_uninitialized_skipped(void *arena) {
 static void
 test_paging(void *arena) {
 	printf("\n--- Paging Test ---\n");
-	struct memory_context *ctx =
-		init_context_from_arena(arena, ARENA_SIZE, "paging");
+	test_env_t env = test_env_create(arena, "paging");
 
-	fwmap_config_t cfg;
-	setup_fwstate_config(&cfg, 128, 8);
-
-	fwmap_t *map = fwmap_new(&cfg, ctx);
-	assert(map != NULL);
-
-	now = 1000;
-
-	/* Insert 10 entries */
-	for (int i = 0; i < 10; i++) {
-		struct fw4_state_key key = make_fw4_key(
-			IPPROTO_TCP,
-			(uint16_t)(6000 + i),
-			80,
-			0x0A000001 + (uint32_t)i,
-			0xC0A80001
-		);
-		struct fw_state_value val =
-			make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-		assert(insert_fw4_entry(map, &key, &val) >= 0);
-	}
+	/* Insert 10 TCP entries: ports 6000..6009 -> 80 */
+	test_env_insert_tcp(&env, 10, 6000, 80);
 
 	/* Read in batches of 3 */
 	fwstate_cursor_entry_t out[3];
@@ -548,7 +460,7 @@ test_paging(void *arena) {
 	int total = 0;
 
 	/* Batch 1: entries 0,1,2 */
-	int32_t n = fwstate_cursor_read_forward(map, &cursor, now, out, 3);
+	uint32_t n = fwstate_cursor_read_forward(env.map, &cursor, now, out, 3);
 	assert(n == 3);
 	assert(out[0].idx == 0);
 	assert(out[2].idx == 2);
@@ -556,7 +468,7 @@ test_paging(void *arena) {
 	total += n;
 
 	/* Batch 2: entries 3,4,5 */
-	n = fwstate_cursor_read_forward(map, &cursor, now, out, 3);
+	n = fwstate_cursor_read_forward(env.map, &cursor, now, out, 3);
 	assert(n == 3);
 	assert(out[0].idx == 3);
 	assert(out[2].idx == 5);
@@ -564,7 +476,7 @@ test_paging(void *arena) {
 	total += n;
 
 	/* Batch 3: entries 6,7,8 */
-	n = fwstate_cursor_read_forward(map, &cursor, now, out, 3);
+	n = fwstate_cursor_read_forward(env.map, &cursor, now, out, 3);
 	assert(n == 3);
 	assert(out[0].idx == 6);
 	assert(out[2].idx == 8);
@@ -572,20 +484,19 @@ test_paging(void *arena) {
 	total += n;
 
 	/* Batch 4: entry 9 only */
-	n = fwstate_cursor_read_forward(map, &cursor, now, out, 3);
+	n = fwstate_cursor_read_forward(env.map, &cursor, now, out, 3);
 	assert(n == 1);
 	assert(out[0].idx == 9);
 	assert(cursor.key_pos == 10);
 	total += n;
 
 	/* Batch 5: no more entries */
-	n = fwstate_cursor_read_forward(map, &cursor, now, out, 3);
+	n = fwstate_cursor_read_forward(env.map, &cursor, now, out, 3);
 	assert(n == 0);
 
 	assert(total == 10);
 
-	fwmap_destroy(map, ctx);
-	verify_memory_leaks(ctx, "paging");
+	test_env_destroy(&env);
 	printf("  Paging test passed\n");
 }
 
@@ -596,30 +507,10 @@ test_paging(void *arena) {
 static void
 test_forward_bounds(void *arena) {
 	printf("\n--- Forward Bounds Safety Test ---\n");
-	struct memory_context *ctx =
-		init_context_from_arena(arena, ARENA_SIZE, "fwd_bounds");
+	test_env_t env = test_env_create(arena, "fwd_bounds");
 
-	fwmap_config_t cfg;
-	setup_fwstate_config(&cfg, 128, 8);
-
-	fwmap_t *map = fwmap_new(&cfg, ctx);
-	assert(map != NULL);
-
-	now = 1000;
-
-	/* Insert 3 entries so key_cursor = 3 */
-	for (int i = 0; i < 3; i++) {
-		struct fw4_state_key key = make_fw4_key(
-			IPPROTO_TCP,
-			(uint16_t)(7000 + i),
-			80,
-			0x0A000001 + (uint32_t)i,
-			0xC0A80001
-		);
-		struct fw_state_value val =
-			make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-		assert(insert_fw4_entry(map, &key, &val) >= 0);
-	}
+	/* Insert 3 TCP entries: ports 7000..7002 -> 80, so key_cursor = 3 */
+	test_env_insert_tcp(&env, 3, 7000, 80);
 
 	fwstate_cursor_entry_t out[10];
 
@@ -629,16 +520,16 @@ test_forward_bounds(void *arena) {
 		.include_expired = true,
 		.timeouts = test_timeouts,
 	};
-	int32_t n = fwstate_cursor_read_forward(map, &cursor, now, out, 10);
+	uint32_t n =
+		fwstate_cursor_read_forward(env.map, &cursor, now, out, 10);
 	assert(n == 0);
 
 	/* key_pos > key_cursor: returns 0 */
 	cursor.key_pos = 100;
-	n = fwstate_cursor_read_forward(map, &cursor, now, out, 10);
+	n = fwstate_cursor_read_forward(env.map, &cursor, now, out, 10);
 	assert(n == 0);
 
-	fwmap_destroy(map, ctx);
-	verify_memory_leaks(ctx, "fwd_bounds");
+	test_env_destroy(&env);
 	printf("  Forward bounds safety test passed\n");
 }
 
@@ -649,30 +540,10 @@ test_forward_bounds(void *arena) {
 static void
 test_backward_clamping(void *arena) {
 	printf("\n--- Backward Clamping Test ---\n");
-	struct memory_context *ctx =
-		init_context_from_arena(arena, ARENA_SIZE, "bwd_clamp");
+	test_env_t env = test_env_create(arena, "bwd_clamp");
 
-	fwmap_config_t cfg;
-	setup_fwstate_config(&cfg, 128, 8);
-
-	fwmap_t *map = fwmap_new(&cfg, ctx);
-	assert(map != NULL);
-
-	now = 1000;
-
-	/* Insert 3 entries so key_cursor = 3 */
-	for (int i = 0; i < 3; i++) {
-		struct fw4_state_key key = make_fw4_key(
-			IPPROTO_TCP,
-			(uint16_t)(8000 + i),
-			80,
-			0x0A000001 + (uint32_t)i,
-			0xC0A80001
-		);
-		struct fw_state_value val =
-			make_fw_value(FWSTATE_ACK, FWSTATE_ACK, now, now);
-		assert(insert_fw4_entry(map, &key, &val) >= 0);
-	}
+	/* Insert 3 TCP entries: ports 8000..8002 -> 80, so key_cursor = 3 */
+	test_env_insert_tcp(&env, 3, 8000, 80);
 
 	fwstate_cursor_entry_t out[10];
 
@@ -686,7 +557,8 @@ test_backward_clamping(void *arena) {
 		.timeouts = test_timeouts,
 	};
 
-	int32_t n = fwstate_cursor_read_backward(map, &cursor, now, out, 10);
+	uint32_t n =
+		fwstate_cursor_read_backward(env.map, &cursor, now, out, 10);
 	assert(n == 3);
 	assert(out[0].idx == 2);
 	assert(out[1].idx == 1);
@@ -698,9 +570,151 @@ test_backward_clamping(void *arena) {
 	assert(k0->hdr.src_port == 8002);
 	assert(k2->hdr.src_port == 8000);
 
-	fwmap_destroy(map, ctx);
-	verify_memory_leaks(ctx, "bwd_clamp");
+	test_env_destroy(&env);
 	printf("  Backward clamping test passed\n");
+}
+
+/* ====================================================================== */
+/* Test 11: Single entry backward                                          */
+/* ====================================================================== */
+
+static void
+test_single_entry_backward(void *arena) {
+	printf("\n--- Single Entry Backward Test ---\n");
+	test_env_t env = test_env_create(arena, "single_bwd");
+
+	/* Insert exactly 1 TCP entry: port 11000 -> 80 */
+	test_env_insert_tcp(&env, 1, 11000, 80);
+
+	fwstate_cursor_entry_t out[10];
+	fwstate_cursor_t cursor = {
+		.key_pos = INT64_MAX,
+		.include_expired = true,
+		.timeouts = test_timeouts,
+	};
+
+	uint32_t n =
+		fwstate_cursor_read_backward(env.map, &cursor, now, out, 10);
+	assert(n == 1);
+	assert(out[0].idx == 0);
+
+	/* Cursor should be exhausted */
+	assert(cursor.key_pos == -1);
+
+	/* Next call should return 0 entries */
+	n = fwstate_cursor_read_backward(env.map, &cursor, now, out, 10);
+	assert(n == 0);
+
+	test_env_destroy(&env);
+	printf("  Single entry backward test passed\n");
+}
+
+/* ====================================================================== */
+/* Test 12: Backward paging                                                */
+/* ====================================================================== */
+
+static void
+test_backward_paging(void *arena) {
+	printf("\n--- Backward Paging Test ---\n");
+	test_env_t env = test_env_create(arena, "bwd_paging");
+
+	/* Insert 10 TCP entries: ports 12000..12009 -> 80 */
+	test_env_insert_tcp(&env, 10, 12000, 80);
+
+	/* Read backward in batches of 3 */
+	fwstate_cursor_entry_t out[3];
+	fwstate_cursor_t cursor = {
+		.key_pos = INT64_MAX,
+		.include_expired = true,
+		.timeouts = test_timeouts,
+	};
+
+	int total = 0;
+
+	/* Batch 1: entries 9, 8, 7 */
+	uint32_t n =
+		fwstate_cursor_read_backward(env.map, &cursor, now, out, 3);
+	assert(n == 3);
+	assert(out[0].idx == 9);
+	assert(out[1].idx == 8);
+	assert(out[2].idx == 7);
+	total += n;
+
+	/* Batch 2: entries 6, 5, 4 */
+	n = fwstate_cursor_read_backward(env.map, &cursor, now, out, 3);
+	assert(n == 3);
+	assert(out[0].idx == 6);
+	assert(out[1].idx == 5);
+	assert(out[2].idx == 4);
+	total += n;
+
+	/* Batch 3: entries 3, 2, 1 */
+	n = fwstate_cursor_read_backward(env.map, &cursor, now, out, 3);
+	assert(n == 3);
+	assert(out[0].idx == 3);
+	assert(out[1].idx == 2);
+	assert(out[2].idx == 1);
+	total += n;
+
+	/* Batch 4: entry 0 only */
+	n = fwstate_cursor_read_backward(env.map, &cursor, now, out, 3);
+	assert(n == 1);
+	assert(out[0].idx == 0);
+	total += n;
+
+	/* Batch 5: no more entries */
+	n = fwstate_cursor_read_backward(env.map, &cursor, now, out, 3);
+	assert(n == 0);
+
+	assert(total == 10);
+
+	test_env_destroy(&env);
+	printf("  Backward paging test passed\n");
+}
+
+/* ====================================================================== */
+/* Test 13: Expired entry at index 0 in backward with include_expired      */
+/* ====================================================================== */
+
+static void
+test_backward_expired_at_zero(void *arena) {
+	printf("\n--- Backward Expired at Index 0 Test ---\n");
+	test_env_t env = test_env_create(arena, "bwd_exp0");
+
+	/* Entry 0: UDP (30s TTL) -- will expire */
+	test_env_insert_udp(&env, 1, 14000, 53, 0);
+
+	/* Entry 1: TCP (120s TTL) -- will not expire */
+	test_env_insert_tcp(&env, 1, 14001, 80);
+
+	/* Advance time past UDP TTL */
+	uint64_t read_now = now + (uint64_t)31e9;
+
+	/* Backward with include_expired=false: should skip entry 0 (UDP) */
+	fwstate_cursor_entry_t out[10];
+	fwstate_cursor_t cursor = {
+		.key_pos = INT64_MAX,
+		.include_expired = false,
+		.timeouts = test_timeouts,
+	};
+
+	uint32_t n = fwstate_cursor_read_backward(
+		env.map, &cursor, read_now, out, 10
+	);
+	assert(n == 1);
+	assert(out[0].idx == 1); /* Only TCP entry */
+
+	/* Backward with include_expired=true: should return both */
+	cursor.key_pos = INT64_MAX;
+	cursor.include_expired = true;
+	n = fwstate_cursor_read_backward(env.map, &cursor, read_now, out, 10);
+	assert(n == 2);
+	assert(out[0].idx == 1);
+	assert(out[1].idx == 0);
+	assert(out[1].expired == true);
+
+	test_env_destroy(&env);
+	printf("  Backward expired at index 0 test passed\n");
 }
 
 /* ====================================================================== */
@@ -734,6 +748,9 @@ main(void) {
 	test_paging(arena);
 	test_forward_bounds(arena);
 	test_backward_clamping(arena);
+	test_single_entry_backward(arena);
+	test_backward_paging(arena);
+	test_backward_expired_at_zero(arena);
 
 	free_arena(arena, ARENA_SIZE);
 

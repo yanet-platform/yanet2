@@ -8,12 +8,8 @@
 #include "config.h"
 #include "fwmap.h"
 
-// ============================================================================
-// Cursor types
-// ============================================================================
-
 typedef struct fwstate_cursor {
-	uint32_t key_pos;
+	int64_t key_pos;
 	bool include_expired;
 	struct fwstate_timeouts timeouts;
 } fwstate_cursor_t;
@@ -22,11 +18,8 @@ typedef struct fwstate_cursor_entry {
 	void *key;
 	void *value;
 	uint32_t idx;
+	bool expired;
 } fwstate_cursor_entry_t;
-
-// ============================================================================
-// TTL helper
-// ============================================================================
 
 /// Select the appropriate TTL for a firewall state entry based on its
 /// protocol type and TCP flags.
@@ -55,15 +48,53 @@ fwstate_entry_ttl(
 	return t->default_;
 }
 
-// ============================================================================
-// Cursor read functions
-// ============================================================================
+static inline int
+fwstate_cursor_read_entry(
+	fwmap_t *map,
+	fwstate_cursor_t *cursor,
+	uint64_t now,
+	fwstate_cursor_entry_t *entry
+) {
+	struct fw_state_value *value = (struct fw_state_value *)fwmap_get_value(
+		map, (uint32_t)cursor->key_pos
+	);
+	if (value == NULL) {
+		return 0;
+	}
+
+	// Skip uninitialized entries
+	if (value->updated_at == 0) {
+		return 0;
+	}
+
+	void *key = fwmap_get_key(map, (uint32_t)cursor->key_pos);
+	if (key == NULL) {
+		return 0;
+	}
+
+	const struct fw_state_key_hdr *hdr =
+		(const struct fw_state_key_hdr *)key;
+	uint64_t ttl = fwstate_entry_ttl(
+		hdr->proto, value->flags.raw, &cursor->timeouts
+	);
+	bool expired = (value->updated_at + ttl <= now);
+
+	if (!cursor->include_expired && expired) {
+		return 0;
+	}
+
+	entry->key = key;
+	entry->value = value;
+	entry->idx = (uint32_t)cursor->key_pos;
+	entry->expired = expired;
+	return 1;
+}
 
 /// Read up to `count` entries in the forward direction (ascending key index).
 /// Returns the number of entries written to `out`.
 /// Returns 0 when there are no more entries.
 /// Bounds-safe: out-of-range key_pos results in 0 entries returned.
-static inline int32_t
+static inline uint32_t
 fwstate_cursor_read_forward(
 	fwmap_t *map,
 	fwstate_cursor_t *cursor,
@@ -73,44 +104,14 @@ fwstate_cursor_read_forward(
 ) {
 	uint32_t key_limit =
 		__atomic_load_n(&map->key_cursor, __ATOMIC_RELAXED);
-	int32_t collected = 0;
+	if (key_limit == 0) {
+		return 0;
+	}
 
-	while ((uint32_t)collected < count && cursor->key_pos < key_limit) {
-		struct fw_state_value *value = (struct fw_state_value *)
-			fwmap_get_value(map, cursor->key_pos);
-		if (value == NULL) {
-			cursor->key_pos++;
-			continue;
-		}
-
-		// Skip uninitialized entries
-		if (value->updated_at == 0) {
-			cursor->key_pos++;
-			continue;
-		}
-
-		void *key = fwmap_get_key(map, cursor->key_pos);
-		if (key == NULL) {
-			cursor->key_pos++;
-			continue;
-		}
-
-		const struct fw_state_key_hdr *hdr =
-			(const struct fw_state_key_hdr *)key;
-		uint64_t ttl = fwstate_entry_ttl(
-			hdr->proto, value->flags.raw, &cursor->timeouts
-		);
-		bool expired = (value->updated_at + ttl <= now);
-
-		if (!cursor->include_expired && expired) {
-			cursor->key_pos++;
-			continue;
-		}
-
-		out[collected].key = key;
-		out[collected].value = value;
-		out[collected].idx = cursor->key_pos;
-		collected++;
+	uint32_t collected = 0;
+	while (collected < count && cursor->key_pos < (int64_t)key_limit) {
+		fwstate_cursor_entry_t *entry = &out[collected];
+		collected += fwstate_cursor_read_entry(map, cursor, now, entry);
 		cursor->key_pos++;
 	}
 
@@ -121,7 +122,7 @@ fwstate_cursor_read_forward(
 /// index). Returns the number of entries written to `out`.
 /// Returns 0 when there are no more entries.
 /// Bounds-safe: out-of-range key_pos is clamped to key_cursor - 1.
-static inline int32_t
+static inline uint32_t
 fwstate_cursor_read_backward(
 	fwmap_t *map,
 	fwstate_cursor_t *cursor,
@@ -131,64 +132,20 @@ fwstate_cursor_read_backward(
 ) {
 	uint32_t key_limit =
 		__atomic_load_n(&map->key_cursor, __ATOMIC_RELAXED);
-	int32_t collected = 0;
-
 	if (key_limit == 0) {
 		return 0;
 	}
 
 	// Clamp key_pos to valid range
-	if (cursor->key_pos >= key_limit) {
-		cursor->key_pos = key_limit - 1;
+	if (cursor->key_pos >= (int64_t)key_limit) {
+		cursor->key_pos = (int64_t)(key_limit)-1;
 	}
 
-	// Use signed position to detect underflow past 0
-	int64_t pos = (int64_t)cursor->key_pos;
-
-	while ((uint32_t)collected < count && pos >= 0) {
-		struct fw_state_value *value = (struct fw_state_value *)
-			fwmap_get_value(map, (uint32_t)pos);
-		if (value == NULL) {
-			pos--;
-			continue;
-		}
-
-		// Skip uninitialized entries
-		if (value->updated_at == 0) {
-			pos--;
-			continue;
-		}
-
-		void *key = fwmap_get_key(map, (uint32_t)pos);
-		if (key == NULL) {
-			pos--;
-			continue;
-		}
-
-		const struct fw_state_key_hdr *hdr =
-			(const struct fw_state_key_hdr *)key;
-		uint64_t ttl = fwstate_entry_ttl(
-			hdr->proto, value->flags.raw, &cursor->timeouts
-		);
-		bool expired = (value->updated_at + ttl <= now);
-
-		if (!cursor->include_expired && expired) {
-			pos--;
-			continue;
-		}
-
-		out[collected].key = key;
-		out[collected].value = value;
-		out[collected].idx = (uint32_t)pos;
-		collected++;
-		pos--;
-	}
-
-	// Update cursor position for next call
-	if (pos < 0) {
-		cursor->key_pos = 0;
-	} else {
-		cursor->key_pos = (uint32_t)pos;
+	uint32_t collected = 0;
+	while (collected < count && cursor->key_pos >= 0) {
+		fwstate_cursor_entry_t *entry = &out[collected];
+		collected += fwstate_cursor_read_entry(map, cursor, now, entry);
+		cursor->key_pos--;
 	}
 
 	return collected;

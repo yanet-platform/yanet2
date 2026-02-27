@@ -222,7 +222,7 @@ impl FWStateService {
             include_expired: cmd.include_expired,
             direction: direction as i32,
             batch_size: cmd.batch,
-            index: cmd.index,
+            index: cmd.index as i64,
         };
         tx.send(initial_req).await.map_err(|e| format!("send error: {e}"))?;
 

@@ -129,13 +129,13 @@ message ListEntriesRequest {
 	bool include_expired = 4; // Whether to include expired entries
 	Direction direction = 5;  // Direction for this read
 	uint32 batch_size = 6;	  // Number of entries to return in this batch
-	uint32 index = 7; // Cursor position from previous response (0 on first)
+	int64 index = 7; // Cursor position from previous response (0 on first)
 }
 
 message ListEntriesResponse {
 	repeated FwStateEntry entries = 1;
 	bool has_more = 2;     // false when cursor reached the end
-	uint32 index = 3;      // Updated cursor position for next request
+	int64 index = 3;       // Updated cursor position for next request
 	uint64 generation = 4; // Config generation for consistency detection
 }
 
