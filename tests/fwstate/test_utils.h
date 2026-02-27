@@ -8,12 +8,15 @@
  */
 
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 
+#include "common/hugepages.h"
 #include "common/memory.h"
 #include "common/memory_block.h"
 
@@ -192,6 +195,52 @@ free_arena(void *ptr, size_t size) {
 	if (ptr) {
 		munmap(ptr, size);
 	}
+}
+
+static inline void *
+allocate_hugepages_memory(size_t size) {
+	char *storage_path = "/dev/hugepages/arena";
+	int mem_fd =
+		open(storage_path, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR
+		);
+	if (mem_fd < 0) {
+		printf("L%d: failed to open storage path\n", __LINE__);
+		return NULL;
+	}
+
+	if (ftruncate(mem_fd, size)) {
+		printf("L%d: failed to truncate storage path\n", __LINE__);
+		close(mem_fd);
+		return NULL;
+	}
+
+	void *storage =
+		mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, 0);
+
+	if (storage == MAP_FAILED) {
+		int err = errno;
+		printf("L%d: failed to create memory-mapped storage %s: %s\n",
+		       __LINE__,
+		       storage_path,
+		       strerror(errno));
+
+		if (err == ENOMEM && is_file_on_hugepages_fs(mem_fd) == 1) {
+			printf("L%d: "
+			       "the storage %s is meant to be allocated on "
+			       "HUGETLBFS, but there is no memory. Maybe "
+			       "because "
+			       "either there are no preallocated pages or "
+			       "another "
+			       "process have consumed the memory\n",
+			       __LINE__,
+			       storage_path);
+		}
+
+		close(mem_fd);
+		return NULL;
+	}
+	close(mem_fd);
+	return storage;
 }
 
 static inline struct memory_context *
