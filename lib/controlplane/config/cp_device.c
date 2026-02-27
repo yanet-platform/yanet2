@@ -251,7 +251,7 @@ cp_device_registry_init(
 	struct memory_context *memory_context,
 	struct cp_device_registry *new_device_registry
 ) {
-	if (registry_init(memory_context, &new_device_registry->registry, 8)) {
+	if (registry_init(memory_context, &new_device_registry->registry, 2)) {
 		NEW_ERROR("failed to initialize device registry");
 		return -1;
 	}

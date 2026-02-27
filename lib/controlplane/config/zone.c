@@ -187,13 +187,12 @@ cp_config_gen_install(
 
 	SET_OFFSET_OF(&new_config_gen->config_gen_ectx, new_config_gen_ectx);
 
-	struct cp_config_gen *new_gen_relative =
-		(struct cp_config_gen *)((uintptr_t)new_config_gen -
-					 (uintptr_t)&cp_config->cp_config_gen);
+	uintptr_t new_gen_relative = (uintptr_t)new_config_gen -
+				     (uintptr_t)&cp_config->cp_config_gen;
 	RCU_UPDATE(
 		&cp_config->cp_config_gen_guard,
 		&cp_config->cp_config_gen,
-		new_gen_relative
+		(struct cp_config_gen *)new_gen_relative
 	);
 
 	cp_config_gen_free(cp_config, old_config_gen);

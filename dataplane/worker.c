@@ -53,6 +53,7 @@
 #include "logging/log.h"
 
 #include <rte_ethdev.h>
+#include <stdint.h>
 
 static void
 worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
@@ -270,6 +271,21 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 	}
 }
 
+static inline struct cp_config_gen *
+current_cp_config_gen_lock(
+	struct cp_config *cp_config, rcu_t *gen_guard, size_t worker_idx
+) {
+	uintptr_t cp_config_gen_relative = (uintptr_t
+	)RCU_READ_BEGIN(gen_guard, worker_idx, &cp_config->cp_config_gen);
+	return (struct cp_config_gen *)((uintptr_t)&cp_config->cp_config_gen +
+					cp_config_gen_relative);
+}
+
+static inline void
+current_cp_config_gen_unlock(rcu_t *gen_guard, size_t worker_idx) {
+	RCU_READ_END(gen_guard, worker_idx);
+}
+
 static void
 worker_loop_round(struct dataplane_worker *worker) {
 	// Initialize current worker time
@@ -284,12 +300,10 @@ worker_loop_round(struct dataplane_worker *worker) {
 	struct cp_config *cp_config = worker->instance->cp_config;
 
 	rcu_t *cp_config_gen_guard = &cp_config->cp_config_gen_guard;
-	struct cp_config_gen *cp_config_gen = RCU_READ_BEGIN(
-		cp_config_gen_guard, worker_idx, &cp_config->cp_config_gen
+
+	struct cp_config_gen *cp_config_gen = current_cp_config_gen_lock(
+		cp_config, cp_config_gen_guard, worker_idx
 	);
-	cp_config_gen =
-		(struct cp_config_gen *)((uintptr_t)&cp_config->cp_config_gen +
-					 (uintptr_t)cp_config_gen);
 
 	struct config_gen_ectx *config_gen_ectx =
 		ADDR_OF(&cp_config_gen->config_gen_ectx);
@@ -311,7 +325,8 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 		dataplane_drop_packets(worker->dataplane, &packet_front.drop);
 
-		RCU_READ_END(cp_config_gen_guard, worker_idx);
+		current_cp_config_gen_unlock(cp_config_gen_guard, worker_idx);
+
 		return;
 	}
 
@@ -390,7 +405,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 		}
 	}
 
-	RCU_READ_END(cp_config_gen_guard, worker_idx);
+	current_cp_config_gen_unlock(cp_config_gen_guard, worker_idx);
 
 	worker_write(worker, &packet_front.output);
 
