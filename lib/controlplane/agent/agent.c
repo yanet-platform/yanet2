@@ -117,7 +117,7 @@ agent_attach(
 	SET_OFFSET_OF(&new_agent->cp_config, cp_config);
 	new_agent->pid = getpid();
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_load_gen(cp_config);
 	new_agent->gen = config_gen->gen;
 
 	block_allocator_init(&new_agent->block_allocator);
@@ -426,10 +426,7 @@ agent_update_modules(
 	int res = AGENT_TRY(
 		agent,
 		cp_config_update_modules(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			module_count,
-			modules
+			ADDR_OF(&agent->cp_config), module_count, modules
 		),
 		"failed to update modules"
 	);
@@ -443,14 +440,11 @@ int
 agent_delete_module(
 	struct agent *agent, const char *module_type, const char *module_name
 ) {
-	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
 	int res = AGENT_TRY(
 		agent,
-		cp_config_delete_module(
-			dp_config, cp_config, module_type, module_name
-		),
+		cp_config_delete_module(cp_config, module_type, module_name),
 		"failed to delete module"
 	);
 
@@ -546,10 +540,7 @@ agent_update_functions(
 	return AGENT_TRY(
 		agent,
 		cp_config_update_functions(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			function_count,
-			functions
+			ADDR_OF(&agent->cp_config), function_count, functions
 		),
 		"failed to update functions"
 	);
@@ -560,9 +551,7 @@ agent_delete_function(struct agent *agent, const char *function_name) {
 	return AGENT_TRY(
 		agent,
 		cp_config_delete_function(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			function_name
+			ADDR_OF(&agent->cp_config), function_name
 		),
 		"failed to delete function"
 	);
@@ -577,10 +566,7 @@ agent_update_pipelines(
 	return AGENT_TRY(
 		agent,
 		cp_config_update_pipelines(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			pipeline_count,
-			pipelines
+			ADDR_OF(&agent->cp_config), pipeline_count, pipelines
 		),
 		"failed to update pipelines"
 	);
@@ -591,9 +577,7 @@ agent_delete_pipeline(struct agent *agent, const char *pipeline_name) {
 	return AGENT_TRY(
 		agent,
 		cp_config_delete_pipeline(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			pipeline_name
+			ADDR_OF(&agent->cp_config), pipeline_name
 		),
 		"failed to delete pipeline"
 	);
@@ -638,10 +622,7 @@ agent_update_devices(
 	return AGENT_TRY(
 		agent,
 		cp_config_update_devices(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			device_count,
-			devices
+			ADDR_OF(&agent->cp_config), device_count, devices
 		),
 		"failed to update devices"
 	);
@@ -704,7 +685,7 @@ yanet_get_cp_module_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_load_gen(cp_config);
 	struct cp_module_registry *module_registry =
 		&config_gen->module_registry;
 
@@ -780,7 +761,7 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_load_gen(cp_config);
 	struct cp_function_registry *function_registry =
 		&config_gen->function_registry;
 
@@ -920,7 +901,7 @@ yanet_get_cp_pipeline_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *config_gen = ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *config_gen = cp_config_load_gen(cp_config);
 	struct registry *pipeline_registry =
 		&config_gen->pipeline_registry.registry;
 
@@ -1053,8 +1034,7 @@ struct cp_device_list_info *
 yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *cp_config_gen = cp_config_load_gen(cp_config);
 
 	struct cp_device_registry *device_registry =
 		&cp_config_gen->device_registry;
@@ -1351,8 +1331,7 @@ yanet_get_module_counters(
 ) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *cp_config_gen = cp_config_load_gen(cp_config);
 
 	struct counter_storage *cs = cp_config_gen_get_module_counter_storage(
 		cp_config_gen,
@@ -1439,8 +1418,7 @@ yanet_get_chain_counters(
 ) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *cp_config_gen = cp_config_load_gen(cp_config);
 
 	struct counter_registry *counter_registry;
 	struct counter_storage *counter_storage;
@@ -1498,8 +1476,7 @@ yanet_get_function_counters(
 ) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *cp_config_gen = cp_config_load_gen(cp_config);
 
 	struct counter_registry *counter_registry;
 	struct counter_storage *counter_storage;
@@ -1552,8 +1529,7 @@ yanet_get_pipeline_counters(
 ) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *cp_config_gen = cp_config_load_gen(cp_config);
 
 	struct counter_registry *counter_registry;
 	struct counter_storage *counter_storage;
@@ -1604,8 +1580,7 @@ yanet_get_device_counters(
 ) {
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 	cp_config_lock(cp_config);
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *cp_config_gen = cp_config_load_gen(cp_config);
 
 	struct counter_registry *counter_registry;
 	struct counter_storage *counter_storage;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -7,6 +8,7 @@
 
 #include "common/memory.h"
 
+#include "common/rcu.h"
 #include "counters/counters.h"
 
 #include "dataplane/config/zone.h"
@@ -90,10 +92,16 @@ struct cp_config {
 	pid_t config_lock;
 
 	/*
-	 * Relative pointer to the current active packet processing
+	 * CP config gen can be changed by controlplane are can be concurrently
+	 * read by dataplane
+	 */
+	rcu_t cp_config_gen_guard;
+
+	/*
+	 * Atomic relative pointer to the current active packet processing
 	 * configuration.
 	 */
-	struct cp_config_gen *cp_config_gen;
+	struct cp_config_gen *_Atomic cp_config_gen;
 
 	/*
 	 * Registry of agent attached to the controplane configuration
@@ -137,7 +145,6 @@ cp_config_unlock(struct cp_config *cp_config);
  */
 int
 cp_config_update_modules(
-	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t module_count,
 	struct cp_module **cp_modules
@@ -145,37 +152,26 @@ cp_config_update_modules(
 
 int
 cp_config_update_functions(
-	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t function_count,
 	struct cp_function_config **functions
 );
 
 int
-cp_config_delete_function(
-	struct dp_config *dp_config,
-	struct cp_config *cp_config,
-	const char *name
-);
+cp_config_delete_function(struct cp_config *cp_config, const char *name);
 
 int
 cp_config_update_pipelines(
-	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t pipeline_count,
 	struct cp_pipeline_config **pipelines
 );
 
 int
-cp_config_delete_pipeline(
-	struct dp_config *dp_config,
-	struct cp_config *cp_config,
-	const char *name
-);
+cp_config_delete_pipeline(struct cp_config *cp_config, const char *name);
 
 int
 cp_config_update_devices(
-	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t device_count,
 	struct cp_device *devices[]
@@ -306,8 +302,21 @@ cp_config_gen_lookup_pipeline_index(
  */
 int
 cp_config_delete_module(
-	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	const char *module_type,
 	const char *module_name
 );
+
+/**
+ * @brief Load the current configuration generation pointer atomically
+ *
+ * This function loads the relative pointer to cp_config_gen and converts it
+ * to an absolute address. The pointer is stored as a relative offset from
+ * the cp_config_gen field itself to support shared memory mapping at different
+ * virtual addresses across processes.
+ *
+ * @param cp_config Pointer to the controlplane configuration
+ * @return Absolute pointer to the current configuration generation
+ */
+struct cp_config_gen *
+cp_config_load_gen(struct cp_config *cp_config);

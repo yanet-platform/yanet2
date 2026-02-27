@@ -1,7 +1,10 @@
 #include "zone.h"
 
+#include <stdatomic.h>
 #include <unistd.h>
 
+#include "common/memory_address.h"
+#include "common/rcu.h"
 #include "cp_device.h"
 #include "cp_module.h"
 #include "cp_pipeline.h"
@@ -160,14 +163,20 @@ cp_config_gen_free(
 	);
 }
 
+struct cp_config_gen *
+cp_config_load_gen(struct cp_config *cp_config) {
+	struct cp_config_gen *cp_config_gen_relative = atomic_load_explicit(
+		&cp_config->cp_config_gen, memory_order_relaxed
+	);
+	return (struct cp_config_gen *)((uintptr_t)(&cp_config->cp_config_gen) +
+					(uintptr_t)(cp_config_gen_relative));
+}
+
 static inline int
 cp_config_gen_install(
-	struct dp_config *dp_config,
-	struct cp_config *cp_config,
-	struct cp_config_gen *new_config_gen
+	struct cp_config *cp_config, struct cp_config_gen *new_config_gen
 ) {
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_load_gen(cp_config);
 
 	struct config_gen_ectx *new_config_gen_ectx =
 		config_gen_ectx_create(new_config_gen, old_config_gen);
@@ -178,8 +187,15 @@ cp_config_gen_install(
 
 	SET_OFFSET_OF(&new_config_gen->config_gen_ectx, new_config_gen_ectx);
 
-	SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
-	dp_config_wait_for_gen(dp_config, new_config_gen->gen);
+	struct cp_config_gen *new_gen_relative =
+		(struct cp_config_gen *)((uintptr_t)new_config_gen -
+					 (uintptr_t)&cp_config->cp_config_gen);
+	RCU_UPDATE(
+		&cp_config->cp_config_gen_guard,
+		&cp_config->cp_config_gen,
+		new_gen_relative
+	);
+
 	cp_config_gen_free(cp_config, old_config_gen);
 
 	return 0;
@@ -187,15 +203,13 @@ cp_config_gen_install(
 
 int
 cp_config_delete_module(
-	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	const char *module_type,
 	const char *module_name
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_load_gen(cp_config);
 
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
@@ -216,7 +230,7 @@ cp_config_delete_module(
 		goto error_free;
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+	if (cp_config_gen_install(cp_config, new_config_gen)) {
 		PUSH_ERROR("failed to install config generation in "
 			   "cp_config_delete_module");
 		goto error_free;
@@ -234,15 +248,13 @@ error_unlock:
 
 int
 cp_config_update_modules(
-	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t module_count,
 	struct cp_module **cp_modules
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_load_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
@@ -269,7 +281,7 @@ cp_config_update_modules(
 		}
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+	if (cp_config_gen_install(cp_config, new_config_gen)) {
 		PUSH_ERROR("failed to install config generation in "
 			   "cp_config_update_modules");
 		goto error_free;
@@ -290,15 +302,13 @@ error_unlock:
  */
 int
 cp_config_update_functions(
-	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t function_count,
 	struct cp_function_config **cp_function_configs
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_load_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
@@ -310,7 +320,6 @@ cp_config_update_functions(
 	for (uint64_t idx = 0; idx < function_count; ++idx) {
 		struct cp_function *new_cp_function = cp_function_create(
 			&cp_config->memory_context,
-			dp_config,
 			new_config_gen,
 			cp_function_configs[idx]
 		);
@@ -333,7 +342,7 @@ cp_config_update_functions(
 		}
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+	if (cp_config_gen_install(cp_config, new_config_gen)) {
 		PUSH_ERROR("failed to install config generation in "
 			   "cp_config_update_functions");
 		goto error_free;
@@ -350,16 +359,11 @@ error_unlock:
 }
 
 int
-cp_config_delete_function(
-	struct dp_config *dp_config,
-	struct cp_config *cp_config,
-	const char *name
-) {
+cp_config_delete_function(struct cp_config *cp_config, const char *name) {
 
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_load_gen(cp_config);
 
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
@@ -376,7 +380,7 @@ cp_config_delete_function(
 		goto error_free;
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+	if (cp_config_gen_install(cp_config, new_config_gen)) {
 		PUSH_ERROR("failed to install config generation in "
 			   "cp_config_delete_function");
 		goto error_free;
@@ -397,15 +401,13 @@ error_unlock:
  */
 int
 cp_config_update_pipelines(
-	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t pipeline_count,
 	struct cp_pipeline_config **cp_pipeline_configs
 ) {
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_load_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 
@@ -440,7 +442,7 @@ cp_config_update_pipelines(
 		}
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+	if (cp_config_gen_install(cp_config, new_config_gen)) {
 		PUSH_ERROR("failed to install config generation in "
 			   "cp_config_update_pipelines");
 		goto error_free;
@@ -457,16 +459,11 @@ error_unlock:
 }
 
 int
-cp_config_delete_pipeline(
-	struct dp_config *dp_config,
-	struct cp_config *cp_config,
-	const char *name
-) {
+cp_config_delete_pipeline(struct cp_config *cp_config, const char *name) {
 
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_load_gen(cp_config);
 
 	uint64_t index;
 	if (cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
@@ -489,7 +486,7 @@ cp_config_delete_pipeline(
 		goto error_free;
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+	if (cp_config_gen_install(cp_config, new_config_gen)) {
 		PUSH_ERROR("failed to install config generation in "
 			   "cp_config_delete_pipeline");
 		goto error_free;
@@ -552,7 +549,6 @@ cp_config_gen_lookup_pipeline_index(
 
 int
 cp_config_update_devices(
-	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t device_count,
 	struct cp_device *devices[]
@@ -560,8 +556,7 @@ cp_config_update_devices(
 	// TODO weight clamp
 	cp_config_lock(cp_config);
 
-	struct cp_config_gen *old_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	struct cp_config_gen *old_config_gen = cp_config_load_gen(cp_config);
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen);
 	if (new_config_gen == NULL) {
@@ -584,7 +579,7 @@ cp_config_update_devices(
 		}
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
+	if (cp_config_gen_install(cp_config, new_config_gen)) {
 		PUSH_ERROR("failed to install config generation in "
 			   "cp_config_update_devices");
 		goto error_free;
@@ -657,6 +652,9 @@ cp_config_gen_create(struct agent *agent) {
 		NEW_ERROR("failed to initialize counter storage registry");
 		goto error;
 	}
+
+	// Initialize config gen ectx
+	cp_config_gen->config_gen_ectx = NULL;
 
 	// Create phy devices
 	for (uint64_t idx = 0; idx < dp_config->dp_topology.device_count;

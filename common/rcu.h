@@ -478,6 +478,53 @@ rcu_update(rcu_t *rcu, atomic_ulong *value, uint64_t upd) {
 	rcu_publish_update(rcu);
 }
 
+/**
+ * @brief Update a value and synchronize with all readers
+ *
+ * This function atomically updates a value and then waits for all readers
+ * to observe the new value. It combines an atomic store with the two-phase
+ * epoch synchronization mechanism.
+ *
+ * The update process:
+ * 1. Store the new value with release semantics
+ * 2. Flip epochs twice (via rcu_publish_update)
+ * 3. Wait for all readers to finish
+ *
+ * After this function returns, all subsequent readers will see the new value,
+ * and all previous readers have finished accessing the old value.
+ *
+ * @param rcu Pointer to the RCU control structure
+ * @param value Pointer to the atomic variable to update
+ * @param upd New value to store
+ *
+ * @note This function blocks until all active readers complete. The blocking
+ *       time is proportional to the longest read-side critical section.
+ * @note External synchronization is required for multiple concurrent writers.
+ * @note The store uses release memory ordering to ensure all previous writes
+ *       are visible before the epoch flip.
+ *
+ * Example:
+ * ```c
+ * rcu_t rcu;
+ * const uint8_t *value = malloc(24);
+ *
+ * // Writer updates generation
+ * RCU_UPDATE(&rcu, &a->b, value);
+ * // Now all readers will see a->b == value
+ * ```
+ *
+ * @see rcu_update()
+ * @see rcu_publish_update()
+ * @see rcu_load()
+ */
+#define RCU_UPDATE(rcu, value_ptr, upd)                                        \
+	do {                                                                   \
+		atomic_store_explicit(                                         \
+			(value_ptr), (upd), memory_order_release               \
+		);                                                             \
+		rcu_publish_update((rcu));                                     \
+	} while (0)
+
 ////////////////////////////////////////////////////////////////////////////////
 // Initialization
 ////////////////////////////////////////////////////////////////////////////////

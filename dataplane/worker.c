@@ -33,6 +33,8 @@
  *  - anything else
  */
 
+#include "common/memory_address.h"
+#include "common/rcu.h"
 #include "dataplane/time/clock.h"
 #include "yanet_build_config.h"
 
@@ -278,13 +280,21 @@ worker_loop_round(struct dataplane_worker *worker) {
 			tsc_clock_get_time_ns(&dp_worker->clock);
 	}
 
+	size_t worker_idx = worker->dp_worker->idx;
 	struct cp_config *cp_config = worker->instance->cp_config;
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+
+	rcu_t *cp_config_gen_guard = &cp_config->cp_config_gen_guard;
+	struct cp_config_gen *cp_config_gen = RCU_READ_BEGIN(
+		cp_config_gen_guard, worker_idx, &cp_config->cp_config_gen
+	);
+	cp_config_gen =
+		(struct cp_config_gen *)((uintptr_t)&cp_config->cp_config_gen +
+					 (uintptr_t)cp_config_gen);
+
 	struct config_gen_ectx *config_gen_ectx =
 		ADDR_OF(&cp_config_gen->config_gen_ectx);
 
-	worker->dp_worker->gen = cp_config_gen->gen;
+	// worker->dp_worker->gen = cp_config_gen->gen;
 	*worker->dp_worker->iterations += 1;
 
 	struct packet_front packet_front;
@@ -301,6 +311,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 
 		dataplane_drop_packets(worker->dataplane, &packet_front.drop);
 
+		RCU_READ_END(cp_config_gen_guard, worker_idx);
 		return;
 	}
 
@@ -378,6 +389,8 @@ worker_loop_round(struct dataplane_worker *worker) {
 			);
 		}
 	}
+
+	RCU_READ_END(cp_config_gen_guard, worker_idx);
 
 	worker_write(worker, &packet_front.output);
 

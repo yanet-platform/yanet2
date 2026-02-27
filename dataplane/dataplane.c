@@ -1,5 +1,6 @@
 #include "dataplane.h"
 
+#include "common/rcu.h"
 #include "config.h"
 #include "logging/log.h"
 
@@ -325,6 +326,9 @@ dataplane_init_storage(
 	memory_context_init(
 		&cp_config->memory_context, "cp", &cp_config->block_allocator
 	);
+
+	// init rcu
+	rcu_init(&cp_config->cp_config_gen_guard);
 
 	// FIXME: cp_config bootstrap routine
 	struct cp_agent_registry *cp_agent_registry =

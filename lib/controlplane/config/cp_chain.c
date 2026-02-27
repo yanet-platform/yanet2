@@ -12,11 +12,9 @@ cp_chain_alloc_size(uint64_t length) {
 struct cp_chain *
 cp_chain_create(
 	struct memory_context *memory_context,
-	struct dp_config *dp_config,
 	struct cp_config_gen *cp_config_gen,
 	struct cp_chain_config *cp_chain_config
 ) {
-	(void)dp_config;
 	(void)cp_config_gen;
 
 	struct cp_chain *new_chain = (struct cp_chain *)memory_balloc(

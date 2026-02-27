@@ -17,7 +17,6 @@ cp_function_alloc_size(uint64_t chain_count) {
 struct cp_function *
 cp_function_create(
 	struct memory_context *memory_context,
-	struct dp_config *dp_config,
 	struct cp_config_gen *cp_config_gen,
 	struct cp_function_config *cp_function_config
 ) {
@@ -141,7 +140,6 @@ cp_function_create(
 
 		struct cp_chain *new_chain = cp_chain_create(
 			memory_context,
-			dp_config,
 			cp_config_gen,
 			cp_function_config->chains[chain_idx].chain
 		);

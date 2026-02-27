@@ -2,6 +2,7 @@
 #include "common/memory_address.h"
 
 #include "../../lib/controlplane/config/zone.h"
+#include "common/rcu.h"
 #include "dataplane/config/zone.h"
 #include "dataplane/pipeline/pipeline.h"
 #include "dataplane/time/clock.h"
@@ -70,8 +71,18 @@ yanet_worker_mock_handle_packets(
 	}
 
 	struct cp_config *cp_config = worker->cp_config;
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
+	rcu_t *cp_config_gen_guard = &cp_config->cp_config_gen_guard;
+
+	struct cp_config_gen *cp_config_gen = RCU_READ_BEGIN(
+		cp_config_gen_guard,
+		worker->dp_worker.idx,
+		&cp_config->cp_config_gen
+	);
+	cp_config_gen =
+		(struct cp_config_gen *)((uintptr_t)(&cp_config->cp_config_gen
+					 ) +
+					 (uintptr_t)cp_config_gen);
+
 	struct config_gen_ectx *config_gen_ectx =
 		ADDR_OF(&cp_config_gen->config_gen_ectx);
 
@@ -169,4 +180,6 @@ yanet_worker_mock_handle_packets(
 	packet_list_init(&packet_front.drop);
 	packet_list_concat(&out_result->output_packets, &packet_front.output);
 	packet_list_init(&packet_front.output);
+
+	RCU_READ_END(cp_config_gen_guard, worker->dp_worker.idx);
 }

@@ -34,8 +34,6 @@ struct dp_device {
 struct dp_worker {
 	uint64_t idx;
 
-	uint64_t gen;
-
 	// Allows to get current worker time.
 	//
 	// Currently, we init it only once

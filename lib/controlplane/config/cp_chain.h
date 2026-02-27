@@ -41,7 +41,6 @@ struct cp_config_gen;
 struct cp_chain *
 cp_chain_create(
 	struct memory_context *memory_context,
-	struct dp_config *dp_config,
 	struct cp_config_gen *cp_config_gen,
 	struct cp_chain_config *cp_chain_config
 );

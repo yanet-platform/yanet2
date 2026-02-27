@@ -10,21 +10,6 @@ dp_config_nextk(struct dp_config *current, uint32_t k) {
 	return current;
 }
 
-void
-dp_config_wait_for_gen(struct dp_config *dp_config, uint64_t gen) {
-	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
-	uint64_t idx = 0;
-	do {
-		volatile struct dp_worker *worker = ADDR_OF(workers + idx);
-		if (worker->gen < gen) {
-			// TODO cpu yield
-			continue;
-		}
-
-		++idx;
-	} while (idx < dp_config->worker_count);
-}
-
 bool
 dp_config_try_lock(struct dp_config *dp_config) {
 	pid_t pid = getpid();

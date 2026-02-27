@@ -140,6 +140,9 @@ dataplane_initialize(
 		&cp_config->memory_context, "cp", &cp_config->block_allocator
 	);
 
+	// Init rcu
+	rcu_init(&cp_config->cp_config_gen_guard);
+
 	struct cp_agent_registry *cp_agent_registry =
 		(struct cp_agent_registry *)memory_balloc(
 			&cp_config->memory_context,
@@ -253,7 +256,7 @@ dataplane_initialize(
 	return 0;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 
 int
 yanet_mock_init(
@@ -303,7 +306,6 @@ yanet_mock_init(
 		memset(&mock->workers[i], 0, sizeof(struct yanet_worker_mock));
 		mock->workers[i].cp_config = cp_config;
 		mock->workers[i].dp_config = dp_config;
-		mock->workers[i].dp_worker.gen = 1000000000000000;
 		mock->workers[i].dp_worker.rx_mempool = mp;
 		mock->workers[i].dp_worker.idx = i;
 	}
