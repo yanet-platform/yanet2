@@ -88,7 +88,7 @@ func Make(config *TestConfig) (*TestSetup, error) {
 		panic("failed to get balancer after successful creation")
 	}
 
-	bootstrap, err := mock.SharedMemory().AgentAttach("bootstrap", 0, 1<<20)
+	bootstrap, err := mock.SharedMemory().AgentReattach("bootstrap", 0, 1<<20)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to bootstrap agent: %v", err)
 	}

@@ -116,7 +116,7 @@ func (m *FunctionService) Update(
 ) (*ynpb.UpdateFunctionResponse, error) {
 	reqFunction := request.Function
 
-	agent, err := m.shm.AgentAttach(functionAgentName, m.instanceID, functionAgentMemory)
+	agent, err := m.shm.AgentReattach(functionAgentName, m.instanceID, functionAgentMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", functionAgentName, err)
 	}
@@ -159,7 +159,7 @@ func (m *FunctionService) Delete(
 ) (*ynpb.DeleteFunctionResponse, error) {
 	functionName := request.Id.Name
 
-	agent, err := m.shm.AgentAttach(functionAgentName, m.instanceID, functionAgentMemory)
+	agent, err := m.shm.AgentReattach(functionAgentName, m.instanceID, functionAgentMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", functionAgentName, err)
 	}

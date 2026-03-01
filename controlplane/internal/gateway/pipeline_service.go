@@ -100,7 +100,7 @@ func (m *PipelineService) Update(
 	ctx context.Context,
 	request *ynpb.UpdatePipelineRequest,
 ) (*ynpb.UpdatePipelineResponse, error) {
-	agent, err := m.shm.AgentAttach(agentName, m.instanceID, defaultAgentMemory)
+	agent, err := m.shm.AgentReattach(agentName, m.instanceID, defaultAgentMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
 	}
@@ -130,7 +130,7 @@ func (m *PipelineService) Delete(
 ) (*ynpb.DeletePipelineResponse, error) {
 	pipelineName := request.GetId().GetName()
 
-	agent, err := m.shm.AgentAttach(agentName, m.instanceID, defaultAgentMemory)
+	agent, err := m.shm.AgentReattach(agentName, m.instanceID, defaultAgentMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to agent %q: %w", agentName, err)
 	}

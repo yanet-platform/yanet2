@@ -77,11 +77,25 @@ func (m *SharedMemory) AgentAttach(name string, instanceIdx uint32, size datasiz
 	return &Agent{name: name, ptr: ptr}, nil
 }
 
+// AgentReattach attaches a module agent to shared memory on the dataplane instance.
+// If Agent with such name already attached, it will be reattached to the same memory.
+func (m *SharedMemory) AgentReattach(name string, instanceIdx uint32, size datasize.ByteSize) (*Agent, error) {
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+
+	ptr := C.agent_reattach(m.ptr, C.uint32_t(instanceIdx), cName, C.size_t(size))
+	if ptr == nil {
+		return nil, fmt.Errorf("failed to attach agent: %s", name)
+	}
+
+	return &Agent{name: name, ptr: ptr}, nil
+}
+
 // AgentsAttach attaches agents to shared memory on the specified list of instances.
 func (m *SharedMemory) AgentsAttach(name string, instanceIndices []uint32, size datasize.ByteSize) ([]*Agent, error) {
 	agents := make([]*Agent, 0, len(instanceIndices))
 	for _, instanceIdx := range instanceIndices {
-		agent, err := m.AgentAttach(name, instanceIdx, size)
+		agent, err := m.AgentReattach(name, instanceIdx, size)
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to shared memory on instance %d: %w", instanceIdx, err)
 		}

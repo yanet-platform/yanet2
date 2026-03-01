@@ -274,7 +274,7 @@ func TestManager(t *testing.T) {
 	})
 
 	t.Run("SetupControlplane", func(t *testing.T) {
-		agent, err := m.SharedMemory().AgentAttach("bootstrap", 0, 1<<20)
+		agent, err := m.SharedMemory().AgentReattach("bootstrap", 0, 1<<20)
 		require.NoError(t, err, "failed to attach bootstrap agent")
 		{
 			functionConfig := ffi.FunctionConfig{
