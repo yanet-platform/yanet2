@@ -222,17 +222,19 @@ message NamedRealStats {
 //
 // MATCHING BEHAVIOR:
 // If a packet matches multiple allowed source configurations, statistics
-// are updated for only one of them (for anyone of match candidates). 
+// are updated for only one of them (for anyone of match candidates).
 // This ensures each packet is counted exactly once.
 message AllowedSourcesStats {
 	// Tag identifying the allowed source configuration.
-	// This corresponds to the tag field in the AllowedSources configuration.
-	// A tag of 0 indicates no tracking (stats not collected for this source).
+	// This corresponds to the tag field in the AllowedSources
+	// configuration. A tag of 0 indicates no tracking (stats not collected
+	// for this source).
 	uint32 tag = 1;
 
 	// Number of packets that passed the allowed source filter.
 	// Incremented when a packet's source address and port match this
-	// allowed source configuration and the packet is accepted for processing.
+	// allowed source configuration and the packet is accepted for
+	// processing.
 	uint64 passes = 2;
 }
 

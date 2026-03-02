@@ -192,7 +192,42 @@ message AllowedSources {
 	// - Custom application ranges: [{from: 8000, to: 9000}]
 	repeated PortsRange ports = 2;
 
-	// TODO: docs
+	// Tag identifier for tracking allowed source statistics.
+	//
+	// When non-zero, enables per-tag statistics tracking for packets
+	// matching this allowed source entry. Multiple AllowedSources entries
+	// can share the same tag to aggregate statistics across different
+	// network prefixes or port ranges.
+	//
+	// BEHAVIOR:
+	// - tag = 0: No statistics tracking for this entry (default)
+	// - tag > 0: Track packets matching this entry under the specified tag
+	//
+	// STATISTICS:
+	// - Tracked in AllowedSourcesStats in NamedVsStats
+	// - Each unique non-zero tag gets its own statistics entry
+	// - Counts total packets that passed allowed source filtering
+	//
+	// USE CASES:
+	// - Track traffic from different customer networks separately
+	// - Monitor access patterns by source category
+	// - Aggregate statistics across multiple network ranges
+	// - Identify which allowed sources are actively used
+	//
+	// EXAMPLES:
+	// 1. Track internal vs external traffic:
+	//    - Internal networks (10.0.0.0/8, 172.16.0.0/12): tag = 1
+	//    - External networks (0.0.0.0/0): tag = 2
+	//
+	// 2. Track per-customer traffic:
+	//    - Customer A networks: tag = 100
+	//    - Customer B networks: tag = 101
+	//    - Customer C networks: tag = 102
+	//
+	// 3. Aggregate multiple ranges under one tag:
+	//    - Entry 1: nets=[10.0.0.0/8], tag=1
+	//    - Entry 2: nets=[172.16.0.0/12], tag=1
+	//    - Both entries contribute to the same statistics counter
 	uint32 tag = 3;
 }
 
