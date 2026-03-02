@@ -1298,7 +1298,11 @@ func TestACLAndFilterReuse(t *testing.T) {
 			func(idx int, isIPv6 bool) []*balancerpb.AllowedSources {
 				acl := createLargeComplexACL(idx, isIPv6, rng)
 				// Add extra duplicates (duplicate first 5 rules again)
-				extraDuplicates := make([]*balancerpb.AllowedSources, 0, len(acl)+5)
+				extraDuplicates := make(
+					[]*balancerpb.AllowedSources,
+					0,
+					len(acl)+5,
+				)
 				extraDuplicates = append(extraDuplicates, acl...)
 				for i := 0; i < 5 && i < len(acl); i++ {
 					extraDuplicates = append(extraDuplicates, acl[i])

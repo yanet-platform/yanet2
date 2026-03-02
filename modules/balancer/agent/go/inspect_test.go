@@ -66,15 +66,18 @@ func TestBalancerAgentInspect(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("10.0.1.1").AsSlice(),
+									Bytes: netip.MustParseAddr("10.0.1.1").
+										AsSlice(),
 								},
 								Port: 8080,
 							},
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("172.16.0.0").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 100,
 						},
@@ -83,10 +86,12 @@ func TestBalancerAgentInspect(t *testing.T) {
 						{
 							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("192.168.1.0").AsSlice(),
+									Bytes: netip.MustParseAddr("192.168.1.0").
+										AsSlice(),
 								},
 								Mask: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+									Bytes: netip.MustParseAddr("255.255.255.0").
+										AsSlice(),
 								},
 							}},
 						},
@@ -105,15 +110,18 @@ func TestBalancerAgentInspect(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("10.0.1.2").AsSlice(),
+									Bytes: netip.MustParseAddr("10.0.1.2").
+										AsSlice(),
 								},
 								Port: 8443,
 							},
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("172.16.0.0").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 50,
 						},
@@ -161,15 +169,18 @@ func TestBalancerAgentInspect(t *testing.T) {
 						{
 							Id: &balancerpb.RelativeRealIdentifier{
 								Ip: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("20.0.1.1").AsSlice(),
+									Bytes: netip.MustParseAddr("20.0.1.1").
+										AsSlice(),
 								},
 								Port: 9090,
 							},
 							SrcAddr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("172.17.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("172.17.0.0").
+									AsSlice(),
 							},
 							SrcMask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
 							},
 							Weight: 200,
 						},
@@ -206,12 +217,32 @@ func TestBalancerAgentInspect(t *testing.T) {
 		require.NotNil(t, inspect, "inspect data is nil")
 
 		// Verify agent-level fields
-		assert.Greater(t, inspect.MemoryLimit, uint64(0), "memory limit should be greater than 0")
-		assert.GreaterOrEqual(t, inspect.MemoryUsage, uint64(0), "memory usage should be non-negative")
-		assert.LessOrEqual(t, inspect.MemoryUsage, inspect.MemoryLimit, "memory usage should not exceed limit")
+		assert.Greater(
+			t,
+			inspect.MemoryLimit,
+			uint64(0),
+			"memory limit should be greater than 0",
+		)
+		assert.GreaterOrEqual(
+			t,
+			inspect.MemoryUsage,
+			uint64(0),
+			"memory usage should be non-negative",
+		)
+		assert.LessOrEqual(
+			t,
+			inspect.MemoryUsage,
+			inspect.MemoryLimit,
+			"memory usage should not exceed limit",
+		)
 
 		// Verify we have two balancers
-		require.Len(t, inspect.Balancers, 2, "expected two balancers in inspect")
+		require.Len(
+			t,
+			inspect.Balancers,
+			2,
+			"expected two balancers in inspect",
+		)
 	})
 
 	t.Run("Inspect_BalancerNames", func(t *testing.T) {
@@ -225,8 +256,16 @@ func TestBalancerAgentInspect(t *testing.T) {
 		}
 
 		// Verify both balancer names are present
-		assert.True(t, balancerNames["balancer0"], "balancer0 should be in inspect")
-		assert.True(t, balancerNames["balancer1"], "balancer1 should be in inspect")
+		assert.True(
+			t,
+			balancerNames["balancer0"],
+			"balancer0 should be in inspect",
+		)
+		assert.True(
+			t,
+			balancerNames["balancer1"],
+			"balancer1 should be in inspect",
+		)
 	})
 
 	t.Run("Inspect_Balancer0_VirtualServices", func(t *testing.T) {
@@ -244,15 +283,33 @@ func TestBalancerAgentInspect(t *testing.T) {
 		require.NotNil(t, balancer0, "balancer0 not found in inspect")
 
 		// Verify packet handler inspect exists
-		require.NotNil(t, balancer0.PacketHandlerInspect, "packet handler inspect is nil")
+		require.NotNil(
+			t,
+			balancer0.PacketHandlerInspect,
+			"packet handler inspect is nil",
+		)
 
 		// Verify memory usage fields are present
-		assert.GreaterOrEqual(t, balancer0.TotalUsage, uint64(0), "total usage should be non-negative")
+		assert.GreaterOrEqual(
+			t,
+			balancer0.TotalUsage,
+			uint64(0),
+			"total usage should be non-negative",
+		)
 
 		// Check IPv4 VS inspect
-		require.NotNil(t, balancer0.PacketHandlerInspect.VsIpv4Inspect, "IPv4 VS inspect is nil")
+		require.NotNil(
+			t,
+			balancer0.PacketHandlerInspect.VsIpv4Inspect,
+			"IPv4 VS inspect is nil",
+		)
 		vsIpv4Inspects := balancer0.PacketHandlerInspect.VsIpv4Inspect.VsInspects
-		require.Len(t, vsIpv4Inspects, 2, "expected 2 IPv4 virtual services in balancer0")
+		require.Len(
+			t,
+			vsIpv4Inspects,
+			2,
+			"expected 2 IPv4 virtual services in balancer0",
+		)
 
 		// Verify VS identifiers
 		vsAddrs := make(map[string]bool)
@@ -262,8 +319,16 @@ func TestBalancerAgentInspect(t *testing.T) {
 			vsAddrs[addr.String()] = true
 		}
 
-		assert.True(t, vsAddrs["10.0.0.1"], "VS 10.0.0.1:80 should be in balancer0")
-		assert.True(t, vsAddrs["10.0.0.2"], "VS 10.0.0.2:443 should be in balancer0")
+		assert.True(
+			t,
+			vsAddrs["10.0.0.1"],
+			"VS 10.0.0.1:80 should be in balancer0",
+		)
+		assert.True(
+			t,
+			vsAddrs["10.0.0.2"],
+			"VS 10.0.0.2:443 should be in balancer0",
+		)
 	})
 
 	t.Run("Inspect_Balancer1_VirtualServices", func(t *testing.T) {
@@ -281,20 +346,48 @@ func TestBalancerAgentInspect(t *testing.T) {
 		require.NotNil(t, balancer1, "balancer1 not found in inspect")
 
 		// Verify packet handler inspect exists
-		require.NotNil(t, balancer1.PacketHandlerInspect, "packet handler inspect is nil")
+		require.NotNil(
+			t,
+			balancer1.PacketHandlerInspect,
+			"packet handler inspect is nil",
+		)
 
 		// Check IPv4 VS inspect
-		require.NotNil(t, balancer1.PacketHandlerInspect.VsIpv4Inspect, "IPv4 VS inspect is nil")
+		require.NotNil(
+			t,
+			balancer1.PacketHandlerInspect.VsIpv4Inspect,
+			"IPv4 VS inspect is nil",
+		)
 		vsIpv4Inspects := balancer1.PacketHandlerInspect.VsIpv4Inspect.VsInspects
-		require.Len(t, vsIpv4Inspects, 1, "expected 1 IPv4 virtual service in balancer1")
+		require.Len(
+			t,
+			vsIpv4Inspects,
+			1,
+			"expected 1 IPv4 virtual service in balancer1",
+		)
 
 		// Verify VS identifier
 		vsInspect := vsIpv4Inspects[0]
 		require.NotNil(t, vsInspect.Identifier, "VS identifier is nil")
 		addr := netip.AddrFrom4([4]byte(vsInspect.Identifier.Addr.Bytes))
-		assert.Equal(t, "20.0.0.1", addr.String(), "VS address should be 20.0.0.1")
-		assert.Equal(t, uint32(8080), vsInspect.Identifier.Port, "VS port should be 8080")
-		assert.Equal(t, balancerpb.TransportProto_UDP, vsInspect.Identifier.Proto, "VS proto should be UDP")
+		assert.Equal(
+			t,
+			"20.0.0.1",
+			addr.String(),
+			"VS address should be 20.0.0.1",
+		)
+		assert.Equal(
+			t,
+			uint32(8080),
+			vsInspect.Identifier.Port,
+			"VS port should be 8080",
+		)
+		assert.Equal(
+			t,
+			balancerpb.TransportProto_UDP,
+			vsInspect.Identifier.Proto,
+			"VS proto should be UDP",
+		)
 	})
 
 	t.Run("Inspect_StateMemory", func(t *testing.T) {
@@ -303,8 +396,18 @@ func TestBalancerAgentInspect(t *testing.T) {
 
 		// Verify state inspect for both balancers
 		for _, balancer := range inspect.Balancers {
-			require.NotNil(t, balancer.StateInspect, "state inspect is nil for %s", balancer.Name)
-			assert.GreaterOrEqual(t, balancer.StateInspect.TotalUsage, uint64(0), "state total usage should be non-negative")
+			require.NotNil(
+				t,
+				balancer.StateInspect,
+				"state inspect is nil for %s",
+				balancer.Name,
+			)
+			assert.GreaterOrEqual(
+				t,
+				balancer.StateInspect.TotalUsage,
+				uint64(0),
+				"state total usage should be non-negative",
+			)
 		}
 	})
 
@@ -317,16 +420,31 @@ func TestBalancerAgentInspect(t *testing.T) {
 			// Packet handler memory
 			ph := balancer.PacketHandlerInspect
 			require.NotNil(t, ph, "packet handler inspect is nil")
-			assert.GreaterOrEqual(t, ph.TotalUsage, uint64(0), "packet handler total usage should be non-negative")
+			assert.GreaterOrEqual(
+				t,
+				ph.TotalUsage,
+				uint64(0),
+				"packet handler total usage should be non-negative",
+			)
 
 			// State memory
 			state := balancer.StateInspect
 			require.NotNil(t, state, "state inspect is nil")
-			assert.GreaterOrEqual(t, state.TotalUsage, uint64(0), "state total usage should be non-negative")
+			assert.GreaterOrEqual(
+				t,
+				state.TotalUsage,
+				uint64(0),
+				"state total usage should be non-negative",
+			)
 
 			// Total balancer memory should be sum of components
 			expectedTotal := ph.TotalUsage + state.TotalUsage + balancer.OtherUsage
-			assert.Equal(t, expectedTotal, balancer.TotalUsage, "balancer total usage should equal sum of components")
+			assert.Equal(
+				t,
+				expectedTotal,
+				balancer.TotalUsage,
+				"balancer total usage should equal sum of components",
+			)
 		}
 	})
 }

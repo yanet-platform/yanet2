@@ -811,10 +811,17 @@ func goToCVsConfigInPlace(
 			if len(allowedSrc.Nets) > 0 {
 				cAllowedSlice[i].nets = (*C.struct_net)(
 					C.malloc(
-						C.size_t(len(allowedSrc.Nets)) * C.size_t(unsafe.Sizeof(C.struct_net{})),
+						C.size_t(
+							len(allowedSrc.Nets),
+						) * C.size_t(
+							unsafe.Sizeof(C.struct_net{}),
+						),
 					),
 				)
-				cNetsSlice := unsafe.Slice(cAllowedSlice[i].nets, len(allowedSrc.Nets))
+				cNetsSlice := unsafe.Slice(
+					cAllowedSlice[i].nets,
+					len(allowedSrc.Nets),
+				)
 				for j, net := range allowedSrc.Nets {
 					cNetsSlice[j] = goToCNet(net)
 				}
@@ -984,8 +991,14 @@ func cToGoVsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 
 			// Convert networks array
 			if cAllowedSlice[i].nets_count > 0 && cAllowedSlice[i].nets != nil {
-				cNetsSlice := unsafe.Slice(cAllowedSlice[i].nets, cAllowedSlice[i].nets_count)
-				config.AllowedSources[i].Nets = make([]xnetip.NetWithMask, cAllowedSlice[i].nets_count)
+				cNetsSlice := unsafe.Slice(
+					cAllowedSlice[i].nets,
+					cAllowedSlice[i].nets_count,
+				)
+				config.AllowedSources[i].Nets = make(
+					[]xnetip.NetWithMask,
+					cAllowedSlice[i].nets_count,
+				)
 				for j := range config.AllowedSources[i].Nets {
 					net := cToGoNet(cNetsSlice[j], isV4)
 					config.AllowedSources[i].Nets[j] = net
@@ -1402,7 +1415,9 @@ func cToGoNamedBalancerInspect(
 	}
 }
 
-func cToGoBalancerInspect(cInspect *C.struct_balancer_inspect) *BalancerInspect {
+func cToGoBalancerInspect(
+	cInspect *C.struct_balancer_inspect,
+) *BalancerInspect {
 	return &BalancerInspect{
 		PacketHandler: *cToGoPacketHandlerInspect(
 			&cInspect.packet_handler_inspect,

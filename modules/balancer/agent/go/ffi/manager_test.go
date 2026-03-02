@@ -1006,9 +1006,11 @@ func TestManager(t *testing.T) {
 							},
 							AllowedSources: []AllowedSources{
 								{
-									Nets: []xnetip.NetWithMask{xnetip.FromPrefix(
-										netip.MustParsePrefix("0.0.0.0/0"),
-									)},
+									Nets: []xnetip.NetWithMask{
+										xnetip.FromPrefix(
+											netip.MustParsePrefix("0.0.0.0/0"),
+										),
+									},
 								},
 							},
 							PeersV4: []netip.Addr{

@@ -1426,7 +1426,10 @@ func ConvertAgentInspectToProto(
 
 	balancers := make([]*balancerpb.BalancerInspect, 0, len(inspect.Balancers))
 	for i := range inspect.Balancers {
-		balancers = append(balancers, ConvertNamedBalancerInspectToProto(&inspect.Balancers[i]))
+		balancers = append(
+			balancers,
+			ConvertNamedBalancerInspectToProto(&inspect.Balancers[i]),
+		)
 	}
 
 	return &balancerpb.AgentInspect{
@@ -1445,11 +1448,15 @@ func ConvertNamedBalancerInspectToProto(
 	}
 
 	return &balancerpb.BalancerInspect{
-		Name:                 inspect.Name,
-		PacketHandlerInspect: ConvertPacketHandlerInspectToProto(&inspect.Inspect.PacketHandler),
-		StateInspect:         ConvertStateInspectToProto(&inspect.Inspect.State),
-		OtherUsage:           inspect.Inspect.OtherUsage,
-		TotalUsage:           inspect.Inspect.TotalUsage,
+		Name: inspect.Name,
+		PacketHandlerInspect: ConvertPacketHandlerInspectToProto(
+			&inspect.Inspect.PacketHandler,
+		),
+		StateInspect: ConvertStateInspectToProto(
+			&inspect.Inspect.State,
+		),
+		OtherUsage: inspect.Inspect.OtherUsage,
+		TotalUsage: inspect.Inspect.TotalUsage,
 	}
 }
 
@@ -1462,8 +1469,12 @@ func ConvertPacketHandlerInspectToProto(
 	}
 
 	return &balancerpb.PacketHandlerInspect{
-		VsIpv4Inspect:   ConvertPacketHandlerVsInspectToProto(&inspect.VsIpv4Inspect),
-		VsIpv6Inspect:   ConvertPacketHandlerVsInspectToProto(&inspect.VsIpv6Inspect),
+		VsIpv4Inspect: ConvertPacketHandlerVsInspectToProto(
+			&inspect.VsIpv4Inspect,
+		),
+		VsIpv6Inspect: ConvertPacketHandlerVsInspectToProto(
+			&inspect.VsIpv6Inspect,
+		),
 		SummaryVsUsage:  inspect.SummaryVsUsage,
 		VsIndexUsage:    inspect.VsIndexUsage,
 		RealsIndexUsage: inspect.RealsIndexUsage,
@@ -1483,7 +1494,10 @@ func ConvertPacketHandlerVsInspectToProto(
 
 	vsInspects := make([]*balancerpb.NamedVsInspect, 0, len(inspect.VsInspects))
 	for i := range inspect.VsInspects {
-		vsInspects = append(vsInspects, ConvertNamedVsInspectToProto(&inspect.VsInspects[i]))
+		vsInspects = append(
+			vsInspects,
+			ConvertNamedVsInspectToProto(&inspect.VsInspects[i]),
+		)
 	}
 
 	return &balancerpb.PacketHandlerVsInspect{
