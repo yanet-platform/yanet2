@@ -17,21 +17,38 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                         }),
                         scheduler: balancerpb::VsScheduler::SourceHash as i32,
                         allowed_srcs: vec![
-                            // Simple network without port restrictions
-                            balancerpb::AllowedSrc {
-                                net: Some(balancerpb::Net {
+                            // Single network with tag
+                            balancerpb::AllowedSources {
+                                nets: vec![balancerpb::Net {
                                     addr: Some(balancerpb::Addr { bytes: vec![10, 0, 0, 0] }),
                                     mask: Some(balancerpb::Addr { bytes: vec![255, 0, 0, 0] }),
-                                }),
+                                }],
                                 ports: vec![],
+                                tag: 100,
                             },
-                            // Network with port restrictions
-                            balancerpb::AllowedSrc {
-                                net: Some(balancerpb::Net {
-                                    addr: Some(balancerpb::Addr { bytes: vec![172, 16, 0, 0] }),
-                                    mask: Some(balancerpb::Addr { bytes: vec![255, 240, 0, 0] }),
-                                }),
+                            // Multiple networks in one entry with port restrictions and tag
+                            balancerpb::AllowedSources {
+                                nets: vec![
+                                    balancerpb::Net {
+                                        addr: Some(balancerpb::Addr { bytes: vec![172, 16, 0, 0] }),
+                                        mask: Some(balancerpb::Addr { bytes: vec![255, 240, 0, 0] }),
+                                    },
+                                    balancerpb::Net {
+                                        addr: Some(balancerpb::Addr { bytes: vec![192, 168, 0, 0] }),
+                                        mask: Some(balancerpb::Addr { bytes: vec![255, 255, 0, 0] }),
+                                    },
+                                ],
                                 ports: vec![balancerpb::PortsRange { from: 1024, to: 65535 }],
+                                tag: 200,
+                            },
+                            // Network without tag (tag = 0)
+                            balancerpb::AllowedSources {
+                                nets: vec![balancerpb::Net {
+                                    addr: Some(balancerpb::Addr { bytes: vec![203, 0, 113, 0] }),
+                                    mask: Some(balancerpb::Addr { bytes: vec![255, 255, 255, 0] }),
+                                }],
+                                ports: vec![balancerpb::PortsRange { from: 80, to: 80 }],
+                                tag: 0, // No tag
                             },
                         ],
                         reals: vec![
@@ -74,24 +91,36 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                         }),
                         scheduler: balancerpb::VsScheduler::RoundRobin as i32,
                         allowed_srcs: vec![
-                            // Allow all IPv4 with specific ports
-                            balancerpb::AllowedSrc {
-                                net: Some(balancerpb::Net {
+                            // Allow all IPv4 with specific ports, no tag
+                            balancerpb::AllowedSources {
+                                nets: vec![balancerpb::Net {
                                     addr: Some(balancerpb::Addr { bytes: vec![0, 0, 0, 0] }),
                                     mask: Some(balancerpb::Addr { bytes: vec![0, 0, 0, 0] }),
-                                }),
+                                }],
                                 ports: vec![
                                     balancerpb::PortsRange { from: 443, to: 443 },
                                     balancerpb::PortsRange { from: 8443, to: 8443 },
                                 ],
+                                tag: 0, // No tag - won't appear in stats
                             },
-                            // Non-contiguous netmask example: 255.0.255.0
-                            balancerpb::AllowedSrc {
-                                net: Some(balancerpb::Net {
-                                    addr: Some(balancerpb::Addr { bytes: vec![10, 0, 0, 0] }),
-                                    mask: Some(balancerpb::Addr { bytes: vec![255, 0, 255, 0] }),
-                                }),
+                            // Multiple networks with non-contiguous netmask and tag
+                            balancerpb::AllowedSources {
+                                nets: vec![
+                                    balancerpb::Net {
+                                        addr: Some(balancerpb::Addr { bytes: vec![10, 0, 0, 0] }),
+                                        mask: Some(balancerpb::Addr { bytes: vec![255, 0, 255, 0] }),
+                                    },
+                                    balancerpb::Net {
+                                        addr: Some(balancerpb::Addr { bytes: vec![192, 168, 0, 0] }),
+                                        mask: Some(balancerpb::Addr { bytes: vec![255, 255, 0, 0] }),
+                                    },
+                                    balancerpb::Net {
+                                        addr: Some(balancerpb::Addr { bytes: vec![198, 51, 100, 0] }),
+                                        mask: Some(balancerpb::Addr { bytes: vec![255, 255, 255, 0] }),
+                                    },
+                                ],
                                 ports: vec![balancerpb::PortsRange { from: 1024, to: 65535 }],
+                                tag: 300,
                             },
                         ],
                         reals: vec![
@@ -346,6 +375,17 @@ pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
                         outgoing_packets: 799_500,
                         outgoing_bytes: 799_500_000,
                     }),
+                    allowed_sources: vec![
+                        balancerpb::AllowedSourcesStats {
+                            tag: 100,
+                            passes: 500_000,
+                        },
+                        balancerpb::AllowedSourcesStats {
+                            tag: 200,
+                            passes: 299_500,
+                        },
+                        // Tag 0 (no tag) doesn't appear in stats
+                    ],
                     reals: vec![
                         balancerpb::NamedRealStats {
                             real: Some(balancerpb::RealIdentifier {
@@ -414,6 +454,13 @@ pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
                         outgoing_packets: 400_000,
                         outgoing_bytes: 400_000_000,
                     }),
+                    allowed_sources: vec![
+                        // Tag 0 (no tag) doesn't appear in stats
+                        balancerpb::AllowedSourcesStats {
+                            tag: 300,
+                            passes: 400_000,
+                        },
+                    ],
                     reals: vec![balancerpb::NamedRealStats {
                         real: Some(balancerpb::RealIdentifier {
                             vs: Some(balancerpb::VsIdentifier {

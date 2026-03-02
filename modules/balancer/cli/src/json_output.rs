@@ -36,7 +36,7 @@ pub struct PacketHandlerConfigJson {
 pub struct VirtualServiceJson {
     pub id: Option<VsIdentifierJson>,
     pub scheduler: String,
-    pub allowed_srcs: Vec<SubnetJson>,
+    pub allowed_srcs: Vec<AllowedSourcesJson>,
     pub reals: Vec<RealJson>,
     pub flags: Option<VsFlagsJson>,
     pub peers: Vec<String>,
@@ -50,11 +50,17 @@ pub struct VsIdentifierJson {
 }
 
 #[derive(Serialize)]
-pub struct SubnetJson {
-    pub addr: String,
-    pub mask: String,
+pub struct AllowedSourcesJson {
+    pub networks: Vec<NetworkJson>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ports: Option<Vec<PortRangeJson>>,
+    pub tag: u32,
+}
+
+#[derive(Serialize)]
+pub struct NetworkJson {
+    pub addr: String,
+    pub mask: String,
 }
 
 #[derive(Serialize)]
@@ -224,6 +230,13 @@ pub struct NamedVsStatsJson {
     pub vs: Option<VsIdentifierJson>,
     pub stats: Option<VsStatsJson>,
     pub reals: Vec<NamedRealStatsJson>,
+    pub allowed_sources: Vec<AllowedSourcesStatsJson>,
+}
+
+#[derive(Serialize)]
+pub struct AllowedSourcesStatsJson {
+    pub tag: u32,
+    pub passes: u64,
 }
 
 #[derive(Serialize)]
@@ -403,11 +416,24 @@ pub fn convert_show_config(response: &balancerpb::ShowConfigResponse) -> ShowCon
                             .allowed_srcs
                             .iter()
                             .filter_map(|s| {
-                                // Extract network info
-                                let net = s.net.as_ref()?;
-                                let addr = opt_addr_to_ip(&net.addr).ok()?;
-                                let mask_bytes = net.mask.as_ref()?.bytes.as_slice();
-                                let mask = crate::entities::bytes_to_ip(mask_bytes).ok()?;
+                                // Extract all networks
+                                let networks: Vec<NetworkJson> = s
+                                    .nets
+                                    .iter()
+                                    .filter_map(|net| {
+                                        let addr = opt_addr_to_ip(&net.addr).ok()?;
+                                        let mask_bytes = net.mask.as_ref()?.bytes.as_slice();
+                                        let mask = crate::entities::bytes_to_ip(mask_bytes).ok()?;
+                                        Some(NetworkJson {
+                                            addr: addr.to_string(),
+                                            mask: mask.to_string(),
+                                        })
+                                    })
+                                    .collect();
+
+                                if networks.is_empty() {
+                                    return None;
+                                }
 
                                 // Extract port ranges if present
                                 let ports = if s.ports.is_empty() {
@@ -421,10 +447,10 @@ pub fn convert_show_config(response: &balancerpb::ShowConfigResponse) -> ShowCon
                                     )
                                 };
 
-                                Some(SubnetJson {
-                                    addr: addr.to_string(),
-                                    mask: mask.to_string(),
+                                Some(AllowedSourcesJson {
+                                    networks,
                                     ports,
+                                    tag: s.tag,
                                 })
                             })
                             .collect(),
@@ -620,6 +646,14 @@ pub fn convert_show_stats(response: &balancerpb::ShowStatsResponse) -> ShowStats
                                 packets: st.packets,
                                 bytes: st.bytes,
                             }),
+                        })
+                        .collect(),
+                    allowed_sources: v
+                        .allowed_sources
+                        .iter()
+                        .map(|a| AllowedSourcesStatsJson {
+                            tag: a.tag,
+                            passes: a.passes,
                         })
                         .collect(),
                 })

@@ -45,25 +45,35 @@ pub fn opt_addr_to_ip(addr: &Option<balancerpb::Addr>) -> Result<IpAddr, String>
         .and_then(addr_to_ip)
 }
 
-/// Format AllowedSrc protobuf message as a string
-/// Returns network in CIDR notation (if possible) or netmask notation with optional port ranges
-/// Format: "10.0.0.0/8 [80,443,1024-65535]" or "10.0.0.0/255.0.255.0 [1024-65535]"
-pub fn format_allowed_src(allowed_src: &balancerpb::AllowedSrc) -> Result<String, String> {
-    let net = allowed_src.net.as_ref().ok_or("missing network")?;
-    let addr = opt_addr_to_ip(&net.addr)?;
-    let mask_bytes = net.mask.as_ref().ok_or("missing mask")?.bytes.as_slice();
+/// Format AllowedSources protobuf message as a string
+/// Returns networks in CIDR notation (if possible) or netmask notation with optional port ranges and tag
+/// Format: "10.0.0.0/8, 192.168.0.0/16 [80,443,1024-65535] [tag: 100]"
+pub fn format_allowed_src(allowed_src: &balancerpb::AllowedSources) -> Result<String, String> {
+    if allowed_src.nets.is_empty() {
+        return Err("no networks specified".to_string());
+    }
 
-    // Try to convert to CIDR prefix, fall back to netmask notation if not contiguous
-    let network_str = match mask_to_prefix(mask_bytes) {
-        Ok(prefix_len) => format!("{}/{}", addr, prefix_len),
-        Err(_) => {
-            // Non-contiguous mask - display as netmask notation
-            let mask_ip = bytes_to_ip(mask_bytes)?;
-            format!("{}/{}", addr, mask_ip)
-        }
-    };
+    // Format all networks
+    let network_strs: Result<Vec<String>, String> = allowed_src
+        .nets
+        .iter()
+        .map(|net| {
+            let addr = opt_addr_to_ip(&net.addr)?;
+            let mask_bytes = net.mask.as_ref().ok_or("missing mask")?.bytes.as_slice();
 
-    let mut result = network_str;
+            // Try to convert to CIDR prefix, fall back to netmask notation if not contiguous
+            match mask_to_prefix(mask_bytes) {
+                Ok(prefix_len) => Ok(format!("{}/{}", addr, prefix_len)),
+                Err(_) => {
+                    // Non-contiguous mask - display as netmask notation
+                    let mask_ip = bytes_to_ip(mask_bytes)?;
+                    Ok(format!("{}/{}", addr, mask_ip))
+                }
+            }
+        })
+        .collect();
+
+    let mut result = network_strs?.join(", ");
 
     // Add port ranges if present in square brackets
     if !allowed_src.ports.is_empty() {
@@ -79,6 +89,13 @@ pub fn format_allowed_src(allowed_src: &balancerpb::AllowedSrc) -> Result<String
             })
             .collect();
         result.push_str(&format!(" [{}]", port_strs.join(",")));
+    }
+
+    // Add tag
+    if allowed_src.tag == 0 {
+        result.push_str(" [tag: None]");
+    } else {
+        result.push_str(&format!(" [tag: {}]", allowed_src.tag));
     }
 
     Ok(result)
@@ -599,12 +616,13 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
                     AllowedSrcEntry::Simple(network_str) => {
                         // Simple format - no port restrictions
                         let (addr, mask_bytes) = parse_network(network_str)?;
-                        Ok(balancerpb::AllowedSrc {
-                            net: Some(balancerpb::Net {
+                        Ok(balancerpb::AllowedSources {
+                            nets: vec![balancerpb::Net {
                                 addr: Some(balancerpb::Addr { bytes: ip_to_bytes(addr) }),
                                 mask: Some(balancerpb::Addr { bytes: mask_bytes }),
-                            }),
+                            }],
                             ports: vec![], // Empty = all ports allowed
+                            tag: 0, // Default tag
                         })
                     }
                     AllowedSrcEntry::Structured { network, ports } => {
@@ -620,12 +638,13 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
                             vec![] // No ports specified = all ports allowed
                         };
 
-                        Ok(balancerpb::AllowedSrc {
-                            net: Some(balancerpb::Net {
+                        Ok(balancerpb::AllowedSources {
+                            nets: vec![balancerpb::Net {
                                 addr: Some(balancerpb::Addr { bytes: ip_to_bytes(addr) }),
                                 mask: Some(balancerpb::Addr { bytes: mask_bytes }),
-                            }),
+                            }],
                             ports: port_ranges,
+                            tag: 0, // Default tag
                         })
                     }
                 }

@@ -1096,6 +1096,24 @@ fn print_show_stats_tree(response: &balancerpb::ShowStatsResponse) -> Result<(),
                             tree.end_child();
                         }
 
+                        // Allowed sources stats
+                        if !vs.allowed_sources.is_empty() {
+                            tree.begin_child("Allowed Sources".to_string());
+                            for allowed_src in &vs.allowed_sources {
+                                let tag_str = if allowed_src.tag == 0 {
+                                    "None".to_string()
+                                } else {
+                                    allowed_src.tag.to_string()
+                                };
+                                tree.add_empty_child(format!(
+                                    "Tag {}: {} passes",
+                                    tag_str,
+                                    format_number(allowed_src.passes)
+                                ));
+                            }
+                            tree.end_child();
+                        }
+
                         tree.end_child();
                     }
                 }
@@ -1435,6 +1453,25 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
                                 "  Broadcasted ICMP Packets: {}",
                                 format_number(s.broadcasted_icmp_packets).bright_green()
                             );
+                        }
+
+                        // Display allowed sources stats
+                        if !vs.allowed_sources.is_empty() {
+                            println!("  {}:", "Allowed Sources".bright_cyan().bold());
+                            for allowed_src in &vs.allowed_sources {
+                                let tag_str = if allowed_src.tag == 0 {
+                                    "None".to_string()
+                                } else {
+                                    allowed_src.tag.to_string()
+                                };
+                                println!(
+                                    "    Tag {}: {}",
+                                    tag_str,
+                                    format_number(allowed_src.passes).bright_green()
+                                );
+                            }
+                        } else {
+                            println!("  {}: {}", "Allowed Sources".bright_cyan().bold(), "None".bright_green());
                         }
 
                         // Display reals table for this VS
