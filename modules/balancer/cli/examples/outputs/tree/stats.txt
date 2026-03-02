@@ -48,7 +48,7 @@ Balancer Statistics
    │     ├─ Packet Clones Sent: 10
    │     ├─ Packet Clones Received: 9
    │     └─ Packet Clone Failures: 1
-   └─ Virtual Services (2)
+   └─ Virtual Services (3)
       ├─ [0]
       │  ├─ VS: 192.0.2.1:80/TCP
       │  ├─ Incoming: 800,000 pkts, 762.9 MB
@@ -64,28 +64,57 @@ Balancer Statistics
       │  ├─ Real Is Removed: 0
       │  ├─ Not Rescheduled Packets: 0
       │  ├─ Broadcasted ICMP Packets: 0
-      │  └─ Reals (2)
-      │     ├─ [0]
-      │     │  ├─ Real: 10.1.1.1:80
-      │     │  ├─ Packets: 500,000
-      │     │  ├─ Bytes: 600.0 MB
-      │     │  ├─ Created Sessions: 30,000
-      │     │  ├─ Packets Real Disabled: 0
-      │     │  ├─ OPS Packets: 0
-      │     │  └─ Error ICMP Packets: 0
-      │     └─ [1]
-      │        ├─ Real: 10.1.1.2:80
-      │        ├─ Packets: 300,000
-      │        ├─ Bytes: 349.5 MB
-      │        ├─ Created Sessions: 20,000
-      │        ├─ Packets Real Disabled: 0
-      │        ├─ OPS Packets: 0
-      │        └─ Error ICMP Packets: 0
-      └─ [1]
-         ├─ VS: 192.0.2.2:443/TCP
-         ├─ Incoming: 400,000 pkts, 381.5 MB
-         ├─ Outgoing: 400,000 pkts, 381.5 MB
-         ├─ Created Sessions: 25,000
+      │  ├─ Reals (2)
+      │  │  ├─ [0]
+      │  │  │  ├─ Real: 10.1.1.1:80
+      │  │  │  ├─ Packets: 500,000
+      │  │  │  ├─ Bytes: 600.0 MB
+      │  │  │  ├─ Created Sessions: 30,000
+      │  │  │  ├─ Packets Real Disabled: 0
+      │  │  │  ├─ OPS Packets: 0
+      │  │  │  └─ Error ICMP Packets: 0
+      │  │  └─ [1]
+      │  │     ├─ Real: 10.1.1.2:80
+      │  │     ├─ Packets: 300,000
+      │  │     ├─ Bytes: 349.5 MB
+      │  │     ├─ Created Sessions: 20,000
+      │  │     ├─ Packets Real Disabled: 0
+      │  │     ├─ OPS Packets: 0
+      │  │     └─ Error ICMP Packets: 0
+      │  └─ Allowed Sources
+      │     ├─ Tag 100: 500,000 passes
+      │     └─ Tag 200: 299,500 passes
+      ├─ [1]
+      │  ├─ VS: 192.0.2.2:443/TCP
+      │  ├─ Incoming: 400,000 pkts, 381.5 MB
+      │  ├─ Outgoing: 400,000 pkts, 381.5 MB
+      │  ├─ Created Sessions: 25,000
+      │  ├─ Packet Src Not Allowed: 0
+      │  ├─ No Reals: 0
+      │  ├─ OPS Packets: 0
+      │  ├─ Session Table Overflow: 0
+      │  ├─ Echo ICMP Packets: 0
+      │  ├─ Error ICMP Packets: 0
+      │  ├─ Real Is Disabled: 0
+      │  ├─ Real Is Removed: 0
+      │  ├─ Not Rescheduled Packets: 0
+      │  ├─ Broadcasted ICMP Packets: 0
+      │  ├─ Reals (1)
+      │  │  └─ [0]
+      │  │     ├─ Real: 10.2.1.1:443
+      │  │     ├─ Packets: 400,000
+      │  │     ├─ Bytes: 480.0 MB
+      │  │     ├─ Created Sessions: 25,000
+      │  │     ├─ Packets Real Disabled: 0
+      │  │     ├─ OPS Packets: 0
+      │  │     └─ Error ICMP Packets: 0
+      │  └─ Allowed Sources
+      │     └─ Tag 300: 400,000 passes
+      └─ [2]
+         ├─ VS: [2001:db8::1]:443/TCP
+         ├─ Incoming: 300,000 pkts, 286.1 MB
+         ├─ Outgoing: 300,000 pkts, 286.1 MB
+         ├─ Created Sessions: 15,000
          ├─ Packet Src Not Allowed: 0
          ├─ No Reals: 0
          ├─ OPS Packets: 0
@@ -96,12 +125,22 @@ Balancer Statistics
          ├─ Real Is Removed: 0
          ├─ Not Rescheduled Packets: 0
          ├─ Broadcasted ICMP Packets: 0
-         └─ Reals (1)
-            └─ [0]
-               ├─ Real: 10.2.1.1:443
-               ├─ Packets: 400,000
-               ├─ Bytes: 480.0 MB
-               ├─ Created Sessions: 25,000
-               ├─ Packets Real Disabled: 0
-               ├─ OPS Packets: 0
-               └─ Error ICMP Packets: 0
+         ├─ Reals (2)
+         │  ├─ [0]
+         │  │  ├─ Real: [2001:db8::1001]:443
+         │  │  ├─ Packets: 150,000
+         │  │  ├─ Bytes: 143.1 MB
+         │  │  ├─ Created Sessions: 7,500
+         │  │  ├─ Packets Real Disabled: 0
+         │  │  ├─ OPS Packets: 0
+         │  │  └─ Error ICMP Packets: 0
+         │  └─ [1]
+         │     ├─ Real: [2001:db8::1002]:443
+         │     ├─ Packets: 150,000
+         │     ├─ Bytes: 143.1 MB
+         │     ├─ Created Sessions: 7,500
+         │     ├─ Packets Real Disabled: 0
+         │     ├─ OPS Packets: 0
+         │     └─ Error ICMP Packets: 0
+         └─ Allowed Sources
+            └─ Tag 400: 300,000 passes

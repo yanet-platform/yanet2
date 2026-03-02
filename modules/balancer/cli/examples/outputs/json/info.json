@@ -70,6 +70,47 @@
             "last_packet_timestamp": "2024-01-15T10:50:45+00:00"
           }
         ]
+      },
+      {
+        "id": {
+          "addr": "2001:db8::1",
+          "port": 443,
+          "proto": "tcp"
+        },
+        "active_sessions": 3000,
+        "last_packet_timestamp": "2024-01-15T10:50:45+00:00",
+        "reals": [
+          {
+            "id": {
+              "vs": {
+                "addr": "2001:db8::1",
+                "port": 443,
+                "proto": "tcp"
+              },
+              "real": {
+                "ip": "2001:db8::1001",
+                "port": 443
+              }
+            },
+            "active_sessions": 1500,
+            "last_packet_timestamp": "2024-01-15T10:50:45+00:00"
+          },
+          {
+            "id": {
+              "vs": {
+                "addr": "2001:db8::1",
+                "port": 443,
+                "proto": "tcp"
+              },
+              "real": {
+                "ip": "2001:db8::1002",
+                "port": 443
+              }
+            },
+            "active_sessions": 1500,
+            "last_packet_timestamp": "2024-01-15T10:50:44+00:00"
+          }
+        ]
       }
     ]
   }

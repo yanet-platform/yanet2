@@ -114,6 +114,29 @@
       "create_timestamp": "2024-01-15T10:48:17+00:00",
       "last_packet_timestamp": "2024-01-15T10:50:42+00:00",
       "timeout": "60s"
+    },
+    {
+      "client_addr": "2001:db8::2001",
+      "client_port": 54321,
+      "vs_id": {
+        "addr": "2001:db8::1",
+        "port": 443,
+        "proto": "tcp"
+      },
+      "real_id": {
+        "vs": {
+          "addr": "2001:db8::1",
+          "port": 443,
+          "proto": "tcp"
+        },
+        "real": {
+          "ip": "2001:db8::1001",
+          "port": 443
+        }
+      },
+      "create_timestamp": "2024-01-15T10:48:20+00:00",
+      "last_packet_timestamp": "2024-01-15T10:50:45+00:00",
+      "timeout": "60s"
     }
   ]
 }

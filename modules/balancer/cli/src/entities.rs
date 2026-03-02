@@ -353,7 +353,7 @@ pub enum AllowedSrcEntry {
     /// Supports both CIDR ("10.0.0.0/8") and netmask ("10.0.0.0/255.0.0.0") notation
     Simple(String),
 
-    /// Structured format with optional port restrictions
+    /// Structured format with optional port restrictions and tag
     Structured {
         /// Network in CIDR or netmask notation
         network: String,
@@ -362,6 +362,10 @@ pub enum AllowedSrcEntry {
         /// Format: "80,443,8000-9000,1024-1030"
         #[serde(skip_serializing_if = "Option::is_none")]
         ports: Option<String>,
+
+        /// Optional tag for tracking (0 = no tag)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tag: Option<u32>,
     },
 }
 
@@ -614,7 +618,7 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
             .map(|entry| {
                 match entry {
                     AllowedSrcEntry::Simple(network_str) => {
-                        // Simple format - no port restrictions
+                        // Simple format - no port restrictions, no tag
                         let (addr, mask_bytes) = parse_network(network_str)?;
                         Ok(balancerpb::AllowedSources {
                             nets: vec![balancerpb::Net {
@@ -622,11 +626,11 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
                                 mask: Some(balancerpb::Addr { bytes: mask_bytes }),
                             }],
                             ports: vec![], // Empty = all ports allowed
-                            tag: 0,        // Default tag
+                            tag: 0,        // No tag
                         })
                     }
-                    AllowedSrcEntry::Structured { network, ports } => {
-                        // Structured format with optional ports
+                    AllowedSrcEntry::Structured { network, ports, tag } => {
+                        // Structured format with optional ports and tag
                         let (addr, mask_bytes) = parse_network(network)?;
 
                         let port_ranges = if let Some(ports_str) = ports {
@@ -644,7 +648,7 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
                                 mask: Some(balancerpb::Addr { bytes: mask_bytes }),
                             }],
                             ports: port_ranges,
-                            tag: 0, // Default tag
+                            tag: tag.unwrap_or(0), // Use provided tag or default to 0
                         })
                     }
                 }

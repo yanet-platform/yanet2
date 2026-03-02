@@ -11,18 +11,47 @@
           "scheduler": "source_hash",
           "allowed_srcs": [
             {
-              "addr": "10.0.0.0",
-              "mask": "255.0.0.0"
+              "networks": [
+                {
+                  "addr": "10.0.0.0",
+                  "mask": "255.0.0.0"
+                }
+              ],
+              "tag": 100
             },
             {
-              "addr": "172.16.0.0",
-              "mask": "255.240.0.0",
+              "networks": [
+                {
+                  "addr": "172.16.0.0",
+                  "mask": "255.240.0.0"
+                },
+                {
+                  "addr": "192.168.0.0",
+                  "mask": "255.255.0.0"
+                }
+              ],
               "ports": [
                 {
                   "from": 1024,
                   "to": 65535
                 }
-              ]
+              ],
+              "tag": 200
+            },
+            {
+              "networks": [
+                {
+                  "addr": "203.0.113.0",
+                  "mask": "255.255.255.0"
+                }
+              ],
+              "ports": [
+                {
+                  "from": 80,
+                  "to": 80
+                }
+              ],
+              "tag": 0
             }
           ],
           "reals": [
@@ -66,8 +95,12 @@
           "scheduler": "round_robin",
           "allowed_srcs": [
             {
-              "addr": "0.0.0.0",
-              "mask": "0.0.0.0",
+              "networks": [
+                {
+                  "addr": "0.0.0.0",
+                  "mask": "0.0.0.0"
+                }
+              ],
               "ports": [
                 {
                   "from": 443,
@@ -77,17 +110,31 @@
                   "from": 8443,
                   "to": 8443
                 }
-              ]
+              ],
+              "tag": 0
             },
             {
-              "addr": "10.0.0.0",
-              "mask": "255.0.255.0",
+              "networks": [
+                {
+                  "addr": "10.0.0.0",
+                  "mask": "255.0.255.0"
+                },
+                {
+                  "addr": "192.168.0.0",
+                  "mask": "255.255.0.0"
+                },
+                {
+                  "addr": "198.51.100.0",
+                  "mask": "255.255.255.0"
+                }
+              ],
               "ports": [
                 {
                   "from": 1024,
                   "to": 65535
                 }
-              ]
+              ],
+              "tag": 300
             }
           ],
           "reals": [
@@ -129,6 +176,53 @@
           "peers": [
             "192.0.2.10"
           ]
+        },
+        {
+          "id": {
+            "addr": "2001:db8::1",
+            "port": 443,
+            "proto": "tcp"
+          },
+          "scheduler": "round_robin",
+          "allowed_srcs": [
+            {
+              "networks": [
+                {
+                  "addr": "2001:db8::",
+                  "mask": "ffff:ffff::"
+                }
+              ],
+              "tag": 400
+            }
+          ],
+          "reals": [
+            {
+              "id": {
+                "ip": "2001:db8::1001",
+                "port": 443
+              },
+              "weight": 100,
+              "src_addr": "2001:db8::1",
+              "src_mask": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"
+            },
+            {
+              "id": {
+                "ip": "2001:db8::1002",
+                "port": 443
+              },
+              "weight": 100,
+              "src_addr": "2001:db8::1",
+              "src_mask": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"
+            }
+          ],
+          "flags": {
+            "gre": false,
+            "fix_mss": true,
+            "ops": false,
+            "pure_l3": false,
+            "wlc": false
+          },
+          "peers": []
         }
       ],
       "source_address_v4": "192.0.2.1",

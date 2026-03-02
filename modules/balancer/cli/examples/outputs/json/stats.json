@@ -121,6 +121,16 @@
               "bytes": 366503875
             }
           }
+        ],
+        "allowed_sources": [
+          {
+            "tag": 100,
+            "passes": 500000
+          },
+          {
+            "tag": 200,
+            "passes": 299500
+          }
         ]
       },
       {
@@ -168,6 +178,88 @@
               "packets": 400000,
               "bytes": 503316480
             }
+          }
+        ],
+        "allowed_sources": [
+          {
+            "tag": 300,
+            "passes": 400000
+          }
+        ]
+      },
+      {
+        "vs": {
+          "addr": "2001:db8::1",
+          "port": 443,
+          "proto": "tcp"
+        },
+        "stats": {
+          "incoming_packets": 300000,
+          "incoming_bytes": 300000000,
+          "packet_src_not_allowed": 0,
+          "no_reals": 0,
+          "ops_packets": 0,
+          "session_table_overflow": 0,
+          "echo_icmp_packets": 0,
+          "error_icmp_packets": 0,
+          "real_is_disabled": 0,
+          "real_is_removed": 0,
+          "not_rescheduled_packets": 0,
+          "broadcasted_icmp_packets": 0,
+          "created_sessions": 15000,
+          "outgoing_packets": 300000,
+          "outgoing_bytes": 300000000
+        },
+        "reals": [
+          {
+            "real": {
+              "vs": {
+                "addr": "2001:db8::1",
+                "port": 443,
+                "proto": "tcp"
+              },
+              "real": {
+                "ip": "2001:db8::1001",
+                "port": 443
+              }
+            },
+            "stats": {
+              "packets_real_disabled": 0,
+              "packets_real_not_present": 0,
+              "ops_packets": 0,
+              "error_icmp_packets": 0,
+              "created_sessions": 7500,
+              "packets": 150000,
+              "bytes": 150000000
+            }
+          },
+          {
+            "real": {
+              "vs": {
+                "addr": "2001:db8::1",
+                "port": 443,
+                "proto": "tcp"
+              },
+              "real": {
+                "ip": "2001:db8::1002",
+                "port": 443
+              }
+            },
+            "stats": {
+              "packets_real_disabled": 0,
+              "packets_real_not_present": 0,
+              "ops_packets": 0,
+              "error_icmp_packets": 0,
+              "created_sessions": 7500,
+              "packets": 150000,
+              "bytes": 150000000
+            }
+          }
+        ],
+        "allowed_sources": [
+          {
+            "tag": 400,
+            "passes": 300000
           }
         ]
       }

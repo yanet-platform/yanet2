@@ -161,6 +161,78 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                         }),
                         peers: vec![balancerpb::Addr { bytes: vec![192, 0, 2, 10] }],
                     },
+                    // IPv6 Virtual Service
+                    balancerpb::VirtualService {
+                        id: Some(balancerpb::VsIdentifier {
+                            addr: Some(balancerpb::Addr {
+                                bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                            }),
+                            port: 443,
+                            proto: balancerpb::TransportProto::Tcp as i32,
+                        }),
+                        scheduler: balancerpb::VsScheduler::RoundRobin as i32,
+                        allowed_srcs: vec![
+                            // IPv6 network with tag
+                            balancerpb::AllowedSources {
+                                nets: vec![balancerpb::Net {
+                                    addr: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                                    }),
+                                    mask: Some(balancerpb::Addr {
+                                        bytes: vec![0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                                    }),
+                                }],
+                                ports: vec![],
+                                tag: 400,
+                            },
+                        ],
+                        reals: vec![
+                            balancerpb::Real {
+                                id: Some(balancerpb::RelativeRealIdentifier {
+                                    ip: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 1],
+                                    }),
+                                    port: 443,
+                                }),
+                                weight: 100,
+                                src_addr: Some(balancerpb::Addr {
+                                    bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                                }),
+                                src_mask: Some(balancerpb::Addr {
+                                    bytes: vec![
+                                        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                                        0xff, 0xff, 0xff,
+                                    ],
+                                }),
+                            },
+                            balancerpb::Real {
+                                id: Some(balancerpb::RelativeRealIdentifier {
+                                    ip: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 2],
+                                    }),
+                                    port: 443,
+                                }),
+                                weight: 100,
+                                src_addr: Some(balancerpb::Addr {
+                                    bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                                }),
+                                src_mask: Some(balancerpb::Addr {
+                                    bytes: vec![
+                                        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                                        0xff, 0xff, 0xff,
+                                    ],
+                                }),
+                            },
+                        ],
+                        flags: Some(balancerpb::VsFlags {
+                            gre: false,
+                            fix_mss: true,
+                            ops: false,
+                            pure_l3: false,
+                            wlc: false,
+                        }),
+                        peers: vec![],
+                    },
                 ],
                 source_address_v4: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 1] }),
                 source_address_v6: Some(balancerpb::Addr {
@@ -288,6 +360,57 @@ pub fn create_state_info_example() -> balancerpb::ShowInfoResponse {
                         active_sessions: 5000,
                         last_packet_timestamp: Some(prost_types::Timestamp { seconds: 1705315845, nanos: 0 }),
                     }],
+                },
+                balancerpb::VsInfo {
+                    id: Some(balancerpb::VsIdentifier {
+                        addr: Some(balancerpb::Addr {
+                            bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                        }),
+                        port: 443,
+                        proto: balancerpb::TransportProto::Tcp as i32,
+                    }),
+                    active_sessions: 3000,
+                    last_packet_timestamp: Some(prost_types::Timestamp { seconds: 1705315845, nanos: 0 }),
+                    reals: vec![
+                        balancerpb::RealInfo {
+                            id: Some(balancerpb::RealIdentifier {
+                                vs: Some(balancerpb::VsIdentifier {
+                                    addr: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                                    }),
+                                    port: 443,
+                                    proto: balancerpb::TransportProto::Tcp as i32,
+                                }),
+                                real: Some(balancerpb::RelativeRealIdentifier {
+                                    ip: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 1],
+                                    }),
+                                    port: 443,
+                                }),
+                            }),
+                            active_sessions: 1500,
+                            last_packet_timestamp: Some(prost_types::Timestamp { seconds: 1705315845, nanos: 0 }),
+                        },
+                        balancerpb::RealInfo {
+                            id: Some(balancerpb::RealIdentifier {
+                                vs: Some(balancerpb::VsIdentifier {
+                                    addr: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                                    }),
+                                    port: 443,
+                                    proto: balancerpb::TransportProto::Tcp as i32,
+                                }),
+                                real: Some(balancerpb::RelativeRealIdentifier {
+                                    ip: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 2],
+                                    }),
+                                    port: 443,
+                                }),
+                            }),
+                            active_sessions: 1500,
+                            last_packet_timestamp: Some(prost_types::Timestamp { seconds: 1705315844, nanos: 0 }),
+                        },
+                    ],
                 },
             ],
         }),
@@ -474,6 +597,85 @@ pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
                         }),
                     }],
                 },
+                balancerpb::NamedVsStats {
+                    vs: Some(balancerpb::VsIdentifier {
+                        addr: Some(balancerpb::Addr {
+                            bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                        }),
+                        port: 443,
+                        proto: balancerpb::TransportProto::Tcp as i32,
+                    }),
+                    stats: Some(balancerpb::VsStats {
+                        incoming_packets: 300_000,
+                        incoming_bytes: 300_000_000,
+                        packet_src_not_allowed: 0,
+                        no_reals: 0,
+                        ops_packets: 0,
+                        session_table_overflow: 0,
+                        echo_icmp_packets: 0,
+                        error_icmp_packets: 0,
+                        real_is_disabled: 0,
+                        real_is_removed: 0,
+                        not_rescheduled_packets: 0,
+                        broadcasted_icmp_packets: 0,
+                        created_sessions: 15_000,
+                        outgoing_packets: 300_000,
+                        outgoing_bytes: 300_000_000,
+                    }),
+                    allowed_sources: vec![balancerpb::AllowedSourcesStats { tag: 400, passes: 300_000 }],
+                    reals: vec![
+                        balancerpb::NamedRealStats {
+                            real: Some(balancerpb::RealIdentifier {
+                                vs: Some(balancerpb::VsIdentifier {
+                                    addr: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                                    }),
+                                    port: 443,
+                                    proto: balancerpb::TransportProto::Tcp as i32,
+                                }),
+                                real: Some(balancerpb::RelativeRealIdentifier {
+                                    ip: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 1],
+                                    }),
+                                    port: 443,
+                                }),
+                            }),
+                            stats: Some(balancerpb::RealStats {
+                                packets_real_disabled: 0,
+                                ops_packets: 0,
+                                error_icmp_packets: 0,
+                                created_sessions: 7_500,
+                                packets: 150_000,
+                                bytes: 150_000_000,
+                            }),
+                        },
+                        balancerpb::NamedRealStats {
+                            real: Some(balancerpb::RealIdentifier {
+                                vs: Some(balancerpb::VsIdentifier {
+                                    addr: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                                    }),
+                                    port: 443,
+                                    proto: balancerpb::TransportProto::Tcp as i32,
+                                }),
+                                real: Some(balancerpb::RelativeRealIdentifier {
+                                    ip: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 2],
+                                    }),
+                                    port: 443,
+                                }),
+                            }),
+                            stats: Some(balancerpb::RealStats {
+                                packets_real_disabled: 0,
+                                ops_packets: 0,
+                                error_icmp_packets: 0,
+                                created_sessions: 7_500,
+                                packets: 150_000,
+                                bytes: 150_000_000,
+                            }),
+                        },
+                    ],
+                },
             ],
         }),
     }
@@ -599,6 +801,38 @@ pub fn create_sessions_info_example() -> balancerpb::ShowSessionsResponse {
                 last_packet_timestamp: Some(prost_types::Timestamp { seconds: 1705315842, nanos: 0 }),
                 timeout: Some(prost_types::Duration { seconds: 60, nanos: 0 }),
             },
+            // IPv6 session example
+            balancerpb::SessionInfo {
+                client_addr: Some(balancerpb::Addr {
+                    bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x20, 1],
+                }),
+                client_port: 54321,
+                vs_id: Some(balancerpb::VsIdentifier {
+                    addr: Some(balancerpb::Addr {
+                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                    }),
+                    port: 443,
+                    proto: balancerpb::TransportProto::Tcp as i32,
+                }),
+                real_id: Some(balancerpb::RealIdentifier {
+                    vs: Some(balancerpb::VsIdentifier {
+                        addr: Some(balancerpb::Addr {
+                            bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                        }),
+                        port: 443,
+                        proto: balancerpb::TransportProto::Tcp as i32,
+                    }),
+                    real: Some(balancerpb::RelativeRealIdentifier {
+                        ip: Some(balancerpb::Addr {
+                            bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 1],
+                        }),
+                        port: 443,
+                    }),
+                }),
+                create_timestamp: Some(prost_types::Timestamp { seconds: 1705315700, nanos: 0 }),
+                last_packet_timestamp: Some(prost_types::Timestamp { seconds: 1705315845, nanos: 0 }),
+                timeout: Some(prost_types::Duration { seconds: 60, nanos: 0 }),
+            },
         ],
     }
 }
@@ -694,10 +928,30 @@ pub fn create_inspect_example() -> balancerpb::ShowInspectResponse {
                         vs_ipv6_inspect: Some(balancerpb::PacketHandlerVsInspect {
                             matcher_usage: 524288,    // 512 KiB
                             summary_vs_usage: 262144, // 256 KiB
-                            vs_inspects: vec![],
+                            vs_inspects: vec![balancerpb::NamedVsInspect {
+                                identifier: Some(balancerpb::VsIdentifier {
+                                    addr: Some(balancerpb::Addr {
+                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                                    }),
+                                    port: 443,
+                                    proto: balancerpb::TransportProto::Tcp as i32,
+                                }),
+                                inspect: Some(balancerpb::VsInspect {
+                                    acl_usage: 262144,     // 256 KiB
+                                    ring_usage: 131072,    // 128 KiB
+                                    counters_usage: 65536, // 64 KiB
+                                    reals_usage: Some(balancerpb::RealsUsage {
+                                        counters_usage: 131072, // 128 KiB
+                                        data_usage: 655360,     // 640 KiB
+                                        total_usage: 786432,    // 768 KiB
+                                    }),
+                                    other_usage: 32768,   // 32 KiB
+                                    total_usage: 1277952, // ~1.22 MiB
+                                }),
+                            }],
                             announce_usage: 131072, // 128 KiB
                             index_usage: 65536,     // 64 KiB
-                            total_usage: 983040,    // 960 KiB
+                            total_usage: 1760832,   // ~1.68 MiB (updated to include IPv6 VS)
                         }),
                         summary_vs_usage: 1048576, // 1 MiB
                         vs_index_usage: 524288,    // 512 KiB

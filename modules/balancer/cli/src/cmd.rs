@@ -437,19 +437,19 @@ pub struct StatsCmd {
     pub name: Option<String>,
 
     /// Device name (optional)
-    #[arg(long)]
+    #[arg(long, short = 'd')]
     pub device: Option<String>,
 
     /// Pipeline name (optional)
-    #[arg(long)]
+    #[arg(long, short = 'm')]
     pub pipeline: Option<String>,
 
     /// Function name (optional)
-    #[arg(long)]
+    #[arg(long, short = 'p')]
     pub function: Option<String>,
 
     /// Chain name (optional)
-    #[arg(long)]
+    #[arg(long, short = 'c')]
     pub chain: Option<String>,
 
     #[clap(flatten)]
