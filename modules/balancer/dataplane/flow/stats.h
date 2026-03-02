@@ -13,10 +13,10 @@
 
 // FWD
 
-static inline void 
+static inline void
 packet_ctx_update_vs_stats_on_outgoing_packet(struct packet_ctx *ctx);
 
-static inline void 
+static inline void
 packet_ctx_update_real_stats_on_packet(struct packet_ctx *ctx);
 
 ////////////////////////////////////////////////////////////////////////////////

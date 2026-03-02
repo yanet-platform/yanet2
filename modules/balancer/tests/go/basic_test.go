@@ -218,7 +218,7 @@ func TestBasicOperations(t *testing.T) {
 		)
 		assert.Equal(
 			t,
-			uint64(len(packet.Data())),
+			uint64(len(response.RawData)),
 			vsStats.Stats.OutgoingBytes,
 			"outgoing bytes should match packet size",
 		)
@@ -240,7 +240,7 @@ func TestBasicOperations(t *testing.T) {
 		)
 		assert.Equal(
 			t,
-			uint64(len(packet.Data())),
+			uint64(len(response.RawData)),
 			realStats.Stats.Bytes,
 			"real bytes should match packet size",
 		)
