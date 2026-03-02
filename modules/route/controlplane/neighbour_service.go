@@ -6,8 +6,6 @@ import (
 	"net/netip"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
 )
@@ -20,14 +18,12 @@ type NeighbourService struct {
 	routepb.UnimplementedNeighbourServer
 
 	neighTable *neigh.NeighTable
-	log        *zap.SugaredLogger
 }
 
 // NewNeighbourService creates a new NeighbourService.
-func NewNeighbourService(neighTable *neigh.NeighTable, log *zap.SugaredLogger) *NeighbourService {
+func NewNeighbourService(neighTable *neigh.NeighTable) *NeighbourService {
 	return &NeighbourService{
 		neighTable: neighTable,
-		log:        log,
 	}
 }
 
@@ -82,43 +78,47 @@ func (m *NeighbourService) List(
 }
 
 // CreateTable creates a new neighbour table.
-func (m *NeighbourService) CreateTable(_ context.Context, req *routepb.CreateNeighbourTableRequest) (*routepb.CreateNeighbourTableResponse, error) {
-	if _, err := m.neighTable.CreateSource(req.GetName(), req.GetDefaultPriority(), false); err != nil {
+func (m *NeighbourService) CreateTable(
+	ctx context.Context,
+	request *routepb.CreateNeighbourTableRequest,
+) (*routepb.CreateNeighbourTableResponse, error) {
+	if _, err := m.neighTable.CreateSource(request.GetName(), request.GetDefaultPriority(), false); err != nil {
 		return nil, err
 	}
-	m.log.Infow("created neighbour table",
-		zap.String("name", req.GetName()),
-		zap.Uint32("default_priority", req.GetDefaultPriority()),
-	)
+
 	return &routepb.CreateNeighbourTableResponse{}, nil
 }
 
 // UpdateTable updates the default priority of an existing neighbour
 // table.
-func (m *NeighbourService) UpdateTable(_ context.Context, req *routepb.UpdateNeighbourTableRequest) (*routepb.UpdateNeighbourTableResponse, error) {
-	if err := m.neighTable.UpdateSource(req.GetName(), req.GetDefaultPriority()); err != nil {
+func (m *NeighbourService) UpdateTable(
+	ctx context.Context,
+	request *routepb.UpdateNeighbourTableRequest,
+) (*routepb.UpdateNeighbourTableResponse, error) {
+	if err := m.neighTable.UpdateSource(request.GetName(), request.GetDefaultPriority()); err != nil {
 		return nil, err
 	}
-	m.log.Infow("updated neighbour table",
-		zap.String("name", req.GetName()),
-		zap.Uint32("default_priority", req.GetDefaultPriority()),
-	)
+
 	return &routepb.UpdateNeighbourTableResponse{}, nil
 }
 
 // RemoveTable removes a user-defined neighbour table.
-func (m *NeighbourService) RemoveTable(_ context.Context, req *routepb.RemoveNeighbourTableRequest) (*routepb.RemoveNeighbourTableResponse, error) {
-	if err := m.neighTable.DeleteSource(req.GetName()); err != nil {
+func (m *NeighbourService) RemoveTable(
+	ctx context.Context,
+	request *routepb.RemoveNeighbourTableRequest,
+) (*routepb.RemoveNeighbourTableResponse, error) {
+	if err := m.neighTable.DeleteSource(request.GetName()); err != nil {
 		return nil, err
 	}
-	m.log.Infow("removed neighbour table",
-		zap.String("name", req.GetName()),
-	)
+
 	return &routepb.RemoveNeighbourTableResponse{}, nil
 }
 
 // ListTables returns metadata about all registered neighbour tables.
-func (m *NeighbourService) ListTables(_ context.Context, _ *routepb.ListNeighbourTablesRequest) (*routepb.ListNeighbourTablesResponse, error) {
+func (m *NeighbourService) ListTables(
+	ctx context.Context,
+	request *routepb.ListNeighbourTablesRequest,
+) (*routepb.ListNeighbourTablesResponse, error) {
 	sources := m.neighTable.ListSources()
 
 	tables := make([]*routepb.NeighbourTableInfo, 0, len(sources))
@@ -138,14 +138,17 @@ func (m *NeighbourService) ListTables(_ context.Context, _ *routepb.ListNeighbou
 
 // UpdateNeighbours inserts or updates one or more neighbour entries in
 // the specified table.
-func (m *NeighbourService) UpdateNeighbours(_ context.Context, req *routepb.UpdateNeighboursRequest) (*routepb.UpdateNeighboursResponse, error) {
-	table := req.GetTable()
+func (m *NeighbourService) UpdateNeighbours(
+	ctx context.Context,
+	request *routepb.UpdateNeighboursRequest,
+) (*routepb.UpdateNeighboursResponse, error) {
+	table := request.GetTable()
 	if table == "" {
 		table = defaultStaticTable
 	}
 
-	entries := make([]neigh.NeighbourEntry, 0, len(req.GetEntries()))
-	for _, e := range req.GetEntries() {
+	entries := make([]neigh.NeighbourEntry, 0, len(request.GetEntries()))
+	for _, e := range request.GetEntries() {
 		addr, err := netip.ParseAddr(e.GetNextHop())
 		if err != nil {
 			return nil, fmt.Errorf("invalid nexthop %q: %w", e.GetNextHop(), err)
@@ -168,23 +171,22 @@ func (m *NeighbourService) UpdateNeighbours(_ context.Context, req *routepb.Upda
 		return nil, err
 	}
 
-	m.log.Infow("updated neighbour entries",
-		zap.String("table", table),
-		zap.Int("count", len(entries)),
-	)
 	return &routepb.UpdateNeighboursResponse{}, nil
 }
 
 // RemoveNeighbours deletes one or more neighbour entries from the
 // specified table.
-func (m *NeighbourService) RemoveNeighbours(_ context.Context, req *routepb.RemoveNeighboursRequest) (*routepb.RemoveNeighboursResponse, error) {
-	table := req.GetTable()
+func (m *NeighbourService) RemoveNeighbours(
+	ctx context.Context,
+	request *routepb.RemoveNeighboursRequest,
+) (*routepb.RemoveNeighboursResponse, error) {
+	table := request.GetTable()
 	if table == "" {
 		table = defaultStaticTable
 	}
 
-	addrs := make([]netip.Addr, 0, len(req.GetNextHops()))
-	for _, hop := range req.GetNextHops() {
+	addrs := make([]netip.Addr, 0, len(request.GetNextHops()))
+	for _, hop := range request.GetNextHops() {
 		addr, err := netip.ParseAddr(hop)
 		if err != nil {
 			return nil, fmt.Errorf("invalid next_hop %q: %w", hop, err)
@@ -196,9 +198,5 @@ func (m *NeighbourService) RemoveNeighbours(_ context.Context, req *routepb.Remo
 		return nil, err
 	}
 
-	m.log.Infow("removed neighbour entries",
-		zap.String("table", table),
-		zap.Int("count", len(addrs)),
-	)
 	return &routepb.RemoveNeighboursResponse{}, nil
 }

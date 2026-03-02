@@ -61,7 +61,7 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 	}
 
 	routeService := NewRouteService(agent, neighbourTable, cfg.RibTTL, log)
-	neighbourService := NewNeighbourService(neighbourTable, log)
+	neighbourService := NewNeighbourService(neighbourTable)
 
 	return &RouteModule{
 		cfg:              cfg,
