@@ -88,9 +88,10 @@ packet_handler:
       allowed_srcs:
         # Simple format (backward compatible) - all ports allowed
         - "10.0.0.0/8"
-        # Structured format with single port
+        # Structured format with single port and tag
         - network: "172.16.0.0/12"
           ports: "443"
+          tag: 123
         # Structured format with port ranges
         - network: "192.168.0.0/16"
           ports: "1024-65535"
