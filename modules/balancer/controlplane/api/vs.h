@@ -310,7 +310,7 @@ struct allowed_sources {
 	struct ports_range *port_ranges;
 
 	// TODO: docs
-	uint64_t tag;
+	uint32_t tag;
 };
 
 struct named_real_config;

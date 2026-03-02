@@ -856,7 +856,7 @@ func goToCVsConfigInPlace(
 			}
 
 			// Set tag field
-			cAllowedSlice[i].tag = C.uint64_t(allowedSrc.Tag)
+			cAllowedSlice[i].tag = C.uint32_t(allowedSrc.Tag)
 		}
 	} else {
 		cConfig.config.allowed_src = nil
@@ -1030,7 +1030,7 @@ func cToGoVsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 			}
 
 			// Get tag field
-			config.AllowedSources[i].Tag = uint64(cAllowedSlice[i].tag)
+			config.AllowedSources[i].Tag = uint32(cAllowedSlice[i].tag)
 		}
 	} else {
 		config.AllowedSources = []AllowedSources{}

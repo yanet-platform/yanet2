@@ -819,15 +819,21 @@ setup_acl_rules(
 	for (size_t i = 0; i < rules_count; ++i) {
 		rule_to_relative_addresses(&rules[i]);
 
-		// register counter
-		sprintf(counter_name, "acl_%zu_%u", vs->registry_idx, rules[i].action);
-		uint64_t counter_id = counter_registry_register(counters, counter_name, 1);
-		if (counter_id == (uint64_t)-1) {
-			NEW_ERROR("failed to register counter for rule: no memory");
-			return -1;
-		}
+		uint32_t rule_tag = rules[i].action;
+		if (rule_tag != 0) {
+			// register counter
+			sprintf(counter_name, "acl_%zu_%u", vs->registry_idx, rule_tag);
+			uint64_t counter_id = counter_registry_register(counters, counter_name, 1);
+			if (counter_id == (uint64_t)-1) {
+				NEW_ERROR("failed to register counter for rule: no memory");
+				return -1;
+			}
 
-		rule_counters[i] = counter_id;
+			rule_counters[i] = counter_id;
+		} else {
+			// counter is undefined, because tag not specified
+			rule_counters[i] = (uint64_t)-1;
+		}
 
 		// store actions equal rule stable index
 		rules[i].action = i;

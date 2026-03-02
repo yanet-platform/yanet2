@@ -1741,7 +1741,7 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 			verifyTag: func(t *testing.T, config *ffi.BalancerManagerConfig) {
 				require.Len(t, config.Balancer.Handler.VirtualServices, 1)
 				require.Len(t, config.Balancer.Handler.VirtualServices[0].AllowedSources, 1)
-				assert.Equal(t, uint64(12345), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+				assert.Equal(t, uint32(12345), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
 					"Tag should be 12345")
 			},
 		},
@@ -1804,7 +1804,7 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 			verifyTag: func(t *testing.T, config *ffi.BalancerManagerConfig) {
 				require.Len(t, config.Balancer.Handler.VirtualServices, 1)
 				require.Len(t, config.Balancer.Handler.VirtualServices[0].AllowedSources, 1)
-				assert.Equal(t, uint64(0), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+				assert.Equal(t, uint32(0), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
 					"Tag should default to 0")
 			},
 		},
@@ -1889,11 +1889,11 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 			verifyTag: func(t *testing.T, config *ffi.BalancerManagerConfig) {
 				require.Len(t, config.Balancer.Handler.VirtualServices, 1)
 				require.Len(t, config.Balancer.Handler.VirtualServices[0].AllowedSources, 3)
-				assert.Equal(t, uint64(100), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+				assert.Equal(t, uint32(100), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
 					"First tag should be 100")
-				assert.Equal(t, uint64(200), config.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
+				assert.Equal(t, uint32(200), config.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
 					"Second tag should be 200")
-				assert.Equal(t, uint64(0), config.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
+				assert.Equal(t, uint32(0), config.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
 					"Third tag should be 0")
 			},
 		},
@@ -1984,11 +1984,11 @@ func TestAllowedSourcesTagRoundTrip(t *testing.T) {
 	require.Len(t, protoConfig.PacketHandler.Vs[0].AllowedSrcs, 3)
 
 	// Verify tags in proto
-	assert.Equal(t, uint64(12345), protoConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+	assert.Equal(t, uint32(12345), protoConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
 		"First tag should be 12345 in proto")
-	assert.Equal(t, uint64(0), protoConfig.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
+	assert.Equal(t, uint32(0), protoConfig.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
 		"Second tag should be 0 in proto")
-	assert.Equal(t, uint64(99999), protoConfig.PacketHandler.Vs[0].AllowedSrcs[2].Tag,
+	assert.Equal(t, uint32(99999), protoConfig.PacketHandler.Vs[0].AllowedSrcs[2].Tag,
 		"Third tag should be 99999 in proto")
 
 	// Convert back to FFI
@@ -1998,10 +1998,10 @@ func TestAllowedSourcesTagRoundTrip(t *testing.T) {
 	require.Len(t, convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources, 3)
 
 	// Verify tags are preserved
-	assert.Equal(t, uint64(12345), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+	assert.Equal(t, uint32(12345), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
 		"First tag should be preserved as 12345")
-	assert.Equal(t, uint64(0), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
+	assert.Equal(t, uint32(0), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
 		"Second tag should be preserved as 0")
-	assert.Equal(t, uint64(99999), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
+	assert.Equal(t, uint32(99999), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
 		"Third tag should be preserved as 99999")
 }

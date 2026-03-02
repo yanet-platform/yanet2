@@ -92,7 +92,9 @@ check_fw_and_inc_stats(
 		assert(result->count == 1);
 		uint32_t rule_idx = ADDR_OF(&result->values)[0];
 		uint64_t counter_id = ADDR_OF(&vs->rule_counters)[rule_idx];
-		counter_get_address(counter_id, ctx->worker_idx, ctx->stats.storage)[0] += 1;
+		if (counter_id != (uint64_t)-1) {
+			counter_get_address(counter_id, ctx->worker_idx, ctx->stats.storage)[0] += 1;
+		}
 		return true;
 	}
 	return false;

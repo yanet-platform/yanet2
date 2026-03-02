@@ -486,7 +486,7 @@ func TestBalancerAgent(t *testing.T) {
 		// Verify tag is 0 (default) since it wasn't specified in the config
 		assert.Equal(
 			t,
-			uint64(0),
+			uint32(0),
 			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
 			"tag should be 0 when not specified",
 		)
@@ -573,7 +573,7 @@ func TestBalancerAgent(t *testing.T) {
 
 		assert.Equal(
 			t,
-			uint64(54321),
+			uint32(54321),
 			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
 			"tag should be updated to 54321",
 		)

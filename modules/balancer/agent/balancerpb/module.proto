@@ -193,7 +193,7 @@ message AllowedSources {
 	repeated PortsRange ports = 2;
 
 	// TODO: docs
-	uint64 tag = 3;
+	uint32 tag = 3;
 }
 
 // Virtual service configuration.

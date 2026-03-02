@@ -1468,13 +1468,13 @@ func TestACLAndFilterReuse(t *testing.T) {
 		require.Len(t, config.PacketHandler.Vs[0].AllowedSrcs, 2)
 		assert.Equal(
 			t,
-			uint64(999),
+			uint32(999),
 			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
 			"first VS first tag should be 999",
 		)
 		assert.Equal(
 			t,
-			uint64(888),
+			uint32(888),
 			config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
 			"first VS second tag should be 888",
 		)
@@ -1483,7 +1483,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 		require.Len(t, config.PacketHandler.Vs[1].AllowedSrcs, 1)
 		assert.Equal(
 			t,
-			uint64(0),
+			uint32(0),
 			config.PacketHandler.Vs[1].AllowedSrcs[0].Tag,
 			"second VS tag should be 0",
 		)
@@ -1492,7 +1492,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 	// Test 25: ACL reuse with many nets and port ranges in different order and with different tags
 	t.Run("ACLReuseWithManyNetsAndPortRanges", func(t *testing.T) {
 		// Helper to create AllowedSources with many nets and port ranges
-		createManyNetsACL := func(variant int, isIPv6 bool, tag uint64, rng *rand.Rand) []*balancerpb.AllowedSources {
+		createManyNetsACL := func(variant int, isIPv6 bool, tag uint32, rng *rand.Rand) []*balancerpb.AllowedSources {
 			numNets := 10 + rng.IntN(6) // 10-15 nets
 			numPorts := 3 + rng.IntN(3) // 3-5 port ranges
 
@@ -1587,7 +1587,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 		}
 
 		// Helper to change tags in AllowedSources
-		changeTags := func(acl []*balancerpb.AllowedSources, newTag uint64) []*balancerpb.AllowedSources {
+		changeTags := func(acl []*balancerpb.AllowedSources, newTag uint32) []*balancerpb.AllowedSources {
 			result := make([]*balancerpb.AllowedSources, len(acl))
 			for i, rule := range acl {
 				result[i] = &balancerpb.AllowedSources{
@@ -1727,10 +1727,10 @@ func TestACLAndFilterReuse(t *testing.T) {
 		require.Len(t, finalConfig.PacketHandler.Vs, 4)
 
 		// Check that the new tags are stored correctly
-		assert.Equal(t, uint64(111), finalConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag, "first IPv4 VS tag should be 111")
-		assert.Equal(t, uint64(222), finalConfig.PacketHandler.Vs[1].AllowedSrcs[0].Tag, "second IPv4 VS tag should be 222")
-		assert.Equal(t, uint64(333), finalConfig.PacketHandler.Vs[2].AllowedSrcs[0].Tag, "first IPv6 VS tag should be 333")
-		assert.Equal(t, uint64(444), finalConfig.PacketHandler.Vs[3].AllowedSrcs[0].Tag, "second IPv6 VS tag should be 444")
+		assert.Equal(t, uint32(111), finalConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag, "first IPv4 VS tag should be 111")
+		assert.Equal(t, uint32(222), finalConfig.PacketHandler.Vs[1].AllowedSrcs[0].Tag, "second IPv4 VS tag should be 222")
+		assert.Equal(t, uint32(333), finalConfig.PacketHandler.Vs[2].AllowedSrcs[0].Tag, "first IPv6 VS tag should be 333")
+		assert.Equal(t, uint32(444), finalConfig.PacketHandler.Vs[3].AllowedSrcs[0].Tag, "second IPv6 VS tag should be 444")
 
 		// Scenario 6: ALMOST matching - one net is different (should NOT reuse)
 		rng6 := rand.New(rand.NewPCG(300, 0))

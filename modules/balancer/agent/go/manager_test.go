@@ -1478,13 +1478,13 @@ func TestManagerTagFieldInConfig(t *testing.T) {
 		// Verify tags
 		assert.Equal(
 			t,
-			uint64(11111),
+			uint32(11111),
 			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
 			"first tag should be 11111",
 		)
 		assert.Equal(
 			t,
-			uint64(22222),
+			uint32(22222),
 			config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
 			"second tag should be 22222",
 		)
@@ -1576,13 +1576,13 @@ func TestManagerTagFieldInConfig(t *testing.T) {
 
 		assert.Equal(
 			t,
-			uint64(33333),
+			uint32(33333),
 			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
 			"first tag should be updated to 33333",
 		)
 		assert.Equal(
 			t,
-			uint64(0),
+			uint32(0),
 			config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
 			"second tag should be updated to 0",
 		)
