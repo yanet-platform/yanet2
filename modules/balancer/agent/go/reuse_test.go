@@ -49,7 +49,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 	require.NoError(t, err)
 
 	// Helper to create a simple ACL (allow all)
-	createSimpleACL := func(isIPv6 bool) []*balancerpb.AllowedSrc {
+	createSimpleACL := func(isIPv6 bool) []*balancerpb.AllowedSources {
 		var addr, mask netip.Addr
 		if isIPv6 {
 			addr = netip.AddrFrom16([16]byte{})
@@ -58,23 +58,25 @@ func TestACLAndFilterReuse(t *testing.T) {
 			addr = netip.AddrFrom4([4]byte{0, 0, 0, 0})
 			mask = netip.AddrFrom4([4]byte{0, 0, 0, 0})
 		}
-		return []*balancerpb.AllowedSrc{
+		return []*balancerpb.AllowedSources{
 			{
-				Net: &balancerpb.Net{
-					Addr: &balancerpb.Addr{Bytes: addr.AsSlice()},
-					Mask: &balancerpb.Addr{Bytes: mask.AsSlice()},
+				Nets: []*balancerpb.Net{
+					{
+						Addr: &balancerpb.Addr{Bytes: addr.AsSlice()},
+						Mask: &balancerpb.Addr{Bytes: mask.AsSlice()},
+					},
 				},
 			},
 		}
 	}
 
 	// Helper to create a complex ACL with multiple rules
-	createComplexACL := func(variant int, isIPv6 bool) []*balancerpb.AllowedSrc {
-		var acl []*balancerpb.AllowedSrc
+	createComplexACL := func(variant int, isIPv6 bool) []*balancerpb.AllowedSources {
+		var acl []*balancerpb.AllowedSources
 		if isIPv6 {
 			// Rule 1: 2001:db8:1::/48
-			acl = append(acl, &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			acl = append(acl, &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{
 						Bytes: netip.AddrFrom16([16]byte{
 							0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0,
@@ -87,12 +89,12 @@ func TestACLAndFilterReuse(t *testing.T) {
 							0, 0, 0, 0, 0, 0, 0, 0,
 						}).AsSlice(),
 					},
-				},
+				}},
 				Ports: []*balancerpb.PortsRange{{From: 1024, To: 65535}},
 			})
 			// Rule 2: 2001:db8:2::/48 with specific ports
-			acl = append(acl, &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			acl = append(acl, &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{
 						Bytes: netip.AddrFrom16([16]byte{
 							0x20, 0x01, 0x0d, 0xb8, 0, 2, 0, 0,
@@ -105,7 +107,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 							0, 0, 0, 0, 0, 0, 0, 0,
 						}).AsSlice(),
 					},
-				},
+				}},
 				Ports: []*balancerpb.PortsRange{
 					{From: 80, To: 80},
 					{From: 443, To: 443},
@@ -113,19 +115,19 @@ func TestACLAndFilterReuse(t *testing.T) {
 			})
 		} else {
 			// Rule 1: 10.0.0.0/8
-			acl = append(acl, &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			acl = append(acl, &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{10, 0, 0, 0}).AsSlice()},
 					Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 0, 0, 0}).AsSlice()},
-				},
+				}},
 				Ports: []*balancerpb.PortsRange{{From: 1024, To: 65535}},
 			})
 			// Rule 2: 192.168.0.0/16 with specific ports
-			acl = append(acl, &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			acl = append(acl, &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{192, 168, 0, 0}).AsSlice()},
 					Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).AsSlice()},
-				},
+				}},
 				Ports: []*balancerpb.PortsRange{{From: 80, To: 80}, {From: 443, To: 443}},
 			})
 		}
@@ -133,8 +135,8 @@ func TestACLAndFilterReuse(t *testing.T) {
 		// Add variant-specific rule
 		if variant > 0 {
 			if isIPv6 {
-				acl = append(acl, &balancerpb.AllowedSrc{
-					Net: &balancerpb.Net{
+				acl = append(acl, &balancerpb.AllowedSources{
+					Nets: []*balancerpb.Net{{
 						Addr: &balancerpb.Addr{
 							Bytes: netip.AddrFrom16([16]byte{
 								0x20, 0x01, 0x0d, 0xb8, 0, byte(variant), 0, 0,
@@ -147,14 +149,14 @@ func TestACLAndFilterReuse(t *testing.T) {
 								0, 0, 0, 0, 0, 0, 0, 0,
 							}).AsSlice(),
 						},
-					},
+					}},
 				})
 			} else {
-				acl = append(acl, &balancerpb.AllowedSrc{
-					Net: &balancerpb.Net{
+				acl = append(acl, &balancerpb.AllowedSources{
+					Nets: []*balancerpb.Net{{
 						Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{172, byte(variant), 0, 0}).AsSlice()},
 						Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).AsSlice()},
-					},
+					}},
 				})
 			}
 		}
@@ -163,12 +165,12 @@ func TestACLAndFilterReuse(t *testing.T) {
 
 	// Helper to create a large complex ACL with 15-20 rules and random duplicates
 	// This tests that ACL comparison handles duplicates correctly and works with many rules
-	createLargeComplexACL := func(variant int, isIPv6 bool, rng *rand.Rand) []*balancerpb.AllowedSrc {
-		var acl []*balancerpb.AllowedSrc
+	createLargeComplexACL := func(variant int, isIPv6 bool, rng *rand.Rand) []*balancerpb.AllowedSources {
+		var acl []*balancerpb.AllowedSources
 		numRules := 15 + rng.IntN(6) // 15-20 rules
 
 		for i := 0; i < numRules; i++ {
-			var rule *balancerpb.AllowedSrc
+			var rule *balancerpb.AllowedSources
 			if isIPv6 {
 				// Generate IPv6 rule with varying prefixes
 				addr := [16]byte{
@@ -207,25 +209,25 @@ func TestACLAndFilterReuse(t *testing.T) {
 					0,
 					0,
 				}
-				rule = &balancerpb.AllowedSrc{
-					Net: &balancerpb.Net{
+				rule = &balancerpb.AllowedSources{
+					Nets: []*balancerpb.Net{{
 						Addr: &balancerpb.Addr{
 							Bytes: netip.AddrFrom16(addr).AsSlice(),
 						},
 						Mask: &balancerpb.Addr{
 							Bytes: netip.AddrFrom16(mask).AsSlice(),
 						},
-					},
+					}},
 				}
 			} else {
 				// Generate IPv4 rule with varying prefixes
 				addr := [4]byte{byte(10 + variant%240), byte(i), 0, 0}
 				mask := [4]byte{255, 255, 0, 0}
-				rule = &balancerpb.AllowedSrc{
-					Net: &balancerpb.Net{
+				rule = &balancerpb.AllowedSources{
+					Nets: []*balancerpb.Net{{
 						Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4(addr).AsSlice()},
 						Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4(mask).AsSlice()},
-					},
+					}},
 				}
 			}
 
@@ -259,7 +261,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 	}
 
 	// Helper to create a VS
-	createVS := func(ip netip.Addr, port uint16, proto balancerpb.TransportProto, acl []*balancerpb.AllowedSrc) *balancerpb.VirtualService {
+	createVS := func(ip netip.Addr, port uint16, proto balancerpb.TransportProto, acl []*balancerpb.AllowedSources) *balancerpb.VirtualService {
 		var realIP netip.Addr
 		var srcAddr, srcMask netip.Addr
 		if ip.Is4() {
@@ -331,7 +333,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 
 	// Helper to generate many virtual services for large-scale tests
 	// ipBase parameter allows using different IP ranges to avoid overlap between tests
-	generateManyVS := func(numIPv4, numIPv6 int, ipBase byte, aclGenerator func(idx int, isIPv6 bool) []*balancerpb.AllowedSrc) []*balancerpb.VirtualService {
+	generateManyVS := func(numIPv4, numIPv6 int, ipBase byte, aclGenerator func(idx int, isIPv6 bool) []*balancerpb.AllowedSources) []*balancerpb.VirtualService {
 		vsList := make([]*balancerpb.VirtualService, 0, numIPv4+numIPv6)
 
 		// Generate IPv4 VS
@@ -638,7 +640,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 	t.Run("ACLOrderIndependence", func(t *testing.T) {
 		// Create ACL with rules in different order
 		acl1 := createComplexACL(2, false)
-		acl2 := make([]*balancerpb.AllowedSrc, len(acl1))
+		acl2 := make([]*balancerpb.AllowedSources, len(acl1))
 		// Reverse order
 		for i := range acl1 {
 			acl2[len(acl1)-1-i] = acl1[i]
@@ -931,7 +933,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 	// Test 14: ACL with duplicates - should be considered the same
 	t.Run("ACLWithDuplicates", func(t *testing.T) {
 		acl := createComplexACL(3, false)
-		aclWithDuplicates := make([]*balancerpb.AllowedSrc, 0, len(acl)*2)
+		aclWithDuplicates := make([]*balancerpb.AllowedSources, 0, len(acl)*2)
 		for _, rule := range acl {
 			aclWithDuplicates = append(aclWithDuplicates, rule)
 			aclWithDuplicates = append(
@@ -1110,7 +1112,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 			15,
 			15,
 			10,
-			func(idx int, isIPv6 bool) []*balancerpb.AllowedSrc {
+			func(idx int, isIPv6 bool) []*balancerpb.AllowedSources {
 				return createLargeComplexACL(idx, isIPv6, rng)
 			},
 		)
@@ -1131,7 +1133,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 			15,
 			15,
 			10,
-			func(idx int, isIPv6 bool) []*balancerpb.AllowedSrc {
+			func(idx int, isIPv6 bool) []*balancerpb.AllowedSources {
 				return createLargeComplexACL(idx, isIPv6, rng2)
 			},
 		)
@@ -1153,7 +1155,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 			15,
 			15,
 			10,
-			func(idx int, isIPv6 bool) []*balancerpb.AllowedSrc {
+			func(idx int, isIPv6 bool) []*balancerpb.AllowedSources {
 				return createLargeComplexACL(idx, isIPv6, rng)
 			},
 		)
@@ -1185,7 +1187,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 			15,
 			15,
 			10,
-			func(idx int, isIPv6 bool) []*balancerpb.AllowedSrc {
+			func(idx int, isIPv6 bool) []*balancerpb.AllowedSources {
 				// Change ACL for indices 0-4 by using different variant
 				if idx < 5 {
 					return createLargeComplexACL(
@@ -1219,7 +1221,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 			25,
 			25,
 			20,
-			func(idx int, isIPv6 bool) []*balancerpb.AllowedSrc {
+			func(idx int, isIPv6 bool) []*balancerpb.AllowedSources {
 				return createLargeComplexACL(idx, isIPv6, rng)
 			},
 		)
@@ -1240,7 +1242,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 			25,
 			25,
 			20,
-			func(idx int, isIPv6 bool) []*balancerpb.AllowedSrc {
+			func(idx int, isIPv6 bool) []*balancerpb.AllowedSources {
 				return createLargeComplexACL(idx, isIPv6, rng2)
 			},
 		)
@@ -1262,7 +1264,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 			25,
 			25,
 			20,
-			func(idx int, isIPv6 bool) []*balancerpb.AllowedSrc {
+			func(idx int, isIPv6 bool) []*balancerpb.AllowedSources {
 				acl := createLargeComplexACL(idx, isIPv6, rng)
 				// Additional shuffle of the ACL rules
 				shuffleRng := rand.New(rand.NewPCG(uint64(idx+1000), 0))
@@ -1293,10 +1295,10 @@ func TestACLAndFilterReuse(t *testing.T) {
 			25,
 			25,
 			20,
-			func(idx int, isIPv6 bool) []*balancerpb.AllowedSrc {
+			func(idx int, isIPv6 bool) []*balancerpb.AllowedSources {
 				acl := createLargeComplexACL(idx, isIPv6, rng)
 				// Add extra duplicates (duplicate first 5 rules again)
-				extraDuplicates := make([]*balancerpb.AllowedSrc, 0, len(acl)+5)
+				extraDuplicates := make([]*balancerpb.AllowedSources, 0, len(acl)+5)
 				extraDuplicates = append(extraDuplicates, acl...)
 				for i := 0; i < 5 && i < len(acl); i++ {
 					extraDuplicates = append(extraDuplicates, acl[i])

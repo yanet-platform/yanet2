@@ -169,17 +169,17 @@ message PortsRange {
 // 3. Allow specific ports from 172.16.0.0/12:
 //    net = 172.16.0.0/255.240.0.0, ports = [{from: 80, to: 80}, {from: 443, to:
 //    443}]
-message AllowedSrc {
-	// Network prefix (address and mask) for source filtering.
+message AllowedSources {
+	// Network prefixes (address and mask) for source filtering.
 	//
-	// Packets are matched against this network using:
+	// Packets are matched against these networks using:
 	//   (packet_src_ip & mask) == (net.addr & mask)
 	//
 	// Special cases:
 	// - 0.0.0.0/0.0.0.0 (IPv4) or ::/:: (IPv6): Matches all addresses
 	// - Single host: Use full mask (255.255.255.255 or
 	// ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff)
-	Net net = 1;
+	repeated Net nets = 1;
 
 	// Optional source port ranges for additional filtering.
 	//
@@ -191,6 +191,9 @@ message AllowedSrc {
 	// - Allow specific services: [{from: 80, to: 80}, {from: 443, to: 443}]
 	// - Custom application ranges: [{from: 8000, to: 9000}]
 	repeated PortsRange ports = 2;
+
+	// TODO: docs
+	uint64 tag = 3;
 }
 
 // Virtual service configuration.
@@ -233,7 +236,7 @@ message VirtualService {
 	// - Implement IP-based access control lists
 	// - Prevent unauthorized access to services
 	// - Combine with port filtering for fine-grained control
-	repeated AllowedSrc allowed_srcs = 3;
+	repeated AllowedSources allowed_srcs = 3;
 
 	// List of real servers backing this virtual service.
 	//

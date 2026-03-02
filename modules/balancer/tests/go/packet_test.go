@@ -120,8 +120,8 @@ func createPacketTestConfig() *balancerpb.BalancerConfig {
 								Proto: proto,
 							},
 							Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-							AllowedSrcs: []*balancerpb.AllowedSrc{
-								{Net: allowedSrc},
+							AllowedSrcs: []*balancerpb.AllowedSources{
+								{Nets: []*balancerpb.Net{allowedSrc}},
 							},
 							Flags: &balancerpb.VsFlags{
 								Gre:    greEnabled,

@@ -77,9 +77,9 @@ func TestICMPEchoRequest(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -88,7 +88,7 @@ func TestICMPEchoRequest(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -129,9 +129,9 @@ func TestICMPEchoRequest(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("2001:db8::").
 										AsSlice(),
@@ -140,7 +140,7 @@ func TestICMPEchoRequest(t *testing.T) {
 									Bytes: netip.MustParseAddr("ffff:ffff::").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -357,9 +357,9 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -368,7 +368,7 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -409,9 +409,9 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("2001:db8::").
 										AsSlice(),
@@ -420,7 +420,7 @@ func TestICMPEchoRequestToNonVirtualService(t *testing.T) {
 									Bytes: netip.MustParseAddr("ffff:ffff::").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -588,9 +588,9 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -599,7 +599,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -638,9 +638,9 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("2001:db8::").
 										AsSlice(),
@@ -649,7 +649,7 @@ func TestICMPErrorWithExistingSession(t *testing.T) {
 									Bytes: netip.MustParseAddr("ffff:ffff::").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -886,9 +886,9 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -897,7 +897,7 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -938,9 +938,9 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("2001:db8::").
 										AsSlice(),
@@ -949,7 +949,7 @@ func TestICMPErrorWithUnknownVS(t *testing.T) {
 									Bytes: netip.MustParseAddr("ffff:ffff::").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -1105,9 +1105,9 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -1116,7 +1116,7 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -1160,9 +1160,9 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("2001:db8::").
 										AsSlice(),
@@ -1171,7 +1171,7 @@ func TestICMPErrorWithNoSession(t *testing.T) {
 									Bytes: netip.MustParseAddr("ffff:ffff::").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{

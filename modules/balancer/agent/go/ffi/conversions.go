@@ -609,12 +609,15 @@ func freeCPacketHandlerConfig(cConfig *C.struct_packet_handler_config) {
 				C.free(unsafe.Pointer(cVsSlice[i].config.reals))
 			}
 			if cVsSlice[i].config.allowed_src != nil {
-				// Free port ranges within each allowed_src
+				// Free port ranges and nets within each allowed_src
 				cAllowedSlice := unsafe.Slice(
 					cVsSlice[i].config.allowed_src,
 					cVsSlice[i].config.allowed_src_count,
 				)
 				for j := range cAllowedSlice {
+					if cAllowedSlice[j].nets != nil {
+						C.free(unsafe.Pointer(cAllowedSlice[j].nets))
+					}
 					if cAllowedSlice[j].port_ranges != nil {
 						C.free(unsafe.Pointer(cAllowedSlice[j].port_ranges))
 					}
@@ -787,24 +790,37 @@ func goToCVsConfigInPlace(
 	}
 
 	// Convert allowed sources
-	cConfig.config.allowed_src_count = C.size_t(len(config.AllowedSrc))
-	if len(config.AllowedSrc) > 0 {
-		cConfig.config.allowed_src = (*C.struct_allowed_src)(
+	cConfig.config.allowed_src_count = C.size_t(len(config.AllowedSources))
+	if len(config.AllowedSources) > 0 {
+		cConfig.config.allowed_src = (*C.struct_allowed_sources)(
 			C.malloc(
 				C.size_t(
-					len(config.AllowedSrc),
+					len(config.AllowedSources),
 				) * C.size_t(
-					unsafe.Sizeof(C.struct_allowed_src{}),
+					unsafe.Sizeof(C.struct_allowed_sources{}),
 				),
 			),
 		)
 		cAllowedSlice := unsafe.Slice(
 			cConfig.config.allowed_src,
-			len(config.AllowedSrc),
+			len(config.AllowedSources),
 		)
-		for i, allowedSrc := range config.AllowedSrc {
-			// Convert network
-			cAllowedSlice[i].net = goToCNet(allowedSrc.Net)
+		for i, allowedSrc := range config.AllowedSources {
+			// Convert networks array
+			cAllowedSlice[i].nets_count = C.size_t(len(allowedSrc.Nets))
+			if len(allowedSrc.Nets) > 0 {
+				cAllowedSlice[i].nets = (*C.struct_net)(
+					C.malloc(
+						C.size_t(len(allowedSrc.Nets)) * C.size_t(unsafe.Sizeof(C.struct_net{})),
+					),
+				)
+				cNetsSlice := unsafe.Slice(cAllowedSlice[i].nets, len(allowedSrc.Nets))
+				for j, net := range allowedSrc.Nets {
+					cNetsSlice[j] = goToCNet(net)
+				}
+			} else {
+				cAllowedSlice[i].nets = nil
+			}
 
 			// Convert port ranges
 			cAllowedSlice[i].port_ranges_count = C.size_t(
@@ -892,12 +908,15 @@ func freeCVsConfig(cConfig *C.struct_named_vs_config) {
 		C.free(unsafe.Pointer(cConfig.config.reals))
 	}
 	if cConfig.config.allowed_src != nil {
-		// Free port ranges within each allowed_src
+		// Free port ranges and nets within each allowed_src
 		cAllowedSlice := unsafe.Slice(
 			cConfig.config.allowed_src,
 			cConfig.config.allowed_src_count,
 		)
 		for i := range cAllowedSlice {
+			if cAllowedSlice[i].nets != nil {
+				C.free(unsafe.Pointer(cAllowedSlice[i].nets))
+			}
 			if cAllowedSlice[i].port_ranges != nil {
 				C.free(unsafe.Pointer(cAllowedSlice[i].port_ranges))
 			}
@@ -955,16 +974,25 @@ func cToGoVsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 			cConfig.config.allowed_src,
 			cConfig.config.allowed_src_count,
 		)
-		config.AllowedSrc = make(
-			[]AllowedSrc,
+		config.AllowedSources = make(
+			[]AllowedSources,
 			cConfig.config.allowed_src_count,
 		)
-		for i := range config.AllowedSrc {
+		for i := range config.AllowedSources {
 			// Determine if IPv4 or IPv6 from the VS identifier address
 			isV4 := config.Identifier.Addr.Is4()
 
-			// Convert network
-			config.AllowedSrc[i].Net = cToGoNet(cAllowedSlice[i].net, isV4)
+			// Convert networks array
+			if cAllowedSlice[i].nets_count > 0 && cAllowedSlice[i].nets != nil {
+				cNetsSlice := unsafe.Slice(cAllowedSlice[i].nets, cAllowedSlice[i].nets_count)
+				config.AllowedSources[i].Nets = make([]xnetip.NetWithMask, cAllowedSlice[i].nets_count)
+				for j := range config.AllowedSources[i].Nets {
+					net := cToGoNet(cNetsSlice[j], isV4)
+					config.AllowedSources[i].Nets[j] = net
+				}
+			} else {
+				config.AllowedSources[i].Nets = []xnetip.NetWithMask{}
+			}
 
 			// Convert port ranges
 			if cAllowedSlice[i].port_ranges_count > 0 &&
@@ -973,12 +1001,12 @@ func cToGoVsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 					cAllowedSlice[i].port_ranges,
 					cAllowedSlice[i].port_ranges_count,
 				)
-				config.AllowedSrc[i].PortRanges = make(
+				config.AllowedSources[i].PortRanges = make(
 					[]PortRange,
 					cAllowedSlice[i].port_ranges_count,
 				)
-				for j := range config.AllowedSrc[i].PortRanges {
-					config.AllowedSrc[i].PortRanges[j] = PortRange{
+				for j := range config.AllowedSources[i].PortRanges {
+					config.AllowedSources[i].PortRanges[j] = PortRange{
 						From: uint16(cPortRangesSlice[j].from),
 						To:   uint16(cPortRangesSlice[j].to),
 					}
@@ -986,7 +1014,7 @@ func cToGoVsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 			}
 		}
 	} else {
-		config.AllowedSrc = []AllowedSrc{}
+		config.AllowedSources = []AllowedSources{}
 	}
 
 	// Convert IPv4 peers

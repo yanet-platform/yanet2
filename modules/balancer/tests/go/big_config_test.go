@@ -165,33 +165,33 @@ func createBigConfig(
 
 		// Create allowed sources (allow all traffic for simplicity)
 		// Only add allowed sources that match the VS IP version
-		var allowedSrcs []*balancerpb.AllowedSrc
+		var allowedSrcs []*balancerpb.AllowedSources
 		if isIPv6 {
 			// IPv6 VS - only allow IPv6 sources
-			allowedSrcs = []*balancerpb.AllowedSrc{
+			allowedSrcs = []*balancerpb.AllowedSources{
 				{
-					Net: &balancerpb.Net{
+					Nets: []*balancerpb.Net{{
 						Addr: &balancerpb.Addr{
 							Bytes: netip.AddrFrom16([16]byte{}).AsSlice(),
 						},
 						Mask: &balancerpb.Addr{
 							Bytes: netip.AddrFrom16([16]byte{}).AsSlice(),
 						},
-					},
+					}},
 				},
 			}
 		} else {
 			// IPv4 VS - only allow IPv4 sources
-			allowedSrcs = []*balancerpb.AllowedSrc{
+			allowedSrcs = []*balancerpb.AllowedSources{
 				{
-					Net: &balancerpb.Net{
+					Nets: []*balancerpb.Net{{
 						Addr: &balancerpb.Addr{
 							Bytes: netip.AddrFrom4([4]byte{0, 0, 0, 0}).AsSlice(),
 						},
 						Mask: &balancerpb.Addr{
 							Bytes: netip.AddrFrom4([4]byte{0, 0, 0, 0}).AsSlice(),
 						},
-					},
+					}},
 				},
 			}
 		}

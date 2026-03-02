@@ -137,7 +137,7 @@ func frCreateReal(ip netip.Addr, weight uint32) *balancerpb.Real {
 }
 
 // frCreateSimpleACL creates a simple allow-all ACL
-func frCreateSimpleACL(isIPv6 bool) []*balancerpb.AllowedSrc {
+func frCreateSimpleACL(isIPv6 bool) []*balancerpb.AllowedSources {
 	var addr, mask netip.Addr
 	if isIPv6 {
 		addr = netip.AddrFrom16([16]byte{})
@@ -147,24 +147,24 @@ func frCreateSimpleACL(isIPv6 bool) []*balancerpb.AllowedSrc {
 		mask = netip.AddrFrom4([4]byte{0, 0, 0, 0})
 	}
 
-	return []*balancerpb.AllowedSrc{
+	return []*balancerpb.AllowedSources{
 		{
-			Net: &balancerpb.Net{
+			Nets: []*balancerpb.Net{{
 				Addr: &balancerpb.Addr{Bytes: addr.AsSlice()},
 				Mask: &balancerpb.Addr{Bytes: mask.AsSlice()},
-			},
+			}},
 		},
 	}
 }
 
 // frCreateComplexACL creates a complex ACL with multiple rules and port ranges
-func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSrc {
-	var acl []*balancerpb.AllowedSrc
+func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSources {
+	var acl []*balancerpb.AllowedSources
 
 	if isIPv6 {
 		// Rule 1: Allow from 2001:db8:1::/48
-		acl = append(acl, &balancerpb.AllowedSrc{
-			Net: &balancerpb.Net{
+		acl = append(acl, &balancerpb.AllowedSources{
+			Nets: []*balancerpb.Net{{
 				Addr: &balancerpb.Addr{
 					Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 						AsSlice(),
@@ -173,15 +173,15 @@ func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSrc {
 					Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 						AsSlice(),
 				},
-			},
+			}},
 			Ports: []*balancerpb.PortsRange{
 				{From: 1024, To: 65535},
 			},
 		})
 
 		// Rule 2: Allow from 2001:db8:2::/48 with specific ports
-		acl = append(acl, &balancerpb.AllowedSrc{
-			Net: &balancerpb.Net{
+		acl = append(acl, &balancerpb.AllowedSources{
+			Nets: []*balancerpb.Net{{
 				Addr: &balancerpb.Addr{
 					Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 						AsSlice(),
@@ -190,7 +190,7 @@ func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSrc {
 					Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 						AsSlice(),
 				},
-			},
+			}},
 			Ports: []*balancerpb.PortsRange{
 				{From: 80, To: 80},
 				{From: 443, To: 443},
@@ -198,22 +198,22 @@ func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSrc {
 		})
 	} else {
 		// Rule 1: Allow from 10.0.0.0/8
-		acl = append(acl, &balancerpb.AllowedSrc{
-			Net: &balancerpb.Net{
+		acl = append(acl, &balancerpb.AllowedSources{
+			Nets: []*balancerpb.Net{{
 				Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{10, 0, 0, 0}).AsSlice()},
 				Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 0, 0, 0}).AsSlice()},
-			},
+			}},
 			Ports: []*balancerpb.PortsRange{
 				{From: 1024, To: 65535},
 			},
 		})
 
 		// Rule 2: Allow from 192.168.0.0/16 with specific ports
-		acl = append(acl, &balancerpb.AllowedSrc{
-			Net: &balancerpb.Net{
+		acl = append(acl, &balancerpb.AllowedSources{
+			Nets: []*balancerpb.Net{{
 				Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{192, 168, 0, 0}).AsSlice()},
 				Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).AsSlice()},
-			},
+			}},
 			Ports: []*balancerpb.PortsRange{
 				{From: 80, To: 80},
 				{From: 443, To: 443},
@@ -224,8 +224,8 @@ func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSrc {
 	// Add index-specific rule for variation
 	if index%2 == 0 {
 		if isIPv6 {
-			acl = append(acl, &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			acl = append(acl, &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{
 						Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 							AsSlice(),
@@ -234,14 +234,14 @@ func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSrc {
 						Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 							AsSlice(),
 					},
-				},
+				}},
 			})
 		} else {
-			acl = append(acl, &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			acl = append(acl, &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{172, 16, 0, 0}).AsSlice()},
 					Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).AsSlice()},
-				},
+				}},
 			})
 		}
 	}
@@ -251,10 +251,10 @@ func frCreateComplexACL(index int, isIPv6 bool) []*balancerpb.AllowedSrc {
 
 // frShuffleACL returns a new ACL with rules in random order
 func frShuffleACL(
-	acl []*balancerpb.AllowedSrc,
+	acl []*balancerpb.AllowedSources,
 	rng *rand.Rand,
-) []*balancerpb.AllowedSrc {
-	shuffled := make([]*balancerpb.AllowedSrc, len(acl))
+) []*balancerpb.AllowedSources {
+	shuffled := make([]*balancerpb.AllowedSources, len(acl))
 	copy(shuffled, acl)
 	rng.Shuffle(len(shuffled), func(i, j int) {
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
@@ -264,13 +264,13 @@ func frShuffleACL(
 
 // frDuplicateACLRules returns a new ACL with some rules duplicated
 func frDuplicateACLRules(
-	acl []*balancerpb.AllowedSrc,
-) []*balancerpb.AllowedSrc {
+	acl []*balancerpb.AllowedSources,
+) []*balancerpb.AllowedSources {
 	if len(acl) == 0 {
 		return acl
 	}
 
-	duplicated := make([]*balancerpb.AllowedSrc, 0, len(acl)*2)
+	duplicated := make([]*balancerpb.AllowedSources, 0, len(acl)*2)
 	for i, rule := range acl {
 		duplicated = append(duplicated, rule)
 		// Duplicate every other rule
@@ -287,7 +287,7 @@ func frCreateVirtualService(
 	port uint16,
 	proto balancerpb.TransportProto,
 	reals []*balancerpb.Real,
-	acl []*balancerpb.AllowedSrc,
+	acl []*balancerpb.AllowedSources,
 	scheduler balancerpb.VsScheduler,
 ) *balancerpb.VirtualService {
 	return &balancerpb.VirtualService{
@@ -340,7 +340,7 @@ func frCreateVSSet(
 		}
 
 		// Create ACL
-		var acl []*balancerpb.AllowedSrc
+		var acl []*balancerpb.AllowedSources
 		if useComplexACL && i%3 == 0 {
 			// Use complex ACL for every 3rd VS
 			acl = frCreateComplexACL(i, isIPv6)
@@ -694,8 +694,8 @@ func TestFilterReuse(t *testing.T) {
 		// This ensures the ACL is truly different from the original
 		for i := 0; i < 5; i++ {
 			// Add a unique network rule that makes this ACL different
-			uniqueRule := &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			uniqueRule := &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{
 						Bytes: netip.AddrFrom4([4]byte{100, byte(i), 0, 0}).
 							AsSlice(),
@@ -704,15 +704,15 @@ func TestFilterReuse(t *testing.T) {
 						Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).
 							AsSlice(),
 					},
-				},
+				}},
 			}
 			newIPv4VS[i].AllowedSrcs = append(
 				newIPv4VS[i].AllowedSrcs,
 				uniqueRule,
 			)
 
-			uniqueRuleV6 := &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			uniqueRuleV6 := &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{
 						Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0x00, byte(i), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 							AsSlice(),
@@ -721,7 +721,7 @@ func TestFilterReuse(t *testing.T) {
 						Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 							AsSlice(),
 					},
-				},
+				}},
 			}
 			newIPv6VS[i].AllowedSrcs = append(
 				newIPv6VS[i].AllowedSrcs,
@@ -816,8 +816,8 @@ func TestFilterReuse(t *testing.T) {
 
 		// Apply the SAME ACL changes as Phase 4 (add unique rules to first 5 VS)
 		for i := range 5 {
-			uniqueRule := &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			uniqueRule := &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{
 						Bytes: netip.AddrFrom4([4]byte{100, byte(i), 0, 0}).
 							AsSlice(),
@@ -826,15 +826,15 @@ func TestFilterReuse(t *testing.T) {
 						Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).
 							AsSlice(),
 					},
-				},
+				}},
 			}
 			newIPv4VS[i].AllowedSrcs = append(
 				newIPv4VS[i].AllowedSrcs,
 				uniqueRule,
 			)
 
-			uniqueRuleV6 := &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			uniqueRuleV6 := &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{
 						Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0x00, byte(i), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 							AsSlice(),
@@ -843,7 +843,7 @@ func TestFilterReuse(t *testing.T) {
 						Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 							AsSlice(),
 					},
-				},
+				}},
 			}
 			newIPv6VS[i].AllowedSrcs = append(
 				newIPv6VS[i].AllowedSrcs,
@@ -930,8 +930,8 @@ func TestFilterReuse(t *testing.T) {
 
 		// Apply the SAME ACL changes as Phase 4/5 (add unique rules to first 5 VS)
 		for i := 0; i < 5; i++ {
-			uniqueRule := &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			uniqueRule := &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{
 						Bytes: netip.AddrFrom4([4]byte{100, byte(i), 0, 0}).
 							AsSlice(),
@@ -940,15 +940,15 @@ func TestFilterReuse(t *testing.T) {
 						Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).
 							AsSlice(),
 					},
-				},
+				}},
 			}
 			newIPv4VS[i].AllowedSrcs = append(
 				newIPv4VS[i].AllowedSrcs,
 				uniqueRule,
 			)
 
-			uniqueRuleV6 := &balancerpb.AllowedSrc{
-				Net: &balancerpb.Net{
+			uniqueRuleV6 := &balancerpb.AllowedSources{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{
 						Bytes: netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 0x00, byte(i), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 							AsSlice(),
@@ -957,7 +957,7 @@ func TestFilterReuse(t *testing.T) {
 						Bytes: netip.AddrFrom16([16]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}).
 							AsSlice(),
 					},
-				},
+				}},
 			}
 			newIPv6VS[i].AllowedSrcs = append(
 				newIPv6VS[i].AllowedSrcs,

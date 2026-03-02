@@ -79,16 +79,16 @@ func TestBalancerAgentInspect(t *testing.T) {
 							Weight: 100,
 						},
 					},
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("192.168.1.0").AsSlice(),
 								},
 								Mask: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 				},

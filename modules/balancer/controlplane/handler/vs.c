@@ -208,7 +208,7 @@ static int
 fill_rule(
 	struct vs *vs,
 	struct filter_rule *rule,
-	struct allowed_src *src,
+	struct allowed_sources *src,
 	struct memory_context *mctx
 ) {
 	rule->action = 1;
@@ -216,37 +216,57 @@ fill_rule(
 		rule->net4.dst_count = 0;
 		rule->net4.dsts = NULL;
 
-		if (validate_net4(&src->net.v4) != 0) {
-			PUSH_ERROR("IPv4 network is invalid");
-			return -1;
+		for (size_t net_idx = 0; net_idx < src->nets_count; ++net_idx) {
+			if (validate_net4(&src->nets[net_idx].v4) != 0) {
+				PUSH_ERROR(
+					"IPv4 network at index %zu is invalid",
+					net_idx
+				);
+				return -1;
+			}
 		}
 
-		rule->net4.src_count = 1;
-		struct net4 *net4_srcs =
-			memory_balloc(mctx, sizeof(struct net4));
+		rule->net4.src_count = src->nets_count;
+		struct net4 *net4_srcs = memory_balloc(
+			mctx, sizeof(struct net4) * src->nets_count
+		);
 		if (net4_srcs == NULL) {
 			NEW_ERROR("failed to allocate net4 srcs");
 			return -1;
 		}
-		net4_srcs[0] = src->net.v4;
+
+		for (size_t net_idx = 0; net_idx < src->nets_count; ++net_idx) {
+			net4_srcs[net_idx] = src->nets[net_idx].v4;
+		}
+
 		rule->net4.srcs = net4_srcs; // Store absolute pointer
 	} else if (vs->identifier.ip_proto == IPPROTO_IPV6) {
 		rule->net6.dst_count = 0;
 		rule->net6.dsts = NULL;
 
-		if (validate_net6(&src->net.v6) != 0) {
-			PUSH_ERROR("IPv6 network is invalid");
-			return -1;
+		for (size_t net_idx = 0; net_idx < src->nets_count; ++net_idx) {
+			if (validate_net6(&src->nets[net_idx].v6) != 0) {
+				PUSH_ERROR(
+					"IPv6 network at index %zu is invalid",
+					net_idx
+				);
+				return -1;
+			}
 		}
 
-		rule->net6.src_count = 1;
-		struct net6 *net6_srcs =
-			memory_balloc(mctx, sizeof(struct net6));
+		rule->net6.src_count = src->nets_count;
+		struct net6 *net6_srcs = memory_balloc(
+			mctx, sizeof(struct net6) * src->nets_count
+		);
 		if (net6_srcs == NULL) {
 			NEW_ERROR("failed to allocate net6 srcs");
 			return -1;
 		}
-		net6_srcs[0] = src->net.v6;
+
+		for (size_t net_idx = 0; net_idx < src->nets_count; ++net_idx) {
+			net6_srcs[net_idx] = src->nets[net_idx].v6;
+		}
+
 		rule->net6.srcs = net6_srcs; // Store absolute pointer
 	}
 

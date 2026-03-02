@@ -1294,14 +1294,14 @@ func TestProtoToVsConfig_EmptyArrays(t *testing.T) {
 		},
 		Scheduler:   balancerpb.VsScheduler_SOURCE_HASH,
 		Reals:       []*balancerpb.Real{},
-		AllowedSrcs: []*balancerpb.AllowedSrc{},
+		AllowedSrcs: []*balancerpb.AllowedSources{},
 		Peers:       []*balancerpb.Addr{},
 	}
 
 	result, err := protoToVsConfig(vs)
 	require.NoError(t, err)
 	assert.Empty(t, result.Reals)
-	assert.Empty(t, result.AllowedSrc)
+	assert.Empty(t, result.AllowedSources)
 	assert.Empty(t, result.PeersV4)
 	assert.Empty(t, result.PeersV6)
 }
@@ -1548,11 +1548,11 @@ func TestConvertVsConfigToProtoWithWlc(t *testing.T) {
 			OPS:    true,
 			PureL3: false,
 		},
-		Scheduler:  ffi.VsSchedulerRoundRobin,
-		Reals:      []ffi.RealConfig{},
-		AllowedSrc: []ffi.AllowedSrc{},
-		PeersV4:    []netip.Addr{},
-		PeersV6:    []netip.Addr{},
+		Scheduler:      ffi.VsSchedulerRoundRobin,
+		Reals:          []ffi.RealConfig{},
+		AllowedSources: []ffi.AllowedSources{},
+		PeersV4:        []netip.Addr{},
+		PeersV6:        []netip.Addr{},
 	}
 
 	tests := []struct {

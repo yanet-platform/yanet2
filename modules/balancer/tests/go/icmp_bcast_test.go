@@ -94,9 +94,9 @@ func TestICMPBroadcastLogic(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -105,7 +105,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -148,9 +148,9 @@ func TestICMPBroadcastLogic(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("2001:db8::").
 										AsSlice(),
@@ -159,7 +159,7 @@ func TestICMPBroadcastLogic(t *testing.T) {
 									Bytes: netip.MustParseAddr("ffff:ffff::").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -576,9 +576,9 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -587,7 +587,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -629,9 +629,9 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("2001:db8::").
 										AsSlice(),
@@ -640,7 +640,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 									Bytes: netip.MustParseAddr("ffff:ffff::").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -718,9 +718,9 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -729,7 +729,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -773,9 +773,9 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("2001:db8::").
 										AsSlice(),
@@ -784,7 +784,7 @@ func TestICMPBroadcastTwoBalancers(t *testing.T) {
 									Bytes: netip.MustParseAddr("ffff:ffff::").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{

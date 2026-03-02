@@ -87,9 +87,9 @@ func TestBalancerAgent(t *testing.T) {
 							Weight: 100,
 						},
 					},
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("192.1.1.1").
 										AsSlice(),
@@ -98,7 +98,7 @@ func TestBalancerAgent(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.255.255.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Peers: []*balancerpb.Addr{
@@ -187,9 +187,9 @@ func TestBalancerAgent(t *testing.T) {
 							Weight: 150,
 						},
 					},
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("192.2.2.0").
 										AsSlice(),
@@ -198,7 +198,7 @@ func TestBalancerAgent(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.255.255.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Peers: []*balancerpb.Addr{
@@ -346,8 +346,8 @@ func TestBalancerAgent(t *testing.T) {
 		// Verify other fields remain unchanged (compare with config before update)
 		assert.Equal(
 			t,
-			configBeforeUpdate.PacketHandler.Vs[0].AllowedSrcs[0].Net.Addr.Bytes,
-			newConfig.PacketHandler.Vs[0].AllowedSrcs[0].Net.Addr.Bytes,
+			configBeforeUpdate.PacketHandler.Vs[0].AllowedSrcs[0].Nets[0].Addr.Bytes,
+			newConfig.PacketHandler.Vs[0].AllowedSrcs[0].Nets[0].Addr.Bytes,
 		)
 		assert.Equal(
 			t,
@@ -447,8 +447,8 @@ func TestBalancerAgent(t *testing.T) {
 		// Verify allowed sources remain unchanged (using new ACL structure)
 		assert.Equal(
 			t,
-			configBeforeUpdate.PacketHandler.Vs[0].AllowedSrcs[0].Net.Addr.Bytes,
-			newConfig.PacketHandler.Vs[0].AllowedSrcs[0].Net.Addr.Bytes,
+			configBeforeUpdate.PacketHandler.Vs[0].AllowedSrcs[0].Nets[0].Addr.Bytes,
+			newConfig.PacketHandler.Vs[0].AllowedSrcs[0].Nets[0].Addr.Bytes,
 		)
 		assert.Equal(
 			t,

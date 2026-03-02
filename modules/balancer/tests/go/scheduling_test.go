@@ -184,16 +184,16 @@ func createVirtualServiceWithFlags(
 			Proto: proto,
 		},
 		Scheduler: scheduler,
-		AllowedSrcs: []*balancerpb.AllowedSrc{
+		AllowedSrcs: []*balancerpb.AllowedSources{
 			{
-				Net: &balancerpb.Net{
+				Nets: []*balancerpb.Net{{
 					Addr: &balancerpb.Addr{
 						Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
 					},
 					Mask: &balancerpb.Addr{
 						Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
 					},
-				},
+				}},
 			},
 		},
 		Flags: &balancerpb.VsFlags{

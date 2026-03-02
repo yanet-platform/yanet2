@@ -1,5 +1,6 @@
 #include "common/memory.h"
 #include "common/memory_address.h"
+#include "common/network.h"
 #include "manager.h"
 #include "modules/balancer/controlplane/api/balancer.h"
 #include "modules/balancer/controlplane/api/vs.h"
@@ -49,8 +50,8 @@ clone_reals_to_relative(
  */
 static int
 clone_allowed_src_to_relative(
-	struct allowed_src **dst,
-	struct allowed_src *src,
+	struct allowed_sources **dst,
+	struct allowed_sources *src,
 	size_t count,
 	struct memory_context *mctx
 ) {
@@ -60,16 +61,39 @@ clone_allowed_src_to_relative(
 	}
 
 	// Allocate array of allowed_src entries
-	struct allowed_src *entries =
-		memory_balloc(mctx, sizeof(struct allowed_src) * count);
+	struct allowed_sources *entries =
+		memory_balloc(mctx, sizeof(struct allowed_sources) * count);
 	if (entries == NULL) {
 		return -1;
 	}
 
 	// For each allowed_src entry, copy addr and clone port ranges
 	for (size_t i = 0; i < count; i++) {
-		// Copy the address
-		entries[i].net = src[i].net;
+		// Copy networks
+		entries[i].nets_count = src[i].nets_count;
+		if (entries[i].nets_count > 0) {
+			entries[i].nets = memory_balloc(
+				mctx, sizeof(struct net) * entries[i].nets_count
+			);
+			if (entries[i].nets == NULL) {
+				// todo: proper cleanup
+				memory_bfree(
+					mctx,
+					entries,
+					sizeof(struct allowed_sources) * count
+				);
+				return -1;
+			}
+			for (size_t net_idx = 0;
+			     net_idx < entries[i].nets_count;
+			     ++net_idx) {
+				entries[i].nets[net_idx] = src[i].nets[net_idx];
+			}
+			SET_OFFSET_OF(&entries[i].nets, entries[i].nets);
+		} else {
+			entries[i].nets = NULL;
+		}
+
 		entries[i].port_ranges_count = src[i].port_ranges_count;
 
 		// Clone the ports_range array
@@ -94,10 +118,11 @@ clone_allowed_src_to_relative(
 						);
 					}
 				}
+				// TODO: proper clean up
 				memory_bfree(
 					mctx,
 					entries,
-					sizeof(struct allowed_src) * count
+					sizeof(struct allowed_sources) * count
 				);
 				return -1;
 			}
@@ -372,23 +397,38 @@ clone_reals_from_relative(
  */
 static int
 clone_allowed_src_from_relative(
-	struct allowed_src **dst, struct allowed_src **src_offset, size_t count
+	struct allowed_sources **dst,
+	struct allowed_sources **src_offset,
+	size_t count
 ) {
 	if (count == 0) {
 		*dst = NULL;
 		return 0;
 	}
 
-	struct allowed_src *src = ADDR_OF(src_offset);
-	struct allowed_src *entries = calloc(count, sizeof(struct allowed_src));
+	struct allowed_sources *src = ADDR_OF(src_offset);
+	struct allowed_sources *entries =
+		calloc(count, sizeof(struct allowed_sources));
 	if (entries == NULL) {
 		return -1;
 	}
 
 	// For each allowed_src entry, copy addr and clone port ranges
 	for (size_t i = 0; i < count; i++) {
-		// Copy the address
-		entries[i].net = src[i].net;
+		// Copy networks
+		entries[i].nets_count = src[i].nets_count;
+		if (entries[i].nets_count > 0) {
+			entries[i].nets =
+				calloc(entries[i].nets_count,
+				       sizeof(struct net6));
+			struct net *nets = ADDR_OF(&src[i].nets);
+			for (size_t net_idx = 0;
+			     net_idx < entries[i].nets_count;
+			     ++net_idx) {
+				entries[i].nets[net_idx] = nets[net_idx];
+			}
+		}
+
 		entries[i].port_ranges_count = src[i].port_ranges_count;
 
 		// Clone the ports_range array
@@ -647,7 +687,7 @@ free_vs_config_with_relative_pointers(
 
 	// Free allowed_src array (with nested port ranges)
 	if (cfg->allowed_src_count > 0 && cfg->allowed_src != NULL) {
-		struct allowed_src *entries = ADDR_OF(&cfg->allowed_src);
+		struct allowed_sources *entries = ADDR_OF(&cfg->allowed_src);
 
 		// First, free each nested ports_range array
 		for (size_t i = 0; i < cfg->allowed_src_count; i++) {
@@ -668,7 +708,7 @@ free_vs_config_with_relative_pointers(
 		memory_bfree(
 			mctx,
 			entries,
-			sizeof(struct allowed_src) * cfg->allowed_src_count
+			sizeof(struct allowed_sources) * cfg->allowed_src_count
 		);
 		cfg->allowed_src = NULL;
 		cfg->allowed_src_count = 0;

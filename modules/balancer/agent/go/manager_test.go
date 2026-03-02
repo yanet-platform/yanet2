@@ -13,11 +13,13 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-var deviceName string = "eth0"
-var pipelineName string = "pipeline0"
-var functionName string = "function0"
-var chainName string = "chain0"
-var balancerName string = "balancer0"
+var (
+	deviceName   string = "eth0"
+	pipelineName string = "pipeline0"
+	functionName string = "function0"
+	chainName    string = "chain0"
+	balancerName string = "balancer0"
+)
 
 func TestManager(t *testing.T) {
 	m, err := mock.NewYanetMock(&mock.YanetMockConfig{
@@ -128,9 +130,9 @@ func TestManager(t *testing.T) {
 							Weight: 200,
 						},
 					},
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("192.1.1.1").
 										AsSlice(),
@@ -139,10 +141,10 @@ func TestManager(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.255.255.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("192.12.0.0").
 										AsSlice(),
@@ -151,7 +153,7 @@ func TestManager(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.255.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Peers: []*balancerpb.Addr{
@@ -209,9 +211,9 @@ func TestManager(t *testing.T) {
 							Weight: 100,
 						},
 					},
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("192.168.0.0").
 										AsSlice(),
@@ -220,7 +222,7 @@ func TestManager(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.255.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Peers: []*balancerpb.Addr{
@@ -330,9 +332,9 @@ func TestManager(t *testing.T) {
 							Weight: 150,
 						},
 					},
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("0.0.0.0").
 										AsSlice(),
@@ -341,7 +343,7 @@ func TestManager(t *testing.T) {
 									Bytes: netip.MustParseAddr("0.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Peers: []*balancerpb.Addr{

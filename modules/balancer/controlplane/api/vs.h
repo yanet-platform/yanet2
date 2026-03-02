@@ -275,18 +275,21 @@ struct ports_range {
  *    net = {172.16.0.0, 255.240.0.0}, port_ranges = [{80, 80}, {443, 443}],
  * count = 2
  */
-struct allowed_src {
+struct allowed_sources {
+	/** Number of networks in the nets array */
+	size_t nets_count;
+
 	/**
-	 * Network prefix (address and mask) for source filtering.
+	 * Network prefixes (address and mask) for source filtering.
 	 *
-	 * Packets are matched against this network using:
+	 * Packets are matched against these networks using:
 	 *   (packet_src_ip & mask) == (net.addr & mask)
 	 *
 	 * Special cases:
 	 * - 0.0.0.0/0.0.0.0 (IPv4) or ::/:: (IPv6): Matches all addresses
 	 * - Single host: Use full mask (255.255.255.255 or all-ones for IPv6)
 	 */
-	struct net net;
+	struct net *nets;
 
 	/** Number of port ranges in the port_ranges array */
 	size_t port_ranges_count;
@@ -305,6 +308,9 @@ struct allowed_src {
 	 * Ownership: Caller allocates and manages this array
 	 */
 	struct ports_range *port_ranges;
+
+	// TODO: docs
+	uint64_t tag;
 };
 
 struct named_real_config;
@@ -395,7 +401,7 @@ struct vs_config {
 	 *
 	 * Ownership: Caller allocates and manages this array
 	 */
-	struct allowed_src *allowed_src;
+	struct allowed_sources *allowed_src;
 
 	/** Number of IPv4 peer balancers in 'peers_v4' array */
 	size_t peers_v4_count;

@@ -214,9 +214,9 @@ func TestSessionTableManual(t *testing.T) {
 						Port:  uint32(vsPort),
 						Proto: balancerpb.TransportProto_TCP,
 					},
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -225,7 +225,7 @@ func TestSessionTableManual(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
@@ -1204,9 +1204,9 @@ func TestSessionTimeouts(t *testing.T) {
 						Port:  uint32(tcpVsPort),
 						Proto: balancerpb.TransportProto_TCP,
 					},
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -1215,7 +1215,7 @@ func TestSessionTimeouts(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
@@ -1255,9 +1255,9 @@ func TestSessionTimeouts(t *testing.T) {
 						Port:  uint32(udpVsPort),
 						Proto: balancerpb.TransportProto_UDP,
 					},
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -1266,7 +1266,7 @@ func TestSessionTimeouts(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,

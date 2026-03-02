@@ -109,9 +109,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.1.0").
 										AsSlice(),
@@ -120,7 +120,7 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 									Bytes: netip.MustParseAddr("255.255.255.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -160,9 +160,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 						Proto: balancerpb.TransportProto_UDP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.2.0").
 										AsSlice(),
@@ -171,7 +171,7 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 									Bytes: netip.MustParseAddr("255.255.255.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -211,9 +211,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("2001:db8:1::").
 										AsSlice(),
@@ -222,7 +222,7 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 									Bytes: netip.MustParseAddr("ffff:ffff:ffff::").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -262,9 +262,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 						Proto: balancerpb.TransportProto_UDP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("2001:db8:2::").
 										AsSlice(),
@@ -273,7 +273,7 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 									Bytes: netip.MustParseAddr("ffff:ffff:ffff::").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -313,9 +313,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("0.0.0.0").
 										AsSlice(),
@@ -324,10 +324,10 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 									Bytes: netip.MustParseAddr("128.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("128.0.0.0").
 										AsSlice(),
@@ -336,7 +336,7 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 									Bytes: netip.MustParseAddr("128.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -376,9 +376,9 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("0.0.0.0").
 										AsSlice(),
@@ -387,7 +387,7 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 									Bytes: netip.MustParseAddr("0.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 						},
 					},
 					Flags: &balancerpb.VsFlags{
@@ -427,7 +427,7 @@ func createAllowedSrcTestConfig() *balancerpb.BalancerConfig {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler:   balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{},
+					AllowedSrcs: []*balancerpb.AllowedSources{},
 					Flags: &balancerpb.VsFlags{
 						Gre:    false,
 						FixMss: false,
@@ -1377,9 +1377,9 @@ func TestAllowedSrcWithPorts(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("192.168.0.0").
 										AsSlice(),
@@ -1388,7 +1388,7 @@ func TestAllowedSrcWithPorts(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.255.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 							Ports: []*balancerpb.PortsRange{
 								{
 									From: 1024,
@@ -1428,9 +1428,9 @@ func TestAllowedSrcWithPorts(t *testing.T) {
 						Proto: balancerpb.TransportProto_TCP,
 					},
 					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
-					AllowedSrcs: []*balancerpb.AllowedSrc{
+					AllowedSrcs: []*balancerpb.AllowedSources{
 						{
-							Net: &balancerpb.Net{
+							Nets: []*balancerpb.Net{{
 								Addr: &balancerpb.Addr{
 									Bytes: netip.MustParseAddr("10.0.0.0").
 										AsSlice(),
@@ -1439,7 +1439,7 @@ func TestAllowedSrcWithPorts(t *testing.T) {
 									Bytes: netip.MustParseAddr("255.0.0.0").
 										AsSlice(),
 								},
-							},
+							}},
 							Ports: []*balancerpb.PortsRange{
 								{From: 80, To: 80},     // HTTP
 								{From: 443, To: 443},   // HTTPS
