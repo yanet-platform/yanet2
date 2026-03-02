@@ -474,8 +474,17 @@ func TestBalancerAgent(t *testing.T) {
 
 		config := manager.Config()
 		require.NotNil(t, config, "config should not be nil")
-		require.NotNil(t, config.PacketHandler, "packet handler should not be nil")
-		require.Len(t, config.PacketHandler.Vs, 1, "should have 1 virtual service")
+		require.NotNil(
+			t,
+			config.PacketHandler,
+			"packet handler should not be nil",
+		)
+		require.Len(
+			t,
+			config.PacketHandler.Vs,
+			1,
+			"should have 1 virtual service",
+		)
 		require.Len(
 			t,
 			config.PacketHandler.Vs[0].AllowedSrcs,
@@ -562,8 +571,17 @@ func TestBalancerAgent(t *testing.T) {
 		// Verify the tag is updated
 		config := manager.Config()
 		require.NotNil(t, config, "config should not be nil")
-		require.NotNil(t, config.PacketHandler, "packet handler should not be nil")
-		require.Len(t, config.PacketHandler.Vs, 1, "should have 1 virtual service")
+		require.NotNil(
+			t,
+			config.PacketHandler,
+			"packet handler should not be nil",
+		)
+		require.Len(
+			t,
+			config.PacketHandler.Vs,
+			1,
+			"should have 1 virtual service",
+		)
 		require.Len(
 			t,
 			config.PacketHandler.Vs[0].AllowedSrcs,

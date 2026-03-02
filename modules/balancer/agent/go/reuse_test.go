@@ -1339,26 +1339,35 @@ func TestACLAndFilterReuse(t *testing.T) {
 					{
 						Nets: []*balancerpb.Net{{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Mask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.0.0.0").
+									AsSlice(),
 							},
 						}},
-						Ports: []*balancerpb.PortsRange{{From: 1024, To: 65535}},
-						Tag:   100, // Tag = 100
+						Ports: []*balancerpb.PortsRange{
+							{From: 1024, To: 65535},
+						},
+						Tag: 100, // Tag = 100
 					},
 					{
 						Nets: []*balancerpb.Net{{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("192.168.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("192.168.0.0").
+									AsSlice(),
 							},
 							Mask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.0.0").
+									AsSlice(),
 							},
 						}},
-						Ports: []*balancerpb.PortsRange{{From: 80, To: 80}, {From: 443, To: 443}},
-						Tag:   200, // Tag = 200
+						Ports: []*balancerpb.PortsRange{
+							{From: 80, To: 80},
+							{From: 443, To: 443},
+						},
+						Tag: 200, // Tag = 200
 					},
 				},
 			),
@@ -1370,10 +1379,12 @@ func TestACLAndFilterReuse(t *testing.T) {
 					{
 						Nets: []*balancerpb.Net{{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("172.16.0.0").
+									AsSlice(),
 							},
 							Mask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.0.0").
+									AsSlice(),
 							},
 						}},
 						Tag: 300, // Tag = 300
@@ -1402,26 +1413,35 @@ func TestACLAndFilterReuse(t *testing.T) {
 					{
 						Nets: []*balancerpb.Net{{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.0").
+									AsSlice(),
 							},
 							Mask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.0.0.0").
+									AsSlice(),
 							},
 						}},
-						Ports: []*balancerpb.PortsRange{{From: 1024, To: 65535}},
-						Tag:   999, // Different tag (was 100)
+						Ports: []*balancerpb.PortsRange{
+							{From: 1024, To: 65535},
+						},
+						Tag: 999, // Different tag (was 100)
 					},
 					{
 						Nets: []*balancerpb.Net{{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("192.168.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("192.168.0.0").
+									AsSlice(),
 							},
 							Mask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.0.0").
+									AsSlice(),
 							},
 						}},
-						Ports: []*balancerpb.PortsRange{{From: 80, To: 80}, {From: 443, To: 443}},
-						Tag:   888, // Different tag (was 200)
+						Ports: []*balancerpb.PortsRange{
+							{From: 80, To: 80},
+							{From: 443, To: 443},
+						},
+						Tag: 888, // Different tag (was 200)
 					},
 				},
 			),
@@ -1433,10 +1453,12 @@ func TestACLAndFilterReuse(t *testing.T) {
 					{
 						Nets: []*balancerpb.Net{{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("172.16.0.0").
+									AsSlice(),
 							},
 							Mask: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+								Bytes: netip.MustParseAddr("255.255.0.0").
+									AsSlice(),
 							},
 						}},
 						Tag: 0, // Different tag (was 300)
@@ -1511,8 +1533,12 @@ func TestACLAndFilterReuse(t *testing.T) {
 						0, 0, 0, 0, 0, 0, 0, 0,
 					}
 					nets[i] = &balancerpb.Net{
-						Addr: &balancerpb.Addr{Bytes: netip.AddrFrom16(addr).AsSlice()},
-						Mask: &balancerpb.Addr{Bytes: netip.AddrFrom16(mask).AsSlice()},
+						Addr: &balancerpb.Addr{
+							Bytes: netip.AddrFrom16(addr).AsSlice(),
+						},
+						Mask: &balancerpb.Addr{
+							Bytes: netip.AddrFrom16(mask).AsSlice(),
+						},
 					}
 				} else {
 					// Generate IPv4 networks
@@ -1608,10 +1634,30 @@ func TestACLAndFilterReuse(t *testing.T) {
 		acl2IPv6 := createManyNetsACL(2, true, 200, rng)
 
 		vsList := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6,
+			),
 		}
 		config := createConfig(vsList)
 
@@ -1632,10 +1678,30 @@ func TestACLAndFilterReuse(t *testing.T) {
 		acl2IPv6Shuffled := shuffleNets(acl2IPv6, shuffleRng)
 
 		vsList2 := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4Shuffled),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Shuffled),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Shuffled),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Shuffled),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4Shuffled,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4Shuffled,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6Shuffled,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6Shuffled,
+			),
 		}
 		config2 := createConfig(vsList2)
 
@@ -1653,10 +1719,30 @@ func TestACLAndFilterReuse(t *testing.T) {
 		acl2IPv6PortShuffled := shufflePorts(acl2IPv6, shuffleRng2)
 
 		vsList3 := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4PortShuffled),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4PortShuffled),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6PortShuffled),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6PortShuffled),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4PortShuffled,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4PortShuffled,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6PortShuffled,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6PortShuffled,
+			),
 		}
 		config3 := createConfig(vsList3)
 
@@ -1673,10 +1759,30 @@ func TestACLAndFilterReuse(t *testing.T) {
 		acl2IPv6NewTag := changeTags(acl2IPv6, 666)
 
 		vsList4 := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4NewTag),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4NewTag),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6NewTag),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6NewTag),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4NewTag,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4NewTag,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6NewTag,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6NewTag,
+			),
 		}
 		config4 := createConfig(vsList4)
 
@@ -1707,10 +1813,30 @@ func TestACLAndFilterReuse(t *testing.T) {
 		acl2IPv6Combined = changeTags(acl2IPv6Combined, 444)
 
 		vsList5 := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4Combined),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4Combined,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6Combined,
+			),
 		}
 		config5 := createConfig(vsList5)
 
@@ -1727,25 +1853,69 @@ func TestACLAndFilterReuse(t *testing.T) {
 		require.Len(t, finalConfig.PacketHandler.Vs, 4)
 
 		// Check that the new tags are stored correctly
-		assert.Equal(t, uint32(111), finalConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag, "first IPv4 VS tag should be 111")
-		assert.Equal(t, uint32(222), finalConfig.PacketHandler.Vs[1].AllowedSrcs[0].Tag, "second IPv4 VS tag should be 222")
-		assert.Equal(t, uint32(333), finalConfig.PacketHandler.Vs[2].AllowedSrcs[0].Tag, "first IPv6 VS tag should be 333")
-		assert.Equal(t, uint32(444), finalConfig.PacketHandler.Vs[3].AllowedSrcs[0].Tag, "second IPv6 VS tag should be 444")
+		assert.Equal(
+			t,
+			uint32(111),
+			finalConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"first IPv4 VS tag should be 111",
+		)
+		assert.Equal(
+			t,
+			uint32(222),
+			finalConfig.PacketHandler.Vs[1].AllowedSrcs[0].Tag,
+			"second IPv4 VS tag should be 222",
+		)
+		assert.Equal(
+			t,
+			uint32(333),
+			finalConfig.PacketHandler.Vs[2].AllowedSrcs[0].Tag,
+			"first IPv6 VS tag should be 333",
+		)
+		assert.Equal(
+			t,
+			uint32(444),
+			finalConfig.PacketHandler.Vs[3].AllowedSrcs[0].Tag,
+			"second IPv6 VS tag should be 444",
+		)
 
 		// Scenario 6: ALMOST matching - one net is different (should NOT reuse)
 		rng6 := rand.New(rand.NewPCG(300, 0))
 		acl1IPv4AlmostMatch := createManyNetsACL(1, false, 111, rng6)
 		// Modify one net in the middle
 		acl1IPv4AlmostMatch[0].Nets[5] = &balancerpb.Net{
-			Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{99, 99, 0, 0}).AsSlice()},
-			Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).AsSlice()},
+			Addr: &balancerpb.Addr{
+				Bytes: netip.AddrFrom4([4]byte{99, 99, 0, 0}).AsSlice(),
+			},
+			Mask: &balancerpb.Addr{
+				Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).AsSlice(),
+			},
 		}
 
 		vsList6 := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4AlmostMatch),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4AlmostMatch,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6Combined,
+			),
 		}
 		config6 := createConfig(vsList6)
 
@@ -1759,13 +1929,36 @@ func TestACLAndFilterReuse(t *testing.T) {
 		rng7 := rand.New(rand.NewPCG(300, 0))
 		acl1IPv4AlmostMatchPort := createManyNetsACL(1, false, 111, rng7)
 		// Modify one port range
-		acl1IPv4AlmostMatchPort[0].Ports[1] = &balancerpb.PortsRange{From: 8443, To: 8443} // Changed from 443
+		acl1IPv4AlmostMatchPort[0].Ports[1] = &balancerpb.PortsRange{
+			From: 8443,
+			To:   8443,
+		} // Changed from 443
 
 		vsList7 := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4AlmostMatchPort),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4AlmostMatchPort,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6Combined,
+			),
 		}
 		config7 := createConfig(vsList7)
 
@@ -1779,13 +1972,35 @@ func TestACLAndFilterReuse(t *testing.T) {
 		rng8 := rand.New(rand.NewPCG(300, 0))
 		acl1IPv4MissingNet := createManyNetsACL(1, false, 111, rng8)
 		// Remove one net from the middle
-		acl1IPv4MissingNet[0].Nets = append(acl1IPv4MissingNet[0].Nets[:3], acl1IPv4MissingNet[0].Nets[4:]...)
+		acl1IPv4MissingNet[0].Nets = append(
+			acl1IPv4MissingNet[0].Nets[:3],
+			acl1IPv4MissingNet[0].Nets[4:]...)
 
 		vsList8 := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4MissingNet),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4MissingNet,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6Combined,
+			),
 		}
 		config8 := createConfig(vsList8)
 
@@ -1802,10 +2017,30 @@ func TestACLAndFilterReuse(t *testing.T) {
 		acl1IPv4MissingPort[0].Ports = acl1IPv4MissingPort[0].Ports[:len(acl1IPv4MissingPort[0].Ports)-1]
 
 		vsList9 := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4MissingPort),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4MissingPort,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6Combined,
+			),
 		}
 		config9 := createConfig(vsList9)
 
@@ -1819,16 +2054,43 @@ func TestACLAndFilterReuse(t *testing.T) {
 		rng10 := rand.New(rand.NewPCG(300, 0))
 		acl1IPv4ExtraNet := createManyNetsACL(1, false, 111, rng10)
 		// Add one extra net
-		acl1IPv4ExtraNet[0].Nets = append(acl1IPv4ExtraNet[0].Nets, &balancerpb.Net{
-			Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{88, 88, 0, 0}).AsSlice()},
-			Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).AsSlice()},
-		})
+		acl1IPv4ExtraNet[0].Nets = append(
+			acl1IPv4ExtraNet[0].Nets,
+			&balancerpb.Net{
+				Addr: &balancerpb.Addr{
+					Bytes: netip.AddrFrom4([4]byte{88, 88, 0, 0}).AsSlice(),
+				},
+				Mask: &balancerpb.Addr{
+					Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).AsSlice(),
+				},
+			},
+		)
 
 		vsList10 := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4ExtraNet),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4ExtraNet,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6Combined,
+			),
 		}
 		config10 := createConfig(vsList10)
 
@@ -1842,13 +2104,36 @@ func TestACLAndFilterReuse(t *testing.T) {
 		rng11 := rand.New(rand.NewPCG(300, 0))
 		acl1IPv4ExtraPort := createManyNetsACL(1, false, 111, rng11)
 		// Add one extra port range
-		acl1IPv4ExtraPort[0].Ports = append(acl1IPv4ExtraPort[0].Ports, &balancerpb.PortsRange{From: 9999, To: 9999})
+		acl1IPv4ExtraPort[0].Ports = append(
+			acl1IPv4ExtraPort[0].Ports,
+			&balancerpb.PortsRange{From: 9999, To: 9999},
+		)
 
 		vsList11 := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4ExtraPort),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4ExtraPort,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6Combined,
+			),
 		}
 		config11 := createConfig(vsList11)
 
@@ -1862,13 +2147,35 @@ func TestACLAndFilterReuse(t *testing.T) {
 		rng12 := rand.New(rand.NewPCG(300, 0))
 		acl1IPv4DifferentMask := createManyNetsACL(1, false, 111, rng12)
 		// Change mask of one net
-		acl1IPv4DifferentMask[0].Nets[2].Mask = &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 255, 255, 0}).AsSlice()} // Changed from /16 to /24
+		acl1IPv4DifferentMask[0].Nets[2].Mask = &balancerpb.Addr{
+			Bytes: netip.AddrFrom4([4]byte{255, 255, 255, 0}).AsSlice(),
+		} // Changed from /16 to /24
 
 		vsList12 := []*balancerpb.VirtualService{
-			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4DifferentMask),
-			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
-			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+			createVS(
+				netip.MustParseAddr("10.0.4.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv4DifferentMask,
+			),
+			createVS(
+				netip.MustParseAddr("10.0.4.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv4Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl1IPv6Combined,
+			),
+			createVS(
+				netip.MustParseAddr("2001:db8:4::2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				acl2IPv6Combined,
+			),
 		}
 		config12 := createConfig(vsList12)
 

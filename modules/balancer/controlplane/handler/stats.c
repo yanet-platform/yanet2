@@ -1,5 +1,6 @@
 #include "api/balancer.h"
 #include "api/real.h"
+#include "api/vs.h"
 #include "common/memory_address.h"
 #include "controlplane/agent/agent.h"
 #include "handler.h"
@@ -8,6 +9,7 @@
 
 #include "lib/controlplane/diag/diag.h"
 #include "vs.h"
+#include <stdlib.h>
 
 #include "api/stats.h"
 
@@ -88,12 +90,12 @@ register_l4_counter(struct counter_registry *registry) {
 
 static void
 setup_real_stats(
-	struct named_real_stats *real_stats,
+	struct real_stats *real_stats,
 	const size_t instances,
 	struct counter_handle *counter
 ) {
 	counter_handle_accum(
-		(uint64_t *)&real_stats->stats,
+		(uint64_t *)real_stats,
 		instances,
 		counter->size,
 		counter->value_handle
@@ -108,6 +110,22 @@ setup_vs_stats(
 ) {
 	counter_handle_accum(
 		(uint64_t *)stats,
+		instances,
+		counter->size,
+		counter->value_handle
+	);
+}
+
+static void
+setup_vs_acl_stats(
+	struct allowed_sources_stats *stats,
+	uint32_t tag,
+	const size_t instances,
+	struct counter_handle *counter
+) {
+	stats->tag = tag;
+	counter_handle_accum(
+		(uint64_t *)&stats->passes,
 		instances,
 		counter->size,
 		counter->value_handle
@@ -186,6 +204,11 @@ init_vs_stats(
 		vs_stats->reals_count = vs->reals_count;
 		vs_stats->reals = real_stats + reals_counter;
 		reals_counter += vs->reals_count;
+		struct allowed_sources_stats *stats =
+			malloc(sizeof(struct allowed_sources_stats) *
+			       vs->rules_count);
+		vs_stats->allowed_sources = stats;
+		vs_stats->allowed_sources_count = 0;
 	}
 }
 
@@ -231,8 +254,28 @@ calculate_stats(
 				// continue
 				continue;
 			}
-			setup_real_stats(&real_stats[idx], instances, counter);
+			setup_real_stats(
+				&real_stats[idx].stats, instances, counter
+			);
 			continue;
+		}
+
+		uint32_t rule_tag;
+		vs_registry_idx = parse_vs_acl_counter(counter, &rule_tag);
+		if (vs_registry_idx != -1) {
+			uint32_t idx = vs_index[vs_registry_idx];
+			if (idx == INDEX_INVALID) {
+				// virtual service not present in packet handler
+				// config, continue
+				continue;
+			}
+			struct named_vs_stats *vs_stats = &stats->vs[idx];
+			size_t allowed_sources_stats_count =
+				vs_stats->allowed_sources_count++;
+			struct allowed_sources_stats *stats =
+				&vs_stats->allowed_sources
+					 [allowed_sources_stats_count];
+			setup_vs_acl_stats(stats, rule_tag, instances, counter);
 		}
 
 		// else, it is common balancer counter

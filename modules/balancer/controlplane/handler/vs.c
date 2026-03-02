@@ -771,7 +771,10 @@ rule_to_relative_addresses(struct filter_rule *rule) {
 
 static int
 setup_acl_rules(
-	struct vs *vs, struct counter_registry *counters, struct vs_config *config, struct memory_context *mctx
+	struct vs *vs,
+	struct counter_registry *counters,
+	struct vs_config *config,
+	struct memory_context *mctx
 ) {
 	// Create filter rules from config (already uses memory_balloc and
 	// relative pointers)
@@ -808,7 +811,8 @@ setup_acl_rules(
 	}
 
 	char counter_name[80];
-	uint64_t *rule_counters = memory_balloc(mctx, sizeof(uint64_t) * rules_count);
+	uint64_t *rule_counters =
+		memory_balloc(mctx, sizeof(uint64_t) * rules_count);
 	if (rule_counters == NULL && rules_count > 0) {
 		NEW_ERROR("failed to allocate rule counters: no memory");
 		return -1;
@@ -822,10 +826,16 @@ setup_acl_rules(
 		uint32_t rule_tag = rules[i].action;
 		if (rule_tag != 0) {
 			// register counter
-			sprintf(counter_name, "acl_%zu_%u", vs->registry_idx, rule_tag);
-			uint64_t counter_id = counter_registry_register(counters, counter_name, 1);
+			sprintf(counter_name,
+				"acl_%zu_%u",
+				vs->registry_idx,
+				rule_tag);
+			uint64_t counter_id = counter_registry_register(
+				counters, counter_name, 1
+			);
 			if (counter_id == (uint64_t)-1) {
-				NEW_ERROR("failed to register counter for rule: no memory");
+				NEW_ERROR("failed to register counter for "
+					  "rule: no memory");
 				return -1;
 			}
 
@@ -980,4 +990,18 @@ vs_fill_inspect(struct vs *vs, struct vs_inspect *inspect, size_t workers) {
 			       inspect->counters_usage +
 			       inspect->reals_usage.total_usage +
 			       inspect->other_usage;
+}
+
+ssize_t
+parse_vs_acl_counter(struct counter_handle *counter, uint32_t *tag) {
+	// in format acl_<vs_registry_idx>_<tag>
+	if (strncmp(counter->name, "acl_", 4) == 0) { // vs acl counter
+		char *end_ptr = NULL;
+		size_t vs_registry_idx =
+			strtoull(counter->name + 4, &end_ptr, 10);
+		*tag = atoi(end_ptr + 1);
+		return vs_registry_idx;
+	} else {
+		return -1;
+	}
 }

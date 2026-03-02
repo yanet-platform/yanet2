@@ -149,6 +149,10 @@ type NamedVsStats struct {
 		Dst   netip.Addr
 		Stats RealStats
 	}
+	AllowedSources []struct {
+		Tag    uint32
+		Passes uint64
+	}
 }
 
 // SessionsTimeouts contains timeout configuration per transport/state

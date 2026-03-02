@@ -1305,6 +1305,25 @@ func cToGoNamedVsStats(cStats *C.struct_named_vs_stats) *NamedVsStats {
 		}
 	}
 
+	// Convert allowed sources stats array
+	if cStats.allowed_sources_count > 0 && cStats.allowed_sources != nil {
+		cAllowedSourcesSlice := unsafe.Slice(
+			cStats.allowed_sources,
+			cStats.allowed_sources_count,
+		)
+		stats.AllowedSources = make([]struct {
+			Tag    uint32
+			Passes uint64
+		}, cStats.allowed_sources_count)
+
+		for i := range stats.AllowedSources {
+			stats.AllowedSources[i].Tag = uint32(cAllowedSourcesSlice[i].tag)
+			stats.AllowedSources[i].Passes = uint64(
+				cAllowedSourcesSlice[i].passes,
+			)
+		}
+	}
+
 	return stats
 }
 

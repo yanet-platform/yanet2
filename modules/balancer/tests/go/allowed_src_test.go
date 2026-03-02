@@ -1629,3 +1629,1001 @@ func TestAllowedSrcWithPorts(t *testing.T) {
 		}
 	})
 }
+
+// TestAllowedSrcWithTags tests that allowed_sources stats are correctly tracked per tag
+func TestAllowedSrcWithTags(t *testing.T) {
+	// Create configuration with multiple allowed sources with different tags
+	config := &balancerpb.BalancerConfig{
+		PacketHandler: &balancerpb.PacketHandlerConfig{
+			SourceAddressV4: &balancerpb.Addr{
+				Bytes: allowedSrcBalancerSrcIPv4.AsSlice(),
+			},
+			SourceAddressV6: &balancerpb.Addr{
+				Bytes: allowedSrcBalancerSrcIPv6.AsSlice(),
+			},
+			Vs: []*balancerpb.VirtualService{
+				// VS with multiple allowed sources with tags
+				{
+					Id: &balancerpb.VsIdentifier{
+						Addr: &balancerpb.Addr{
+							Bytes: netip.MustParseAddr("10.30.1.1").AsSlice(),
+						},
+						Port:  80,
+						Proto: balancerpb.TransportProto_TCP,
+					},
+					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
+					AllowedSrcs: []*balancerpb.AllowedSources{
+						{
+							// Tag 100: Internal network
+							Nets: []*balancerpb.Net{{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("10.0.0.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.0.0.0").
+										AsSlice(),
+								},
+							}},
+							Tag: 100,
+						},
+						{
+							// Tag 200: Partner network
+							Nets: []*balancerpb.Net{{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("192.168.0.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.255.0.0").
+										AsSlice(),
+								},
+							}},
+							Tag: 200,
+						},
+						{
+							// Tag 300: Public network range (for testing untracked sources)
+							// Using a specific range that doesn't overlap with tags 100 and 200
+							Nets: []*balancerpb.Net{{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("8.0.0.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.0.0.0").
+										AsSlice(),
+								},
+							}},
+							Tag: 0, // Tag 0 means no tracking
+						},
+					},
+					Flags: &balancerpb.VsFlags{},
+					Reals: []*balancerpb.Real{
+						{
+							Id: &balancerpb.RelativeRealIdentifier{
+								Ip: &balancerpb.Addr{
+									Bytes: allowedSrcRealIPv4.AsSlice(),
+								},
+								Port: 0,
+							},
+							Weight: 1,
+							SrcAddr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("4.4.4.4").AsSlice(),
+							},
+							SrcMask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
+							},
+						},
+					},
+					Peers: []*balancerpb.Addr{},
+				},
+				// VS with multiple networks per allowed source and multiple port ranges
+				{
+					Id: &balancerpb.VsIdentifier{
+						Addr: &balancerpb.Addr{
+							Bytes: netip.MustParseAddr("10.30.2.1").AsSlice(),
+						},
+						Port:  443,
+						Proto: balancerpb.TransportProto_TCP,
+					},
+					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
+					AllowedSrcs: []*balancerpb.AllowedSources{
+						{
+							// Tag 300: Multiple networks with port restrictions
+							Nets: []*balancerpb.Net{
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("172.16.0.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.240.0.0").
+											AsSlice(),
+									},
+								},
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("172.32.0.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.240.0.0").
+											AsSlice(),
+									},
+								},
+							},
+							Ports: []*balancerpb.PortsRange{
+								{From: 1024, To: 65535}, // High ports only
+							},
+							Tag: 300,
+						},
+						{
+							// Tag 400: Different network with different port ranges
+							Nets: []*balancerpb.Net{{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("203.0.113.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.255.255.0").
+										AsSlice(),
+								},
+							}},
+							Ports: []*balancerpb.PortsRange{
+								{From: 80, To: 80},
+								{From: 443, To: 443},
+								{From: 8080, To: 8080},
+							},
+							Tag: 400,
+						},
+					},
+					Flags: &balancerpb.VsFlags{},
+					Reals: []*balancerpb.Real{
+						{
+							Id: &balancerpb.RelativeRealIdentifier{
+								Ip: &balancerpb.Addr{
+									Bytes: allowedSrcRealIPv4.AsSlice(),
+								},
+								Port: 0,
+							},
+							Weight: 1,
+							SrcAddr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("4.4.4.4").AsSlice(),
+							},
+							SrcMask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
+							},
+						},
+					},
+					Peers: []*balancerpb.Addr{},
+				},
+			},
+			DecapAddresses: []*balancerpb.Addr{},
+			SessionsTimeouts: &balancerpb.SessionsTimeouts{
+				TcpSynAck: 60,
+				TcpSyn:    60,
+				TcpFin:    60,
+				Tcp:       60,
+				Udp:       60,
+				Default:   60,
+			},
+		},
+		State: &balancerpb.StateConfig{
+			SessionTableCapacity:      func() *uint64 { v := uint64(1000); return &v }(),
+			SessionTableMaxLoadFactor: func() *float32 { v := float32(0.8); return &v }(),
+			RefreshPeriod:             durationpb.New(0),
+			Wlc: &balancerpb.WlcConfig{
+				Power:     func() *uint64 { v := uint64(10); return &v }(),
+				MaxWeight: func() *uint32 { v := uint32(1000); return &v }(),
+			},
+		},
+	}
+
+	ts, err := utils.Make(&utils.TestConfig{
+		Mock:     utils.SingleWorkerMockConfig(256*datasize.MB, 4*datasize.MB),
+		Balancer: config,
+		AgentMemory: func() *datasize.ByteSize {
+			memory := 128 * datasize.MB
+			return &memory
+		}(),
+	})
+	require.NoError(t, err)
+	defer ts.Free()
+
+	// Enable all reals
+	utils.EnableAllReals(t, ts)
+
+	statsRef := &balancerpb.PacketHandlerRef{
+		Device:   &utils.DeviceName,
+		Pipeline: &utils.PipelineName,
+		Function: &utils.FunctionName,
+		Chain:    &utils.ChainName,
+	}
+
+	t.Run("TaggedSourcesTracking", func(t *testing.T) {
+		vsIP := netip.MustParseAddr("10.30.1.1")
+		vsPort := uint16(80)
+
+		// Get initial stats
+		initialStats, err := ts.Balancer.Stats(statsRef)
+		require.NoError(t, err)
+
+		var initialVsStats *balancerpb.NamedVsStats
+		for _, vs := range initialStats.Vs {
+			addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+			if addr == vsIP && vs.Vs.Port == uint32(vsPort) {
+				initialVsStats = vs
+				break
+			}
+		}
+		require.NotNil(t, initialVsStats, "VS stats should exist")
+
+		// Send packets from different sources
+		testCases := []struct {
+			name        string
+			srcIP       string
+			srcPort     uint16
+			expectedTag uint32
+		}{
+			{"InternalNetwork", "10.5.5.5", 50000, 100},
+			{"PartnerNetwork", "192.168.10.10", 50001, 200},
+			{"PublicNetwork", "8.8.8.8", 50002, 0}, // Tag 0 - no tracking
+		}
+
+		for _, tc := range testCases {
+			clientIP := netip.MustParseAddr(tc.srcIP)
+			packetLayers := utils.MakeTCPPacket(
+				clientIP,
+				tc.srcPort,
+				vsIP,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
+			packet := xpacket.LayersToPacket(t, packetLayers...)
+
+			result, err := ts.Mock.HandlePackets(packet)
+			require.NoError(
+				t,
+				err,
+				"packet from %s should be processed",
+				tc.name,
+			)
+			require.Equal(
+				t,
+				1,
+				len(result.Output),
+				"expected 1 output packet for %s",
+				tc.name,
+			)
+		}
+
+		// Get final stats
+		finalStats, err := ts.Balancer.Stats(statsRef)
+		require.NoError(t, err)
+
+		var finalVsStats *balancerpb.NamedVsStats
+		for _, vs := range finalStats.Vs {
+			addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+			if addr == vsIP && vs.Vs.Port == uint32(vsPort) {
+				finalVsStats = vs
+				break
+			}
+		}
+		require.NotNil(t, finalVsStats, "VS stats should exist")
+
+		// Verify allowed_sources stats
+		require.NotNil(
+			t,
+			finalVsStats.AllowedSources,
+			"allowed_sources stats should exist",
+		)
+
+		// Build a map of tag -> passes for easier verification
+		tagStats := make(map[uint32]uint64)
+		for _, allowedSrc := range finalVsStats.AllowedSources {
+			tagStats[allowedSrc.Tag] = allowedSrc.Passes
+		}
+
+		// Verify tag 100 (Internal network) has 1 pass
+		assert.Equal(t, uint64(1), tagStats[100], "tag 100 should have 1 pass")
+
+		// Verify tag 200 (Partner network) has 1 pass
+		assert.Equal(t, uint64(1), tagStats[200], "tag 200 should have 1 pass")
+
+		// Verify tag 0 (Public network) is NOT tracked
+		_, exists := tagStats[0]
+		assert.False(t, exists, "tag 0 should not be tracked in stats")
+	})
+
+	t.Run("MultipleNetworksAndPorts", func(t *testing.T) {
+		vsIP := netip.MustParseAddr("10.30.2.1")
+		vsPort := uint16(443)
+
+		// Get initial stats
+		initialStats, err := ts.Balancer.Stats(statsRef)
+		require.NoError(t, err)
+
+		var initialVsStats *balancerpb.NamedVsStats
+		for _, vs := range initialStats.Vs {
+			addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+			if addr == vsIP && vs.Vs.Port == uint32(vsPort) {
+				initialVsStats = vs
+				break
+			}
+		}
+		require.NotNil(t, initialVsStats, "VS stats should exist")
+
+		// Test packets from different networks and ports
+		testCases := []struct {
+			name        string
+			srcIP       string
+			srcPort     uint16
+			shouldPass  bool
+			expectedTag uint32
+		}{
+			// Tag 300 tests (172.16.0.0/12 and 172.32.0.0/12 with high ports)
+			{"Network1HighPort", "172.16.1.1", 50000, true, 300},
+			{"Network2HighPort", "172.32.1.1", 50001, true, 300},
+			{"Network1LowPort", "172.16.1.1", 80, false, 0}, // Low port blocked
+
+			// Tag 400 tests (203.0.113.0/24 with specific ports)
+			{"Network3Port80", "203.0.113.10", 80, true, 400},
+			{"Network3Port443", "203.0.113.10", 443, true, 400},
+			{"Network3Port8080", "203.0.113.10", 8080, true, 400},
+			{
+				"Network3Port22",
+				"203.0.113.10",
+				22,
+				false,
+				0,
+			}, // Port not in allowed list
+		}
+
+		passedPackets := make(map[uint32]int)
+		for _, tc := range testCases {
+			clientIP := netip.MustParseAddr(tc.srcIP)
+			packetLayers := utils.MakeTCPPacket(
+				clientIP,
+				tc.srcPort,
+				vsIP,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
+			packet := xpacket.LayersToPacket(t, packetLayers...)
+
+			result, err := ts.Mock.HandlePackets(packet)
+			require.NoError(t, err, "packet processing failed for %s", tc.name)
+
+			if tc.shouldPass {
+				require.Equal(
+					t,
+					1,
+					len(result.Output),
+					"expected 1 output packet for %s",
+					tc.name,
+				)
+				require.Empty(
+					t,
+					result.Drop,
+					"expected no dropped packets for %s",
+					tc.name,
+				)
+				passedPackets[tc.expectedTag]++
+			} else {
+				require.Empty(t, result.Output, "expected no output packets for %s", tc.name)
+				require.Equal(t, 1, len(result.Drop), "expected 1 dropped packet for %s", tc.name)
+			}
+		}
+
+		// Get final stats
+		finalStats, err := ts.Balancer.Stats(statsRef)
+		require.NoError(t, err)
+
+		var finalVsStats *balancerpb.NamedVsStats
+		for _, vs := range finalStats.Vs {
+			addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+			if addr == vsIP && vs.Vs.Port == uint32(vsPort) {
+				finalVsStats = vs
+				break
+			}
+		}
+		require.NotNil(t, finalVsStats, "VS stats should exist")
+
+		// Verify allowed_sources stats
+		require.NotNil(
+			t,
+			finalVsStats.AllowedSources,
+			"allowed_sources stats should exist",
+		)
+
+		// Build a map of tag -> passes
+		tagStats := make(map[uint32]uint64)
+		for _, allowedSrc := range finalVsStats.AllowedSources {
+			tagStats[allowedSrc.Tag] = allowedSrc.Passes
+		}
+
+		// Verify tag 300 has correct number of passes (2 packets from different networks)
+		assert.Equal(t, uint64(passedPackets[300]), tagStats[300],
+			"tag 300 should have %d passes", passedPackets[300])
+
+		// Verify tag 400 has correct number of passes (3 packets from different ports)
+		assert.Equal(t, uint64(passedPackets[400]), tagStats[400],
+			"tag 400 should have %d passes", passedPackets[400])
+	})
+}
+
+// TestAllowedSrcMultipleNetworksWithTags tests ACL behavior with multiple networks per allowed source
+// and verifies stats tracking using tags
+func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
+	// Create configuration with allowed sources containing multiple networks each
+	config := &balancerpb.BalancerConfig{
+		PacketHandler: &balancerpb.PacketHandlerConfig{
+			SourceAddressV4: &balancerpb.Addr{
+				Bytes: allowedSrcBalancerSrcIPv4.AsSlice(),
+			},
+			SourceAddressV6: &balancerpb.Addr{
+				Bytes: allowedSrcBalancerSrcIPv6.AsSlice(),
+			},
+			Vs: []*balancerpb.VirtualService{
+				// VS with multiple allowed sources, each containing multiple networks
+				{
+					Id: &balancerpb.VsIdentifier{
+						Addr: &balancerpb.Addr{
+							Bytes: netip.MustParseAddr("10.40.1.1").AsSlice(),
+						},
+						Port:  80,
+						Proto: balancerpb.TransportProto_TCP,
+					},
+					Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
+					AllowedSrcs: []*balancerpb.AllowedSources{
+						{
+							// Tag 500: Corporate networks (4 different subnets)
+							Nets: []*balancerpb.Net{
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("10.10.0.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.0.0").
+											AsSlice(),
+									},
+								},
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("10.20.0.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.0.0").
+											AsSlice(),
+									},
+								},
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("10.30.0.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.0.0").
+											AsSlice(),
+									},
+								},
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("10.40.0.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.0.0").
+											AsSlice(),
+									},
+								},
+							},
+							Tag: 500,
+						},
+						{
+							// Tag 600: Partner networks (3 different subnets)
+							Nets: []*balancerpb.Net{
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("192.168.1.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.255.0").
+											AsSlice(),
+									},
+								},
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("192.168.2.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.255.0").
+											AsSlice(),
+									},
+								},
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("192.168.3.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.255.0").
+											AsSlice(),
+									},
+								},
+							},
+							Tag: 600,
+						},
+						{
+							// Tag 700: External networks (4 different subnets with port restrictions)
+							Nets: []*balancerpb.Net{
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("203.0.113.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.255.0").
+											AsSlice(),
+									},
+								},
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("198.51.100.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.255.0").
+											AsSlice(),
+									},
+								},
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("198.18.0.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.254.0.0").
+											AsSlice(),
+									},
+								},
+								{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("100.64.0.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.192.0.0").
+											AsSlice(),
+									},
+								},
+							},
+							Ports: []*balancerpb.PortsRange{
+								{From: 1024, To: 65535}, // Only high ports
+							},
+							Tag: 700,
+						},
+					},
+					Flags: &balancerpb.VsFlags{},
+					Reals: []*balancerpb.Real{
+						{
+							Id: &balancerpb.RelativeRealIdentifier{
+								Ip: &balancerpb.Addr{
+									Bytes: allowedSrcRealIPv4.AsSlice(),
+								},
+								Port: 0,
+							},
+							Weight: 1,
+							SrcAddr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("4.4.4.4").AsSlice(),
+							},
+							SrcMask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.255.255").
+									AsSlice(),
+							},
+						},
+					},
+					Peers: []*balancerpb.Addr{},
+				},
+			},
+			DecapAddresses: []*balancerpb.Addr{},
+			SessionsTimeouts: &balancerpb.SessionsTimeouts{
+				TcpSynAck: 60,
+				TcpSyn:    60,
+				TcpFin:    60,
+				Tcp:       60,
+				Udp:       60,
+				Default:   60,
+			},
+		},
+		State: &balancerpb.StateConfig{
+			SessionTableCapacity:      func() *uint64 { v := uint64(1000); return &v }(),
+			SessionTableMaxLoadFactor: func() *float32 { v := float32(0.8); return &v }(),
+			RefreshPeriod:             durationpb.New(0),
+			Wlc: &balancerpb.WlcConfig{
+				Power:     func() *uint64 { v := uint64(10); return &v }(),
+				MaxWeight: func() *uint32 { v := uint32(1000); return &v }(),
+			},
+		},
+	}
+
+	ts, err := utils.Make(&utils.TestConfig{
+		Mock:     utils.SingleWorkerMockConfig(256*datasize.MB, 4*datasize.MB),
+		Balancer: config,
+		AgentMemory: func() *datasize.ByteSize {
+			memory := 128 * datasize.MB
+			return &memory
+		}(),
+	})
+	require.NoError(t, err)
+	defer ts.Free()
+
+	// Enable all reals
+	utils.EnableAllReals(t, ts)
+
+	statsRef := &balancerpb.PacketHandlerRef{
+		Device:   &utils.DeviceName,
+		Pipeline: &utils.PipelineName,
+		Function: &utils.FunctionName,
+		Chain:    &utils.ChainName,
+	}
+
+	vsIP := netip.MustParseAddr("10.40.1.1")
+	vsPort := uint16(80)
+
+	t.Run("CorporateNetworks_Tag500", func(t *testing.T) {
+		// Test packets from all 4 corporate networks
+		testCases := []struct {
+			name    string
+			srcIP   string
+			srcPort uint16
+		}{
+			{"Network1", "10.10.5.5", 50000},
+			{"Network2", "10.20.10.10", 50001},
+			{"Network3", "10.30.15.15", 50002},
+			{"Network4", "10.40.20.20", 50003},
+		}
+
+		for _, tc := range testCases {
+			clientIP := netip.MustParseAddr(tc.srcIP)
+			packetLayers := utils.MakeTCPPacket(
+				clientIP,
+				tc.srcPort,
+				vsIP,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
+			packet := xpacket.LayersToPacket(t, packetLayers...)
+
+			result, err := ts.Mock.HandlePackets(packet)
+			require.NoError(
+				t,
+				err,
+				"packet from %s should be processed",
+				tc.name,
+			)
+			require.Equal(
+				t,
+				1,
+				len(result.Output),
+				"expected 1 output packet for %s",
+				tc.name,
+			)
+			require.Empty(
+				t,
+				result.Drop,
+				"expected no dropped packets for %s",
+				tc.name,
+			)
+		}
+
+		// Verify stats for tag 500
+		stats, err := ts.Balancer.Stats(statsRef)
+		require.NoError(t, err)
+
+		var vsStats *balancerpb.NamedVsStats
+		for _, vs := range stats.Vs {
+			addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+			if addr == vsIP && vs.Vs.Port == uint32(vsPort) {
+				vsStats = vs
+				break
+			}
+		}
+		require.NotNil(t, vsStats, "VS stats should exist")
+
+		// Build tag stats map
+		tagStats := make(map[uint32]uint64)
+		for _, allowedSrc := range vsStats.AllowedSources {
+			tagStats[allowedSrc.Tag] = allowedSrc.Passes
+		}
+
+		// Verify tag 500 has 4 passes (one from each network)
+		assert.Equal(
+			t,
+			uint64(4),
+			tagStats[500],
+			"tag 500 should have 4 passes",
+		)
+	})
+
+	t.Run("PartnerNetworks_Tag600", func(t *testing.T) {
+		// Test packets from all 3 partner networks
+		testCases := []struct {
+			name    string
+			srcIP   string
+			srcPort uint16
+		}{
+			{"Partner1", "192.168.1.100", 51000},
+			{"Partner2", "192.168.2.200", 51001},
+			{"Partner3", "192.168.3.50", 51002},
+		}
+
+		for _, tc := range testCases {
+			clientIP := netip.MustParseAddr(tc.srcIP)
+			packetLayers := utils.MakeTCPPacket(
+				clientIP,
+				tc.srcPort,
+				vsIP,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
+			packet := xpacket.LayersToPacket(t, packetLayers...)
+
+			result, err := ts.Mock.HandlePackets(packet)
+			require.NoError(
+				t,
+				err,
+				"packet from %s should be processed",
+				tc.name,
+			)
+			require.Equal(
+				t,
+				1,
+				len(result.Output),
+				"expected 1 output packet for %s",
+				tc.name,
+			)
+			require.Empty(
+				t,
+				result.Drop,
+				"expected no dropped packets for %s",
+				tc.name,
+			)
+		}
+
+		// Verify stats for tag 600
+		stats, err := ts.Balancer.Stats(statsRef)
+		require.NoError(t, err)
+
+		var vsStats *balancerpb.NamedVsStats
+		for _, vs := range stats.Vs {
+			addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+			if addr == vsIP && vs.Vs.Port == uint32(vsPort) {
+				vsStats = vs
+				break
+			}
+		}
+		require.NotNil(t, vsStats, "VS stats should exist")
+
+		// Build tag stats map
+		tagStats := make(map[uint32]uint64)
+		for _, allowedSrc := range vsStats.AllowedSources {
+			tagStats[allowedSrc.Tag] = allowedSrc.Passes
+		}
+
+		// Verify tag 600 has 3 passes (one from each partner network)
+		assert.Equal(
+			t,
+			uint64(3),
+			tagStats[600],
+			"tag 600 should have 3 passes",
+		)
+	})
+
+	t.Run("ExternalNetworks_Tag700_WithPortFiltering", func(t *testing.T) {
+		// Test packets from all 4 external networks with different port scenarios
+		testCases := []struct {
+			name       string
+			srcIP      string
+			srcPort    uint16
+			shouldPass bool
+		}{
+			// High ports - should pass
+			{"External1_HighPort", "203.0.113.10", 50000, true},
+			{"External2_HighPort", "198.51.100.20", 50001, true},
+			{"External3_HighPort", "198.18.5.5", 50002, true},
+			{"External4_HighPort", "100.64.10.10", 50003, true},
+
+			// Low ports - should be blocked
+			{"External1_LowPort", "203.0.113.11", 80, false},
+			{"External2_LowPort", "198.51.100.21", 443, false},
+			{"External3_LowPort", "198.18.5.6", 22, false},
+			{"External4_LowPort", "100.64.10.11", 1023, false},
+		}
+
+		passedCount := 0
+		for _, tc := range testCases {
+			clientIP := netip.MustParseAddr(tc.srcIP)
+			packetLayers := utils.MakeTCPPacket(
+				clientIP,
+				tc.srcPort,
+				vsIP,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
+			packet := xpacket.LayersToPacket(t, packetLayers...)
+
+			result, err := ts.Mock.HandlePackets(packet)
+			require.NoError(t, err, "packet processing failed for %s", tc.name)
+
+			if tc.shouldPass {
+				require.Equal(
+					t,
+					1,
+					len(result.Output),
+					"expected 1 output packet for %s",
+					tc.name,
+				)
+				require.Empty(
+					t,
+					result.Drop,
+					"expected no dropped packets for %s",
+					tc.name,
+				)
+				passedCount++
+			} else {
+				require.Empty(t, result.Output, "expected no output packets for %s", tc.name)
+				require.Equal(t, 1, len(result.Drop), "expected 1 dropped packet for %s", tc.name)
+			}
+		}
+
+		// Verify stats for tag 700
+		stats, err := ts.Balancer.Stats(statsRef)
+		require.NoError(t, err)
+
+		var vsStats *balancerpb.NamedVsStats
+		for _, vs := range stats.Vs {
+			addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+			if addr == vsIP && vs.Vs.Port == uint32(vsPort) {
+				vsStats = vs
+				break
+			}
+		}
+		require.NotNil(t, vsStats, "VS stats should exist")
+
+		// Build tag stats map
+		tagStats := make(map[uint32]uint64)
+		for _, allowedSrc := range vsStats.AllowedSources {
+			tagStats[allowedSrc.Tag] = allowedSrc.Passes
+		}
+
+		// Verify tag 700 has correct number of passes (only high port packets)
+		assert.Equal(
+			t,
+			uint64(passedCount),
+			tagStats[700],
+			"tag 700 should have %d passes (only high port packets)",
+			passedCount,
+		)
+	})
+
+	t.Run("BlockedSources", func(t *testing.T) {
+		// Test packets from networks not in any allowed source
+		testCases := []struct {
+			name    string
+			srcIP   string
+			srcPort uint16
+		}{
+			{"Blocked1", "172.16.1.1", 50000},
+			{"Blocked2", "8.8.8.8", 50001},
+			{"Blocked3", "1.1.1.1", 50002},
+		}
+
+		for _, tc := range testCases {
+			clientIP := netip.MustParseAddr(tc.srcIP)
+			packetLayers := utils.MakeTCPPacket(
+				clientIP,
+				tc.srcPort,
+				vsIP,
+				vsPort,
+				&layers.TCP{SYN: true},
+			)
+			packet := xpacket.LayersToPacket(t, packetLayers...)
+
+			result, err := ts.Mock.HandlePackets(packet)
+			require.NoError(t, err, "packet processing failed for %s", tc.name)
+			require.Empty(
+				t,
+				result.Output,
+				"expected no output packets for %s",
+				tc.name,
+			)
+			require.Equal(
+				t,
+				1,
+				len(result.Drop),
+				"expected 1 dropped packet for %s",
+				tc.name,
+			)
+		}
+
+		// Verify these blocked packets don't appear in any tag stats
+		stats, err := ts.Balancer.Stats(statsRef)
+		require.NoError(t, err)
+
+		var vsStats *balancerpb.NamedVsStats
+		for _, vs := range stats.Vs {
+			addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+			if addr == vsIP && vs.Vs.Port == uint32(vsPort) {
+				vsStats = vs
+				break
+			}
+		}
+		require.NotNil(t, vsStats, "VS stats should exist")
+
+		// Verify packet_src_not_allowed counter increased
+		assert.Greater(t, vsStats.Stats.PacketSrcNotAllowed, uint64(0),
+			"packet_src_not_allowed should be greater than 0")
+	})
+
+	t.Run("VerifyAllTagsPresent", func(t *testing.T) {
+		// Final verification that all tags are present with correct counts
+		stats, err := ts.Balancer.Stats(statsRef)
+		require.NoError(t, err)
+
+		var vsStats *balancerpb.NamedVsStats
+		for _, vs := range stats.Vs {
+			addr, _ := netip.AddrFromSlice(vs.Vs.Addr.Bytes)
+			if addr == vsIP && vs.Vs.Port == uint32(vsPort) {
+				vsStats = vs
+				break
+			}
+		}
+		require.NotNil(t, vsStats, "VS stats should exist")
+
+		// Build tag stats map
+		tagStats := make(map[uint32]uint64)
+		for _, allowedSrc := range vsStats.AllowedSources {
+			tagStats[allowedSrc.Tag] = allowedSrc.Passes
+		}
+
+		// Verify all three tags are present
+		assert.Contains(t, tagStats, uint32(500), "tag 500 should be present")
+		assert.Contains(t, tagStats, uint32(600), "tag 600 should be present")
+		assert.Contains(t, tagStats, uint32(700), "tag 700 should be present")
+
+		// Verify tag 500 (4 corporate networks)
+		assert.Equal(
+			t,
+			uint64(4),
+			tagStats[500],
+			"tag 500 should have 4 passes",
+		)
+
+		// Verify tag 600 (3 partner networks)
+		assert.Equal(
+			t,
+			uint64(3),
+			tagStats[600],
+			"tag 600 should have 3 passes",
+		)
+
+		// Verify tag 700 (4 external networks with port filtering - only high ports)
+		assert.Equal(
+			t,
+			uint64(4),
+			tagStats[700],
+			"tag 700 should have 4 passes",
+		)
+
+		// Verify total allowed sources count
+		assert.Equal(t, 3, len(vsStats.AllowedSources),
+			"should have exactly 3 allowed source stats entries")
+	})
+}

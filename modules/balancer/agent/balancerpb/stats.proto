@@ -214,6 +214,28 @@ message NamedRealStats {
 	RealStats stats = 2;
 }
 
+// Per-allowed-source statistics.
+//
+// Tracks packet counts for traffic matching a specific allowed source
+// configuration identified by its tag. Only sources with non-zero tags
+// are tracked; sources without tags (tag=0) do not generate statistics.
+//
+// MATCHING BEHAVIOR:
+// If a packet matches multiple allowed source configurations, statistics
+// are updated for only one of them (for anyone of match candidates). 
+// This ensures each packet is counted exactly once.
+message AllowedSourcesStats {
+	// Tag identifying the allowed source configuration.
+	// This corresponds to the tag field in the AllowedSources configuration.
+	// A tag of 0 indicates no tracking (stats not collected for this source).
+	uint32 tag = 1;
+
+	// Number of packets that passed the allowed source filter.
+	// Incremented when a packet's source address and port match this
+	// allowed source configuration and the packet is accepted for processing.
+	uint64 passes = 2;
+}
+
 // Virtual service statistics with identifier.
 //
 // Associates statistics with a specific virtual service and
@@ -227,6 +249,17 @@ message NamedVsStats {
 
 	// Per-real statistics for all reals backing this virtual service
 	repeated NamedRealStats reals = 3;
+
+	// Per-allowed-source statistics for this virtual service.
+	//
+	// Contains statistics for each allowed source configuration that has
+	// a non-zero tag. Sources without tags (tag=0) are not tracked and
+	// will not appear in this array.
+	//
+	// The array is populated based on actual traffic patterns - only
+	// allowed sources that have received matching packets will have
+	// statistics entries.
+	repeated AllowedSourcesStats allowed_sources = 4;
 }
 
 // Complete balancer statistics.

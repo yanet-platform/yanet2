@@ -41,7 +41,8 @@ func TestValidation_InvalidPortRange(t *testing.T) {
 					{
 						Id: &balancerpb.RelativeRealIdentifier{
 							Ip: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.1.1").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.1.1").
+									AsSlice(),
 							},
 							Port: 8080,
 						},
@@ -50,7 +51,8 @@ func TestValidation_InvalidPortRange(t *testing.T) {
 							Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
 						},
 						SrcMask: &balancerpb.Addr{
-							Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+							Bytes: netip.MustParseAddr("255.255.255.0").
+								AsSlice(),
 						},
 					},
 				},
@@ -59,10 +61,12 @@ func TestValidation_InvalidPortRange(t *testing.T) {
 						Nets: []*balancerpb.Net{
 							{
 								Addr: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("192.168.0.0").AsSlice(),
+									Bytes: netip.MustParseAddr("192.168.0.0").
+										AsSlice(),
 								},
 								Mask: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+									Bytes: netip.MustParseAddr("255.255.0.0").
+										AsSlice(),
 								},
 							},
 						},
@@ -80,8 +84,18 @@ func TestValidation_InvalidPortRange(t *testing.T) {
 
 	_, err := ProtoToHandlerConfig(config)
 	require.Error(t, err, "Expected error for invalid port range")
-	assert.Contains(t, err.Error(), "invalid range", "Error should mention invalid range")
-	assert.Contains(t, err.Error(), "from=8080", "Error should mention from value")
+	assert.Contains(
+		t,
+		err.Error(),
+		"invalid range",
+		"Error should mention invalid range",
+	)
+	assert.Contains(
+		t,
+		err.Error(),
+		"from=8080",
+		"Error should mention from value",
+	)
 	assert.Contains(t, err.Error(), "to=80", "Error should mention to value")
 }
 
@@ -123,7 +137,8 @@ func TestValidation_TransportProtoTcpAndUdp(t *testing.T) {
 					{
 						Id: &balancerpb.VsIdentifier{
 							Addr: &balancerpb.Addr{
-								Bytes: netip.MustParseAddr("10.0.0.100").AsSlice(),
+								Bytes: netip.MustParseAddr("10.0.0.100").
+									AsSlice(),
 							},
 							Port:  80,
 							Proto: tc.proto,
@@ -133,16 +148,19 @@ func TestValidation_TransportProtoTcpAndUdp(t *testing.T) {
 							{
 								Id: &balancerpb.RelativeRealIdentifier{
 									Ip: &balancerpb.Addr{
-										Bytes: netip.MustParseAddr("10.0.1.1").AsSlice(),
+										Bytes: netip.MustParseAddr("10.0.1.1").
+											AsSlice(),
 									},
 									Port: 8080,
 								},
 								Weight: 100,
 								SrcAddr: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+									Bytes: netip.MustParseAddr("172.16.0.0").
+										AsSlice(),
 								},
 								SrcMask: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+									Bytes: netip.MustParseAddr("255.255.255.0").
+										AsSlice(),
 								},
 							},
 						},
@@ -151,10 +169,12 @@ func TestValidation_TransportProtoTcpAndUdp(t *testing.T) {
 								Nets: []*balancerpb.Net{
 									{
 										Addr: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("192.168.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("192.168.0.0").
+												AsSlice(),
 										},
 										Mask: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("255.255.0.0").
+												AsSlice(),
 										},
 									},
 								},
@@ -165,9 +185,18 @@ func TestValidation_TransportProtoTcpAndUdp(t *testing.T) {
 			}
 
 			result, err := ProtoToHandlerConfig(config)
-			require.NoError(t, err, "Valid TCP/UDP protocol should not produce error")
+			require.NoError(
+				t,
+				err,
+				"Valid TCP/UDP protocol should not produce error",
+			)
 			require.NotNil(t, result, "Result should not be nil")
-			require.Len(t, result.VirtualServices, 1, "Should have one virtual service")
+			require.Len(
+				t,
+				result.VirtualServices,
+				1,
+				"Should have one virtual service",
+			)
 		})
 	}
 }
@@ -246,16 +275,19 @@ func TestValidation_AllowedSrcIPVersionMismatch(t *testing.T) {
 							{
 								Id: &balancerpb.RelativeRealIdentifier{
 									Ip: &balancerpb.Addr{
-										Bytes: netip.MustParseAddr("10.0.1.1").AsSlice(),
+										Bytes: netip.MustParseAddr("10.0.1.1").
+											AsSlice(),
 									},
 									Port: 8080,
 								},
 								Weight: 100,
 								SrcAddr: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+									Bytes: netip.MustParseAddr("172.16.0.0").
+										AsSlice(),
 								},
 								SrcMask: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("255.255.255.0").AsSlice(),
+									Bytes: netip.MustParseAddr("255.255.255.0").
+										AsSlice(),
 								},
 							},
 						},
@@ -264,10 +296,12 @@ func TestValidation_AllowedSrcIPVersionMismatch(t *testing.T) {
 								Nets: []*balancerpb.Net{
 									{
 										Addr: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr(tc.allowedSrcAddr).AsSlice(),
+											Bytes: netip.MustParseAddr(tc.allowedSrcAddr).
+												AsSlice(),
 										},
 										Mask: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr(tc.allowedSrcMask).AsSlice(),
+											Bytes: netip.MustParseAddr(tc.allowedSrcMask).
+												AsSlice(),
 										},
 									},
 								},
@@ -281,7 +315,12 @@ func TestValidation_AllowedSrcIPVersionMismatch(t *testing.T) {
 
 			if tc.expectError {
 				require.Error(t, err, "Expected error for IP version mismatch")
-				assert.Contains(t, err.Error(), tc.errorContains, "Error should mention IP version")
+				assert.Contains(
+					t,
+					err.Error(),
+					tc.errorContains,
+					"Error should mention IP version",
+				)
 			} else {
 				require.NoError(t, err, "Valid IP version match should not produce error")
 			}

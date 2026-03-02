@@ -382,7 +382,8 @@ func protoToVsConfig(
 			if vsAddr.Is4() != addr.Is4() {
 				return ffi.VsConfig{}, fmt.Errorf(
 					"allowed_src[%d].net[%d]: IP version mismatch - VS is %s but allowed_src network is %s",
-					i, j,
+					i,
+					j,
 					func() string {
 						if vsAddr.Is4() {
 							return "IPv4"
@@ -944,6 +945,22 @@ func ConvertBalancerStatsToProto(
 			})
 		}
 
+		// Convert allowed sources stats for this VS
+		allowedSourcesStats := make(
+			[]*balancerpb.AllowedSourcesStats,
+			0,
+			len(stats.Vs[i].AllowedSources),
+		)
+		for j := range stats.Vs[i].AllowedSources {
+			allowedSourcesStats = append(
+				allowedSourcesStats,
+				&balancerpb.AllowedSourcesStats{
+					Tag:    stats.Vs[i].AllowedSources[j].Tag,
+					Passes: stats.Vs[i].AllowedSources[j].Passes,
+				},
+			)
+		}
+
 		vsStats = append(vsStats, &balancerpb.NamedVsStats{
 			Vs: &balancerpb.VsIdentifier{
 				Addr: &balancerpb.Addr{
@@ -954,8 +971,9 @@ func ConvertBalancerStatsToProto(
 					stats.Vs[i].Identifier.TransportProto,
 				),
 			},
-			Stats: ConvertVsStatsToProto(&stats.Vs[i].Stats),
-			Reals: realStats,
+			Stats:          ConvertVsStatsToProto(&stats.Vs[i].Stats),
+			Reals:          realStats,
+			AllowedSources: allowedSourcesStats,
 		})
 	}
 

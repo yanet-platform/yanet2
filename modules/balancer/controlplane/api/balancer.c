@@ -253,6 +253,11 @@ balancer_stats_free(struct balancer_stats *stats) {
 		struct named_vs_stats *first_vs = &stats->vs[0];
 		struct named_real_stats *reals = first_vs->reals;
 		free(reals);
+		for (size_t vs_idx = 0; vs_idx < stats->vs_count; ++vs_idx) {
+			struct allowed_sources_stats *allowed_sources =
+				stats->vs[vs_idx].allowed_sources;
+			free(allowed_sources);
+		}
 	}
 	free(stats->vs);
 }

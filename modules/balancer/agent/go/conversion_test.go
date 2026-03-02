@@ -1698,7 +1698,8 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 						{
 							Id: &balancerpb.VsIdentifier{
 								Addr: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("192.168.1.100").AsSlice(),
+									Bytes: netip.MustParseAddr("192.168.1.100").
+										AsSlice(),
 								},
 								Port:  80,
 								Proto: balancerpb.TransportProto_TCP,
@@ -1709,10 +1710,12 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 								{
 									Nets: []*balancerpb.Net{{
 										Addr: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("10.0.0.0").
+												AsSlice(),
 										},
 										Mask: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("255.0.0.0").
+												AsSlice(),
 										},
 									}},
 									Tag: 12345, // Non-zero tag
@@ -1740,9 +1743,17 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 			},
 			verifyTag: func(t *testing.T, config *ffi.BalancerManagerConfig) {
 				require.Len(t, config.Balancer.Handler.VirtualServices, 1)
-				require.Len(t, config.Balancer.Handler.VirtualServices[0].AllowedSources, 1)
-				assert.Equal(t, uint32(12345), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
-					"Tag should be 12345")
+				require.Len(
+					t,
+					config.Balancer.Handler.VirtualServices[0].AllowedSources,
+					1,
+				)
+				assert.Equal(
+					t,
+					uint32(12345),
+					config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+					"Tag should be 12345",
+				)
 			},
 		},
 		{
@@ -1761,7 +1772,8 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 						{
 							Id: &balancerpb.VsIdentifier{
 								Addr: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("192.168.1.100").AsSlice(),
+									Bytes: netip.MustParseAddr("192.168.1.100").
+										AsSlice(),
 								},
 								Port:  80,
 								Proto: balancerpb.TransportProto_TCP,
@@ -1772,10 +1784,12 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 								{
 									Nets: []*balancerpb.Net{{
 										Addr: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("10.0.0.0").
+												AsSlice(),
 										},
 										Mask: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("255.0.0.0").
+												AsSlice(),
 										},
 									}},
 									// Tag not specified - should default to 0
@@ -1803,9 +1817,17 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 			},
 			verifyTag: func(t *testing.T, config *ffi.BalancerManagerConfig) {
 				require.Len(t, config.Balancer.Handler.VirtualServices, 1)
-				require.Len(t, config.Balancer.Handler.VirtualServices[0].AllowedSources, 1)
-				assert.Equal(t, uint32(0), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
-					"Tag should default to 0")
+				require.Len(
+					t,
+					config.Balancer.Handler.VirtualServices[0].AllowedSources,
+					1,
+				)
+				assert.Equal(
+					t,
+					uint32(0),
+					config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+					"Tag should default to 0",
+				)
 			},
 		},
 		{
@@ -1824,7 +1846,8 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 						{
 							Id: &balancerpb.VsIdentifier{
 								Addr: &balancerpb.Addr{
-									Bytes: netip.MustParseAddr("192.168.1.100").AsSlice(),
+									Bytes: netip.MustParseAddr("192.168.1.100").
+										AsSlice(),
 								},
 								Port:  80,
 								Proto: balancerpb.TransportProto_TCP,
@@ -1835,10 +1858,12 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 								{
 									Nets: []*balancerpb.Net{{
 										Addr: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("10.0.0.0").
+												AsSlice(),
 										},
 										Mask: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("255.0.0.0").
+												AsSlice(),
 										},
 									}},
 									Tag: 100,
@@ -1846,10 +1871,12 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 								{
 									Nets: []*balancerpb.Net{{
 										Addr: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("192.168.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("192.168.0.0").
+												AsSlice(),
 										},
 										Mask: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("255.255.0.0").
+												AsSlice(),
 										},
 									}},
 									Tag: 200,
@@ -1857,10 +1884,12 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 								{
 									Nets: []*balancerpb.Net{{
 										Addr: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("172.16.0.0").
+												AsSlice(),
 										},
 										Mask: &balancerpb.Addr{
-											Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+											Bytes: netip.MustParseAddr("255.255.0.0").
+												AsSlice(),
 										},
 									}},
 									// Tag not specified - should be 0
@@ -1888,13 +1917,29 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 			},
 			verifyTag: func(t *testing.T, config *ffi.BalancerManagerConfig) {
 				require.Len(t, config.Balancer.Handler.VirtualServices, 1)
-				require.Len(t, config.Balancer.Handler.VirtualServices[0].AllowedSources, 3)
-				assert.Equal(t, uint32(100), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
-					"First tag should be 100")
-				assert.Equal(t, uint32(200), config.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
-					"Second tag should be 200")
-				assert.Equal(t, uint32(0), config.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
-					"Third tag should be 0")
+				require.Len(
+					t,
+					config.Balancer.Handler.VirtualServices[0].AllowedSources,
+					3,
+				)
+				assert.Equal(
+					t,
+					uint32(100),
+					config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+					"First tag should be 100",
+				)
+				assert.Equal(
+					t,
+					uint32(200),
+					config.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
+					"Second tag should be 200",
+				)
+				assert.Equal(
+					t,
+					uint32(0),
+					config.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
+					"Third tag should be 0",
+				)
 			},
 		},
 	}
@@ -1924,7 +1969,9 @@ func TestAllowedSourcesTagRoundTrip(t *testing.T) {
 				VirtualServices: []ffi.VsConfig{
 					{
 						Identifier: ffi.VsIdentifier{
-							Addr:           netip.MustParseAddr("192.168.1.100"),
+							Addr: netip.MustParseAddr(
+								"192.168.1.100",
+							),
 							Port:           80,
 							TransportProto: ffi.VsTransportProtoTCP,
 						},
@@ -1933,21 +1980,27 @@ func TestAllowedSourcesTagRoundTrip(t *testing.T) {
 						AllowedSources: []ffi.AllowedSources{
 							{
 								Nets: []xnetip.NetWithMask{
-									xnetip.FromPrefix(netip.MustParsePrefix("10.0.0.0/8")),
+									xnetip.FromPrefix(
+										netip.MustParsePrefix("10.0.0.0/8"),
+									),
 								},
 								PortRanges: []ffi.PortRange{},
 								Tag:        12345,
 							},
 							{
 								Nets: []xnetip.NetWithMask{
-									xnetip.FromPrefix(netip.MustParsePrefix("192.168.0.0/16")),
+									xnetip.FromPrefix(
+										netip.MustParsePrefix("192.168.0.0/16"),
+									),
 								},
 								PortRanges: []ffi.PortRange{},
 								Tag:        0, // Zero tag
 							},
 							{
 								Nets: []xnetip.NetWithMask{
-									xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/12")),
+									xnetip.FromPrefix(
+										netip.MustParsePrefix("172.16.0.0/12"),
+									),
 								},
 								PortRanges: []ffi.PortRange{},
 								Tag:        99999,
@@ -1984,24 +2037,52 @@ func TestAllowedSourcesTagRoundTrip(t *testing.T) {
 	require.Len(t, protoConfig.PacketHandler.Vs[0].AllowedSrcs, 3)
 
 	// Verify tags in proto
-	assert.Equal(t, uint32(12345), protoConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
-		"First tag should be 12345 in proto")
-	assert.Equal(t, uint32(0), protoConfig.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
-		"Second tag should be 0 in proto")
-	assert.Equal(t, uint32(99999), protoConfig.PacketHandler.Vs[0].AllowedSrcs[2].Tag,
-		"Third tag should be 99999 in proto")
+	assert.Equal(
+		t,
+		uint32(12345),
+		protoConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+		"First tag should be 12345 in proto",
+	)
+	assert.Equal(
+		t,
+		uint32(0),
+		protoConfig.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
+		"Second tag should be 0 in proto",
+	)
+	assert.Equal(
+		t,
+		uint32(99999),
+		protoConfig.PacketHandler.Vs[0].AllowedSrcs[2].Tag,
+		"Third tag should be 99999 in proto",
+	)
 
 	// Convert back to FFI
 	convertedConfig, err := ProtoToManagerConfig(protoConfig)
 	require.NoError(t, err)
 	require.Len(t, convertedConfig.Balancer.Handler.VirtualServices, 1)
-	require.Len(t, convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources, 3)
+	require.Len(
+		t,
+		convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources,
+		3,
+	)
 
 	// Verify tags are preserved
-	assert.Equal(t, uint32(12345), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
-		"First tag should be preserved as 12345")
-	assert.Equal(t, uint32(0), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
-		"Second tag should be preserved as 0")
-	assert.Equal(t, uint32(99999), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
-		"Third tag should be preserved as 99999")
+	assert.Equal(
+		t,
+		uint32(12345),
+		convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+		"First tag should be preserved as 12345",
+	)
+	assert.Equal(
+		t,
+		uint32(0),
+		convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
+		"Second tag should be preserved as 0",
+	)
+	assert.Equal(
+		t,
+		uint32(99999),
+		convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
+		"Third tag should be preserved as 99999",
+	)
 }

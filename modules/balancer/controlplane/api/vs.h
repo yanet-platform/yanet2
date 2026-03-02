@@ -598,6 +598,12 @@ struct vs_stats {
 	uint64_t outgoing_bytes;
 };
 
+// TODO: docs
+struct allowed_sources_stats {
+	uint32_t tag;
+	uint64_t passes;
+};
+
 /**
  * Virtual service statistics with identifier.
  *
@@ -625,6 +631,10 @@ struct named_vs_stats {
 	 * configuration order of reals in the virtual service.
 	 */
 	struct named_real_stats *reals;
+
+	// TODO: docs
+	size_t allowed_sources_count;
+	struct allowed_sources_stats *allowed_sources;
 };
 
 /**
