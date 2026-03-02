@@ -72,11 +72,9 @@ select_real(
 		// update stats
 
 		// real stats
-		packet_ctx_update_real_stats_on_packet(ctx);
 		REAL_STATS_INC(ops_packets, ctx);
 
 		// vs stats
-		packet_ctx_update_vs_stats_on_outgoing_packet(ctx);
 		VS_STATS_INC(ops_packets, ctx);
 
 		return real;
@@ -147,10 +145,6 @@ select_real(
 			session_state->last_packet_timestamp = now;
 			session_unlock(session_lock);
 
-			// update real and virtual service stats
-			packet_ctx_update_real_stats_on_packet(ctx);
-			packet_ctx_update_vs_stats_on_outgoing_packet(ctx);
-
 			// real is selected, just return it.
 			return real;
 		}
@@ -199,10 +193,7 @@ select_real(
 	session_unlock(session_lock);
 
 	// update stats
-	packet_ctx_update_vs_stats_on_outgoing_packet(ctx);
 	VS_STATS_INC(created_sessions, ctx);
-
-	packet_ctx_update_real_stats_on_packet(ctx);
 	REAL_STATS_INC(created_sessions, ctx);
 
 	return real;

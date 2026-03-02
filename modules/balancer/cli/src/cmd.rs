@@ -163,7 +163,8 @@ pub struct EnableRealCmd {
     #[arg(long, short = 'n')]
     pub name: Option<String>,
 
-    /// Virtual service in format "ip:port/proto" (e.g., "192.168.1.1:80/tcp")
+    /// Virtual service in format "ip:port/proto", "[ipv6]:port/proto", or "ipv6:port/proto"
+    /// (e.g., "192.168.1.1:80/tcp", "[2001:db8::1]:443/tcp", or "2001:db8::1:443/tcp")
     #[arg(long)]
     pub vs: String,
 
@@ -180,53 +181,99 @@ pub struct EnableRealCmd {
     pub flush: bool,
 }
 
-impl TryFrom<EnableRealCmd> for balancerpb::UpdateRealsRequest {
-    type Error = String;
+/// Helper function to parse VS identifier from string
+/// Supports three formats:
+/// - IPv4: "192.168.1.1:80/tcp"
+/// - IPv6 with brackets: "[2001:db8::1]:443/tcp"
+/// - IPv6 without brackets: "2001:db8::1:443/tcp"
+fn parse_vs_identifier(vs_str: &str) -> Result<(std::net::IpAddr, u16, balancerpb::TransportProto), String> {
+    // Split by '/' to separate address:port from protocol
+    let vs_parts: Vec<&str> = vs_str.split('/').collect();
+    if vs_parts.len() != 2 {
+        return Err(format!(
+            "invalid --vs format: '{}'. Expected format: 'ip:port/proto', '[ipv6]:port/proto', or 'ipv6:port/proto'",
+            vs_str
+        ));
+    }
 
-    fn try_from(cmd: EnableRealCmd) -> Result<Self, Self::Error> {
-        // Parse the --vs option in format "ip:port/proto"
-        let vs_parts: Vec<&str> = cmd.vs.split('/').collect();
-        if vs_parts.len() != 2 {
+    let addr_port = vs_parts[0];
+    let proto_str = vs_parts[1];
+
+    // Parse protocol (case-insensitive)
+    let proto = match proto_str.to_uppercase().as_str() {
+        "TCP" => balancerpb::TransportProto::Tcp,
+        "UDP" => balancerpb::TransportProto::Udp,
+        _ => {
             return Err(format!(
-                "invalid --vs format: '{}'. Expected format: 'ip:port/proto' (e.g., '192.168.1.1:80/tcp')",
-                cmd.vs
+                "invalid proto: '{}'. Expected 'tcp' or 'udp' (case-insensitive)",
+                proto_str
             ));
         }
+    };
 
-        let addr_port = vs_parts[0];
-        let proto_str = vs_parts[1];
+    // Parse IP and port, handling IPv4, IPv6 with brackets, and IPv6 without brackets
+    let (ip_str, port_str) = if addr_port.starts_with('[') {
+        // IPv6 bracket notation: [ipv6]:port
+        let bracket_end = addr_port.find(']').ok_or_else(|| {
+            format!(
+                "invalid IPv6 bracket notation: '{}'. Expected format: '[ipv6]:port'",
+                addr_port
+            )
+        })?;
 
-        // Parse protocol (case-insensitive)
-        let proto = match proto_str.to_uppercase().as_str() {
-            "TCP" => balancerpb::TransportProto::Tcp,
-            "UDP" => balancerpb::TransportProto::Udp,
-            _ => {
-                return Err(format!(
-                    "invalid proto: '{}'. Expected 'tcp' or 'udp' (case-insensitive)",
-                    proto_str
-                ));
-            }
-        };
+        let ip_part = &addr_port[1..bracket_end]; // Extract IP without brackets
+        let remaining = &addr_port[bracket_end + 1..];
 
-        // Parse IP and port
-        let addr_port_parts: Vec<&str> = addr_port.rsplitn(2, ':').collect();
-        if addr_port_parts.len() != 2 {
+        if !remaining.starts_with(':') {
             return Err(format!(
-                "invalid address:port format: '{}'. Expected format: 'ip:port'",
+                "invalid IPv6 bracket notation: '{}'. Expected ':' after ']'",
                 addr_port
             ));
         }
 
-        let port_str = addr_port_parts[0];
-        let ip_str = addr_port_parts[1];
+        let port_part = &remaining[1..]; // Skip the ':'
+        (ip_part, port_part)
+    } else {
+        // IPv4 or IPv6 without brackets
+        // Split from the right to get the last component (port)
+        let addr_port_parts: Vec<&str> = addr_port.rsplitn(2, ':').collect();
+        if addr_port_parts.len() != 2 {
+            return Err(format!(
+                "invalid address:port format: '{}'. Expected format: 'ip:port' or '[ipv6]:port'",
+                addr_port
+            ));
+        }
 
-        let virtual_port: u16 = port_str
-            .parse()
-            .map_err(|e| format!("invalid port '{}': {}", port_str, e))?;
+        let port_part = addr_port_parts[0];
+        let ip_part = addr_port_parts[1];
 
-        let virtual_ip: std::net::IpAddr = ip_str
-            .parse()
-            .map_err(|e| format!("invalid virtual IP '{}': {}", ip_str, e))?;
+        // Try to parse the port to validate it's actually a port number
+        // This helps distinguish IPv6 addresses from port numbers
+        if port_part.parse::<u16>().is_err() {
+            return Err(format!(
+                "invalid port in '{}'. Last component after ':' must be a valid port number",
+                addr_port
+            ));
+        }
+
+        (ip_part, port_part)
+    };
+
+    let virtual_port: u16 = port_str
+        .parse()
+        .map_err(|e| format!("invalid port '{}': {}", port_str, e))?;
+
+    let virtual_ip: std::net::IpAddr = ip_str.parse().map_err(|e| format!("invalid IP '{}': {}", ip_str, e))?;
+
+    Ok((virtual_ip, virtual_port, proto))
+}
+
+impl TryFrom<EnableRealCmd> for balancerpb::UpdateRealsRequest {
+    type Error = String;
+
+    fn try_from(cmd: EnableRealCmd) -> Result<Self, Self::Error> {
+        // Parse the --vs option
+        let (virtual_ip, virtual_port, proto) = parse_vs_identifier(&cmd.vs)?;
 
         // Create updates for all real IPs
         let mut updates = Vec::new();
@@ -278,7 +325,8 @@ pub struct DisableRealCmd {
     #[arg(long, short = 'n')]
     pub name: Option<String>,
 
-    /// Virtual service in format "ip:port/proto" (e.g., "192.168.1.1:80/tcp")
+    /// Virtual service in format "ip:port/proto", "[ipv6]:port/proto", or "ipv6:port/proto"
+    /// (e.g., "192.168.1.1:80/tcp", "[2001:db8::1]:443/tcp", or "2001:db8::1:443/tcp")
     #[arg(long)]
     pub vs: String,
 
@@ -295,49 +343,8 @@ impl TryFrom<DisableRealCmd> for balancerpb::UpdateRealsRequest {
     type Error = String;
 
     fn try_from(cmd: DisableRealCmd) -> Result<Self, Self::Error> {
-        // Parse the --vs option in format "ip:port/proto"
-        let vs_parts: Vec<&str> = cmd.vs.split('/').collect();
-        if vs_parts.len() != 2 {
-            return Err(format!(
-                "invalid --vs format: '{}'. Expected format: 'ip:port/proto' (e.g., '192.168.1.1:80/tcp')",
-                cmd.vs
-            ));
-        }
-
-        let addr_port = vs_parts[0];
-        let proto_str = vs_parts[1];
-
-        // Parse protocol (case-insensitive)
-        let proto = match proto_str.to_uppercase().as_str() {
-            "TCP" => balancerpb::TransportProto::Tcp,
-            "UDP" => balancerpb::TransportProto::Udp,
-            _ => {
-                return Err(format!(
-                    "invalid proto: '{}'. Expected 'tcp' or 'udp' (case-insensitive)",
-                    proto_str
-                ));
-            }
-        };
-
-        // Parse IP and port
-        let addr_port_parts: Vec<&str> = addr_port.rsplitn(2, ':').collect();
-        if addr_port_parts.len() != 2 {
-            return Err(format!(
-                "invalid address:port format: '{}'. Expected format: 'ip:port'",
-                addr_port
-            ));
-        }
-
-        let port_str = addr_port_parts[0];
-        let ip_str = addr_port_parts[1];
-
-        let virtual_port: u16 = port_str
-            .parse()
-            .map_err(|e| format!("invalid port '{}': {}", port_str, e))?;
-
-        let virtual_ip: std::net::IpAddr = ip_str
-            .parse()
-            .map_err(|e| format!("invalid virtual IP '{}': {}", ip_str, e))?;
+        // Parse the --vs option
+        let (virtual_ip, virtual_port, proto) = parse_vs_identifier(&cmd.vs)?;
 
         // Create updates for all real IPs
         let mut updates = Vec::new();
@@ -441,11 +448,11 @@ pub struct StatsCmd {
     pub device: Option<String>,
 
     /// Pipeline name (optional)
-    #[arg(long, short = 'm')]
+    #[arg(long, short = 'p')]
     pub pipeline: Option<String>,
 
     /// Function name (optional)
-    #[arg(long, short = 'p')]
+    #[arg(long, short = 'f')]
     pub function: Option<String>,
 
     /// Chain name (optional)

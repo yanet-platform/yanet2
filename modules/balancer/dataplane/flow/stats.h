@@ -9,12 +9,32 @@
 // Common module stats
 ////////////////////////////////////////////////////////////////////////////////
 
+////////////////////////////////////////////////////////////////////////////////
+
+// FWD
+
+static inline void 
+packet_ctx_update_vs_stats_on_outgoing_packet(struct packet_ctx *ctx);
+
+static inline void 
+packet_ctx_update_real_stats_on_packet(struct packet_ctx *ctx);
+
+////////////////////////////////////////////////////////////////////////////////
+
 static inline void
 packet_ctx_update_common_stats_on_outgoing_packet(struct packet_ctx *ctx) {
 	uint64_t pkt_len = ctx->packet->mbuf->pkt_len;
 
 	ctx->stats.common->outgoing_packets += 1;
 	ctx->stats.common->outgoing_bytes += pkt_len;
+
+	if (ctx->vs.ptr != NULL) {
+		packet_ctx_update_vs_stats_on_outgoing_packet(ctx);
+	}
+
+	if (ctx->real.ptr != NULL) {
+		packet_ctx_update_real_stats_on_packet(ctx);
+	}
 }
 
 static inline void
