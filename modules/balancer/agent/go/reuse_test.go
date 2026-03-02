@@ -1326,4 +1326,556 @@ func TestACLAndFilterReuse(t *testing.T) {
 		// All ACLs should be reused (duplicates don't matter)
 		verifyUpdateInfo(t, updateInfo, true, true, 50)
 	})
+
+	// Test 23: ACL with different tags - should be considered equal (tags don't affect ACL comparison)
+	t.Run("ACLWithDifferentTags_ShouldBeEqual", func(t *testing.T) {
+		// Create initial config with specific tags
+		vsList := []*balancerpb.VirtualService{
+			createVS(
+				netip.MustParseAddr("10.0.3.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				[]*balancerpb.AllowedSources{
+					{
+						Nets: []*balancerpb.Net{{
+							Addr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+							},
+							Mask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+							},
+						}},
+						Ports: []*balancerpb.PortsRange{{From: 1024, To: 65535}},
+						Tag:   100, // Tag = 100
+					},
+					{
+						Nets: []*balancerpb.Net{{
+							Addr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("192.168.0.0").AsSlice(),
+							},
+							Mask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+							},
+						}},
+						Ports: []*balancerpb.PortsRange{{From: 80, To: 80}, {From: 443, To: 443}},
+						Tag:   200, // Tag = 200
+					},
+				},
+			),
+			createVS(
+				netip.MustParseAddr("10.0.3.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				[]*balancerpb.AllowedSources{
+					{
+						Nets: []*balancerpb.Net{{
+							Addr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+							},
+							Mask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+							},
+						}},
+						Tag: 300, // Tag = 300
+					},
+				},
+			),
+		}
+		config := createConfig(vsList)
+
+		manager, err := agent.BalancerManager("test")
+		require.NoError(t, err)
+
+		updateInfo, err := manager.Update(config, m.CurrentTime())
+		require.NoError(t, err)
+
+		// Nothing reused (new VS set)
+		verifyUpdateInfo(t, updateInfo, false, false, 0)
+
+		// Update with same ACL rules but different tags - should be considered equal
+		vsList2 := []*balancerpb.VirtualService{
+			createVS(
+				netip.MustParseAddr("10.0.3.1"),
+				80,
+				balancerpb.TransportProto_TCP,
+				[]*balancerpb.AllowedSources{
+					{
+						Nets: []*balancerpb.Net{{
+							Addr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+							},
+							Mask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+							},
+						}},
+						Ports: []*balancerpb.PortsRange{{From: 1024, To: 65535}},
+						Tag:   999, // Different tag (was 100)
+					},
+					{
+						Nets: []*balancerpb.Net{{
+							Addr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("192.168.0.0").AsSlice(),
+							},
+							Mask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+							},
+						}},
+						Ports: []*balancerpb.PortsRange{{From: 80, To: 80}, {From: 443, To: 443}},
+						Tag:   888, // Different tag (was 200)
+					},
+				},
+			),
+			createVS(
+				netip.MustParseAddr("10.0.3.2"),
+				80,
+				balancerpb.TransportProto_TCP,
+				[]*balancerpb.AllowedSources{
+					{
+						Nets: []*balancerpb.Net{{
+							Addr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+							},
+							Mask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+							},
+						}},
+						Tag: 0, // Different tag (was 300)
+					},
+				},
+			),
+		}
+		config2 := createConfig(vsList2)
+
+		updateInfo2, err := manager.Update(config2, m.CurrentTime())
+		require.NoError(t, err)
+
+		// All ACLs should be reused (tags don't affect ACL comparison)
+		verifyUpdateInfo(t, updateInfo2, true, true, 2)
+	})
+
+	// Test 24: Verify tag values are preserved in config after update
+	t.Run("TagValuesPreservedInConfig", func(t *testing.T) {
+		// Get current config and verify tag values
+		manager, err := agent.BalancerManager("test")
+		require.NoError(t, err)
+
+		config := manager.Config()
+		require.NotNil(t, config)
+		require.NotNil(t, config.PacketHandler)
+		require.Len(t, config.PacketHandler.Vs, 2)
+
+		// Verify first VS tags
+		require.Len(t, config.PacketHandler.Vs[0].AllowedSrcs, 2)
+		assert.Equal(
+			t,
+			uint64(999),
+			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"first VS first tag should be 999",
+		)
+		assert.Equal(
+			t,
+			uint64(888),
+			config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
+			"first VS second tag should be 888",
+		)
+
+		// Verify second VS tag
+		require.Len(t, config.PacketHandler.Vs[1].AllowedSrcs, 1)
+		assert.Equal(
+			t,
+			uint64(0),
+			config.PacketHandler.Vs[1].AllowedSrcs[0].Tag,
+			"second VS tag should be 0",
+		)
+	})
+
+	// Test 25: ACL reuse with many nets and port ranges in different order and with different tags
+	t.Run("ACLReuseWithManyNetsAndPortRanges", func(t *testing.T) {
+		// Helper to create AllowedSources with many nets and port ranges
+		createManyNetsACL := func(variant int, isIPv6 bool, tag uint64, rng *rand.Rand) []*balancerpb.AllowedSources {
+			numNets := 10 + rng.IntN(6) // 10-15 nets
+			numPorts := 3 + rng.IntN(3) // 3-5 port ranges
+
+			nets := make([]*balancerpb.Net, numNets)
+			for i := range numNets {
+				if isIPv6 {
+					// Generate IPv6 networks
+					addr := [16]byte{
+						0x20, 0x01, 0x0d, 0xb8,
+						byte(variant), byte(i), 0, 0,
+						0, 0, 0, 0, 0, 0, 0, 0,
+					}
+					mask := [16]byte{
+						0xff, 0xff, 0xff, 0xff,
+						0xff, 0xff, 0, 0,
+						0, 0, 0, 0, 0, 0, 0, 0,
+					}
+					nets[i] = &balancerpb.Net{
+						Addr: &balancerpb.Addr{Bytes: netip.AddrFrom16(addr).AsSlice()},
+						Mask: &balancerpb.Addr{Bytes: netip.AddrFrom16(mask).AsSlice()},
+					}
+				} else {
+					// Generate IPv4 networks
+					addr := [4]byte{byte(10 + variant%240), byte(i), 0, 0}
+					mask := [4]byte{255, 255, 0, 0}
+					nets[i] = &balancerpb.Net{
+						Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4(addr).AsSlice()},
+						Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4(mask).AsSlice()},
+					}
+				}
+			}
+
+			ports := make([]*balancerpb.PortsRange, numPorts)
+			for i := range numPorts {
+				switch i {
+				case 0:
+					ports[i] = &balancerpb.PortsRange{From: 80, To: 80}
+				case 1:
+					ports[i] = &balancerpb.PortsRange{From: 443, To: 443}
+				case 2:
+					ports[i] = &balancerpb.PortsRange{From: 1024, To: 2048}
+				case 3:
+					ports[i] = &balancerpb.PortsRange{From: 8000, To: 9000}
+				case 4:
+					ports[i] = &balancerpb.PortsRange{From: 3000, To: 3999}
+				}
+			}
+
+			return []*balancerpb.AllowedSources{
+				{
+					Nets:  nets,
+					Ports: ports,
+					Tag:   tag,
+				},
+			}
+		}
+
+		// Helper to shuffle nets in AllowedSources
+		shuffleNets := func(acl []*balancerpb.AllowedSources, rng *rand.Rand) []*balancerpb.AllowedSources {
+			result := make([]*balancerpb.AllowedSources, len(acl))
+			for i, rule := range acl {
+				newNets := make([]*balancerpb.Net, len(rule.Nets))
+				copy(newNets, rule.Nets)
+				rng.Shuffle(len(newNets), func(i, j int) {
+					newNets[i], newNets[j] = newNets[j], newNets[i]
+				})
+				result[i] = &balancerpb.AllowedSources{
+					Nets:  newNets,
+					Ports: rule.Ports,
+					Tag:   rule.Tag,
+				}
+			}
+			return result
+		}
+
+		// Helper to shuffle port ranges in AllowedSources
+		shufflePorts := func(acl []*balancerpb.AllowedSources, rng *rand.Rand) []*balancerpb.AllowedSources {
+			result := make([]*balancerpb.AllowedSources, len(acl))
+			for i, rule := range acl {
+				newPorts := make([]*balancerpb.PortsRange, len(rule.Ports))
+				copy(newPorts, rule.Ports)
+				rng.Shuffle(len(newPorts), func(i, j int) {
+					newPorts[i], newPorts[j] = newPorts[j], newPorts[i]
+				})
+				result[i] = &balancerpb.AllowedSources{
+					Nets:  rule.Nets,
+					Ports: newPorts,
+					Tag:   rule.Tag,
+				}
+			}
+			return result
+		}
+
+		// Helper to change tags in AllowedSources
+		changeTags := func(acl []*balancerpb.AllowedSources, newTag uint64) []*balancerpb.AllowedSources {
+			result := make([]*balancerpb.AllowedSources, len(acl))
+			for i, rule := range acl {
+				result[i] = &balancerpb.AllowedSources{
+					Nets:  rule.Nets,
+					Ports: rule.Ports,
+					Tag:   newTag,
+				}
+			}
+			return result
+		}
+
+		rng := rand.New(rand.NewPCG(300, 0)) // Deterministic seed
+
+		// Scenario 1: Initial configuration with many nets and port ranges
+		acl1IPv4 := createManyNetsACL(1, false, 100, rng)
+		acl2IPv4 := createManyNetsACL(2, false, 200, rng)
+		acl1IPv6 := createManyNetsACL(1, true, 100, rng)
+		acl2IPv6 := createManyNetsACL(2, true, 200, rng)
+
+		vsList := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6),
+		}
+		config := createConfig(vsList)
+
+		manager, err := agent.BalancerManager("test")
+		require.NoError(t, err)
+
+		updateInfo, err := manager.Update(config, m.CurrentTime())
+		require.NoError(t, err)
+
+		// Nothing reused (new VS set)
+		verifyUpdateInfo(t, updateInfo, false, false, 0)
+
+		// Scenario 2: Same ACL with shuffled net order
+		shuffleRng := rand.New(rand.NewPCG(301, 0))
+		acl1IPv4Shuffled := shuffleNets(acl1IPv4, shuffleRng)
+		acl2IPv4Shuffled := shuffleNets(acl2IPv4, shuffleRng)
+		acl1IPv6Shuffled := shuffleNets(acl1IPv6, shuffleRng)
+		acl2IPv6Shuffled := shuffleNets(acl2IPv6, shuffleRng)
+
+		vsList2 := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4Shuffled),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Shuffled),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Shuffled),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Shuffled),
+		}
+		config2 := createConfig(vsList2)
+
+		updateInfo2, err := manager.Update(config2, m.CurrentTime())
+		require.NoError(t, err)
+
+		// All ACLs should be reused (net order doesn't matter)
+		verifyUpdateInfo(t, updateInfo2, true, true, 4)
+
+		// Scenario 3: Same ACL with shuffled port range order
+		shuffleRng2 := rand.New(rand.NewPCG(302, 0))
+		acl1IPv4PortShuffled := shufflePorts(acl1IPv4, shuffleRng2)
+		acl2IPv4PortShuffled := shufflePorts(acl2IPv4, shuffleRng2)
+		acl1IPv6PortShuffled := shufflePorts(acl1IPv6, shuffleRng2)
+		acl2IPv6PortShuffled := shufflePorts(acl2IPv6, shuffleRng2)
+
+		vsList3 := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4PortShuffled),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4PortShuffled),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6PortShuffled),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6PortShuffled),
+		}
+		config3 := createConfig(vsList3)
+
+		updateInfo3, err := manager.Update(config3, m.CurrentTime())
+		require.NoError(t, err)
+
+		// All ACLs should be reused (port range order doesn't matter)
+		verifyUpdateInfo(t, updateInfo3, true, true, 4)
+
+		// Scenario 4: Same ACL with different tags
+		acl1IPv4NewTag := changeTags(acl1IPv4, 999)
+		acl2IPv4NewTag := changeTags(acl2IPv4, 888)
+		acl1IPv6NewTag := changeTags(acl1IPv6, 777)
+		acl2IPv6NewTag := changeTags(acl2IPv6, 666)
+
+		vsList4 := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4NewTag),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4NewTag),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6NewTag),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6NewTag),
+		}
+		config4 := createConfig(vsList4)
+
+		updateInfo4, err := manager.Update(config4, m.CurrentTime())
+		require.NoError(t, err)
+
+		// All ACLs should be reused (tags don't affect ACL comparison)
+		verifyUpdateInfo(t, updateInfo4, true, true, 4)
+
+		// Scenario 5: Combined - shuffled nets, shuffled ports, and different tags
+		shuffleRng3 := rand.New(rand.NewPCG(303, 0))
+		shuffleRng4 := rand.New(rand.NewPCG(304, 0))
+
+		acl1IPv4Combined := shuffleNets(acl1IPv4, shuffleRng3)
+		acl1IPv4Combined = shufflePorts(acl1IPv4Combined, shuffleRng4)
+		acl1IPv4Combined = changeTags(acl1IPv4Combined, 111)
+
+		acl2IPv4Combined := shuffleNets(acl2IPv4, shuffleRng3)
+		acl2IPv4Combined = shufflePorts(acl2IPv4Combined, shuffleRng4)
+		acl2IPv4Combined = changeTags(acl2IPv4Combined, 222)
+
+		acl1IPv6Combined := shuffleNets(acl1IPv6, shuffleRng3)
+		acl1IPv6Combined = shufflePorts(acl1IPv6Combined, shuffleRng4)
+		acl1IPv6Combined = changeTags(acl1IPv6Combined, 333)
+
+		acl2IPv6Combined := shuffleNets(acl2IPv6, shuffleRng3)
+		acl2IPv6Combined = shufflePorts(acl2IPv6Combined, shuffleRng4)
+		acl2IPv6Combined = changeTags(acl2IPv6Combined, 444)
+
+		vsList5 := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4Combined),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+		}
+		config5 := createConfig(vsList5)
+
+		updateInfo5, err := manager.Update(config5, m.CurrentTime())
+		require.NoError(t, err)
+
+		// All ACLs should be reused (order and tags don't matter)
+		verifyUpdateInfo(t, updateInfo5, true, true, 4)
+
+		// Verify that tags are preserved in the final config
+		finalConfig := manager.Config()
+		require.NotNil(t, finalConfig)
+		require.NotNil(t, finalConfig.PacketHandler)
+		require.Len(t, finalConfig.PacketHandler.Vs, 4)
+
+		// Check that the new tags are stored correctly
+		assert.Equal(t, uint64(111), finalConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag, "first IPv4 VS tag should be 111")
+		assert.Equal(t, uint64(222), finalConfig.PacketHandler.Vs[1].AllowedSrcs[0].Tag, "second IPv4 VS tag should be 222")
+		assert.Equal(t, uint64(333), finalConfig.PacketHandler.Vs[2].AllowedSrcs[0].Tag, "first IPv6 VS tag should be 333")
+		assert.Equal(t, uint64(444), finalConfig.PacketHandler.Vs[3].AllowedSrcs[0].Tag, "second IPv6 VS tag should be 444")
+
+		// Scenario 6: ALMOST matching - one net is different (should NOT reuse)
+		rng6 := rand.New(rand.NewPCG(300, 0))
+		acl1IPv4AlmostMatch := createManyNetsACL(1, false, 111, rng6)
+		// Modify one net in the middle
+		acl1IPv4AlmostMatch[0].Nets[5] = &balancerpb.Net{
+			Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{99, 99, 0, 0}).AsSlice()},
+			Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).AsSlice()},
+		}
+
+		vsList6 := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4AlmostMatch),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+		}
+		config6 := createConfig(vsList6)
+
+		updateInfo6, err := manager.Update(config6, m.CurrentTime())
+		require.NoError(t, err)
+
+		// Only 3 ACLs should be reused (first IPv4 VS has different net)
+		verifyUpdateInfo(t, updateInfo6, true, true, 3)
+
+		// Scenario 7: ALMOST matching - one port range is different (should NOT reuse)
+		rng7 := rand.New(rand.NewPCG(300, 0))
+		acl1IPv4AlmostMatchPort := createManyNetsACL(1, false, 111, rng7)
+		// Modify one port range
+		acl1IPv4AlmostMatchPort[0].Ports[1] = &balancerpb.PortsRange{From: 8443, To: 8443} // Changed from 443
+
+		vsList7 := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4AlmostMatchPort),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+		}
+		config7 := createConfig(vsList7)
+
+		updateInfo7, err := manager.Update(config7, m.CurrentTime())
+		require.NoError(t, err)
+
+		// Only 3 ACLs should be reused (first IPv4 VS has different port range)
+		verifyUpdateInfo(t, updateInfo7, true, true, 3)
+
+		// Scenario 8: ALMOST matching - one net is missing (should NOT reuse)
+		rng8 := rand.New(rand.NewPCG(300, 0))
+		acl1IPv4MissingNet := createManyNetsACL(1, false, 111, rng8)
+		// Remove one net from the middle
+		acl1IPv4MissingNet[0].Nets = append(acl1IPv4MissingNet[0].Nets[:3], acl1IPv4MissingNet[0].Nets[4:]...)
+
+		vsList8 := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4MissingNet),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+		}
+		config8 := createConfig(vsList8)
+
+		updateInfo8, err := manager.Update(config8, m.CurrentTime())
+		require.NoError(t, err)
+
+		// Only 3 ACLs should be reused (first IPv4 VS has missing net)
+		verifyUpdateInfo(t, updateInfo8, true, true, 3)
+
+		// Scenario 9: ALMOST matching - one port range is missing (should NOT reuse)
+		rng9 := rand.New(rand.NewPCG(300, 0))
+		acl1IPv4MissingPort := createManyNetsACL(1, false, 111, rng9)
+		// Remove one port range
+		acl1IPv4MissingPort[0].Ports = acl1IPv4MissingPort[0].Ports[:len(acl1IPv4MissingPort[0].Ports)-1]
+
+		vsList9 := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4MissingPort),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+		}
+		config9 := createConfig(vsList9)
+
+		updateInfo9, err := manager.Update(config9, m.CurrentTime())
+		require.NoError(t, err)
+
+		// Only 3 ACLs should be reused (first IPv4 VS has missing port range)
+		verifyUpdateInfo(t, updateInfo9, true, true, 3)
+
+		// Scenario 10: ALMOST matching - one extra net added (should NOT reuse)
+		rng10 := rand.New(rand.NewPCG(300, 0))
+		acl1IPv4ExtraNet := createManyNetsACL(1, false, 111, rng10)
+		// Add one extra net
+		acl1IPv4ExtraNet[0].Nets = append(acl1IPv4ExtraNet[0].Nets, &balancerpb.Net{
+			Addr: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{88, 88, 0, 0}).AsSlice()},
+			Mask: &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 255, 0, 0}).AsSlice()},
+		})
+
+		vsList10 := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4ExtraNet),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+		}
+		config10 := createConfig(vsList10)
+
+		updateInfo10, err := manager.Update(config10, m.CurrentTime())
+		require.NoError(t, err)
+
+		// Only 3 ACLs should be reused (first IPv4 VS has extra net)
+		verifyUpdateInfo(t, updateInfo10, true, true, 3)
+
+		// Scenario 11: ALMOST matching - one extra port range added (should NOT reuse)
+		rng11 := rand.New(rand.NewPCG(300, 0))
+		acl1IPv4ExtraPort := createManyNetsACL(1, false, 111, rng11)
+		// Add one extra port range
+		acl1IPv4ExtraPort[0].Ports = append(acl1IPv4ExtraPort[0].Ports, &balancerpb.PortsRange{From: 9999, To: 9999})
+
+		vsList11 := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4ExtraPort),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+		}
+		config11 := createConfig(vsList11)
+
+		updateInfo11, err := manager.Update(config11, m.CurrentTime())
+		require.NoError(t, err)
+
+		// Only 3 ACLs should be reused (first IPv4 VS has extra port range)
+		verifyUpdateInfo(t, updateInfo11, true, true, 3)
+
+		// Scenario 12: ALMOST matching - net mask is different (should NOT reuse)
+		rng12 := rand.New(rand.NewPCG(300, 0))
+		acl1IPv4DifferentMask := createManyNetsACL(1, false, 111, rng12)
+		// Change mask of one net
+		acl1IPv4DifferentMask[0].Nets[2].Mask = &balancerpb.Addr{Bytes: netip.AddrFrom4([4]byte{255, 255, 255, 0}).AsSlice()} // Changed from /16 to /24
+
+		vsList12 := []*balancerpb.VirtualService{
+			createVS(netip.MustParseAddr("10.0.4.1"), 80, balancerpb.TransportProto_TCP, acl1IPv4DifferentMask),
+			createVS(netip.MustParseAddr("10.0.4.2"), 80, balancerpb.TransportProto_TCP, acl2IPv4Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::1"), 80, balancerpb.TransportProto_TCP, acl1IPv6Combined),
+			createVS(netip.MustParseAddr("2001:db8:4::2"), 80, balancerpb.TransportProto_TCP, acl2IPv6Combined),
+		}
+		config12 := createConfig(vsList12)
+
+		updateInfo12, err := manager.Update(config12, m.CurrentTime())
+		require.NoError(t, err)
+
+		// Only 3 ACLs should be reused (first IPv4 VS has different mask)
+		verifyUpdateInfo(t, updateInfo12, true, true, 3)
+	})
 }

@@ -57,6 +57,9 @@ struct vs {
 	// transport.srcs)
 	struct filter_rule *rules;
 
+	// Indices of counters for rules
+	uint64_t *rule_counters;
+
 	// Number of IPv4 peer balancer addresses
 	size_t peers_v4_count;
 

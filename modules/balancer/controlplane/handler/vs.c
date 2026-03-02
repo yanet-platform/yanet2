@@ -6,6 +6,7 @@
 #include "common/network.h"
 
 #include "compiler/declare.h"
+#include "counters/counters.h"
 #include "lib/controlplane/diag/diag.h"
 
 #include "rules.h"
@@ -211,7 +212,8 @@ fill_rule(
 	struct allowed_sources *src,
 	struct memory_context *mctx
 ) {
-	rule->action = 1;
+	rule->action = src->tag;
+
 	if (vs->identifier.ip_proto == IPPROTO_IP) {
 		rule->net4.dst_count = 0;
 		rule->net4.dsts = NULL;
@@ -769,7 +771,7 @@ rule_to_relative_addresses(struct filter_rule *rule) {
 
 static int
 setup_acl_rules(
-	struct vs *vs, struct vs_config *config, struct memory_context *mctx
+	struct vs *vs, struct counter_registry *counters, struct vs_config *config, struct memory_context *mctx
 ) {
 	// Create filter rules from config (already uses memory_balloc and
 	// relative pointers)
@@ -805,14 +807,35 @@ setup_acl_rules(
 		rules[++last_rule_idx] = rules[rule_idx];
 	}
 
+	char counter_name[80];
+	uint64_t *rule_counters = memory_balloc(mctx, sizeof(uint64_t) * rules_count);
+	if (rule_counters == NULL && rules_count > 0) {
+		NEW_ERROR("failed to allocate rule counters: no memory");
+		return -1;
+	}
+
 	// Change to relative offsets
 	rules_count = last_rule_idx + 1;
 	for (size_t i = 0; i < rules_count; ++i) {
 		rule_to_relative_addresses(&rules[i]);
+
+		// register counter
+		sprintf(counter_name, "acl_%zu_%u", vs->registry_idx, rules[i].action);
+		uint64_t counter_id = counter_registry_register(counters, counter_name, 1);
+		if (counter_id == (uint64_t)-1) {
+			NEW_ERROR("failed to register counter for rule: no memory");
+			return -1;
+		}
+
+		rule_counters[i] = counter_id;
+
+		// store actions equal rule stable index
+		rules[i].action = i;
 	}
 
 	// Store using relative pointers
 	SET_OFFSET_OF(&vs->rules, rules);
+	SET_OFFSET_OF(&vs->rule_counters, rule_counters);
 	vs->rules_count = rules_count;
 
 	return 0;
@@ -826,7 +849,7 @@ vs_with_identifier_and_registry_idx_init(
 	struct real *reals,
 	struct balancer_state *balancer_state,
 	struct named_vs_config *config,
-	struct counter_registry *registry,
+	struct counter_registry *counters,
 	struct memory_context *mctx,
 	struct balancer_update_info *update_info
 ) {
@@ -850,12 +873,12 @@ vs_with_identifier_and_registry_idx_init(
 		goto free_peers;
 	}
 
-	if (register_counter(vs, registry) != 0) {
+	if (register_counter(vs, counters) != 0) {
 		PUSH_ERROR("failed to register counter");
 		goto free_selector;
 	}
 
-	if (setup_acl_rules(vs, &config->config, mctx) != 0) {
+	if (setup_acl_rules(vs, counters, &config->config, mctx) != 0) {
 		PUSH_ERROR("failed to store acl rules");
 		goto free_selector;
 	}

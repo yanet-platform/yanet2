@@ -1674,3 +1674,334 @@ func TestConvertBalancerConfigToProto_WithWlc(t *testing.T) {
 	assert.Equal(t, uint64(10), *result.State.Wlc.Power)
 	assert.Equal(t, uint32(1000), *result.State.Wlc.MaxWeight)
 }
+
+// TestAllowedSourcesTagConversion tests that tag field is properly converted
+func TestAllowedSourcesTagConversion(t *testing.T) {
+	tests := []struct {
+		name        string
+		protoConfig *balancerpb.BalancerConfig
+		verifyTag   func(t *testing.T, config *ffi.BalancerManagerConfig)
+	}{
+		{
+			name: "Tag field set to non-zero value",
+			protoConfig: &balancerpb.BalancerConfig{
+				PacketHandler: &balancerpb.PacketHandlerConfig{
+					SessionsTimeouts: &balancerpb.SessionsTimeouts{
+						TcpSynAck: 10,
+						TcpSyn:    20,
+						TcpFin:    15,
+						Tcp:       100,
+						Udp:       50,
+						Default:   30,
+					},
+					Vs: []*balancerpb.VirtualService{
+						{
+							Id: &balancerpb.VsIdentifier{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("192.168.1.100").AsSlice(),
+								},
+								Port:  80,
+								Proto: balancerpb.TransportProto_TCP,
+							},
+							Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
+							Reals:     []*balancerpb.Real{},
+							AllowedSrcs: []*balancerpb.AllowedSources{
+								{
+									Nets: []*balancerpb.Net{{
+										Addr: &balancerpb.Addr{
+											Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+										},
+										Mask: &balancerpb.Addr{
+											Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+										},
+									}},
+									Tag: 12345, // Non-zero tag
+								},
+							},
+						},
+					},
+					SourceAddressV4: &balancerpb.Addr{
+						Bytes: netip.MustParseAddr("10.0.0.1").AsSlice(),
+					},
+					SourceAddressV6: &balancerpb.Addr{
+						Bytes: netip.MustParseAddr("::1").AsSlice(),
+					},
+					DecapAddresses: []*balancerpb.Addr{},
+				},
+				State: &balancerpb.StateConfig{
+					SessionTableCapacity:      ptrUint64(1000),
+					SessionTableMaxLoadFactor: ptrFloat32(0.75),
+					RefreshPeriod:             durationpb.New(5 * time.Second),
+					Wlc: &balancerpb.WlcConfig{
+						Power:     ptrUint64(2),
+						MaxWeight: ptrUint32(1000),
+					},
+				},
+			},
+			verifyTag: func(t *testing.T, config *ffi.BalancerManagerConfig) {
+				require.Len(t, config.Balancer.Handler.VirtualServices, 1)
+				require.Len(t, config.Balancer.Handler.VirtualServices[0].AllowedSources, 1)
+				assert.Equal(t, uint64(12345), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+					"Tag should be 12345")
+			},
+		},
+		{
+			name: "Tag field not specified (defaults to zero)",
+			protoConfig: &balancerpb.BalancerConfig{
+				PacketHandler: &balancerpb.PacketHandlerConfig{
+					SessionsTimeouts: &balancerpb.SessionsTimeouts{
+						TcpSynAck: 10,
+						TcpSyn:    20,
+						TcpFin:    15,
+						Tcp:       100,
+						Udp:       50,
+						Default:   30,
+					},
+					Vs: []*balancerpb.VirtualService{
+						{
+							Id: &balancerpb.VsIdentifier{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("192.168.1.100").AsSlice(),
+								},
+								Port:  80,
+								Proto: balancerpb.TransportProto_TCP,
+							},
+							Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
+							Reals:     []*balancerpb.Real{},
+							AllowedSrcs: []*balancerpb.AllowedSources{
+								{
+									Nets: []*balancerpb.Net{{
+										Addr: &balancerpb.Addr{
+											Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+										},
+										Mask: &balancerpb.Addr{
+											Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+										},
+									}},
+									// Tag not specified - should default to 0
+								},
+							},
+						},
+					},
+					SourceAddressV4: &balancerpb.Addr{
+						Bytes: netip.MustParseAddr("10.0.0.1").AsSlice(),
+					},
+					SourceAddressV6: &balancerpb.Addr{
+						Bytes: netip.MustParseAddr("::1").AsSlice(),
+					},
+					DecapAddresses: []*balancerpb.Addr{},
+				},
+				State: &balancerpb.StateConfig{
+					SessionTableCapacity:      ptrUint64(1000),
+					SessionTableMaxLoadFactor: ptrFloat32(0.75),
+					RefreshPeriod:             durationpb.New(5 * time.Second),
+					Wlc: &balancerpb.WlcConfig{
+						Power:     ptrUint64(2),
+						MaxWeight: ptrUint32(1000),
+					},
+				},
+			},
+			verifyTag: func(t *testing.T, config *ffi.BalancerManagerConfig) {
+				require.Len(t, config.Balancer.Handler.VirtualServices, 1)
+				require.Len(t, config.Balancer.Handler.VirtualServices[0].AllowedSources, 1)
+				assert.Equal(t, uint64(0), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+					"Tag should default to 0")
+			},
+		},
+		{
+			name: "Multiple allowed sources with different tags",
+			protoConfig: &balancerpb.BalancerConfig{
+				PacketHandler: &balancerpb.PacketHandlerConfig{
+					SessionsTimeouts: &balancerpb.SessionsTimeouts{
+						TcpSynAck: 10,
+						TcpSyn:    20,
+						TcpFin:    15,
+						Tcp:       100,
+						Udp:       50,
+						Default:   30,
+					},
+					Vs: []*balancerpb.VirtualService{
+						{
+							Id: &balancerpb.VsIdentifier{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("192.168.1.100").AsSlice(),
+								},
+								Port:  80,
+								Proto: balancerpb.TransportProto_TCP,
+							},
+							Scheduler: balancerpb.VsScheduler_ROUND_ROBIN,
+							Reals:     []*balancerpb.Real{},
+							AllowedSrcs: []*balancerpb.AllowedSources{
+								{
+									Nets: []*balancerpb.Net{{
+										Addr: &balancerpb.Addr{
+											Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+										},
+										Mask: &balancerpb.Addr{
+											Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+										},
+									}},
+									Tag: 100,
+								},
+								{
+									Nets: []*balancerpb.Net{{
+										Addr: &balancerpb.Addr{
+											Bytes: netip.MustParseAddr("192.168.0.0").AsSlice(),
+										},
+										Mask: &balancerpb.Addr{
+											Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+										},
+									}},
+									Tag: 200,
+								},
+								{
+									Nets: []*balancerpb.Net{{
+										Addr: &balancerpb.Addr{
+											Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+										},
+										Mask: &balancerpb.Addr{
+											Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+										},
+									}},
+									// Tag not specified - should be 0
+								},
+							},
+						},
+					},
+					SourceAddressV4: &balancerpb.Addr{
+						Bytes: netip.MustParseAddr("10.0.0.1").AsSlice(),
+					},
+					SourceAddressV6: &balancerpb.Addr{
+						Bytes: netip.MustParseAddr("::1").AsSlice(),
+					},
+					DecapAddresses: []*balancerpb.Addr{},
+				},
+				State: &balancerpb.StateConfig{
+					SessionTableCapacity:      ptrUint64(1000),
+					SessionTableMaxLoadFactor: ptrFloat32(0.75),
+					RefreshPeriod:             durationpb.New(5 * time.Second),
+					Wlc: &balancerpb.WlcConfig{
+						Power:     ptrUint64(2),
+						MaxWeight: ptrUint32(1000),
+					},
+				},
+			},
+			verifyTag: func(t *testing.T, config *ffi.BalancerManagerConfig) {
+				require.Len(t, config.Balancer.Handler.VirtualServices, 1)
+				require.Len(t, config.Balancer.Handler.VirtualServices[0].AllowedSources, 3)
+				assert.Equal(t, uint64(100), config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+					"First tag should be 100")
+				assert.Equal(t, uint64(200), config.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
+					"Second tag should be 200")
+				assert.Equal(t, uint64(0), config.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
+					"Third tag should be 0")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := ProtoToManagerConfig(tt.protoConfig)
+			require.NoError(t, err, "failed to convert config")
+			tt.verifyTag(t, config)
+		})
+	}
+}
+
+// TestAllowedSourcesTagRoundTrip tests bidirectional conversion of tag field
+func TestAllowedSourcesTagRoundTrip(t *testing.T) {
+	originalConfig := &ffi.BalancerManagerConfig{
+		Balancer: ffi.BalancerConfig{
+			Handler: ffi.PacketHandlerConfig{
+				SessionsTimeouts: ffi.SessionsTimeouts{
+					TCPSynAck: 10,
+					TCPSyn:    20,
+					TCPFin:    15,
+					TCP:       100,
+					UDP:       50,
+					Default:   30,
+				},
+				VirtualServices: []ffi.VsConfig{
+					{
+						Identifier: ffi.VsIdentifier{
+							Addr:           netip.MustParseAddr("192.168.1.100"),
+							Port:           80,
+							TransportProto: ffi.VsTransportProtoTCP,
+						},
+						Scheduler: ffi.VsSchedulerRoundRobin,
+						Reals:     []ffi.RealConfig{},
+						AllowedSources: []ffi.AllowedSources{
+							{
+								Nets: []xnetip.NetWithMask{
+									xnetip.FromPrefix(netip.MustParsePrefix("10.0.0.0/8")),
+								},
+								PortRanges: []ffi.PortRange{},
+								Tag:        12345,
+							},
+							{
+								Nets: []xnetip.NetWithMask{
+									xnetip.FromPrefix(netip.MustParsePrefix("192.168.0.0/16")),
+								},
+								PortRanges: []ffi.PortRange{},
+								Tag:        0, // Zero tag
+							},
+							{
+								Nets: []xnetip.NetWithMask{
+									xnetip.FromPrefix(netip.MustParsePrefix("172.16.0.0/12")),
+								},
+								PortRanges: []ffi.PortRange{},
+								Tag:        99999,
+							},
+						},
+						PeersV4: []netip.Addr{},
+						PeersV6: []netip.Addr{},
+						Flags:   ffi.VsFlags{},
+					},
+				},
+				SourceV4: netip.MustParseAddr("10.0.0.1"),
+				SourceV6: netip.MustParseAddr("::1"),
+				DecapV4:  []netip.Addr{},
+				DecapV6:  []netip.Addr{},
+			},
+			State: ffi.StateConfig{
+				TableCapacity: 1000,
+			},
+		},
+		RefreshPeriod: 5 * time.Second,
+		MaxLoadFactor: 0.75,
+		Wlc: ffi.BalancerManagerWlcConfig{
+			Power:         2,
+			MaxRealWeight: 1000,
+			Vs:            []uint32{},
+		},
+	}
+
+	// Convert to proto
+	protoConfig := ConvertBalancerConfigToProto(originalConfig)
+	require.NotNil(t, protoConfig)
+	require.NotNil(t, protoConfig.PacketHandler)
+	require.Len(t, protoConfig.PacketHandler.Vs, 1)
+	require.Len(t, protoConfig.PacketHandler.Vs[0].AllowedSrcs, 3)
+
+	// Verify tags in proto
+	assert.Equal(t, uint64(12345), protoConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+		"First tag should be 12345 in proto")
+	assert.Equal(t, uint64(0), protoConfig.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
+		"Second tag should be 0 in proto")
+	assert.Equal(t, uint64(99999), protoConfig.PacketHandler.Vs[0].AllowedSrcs[2].Tag,
+		"Third tag should be 99999 in proto")
+
+	// Convert back to FFI
+	convertedConfig, err := ProtoToManagerConfig(protoConfig)
+	require.NoError(t, err)
+	require.Len(t, convertedConfig.Balancer.Handler.VirtualServices, 1)
+	require.Len(t, convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources, 3)
+
+	// Verify tags are preserved
+	assert.Equal(t, uint64(12345), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
+		"First tag should be preserved as 12345")
+	assert.Equal(t, uint64(0), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
+		"Second tag should be preserved as 0")
+	assert.Equal(t, uint64(99999), convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
+		"Third tag should be preserved as 99999")
+}

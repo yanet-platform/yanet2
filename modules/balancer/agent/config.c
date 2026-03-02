@@ -94,6 +94,8 @@ clone_allowed_src_to_relative(
 			entries[i].nets = NULL;
 		}
 
+		entries[i].tag = src[i].tag;
+
 		entries[i].port_ranges_count = src[i].port_ranges_count;
 
 		// Clone the ports_range array
@@ -454,6 +456,8 @@ clone_allowed_src_from_relative(
 		} else {
 			entries[i].port_ranges = NULL;
 		}
+
+		entries[i].tag = src[i].tag;
 	}
 
 	*dst = entries;

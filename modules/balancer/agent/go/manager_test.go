@@ -4,6 +4,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	yanet2 "github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
@@ -1320,5 +1321,270 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 		require.NotNil(t, config.State.Wlc)
 		require.Equal(t, newPower, *config.State.Wlc.Power)
 		require.Equal(t, newMaxWeight, *config.State.Wlc.MaxWeight)
+	})
+}
+
+// TestManagerTagFieldInConfig tests that tag field is properly shown in manager config
+func TestManagerTagFieldInConfig(t *testing.T) {
+	m, err := mock.NewYanetMock(&mock.YanetMockConfig{
+		AgentsMemory: 1 << 28,
+		DpMemory:     1 << 24,
+		Workers:      1,
+		Devices: []mock.YanetMockDeviceConfig{
+			{
+				ID:   0,
+				Name: deviceName,
+			},
+		},
+	})
+	require.NoError(t, err, "failed to create mock")
+	require.NotNil(t, m, "mock is nil")
+
+	// Create balancer agent
+	agent, err := ffi.NewBalancerAgent(m.SharedMemory(), 1<<25)
+	require.NoError(t, err, "failed to create balancer agent")
+	require.NotNil(t, agent, "balancer agent is nil")
+
+	// Create logger
+	logger, err := zap.NewDevelopment()
+	require.NoError(t, err, "failed to create logger")
+	sugaredLogger := logger.Sugar()
+
+	// Create config with specific tag values
+	capacity := uint64(1000)
+	maxLoadFactor := float32(0.75)
+	power := uint64(10)
+	maxWeight := uint32(1024)
+
+	protoConfig := &balancerpb.BalancerConfig{
+		PacketHandler: &balancerpb.PacketHandlerConfig{
+			SessionsTimeouts: &balancerpb.SessionsTimeouts{
+				TcpSynAck: 10,
+				TcpSyn:    20,
+				TcpFin:    15,
+				Tcp:       100,
+				Udp:       11,
+				Default:   19,
+			},
+			Vs: []*balancerpb.VirtualService{
+				{
+					Id: &balancerpb.VsIdentifier{
+						Addr: &balancerpb.Addr{
+							Bytes: netip.MustParseAddr("10.12.13.213").
+								AsSlice(),
+						},
+						Port:  80,
+						Proto: balancerpb.TransportProto_TCP,
+					},
+					Flags:     &balancerpb.VsFlags{FixMss: true},
+					Scheduler: balancerpb.VsScheduler_SOURCE_HASH,
+					Reals: []*balancerpb.Real{
+						{
+							Id: &balancerpb.RelativeRealIdentifier{
+								Ip: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("10.12.13.213").
+										AsSlice(),
+								},
+								Port: 8080,
+							},
+							SrcAddr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("172.16.0.0").
+									AsSlice(),
+							},
+							SrcMask: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("255.255.255.0").
+									AsSlice(),
+							},
+							Weight: 100,
+						},
+					},
+					AllowedSrcs: []*balancerpb.AllowedSources{
+						{
+							Nets: []*balancerpb.Net{{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("192.1.1.1").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.255.255.0").
+										AsSlice(),
+								},
+							}},
+							Tag: 11111, // First tag
+						},
+						{
+							Nets: []*balancerpb.Net{{
+								Addr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("192.12.0.0").
+										AsSlice(),
+								},
+								Mask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.255.0.0").
+										AsSlice(),
+								},
+							}},
+							Tag: 22222, // Second tag
+						},
+					},
+				},
+			},
+			SourceAddressV4: &balancerpb.Addr{
+				Bytes: netip.MustParseAddr("10.12.13.213").AsSlice(),
+			},
+			SourceAddressV6: &balancerpb.Addr{
+				Bytes: netip.MustParseAddr("2001:db8::1").AsSlice(),
+			},
+			DecapAddresses: []*balancerpb.Addr{
+				{Bytes: netip.MustParseAddr("10.13.11.215").AsSlice()},
+			},
+		},
+		State: &balancerpb.StateConfig{
+			SessionTableCapacity:      &capacity,
+			SessionTableMaxLoadFactor: &maxLoadFactor,
+			RefreshPeriod:             durationpb.New(0),
+			Wlc: &balancerpb.WlcConfig{
+				Power:     &power,
+				MaxWeight: &maxWeight,
+			},
+		},
+	}
+
+	// Convert to FFI config and create manager
+	managerConfig, err := ProtoToManagerConfig(protoConfig)
+	require.NoError(t, err, "failed to convert config")
+
+	managerHandle, err := agent.NewManager("test_tag_manager", managerConfig)
+	require.NoError(t, err, "failed to create balancer manager")
+	require.NotNil(t, managerHandle, "balancer manager handle is nil")
+
+	manager := NewBalancerManager(managerHandle, sugaredLogger)
+	require.NotNil(t, manager, "manager should not be nil")
+
+	now := m.CurrentTime()
+
+	// Test 1: Verify initial config has correct tags
+	t.Run("InitialConfigTags", func(t *testing.T) {
+		config := manager.Config()
+		require.NotNil(t, config, "config should not be nil")
+		require.NotNil(t, config.PacketHandler, "packet handler should not be nil")
+		require.Len(t, config.PacketHandler.Vs, 1, "should have 1 virtual service")
+		require.Len(
+			t,
+			config.PacketHandler.Vs[0].AllowedSrcs,
+			2,
+			"should have 2 allowed sources",
+		)
+
+		// Verify tags
+		assert.Equal(
+			t,
+			uint64(11111),
+			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"first tag should be 11111",
+		)
+		assert.Equal(
+			t,
+			uint64(22222),
+			config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
+			"second tag should be 22222",
+		)
+	})
+
+	// Test 2: Update config with different tags
+	t.Run("UpdateConfigTags", func(t *testing.T) {
+		updateConfig := &balancerpb.BalancerConfig{
+			PacketHandler: &balancerpb.PacketHandlerConfig{
+				Vs: []*balancerpb.VirtualService{
+					{
+						Id: &balancerpb.VsIdentifier{
+							Addr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("10.12.13.213").
+									AsSlice(),
+							},
+							Port:  80,
+							Proto: balancerpb.TransportProto_TCP,
+						},
+						Flags:     &balancerpb.VsFlags{FixMss: true},
+						Scheduler: balancerpb.VsScheduler_SOURCE_HASH,
+						Reals: []*balancerpb.Real{
+							{
+								Id: &balancerpb.RelativeRealIdentifier{
+									Ip: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("10.12.13.213").
+											AsSlice(),
+									},
+									Port: 8080,
+								},
+								SrcAddr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("172.16.0.0").
+										AsSlice(),
+								},
+								SrcMask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.255.255.0").
+										AsSlice(),
+								},
+								Weight: 100,
+							},
+						},
+						AllowedSrcs: []*balancerpb.AllowedSources{
+							{
+								Nets: []*balancerpb.Net{{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("192.1.1.1").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.255.0").
+											AsSlice(),
+									},
+								}},
+								Tag: 33333, // Changed tag
+							},
+							{
+								Nets: []*balancerpb.Net{{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("192.12.0.0").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.0.0").
+											AsSlice(),
+									},
+								}},
+								Tag: 0, // Changed to zero
+							},
+						},
+					},
+				},
+			},
+		}
+
+		_, err := manager.Update(updateConfig, now)
+		require.NoError(t, err, "failed to update manager config")
+
+		// Verify updated tags
+		config := manager.Config()
+		require.NotNil(t, config, "config should not be nil")
+		require.NotNil(t, config.PacketHandler, "packet handler should not be nil")
+		require.Len(t, config.PacketHandler.Vs, 1, "should have 1 virtual service")
+		require.Len(
+			t,
+			config.PacketHandler.Vs[0].AllowedSrcs,
+			2,
+			"should have 2 allowed sources",
+		)
+
+		assert.Equal(
+			t,
+			uint64(33333),
+			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"first tag should be updated to 33333",
+		)
+		assert.Equal(
+			t,
+			uint64(0),
+			config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
+			"second tag should be updated to 0",
+		)
 	})
 }

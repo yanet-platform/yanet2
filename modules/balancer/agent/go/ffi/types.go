@@ -27,6 +27,7 @@ type PortRange struct {
 type AllowedSources struct {
 	Nets       []xnetip.NetWithMask // Network with address and arbitrary mask
 	PortRanges []PortRange          // Optional port ranges
+	Tag        uint64               // Tag for identification/filtering
 }
 
 // VsScheduler represents the scheduling algorithm for a virtual service
@@ -313,7 +314,7 @@ type RealsUsage struct {
 
 // VsInspect contains memory usage for a single virtual service
 type VsInspect struct {
-	AclUsage      uint64
+	ACLUsage      uint64
 	RingUsage     uint64
 	CountersUsage uint64
 	RealsUsage    RealsUsage

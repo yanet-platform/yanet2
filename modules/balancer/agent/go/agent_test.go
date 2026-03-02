@@ -466,4 +466,116 @@ func TestBalancerAgent(t *testing.T) {
 			newConfig.State.SessionTableCapacity,
 		)
 	})
+
+	t.Run("VerifyTagInConfig", func(t *testing.T) {
+		// Test that tag field is properly shown in config
+		manager, err := agent.BalancerManager("balancer0")
+		require.NoError(t, err, "failed to get manager")
+
+		config := manager.Config()
+		require.NotNil(t, config, "config should not be nil")
+		require.NotNil(t, config.PacketHandler, "packet handler should not be nil")
+		require.Len(t, config.PacketHandler.Vs, 1, "should have 1 virtual service")
+		require.Len(
+			t,
+			config.PacketHandler.Vs[0].AllowedSrcs,
+			1,
+			"should have 1 allowed source",
+		)
+
+		// Verify tag is 0 (default) since it wasn't specified in the config
+		assert.Equal(
+			t,
+			uint64(0),
+			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"tag should be 0 when not specified",
+		)
+	})
+
+	t.Run("UpdateWithTag", func(t *testing.T) {
+		// Update config with a specific tag value
+		update := &balancerpb.BalancerConfig{
+			PacketHandler: &balancerpb.PacketHandlerConfig{
+				Vs: []*balancerpb.VirtualService{
+					{
+						Id: &balancerpb.VsIdentifier{
+							Addr: &balancerpb.Addr{
+								Bytes: netip.MustParseAddr("10.12.13.213").
+									AsSlice(),
+							},
+							Port:  80,
+							Proto: balancerpb.TransportProto_TCP,
+						},
+						Flags: &balancerpb.VsFlags{
+							FixMss: true,
+						},
+						Scheduler: balancerpb.VsScheduler_SOURCE_HASH,
+						Reals: []*balancerpb.Real{
+							{
+								Id: &balancerpb.RelativeRealIdentifier{
+									Ip: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("10.12.13.213").
+											AsSlice(),
+									},
+									Port: 8080,
+								},
+								SrcAddr: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("172.16.0.0").
+										AsSlice(),
+								},
+								SrcMask: &balancerpb.Addr{
+									Bytes: netip.MustParseAddr("255.255.255.0").
+										AsSlice(),
+								},
+								Weight: 100,
+							},
+						},
+						AllowedSrcs: []*balancerpb.AllowedSources{
+							{
+								Nets: []*balancerpb.Net{{
+									Addr: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("192.1.1.1").
+											AsSlice(),
+									},
+									Mask: &balancerpb.Addr{
+										Bytes: netip.MustParseAddr("255.255.255.0").
+											AsSlice(),
+									},
+								}},
+								Tag: 54321, // Set a specific tag
+							},
+						},
+						Peers: []*balancerpb.Addr{
+							{Bytes: netip.MustParseAddr("12.1.1.3").AsSlice()},
+						},
+					},
+				},
+			},
+		}
+
+		manager, err := agent.BalancerManager("balancer0")
+		require.NoError(t, err, "failed to get manager")
+
+		_, err = manager.Update(update, m.CurrentTime())
+		require.NoError(t, err, "failed to update manager")
+
+		// Verify the tag is updated
+		config := manager.Config()
+		require.NotNil(t, config, "config should not be nil")
+		require.NotNil(t, config.PacketHandler, "packet handler should not be nil")
+		require.Len(t, config.PacketHandler.Vs, 1, "should have 1 virtual service")
+		require.Len(
+			t,
+			config.PacketHandler.Vs[0].AllowedSrcs,
+			1,
+			"should have 1 allowed source",
+		)
+
+		assert.Equal(
+			t,
+			uint64(54321),
+			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"tag should be updated to 54321",
+		)
+	})
 }

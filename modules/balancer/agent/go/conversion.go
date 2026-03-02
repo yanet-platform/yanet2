@@ -378,6 +378,26 @@ func protoToVsConfig(
 				)
 			}
 
+			// Validate IP version matches VS address
+			if vsAddr.Is4() != addr.Is4() {
+				return ffi.VsConfig{}, fmt.Errorf(
+					"allowed_src[%d].net[%d]: IP version mismatch - VS is %s but allowed_src network is %s",
+					i, j,
+					func() string {
+						if vsAddr.Is4() {
+							return "IPv4"
+						}
+						return "IPv6"
+					}(),
+					func() string {
+						if addr.Is4() {
+							return "IPv4"
+						}
+						return "IPv6"
+					}(),
+				)
+			}
+
 			// Convert mask bytes
 			var maskBytes []byte
 			if protoNet.Mask != nil {
@@ -432,6 +452,7 @@ func protoToVsConfig(
 		allowedSrc = append(allowedSrc, ffi.AllowedSources{
 			Nets:       nets,
 			PortRanges: portRanges,
+			Tag:        protoAllowedSrc.Tag,
 		})
 	}
 
@@ -1257,6 +1278,7 @@ func convertVsConfigToProtoWithWlc(
 		allowedSrcs = append(allowedSrcs, &balancerpb.AllowedSources{
 			Nets:  nets,
 			Ports: protoPortRanges,
+			Tag:   allowedSrc.Tag,
 		})
 	}
 
@@ -1539,7 +1561,7 @@ func ConvertVsInspectToProto(
 	}
 
 	return &balancerpb.VsInspect{
-		AclUsage:      inspect.AclUsage,
+		AclUsage:      inspect.ACLUsage,
 		RingUsage:     inspect.RingUsage,
 		CountersUsage: inspect.CountersUsage,
 		RealsUsage:    ConvertRealsUsageToProto(&inspect.RealsUsage),

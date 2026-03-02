@@ -854,6 +854,9 @@ func goToCVsConfigInPlace(
 			} else {
 				cAllowedSlice[i].port_ranges = nil
 			}
+
+			// Set tag field
+			cAllowedSlice[i].tag = C.uint64_t(allowedSrc.Tag)
 		}
 	} else {
 		cConfig.config.allowed_src = nil
@@ -1025,6 +1028,9 @@ func cToGoVsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 					}
 				}
 			}
+
+			// Get tag field
+			config.AllowedSources[i].Tag = uint64(cAllowedSlice[i].tag)
 		}
 	} else {
 		config.AllowedSources = []AllowedSources{}
@@ -1479,7 +1485,7 @@ func cToGoNamedVsInspect(cInspect *C.struct_named_vs_inspect) *NamedVsInspect {
 
 func cToGoVsInspect(cInspect *C.struct_vs_inspect) *VsInspect {
 	return &VsInspect{
-		AclUsage:      uint64(cInspect.acl_usage),
+		ACLUsage:      uint64(cInspect.acl_usage),
 		RingUsage:     uint64(cInspect.ring_usage),
 		CountersUsage: uint64(cInspect.counters_usage),
 		RealsUsage:    *cToGoRealsUsage(&cInspect.reals_usage),

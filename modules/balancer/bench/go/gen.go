@@ -115,11 +115,11 @@ func (ctx *Generator) generateClientIP(
 	if len(vs.AllowedSrcs) > 0 {
 		idx := ctx.rand.IntN(len(vs.AllowedSrcs))
 		allowedSrc := vs.AllowedSrcs[idx]
-		netAddr, ok := netip.AddrFromSlice(allowedSrc.Net.Addr.Bytes)
+		netAddr, ok := netip.AddrFromSlice(allowedSrc.Nets[0].Addr.Bytes)
 		if !ok {
 			panic("invalid allowed source address")
 		}
-		maskAddr, ok := netip.AddrFromSlice(allowedSrc.Net.Mask.Bytes)
+		maskAddr, ok := netip.AddrFromSlice(allowedSrc.Nets[0].Mask.Bytes)
 		if !ok {
 			panic("invalid allowed source mask")
 		}

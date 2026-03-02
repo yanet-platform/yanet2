@@ -203,29 +203,29 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 			scheduler = balancerpb.VsScheduler_ROUND_ROBIN
 		}
 
-		allowedSrc := make([]*balancerpb.AllowedSrc, 0, config.AllowedSrcPerVs)
+		allowedSrc := make([]*balancerpb.AllowedSources, 0, config.AllowedSrcPerVs)
 		for i := 0; i < config.AllowedSrcPerVs; i++ {
 			if addr.Is4() {
-				allowedSrc = append(allowedSrc, &balancerpb.AllowedSrc{
-					Net: &balancerpb.Net{
+				allowedSrc = append(allowedSrc, &balancerpb.AllowedSources{
+					Nets: []*balancerpb.Net{{
 						Addr: &balancerpb.Addr{
 							Bytes: []byte{byte(i / 256), byte(i % 256), 5, 5},
 						},
 						Mask: &balancerpb.Addr{
 							Bytes: []byte{255, 255, 255, 255},
 						},
-					},
+					}},
 				})
 			} else {
-				allowedSrc = append(allowedSrc, &balancerpb.AllowedSrc{
-					Net: &balancerpb.Net{
+				allowedSrc = append(allowedSrc, &balancerpb.AllowedSources{
+					Nets: []*balancerpb.Net{{
 						Addr: &balancerpb.Addr{
 							Bytes: []byte{byte(i / 256), byte(i % 256), 0, 2, 3, 0, 0, 29, 0, 43, 0, 16, 0, 0, 0, 0},
 						},
 						Mask: &balancerpb.Addr{
 							Bytes: []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
 						},
-					},
+					}},
 				})
 			}
 		}

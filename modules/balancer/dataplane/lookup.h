@@ -4,6 +4,7 @@
 #include "common/memory_address.h"
 #include "common/network.h"
 
+#include "counters/counters.h"
 #include "flow/helpers.h"
 #include "lib/dataplane/packet/packet.h"
 
@@ -84,11 +85,25 @@ vs_v4_lookup(struct packet_ctx *ctx) {
 }
 
 static inline bool
+check_fw_and_inc_stats(
+	struct packet_ctx *ctx, struct vs *vs, struct value_range *result
+) {
+	if (result->count > 0) {
+		assert(result->count == 1);
+		uint32_t rule_idx = ADDR_OF(&result->values)[0];
+		uint64_t counter_id = ADDR_OF(&vs->rule_counters)[rule_idx];
+		counter_get_address(counter_id, ctx->worker_idx, ctx->stats.storage)[0] += 1;
+		return true;
+	}
+	return false;
+}
+
+static inline bool
 vs_v4_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	(void)ctx;
 	struct value_range *result;
 	FILTER_QUERY(ADDR_OF(&vs->acl), vs_acl_ipv4, &packet, &result, 1);
-	return result->count != 0;
+	return check_fw_and_inc_stats(ctx, vs, result);
 }
 
 static inline bool
@@ -143,7 +158,7 @@ vs_v6_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	(void)ctx;
 	struct value_range *result;
 	FILTER_QUERY(ADDR_OF(&vs->acl), vs_acl_ipv6, &packet, &result, 1);
-	return result->count != 0;
+	return check_fw_and_inc_stats(ctx, vs, result);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
