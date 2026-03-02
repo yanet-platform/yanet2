@@ -447,11 +447,7 @@ pub fn convert_show_config(response: &balancerpb::ShowConfigResponse) -> ShowCon
                                     )
                                 };
 
-                                Some(AllowedSourcesJson {
-                                    networks,
-                                    ports,
-                                    tag: s.tag,
-                                })
+                                Some(AllowedSourcesJson { networks, ports, tag: s.tag })
                             })
                             .collect(),
                         reals: vs
@@ -651,10 +647,7 @@ pub fn convert_show_stats(response: &balancerpb::ShowStatsResponse) -> ShowStats
                     allowed_sources: v
                         .allowed_sources
                         .iter()
-                        .map(|a| AllowedSourcesStatsJson {
-                            tag: a.tag,
-                            passes: a.passes,
-                        })
+                        .map(|a| AllowedSourcesStatsJson { tag: a.tag, passes: a.passes })
                         .collect(),
                 })
                 .collect(),

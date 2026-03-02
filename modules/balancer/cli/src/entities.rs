@@ -622,7 +622,7 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
                                 mask: Some(balancerpb::Addr { bytes: mask_bytes }),
                             }],
                             ports: vec![], // Empty = all ports allowed
-                            tag: 0, // Default tag
+                            tag: 0,        // Default tag
                         })
                     }
                     AllowedSrcEntry::Structured { network, ports } => {

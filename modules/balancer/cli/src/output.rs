@@ -1471,7 +1471,11 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
                                 );
                             }
                         } else {
-                            println!("  {}: {}", "Allowed Sources".bright_cyan().bold(), "None".bright_green());
+                            println!(
+                                "  {}: {}",
+                                "Allowed Sources".bright_cyan().bold(),
+                                "None".bright_green()
+                            );
                         }
 
                         // Display reals table for this VS

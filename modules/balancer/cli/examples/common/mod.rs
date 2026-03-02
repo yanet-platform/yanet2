@@ -376,14 +376,8 @@ pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
                         outgoing_bytes: 799_500_000,
                     }),
                     allowed_sources: vec![
-                        balancerpb::AllowedSourcesStats {
-                            tag: 100,
-                            passes: 500_000,
-                        },
-                        balancerpb::AllowedSourcesStats {
-                            tag: 200,
-                            passes: 299_500,
-                        },
+                        balancerpb::AllowedSourcesStats { tag: 100, passes: 500_000 },
+                        balancerpb::AllowedSourcesStats { tag: 200, passes: 299_500 },
                         // Tag 0 (no tag) doesn't appear in stats
                     ],
                     reals: vec![
@@ -456,10 +450,7 @@ pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
                     }),
                     allowed_sources: vec![
                         // Tag 0 (no tag) doesn't appear in stats
-                        balancerpb::AllowedSourcesStats {
-                            tag: 300,
-                            passes: 400_000,
-                        },
+                        balancerpb::AllowedSourcesStats { tag: 300, passes: 400_000 },
                     ],
                     reals: vec![balancerpb::NamedRealStats {
                         real: Some(balancerpb::RealIdentifier {
