@@ -90,6 +90,10 @@ type RoutesList struct {
 	Routes []Route
 }
 
+// Insert adds or replaces a route in the list.
+//
+// Returns true when a new route was appended, false when an existing route was
+// replaced.
 func (m *RoutesList) Insert(route Route) bool {
 	insertedIdx := -1
 	for idx, r := range m.Routes {
@@ -106,7 +110,7 @@ func (m *RoutesList) Insert(route Route) bool {
 		// Sorting an almost-sorted slice should be relatively efficient
 		slices.SortFunc(m.Routes, routeCompareRev) // for DESC order
 	}
-	return true
+	return insertedIdx == -1
 }
 
 func (m *RoutesList) Remove(route Route) bool {

@@ -13,7 +13,7 @@ import (
 type RIB struct {
 	mu               sync.RWMutex
 	routes           MapTrie[netip.Prefix, netip.Addr, RoutesList]
-	changedAt        *atomic.Int64
+	stats            *RIBStats
 	currentSessionId *atomic.Uint64 // Monotonically increasing ID for BIRD import sessions
 	// sessionTerminator points to a flag signaling the active FeedRIB stream to terminate;
 	// swapped on NewSession to invalidate the previous stream.
@@ -22,13 +22,12 @@ type RIB struct {
 }
 
 func NewRIB(log *zap.SugaredLogger) *RIB {
-	changedAt := atomic.Int64{}
-	changedAt.Store(time.Now().UnixNano())
 	sessionTerminator := &atomic.Pointer[atomic.Bool]{}
 	sessionTerminator.Store(&atomic.Bool{})
+
 	return &RIB{
 		routes:            NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
-		changedAt:         &changedAt,
+		stats:             NewRIBStats(),
 		currentSessionId:  &atomic.Uint64{},
 		sessionTerminator: sessionTerminator,
 		log:               log,
@@ -48,17 +47,21 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr, sourc
 	m.routes.InsertOrUpdate(
 		route.Prefix,
 		func() RoutesList {
+			m.stats.OnPrefixAdded()
+			m.stats.OnRouteAdded(1)
 			return RoutesList{
 				Routes: []Route{route},
 			}
 		},
-		func(m RoutesList) RoutesList {
-			m.Insert(route)
-			return m
+		func(rl RoutesList) RoutesList {
+			if rl.Insert(route) {
+				m.stats.OnRouteAdded(1)
+			}
+			return rl
 		},
 	)
 	m.mu.Unlock()
-	m.changedAt.Store(time.Now().UnixNano())
+	m.stats.OnChanged()
 
 	m.log.Infow("RIB: added unicast route",
 		zap.Stringer("prefix", prefix),
@@ -76,7 +79,7 @@ func (m *RIB) RemoveUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr, so
 	m.routes.UpdateOrDelete(
 		prefix,
 		func(routesList RoutesList) (RoutesList, bool) {
-			// Filter out only static routes with matching nexthop
+			// Filter out only static routes with matching nexthop.
 			newRoutes := make([]Route, 0, len(routesList.Routes))
 			for _, r := range routesList.Routes {
 				if r.NextHop == nexthopAddr && r.SourceID == sourceID {
@@ -86,13 +89,18 @@ func (m *RIB) RemoveUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr, so
 				newRoutes = append(newRoutes, r)
 			}
 			routesList.Routes = newRoutes
-			// Delete the prefix entry if no routes remain
-			return routesList, len(routesList.Routes) == 0
+			// Delete the prefix entry if no routes remain.
+			isEmpty := len(routesList.Routes) == 0
+			if isEmpty {
+				m.stats.OnPrefixRemoved()
+			}
+			return routesList, isEmpty
 		},
 	)
 
 	if found > 0 {
-		m.changedAt.Store(time.Now().UnixNano())
+		m.stats.OnRouteRemoved(found)
+		m.stats.OnChanged()
 		m.log.Infow("RIB: removed unicast route",
 			zap.Stringer("prefix", prefix),
 			zap.Stringer("nexthop", nexthopAddr),
@@ -142,28 +150,39 @@ func (m *RIB) Update(routes ...Route) {
 	m.mu.Lock()
 	m.update(routes...)
 	m.mu.Unlock()
-	m.changedAt.Store(time.Now().UnixNano())
+	m.stats.OnChanged()
 }
+
 func (m *RIB) update(routes ...Route) {
 	for _, route := range routes {
 		if route.ToRemove {
 			m.routes.UpdateOrDelete(
 				route.Prefix,
 				func(rl RoutesList) (RoutesList, bool) {
-					rl.Remove(route)
-					return rl, len(rl.Routes) == 0
+					if rl.Remove(route) {
+						m.stats.OnRouteRemoved(1)
+					}
+					isEmpty := len(rl.Routes) == 0
+					if isEmpty {
+						m.stats.OnPrefixRemoved()
+					}
+					return rl, isEmpty
 				},
 			)
 		} else {
 			m.routes.InsertOrUpdate(
 				route.Prefix,
 				func() RoutesList {
+					m.stats.OnPrefixAdded()
+					m.stats.OnRouteAdded(1)
 					return RoutesList{
 						Routes: []Route{route},
 					}
 				},
 				func(rl RoutesList) RoutesList {
-					rl.Insert(route)
+					if rl.Insert(route) {
+						m.stats.OnRouteAdded(1)
+					}
 					return rl
 				},
 			)
@@ -171,8 +190,9 @@ func (m *RIB) update(routes ...Route) {
 	}
 }
 
-func (m *RIB) UpdatedAt() time.Time {
-	return time.Unix(0, m.changedAt.Load())
+// Stats returns an O(1) snapshot of RIB counters.
+func (m *RIB) Stats() RIBStatsSnapshot {
+	return m.stats.Snapshot()
 }
 
 // NewSession generates a unique ID for a new BIRD import stream and provides its termination flag.
@@ -210,7 +230,7 @@ func (m *RIB) CleanupTask(sessionID uint64, quit chan bool, ttl time.Duration) {
 	defer func() {
 		m.mu.Unlock()
 		if removedCount > 0 {
-			m.changedAt.Store(time.Now().UnixNano())
+			m.stats.OnChanged()
 		}
 	}()
 
