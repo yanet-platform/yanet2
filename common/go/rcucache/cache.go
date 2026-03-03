@@ -67,12 +67,12 @@ type CacheView[K comparable, V any] struct {
 }
 
 // Lookup returns the value for the specified key.
-func (m *CacheView[K, V]) Lookup(key K) (V, bool) {
+func (m CacheView[K, V]) Lookup(key K) (V, bool) {
 	v, ok := m.cache[key]
 	return v, ok
 }
 
 // Entries returns entries in the cache as an iterator.
-func (m *CacheView[K, V]) Entries() (iter.Seq[V], int) {
+func (m CacheView[K, V]) Entries() (iter.Seq[V], int) {
 	return maps.Values(m.cache), len(m.cache)
 }
