@@ -54,7 +54,7 @@ fn main() {
         .allowlist_type("network_header")
         .allowlist_type("transport_header")
         .allowlist_function("packet_.*")
-        .allowlist_var("MODULE_NAME_LEN")
+        .allowlist_var("CP_MODULE_NAME_LEN")
         .allowlist_type("rte_mbuf")
         .allowlist_type("rte_ipv4_hdr")
         .allowlist_type("rte_tcp_hdr")

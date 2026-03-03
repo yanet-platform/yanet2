@@ -90,8 +90,12 @@ pub unsafe extern "C" fn proxy_handle_packets(
             let syn = tcp_header.tcp_flags & (RTE_TCP_SYN_FLAG as u8) != 0;
             let ack = tcp_header.tcp_flags & (RTE_TCP_ACK_FLAG as u8) != 0;
 
-            println!("SYN: {} ACK: {}", syn, ack);
-            println!("DST: {:?} SRC: {:?}", Ipv4Addr::from_bits(ipv4_header.dst_addr.swap_bytes()), Ipv4Addr::from_bits(ipv4_header.src_addr.swap_bytes()));
+            println!("SYN: {} ACK: {} DST: {:?} SRC: {:?} state.config.proxy_addr: {:?}",
+                syn as usize, ack as usize,
+                Ipv4Addr::from_bits(ipv4_header.dst_addr.swap_bytes()),
+                Ipv4Addr::from_bits(ipv4_header.src_addr.swap_bytes()),
+                Ipv4Addr::from_bits(state.config.proxy_addr.swap_bytes())
+            );
 
             if ipv4_header.dst_addr == state.config.proxy_addr
                 && ack {
@@ -113,6 +117,11 @@ pub unsafe extern "C" fn proxy_handle_packets(
                 println!("SKIP");
                 continue;
             }
+
+            println!("Send DST: {:?} SRC: {:?}",
+                Ipv4Addr::from_bits(ipv4_header.dst_addr.swap_bytes()),
+                Ipv4Addr::from_bits(ipv4_header.src_addr.swap_bytes())
+            );
 
             tcp_header.cksum = 0;
             tcp_header.cksum = proxy::checksum::ipv4_udptcp_cksum(

@@ -1,7 +1,7 @@
 use std::ffi::c_char;
 use std::ptr;
 
-use bindings::{module, MODULE_NAME_LEN};
+use bindings::{module, CP_MODULE_NAME_LEN};
 use crate::dataplane::proxy_handle_packets;
 
 #[repr(C)]
@@ -21,7 +21,7 @@ pub unsafe extern "C" fn new_module_proxy() -> *mut module {
         let proxy_module = &mut *module_ptr;
     
         let name = b"proxy\0";
-        let name_len = name.len().min(MODULE_NAME_LEN as usize);
+        let name_len = name.len().min(CP_MODULE_NAME_LEN as usize);
         ptr::copy_nonoverlapping(
             name.as_ptr() as *const c_char,
             proxy_module.module.name.as_mut_ptr(),
