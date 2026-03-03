@@ -262,8 +262,8 @@ func rangeToCIDR(af uint8, from netip.Addr, to netip.Addr) (netip.Prefix, bool) 
 		break
 	}
 
-	// Verify: from must have all host bits zero, to must
-	// have all host bits one.
+	// Verify: from must have all host bits zero, to must have all host bits
+	// one.
 	prefix, err := from.Prefix(prefixLen)
 	if err != nil {
 		return netip.Prefix{}, false
@@ -272,8 +272,7 @@ func rangeToCIDR(af uint8, from netip.Addr, to netip.Addr) (netip.Prefix, bool) 
 		return netip.Prefix{}, false
 	}
 
-	// Verify the "to" address matches the broadcast for
-	// this prefix.
+	// Verify the "to" address matches the broadcast for this prefix.
 	expectedTo := xnetip.LastAddr(prefix)
 	if expectedTo != to {
 		return netip.Prefix{}, false
@@ -292,45 +291,32 @@ func (m *RouteService) FlushRoutes(
 	}
 	ribRef, ok := m.getRib(name)
 	if !ok {
-		m.log.Warnf("no RIB found for module '%s'", name)
 		return &routepb.FlushRoutesResponse{}, nil
 	}
 
-	return &routepb.FlushRoutesResponse{}, m.syncRouteUpdates(ribRef, name)
+	if err := m.syncRouteUpdates(ribRef, name); err != nil {
+		return nil, fmt.Errorf("failed to sync route updates: %w", err)
+	}
+
+	return &routepb.FlushRoutesResponse{}, nil
 }
 
 func (m *RouteService) InsertRoute(
 	ctx context.Context,
 	request *routepb.InsertRouteRequest,
 ) (*routepb.InsertRouteResponse, error) {
-	startTime := time.Now()
-
 	name := request.GetName()
 	if name == "" {
-		m.log.Errorw("InsertRoute: name validation failed",
-			zap.String("config_name", name),
-		)
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
 	prefix, err := netip.ParsePrefix(request.GetPrefix())
 	if err != nil {
-		m.log.Errorw("InsertRoute: failed to parse prefix",
-			zap.Error(err),
-			zap.String("prefix_str", request.GetPrefix()),
-			zap.String("name", name),
-		)
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix %q: %v", request.GetPrefix(), err)
 	}
 
 	nexthopAddr, err := netip.ParseAddr(request.GetNexthopAddr())
 	if err != nil {
-		m.log.Errorw("InsertRoute: failed to parse nexthop address",
-			zap.Error(err),
-			zap.String("nexthop_str", request.GetNexthopAddr()),
-			zap.Stringer("prefix", prefix),
-			zap.String("name", name),
-		)
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop address %q: %v", request.GetNexthopAddr(), err)
 	}
 
@@ -339,34 +325,15 @@ func (m *RouteService) InsertRoute(
 	holder := m.getOrCreateRib(name)
 
 	if err := holder.AddUnicastRoute(prefix, nexthopAddr, sourceID); err != nil {
-		m.log.Errorw("InsertRoute: failed to add unicast route to RIB",
-			zap.Error(err),
-			zap.Stringer("prefix", prefix),
-			zap.Stringer("nexthop", nexthopAddr),
-			zap.Uint8("source", uint8(sourceID)),
-			zap.String("name", name),
-		)
 		return nil, fmt.Errorf("failed to add unicast route: %w", err)
 	}
 
 	if request.GetDoFlush() {
 		if err := m.syncRouteUpdates(holder, name); err != nil {
-			m.log.Errorw("InsertRoute: failed to sync route updates",
-				zap.Error(err),
-				zap.Stringer("prefix", prefix),
-				zap.Stringer("nexthop", nexthopAddr),
-				zap.String("name", name),
-			)
-			return &routepb.InsertRouteResponse{}, err
+			return nil, fmt.Errorf("failed to sync route updates: %w", err)
 		}
 	}
 
-	m.log.Infow("InsertRoute completed successfully",
-		zap.Stringer("prefix", prefix),
-		zap.Stringer("nexthop", nexthopAddr),
-		zap.String("name", name),
-		zap.Duration("duration", time.Since(startTime)),
-	)
 	return &routepb.InsertRouteResponse{}, nil
 }
 
@@ -374,8 +341,6 @@ func (m *RouteService) DeleteRoute(
 	ctx context.Context,
 	request *routepb.DeleteRouteRequest,
 ) (*routepb.DeleteRouteResponse, error) {
-	startTime := time.Now()
-
 	name := request.GetName()
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
@@ -395,41 +360,19 @@ func (m *RouteService) DeleteRoute(
 
 	holder, ok := m.getRib(name)
 	if !ok {
-		m.log.Warnw("DeleteRoute: no RIB found for module",
-			zap.String("name", name),
-		)
 		return &routepb.DeleteRouteResponse{}, nil
 	}
 
 	if err := holder.RemoveUnicastRoute(prefix, nexthopAddr, sourceID); err != nil {
-		m.log.Errorw("DeleteRoute: failed to remove unicast route from RIB",
-			zap.Error(err),
-			zap.Stringer("prefix", prefix),
-			zap.Stringer("nexthop", nexthopAddr),
-			zap.Uint8("source", uint8(sourceID)),
-			zap.String("name", name),
-		)
 		return nil, fmt.Errorf("failed to remove unicast route: %w", err)
 	}
 
 	if request.GetDoFlush() {
 		if err := m.syncRouteUpdates(holder, name); err != nil {
-			m.log.Errorw("DeleteRoute: failed to sync route deletions",
-				zap.Error(err),
-				zap.Stringer("prefix", prefix),
-				zap.Stringer("nexthop", nexthopAddr),
-				zap.String("name", name),
-			)
-			return nil, status.Errorf(codes.Internal, "failed to sync route deletions: %v", err)
+			return nil, fmt.Errorf("failed to sync route deletions: %w", err)
 		}
 	}
 
-	m.log.Infow("DeleteRoute completed successfully",
-		zap.Stringer("prefix", prefix),
-		zap.Stringer("nexthop", nexthopAddr),
-		zap.String("name", name),
-		zap.Duration("duration", time.Since(startTime)),
-	)
 	return &routepb.DeleteRouteResponse{}, nil
 }
 
@@ -437,8 +380,6 @@ func (m *RouteService) DeleteConfig(
 	ctx context.Context,
 	request *routepb.DeleteConfigRequest,
 ) (*routepb.DeleteConfigResponse, error) {
-	startTime := time.Now()
-
 	name := request.GetName()
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
@@ -460,21 +401,12 @@ func (m *RouteService) DeleteConfig(
 
 	// Remove the RIB from the map.
 	m.ribsLock.Lock()
-	_, exists := m.ribs[name]
-	if !exists {
+	if _, ok := m.ribs[name]; !ok {
 		m.ribsLock.Unlock()
-		m.log.Warnw("DeleteConfig: RIB not found",
-			zap.String("name", name),
-		)
 		return &routepb.DeleteConfigResponse{}, nil
 	}
 	delete(m.ribs, name)
 	m.ribsLock.Unlock()
-
-	m.log.Infow("DeleteConfig completed successfully",
-		zap.String("name", name),
-		zap.Duration("duration", time.Since(startTime)),
-	)
 
 	return &routepb.DeleteConfigResponse{}, nil
 }
