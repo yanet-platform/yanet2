@@ -1841,10 +1841,10 @@ yanet_module_performance_counters(
 	counters->tx_bytes = 0;
 
 	// Allocate memory for the performance counters structure
-	counters->counters_count = CP_MODULE_PERF_COUNTERS;
+	counters->counters_count = MODULE_ECTX_PERF_COUNTERS;
 	counters->counters = (struct module_performance_counter *)malloc(
 		sizeof(struct module_performance_counter) *
-		CP_MODULE_PERF_COUNTERS
+		MODULE_ECTX_PERF_COUNTERS
 	);
 	if (counters->counters == NULL) {
 		yanet_counter_handle_list_free(counter_list);
@@ -1856,7 +1856,7 @@ yanet_module_performance_counters(
 	memset(counters->counters,
 	       0,
 	       sizeof(struct module_performance_counter) *
-		       CP_MODULE_PERF_COUNTERS);
+		       MODULE_ECTX_PERF_COUNTERS);
 
 	// Parse all counters - both performance histograms and tx/rx counters
 	for (size_t i = 0; i < counter_list->count; ++i) {
@@ -1905,7 +1905,8 @@ yanet_module_performance_counters(
 					module_name
 				);
 				// Clean up and return error
-				for (size_t j = 0; j < CP_MODULE_PERF_COUNTERS;
+				for (size_t j = 0;
+				     j < MODULE_ECTX_PERF_COUNTERS;
 				     ++j) {
 					free(counters->counters[j]
 						     .latency_ranges);

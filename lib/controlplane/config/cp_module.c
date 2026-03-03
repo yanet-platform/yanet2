@@ -11,6 +11,35 @@
 #include "lib/controlplane/diag/diag.h"
 #include <stdio.h>
 
+static int
+cp_module_build_perf_counters(struct cp_module *cp_module) {
+	for (size_t counter_idx = 0; counter_idx < MODULE_ECTX_PERF_COUNTERS;
+	     ++counter_idx) {
+		char name[16];
+		sprintf(name, "hist_%zu", counter_idx);
+		cp_module->perf_counters_indices[counter_idx] =
+			counter_registry_register(
+				&cp_module->counter_registry,
+				name,
+				MODULE_ECTX_PERF_COUNTER_SIZE
+			);
+		if (cp_module->perf_counters_indices[counter_idx] ==
+		    COUNTER_INVALID) {
+			NEW_ERROR(
+				"failed to register histogram counter at index "
+				"%zu for module "
+				"'%s:%s'",
+				counter_idx,
+				cp_module->type,
+				cp_module->name
+			);
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
 int
 cp_module_init(
 	struct cp_module *cp_module,
@@ -101,28 +130,9 @@ cp_module_init(
 		);
 		return -1;
 	}
-	for (size_t counter_idx = 0; counter_idx < CP_MODULE_PERF_COUNTERS;
-	     ++counter_idx) {
-		char name[16];
-		sprintf(name, "hist_%zu", counter_idx);
-		cp_module->perf_counters_indices[counter_idx] =
-			counter_registry_register(
-				&cp_module->counter_registry,
-				name,
-				CP_MODULE_PERF_COUNTER_SIZE
-			);
-		if (cp_module->perf_counters_indices[counter_idx] ==
-		    COUNTER_INVALID) {
-			NEW_ERROR(
-				"failed to register histogram counter at index "
-				"%zu for module "
-				"'%s:%s'",
-				counter_idx,
-				module_type,
-				module_name
-			);
-			return -1;
-		}
+
+	if (cp_module_build_perf_counters(cp_module)) {
+		return -1;
 	}
 
 	uint64_t any_idx;
@@ -385,18 +395,18 @@ cp_module_parse_performance_counter(
 	}
 
 	// Validate counter index is in valid range [0, 5]
-	if (counter_idx >= CP_MODULE_PERF_COUNTERS) {
+	if (counter_idx >= MODULE_ECTX_PERF_COUNTERS) {
 		errno = EINVAL;
 		return -1;
 	}
 
 	// Calculate total number of histogram buckets
 	const size_t hist_buckets =
-		counters_hybrid_histogram_batches(&cp_module_perf_counter);
+		counters_hybrid_histogram_batches(&module_ectx_perf_counter);
 
 	// Determine minimum batch size based on counter index
 	// Batch sizes: 1, 2-3, 4-7, 8-15, 16-31, 32+
-	const uint64_t batch_sizes[CP_MODULE_PERF_COUNTERS] = {
+	const uint64_t batch_sizes[MODULE_ECTX_PERF_COUNTERS] = {
 		1, 2, 4, 8, 16, 32
 	};
 
@@ -422,8 +432,8 @@ cp_module_parse_performance_counter(
 	counter->packets = 0;
 	counter->bytes = 0;
 	for (size_t instance_idx = 0; instance_idx < workers; ++instance_idx) {
-		struct cp_module_perf_counter_layout *perf_counter =
-			(struct cp_module_perf_counter_layout *)
+		struct module_ectx_perf_counter_layout *perf_counter =
+			(struct module_ectx_perf_counter_layout *)
 				counter_handle_get_value(
 					counter_handle->value_handle,
 					instance_idx
@@ -441,15 +451,15 @@ cp_module_parse_performance_counter(
 		// Calculate minimum latency for this bucket
 		latency_range->min_latency =
 			counters_hybrid_histogram_batch_first_elem(
-				&cp_module_perf_counter, range_idx
+				&module_ectx_perf_counter, range_idx
 			);
 
 		// Accumulate counter values across all worker instances
 		latency_range->batches = 0;
 		for (size_t worker_idx = 0; worker_idx < workers;
 		     ++worker_idx) {
-			struct cp_module_perf_counter_layout *perf_counter =
-				(struct cp_module_perf_counter_layout *)
+			struct module_ectx_perf_counter_layout *perf_counter =
+				(struct module_ectx_perf_counter_layout *)
 					counter_handle_get_value(
 						counter_handle->value_handle,
 						worker_idx

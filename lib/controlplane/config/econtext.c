@@ -71,7 +71,7 @@ module_ectx_create(
 	module_ectx->tx_counter_id = cp_module->tx_counter_id;
 	module_ectx->rx_bytes_counter_id = cp_module->rx_bytes_counter_id;
 	module_ectx->tx_bytes_counter_id = cp_module->tx_bytes_counter_id;
-	memcpy(module_ectx->perf_counter_indices,
+	memcpy(module_ectx->perf_counters_indices,
 	       cp_module->perf_counters_indices,
 	       sizeof(cp_module->perf_counters_indices));
 
@@ -419,6 +419,18 @@ function_ectx_create(
 	}
 
 	SET_OFFSET_OF(&function_ectx->counter_storage, counter_storage);
+	function_ectx->counter_packet_in_count =
+		cp_function->counter_packet_in_count;
+	function_ectx->counter_packet_in_bytes =
+		cp_function->counter_packet_in_bytes;
+	function_ectx->counter_packet_out_count =
+		cp_function->counter_packet_out_count;
+	function_ectx->counter_packet_out_bytes =
+		cp_function->counter_packet_out_bytes;
+	function_ectx->counter_packet_drop_count =
+		cp_function->counter_packet_drop_count;
+	function_ectx->counter_packet_drop_bytes =
+		cp_function->counter_packet_drop_bytes;
 
 	uint64_t pos = 0;
 	for (uint64_t idx = 0; idx < cp_function->chain_count; ++idx) {
@@ -549,6 +561,18 @@ pipeline_ectx_create(
 	}
 
 	SET_OFFSET_OF(&pipeline_ectx->counter_storage, counter_storage);
+	pipeline_ectx->counter_packet_in_count =
+		cp_pipeline->counter_packet_in_count;
+	pipeline_ectx->counter_packet_in_bytes =
+		cp_pipeline->counter_packet_in_bytes;
+	pipeline_ectx->counter_packet_out_count =
+		cp_pipeline->counter_packet_out_count;
+	pipeline_ectx->counter_packet_out_bytes =
+		cp_pipeline->counter_packet_out_bytes;
+	pipeline_ectx->counter_packet_drop_count =
+		cp_pipeline->counter_packet_drop_count;
+	pipeline_ectx->counter_packet_drop_bytes =
+		cp_pipeline->counter_packet_drop_bytes;
 
 	for (uint64_t idx = 0; idx < cp_pipeline->length; ++idx) {
 		struct cp_function *cp_function = cp_config_gen_lookup_function(
@@ -809,6 +833,14 @@ device_ectx_create(
 	}
 
 	SET_OFFSET_OF(&device_ectx->counter_storage, counter_storage);
+	device_ectx->counter_packet_rx_count =
+		cp_device->counter_packet_rx_count;
+	device_ectx->counter_packet_rx_bytes =
+		cp_device->counter_packet_rx_bytes;
+	device_ectx->counter_packet_tx_count =
+		cp_device->counter_packet_tx_count;
+	device_ectx->counter_packet_tx_bytes =
+		cp_device->counter_packet_tx_bytes;
 
 	struct dp_device *dp_device =
 		ADDR_OF(&dp_config->dp_devices) + cp_device->dp_device_idx;

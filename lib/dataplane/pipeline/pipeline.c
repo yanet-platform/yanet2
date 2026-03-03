@@ -2,12 +2,8 @@
 
 #include "common/numutils.h"
 
-#include "controlplane/config/cp_device.h"
-#include "controlplane/config/cp_function.h"
-#include "controlplane/config/cp_module.h"
-#include "controlplane/config/cp_pipeline.h"
-#include "controlplane/config/econtext.h"
 #include "counters/histogram.h"
+#include "lib/dataplane/pipeline/econtext.h"
 
 #include "dataplane/config/zone.h"
 #include "dataplane/packet/packet.h"
@@ -77,16 +73,16 @@ module_ectx_process(
 	uint64_t elapsed_ns = tsc_elapsed_ns(tsc_end - tsc_start);
 	if (packets_count > 0) {
 		size_t idx = uint64_log_up(packets_count);
-		size_t batch_idx = idx < CP_MODULE_PERF_COUNTERS
+		size_t batch_idx = idx < MODULE_ECTX_PERF_COUNTERS
 					   ? idx
-					   : CP_MODULE_PERF_COUNTERS - 1;
+					   : MODULE_ECTX_PERF_COUNTERS - 1;
 		size_t counter_idx =
-			module_ectx->perf_counter_indices[batch_idx];
+			module_ectx->perf_counters_indices[batch_idx];
 		size_t hist_idx = counters_hybrid_histogram_batch(
-			&cp_module_perf_counter, elapsed_ns / packets_count
+			&module_ectx_perf_counter, elapsed_ns / packets_count
 		);
-		struct cp_module_perf_counter_layout *counter =
-			(struct cp_module_perf_counter_layout *)
+		struct module_ectx_perf_counter_layout *counter =
+			(struct module_ectx_perf_counter_layout *)
 				counter_get_address(
 					counter_idx, dp_worker->idx, storage
 				);
@@ -104,21 +100,6 @@ module_ectx_process(
 		packet_front->output.count,
 		packet_list_bytes_sum(&packet_front->output)
 	);
-
-	LOG_TRACEX(int in = packet_list_counter(&packet_front->input);
-		   int out = packet_list_counter(&packet_front->output);
-		   int drop = packet_list_counter(&packet_front->drop);
-		   struct cp_module *cp_module =
-			   ADDR_OF(&module_ectx->cp_module);
-
-		   packet_list_print(&packet_front->output);
-		   ,
-		   "processed packets with module %s, in %d, out "
-		   "%d, drop %d. Output list printed above.",
-		   cp_module->name,
-		   in,
-		   out,
-		   drop);
 }
 
 void
@@ -159,13 +140,12 @@ function_ectx_process(
 	struct function_ectx *function_ectx,
 	struct packet_front *packet_front
 ) {
-	struct cp_function *cp_function = ADDR_OF(&function_ectx->cp_function);
 	struct counter_storage *storage =
 		ADDR_OF(&function_ectx->counter_storage);
 
 	counter_add_packets_bytes(
-		cp_function->counter_packet_in_count,
-		cp_function->counter_packet_in_bytes,
+		function_ectx->counter_packet_in_count,
+		function_ectx->counter_packet_in_bytes,
 		dp_worker->idx,
 		storage,
 		packet_front->output.count,
@@ -196,16 +176,16 @@ function_ectx_process(
 	}
 
 	counter_add_packets_bytes(
-		cp_function->counter_packet_out_count,
-		cp_function->counter_packet_out_bytes,
+		function_ectx->counter_packet_out_count,
+		function_ectx->counter_packet_out_bytes,
 		dp_worker->idx,
 		storage,
 		packet_front->output.count,
 		packet_list_bytes_sum(&packet_front->output)
 	);
 	counter_add_packets_bytes(
-		cp_function->counter_packet_drop_count,
-		cp_function->counter_packet_drop_bytes,
+		function_ectx->counter_packet_drop_count,
+		function_ectx->counter_packet_drop_bytes,
 		dp_worker->idx,
 		storage,
 		packet_front->drop.count,
@@ -219,14 +199,13 @@ pipeline_ectx_process(
 	struct pipeline_ectx *pipeline_ectx,
 	struct packet_front *packet_front
 ) {
-	struct cp_pipeline *cp_pipeline = ADDR_OF(&pipeline_ectx->cp_pipeline);
 	struct counter_storage *storage =
 		ADDR_OF(&pipeline_ectx->counter_storage);
 
 	// Packets arrive in output list, count them before processing
 	counter_add_packets_bytes(
-		cp_pipeline->counter_packet_in_count,
-		cp_pipeline->counter_packet_in_bytes,
+		pipeline_ectx->counter_packet_in_count,
+		pipeline_ectx->counter_packet_in_bytes,
 		dp_worker->idx,
 		storage,
 		packet_front->output.count,
@@ -241,16 +220,16 @@ pipeline_ectx_process(
 	}
 
 	counter_add_packets_bytes(
-		cp_pipeline->counter_packet_out_count,
-		cp_pipeline->counter_packet_out_bytes,
+		pipeline_ectx->counter_packet_out_count,
+		pipeline_ectx->counter_packet_out_bytes,
 		dp_worker->idx,
 		storage,
 		packet_front->output.count,
 		packet_list_bytes_sum(&packet_front->output)
 	);
 	counter_add_packets_bytes(
-		cp_pipeline->counter_packet_drop_count,
-		cp_pipeline->counter_packet_drop_bytes,
+		pipeline_ectx->counter_packet_drop_count,
+		pipeline_ectx->counter_packet_drop_bytes,
 		dp_worker->idx,
 		storage,
 		packet_front->drop.count,
@@ -307,10 +286,9 @@ device_ectx_process_input(
 	struct device_ectx *device_ectx,
 	struct packet_front *packet_front
 ) {
-	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
 	counter_add_packets_bytes(
-		cp_device->counter_packet_rx_count,
-		cp_device->counter_packet_rx_bytes,
+		device_ectx->counter_packet_rx_count,
+		device_ectx->counter_packet_rx_bytes,
 		dp_worker->idx,
 		ADDR_OF(&device_ectx->counter_storage),
 		packet_list_count(&packet_front->output),
@@ -330,10 +308,9 @@ device_ectx_process_output(
 	struct device_ectx *device_ectx,
 	struct packet_front *packet_front
 ) {
-	struct cp_device *cp_device = ADDR_OF(&device_ectx->cp_device);
 	counter_add_packets_bytes(
-		cp_device->counter_packet_tx_count,
-		cp_device->counter_packet_tx_bytes,
+		device_ectx->counter_packet_tx_count,
+		device_ectx->counter_packet_tx_bytes,
 		dp_worker->idx,
 		ADDR_OF(&device_ectx->counter_storage),
 		packet_list_count(&packet_front->output),
