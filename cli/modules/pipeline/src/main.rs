@@ -50,7 +50,7 @@ pub struct UpdateCmd {
     #[arg(long)]
     pub name: String,
     /// Pipeline functions.
-    #[arg(long)]
+    #[arg(long, value_delimiter = ',')]
     pub functions: Vec<String>,
 }
 

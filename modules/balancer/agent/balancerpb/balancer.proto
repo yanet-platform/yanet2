@@ -127,6 +127,44 @@ service BalancerService {
 	// by the balancer, including client addresses, virtual service
 	// mappings, real server assignments, and timeout information.
 	rpc ShowSessions(ShowSessionsRequest) returns (ShowSessionsResponse);
+
+	// Update specific virtual services.
+	//
+	// This RPC allows partial updates to the virtual services configuration
+	// without requiring the full configuration to be provided. Only the
+	// virtual services specified in the request are updated or added.
+	//
+	// Behavior:
+	// - Virtual services in the request that already exist are replaced
+	// - Virtual services in the request that don't exist are added
+	// - Virtual services not in the request remain unchanged
+	// - Full VS configuration must be provided for each VS in the request
+	//
+	// The response includes filter reuse metadata, but only for the virtual
+	// services that were included in the update request. This allows tracking
+	// which ACL filters were reused vs recompiled for the updated VSs.
+	//
+	// Note: VS matcher filters (IPv4/IPv6) may be recompiled if the set of
+	// VS identifiers changes.
+	rpc UpdateVS(UpdateVSRequest) returns (UpdateVSResponse);
+
+	// Delete specific virtual services.
+	//
+	// This RPC removes the specified virtual services from the balancer
+	// configuration. Other virtual services remain unchanged.
+	//
+	// Behavior:
+	// - Virtual services matching the identifiers in the request are removed
+	// - Virtual services not in the request remain unchanged
+	// - Deleting a non-existent VS is not an error (idempotent)
+	// - Active sessions for deleted VSs will eventually time out
+	//
+	// The response includes filter reuse metadata with an empty ACL reuse
+	// list, since deleted VSs don't have ACL filters to reuse.
+	//
+	// Note: VS matcher filters (IPv4/IPv6) will be recompiled since the
+	// set of VS identifiers changes.
+	rpc DeleteVS(DeleteVSRequest) returns (DeleteVSResponse);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -392,4 +430,77 @@ message ShowInspectRequest {
 message ShowInspectResponse {
 	// Agent-level memory inspection including all balancers
 	AgentInspect inspect = 1;
+}
+
+// Request to update specific virtual services.
+//
+// Allows partial updates to the VS configuration by specifying only
+// the virtual services that need to be updated or added.
+message UpdateVSRequest {
+	// Balancer instance name (optional, auto-selects if only one exists).
+	//
+	// If not specified and exactly one balancer manager exists, that
+	// manager is automatically selected. If multiple managers exist,
+	// the name must be explicitly provided.
+	optional string name = 1;
+
+	// List of virtual services to update or add.
+	//
+	// Each VS must include a complete configuration. VSs with matching
+	// identifiers in the current config will be replaced; new identifiers
+	// will be added. VSs not in this list remain unchanged.
+	repeated VirtualService vs = 2;
+}
+
+// Response to UpdateVS request.
+//
+// Contains the balancer name and metadata about filter reuse during the update.
+message UpdateVSResponse {
+	// Balancer instance name that was updated.
+	string name = 1;
+
+	// Metadata about filter reuse during the update.
+	//
+	// The vs_acl_reuses list only contains virtual services that were
+	// included in the update request. This allows tracking which ACL
+	// filters were reused vs recompiled specifically for the updated VSs.
+	//
+	// Note: created field will always be false for UpdateVS operations.
+	UpdateInfo info = 2;
+}
+
+// Request to delete specific virtual services.
+//
+// Removes the specified virtual services from the balancer configuration
+// while leaving other virtual services unchanged.
+message DeleteVSRequest {
+	// Balancer instance name (optional, auto-selects if only one exists).
+	//
+	// If not specified and exactly one balancer manager exists, that
+	// manager is automatically selected. If multiple managers exist,
+	// the name must be explicitly provided.
+	optional string name = 1;
+
+	// List of virtual services to delete.
+	//
+	// Only the VS identifiers (id field) are used for matching; other
+	// fields in the VirtualService message are ignored. VSs with matching
+	// identifiers will be removed from the configuration.
+	repeated VirtualService vs = 2;
+}
+
+// Response to DeleteVS request.
+//
+// Contains the balancer name and metadata about filter reuse during the update.
+message DeleteVSResponse {
+	// Balancer instance name that was updated.
+	string name = 1;
+
+	// Metadata about filter reuse during the update.
+	//
+	// The vs_acl_reuses list will always be empty for delete operations,
+	// since deleted VSs don't have ACL filters to reuse.
+	//
+	// Note: created field will always be false for DeleteVS operations.
+	UpdateInfo info = 2;
 }
