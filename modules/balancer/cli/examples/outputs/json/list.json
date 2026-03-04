@@ -1,6 +1,1 @@
-{
-  "configs": [
-    "my-balancer",
-    "test-balancer"
-  ]
-}
+{"configs":["my-balancer","test-balancer"]}

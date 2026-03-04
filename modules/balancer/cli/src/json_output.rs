@@ -713,6 +713,29 @@ pub fn convert_update_info(info: &balancerpb::UpdateInfo) -> UpdateInfoJson {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// VS Update Info JSON structures (without created field)
+////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Serialize)]
+pub struct VsUpdateInfoJson {
+    pub vs_ipv4_matcher_reused: bool,
+    pub vs_ipv6_matcher_reused: bool,
+    pub vs_acl_reuses: Vec<VsIdentifierJson>,
+}
+
+pub fn convert_vs_update_info(info: &balancerpb::UpdateInfo) -> VsUpdateInfoJson {
+    VsUpdateInfoJson {
+        vs_ipv4_matcher_reused: info.vs_ipv4_matcher_reused,
+        vs_ipv6_matcher_reused: info.vs_ipv6_matcher_reused,
+        vs_acl_reuses: info
+            .vs_acl_reuses
+            .iter()
+            .filter_map(|vs_id| convert_vs_identifier(Some(vs_id)))
+            .collect(),
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // ShowInspect JSON structures
 ////////////////////////////////////////////////////////////////////////////////
 

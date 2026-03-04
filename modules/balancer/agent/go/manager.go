@@ -414,7 +414,11 @@ func (b *BalancerManager) UpdateVS(
 		ffiVs, err := protoToVsConfig(protoVs)
 		if err != nil {
 			b.log.Errorw("failed to convert VS", "index", i, "error", err)
-			return nil, fmt.Errorf("failed to convert VS at index %d: %w", i, err)
+			return nil, fmt.Errorf(
+				"failed to convert VS at index %d: %w",
+				i,
+				err,
+			)
 		}
 		ffiVsList = append(ffiVsList, ffiVs)
 	}
@@ -500,7 +504,10 @@ func (b *BalancerManager) UpdateVS(
 	}
 
 	// Filter ACL reuse list to only include VS from the update request
-	filteredUpdateInfo := filterACLReusesForRequestedVs(updateInfo, requestedVsIds)
+	filteredUpdateInfo := filterACLReusesForRequestedVs(
+		updateInfo,
+		requestedVsIds,
+	)
 
 	b.log.Infow("virtual services updated successfully",
 		"vs_count", len(vsList),

@@ -390,6 +390,22 @@ impl BalancerConfig {
     }
 }
 
+/// Configuration containing only virtual services list
+/// Used for UpdateVS command
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VsListConfig {
+    pub vs: Vec<VirtualService>,
+}
+
+impl VsListConfig {
+    /// Load configuration from a YAML file
+    pub fn from_yaml_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let file = std::fs::File::open(path)?;
+        let config = serde_yaml::from_reader(file)?;
+        Ok(config)
+    }
+}
+
 /// Packet processing configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PacketHandlerConfig {

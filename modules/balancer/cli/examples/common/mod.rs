@@ -869,6 +869,39 @@ pub fn create_update_info_updated_example() -> balancerpb::UpdateInfo {
 }
 
 #[allow(dead_code)]
+pub fn create_vs_update_info_example() -> balancerpb::UpdateInfo {
+    // VS update/delete operations never have created=true
+    balancerpb::UpdateInfo {
+        created: false,
+        vs_ipv4_matcher_reused: true,
+        vs_ipv6_matcher_reused: false,
+        vs_acl_reuses: vec![
+            balancerpb::VsIdentifier {
+                addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 1] }),
+                port: 80,
+                proto: balancerpb::TransportProto::Tcp as i32,
+            },
+            balancerpb::VsIdentifier {
+                addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 2] }),
+                port: 443,
+                proto: balancerpb::TransportProto::Tcp as i32,
+            },
+        ],
+    }
+}
+
+#[allow(dead_code)]
+pub fn create_vs_delete_info_example() -> balancerpb::UpdateInfo {
+    // VS delete operations have empty ACL reuse list
+    balancerpb::UpdateInfo {
+        created: false,
+        vs_ipv4_matcher_reused: false,
+        vs_ipv6_matcher_reused: true,
+        vs_acl_reuses: vec![], // Always empty for delete
+    }
+}
+
+#[allow(dead_code)]
 pub fn create_inspect_example() -> balancerpb::ShowInspectResponse {
     balancerpb::ShowInspectResponse {
         inspect: Some(balancerpb::AgentInspect {

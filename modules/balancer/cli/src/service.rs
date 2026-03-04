@@ -7,7 +7,7 @@ use ync::client::{ConnectionArgs, LayeredChannel};
 
 use crate::{
     cmd::*,
-    entities::BalancerConfig,
+    entities::{BalancerConfig, VsListConfig},
     output,
     rpc::{BalancerServiceClient, balancerpb},
 };
@@ -47,6 +47,7 @@ impl BalancerService {
         match mode {
             Mode::Update(cmd) => self.update_config(cmd).await,
             Mode::Reals(cmd) => self.handle_reals(cmd).await,
+            Mode::Vs(cmd) => self.handle_vs(cmd).await,
             Mode::Config(cmd) => self.config(cmd).await,
             Mode::List(cmd) => self.list(cmd).await,
             Mode::Stats(cmd) => self.stats(cmd).await,
@@ -245,6 +246,73 @@ impl BalancerService {
         let response = self.client.show_inspect(request).await?.into_inner();
 
         output::print_show_inspect(&response, cmd.format.to_format())?;
+        Ok(())
+    }
+
+    /// Handle VS commands
+    async fn handle_vs(&mut self, cmd: VsCmd) -> Result<(), Box<dyn Error>> {
+        match cmd.mode {
+            VsMode::Update(cmd) => self.update_vs(cmd).await,
+            VsMode::Delete(cmd) => self.delete_vs(cmd).await,
+        }
+    }
+
+    /// Update virtual services
+    async fn update_vs(&mut self, cmd: UpdateVsCmd) -> Result<(), Box<dyn Error>> {
+        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
+        info!("Loading VS configuration from: {}", cmd.config);
+
+        let vs_config = VsListConfig::from_yaml_file(&cmd.config)?;
+        let vs_count = vs_config.vs.len();
+
+        // Convert VirtualService entities to protobuf
+        let vs_list: Result<Vec<balancerpb::VirtualService>, String> =
+            vs_config.vs.into_iter().map(TryInto::try_into).collect();
+        let vs_list = vs_list?;
+
+        let request = balancerpb::UpdateVsRequest { name: cmd.name.clone(), vs: vs_list };
+
+        log::debug!("Sending UpdateVS request for '{}'", name_display);
+        let response = self.client.update_vs(request).await?.into_inner();
+
+        info!(
+            "Successfully updated {} virtual service(s) for '{}'",
+            vs_count, response.name
+        );
+
+        // Display update information
+        if let Some(update_info) = &response.info {
+            output::print_vs_update_info(update_info, cmd.format.to_format(), output::VsOperation::Update)?;
+        }
+
+        Ok(())
+    }
+
+    /// Delete virtual services
+    async fn delete_vs(&mut self, cmd: DeleteVsCmd) -> Result<(), Box<dyn Error>> {
+        // Extract values before moving cmd
+        let name_for_display = cmd.name.clone();
+        let name_display = name_for_display.as_deref().unwrap_or("<auto>");
+        let vs_count = cmd.vs.len();
+        let format = cmd.format.to_format();
+
+        info!("Deleting {} virtual service(s) from '{}'", vs_count, name_display);
+
+        let request: balancerpb::DeleteVsRequest = cmd.try_into()?;
+
+        log::debug!("Sending DeleteVS request for '{}'", name_display);
+        let response = self.client.delete_vs(request).await?.into_inner();
+
+        info!(
+            "Successfully deleted {} virtual service(s) from '{}'",
+            vs_count, response.name
+        );
+
+        // Display update information
+        if let Some(update_info) = &response.info {
+            output::print_vs_update_info(update_info, format, output::VsOperation::Delete)?;
+        }
+
         Ok(())
     }
 }

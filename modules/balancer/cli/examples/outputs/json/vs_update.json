@@ -1,0 +1,1 @@
+{"vs_ipv4_matcher_reused":true,"vs_ipv6_matcher_reused":false,"vs_acl_reuses":[{"addr":"192.0.2.1","port":80,"proto":"tcp"},{"addr":"192.0.2.2","port":443,"proto":"tcp"}]}

@@ -170,7 +170,10 @@ func createInitialTestConfig() *balancerpb.BalancerConfig {
 }
 
 // findVSInConfig finds a VS in config by IP address
-func findVSInConfig(config *balancerpb.BalancerConfig, vsIP netip.Addr) *balancerpb.VirtualService {
+func findVSInConfig(
+	config *balancerpb.BalancerConfig,
+	vsIP netip.Addr,
+) *balancerpb.VirtualService {
 	for _, vs := range config.PacketHandler.Vs {
 		addr, _ := netip.AddrFromSlice(vs.Id.Addr.Bytes)
 		if addr == vsIP {
@@ -181,7 +184,11 @@ func findVSInConfig(config *balancerpb.BalancerConfig, vsIP netip.Addr) *balance
 }
 
 // verifyWLCConfig verifies that WLC configuration is correctly set for specified VSs
-func verifyWLCConfig(t *testing.T, config *balancerpb.BalancerConfig, expectedWLCVSs []netip.Addr) {
+func verifyWLCConfig(
+	t *testing.T,
+	config *balancerpb.BalancerConfig,
+	expectedWLCVSs []netip.Addr,
+) {
 	t.Helper()
 
 	require.NotNil(t, config.State, "State config should not be nil")
@@ -228,14 +235,22 @@ func TestUpdateVSBasicOperations(t *testing.T) {
 			createTestReal(testReal5IP, 1),
 		})
 
-		updateInfo, err := ts.Balancer.UpdateVS([]*balancerpb.VirtualService{newVS}, ts.Mock.CurrentTime())
+		updateInfo, err := ts.Balancer.UpdateVS(
+			[]*balancerpb.VirtualService{newVS},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 		require.NotNil(t, updateInfo)
 
 		// Verify config
 		updatedConfig := ts.Balancer.Config()
 		require.NotNil(t, updatedConfig)
-		assert.Equal(t, 3, len(updatedConfig.PacketHandler.Vs), "should have 3 VS")
+		assert.Equal(
+			t,
+			3,
+			len(updatedConfig.PacketHandler.Vs),
+			"should have 3 VS",
+		)
 
 		// Verify VS3 exists
 		vs3 := findVSInConfig(updatedConfig, testVs3IP)
@@ -249,18 +264,31 @@ func TestUpdateVSBasicOperations(t *testing.T) {
 
 	t.Run("UpdateExistingVS", func(t *testing.T) {
 		// Update VS1: change from WLC=true to WLC=false
-		updatedVS1 := createTestVS(testVs1IP, testVs1Port, false, []*balancerpb.Real{
-			createTestReal(testReal6IP, 1),
-		})
+		updatedVS1 := createTestVS(
+			testVs1IP,
+			testVs1Port,
+			false,
+			[]*balancerpb.Real{
+				createTestReal(testReal6IP, 1),
+			},
+		)
 
-		updateInfo, err := ts.Balancer.UpdateVS([]*balancerpb.VirtualService{updatedVS1}, ts.Mock.CurrentTime())
+		updateInfo, err := ts.Balancer.UpdateVS(
+			[]*balancerpb.VirtualService{updatedVS1},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 		require.NotNil(t, updateInfo)
 
 		// Verify config
 		updatedConfig := ts.Balancer.Config()
 		require.NotNil(t, updatedConfig)
-		assert.Equal(t, 3, len(updatedConfig.PacketHandler.Vs), "should still have 3 VS")
+		assert.Equal(
+			t,
+			3,
+			len(updatedConfig.PacketHandler.Vs),
+			"should still have 3 VS",
+		)
 
 		// Verify VS1 updated
 		vs1 := findVSInConfig(updatedConfig, testVs1IP)
@@ -274,10 +302,15 @@ func TestUpdateVSBasicOperations(t *testing.T) {
 
 	t.Run("UpdateMultipleVS", func(t *testing.T) {
 		// Update VS2 to enable WLC and add VS4 with WLC
-		updatedVS2 := createTestVS(testVs2IP, testVs2Port, true, []*balancerpb.Real{
-			createTestReal(testReal7IP, 2),
-			createTestReal(testReal8IP, 1),
-		})
+		updatedVS2 := createTestVS(
+			testVs2IP,
+			testVs2Port,
+			true,
+			[]*balancerpb.Real{
+				createTestReal(testReal7IP, 2),
+				createTestReal(testReal8IP, 1),
+			},
+		)
 		newVS4 := createTestVS(testVs4IP, testVs4Port, true, []*balancerpb.Real{
 			createTestReal(testReal9IP, 1),
 		})
@@ -292,7 +325,12 @@ func TestUpdateVSBasicOperations(t *testing.T) {
 		// Verify config
 		updatedConfig := ts.Balancer.Config()
 		require.NotNil(t, updatedConfig)
-		assert.Equal(t, 4, len(updatedConfig.PacketHandler.Vs), "should have 4 VS")
+		assert.Equal(
+			t,
+			4,
+			len(updatedConfig.PacketHandler.Vs),
+			"should have 4 VS",
+		)
 
 		// Verify VS2 updated
 		vs2 := findVSInConfig(updatedConfig, testVs2IP)
@@ -306,7 +344,11 @@ func TestUpdateVSBasicOperations(t *testing.T) {
 		assert.True(t, vs4.Flags.Wlc, "VS4 should have WLC enabled")
 
 		// Verify WLC: VS2, VS3, VS4 should have WLC enabled
-		verifyWLCConfig(t, updatedConfig, []netip.Addr{testVs2IP, testVs3IP, testVs4IP})
+		verifyWLCConfig(
+			t,
+			updatedConfig,
+			[]netip.Addr{testVs2IP, testVs3IP, testVs4IP},
+		)
 	})
 }
 
@@ -329,17 +371,29 @@ func TestDeleteVSBasicOperations(t *testing.T) {
 		// Delete VS1
 		vsToDelete := createTestVS(testVs1IP, testVs1Port, false, nil)
 
-		updateInfo, err := ts.Balancer.DeleteVS([]*balancerpb.VirtualService{vsToDelete}, ts.Mock.CurrentTime())
+		updateInfo, err := ts.Balancer.DeleteVS(
+			[]*balancerpb.VirtualService{vsToDelete},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 		require.NotNil(t, updateInfo)
 
 		// Verify ACL reuse list is empty for delete
-		assert.Empty(t, updateInfo.ACLReusedVs, "ACL reuse list should be empty for delete")
+		assert.Empty(
+			t,
+			updateInfo.ACLReusedVs,
+			"ACL reuse list should be empty for delete",
+		)
 
 		// Verify config
 		updatedConfig := ts.Balancer.Config()
 		require.NotNil(t, updatedConfig)
-		assert.Equal(t, 1, len(updatedConfig.PacketHandler.Vs), "should have 1 VS")
+		assert.Equal(
+			t,
+			1,
+			len(updatedConfig.PacketHandler.Vs),
+			"should have 1 VS",
+		)
 
 		// Verify VS1 deleted
 		vs1 := findVSInConfig(updatedConfig, testVs1IP)
@@ -362,7 +416,10 @@ func TestDeleteVSBasicOperations(t *testing.T) {
 			createTestReal(testReal4IP, 1),
 		})
 
-		_, err := ts.Balancer.UpdateVS([]*balancerpb.VirtualService{vs1, vs3}, ts.Mock.CurrentTime())
+		_, err := ts.Balancer.UpdateVS(
+			[]*balancerpb.VirtualService{vs1, vs3},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 
 		// Delete VS2 and VS3
@@ -371,14 +428,22 @@ func TestDeleteVSBasicOperations(t *testing.T) {
 			createTestVS(testVs3IP, testVs3Port, false, nil),
 		}
 
-		updateInfo, err := ts.Balancer.DeleteVS(vsToDelete, ts.Mock.CurrentTime())
+		updateInfo, err := ts.Balancer.DeleteVS(
+			vsToDelete,
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 		require.NotNil(t, updateInfo)
 
 		// Verify config
 		updatedConfig := ts.Balancer.Config()
 		require.NotNil(t, updatedConfig)
-		assert.Equal(t, 1, len(updatedConfig.PacketHandler.Vs), "should have 1 VS")
+		assert.Equal(
+			t,
+			1,
+			len(updatedConfig.PacketHandler.Vs),
+			"should have 1 VS",
+		)
 
 		// Verify only VS1 remains
 		vs1Found := findVSInConfig(updatedConfig, testVs1IP)
@@ -392,14 +457,22 @@ func TestDeleteVSBasicOperations(t *testing.T) {
 		// Try to delete non-existent VS
 		vsToDelete := createTestVS(testVs4IP, testVs4Port, false, nil)
 
-		updateInfo, err := ts.Balancer.DeleteVS([]*balancerpb.VirtualService{vsToDelete}, ts.Mock.CurrentTime())
+		updateInfo, err := ts.Balancer.DeleteVS(
+			[]*balancerpb.VirtualService{vsToDelete},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err, "deleting non-existent VS should not error")
 		require.NotNil(t, updateInfo)
 
 		// Verify config unchanged
 		updatedConfig := ts.Balancer.Config()
 		require.NotNil(t, updatedConfig)
-		assert.Equal(t, 1, len(updatedConfig.PacketHandler.Vs), "should still have 1 VS")
+		assert.Equal(
+			t,
+			1,
+			len(updatedConfig.PacketHandler.Vs),
+			"should still have 1 VS",
+		)
 	})
 }
 
@@ -430,7 +503,10 @@ func TestUpdateVSAndDeleteVSWorkflow(t *testing.T) {
 			createTestReal(testReal5IP, 1),
 		})
 
-		_, err := ts.Balancer.UpdateVS([]*balancerpb.VirtualService{vs3, vs4}, ts.Mock.CurrentTime())
+		_, err := ts.Balancer.UpdateVS(
+			[]*balancerpb.VirtualService{vs3, vs4},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 
 		config := ts.Balancer.Config()
@@ -453,7 +529,10 @@ func TestUpdateVSAndDeleteVSWorkflow(t *testing.T) {
 
 		// Step 3: Delete VS2
 		vsToDelete := createTestVS(testVs2IP, testVs2Port, false, nil)
-		_, err = ts.Balancer.DeleteVS([]*balancerpb.VirtualService{vsToDelete}, ts.Mock.CurrentTime())
+		_, err = ts.Balancer.DeleteVS(
+			[]*balancerpb.VirtualService{vsToDelete},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 
 		config = ts.Balancer.Config()
@@ -461,11 +540,19 @@ func TestUpdateVSAndDeleteVSWorkflow(t *testing.T) {
 		verifyWLCConfig(t, config, []netip.Addr{testVs1IP, testVs3IP})
 
 		// Step 4: Update VS1 to disable WLC
-		updatedVS1 := createTestVS(testVs1IP, testVs1Port, false, []*balancerpb.Real{
-			createTestReal(testReal1IP, 1),
-			createTestReal(testReal2IP, 1),
-		})
-		_, err = ts.Balancer.UpdateVS([]*balancerpb.VirtualService{updatedVS1}, ts.Mock.CurrentTime())
+		updatedVS1 := createTestVS(
+			testVs1IP,
+			testVs1Port,
+			false,
+			[]*balancerpb.Real{
+				createTestReal(testReal1IP, 1),
+				createTestReal(testReal2IP, 1),
+			},
+		)
+		_, err = ts.Balancer.UpdateVS(
+			[]*balancerpb.VirtualService{updatedVS1},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 
 		config = ts.Balancer.Config()
@@ -510,7 +597,10 @@ func TestWLCIndexRecalculation(t *testing.T) {
 		vs3 := createTestVS(testVs3IP, testVs3Port, true, []*balancerpb.Real{
 			createTestReal(testReal4IP, 1),
 		})
-		_, err := ts.Balancer.UpdateVS([]*balancerpb.VirtualService{vs3}, ts.Mock.CurrentTime())
+		_, err := ts.Balancer.UpdateVS(
+			[]*balancerpb.VirtualService{vs3},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 
 		// Now: VS1 (index 0, WLC), VS2 (index 1, no WLC), VS3 (index 2, WLC)
@@ -518,15 +608,27 @@ func TestWLCIndexRecalculation(t *testing.T) {
 		verifyWLCConfig(t, config, []netip.Addr{testVs1IP, testVs3IP})
 
 		// Update VS2 to enable WLC
-		updatedVS2 := createTestVS(testVs2IP, testVs2Port, true, []*balancerpb.Real{
-			createTestReal(testReal3IP, 1),
-		})
-		_, err = ts.Balancer.UpdateVS([]*balancerpb.VirtualService{updatedVS2}, ts.Mock.CurrentTime())
+		updatedVS2 := createTestVS(
+			testVs2IP,
+			testVs2Port,
+			true,
+			[]*balancerpb.Real{
+				createTestReal(testReal3IP, 1),
+			},
+		)
+		_, err = ts.Balancer.UpdateVS(
+			[]*balancerpb.VirtualService{updatedVS2},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 
 		// Now all 3 VS have WLC
 		config = ts.Balancer.Config()
-		verifyWLCConfig(t, config, []netip.Addr{testVs1IP, testVs2IP, testVs3IP})
+		verifyWLCConfig(
+			t,
+			config,
+			[]netip.Addr{testVs1IP, testVs2IP, testVs3IP},
+		)
 	})
 
 	t.Run("WLCIndexRecalculationOnDelete", func(t *testing.T) {
@@ -534,7 +636,10 @@ func TestWLCIndexRecalculation(t *testing.T) {
 
 		// Delete VS2 (middle VS with WLC)
 		vsToDelete := createTestVS(testVs2IP, testVs2Port, false, nil)
-		_, err := ts.Balancer.DeleteVS([]*balancerpb.VirtualService{vsToDelete}, ts.Mock.CurrentTime())
+		_, err := ts.Balancer.DeleteVS(
+			[]*balancerpb.VirtualService{vsToDelete},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 
 		// Now: VS1 (index 0, WLC), VS3 (index 1, WLC) - indices shifted
@@ -543,7 +648,9 @@ func TestWLCIndexRecalculation(t *testing.T) {
 
 		// Verify VS3 is now at index 1
 		assert.Equal(t, 2, len(config.PacketHandler.Vs))
-		vs3Addr, _ := netip.AddrFromSlice(config.PacketHandler.Vs[1].Id.Addr.Bytes)
+		vs3Addr, _ := netip.AddrFromSlice(
+			config.PacketHandler.Vs[1].Id.Addr.Bytes,
+		)
 		assert.Equal(t, testVs3IP, vs3Addr, "VS3 should be at index 1")
 	})
 }
@@ -560,12 +667,22 @@ func TestACLRebuildVerification(t *testing.T) {
 				Bytes: netip.MustParseAddr("fe80::5").AsSlice(),
 			},
 			Vs: []*balancerpb.VirtualService{
-				createTestVSWithACL(testVs1IP, testVs1Port, false, []*balancerpb.Real{
-					createTestReal(testReal1IP, 1),
-				}, []*balancerpb.Net{{
-					Addr: &balancerpb.Addr{Bytes: netip.MustParseAddr("10.0.0.0").AsSlice()},
-					Mask: &balancerpb.Addr{Bytes: netip.MustParseAddr("255.0.0.0").AsSlice()},
-				}}),
+				createTestVSWithACL(
+					testVs1IP,
+					testVs1Port,
+					false,
+					[]*balancerpb.Real{
+						createTestReal(testReal1IP, 1),
+					},
+					[]*balancerpb.Net{{
+						Addr: &balancerpb.Addr{
+							Bytes: netip.MustParseAddr("10.0.0.0").AsSlice(),
+						},
+						Mask: &balancerpb.Addr{
+							Bytes: netip.MustParseAddr("255.0.0.0").AsSlice(),
+						},
+					}},
+				),
 			},
 			DecapAddresses: []*balancerpb.Addr{},
 			SessionsTimeouts: &balancerpb.SessionsTimeouts{
@@ -615,7 +732,12 @@ func TestACLRebuildVerification(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 		result, err := ts.Mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "packet from 10.0.0.1 should be allowed")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"packet from 10.0.0.1 should be allowed",
+		)
 		assert.Empty(t, result.Drop, "packet should not be dropped")
 
 		// Packet from 192.168.1.1 should be denied
@@ -630,20 +752,37 @@ func TestACLRebuildVerification(t *testing.T) {
 		packet = xpacket.LayersToPacket(t, packetLayers...)
 		result, err = ts.Mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Empty(t, result.Output, "packet from 192.168.1.100 should be denied")
+		assert.Empty(
+			t,
+			result.Output,
+			"packet from 192.168.1.100 should be denied",
+		)
 		assert.Equal(t, 1, len(result.Drop), "packet should be dropped")
 	})
 
 	t.Run("UpdateACL_AllowsOnly192Network", func(t *testing.T) {
 		// Update VS1 to allow only 192.168.0.0/16
-		updatedVS1 := createTestVSWithACL(testVs1IP, testVs1Port, false, []*balancerpb.Real{
-			createTestReal(testReal1IP, 1),
-		}, []*balancerpb.Net{{
-			Addr: &balancerpb.Addr{Bytes: netip.MustParseAddr("192.168.0.0").AsSlice()},
-			Mask: &balancerpb.Addr{Bytes: netip.MustParseAddr("255.255.0.0").AsSlice()},
-		}})
+		updatedVS1 := createTestVSWithACL(
+			testVs1IP,
+			testVs1Port,
+			false,
+			[]*balancerpb.Real{
+				createTestReal(testReal1IP, 1),
+			},
+			[]*balancerpb.Net{{
+				Addr: &balancerpb.Addr{
+					Bytes: netip.MustParseAddr("192.168.0.0").AsSlice(),
+				},
+				Mask: &balancerpb.Addr{
+					Bytes: netip.MustParseAddr("255.255.0.0").AsSlice(),
+				},
+			}},
+		)
 
-		updateInfo, err := ts.Balancer.UpdateVS([]*balancerpb.VirtualService{updatedVS1}, ts.Mock.CurrentTime())
+		updateInfo, err := ts.Balancer.UpdateVS(
+			[]*balancerpb.VirtualService{updatedVS1},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 		require.NotNil(t, updateInfo)
 
@@ -659,7 +798,11 @@ func TestACLRebuildVerification(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 		result, err := ts.Mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Empty(t, result.Output, "packet from 10.0.0.1 should now be denied")
+		assert.Empty(
+			t,
+			result.Output,
+			"packet from 10.0.0.1 should now be denied",
+		)
 		assert.Equal(t, 1, len(result.Drop), "packet should be dropped")
 
 		// Packet from 192.168.1.1 should now be allowed
@@ -674,20 +817,38 @@ func TestACLRebuildVerification(t *testing.T) {
 		packet = xpacket.LayersToPacket(t, packetLayers...)
 		result, err = ts.Mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "packet from 192.168.1.100 should now be allowed")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"packet from 192.168.1.100 should now be allowed",
+		)
 		assert.Empty(t, result.Drop, "packet should not be dropped")
 	})
 
 	t.Run("UpdateACL_AllowsAllNetworks", func(t *testing.T) {
 		// Update VS1 to allow all networks (0.0.0.0/0)
-		updatedVS1 := createTestVSWithACL(testVs1IP, testVs1Port, false, []*balancerpb.Real{
-			createTestReal(testReal1IP, 1),
-		}, []*balancerpb.Net{{
-			Addr: &balancerpb.Addr{Bytes: netip.MustParseAddr("0.0.0.0").AsSlice()},
-			Mask: &balancerpb.Addr{Bytes: netip.MustParseAddr("0.0.0.0").AsSlice()},
-		}})
+		updatedVS1 := createTestVSWithACL(
+			testVs1IP,
+			testVs1Port,
+			false,
+			[]*balancerpb.Real{
+				createTestReal(testReal1IP, 1),
+			},
+			[]*balancerpb.Net{{
+				Addr: &balancerpb.Addr{
+					Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
+				},
+				Mask: &balancerpb.Addr{
+					Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
+				},
+			}},
+		)
 
-		updateInfo, err := ts.Balancer.UpdateVS([]*balancerpb.VirtualService{updatedVS1}, ts.Mock.CurrentTime())
+		updateInfo, err := ts.Balancer.UpdateVS(
+			[]*balancerpb.VirtualService{updatedVS1},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 		require.NotNil(t, updateInfo)
 
@@ -703,7 +864,12 @@ func TestACLRebuildVerification(t *testing.T) {
 		packet := xpacket.LayersToPacket(t, packetLayers...)
 		result, err := ts.Mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "packet from 10.0.0.1 should be allowed")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"packet from 10.0.0.1 should be allowed",
+		)
 		assert.Empty(t, result.Drop)
 
 		client2 := netip.MustParseAddr("192.168.1.100")
@@ -717,39 +883,78 @@ func TestACLRebuildVerification(t *testing.T) {
 		packet = xpacket.LayersToPacket(t, packetLayers...)
 		result, err = ts.Mock.HandlePackets(packet)
 		require.NoError(t, err)
-		assert.Equal(t, 1, len(result.Output), "packet from 192.168.1.100 should be allowed")
+		assert.Equal(
+			t,
+			1,
+			len(result.Output),
+			"packet from 192.168.1.100 should be allowed",
+		)
 		assert.Empty(t, result.Drop)
 	})
 
 	t.Run("VerifyACLReuseReporting", func(t *testing.T) {
 		// Update VS1 with same ACL - should report ACL reuse
-		sameACLVS := createTestVSWithACL(testVs1IP, testVs1Port, false, []*balancerpb.Real{
-			createTestReal(testReal1IP, 1),
-		}, []*balancerpb.Net{{
-			Addr: &balancerpb.Addr{Bytes: netip.MustParseAddr("0.0.0.0").AsSlice()},
-			Mask: &balancerpb.Addr{Bytes: netip.MustParseAddr("0.0.0.0").AsSlice()},
-		}})
+		sameACLVS := createTestVSWithACL(
+			testVs1IP,
+			testVs1Port,
+			false,
+			[]*balancerpb.Real{
+				createTestReal(testReal1IP, 1),
+			},
+			[]*balancerpb.Net{{
+				Addr: &balancerpb.Addr{
+					Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
+				},
+				Mask: &balancerpb.Addr{
+					Bytes: netip.MustParseAddr("0.0.0.0").AsSlice(),
+				},
+			}},
+		)
 
-		updateInfo, err := ts.Balancer.UpdateVS([]*balancerpb.VirtualService{sameACLVS}, ts.Mock.CurrentTime())
+		updateInfo, err := ts.Balancer.UpdateVS(
+			[]*balancerpb.VirtualService{sameACLVS},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 		require.NotNil(t, updateInfo)
 
 		// Should report ACL reuse for VS1
-		assert.NotEmpty(t, updateInfo.ACLReusedVs, "ACL should be reused when unchanged")
+		assert.NotEmpty(
+			t,
+			updateInfo.ACLReusedVs,
+			"ACL should be reused when unchanged",
+		)
 
 		// Update VS1 with different ACL - should NOT report ACL reuse
-		differentACLVS := createTestVSWithACL(testVs1IP, testVs1Port, false, []*balancerpb.Real{
-			createTestReal(testReal1IP, 1),
-		}, []*balancerpb.Net{{
-			Addr: &balancerpb.Addr{Bytes: netip.MustParseAddr("172.16.0.0").AsSlice()},
-			Mask: &balancerpb.Addr{Bytes: netip.MustParseAddr("255.240.0.0").AsSlice()},
-		}})
+		differentACLVS := createTestVSWithACL(
+			testVs1IP,
+			testVs1Port,
+			false,
+			[]*balancerpb.Real{
+				createTestReal(testReal1IP, 1),
+			},
+			[]*balancerpb.Net{{
+				Addr: &balancerpb.Addr{
+					Bytes: netip.MustParseAddr("172.16.0.0").AsSlice(),
+				},
+				Mask: &balancerpb.Addr{
+					Bytes: netip.MustParseAddr("255.240.0.0").AsSlice(),
+				},
+			}},
+		)
 
-		updateInfo, err = ts.Balancer.UpdateVS([]*balancerpb.VirtualService{differentACLVS}, ts.Mock.CurrentTime())
+		updateInfo, err = ts.Balancer.UpdateVS(
+			[]*balancerpb.VirtualService{differentACLVS},
+			ts.Mock.CurrentTime(),
+		)
 		require.NoError(t, err)
 		require.NotNil(t, updateInfo)
 
 		// Should NOT report ACL reuse for VS1
-		assert.Empty(t, updateInfo.ACLReusedVs, "ACL should not be reused when changed")
+		assert.Empty(
+			t,
+			updateInfo.ACLReusedVs,
+			"ACL should not be reused when changed",
+		)
 	})
 }

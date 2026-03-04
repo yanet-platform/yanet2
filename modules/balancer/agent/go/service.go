@@ -371,7 +371,13 @@ func (m *BalancerService) UpdateVS(
 		return nil, err
 	}
 
-	m.log.Infow("updating virtual services", "name", name, "vs_count", len(req.Vs))
+	m.log.Infow(
+		"updating virtual services",
+		"name",
+		name,
+		"vs_count",
+		len(req.Vs),
+	)
 
 	updateInfo, err := manager.UpdateVS(req.Vs, time.Now())
 	if err != nil {
@@ -383,7 +389,13 @@ func (m *BalancerService) UpdateVS(
 		return nil, fmt.Errorf("failed to update virtual services: %v", err)
 	}
 
-	m.log.Infow("virtual services updated", "name", name, "vs_count", len(req.Vs))
+	m.log.Infow(
+		"virtual services updated",
+		"name",
+		name,
+		"vs_count",
+		len(req.Vs),
+	)
 
 	return &balancerpb.UpdateVSResponse{
 		Name: name,
@@ -403,7 +415,13 @@ func (m *BalancerService) DeleteVS(
 		return nil, err
 	}
 
-	m.log.Infow("deleting virtual services", "name", name, "vs_count", len(req.Vs))
+	m.log.Infow(
+		"deleting virtual services",
+		"name",
+		name,
+		"vs_count",
+		len(req.Vs),
+	)
 
 	updateInfo, err := manager.DeleteVS(req.Vs, time.Now())
 	if err != nil {
@@ -415,7 +433,13 @@ func (m *BalancerService) DeleteVS(
 		return nil, fmt.Errorf("failed to delete virtual services: %v", err)
 	}
 
-	m.log.Infow("virtual services deleted", "name", name, "vs_count", len(req.Vs))
+	m.log.Infow(
+		"virtual services deleted",
+		"name",
+		name,
+		"vs_count",
+		len(req.Vs),
+	)
 
 	return &balancerpb.DeleteVSResponse{
 		Name: name,

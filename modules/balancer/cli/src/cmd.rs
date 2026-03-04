@@ -103,6 +103,8 @@ pub enum Mode {
     Update(UpdateCmd),
     /// Manage real servers
     Reals(RealsCmd),
+    /// Manage virtual services
+    Vs(VsCmd),
     /// Show balancer configuration
     Config(ConfigCmd),
     /// List all balancer configurations
@@ -530,6 +532,87 @@ pub struct GraphCmd {
 impl From<&GraphCmd> for balancerpb::ShowGraphRequest {
     fn from(cmd: &GraphCmd) -> Self {
         Self { name: cmd.name.clone() }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// VS Commands
+////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Debug, Clone, Parser)]
+pub struct VsCmd {
+    #[clap(subcommand)]
+    pub mode: VsMode,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub enum VsMode {
+    /// Update or add virtual services from YAML file
+    Update(UpdateVsCmd),
+    /// Delete virtual services by identifier
+    Delete(DeleteVsCmd),
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct UpdateVsCmd {
+    /// Name of the module config (optional, auto-selects if only one exists)
+    #[arg(long, short = 'n')]
+    pub name: Option<String>,
+
+    /// Path to the YAML configuration file containing virtual services
+    #[arg(long, short = 'c')]
+    pub config: String,
+
+    #[clap(flatten)]
+    pub format: FormatFlags,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct DeleteVsCmd {
+    /// Name of the module config (optional, auto-selects if only one exists)
+    #[arg(long, short = 'n')]
+    pub name: Option<String>,
+
+    /// Virtual services to delete in format "ip:port/proto", "[ipv6]:port/proto", or "ipv6:port/proto"
+    /// (e.g., "192.168.1.1:80/tcp", "[2001:db8::1]:443/tcp", or "2001:db8::1:443/tcp")
+    #[arg(long, required = true, num_args = 1..)]
+    pub vs: Vec<String>,
+
+    #[clap(flatten)]
+    pub format: FormatFlags,
+}
+
+impl TryFrom<DeleteVsCmd> for balancerpb::DeleteVsRequest {
+    type Error = String;
+
+    fn try_from(cmd: DeleteVsCmd) -> Result<Self, Self::Error> {
+        let mut vs_list = Vec::new();
+
+        for vs_str in &cmd.vs {
+            let (ip, port, proto) = parse_vs_identifier(vs_str)?;
+
+            // Create a minimal VirtualService with only the identifier
+            // Other fields are ignored for delete operation
+            vs_list.push(balancerpb::VirtualService {
+                id: Some(balancerpb::VsIdentifier {
+                    addr: Some(balancerpb::Addr {
+                        bytes: match ip {
+                            std::net::IpAddr::V4(ip) => ip.octets().to_vec(),
+                            std::net::IpAddr::V6(ip) => ip.octets().to_vec(),
+                        },
+                    }),
+                    port: port as u32,
+                    proto: proto as i32,
+                }),
+                scheduler: 0, // Ignored for delete
+                allowed_srcs: vec![],
+                reals: vec![],
+                flags: None,
+                peers: vec![],
+            });
+        }
+
+        Ok(Self { name: cmd.name, vs: vs_list })
     }
 }
 
