@@ -16,9 +16,10 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
+	"github.com/yanet-platform/yanet2/modules/route/internal/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
 
@@ -28,11 +29,11 @@ type RouteService struct {
 	// shmLock serializes shared-memory mutations and protects the ffiModules
 	// map.
 	shmLock sync.RWMutex
-	agent   *ffi.Agent
+	agent   *cpffi.Agent
 	// ribsLock protects the ribs map only.
 	ribsLock   sync.RWMutex
 	ribs       map[string]*rib.RIB
-	ffiModules map[string]*ModuleConfig
+	ffiModules map[string]*ffi.ModuleConfig
 	neighTable *neigh.NeighTable
 
 	ribTTL time.Duration
@@ -42,7 +43,7 @@ type RouteService struct {
 }
 
 func NewRouteService(
-	agent *ffi.Agent,
+	agent *cpffi.Agent,
 	neighTable *neigh.NeighTable,
 	ribTTL time.Duration,
 	log *zap.SugaredLogger,
@@ -50,7 +51,7 @@ func NewRouteService(
 	return &RouteService{
 		agent:      agent,
 		ribs:       map[string]*rib.RIB{},
-		ffiModules: map[string]*ModuleConfig{},
+		ffiModules: map[string]*ffi.ModuleConfig{},
 		neighTable: neighTable,
 		ribTTL:     ribTTL,
 		quitCh:     make(chan bool),
@@ -183,10 +184,10 @@ func (m *RouteService) ShowFIB(
 	response := &routepb.ShowFIBResponse{}
 
 	for _, e := range entries {
-		if request.GetIpv4Only() && e.AddressFamily != addressFamilyIPv4 {
+		if request.GetIpv4Only() && e.AddressFamily != ffi.AddressFamilyIPv4 {
 			continue
 		}
-		if request.GetIpv6Only() && e.AddressFamily != addressFamilyIPv6 {
+		if request.GetIpv6Only() && e.AddressFamily != ffi.AddressFamilyIPv6 {
 			continue
 		}
 
@@ -533,7 +534,7 @@ func (m *RouteService) updateModuleConfig(
 	name string,
 	ribDump rib.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
 ) error {
-	config, err := NewModuleConfig(m.agent, name)
+	config, err := ffi.NewModuleConfig(m.agent, name)
 	if err != nil {
 		m.log.Errorw("updateModuleConfig: failed to create module config",
 			zap.Error(err),
@@ -590,7 +591,7 @@ func (m *RouteService) updateModuleConfig(
 					continue
 				}
 
-				idx, err := config.RouteAdd(
+				idx, err := config.AddRoute(
 					entry.HardwareRoute.SourceMAC[:],
 					entry.HardwareRoute.DestinationMAC[:],
 					entry.HardwareRoute.Device,
@@ -615,7 +616,7 @@ func (m *RouteService) updateModuleConfig(
 
 			idx, ok := routesListsSet[routesListSetKey]
 			if !ok {
-				routeListIdx, err := config.RouteListAdd(routesListSetKey.AsSlice())
+				routeListIdx, err := config.AddRouteList(routesListSetKey.AsSlice())
 				if err != nil {
 					m.log.Errorw("updateModuleConfig: failed to add route list",
 						zap.Error(err),
@@ -629,7 +630,7 @@ func (m *RouteService) updateModuleConfig(
 				routesListsSet[routesListSetKey] = idx
 			}
 
-			if err := config.PrefixAdd(prefix, uint32(idx)); err != nil {
+			if err := config.AddPrefix(prefix, uint32(idx)); err != nil {
 				m.log.Errorw("updateModuleConfig: failed to add prefix",
 					zap.Error(err),
 					zap.Stringer("prefix", prefix),
@@ -653,7 +654,7 @@ func (m *RouteService) updateModuleConfig(
 		zap.Duration("processing_duration", time.Since(routeInsertionStart)),
 	)
 
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules([]cpffi.ModuleConfig{config.AsFFIModule()}); err != nil {
 		m.log.Errorw("updateModuleConfig: failed to update modules via FFI",
 			zap.Error(err),
 			zap.String("name", name),
