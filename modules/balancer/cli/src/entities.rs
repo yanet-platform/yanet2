@@ -92,10 +92,13 @@ pub fn format_allowed_src(allowed_src: &balancerpb::AllowedSources) -> Result<St
     }
 
     // Add tag
-    if allowed_src.tag == 0 {
-        result.push_str(" [tag: None]");
-    } else {
-        result.push_str(&format!(" [tag: {}]", allowed_src.tag));
+    match &allowed_src.tag {
+        Some(tag) if !tag.is_empty() => {
+            result.push_str(&format!(" [tag: {}]", tag));
+        }
+        _ => {
+            result.push_str(" [tag: None]");
+        }
     }
 
     Ok(result)
@@ -363,9 +366,9 @@ pub enum AllowedSrcEntry {
         #[serde(skip_serializing_if = "Option::is_none")]
         ports: Option<String>,
 
-        /// Optional tag for tracking (0 = no tag)
+        /// Optional tag for tracking (empty/None = no tag)
         #[serde(skip_serializing_if = "Option::is_none")]
-        tag: Option<u32>,
+        tag: Option<String>,
     },
 }
 
@@ -642,7 +645,7 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
                                 mask: Some(balancerpb::Addr { bytes: mask_bytes }),
                             }],
                             ports: vec![], // Empty = all ports allowed
-                            tag: 0,        // No tag
+                            tag: None,        // No tag
                         })
                     }
                     AllowedSrcEntry::Structured { network, ports, tag } => {
@@ -664,7 +667,7 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
                                 mask: Some(balancerpb::Addr { bytes: mask_bytes }),
                             }],
                             ports: port_ranges,
-                            tag: tag.unwrap_or(0), // Use provided tag or default to 0
+                            tag: tag.as_ref().map(|t| t.to_string()), // Convert Option<String> to Option<String>
                         })
                     }
                 }

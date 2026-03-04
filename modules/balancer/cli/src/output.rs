@@ -1267,10 +1267,10 @@ fn print_show_stats_tree(response: &balancerpb::ShowStatsResponse) -> Result<(),
                         if !vs.allowed_sources.is_empty() {
                             tree.begin_child("Allowed Sources".to_string());
                             for allowed_src in &vs.allowed_sources {
-                                let tag_str = if allowed_src.tag == 0 {
+                                let tag_str = if allowed_src.tag.is_empty() {
                                     "None".to_string()
                                 } else {
-                                    allowed_src.tag.to_string()
+                                    allowed_src.tag.clone()
                                 };
                                 tree.add_empty_child(format!(
                                     "Tag {}: {} passes",
@@ -1626,10 +1626,10 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
                         if !vs.allowed_sources.is_empty() {
                             println!("  {}:", "Allowed Sources".bright_cyan().bold());
                             for allowed_src in &vs.allowed_sources {
-                                let tag_str = if allowed_src.tag == 0 {
+                                let tag_str = if allowed_src.tag.is_empty() {
                                     "None".to_string()
                                 } else {
-                                    allowed_src.tag.to_string()
+                                    allowed_src.tag.clone()
                                 };
                                 println!(
                                     "    Tag {}: {}",

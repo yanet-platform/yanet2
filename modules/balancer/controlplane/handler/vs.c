@@ -26,6 +26,25 @@
 
 #include "filter/compiler.h"
 
+#define MAX_TAG_LENGTH 240
+
+static int
+validate_tag(const char *tag) {
+	if (tag == NULL) {
+		return 0; // NULL is valid (means no tracking)
+	}
+	size_t len = strnlen(tag, MAX_TAG_LENGTH + 1);
+	if (len == 0) {
+		NEW_ERROR("tag must be at least 1 character long");
+		return -1;
+	}
+	if (len > MAX_TAG_LENGTH) {
+		NEW_ERROR("tag length %zu exceeds maximum %d", len, MAX_TAG_LENGTH);
+		return -1;
+	}
+	return 0;
+}
+
 static int
 setup_reals(
 	struct vs *vs,
@@ -209,10 +228,11 @@ static int
 fill_rule(
 	struct vs *vs,
 	struct filter_rule *rule,
+	size_t src_idx,
 	struct allowed_sources *src,
 	struct memory_context *mctx
 ) {
-	rule->action = src->tag;
+	rule->action = (uint32_t)src_idx;
 
 	if (vs->identifier.ip_proto == IPPROTO_IP) {
 		rule->net4.dst_count = 0;
@@ -356,6 +376,7 @@ src_filter_rules(
 		if (fill_rule(
 			    vs,
 			    &r[rule_idx],
+				rule_idx,
 			    &config->allowed_src[rule_idx],
 			    mctx
 		    ) != 0) {
@@ -810,7 +831,7 @@ setup_acl_rules(
 		rules[++last_rule_idx] = rules[rule_idx];
 	}
 
-	char counter_name[80];
+	char counter_name[256];
 	uint64_t *rule_counters =
 		memory_balloc(mctx, sizeof(uint64_t) * rules_count);
 	if (rule_counters == NULL && rules_count > 0) {
@@ -823,11 +844,19 @@ setup_acl_rules(
 	for (size_t i = 0; i < rules_count; ++i) {
 		rule_to_relative_addresses(&rules[i]);
 
-		uint32_t rule_tag = rules[i].action;
-		if (rule_tag != 0) {
+		uint32_t allowed_src_idx = rules[i].action;
+		const char *rule_tag = config->allowed_src[allowed_src_idx].tag;
+		
+		// Validate tag before using it
+		if (validate_tag(rule_tag) != 0) {
+			PUSH_ERROR("invalid tag at allowed_src index %u", allowed_src_idx);
+			return -1;
+		}
+		
+		if (rule_tag != NULL) {
 			// register counter
 			sprintf(counter_name,
-				"acl_%zu_%u",
+				"acl_%zu_%s",
 				vs->registry_idx,
 				rule_tag);
 			uint64_t counter_id = counter_registry_register(
@@ -993,13 +1022,13 @@ vs_fill_inspect(struct vs *vs, struct vs_inspect *inspect, size_t workers) {
 }
 
 ssize_t
-parse_vs_acl_counter(struct counter_handle *counter, uint32_t *tag) {
+parse_vs_acl_counter(struct counter_handle *counter, const char **tag) {
 	// in format acl_<vs_registry_idx>_<tag>
 	if (strncmp(counter->name, "acl_", 4) == 0) { // vs acl counter
 		char *end_ptr = NULL;
 		size_t vs_registry_idx =
 			strtoull(counter->name + 4, &end_ptr, 10);
-		*tag = atoi(end_ptr + 1);
+		*tag = end_ptr + 1; // Point to the tag string in counter name
 		return vs_registry_idx;
 	} else {
 		return -1;

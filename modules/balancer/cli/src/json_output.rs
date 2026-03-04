@@ -54,7 +54,8 @@ pub struct AllowedSourcesJson {
     pub networks: Vec<NetworkJson>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ports: Option<Vec<PortRangeJson>>,
-    pub tag: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -235,7 +236,7 @@ pub struct NamedVsStatsJson {
 
 #[derive(Serialize)]
 pub struct AllowedSourcesStatsJson {
-    pub tag: u32,
+    pub tag: String,
     pub passes: u64,
 }
 
@@ -447,7 +448,7 @@ pub fn convert_show_config(response: &balancerpb::ShowConfigResponse) -> ShowCon
                                     )
                                 };
 
-                                Some(AllowedSourcesJson { networks, ports, tag: s.tag })
+                                Some(AllowedSourcesJson { networks, ports, tag: s.tag.as_ref().map(|t| t.clone()) })
                             })
                             .collect(),
                         reals: vs
@@ -647,7 +648,7 @@ pub fn convert_show_stats(response: &balancerpb::ShowStatsResponse) -> ShowStats
                     allowed_sources: v
                         .allowed_sources
                         .iter()
-                        .map(|a| AllowedSourcesStatsJson { tag: a.tag, passes: a.passes })
+                        .map(|a| AllowedSourcesStatsJson { tag: a.tag.clone(), passes: a.passes })
                         .collect(),
                 })
                 .collect(),

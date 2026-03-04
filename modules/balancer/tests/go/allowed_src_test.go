@@ -1665,7 +1665,7 @@ func TestAllowedSrcWithTags(t *testing.T) {
 										AsSlice(),
 								},
 							}},
-							Tag: 100,
+							Tag: func() *string { s := "100"; return &s }(),
 						},
 						{
 							// Tag 200: Partner network
@@ -1679,7 +1679,7 @@ func TestAllowedSrcWithTags(t *testing.T) {
 										AsSlice(),
 								},
 							}},
-							Tag: 200,
+							Tag: func() *string { s := "200"; return &s }(),
 						},
 						{
 							// Tag 300: Public network range (for testing untracked sources)
@@ -1694,7 +1694,7 @@ func TestAllowedSrcWithTags(t *testing.T) {
 										AsSlice(),
 								},
 							}},
-							Tag: 0, // Tag 0 means no tracking
+							Tag: nil, // nil means no tracking
 						},
 					},
 					Flags: &balancerpb.VsFlags{},
@@ -1756,7 +1756,7 @@ func TestAllowedSrcWithTags(t *testing.T) {
 							Ports: []*balancerpb.PortsRange{
 								{From: 1024, To: 65535}, // High ports only
 							},
-							Tag: 300,
+							Tag: func() *string { s := "300"; return &s }(),
 						},
 						{
 							// Tag 400: Different network with different port ranges
@@ -1775,7 +1775,7 @@ func TestAllowedSrcWithTags(t *testing.T) {
 								{From: 443, To: 443},
 								{From: 8080, To: 8080},
 							},
-							Tag: 400,
+							Tag: func() *string { s := "400"; return &s }(),
 						},
 					},
 					Flags: &balancerpb.VsFlags{},
@@ -1921,20 +1921,20 @@ func TestAllowedSrcWithTags(t *testing.T) {
 		)
 
 		// Build a map of tag -> passes for easier verification
-		tagStats := make(map[uint32]uint64)
+		tagStats := make(map[string]uint64)
 		for _, allowedSrc := range finalVsStats.AllowedSources {
 			tagStats[allowedSrc.Tag] = allowedSrc.Passes
 		}
 
 		// Verify tag 100 (Internal network) has 1 pass
-		assert.Equal(t, uint64(1), tagStats[100], "tag 100 should have 1 pass")
+		assert.Equal(t, uint64(1), tagStats["100"], "tag 100 should have 1 pass")
 
 		// Verify tag 200 (Partner network) has 1 pass
-		assert.Equal(t, uint64(1), tagStats[200], "tag 200 should have 1 pass")
+		assert.Equal(t, uint64(1), tagStats["200"], "tag 200 should have 1 pass")
 
-		// Verify tag 0 (Public network) is NOT tracked
-		_, exists := tagStats[0]
-		assert.False(t, exists, "tag 0 should not be tracked in stats")
+		// Verify nil tag (Public network) is NOT tracked
+		_, exists := tagStats[""]
+		assert.False(t, exists, "nil tag should not be tracked in stats")
 	})
 
 	t.Run("MultipleNetworksAndPorts", func(t *testing.T) {
@@ -2039,17 +2039,17 @@ func TestAllowedSrcWithTags(t *testing.T) {
 		)
 
 		// Build a map of tag -> passes
-		tagStats := make(map[uint32]uint64)
+		tagStats := make(map[string]uint64)
 		for _, allowedSrc := range finalVsStats.AllowedSources {
 			tagStats[allowedSrc.Tag] = allowedSrc.Passes
 		}
 
 		// Verify tag 300 has correct number of passes (2 packets from different networks)
-		assert.Equal(t, uint64(passedPackets[300]), tagStats[300],
+		assert.Equal(t, uint64(passedPackets[300]), tagStats["300"],
 			"tag 300 should have %d passes", passedPackets[300])
 
 		// Verify tag 400 has correct number of passes (3 packets from different ports)
-		assert.Equal(t, uint64(passedPackets[400]), tagStats[400],
+		assert.Equal(t, uint64(passedPackets[400]), tagStats["400"],
 			"tag 400 should have %d passes", passedPackets[400])
 	})
 }
@@ -2122,7 +2122,7 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 									},
 								},
 							},
-							Tag: 500,
+							Tag: func() *string { s := "500"; return &s }(),
 						},
 						{
 							// Tag 600: Partner networks (3 different subnets)
@@ -2158,7 +2158,7 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 									},
 								},
 							},
-							Tag: 600,
+							Tag: func() *string { s := "600"; return &s }(),
 						},
 						{
 							// Tag 700: External networks (4 different subnets with port restrictions)
@@ -2207,7 +2207,7 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 							Ports: []*balancerpb.PortsRange{
 								{From: 1024, To: 65535}, // Only high ports
 							},
-							Tag: 700,
+							Tag: func() *string { s := "700"; return &s }(),
 						},
 					},
 					Flags: &balancerpb.VsFlags{},
@@ -2338,7 +2338,7 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 		require.NotNil(t, vsStats, "VS stats should exist")
 
 		// Build tag stats map
-		tagStats := make(map[uint32]uint64)
+		tagStats := make(map[string]uint64)
 		for _, allowedSrc := range vsStats.AllowedSources {
 			tagStats[allowedSrc.Tag] = allowedSrc.Passes
 		}
@@ -2347,7 +2347,7 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 		assert.Equal(
 			t,
 			uint64(4),
-			tagStats[500],
+			tagStats["500"],
 			"tag 500 should have 4 passes",
 		)
 	})
@@ -2412,7 +2412,7 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 		require.NotNil(t, vsStats, "VS stats should exist")
 
 		// Build tag stats map
-		tagStats := make(map[uint32]uint64)
+		tagStats := make(map[string]uint64)
 		for _, allowedSrc := range vsStats.AllowedSources {
 			tagStats[allowedSrc.Tag] = allowedSrc.Passes
 		}
@@ -2421,7 +2421,7 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 		assert.Equal(
 			t,
 			uint64(3),
-			tagStats[600],
+			tagStats["600"],
 			"tag 600 should have 3 passes",
 		)
 	})
@@ -2498,7 +2498,7 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 		require.NotNil(t, vsStats, "VS stats should exist")
 
 		// Build tag stats map
-		tagStats := make(map[uint32]uint64)
+		tagStats := make(map[string]uint64)
 		for _, allowedSrc := range vsStats.AllowedSources {
 			tagStats[allowedSrc.Tag] = allowedSrc.Passes
 		}
@@ -2507,7 +2507,7 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 		assert.Equal(
 			t,
 			uint64(passedCount),
-			tagStats[700],
+			tagStats["700"],
 			"tag 700 should have %d passes (only high port packets)",
 			passedCount,
 		)
@@ -2588,21 +2588,21 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 		require.NotNil(t, vsStats, "VS stats should exist")
 
 		// Build tag stats map
-		tagStats := make(map[uint32]uint64)
+		tagStats := make(map[string]uint64)
 		for _, allowedSrc := range vsStats.AllowedSources {
 			tagStats[allowedSrc.Tag] = allowedSrc.Passes
 		}
 
 		// Verify all three tags are present
-		assert.Contains(t, tagStats, uint32(500), "tag 500 should be present")
-		assert.Contains(t, tagStats, uint32(600), "tag 600 should be present")
-		assert.Contains(t, tagStats, uint32(700), "tag 700 should be present")
+		assert.Contains(t, tagStats, "500", "tag 500 should be present")
+		assert.Contains(t, tagStats, "600", "tag 600 should be present")
+		assert.Contains(t, tagStats, "700", "tag 700 should be present")
 
 		// Verify tag 500 (4 corporate networks)
 		assert.Equal(
 			t,
 			uint64(4),
-			tagStats[500],
+			tagStats["500"],
 			"tag 500 should have 4 passes",
 		)
 
@@ -2610,7 +2610,7 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 		assert.Equal(
 			t,
 			uint64(3),
-			tagStats[600],
+			tagStats["600"],
 			"tag 600 should have 3 passes",
 		)
 
@@ -2618,7 +2618,7 @@ func TestAllowedSrcMultipleNetworksWithTags(t *testing.T) {
 		assert.Equal(
 			t,
 			uint64(4),
-			tagStats[700],
+			tagStats["700"],
 			"tag 700 should have 4 passes",
 		)
 

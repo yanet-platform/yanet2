@@ -27,7 +27,7 @@ type PortRange struct {
 type AllowedSources struct {
 	Nets       []xnetip.NetWithMask // Network with address and arbitrary mask
 	PortRanges []PortRange          // Optional port ranges
-	Tag        uint32               // Tag for identification/filtering
+	Tag        string               // Tag for identification/filtering (empty string means no tracking)
 }
 
 // VsScheduler represents the scheduling algorithm for a virtual service
@@ -150,7 +150,7 @@ type NamedVsStats struct {
 		Stats RealStats
 	}
 	AllowedSources []struct {
-		Tag    uint32
+		Tag    string
 		Passes uint64
 	}
 }

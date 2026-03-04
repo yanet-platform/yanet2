@@ -119,11 +119,11 @@ setup_vs_stats(
 static void
 setup_vs_acl_stats(
 	struct allowed_sources_stats *stats,
-	uint32_t tag,
+	const char *tag,
 	const size_t instances,
 	struct counter_handle *counter
 ) {
-	stats->tag = tag;
+	stats->tag = strdup(tag);
 	counter_handle_accum(
 		(uint64_t *)&stats->passes,
 		instances,
@@ -260,7 +260,7 @@ calculate_stats(
 			continue;
 		}
 
-		uint32_t rule_tag;
+		const char *rule_tag;
 		vs_registry_idx = parse_vs_acl_counter(counter, &rule_tag);
 		if (vs_registry_idx != -1) {
 			uint32_t idx = vs_index[vs_registry_idx];
