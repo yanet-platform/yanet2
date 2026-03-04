@@ -2162,6 +2162,135 @@ push_packet(struct upkt *pkt) {
 }
 
 /**
+ * @brief Push a malformed packet with mismatched lengths for fuzzer regression
+ * testing
+ *
+ * Creates a packet where the claimed lengths in headers don't match the actual
+ * data. This bypasses parse_packet() validation to test NAT64 module's
+ * internal bounds checking.
+ *
+ * @param pkt Packet structure with headers and data
+ * @param claimed_total_length Value to write to IPv4 total_length field
+ * @param claimed_udp_len Value to write to UDP dgram_len (0 to use actual)
+ * @return 0 on success, -1 on failure
+ */
+static inline int
+push_packet_malformed(
+	struct upkt *pkt,
+	uint16_t claimed_total_length,
+	uint16_t claimed_udp_len
+) {
+	struct rte_mbuf *mbuf = rte_pktmbuf_alloc(test_params.mbuf_pool);
+	if (!mbuf) {
+		RTE_LOG(ERR, NAT64_TEST, "Failed to allocate mbuf\n");
+		return -1;
+	}
+
+	uint16_t pkt_len = sizeof(struct rte_ether_hdr);
+	uint16_t l3_len = 0;
+	uint16_t l4_len = 0;
+	uint8_t proto = 0;
+	if (pkt->eth.ether_type == RTE_BE16(RTE_ETHER_TYPE_IPV4)) {
+		l3_len = rte_ipv4_hdr_len(&pkt->ip.ipv4);
+		proto = pkt->ip.ipv4.next_proto_id;
+	} else if (pkt->eth.ether_type == RTE_BE16(RTE_ETHER_TYPE_IPV6)) {
+		l3_len = sizeof(struct rte_ipv6_hdr);
+		proto = pkt->ip.ipv6.proto;
+	} else {
+		RTE_LOG(ERR,
+			NAT64_TEST,
+			"Unsupported ether type %04X\n",
+			pkt->eth.ether_type);
+		rte_pktmbuf_free(mbuf);
+		return -1;
+	}
+	switch (proto) {
+	case IPPROTO_UDP:
+		l4_len = sizeof(struct rte_udp_hdr);
+		break;
+	case IPPROTO_TCP:
+		l4_len = sizeof(struct rte_tcp_hdr);
+		break;
+	case IPPROTO_ICMP:
+		l4_len = sizeof(struct icmphdr);
+		break;
+	case IPPROTO_ICMPV6:
+		l4_len = sizeof(struct icmp6_hdr);
+		break;
+	}
+	pkt_len += l3_len + l4_len + pkt->data_len;
+
+	rte_pktmbuf_append(mbuf, pkt_len);
+	struct rte_ether_hdr *eth_hdr =
+		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+	rte_memcpy(eth_hdr, &pkt->eth, sizeof(struct rte_ether_hdr));
+
+	// Copy IP header
+	rte_memcpy(
+		rte_pktmbuf_mtod_offset(
+			mbuf, void *, sizeof(struct rte_ether_hdr)
+		),
+		&pkt->ip,
+		l3_len
+	);
+
+	// Copy L4 header
+	rte_memcpy(
+		rte_pktmbuf_mtod_offset(
+			mbuf, void *, sizeof(struct rte_ether_hdr) + l3_len
+		),
+		&pkt->proto,
+		l4_len
+	);
+
+	if (pkt->data_len > 0 && pkt->data != NULL) {
+		rte_memcpy(
+			rte_pktmbuf_mtod_offset(
+				mbuf,
+				void *,
+				sizeof(struct rte_ether_hdr) + l3_len + l4_len
+			),
+			pkt->data,
+			pkt->data_len
+		);
+	}
+
+	// PATCH: Override IPv4 total_length with claimed value
+	if (pkt->eth.ether_type == RTE_BE16(RTE_ETHER_TYPE_IPV4)) {
+		struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv4_hdr *,
+			sizeof(struct rte_ether_hdr)
+		);
+		ipv4_hdr->total_length = rte_cpu_to_be_16(claimed_total_length);
+
+		// PATCH: Override UDP dgram_len if specified
+		if (proto == IPPROTO_UDP && claimed_udp_len > 0) {
+			struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_udp_hdr *,
+				sizeof(struct rte_ether_hdr) + l3_len
+			);
+			udp_hdr->dgram_len = rte_cpu_to_be_16(claimed_udp_len);
+		}
+	}
+
+	mbuf->port = 0;
+
+	struct packet *packet = mbuf_to_packet(mbuf);
+	memset(packet, 0, sizeof(struct packet));
+	packet->mbuf = mbuf;
+	packet->rx_device_id = 0;
+	packet->tx_device_id = 0;
+
+	// SKIP parse_packet() - we want malformed packets to reach NAT64
+	// parse_packet() would reject these due to length mismatches
+
+	packet_list_add(&test_params.packet_front.input, packet);
+	return 0;
+}
+
+/**
  * @brief Create basic UDP test cases from NAT64 address mappings
  *
  * For each configured address mapping:
@@ -4662,6 +4791,183 @@ test_nat64_unknown_handling() {
 }
 
 /**
+ * @brief Test bounds validation for corrupted packets
+ *
+ * Fuzzer regression tests that verify proper handling of malformed packets:
+ * - ICMP with total_length claiming more data than available
+ * - UDP with dgram_len not matching IPv4 payload length
+ *
+ * Uses push_packet_malformed() to bypass parse_packet() validation
+ * and test NAT64 module's internal bounds checking.
+ *
+ * @return 0 on success, error count on failure
+ */
+static inline int
+test_nat64_bounds_validation(void) {
+	// Test case 1: ICMP Echo with oversized total_length claim
+	// total_length claims 100+ bytes but actual data is only 10 bytes
+	{
+		packet_list_cleanup(&test_params.packet_front.input);
+		packet_list_cleanup(&test_params.packet_front.output);
+		packet_list_cleanup(&test_params.packet_front.drop);
+
+		struct upkt pkt_icmp_oversized = {
+			.eth =
+				{
+					.dst_addr.addr_bytes =
+						{0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff},
+					.src_addr.addr_bytes =
+						{0x02,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00},
+					.ether_type =
+						RTE_BE16(RTE_ETHER_TYPE_IPV4),
+				},
+			.ip.ipv4 =
+				{
+					.version_ihl = RTE_IPV4_VHL_DEF,
+					.time_to_live = DEFAULT_TTL,
+					.next_proto_id = IPPROTO_ICMP,
+					.src_addr = outer_ip4,
+					.dst_addr = config_data.mapping[0].ip4,
+				},
+			.proto.icmp =
+				{
+					.type = ICMP_ECHO,
+					.code = 0,
+					.un.echo.id = RTE_BE16(1),
+					.un.echo.sequence = RTE_BE16(1),
+				},
+			.data_len = 10,
+			.data = "0123456789",
+		};
+
+		// Claim 100 bytes of ICMP payload, actual is 10 bytes
+		uint16_t claimed_total_len = sizeof(struct rte_ipv4_hdr) +
+					     sizeof(struct icmphdr) + 100;
+
+		TEST_ASSERT_EQUAL(
+			push_packet_malformed(
+				&pkt_icmp_oversized, claimed_total_len, 0
+			),
+			0,
+			"Failed to push malformed ICMP packet\n"
+		);
+
+		// Run NAT64
+		struct module_ectx module_ectx;
+		SET_OFFSET_OF(
+			&module_ectx.cp_module,
+			&test_params.module_config.cp_module
+		);
+		test_params.module->handler(
+			NULL, &module_ectx, &test_params.packet_front
+		);
+
+		// Expect drop
+		int drop_count =
+			packet_list_count(&test_params.packet_front.drop);
+		TEST_ASSERT_EQUAL(
+			drop_count,
+			1,
+			"ICMP oversized: Expected 1 drop, got %d\n",
+			drop_count
+		);
+	}
+
+	// Test case 2: UDP with dgram_len mismatch
+	// UDP header claims 1000 bytes, IPv4 claims correct 18 bytes
+	{
+		packet_list_cleanup(&test_params.packet_front.input);
+		packet_list_cleanup(&test_params.packet_front.output);
+		packet_list_cleanup(&test_params.packet_front.drop);
+
+		struct upkt pkt_udp_mismatch = {
+			.eth =
+				{
+					.dst_addr.addr_bytes =
+						{0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff,
+						 0xff},
+					.src_addr.addr_bytes =
+						{0x02,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00,
+						 0x00},
+					.ether_type =
+						RTE_BE16(RTE_ETHER_TYPE_IPV4),
+				},
+			.ip.ipv4 =
+				{
+					.version_ihl = RTE_IPV4_VHL_DEF,
+					.time_to_live = DEFAULT_TTL,
+					.next_proto_id = IPPROTO_UDP,
+					.src_addr = outer_ip4,
+					.dst_addr = config_data.mapping[0].ip4,
+				},
+			.proto.udp =
+				{
+					.src_port = RTE_BE16(12345),
+					.dst_port = RTE_BE16(53),
+				},
+			.data_len = 10,
+			.data = "0123456789",
+		};
+
+		// Correct IPv4 total_length
+		uint16_t claimed_total_len = sizeof(struct rte_ipv4_hdr) +
+					     sizeof(struct rte_udp_hdr) + 10;
+		// But UDP dgram_len claims 1008 bytes (8 + 1000)
+		uint16_t claimed_udp_len = sizeof(struct rte_udp_hdr) + 1000;
+
+		TEST_ASSERT_EQUAL(
+			push_packet_malformed(
+				&pkt_udp_mismatch,
+				claimed_total_len,
+				claimed_udp_len
+			),
+			0,
+			"Failed to push malformed UDP packet\n"
+		);
+
+		// Run NAT64
+		struct module_ectx module_ectx;
+		SET_OFFSET_OF(
+			&module_ectx.cp_module,
+			&test_params.module_config.cp_module
+		);
+		test_params.module->handler(
+			NULL, &module_ectx, &test_params.packet_front
+		);
+
+		// Expect drop due to UDP length mismatch
+		int drop_count =
+			packet_list_count(&test_params.packet_front.drop);
+		TEST_ASSERT_EQUAL(
+			drop_count,
+			1,
+			"UDP mismatch: Expected 1 drop, got %d\n",
+			drop_count
+		);
+	}
+
+	return TEST_SUCCESS;
+}
+
+/**
  * @brief Test ICMP packet translation
  *
  * Verifies:
@@ -4815,6 +5121,10 @@ static struct unit_test_suite nat64_test_suite =
 		 TEST_CASE_NAMED(
 			 "test_nat64_unknown_handling",
 			 test_nat64_unknown_handling
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_bounds_validation",
+			 test_nat64_bounds_validation
 		 ),
 
 		 TEST_CASES_END() /**< NULL terminate unit test array */
