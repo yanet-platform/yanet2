@@ -255,8 +255,8 @@ message NamedVsStats {
 	// Per-allowed-source statistics for this virtual service.
 	//
 	// Contains statistics for each allowed source configuration that has
-	// a non-empty tag. Sources without tags (NULL/not set) are not tracked and
-	// will not appear in this array.
+	// a non-empty tag. Sources without tags (NULL/not set) are not tracked
+	// and will not appear in this array.
 	//
 	// The array is populated based on actual traffic patterns - only
 	// allowed sources that have received matching packets will have

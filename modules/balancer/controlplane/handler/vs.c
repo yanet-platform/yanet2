@@ -39,7 +39,9 @@ validate_tag(const char *tag) {
 		return -1;
 	}
 	if (len > MAX_TAG_LENGTH) {
-		NEW_ERROR("tag length %zu exceeds maximum %d", len, MAX_TAG_LENGTH);
+		NEW_ERROR(
+			"tag length %zu exceeds maximum %d", len, MAX_TAG_LENGTH
+		);
 		return -1;
 	}
 	return 0;
@@ -376,7 +378,7 @@ src_filter_rules(
 		if (fill_rule(
 			    vs,
 			    &r[rule_idx],
-				rule_idx,
+			    rule_idx,
 			    &config->allowed_src[rule_idx],
 			    mctx
 		    ) != 0) {
@@ -846,13 +848,16 @@ setup_acl_rules(
 
 		uint32_t allowed_src_idx = rules[i].action;
 		const char *rule_tag = config->allowed_src[allowed_src_idx].tag;
-		
+
 		// Validate tag before using it
 		if (validate_tag(rule_tag) != 0) {
-			PUSH_ERROR("invalid tag at allowed_src index %u", allowed_src_idx);
+			PUSH_ERROR(
+				"invalid tag at allowed_src index %u",
+				allowed_src_idx
+			);
 			return -1;
 		}
-		
+
 		if (rule_tag != NULL) {
 			// register counter
 			sprintf(counter_name,

@@ -141,8 +141,9 @@ service BalancerService {
 	// - Full VS configuration must be provided for each VS in the request
 	//
 	// The response includes filter reuse metadata, but only for the virtual
-	// services that were included in the update request. This allows tracking
-	// which ACL filters were reused vs recompiled for the updated VSs.
+	// services that were included in the update request. This allows
+	// tracking which ACL filters were reused vs recompiled for the updated
+	// VSs.
 	//
 	// Note: VS matcher filters (IPv4/IPv6) may be recompiled if the set of
 	// VS identifiers changes.
@@ -154,7 +155,8 @@ service BalancerService {
 	// configuration. Other virtual services remain unchanged.
 	//
 	// Behavior:
-	// - Virtual services matching the identifiers in the request are removed
+	// - Virtual services matching the identifiers in the request are
+	// removed
 	// - Virtual services not in the request remain unchanged
 	// - Deleting a non-existent VS is not an error (idempotent)
 	// - Active sessions for deleted VSs will eventually time out

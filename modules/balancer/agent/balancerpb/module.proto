@@ -194,14 +194,16 @@ message AllowedSources {
 
 	// Tag identifier for tracking allowed source statistics.
 	//
-	// When specified (non-empty), enables per-tag statistics tracking for packets
-	// matching this allowed source entry. Multiple AllowedSources entries
-	// can share the same tag to aggregate statistics across different
-	// network prefixes or port ranges.
+	// When specified (non-empty), enables per-tag statistics tracking for
+	// packets matching this allowed source entry. Multiple AllowedSources
+	// entries can share the same tag to aggregate statistics across
+	// different network prefixes or port ranges.
 	//
 	// BEHAVIOR:
-	// - tag not set or empty: No statistics tracking for this entry (default)
-	// - tag = "name": Track packets matching this entry under the specified tag
+	// - tag not set or empty: No statistics tracking for this entry
+	// (default)
+	// - tag = "name": Track packets matching this entry under the specified
+	// tag
 	//
 	// STATISTICS:
 	// - Tracked in AllowedSourcesStats in NamedVsStats

@@ -319,7 +319,8 @@ struct allowed_sources {
 	 *
 	 * BEHAVIOR:
 	 * - tag = NULL: No statistics tracking for this entry (default)
-	 * - tag = "name": Track packets matching this entry under the specified tag
+	 * - tag = "name": Track packets matching this entry under the specified
+	 * tag
 	 *
 	 * STATISTICS:
 	 * - Tracked in allowed_sources_stats array in named_vs_stats
@@ -728,9 +729,11 @@ struct named_vs_stats {
 	 * - Duplicate tags share one statistics entry
 	 *
 	 * EXAMPLES:
-	 * - Config has 3 allowed_src entries with tags ["a", "b", "a"] → count = 2
+	 * - Config has 3 allowed_src entries with tags ["a", "b", "a"] → count
+	 * = 2
 	 * - Config has 2 allowed_src entries with tags [NULL, NULL] → count = 0
-	 * - Config has 4 allowed_src entries with tags ["a", "b", "c", "d"] → count = 4
+	 * - Config has 4 allowed_src entries with tags ["a", "b", "c", "d"] →
+	 * count = 4
 	 */
 	size_t allowed_sources_count;
 
