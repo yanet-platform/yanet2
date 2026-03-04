@@ -51,9 +51,14 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
-// Free frees the route module configuration
+// Free releases the underlying C memory.
+//
+// Safe to call multiple times: subsequent calls are no-ops.
 func (m *ModuleConfig) Free() {
-	C.route_module_config_free(m.asRawPtr())
+	if ptr := m.asRawPtr(); ptr != nil {
+		C.route_module_config_free(ptr)
+		m.ptr = ffi.ModuleConfig{}
+	}
 }
 
 func (m *ModuleConfig) RouteAdd(srcAddr net.HardwareAddr, dstAddr net.HardwareAddr, device string) (int, error) {
@@ -87,12 +92,20 @@ func (m *ModuleConfig) RouteAdd(srcAddr net.HardwareAddr, dstAddr net.HardwareAd
 }
 
 func (m *ModuleConfig) RouteListAdd(routeIndices []uint32) (int, error) {
+	if len(routeIndices) == 0 {
+		return -1, fmt.Errorf("failed to add route list: routeIndices must not be empty")
+	}
+
 	cRouteIndices := make([]C.uint32_t, len(routeIndices))
 	for idx, v := range routeIndices {
 		cRouteIndices[idx] = C.uint32_t(v)
 	}
 
-	idx, err := C.route_module_config_add_route_list((*C.struct_cp_module)(m.ptr.AsRawPtr()), C.size_t(len(routeIndices)), &cRouteIndices[0])
+	idx, err := C.route_module_config_add_route_list(
+		m.asRawPtr(),
+		C.size_t(len(routeIndices)),
+		&cRouteIndices[0],
+	)
 	if err != nil {
 		return -1, fmt.Errorf("failed to add route list: %w", err)
 	}

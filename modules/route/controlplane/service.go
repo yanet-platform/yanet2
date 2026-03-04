@@ -183,10 +183,10 @@ func (m *RouteService) ShowFIB(
 	response := &routepb.ShowFIBResponse{}
 
 	for _, e := range entries {
-		if request.GetIpv4Only() && e.AddressFamily != 4 {
+		if request.GetIpv4Only() && e.AddressFamily != addressFamilyIPv4 {
 			continue
 		}
-		if request.GetIpv6Only() && e.AddressFamily != 6 {
+		if request.GetIpv6Only() && e.AddressFamily != addressFamilyIPv6 {
 			continue
 		}
 
