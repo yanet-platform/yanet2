@@ -1,6 +1,6 @@
 //! gRPC proto module definitions
 
-#[allow(non_snake_case)]
+#[allow(clippy::all, non_snake_case)]
 pub mod balancerpb {
     tonic::include_proto!("balancerpb");
 }

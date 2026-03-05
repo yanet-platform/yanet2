@@ -7,7 +7,7 @@ use colored::Colorize;
 use ipnet::IpNet;
 use tabled::Tabled;
 
-#[allow(non_snake_case)]
+#[allow(clippy::all, non_snake_case)]
 pub mod routepb {
     tonic::include_proto!("routepb");
 }

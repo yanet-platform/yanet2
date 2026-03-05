@@ -448,7 +448,7 @@ pub fn convert_show_config(response: &balancerpb::ShowConfigResponse) -> ShowCon
                                     )
                                 };
 
-                                Some(AllowedSourcesJson { networks, ports, tag: s.tag.as_ref().map(|t| t.clone()) })
+                                Some(AllowedSourcesJson { networks, ports, tag: s.tag.clone() })
                             })
                             .collect(),
                         reals: vs

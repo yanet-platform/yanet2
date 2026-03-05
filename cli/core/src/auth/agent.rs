@@ -46,7 +46,7 @@ pub enum AgentError {
 #[derive(Debug)]
 pub enum SshIdentity {
     PublicKey(PublicKey),
-    Certificate(Certificate),
+    Certificate(Box<Certificate>),
 }
 
 impl SshIdentity {
@@ -57,7 +57,7 @@ impl SshIdentity {
 
         if Algorithm::new_certificate(algo_str).is_ok() {
             let cert = Certificate::from_bytes(buf)?;
-            Ok(Self::Certificate(cert))
+            Ok(Self::Certificate(Box::new(cert)))
         } else {
             let pk = PublicKey::from_bytes(buf)?;
             Ok(Self::PublicKey(pk))
@@ -67,7 +67,7 @@ impl SshIdentity {
     /// Returns the certificate if this identity is one.
     pub fn certificate(&self) -> Option<&Certificate> {
         match self {
-            Self::Certificate(c) => Some(c),
+            Self::Certificate(c) => Some(c.as_ref()),
             Self::PublicKey(_) => None,
         }
     }
@@ -119,7 +119,7 @@ impl SshAgent {
                     let blob = identity.to_bytes()?;
                     // We need to move the cert out.
                     if let SshIdentity::Certificate(cert) = identity {
-                        return Ok((cert, blob));
+                        return Ok((*cert, blob));
                     }
                 }
             }

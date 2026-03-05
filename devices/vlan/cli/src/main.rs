@@ -94,7 +94,7 @@ impl DeviceVlanService {
                         let weight = parts[1].parse::<u64>().expect("Invalid weight value");
                         DevicePipeline {
                             name: parts[0].to_string(),
-                            weight: weight,
+                            weight,
                         }
                     })
                     .collect(),
@@ -109,7 +109,7 @@ impl DeviceVlanService {
                         let weight = parts[1].parse::<u64>().expect("Invalid weight value");
                         DevicePipeline {
                             name: parts[0].to_string(),
-                            weight: weight,
+                            weight,
                         }
                     })
                     .collect(),

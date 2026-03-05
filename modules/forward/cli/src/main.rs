@@ -261,7 +261,7 @@ impl ForwardService {
         let rules: Vec<forwardpb::Rule> = config.into();
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
-            rules: rules,
+            rules,
         };
         log::trace!("UpdateConfigRequest: {request:?}");
         let response = self.client.update_config(request).await?.into_inner();
