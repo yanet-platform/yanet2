@@ -143,6 +143,15 @@ category = executable('category',
 )
 test('category', category, suite: ['filter'])
 
+basic_port_fast = executable('basic_port_fast',
+  ['basic_port_fast.c'], 
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('basic_port_fast', basic_port_fast, suite: ['filter'])
+
 basic_proto_range = executable('basic_proto_range',
   ['basic_proto_range.c'], 
   c_args: yanet_test_c_args,

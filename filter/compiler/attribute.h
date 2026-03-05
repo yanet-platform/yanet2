@@ -41,6 +41,8 @@ struct filter_attr_compiler {
 
 REGISTER_ATTRIBUTE(port_src);
 REGISTER_ATTRIBUTE(port_dst);
+REGISTER_ATTRIBUTE(port_fast_src);
+REGISTER_ATTRIBUTE(port_fast_dst);
 REGISTER_ATTRIBUTE(proto);
 REGISTER_ATTRIBUTE(proto_range);
 REGISTER_ATTRIBUTE(net4_src);

@@ -5,6 +5,7 @@
 #include "common/network.h"
 #include "common/registry.h"
 #include "declare.h"
+#include "helper.h"
 #include "rule.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -37,15 +38,10 @@ validate_net6(struct net6 *net6) {
 	       validate_net6_half(net6->mask + 8);
 }
 
-struct segment {
-	uint64_t from;
-	uint64_t to;
-};
-
 static int
-compare_segments(const void *left_void, const void *right_void) {
-	struct segment *left = (struct segment *)left_void;
-	struct segment *right = (struct segment *)right_void;
+compare_segments_u64(const void *left_void, const void *right_void) {
+	struct segment_u64 *left = (struct segment_u64 *)left_void;
+	struct segment_u64 *right = (struct segment_u64 *)right_void;
 	if (left->from < right->from) {
 		return -1;
 	} else if (left->from > right->from) {
@@ -91,7 +87,7 @@ validate_and_count(
 
 static size_t
 fill_segments(
-	struct segment *segments,
+	struct segment_u64 *segments,
 	const struct filter_rule *rules,
 	size_t rules_count,
 	get_net getter,
@@ -104,12 +100,14 @@ fill_segments(
 			uint64_t from, to;
 			net6_part_from_to(cur.nets + j, part, &from, &to);
 			segments[cnt++] =
-				(struct segment){.from = from, .to = to};
+				(struct segment_u64){.from = from, .to = to};
 		}
 	}
 
-	qsort(segments, cnt, sizeof(struct segment), compare_segments);
+	qsort(segments, cnt, sizeof(struct segment_u64), compare_segments_u64);
 
+	// Keep segments with different 'to' values (original logic)
+	// This is needed for net6's 2D classifier architecture
 	uint64_t max_right = 0;
 	size_t taken = 0;
 	for (size_t i = 0; i < cnt; ++i) {
@@ -132,8 +130,8 @@ init_classifier_part(
 	const struct filter_rule *rules,
 	size_t rules_count
 ) {
-	struct segment *segments =
-		malloc(sizeof(struct segment) * segments_count);
+	struct segment_u64 *segments =
+		malloc(sizeof(struct segment_u64) * segments_count);
 	size_t after_collapse_cnt =
 		fill_segments(segments, rules, rules_count, getter, part);
 

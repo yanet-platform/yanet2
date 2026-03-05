@@ -7,6 +7,7 @@
 #include "net6.h"
 #include "net6_fast.h"
 #include "port.h"
+#include "port_fast.h"
 #include "proto.h"
 #include "proto_range.h"
 #include "vlan.h"
