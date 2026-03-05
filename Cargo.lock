@@ -3327,7 +3327,6 @@ dependencies = [
  "clap_complete",
  "colored",
  "ipnet",
- "ipnetwork",
  "log",
  "prost",
  "prost-types",

@@ -1,13 +1,16 @@
 use core::error::Error;
-use std::net::IpAddr;
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use forwardpb::{
-    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
+    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     forward_service_client::ForwardServiceClient,
 };
-use ipnetwork::IpNetwork;
+use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -65,22 +68,23 @@ pub struct ListCmd {}
 pub struct DeleteCmd {
     /// The name of the module config to delete.
     #[arg(long = "cfg", short)]
-    pub config_name: String,
+    pub config: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// The name of the module config to operate on.
     #[arg(long = "cfg", short)]
-    pub config_name: String,
-    /// Ruleset file name.
-    #[arg(required = true, long = "rules", value_name = "rules")]
-    pub rules: String,
+    pub config: String,
+    /// Ruleset file path.
+    #[arg(required = true, long = "rules", value_name = "PATH")]
+    pub rules: PathBuf,
 }
 
 impl From<String> for filterpb::Device {
-    fn from(n: String) -> Self {
-        Self { name: n }
+    #[inline]
+    fn from(name: String) -> Self {
+        Self { name }
     }
 }
 
@@ -96,58 +100,21 @@ impl From<VlanRange> for filterpb::VlanRange {
     }
 }
 
-impl From<String> for filterpb::IpNet {
-    fn from(value: String) -> Self {
-        let parts: Vec<&str> = value.split('/').collect();
-        if parts.len() == 1 {
-            let addr: IpAddr = value.parse().unwrap();
-            return match addr {
-                IpAddr::V4(v4) => Self {
-                    addr: v4.octets().to_vec(),
-                    mask: [0xff, 0xff, 0xff, 0xff].to_vec(),
-                },
-                IpAddr::V6(v6) => Self {
-                    addr: v6.octets().to_vec(),
-                    mask: [
-                        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    ]
-                    .to_vec(),
-                },
-            };
-        }
+impl TryFrom<String> for filterpb::IpNet {
+    type Error = Box<dyn Error>;
 
-        if parts.len() != 2 {
-            panic!("invalid format");
-        }
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let net: IpNet = value.parse()?;
+        let addr = match &net {
+            IpNet::V4(v4) => v4.addr().octets().to_vec(),
+            IpNet::V6(v6) => v6.addr().octets().to_vec(),
+        };
+        let mask = match &net {
+            IpNet::V4(v4) => v4.netmask().octets().to_vec(),
+            IpNet::V6(v6) => v6.netmask().octets().to_vec(),
+        };
 
-        let parsed: Result<IpNetwork, _> = value.parse();
-
-        match parsed {
-            Ok(net) => Self {
-                addr: match net.ip() {
-                    IpAddr::V4(v4) => v4.octets().to_vec(),
-                    IpAddr::V6(v6) => v6.octets().to_vec(),
-                },
-                mask: match net.mask() {
-                    IpAddr::V4(v4) => v4.octets().to_vec(),
-                    IpAddr::V6(v6) => v6.octets().to_vec(),
-                },
-            },
-            Err(_) => {
-                let addr: IpAddr = parts[0].parse().unwrap();
-                let mask: IpAddr = parts[1].parse().unwrap();
-                Self {
-                    addr: match addr {
-                        IpAddr::V4(v4) => v4.octets().to_vec(),
-                        IpAddr::V6(v6) => v6.octets().to_vec(),
-                    },
-                    mask: match mask {
-                        IpAddr::V4(v4) => v4.octets().to_vec(),
-                        IpAddr::V6(v6) => v6.octets().to_vec(),
-                    },
-                }
-            }
-        }
+        Ok(Self { addr, mask })
     }
 }
 
@@ -169,9 +136,11 @@ struct ForwardRule {
     dsts: Vec<String>,
 }
 
-impl From<ForwardRule> for forwardpb::Rule {
-    fn from(forward_rule: ForwardRule) -> Self {
-        Self {
+impl TryFrom<ForwardRule> for forwardpb::Rule {
+    type Error = Box<dyn Error>;
+
+    fn try_from(forward_rule: ForwardRule) -> Result<Self, Self::Error> {
+        Ok(Self {
             action: Some(forwardpb::Action {
                 target: forward_rule.target,
                 mode: match forward_rule.mode {
@@ -183,38 +152,43 @@ impl From<ForwardRule> for forwardpb::Rule {
             }),
             devices: forward_rule.devices.into_iter().map(|m| m.into()).collect(),
             vlan_ranges: forward_rule.vlan_ranges.into_iter().map(|m| m.into()).collect(),
-            srcs: forward_rule.srcs.into_iter().map(|m| m.into()).collect(),
-            dsts: forward_rule.dsts.into_iter().map(|m| m.into()).collect(),
-        }
+            srcs: forward_rule
+                .srcs
+                .into_iter()
+                .map(filterpb::IpNet::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
+            dsts: forward_rule
+                .dsts
+                .into_iter()
+                .map(filterpb::IpNet::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
+        })
     }
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ForwardConfig {
     rules: Vec<ForwardRule>,
 }
 
-impl From<ForwardConfig> for Vec<forwardpb::Rule> {
-    fn from(config: ForwardConfig) -> Self {
-        config.rules.into_iter().map(From::from).collect()
+impl TryFrom<ForwardConfig> for Vec<forwardpb::Rule> {
+    type Error = Box<dyn Error>;
+
+    fn try_from(config: ForwardConfig) -> Result<Self, Self::Error> {
+        config.rules.into_iter().map(forwardpb::Rule::try_from).collect()
     }
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 impl ForwardConfig {
-    pub fn from_file(path: &str) -> Result<Self, Box<dyn Error>> {
-        let file = std::fs::File::open(path)?;
+    pub fn load<P>(path: P) -> Result<Self, Box<dyn Error>>
+    where
+        P: AsRef<Path>,
+    {
+        let file = File::open(path)?;
         let config = serde_yaml::from_reader(file)?;
+
         Ok(config)
     }
-}
-
-pub fn print_config_json(response: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
-    println!("{:}", serde_json::to_string(&response)?);
-    Ok(())
 }
 
 pub struct ForwardService {
@@ -234,39 +208,33 @@ impl ForwardService {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self.client.show_config(request).await?.into_inner();
 
-        print_config_json(&response)?;
-
+        println!("{}", serde_json::to_string(&response)?);
         Ok(())
     }
 
     pub async fn list_configs(&mut self, _cmd: ListCmd) -> Result<(), Box<dyn Error>> {
         let request = ListConfigsRequest {};
-        log::trace!("list configs request: {request:?}");
         let response = self.client.list_configs(request).await?.into_inner();
-        log::debug!("list configs response: {response:?}");
 
-        println!("{}", serde_json::to_string_pretty(&response.configs)?);
+        println!("{}", serde_json::to_string(&response.configs)?);
         Ok(())
     }
 
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
-        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
+        let request = DeleteConfigRequest { name: cmd.config.clone() };
         self.client.delete_config(request).await?;
 
+        println!("OK");
         Ok(())
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        let config = ForwardConfig::from_file(&cmd.rules)?;
-        let rules: Vec<forwardpb::Rule> = config.into();
-        let request = UpdateConfigRequest {
-            name: cmd.config_name.clone(),
-            rules,
-        };
-        log::trace!("UpdateConfigRequest: {request:?}");
-        let response = self.client.update_config(request).await?.into_inner();
-        log::debug!("UpdateConfigResponse: {response:?}");
+        let config = ForwardConfig::load(&cmd.rules)?;
+        let rules: Vec<forwardpb::Rule> = config.try_into()?;
+        let request = UpdateConfigRequest { name: cmd.config.clone(), rules };
+        self.client.update_config(request).await?;
 
+        println!("OK");
         Ok(())
     }
 }
