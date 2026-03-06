@@ -5,17 +5,12 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{pipeline_service_client::PipelineServiceClient, DeletePipelineRequest, Pipeline, UpdatePipelineRequest};
-use commonpb::{FunctionId, PipelineId};
+use commonpb::pb::{FunctionId, PipelineId};
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     logging,
 };
-
-#[allow(non_snake_case)]
-pub mod commonpb {
-    tonic::include_proto!("commonpb");
-}
 
 #[allow(non_snake_case)]
 pub mod code {

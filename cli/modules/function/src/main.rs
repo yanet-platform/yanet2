@@ -8,17 +8,12 @@ use code::{
     function_service_client::FunctionServiceClient, Chain, DeleteFunctionRequest, Function, FunctionChain,
     UpdateFunctionRequest,
 };
-use commonpb::{FunctionId, ModuleId};
+use commonpb::pb::{FunctionId, ModuleId};
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     logging,
 };
-
-#[allow(non_snake_case)]
-pub mod commonpb {
-    tonic::include_proto!("commonpb");
-}
 
 #[allow(non_snake_case)]
 pub mod code {

@@ -1,9 +1,9 @@
-use core::{error::Error, str::FromStr};
+use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use code::{UpdateDevicePlainRequest, device_plain_service_client::DevicePlainServiceClient};
-use commonpb::{Device, DevicePipeline};
+use commonpb::pb::Device;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
@@ -15,13 +15,6 @@ pub mod code {
     use serde::Serialize;
 
     tonic::include_proto!("plainpb");
-}
-
-#[allow(non_snake_case)]
-pub mod commonpb {
-    use serde::Serialize;
-
-    tonic::include_proto!("commonpb");
 }
 
 /// DevicePlain module.
@@ -63,20 +56,6 @@ pub struct UpdateCmd {
     /// Pipeline assignments in format "pipeline_name:weight"
     #[arg(short, long)]
     pub output: Vec<String>,
-}
-
-impl FromStr for DevicePipeline {
-    type Err = Box<dyn Error>;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (name, weight) = s
-            .split_once(':')
-            .ok_or_else(|| format!("invalid pipeline format '{s}': expected 'name:weight'"))?;
-        let weight = weight
-            .parse::<u64>()
-            .map_err(|e| format!("invalid weight in '{s}': {e}"))?;
-        Ok(DevicePipeline { name: name.to_string(), weight })
-    }
 }
 
 pub struct DevicePlainService {

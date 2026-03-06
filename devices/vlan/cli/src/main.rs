@@ -1,9 +1,9 @@
-use core::{error::Error, str::FromStr};
+use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use code::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
-use commonpb::{Device, DevicePipeline};
+use commonpb::pb::Device;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
@@ -15,13 +15,6 @@ pub mod code {
     use serde::Serialize;
 
     tonic::include_proto!("vlanpb");
-}
-
-#[allow(non_snake_case)]
-pub mod commonpb {
-    use serde::Serialize;
-
-    tonic::include_proto!("commonpb");
 }
 
 /// DeviceVlan module.
@@ -66,20 +59,6 @@ pub struct UpdateCmd {
     /// Vlan tag
     #[arg(short, long)]
     pub vlan: u16,
-}
-
-impl FromStr for DevicePipeline {
-    type Err = Box<dyn Error>;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (name, weight) = s
-            .split_once(':')
-            .ok_or_else(|| format!("invalid pipeline format '{s}': expected 'name:weight'"))?;
-        let weight = weight
-            .parse::<u64>()
-            .map_err(|e| format!("invalid weight in '{s}': {e}"))?;
-        Ok(DevicePipeline { name: name.to_string(), weight })
-    }
 }
 
 pub struct DeviceVlanService {
