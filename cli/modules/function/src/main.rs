@@ -1,6 +1,7 @@
 //! CLI for YANET "function" module.
 
 use core::error::Error;
+use std::str::FromStr;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
@@ -18,6 +19,38 @@ use ync::{
 #[allow(non_snake_case)]
 pub mod code {
     tonic::include_proto!("ynpb");
+}
+
+impl FromStr for FunctionChain {
+    type Err = Box<dyn Error>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (chain_part, modules_part) = s
+            .split_once('=')
+            .ok_or_else(|| format!("invalid chain format: expected 'name:weight=modules', got {s:?}"))?;
+        let (name, weight) = chain_part
+            .split_once(':')
+            .ok_or_else(|| format!("invalid chain format: expected 'name:weight', got {chain_part:?}"))?;
+        let weight = weight
+            .parse::<u64>()
+            .map_err(|e| format!("invalid chain weight {weight:?}: {e}"))?;
+        let modules = modules_part
+            .split(',')
+            .map(|m| -> Result<ModuleId, Box<dyn Error>> {
+                let (r#type, name) = m
+                    .split_once(':')
+                    .ok_or_else(|| format!("invalid module format: expected 'module_type:config_name', got {m:?}"))?;
+                Ok(ModuleId {
+                    r#type: r#type.to_string(),
+                    name: name.to_string(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(FunctionChain {
+            weight,
+            chain: Some(Chain { name: name.to_string(), modules }),
+        })
+    }
 }
 
 /// Function module.
@@ -95,43 +128,15 @@ impl FunctionService {
     }
 
     pub async fn update_functions(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
+        let chains = cmd
+            .chains
+            .iter()
+            .map(|s| s.parse::<FunctionChain>())
+            .collect::<Result<Vec<_>, _>>()?;
         let request = UpdateFunctionRequest {
             function: Some(Function {
                 id: Some(FunctionId { name: cmd.name }),
-                chains: cmd
-                    .chains
-                    .into_iter()
-                    .map(|m| {
-                        let chain_modules: Vec<&str> = m.split('=').collect();
-                        if chain_modules.len() != 2 {
-                            panic!("Invalid chain format");
-                        }
-                        let chain_weight: Vec<&str> = chain_modules[0].split(':').collect();
-                        if chain_weight.len() != 2 {
-                            panic!("Invalid chain format");
-                        }
-                        let modules: Vec<&str> = chain_modules[1].split(',').collect();
-                        FunctionChain {
-                            weight: chain_weight[1].parse::<u64>().expect("invalid chain format"),
-                            chain: Some(Chain {
-                                name: chain_weight[0].to_string(),
-                                modules: modules
-                                    .into_iter()
-                                    .map(|m| {
-                                        let parts: Vec<&str> = m.split(':').collect();
-                                        if parts.len() != 2 {
-                                            panic!("Invalid module format. Expected 'module_name:config_name'");
-                                        }
-                                        ModuleId {
-                                            r#type: parts[0].to_string(),
-                                            name: parts[1].to_string(),
-                                        }
-                                    })
-                                    .collect(),
-                            }),
-                        }
-                    })
-                    .collect(),
+                chains,
             }),
         };
 
