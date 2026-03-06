@@ -161,6 +161,36 @@ basic_proto_range = executable('basic_proto_range',
 )
 test('basic_proto_range', basic_proto_range, suite: ['filter'])
 
+# test combo net4_fast_src + port_fast_src
+combo_net4_port_src = executable('combo_net4_port_src',
+  ['combo_net4_port_src.c'], 
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('combo_net4_port_src', combo_net4_port_src, suite: ['filter'])
+
+# test combo net6_fast_src + port_fast_src
+combo_net6_port_src = executable('combo_net6_port_src',
+  ['combo_net6_port_src.c'], 
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('combo_net6_port_src', combo_net6_port_src, suite: ['filter'])
+
+# test combo net4_fast_dst + port_fast_dst + proto_range
+combo_net4_port_proto_dst = executable('combo_net4_port_proto_dst',
+  ['combo_net4_port_proto_dst.c'], 
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('combo_net4_port_proto_dst', combo_net4_port_proto_dst, suite: ['filter'])
+
 subdir('shm')
 
 executable('bench_net4',

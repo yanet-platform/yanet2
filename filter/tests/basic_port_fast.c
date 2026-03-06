@@ -1,5 +1,4 @@
 #include "common/memory.h"
-#include "common/memory_address.h"
 #include "common/memory_block.h"
 #include "common/network.h"
 #include "common/registry.h"
@@ -86,50 +85,10 @@ query_and_expect_actions(
 		break;
 	}
 
-	for (size_t packet_idx = 0; packet_idx < packets_count; ++packet_idx) {
-		struct value_range *range = ranges[packet_idx];
-		uint32_t *range_values = ADDR_OF(&range->values);
-
-		struct value_range *expected_range = expected[packet_idx];
-		uint32_t *expected_range_values = expected_range->values;
-
-		for (size_t expected_value_idx = 0;
-		     expected_value_idx < expected_range->count;
-		     ++expected_value_idx) {
-			int found = 0;
-			for (size_t got_idx = 0; got_idx < range->count;
-			     ++got_idx) {
-				if (expected_range_values[expected_value_idx] ==
-				    range_values[got_idx]) {
-					found = 1;
-					break;
-				}
-			}
-
-			if (!found) {
-				LOG(ERROR,
-				    "packet at idx %zu: expected action %u, "
-				    "got %zu actions:",
-				    packet_idx,
-				    expected_range_values[expected_value_idx],
-				    range->count);
-				for (size_t got_idx = 0; got_idx < range->count;
-				     ++got_idx) {
-					LOG(ERROR,
-					    "  action[%zu] = %u",
-					    got_idx,
-					    range_values[got_idx]);
-				}
-			}
-
-			TEST_ASSERT(
-				found,
-				"packet at idx %zu: not got expected action %u",
-				packet_idx,
-				expected_range_values[expected_value_idx]
-			);
-		}
-	}
+	TEST_ASSERT_SUCCESS(
+		compare_expected_ranges(ranges, expected, packets_count),
+		"got value ranges != expected"
+	);
 
 	free(ranges);
 
@@ -183,15 +142,17 @@ test_basic(void *arena, enum filter_sign sign) {
 	};
 
 	struct test_port_range ranges[] = {
-		{.from = 96, .to = 103},     // [96, 103]
-		{.from = 96, .to = 111},     // [96, 111]
-		{.from = 80, .to = 95},	     // [80, 95]
-		{.from = 88, .to = 91},	     // [88, 91]
-		{.from = 116, .to = 119},    // [116, 119]
-		{.from = 128, .to = 143},    // [128, 143]
-		{.from = 1024, .to = 5000},  // [1024, 5000]
-		{.from = 8080, .to = 8080},  // [8080, 8080] - single port
-		{.from = 49152, .to = 65535} // [49152, 65535] - high ports
+		{.from = 96, .to = 103},
+		{.from = 80, .to = 95},
+		{.from = 116, .to = 119},
+		{.from = 1024, .to = 5000},
+		{.from = 128, .to = 143},
+		{.from = 49152, .to = 65535},
+		{.from = 8080, .to = 8080},
+		{.from = 88, .to = 91},
+		{.from = 96, .to = 111},
+		{.from = 43, .to = 79},
+		{.from = 82, .to = 95},
 	};
 	const size_t ranges_count = sizeof(ranges) / sizeof(ranges[0]);
 
@@ -646,6 +607,803 @@ stress(void *arena,
 	return TEST_SUCCESS;
 }
 
+// Corner case tests
+
+static int
+test_no_match(void *arena, enum filter_sign sign) {
+	assert(sign == src || sign == dst);
+	const char *sign_name = filter_sign_to_string(sign);
+
+	LOG(INFO, "=== Test No Match: %s ===", sign_name);
+
+	// Define port ranges that won't match our test packets
+	struct test_port_range {
+		uint16_t from;
+		uint16_t to;
+	};
+
+	struct test_port_range ranges[] = {
+		{.from = 80, .to = 90},	      // HTTP range
+		{.from = 443, .to = 443},     // HTTPS
+		{.from = 1024, .to = 5000},   // Registered ports
+		{.from = 49152, .to = 65535}, // Dynamic/private ports
+	};
+	const size_t ranges_count = sizeof(ranges) / sizeof(ranges[0]);
+
+	// Test ports that don't match any range
+	const uint16_t test_ports[] = {
+		79,    // One below first range
+		91,    // One above first range
+		442,   // One below HTTPS
+		444,   // One above HTTPS
+		1023,  // One below registered
+		5001,  // One above registered
+		49151, // One below dynamic
+		22,    // SSH - not in any range
+	};
+	const size_t test_ports_count =
+		sizeof(test_ports) / sizeof(test_ports[0]);
+
+	struct packet *packets[test_ports_count];
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
+	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		packets[i] = malloc(sizeof(struct packet));
+		int fill_result = fill_packet_net4(
+			packets[i],
+			sip,
+			dip,
+			test_ports[i],
+			test_ports[i],
+			IPPROTO_TCP,
+			0
+		);
+		TEST_ASSERT_EQUAL(
+			fill_result, 0, "failed to fill packet at index %zu", i
+		);
+	}
+
+	// Build rules
+	struct filter_rule rules[ranges_count];
+	struct filter_rule_builder builders[ranges_count];
+	for (size_t range_idx = 0; range_idx < ranges_count; ++range_idx) {
+		builder_init(&builders[range_idx]);
+		if (sign == src) {
+			builder_add_port_src_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		} else {
+			builder_add_port_dst_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		}
+		rules[range_idx] = build_rule(
+			&builders[range_idx],
+			(range_idx + 1) | ACTION_NON_TERMINATE
+		);
+	}
+
+	// Expected: no matches for any packet
+	struct value_range *expected_ranges[test_ports_count];
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		expected_ranges[i] = malloc(sizeof(struct value_range));
+		expected_ranges[i]->count = 0;
+		expected_ranges[i]->values = malloc(sizeof(uint32_t));
+	}
+
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize block allocator");
+	block_allocator_put_arena(&alloc, arena, arena_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
+
+	struct filter filter;
+	if (sign == src) {
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, ranges_count, &mctx
+		);
+	} else {
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, ranges_count, &mctx
+		);
+	}
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
+
+	res = query_and_expect_actions(
+		&filter, sign, packets, test_ports_count, expected_ranges
+	);
+	TEST_ASSERT_SUCCESS(res, "some checks failed");
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		free(expected_ranges[i]->values);
+		free(expected_ranges[i]);
+		free_packet(packets[i]);
+		free(packets[i]);
+	}
+
+	return TEST_SUCCESS;
+}
+
+static int
+test_overlapping_ranges(void *arena, enum filter_sign sign) {
+	assert(sign == src || sign == dst);
+	const char *sign_name = filter_sign_to_string(sign);
+
+	LOG(INFO, "=== Test Overlapping Ranges: %s ===", sign_name);
+
+	// Define overlapping port ranges
+	// 1000-2000 contains 1200-1500 contains 1300-1400
+	struct test_port_range {
+		uint16_t from;
+		uint16_t to;
+	};
+
+	struct test_port_range ranges[] = {
+		{.from = 1000, .to = 2000}, // Widest
+		{.from = 1200, .to = 1500}, // Middle
+		{.from = 1300, .to = 1400}, // Narrowest
+		{.from = 3000, .to = 4000}, // Non-overlapping
+	};
+	const size_t ranges_count = sizeof(ranges) / sizeof(ranges[0]);
+
+	// Test ports
+	const uint16_t test_ports[] = {
+		1350, // Matches rules 1, 2, 3 (all nested)
+		1250, // Matches rules 1, 2 (not in narrowest)
+		1100, // Matches rule 1 only (not in middle)
+		3500, // Matches rule 4 only
+		5000, // Matches nothing
+	};
+	const size_t test_ports_count =
+		sizeof(test_ports) / sizeof(test_ports[0]);
+
+	struct packet *packets[test_ports_count];
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
+	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		packets[i] = malloc(sizeof(struct packet));
+		int fill_result = fill_packet_net4(
+			packets[i],
+			sip,
+			dip,
+			test_ports[i],
+			test_ports[i],
+			IPPROTO_TCP,
+			0
+		);
+		TEST_ASSERT_EQUAL(
+			fill_result, 0, "failed to fill packet at index %zu", i
+		);
+	}
+
+	// Build rules
+	struct filter_rule rules[ranges_count];
+	struct filter_rule_builder builders[ranges_count];
+	for (size_t range_idx = 0; range_idx < ranges_count; ++range_idx) {
+		builder_init(&builders[range_idx]);
+		if (sign == src) {
+			builder_add_port_src_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		} else {
+			builder_add_port_dst_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		}
+		rules[range_idx] = build_rule(
+			&builders[range_idx],
+			(range_idx + 1) | ACTION_NON_TERMINATE
+		);
+	}
+
+	// Expected matches
+	uint32_t expected_actions[][4] = {
+		{1 | ACTION_NON_TERMINATE,
+		 2 | ACTION_NON_TERMINATE,
+		 3 | ACTION_NON_TERMINATE,
+		 0}, // Port 1350: rules 1,2,3
+		{1 | ACTION_NON_TERMINATE, 2 | ACTION_NON_TERMINATE, 0, 0
+		},				     // Port 1250: rules 1,2
+		{1 | ACTION_NON_TERMINATE, 0, 0, 0}, // Port 1100: rule 1
+		{4 | ACTION_NON_TERMINATE, 0, 0, 0}, // Port 3500: rule 4
+		{0, 0, 0, 0},			     // Port 5000: no match
+	};
+	uint32_t expected_counts[] = {3, 2, 1, 1, 0};
+
+	struct value_range *expected_ranges[test_ports_count];
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		expected_ranges[i] = malloc(sizeof(struct value_range));
+		expected_ranges[i]->count = expected_counts[i];
+		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 4);
+		for (size_t j = 0; j < expected_counts[i]; ++j) {
+			expected_ranges[i]->values[j] = expected_actions[i][j];
+		}
+	}
+
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize block allocator");
+	block_allocator_put_arena(&alloc, arena, arena_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
+
+	struct filter filter;
+	if (sign == src) {
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, ranges_count, &mctx
+		);
+	} else {
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, ranges_count, &mctx
+		);
+	}
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
+
+	res = query_and_expect_actions(
+		&filter, sign, packets, test_ports_count, expected_ranges
+	);
+	TEST_ASSERT_SUCCESS(res, "some checks failed");
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		free(expected_ranges[i]->values);
+		free(expected_ranges[i]);
+		free_packet(packets[i]);
+		free(packets[i]);
+	}
+
+	return TEST_SUCCESS;
+}
+
+static int
+test_boundary_conditions(void *arena, enum filter_sign sign) {
+	assert(sign == src || sign == dst);
+	const char *sign_name = filter_sign_to_string(sign);
+
+	LOG(INFO, "=== Test Boundary Conditions: %s ===", sign_name);
+
+	// Port range: 1000-2000
+	struct test_port_range {
+		uint16_t from;
+		uint16_t to;
+	};
+
+	struct test_port_range ranges[] = {
+		{.from = 1000, .to = 2000},
+	};
+	const size_t ranges_count = sizeof(ranges) / sizeof(ranges[0]);
+
+	// Test ports at boundaries
+	const uint16_t test_ports[] = {
+		1000, // Exact start - should match
+		1001, // Just after start - should match
+		1999, // Just before end - should match
+		2000, // Exact end - should match
+		999,  // One before start - should NOT match
+		2001, // One after end - should NOT match
+	};
+	const size_t test_ports_count =
+		sizeof(test_ports) / sizeof(test_ports[0]);
+
+	struct packet *packets[test_ports_count];
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
+	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		packets[i] = malloc(sizeof(struct packet));
+		int fill_result = fill_packet_net4(
+			packets[i],
+			sip,
+			dip,
+			test_ports[i],
+			test_ports[i],
+			IPPROTO_TCP,
+			0
+		);
+		TEST_ASSERT_EQUAL(
+			fill_result, 0, "failed to fill packet at index %zu", i
+		);
+	}
+
+	// Build rules
+	struct filter_rule rules[ranges_count];
+	struct filter_rule_builder builders[ranges_count];
+	for (size_t range_idx = 0; range_idx < ranges_count; ++range_idx) {
+		builder_init(&builders[range_idx]);
+		if (sign == src) {
+			builder_add_port_src_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		} else {
+			builder_add_port_dst_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		}
+		rules[range_idx] = build_rule(
+			&builders[range_idx],
+			(range_idx + 1) | ACTION_NON_TERMINATE
+		);
+	}
+
+	// Expected: first 4 match, last 2 don't
+	uint32_t expected_counts[] = {1, 1, 1, 1, 0, 0};
+	struct value_range *expected_ranges[test_ports_count];
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		expected_ranges[i] = malloc(sizeof(struct value_range));
+		expected_ranges[i]->count = expected_counts[i];
+		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
+		if (expected_counts[i] > 0) {
+			expected_ranges[i]->values[0] =
+				1 | ACTION_NON_TERMINATE;
+		}
+	}
+
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize block allocator");
+	block_allocator_put_arena(&alloc, arena, arena_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
+
+	struct filter filter;
+	if (sign == src) {
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, ranges_count, &mctx
+		);
+	} else {
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, ranges_count, &mctx
+		);
+	}
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
+
+	res = query_and_expect_actions(
+		&filter, sign, packets, test_ports_count, expected_ranges
+	);
+	TEST_ASSERT_SUCCESS(res, "some checks failed");
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		free(expected_ranges[i]->values);
+		free(expected_ranges[i]);
+		free_packet(packets[i]);
+		free(packets[i]);
+	}
+
+	return TEST_SUCCESS;
+}
+
+static int
+test_single_port_ranges(void *arena, enum filter_sign sign) {
+	assert(sign == src || sign == dst);
+	const char *sign_name = filter_sign_to_string(sign);
+
+	LOG(INFO, "=== Test Single Port Ranges: %s ===", sign_name);
+
+	// Define single-port ranges (from == to)
+	struct test_port_range {
+		uint16_t from;
+		uint16_t to;
+	};
+
+	struct test_port_range ranges[] = {
+		{.from = 80, .to = 80},	    // HTTP
+		{.from = 443, .to = 443},   // HTTPS
+		{.from = 22, .to = 22},	    // SSH
+		{.from = 3306, .to = 3306}, // MySQL
+	};
+	const size_t ranges_count = sizeof(ranges) / sizeof(ranges[0]);
+
+	// Test ports
+	const uint16_t test_ports[] = {
+		80,   // Exact match rule 1
+		443,  // Exact match rule 2
+		22,   // Exact match rule 3
+		3306, // Exact match rule 4
+		81,   // One off from rule 1 - no match
+		442,  // One off from rule 2 - no match
+		21,   // One off from rule 3 - no match
+		3307, // One off from rule 4 - no match
+	};
+	const size_t test_ports_count =
+		sizeof(test_ports) / sizeof(test_ports[0]);
+
+	struct packet *packets[test_ports_count];
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
+	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		packets[i] = malloc(sizeof(struct packet));
+		int fill_result = fill_packet_net4(
+			packets[i],
+			sip,
+			dip,
+			test_ports[i],
+			test_ports[i],
+			IPPROTO_TCP,
+			0
+		);
+		TEST_ASSERT_EQUAL(
+			fill_result, 0, "failed to fill packet at index %zu", i
+		);
+	}
+
+	// Build rules
+	struct filter_rule rules[ranges_count];
+	struct filter_rule_builder builders[ranges_count];
+	for (size_t range_idx = 0; range_idx < ranges_count; ++range_idx) {
+		builder_init(&builders[range_idx]);
+		if (sign == src) {
+			builder_add_port_src_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		} else {
+			builder_add_port_dst_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		}
+		rules[range_idx] = build_rule(
+			&builders[range_idx],
+			(range_idx + 1) | ACTION_NON_TERMINATE
+		);
+	}
+
+	// Expected: first 4 match their respective rules, last 4 don't match
+	uint32_t expected_actions[][1] = {
+		{1 | ACTION_NON_TERMINATE},
+		{2 | ACTION_NON_TERMINATE},
+		{3 | ACTION_NON_TERMINATE},
+		{4 | ACTION_NON_TERMINATE},
+		{0},
+		{0},
+		{0},
+		{0},
+	};
+	uint32_t expected_counts[] = {1, 1, 1, 1, 0, 0, 0, 0};
+
+	struct value_range *expected_ranges[test_ports_count];
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		expected_ranges[i] = malloc(sizeof(struct value_range));
+		expected_ranges[i]->count = expected_counts[i];
+		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
+		if (expected_counts[i] > 0) {
+			expected_ranges[i]->values[0] = expected_actions[i][0];
+		}
+	}
+
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize block allocator");
+	block_allocator_put_arena(&alloc, arena, arena_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
+
+	struct filter filter;
+	if (sign == src) {
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, ranges_count, &mctx
+		);
+	} else {
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, ranges_count, &mctx
+		);
+	}
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
+
+	res = query_and_expect_actions(
+		&filter, sign, packets, test_ports_count, expected_ranges
+	);
+	TEST_ASSERT_SUCCESS(res, "some checks failed");
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		free(expected_ranges[i]->values);
+		free(expected_ranges[i]);
+		free_packet(packets[i]);
+		free(packets[i]);
+	}
+
+	return TEST_SUCCESS;
+}
+
+static int
+test_adjacent_ranges(void *arena, enum filter_sign sign) {
+	assert(sign == src || sign == dst);
+	const char *sign_name = filter_sign_to_string(sign);
+
+	LOG(INFO, "=== Test Adjacent Ranges: %s ===", sign_name);
+
+	// Define adjacent non-overlapping port ranges
+	// 1000-1999 and 2000-2999
+	struct test_port_range {
+		uint16_t from;
+		uint16_t to;
+	};
+
+	struct test_port_range ranges[] = {
+		{.from = 1000, .to = 1999},
+		{.from = 2000, .to = 2999},
+	};
+	const size_t ranges_count = sizeof(ranges) / sizeof(ranges[0]);
+
+	// Test ports at boundaries
+	const uint16_t test_ports[] = {
+		1000, // Start of first range
+		1999, // End of first range
+		2000, // Start of second range
+		2999, // End of second range
+		1500, // Middle of first range
+		2500, // Middle of second range
+	};
+	const size_t test_ports_count =
+		sizeof(test_ports) / sizeof(test_ports[0]);
+
+	struct packet *packets[test_ports_count];
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
+	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		packets[i] = malloc(sizeof(struct packet));
+		int fill_result = fill_packet_net4(
+			packets[i],
+			sip,
+			dip,
+			test_ports[i],
+			test_ports[i],
+			IPPROTO_TCP,
+			0
+		);
+		TEST_ASSERT_EQUAL(
+			fill_result, 0, "failed to fill packet at index %zu", i
+		);
+	}
+
+	// Build rules
+	struct filter_rule rules[ranges_count];
+	struct filter_rule_builder builders[ranges_count];
+	for (size_t range_idx = 0; range_idx < ranges_count; ++range_idx) {
+		builder_init(&builders[range_idx]);
+		if (sign == src) {
+			builder_add_port_src_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		} else {
+			builder_add_port_dst_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		}
+		rules[range_idx] = build_rule(
+			&builders[range_idx],
+			(range_idx + 1) | ACTION_NON_TERMINATE
+		);
+	}
+
+	// Expected: ports 0,1,4 match rule 1; ports 2,3,5 match rule 2
+	uint32_t expected_actions[][1] = {
+		{1 | ACTION_NON_TERMINATE}, // Port 1000
+		{1 | ACTION_NON_TERMINATE}, // Port 1999
+		{2 | ACTION_NON_TERMINATE}, // Port 2000
+		{2 | ACTION_NON_TERMINATE}, // Port 2999
+		{1 | ACTION_NON_TERMINATE}, // Port 1500
+		{2 | ACTION_NON_TERMINATE}, // Port 2500
+	};
+	uint32_t expected_counts[] = {1, 1, 1, 1, 1, 1};
+
+	struct value_range *expected_ranges[test_ports_count];
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		expected_ranges[i] = malloc(sizeof(struct value_range));
+		expected_ranges[i]->count = expected_counts[i];
+		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
+		expected_ranges[i]->values[0] = expected_actions[i][0];
+	}
+
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize block allocator");
+	block_allocator_put_arena(&alloc, arena, arena_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
+
+	struct filter filter;
+	if (sign == src) {
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, ranges_count, &mctx
+		);
+	} else {
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, ranges_count, &mctx
+		);
+	}
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
+
+	res = query_and_expect_actions(
+		&filter, sign, packets, test_ports_count, expected_ranges
+	);
+	TEST_ASSERT_SUCCESS(res, "some checks failed");
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		free(expected_ranges[i]->values);
+		free(expected_ranges[i]);
+		free_packet(packets[i]);
+		free(packets[i]);
+	}
+
+	return TEST_SUCCESS;
+}
+
+static int
+test_extreme_ports(void *arena, enum filter_sign sign) {
+	assert(sign == src || sign == dst);
+	const char *sign_name = filter_sign_to_string(sign);
+
+	LOG(INFO, "=== Test Extreme Ports: %s ===", sign_name);
+
+	// Test extreme port values (0, 65535, and ranges including them)
+	struct test_port_range {
+		uint16_t from;
+		uint16_t to;
+	};
+
+	struct test_port_range ranges[] = {
+		{.from = 0, .to = 100},	      // Includes port 0
+		{.from = 65400, .to = 65535}, // Includes port 65535
+		{.from = 0, .to = 65535},     // Full range
+	};
+	const size_t ranges_count = sizeof(ranges) / sizeof(ranges[0]);
+
+	// Test ports
+	const uint16_t test_ports[] = {
+		0,     // Minimum port - matches rules 1, 3
+		1,     // Just above min - matches rules 1, 3
+		100,   // End of first range - matches rules 1, 3
+		101,   // Just after first range - matches rule 3 only
+		65400, // Start of second range - matches rules 2, 3
+		65534, // Just before max - matches rules 2, 3
+		65535, // Maximum port - matches rules 2, 3
+		500,   // Middle port - matches rule 3 only
+	};
+	const size_t test_ports_count =
+		sizeof(test_ports) / sizeof(test_ports[0]);
+
+	struct packet *packets[test_ports_count];
+	uint8_t sip[NET4_LEN] = {0, 0, 0, 0};
+	uint8_t dip[NET4_LEN] = {0, 0, 0, 0};
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		packets[i] = malloc(sizeof(struct packet));
+		int fill_result = fill_packet_net4(
+			packets[i],
+			sip,
+			dip,
+			test_ports[i],
+			test_ports[i],
+			IPPROTO_TCP,
+			0
+		);
+		TEST_ASSERT_EQUAL(
+			fill_result, 0, "failed to fill packet at index %zu", i
+		);
+	}
+
+	// Build rules
+	struct filter_rule rules[ranges_count];
+	struct filter_rule_builder builders[ranges_count];
+	for (size_t range_idx = 0; range_idx < ranges_count; ++range_idx) {
+		builder_init(&builders[range_idx]);
+		if (sign == src) {
+			builder_add_port_src_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		} else {
+			builder_add_port_dst_range(
+				&builders[range_idx],
+				ranges[range_idx].from,
+				ranges[range_idx].to
+			);
+		}
+		rules[range_idx] = build_rule(
+			&builders[range_idx],
+			(range_idx + 1) | ACTION_NON_TERMINATE
+		);
+	}
+
+	// Expected matches
+	uint32_t expected_actions[][3] = {
+		{1 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
+		}, // Port 0: rules 1,3
+		{1 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
+		}, // Port 1: rules 1,3
+		{1 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
+		},				  // Port 100: rules 1,3
+		{3 | ACTION_NON_TERMINATE, 0, 0}, // Port 101: rule 3
+		{2 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
+		}, // Port 65400: rules 2,3
+		{2 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
+		}, // Port 65534: rules 2,3
+		{2 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
+		},				  // Port 65535: rules 2,3
+		{3 | ACTION_NON_TERMINATE, 0, 0}, // Port 500: rule 3
+	};
+	uint32_t expected_counts[] = {2, 2, 2, 1, 2, 2, 2, 1};
+
+	struct value_range *expected_ranges[test_ports_count];
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		expected_ranges[i] = malloc(sizeof(struct value_range));
+		expected_ranges[i]->count = expected_counts[i];
+		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 3);
+		for (size_t j = 0; j < expected_counts[i]; ++j) {
+			expected_ranges[i]->values[j] = expected_actions[i][j];
+		}
+	}
+
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize block allocator");
+	block_allocator_put_arena(&alloc, arena, arena_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
+
+	struct filter filter;
+	if (sign == src) {
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, ranges_count, &mctx
+		);
+	} else {
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, ranges_count, &mctx
+		);
+	}
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
+
+	res = query_and_expect_actions(
+		&filter, sign, packets, test_ports_count, expected_ranges
+	);
+	TEST_ASSERT_SUCCESS(res, "some checks failed");
+
+	for (size_t i = 0; i < test_ports_count; ++i) {
+		free(expected_ranges[i]->values);
+		free(expected_ranges[i]);
+		free_packet(packets[i]);
+		free(packets[i]);
+	}
+
+	return TEST_SUCCESS;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 int
@@ -728,6 +1486,79 @@ main() {
 			    stress_case->num_packets,
 			    stress_case->seed);
 		}
+	}
+
+	// Corner case tests
+	++tests;
+	if (test_no_match(arena, src) != 0) {
+		LOG(ERROR, "test_no_match (src) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_no_match(arena, dst) != 0) {
+		LOG(ERROR, "test_no_match (dst) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_overlapping_ranges(arena, src) != 0) {
+		LOG(ERROR, "test_overlapping_ranges (src) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_overlapping_ranges(arena, dst) != 0) {
+		LOG(ERROR, "test_overlapping_ranges (dst) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_boundary_conditions(arena, src) != 0) {
+		LOG(ERROR, "test_boundary_conditions (src) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_boundary_conditions(arena, dst) != 0) {
+		LOG(ERROR, "test_boundary_conditions (dst) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_single_port_ranges(arena, src) != 0) {
+		LOG(ERROR, "test_single_port_ranges (src) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_single_port_ranges(arena, dst) != 0) {
+		LOG(ERROR, "test_single_port_ranges (dst) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_adjacent_ranges(arena, src) != 0) {
+		LOG(ERROR, "test_adjacent_ranges (src) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_adjacent_ranges(arena, dst) != 0) {
+		LOG(ERROR, "test_adjacent_ranges (dst) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_extreme_ports(arena, src) != 0) {
+		LOG(ERROR, "test_extreme_ports (src) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_extreme_ports(arena, dst) != 0) {
+		LOG(ERROR, "test_extreme_ports (dst) failed");
+		++failed;
 	}
 
 	free(arena);

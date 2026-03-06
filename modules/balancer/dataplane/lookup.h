@@ -22,8 +22,8 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_QUERY_DECLARE(vs_lookup_ipv4, net4_fast_dst, port_dst, proto);
-FILTER_QUERY_DECLARE(vs_acl_ipv4, net4_fast_src, port_src);
+FILTER_QUERY_DECLARE(vs_lookup_ipv4, net4_fast_dst, port_fast_dst, proto);
+FILTER_QUERY_DECLARE(vs_acl_ipv4, net4_fast_src, port_fast_src);
 
 static inline uint32_t
 vs_v4_table_lookup(struct packet_handler *handler, struct packet *packet) {
@@ -45,8 +45,8 @@ vs_v4_table_lookup(struct packet_handler *handler, struct packet *packet) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_QUERY_DECLARE(vs_lookup_ipv6, net6_fast_dst, port_dst, proto);
-FILTER_QUERY_DECLARE(vs_acl_ipv6, net6_fast_src, port_src);
+FILTER_QUERY_DECLARE(vs_lookup_ipv6, net6_fast_dst, port_fast_dst, proto);
+FILTER_QUERY_DECLARE(vs_acl_ipv6, net6_fast_src, port_fast_src);
 
 static inline uint32_t
 vs_v6_table_lookup(struct packet_handler *handler, struct packet *packet) {

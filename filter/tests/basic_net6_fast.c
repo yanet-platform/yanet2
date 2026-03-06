@@ -1,5 +1,4 @@
 #include "common/memory.h"
-#include "common/memory_address.h"
 #include "common/memory_block.h"
 #include "common/network.h"
 #include "common/registry.h"
@@ -87,34 +86,10 @@ query_and_expect_actions(
 		break;
 	}
 
-	for (size_t packet_idx = 0; packet_idx < packets_count; ++packet_idx) {
-		struct value_range *range = ranges[packet_idx];
-		uint32_t *range_values = ADDR_OF(&range->values);
-
-		struct value_range *expected_range = expected[packet_idx];
-		uint32_t *expected_range_values = expected_range->values;
-
-		for (size_t expected_value_idx = 0;
-		     expected_value_idx < expected_range->count;
-		     ++expected_value_idx) {
-			int found = 0;
-			for (size_t got_idx = 0; got_idx < range->count;
-			     ++got_idx) {
-				if (expected_range_values[expected_value_idx] ==
-				    range_values[got_idx]) {
-					found = 1;
-					break;
-				}
-			}
-
-			TEST_ASSERT(
-				found,
-				"packet at idx %zu: not got expected action %u",
-				packet_idx,
-				expected_range_values[expected_value_idx]
-			);
-		}
-	}
+	TEST_ASSERT_SUCCESS(
+		compare_expected_ranges(ranges, expected, packets_count),
+		"got value ranges != expected"
+	);
 
 	free(ranges);
 
@@ -787,6 +762,876 @@ stress(void *arena,
 	return TEST_SUCCESS;
 }
 
+// Corner case tests
+
+static int
+test_no_match(void *arena, enum filter_sign sign) {
+	assert(sign == src || sign == dst);
+	const char *sign_name = filter_sign_to_string(sign);
+
+	LOG(INFO, "=== Test No Match: %s ===", sign_name);
+
+	// Define networks that won't match our test packets
+	struct test_net nets[] = {
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0},
+		 .prefix = 64}, // 2001:db8::/64
+		{.addr = {0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		 .prefix = 8}, // fd00::/8
+		{.addr = {0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		 .prefix = 10}, // fe80::/10
+	};
+	const size_t nets_count = sizeof(nets) / sizeof(nets[0]);
+
+	// Test packets that don't match any network
+	const uint8_t test_ips[][NET6_LEN] = {
+		{0x20, 0x01, 0x0d, 0xb7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+		}, // Different /64
+		{0x20, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+		}, // Different prefix
+		{0xfc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+		}, // Outside fd00::/8
+		{0xfe, 0xc0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+		}, // Outside fe80::/10
+		{0x26, 0x06, 0x47, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+		}, // Public IPv6
+	};
+	const size_t test_ips_count = sizeof(test_ips) / sizeof(test_ips[0]);
+
+	struct packet *packets[test_ips_count];
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		packets[i] = malloc(sizeof(struct packet));
+		int fill_result = fill_packet_net6(
+			packets[i],
+			test_ips[i],
+			test_ips[i],
+			0,
+			0,
+			IPPROTO_UDP,
+			0
+		);
+		TEST_ASSERT_EQUAL(
+			fill_result, 0, "failed to fill packet at index %zu", i
+		);
+	}
+
+	// Build rules
+	struct filter_rule rules[nets_count];
+	struct filter_rule_builder builders[nets_count];
+	for (size_t net_idx = 0; net_idx < nets_count; ++net_idx) {
+		builder_init(&builders[net_idx]);
+		uint8_t mask[NET6_LEN];
+		prefix_mask(mask, nets[net_idx].prefix);
+		struct net6 net;
+		memcpy(net.addr, nets[net_idx].addr, NET6_LEN);
+		memcpy(net.mask, mask, NET6_LEN);
+		if (sign == src) {
+			builder_add_net6_src(&builders[net_idx], net);
+		} else {
+			builder_add_net6_dst(&builders[net_idx], net);
+		}
+		rules[net_idx] = build_rule(
+			&builders[net_idx], (net_idx + 1) | ACTION_NON_TERMINATE
+		);
+	}
+
+	// Expected: no matches for any packet
+	struct value_range *expected_ranges[test_ips_count];
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		expected_ranges[i] = malloc(sizeof(struct value_range));
+		expected_ranges[i]->count = 0;
+		expected_ranges[i]->values = malloc(sizeof(uint32_t));
+	}
+
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize block allocator");
+	block_allocator_put_arena(&alloc, arena, arena_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
+
+	struct filter filter;
+	if (sign == src) {
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, nets_count, &mctx
+		);
+	} else {
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, nets_count, &mctx
+		);
+	}
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
+
+	res = query_and_expect_actions(
+		&filter, sign, packets, test_ips_count, expected_ranges
+	);
+	TEST_ASSERT_SUCCESS(res, "some checks failed");
+
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		free(expected_ranges[i]->values);
+		free(expected_ranges[i]);
+		free_packet(packets[i]);
+		free(packets[i]);
+	}
+
+	return TEST_SUCCESS;
+}
+
+static int
+test_overlapping_networks(void *arena, enum filter_sign sign) {
+	assert(sign == src || sign == dst);
+	const char *sign_name = filter_sign_to_string(sign);
+
+	LOG(INFO, "=== Test Overlapping Networks: %s ===", sign_name);
+
+	// Define nested/overlapping networks
+	// 2001:db8::/32 contains 2001:db8:1::/48 contains 2001:db8:1:1::/64
+	struct test_net nets[] = {
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0},
+		 .prefix = 32}, // Widest
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  1,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0},
+		 .prefix = 48}, // Middle
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  1,
+			  0,
+			  1,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0},
+		 .prefix = 64}, // Narrowest
+		{.addr = {0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		 .prefix = 8}, // Non-overlapping
+	};
+	const size_t nets_count = sizeof(nets) / sizeof(nets[0]);
+
+	// DEBUG: Print segment ranges for each network
+	LOG(INFO, "DEBUG: Analyzing network segment ranges:");
+	for (size_t i = 0; i < nets_count; ++i) {
+		uint8_t mask[NET6_LEN];
+		prefix_mask(mask, nets[i].prefix);
+
+		// Calculate high part (first 64 bits)
+		uint64_t addr_high = 0, mask_high = 0;
+		for (size_t j = 0; j < 8; ++j) {
+			addr_high |= ((uint64_t)nets[i].addr[j])
+				     << (56 - j * 8);
+			mask_high |= ((uint64_t)mask[j]) << (56 - j * 8);
+		}
+		uint64_t from_high = addr_high & mask_high;
+		uint64_t to_high = addr_high | ~mask_high;
+
+		// Calculate low part (last 64 bits)
+		uint64_t addr_low = 0, mask_low = 0;
+		for (size_t j = 0; j < 8; ++j) {
+			addr_low |= ((uint64_t)nets[i].addr[j + 8])
+				    << (56 - j * 8);
+			mask_low |= ((uint64_t)mask[j + 8]) << (56 - j * 8);
+		}
+		uint64_t from_low = addr_low & mask_low;
+		uint64_t to_low = addr_low | ~mask_low;
+
+		LOG(INFO,
+		    "  Net %zu (prefix=%zu): high=[0x%016lx, 0x%016lx], "
+		    "low=[0x%016lx, 0x%016lx]",
+		    i,
+		    nets[i].prefix,
+		    from_high,
+		    to_high,
+		    from_low,
+		    to_low);
+
+		// Check for potential overflow
+		if (to_high == UINT64_MAX) {
+			LOG(WARN,
+			    "    WARNING: to_high == UINT64_MAX, to_high+1 "
+			    "will overflow!");
+		}
+		if (to_low == UINT64_MAX) {
+			LOG(WARN,
+			    "    WARNING: to_low == UINT64_MAX, to_low+1 will "
+			    "overflow!");
+		}
+	}
+
+	// Test packets
+	const uint8_t test_ips[][NET6_LEN] = {
+		{0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 100
+		}, // Matches rules 1, 2, 3
+		{0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 100
+		}, // Matches rules 1, 2
+		{0x20, 0x01, 0x0d, 0xb8, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+		}, // Matches rule 1 only
+		{0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+		}, // Matches rule 4 only
+		{0x26, 0x06, 0x47, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+		}, // Matches nothing
+	};
+	const size_t test_ips_count = sizeof(test_ips) / sizeof(test_ips[0]);
+
+	struct packet *packets[test_ips_count];
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		packets[i] = malloc(sizeof(struct packet));
+		int fill_result = fill_packet_net6(
+			packets[i],
+			test_ips[i],
+			test_ips[i],
+			0,
+			0,
+			IPPROTO_UDP,
+			0
+		);
+		TEST_ASSERT_EQUAL(
+			fill_result, 0, "failed to fill packet at index %zu", i
+		);
+	}
+
+	// Build rules
+	struct filter_rule rules[nets_count];
+	struct filter_rule_builder builders[nets_count];
+	for (size_t net_idx = 0; net_idx < nets_count; ++net_idx) {
+		builder_init(&builders[net_idx]);
+		uint8_t mask[NET6_LEN];
+		prefix_mask(mask, nets[net_idx].prefix);
+		struct net6 net;
+		memcpy(net.addr, nets[net_idx].addr, NET6_LEN);
+		memcpy(net.mask, mask, NET6_LEN);
+		if (sign == src) {
+			builder_add_net6_src(&builders[net_idx], net);
+		} else {
+			builder_add_net6_dst(&builders[net_idx], net);
+		}
+		rules[net_idx] = build_rule(
+			&builders[net_idx], (net_idx + 1) | ACTION_NON_TERMINATE
+		);
+	}
+
+	// Expected matches
+	uint32_t expected_actions[][4] = {
+		{1 | ACTION_NON_TERMINATE,
+		 2 | ACTION_NON_TERMINATE,
+		 3 | ACTION_NON_TERMINATE,
+		 0}, // Packet 0: rules 1,2,3
+		{1 | ACTION_NON_TERMINATE, 2 | ACTION_NON_TERMINATE, 0, 0
+		},				     // Packet 1: rules 1,2
+		{1 | ACTION_NON_TERMINATE, 0, 0, 0}, // Packet 2: rule 1
+		{4 | ACTION_NON_TERMINATE, 0, 0, 0}, // Packet 3: rule 4
+		{0, 0, 0, 0},			     // Packet 4: no match
+	};
+	uint32_t expected_counts[] = {3, 2, 1, 1, 0};
+
+	struct value_range *expected_ranges[test_ips_count];
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		expected_ranges[i] = malloc(sizeof(struct value_range));
+		expected_ranges[i]->count = expected_counts[i];
+		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 4);
+		for (size_t j = 0; j < expected_counts[i]; ++j) {
+			expected_ranges[i]->values[j] = expected_actions[i][j];
+		}
+	}
+
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize block allocator");
+	block_allocator_put_arena(&alloc, arena, arena_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
+
+	struct filter filter;
+	if (sign == src) {
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, nets_count, &mctx
+		);
+	} else {
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, nets_count, &mctx
+		);
+	}
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
+
+	res = query_and_expect_actions(
+		&filter, sign, packets, test_ips_count, expected_ranges
+	);
+	TEST_ASSERT_SUCCESS(res, "some checks failed");
+
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		free(expected_ranges[i]->values);
+		free(expected_ranges[i]);
+		free_packet(packets[i]);
+		free(packets[i]);
+	}
+
+	return TEST_SUCCESS;
+}
+
+static int
+test_boundary_conditions(void *arena, enum filter_sign sign) {
+	assert(sign == src || sign == dst);
+	const char *sign_name = filter_sign_to_string(sign);
+
+	LOG(INFO, "=== Test Boundary Conditions: %s ===", sign_name);
+
+	// Network: 2001:db8::/64
+	struct test_net nets[] = {
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0},
+		 .prefix = 64},
+	};
+	const size_t nets_count = sizeof(nets) / sizeof(nets[0]);
+
+	// Test IPs at boundaries
+	const uint8_t test_ips[][NET6_LEN] = {
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+		}, // Exact start - should match
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+		}, // Just after start - should match
+		{0x20,
+		 0x01,
+		 0x0d,
+		 0xb8,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xfe}, // Just before end - should match
+		{0x20,
+		 0x01,
+		 0x0d,
+		 0xb8,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff}, // Exact end - should match
+		{0x20,
+		 0x01,
+		 0x0d,
+		 0xb7,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff}, // One before start - should NOT match
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0
+		}, // One after end - should NOT match
+	};
+	const size_t test_ips_count = sizeof(test_ips) / sizeof(test_ips[0]);
+
+	struct packet *packets[test_ips_count];
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		packets[i] = malloc(sizeof(struct packet));
+		int fill_result = fill_packet_net6(
+			packets[i],
+			test_ips[i],
+			test_ips[i],
+			0,
+			0,
+			IPPROTO_UDP,
+			0
+		);
+		TEST_ASSERT_EQUAL(
+			fill_result, 0, "failed to fill packet at index %zu", i
+		);
+	}
+
+	// Build rules
+	struct filter_rule rules[nets_count];
+	struct filter_rule_builder builders[nets_count];
+	for (size_t net_idx = 0; net_idx < nets_count; ++net_idx) {
+		builder_init(&builders[net_idx]);
+		uint8_t mask[NET6_LEN];
+		prefix_mask(mask, nets[net_idx].prefix);
+		struct net6 net;
+		memcpy(net.addr, nets[net_idx].addr, NET6_LEN);
+		memcpy(net.mask, mask, NET6_LEN);
+		if (sign == src) {
+			builder_add_net6_src(&builders[net_idx], net);
+		} else {
+			builder_add_net6_dst(&builders[net_idx], net);
+		}
+		rules[net_idx] = build_rule(
+			&builders[net_idx], (net_idx + 1) | ACTION_NON_TERMINATE
+		);
+	}
+
+	// Expected: first 4 match, last 2 don't
+	uint32_t expected_counts[] = {1, 1, 1, 1, 0, 0};
+	struct value_range *expected_ranges[test_ips_count];
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		expected_ranges[i] = malloc(sizeof(struct value_range));
+		expected_ranges[i]->count = expected_counts[i];
+		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
+		if (expected_counts[i] > 0) {
+			expected_ranges[i]->values[0] =
+				1 | ACTION_NON_TERMINATE;
+		}
+	}
+
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize block allocator");
+	block_allocator_put_arena(&alloc, arena, arena_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
+
+	struct filter filter;
+	if (sign == src) {
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, nets_count, &mctx
+		);
+	} else {
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, nets_count, &mctx
+		);
+	}
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
+
+	res = query_and_expect_actions(
+		&filter, sign, packets, test_ips_count, expected_ranges
+	);
+	TEST_ASSERT_SUCCESS(res, "some checks failed");
+
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		free(expected_ranges[i]->values);
+		free(expected_ranges[i]);
+		free_packet(packets[i]);
+		free(packets[i]);
+	}
+
+	return TEST_SUCCESS;
+}
+
+static int
+test_single_host_networks(void *arena, enum filter_sign sign) {
+	assert(sign == src || sign == dst);
+	const char *sign_name = filter_sign_to_string(sign);
+
+	LOG(INFO, "=== Test Single Host Networks (/128): %s ===", sign_name);
+
+	// Define /128 networks (single hosts)
+	struct test_net nets[] = {
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  10},
+		 .prefix = 128},
+		{.addr = {0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		 .prefix = 128},
+		{.addr =
+			 {0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100
+			 },
+		 .prefix = 128},
+	};
+	const size_t nets_count = sizeof(nets) / sizeof(nets[0]);
+
+	// Test packets
+	const uint8_t test_ips[][NET6_LEN] = {
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10
+		}, // Exact match rule 1
+		{0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+		}, // Exact match rule 2
+		{0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100
+		}, // Exact match rule 3
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11
+		}, // One off from rule 1 - no match
+		{0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2
+		}, // One off from rule 2 - no match
+		{0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 99
+		}, // One off from rule 3 - no match
+	};
+	const size_t test_ips_count = sizeof(test_ips) / sizeof(test_ips[0]);
+
+	struct packet *packets[test_ips_count];
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		packets[i] = malloc(sizeof(struct packet));
+		int fill_result = fill_packet_net6(
+			packets[i],
+			test_ips[i],
+			test_ips[i],
+			0,
+			0,
+			IPPROTO_UDP,
+			0
+		);
+		TEST_ASSERT_EQUAL(
+			fill_result, 0, "failed to fill packet at index %zu", i
+		);
+	}
+
+	// Build rules
+	struct filter_rule rules[nets_count];
+	struct filter_rule_builder builders[nets_count];
+	for (size_t net_idx = 0; net_idx < nets_count; ++net_idx) {
+		builder_init(&builders[net_idx]);
+		uint8_t mask[NET6_LEN];
+		prefix_mask(mask, nets[net_idx].prefix);
+		struct net6 net;
+		memcpy(net.addr, nets[net_idx].addr, NET6_LEN);
+		memcpy(net.mask, mask, NET6_LEN);
+		if (sign == src) {
+			builder_add_net6_src(&builders[net_idx], net);
+		} else {
+			builder_add_net6_dst(&builders[net_idx], net);
+		}
+		rules[net_idx] = build_rule(
+			&builders[net_idx], (net_idx + 1) | ACTION_NON_TERMINATE
+		);
+	}
+
+	// Expected: first 3 match their respective rules, last 3 don't match
+	uint32_t expected_actions[][1] = {
+		{1 | ACTION_NON_TERMINATE},
+		{2 | ACTION_NON_TERMINATE},
+		{3 | ACTION_NON_TERMINATE},
+		{0},
+		{0},
+		{0},
+	};
+	uint32_t expected_counts[] = {1, 1, 1, 0, 0, 0};
+
+	struct value_range *expected_ranges[test_ips_count];
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		expected_ranges[i] = malloc(sizeof(struct value_range));
+		expected_ranges[i]->count = expected_counts[i];
+		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
+		if (expected_counts[i] > 0) {
+			expected_ranges[i]->values[0] = expected_actions[i][0];
+		}
+	}
+
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize block allocator");
+	block_allocator_put_arena(&alloc, arena, arena_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
+
+	struct filter filter;
+	if (sign == src) {
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, nets_count, &mctx
+		);
+	} else {
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, nets_count, &mctx
+		);
+	}
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
+
+	res = query_and_expect_actions(
+		&filter, sign, packets, test_ips_count, expected_ranges
+	);
+	TEST_ASSERT_SUCCESS(res, "some checks failed");
+
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		free(expected_ranges[i]->values);
+		free(expected_ranges[i]);
+		free_packet(packets[i]);
+		free(packets[i]);
+	}
+
+	return TEST_SUCCESS;
+}
+
+static int
+test_adjacent_networks(void *arena, enum filter_sign sign) {
+	assert(sign == src || sign == dst);
+	const char *sign_name = filter_sign_to_string(sign);
+
+	LOG(INFO, "=== Test Adjacent Networks: %s ===", sign_name);
+
+	// Define adjacent non-overlapping networks
+	// 2001:db8::/65 and 2001:db8:0:0:8000::/65
+	struct test_net nets[] = {
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0},
+		 .prefix = 65},
+		{.addr =
+			 {0x20,
+			  0x01,
+			  0x0d,
+			  0xb8,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0x80,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0,
+			  0},
+		 .prefix = 65},
+	};
+	const size_t nets_count = sizeof(nets) / sizeof(nets[0]);
+
+	// Test packets at boundaries
+	const uint8_t test_ips[][NET6_LEN] = {
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+		}, // Start of first network
+		{0x20,
+		 0x01,
+		 0x0d,
+		 0xb8,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0x7f,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff}, // End of first network
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0x80, 0, 0, 0, 0, 0, 0, 0
+		}, // Start of second network
+		{0x20,
+		 0x01,
+		 0x0d,
+		 0xb8,
+		 0,
+		 0,
+		 0,
+		 0,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff,
+		 0xff}, // End of second network
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0x40, 0, 0, 0, 0, 0, 0, 0
+		}, // Middle of first network
+		{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0xc0, 0, 0, 0, 0, 0, 0, 0
+		}, // Middle of second network
+	};
+	const size_t test_ips_count = sizeof(test_ips) / sizeof(test_ips[0]);
+
+	struct packet *packets[test_ips_count];
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		packets[i] = malloc(sizeof(struct packet));
+		int fill_result = fill_packet_net6(
+			packets[i],
+			test_ips[i],
+			test_ips[i],
+			0,
+			0,
+			IPPROTO_UDP,
+			0
+		);
+		TEST_ASSERT_EQUAL(
+			fill_result, 0, "failed to fill packet at index %zu", i
+		);
+	}
+
+	// Build rules
+	struct filter_rule rules[nets_count];
+	struct filter_rule_builder builders[nets_count];
+	for (size_t net_idx = 0; net_idx < nets_count; ++net_idx) {
+		builder_init(&builders[net_idx]);
+		uint8_t mask[NET6_LEN];
+		prefix_mask(mask, nets[net_idx].prefix);
+		struct net6 net;
+		memcpy(net.addr, nets[net_idx].addr, NET6_LEN);
+		memcpy(net.mask, mask, NET6_LEN);
+		if (sign == src) {
+			builder_add_net6_src(&builders[net_idx], net);
+		} else {
+			builder_add_net6_dst(&builders[net_idx], net);
+		}
+		rules[net_idx] = build_rule(
+			&builders[net_idx], (net_idx + 1) | ACTION_NON_TERMINATE
+		);
+	}
+
+	// Expected: packets 0,1,4 match rule 1; packets 2,3,5 match rule 2
+	uint32_t expected_actions[][1] = {
+		{1 | ACTION_NON_TERMINATE}, // Packet 0
+		{1 | ACTION_NON_TERMINATE}, // Packet 1
+		{2 | ACTION_NON_TERMINATE}, // Packet 2
+		{2 | ACTION_NON_TERMINATE}, // Packet 3
+		{1 | ACTION_NON_TERMINATE}, // Packet 4
+		{2 | ACTION_NON_TERMINATE}, // Packet 5
+	};
+	uint32_t expected_counts[] = {1, 1, 1, 1, 1, 1};
+
+	struct value_range *expected_ranges[test_ips_count];
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		expected_ranges[i] = malloc(sizeof(struct value_range));
+		expected_ranges[i]->count = expected_counts[i];
+		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
+		expected_ranges[i]->values[0] = expected_actions[i][0];
+	}
+
+	struct block_allocator alloc;
+	int res = block_allocator_init(&alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize block allocator");
+	block_allocator_put_arena(&alloc, arena, arena_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
+
+	struct filter filter;
+	if (sign == src) {
+		res = FILTER_INIT(
+			&filter, sign_fast_src, rules, nets_count, &mctx
+		);
+	} else {
+		res = FILTER_INIT(
+			&filter, sign_fast_dst, rules, nets_count, &mctx
+		);
+	}
+	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
+
+	res = query_and_expect_actions(
+		&filter, sign, packets, test_ips_count, expected_ranges
+	);
+	TEST_ASSERT_SUCCESS(res, "some checks failed");
+
+	for (size_t i = 0; i < test_ips_count; ++i) {
+		free(expected_ranges[i]->values);
+		free(expected_ranges[i]);
+		free_packet(packets[i]);
+		free(packets[i]);
+	}
+
+	return TEST_SUCCESS;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 int
@@ -871,7 +1716,66 @@ main() {
 		}
 	}
 
-	(void)stress;
+	// Corner case tests
+	++tests;
+	if (test_no_match(arena, src) != 0) {
+		LOG(ERROR, "test_no_match (src) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_no_match(arena, dst) != 0) {
+		LOG(ERROR, "test_no_match (dst) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_overlapping_networks(arena, src) != 0) {
+		LOG(ERROR, "test_overlapping_networks (src) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_overlapping_networks(arena, dst) != 0) {
+		LOG(ERROR, "test_overlapping_networks (dst) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_boundary_conditions(arena, src) != 0) {
+		LOG(ERROR, "test_boundary_conditions (src) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_boundary_conditions(arena, dst) != 0) {
+		LOG(ERROR, "test_boundary_conditions (dst) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_single_host_networks(arena, src) != 0) {
+		LOG(ERROR, "test_single_host_networks (src) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_single_host_networks(arena, dst) != 0) {
+		LOG(ERROR, "test_single_host_networks (dst) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_adjacent_networks(arena, src) != 0) {
+		LOG(ERROR, "test_adjacent_networks (src) failed");
+		++failed;
+	}
+
+	++tests;
+	if (test_adjacent_networks(arena, dst) != 0) {
+		LOG(ERROR, "test_adjacent_networks (dst) failed");
+		++failed;
+	}
 
 	free(arena);
 

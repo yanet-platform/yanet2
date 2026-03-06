@@ -1278,6 +1278,227 @@ test_btree_u64_various_n(size_t n) {
 	LOG(INFO, "✓ btree_u64 n=%zu test passed", n);
 	return TEST_SUCCESS;
 }
+////////////////////////////////////////////////////////////////////////////////
+// Test: Batch upper_bounds with uint32_t
+////////////////////////////////////////////////////////////////////////////////
+
+static int
+test_btree_u32_upper_bounds_batch() {
+	LOG(INFO, "Test: btree_u32_upper_bounds batch");
+
+	struct block_allocator ba;
+	struct memory_context mctx;
+	void *raw_mem = NULL;
+	const size_t arena_size = 1 << 26; // 64 MiB
+
+	TEST_ASSERT(
+		setup_allocator(&ba, &mctx, &raw_mem, arena_size) ==
+			TEST_SUCCESS,
+		"setup_allocator failed"
+	);
+
+	uint32_t data[] = {1, 5, 10, 15, 20, 25, 30, 35, 40};
+	size_t n = sizeof(data) / sizeof(data[0]);
+
+	struct btree_u32 tree;
+	int ret = btree_u32_init(&tree, data, n, &mctx);
+	TEST_ASSERT_EQUAL(ret, 0, "btree_u32 initialization failed");
+
+	// Test batch search with multiple values
+	uint32_t search_values[] = {1, 10, 15, 27, 40, 100};
+	uint32_t results[6];
+	size_t count = btree_u32_upper_bounds(&tree, search_values, 6, results);
+	TEST_ASSERT_EQUAL(count, 6, "upper_bounds should process 6 values");
+
+	// Verify results
+	TEST_ASSERT_EQUAL(results[0], 1, "upper_bound(1) should return 1");
+	TEST_ASSERT_EQUAL(results[1], 3, "upper_bound(10) should return 3");
+	TEST_ASSERT_EQUAL(results[2], 4, "upper_bound(15) should return 4");
+	TEST_ASSERT_EQUAL(results[3], 6, "upper_bound(27) should return 6");
+	TEST_ASSERT_EQUAL(results[4], n, "upper_bound(40) should return n");
+	TEST_ASSERT_EQUAL(results[5], n, "upper_bound(100) should return n");
+
+	// Test with single value
+	uint32_t single_value = 20;
+	uint32_t single_result;
+	count = btree_u32_upper_bounds(&tree, &single_value, 1, &single_result);
+	TEST_ASSERT_EQUAL(count, 1, "upper_bounds should process 1 value");
+	TEST_ASSERT_EQUAL(single_result, 5, "upper_bound(20) should return 5");
+
+	btree_u32_free(&tree);
+	free(raw_mem);
+	LOG(INFO, "✓ btree_u32_upper_bounds batch test passed");
+	return TEST_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Test: Batch upper_bounds with uint64_t
+////////////////////////////////////////////////////////////////////////////////
+
+static int
+test_btree_u64_upper_bounds_batch() {
+	LOG(INFO, "Test: btree_u64_upper_bounds batch");
+
+	struct block_allocator ba;
+	struct memory_context mctx;
+	void *raw_mem = NULL;
+	const size_t arena_size = 1 << 26; // 64 MiB
+
+	TEST_ASSERT(
+		setup_allocator(&ba, &mctx, &raw_mem, arena_size) ==
+			TEST_SUCCESS,
+		"setup_allocator failed"
+	);
+
+	uint64_t data[] = {1, 5, 10, 15, 20, 25, 30, 35, 40};
+	size_t n = sizeof(data) / sizeof(data[0]);
+
+	struct btree_u64 tree;
+	int ret = btree_u64_init(&tree, data, n, &mctx);
+	TEST_ASSERT_EQUAL(ret, 0, "btree_u64 initialization failed");
+
+	// Test batch search with multiple values
+	uint64_t search_values[] = {1, 10, 15, 27, 40, 100};
+	uint32_t results[6];
+	size_t count = btree_u64_upper_bounds(&tree, search_values, 6, results);
+	TEST_ASSERT_EQUAL(count, 6, "upper_bounds should process 6 values");
+
+	// Verify results
+	TEST_ASSERT_EQUAL(results[0], 1, "upper_bound(1) should return 1");
+	TEST_ASSERT_EQUAL(results[1], 3, "upper_bound(10) should return 3");
+	TEST_ASSERT_EQUAL(results[2], 4, "upper_bound(15) should return 4");
+	TEST_ASSERT_EQUAL(results[3], 6, "upper_bound(27) should return 6");
+	TEST_ASSERT_EQUAL(results[4], n, "upper_bound(40) should return n");
+	TEST_ASSERT_EQUAL(results[5], n, "upper_bound(100) should return n");
+
+	// Test with single value
+	uint64_t single_value = 20;
+	uint32_t single_result;
+	count = btree_u64_upper_bounds(&tree, &single_value, 1, &single_result);
+	TEST_ASSERT_EQUAL(count, 1, "upper_bounds should process 1 value");
+	TEST_ASSERT_EQUAL(single_result, 5, "upper_bound(20) should return 5");
+
+	btree_u64_free(&tree);
+	free(raw_mem);
+	LOG(INFO, "✓ btree_u64_upper_bounds batch test passed");
+	return TEST_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Test: Batch upper_bounds with large batch (uint32_t)
+////////////////////////////////////////////////////////////////////////////////
+
+static int
+test_btree_u32_upper_bounds_large_batch() {
+	LOG(INFO, "Test: btree_u32_upper_bounds large batch");
+
+	struct block_allocator ba;
+	struct memory_context mctx;
+	void *raw_mem = NULL;
+	const size_t arena_size = 1 << 26; // 64 MiB
+
+	TEST_ASSERT(
+		setup_allocator(&ba, &mctx, &raw_mem, arena_size) ==
+			TEST_SUCCESS,
+		"setup_allocator failed"
+	);
+
+	const size_t n = 100;
+	uint32_t *data = malloc(n * sizeof(uint32_t));
+	TEST_ASSERT_NOT_NULL(data, "failed to allocate test data");
+
+	// Create sorted array: 0, 10, 20, 30, ...
+	for (size_t i = 0; i < n; i++) {
+		data[i] = i * 10;
+	}
+
+	struct btree_u32 tree;
+	int ret = btree_u32_init(&tree, data, n, &mctx);
+	TEST_ASSERT_EQUAL(ret, 0, "btree_u32 initialization failed");
+
+	// Test with 32 values (max batch size)
+	uint32_t search_values[32];
+	uint32_t results[32];
+	for (size_t i = 0; i < 32; i++) {
+		search_values[i] = i * 30 + 5; // 5, 35, 65, 95, ...
+	}
+
+	size_t count =
+		btree_u32_upper_bounds(&tree, search_values, 32, results);
+	TEST_ASSERT_EQUAL(count, 32, "upper_bounds should process 32 values");
+
+	// Verify some results
+	TEST_ASSERT_EQUAL(
+		results[0], 1, "upper_bound(5) should return 1 (element 10)"
+	);
+	TEST_ASSERT_EQUAL(
+		results[1], 4, "upper_bound(35) should return 4 (element 40)"
+	);
+
+	btree_u32_free(&tree);
+	free(data);
+	free(raw_mem);
+	LOG(INFO, "✓ btree_u32_upper_bounds large batch test passed");
+	return TEST_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Test: Batch upper_bounds with large batch (uint64_t)
+////////////////////////////////////////////////////////////////////////////////
+
+static int
+test_btree_u64_upper_bounds_large_batch() {
+	LOG(INFO, "Test: btree_u64_upper_bounds large batch");
+
+	struct block_allocator ba;
+	struct memory_context mctx;
+	void *raw_mem = NULL;
+	const size_t arena_size = 1 << 26; // 64 MiB
+
+	TEST_ASSERT(
+		setup_allocator(&ba, &mctx, &raw_mem, arena_size) ==
+			TEST_SUCCESS,
+		"setup_allocator failed"
+	);
+
+	const size_t n = 100;
+	uint64_t *data = malloc(n * sizeof(uint64_t));
+	TEST_ASSERT_NOT_NULL(data, "failed to allocate test data");
+
+	// Create sorted array: 0, 10, 20, 30, ...
+	for (size_t i = 0; i < n; i++) {
+		data[i] = i * 10;
+	}
+
+	struct btree_u64 tree;
+	int ret = btree_u64_init(&tree, data, n, &mctx);
+	TEST_ASSERT_EQUAL(ret, 0, "btree_u64 initialization failed");
+
+	// Test with 32 values (max batch size)
+	uint64_t search_values[32];
+	uint32_t results[32];
+	for (size_t i = 0; i < 32; i++) {
+		search_values[i] = i * 30 + 5; // 5, 35, 65, 95, ...
+	}
+
+	size_t count =
+		btree_u64_upper_bounds(&tree, search_values, 32, results);
+	TEST_ASSERT_EQUAL(count, 32, "upper_bounds should process 32 values");
+
+	// Verify some results
+	TEST_ASSERT_EQUAL(
+		results[0], 1, "upper_bound(5) should return 1 (element 10)"
+	);
+	TEST_ASSERT_EQUAL(
+		results[1], 4, "upper_bound(35) should return 4 (element 40)"
+	);
+
+	btree_u64_free(&tree);
+	free(data);
+	free(raw_mem);
+	LOG(INFO, "✓ btree_u64_upper_bounds large batch test passed");
+	return TEST_SUCCESS;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Main test runner
@@ -1312,6 +1533,10 @@ main() {
 		failed++;
 	if (test_btree_u32_power_of_2_sizes() != TEST_SUCCESS)
 		failed++;
+	if (test_btree_u32_upper_bounds_batch() != TEST_SUCCESS)
+		failed++;
+	if (test_btree_u32_upper_bounds_large_batch() != TEST_SUCCESS)
+		failed++;
 
 	// Run uint64_t tests
 	if (test_btree_u64_init_free() != TEST_SUCCESS)
@@ -1335,6 +1560,10 @@ main() {
 	if (test_btree_u64_boundary_values() != TEST_SUCCESS)
 		failed++;
 	if (test_btree_u64_power_of_2_sizes() != TEST_SUCCESS)
+		failed++;
+	if (test_btree_u64_upper_bounds_batch() != TEST_SUCCESS)
+		failed++;
+	if (test_btree_u64_upper_bounds_large_batch() != TEST_SUCCESS)
 		failed++;
 
 	// Run various size tests
