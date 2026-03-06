@@ -47,57 +47,9 @@
 /* Project headers */
 #include "common.h"
 #include "dataplane/module/module.h"
+#include "dataplane/packet/icmp.h"
+#include "dataplane/packet/packet.h"
 #include "modules/nat64/dataplane/nat64dp.h"
-
-/*
- * Packed ICMPv6 header for safe unaligned mbuf access.
- * Based on system struct icmp6_hdr but with __rte_packed attribute.
- * This prevents UBSAN alignment warnings when accessing ICMPv6 headers
- * at arbitrary offsets in mbuf data.
- */
-struct nat64_icmp6_hdr {
-	uint8_t icmp6_type;
-	uint8_t icmp6_code;
-	rte_be16_t icmp6_cksum;
-	union {
-		rte_be32_t icmp6_un_data32[1];
-		rte_be16_t icmp6_un_data16[2];
-		uint8_t icmp6_un_data8[4];
-	} icmp6_dataun;
-} __rte_packed;
-
-/* Convenience macros matching system icmp6_hdr naming */
-#define nat64_icmp6_pptr icmp6_dataun.icmp6_un_data32[0]
-#define nat64_icmp6_mtu icmp6_dataun.icmp6_un_data32[0]
-#define nat64_icmp6_id icmp6_dataun.icmp6_un_data16[0]
-#define nat64_icmp6_seq icmp6_dataun.icmp6_un_data16[1]
-
-/*
- * Packed ICMPv4 header with full union support.
- * Based on system struct icmp but with __rte_packed attribute.
- */
-struct nat64_icmp_hdr {
-	uint8_t icmp_type;
-	uint8_t icmp_code;
-	rte_be16_t icmp_cksum;
-	union {
-		uint8_t ih_pptr;
-		struct {
-			rte_be16_t ipm_void;
-			rte_be16_t ipm_nextmtu;
-		} ih_pmtu;
-		struct {
-			rte_be16_t icd_id;
-			rte_be16_t icd_seq;
-		} ih_idseq;
-		rte_be32_t ih_void;
-	} icmp_hun;
-} __rte_packed;
-
-#define nat64_icmp_pptr icmp_hun.ih_pptr
-#define nat64_icmp_nextmtu icmp_hun.ih_pmtu.ipm_nextmtu
-#define nat64_icmp_id icmp_hun.ih_idseq.icd_id
-#define nat64_icmp_seq icmp_hun.ih_idseq.icd_seq
 
 /**
  * @def RTE_LOGTYPE_NAT64
@@ -359,8 +311,8 @@ icmp_v6_to_v4(
 		return -1;
 	}
 
-	struct nat64_icmp6_hdr *icmp_header = rte_pktmbuf_mtod_offset(
-		mbuf, struct nat64_icmp6_hdr *, packet->transport_header.offset
+	struct yanet_icmp6_hdr *icmp_header = rte_pktmbuf_mtod_offset(
+		mbuf, struct yanet_icmp6_hdr *, packet->transport_header.offset
 	);
 
 	if (!icmp_header) {
@@ -414,7 +366,7 @@ icmp_v6_to_v4(
 		code = ICMP_FRAG_NEEDED;
 
 		// MTU adjustment according to RFC7915 section 5.2
-		uint32_t mtu = rte_be_to_cpu_32(icmp_header->nat64_icmp6_mtu);
+		uint32_t mtu = rte_be_to_cpu_32(icmp_header->yanet_icmp6_mtu);
 		LOG_DBG(NAT64, "Original ICMPv6 MTU: %u\n", mtu);
 
 		// RFC7915 Section 5.2: Handle MTU adjustment for Packet Too Big
@@ -467,9 +419,9 @@ icmp_v6_to_v4(
 		LOG_DBG(NAT64, "Adjusted ICMPv4 MTU: %u\n", mtu);
 
 		// Store the adjusted MTU in the ICMPv4 header
-		struct nat64_icmp_hdr *icmp_hdr =
-			(struct nat64_icmp_hdr *)icmp_header;
-		icmp_hdr->nat64_icmp_nextmtu = rte_cpu_to_be_16(mtu);
+		struct yanet_icmp_hdr *icmp_hdr =
+			(struct yanet_icmp_hdr *)icmp_header;
+		icmp_hdr->yanet_icmp_nextmtu = rte_cpu_to_be_16(mtu);
 		break;
 
 	case ICMP6_TIME_EXCEEDED:
@@ -487,7 +439,7 @@ icmp_v6_to_v4(
 			// RFC7915 Figure 6: Pointer translation from IPv6 to
 			// IPv4
 			uint32_t ptr =
-				rte_be_to_cpu_32(icmp_header->nat64_icmp6_pptr);
+				rte_be_to_cpu_32(icmp_header->yanet_icmp6_pptr);
 
 			LOG_DBG(NAT64,
 				"Translating ICMPv6 Parameter Problem pointer: "
@@ -586,7 +538,7 @@ icmp_v6_to_v4(
 				"Translated Parameter Problem pointer to IPv4 "
 				"offset: %u\n",
 				ptr);
-			icmp_header->nat64_icmp6_pptr = rte_cpu_to_be_32(
+			icmp_header->yanet_icmp6_pptr = rte_cpu_to_be_32(
 				ptr << 24
 			); // set first byte to ptr and zeroed other bytes
 			   // (reserved 6-8). TODO: support RFC4884.
@@ -672,7 +624,7 @@ icmp_v6_to_v4(
 
 		// Get offset to embedded packet
 		uint16_t embedded_offset = packet->transport_header.offset +
-					   sizeof(struct nat64_icmp6_hdr);
+					   sizeof(struct yanet_icmp6_hdr);
 
 		// RFC7915: Validate minimum length requirements
 		uint16_t remaining_len =
@@ -703,7 +655,7 @@ icmp_v6_to_v4(
 		uint16_t embedded_total_len =
 			rte_be_to_cpu_16(new_ipv4_header->total_length) -
 			rte_ipv4_hdr_len(new_ipv4_header) -
-			sizeof(struct nat64_icmp6_hdr);
+			sizeof(struct yanet_icmp6_hdr);
 
 		if (remaining_len < embedded_total_len) {
 			LOG_DBG(NAT64,
@@ -716,10 +668,10 @@ icmp_v6_to_v4(
 
 		// RFC7915: Check for nested ICMP errors (not allowed)
 		if (ipv6_payload_header->proto == IPPROTO_ICMPV6) {
-			struct nat64_icmp6_hdr *embedded_icmp =
+			struct yanet_icmp6_hdr *embedded_icmp =
 				rte_pktmbuf_mtod_offset(
 					mbuf,
-					struct nat64_icmp6_hdr *,
+					struct yanet_icmp6_hdr *,
 					embedded_offset +
 						sizeof(struct rte_ipv6_hdr)
 				);
@@ -798,12 +750,12 @@ icmp_v6_to_v4(
 				return -1;
 			}
 			// Skip this extension header
-			struct ipv6_ext_2byte *ext_hdr =
+			struct yanet_ipv6_ext_2byte *ext_hdr =
 				rte_pktmbuf_mtod_offset(
 					mbuf,
-					struct ipv6_ext_2byte *,
+					struct yanet_ipv6_ext_2byte *,
 					packet->transport_header.offset +
-						sizeof(struct nat64_icmp6_hdr) +
+						sizeof(struct yanet_icmp6_hdr) +
 						offset
 				);
 
@@ -815,8 +767,9 @@ icmp_v6_to_v4(
 				return -1;
 			}
 
-			next_header = ext_hdr->next_type;
-			uint16_t new_offset = offset + (ext_hdr->size + 1) * 8;
+			next_header = ext_hdr->next_header;
+			uint16_t new_offset =
+				offset + (ext_hdr->extension_length + 1) * 8;
 			if (new_offset >= remaining_len) {
 				RTE_LOG(ERR,
 					NAT64,
@@ -830,12 +783,12 @@ icmp_v6_to_v4(
 		if (next_header == IPPROTO_FRAGMENT) {
 			is_fragmented = 1;
 			// Skip the fragment header
-			struct ipv6_ext_fragment *frag_hdr =
+			struct yanet_ipv6_ext_fragment *frag_hdr =
 				rte_pktmbuf_mtod_offset(
 					mbuf,
-					struct ipv6_ext_fragment *,
+					struct yanet_ipv6_ext_fragment *,
 					packet->transport_header.offset +
-						sizeof(struct nat64_icmp6_hdr) +
+						sizeof(struct yanet_icmp6_hdr) +
 						offset
 				);
 
@@ -846,8 +799,8 @@ icmp_v6_to_v4(
 				return -1;
 			}
 
-			next_header = frag_hdr->next_type;
-			offset += sizeof(struct ipv6_ext_fragment);
+			next_header = frag_hdr->next_header;
+			offset += sizeof(struct yanet_ipv6_ext_fragment);
 		}
 		// Calculate the delta for header size difference
 		int16_t delta = offset - sizeof(struct rte_ipv4_hdr);
@@ -867,7 +820,7 @@ icmp_v6_to_v4(
 				mbuf,
 				struct rte_ipv4_hdr *,
 				packet->transport_header.offset +
-					sizeof(struct nat64_icmp6_hdr) + delta
+					sizeof(struct yanet_icmp6_hdr) + delta
 			);
 
 		if (!new_ipv4_payload_header) {
@@ -897,12 +850,12 @@ icmp_v6_to_v4(
 
 		// Set identification, flags, and fragment offset
 		if (is_fragmented) {
-			struct ipv6_ext_fragment *frag_hdr =
+			struct yanet_ipv6_ext_fragment *frag_hdr =
 				rte_pktmbuf_mtod_offset(
 					mbuf,
-					struct ipv6_ext_fragment *,
+					struct yanet_ipv6_ext_fragment *,
 					packet->transport_header.offset +
-						sizeof(struct nat64_icmp6_hdr) +
+						sizeof(struct yanet_icmp6_hdr) +
 						sizeof(struct rte_ipv6_hdr)
 				);
 
@@ -949,17 +902,17 @@ icmp_v6_to_v4(
 		      RTE_BE16(RTE_IPV4_HDR_OFFSET_MASK)) == 0)) {
 			uint16_t transport_offset =
 				packet->transport_header.offset +
-				sizeof(struct nat64_icmp6_hdr) +
+				sizeof(struct yanet_icmp6_hdr) +
 				sizeof(struct rte_ipv4_hdr) + delta;
 
 			switch (new_ipv4_payload_header->next_proto_id) {
 			case IPPROTO_ICMPV6: {
 				// Embedded ICMPv6 header needs to be translated
 				// to ICMPv4
-				struct nat64_icmp6_hdr *embedded_icmp6 =
+				struct yanet_icmp6_hdr *embedded_icmp6 =
 					rte_pktmbuf_mtod_offset(
 						mbuf,
-						struct nat64_icmp6_hdr *,
+						struct yanet_icmp6_hdr *,
 						transport_offset
 					);
 
@@ -999,8 +952,8 @@ icmp_v6_to_v4(
 					IPPROTO_ICMP;
 
 				// Recalculate the ICMP checksum
-				struct nat64_icmp_hdr *embedded_icmp4 =
-					(struct nat64_icmp_hdr *)embedded_icmp6;
+				struct yanet_icmp_hdr *embedded_icmp4 =
+					(struct yanet_icmp_hdr *)embedded_icmp6;
 
 				// Validate ICMP payload length
 				uint16_t available_payload_len =
@@ -1135,19 +1088,19 @@ icmp_v6_to_v4(
 			mbuf,
 			char *,
 			packet->transport_header.offset +
-				sizeof(struct nat64_icmp6_hdr) + delta
+				sizeof(struct yanet_icmp6_hdr) + delta
 		);
 
 		char *dst = rte_pktmbuf_mtod_offset(
 			mbuf,
 			char *,
 			packet->transport_header.offset +
-				sizeof(struct nat64_icmp6_hdr)
+				sizeof(struct yanet_icmp6_hdr)
 		);
 
 		ssize_t len = rte_pktmbuf_data_len(mbuf) -
 			      (packet->transport_header.offset +
-			       sizeof(struct nat64_icmp6_hdr) + delta);
+			       sizeof(struct yanet_icmp6_hdr) + delta);
 
 		if (len < 0) {
 			RTE_LOG(ERR,
@@ -1169,7 +1122,7 @@ icmp_v6_to_v4(
 		);
 	}
 	// RFC7915: Calculate ICMPv4 checksum
-	struct nat64_icmp_hdr *icmp_hdr = (struct nat64_icmp_hdr *)icmp_header;
+	struct yanet_icmp_hdr *icmp_hdr = (struct yanet_icmp_hdr *)icmp_header;
 	icmp_hdr->icmp_cksum = 0;
 
 	// Get the ICMP message length from IPv4 header
@@ -1472,9 +1425,9 @@ process_ipv6_extension_headers(
 		case IPPROTO_HOPOPTS:
 		case IPPROTO_DSTOPTS: {
 			// RFC7915: Process Hop-by-Hop and Destination Options
-			struct ipv6_ext_2byte *hdr =
-				(struct ipv6_ext_2byte *)ext_hdr;
-			uint8_t hdr_len = (hdr->size + 1) * 8;
+			struct yanet_ipv6_ext_2byte *hdr =
+				(struct yanet_ipv6_ext_2byte *)ext_hdr;
+			uint8_t hdr_len = (hdr->extension_length + 1) * 8;
 
 			// Validate header length
 			if (current_offset + hdr_len >
@@ -1485,7 +1438,7 @@ process_ipv6_extension_headers(
 				return -1;
 			}
 
-			*next_header = hdr->next_type;
+			*next_header = hdr->next_header;
 			current_offset += hdr_len;
 			*ext_hdrs_len += hdr_len;
 
@@ -1494,14 +1447,14 @@ process_ipv6_extension_headers(
 				"  - Length: %u bytes\n"
 				"  - Next header: %u\n",
 				hdr_len,
-				hdr->next_type);
+				hdr->next_header);
 			break;
 		}
 
 		case IPPROTO_ROUTING: {
 			// RFC7915: Handle Routing Header
-			struct ipv6_ext_2byte *hdr =
-				(struct ipv6_ext_2byte *)ext_hdr;
+			struct yanet_ipv6_ext_2byte *hdr =
+				(struct yanet_ipv6_ext_2byte *)ext_hdr;
 
 			// Check for Type 0 Routing Header (deprecated)
 			if (((uint8_t *)hdr)[2] == 0) {
@@ -1511,7 +1464,7 @@ process_ipv6_extension_headers(
 				return -1;
 			}
 
-			uint8_t hdr_len = (hdr->size + 1) * 8;
+			uint8_t hdr_len = (hdr->extension_length + 1) * 8;
 
 			// Validate header length
 			if (current_offset + hdr_len >
@@ -1522,7 +1475,7 @@ process_ipv6_extension_headers(
 				return -1;
 			}
 
-			*next_header = hdr->next_type;
+			*next_header = hdr->next_header;
 			current_offset += hdr_len;
 			*ext_hdrs_len += hdr_len;
 
@@ -1533,14 +1486,14 @@ process_ipv6_extension_headers(
 				"  - Next header: %u\n",
 				((uint8_t *)hdr)[2],
 				hdr_len,
-				hdr->next_type);
+				hdr->next_header);
 			break;
 		}
 
 		case IPPROTO_FRAGMENT: {
 			// RFC7915: Process Fragment Header
-			struct ipv6_ext_fragment *frag_hdr =
-				(struct ipv6_ext_fragment *)ext_hdr;
+			struct yanet_ipv6_ext_fragment *frag_hdr =
+				(struct yanet_ipv6_ext_fragment *)ext_hdr;
 
 			// Validate fragment header
 			if (current_offset + sizeof(*frag_hdr) >
@@ -1552,7 +1505,7 @@ process_ipv6_extension_headers(
 			}
 
 			*is_fragmented = 1;
-			*next_header = frag_hdr->next_type;
+			*next_header = frag_hdr->next_header;
 
 			// Extract fragment data using DPDK macros
 			uint16_t frag_data =
@@ -1562,7 +1515,7 @@ process_ipv6_extension_headers(
 			*frag_id = frag_hdr->identification;
 
 			// RFC7915: Drop fragmented ICMP
-			if (frag_hdr->next_type == IPPROTO_ICMPV6) {
+			if (frag_hdr->next_header == IPPROTO_ICMPV6) {
 				LOG_DBG(NAT64,
 					"Dropping fragmented ICMPv6 packet\n");
 				return -1;
@@ -1845,9 +1798,9 @@ nat64_handle_v6(
 	if (ipv6_header->proto == IPPROTO_ICMPV6) {
 		new_ipv4_header->next_proto_id = IPPROTO_ICMP;
 
-		struct nat64_icmp6_hdr *icmp_header = rte_pktmbuf_mtod_offset(
+		struct yanet_icmp6_hdr *icmp_header = rte_pktmbuf_mtod_offset(
 			mbuf,
-			struct nat64_icmp6_hdr *,
+			struct yanet_icmp6_hdr *,
 			packet->transport_header.offset
 		);
 
@@ -2108,8 +2061,8 @@ icmp_v4_to_v6(
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	struct nat64_icmp_hdr *icmp_header = rte_pktmbuf_mtod_offset(
-		mbuf, struct nat64_icmp_hdr *, packet->transport_header.offset
+	struct yanet_icmp_hdr *icmp_header = rte_pktmbuf_mtod_offset(
+		mbuf, struct yanet_icmp_hdr *, packet->transport_header.offset
 	);
 
 	uint8_t type = icmp_header->icmp_type;
@@ -2212,8 +2165,9 @@ icmp_v4_to_v6(
 		case ICMP_PROT_UNREACH:
 			type = ICMP6_PARAM_PROB;
 			code = ICMP6_PARAMPROB_NEXTHEADER;
-			((struct nat64_icmp6_hdr *)icmp_header)
-				->nat64_icmp6_pptr = rte_be_to_cpu_32(6);
+
+			((struct yanet_icmp6_hdr *)icmp_header)
+				->yanet_icmp6_pptr = rte_be_to_cpu_32(6);
 			break;
 
 		case ICMP_PORT_UNREACH:
@@ -2226,7 +2180,7 @@ icmp_v4_to_v6(
 
 			// Get MTU from ICMP header
 			uint16_t mtu =
-				rte_be_to_cpu_16(icmp_header->nat64_icmp_nextmtu
+				rte_be_to_cpu_16(icmp_header->yanet_icmp_nextmtu
 				);
 
 			// RFC7915: If MTU is 0, router doesn't implement
@@ -2254,12 +2208,12 @@ icmp_v4_to_v6(
 				"  - Original MTU: %u\n"
 				"  - Adjusted MTU: %u\n"
 				"  - Config IPv6 MTU: %u\n",
-				rte_be_to_cpu_16(icmp_header->nat64_icmp_nextmtu
+				rte_be_to_cpu_16(icmp_header->yanet_icmp_nextmtu
 				),
 				mtu,
 				nat64_config->mtu.ipv6);
 
-			icmp_header->nat64_icmp_nextmtu = rte_cpu_to_be_32(mtu);
+			icmp_header->yanet_icmp_nextmtu = rte_cpu_to_be_32(mtu);
 			break;
 
 		default:
@@ -2335,7 +2289,7 @@ icmp_v4_to_v6(
 		 * Figure 3: Pointer Value for Translating from IPv4 to IPv6
 		 */
 
-		uint8_t ptr = icmp_header->nat64_icmp_pptr;
+		uint8_t ptr = icmp_header->yanet_icmp_pptr;
 		switch (ptr) {
 		case 0:
 		case 1:
@@ -2389,7 +2343,7 @@ icmp_v4_to_v6(
 			break;
 		}
 
-		((struct nat64_icmp6_hdr *)icmp_header)->nat64_icmp6_pptr =
+		((struct yanet_icmp6_hdr *)icmp_header)->yanet_icmp6_pptr =
 			rte_be_to_cpu_32(ptr);
 		break;
 
@@ -2651,12 +2605,12 @@ icmp_v4_to_v6(
 	}
 
 	// Ensure minimum ICMPv6 header length
-	if (icmp6_len < sizeof(struct nat64_icmp6_hdr)) {
+	if (icmp6_len < sizeof(struct yanet_icmp6_hdr)) {
 		RTE_LOG(ERR,
 			NAT64,
 			"ICMPv6 message too short: %u bytes (min %zu)\n",
 			icmp6_len,
-			sizeof(struct nat64_icmp6_hdr));
+			sizeof(struct yanet_icmp6_hdr));
 		return -1;
 	}
 

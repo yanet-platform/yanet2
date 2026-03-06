@@ -130,13 +130,15 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				return -1;
 			}
 
-			const struct ipv6_ext_2byte *ext =
+			const struct yanet_ipv6_ext_2byte *ext =
 				rte_pktmbuf_mtod_offset(
-					mbuf, struct ipv6_ext_2byte *, *offset
+					mbuf,
+					struct yanet_ipv6_ext_2byte *,
+					*offset
 				);
 
-			ext_type = ext->next_type;
-			*offset += (1 + ext->size) * 8;
+			ext_type = ext->next_header;
+			*offset += (1 + ext->extension_length) * 8;
 
 			// FIXME: packet->network_flags |=
 			// NETWORK_FLAG_HAS_EXTENSION;
@@ -145,13 +147,15 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				return -1;
 			}
 
-			const struct ipv6_ext_2byte *ext =
+			const struct yanet_ipv6_ext_2byte *ext =
 				rte_pktmbuf_mtod_offset(
-					mbuf, struct ipv6_ext_2byte *, *offset
+					mbuf,
+					struct yanet_ipv6_ext_2byte *,
+					*offset
 				);
 
-			ext_type = ext->next_type;
-			*offset += (2 + ext->size) * 4;
+			ext_type = ext->next_header;
+			*offset += (2 + ext->extension_length) * 4;
 			// FIXME: packet->network_flags |=
 			// NETWORK_FLAG_HAS_EXTENSION;
 		} else if (ext_type == IPPROTO_FRAGMENT) {
@@ -159,10 +163,10 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				return -1;
 			}
 
-			const struct ipv6_ext_fragment *ext =
+			const struct yanet_ipv6_ext_fragment *ext =
 				rte_pktmbuf_mtod_offset(
 					mbuf,
-					struct ipv6_ext_fragment *,
+					struct yanet_ipv6_ext_fragment *,
 					*offset
 				);
 
@@ -174,7 +178,7 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				}
 			}
 
-			ext_type = ext->next_type;
+			ext_type = ext->next_header;
 			*offset += RTE_IPV6_FRAG_HDR_SIZE;
 
 			// FIXME: packet->network_flags |=

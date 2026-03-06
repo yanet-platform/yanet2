@@ -182,13 +182,13 @@ packet_list_bytes_sum(struct packet_list *list);
 void
 logtrace_rte_mbuf(struct rte_mbuf *mbuf);
 
-struct ipv6_ext_2byte {
-	uint8_t next_type;
-	uint8_t size;
+struct yanet_ipv6_ext_2byte {
+	uint8_t next_header;
+	uint8_t extension_length;
 } __attribute__((__packed__));
 
-struct ipv6_ext_fragment {
-	uint8_t next_type;
+struct yanet_ipv6_ext_fragment {
+	uint8_t next_header;
 	uint8_t reserved;
 	uint16_t offset_flag;
 	uint32_t identification;
