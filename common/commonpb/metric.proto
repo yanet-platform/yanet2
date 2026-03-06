@@ -4,16 +4,20 @@ package commonpb;
 
 option go_package = "github.com/yanet-platform/yanet2/common/commonpb;commonpb";
 
+message MetricValue {
+	oneof value {
+		uint64 counter = 1;
+		double gauge = 2;
+		Histogram histogram = 3;
+	}
+}
+
 message Metric {
 	string name = 1;
 	string description = 2;
 	MetricType type = 3;
 	repeated Label labels = 4;
-	oneof value {
-		uint64 counter = 5;
-		double gauge = 6;
-		Histogram histogram = 7;
-	}
+	MetricValue value = 5;
 }
 
 enum MetricType {
