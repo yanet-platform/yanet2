@@ -3,20 +3,20 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
-use code::{
+use ipnet::Ipv6Net;
+use nat64pb::{
     nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, ListConfigsRequest,
     SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest, ShowConfigResponse,
 };
-use ipnet::Ipv6Net;
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
-use yanet_cli::{
+use ync::{
     client::{ConnectionArgs, LayeredChannel},
     logging,
 };
 
 #[allow(non_snake_case)]
-pub mod code {
+pub mod nat64pb {
     use serde::Serialize;
     tonic::include_proto!("nat64pb");
 }
@@ -176,7 +176,7 @@ pub struct NAT64Service {
 
 impl NAT64Service {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = yanet_cli::client::connect(connection).await?;
+        let channel = ync::client::connect(connection).await?;
         let client = Nat64ServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
@@ -217,8 +217,9 @@ impl NAT64Service {
             prefix: cmd.prefix.addr().octets()[..12].to_vec(),
         };
         log::debug!("AddPrefixRequest: {request:?}");
-        let response = self.client.add_prefix(request).await?.into_inner();
-        log::debug!("AddPrefixResponse: {response:?}");
+        self.client.add_prefix(request).await?;
+
+        println!("OK");
         Ok(())
     }
 
@@ -230,22 +231,24 @@ impl NAT64Service {
             prefix_index: cmd.prefix_index,
         };
         log::debug!("AddMappingRequest: {request:?}");
-        let response = self.client.add_mapping(request).await?.into_inner();
-        log::debug!("AddMappingResponse: {response:?}");
+        self.client.add_mapping(request).await?;
+
+        println!("OK");
         Ok(())
     }
 
     pub async fn set_mtu(&mut self, cmd: MtuCmd) -> Result<(), Box<dyn Error>> {
         let request = SetMtuRequest {
             name: cmd.config_name.clone(),
-            mtu: Some(code::MtuConfig {
+            mtu: Some(nat64pb::MtuConfig {
                 ipv4_mtu: cmd.ipv4_mtu,
                 ipv6_mtu: cmd.ipv6_mtu,
             }),
         };
         log::debug!("SetMtuRequest: {request:?}");
-        let response = self.client.set_mtu(request).await?.into_inner();
-        log::debug!("SetMtuResponse: {response:?}");
+        self.client.set_mtu(request).await?;
+
+        println!("OK");
         Ok(())
     }
 
@@ -256,8 +259,9 @@ impl NAT64Service {
             drop_unknown_mapping: cmd.drop_unknown_mapping,
         };
         log::debug!("SetDropUnknownRequest: {request:?}");
-        let response = self.client.set_drop_unknown(request).await?.into_inner();
-        log::debug!("SetDropUnknownResponse: {response:?}");
+        self.client.set_drop_unknown(request).await?;
+
+        println!("OK");
         Ok(())
     }
 }

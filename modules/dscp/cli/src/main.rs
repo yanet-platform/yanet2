@@ -2,7 +2,7 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
-use code::{
+use dscppb::{
     AddPrefixesRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest, ShowConfigRequest,
     ShowConfigResponse, dscp_service_client::DscpServiceClient,
 };
@@ -14,10 +14,10 @@ use ync::{
     logging,
 };
 
-use crate::code::ListConfigsRequest;
+use crate::dscppb::ListConfigsRequest;
 
 #[allow(non_snake_case)]
-pub mod code {
+pub mod dscppb {
     use serde::Serialize;
 
     tonic::include_proto!("dscppb");
