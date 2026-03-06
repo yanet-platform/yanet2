@@ -19,13 +19,13 @@ static inline void
 FILTER_ATTR_QUERY_FUNC(port_fast_dst)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	struct segments_u32_classifier *classifier =
-		(struct segments_u32_classifier *)data;
-	uint32_t ports[segments_u32_classifier_max_batch_size];
+	struct segment_u16_classifier *classifier =
+		(struct segment_u16_classifier *)data;
+	uint16_t ports[segment_u16_classifier_max_batch_size];
 	while (count > 0) {
 		size_t cur_count = count;
-		if (cur_count > segments_u32_classifier_max_batch_size) {
-			cur_count = segments_u32_classifier_max_batch_size;
+		if (cur_count > segment_u16_classifier_max_batch_size) {
+			cur_count = segment_u16_classifier_max_batch_size;
 		}
 		for (size_t packet_idx = 0; packet_idx < cur_count;
 		     ++packet_idx) {
@@ -52,7 +52,7 @@ FILTER_ATTR_QUERY_FUNC(port_fast_dst)(
 					rte_be_to_cpu_16(udp_hdr->dst_port);
 			}
 		}
-		cur_count = segments_u32_classify(
+		cur_count = segment_u16_classify(
 			classifier, cur_count, ports, result
 		);
 		count -= cur_count;
@@ -65,13 +65,13 @@ static inline void
 FILTER_ATTR_QUERY_FUNC(port_fast_src)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	struct segments_u32_classifier *classifier =
-		(struct segments_u32_classifier *)data;
-	uint32_t ports[segments_u32_classifier_max_batch_size];
+	struct segment_u16_classifier *classifier =
+		(struct segment_u16_classifier *)data;
+	uint16_t ports[segment_u16_classifier_max_batch_size];
 	while (count > 0) {
 		size_t cur_count = count;
-		if (cur_count > segments_u32_classifier_max_batch_size) {
-			cur_count = segments_u32_classifier_max_batch_size;
+		if (cur_count > segment_u16_classifier_max_batch_size) {
+			cur_count = segment_u16_classifier_max_batch_size;
 		}
 		for (size_t packet_idx = 0; packet_idx < cur_count;
 		     ++packet_idx) {
@@ -98,7 +98,7 @@ FILTER_ATTR_QUERY_FUNC(port_fast_src)(
 					rte_be_to_cpu_16(udp_hdr->src_port);
 			}
 		}
-		cur_count = segments_u32_classify(
+		cur_count = segment_u16_classify(
 			classifier, cur_count, ports, result
 		);
 		count -= cur_count;

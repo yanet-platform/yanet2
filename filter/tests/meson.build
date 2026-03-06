@@ -161,6 +161,16 @@ basic_proto_range = executable('basic_proto_range',
 )
 test('basic_proto_range', basic_proto_range, suite: ['filter'])
 
+
+basic_proto_range_fast = executable('basic_proto_range_fast',
+  ['basic_proto_range_fast.c'], 
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('basic_proto_range_fast', basic_proto_range_fast, suite: ['filter'])
+
 # test combo net4_fast_src + port_fast_src
 combo_net4_port_src = executable('combo_net4_port_src',
   ['combo_net4_port_src.c'], 

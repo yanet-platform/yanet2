@@ -99,6 +99,14 @@ btree_test = executable(
 test('btree', btree_test, suite: ['common'])
 
 executable(
+  'btree_bench_u16',
+  ['btree_bench_u16.c'],
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies
+)
+
+executable(
   'btree_bench_u32',
   ['btree_bench_u32.c'],
   c_args: yanet_c_args,

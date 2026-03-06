@@ -51,8 +51,8 @@ classifier_init(
 	struct memory_context *mctx,
 	port_ranges_getter getter
 ) {
-	struct segments_u32_classifier *classifier =
-		memory_balloc(mctx, sizeof(struct segments_u32_classifier));
+	struct segment_u16_classifier *classifier =
+		memory_balloc(mctx, sizeof(struct segment_u16_classifier));
 	if (classifier == NULL) {
 		return -1;
 	}
@@ -61,8 +61,8 @@ classifier_init(
 	if (count < 0) {
 		return -2;
 	}
-	struct segment_u32 *segments =
-		malloc(sizeof(struct segment_u32) * count);
+	struct segment_u16 *segments =
+		malloc(sizeof(struct segment_u16) * count);
 	size_t segment_idx = 0;
 	for (size_t rule_idx = 0; rule_idx < rules_count; ++rule_idx) {
 		struct filter_port_ranges ranges = getter(&rules[rule_idx]);
@@ -70,12 +70,12 @@ classifier_init(
 		     ++range_idx) {
 			struct filter_port_range range =
 				ranges.items[range_idx];
-			segments[segment_idx++] = (struct segment_u32
+			segments[segment_idx++] = (struct segment_u16
 			){.from = range.from, .to = range.to, .label = rule_idx
 			};
 		}
 	}
-	int res = segments_classifier_u32_init(
+	int res = segments_classifier_u16_init(
 		classifier, mctx, registry, count, segments
 	);
 	free(segments);
@@ -128,13 +128,13 @@ void
 FILTER_ATTR_COMPILER_FREE_FUNC(port_fast_src)(
 	void *data, struct memory_context *memory_context
 ) {
-	struct segments_u32_classifier *classifier =
-		(struct segments_u32_classifier *)data;
-	segments_classifier_u32_free(classifier, memory_context);
+	struct segment_u16_classifier *classifier =
+		(struct segment_u16_classifier *)data;
+	segments_classifier_u16_free(classifier, memory_context);
 	memory_bfree(
 		memory_context,
 		classifier,
-		sizeof(struct segments_u32_classifier)
+		sizeof(struct segment_u16_classifier)
 	);
 }
 
@@ -142,12 +142,12 @@ void
 FILTER_ATTR_COMPILER_FREE_FUNC(port_fast_dst)(
 	void *data, struct memory_context *memory_context
 ) {
-	struct segments_u32_classifier *classifier =
-		(struct segments_u32_classifier *)data;
-	segments_classifier_u32_free(classifier, memory_context);
+	struct segment_u16_classifier *classifier =
+		(struct segment_u16_classifier *)data;
+	segments_classifier_u16_free(classifier, memory_context);
 	memory_bfree(
 		memory_context,
 		classifier,
-		sizeof(struct segments_u32_classifier)
+		sizeof(struct segment_u16_classifier)
 	);
 }

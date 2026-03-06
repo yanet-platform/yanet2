@@ -9,6 +9,7 @@
 #include "counters/counters.h"
 #include "lib/controlplane/diag/diag.h"
 
+#include "rule.h"
 #include "rules.h"
 #include "selector.h"
 #include "vs.h"
@@ -474,6 +475,21 @@ compare_port_range(const void *va, const void *vb) {
 	return 0;
 }
 
+static int
+compare_proto_range(const void *va, const void *vb) {
+	const struct filter_proto_range *a =
+		(const struct filter_proto_range *)va;
+	const struct filter_proto_range *b =
+		(const struct filter_proto_range *)vb;
+	if (a->from != b->from) {
+		return (a->from < b->from) ? -1 : 1;
+	}
+	if (a->to != b->to) {
+		return (a->to < b->to) ? -1 : 1;
+	}
+	return 0;
+}
+
 // Normalize a single rule by sorting its internal arrays.
 // This function expects ABSOLUTE pointers in the rule.
 static void
@@ -500,6 +516,14 @@ normalize_rule(struct filter_rule *rule) {
 		      rule->transport.src_count,
 		      sizeof(struct filter_port_range),
 		      compare_port_range);
+	}
+
+	// Sort proto ranges (already absolute pointer)
+	if (rule->transport.proto_count > 1 && rule->transport.protos != NULL) {
+		qsort(rule->transport.protos,
+		      rule->transport.proto_count,
+		      sizeof(struct filter_proto_range),
+		      compare_proto_range);
 	}
 }
 
@@ -558,6 +582,7 @@ compare_filter_rules(const void *va, const void *vb) {
 			}
 		}
 	}
+
 	return 0;
 }
 
@@ -618,6 +643,7 @@ compare_filter_rules_relative(
 			}
 		}
 	}
+
 	return 0;
 }
 
