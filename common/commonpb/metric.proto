@@ -10,7 +10,7 @@ message Metric {
 	MetricType type = 3;
 	repeated Label labels = 4;
 	oneof value {
-		double counter = 5;
+		uint64 counter = 5;
 		double gauge = 6;
 		Histogram histogram = 7;
 	}
