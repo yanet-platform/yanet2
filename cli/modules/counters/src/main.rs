@@ -371,8 +371,9 @@ fn format_perf_counters(response: &code::PerfCountersResponse) {
     // Total content width without padding (used for reference)
     let _content_width = rx_width + separator_width + tx_width;
 
-    // Distribute padding: some before RX, some between RX and separator, some after TX
-    // We want the separator centered, so left_half and right_half should be equal
+    // Distribute padding: some before RX, some between RX and separator, some after
+    // TX We want the separator centered, so left_half and right_half should be
+    // equal
     let left_half: usize = 37; // (74 - 0) / 2, but we want separator at position 37
     let right_half: usize = 37;
 
@@ -786,7 +787,8 @@ fn format_latency(ns: u64) -> String {
     }
 }
 
-/// Format large numbers with thousand separators or K/M/G/T suffixes for very large numbers
+/// Format large numbers with thousand separators or K/M/G/T suffixes for very
+/// large numbers
 fn format_number(n: u64) -> String {
     const THOUSAND: f64 = 1_000.0;
     const MILLION: f64 = 1_000_000.0;
@@ -820,7 +822,8 @@ fn format_number(n: u64) -> String {
     }
 }
 
-/// Calculate display width of a string (accounting for multi-byte UTF-8 characters)
+/// Calculate display width of a string (accounting for multi-byte UTF-8
+/// characters)
 fn display_width(s: &str) -> usize {
     s.chars().count()
 }

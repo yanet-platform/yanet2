@@ -89,10 +89,7 @@ impl DevicePlainService {
                             panic!("Invalid pipeline format. Expected 'pipeline_name:weight'");
                         }
                         let weight = parts[1].parse::<u64>().expect("Invalid weight value");
-                        DevicePipeline {
-                            name: parts[0].to_string(),
-                            weight,
-                        }
+                        DevicePipeline { name: parts[0].to_string(), weight }
                     })
                     .collect(),
                 output: cmd
@@ -104,10 +101,7 @@ impl DevicePlainService {
                             panic!("Invalid pipeline format. Expected 'pipeline_name:weight'");
                         }
                         let weight = parts[1].parse::<u64>().expect("Invalid weight value");
-                        DevicePipeline {
-                            name: parts[0].to_string(),
-                            weight,
-                        }
+                        DevicePipeline { name: parts[0].to_string(), weight }
                     })
                     .collect(),
             }),

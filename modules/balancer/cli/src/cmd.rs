@@ -80,7 +80,8 @@ pub struct InspectFormatFlags {
 }
 
 impl InspectFormatFlags {
-    /// Convert flags to InspectOutputFormat, defaulting to Normal if none specified
+    /// Convert flags to InspectOutputFormat, defaulting to Normal if none
+    /// specified
     pub fn to_format(&self) -> crate::output::InspectOutputFormat {
         if self.json {
             output::InspectOutputFormat::Json
@@ -165,8 +166,9 @@ pub struct EnableRealCmd {
     #[arg(long, short = 'n')]
     pub name: Option<String>,
 
-    /// Virtual service in format "ip:port/proto", "[ipv6]:port/proto", or "ipv6:port/proto"
-    /// (e.g., "192.168.1.1:80/tcp", "[2001:db8::1]:443/tcp", or "2001:db8::1:443/tcp")
+    /// Virtual service in format "ip:port/proto", "[ipv6]:port/proto", or
+    /// "ipv6:port/proto" (e.g., "192.168.1.1:80/tcp",
+    /// "[2001:db8::1]:443/tcp", or "2001:db8::1:443/tcp")
     #[arg(long)]
     pub vs: String,
 
@@ -213,7 +215,8 @@ fn parse_vs_identifier(vs_str: &str) -> Result<(std::net::IpAddr, u16, balancerp
         }
     };
 
-    // Parse IP and port, handling IPv4, IPv6 with brackets, and IPv6 without brackets
+    // Parse IP and port, handling IPv4, IPv6 with brackets, and IPv6 without
+    // brackets
     let (ip_str, port_str) = if addr_port.starts_with('[') {
         // IPv6 bracket notation: [ipv6]:port
         let bracket_end = addr_port.find(']').ok_or_else(|| {
@@ -327,8 +330,9 @@ pub struct DisableRealCmd {
     #[arg(long, short = 'n')]
     pub name: Option<String>,
 
-    /// Virtual service in format "ip:port/proto", "[ipv6]:port/proto", or "ipv6:port/proto"
-    /// (e.g., "192.168.1.1:80/tcp", "[2001:db8::1]:443/tcp", or "2001:db8::1:443/tcp")
+    /// Virtual service in format "ip:port/proto", "[ipv6]:port/proto", or
+    /// "ipv6:port/proto" (e.g., "192.168.1.1:80/tcp",
+    /// "[2001:db8::1]:443/tcp", or "2001:db8::1:443/tcp")
     #[arg(long)]
     pub vs: String,
 
@@ -573,8 +577,9 @@ pub struct DeleteVsCmd {
     #[arg(long, short = 'n')]
     pub name: Option<String>,
 
-    /// Virtual services to delete in format "ip:port/proto", "[ipv6]:port/proto", or "ipv6:port/proto"
-    /// (e.g., "192.168.1.1:80/tcp", "[2001:db8::1]:443/tcp", or "2001:db8::1:443/tcp")
+    /// Virtual services to delete in format "ip:port/proto",
+    /// "[ipv6]:port/proto", or "ipv6:port/proto" (e.g., "192.168.1.1:80/
+    /// tcp", "[2001:db8::1]:443/tcp", or "2001:db8::1:443/tcp")
     #[arg(long, required = true, num_args = 1..)]
     pub vs: Vec<String>,
 

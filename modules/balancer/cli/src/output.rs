@@ -1914,7 +1914,8 @@ fn print_show_graph_table(response: &balancerpb::ShowGraphResponse) -> Result<()
     println!();
 
     if let Some(graph) = &response.graph {
-        // Display each VS with its reals in a hierarchical format (similar to info output)
+        // Display each VS with its reals in a hierarchical format (similar to info
+        // output)
         if !graph.virtual_services.is_empty() {
             for vs in &graph.virtual_services {
                 if let Some(vs_id) = &vs.identifier {

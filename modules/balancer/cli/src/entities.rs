@@ -46,8 +46,9 @@ pub fn opt_addr_to_ip(addr: &Option<balancerpb::Addr>) -> Result<IpAddr, String>
 }
 
 /// Format AllowedSources protobuf message as a string
-/// Returns networks in CIDR notation (if possible) or netmask notation with optional port ranges and tag
-/// Format: "10.0.0.0/8, 192.168.0.0/16 [80,443,1024-65535] [tag: 100]"
+/// Returns networks in CIDR notation (if possible) or netmask notation with
+/// optional port ranges and tag Format: "10.0.0.0/8, 192.168.0.0/16
+/// [80,443,1024-65535] [tag: 100]"
 pub fn format_allowed_src(allowed_src: &balancerpb::AllowedSources) -> Result<String, String> {
     if allowed_src.nets.is_empty() {
         return Err("no networks specified".to_string());
@@ -61,7 +62,8 @@ pub fn format_allowed_src(allowed_src: &balancerpb::AllowedSources) -> Result<St
             let addr = opt_addr_to_ip(&net.addr)?;
             let mask_bytes = net.mask.as_ref().ok_or("missing mask")?.bytes.as_slice();
 
-            // Try to convert to CIDR prefix, fall back to netmask notation if not contiguous
+            // Try to convert to CIDR prefix, fall back to netmask notation if not
+            // contiguous
             match mask_to_prefix(mask_bytes) {
                 Ok(prefix_len) => Ok(format!("{}/{}", addr, prefix_len)),
                 Err(_) => {
@@ -105,7 +107,8 @@ pub fn format_allowed_src(allowed_src: &balancerpb::AllowedSources) -> Result<St
 }
 
 /// Parse CIDR notation (e.g., "192.168.0.0/24")
-/// This function is kept for backward compatibility but internally uses parse_network
+/// This function is kept for backward compatibility but internally uses
+/// parse_network
 #[allow(dead_code)]
 pub fn parse_cidr(cidr: &str) -> Result<(IpAddr, u32), String> {
     let (addr, mask_bytes) = parse_network(cidr)?;
@@ -248,7 +251,8 @@ pub fn mask_to_prefix(mask_bytes: &[u8]) -> Result<u32, String> {
 /// Examples:
 /// - Single port: "80" -> [PortRange { from: 80, to: 80 }]
 /// - Range: "1024-65535" -> [PortRange { from: 1024, to: 65535 }]
-/// - Multiple: "80,443,8000-9000" -> [PortRange { from: 80, to: 80 }, PortRange { from: 443, to: 443 }, PortRange { from: 8000, to: 9000 }]
+/// - Multiple: "80,443,8000-9000" -> [PortRange { from: 80, to: 80 }, PortRange
+///   { from: 443, to: 443 }, PortRange { from: 8000, to: 9000 }]
 pub fn parse_ports(ports_str: &str) -> Result<Vec<PortRange>, String> {
     let mut ranges = Vec::new();
 
@@ -353,7 +357,8 @@ pub struct PortRange {
 #[serde(untagged)]
 pub enum AllowedSrcEntry {
     /// Simple network string (backward compatible)
-    /// Supports both CIDR ("10.0.0.0/8") and netmask ("10.0.0.0/255.0.0.0") notation
+    /// Supports both CIDR ("10.0.0.0/8") and netmask ("10.0.0.0/255.0.0.0")
+    /// notation
     Simple(String),
 
     /// Structured format with optional port restrictions and tag
@@ -645,7 +650,7 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
                                 mask: Some(balancerpb::Addr { bytes: mask_bytes }),
                             }],
                             ports: vec![], // Empty = all ports allowed
-                            tag: None,        // No tag
+                            tag: None,     // No tag
                         })
                     }
                     AllowedSrcEntry::Structured { network, ports, tag } => {

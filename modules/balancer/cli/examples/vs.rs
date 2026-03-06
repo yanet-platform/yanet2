@@ -1,7 +1,7 @@
 //! Example: vs command output
 //! Run with: cargo run --example vs [operation] [format]
-//! Where operation is one of: update, delete (default: both operations, all formats)
-//! Where format is one of: table, tree, json (default: all formats)
+//! Where operation is one of: update, delete (default: both operations, all
+//! formats) Where format is one of: table, tree, json (default: all formats)
 
 mod common;
 
