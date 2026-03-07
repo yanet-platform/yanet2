@@ -3,8 +3,6 @@ package metrics
 import (
 	"math"
 	"sync/atomic"
-
-	"github.com/yanet-platform/yanet2/common/commonpb"
 )
 
 type Gauge struct {
@@ -18,8 +16,4 @@ func (g *Gauge) Store(value float64) {
 
 func (g *Gauge) Load() float64 {
 	return math.Float64frombits(g.bits.Load())
-}
-
-func (g *Gauge) ToProto() *commonpb.MetricValue {
-	return &commonpb.MetricValue{Value: &commonpb.MetricValue_Gauge{Gauge: g.Load()}}
 }

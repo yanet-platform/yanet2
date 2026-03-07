@@ -2,8 +2,6 @@ package metrics
 
 import (
 	"sync/atomic"
-
-	"github.com/yanet-platform/yanet2/common/commonpb"
 )
 
 type Counter struct {
@@ -20,8 +18,4 @@ func (c *Counter) Inc() uint64 {
 
 func (c *Counter) Load() uint64 {
 	return c.value.Load()
-}
-
-func (c *Counter) ToProto() *commonpb.MetricValue {
-	return &commonpb.MetricValue{Value: &commonpb.MetricValue_Counter{Counter: c.Load()}}
 }
