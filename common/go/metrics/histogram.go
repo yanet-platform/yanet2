@@ -6,12 +6,12 @@ import (
 )
 
 type Histogram struct {
-	bounds []float64
+	Bounds []float64
 
-	// buckets holds the counters.
-	// len(buckets) == len(bounds) + 1.
+	// Buckets holds the counters.
+	// len(Buckets) == len(bounds) + 1.
 	// The last bucket is for values > the last bound (+Inf).
-	buckets []atomic.Uint64
+	Buckets []atomic.Uint64
 }
 
 func NewHistogram(bounds []float64) *Histogram {
@@ -20,20 +20,16 @@ func NewHistogram(bounds []float64) *Histogram {
 	sort.Float64s(sorted)
 
 	return &Histogram{
-		bounds: sorted,
+		Bounds: sorted,
 		// we need 1 extra bucket for the "infinite" bucket (values > max bound)
-		buckets: make([]atomic.Uint64, len(sorted)+1),
+		Buckets: make([]atomic.Uint64, len(sorted)+1),
 	}
 }
 
 // Observe records a new value.
 // Complexity: O(log N) for search + O(1) for atomic write.
 func (h *Histogram) Observe(value float64) {
-	idx := sort.SearchFloat64s(h.bounds, value)
+	idx := sort.SearchFloat64s(h.Bounds, value)
 
-	h.buckets[idx].Add(1)
-}
-
-func (h *Histogram) Buckets() []atomic.Uint64 {
-	return h.buckets
+	h.Buckets[idx].Add(1)
 }
