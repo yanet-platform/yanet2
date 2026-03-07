@@ -12,7 +12,9 @@ import (
 // hashing with collision handling. The hash function and storage layout are
 // internal implementation details.
 type MetricMap[T any] struct {
-	mu      sync.RWMutex
+	mu sync.RWMutex
+
+	// we need stable pointers here
 	entries map[uint64][]metricEntry[T]
 }
 
@@ -27,7 +29,7 @@ func NewMetricMap[T any]() MetricMap[T] {
 
 // GetOrCreate returns the metric for the given label set, creating it via
 // create if it does not yet exist. Order of labels is important
-func (m *MetricMap[T]) GetOrCreate(id MetricID, create func() T) *T {
+func (m *MetricMap[T]) GetOrCreate(id MetricID, create func() T) T {
 	h := hashID(id)
 
 	m.mu.RLock()
@@ -35,7 +37,7 @@ func (m *MetricMap[T]) GetOrCreate(id MetricID, create func() T) *T {
 		for idx := range bucket {
 			if bucket[idx].id.EqualOrdered(id) {
 				m.mu.RUnlock()
-				return &bucket[idx].metric
+				return bucket[idx].metric
 			}
 		}
 	}
@@ -47,30 +49,25 @@ func (m *MetricMap[T]) GetOrCreate(id MetricID, create func() T) *T {
 	if bucket, ok := m.entries[h]; ok {
 		for idx := range bucket {
 			if bucket[idx].id.EqualOrdered(id) {
-				return &bucket[idx].metric
+				return bucket[idx].metric
 			}
 		}
 	}
 
 	m.entries[h] = append(m.entries[h], metricEntry[T]{id: id, metric: create()})
 
-	return &m.entries[h][len(m.entries[h])-1].metric
+	return m.entries[h][len(m.entries[h])-1].metric
 }
 
-type MetricRef[T any] struct {
-	ID    MetricID
-	Value *T
-}
-
-// Values returns a snapshot of all stored metrics.
-func (m *MetricMap[T]) Values() []MetricRef[T] {
+// Metrics returns a slice of references of all stored metrics.
+func (m *MetricMap[T]) Metrics() []Metric[T] {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var out []MetricRef[T]
+	var out []Metric[T]
 	for _, bucket := range m.entries {
-		for _, entry := range bucket {
-			out = append(out, MetricRef[T]{ID: entry.id, Value: &entry.metric})
+		for i := range bucket {
+			out = append(out, Metric[T]{ID: bucket[i].id, Value: bucket[i].metric})
 		}
 	}
 	return out

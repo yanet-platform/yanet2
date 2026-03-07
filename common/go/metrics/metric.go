@@ -1,3 +1,5 @@
+// Package metrics provides thread-safe metric primitives for collecting
+// application telemetry data including counters, gauges, and histograms.
 package metrics
 
 import "slices"
@@ -16,12 +18,17 @@ func (a MetricID) EqualOrdered(b MetricID) bool {
 	return a.Name == b.Name && slices.Equal(a.Labels, b.Labels)
 }
 
+type Metric[T any] struct {
+	ID    MetricID
+	Value T
+}
+
 type IsMetricValue interface {
 	isMetricValue()
 }
 
-func (c *Counter) isMetricValue() {}
+func (*Counter) isMetricValue() {}
 
-func (g *Gauge) isMetricValue() {}
+func (*Gauge) isMetricValue() {}
 
-func (h *Histogram) isMetricValue() {}
+func (*Histogram) isMetricValue() {}
