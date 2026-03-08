@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/yanet-platform/yanet2/common/go/maptrie"
 )
 
 type RIB struct {
 	mu               sync.RWMutex
-	routes           MapTrie[netip.Prefix, netip.Addr, RoutesList]
+	routes           maptrie.MapTrie[netip.Prefix, netip.Addr, RoutesList]
 	stats            *RIBStats
 	currentSessionId *atomic.Uint64 // Monotonically increasing ID for BIRD import sessions
 	// sessionTerminator points to a flag signaling the active FeedRIB stream to terminate;
@@ -26,7 +28,7 @@ func NewRIB(log *zap.SugaredLogger) *RIB {
 	sessionTerminator.Store(&atomic.Bool{})
 
 	return &RIB{
-		routes:            NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
+		routes:            maptrie.NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024),
 		stats:             NewRIBStats(),
 		currentSessionId:  &atomic.Uint64{},
 		sessionTerminator: sessionTerminator,
@@ -118,7 +120,7 @@ func (m *RIB) RemoveUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr, so
 	return nil
 }
 
-func (m *RIB) DumpRoutes() MapTrie[netip.Prefix, netip.Addr, RoutesList] {
+func (m *RIB) DumpRoutes() maptrie.MapTrie[netip.Prefix, netip.Addr, RoutesList] {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// Since `RoutesList` is passed by value, there's no need to create a

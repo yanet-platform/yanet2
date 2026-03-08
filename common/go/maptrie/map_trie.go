@@ -1,4 +1,4 @@
-package rib
+package maptrie
 
 import (
 	"maps"

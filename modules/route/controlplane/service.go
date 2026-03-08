@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
+	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
@@ -532,7 +533,7 @@ func (m *RouteService) syncRouteUpdates(ribRef *rib.RIB, name string) error {
 
 func (m *RouteService) updateModuleConfig(
 	name string,
-	ribDump rib.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
+	ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
 ) error {
 	config, err := ffi.NewModuleConfig(m.agent, name)
 	if err != nil {

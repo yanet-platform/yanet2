@@ -1,4 +1,4 @@
-package rib
+package maptrie
 
 import (
 	"encoding/binary"
@@ -315,7 +315,7 @@ func Fuzz_MapTrie_InsertAndLookup(f *testing.F) {
 	f.Add(byte(128), allFF[:], allFF[:])
 
 	f.Fuzz(func(t *testing.T, m byte, pb []byte, qb []byte) {
-		mt := NewMapTrie[netip.Prefix, netip.Addr, RoutesList](0)
+		mt := NewMapTrie[netip.Prefix, netip.Addr, []netip.Prefix](0)
 
 		prefixBytes := [16]byte{}
 		copy(prefixBytes[:], pb)
@@ -324,16 +324,13 @@ func Fuzz_MapTrie_InsertAndLookup(f *testing.F) {
 		m = min(m, 128)
 		p := netip.PrefixFrom(prefixAddr, int(m)).Masked()
 
-		route := Route{Prefix: p}
 		mt.InsertOrUpdate(
 			p,
-			func() RoutesList {
-				return RoutesList{
-					Routes: []Route{route},
-				}
+			func() []netip.Prefix {
+				return []netip.Prefix{p}
 			},
-			func(m RoutesList) RoutesList {
-				m.Routes = append(m.Routes, route)
+			func(m []netip.Prefix) []netip.Prefix {
+				m = append(m, p)
 				return m
 			},
 		)
@@ -371,7 +368,7 @@ func heapInUse() uint64 {
 	return ms.HeapInuse
 }
 
-func initTestData(v4count int, v6count int, random bool) ([]netip.Addr, []Route) {
+func initTestData(v4count int, v6count int, random bool) ([]netip.Addr, []netip.Prefix) {
 	maskShift := 8
 	addrs := make([]netip.Addr, 0, v4count+v6count)
 	for idx := range v4count {
@@ -399,27 +396,27 @@ func initTestData(v4count int, v6count int, random bool) ([]netip.Addr, []Route)
 		addrs = append(addrs, netip.AddrFrom16(v6a))
 	}
 
-	routes := make([]Route, len(addrs))
+	prefixes := make([]netip.Prefix, len(addrs))
 	for idx, a := range addrs {
 		mask := a.BitLen() - maskShift
 		if random {
 			mask = rand.Intn(a.BitLen() + 1)
 		}
 		p, _ := a.Prefix(mask)
-		routes[idx] = Route{Prefix: p.Masked()}
+		prefixes[idx] = p.Masked()
 	}
-	return addrs, routes
+	return addrs, prefixes
 }
 
 func Test_MapTrie_InsertMany(t *testing.T) {
-	addrs, routes := initTestData(200000, 200000, true)
-	mt := NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024 * 4)
-	for _, route := range routes {
+	addrs, prefixes := initTestData(200000, 200000, true)
+	mt := NewMapTrie[netip.Prefix, netip.Addr, []netip.Prefix](1024 * 4)
+	for _, prefix := range prefixes {
 		mt.InsertOrUpdate(
-			route.Prefix,
-			func() RoutesList { return RoutesList{Routes: []Route{route}} },
-			func(m RoutesList) RoutesList {
-				m.Routes = append(m.Routes, route)
+			prefix,
+			func() []netip.Prefix { return []netip.Prefix{prefix} },
+			func(m []netip.Prefix) []netip.Prefix {
+				m = append(m, prefix)
 				return m
 			},
 		)
@@ -430,27 +427,27 @@ func Test_MapTrie_InsertMany(t *testing.T) {
 	}
 }
 
-var benchDataInsertuniqAddrs, benchDataInsertuniqRoutes = initTestData(1_000_000, 400_000, false)
+var benchDataInsertuniqAddrs, benchDataInsertuniqPrefixes = initTestData(1_000_000, 400_000, false)
 
 func Benchmark_MapTrie_InsertUniq(b *testing.B) {
 	addrs := benchDataInsertuniqAddrs
-	routes := benchDataInsertuniqRoutes
+	prefixes := benchDataInsertuniqPrefixes
 
 	inuse0 := heapInUse()
-	trie := NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024)
+	trie := NewMapTrie[netip.Prefix, netip.Addr, []netip.Prefix](1024)
 	inuse1 := heapInUse()
 	b.Logf("The initial Memory usage of MapTrie: %s", datasize.ByteSize(inuse1-inuse0))
 
 	b.ResetTimer()
 	for b.Loop() {
-		for idx, route := range routes {
+		for _, prefix := range prefixes {
 			trie.InsertOrUpdate(
-				routes[idx].Prefix,
-				func() RoutesList {
-					return RoutesList{Routes: []Route{route}}
+				prefix,
+				func() []netip.Prefix {
+					return []netip.Prefix{prefix}
 				},
-				func(m RoutesList) RoutesList {
-					m.Routes = append(m.Routes, route)
+				func(m []netip.Prefix) []netip.Prefix {
+					m = append(m, prefix)
 					return m
 				},
 			)
@@ -465,31 +462,31 @@ func Benchmark_MapTrie_InsertUniq(b *testing.B) {
 		if !ok {
 			panic("not found")
 		}
-		found += len(v.Routes)
+		found += len(v)
 	}
-	b.Logf("Total number of routes %d: uniq %d", len(routes), trie.Len())
+	b.Logf("Total number of routes %d: uniq %d", len(prefixes), trie.Len())
 	b.Logf("Memory usage by mapTrie %s found=%d of 1k", datasize.ByteSize(inuse2-inuse0), found)
 }
 
-var _, benchDataInsertMessRoutes = initTestData(1_000_000, 400_000, true)
+var _, benchDataInsertMessPrefixes = initTestData(1_000_000, 400_000, true)
 
 func Benchmark_MapTrie_InsertMess(b *testing.B) {
-	routes := benchDataInsertMessRoutes
+	prefixes := benchDataInsertMessPrefixes
 	inUse0 := heapInUse()
-	trie := NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024)
+	trie := NewMapTrie[netip.Prefix, netip.Addr, []netip.Prefix](1024)
 
 	inUse1 := heapInUse()
 	b.Logf("Initial Memory usage by mapTrie %s", datasize.ByteSize(inUse1-inUse0))
 	b.ResetTimer()
 	for b.Loop() {
-		for idx, route := range routes {
+		for _, prefix := range prefixes {
 			trie.InsertOrUpdate(
-				routes[idx].Prefix,
-				func() RoutesList {
-					return RoutesList{Routes: []Route{route}}
+				prefix,
+				func() []netip.Prefix {
+					return []netip.Prefix{prefix}
 				},
-				func(m RoutesList) RoutesList {
-					m.Routes = append(m.Routes, route)
+				func(m []netip.Prefix) []netip.Prefix {
+					m = append(m, prefix)
 					return m
 				},
 			)
@@ -498,24 +495,24 @@ func Benchmark_MapTrie_InsertMess(b *testing.B) {
 	b.StopTimer()
 	inuse2 := heapInUse()
 
-	b.Logf("Total number of prefixes %d: uniq %d", len(routes), trie.Len())
+	b.Logf("Total number of prefixes %d: uniq %d", len(prefixes), trie.Len())
 	b.Logf("Memory usage by mapTrie %s", datasize.ByteSize(inuse2-inUse0))
 }
 
-var benchLookup1kAddrs, benchLookup1kRoutes = initTestData(1_000_000, 400_000, true)
+var benchLookup1kAddrs, benchLookup1kPrefixes = initTestData(1_000_000, 400_000, true)
 
 func Benchmark_mapTrie_lookup_mess_1k(b *testing.B) {
 	addrs := benchLookup1kAddrs
-	routes := benchLookup1kRoutes
+	prefixes := benchLookup1kPrefixes
 
-	mt := NewMapTrie[netip.Prefix, netip.Addr, RoutesList](1024)
-	for _, route := range routes {
+	mt := NewMapTrie[netip.Prefix, netip.Addr, []netip.Prefix](1024)
+	for _, prefix := range prefixes {
 		mt.InsertOrUpdate(
-			route.Prefix,
-			func() RoutesList {
-				return RoutesList{Routes: []Route{route}}
+			prefix,
+			func() []netip.Prefix {
+				return []netip.Prefix{prefix}
 			},
-			func(m RoutesList) RoutesList {
+			func(m []netip.Prefix) []netip.Prefix {
 				return m
 			},
 		)
@@ -528,9 +525,9 @@ func Benchmark_mapTrie_lookup_mess_1k(b *testing.B) {
 		if !ok {
 			panic("not found")
 		}
-		found += len(v.Routes)
+		found += len(v)
 	}
 	b.StopTimer()
 
-	b.Logf("Total number of prefixes %d: uniq: %d, found: %d", len(routes), mt.Len(), found)
+	b.Logf("Total number of prefixes %d: uniq: %d, found: %d", len(prefixes), mt.Len(), found)
 }
