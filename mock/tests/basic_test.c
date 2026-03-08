@@ -120,7 +120,7 @@ setup_cp(struct agent *agent, struct cp_module *cp_module) {
 ////////////////////////////////////////////////////////////////////////////////
 
 static uint8_t
-packet_data_chsum(struct packet_data *data) {
+packet_info_chsum(struct packet_info *data) {
 	uint8_t x = 0;
 	for (size_t i = 0; i < data->size; ++i) {
 		x ^= data->data[i];
@@ -141,8 +141,8 @@ send_packet(struct yanet_mock *mock) {
 		&packet, src_ip, dst_ip, 1000, 80, IPPROTO_UDP, IPPROTO_IP, 0
 	);
 
-	struct packet_data init_packet_data = packet_data(&packet);
-	uint8_t init_chsum = packet_data_chsum(&init_packet_data);
+	struct packet_info init_packet_info = packet_info(&packet);
+	uint8_t init_chsum = packet_info_chsum(&init_packet_info);
 
 	TEST_ASSERT_EQUAL(res, 0, "failed to fill packet");
 	packet.tx_device_id = 0;
@@ -159,8 +159,8 @@ send_packet(struct yanet_mock *mock) {
 	struct packet *p = result.output_packets.first;
 	TEST_ASSERT_EQUAL(p, &packet, "returned packet is not which were sent");
 
-	struct packet_data result_packet_data = packet_data(&packet);
-	uint8_t result_chsum = packet_data_chsum(&result_packet_data);
+	struct packet_info result_packet_info = packet_info(&packet);
+	uint8_t result_chsum = packet_info_chsum(&result_packet_info);
 
 	TEST_ASSERT_EQUAL(
 		init_chsum,

@@ -21,8 +21,8 @@ type PacketData struct {
 	RxDeviceId uint16
 }
 
-func (data *PacketData) asRaw() C.struct_packet_data {
-	return C.struct_packet_data{
+func (data *PacketData) asRaw() C.struct_packet_info {
+	return C.struct_packet_info{
 		data:         (*C.uint8_t)(&data.Data[0]),
 		size:         C.uint16_t(len(data.Data)),
 		tx_device_id: C.uint16_t(data.TxDeviceId),
@@ -54,7 +54,7 @@ func NewPacketFromData(
 }
 
 func (packet *Packet) Data() PacketData {
-	data := C.packet_data((*C.struct_packet)(packet))
+	data := C.packet_info((*C.struct_packet)(packet))
 	size := data.size
 	bytes := unsafe.Slice((*uint8)(data.data), size)
 	return PacketData{
@@ -140,13 +140,13 @@ func FillPacketListFromDataWithCustomAlloc(
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
 
-	datas := make([]C.struct_packet_data, len(data))
+	datas := make([]C.struct_packet_info, len(data))
 	for idx := range data {
 		// Pin the data slice before taking its pointer
 		pinner.Pin(&data[idx].Data[0])
 		datas[idx] = data[idx].asRaw()
 	}
-	var ptr *C.struct_packet_data = nil
+	var ptr *C.struct_packet_info = nil
 	if len(datas) > 0 {
 		ptr = &datas[0]
 	}

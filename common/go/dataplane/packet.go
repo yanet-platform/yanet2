@@ -48,7 +48,7 @@ type Packet C.struct_packet
 
 func NewPacketFromData(data PacketData) (*Packet, error) {
 	packet := C.struct_packet{}
-	packetData := C.struct_packet_data{
+	packetData := C.struct_packet_info{
 		data:         (*C.uint8_t)(&data.Payload[0]),
 		size:         C.uint16_t(len(data.Payload)),
 		tx_device_id: C.uint16_t(data.TxDeviceId),
@@ -64,7 +64,7 @@ func NewPacketFromData(data PacketData) (*Packet, error) {
 }
 
 func (packet *Packet) Data() PacketData {
-	data := C.packet_data((*C.struct_packet)(packet))
+	data := C.packet_info((*C.struct_packet)(packet))
 	size := data.size
 	bytes := unsafe.Slice((*uint8)(data.data), size)
 	return PacketData{

@@ -256,8 +256,8 @@ generate_rules(
 // Packet generation with high match probability
 
 static void
-generate_packet_data(
-	struct packet_data *packets,
+generate_packet_info(
+	struct packet_info *packets,
 	size_t num_packets,
 	enum signature_type sig_type __attribute__((unused)),
 	uint64_t *rng,
@@ -358,7 +358,7 @@ generate_packet_data(
 			(proto == IPPROTO_UDP ? sizeof(struct rte_udp_hdr)
 					      : sizeof(struct rte_tcp_hdr));
 
-		packets[i] = (struct packet_data){
+		packets[i] = (struct packet_info){
 			.data = buf,
 			.size = total_size,
 			.tx_device_id = 0,
@@ -636,11 +636,11 @@ main(int argc, char **argv) {
 	       config.num_batches);
 
 	// Allocate memory for packet data structures
-	size_t packet_data_size = sizeof(struct packet_data) * total_packets;
-	struct packet_data *packet_data_array =
-		(struct packet_data *)allocate_hugepage_memory(packet_data_size
+	size_t packet_info_size = sizeof(struct packet_info) * total_packets;
+	struct packet_info *packet_info_array =
+		(struct packet_info *)allocate_hugepage_memory(packet_info_size
 		);
-	if (packet_data_array == NULL) {
+	if (packet_info_array == NULL) {
 		munmap(builders, builders_size);
 		munmap(rules, rules_size);
 		munmap(arena, arena_size);
@@ -651,7 +651,7 @@ main(int argc, char **argv) {
 	size_t packet_buffers_size = 128 * total_packets;
 	void *packet_buffers = allocate_hugepage_memory(packet_buffers_size);
 	if (packet_buffers == NULL) {
-		munmap(packet_data_array, packet_data_size);
+		munmap(packet_info_array, packet_info_size);
 		munmap(builders, builders_size);
 		munmap(rules, rules_size);
 		munmap(arena, arena_size);
@@ -659,8 +659,8 @@ main(int argc, char **argv) {
 	}
 
 	// Generate packet data
-	generate_packet_data(
-		packet_data_array,
+	generate_packet_info(
+		packet_info_array,
 		total_packets,
 		config.sig_type,
 		&rng,
@@ -672,7 +672,7 @@ main(int argc, char **argv) {
 	void *packet_alloc_arena = allocate_hugepage_memory(packet_alloc_size);
 	if (packet_alloc_arena == NULL) {
 		munmap(packet_buffers, packet_buffers_size);
-		munmap(packet_data_array, packet_data_size);
+		munmap(packet_info_array, packet_info_size);
 		munmap(builders, builders_size);
 		munmap(rules, rules_size);
 		munmap(arena, arena_size);
@@ -689,7 +689,7 @@ main(int argc, char **argv) {
 	res = fill_packet_list_custom_alloc(
 		&packet_list,
 		total_packets,
-		packet_data_array,
+		packet_info_array,
 		0, // auto-calculate mbuf size
 		&packet_allocator,
 		hugepage_alloc
@@ -698,7 +698,7 @@ main(int argc, char **argv) {
 		fprintf(stderr, "Failed to create packet list\n");
 		munmap(packet_alloc_arena, packet_alloc_size);
 		munmap(packet_buffers, packet_buffers_size);
-		munmap(packet_data_array, packet_data_size);
+		munmap(packet_info_array, packet_info_size);
 		munmap(builders, builders_size);
 		munmap(rules, rules_size);
 		munmap(arena, arena_size);
@@ -712,7 +712,7 @@ main(int argc, char **argv) {
 	if (packets == NULL) {
 		munmap(packet_alloc_arena, packet_alloc_size);
 		munmap(packet_buffers, packet_buffers_size);
-		munmap(packet_data_array, packet_data_size);
+		munmap(packet_info_array, packet_info_size);
 		munmap(builders, builders_size);
 		munmap(rules, rules_size);
 		munmap(arena, arena_size);
@@ -745,7 +745,7 @@ main(int argc, char **argv) {
 	munmap(packets, packets_array_size);
 	munmap(packet_alloc_arena, packet_alloc_size);
 	munmap(packet_buffers, packet_buffers_size);
-	munmap(packet_data_array, packet_data_size);
+	munmap(packet_info_array, packet_info_size);
 	munmap(builders, builders_size);
 	munmap(rules, rules_size);
 	munmap(arena, arena_size);

@@ -234,7 +234,7 @@ free_packet(struct packet *packet) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void
-init_mbuf(struct rte_mbuf *m, struct packet_data *data, uint16_t buf_len) {
+init_mbuf(struct rte_mbuf *m, struct packet_info *data, uint16_t buf_len) {
 	m->priv_size = 0;
 	m->buf_len = buf_len;
 	uint32_t mbuf_size = sizeof(struct rte_mbuf) + m->priv_size;
@@ -261,7 +261,7 @@ init_mbuf(struct rte_mbuf *m, struct packet_data *data, uint16_t buf_len) {
 
 static int
 init_packet_with_mbuf(
-	struct packet *packet, struct rte_mbuf *mbuf, struct packet_data *data
+	struct packet *packet, struct rte_mbuf *mbuf, struct packet_info *data
 ) {
 	memset(packet, 0, sizeof(struct packet));
 	packet->mbuf = mbuf;
@@ -284,7 +284,7 @@ int
 fill_packet_list(
 	struct packet_list *packet_list,
 	size_t packets_count,
-	struct packet_data *packets,
+	struct packet_info *packets,
 	uint16_t mbuf_size
 ) {
 	return fill_packet_list_custom_alloc(
@@ -308,20 +308,20 @@ free_packet_list(struct packet_list *packet_list) {
 	}
 }
 
-struct packet_data
-packet_data(const struct packet *p) {
+struct packet_info
+packet_info(const struct packet *p) {
 	struct rte_mbuf *m = packet_to_mbuf(p);
 	// TODO: multisegment packets
 	size_t size = m->data_len;
 	uint8_t *data = rte_pktmbuf_mtod(m, uint8_t *);
-	return (struct packet_data){data, size, p->tx_device_id, p->rx_device_id
+	return (struct packet_info){data, size, p->tx_device_id, p->rx_device_id
 	};
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 int
-fill_packet_from_data(struct packet *packet, struct packet_data *data) {
+fill_packet_from_data(struct packet *packet, struct packet_info *data) {
 	size_t buf_len = RTE_PKTMBUF_HEADROOM + data->size;
 	if (buf_len % alignof(struct rte_mbuf) != 0) {
 		size_t a = alignof(struct rte_mbuf);
@@ -339,7 +339,7 @@ int
 fill_packet_list_custom_alloc(
 	struct packet_list *packet_list,
 	size_t packets_count,
-	struct packet_data *packets,
+	struct packet_info *packets,
 	uint16_t mbuf_size,
 	void *alloc,
 	alloc_func alloc_func
@@ -347,7 +347,7 @@ fill_packet_list_custom_alloc(
 	packet_list_init(packet_list);
 
 	for (size_t i = 0; i < packets_count; i++) {
-		struct packet_data *data = &packets[i];
+		struct packet_info *data = &packets[i];
 		size_t cur_mbuf_size = mbuf_size;
 		if (cur_mbuf_size == 0) {
 			size_t buf_len = RTE_PKTMBUF_HEADROOM + data->size;
