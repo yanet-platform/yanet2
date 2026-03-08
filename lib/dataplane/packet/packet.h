@@ -121,6 +121,9 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset);
 int
 parse_packet(struct packet *packet);
 
+void *
+packet_data(struct packet *packet);
+
 static inline struct rte_mbuf *
 packet_to_mbuf(const struct packet *packet) {
 	return packet->mbuf;
