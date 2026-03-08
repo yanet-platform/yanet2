@@ -13,6 +13,11 @@ message VlanRange {
 	uint32 to = 2;
 }
 
+message IPPrefix {
+	bytes addr = 1;
+	uint32 length = 2;
+}
+
 message IPNet {
 	bytes addr = 1;
 	bytes mask = 2;
