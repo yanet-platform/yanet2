@@ -17,6 +17,7 @@ import (
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
+	route_mpls "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
@@ -46,14 +47,15 @@ func DefaultConfig() *Config {
 		MemoryPath: "/dev/hugepages/yanet",
 		Gateway:    gateway.DefaultConfig(),
 		Modules: ModulesConfig{
-			Route:    route.DefaultConfig(),
-			Decap:    decap.DefaultConfig(),
-			DSCP:     dscp.DefaultConfig(),
-			Forward:  forward.DefaultConfig(),
-			NAT64:    nat64.DefaultConfig(),
-			Pdump:    pdump.DefaultConfig(),
-			Balancer: balancer.DefaultConfig(),
-			ACL:      acl.DefaultConfig(),
+			Route:     route.DefaultConfig(),
+			RouteMPLS: route_mpls.DefaultConfig(),
+			Decap:     decap.DefaultConfig(),
+			DSCP:      dscp.DefaultConfig(),
+			Forward:   forward.DefaultConfig(),
+			NAT64:     nat64.DefaultConfig(),
+			Pdump:     pdump.DefaultConfig(),
+			Balancer:  balancer.DefaultConfig(),
+			ACL:       acl.DefaultConfig(),
 		},
 		Devices: DevicesConfig{
 			Plain: plain.DefaultConfig(),
@@ -81,6 +83,9 @@ func LoadConfig(path string) (*Config, error) {
 type ModulesConfig struct {
 	// Route is the configuration for the route module.
 	Route *route.Config `yaml:"route"`
+
+	// Route is the configuration for the route mpls module.
+	RouteMPLS *route_mpls.Config `yaml:"route-mpls"`
 
 	// Decap is the configuration for the decap module.
 	Decap *decap.Config `yaml:"decap"`
