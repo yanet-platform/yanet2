@@ -25,7 +25,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                 "modules/balancer/agent/balancerpb/module.proto",
                 "modules/balancer/agent/balancerpb/stats.proto",
                 "modules/balancer/agent/balancerpb/graph.proto",
-                "common/commonpb/metric.proto",
+                "common/commonpb/metric.proto"
             ],
             &["../../.."],
         )?;

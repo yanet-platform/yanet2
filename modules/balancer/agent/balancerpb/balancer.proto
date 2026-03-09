@@ -171,6 +171,16 @@ service BalancerService {
 	// Note: VS matcher filters (IPv4/IPv6) will be recompiled since the
 	// set of VS identifiers changes.
 	rpc DeleteVS(DeleteVSRequest) returns (DeleteVSResponse);
+	
+	rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+}
+
+message GetMetricsRequest {
+}
+
+message GetMetricsResponse {
+	// List of metrics
+	repeated commonpb.Metric metrics = 1;
 }
 
 message GetMetricsRequest {

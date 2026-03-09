@@ -7,6 +7,11 @@ pub mod commonpb {
 
 #[allow(non_snake_case)]
 #[allow(clippy::all, non_snake_case)]
+pub mod commonpb {
+    tonic::include_proto!("commonpb");
+}
+
+#[allow(clippy::all, non_snake_case)]
 pub mod balancerpb {
     tonic::include_proto!("balancerpb");
 }
