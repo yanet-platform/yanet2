@@ -372,6 +372,7 @@ func (m *BalancerService) GetMetrics(
 		return &balancerpb.GetMetricsResponse{
 			Metrics: metrics,
 		}, nil
+	}
 }
 
 // UpdateVS updates specific virtual services in the balancer configuration.

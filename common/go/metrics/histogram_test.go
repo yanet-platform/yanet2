@@ -1,44 +1,47 @@
 package metrics
 
 import (
+	"fmt"
+	"math"
 	"slices"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewHistogram(t *testing.T) {
 	t.Run("SortsBounds", func(t *testing.T) {
 		h := NewHistogram([]float64{100, 10, 50, 1})
-		want := []float64{1, 10, 50, 100}
-		if !slices.Equal(h.Bounds, want) {
-			t.Errorf("Bounds = %v, want %v", h.Bounds, want)
+		snapshot := h.Snapshot()
+		// Verify bounds are sorted (excluding +Inf)
+		bounds := make([]float64, 0, len(snapshot)-1)
+		for i := 0; i < len(snapshot)-1; i++ {
+			bounds = append(bounds, snapshot[i].UpperBound)
 		}
+		want := []float64{1, 10, 50, 100}
+		assert.Equal(t, want, bounds, "bounds should be sorted")
 	})
 
 	t.Run("BucketCount", func(t *testing.T) {
 		h := NewHistogram([]float64{1, 5, 10})
-		if got := len(h.Buckets); got != 4 {
-			t.Errorf("len(Buckets) = %v, want 4", got)
-		}
+		snapshot := h.Snapshot()
+		assert.Equal(t, 4, len(snapshot), "should have 4 buckets (3 bounds + inf)")
 	})
 
 	t.Run("EmptyBounds", func(t *testing.T) {
 		h := NewHistogram([]float64{})
-		if len(h.Bounds) != 0 {
-			t.Errorf("len(Bounds) = %v, want 0", len(h.Bounds))
-		}
-		if len(h.Buckets) != 1 {
-			t.Errorf("len(Buckets) = %v, want 1 (inf bucket)", len(h.Buckets))
-		}
+		snapshot := h.Snapshot()
+		assert.Len(t, snapshot, 1, "should have 1 inf bucket")
+		assert.True(t, math.IsInf(snapshot[0].UpperBound, 1), "single bucket should be +Inf")
 	})
 
 	t.Run("DoesNotModifyInput", func(t *testing.T) {
 		input := []float64{3, 1, 2}
 		original := slices.Clone(input)
 		_ = NewHistogram(input)
-		if !slices.Equal(input, original) {
-			t.Errorf("input modified: got %v, want %v", input, original)
-		}
+		assert.Equal(t, original, input, "input should not be modified")
 	})
 }
 
@@ -65,12 +68,12 @@ func TestHistogramObserve(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			before := h.Buckets[tc.bucket].Load()
+			snapshot := h.Snapshot()
+			before := snapshot[tc.bucket].Count
 			h.Observe(tc.value)
-			after := h.Buckets[tc.bucket].Load()
-			if after != before+1 {
-				t.Errorf("Observe(%v): bucket[%d] = %v, want %v", tc.value, tc.bucket, after, before+1)
-			}
+			snapshot = h.Snapshot()
+			after := snapshot[tc.bucket].Count
+			assert.Equal(t, before+1, after, "bucket should be incremented by 1")
 		})
 	}
 }
@@ -96,12 +99,15 @@ func TestHistogramObserveNegativeBounds(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		before := h.Buckets[tc.bucket].Load()
-		h.Observe(tc.value)
-		after := h.Buckets[tc.bucket].Load()
-		if after != before+1 {
-			t.Errorf("Observe(%v): bucket[%d] = %v, want %v", tc.value, tc.bucket, after, before+1)
-		}
+		name := fmt.Sprintf("value=%v", tc.value)
+		t.Run(name, func(t *testing.T) {
+			snapshot := h.Snapshot()
+			before := snapshot[tc.bucket].Count
+			h.Observe(tc.value)
+			snapshot = h.Snapshot()
+			after := snapshot[tc.bucket].Count
+			assert.Equal(t, before+1, after, "bucket should be incremented by 1 for value %v", tc.value)
+		})
 	}
 }
 
@@ -110,11 +116,14 @@ func TestHistogramObserveEmptyBounds(t *testing.T) {
 
 	// All values go to the single inf bucket
 	for _, v := range []float64{-100, 0, 100} {
-		before := h.Buckets[0].Load()
-		h.Observe(v)
-		if h.Buckets[0].Load() != before+1 {
-			t.Errorf("Observe(%v) did not increment inf bucket", v)
-		}
+		name := fmt.Sprintf("value=%v", v)
+		t.Run(name, func(t *testing.T) {
+			snapshot := h.Snapshot()
+			before := snapshot[0].Count
+			h.Observe(v)
+			snapshot = h.Snapshot()
+			assert.Equal(t, before+1, snapshot[0].Count, "inf bucket should be incremented for value %v", v)
+		})
 	}
 }
 
@@ -132,11 +141,85 @@ func TestHistogramConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 
+	snapshot := h.Snapshot()
 	var total uint64
-	for i := range h.Buckets {
-		total += h.Buckets[i].Load()
+	for _, bucket := range snapshot {
+		total += bucket.Count
 	}
-	if total != uint64(n) {
-		t.Errorf("total observations = %v, want %v", total, n)
-	}
+	assert.Equal(t, uint64(n), total, "total observations should match")
+}
+
+func TestHistogramSnapshot(t *testing.T) {
+	t.Run("EmptyHistogram", func(t *testing.T) {
+		h := NewHistogram([]float64{10, 50, 100})
+		snapshot := h.Snapshot()
+
+		require.Len(t, snapshot, 4, "should have 4 buckets")
+
+		// Verify all counts are zero
+		for i, bucket := range snapshot {
+			assert.Equal(t, uint64(0), bucket.Count, "bucket %d should have zero count", i)
+		}
+
+		// Verify bounds
+		assert.Equal(t, 10.0, snapshot[0].UpperBound, "first bound should be 10")
+		assert.Equal(t, 50.0, snapshot[1].UpperBound, "second bound should be 50")
+		assert.Equal(t, 100.0, snapshot[2].UpperBound, "third bound should be 100")
+		assert.True(t, math.IsInf(snapshot[3].UpperBound, 1), "last bound should be +Inf")
+	})
+
+	t.Run("WithObservations", func(t *testing.T) {
+		h := NewHistogram([]float64{10, 50, 100})
+		h.Observe(5)   // bucket 0
+		h.Observe(25)  // bucket 1
+		h.Observe(75)  // bucket 2
+		h.Observe(200) // bucket 3
+
+		snapshot := h.Snapshot()
+
+		require.Len(t, snapshot, 4, "should have 4 buckets")
+
+		// Verify counts
+		assert.Equal(t, uint64(1), snapshot[0].Count, "bucket 0 should have 1 observation")
+		assert.Equal(t, uint64(1), snapshot[1].Count, "bucket 1 should have 1 observation")
+		assert.Equal(t, uint64(1), snapshot[2].Count, "bucket 2 should have 1 observation")
+		assert.Equal(t, uint64(1), snapshot[3].Count, "bucket 3 should have 1 observation")
+
+		// Verify bounds
+		assert.Equal(t, 10.0, snapshot[0].UpperBound, "bucket 0 upper bound")
+		assert.Equal(t, 50.0, snapshot[1].UpperBound, "bucket 1 upper bound")
+		assert.Equal(t, 100.0, snapshot[2].UpperBound, "bucket 2 upper bound")
+		assert.True(t, math.IsInf(snapshot[3].UpperBound, 1), "bucket 3 should be +Inf")
+	})
+
+	t.Run("SnapshotIsImmutable", func(t *testing.T) {
+		h := NewHistogram([]float64{10})
+		h.Observe(5)
+
+		snapshot1 := h.Snapshot()
+		assert.Equal(t, uint64(1), snapshot1[0].Count, "initial snapshot should have 1 observation")
+
+		// Add more observations
+		h.Observe(5)
+		h.Observe(5)
+
+		// Original snapshot should be unchanged
+		assert.Equal(t, uint64(1), snapshot1[0].Count, "original snapshot should be unchanged")
+
+		// New snapshot should reflect updates
+		snapshot2 := h.Snapshot()
+		assert.Equal(t, uint64(3), snapshot2[0].Count, "new snapshot should have 3 observations")
+	})
+
+	t.Run("EmptyBoundsHistogram", func(t *testing.T) {
+		h := NewHistogram([]float64{})
+		h.Observe(100)
+		h.Observe(-100)
+
+		snapshot := h.Snapshot()
+
+		require.Len(t, snapshot, 1, "should have 1 bucket")
+		assert.Equal(t, uint64(2), snapshot[0].Count, "inf bucket should have 2 observations")
+		assert.True(t, math.IsInf(snapshot[0].UpperBound, 1), "should be +Inf")
+	})
 }

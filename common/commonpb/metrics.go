@@ -1,8 +1,6 @@
 package commonpb
 
 import (
-	"math"
-
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 )
 
@@ -17,24 +15,25 @@ func MetricValueToProto(v metrics.IsMetricValue) isMetric_Value {
 			Gauge: v.Load(),
 		}
 	case *metrics.Histogram:
-		boundsCount := len(v.Bounds)
+		bucketSnapshots := v.Snapshot()
 
-		// one extra bucket for +inf bound
-		buckets := make([]*Bucket, 0, boundsCount+1)
+		// NOTE: The buckets are populated with raw per-bucket counts, not cumulative counts.
+		// This is a deliberate divergence from Prometheus/OpenTelemetry semantics where each
+		// bucket count is cumulative (includes all observations ≤ upper bound).
+		// Here, each bucket contains only the count of observations that fall within its
+		// specific range (previous_bound < value ≤ upper_bound).
+		buckets := make([]*Bucket, len(bucketSnapshots))
 		var totalCount uint64
 
-		for i := range boundsCount {
-			count := v.Buckets[i].Load()
-			totalCount += count
-			buckets = append(buckets, &Bucket{
-				Count:      count,
-				UpperBound: v.Bounds[i],
-			})
+		for i := range bucketSnapshots {
+			bucket := &bucketSnapshots[i]
+			totalCount += bucket.Count
+			buckets[i] = &Bucket{
+				Count:      bucket.Count,
+				UpperBound: bucket.UpperBound,
+			}
 		}
 
-		infCount := v.Buckets[boundsCount].Load()
-		totalCount += infCount
-		buckets = append(buckets, &Bucket{Count: infCount, UpperBound: math.Inf(1)})
 		return &Metric_Histogram{
 			Histogram: &Histogram{
 				Buckets:    buckets,
@@ -42,6 +41,7 @@ func MetricValueToProto(v metrics.IsMetricValue) isMetric_Value {
 			},
 		}
 	}
+
 	return nil
 }
 

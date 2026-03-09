@@ -1,17 +1,23 @@
 package metrics
 
 import (
+	"math"
 	"sort"
 	"sync/atomic"
 )
 
+type BucketSnapshot struct {
+	UpperBound float64
+	Count      uint64
+}
+
 type Histogram struct {
-	Bounds []float64
+	bounds []float64
 
 	// Buckets holds the counters.
 	// len(Buckets) == len(bounds) + 1.
 	// The last bucket is for values > the last bound (+Inf).
-	Buckets []atomic.Uint64
+	buckets []atomic.Uint64
 }
 
 func NewHistogram(bounds []float64) *Histogram {
@@ -20,16 +26,32 @@ func NewHistogram(bounds []float64) *Histogram {
 	sort.Float64s(sorted)
 
 	return &Histogram{
-		Bounds: sorted,
+		bounds: sorted,
 		// we need 1 extra bucket for the "infinite" bucket (values > max bound)
-		Buckets: make([]atomic.Uint64, len(sorted)+1),
+		buckets: make([]atomic.Uint64, len(sorted)+1),
 	}
 }
 
 // Observe records a new value.
 // Complexity: O(log N) for search + O(1) for atomic write.
-func (h *Histogram) Observe(value float64) {
-	idx := sort.SearchFloat64s(h.Bounds, value)
+func (m *Histogram) Observe(value float64) {
+	idx := sort.SearchFloat64s(m.bounds, value)
 
-	h.Buckets[idx].Add(1)
+	m.buckets[idx].Add(1)
+}
+
+// Snapshot returns a snapshot of the histogram buckets.
+func (m *Histogram) Snapshot() []BucketSnapshot {
+	snapshot := make([]BucketSnapshot, len(m.buckets))
+	for i := range m.bounds {
+		snapshot[i] = BucketSnapshot{
+			UpperBound: m.bounds[i],
+			Count:      m.buckets[i].Load(),
+		}
+	}
+	snapshot[len(m.bounds)] = BucketSnapshot{
+		UpperBound: math.Inf(1),
+		Count:      m.buckets[len(m.bounds)].Load(),
+	}
+	return snapshot
 }

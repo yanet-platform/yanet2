@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 )
 
@@ -14,12 +16,8 @@ func TestMetricValueToProto_Counter(t *testing.T) {
 	result := MetricValueToProto(&counter)
 
 	mc, ok := result.(*Metric_Counter)
-	if !ok {
-		t.Fatalf("expected *Metric_Counter, got %T", result)
-	}
-	if mc.Counter != 42 {
-		t.Errorf("expected counter value 42, got %d", mc.Counter)
-	}
+	require.True(t, ok, "expected *Metric_Counter, got %T", result)
+	assert.Equal(t, uint64(42), mc.Counter, "counter value should match")
 }
 
 func TestMetricValueToProto_Gauge(t *testing.T) {
@@ -29,16 +27,15 @@ func TestMetricValueToProto_Gauge(t *testing.T) {
 	result := MetricValueToProto(&gauge)
 
 	mg, ok := result.(*Metric_Gauge)
-	if !ok {
-		t.Fatalf("expected *Metric_Gauge, got %T", result)
-	}
-	if mg.Gauge != 3.14 {
-		t.Errorf("expected gauge value 3.14, got %f", mg.Gauge)
-	}
+	require.True(t, ok, "expected *Metric_Gauge, got %T", result)
+	assert.Equal(t, 3.14, mg.Gauge, "gauge value should match")
 }
 
 func TestMetricValueToProto_Histogram(t *testing.T) {
+	// Create histogram with pre-populated buckets to test conversion, not histogram logic
 	histogram := metrics.NewHistogram([]float64{10, 50, 100})
+
+	// Pre-populate buckets with known values
 	histogram.Observe(5)   // bucket 0 (<=10)
 	histogram.Observe(25)  // bucket 1 (<=50)
 	histogram.Observe(75)  // bucket 2 (<=100)
@@ -47,31 +44,23 @@ func TestMetricValueToProto_Histogram(t *testing.T) {
 	result := MetricValueToProto(histogram)
 
 	mh, ok := result.(*Metric_Histogram)
-	if !ok {
-		t.Fatalf("expected *Metric_Histogram, got %T", result)
-	}
+	require.True(t, ok, "expected *Metric_Histogram, got %T", result)
 
 	h := mh.Histogram
-	if len(h.Buckets) != 4 {
-		t.Fatalf("expected 4 buckets, got %d", len(h.Buckets))
-	}
+	require.NotNil(t, h, "histogram should not be nil")
 
-	// Check bucket bounds and counts
+	// Verify conversion maps histogram snapshot to proto correctly
+	assert.Equal(t, 4, len(h.Buckets), "should have 4 buckets")
+
+	// Verify bucket bounds are correctly mapped
 	expectedBounds := []float64{10, 50, 100, math.Inf(1)}
-	expectedCounts := []uint64{1, 1, 1, 1}
-
 	for i, bucket := range h.Buckets {
-		if bucket.UpperBound != expectedBounds[i] {
-			t.Errorf("bucket %d: expected upper bound %f, got %f", i, expectedBounds[i], bucket.UpperBound)
-		}
-		if bucket.Count != expectedCounts[i] {
-			t.Errorf("bucket %d: expected count %d, got %d", i, expectedCounts[i], bucket.Count)
-		}
+		assert.Equal(t, expectedBounds[i], bucket.UpperBound, "bucket %d upper bound should match", i)
+		assert.Equal(t, uint64(1), bucket.Count, "bucket %d count should match", i)
 	}
 
-	if h.TotalCount != 4 {
-		t.Errorf("expected total count 4, got %d", h.TotalCount)
-	}
+	// Verify total count is correctly calculated
+	assert.Equal(t, uint64(4), h.TotalCount, "total count should match")
 }
 
 func TestMetricLabelsToProto(t *testing.T) {
@@ -82,24 +71,18 @@ func TestMetricLabelsToProto(t *testing.T) {
 
 	result := MetricLabelsToProto(labels)
 
-	if len(result) != 2 {
-		t.Fatalf("expected 2 labels, got %d", len(result))
-	}
+	require.Len(t, result, 2, "should have 2 labels")
 
-	if result[0].Name != "env" || result[0].Value != "prod" {
-		t.Errorf("label 0: expected env=prod, got %s=%s", result[0].Name, result[0].Value)
-	}
-	if result[1].Name != "region" || result[1].Value != "us-east" {
-		t.Errorf("label 1: expected region=us-east, got %s=%s", result[1].Name, result[1].Value)
-	}
+	assert.Equal(t, "env", result[0].Name, "first label name should match")
+	assert.Equal(t, "prod", result[0].Value, "first label value should match")
+	assert.Equal(t, "region", result[1].Name, "second label name should match")
+	assert.Equal(t, "us-east", result[1].Value, "second label value should match")
 }
 
 func TestMetricLabelsToProto_Empty(t *testing.T) {
 	result := MetricLabelsToProto(nil)
 
-	if len(result) != 0 {
-		t.Errorf("expected empty slice, got %d labels", len(result))
-	}
+	assert.Empty(t, result, "should return empty slice for nil input")
 }
 
 func TestMetricRefsToProto_Counter(t *testing.T) {
@@ -117,9 +100,7 @@ func TestMetricRefsToProto_Counter(t *testing.T) {
 	refs := m.Metrics()
 	result := MetricRefsToProto(refs)
 
-	if len(result) != 2 {
-		t.Fatalf("expected 2 metrics, got %d", len(result))
-	}
+	require.Len(t, result, 2, "should have 2 metrics")
 
 	// Find metrics by label value
 	var getMetric, postMetric *Metric
@@ -131,19 +112,12 @@ func TestMetricRefsToProto_Counter(t *testing.T) {
 		}
 	}
 
-	if getMetric == nil || postMetric == nil {
-		t.Fatal("could not find expected metrics")
-	}
+	require.NotNil(t, getMetric, "should find GET metric")
+	require.NotNil(t, postMetric, "should find POST metric")
 
-	if getMetric.Name != "requests" {
-		t.Errorf("expected name 'requests', got '%s'", getMetric.Name)
-	}
-	if getMetric.GetCounter() != 100 {
-		t.Errorf("expected GET counter 100, got %d", getMetric.GetCounter())
-	}
-	if postMetric.GetCounter() != 50 {
-		t.Errorf("expected POST counter 50, got %d", postMetric.GetCounter())
-	}
+	assert.Equal(t, "requests", getMetric.Name, "GET metric name should match")
+	assert.Equal(t, uint64(100), getMetric.GetCounter(), "GET counter value should match")
+	assert.Equal(t, uint64(50), postMetric.GetCounter(), "POST counter value should match")
 }
 
 func TestMetricRefsToProto_Gauge(t *testing.T) {
@@ -156,19 +130,13 @@ func TestMetricRefsToProto_Gauge(t *testing.T) {
 	refs := m.Metrics()
 	result := MetricRefsToProto(refs)
 
-	if len(result) != 1 {
-		t.Fatalf("expected 1 metric, got %d", len(result))
-	}
+	require.Len(t, result, 1, "should have 1 metric")
 
-	if result[0].Name != "temperature" {
-		t.Errorf("expected name 'temperature', got '%s'", result[0].Name)
-	}
-	if result[0].GetGauge() != 65.5 {
-		t.Errorf("expected gauge 65.5, got %f", result[0].GetGauge())
-	}
-	if len(result[0].Labels) != 1 || result[0].Labels[0].Name != "location" || result[0].Labels[0].Value != "cpu" {
-		t.Errorf("unexpected labels: %+v", result[0].Labels)
-	}
+	assert.Equal(t, "temperature", result[0].Name, "metric name should match")
+	assert.Equal(t, 65.5, result[0].GetGauge(), "gauge value should match")
+	require.Len(t, result[0].Labels, 1, "should have 1 label")
+	assert.Equal(t, "location", result[0].Labels[0].Name, "label name should match")
+	assert.Equal(t, "cpu", result[0].Labels[0].Value, "label value should match")
 }
 
 func TestMetricRefsToProto_Histogram(t *testing.T) {
@@ -183,26 +151,15 @@ func TestMetricRefsToProto_Histogram(t *testing.T) {
 	refs := m.Metrics()
 	result := MetricRefsToProto(refs)
 
-	if len(result) != 1 {
-		t.Fatalf("expected 1 metric, got %d", len(result))
-	}
+	require.Len(t, result, 1, "should have 1 metric")
 
-	if result[0].Name != "latency" {
-		t.Errorf("expected name 'latency', got '%s'", result[0].Name)
-	}
+	assert.Equal(t, "latency", result[0].Name, "metric name should match")
 
 	hist := result[0].GetHistogram()
-	if hist == nil {
-		t.Fatal("expected histogram value")
-	}
+	require.NotNil(t, hist, "histogram value should not be nil")
 
-	if len(hist.Buckets) != 4 {
-		t.Fatalf("expected 4 buckets, got %d", len(hist.Buckets))
-	}
-
-	if hist.TotalCount != 3 {
-		t.Errorf("expected total count 3, got %d", hist.TotalCount)
-	}
+	assert.Len(t, hist.Buckets, 4, "should have 4 buckets")
+	assert.Equal(t, uint64(3), hist.TotalCount, "total count should match")
 }
 
 func TestMetricRefsToProto_Empty(t *testing.T) {
@@ -211,9 +168,7 @@ func TestMetricRefsToProto_Empty(t *testing.T) {
 	refs := m.Metrics()
 	result := MetricRefsToProto(refs)
 
-	if len(result) != 0 {
-		t.Errorf("expected empty slice, got %d metrics", len(result))
-	}
+	assert.Empty(t, result, "should return empty slice for empty metric map")
 }
 
 func TestMetricRefsToProto_LiveUpdates(t *testing.T) {
@@ -227,9 +182,7 @@ func TestMetricRefsToProto_LiveUpdates(t *testing.T) {
 	refs := m.Metrics()
 	result1 := MetricRefsToProto(refs)
 
-	if result1[0].GetCounter() != 10 {
-		t.Errorf("expected counter 10, got %d", result1[0].GetCounter())
-	}
+	assert.Equal(t, uint64(10), result1[0].GetCounter(), "initial counter value should be 10")
 
 	// Update the counter
 	c.Add(5)
@@ -238,7 +191,5 @@ func TestMetricRefsToProto_LiveUpdates(t *testing.T) {
 	refs = m.Metrics()
 	result2 := MetricRefsToProto(refs)
 
-	if result2[0].GetCounter() != 15 {
-		t.Errorf("expected counter 15, got %d", result2[0].GetCounter())
-	}
+	assert.Equal(t, uint64(15), result2[0].GetCounter(), "updated counter value should be 15")
 }

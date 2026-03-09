@@ -23,8 +23,8 @@ type metricEntry[T any] struct {
 	metric T
 }
 
-func NewMetricMap[T any]() MetricMap[T] {
-	return MetricMap[T]{entries: map[uint64][]metricEntry[T]{}}
+func NewMetricMap[T any]() *MetricMap[T] {
+	return &MetricMap[T]{entries: map[uint64][]metricEntry[T]{}}
 }
 
 // GetOrCreate returns the metric for the given label set, creating it via

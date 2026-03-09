@@ -257,8 +257,9 @@ impl BalancerService {
         let response = self.client.get_metrics(request).await?.into_inner();
         let s = serde_json::to_string(&response)?;
         println!("{}", s);
+        Ok(())
     }
-  
+
     /// Handle VS commands
     async fn handle_vs(&mut self, cmd: VsCmd) -> Result<(), Box<dyn Error>> {
         match cmd.mode {

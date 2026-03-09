@@ -5,6 +5,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMetricMapGetOrCreate(t *testing.T) {
@@ -15,12 +18,8 @@ func TestMetricMapGetOrCreate(t *testing.T) {
 		var calls int
 		c := m.GetOrCreate(id, func() *Counter { calls++; return &Counter{} })
 
-		if calls != 1 {
-			t.Errorf("create called %d times, want 1", calls)
-		}
-		if c == nil {
-			t.Fatal("GetOrCreate returned nil")
-		}
+		assert.Equal(t, 1, calls, "create should be called once")
+		require.NotNil(t, c, "GetOrCreate should not return nil")
 	})
 
 	t.Run("ReturnsExisting", func(t *testing.T) {
@@ -33,15 +32,9 @@ func TestMetricMapGetOrCreate(t *testing.T) {
 		var calls int
 		c2 := m.GetOrCreate(id, func() *Counter { calls++; return &Counter{} })
 
-		if calls != 0 {
-			t.Errorf("create called %d times for existing metric", calls)
-		}
-		if c1 != c2 {
-			t.Error("GetOrCreate returned different pointer for same ID")
-		}
-		if c2.Load() != 1 {
-			t.Errorf("existing metric value = %d, want 1", c2.Load())
-		}
+		assert.Equal(t, 0, calls, "create should not be called for existing metric")
+		assert.Same(t, c1, c2, "should return same pointer for same ID")
+		assert.Equal(t, uint64(1), c2.Load(), "existing metric value should be preserved")
 	})
 
 	t.Run("DifferentIDs", func(t *testing.T) {
@@ -55,9 +48,8 @@ func TestMetricMapGetOrCreate(t *testing.T) {
 		c1.Add(10)
 		c2.Add(20)
 
-		if c1.Load() != 10 || c2.Load() != 20 {
-			t.Errorf("metrics not independent: c1=%d, c2=%d", c1.Load(), c2.Load())
-		}
+		assert.Equal(t, uint64(10), c1.Load(), "metric1 should have correct value")
+		assert.Equal(t, uint64(20), c2.Load(), "metric2 should have correct value")
 	})
 }
 
@@ -70,23 +62,17 @@ func TestMetricMapLabelOrder(t *testing.T) {
 	c1 := m.GetOrCreate(id1, func() *Counter { return &Counter{} })
 	c2 := m.GetOrCreate(id2, func() *Counter { return &Counter{} })
 
-	if c1 == c2 {
-		t.Error("different label order should create different metrics")
-	}
+	assert.NotSame(t, c1, c2, "different label order should create different metrics")
 
 	c1.Inc()
-	if c2.Load() != 0 {
-		t.Error("metrics with different label order should be independent")
-	}
+	assert.Equal(t, uint64(0), c2.Load(), "metrics with different label order should be independent")
 }
 
 func TestMetricMapMetrics(t *testing.T) {
 	t.Run("Empty", func(t *testing.T) {
 		m := NewMetricMap[*Counter]()
 		refs := m.Metrics()
-		if len(refs) != 0 {
-			t.Errorf("Metrics() on empty map = %d items, want 0", len(refs))
-		}
+		assert.Empty(t, refs, "Metrics() on empty map should return empty slice")
 	})
 
 	t.Run("ReturnsAll", func(t *testing.T) {
@@ -97,9 +83,7 @@ func TestMetricMapMetrics(t *testing.T) {
 		}
 
 		refs := m.Metrics()
-		if len(refs) != 5 {
-			t.Errorf("Metrics() = %d items, want 5", len(refs))
-		}
+		assert.Len(t, refs, 5, "Metrics() should return all metrics")
 	})
 
 	t.Run("LiveReferences", func(t *testing.T) {
@@ -108,25 +92,19 @@ func TestMetricMapMetrics(t *testing.T) {
 		c := m.GetOrCreate(id, func() *Counter { return &Counter{} })
 
 		refs := m.Metrics()
-		if len(refs) != 1 {
-			t.Fatalf("Metrics() = %d items, want 1", len(refs))
-		}
+		require.Len(t, refs, 1, "should have 1 metric")
 
 		// Modify via original pointer
 		c.Add(100)
 
 		// Should be reflected in the reference
-		if refs[0].Value.Load() != 100 {
-			t.Errorf("live reference not updated: got %d, want 100", refs[0].Value.Load())
-		}
+		assert.Equal(t, uint64(100), refs[0].Value.Load(), "live reference should reflect updates")
 
 		// Modify via reference
 		refs[0].Value.Add(50)
 
 		// Should be reflected in original
-		if c.Load() != 150 {
-			t.Errorf("original not updated via reference: got %d, want 150", c.Load())
-		}
+		assert.Equal(t, uint64(150), c.Load(), "original should reflect updates via reference")
 	})
 
 	t.Run("IDsPreserved", func(t *testing.T) {
@@ -135,9 +113,7 @@ func TestMetricMapMetrics(t *testing.T) {
 		m.GetOrCreate(id, func() *Counter { return &Counter{} })
 
 		refs := m.Metrics()
-		if !refs[0].ID.EqualOrdered(id) {
-			t.Errorf("ID not preserved: got %+v, want %+v", refs[0].ID, id)
-		}
+		assert.True(t, refs[0].ID.EqualOrdered(id), "ID should be preserved")
 	})
 }
 
@@ -168,19 +144,13 @@ func TestMetricMapConcurrent(t *testing.T) {
 	wg.Wait()
 
 	// Each metric should be created exactly once
-	if createCalls.Load() != int64(len(ids)) {
-		t.Errorf("create called %d times, want %d", createCalls.Load(), len(ids))
-	}
+	assert.Equal(t, int64(len(ids)), createCalls.Load(), "each metric should be created exactly once")
 
 	// Each metric should have n increments
 	refs := m.Metrics()
-	if len(refs) != len(ids) {
-		t.Errorf("Metrics() = %d items, want %d", len(refs), len(ids))
-	}
+	assert.Len(t, refs, len(ids), "should have correct number of metrics")
 	for _, ref := range refs {
-		if ref.Value.Load() != uint64(n) {
-			t.Errorf("metric %s = %d, want %d", ref.ID.Name, ref.Value.Load(), n)
-		}
+		assert.Equal(t, uint64(n), ref.Value.Load(), "metric %s should have correct count", ref.ID.Name)
 	}
 }
 
@@ -192,9 +162,7 @@ func TestMetricMapIntegration(t *testing.T) {
 		g.Store(36.6)
 
 		refs := m.Metrics()
-		if refs[0].Value.Load() != 36.6 {
-			t.Errorf("Gauge value = %v, want 36.6", refs[0].Value.Load())
-		}
+		assert.Equal(t, 36.6, refs[0].Value.Load(), "Gauge value should match")
 	})
 
 	t.Run("WithHistogram", func(t *testing.T) {
@@ -204,13 +172,12 @@ func TestMetricMapIntegration(t *testing.T) {
 		h.Observe(25)
 
 		refs := m.Metrics()
-		total := uint64(0)
-		for i := range (*refs[0].Value).Buckets {
-			total += (*refs[0].Value).Buckets[i].Load()
+		snapshot := refs[0].Value.Snapshot()
+		var total uint64
+		for _, bucket := range snapshot {
+			total += bucket.Count
 		}
-		if total != 1 {
-			t.Errorf("Histogram total = %d, want 1", total)
-		}
+		assert.Equal(t, uint64(1), total, "Histogram total should match")
 	})
 }
 

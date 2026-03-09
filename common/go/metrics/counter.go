@@ -8,14 +8,14 @@ type Counter struct {
 	value atomic.Uint64
 }
 
-func (c *Counter) Add(value uint64) uint64 {
-	return c.value.Add(value)
+func (m *Counter) Add(value uint64) uint64 {
+	return m.value.Add(value)
 }
 
-func (c *Counter) Inc() uint64 {
-	return c.Add(1)
+func (m *Counter) Inc() uint64 {
+	return m.Add(1)
 }
 
-func (c *Counter) Load() uint64 {
-	return c.value.Load()
+func (m *Counter) Load() uint64 {
+	return m.value.Load()
 }

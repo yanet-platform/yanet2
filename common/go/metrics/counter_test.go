@@ -3,53 +3,41 @@ package metrics
 import (
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCounter(t *testing.T) {
 	t.Run("ZeroValue", func(t *testing.T) {
 		var c Counter
-		if got := c.Load(); got != 0 {
-			t.Errorf("zero-value Counter.Load() = %v, want 0", got)
-		}
+		assert.Equal(t, uint64(0), c.Load(), "zero-value Counter should be 0")
 	})
 
 	t.Run("Inc", func(t *testing.T) {
 		var c Counter
 		for i := uint64(1); i <= 5; i++ {
 			got := c.Inc()
-			if got != i {
-				t.Errorf("Inc() = %v, want %v", got, i)
-			}
-			if c.Load() != i {
-				t.Errorf("Load() = %v, want %v", c.Load(), i)
-			}
+			assert.Equal(t, i, got, "Inc() should return incremented value")
+			assert.Equal(t, i, c.Load(), "Load() should match incremented value")
 		}
 	})
 
 	t.Run("Add", func(t *testing.T) {
 		var c Counter
 		got := c.Add(10)
-		if got != 10 {
-			t.Errorf("Add(10) = %v, want 10", got)
-		}
+		assert.Equal(t, uint64(10), got, "Add(10) should return 10")
 
 		got = c.Add(5)
-		if got != 15 {
-			t.Errorf("Add(5) = %v, want 15", got)
-		}
+		assert.Equal(t, uint64(15), got, "Add(5) should return 15")
 
-		if c.Load() != 15 {
-			t.Errorf("Load() = %v, want 15", c.Load())
-		}
+		assert.Equal(t, uint64(15), c.Load(), "Load() should return 15")
 	})
 
 	t.Run("AddZero", func(t *testing.T) {
 		var c Counter
 		c.Add(10)
 		got := c.Add(0)
-		if got != 10 {
-			t.Errorf("Add(0) = %v, want 10", got)
-		}
+		assert.Equal(t, uint64(10), got, "Add(0) should not change value")
 	})
 }
 
@@ -69,7 +57,5 @@ func TestCounterConcurrent(t *testing.T) {
 	wg.Wait()
 
 	want := uint64(n) * perGoroutine
-	if got := c.Load(); got != want {
-		t.Errorf("concurrent Add: got %v, want %v", got, want)
-	}
+	assert.Equal(t, want, c.Load(), "concurrent Add should produce correct total")
 }
