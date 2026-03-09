@@ -144,9 +144,20 @@ func TestMetricRefsToProto_Histogram(t *testing.T) {
 
 	id := metrics.MetricID{Name: "latency", Labels: []metrics.Label{{Name: "endpoint", Value: "/api"}}}
 	h := m.GetOrCreate(id, func() *metrics.Histogram { return metrics.NewHistogram([]float64{10, 50, 100}) })
+
+	// Observe values in different buckets:
+	// bucket 0 (<=10): 5, 8
+	// bucket 1 (10,50]: 25, 30
+	// bucket 2 (50,100]: 75
+	// bucket 3 (>100): 150, 200, 300
 	h.Observe(5)
+	h.Observe(8)
 	h.Observe(25)
+	h.Observe(30)
 	h.Observe(75)
+	h.Observe(150)
+	h.Observe(200)
+	h.Observe(300)
 
 	refs := m.Metrics()
 	result := MetricRefsToProto(refs)
@@ -154,12 +165,39 @@ func TestMetricRefsToProto_Histogram(t *testing.T) {
 	require.Len(t, result, 1, "should have 1 metric")
 
 	assert.Equal(t, "latency", result[0].Name, "metric name should match")
+	require.Len(t, result[0].Labels, 1, "should have 1 label")
+	assert.Equal(t, "endpoint", result[0].Labels[0].Name, "label name should match")
+	assert.Equal(t, "/api", result[0].Labels[0].Value, "label value should match")
 
 	hist := result[0].GetHistogram()
 	require.NotNil(t, hist, "histogram value should not be nil")
 
-	assert.Len(t, hist.Buckets, 4, "should have 4 buckets")
-	assert.Equal(t, uint64(3), hist.TotalCount, "total count should match")
+	// Verify bucket structure
+	require.Len(t, hist.Buckets, 4, "should have 4 buckets (3 bounds + inf)")
+
+	// Verify each bucket's upper bound and count
+	// Note: counts are raw per-bucket counts, not cumulative
+	assert.Equal(t, 10.0, hist.Buckets[0].UpperBound, "bucket 0 upper bound should be 10")
+	assert.Equal(t, uint64(2), hist.Buckets[0].Count, "bucket 0 should have 2 observations (5, 8)")
+
+	assert.Equal(t, 50.0, hist.Buckets[1].UpperBound, "bucket 1 upper bound should be 50")
+	assert.Equal(t, uint64(2), hist.Buckets[1].Count, "bucket 1 should have 2 observations (25, 30)")
+
+	assert.Equal(t, 100.0, hist.Buckets[2].UpperBound, "bucket 2 upper bound should be 100")
+	assert.Equal(t, uint64(1), hist.Buckets[2].Count, "bucket 2 should have 1 observation (75)")
+
+	assert.True(t, math.IsInf(hist.Buckets[3].UpperBound, 1), "bucket 3 upper bound should be +Inf")
+	assert.Equal(t, uint64(3), hist.Buckets[3].Count, "bucket 3 should have 3 observations (150, 200, 300)")
+
+	// Verify total count
+	assert.Equal(t, uint64(8), hist.TotalCount, "total count should be sum of all bucket counts")
+
+	// Verify total count matches sum of individual buckets
+	var sumCounts uint64
+	for _, bucket := range hist.Buckets {
+		sumCounts += bucket.Count
+	}
+	assert.Equal(t, hist.TotalCount, sumCounts, "total count should equal sum of bucket counts")
 }
 
 func TestMetricRefsToProto_Empty(t *testing.T) {
