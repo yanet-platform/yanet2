@@ -6,7 +6,6 @@ package ffi
 
 import (
 	"net/netip"
-	"strconv"
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
@@ -83,7 +82,7 @@ type RelativeRealIdentifier struct {
 }
 
 func (id *RelativeRealIdentifier) String() string {
-	return id.Addr.String() + ":" + strconv.Itoa(int(id.Port))
+	return netip.AddrPortFrom(id.Addr, id.Port).String()
 }
 
 // RealIdentifier uniquely identifies a real server within a virtual service

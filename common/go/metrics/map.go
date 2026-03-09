@@ -14,7 +14,6 @@ import (
 type MetricMap[T any] struct {
 	mu sync.RWMutex
 
-	// we need stable pointers here
 	entries map[uint64][]metricEntry[T]
 }
 
@@ -27,22 +26,22 @@ func NewMetricMap[T any]() *MetricMap[T] {
 	return &MetricMap[T]{entries: map[uint64][]metricEntry[T]{}}
 }
 
-// GetOrCreate returns the metric for the given label set, creating it via
-// create if it does not yet exist. Order of labels is important
-func (m *MetricMap[T]) GetOrCreate(id MetricID, create func() T) T {
-	h := hashID(id)
-
+func (m *MetricMap[T]) tryGet(id MetricID, h uint64) *T {
 	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	if bucket, ok := m.entries[h]; ok {
 		for idx := range bucket {
 			if bucket[idx].id.EqualOrdered(id) {
-				m.mu.RUnlock()
-				return bucket[idx].metric
+				return &bucket[idx].metric
 			}
 		}
 	}
-	m.mu.RUnlock()
 
+	return nil
+}
+
+func (m *MetricMap[T]) create(id MetricID, h uint64, create func() T) T {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -53,10 +52,20 @@ func (m *MetricMap[T]) GetOrCreate(id MetricID, create func() T) T {
 			}
 		}
 	}
-
 	m.entries[h] = append(m.entries[h], metricEntry[T]{id: id, metric: create()})
-
 	return m.entries[h][len(m.entries[h])-1].metric
+}
+
+// GetOrCreate returns the metric for the given label list, creating it via
+// create if it does not yet exist. Order of labels is important
+func (m *MetricMap[T]) GetOrCreate(id MetricID, create func() T) T {
+	h := hashID(id)
+
+	if existent := m.tryGet(id, h); existent != nil {
+		return *existent
+	}
+
+	return m.create(id, h, create)
 }
 
 // Metrics returns a slice of references of all stored metrics.

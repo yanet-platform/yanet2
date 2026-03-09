@@ -245,258 +245,7 @@ func (b *BalancerManager) Stats(
 	return ConvertBalancerStatsToProto(ffiStats), nil
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-var commonCounters = []struct {
-	name   string
-	getter func(*ffi.BalancerStats) uint64
-}{
-	{
-		name: "incoming_bits",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.Common.IncomingBytes * 8
-		},
-	},
-	{
-		name: "incoming_packets",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.Common.IncomingPackets
-		},
-	},
-	{
-		name: "outgoing_bits",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.Common.OutgoingBytes * 8
-		},
-	},
-	{
-		name: "outgoing_packets",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.Common.OutgoingPackets
-		},
-	},
-	{
-		name: "l4_incoming_packets",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.L4.IncomingPackets
-		},
-	},
-	{
-		name: "l4_outgoing_packets",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.L4.OutgoingPackets
-		},
-	},
-	{
-		name: "l4_select_vs_failed",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.L4.SelectVsFailed
-		},
-	},
-	{
-		name: "icmp_ipv4_incoming_packets",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.IcmpIpv4.IncomingPackets
-		},
-	},
-	{
-		name: "icmp_ipv6_incoming_packets",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.IcmpIpv6.IncomingPackets
-		},
-	},
-	{
-		name: "icmp_ipv4_forwarded_packets",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.IcmpIpv4.ForwardedPackets
-		},
-	},
-	{
-		name: "icmp_ipv4_packet_clones_sent",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.IcmpIpv4.PacketClonesSent
-		},
-	},
-	{
-		name: "icmp_ipv4_packet_clones_received",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.IcmpIpv4.PacketClonesReceived
-		},
-	},
-	{
-		name: "icmp_ipv4_packet_clone_failures",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.IcmpIpv4.PacketCloneFailures
-		},
-	},
-	{
-		name: "icmp_ipv6_forwarded_packets",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.IcmpIpv6.ForwardedPackets
-		},
-	},
-	{
-		name: "icmp_ipv6_packet_clones_sent",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.IcmpIpv6.PacketClonesSent
-		},
-	},
-	{
-		name: "icmp_ipv6_packet_clones_received",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.IcmpIpv6.PacketClonesReceived
-		},
-	},
-	{
-		name: "icmp_ipv6_packet_clone_failures",
-		getter: func(s *ffi.BalancerStats) uint64 {
-			return s.IcmpIpv6.PacketCloneFailures
-		},
-	},
-}
-
-var vsCounters = []struct {
-	name   string
-	getter func(*ffi.VsStats) uint64
-}{
-	{
-		name: "vs_incoming_bits",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.IncomingBytes * 8
-		},
-	},
-	{
-		name: "vs_incoming_packets",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.IncomingPackets
-		},
-	},
-	{
-		name: "vs_outgoing_bits",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.OutgoingBytes * 8
-		},
-	},
-	{
-		name: "vs_outgoing_packets",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.OutgoingPackets
-		},
-	},
-	{
-		name: "vs_created_sessions",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.CreatedSessions
-		},
-	},
-	{
-		name: "vs_packet_src_not_allowed",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.PacketSrcNotAllowed
-		},
-	},
-	{
-		name: "vs_no_reals",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.NoReals
-		},
-	},
-	{
-		name: "vs_ops_packets",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.OpsPackets
-		},
-	},
-	{
-		name: "vs_session_table_overflow",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.SessionTableOverflow
-		},
-	},
-	{
-		name: "vs_echo_icmp_packets",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.EchoIcmpPackets
-		},
-	},
-	{
-		name: "vs_error_icmp_packets",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.ErrorIcmpPackets
-		},
-	},
-	{
-		name: "vs_real_is_disabled",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.RealIsDisabled
-		},
-	},
-	{
-		name: "vs_real_is_removed",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.RealIsRemoved
-		},
-	},
-	{
-		name: "vs_not_rescheduled_packets",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.NotRescheduledPackets
-		},
-	},
-	{
-		name: "vs_broadcasted_icmp_packets",
-		getter: func(s *ffi.VsStats) uint64 {
-			return s.BroadcastedIcmpPackets
-		},
-	},
-}
-
-var realCounters = []struct {
-	name   string
-	getter func(*ffi.RealStats) uint64
-}{
-	{
-		name: "real_incoming_bits",
-		getter: func(s *ffi.RealStats) uint64 {
-			return s.Bytes * 8
-		},
-	},
-	{
-		name: "real_incoming_packets",
-		getter: func(s *ffi.RealStats) uint64 {
-			return s.Packets
-		},
-	},
-	{
-		name: "real_created_sessions",
-		getter: func(s *ffi.RealStats) uint64 {
-			return s.CreatedSessions
-		},
-	},
-	{
-		name: "real_icmp_error_packets",
-		getter: func(s *ffi.RealStats) uint64 {
-			return s.ErrorIcmpPackets
-		},
-	},
-	{
-		name: "real_ops_packets",
-		getter: func(s *ffi.RealStats) uint64 {
-			return s.OpsPackets
-		},
-	},
-	{
-		name: "packets_real_disabled",
-		getter: func(s *ffi.RealStats) uint64 {
-			return s.PacketsRealDisabled
-		},
-	},
-}
-
-func (b *BalancerManager) Metrics(
-	now time.Time,
-	ref *balancerpb.PacketHandlerRef,
-) ([]*commonpb.Metric, error) {
+func (b *BalancerManager) Metrics(ref *balancerpb.PacketHandlerRef) ([]*commonpb.Metric, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -513,136 +262,58 @@ func (b *BalancerManager) Metrics(
 		return nil, fmt.Errorf("failed to get stats: %s", err)
 	}
 
-	info, err := b.handle.Info(now)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get info: %s", err)
-	}
-
-	config := b.handle.Config()
-
 	refLabels := make([]*commonpb.Label, 0, 5)
-	refLabels = append(
-		refLabels,
-		&commonpb.Label{Name: "device", Value: *ref.Device},
-	)
-	refLabels = append(
-		refLabels,
-		&commonpb.Label{Name: "pipeline", Value: *ref.Pipeline},
-	)
-	refLabels = append(
-		refLabels,
-		&commonpb.Label{Name: "function", Value: *ref.Function},
-	)
-	refLabels = append(
-		refLabels,
-		&commonpb.Label{Name: "chain", Value: *ref.Chain},
-	)
-	refLabels = append(
-		refLabels,
-		&commonpb.Label{Name: "config", Value: b.Name()},
-	)
+	refLabels = append(refLabels, &commonpb.Label{Name: "device", Value: *ref.Device})
+	refLabels = append(refLabels, &commonpb.Label{Name: "pipeline", Value: *ref.Pipeline})
+	refLabels = append(refLabels, &commonpb.Label{Name: "function", Value: *ref.Function})
+	refLabels = append(refLabels, &commonpb.Label{Name: "chain", Value: *ref.Chain})
+	refLabels = append(refLabels, &commonpb.Label{Name: "config", Value: b.Name()})
 
 	makeCounter := func(name string, value uint64, extraLabels ...*commonpb.Label) *commonpb.Metric {
-		metric := commonpb.Metric{
-			Name:   name,
-			Labels: append(refLabels, extraLabels...),
-			Value:  &commonpb.Metric_Counter{Counter: value},
-		}
+		metric := commonpb.Metric{Name: name, Labels: append(refLabels, extraLabels...), Value: &commonpb.Metric_Counter{Counter: value}}
 		return &metric
 	}
 
-	makeGauge := func(name string, value float64, extraLabels ...*commonpb.Label) *commonpb.Metric {
-		metric := commonpb.Metric{
-			Name:   name,
-			Labels: append(refLabels, extraLabels...),
-			Value:  &commonpb.Metric_Gauge{Gauge: value},
-		}
-		return &metric
-	}
+	commonCounters := 4
 
-	commonMetricsCount := len(
-		commonCounters,
-	) + 2 // +2 for active sessions and session table capacity (from info and config)
+	incomingBits := makeCounter("incoming_bits", ffiStats.Common.IncomingBytes*8)
+	incomingPackets := makeCounter("incoming_packets", ffiStats.Common.IncomingPackets)
 
-	perVsMetrics := len(
-		vsCounters,
-	) + 1 // +1 for active sessions (from info)
-	perRealMetrics := len(
-		realCounters,
-	) + 1 // +1 for active sessions (from info)
+	outgoingBits := makeCounter("outgoing_bits", ffiStats.Common.OutgoingBytes*8)
+	outgoingPackets := makeCounter("outgoing_packets", ffiStats.Common.OutgoingPackets)
 
-	metricsCount := commonMetricsCount + perVsMetrics*len(ffiStats.Vs)
+	perVScounters := 4
+	perRealCounters := 2
+
+	counters := commonCounters + perVScounters*len(ffiStats.Vs)
 
 	for vsIdx := range ffiStats.Vs {
 		vs := &ffiStats.Vs[vsIdx]
-		metricsCount += perRealMetrics * len(vs.Reals)
+		counters += perRealCounters * len(vs.Reals)
 	}
 
-	metrics := make([]*commonpb.Metric, 0, metricsCount)
+	metrics := make([]*commonpb.Metric, 0, counters)
+	metrics = append(metrics, incomingBits, incomingPackets, outgoingBits, outgoingPackets)
 
-	// make common metrics
-	{
-		metrics = append(
-			metrics,
-			makeCounter("active_sessions", info.ActiveSessions),
-			makeGauge(
-				"session_table_capacity",
-				float64(config.Balancer.State.TableCapacity),
-			),
-		)
-		for _, counter := range commonCounters {
-			metrics = append(
-				metrics,
-				makeCounter(counter.name, counter.getter(ffiStats)),
-			)
-		}
-	}
-
-	// make vs metrics
 	for vsIdx := range ffiStats.Vs {
 		vs := &ffiStats.Vs[vsIdx]
-		vsInfo := &info.Vs[vsIdx]
 		labelVS := &commonpb.Label{Name: "vs", Value: vs.Identifier.String()}
 
-		metrics = append(
-			metrics,
-			makeCounter("vs_active_sessions", vsInfo.ActiveSessions, labelVS),
-		)
+		incomingBits := makeCounter("vs_incoming_bits", vs.Stats.IncomingBytes*8, labelVS)
+		incomingPackets := makeCounter("vs_incoming_packets", vs.Stats.IncomingPackets, labelVS)
+		outgoingBits := makeCounter("vs_outgoing_bits", vs.Stats.OutgoingBytes*8, labelVS)
+		outgoingPackets := makeCounter("vs_outgoing_packets", vs.Stats.OutgoingPackets, labelVS)
 
-		for _, counter := range vsCounters {
-			metrics = append(
-				metrics,
-				makeCounter(counter.name, counter.getter(&vs.Stats), labelVS),
-			)
-		}
+		metrics = append(metrics, incomingBits, incomingPackets, outgoingBits, outgoingPackets)
 
-		// make real metrics
 		for realIdx := range vs.Reals {
 			real := &vs.Reals[realIdx]
-			realInfo := &vsInfo.Reals[realIdx]
 			labelReal := &commonpb.Label{Name: "real", Value: real.Dst.String()}
 
-			metrics = append(
-				metrics,
-				makeCounter(
-					"real_active_sessions",
-					realInfo.ActiveSessions,
-					labelVS,
-					labelReal,
-				),
-			)
+			incomingBits := makeCounter("real_incoming_bits", real.Stats.Bytes*8, labelVS, labelReal)
+			incomingPackets := makeCounter("real_incoming_packets", real.Stats.Packets, labelVS, labelReal)
 
-			for _, counter := range realCounters {
-				metrics = append(
-					metrics,
-					makeCounter(
-						counter.name,
-						counter.getter(&real.Stats),
-						labelVS,
-						labelReal,
-					),
-				)
-			}
+			metrics = append(metrics, incomingBits, incomingPackets)
 		}
 	}
 
