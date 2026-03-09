@@ -6,12 +6,11 @@ option go_package = "github.com/yanet-platform/yanet2/common/commonpb;commonpb";
 
 message Metric {
 	string name = 1;
-	string description = 2;
-	repeated Label labels = 3;
+	repeated Label labels = 2;
 	oneof value {
-		uint64 counter = 4;
-		double gauge = 5;
-		Histogram histogram = 6;
+		uint64 counter = 3;
+		double gauge = 4;
+		Histogram histogram = 5;
 	}
 }
 
