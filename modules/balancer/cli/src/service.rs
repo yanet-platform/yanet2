@@ -326,4 +326,14 @@ impl BalancerService {
 
         Ok(())
     }
+
+    /// Metrics
+    async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Box<dyn Error>> {
+        log::debug!("Fetching metrics");
+        let request: balancerpb::GetMetricsRequest = (&cmd).into();
+        let response = self.client.get_metrics(request).await?.into_inner();
+        let s = serde_json::to_string(&response)?;
+        println!("{}", s);
+        Ok(())
+    }
 }
